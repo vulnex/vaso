@@ -54,6 +54,7 @@ program
   .option('-o, --output <file>', 'write report to file')
   .option('--save-baseline', 'save scan results as baseline')
   .option('--diff', 'compare against saved baseline')
+  .option('--all-users', 'scan all user accounts (requires root/sudo)')
   .option('--no-color', 'disable colored output')
   .action(async (options) => {
     const { runScan } = await import('./commands/scan.js');
@@ -65,6 +66,7 @@ program
   .description('Detect installed AI agents')
   .option('-a, --agent <type>', 'detect a specific agent only (openclaw, nanoclaw, picoclaw)')
   .option('-f, --format <format>', 'output format (terminal, json)', 'terminal')
+  .option('--all-users', 'detect across all user accounts (requires root/sudo)')
   .option('--verbose', 'show search paths checked for each adapter')
   .action(async (options) => {
     const { runDetect } = await import('./commands/detect.js');

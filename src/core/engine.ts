@@ -12,7 +12,9 @@ export class ScanEngine {
 
   async scan(options: ScanOptions): Promise<ScanResult> {
     // 1. Detect installed agents
-    const installations = await this.adapters.detectAll();
+    const installations = await this.adapters.detectAll({
+      allUsers: options.allUsers,
+    });
 
     // Filter by agent if specified
     const filtered = options.agentFilter

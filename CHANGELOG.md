@@ -6,6 +6,38 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- **Adapter `detect()` signature**: `AgentAdapter.detect()` now returns `Promise<AgentInstallation[]>` instead of `Promise<AgentInstallation | null>`, enabling adapters to report multiple installations (e.g. different users or profiles)
+- **`AdapterRegistry.detectAll()`** accepts optional `DetectOptions` and flatMaps adapter results
+- **NanoClaw/PicoClaw adapters**: updated to new `detect()` signature (return `[]`/`[installation]`)
+
+### Added
+
+#### Multi-user Scanning
+- `--all-users` flag on `vaso scan` and `vaso detect` — when running as root/sudo, enumerates all user home directories (`/Users/*` on macOS, `/home/*` + `/root` on Linux) to find agent installations across all accounts
+- `DetectOptions` interface in `src/adapters/adapter.ts` with `allUsers` flag, threaded from CLI through engine to adapters
+- `getUserHomeDirs()` helper (exported from OpenClaw adapter for testability) — excludes `Shared`, `Guest`, `.localized`
+
+#### OpenClaw Detection Enhancements
+- **`OPENCLAW_PROFILE` support**: reads the `OPENCLAW_PROFILE` env var and searches `~/.openclaw-{PROFILE}` directories alongside the default `~/.openclaw`; stored in `AgentInstallation.profile`
+- **CLI binary detection**: checks system paths (`/usr/local/bin`, `/opt/homebrew/bin`, `/usr/bin`), user-relative paths (`~/.volta/bin`, `~/.local/bin`, `~/.nvm/current/bin`, `~/bin`), and `which openclaw` fallback; stored in `AgentInstallation.cliBinary`
+- **macOS `.app` bundle detection**: checks `/Applications/OpenClaw.app`; stored in `AgentInstallation.appBundle`
+- **Minimal installation reporting**: returns an installation entry when only a CLI binary or `.app` bundle is found (no config files), enabling `vaso detect` to report partially-installed agents
+
+#### Types
+- `AgentInstallation`: added `profile`, `user`, `appBundle`, `cliBinary` fields
+- `ScanOptions`: added `allUsers` field
+
+#### CLI & Reporting
+- `vaso detect` output now shows CLI binary path, app bundle path, user, and profile when present
+- Terminal scan report shows `(user: X, profile: Y)` in agent headers when multi-user or profile data is available
+
+#### Tests
+- 12 new unit tests in `src/adapters/openclaw.test.ts`: default detection, profile-aware detection, CLI binary discovery (system paths, `which` fallback), `.app` bundle detection, minimal installation, `OPENCLAW_HOME` support, `getUserHomeDirs()` behavior
+- Updated mock adapter in `src/core/engine.test.ts` to match new `detect()` signature
+- Test suite now at 170 tests across 18 test files
+
 ### Fixed
 
 - **testcontainers API compatibility**: `builtImage.imageName` returns an object in testcontainers v11, not a string — use `.string` property when constructing `GenericContainer`

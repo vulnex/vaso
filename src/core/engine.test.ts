@@ -14,7 +14,7 @@ const mockInstallation: AgentInstallation = {
 const mockAdapter: AgentAdapter = {
   agent: 'openclaw',
   displayName: 'OpenClaw',
-  async detect() { return mockInstallation; },
+  async detect() { return [mockInstallation]; },
   getConfigPaths() { return []; },
   getSkillsDir() { return undefined; },
   getGatewayInfo() { return undefined; },

@@ -1,7 +1,7 @@
-import { access, readFile } from 'node:fs/promises';
+import { access } from 'node:fs/promises';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
-import type { AgentAdapter } from './adapter.js';
+import type { AgentAdapter, DetectOptions } from './adapter.js';
 import type { AgentInstallation, GatewayInfo } from '../core/types.js';
 import { loadConfig } from '../core/config-loader.js';
 
@@ -13,7 +13,7 @@ export const nanoclawAdapter: AgentAdapter = {
   agent: 'nanoclaw',
   displayName: 'NanoClaw',
 
-  async detect(): Promise<AgentInstallation | null> {
+  async detect(_options?: DetectOptions): Promise<AgentInstallation[]> {
     const home = homedir();
     const configDir = join(home, '.config', 'nanoclaw');
     const envPath = join(home, '.nanoclaw.env');
@@ -44,14 +44,14 @@ export const nanoclawAdapter: AgentAdapter = {
       } catch {}
     }
 
-    if (configFiles.length === 0) return null;
+    if (configFiles.length === 0) return [];
 
-    return {
+    return [{
       agent: 'nanoclaw',
       installDir: configDir,
       configFiles,
       skillsDir: this.getSkillsDir(configDir),
-    };
+    }];
   },
 
   getConfigPaths(): string[] {

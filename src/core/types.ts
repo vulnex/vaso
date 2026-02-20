@@ -56,6 +56,10 @@ export interface AgentInstallation {
   configFiles: ParsedConfig[];
   skillsDir?: string;
   gateway?: GatewayInfo;
+  profile?: string;
+  user?: string;
+  appBundle?: string;
+  cliBinary?: string;
 }
 
 export interface ScanContext {
@@ -94,6 +98,7 @@ export interface ScanOptions {
   format?: OutputFormat;
   saveBaseline?: boolean;
   diff?: boolean;
+  allUsers?: boolean;
 }
 
 export interface FixResult {

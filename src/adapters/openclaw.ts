@@ -1,7 +1,8 @@
 import { access, readdir } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, basename } from 'node:path';
 import { homedir } from 'node:os';
-import type { AgentAdapter } from './adapter.js';
+import { execFileSync } from 'node:child_process';
+import type { AgentAdapter, DetectOptions } from './adapter.js';
 import type { AgentInstallation, GatewayInfo } from '../core/types.js';
 import { loadConfig } from '../core/config-loader.js';
 
@@ -13,23 +14,24 @@ const CONFIG_FILENAMES = [
   '.env',
 ];
 
-function getSearchDirs(): string[] {
-  const home = homedir();
-  const dirs = [
-    join(home, '.openclaw'),
-    join(home, '.clawdbot'),
-    join(home, '.moltbot'),
-    '/etc/openclaw',
-  ];
+const SYSTEM_CLI_PATHS = [
+  '/usr/local/bin/openclaw',
+  '/opt/homebrew/bin/openclaw',
+  '/usr/bin/openclaw',
+];
 
-  if (process.env.OPENCLAW_HOME) {
-    dirs.unshift(process.env.OPENCLAW_HOME);
-  }
+const USER_CLI_RELATIVE_PATHS = [
+  '.volta/bin/openclaw',
+  '.local/bin/openclaw',
+  '.nvm/current/bin/openclaw',
+  'bin/openclaw',
+];
 
-  return dirs;
-}
+const APP_BUNDLE_PATH = '/Applications/OpenClaw.app';
 
-async function dirExists(path: string): Promise<boolean> {
+const EXCLUDED_USERS = new Set(['Shared', 'Guest', '.localized']);
+
+async function pathExists(path: string): Promise<boolean> {
   try {
     await access(path);
     return true;
@@ -38,56 +40,178 @@ async function dirExists(path: string): Promise<boolean> {
   }
 }
 
+/**
+ * Get home directories to scan.
+ * If allUsers is true and running as root, enumerate all user home dirs.
+ * Otherwise return only the current user's home dir.
+ */
+export async function getUserHomeDirs(allUsers?: boolean): Promise<Array<{ home: string; user: string }>> {
+  if (allUsers && process.getuid?.() === 0) {
+    const baseDir = process.platform === 'darwin' ? '/Users' : '/home';
+    try {
+      const entries = await readdir(baseDir, { withFileTypes: true });
+      const dirs: Array<{ home: string; user: string }> = [];
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        if (EXCLUDED_USERS.has(entry.name)) continue;
+        dirs.push({ home: join(baseDir, entry.name), user: entry.name });
+      }
+      // Also include /root on Linux
+      if (process.platform === 'linux' && await pathExists('/root')) {
+        dirs.push({ home: '/root', user: 'root' });
+      }
+      return dirs;
+    } catch {
+      // Fallback to current user
+    }
+  }
+
+  const home = homedir();
+  return [{ home, user: basename(home) }];
+}
+
+/**
+ * Get OpenClaw config directories for a given home directory,
+ * optionally including profile-specific directories.
+ */
+function getSearchDirs(home: string, profile?: string): string[] {
+  const dirs = [
+    join(home, '.openclaw'),
+    join(home, '.clawdbot'),
+    join(home, '.moltbot'),
+  ];
+
+  if (profile) {
+    dirs.unshift(join(home, `.openclaw-${profile}`));
+  }
+
+  if (process.env.OPENCLAW_HOME) {
+    dirs.unshift(process.env.OPENCLAW_HOME);
+  }
+
+  // System-wide config (only once, not per-user)
+  if (home === homedir()) {
+    dirs.push('/etc/openclaw');
+  }
+
+  return dirs;
+}
+
+/**
+ * Find the first existing CLI binary path.
+ */
+async function findCLIBinary(home: string): Promise<string | undefined> {
+  // Check system paths
+  for (const p of SYSTEM_CLI_PATHS) {
+    if (await pathExists(p)) return p;
+  }
+
+  // Check user-relative paths
+  for (const rel of USER_CLI_RELATIVE_PATHS) {
+    const p = join(home, rel);
+    if (await pathExists(p)) return p;
+  }
+
+  // Try which/command lookup
+  try {
+    const result = execFileSync('which', ['openclaw'], {
+      encoding: 'utf-8',
+      timeout: 3000,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+    if (result) return result;
+  } catch {
+    // Not in PATH
+  }
+
+  return undefined;
+}
+
+/**
+ * Check for macOS .app bundle.
+ */
+async function findAppBundle(): Promise<string | undefined> {
+  if (process.platform !== 'darwin') return undefined;
+  if (await pathExists(APP_BUNDLE_PATH)) return APP_BUNDLE_PATH;
+  return undefined;
+}
+
 export const openclawAdapter: AgentAdapter = {
   agent: 'openclaw',
   displayName: 'OpenClaw',
 
-  async detect(): Promise<AgentInstallation | null> {
-    const searchDirs = getSearchDirs();
+  async detect(options?: DetectOptions): Promise<AgentInstallation[]> {
+    const profile = process.env.OPENCLAW_PROFILE || undefined;
+    const userDirs = await getUserHomeDirs(options?.allUsers);
+    const appBundle = await findAppBundle();
+    const installations: AgentInstallation[] = [];
 
-    for (const dir of searchDirs) {
-      if (!(await dirExists(dir))) continue;
+    for (const { home, user } of userDirs) {
+      const cliBinary = await findCLIBinary(home);
+      const searchDirs = getSearchDirs(home, profile);
+      let foundForUser = false;
 
-      const configFiles = [];
-      for (const filename of CONFIG_FILENAMES) {
-        const filePath = join(dir, filename);
-        try {
-          const config = await loadConfig(filePath);
-          configFiles.push(config);
-        } catch {
-          // File doesn't exist or can't be parsed
+      for (const dir of searchDirs) {
+        if (!(await pathExists(dir))) continue;
+
+        const configFiles = [];
+        for (const filename of CONFIG_FILENAMES) {
+          const filePath = join(dir, filename);
+          try {
+            const config = await loadConfig(filePath);
+            configFiles.push(config);
+          } catch {
+            // File doesn't exist or can't be parsed
+          }
         }
+
+        if (configFiles.length === 0) continue;
+
+        // Extract version from openclaw.json
+        const mainConfig = configFiles.find(c => c.filePath.endsWith('openclaw.json'));
+        const version = mainConfig?.data?.version as string | undefined;
+        const skillsDir = this.getSkillsDir(dir);
+
+        // Merge all config data to extract gateway info
+        const merged: Record<string, unknown> = {};
+        for (const c of configFiles) {
+          Object.assign(merged, c.data);
+        }
+
+        installations.push({
+          agent: 'openclaw',
+          version,
+          installDir: dir,
+          configFiles,
+          skillsDir,
+          gateway: this.getGatewayInfo(merged),
+          profile,
+          user: options?.allUsers ? user : undefined,
+          appBundle,
+          cliBinary,
+        });
+        foundForUser = true;
       }
 
-      if (configFiles.length === 0) continue;
-
-      // Extract version and dirs from openclaw.json
-      const mainConfig = configFiles.find(c => c.filePath.endsWith('openclaw.json'));
-      const version = mainConfig?.data?.version as string | undefined;
-      const workspace = mainConfig?.data?.workspace as string | undefined;
-      const skillsDir = this.getSkillsDir(dir);
-
-      // Merge all config data to extract gateway info
-      const merged: Record<string, unknown> = {};
-      for (const c of configFiles) {
-        Object.assign(merged, c.data);
+      // If no configs found but CLI or .app exists, report a minimal installation
+      if (!foundForUser && (cliBinary || appBundle)) {
+        installations.push({
+          agent: 'openclaw',
+          installDir: join(home, '.openclaw'),
+          configFiles: [],
+          cliBinary,
+          appBundle,
+          profile,
+          user: options?.allUsers ? user : undefined,
+        });
       }
-
-      return {
-        agent: 'openclaw',
-        version,
-        installDir: dir,
-        configFiles,
-        skillsDir,
-        gateway: this.getGatewayInfo(merged),
-      };
     }
 
-    return null;
+    return installations;
   },
 
   getConfigPaths(): string[] {
-    const dirs = getSearchDirs();
+    const dirs = getSearchDirs(homedir(), process.env.OPENCLAW_PROFILE || undefined);
     return dirs.flatMap(dir =>
       CONFIG_FILENAMES.map(f => join(dir, f))
     );
@@ -98,7 +222,6 @@ export const openclawAdapter: AgentAdapter = {
       join(installDir, 'skills'),
       join(installDir, 'custom_skills'),
     ];
-    // Return the first candidate (existence checked at runtime)
     return candidates[0];
   },
 

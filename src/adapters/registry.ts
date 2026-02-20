@@ -1,4 +1,4 @@
-import type { AgentAdapter } from './adapter.js';
+import type { AgentAdapter, DetectOptions } from './adapter.js';
 import type { AgentInstallation } from '../core/types.js';
 
 export class AdapterRegistry {
@@ -8,16 +8,16 @@ export class AdapterRegistry {
     this.adapters.push(adapter);
   }
 
-  async detectAll(): Promise<AgentInstallation[]> {
+  async detectAll(options?: DetectOptions): Promise<AgentInstallation[]> {
     const results = await Promise.allSettled(
-      this.adapters.map(a => a.detect())
+      this.adapters.map(a => a.detect(options))
     );
 
     return results
-      .filter((r): r is PromiseFulfilledResult<AgentInstallation | null> =>
-        r.status === 'fulfilled' && r.value !== null
+      .filter((r): r is PromiseFulfilledResult<AgentInstallation[]> =>
+        r.status === 'fulfilled'
       )
-      .map(r => r.value!);
+      .flatMap(r => r.value);
   }
 
   getAdapters(): AgentAdapter[] {

@@ -1,7 +1,7 @@
 import { access } from 'node:fs/promises';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
-import type { AgentAdapter } from './adapter.js';
+import type { AgentAdapter, DetectOptions } from './adapter.js';
 import type { AgentInstallation, GatewayInfo } from '../core/types.js';
 import { loadConfig } from '../core/config-loader.js';
 
@@ -13,7 +13,7 @@ export const picoclawAdapter: AgentAdapter = {
   agent: 'picoclaw',
   displayName: 'PicoClaw',
 
-  async detect(): Promise<AgentInstallation | null> {
+  async detect(_options?: DetectOptions): Promise<AgentInstallation[]> {
     const home = homedir();
     const picoDir = join(home, '.picoclaw');
     const configFiles = [];
@@ -32,7 +32,7 @@ export const picoclawAdapter: AgentAdapter = {
       } catch {}
     }
 
-    if (configFiles.length === 0) return null;
+    if (configFiles.length === 0) return [];
 
     // Merge all config data to extract gateway info
     const merged: Record<string, unknown> = {};
@@ -40,13 +40,13 @@ export const picoclawAdapter: AgentAdapter = {
       Object.assign(merged, c.data);
     }
 
-    return {
+    return [{
       agent: 'picoclaw',
       installDir: picoDir,
       configFiles,
       skillsDir: this.getSkillsDir(picoDir),
       gateway: this.getGatewayInfo(merged),
-    };
+    }];
   },
 
   getConfigPaths(): string[] {

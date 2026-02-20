@@ -5,12 +5,15 @@ import type { AgentInstallation, AgentType } from '../core/types.js';
 export interface DetectCommandOptions {
   agent?: string;
   format: string;
+  allUsers?: boolean;
   verbose?: boolean;
 }
 
 export async function runDetect(options: DetectCommandOptions): Promise<void> {
   try {
-    let installations = await adapterRegistry.detectAll();
+    let installations = await adapterRegistry.detectAll({
+      allUsers: options.allUsers,
+    });
 
     // Filter by agent type if specified
     if (options.agent) {
@@ -55,11 +58,27 @@ function renderTerminal(installations: AgentInstallation[], verbose?: boolean): 
   }
 
   for (const inst of installations) {
-    console.log(chalk.bold.cyan(`${inst.agent}`));
+    // Build header with user/profile info
+    const headerParts = [inst.agent];
+    if (inst.user) headerParts.push(`user: ${inst.user}`);
+    if (inst.profile) headerParts.push(`profile: ${inst.profile}`);
+    const header = headerParts.length > 1
+      ? `${headerParts[0]} (${headerParts.slice(1).join(', ')})`
+      : headerParts[0];
+
+    console.log(chalk.bold.cyan(header));
     console.log(`  ${'Version:'.padEnd(14)} ${inst.version ?? chalk.dim('unknown')}`);
     console.log(`  ${'Install dir:'.padEnd(14)} ${inst.installDir}`);
     console.log(`  ${'Config files:'.padEnd(14)} ${inst.configFiles.length}`);
     console.log(`  ${'Skills dir:'.padEnd(14)} ${inst.skillsDir ?? chalk.dim('none')}`);
+
+    if (inst.cliBinary) {
+      console.log(`  ${'CLI binary:'.padEnd(14)} ${inst.cliBinary}`);
+    }
+
+    if (inst.appBundle) {
+      console.log(`  ${'App bundle:'.padEnd(14)} ${inst.appBundle}`);
+    }
 
     if (inst.gateway) {
       const gw = inst.gateway;

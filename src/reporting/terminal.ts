@@ -31,8 +31,15 @@ export class TerminalReporter implements Reporter {
     }
 
     for (const agent of result.agents) {
-      lines.push(chalk.bold.cyan(`Agent: ${agent.agent}`));
-      lines.push(`  Install: ${agent.installation.installDir}`);
+      const inst = agent.installation;
+      const headerParts = [agent.agent];
+      if (inst.user) headerParts.push(`user: ${inst.user}`);
+      if (inst.profile) headerParts.push(`profile: ${inst.profile}`);
+      const agentHeader = headerParts.length > 1
+        ? `${headerParts[0]} (${headerParts.slice(1).join(', ')})`
+        : headerParts[0];
+      lines.push(chalk.bold.cyan(`Agent: ${agentHeader}`));
+      lines.push(`  Install: ${inst.installDir}`);
       lines.push(`  Score: ${this.formatScore(agent.score)} (${agent.grade})`);
       lines.push('');
 

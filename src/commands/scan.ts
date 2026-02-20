@@ -13,6 +13,7 @@ export interface ScanCommandOptions {
   output?: string;
   saveBaseline?: boolean;
   diff?: boolean;
+  allUsers?: boolean;
   color?: boolean;
 }
 
@@ -24,6 +25,7 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
     format: options.format as 'terminal' | 'json' | 'sarif' | 'markdown',
     saveBaseline: options.saveBaseline,
     diff: options.diff,
+    allUsers: options.allUsers,
   };
 
   try {
