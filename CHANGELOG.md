@@ -36,8 +36,15 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - Added `scanMCP()` method to `ScanEngine` for standalone MCP scanning
 - Added `trustedMCPPackages` (16 known packages) to IOC database for typosquatting detection
 - Extracted shared `API_KEY_PATTERNS` to `src/core/patterns.ts` for reuse across CFG-002 and MCP-003
-- 26 new tests: 6 for MCP discovery, 20 for MCP checks (insecure + secure cases for each)
+- 34 new tests: 6 for MCP discovery, 20 for MCP checks (insecure + secure cases for each), 8 for MCP command (`runMCPScan`/`runMCPList`)
 - Test fixtures: insecure/secure Claude Desktop configs, vulnerable/safe MCP server source files
+
+#### MCP Integration Testing
+- **MCP Dockerfile** (`testing/docker/agents/mcp.Dockerfile`): copies MCP config and vulnerable server source for Docker-based end-to-end tests
+- **MCP integration test** (`testing/integration/mcp.integration.test.ts`): insecure scenario asserts all 10 MCP checks (MCP-001 through MCP-010) with correct severities, low score, and failing grade; secure scenario asserts MCP-002, MCP-003, MCP-010 pass with high score and passing grade
+- **`mcp-insecure` and `mcp-secure`** services added to `testing/docker-compose.yml`
+- **`command` option** added to `VasoScanOptions` in `testing/integration/helpers.ts` to support custom CLI subcommands (e.g., `['mcp', 'scan', '--path', '/mcp/config.json']`); backward-compatible — defaults to `['scan']`
+- **MCP command unit test** (`src/commands/mcp.test.ts`): 8 tests covering `runMCPScan` (path discovery, platform discovery, no servers, critical exit code) and `runMCPList` (JSON output, terminal output, no servers, platform discovery)
 
 #### Docker Integration Testing Infrastructure
 - **testcontainers** integration for programmatic Docker-based integration tests driven by vitest
@@ -49,9 +56,9 @@ This project adheres to [Semantic Versioning](https://semver.org/).
   - **PicoClaw insecure**: triggers CFG-001, CFG-002, CFG-008, CFG-009, CFG-012, IOC-002
   - Secure variants for all agents with hardened configs and benign skills
 - Test helpers (`testing/integration/helpers.ts`): `buildBaseImage()`, `runVasoScan()`, `findCheck()`, `getAgentResult()`, `expectCheckFailed()`, `expectCheckPassed()`
-- 5 integration test suites: `openclaw.integration.test.ts`, `nanoclaw.integration.test.ts`, `picoclaw.integration.test.ts`, `multi-agent.integration.test.ts`, `scoring.integration.test.ts`
+- 6 integration test suites: `openclaw.integration.test.ts`, `nanoclaw.integration.test.ts`, `picoclaw.integration.test.ts`, `multi-agent.integration.test.ts`, `scoring.integration.test.ts`, `mcp.integration.test.ts`
 - Separate vitest config (`testing/vitest.config.integration.ts`) with 120s test timeout, 180s hook timeout
-- Docker Compose file (`testing/docker-compose.yml`) with 9 services for manual testing
+- Docker Compose file (`testing/docker-compose.yml`) with 11 services for manual testing
 - GitHub Actions CI workflow (`.github/workflows/integration-tests.yml`) — runs integration tests after unit tests pass
 - npm scripts: `test:integration`, `test:all`, `docker:build-base`
 - `.dockerignore` for optimized Docker build context
@@ -156,7 +163,7 @@ Initial release of VASO with full scan engine, 39 security checks, 3 agent adapt
 - `bin/vaso-quick.sh`: Zero-dependency Bash script for 5 critical checks without Node.js
 
 #### Test Suite
-- 150 tests across 16 test files
-- Coverage: core engine, scoring, config loader, check registry, all 15 config checks, 10 MCP checks, MCP discovery, AST analyzer, pattern engine, entropy analyzer, IOC database, typosquatting, SARIF output, markdown output, baseline diffing, detect command
+- 158 tests across 17 test files
+- Coverage: core engine, scoring, config loader, check registry, all 15 config checks, 10 MCP checks, MCP discovery, MCP command, AST analyzer, pattern engine, entropy analyzer, IOC database, typosquatting, SARIF output, markdown output, baseline diffing, detect command
 
 [0.1.0]: https://github.com/vulnex/vaso/releases/tag/v0.1.0

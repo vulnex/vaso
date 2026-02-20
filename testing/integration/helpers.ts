@@ -32,6 +32,8 @@ export interface VasoScanOptions {
   env?: Record<string, string>;
   /** Extra CLI args to append to the VASO scan command */
   cliArgs?: string[];
+  /** CLI subcommand(s) to run. Defaults to ['scan']. */
+  command?: string[];
 }
 
 /**
@@ -68,7 +70,8 @@ export async function runVasoScan(options: VasoScanOptions): Promise<ScanResult>
     started = await builder.start();
 
     // Execute VASO scan inside the running container
-    const cmd = ['node', 'dist/cli.js', 'scan', '--format', 'json'];
+    const subcommand = options.command ?? ['scan'];
+    const cmd = ['node', 'dist/cli.js', ...subcommand, '--format', 'json'];
     if (options.cliArgs) {
       cmd.push(...options.cliArgs);
     }

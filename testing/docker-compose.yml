@@ -76,6 +76,29 @@ services:
       base:
         condition: service_completed_successfully
 
+  # MCP scenarios
+  mcp-insecure:
+    build:
+      context: ..
+      dockerfile: testing/docker/agents/mcp.Dockerfile
+      args:
+        BASE_IMAGE: vaso-test-base
+        SCENARIO: insecure
+    depends_on:
+      base:
+        condition: service_completed_successfully
+
+  mcp-secure:
+    build:
+      context: ..
+      dockerfile: testing/docker/agents/mcp.Dockerfile
+      args:
+        BASE_IMAGE: vaso-test-base
+        SCENARIO: secure
+    depends_on:
+      base:
+        condition: service_completed_successfully
+
   # Multi-agent scenarios
   multi-insecure:
     build:
