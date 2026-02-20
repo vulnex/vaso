@@ -1,6 +1,6 @@
 # VASO User Guide
 
-VASO (VULNEX Agent Security Observer) is a security scanner for AI agent deployments. It detects misconfigurations, malicious skills, known threats, and runtime vulnerabilities across OpenClaw, NanoClaw, and PicoClaw installations.
+VASO (VULNEX Agent Security Observer) is a security scanner for AI agent deployments. It detects misconfigurations, malicious skills, known threats, and runtime vulnerabilities across OpenClaw, NanoClaw, PicoClaw installations, and MCP (Model Context Protocol) server configurations.
 
 ## Installation
 
@@ -37,6 +37,7 @@ vaso scan [options]
 | `-o, --output <file>` | Write report to a file instead of stdout |
 | `--save-baseline` | Save current results as a baseline for future comparison |
 | `--diff` | Compare results against the last saved baseline |
+| `--all-users` | Scan all user accounts (requires root/sudo) |
 | `--no-color` | Disable colored terminal output |
 
 Examples:
@@ -73,6 +74,7 @@ vaso detect [options]
 |--------|-------------|
 | `-a, --agent <type>` | Detect a specific agent only: `openclaw`, `nanoclaw`, or `picoclaw` |
 | `-f, --format <format>` | Output format: `terminal` (default) or `json` |
+| `--all-users` | Detect across all user accounts (requires root/sudo) |
 | `--verbose` | Show the search paths checked for each adapter |
 
 Examples:
@@ -131,6 +133,62 @@ Reload the IOC (Indicators of Compromise) threat intelligence database.
 vaso update
 ```
 
+### `vaso mcp scan`
+
+Scan MCP (Model Context Protocol) server configurations for security issues. This auto-discovers MCP configs from Claude Desktop, Claude Code, Cursor, Windsurf, VS Code, and project-level config files.
+
+```
+vaso mcp scan [options]
+```
+
+| Option | Description |
+|--------|-------------|
+| `-f, --format <format>` | Output format: `terminal` (default), `json`, `sarif`, `markdown` |
+| `-o, --output <file>` | Write report to a file instead of stdout |
+| `-p, --path <paths...>` | Specific config file paths to scan (skips auto-discovery) |
+| `--no-color` | Disable colored terminal output |
+
+Examples:
+
+```bash
+# Scan all auto-discovered MCP configs
+vaso mcp scan
+
+# Scan a specific config file
+vaso mcp scan --path ~/.claude/mcp.json
+
+# Generate JSON report
+vaso mcp scan --format json -o mcp-report.json
+```
+
+### `vaso mcp list`
+
+List discovered MCP server configurations without running security checks. Useful for verifying which MCP servers VASO can see before running a scan.
+
+```
+vaso mcp list [options]
+```
+
+| Option | Description |
+|--------|-------------|
+| `-f, --format <format>` | Output format: `terminal` (default) or `json` |
+| `-p, --path <paths...>` | Specific config file paths to scan |
+
+Examples:
+
+```bash
+# List all discovered MCP servers
+vaso mcp list
+
+# Get machine-readable output
+vaso mcp list --format json
+
+# List servers from a specific config
+vaso mcp list --path .mcp.json
+```
+
+Terminal output shows each server's name, transport type, command/URL, and environment variable names. JSON output returns the full discovery result.
+
 ## Exit Codes
 
 | Code | Meaning |
@@ -159,7 +217,7 @@ Penalties:
 
 ## Security Checks
 
-VASO runs 39 checks organized into 5 categories.
+VASO runs 49 checks organized into 6 categories.
 
 ### Configuration (CFG-001 to CFG-015)
 
@@ -235,6 +293,25 @@ Detects persistence mechanisms and runtime threats.
 | RUN-003 | VS Code Extension Trojans | Critical |
 | RUN-004 | Docker Socket Permissions | Warning |
 
+### MCP Server Security (MCP-001 to MCP-010)
+
+Security checks for MCP (Model Context Protocol) server configurations and source code.
+
+| ID | Name | Severity | Fixable |
+|----|------|----------|---------|
+| MCP-001 | MCP Config Discovery | Info | No |
+| MCP-002 | Transport Security | Critical | No |
+| MCP-003 | Credential Exposure | Critical | Yes |
+| MCP-004 | Overprivileged Tools | Critical | No |
+| MCP-005 | Tool Input Injection | Critical | No |
+| MCP-006 | Data Exfiltration Risk | Critical | No |
+| MCP-007 | Prompt Injection via Tool Results | Warning | No |
+| MCP-008 | Server Provenance | Warning/Critical | No |
+| MCP-009 | Permission Scope | Warning | No |
+| MCP-010 | Rug Pull Risk | Warning | Yes |
+
+MCP-008 severity is dynamic: critical if an IOC match is found, otherwise warning.
+
 ## Supported Agents
 
 ### OpenClaw
@@ -259,6 +336,27 @@ VASO looks for:
 VASO looks for:
 - `~/.picoclaw/config.json`
 - `~/.picoclaw/auth.json`
+
+### MCP Servers
+
+VASO auto-discovers MCP server configurations from multiple sources:
+
+**Global configs:**
+- `~/Library/Application Support/Claude/claude_desktop_config.json` (Claude Desktop, macOS)
+- `~/.config/Claude/claude_desktop_config.json` (Claude Desktop, Linux)
+- `%APPDATA%\Claude\claude_desktop_config.json` (Claude Desktop, Windows)
+- `~/.claude/mcp.json` (Claude Code)
+- `~/.cursor/mcp.json` (Cursor)
+- `~/.codeium/windsurf/mcp_config.json` (Windsurf)
+
+**Project-level configs:**
+- `.mcp.json` (Claude Code project)
+- `.cursor/mcp.json` (Cursor project)
+- `.windsurf/mcp.json` (Windsurf project)
+- `.vscode/mcp.json` (VS Code)
+- `mcp.json` (Generic MCP)
+
+You can also point VASO at specific config files with `vaso mcp scan --path <file>`.
 
 ## Output Formats
 

@@ -59,7 +59,7 @@ function renderTerminal(installations: AgentInstallation[], verbose?: boolean): 
 
   for (const inst of installations) {
     // Build header with user/profile info
-    const headerParts = [inst.agent];
+    const headerParts: string[] = [inst.agent];
     if (inst.user) headerParts.push(`user: ${inst.user}`);
     if (inst.profile) headerParts.push(`profile: ${inst.profile}`);
     const header = headerParts.length > 1

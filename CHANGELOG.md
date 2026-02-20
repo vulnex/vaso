@@ -36,10 +36,11 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 #### Tests
 - 12 new unit tests in `src/adapters/openclaw.test.ts`: default detection, profile-aware detection, CLI binary discovery (system paths, `which` fallback), `.app` bundle detection, minimal installation, `OPENCLAW_HOME` support, `getUserHomeDirs()` behavior
 - Updated mock adapter in `src/core/engine.test.ts` to match new `detect()` signature
-- Test suite now at 170 tests across 18 test files
+- Test suite now at 272 tests (170 unit + 102 integration) across 24 test files
 
 ### Fixed
 
+- **TypeScript type error in `headerParts`**: `detect.ts` and `terminal.ts` inferred `headerParts` as `AgentType[]` from `[inst.agent]`, causing template literal strings (`user: …`, `profile: …`) to fail type-checking; added explicit `string[]` annotation to both
 - **testcontainers API compatibility**: `builtImage.imageName` returns an object in testcontainers v11, not a string — use `.string` property when constructing `GenericContainer`
 - **SKL-002 (Obfuscated Code)**: Entropy-only detection missed hex escape sequences (3.16 bits/char) and base64 strings (5.13 bits/char) below the 5.5 threshold; added pattern-based detection for hex escape chains, long base64 strings, `String.fromCharCode`, and `atob()`
 - **RS-005 regex false positive**: Pattern `/\bSocket\b.*\bsubprocess|exec|spawn\b/i` was parsed as three ungrouped alternations, causing `exec` to match "execution" in comments; fixed to `/\bSocket\b.*\b(?:subprocess|exec|spawn)\b/i`
