@@ -38,6 +38,9 @@ describe('MarkdownReporter', () => {
     const reporter = new MarkdownReporter();
     const output = reporter.render(result);
 
+    console.log(`[Markdown] output length: ${output.length} chars`);
+    console.log(`[Markdown] generated report:\n${output}`);
+
     expect(output).toContain('# VASO Security Scan Report');
     expect(output).toContain('**Score:** 88/100 (B)');
     expect(output).toContain('| CFG-001 |');

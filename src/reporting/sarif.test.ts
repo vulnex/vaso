@@ -40,6 +40,10 @@ describe('SarifReporter', () => {
     const output = reporter.render(result);
     const sarif = JSON.parse(output);
 
+    console.log(`[SARIF] version: ${sarif.version}, runs: ${sarif.runs.length}`);
+    console.log(`[SARIF] tool: ${sarif.runs[0].tool.driver.name}, results: ${sarif.runs[0].results.length}`);
+    console.log(`[SARIF] first result → ruleId: ${sarif.runs[0].results[0].ruleId}, level: ${sarif.runs[0].results[0].level}`);
+
     expect(sarif.version).toBe('2.1.0');
     expect(sarif.runs).toHaveLength(1);
     expect(sarif.runs[0].tool.driver.name).toBe('VASO');

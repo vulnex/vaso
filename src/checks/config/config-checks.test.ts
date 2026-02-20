@@ -43,6 +43,7 @@ describe('CFG-001: Gateway Binding', () => {
   it('fails when gateway bound to 0.0.0.0', async () => {
     const config = makeConfig({ gateway: { host: '0.0.0.0', port: 18789 } });
     const result = await cfg001.run(makeContext([config]));
+    console.log(`[CFG-001] host=0.0.0.0 → passed: ${result.passed}, severity: ${result.severity}, message: ${result.message}`);
     expect(result.passed).toBe(false);
     expect(result.severity).toBe('critical');
   });
@@ -50,12 +51,14 @@ describe('CFG-001: Gateway Binding', () => {
   it('passes when gateway bound to 127.0.0.1', async () => {
     const config = makeConfig({ gateway: { host: '127.0.0.1', port: 18789 } });
     const result = await cfg001.run(makeContext([config]));
+    console.log(`[CFG-001] host=127.0.0.1 → passed: ${result.passed}, message: ${result.message}`);
     expect(result.passed).toBe(true);
   });
 
   it('passes with no gateway config', async () => {
     const config = makeConfig({});
     const result = await cfg001.run(makeContext([config]));
+    console.log(`[CFG-001] no gateway → passed: ${result.passed}, message: ${result.message}`);
     expect(result.passed).toBe(true);
   });
 });
@@ -65,6 +68,7 @@ describe('CFG-002: API Key Exposure', () => {
     const raw = '{\n  "apiKey": "sk-abc123456789012345678901234567890123"\n}';
     const config = makeConfig({ apiKey: 'sk-abc123456789012345678901234567890123' }, raw);
     const result = await cfg002.run(makeContext([config]));
+    console.log(`[CFG-002] sk-* key in config → passed: ${result.passed}, message: ${result.message}`);
     expect(result.passed).toBe(false);
   });
 
@@ -72,12 +76,14 @@ describe('CFG-002: API Key Exposure', () => {
     const raw = '{\n  "aws": "AKIAIOSFODNN7EXAMPLE"\n}';
     const config = makeConfig({ aws: 'AKIAIOSFODNN7EXAMPLE' }, raw);
     const result = await cfg002.run(makeContext([config]));
+    console.log(`[CFG-002] AWS key in config → passed: ${result.passed}, message: ${result.message}`);
     expect(result.passed).toBe(false);
   });
 
   it('passes with clean config', async () => {
     const config = makeConfig({ gateway: { host: '127.0.0.1' } });
     const result = await cfg002.run(makeContext([config]));
+    console.log(`[CFG-002] clean config → passed: ${result.passed}, message: ${result.message}`);
     expect(result.passed).toBe(true);
   });
 
@@ -89,6 +95,7 @@ describe('CFG-002: API Key Exposure', () => {
       data: { API_KEY: 'sk-abc123456789012345678901234567890123' },
     };
     const result = await cfg002.run(makeContext([envConfig]));
+    console.log(`[CFG-002] .env file → passed: ${result.passed} (skipped), message: ${result.message}`);
     expect(result.passed).toBe(true);
   });
 });
@@ -99,6 +106,7 @@ describe('CFG-004: TLS Not Configured', () => {
     const ctx = makeContext([config]);
     ctx.installation.gateway = { host: '127.0.0.1', tls: false };
     const result = await cfg004.run(ctx);
+    console.log(`[CFG-004] tls=false → passed: ${result.passed}, message: ${result.message}`);
     expect(result.passed).toBe(false);
   });
 
@@ -108,6 +116,7 @@ describe('CFG-004: TLS Not Configured', () => {
     const ctx = makeContext([config]);
     ctx.installation.gateway = { tls: true };
     const result = await cfg004.run(ctx);
+    console.log(`[CFG-004] tls=true → passed: ${result.passed}, message: ${result.message}`);
     expect(result.passed).toBe(true);
   });
 });
@@ -116,12 +125,14 @@ describe('CFG-005: Missing Shell Allowlist', () => {
   it('fails when no safeBins configured', async () => {
     const config = makeConfig({});
     const result = await cfg005.run(makeContext([config]));
+    console.log(`[CFG-005] no safeBins → passed: ${result.passed}, message: ${result.message}`);
     expect(result.passed).toBe(false);
   });
 
   it('passes when safeBins configured', async () => {
     const config = makeConfig({ security: { safeBins: ['ls', 'cat', 'grep'] } });
     const result = await cfg005.run(makeContext([config]));
+    console.log(`[CFG-005] safeBins=[ls,cat,grep] → passed: ${result.passed}, message: ${result.message}`);
     expect(result.passed).toBe(true);
   });
 });
@@ -130,12 +141,14 @@ describe('CFG-006: Workspace Restriction', () => {
   it('fails when no workspace configured', async () => {
     const config = makeConfig({});
     const result = await cfg006.run(makeContext([config]));
+    console.log(`[CFG-006] no workspace → passed: ${result.passed}, message: ${result.message}`);
     expect(result.passed).toBe(false);
   });
 
   it('passes when workspace configured', async () => {
     const config = makeConfig({ workspace: '/home/user/projects' });
     const result = await cfg006.run(makeContext([config]));
+    console.log(`[CFG-006] workspace=/home/user/projects → passed: ${result.passed}, message: ${result.message}`);
     expect(result.passed).toBe(true);
   });
 });
@@ -144,18 +157,21 @@ describe('CFG-007: Webhook Missing Auth', () => {
   it('fails when webhook has no auth', async () => {
     const config = makeConfig({ webhooks: [{ url: 'https://example.com/hook' }] });
     const result = await cfg007.run(makeContext([config]));
+    console.log(`[CFG-007] webhook no auth → passed: ${result.passed}, message: ${result.message}`);
     expect(result.passed).toBe(false);
   });
 
   it('passes when webhook has secret', async () => {
     const config = makeConfig({ webhooks: [{ url: 'https://example.com/hook', secret: 'abc123' }] });
     const result = await cfg007.run(makeContext([config]));
+    console.log(`[CFG-007] webhook with secret → passed: ${result.passed}, message: ${result.message}`);
     expect(result.passed).toBe(true);
   });
 
   it('passes when no webhooks configured', async () => {
     const config = makeConfig({});
     const result = await cfg007.run(makeContext([config]));
+    console.log(`[CFG-007] no webhooks → passed: ${result.passed}, message: ${result.message}`);
     expect(result.passed).toBe(true);
   });
 });
@@ -164,6 +180,7 @@ describe('CFG-008: Sandbox Disabled', () => {
   it('fails when sandbox is false', async () => {
     const config = makeConfig({ sandbox: false });
     const result = await cfg008.run(makeContext([config]));
+    console.log(`[CFG-008] sandbox=false → passed: ${result.passed}, severity: ${result.severity}, message: ${result.message}`);
     expect(result.passed).toBe(false);
     expect(result.severity).toBe('critical');
   });
@@ -171,12 +188,14 @@ describe('CFG-008: Sandbox Disabled', () => {
   it('fails when sandbox is "disabled"', async () => {
     const config = makeConfig({ sandbox: 'disabled' });
     const result = await cfg008.run(makeContext([config]));
+    console.log(`[CFG-008] sandbox="disabled" → passed: ${result.passed}, message: ${result.message}`);
     expect(result.passed).toBe(false);
   });
 
   it('passes when sandbox is true', async () => {
     const config = makeConfig({ sandbox: true });
     const result = await cfg008.run(makeContext([config]));
+    console.log(`[CFG-008] sandbox=true → passed: ${result.passed}, message: ${result.message}`);
     expect(result.passed).toBe(true);
   });
 });
@@ -185,18 +204,21 @@ describe('CFG-009: Default Credentials', () => {
   it('fails with weak password', async () => {
     const config = makeConfig({ auth: { password: 'admin' } });
     const result = await cfg009.run(makeContext([config]));
+    console.log(`[CFG-009] password="admin" → passed: ${result.passed}, message: ${result.message}`);
     expect(result.passed).toBe(false);
   });
 
   it('fails with "changeme"', async () => {
     const config = makeConfig({ auth: { password: 'changeme' } });
     const result = await cfg009.run(makeContext([config]));
+    console.log(`[CFG-009] password="changeme" → passed: ${result.passed}, message: ${result.message}`);
     expect(result.passed).toBe(false);
   });
 
   it('passes with strong credentials', async () => {
     const config = makeConfig({ auth: { password: 'xK9#mP2$vL5nQ8wR' } });
     const result = await cfg009.run(makeContext([config]));
+    console.log(`[CFG-009] strong password → passed: ${result.passed}, message: ${result.message}`);
     expect(result.passed).toBe(true);
   });
 });
@@ -205,12 +227,14 @@ describe('CFG-010: Rate Limiting', () => {
   it('fails when no rate limiting', async () => {
     const config = makeConfig({});
     const result = await cfg010.run(makeContext([config]));
+    console.log(`[CFG-010] no rate limit → passed: ${result.passed}, message: ${result.message}`);
     expect(result.passed).toBe(false);
   });
 
   it('passes when rate limiting configured', async () => {
     const config = makeConfig({ rateLimit: { max: 100, window: '1m' } });
     const result = await cfg010.run(makeContext([config]));
+    console.log(`[CFG-010] rateLimit={max:100,window:1m} → passed: ${result.passed}, message: ${result.message}`);
     expect(result.passed).toBe(true);
   });
 });
@@ -219,6 +243,7 @@ describe('CFG-012: Auth Bypass', () => {
   it('fails when auth bypass is true', async () => {
     const config = makeConfig({ auth: { bypass: true } });
     const result = await cfg012.run(makeContext([config]));
+    console.log(`[CFG-012] auth.bypass=true → passed: ${result.passed}, severity: ${result.severity}, message: ${result.message}`);
     expect(result.passed).toBe(false);
     expect(result.severity).toBe('critical');
   });
@@ -226,12 +251,14 @@ describe('CFG-012: Auth Bypass', () => {
   it('fails when auth mode is none', async () => {
     const config = makeConfig({ gateway: { auth: { mode: 'none' } } });
     const result = await cfg012.run(makeContext([config]));
+    console.log(`[CFG-012] auth.mode="none" → passed: ${result.passed}, message: ${result.message}`);
     expect(result.passed).toBe(false);
   });
 
   it('passes with proper auth', async () => {
     const config = makeConfig({ gateway: { auth: { mode: 'bearer' } } });
     const result = await cfg012.run(makeContext([config]));
+    console.log(`[CFG-012] auth.mode="bearer" → passed: ${result.passed}, message: ${result.message}`);
     expect(result.passed).toBe(true);
   });
 });
@@ -240,12 +267,14 @@ describe('CFG-013: DM Policy', () => {
   it('fails when DM policy is open', async () => {
     const config = makeConfig({ dm: { policy: 'open' } });
     const result = await cfg013.run(makeContext([config]));
+    console.log(`[CFG-013] dm.policy="open" → passed: ${result.passed}, message: ${result.message}`);
     expect(result.passed).toBe(false);
   });
 
   it('passes with restricted policy', async () => {
     const config = makeConfig({ dm: { policy: 'restricted' } });
     const result = await cfg013.run(makeContext([config]));
+    console.log(`[CFG-013] dm.policy="restricted" → passed: ${result.passed}, message: ${result.message}`);
     expect(result.passed).toBe(true);
   });
 });
@@ -254,12 +283,14 @@ describe('CFG-014: Tool Policy', () => {
   it('fails when tool policy is permissive', async () => {
     const config = makeConfig({ tools: { policy: 'allow_all' } });
     const result = await cfg014.run(makeContext([config]));
+    console.log(`[CFG-014] tools.policy="allow_all" → passed: ${result.passed}, message: ${result.message}`);
     expect(result.passed).toBe(false);
   });
 
   it('passes with allowlist policy', async () => {
     const config = makeConfig({ tools: { policy: 'allowlist' } });
     const result = await cfg014.run(makeContext([config]));
+    console.log(`[CFG-014] tools.policy="allowlist" → passed: ${result.passed}, message: ${result.message}`);
     expect(result.passed).toBe(true);
   });
 });
@@ -268,6 +299,7 @@ describe('CFG-015: mDNS Broadcast', () => {
   it('fails when mDNS is enabled', async () => {
     const config = makeConfig({ mdns: true });
     const result = await cfg015.run(makeContext([config]));
+    console.log(`[CFG-015] mdns=true → passed: ${result.passed}, severity: ${result.severity}, message: ${result.message}`);
     expect(result.passed).toBe(false);
     expect(result.severity).toBe('info');
   });
@@ -275,6 +307,7 @@ describe('CFG-015: mDNS Broadcast', () => {
   it('passes when mDNS is not configured', async () => {
     const config = makeConfig({});
     const result = await cfg015.run(makeContext([config]));
+    console.log(`[CFG-015] no mdns → passed: ${result.passed}, message: ${result.message}`);
     expect(result.passed).toBe(true);
   });
 });

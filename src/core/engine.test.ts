@@ -53,6 +53,11 @@ describe('ScanEngine', () => {
     const engine = new ScanEngine(adapters, checks);
     const result = await engine.scan({});
 
+    console.log(`[ScanEngine] end-to-end → agents: ${result.agents.length}, agent: ${result.agents[0].agent}`);
+    console.log(`[ScanEngine] results: ${result.agents[0].results.map(r => `${r.id}:${r.passed ? 'PASS' : 'FAIL'}(${r.severity})`).join(', ')}`);
+    console.log(`[ScanEngine] score: ${result.agents[0].score}, grade: ${result.agents[0].grade}`);
+    console.log(`[ScanEngine] summary:`, JSON.stringify(result.summary));
+
     expect(result.agents).toHaveLength(1);
     expect(result.agents[0].agent).toBe('openclaw');
     expect(result.agents[0].results).toHaveLength(3);
@@ -70,6 +75,8 @@ describe('ScanEngine', () => {
     const engine = new ScanEngine(adapters, checks);
     const result = await engine.scan({});
 
+    console.log(`[ScanEngine] no agents → agents: ${result.agents.length}, totalScore: ${result.totalScore}, totalGrade: ${result.totalGrade}`);
+
     expect(result.agents).toHaveLength(0);
     expect(result.totalScore).toBe(100);
     expect(result.totalGrade).toBe('A');
@@ -86,10 +93,12 @@ describe('ScanEngine', () => {
 
     // Filter for non-existent agent
     const result = await engine.scan({ agentFilter: 'nanoclaw' });
+    console.log(`[ScanEngine] filter nanoclaw → agents found: ${result.agents.length}`);
     expect(result.agents).toHaveLength(0);
 
     // Filter for existing agent
     const result2 = await engine.scan({ agentFilter: 'openclaw' });
+    console.log(`[ScanEngine] filter openclaw → agents found: ${result2.agents.length}`);
     expect(result2.agents).toHaveLength(1);
   });
 
@@ -110,6 +119,8 @@ describe('ScanEngine', () => {
 
     const engine = new ScanEngine(adapters, checks);
     const result = await engine.scan({});
+
+    console.log(`[ScanEngine] graceful failure → results count: ${result.agents[0].results.length}, surviving check: ${result.agents[0].results[0]?.id}:${result.agents[0].results[0]?.passed}`);
 
     // Failing check is excluded, passing check remains
     expect(result.agents[0].results).toHaveLength(1);

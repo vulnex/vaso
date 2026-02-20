@@ -17,28 +17,36 @@ function makeResult(overrides: Partial<CheckResult> = {}): CheckResult {
 describe('computeScore', () => {
   it('returns 100 for all passed checks', () => {
     const results = [makeResult(), makeResult(), makeResult()];
-    expect(computeScore(results)).toBe(100);
+    const score = computeScore(results);
+    console.log(`[computeScore] 3 passed checks → score: ${score}`);
+    expect(score).toBe(100);
   });
 
   it('deducts 12 per critical failure', () => {
     const results = [
       makeResult({ passed: false, severity: 'critical' }),
     ];
-    expect(computeScore(results)).toBe(88);
+    const score = computeScore(results);
+    console.log(`[computeScore] 1 critical failure → score: ${score} (100 - 12)`);
+    expect(score).toBe(88);
   });
 
   it('deducts 5 per warning failure', () => {
     const results = [
       makeResult({ passed: false, severity: 'warning' }),
     ];
-    expect(computeScore(results)).toBe(95);
+    const score = computeScore(results);
+    console.log(`[computeScore] 1 warning failure → score: ${score} (100 - 5)`);
+    expect(score).toBe(95);
   });
 
   it('does not deduct for info failures', () => {
     const results = [
       makeResult({ passed: false, severity: 'info' }),
     ];
-    expect(computeScore(results)).toBe(100);
+    const score = computeScore(results);
+    console.log(`[computeScore] 1 info failure → score: ${score} (no deduction)`);
+    expect(score).toBe(100);
   });
 
   it('handles mixed results', () => {
@@ -47,25 +55,34 @@ describe('computeScore', () => {
       makeResult({ passed: false, severity: 'warning' }),
       makeResult({ passed: true }),
     ];
-    // 100 - 12 - 5 = 83
-    expect(computeScore(results)).toBe(83);
+    const score = computeScore(results);
+    console.log(`[computeScore] 1 critical + 1 warning + 1 pass → score: ${score} (100 - 12 - 5)`);
+    expect(score).toBe(83);
   });
 
   it('floors at 0', () => {
     const results = Array.from({ length: 10 }, () =>
       makeResult({ passed: false, severity: 'critical' })
     );
-    // 100 - 120 = 0 (clamped)
-    expect(computeScore(results)).toBe(0);
+    const score = computeScore(results);
+    console.log(`[computeScore] 10 critical failures → score: ${score} (clamped from ${100 - 120})`);
+    expect(score).toBe(0);
   });
 
   it('handles empty results', () => {
-    expect(computeScore([])).toBe(100);
+    const score = computeScore([]);
+    console.log(`[computeScore] empty results → score: ${score}`);
+    expect(score).toBe(100);
   });
 });
 
 describe('scoreToGrade', () => {
   it('grades correctly', () => {
+    const grades = [100, 95, 90, 89, 80, 79, 70, 69, 60, 59, 0].map(s => ({
+      score: s,
+      grade: scoreToGrade(s),
+    }));
+    console.log('[scoreToGrade] mappings:', grades.map(g => `${g.score}→${g.grade}`).join(', '));
     expect(scoreToGrade(100)).toBe('A');
     expect(scoreToGrade(95)).toBe('A');
     expect(scoreToGrade(90)).toBe('A');
@@ -91,6 +108,7 @@ describe('summarizeResults', () => {
       makeResult({ passed: true }),
     ];
     const summary = summarizeResults(results);
+    console.log('[summarizeResults] 6 results →', JSON.stringify(summary));
     expect(summary).toEqual({
       critical: 2,
       warning: 1,
@@ -101,7 +119,9 @@ describe('summarizeResults', () => {
   });
 
   it('handles empty', () => {
-    expect(summarizeResults([])).toEqual({
+    const summary = summarizeResults([]);
+    console.log('[summarizeResults] empty →', JSON.stringify(summary));
+    expect(summary).toEqual({
       critical: 0,
       warning: 0,
       info: 0,

@@ -1,7 +1,7 @@
 export type Severity = 'critical' | 'warning' | 'info';
 export type Grade = 'A' | 'B' | 'C' | 'D' | 'F';
-export type AgentType = 'openclaw' | 'nanoclaw' | 'picoclaw';
-export type CheckCategory = 'config' | 'skills' | 'ioc' | 'network' | 'runtime' | 'policy';
+export type AgentType = 'openclaw' | 'nanoclaw' | 'picoclaw' | 'mcp';
+export type CheckCategory = 'config' | 'skills' | 'ioc' | 'network' | 'runtime' | 'policy' | 'mcp';
 export type OutputFormat = 'terminal' | 'json' | 'sarif' | 'markdown';
 
 export interface Evidence {
@@ -63,6 +63,8 @@ export interface ScanContext {
   configs: ParsedConfig[];
   platform: NodeJS.Platform;
   skillFiles?: string[];
+  mcpConfigs?: import('../mcp/types.js').MCPConfig[];
+  mcpServerSources?: import('../mcp/types.js').MCPServerSource[];
 }
 
 export interface AgentScanResult {

@@ -5,6 +5,7 @@ export interface IOCDatabase {
   maliciousPublishers: string[];
   maliciousSkillPatterns: RegExp[];
   trustedSkillNames: string[];
+  trustedMCPPackages: string[];
 }
 
 // Ported from openclaw-security-monitor IOC data
@@ -83,6 +84,25 @@ const TRUSTED_SKILL_NAMES = [
   'markdown-editor',
 ];
 
+const TRUSTED_MCP_PACKAGES = [
+  '@modelcontextprotocol/server-filesystem',
+  '@modelcontextprotocol/server-github',
+  '@modelcontextprotocol/server-gitlab',
+  '@modelcontextprotocol/server-google-maps',
+  '@modelcontextprotocol/server-memory',
+  '@modelcontextprotocol/server-postgres',
+  '@modelcontextprotocol/server-puppeteer',
+  '@modelcontextprotocol/server-sequentialthinker',
+  '@modelcontextprotocol/server-slack',
+  '@modelcontextprotocol/server-sqlite',
+  '@modelcontextprotocol/server-brave-search',
+  '@modelcontextprotocol/server-fetch',
+  '@modelcontextprotocol/server-everything',
+  'mcp-server-fetch',
+  'mcp-server-sqlite',
+  'mcp-server-filesystem',
+];
+
 let _db: IOCDatabase | null = null;
 
 export function getIOCDatabase(): IOCDatabase {
@@ -94,6 +114,7 @@ export function getIOCDatabase(): IOCDatabase {
       maliciousPublishers: [...MALICIOUS_PUBLISHERS],
       maliciousSkillPatterns: [...MALICIOUS_SKILL_PATTERNS],
       trustedSkillNames: [...TRUSTED_SKILL_NAMES],
+      trustedMCPPackages: [...TRUSTED_MCP_PACKAGES],
     };
   }
   return _db;

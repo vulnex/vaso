@@ -16,6 +16,29 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+#### MCP Server Security Scanning
+- **MCP discovery engine** (`src/mcp/discovery.ts`): scans all known config locations for Claude Desktop (macOS/Linux/Windows), Claude Code (`~/.claude/mcp.json`, `.mcp.json`), Cursor, Windsurf, and VS Code; parses `mcpServers` blocks with stdio/SSE/streamable-HTTP transport inference
+- **MCP source resolver** (`src/mcp/source-resolver.ts`): infers package names from `npx`/`uvx`/`node` commands, resolves local source paths for AST analysis
+- **`vaso mcp scan`** command: standalone MCP security scan with `--format`, `--output`, and `--path` options
+- **`vaso mcp list`** command: inventory all discovered MCP server configurations
+- **MCP-001** (Config Discovery): inventories all configured MCP servers across all agent configs (info)
+- **MCP-002** (Transport Security): detects SSE/HTTP on 0.0.0.0, missing TLS, `--no-tls` flags (critical)
+- **MCP-003** (Credential Exposure): detects plaintext API keys and high-entropy secrets in env blocks; reuses shared `API_KEY_PATTERNS` and Shannon entropy analysis (critical)
+- **MCP-004** (Overprivileged Tools): detects exec/shell/write capabilities in server source via AST analysis (critical)
+- **MCP-005** (Tool Input Injection): detects unsanitized LLM/user input flowing to exec, spawn, eval, SQL, and file write sinks (critical)
+- **MCP-006** (Data Exfiltration Risk): detects source-to-sink data flow and suspicious network calls in server source via AST (critical)
+- **MCP-007** (Prompt Injection via Tool Results): detects raw external HTTP/file content returned unsanitized in tool results; accounts for sanitization presence (warning)
+- **MCP-008** (Server Provenance): checks package names against IOC database for typosquatting (Levenshtein distance), malicious publishers, and malicious domain/name patterns (warning/critical)
+- **MCP-009** (Permission Scope): detects disproportionate resource access — admin naming, world-writable permissions, root filesystem globbing, Docker privileged mode (warning)
+- **MCP-010** (Rug Pull Risk): detects unpinned `npx`/`uvx` versions and auto-install flags that enable supply chain attacks (warning)
+- Added `'mcp'` to `AgentType` and `CheckCategory` type unions
+- Added `mcpConfigs` and `mcpServerSources` fields to `ScanContext`
+- Added `scanMCP()` method to `ScanEngine` for standalone MCP scanning
+- Added `trustedMCPPackages` (16 known packages) to IOC database for typosquatting detection
+- Extracted shared `API_KEY_PATTERNS` to `src/core/patterns.ts` for reuse across CFG-002 and MCP-003
+- 26 new tests: 6 for MCP discovery, 20 for MCP checks (insecure + secure cases for each)
+- Test fixtures: insecure/secure Claude Desktop configs, vulnerable/safe MCP server source files
+
 #### Docker Integration Testing Infrastructure
 - **testcontainers** integration for programmatic Docker-based integration tests driven by vitest
 - Multi-stage base Dockerfile (`testing/docker/base.Dockerfile`) — builds VASO in `node:20-slim`, copies only runtime artifacts to final image
@@ -133,7 +156,7 @@ Initial release of VASO with full scan engine, 39 security checks, 3 agent adapt
 - `bin/vaso-quick.sh`: Zero-dependency Bash script for 5 critical checks without Node.js
 
 #### Test Suite
-- 124 tests across 14 test files
-- Coverage: core engine, scoring, config loader, check registry, all 15 config checks, AST analyzer, pattern engine, entropy analyzer, IOC database, typosquatting, SARIF output, markdown output, baseline diffing, detect command
+- 150 tests across 16 test files
+- Coverage: core engine, scoring, config loader, check registry, all 15 config checks, 10 MCP checks, MCP discovery, AST analyzer, pattern engine, entropy analyzer, IOC database, typosquatting, SARIF output, markdown output, baseline diffing, detect command
 
 [0.1.0]: https://github.com/vulnex/vaso/releases/tag/v0.1.0

@@ -4,6 +4,7 @@ import { skillChecks } from './skills/index.js';
 import { iocChecks } from './ioc/index.js';
 import { networkChecks } from './network/index.js';
 import { runtimeChecks } from './runtime/index.js';
+import { mcpChecks } from './mcp/index.js';
 
 export function registerAllChecks(): void {
   checkRegistry.registerAll(configChecks);
@@ -11,4 +12,5 @@ export function registerAllChecks(): void {
   checkRegistry.registerAll(iocChecks);
   checkRegistry.registerAll(networkChecks);
   checkRegistry.registerAll(runtimeChecks);
+  checkRegistry.registerAll(mcpChecks);
 }

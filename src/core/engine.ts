@@ -1,6 +1,7 @@
 import type { ScanOptions, ScanResult, ScanContext, AgentScanResult, AgentInstallation } from './types.js';
 import type { CheckRegistry } from './check-registry.js';
 import type { AdapterRegistry } from '../adapters/registry.js';
+import type { MCPConfig, MCPServerSource } from '../mcp/types.js';
 import { computeScore, scoreToGrade, summarizeResults } from './scoring.js';
 
 export class ScanEngine {
@@ -79,6 +80,57 @@ export class ScanEngine {
       results,
       score,
       grade: scoreToGrade(score),
+    };
+  }
+
+  async scanMCP(
+    mcpConfigs: MCPConfig[],
+    serverSources: MCPServerSource[],
+    options: ScanOptions,
+  ): Promise<ScanResult> {
+    const context: ScanContext = {
+      installation: {
+        agent: 'mcp',
+        installDir: process.cwd(),
+        configFiles: [],
+      },
+      configs: [],
+      platform: process.platform,
+      mcpConfigs,
+      mcpServerSources: serverSources,
+    };
+
+    // Get only MCP-category checks
+    const mcpChecks = this.checks.getByCategory('mcp');
+
+    const settled = await Promise.allSettled(
+      mcpChecks.map(check => check.run(context))
+    );
+
+    const results = settled
+      .filter((r): r is PromiseFulfilledResult<Awaited<ReturnType<typeof mcpChecks[0]['run']>>> =>
+        r.status === 'fulfilled'
+      )
+      .map(r => r.value);
+
+    const score = computeScore(results);
+
+    const agentResult: AgentScanResult = {
+      agent: 'mcp',
+      installation: context.installation,
+      results,
+      score,
+      grade: scoreToGrade(score),
+    };
+
+    const summary = summarizeResults(results);
+
+    return {
+      timestamp: new Date().toISOString(),
+      agents: [agentResult],
+      totalScore: score,
+      totalGrade: scoreToGrade(score),
+      summary,
     };
   }
 

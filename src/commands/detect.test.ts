@@ -56,6 +56,7 @@ describe('runDetect', () => {
     await runDetect({ format: 'terminal' });
 
     const output = consoleLogs.join('\n');
+    originalLog(`[detect] terminal output:\n${output}`);
     expect(output).toContain('openclaw');
     expect(output).toContain('1.2.3');
     expect(output).toContain('/home/user/.openclaw');
@@ -74,6 +75,7 @@ describe('runDetect', () => {
 
     const output = consoleLogs.join('\n');
     const parsed = JSON.parse(output);
+    originalLog(`[detect] JSON output → ${parsed.length} agents: ${parsed.map((a: { agent: string }) => a.agent).join(', ')}`);
     expect(parsed).toHaveLength(2);
     expect(parsed[0].agent).toBe('openclaw');
     expect(parsed[0].version).toBe('1.2.3');
@@ -86,6 +88,7 @@ describe('runDetect', () => {
     await runDetect({ format: 'json', agent: 'nanoclaw' });
 
     const parsed = JSON.parse(consoleLogs.join('\n'));
+    originalLog(`[detect] --agent=nanoclaw → ${parsed.length} result(s): ${parsed.map((a: { agent: string }) => a.agent).join(', ')}`);
     expect(parsed).toHaveLength(1);
     expect(parsed[0].agent).toBe('nanoclaw');
   });
@@ -96,6 +99,7 @@ describe('runDetect', () => {
     await runDetect({ format: 'terminal' });
 
     const output = consoleLogs.join('\n');
+    originalLog(`[detect] no agents → output: "${output}"`);
     expect(output).toContain('No agents detected.');
   });
 
@@ -115,6 +119,7 @@ describe('runDetect', () => {
     await runDetect({ format: 'terminal', verbose: true });
 
     const output = consoleLogs.join('\n');
+    originalLog(`[detect] verbose output:\n${output}`);
     expect(output).toContain('Adapters checked:');
     expect(output).toContain('OpenClaw');
     expect(output).toContain('/home/user/.openclaw/openclaw.json');

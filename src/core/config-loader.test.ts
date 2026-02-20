@@ -21,6 +21,7 @@ describe('loadConfig', () => {
     await writeFile(filePath, JSON.stringify({ gateway: { host: '0.0.0.0', port: 18789 } }));
 
     const config = await loadConfig(filePath);
+    console.log(`[loadConfig] JSON → format: ${config.format}, data:`, JSON.stringify(config.data));
     expect(config.format).toBe('json');
     expect(config.data).toEqual({ gateway: { host: '0.0.0.0', port: 18789 } });
     await cleanup();
@@ -32,6 +33,7 @@ describe('loadConfig', () => {
     await writeFile(filePath, 'gateway:\n  host: 127.0.0.1\n  port: 18789\n');
 
     const config = await loadConfig(filePath);
+    console.log(`[loadConfig] YAML → format: ${config.format}, data:`, JSON.stringify(config.data));
     expect(config.format).toBe('yaml');
     expect(config.data).toEqual({ gateway: { host: '127.0.0.1', port: 18789 } });
     await cleanup();
@@ -43,6 +45,7 @@ describe('loadConfig', () => {
     await writeFile(filePath, 'API_KEY=sk-test123\nDEBUG=true\n# comment\n');
 
     const config = await loadConfig(filePath);
+    console.log(`[loadConfig] .env → format: ${config.format}, data:`, JSON.stringify(config.data));
     expect(config.format).toBe('env');
     expect(config.data).toEqual({ API_KEY: 'sk-test123', DEBUG: 'true' });
     await cleanup();
@@ -54,6 +57,7 @@ describe('loadConfig', () => {
     await writeFile(filePath, 'KEY="hello world"\nKEY2=\'single quoted\'\n');
 
     const config = await loadConfig(filePath);
+    console.log(`[loadConfig] quoted .env → data:`, JSON.stringify(config.data));
     expect(config.data).toEqual({ KEY: 'hello world', KEY2: 'single quoted' });
     await cleanup();
   });
@@ -65,6 +69,7 @@ describe('loadConfig', () => {
     await writeFile(filePath, content);
 
     const config = await loadConfig(filePath);
+    console.log(`[loadConfig] raw preserved → filePath: ${config.filePath}, raw: "${config.raw}"`);
     expect(config.raw).toBe(content);
     expect(config.filePath).toBe(filePath);
     await cleanup();
