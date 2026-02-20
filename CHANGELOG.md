@@ -6,6 +6,14 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **testcontainers API compatibility**: `builtImage.imageName` returns an object in testcontainers v11, not a string — use `.string` property when constructing `GenericContainer`
+- **SKL-002 (Obfuscated Code)**: Entropy-only detection missed hex escape sequences (3.16 bits/char) and base64 strings (5.13 bits/char) below the 5.5 threshold; added pattern-based detection for hex escape chains, long base64 strings, `String.fromCharCode`, and `atob()`
+- **RS-005 regex false positive**: Pattern `/\bSocket\b.*\bsubprocess|exec|spawn\b/i` was parsed as three ungrouped alternations, causing `exec` to match "execution" in comments; fixed to `/\bSocket\b.*\b(?:subprocess|exec|spawn)\b/i`
+- **PicoClaw adapter**: `getGatewayInfo()` returned `undefined` unconditionally and `detect()` never populated `gateway` on the installation; implemented gateway extraction matching the OpenClaw adapter pattern
+- **PicoClaw secure fixture**: Calculator skill used `Function()` (flagged as critical by SKL-003); replaced with safe token-based arithmetic; added `workspace` and `safeBins` config keys to pass CFG-005/CFG-006
+
 ### Added
 
 #### Docker Integration Testing Infrastructure

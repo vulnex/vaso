@@ -17,5 +17,9 @@
   },
   "tools": {
     "policy": "allowlist"
+  },
+  "workspace": "/home/picoclaw/workspace",
+  "security": {
+    "safeBins": ["node", "npm", "git"]
   }
 }

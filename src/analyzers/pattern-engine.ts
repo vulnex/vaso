@@ -22,7 +22,7 @@ export const SECURITY_PATTERNS: PatternRule[] = [
   { id: 'RS-002', pattern: /\bnc\b.*-e\s+(?:\/bin\/(?:ba)?sh|cmd)/i, category: 'reverse-shell', severity: 'critical', description: 'Netcat reverse shell' },
   { id: 'RS-003', pattern: /\bnet\.connect\s*\(.*\bchild_process\b/i, category: 'reverse-shell', severity: 'critical', description: 'Node.js net.connect reverse shell' },
   { id: 'RS-004', pattern: /\bnew\s+WebSocket\b.*\bchild_process\b/is, category: 'reverse-shell', severity: 'critical', description: 'WebSocket reverse shell' },
-  { id: 'RS-005', pattern: /\bSocket\b.*\bsubprocess|exec|spawn\b/i, category: 'reverse-shell', severity: 'critical', description: 'Socket-based reverse shell' },
+  { id: 'RS-005', pattern: /\bSocket\b.*\b(?:subprocess|exec|spawn)\b/i, category: 'reverse-shell', severity: 'critical', description: 'Socket-based reverse shell' },
   { id: 'RS-006', pattern: /python\S*\s+-c\s+['"]import\s+socket/i, category: 'reverse-shell', severity: 'critical', description: 'Python reverse shell' },
   { id: 'RS-007', pattern: /\bsocat\b.*\bexec:/i, category: 'reverse-shell', severity: 'critical', description: 'Socat reverse shell' },
 

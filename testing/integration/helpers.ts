@@ -57,7 +57,7 @@ export async function runVasoScan(options: VasoScanOptions): Promise<ScanResult>
   // Start container with a keep-alive command so it doesn't exit immediately
   let started: StartedTestContainer | undefined;
   try {
-    let builder = new GenericContainer(builtImage.imageName)
+    let builder = new GenericContainer(builtImage.imageName.string)
       .withCommand(['tail', '-f', '/dev/null'])
       .withStartupTimeout(60_000);
 

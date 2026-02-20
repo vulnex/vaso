@@ -34,11 +34,18 @@ export const picoclawAdapter: AgentAdapter = {
 
     if (configFiles.length === 0) return null;
 
+    // Merge all config data to extract gateway info
+    const merged: Record<string, unknown> = {};
+    for (const c of configFiles) {
+      Object.assign(merged, c.data);
+    }
+
     return {
       agent: 'picoclaw',
       installDir: picoDir,
       configFiles,
       skillsDir: this.getSkillsDir(picoDir),
+      gateway: this.getGatewayInfo(merged),
     };
   },
 
@@ -55,7 +62,15 @@ export const picoclawAdapter: AgentAdapter = {
   },
 
   getGatewayInfo(config: Record<string, unknown>): GatewayInfo | undefined {
-    return undefined;
+    const gw = config.gateway as Record<string, unknown> | undefined;
+    if (!gw) return undefined;
+
+    return {
+      host: gw.host as string | undefined,
+      port: gw.port as number | undefined,
+      authMode: (config.auth as Record<string, unknown>)?.mode as string | undefined,
+      tls: gw.tls as boolean | undefined,
+    };
   },
 
   getCLICommand(): string {
