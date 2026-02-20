@@ -19,6 +19,7 @@ Initial release of VASO with full scan engine, 39 security checks, 3 agent adapt
 - Differential scanning with baseline save/load/diff (`--save-baseline`, `--diff`)
 
 #### CLI
+- `vaso detect` command to enumerate installed AI agents without running security checks; supports `--agent`, `--format` (terminal/json), and `--verbose` options
 - `vaso scan` command with auto-detect, `--agent`, `--format`, `--output` options
 - `vaso fix` command with `--dry-run` and `--yes` modes
 - `vaso update` command to reload IOC database
@@ -103,7 +104,7 @@ Initial release of VASO with full scan engine, 39 security checks, 3 agent adapt
 - `bin/vaso-quick.sh`: Zero-dependency Bash script for 5 critical checks without Node.js
 
 #### Test Suite
-- 119 tests across 13 test files
-- Coverage: core engine, scoring, config loader, check registry, all 15 config checks, AST analyzer, pattern engine, entropy analyzer, IOC database, typosquatting, SARIF output, markdown output, baseline diffing
+- 124 tests across 14 test files
+- Coverage: core engine, scoring, config loader, check registry, all 15 config checks, AST analyzer, pattern engine, entropy analyzer, IOC database, typosquatting, SARIF output, markdown output, baseline diffing, detect command
 
 [0.1.0]: https://github.com/vulnex/vaso/releases/tag/v0.1.0

@@ -36,6 +36,17 @@ program
   });
 
 program
+  .command('detect')
+  .description('Detect installed AI agents')
+  .option('-a, --agent <type>', 'detect a specific agent only (openclaw, nanoclaw, picoclaw)')
+  .option('-f, --format <format>', 'output format (terminal, json)', 'terminal')
+  .option('--verbose', 'show search paths checked for each adapter')
+  .action(async (options) => {
+    const { runDetect } = await import('./commands/detect.js');
+    await runDetect(options);
+  });
+
+program
   .command('fix')
   .description('Auto-fix detected security issues')
   .option('-a, --agent <type>', 'fix a specific agent')
