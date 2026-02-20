@@ -1,0 +1,14 @@
+import { checkRegistry } from '../core/check-registry.js';
+import { configChecks } from './config/index.js';
+import { skillChecks } from './skills/index.js';
+import { iocChecks } from './ioc/index.js';
+import { networkChecks } from './network/index.js';
+import { runtimeChecks } from './runtime/index.js';
+
+export function registerAllChecks(): void {
+  checkRegistry.registerAll(configChecks);
+  checkRegistry.registerAll(skillChecks);
+  checkRegistry.registerAll(iocChecks);
+  checkRegistry.registerAll(networkChecks);
+  checkRegistry.registerAll(runtimeChecks);
+}

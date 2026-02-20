@@ -1,0 +1,50 @@
+import { describe, it, expect } from 'vitest';
+import { SarifReporter } from './sarif.js';
+import type { ScanResult } from '../core/types.js';
+
+describe('SarifReporter', () => {
+  it('generates valid SARIF structure', () => {
+    const result: ScanResult = {
+      timestamp: '2026-02-20T00:00:00.000Z',
+      agents: [{
+        agent: 'openclaw',
+        installation: { agent: 'openclaw', installDir: '/tmp', configFiles: [] },
+        results: [
+          {
+            id: 'CFG-001',
+            name: 'Gateway Binding',
+            category: 'config',
+            severity: 'critical',
+            passed: false,
+            message: 'Gateway bound to 0.0.0.0',
+            evidence: [{ file: '/tmp/config.json', line: 5, snippet: '"host": "0.0.0.0"' }],
+          },
+          {
+            id: 'CFG-002',
+            name: 'API Key Exposure',
+            category: 'config',
+            severity: 'critical',
+            passed: true,
+            message: 'No API keys found',
+          },
+        ],
+        score: 88,
+        grade: 'B',
+      }],
+      totalScore: 88,
+      totalGrade: 'B',
+      summary: { critical: 1, warning: 0, info: 0, passed: 1, total: 2 },
+    };
+
+    const reporter = new SarifReporter();
+    const output = reporter.render(result);
+    const sarif = JSON.parse(output);
+
+    expect(sarif.version).toBe('2.1.0');
+    expect(sarif.runs).toHaveLength(1);
+    expect(sarif.runs[0].tool.driver.name).toBe('VASO');
+    expect(sarif.runs[0].results).toHaveLength(1); // Only failed checks
+    expect(sarif.runs[0].results[0].ruleId).toBe('CFG-001');
+    expect(sarif.runs[0].results[0].level).toBe('error');
+  });
+});
