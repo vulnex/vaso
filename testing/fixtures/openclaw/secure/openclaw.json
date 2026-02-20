@@ -1,0 +1,31 @@
+{
+  "version": "1.2.0",
+  "gateway": {
+    "host": "127.0.0.1",
+    "port": 8080,
+    "tls": true,
+    "auth": {
+      "mode": "token",
+      "bypass": false
+    }
+  },
+  "sandbox": true,
+  "webhooks": [
+    {
+      "url": "https://example.com/hook",
+      "events": ["agent.start"],
+      "secret": "whsec_a1b2c3d4e5f6"
+    }
+  ],
+  "rateLimit": {
+    "maxRequests": 100,
+    "windowMs": 60000
+  },
+  "dm": {
+    "policy": "restricted"
+  },
+  "tools": {
+    "policy": "allowlist"
+  },
+  "mdns": false
+}

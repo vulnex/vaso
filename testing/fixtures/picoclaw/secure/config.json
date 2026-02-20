@@ -1,0 +1,21 @@
+{
+  "gateway": {
+    "host": "127.0.0.1",
+    "port": 7070,
+    "tls": true
+  },
+  "sandbox": true,
+  "auth": {
+    "mode": "token"
+  },
+  "rateLimit": {
+    "maxRequests": 100,
+    "windowMs": 60000
+  },
+  "dm": {
+    "policy": "restricted"
+  },
+  "tools": {
+    "policy": "allowlist"
+  }
+}

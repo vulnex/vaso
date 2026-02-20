@@ -4,6 +4,27 @@ All notable changes to VASO (VULNEX Agent Security Observer) will be documented 
 
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+#### Docker Integration Testing Infrastructure
+- **testcontainers** integration for programmatic Docker-based integration tests driven by vitest
+- Multi-stage base Dockerfile (`testing/docker/base.Dockerfile`) — builds VASO in `node:20-slim`, copies only runtime artifacts to final image
+- Agent-specific Dockerfiles for OpenClaw, NanoClaw, PicoClaw, and multi-agent scenarios with `ARG SCENARIO` for insecure/secure switching
+- Fixture files for all three agents:
+  - **OpenClaw insecure**: triggers CFG-001, CFG-002, CFG-004, CFG-007, CFG-008, CFG-009, CFG-010, CFG-012, CFG-013, CFG-014, CFG-015, SKL-001, SKL-002, SKL-003, SKL-005, SKL-007, IOC-001, IOC-002, IOC-005
+  - **NanoClaw insecure**: triggers CFG-001, CFG-008, CFG-012, CFG-013, CFG-014, SKL-003, IOC-001
+  - **PicoClaw insecure**: triggers CFG-001, CFG-002, CFG-008, CFG-009, CFG-012, IOC-002
+  - Secure variants for all agents with hardened configs and benign skills
+- Test helpers (`testing/integration/helpers.ts`): `buildBaseImage()`, `runVasoScan()`, `findCheck()`, `getAgentResult()`, `expectCheckFailed()`, `expectCheckPassed()`
+- 5 integration test suites: `openclaw.integration.test.ts`, `nanoclaw.integration.test.ts`, `picoclaw.integration.test.ts`, `multi-agent.integration.test.ts`, `scoring.integration.test.ts`
+- Separate vitest config (`testing/vitest.config.integration.ts`) with 120s test timeout, 180s hook timeout
+- Docker Compose file (`testing/docker-compose.yml`) with 9 services for manual testing
+- GitHub Actions CI workflow (`.github/workflows/integration-tests.yml`) — runs integration tests after unit tests pass
+- npm scripts: `test:integration`, `test:all`, `docker:build-base`
+- `.dockerignore` for optimized Docker build context
+
 ## [0.1.0] - 2026-02-20
 
 Initial release of VASO with full scan engine, 39 security checks, 3 agent adapters, and 5 output formats.

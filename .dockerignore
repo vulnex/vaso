@@ -1,0 +1,9 @@
+node_modules/
+.git/
+coverage/
+*.tgz
+.DS_Store
+*.log
+devnotes/
+.env
+.env.local

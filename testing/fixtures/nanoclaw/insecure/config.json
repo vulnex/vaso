@@ -1,0 +1,17 @@
+{
+  "gateway": {
+    "host": "0.0.0.0",
+    "port": 9090
+  },
+  "sandbox": false,
+  "auth": {
+    "mode": "none",
+    "bypass": true
+  },
+  "dm": {
+    "policy": "open"
+  },
+  "tools": {
+    "policy": "allow_all"
+  }
+}

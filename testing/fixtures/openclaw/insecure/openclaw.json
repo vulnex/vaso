@@ -1,0 +1,28 @@
+{
+  "version": "1.2.0",
+  "gateway": {
+    "host": "0.0.0.0",
+    "port": 8080,
+    "tls": false,
+    "auth": {
+      "mode": "none",
+      "bypass": true
+    }
+  },
+  "apiKey": "sk-abc123def456ghi789jkl012mno345pqr678stu901vwx",
+  "sandbox": false,
+  "password": "admin",
+  "webhooks": [
+    {
+      "url": "https://example.com/hook",
+      "events": ["agent.start", "agent.stop"]
+    }
+  ],
+  "dm": {
+    "policy": "open"
+  },
+  "tools": {
+    "policy": "allow_all"
+  },
+  "mdns": true
+}

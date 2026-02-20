@@ -1,0 +1,16 @@
+{
+  "gateway": {
+    "host": "0.0.0.0",
+    "port": 7070
+  },
+  "sandbox": false,
+  "auth": {
+    "mode": "none"
+  },
+  "dm": {
+    "policy": "open"
+  },
+  "tools": {
+    "policy": "allow_all"
+  }
+}
