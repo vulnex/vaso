@@ -8,6 +8,21 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+#### Per-Agent Scanning for OpenClaw Multi-Agent Installations
+- **`agentName`** and **`skillsDirs`** fields added to `AgentInstallation` — `agentName` identifies sub-agent definitions (e.g. `"researcher"`, `"coder"`), `skillsDirs` supports multiple skill directories (shared + per-agent)
+- **OpenClaw adapter** now discovers `agents/` subdirectories within each installation: for each sub-agent, loads agent-specific configs (`agent.yaml`, `agent.json`, `config.yaml`, `config.json`, `.env`), deep-merges with global config (agent overrides global), and emits a separate `AgentInstallation` with merged configs and combined skill directories
+- **`deepMerge()`** utility in `src/core/utils.ts`: recursive object merge where override wins for conflicts, arrays from override replace base arrays
+- **Terminal reporter** shows `agent: <name>` in scan headers when sub-agents are present
+- **`vaso detect`** shows agent name in output and sub-agent count in summary (e.g. `Found 3 agent(s) (2 sub-agent definitions).`)
+- **Markdown reporter** includes `(agent: <name>)` in section headers
+- **SARIF reporter** includes `agentName` in result properties
+- No changes needed to scan engine, check modules, remediation engine, or config writer — they already operate on `AgentInstallation[]` and `ScanContext`
+
+#### Tests
+- `src/core/utils.test.ts`: 9 tests covering `getNestedValue`, `setNestedValue`, and `deepMerge` (shallow merge, deep nested merge, override wins, array replacement, immutability, empty objects)
+- `src/adapters/openclaw-agents.test.ts`: 5 tests for per-agent discovery (multi-agent detection with config merging and skillsDirs, global-only fallback, agentName correctness, cliBinary/appBundle inheritance, non-directory entry filtering)
+- Test suite now at 296 tests across 28 test files
+
 #### Remediation Engine — `vaso fix` Now Works
 - **Config writer utilities** (`src/remediation/config-writer.ts`): `updateEnvFile()`, `updateJsonFile()`, `updateYamlFile()`, `updateTomlFile()`, `chmodFile()`, and `updateConfigValue()` dispatcher — handles all 4 config formats with comment/indentation preservation
 - **`setNestedValue()`** in `src/core/utils.ts`: write counterpart to `getNestedValue()`, creates intermediate objects as needed
