@@ -136,6 +136,60 @@ export class ScanEngine {
     };
   }
 
+  async scanSkill(
+    skillPath: string,
+    skillFiles: string[],
+    options: ScanOptions,
+  ): Promise<ScanResult> {
+    const context: ScanContext = {
+      installation: {
+        agent: 'skill-audit',
+        installDir: skillPath,
+        skillsDir: skillPath,
+        configFiles: [],
+      },
+      configs: [],
+      platform: process.platform,
+      skillFiles,
+    };
+
+    // Run skill + IOC checks only
+    const skillChecks = [
+      ...this.checks.getByCategory('skills'),
+      ...this.checks.getByCategory('ioc'),
+    ];
+
+    const settled = await Promise.allSettled(
+      skillChecks.map(check => check.run(context))
+    );
+
+    const results = settled
+      .filter((r): r is PromiseFulfilledResult<Awaited<ReturnType<typeof skillChecks[0]['run']>>> =>
+        r.status === 'fulfilled'
+      )
+      .map(r => r.value);
+
+    const score = computeScore(results);
+
+    const agentResult: AgentScanResult = {
+      agent: 'skill-audit',
+      installation: context.installation,
+      results,
+      score,
+      grade: scoreToGrade(score),
+    };
+
+    const summary = summarizeResults(results);
+
+    return {
+      timestamp: new Date().toISOString(),
+      agents: [agentResult],
+      totalScore: score,
+      totalGrade: scoreToGrade(score),
+      summary,
+    };
+  }
+
   private emptyResult(agentFilter?: string): ScanResult {
     return {
       timestamp: new Date().toISOString(),

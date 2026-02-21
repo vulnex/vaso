@@ -137,6 +137,22 @@ mcpCommand
     await runMCPList(options);
   });
 
+const skillCommand = program
+  .command('skill')
+  .description('Skill security auditing');
+
+skillCommand
+  .command('audit')
+  .description('Audit a local skill directory for security issues before installation')
+  .argument('<path>', 'path to skill directory')
+  .option('-f, --format <format>', 'output format (terminal, json, sarif, markdown, html)', 'terminal')
+  .option('-o, --output <file>', 'write report to file')
+  .option('--no-color', 'disable colored output')
+  .action(async (path: string, options: Record<string, unknown>) => {
+    const { runSkillAudit } = await import('./commands/skill-audit.js');
+    await runSkillAudit(path, options as { format: string; output?: string; color?: boolean });
+  });
+
 const pluginCommand = program
   .command('plugin')
   .description('Manage agent security plugins');

@@ -4,6 +4,7 @@ import { homedir } from 'node:os';
 import chalk from 'chalk';
 import type { ScanResult, FixResult, AgentScanResult, CheckResult } from '../core/types.js';
 import type { CheckRegistry } from '../core/check-registry.js';
+import { promptForFix } from './prompt.js';
 
 export interface FixOptions {
   dryRun?: boolean;
@@ -19,6 +20,13 @@ export class RemediationEngine {
 
   async fix(scanResult: ScanResult, options: FixOptions): Promise<FixResult[]> {
     const results: FixResult[] = [];
+    let applyAll = options.yes ?? false;
+
+    // Non-TTY safety: require --yes in non-interactive environments
+    if (!applyAll && !options.dryRun && !process.stdin.isTTY) {
+      console.log(chalk.yellow('Non-interactive terminal detected. Use --yes to apply fixes in CI/scripts.'));
+      return results;
+    }
 
     for (const agent of scanResult.agents) {
       const fixable = agent.results.filter(r => !r.passed && r.fixable);
@@ -36,6 +44,26 @@ export class RemediationEngine {
           console.log(`  ${chalk.yellow('[dry-run]')} ${finding.id}: ${finding.fixDescription ?? 'would fix'}`);
           results.push({ checkId: finding.id, applied: false, message: `Dry run: ${finding.fixDescription}` });
           continue;
+        }
+
+        // Interactive prompt when not in auto-apply mode
+        if (!applyAll) {
+          const response = await promptForFix(finding);
+
+          if (response === 'no') {
+            results.push({ checkId: finding.id, applied: false, message: 'Skipped by user' });
+            continue;
+          }
+
+          if (response === 'quit') {
+            results.push({ checkId: finding.id, applied: false, message: 'Skipped by user' });
+            return results;
+          }
+
+          if (response === 'all') {
+            applyAll = true;
+          }
+          // 'yes' and 'all' fall through to apply
         }
 
         try {
