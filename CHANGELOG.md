@@ -8,6 +8,22 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+#### IOC Auto-Updater with Ed25519-Signed Threat Feeds
+- **Pull-based feed system** (`src/ioc/updater.ts`): fetches remote IOC feed JSON + detached `.sig` from configurable URL, verifies Ed25519 signature via `node:crypto`, persists to `~/.vaso/ioc/`, merges additively with bundled data — zero new npm dependencies
+- **Ed25519 signature verification**: mandatory on every fetch and every cache load (catches local tampering); 64-byte signature length enforcement; key pinning with no TOFU — rotation requires new VASO release
+- **Feed version monotonicity**: rejects downgrades (remote version must exceed cached version); `--force` flag overrides staleness and version checks
+- **Additive merge**: remote feed extends bundled data (union with deduplication for strings via Set, RegExp by source+flags, BinaryPattern by name+type); bundled indicators are always present regardless of feed state
+- **Staleness detection**: configurable threshold (default 7 days) based on `~/.vaso/ioc/metadata.json` timestamps; stale/missing feed triggers yellow warning on all non-update commands
+- **`initIOCDatabase()`**: async startup initializer loads cached feed and merges with bundled data; idempotent; `getIOCDatabase()` falls back to bundled-only if never called
+- **`vaso update` command**: real fetch-verify-persist-reload flow replacing the previous stub; prints per-field new indicator counts and merged database totals; accepts `--url <url>` (custom feed) and `--force` options
+- **CLI preAction hook**: now async; calls `initIOCDatabase()` on every command; shows staleness warning for non-update commands
+- **Feed type definitions** (`src/ioc/feed-types.ts`): `IOCFeed`, `IOCFeedData`, `SerializedRegExp`, `SerializedBinaryPattern`, `IOCFeedMetadata`, `UpdateResult` interfaces
+- **Public key module** (`src/ioc/public-key.ts`): bundled Ed25519 public key PEM, default feed URL, staleness threshold constants
+- **Maintainer scripts**: `scripts/generate-feed-keypair.mjs` (generates Ed25519 keypair), `scripts/sign-feed.mjs` (produces detached base64 `.sig` file)
+- 33 new tests in `src/ioc/updater.test.ts`: signature verification (valid, tampered, wrong key, malformed, wrong length), deserialization (RegExp, BinaryPattern, flags, empty), merge (all 8 fields, dedup, bundled preservation), staleness (missing, fresh, old, custom threshold, malformed), cached feed (missing, valid, tampered+deleted), fetch cycle (success, network error, bad sig, version downgrade, staleness skip, force bypass), init integration (bundled fallback, idempotent, reset)
+- `feed-signing-key.pem` added to `.gitignore`
+- Test suite now at 374 tests across 35 test files
+
 #### Missing Design-Spec Checks (11 new checks, 1 new category)
 - **SKL-011** (Dependency Audit): checks skill `package.json` deps against known malicious packages (`event-stream`, `flatmap-stream`, etc.) and malicious publishers; warns on missing lockfile (warning)
 - **SKL-012** (Code Complexity): cyclomatic complexity per function via Babel AST traversal; flags functions exceeding threshold of 15 decision points (info)
