@@ -9,6 +9,8 @@ import { skl007 } from './skl-007-prompt-injection.js';
 import { skl008 } from './skl-008-suspicious-network.js';
 import { skl009 } from './skl-009-crypto-wallet.js';
 import { skl010 } from './skl-010-unauthorized-fs.js';
+import { skl011 } from './skl-011-dependency-audit.js';
+import { skl012 } from './skl-012-code-complexity.js';
 
 export const skillChecks: CheckModule[] = [
   skl001,
@@ -21,4 +23,6 @@ export const skillChecks: CheckModule[] = [
   skl008,
   skl009,
   skl010,
+  skl011,
+  skl012,
 ];

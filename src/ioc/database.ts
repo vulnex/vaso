@@ -1,3 +1,9 @@
+export interface BinaryPattern {
+  name: string;
+  pattern: Buffer | RegExp;
+  type: 'buffer' | 'regex';
+}
+
 export interface IOCDatabase {
   c2Ips: string[];
   maliciousDomains: string[];
@@ -6,6 +12,7 @@ export interface IOCDatabase {
   maliciousSkillPatterns: RegExp[];
   trustedSkillNames: string[];
   trustedMCPPackages: string[];
+  binaryPatterns: BinaryPattern[];
 }
 
 // Ported from openclaw-security-monitor IOC data
@@ -84,6 +91,15 @@ const TRUSTED_SKILL_NAMES = [
   'markdown-editor',
 ];
 
+const BINARY_PATTERNS: BinaryPattern[] = [
+  { name: 'ELF binary', pattern: Buffer.from([0x7f, 0x45, 0x4c, 0x46]), type: 'buffer' },
+  { name: 'Mach-O 64-bit binary', pattern: Buffer.from([0xcf, 0xfa, 0xed, 0xfe]), type: 'buffer' },
+  { name: 'Mach-O 32-bit binary', pattern: Buffer.from([0xce, 0xfa, 0xed, 0xfe]), type: 'buffer' },
+  { name: 'PE/DOS executable', pattern: Buffer.from([0x4d, 0x5a]), type: 'buffer' },
+  { name: 'NUL-padding shellcode', pattern: /\x00{16,}/, type: 'regex' },
+  { name: 'Packed JS eval wrapper', pattern: /eval\(function\(p,a,c,k,e/, type: 'regex' },
+];
+
 const TRUSTED_MCP_PACKAGES = [
   '@modelcontextprotocol/server-filesystem',
   '@modelcontextprotocol/server-github',
@@ -115,6 +131,7 @@ export function getIOCDatabase(): IOCDatabase {
       maliciousSkillPatterns: [...MALICIOUS_SKILL_PATTERNS],
       trustedSkillNames: [...TRUSTED_SKILL_NAMES],
       trustedMCPPackages: [...TRUSTED_MCP_PACKAGES],
+      binaryPatterns: [...BINARY_PATTERNS],
     };
   }
   return _db;
