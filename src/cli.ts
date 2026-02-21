@@ -10,6 +10,7 @@ import { zeroclawAdapter } from './adapters/zeroclaw.js';
 import { registerAllChecks } from './checks/index.js';
 import { initIOCDatabase } from './ioc/database.js';
 import { isFeedStale } from './ioc/updater.js';
+import { loadUserPlugins } from './user-plugins/loader.js';
 
 const VERSION = '0.1.0';
 
@@ -45,6 +46,15 @@ program
   .version(VERSION, '-v, --version')
   .hook('preAction', async (thisCommand) => {
     printBanner();
+
+    // Load user plugins from ~/.vaso/plugins/
+    const userPlugins = await loadUserPlugins();
+    for (const p of userPlugins) {
+      if (p.status === 'error') {
+        console.log(chalk.yellow(`  Warning: user plugin "${p.name}" failed to load: ${p.error}\n`));
+      }
+    }
+
     await initIOCDatabase();
 
     // Warn about stale feed for non-update commands
@@ -184,6 +194,29 @@ pluginCommand
   .action(async (options) => {
     const { runPluginStatus } = await import('./commands/plugin.js');
     await runPluginStatus(options);
+  });
+
+const extCommand = program
+  .command('ext')
+  .description('Manage user plugins');
+
+extCommand
+  .command('list')
+  .description('List loaded user plugins')
+  .option('-f, --format <format>', 'output format (terminal, json)', 'terminal')
+  .action(async (options) => {
+    const { runExtList } = await import('./commands/user-plugin.js');
+    await runExtList(options);
+  });
+
+extCommand
+  .command('info')
+  .description('Show details for a user plugin')
+  .argument('<name>', 'plugin name')
+  .option('-f, --format <format>', 'output format (terminal, json)', 'terminal')
+  .action(async (name: string, options: Record<string, unknown>) => {
+    const { runExtInfo } = await import('./commands/user-plugin.js');
+    await runExtInfo(name, options as { format?: string });
   });
 
 program.parse();
