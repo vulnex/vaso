@@ -1,0 +1,44 @@
+{
+  "host": "0.0.0.0",
+  "port": 18790,
+  "restrictToWorkspace": false,
+  "openaiApiKey": "sk-abc123def456ghi789jkl012mno345pqr678stu901vwx",
+  "anthropicApiKey": "sk-ant-abc123-def456ghi789jkl012mno345pqr678stu901vwxyz",
+  "channels": {
+    "telegram": {
+      "enabled": true,
+      "allowFrom": [],
+      "bridgeToken": ""
+    },
+    "whatsapp": {
+      "enabled": true,
+      "allowFrom": [],
+      "bridge_token": ""
+    },
+    "discord": {
+      "enabled": true,
+      "allowFrom": []
+    },
+    "slack": {
+      "enabled": true,
+      "allowFrom": []
+    }
+  },
+  "tools": {
+    "exec": {
+      "enabled": true,
+      "denyList": ["rm", "shutdown"]
+    },
+    "webFetch": {
+      "enabled": true
+    }
+  },
+  "cron": [
+    {
+      "schedule": "*/30 * * * *",
+      "channel": "*",
+      "message": "heartbeat check"
+    }
+  ],
+  "skillSource": "npx"
+}

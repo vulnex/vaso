@@ -1,11 +1,5 @@
 import type { CheckModule, ScanContext, CheckResult } from '../../core/types.js';
-
-function getNestedValue(obj: Record<string, unknown>, path: string): unknown {
-  return path.split('.').reduce<unknown>((curr, key) => {
-    if (curr && typeof curr === 'object') return (curr as Record<string, unknown>)[key];
-    return undefined;
-  }, obj);
-}
+import { getNestedValue } from '../../core/utils.js';
 
 export const cfg001: CheckModule = {
   id: 'CFG-001',
@@ -20,21 +14,26 @@ export const cfg001: CheckModule = {
     for (const config of ctx.configs) {
       const host =
         getNestedValue(config.data, 'gateway.host') ??
+        getNestedValue(config.data, 'server.host') ??
         getNestedValue(config.data, 'host') ??
         config.data.GATEWAY_HOST;
 
-      if (host === '0.0.0.0') {
+      const WILDCARD_BINDS = ['0.0.0.0', '[::]', '::'];
+
+      if (typeof host === 'string' && WILDCARD_BINDS.includes(host)) {
         evidence.push({
           file: config.filePath,
-          detail: `Gateway bound to 0.0.0.0 — accessible from all network interfaces`,
+          detail: `Gateway bound to ${host} — accessible from all network interfaces`,
         });
       }
 
       // Also check raw content for grep-style detection
-      if (config.raw.includes('0.0.0.0')) {
+      const hasWildcard = WILDCARD_BINDS.some(w => config.raw.includes(w));
+      if (hasWildcard) {
         const lines = config.raw.split('\n');
         for (let i = 0; i < lines.length; i++) {
-          if (lines[i].includes('0.0.0.0') && /host|bind|listen/i.test(lines[i])) {
+          const hasMatch = WILDCARD_BINDS.some(w => lines[i].includes(w));
+          if (hasMatch && /host|bind|listen/i.test(lines[i])) {
             evidence.push({
               file: config.filePath,
               line: i + 1,

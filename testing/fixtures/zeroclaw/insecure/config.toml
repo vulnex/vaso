@@ -1,0 +1,53 @@
+[server]
+host = "[::]"
+port = 3000
+
+[secrets]
+encrypt = false
+
+[tunnel]
+provider = "none"
+
+[security]
+require_pairing = false
+allow_public_bind = true
+
+[autonomy]
+level = "full"
+
+[workspace]
+workspace_only = false
+
+[channels.telegram]
+enabled = true
+allowed_users = ["*"]
+
+[channels.whatsapp]
+enabled = true
+app_secret = ""
+allowed_users = ["123456"]
+
+[channels.discord]
+enabled = true
+allowed_users = ["*"]
+
+[skills]
+open_install = true
+sources = ["https://github.com/public-skills/repo"]
+
+[integrations.composio]
+enabled = true
+
+[tools.browser]
+enabled = true
+
+[tools.http]
+enabled = true
+
+[runtime]
+kind = "native"
+
+[api_keys]
+openai = "sk-abc123def456ghi789jkl012mno345pqr678stu901vwx"
+anthropic = "sk-ant-abc123-def456ghi789jkl012mno345pqr678stu901vwxyz"
+legacy_encrypted = "enc:SGVsbG8gV29ybGQ="

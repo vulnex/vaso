@@ -4,6 +4,9 @@ import { adapterRegistry } from './adapters/registry.js';
 import { openclawAdapter } from './adapters/openclaw.js';
 import { nanoclawAdapter } from './adapters/nanoclaw.js';
 import { picoclawAdapter } from './adapters/picoclaw.js';
+import { ironclawAdapter } from './adapters/ironclaw.js';
+import { nanobotAdapter } from './adapters/nanobot.js';
+import { zeroclawAdapter } from './adapters/zeroclaw.js';
 import { registerAllChecks } from './checks/index.js';
 
 const VERSION = '0.1.0';
@@ -27,6 +30,9 @@ function printBanner(): void {
 adapterRegistry.register(openclawAdapter);
 adapterRegistry.register(nanoclawAdapter);
 adapterRegistry.register(picoclawAdapter);
+adapterRegistry.register(ironclawAdapter);
+adapterRegistry.register(nanobotAdapter);
+adapterRegistry.register(zeroclawAdapter);
 registerAllChecks();
 
 const program = new Command();
@@ -49,7 +55,7 @@ program.helpInformation = function () {
 program
   .command('scan')
   .description('Scan installed AI agents for security issues')
-  .option('-a, --agent <type>', 'scan a specific agent (openclaw, nanoclaw, picoclaw)')
+  .option('-a, --agent <type>', 'scan a specific agent (openclaw, nanoclaw, picoclaw, ironclaw, nanobot, zeroclaw)')
   .option('-f, --format <format>', 'output format (terminal, json, sarif, markdown)', 'terminal')
   .option('-o, --output <file>', 'write report to file')
   .option('--save-baseline', 'save scan results as baseline')
@@ -64,7 +70,7 @@ program
 program
   .command('detect')
   .description('Detect installed AI agents')
-  .option('-a, --agent <type>', 'detect a specific agent only (openclaw, nanoclaw, picoclaw)')
+  .option('-a, --agent <type>', 'detect a specific agent only (openclaw, nanoclaw, picoclaw, ironclaw, nanobot, zeroclaw)')
   .option('-f, --format <format>', 'output format (terminal, json)', 'terminal')
   .option('--all-users', 'detect across all user accounts (requires root/sudo)')
   .option('--verbose', 'show search paths checked for each adapter')

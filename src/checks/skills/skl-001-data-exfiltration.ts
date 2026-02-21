@@ -1,26 +1,7 @@
 import { readFile } from 'node:fs/promises';
-import { readdir } from 'node:fs/promises';
-import { join, extname } from 'node:path';
 import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
 import { analyzeCode } from '../../analyzers/ast-analyzer.js';
-
-const CODE_EXTENSIONS = new Set(['.js', '.ts', '.mjs', '.cjs', '.mts', '.cts']);
-
-async function getSkillFiles(dir: string): Promise<string[]> {
-  const files: string[] = [];
-  try {
-    const entries = await readdir(dir, { withFileTypes: true, recursive: true });
-    for (const entry of entries) {
-      if (entry.isFile() && CODE_EXTENSIONS.has(extname(entry.name))) {
-        const fullPath = entry.parentPath ? join(entry.parentPath, entry.name) : join(dir, entry.name);
-        files.push(fullPath);
-      }
-    }
-  } catch {
-    // Directory may not exist
-  }
-  return files;
-}
+import { getSkillFiles } from '../../core/utils.js';
 
 export const skl001: CheckModule = {
   id: 'SKL-001',

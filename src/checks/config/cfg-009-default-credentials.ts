@@ -7,12 +7,7 @@ const WEAK_PATTERNS = [
 
 const CREDENTIAL_KEYS = ['password', 'secret', 'token', 'api_key', 'apiKey', 'auth_token'];
 
-function getNestedValue(obj: Record<string, unknown>, path: string): unknown {
-  return path.split('.').reduce<unknown>((curr, key) => {
-    if (curr && typeof curr === 'object') return (curr as Record<string, unknown>)[key];
-    return undefined;
-  }, obj);
-}
+import { getNestedValue } from '../../core/utils.js';
 
 export const cfg009: CheckModule = {
   id: 'CFG-009',

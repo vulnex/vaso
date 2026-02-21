@@ -1,9 +1,7 @@
-import { readFile, readdir } from 'node:fs/promises';
-import { join, extname } from 'node:path';
+import { readFile } from 'node:fs/promises';
 import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
 import { findHighEntropyBlocks } from '../../analyzers/entropy.js';
-
-const CODE_EXTENSIONS = new Set(['.js', '.ts', '.mjs', '.cjs', '.mts', '.cts']);
+import { getSkillFiles } from '../../core/utils.js';
 
 // Pattern-based obfuscation indicators that entropy alone may miss
 const OBFUSCATION_PATTERNS: { pattern: RegExp; label: string }[] = [
@@ -12,20 +10,6 @@ const OBFUSCATION_PATTERNS: { pattern: RegExp; label: string }[] = [
   { pattern: /String\.fromCharCode\s*\([\s\S]*?,[\s\S]*?,/, label: 'String.fromCharCode with multiple args' },
   { pattern: /\batob\s*\(/, label: 'atob() decoding' },
 ];
-
-async function getSkillFiles(dir: string): Promise<string[]> {
-  const files: string[] = [];
-  try {
-    const entries = await readdir(dir, { withFileTypes: true, recursive: true });
-    for (const entry of entries) {
-      if (entry.isFile() && CODE_EXTENSIONS.has(extname(entry.name))) {
-        const fullPath = entry.parentPath ? join(entry.parentPath, entry.name) : join(dir, entry.name);
-        files.push(fullPath);
-      }
-    }
-  } catch {}
-  return files;
-}
 
 export const skl002: CheckModule = {
   id: 'SKL-002',

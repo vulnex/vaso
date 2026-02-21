@@ -62,6 +62,17 @@ describe('loadConfig', () => {
     await cleanup();
   });
 
+  it('parses TOML config', async () => {
+    await setup();
+    const filePath = join(TEST_DIR, 'config.toml');
+    await writeFile(filePath, '[server]\nhost = "127.0.0.1"\nport = 3000\n');
+
+    const config = await loadConfig(filePath);
+    expect(config.format).toBe('toml');
+    expect(config.data).toEqual({ server: { host: '127.0.0.1', port: 3000 } });
+    await cleanup();
+  });
+
   it('preserves raw content', async () => {
     await setup();
     const content = '{"test": true}';

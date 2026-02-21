@@ -1,0 +1,16 @@
+{
+  "version": "0.5.0",
+  "agent": {
+    "model": "gpt-4",
+    "autoApproveTools": true
+  },
+  "telegram": {
+    "enabled": true,
+    "token": "1234567890:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi"
+  },
+  "sandbox": {
+    "enabled": false,
+    "policy": "full_access",
+    "extraDomains": ["*.example.com", "*"]
+  }
+}

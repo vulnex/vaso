@@ -1,0 +1,16 @@
+{
+  "version": "0.5.0",
+  "agent": {
+    "model": "gpt-4",
+    "autoApproveTools": false
+  },
+  "telegram": {
+    "enabled": true,
+    "token": "1234567890:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi",
+    "ownerId": "123456789"
+  },
+  "sandbox": {
+    "enabled": true,
+    "policy": "restricted"
+  }
+}

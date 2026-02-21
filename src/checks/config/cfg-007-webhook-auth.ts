@@ -1,11 +1,5 @@
 import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
-
-function getNestedValue(obj: Record<string, unknown>, path: string): unknown {
-  return path.split('.').reduce<unknown>((curr, key) => {
-    if (curr && typeof curr === 'object') return (curr as Record<string, unknown>)[key];
-    return undefined;
-  }, obj);
-}
+import { getNestedValue } from '../../core/utils.js';
 
 export const cfg007: CheckModule = {
   id: 'CFG-007',

@@ -1,25 +1,10 @@
-import { readFile, readdir } from 'node:fs/promises';
-import { join, extname } from 'node:path';
+import { readFile } from 'node:fs/promises';
 import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
 import { analyzeCode } from '../../analyzers/ast-analyzer.js';
 import { scanWithPatterns, SECURITY_PATTERNS } from '../../analyzers/pattern-engine.js';
+import { getSkillFiles } from '../../core/utils.js';
 
-const CODE_EXTENSIONS = new Set(['.js', '.ts', '.mjs', '.cjs', '.mts', '.cts']);
 const CRED_HARVEST_RULES = SECURITY_PATTERNS.filter(r => r.category === 'credential-harvest');
-
-async function getSkillFiles(dir: string): Promise<string[]> {
-  const files: string[] = [];
-  try {
-    const entries = await readdir(dir, { withFileTypes: true, recursive: true });
-    for (const entry of entries) {
-      if (entry.isFile() && CODE_EXTENSIONS.has(extname(entry.name))) {
-        const fullPath = entry.parentPath ? join(entry.parentPath, entry.name) : join(dir, entry.name);
-        files.push(fullPath);
-      }
-    }
-  } catch {}
-  return files;
-}
 
 export const skl006: CheckModule = {
   id: 'SKL-006',

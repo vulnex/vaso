@@ -1,7 +1,7 @@
 export type Severity = 'critical' | 'warning' | 'info';
 export type Grade = 'A' | 'B' | 'C' | 'D' | 'F';
-export type AgentType = 'openclaw' | 'nanoclaw' | 'picoclaw' | 'mcp';
-export type CheckCategory = 'config' | 'skills' | 'ioc' | 'network' | 'runtime' | 'policy' | 'mcp';
+export type AgentType = 'openclaw' | 'nanoclaw' | 'picoclaw' | 'mcp' | 'ironclaw' | 'nanobot' | 'zeroclaw';
+export type CheckCategory = 'config' | 'skills' | 'ioc' | 'network' | 'runtime' | 'policy' | 'mcp' | 'ironclaw' | 'nanobot' | 'zeroclaw';
 export type OutputFormat = 'terminal' | 'json' | 'sarif' | 'markdown';
 
 export interface Evidence {
@@ -37,7 +37,7 @@ export interface CheckModule {
 
 export interface ParsedConfig {
   raw: string;
-  format: 'json' | 'yaml' | 'env' | 'unknown';
+  format: 'json' | 'yaml' | 'env' | 'toml' | 'unknown';
   filePath: string;
   data: Record<string, unknown>;
 }

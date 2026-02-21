@@ -1,0 +1,12 @@
+{
+  "profiles": {
+    "default": {
+      "provider": "openai",
+      "apiKey": "sk-abc123def456ghi789jkl012mno345pqr678stu901vwx"
+    },
+    "backup": {
+      "provider": "anthropic",
+      "apiKey": "sk-ant-abc123-def456ghi789jkl012mno345pqr678stu901vwxyz"
+    }
+  }
+}

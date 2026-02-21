@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { extname } from 'node:path';
 import YAML from 'yaml';
+import { parse as parseTOML } from 'smol-toml';
 import type { ParsedConfig } from './types.js';
 
 export async function loadConfig(filePath: string): Promise<ParsedConfig> {
@@ -21,6 +22,8 @@ function detectFormat(ext: string, filePath: string): ParsedConfig['format'] {
       return 'yaml';
     case '.env':
       return 'env';
+    case '.toml':
+      return 'toml';
     default:
       if (filePath.endsWith('.env') || filePath.includes('.env.')) return 'env';
       // Try to detect by content
@@ -36,6 +39,8 @@ function parseContent(raw: string, format: ParsedConfig['format']): Record<strin
       return YAML.parse(raw) ?? {};
     case 'env':
       return parseEnv(raw);
+    case 'toml':
+      return parseTOML(raw) as Record<string, unknown>;
     case 'unknown':
       return tryParse(raw);
   }
@@ -67,7 +72,11 @@ function tryParse(raw: string): Record<string, unknown> {
     try {
       return YAML.parse(raw) ?? {};
     } catch {
-      return {};
+      try {
+        return parseTOML(raw) as Record<string, unknown>;
+      } catch {
+        return {};
+      }
     }
   }
 }

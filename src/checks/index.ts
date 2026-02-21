@@ -5,6 +5,9 @@ import { iocChecks } from './ioc/index.js';
 import { networkChecks } from './network/index.js';
 import { runtimeChecks } from './runtime/index.js';
 import { mcpChecks } from './mcp/index.js';
+import { ironclawChecks } from './ironclaw/index.js';
+import { nanobotChecks } from './nanobot/index.js';
+import { zeroclawChecks } from './zeroclaw/index.js';
 
 export function registerAllChecks(): void {
   checkRegistry.registerAll(configChecks);
@@ -13,4 +16,7 @@ export function registerAllChecks(): void {
   checkRegistry.registerAll(networkChecks);
   checkRegistry.registerAll(runtimeChecks);
   checkRegistry.registerAll(mcpChecks);
+  checkRegistry.registerAll(ironclawChecks);
+  checkRegistry.registerAll(nanobotChecks);
+  checkRegistry.registerAll(zeroclawChecks);
 }

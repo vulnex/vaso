@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "default": {
+      "provider": "openai",
+      "apiKey": "enc2:encrypted-key-data-here"
+    }
+  }
+}
