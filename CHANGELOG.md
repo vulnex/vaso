@@ -8,6 +8,19 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+#### Plugin Mode — `before_agent_start` Security Gate
+- **Plugin system** (`src/plugins/`): dual-mode architecture allowing VASO to run as an agent plugin that hooks into each framework's startup lifecycle, blocking agents when critical security issues are found
+- **Plugin types** (`src/plugins/types.ts`): `PluginConfig`, `PluginManifest`, `PluginInfo`, `PreStartScanResult` interfaces; `PLUGIN_AGENTS` constant and `DEFAULT_PLUGIN_CONFIG` defaults (blockOnCritical: true, blockOnWarning: false, timeout: 30s)
+- **Plugin runner** (`src/plugins/runner.ts`): programmatic `runPreStartScan(agent, config?)` for in-process scanning with `Promise.race` timeout; `evaluateScanResult()` pure function for block policy evaluation; errors and timeouts always allow startup (safe default — VASO errors must never prevent a legitimate agent from starting)
+- **Plugin installer** (`src/plugins/installer.ts`): `installPlugin()` generates framework-specific `.mjs` files using `execFileSync` subprocess to run `vaso scan --agent <type> --format json`; `uninstallPlugin()` with idempotent ENOENT handling; `getPluginStatus()` reads manifest sidecars; `loadPluginConfig()`/`savePluginConfig()` for `~/.vaso/plugin-config.json`; `resolveVasoBinaryPath()` tries `process.argv[1]`, `which vaso`, fallback to `'vaso'`
+- **Framework-specific plugin exports**:
+  - **OpenClaw**: `export default { name, version, hooks: { before_agent_start } }` → `~/.openclaw/plugins/vaso-security.mjs`
+  - **NanoClaw**: `export const lifecycle = { onBeforeStart }` → `~/.config/nanoclaw/plugins/vaso-security.mjs`
+  - **PicoClaw**: `export default { name, version, handlers: { preStart } }` → `~/.picoclaw/plugins/vaso-security.mjs`
+- **CLI commands** (`src/commands/plugin.ts`): `vaso plugin install -a <type> [--force]`, `vaso plugin uninstall -a <type>`, `vaso plugin status [-a <type>] [-f <format>]`
+- 37 new tests in `src/plugins/plugin.test.ts`: `evaluateScanResult` (9 cases — no findings, block on critical, no block when disabled, block on warning, excludeChecks filtering, summary counts, findings arrays, elapsed/score/grade, priority), `generatePluginContent` (7 — OpenClaw/NanoClaw/PicoClaw export shapes, binary path embedding, version embedding, ESM syntax, execFileSync usage), `getPluginInstallPath` (3 — correct path per agent), `loadPluginConfig` (1 — defaults on missing file), CLI commands (9 — invalid agent rejection, install success, force passthrough, conflict suggestion, uninstall confirmation, status terminal/JSON rendering, agent filter), `runPreStartScan` (6 — blocked on critical, safe on error, safe on timeout, idempotent init, agent filter, custom config)
+- Test suite now at 411 tests across 36 test files
+
 #### IOC Auto-Updater with Ed25519-Signed Threat Feeds
 - **Pull-based feed system** (`src/ioc/updater.ts`): fetches remote IOC feed JSON + detached `.sig` from configurable URL, verifies Ed25519 signature via `node:crypto`, persists to `~/.vaso/ioc/`, merges additively with bundled data — zero new npm dependencies
 - **Ed25519 signature verification**: mandatory on every fetch and every cache load (catches local tampering); 64-byte signature length enforcement; key pinning with no TOFU — rotation requires new VASO release
