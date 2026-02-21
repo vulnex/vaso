@@ -8,6 +8,25 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+#### Skill Audit Command — `vaso skill audit <path>`
+- **`vaso skill audit <path>`** command: pre-install single-skill security scanning — point at a local skill directory and get a security report before installing it into an agent framework
+- **`scanSkill()` method** on `ScanEngine` (modeled on `scanMCP()`): creates a synthetic `ScanContext` with `agent: 'skill-audit'`, runs only `skills` + `ioc` category checks against the skill directory
+- **`src/commands/skill-audit.ts`**: validates path exists and is a directory, discovers code files via `getSkillFiles()`, early-returns with message if no code files found, sets `exitCode=1` on critical findings
+- **`skill` command group** in CLI with `audit` subcommand: `vaso skill audit <path> [-f format] [-o file] [--no-color]` — leaves room for future `vaso skill list`, etc.
+- `'skill-audit'` added to `AgentType` union so reporters display the correct agent type
+- 7 new tests in `src/commands/skill-audit.test.ts`: missing path, not a directory, no code files, happy path, critical findings, `--output` file write, engine error handling
+
+#### Interactive TUI Fix Mode
+- **Per-fix interactive confirmation** for `vaso fix`: when neither `--yes` nor `--dry-run` is set, prompts for each fixable finding with `[y]es / [n]o / [a]ll / [q]uit`
+- **`src/remediation/prompt.ts`**: standalone prompt module using `node:readline` (zero new dependencies) — displays check ID, color-coded severity, message, evidence, and fix description; empty/unrecognized input defaults to `'no'` (safe default)
+- **Non-TTY safety**: `RemediationEngine.fix()` detects non-interactive terminals and requires explicit `--yes` in CI/script environments
+- **`'all'` response**: sets `applyAll=true`, applying the current and all remaining fixes without further prompts
+- **`'quit'` response**: skips current fix and returns accumulated results immediately
+- Backward compatible: `--yes` and `--dry-run` behavior is identical to previous implementation
+- 13 new tests in `src/remediation/prompt.test.ts`: all input variants (y/yes/n/no/a/all/q/quit/empty/unrecognized), readline close, display output, minimal finding
+- 9 new tests in `src/remediation/engine.test.ts`: `--yes` no prompts, `--dry-run` no prompts, interactive yes/no/quit/all, fix failure in interactive mode, non-TTY warning, non-TTY with `--yes`
+- Test suite now at 440 tests across 39 test files
+
 #### Plugin Mode — `before_agent_start` Security Gate
 - **Plugin system** (`src/plugins/`): dual-mode architecture allowing VASO to run as an agent plugin that hooks into each framework's startup lifecycle, blocking agents when critical security issues are found
 - **Plugin types** (`src/plugins/types.ts`): `PluginConfig`, `PluginManifest`, `PluginInfo`, `PreStartScanResult` interfaces; `PLUGIN_AGENTS` constant and `DEFAULT_PLUGIN_CONFIG` defaults (blockOnCritical: true, blockOnWarning: false, timeout: 30s)
