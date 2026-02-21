@@ -1,4 +1,5 @@
-import type { CheckModule, ScanContext, CheckResult } from '../../core/types.js';
+import type { CheckModule, ScanContext, CheckResult, FixResult } from '../../core/types.js';
+import { updateConfigValue } from '../../remediation/config-writer.js';
 import { getNestedValue } from '../../core/utils.js';
 
 export const cfg010: CheckModule = {
@@ -36,5 +37,16 @@ export const cfg010: CheckModule = {
       fixable: true,
       fixDescription: 'Add rate limiting configuration',
     };
+  },
+
+  async fix(ctx: ScanContext): Promise<FixResult> {
+    const rateLimit = { max: 60, window: '1m' };
+    for (const config of ctx.configs) {
+      const keyPath = config.format === 'env' ? 'RATE_LIMIT' : 'rateLimit';
+      const value = config.format === 'env' ? '60/1m' : rateLimit;
+      await updateConfigValue(config, keyPath, value);
+      return { checkId: 'CFG-010', applied: true, message: 'Added rate limiting (60 requests per minute)' };
+    }
+    return { checkId: 'CFG-010', applied: false, message: 'No config file found' };
   },
 };

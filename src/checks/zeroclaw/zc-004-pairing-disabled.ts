@@ -1,5 +1,6 @@
-import type { CheckModule, ScanContext, CheckResult } from '../../core/types.js';
+import type { CheckModule, ScanContext, CheckResult, FixResult } from '../../core/types.js';
 import { getNestedValue } from '../../core/utils.js';
+import { updateTomlFile } from '../../remediation/config-writer.js';
 
 export const zc004: CheckModule = {
   id: 'ZC-004',
@@ -38,5 +39,15 @@ export const zc004: CheckModule = {
       fixable: true,
       fixDescription: 'Set require_pairing=true to enforce device authentication',
     };
+  },
+
+  async fix(ctx: ScanContext): Promise<FixResult> {
+    for (const config of ctx.configs) {
+      if (config.format === 'toml') {
+        await updateTomlFile(config.filePath, 'require_pairing', true);
+        return { checkId: 'ZC-004', applied: true, message: 'Set require_pairing=true' };
+      }
+    }
+    return { checkId: 'ZC-004', applied: false, message: 'No TOML config file found' };
   },
 };

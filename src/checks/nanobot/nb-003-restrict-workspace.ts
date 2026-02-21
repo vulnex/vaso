@@ -1,5 +1,6 @@
-import type { CheckModule, ScanContext, CheckResult } from '../../core/types.js';
+import type { CheckModule, ScanContext, CheckResult, FixResult } from '../../core/types.js';
 import { getNestedValue } from '../../core/utils.js';
+import { updateJsonFile } from '../../remediation/config-writer.js';
 
 export const nb003: CheckModule = {
   id: 'NB-003',
@@ -37,5 +38,15 @@ export const nb003: CheckModule = {
       evidence: evidence.length > 0 ? evidence : undefined,
       fixable: true, fixDescription: 'Set "restrictToWorkspace": true in config',
     };
+  },
+
+  async fix(ctx: ScanContext): Promise<FixResult> {
+    for (const config of ctx.configs) {
+      if (config.format === 'json') {
+        await updateJsonFile(config.filePath, 'restrictToWorkspace', true);
+        return { checkId: 'NB-003', applied: true, message: 'Set restrictToWorkspace=true' };
+      }
+    }
+    return { checkId: 'NB-003', applied: false, message: 'No JSON config file found' };
   },
 };

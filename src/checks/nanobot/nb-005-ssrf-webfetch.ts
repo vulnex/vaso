@@ -1,5 +1,6 @@
-import type { CheckModule, ScanContext, CheckResult } from '../../core/types.js';
+import type { CheckModule, ScanContext, CheckResult, FixResult } from '../../core/types.js';
 import { getNestedValue } from '../../core/utils.js';
+import { updateJsonFile } from '../../remediation/config-writer.js';
 
 export const nb005: CheckModule = {
   id: 'NB-005',
@@ -47,5 +48,16 @@ export const nb005: CheckModule = {
       evidence: evidence.length > 0 ? evidence : undefined,
       fixable: true, fixDescription: 'Add blockedHosts with localhost, 127.0.0.1, 169.254.169.254, and private IP ranges to WebFetchTool config',
     };
+  },
+
+  async fix(ctx: ScanContext): Promise<FixResult> {
+    const blockedHosts = ['localhost', '127.0.0.1', '0.0.0.0', '169.254.169.254', '10.*', '172.16.*', '192.168.*'];
+    for (const config of ctx.configs) {
+      if (config.format === 'json') {
+        await updateJsonFile(config.filePath, 'tools.webFetch.blockedHosts', blockedHosts);
+        return { checkId: 'NB-005', applied: true, message: 'Added SSRF-blocking host list to WebFetchTool' };
+      }
+    }
+    return { checkId: 'NB-005', applied: false, message: 'No JSON config file found' };
   },
 };

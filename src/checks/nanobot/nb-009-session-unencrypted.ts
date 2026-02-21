@@ -1,5 +1,6 @@
-import type { CheckModule, ScanContext, CheckResult } from '../../core/types.js';
+import type { CheckModule, ScanContext, CheckResult, FixResult } from '../../core/types.js';
 import { getNestedValue } from '../../core/utils.js';
+import { updateJsonFile } from '../../remediation/config-writer.js';
 import { join } from 'node:path';
 import { readdir } from 'node:fs/promises';
 
@@ -65,5 +66,15 @@ export const nb009: CheckModule = {
       evidence: evidence.length > 0 ? evidence : undefined,
       fixable: true, fixDescription: 'Enable session encryption in config: "sessions": { "encryption": true }',
     };
+  },
+
+  async fix(ctx: ScanContext): Promise<FixResult> {
+    for (const config of ctx.configs) {
+      if (config.format === 'json') {
+        await updateJsonFile(config.filePath, 'sessions.encryption', true);
+        return { checkId: 'NB-009', applied: true, message: 'Enabled session encryption' };
+      }
+    }
+    return { checkId: 'NB-009', applied: false, message: 'No JSON config file found' };
   },
 };

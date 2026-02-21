@@ -1,4 +1,5 @@
-import type { CheckModule, ScanContext, CheckResult } from '../../core/types.js';
+import type { CheckModule, ScanContext, CheckResult, FixResult } from '../../core/types.js';
+import { updateConfigValue } from '../../remediation/config-writer.js';
 import { getNestedValue } from '../../core/utils.js';
 
 export const cfg008: CheckModule = {
@@ -37,5 +38,14 @@ export const cfg008: CheckModule = {
       passed: true,
       message: 'Sandbox is not explicitly disabled',
     };
+  },
+
+  async fix(ctx: ScanContext): Promise<FixResult> {
+    for (const config of ctx.configs) {
+      const keyPath = config.format === 'env' ? 'SANDBOX' : 'sandbox';
+      await updateConfigValue(config, keyPath, true);
+      return { checkId: 'CFG-008', applied: true, message: 'Enabled sandbox mode' };
+    }
+    return { checkId: 'CFG-008', applied: false, message: 'No config file found' };
   },
 };

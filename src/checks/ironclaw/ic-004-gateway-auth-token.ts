@@ -1,4 +1,6 @@
-import type { CheckModule, ScanContext, CheckResult } from '../../core/types.js';
+import type { CheckModule, ScanContext, CheckResult, FixResult } from '../../core/types.js';
+import { updateEnvFile, updateTomlFile } from '../../remediation/config-writer.js';
+import { randomBytes } from 'node:crypto';
 import { getNestedValue } from '../../core/utils.js';
 
 export const ic004: CheckModule = {
@@ -39,5 +41,20 @@ export const ic004: CheckModule = {
       fixable: true,
       fixDescription: 'Set a persistent GATEWAY_AUTH_TOKEN in .env or gateway.auth_token in config.toml',
     };
+  },
+
+  async fix(ctx: ScanContext): Promise<FixResult> {
+    const token = randomBytes(32).toString('hex');
+    for (const config of ctx.configs) {
+      if (config.format === 'env') {
+        await updateEnvFile(config.filePath, 'GATEWAY_AUTH_TOKEN', token);
+        return { checkId: 'IC-004', applied: true, message: 'Generated and set persistent GATEWAY_AUTH_TOKEN' };
+      }
+      if (config.format === 'toml') {
+        await updateTomlFile(config.filePath, 'gateway.auth_token', token);
+        return { checkId: 'IC-004', applied: true, message: 'Generated and set persistent GATEWAY_AUTH_TOKEN' };
+      }
+    }
+    return { checkId: 'IC-004', applied: false, message: 'No compatible config file found' };
   },
 };

@@ -1,4 +1,4 @@
-import type { CheckModule, ScanContext, CheckResult } from '../../core/types.js';
+import type { CheckModule, ScanContext, CheckResult, FixResult } from '../../core/types.js';
 import { getNestedValue } from '../../core/utils.js';
 
 export const nb012: CheckModule = {
@@ -67,5 +67,9 @@ export const nb012: CheckModule = {
       evidence: evidence.length > 0 ? evidence : undefined,
       fixable: true, fixDescription: 'Install skills locally with pinned versions instead of using npx for remote execution',
     };
+  },
+
+  async fix(_ctx: ScanContext): Promise<FixResult> {
+    return { checkId: 'NB-012', applied: false, message: 'Manual action required: install skills locally with pinned versions instead of using npx for remote execution' };
   },
 };

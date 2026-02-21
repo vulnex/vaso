@@ -1,4 +1,5 @@
-import type { CheckModule, ScanContext, CheckResult } from '../../core/types.js';
+import type { CheckModule, ScanContext, CheckResult, FixResult } from '../../core/types.js';
+import { updateEnvFile, updateTomlFile } from '../../remediation/config-writer.js';
 import { getNestedValue } from '../../core/utils.js';
 
 export const ic005: CheckModule = {
@@ -38,5 +39,19 @@ export const ic005: CheckModule = {
       fixable: true,
       fixDescription: 'Set SANDBOX_ENABLED=true in .env or sandbox.enabled=true in config.toml',
     };
+  },
+
+  async fix(ctx: ScanContext): Promise<FixResult> {
+    for (const config of ctx.configs) {
+      if (config.format === 'env') {
+        await updateEnvFile(config.filePath, 'SANDBOX_ENABLED', 'true');
+        return { checkId: 'IC-005', applied: true, message: 'Set SANDBOX_ENABLED=true' };
+      }
+      if (config.format === 'toml') {
+        await updateTomlFile(config.filePath, 'sandbox.enabled', true);
+        return { checkId: 'IC-005', applied: true, message: 'Set SANDBOX_ENABLED=true' };
+      }
+    }
+    return { checkId: 'IC-005', applied: false, message: 'No compatible config file found' };
   },
 };

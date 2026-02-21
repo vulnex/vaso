@@ -1,4 +1,5 @@
-import type { CheckModule, ScanContext, CheckResult } from '../../core/types.js';
+import type { CheckModule, ScanContext, CheckResult, FixResult } from '../../core/types.js';
+import { updateConfigValue } from '../../remediation/config-writer.js';
 import { getNestedValue } from '../../core/utils.js';
 
 export const cfg013: CheckModule = {
@@ -37,5 +38,14 @@ export const cfg013: CheckModule = {
       passed: true,
       message: 'DM policy is not set to open',
     };
+  },
+
+  async fix(ctx: ScanContext): Promise<FixResult> {
+    for (const config of ctx.configs) {
+      const keyPath = config.format === 'env' ? 'DM_POLICY' : 'dm.policy';
+      await updateConfigValue(config, keyPath, 'restricted');
+      return { checkId: 'CFG-013', applied: true, message: 'Set DM policy to restricted' };
+    }
+    return { checkId: 'CFG-013', applied: false, message: 'No config file found' };
   },
 };

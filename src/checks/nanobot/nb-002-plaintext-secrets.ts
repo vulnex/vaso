@@ -1,4 +1,4 @@
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { CheckModule, ScanContext, CheckResult, Evidence, FixResult } from '../../core/types.js';
 import { API_KEY_PATTERNS } from '../../core/patterns.js';
 
 const PLACEHOLDER_HINTS = ['your-', 'xxx', 'placeholder', 'changeme', 'TODO', 'REPLACE', '<', 'example'];
@@ -47,5 +47,9 @@ export const nb002: CheckModule = {
       evidence: evidence.length > 0 ? evidence : undefined,
       fixable: true, fixDescription: 'Move secrets to environment variables or a secrets manager',
     };
+  },
+
+  async fix(_ctx: ScanContext): Promise<FixResult> {
+    return { checkId: 'NB-002', applied: false, message: 'Manual action required: move plaintext secrets to environment variables or a secrets manager' };
   },
 };

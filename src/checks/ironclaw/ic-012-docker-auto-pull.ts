@@ -1,4 +1,5 @@
-import type { CheckModule, ScanContext, CheckResult } from '../../core/types.js';
+import type { CheckModule, ScanContext, CheckResult, FixResult } from '../../core/types.js';
+import { updateEnvFile, updateTomlFile } from '../../remediation/config-writer.js';
 import { getNestedValue } from '../../core/utils.js';
 
 export const ic012: CheckModule = {
@@ -48,5 +49,19 @@ export const ic012: CheckModule = {
       fixable: true,
       fixDescription: 'Pin SANDBOX_DOCKER_IMAGE to a sha256 digest (e.g., myimage@sha256:abc123...) or disable SANDBOX_AUTO_PULL',
     };
+  },
+
+  async fix(ctx: ScanContext): Promise<FixResult> {
+    for (const config of ctx.configs) {
+      if (config.format === 'env') {
+        await updateEnvFile(config.filePath, 'SANDBOX_AUTO_PULL', 'false');
+        return { checkId: 'IC-012', applied: true, message: 'Disabled SANDBOX_AUTO_PULL' };
+      }
+      if (config.format === 'toml') {
+        await updateTomlFile(config.filePath, 'sandbox.auto_pull', false);
+        return { checkId: 'IC-012', applied: true, message: 'Disabled SANDBOX_AUTO_PULL' };
+      }
+    }
+    return { checkId: 'IC-012', applied: false, message: 'No compatible config file found' };
   },
 };

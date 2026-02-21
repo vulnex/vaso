@@ -1,4 +1,4 @@
-import type { CheckModule, ScanContext, CheckResult } from '../../core/types.js';
+import type { CheckModule, ScanContext, CheckResult, FixResult } from '../../core/types.js';
 import { getNestedValue } from '../../core/utils.js';
 
 const TLS_LISTENERS = [
@@ -55,5 +55,9 @@ export const ic002: CheckModule = {
       fixable: true,
       fixDescription: 'Configure TLS certificates for each active listener (GATEWAY_TLS_CERT, HTTP_TLS_CERT, ORCHESTRATOR_TLS_CERT)',
     };
+  },
+
+  async fix(_ctx: ScanContext): Promise<FixResult> {
+    return { checkId: 'IC-002', applied: false, message: 'Manual action required: configure TLS certificates for each listener (GATEWAY_TLS_CERT, HTTP_TLS_CERT, ORCHESTRATOR_TLS_CERT) with valid cert/key file paths' };
   },
 };

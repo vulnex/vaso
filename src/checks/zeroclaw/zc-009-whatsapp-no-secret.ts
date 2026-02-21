@@ -1,4 +1,4 @@
-import type { CheckModule, ScanContext, CheckResult } from '../../core/types.js';
+import type { CheckModule, ScanContext, CheckResult, FixResult } from '../../core/types.js';
 import { getNestedValue } from '../../core/utils.js';
 
 export const zc009: CheckModule = {
@@ -44,5 +44,9 @@ export const zc009: CheckModule = {
       fixable: true,
       fixDescription: 'Set channels.whatsapp.app_secret to your WhatsApp app secret for HMAC webhook verification',
     };
+  },
+
+  async fix(_ctx: ScanContext): Promise<FixResult> {
+    return { checkId: 'ZC-009', applied: false, message: 'Manual action required: set channels.whatsapp.app_secret to your WhatsApp app secret for HMAC webhook verification' };
   },
 };

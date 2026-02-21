@@ -1,4 +1,4 @@
-import type { CheckModule, ScanContext, CheckResult } from '../../core/types.js';
+import type { CheckModule, ScanContext, CheckResult, FixResult } from '../../core/types.js';
 import { getNestedValue } from '../../core/utils.js';
 
 export const zc012: CheckModule = {
@@ -39,5 +39,9 @@ export const zc012: CheckModule = {
       fixable: true,
       fixDescription: 'Set tools.http.allowed_domains to a list of trusted domains',
     };
+  },
+
+  async fix(_ctx: ScanContext): Promise<FixResult> {
+    return { checkId: 'ZC-012', applied: false, message: 'Manual action required: set tools.http.allowed_domains to a list of trusted domains' };
   },
 };

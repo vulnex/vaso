@@ -1,5 +1,6 @@
-import type { CheckModule, ScanContext, CheckResult } from '../../core/types.js';
+import type { CheckModule, ScanContext, CheckResult, FixResult } from '../../core/types.js';
 import { getNestedValue } from '../../core/utils.js';
+import { updateTomlFile } from '../../remediation/config-writer.js';
 
 export const zc006: CheckModule = {
   id: 'ZC-006',
@@ -38,5 +39,15 @@ export const zc006: CheckModule = {
       fixable: true,
       fixDescription: 'Set workspace_only=true to restrict filesystem access to the workspace directory',
     };
+  },
+
+  async fix(ctx: ScanContext): Promise<FixResult> {
+    for (const config of ctx.configs) {
+      if (config.format === 'toml') {
+        await updateTomlFile(config.filePath, 'workspace_only', true);
+        return { checkId: 'ZC-006', applied: true, message: 'Set workspace_only=true' };
+      }
+    }
+    return { checkId: 'ZC-006', applied: false, message: 'No TOML config file found' };
   },
 };

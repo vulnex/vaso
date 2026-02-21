@@ -1,4 +1,4 @@
-import type { CheckModule, ScanContext, CheckResult } from '../../core/types.js';
+import type { CheckModule, ScanContext, CheckResult, FixResult } from '../../core/types.js';
 
 export const nb008: CheckModule = {
   id: 'NB-008',
@@ -40,5 +40,9 @@ export const nb008: CheckModule = {
       evidence: evidence.length > 0 ? evidence : undefined,
       fixable: true, fixDescription: 'Set a strong bridge_token for each WhatsApp bridge channel',
     };
+  },
+
+  async fix(_ctx: ScanContext): Promise<FixResult> {
+    return { checkId: 'NB-008', applied: false, message: 'Manual action required: generate and set a strong bridge_token for each WhatsApp bridge channel' };
   },
 };

@@ -1,4 +1,5 @@
-import type { CheckModule, ScanContext, CheckResult } from '../../core/types.js';
+import type { CheckModule, ScanContext, CheckResult, FixResult } from '../../core/types.js';
+import { updateConfigValue } from '../../remediation/config-writer.js';
 import { getNestedValue } from '../../core/utils.js';
 
 export const cfg001: CheckModule = {
@@ -62,5 +63,14 @@ export const cfg001: CheckModule = {
       fixable: true,
       fixDescription: 'Rebind gateway to 127.0.0.1',
     };
+  },
+
+  async fix(ctx: ScanContext): Promise<FixResult> {
+    for (const config of ctx.configs) {
+      const keyPath = config.format === 'env' ? 'GATEWAY_HOST' : 'gateway.host';
+      await updateConfigValue(config, keyPath, '127.0.0.1');
+      return { checkId: 'CFG-001', applied: true, message: 'Set gateway host to 127.0.0.1' };
+    }
+    return { checkId: 'CFG-001', applied: false, message: 'No config file found' };
   },
 };

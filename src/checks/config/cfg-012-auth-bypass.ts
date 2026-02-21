@@ -1,4 +1,5 @@
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { CheckModule, ScanContext, CheckResult, Evidence, FixResult } from '../../core/types.js';
+import { updateConfigValue } from '../../remediation/config-writer.js';
 import { getNestedValue } from '../../core/utils.js';
 
 export const cfg012: CheckModule = {
@@ -48,5 +49,14 @@ export const cfg012: CheckModule = {
       fixable: true,
       fixDescription: 'Disable auth bypass and set proper auth mode',
     };
+  },
+
+  async fix(ctx: ScanContext): Promise<FixResult> {
+    for (const config of ctx.configs) {
+      const keyPath = config.format === 'env' ? 'AUTH_BYPASS' : 'auth.bypass';
+      await updateConfigValue(config, keyPath, false);
+      return { checkId: 'CFG-012', applied: true, message: 'Disabled auth bypass' };
+    }
+    return { checkId: 'CFG-012', applied: false, message: 'No config file found' };
   },
 };

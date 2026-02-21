@@ -1,4 +1,4 @@
-import type { CheckModule, ScanContext, CheckResult } from '../../core/types.js';
+import type { CheckModule, ScanContext, CheckResult, FixResult } from '../../core/types.js';
 import { getNestedValue } from '../../core/utils.js';
 
 export const ic010: CheckModule = {
@@ -45,5 +45,9 @@ export const ic010: CheckModule = {
       fixable: true,
       fixDescription: 'Set TELEGRAM_OWNER_ID to your Telegram user ID in .env or telegram.owner_id in config.toml',
     };
+  },
+
+  async fix(_ctx: ScanContext): Promise<FixResult> {
+    return { checkId: 'IC-010', applied: false, message: 'Manual action required: set TELEGRAM_OWNER_ID to your numeric Telegram user ID (use @userinfobot to find it)' };
   },
 };

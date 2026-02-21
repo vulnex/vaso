@@ -1,4 +1,5 @@
-import type { CheckModule, ScanContext, CheckResult } from '../../core/types.js';
+import type { CheckModule, ScanContext, CheckResult, FixResult } from '../../core/types.js';
+import { updateEnvFile, updateTomlFile } from '../../remediation/config-writer.js';
 import { getNestedValue } from '../../core/utils.js';
 
 export const ic006: CheckModule = {
@@ -38,5 +39,19 @@ export const ic006: CheckModule = {
       fixable: true,
       fixDescription: 'Set SANDBOX_POLICY=restricted or SANDBOX_POLICY=minimal in .env or sandbox.policy in config.toml',
     };
+  },
+
+  async fix(ctx: ScanContext): Promise<FixResult> {
+    for (const config of ctx.configs) {
+      if (config.format === 'env') {
+        await updateEnvFile(config.filePath, 'SANDBOX_POLICY', 'restricted');
+        return { checkId: 'IC-006', applied: true, message: 'Set SANDBOX_POLICY=restricted' };
+      }
+      if (config.format === 'toml') {
+        await updateTomlFile(config.filePath, 'sandbox.policy', 'restricted');
+        return { checkId: 'IC-006', applied: true, message: 'Set SANDBOX_POLICY=restricted' };
+      }
+    }
+    return { checkId: 'IC-006', applied: false, message: 'No compatible config file found' };
   },
 };

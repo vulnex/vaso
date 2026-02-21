@@ -1,4 +1,5 @@
-import type { CheckModule, ScanContext, CheckResult } from '../../core/types.js';
+import type { CheckModule, ScanContext, CheckResult, FixResult } from '../../core/types.js';
+import { updateConfigValue } from '../../remediation/config-writer.js';
 import { getNestedValue } from '../../core/utils.js';
 
 export const cfg005: CheckModule = {
@@ -35,5 +36,16 @@ export const cfg005: CheckModule = {
       fixable: true,
       fixDescription: 'Add safeBins allowlist to config',
     };
+  },
+
+  async fix(ctx: ScanContext): Promise<FixResult> {
+    const safeBins = ['ls', 'cat', 'grep', 'head', 'tail', 'wc', 'echo', 'date'];
+    for (const config of ctx.configs) {
+      const keyPath = config.format === 'env' ? 'SAFE_BINS' : 'security.safeBins';
+      const value = config.format === 'env' ? safeBins.join(',') : safeBins;
+      await updateConfigValue(config, keyPath, value);
+      return { checkId: 'CFG-005', applied: true, message: 'Added safeBins allowlist with safe defaults' };
+    }
+    return { checkId: 'CFG-005', applied: false, message: 'No config file found' };
   },
 };

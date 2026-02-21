@@ -1,4 +1,4 @@
-import type { CheckModule, ScanContext, CheckResult } from '../../core/types.js';
+import type { CheckModule, ScanContext, CheckResult, FixResult } from '../../core/types.js';
 import { getNestedValue } from '../../core/utils.js';
 
 export const ic009: CheckModule = {
@@ -65,5 +65,9 @@ export const ic009: CheckModule = {
       fixable: true,
       fixDescription: 'Remove SECRETS_MASTER_KEY from .env and store it in the system keychain or a secrets vault',
     };
+  },
+
+  async fix(_ctx: ScanContext): Promise<FixResult> {
+    return { checkId: 'IC-009', applied: false, message: 'Manual action required: remove SECRETS_MASTER_KEY from config files and store it in the system keychain or a secrets vault' };
   },
 };

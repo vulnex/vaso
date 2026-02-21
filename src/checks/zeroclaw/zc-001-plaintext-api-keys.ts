@@ -1,6 +1,7 @@
-import type { CheckModule, ScanContext, CheckResult } from '../../core/types.js';
+import type { CheckModule, ScanContext, CheckResult, FixResult } from '../../core/types.js';
 import { getNestedValue } from '../../core/utils.js';
 import { API_KEY_PATTERNS } from '../../core/patterns.js';
+import { updateTomlFile } from '../../remediation/config-writer.js';
 
 export const zc001: CheckModule = {
   id: 'ZC-001',
@@ -51,5 +52,15 @@ export const zc001: CheckModule = {
       fixable: true,
       fixDescription: 'Set secrets.encrypt=true and re-encrypt API keys using zeroclaw secrets encrypt',
     };
+  },
+
+  async fix(ctx: ScanContext): Promise<FixResult> {
+    for (const config of ctx.configs) {
+      if (config.format === 'toml') {
+        await updateTomlFile(config.filePath, 'secrets.encrypt', true);
+        return { checkId: 'ZC-001', applied: true, message: 'Set secrets.encrypt=true — run "zeroclaw secrets encrypt" to encrypt existing keys' };
+      }
+    }
+    return { checkId: 'ZC-001', applied: false, message: 'No TOML config file found' };
   },
 };

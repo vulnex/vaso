@@ -1,5 +1,6 @@
-import type { CheckModule, ScanContext, CheckResult } from '../../core/types.js';
+import type { CheckModule, ScanContext, CheckResult, FixResult } from '../../core/types.js';
 import { getNestedValue } from '../../core/utils.js';
+import { updateTomlFile } from '../../remediation/config-writer.js';
 
 export const zc005: CheckModule = {
   id: 'ZC-005',
@@ -36,5 +37,15 @@ export const zc005: CheckModule = {
       fixable: true,
       fixDescription: 'Set autonomy.level to "supervised" or "restricted" to require approval for tool execution',
     };
+  },
+
+  async fix(ctx: ScanContext): Promise<FixResult> {
+    for (const config of ctx.configs) {
+      if (config.format === 'toml') {
+        await updateTomlFile(config.filePath, 'autonomy.level', 'supervised');
+        return { checkId: 'ZC-005', applied: true, message: 'Set autonomy.level=supervised' };
+      }
+    }
+    return { checkId: 'ZC-005', applied: false, message: 'No TOML config file found' };
   },
 };

@@ -1,4 +1,5 @@
-import type { CheckModule, ScanContext, CheckResult } from '../../core/types.js';
+import type { CheckModule, ScanContext, CheckResult, FixResult } from '../../core/types.js';
+import { updateEnvFile, updateTomlFile } from '../../remediation/config-writer.js';
 import { getNestedValue } from '../../core/utils.js';
 
 export const ic007: CheckModule = {
@@ -39,5 +40,19 @@ export const ic007: CheckModule = {
       fixable: true,
       fixDescription: 'Set AGENT_AUTO_APPROVE_TOOLS=false in .env or agent.auto_approve_tools=false in config.toml',
     };
+  },
+
+  async fix(ctx: ScanContext): Promise<FixResult> {
+    for (const config of ctx.configs) {
+      if (config.format === 'env') {
+        await updateEnvFile(config.filePath, 'AGENT_AUTO_APPROVE_TOOLS', 'false');
+        return { checkId: 'IC-007', applied: true, message: 'Set AGENT_AUTO_APPROVE_TOOLS=false' };
+      }
+      if (config.format === 'toml') {
+        await updateTomlFile(config.filePath, 'agent.auto_approve_tools', false);
+        return { checkId: 'IC-007', applied: true, message: 'Set AGENT_AUTO_APPROVE_TOOLS=false' };
+      }
+    }
+    return { checkId: 'IC-007', applied: false, message: 'No compatible config file found' };
   },
 };

@@ -1,5 +1,6 @@
-import type { CheckModule, ScanContext, CheckResult } from '../../core/types.js';
+import type { CheckModule, ScanContext, CheckResult, FixResult } from '../../core/types.js';
 import { getNestedValue } from '../../core/utils.js';
+import { updateTomlFile } from '../../remediation/config-writer.js';
 
 const KNOWN_SANDBOXES = ['firejail', 'bubblewrap', 'bwrap', 'landlock', 'docker', 'podman', 'nsjail'];
 
@@ -45,5 +46,15 @@ export const zc014: CheckModule = {
       fixable: true,
       fixDescription: 'Set runtime.sandbox to a supported sandbox (firejail, bubblewrap, landlock) or use runtime.kind=docker',
     };
+  },
+
+  async fix(ctx: ScanContext): Promise<FixResult> {
+    for (const config of ctx.configs) {
+      if (config.format === 'toml') {
+        await updateTomlFile(config.filePath, 'runtime.sandbox', 'firejail');
+        return { checkId: 'ZC-014', applied: true, message: 'Set runtime.sandbox=firejail' };
+      }
+    }
+    return { checkId: 'ZC-014', applied: false, message: 'No TOML config file found' };
   },
 };

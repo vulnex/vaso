@@ -1,5 +1,6 @@
-import type { CheckModule, ScanContext, CheckResult } from '../../core/types.js';
+import type { CheckModule, ScanContext, CheckResult, FixResult } from '../../core/types.js';
 import { getNestedValue } from '../../core/utils.js';
+import { updateTomlFile } from '../../remediation/config-writer.js';
 
 export const zc003: CheckModule = {
   id: 'ZC-003',
@@ -40,5 +41,15 @@ export const zc003: CheckModule = {
       fixable: true,
       fixDescription: 'Set tunnel.provider to a supported provider (e.g., cloudflare, ngrok) or disable allow_public_bind',
     };
+  },
+
+  async fix(ctx: ScanContext): Promise<FixResult> {
+    for (const config of ctx.configs) {
+      if (config.format === 'toml') {
+        await updateTomlFile(config.filePath, 'security.allow_public_bind', false);
+        return { checkId: 'ZC-003', applied: true, message: 'Set security.allow_public_bind=false' };
+      }
+    }
+    return { checkId: 'ZC-003', applied: false, message: 'No TOML config file found' };
   },
 };

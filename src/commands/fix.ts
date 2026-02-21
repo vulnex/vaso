@@ -3,6 +3,7 @@ import { ScanEngine } from '../core/engine.js';
 import { adapterRegistry } from '../adapters/registry.js';
 import { checkRegistry } from '../core/check-registry.js';
 import { RemediationEngine } from '../remediation/engine.js';
+import { rollback } from '../remediation/rollback.js';
 
 export interface FixCommandOptions {
   agent?: string;
@@ -13,7 +14,7 @@ export interface FixCommandOptions {
 
 export async function runFix(options: FixCommandOptions): Promise<void> {
   if (options.rollback) {
-    console.log(chalk.yellow('Rollback not implemented yet. Check ~/.vaso/backups/ for manual rollback.'));
+    await rollback();
     return;
   }
 

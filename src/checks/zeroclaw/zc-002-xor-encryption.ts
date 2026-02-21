@@ -1,4 +1,4 @@
-import type { CheckModule, ScanContext, CheckResult } from '../../core/types.js';
+import type { CheckModule, ScanContext, CheckResult, FixResult } from '../../core/types.js';
 
 const XOR_CIPHER_PATTERN = /\benc:[A-Za-z0-9+\/=]+/g;
 
@@ -43,5 +43,9 @@ export const zc002: CheckModule = {
       fixable: true,
       fixDescription: 'Re-encrypt secrets using zeroclaw secrets encrypt with AES-256',
     };
+  },
+
+  async fix(_ctx: ScanContext): Promise<FixResult> {
+    return { checkId: 'ZC-002', applied: false, message: 'Manual action required: re-encrypt secrets using "zeroclaw secrets encrypt" with AES-256 to replace XOR-encrypted values' };
   },
 };

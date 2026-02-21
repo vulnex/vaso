@@ -1,4 +1,4 @@
-import type { CheckModule, ScanContext, CheckResult } from '../../core/types.js';
+import type { CheckModule, ScanContext, CheckResult, FixResult } from '../../core/types.js';
 import { getNestedValue } from '../../core/utils.js';
 
 export const ic011: CheckModule = {
@@ -53,5 +53,9 @@ export const ic011: CheckModule = {
       fixable: true,
       fixDescription: 'Replace wildcard domain patterns with specific fully-qualified domain names in SANDBOX_EXTRA_DOMAINS',
     };
+  },
+
+  async fix(_ctx: ScanContext): Promise<FixResult> {
+    return { checkId: 'IC-011', applied: false, message: 'Manual action required: replace wildcard patterns in SANDBOX_EXTRA_DOMAINS with specific fully-qualified domain names' };
   },
 };

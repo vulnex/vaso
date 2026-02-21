@@ -1,4 +1,4 @@
-import type { CheckModule, ScanContext, CheckResult } from '../../core/types.js';
+import type { CheckModule, ScanContext, CheckResult, FixResult } from '../../core/types.js';
 import { getNestedValue } from '../../core/utils.js';
 
 export const zc007: CheckModule = {
@@ -44,5 +44,9 @@ export const zc007: CheckModule = {
       fixable: true,
       fixDescription: 'Replace "*" in allowed_users with explicit user identifiers',
     };
+  },
+
+  async fix(_ctx: ScanContext): Promise<FixResult> {
+    return { checkId: 'ZC-007', applied: false, message: 'Manual action required: replace "*" in allowed_users with specific user identifiers for each channel' };
   },
 };

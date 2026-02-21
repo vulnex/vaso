@@ -1,4 +1,5 @@
-import type { CheckModule, ScanContext, CheckResult } from '../../core/types.js';
+import type { CheckModule, ScanContext, CheckResult, FixResult } from '../../core/types.js';
+import { updateEnvFile, updateTomlFile } from '../../remediation/config-writer.js';
 
 export const ic001: CheckModule = {
   id: 'IC-001',
@@ -29,5 +30,19 @@ export const ic001: CheckModule = {
       evidence: evidence.length > 0 ? evidence : undefined,
       fixable: true, fixDescription: 'Set HTTP_HOST=127.0.0.1 in .env',
     };
+  },
+
+  async fix(ctx: ScanContext): Promise<FixResult> {
+    for (const config of ctx.configs) {
+      if (config.format === 'env') {
+        await updateEnvFile(config.filePath, 'HTTP_HOST', '127.0.0.1');
+        return { checkId: 'IC-001', applied: true, message: 'Set HTTP_HOST=127.0.0.1' };
+      }
+      if (config.format === 'toml') {
+        await updateTomlFile(config.filePath, 'http.host', '127.0.0.1');
+        return { checkId: 'IC-001', applied: true, message: 'Set HTTP_HOST=127.0.0.1' };
+      }
+    }
+    return { checkId: 'IC-001', applied: false, message: 'No compatible config file found' };
   },
 };

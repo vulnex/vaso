@@ -1,5 +1,6 @@
-import type { CheckModule, ScanContext, CheckResult } from '../../core/types.js';
+import type { CheckModule, ScanContext, CheckResult, FixResult } from '../../core/types.js';
 import { getNestedValue } from '../../core/utils.js';
+import { updateJsonFile } from '../../remediation/config-writer.js';
 
 export const nb011: CheckModule = {
   id: 'NB-011',
@@ -49,5 +50,16 @@ export const nb011: CheckModule = {
       evidence: evidence.length > 0 ? evidence : undefined,
       fixable: true, fixDescription: 'Add rate limiting to channels or set a global rateLimit in config',
     };
+  },
+
+  async fix(ctx: ScanContext): Promise<FixResult> {
+    const rateLimit = { maxPerMinute: 30, maxPerHour: 500 };
+    for (const config of ctx.configs) {
+      if (config.format === 'json') {
+        await updateJsonFile(config.filePath, 'rateLimit', rateLimit);
+        return { checkId: 'NB-011', applied: true, message: 'Added global rate limit (30/min, 500/hr)' };
+      }
+    }
+    return { checkId: 'NB-011', applied: false, message: 'No JSON config file found' };
   },
 };

@@ -1,5 +1,6 @@
-import type { CheckModule, ScanContext, CheckResult } from '../../core/types.js';
+import type { CheckModule, ScanContext, CheckResult, FixResult } from '../../core/types.js';
 import { getNestedValue } from '../../core/utils.js';
+import { updateTomlFile } from '../../remediation/config-writer.js';
 
 const PUBLIC_URL_PATTERNS = [
   /https?:\/\/github\.com\//,
@@ -62,5 +63,15 @@ export const zc008: CheckModule = {
       fixable: true,
       fixDescription: 'Set skills.open_install=false and restrict skills.sources to trusted private repositories',
     };
+  },
+
+  async fix(ctx: ScanContext): Promise<FixResult> {
+    for (const config of ctx.configs) {
+      if (config.format === 'toml') {
+        await updateTomlFile(config.filePath, 'skills.open_install', false);
+        return { checkId: 'ZC-008', applied: true, message: 'Set skills.open_install=false' };
+      }
+    }
+    return { checkId: 'ZC-008', applied: false, message: 'No TOML config file found' };
   },
 };

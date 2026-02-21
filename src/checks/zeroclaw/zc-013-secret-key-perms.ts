@@ -1,6 +1,7 @@
 import { stat } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { CheckModule, ScanContext, CheckResult } from '../../core/types.js';
+import type { CheckModule, ScanContext, CheckResult, FixResult } from '../../core/types.js';
+import { chmodFile } from '../../remediation/config-writer.js';
 
 export const zc013: CheckModule = {
   id: 'ZC-013',
@@ -39,5 +40,15 @@ export const zc013: CheckModule = {
       fixable: true,
       fixDescription: 'Run: chmod 600 ~/.zeroclaw/.secret_key',
     };
+  },
+
+  async fix(ctx: ScanContext): Promise<FixResult> {
+    const keyPath = join(ctx.installation.installDir, '.secret_key');
+    try {
+      await chmodFile(keyPath, 0o600);
+      return { checkId: 'ZC-013', applied: true, message: 'Set .secret_key permissions to 600' };
+    } catch {
+      return { checkId: 'ZC-013', applied: false, message: 'Failed to set permissions on .secret_key' };
+    }
   },
 };

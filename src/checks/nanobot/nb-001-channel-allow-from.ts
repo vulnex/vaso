@@ -1,4 +1,4 @@
-import type { CheckModule, ScanContext, CheckResult } from '../../core/types.js';
+import type { CheckModule, ScanContext, CheckResult, FixResult } from '../../core/types.js';
 
 export const nb001: CheckModule = {
   id: 'NB-001',
@@ -31,5 +31,9 @@ export const nb001: CheckModule = {
       evidence: evidence.length > 0 ? evidence : undefined,
       fixable: true, fixDescription: 'Add allowed user IDs to channel allowFrom arrays',
     };
+  },
+
+  async fix(_ctx: ScanContext): Promise<FixResult> {
+    return { checkId: 'NB-001', applied: false, message: 'Manual action required: add specific user IDs to the allowFrom array for each channel' };
   },
 };

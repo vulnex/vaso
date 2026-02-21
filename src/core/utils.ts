@@ -34,6 +34,23 @@ export async function getSkillFiles(dir: string): Promise<string[]> {
 }
 
 /**
+ * Set a value at a dot-separated path in a nested object.
+ * Creates intermediate objects as needed.
+ * e.g. setNestedValue({}, 'a.b.c', 1) → { a: { b: { c: 1 } } }
+ */
+export function setNestedValue(obj: Record<string, unknown>, path: string, value: unknown): void {
+  const keys = path.split('.');
+  let current: Record<string, unknown> = obj;
+  for (let i = 0; i < keys.length - 1; i++) {
+    if (!(keys[i] in current) || typeof current[keys[i]] !== 'object' || current[keys[i]] === null) {
+      current[keys[i]] = {};
+    }
+    current = current[keys[i]] as Record<string, unknown>;
+  }
+  current[keys[keys.length - 1]] = value;
+}
+
+/**
  * Check if a path exists (file or directory).
  */
 export async function pathExists(path: string): Promise<boolean> {
