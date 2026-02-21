@@ -11,6 +11,73 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - **Adapter `detect()` signature**: `AgentAdapter.detect()` now returns `Promise<AgentInstallation[]>` instead of `Promise<AgentInstallation | null>`, enabling adapters to report multiple installations (e.g. different users or profiles)
 - **`AdapterRegistry.detectAll()`** accepts optional `DetectOptions` and flatMaps adapter results
 - **NanoClaw/PicoClaw adapters**: updated to new `detect()` signature (return `[]`/`[installation]`)
+- **Shared utilities extracted**: `getNestedValue()` (from 13 files), `getSkillFiles()` (from 10 files), and `pathExists()` (from 3 adapters) consolidated into `src/core/utils.ts` to eliminate duplication
+- **CFG-001 (Gateway Binding)**: now detects IPv6 wildcard binds (`[::]`, `::`) alongside `0.0.0.0`, and checks `server.host` config path for ZeroClaw TOML support
+
+### Added
+
+#### IronClaw Agent Support
+- **IronClaw adapter** (`src/adapters/ironclaw.ts`): detects `~/.ironclaw/` config dir with `.env`, `config.toml`, `settings.json`, `mcp-servers.json`; CLI binary via `~/.cargo/bin/ironclaw` or `which` fallback; gateway extraction from env vars and TOML `[gateway]` section
+- **IC-001** (HTTP Webhook Public Bind): detects `HTTP_HOST=0.0.0.0` default on port 8080 (critical)
+- **IC-002** (No TLS on Listeners): checks all 3 listeners (gateway/webhook/orchestrator) for TLS cert configuration (critical)
+- **IC-003** (Orchestrator Public Bind): detects `ORCHESTRATOR_HOST=0.0.0.0` on gRPC port 50051 (critical)
+- **IC-004** (Missing Gateway Auth Token): flags missing/empty `GATEWAY_AUTH_TOKEN` with ephemeral random fallback (warning)
+- **IC-005** (Sandbox Disabled): detects `SANDBOX_ENABLED=false` in .env or TOML (critical)
+- **IC-006** (Full Access Sandbox Policy): detects `SANDBOX_POLICY=full_access` granting unrestricted system access (critical)
+- **IC-007** (Auto-Approve Tools): detects `AGENT_AUTO_APPROVE_TOOLS=true` bypassing all tool approval prompts (critical)
+- **IC-008** (Local Tools Bypass): detects `ALLOW_LOCAL_TOOLS=true` allowing tool execution outside sandbox (warning)
+- **IC-009** (Secrets Key in .env): detects plaintext `SECRETS_MASTER_KEY` in config files (critical)
+- **IC-010** (Telegram Without Owner ID): flags Telegram enabled without `TELEGRAM_OWNER_ID` restriction (warning)
+- **IC-011** (Broad Sandbox Domains): detects wildcard patterns in `SANDBOX_EXTRA_DOMAINS` (warning)
+- **IC-012** (Docker Auto-Pull No Digest): flags `SANDBOX_AUTO_PULL=true` without `@sha256:` digest pinning (warning)
+
+#### Nanobot Agent Support
+- **Nanobot adapter** (`src/adapters/nanobot.ts`): detects `~/.nanobot/config.json`; skills at `workspace/skills/`; memory files (MEMORY.md, HEARTBEAT.md, SOUL.md); gateway from root `host`/`port` (default `0.0.0.0:18790`); CLI binary via `which` fallback
+- **NB-001** (Empty Channel allowFrom): detects `channels.*.allowFrom: []` with no access control (critical)
+- **NB-002** (Plaintext Secrets): scans config.json for plaintext API keys using `API_KEY_PATTERNS` (critical)
+- **NB-003** (Workspace Sandboxing Off): detects `restrictToWorkspace: false` (default) (warning)
+- **NB-004** (Weak Shell Filtering): flags ExecTool denylist that is missing, empty, or shorter than 5 entries (critical)
+- **NB-005** (No SSRF Protection): detects WebFetchTool without `blockedHosts`/`allowedHosts` restrictions (warning)
+- **NB-006** (Heartbeat Injection Risk): flags writable HEARTBEAT.md executed every 30min (warning)
+- **NB-007** (Memory Prompt Injection): detects MEMORY.md loaded into system prompt — persistent injection vector (critical)
+- **NB-008** (WhatsApp Bridge No Token): flags WhatsApp enabled without `bridge_token` (warning)
+- **NB-009** (Unencrypted Sessions): detects session JSONL files stored without encryption (warning)
+- **NB-010** (Cron Arbitrary Channels): flags cron jobs targeting wildcard channels/recipients (warning)
+- **NB-011** (No Rate Limiting): detects missing rate limiting on channels (warning)
+- **NB-012** (ClawHub via npx): flags skill install via `npx` — supply chain risk (warning)
+
+#### ZeroClaw Agent Support
+- **ZeroClaw adapter** (`src/adapters/zeroclaw.ts`): detects `~/.zeroclaw/` with `config.toml`, `auth-profiles.json`; skills at `workspace/skills/`; CLI binary via `~/.cargo/bin/zeroclaw` or `which`; gateway from TOML `[server]` or `[gateway]` section (default port 3000); credential paths include `.secret_key`
+- **ZC-001** (Plaintext API Keys): detects `secrets.encrypt=false` with API keys in config (critical)
+- **ZC-002** (Legacy XOR Encryption): detects `enc:` prefix values — trivially reversible XOR cipher (critical)
+- **ZC-003** (Public Bind No Tunnel): detects `allow_public_bind=true` + `tunnel.provider=none` (critical)
+- **ZC-004** (Pairing Disabled): detects `require_pairing=false` allowing unauthenticated device connections (warning)
+- **ZC-005** (Full Autonomy Mode): detects `autonomy.level=full` bypassing all approval gates (critical)
+- **ZC-006** (Unrestricted Filesystem): detects `workspace_only=false` allowing access beyond workspace (warning)
+- **ZC-007** (Wildcard Channel Users): detects `"*"` in `allowed_users` for any channel (critical)
+- **ZC-008** (Open Skills Enabled): flags `skills.open_install=true` — supply chain risk via public repos (warning)
+- **ZC-009** (Missing WhatsApp App Secret): detects webhooks accepted without HMAC signature verification (warning)
+- **ZC-010** (Composio Integration): flags 1000+ OAuth apps attack surface when enabled (info)
+- **ZC-011** (Browser No Domain Allowlist): detects browser tool without `allowed_domains` (warning)
+- **ZC-012** (HTTP Tool No Domain Filter): detects HTTP request tool without domain restrictions (warning)
+- **ZC-013** (.secret_key Permissions): checks file mode is 0600; linux/darwin only (critical)
+- **ZC-014** (No OS-Level Sandbox): detects `runtime.kind=native` without Firejail/Bubblewrap/Landlock (warning)
+
+#### Infrastructure
+- **TOML config parsing**: added `smol-toml` dependency; `.toml` format detection, parsing, and fallback in `config-loader.ts`; `'toml'` added to `ParsedConfig.format` union
+- **Type extensions**: `AgentType` union extended with `'ironclaw' | 'nanobot' | 'zeroclaw'`; `CheckCategory` union extended with `'ironclaw' | 'nanobot' | 'zeroclaw'`
+- **Telegram Bot token pattern** added to `API_KEY_PATTERNS` in `src/core/patterns.ts`
+- **`src/core/utils.ts`**: shared `getNestedValue()`, `getSkillFiles()`, `pathExists()` — imported by 23+ check and adapter files
+
+#### Tests & Fixtures
+- 3 adapter unit tests: `ironclaw.test.ts` (9 tests), `nanobot.test.ts` (8 tests), `zeroclaw.test.ts` (8 tests)
+- 3 check unit tests: `ironclaw-checks.test.ts`, `nanobot-checks.test.ts`, `zeroclaw-checks.test.ts`
+- TOML parsing test added to `config-loader.test.ts`
+- Test fixtures for all 3 agents: insecure configs (triggering all agent-specific checks), secure configs, malicious and safe skill directories
+- 3 Dockerfiles: `ironclaw.Dockerfile`, `nanobot.Dockerfile`, `zeroclaw.Dockerfile`
+- 3 integration test suites: `ironclaw.integration.test.ts`, `nanobot.integration.test.ts`, `zeroclaw.integration.test.ts`
+- Test suite now at 249 tests across 24 test files
+- Total security checks: 83 (45 existing + 12 IC + 12 NB + 14 ZC) — all 45 existing checks automatically apply to new agents (no `supportedAgents` filter)
 
 ### Added
 
