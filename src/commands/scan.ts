@@ -22,7 +22,7 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
 
   const scanOptions: ScanOptions = {
     agentFilter: options.agent,
-    format: options.format as 'terminal' | 'json' | 'sarif' | 'markdown',
+    format: options.format as 'terminal' | 'json' | 'sarif' | 'markdown' | 'html',
     saveBaseline: options.saveBaseline,
     diff: options.diff,
     allUsers: options.allUsers,

@@ -56,7 +56,7 @@ program
   .command('scan')
   .description('Scan installed AI agents for security issues')
   .option('-a, --agent <type>', 'scan a specific agent (openclaw, nanoclaw, picoclaw, ironclaw, nanobot, zeroclaw)')
-  .option('-f, --format <format>', 'output format (terminal, json, sarif, markdown)', 'terminal')
+  .option('-f, --format <format>', 'output format (terminal, json, sarif, markdown, html)', 'terminal')
   .option('-o, --output <file>', 'write report to file')
   .option('--save-baseline', 'save scan results as baseline')
   .option('--diff', 'compare against saved baseline')
@@ -106,7 +106,7 @@ const mcpCommand = program
 mcpCommand
   .command('scan')
   .description('Scan MCP server configurations for security issues')
-  .option('-f, --format <format>', 'output format (terminal, json, sarif, markdown)', 'terminal')
+  .option('-f, --format <format>', 'output format (terminal, json, sarif, markdown, html)', 'terminal')
   .option('-o, --output <file>', 'write report to file')
   .option('-p, --path <paths...>', 'specific config file paths to scan')
   .option('--no-color', 'disable colored output')
