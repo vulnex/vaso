@@ -8,6 +8,18 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+#### User Plugin System — `vaso ext`
+- **User plugin loader** (`src/user-plugins/loader.ts`): discovers and loads `.js`/`.mjs` plugins from `~/.vaso/plugins/` drop folder — supports single-file plugins, directory plugins (resolved via `package.json` main → `index.mjs` → `index.js`), and async `register()` functions
+- **Plugin API** (`src/user-plugins/types.ts`): `VasoPlugin` interface (what plugins export), `VasoPluginAPI` (registration hooks for checks, adapters, and reporters), `LoadedPlugin` (internal tracking with path, name, status, error, and registered item lists)
+- **Two-layer error isolation**: outer try/catch around import+register, inner try/catch around each individual registration call — broken plugins log warnings but never crash VASO
+- **`vaso ext list`** command: lists all loaded user plugins with status, registered counts, paths; supports `--format json`
+- **`vaso ext info <name>`** command: shows detail for one plugin including registered checks, adapters, reporters; supports `--format json`
+- **CLI integration**: user plugins load in `preAction` hook after banner, before IOC database init; plugins load after built-in checks so duplicate IDs are caught (built-ins win)
+- Uses `pathToFileURL()` for cross-platform dynamic import, `mod.default ?? mod` for ESM/CJS compatibility — zero new dependencies
+- Hidden files (`.` or `_` prefix) and non-JS files are skipped automatically
+- 15 new tests in `src/user-plugins/loader.test.ts`: empty/nonexistent dirs, valid plugin loading with meta tracking, syntax errors, missing register(), duplicate check IDs (partial load), directory resolution (package.json/index.mjs/index.js), hidden file skipping, async register, thrown errors, getLoadedPlugins caching
+- Test suite now at 470 tests across 41 test files
+
 #### Skill Audit Command — `vaso skill audit <path>`
 - **`vaso skill audit <path>`** command: pre-install single-skill security scanning — point at a local skill directory and get a security report before installing it into an agent framework
 - **`scanSkill()` method** on `ScanEngine` (modeled on `scanMCP()`): creates a synthetic `ScanContext` with `agent: 'skill-audit'`, runs only `skills` + `ioc` category checks against the skill directory
