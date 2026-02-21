@@ -95,6 +95,35 @@ vaso detect --verbose
 
 Terminal output shows each agent's type, version, install directory, config file count, skills directory, and gateway info. JSON output returns the full `AgentInstallation` array.
 
+### `vaso skill audit`
+
+Audit a local skill directory for security issues before installing it into an agent framework. Runs skill code analysis (SKL-*) and IOC matching (IOC-*) checks against the directory.
+
+```
+vaso skill audit <path> [options]
+```
+
+| Option | Description |
+|--------|-------------|
+| `-f, --format <format>` | Output format: `terminal` (default), `json`, `sarif`, `markdown`, `html` |
+| `-o, --output <file>` | Write report to a file instead of stdout |
+| `--no-color` | Disable colored terminal output |
+
+Examples:
+
+```bash
+# Audit a skill before installing
+vaso skill audit ./my-downloaded-skill/
+
+# Generate JSON report
+vaso skill audit ./skills/web-scraper --format json -o audit.json
+
+# Quick check from a CI pipeline
+vaso skill audit ./skills/new-skill && echo "Safe to install"
+```
+
+Exit code 1 is returned if any critical findings are detected. If the path does not exist, is not a directory, or contains no code files, VASO reports the issue and exits without scanning.
+
 ### `vaso fix`
 
 Automatically remediate fixable findings.
@@ -110,13 +139,35 @@ vaso fix [options]
 | `-y, --yes` | Apply all fixes without prompting |
 | `--rollback` | Undo the last fix operation |
 
+When neither `--yes` nor `--dry-run` is set, VASO enters **interactive mode** and prompts for each fixable finding:
+
+```
+  CFG-001 [critical]
+  Gateway bound to 0.0.0.0
+    /home/user/.openclaw/config.json:5
+  Fix: Change gateway host to 127.0.0.1
+  Apply fix? [y]es / [n]o / [a]ll / [q]uit:
+```
+
+| Response | Behavior |
+|----------|----------|
+| `y` / `yes` | Apply this fix |
+| `n` / `no` (default) | Skip this fix |
+| `a` / `all` | Apply this fix and all remaining fixes without prompting |
+| `q` / `quit` | Skip this fix and stop (return results so far) |
+
+In non-interactive environments (CI pipelines, scripts), VASO requires `--yes` to apply fixes. Without it, fixes are skipped with a warning.
+
 Examples:
 
 ```bash
+# Interactive mode — prompted for each fix
+vaso fix
+
 # Preview what would be fixed
 vaso fix --dry-run
 
-# Apply all fixes
+# Apply all fixes without prompting (required in CI)
 vaso fix --yes
 
 # Fix only OpenClaw issues

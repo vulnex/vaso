@@ -48,6 +48,9 @@ npx vitest run --coverage
 | `src/reporting/sarif.test.ts` | SARIF v2.1.0 output structure |
 | `src/reporting/markdown.test.ts` | Markdown table output |
 | `src/commands/detect.test.ts` | Detect command with mocked adapters |
+| `src/commands/skill-audit.test.ts` | Skill audit command (path validation, scan, output) |
+| `src/remediation/prompt.test.ts` | Interactive TUI prompt (y/n/a/q input handling) |
+| `src/remediation/engine.test.ts` | RemediationEngine interactive fix flow |
 
 ### Writing Unit Tests
 

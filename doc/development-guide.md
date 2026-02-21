@@ -42,6 +42,7 @@ src/
     typosquat.ts            Levenshtein distance for typosquatting
   remediation/
     engine.ts               RemediationEngine — backup + fix orchestration
+    prompt.ts               Interactive TUI prompt (y/n/a/q) for per-fix confirmation
   reporting/
     reporter.ts             Reporter interface
     index.ts                Reporter factory + registration
@@ -55,6 +56,7 @@ src/
     fix.ts                  vaso fix handler
     update.ts               vaso update handler
     mcp.ts                  vaso mcp scan/list handler
+    skill-audit.ts          vaso skill audit handler
 ```
 
 ## Scan Engine Flow
@@ -81,6 +83,18 @@ src/
 2. resolveServerSources() resolves local paths to server source code
 3. ScanEngine.scanMCP() builds a ScanContext with mcpConfigs + mcpServerSources
 4. MCP checks (MCP-001 to MCP-010) run against the context
+5. Results are scored, graded, and rendered as with agent scans
+```
+
+### Skill Audit (`vaso skill audit <path>`)
+
+```
+1. Command handler validates path exists and is a directory
+2. getSkillFiles(path) discovers code files (.js/.ts/.py/.sh etc.)
+3. ScanEngine.scanSkill() builds a synthetic ScanContext:
+   — agent: 'skill-audit', installDir/skillsDir: the skill path
+   — configFiles: [] (no configs), skillFiles: discovered files
+4. Only skills + IOC category checks run (config/network/runtime skipped)
 5. Results are scored, graded, and rendered as with agent scans
 ```
 
