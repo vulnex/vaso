@@ -137,4 +137,37 @@ mcpCommand
     await runMCPList(options);
   });
 
+const pluginCommand = program
+  .command('plugin')
+  .description('Manage agent security plugins');
+
+pluginCommand
+  .command('install')
+  .description('Install VASO security plugin for an agent framework')
+  .requiredOption('-a, --agent <type>', 'agent framework (openclaw, nanoclaw, picoclaw)')
+  .option('--force', 'overwrite existing plugin')
+  .action(async (options) => {
+    const { runPluginInstall } = await import('./commands/plugin.js');
+    await runPluginInstall(options);
+  });
+
+pluginCommand
+  .command('uninstall')
+  .description('Uninstall VASO security plugin for an agent framework')
+  .requiredOption('-a, --agent <type>', 'agent framework (openclaw, nanoclaw, picoclaw)')
+  .action(async (options) => {
+    const { runPluginUninstall } = await import('./commands/plugin.js');
+    await runPluginUninstall(options);
+  });
+
+pluginCommand
+  .command('status')
+  .description('Show plugin installation status')
+  .option('-a, --agent <type>', 'check a specific agent only')
+  .option('-f, --format <format>', 'output format (terminal, json)', 'terminal')
+  .action(async (options) => {
+    const { runPluginStatus } = await import('./commands/plugin.js');
+    await runPluginStatus(options);
+  });
+
 program.parse();
