@@ -6,6 +6,58 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+#### Remediation Engine — `vaso fix` Now Works
+- **Config writer utilities** (`src/remediation/config-writer.ts`): `updateEnvFile()`, `updateJsonFile()`, `updateYamlFile()`, `updateTomlFile()`, `chmodFile()`, and `updateConfigValue()` dispatcher — handles all 4 config formats with comment/indentation preservation
+- **`setNestedValue()`** in `src/core/utils.ts`: write counterpart to `getNestedValue()`, creates intermediate objects as needed
+- **Rollback support** (`src/remediation/rollback.ts`): restores files from `~/.vaso/backups/` by timestamp; `vaso fix --rollback` now functional (previously printed "not implemented yet")
+- **42 `fix()` methods** across all fixable checks:
+
+  **IronClaw (12 checks)** — 8 automatable, 4 guidance-only:
+  - IC-001: `HTTP_HOST=127.0.0.1`
+  - IC-003: `ORCHESTRATOR_HOST=127.0.0.1`
+  - IC-004: generates random 32-byte hex `GATEWAY_AUTH_TOKEN`
+  - IC-005: `SANDBOX_ENABLED=true`
+  - IC-006: `SANDBOX_POLICY=restricted`
+  - IC-007: `AGENT_AUTO_APPROVE_TOOLS=false`
+  - IC-008: `ALLOW_LOCAL_TOOLS=false`
+  - IC-012: `SANDBOX_AUTO_PULL=false`
+  - IC-002, IC-009, IC-010, IC-011: return manual action guidance
+
+  **Config (7 checks)** — 6 automatable, 1 file permission:
+  - CFG-001: `gateway.host=127.0.0.1`
+  - CFG-005: adds `safeBins` allowlist with 8 safe defaults
+  - CFG-008: `sandbox=true`
+  - CFG-010: adds `rateLimit` (60 req/min)
+  - CFG-012: `auth.bypass=false`
+  - CFG-013: `dm.policy=restricted`
+  - CFG-003: `chmod 600` on all overly-permissive config files
+
+  **Nanobot (10 checks)** — 5 automatable, 5 guidance-only:
+  - NB-003: `restrictToWorkspace=true`
+  - NB-004: adds 13-entry ExecTool `denyList` (rm, curl, wget, etc.)
+  - NB-005: adds SSRF-blocking `blockedHosts` (localhost, private IPs, metadata endpoint)
+  - NB-009: `sessions.encryption=true`
+  - NB-011: adds `rateLimit` (30/min, 500/hr)
+  - NB-001, NB-002, NB-008, NB-010, NB-012: return manual action guidance
+
+  **ZeroClaw (13 checks)** — 7 automatable, 1 file permission, 5 guidance-only:
+  - ZC-001: `secrets.encrypt=true`
+  - ZC-003: `security.allow_public_bind=false`
+  - ZC-004: `require_pairing=true`
+  - ZC-005: `autonomy.level=supervised`
+  - ZC-006: `workspace_only=true`
+  - ZC-008: `skills.open_install=false`
+  - ZC-014: `runtime.sandbox=firejail`
+  - ZC-013: `chmod 600` on `.secret_key`
+  - ZC-002, ZC-007, ZC-009, ZC-011, ZC-012: return manual action guidance
+
+#### Tests
+- `src/remediation/config-writer.test.ts`: 16 tests covering all 5 writer functions, format preservation, and dispatcher routing
+- `src/remediation/remediation.test.ts`: 17 integration tests — end-to-end fix→verify cycles for representative checks from each agent category, guidance-only checks, file permissions, and rollback
+- Test suite now at 282 tests across 26 test files
+
 ### Changed
 
 - **Adapter `detect()` signature**: `AgentAdapter.detect()` now returns `Promise<AgentInstallation[]>` instead of `Promise<AgentInstallation | null>`, enabling adapters to report multiple installations (e.g. different users or profiles)
