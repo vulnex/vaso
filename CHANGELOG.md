@@ -8,6 +8,34 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+#### Missing Design-Spec Checks (11 new checks, 1 new category)
+- **SKL-011** (Dependency Audit): checks skill `package.json` deps against known malicious packages (`event-stream`, `flatmap-stream`, etc.) and malicious publishers; warns on missing lockfile (warning)
+- **SKL-012** (Code Complexity): cyclomatic complexity per function via Babel AST traversal; flags functions exceeding threshold of 15 decision points (info)
+- **IOC-007** (Binary Pattern Match): YARA-like byte/regex patterns on skill files — detects embedded ELF, Mach-O 64/32-bit, PE/DOS binaries, NUL-padding shellcode markers, and packed JS eval wrappers (critical)
+- **IOC-008** (VirusTotal Cross-Reference): SHA-256 hashes skill files and checks against VirusTotal API; opt-in via `VIRUSTOTAL_API_KEY` env var, passes gracefully when no key is set (critical)
+- **NET-005** (Active Connection Monitoring): parses `netstat`/`ss` output for ESTABLISHED connections and cross-references IPs against C2 database; darwin/linux only (critical)
+- **RUN-005** (Process Ancestry Analysis): walks PPID chain (max 5 levels) for agent processes, flags suspicious parents like `curl`, `wget`, `nc`, `python`, `bash -c`; darwin/linux only (warning)
+- **POL-001** (Exec Approval Required): verifies tool execution requires user approval — detects `auto_approve: true`, `execApproval: false`, and `AGENT_AUTO_APPROVE_TOOLS` env var (warning)
+- **POL-002** (Log Redaction): verifies logging has secret redaction configured when logging is enabled (warning)
+- **POL-003** (Session Credential Permissions): `stat()` on session/token/auth/credential files for 0600 permissions; darwin/linux only (warning)
+- **POL-004** (Sandbox Policy Enforcement): when sandbox is enabled, verifies it has ≥2 substantive constraints (exec, filesystem, network restrictions) (warning)
+- **POL-005** (Plaintext Credential Files): scans `.npmrc`, `.netrc`, `.pgpass`, `.my.cnf`, `.s3cfg`, `credentials`, `secrets.txt`, `.boto`, `.pypirc`, `.authinfo` against `API_KEY_PATTERNS` (critical)
+- **`binaryPatterns`** field added to `IOCDatabase` interface with 6 seed patterns (ELF, Mach-O 64-bit, Mach-O 32-bit, PE/DOS, NUL shellcode, packed JS)
+- **`policy`** check category added — `src/checks/policy/` with 5 checks and barrel index
+- 34 new tests: `skill-checks.test.ts` (7), `ioc-checks.test.ts` (6), `network-checks.test.ts` (2), `runtime-checks.test.ts` (3), `policy-checks.test.ts` (16)
+- Test suite now at 341 tests across 34 test files
+- Total security checks: 98
+
+#### HTML Output Format
+- **HTML reporter** (`src/reporting/html.ts`): self-contained, browser-viewable scan report with all CSS inlined — no external dependencies or JavaScript frameworks required
+- Color-coded severity badges (critical=#dc2626, warning=#d97706, info=#2563eb), grade-colored score display (A/B=green, C=amber, D/F=red), summary cards row, per-agent findings tables with striped rows, passed checks lists, and evidence file:line references
+- Responsive layout using CSS grid — works on mobile (collapses to 2-column cards and single-column passed lists at 600px)
+- XSS-safe HTML escaping for all user-controlled content (messages, evidence, config values)
+- `--format html` available on `vaso scan` and `vaso mcp scan` commands
+- `'html'` added to `OutputFormat` type union
+- 11 tests in `src/reporting/html.test.ts`: HTML structure, content rendering, severity labels, agent name display, evidence rendering, HTML escaping, empty agents, fixable indication, metadata, format property
+- Test suite now at 307 tests across 29 test files
+
 #### Per-Agent Scanning for OpenClaw Multi-Agent Installations
 - **`agentName`** and **`skillsDirs`** fields added to `AgentInstallation` — `agentName` identifies sub-agent definitions (e.g. `"researcher"`, `"coder"`), `skillsDirs` supports multiple skill directories (shared + per-agent)
 - **OpenClaw adapter** now discovers `agents/` subdirectories within each installation: for each sub-agent, loads agent-specific configs (`agent.yaml`, `agent.json`, `config.yaml`, `config.json`, `.env`), deep-merges with global config (agent overrides global), and emits a separate `AgentInstallation` with merged configs and combined skill directories
