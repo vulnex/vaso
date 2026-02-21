@@ -7,3 +7,4 @@ coverage/
 .env
 .env.local
 devnotes/
+feed-signing-key.pem

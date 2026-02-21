@@ -120,23 +120,54 @@ const TRUSTED_MCP_PACKAGES = [
 ];
 
 let _db: IOCDatabase | null = null;
+let _initialized = false;
+
+export function buildBundledDatabase(): IOCDatabase {
+  return {
+    c2Ips: [...C2_IPS],
+    maliciousDomains: [...MALICIOUS_DOMAINS],
+    fileHashes: [...FILE_HASHES],
+    maliciousPublishers: [...MALICIOUS_PUBLISHERS],
+    maliciousSkillPatterns: [...MALICIOUS_SKILL_PATTERNS],
+    trustedSkillNames: [...TRUSTED_SKILL_NAMES],
+    trustedMCPPackages: [...TRUSTED_MCP_PACKAGES],
+    binaryPatterns: [...BINARY_PATTERNS],
+  };
+}
+
+/**
+ * Initialize the IOC database by loading any cached feed and merging
+ * with bundled data. Call once at startup. Safe to call multiple times
+ * (idempotent after first call unless reloadIOCDatabase() is called).
+ */
+export async function initIOCDatabase(): Promise<void> {
+  if (_initialized) return;
+
+  const bundled = buildBundledDatabase();
+
+  try {
+    const { loadCachedFeed, mergeFeedIntoDatabase } = await import('./updater.js');
+    const feedData = await loadCachedFeed();
+    if (feedData) {
+      _db = mergeFeedIntoDatabase(bundled, feedData);
+    } else {
+      _db = bundled;
+    }
+  } catch {
+    _db = bundled;
+  }
+
+  _initialized = true;
+}
 
 export function getIOCDatabase(): IOCDatabase {
   if (!_db) {
-    _db = {
-      c2Ips: [...C2_IPS],
-      maliciousDomains: [...MALICIOUS_DOMAINS],
-      fileHashes: [...FILE_HASHES],
-      maliciousPublishers: [...MALICIOUS_PUBLISHERS],
-      maliciousSkillPatterns: [...MALICIOUS_SKILL_PATTERNS],
-      trustedSkillNames: [...TRUSTED_SKILL_NAMES],
-      trustedMCPPackages: [...TRUSTED_MCP_PACKAGES],
-      binaryPatterns: [...BINARY_PATTERNS],
-    };
+    _db = buildBundledDatabase();
   }
   return _db;
 }
 
 export function reloadIOCDatabase(): void {
   _db = null;
+  _initialized = false;
 }

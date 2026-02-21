@@ -8,6 +8,8 @@ import { ironclawAdapter } from './adapters/ironclaw.js';
 import { nanobotAdapter } from './adapters/nanobot.js';
 import { zeroclawAdapter } from './adapters/zeroclaw.js';
 import { registerAllChecks } from './checks/index.js';
+import { initIOCDatabase } from './ioc/database.js';
+import { isFeedStale } from './ioc/updater.js';
 
 const VERSION = '0.1.0';
 
@@ -41,8 +43,16 @@ program
   .name('vaso')
   .description('VULNEX Agent Security Observer — security scanner for AI agent deployments')
   .version(VERSION, '-v, --version')
-  .hook('preAction', () => {
+  .hook('preAction', async (thisCommand) => {
     printBanner();
+    await initIOCDatabase();
+
+    // Warn about stale feed for non-update commands
+    if (thisCommand.name() !== 'update' && isFeedStale()) {
+      console.log(
+        chalk.yellow('  IOC feed is stale or missing. Run `vaso update` for latest threat data.\n'),
+      );
+    }
   });
 
 // Show banner on help
@@ -93,10 +103,12 @@ program
 
 program
   .command('update')
-  .description('Update IOC database')
-  .action(async () => {
+  .description('Update IOC database from remote threat feed')
+  .option('--url <url>', 'custom feed URL')
+  .option('--force', 'force update even if feed is not stale')
+  .action(async (options) => {
     const { runUpdate } = await import('./commands/update.js');
-    await runUpdate();
+    await runUpdate(options);
   });
 
 const mcpCommand = program
