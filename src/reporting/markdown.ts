@@ -32,7 +32,10 @@ export class MarkdownReporter implements Reporter {
     lines.push('');
 
     for (const agent of result.agents) {
-      lines.push(`## ${agent.agent} (Score: ${agent.score}, Grade: ${agent.grade})`);
+      const agentLabel = agent.installation.agentName
+        ? `${agent.agent} (agent: ${agent.installation.agentName})`
+        : agent.agent;
+      lines.push(`## ${agentLabel} (Score: ${agent.score}, Grade: ${agent.grade})`);
       lines.push('');
 
       const failed = agent.results.filter(r => !r.passed);

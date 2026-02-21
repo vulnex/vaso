@@ -51,10 +51,12 @@ export interface GatewayInfo {
 
 export interface AgentInstallation {
   agent: AgentType;
+  agentName?: string;
   version?: string;
   installDir: string;
   configFiles: ParsedConfig[];
   skillsDir?: string;
+  skillsDirs?: string[];
   gateway?: GatewayInfo;
   profile?: string;
   user?: string;

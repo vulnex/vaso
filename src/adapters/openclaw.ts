@@ -5,6 +5,7 @@ import { execFileSync } from 'node:child_process';
 import type { AgentAdapter, DetectOptions } from './adapter.js';
 import type { AgentInstallation, GatewayInfo } from '../core/types.js';
 import { loadConfig } from '../core/config-loader.js';
+import { deepMerge } from '../core/utils.js';
 
 const CONFIG_FILENAMES = [
   'openclaw.json',
@@ -25,6 +26,10 @@ const USER_CLI_RELATIVE_PATHS = [
   '.local/bin/openclaw',
   '.nvm/current/bin/openclaw',
   'bin/openclaw',
+];
+
+const AGENT_CONFIG_FILENAMES = [
+  'agent.yaml', 'agent.json', 'config.yaml', 'config.json', '.env',
 ];
 
 const APP_BUNDLE_PATH = '/Applications/OpenClaw.app';
@@ -178,7 +183,7 @@ export const openclawAdapter: AgentAdapter = {
           Object.assign(merged, c.data);
         }
 
-        installations.push({
+        const globalInstallation: AgentInstallation = {
           agent: 'openclaw',
           version,
           installDir: dir,
@@ -189,7 +194,66 @@ export const openclawAdapter: AgentAdapter = {
           user: options?.allUsers ? user : undefined,
           appBundle,
           cliBinary,
-        });
+        };
+        installations.push(globalInstallation);
+
+        // Discover per-agent subdirectories
+        const agentsDir = join(dir, 'agents');
+        if (await pathExists(agentsDir)) {
+          try {
+            const agentEntries = await readdir(agentsDir, { withFileTypes: true });
+            for (const entry of agentEntries) {
+              if (!entry.isDirectory()) continue;
+              const agentSubDir = join(agentsDir, entry.name);
+
+              // Load agent-specific config files
+              const agentConfigFiles = [];
+              for (const filename of AGENT_CONFIG_FILENAMES) {
+                const filePath = join(agentSubDir, filename);
+                try {
+                  const config = await loadConfig(filePath);
+                  agentConfigFiles.push(config);
+                } catch {
+                  // File doesn't exist or can't be parsed
+                }
+              }
+
+              // Merge global config data with agent-specific data
+              let agentMerged = { ...merged };
+              for (const c of agentConfigFiles) {
+                agentMerged = deepMerge(agentMerged, c.data) as Record<string, unknown>;
+              }
+
+              // Build skillsDirs: shared + per-agent
+              const agentSkillsDirs: string[] = [];
+              if (skillsDir && await pathExists(skillsDir)) {
+                agentSkillsDirs.push(skillsDir);
+              }
+              const agentSkillsDir = join(agentSubDir, 'skills');
+              if (await pathExists(agentSkillsDir)) {
+                agentSkillsDirs.push(agentSkillsDir);
+              }
+
+              installations.push({
+                agent: 'openclaw',
+                agentName: entry.name,
+                version,
+                installDir: agentSubDir,
+                configFiles: [...configFiles, ...agentConfigFiles],
+                skillsDir: agentSkillsDirs.length > 0 ? agentSkillsDirs[agentSkillsDirs.length - 1] : undefined,
+                skillsDirs: agentSkillsDirs.length > 0 ? agentSkillsDirs : undefined,
+                gateway: this.getGatewayInfo(agentMerged),
+                profile,
+                user: options?.allUsers ? user : undefined,
+                appBundle,
+                cliBinary,
+              });
+            }
+          } catch {
+            // agents/ directory not readable
+          }
+        }
+
         foundForUser = true;
       }
 

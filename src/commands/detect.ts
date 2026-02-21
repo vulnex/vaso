@@ -61,12 +61,16 @@ function renderTerminal(installations: AgentInstallation[], verbose?: boolean): 
     // Build header with user/profile info
     const headerParts: string[] = [inst.agent];
     if (inst.user) headerParts.push(`user: ${inst.user}`);
+    if (inst.agentName) headerParts.push(`agent: ${inst.agentName}`);
     if (inst.profile) headerParts.push(`profile: ${inst.profile}`);
     const header = headerParts.length > 1
       ? `${headerParts[0]} (${headerParts.slice(1).join(', ')})`
       : headerParts[0];
 
     console.log(chalk.bold.cyan(header));
+    if (inst.agentName) {
+      console.log(`  ${'Agent name:'.padEnd(14)} ${inst.agentName}`);
+    }
     console.log(`  ${'Version:'.padEnd(14)} ${inst.version ?? chalk.dim('unknown')}`);
     console.log(`  ${'Install dir:'.padEnd(14)} ${inst.installDir}`);
     console.log(`  ${'Config files:'.padEnd(14)} ${inst.configFiles.length}`);
@@ -94,5 +98,10 @@ function renderTerminal(installations: AgentInstallation[], verbose?: boolean): 
     console.log('');
   }
 
-  console.log(chalk.bold(`Found ${installations.length} agent(s).`));
+  const subAgents = installations.filter(i => i.agentName);
+  if (subAgents.length > 0) {
+    console.log(chalk.bold(`Found ${installations.length} agent(s) (${subAgents.length} sub-agent definitions).`));
+  } else {
+    console.log(chalk.bold(`Found ${installations.length} agent(s).`));
+  }
 }

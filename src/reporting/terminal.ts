@@ -34,6 +34,7 @@ export class TerminalReporter implements Reporter {
       const inst = agent.installation;
       const headerParts: string[] = [agent.agent];
       if (inst.user) headerParts.push(`user: ${inst.user}`);
+      if (inst.agentName) headerParts.push(`agent: ${inst.agentName}`);
       if (inst.profile) headerParts.push(`profile: ${inst.profile}`);
       const agentHeader = headerParts.length > 1
         ? `${headerParts[0]} (${headerParts.slice(1).join(', ')})`

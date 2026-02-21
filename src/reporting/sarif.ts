@@ -77,6 +77,9 @@ export class SarifReporter implements Reporter {
           level: SARIF_SEVERITY_MAP[check.severity],
           message: { text: check.message },
           locations: [],
+          ...(agent.installation.agentName ? {
+            properties: { agentName: agent.installation.agentName },
+          } : {}),
         };
 
         if (check.evidence) {
