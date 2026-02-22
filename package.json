@@ -36,10 +36,17 @@
   "engines": {
     "node": ">=18.0.0"
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vulnex/vaso.git"
+  },
+  "homepage": "https://github.com/vulnex/vaso",
+  "bugs": {
+    "url": "https://github.com/vulnex/vaso/issues"
+  },
   "files": [
     "dist",
     "bin",
-    "ioc",
     "LICENSE",
     "README.md"
   ],
