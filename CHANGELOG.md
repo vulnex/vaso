@@ -8,6 +8,24 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+#### Hybrid E2E Test Suite — Agent Fixtures + Real MCP Servers
+- **34 local end-to-end tests** across 5 test files in `testing/e2e/` — exercises the full CLI as a child process against realistic agent installations, no Docker required
+- **Fixture installation engine** (`testing/e2e/helpers/setup.ts`): creates temporary HOME directories with agent fixtures copied from `testing/fixtures/`, rewriting NanoClaw `NANOCLAW_HOME` paths and setting file permissions to simulate insecure/secure scenarios; supports all 6 agents (OpenClaw, NanoClaw, PicoClaw, IronClaw, Nanobot, ZeroClaw)
+- **CLI runner** (`testing/e2e/helpers/cli-runner.ts`): spawns `node dist/cli.js` as a child process with custom `HOME` env; exports `runVasoCLI()` (raw output), `runVasoJSON()` (parsed `ScanResult`), and `runVasoJSONArray()` (for `vaso detect --format json`); brace-matching JSON extraction reused from integration helpers
+- **MCP config generator** (`testing/e2e/helpers/mcp-config.ts`): resolves real installed MCP server package entry points via `createRequire()`, generates `claude_desktop_config.json` with optional insecure entries and vulnerable server source paths
+- **`detect.e2e.test.ts`** (4 tests): all 6 agents discovered, `--agent` filtering, terminal output validation, installDir path verification
+- **`scan.e2e.test.ts`** (15 tests): full scan across all 6 agents, cross-agent checks (CFG-001, CFG-008), agent-specific checks (IC-005, ZC-001), agent filter, secure vs insecure score comparison
+- **`mcp-scan.e2e.test.ts`** (8 tests): MCP scan with insecure entries (MCP-002, MCP-003), vulnerable server source analysis (MCP-004, MCP-005, MCP-006), clean packages score comparison
+- **`mcp-list.e2e.test.ts`** (2 tests): terminal and JSON MCP server listing with 4 real packages
+- **`output-formats.e2e.test.ts`** (5 tests): JSON, SARIF, markdown, HTML, and terminal format validation
+- **Global setup/teardown**: ensures `dist/cli.js` is built before tests; cleans leftover `vaso-e2e-*` temp dirs after
+- **Parallel-safe**: each test creates its own temp HOME passed via env to child processes — no global state mutation
+- **4 MCP server devDependencies**: `@modelcontextprotocol/server-filesystem`, `server-memory`, `server-everything`, `server-sequential-thinking`
+- **`glob` devDependency** for recursive file permission setting in fixture setup
+- **npm scripts**: `test:e2e` runs E2E suite; `test:all` updated to `vitest run && npm run test:e2e && npm run test:integration` (speed order: unit → e2e → Docker)
+- Separate vitest config (`testing/vitest.config.e2e.ts`) with 60s test timeout, 120s hook timeout
+- Test suite now at 474 unit tests + 34 e2e tests across 45 test files
+
 #### Example User Plugins
 - **4 example plugins** in `examples/plugins/` demonstrating the full `VasoPluginAPI` surface — copy to `~/.vaso/plugins/` to use
 - **`env-hygiene-check.mjs`** (simple): `api.registerCheck()` — registers USR-001 (warning) that detects development/debug environment patterns in agent configs (NODE_ENV=development, DEBUG=true, localhost references, private IPs); scans both parsed config data (structured walk) and raw text (line-by-line)
