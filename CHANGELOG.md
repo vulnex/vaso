@@ -8,6 +8,14 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+#### Example User Plugins
+- **4 example plugins** in `examples/plugins/` demonstrating the full `VasoPluginAPI` surface — copy to `~/.vaso/plugins/` to use
+- **`env-hygiene-check.mjs`** (simple): `api.registerCheck()` — registers USR-001 (warning) that detects development/debug environment patterns in agent configs (NODE_ENV=development, DEBUG=true, localhost references, private IPs); scans both parsed config data (structured walk) and raw text (line-by-line)
+- **`csv-reporter.mjs`** (simple): `api.registerReporter()` — registers `csv` output format for `vaso scan --format csv`; RFC 4180-compliant with header row, one row per evidence item (denormalized), summary row with score/grade, proper field escaping
+- **`compliance-audit-checks.mjs`** (medium): `api.registerChecks()` — batch-registers 3 compliance checks (USR-010 audit logging/critical, USR-011 log rotation/warning, USR-012 data retention/warning); USR-010 includes `fix()` method returning remediation guidance; shared `findInConfigs()` helper avoids duplication
+- **`custom-agent-adapter.mjs`** (advanced): all three APIs in one plugin — registers a ToolForge agent adapter (`api.registerAdapter()`), an agent-scoped sandbox check USR-020 (`supportedAgents: ['toolforge']`), and a `summary-line` CI/CD reporter (`VASO: 85/100 (B) | 0 critical, 2 warning, 1 info | openclaw`)
+- **`examples/plugins/README.md`**: installation instructions, API overview, `USR-` check ID convention
+
 #### MCP OAuth 2.1 Security Checks (MCP-011 through MCP-018)
 - **MCP-011** (OAuth Endpoint HTTPS): detects HTTP authorization/token endpoint URLs in config env blocks and source code; exempts localhost/127.0.0.1/[::1] for local development (critical)
 - **MCP-012** (OAuth Client Secret Exposure): detects plaintext `client_secret`, `access_token`, `refresh_token` in env blocks via key name patterns, value patterns (Google OAuth, JWT, Ory tokens), and Shannon entropy analysis (>4.5 bits); masks values in evidence (critical)
