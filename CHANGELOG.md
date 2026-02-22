@@ -8,6 +8,21 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+#### MCP OAuth 2.1 Security Checks (MCP-011 through MCP-018)
+- **MCP-011** (OAuth Endpoint HTTPS): detects HTTP authorization/token endpoint URLs in config env blocks and source code; exempts localhost/127.0.0.1/[::1] for local development (critical)
+- **MCP-012** (OAuth Client Secret Exposure): detects plaintext `client_secret`, `access_token`, `refresh_token` in env blocks via key name patterns, value patterns (Google OAuth, JWT, Ory tokens), and Shannon entropy analysis (>4.5 bits); masks values in evidence (critical)
+- **MCP-013** (Missing PKCE): detects OAuth authorization flows without `code_challenge`/`code_verifier` parameters and flags `code_challenge_method: "plain"` (must be S256); uses ±15 line radius for context-aware detection (critical)
+- **MCP-014** (Insecure Token Storage): detects tokens in `console.log`, `localStorage`/`sessionStorage`, `writeFile`, URL query parameters, and string concatenation into URLs (critical)
+- **MCP-015** (Token Passthrough): detects MCP servers forwarding received authorization headers or context tokens to downstream API calls — confused deputy risk (critical)
+- **MCP-016** (Insecure Redirect URI): detects HTTP redirect/callback URIs in config and source, wildcard redirect patterns, and user-controlled redirect targets via `req.query`/`req.params` (warning)
+- **MCP-017** (Overly Broad OAuth Scopes): detects wildcard (`*`), `admin`, `root`, `full_access` scopes in config and source; flags excessive scope counts (>10 individual scopes) (warning)
+- **MCP-018** (Missing State Parameter): detects OAuth authorization URL construction without `state` parameter, hardcoded/static state values, and callback handlers that don't verify state; distinguishes config constants from active URL construction (warning)
+- `OAUTH_SECRET_PATTERNS` and `OAUTH_TOKEN_VALUE_PATTERNS` added to `src/core/patterns.ts` for reuse across OAuth checks
+- Test fixtures: `vulnerable-oauth-server/index.js` (exhibits all 8 anti-patterns), `safe-oauth-server/index.js` (PKCE S256, dynamic state, encrypted storage, service credentials for downstream)
+- 19 new tests covering all 8 checks (fail/pass cases + edge cases for localhost exception, plain PKCE, small scope sets)
+- Test suite now at 474 tests across 40 test files
+- Total MCP checks: 18 (MCP-001 through MCP-018)
+
 #### User Plugin System — `vaso ext`
 - **User plugin loader** (`src/user-plugins/loader.ts`): discovers and loads `.js`/`.mjs` plugins from `~/.vaso/plugins/` drop folder — supports single-file plugins, directory plugins (resolved via `package.json` main → `index.mjs` → `index.js`), and async `register()` functions
 - **Plugin API** (`src/user-plugins/types.ts`): `VasoPlugin` interface (what plugins export), `VasoPluginAPI` (registration hooks for checks, adapters, and reporters), `LoadedPlugin` (internal tracking with path, name, status, error, and registered item lists)
