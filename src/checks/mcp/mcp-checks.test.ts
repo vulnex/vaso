@@ -13,6 +13,14 @@ import { mcp007 } from './mcp-007-prompt-injection.js';
 import { mcp008 } from './mcp-008-server-provenance.js';
 import { mcp009 } from './mcp-009-permission-scope.js';
 import { mcp010 } from './mcp-010-rug-pull-risk.js';
+import { mcp011 } from './mcp-011-oauth-endpoint-https.js';
+import { mcp012 } from './mcp-012-oauth-client-secret-exposure.js';
+import { mcp013 } from './mcp-013-missing-pkce.js';
+import { mcp014 } from './mcp-014-insecure-token-storage.js';
+import { mcp015 } from './mcp-015-token-passthrough.js';
+import { mcp016 } from './mcp-016-insecure-redirect-uri.js';
+import { mcp017 } from './mcp-017-overly-broad-scopes.js';
+import { mcp018 } from './mcp-018-missing-state-parameter.js';
 
 const FIXTURES = join(__dirname, '../../../testing/fixtures/mcp');
 
@@ -22,6 +30,14 @@ const vulnerableSource = readFileSync(
 );
 const safeSource = readFileSync(
   join(FIXTURES, 'mcp-server-source/safe-server/index.js'),
+  'utf-8',
+);
+const vulnerableOAuthSource = readFileSync(
+  join(FIXTURES, 'mcp-server-source/vulnerable-oauth-server/index.js'),
+  'utf-8',
+);
+const safeOAuthSource = readFileSync(
+  join(FIXTURES, 'mcp-server-source/safe-oauth-server/index.js'),
   'utf-8',
 );
 
@@ -124,6 +140,69 @@ const safeSources: MCPServerSource[] = [
     serverName: 'safe-server',
     localPath: join(FIXTURES, 'mcp-server-source/safe-server/index.js'),
     sourceCode: safeSource,
+  },
+];
+
+// --- OAuth-specific config fixtures ---
+const insecureOAuthConfigs: MCPConfig[] = [
+  {
+    source: 'Claude Desktop',
+    filePath: join(FIXTURES, 'insecure/claude_desktop_config.json'),
+    servers: [
+      {
+        name: 'oauth-server',
+        command: 'node',
+        args: ['oauth-server.js'],
+        env: {
+          OAUTH_TOKEN_ENDPOINT: 'http://auth.example.com/oauth/token',
+          AUTH_URL: 'http://auth.example.com/authorize',
+          CLIENT_SECRET: 'super-secret-client-value-abc123xyz789',
+          REFRESH_TOKEN: 'eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.fakesig',
+          OAUTH_REDIRECT_URI: 'http://myapp.example.com/callback',
+          OAUTH_SCOPE: '*',
+        },
+        transport: 'stdio',
+      },
+    ],
+  },
+];
+
+const secureOAuthConfigs: MCPConfig[] = [
+  {
+    source: 'Claude Desktop',
+    filePath: join(FIXTURES, 'secure/claude_desktop_config.json'),
+    servers: [
+      {
+        name: 'oauth-server',
+        command: 'node',
+        args: ['oauth-server.js'],
+        env: {
+          OAUTH_TOKEN_ENDPOINT: 'https://auth.example.com/oauth/token',
+          AUTH_URL: 'https://auth.example.com/authorize',
+          CLIENT_SECRET: '${CLIENT_SECRET}',
+          REFRESH_TOKEN: '${REFRESH_TOKEN}',
+          OAUTH_REDIRECT_URI: 'https://myapp.example.com/callback',
+          OAUTH_SCOPE: 'read:data write:own',
+        },
+        transport: 'stdio',
+      },
+    ],
+  },
+];
+
+const vulnerableOAuthSources: MCPServerSource[] = [
+  {
+    serverName: 'oauth-server',
+    localPath: join(FIXTURES, 'mcp-server-source/vulnerable-oauth-server/index.js'),
+    sourceCode: vulnerableOAuthSource,
+  },
+];
+
+const safeOAuthSources: MCPServerSource[] = [
+  {
+    serverName: 'oauth-server',
+    localPath: join(FIXTURES, 'mcp-server-source/safe-oauth-server/index.js'),
+    sourceCode: safeOAuthSource,
   },
 ];
 
@@ -396,6 +475,281 @@ describe('MCP-010: Rug Pull Risk', () => {
     console.log(`[MCP-010] pinned → passed: ${result.passed}`);
 
     // secure configs use @1.2.0 and @0.5.1 version pins
+    expect(result.passed).toBe(true);
+  });
+});
+
+// ==================== MCP-011: OAuth Endpoint HTTPS ====================
+describe('MCP-011: OAuth Endpoint HTTPS', () => {
+  it('detects HTTP OAuth endpoints in config and source', async () => {
+    const ctx = makeContext({ mcpConfigs: insecureOAuthConfigs, mcpServerSources: vulnerableOAuthSources });
+    const result = await mcp011.run(ctx);
+
+    console.log(`[MCP-011] insecure → passed: ${result.passed}, evidence: ${result.evidence?.length ?? 0}`);
+    for (const e of result.evidence ?? []) {
+      console.log(`  ${e.detail}`);
+    }
+
+    expect(result.passed).toBe(false);
+    expect(result.severity).toBe('critical');
+    expect(result.evidence!.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('passes for HTTPS OAuth endpoints', async () => {
+    const ctx = makeContext({ mcpConfigs: secureOAuthConfigs, mcpServerSources: safeOAuthSources });
+    const result = await mcp011.run(ctx);
+
+    console.log(`[MCP-011] secure → passed: ${result.passed}`);
+
+    expect(result.passed).toBe(true);
+  });
+
+  it('allows HTTP localhost as exception', async () => {
+    const localhostConfigs: MCPConfig[] = [
+      {
+        source: 'Test',
+        filePath: '/tmp/test.json',
+        servers: [{
+          name: 'local-dev',
+          command: 'node',
+          args: ['server.js'],
+          env: { OAUTH_TOKEN_ENDPOINT: 'http://localhost:8080/oauth/token' },
+          transport: 'stdio',
+        }],
+      },
+    ];
+
+    const ctx = makeContext({ mcpConfigs: localhostConfigs });
+    const result = await mcp011.run(ctx);
+
+    console.log(`[MCP-011] localhost → passed: ${result.passed}`);
+
+    expect(result.passed).toBe(true);
+  });
+});
+
+// ==================== MCP-012: OAuth Client Secret Exposure ====================
+describe('MCP-012: OAuth Client Secret Exposure', () => {
+  it('detects plaintext OAuth secrets in env blocks', async () => {
+    const ctx = makeContext({ mcpConfigs: insecureOAuthConfigs });
+    const result = await mcp012.run(ctx);
+
+    console.log(`[MCP-012] insecure → passed: ${result.passed}, evidence: ${result.evidence?.length ?? 0}`);
+    for (const e of result.evidence ?? []) {
+      console.log(`  ${e.detail}`);
+    }
+
+    expect(result.passed).toBe(false);
+    expect(result.severity).toBe('critical');
+    // CLIENT_SECRET key + REFRESH_TOKEN key at minimum
+    expect(result.evidence!.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('passes for env variable references', async () => {
+    const ctx = makeContext({ mcpConfigs: secureOAuthConfigs });
+    const result = await mcp012.run(ctx);
+
+    console.log(`[MCP-012] secure → passed: ${result.passed}`);
+
+    expect(result.passed).toBe(true);
+  });
+});
+
+// ==================== MCP-013: Missing PKCE ====================
+describe('MCP-013: Missing PKCE', () => {
+  it('detects OAuth flows without PKCE', async () => {
+    const ctx = makeContext({ mcpServerSources: vulnerableOAuthSources });
+    const result = await mcp013.run(ctx);
+
+    console.log(`[MCP-013] vulnerable → passed: ${result.passed}, evidence: ${result.evidence?.length ?? 0}`);
+    for (const e of result.evidence ?? []) {
+      console.log(`  line ${e.line}: ${e.detail}`);
+    }
+
+    expect(result.passed).toBe(false);
+    expect(result.severity).toBe('critical');
+    expect(result.evidence!.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('passes for OAuth flows with PKCE S256', async () => {
+    const ctx = makeContext({ mcpServerSources: safeOAuthSources });
+    const result = await mcp013.run(ctx);
+
+    console.log(`[MCP-013] safe → passed: ${result.passed}`);
+
+    expect(result.passed).toBe(true);
+  });
+
+  it('flags code_challenge_method: plain', async () => {
+    const plainPkceSource: MCPServerSource[] = [{
+      serverName: 'plain-pkce',
+      sourceCode: `
+        const params = {
+          code_challenge: challenge,
+          code_challenge_method: 'plain',
+          response_type: 'code',
+        };
+      `,
+    }];
+
+    const ctx = makeContext({ mcpServerSources: plainPkceSource });
+    const result = await mcp013.run(ctx);
+
+    console.log(`[MCP-013] plain → passed: ${result.passed}`);
+
+    expect(result.passed).toBe(false);
+    expect(result.evidence!.some(e => e.detail?.includes('plain'))).toBe(true);
+  });
+});
+
+// ==================== MCP-014: Insecure Token Storage ====================
+describe('MCP-014: Insecure Token Storage', () => {
+  it('detects token logging and insecure storage', async () => {
+    const ctx = makeContext({ mcpServerSources: vulnerableOAuthSources });
+    const result = await mcp014.run(ctx);
+
+    console.log(`[MCP-014] vulnerable → passed: ${result.passed}, evidence: ${result.evidence?.length ?? 0}`);
+    for (const e of result.evidence ?? []) {
+      console.log(`  line ${e.line}: ${e.detail}`);
+    }
+
+    expect(result.passed).toBe(false);
+    expect(result.severity).toBe('critical');
+    // console.log token, localStorage, query param
+    expect(result.evidence!.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('passes for encrypted token storage', async () => {
+    const ctx = makeContext({ mcpServerSources: safeOAuthSources });
+    const result = await mcp014.run(ctx);
+
+    console.log(`[MCP-014] safe → passed: ${result.passed}`);
+
+    expect(result.passed).toBe(true);
+  });
+});
+
+// ==================== MCP-015: Token Passthrough ====================
+describe('MCP-015: Token Passthrough', () => {
+  it('detects auth token forwarding to downstream APIs', async () => {
+    const ctx = makeContext({ mcpServerSources: vulnerableOAuthSources });
+    const result = await mcp015.run(ctx);
+
+    console.log(`[MCP-015] vulnerable → passed: ${result.passed}, evidence: ${result.evidence?.length ?? 0}`);
+    for (const e of result.evidence ?? []) {
+      console.log(`  line ${e.line}: ${e.detail}`);
+    }
+
+    expect(result.passed).toBe(false);
+    expect(result.severity).toBe('critical');
+    expect(result.evidence!.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('passes for server using own service credentials', async () => {
+    const ctx = makeContext({ mcpServerSources: safeOAuthSources });
+    const result = await mcp015.run(ctx);
+
+    console.log(`[MCP-015] safe → passed: ${result.passed}`);
+
+    expect(result.passed).toBe(true);
+  });
+});
+
+// ==================== MCP-016: Insecure Redirect URI ====================
+describe('MCP-016: Insecure Redirect URI', () => {
+  it('detects HTTP redirect URIs in config and source', async () => {
+    const ctx = makeContext({ mcpConfigs: insecureOAuthConfigs, mcpServerSources: vulnerableOAuthSources });
+    const result = await mcp016.run(ctx);
+
+    console.log(`[MCP-016] insecure → passed: ${result.passed}, evidence: ${result.evidence?.length ?? 0}`);
+    for (const e of result.evidence ?? []) {
+      console.log(`  ${e.detail}`);
+    }
+
+    expect(result.passed).toBe(false);
+    expect(result.severity).toBe('warning');
+    expect(result.evidence!.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('passes for HTTPS redirect URIs', async () => {
+    const ctx = makeContext({ mcpConfigs: secureOAuthConfigs, mcpServerSources: safeOAuthSources });
+    const result = await mcp016.run(ctx);
+
+    console.log(`[MCP-016] secure → passed: ${result.passed}`);
+
+    expect(result.passed).toBe(true);
+  });
+});
+
+// ==================== MCP-017: Overly Broad Scopes ====================
+describe('MCP-017: Overly Broad OAuth Scopes', () => {
+  it('detects wildcard and admin scopes', async () => {
+    const ctx = makeContext({ mcpConfigs: insecureOAuthConfigs, mcpServerSources: vulnerableOAuthSources });
+    const result = await mcp017.run(ctx);
+
+    console.log(`[MCP-017] broad → passed: ${result.passed}, evidence: ${result.evidence?.length ?? 0}`);
+    for (const e of result.evidence ?? []) {
+      console.log(`  ${e.detail}`);
+    }
+
+    expect(result.passed).toBe(false);
+    expect(result.severity).toBe('warning');
+    expect(result.evidence!.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('passes for reasonable scope lists', async () => {
+    const ctx = makeContext({ mcpConfigs: secureOAuthConfigs, mcpServerSources: safeOAuthSources });
+    const result = await mcp017.run(ctx);
+
+    console.log(`[MCP-017] minimal → passed: ${result.passed}`);
+
+    expect(result.passed).toBe(true);
+  });
+
+  it('passes for a small set of specific scopes', async () => {
+    const smallScopeConfigs: MCPConfig[] = [{
+      source: 'Test',
+      filePath: '/tmp/test.json',
+      servers: [{
+        name: 'well-scoped',
+        command: 'node',
+        args: ['server.js'],
+        env: { OAUTH_SCOPE: 'read:repos read:user read:org write:packages' },
+        transport: 'stdio',
+      }],
+    }];
+
+    const ctx = makeContext({ mcpConfigs: smallScopeConfigs });
+    const result = await mcp017.run(ctx);
+
+    console.log(`[MCP-017] small scope set → passed: ${result.passed}`);
+
+    expect(result.passed).toBe(true);
+  });
+});
+
+// ==================== MCP-018: Missing State Parameter ====================
+describe('MCP-018: Missing State Parameter', () => {
+  it('detects OAuth flows without state parameter', async () => {
+    const ctx = makeContext({ mcpServerSources: vulnerableOAuthSources });
+    const result = await mcp018.run(ctx);
+
+    console.log(`[MCP-018] vulnerable → passed: ${result.passed}, evidence: ${result.evidence?.length ?? 0}`);
+    for (const e of result.evidence ?? []) {
+      console.log(`  line ${e.line}: ${e.detail}`);
+    }
+
+    expect(result.passed).toBe(false);
+    expect(result.severity).toBe('warning');
+    expect(result.evidence!.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('passes for OAuth flows with dynamic state', async () => {
+    const ctx = makeContext({ mcpServerSources: safeOAuthSources });
+    const result = await mcp018.run(ctx);
+
+    console.log(`[MCP-018] safe → passed: ${result.passed}`);
+
     expect(result.passed).toBe(true);
   });
 });

@@ -9,6 +9,14 @@ import { mcp007 } from './mcp-007-prompt-injection.js';
 import { mcp008 } from './mcp-008-server-provenance.js';
 import { mcp009 } from './mcp-009-permission-scope.js';
 import { mcp010 } from './mcp-010-rug-pull-risk.js';
+import { mcp011 } from './mcp-011-oauth-endpoint-https.js';
+import { mcp012 } from './mcp-012-oauth-client-secret-exposure.js';
+import { mcp013 } from './mcp-013-missing-pkce.js';
+import { mcp014 } from './mcp-014-insecure-token-storage.js';
+import { mcp015 } from './mcp-015-token-passthrough.js';
+import { mcp016 } from './mcp-016-insecure-redirect-uri.js';
+import { mcp017 } from './mcp-017-overly-broad-scopes.js';
+import { mcp018 } from './mcp-018-missing-state-parameter.js';
 
 export const mcpChecks: CheckModule[] = [
   mcp001,
@@ -21,4 +29,12 @@ export const mcpChecks: CheckModule[] = [
   mcp008,
   mcp009,
   mcp010,
+  mcp011,
+  mcp012,
+  mcp013,
+  mcp014,
+  mcp015,
+  mcp016,
+  mcp017,
+  mcp018,
 ];
