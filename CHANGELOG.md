@@ -8,6 +8,13 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+#### Cross-Platform Installer Script
+- **`install.sh`** — one-liner bash installer for Linux, macOS, and WSL: `curl -fsSL https://raw.githubusercontent.com/vulnex/vaso/main/install.sh | bash`
+- Detects platform (macOS, Linux, WSL via `/proc/version` check) and architecture
+- Validates Node.js 18+ and npm are present; if missing, prints platform-specific install instructions (Homebrew for macOS, apt/dnf for Linux/WSL, nvm for all, direct download link)
+- Auto-detects whether `sudo` is needed for global npm install by checking npm prefix writability
+- Post-install verification: confirms `vaso` is in PATH, prints version and getting-started commands; if npm global bin isn't in PATH, shows the exact `export PATH` line to add
+
 #### Hybrid E2E Test Suite — Agent Fixtures + Real MCP Servers
 - **34 local end-to-end tests** across 5 test files in `testing/e2e/` — exercises the full CLI as a child process against realistic agent installations, no Docker required
 - **Fixture installation engine** (`testing/e2e/helpers/setup.ts`): creates temporary HOME directories with agent fixtures copied from `testing/fixtures/`, rewriting NanoClaw `NANOCLAW_HOME` paths and setting file permissions to simulate insecure/secure scenarios; supports all 6 agents (OpenClaw, NanoClaw, PicoClaw, IronClaw, Nanobot, ZeroClaw)
