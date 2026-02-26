@@ -8,3 +8,4 @@ coverage/
 .env.local
 devnotes/
 feed-signing-key.pem
+CLAUDE.md
