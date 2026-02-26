@@ -42,6 +42,13 @@ export const ironclawAdapter: AgentAdapter = {
       Object.assign(merged, c.data);
     }
 
+    // Extract version from TOML config, fallback to CLI
+    const tomlConfig = configFiles.find(c => c.filePath.endsWith('.toml'));
+    const version =
+      (tomlConfig?.data?.version as string) ??
+      ((tomlConfig?.data?.package as Record<string, unknown>)?.version as string) ??
+      queryCliVersion(cliBinary ?? 'ironclaw');
+
     return [{
       agent: 'ironclaw',
       installDir: ironDir,
@@ -49,6 +56,7 @@ export const ironclawAdapter: AgentAdapter = {
       skillsDir: this.getSkillsDir(ironDir),
       gateway: this.getGatewayInfo(merged),
       cliBinary,
+      version,
     }];
   },
 
@@ -105,6 +113,20 @@ export const ironclawAdapter: AgentAdapter = {
     return 'ironclaw';
   },
 };
+
+function queryCliVersion(binary: string): string | undefined {
+  try {
+    const output = execFileSync(binary, ['--version'], {
+      encoding: 'utf-8',
+      timeout: 3000,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+    const m = /(\d+\.\d+\.\d+(?:-[a-zA-Z0-9.]+)?)/.exec(output);
+    return m?.[1];
+  } catch {
+    return undefined;
+  }
+}
 
 async function findCLIBinary(home: string): Promise<string | undefined> {
   const cargoPath = join(home, '.cargo', 'bin', 'ironclaw');

@@ -32,6 +32,10 @@ export const nanobotAdapter: AgentAdapter = {
       Object.assign(merged, c.data);
     }
 
+    // Extract version from config, fallback to CLI
+    const mainConfig = configFiles.find(c => c.filePath.endsWith('config.json'));
+    const version = (mainConfig?.data?.version as string) ?? queryCliVersion(cliBinary ?? 'nanobot');
+
     return [{
       agent: 'nanobot',
       installDir: nanobotDir,
@@ -39,6 +43,7 @@ export const nanobotAdapter: AgentAdapter = {
       skillsDir: this.getSkillsDir(nanobotDir),
       gateway: this.getGatewayInfo(merged),
       cliBinary,
+      version,
     }];
   },
 
@@ -83,6 +88,20 @@ export const nanobotAdapter: AgentAdapter = {
     return 'nanobot';
   },
 };
+
+function queryCliVersion(binary: string): string | undefined {
+  try {
+    const output = execFileSync(binary, ['--version'], {
+      encoding: 'utf-8',
+      timeout: 3000,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+    const m = /(\d+\.\d+\.\d+(?:-[a-zA-Z0-9.]+)?)/.exec(output);
+    return m?.[1];
+  } catch {
+    return undefined;
+  }
+}
 
 async function findCLIBinary(): Promise<string | undefined> {
   try {

@@ -10,6 +10,8 @@ import { zeroclawAdapter } from './adapters/zeroclaw.js';
 import { registerAllChecks } from './checks/index.js';
 import { initIOCDatabase } from './ioc/database.js';
 import { isFeedStale } from './ioc/updater.js';
+import { initAdvisoryDatabase } from './advisory/database.js';
+import { isAdvisoryFeedStale } from './advisory/updater.js';
 import { loadUserPlugins } from './user-plugins/loader.js';
 
 const VERSION = '0.1.0';
@@ -56,12 +58,20 @@ program
     }
 
     await initIOCDatabase();
+    await initAdvisoryDatabase();
 
-    // Warn about stale feed for non-update commands
-    if (thisCommand.name() !== 'update' && isFeedStale()) {
-      console.log(
-        chalk.yellow('  IOC feed is stale or missing. Run `vaso update` for latest threat data.\n'),
-      );
+    // Warn about stale feeds for non-update commands
+    if (thisCommand.name() !== 'update') {
+      if (isFeedStale()) {
+        console.log(
+          chalk.yellow('  IOC feed is stale or missing. Run `vaso update` for latest threat data.\n'),
+        );
+      }
+      if (isAdvisoryFeedStale()) {
+        console.log(
+          chalk.yellow('  Advisory feed is stale or missing. Run `vaso update` for latest advisories.\n'),
+        );
+      }
     }
   });
 

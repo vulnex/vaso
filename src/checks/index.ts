@@ -9,6 +9,7 @@ import { ironclawChecks } from './ironclaw/index.js';
 import { nanobotChecks } from './nanobot/index.js';
 import { zeroclawChecks } from './zeroclaw/index.js';
 import { policyChecks } from './policy/index.js';
+import { advisoryChecks } from './advisory/index.js';
 
 export function registerAllChecks(): void {
   checkRegistry.registerAll(configChecks);
@@ -21,4 +22,5 @@ export function registerAllChecks(): void {
   checkRegistry.registerAll(nanobotChecks);
   checkRegistry.registerAll(zeroclawChecks);
   checkRegistry.registerAll(policyChecks);
+  checkRegistry.registerAll(advisoryChecks);
 }

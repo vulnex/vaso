@@ -40,6 +40,13 @@ export const zeroclawAdapter: AgentAdapter = {
       Object.assign(merged, c.data);
     }
 
+    // Extract version from TOML config, fallback to CLI
+    const tomlConfig = configFiles.find(c => c.filePath.endsWith('.toml'));
+    const version =
+      (tomlConfig?.data?.version as string) ??
+      ((tomlConfig?.data?.package as Record<string, unknown>)?.version as string) ??
+      queryCliVersion(cliBinary ?? 'zeroclaw');
+
     return [{
       agent: 'zeroclaw',
       installDir: zeroDir,
@@ -47,6 +54,7 @@ export const zeroclawAdapter: AgentAdapter = {
       skillsDir: this.getSkillsDir(zeroDir),
       gateway: this.getGatewayInfo(merged),
       cliBinary,
+      version,
     }];
   },
 
@@ -95,6 +103,20 @@ export const zeroclawAdapter: AgentAdapter = {
     return 'zeroclaw';
   },
 };
+
+function queryCliVersion(binary: string): string | undefined {
+  try {
+    const output = execFileSync(binary, ['--version'], {
+      encoding: 'utf-8',
+      timeout: 3000,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+    const m = /(\d+\.\d+\.\d+(?:-[a-zA-Z0-9.]+)?)/.exec(output);
+    return m?.[1];
+  } catch {
+    return undefined;
+  }
+}
 
 async function findCLIBinary(home: string): Promise<string | undefined> {
   const cargoPath = join(home, '.cargo', 'bin', 'zeroclaw');

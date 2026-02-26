@@ -1,6 +1,7 @@
 import { access } from 'node:fs/promises';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
+import { execFileSync } from 'node:child_process';
 import type { AgentAdapter, DetectOptions } from './adapter.js';
 import type { AgentInstallation, GatewayInfo } from '../core/types.js';
 import { loadConfig } from '../core/config-loader.js';
@@ -46,11 +47,16 @@ export const nanoclawAdapter: AgentAdapter = {
 
     if (configFiles.length === 0) return [];
 
+    // Extract version from config, fallback to CLI
+    const mainConfig = configFiles.find(c => c.filePath.endsWith('config.json'));
+    const version = (mainConfig?.data?.version as string) ?? queryCliVersion('nanoclaw');
+
     return [{
       agent: 'nanoclaw',
       installDir: configDir,
       configFiles,
       skillsDir: this.getSkillsDir(configDir),
+      version,
     }];
   },
 
@@ -75,3 +81,17 @@ export const nanoclawAdapter: AgentAdapter = {
     return 'nanoclaw';
   },
 };
+
+function queryCliVersion(binary: string): string | undefined {
+  try {
+    const output = execFileSync(binary, ['--version'], {
+      encoding: 'utf-8',
+      timeout: 3000,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+    const m = /(\d+\.\d+\.\d+(?:-[a-zA-Z0-9.]+)?)/.exec(output);
+    return m?.[1];
+  } catch {
+    return undefined;
+  }
+}

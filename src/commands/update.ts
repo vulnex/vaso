@@ -1,6 +1,8 @@
 import chalk from 'chalk';
 import { reloadIOCDatabase, getIOCDatabase, initIOCDatabase } from '../ioc/database.js';
 import { fetchAndUpdateFeed } from '../ioc/updater.js';
+import { reloadAdvisoryDatabase, getAdvisoryDatabase, initAdvisoryDatabase } from '../advisory/database.js';
+import { fetchAndUpdateAdvisoryFeed } from '../advisory/updater.js';
 
 export interface UpdateOptions {
   url?: string;
@@ -49,4 +51,28 @@ export async function runUpdate(options: UpdateOptions = {}): Promise<void> {
   console.log(`  Trusted skill names: ${db.trustedSkillNames.length}`);
   console.log(`  Trusted MCP packages: ${db.trustedMCPPackages.length}`);
   console.log(`  Binary patterns: ${db.binaryPatterns.length}`);
+
+  // Update advisory feed
+  console.log(chalk.cyan('\nUpdating advisory database from remote feed...'));
+
+  const advResult = await fetchAndUpdateAdvisoryFeed({
+    force: options.force ?? true,
+  });
+
+  if (!advResult.success) {
+    console.log(chalk.red(`Advisory update failed: ${advResult.message}`));
+    console.log(chalk.yellow('Falling back to bundled advisory data.'));
+  } else {
+    console.log(chalk.green(advResult.message));
+    if (advResult.newAdvisories !== undefined) {
+      console.log(chalk.dim(`  Advisories in feed: ${advResult.newAdvisories}`));
+    }
+  }
+
+  // Reload advisory database with merged feed data
+  reloadAdvisoryDatabase();
+  await initAdvisoryDatabase();
+  const advDb = getAdvisoryDatabase();
+
+  console.log(chalk.green(`\nMerged advisory database: ${advDb.advisories.length} advisories`));
 }
