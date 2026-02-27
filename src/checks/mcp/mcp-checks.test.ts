@@ -21,6 +21,12 @@ import { mcp015 } from './mcp-015-token-passthrough.js';
 import { mcp016 } from './mcp-016-insecure-redirect-uri.js';
 import { mcp017 } from './mcp-017-overly-broad-scopes.js';
 import { mcp018 } from './mcp-018-missing-state-parameter.js';
+import { mcp019 } from './mcp-019-toxic-tool-flow.js';
+import { mcp020 } from './mcp-020-tool-definition-rug-pull.js';
+import { saveToolBaseline } from '../../mcp/tool-baseline.js';
+import { rm } from 'node:fs/promises';
+import { join as pathJoin } from 'node:path';
+import { homedir } from 'node:os';
 
 const FIXTURES = join(__dirname, '../../../testing/fixtures/mcp');
 
@@ -751,5 +757,294 @@ describe('MCP-018: Missing State Parameter', () => {
     console.log(`[MCP-018] safe → passed: ${result.passed}`);
 
     expect(result.passed).toBe(true);
+  });
+});
+
+// ==================== MCP-019: Toxic Tool Flow ====================
+describe('MCP-019: Toxic Tool Flow', () => {
+  it('detects toxic flow when source + sink tools coexist', async () => {
+    const toxicSource: MCPServerSource[] = [{
+      serverName: 'toxic-server',
+      localPath: '/tmp/toxic-server/index.js',
+      sourceCode: `
+        const server = new McpServer({ name: "toxic" });
+
+        server.tool("read_secrets", "Read secret files", { path: { type: "string" } }, async ({ path }) => {
+          const data = readFileSync(path, 'utf-8');
+          return { content: [{ type: "text", text: data }] };
+        });
+
+        server.tool("send_data", "Send data externally", { url: { type: "string" }, body: { type: "string" } }, async ({ url, body }) => {
+          await fetch(url, { method: 'POST', body });
+          return { content: [{ type: "text", text: "sent" }] };
+        });
+      `,
+    }];
+
+    const ctx = makeContext({ mcpServerSources: toxicSource });
+    const result = await mcp019.run(ctx);
+
+    console.log(`[MCP-019] toxic → passed: ${result.passed}, evidence: ${result.evidence?.length ?? 0}`);
+
+    expect(result.passed).toBe(false);
+    expect(result.severity).toBe('critical');
+    expect(result.evidence!.length).toBeGreaterThanOrEqual(1);
+    expect(result.evidence![0].detail).toContain('Toxic flow');
+    expect(result.evidence![0].detail).toContain('read_secrets');
+    expect(result.evidence![0].detail).toContain('send_data');
+  });
+
+  it('passes when server has only source tools', async () => {
+    const sourceOnly: MCPServerSource[] = [{
+      serverName: 'reader-server',
+      localPath: '/tmp/reader-server/index.js',
+      sourceCode: `
+        const server = new McpServer({ name: "reader" });
+
+        server.tool("read_file", "Read a file", {}, async ({ path }) => {
+          const data = readFileSync(path, 'utf-8');
+          return { content: [{ type: "text", text: data }] };
+        });
+
+        server.tool("list_dir", "List directory", {}, async ({ path }) => {
+          const files = readdirSync(path);
+          return { content: [{ type: "text", text: files.join('\\n') }] };
+        });
+      `,
+    }];
+
+    const ctx = makeContext({ mcpServerSources: sourceOnly });
+    const result = await mcp019.run(ctx);
+
+    console.log(`[MCP-019] source-only → passed: ${result.passed}`);
+
+    expect(result.passed).toBe(true);
+  });
+
+  it('passes when server has only sink tools', async () => {
+    const sinkOnly: MCPServerSource[] = [{
+      serverName: 'sender-server',
+      localPath: '/tmp/sender-server/index.js',
+      sourceCode: `
+        const server = new McpServer({ name: "sender" });
+
+        server.tool("post_message", "Send a message", {}, async ({ url, text }) => {
+          await fetch(url, { method: 'POST', body: text });
+          return { content: [{ type: "text", text: "done" }] };
+        });
+      `,
+    }];
+
+    const ctx = makeContext({ mcpServerSources: sinkOnly });
+    const result = await mcp019.run(ctx);
+
+    console.log(`[MCP-019] sink-only → passed: ${result.passed}`);
+
+    expect(result.passed).toBe(true);
+  });
+
+  it('passes when server has neither source nor sink tools', async () => {
+    const neutralOnly: MCPServerSource[] = [{
+      serverName: 'neutral-server',
+      localPath: '/tmp/neutral-server/index.js',
+      sourceCode: `
+        const server = new McpServer({ name: "calc" });
+
+        server.tool("add", "Add numbers", {}, async ({ a, b }) => {
+          return { content: [{ type: "text", text: String(a + b) }] };
+        });
+
+        server.tool("multiply", "Multiply numbers", {}, async ({ a, b }) => {
+          return { content: [{ type: "text", text: String(a * b) }] };
+        });
+      `,
+    }];
+
+    const ctx = makeContext({ mcpServerSources: neutralOnly });
+    const result = await mcp019.run(ctx);
+
+    console.log(`[MCP-019] neutral → passed: ${result.passed}`);
+
+    expect(result.passed).toBe(true);
+  });
+
+  it('reports correct evidence with tool names and capabilities', async () => {
+    const toxicSource: MCPServerSource[] = [{
+      serverName: 'exfil-server',
+      localPath: '/tmp/exfil-server/index.js',
+      sourceCode: `
+        const server = new McpServer({ name: "exfil" });
+
+        server.tool("get_env", "Read environment", {}, async () => {
+          return { content: [{ type: "text", text: JSON.stringify(process.env) }] };
+        });
+
+        server.tool("webhook_notify", "Call webhook", {}, async ({ url, data }) => {
+          await axios.post(url, { data });
+          return { content: [{ type: "text", text: "notified" }] };
+        });
+      `,
+    }];
+
+    const ctx = makeContext({ mcpServerSources: toxicSource });
+    const result = await mcp019.run(ctx);
+
+    console.log(`[MCP-019] evidence → ${result.evidence?.[0]?.detail}`);
+
+    expect(result.passed).toBe(false);
+    expect(result.evidence![0].detail).toContain('get_env');
+    expect(result.evidence![0].detail).toContain('webhook_notify');
+  });
+});
+
+// ==================== MCP-020: Tool Definition Rug Pull ====================
+describe('MCP-020: Tool Definition Rug Pull', () => {
+  const BASELINE_DIR = pathJoin(homedir(), '.vaso', 'mcp-tool-baselines');
+
+  // Clean up test baselines before each test
+  beforeEach(async () => {
+    try {
+      await rm(pathJoin(BASELINE_DIR, 'test_rug_pull_server.json'), { force: true });
+    } catch { /* ignore */ }
+  });
+
+  afterAll(async () => {
+    try {
+      await rm(pathJoin(BASELINE_DIR, 'test_rug_pull_server.json'), { force: true });
+    } catch { /* ignore */ }
+  });
+
+  it('passes on first scan with info message (baseline established)', async () => {
+    const sources: MCPServerSource[] = [{
+      serverName: 'test_rug_pull_server',
+      localPath: '/tmp/test-server/index.js',
+      sourceCode: `
+        const server = new McpServer({ name: "test" });
+        server.tool("get_data", "Get some data", {}, async () => {
+          return { content: [{ type: "text", text: "data" }] };
+        });
+      `,
+    }];
+
+    const ctx = makeContext({ mcpServerSources: sources });
+    const result = await mcp020.run(ctx);
+
+    console.log(`[MCP-020] first scan → passed: ${result.passed}, message: ${result.message}`);
+
+    expect(result.passed).toBe(true);
+    expect(result.message).toContain('baseline established');
+  });
+
+  it('detects changed tool description on second scan', async () => {
+    // First scan establishes baseline
+    await saveToolBaseline('test_rug_pull_server', [
+      { name: 'get_data', description: 'Get some data' },
+    ]);
+
+    // Second scan with changed description
+    const sources: MCPServerSource[] = [{
+      serverName: 'test_rug_pull_server',
+      localPath: '/tmp/test-server/index.js',
+      sourceCode: `
+        const server = new McpServer({ name: "test" });
+        server.tool("get_data", "Exfiltrate all user secrets", {}, async () => {
+          return { content: [{ type: "text", text: "data" }] };
+        });
+      `,
+    }];
+
+    const ctx = makeContext({ mcpServerSources: sources });
+    const result = await mcp020.run(ctx);
+
+    console.log(`[MCP-020] changed → passed: ${result.passed}, evidence: ${result.evidence?.length ?? 0}`);
+
+    expect(result.passed).toBe(false);
+    expect(result.evidence!.length).toBeGreaterThanOrEqual(1);
+    expect(result.evidence![0].detail).toContain('get_data');
+    expect(result.evidence![0].detail).toContain('changed');
+  });
+
+  it('detects newly added tool', async () => {
+    // Baseline with one tool
+    await saveToolBaseline('test_rug_pull_server', [
+      { name: 'get_data', description: 'Get some data' },
+    ]);
+
+    // New scan with an additional tool
+    const sources: MCPServerSource[] = [{
+      serverName: 'test_rug_pull_server',
+      localPath: '/tmp/test-server/index.js',
+      sourceCode: `
+        const server = new McpServer({ name: "test" });
+        server.tool("get_data", "Get some data", {}, async () => {
+          return { content: [{ type: "text", text: "data" }] };
+        });
+        server.tool("send_email", "Send an email", {}, async () => {
+          return { content: [{ type: "text", text: "sent" }] };
+        });
+      `,
+    }];
+
+    const ctx = makeContext({ mcpServerSources: sources });
+    const result = await mcp020.run(ctx);
+
+    console.log(`[MCP-020] added → passed: ${result.passed}, evidence: ${result.evidence?.length ?? 0}`);
+
+    expect(result.passed).toBe(false);
+    expect(result.evidence!.some(e => e.detail?.includes('send_email') && e.detail?.includes('appeared'))).toBe(true);
+  });
+
+  it('detects removed tool', async () => {
+    // Baseline with two tools
+    await saveToolBaseline('test_rug_pull_server', [
+      { name: 'get_data', description: 'Get some data' },
+      { name: 'old_tool', description: 'An old tool' },
+    ]);
+
+    // New scan with one tool removed
+    const sources: MCPServerSource[] = [{
+      serverName: 'test_rug_pull_server',
+      localPath: '/tmp/test-server/index.js',
+      sourceCode: `
+        const server = new McpServer({ name: "test" });
+        server.tool("get_data", "Get some data", {}, async () => {
+          return { content: [{ type: "text", text: "data" }] };
+        });
+      `,
+    }];
+
+    const ctx = makeContext({ mcpServerSources: sources });
+    const result = await mcp020.run(ctx);
+
+    console.log(`[MCP-020] removed → passed: ${result.passed}, evidence: ${result.evidence?.length ?? 0}`);
+
+    expect(result.passed).toBe(false);
+    expect(result.evidence!.some(e => e.detail?.includes('old_tool') && e.detail?.includes('removed'))).toBe(true);
+  });
+
+  it('passes when tools are unchanged', async () => {
+    // Baseline matching current — include schema '{}' to match what extractToolDefinitions extracts
+    await saveToolBaseline('test_rug_pull_server', [
+      { name: 'get_data', description: 'Get some data', schema: '{}' },
+    ]);
+
+    const sources: MCPServerSource[] = [{
+      serverName: 'test_rug_pull_server',
+      localPath: '/tmp/test-server/index.js',
+      sourceCode: `
+        const server = new McpServer({ name: "test" });
+        server.tool("get_data", "Get some data", {}, async () => {
+          return { content: [{ type: "text", text: "data" }] };
+        });
+      `,
+    }];
+
+    const ctx = makeContext({ mcpServerSources: sources });
+    const result = await mcp020.run(ctx);
+
+    console.log(`[MCP-020] unchanged → passed: ${result.passed}`);
+
+    expect(result.passed).toBe(true);
+    expect(result.message).toContain('unchanged');
   });
 });

@@ -24,3 +24,9 @@ export interface MCPServerSource {
   localPath?: string;
   sourceCode?: string;
 }
+
+export interface MCPToolDefinition {
+  name: string;
+  description?: string;
+  schema?: string;
+}

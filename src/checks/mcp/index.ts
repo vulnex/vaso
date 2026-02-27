@@ -17,6 +17,8 @@ import { mcp015 } from './mcp-015-token-passthrough.js';
 import { mcp016 } from './mcp-016-insecure-redirect-uri.js';
 import { mcp017 } from './mcp-017-overly-broad-scopes.js';
 import { mcp018 } from './mcp-018-missing-state-parameter.js';
+import { mcp019 } from './mcp-019-toxic-tool-flow.js';
+import { mcp020 } from './mcp-020-tool-definition-rug-pull.js';
 
 export const mcpChecks: CheckModule[] = [
   mcp001,
@@ -37,4 +39,6 @@ export const mcpChecks: CheckModule[] = [
   mcp016,
   mcp017,
   mcp018,
+  mcp019,
+  mcp020,
 ];
