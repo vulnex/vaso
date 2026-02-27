@@ -33,9 +33,9 @@ vi.mock('../plugins/installer.js', () => ({
 // Mock scan engine for runner tests
 const mockScan = vi.fn();
 vi.mock('../core/engine.js', () => ({
-  ScanEngine: vi.fn().mockImplementation(() => ({
-    scan: mockScan,
-  })),
+  ScanEngine: vi.fn().mockImplementation(function () {
+    return { scan: mockScan };
+  }),
 }));
 
 // Mock adapters

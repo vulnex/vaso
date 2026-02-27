@@ -1,5 +1,6 @@
 import { readFile, readdir, access } from 'node:fs/promises';
 import { join } from 'node:path';
+import type { Dirent } from 'node:fs';
 import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
 import { getIOCDatabase } from '../../ioc/database.js';
 
@@ -34,9 +35,9 @@ export const skl011: CheckModule = {
 
     const db = getIOCDatabase();
 
-    let entries: Awaited<ReturnType<typeof readdir>>;
+    let entries: Dirent<string>[];
     try {
-      entries = await readdir(skillsDir, { withFileTypes: true });
+      entries = await readdir(skillsDir, { withFileTypes: true, encoding: 'utf-8' });
     } catch {
       return { id: 'SKL-011', name: 'Dependency Audit', category: 'skills', severity: 'warning', passed: true, message: 'Skills directory not accessible' };
     }

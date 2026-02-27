@@ -1,5 +1,6 @@
 import { readFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
+import type { Dirent } from 'node:fs';
 import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
 import { API_KEY_PATTERNS } from '../../core/patterns.js';
 
@@ -27,9 +28,9 @@ export const pol005: CheckModule = {
     const evidence: Evidence[] = [];
     const installDir = ctx.installation.installDir;
 
-    let entries: Awaited<ReturnType<typeof readdir>>;
+    let entries: Dirent<string>[];
     try {
-      entries = await readdir(installDir, { withFileTypes: true, recursive: true });
+      entries = await readdir(installDir, { withFileTypes: true, recursive: true, encoding: 'utf-8' });
     } catch {
       return {
         id: 'POL-005',

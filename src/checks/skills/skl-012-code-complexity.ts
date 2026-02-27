@@ -53,11 +53,11 @@ export const skl012: CheckModule = {
         }
 
         traverse(ast, {
-          'FunctionDeclaration|FunctionExpression|ArrowFunctionExpression|ObjectMethod'(path: { node: { id?: { name: string } | null; key?: { name?: string; value?: string }; loc?: { start: { line: number } } }; traverse: (visitor: Record<string, (p: unknown) => void>) => void }) {
+          'FunctionDeclaration|FunctionExpression|ArrowFunctionExpression|ObjectMethod'(path) {
             let complexity = 1;
 
             path.traverse({
-              enter(innerPath: { node: { type: string } }) {
+              enter(innerPath) {
                 if (DECISION_NODES.has(innerPath.node.type)) {
                   complexity++;
                 }
@@ -65,9 +65,12 @@ export const skl012: CheckModule = {
             });
 
             if (complexity > COMPLEXITY_THRESHOLD) {
+              const node = path.node as unknown as Record<string, unknown>;
+              const id = node.id as { name: string } | null | undefined;
+              const key = node.key as { name?: string; value?: string } | undefined;
               const funcName =
-                (path.node.id?.name) ??
-                (path.node.key && 'name' in path.node.key ? path.node.key.name : undefined) ??
+                id?.name ??
+                (key && 'name' in key ? key.name : undefined) ??
                 '<anonymous>';
               const line = path.node.loc?.start.line ?? 0;
 

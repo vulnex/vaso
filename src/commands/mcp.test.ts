@@ -7,10 +7,12 @@ import type { ScanResult } from '../core/types.js';
 const mockDiscover = vi.fn();
 const mockDiscoverFromPaths = vi.fn();
 vi.mock('../mcp/discovery.js', () => ({
-  MCPDiscovery: vi.fn().mockImplementation(() => ({
-    discover: mockDiscover,
-    discoverFromPaths: mockDiscoverFromPaths,
-  })),
+  MCPDiscovery: vi.fn().mockImplementation(function () {
+    return {
+      discover: mockDiscover,
+      discoverFromPaths: mockDiscoverFromPaths,
+    };
+  }),
 }));
 
 // Mock resolveServerSources
@@ -22,9 +24,9 @@ vi.mock('../mcp/source-resolver.js', () => ({
 // Mock ScanEngine
 const mockScanMCP = vi.fn();
 vi.mock('../core/engine.js', () => ({
-  ScanEngine: vi.fn().mockImplementation(() => ({
-    scanMCP: mockScanMCP,
-  })),
+  ScanEngine: vi.fn().mockImplementation(function () {
+    return { scanMCP: mockScanMCP };
+  }),
 }));
 
 // Mock getReporter

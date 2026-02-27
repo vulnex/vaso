@@ -70,7 +70,7 @@ describe('runScan', () => {
 
     const mockResult = makeScanResult();
     const mockScan = vi.fn().mockResolvedValue(mockResult);
-    mockScanEngine.mockImplementation(() => ({ scan: mockScan } as any));
+    mockScanEngine.mockImplementation(function () { return { scan: mockScan } as any; });
     mockGetReporter.mockReturnValue({ format: 'terminal', render: () => 'rendered output' } as any);
   });
 
@@ -129,7 +129,7 @@ describe('runScan', () => {
       }],
     });
     const mockScan = vi.fn().mockResolvedValue(critResult);
-    mockScanEngine.mockImplementation(() => ({ scan: mockScan } as any));
+    mockScanEngine.mockImplementation(function () { return { scan: mockScan } as any; });
 
     await runScan({ format: 'terminal' });
     expect(process.exitCode).toBe(1);
@@ -137,7 +137,7 @@ describe('runScan', () => {
 
   it('sets exit code 1 on error', async () => {
     const mockScan = vi.fn().mockRejectedValue(new Error('scan failed'));
-    mockScanEngine.mockImplementation(() => ({ scan: mockScan } as any));
+    mockScanEngine.mockImplementation(function () { return { scan: mockScan } as any; });
 
     await runScan({ format: 'terminal' });
     expect(process.exitCode).toBe(1);
@@ -146,7 +146,7 @@ describe('runScan', () => {
 
   it('passes agent filter to engine', async () => {
     const mockScan = vi.fn().mockResolvedValue(makeScanResult());
-    mockScanEngine.mockImplementation(() => ({ scan: mockScan } as any));
+    mockScanEngine.mockImplementation(function () { return { scan: mockScan } as any; });
 
     await runScan({ format: 'terminal', agent: 'nanoclaw' });
     expect(mockScan).toHaveBeenCalledWith(expect.objectContaining({ agentFilter: 'nanoclaw' }));

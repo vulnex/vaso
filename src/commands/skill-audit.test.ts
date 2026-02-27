@@ -18,9 +18,9 @@ vi.mock('../core/utils.js', () => ({
 // Mock ScanEngine
 const mockScanSkill = vi.fn();
 vi.mock('../core/engine.js', () => ({
-  ScanEngine: vi.fn().mockImplementation(() => ({
-    scanSkill: mockScanSkill,
-  })),
+  ScanEngine: vi.fn().mockImplementation(function () {
+    return { scanSkill: mockScanSkill };
+  }),
 }));
 
 // Mock getReporter
