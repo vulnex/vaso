@@ -1,5 +1,5 @@
-import { access, readdir } from 'node:fs/promises';
-import { join, basename } from 'node:path';
+import { access, readdir, readFile, realpath } from 'node:fs/promises';
+import { join, basename, dirname } from 'node:path';
 import { homedir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import type { AgentAdapter, DetectOptions } from './adapter.js';
@@ -25,6 +25,7 @@ const USER_CLI_RELATIVE_PATHS = [
   '.volta/bin/openclaw',
   '.local/bin/openclaw',
   '.nvm/current/bin/openclaw',
+  '.npm-global/bin/openclaw',
   'bin/openclaw',
 ];
 
@@ -141,6 +142,54 @@ async function findAppBundle(): Promise<string | undefined> {
   return undefined;
 }
 
+function queryCliVersion(binary: string): string | undefined {
+  // Try --version flag first
+  for (const args of [['--version'], ['version']]) {
+    try {
+      const output = execFileSync(binary, args, {
+        encoding: 'utf-8',
+        timeout: 3000,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      }).trim();
+      const m = /(\d+\.\d+\.\d+(?:-[a-zA-Z0-9.]+)?)/.exec(output);
+      if (m?.[1]) return m[1];
+    } catch {
+      // Try next approach
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Read version from the package.json nearest to a CLI binary's resolved path.
+ * Works for npm-installed binaries (global or local).
+ */
+async function readPackageVersion(binary: string): Promise<string | undefined> {
+  try {
+    const resolved = await realpath(binary);
+    // Walk up from the binary to find package.json
+    let dir = dirname(resolved);
+    for (let i = 0; i < 5; i++) {
+      const pkgPath = join(dir, 'package.json');
+      try {
+        const raw = await readFile(pkgPath, 'utf-8');
+        const pkg = JSON.parse(raw);
+        if (pkg.version && /^\d+\.\d+\.\d+/.test(pkg.version)) {
+          return pkg.version;
+        }
+      } catch {
+        // No package.json here, walk up
+      }
+      const parent = dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
+    }
+  } catch {
+    // realpath or read failed
+  }
+  return undefined;
+}
+
 export const openclawAdapter: AgentAdapter = {
   agent: 'openclaw',
   displayName: 'OpenClaw',
@@ -172,9 +221,11 @@ export const openclawAdapter: AgentAdapter = {
 
         if (configFiles.length === 0) continue;
 
-        // Extract version from openclaw.json
+        // Extract version from openclaw.json, fallback to CLI, then package.json
         const mainConfig = configFiles.find(c => c.filePath.endsWith('openclaw.json'));
-        const version = mainConfig?.data?.version as string | undefined;
+        const version = (mainConfig?.data?.version as string)
+          ?? (cliBinary ? queryCliVersion(cliBinary) : undefined)
+          ?? (cliBinary ? await readPackageVersion(cliBinary) : undefined);
         const skillsDir = this.getSkillsDir(dir);
 
         // Merge all config data to extract gateway info

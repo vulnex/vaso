@@ -13,6 +13,8 @@ import { isFeedStale } from './ioc/updater.js';
 import { initAdvisoryDatabase } from './advisory/database.js';
 import { isAdvisoryFeedStale } from './advisory/updater.js';
 import { loadUserPlugins } from './user-plugins/loader.js';
+import { loadAndRegisterRules } from './rules/index.js';
+import { checkRegistry } from './core/check-registry.js';
 
 const VERSION = '0.1.0';
 
@@ -57,6 +59,30 @@ program
       }
     }
 
+    // Load declarative rules only for commands that run checks (scan, fix)
+    const commandName = thisCommand.name();
+    const needsRules = commandName === 'scan' || commandName === 'fix';
+
+    if (needsRules) {
+      const opts = thisCommand.opts?.() ?? {};
+      const skipRules = opts.customRules === false;
+
+      if (!skipRules) {
+        const extraPaths = opts.rules as string[] | undefined;
+        const rulesResult = await loadAndRegisterRules(checkRegistry, { extraPaths });
+        for (const err of rulesResult.loadResult.allErrors) {
+          const loc = err.rule ? ` (rule ${err.rule})` : '';
+          console.log(chalk.yellow(`  Warning: rule file ${err.file}${loc}: ${err.message}\n`));
+        }
+        for (const skip of rulesResult.skipped) {
+          console.log(chalk.yellow(`  Warning: rule "${skip.id}" skipped: ${skip.reason}\n`));
+        }
+        if (rulesResult.registered.length > 0) {
+          console.log(chalk.dim(`  Loaded ${rulesResult.registered.length} declarative rule(s)\n`));
+        }
+      }
+    }
+
     await initIOCDatabase();
     await initAdvisoryDatabase();
 
@@ -91,6 +117,8 @@ program
   .option('--save-baseline', 'save scan results as baseline')
   .option('--diff', 'compare against saved baseline')
   .option('--all-users', 'scan all user accounts (requires root/sudo)')
+  .option('--rules <paths...>', 'load additional rule files')
+  .option('--no-custom-rules', 'skip declarative rules')
   .option('--no-color', 'disable colored output')
   .action(async (options) => {
     const { runScan } = await import('./commands/scan.js');
@@ -227,6 +255,38 @@ extCommand
   .action(async (name: string, options: Record<string, unknown>) => {
     const { runExtInfo } = await import('./commands/user-plugin.js');
     await runExtInfo(name, options as { format?: string });
+  });
+
+const rulesCommand = program
+  .command('rules')
+  .description('Manage declarative YAML rules');
+
+rulesCommand
+  .command('list')
+  .description('List loaded declarative rules')
+  .option('-f, --format <format>', 'output format (terminal, json)', 'terminal')
+  .action(async (options) => {
+    const { runRulesList } = await import('./commands/rules.js');
+    await runRulesList(options);
+  });
+
+rulesCommand
+  .command('validate')
+  .description('Validate a rule file')
+  .argument('<file>', 'path to YAML rule file')
+  .option('-f, --format <format>', 'output format (terminal, json)', 'terminal')
+  .action(async (file: string, options: Record<string, unknown>) => {
+    const { runRulesValidate } = await import('./commands/rules.js');
+    await runRulesValidate(file, options as { format?: string });
+  });
+
+rulesCommand
+  .command('init')
+  .description('Generate a starter rule template')
+  .option('--dir <path>', 'target directory (default: ~/.vaso/rules/)')
+  .action(async (options) => {
+    const { runRulesInit } = await import('./commands/rules.js');
+    await runRulesInit(options);
   });
 
 program.parse();

@@ -1,0 +1,60 @@
+# Organization Security Policy Rules
+# Drop this file in ~/.vaso/rules/ or .vaso/rules/ to enforce org-wide policies.
+
+rules:
+  - id: ORG-001
+    name: Require TLS for gateway
+    category: config
+    severity: critical
+    description: All agent gateways must use TLS in production
+    config:
+      path: "gateway.tls.enabled"
+      operator: "exists"
+      pass_when: "match"
+    fix:
+      guidance: "Enable TLS in your agent gateway configuration"
+
+  - id: ORG-002
+    name: Prohibit wildcard CORS origins
+    category: config
+    severity: warning
+    description: CORS origin must not be set to wildcard
+    config:
+      path: "gateway.cors.origin"
+      operator: "eq"
+      value: "*"
+
+  - id: ORG-003
+    name: Enforce authentication
+    category: config
+    severity: critical
+    description: Agent gateway must require authentication
+    config:
+      path: "gateway.auth.mode"
+      operator: "in"
+      value: ["api-key", "oauth2", "mtls"]
+      pass_when: "match"
+    fix:
+      guidance: "Set gateway.auth.mode to one of: api-key, oauth2, mtls"
+
+  - id: ORG-004
+    name: No localhost in production configs
+    category: config
+    severity: warning
+    description: Production configs should not reference localhost
+    pattern:
+      regex: "localhost|127\\.0\\.0\\.1"
+      target: configs
+      message: "Localhost reference in {{file}}:{{line}}"
+
+  - id: ORG-005
+    name: Max token limit enforced
+    category: config
+    severity: info
+    description: Token limits prevent runaway agent costs
+    config:
+      path: "agent.max_tokens"
+      operator: "exists"
+      pass_when: "match"
+    fix:
+      guidance: "Set agent.max_tokens to a reasonable limit (e.g., 4096)"
