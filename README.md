@@ -6,7 +6,7 @@
 
 ## Overview
 
-VASO scans AI agent frameworks and MCP server configurations for security misconfigurations, malicious code, and known threats. It runs 106 checks across 6 agent frameworks, using AST-based static analysis (not regex) for accurate results without ever executing scanned code.
+VASO scans AI agent frameworks and MCP server configurations for security misconfigurations, malicious code, and known threats. It runs 113 checks across 6 agent frameworks, using AST-based static analysis (not regex) for accurate results without ever executing scanned code.
 
 ## Installation
 
@@ -14,7 +14,7 @@ VASO scans AI agent frameworks and MCP server configurations for security miscon
 npm install -g vaso
 ```
 
-Requires Node.js 18+.
+Requires Node.js 20+.
 
 ## Quick Start
 
@@ -60,7 +60,7 @@ See [doc/user-guide.md](doc/user-guide.md) for full option reference.
 
 ## Security Checks
 
-106 checks organized into 8 categories:
+113 checks organized into 11 categories:
 
 | Category | IDs | Count | Description |
 |----------|-----|-------|-------------|
@@ -70,7 +70,8 @@ See [doc/user-guide.md](doc/user-guide.md) for full option reference.
 | Network | NET-001–005 | 5 | Gateway exposure, WebSocket origins, proxy bypass |
 | Runtime | RUN-001–005 | 5 | LaunchAgents, cron, Docker socket, VS Code trojans |
 | Policy | POL-001–005 | 5 | DM policy, tool policy, sandbox compliance |
-| MCP Server | MCP-001–018 | 18 | Transport security, credential exposure, tool injection |
+| MCP Server | MCP-001–020 | 20 | Transport security, credential exposure, tool injection, toxic flows, rug pull |
+| Advisory | ADV-001–005 | 5 | Vulnerability/CVE detection with version awareness |
 | Agent-Specific | Various | 38 | Per-framework checks (IronClaw, Nanobot, ZeroClaw) |
 
 ## Output Formats
