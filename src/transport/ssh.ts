@@ -2,14 +2,49 @@
  * SSH target parsing and remote probe execution for network scanning.
  */
 
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
+import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { writeFile, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { ProbeSnapshot, ProbeManifest } from '../core/snapshot-types.js';
 
-const execFileAsync = promisify(execFile);
+/**
+ * Run a command capturing stdout, with stdin/stderr inherited from the
+ * terminal so SSH can prompt for passwords interactively.
+ */
+function spawnCapture(
+  cmd: string,
+  args: string[],
+  options: { timeout?: number } = {},
+): Promise<{ stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    const isInteractive = process.stdin.isTTY ?? false;
+    const child = spawn(cmd, args, {
+      stdio: [
+        isInteractive ? 'inherit' : 'pipe',  // stdin: inherit for password prompts
+        'pipe',                                // stdout: capture
+        isInteractive ? 'inherit' : 'pipe',  // stderr: inherit so user sees SSH messages
+      ],
+      timeout: options.timeout,
+    });
+
+    const chunks: Buffer[] = [];
+    const errChunks: Buffer[] = [];
+    child.stdout!.on('data', (d: Buffer) => chunks.push(d));
+    if (child.stderr) child.stderr.on('data', (d: Buffer) => errChunks.push(d));
+
+    child.on('close', (code) => {
+      const stdout = Buffer.concat(chunks).toString('utf-8');
+      const stderr = Buffer.concat(errChunks).toString('utf-8');
+      if (code === 0) {
+        resolve({ stdout, stderr });
+      } else {
+        reject(new Error(`Command failed: ${cmd} ${args.join(' ')}\n${stderr || stdout}`.trim()));
+      }
+    });
+    child.on('error', reject);
+  });
+}
 
 export interface SSHTarget {
   user: string;
@@ -69,7 +104,6 @@ interface RemotePlatform {
 
 function buildSSHArgs(target: SSHTarget, remoteCmd: string[]): string[] {
   const args = [
-    '-o', 'BatchMode=yes',
     '-o', 'StrictHostKeyChecking=accept-new',
     '-o', 'ConnectTimeout=10',
     '-p', String(target.port),
@@ -81,7 +115,6 @@ function buildSSHArgs(target: SSHTarget, remoteCmd: string[]): string[] {
 
 function buildSCPArgs(target: SSHTarget, localPath: string, remotePath: string): string[] {
   const args = [
-    '-o', 'BatchMode=yes',
     '-o', 'StrictHostKeyChecking=accept-new',
     '-o', 'ConnectTimeout=10',
     '-P', String(target.port),
@@ -92,9 +125,7 @@ function buildSCPArgs(target: SSHTarget, localPath: string, remotePath: string):
 }
 
 async function detectRemotePlatform(target: SSHTarget, timeout: number): Promise<RemotePlatform> {
-  const { stdout } = await execFileAsync('ssh', buildSSHArgs(target, ['uname -s && uname -m']), {
-    timeout, encoding: 'utf-8',
-  });
+  const { stdout } = await spawnCapture('ssh', buildSSHArgs(target, ['uname -s && uname -m']), { timeout });
   const lines = stdout.trim().split('\n');
   if (lines.length < 2) throw new Error(`Unexpected uname output from ${target.host}: ${stdout}`);
 
@@ -139,17 +170,15 @@ export async function executeRemoteProbe(
     await writeFile(localManifestPath, JSON.stringify(options.manifest), 'utf-8');
 
     // 4. Push binary + manifest to remote
-    await execFileAsync('scp', buildSCPArgs(target, localBinary, remoteProbePath), { timeout, encoding: 'utf-8' });
-    await execFileAsync('scp', buildSCPArgs(target, localManifestPath, remoteManifestPath), { timeout, encoding: 'utf-8' });
+    await spawnCapture('scp', buildSCPArgs(target, localBinary, remoteProbePath), { timeout });
+    await spawnCapture('scp', buildSCPArgs(target, localManifestPath, remoteManifestPath), { timeout });
 
     // 5. Make probe executable
-    await execFileAsync('ssh', buildSSHArgs(target, [`chmod +x ${remoteProbePath}`]), { timeout: 10000, encoding: 'utf-8' });
+    await spawnCapture('ssh', buildSSHArgs(target, [`chmod +x ${remoteProbePath}`]), { timeout: 10000 });
 
     // 6. Execute probe
     const probeCmd = `${remoteProbePath} --manifest ${remoteManifestPath}${target.sudo ? ' --escalate' : ''}`;
-    const { stdout } = await execFileAsync('ssh', buildSSHArgs(target, [probeCmd]), {
-      timeout, encoding: 'utf-8', maxBuffer: 50 * 1024 * 1024,
-    });
+    const { stdout } = await spawnCapture('ssh', buildSSHArgs(target, [probeCmd]), { timeout });
 
     // 7. Parse snapshot
     return JSON.parse(stdout) as ProbeSnapshot;
@@ -157,8 +186,8 @@ export async function executeRemoteProbe(
     // Clean up local temp file
     await unlink(localManifestPath).catch(() => {});
     // Clean up remote temp files (best effort)
-    await execFileAsync('ssh', buildSSHArgs(target, [`rm -f ${remoteProbePath} ${remoteManifestPath}`]), {
-      timeout: 10000, encoding: 'utf-8',
+    await spawnCapture('ssh', buildSSHArgs(target, [`rm -f ${remoteProbePath} ${remoteManifestPath}`]), {
+      timeout: 10000,
     }).catch(() => {});
   }
 }
