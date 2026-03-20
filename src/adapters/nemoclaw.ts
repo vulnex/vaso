@@ -51,8 +51,8 @@ export const nemoclawAdapter: AgentAdapter = {
       } catch {}
     }
 
-    // Even if no config files parsed, the directory existing means NemoClaw is installed
-    if (configFiles.length === 0 && !(await fs.access(nemoDir))) return [];
+    // Directory exists but no config files means NemoClaw is not actually installed
+    if (configFiles.length === 0) return [];
 
     // Extract version from CLI or state
     let version = queryCliVersion('nemoclaw', fs);
