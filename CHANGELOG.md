@@ -37,6 +37,22 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - 29 new tests for `SnapshotFSProvider` covering all methods, error cases, and edge cases
 - Total tests: 822
 
+#### Network Scanning — SSH Remote Transport (Phase C)
+- **`vaso scan --host user@host`**: scan a remote host over SSH in a single command — automatically pushes the probe binary, executes it, and streams the snapshot back
+- **`vaso scan --host user@host1 --host user@host2`**: parallel multi-host scanning with configurable concurrency
+- **`vaso scan --inventory hosts.yaml`**: scan hosts listed in a YAML inventory file with per-host user, port, identity, sudo, and label overrides
+- **SSH ControlMaster multiplexing**: authenticates once (supporting interactive password prompts), then reuses the connection for all subsequent ssh/scp commands — no repeated password prompts
+- **Automatic platform detection**: detects remote OS and architecture via `uname`, selects the correct cross-compiled probe binary (linux/darwin, amd64/arm64)
+- **`--ssh-key <path>`**: specify SSH identity file for remote connections
+- **`--ssh-timeout <seconds>`**: configurable SSH connection timeout (default 60s)
+- **`--sudo`**: pass `--escalate` to the remote probe for privilege escalation via passwordless sudo
+- **Per-host error isolation**: failed hosts produce error entries without blocking other hosts
+- **`ScanResult.label`**: optional label for host identification in reports
+- **SSH transport layer** (`src/transport/`): `ssh.ts` (target parser, ControlMaster, remote probe execution), `inventory.ts` (YAML inventory parser), `multi-host.ts` (parallel scanning orchestrator)
+- No SSH library dependency — uses the system `ssh`/`scp` binaries, respects `~/.ssh/config` for host aliases and jump hosts
+- 22 new tests for SSH target parsing, inventory parsing, and multi-host aggregation
+- Total tests: 843
+
 #### Cross-Platform Installer Script
 - **`install.sh`** — one-liner bash installer for Linux, macOS, and WSL: `curl -fsSL https://raw.githubusercontent.com/vulnex/vaso/main/install.sh | bash`
 - Detects platform (macOS, Linux, WSL via `/proc/version` check) and architecture
