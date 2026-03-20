@@ -121,6 +121,11 @@ program
   .option('--all-users', 'scan all user accounts (requires root/sudo)')
   .option('--rules <paths...>', 'load additional rule files')
   .option('--no-custom-rules', 'skip declarative rules')
+  .option('--host <targets...>', 'remote host(s) to scan via SSH (user@host[:port])')
+  .option('--inventory <path>', 'YAML file listing hosts to scan')
+  .option('--ssh-key <path>', 'SSH identity file for remote connections')
+  .option('--ssh-timeout <seconds>', 'SSH connection timeout in seconds', '60')
+  .option('--sudo', 'attempt privilege escalation via sudo on remote hosts')
   .option('--snapshot <path>', 'scan from a pre-collected probe snapshot file')
   .option('--no-color', 'disable colored output')
   .action(async (options) => {

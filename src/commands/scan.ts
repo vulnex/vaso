@@ -18,6 +18,11 @@ export interface ScanCommandOptions {
   allUsers?: boolean;
   color?: boolean;
   snapshot?: string;
+  host?: string[];
+  inventory?: string;
+  sshKey?: string;
+  sshTimeout?: string;
+  sudo?: boolean;
 }
 
 export async function runScan(options: ScanCommandOptions): Promise<void> {
@@ -50,6 +55,98 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
     }
 
     console.log(chalk.dim(`  Scanning snapshot from host "${snapshot.hostname}" (${snapshot.platform})\n`));
+  }
+
+  // SSH remote scanning
+  if (options.host || options.inventory) {
+    const { parseSSHTarget } = await import('../transport/ssh.js');
+    const { parseInventory } = await import('../transport/inventory.js');
+    const { scanMultipleHosts } = await import('../transport/multi-host.js');
+    const { buildProbeManifest } = await import('../core/manifest-builder.js');
+    type SSHTarget = import('../transport/ssh.js').SSHTarget;
+
+    // Build target list
+    let targets: SSHTarget[] = [];
+
+    if (options.host) {
+      targets = options.host.map(h => {
+        const t = parseSSHTarget(h);
+        if (options.sshKey) t.identity = options.sshKey;
+        if (options.sudo) t.sudo = true;
+        return t;
+      });
+    }
+
+    if (options.inventory) {
+      const inventoryTargets = await parseInventory(options.inventory);
+      // Apply CLI overrides
+      for (const t of inventoryTargets) {
+        if (options.sshKey && !t.identity) t.identity = options.sshKey;
+        if (options.sudo) t.sudo = true;
+      }
+      targets.push(...inventoryTargets);
+    }
+
+    if (targets.length === 0) {
+      console.error(chalk.red('No scan targets specified'));
+      process.exitCode = 1;
+      return;
+    }
+
+    // Determine probe binary directory
+    // Look for probe binaries relative to the VASO installation
+    const { dirname, join } = await import('node:path');
+    const { fileURLToPath } = await import('node:url');
+    const vasoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
+    const probeBinDir = join(vasoRoot, 'probe', 'dist');
+
+    const manifest = buildProbeManifest(adapterRegistry.getAdapters());
+    const timeout = parseInt(options.sshTimeout ?? '60', 10) * 1000;
+
+    console.log(chalk.bold(`\n  Scanning ${targets.length} remote host(s)...\n`));
+
+    const hostResults = await scanMultipleHosts({
+      targets,
+      transportOptions: { probeBinDir, manifest, timeout },
+      scanOptions: {
+        agentFilter: options.agent,
+        format: options.format as any,
+      },
+    });
+
+    // Report results
+    const reporter = getReporter(options.format as any ?? 'terminal');
+    const successResults = hostResults.filter(hr => hr.result);
+    const failedResults = hostResults.filter(hr => hr.error);
+
+    for (const hr of successResults) {
+      if (hr.result) {
+        const label = hr.target.label ?? `${hr.target.user}@${hr.target.host}`;
+        console.log(chalk.bold(`\n── ${label} (${hr.result.host ?? hr.target.host}) ──\n`));
+        console.log(reporter.render(hr.result));
+      }
+    }
+
+    if (failedResults.length > 0) {
+      console.log(chalk.bold(chalk.red(`\n  Failed hosts (${failedResults.length}):`)));
+      for (const hr of failedResults) {
+        const label = hr.target.label ?? `${hr.target.user}@${hr.target.host}`;
+        console.log(chalk.red(`    ✗ ${label}: ${hr.error}`));
+      }
+    }
+
+    // Summary
+    console.log(chalk.bold(`\n  Summary: ${successResults.length} scanned, ${failedResults.length} failed\n`));
+
+    // Exit with non-zero if any critical findings or failures
+    const hasCritical = successResults.some(hr =>
+      hr.result?.agents.some(a => a.results.some(r => r.severity === 'critical' && !r.passed))
+    );
+    if (hasCritical || failedResults.length > 0) {
+      process.exitCode = 1;
+    }
+
+    return; // Don't fall through to local scan
   }
 
   const engine = new ScanEngine(adapterRegistry, checkRegistry, snapshotFs);
