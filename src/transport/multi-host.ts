@@ -63,16 +63,28 @@ export async function scanMultipleHosts(
   async function processTarget(target: SSHTarget): Promise<HostScanResult> {
     const start = Date.now();
     try {
-      // TODO: implement actual SSH transport
-      // 1. Connect via ssh2 or spawn ssh subprocess
-      // 2. Detect remote arch (uname -m)
-      // 3. Upload probe binary from probeBinDir
-      // 4. Execute probe with manifest, capture JSON output
-      // 5. Parse snapshot
-      throw new Error(
-        `SSH transport not yet implemented — use "vaso probe" on remote host ` +
-        `and "vaso scan --snapshot <file>" locally instead`,
-      );
+      const { executeRemoteProbe } = await import('./ssh.js');
+
+      const snapshot = await executeRemoteProbe(target, {
+        probeBinDir: transportOptions.probeBinDir,
+        manifest: transportOptions.manifest,
+        timeout: transportOptions.timeout,
+      });
+
+      const snapshotFs = new SnapshotFSProvider(snapshot);
+      const engine = new ScanEngine(adapterRegistry, checkRegistry, snapshotFs);
+      const result = await engine.scan({
+        agentFilter: scanOptions.agentFilter,
+      });
+
+      result.host = snapshot.hostname;
+      result.label = target.label;
+
+      return {
+        target,
+        result,
+        durationMs: Date.now() - start,
+      };
     } catch (err) {
       return {
         target,
