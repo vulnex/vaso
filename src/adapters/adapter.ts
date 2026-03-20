@@ -16,4 +16,5 @@ export interface AgentAdapter {
   getMemoryFiles?(installDir: string): string[];
   getCredentialPaths?(installDir: string): string[];
   getCLICommand?(): string;
+  getProbeManifest?(): import('../core/snapshot-types.js').ProbeManifest;
 }

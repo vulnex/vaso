@@ -1,6 +1,7 @@
 import { join } from 'node:path';
 import type { AgentAdapter, DetectOptions } from './adapter.js';
 import type { AgentInstallation, GatewayInfo } from '../core/types.js';
+import type { ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { loadConfig } from '../core/config-loader.js';
@@ -101,6 +102,32 @@ export const zeroclawAdapter: AgentAdapter = {
 
   getCLICommand(): string {
     return 'zeroclaw';
+  },
+
+  getProbeManifest(): ProbeManifest {
+    return {
+      filePaths: [
+        '~/.zeroclaw/config.toml',
+        '~/.zeroclaw/auth-profiles.json',
+        '~/.zeroclaw/.secret_key',
+      ],
+      globPatterns: [
+        '~/.zeroclaw/workspace/skills/**',
+      ],
+      commands: [
+        { id: 'zeroclaw-which', cmd: 'which', args: ['zeroclaw'], timeout: 3000 },
+        { id: 'zeroclaw-version', cmd: 'zeroclaw', args: ['--version'], timeout: 3000 },
+      ],
+      directoryListings: [
+        '~/.zeroclaw',
+        '~/.zeroclaw/workspace',
+        '~/.zeroclaw/workspace/skills',
+        '~/.cargo/bin',
+      ],
+      envPrefixes: ['ZEROCLAW_'],
+      systemPaths: [],
+      systemDirListings: [],
+    };
   },
 };
 

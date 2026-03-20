@@ -1,6 +1,7 @@
 import { join } from 'node:path';
 import type { AgentAdapter, DetectOptions } from './adapter.js';
 import type { AgentInstallation, GatewayInfo } from '../core/types.js';
+import type { ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { loadConfig } from '../core/config-loader.js';
@@ -75,6 +76,30 @@ export const nanoclawAdapter: AgentAdapter = {
 
   getCLICommand(): string {
     return 'nanoclaw';
+  },
+
+  getProbeManifest(): ProbeManifest {
+    return {
+      filePaths: [
+        '~/.nanoclaw.env',
+        '~/.config/nanoclaw/config.json',
+        '~/.config/nanoclaw/mount-allowlist.json',
+      ],
+      globPatterns: [
+        '~/.config/nanoclaw/skills/**',
+      ],
+      commands: [
+        { id: 'nanoclaw-which', cmd: 'which', args: ['nanoclaw'], timeout: 3000 },
+        { id: 'nanoclaw-version', cmd: 'nanoclaw', args: ['--version'], timeout: 3000 },
+      ],
+      directoryListings: [
+        '~/.config/nanoclaw',
+        '~/.config/nanoclaw/skills',
+      ],
+      envPrefixes: ['NANOCLAW_'],
+      systemPaths: [],
+      systemDirListings: [],
+    };
   },
 };
 

@@ -1,6 +1,7 @@
 import { join } from 'node:path';
 import type { AgentAdapter, DetectOptions } from './adapter.js';
 import type { AgentInstallation, GatewayInfo } from '../core/types.js';
+import type { ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { loadConfig } from '../core/config-loader.js';
@@ -77,6 +78,29 @@ export const picoclawAdapter: AgentAdapter = {
 
   getCLICommand(): string {
     return 'picoclaw';
+  },
+
+  getProbeManifest(): ProbeManifest {
+    return {
+      filePaths: [
+        '~/.picoclaw/config.json',
+        '~/.picoclaw/auth.json',
+      ],
+      globPatterns: [
+        '~/.picoclaw/skills/**',
+      ],
+      commands: [
+        { id: 'picoclaw-which', cmd: 'which', args: ['picoclaw'], timeout: 3000 },
+        { id: 'picoclaw-version', cmd: 'picoclaw', args: ['--version'], timeout: 3000 },
+      ],
+      directoryListings: [
+        '~/.picoclaw',
+        '~/.picoclaw/skills',
+      ],
+      envPrefixes: ['PICOCLAW_'],
+      systemPaths: [],
+      systemDirListings: [],
+    };
   },
 };
 

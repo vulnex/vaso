@@ -9,3 +9,5 @@ coverage/
 devnotes/
 feed-signing-key.pem
 CLAUDE.md
+internal_data/
+probe/dist/

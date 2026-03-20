@@ -121,6 +121,7 @@ program
   .option('--all-users', 'scan all user accounts (requires root/sudo)')
   .option('--rules <paths...>', 'load additional rule files')
   .option('--no-custom-rules', 'skip declarative rules')
+  .option('--snapshot <path>', 'scan from a pre-collected probe snapshot file')
   .option('--no-color', 'disable colored output')
   .action(async (options) => {
     const { runScan } = await import('./commands/scan.js');
@@ -289,6 +290,26 @@ rulesCommand
   .action(async (options) => {
     const { runRulesInit } = await import('./commands/rules.js');
     await runRulesInit(options);
+  });
+
+const probeCmd = program
+  .command('probe')
+  .description('Manage probe snapshots for remote scanning');
+
+probeCmd
+  .command('manifest')
+  .description('Generate a probe manifest for remote data collection')
+  .action(async () => {
+    const { probeManifest } = await import('./commands/probe.js');
+    await probeManifest(adapterRegistry);
+  });
+
+probeCmd
+  .command('validate <path>')
+  .description('Validate a probe snapshot file')
+  .action(async (path: string) => {
+    const { probeValidate } = await import('./commands/probe.js');
+    await probeValidate(path);
   });
 
 program.parse();

@@ -1,6 +1,7 @@
 import { join } from 'node:path';
 import type { AgentAdapter, DetectOptions } from './adapter.js';
 import type { AgentInstallation, GatewayInfo } from '../core/types.js';
+import type { ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { loadConfig } from '../core/config-loader.js';
@@ -111,6 +112,34 @@ export const ironclawAdapter: AgentAdapter = {
 
   getCLICommand(): string {
     return 'ironclaw';
+  },
+
+  getProbeManifest(): ProbeManifest {
+    return {
+      filePaths: [
+        '~/.ironclaw/.env',
+        '~/.ironclaw/config.toml',
+        '~/.ironclaw/settings.json',
+        '~/.ironclaw/mcp-servers.json',
+        '~/.ironclaw/memory.json',
+        '~/.ironclaw/conversations.db',
+      ],
+      globPatterns: [
+        '~/.ironclaw/skills/**',
+      ],
+      commands: [
+        { id: 'ironclaw-which', cmd: 'which', args: ['ironclaw'], timeout: 3000 },
+        { id: 'ironclaw-version', cmd: 'ironclaw', args: ['--version'], timeout: 3000 },
+      ],
+      directoryListings: [
+        '~/.ironclaw',
+        '~/.ironclaw/skills',
+        '~/.cargo/bin',
+      ],
+      envPrefixes: ['IRONCLAW_', 'GATEWAY_'],
+      systemPaths: [],
+      systemDirListings: [],
+    };
   },
 };
 
