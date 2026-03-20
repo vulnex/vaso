@@ -142,8 +142,8 @@ export class SnapshotFSProvider implements FSProvider {
 
   private hasChildPaths(path: string): boolean {
     const prefix = path.endsWith('/') ? path : path + '/';
-    for (const key of Object.keys(this.snapshot.files)) {
-      if (key.startsWith(prefix)) return true;
+    for (const [key, entry] of Object.entries(this.snapshot.files)) {
+      if (key.startsWith(prefix) && entry.exists) return true;
     }
     for (const key of Object.keys(this.snapshot.directories)) {
       if (key.startsWith(prefix)) return true;
