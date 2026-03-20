@@ -1,4 +1,3 @@
-import { readdir } from 'node:fs/promises';
 import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
 import { getIOCDatabase } from '../../ioc/database.js';
 
@@ -19,9 +18,9 @@ export const ioc006: CheckModule = {
     }
 
     try {
-      const entries = await readdir(skillsDir, { withFileTypes: true });
+      const entries = await ctx.fs.readdirEntries(skillsDir);
       for (const entry of entries) {
-        if (!entry.isDirectory()) continue;
+        if (!entry.isDirectory) continue;
 
         for (const pattern of db.maliciousSkillPatterns) {
           if (pattern.test(entry.name)) {

@@ -1,4 +1,3 @@
-import { readFile } from 'node:fs/promises';
 import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
 import { analyzeCode } from '../../analyzers/ast-analyzer.js';
 import { getSkillFiles } from '../../core/utils.js';
@@ -17,11 +16,11 @@ export const skl003: CheckModule = {
       return { id: 'SKL-003', name: 'Eval/Exec Usage', category: 'skills', severity: 'critical', passed: true, message: 'No skills directory found' };
     }
 
-    const files = ctx.skillFiles ?? await getSkillFiles(skillsDir);
+    const files = ctx.skillFiles ?? await getSkillFiles(skillsDir, ctx.fs);
 
     for (const file of files) {
       try {
-        const code = await readFile(file, 'utf-8');
+        const code = await ctx.fs.readFile(file);
         const flows = analyzeCode(code, file);
         const execFlows = flows.filter(f => f.type === 'eval-exec');
 

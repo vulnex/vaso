@@ -1,4 +1,3 @@
-import { execSync } from 'node:child_process';
 import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
 
 const AGENT_KEYWORDS = ['openclaw', 'nanoclaw', 'picoclaw', 'ironclaw', 'nanobot', 'zeroclaw'];
@@ -27,12 +26,12 @@ export const run005: CheckModule = {
   description: 'Check agent process ancestry for suspicious parent processes',
   supportedPlatforms: ['darwin', 'linux'],
 
-  async run(_ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx: ScanContext): Promise<CheckResult> {
     const evidence: Evidence[] = [];
 
     let output = '';
     try {
-      output = execSync('ps -eo pid,ppid,comm 2>/dev/null', { encoding: 'utf-8', timeout: 5000 });
+      output = ctx.fs.execSync('ps', ['-eo', 'pid,ppid,comm'], { timeout: 5000 });
     } catch {
       return {
         id: 'RUN-005',

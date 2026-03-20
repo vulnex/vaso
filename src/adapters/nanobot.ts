@@ -1,29 +1,29 @@
 import { join } from 'node:path';
-import { homedir } from 'node:os';
-import { execFileSync } from 'node:child_process';
 import type { AgentAdapter, DetectOptions } from './adapter.js';
 import type { AgentInstallation, GatewayInfo } from '../core/types.js';
+import type { FSProvider } from '../core/fs-provider.js';
+import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { loadConfig } from '../core/config-loader.js';
-import { pathExists } from '../core/utils.js';
 
 export const nanobotAdapter: AgentAdapter = {
   agent: 'nanobot',
   displayName: 'Nanobot',
 
   async detect(_options?: DetectOptions): Promise<AgentInstallation[]> {
-    const home = homedir();
+    const fs = _options?.fs ?? new LocalFSProvider();
+    const home = fs.homedir();
     const nanobotDir = join(home, '.nanobot');
     const configFiles = [];
 
     const configPath = join(nanobotDir, 'config.json');
-    if (await pathExists(configPath)) {
+    if (await fs.access(configPath)) {
       try {
-        configFiles.push(await loadConfig(configPath));
+        configFiles.push(await loadConfig(configPath, fs));
       } catch {}
     }
 
     // Also check for CLI binary
-    const cliBinary = await findCLIBinary();
+    const cliBinary = await findCLIBinary(fs);
 
     if (configFiles.length === 0 && !cliBinary) return [];
 
@@ -34,7 +34,7 @@ export const nanobotAdapter: AgentAdapter = {
 
     // Extract version from config, fallback to CLI
     const mainConfig = configFiles.find(c => c.filePath.endsWith('config.json'));
-    const version = (mainConfig?.data?.version as string) ?? queryCliVersion(cliBinary ?? 'nanobot');
+    const version = (mainConfig?.data?.version as string) ?? queryCliVersion(cliBinary ?? 'nanobot', fs);
 
     return [{
       agent: 'nanobot',
@@ -48,7 +48,7 @@ export const nanobotAdapter: AgentAdapter = {
   },
 
   getConfigPaths(): string[] {
-    const home = homedir();
+    const home = new LocalFSProvider().homedir();
     return [
       join(home, '.nanobot', 'config.json'),
     ];
@@ -89,13 +89,9 @@ export const nanobotAdapter: AgentAdapter = {
   },
 };
 
-function queryCliVersion(binary: string): string | undefined {
+function queryCliVersion(binary: string, fs: FSProvider): string | undefined {
   try {
-    const output = execFileSync(binary, ['--version'], {
-      encoding: 'utf-8',
-      timeout: 3000,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    }).trim();
+    const output = fs.execSync(binary, ['--version'], { timeout: 3000 }).trim();
     const m = /(\d+\.\d+\.\d+(?:-[a-zA-Z0-9.]+)?)/.exec(output);
     return m?.[1];
   } catch {
@@ -103,13 +99,9 @@ function queryCliVersion(binary: string): string | undefined {
   }
 }
 
-async function findCLIBinary(): Promise<string | undefined> {
+async function findCLIBinary(fs: FSProvider): Promise<string | undefined> {
   try {
-    const result = execFileSync('which', ['nanobot'], {
-      encoding: 'utf-8',
-      timeout: 3000,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    }).trim();
+    const result = fs.execSync('which', ['nanobot'], { timeout: 3000 }).trim();
     if (result) return result;
   } catch {}
 

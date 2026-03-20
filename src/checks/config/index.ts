@@ -14,6 +14,15 @@ import { cfg012 } from './cfg-012-auth-bypass.js';
 import { cfg013 } from './cfg-013-dm-policy.js';
 import { cfg014 } from './cfg-014-tool-policy.js';
 import { cfg015 } from './cfg-015-mdns-broadcast.js';
+import { cfg016 } from './cfg-016-nemoclaw-hardening.js';
+import { cfg017 } from './cfg-017-nemoclaw-sandbox-active.js';
+import { cfg018 } from './cfg-018-nemoclaw-network-policy.js';
+import { cfg019 } from './cfg-019-nemoclaw-blueprint-integrity.js';
+import { cfg020 } from './cfg-020-nemoclaw-api-key-exposure.js';
+import { cfg021 } from './cfg-021-nemoclaw-gpu-isolation.js';
+import { cfg022 } from './cfg-022-nemoclaw-policy-scope.js';
+import { cfg023 } from './cfg-023-nemoclaw-model-pinning.js';
+import { cfg024 } from './cfg-024-nemoclaw-default-sandbox.js';
 
 export const configChecks: CheckModule[] = [
   cfg001,
@@ -31,4 +40,13 @@ export const configChecks: CheckModule[] = [
   cfg013,
   cfg014,
   cfg015,
+  cfg016,
+  cfg017,
+  cfg018,
+  cfg019,
+  cfg020,
+  cfg021,
+  cfg022,
+  cfg023,
+  cfg024,
 ];

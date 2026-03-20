@@ -1,6 +1,4 @@
-import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
 import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
 
 const SUSPICIOUS_KEYWORDS = [
@@ -20,15 +18,16 @@ export const run001: CheckModule = {
     const evidence: Evidence[] = [];
 
     if (ctx.platform === 'darwin') {
+      const home = ctx.fs.homedir();
       const launchDirs = [
-        join(homedir(), 'Library', 'LaunchAgents'),
+        join(home, 'Library', 'LaunchAgents'),
         '/Library/LaunchAgents',
         '/Library/LaunchDaemons',
       ];
 
       for (const dir of launchDirs) {
         try {
-          const entries = await readdir(dir);
+          const entries = await ctx.fs.readdir(dir);
           for (const entry of entries) {
             const lower = entry.toLowerCase();
             for (const keyword of SUSPICIOUS_KEYWORDS) {
@@ -36,7 +35,7 @@ export const run001: CheckModule = {
                 const filePath = join(dir, entry);
                 let detail = `LaunchAgent references "${keyword}"`;
                 try {
-                  const content = await readFile(filePath, 'utf-8');
+                  const content = await ctx.fs.readFile(filePath);
                   if (content.includes('ProgramArguments')) {
                     detail += ` — has ProgramArguments`;
                   }
@@ -51,14 +50,15 @@ export const run001: CheckModule = {
     }
 
     if (ctx.platform === 'linux') {
+      const home = ctx.fs.homedir();
       const systemdDirs = [
-        join(homedir(), '.config', 'systemd', 'user'),
+        join(home, '.config', 'systemd', 'user'),
         '/etc/systemd/system',
       ];
 
       for (const dir of systemdDirs) {
         try {
-          const entries = await readdir(dir);
+          const entries = await ctx.fs.readdir(dir);
           for (const entry of entries) {
             const lower = entry.toLowerCase();
             for (const keyword of SUSPICIOUS_KEYWORDS) {

@@ -4,35 +4,35 @@ import { ironclawAdapter } from './ironclaw.js';
 
 vi.mock('node:fs/promises', () => ({
   access: vi.fn(),
+  readdir: vi.fn(),
+  readFile: vi.fn(),
+  stat: vi.fn(),
+  realpath: vi.fn(),
 }));
 
 vi.mock('node:child_process', () => ({
   execFileSync: vi.fn(),
+  execFile: vi.fn(),
 }));
 
 vi.mock('../core/config-loader.js', () => ({
   loadConfig: vi.fn(),
 }));
 
-vi.mock('../core/utils.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../core/utils.js')>();
-  return {
-    ...actual,
-    pathExists: vi.fn(),
-  };
-});
-
+import { access } from 'node:fs/promises';
 import { loadConfig } from '../core/config-loader.js';
-import { pathExists } from '../core/utils.js';
 import { execFileSync } from 'node:child_process';
 
-const mockPathExists = vi.mocked(pathExists);
+const mockAccess = vi.mocked(access);
 const mockLoadConfig = vi.mocked(loadConfig);
 const mockExecFileSync = vi.mocked(execFileSync);
 
 function setExistingPaths(paths: string[]): void {
   const pathSet = new Set(paths);
-  mockPathExists.mockImplementation(async (path) => pathSet.has(path));
+  mockAccess.mockImplementation(async (path) => {
+    if (pathSet.has(path as string)) return undefined;
+    throw new Error('ENOENT');
+  });
 }
 
 function mockConfig(filePath: string, data: Record<string, unknown> = {}) {

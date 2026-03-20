@@ -1,5 +1,6 @@
-import { access, readdir } from 'node:fs/promises';
 import { join, extname } from 'node:path';
+import type { FSProvider } from './fs-provider.js';
+import { LocalFSProvider } from './local-fs-provider.js';
 
 /**
  * Navigate a nested object by dot-separated path.
@@ -17,12 +18,13 @@ const CODE_EXTENSIONS = new Set(['.js', '.ts', '.mjs', '.cjs', '.jsx', '.tsx', '
 /**
  * Recursively find all code files (JS/TS/Python/Shell) under a directory.
  */
-export async function getSkillFiles(dir: string): Promise<string[]> {
+export async function getSkillFiles(dir: string, fs?: FSProvider): Promise<string[]> {
+  const provider = fs ?? new LocalFSProvider();
   const files: string[] = [];
   try {
-    const entries = await readdir(dir, { withFileTypes: true, recursive: true });
+    const entries = await provider.readdirEntries(dir, { recursive: true });
     for (const entry of entries) {
-      if (entry.isFile() && CODE_EXTENSIONS.has(extname(entry.name))) {
+      if (entry.isFile && CODE_EXTENSIONS.has(extname(entry.name))) {
         const fullPath = entry.parentPath ? join(entry.parentPath, entry.name) : join(dir, entry.name);
         files.push(fullPath);
       }
@@ -84,11 +86,7 @@ export function deepMerge(
 /**
  * Check if a path exists (file or directory).
  */
-export async function pathExists(path: string): Promise<boolean> {
-  try {
-    await access(path);
-    return true;
-  } catch {
-    return false;
-  }
+export async function pathExists(path: string, fs?: FSProvider): Promise<boolean> {
+  const provider = fs ?? new LocalFSProvider();
+  return provider.access(path);
 }

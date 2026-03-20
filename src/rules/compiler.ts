@@ -1,4 +1,3 @@
-import { readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import type { CheckModule, CheckResult, ScanContext, Evidence, FixResult } from '../core/types.js';
 import { getNestedValue } from '../core/utils.js';
@@ -83,7 +82,7 @@ function compilePatternRule(rule: DeclarativeRule): CheckModule['run'] {
         content = entry.content;
       } else {
         try {
-          content = await readFile(entry.filePath, 'utf-8');
+          content = await ctx.fs.readFile(entry.filePath);
         } catch {
           continue;
         }
@@ -136,7 +135,7 @@ function compileFileExistsRule(rule: DeclarativeRule): CheckModule['run'] {
       ? file_exists.path
       : resolve(join(ctx.installation.installDir, file_exists.path));
 
-    const exists = await pathExists(targetPath);
+    const exists = await pathExists(targetPath, ctx.fs);
     const passed = passWhen === 'exists' ? exists : !exists;
 
     const evidence: Evidence[] = passed ? [] : [{

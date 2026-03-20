@@ -1,15 +1,14 @@
-import { readFile, access } from 'node:fs/promises';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { MCPConfig, MCPServerEntry, MCPDiscoveryResult } from './types.js';
+import type { FSProvider } from '../core/fs-provider.js';
+import { LocalFSProvider } from '../core/local-fs-provider.js';
 
 interface ConfigLocation {
   source: string;
   path: string;
 }
 
-function getGlobalConfigLocations(platform: NodeJS.Platform): ConfigLocation[] {
-  const home = homedir();
+function getGlobalConfigLocations(platform: NodeJS.Platform, home: string): ConfigLocation[] {
   const locations: ConfigLocation[] = [];
 
   // Claude Desktop
@@ -62,15 +61,6 @@ function getProjectConfigLocations(projectDir: string): ConfigLocation[] {
   ];
 }
 
-async function fileExists(filePath: string): Promise<boolean> {
-  try {
-    await access(filePath);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 function parseServerEntries(data: Record<string, unknown>): MCPServerEntry[] {
   const servers: MCPServerEntry[] = [];
   const mcpServers = data.mcpServers as Record<string, Record<string, unknown>> | undefined;
@@ -105,22 +95,29 @@ function parseServerEntries(data: Record<string, unknown>): MCPServerEntry[] {
 }
 
 export class MCPDiscovery {
+  private fs: FSProvider;
+
+  constructor(fs?: FSProvider) {
+    this.fs = fs ?? new LocalFSProvider();
+  }
+
   async discover(
     platform: NodeJS.Platform = process.platform,
     projectDir?: string,
   ): Promise<MCPDiscoveryResult> {
     const configs: MCPConfig[] = [];
+    const home = this.fs.homedir();
 
     const locations = [
-      ...getGlobalConfigLocations(platform),
+      ...getGlobalConfigLocations(platform, home),
       ...(projectDir ? getProjectConfigLocations(projectDir) : []),
     ];
 
     for (const location of locations) {
-      if (!await fileExists(location.path)) continue;
+      if (!await this.fs.access(location.path)) continue;
 
       try {
-        const raw = await readFile(location.path, 'utf-8');
+        const raw = await this.fs.readFile(location.path);
         const data = JSON.parse(raw) as Record<string, unknown>;
         const servers = parseServerEntries(data);
 
@@ -144,10 +141,10 @@ export class MCPDiscovery {
     const configs: MCPConfig[] = [];
 
     for (const filePath of paths) {
-      if (!await fileExists(filePath)) continue;
+      if (!await this.fs.access(filePath)) continue;
 
       try {
-        const raw = await readFile(filePath, 'utf-8');
+        const raw = await this.fs.readFile(filePath);
         const data = JSON.parse(raw) as Record<string, unknown>;
         const servers = parseServerEntries(data);
 

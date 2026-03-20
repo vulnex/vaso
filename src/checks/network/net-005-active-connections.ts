@@ -1,4 +1,3 @@
-import { execSync } from 'node:child_process';
 import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
 import { getIOCDatabase } from '../../ioc/database.js';
 
@@ -20,9 +19,9 @@ export const net005: CheckModule = {
     let output = '';
     try {
       if (ctx.platform === 'darwin') {
-        output = execSync('netstat -an -p tcp 2>/dev/null', { encoding: 'utf-8', timeout: 5000 });
+        output = ctx.fs.execSync('netstat', ['-an', '-p', 'tcp'], { timeout: 5000 });
       } else {
-        output = execSync('ss -tn 2>/dev/null', { encoding: 'utf-8', timeout: 5000 });
+        output = ctx.fs.execSync('ss', ['-tn'], { timeout: 5000 });
       }
     } catch {
       return {

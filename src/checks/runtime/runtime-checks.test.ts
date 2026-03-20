@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { ScanContext, AgentInstallation } from '../../core/types.js';
+import { LocalFSProvider } from '../../core/local-fs-provider.js';
 import { run005 } from './run-005-process-ancestry.js';
 
 function makeContext(): ScanContext {
@@ -8,7 +9,7 @@ function makeContext(): ScanContext {
     installDir: '/tmp/test-openclaw',
     configFiles: [],
   };
-  return { installation, configs: [], platform: process.platform as NodeJS.Platform };
+  return { installation, configs: [], platform: process.platform as NodeJS.Platform, fs: new LocalFSProvider() };
 }
 
 describe('RUN-005: Process Ancestry Analysis', () => {

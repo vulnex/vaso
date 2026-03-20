@@ -7,6 +7,7 @@ import { picoclawAdapter } from './adapters/picoclaw.js';
 import { ironclawAdapter } from './adapters/ironclaw.js';
 import { nanobotAdapter } from './adapters/nanobot.js';
 import { zeroclawAdapter } from './adapters/zeroclaw.js';
+import { nemoclawAdapter } from './adapters/nemoclaw.js';
 import { registerAllChecks } from './checks/index.js';
 import { initIOCDatabase } from './ioc/database.js';
 import { isFeedStale } from './ioc/updater.js';
@@ -40,6 +41,7 @@ adapterRegistry.register(picoclawAdapter);
 adapterRegistry.register(ironclawAdapter);
 adapterRegistry.register(nanobotAdapter);
 adapterRegistry.register(zeroclawAdapter);
+adapterRegistry.register(nemoclawAdapter);
 registerAllChecks();
 
 const program = new Command();

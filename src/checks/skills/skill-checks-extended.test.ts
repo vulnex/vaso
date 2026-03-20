@@ -3,6 +3,7 @@ import { mkdtemp, writeFile, mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { ScanContext, AgentInstallation } from '../../core/types.js';
+import { LocalFSProvider } from '../../core/local-fs-provider.js';
 import { skl001 } from './skl-001-data-exfiltration.js';
 import { skl002 } from './skl-002-obfuscated-code.js';
 import { skl003 } from './skl-003-eval-exec.js';
@@ -21,7 +22,7 @@ function makeContext(skillsDir?: string): ScanContext {
     configFiles: [],
     skillsDir,
   };
-  return { installation, configs: [], platform: 'darwin' };
+  return { installation, configs: [], platform: 'darwin', fs: new LocalFSProvider() };
 }
 
 describe('SKL-001: Data Exfiltration Flow', () => {

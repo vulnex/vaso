@@ -1,4 +1,3 @@
-import { execSync } from 'node:child_process';
 import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
 
 const SUSPICIOUS_KEYWORDS = [
@@ -14,11 +13,11 @@ export const run002: CheckModule = {
   description: 'Check for cron entries referencing agent paths',
   supportedPlatforms: ['darwin', 'linux'],
 
-  async run(_ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx: ScanContext): Promise<CheckResult> {
     const evidence: Evidence[] = [];
 
     try {
-      const crontab = execSync('crontab -l 2>/dev/null', { encoding: 'utf-8', timeout: 5000 });
+      const crontab = ctx.fs.execSync('crontab', ['-l'], { timeout: 5000 });
       const lines = crontab.split('\n');
 
       for (let i = 0; i < lines.length; i++) {

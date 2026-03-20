@@ -1,15 +1,7 @@
-import { readFile, access, readdir } from 'node:fs/promises';
 import { join, dirname, resolve } from 'node:path';
 import type { MCPServerEntry, MCPServerSource } from './types.js';
-
-async function fileExists(filePath: string): Promise<boolean> {
-  try {
-    await access(filePath);
-    return true;
-  } catch {
-    return false;
-  }
-}
+import type { FSProvider } from '../core/fs-provider.js';
+import { LocalFSProvider } from '../core/local-fs-provider.js';
 
 export function inferPackageName(server: MCPServerEntry): string | undefined {
   if (!server.command || !server.args?.length) return undefined;
@@ -67,21 +59,21 @@ export function resolveLocalPath(server: MCPServerEntry): string | undefined {
   return undefined;
 }
 
-async function readSourceFile(filePath: string): Promise<string | undefined> {
+async function readSourceFile(filePath: string, fs: FSProvider): Promise<string | undefined> {
   try {
-    const content = await readFile(filePath, 'utf-8');
+    const content = await fs.readFile(filePath);
     return content;
   } catch {
     return undefined;
   }
 }
 
-async function findMainEntry(dir: string): Promise<string | undefined> {
+async function findMainEntry(dir: string, fs: FSProvider): Promise<string | undefined> {
   // Check package.json main field
   const pkgPath = join(dir, 'package.json');
-  if (await fileExists(pkgPath)) {
+  if (await fs.access(pkgPath)) {
     try {
-      const pkg = JSON.parse(await readFile(pkgPath, 'utf-8'));
+      const pkg = JSON.parse(await fs.readFile(pkgPath));
       if (pkg.main) return join(dir, pkg.main);
       if (pkg.bin) {
         const binEntry = typeof pkg.bin === 'string' ? pkg.bin : Object.values(pkg.bin)[0];
@@ -96,7 +88,7 @@ async function findMainEntry(dir: string): Promise<string | undefined> {
   const candidates = ['index.js', 'index.ts', 'src/index.js', 'src/index.ts', 'main.js', 'server.js'];
   for (const candidate of candidates) {
     const fullPath = join(dir, candidate);
-    if (await fileExists(fullPath)) return fullPath;
+    if (await fs.access(fullPath)) return fullPath;
   }
 
   return undefined;
@@ -104,7 +96,9 @@ async function findMainEntry(dir: string): Promise<string | undefined> {
 
 export async function resolveServerSources(
   servers: MCPServerEntry[],
+  fs?: FSProvider,
 ): Promise<MCPServerSource[]> {
+  const provider = fs ?? new LocalFSProvider();
   const sources: MCPServerSource[] = [];
 
   for (const server of servers) {
@@ -114,13 +108,13 @@ export async function resolveServerSources(
     let sourceCode: string | undefined;
 
     if (localPath) {
-      sourceCode = await readSourceFile(localPath);
+      sourceCode = await readSourceFile(localPath, provider);
 
       // If it's a directory, find the main entry
       if (!sourceCode) {
-        const entry = await findMainEntry(localPath);
+        const entry = await findMainEntry(localPath, provider);
         if (entry) {
-          sourceCode = await readSourceFile(entry);
+          sourceCode = await readSourceFile(entry, provider);
         }
       }
     }

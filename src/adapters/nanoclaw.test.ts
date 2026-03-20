@@ -4,10 +4,15 @@ import { nanoclawAdapter } from './nanoclaw.js';
 
 vi.mock('node:fs/promises', () => ({
   access: vi.fn(),
+  readdir: vi.fn(),
+  readFile: vi.fn(),
+  stat: vi.fn(),
+  realpath: vi.fn(),
 }));
 
 vi.mock('node:child_process', () => ({
   execFileSync: vi.fn(),
+  execFile: vi.fn(),
 }));
 
 vi.mock('../core/config-loader.js', () => ({

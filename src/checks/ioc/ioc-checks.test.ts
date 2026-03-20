@@ -3,6 +3,7 @@ import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { ScanContext, AgentInstallation } from '../../core/types.js';
+import { LocalFSProvider } from '../../core/local-fs-provider.js';
 import { ioc007 } from './ioc-007-binary-patterns.js';
 import { ioc008 } from './ioc-008-virustotal.js';
 
@@ -13,7 +14,7 @@ function makeContext(skillsDir?: string): ScanContext {
     configFiles: [],
     skillsDir,
   };
-  return { installation, configs: [], platform: 'darwin' };
+  return { installation, configs: [], platform: 'darwin', fs: new LocalFSProvider() };
 }
 
 describe('IOC-007: Binary Pattern Match', () => {

@@ -1,35 +1,31 @@
-import { access } from 'node:fs/promises';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
-import { execFileSync } from 'node:child_process';
 import type { AgentAdapter, DetectOptions } from './adapter.js';
 import type { AgentInstallation, GatewayInfo } from '../core/types.js';
+import type { FSProvider } from '../core/fs-provider.js';
+import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { loadConfig } from '../core/config-loader.js';
-
-async function fileExists(path: string): Promise<boolean> {
-  try { await access(path); return true; } catch { return false; }
-}
 
 export const picoclawAdapter: AgentAdapter = {
   agent: 'picoclaw',
   displayName: 'PicoClaw',
 
   async detect(_options?: DetectOptions): Promise<AgentInstallation[]> {
-    const home = homedir();
+    const fs = _options?.fs ?? new LocalFSProvider();
+    const home = fs.homedir();
     const picoDir = join(home, '.picoclaw');
     const configFiles = [];
 
     const configPath = join(picoDir, 'config.json');
-    if (await fileExists(configPath)) {
+    if (await fs.access(configPath)) {
       try {
-        configFiles.push(await loadConfig(configPath));
+        configFiles.push(await loadConfig(configPath, fs));
       } catch {}
     }
 
     const authPath = join(picoDir, 'auth.json');
-    if (await fileExists(authPath)) {
+    if (await fs.access(authPath)) {
       try {
-        configFiles.push(await loadConfig(authPath));
+        configFiles.push(await loadConfig(authPath, fs));
       } catch {}
     }
 
@@ -43,7 +39,7 @@ export const picoclawAdapter: AgentAdapter = {
 
     // Extract version from config, fallback to CLI
     const mainConfig = configFiles.find(c => c.filePath.endsWith('config.json'));
-    const version = (mainConfig?.data?.version as string) ?? queryCliVersion('picoclaw');
+    const version = (mainConfig?.data?.version as string) ?? queryCliVersion('picoclaw', fs);
 
     return [{
       agent: 'picoclaw',
@@ -56,7 +52,7 @@ export const picoclawAdapter: AgentAdapter = {
   },
 
   getConfigPaths(): string[] {
-    const home = homedir();
+    const home = new LocalFSProvider().homedir();
     return [
       join(home, '.picoclaw', 'config.json'),
       join(home, '.picoclaw', 'auth.json'),
@@ -84,13 +80,9 @@ export const picoclawAdapter: AgentAdapter = {
   },
 };
 
-function queryCliVersion(binary: string): string | undefined {
+function queryCliVersion(binary: string, fs: FSProvider): string | undefined {
   try {
-    const output = execFileSync(binary, ['--version'], {
-      encoding: 'utf-8',
-      timeout: 3000,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    }).trim();
+    const output = fs.execSync(binary, ['--version'], { timeout: 3000 }).trim();
     const m = /(\d+\.\d+\.\d+(?:-[a-zA-Z0-9.]+)?)/.exec(output);
     return m?.[1];
   } catch {

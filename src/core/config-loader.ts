@@ -1,11 +1,13 @@
-import { readFile } from 'node:fs/promises';
 import { extname } from 'node:path';
 import YAML from 'yaml';
 import { parse as parseTOML } from 'smol-toml';
 import type { ParsedConfig } from './types.js';
+import type { FSProvider } from './fs-provider.js';
+import { LocalFSProvider } from './local-fs-provider.js';
 
-export async function loadConfig(filePath: string): Promise<ParsedConfig> {
-  const raw = await readFile(filePath, 'utf-8');
+export async function loadConfig(filePath: string, fs?: FSProvider): Promise<ParsedConfig> {
+  const provider = fs ?? new LocalFSProvider();
+  const raw = await provider.readFile(filePath);
   const ext = extname(filePath).toLowerCase();
   const format = detectFormat(ext, filePath);
   const data = parseContent(raw, format);

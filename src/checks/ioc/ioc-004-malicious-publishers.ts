@@ -1,4 +1,3 @@
-import { readFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
 import { getIOCDatabase } from '../../ioc/database.js';
@@ -22,15 +21,15 @@ export const ioc004: CheckModule = {
 
     // Look for package.json, skill.json, or metadata files in skill dirs
     try {
-      const entries = await readdir(skillsDir, { withFileTypes: true });
+      const entries = await ctx.fs.readdirEntries(skillsDir);
       for (const entry of entries) {
-        if (!entry.isDirectory()) continue;
+        if (!entry.isDirectory) continue;
 
         const metadataFiles = ['package.json', 'skill.json', 'metadata.json'];
         for (const metaFile of metadataFiles) {
           const metaPath = join(skillsDir, entry.name, metaFile);
           try {
-            const content = await readFile(metaPath, 'utf-8');
+            const content = await ctx.fs.readFile(metaPath);
             const data = JSON.parse(content);
             const author = (data.author?.name ?? data.author ?? data.publisher ?? '').toLowerCase();
 

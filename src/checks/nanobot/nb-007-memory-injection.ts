@@ -1,8 +1,6 @@
 import type { CheckModule, ScanContext, CheckResult } from '../../core/types.js';
-import { pathExists } from '../../core/utils.js';
 import { getNestedValue } from '../../core/utils.js';
 import { join } from 'node:path';
-import { stat } from 'node:fs/promises';
 
 export const nb007: CheckModule = {
   id: 'NB-007',
@@ -16,7 +14,7 @@ export const nb007: CheckModule = {
     const evidence = [];
     const installDir = ctx.installation.installDir;
     const memoryPath = join(installDir, 'MEMORY.md');
-    const memoryExists = await pathExists(memoryPath);
+    const memoryExists = await ctx.fs.access(memoryPath);
 
     // Check if memory feature is enabled in config
     let memoryEnabled = false;
@@ -38,7 +36,7 @@ export const nb007: CheckModule = {
 
     if (memoryExists && memoryEnabled) {
       try {
-        const info = await stat(memoryPath);
+        const info = await ctx.fs.stat(memoryPath);
         const worldWritable = (info.mode & 0o002) !== 0;
 
         evidence.push({

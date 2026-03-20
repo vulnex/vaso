@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ScanContext, AgentInstallation } from '../../core/types.js';
 import type { MCPConfig, MCPServerSource } from '../../mcp/types.js';
+import { LocalFSProvider } from '../../core/local-fs-provider.js';
 import { mcp001 } from './mcp-001-config-discovery.js';
 import { mcp002 } from './mcp-002-transport-security.js';
 import { mcp003 } from './mcp-003-credential-exposure.js';
@@ -61,6 +62,7 @@ function makeContext(overrides: {
     installation: baseInstallation,
     configs: [],
     platform: 'darwin',
+    fs: new LocalFSProvider(),
     ...overrides,
   };
 }

@@ -1,4 +1,3 @@
-import { stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { CheckModule, ScanContext, CheckResult, FixResult } from '../../core/types.js';
 import { chmodFile } from '../../remediation/config-writer.js';
@@ -16,7 +15,7 @@ export const zc013: CheckModule = {
     const evidence = [];
     const keyPath = join(ctx.installation.installDir, '.secret_key');
     try {
-      const stats = await stat(keyPath);
+      const stats = await ctx.fs.stat(keyPath);
       const mode = stats.mode & 0o777;
       if (mode !== 0o600) {
         evidence.push({

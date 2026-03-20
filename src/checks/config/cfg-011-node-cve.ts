@@ -1,4 +1,3 @@
-import { execSync } from 'node:child_process';
 import type { CheckModule, ScanContext, CheckResult } from '../../core/types.js';
 
 const VULNERABLE_RANGES = [
