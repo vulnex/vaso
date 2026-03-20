@@ -1,6 +1,7 @@
 import { join } from 'node:path';
 import type { AgentAdapter, DetectOptions } from './adapter.js';
 import type { AgentInstallation, GatewayInfo } from '../core/types.js';
+import type { ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { loadConfig } from '../core/config-loader.js';
@@ -86,6 +87,32 @@ export const nanobotAdapter: AgentAdapter = {
 
   getCLICommand(): string {
     return 'nanobot';
+  },
+
+  getProbeManifest(): ProbeManifest {
+    return {
+      filePaths: [
+        '~/.nanobot/config.json',
+        '~/.nanobot/workspace/memory/MEMORY.md',
+        '~/.nanobot/workspace/HEARTBEAT.md',
+        '~/.nanobot/workspace/SOUL.md',
+      ],
+      globPatterns: [
+        '~/.nanobot/workspace/skills/**',
+      ],
+      commands: [
+        { id: 'nanobot-which', cmd: 'which', args: ['nanobot'], timeout: 3000 },
+        { id: 'nanobot-version', cmd: 'nanobot', args: ['--version'], timeout: 3000 },
+      ],
+      directoryListings: [
+        '~/.nanobot',
+        '~/.nanobot/workspace',
+        '~/.nanobot/workspace/skills',
+      ],
+      envPrefixes: ['NANOBOT_'],
+      systemPaths: [],
+      systemDirListings: [],
+    };
   },
 };
 

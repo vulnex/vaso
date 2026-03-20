@@ -4,8 +4,10 @@ import { adapterRegistry } from '../adapters/registry.js';
 import { checkRegistry } from '../core/check-registry.js';
 import { getReporter } from '../reporting/index.js';
 import { saveBaseline, loadBaseline, diffResults } from '../core/baseline.js';
+import { SnapshotFSProvider } from '../core/snapshot-fs-provider.js';
+import type { ProbeSnapshot } from '../core/snapshot-types.js';
 import type { ScanOptions } from '../core/types.js';
-import { writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 
 export interface ScanCommandOptions {
   agent?: string;
@@ -15,10 +17,42 @@ export interface ScanCommandOptions {
   diff?: boolean;
   allUsers?: boolean;
   color?: boolean;
+  snapshot?: string;
 }
 
 export async function runScan(options: ScanCommandOptions): Promise<void> {
-  const engine = new ScanEngine(adapterRegistry, checkRegistry);
+  let snapshotFs: SnapshotFSProvider | undefined;
+
+  if (options.snapshot) {
+    const raw = await readFile(options.snapshot, 'utf-8');
+    const snapshot = JSON.parse(raw) as ProbeSnapshot;
+
+    // Validate required fields
+    const errors: string[] = [];
+    if (snapshot.version !== 1) errors.push(`Unsupported snapshot version: ${snapshot.version}`);
+    if (!snapshot.platform) errors.push('Missing platform field');
+    if (!snapshot.hostname) errors.push('Missing hostname field');
+    if (!snapshot.files || typeof snapshot.files !== 'object') errors.push('Missing or invalid files field');
+    if (!snapshot.directories || typeof snapshot.directories !== 'object') errors.push('Missing or invalid directories field');
+    if (!snapshot.commandOutputs || typeof snapshot.commandOutputs !== 'object') errors.push('Missing or invalid commandOutputs field');
+
+    if (errors.length > 0) {
+      console.error(chalk.red('Invalid snapshot file:'));
+      for (const e of errors) console.error(chalk.red(`  - ${e}`));
+      process.exitCode = 1;
+      return;
+    }
+
+    snapshotFs = new SnapshotFSProvider(snapshot);
+
+    if (snapshot.privilege && !snapshot.privilege.isRoot) {
+      console.log(chalk.yellow(`  Warning: snapshot collected as non-root user "${snapshot.privilege.username}" — scan coverage may be limited.\n`));
+    }
+
+    console.log(chalk.dim(`  Scanning snapshot from host "${snapshot.hostname}" (${snapshot.platform})\n`));
+  }
+
+  const engine = new ScanEngine(adapterRegistry, checkRegistry, snapshotFs);
 
   const scanOptions: ScanOptions = {
     agentFilter: options.agent,
@@ -30,6 +64,11 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
 
   try {
     const result = await engine.scan(scanOptions);
+
+    // Set host from snapshot if scanning from snapshot
+    if (snapshotFs) {
+      result.host = snapshotFs.hostname;
+    }
 
     // Save baseline if requested
     if (options.saveBaseline) {

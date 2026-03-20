@@ -84,6 +84,7 @@ export interface AgentScanResult {
 
 export interface ScanResult {
   timestamp: string;
+  host?: string;
   agents: AgentScanResult[];
   totalScore: number;
   totalGrade: Grade;

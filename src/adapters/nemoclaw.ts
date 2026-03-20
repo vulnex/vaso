@@ -1,6 +1,7 @@
 import { join } from 'node:path';
 import type { AgentAdapter, DetectOptions } from './adapter.js';
 import type { AgentInstallation, GatewayInfo } from '../core/types.js';
+import type { ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { loadConfig } from '../core/config-loader.js';
@@ -113,6 +114,34 @@ export const nemoclawAdapter: AgentAdapter = {
 
   getCLICommand(): string {
     return 'nemoclaw';
+  },
+
+  getProbeManifest(): ProbeManifest {
+    return {
+      filePaths: [
+        '~/.nemoclaw/sandboxes.json',
+        '~/.nemoclaw/credentials.json',
+        '~/.nemoclaw/config.json',
+        '~/.nemoclaw/state/nemoclaw.json',
+      ],
+      globPatterns: [
+        '~/.nemoclaw/blueprints/**',
+        '~/.nemoclaw/policies/**',
+      ],
+      commands: [
+        { id: 'nemoclaw-which', cmd: 'which', args: ['nemoclaw'], timeout: 3000 },
+        { id: 'nemoclaw-version', cmd: 'nemoclaw', args: ['--version'], timeout: 3000 },
+      ],
+      directoryListings: [
+        '~/.nemoclaw',
+        '~/.nemoclaw/state',
+        '~/.nemoclaw/blueprints',
+        '~/.nemoclaw/policies',
+      ],
+      envPrefixes: ['NEMOCLAW_'],
+      systemPaths: [],
+      systemDirListings: [],
+    };
   },
 };
 

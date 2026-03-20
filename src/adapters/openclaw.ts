@@ -1,6 +1,7 @@
 import { join, basename, dirname } from 'node:path';
 import type { AgentAdapter, DetectOptions } from './adapter.js';
 import type { AgentInstallation, GatewayInfo } from '../core/types.js';
+import type { ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { loadConfig } from '../core/config-loader.js';
@@ -355,5 +356,63 @@ export const openclawAdapter: AgentAdapter = {
 
   getCLICommand(): string {
     return 'openclaw';
+  },
+
+  getProbeManifest(): ProbeManifest {
+    return {
+      filePaths: [
+        '~/.openclaw/openclaw.json',
+        '~/.openclaw/config.yaml',
+        '~/.openclaw/config.json',
+        '~/.openclaw/gateway.yaml',
+        '~/.openclaw/.env',
+        '~/.clawdbot/openclaw.json',
+        '~/.clawdbot/config.yaml',
+        '~/.clawdbot/config.json',
+        '~/.clawdbot/gateway.yaml',
+        '~/.clawdbot/.env',
+        '~/.moltbot/openclaw.json',
+        '~/.moltbot/config.yaml',
+        '~/.moltbot/config.json',
+        '~/.moltbot/gateway.yaml',
+        '~/.moltbot/.env',
+        '~/.openclaw/credentials.json',
+        '~/.openclaw/auth.json',
+        '~/.openclaw/memory.json',
+        '~/.openclaw/conversations.db',
+      ],
+      globPatterns: [
+        '~/.openclaw/skills/**',
+        '~/.openclaw/custom_skills/**',
+        '~/.openclaw/agents/*/agent.yaml',
+        '~/.openclaw/agents/*/agent.json',
+        '~/.openclaw/agents/*/config.yaml',
+        '~/.openclaw/agents/*/config.json',
+        '~/.openclaw/agents/*/.env',
+        '~/.openclaw/agents/*/skills/**',
+      ],
+      commands: [
+        { id: 'openclaw-which', cmd: 'which', args: ['openclaw'], timeout: 3000 },
+        { id: 'openclaw-version', cmd: 'openclaw', args: ['--version'], timeout: 3000 },
+      ],
+      directoryListings: [
+        '~/.openclaw',
+        '~/.openclaw/agents',
+        '~/.openclaw/skills',
+        '~/.clawdbot',
+        '~/.moltbot',
+      ],
+      envPrefixes: ['OPENCLAW_'],
+      systemPaths: [
+        '/usr/local/bin/openclaw',
+        '/opt/homebrew/bin/openclaw',
+        '/usr/bin/openclaw',
+        '/etc/openclaw',
+        '/Applications/OpenClaw.app',
+      ],
+      systemDirListings: [
+        '/etc/openclaw',
+      ],
+    };
   },
 };
