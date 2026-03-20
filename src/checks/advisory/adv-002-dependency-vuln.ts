@@ -1,4 +1,3 @@
-import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
 import { getAdvisoryDatabase } from '../../advisory/database.js';
@@ -29,9 +28,9 @@ export const adv002: CheckModule = {
     const installDir = ctx.installation.installDir;
 
     // Check package.json
-    const deps = await loadPackageJsonDeps(installDir);
+    const deps = await loadPackageJsonDeps(ctx, installDir);
     // Check Cargo.toml
-    const cargoDeps = await loadCargoTomlDeps(installDir);
+    const cargoDeps = await loadCargoTomlDeps(ctx, installDir);
     const allDeps = { ...deps, ...cargoDeps };
 
     for (const adv of depAdvisories) {
@@ -60,9 +59,9 @@ export const adv002: CheckModule = {
   },
 };
 
-async function loadPackageJsonDeps(dir: string): Promise<Record<string, string>> {
+async function loadPackageJsonDeps(ctx: ScanContext, dir: string): Promise<Record<string, string>> {
   try {
-    const raw = await readFile(join(dir, 'package.json'), 'utf-8');
+    const raw = await ctx.fs.readFile(join(dir, 'package.json'));
     const pkg = JSON.parse(raw);
     return {
       ...(pkg.dependencies ?? {}),
@@ -73,9 +72,9 @@ async function loadPackageJsonDeps(dir: string): Promise<Record<string, string>>
   }
 }
 
-async function loadCargoTomlDeps(dir: string): Promise<Record<string, string>> {
+async function loadCargoTomlDeps(ctx: ScanContext, dir: string): Promise<Record<string, string>> {
   try {
-    const raw = await readFile(join(dir, 'Cargo.toml'), 'utf-8');
+    const raw = await ctx.fs.readFile(join(dir, 'Cargo.toml'));
     const deps: Record<string, string> = {};
     // Simple regex extraction for [dependencies] section entries like: name = "version"
     const depSection = raw.match(/\[dependencies\]([\s\S]*?)(?:\n\[|$)/);

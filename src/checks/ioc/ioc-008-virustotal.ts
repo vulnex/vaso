@@ -1,4 +1,3 @@
-import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
 import { getSkillFiles } from '../../core/utils.js';
@@ -33,7 +32,7 @@ export const ioc008: CheckModule = {
 
     for (const file of files) {
       try {
-        const content = await readFile(file);
+        const content = await ctx.fs.readFile(file);
         const hash = createHash('sha256').update(content).digest('hex');
 
         const response = await fetch(`https://www.virustotal.com/api/v3/files/${hash}`, {

@@ -1,17 +1,16 @@
-import { readFile, readdir } from 'node:fs/promises';
 import { join, extname } from 'node:path';
 import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
 import { getIOCDatabase } from '../../ioc/database.js';
 
 const SCAN_EXTENSIONS = new Set(['.js', '.ts', '.mjs', '.cjs', '.json', '.yaml', '.yml', '.env', '.sh']);
 
-async function getAllFiles(dirs: string[]): Promise<string[]> {
+async function getAllFilesViaCtx(ctx: ScanContext, dirs: string[]): Promise<string[]> {
   const files: string[] = [];
   for (const dir of dirs) {
     try {
-      const entries = await readdir(dir, { withFileTypes: true, recursive: true });
+      const entries = await ctx.fs.readdirEntries(dir, { recursive: true });
       for (const entry of entries) {
-        if (entry.isFile() && SCAN_EXTENSIONS.has(extname(entry.name))) {
+        if (entry.isFile && SCAN_EXTENSIONS.has(extname(entry.name))) {
           const fullPath = entry.parentPath ? join(entry.parentPath, entry.name) : join(dir, entry.name);
           files.push(fullPath);
         }
@@ -54,10 +53,10 @@ export const ioc001: CheckModule = {
     }
 
     // Check skill files
-    const files = await getAllFiles(dirs);
+    const files = await getAllFilesViaCtx(ctx, dirs);
     for (const file of files) {
       try {
-        const content = await readFile(file, 'utf-8');
+        const content = await ctx.fs.readFile(file);
         for (const ip of db.c2Ips) {
           if (content.includes(ip)) {
             const lines = content.split('\n');

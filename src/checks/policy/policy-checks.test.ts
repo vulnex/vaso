@@ -3,6 +3,7 @@ import { mkdtemp, writeFile, mkdir, rm, chmod } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { ScanContext, ParsedConfig, AgentInstallation } from '../../core/types.js';
+import { LocalFSProvider } from '../../core/local-fs-provider.js';
 import { pol001 } from './pol-001-exec-approval.js';
 import { pol002 } from './pol-002-log-redaction.js';
 import { pol003 } from './pol-003-session-credentials.js';
@@ -24,7 +25,7 @@ function makeContext(configs: ParsedConfig[], installDir = '/tmp/test-install'):
     installDir,
     configFiles: configs,
   };
-  return { installation, configs, platform: 'darwin' };
+  return { installation, configs, platform: 'darwin', fs: new LocalFSProvider() };
 }
 
 // POL-001

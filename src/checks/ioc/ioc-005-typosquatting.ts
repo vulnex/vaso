@@ -1,4 +1,3 @@
-import { readdir } from 'node:fs/promises';
 import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
 import { getIOCDatabase } from '../../ioc/database.js';
 import { detectTyposquatting } from '../../ioc/typosquat.js';
@@ -20,9 +19,9 @@ export const ioc005: CheckModule = {
     }
 
     try {
-      const entries = await readdir(skillsDir, { withFileTypes: true });
+      const entries = await ctx.fs.readdirEntries(skillsDir);
       for (const entry of entries) {
-        if (!entry.isDirectory()) continue;
+        if (!entry.isDirectory) continue;
 
         const match = detectTyposquatting(entry.name, db.trustedSkillNames);
         if (match) {

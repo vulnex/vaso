@@ -1,4 +1,3 @@
-import { readFile } from 'node:fs/promises';
 import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
 import { findHighEntropyBlocks } from '../../analyzers/entropy.js';
 import { getSkillFiles } from '../../core/utils.js';
@@ -29,7 +28,7 @@ export const skl002: CheckModule = {
 
     for (const file of files) {
       try {
-        const code = await readFile(file, 'utf-8');
+        const code = await ctx.fs.readFile(file);
 
         // Entropy-based detection
         const blocks = findHighEntropyBlocks(code);

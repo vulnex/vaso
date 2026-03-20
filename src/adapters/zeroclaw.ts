@@ -1,10 +1,9 @@
 import { join } from 'node:path';
-import { homedir } from 'node:os';
-import { execFileSync } from 'node:child_process';
 import type { AgentAdapter, DetectOptions } from './adapter.js';
 import type { AgentInstallation, GatewayInfo } from '../core/types.js';
+import type { FSProvider } from '../core/fs-provider.js';
+import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { loadConfig } from '../core/config-loader.js';
-import { pathExists } from '../core/utils.js';
 import { getNestedValue } from '../core/utils.js';
 
 const CONFIG_FILENAMES = [
@@ -17,21 +16,22 @@ export const zeroclawAdapter: AgentAdapter = {
   displayName: 'ZeroClaw',
 
   async detect(_options?: DetectOptions): Promise<AgentInstallation[]> {
-    const home = homedir();
+    const fs = _options?.fs ?? new LocalFSProvider();
+    const home = fs.homedir();
     const zeroDir = join(home, '.zeroclaw');
     const configFiles = [];
 
     for (const filename of CONFIG_FILENAMES) {
       const filePath = join(zeroDir, filename);
-      if (await pathExists(filePath)) {
+      if (await fs.access(filePath)) {
         try {
-          configFiles.push(await loadConfig(filePath));
+          configFiles.push(await loadConfig(filePath, fs));
         } catch {}
       }
     }
 
     // Also check for CLI binary
-    const cliBinary = await findCLIBinary(home);
+    const cliBinary = await findCLIBinary(home, fs);
 
     if (configFiles.length === 0 && !cliBinary) return [];
 
@@ -45,7 +45,7 @@ export const zeroclawAdapter: AgentAdapter = {
     const version =
       (tomlConfig?.data?.version as string) ??
       ((tomlConfig?.data?.package as Record<string, unknown>)?.version as string) ??
-      queryCliVersion(cliBinary ?? 'zeroclaw');
+      queryCliVersion(cliBinary ?? 'zeroclaw', fs);
 
     return [{
       agent: 'zeroclaw',
@@ -59,7 +59,7 @@ export const zeroclawAdapter: AgentAdapter = {
   },
 
   getConfigPaths(): string[] {
-    const home = homedir();
+    const home = new LocalFSProvider().homedir();
     const zeroDir = join(home, '.zeroclaw');
     return CONFIG_FILENAMES.map(f => join(zeroDir, f));
   },
@@ -104,13 +104,9 @@ export const zeroclawAdapter: AgentAdapter = {
   },
 };
 
-function queryCliVersion(binary: string): string | undefined {
+function queryCliVersion(binary: string, fs: FSProvider): string | undefined {
   try {
-    const output = execFileSync(binary, ['--version'], {
-      encoding: 'utf-8',
-      timeout: 3000,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    }).trim();
+    const output = fs.execSync(binary, ['--version'], { timeout: 3000 }).trim();
     const m = /(\d+\.\d+\.\d+(?:-[a-zA-Z0-9.]+)?)/.exec(output);
     return m?.[1];
   } catch {
@@ -118,16 +114,12 @@ function queryCliVersion(binary: string): string | undefined {
   }
 }
 
-async function findCLIBinary(home: string): Promise<string | undefined> {
+async function findCLIBinary(home: string, fs: FSProvider): Promise<string | undefined> {
   const cargoPath = join(home, '.cargo', 'bin', 'zeroclaw');
-  if (await pathExists(cargoPath)) return cargoPath;
+  if (await fs.access(cargoPath)) return cargoPath;
 
   try {
-    const result = execFileSync('which', ['zeroclaw'], {
-      encoding: 'utf-8',
-      timeout: 3000,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    }).trim();
+    const result = fs.execSync('which', ['zeroclaw'], { timeout: 3000 }).trim();
     if (result) return result;
   } catch {}
 

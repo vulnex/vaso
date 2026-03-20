@@ -1,10 +1,9 @@
 import { join } from 'node:path';
-import { homedir } from 'node:os';
-import { execFileSync } from 'node:child_process';
 import type { AgentAdapter, DetectOptions } from './adapter.js';
 import type { AgentInstallation, GatewayInfo } from '../core/types.js';
+import type { FSProvider } from '../core/fs-provider.js';
+import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { loadConfig } from '../core/config-loader.js';
-import { pathExists } from '../core/utils.js';
 
 const CONFIG_FILENAMES = [
   '.env',
@@ -18,21 +17,22 @@ export const ironclawAdapter: AgentAdapter = {
   displayName: 'IronClaw',
 
   async detect(_options?: DetectOptions): Promise<AgentInstallation[]> {
-    const home = homedir();
+    const fs = _options?.fs ?? new LocalFSProvider();
+    const home = fs.homedir();
     const ironDir = join(home, '.ironclaw');
     const configFiles = [];
 
     for (const filename of CONFIG_FILENAMES) {
       const filePath = join(ironDir, filename);
-      if (await pathExists(filePath)) {
+      if (await fs.access(filePath)) {
         try {
-          configFiles.push(await loadConfig(filePath));
+          configFiles.push(await loadConfig(filePath, fs));
         } catch {}
       }
     }
 
     // Also check for CLI binary
-    const cliBinary = await findCLIBinary(home);
+    const cliBinary = await findCLIBinary(home, fs);
 
     if (configFiles.length === 0 && !cliBinary) return [];
 
@@ -47,7 +47,7 @@ export const ironclawAdapter: AgentAdapter = {
     const version =
       (tomlConfig?.data?.version as string) ??
       ((tomlConfig?.data?.package as Record<string, unknown>)?.version as string) ??
-      queryCliVersion(cliBinary ?? 'ironclaw');
+      queryCliVersion(cliBinary ?? 'ironclaw', fs);
 
     return [{
       agent: 'ironclaw',
@@ -61,7 +61,7 @@ export const ironclawAdapter: AgentAdapter = {
   },
 
   getConfigPaths(): string[] {
-    const home = homedir();
+    const home = new LocalFSProvider().homedir();
     const ironDir = join(home, '.ironclaw');
     return CONFIG_FILENAMES.map(f => join(ironDir, f));
   },
@@ -114,13 +114,9 @@ export const ironclawAdapter: AgentAdapter = {
   },
 };
 
-function queryCliVersion(binary: string): string | undefined {
+function queryCliVersion(binary: string, fs: FSProvider): string | undefined {
   try {
-    const output = execFileSync(binary, ['--version'], {
-      encoding: 'utf-8',
-      timeout: 3000,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    }).trim();
+    const output = fs.execSync(binary, ['--version'], { timeout: 3000 }).trim();
     const m = /(\d+\.\d+\.\d+(?:-[a-zA-Z0-9.]+)?)/.exec(output);
     return m?.[1];
   } catch {
@@ -128,16 +124,12 @@ function queryCliVersion(binary: string): string | undefined {
   }
 }
 
-async function findCLIBinary(home: string): Promise<string | undefined> {
+async function findCLIBinary(home: string, fs: FSProvider): Promise<string | undefined> {
   const cargoPath = join(home, '.cargo', 'bin', 'ironclaw');
-  if (await pathExists(cargoPath)) return cargoPath;
+  if (await fs.access(cargoPath)) return cargoPath;
 
   try {
-    const result = execFileSync('which', ['ironclaw'], {
-      encoding: 'utf-8',
-      timeout: 3000,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    }).trim();
+    const result = fs.execSync('which', ['ironclaw'], { timeout: 3000 }).trim();
     if (result) return result;
   } catch {}
 

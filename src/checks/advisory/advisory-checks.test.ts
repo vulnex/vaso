@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import type { ScanContext, AgentInstallation, ParsedConfig } from '../../core/types.js';
+import { LocalFSProvider } from '../../core/local-fs-provider.js';
 import { adv001 } from './adv-001-version-vuln.js';
 import { adv002 } from './adv-002-dependency-vuln.js';
 import { adv003 } from './adv-003-eol-version.js';
@@ -19,6 +20,7 @@ function makeContext(overrides: Partial<AgentInstallation> = {}, configs?: Parse
     installation,
     configs: configs ?? installation.configFiles,
     platform: 'darwin',
+    fs: new LocalFSProvider(),
   };
 }
 

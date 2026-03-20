@@ -1,4 +1,3 @@
-import { readFile } from 'node:fs/promises';
 import { parse } from '@babel/parser';
 import _traverse from '@babel/traverse';
 import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
@@ -40,7 +39,7 @@ export const skl012: CheckModule = {
 
     for (const file of files) {
       try {
-        const code = await readFile(file, 'utf-8');
+        const code = await ctx.fs.readFile(file);
         let ast: ReturnType<typeof parse>;
         try {
           ast = parse(code, {

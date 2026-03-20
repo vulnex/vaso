@@ -1,7 +1,5 @@
 import type { CheckModule, ScanContext, CheckResult } from '../../core/types.js';
-import { pathExists } from '../../core/utils.js';
 import { join } from 'node:path';
-import { stat } from 'node:fs/promises';
 
 export const nb006: CheckModule = {
   id: 'NB-006',
@@ -16,9 +14,9 @@ export const nb006: CheckModule = {
     const installDir = ctx.installation.installDir;
     const heartbeatPath = join(installDir, 'HEARTBEAT.md');
 
-    if (await pathExists(heartbeatPath)) {
+    if (await ctx.fs.access(heartbeatPath)) {
       try {
-        const info = await stat(heartbeatPath);
+        const info = await ctx.fs.stat(heartbeatPath);
         const worldWritable = (info.mode & 0o002) !== 0;
         const groupWritable = (info.mode & 0o020) !== 0;
 

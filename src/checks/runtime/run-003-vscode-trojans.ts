@@ -1,6 +1,4 @@
-import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
 import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
 
 // Known malicious VS Code extension IDs
@@ -18,9 +16,9 @@ export const run003: CheckModule = {
   severity: 'critical',
   description: 'Check for known malicious VS Code extension IDs',
 
-  async run(_ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx: ScanContext): Promise<CheckResult> {
     const evidence: Evidence[] = [];
-    const home = homedir();
+    const home = ctx.fs.homedir();
 
     const extensionDirs = [
       join(home, '.vscode', 'extensions'),
@@ -30,8 +28,7 @@ export const run003: CheckModule = {
 
     for (const dir of extensionDirs) {
       try {
-        const { readdir } = await import('node:fs/promises');
-        const entries = await readdir(dir);
+        const entries = await ctx.fs.readdir(dir);
 
         for (const entry of entries) {
           const lower = entry.toLowerCase();

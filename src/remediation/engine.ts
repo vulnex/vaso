@@ -3,6 +3,7 @@ import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
 import chalk from 'chalk';
 import type { ScanResult, FixResult, AgentScanResult, CheckResult } from '../core/types.js';
+import { LocalFSProvider } from '../core/local-fs-provider.js';
 import type { CheckRegistry } from '../core/check-registry.js';
 import { promptForFix } from './prompt.js';
 
@@ -78,6 +79,7 @@ export class RemediationEngine {
             installation: agent.installation,
             configs: agent.installation.configFiles,
             platform: process.platform,
+            fs: new LocalFSProvider(),
           });
 
           results.push(fixResult);

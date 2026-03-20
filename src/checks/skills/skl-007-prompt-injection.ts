@@ -1,4 +1,3 @@
-import { readFile, readdir } from 'node:fs/promises';
 import { join, extname } from 'node:path';
 import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
 import { scanWithPatterns, SECURITY_PATTERNS } from '../../analyzers/pattern-engine.js';
@@ -6,12 +5,12 @@ import { scanWithPatterns, SECURITY_PATTERNS } from '../../analyzers/pattern-eng
 const DOC_EXTENSIONS = new Set(['.md', '.txt', '.rst']);
 const PROMPT_INJECTION_RULES = SECURITY_PATTERNS.filter(r => r.category === 'prompt-injection');
 
-async function getDocFiles(dir: string): Promise<string[]> {
+async function getDocFiles(dir: string, fs: ScanContext['fs']): Promise<string[]> {
   const files: string[] = [];
   try {
-    const entries = await readdir(dir, { withFileTypes: true, recursive: true });
+    const entries = await fs.readdirEntries(dir, { recursive: true });
     for (const entry of entries) {
-      if (entry.isFile()) {
+      if (entry.isFile) {
         const ext = extname(entry.name);
         const name = entry.name.toUpperCase();
         if (DOC_EXTENSIONS.has(ext) || name === 'SKILL.MD' || name === 'README.MD') {
@@ -38,11 +37,11 @@ export const skl007: CheckModule = {
       return { id: 'SKL-007', name: 'Prompt Injection in SKILL.md', category: 'skills', severity: 'warning', passed: true, message: 'No skills directory found' };
     }
 
-    const files = await getDocFiles(skillsDir);
+    const files = await getDocFiles(skillsDir, ctx.fs);
 
     for (const file of files) {
       try {
-        const content = await readFile(file, 'utf-8');
+        const content = await ctx.fs.readFile(file);
         const matches = scanWithPatterns(content, PROMPT_INJECTION_RULES);
 
         for (const match of matches) {

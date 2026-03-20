@@ -2,18 +2,26 @@ import type { ScanOptions, ScanResult, ScanContext, AgentScanResult, AgentInstal
 import type { CheckRegistry } from './check-registry.js';
 import type { AdapterRegistry } from '../adapters/registry.js';
 import type { MCPConfig, MCPServerSource } from '../mcp/types.js';
+import type { FSProvider } from './fs-provider.js';
+import { LocalFSProvider } from './local-fs-provider.js';
 import { computeScore, scoreToGrade, summarizeResults } from './scoring.js';
 
 export class ScanEngine {
+  private fs: FSProvider;
+
   constructor(
     private adapters: AdapterRegistry,
     private checks: CheckRegistry,
-  ) {}
+    fs?: FSProvider,
+  ) {
+    this.fs = fs ?? new LocalFSProvider();
+  }
 
   async scan(options: ScanOptions): Promise<ScanResult> {
     // 1. Detect installed agents
     const installations = await this.adapters.detectAll({
       allUsers: options.allUsers,
+      fs: this.fs,
     });
 
     // Filter by agent if specified
@@ -57,7 +65,8 @@ export class ScanEngine {
     const context: ScanContext = {
       installation,
       configs: installation.configFiles,
-      platform: process.platform,
+      platform: this.fs.platform,
+      fs: this.fs,
     };
 
     // Get applicable checks
@@ -97,7 +106,8 @@ export class ScanEngine {
         configFiles: [],
       },
       configs: [],
-      platform: process.platform,
+      platform: this.fs.platform,
+      fs: this.fs,
       mcpConfigs,
       mcpServerSources: serverSources,
     };
@@ -149,7 +159,8 @@ export class ScanEngine {
         configFiles: [],
       },
       configs: [],
-      platform: process.platform,
+      platform: this.fs.platform,
+      fs: this.fs,
       skillFiles,
     };
 

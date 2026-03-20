@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { compileRule } from './compiler.js';
 import type { DeclarativeRule } from './schema.js';
 import type { ScanContext, ParsedConfig, AgentInstallation } from '../core/types.js';
+import { LocalFSProvider } from '../core/local-fs-provider.js';
 
 function makeContext(overrides?: Partial<ScanContext>): ScanContext {
   const config: ParsedConfig = {
@@ -19,6 +20,7 @@ function makeContext(overrides?: Partial<ScanContext>): ScanContext {
     installation,
     configs: [config],
     platform: 'darwin',
+    fs: new LocalFSProvider(),
     ...overrides,
   };
 }

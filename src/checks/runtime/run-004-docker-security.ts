@@ -1,4 +1,3 @@
-import { stat } from 'node:fs/promises';
 import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
 
 export const run004: CheckModule = {
@@ -9,12 +8,12 @@ export const run004: CheckModule = {
   description: 'Check Docker socket permissions and container security',
   supportedPlatforms: ['darwin', 'linux'],
 
-  async run(_ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx: ScanContext): Promise<CheckResult> {
     const evidence: Evidence[] = [];
 
     // Check Docker socket permissions
     try {
-      const stats = await stat('/var/run/docker.sock');
+      const stats = await ctx.fs.stat('/var/run/docker.sock');
       const mode = stats.mode & 0o777;
 
       // Warn if world-readable/writable

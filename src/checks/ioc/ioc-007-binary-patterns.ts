@@ -1,4 +1,3 @@
-import { readFile } from 'node:fs/promises';
 import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
 import { getIOCDatabase } from '../../ioc/database.js';
 import { getSkillFiles } from '../../core/utils.js';
@@ -22,16 +21,15 @@ export const ioc007: CheckModule = {
 
     for (const file of files) {
       try {
-        const buf = await readFile(file);
+        const content = await ctx.fs.readFile(file);
 
         for (const bp of db.binaryPatterns) {
           let matched = false;
 
           if (bp.type === 'buffer') {
-            matched = buf.indexOf(bp.pattern as Buffer) !== -1;
+            matched = content.includes((bp.pattern as Buffer).toString('latin1'));
           } else {
-            // Use latin1 encoding to preserve all 256 byte values
-            matched = (bp.pattern as RegExp).test(buf.toString('latin1'));
+            matched = (bp.pattern as RegExp).test(content);
           }
 
           if (matched) {

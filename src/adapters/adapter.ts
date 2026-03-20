@@ -2,6 +2,7 @@ import type { AgentType, AgentInstallation, GatewayInfo } from '../core/types.js
 
 export interface DetectOptions {
   allUsers?: boolean;
+  fs?: import('../core/fs-provider.js').FSProvider;
 }
 
 export interface AgentAdapter {

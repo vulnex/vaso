@@ -1,6 +1,4 @@
-import { readFile, readdir, access } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { Dirent } from 'node:fs';
 import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
 import { getIOCDatabase } from '../../ioc/database.js';
 
@@ -35,21 +33,21 @@ export const skl011: CheckModule = {
 
     const db = getIOCDatabase();
 
-    let entries: Dirent<string>[];
+    let entries: { name: string; isFile: boolean; isDirectory: boolean; parentPath?: string }[];
     try {
-      entries = await readdir(skillsDir, { withFileTypes: true, encoding: 'utf-8' });
+      entries = await ctx.fs.readdirEntries(skillsDir);
     } catch {
       return { id: 'SKL-011', name: 'Dependency Audit', category: 'skills', severity: 'warning', passed: true, message: 'Skills directory not accessible' };
     }
 
     for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
+      if (!entry.isDirectory) continue;
       const skillDir = entry.parentPath ? join(entry.parentPath, entry.name) : join(skillsDir, entry.name);
       const pkgPath = join(skillDir, 'package.json');
 
       let pkgData: Record<string, unknown>;
       try {
-        const raw = await readFile(pkgPath, 'utf-8');
+        const raw = await ctx.fs.readFile(pkgPath);
         pkgData = JSON.parse(raw) as Record<string, unknown>;
       } catch {
         continue; // No package.json in this skill
@@ -85,12 +83,9 @@ export const skl011: CheckModule = {
       // Check lockfile presence
       let hasLockfile = false;
       for (const lockfile of LOCKFILES) {
-        try {
-          await access(join(skillDir, lockfile));
+        if (await ctx.fs.access(join(skillDir, lockfile))) {
           hasLockfile = true;
           break;
-        } catch {
-          // Not found
         }
       }
 

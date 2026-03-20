@@ -1,6 +1,6 @@
 export type Severity = 'critical' | 'warning' | 'info';
 export type Grade = 'A' | 'B' | 'C' | 'D' | 'F';
-export type AgentType = 'openclaw' | 'nanoclaw' | 'picoclaw' | 'mcp' | 'ironclaw' | 'nanobot' | 'zeroclaw' | 'skill-audit';
+export type AgentType = 'openclaw' | 'nanoclaw' | 'picoclaw' | 'mcp' | 'ironclaw' | 'nanobot' | 'zeroclaw' | 'nemoclaw' | 'skill-audit';
 export type CheckCategory = 'config' | 'skills' | 'ioc' | 'network' | 'runtime' | 'policy' | 'mcp' | 'ironclaw' | 'nanobot' | 'zeroclaw' | 'advisory';
 export type OutputFormat = 'terminal' | 'json' | 'sarif' | 'markdown' | 'html';
 
@@ -68,6 +68,7 @@ export interface ScanContext {
   installation: AgentInstallation;
   configs: ParsedConfig[];
   platform: NodeJS.Platform;
+  fs: import('./fs-provider.js').FSProvider;
   skillFiles?: string[];
   mcpConfigs?: import('../mcp/types.js').MCPConfig[];
   mcpServerSources?: import('../mcp/types.js').MCPServerSource[];

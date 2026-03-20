@@ -2,7 +2,6 @@ import type { CheckModule, ScanContext, CheckResult, FixResult } from '../../cor
 import { getNestedValue } from '../../core/utils.js';
 import { updateJsonFile } from '../../remediation/config-writer.js';
 import { join } from 'node:path';
-import { readdir } from 'node:fs/promises';
 
 export const nb009: CheckModule = {
   id: 'NB-009',
@@ -39,7 +38,7 @@ export const nb009: CheckModule = {
     let sessionFilesFound = false;
     for (const dir of sessionDirs) {
       try {
-        const entries = await readdir(dir);
+        const entries = await ctx.fs.readdir(dir);
         const jsonlFiles = entries.filter(f => f.endsWith('.jsonl') || f.endsWith('.session'));
         if (jsonlFiles.length > 0) {
           sessionFilesFound = true;

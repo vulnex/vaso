@@ -1,4 +1,3 @@
-import { stat } from 'node:fs/promises';
 import type { CheckModule, ScanContext, CheckResult, Evidence, FixResult } from '../../core/types.js';
 import { chmodFile } from '../../remediation/config-writer.js';
 
@@ -15,7 +14,7 @@ export const cfg003: CheckModule = {
 
     for (const config of ctx.configs) {
       try {
-        const stats = await stat(config.filePath);
+        const stats = await ctx.fs.stat(config.filePath);
         const mode = stats.mode & 0o777;
         // Warn if group or other has any access
         if (mode & 0o077) {

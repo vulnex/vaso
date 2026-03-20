@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { homedir } from 'node:os';
 import type { ScanContext, ParsedConfig, AgentInstallation } from '../core/types.js';
+import { LocalFSProvider } from '../core/local-fs-provider.js';
 
 // IronClaw checks
 import { ic001 } from '../checks/ironclaw/ic-001-webhook-binding.js';
@@ -64,7 +65,7 @@ function makeCtx(
     installDir: installDir ?? TEST_DIR,
     configFiles: configs,
   };
-  return { installation, configs, platform: 'darwin' };
+  return { installation, configs, platform: 'darwin', fs: new LocalFSProvider() };
 }
 
 // ── IronClaw fix() tests ──────────────────────────────────────────────

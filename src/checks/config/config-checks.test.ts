@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { ScanContext, ParsedConfig, AgentInstallation } from '../../core/types.js';
+import { LocalFSProvider } from '../../core/local-fs-provider.js';
 import { cfg001 } from './cfg-001-gateway-binding.js';
 import { cfg002 } from './cfg-002-api-key-exposure.js';
 import { cfg004 } from './cfg-004-tls-config.js';
@@ -36,7 +37,7 @@ function makeContext(configs: ParsedConfig[]): ScanContext {
         }
       : undefined,
   };
-  return { installation, configs, platform: 'darwin' };
+  return { installation, configs, platform: 'darwin', fs: new LocalFSProvider() };
 }
 
 describe('CFG-001: Gateway Binding', () => {

@@ -1,29 +1,25 @@
-import { access } from 'node:fs/promises';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
-import { execFileSync } from 'node:child_process';
 import type { AgentAdapter, DetectOptions } from './adapter.js';
 import type { AgentInstallation, GatewayInfo } from '../core/types.js';
+import type { FSProvider } from '../core/fs-provider.js';
+import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { loadConfig } from '../core/config-loader.js';
-
-async function fileExists(path: string): Promise<boolean> {
-  try { await access(path); return true; } catch { return false; }
-}
 
 export const nanoclawAdapter: AgentAdapter = {
   agent: 'nanoclaw',
   displayName: 'NanoClaw',
 
   async detect(_options?: DetectOptions): Promise<AgentInstallation[]> {
-    const home = homedir();
+    const fs = _options?.fs ?? new LocalFSProvider();
+    const home = fs.homedir();
     const configDir = join(home, '.config', 'nanoclaw');
     const envPath = join(home, '.nanoclaw.env');
     const configFiles = [];
 
     // Check .env file with NanoClaw vars
-    if (await fileExists(envPath)) {
+    if (await fs.access(envPath)) {
       try {
-        const config = await loadConfig(envPath);
+        const config = await loadConfig(envPath, fs);
         if (config.data.NANOCLAW_HOME || config.data.NANOCLAW_PORT) {
           configFiles.push(config);
         }
@@ -32,16 +28,16 @@ export const nanoclawAdapter: AgentAdapter = {
 
     // Check config dir
     const mountAllowlistPath = join(configDir, 'mount-allowlist.json');
-    if (await fileExists(mountAllowlistPath)) {
+    if (await fs.access(mountAllowlistPath)) {
       try {
-        configFiles.push(await loadConfig(mountAllowlistPath));
+        configFiles.push(await loadConfig(mountAllowlistPath, fs));
       } catch {}
     }
 
     const configPath = join(configDir, 'config.json');
-    if (await fileExists(configPath)) {
+    if (await fs.access(configPath)) {
       try {
-        configFiles.push(await loadConfig(configPath));
+        configFiles.push(await loadConfig(configPath, fs));
       } catch {}
     }
 
@@ -49,7 +45,7 @@ export const nanoclawAdapter: AgentAdapter = {
 
     // Extract version from config, fallback to CLI
     const mainConfig = configFiles.find(c => c.filePath.endsWith('config.json'));
-    const version = (mainConfig?.data?.version as string) ?? queryCliVersion('nanoclaw');
+    const version = (mainConfig?.data?.version as string) ?? queryCliVersion('nanoclaw', fs);
 
     return [{
       agent: 'nanoclaw',
@@ -61,7 +57,7 @@ export const nanoclawAdapter: AgentAdapter = {
   },
 
   getConfigPaths(): string[] {
-    const home = homedir();
+    const home = new LocalFSProvider().homedir();
     return [
       join(home, '.nanoclaw.env'),
       join(home, '.config', 'nanoclaw', 'config.json'),
@@ -82,13 +78,9 @@ export const nanoclawAdapter: AgentAdapter = {
   },
 };
 
-function queryCliVersion(binary: string): string | undefined {
+function queryCliVersion(binary: string, fs: FSProvider): string | undefined {
   try {
-    const output = execFileSync(binary, ['--version'], {
-      encoding: 'utf-8',
-      timeout: 3000,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    }).trim();
+    const output = fs.execSync(binary, ['--version'], { timeout: 3000 }).trim();
     const m = /(\d+\.\d+\.\d+(?:-[a-zA-Z0-9.]+)?)/.exec(output);
     return m?.[1];
   } catch {

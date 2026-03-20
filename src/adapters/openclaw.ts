@@ -1,9 +1,8 @@
-import { access, readdir, readFile, realpath } from 'node:fs/promises';
 import { join, basename, dirname } from 'node:path';
-import { homedir } from 'node:os';
-import { execFileSync } from 'node:child_process';
 import type { AgentAdapter, DetectOptions } from './adapter.js';
 import type { AgentInstallation, GatewayInfo } from '../core/types.js';
+import type { FSProvider } from '../core/fs-provider.js';
+import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { loadConfig } from '../core/config-loader.js';
 import { deepMerge } from '../core/utils.js';
 
@@ -37,33 +36,25 @@ const APP_BUNDLE_PATH = '/Applications/OpenClaw.app';
 
 const EXCLUDED_USERS = new Set(['Shared', 'Guest', '.localized']);
 
-async function pathExists(path: string): Promise<boolean> {
-  try {
-    await access(path);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 /**
  * Get home directories to scan.
  * If allUsers is true and running as root, enumerate all user home dirs.
  * Otherwise return only the current user's home dir.
  */
-export async function getUserHomeDirs(allUsers?: boolean): Promise<Array<{ home: string; user: string }>> {
+export async function getUserHomeDirs(allUsers?: boolean, fs?: FSProvider): Promise<Array<{ home: string; user: string }>> {
+  const _fs = fs ?? new LocalFSProvider();
   if (allUsers && process.getuid?.() === 0) {
-    const baseDir = process.platform === 'darwin' ? '/Users' : '/home';
+    const baseDir = _fs.platform === 'darwin' ? '/Users' : '/home';
     try {
-      const entries = await readdir(baseDir, { withFileTypes: true });
+      const entries = await _fs.readdirEntries(baseDir);
       const dirs: Array<{ home: string; user: string }> = [];
       for (const entry of entries) {
-        if (!entry.isDirectory()) continue;
+        if (!entry.isDirectory) continue;
         if (EXCLUDED_USERS.has(entry.name)) continue;
         dirs.push({ home: join(baseDir, entry.name), user: entry.name });
       }
       // Also include /root on Linux
-      if (process.platform === 'linux' && await pathExists('/root')) {
+      if (_fs.platform === 'linux' && await _fs.access('/root')) {
         dirs.push({ home: '/root', user: 'root' });
       }
       return dirs;
@@ -72,7 +63,7 @@ export async function getUserHomeDirs(allUsers?: boolean): Promise<Array<{ home:
     }
   }
 
-  const home = homedir();
+  const home = _fs.homedir();
   return [{ home, user: basename(home) }];
 }
 
@@ -80,7 +71,7 @@ export async function getUserHomeDirs(allUsers?: boolean): Promise<Array<{ home:
  * Get OpenClaw config directories for a given home directory,
  * optionally including profile-specific directories.
  */
-function getSearchDirs(home: string, profile?: string): string[] {
+function getSearchDirs(home: string, profile?: string, fs?: FSProvider): string[] {
   const dirs = [
     join(home, '.openclaw'),
     join(home, '.clawdbot'),
@@ -96,7 +87,8 @@ function getSearchDirs(home: string, profile?: string): string[] {
   }
 
   // System-wide config (only once, not per-user)
-  if (home === homedir()) {
+  const currentHome = fs ? fs.homedir() : new LocalFSProvider().homedir();
+  if (home === currentHome) {
     dirs.push('/etc/openclaw');
   }
 
@@ -106,25 +98,21 @@ function getSearchDirs(home: string, profile?: string): string[] {
 /**
  * Find the first existing CLI binary path.
  */
-async function findCLIBinary(home: string): Promise<string | undefined> {
+async function findCLIBinary(home: string, fs: FSProvider): Promise<string | undefined> {
   // Check system paths
   for (const p of SYSTEM_CLI_PATHS) {
-    if (await pathExists(p)) return p;
+    if (await fs.access(p)) return p;
   }
 
   // Check user-relative paths
   for (const rel of USER_CLI_RELATIVE_PATHS) {
     const p = join(home, rel);
-    if (await pathExists(p)) return p;
+    if (await fs.access(p)) return p;
   }
 
   // Try which/command lookup
   try {
-    const result = execFileSync('which', ['openclaw'], {
-      encoding: 'utf-8',
-      timeout: 3000,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    }).trim();
+    const result = fs.execSync('which', ['openclaw'], { timeout: 3000 }).trim();
     if (result) return result;
   } catch {
     // Not in PATH
@@ -136,21 +124,17 @@ async function findCLIBinary(home: string): Promise<string | undefined> {
 /**
  * Check for macOS .app bundle.
  */
-async function findAppBundle(): Promise<string | undefined> {
-  if (process.platform !== 'darwin') return undefined;
-  if (await pathExists(APP_BUNDLE_PATH)) return APP_BUNDLE_PATH;
+async function findAppBundle(fs: FSProvider): Promise<string | undefined> {
+  if (fs.platform !== 'darwin') return undefined;
+  if (await fs.access(APP_BUNDLE_PATH)) return APP_BUNDLE_PATH;
   return undefined;
 }
 
-function queryCliVersion(binary: string): string | undefined {
+function queryCliVersion(binary: string, fs: FSProvider): string | undefined {
   // Try --version flag first
   for (const args of [['--version'], ['version']]) {
     try {
-      const output = execFileSync(binary, args, {
-        encoding: 'utf-8',
-        timeout: 3000,
-        stdio: ['pipe', 'pipe', 'pipe'],
-      }).trim();
+      const output = fs.execSync(binary, args, { timeout: 3000 }).trim();
       const m = /(\d+\.\d+\.\d+(?:-[a-zA-Z0-9.]+)?)/.exec(output);
       if (m?.[1]) return m[1];
     } catch {
@@ -164,15 +148,15 @@ function queryCliVersion(binary: string): string | undefined {
  * Read version from the package.json nearest to a CLI binary's resolved path.
  * Works for npm-installed binaries (global or local).
  */
-async function readPackageVersion(binary: string): Promise<string | undefined> {
+async function readPackageVersion(binary: string, fs: FSProvider): Promise<string | undefined> {
   try {
-    const resolved = await realpath(binary);
+    const resolved = await fs.realpath(binary);
     // Walk up from the binary to find package.json
     let dir = dirname(resolved);
     for (let i = 0; i < 5; i++) {
       const pkgPath = join(dir, 'package.json');
       try {
-        const raw = await readFile(pkgPath, 'utf-8');
+        const raw = await fs.readFile(pkgPath);
         const pkg = JSON.parse(raw);
         if (pkg.version && /^\d+\.\d+\.\d+/.test(pkg.version)) {
           return pkg.version;
@@ -195,24 +179,25 @@ export const openclawAdapter: AgentAdapter = {
   displayName: 'OpenClaw',
 
   async detect(options?: DetectOptions): Promise<AgentInstallation[]> {
+    const fs = options?.fs ?? new LocalFSProvider();
     const profile = process.env.OPENCLAW_PROFILE || undefined;
-    const userDirs = await getUserHomeDirs(options?.allUsers);
-    const appBundle = await findAppBundle();
+    const userDirs = await getUserHomeDirs(options?.allUsers, fs);
+    const appBundle = await findAppBundle(fs);
     const installations: AgentInstallation[] = [];
 
     for (const { home, user } of userDirs) {
-      const cliBinary = await findCLIBinary(home);
-      const searchDirs = getSearchDirs(home, profile);
+      const cliBinary = await findCLIBinary(home, fs);
+      const searchDirs = getSearchDirs(home, profile, fs);
       let foundForUser = false;
 
       for (const dir of searchDirs) {
-        if (!(await pathExists(dir))) continue;
+        if (!(await fs.access(dir))) continue;
 
         const configFiles = [];
         for (const filename of CONFIG_FILENAMES) {
           const filePath = join(dir, filename);
           try {
-            const config = await loadConfig(filePath);
+            const config = await loadConfig(filePath, fs);
             configFiles.push(config);
           } catch {
             // File doesn't exist or can't be parsed
@@ -224,8 +209,8 @@ export const openclawAdapter: AgentAdapter = {
         // Extract version from openclaw.json, fallback to CLI, then package.json
         const mainConfig = configFiles.find(c => c.filePath.endsWith('openclaw.json'));
         const version = (mainConfig?.data?.version as string)
-          ?? (cliBinary ? queryCliVersion(cliBinary) : undefined)
-          ?? (cliBinary ? await readPackageVersion(cliBinary) : undefined);
+          ?? (cliBinary ? queryCliVersion(cliBinary, fs) : undefined)
+          ?? (cliBinary ? await readPackageVersion(cliBinary, fs) : undefined);
         const skillsDir = this.getSkillsDir(dir);
 
         // Merge all config data to extract gateway info
@@ -250,11 +235,11 @@ export const openclawAdapter: AgentAdapter = {
 
         // Discover per-agent subdirectories
         const agentsDir = join(dir, 'agents');
-        if (await pathExists(agentsDir)) {
+        if (await fs.access(agentsDir)) {
           try {
-            const agentEntries = await readdir(agentsDir, { withFileTypes: true });
+            const agentEntries = await fs.readdirEntries(agentsDir);
             for (const entry of agentEntries) {
-              if (!entry.isDirectory()) continue;
+              if (!entry.isDirectory) continue;
               const agentSubDir = join(agentsDir, entry.name);
 
               // Load agent-specific config files
@@ -262,7 +247,7 @@ export const openclawAdapter: AgentAdapter = {
               for (const filename of AGENT_CONFIG_FILENAMES) {
                 const filePath = join(agentSubDir, filename);
                 try {
-                  const config = await loadConfig(filePath);
+                  const config = await loadConfig(filePath, fs);
                   agentConfigFiles.push(config);
                 } catch {
                   // File doesn't exist or can't be parsed
@@ -277,11 +262,11 @@ export const openclawAdapter: AgentAdapter = {
 
               // Build skillsDirs: shared + per-agent
               const agentSkillsDirs: string[] = [];
-              if (skillsDir && await pathExists(skillsDir)) {
+              if (skillsDir && await fs.access(skillsDir)) {
                 agentSkillsDirs.push(skillsDir);
               }
               const agentSkillsDir = join(agentSubDir, 'skills');
-              if (await pathExists(agentSkillsDir)) {
+              if (await fs.access(agentSkillsDir)) {
                 agentSkillsDirs.push(agentSkillsDir);
               }
 
@@ -326,7 +311,8 @@ export const openclawAdapter: AgentAdapter = {
   },
 
   getConfigPaths(): string[] {
-    const dirs = getSearchDirs(homedir(), process.env.OPENCLAW_PROFILE || undefined);
+    const _fs = new LocalFSProvider();
+    const dirs = getSearchDirs(_fs.homedir(), process.env.OPENCLAW_PROFILE || undefined, _fs);
     return dirs.flatMap(dir =>
       CONFIG_FILENAMES.map(f => join(dir, f))
     );

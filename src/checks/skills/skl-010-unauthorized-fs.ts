@@ -1,4 +1,3 @@
-import { readFile } from 'node:fs/promises';
 import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
 import { analyzeCode } from '../../analyzers/ast-analyzer.js';
 import { getSkillFiles } from '../../core/utils.js';
@@ -21,7 +20,7 @@ export const skl010: CheckModule = {
 
     for (const file of files) {
       try {
-        const code = await readFile(file, 'utf-8');
+        const code = await ctx.fs.readFile(file);
         const flows = analyzeCode(code, file);
         const fsAccess = flows.filter(f => f.type === 'fs-access');
 

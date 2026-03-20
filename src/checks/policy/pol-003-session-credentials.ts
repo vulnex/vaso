@@ -1,6 +1,4 @@
-import { readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { Dirent } from 'node:fs';
 import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
 
 const CREDENTIAL_FILE_PATTERNS = [
@@ -23,9 +21,9 @@ export const pol003: CheckModule = {
     const evidence: Evidence[] = [];
     const installDir = ctx.installation.installDir;
 
-    let entries: Dirent<string>[];
+    let entries: { name: string; isFile: boolean; isDirectory: boolean; parentPath?: string }[];
     try {
-      entries = await readdir(installDir, { withFileTypes: true, recursive: true, encoding: 'utf-8' });
+      entries = await ctx.fs.readdirEntries(installDir, { recursive: true });
     } catch {
       return {
         id: 'POL-003',
@@ -38,14 +36,14 @@ export const pol003: CheckModule = {
     }
 
     for (const entry of entries) {
-      if (!entry.isFile()) continue;
+      if (!entry.isFile) continue;
 
       const matches = CREDENTIAL_FILE_PATTERNS.some(p => p.test(entry.name));
       if (!matches) continue;
 
       const fullPath = entry.parentPath ? join(entry.parentPath, entry.name) : join(installDir, entry.name);
       try {
-        const stats = await stat(fullPath);
+        const stats = await ctx.fs.stat(fullPath);
         const mode = stats.mode & 0o777;
         if (mode & 0o077) {
           evidence.push({
