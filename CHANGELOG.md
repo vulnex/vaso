@@ -8,6 +8,35 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+#### Network Scanning — FSProvider Abstraction (Phase A)
+- **`FSProvider` interface** (`src/core/fs-provider.ts`): abstracts all filesystem and process I/O behind a swappable interface (`readFile`, `readdir`, `readdirEntries`, `access`, `stat`, `realpath`, `exec`, `execSync`, `platform`, `homedir`) — the prerequisite for remote and snapshot-based scanning
+- **`LocalFSProvider`** (`src/core/local-fs-provider.ts`): wraps `node:fs/promises` and `node:child_process` with zero behavior change — existing local scans work identically
+- **`ScanContext.fs`**: all 117 check modules now receive `FSProvider` via `ctx.fs` instead of importing `node:fs` directly; all 7 adapters receive it via `DetectOptions.fs`
+- **Mechanical migration**: 85 files changed — all direct `node:fs/promises`, `node:fs`, `node:child_process`, and `node:os` imports removed from checks and adapters; core utilities (`config-loader`, `utils`, `rules/loader`, `mcp/discovery`, `mcp/source-resolver`) accept optional `FSProvider` parameter
+- **`ScanEngine`** constructor accepts optional `FSProvider`, defaults to `LocalFSProvider`; injects into all `ScanContext` objects
+- Zero logic changes to any check module — only the I/O source is now swappable
+- All 793 tests pass identically after migration
+
+#### Network Scanning — Snapshot Scanning & vaso-probe (Phase B)
+- **`SnapshotFSProvider`** (`src/core/snapshot-fs-provider.ts`): serves `readFile`, `readdir`, `access`, `stat`, `exec`, and `execSync` from an in-memory `ProbeSnapshot` JSON object; throws descriptive errors when requested data was not collected in the snapshot
+- **`ProbeSnapshot` / `ProbeManifest` types** (`src/core/snapshot-types.ts`): define the collection contract between scanner and probe — files, directories, commands, env vars, privilege metadata
+- **`getProbeManifest()`** implemented on all 7 adapters: each declares the files, directories, globs, commands, and env prefixes it needs collected from a remote host
+- **`buildProbeManifest()`** (`src/core/manifest-builder.ts`): merges adapter manifests with runtime/network check commands (netstat, ss, ps, crontab, launchctl), deduplicates
+- **`vaso scan --snapshot <path>`**: loads a pre-collected JSON snapshot, creates `SnapshotFSProvider`, runs the full scan pipeline — checks see no difference between local and snapshot scanning
+- **`vaso probe manifest`**: generates the full collection manifest (JSON) for all registered adapters
+- **`vaso probe validate <path>`**: validates a snapshot file structure and prints summary (host, platform, file/dir/command counts, privilege level)
+- **`ScanResult.host`**: populated from `snapshot.hostname` when scanning a snapshot; reporters show host in output
+- **Privilege warnings**: scanner shows a warning when the snapshot was collected as a non-root user, indicating limited scan coverage
+- **`vaso-probe` Go binary** (`probe/`): zero-dependency static binary for Linux and macOS (amd64/arm64) that collects files, directories, commands, and env vars according to a manifest
+  - Privilege-aware: as root, enumerates all user home directories; as regular user, scans current user only
+  - `--escalate` flag: attempts passwordless sudo re-execution for full-coverage scanning
+  - Hardcoded command allowlist prevents arbitrary command execution
+  - `--manifest` flag for custom collection; built-in default manifest covers all 7 agent frameworks
+  - Cross-compilation via `Makefile` with `CGO_ENABLED=0` for 4 targets
+  - Uses `doublestar` library for glob expansion
+- 29 new tests for `SnapshotFSProvider` covering all methods, error cases, and edge cases
+- Total tests: 822
+
 #### Cross-Platform Installer Script
 - **`install.sh`** — one-liner bash installer for Linux, macOS, and WSL: `curl -fsSL https://raw.githubusercontent.com/vulnex/vaso/main/install.sh | bash`
 - Detects platform (macOS, Linux, WSL via `/proc/version` check) and architecture
