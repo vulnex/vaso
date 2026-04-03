@@ -8,6 +8,7 @@ import { ironclawAdapter } from './adapters/ironclaw.js';
 import { nanobotAdapter } from './adapters/nanobot.js';
 import { zeroclawAdapter } from './adapters/zeroclaw.js';
 import { nemoclawAdapter } from './adapters/nemoclaw.js';
+import { hermesAdapter } from './adapters/hermes.js';
 import { registerAllChecks } from './checks/index.js';
 import { initIOCDatabase } from './ioc/database.js';
 import { isFeedStale } from './ioc/updater.js';
@@ -42,6 +43,7 @@ adapterRegistry.register(ironclawAdapter);
 adapterRegistry.register(nanobotAdapter);
 adapterRegistry.register(zeroclawAdapter);
 adapterRegistry.register(nemoclawAdapter);
+adapterRegistry.register(hermesAdapter);
 registerAllChecks();
 
 const program = new Command();
@@ -140,6 +142,11 @@ program
   .option('-f, --format <format>', 'output format (terminal, json)', 'terminal')
   .option('--all-users', 'detect across all user accounts (requires root/sudo)')
   .option('--verbose', 'show search paths checked for each adapter')
+  .option('--host <targets...>', 'remote host(s) to detect via SSH (user@host[:port])')
+  .option('--inventory <path>', 'YAML inventory file with host definitions')
+  .option('--ssh-key <path>', 'SSH identity file for remote connections')
+  .option('--ssh-timeout <seconds>', 'SSH connection timeout in seconds', '60')
+  .option('--snapshot <path>', 'detect from a local probe snapshot JSON file')
   .action(async (options) => {
     const { runDetect } = await import('./commands/detect.js');
     await runDetect(options);
