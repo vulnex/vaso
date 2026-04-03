@@ -231,6 +231,10 @@ func DefaultManifest() ProbeManifest {
 			// NemoClaw
 			"~/.nemoclaw/config.json",
 			"~/.nemoclaw/config.yaml",
+			// Hermes
+			"~/.hermes/config.yaml",
+			"~/.hermes/.env",
+			"~/.hermes/credentials.json",
 			// MCP configs
 			"~/.config/claude-desktop/claude_desktop_config.json",
 			"~/.cursor/mcp.json",
@@ -244,6 +248,8 @@ func DefaultManifest() ProbeManifest {
 			"~/.ironclaw/**/*.toml",
 			"~/.zeroclaw/**/*.toml",
 			"~/.nemoclaw/**/*.yaml",
+			"~/.hermes/skills/**",
+			"~/.hermes/optional-skills/**",
 		},
 		Commands: []CommandRequest{
 			{ID: "openclaw-version", Cmd: "openclaw", Args: []string{"--version"}, Timeout: 5000},
@@ -253,6 +259,7 @@ func DefaultManifest() ProbeManifest {
 			{ID: "nanobot-version", Cmd: "nanobot", Args: []string{"--version"}, Timeout: 5000},
 			{ID: "zeroclaw-version", Cmd: "zeroclaw", Args: []string{"--version"}, Timeout: 5000},
 			{ID: "nemoclaw-version", Cmd: "nemoclaw", Args: []string{"--version"}, Timeout: 5000},
+			{ID: "hermes-version", Cmd: "hermes", Args: []string{"version"}, Timeout: 5000},
 			{ID: "docker-ps", Cmd: "docker", Args: []string{"ps", "--format", "{{.Names}}\t{{.Image}}\t{{.Status}}"}, Timeout: 10000},
 			{ID: "netstat-listen", Cmd: "netstat", Args: []string{"-tlnp"}, Timeout: 5000},
 			{ID: "ps-agents", Cmd: "ps", Args: []string{"aux"}, Timeout: 5000},
@@ -269,6 +276,9 @@ func DefaultManifest() ProbeManifest {
 			"~/.nanobot",
 			"~/.zeroclaw",
 			"~/.nemoclaw",
+			"~/.hermes",
+			"~/.hermes/skills",
+			"~/.hermes/optional-skills",
 			"~/.vaso/plugins",
 		},
 		EnvPrefixes: []string{
@@ -279,6 +289,7 @@ func DefaultManifest() ProbeManifest {
 			"NANOBOT_",
 			"ZEROCLAW_",
 			"NEMOCLAW_",
+			"HERMES_",
 			"MCP_",
 			"VASO_",
 		},
