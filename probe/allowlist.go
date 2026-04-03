@@ -16,6 +16,7 @@ var commandAllowlist = map[string]bool{
 	"nanobot":  true,
 	"zeroclaw": true,
 	"nemoclaw": true,
+	"hermes":   true,
 	"cat":      true,
 	"uname":    true,
 	"hostname": true,
