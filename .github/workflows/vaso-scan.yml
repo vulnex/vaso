@@ -9,8 +9,12 @@ on:
     - cron: '0 6 * * 1' # Weekly Monday 6am
 
 jobs:
-  scan:
+  # Self-scan against the current source so PRs catch issues they introduce.
+  self-scan:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write  # required for upload-sarif
     steps:
       - uses: actions/checkout@v4
 
@@ -18,28 +22,24 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Install VASO
-        run: npm install -g vaso
+      - name: Install and build
+        run: |
+          npm ci
+          npm run build
+          npm link
 
-      - name: Run VASO scan
-        run: vaso scan --format sarif -o results.sarif
-        continue-on-error: true
+      - name: Scan with current source
+        run: vaso scan --format sarif -o vaso-results.sarif --fail-on critical
 
-      - name: Upload SARIF
-        if: always()
+      - name: Upload SARIF to Code Scanning
+        if: always() && hashFiles('vaso-results.sarif') != ''
         uses: github/codeql-action/upload-sarif@v3
         with:
-          sarif_file: results.sarif
+          sarif_file: vaso-results.sarif
 
-      - name: Run VASO scan (JSON)
-        run: vaso scan --format json -o results.json
-        continue-on-error: true
-
-      - name: Upload scan results
-        if: always()
+      - name: Upload scan artifact
+        if: always() && hashFiles('vaso-results.sarif') != ''
         uses: actions/upload-artifact@v4
         with:
-          name: vaso-scan-results
-          path: |
-            results.sarif
-            results.json
+          name: vaso-self-scan
+          path: vaso-results.sarif

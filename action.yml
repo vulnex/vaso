@@ -1,0 +1,110 @@
+name: 'VASO Security Scan'
+description: 'Scan AI agent installations and MCP server configurations for security issues'
+author: 'VULNEX'
+branding:
+  icon: 'shield'
+  color: 'red'
+
+inputs:
+  version:
+    description: 'VASO version to install (npm dist-tag or x.y.z). Defaults to latest.'
+    required: false
+    default: 'latest'
+  agent:
+    description: 'Scan a single agent only (openclaw, nanoclaw, picoclaw, ironclaw, nanobot, zeroclaw, nemoclaw, hermes, claude-code, codex). Omit to scan all detected agents.'
+    required: false
+    default: ''
+  format:
+    description: 'Output format: terminal, json, sarif, markdown, or html.'
+    required: false
+    default: 'sarif'
+  output:
+    description: 'Path for the scan report. Defaults to vaso-results.<format-extension>.'
+    required: false
+    default: ''
+  fail-on:
+    description: 'Exit non-zero when findings reach this severity: critical (default), warning, info, or none.'
+    required: false
+    default: 'critical'
+  working-directory:
+    description: 'Directory to run vaso from. Defaults to the workspace root.'
+    required: false
+    default: '.'
+  upload-sarif:
+    description: 'When format is sarif, also upload the report to GitHub Code Scanning. Defaults to true.'
+    required: false
+    default: 'true'
+  debug:
+    description: 'Enable --debug to print full stack traces on errors.'
+    required: false
+    default: 'false'
+  extra-args:
+    description: 'Additional CLI flags appended verbatim to vaso scan (escape hatch for flags this action does not model).'
+    required: false
+    default: ''
+
+outputs:
+  report-path:
+    description: 'Absolute path to the generated scan report.'
+    value: ${{ steps.run.outputs.report-path }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    - name: Install VASO
+      shell: bash
+      run: npm install -g "vaso@${{ inputs.version }}"
+
+    - name: Run VASO scan
+      id: run
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        VASO_AGENT: ${{ inputs.agent }}
+        VASO_FORMAT: ${{ inputs.format }}
+        VASO_OUTPUT: ${{ inputs.output }}
+        VASO_FAIL_ON: ${{ inputs.fail-on }}
+        VASO_DEBUG: ${{ inputs.debug }}
+        VASO_EXTRA_ARGS: ${{ inputs.extra-args }}
+      run: |
+        set -euo pipefail
+
+        # Default output filename based on format
+        if [[ -z "$VASO_OUTPUT" ]]; then
+          case "$VASO_FORMAT" in
+            sarif) VASO_OUTPUT="vaso-results.sarif" ;;
+            json) VASO_OUTPUT="vaso-results.json" ;;
+            markdown) VASO_OUTPUT="vaso-results.md" ;;
+            html) VASO_OUTPUT="vaso-results.html" ;;
+            terminal) VASO_OUTPUT="" ;;
+            *) VASO_OUTPUT="vaso-results.txt" ;;
+          esac
+        fi
+
+        ARGS=(scan --format "$VASO_FORMAT" --fail-on "$VASO_FAIL_ON")
+        [[ -n "$VASO_AGENT" ]] && ARGS+=(--agent "$VASO_AGENT")
+        [[ -n "$VASO_OUTPUT" ]] && ARGS+=(--output "$VASO_OUTPUT")
+        [[ "$VASO_DEBUG" == "true" ]] && ARGS=(--debug "${ARGS[@]}")
+
+        # shellcheck disable=SC2206 # word-splitting is intentional for extra-args
+        EXTRA=( $VASO_EXTRA_ARGS )
+
+        echo "::group::vaso ${ARGS[*]} ${EXTRA[*]}"
+        vaso "${ARGS[@]}" "${EXTRA[@]}"
+        echo "::endgroup::"
+
+        if [[ -n "$VASO_OUTPUT" ]]; then
+          REPORT_ABS="$(realpath "$VASO_OUTPUT")"
+          echo "report-path=$REPORT_ABS" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Upload SARIF to Code Scanning
+      if: ${{ inputs.format == 'sarif' && inputs.upload-sarif == 'true' && steps.run.outputs.report-path != '' && always() }}
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: ${{ steps.run.outputs.report-path }}
