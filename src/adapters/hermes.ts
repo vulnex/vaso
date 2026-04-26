@@ -5,6 +5,7 @@ import type { ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { loadConfig } from '../core/config-loader.js';
+import { queryCliVersion } from './version-query.js';
 
 const CONFIG_FILENAMES = ['config.yaml', '.env'];
 
@@ -43,7 +44,7 @@ export const hermesAdapter: AgentAdapter = {
 
     if (configFiles.length === 0) return [];
 
-    const version = queryCliVersion(await findCLIBinary(home, fs), fs);
+    const version = queryCliVersion(await findCLIBinary(home, fs), fs, { argSets: [['version'], ['--version']] });
 
     // Merge all config data to extract gateway info
     const merged: Record<string, unknown> = {};
@@ -151,14 +152,3 @@ async function findCLIBinary(home: string, fs: FSProvider): Promise<string | und
   return undefined;
 }
 
-function queryCliVersion(binary: string | undefined, fs: FSProvider): string | undefined {
-  if (!binary) return undefined;
-  for (const args of [['version'], ['--version']]) {
-    try {
-      const output = fs.execSync(binary, args, { timeout: 3000 }).trim();
-      const m = /(\d+\.\d+\.\d+(?:-[a-zA-Z0-9.]+)?)/.exec(output);
-      if (m?.[1]) return m[1];
-    } catch {}
-  }
-  return undefined;
-}

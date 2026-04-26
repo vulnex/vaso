@@ -5,6 +5,7 @@ import type { ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { loadConfig } from '../core/config-loader.js';
+import { queryCliVersion } from './version-query.js';
 
 export const nanobotAdapter: AgentAdapter = {
   agent: 'nanobot',
@@ -115,16 +116,6 @@ export const nanobotAdapter: AgentAdapter = {
     };
   },
 };
-
-function queryCliVersion(binary: string, fs: FSProvider): string | undefined {
-  try {
-    const output = fs.execSync(binary, ['--version'], { timeout: 3000 }).trim();
-    const m = /(\d+\.\d+\.\d+(?:-[a-zA-Z0-9.]+)?)/.exec(output);
-    return m?.[1];
-  } catch {
-    return undefined;
-  }
-}
 
 async function findCLIBinary(fs: FSProvider): Promise<string | undefined> {
   try {
