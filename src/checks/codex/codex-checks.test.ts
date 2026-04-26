@@ -38,8 +38,8 @@ function makeCtx(configs: ParsedConfig[], fs?: FSProvider): ScanContext {
 }
 
 describe('Codex checks', () => {
-  it('exports 4 checks', () => {
-    expect(codexChecks).toHaveLength(4);
+  it('exports 8 checks', () => {
+    expect(codexChecks).toHaveLength(8);
   });
 
   it('all checks have coding-agent category and supportedAgents', () => {
@@ -133,6 +133,147 @@ describe('CDX-004: Codex Unpinned MCP Server', () => {
       },
     });
     const result = await check.run(makeCtx([config]));
+    expect(result.passed).toBe(true);
+  });
+});
+
+describe('CDX-005: Codex Shell Env Inherits All', () => {
+  const check = codexChecks.find(c => c.id === 'CDX-005')!;
+
+  it('fails when shell_environment_policy.inherit = "all"', async () => {
+    const config = makeConfig('config.toml', {
+      shell_environment_policy: { inherit: 'all' },
+    });
+    const result = await check.run(makeCtx([config]));
+    expect(result.passed).toBe(false);
+    expect(result.severity).toBe('critical');
+  });
+
+  it('passes when inherit = "core"', async () => {
+    const config = makeConfig('config.toml', {
+      shell_environment_policy: { inherit: 'core' },
+    });
+    const result = await check.run(makeCtx([config]));
+    expect(result.passed).toBe(true);
+  });
+
+  it('passes when shell_environment_policy is unset', async () => {
+    const result = await check.run(makeCtx([makeConfig('config.toml', { model: 'o4-mini' })]));
+    expect(result.passed).toBe(true);
+  });
+});
+
+describe('CDX-006: Codex Trusted Projects Too Broad', () => {
+  const check = codexChecks.find(c => c.id === 'CDX-006')!;
+
+  it('fails when trusted_projects contains "/"', async () => {
+    const config = makeConfig('config.toml', { trusted_projects: ['/'] });
+    const result = await check.run(makeCtx([config]));
+    expect(result.passed).toBe(false);
+  });
+
+  it('fails when trusted_projects contains "~"', async () => {
+    const config = makeConfig('config.toml', { trusted_projects: ['~'] });
+    const result = await check.run(makeCtx([config]));
+    expect(result.passed).toBe(false);
+  });
+
+  it('fails when [projects."/tmp"] trust_level = "trusted"', async () => {
+    const config = makeConfig('config.toml', {
+      projects: { '/tmp': { trust_level: 'trusted' } },
+    });
+    const result = await check.run(makeCtx([config]));
+    expect(result.passed).toBe(false);
+  });
+
+  it('passes for narrow project paths', async () => {
+    const config = makeConfig('config.toml', {
+      trusted_projects: ['/Users/dev/myrepo'],
+    });
+    const result = await check.run(makeCtx([config]));
+    expect(result.passed).toBe(true);
+  });
+});
+
+describe('CDX-007: Codex Memory File Secret Leak', () => {
+  const check = codexChecks.find(c => c.id === 'CDX-007')!;
+
+  it('passes when no memory files exist', async () => {
+    const fs = makeFs({ access: vi.fn(async () => false) });
+    const result = await check.run(makeCtx([], fs));
+    expect(result.passed).toBe(true);
+  });
+
+  it('fails when AGENTS.md contains an Anthropic key', async () => {
+    const fs = makeFs({
+      access: vi.fn(async (p: string) => p.endsWith('AGENTS.md')),
+      readFile: vi.fn(async () => 'Use sk-ant-' + 'A'.repeat(40) + 'q9Wz1XYz for testing'),
+    });
+    const result = await check.run(makeCtx([], fs));
+    expect(result.passed).toBe(false);
+    expect(result.severity).toBe('critical');
+  });
+
+  it('fails when instructions.md contains an AWS key', async () => {
+    const fs = makeFs({
+      access: vi.fn(async (p: string) => p.endsWith('instructions.md')),
+      readFile: vi.fn(async () => 'AKIAIOSFODNN7EXAMPLE\n'),
+    });
+    const result = await check.run(makeCtx([], fs));
+    expect(result.passed).toBe(false);
+  });
+
+  it('passes for ordinary memory content', async () => {
+    const fs = makeFs({
+      access: vi.fn(async () => true),
+      readFile: vi.fn(async () => '# Instructions\nUse npm for builds.\n'),
+    });
+    const result = await check.run(makeCtx([], fs));
+    expect(result.passed).toBe(true);
+  });
+});
+
+describe('CDX-008: Codex Profile Security Downgrade', () => {
+  const check = codexChecks.find(c => c.id === 'CDX-008')!;
+
+  it('fails when a profile sets approval_policy = "never" but root does not', async () => {
+    const config = makeConfig('config.toml', {
+      approval_policy: 'on-request',
+      profiles: { yolo: { approval_policy: 'never' } },
+    });
+    const result = await check.run(makeCtx([config]));
+    expect(result.passed).toBe(false);
+  });
+
+  it('fails when a profile sets sandbox_mode = "danger-full-access" but root does not', async () => {
+    const config = makeConfig('config.toml', {
+      sandbox_mode: 'workspace-write',
+      profiles: { yolo: { sandbox_mode: 'danger-full-access' } },
+    });
+    const result = await check.run(makeCtx([config]));
+    expect(result.passed).toBe(false);
+  });
+
+  it('passes when a profile matches root settings', async () => {
+    const config = makeConfig('config.toml', {
+      approval_policy: 'on-request',
+      profiles: { dev: { approval_policy: 'on-request', sandbox_mode: 'workspace-write' } },
+    });
+    const result = await check.run(makeCtx([config]));
+    expect(result.passed).toBe(true);
+  });
+
+  it('does not flag a profile that matches an already-dangerous root', async () => {
+    const config = makeConfig('config.toml', {
+      approval_policy: 'never',
+      profiles: { same: { approval_policy: 'never' } },
+    });
+    const result = await check.run(makeCtx([config]));
+    expect(result.passed).toBe(true);
+  });
+
+  it('passes when no profiles are defined', async () => {
+    const result = await check.run(makeCtx([makeConfig('config.toml', { model: 'o4-mini' })]));
     expect(result.passed).toBe(true);
   });
 });
