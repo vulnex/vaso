@@ -1,8 +1,9 @@
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { CODING_AGENTS } from '../../core/types.js';
 import { getNestedValue } from '../../core/utils.js';
 
-export const pol004: CheckModule = {
+export const pol004 = defineCheck({
   id: 'POL-004',
   name: 'Sandbox Policy Enforcement',
   category: 'policy',
@@ -10,7 +11,7 @@ export const pol004: CheckModule = {
   description: 'Verify that enabled sandboxes have substantive constraints (exec, filesystem, network)',
   excludedAgents: CODING_AGENTS,
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence: Evidence[] = [];
 
     for (const config of ctx.configs) {
@@ -18,16 +19,13 @@ export const pol004: CheckModule = {
                       getNestedValue(config.data, 'security.sandbox') ??
                       getNestedValue(config.data, 'isolation');
 
-      // Skip if sandbox is disabled or not configured
       if (!sandbox || sandbox === false || sandbox === 'disabled' || sandbox === 'off' || sandbox === 'none') {
         continue;
       }
 
-      // Sandbox is enabled — count substantive constraints
       let constraints = 0;
       const sandboxObj = typeof sandbox === 'object' ? sandbox as Record<string, unknown> : config.data;
 
-      // 1. Exec restrictions
       const execRestriction = getNestedValue(sandboxObj, 'allowedExec') ??
                               getNestedValue(sandboxObj, 'safeBins') ??
                               getNestedValue(sandboxObj, 'restrictedExec') ??
@@ -36,7 +34,6 @@ export const pol004: CheckModule = {
                               getNestedValue(config.data, 'sandbox.execPolicy');
       if (execRestriction) constraints++;
 
-      // 2. Filesystem boundaries
       const fsRestriction = getNestedValue(sandboxObj, 'filesystem') ??
                             getNestedValue(sandboxObj, 'allowedPaths') ??
                             getNestedValue(sandboxObj, 'workspace') ??
@@ -45,7 +42,6 @@ export const pol004: CheckModule = {
                             getNestedValue(config.data, 'sandbox.filesystem');
       if (fsRestriction) constraints++;
 
-      // 3. Network restrictions
       const netRestriction = getNestedValue(sandboxObj, 'network') ??
                              getNestedValue(sandboxObj, 'allowedHosts') ??
                              getNestedValue(sandboxObj, 'networkPolicy') ??
@@ -61,16 +57,9 @@ export const pol004: CheckModule = {
       }
     }
 
-    return {
-      id: 'POL-004',
-      name: 'Sandbox Policy Enforcement',
-      category: 'policy',
-      severity: 'warning',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'Sandbox policies have sufficient constraints'
-        : `Found ${evidence.length} sandbox config(s) with insufficient constraints`,
-      evidence: evidence.length > 0 ? evidence : undefined,
-    };
+    return h.fromEvidence(evidence, {
+      passed: 'Sandbox policies have sufficient constraints',
+      failed: (n) => `Found ${n} sandbox config(s) with insufficient constraints`,
+    });
   },
-};
+});

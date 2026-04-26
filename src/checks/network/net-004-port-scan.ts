@@ -1,5 +1,6 @@
 import { createConnection } from 'node:net';
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { CODING_AGENTS } from '../../core/types.js';
 
 const AGENT_PORTS = [18789, 18790, 3000, 8080, 8443];
@@ -14,7 +15,7 @@ function checkPort(host: string, port: number, timeout = 1000): Promise<boolean>
   });
 }
 
-export const net004: CheckModule = {
+export const net004 = defineCheck({
   id: 'NET-004',
   name: 'Agent Service Port Scan',
   category: 'network',
@@ -22,31 +23,25 @@ export const net004: CheckModule = {
   description: 'Check for agent services listening on known ports',
   excludedAgents: CODING_AGENTS,
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(_ctx, h) {
     const evidence: Evidence[] = [];
 
-    const checks = await Promise.allSettled(
+    await Promise.allSettled(
       AGENT_PORTS.map(async (port) => {
         const open = await checkPort('127.0.0.1', port);
         if (open) {
-          evidence.push({
-            file: 'localhost',
-            detail: `Port ${port} is open on localhost`,
-          });
+          evidence.push({ file: 'localhost', detail: `Port ${port} is open on localhost` });
         }
       })
     );
 
-    return {
-      id: 'NET-004',
-      name: 'Agent Service Port Scan',
-      category: 'network',
-      severity: 'info',
-      passed: true, // Info-only, doesn't fail
+    // Info-only — never fails the scan, but reports findings
+    return h.result({
+      passed: true,
       message: evidence.length === 0
         ? 'No agent services detected on known ports'
         : `Found ${evidence.length} open agent port(s)`,
-      evidence: evidence.length > 0 ? evidence : undefined,
-    };
+      evidence,
+    });
   },
-};
+});

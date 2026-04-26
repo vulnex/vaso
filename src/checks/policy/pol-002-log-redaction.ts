@@ -1,8 +1,9 @@
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { CODING_AGENTS } from '../../core/types.js';
 import { getNestedValue } from '../../core/utils.js';
 
-export const pol002: CheckModule = {
+export const pol002 = defineCheck({
   id: 'POL-002',
   name: 'Log Redaction',
   category: 'policy',
@@ -10,7 +11,7 @@ export const pol002: CheckModule = {
   description: 'Verify logging has secret redaction configured when logging is enabled',
   excludedAgents: CODING_AGENTS,
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence: Evidence[] = [];
 
     for (const config of ctx.configs) {
@@ -18,7 +19,6 @@ export const pol002: CheckModule = {
                              getNestedValue(config.data, 'log.enabled') ??
                              getNestedValue(config.data, 'logs');
 
-      // Only check redaction if logging is explicitly enabled
       if (loggingEnabled === true || loggingEnabled === 'true' || (typeof loggingEnabled === 'object' && loggingEnabled !== null)) {
         const redaction = getNestedValue(config.data, 'logging.redact') ??
                           getNestedValue(config.data, 'logRedaction') ??
@@ -35,16 +35,9 @@ export const pol002: CheckModule = {
       }
     }
 
-    return {
-      id: 'POL-002',
-      name: 'Log Redaction',
-      category: 'policy',
-      severity: 'warning',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'Log redaction is properly configured or logging is not enabled'
-        : `Found ${evidence.length} config(s) with logging enabled but no redaction`,
-      evidence: evidence.length > 0 ? evidence : undefined,
-    };
+    return h.fromEvidence(evidence, {
+      passed: 'Log redaction is properly configured or logging is not enabled',
+      failed: (n) => `Found ${n} config(s) with logging enabled but no redaction`,
+    });
   },
-};
+});

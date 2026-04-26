@@ -1,5 +1,6 @@
 import { join } from 'node:path';
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { API_KEY_PATTERNS } from '../../core/patterns.js';
 
 const CREDENTIAL_FILES = new Set([
@@ -15,31 +16,24 @@ const CREDENTIAL_FILES = new Set([
   '.authinfo',
 ]);
 
-export const pol005: CheckModule = {
+export const pol005 = defineCheck({
   id: 'POL-005',
   name: 'Plaintext Credential Files',
   category: 'policy',
   severity: 'critical',
   description: 'Scan common credential files for plaintext API keys and secrets',
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
-    const evidence: Evidence[] = [];
+  async run(ctx, h) {
     const installDir = ctx.installation.installDir;
 
     let entries: { name: string; isFile: boolean; isDirectory: boolean; parentPath?: string }[];
     try {
       entries = await ctx.fs.readdirEntries(installDir, { recursive: true });
     } catch {
-      return {
-        id: 'POL-005',
-        name: 'Plaintext Credential Files',
-        category: 'policy',
-        severity: 'critical',
-        passed: true,
-        message: 'Install directory not accessible',
-      };
+      return h.passed('Install directory not accessible');
     }
 
+    const evidence: Evidence[] = [];
     for (const entry of entries) {
       if (!entry.isFile) continue;
       if (!CREDENTIAL_FILES.has(entry.name)) continue;
@@ -68,16 +62,9 @@ export const pol005: CheckModule = {
       }
     }
 
-    return {
-      id: 'POL-005',
-      name: 'Plaintext Credential Files',
-      category: 'policy',
-      severity: 'critical',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'No plaintext credentials found in common credential files'
-        : `Found ${evidence.length} plaintext credential(s) in credential files`,
-      evidence: evidence.length > 0 ? evidence : undefined,
-    };
+    return h.fromEvidence(evidence, {
+      passed: 'No plaintext credentials found in common credential files',
+      failed: (n) => `Found ${n} plaintext credential(s) in credential files`,
+    });
   },
-};
+});

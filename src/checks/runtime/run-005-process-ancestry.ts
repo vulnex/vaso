@@ -1,4 +1,5 @@
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { CODING_AGENTS } from '../../core/types.js';
 
 const AGENT_KEYWORDS = ['openclaw', 'nanoclaw', 'picoclaw', 'ironclaw', 'nanobot', 'zeroclaw'];
@@ -19,7 +20,7 @@ interface ProcessInfo {
   comm: string;
 }
 
-export const run005: CheckModule = {
+export const run005 = defineCheck({
   id: 'RUN-005',
   name: 'Process Ancestry Analysis',
   category: 'runtime',
@@ -28,23 +29,15 @@ export const run005: CheckModule = {
   excludedAgents: CODING_AGENTS,
   supportedPlatforms: ['darwin', 'linux'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
-    const evidence: Evidence[] = [];
-
+  async run(ctx, h) {
     let output = '';
     try {
       output = ctx.fs.execSync('ps', ['-eo', 'pid,ppid,comm'], { timeout: 5000 });
     } catch {
-      return {
-        id: 'RUN-005',
-        name: 'Process Ancestry Analysis',
-        category: 'runtime',
-        severity: 'warning',
-        passed: true,
-        message: 'Could not retrieve process list',
-      };
+      return h.passed('Could not retrieve process list');
     }
 
+    const evidence: Evidence[] = [];
     const processMap = new Map<number, ProcessInfo>();
     const agentPids: number[] = [];
     const lines = output.split('\n');
@@ -72,7 +65,6 @@ export const run005: CheckModule = {
       }
     }
 
-    // Walk PPID chain for each agent process
     for (const agentPid of agentPids) {
       let currentPid = agentPid;
       const agentComm = processMap.get(agentPid)?.comm ?? 'unknown';
@@ -109,16 +101,9 @@ export const run005: CheckModule = {
       }
     }
 
-    return {
-      id: 'RUN-005',
-      name: 'Process Ancestry Analysis',
-      category: 'runtime',
-      severity: 'warning',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'No suspicious process ancestry detected for agent processes'
-        : `Found ${evidence.length} agent process(es) with suspicious parent processes`,
-      evidence: evidence.length > 0 ? evidence : undefined,
-    };
+    return h.fromEvidence(evidence, {
+      passed: 'No suspicious process ancestry detected for agent processes',
+      failed: (n) => `Found ${n} agent process(es) with suspicious parent processes`,
+    });
   },
-};
+});
