@@ -1,4 +1,5 @@
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { getNestedValue } from '../../core/utils.js';
 
 const DANGEROUS_BASH_PATTERNS = [
@@ -15,7 +16,7 @@ const DANGEROUS_BASH_PATTERNS = [
   { pattern: /^Bash\(.*\*\)$/, reason: 'wildcard arguments expand the attack surface' },
 ];
 
-export const cc002: CheckModule = {
+export const cc002 = defineCheck({
   id: 'CC-002',
   name: 'Broad Bash Allowlist',
   category: 'coding-agent',
@@ -23,7 +24,7 @@ export const cc002: CheckModule = {
   description: 'Detect overly broad Bash patterns in Claude Code permissions.allow',
   supportedAgents: ['claude-code'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence: Evidence[] = [];
 
     for (const config of ctx.configs) {
@@ -45,18 +46,10 @@ export const cc002: CheckModule = {
       }
     }
 
-    return {
-      id: 'CC-002',
-      name: 'Broad Bash Allowlist',
-      category: 'coding-agent',
-      severity: 'warning',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'No overly broad Bash permissions detected'
-        : `Found ${evidence.length} risky Bash allow pattern(s) — narrow them to specific commands`,
-      evidence: evidence.length > 0 ? evidence : undefined,
-      fixable: false,
+    return h.fromEvidence(evidence, {
+      passed: 'No overly broad Bash permissions detected',
+      failed: (n) => `Found ${n} risky Bash allow pattern(s) — narrow them to specific commands`,
       fixDescription: 'Replace broad Bash patterns with specific subcommands (e.g. Bash(git:status))',
-    };
+    });
   },
-};
+});

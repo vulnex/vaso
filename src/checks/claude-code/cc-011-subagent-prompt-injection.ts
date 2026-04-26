@@ -1,5 +1,6 @@
 import { join, extname } from 'node:path';
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence, ScanContext } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { scanWithPatterns, SECURITY_PATTERNS } from '../../analyzers/pattern-engine.js';
 
 const PROMPT_INJECTION_RULES = SECURITY_PATTERNS.filter(r => r.category === 'prompt-injection');
@@ -18,7 +19,7 @@ async function getAgentDocs(dir: string, fs: ScanContext['fs']): Promise<string[
   return files;
 }
 
-export const cc011: CheckModule = {
+export const cc011 = defineCheck({
   id: 'CC-011',
   name: 'Sub-Agent Prompt Injection',
   category: 'coding-agent',
@@ -26,21 +27,11 @@ export const cc011: CheckModule = {
   description: 'Scan ~/.claude/agents/*.md sub-agent definitions for prompt injection patterns',
   supportedAgents: ['claude-code'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
-    const evidence: Evidence[] = [];
+  async run(ctx, h) {
     const agentsDir = join(ctx.installation.installDir, 'agents');
+    if (!(await ctx.fs.access(agentsDir))) return h.passed('No sub-agents directory present');
 
-    if (!(await ctx.fs.access(agentsDir))) {
-      return {
-        id: 'CC-011',
-        name: 'Sub-Agent Prompt Injection',
-        category: 'coding-agent',
-        severity: 'warning',
-        passed: true,
-        message: 'No sub-agents directory present',
-      };
-    }
-
+    const evidence: Evidence[] = [];
     const files = await getAgentDocs(agentsDir, ctx.fs);
 
     for (const file of files) {
@@ -58,18 +49,10 @@ export const cc011: CheckModule = {
       } catch {}
     }
 
-    return {
-      id: 'CC-011',
-      name: 'Sub-Agent Prompt Injection',
-      category: 'coding-agent',
-      severity: 'warning',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'No prompt injection patterns found in sub-agent definitions'
-        : `Found ${evidence.length} prompt injection pattern(s) in sub-agent definitions`,
-      evidence: evidence.length > 0 ? evidence : undefined,
-      fixable: false,
+    return h.fromEvidence(evidence, {
+      passed: 'No prompt injection patterns found in sub-agent definitions',
+      failed: (n) => `Found ${n} prompt injection pattern(s) in sub-agent definitions`,
       fixDescription: 'Audit the flagged sub-agent files; remove instructions that override or escape system prompts',
-    };
+    });
   },
-};
+});

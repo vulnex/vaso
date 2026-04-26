@@ -1,9 +1,10 @@
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { getNestedValue } from '../../core/utils.js';
 
 const DANGEROUS_MODES = new Set(['bypassPermissions', 'acceptAll', 'dangerouslySkipPermissions']);
 
-export const cc001: CheckModule = {
+export const cc001 = defineCheck({
   id: 'CC-001',
   name: 'Permission Bypass Mode',
   category: 'coding-agent',
@@ -11,7 +12,7 @@ export const cc001: CheckModule = {
   description: 'Detect when Claude Code is configured to bypass tool approval prompts',
   supportedAgents: ['claude-code'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence: Evidence[] = [];
 
     for (const config of ctx.configs) {
@@ -32,18 +33,10 @@ export const cc001: CheckModule = {
       }
     }
 
-    return {
-      id: 'CC-001',
-      name: 'Permission Bypass Mode',
-      category: 'coding-agent',
-      severity: 'critical',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'Permission approval prompts are not bypassed'
-        : 'Permission bypass mode is enabled — Claude Code will execute tools without confirmation',
-      evidence: evidence.length > 0 ? evidence : undefined,
-      fixable: false,
+    return h.fromEvidence(evidence, {
+      passed: 'Permission approval prompts are not bypassed',
+      failed: () => 'Permission bypass mode is enabled — Claude Code will execute tools without confirmation',
       fixDescription: 'Remove permissions.defaultMode = "bypassPermissions" or set it to "default"/"acceptEdits"',
-    };
+    });
   },
-};
+});

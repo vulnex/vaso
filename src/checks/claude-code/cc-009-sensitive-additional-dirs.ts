@@ -1,6 +1,7 @@
 import { homedir } from 'node:os';
 import { join, normalize } from 'node:path';
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { getNestedValue } from '../../core/utils.js';
 
 const HOME = homedir();
@@ -33,7 +34,7 @@ function matchesSensitive(dir: string): SensitiveTarget | undefined {
   return SENSITIVE_TARGETS.find(t => normalized === t.path || normalized.startsWith(t.path + '/'));
 }
 
-export const cc009: CheckModule = {
+export const cc009 = defineCheck({
   id: 'CC-009',
   name: 'Sensitive Additional Directories',
   category: 'coding-agent',
@@ -41,7 +42,7 @@ export const cc009: CheckModule = {
   description: 'Detect when permissions.additionalDirectories grants Claude Code access to credential or system directories',
   supportedAgents: ['claude-code'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence: Evidence[] = [];
 
     for (const config of ctx.configs) {
@@ -61,18 +62,10 @@ export const cc009: CheckModule = {
       }
     }
 
-    return {
-      id: 'CC-009',
-      name: 'Sensitive Additional Directories',
-      category: 'coding-agent',
-      severity: 'critical',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'No sensitive paths in permissions.additionalDirectories'
-        : `Found ${evidence.length} sensitive path(s) in permissions.additionalDirectories`,
-      evidence: evidence.length > 0 ? evidence : undefined,
-      fixable: false,
+    return h.fromEvidence(evidence, {
+      passed: 'No sensitive paths in permissions.additionalDirectories',
+      failed: (n) => `Found ${n} sensitive path(s) in permissions.additionalDirectories`,
       fixDescription: 'Remove credential/system directories from permissions.additionalDirectories',
-    };
+    });
   },
-};
+});

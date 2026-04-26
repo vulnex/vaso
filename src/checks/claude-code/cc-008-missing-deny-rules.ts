@@ -1,4 +1,5 @@
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { getNestedValue } from '../../core/utils.js';
 
 const RECOMMENDED_DENY_PATTERNS = [
@@ -7,7 +8,7 @@ const RECOMMENDED_DENY_PATTERNS = [
   'Bash(curl:*)',
 ];
 
-export const cc008: CheckModule = {
+export const cc008 = defineCheck({
   id: 'CC-008',
   name: 'Missing Sensitive Deny Rules',
   category: 'coding-agent',
@@ -15,7 +16,7 @@ export const cc008: CheckModule = {
   description: 'Suggest adding common deny rules when an allow list is configured but no deny list is set',
   supportedAgents: ['claude-code'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence: Evidence[] = [];
 
     for (const config of ctx.configs) {
@@ -36,18 +37,10 @@ export const cc008: CheckModule = {
       }
     }
 
-    return {
-      id: 'CC-008',
-      name: 'Missing Sensitive Deny Rules',
-      category: 'coding-agent',
-      severity: 'info',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'Permission deny list covers common destructive commands or none configured'
-        : 'No deny rules cover destructive commands — consider adding rm/sudo/curl deny patterns',
-      evidence: evidence.length > 0 ? evidence : undefined,
-      fixable: false,
+    return h.fromEvidence(evidence, {
+      passed: 'Permission deny list covers common destructive commands or none configured',
+      failed: () => 'No deny rules cover destructive commands — consider adding rm/sudo/curl deny patterns',
       fixDescription: 'Add Bash(rm:*), Bash(sudo:*), Bash(curl:*) to permissions.deny',
-    };
+    });
   },
-};
+});

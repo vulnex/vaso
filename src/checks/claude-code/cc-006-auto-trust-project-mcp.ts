@@ -1,6 +1,7 @@
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 
-export const cc006: CheckModule = {
+export const cc006 = defineCheck({
   id: 'CC-006',
   name: 'Auto-Trust Project MCP Servers',
   category: 'coding-agent',
@@ -8,7 +9,7 @@ export const cc006: CheckModule = {
   description: 'Detect enableAllProjectMcpServers, which trusts MCP servers from any project .mcp.json',
   supportedAgents: ['claude-code'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence: Evidence[] = [];
 
     for (const config of ctx.configs) {
@@ -20,18 +21,10 @@ export const cc006: CheckModule = {
       }
     }
 
-    return {
-      id: 'CC-006',
-      name: 'Auto-Trust Project MCP Servers',
-      category: 'coding-agent',
-      severity: 'warning',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'Project-level MCP servers require explicit trust'
-        : 'enableAllProjectMcpServers is on — any cloned repo can run MCP servers without prompting',
-      evidence: evidence.length > 0 ? evidence : undefined,
-      fixable: false,
+    return h.fromEvidence(evidence, {
+      passed: 'Project-level MCP servers require explicit trust',
+      failed: () => 'enableAllProjectMcpServers is on — any cloned repo can run MCP servers without prompting',
       fixDescription: 'Remove enableAllProjectMcpServers, or use enabledMcpjsonServers for an explicit allowlist',
-    };
+    });
   },
-};
+});
