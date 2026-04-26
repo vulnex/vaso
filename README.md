@@ -6,7 +6,7 @@
 
 ## Overview
 
-VASO scans AI agent frameworks and MCP server configurations for security misconfigurations, malicious code, and known threats. It runs 113 checks across 6 agent frameworks, using AST-based static analysis (not regex) for accurate results without ever executing scanned code.
+VASO scans AI agent frameworks, interactive coding agents, and MCP server configurations for security misconfigurations, malicious code, and known threats. It runs 134 checks across 10 agents (8 autonomous frameworks + Claude Code + Codex), using AST-based static analysis (not regex) for accurate results without ever executing scanned code.
 
 ## Installation
 
@@ -52,19 +52,31 @@ See [doc/user-guide.md](doc/user-guide.md) for full option reference.
 
 ## Supported Agents
 
+**Autonomous frameworks**
+
 - **OpenClaw** — `~/.openclaw`, `~/.clawdbot`, `~/.moltbot`, `/etc/openclaw`
 - **NanoClaw** — `~/.nanoclaw.env`, `~/.config/nanoclaw/`
 - **PicoClaw** — `~/.picoclaw/`
-- **IronClaw**, **Nanobot**, **ZeroClaw** — additional agent frameworks
-- **MCP Servers** — Claude Desktop, Claude Code, Cursor, Windsurf, VS Code, project-level configs
+- **IronClaw** — `~/.ironclaw/` (TOML, gRPC gateway)
+- **Nanobot** — `~/.nanobot/` (Discord/Slack bot framework)
+- **ZeroClaw** — `~/.zeroclaw/` (Composio integration)
+- **NemoClaw** — `~/.nemoclaw/` (NVIDIA NIM, GPU isolation)
+- **Hermes** — `~/.hermes/` (API-server gateway model)
+
+**Coding agents**
+
+- **Claude Code** — `~/.claude/`, `~/.claude.json`, project-level `.claude/`
+- **Codex** — `~/.codex/{config.toml,auth.json}`
+
+**MCP servers** — Claude Desktop, Claude Code, Cursor, Windsurf, VS Code, project-level configs
 
 ## Security Checks
 
-113 checks organized into 11 categories:
+134 checks organized into 12 categories:
 
 | Category | IDs | Count | Description |
 |----------|-----|-------|-------------|
-| Configuration | CFG-001–015 | 15 | Gateway binding, API keys, TLS, permissions, sandbox |
+| Configuration | CFG-001–024 | 24 | Gateway binding, API keys, TLS, permissions, sandbox, NemoClaw hardening |
 | Skill Code | SKL-001–012 | 12 | AST data-flow, obfuscation, eval/exec, reverse shells |
 | IOC Matching | IOC-001–008 | 8 | C2 IPs, malicious domains, typosquatting, file hashes |
 | Network | NET-001–005 | 5 | Gateway exposure, WebSocket origins, proxy bypass |
@@ -72,7 +84,10 @@ See [doc/user-guide.md](doc/user-guide.md) for full option reference.
 | Policy | POL-001–005 | 5 | DM policy, tool policy, sandbox compliance |
 | MCP Server | MCP-001–020 | 20 | Transport security, credential exposure, tool injection, toxic flows, rug pull |
 | Advisory | ADV-001–005 | 5 | Vulnerability/CVE detection with version awareness |
-| Agent-Specific | Various | 38 | Per-framework checks (IronClaw, Nanobot, ZeroClaw) |
+| Coding Agent | CC-001–008, CDX-001–004 | 12 | Claude Code: bypassPermissions, broad Bash allow, unsafe hooks, plaintext keys, MCP pinning. Codex: approval policy, sandbox mode, auth file perms |
+| Agent-Specific | IC, NB, ZC | 38 | Per-framework checks (IronClaw, Nanobot, ZeroClaw) |
+
+Server-only checks (gateway/network/runtime concepts) are automatically excluded for coding agents to avoid false positives — Claude Code and Codex have a different threat model than autonomous server agents.
 
 ## Output Formats
 
