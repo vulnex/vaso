@@ -1,7 +1,8 @@
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { extractToolDefinitions, diffToolBaseline } from '../../mcp/tool-baseline.js';
 
-export const mcp020: CheckModule = {
+export const mcp020 = defineCheck({
   id: 'MCP-020',
   name: 'Tool Definition Rug Pull',
   category: 'mcp',
@@ -9,7 +10,7 @@ export const mcp020: CheckModule = {
   description: 'Detect silent changes to MCP tool definitions between scans',
   supportedAgents: ['mcp'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence: Evidence[] = [];
     const sources = ctx.mcpServerSources ?? [];
     let anyFirstScan = false;
@@ -54,26 +55,16 @@ export const mcp020: CheckModule = {
     }
 
     if (anyFirstScan && evidence.length === 0) {
-      return {
-        id: 'MCP-020',
-        name: 'Tool Definition Rug Pull',
-        category: 'mcp',
-        severity: 'info',
+      return h.result({
         passed: true,
         message: 'MCP tool definition baseline established — changes will be detected on subsequent scans',
-      };
+        severity: 'info',
+      });
     }
 
-    return {
-      id: 'MCP-020',
-      name: 'Tool Definition Rug Pull',
-      category: 'mcp',
-      severity: 'warning',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'MCP tool definitions unchanged since last scan'
-        : `Found ${totalChanges} tool definition change(s) across MCP servers — possible rug pull`,
-      evidence: evidence.length > 0 ? evidence : undefined,
-    };
+    return h.fromEvidence(evidence, {
+      passed: 'MCP tool definitions unchanged since last scan',
+      failed: () => `Found ${totalChanges} tool definition change(s) across MCP servers — possible rug pull`,
+    });
   },
-};
+});
