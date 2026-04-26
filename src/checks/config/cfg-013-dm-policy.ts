@@ -1,4 +1,5 @@
 import type { CheckModule, ScanContext, CheckResult, FixResult } from '../../core/types.js';
+import { CODING_AGENTS } from '../../core/types.js';
 import { updateConfigValue } from '../../remediation/config-writer.js';
 import { getNestedValue } from '../../core/utils.js';
 
@@ -8,6 +9,7 @@ export const cfg013: CheckModule = {
   category: 'config',
   severity: 'warning',
   description: 'Check if direct message policy allows unrestricted messaging',
+  excludedAgents: CODING_AGENTS,
 
   async run(ctx: ScanContext): Promise<CheckResult> {
     for (const config of ctx.configs) {

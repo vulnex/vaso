@@ -1,4 +1,5 @@
 import type { CheckModule, ScanContext, CheckResult } from '../../core/types.js';
+import { CODING_AGENTS } from '../../core/types.js';
 
 export const cfg004: CheckModule = {
   id: 'CFG-004',
@@ -6,6 +7,7 @@ export const cfg004: CheckModule = {
   category: 'config',
   severity: 'warning',
   description: 'Check if TLS/HTTPS is configured for the gateway',
+  excludedAgents: CODING_AGENTS,
 
   async run(ctx: ScanContext): Promise<CheckResult> {
     if (!ctx.installation.gateway) {

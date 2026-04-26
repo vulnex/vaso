@@ -1,4 +1,5 @@
 import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import { CODING_AGENTS } from '../../core/types.js';
 import { getIOCDatabase } from '../../ioc/database.js';
 
 const IP_REGEX = /(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/g;
@@ -9,6 +10,7 @@ export const net005: CheckModule = {
   category: 'network',
   severity: 'critical',
   description: 'Check active network connections against known C2 IP addresses',
+  excludedAgents: CODING_AGENTS,
   supportedPlatforms: ['darwin', 'linux'],
 
   async run(ctx: ScanContext): Promise<CheckResult> {

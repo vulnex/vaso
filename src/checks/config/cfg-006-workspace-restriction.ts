@@ -1,4 +1,5 @@
 import type { CheckModule, ScanContext, CheckResult } from '../../core/types.js';
+import { CODING_AGENTS } from '../../core/types.js';
 import { getNestedValue } from '../../core/utils.js';
 
 export const cfg006: CheckModule = {
@@ -7,6 +8,7 @@ export const cfg006: CheckModule = {
   category: 'config',
   severity: 'warning',
   description: 'Check if filesystem access is restricted to a workspace directory',
+  excludedAgents: CODING_AGENTS,
 
   async run(ctx: ScanContext): Promise<CheckResult> {
     let found = false;

@@ -1,4 +1,5 @@
 import type { CheckModule, ScanContext, CheckResult } from '../../core/types.js';
+import { CODING_AGENTS } from '../../core/types.js';
 
 export const net001: CheckModule = {
   id: 'NET-001',
@@ -6,6 +7,7 @@ export const net001: CheckModule = {
   category: 'network',
   severity: 'critical',
   description: 'Check if the gateway is bound to a public address',
+  excludedAgents: CODING_AGENTS,
 
   async run(ctx: ScanContext): Promise<CheckResult> {
     const gw = ctx.installation.gateway;

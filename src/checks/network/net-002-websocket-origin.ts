@@ -1,4 +1,5 @@
 import type { CheckModule, ScanContext, CheckResult } from '../../core/types.js';
+import { CODING_AGENTS } from '../../core/types.js';
 import { getNestedValue } from '../../core/utils.js';
 
 export const net002: CheckModule = {
@@ -7,6 +8,7 @@ export const net002: CheckModule = {
   category: 'network',
   severity: 'critical',
   description: 'Check if WebSocket connections validate the Origin header (CVE-2026-25253)',
+  excludedAgents: CODING_AGENTS,
 
   async run(ctx: ScanContext): Promise<CheckResult> {
     for (const config of ctx.configs) {
