@@ -1,4 +1,5 @@
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { shannonEntropy } from '../../analyzers/entropy.js';
 
 const SECRET_KEY_NAMES = /(?:api[_-]?key|token|secret|password|credential|auth)/i;
@@ -32,7 +33,7 @@ function walkEnv(env: Record<string, unknown>, file: string, prefix: string, evi
   }
 }
 
-export const cc004: CheckModule = {
+export const cc004 = defineCheck({
   id: 'CC-004',
   name: 'Plaintext API Key in Config',
   category: 'coding-agent',
@@ -40,7 +41,7 @@ export const cc004: CheckModule = {
   description: 'Detect API keys or tokens stored in plaintext inside Claude Code settings',
   supportedAgents: ['claude-code'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence: Evidence[] = [];
 
     for (const config of ctx.configs) {
@@ -61,18 +62,10 @@ export const cc004: CheckModule = {
       }
     }
 
-    return {
-      id: 'CC-004',
-      name: 'Plaintext API Key in Config',
-      category: 'coding-agent',
-      severity: 'critical',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'No plaintext API keys detected in Claude Code settings'
-        : `Found ${evidence.length} plaintext credential(s) in Claude Code settings`,
-      evidence: evidence.length > 0 ? evidence : undefined,
-      fixable: false,
+    return h.fromEvidence(evidence, {
+      passed: 'No plaintext API keys detected in Claude Code settings',
+      failed: (n) => `Found ${n} plaintext credential(s) in Claude Code settings`,
       fixDescription: 'Reference secrets via env vars ("$ANTHROPIC_API_KEY") or apiKeyHelper instead of inlining',
-    };
+    });
   },
-};
+});

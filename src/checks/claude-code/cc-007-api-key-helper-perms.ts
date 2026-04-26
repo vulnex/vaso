@@ -1,6 +1,7 @@
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 
-export const cc007: CheckModule = {
+export const cc007 = defineCheck({
   id: 'CC-007',
   name: 'apiKeyHelper Script Permissions',
   category: 'coding-agent',
@@ -8,7 +9,7 @@ export const cc007: CheckModule = {
   description: 'Verify that an apiKeyHelper script is not world-writable',
   supportedAgents: ['claude-code'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence: Evidence[] = [];
 
     for (const config of ctx.configs) {
@@ -28,7 +29,6 @@ export const cc007: CheckModule = {
           continue;
         }
         const stat = await ctx.fs.stat(path);
-        // World-writable bit (others: write)
         if ((stat.mode & 0o002) !== 0) {
           evidence.push({
             file: config.filePath,
@@ -41,18 +41,10 @@ export const cc007: CheckModule = {
       }
     }
 
-    return {
-      id: 'CC-007',
-      name: 'apiKeyHelper Script Permissions',
-      category: 'coding-agent',
-      severity: 'warning',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'apiKeyHelper script (if configured) has safe permissions'
-        : `Found ${evidence.length} apiKeyHelper issue(s)`,
-      evidence: evidence.length > 0 ? evidence : undefined,
-      fixable: false,
+    return h.fromEvidence(evidence, {
+      passed: 'apiKeyHelper script (if configured) has safe permissions',
+      failed: (n) => `Found ${n} apiKeyHelper issue(s)`,
       fixDescription: 'Run `chmod 700` on the apiKeyHelper script and ensure its parent directory is not world-writable',
-    };
+    });
   },
-};
+});

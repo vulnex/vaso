@@ -1,4 +1,5 @@
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 
 interface ServerSpec {
   command?: string;
@@ -28,7 +29,7 @@ function checkServer(name: string, server: ServerSpec, file: string, evidence: E
   });
 }
 
-export const cc005: CheckModule = {
+export const cc005 = defineCheck({
   id: 'CC-005',
   name: 'Unpinned MCP Server Package',
   category: 'coding-agent',
@@ -36,7 +37,7 @@ export const cc005: CheckModule = {
   description: 'Detect MCP servers launched via npx/uvx/etc. without a pinned package version',
   supportedAgents: ['claude-code'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence: Evidence[] = [];
 
     for (const config of ctx.configs) {
@@ -65,18 +66,10 @@ export const cc005: CheckModule = {
       }
     }
 
-    return {
-      id: 'CC-005',
-      name: 'Unpinned MCP Server Package',
-      category: 'coding-agent',
-      severity: 'warning',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'All MCP server packages are version-pinned'
-        : `Found ${evidence.length} MCP server(s) running unpinned packages`,
-      evidence: evidence.length > 0 ? evidence : undefined,
-      fixable: false,
+    return h.fromEvidence(evidence, {
+      passed: 'All MCP server packages are version-pinned',
+      failed: (n) => `Found ${n} MCP server(s) running unpinned packages`,
       fixDescription: 'Pin packages to a specific version (e.g. @modelcontextprotocol/server-foo@1.2.3)',
-    };
+    });
   },
-};
+});

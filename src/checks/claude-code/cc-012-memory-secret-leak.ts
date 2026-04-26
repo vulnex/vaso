@@ -1,5 +1,6 @@
 import { join } from 'node:path';
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { findHighEntropyBlocks } from '../../analyzers/entropy.js';
 
 const KNOWN_KEY_PREFIXES: { pattern: RegExp; name: string }[] = [
@@ -14,7 +15,7 @@ const KNOWN_KEY_PREFIXES: { pattern: RegExp; name: string }[] = [
 const ENTROPY_THRESHOLD = 5.5;
 const MIN_BLOCK_LEN = 40;
 
-export const cc012: CheckModule = {
+export const cc012 = defineCheck({
   id: 'CC-012',
   name: 'Memory File Secret Leak',
   category: 'coding-agent',
@@ -22,36 +23,19 @@ export const cc012: CheckModule = {
   description: 'Scan ~/.claude/CLAUDE.md and project CLAUDE.md for plaintext secrets and high-entropy strings',
   supportedAgents: ['claude-code'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
-    const evidence: Evidence[] = [];
+  async run(ctx, h) {
     const memoryFile = join(ctx.installation.installDir, 'CLAUDE.md');
-
-    if (!(await ctx.fs.access(memoryFile))) {
-      return {
-        id: 'CC-012',
-        name: 'Memory File Secret Leak',
-        category: 'coding-agent',
-        severity: 'critical',
-        passed: true,
-        message: 'No CLAUDE.md memory file present',
-      };
-    }
+    if (!(await ctx.fs.access(memoryFile))) return h.passed('No CLAUDE.md memory file present');
 
     let content: string;
     try {
       content = await ctx.fs.readFile(memoryFile);
     } catch {
-      return {
-        id: 'CC-012',
-        name: 'Memory File Secret Leak',
-        category: 'coding-agent',
-        severity: 'critical',
-        passed: true,
-        message: 'CLAUDE.md is not readable',
-      };
+      return h.passed('CLAUDE.md is not readable');
     }
 
-    // Known prefix matches
+    const evidence: Evidence[] = [];
+
     const lines = content.split('\n');
     for (let i = 0; i < lines.length; i++) {
       for (const { pattern, name } of KNOWN_KEY_PREFIXES) {
@@ -67,7 +51,6 @@ export const cc012: CheckModule = {
       }
     }
 
-    // High-entropy blocks (catch unknown-format secrets)
     const blocks = findHighEntropyBlocks(content, ENTROPY_THRESHOLD, MIN_BLOCK_LEN);
     for (const b of blocks) {
       // De-dup with known-prefix matches on the same line
@@ -80,18 +63,10 @@ export const cc012: CheckModule = {
       });
     }
 
-    return {
-      id: 'CC-012',
-      name: 'Memory File Secret Leak',
-      category: 'coding-agent',
-      severity: 'critical',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'No secrets detected in CLAUDE.md memory file'
-        : `Found ${evidence.length} potential secret(s) in CLAUDE.md`,
-      evidence: evidence.length > 0 ? evidence : undefined,
-      fixable: false,
+    return h.fromEvidence(evidence, {
+      passed: 'No secrets detected in CLAUDE.md memory file',
+      failed: (n) => `Found ${n} potential secret(s) in CLAUDE.md`,
       fixDescription: 'Remove the secret from CLAUDE.md and rotate the credential — memory files are often committed to git',
-    };
+    });
   },
-};
+});

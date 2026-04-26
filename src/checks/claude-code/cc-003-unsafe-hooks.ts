@@ -1,4 +1,5 @@
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 
 const UNQUOTED_VAR_PATTERN = /(?<!["'])\$(?:CLAUDE_[A-Z_]+|TOOL_INPUT|USER_PROMPT|FILE_PATH|\{[A-Z_]+\})(?!["'])/;
 const COMMAND_SUBSTITUTION_PATTERN = /\$\([^)]*\$[A-Z]/;
@@ -9,7 +10,7 @@ interface HookEntry {
   hooks?: Array<{ type?: string; command?: string }>;
 }
 
-export const cc003: CheckModule = {
+export const cc003 = defineCheck({
   id: 'CC-003',
   name: 'Unsafe Hook Commands',
   category: 'coding-agent',
@@ -17,7 +18,7 @@ export const cc003: CheckModule = {
   description: 'Detect Claude Code hooks that exec untrusted shell input without quoting',
   supportedAgents: ['claude-code'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence: Evidence[] = [];
 
     for (const config of ctx.configs) {
@@ -55,18 +56,10 @@ export const cc003: CheckModule = {
       }
     }
 
-    return {
-      id: 'CC-003',
-      name: 'Unsafe Hook Commands',
-      category: 'coding-agent',
-      severity: 'warning',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'No unsafe hook commands detected'
-        : `Found ${evidence.length} hook command(s) that may execute untrusted input`,
-      evidence: evidence.length > 0 ? evidence : undefined,
-      fixable: false,
+    return h.fromEvidence(evidence, {
+      passed: 'No unsafe hook commands detected',
+      failed: (n) => `Found ${n} hook command(s) that may execute untrusted input`,
       fixDescription: 'Quote $-variables ("$VAR") and avoid eval/sh -c with dynamic input',
-    };
+    });
   },
-};
+});

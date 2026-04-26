@@ -1,10 +1,11 @@
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 
 const UNQUOTED_VAR = /(?<!["'])\$(?:[A-Z_][A-Z0-9_]*|\{[A-Z_][A-Z0-9_]*\})(?!["'])/;
 const REMOTE_FETCH = /\b(?:curl|wget|fetch)\b[^|]*\|\s*(?:ba)?sh/i;
 const RAW_EVAL = /\b(?:eval|bash\s+-c|sh\s+-c)\b/;
 
-export const cc010: CheckModule = {
+export const cc010 = defineCheck({
   id: 'CC-010',
   name: 'Unsafe Status Line Command',
   category: 'coding-agent',
@@ -12,7 +13,7 @@ export const cc010: CheckModule = {
   description: 'Detect Claude Code statusLine commands that fetch remote scripts or interpolate unquoted input',
   supportedAgents: ['claude-code'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence: Evidence[] = [];
 
     for (const config of ctx.configs) {
@@ -36,18 +37,10 @@ export const cc010: CheckModule = {
       }
     }
 
-    return {
-      id: 'CC-010',
-      name: 'Unsafe Status Line Command',
-      category: 'coding-agent',
-      severity: 'warning',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'Status line command (if any) looks safe'
-        : 'Status line command may execute untrusted input on every prompt',
-      evidence: evidence.length > 0 ? evidence : undefined,
-      fixable: false,
+    return h.fromEvidence(evidence, {
+      passed: 'Status line command (if any) looks safe',
+      failed: () => 'Status line command may execute untrusted input on every prompt',
       fixDescription: 'Quote $-variables, avoid curl|sh patterns, point statusLine.command at a static script',
-    };
+    });
   },
-};
+});
