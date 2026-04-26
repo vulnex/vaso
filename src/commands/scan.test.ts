@@ -156,4 +156,52 @@ describe('runScan', () => {
     await runScan({ format: 'json' });
     expect(mockGetReporter).toHaveBeenCalledWith('json');
   });
+
+  describe('--fail-on', () => {
+    function setupResult(severity: 'critical' | 'warning' | 'info') {
+      const r = makeScanResult({
+        agents: [{
+          agent: 'openclaw',
+          installation: { agent: 'openclaw', installDir: '/tmp', configFiles: [] },
+          results: [
+            { id: 'X', name: 'x', category: 'config', severity, passed: false, message: 'fail' },
+          ],
+          score: 50,
+          grade: 'D',
+        }],
+      });
+      const mockScan = vi.fn().mockResolvedValue(r);
+      mockScanEngine.mockImplementation(function () { return { scan: mockScan } as any; });
+    }
+
+    it('default (critical) does not trip on a warning-only result', async () => {
+      setupResult('warning');
+      await runScan({ format: 'terminal' });
+      expect(process.exitCode).toBeUndefined();
+    });
+
+    it('--fail-on warning trips on a warning result', async () => {
+      setupResult('warning');
+      await runScan({ format: 'terminal', failOn: 'warning' });
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('--fail-on info trips on an info result', async () => {
+      setupResult('info');
+      await runScan({ format: 'terminal', failOn: 'info' });
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('--fail-on none does not trip even on critical', async () => {
+      setupResult('critical');
+      await runScan({ format: 'terminal', failOn: 'none' });
+      expect(process.exitCode).toBeUndefined();
+    });
+
+    it('rejects an invalid --fail-on value with exit 2', async () => {
+      await runScan({ format: 'terminal', failOn: 'fatal' });
+      expect(process.exitCode).toBe(2);
+      expect(consoleErrors.some(l => l.includes('Invalid --fail-on'))).toBe(true);
+    });
+  });
 });

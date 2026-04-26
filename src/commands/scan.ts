@@ -7,6 +7,8 @@ import { saveBaseline, loadBaseline, diffResults } from '../core/baseline.js';
 import { SnapshotFSProvider } from '../core/snapshot-fs-provider.js';
 import type { ProbeSnapshot } from '../core/snapshot-types.js';
 import type { ScanOptions } from '../core/types.js';
+import { shouldFailScan, isValidFailOn, type FailOnLevel } from '../core/exit-criteria.js';
+import { logError } from '../core/debug.js';
 import { readFile, writeFile } from 'node:fs/promises';
 
 export interface ScanCommandOptions {
@@ -23,9 +25,17 @@ export interface ScanCommandOptions {
   sshKey?: string;
   sshTimeout?: string;
   sudo?: boolean;
+  failOn?: string;
 }
 
 export async function runScan(options: ScanCommandOptions): Promise<void> {
+  const failOn: FailOnLevel = options.failOn && isValidFailOn(options.failOn) ? options.failOn : 'critical';
+  if (options.failOn && !isValidFailOn(options.failOn)) {
+    console.error(chalk.red(`Invalid --fail-on value "${options.failOn}". Use: critical, warning, info, or none.`));
+    process.exitCode = 2;
+    return;
+  }
+
   let snapshotFs: SnapshotFSProvider | undefined;
 
   if (options.snapshot) {
@@ -138,11 +148,11 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
     // Summary
     console.log(chalk.bold(`\n  Summary: ${successResults.length} scanned, ${failedResults.length} failed\n`));
 
-    // Exit with non-zero if any critical findings or failures
-    const hasCritical = successResults.some(hr =>
-      hr.result?.agents.some(a => a.results.some(r => r.severity === 'critical' && !r.passed))
+    // Exit non-zero if any host failed, or if findings meet the --fail-on threshold
+    const allResults = successResults.flatMap(hr =>
+      hr.result?.agents.flatMap(a => a.results) ?? []
     );
-    if (hasCritical || failedResults.length > 0) {
+    if (shouldFailScan(allResults, failOn) || failedResults.length > 0) {
       process.exitCode = 1;
     }
 
@@ -211,15 +221,13 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
       console.log(output);
     }
 
-    // Exit with non-zero if critical findings
-    const hasCritical = result.agents.some(a =>
-      a.results.some(r => r.severity === 'critical' && !r.passed)
-    );
-    if (hasCritical) {
+    // Exit non-zero if findings meet the --fail-on threshold (default: critical only)
+    const allResults = result.agents.flatMap(a => a.results);
+    if (shouldFailScan(allResults, failOn)) {
       process.exitCode = 1;
     }
   } catch (err) {
-    console.error(chalk.red('Scan failed:'), (err as Error).message);
+    logError(chalk.red('Scan failed:'), err);
     process.exitCode = 1;
   }
 }

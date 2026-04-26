@@ -38,7 +38,10 @@ vaso scan [options]
 | `--save-baseline` | Save current results as a baseline for future comparison |
 | `--diff` | Compare results against the last saved baseline |
 | `--all-users` | Scan all user accounts (requires root/sudo) |
+| `--fail-on <severity>` | Exit non-zero on findings of this severity or higher: `critical` (default), `warning`, `info`, or `none` |
 | `--no-color` | Disable colored terminal output |
+
+`--debug` is also available globally to print full stack traces on errors.
 
 Examples:
 
@@ -60,6 +63,9 @@ vaso scan --save-baseline
 
 # Compare against the baseline on subsequent scans
 vaso scan --diff
+
+# Fail CI on any warning or critical finding
+vaso scan --fail-on warning
 ```
 
 ### `vaso detect`

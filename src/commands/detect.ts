@@ -1,6 +1,7 @@
 import chalk from 'chalk';
 import { adapterRegistry } from '../adapters/registry.js';
 import type { AgentInstallation, AgentType } from '../core/types.js';
+import { logError } from '../core/debug.js';
 
 export interface DetectCommandOptions {
   agent?: string;
@@ -42,7 +43,7 @@ export async function runDetect(options: DetectCommandOptions): Promise<void> {
 
     renderResults(installations, options);
   } catch (err) {
-    console.error(chalk.red('Detection failed:'), (err as Error).message);
+    logError(chalk.red('Detection failed:'), err);
     process.exitCode = 1;
   }
 }

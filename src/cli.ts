@@ -19,6 +19,7 @@ import { isAdvisoryFeedStale } from './advisory/updater.js';
 import { loadUserPlugins } from './user-plugins/loader.js';
 import { loadAndRegisterRules } from './rules/index.js';
 import { checkRegistry } from './core/check-registry.js';
+import { setDebug } from './core/debug.js';
 
 const VERSION = '0.1.0';
 
@@ -56,7 +57,9 @@ program
   .name('vaso')
   .description('VULNEX Agent Security Observer — security scanner for AI agent deployments')
   .version(VERSION, '-v, --version')
+  .option('--debug', 'print full stack traces on errors')
   .hook('preAction', async (thisCommand) => {
+    setDebug(Boolean(program.opts().debug));
     printBanner();
 
     // Load user plugins from ~/.vaso/plugins/
@@ -134,6 +137,7 @@ program
   .option('--sudo', 'attempt privilege escalation via sudo on remote hosts')
   .option('--snapshot <path>', 'scan from a pre-collected probe snapshot file')
   .option('--no-color', 'disable colored output')
+  .option('--fail-on <severity>', 'exit non-zero on findings of this severity or higher (critical, warning, info, none)', 'critical')
   .action(async (options) => {
     const { runScan } = await import('./commands/scan.js');
     await runScan(options);

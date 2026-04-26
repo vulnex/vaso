@@ -7,6 +7,7 @@ import { getReporter } from '../reporting/index.js';
 import { MCPDiscovery } from '../mcp/discovery.js';
 import { resolveServerSources } from '../mcp/source-resolver.js';
 import type { ScanOptions } from '../core/types.js';
+import { logError } from '../core/debug.js';
 
 export interface MCPScanCommandOptions {
   format: string;
@@ -59,7 +60,7 @@ export async function runMCPScan(options: MCPScanCommandOptions): Promise<void> 
       process.exitCode = 1;
     }
   } catch (err) {
-    console.error(chalk.red('MCP scan failed:'), (err as Error).message);
+    logError(chalk.red('MCP scan failed:'), err);
     process.exitCode = 1;
   }
 }
@@ -106,7 +107,7 @@ export async function runMCPList(options: { format: string; path?: string[] }): 
       console.log('');
     }
   } catch (err) {
-    console.error(chalk.red('MCP list failed:'), (err as Error).message);
+    logError(chalk.red('MCP list failed:'), err);
     process.exitCode = 1;
   }
 }

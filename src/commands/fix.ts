@@ -4,6 +4,7 @@ import { adapterRegistry } from '../adapters/registry.js';
 import { checkRegistry } from '../core/check-registry.js';
 import { RemediationEngine } from '../remediation/engine.js';
 import { rollback } from '../remediation/rollback.js';
+import { logError } from '../core/debug.js';
 
 export interface FixCommandOptions {
   agent?: string;
@@ -49,7 +50,7 @@ export async function runFix(options: FixCommandOptions): Promise<void> {
     const applied = results.filter(r => r.applied).length;
     console.log(`\n${chalk.bold('Summary:')} ${applied}/${results.length} fixes applied`);
   } catch (err) {
-    console.error(chalk.red('Fix failed:'), (err as Error).message);
+    logError(chalk.red('Fix failed:'), err);
     process.exitCode = 1;
   }
 }
