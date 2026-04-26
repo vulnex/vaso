@@ -1,4 +1,5 @@
 import type { CheckModule, ScanContext, CheckResult, Evidence, FixResult } from '../../core/types.js';
+import { CODING_AGENTS } from '../../core/types.js';
 import { updateConfigValue } from '../../remediation/config-writer.js';
 import { getNestedValue } from '../../core/utils.js';
 
@@ -8,6 +9,7 @@ export const cfg012: CheckModule = {
   category: 'config',
   severity: 'critical',
   description: 'Check if authentication bypass is enabled in configuration',
+  excludedAgents: CODING_AGENTS,
 
   async run(ctx: ScanContext): Promise<CheckResult> {
     const evidence: Evidence[] = [];

@@ -1,5 +1,6 @@
 import { join } from 'node:path';
 import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import { CODING_AGENTS } from '../../core/types.js';
 
 // Known malicious VS Code extension IDs
 const MALICIOUS_EXTENSIONS = new Set([
@@ -15,6 +16,7 @@ export const run003: CheckModule = {
   category: 'runtime',
   severity: 'critical',
   description: 'Check for known malicious VS Code extension IDs',
+  excludedAgents: CODING_AGENTS,
 
   async run(ctx: ScanContext): Promise<CheckResult> {
     const evidence: Evidence[] = [];

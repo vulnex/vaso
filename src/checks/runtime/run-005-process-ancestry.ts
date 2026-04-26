@@ -1,4 +1,5 @@
 import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import { CODING_AGENTS } from '../../core/types.js';
 
 const AGENT_KEYWORDS = ['openclaw', 'nanoclaw', 'picoclaw', 'ironclaw', 'nanobot', 'zeroclaw'];
 
@@ -24,6 +25,7 @@ export const run005: CheckModule = {
   category: 'runtime',
   severity: 'warning',
   description: 'Check agent process ancestry for suspicious parent processes',
+  excludedAgents: CODING_AGENTS,
   supportedPlatforms: ['darwin', 'linux'],
 
   async run(ctx: ScanContext): Promise<CheckResult> {

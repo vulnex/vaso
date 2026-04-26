@@ -1,5 +1,6 @@
 import { join } from 'node:path';
 import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import { CODING_AGENTS } from '../../core/types.js';
 
 const SUSPICIOUS_KEYWORDS = [
   'openclaw', 'nanoclaw', 'picoclaw', 'claw', 'agent',
@@ -12,6 +13,7 @@ export const run001: CheckModule = {
   category: 'runtime',
   severity: 'warning',
   description: 'Check for unauthorized LaunchAgents (macOS) or systemd services (Linux) referencing agents',
+  excludedAgents: CODING_AGENTS,
   supportedPlatforms: ['darwin', 'linux'],
 
   async run(ctx: ScanContext): Promise<CheckResult> {

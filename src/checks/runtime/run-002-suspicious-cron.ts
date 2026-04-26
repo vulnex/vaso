@@ -1,4 +1,5 @@
 import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import { CODING_AGENTS } from '../../core/types.js';
 
 const SUSPICIOUS_KEYWORDS = [
   'openclaw', 'nanoclaw', 'picoclaw', 'claw', 'moltbot', 'clawdbot',
@@ -11,6 +12,7 @@ export const run002: CheckModule = {
   category: 'runtime',
   severity: 'warning',
   description: 'Check for cron entries referencing agent paths',
+  excludedAgents: CODING_AGENTS,
   supportedPlatforms: ['darwin', 'linux'],
 
   async run(ctx: ScanContext): Promise<CheckResult> {

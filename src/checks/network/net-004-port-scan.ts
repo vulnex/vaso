@@ -1,5 +1,6 @@
 import { createConnection } from 'node:net';
 import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import { CODING_AGENTS } from '../../core/types.js';
 
 const AGENT_PORTS = [18789, 18790, 3000, 8080, 8443];
 
@@ -19,6 +20,7 @@ export const net004: CheckModule = {
   category: 'network',
   severity: 'info',
   description: 'Check for agent services listening on known ports',
+  excludedAgents: CODING_AGENTS,
 
   async run(ctx: ScanContext): Promise<CheckResult> {
     const evidence: Evidence[] = [];

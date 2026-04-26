@@ -1,4 +1,5 @@
 import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import { CODING_AGENTS } from '../../core/types.js';
 import { getNestedValue } from '../../core/utils.js';
 
 export const pol001: CheckModule = {
@@ -7,6 +8,7 @@ export const pol001: CheckModule = {
   category: 'policy',
   severity: 'warning',
   description: 'Verify tool execution requires user approval and is not auto-approved',
+  excludedAgents: CODING_AGENTS,
 
   async run(ctx: ScanContext): Promise<CheckResult> {
     const evidence: Evidence[] = [];

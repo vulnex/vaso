@@ -1,4 +1,5 @@
 import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import { CODING_AGENTS } from '../../core/types.js';
 import { getNestedValue } from '../../core/utils.js';
 
 export const pol004: CheckModule = {
@@ -7,6 +8,7 @@ export const pol004: CheckModule = {
   category: 'policy',
   severity: 'warning',
   description: 'Verify that enabled sandboxes have substantive constraints (exec, filesystem, network)',
+  excludedAgents: CODING_AGENTS,
 
   async run(ctx: ScanContext): Promise<CheckResult> {
     const evidence: Evidence[] = [];

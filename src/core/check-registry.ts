@@ -26,7 +26,8 @@ export class CheckRegistry {
 
   getForAgent(agent: AgentType): CheckModule[] {
     return this.checks.filter(c =>
-      !c.supportedAgents || c.supportedAgents.includes(agent)
+      (!c.supportedAgents || c.supportedAgents.includes(agent)) &&
+      !(c.excludedAgents?.includes(agent))
     );
   }
 
@@ -39,8 +40,9 @@ export class CheckRegistry {
   getApplicable(agent: AgentType, platform: NodeJS.Platform): CheckModule[] {
     return this.checks.filter(c => {
       const agentMatch = !c.supportedAgents || c.supportedAgents.includes(agent);
+      const notExcluded = !c.excludedAgents?.includes(agent);
       const platformMatch = !c.supportedPlatforms || c.supportedPlatforms.includes(platform);
-      return agentMatch && platformMatch;
+      return agentMatch && notExcluded && platformMatch;
     });
   }
 

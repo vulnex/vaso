@@ -1,4 +1,5 @@
 import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import { CODING_AGENTS } from '../../core/types.js';
 
 export const run004: CheckModule = {
   id: 'RUN-004',
@@ -6,6 +7,7 @@ export const run004: CheckModule = {
   category: 'runtime',
   severity: 'warning',
   description: 'Check Docker socket permissions and container security',
+  excludedAgents: CODING_AGENTS,
   supportedPlatforms: ['darwin', 'linux'],
 
   async run(ctx: ScanContext): Promise<CheckResult> {

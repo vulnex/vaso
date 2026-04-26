@@ -1,7 +1,14 @@
 export type Severity = 'critical' | 'warning' | 'info';
 export type Grade = 'A' | 'B' | 'C' | 'D' | 'F';
-export type AgentType = 'openclaw' | 'nanoclaw' | 'picoclaw' | 'mcp' | 'ironclaw' | 'nanobot' | 'zeroclaw' | 'nemoclaw' | 'hermes' | 'skill-audit';
-export type CheckCategory = 'config' | 'skills' | 'ioc' | 'network' | 'runtime' | 'policy' | 'mcp' | 'ironclaw' | 'nanobot' | 'zeroclaw' | 'advisory';
+export type AgentType = 'openclaw' | 'nanoclaw' | 'picoclaw' | 'mcp' | 'ironclaw' | 'nanobot' | 'zeroclaw' | 'nemoclaw' | 'hermes' | 'claude-code' | 'codex' | 'skill-audit';
+export type CheckCategory = 'config' | 'skills' | 'ioc' | 'network' | 'runtime' | 'policy' | 'mcp' | 'ironclaw' | 'nanobot' | 'zeroclaw' | 'advisory' | 'coding-agent';
+
+/**
+ * Coding agents (interactive developer tools) — different threat model from
+ * autonomous server frameworks. Used by checks via `excludedAgents` to skip
+ * server-only concepts like gateway binding, rate limiting, LaunchAgents, etc.
+ */
+export const CODING_AGENTS: AgentType[] = ['claude-code', 'codex'];
 export type OutputFormat = 'terminal' | 'json' | 'sarif' | 'markdown' | 'html';
 
 export interface Evidence {
@@ -30,6 +37,7 @@ export interface CheckModule {
   severity: Severity;
   description: string;
   supportedAgents?: AgentType[];
+  excludedAgents?: AgentType[];
   supportedPlatforms?: NodeJS.Platform[];
   run(context: ScanContext): Promise<CheckResult>;
   fix?(context: ScanContext): Promise<FixResult>;
