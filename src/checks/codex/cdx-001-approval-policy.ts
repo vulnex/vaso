@@ -1,8 +1,9 @@
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 
 const DANGEROUS_POLICIES = new Set(['never', 'none', 'auto']);
 
-export const cdx001: CheckModule = {
+export const cdx001 = defineCheck({
   id: 'CDX-001',
   name: 'Codex Approval Policy Disabled',
   category: 'coding-agent',
@@ -10,7 +11,7 @@ export const cdx001: CheckModule = {
   description: 'Detect when Codex approval_policy is set to a value that skips user confirmation',
   supportedAgents: ['codex'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence: Evidence[] = [];
 
     for (const config of ctx.configs) {
@@ -23,18 +24,10 @@ export const cdx001: CheckModule = {
       }
     }
 
-    return {
-      id: 'CDX-001',
-      name: 'Codex Approval Policy Disabled',
-      category: 'coding-agent',
-      severity: 'critical',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'Codex approval policy requires user confirmation'
-        : 'Codex approval policy bypasses user confirmation',
-      evidence: evidence.length > 0 ? evidence : undefined,
-      fixable: false,
+    return h.fromEvidence(evidence, {
+      passed: 'Codex approval policy requires user confirmation',
+      failed: () => 'Codex approval policy bypasses user confirmation',
       fixDescription: 'Set approval_policy to "untrusted", "on-failure", or "on-request" in ~/.codex/config.toml',
-    };
+    });
   },
-};
+});

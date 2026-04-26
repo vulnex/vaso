@@ -1,4 +1,5 @@
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 
 const DANGEROUS_SANDBOX_MODES = new Set([
   'danger-full-access',
@@ -8,7 +9,7 @@ const DANGEROUS_SANDBOX_MODES = new Set([
   'disabled',
 ]);
 
-export const cdx002: CheckModule = {
+export const cdx002 = defineCheck({
   id: 'CDX-002',
   name: 'Codex Sandbox Disabled',
   category: 'coding-agent',
@@ -16,7 +17,7 @@ export const cdx002: CheckModule = {
   description: 'Detect when Codex sandbox_mode grants unrestricted host access',
   supportedAgents: ['codex'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence: Evidence[] = [];
 
     for (const config of ctx.configs) {
@@ -29,18 +30,10 @@ export const cdx002: CheckModule = {
       }
     }
 
-    return {
-      id: 'CDX-002',
-      name: 'Codex Sandbox Disabled',
-      category: 'coding-agent',
-      severity: 'critical',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'Codex sandbox is restricting command execution'
-        : 'Codex sandbox is disabled — commands have full host access',
-      evidence: evidence.length > 0 ? evidence : undefined,
-      fixable: false,
+    return h.fromEvidence(evidence, {
+      passed: 'Codex sandbox is restricting command execution',
+      failed: () => 'Codex sandbox is disabled — commands have full host access',
       fixDescription: 'Set sandbox_mode to "read-only" or "workspace-write" in ~/.codex/config.toml',
-    };
+    });
   },
-};
+});

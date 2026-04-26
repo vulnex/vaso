@@ -1,4 +1,5 @@
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 
 const DANGEROUS_APPROVAL = new Set(['never', 'none', 'auto']);
 const DANGEROUS_SANDBOX = new Set([
@@ -17,7 +18,7 @@ function isDangerousSandbox(v: unknown): boolean {
   return typeof v === 'string' && DANGEROUS_SANDBOX.has(v.toLowerCase());
 }
 
-export const cdx008: CheckModule = {
+export const cdx008 = defineCheck({
   id: 'CDX-008',
   name: 'Codex Profile Security Downgrade',
   category: 'coding-agent',
@@ -25,7 +26,7 @@ export const cdx008: CheckModule = {
   description: 'Detect Codex profiles that override approval_policy or sandbox_mode to a more permissive value than the root config',
   supportedAgents: ['codex'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence: Evidence[] = [];
 
     for (const config of ctx.configs) {
@@ -59,18 +60,10 @@ export const cdx008: CheckModule = {
       }
     }
 
-    return {
-      id: 'CDX-008',
-      name: 'Codex Profile Security Downgrade',
-      category: 'coding-agent',
-      severity: 'warning',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'No Codex profile downgrades the root security posture'
-        : `Found ${evidence.length} Codex profile(s) that weaken approval/sandbox vs. root config`,
-      evidence: evidence.length > 0 ? evidence : undefined,
-      fixable: false,
+    return h.fromEvidence(evidence, {
+      passed: 'No Codex profile downgrades the root security posture',
+      failed: (n) => `Found ${n} Codex profile(s) that weaken approval/sandbox vs. root config`,
       fixDescription: 'Remove the override from the profile, or remove the profile entirely — the root config is the floor',
-    };
+    });
   },
-};
+});

@@ -1,6 +1,7 @@
 import { homedir } from 'node:os';
 import { normalize } from 'node:path';
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 
 const HOME = homedir();
 
@@ -53,7 +54,7 @@ function extractTrustedPaths(data: Record<string, unknown>): string[] {
   return paths;
 }
 
-export const cdx006: CheckModule = {
+export const cdx006 = defineCheck({
   id: 'CDX-006',
   name: 'Codex Trusted Projects Too Broad',
   category: 'coding-agent',
@@ -61,7 +62,7 @@ export const cdx006: CheckModule = {
   description: 'Detect Codex trusted_projects entries that grant approval bypass over /, $HOME, /tmp, or /etc',
   supportedAgents: ['codex'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence: Evidence[] = [];
 
     for (const config of ctx.configs) {
@@ -78,18 +79,10 @@ export const cdx006: CheckModule = {
       }
     }
 
-    return {
-      id: 'CDX-006',
-      name: 'Codex Trusted Projects Too Broad',
-      category: 'coding-agent',
-      severity: 'warning',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'Codex trusted projects scope is reasonable'
-        : `Found ${evidence.length} overly broad trusted project path(s)`,
-      evidence: evidence.length > 0 ? evidence : undefined,
-      fixable: false,
+    return h.fromEvidence(evidence, {
+      passed: 'Codex trusted projects scope is reasonable',
+      failed: (n) => `Found ${n} overly broad trusted project path(s)`,
       fixDescription: 'Trust specific project directories (e.g. ~/code/myrepo), not /, $HOME, or /tmp',
-    };
+    });
   },
-};
+});

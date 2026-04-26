@@ -1,5 +1,6 @@
 import { join } from 'node:path';
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence, ScanContext } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { findHighEntropyBlocks } from '../../analyzers/entropy.js';
 
 const KNOWN_KEY_PREFIXES: { pattern: RegExp; name: string }[] = [
@@ -53,7 +54,7 @@ async function scanFile(file: string, ctx: ScanContext, evidence: Evidence[]): P
   }
 }
 
-export const cdx007: CheckModule = {
+export const cdx007 = defineCheck({
   id: 'CDX-007',
   name: 'Codex Memory File Secret Leak',
   category: 'coding-agent',
@@ -61,25 +62,16 @@ export const cdx007: CheckModule = {
   description: 'Scan ~/.codex/AGENTS.md and ~/.codex/instructions.md for plaintext secrets and high-entropy strings',
   supportedAgents: ['codex'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence: Evidence[] = [];
-
     for (const filename of MEMORY_FILES) {
       await scanFile(join(ctx.installation.installDir, filename), ctx, evidence);
     }
 
-    return {
-      id: 'CDX-007',
-      name: 'Codex Memory File Secret Leak',
-      category: 'coding-agent',
-      severity: 'critical',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'No secrets detected in Codex memory files'
-        : `Found ${evidence.length} potential secret(s) in Codex memory files`,
-      evidence: evidence.length > 0 ? evidence : undefined,
-      fixable: false,
+    return h.fromEvidence(evidence, {
+      passed: 'No secrets detected in Codex memory files',
+      failed: (n) => `Found ${n} potential secret(s) in Codex memory files`,
       fixDescription: 'Remove the secret from the memory file and rotate the credential — these files are often committed to git',
-    };
+    });
   },
-};
+});
