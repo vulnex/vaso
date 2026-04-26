@@ -7,6 +7,7 @@ import { adapterRegistry } from '../adapters/registry.js';
 import { checkRegistry } from '../core/check-registry.js';
 import { getReporter } from '../reporting/index.js';
 import { getSkillFiles } from '../core/utils.js';
+import { logError } from '../core/debug.js';
 
 export interface SkillAuditCommandOptions {
   format: string;
@@ -66,7 +67,7 @@ export async function runSkillAudit(skillPath: string, options: SkillAuditComman
       process.exitCode = 1;
     }
   } catch (err) {
-    console.error(chalk.red('Skill audit failed:'), (err as Error).message);
+    logError(chalk.red('Skill audit failed:'), err);
     process.exitCode = 1;
   }
 }
