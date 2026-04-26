@@ -1,4 +1,5 @@
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 
 const SHELL_BINS = new Set(['sh', 'bash', 'zsh', 'fish', 'dash', 'ksh']);
 const SHELL_EXEC_FLAGS = new Set(['-c', '-cu', '-uc']);
@@ -53,7 +54,7 @@ function inspectNotify(notify: unknown): NotifyFinding[] {
   return findings;
 }
 
-export const cdx009: CheckModule = {
+export const cdx009 = defineCheck({
   id: 'CDX-009',
   name: 'Codex Unsafe Notify Command',
   category: 'coding-agent',
@@ -61,7 +62,7 @@ export const cdx009: CheckModule = {
   description: 'Detect Codex `notify` automation that invokes a shell (-c), uses a relative command name, or runs a script from a world-writable directory',
   supportedAgents: ['codex'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence: Evidence[] = [];
 
     for (const config of ctx.configs) {
@@ -90,18 +91,10 @@ export const cdx009: CheckModule = {
       }
     }
 
-    return {
-      id: 'CDX-009',
-      name: 'Codex Unsafe Notify Command',
-      category: 'coding-agent',
-      severity: 'warning',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'Codex notify command is safely configured (or not set)'
-        : `Found ${evidence.length} unsafe Codex notify configuration(s)`,
-      evidence: evidence.length > 0 ? evidence : undefined,
-      fixable: false,
+    return h.fromEvidence(evidence, {
+      passed: 'Codex notify command is safely configured (or not set)',
+      failed: (n) => `Found ${n} unsafe Codex notify configuration(s)`,
       fixDescription: 'Use an absolute path to a non-shell script (e.g. notify = ["/usr/local/bin/codex-notify"]); avoid sh -c and /tmp scripts',
-    };
+    });
   },
-};
+});

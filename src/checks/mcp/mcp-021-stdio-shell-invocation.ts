@@ -1,4 +1,5 @@
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 
 const SHELL_BINS = new Set(['sh', 'bash', 'zsh', 'fish', 'dash', 'ksh']);
 const SHELL_EXEC_FLAGS = new Set(['-c', '-cu', '-uc']);
@@ -8,7 +9,7 @@ function basename(p: string): string {
   return idx >= 0 ? p.slice(idx + 1) : p;
 }
 
-export const mcp021: CheckModule = {
+export const mcp021 = defineCheck({
   id: 'MCP-021',
   name: 'Stdio Server Shell Invocation',
   category: 'mcp',
@@ -16,7 +17,7 @@ export const mcp021: CheckModule = {
   description: 'Detect stdio MCP servers launched through sh -c / bash -c, which turns any env var or arg into shell input',
   supportedAgents: ['mcp'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence: Evidence[] = [];
     const mcpConfigs = ctx.mcpConfigs ?? [];
 
@@ -35,18 +36,10 @@ export const mcp021: CheckModule = {
       }
     }
 
-    return {
-      id: 'MCP-021',
-      name: 'Stdio Server Shell Invocation',
-      category: 'mcp',
-      severity: 'warning',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'No MCP servers are launched through a shell -c invocation'
-        : `Found ${evidence.length} MCP server(s) launched via shell -c — injection-prone`,
-      evidence: evidence.length > 0 ? evidence : undefined,
-      fixable: false,
+    return h.fromEvidence(evidence, {
+      passed: 'No MCP servers are launched through a shell -c invocation',
+      failed: (n) => `Found ${n} MCP server(s) launched via shell -c — injection-prone`,
       fixDescription: 'Invoke the server binary directly with argv (command: "/path/to/server", args: [...]); avoid shell -c wrappers',
-    };
+    });
   },
-};
+});

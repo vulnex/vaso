@@ -1,8 +1,9 @@
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { detectTyposquatting } from '../../ioc/typosquat.js';
 import { getIOCDatabase } from '../../ioc/database.js';
 
-export const mcp008: CheckModule = {
+export const mcp008 = defineCheck({
   id: 'MCP-008',
   name: 'Server Provenance',
   category: 'mcp',
@@ -10,7 +11,7 @@ export const mcp008: CheckModule = {
   description: 'Check MCP server package names for typosquatting, known-malicious publishers, and IOC matches',
   supportedAgents: ['mcp'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence: Evidence[] = [];
     const mcpConfigs = ctx.mcpConfigs ?? [];
     const sources = ctx.mcpServerSources ?? [];
@@ -22,7 +23,6 @@ export const mcp008: CheckModule = {
       const packageName = source.packageName;
       if (!packageName) continue;
 
-      // Check against known malicious publishers
       const normalizedPkg = packageName.toLowerCase();
       for (const publisher of ioc.maliciousPublishers) {
         if (normalizedPkg.includes(publisher.toLowerCase())) {
@@ -34,7 +34,6 @@ export const mcp008: CheckModule = {
         }
       }
 
-      // Check against malicious domain patterns in package name
       for (const domain of ioc.maliciousDomains) {
         const domainBase = domain.split('.')[0];
         if (normalizedPkg.includes(domainBase)) {
@@ -46,7 +45,6 @@ export const mcp008: CheckModule = {
         }
       }
 
-      // Typosquatting detection against trusted MCP packages
       if (trustedPackages.length > 0) {
         const typosquat = detectTyposquatting(packageName, trustedPackages);
         if (typosquat) {
@@ -58,7 +56,6 @@ export const mcp008: CheckModule = {
         }
       }
 
-      // Check for suspicious package name patterns
       for (const pattern of ioc.maliciousSkillPatterns) {
         if (pattern.test(packageName)) {
           evidence.push({
@@ -70,24 +67,18 @@ export const mcp008: CheckModule = {
       }
     }
 
-    // Determine severity: critical if IOC match, warning otherwise
+    // Severity escalates to critical when an IOC publisher/domain matched
     const hasCritical = evidence.some(e =>
       e.detail?.includes('malicious publisher') || e.detail?.includes('malicious domain')
     );
 
-    return {
-      id: 'MCP-008',
-      name: 'Server Provenance',
-      category: 'mcp',
-      severity: hasCritical ? 'critical' : 'warning',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'All MCP server packages pass provenance checks'
-        : `Found ${evidence.length} provenance concern(s) for MCP server packages`,
-      evidence: evidence.length > 0 ? evidence : undefined,
-    };
+    return h.fromEvidence(evidence, {
+      passed: 'All MCP server packages pass provenance checks',
+      failed: (n) => `Found ${n} provenance concern(s) for MCP server packages`,
+      severity: hasCritical ? 'critical' : undefined,
+    });
   },
-};
+});
 
 function findConfigFile(configs: import('../../mcp/types.js').MCPConfig[], serverName: string): string {
   for (const config of configs) {

@@ -1,4 +1,5 @@
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 
 const WORLD_WRITABLE_PREFIXES = ['/tmp/', '/var/tmp/', '/private/tmp/'];
 
@@ -22,7 +23,7 @@ function inWorldWritable(path: string): string | undefined {
   return undefined;
 }
 
-export const mcp022: CheckModule = {
+export const mcp022 = defineCheck({
   id: 'MCP-022',
   name: 'Server Command in World-Writable Path',
   category: 'mcp',
@@ -30,7 +31,7 @@ export const mcp022: CheckModule = {
   description: 'Detect MCP servers whose command (or interpreter script) lives in /tmp, /var/tmp, or /private/tmp — replaceable by any local user',
   supportedAgents: ['mcp'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence: Evidence[] = [];
     const mcpConfigs = ctx.mcpConfigs ?? [];
 
@@ -51,7 +52,6 @@ export const mcp022: CheckModule = {
         // For interpreters (python, node, etc.), check the script path in args[0]
         const base = basename(server.command);
         if (INTERPRETERS.has(base) && server.args && server.args.length > 0) {
-          // Skip leading flags like -u, -m, -x to find the first non-flag arg
           const scriptArg = server.args.find(a => !a.startsWith('-'));
           if (scriptArg) {
             const argDir = inWorldWritable(scriptArg);
@@ -67,18 +67,10 @@ export const mcp022: CheckModule = {
       }
     }
 
-    return {
-      id: 'MCP-022',
-      name: 'Server Command in World-Writable Path',
-      category: 'mcp',
-      severity: 'critical',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'No MCP servers run from world-writable paths'
-        : `Found ${evidence.length} MCP server(s) running from world-writable paths`,
-      evidence: evidence.length > 0 ? evidence : undefined,
-      fixable: false,
+    return h.fromEvidence(evidence, {
+      passed: 'No MCP servers run from world-writable paths',
+      failed: (n) => `Found ${n} MCP server(s) running from world-writable paths`,
       fixDescription: 'Move the server binary or script to a user-owned directory (e.g. ~/.local/bin or a project venv); never run from /tmp',
-    };
+    });
   },
-};
+});
