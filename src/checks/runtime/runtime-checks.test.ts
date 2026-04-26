@@ -3,6 +3,7 @@ import type { ScanContext, AgentInstallation } from '../../core/types.js';
 import type { FSProvider } from '../../core/fs-provider.js';
 import { LocalFSProvider } from '../../core/local-fs-provider.js';
 import { run001 } from './run-001-launch-agents.js';
+import { run002 } from './run-002-suspicious-cron.js';
 import { run005 } from './run-005-process-ancestry.js';
 
 function makeContext(): ScanContext {
@@ -98,6 +99,67 @@ describe('RUN-001: Unauthorized LaunchAgents', () => {
       platform: 'darwin',
     } as FSProvider;
     const result = await run001.run(makeRunCtx(fs));
+    expect(result.passed).toBe(true);
+  });
+});
+
+function makeCronCtx(crontabOutput: string | Error): ScanContext {
+  const fs: FSProvider = {
+    readdir: vi.fn(async () => []),
+    readFile: vi.fn(async () => ''),
+    readdirEntries: vi.fn(async () => []),
+    access: vi.fn(async () => false),
+    stat: vi.fn(),
+    realpath: vi.fn(),
+    exec: vi.fn(),
+    execSync: vi.fn(() => {
+      if (crontabOutput instanceof Error) throw crontabOutput;
+      return crontabOutput;
+    }),
+    homedir: () => '/home/test',
+    platform: 'linux',
+  } as FSProvider;
+
+  const installation: AgentInstallation = {
+    agent: 'openclaw',
+    installDir: '/home/test/.openclaw',
+    configFiles: [],
+  };
+  return { installation, configs: [], platform: 'linux', fs };
+}
+
+describe('RUN-002: Suspicious Cron Entries', () => {
+  it('does not flag generic cron entries that just contain "agent" or "skill"', async () => {
+    const crontab = [
+      '0 * * * * /usr/local/bin/google-keystone-agent --check-for-updates',
+      '*/5 * * * * /opt/alexa-skill-builder/sync.sh',
+      '@reboot /usr/bin/systemd-user-agent --start',
+    ].join('\n');
+    const result = await run002.run(makeCronCtx(crontab));
+    expect(result.passed).toBe(true);
+  });
+
+  it('flags cron entries that reference *claw frameworks', async () => {
+    const crontab = '0 * * * * /home/me/.openclaw/scripts/persistence.sh';
+    const result = await run002.run(makeCronCtx(crontab));
+    expect(result.passed).toBe(false);
+    expect(result.evidence?.[0].snippet).toContain('openclaw');
+  });
+
+  it('flags cron entries that reference nanobot', async () => {
+    const crontab = '*/10 * * * * /usr/local/bin/nanobot heartbeat';
+    const result = await run002.run(makeCronCtx(crontab));
+    expect(result.passed).toBe(false);
+  });
+
+  it('passes when crontab is unavailable', async () => {
+    const result = await run002.run(makeCronCtx(new Error('no crontab')));
+    expect(result.passed).toBe(true);
+  });
+
+  it('skips comment lines', async () => {
+    const crontab = '# this is a comment about openclaw\n# nothing real here';
+    const result = await run002.run(makeCronCtx(crontab));
     expect(result.passed).toBe(true);
   });
 });
