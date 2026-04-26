@@ -97,6 +97,8 @@ vaso scan --format json -o report.json # JSON — structured, machine-readable
 vaso scan --format sarif -o results.sarif  # SARIF — GitHub Code Scanning compatible
 vaso scan --format markdown -o report.md   # Markdown — for PR comments
 vaso scan --format html -o report.html     # HTML — standalone report
+vaso scan --format csv -o results.csv      # CSV — one row per finding, for SIEM ingestion
+vaso scan --format junit -o results.xml    # JUnit XML — for CI test-result reporters
 ```
 
 ## Scoring
