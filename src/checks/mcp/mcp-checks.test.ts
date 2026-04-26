@@ -24,6 +24,9 @@ import { mcp017 } from './mcp-017-overly-broad-scopes.js';
 import { mcp018 } from './mcp-018-missing-state-parameter.js';
 import { mcp019 } from './mcp-019-toxic-tool-flow.js';
 import { mcp020 } from './mcp-020-tool-definition-rug-pull.js';
+import { mcp021 } from './mcp-021-stdio-shell-invocation.js';
+import { mcp022 } from './mcp-022-world-writable-command.js';
+import { mcp023 } from './mcp-023-streamable-http-origin-pinning.js';
 import { saveToolBaseline } from '../../mcp/tool-baseline.js';
 import { rm } from 'node:fs/promises';
 import { join as pathJoin } from 'node:path';
@@ -1048,5 +1051,246 @@ describe('MCP-020: Tool Definition Rug Pull', () => {
 
     expect(result.passed).toBe(true);
     expect(result.message).toContain('unchanged');
+  });
+});
+
+// ==================== MCP-021: Stdio Server Shell Invocation ====================
+describe('MCP-021: Stdio Server Shell Invocation', () => {
+  it('fails when a stdio server is launched via sh -c', async () => {
+    const cfg: MCPConfig = {
+      source: 'project',
+      filePath: '/tmp/mcp.json',
+      servers: [{
+        name: 'risky',
+        command: 'sh',
+        args: ['-c', 'cd $PROJECT_ROOT && python server.py'],
+        transport: 'stdio',
+      }],
+    };
+    const result = await mcp021.run(makeContext({ mcpConfigs: [cfg] }));
+    expect(result.passed).toBe(false);
+    expect(result.severity).toBe('warning');
+    expect(result.evidence?.[0].detail).toMatch(/sh -c/);
+  });
+
+  it('fails for /usr/bin/bash -c too (resolves basename)', async () => {
+    const cfg: MCPConfig = {
+      source: 'project',
+      filePath: '/tmp/mcp.json',
+      servers: [{
+        name: 'risky',
+        command: '/usr/bin/bash',
+        args: ['-c', 'echo hi'],
+        transport: 'stdio',
+      }],
+    };
+    const result = await mcp021.run(makeContext({ mcpConfigs: [cfg] }));
+    expect(result.passed).toBe(false);
+  });
+
+  it('passes when the server is invoked directly with argv', async () => {
+    const cfg: MCPConfig = {
+      source: 'project',
+      filePath: '/tmp/mcp.json',
+      servers: [{
+        name: 'safe',
+        command: '/usr/local/bin/my-mcp-server',
+        args: ['--port', '3000'],
+        transport: 'stdio',
+      }],
+    };
+    const result = await mcp021.run(makeContext({ mcpConfigs: [cfg] }));
+    expect(result.passed).toBe(true);
+  });
+
+  it('passes when the command is sh but no -c flag', async () => {
+    const cfg: MCPConfig = {
+      source: 'project',
+      filePath: '/tmp/mcp.json',
+      servers: [{
+        name: 'edge',
+        command: 'sh',
+        args: ['/usr/local/bin/wrapper.sh'],
+        transport: 'stdio',
+      }],
+    };
+    const result = await mcp021.run(makeContext({ mcpConfigs: [cfg] }));
+    expect(result.passed).toBe(true);
+  });
+
+  it('passes when there are no MCP configs', async () => {
+    const result = await mcp021.run(makeContext({ mcpConfigs: [] }));
+    expect(result.passed).toBe(true);
+  });
+});
+
+// ==================== MCP-022: Server Command in World-Writable Path ====================
+describe('MCP-022: Server Command in World-Writable Path', () => {
+  it('fails when the command itself is in /tmp', async () => {
+    const cfg: MCPConfig = {
+      source: 'project',
+      filePath: '/tmp/mcp.json',
+      servers: [{
+        name: 'risky',
+        command: '/tmp/my-mcp-server',
+        args: [],
+        transport: 'stdio',
+      }],
+    };
+    const result = await mcp022.run(makeContext({ mcpConfigs: [cfg] }));
+    expect(result.passed).toBe(false);
+    expect(result.severity).toBe('critical');
+    expect(result.evidence?.[0].detail).toMatch(/\/tmp/);
+  });
+
+  it('fails when an interpreter runs a script from /tmp', async () => {
+    const cfg: MCPConfig = {
+      source: 'project',
+      filePath: '/tmp/mcp.json',
+      servers: [{
+        name: 'risky',
+        command: '/usr/bin/python3',
+        args: ['/tmp/server.py'],
+        transport: 'stdio',
+      }],
+    };
+    const result = await mcp022.run(makeContext({ mcpConfigs: [cfg] }));
+    expect(result.passed).toBe(false);
+  });
+
+  it('fails for /var/tmp scripts', async () => {
+    const cfg: MCPConfig = {
+      source: 'project',
+      filePath: '/tmp/mcp.json',
+      servers: [{
+        name: 'risky',
+        command: 'node',
+        args: ['/var/tmp/server.js'],
+        transport: 'stdio',
+      }],
+    };
+    const result = await mcp022.run(makeContext({ mcpConfigs: [cfg] }));
+    expect(result.passed).toBe(false);
+  });
+
+  it('passes when the command is in a normal install path', async () => {
+    const cfg: MCPConfig = {
+      source: 'project',
+      filePath: '/tmp/mcp.json',
+      servers: [{
+        name: 'safe',
+        command: '/usr/local/bin/my-mcp-server',
+        args: [],
+        transport: 'stdio',
+      }],
+    };
+    const result = await mcp022.run(makeContext({ mcpConfigs: [cfg] }));
+    expect(result.passed).toBe(true);
+  });
+
+  it('passes when interpreter args are flags only, no script path', async () => {
+    const cfg: MCPConfig = {
+      source: 'project',
+      filePath: '/tmp/mcp.json',
+      servers: [{
+        name: 'safe',
+        command: 'python3',
+        args: ['-m', 'my_module'],
+        transport: 'stdio',
+      }],
+    };
+    const result = await mcp022.run(makeContext({ mcpConfigs: [cfg] }));
+    expect(result.passed).toBe(true);
+  });
+});
+
+// ==================== MCP-023: Streamable-HTTP Without Origin Pinning ====================
+describe('MCP-023: Streamable-HTTP Server Without Origin Pinning', () => {
+  it('fails for streamable-http on a remote URL with no origin allowlist', async () => {
+    const cfg: MCPConfig = {
+      source: 'project',
+      filePath: '/tmp/mcp.json',
+      servers: [{
+        name: 'risky',
+        url: 'https://mcp.example.com/sse',
+        transport: 'streamable-http',
+      }],
+    };
+    const result = await mcp023.run(makeContext({ mcpConfigs: [cfg] }));
+    expect(result.passed).toBe(false);
+    expect(result.severity).toBe('warning');
+    expect(result.evidence?.[0].detail).toMatch(/DNS rebinding|2025 MCP spec/);
+  });
+
+  it('passes when streamable-http URL is localhost', async () => {
+    const cfg: MCPConfig = {
+      source: 'project',
+      filePath: '/tmp/mcp.json',
+      servers: [{
+        name: 'safe',
+        url: 'http://localhost:3000/sse',
+        transport: 'streamable-http',
+      }],
+    };
+    const result = await mcp023.run(makeContext({ mcpConfigs: [cfg] }));
+    expect(result.passed).toBe(true);
+  });
+
+  it('passes when streamable-http URL is 127.0.0.1', async () => {
+    const cfg: MCPConfig = {
+      source: 'project',
+      filePath: '/tmp/mcp.json',
+      servers: [{
+        name: 'safe',
+        url: 'http://127.0.0.1:3000/sse',
+        transport: 'streamable-http',
+      }],
+    };
+    const result = await mcp023.run(makeContext({ mcpConfigs: [cfg] }));
+    expect(result.passed).toBe(true);
+  });
+
+  it('passes when args declare an allowed-origins allowlist', async () => {
+    const cfg: MCPConfig = {
+      source: 'project',
+      filePath: '/tmp/mcp.json',
+      servers: [{
+        name: 'safe',
+        command: 'my-mcp',
+        args: ['--allowed-origins', 'https://app.example.com'],
+        url: 'https://mcp.example.com/sse',
+        transport: 'streamable-http',
+      }],
+    };
+    const result = await mcp023.run(makeContext({ mcpConfigs: [cfg] }));
+    expect(result.passed).toBe(true);
+  });
+
+  it('does not flag stdio servers', async () => {
+    const cfg: MCPConfig = {
+      source: 'project',
+      filePath: '/tmp/mcp.json',
+      servers: [{
+        name: 'stdio-server',
+        command: '/usr/local/bin/srv',
+        transport: 'stdio',
+      }],
+    };
+    const result = await mcp023.run(makeContext({ mcpConfigs: [cfg] }));
+    expect(result.passed).toBe(true);
+  });
+
+  it('does not flag plain sse transport (handled elsewhere)', async () => {
+    const cfg: MCPConfig = {
+      source: 'project',
+      filePath: '/tmp/mcp.json',
+      servers: [{
+        name: 'old-sse',
+        url: 'https://mcp.example.com/sse',
+        transport: 'sse',
+      }],
+    };
+    const result = await mcp023.run(makeContext({ mcpConfigs: [cfg] }));
+    expect(result.passed).toBe(true);
   });
 });
