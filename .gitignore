@@ -11,3 +11,5 @@ feed-signing-key.pem
 CLAUDE.md
 internal_data/
 probe/dist/
+probe/probe
+probe/vaso-probe
