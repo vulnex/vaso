@@ -6,7 +6,7 @@
 
 ## Overview
 
-VASO scans AI agent frameworks, interactive coding agents, and MCP server configurations for security misconfigurations, malicious code, and known threats. It runs 134 checks across 10 agents (8 autonomous frameworks + Claude Code + Codex), using AST-based static analysis (not regex) for accurate results without ever executing scanned code.
+VASO scans AI agent frameworks, interactive coding agents, and MCP server configurations for security misconfigurations, malicious code, and known threats. It runs 143 checks across 10 agents (8 autonomous frameworks + Claude Code + Codex), using AST-based static analysis (not regex) for accurate results without ever executing scanned code.
 
 ## Installation
 
@@ -72,7 +72,7 @@ See [doc/user-guide.md](doc/user-guide.md) for full option reference.
 
 ## Security Checks
 
-134 checks organized into 12 categories:
+143 checks organized into 12 categories:
 
 | Category | IDs | Count | Description |
 |----------|-----|-------|-------------|
@@ -84,8 +84,8 @@ See [doc/user-guide.md](doc/user-guide.md) for full option reference.
 | Policy | POL-001–005 | 5 | DM policy, tool policy, sandbox compliance |
 | MCP Server | MCP-001–020 | 20 | Transport security, credential exposure, tool injection, toxic flows, rug pull |
 | Advisory | ADV-001–005 | 5 | Vulnerability/CVE detection with version awareness |
-| Coding Agent | CC-001–008, CDX-001–004 | 12 | Claude Code: bypassPermissions, broad Bash allow, unsafe hooks, plaintext keys, MCP pinning. Codex: approval policy, sandbox mode, auth file perms |
-| Agent-Specific | IC, NB, ZC | 38 | Per-framework checks (IronClaw, Nanobot, ZeroClaw) |
+| Coding Agent | CC-001–012, CDX-001–009 | 21 | Claude Code (12): bypassPermissions, broad Bash allow, unsafe hooks, plaintext keys, MCP pinning, project-MCP auto-trust, helper perms, missing deny rules, additionalDirectories, status-line safety, sub-agent prompt injection, CLAUDE.md secrets. Codex (9): approval policy, sandbox mode, auth file perms, MCP pinning, shell-env policy, trusted-projects scope, AGENTS.md secrets, profile downgrade, unsafe notify command |
+| Agent-Specific | IC, NB, ZC | 38 | Per-framework checks (IronClaw 12, Nanobot 12, ZeroClaw 14) |
 
 Server-only checks (gateway/network/runtime concepts) are automatically excluded for coding agents to avoid false positives — Claude Code and Codex have a different threat model than autonomous server agents.
 
