@@ -7,10 +7,29 @@ export interface DetectCommandOptions {
   format: string;
   allUsers?: boolean;
   verbose?: boolean;
+  host?: string[];
+  inventory?: string;
+  sshKey?: string;
+  sshTimeout?: string;
+  snapshot?: string;
 }
 
 export async function runDetect(options: DetectCommandOptions): Promise<void> {
   try {
+    // Snapshot-based detection
+    if (options.snapshot) {
+      const results = await detectFromSnapshot(options);
+      renderResults(results, options);
+      return;
+    }
+
+    // SSH remote detection
+    if (options.host || options.inventory) {
+      await detectRemoteHosts(options);
+      return;
+    }
+
+    // Local detection
     let installations = await adapterRegistry.detectAll({
       allUsers: options.allUsers,
     });
@@ -21,14 +40,169 @@ export async function runDetect(options: DetectCommandOptions): Promise<void> {
       installations = installations.filter(i => i.agent === agentType);
     }
 
-    if (options.format === 'json') {
-      renderJson(installations);
-    } else {
-      renderTerminal(installations, options.verbose);
-    }
+    renderResults(installations, options);
   } catch (err) {
     console.error(chalk.red('Detection failed:'), (err as Error).message);
     process.exitCode = 1;
+  }
+}
+
+async function detectFromSnapshot(options: DetectCommandOptions): Promise<AgentInstallation[]> {
+  const { readFile } = await import('node:fs/promises');
+  const { SnapshotFSProvider } = await import('../core/snapshot-fs-provider.js');
+  const raw = await readFile(options.snapshot!, 'utf-8');
+  const snapshot = JSON.parse(raw);
+
+  const errors: string[] = [];
+  if (snapshot.version !== 1) errors.push(`Unsupported snapshot version: ${snapshot.version}`);
+  if (!snapshot.platform) errors.push('Missing platform field');
+  if (!snapshot.hostname) errors.push('Missing hostname field');
+  if (!snapshot.files || typeof snapshot.files !== 'object') errors.push('Missing or invalid files field');
+
+  if (errors.length > 0) {
+    console.error(chalk.red('Invalid snapshot file:'));
+    for (const e of errors) console.error(chalk.red(`  - ${e}`));
+    process.exitCode = 1;
+    return [];
+  }
+
+  const snapshotFs = new SnapshotFSProvider(snapshot);
+
+  console.log(chalk.dim(`  Detecting agents from snapshot "${snapshot.hostname}" (${snapshot.platform})\n`));
+
+  let installations = await adapterRegistry.detectAll({
+    allUsers: options.allUsers,
+    fs: snapshotFs,
+  });
+
+  if (options.agent) {
+    installations = installations.filter(i => i.agent === (options.agent as AgentType));
+  }
+
+  return installations;
+}
+
+interface HostDetectResult {
+  host: string;
+  label?: string;
+  installations: AgentInstallation[];
+  error?: string;
+}
+
+async function detectRemoteHosts(options: DetectCommandOptions): Promise<void> {
+  const { parseSSHTarget } = await import('../transport/ssh.js');
+  const { parseInventory } = await import('../transport/inventory.js');
+  const { buildProbeManifest } = await import('../core/manifest-builder.js');
+  const { SnapshotFSProvider } = await import('../core/snapshot-fs-provider.js');
+  const { executeRemoteProbe } = await import('../transport/ssh.js');
+  const { dirname, join } = await import('node:path');
+  const { fileURLToPath } = await import('node:url');
+
+  type SSHTarget = import('../transport/ssh.js').SSHTarget;
+
+  let targets: SSHTarget[] = [];
+
+  if (options.host) {
+    targets = options.host.map(h => {
+      const t = parseSSHTarget(h);
+      if (options.sshKey) t.identity = options.sshKey;
+      return t;
+    });
+  }
+
+  if (options.inventory) {
+    const inventoryTargets = await parseInventory(options.inventory);
+    for (const t of inventoryTargets) {
+      if (options.sshKey && !t.identity) t.identity = options.sshKey;
+    }
+    targets.push(...inventoryTargets);
+  }
+
+  if (targets.length === 0) {
+    console.error(chalk.red('No detection targets specified'));
+    process.exitCode = 1;
+    return;
+  }
+
+  const vasoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
+  const probeBinDir = join(vasoRoot, 'probe', 'dist');
+  const manifest = buildProbeManifest(adapterRegistry.getAdapters());
+  const timeout = parseInt(options.sshTimeout ?? '60', 10) * 1000;
+
+  console.log(chalk.bold(`\n  Detecting agents on ${targets.length} remote host(s)...\n`));
+
+  const CONCURRENCY = 5;
+  const results: HostDetectResult[] = [];
+
+  async function processTarget(target: SSHTarget): Promise<HostDetectResult> {
+    const label = target.label ?? `${target.user}@${target.host}`;
+    try {
+      const snapshot = await executeRemoteProbe(target, {
+        probeBinDir,
+        manifest,
+        timeout,
+      });
+
+      const snapshotFs = new SnapshotFSProvider(snapshot);
+      let installations = await adapterRegistry.detectAll({
+        allUsers: options.allUsers,
+        fs: snapshotFs,
+      });
+
+      if (options.agent) {
+        installations = installations.filter(i => i.agent === (options.agent as AgentType));
+      }
+
+      return { host: snapshot.hostname ?? target.host, label: target.label, installations };
+    } catch (err) {
+      return { host: target.host, label: target.label, installations: [], error: (err as Error).message };
+    }
+  }
+
+  for (let i = 0; i < targets.length; i += CONCURRENCY) {
+    const batch = targets.slice(i, i + CONCURRENCY);
+    const batchResults = await Promise.all(batch.map(processTarget));
+    results.push(...batchResults);
+  }
+
+  // Render multi-host results
+  if (options.format === 'json') {
+    console.log(JSON.stringify(results, null, 2));
+  } else {
+    for (const hr of results) {
+      const hostLabel = hr.label ?? hr.host;
+      console.log(chalk.bold(`\n── ${hostLabel} ──\n`));
+
+      if (hr.error) {
+        console.log(chalk.red(`  Error: ${hr.error}\n`));
+        continue;
+      }
+
+      if (hr.installations.length === 0) {
+        console.log(chalk.yellow('  No agents detected.\n'));
+        continue;
+      }
+
+      renderTerminal(hr.installations, options.verbose);
+    }
+
+    const successCount = results.filter(r => !r.error).length;
+    const failedCount = results.filter(r => r.error).length;
+    const totalAgents = results.reduce((sum, r) => sum + r.installations.length, 0);
+
+    console.log(chalk.bold(`\n  ${successCount} host(s) scanned, ${totalAgents} agent(s) detected.`));
+    if (failedCount > 0) {
+      console.log(chalk.red(`  ${failedCount} host(s) failed.`));
+    }
+    console.log('');
+  }
+}
+
+function renderResults(installations: AgentInstallation[], options: DetectCommandOptions): void {
+  if (options.format === 'json') {
+    renderJson(installations);
+  } else {
+    renderTerminal(installations, options.verbose);
   }
 }
 
