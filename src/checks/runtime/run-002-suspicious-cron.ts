@@ -1,9 +1,14 @@
 import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
 import { CODING_AGENTS } from '../../core/types.js';
 
+// Distinctive framework-name substrings only. Generic words like "agent"
+// and "skill" match unrelated tooling (system updaters, Alexa skill kits,
+// generic helper scripts) and were producing false positives.
 const SUSPICIOUS_KEYWORDS = [
-  'openclaw', 'nanoclaw', 'picoclaw', 'claw', 'moltbot', 'clawdbot',
-  'skill', 'agent',
+  'claw',          // catches openclaw, nanoclaw, picoclaw, ironclaw, zeroclaw, nemoclaw, clawdbot
+  'nanobot',
+  'moltbot',
+  'hermes-agent',
 ];
 
 export const run002: CheckModule = {
