@@ -2,9 +2,15 @@ import { join } from 'node:path';
 import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
 import { CODING_AGENTS } from '../../core/types.js';
 
+// Substrings distinctive enough to indicate a persistence file references one
+// of the agent frameworks VASO scans. Generic words like "agent" and "skill"
+// are intentionally excluded — they false-positive on Google Keystone, MS
+// Update, Apple's own LaunchAgents, etc., none of which are relevant here.
 const SUSPICIOUS_KEYWORDS = [
-  'openclaw', 'nanoclaw', 'picoclaw', 'claw', 'agent',
-  'skill', 'moltbot', 'clawdbot',
+  'claw',          // catches openclaw, nanoclaw, picoclaw, ironclaw, zeroclaw, nemoclaw, clawdbot
+  'nanobot',
+  'moltbot',
+  'hermes-agent',  // specific enough to avoid Facebook Hermes / unrelated tooling
 ];
 
 export const run001: CheckModule = {
