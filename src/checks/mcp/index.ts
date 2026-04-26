@@ -19,6 +19,9 @@ import { mcp017 } from './mcp-017-overly-broad-scopes.js';
 import { mcp018 } from './mcp-018-missing-state-parameter.js';
 import { mcp019 } from './mcp-019-toxic-tool-flow.js';
 import { mcp020 } from './mcp-020-tool-definition-rug-pull.js';
+import { mcp021 } from './mcp-021-stdio-shell-invocation.js';
+import { mcp022 } from './mcp-022-world-writable-command.js';
+import { mcp023 } from './mcp-023-streamable-http-origin-pinning.js';
 
 export const mcpChecks: CheckModule[] = [
   mcp001,
@@ -41,4 +44,7 @@ export const mcpChecks: CheckModule[] = [
   mcp018,
   mcp019,
   mcp020,
+  mcp021,
+  mcp022,
+  mcp023,
 ];

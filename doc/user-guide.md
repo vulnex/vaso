@@ -274,7 +274,7 @@ Penalties:
 
 ## Security Checks
 
-VASO runs **143 checks across 12 categories**. The full per-check reference (descriptions, severity, fixability, evidence shape) lives in [`devnotes/checks-reference.md`](../devnotes/checks-reference.md).
+VASO runs **146 checks across 12 categories**. The full per-check reference (descriptions, severity, fixability, evidence shape) lives in [`devnotes/checks-reference.md`](../devnotes/checks-reference.md).
 
 | Category | IDs | Count | Scope |
 |----------|-----|-------|-------|
@@ -284,7 +284,7 @@ VASO runs **143 checks across 12 categories**. The full per-check reference (des
 | Network | NET-001–005 | 5 | Gateway exposure, WebSocket origins, proxy bypass |
 | Runtime | RUN-001–005 | 5 | LaunchAgents, cron, Docker socket, VS Code trojans |
 | Policy | POL-001–005 | 5 | DM policy, tool policy, sandbox compliance |
-| MCP Server | MCP-001–020 | 20 | Transport security, credentials, tool injection, toxic flows, rug pull, OAuth 2.1 |
+| MCP Server | MCP-001–023 | 23 | Transport security, credentials, tool injection, toxic flows, rug pull, OAuth 2.1, stdio shell-c, world-writable command paths, streamable-HTTP origin pinning |
 | Advisory | ADV-001–005 | 5 | Vulnerability/CVE detection with version awareness |
 | IronClaw | IC-001–012 | 12 | Webhook bind, sandbox, auto-approve tools |
 | Nanobot | NB-001–012 | 12 | Channel allow, shell filtering, memory injection |
