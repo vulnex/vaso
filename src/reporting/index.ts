@@ -4,6 +4,8 @@ import { JsonReporter } from './json.js';
 import { SarifReporter } from './sarif.js';
 import { MarkdownReporter } from './markdown.js';
 import { HtmlReporter } from './html.js';
+import { CsvReporter } from './csv.js';
+import { JunitReporter } from './junit.js';
 
 const reporters: Record<string, () => Reporter> = {
   terminal: () => new TerminalReporter(),
@@ -11,6 +13,8 @@ const reporters: Record<string, () => Reporter> = {
   sarif: () => new SarifReporter(),
   markdown: () => new MarkdownReporter(),
   html: () => new HtmlReporter(),
+  csv: () => new CsvReporter(),
+  junit: () => new JunitReporter(),
 };
 
 export function getReporter(format: string): Reporter {

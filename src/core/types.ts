@@ -9,7 +9,7 @@ export type CheckCategory = 'config' | 'skills' | 'ioc' | 'network' | 'runtime' 
  * server-only concepts like gateway binding, rate limiting, LaunchAgents, etc.
  */
 export const CODING_AGENTS: AgentType[] = ['claude-code', 'codex'];
-export type OutputFormat = 'terminal' | 'json' | 'sarif' | 'markdown' | 'html';
+export type OutputFormat = 'terminal' | 'json' | 'sarif' | 'markdown' | 'html' | 'csv' | 'junit';
 
 export interface Evidence {
   file: string;

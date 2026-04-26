@@ -33,7 +33,7 @@ vaso scan [options]
 | Option | Description |
 |--------|-------------|
 | `-a, --agent <type>` | Scan a specific agent: `openclaw`, `nanoclaw`, `picoclaw`, `ironclaw`, `nanobot`, `zeroclaw`, `nemoclaw`, `hermes`, `claude-code`, or `codex` |
-| `-f, --format <format>` | Output format: `terminal` (default), `json`, `sarif`, `markdown` |
+| `-f, --format <format>` | Output format: `terminal` (default), `json`, `sarif`, `markdown`, `html`, `csv`, `junit` |
 | `-o, --output <file>` | Write report to a file instead of stdout |
 | `--save-baseline` | Save current results as a baseline for future comparison |
 | `--diff` | Compare results against the last saved baseline |
@@ -111,7 +111,7 @@ vaso skill audit <path> [options]
 
 | Option | Description |
 |--------|-------------|
-| `-f, --format <format>` | Output format: `terminal` (default), `json`, `sarif`, `markdown`, `html` |
+| `-f, --format <format>` | Output format: `terminal` (default), `json`, `sarif`, `markdown`, `html`, `csv`, `junit` |
 | `-o, --output <file>` | Write report to a file instead of stdout |
 | `--no-color` | Disable colored terminal output |
 
@@ -200,7 +200,7 @@ vaso mcp scan [options]
 
 | Option | Description |
 |--------|-------------|
-| `-f, --format <format>` | Output format: `terminal` (default), `json`, `sarif`, `markdown` |
+| `-f, --format <format>` | Output format: `terminal` (default), `json`, `sarif`, `markdown`, `html`, `csv`, `junit` |
 | `-o, --output <file>` | Write report to a file instead of stdout |
 | `-p, --path <paths...>` | Specific config file paths to scan (skips auto-discovery) |
 | `--no-color` | Disable colored terminal output |
