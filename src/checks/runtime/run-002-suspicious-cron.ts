@@ -1,17 +1,15 @@
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { CODING_AGENTS } from '../../core/types.js';
 
-// Distinctive framework-name substrings only. Generic words like "agent"
-// and "skill" match unrelated tooling (system updaters, Alexa skill kits,
-// generic helper scripts) and were producing false positives.
 const SUSPICIOUS_KEYWORDS = [
-  'claw',          // catches openclaw, nanoclaw, picoclaw, ironclaw, zeroclaw, nemoclaw, clawdbot
+  'claw',
   'nanobot',
   'moltbot',
   'hermes-agent',
 ];
 
-export const run002: CheckModule = {
+export const run002 = defineCheck({
   id: 'RUN-002',
   name: 'Suspicious Cron Entries',
   category: 'runtime',
@@ -20,7 +18,7 @@ export const run002: CheckModule = {
   excludedAgents: CODING_AGENTS,
   supportedPlatforms: ['darwin', 'linux'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence: Evidence[] = [];
 
     try {
@@ -48,16 +46,9 @@ export const run002: CheckModule = {
       // No crontab or access denied
     }
 
-    return {
-      id: 'RUN-002',
-      name: 'Suspicious Cron Entries',
-      category: 'runtime',
-      severity: 'warning',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'No suspicious cron entries found'
-        : `Found ${evidence.length} suspicious cron entry/entries`,
-      evidence: evidence.length > 0 ? evidence : undefined,
-    };
+    return h.fromEvidence(evidence, {
+      passed: 'No suspicious cron entries found',
+      failed: (n) => `Found ${n} suspicious cron entry/entries`,
+    });
   },
-};
+});

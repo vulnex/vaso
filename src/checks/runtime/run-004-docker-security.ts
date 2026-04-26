@@ -1,7 +1,8 @@
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { CODING_AGENTS } from '../../core/types.js';
 
-export const run004: CheckModule = {
+export const run004 = defineCheck({
   id: 'RUN-004',
   name: 'Docker Security',
   category: 'runtime',
@@ -10,15 +11,12 @@ export const run004: CheckModule = {
   excludedAgents: CODING_AGENTS,
   supportedPlatforms: ['darwin', 'linux'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence: Evidence[] = [];
 
-    // Check Docker socket permissions
     try {
       const stats = await ctx.fs.stat('/var/run/docker.sock');
       const mode = stats.mode & 0o777;
-
-      // Warn if world-readable/writable
       if (mode & 0o006) {
         evidence.push({
           file: '/var/run/docker.sock',
@@ -29,16 +27,9 @@ export const run004: CheckModule = {
       // Docker not installed or no socket
     }
 
-    return {
-      id: 'RUN-004',
-      name: 'Docker Security',
-      category: 'runtime',
-      severity: 'warning',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'Docker security checks passed (or Docker not installed)'
-        : `Found ${evidence.length} Docker security issue(s)`,
-      evidence: evidence.length > 0 ? evidence : undefined,
-    };
+    return h.fromEvidence(evidence, {
+      passed: 'Docker security checks passed (or Docker not installed)',
+      failed: (n) => `Found ${n} Docker security issue(s)`,
+    });
   },
-};
+});

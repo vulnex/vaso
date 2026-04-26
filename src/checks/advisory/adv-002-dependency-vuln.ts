@@ -1,35 +1,25 @@
 import { join } from 'node:path';
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence, ScanContext } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { getAdvisoryDatabase } from '../../advisory/database.js';
 import { satisfies } from '../../core/semver.js';
 
-export const adv002: CheckModule = {
+export const adv002 = defineCheck({
   id: 'ADV-002',
   name: 'Dependency Vulnerability',
   category: 'advisory',
   severity: 'warning',
   description: 'Scan package.json/Cargo.toml dependencies against known advisory entries',
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const db = getAdvisoryDatabase();
     const depAdvisories = db.advisories.filter(a => a.affectedDependency);
-    if (depAdvisories.length === 0) {
-      return {
-        id: 'ADV-002',
-        name: 'Dependency Vulnerability',
-        category: 'advisory',
-        severity: 'warning',
-        passed: true,
-        message: 'No dependency advisories in database',
-      };
-    }
+    if (depAdvisories.length === 0) return h.passed('No dependency advisories in database');
 
     const evidence: Evidence[] = [];
     const installDir = ctx.installation.installDir;
 
-    // Check package.json
     const deps = await loadPackageJsonDeps(ctx, installDir);
-    // Check Cargo.toml
     const cargoDeps = await loadCargoTomlDeps(ctx, installDir);
     const allDeps = { ...deps, ...cargoDeps };
 
@@ -45,19 +35,12 @@ export const adv002: CheckModule = {
       }
     }
 
-    return {
-      id: 'ADV-002',
-      name: 'Dependency Vulnerability',
-      category: 'advisory',
-      severity: 'warning',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'No vulnerable dependencies detected'
-        : `${evidence.length} vulnerable dependenc${evidence.length === 1 ? 'y' : 'ies'} detected`,
-      evidence: evidence.length > 0 ? evidence : undefined,
-    };
+    return h.fromEvidence(evidence, {
+      passed: 'No vulnerable dependencies detected',
+      failed: (n) => `${n} vulnerable dependenc${n === 1 ? 'y' : 'ies'} detected`,
+    });
   },
-};
+});
 
 async function loadPackageJsonDeps(ctx: ScanContext, dir: string): Promise<Record<string, string>> {
   try {
@@ -76,7 +59,6 @@ async function loadCargoTomlDeps(ctx: ScanContext, dir: string): Promise<Record<
   try {
     const raw = await ctx.fs.readFile(join(dir, 'Cargo.toml'));
     const deps: Record<string, string> = {};
-    // Simple regex extraction for [dependencies] section entries like: name = "version"
     const depSection = raw.match(/\[dependencies\]([\s\S]*?)(?:\n\[|$)/);
     if (depSection) {
       const lines = depSection[1].split('\n');

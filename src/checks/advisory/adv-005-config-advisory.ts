@@ -1,15 +1,16 @@
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { getAdvisoryDatabase } from '../../advisory/database.js';
 import { getNestedValue } from '../../core/utils.js';
 
-export const adv005: CheckModule = {
+export const adv005 = defineCheck({
   id: 'ADV-005',
   name: 'Config-Based Advisory',
   category: 'advisory',
   severity: 'critical',
   description: 'Match agent configurations against advisory config patterns',
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const db = getAdvisoryDatabase();
     const agent = ctx.installation.agent;
     const configAdvisories = db.advisories.filter(adv => {
@@ -17,16 +18,7 @@ export const adv005: CheckModule = {
       return adv.agent === agent || adv.agent === '*';
     });
 
-    if (configAdvisories.length === 0) {
-      return {
-        id: 'ADV-005',
-        name: 'Config-Based Advisory',
-        category: 'advisory',
-        severity: 'critical',
-        passed: true,
-        message: 'No config-pattern advisories in database',
-      };
-    }
+    if (configAdvisories.length === 0) return h.passed('No config-pattern advisories in database');
 
     const evidence: Evidence[] = [];
 
@@ -47,16 +39,9 @@ export const adv005: CheckModule = {
       }
     }
 
-    return {
-      id: 'ADV-005',
-      name: 'Config-Based Advisory',
-      category: 'advisory',
-      severity: 'critical',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'No config patterns match known advisories'
-        : `${evidence.length} config${evidence.length === 1 ? '' : 's'} match${evidence.length === 1 ? 'es' : ''} known advisory patterns`,
-      evidence: evidence.length > 0 ? evidence : undefined,
-    };
+    return h.fromEvidence(evidence, {
+      passed: 'No config patterns match known advisories',
+      failed: (n) => `${n} config${n === 1 ? '' : 's'} match${n === 1 ? 'es' : ''} known advisory patterns`,
+    });
   },
-};
+});

@@ -1,5 +1,6 @@
 import { join } from 'node:path';
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { CODING_AGENTS } from '../../core/types.js';
 
 // Known malicious VS Code extension IDs
@@ -10,7 +11,7 @@ const MALICIOUS_EXTENSIONS = new Set([
   'clawhavoc.malicious-skill-loader',
 ]);
 
-export const run003: CheckModule = {
+export const run003 = defineCheck({
   id: 'RUN-003',
   name: 'VS Code Extension Trojans',
   category: 'runtime',
@@ -18,7 +19,7 @@ export const run003: CheckModule = {
   description: 'Check for known malicious VS Code extension IDs',
   excludedAgents: CODING_AGENTS,
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence: Evidence[] = [];
     const home = ctx.fs.homedir();
 
@@ -46,16 +47,9 @@ export const run003: CheckModule = {
       } catch {}
     }
 
-    return {
-      id: 'RUN-003',
-      name: 'VS Code Extension Trojans',
-      category: 'runtime',
-      severity: 'critical',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'No known malicious VS Code extensions found'
-        : `Found ${evidence.length} malicious VS Code extension(s)`,
-      evidence: evidence.length > 0 ? evidence : undefined,
-    };
+    return h.fromEvidence(evidence, {
+      passed: 'No known malicious VS Code extensions found',
+      failed: (n) => `Found ${n} malicious VS Code extension(s)`,
+    });
   },
-};
+});

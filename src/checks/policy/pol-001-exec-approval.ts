@@ -1,8 +1,9 @@
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { CODING_AGENTS } from '../../core/types.js';
 import { getNestedValue } from '../../core/utils.js';
 
-export const pol001: CheckModule = {
+export const pol001 = defineCheck({
   id: 'POL-001',
   name: 'Exec Approval Required',
   category: 'policy',
@@ -10,7 +11,7 @@ export const pol001: CheckModule = {
   description: 'Verify tool execution requires user approval and is not auto-approved',
   excludedAgents: CODING_AGENTS,
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence: Evidence[] = [];
 
     for (const config of ctx.configs) {
@@ -39,7 +40,6 @@ export const pol001: CheckModule = {
       }
     }
 
-    // Check environment variable
     const envAutoApprove = process.env['AGENT_AUTO_APPROVE_TOOLS'];
     if (envAutoApprove === 'true' || envAutoApprove === '1' || envAutoApprove === 'all') {
       evidence.push({
@@ -48,16 +48,9 @@ export const pol001: CheckModule = {
       });
     }
 
-    return {
-      id: 'POL-001',
-      name: 'Exec Approval Required',
-      category: 'policy',
-      severity: 'warning',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'Tool execution approval is properly configured'
-        : `Found ${evidence.length} issue(s) with execution approval policy`,
-      evidence: evidence.length > 0 ? evidence : undefined,
-    };
+    return h.fromEvidence(evidence, {
+      passed: 'Tool execution approval is properly configured',
+      failed: (n) => `Found ${n} issue(s) with execution approval policy`,
+    });
   },
-};
+});

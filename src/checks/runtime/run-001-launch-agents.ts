@@ -1,11 +1,8 @@
 import { join } from 'node:path';
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { CODING_AGENTS } from '../../core/types.js';
 
-// Substrings distinctive enough to indicate a persistence file references one
-// of the agent frameworks VASO scans. Generic words like "agent" and "skill"
-// are intentionally excluded — they false-positive on Google Keystone, MS
-// Update, Apple's own LaunchAgents, etc., none of which are relevant here.
 const SUSPICIOUS_KEYWORDS = [
   'claw',          // catches openclaw, nanoclaw, picoclaw, ironclaw, zeroclaw, nemoclaw, clawdbot
   'nanobot',
@@ -13,7 +10,7 @@ const SUSPICIOUS_KEYWORDS = [
   'hermes-agent',  // specific enough to avoid Facebook Hermes / unrelated tooling
 ];
 
-export const run001: CheckModule = {
+export const run001 = defineCheck({
   id: 'RUN-001',
   name: 'Unauthorized LaunchAgents',
   category: 'runtime',
@@ -22,7 +19,7 @@ export const run001: CheckModule = {
   excludedAgents: CODING_AGENTS,
   supportedPlatforms: ['darwin', 'linux'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence: Evidence[] = [];
 
     if (ctx.platform === 'darwin') {
@@ -83,16 +80,9 @@ export const run001: CheckModule = {
       }
     }
 
-    return {
-      id: 'RUN-001',
-      name: 'Unauthorized LaunchAgents',
-      category: 'runtime',
-      severity: 'warning',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'No suspicious persistence mechanisms found'
-        : `Found ${evidence.length} suspicious persistence mechanism(s)`,
-      evidence: evidence.length > 0 ? evidence : undefined,
-    };
+    return h.fromEvidence(evidence, {
+      passed: 'No suspicious persistence mechanisms found',
+      failed: (n) => `Found ${n} suspicious persistence mechanism(s)`,
+    });
   },
-};
+});

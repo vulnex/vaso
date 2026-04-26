@@ -1,10 +1,11 @@
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { CODING_AGENTS } from '../../core/types.js';
 import { getIOCDatabase } from '../../ioc/database.js';
 
 const IP_REGEX = /(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/g;
 
-export const net005: CheckModule = {
+export const net005 = defineCheck({
   id: 'NET-005',
   name: 'Active Connection Monitoring',
   category: 'network',
@@ -13,7 +14,7 @@ export const net005: CheckModule = {
   excludedAgents: CODING_AGENTS,
   supportedPlatforms: ['darwin', 'linux'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence: Evidence[] = [];
     const db = getIOCDatabase();
     const c2Set = new Set(db.c2Ips);
@@ -26,14 +27,7 @@ export const net005: CheckModule = {
         output = ctx.fs.execSync('ss', ['-tn'], { timeout: 5000 });
       }
     } catch {
-      return {
-        id: 'NET-005',
-        name: 'Active Connection Monitoring',
-        category: 'network',
-        severity: 'critical',
-        passed: true,
-        message: 'Could not retrieve active connections',
-      };
+      return h.passed('Could not retrieve active connections');
     }
 
     const lines = output.split('\n');
@@ -55,16 +49,9 @@ export const net005: CheckModule = {
       }
     }
 
-    return {
-      id: 'NET-005',
-      name: 'Active Connection Monitoring',
-      category: 'network',
-      severity: 'critical',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'No active connections to known C2 IP addresses'
-        : `Found ${evidence.length} active connection(s) to known C2 IP addresses`,
-      evidence: evidence.length > 0 ? evidence : undefined,
-    };
+    return h.fromEvidence(evidence, {
+      passed: 'No active connections to known C2 IP addresses',
+      failed: (n) => `Found ${n} active connection(s) to known C2 IP addresses`,
+    });
   },
-};
+});

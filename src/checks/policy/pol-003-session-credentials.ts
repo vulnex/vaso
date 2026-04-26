@@ -1,5 +1,6 @@
 import { join } from 'node:path';
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 
 const CREDENTIAL_FILE_PATTERNS = [
   /session/i,
@@ -9,7 +10,7 @@ const CREDENTIAL_FILE_PATTERNS = [
   /\.secret_key$/i,
 ];
 
-export const pol003: CheckModule = {
+export const pol003 = defineCheck({
   id: 'POL-003',
   name: 'Session Credential Permissions',
   category: 'policy',
@@ -17,24 +18,17 @@ export const pol003: CheckModule = {
   description: 'Check that session/token/auth files have restrictive permissions (0600)',
   supportedPlatforms: ['darwin', 'linux'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
-    const evidence: Evidence[] = [];
+  async run(ctx, h) {
     const installDir = ctx.installation.installDir;
 
     let entries: { name: string; isFile: boolean; isDirectory: boolean; parentPath?: string }[];
     try {
       entries = await ctx.fs.readdirEntries(installDir, { recursive: true });
     } catch {
-      return {
-        id: 'POL-003',
-        name: 'Session Credential Permissions',
-        category: 'policy',
-        severity: 'warning',
-        passed: true,
-        message: 'Install directory not accessible',
-      };
+      return h.passed('Install directory not accessible');
     }
 
+    const evidence: Evidence[] = [];
     for (const entry of entries) {
       if (!entry.isFile) continue;
 
@@ -56,16 +50,9 @@ export const pol003: CheckModule = {
       }
     }
 
-    return {
-      id: 'POL-003',
-      name: 'Session Credential Permissions',
-      category: 'policy',
-      severity: 'warning',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'All session/credential files have restrictive permissions'
-        : `${evidence.length} session/credential file(s) have overly permissive permissions`,
-      evidence: evidence.length > 0 ? evidence : undefined,
-    };
+    return h.fromEvidence(evidence, {
+      passed: 'All session/credential files have restrictive permissions',
+      failed: (n) => `${n} session/credential file(s) have overly permissive permissions`,
+    });
   },
-};
+});
