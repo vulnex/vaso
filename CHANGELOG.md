@@ -53,6 +53,18 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - 22 new tests for SSH target parsing, inventory parsing, and multi-host aggregation
 - Total tests: 843
 
+#### Hermes Agent Support
+- **Hermes adapter** (`src/adapters/hermes.ts`): detects Hermes Agent (Nous Research) installations by scanning `~/.hermes` (or `HERMES_HOME` env override) for `config.yaml` and `.env` config files
+- **Gateway detection**: extracts API server binding from `platforms.api_server` config (default `127.0.0.1:8642`)
+- **Skills directory**: reports `~/.hermes/skills/` for skill code analysis
+- **CLI version extraction**: queries `hermes version` / `hermes --version` for installed version
+- **Probe manifest**: declares file paths, glob patterns, commands, and env prefixes (`HERMES_`) for remote snapshot scanning
+- **Credential and memory path discovery**: `.env`, `credentials.json`, `memory/`, `conversations.db`
+- **Go probe updated**: `hermes` added to command allowlist; `DefaultManifest()` includes `~/.hermes` config files, skills/optional-skills globs, `hermes version` command, directory listings, and `HERMES_` env prefix
+- `'hermes'` added to `AgentType` union; adapter registered in CLI alongside existing 7 adapters
+- 16 new unit tests covering detection, config loading, gateway extraction, env override, probe manifest
+- Total tests: 859
+
 #### Cross-Platform Installer Script
 - **`install.sh`** — one-liner bash installer for Linux, macOS, and WSL: `curl -fsSL https://raw.githubusercontent.com/vulnex/vaso/main/install.sh | bash`
 - Detects platform (macOS, Linux, WSL via `/proc/version` check) and architecture
