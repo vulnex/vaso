@@ -7,6 +7,7 @@ import { cdx005 } from './cdx-005-shell-env-policy.js';
 import { cdx006 } from './cdx-006-trusted-projects-scope.js';
 import { cdx007 } from './cdx-007-memory-secret-leak.js';
 import { cdx008 } from './cdx-008-profile-downgrade.js';
+import { cdx009 } from './cdx-009-unsafe-notify.js';
 
 export const codexChecks: CheckModule[] = [
   cdx001,
@@ -17,4 +18,5 @@ export const codexChecks: CheckModule[] = [
   cdx006,
   cdx007,
   cdx008,
+  cdx009,
 ];
