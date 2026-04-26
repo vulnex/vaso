@@ -1,10 +1,11 @@
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 
 const PACKAGE_RUNNERS = new Set(['npx', 'pnpm', 'yarn', 'bunx', 'uvx', 'pipx']);
 const PINNED_PACKAGE = /@\d+\.\d+\.\d+/;
 const SHA_PINNED = /(?:@sha256:|#[a-f0-9]{7,40})/i;
 
-export const cdx004: CheckModule = {
+export const cdx004 = defineCheck({
   id: 'CDX-004',
   name: 'Codex Unpinned MCP Server',
   category: 'coding-agent',
@@ -12,7 +13,7 @@ export const cdx004: CheckModule = {
   description: 'Detect MCP servers in Codex config launched via package runners without a pinned version',
   supportedAgents: ['codex'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence: Evidence[] = [];
 
     for (const config of ctx.configs) {
@@ -44,18 +45,10 @@ export const cdx004: CheckModule = {
       }
     }
 
-    return {
-      id: 'CDX-004',
-      name: 'Codex Unpinned MCP Server',
-      category: 'coding-agent',
-      severity: 'warning',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'All Codex MCP server packages are version-pinned'
-        : `Found ${evidence.length} Codex MCP server(s) running unpinned packages`,
-      evidence: evidence.length > 0 ? evidence : undefined,
-      fixable: false,
+    return h.fromEvidence(evidence, {
+      passed: 'All Codex MCP server packages are version-pinned',
+      failed: (n) => `Found ${n} Codex MCP server(s) running unpinned packages`,
       fixDescription: 'Pin packages to a specific version in [mcp_servers.*] config',
-    };
+    });
   },
-};
+});

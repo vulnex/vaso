@@ -1,7 +1,8 @@
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { getNestedValue } from '../../core/utils.js';
 
-export const cdx005: CheckModule = {
+export const cdx005 = defineCheck({
   id: 'CDX-005',
   name: 'Codex Shell Env Inherits All',
   category: 'coding-agent',
@@ -9,7 +10,7 @@ export const cdx005: CheckModule = {
   description: 'Detect when shell_environment_policy.inherit = "all" leaks every env var (including secrets) to subprocess shells',
   supportedAgents: ['codex'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence: Evidence[] = [];
 
     for (const config of ctx.configs) {
@@ -25,18 +26,10 @@ export const cdx005: CheckModule = {
       }
     }
 
-    return {
-      id: 'CDX-005',
-      name: 'Codex Shell Env Inherits All',
-      category: 'coding-agent',
-      severity: 'critical',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'Codex shell environment policy is restricted'
-        : 'Codex inherits the entire process environment into tool subprocesses',
-      evidence: evidence.length > 0 ? evidence : undefined,
-      fixable: false,
+    return h.fromEvidence(evidence, {
+      passed: 'Codex shell environment policy is restricted',
+      failed: () => 'Codex inherits the entire process environment into tool subprocesses',
       fixDescription: 'Set [shell_environment_policy] inherit = "core" (or "none") and use include_only/set for the specific vars tools need',
-    };
+    });
   },
-};
+});
