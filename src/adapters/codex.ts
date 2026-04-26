@@ -6,6 +6,7 @@ import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { loadConfig } from '../core/config-loader.js';
 import { getUserHomeDirs } from './openclaw.js';
+import { queryCliVersion } from './version-query.js';
 
 const CODEX_DIR_NAME = '.codex';
 const CONFIG_FILES = ['config.toml', 'auth.json'];
@@ -35,16 +36,6 @@ async function findCLIBinary(home: string, fs: FSProvider): Promise<string | und
   try {
     const result = fs.execSync('which', ['codex'], { timeout: 3000 }).trim();
     if (result) return result;
-  } catch {}
-  return undefined;
-}
-
-function queryCliVersion(binary: string | undefined, fs: FSProvider): string | undefined {
-  if (!binary) return undefined;
-  try {
-    const output = fs.execSync(binary, ['--version'], { timeout: 3000 }).trim();
-    const m = /(\d+\.\d+\.\d+(?:[-.][a-zA-Z0-9.]+)?)/.exec(output);
-    if (m?.[1]) return m[1];
   } catch {}
   return undefined;
 }

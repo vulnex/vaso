@@ -6,6 +6,7 @@ import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { loadConfig } from '../core/config-loader.js';
 import { deepMerge } from '../core/utils.js';
+import { queryCliVersion } from './version-query.js';
 
 const CONFIG_FILENAMES = [
   'openclaw.json',
@@ -131,20 +132,6 @@ async function findAppBundle(fs: FSProvider): Promise<string | undefined> {
   return undefined;
 }
 
-function queryCliVersion(binary: string, fs: FSProvider): string | undefined {
-  // Try --version flag first
-  for (const args of [['--version'], ['version']]) {
-    try {
-      const output = fs.execSync(binary, args, { timeout: 3000 }).trim();
-      const m = /(\d+\.\d+\.\d+(?:-[a-zA-Z0-9.]+)?)/.exec(output);
-      if (m?.[1]) return m[1];
-    } catch {
-      // Try next approach
-    }
-  }
-  return undefined;
-}
-
 /**
  * Read version from the package.json nearest to a CLI binary's resolved path.
  * Works for npm-installed binaries (global or local).
@@ -210,7 +197,7 @@ export const openclawAdapter: AgentAdapter = {
         // Extract version from openclaw.json, fallback to CLI, then package.json
         const mainConfig = configFiles.find(c => c.filePath.endsWith('openclaw.json'));
         const version = (mainConfig?.data?.version as string)
-          ?? (cliBinary ? queryCliVersion(cliBinary, fs) : undefined)
+          ?? (cliBinary ? queryCliVersion(cliBinary, fs, { argSets: [['--version'], ['version']] }) : undefined)
           ?? (cliBinary ? await readPackageVersion(cliBinary, fs) : undefined);
         const skillsDir = this.getSkillsDir(dir);
 
