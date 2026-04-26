@@ -38,8 +38,8 @@ function makeCtx(configs: ParsedConfig[], fs?: FSProvider): ScanContext {
 }
 
 describe('Codex checks', () => {
-  it('exports 8 checks', () => {
-    expect(codexChecks).toHaveLength(8);
+  it('exports 9 checks', () => {
+    expect(codexChecks).toHaveLength(9);
   });
 
   it('all checks have coding-agent category and supportedAgents', () => {
@@ -274,6 +274,76 @@ describe('CDX-008: Codex Profile Security Downgrade', () => {
 
   it('passes when no profiles are defined', async () => {
     const result = await check.run(makeCtx([makeConfig('config.toml', { model: 'o4-mini' })]));
+    expect(result.passed).toBe(true);
+  });
+});
+
+describe('CDX-009: Codex Unsafe Notify Command', () => {
+  const check = codexChecks.find(c => c.id === 'CDX-009')!;
+
+  it('fails when notify uses sh -c', async () => {
+    const config = makeConfig('config.toml', {
+      notify: ['sh', '-c', 'echo done | tee /tmp/log'],
+    });
+    const result = await check.run(makeCtx([config]));
+    expect(result.passed).toBe(false);
+    expect(result.severity).toBe('warning');
+    expect(result.evidence?.[0].detail).toMatch(/sh -c/);
+  });
+
+  it('fails when notify uses bash -c', async () => {
+    const config = makeConfig('config.toml', {
+      notify: ['bash', '-c', 'curl example.com'],
+    });
+    const result = await check.run(makeCtx([config]));
+    expect(result.passed).toBe(false);
+  });
+
+  it('fails when notify command is a relative name (PATH hijack)', async () => {
+    const config = makeConfig('config.toml', {
+      notify: ['my-notifier', '--quiet'],
+    });
+    const result = await check.run(makeCtx([config]));
+    expect(result.passed).toBe(false);
+    expect(result.evidence?.[0].detail).toMatch(/PATH hijack/);
+  });
+
+  it('fails when notify references a /tmp script', async () => {
+    const config = makeConfig('config.toml', {
+      notify: ['/usr/bin/python3', '/tmp/notify.py'],
+    });
+    const result = await check.run(makeCtx([config]));
+    expect(result.passed).toBe(false);
+    expect(result.evidence?.[0].detail).toMatch(/world-writable/);
+  });
+
+  it('detects unsafe notify inside a profile', async () => {
+    const config = makeConfig('config.toml', {
+      notify: ['/usr/local/bin/notify'],
+      profiles: {
+        risky: { notify: ['sh', '-c', 'whoami'] },
+      },
+    });
+    const result = await check.run(makeCtx([config]));
+    expect(result.passed).toBe(false);
+    expect(result.evidence?.[0].snippet).toMatch(/profiles.risky/);
+  });
+
+  it('passes when notify is an absolute path to a non-shell binary', async () => {
+    const config = makeConfig('config.toml', {
+      notify: ['/usr/local/bin/codex-notify', '--json'],
+    });
+    const result = await check.run(makeCtx([config]));
+    expect(result.passed).toBe(true);
+  });
+
+  it('passes when notify is unset', async () => {
+    const result = await check.run(makeCtx([makeConfig('config.toml', { model: 'o4-mini' })]));
+    expect(result.passed).toBe(true);
+  });
+
+  it('passes when notify is an empty array', async () => {
+    const result = await check.run(makeCtx([makeConfig('config.toml', { notify: [] })]));
     expect(result.passed).toBe(true);
   });
 });
