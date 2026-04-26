@@ -105,17 +105,34 @@ VASO produces a 0–100 score with a letter grade (A–F). Critical findings ded
 
 ## CI/CD Integration
 
-VASO ships with a ready-made workflow at `.github/workflows/vaso-scan.yml`. For custom setups:
+### GitHub Action
+
+The simplest path — drop one step into any workflow:
+
+```yaml
+- uses: vulnex/vaso@v1
+  with:
+    fail-on: critical          # or warning, info, none
+    format: sarif              # sarif, json, markdown, html, terminal
+    # output: vaso-results.sarif  (default: vaso-results.<ext>)
+    # agent: claude-code           (default: scan all detected agents)
+    # version: latest               (npm dist-tag or x.y.z)
+    # upload-sarif: 'true'          (auto-uploads to Code Scanning)
+```
+
+The action installs the requested VASO version, runs the scan, and (when `format: sarif`) uploads the report to GitHub Code Scanning. Exit codes follow `--fail-on`: a `critical` threshold (default) fails the build only on critical findings; pass `none` to never fail.
+
+### Manual workflow
 
 ```yaml
 - name: Install VASO
   run: npm install -g vaso
 
 - name: Run VASO scan
-  run: vaso scan --format sarif -o results.sarif
-  continue-on-error: true
+  run: vaso scan --format sarif -o results.sarif --fail-on critical
 
 - name: Upload SARIF
+  if: always()
   uses: github/codeql-action/upload-sarif@v3
   with:
     sarif_file: results.sarif
