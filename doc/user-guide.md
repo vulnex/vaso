@@ -1,6 +1,6 @@
 # VASO User Guide
 
-VASO (VULNEX Agent Security Observer) is a security scanner for AI agent deployments. It detects misconfigurations, malicious skills, known threats, and runtime vulnerabilities across OpenClaw, NanoClaw, PicoClaw installations, and MCP (Model Context Protocol) server configurations.
+VASO (VULNEX Agent Security Observer) is a security scanner for AI agent deployments. It detects misconfigurations, malicious skills, known threats, and runtime vulnerabilities across eight autonomous agent frameworks (OpenClaw, NanoClaw, PicoClaw, IronClaw, Nanobot, ZeroClaw, NemoClaw, Hermes), two interactive coding agents (Claude Code, Codex), and MCP (Model Context Protocol) server configurations.
 
 ## Installation
 
@@ -8,7 +8,7 @@ VASO (VULNEX Agent Security Observer) is a security scanner for AI agent deploym
 npm install -g vaso
 ```
 
-Requirements: Node.js 18 or later.
+Requirements: Node.js 20 or later.
 
 ## Quick Start
 
@@ -32,7 +32,7 @@ vaso scan [options]
 
 | Option | Description |
 |--------|-------------|
-| `-a, --agent <type>` | Scan a specific agent: `openclaw`, `nanoclaw`, or `picoclaw` |
+| `-a, --agent <type>` | Scan a specific agent: `openclaw`, `nanoclaw`, `picoclaw`, `ironclaw`, `nanobot`, `zeroclaw`, `nemoclaw`, `hermes`, `claude-code`, or `codex` |
 | `-f, --format <format>` | Output format: `terminal` (default), `json`, `sarif`, `markdown` |
 | `-o, --output <file>` | Write report to a file instead of stdout |
 | `--save-baseline` | Save current results as a baseline for future comparison |
@@ -72,7 +72,7 @@ vaso detect [options]
 
 | Option | Description |
 |--------|-------------|
-| `-a, --agent <type>` | Detect a specific agent only: `openclaw`, `nanoclaw`, or `picoclaw` |
+| `-a, --agent <type>` | Detect a specific agent only: `openclaw`, `nanoclaw`, `picoclaw`, `ironclaw`, `nanobot`, `zeroclaw`, `nemoclaw`, `hermes`, `claude-code`, or `codex` |
 | `-f, --format <format>` | Output format: `terminal` (default) or `json` |
 | `--all-users` | Detect across all user accounts (requires root/sudo) |
 | `--verbose` | Show the search paths checked for each adapter |
@@ -268,125 +268,48 @@ Penalties:
 
 ## Security Checks
 
-VASO runs 49 checks organized into 6 categories.
+VASO runs **143 checks across 12 categories**. The full per-check reference (descriptions, severity, fixability, evidence shape) lives in [`devnotes/checks-reference.md`](../devnotes/checks-reference.md).
 
-### Configuration (CFG-001 to CFG-015)
+| Category | IDs | Count | Scope |
+|----------|-----|-------|-------|
+| Configuration | CFG-001–024 | 24 | Gateway binding, API keys, TLS, permissions, sandbox, NemoClaw hardening |
+| Skill Code | SKL-001–012 | 12 | AST data-flow, obfuscation, eval/exec, reverse shells |
+| IOC Matching | IOC-001–008 | 8 | C2 IPs, malicious domains, typosquatting, file hashes |
+| Network | NET-001–005 | 5 | Gateway exposure, WebSocket origins, proxy bypass |
+| Runtime | RUN-001–005 | 5 | LaunchAgents, cron, Docker socket, VS Code trojans |
+| Policy | POL-001–005 | 5 | DM policy, tool policy, sandbox compliance |
+| MCP Server | MCP-001–020 | 20 | Transport security, credentials, tool injection, toxic flows, rug pull, OAuth 2.1 |
+| Advisory | ADV-001–005 | 5 | Vulnerability/CVE detection with version awareness |
+| IronClaw | IC-001–012 | 12 | Webhook bind, sandbox, auto-approve tools |
+| Nanobot | NB-001–012 | 12 | Channel allow, shell filtering, memory injection |
+| ZeroClaw | ZC-001–014 | 14 | API keys, autonomy mode, filesystem access |
+| Coding Agent | CC-001–012, CDX-001–009 | 21 | Claude Code (12) + Codex (9): permissions, hooks, MCP pinning, memory-file secrets, notify automation |
 
-Audits agent configuration files for insecure settings.
-
-| ID | Name | Severity | Fixable |
-|----|------|----------|---------|
-| CFG-001 | Gateway Binding (0.0.0.0) | Critical | Yes |
-| CFG-002 | API Key Exposure | Critical | No |
-| CFG-003 | File Permissions | Warning | Yes |
-| CFG-004 | TLS Not Configured | Warning | No |
-| CFG-005 | Missing Shell Allowlist | Warning | Yes |
-| CFG-006 | No Workspace Restriction | Warning | No |
-| CFG-007 | Webhook Missing Auth | Warning | No |
-| CFG-008 | Sandbox Disabled | Critical | Yes |
-| CFG-009 | Default/Weak Credentials | Critical | No |
-| CFG-010 | No Rate Limiting | Warning | Yes |
-| CFG-011 | Node.js CVE-2026-21636 | Warning | No |
-| CFG-012 | Auth Bypass Enabled | Critical | Yes |
-| CFG-013 | DM Policy Open | Warning | Yes |
-| CFG-014 | Tool Policy Permissive | Warning | No |
-| CFG-015 | mDNS Full Broadcast | Info | No |
-
-### Skill Code Analysis (SKL-001 to SKL-010)
-
-Static analysis of skill/plugin source code using AST parsing and pattern matching.
-
-| ID | Name | Severity | Method |
-|----|------|----------|--------|
-| SKL-001 | Data Exfiltration Flow | Critical | AST source-to-sink |
-| SKL-002 | Obfuscated Code | Warning | Entropy analysis |
-| SKL-003 | Eval/Exec Usage | Critical | AST |
-| SKL-004 | Curl-Pipe Execution | Critical | Pattern |
-| SKL-005 | Reverse Shell Patterns | Critical | Pattern |
-| SKL-006 | Credential Harvesting | Critical | AST + pattern |
-| SKL-007 | Prompt Injection in SKILL.md | Warning | Pattern |
-| SKL-008 | Suspicious Network Calls | Warning | AST |
-| SKL-009 | Crypto Wallet Targeting | Warning | Pattern |
-| SKL-010 | Unauthorized FS Access | Warning | AST |
-
-### Indicators of Compromise (IOC-001 to IOC-006)
-
-Matches against known threat intelligence.
-
-| ID | Name | Severity |
-|----|------|----------|
-| IOC-001 | C2 IP Detection | Critical |
-| IOC-002 | Malicious Domains | Critical |
-| IOC-003 | File Hash Match | Critical |
-| IOC-004 | Malicious Publishers | Critical |
-| IOC-005 | Typosquatting | Warning |
-| IOC-006 | Skill Name Patterns | Warning |
-
-### Network (NET-001 to NET-004)
-
-Checks for exposed services and network misconfigurations.
-
-| ID | Name | Severity |
-|----|------|----------|
-| NET-001 | Gateway Internet Exposure | Critical |
-| NET-002 | WebSocket Origin Validation | Critical |
-| NET-003 | Reverse Proxy Bypass | Warning |
-| NET-004 | Port Scan (Agent Services) | Info |
-
-### Runtime (RUN-001 to RUN-004)
-
-Detects persistence mechanisms and runtime threats.
-
-| ID | Name | Severity |
-|----|------|----------|
-| RUN-001 | Unauthorized LaunchAgents/systemd | Warning |
-| RUN-002 | Suspicious Cron Entries | Warning |
-| RUN-003 | VS Code Extension Trojans | Critical |
-| RUN-004 | Docker Socket Permissions | Warning |
-
-### MCP Server Security (MCP-001 to MCP-010)
-
-Security checks for MCP (Model Context Protocol) server configurations and source code.
-
-| ID | Name | Severity | Fixable |
-|----|------|----------|---------|
-| MCP-001 | MCP Config Discovery | Info | No |
-| MCP-002 | Transport Security | Critical | No |
-| MCP-003 | Credential Exposure | Critical | Yes |
-| MCP-004 | Overprivileged Tools | Critical | No |
-| MCP-005 | Tool Input Injection | Critical | No |
-| MCP-006 | Data Exfiltration Risk | Critical | No |
-| MCP-007 | Prompt Injection via Tool Results | Warning | No |
-| MCP-008 | Server Provenance | Warning/Critical | No |
-| MCP-009 | Permission Scope | Warning | No |
-| MCP-010 | Rug Pull Risk | Warning | Yes |
-
-MCP-008 severity is dynamic: critical if an IOC match is found, otherwise warning.
+Server-side checks (CFG, NET, RUN, POL) are auto-excluded for coding agents since their threat model differs from server frameworks.
 
 ## Supported Agents
 
-### OpenClaw
+VASO ships ten adapters. Each implements `detect()`, `getConfigPaths()`, `getSkillsDir()`, and `getGatewayInfo()` against its framework's on-disk layout.
 
-VASO searches the following directories:
-- `$OPENCLAW_HOME` (environment variable)
-- `~/.openclaw`
-- `~/.clawdbot`
-- `~/.moltbot`
-- `/etc/openclaw`
+### Autonomous frameworks
 
-Config files parsed: `openclaw.json`, `config.yaml`, `config.json`, `gateway.yaml`, `.env`
+| Adapter | Config locations | Formats |
+|---------|------------------|---------|
+| OpenClaw | `$OPENCLAW_HOME`, `~/.openclaw`, `~/.clawdbot`, `~/.moltbot`, `/etc/openclaw` | JSON, YAML, ENV |
+| NanoClaw | `~/.nanoclaw.env`, `~/.config/nanoclaw/` | JSON, ENV |
+| PicoClaw | `~/.picoclaw/config.json`, `~/.picoclaw/auth.json` | JSON |
+| IronClaw | `~/.ironclaw/`, `/etc/ironclaw/` | TOML |
+| Nanobot | `~/.nanobot/`, project-local | JSON |
+| ZeroClaw | `~/.zeroclaw/`, `/etc/zeroclaw/` | TOML |
+| NemoClaw | `~/.nemoclaw/`, `/etc/nemoclaw/` | JSON, YAML |
+| Hermes | `~/.hermes/`, `/etc/hermes/` | YAML, ENV |
 
-### NanoClaw
+### Coding agents
 
-VASO looks for:
-- `~/.nanoclaw.env`
-- `~/.config/nanoclaw/` (mount allowlist and config)
-
-### PicoClaw
-
-VASO looks for:
-- `~/.picoclaw/config.json`
-- `~/.picoclaw/auth.json`
+| Adapter | Config locations | Formats |
+|---------|------------------|---------|
+| Claude Code | `~/.claude/`, `~/.claude.json`, project `.claude/` | JSON |
+| Codex | `~/.codex/config.toml`, `~/.codex/auth.json` | TOML, JSON |
 
 ### MCP Servers
 
