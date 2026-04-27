@@ -6,6 +6,51 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-04-27
+
+### Added
+
+#### Framework-Specific Check Categories
+
+- **OpenClaw checks** (`src/checks/openclaw/`, 6 checks):
+  - **OC-001**: sub-agent config security downgrade — flags when `agents/<name>/agent.{yaml,json}` overrides global hardening (TLS off, sandbox off, gateway re-bound publicly, auth weakened) via the adapter's silent `deepMerge`
+  - **OC-003**: legacy `.clawdbot` / `.moltbot` directories still loaded by the adapter alongside `.openclaw`
+  - **OC-004**: `OPENCLAW_HOME` env var redirecting config loading outside the user home (escalates to critical when redirected to world-writable locations like `/tmp`, `/dev/shm`)
+  - **OC-005**: `.openclaw-${profile}` config relaxes the security posture relative to the default `.openclaw` config
+  - **OC-006**: `memory.json` and `conversations.db` permissions (should be 0600; conversation history with PII / embedded secrets) — fixable
+  - **OC-007**: `/etc/openclaw` directory or system configs writable by non-root — critical hijack vector
+  - Shared `posture.ts` helper extracts security posture (TLS, auth mode, gateway host/port, sandbox, approval) and detects downgrades; used by OC-001 and OC-005
+
+- **NanoClaw checks** (`src/checks/nanoclaw/`, 5 checks):
+  - **NC-001**: overbroad `mount-allowlist.json` entries (root globs `/`, `/*`; system dirs `/etc`, `/root`, `/var/log`, `/proc`, `/sys`; credentials dirs `~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.config`, `~/.kube`, `~/.docker`)
+  - **NC-002**: `mount-allowlist.json` group/world-writable — any local user can grant the agent additional filesystem scope; fixable
+  - **NC-003**: `NANOCLAW_HOME` redirected to non-home / world-writable runtime directory (warning, escalates to critical for `/tmp`-class paths)
+  - **NC-004**: `NANOCLAW_HOST=0.0.0.0` or unspecified while `NANOCLAW_PORT` is set — public listener exposure; fixable
+  - **NC-005**: skills directory group/world-writable — persistent skill-injection vector
+
+- **CheckCategory** type extended with `'openclaw'` and `'nanoclaw'`
+
+#### PicoClaw Coverage Strategy
+- PicoClaw deliberately ships **no `picoclaw/` check category** — its thin surface (`config.json` + `auth.json` + `skills/`) is fully covered by generic CFG-001/002/003/004, SKL-*, ADV-*, IOC-* checks. Documented rationale in `CLAUDE.md` so the decision is durable.
+
+### Changed
+
+#### `defineCheck` Migration Completed
+All 146 check modules previously authored against the raw `CheckModule` interface now use the `defineCheck` helper from `src/core/check-builder.ts`, completing the migration started in v0.2.0:
+- **IOC** (8): `bd64617`
+- **IronClaw** (12): `4b0bd2d`
+- **Nanobot** (12): `652e21e`
+- **ZeroClaw** (14): `0503d14`
+- **MCP** (18 remaining): `d058172`
+- **config** (24): `f262068`
+- **skills** (11 remaining): `cfbd23e`
+
+Net effect: −760 lines across 99 check files. Pure refactor — no behavior change.
+
+### Test Suite
+- 1095 unit tests across 79 files (was 1044/78 at v0.2.0)
+- 27 new tests for OpenClaw checks, 24 new tests for NanoClaw checks
+
 ## [0.2.0] - 2026-04-27
 
 ### Added
@@ -528,5 +573,6 @@ Initial release of VASO with full scan engine, 39 security checks, 3 agent adapt
 - 158 tests across 17 test files
 - Coverage: core engine, scoring, config loader, check registry, all 15 config checks, 10 MCP checks, MCP discovery, MCP command, AST analyzer, pattern engine, entropy analyzer, IOC database, typosquatting, SARIF output, markdown output, baseline diffing, detect command
 
+[0.2.1]: https://github.com/vulnex/vaso/releases/tag/v0.2.1
 [0.2.0]: https://github.com/vulnex/vaso/releases/tag/v0.2.0
 [0.1.0]: https://github.com/vulnex/vaso/releases/tag/v0.1.0

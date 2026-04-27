@@ -25,7 +25,7 @@ export class SarifReporter implements Reporter {
           driver: {
             name: 'VASO',
             fullName: 'VULNEX Agent Security Observer',
-            version: '0.2.0',
+            version: '0.2.1',
             informationUri: 'https://github.com/vulnex/vaso',
             rules: this.buildRules(result),
           },
