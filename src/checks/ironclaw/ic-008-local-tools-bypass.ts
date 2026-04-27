@@ -1,8 +1,8 @@
-import type { CheckModule, ScanContext, CheckResult, FixResult } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { updateEnvFile, updateTomlFile } from '../../remediation/config-writer.js';
 import { getNestedValue } from '../../core/utils.js';
 
-export const ic008: CheckModule = {
+export const ic008 = defineCheck({
   id: 'IC-008',
   name: 'Local Tools Bypass',
   category: 'ironclaw',
@@ -10,7 +10,7 @@ export const ic008: CheckModule = {
   description: 'Check if ALLOW_LOCAL_TOOLS is enabled, allowing tools to execute outside the sandbox',
   supportedAgents: ['ironclaw'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence = [];
 
     for (const config of ctx.configs) {
@@ -27,22 +27,15 @@ export const ic008: CheckModule = {
       }
     }
 
-    return {
-      id: 'IC-008',
-      name: 'Local Tools Bypass',
-      category: 'ironclaw',
-      severity: 'warning',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'Local tools bypass is not enabled'
-        : 'Local tools bypass is enabled — tools can execute outside the sandbox',
-      evidence: evidence.length > 0 ? evidence : undefined,
+    return h.fromEvidence(evidence, {
+      passed: 'Local tools bypass is not enabled',
+      failed: () => 'Local tools bypass is enabled — tools can execute outside the sandbox',
       fixable: true,
       fixDescription: 'Set ALLOW_LOCAL_TOOLS=false in .env or tools.allow_local=false in config.toml',
-    };
+    });
   },
 
-  async fix(ctx: ScanContext): Promise<FixResult> {
+  async fix(ctx) {
     for (const config of ctx.configs) {
       if (config.format === 'env') {
         await updateEnvFile(config.filePath, 'ALLOW_LOCAL_TOOLS', 'false');
@@ -55,4 +48,4 @@ export const ic008: CheckModule = {
     }
     return { checkId: 'IC-008', applied: false, message: 'No compatible config file found' };
   },
-};
+});

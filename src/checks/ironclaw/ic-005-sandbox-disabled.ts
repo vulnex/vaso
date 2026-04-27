@@ -1,8 +1,8 @@
-import type { CheckModule, ScanContext, CheckResult, FixResult } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { updateEnvFile, updateTomlFile } from '../../remediation/config-writer.js';
 import { getNestedValue } from '../../core/utils.js';
 
-export const ic005: CheckModule = {
+export const ic005 = defineCheck({
   id: 'IC-005',
   name: 'Sandbox Disabled',
   category: 'ironclaw',
@@ -10,7 +10,7 @@ export const ic005: CheckModule = {
   description: 'Check if sandbox isolation is explicitly disabled',
   supportedAgents: ['ironclaw'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence = [];
 
     for (const config of ctx.configs) {
@@ -26,22 +26,15 @@ export const ic005: CheckModule = {
       }
     }
 
-    return {
-      id: 'IC-005',
-      name: 'Sandbox Disabled',
-      category: 'ironclaw',
-      severity: 'critical',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'Sandbox is not explicitly disabled'
-        : 'Sandbox is disabled — tools execute without isolation',
-      evidence: evidence.length > 0 ? evidence : undefined,
+    return h.fromEvidence(evidence, {
+      passed: 'Sandbox is not explicitly disabled',
+      failed: () => 'Sandbox is disabled — tools execute without isolation',
       fixable: true,
       fixDescription: 'Set SANDBOX_ENABLED=true in .env or sandbox.enabled=true in config.toml',
-    };
+    });
   },
 
-  async fix(ctx: ScanContext): Promise<FixResult> {
+  async fix(ctx) {
     for (const config of ctx.configs) {
       if (config.format === 'env') {
         await updateEnvFile(config.filePath, 'SANDBOX_ENABLED', 'true');
@@ -54,4 +47,4 @@ export const ic005: CheckModule = {
     }
     return { checkId: 'IC-005', applied: false, message: 'No compatible config file found' };
   },
-};
+});

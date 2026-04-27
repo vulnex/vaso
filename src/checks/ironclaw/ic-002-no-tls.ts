@@ -1,4 +1,4 @@
-import type { CheckModule, ScanContext, CheckResult, FixResult } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { getNestedValue } from '../../core/utils.js';
 
 const TLS_LISTENERS = [
@@ -7,7 +7,7 @@ const TLS_LISTENERS = [
   { envKey: 'ORCHESTRATOR_TLS_CERT', tomlPath: 'orchestrator.tls', label: 'Orchestrator' },
 ] as const;
 
-export const ic002: CheckModule = {
+export const ic002 = defineCheck({
   id: 'IC-002',
   name: 'No TLS on Listeners',
   category: 'ironclaw',
@@ -15,7 +15,7 @@ export const ic002: CheckModule = {
   description: 'Check all 3 listeners (gateway, webhook, orchestrator) for TLS configuration',
   supportedAgents: ['ironclaw'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence = [];
 
     for (const config of ctx.configs) {
@@ -27,7 +27,6 @@ export const ic002: CheckModule = {
         const hasTls = !!(envCert || tomlTls || tomlCert);
 
         if (!hasTls) {
-          // Only flag if the listener appears to be configured at all
           const listenerPrefix = listener.envKey.replace('_TLS_CERT', '');
           const listenerActive = config.raw.includes(listenerPrefix) ||
             getNestedValue(config.data, listener.tomlPath.replace('.tls', ''));
@@ -42,22 +41,15 @@ export const ic002: CheckModule = {
       }
     }
 
-    return {
-      id: 'IC-002',
-      name: 'No TLS on Listeners',
-      category: 'ironclaw',
-      severity: 'critical',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'All active listeners have TLS configured'
-        : `Found ${evidence.length} listener(s) without TLS — traffic is unencrypted`,
-      evidence: evidence.length > 0 ? evidence : undefined,
+    return h.fromEvidence(evidence, {
+      passed: 'All active listeners have TLS configured',
+      failed: (n) => `Found ${n} listener(s) without TLS — traffic is unencrypted`,
       fixable: true,
       fixDescription: 'Configure TLS certificates for each active listener (GATEWAY_TLS_CERT, HTTP_TLS_CERT, ORCHESTRATOR_TLS_CERT)',
-    };
+    });
   },
 
-  async fix(_ctx: ScanContext): Promise<FixResult> {
+  async fix() {
     return { checkId: 'IC-002', applied: false, message: 'Manual action required: configure TLS certificates for each listener (GATEWAY_TLS_CERT, HTTP_TLS_CERT, ORCHESTRATOR_TLS_CERT) with valid cert/key file paths' };
   },
-};
+});

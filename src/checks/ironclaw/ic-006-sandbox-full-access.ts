@@ -1,8 +1,8 @@
-import type { CheckModule, ScanContext, CheckResult, FixResult } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { updateEnvFile, updateTomlFile } from '../../remediation/config-writer.js';
 import { getNestedValue } from '../../core/utils.js';
 
-export const ic006: CheckModule = {
+export const ic006 = defineCheck({
   id: 'IC-006',
   name: 'Sandbox Full Access Policy',
   category: 'ironclaw',
@@ -10,7 +10,7 @@ export const ic006: CheckModule = {
   description: 'Check if sandbox policy is set to full_access, granting unrestricted system access',
   supportedAgents: ['ironclaw'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence = [];
 
     for (const config of ctx.configs) {
@@ -26,22 +26,15 @@ export const ic006: CheckModule = {
       }
     }
 
-    return {
-      id: 'IC-006',
-      name: 'Sandbox Full Access Policy',
-      category: 'ironclaw',
-      severity: 'critical',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'Sandbox policy is not set to full_access'
-        : 'Sandbox policy is full_access — tools have unrestricted system access',
-      evidence: evidence.length > 0 ? evidence : undefined,
+    return h.fromEvidence(evidence, {
+      passed: 'Sandbox policy is not set to full_access',
+      failed: () => 'Sandbox policy is full_access — tools have unrestricted system access',
       fixable: true,
       fixDescription: 'Set SANDBOX_POLICY=restricted or SANDBOX_POLICY=minimal in .env or sandbox.policy in config.toml',
-    };
+    });
   },
 
-  async fix(ctx: ScanContext): Promise<FixResult> {
+  async fix(ctx) {
     for (const config of ctx.configs) {
       if (config.format === 'env') {
         await updateEnvFile(config.filePath, 'SANDBOX_POLICY', 'restricted');
@@ -54,4 +47,4 @@ export const ic006: CheckModule = {
     }
     return { checkId: 'IC-006', applied: false, message: 'No compatible config file found' };
   },
-};
+});

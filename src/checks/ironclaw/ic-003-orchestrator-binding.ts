@@ -1,8 +1,8 @@
-import type { CheckModule, ScanContext, CheckResult, FixResult } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { updateEnvFile, updateTomlFile } from '../../remediation/config-writer.js';
 import { getNestedValue } from '../../core/utils.js';
 
-export const ic003: CheckModule = {
+export const ic003 = defineCheck({
   id: 'IC-003',
   name: 'Orchestrator Public Bind',
   category: 'ironclaw',
@@ -10,7 +10,7 @@ export const ic003: CheckModule = {
   description: 'Check if gRPC orchestrator is bound to 0.0.0.0 (port 50051)',
   supportedAgents: ['ironclaw'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence = [];
 
     for (const config of ctx.configs) {
@@ -31,7 +31,6 @@ export const ic003: CheckModule = {
         });
       }
 
-      // Also flag if no host is set but orchestrator port is configured (defaults to 0.0.0.0 on Linux)
       if (!host && (config.data.ORCHESTRATOR_PORT || getNestedValue(config.data, 'orchestrator.port'))) {
         if (ctx.platform === 'linux') {
           evidence.push({
@@ -42,22 +41,15 @@ export const ic003: CheckModule = {
       }
     }
 
-    return {
-      id: 'IC-003',
-      name: 'Orchestrator Public Bind',
-      category: 'ironclaw',
-      severity: 'critical',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'Orchestrator gRPC is not publicly bound'
-        : 'Orchestrator gRPC is bound to 0.0.0.0 — accessible from all network interfaces',
-      evidence: evidence.length > 0 ? evidence : undefined,
+    return h.fromEvidence(evidence, {
+      passed: 'Orchestrator gRPC is not publicly bound',
+      failed: () => 'Orchestrator gRPC is bound to 0.0.0.0 — accessible from all network interfaces',
       fixable: true,
       fixDescription: 'Set ORCHESTRATOR_HOST=127.0.0.1 in .env or orchestrator.host in config.toml',
-    };
+    });
   },
 
-  async fix(ctx: ScanContext): Promise<FixResult> {
+  async fix(ctx) {
     for (const config of ctx.configs) {
       if (config.format === 'env') {
         await updateEnvFile(config.filePath, 'ORCHESTRATOR_HOST', '127.0.0.1');
@@ -70,4 +62,4 @@ export const ic003: CheckModule = {
     }
     return { checkId: 'IC-003', applied: false, message: 'No compatible config file found' };
   },
-};
+});

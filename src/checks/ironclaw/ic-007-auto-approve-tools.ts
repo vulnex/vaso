@@ -1,8 +1,8 @@
-import type { CheckModule, ScanContext, CheckResult, FixResult } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { updateEnvFile, updateTomlFile } from '../../remediation/config-writer.js';
 import { getNestedValue } from '../../core/utils.js';
 
-export const ic007: CheckModule = {
+export const ic007 = defineCheck({
   id: 'IC-007',
   name: 'Auto-Approve Tools Enabled',
   category: 'ironclaw',
@@ -10,7 +10,7 @@ export const ic007: CheckModule = {
   description: 'Check if AGENT_AUTO_APPROVE_TOOLS is enabled, bypassing all tool approval prompts',
   supportedAgents: ['ironclaw'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence = [];
 
     for (const config of ctx.configs) {
@@ -27,22 +27,15 @@ export const ic007: CheckModule = {
       }
     }
 
-    return {
-      id: 'IC-007',
-      name: 'Auto-Approve Tools Enabled',
-      category: 'ironclaw',
-      severity: 'critical',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'Tool auto-approval is not enabled'
-        : 'Tool auto-approval is enabled — all tool executions bypass user confirmation',
-      evidence: evidence.length > 0 ? evidence : undefined,
+    return h.fromEvidence(evidence, {
+      passed: 'Tool auto-approval is not enabled',
+      failed: () => 'Tool auto-approval is enabled — all tool executions bypass user confirmation',
       fixable: true,
       fixDescription: 'Set AGENT_AUTO_APPROVE_TOOLS=false in .env or agent.auto_approve_tools=false in config.toml',
-    };
+    });
   },
 
-  async fix(ctx: ScanContext): Promise<FixResult> {
+  async fix(ctx) {
     for (const config of ctx.configs) {
       if (config.format === 'env') {
         await updateEnvFile(config.filePath, 'AGENT_AUTO_APPROVE_TOOLS', 'false');
@@ -55,4 +48,4 @@ export const ic007: CheckModule = {
     }
     return { checkId: 'IC-007', applied: false, message: 'No compatible config file found' };
   },
-};
+});

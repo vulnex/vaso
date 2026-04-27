@@ -1,7 +1,7 @@
-import type { CheckModule, ScanContext, CheckResult, FixResult } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { getNestedValue } from '../../core/utils.js';
 
-export const ic010: CheckModule = {
+export const ic010 = defineCheck({
   id: 'IC-010',
   name: 'Telegram Without Owner ID',
   category: 'ironclaw',
@@ -9,7 +9,7 @@ export const ic010: CheckModule = {
   description: 'Check if Telegram integration is enabled but TELEGRAM_OWNER_ID is not set',
   supportedAgents: ['ironclaw'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence = [];
 
     for (const config of ctx.configs) {
@@ -32,22 +32,15 @@ export const ic010: CheckModule = {
       }
     }
 
-    return {
-      id: 'IC-010',
-      name: 'Telegram Without Owner ID',
-      category: 'ironclaw',
-      severity: 'warning',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'Telegram owner ID is properly configured or Telegram is not enabled'
-        : 'Telegram is enabled without an owner ID — bot is accessible to any user',
-      evidence: evidence.length > 0 ? evidence : undefined,
+    return h.fromEvidence(evidence, {
+      passed: 'Telegram owner ID is properly configured or Telegram is not enabled',
+      failed: () => 'Telegram is enabled without an owner ID — bot is accessible to any user',
       fixable: true,
       fixDescription: 'Set TELEGRAM_OWNER_ID to your Telegram user ID in .env or telegram.owner_id in config.toml',
-    };
+    });
   },
 
-  async fix(_ctx: ScanContext): Promise<FixResult> {
+  async fix() {
     return { checkId: 'IC-010', applied: false, message: 'Manual action required: set TELEGRAM_OWNER_ID to your numeric Telegram user ID (use @userinfobot to find it)' };
   },
-};
+});

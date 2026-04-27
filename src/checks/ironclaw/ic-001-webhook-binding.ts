@@ -1,7 +1,7 @@
-import type { CheckModule, ScanContext, CheckResult, FixResult } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { updateEnvFile, updateTomlFile } from '../../remediation/config-writer.js';
 
-export const ic001: CheckModule = {
+export const ic001 = defineCheck({
   id: 'IC-001',
   name: 'HTTP Webhook Public Bind',
   category: 'ironclaw',
@@ -9,7 +9,7 @@ export const ic001: CheckModule = {
   description: 'Check if HTTP webhook listener is bound to 0.0.0.0 (default on port 8080)',
   supportedAgents: ['ironclaw'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence = [];
     for (const config of ctx.configs) {
       const host = config.data.HTTP_HOST as string | undefined;
@@ -21,18 +21,15 @@ export const ic001: CheckModule = {
         });
       }
     }
-    return {
-      id: 'IC-001', name: 'HTTP Webhook Public Bind', category: 'ironclaw',
-      severity: 'critical', passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'HTTP webhook is not publicly bound'
-        : 'HTTP webhook is bound to 0.0.0.0 — accessible from all network interfaces',
-      evidence: evidence.length > 0 ? evidence : undefined,
-      fixable: true, fixDescription: 'Set HTTP_HOST=127.0.0.1 in .env',
-    };
+    return h.fromEvidence(evidence, {
+      passed: 'HTTP webhook is not publicly bound',
+      failed: () => 'HTTP webhook is bound to 0.0.0.0 — accessible from all network interfaces',
+      fixable: true,
+      fixDescription: 'Set HTTP_HOST=127.0.0.1 in .env',
+    });
   },
 
-  async fix(ctx: ScanContext): Promise<FixResult> {
+  async fix(ctx) {
     for (const config of ctx.configs) {
       if (config.format === 'env') {
         await updateEnvFile(config.filePath, 'HTTP_HOST', '127.0.0.1');
@@ -45,4 +42,4 @@ export const ic001: CheckModule = {
     }
     return { checkId: 'IC-001', applied: false, message: 'No compatible config file found' };
   },
-};
+});

@@ -1,9 +1,9 @@
-import type { CheckModule, ScanContext, CheckResult, FixResult } from '../../core/types.js';
-import { updateEnvFile, updateTomlFile } from '../../remediation/config-writer.js';
 import { randomBytes } from 'node:crypto';
+import { defineCheck } from '../../core/check-builder.js';
+import { updateEnvFile, updateTomlFile } from '../../remediation/config-writer.js';
 import { getNestedValue } from '../../core/utils.js';
 
-export const ic004: CheckModule = {
+export const ic004 = defineCheck({
   id: 'IC-004',
   name: 'Gateway Auth Token Missing',
   category: 'ironclaw',
@@ -11,7 +11,7 @@ export const ic004: CheckModule = {
   description: 'Check if GATEWAY_AUTH_TOKEN is set — ephemeral random tokens are not persistent across restarts',
   supportedAgents: ['ironclaw'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence = [];
 
     for (const config of ctx.configs) {
@@ -28,22 +28,15 @@ export const ic004: CheckModule = {
       }
     }
 
-    return {
-      id: 'IC-004',
-      name: 'Gateway Auth Token Missing',
-      category: 'ironclaw',
-      severity: 'warning',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'Gateway auth token is explicitly configured'
-        : 'Gateway auth token is not set — ephemeral tokens reset on restart',
-      evidence: evidence.length > 0 ? evidence : undefined,
+    return h.fromEvidence(evidence, {
+      passed: 'Gateway auth token is explicitly configured',
+      failed: () => 'Gateway auth token is not set — ephemeral tokens reset on restart',
       fixable: true,
       fixDescription: 'Set a persistent GATEWAY_AUTH_TOKEN in .env or gateway.auth_token in config.toml',
-    };
+    });
   },
 
-  async fix(ctx: ScanContext): Promise<FixResult> {
+  async fix(ctx) {
     const token = randomBytes(32).toString('hex');
     for (const config of ctx.configs) {
       if (config.format === 'env') {
@@ -57,4 +50,4 @@ export const ic004: CheckModule = {
     }
     return { checkId: 'IC-004', applied: false, message: 'No compatible config file found' };
   },
-};
+});

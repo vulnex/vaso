@@ -1,7 +1,7 @@
-import type { CheckModule, ScanContext, CheckResult, FixResult } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { getNestedValue } from '../../core/utils.js';
 
-export const ic009: CheckModule = {
+export const ic009 = defineCheck({
   id: 'IC-009',
   name: 'Secrets Master Key in .env',
   category: 'ironclaw',
@@ -9,7 +9,7 @@ export const ic009: CheckModule = {
   description: 'Check if SECRETS_MASTER_KEY is stored in a .env file instead of a keychain or vault',
   supportedAgents: ['ironclaw'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence = [];
 
     for (const config of ctx.configs) {
@@ -19,7 +19,6 @@ export const ic009: CheckModule = {
         (getNestedValue(config.data, 'secrets.masterKey') as string | undefined);
 
       if (masterKey && masterKey.trim() !== '') {
-        // Only flag if the value is in a file (not just referencing an env var placeholder)
         const isPlaceholder = /^\$\{?[A-Z_]+\}?$/.test(masterKey.trim());
         if (!isPlaceholder) {
           evidence.push({
@@ -29,7 +28,6 @@ export const ic009: CheckModule = {
         }
       }
 
-      // Also check raw content for .env files specifically
       if (config.format === 'env' && config.raw.includes('SECRETS_MASTER_KEY')) {
         const lines = config.raw.split('\n');
         for (let i = 0; i < lines.length; i++) {
@@ -52,22 +50,15 @@ export const ic009: CheckModule = {
       }
     }
 
-    return {
-      id: 'IC-009',
-      name: 'Secrets Master Key in .env',
-      category: 'ironclaw',
-      severity: 'critical',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'No plaintext secrets master key found in config files'
-        : 'SECRETS_MASTER_KEY found in config file — should use keychain/vault',
-      evidence: evidence.length > 0 ? evidence : undefined,
+    return h.fromEvidence(evidence, {
+      passed: 'No plaintext secrets master key found in config files',
+      failed: () => 'SECRETS_MASTER_KEY found in config file — should use keychain/vault',
       fixable: true,
       fixDescription: 'Remove SECRETS_MASTER_KEY from .env and store it in the system keychain or a secrets vault',
-    };
+    });
   },
 
-  async fix(_ctx: ScanContext): Promise<FixResult> {
+  async fix() {
     return { checkId: 'IC-009', applied: false, message: 'Manual action required: remove SECRETS_MASTER_KEY from config files and store it in the system keychain or a secrets vault' };
   },
-};
+});
