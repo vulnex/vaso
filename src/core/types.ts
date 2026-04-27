@@ -1,7 +1,7 @@
 export type Severity = 'critical' | 'warning' | 'info';
 export type Grade = 'A' | 'B' | 'C' | 'D' | 'F';
 export type AgentType = 'openclaw' | 'nanoclaw' | 'picoclaw' | 'mcp' | 'ironclaw' | 'nanobot' | 'zeroclaw' | 'nemoclaw' | 'hermes' | 'claude-code' | 'codex' | 'skill-audit';
-export type CheckCategory = 'config' | 'skills' | 'ioc' | 'network' | 'runtime' | 'policy' | 'mcp' | 'ironclaw' | 'nanobot' | 'zeroclaw' | 'advisory' | 'coding-agent';
+export type CheckCategory = 'config' | 'skills' | 'ioc' | 'network' | 'runtime' | 'policy' | 'mcp' | 'openclaw' | 'nanoclaw' | 'ironclaw' | 'nanobot' | 'zeroclaw' | 'advisory' | 'coding-agent';
 
 /**
  * Coding agents (interactive developer tools) — different threat model from
