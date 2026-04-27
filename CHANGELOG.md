@@ -6,6 +6,8 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-04-27
+
 ### Added
 
 #### Visualization Config Emission (PRD-006)
