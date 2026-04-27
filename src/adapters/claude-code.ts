@@ -1,6 +1,6 @@
 import { join, basename } from 'node:path';
 import type { AgentAdapter, DetectOptions } from './adapter.js';
-import type { AgentInstallation, GatewayInfo } from '../core/types.js';
+import type { AgentInstallation, GatewayInfo, ZoneGraph } from '../core/types.js';
 import type { ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
@@ -177,6 +177,57 @@ export const claudeCodeAdapter: AgentAdapter = {
       envPrefixes: ['CLAUDE_', 'ANTHROPIC_'],
       systemPaths: SYSTEM_CLI_PATHS,
       systemDirListings: [],
+    };
+  },
+
+  getZoneGraph(): ZoneGraph {
+    return {
+      zones: [
+        { id: 'net', label: 'Network', trustLevel: 0 },
+        { id: 'mcp', label: 'MCP Transport', trustLevel: 1 },
+        { id: 'tool', label: 'Tool Execution', trustLevel: 2 },
+        { id: 'host', label: 'Host FS', trustLevel: 3 },
+      ],
+      components: [
+        { id: 'inbound', label: 'Network / Remote MCP', zone: 'net' },
+        {
+          id: 'mcp-transport',
+          label: 'MCP Transport',
+          zone: 'mcp',
+          guardCheckIds: ['CC-005', 'CC-006'],
+        },
+        {
+          id: 'tools',
+          label: 'Tool Permissions',
+          zone: 'tool',
+          guardCheckIds: ['CC-001', 'CC-002', 'CC-008'],
+        },
+        {
+          id: 'hooks',
+          label: 'Hooks (side-channel)',
+          zone: 'tool',
+          guardCheckIds: ['CC-003', 'CC-010', 'CC-011'],
+        },
+        {
+          id: 'fs',
+          label: 'Host Filesystem',
+          zone: 'host',
+          guardCheckIds: ['CC-004', 'CC-007', 'CC-009', 'CC-012'],
+        },
+      ],
+      edges: [
+        { from: 'inbound', to: 'mcp-transport', kind: 'data' },
+        { from: 'mcp-transport', to: 'tools', kind: 'control' },
+        { from: 'tools', to: 'fs', kind: 'data' },
+        { from: 'tools', to: 'hooks', kind: 'control' },
+        { from: 'hooks', to: 'fs', kind: 'control', label: 'arbitrary cmd' },
+        {
+          from: 'inbound',
+          to: 'fs',
+          label: 'permission bypass',
+          triggerCheckIds: ['CC-001', 'CC-002'],
+        },
+      ],
     };
   },
 };

@@ -1,4 +1,4 @@
-import type { AgentType, AgentInstallation, GatewayInfo } from '../core/types.js';
+import type { AgentType, AgentInstallation, GatewayInfo, ZoneGraph } from '../core/types.js';
 
 export interface DetectOptions {
   allUsers?: boolean;
@@ -17,4 +17,5 @@ export interface AgentAdapter {
   getCredentialPaths?(installDir: string): string[];
   getCLICommand?(): string;
   getProbeManifest?(): import('../core/snapshot-types.js').ProbeManifest;
+  getZoneGraph?(): ZoneGraph;
 }

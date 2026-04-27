@@ -120,3 +120,36 @@ export interface FixResult {
   message: string;
   backupPath?: string;
 }
+
+/**
+ * Privilege gradient model — used to emit USecVisLib privilege-gradient configs
+ * (PRD-006). Each adapter optionally declares its own ZoneGraph; adapters that
+ * don't implement getZoneGraph() get the generic 4-zone fallback.
+ */
+
+export interface Zone {
+  id: string;
+  label: string;
+  trustLevel: number;
+}
+
+export interface ZoneComponent {
+  id: string;
+  label: string;
+  zone: string;
+  guardCheckIds?: string[];
+}
+
+export interface ZoneEdge {
+  from: string;
+  to: string;
+  label?: string;
+  kind?: 'data' | 'control' | 'resource' | 'feedback';
+  triggerCheckIds?: string[];
+}
+
+export interface ZoneGraph {
+  zones: Zone[];
+  components: ZoneComponent[];
+  edges: ZoneEdge[];
+}

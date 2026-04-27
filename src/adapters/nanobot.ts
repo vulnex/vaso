@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import type { AgentAdapter, DetectOptions } from './adapter.js';
-import type { AgentInstallation, GatewayInfo } from '../core/types.js';
+import type { AgentInstallation, GatewayInfo, ZoneGraph } from '../core/types.js';
 import type { ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
@@ -113,6 +113,49 @@ export const nanobotAdapter: AgentAdapter = {
       envPrefixes: ['NANOBOT_'],
       systemPaths: [],
       systemDirListings: [],
+    };
+  },
+
+  getZoneGraph(): ZoneGraph {
+    return {
+      zones: [
+        { id: 'chat', label: 'Chat Platforms', trustLevel: 0 },
+        { id: 'core', label: 'Bot Core', trustLevel: 1 },
+        { id: 'exec', label: 'Shell Exec', trustLevel: 2 },
+        { id: 'host', label: 'Host FS', trustLevel: 3 },
+      ],
+      components: [
+        { id: 'edge', label: 'Discord/Slack Edge', zone: 'chat' },
+        {
+          id: 'bot',
+          label: 'Nanobot Core',
+          zone: 'core',
+          guardCheckIds: ['NB-001', 'NB-008', 'NB-010', 'NB-011', 'NB-012'],
+        },
+        {
+          id: 'shell',
+          label: 'Tool/Shell Execution',
+          zone: 'exec',
+          guardCheckIds: ['NB-004', 'NB-005', 'NB-006', 'NB-007', 'NB-009'],
+        },
+        {
+          id: 'fs',
+          label: 'Host Filesystem',
+          zone: 'host',
+          guardCheckIds: ['NB-002', 'NB-003'],
+        },
+      ],
+      edges: [
+        { from: 'edge', to: 'bot', kind: 'data', label: 'message' },
+        { from: 'bot', to: 'shell', kind: 'control' },
+        { from: 'shell', to: 'fs', kind: 'data' },
+        {
+          from: 'edge',
+          to: 'fs',
+          label: 'channel-driven exec',
+          triggerCheckIds: ['NB-001', 'NB-004'],
+        },
+      ],
     };
   },
 };

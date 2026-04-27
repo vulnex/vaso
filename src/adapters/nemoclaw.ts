@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import type { AgentAdapter, DetectOptions } from './adapter.js';
-import type { AgentInstallation, GatewayInfo } from '../core/types.js';
+import type { AgentInstallation, GatewayInfo, ZoneGraph } from '../core/types.js';
 import type { ProbeManifest } from '../core/snapshot-types.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { loadConfig } from '../core/config-loader.js';
@@ -141,6 +141,57 @@ export const nemoclawAdapter: AgentAdapter = {
       envPrefixes: ['NEMOCLAW_'],
       systemPaths: [],
       systemDirListings: [],
+    };
+  },
+
+  getZoneGraph(): ZoneGraph {
+    return {
+      zones: [
+        { id: 'net', label: 'Network', trustLevel: 0 },
+        { id: 'gw', label: 'Gateway', trustLevel: 1 },
+        { id: 'cpu', label: 'CPU Sandbox', trustLevel: 2 },
+        { id: 'gpu', label: 'GPU Isolation', trustLevel: 3 },
+        { id: 'host', label: 'Host FS', trustLevel: 4 },
+      ],
+      components: [
+        { id: 'inbound', label: 'Network Ingress', zone: 'net' },
+        {
+          id: 'gateway',
+          label: 'NemoClaw Gateway',
+          zone: 'gw',
+          guardCheckIds: ['CFG-001', 'CFG-004', 'NET-001', 'CFG-020'],
+        },
+        {
+          id: 'sandbox',
+          label: 'CPU Sandbox',
+          zone: 'cpu',
+          guardCheckIds: ['CFG-016', 'CFG-017', 'CFG-022', 'CFG-024'],
+        },
+        {
+          id: 'gpu',
+          label: 'GPU Boundary',
+          zone: 'gpu',
+          guardCheckIds: ['CFG-018', 'CFG-019', 'CFG-021', 'CFG-023'],
+        },
+        {
+          id: 'fs',
+          label: 'Host Filesystem',
+          zone: 'host',
+          guardCheckIds: ['RUN-001', 'POL-001'],
+        },
+      ],
+      edges: [
+        { from: 'inbound', to: 'gateway', kind: 'data' },
+        { from: 'gateway', to: 'sandbox', kind: 'control' },
+        { from: 'sandbox', to: 'gpu', kind: 'resource' },
+        { from: 'gpu', to: 'fs', kind: 'data', label: 'model artifacts' },
+        {
+          from: 'inbound',
+          to: 'fs',
+          label: 'sandbox bypass',
+          triggerCheckIds: ['CFG-017', 'CFG-022', 'CFG-024'],
+        },
+      ],
     };
   },
 };
