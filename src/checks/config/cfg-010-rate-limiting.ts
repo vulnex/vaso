@@ -1,9 +1,9 @@
-import type { CheckModule, ScanContext, CheckResult, FixResult } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { CODING_AGENTS } from '../../core/types.js';
 import { updateConfigValue } from '../../remediation/config-writer.js';
 import { getNestedValue } from '../../core/utils.js';
 
-export const cfg010: CheckModule = {
+export const cfg010 = defineCheck({
   id: 'CFG-010',
   name: 'No Rate Limiting',
   category: 'config',
@@ -11,7 +11,7 @@ export const cfg010: CheckModule = {
   description: 'Check if rate limiting is configured for the gateway',
   excludedAgents: CODING_AGENTS,
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     let found = false;
 
     for (const config of ctx.configs) {
@@ -27,21 +27,17 @@ export const cfg010: CheckModule = {
       }
     }
 
-    return {
-      id: 'CFG-010',
-      name: 'No Rate Limiting',
-      category: 'config',
-      severity: 'warning',
+    return h.result({
       passed: found,
       message: found
         ? 'Rate limiting is configured'
         : 'No rate limiting configured — gateway is vulnerable to abuse',
       fixable: true,
       fixDescription: 'Add rate limiting configuration',
-    };
+    });
   },
 
-  async fix(ctx: ScanContext): Promise<FixResult> {
+  async fix(ctx) {
     const rateLimit = { max: 60, window: '1m' };
     for (const config of ctx.configs) {
       const keyPath = config.format === 'env' ? 'RATE_LIMIT' : 'rateLimit';
@@ -51,4 +47,4 @@ export const cfg010: CheckModule = {
     }
     return { checkId: 'CFG-010', applied: false, message: 'No config file found' };
   },
-};
+});

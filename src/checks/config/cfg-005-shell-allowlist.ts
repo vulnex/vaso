@@ -1,9 +1,9 @@
-import type { CheckModule, ScanContext, CheckResult, FixResult } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { CODING_AGENTS } from '../../core/types.js';
 import { updateConfigValue } from '../../remediation/config-writer.js';
 import { getNestedValue } from '../../core/utils.js';
 
-export const cfg005: CheckModule = {
+export const cfg005 = defineCheck({
   id: 'CFG-005',
   name: 'Missing Shell Allowlist',
   category: 'config',
@@ -11,7 +11,7 @@ export const cfg005: CheckModule = {
   description: 'Check if a shell command allowlist (safeBins) is configured',
   excludedAgents: CODING_AGENTS,
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     let found = false;
 
     for (const config of ctx.configs) {
@@ -26,21 +26,17 @@ export const cfg005: CheckModule = {
       }
     }
 
-    return {
-      id: 'CFG-005',
-      name: 'Missing Shell Allowlist',
-      category: 'config',
-      severity: 'warning',
+    return h.result({
       passed: found,
       message: found
         ? 'Shell command allowlist (safeBins) is configured'
         : 'No shell command allowlist — agents can execute any command',
       fixable: true,
       fixDescription: 'Add safeBins allowlist to config',
-    };
+    });
   },
 
-  async fix(ctx: ScanContext): Promise<FixResult> {
+  async fix(ctx) {
     const safeBins = ['ls', 'cat', 'grep', 'head', 'tail', 'wc', 'echo', 'date'];
     for (const config of ctx.configs) {
       const keyPath = config.format === 'env' ? 'SAFE_BINS' : 'security.safeBins';
@@ -50,4 +46,4 @@ export const cfg005: CheckModule = {
     }
     return { checkId: 'CFG-005', applied: false, message: 'No config file found' };
   },
-};
+});

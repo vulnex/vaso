@@ -1,7 +1,8 @@
 import { join } from 'node:path';
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 
-export const cfg019: CheckModule = {
+export const cfg019 = defineCheck({
   id: 'CFG-019',
   name: 'NemoClaw Blueprint Integrity',
   category: 'config',
@@ -9,17 +10,13 @@ export const cfg019: CheckModule = {
   description: 'Check if NemoClaw blueprint uses digest verification and version pinning',
   supportedAgents: ['openclaw', 'nemoclaw'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const nemoDir = join(ctx.fs.homedir(), '.nemoclaw');
     if (!(await ctx.fs.access(nemoDir))) {
-      return {
-        id: 'CFG-019',
-        name: 'NemoClaw Blueprint Integrity',
-        category: 'config',
-        severity: 'info',
+      return h.result({
         passed: false,
         message: 'NemoClaw not installed — blueprint integrity check not applicable',
-      };
+      });
     }
 
     const evidence: Evidence[] = [];
@@ -88,16 +85,12 @@ export const cfg019: CheckModule = {
 
     const passed = evidence.length > 0;
 
-    return {
-      id: 'CFG-019',
-      name: 'NemoClaw Blueprint Integrity',
-      category: 'config',
-      severity: 'info',
+    return h.result({
       passed,
       message: passed
         ? `NemoClaw blueprint integrity verified${usesLatest ? ' (warning: using "latest" tag)' : ''}`
         : 'NemoClaw installed but no blueprint artifacts found',
-      evidence: evidence.length > 0 ? evidence : undefined,
-    };
+      evidence,
+    });
   },
-};
+});

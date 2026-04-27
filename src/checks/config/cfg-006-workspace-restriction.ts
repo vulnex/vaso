@@ -1,8 +1,8 @@
-import type { CheckModule, ScanContext, CheckResult } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { CODING_AGENTS } from '../../core/types.js';
 import { getNestedValue } from '../../core/utils.js';
 
-export const cfg006: CheckModule = {
+export const cfg006 = defineCheck({
   id: 'CFG-006',
   name: 'No Workspace Restriction',
   category: 'config',
@@ -10,7 +10,7 @@ export const cfg006: CheckModule = {
   description: 'Check if filesystem access is restricted to a workspace directory',
   excludedAgents: CODING_AGENTS,
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     let found = false;
 
     for (const config of ctx.configs) {
@@ -26,15 +26,11 @@ export const cfg006: CheckModule = {
       }
     }
 
-    return {
-      id: 'CFG-006',
-      name: 'No Workspace Restriction',
-      category: 'config',
-      severity: 'warning',
+    return h.result({
       passed: found,
       message: found
         ? 'Filesystem access is restricted to a workspace directory'
         : 'No workspace restriction — agent has unrestricted filesystem access',
-    };
+    });
   },
-};
+});

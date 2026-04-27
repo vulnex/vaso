@@ -1,7 +1,8 @@
 import { join } from 'node:path';
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 
-export const cfg016: CheckModule = {
+export const cfg016 = defineCheck({
   id: 'CFG-016',
   name: 'NemoClaw Hardening',
   category: 'config',
@@ -9,21 +10,17 @@ export const cfg016: CheckModule = {
   description: 'Check if NemoClaw sandbox hardening is installed for OpenClaw',
   supportedAgents: ['openclaw', 'nemoclaw'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const nemoDir = join(ctx.fs.homedir(), '.nemoclaw');
     const stateFile = join(nemoDir, 'state', 'nemoclaw.json');
     const configFile = join(nemoDir, 'config.json');
 
     const dirExists = await ctx.fs.access(nemoDir);
     if (!dirExists) {
-      return {
-        id: 'CFG-016',
-        name: 'NemoClaw Hardening',
-        category: 'config',
-        severity: 'info',
+      return h.result({
         passed: false,
         message: 'NemoClaw sandbox hardening is not installed — consider deploying NemoClaw for Landlock + seccomp + network isolation',
-      };
+      });
     }
 
     const evidence: Evidence[] = [];
@@ -58,14 +55,10 @@ export const cfg016: CheckModule = {
       }
     }
 
-    return {
-      id: 'CFG-016',
-      name: 'NemoClaw Hardening',
-      category: 'config',
-      severity: 'info',
+    return h.result({
       passed: true,
       message: 'NemoClaw sandbox hardening is installed',
       evidence,
-    };
+    });
   },
-};
+});

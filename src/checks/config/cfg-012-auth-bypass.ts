@@ -1,9 +1,10 @@
-import type { CheckModule, ScanContext, CheckResult, Evidence, FixResult } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { CODING_AGENTS } from '../../core/types.js';
 import { updateConfigValue } from '../../remediation/config-writer.js';
 import { getNestedValue } from '../../core/utils.js';
 
-export const cfg012: CheckModule = {
+export const cfg012 = defineCheck({
   id: 'CFG-012',
   name: 'Auth Bypass Enabled',
   category: 'config',
@@ -11,7 +12,7 @@ export const cfg012: CheckModule = {
   description: 'Check if authentication bypass is enabled in configuration',
   excludedAgents: CODING_AGENTS,
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence: Evidence[] = [];
 
     for (const config of ctx.configs) {
@@ -38,22 +39,18 @@ export const cfg012: CheckModule = {
       }
     }
 
-    return {
-      id: 'CFG-012',
-      name: 'Auth Bypass Enabled',
-      category: 'config',
-      severity: 'critical',
+    return h.result({
       passed: evidence.length === 0,
       message: evidence.length === 0
         ? 'Authentication bypass is not enabled'
         : 'Authentication bypass is enabled — anyone can access the agent',
-      evidence: evidence.length > 0 ? evidence : undefined,
+      evidence,
       fixable: true,
       fixDescription: 'Disable auth bypass and set proper auth mode',
-    };
+    });
   },
 
-  async fix(ctx: ScanContext): Promise<FixResult> {
+  async fix(ctx) {
     for (const config of ctx.configs) {
       const keyPath = config.format === 'env' ? 'AUTH_BYPASS' : 'auth.bypass';
       await updateConfigValue(config, keyPath, false);
@@ -61,4 +58,4 @@ export const cfg012: CheckModule = {
     }
     return { checkId: 'CFG-012', applied: false, message: 'No config file found' };
   },
-};
+});

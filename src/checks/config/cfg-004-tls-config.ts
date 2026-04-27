@@ -1,7 +1,7 @@
-import type { CheckModule, ScanContext, CheckResult } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { CODING_AGENTS } from '../../core/types.js';
 
-export const cfg004: CheckModule = {
+export const cfg004 = defineCheck({
   id: 'CFG-004',
   name: 'TLS Not Configured',
   category: 'config',
@@ -9,16 +9,9 @@ export const cfg004: CheckModule = {
   description: 'Check if TLS/HTTPS is configured for the gateway',
   excludedAgents: CODING_AGENTS,
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     if (!ctx.installation.gateway) {
-      return {
-        id: 'CFG-004',
-        name: 'TLS Not Configured',
-        category: 'config',
-        severity: 'warning',
-        passed: true,
-        message: 'No gateway configured — TLS check not applicable',
-      };
+      return h.passed('No gateway configured — TLS check not applicable');
     }
 
     const gw = ctx.installation.gateway;
@@ -34,15 +27,11 @@ export const cfg004: CheckModule = {
 
     const passed = hasTls || tlsInConfig;
 
-    return {
-      id: 'CFG-004',
-      name: 'TLS Not Configured',
-      category: 'config',
-      severity: 'warning',
+    return h.result({
       passed,
       message: passed
         ? 'TLS is configured for the gateway'
         : 'TLS is not configured — traffic is unencrypted',
-    };
+    });
   },
-};
+});
