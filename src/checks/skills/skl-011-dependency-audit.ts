@@ -1,5 +1,6 @@
 import { join } from 'node:path';
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { getIOCDatabase } from '../../ioc/database.js';
 
 const MALICIOUS_PACKAGES = new Set([
@@ -17,19 +18,16 @@ const MALICIOUS_PACKAGES = new Set([
 
 const LOCKFILES = ['package-lock.json', 'yarn.lock', 'pnpm-lock.yaml'];
 
-export const skl011: CheckModule = {
+export const skl011 = defineCheck({
   id: 'SKL-011',
   name: 'Dependency Audit',
   category: 'skills',
   severity: 'warning',
   description: 'Check skill package.json dependencies against known malicious packages and verify lockfile presence',
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
-    const evidence: Evidence[] = [];
+  async run(ctx, h) {
     const skillsDir = ctx.installation.skillsDir;
-    if (!skillsDir) {
-      return { id: 'SKL-011', name: 'Dependency Audit', category: 'skills', severity: 'warning', passed: true, message: 'No skills directory found' };
-    }
+    if (!skillsDir) return h.passed('No skills directory found');
 
     const db = getIOCDatabase();
 
@@ -37,8 +35,10 @@ export const skl011: CheckModule = {
     try {
       entries = await ctx.fs.readdirEntries(skillsDir);
     } catch {
-      return { id: 'SKL-011', name: 'Dependency Audit', category: 'skills', severity: 'warning', passed: true, message: 'Skills directory not accessible' };
+      return h.passed('Skills directory not accessible');
     }
+
+    const evidence: Evidence[] = [];
 
     for (const entry of entries) {
       if (!entry.isDirectory) continue;
@@ -97,16 +97,9 @@ export const skl011: CheckModule = {
       }
     }
 
-    return {
-      id: 'SKL-011',
-      name: 'Dependency Audit',
-      category: 'skills',
-      severity: 'warning',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'All skill dependencies are clean'
-        : `Found ${evidence.length} dependency issue(s)`,
-      evidence: evidence.length > 0 ? evidence : undefined,
-    };
+    return h.fromEvidence(evidence, {
+      passed: 'All skill dependencies are clean',
+      failed: (n) => `Found ${n} dependency issue(s)`,
+    });
   },
-};
+});

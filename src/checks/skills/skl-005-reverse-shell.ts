@@ -1,23 +1,22 @@
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { scanWithPatterns, SECURITY_PATTERNS } from '../../analyzers/pattern-engine.js';
 import { getSkillFiles } from '../../core/utils.js';
 
 const REVERSE_SHELL_RULES = SECURITY_PATTERNS.filter(r => r.category === 'reverse-shell');
 
-export const skl005: CheckModule = {
+export const skl005 = defineCheck({
   id: 'SKL-005',
   name: 'Reverse Shell Patterns',
   category: 'skills',
   severity: 'critical',
   description: 'Detect reverse shell patterns (Bash, netcat, Node.js, Python, etc.)',
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
-    const evidence: Evidence[] = [];
+  async run(ctx, h) {
     const skillsDir = ctx.installation.skillsDir;
-    if (!skillsDir) {
-      return { id: 'SKL-005', name: 'Reverse Shell Patterns', category: 'skills', severity: 'critical', passed: true, message: 'No skills directory found' };
-    }
+    if (!skillsDir) return h.passed('No skills directory found');
 
+    const evidence: Evidence[] = [];
     const files = ctx.skillFiles ?? await getSkillFiles(skillsDir);
 
     for (const file of files) {
@@ -36,16 +35,9 @@ export const skl005: CheckModule = {
       } catch {}
     }
 
-    return {
-      id: 'SKL-005',
-      name: 'Reverse Shell Patterns',
-      category: 'skills',
-      severity: 'critical',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'No reverse shell patterns detected'
-        : `Found ${evidence.length} reverse shell pattern(s)`,
-      evidence: evidence.length > 0 ? evidence : undefined,
-    };
+    return h.fromEvidence(evidence, {
+      passed: 'No reverse shell patterns detected',
+      failed: (n) => `Found ${n} reverse shell pattern(s)`,
+    });
   },
-};
+});

@@ -1,21 +1,20 @@
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { analyzeCode } from '../../analyzers/ast-analyzer.js';
 import { getSkillFiles } from '../../core/utils.js';
 
-export const skl008: CheckModule = {
+export const skl008 = defineCheck({
   id: 'SKL-008',
   name: 'Suspicious Network Calls',
   category: 'skills',
   severity: 'warning',
   description: 'Detect non-localhost, non-HTTPS network calls',
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
-    const evidence: Evidence[] = [];
+  async run(ctx, h) {
     const skillsDir = ctx.installation.skillsDir;
-    if (!skillsDir) {
-      return { id: 'SKL-008', name: 'Suspicious Network Calls', category: 'skills', severity: 'warning', passed: true, message: 'No skills directory found' };
-    }
+    if (!skillsDir) return h.passed('No skills directory found');
 
+    const evidence: Evidence[] = [];
     const files = ctx.skillFiles ?? await getSkillFiles(skillsDir);
 
     for (const file of files) {
@@ -35,16 +34,9 @@ export const skl008: CheckModule = {
       } catch {}
     }
 
-    return {
-      id: 'SKL-008',
-      name: 'Suspicious Network Calls',
-      category: 'skills',
-      severity: 'warning',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'No suspicious network calls detected'
-        : `Found ${evidence.length} suspicious network call(s)`,
-      evidence: evidence.length > 0 ? evidence : undefined,
-    };
+    return h.fromEvidence(evidence, {
+      passed: 'No suspicious network calls detected',
+      failed: (n) => `Found ${n} suspicious network call(s)`,
+    });
   },
-};
+});
