@@ -176,6 +176,20 @@ program
   });
 
 program
+  .command('visualize')
+  .description('Emit USecVisLib config files (TOML/JSON/YAML) for scan visualization')
+  .option('-i, --input <file>', 'use existing scan result JSON instead of running a fresh scan')
+  .option('-o, --output <dir>', 'output directory for the bundle', './vaso-visualizations')
+  .option('--vis-format <format>', 'config file format (toml, json, yaml)', 'toml')
+  .option('--diagrams <list>', 'comma-separated diagram types (attack-tree, privilege-gradient, component)')
+  .option('-a, --agent <type>', 'scan a specific agent only (when running fresh scan)')
+  .option('--all-users', 'scan all user accounts (requires root/sudo)')
+  .action(async (options) => {
+    const { runVisualize } = await import('./commands/visualize.js');
+    await runVisualize(options);
+  });
+
+program
   .command('update')
   .description('Update IOC database from remote threat feed')
   .option('--url <url>', 'custom feed URL')
