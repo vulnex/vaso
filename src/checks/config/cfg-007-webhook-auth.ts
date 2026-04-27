@@ -1,8 +1,9 @@
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { CODING_AGENTS } from '../../core/types.js';
 import { getNestedValue } from '../../core/utils.js';
 
-export const cfg007: CheckModule = {
+export const cfg007 = defineCheck({
   id: 'CFG-007',
   name: 'Webhook Missing Auth',
   category: 'config',
@@ -10,7 +11,7 @@ export const cfg007: CheckModule = {
   description: 'Check if webhooks are configured without authentication',
   excludedAgents: CODING_AGENTS,
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence: Evidence[] = [];
 
     for (const config of ctx.configs) {
@@ -33,16 +34,9 @@ export const cfg007: CheckModule = {
       }
     }
 
-    return {
-      id: 'CFG-007',
-      name: 'Webhook Missing Auth',
-      category: 'config',
-      severity: 'warning',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'No unauthenticated webhooks found'
-        : `${evidence.length} webhook(s) configured without authentication`,
-      evidence: evidence.length > 0 ? evidence : undefined,
-    };
+    return h.fromEvidence(evidence, {
+      passed: 'No unauthenticated webhooks found',
+      failed: (n) => `${n} webhook(s) configured without authentication`,
+    });
   },
-};
+});

@@ -1,9 +1,9 @@
-import type { CheckModule, ScanContext, CheckResult, FixResult } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { CODING_AGENTS } from '../../core/types.js';
 import { updateConfigValue } from '../../remediation/config-writer.js';
 import { getNestedValue } from '../../core/utils.js';
 
-export const cfg008: CheckModule = {
+export const cfg008 = defineCheck({
   id: 'CFG-008',
   name: 'Sandbox Disabled',
   category: 'config',
@@ -11,38 +11,27 @@ export const cfg008: CheckModule = {
   description: 'Check if code sandbox/isolation is disabled',
   excludedAgents: CODING_AGENTS,
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     for (const config of ctx.configs) {
       const sandbox = getNestedValue(config.data, 'sandbox') ??
                       getNestedValue(config.data, 'security.sandbox') ??
                       getNestedValue(config.data, 'isolation');
 
       if (sandbox === false || sandbox === 'disabled' || sandbox === 'off' || sandbox === 'none') {
-        return {
-          id: 'CFG-008',
-          name: 'Sandbox Disabled',
-          category: 'config',
-          severity: 'critical',
+        return h.result({
           passed: false,
           message: 'Code sandbox is explicitly disabled — skills run without isolation',
           evidence: [{ file: config.filePath, detail: `sandbox: ${String(sandbox)}` }],
           fixable: true,
           fixDescription: 'Enable sandbox mode',
-        };
+        });
       }
     }
 
-    return {
-      id: 'CFG-008',
-      name: 'Sandbox Disabled',
-      category: 'config',
-      severity: 'critical',
-      passed: true,
-      message: 'Sandbox is not explicitly disabled',
-    };
+    return h.passed('Sandbox is not explicitly disabled');
   },
 
-  async fix(ctx: ScanContext): Promise<FixResult> {
+  async fix(ctx) {
     for (const config of ctx.configs) {
       const keyPath = config.format === 'env' ? 'SANDBOX' : 'sandbox';
       await updateConfigValue(config, keyPath, true);
@@ -50,4 +39,4 @@ export const cfg008: CheckModule = {
     }
     return { checkId: 'CFG-008', applied: false, message: 'No config file found' };
   },
-};
+});

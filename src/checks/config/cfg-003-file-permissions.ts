@@ -1,7 +1,8 @@
-import type { CheckModule, ScanContext, CheckResult, Evidence, FixResult } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { chmodFile } from '../../remediation/config-writer.js';
 
-export const cfg003: CheckModule = {
+export const cfg003 = defineCheck({
   id: 'CFG-003',
   name: 'File Permissions',
   category: 'config',
@@ -9,7 +10,7 @@ export const cfg003: CheckModule = {
   description: 'Check that config files have restrictive permissions (600 or tighter)',
   supportedPlatforms: ['darwin', 'linux'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence: Evidence[] = [];
 
     for (const config of ctx.configs) {
@@ -28,22 +29,15 @@ export const cfg003: CheckModule = {
       }
     }
 
-    return {
-      id: 'CFG-003',
-      name: 'File Permissions',
-      category: 'config',
-      severity: 'warning',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'All config files have restrictive permissions'
-        : `${evidence.length} config file(s) have overly permissive permissions`,
-      evidence: evidence.length > 0 ? evidence : undefined,
+    return h.fromEvidence(evidence, {
+      passed: 'All config files have restrictive permissions',
+      failed: (n) => `${n} config file(s) have overly permissive permissions`,
       fixable: true,
       fixDescription: 'Set permissions to 600 (chmod 600)',
-    };
+    });
   },
 
-  async fix(ctx: ScanContext): Promise<FixResult> {
+  async fix(ctx) {
     let fixed = 0;
     for (const config of ctx.configs) {
       try {
@@ -59,4 +53,4 @@ export const cfg003: CheckModule = {
       message: fixed > 0 ? `Set permissions to 600 on ${fixed} file(s)` : 'No files to fix',
     };
   },
-};
+});

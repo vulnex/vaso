@@ -1,9 +1,9 @@
-import type { CheckModule, ScanContext, CheckResult, FixResult } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { CODING_AGENTS } from '../../core/types.js';
 import { updateConfigValue } from '../../remediation/config-writer.js';
 import { getNestedValue } from '../../core/utils.js';
 
-export const cfg001: CheckModule = {
+export const cfg001 = defineCheck({
   id: 'CFG-001',
   name: 'Gateway Binding',
   category: 'config',
@@ -11,7 +11,7 @@ export const cfg001: CheckModule = {
   description: 'Check if gateway is bound to 0.0.0.0 (all interfaces), exposing it to the network',
   excludedAgents: CODING_AGENTS,
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence = [];
 
     for (const config of ctx.configs) {
@@ -52,22 +52,18 @@ export const cfg001: CheckModule = {
       arr.findIndex(x => x.file === e.file && x.line === e.line) === i
     );
 
-    return {
-      id: 'CFG-001',
-      name: 'Gateway Binding',
-      category: 'config',
-      severity: 'critical',
+    return h.result({
       passed: uniqueEvidence.length === 0,
       message: uniqueEvidence.length === 0
         ? 'Gateway is not bound to 0.0.0.0'
         : 'Gateway is bound to 0.0.0.0 — accessible from all network interfaces',
-      evidence: uniqueEvidence.length > 0 ? uniqueEvidence : undefined,
+      evidence: uniqueEvidence,
       fixable: true,
       fixDescription: 'Rebind gateway to 127.0.0.1',
-    };
+    });
   },
 
-  async fix(ctx: ScanContext): Promise<FixResult> {
+  async fix(ctx) {
     for (const config of ctx.configs) {
       const keyPath = config.format === 'env' ? 'GATEWAY_HOST' : 'gateway.host';
       await updateConfigValue(config, keyPath, '127.0.0.1');
@@ -75,4 +71,4 @@ export const cfg001: CheckModule = {
     }
     return { checkId: 'CFG-001', applied: false, message: 'No config file found' };
   },
-};
+});

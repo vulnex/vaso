@@ -1,14 +1,15 @@
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { API_KEY_PATTERNS } from '../../core/patterns.js';
 
-export const cfg002: CheckModule = {
+export const cfg002 = defineCheck({
   id: 'CFG-002',
   name: 'API Key Exposure',
   category: 'config',
   severity: 'critical',
   description: 'Check for exposed API keys and secrets in config files',
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence: Evidence[] = [];
 
     for (const config of ctx.configs) {
@@ -30,16 +31,9 @@ export const cfg002: CheckModule = {
       }
     }
 
-    return {
-      id: 'CFG-002',
-      name: 'API Key Exposure',
-      category: 'config',
-      severity: 'critical',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'No API keys found in config files'
-        : `Found ${evidence.length} exposed API key(s) in config files`,
-      evidence: evidence.length > 0 ? evidence : undefined,
-    };
+    return h.fromEvidence(evidence, {
+      passed: 'No API keys found in config files',
+      failed: (n) => `Found ${n} exposed API key(s) in config files`,
+    });
   },
-};
+});

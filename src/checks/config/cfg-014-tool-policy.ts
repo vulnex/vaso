@@ -1,8 +1,8 @@
-import type { CheckModule, ScanContext, CheckResult } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { CODING_AGENTS } from '../../core/types.js';
 import { getNestedValue } from '../../core/utils.js';
 
-export const cfg014: CheckModule = {
+export const cfg014 = defineCheck({
   id: 'CFG-014',
   name: 'Tool Policy Permissive',
   category: 'config',
@@ -10,32 +10,21 @@ export const cfg014: CheckModule = {
   description: 'Check if the tool execution policy is too permissive',
   excludedAgents: CODING_AGENTS,
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     for (const config of ctx.configs) {
       const toolPolicy = getNestedValue(config.data, 'tools.policy') ??
                          getNestedValue(config.data, 'security.toolPolicy') ??
                          getNestedValue(config.data, 'skillPolicy');
 
       if (toolPolicy === 'allow_all' || toolPolicy === 'permissive' || toolPolicy === 'unrestricted') {
-        return {
-          id: 'CFG-014',
-          name: 'Tool Policy Permissive',
-          category: 'config',
-          severity: 'warning',
+        return h.result({
           passed: false,
           message: 'Tool policy is permissive — any skill/tool can be executed without approval',
           evidence: [{ file: config.filePath, detail: `Tool policy: ${String(toolPolicy)}` }],
-        };
+        });
       }
     }
 
-    return {
-      id: 'CFG-014',
-      name: 'Tool Policy Permissive',
-      category: 'config',
-      severity: 'warning',
-      passed: true,
-      message: 'Tool policy is not overly permissive',
-    };
+    return h.passed('Tool policy is not overly permissive');
   },
-};
+});

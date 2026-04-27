@@ -1,7 +1,8 @@
 import { join } from 'node:path';
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 
-export const cfg018: CheckModule = {
+export const cfg018 = defineCheck({
   id: 'CFG-018',
   name: 'NemoClaw Network Policy',
   category: 'config',
@@ -9,17 +10,13 @@ export const cfg018: CheckModule = {
   description: 'Check if NemoClaw enforces deny-by-default network policy with controlled egress',
   supportedAgents: ['openclaw', 'nemoclaw'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const stateFile = join(ctx.fs.homedir(), '.nemoclaw', 'state', 'nemoclaw.json');
     if (!(await ctx.fs.access(stateFile))) {
-      return {
-        id: 'CFG-018',
-        name: 'NemoClaw Network Policy',
-        category: 'config',
-        severity: 'warning',
+      return h.result({
         passed: false,
         message: 'NemoClaw not deployed — no network policy enforcement',
-      };
+      });
     }
 
     // Find the active blueprint to check its policy config
@@ -52,15 +49,11 @@ export const cfg018: CheckModule = {
     }
 
     if (!blueprintDir) {
-      return {
-        id: 'CFG-018',
-        name: 'NemoClaw Network Policy',
-        category: 'config',
-        severity: 'warning',
+      return h.result({
         passed: true,
         message: 'NemoClaw is deployed but blueprint policies could not be located for inspection',
         evidence: [{ file: stateFile, detail: 'Sandbox deployed — network policy assumed active via OpenShell enforcement' }],
-      };
+      });
     }
 
     const evidence: Evidence[] = [];
@@ -101,14 +94,10 @@ export const cfg018: CheckModule = {
       } catch {}
     }
 
-    return {
-      id: 'CFG-018',
-      name: 'NemoClaw Network Policy',
-      category: 'config',
-      severity: 'warning',
+    return h.result({
       passed: true,
       message: 'NemoClaw network policy is configured with controlled egress',
       evidence,
-    };
+    });
   },
-};
+});

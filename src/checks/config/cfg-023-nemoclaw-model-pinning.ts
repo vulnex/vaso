@@ -1,5 +1,6 @@
 import { join } from 'node:path';
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 
 const SANDBOXES_FILE = 'sandboxes.json';
 
@@ -12,7 +13,7 @@ interface SandboxesConfig {
   sandboxes?: Record<string, SandboxEntry>;
 }
 
-export const cfg023: CheckModule = {
+export const cfg023 = defineCheck({
   id: 'CFG-023',
   name: 'NemoClaw Model Pinning',
   category: 'config',
@@ -20,18 +21,11 @@ export const cfg023: CheckModule = {
   description: 'Check if NemoClaw sandboxes pin models to specific versions to prevent model swap attacks',
   supportedAgents: ['openclaw', 'nemoclaw'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const sandboxesPath = join(ctx.fs.homedir(), '.nemoclaw', SANDBOXES_FILE);
 
     if (!(await ctx.fs.access(sandboxesPath))) {
-      return {
-        id: 'CFG-023',
-        name: 'NemoClaw Model Pinning',
-        category: 'config',
-        severity: 'info',
-        passed: true,
-        message: 'No NemoClaw sandboxes configuration found',
-      };
+      return h.passed('No NemoClaw sandboxes configuration found');
     }
 
     let config: SandboxesConfig;
@@ -39,25 +33,14 @@ export const cfg023: CheckModule = {
       const raw = await ctx.fs.readFile(sandboxesPath);
       config = JSON.parse(raw) as SandboxesConfig;
     } catch {
-      return {
-        id: 'CFG-023',
-        name: 'NemoClaw Model Pinning',
-        category: 'config',
-        severity: 'info',
+      return h.result({
         passed: false,
         message: 'NemoClaw sandboxes.json exists but could not be parsed',
-      };
+      });
     }
 
     if (!config.sandboxes || Object.keys(config.sandboxes).length === 0) {
-      return {
-        id: 'CFG-023',
-        name: 'NemoClaw Model Pinning',
-        category: 'config',
-        severity: 'info',
-        passed: true,
-        message: 'No sandboxes defined in NemoClaw configuration',
-      };
+      return h.passed('No sandboxes defined in NemoClaw configuration');
     }
 
     const evidence: Evidence[] = [];
@@ -106,16 +89,12 @@ export const cfg023: CheckModule = {
       }
     }
 
-    return {
-      id: 'CFG-023',
-      name: 'NemoClaw Model Pinning',
-      category: 'config',
-      severity: 'info',
+    return h.result({
       passed: unpinnedCount === 0,
       message: unpinnedCount === 0
         ? 'All sandbox models are pinned to specific versions'
         : `${unpinnedCount} sandbox(es) use unpinned or mutable model references`,
-      evidence: evidence.length > 0 ? evidence : undefined,
-    };
+      evidence,
+    });
   },
-};
+});

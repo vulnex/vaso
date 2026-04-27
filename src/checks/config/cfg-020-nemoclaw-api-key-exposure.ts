@@ -1,10 +1,11 @@
 import { join } from 'node:path';
-import type { CheckModule, ScanContext, CheckResult, Evidence, FixResult } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { chmodFile } from '../../remediation/config-writer.js';
 
 const CREDENTIAL_FILE = 'credentials.json';
 
-export const cfg020: CheckModule = {
+export const cfg020 = defineCheck({
   id: 'CFG-020',
   name: 'NemoClaw API Key Exposure',
   category: 'config',
@@ -12,18 +13,11 @@ export const cfg020: CheckModule = {
   description: 'Check if NemoClaw credentials.json stores API keys in plaintext with unsafe file permissions',
   supportedAgents: ['openclaw', 'nemoclaw'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const credPath = join(ctx.fs.homedir(), '.nemoclaw', CREDENTIAL_FILE);
 
     if (!(await ctx.fs.access(credPath))) {
-      return {
-        id: 'CFG-020',
-        name: 'NemoClaw API Key Exposure',
-        category: 'config',
-        severity: 'critical',
-        passed: true,
-        message: 'No NemoClaw credentials file found',
-      };
+      return h.passed('No NemoClaw credentials file found');
     }
 
     const evidence: Evidence[] = [];
@@ -73,11 +67,7 @@ export const cfg020: CheckModule = {
 
     const passed = !hasPlaintextKey && !hasLoosePerms;
 
-    return {
-      id: 'CFG-020',
-      name: 'NemoClaw API Key Exposure',
-      category: 'config',
-      severity: 'critical',
+    return h.result({
       passed,
       message: passed
         ? 'NemoClaw credentials are properly secured'
@@ -85,13 +75,13 @@ export const cfg020: CheckModule = {
             hasPlaintextKey && 'plaintext API keys',
             hasLoosePerms && 'overly permissive file permissions',
           ].filter(Boolean).join(', ')}`,
-      evidence: evidence.length > 0 ? evidence : undefined,
+      evidence,
       fixable: hasLoosePerms,
       fixDescription: hasLoosePerms ? 'Set credentials.json permissions to 600 (owner read/write only)' : undefined,
-    };
+    });
   },
 
-  async fix(ctx: ScanContext): Promise<FixResult> {
+  async fix(ctx) {
     const credPath = join(ctx.fs.homedir(), '.nemoclaw', CREDENTIAL_FILE);
     if (!(await ctx.fs.access(credPath))) {
       return { checkId: 'CFG-020', applied: false, message: 'Credentials file not found' };
@@ -112,4 +102,4 @@ export const cfg020: CheckModule = {
       };
     }
   },
-};
+});

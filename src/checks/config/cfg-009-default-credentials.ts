@@ -1,4 +1,5 @@
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 
 const WEAK_PATTERNS = [
   /\bpassword\b/i,
@@ -9,14 +10,14 @@ const CREDENTIAL_KEYS = ['password', 'secret', 'token', 'api_key', 'apiKey', 'au
 
 import { getNestedValue } from '../../core/utils.js';
 
-export const cfg009: CheckModule = {
+export const cfg009 = defineCheck({
   id: 'CFG-009',
   name: 'Default/Weak Credentials',
   category: 'config',
   severity: 'critical',
   description: 'Check for default or weak credentials in config files',
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence: Evidence[] = [];
 
     for (const config of ctx.configs) {
@@ -40,16 +41,9 @@ export const cfg009: CheckModule = {
       }
     }
 
-    return {
-      id: 'CFG-009',
-      name: 'Default/Weak Credentials',
-      category: 'config',
-      severity: 'critical',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'No default or weak credentials found'
-        : `Found ${evidence.length} default/weak credential(s)`,
-      evidence: evidence.length > 0 ? evidence : undefined,
-    };
+    return h.fromEvidence(evidence, {
+      passed: 'No default or weak credentials found',
+      failed: (n) => `Found ${n} default/weak credential(s)`,
+    });
   },
-};
+});
