@@ -1,21 +1,20 @@
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { getIOCDatabase } from '../../ioc/database.js';
 
-export const ioc006: CheckModule = {
+export const ioc006 = defineCheck({
   id: 'IOC-006',
   name: 'Skill Name Patterns',
   category: 'ioc',
   severity: 'warning',
   description: 'Match skill names against known malicious naming patterns',
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence: Evidence[] = [];
     const db = getIOCDatabase();
     const skillsDir = ctx.installation.skillsDir;
 
-    if (!skillsDir) {
-      return { id: 'IOC-006', name: 'Skill Name Patterns', category: 'ioc', severity: 'warning', passed: true, message: 'No skills directory found' };
-    }
+    if (!skillsDir) return h.passed('No skills directory found');
 
     try {
       const entries = await ctx.fs.readdirEntries(skillsDir);
@@ -34,16 +33,9 @@ export const ioc006: CheckModule = {
       }
     } catch {}
 
-    return {
-      id: 'IOC-006',
-      name: 'Skill Name Patterns',
-      category: 'ioc',
-      severity: 'warning',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'No malicious skill name patterns detected'
-        : `Found ${evidence.length} skill(s) with suspicious names`,
-      evidence: evidence.length > 0 ? evidence : undefined,
-    };
+    return h.fromEvidence(evidence, {
+      passed: 'No malicious skill name patterns detected',
+      failed: (n) => `Found ${n} skill(s) with suspicious names`,
+    });
   },
-};
+});

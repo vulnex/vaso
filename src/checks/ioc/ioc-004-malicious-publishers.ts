@@ -1,25 +1,23 @@
 import { join } from 'node:path';
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { getIOCDatabase } from '../../ioc/database.js';
 
-export const ioc004: CheckModule = {
+export const ioc004 = defineCheck({
   id: 'IOC-004',
   name: 'Malicious Publishers',
   category: 'ioc',
   severity: 'critical',
   description: 'Check skill metadata for known malicious publishers',
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence: Evidence[] = [];
     const db = getIOCDatabase();
     const publisherSet = new Set(db.maliciousPublishers.map(p => p.toLowerCase()));
     const skillsDir = ctx.installation.skillsDir;
 
-    if (!skillsDir) {
-      return { id: 'IOC-004', name: 'Malicious Publishers', category: 'ioc', severity: 'critical', passed: true, message: 'No skills directory found' };
-    }
+    if (!skillsDir) return h.passed('No skills directory found');
 
-    // Look for package.json, skill.json, or metadata files in skill dirs
     try {
       const entries = await ctx.fs.readdirEntries(skillsDir);
       for (const entry of entries) {
@@ -44,16 +42,9 @@ export const ioc004: CheckModule = {
       }
     } catch {}
 
-    return {
-      id: 'IOC-004',
-      name: 'Malicious Publishers',
-      category: 'ioc',
-      severity: 'critical',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'No known malicious publishers found'
-        : `Found ${evidence.length} skill(s) from known malicious publishers`,
-      evidence: evidence.length > 0 ? evidence : undefined,
-    };
+    return h.fromEvidence(evidence, {
+      passed: 'No known malicious publishers found',
+      failed: (n) => `Found ${n} skill(s) from known malicious publishers`,
+    });
   },
-};
+});

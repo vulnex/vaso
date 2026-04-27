@@ -1,5 +1,6 @@
 import { join, extname } from 'node:path';
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence, ScanContext } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { getIOCDatabase } from '../../ioc/database.js';
 
 const SCAN_EXTENSIONS = new Set(['.js', '.ts', '.mjs', '.cjs', '.json', '.yaml', '.yml', '.env', '.sh']);
@@ -20,20 +21,19 @@ async function getAllFilesViaCtx(ctx: ScanContext, dirs: string[]): Promise<stri
   return files;
 }
 
-export const ioc001: CheckModule = {
+export const ioc001 = defineCheck({
   id: 'IOC-001',
   name: 'C2 IP Detection',
   category: 'ioc',
   severity: 'critical',
   description: 'Scan code and configs for known C2 (command and control) IP addresses',
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence: Evidence[] = [];
     const db = getIOCDatabase();
     const dirs = [ctx.installation.installDir];
     if (ctx.installation.skillsDir) dirs.push(ctx.installation.skillsDir);
 
-    // Check configs first
     for (const config of ctx.configs) {
       for (const ip of db.c2Ips) {
         if (config.raw.includes(ip)) {
@@ -52,7 +52,6 @@ export const ioc001: CheckModule = {
       }
     }
 
-    // Check skill files
     const files = await getAllFilesViaCtx(ctx, dirs);
     for (const file of files) {
       try {
@@ -75,16 +74,9 @@ export const ioc001: CheckModule = {
       } catch {}
     }
 
-    return {
-      id: 'IOC-001',
-      name: 'C2 IP Detection',
-      category: 'ioc',
-      severity: 'critical',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'No known C2 IP addresses found'
-        : `Found ${evidence.length} reference(s) to known C2 IP addresses`,
-      evidence: evidence.length > 0 ? evidence : undefined,
-    };
+    return h.fromEvidence(evidence, {
+      passed: 'No known C2 IP addresses found',
+      failed: (n) => `Found ${n} reference(s) to known C2 IP addresses`,
+    });
   },
-};
+});

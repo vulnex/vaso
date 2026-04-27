@@ -1,5 +1,6 @@
 import { join, extname } from 'node:path';
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence, ScanContext } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { getIOCDatabase } from '../../ioc/database.js';
 
 const SCAN_EXTENSIONS = new Set(['.js', '.ts', '.mjs', '.cjs', '.json', '.yaml', '.yml', '.env', '.sh', '.md']);
@@ -20,14 +21,14 @@ async function getAllFilesViaCtx(ctx: ScanContext, dirs: string[]): Promise<stri
   return files;
 }
 
-export const ioc002: CheckModule = {
+export const ioc002 = defineCheck({
   id: 'IOC-002',
   name: 'Malicious Domains',
   category: 'ioc',
   severity: 'critical',
   description: 'Scan for known malicious domains in code and configs',
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence: Evidence[] = [];
     const db = getIOCDatabase();
     const dirs = [ctx.installation.installDir];
@@ -64,16 +65,9 @@ export const ioc002: CheckModule = {
       }
     }
 
-    return {
-      id: 'IOC-002',
-      name: 'Malicious Domains',
-      category: 'ioc',
-      severity: 'critical',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'No known malicious domains found'
-        : `Found ${evidence.length} reference(s) to known malicious domains`,
-      evidence: evidence.length > 0 ? evidence : undefined,
-    };
+    return h.fromEvidence(evidence, {
+      passed: 'No known malicious domains found',
+      failed: (n) => `Found ${n} reference(s) to known malicious domains`,
+    });
   },
-};
+});

@@ -1,31 +1,21 @@
 import { createHash } from 'node:crypto';
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { getSkillFiles } from '../../core/utils.js';
 
-export const ioc008: CheckModule = {
+export const ioc008 = defineCheck({
   id: 'IOC-008',
   name: 'VirusTotal Cross-Reference',
   category: 'ioc',
   severity: 'critical',
   description: 'SHA-256 hash skill files and check against VirusTotal API (opt-in via VIRUSTOTAL_API_KEY)',
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const apiKey = process.env['VIRUSTOTAL_API_KEY'];
-    if (!apiKey) {
-      return {
-        id: 'IOC-008',
-        name: 'VirusTotal Cross-Reference',
-        category: 'ioc',
-        severity: 'critical',
-        passed: true,
-        message: 'VirusTotal check skipped — no VIRUSTOTAL_API_KEY set',
-      };
-    }
+    if (!apiKey) return h.passed('VirusTotal check skipped — no VIRUSTOTAL_API_KEY set');
 
     const skillsDir = ctx.installation.skillsDir;
-    if (!skillsDir) {
-      return { id: 'IOC-008', name: 'VirusTotal Cross-Reference', category: 'ioc', severity: 'critical', passed: true, message: 'No skills directory found' };
-    }
+    if (!skillsDir) return h.passed('No skills directory found');
 
     const evidence: Evidence[] = [];
     const files = ctx.skillFiles ?? await getSkillFiles(skillsDir);
@@ -49,22 +39,12 @@ export const ioc008: CheckModule = {
             });
           }
         }
-        // 404 = not in VT database = not flagged; other errors ignored
-      } catch {
-        // Network errors, rate limits, etc. — skip file
-      }
+      } catch {}
     }
 
-    return {
-      id: 'IOC-008',
-      name: 'VirusTotal Cross-Reference',
-      category: 'ioc',
-      severity: 'critical',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'No skill files flagged by VirusTotal'
-        : `${evidence.length} file(s) flagged as malicious by VirusTotal`,
-      evidence: evidence.length > 0 ? evidence : undefined,
-    };
+    return h.fromEvidence(evidence, {
+      passed: 'No skill files flagged by VirusTotal',
+      failed: (n) => `${n} file(s) flagged as malicious by VirusTotal`,
+    });
   },
-};
+});
