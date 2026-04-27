@@ -1,6 +1,6 @@
-import type { CheckModule, ScanContext, CheckResult, FixResult } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 
-export const nb008: CheckModule = {
+export const nb008 = defineCheck({
   id: 'NB-008',
   name: 'Empty Bridge Token',
   category: 'nanobot',
@@ -8,7 +8,7 @@ export const nb008: CheckModule = {
   description: 'Check if WhatsApp bridge is enabled but bridge_token is empty or unset',
   supportedAgents: ['nanobot'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence = [];
     for (const config of ctx.configs) {
       const channels = config.data.channels as Record<string, Record<string, unknown>> | undefined;
@@ -31,18 +31,15 @@ export const nb008: CheckModule = {
         }
       }
     }
-    return {
-      id: 'NB-008', name: 'Empty Bridge Token', category: 'nanobot',
-      severity: 'warning', passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'All bridge channels have tokens configured'
-        : 'Bridge channel(s) found with empty or missing bridge_token',
-      evidence: evidence.length > 0 ? evidence : undefined,
-      fixable: true, fixDescription: 'Set a strong bridge_token for each WhatsApp bridge channel',
-    };
+    return h.fromEvidence(evidence, {
+      passed: 'All bridge channels have tokens configured',
+      failed: () => 'Bridge channel(s) found with empty or missing bridge_token',
+      fixable: true,
+      fixDescription: 'Set a strong bridge_token for each WhatsApp bridge channel',
+    });
   },
 
-  async fix(_ctx: ScanContext): Promise<FixResult> {
+  async fix() {
     return { checkId: 'NB-008', applied: false, message: 'Manual action required: generate and set a strong bridge_token for each WhatsApp bridge channel' };
   },
-};
+});

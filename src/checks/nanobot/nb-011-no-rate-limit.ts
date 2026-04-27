@@ -1,8 +1,8 @@
-import type { CheckModule, ScanContext, CheckResult, FixResult } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { getNestedValue } from '../../core/utils.js';
 import { updateJsonFile } from '../../remediation/config-writer.js';
 
-export const nb011: CheckModule = {
+export const nb011 = defineCheck({
   id: 'NB-011',
   name: 'No Rate Limiting',
   category: 'nanobot',
@@ -10,17 +10,15 @@ export const nb011: CheckModule = {
   description: 'Check if no rate limiting is configured on any channel',
   supportedAgents: ['nanobot'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence = [];
     for (const config of ctx.configs) {
-      // Check global rate limit
       const globalRateLimit = getNestedValue(config.data, 'rateLimit')
         ?? getNestedValue(config.data, 'rateLimiting')
         ?? getNestedValue(config.data, 'security.rateLimit');
 
       const channels = config.data.channels as Record<string, Record<string, unknown>> | undefined;
       if (!channels || typeof channels !== 'object') {
-        // No channels — check global only
         if (!globalRateLimit) {
           evidence.push({
             file: config.filePath,
@@ -41,18 +39,15 @@ export const nb011: CheckModule = {
         }
       }
     }
-    return {
-      id: 'NB-011', name: 'No Rate Limiting', category: 'nanobot',
-      severity: 'warning', passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'Rate limiting is configured'
-        : 'Channel(s) found without rate limiting — vulnerable to abuse',
-      evidence: evidence.length > 0 ? evidence : undefined,
-      fixable: true, fixDescription: 'Add rate limiting to channels or set a global rateLimit in config',
-    };
+    return h.fromEvidence(evidence, {
+      passed: 'Rate limiting is configured',
+      failed: () => 'Channel(s) found without rate limiting — vulnerable to abuse',
+      fixable: true,
+      fixDescription: 'Add rate limiting to channels or set a global rateLimit in config',
+    });
   },
 
-  async fix(ctx: ScanContext): Promise<FixResult> {
+  async fix(ctx) {
     const rateLimit = { maxPerMinute: 30, maxPerHour: 500 };
     for (const config of ctx.configs) {
       if (config.format === 'json') {
@@ -62,4 +57,4 @@ export const nb011: CheckModule = {
     }
     return { checkId: 'NB-011', applied: false, message: 'No JSON config file found' };
   },
-};
+});

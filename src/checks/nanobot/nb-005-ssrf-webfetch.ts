@@ -1,8 +1,8 @@
-import type { CheckModule, ScanContext, CheckResult, FixResult } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { getNestedValue } from '../../core/utils.js';
 import { updateJsonFile } from '../../remediation/config-writer.js';
 
-export const nb005: CheckModule = {
+export const nb005 = defineCheck({
   id: 'NB-005',
   name: 'WebFetchTool SSRF Risk',
   category: 'nanobot',
@@ -10,7 +10,7 @@ export const nb005: CheckModule = {
   description: 'Check if WebFetchTool allows requests to localhost or private IPs (SSRF risk)',
   supportedAgents: ['nanobot'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence = [];
     for (const config of ctx.configs) {
       const webFetch = getNestedValue(config.data, 'tools.webFetch')
@@ -39,18 +39,15 @@ export const nb005: CheckModule = {
         });
       }
     }
-    return {
-      id: 'NB-005', name: 'WebFetchTool SSRF Risk', category: 'nanobot',
-      severity: 'warning', passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'WebFetchTool has host restrictions configured'
-        : 'WebFetchTool lacks host restrictions — SSRF risk to localhost/private IPs',
-      evidence: evidence.length > 0 ? evidence : undefined,
-      fixable: true, fixDescription: 'Add blockedHosts with localhost, 127.0.0.1, 169.254.169.254, and private IP ranges to WebFetchTool config',
-    };
+    return h.fromEvidence(evidence, {
+      passed: 'WebFetchTool has host restrictions configured',
+      failed: () => 'WebFetchTool lacks host restrictions — SSRF risk to localhost/private IPs',
+      fixable: true,
+      fixDescription: 'Add blockedHosts with localhost, 127.0.0.1, 169.254.169.254, and private IP ranges to WebFetchTool config',
+    });
   },
 
-  async fix(ctx: ScanContext): Promise<FixResult> {
+  async fix(ctx) {
     const blockedHosts = ['localhost', '127.0.0.1', '0.0.0.0', '169.254.169.254', '10.*', '172.16.*', '192.168.*'];
     for (const config of ctx.configs) {
       if (config.format === 'json') {
@@ -60,4 +57,4 @@ export const nb005: CheckModule = {
     }
     return { checkId: 'NB-005', applied: false, message: 'No JSON config file found' };
   },
-};
+});

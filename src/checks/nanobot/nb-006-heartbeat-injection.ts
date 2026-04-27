@@ -1,7 +1,7 @@
-import type { CheckModule, ScanContext, CheckResult } from '../../core/types.js';
 import { join } from 'node:path';
+import { defineCheck } from '../../core/check-builder.js';
 
-export const nb006: CheckModule = {
+export const nb006 = defineCheck({
   id: 'NB-006',
   name: 'HEARTBEAT.md Injection Risk',
   category: 'nanobot',
@@ -9,7 +9,7 @@ export const nb006: CheckModule = {
   description: 'Check if HEARTBEAT.md exists in workspace and is potentially writable/injectable',
   supportedAgents: ['nanobot'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence = [];
     const installDir = ctx.installation.installDir;
     const heartbeatPath = join(installDir, 'HEARTBEAT.md');
@@ -44,14 +44,11 @@ export const nb006: CheckModule = {
       }
     }
 
-    return {
-      id: 'NB-006', name: 'HEARTBEAT.md Injection Risk', category: 'nanobot',
-      severity: 'warning', passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'No HEARTBEAT.md found in workspace'
-        : 'HEARTBEAT.md present in workspace — potential injection vector',
-      evidence: evidence.length > 0 ? evidence : undefined,
-      fixable: false, fixDescription: 'Review HEARTBEAT.md content and set restrictive file permissions (chmod 600)',
-    };
+    return h.fromEvidence(evidence, {
+      passed: 'No HEARTBEAT.md found in workspace',
+      failed: () => 'HEARTBEAT.md present in workspace — potential injection vector',
+      fixable: false,
+      fixDescription: 'Review HEARTBEAT.md content and set restrictive file permissions (chmod 600)',
+    });
   },
-};
+});
