@@ -1,4 +1,5 @@
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 
 const AUTHORIZE_URL_PATTERN = /\/authorize|\/authorization/;
 const CODE_CHALLENGE_PATTERN = /code_challenge/;
@@ -8,7 +9,7 @@ const TOKEN_EXCHANGE_PATTERN = /\/token|grant_type|authorization_code/;
 
 const SEARCH_RADIUS = 15;
 
-export const mcp013: CheckModule = {
+export const mcp013 = defineCheck({
   id: 'MCP-013',
   name: 'Missing PKCE',
   category: 'mcp',
@@ -16,7 +17,7 @@ export const mcp013: CheckModule = {
   description: 'Detect OAuth authorization flows without PKCE (Proof Key for Code Exchange) protection',
   supportedAgents: ['mcp'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence: Evidence[] = [];
     const mcpServerSources = ctx.mcpServerSources ?? [];
 
@@ -72,18 +73,11 @@ export const mcp013: CheckModule = {
       }
     }
 
-    return {
-      id: 'MCP-013',
-      name: 'Missing PKCE',
-      category: 'mcp',
-      severity: 'critical',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'OAuth flows properly implement PKCE'
-        : `Found ${evidence.length} OAuth flow(s) without PKCE protection`,
-      evidence: evidence.length > 0 ? evidence : undefined,
+    return h.fromEvidence(evidence, {
+      passed: 'OAuth flows properly implement PKCE',
+      failed: (n) => `Found ${n} OAuth flow(s) without PKCE protection`,
       fixable: false,
       fixDescription: 'Add PKCE with S256 code_challenge_method to all OAuth authorization flows',
-    };
+    });
   },
-};
+});

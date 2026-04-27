@@ -1,4 +1,5 @@
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { extractToolDefinitions } from '../../mcp/tool-baseline.js';
 
 const SOURCE_PATTERNS = [
@@ -100,7 +101,7 @@ function extractToolHandlers(sourceCode: string): Map<string, string> {
   return handlers;
 }
 
-export const mcp019: CheckModule = {
+export const mcp019 = defineCheck({
   id: 'MCP-019',
   name: 'Toxic Tool Flow',
   category: 'mcp',
@@ -108,7 +109,7 @@ export const mcp019: CheckModule = {
   description: 'Detect dangerous source→sink tool combinations that enable data exfiltration via chained tool calls',
   supportedAgents: ['mcp'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence: Evidence[] = [];
     const sources = ctx.mcpServerSources ?? [];
 
@@ -144,16 +145,9 @@ export const mcp019: CheckModule = {
       }
     }
 
-    return {
-      id: 'MCP-019',
-      name: 'Toxic Tool Flow',
-      category: 'mcp',
-      severity: 'critical',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'No toxic source→sink tool combinations found in MCP servers'
-        : `Found ${evidence.length} MCP server(s) with toxic tool flow (source + sink tools coexist)`,
-      evidence: evidence.length > 0 ? evidence : undefined,
-    };
+    return h.fromEvidence(evidence, {
+      passed: 'No toxic source→sink tool combinations found in MCP servers',
+      failed: (n) => `Found ${n} MCP server(s) with toxic tool flow (source + sink tools coexist)`,
+    });
   },
-};
+});

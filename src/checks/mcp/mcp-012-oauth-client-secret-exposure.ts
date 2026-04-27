@@ -1,4 +1,5 @@
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { OAUTH_SECRET_PATTERNS, OAUTH_TOKEN_VALUE_PATTERNS } from '../../core/patterns.js';
 import { shannonEntropy } from '../../analyzers/entropy.js';
 
@@ -10,7 +11,7 @@ function maskValue(value: string): string {
   return value.slice(0, 8) + '*'.repeat(Math.max(0, value.length - 8));
 }
 
-export const mcp012: CheckModule = {
+export const mcp012 = defineCheck({
   id: 'MCP-012',
   name: 'OAuth Client Secret Exposure',
   category: 'mcp',
@@ -18,7 +19,7 @@ export const mcp012: CheckModule = {
   description: 'Check for plaintext OAuth client secrets, access tokens, and refresh tokens in MCP config env blocks',
   supportedAgents: ['mcp'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence: Evidence[] = [];
     const mcpConfigs = ctx.mcpConfigs ?? [];
 
@@ -80,18 +81,11 @@ export const mcp012: CheckModule = {
       }
     }
 
-    return {
-      id: 'MCP-012',
-      name: 'OAuth Client Secret Exposure',
-      category: 'mcp',
-      severity: 'critical',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'No exposed OAuth credentials found in MCP configs'
-        : `Found ${evidence.length} exposed OAuth credential(s) in MCP configs`,
-      evidence: evidence.length > 0 ? evidence : undefined,
+    return h.fromEvidence(evidence, {
+      passed: 'No exposed OAuth credentials found in MCP configs',
+      failed: (n) => `Found ${n} exposed OAuth credential(s) in MCP configs`,
       fixable: evidence.length > 0,
       fixDescription: 'Move OAuth secrets to a secrets manager or use environment variable references (e.g., ${CLIENT_SECRET})',
-    };
+    });
   },
-};
+});

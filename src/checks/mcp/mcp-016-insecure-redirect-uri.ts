@@ -1,4 +1,5 @@
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 
 const LOCALHOST_EXCEPTIONS = ['localhost', '127.0.0.1', '[::1]'];
 
@@ -14,7 +15,7 @@ const SOURCE_REDIRECT_PATTERNS = [
   { pattern: /callback.*(?:req\.query|req\.params|request\.query|params\.).*redirect/, detail: 'User-controlled redirect in callback handler' },
 ];
 
-export const mcp016: CheckModule = {
+export const mcp016 = defineCheck({
   id: 'MCP-016',
   name: 'Insecure Redirect URI',
   category: 'mcp',
@@ -22,7 +23,7 @@ export const mcp016: CheckModule = {
   description: 'Detect HTTP redirect URIs, wildcard patterns, and user-controlled redirect targets in OAuth flows',
   supportedAgents: ['mcp'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence: Evidence[] = [];
     const mcpConfigs = ctx.mcpConfigs ?? [];
     const mcpServerSources = ctx.mcpServerSources ?? [];
@@ -70,18 +71,11 @@ export const mcp016: CheckModule = {
       }
     }
 
-    return {
-      id: 'MCP-016',
-      name: 'Insecure Redirect URI',
-      category: 'mcp',
-      severity: 'warning',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'All OAuth redirect URIs are properly secured'
-        : `Found ${evidence.length} insecure redirect URI pattern(s)`,
-      evidence: evidence.length > 0 ? evidence : undefined,
+    return h.fromEvidence(evidence, {
+      passed: 'All OAuth redirect URIs are properly secured',
+      failed: (n) => `Found ${n} insecure redirect URI pattern(s)`,
       fixable: evidence.length > 0,
       fixDescription: 'Use HTTPS redirect URIs with exact-match validation; never allow user-controlled redirects',
-    };
+    });
   },
-};
+});

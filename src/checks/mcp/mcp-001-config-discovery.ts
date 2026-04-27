@@ -1,6 +1,7 @@
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 
-export const mcp001: CheckModule = {
+export const mcp001 = defineCheck({
   id: 'MCP-001',
   name: 'MCP Config Discovery',
   category: 'mcp',
@@ -8,7 +9,7 @@ export const mcp001: CheckModule = {
   description: 'Inventory all configured MCP servers across all agent configs',
   supportedAgents: ['mcp'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence: Evidence[] = [];
     const mcpConfigs = ctx.mcpConfigs ?? [];
 
@@ -32,16 +33,12 @@ export const mcp001: CheckModule = {
 
     const totalServers = mcpConfigs.reduce((sum, c) => sum + c.servers.length, 0);
 
-    return {
-      id: 'MCP-001',
-      name: 'MCP Config Discovery',
-      category: 'mcp',
-      severity: 'info',
+    return h.result({
       passed: true,
       message: totalServers === 0
         ? 'No MCP servers configured'
         : `Found ${totalServers} MCP server(s) across ${mcpConfigs.length} config(s)`,
-      evidence: evidence.length > 0 ? evidence : undefined,
-    };
+      evidence,
+    });
   },
-};
+});

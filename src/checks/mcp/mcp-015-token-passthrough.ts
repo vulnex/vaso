@@ -1,4 +1,5 @@
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 
 const TOKEN_PASSTHROUGH_PATTERNS = [
   { pattern: /req(?:uest)?\.headers\.authorization.*(?:fetch|http\.request|axios|got|request\()/i, detail: 'Inbound authorization header forwarded to outbound request' },
@@ -10,7 +11,7 @@ const TOKEN_PASSTHROUGH_PATTERNS = [
   { pattern: /authorization\s*:\s*[`'"]\s*Bearer\s*\$\{.*(?:req|request|ctx|context).*token/i, detail: 'Token from request context interpolated into outbound Authorization header' },
 ];
 
-export const mcp015: CheckModule = {
+export const mcp015 = defineCheck({
   id: 'MCP-015',
   name: 'Token Passthrough',
   category: 'mcp',
@@ -18,7 +19,7 @@ export const mcp015: CheckModule = {
   description: 'Detect MCP servers forwarding received auth tokens to downstream APIs (confused deputy risk)',
   supportedAgents: ['mcp'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence: Evidence[] = [];
     const mcpServerSources = ctx.mcpServerSources ?? [];
 
@@ -47,16 +48,9 @@ export const mcp015: CheckModule = {
       }
     }
 
-    return {
-      id: 'MCP-015',
-      name: 'Token Passthrough',
-      category: 'mcp',
-      severity: 'critical',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'No token passthrough patterns detected'
-        : `Found ${evidence.length} token passthrough pattern(s) — tokens may be forwarded to downstream services`,
-      evidence: evidence.length > 0 ? evidence : undefined,
-    };
+    return h.fromEvidence(evidence, {
+      passed: 'No token passthrough patterns detected',
+      failed: (n) => `Found ${n} token passthrough pattern(s) — tokens may be forwarded to downstream services`,
+    });
   },
-};
+});

@@ -1,4 +1,5 @@
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 
 function isVersionPinned(packageArg: string): boolean {
   // Scoped packages: @scope/name@version
@@ -20,7 +21,7 @@ function isVersionPinned(packageArg: string): boolean {
   return version !== 'latest' && version.length > 0;
 }
 
-export const mcp010: CheckModule = {
+export const mcp010 = defineCheck({
   id: 'MCP-010',
   name: 'Rug Pull Risk',
   category: 'mcp',
@@ -28,7 +29,7 @@ export const mcp010: CheckModule = {
   description: 'Detect unpinned versions and missing lockfiles that enable supply chain attacks',
   supportedAgents: ['mcp'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence: Evidence[] = [];
     const mcpConfigs = ctx.mcpConfigs ?? [];
 
@@ -76,18 +77,11 @@ export const mcp010: CheckModule = {
       }
     }
 
-    return {
-      id: 'MCP-010',
-      name: 'Rug Pull Risk',
-      category: 'mcp',
-      severity: 'warning',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'MCP server packages are properly version-pinned'
-        : `Found ${evidence.length} supply chain risk(s) from unpinned versions`,
-      evidence: evidence.length > 0 ? evidence : undefined,
+    return h.fromEvidence(evidence, {
+      passed: 'MCP server packages are properly version-pinned',
+      failed: (n) => `Found ${n} supply chain risk(s) from unpinned versions`,
       fixable: evidence.length > 0,
       fixDescription: 'Pin package versions (e.g., npx @scope/package@1.2.3)',
-    };
+    });
   },
-};
+});

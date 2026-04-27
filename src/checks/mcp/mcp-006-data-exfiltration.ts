@@ -1,7 +1,8 @@
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { analyzeCode } from '../../analyzers/ast-analyzer.js';
 
-export const mcp006: CheckModule = {
+export const mcp006 = defineCheck({
   id: 'MCP-006',
   name: 'Data Exfiltration Risk',
   category: 'mcp',
@@ -9,7 +10,7 @@ export const mcp006: CheckModule = {
   description: 'Detect sensitive data flowing to network sinks in MCP server source',
   supportedAgents: ['mcp'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence: Evidence[] = [];
     const sources = ctx.mcpServerSources ?? [];
 
@@ -40,16 +41,9 @@ export const mcp006: CheckModule = {
       }
     }
 
-    return {
-      id: 'MCP-006',
-      name: 'Data Exfiltration Risk',
-      category: 'mcp',
-      severity: 'critical',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'No data exfiltration patterns found in MCP server source'
-        : `Found ${evidence.length} data exfiltration risk(s) in MCP server source`,
-      evidence: evidence.length > 0 ? evidence : undefined,
-    };
+    return h.fromEvidence(evidence, {
+      passed: 'No data exfiltration patterns found in MCP server source',
+      failed: (n) => `Found ${n} data exfiltration risk(s) in MCP server source`,
+    });
   },
-};
+});

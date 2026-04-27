@@ -1,7 +1,8 @@
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { analyzeCode } from '../../analyzers/ast-analyzer.js';
 
-export const mcp004: CheckModule = {
+export const mcp004 = defineCheck({
   id: 'MCP-004',
   name: 'Overprivileged Tools',
   category: 'mcp',
@@ -9,7 +10,7 @@ export const mcp004: CheckModule = {
   description: 'Detect MCP servers with exec/shell/write capabilities in source code',
   supportedAgents: ['mcp'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence: Evidence[] = [];
     const sources = ctx.mcpServerSources ?? [];
 
@@ -40,16 +41,9 @@ export const mcp004: CheckModule = {
       }
     }
 
-    return {
-      id: 'MCP-004',
-      name: 'Overprivileged Tools',
-      category: 'mcp',
-      severity: 'critical',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'No overprivileged operations found in MCP server source'
-        : `Found ${evidence.length} overprivileged operation(s) in MCP server source`,
-      evidence: evidence.length > 0 ? evidence : undefined,
-    };
+    return h.fromEvidence(evidence, {
+      passed: 'No overprivileged operations found in MCP server source',
+      failed: (n) => `Found ${n} overprivileged operation(s) in MCP server source`,
+    });
   },
-};
+});

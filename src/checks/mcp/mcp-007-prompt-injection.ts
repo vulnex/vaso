@@ -1,4 +1,5 @@
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 
 // Patterns indicating raw external content returned unsanitized in tool results
 const UNSAFE_RETURN_PATTERNS = [
@@ -17,7 +18,7 @@ const SANITIZATION_PATTERNS = [
   /\.replace\(.*<.*>/i,
 ];
 
-export const mcp007: CheckModule = {
+export const mcp007 = defineCheck({
   id: 'MCP-007',
   name: 'Prompt Injection via Tool Results',
   category: 'mcp',
@@ -25,7 +26,7 @@ export const mcp007: CheckModule = {
   description: 'Detect raw external content returned unsanitized in MCP tool results',
   supportedAgents: ['mcp'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence: Evidence[] = [];
     const sources = ctx.mcpServerSources ?? [];
 
@@ -53,16 +54,9 @@ export const mcp007: CheckModule = {
       }
     }
 
-    return {
-      id: 'MCP-007',
-      name: 'Prompt Injection via Tool Results',
-      category: 'mcp',
-      severity: 'warning',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'No prompt injection risks detected in MCP tool results'
-        : `Found ${evidence.length} potential prompt injection vector(s) in MCP tool results`,
-      evidence: evidence.length > 0 ? evidence : undefined,
-    };
+    return h.fromEvidence(evidence, {
+      passed: 'No prompt injection risks detected in MCP tool results',
+      failed: (n) => `Found ${n} potential prompt injection vector(s) in MCP tool results`,
+    });
   },
-};
+});
