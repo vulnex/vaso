@@ -1,8 +1,8 @@
-import type { CheckModule, ScanContext, CheckResult, FixResult } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { updateEnvFile, updateTomlFile } from '../../remediation/config-writer.js';
 import { getNestedValue } from '../../core/utils.js';
 
-export const ic012: CheckModule = {
+export const ic012 = defineCheck({
   id: 'IC-012',
   name: 'Docker Auto-Pull Without Digest Pin',
   category: 'ironclaw',
@@ -10,7 +10,7 @@ export const ic012: CheckModule = {
   description: 'Check if SANDBOX_AUTO_PULL is enabled without a sha256 digest pin on the Docker image',
   supportedAgents: ['ironclaw'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence = [];
 
     for (const config of ctx.configs) {
@@ -36,22 +36,15 @@ export const ic012: CheckModule = {
       }
     }
 
-    return {
-      id: 'IC-012',
-      name: 'Docker Auto-Pull Without Digest Pin',
-      category: 'ironclaw',
-      severity: 'warning',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'Docker auto-pull is either disabled or uses a pinned image digest'
-        : 'Docker auto-pull is enabled without a sha256 digest pin — vulnerable to tag mutation',
-      evidence: evidence.length > 0 ? evidence : undefined,
+    return h.fromEvidence(evidence, {
+      passed: 'Docker auto-pull is either disabled or uses a pinned image digest',
+      failed: () => 'Docker auto-pull is enabled without a sha256 digest pin — vulnerable to tag mutation',
       fixable: true,
       fixDescription: 'Pin SANDBOX_DOCKER_IMAGE to a sha256 digest (e.g., myimage@sha256:abc123...) or disable SANDBOX_AUTO_PULL',
-    };
+    });
   },
 
-  async fix(ctx: ScanContext): Promise<FixResult> {
+  async fix(ctx) {
     for (const config of ctx.configs) {
       if (config.format === 'env') {
         await updateEnvFile(config.filePath, 'SANDBOX_AUTO_PULL', 'false');
@@ -64,4 +57,4 @@ export const ic012: CheckModule = {
     }
     return { checkId: 'IC-012', applied: false, message: 'No compatible config file found' };
   },
-};
+});

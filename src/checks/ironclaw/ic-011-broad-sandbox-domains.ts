@@ -1,7 +1,7 @@
-import type { CheckModule, ScanContext, CheckResult, FixResult } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { getNestedValue } from '../../core/utils.js';
 
-export const ic011: CheckModule = {
+export const ic011 = defineCheck({
   id: 'IC-011',
   name: 'Broad Sandbox Domain Allowlist',
   category: 'ironclaw',
@@ -9,7 +9,7 @@ export const ic011: CheckModule = {
   description: 'Check if SANDBOX_EXTRA_DOMAINS contains wildcard patterns that weaken network isolation',
   supportedAgents: ['ironclaw'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence = [];
 
     for (const config of ctx.configs) {
@@ -20,7 +20,6 @@ export const ic011: CheckModule = {
 
       if (!extraDomains) continue;
 
-      // Normalize to array
       const domainList = Array.isArray(extraDomains)
         ? extraDomains
         : extraDomains.split(',').map(d => d.trim());
@@ -40,22 +39,15 @@ export const ic011: CheckModule = {
       }
     }
 
-    return {
-      id: 'IC-011',
-      name: 'Broad Sandbox Domain Allowlist',
-      category: 'ironclaw',
-      severity: 'warning',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'No wildcard patterns in sandbox domain allowlist'
-        : 'Sandbox domain allowlist contains wildcard patterns — network isolation is weakened',
-      evidence: evidence.length > 0 ? evidence : undefined,
+    return h.fromEvidence(evidence, {
+      passed: 'No wildcard patterns in sandbox domain allowlist',
+      failed: () => 'Sandbox domain allowlist contains wildcard patterns — network isolation is weakened',
       fixable: true,
       fixDescription: 'Replace wildcard domain patterns with specific fully-qualified domain names in SANDBOX_EXTRA_DOMAINS',
-    };
+    });
   },
 
-  async fix(_ctx: ScanContext): Promise<FixResult> {
+  async fix() {
     return { checkId: 'IC-011', applied: false, message: 'Manual action required: replace wildcard patterns in SANDBOX_EXTRA_DOMAINS with specific fully-qualified domain names' };
   },
-};
+});
