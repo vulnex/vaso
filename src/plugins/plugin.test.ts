@@ -272,7 +272,7 @@ describe('generatePluginContent', () => {
 
   it('embeds version in generated content', () => {
     const content = generatePluginContent('openclaw', '/usr/local/bin/vaso');
-    expect(content).toContain('0.1.0');
+    expect(content).toContain('0.2.0');
   });
 
   it('uses .mjs-compatible ESM syntax', () => {

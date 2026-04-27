@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process';
 import type { PluginAgentType, PluginConfig, PluginManifest, PluginInfo } from './types.js';
 import { PLUGIN_AGENTS, DEFAULT_PLUGIN_CONFIG } from './types.js';
 
-const VERSION = '0.1.0';
+const VERSION = '0.2.0';
 
 const PLUGIN_PATHS: Record<PluginAgentType, string> = {
   openclaw: join(homedir(), '.openclaw', 'plugins', 'vaso-security.mjs'),
