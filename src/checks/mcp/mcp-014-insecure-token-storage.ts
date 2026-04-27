@@ -1,4 +1,5 @@
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 
 const INSECURE_TOKEN_PATTERNS = [
   { pattern: /console\.log\s*\(.*(?:token|access_token|refresh_token|bearer)/i, detail: 'OAuth token logged to console' },
@@ -11,7 +12,7 @@ const INSECURE_TOKEN_PATTERNS = [
   { pattern: /(?:token|access_token|bearer)\s*\+\s*['"`]/, detail: 'OAuth token concatenated into string (potential URL leak)' },
 ];
 
-export const mcp014: CheckModule = {
+export const mcp014 = defineCheck({
   id: 'MCP-014',
   name: 'Insecure Token Storage',
   category: 'mcp',
@@ -19,7 +20,7 @@ export const mcp014: CheckModule = {
   description: 'Detect OAuth tokens written to files, localStorage, console.log, or passed in query parameters',
   supportedAgents: ['mcp'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence: Evidence[] = [];
     const mcpServerSources = ctx.mcpServerSources ?? [];
 
@@ -48,18 +49,11 @@ export const mcp014: CheckModule = {
       }
     }
 
-    return {
-      id: 'MCP-014',
-      name: 'Insecure Token Storage',
-      category: 'mcp',
-      severity: 'critical',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'No insecure token storage patterns found'
-        : `Found ${evidence.length} insecure token storage pattern(s)`,
-      evidence: evidence.length > 0 ? evidence : undefined,
+    return h.fromEvidence(evidence, {
+      passed: 'No insecure token storage patterns found',
+      failed: (n) => `Found ${n} insecure token storage pattern(s)`,
       fixable: false,
       fixDescription: 'Store tokens securely (encrypted at rest, never in logs/URLs/localStorage)',
-    };
+    });
   },
-};
+});

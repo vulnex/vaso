@@ -1,4 +1,5 @@
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 
 // Patterns indicating unsanitized input flowing to dangerous sinks
 const INJECTION_PATTERNS = [
@@ -13,7 +14,7 @@ const INJECTION_PATTERNS = [
   { pattern: /new\s+Function\s*\(\s*(?:req|input|args|params|query|body|tool_input)/i, name: 'Dynamic Function constructor with user input' },
 ];
 
-export const mcp005: CheckModule = {
+export const mcp005 = defineCheck({
   id: 'MCP-005',
   name: 'Tool Input Injection',
   category: 'mcp',
@@ -21,7 +22,7 @@ export const mcp005: CheckModule = {
   description: 'Detect unsanitized LLM/user input flowing to dangerous sinks in MCP server source',
   supportedAgents: ['mcp'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence: Evidence[] = [];
     const sources = ctx.mcpServerSources ?? [];
 
@@ -44,16 +45,9 @@ export const mcp005: CheckModule = {
       }
     }
 
-    return {
-      id: 'MCP-005',
-      name: 'Tool Input Injection',
-      category: 'mcp',
-      severity: 'critical',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'No injection vulnerabilities detected in MCP server source'
-        : `Found ${evidence.length} potential injection vulnerability(ies) in MCP server source`,
-      evidence: evidence.length > 0 ? evidence : undefined,
-    };
+    return h.fromEvidence(evidence, {
+      passed: 'No injection vulnerabilities detected in MCP server source',
+      failed: (n) => `Found ${n} potential injection vulnerability(ies) in MCP server source`,
+    });
   },
-};
+});

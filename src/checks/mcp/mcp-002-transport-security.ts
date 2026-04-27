@@ -1,6 +1,7 @@
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 
-export const mcp002: CheckModule = {
+export const mcp002 = defineCheck({
   id: 'MCP-002',
   name: 'Transport Security',
   category: 'mcp',
@@ -8,7 +9,7 @@ export const mcp002: CheckModule = {
   description: 'Check for MCP servers using insecure transports (SSE/HTTP without TLS, binding to 0.0.0.0)',
   supportedAgents: ['mcp'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence: Evidence[] = [];
     const mcpConfigs = ctx.mcpConfigs ?? [];
 
@@ -55,16 +56,9 @@ export const mcp002: CheckModule = {
       }
     }
 
-    return {
-      id: 'MCP-002',
-      name: 'Transport Security',
-      category: 'mcp',
-      severity: 'critical',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'All MCP transports use secure configurations'
-        : `Found ${evidence.length} insecure transport configuration(s)`,
-      evidence: evidence.length > 0 ? evidence : undefined,
-    };
+    return h.fromEvidence(evidence, {
+      passed: 'All MCP transports use secure configurations',
+      failed: (n) => `Found ${n} insecure transport configuration(s)`,
+    });
   },
-};
+});

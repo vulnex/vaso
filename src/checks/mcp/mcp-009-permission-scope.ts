@@ -1,4 +1,5 @@
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 
 // Patterns indicating disproportionate resource access in server names/packages
 const OVERPRIVILEGED_PATTERNS = [
@@ -16,7 +17,7 @@ const SOURCE_PERMISSION_PATTERNS = [
   { pattern: /readdir(?:Sync)?\s*\(\s*['"](?:\/|~)/i, name: 'Reading root or home directory' },
 ];
 
-export const mcp009: CheckModule = {
+export const mcp009 = defineCheck({
   id: 'MCP-009',
   name: 'Permission Scope',
   category: 'mcp',
@@ -24,7 +25,7 @@ export const mcp009: CheckModule = {
   description: 'Detect MCP servers requesting disproportionate resource access',
   supportedAgents: ['mcp'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence: Evidence[] = [];
     const mcpConfigs = ctx.mcpConfigs ?? [];
     const sources = ctx.mcpServerSources ?? [];
@@ -75,16 +76,9 @@ export const mcp009: CheckModule = {
       }
     }
 
-    return {
-      id: 'MCP-009',
-      name: 'Permission Scope',
-      category: 'mcp',
-      severity: 'warning',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'MCP server permission scopes appear reasonable'
-        : `Found ${evidence.length} disproportionate permission scope(s)`,
-      evidence: evidence.length > 0 ? evidence : undefined,
-    };
+    return h.fromEvidence(evidence, {
+      passed: 'MCP server permission scopes appear reasonable',
+      failed: (n) => `Found ${n} disproportionate permission scope(s)`,
+    });
   },
-};
+});

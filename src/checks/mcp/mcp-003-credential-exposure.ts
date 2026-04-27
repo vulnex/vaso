@@ -1,11 +1,12 @@
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { API_KEY_PATTERNS } from '../../core/patterns.js';
 import { shannonEntropy } from '../../analyzers/entropy.js';
 
 const HIGH_ENTROPY_THRESHOLD = 4.5;
 const MIN_SECRET_LENGTH = 16;
 
-export const mcp003: CheckModule = {
+export const mcp003 = defineCheck({
   id: 'MCP-003',
   name: 'Credential Exposure',
   category: 'mcp',
@@ -13,7 +14,7 @@ export const mcp003: CheckModule = {
   description: 'Check for plaintext secrets in MCP server env blocks and config values',
   supportedAgents: ['mcp'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence: Evidence[] = [];
     const mcpConfigs = ctx.mcpConfigs ?? [];
 
@@ -55,18 +56,11 @@ export const mcp003: CheckModule = {
       }
     }
 
-    return {
-      id: 'MCP-003',
-      name: 'Credential Exposure',
-      category: 'mcp',
-      severity: 'critical',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'No plaintext credentials found in MCP configs'
-        : `Found ${evidence.length} exposed credential(s) in MCP configs`,
-      evidence: evidence.length > 0 ? evidence : undefined,
+    return h.fromEvidence(evidence, {
+      passed: 'No plaintext credentials found in MCP configs',
+      failed: (n) => `Found ${n} exposed credential(s) in MCP configs`,
       fixable: evidence.length > 0,
       fixDescription: 'Move secrets to environment variables or a secrets manager',
-    };
+    });
   },
-};
+});

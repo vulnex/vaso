@@ -1,4 +1,5 @@
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 
 const OAUTH_URL_ENV_PATTERNS = /(?:oauth|auth|token|authorize)[_-]?(?:url|endpoint|uri|server)/i;
 
@@ -17,7 +18,7 @@ const SOURCE_HTTP_OAUTH_PATTERNS = [
   { pattern: /http:\/\/(?!localhost|127\.0\.0\.1|\[::1\])[^'"\s]*\/oauth2\//, detail: 'HTTP OAuth2 endpoint URL' },
 ];
 
-export const mcp011: CheckModule = {
+export const mcp011 = defineCheck({
   id: 'MCP-011',
   name: 'OAuth Endpoint HTTPS',
   category: 'mcp',
@@ -25,7 +26,7 @@ export const mcp011: CheckModule = {
   description: 'Check for OAuth authorization/token endpoints using HTTP instead of HTTPS (OAuth 2.1 mandates TLS)',
   supportedAgents: ['mcp'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence: Evidence[] = [];
     const mcpConfigs = ctx.mcpConfigs ?? [];
     const mcpServerSources = ctx.mcpServerSources ?? [];
@@ -67,18 +68,11 @@ export const mcp011: CheckModule = {
       }
     }
 
-    return {
-      id: 'MCP-011',
-      name: 'OAuth Endpoint HTTPS',
-      category: 'mcp',
-      severity: 'critical',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'All OAuth endpoints use HTTPS'
-        : `Found ${evidence.length} OAuth endpoint(s) using HTTP instead of HTTPS`,
-      evidence: evidence.length > 0 ? evidence : undefined,
+    return h.fromEvidence(evidence, {
+      passed: 'All OAuth endpoints use HTTPS',
+      failed: (n) => `Found ${n} OAuth endpoint(s) using HTTP instead of HTTPS`,
       fixable: evidence.length > 0,
       fixDescription: 'Change all OAuth endpoint URLs from http:// to https://',
-    };
+    });
   },
-};
+});

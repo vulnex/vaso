@@ -1,4 +1,5 @@
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 
 const DANGEROUS_SCOPE_PATTERNS = [
   { pattern: /scope['":\s]*['"]?\*['"]?/i, detail: 'Wildcard scope — grants unrestricted access' },
@@ -10,7 +11,7 @@ const DANGEROUS_SCOPE_PATTERNS = [
 
 const MAX_SCOPE_COUNT = 10;
 
-export const mcp017: CheckModule = {
+export const mcp017 = defineCheck({
   id: 'MCP-017',
   name: 'Overly Broad OAuth Scopes',
   category: 'mcp',
@@ -18,7 +19,7 @@ export const mcp017: CheckModule = {
   description: 'Detect wildcard scopes, excessive scope lists, and full-access patterns in OAuth configurations',
   supportedAgents: ['mcp'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence: Evidence[] = [];
     const mcpConfigs = ctx.mcpConfigs ?? [];
     const mcpServerSources = ctx.mcpServerSources ?? [];
@@ -96,18 +97,11 @@ export const mcp017: CheckModule = {
       }
     }
 
-    return {
-      id: 'MCP-017',
-      name: 'Overly Broad OAuth Scopes',
-      category: 'mcp',
-      severity: 'warning',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'OAuth scopes follow principle of least privilege'
-        : `Found ${evidence.length} overly broad OAuth scope pattern(s)`,
-      evidence: evidence.length > 0 ? evidence : undefined,
+    return h.fromEvidence(evidence, {
+      passed: 'OAuth scopes follow principle of least privilege',
+      failed: (n) => `Found ${n} overly broad OAuth scope pattern(s)`,
       fixable: false,
       fixDescription: 'Request only the minimum scopes needed; avoid wildcards and admin scopes',
-    };
+    });
   },
-};
+});

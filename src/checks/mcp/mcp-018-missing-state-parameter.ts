@@ -1,4 +1,5 @@
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 
 const AUTHORIZE_URL_PATTERN = /\/authorize|\/authorization/;
 const STATE_PARAM_PATTERN = /state/;
@@ -20,7 +21,7 @@ const URL_CONSTRUCTION_PATTERN = /[?&]|URLSearchParams|\.search|\.href|redirect\
 
 const SEARCH_RADIUS = 15;
 
-export const mcp018: CheckModule = {
+export const mcp018 = defineCheck({
   id: 'MCP-018',
   name: 'Missing State Parameter',
   category: 'mcp',
@@ -28,7 +29,7 @@ export const mcp018: CheckModule = {
   description: 'Detect OAuth authorization flows without state/CSRF protection or with static state values',
   supportedAgents: ['mcp'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence: Evidence[] = [];
     const mcpServerSources = ctx.mcpServerSources ?? [];
 
@@ -104,16 +105,9 @@ export const mcp018: CheckModule = {
       }
     }
 
-    return {
-      id: 'MCP-018',
-      name: 'Missing State Parameter',
-      category: 'mcp',
-      severity: 'warning',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'OAuth flows properly implement state/CSRF protection'
-        : `Found ${evidence.length} OAuth flow(s) without proper state/CSRF protection`,
-      evidence: evidence.length > 0 ? evidence : undefined,
-    };
+    return h.fromEvidence(evidence, {
+      passed: 'OAuth flows properly implement state/CSRF protection',
+      failed: (n) => `Found ${n} OAuth flow(s) without proper state/CSRF protection`,
+    });
   },
-};
+});
