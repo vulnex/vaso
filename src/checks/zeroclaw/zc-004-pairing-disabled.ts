@@ -1,8 +1,8 @@
-import type { CheckModule, ScanContext, CheckResult, FixResult } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { getNestedValue } from '../../core/utils.js';
 import { updateTomlFile } from '../../remediation/config-writer.js';
 
-export const zc004: CheckModule = {
+export const zc004 = defineCheck({
   id: 'ZC-004',
   name: 'Pairing Disabled',
   category: 'zeroclaw',
@@ -10,7 +10,7 @@ export const zc004: CheckModule = {
   description: 'Detect require_pairing=false which allows unauthenticated device connections',
   supportedAgents: ['zeroclaw'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence = [];
 
     for (const config of ctx.configs) {
@@ -26,22 +26,15 @@ export const zc004: CheckModule = {
       }
     }
 
-    return {
-      id: 'ZC-004',
-      name: 'Pairing Disabled',
-      category: 'zeroclaw',
-      severity: 'warning',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'Device pairing is required'
-        : 'Device pairing is disabled — unauthenticated connections allowed',
-      evidence: evidence.length > 0 ? evidence : undefined,
+    return h.fromEvidence(evidence, {
+      passed: 'Device pairing is required',
+      failed: () => 'Device pairing is disabled — unauthenticated connections allowed',
       fixable: true,
       fixDescription: 'Set require_pairing=true to enforce device authentication',
-    };
+    });
   },
 
-  async fix(ctx: ScanContext): Promise<FixResult> {
+  async fix(ctx) {
     for (const config of ctx.configs) {
       if (config.format === 'toml') {
         await updateTomlFile(config.filePath, 'require_pairing', true);
@@ -50,4 +43,4 @@ export const zc004: CheckModule = {
     }
     return { checkId: 'ZC-004', applied: false, message: 'No TOML config file found' };
   },
-};
+});

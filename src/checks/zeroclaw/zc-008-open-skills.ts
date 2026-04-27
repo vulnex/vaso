@@ -1,4 +1,4 @@
-import type { CheckModule, ScanContext, CheckResult, FixResult } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { getNestedValue } from '../../core/utils.js';
 import { updateTomlFile } from '../../remediation/config-writer.js';
 
@@ -10,7 +10,7 @@ const PUBLIC_URL_PATTERNS = [
   /https?:\/\/.*\.git$/,
 ];
 
-export const zc008: CheckModule = {
+export const zc008 = defineCheck({
   id: 'ZC-008',
   name: 'Open Skills',
   category: 'zeroclaw',
@@ -18,7 +18,7 @@ export const zc008: CheckModule = {
   description: 'Detect open skills enabled — skills installed from public repos via git clone',
   supportedAgents: ['zeroclaw'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence = [];
 
     for (const config of ctx.configs) {
@@ -50,22 +50,15 @@ export const zc008: CheckModule = {
       }
     }
 
-    return {
-      id: 'ZC-008',
-      name: 'Open Skills',
-      category: 'zeroclaw',
-      severity: 'warning',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'Open skill installation is not enabled'
-        : `Found ${evidence.length} open skill configuration(s) — unvetted code may be installed`,
-      evidence: evidence.length > 0 ? evidence : undefined,
+    return h.fromEvidence(evidence, {
+      passed: 'Open skill installation is not enabled',
+      failed: (n) => `Found ${n} open skill configuration(s) — unvetted code may be installed`,
       fixable: true,
       fixDescription: 'Set skills.open_install=false and restrict skills.sources to trusted private repositories',
-    };
+    });
   },
 
-  async fix(ctx: ScanContext): Promise<FixResult> {
+  async fix(ctx) {
     for (const config of ctx.configs) {
       if (config.format === 'toml') {
         await updateTomlFile(config.filePath, 'skills.open_install', false);
@@ -74,4 +67,4 @@ export const zc008: CheckModule = {
     }
     return { checkId: 'ZC-008', applied: false, message: 'No TOML config file found' };
   },
-};
+});

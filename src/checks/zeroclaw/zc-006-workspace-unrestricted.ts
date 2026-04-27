@@ -1,8 +1,8 @@
-import type { CheckModule, ScanContext, CheckResult, FixResult } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { getNestedValue } from '../../core/utils.js';
 import { updateTomlFile } from '../../remediation/config-writer.js';
 
-export const zc006: CheckModule = {
+export const zc006 = defineCheck({
   id: 'ZC-006',
   name: 'Workspace Unrestricted',
   category: 'zeroclaw',
@@ -10,7 +10,7 @@ export const zc006: CheckModule = {
   description: 'Detect workspace_only=false which allows filesystem access beyond workspace',
   supportedAgents: ['zeroclaw'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence = [];
 
     for (const config of ctx.configs) {
@@ -26,22 +26,15 @@ export const zc006: CheckModule = {
       }
     }
 
-    return {
-      id: 'ZC-006',
-      name: 'Workspace Unrestricted',
-      category: 'zeroclaw',
-      severity: 'warning',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'Filesystem access is restricted to workspace'
-        : 'Filesystem access is unrestricted — agent can access files outside workspace',
-      evidence: evidence.length > 0 ? evidence : undefined,
+    return h.fromEvidence(evidence, {
+      passed: 'Filesystem access is restricted to workspace',
+      failed: () => 'Filesystem access is unrestricted — agent can access files outside workspace',
       fixable: true,
       fixDescription: 'Set workspace_only=true to restrict filesystem access to the workspace directory',
-    };
+    });
   },
 
-  async fix(ctx: ScanContext): Promise<FixResult> {
+  async fix(ctx) {
     for (const config of ctx.configs) {
       if (config.format === 'toml') {
         await updateTomlFile(config.filePath, 'workspace_only', true);
@@ -50,4 +43,4 @@ export const zc006: CheckModule = {
     }
     return { checkId: 'ZC-006', applied: false, message: 'No TOML config file found' };
   },
-};
+});

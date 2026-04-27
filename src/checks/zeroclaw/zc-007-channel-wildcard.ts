@@ -1,7 +1,7 @@
-import type { CheckModule, ScanContext, CheckResult, FixResult } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { getNestedValue } from '../../core/utils.js';
 
-export const zc007: CheckModule = {
+export const zc007 = defineCheck({
   id: 'ZC-007',
   name: 'Channel Wildcard Users',
   category: 'zeroclaw',
@@ -9,7 +9,7 @@ export const zc007: CheckModule = {
   description: 'Detect "*" in allowed_users for any channel, granting unrestricted access',
   supportedAgents: ['zeroclaw'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence = [];
 
     for (const config of ctx.configs) {
@@ -31,22 +31,15 @@ export const zc007: CheckModule = {
       }
     }
 
-    return {
-      id: 'ZC-007',
-      name: 'Channel Wildcard Users',
-      category: 'zeroclaw',
-      severity: 'critical',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'No channels have wildcard allowed_users'
-        : `Found ${evidence.length} channel(s) with wildcard allowed_users`,
-      evidence: evidence.length > 0 ? evidence : undefined,
+    return h.fromEvidence(evidence, {
+      passed: 'No channels have wildcard allowed_users',
+      failed: (n) => `Found ${n} channel(s) with wildcard allowed_users`,
       fixable: true,
       fixDescription: 'Replace "*" in allowed_users with explicit user identifiers',
-    };
+    });
   },
 
-  async fix(_ctx: ScanContext): Promise<FixResult> {
+  async fix() {
     return { checkId: 'ZC-007', applied: false, message: 'Manual action required: replace "*" in allowed_users with specific user identifiers for each channel' };
   },
-};
+});
