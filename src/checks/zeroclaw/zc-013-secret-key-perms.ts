@@ -1,8 +1,8 @@
 import { join } from 'node:path';
-import type { CheckModule, ScanContext, CheckResult, FixResult } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { chmodFile } from '../../remediation/config-writer.js';
 
-export const zc013: CheckModule = {
+export const zc013 = defineCheck({
   id: 'ZC-013',
   name: '.secret_key Permissions',
   category: 'zeroclaw',
@@ -11,7 +11,7 @@ export const zc013: CheckModule = {
   supportedAgents: ['zeroclaw'],
   supportedPlatforms: ['linux', 'darwin'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence = [];
     const keyPath = join(ctx.installation.installDir, '.secret_key');
     try {
@@ -23,25 +23,17 @@ export const zc013: CheckModule = {
           detail: `File permissions are ${mode.toString(8)} — should be 600`,
         });
       }
-    } catch {
-      // File doesn't exist — not a finding
-    }
-    return {
-      id: 'ZC-013',
-      name: '.secret_key Permissions',
-      category: 'zeroclaw',
-      severity: 'critical',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? '.secret_key has appropriate permissions'
-        : '.secret_key has overly permissive file permissions',
-      evidence: evidence.length > 0 ? evidence : undefined,
+    } catch {}
+
+    return h.fromEvidence(evidence, {
+      passed: '.secret_key has appropriate permissions',
+      failed: () => '.secret_key has overly permissive file permissions',
       fixable: true,
       fixDescription: 'Run: chmod 600 ~/.zeroclaw/.secret_key',
-    };
+    });
   },
 
-  async fix(ctx: ScanContext): Promise<FixResult> {
+  async fix(ctx) {
     const keyPath = join(ctx.installation.installDir, '.secret_key');
     try {
       await chmodFile(keyPath, 0o600);
@@ -50,4 +42,4 @@ export const zc013: CheckModule = {
       return { checkId: 'ZC-013', applied: false, message: 'Failed to set permissions on .secret_key' };
     }
   },
-};
+});

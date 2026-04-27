@@ -1,7 +1,7 @@
-import type { CheckModule, ScanContext, CheckResult, FixResult } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { getNestedValue } from '../../core/utils.js';
 
-export const zc009: CheckModule = {
+export const zc009 = defineCheck({
   id: 'ZC-009',
   name: 'WhatsApp No App Secret',
   category: 'zeroclaw',
@@ -9,7 +9,7 @@ export const zc009: CheckModule = {
   description: 'Detect WhatsApp channel enabled without app_secret — webhooks accepted without HMAC verification',
   supportedAgents: ['zeroclaw'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence = [];
 
     for (const config of ctx.configs) {
@@ -31,22 +31,15 @@ export const zc009: CheckModule = {
       }
     }
 
-    return {
-      id: 'ZC-009',
-      name: 'WhatsApp No App Secret',
-      category: 'zeroclaw',
-      severity: 'warning',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'WhatsApp channel has app_secret configured or is not enabled'
-        : 'WhatsApp channel lacks app_secret — webhooks accepted without signature verification',
-      evidence: evidence.length > 0 ? evidence : undefined,
+    return h.fromEvidence(evidence, {
+      passed: 'WhatsApp channel has app_secret configured or is not enabled',
+      failed: () => 'WhatsApp channel lacks app_secret — webhooks accepted without signature verification',
       fixable: true,
       fixDescription: 'Set channels.whatsapp.app_secret to your WhatsApp app secret for HMAC webhook verification',
-    };
+    });
   },
 
-  async fix(_ctx: ScanContext): Promise<FixResult> {
+  async fix() {
     return { checkId: 'ZC-009', applied: false, message: 'Manual action required: set channels.whatsapp.app_secret to your WhatsApp app secret for HMAC webhook verification' };
   },
-};
+});

@@ -1,8 +1,8 @@
-import type { CheckModule, ScanContext, CheckResult, FixResult } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 
 const XOR_CIPHER_PATTERN = /\benc:[A-Za-z0-9+\/=]+/g;
 
-export const zc002: CheckModule = {
+export const zc002 = defineCheck({
   id: 'ZC-002',
   name: 'XOR Encryption',
   category: 'zeroclaw',
@@ -10,7 +10,7 @@ export const zc002: CheckModule = {
   description: 'Detect values using legacy XOR cipher (enc: prefix), which is trivially reversible',
   supportedAgents: ['zeroclaw'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence = [];
 
     for (const config of ctx.configs) {
@@ -30,22 +30,15 @@ export const zc002: CheckModule = {
       }
     }
 
-    return {
-      id: 'ZC-002',
-      name: 'XOR Encryption',
-      category: 'zeroclaw',
-      severity: 'critical',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'No legacy XOR-encrypted values found'
-        : `Found ${evidence.length} value(s) using trivially reversible XOR cipher`,
-      evidence: evidence.length > 0 ? evidence : undefined,
+    return h.fromEvidence(evidence, {
+      passed: 'No legacy XOR-encrypted values found',
+      failed: (n) => `Found ${n} value(s) using trivially reversible XOR cipher`,
       fixable: true,
       fixDescription: 'Re-encrypt secrets using zeroclaw secrets encrypt with AES-256',
-    };
+    });
   },
 
-  async fix(_ctx: ScanContext): Promise<FixResult> {
+  async fix() {
     return { checkId: 'ZC-002', applied: false, message: 'Manual action required: re-encrypt secrets using "zeroclaw secrets encrypt" with AES-256 to replace XOR-encrypted values' };
   },
-};
+});

@@ -1,7 +1,7 @@
-import type { CheckModule, ScanContext, CheckResult } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { getNestedValue } from '../../core/utils.js';
 
-export const zc010: CheckModule = {
+export const zc010 = defineCheck({
   id: 'ZC-010',
   name: 'Composio Integration Enabled',
   category: 'zeroclaw',
@@ -9,7 +9,7 @@ export const zc010: CheckModule = {
   description: 'Detect Composio integration enabled — grants access to 1000+ OAuth apps, large attack surface',
   supportedAgents: ['zeroclaw'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence = [];
 
     for (const config of ctx.configs) {
@@ -23,16 +23,9 @@ export const zc010: CheckModule = {
       }
     }
 
-    return {
-      id: 'ZC-010',
-      name: 'Composio Integration Enabled',
-      category: 'zeroclaw',
-      severity: 'info',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'Composio integration is not enabled'
-        : 'Composio integration is enabled — large OAuth attack surface',
-      evidence: evidence.length > 0 ? evidence : undefined,
-    };
+    return h.fromEvidence(evidence, {
+      passed: 'Composio integration is not enabled',
+      failed: () => 'Composio integration is enabled — large OAuth attack surface',
+    });
   },
-};
+});

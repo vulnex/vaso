@@ -1,8 +1,8 @@
-import type { CheckModule, ScanContext, CheckResult, FixResult } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { getNestedValue } from '../../core/utils.js';
 import { updateTomlFile } from '../../remediation/config-writer.js';
 
-export const zc005: CheckModule = {
+export const zc005 = defineCheck({
   id: 'ZC-005',
   name: 'Full Autonomy Mode',
   category: 'zeroclaw',
@@ -10,7 +10,7 @@ export const zc005: CheckModule = {
   description: 'Detect autonomy.level=full which bypasses all approval gates for tool execution',
   supportedAgents: ['zeroclaw'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence = [];
 
     for (const config of ctx.configs) {
@@ -24,22 +24,15 @@ export const zc005: CheckModule = {
       }
     }
 
-    return {
-      id: 'ZC-005',
-      name: 'Full Autonomy Mode',
-      category: 'zeroclaw',
-      severity: 'critical',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'Autonomy level is not set to full'
-        : 'Full autonomy mode enabled — all approval gates bypassed',
-      evidence: evidence.length > 0 ? evidence : undefined,
+    return h.fromEvidence(evidence, {
+      passed: 'Autonomy level is not set to full',
+      failed: () => 'Full autonomy mode enabled — all approval gates bypassed',
       fixable: true,
       fixDescription: 'Set autonomy.level to "supervised" or "restricted" to require approval for tool execution',
-    };
+    });
   },
 
-  async fix(ctx: ScanContext): Promise<FixResult> {
+  async fix(ctx) {
     for (const config of ctx.configs) {
       if (config.format === 'toml') {
         await updateTomlFile(config.filePath, 'autonomy.level', 'supervised');
@@ -48,4 +41,4 @@ export const zc005: CheckModule = {
     }
     return { checkId: 'ZC-005', applied: false, message: 'No TOML config file found' };
   },
-};
+});

@@ -1,8 +1,8 @@
-import type { CheckModule, ScanContext, CheckResult, FixResult } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { getNestedValue } from '../../core/utils.js';
 import { updateTomlFile } from '../../remediation/config-writer.js';
 
-export const zc003: CheckModule = {
+export const zc003 = defineCheck({
   id: 'ZC-003',
   name: 'Public Bind Without Tunnel',
   category: 'zeroclaw',
@@ -10,7 +10,7 @@ export const zc003: CheckModule = {
   description: 'Detect allow_public_bind=true combined with no tunnel provider configured',
   supportedAgents: ['zeroclaw'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence = [];
 
     for (const config of ctx.configs) {
@@ -28,22 +28,15 @@ export const zc003: CheckModule = {
       }
     }
 
-    return {
-      id: 'ZC-003',
-      name: 'Public Bind Without Tunnel',
-      category: 'zeroclaw',
-      severity: 'critical',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'Public bind is disabled or a tunnel provider is configured'
-        : 'Server is directly exposed — public bind enabled without tunnel',
-      evidence: evidence.length > 0 ? evidence : undefined,
+    return h.fromEvidence(evidence, {
+      passed: 'Public bind is disabled or a tunnel provider is configured',
+      failed: () => 'Server is directly exposed — public bind enabled without tunnel',
       fixable: true,
       fixDescription: 'Set tunnel.provider to a supported provider (e.g., cloudflare, ngrok) or disable allow_public_bind',
-    };
+    });
   },
 
-  async fix(ctx: ScanContext): Promise<FixResult> {
+  async fix(ctx) {
     for (const config of ctx.configs) {
       if (config.format === 'toml') {
         await updateTomlFile(config.filePath, 'security.allow_public_bind', false);
@@ -52,4 +45,4 @@ export const zc003: CheckModule = {
     }
     return { checkId: 'ZC-003', applied: false, message: 'No TOML config file found' };
   },
-};
+});

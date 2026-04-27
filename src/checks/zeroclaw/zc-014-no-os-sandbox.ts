@@ -1,10 +1,10 @@
-import type { CheckModule, ScanContext, CheckResult, FixResult } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { getNestedValue } from '../../core/utils.js';
 import { updateTomlFile } from '../../remediation/config-writer.js';
 
 const KNOWN_SANDBOXES = ['firejail', 'bubblewrap', 'bwrap', 'landlock', 'docker', 'podman', 'nsjail'];
 
-export const zc014: CheckModule = {
+export const zc014 = defineCheck({
   id: 'ZC-014',
   name: 'No OS Sandbox',
   category: 'zeroclaw',
@@ -12,7 +12,7 @@ export const zc014: CheckModule = {
   description: 'Detect runtime.kind=native without OS-level sandboxing (Firejail, Bubblewrap, Landlock)',
   supportedAgents: ['zeroclaw'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence = [];
 
     for (const config of ctx.configs) {
@@ -33,22 +33,15 @@ export const zc014: CheckModule = {
       }
     }
 
-    return {
-      id: 'ZC-014',
-      name: 'No OS Sandbox',
-      category: 'zeroclaw',
-      severity: 'warning',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'Runtime has OS-level sandboxing or is not running in native mode'
-        : 'Native runtime without OS-level sandboxing — process isolation is missing',
-      evidence: evidence.length > 0 ? evidence : undefined,
+    return h.fromEvidence(evidence, {
+      passed: 'Runtime has OS-level sandboxing or is not running in native mode',
+      failed: () => 'Native runtime without OS-level sandboxing — process isolation is missing',
       fixable: true,
       fixDescription: 'Set runtime.sandbox to a supported sandbox (firejail, bubblewrap, landlock) or use runtime.kind=docker',
-    };
+    });
   },
 
-  async fix(ctx: ScanContext): Promise<FixResult> {
+  async fix(ctx) {
     for (const config of ctx.configs) {
       if (config.format === 'toml') {
         await updateTomlFile(config.filePath, 'runtime.sandbox', 'firejail');
@@ -57,4 +50,4 @@ export const zc014: CheckModule = {
     }
     return { checkId: 'ZC-014', applied: false, message: 'No TOML config file found' };
   },
-};
+});

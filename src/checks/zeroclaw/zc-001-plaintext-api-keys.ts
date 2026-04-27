@@ -1,9 +1,9 @@
-import type { CheckModule, ScanContext, CheckResult, FixResult } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { getNestedValue } from '../../core/utils.js';
 import { API_KEY_PATTERNS } from '../../core/patterns.js';
 import { updateTomlFile } from '../../remediation/config-writer.js';
 
-export const zc001: CheckModule = {
+export const zc001 = defineCheck({
   id: 'ZC-001',
   name: 'Plaintext API Keys',
   category: 'zeroclaw',
@@ -11,14 +11,13 @@ export const zc001: CheckModule = {
   description: 'Detect secrets.encrypt=false with API keys present in config',
   supportedAgents: ['zeroclaw'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence = [];
 
     for (const config of ctx.configs) {
       const encrypt = getNestedValue(config.data, 'secrets.encrypt');
 
       if (encrypt === false || encrypt === 'false') {
-        // Encryption is disabled — scan raw content for API key patterns
         for (const { pattern, name } of API_KEY_PATTERNS) {
           const matches = config.raw.match(pattern);
           if (matches) {
@@ -29,7 +28,6 @@ export const zc001: CheckModule = {
           }
         }
 
-        // If no specific key pattern matched but encryption is still off, flag it
         if (!evidence.some(e => e.file === config.filePath)) {
           evidence.push({
             file: config.filePath,
@@ -39,22 +37,15 @@ export const zc001: CheckModule = {
       }
     }
 
-    return {
-      id: 'ZC-001',
-      name: 'Plaintext API Keys',
-      category: 'zeroclaw',
-      severity: 'critical',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'Secret encryption is enabled or no API keys found'
-        : `Found ${evidence.length} config(s) with plaintext API keys`,
-      evidence: evidence.length > 0 ? evidence : undefined,
+    return h.fromEvidence(evidence, {
+      passed: 'Secret encryption is enabled or no API keys found',
+      failed: (n) => `Found ${n} config(s) with plaintext API keys`,
       fixable: true,
       fixDescription: 'Set secrets.encrypt=true and re-encrypt API keys using zeroclaw secrets encrypt',
-    };
+    });
   },
 
-  async fix(ctx: ScanContext): Promise<FixResult> {
+  async fix(ctx) {
     for (const config of ctx.configs) {
       if (config.format === 'toml') {
         await updateTomlFile(config.filePath, 'secrets.encrypt', true);
@@ -63,4 +54,4 @@ export const zc001: CheckModule = {
     }
     return { checkId: 'ZC-001', applied: false, message: 'No TOML config file found' };
   },
-};
+});

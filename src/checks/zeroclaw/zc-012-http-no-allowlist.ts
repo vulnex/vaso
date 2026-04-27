@@ -1,7 +1,7 @@
-import type { CheckModule, ScanContext, CheckResult, FixResult } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { getNestedValue } from '../../core/utils.js';
 
-export const zc012: CheckModule = {
+export const zc012 = defineCheck({
   id: 'ZC-012',
   name: 'HTTP Tool No Allowlist',
   category: 'zeroclaw',
@@ -9,7 +9,7 @@ export const zc012: CheckModule = {
   description: 'Detect HTTP request tool enabled without domain restrictions',
   supportedAgents: ['zeroclaw'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence = [];
 
     for (const config of ctx.configs) {
@@ -26,22 +26,15 @@ export const zc012: CheckModule = {
       }
     }
 
-    return {
-      id: 'ZC-012',
-      name: 'HTTP Tool No Allowlist',
-      category: 'zeroclaw',
-      severity: 'warning',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'HTTP tool has domain restrictions or is not enabled'
-        : 'HTTP tool enabled without domain allowlist — unrestricted outbound requests',
-      evidence: evidence.length > 0 ? evidence : undefined,
+    return h.fromEvidence(evidence, {
+      passed: 'HTTP tool has domain restrictions or is not enabled',
+      failed: () => 'HTTP tool enabled without domain allowlist — unrestricted outbound requests',
       fixable: true,
       fixDescription: 'Set tools.http.allowed_domains to a list of trusted domains',
-    };
+    });
   },
 
-  async fix(_ctx: ScanContext): Promise<FixResult> {
+  async fix() {
     return { checkId: 'ZC-012', applied: false, message: 'Manual action required: set tools.http.allowed_domains to a list of trusted domains' };
   },
-};
+});
