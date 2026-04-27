@@ -1,24 +1,23 @@
 import { createHash } from 'node:crypto';
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { getIOCDatabase } from '../../ioc/database.js';
 import { getSkillFiles } from '../../core/utils.js';
 
-export const ioc003: CheckModule = {
+export const ioc003 = defineCheck({
   id: 'IOC-003',
   name: 'File Hash Match',
   category: 'ioc',
   severity: 'critical',
   description: 'SHA-256 hash skill files and compare against known malicious hashes',
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence: Evidence[] = [];
     const db = getIOCDatabase();
     const hashSet = new Set(db.fileHashes);
     const skillsDir = ctx.installation.skillsDir;
 
-    if (!skillsDir) {
-      return { id: 'IOC-003', name: 'File Hash Match', category: 'ioc', severity: 'critical', passed: true, message: 'No skills directory found' };
-    }
+    if (!skillsDir) return h.passed('No skills directory found');
 
     const files = await getSkillFiles(skillsDir);
 
@@ -36,16 +35,9 @@ export const ioc003: CheckModule = {
       } catch {}
     }
 
-    return {
-      id: 'IOC-003',
-      name: 'File Hash Match',
-      category: 'ioc',
-      severity: 'critical',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'No known malicious file hashes found'
-        : `Found ${evidence.length} file(s) matching known malicious hashes`,
-      evidence: evidence.length > 0 ? evidence : undefined,
-    };
+    return h.fromEvidence(evidence, {
+      passed: 'No known malicious file hashes found',
+      failed: (n) => `Found ${n} file(s) matching known malicious hashes`,
+    });
   },
-};
+});
