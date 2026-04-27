@@ -10,7 +10,7 @@ import type { CheckModule } from '../core/types.js';
 import type { AgentAdapter } from '../adapters/adapter.js';
 import type { Reporter } from '../reporting/reporter.js';
 
-const VERSION = '0.1.0';
+const VERSION = '0.2.0';
 
 let loadedPlugins: LoadedPlugin[] = [];
 

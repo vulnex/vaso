@@ -1,6 +1,6 @@
 {
   "name": "vaso",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "VULNEX Agent Security Observer — agent-agnostic security scanner for AI agent deployments",
   "type": "module",
   "main": "dist/cli.js",
@@ -29,6 +29,11 @@
     "ironclaw",
     "nanobot",
     "zeroclaw",
+    "nemoclaw",
+    "hermes",
+    "claude-code",
+    "codex",
+    "mcp",
     "vulnerability"
   ],
   "author": "VULNEX",

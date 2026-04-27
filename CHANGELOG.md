@@ -6,6 +6,8 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-04-27
+
 ### Added
 
 #### Network Scanning — FSProvider Abstraction (Phase A)
@@ -526,4 +528,5 @@ Initial release of VASO with full scan engine, 39 security checks, 3 agent adapt
 - 158 tests across 17 test files
 - Coverage: core engine, scoring, config loader, check registry, all 15 config checks, 10 MCP checks, MCP discovery, MCP command, AST analyzer, pattern engine, entropy analyzer, IOC database, typosquatting, SARIF output, markdown output, baseline diffing, detect command
 
+[0.2.0]: https://github.com/vulnex/vaso/releases/tag/v0.2.0
 [0.1.0]: https://github.com/vulnex/vaso/releases/tag/v0.1.0
