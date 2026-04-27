@@ -20,6 +20,8 @@ import { loadUserPlugins } from './user-plugins/loader.js';
 import { loadAndRegisterRules } from './rules/index.js';
 import { checkRegistry } from './core/check-registry.js';
 import { setDebug } from './core/debug.js';
+import { assertZoneGraphsValid } from './core/zone-graph-validator.js';
+import { defaultZoneGraph } from './core/default-zone-graph.js';
 
 const VERSION = '0.2.1';
 
@@ -50,6 +52,7 @@ adapterRegistry.register(hermesAdapter);
 adapterRegistry.register(claudeCodeAdapter);
 adapterRegistry.register(codexAdapter);
 registerAllChecks();
+assertZoneGraphsValid(adapterRegistry, checkRegistry, defaultZoneGraph);
 
 const program = new Command();
 

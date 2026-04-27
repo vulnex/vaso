@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import type { AgentAdapter, DetectOptions } from './adapter.js';
-import type { AgentInstallation, GatewayInfo } from '../core/types.js';
+import type { AgentInstallation, GatewayInfo, ZoneGraph } from '../core/types.js';
 import type { ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
@@ -133,6 +133,49 @@ export const codexAdapter: AgentAdapter = {
       envPrefixes: ['CODEX_', 'OPENAI_'],
       systemPaths: SYSTEM_CLI_PATHS,
       systemDirListings: [],
+    };
+  },
+
+  getZoneGraph(): ZoneGraph {
+    return {
+      zones: [
+        { id: 'net', label: 'Network', trustLevel: 0 },
+        { id: 'mcp', label: 'MCP Transport', trustLevel: 1 },
+        { id: 'sbx', label: 'Sandbox Mode', trustLevel: 2 },
+        { id: 'host', label: 'Host FS', trustLevel: 3 },
+      ],
+      components: [
+        { id: 'inbound', label: 'Network / Remote MCP', zone: 'net' },
+        {
+          id: 'mcp-transport',
+          label: 'MCP Transport',
+          zone: 'mcp',
+          guardCheckIds: ['CDX-004'],
+        },
+        {
+          id: 'sandbox',
+          label: 'Sandbox Mode (read/workspace/danger)',
+          zone: 'sbx',
+          guardCheckIds: ['CDX-001', 'CDX-002', 'CDX-005', 'CDX-006', 'CDX-008'],
+        },
+        {
+          id: 'fs',
+          label: 'Host Filesystem',
+          zone: 'host',
+          guardCheckIds: ['CDX-003', 'CDX-007', 'CDX-009'],
+        },
+      ],
+      edges: [
+        { from: 'inbound', to: 'mcp-transport', kind: 'data' },
+        { from: 'mcp-transport', to: 'sandbox', kind: 'control' },
+        { from: 'sandbox', to: 'fs', kind: 'data' },
+        {
+          from: 'inbound',
+          to: 'fs',
+          label: 'sandbox bypass',
+          triggerCheckIds: ['CDX-001', 'CDX-002'],
+        },
+      ],
     };
   },
 };

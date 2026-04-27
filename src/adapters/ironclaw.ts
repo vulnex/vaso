@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import type { AgentAdapter, DetectOptions } from './adapter.js';
-import type { AgentInstallation, GatewayInfo } from '../core/types.js';
+import type { AgentInstallation, GatewayInfo, ZoneGraph } from '../core/types.js';
 import type { ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
@@ -140,6 +140,49 @@ export const ironclawAdapter: AgentAdapter = {
       envPrefixes: ['IRONCLAW_', 'GATEWAY_'],
       systemPaths: [],
       systemDirListings: [],
+    };
+  },
+
+  getZoneGraph(): ZoneGraph {
+    return {
+      zones: [
+        { id: 'net', label: 'Network', trustLevel: 0 },
+        { id: 'gw', label: 'gRPC Gateway', trustLevel: 1 },
+        { id: 'sbx', label: 'Sandbox', trustLevel: 2 },
+        { id: 'host', label: 'Host FS', trustLevel: 3 },
+      ],
+      components: [
+        { id: 'inbound', label: 'Network Ingress', zone: 'net' },
+        {
+          id: 'gateway',
+          label: 'IronClaw gRPC Gateway',
+          zone: 'gw',
+          guardCheckIds: ['IC-001', 'IC-002', 'IC-003', 'IC-004', 'IC-010'],
+        },
+        {
+          id: 'sandbox',
+          label: 'Sandbox Boundary',
+          zone: 'sbx',
+          guardCheckIds: ['IC-005', 'IC-006', 'IC-011', 'IC-012'],
+        },
+        {
+          id: 'fs',
+          label: 'Host Filesystem',
+          zone: 'host',
+          guardCheckIds: ['IC-007', 'IC-008', 'IC-009'],
+        },
+      ],
+      edges: [
+        { from: 'inbound', to: 'gateway', kind: 'data' },
+        { from: 'gateway', to: 'sandbox', kind: 'control' },
+        { from: 'sandbox', to: 'fs', kind: 'data' },
+        {
+          from: 'inbound',
+          to: 'fs',
+          label: 'sandbox bypass',
+          triggerCheckIds: ['IC-005', 'IC-008'],
+        },
+      ],
     };
   },
 };
