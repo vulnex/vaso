@@ -1,6 +1,6 @@
-import type { CheckModule, ScanContext, CheckResult, FixResult } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 
-export const nb001: CheckModule = {
+export const nb001 = defineCheck({
   id: 'NB-001',
   name: 'Empty Channel allowFrom',
   category: 'nanobot',
@@ -8,7 +8,7 @@ export const nb001: CheckModule = {
   description: 'Check if any channel has an empty allowFrom list (no access control)',
   supportedAgents: ['nanobot'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence = [];
     for (const config of ctx.configs) {
       const channels = config.data.channels as Record<string, Record<string, unknown>> | undefined;
@@ -22,18 +22,15 @@ export const nb001: CheckModule = {
         }
       }
     }
-    return {
-      id: 'NB-001', name: 'Empty Channel allowFrom', category: 'nanobot',
-      severity: 'critical', passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'All channels have allowFrom configured'
-        : 'Channels with empty allowFrom detected — no access control',
-      evidence: evidence.length > 0 ? evidence : undefined,
-      fixable: true, fixDescription: 'Add allowed user IDs to channel allowFrom arrays',
-    };
+    return h.fromEvidence(evidence, {
+      passed: 'All channels have allowFrom configured',
+      failed: () => 'Channels with empty allowFrom detected — no access control',
+      fixable: true,
+      fixDescription: 'Add allowed user IDs to channel allowFrom arrays',
+    });
   },
 
-  async fix(_ctx: ScanContext): Promise<FixResult> {
+  async fix() {
     return { checkId: 'NB-001', applied: false, message: 'Manual action required: add specific user IDs to the allowFrom array for each channel' };
   },
-};
+});

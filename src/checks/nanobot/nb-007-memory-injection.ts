@@ -1,8 +1,8 @@
-import type { CheckModule, ScanContext, CheckResult } from '../../core/types.js';
-import { getNestedValue } from '../../core/utils.js';
 import { join } from 'node:path';
+import { defineCheck } from '../../core/check-builder.js';
+import { getNestedValue } from '../../core/utils.js';
 
-export const nb007: CheckModule = {
+export const nb007 = defineCheck({
   id: 'NB-007',
   name: 'MEMORY.md Prompt Injection',
   category: 'nanobot',
@@ -10,13 +10,12 @@ export const nb007: CheckModule = {
   description: 'Check if MEMORY.md is loaded into the system prompt — persistent prompt injection vector',
   supportedAgents: ['nanobot'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence = [];
     const installDir = ctx.installation.installDir;
     const memoryPath = join(installDir, 'MEMORY.md');
     const memoryExists = await ctx.fs.access(memoryPath);
 
-    // Check if memory feature is enabled in config
     let memoryEnabled = false;
     for (const config of ctx.configs) {
       const memoryConfig = getNestedValue(config.data, 'memory')
@@ -27,7 +26,6 @@ export const nb007: CheckModule = {
         memoryEnabled = true;
       }
 
-      // Check if MEMORY.md is referenced in system prompt includes
       const raw = config.raw;
       if (raw.includes('MEMORY.md') || raw.includes('memory.md')) {
         memoryEnabled = true;
@@ -58,14 +56,11 @@ export const nb007: CheckModule = {
       });
     }
 
-    return {
-      id: 'NB-007', name: 'MEMORY.md Prompt Injection', category: 'nanobot',
-      severity: 'critical', passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'No MEMORY.md prompt injection risk detected'
-        : 'MEMORY.md may be injected into system prompt — persistent prompt injection vector',
-      evidence: evidence.length > 0 ? evidence : undefined,
-      fixable: false, fixDescription: 'Restrict write access to MEMORY.md (chmod 400) and audit its contents regularly',
-    };
+    return h.fromEvidence(evidence, {
+      passed: 'No MEMORY.md prompt injection risk detected',
+      failed: () => 'MEMORY.md may be injected into system prompt — persistent prompt injection vector',
+      fixable: false,
+      fixDescription: 'Restrict write access to MEMORY.md (chmod 400) and audit its contents regularly',
+    });
   },
-};
+});

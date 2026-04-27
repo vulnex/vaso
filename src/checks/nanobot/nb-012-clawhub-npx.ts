@@ -1,7 +1,7 @@
-import type { CheckModule, ScanContext, CheckResult, FixResult } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { getNestedValue } from '../../core/utils.js';
 
-export const nb012: CheckModule = {
+export const nb012 = defineCheck({
   id: 'NB-012',
   name: 'npx Skill Installation',
   category: 'nanobot',
@@ -9,10 +9,9 @@ export const nb012: CheckModule = {
   description: 'Check if skills are installed via npx (supply chain risk from unverified packages)',
   supportedAgents: ['nanobot'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence = [];
     for (const config of ctx.configs) {
-      // Check skillSource config
       const skillSource = getNestedValue(config.data, 'skillSource')
         ?? getNestedValue(config.data, 'skills.source')
         ?? getNestedValue(config.data, 'skills.installMethod');
@@ -24,7 +23,6 @@ export const nb012: CheckModule = {
         });
       }
 
-      // Check for npx references in raw config
       const raw = config.raw;
       const npxPattern = /\bnpx\s+[@a-zA-Z0-9\-_/]+/g;
       const matches = raw.match(npxPattern);
@@ -38,7 +36,6 @@ export const nb012: CheckModule = {
         }
       }
 
-      // Check skills array/object for npx-based entries
       const skills = config.data.skills;
       if (skills && typeof skills === 'object') {
         const skillEntries = Array.isArray(skills)
@@ -58,18 +55,15 @@ export const nb012: CheckModule = {
         }
       }
     }
-    return {
-      id: 'NB-012', name: 'npx Skill Installation', category: 'nanobot',
-      severity: 'warning', passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'No npx-based skill installations found'
-        : `Found ${evidence.length} npx-based skill reference(s) — supply chain risk`,
-      evidence: evidence.length > 0 ? evidence : undefined,
-      fixable: true, fixDescription: 'Install skills locally with pinned versions instead of using npx for remote execution',
-    };
+    return h.fromEvidence(evidence, {
+      passed: 'No npx-based skill installations found',
+      failed: (n) => `Found ${n} npx-based skill reference(s) — supply chain risk`,
+      fixable: true,
+      fixDescription: 'Install skills locally with pinned versions instead of using npx for remote execution',
+    });
   },
 
-  async fix(_ctx: ScanContext): Promise<FixResult> {
+  async fix() {
     return { checkId: 'NB-012', applied: false, message: 'Manual action required: install skills locally with pinned versions instead of using npx for remote execution' };
   },
-};
+});

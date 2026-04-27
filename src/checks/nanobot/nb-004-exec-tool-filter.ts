@@ -1,10 +1,10 @@
-import type { CheckModule, ScanContext, CheckResult, FixResult } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { getNestedValue } from '../../core/utils.js';
 import { updateJsonFile } from '../../remediation/config-writer.js';
 
 const MIN_DENYLIST_LENGTH = 5;
 
-export const nb004: CheckModule = {
+export const nb004 = defineCheck({
   id: 'NB-004',
   name: 'Weak ExecTool Denylist',
   category: 'nanobot',
@@ -12,7 +12,7 @@ export const nb004: CheckModule = {
   description: 'Check if the ExecTool command denylist is missing, empty, or too short to be effective',
   supportedAgents: ['nanobot'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence = [];
     for (const config of ctx.configs) {
       const execTool = getNestedValue(config.data, 'tools.exec')
@@ -40,18 +40,15 @@ export const nb004: CheckModule = {
         });
       }
     }
-    return {
-      id: 'NB-004', name: 'Weak ExecTool Denylist', category: 'nanobot',
-      severity: 'critical', passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'ExecTool denylist is adequately configured'
-        : 'ExecTool has a missing or weak command denylist',
-      evidence: evidence.length > 0 ? evidence : undefined,
-      fixable: true, fixDescription: 'Add a comprehensive command denylist to ExecTool config (rm, curl, wget, chmod, chown, etc.)',
-    };
+    return h.fromEvidence(evidence, {
+      passed: 'ExecTool denylist is adequately configured',
+      failed: () => 'ExecTool has a missing or weak command denylist',
+      fixable: true,
+      fixDescription: 'Add a comprehensive command denylist to ExecTool config (rm, curl, wget, chmod, chown, etc.)',
+    });
   },
 
-  async fix(ctx: ScanContext): Promise<FixResult> {
+  async fix(ctx) {
     const denyList = ['rm', 'rmdir', 'mkfs', 'dd', 'curl', 'wget', 'nc', 'chmod', 'chown', 'kill', 'shutdown', 'reboot', 'passwd'];
     for (const config of ctx.configs) {
       if (config.format === 'json') {
@@ -61,4 +58,4 @@ export const nb004: CheckModule = {
     }
     return { checkId: 'NB-004', applied: false, message: 'No JSON config file found' };
   },
-};
+});

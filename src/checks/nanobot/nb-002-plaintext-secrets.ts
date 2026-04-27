@@ -1,4 +1,5 @@
-import type { CheckModule, ScanContext, CheckResult, Evidence, FixResult } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { API_KEY_PATTERNS } from '../../core/patterns.js';
 
 const PLACEHOLDER_HINTS = ['your-', 'xxx', 'placeholder', 'changeme', 'TODO', 'REPLACE', '<', 'example'];
@@ -8,7 +9,7 @@ function looksLikePlaceholder(value: string): boolean {
   return PLACEHOLDER_HINTS.some(hint => lower.includes(hint.toLowerCase()));
 }
 
-export const nb002: CheckModule = {
+export const nb002 = defineCheck({
   id: 'NB-002',
   name: 'Plaintext Secrets in Config',
   category: 'nanobot',
@@ -16,7 +17,7 @@ export const nb002: CheckModule = {
   description: 'Scan config files for plaintext API keys, tokens, and passwords',
   supportedAgents: ['nanobot'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence: Evidence[] = [];
 
     for (const config of ctx.configs) {
@@ -38,18 +39,15 @@ export const nb002: CheckModule = {
       }
     }
 
-    return {
-      id: 'NB-002', name: 'Plaintext Secrets in Config', category: 'nanobot',
-      severity: 'critical', passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'No plaintext secrets found in nanobot configs'
-        : `Found ${evidence.length} plaintext secret(s) in nanobot configs`,
-      evidence: evidence.length > 0 ? evidence : undefined,
-      fixable: true, fixDescription: 'Move secrets to environment variables or a secrets manager',
-    };
+    return h.fromEvidence(evidence, {
+      passed: 'No plaintext secrets found in nanobot configs',
+      failed: (n) => `Found ${n} plaintext secret(s) in nanobot configs`,
+      fixable: true,
+      fixDescription: 'Move secrets to environment variables or a secrets manager',
+    });
   },
 
-  async fix(_ctx: ScanContext): Promise<FixResult> {
+  async fix() {
     return { checkId: 'NB-002', applied: false, message: 'Manual action required: move plaintext secrets to environment variables or a secrets manager' };
   },
-};
+});

@@ -1,9 +1,9 @@
-import type { CheckModule, ScanContext, CheckResult, FixResult } from '../../core/types.js';
+import { join } from 'node:path';
+import { defineCheck } from '../../core/check-builder.js';
 import { getNestedValue } from '../../core/utils.js';
 import { updateJsonFile } from '../../remediation/config-writer.js';
-import { join } from 'node:path';
 
-export const nb009: CheckModule = {
+export const nb009 = defineCheck({
   id: 'NB-009',
   name: 'Unencrypted Session Files',
   category: 'nanobot',
@@ -11,11 +11,10 @@ export const nb009: CheckModule = {
   description: 'Check if session files (JSONL) exist without encryption configured',
   supportedAgents: ['nanobot'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence = [];
     const installDir = ctx.installation.installDir;
 
-    // Check if encryption is configured
     let encryptionEnabled = false;
     for (const config of ctx.configs) {
       const encryption = getNestedValue(config.data, 'sessions.encryption')
@@ -28,7 +27,6 @@ export const nb009: CheckModule = {
       }
     }
 
-    // Look for session files in common locations
     const sessionDirs = [
       join(installDir, 'sessions'),
       join(installDir, '.sessions'),
@@ -49,25 +47,18 @@ export const nb009: CheckModule = {
             });
           }
         }
-      } catch {
-        // Directory does not exist — skip
-      }
+      } catch {}
     }
 
-    return {
-      id: 'NB-009', name: 'Unencrypted Session Files', category: 'nanobot',
-      severity: 'warning', passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? sessionFilesFound
-          ? 'Session files found with encryption enabled'
-          : 'No session files found'
-        : 'Session files found without encryption — plaintext conversation history',
-      evidence: evidence.length > 0 ? evidence : undefined,
-      fixable: true, fixDescription: 'Enable session encryption in config: "sessions": { "encryption": true }',
-    };
+    return h.fromEvidence(evidence, {
+      passed: sessionFilesFound ? 'Session files found with encryption enabled' : 'No session files found',
+      failed: () => 'Session files found without encryption — plaintext conversation history',
+      fixable: true,
+      fixDescription: 'Enable session encryption in config: "sessions": { "encryption": true }',
+    });
   },
 
-  async fix(ctx: ScanContext): Promise<FixResult> {
+  async fix(ctx) {
     for (const config of ctx.configs) {
       if (config.format === 'json') {
         await updateJsonFile(config.filePath, 'sessions.encryption', true);
@@ -76,4 +67,4 @@ export const nb009: CheckModule = {
     }
     return { checkId: 'NB-009', applied: false, message: 'No JSON config file found' };
   },
-};
+});

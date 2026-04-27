@@ -1,6 +1,6 @@
-import type { CheckModule, ScanContext, CheckResult, FixResult } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 
-export const nb010: CheckModule = {
+export const nb010 = defineCheck({
   id: 'NB-010',
   name: 'Unrestricted Cron Channels',
   category: 'nanobot',
@@ -8,7 +8,7 @@ export const nb010: CheckModule = {
   description: 'Check if cron jobs can target any channel or recipient without restrictions',
   supportedAgents: ['nanobot'],
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
+  async run(ctx, h) {
     const evidence = [];
     for (const config of ctx.configs) {
       const cron = config.data.cron ?? config.data.cronJobs ?? config.data.scheduledTasks;
@@ -35,18 +35,15 @@ export const nb010: CheckModule = {
         }
       }
     }
-    return {
-      id: 'NB-010', name: 'Unrestricted Cron Channels', category: 'nanobot',
-      severity: 'warning', passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'All cron jobs have channel/recipient restrictions'
-        : 'Cron job(s) found that can target any channel without restrictions',
-      evidence: evidence.length > 0 ? evidence : undefined,
-      fixable: true, fixDescription: 'Set explicit channel and recipient restrictions for each cron job',
-    };
+    return h.fromEvidence(evidence, {
+      passed: 'All cron jobs have channel/recipient restrictions',
+      failed: () => 'Cron job(s) found that can target any channel without restrictions',
+      fixable: true,
+      fixDescription: 'Set explicit channel and recipient restrictions for each cron job',
+    });
   },
 
-  async fix(_ctx: ScanContext): Promise<FixResult> {
+  async fix() {
     return { checkId: 'NB-010', applied: false, message: 'Manual action required: set explicit channel and recipient restrictions for each cron job' };
   },
-};
+});
