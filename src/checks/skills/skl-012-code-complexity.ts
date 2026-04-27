@@ -1,6 +1,7 @@
 import { parse } from '@babel/parser';
 import _traverse from '@babel/traverse';
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { getSkillFiles } from '../../core/utils.js';
 
 // Handle ESM/CJS interop
@@ -21,20 +22,18 @@ const DECISION_NODES = new Set([
   'LogicalExpression',
 ]);
 
-export const skl012: CheckModule = {
+export const skl012 = defineCheck({
   id: 'SKL-012',
   name: 'Code Complexity',
   category: 'skills',
   severity: 'info',
   description: 'Measure cyclomatic complexity per function via Babel AST; flag functions exceeding threshold',
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
-    const evidence: Evidence[] = [];
+  async run(ctx, h) {
     const skillsDir = ctx.installation.skillsDir;
-    if (!skillsDir) {
-      return { id: 'SKL-012', name: 'Code Complexity', category: 'skills', severity: 'info', passed: true, message: 'No skills directory found' };
-    }
+    if (!skillsDir) return h.passed('No skills directory found');
 
+    const evidence: Evidence[] = [];
     const files = ctx.skillFiles ?? await getSkillFiles(skillsDir);
 
     for (const file of files) {
@@ -86,16 +85,9 @@ export const skl012: CheckModule = {
       }
     }
 
-    return {
-      id: 'SKL-012',
-      name: 'Code Complexity',
-      category: 'skills',
-      severity: 'info',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'All functions are within complexity threshold'
-        : `Found ${evidence.length} function(s) exceeding complexity threshold of ${COMPLEXITY_THRESHOLD}`,
-      evidence: evidence.length > 0 ? evidence : undefined,
-    };
+    return h.fromEvidence(evidence, {
+      passed: 'All functions are within complexity threshold',
+      failed: (n) => `Found ${n} function(s) exceeding complexity threshold of ${COMPLEXITY_THRESHOLD}`,
+    });
   },
-};
+});

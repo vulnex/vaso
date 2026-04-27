@@ -1,23 +1,22 @@
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { scanWithPatterns, SECURITY_PATTERNS } from '../../analyzers/pattern-engine.js';
 import { getSkillFiles } from '../../core/utils.js';
 
 const CRYPTO_RULES = SECURITY_PATTERNS.filter(r => r.category === 'crypto-wallet');
 
-export const skl009: CheckModule = {
+export const skl009 = defineCheck({
   id: 'SKL-009',
   name: 'Crypto Wallet Targeting',
   category: 'skills',
   severity: 'warning',
   description: 'Detect crypto wallet address patterns and API targeting',
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
-    const evidence: Evidence[] = [];
+  async run(ctx, h) {
     const skillsDir = ctx.installation.skillsDir;
-    if (!skillsDir) {
-      return { id: 'SKL-009', name: 'Crypto Wallet Targeting', category: 'skills', severity: 'warning', passed: true, message: 'No skills directory found' };
-    }
+    if (!skillsDir) return h.passed('No skills directory found');
 
+    const evidence: Evidence[] = [];
     const files = ctx.skillFiles ?? await getSkillFiles(skillsDir);
 
     for (const file of files) {
@@ -36,16 +35,9 @@ export const skl009: CheckModule = {
       } catch {}
     }
 
-    return {
-      id: 'SKL-009',
-      name: 'Crypto Wallet Targeting',
-      category: 'skills',
-      severity: 'warning',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'No crypto wallet targeting patterns detected'
-        : `Found ${evidence.length} crypto wallet targeting pattern(s)`,
-      evidence: evidence.length > 0 ? evidence : undefined,
-    };
+    return h.fromEvidence(evidence, {
+      passed: 'No crypto wallet targeting patterns detected',
+      failed: (n) => `Found ${n} crypto wallet targeting pattern(s)`,
+    });
   },
-};
+});

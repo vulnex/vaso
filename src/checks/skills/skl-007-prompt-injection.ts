@@ -1,5 +1,6 @@
 import { join, extname } from 'node:path';
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence, ScanContext } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { scanWithPatterns, SECURITY_PATTERNS } from '../../analyzers/pattern-engine.js';
 
 const DOC_EXTENSIONS = new Set(['.md', '.txt', '.rst']);
@@ -23,20 +24,18 @@ async function getDocFiles(dir: string, fs: ScanContext['fs']): Promise<string[]
   return files;
 }
 
-export const skl007: CheckModule = {
+export const skl007 = defineCheck({
   id: 'SKL-007',
   name: 'Prompt Injection in SKILL.md',
   category: 'skills',
   severity: 'warning',
   description: 'Detect prompt injection patterns in skill documentation files',
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
-    const evidence: Evidence[] = [];
+  async run(ctx, h) {
     const skillsDir = ctx.installation.skillsDir;
-    if (!skillsDir) {
-      return { id: 'SKL-007', name: 'Prompt Injection in SKILL.md', category: 'skills', severity: 'warning', passed: true, message: 'No skills directory found' };
-    }
+    if (!skillsDir) return h.passed('No skills directory found');
 
+    const evidence: Evidence[] = [];
     const files = await getDocFiles(skillsDir, ctx.fs);
 
     for (const file of files) {
@@ -55,16 +54,9 @@ export const skl007: CheckModule = {
       } catch {}
     }
 
-    return {
-      id: 'SKL-007',
-      name: 'Prompt Injection in SKILL.md',
-      category: 'skills',
-      severity: 'warning',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'No prompt injection patterns found in skill docs'
-        : `Found ${evidence.length} prompt injection pattern(s) in skill documentation`,
-      evidence: evidence.length > 0 ? evidence : undefined,
-    };
+    return h.fromEvidence(evidence, {
+      passed: 'No prompt injection patterns found in skill docs',
+      failed: (n) => `Found ${n} prompt injection pattern(s) in skill documentation`,
+    });
   },
-};
+});

@@ -1,4 +1,5 @@
-import type { CheckModule, ScanContext, CheckResult, Evidence } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
 import { findHighEntropyBlocks } from '../../analyzers/entropy.js';
 import { getSkillFiles } from '../../core/utils.js';
 
@@ -10,20 +11,18 @@ const OBFUSCATION_PATTERNS: { pattern: RegExp; label: string }[] = [
   { pattern: /\batob\s*\(/, label: 'atob() decoding' },
 ];
 
-export const skl002: CheckModule = {
+export const skl002 = defineCheck({
   id: 'SKL-002',
   name: 'Obfuscated Code',
   category: 'skills',
   severity: 'warning',
   description: 'Detect obfuscated code using Shannon entropy analysis and pattern matching',
 
-  async run(ctx: ScanContext): Promise<CheckResult> {
-    const evidence: Evidence[] = [];
+  async run(ctx, h) {
     const skillsDir = ctx.installation.skillsDir;
-    if (!skillsDir) {
-      return { id: 'SKL-002', name: 'Obfuscated Code', category: 'skills', severity: 'warning', passed: true, message: 'No skills directory found' };
-    }
+    if (!skillsDir) return h.passed('No skills directory found');
 
+    const evidence: Evidence[] = [];
     const files = ctx.skillFiles ?? await getSkillFiles(skillsDir);
 
     for (const file of files) {
@@ -64,16 +63,9 @@ export const skl002: CheckModule = {
       } catch {}
     }
 
-    return {
-      id: 'SKL-002',
-      name: 'Obfuscated Code',
-      category: 'skills',
-      severity: 'warning',
-      passed: evidence.length === 0,
-      message: evidence.length === 0
-        ? 'No obfuscated code blocks detected'
-        : `Found ${evidence.length} obfuscated code block(s) — possible obfuscation`,
-      evidence: evidence.length > 0 ? evidence : undefined,
-    };
+    return h.fromEvidence(evidence, {
+      passed: 'No obfuscated code blocks detected',
+      failed: (n) => `Found ${n} obfuscated code block(s) — possible obfuscation`,
+    });
   },
-};
+});
