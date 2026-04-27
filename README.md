@@ -38,6 +38,7 @@ Exit code 1 means critical findings were detected — use this to fail CI pipeli
 | `vaso scan` | Scan installed agents and report findings |
 | `vaso detect` | List detected agent installations |
 | `vaso fix` | Auto-remediate fixable findings |
+| `vaso visualize` | Emit USecVisLib config files for visualization |
 | `vaso update` | Reload IOC threat intelligence database |
 | `vaso mcp scan` | Scan MCP server configurations |
 | `vaso mcp list` | List discovered MCP servers |
@@ -148,6 +149,26 @@ Track security posture over time:
 vaso scan --save-baseline    # Save after a clean scan
 vaso scan --diff             # Compare against baseline on subsequent scans
 ```
+
+## Visualizations
+
+`vaso visualize` emits [USecVisLib](https://github.com/vulnex/usecvislib) config files (TOML by default; JSON/YAML available) for three diagram types: per-installation **attack tree**, per-installation **privilege gradient** (architecture-specific — NemoClaw GPU isolation, Claude Code MCP transport, etc.), and a whole-scan **component diagram**.
+
+```bash
+# Run a fresh scan and write the bundle
+vaso visualize -o ./vis/
+
+# Or replay a saved scan result
+vaso scan -f json -o scan.json
+vaso visualize -i scan.json -o ./vis/
+
+# Render with USecVisLib (commands also listed in the bundle README)
+usecvis -m 0 -i ./vis/openclaw-attack-tree.toml -o tree -f png
+usecvis -m 6 -i ./vis/openclaw-privilege-gradient.toml -o gradient -f png
+usecvis -m 7 -i ./vis/topology.toml -o topology -f png
+```
+
+VASO never bundles, sidecars, or calls a USecVisLib server — the contract between the two tools is a static config file. Users render externally with whichever USecVisLib mode (CLI, REST, or MCP) they prefer.
 
 ## Zero-Dependency Quick Scan
 

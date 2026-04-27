@@ -6,6 +6,45 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+#### Visualization Config Emission (PRD-006)
+
+`vaso visualize` emits USecVisLib config files (TOML/JSON/YAML) for three diagram types. VASO does not bundle, sidecar, or call a USecVisLib server — users render externally with `usecvis` (CLI, REST, or MCP).
+
+- **`vaso visualize`** command (`src/commands/visualize.ts`):
+  - Two modes: fresh scan (default) or replay from `-i scan.json`
+  - Flags: `-o <dir>` (default `./vaso-visualizations/`), `--vis-format toml|json|yaml` (default `toml`), `--diagrams attack-tree,privilege-gradient,component`, `-a <agent>`, `--all-users`
+  - Writes one file per (installation × diagram) plus a `README.md` with the corresponding `usecvis` command for each file
+
+- **`ZoneGraph` model** (`src/core/types.ts`): per-adapter privilege-gradient declaration with zones, components, edges, and explicit inversion paths gated on check-failure triggers
+  - Validator (`src/core/zone-graph-validator.ts`) runs after registry init; fails CI if any graph references an unknown check ID
+  - Generic 4-zone fallback (`src/core/default-zone-graph.ts`) used by adapters that don't declare a custom graph
+  - Custom graphs for the five adapters with materially distinct surfaces:
+    - **NemoClaw** — 5 zones with explicit GPU isolation boundary
+    - **IronClaw** — gRPC gateway zone instead of generic HTTP
+    - **Nanobot** — chat-platform edge zone (Discord/Slack)
+    - **Claude Code** — MCP transport + tool-execution zones with hooks side-channel component
+    - **Codex** — sandbox-mode zone (read/workspace/danger)
+  - Generic fallback used by OpenClaw, NanoClaw, PicoClaw, ZeroClaw, Hermes
+  - Each custom graph declares one inversion edge mapping a real attack class (sandbox bypass, permission bypass, channel-driven exec)
+
+- **Visualization data models** (`src/visualizations/models/`):
+  - `attack-tree-model.ts` — pure `ScanResult → AttackTreeModel` shaper; root → category → finding tree, skips passed checks, attaches CVSS to leaves
+  - `topology-model.ts` — pure `ScanResult → TopologyModel` shaper; host → agents → gateways
+  - `cvss-mapper.ts` — real CVSS extracted from advisory check evidence when present (`cvss=N.N` or `CVSS: N.N` patterns); severity-mapped fallback (`critical→9.0, warning→5.0, info→2.0`) for findings without CVSS data. The bundle README documents the mapping explicitly.
+
+- **USecVisLib config serializers** (`src/visualizations/serializers/`):
+  - `usecvis-shape.ts` — three transformers matching USecVisLib's exact schemas: `[tree]/[nodes]/[edges]` for attack trees, `[[zones]]/[[components]]/[[influence_types]]/[[influences]]` for privilege gradient, `layers/connections` for component diagrams
+  - `format.ts` — `serialize(shape, 'toml'|'json'|'yaml')` via `smol-toml` / `JSON.stringify` / `yaml`
+
+- **`AgentAdapter.getZoneGraph?()`** added as an optional method on the adapter interface.
+
+#### Test Suite
+
+- 1173 unit tests across visualizations module (78 new across Phases 1–4)
+- `src/adapters/zone-graphs.test.ts` exercises every registered adapter's graph against the real check registry
+
 ## [0.2.1] - 2026-04-27
 
 ### Added
