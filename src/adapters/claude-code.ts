@@ -122,7 +122,7 @@ export const claudeCodeAdapter: AgentAdapter = {
         installDir: claudeDir,
         configFiles,
         skillsDir,
-        models: this.getModels?.(configFiles, fs),
+        models: await this.getModels?.(configFiles, fs),
         user: options?.allUsers ? user : undefined,
         cliBinary,
       });
@@ -140,7 +140,7 @@ export const claudeCodeAdapter: AgentAdapter = {
           installDir: projectClaudeDir,
           configFiles: projectConfigs,
           skillsDir: this.getSkillsDir(projectClaudeDir),
-          models: this.getModels?.(projectConfigs, fs),
+          models: await this.getModels?.(projectConfigs, fs),
           profile: 'project',
         });
       }

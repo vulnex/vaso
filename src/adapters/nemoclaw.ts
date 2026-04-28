@@ -234,7 +234,7 @@ export const nemoclawAdapter: AgentAdapter = {
       configFiles,
       cliBinary,
       version,
-      models: this.getModels?.(configFiles),
+      models: await this.getModels?.(configFiles),
     }];
   },
 

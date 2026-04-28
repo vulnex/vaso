@@ -157,18 +157,67 @@ describe('adapter.getModels()', () => {
   });
 
   describe('codex', () => {
-    it('reads top-level model + model_provider from config.toml', () => {
+    it('reads top-level model + model_provider from config.toml', async () => {
       const configs = [
         cfg('/u/.codex/config.toml', { model: 'gpt-5.4', model_provider: 'openai' }),
       ];
-      expect(codexAdapter.getModels!(configs)).toEqual([
+      expect(await codexAdapter.getModels!(configs)).toEqual([
         { id: 'gpt-5.4', provider: 'openai' },
       ]);
     });
 
-    it('returns [] when config.toml lacks model', () => {
+    it('returns [] when config.toml lacks model and no fs available', async () => {
       const configs = [cfg('/u/.codex/config.toml', { trust_level: 'trusted' })];
-      expect(codexAdapter.getModels!(configs)).toEqual([]);
+      expect(await codexAdapter.getModels!(configs)).toEqual([]);
+    });
+
+    it('falls back to latest session jsonl when config.toml has no model', async () => {
+      // Synthesize a minimal FSProvider that walks a fake sessions tree:
+      // /home/u/.codex/sessions/2026/04/18/rollout-2026-04-18T22-06.jsonl
+      // and an older 2026/04/17 one to confirm we pick the lex-latest.
+      const tree: Record<string, string[]> = {
+        '/home/u/.codex/sessions': ['2025', '2026'],
+        '/home/u/.codex/sessions/2026': ['03', '04'],
+        '/home/u/.codex/sessions/2026/04': ['17', '18'],
+        '/home/u/.codex/sessions/2026/04/17': ['rollout-2026-04-17T09-00-x.jsonl'],
+        '/home/u/.codex/sessions/2026/04/18': [
+          'rollout-2026-04-18T10-00-a.jsonl',
+          'rollout-2026-04-18T22-06-z.jsonl',
+        ],
+      };
+      const files: Record<string, string> = {
+        '/home/u/.codex/sessions/2026/04/18/rollout-2026-04-18T22-06-z.jsonl':
+          '{"type":"turn_context","payload":{"model":"gpt-4o-mini"}}\n' +
+          '{"type":"turn_context","payload":{"model":"gpt-5-codex"}}\n',
+      };
+      const fakeFs = {
+        homedir: () => '/home/u',
+        async readdirEntries(p: string) {
+          const names = tree[p];
+          if (!names) throw new Error(`ENOENT ${p}`);
+          return names.map(n => ({
+            name: n,
+            isFile: !tree[`${p}/${n}`],
+            isDirectory: !!tree[`${p}/${n}`],
+          }));
+        },
+        async readFile(p: string) {
+          if (!(p in files)) throw new Error(`ENOENT ${p}`);
+          return files[p];
+        },
+      } as unknown as FSProvider;
+      expect(await codexAdapter.getModels!([], fakeFs)).toEqual([
+        { id: 'gpt-5-codex', via: 'last session' },
+      ]);
+    });
+
+    it('returns [] when sessions tree exists but has no rollout files', async () => {
+      const fakeFs = {
+        homedir: () => '/home/u',
+        async readdirEntries() { return []; },
+        async readFile() { throw new Error('ENOENT'); },
+      } as unknown as FSProvider;
+      expect(await codexAdapter.getModels!([], fakeFs)).toEqual([]);
     });
   });
 

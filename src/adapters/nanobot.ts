@@ -84,7 +84,7 @@ export const nanobotAdapter: AgentAdapter = {
       configFiles,
       skillsDir: this.getSkillsDir(nanobotDir),
       gateway: this.getGatewayInfo(merged),
-      models: this.getModels?.(configFiles),
+      models: await this.getModels?.(configFiles),
       cliBinary,
       version,
     }];
