@@ -90,7 +90,7 @@ export const nanoclawAdapter: AgentAdapter = {
       ],
       commands: [
         { id: 'nanoclaw-which', cmd: 'which', args: ['nanoclaw'], timeout: 3000 },
-        { id: 'nanoclaw-version', cmd: 'nanoclaw', args: ['--version'], timeout: 3000 },
+        { id: 'nanoclaw-version', cmd: 'nanoclaw', args: ['--version'], timeout: 15000 },
       ],
       directoryListings: [
         '~/.config/nanoclaw',

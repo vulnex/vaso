@@ -5,7 +5,43 @@ import type { ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { loadConfig } from '../core/config-loader.js';
-import { queryCliVersion } from './version-query.js';
+import { queryCliVersion, readPackageVersion } from './version-query.js';
+
+const SYSTEM_CLI_PATHS = [
+  '/usr/local/bin/nanobot',
+  '/opt/homebrew/bin/nanobot',
+  '/usr/bin/nanobot',
+];
+
+const USER_CLI_RELATIVE_PATHS = [
+  '.local/bin/nanobot',
+  '.npm-global/bin/nanobot',
+  '.volta/bin/nanobot',
+  '.bun/bin/nanobot',
+];
+
+function nodeModulesPackageJsonCandidates(home: string): string[] {
+  return [
+    '/usr/lib/node_modules/nanobot/package.json',
+    '/usr/local/lib/node_modules/nanobot/package.json',
+    '/opt/homebrew/lib/node_modules/nanobot/package.json',
+    `${home}/.npm-global/lib/node_modules/nanobot/package.json`,
+    `${home}/.bun/install/global/node_modules/nanobot/package.json`,
+    `${home}/.volta/tools/image/packages/nanobot/package.json`,
+  ];
+}
+
+async function readNodePackageVersion(fs: FSProvider): Promise<string | undefined> {
+  const home = fs.homedir();
+  for (const p of nodeModulesPackageJsonCandidates(home)) {
+    try {
+      const raw = await fs.readFile(p);
+      const pkg = JSON.parse(raw);
+      if (pkg.version && /^\d+\.\d+\.\d+/.test(pkg.version)) return pkg.version;
+    } catch {}
+  }
+  return undefined;
+}
 
 export const nanobotAdapter: AgentAdapter = {
   agent: 'nanobot',
@@ -25,7 +61,7 @@ export const nanobotAdapter: AgentAdapter = {
     }
 
     // Also check for CLI binary
-    const cliBinary = await findCLIBinary(fs);
+    const cliBinary = await findCLIBinary(home, fs);
 
     if (configFiles.length === 0 && !cliBinary) return [];
 
@@ -34,9 +70,13 @@ export const nanobotAdapter: AgentAdapter = {
       Object.assign(merged, c.data);
     }
 
-    // Extract version from config, fallback to CLI
+    // Extract version: config field > CLI exec > package.json next to binary
+    // > known npm-global package.json roots.
     const mainConfig = configFiles.find(c => c.filePath.endsWith('config.json'));
-    const version = (mainConfig?.data?.version as string) ?? queryCliVersion(cliBinary ?? 'nanobot', fs);
+    const version = (mainConfig?.data?.version as string)
+      ?? queryCliVersion(cliBinary, fs)
+      ?? (await readPackageVersion(cliBinary, fs))
+      ?? (await readNodePackageVersion(fs));
 
     return [{
       agent: 'nanobot',
@@ -97,13 +137,26 @@ export const nanobotAdapter: AgentAdapter = {
         '~/.nanobot/workspace/memory/MEMORY.md',
         '~/.nanobot/workspace/HEARTBEAT.md',
         '~/.nanobot/workspace/SOUL.md',
+        // User-relative CLI install locations.
+        '~/.local/bin/nanobot',
+        '~/.npm-global/bin/nanobot',
+        '~/.volta/bin/nanobot',
+        '~/.bun/bin/nanobot',
+        // npm-global package.json (canonical version source for Node CLIs).
+        '/usr/lib/node_modules/nanobot/package.json',
+        '/usr/local/lib/node_modules/nanobot/package.json',
+        '/opt/homebrew/lib/node_modules/nanobot/package.json',
+        '~/.npm-global/lib/node_modules/nanobot/package.json',
+        '~/.bun/install/global/node_modules/nanobot/package.json',
+        '~/.volta/tools/image/packages/nanobot/package.json',
       ],
       globPatterns: [
         '~/.nanobot/workspace/skills/**',
+        '~/.nvm/versions/node/*/lib/node_modules/nanobot/package.json',
       ],
       commands: [
         { id: 'nanobot-which', cmd: 'which', args: ['nanobot'], timeout: 3000 },
-        { id: 'nanobot-version', cmd: 'nanobot', args: ['--version'], timeout: 3000 },
+        { id: 'nanobot-version', cmd: 'nanobot', args: ['--version'], timeout: 15000 },
       ],
       directoryListings: [
         '~/.nanobot',
@@ -111,7 +164,7 @@ export const nanobotAdapter: AgentAdapter = {
         '~/.nanobot/workspace/skills',
       ],
       envPrefixes: ['NANOBOT_'],
-      systemPaths: [],
+      systemPaths: SYSTEM_CLI_PATHS,
       systemDirListings: [],
     };
   },
@@ -160,11 +213,17 @@ export const nanobotAdapter: AgentAdapter = {
   },
 };
 
-async function findCLIBinary(fs: FSProvider): Promise<string | undefined> {
+async function findCLIBinary(home: string, fs: FSProvider): Promise<string | undefined> {
+  for (const p of SYSTEM_CLI_PATHS) {
+    if (await fs.access(p)) return p;
+  }
+  for (const rel of USER_CLI_RELATIVE_PATHS) {
+    const p = join(home, rel);
+    if (await fs.access(p)) return p;
+  }
   try {
     const result = fs.execSync('which', ['nanobot'], { timeout: 3000 }).trim();
     if (result) return result;
   } catch {}
-
   return undefined;
 }

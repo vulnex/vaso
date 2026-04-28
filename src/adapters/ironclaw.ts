@@ -130,7 +130,7 @@ export const ironclawAdapter: AgentAdapter = {
       ],
       commands: [
         { id: 'ironclaw-which', cmd: 'which', args: ['ironclaw'], timeout: 3000 },
-        { id: 'ironclaw-version', cmd: 'ironclaw', args: ['--version'], timeout: 3000 },
+        { id: 'ironclaw-version', cmd: 'ironclaw', args: ['--version'], timeout: 15000 },
       ],
       directoryListings: [
         '~/.ironclaw',

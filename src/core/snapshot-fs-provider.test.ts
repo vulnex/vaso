@@ -307,6 +307,32 @@ describe('SnapshotFSProvider', () => {
       expect(result.stdout).toBe('tcp 0.0.0.0:8080\n');
       expect(result.exitCode).toBe(0);
     });
+
+    it('resolves full-path binary against snapshot id keyed by basename', async () => {
+      const provider = new SnapshotFSProvider(
+        makeSnapshot({
+          commandOutputs: {
+            'codex-version': { stdout: 'codex 0.41.0\n', stderr: '', exitCode: 0 },
+          },
+        }),
+      );
+      const result = await provider.exec('/usr/local/bin/codex', ['--version']);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain('0.41.0');
+    });
+
+    it('translates `which <bin>` into the <bin>-which snapshot entry', async () => {
+      const provider = new SnapshotFSProvider(
+        makeSnapshot({
+          commandOutputs: {
+            'openclaw-which': { stdout: '/usr/local/bin/openclaw\n', stderr: '', exitCode: 0 },
+          },
+        }),
+      );
+      const result = await provider.exec('which', ['openclaw']);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout.trim()).toBe('/usr/local/bin/openclaw');
+    });
   });
 
   describe('execSync', () => {
@@ -336,6 +362,18 @@ describe('SnapshotFSProvider', () => {
     it('throws for missing command', () => {
       const provider = new SnapshotFSProvider(makeSnapshot());
       expect(() => provider.execSync('unknown', ['--flag'])).toThrow('not collected');
+    });
+
+    it('returns version output when called with full binary path', () => {
+      const provider = new SnapshotFSProvider(
+        makeSnapshot({
+          commandOutputs: {
+            'claude-version': { stdout: '1.0.66 (Claude Code)\n', stderr: '', exitCode: 0 },
+          },
+        }),
+      );
+      const stdout = provider.execSync('/usr/local/bin/claude', ['--version']);
+      expect(stdout).toContain('1.0.66');
     });
   });
 

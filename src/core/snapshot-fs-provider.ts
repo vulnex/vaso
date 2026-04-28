@@ -1,16 +1,14 @@
-import { join } from 'node:path';
+import { join, basename } from 'node:path';
 import type { FSProvider, DirentInfo, ExecResult, ExecOptions } from './fs-provider.js';
 import type { ProbeSnapshot } from './snapshot-types.js';
 
 export class SnapshotFSProvider implements FSProvider {
   readonly platform: NodeJS.Platform;
   private snapshot: ProbeSnapshot;
-  private commandIndex: Map<string, string>;
 
   constructor(snapshot: ProbeSnapshot) {
     this.snapshot = snapshot;
     this.platform = snapshot.platform as NodeJS.Platform;
-    this.commandIndex = this.buildCommandIndex();
   }
 
   async readFile(path: string): Promise<string> {
@@ -171,31 +169,42 @@ export class SnapshotFSProvider implements FSProvider {
     return results;
   }
 
-  private buildCommandIndex(): Map<string, string> {
-    const index = new Map<string, string>();
-    for (const id of Object.keys(this.snapshot.commandOutputs)) {
-      index.set(id, id);
-    }
-    return index;
-  }
-
   private findCommandOutput(cmd: string, args: string[]) {
-    // Try exact id match first (e.g., "openclaw-version")
-    const key = `${cmd} ${args.join(' ')}`.trim();
-    if (this.snapshot.commandOutputs[key]) {
-      return this.snapshot.commandOutputs[key];
+    // Try exact id match first against both the raw cmd and its basename, so
+    // adapters that resolve cliBinary to a full path (e.g. /usr/local/bin/codex
+    // --version) still match snapshot entries keyed by the bare command name.
+    const cmdBase = basename(cmd);
+    const fullKey = `${cmd} ${args.join(' ')}`.trim();
+    if (this.snapshot.commandOutputs[fullKey]) {
+      return this.snapshot.commandOutputs[fullKey];
+    }
+    if (cmdBase !== cmd) {
+      const baseKey = `${cmdBase} ${args.join(' ')}`.trim();
+      if (this.snapshot.commandOutputs[baseKey]) {
+        return this.snapshot.commandOutputs[baseKey];
+      }
+    }
+
+    // Special case: `which <bin>` is collected by manifests as `<bin>-which`.
+    // Translate the lookup so adapter fallbacks (`fs.execSync('which', ['openclaw'])`)
+    // resolve to the snapshot entry collected on the remote host.
+    if (cmdBase === 'which' && args.length > 0) {
+      const target = basename(args[0]);
+      const whichId = `${target}-which`;
+      if (this.snapshot.commandOutputs[whichId]) {
+        return this.snapshot.commandOutputs[whichId];
+      }
     }
 
     // Try matching by command name and args pattern
     for (const [id, output] of Object.entries(this.snapshot.commandOutputs)) {
       // Match ids like "netstat-tcp" against cmd "netstat" with args containing "tcp"
       const idParts = id.split('-');
-      if (idParts[0] === cmd || id.startsWith(cmd)) {
+      if (idParts[0] === cmdBase || id.startsWith(cmdBase)) {
         // Heuristic: if the id starts with the command name, it's likely a match
         // Check if args overlap with id components
         const idLower = id.toLowerCase();
-        const argsStr = args.join(' ').toLowerCase();
-        if (idLower.includes(cmd) && (args.length === 0 || this.argsMatchId(id, cmd, args))) {
+        if (idLower.includes(cmdBase) && (args.length === 0 || this.argsMatchId(id, cmdBase, args))) {
           return output;
         }
       }
