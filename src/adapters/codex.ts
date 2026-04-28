@@ -6,7 +6,7 @@ import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { loadConfig } from '../core/config-loader.js';
 import { getUserHomeDirs } from './openclaw.js';
-import { queryCliVersion } from './version-query.js';
+import { queryCliVersion, readPackageVersion } from './version-query.js';
 
 const CODEX_DIR_NAME = '.codex';
 const CONFIG_FILES = ['config.toml', 'auth.json'];
@@ -67,7 +67,8 @@ export const codexAdapter: AgentAdapter = {
         }
       }
 
-      const version = queryCliVersion(cliBinary, fs);
+      const version = queryCliVersion(cliBinary, fs)
+        ?? (await readPackageVersion(cliBinary, fs));
 
       installations.push({
         agent: 'codex',
@@ -121,11 +122,17 @@ export const codexAdapter: AgentAdapter = {
         '~/.codex/auth.json',
         '~/.codex/instructions.md',
         '~/.codex/AGENTS.md',
+        // User-relative CLI install locations — kept in sync with USER_CLI_RELATIVE_PATHS
+        '~/.local/bin/codex',
+        '~/.npm-global/bin/codex',
+        '~/.volta/bin/codex',
+        '~/.bun/bin/codex',
+        '~/.cargo/bin/codex',
       ],
       globPatterns: [],
       commands: [
         { id: 'codex-which', cmd: 'which', args: ['codex'], timeout: 3000 },
-        { id: 'codex-version', cmd: 'codex', args: ['--version'], timeout: 3000 },
+        { id: 'codex-version', cmd: 'codex', args: ['--version'], timeout: 15000 },
       ],
       directoryListings: [
         '~/.codex',

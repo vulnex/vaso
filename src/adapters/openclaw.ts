@@ -1,4 +1,4 @@
-import { join, basename, dirname } from 'node:path';
+import { join, basename } from 'node:path';
 import type { AgentAdapter, DetectOptions } from './adapter.js';
 import type { AgentInstallation, GatewayInfo } from '../core/types.js';
 import type { ProbeManifest } from '../core/snapshot-types.js';
@@ -6,7 +6,7 @@ import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { loadConfig } from '../core/config-loader.js';
 import { deepMerge } from '../core/utils.js';
-import { queryCliVersion } from './version-query.js';
+import { queryCliVersion, readPackageVersion } from './version-query.js';
 
 const CONFIG_FILENAMES = [
   'openclaw.json',
@@ -132,36 +132,6 @@ async function findAppBundle(fs: FSProvider): Promise<string | undefined> {
   return undefined;
 }
 
-/**
- * Read version from the package.json nearest to a CLI binary's resolved path.
- * Works for npm-installed binaries (global or local).
- */
-async function readPackageVersion(binary: string, fs: FSProvider): Promise<string | undefined> {
-  try {
-    const resolved = await fs.realpath(binary);
-    // Walk up from the binary to find package.json
-    let dir = dirname(resolved);
-    for (let i = 0; i < 5; i++) {
-      const pkgPath = join(dir, 'package.json');
-      try {
-        const raw = await fs.readFile(pkgPath);
-        const pkg = JSON.parse(raw);
-        if (pkg.version && /^\d+\.\d+\.\d+/.test(pkg.version)) {
-          return pkg.version;
-        }
-      } catch {
-        // No package.json here, walk up
-      }
-      const parent = dirname(dir);
-      if (parent === dir) break;
-      dir = parent;
-    }
-  } catch {
-    // realpath or read failed
-  }
-  return undefined;
-}
-
 export const openclawAdapter: AgentAdapter = {
   agent: 'openclaw',
   displayName: 'OpenClaw',
@@ -194,9 +164,14 @@ export const openclawAdapter: AgentAdapter = {
 
         if (configFiles.length === 0) continue;
 
-        // Extract version from openclaw.json, fallback to CLI, then package.json
+        // Extract version from openclaw.json (top-level `version`, or
+        // `meta.lastTouchedVersion` written by the wizard), fallback to CLI,
+        // then package.json near the binary.
         const mainConfig = configFiles.find(c => c.filePath.endsWith('openclaw.json'));
+        const meta = mainConfig?.data?.meta as Record<string, unknown> | undefined;
         const version = (mainConfig?.data?.version as string)
+          ?? (meta?.lastTouchedVersion as string)
+          ?? (meta?.lastRunVersion as string)
           ?? (cliBinary ? queryCliVersion(cliBinary, fs, { argSets: [['--version'], ['version']] }) : undefined)
           ?? (cliBinary ? await readPackageVersion(cliBinary, fs) : undefined);
         const skillsDir = this.getSkillsDir(dir);
@@ -367,6 +342,12 @@ export const openclawAdapter: AgentAdapter = {
         '~/.openclaw/auth.json',
         '~/.openclaw/memory.json',
         '~/.openclaw/conversations.db',
+        // User-relative CLI install locations — kept in sync with USER_CLI_RELATIVE_PATHS
+        '~/.volta/bin/openclaw',
+        '~/.local/bin/openclaw',
+        '~/.nvm/current/bin/openclaw',
+        '~/.npm-global/bin/openclaw',
+        '~/bin/openclaw',
       ],
       globPatterns: [
         '~/.openclaw/skills/**',
@@ -380,7 +361,7 @@ export const openclawAdapter: AgentAdapter = {
       ],
       commands: [
         { id: 'openclaw-which', cmd: 'which', args: ['openclaw'], timeout: 3000 },
-        { id: 'openclaw-version', cmd: 'openclaw', args: ['--version'], timeout: 3000 },
+        { id: 'openclaw-version', cmd: 'openclaw', args: ['--version'], timeout: 15000 },
       ],
       directoryListings: [
         '~/.openclaw',

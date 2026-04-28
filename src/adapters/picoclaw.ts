@@ -91,7 +91,7 @@ export const picoclawAdapter: AgentAdapter = {
       ],
       commands: [
         { id: 'picoclaw-which', cmd: 'which', args: ['picoclaw'], timeout: 3000 },
-        { id: 'picoclaw-version', cmd: 'picoclaw', args: ['--version'], timeout: 3000 },
+        { id: 'picoclaw-version', cmd: 'picoclaw', args: ['--version'], timeout: 15000 },
       ],
       directoryListings: [
         '~/.picoclaw',

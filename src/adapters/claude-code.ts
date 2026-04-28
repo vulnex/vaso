@@ -6,7 +6,7 @@ import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { loadConfig } from '../core/config-loader.js';
 import { getUserHomeDirs } from './openclaw.js';
-import { queryCliVersion } from './version-query.js';
+import { queryCliVersion, readPackageVersion } from './version-query.js';
 
 const CLAUDE_DIR_NAME = '.claude';
 const SETTINGS_FILES = ['settings.json', 'settings.local.json'];
@@ -80,7 +80,8 @@ export const claudeCodeAdapter: AgentAdapter = {
         } catch {}
       }
 
-      const version = queryCliVersion(cliBinary, fs);
+      const version = queryCliVersion(cliBinary, fs)
+        ?? (await readPackageVersion(cliBinary, fs));
       const skillsDir = this.getSkillsDir(claudeDir);
 
       installations.push({
@@ -159,6 +160,14 @@ export const claudeCodeAdapter: AgentAdapter = {
         '~/.claude/.credentials.json',
         '~/.claude/mcp.json',
         '~/.claude.json',
+        // User-relative CLI install locations — kept in sync with USER_CLI_RELATIVE_PATHS
+        // so findCLIBinary can resolve the binary in remote snapshots where the
+        // non-interactive SSH PATH may not include the install dir.
+        '~/.local/bin/claude',
+        '~/.npm-global/bin/claude',
+        '~/.volta/bin/claude',
+        '~/.claude/local/claude',
+        '~/.bun/bin/claude',
       ],
       globPatterns: [
         '~/.claude/skills/**',
@@ -167,7 +176,7 @@ export const claudeCodeAdapter: AgentAdapter = {
       ],
       commands: [
         { id: 'claude-which', cmd: 'which', args: ['claude'], timeout: 3000 },
-        { id: 'claude-version', cmd: 'claude', args: ['--version'], timeout: 3000 },
+        { id: 'claude-version', cmd: 'claude', args: ['--version'], timeout: 15000 },
       ],
       directoryListings: [
         '~/.claude',

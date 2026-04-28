@@ -160,6 +160,7 @@ program
   .option('--ssh-key <path>', 'SSH identity file for remote connections')
   .option('--ssh-timeout <seconds>', 'SSH connection timeout in seconds', '60')
   .option('--snapshot <path>', 'detect from a local probe snapshot JSON file')
+  .option('--save-snapshot <dir>', 'after fetching SSH snapshots, write each as <hostname>.json under this directory (for debugging)')
   .action(async (options) => {
     const { runDetect } = await import('./commands/detect.js');
     await runDetect(options);

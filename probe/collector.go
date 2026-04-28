@@ -16,6 +16,43 @@ import (
 
 const defaultCommandTimeout = 5000 // ms
 
+// Files larger than this are stat'd but their content is not embedded in the
+// snapshot. This protects against filePath/glob entries that incidentally
+// resolve to executables or large data files — without it, a single ~100 MB
+// CLI binary in ~/.claude/local/claude would balloon the JSON snapshot past
+// V8's ~512 MB max-string limit on the consuming Node side.
+const maxFileContentBytes = 1 << 20 // 1 MiB
+
+// Common per-user bin dirs that hold CLIs we care about. Non-interactive SSH
+// sessions inherit a minimal PATH that excludes these, so we prepend them
+// before running version/which probes.
+var userBinDirs = []string{
+	".local/bin",
+	".bun/bin",
+	".cargo/bin",
+	".npm-global/bin",
+	".volta/bin",
+	".nvm/current/bin",
+	".claude/local",
+	"bin",
+}
+
+// buildAugmentedPath prepends each home's user bin dirs to PATH (current-user
+// home first), so commands like `claude --version` resolve under non-interactive
+// SSH where rc-file PATH additions don't apply.
+func buildAugmentedPath(homes []UserHome, basePath string) string {
+	var prefix []string
+	for _, h := range homes {
+		for _, d := range userBinDirs {
+			prefix = append(prefix, filepath.Join(h.Path, d))
+		}
+	}
+	if basePath == "" {
+		return strings.Join(prefix, string(os.PathListSeparator))
+	}
+	return strings.Join(prefix, string(os.PathListSeparator)) + string(os.PathListSeparator) + basePath
+}
+
 // Collect executes the probe manifest and returns a snapshot.
 func Collect(manifest ProbeManifest, escalate bool) ProbeSnapshot {
 	MaybeEscalate(escalate)
@@ -81,9 +118,20 @@ func Collect(manifest ProbeManifest, escalate bool) ProbeSnapshot {
 		snapshot.Directories[dir] = collectDirectory(dir)
 	}
 
-	// Run allowed commands
+	// Run allowed commands with PATH extended to include per-user bin dirs.
+	// Each output is stored under both its manifest ID (e.g. "nemoclaw-help")
+	// and its natural "<cmd> <args>" key (e.g. "nemoclaw help") so the TS-side
+	// snapshot lookup can resolve ambiguous shared-basename commands precisely.
+	cmdPath := buildAugmentedPath(homes, os.Getenv("PATH"))
 	for _, cmdReq := range manifest.Commands {
-		snapshot.CommandOutputs[cmdReq.ID] = runCommand(cmdReq)
+		out := runCommand(cmdReq, cmdPath)
+		snapshot.CommandOutputs[cmdReq.ID] = out
+		naturalKey := strings.TrimSpace(cmdReq.Cmd + " " + strings.Join(cmdReq.Args, " "))
+		if naturalKey != "" && naturalKey != cmdReq.ID {
+			if _, exists := snapshot.CommandOutputs[naturalKey]; !exists {
+				snapshot.CommandOutputs[naturalKey] = out
+			}
+		}
 	}
 
 	// Collect filtered environment variables
@@ -108,24 +156,36 @@ func expandPaths(paths []string, homes []UserHome) []string {
 	return expanded
 }
 
-// collectFile reads a file and returns its content and mode.
+// collectFile reads a file and returns its content and mode. Files exceeding
+// maxFileContentBytes are stat'd only — the snapshot records Exists+Mode but
+// no content, which is sufficient for adapters that just need to verify a CLI
+// binary's presence without parsing it.
 func collectFile(path string) FileEntry {
 	info, err := os.Stat(path)
 	if err != nil {
 		return FileEntry{Exists: false}
 	}
 
+	mode := int(info.Mode().Perm())
+
+	if info.Size() > maxFileContentBytes {
+		return FileEntry{
+			Exists: true,
+			Mode:   mode,
+		}
+	}
+
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return FileEntry{
 			Exists: true,
-			Mode:   int(info.Mode().Perm()),
+			Mode:   mode,
 		}
 	}
 
 	return FileEntry{
 		Content: string(content),
-		Mode:    int(info.Mode().Perm()),
+		Mode:    mode,
 		Exists:  true,
 	}
 }
@@ -148,8 +208,35 @@ func collectDirectory(dir string) []string {
 	return names
 }
 
-// runCommand executes a command if it is on the allowlist.
-func runCommand(req CommandRequest) CommandOutput {
+// resolveBinary searches augmentedPath for a bare command name. Go's
+// exec.LookPath uses the parent process's PATH, not the env we'd attach via
+// cmd.Env, so for binaries that only live under per-user bin dirs (e.g.
+// ~/.local/bin/claude) we must resolve the absolute path ourselves.
+func resolveBinary(cmd, augmentedPath string) string {
+	if filepath.IsAbs(cmd) || strings.Contains(cmd, "/") {
+		return cmd
+	}
+	for _, dir := range strings.Split(augmentedPath, string(os.PathListSeparator)) {
+		if dir == "" {
+			continue
+		}
+		candidate := filepath.Join(dir, cmd)
+		info, err := os.Stat(candidate)
+		if err != nil || info.IsDir() {
+			continue
+		}
+		if info.Mode()&0o111 != 0 {
+			return candidate
+		}
+	}
+	return cmd
+}
+
+// runCommand executes a command if it is on the allowlist. The provided
+// augmented PATH is searched for bare commands and also propagated to the
+// child process so spawned scripts (e.g. node-based CLI shims) can resolve
+// their own dependencies.
+func runCommand(req CommandRequest, augmentedPath string) CommandOutput {
 	if !IsAllowed(req.Cmd) {
 		return CommandOutput{
 			Stderr:   fmt.Sprintf("command %q not in allowlist", req.Cmd),
@@ -165,7 +252,24 @@ func runCommand(req CommandRequest) CommandOutput {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Millisecond)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, req.Cmd, req.Args...)
+	resolved := resolveBinary(req.Cmd, augmentedPath)
+	cmd := exec.CommandContext(ctx, resolved, req.Args...)
+
+	if augmentedPath != "" {
+		env := os.Environ()
+		hasPath := false
+		for i, e := range env {
+			if strings.HasPrefix(e, "PATH=") {
+				env[i] = "PATH=" + augmentedPath
+				hasPath = true
+				break
+			}
+		}
+		if !hasPath {
+			env = append(env, "PATH="+augmentedPath)
+		}
+		cmd.Env = env
+	}
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

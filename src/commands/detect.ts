@@ -13,6 +13,7 @@ export interface DetectCommandOptions {
   sshKey?: string;
   sshTimeout?: string;
   snapshot?: string;
+  saveSnapshot?: string;
 }
 
 export async function runDetect(options: DetectCommandOptions): Promise<void> {
@@ -136,13 +137,26 @@ async function detectRemoteHosts(options: DetectCommandOptions): Promise<void> {
   const results: HostDetectResult[] = [];
 
   async function processTarget(target: SSHTarget): Promise<HostDetectResult> {
-    const label = target.label ?? `${target.user}@${target.host}`;
     try {
       const snapshot = await executeRemoteProbe(target, {
         probeBinDir,
         manifest,
         timeout,
       });
+
+      if (options.saveSnapshot) {
+        try {
+          const { writeFile, mkdir } = await import('node:fs/promises');
+          const { join: joinPath } = await import('node:path');
+          await mkdir(options.saveSnapshot, { recursive: true });
+          const safeHost = (snapshot.hostname ?? target.host).replace(/[^A-Za-z0-9._-]/g, '_');
+          const outPath = joinPath(options.saveSnapshot, `${safeHost}.json`);
+          await writeFile(outPath, JSON.stringify(snapshot, null, 2), 'utf-8');
+          console.log(chalk.dim(`  Saved snapshot for ${target.host} → ${outPath}`));
+        } catch (err) {
+          console.log(chalk.yellow(`  Warning: failed to save snapshot for ${target.host}: ${(err as Error).message}`));
+        }
+      }
 
       const snapshotFs = new SnapshotFSProvider(snapshot);
       let installations = await adapterRegistry.detectAll({

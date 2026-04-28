@@ -117,7 +117,7 @@ export const zeroclawAdapter: AgentAdapter = {
       ],
       commands: [
         { id: 'zeroclaw-which', cmd: 'which', args: ['zeroclaw'], timeout: 3000 },
-        { id: 'zeroclaw-version', cmd: 'zeroclaw', args: ['--version'], timeout: 3000 },
+        { id: 'zeroclaw-version', cmd: 'zeroclaw', args: ['--version'], timeout: 15000 },
       ],
       directoryListings: [
         '~/.zeroclaw',

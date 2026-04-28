@@ -5,7 +5,7 @@ import type { ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { loadConfig } from '../core/config-loader.js';
-import { queryCliVersion } from './version-query.js';
+import { queryCliVersion, readPackageVersion } from './version-query.js';
 
 const RUNTIME_FILES = ['.env'];
 
@@ -65,6 +65,7 @@ export const lyrieAdapter: AgentAdapter = {
 
     const version =
       queryCliVersion(cliBinary, fs, { argSets: [['--version'], ['version']] }) ??
+      (await readPackageVersion(cliBinary, fs)) ??
       '0.1.0';
 
     return [{
@@ -129,6 +130,9 @@ export const lyrieAdapter: AgentAdapter = {
         '~/.lyrie/memory/lyrie-memory.db',
         '~/.lyrie/edits.json',
         '~/.lyrie/pairing.json',
+        // User-relative CLI install locations — kept in sync with USER_CLI_RELATIVE_PATHS
+        '~/.bun/bin/lyrie',
+        '~/.local/bin/lyrie',
       ],
       globPatterns: [
         '~/.lyrie/memory/archive/*.db',
@@ -137,8 +141,8 @@ export const lyrieAdapter: AgentAdapter = {
       ],
       commands: [
         { id: 'lyrie-which', cmd: 'which', args: ['lyrie'], timeout: 3000 },
-        { id: 'lyrie-version', cmd: 'lyrie', args: ['--version'], timeout: 3000 },
-        { id: 'lyrie-shield-version', cmd: 'lyrie-shield', args: ['--version'], timeout: 3000 },
+        { id: 'lyrie-version', cmd: 'lyrie', args: ['--version'], timeout: 15000 },
+        { id: 'lyrie-shield-version', cmd: 'lyrie-shield', args: ['--version'], timeout: 15000 },
       ],
       directoryListings: [
         '~/.lyrie',
