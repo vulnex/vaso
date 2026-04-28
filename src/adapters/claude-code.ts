@@ -157,6 +157,7 @@ export const claudeCodeAdapter: AgentAdapter = {
         '~/.claude/settings.local.json',
         '~/.claude/CLAUDE.md',
         '~/.claude/.credentials.json',
+        '~/.claude/mcp.json',
         '~/.claude.json',
       ],
       globPatterns: [

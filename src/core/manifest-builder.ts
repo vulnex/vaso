@@ -38,6 +38,15 @@ export function buildProbeManifest(adapters: AgentAdapter[]): ProbeManifest {
   merged.directoryListings.push('~/Library/LaunchAgents');
   merged.systemDirListings!.push('/Library/LaunchAgents', '/Library/LaunchDaemons');
 
+  // MCP host configs that aren't owned by any single adapter
+  // (Claude Desktop, Cursor, Windsurf — consumed by `vaso mcp scan`)
+  merged.filePaths.push(
+    '~/Library/Application Support/Claude/claude_desktop_config.json',
+    '~/.config/Claude/claude_desktop_config.json',
+    '~/.cursor/mcp.json',
+    '~/.codeium/windsurf/mcp_config.json',
+  );
+
   // Deduplicate
   merged.filePaths = [...new Set(merged.filePaths)];
   merged.globPatterns = [...new Set(merged.globPatterns)];

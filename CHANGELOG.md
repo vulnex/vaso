@@ -6,6 +6,16 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Probe manifest now collects MCP host configs.** The CLI-emitted manifest (`vaso probe manifest`, consumed by `vaso-probe`) was missing the cross-host MCP config files that `vaso mcp scan` reads, so snapshot-based scans under-reported MCP findings. Added:
+  - `~/.claude/mcp.json` (Claude Code adapter manifest)
+  - `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
+  - `~/.config/Claude/claude_desktop_config.json` (linux)
+  - `~/.cursor/mcp.json`
+  - `~/.codeium/windsurf/mcp_config.json`
+- **`vaso-probe` `DefaultManifest()` fallback corrected and extended.** Used when the probe is invoked without `-manifest`. Fixed wrong Claude Desktop linux path (`~/.config/claude-desktop/...` → `~/.config/Claude/...`, case-sensitive), added Claude Code, Codex, and Windsurf paths, and added `CLAUDE_`/`ANTHROPIC_`/`CODEX_`/`OPENAI_` env prefixes. Comment now states the fallback is minimum-viable and operators should prefer the CLI-emitted manifest.
+
 ## [0.3.0] - 2026-04-27
 
 ### Added

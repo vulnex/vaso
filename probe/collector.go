@@ -209,7 +209,10 @@ func collectEnv(prefixes []string) map[string]string {
 	return result
 }
 
-// DefaultManifest returns a manifest covering common agent framework paths.
+// DefaultManifest returns a minimum-viable manifest used when the probe is
+// invoked without -manifest. Operators should prefer `vaso probe manifest`
+// (emitted by the VASO CLI) for full coverage — this fallback only contains
+// the most common config paths and may lag the CLI-emitted manifest.
 func DefaultManifest() ProbeManifest {
 	return ProbeManifest{
 		FilePaths: []string{
@@ -235,10 +238,20 @@ func DefaultManifest() ProbeManifest {
 			"~/.hermes/config.yaml",
 			"~/.hermes/.env",
 			"~/.hermes/credentials.json",
-			// MCP configs
-			"~/.config/claude-desktop/claude_desktop_config.json",
+			// Claude Code
+			"~/.claude/settings.json",
+			"~/.claude/settings.local.json",
+			"~/.claude/.credentials.json",
+			"~/.claude/mcp.json",
+			"~/.claude.json",
+			// Codex
+			"~/.codex/config.toml",
+			"~/.codex/auth.json",
+			// MCP host configs
+			"~/Library/Application Support/Claude/claude_desktop_config.json",
+			"~/.config/Claude/claude_desktop_config.json",
 			"~/.cursor/mcp.json",
-			"~/.vscode/mcp.json",
+			"~/.codeium/windsurf/mcp_config.json",
 		},
 		GlobPatterns: []string{
 			"~/.openclaw/profiles/*.json",
@@ -279,6 +292,11 @@ func DefaultManifest() ProbeManifest {
 			"~/.hermes",
 			"~/.hermes/skills",
 			"~/.hermes/optional-skills",
+			"~/.claude",
+			"~/.claude/skills",
+			"~/.claude/plugins",
+			"~/.claude/agents",
+			"~/.codex",
 			"~/.vaso/plugins",
 		},
 		EnvPrefixes: []string{
@@ -290,6 +308,10 @@ func DefaultManifest() ProbeManifest {
 			"ZEROCLAW_",
 			"NEMOCLAW_",
 			"HERMES_",
+			"CLAUDE_",
+			"ANTHROPIC_",
+			"CODEX_",
+			"OPENAI_",
 			"MCP_",
 			"VASO_",
 		},
