@@ -68,7 +68,7 @@ export class SnapshotFSProvider implements FSProvider {
   async access(path: string): Promise<boolean> {
     const fileEntry = this.snapshot.files[path];
     if (fileEntry?.exists) return true;
-    if (path in this.snapshot.directories) return true;
+    if (this.directoryExists(path)) return true;
     // Check if any collected path starts with this as a directory
     if (this.hasChildPaths(path)) return true;
     return false;
@@ -83,7 +83,7 @@ export class SnapshotFSProvider implements FSProvider {
         isDirectory: () => false,
       };
     }
-    if (path in this.snapshot.directories || this.hasChildPaths(path)) {
+    if (this.directoryExists(path) || this.hasChildPaths(path)) {
       return {
         mode: 0o755,
         isFile: () => false,
@@ -138,13 +138,26 @@ export class SnapshotFSProvider implements FSProvider {
     return this.snapshot.privilege;
   }
 
+  /**
+   * Returns true only when the snapshot has an explicit, non-null listing for
+   * the given directory. Older probes (and the Go zero-value behaviour) could
+   * insert keys with `null` listings when `os.ReadDir` failed for a missing
+   * directory; treating those as "exists" produces false-positive agent
+   * detections, so they're filtered out here.
+   */
+  private directoryExists(path: string): boolean {
+    if (!(path in this.snapshot.directories)) return false;
+    const listing = this.snapshot.directories[path];
+    return Array.isArray(listing);
+  }
+
   private hasChildPaths(path: string): boolean {
     const prefix = path.endsWith('/') ? path : path + '/';
     for (const [key, entry] of Object.entries(this.snapshot.files)) {
       if (key.startsWith(prefix) && entry.exists) return true;
     }
-    for (const key of Object.keys(this.snapshot.directories)) {
-      if (key.startsWith(prefix)) return true;
+    for (const [key, listing] of Object.entries(this.snapshot.directories)) {
+      if (key.startsWith(prefix) && Array.isArray(listing)) return true;
     }
     return false;
   }
