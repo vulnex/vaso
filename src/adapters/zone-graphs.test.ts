@@ -14,6 +14,7 @@ import { nanoclawChecks } from '../checks/nanoclaw/index.js';
 import { ironclawChecks } from '../checks/ironclaw/index.js';
 import { nanobotChecks } from '../checks/nanobot/index.js';
 import { zeroclawChecks } from '../checks/zeroclaw/index.js';
+import { lyrieChecks } from '../checks/lyrie/index.js';
 import { policyChecks } from '../checks/policy/index.js';
 import { advisoryChecks } from '../checks/advisory/index.js';
 import { claudeCodeChecks } from '../checks/claude-code/index.js';
@@ -26,6 +27,7 @@ import { nanobotAdapter } from './nanobot.js';
 import { zeroclawAdapter } from './zeroclaw.js';
 import { nemoclawAdapter } from './nemoclaw.js';
 import { hermesAdapter } from './hermes.js';
+import { lyrieAdapter } from './lyrie.js';
 import { claudeCodeAdapter } from './claude-code.js';
 import { codexAdapter } from './codex.js';
 
@@ -34,14 +36,14 @@ function makeFullRegistries() {
   for (const set of [
     configChecks, skillChecks, iocChecks, networkChecks, runtimeChecks,
     mcpChecks, openclawChecks, nanoclawChecks, ironclawChecks, nanobotChecks,
-    zeroclawChecks, policyChecks, advisoryChecks, claudeCodeChecks, codexChecks,
+    zeroclawChecks, lyrieChecks, policyChecks, advisoryChecks, claudeCodeChecks, codexChecks,
   ]) {
     checks.registerAll(set);
   }
   const adapters = new AdapterRegistry();
   for (const a of [
     openclawAdapter, nanoclawAdapter, picoclawAdapter, ironclawAdapter,
-    nanobotAdapter, zeroclawAdapter, nemoclawAdapter, hermesAdapter,
+    nanobotAdapter, zeroclawAdapter, nemoclawAdapter, hermesAdapter, lyrieAdapter,
     claudeCodeAdapter, codexAdapter,
   ]) {
     adapters.register(a);
@@ -60,6 +62,7 @@ describe('adapter ZoneGraphs (real check registry)', () => {
     ['nemoclaw', nemoclawAdapter, 5],
     ['ironclaw', ironclawAdapter, 4],
     ['nanobot', nanobotAdapter, 4],
+    ['lyrie', lyrieAdapter, 5],
     ['claude-code', claudeCodeAdapter, 4],
     ['codex', codexAdapter, 4],
   ] as const)('%s graph has the expected zone count', (_name, adapter, zoneCount) => {
@@ -80,7 +83,8 @@ describe('adapter ZoneGraphs (real check registry)', () => {
 
   it('every custom graph declares at least one inversion edge', () => {
     const customAdapters = [
-      nemoclawAdapter, ironclawAdapter, nanobotAdapter, claudeCodeAdapter, codexAdapter,
+      nemoclawAdapter, ironclawAdapter, nanobotAdapter, lyrieAdapter,
+      claudeCodeAdapter, codexAdapter,
     ];
     for (const adapter of customAdapters) {
       const graph = adapter.getZoneGraph!();
@@ -96,6 +100,7 @@ describe('adapter ZoneGraphs (real check registry)', () => {
       ['nemoclaw', nemoclawAdapter],
       ['ironclaw', ironclawAdapter],
       ['nanobot', nanobotAdapter],
+      ['lyrie', lyrieAdapter],
       ['claude-code', claudeCodeAdapter],
       ['codex', codexAdapter],
     ] as const;
