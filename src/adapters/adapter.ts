@@ -15,8 +15,10 @@ export interface AgentAdapter {
   getGatewayInfo(config: Record<string, unknown>): GatewayInfo | undefined;
   /** Extract the LLM models the agent is configured to use. Optional — adapters
    *  whose configs don't expose a model field can omit this. The `fs` argument
-   *  is passed for adapters that need to read env vars (e.g. ANTHROPIC_MODEL). */
-  getModels?(configs: ParsedConfig[], fs?: import('../core/fs-provider.js').FSProvider): ModelRef[];
+   *  is passed for adapters that need to read env vars (e.g. ANTHROPIC_MODEL)
+   *  or walk auxiliary files (e.g. codex's session jsonls). May be sync or
+   *  async; callers should `await`. */
+  getModels?(configs: ParsedConfig[], fs?: import('../core/fs-provider.js').FSProvider): ModelRef[] | Promise<ModelRef[]>;
   getMemoryFiles?(installDir: string): string[];
   getCredentialPaths?(installDir: string): string[];
   getCLICommand?(): string;
