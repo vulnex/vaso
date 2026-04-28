@@ -1,4 +1,4 @@
-import type { AgentType, AgentInstallation, GatewayInfo, ZoneGraph } from '../core/types.js';
+import type { AgentType, AgentInstallation, GatewayInfo, ModelRef, ParsedConfig, ZoneGraph } from '../core/types.js';
 
 export interface DetectOptions {
   allUsers?: boolean;
@@ -13,6 +13,10 @@ export interface AgentAdapter {
   getConfigPaths(): string[];
   getSkillsDir(installDir: string): string | undefined;
   getGatewayInfo(config: Record<string, unknown>): GatewayInfo | undefined;
+  /** Extract the LLM models the agent is configured to use. Optional — adapters
+   *  whose configs don't expose a model field can omit this. The `fs` argument
+   *  is passed for adapters that need to read env vars (e.g. ANTHROPIC_MODEL). */
+  getModels?(configs: ParsedConfig[], fs?: import('../core/fs-provider.js').FSProvider): ModelRef[];
   getMemoryFiles?(installDir: string): string[];
   getCredentialPaths?(installDir: string): string[];
   getCLICommand?(): string;

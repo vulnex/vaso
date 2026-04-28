@@ -86,4 +86,8 @@ export class LocalFSProvider implements FSProvider {
   homedir(): string {
     return osHomedir();
   }
+
+  getEnv(key: string): string | undefined {
+    return process.env[key];
+  }
 }

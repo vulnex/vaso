@@ -47,6 +47,7 @@ function makeFs(o: FsOverrides = {}): FSProvider {
       throw new Error('not found');
     }),
     homedir: () => '/home/test',
+    getEnv: vi.fn(() => undefined),
     platform: 'linux',
   } as FSProvider;
 }

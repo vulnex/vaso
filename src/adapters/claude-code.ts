@@ -1,6 +1,6 @@
 import { join, basename } from 'node:path';
 import type { AgentAdapter, DetectOptions } from './adapter.js';
-import type { AgentInstallation, GatewayInfo, ZoneGraph } from '../core/types.js';
+import type { AgentInstallation, GatewayInfo, ModelRef, ParsedConfig, ZoneGraph } from '../core/types.js';
 import type { ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
@@ -53,6 +53,38 @@ async function loadSettingsFiles(dir: string, fs: FSProvider) {
   return configFiles;
 }
 
+/**
+ * Infer the Claude model the user is most likely running on by default, based
+ * on persisted plan/migration flags in ~/.claude.json. Returned with
+ * via='plan default' so callers can present it as a derived hint rather than
+ * an explicit setting. Returns undefined when no plan signal is available.
+ */
+function inferPlanDefaultModel(rootState?: Record<string, unknown>): ModelRef | undefined {
+  if (!rootState) return undefined;
+  const flag = (k: string) => rootState[k] === true;
+  // Migration flags Claude Code sets when it has moved a user's defaults
+  // forward to a new generation. Most-recent wins.
+  const opusVersion = flag('opus47MigrationComplete')
+    ? '4.7'
+    : flag('opus45MigrationComplete') || flag('opusProMigrationComplete')
+      ? '4.5'
+      : undefined;
+  const sonnetVersion = flag('sonnet1m45MigrationComplete') || flag('sonnet45MigrationComplete')
+    ? '4.5'
+    : undefined;
+  const onOpusPlan = flag('hasOpusPlanDefault') || flag('opusProMigrationComplete');
+  if (onOpusPlan && opusVersion) {
+    return { id: `claude-opus-${opusVersion}`, provider: 'anthropic', via: 'plan default' };
+  }
+  if (sonnetVersion) {
+    return { id: `claude-sonnet-${sonnetVersion}`, provider: 'anthropic', via: 'plan default' };
+  }
+  if (opusVersion) {
+    return { id: `claude-opus-${opusVersion}`, provider: 'anthropic', via: 'plan default' };
+  }
+  return undefined;
+}
+
 export const claudeCodeAdapter: AgentAdapter = {
   agent: 'claude-code',
   displayName: 'Claude Code',
@@ -90,6 +122,7 @@ export const claudeCodeAdapter: AgentAdapter = {
         installDir: claudeDir,
         configFiles,
         skillsDir,
+        models: this.getModels?.(configFiles, fs),
         user: options?.allUsers ? user : undefined,
         cliBinary,
       });
@@ -107,6 +140,7 @@ export const claudeCodeAdapter: AgentAdapter = {
           installDir: projectClaudeDir,
           configFiles: projectConfigs,
           skillsDir: this.getSkillsDir(projectClaudeDir),
+          models: this.getModels?.(projectConfigs, fs),
           profile: 'project',
         });
       }
@@ -130,6 +164,38 @@ export const claudeCodeAdapter: AgentAdapter = {
 
   getGatewayInfo(_config: Record<string, unknown>): GatewayInfo | undefined {
     return undefined;
+  },
+
+  getModels(configs: ParsedConfig[], fs?: FSProvider): ModelRef[] {
+    // Claude Code rarely persists the active model: the `/model` runtime
+    // command doesn't write back to settings.json, so most users have no
+    // explicit `model` field. We layer signals from most-explicit to most-
+    // inferred and stop at the first that yields anything.
+    //
+    //   1. settings.{json,local.json}.model + .fallbackModel  (explicit)
+    //   2. ~/.claude.json top-level `model` field             (rare)
+    //   3. ANTHROPIC_MODEL env var                            (explicit override)
+    //   4. Plan-default inference from migration flags        (best-effort)
+    const out: ModelRef[] = [];
+
+    for (const file of configs) {
+      if (!file.filePath.endsWith('settings.json') && !file.filePath.endsWith('settings.local.json')) continue;
+      const id = file.data?.model as string | undefined;
+      if (id) out.push({ id, provider: 'anthropic' });
+      const fallback = file.data?.fallbackModel as string | undefined;
+      if (fallback && fallback !== id) out.push({ id: fallback, provider: 'anthropic', via: 'fallback' });
+    }
+    if (out.length > 0) return out;
+
+    const rootState = configs.find(c => c.filePath.endsWith(ROOT_STATE_FILE));
+    const rootModel = rootState?.data?.model as string | undefined;
+    if (rootModel) return [{ id: rootModel, provider: 'anthropic' }];
+
+    const envModel = fs?.getEnv?.('ANTHROPIC_MODEL');
+    if (envModel) return [{ id: envModel, provider: 'anthropic', via: 'ANTHROPIC_MODEL' }];
+
+    const inferred = inferPlanDefaultModel(rootState?.data);
+    return inferred ? [inferred] : [];
   },
 
   getMemoryFiles(installDir: string): string[] {

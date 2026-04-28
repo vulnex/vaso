@@ -130,6 +130,10 @@ export class SnapshotFSProvider implements FSProvider {
     return this.snapshot.homedir;
   }
 
+  getEnv(key: string): string | undefined {
+    return this.snapshot.env?.[key];
+  }
+
   get hostname(): string {
     return this.snapshot.hostname;
   }
