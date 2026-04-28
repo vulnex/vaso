@@ -201,6 +201,28 @@ describe('SnapshotFSProvider', () => {
       // /app is also an implicit parent
       expect(await provider.access('/app')).toBe(true);
     });
+
+    it('returns false for directory keys with null listings (failed probe)', async () => {
+      // Older probe versions inserted a key with null when os.ReadDir failed
+      // because the dir didn't exist; access() must not treat those as present.
+      const provider = new SnapshotFSProvider(
+        makeSnapshot({
+          files: {
+            '/home/u/.lyrie/.env': { content: '', mode: 0o600, exists: false },
+            '/home/u/.lyrie/pairing.json': { content: '', mode: 0o600, exists: false },
+          },
+          directories: {
+            '/home/u/.lyrie': null as unknown as string[],
+            '/home/u/.lyrie/memory': null as unknown as string[],
+            '/home/u/.lyrie/migrations': null as unknown as string[],
+          },
+        }),
+      );
+      expect(await provider.access('/home/u/.lyrie')).toBe(false);
+      expect(await provider.access('/home/u/.lyrie/memory')).toBe(false);
+      expect(await provider.access('/home/u/.lyrie/migrations')).toBe(false);
+      expect(await provider.access('/home/u/.lyrie/pairing.json')).toBe(false);
+    });
   });
 
   // ---------------------------------------------------------------------------

@@ -107,15 +107,22 @@ func Collect(manifest ProbeManifest, escalate bool) ProbeSnapshot {
 		}
 	}
 
-	// Expand and collect directory listings
+	// Expand and collect directory listings. Only non-nil listings are stored:
+	// a nil result means the directory doesn't exist or can't be read, and
+	// inserting a key with a nil value would cause downstream consumers to
+	// report the directory as "present".
 	expandedDirs := expandPaths(manifest.DirectoryListings, homes)
 	for _, dir := range expandedDirs {
-		snapshot.Directories[dir] = collectDirectory(dir)
+		if listing := collectDirectory(dir); listing != nil {
+			snapshot.Directories[dir] = listing
+		}
 	}
 
 	// Collect system directory listings (not expanded per-user)
 	for _, dir := range manifest.SystemDirListings {
-		snapshot.Directories[dir] = collectDirectory(dir)
+		if listing := collectDirectory(dir); listing != nil {
+			snapshot.Directories[dir] = listing
+		}
 	}
 
 	// Run allowed commands with PATH extended to include per-user bin dirs.
@@ -190,14 +197,19 @@ func collectFile(path string) FileEntry {
 	}
 }
 
-// collectDirectory lists the entries of a directory.
+// collectDirectory lists the entries of a directory. Returns nil if the
+// directory doesn't exist or cannot be read; the caller treats that as a
+// signal to skip storing the entry entirely so that consumers don't mistake
+// "we tried to list this and it wasn't there" for "this directory exists".
 func collectDirectory(dir string) []string {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil
 	}
 
-	var names []string
+	// Empty but readable directory: return a non-nil empty slice so the caller
+	// can distinguish "exists, no entries" from "doesn't exist".
+	names := make([]string, 0, len(entries))
 	for _, entry := range entries {
 		name := entry.Name()
 		if entry.IsDir() {
