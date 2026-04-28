@@ -144,6 +144,7 @@ describe('Claude Code adapter', () => {
   it('returns probe manifest with expected paths', () => {
     const manifest = claudeCodeAdapter.getProbeManifest!();
     expect(manifest.filePaths).toContain('~/.claude/settings.json');
+    expect(manifest.filePaths).toContain('~/.claude/mcp.json');
     expect(manifest.filePaths).toContain('~/.claude.json');
     expect(manifest.envPrefixes).toContain('ANTHROPIC_');
     expect(manifest.envPrefixes).toContain('CLAUDE_');
