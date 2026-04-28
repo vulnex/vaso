@@ -6,6 +6,21 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **Lyrie agent adapter + 18 security checks (`LY-001`–`LY-018`).** Lyrie (`~/.lyrie/`) is a Bun turborepo with a Rust Shield (Layer 1), a 10-channel gateway (Telegram / WhatsApp / Discord / Slack / Matrix / Mattermost / IRC / Feishu / Rocket.Chat / WebChat), MCP client+server, diff-view EditEngine with operator approval, and cross-agent migration importers. New check category `lyrie` covers:
+  - **LY-001/002** Shield-bypass surface (`LYRIE_SHIELD_MODE=passive`, missing `lyrie-shield` binary)
+  - **LY-003** DM pairing policy `open` or unset on any of the 10 channels (Lyrie's documented legacy default — anyone can DM the agent)
+  - **LY-004/005** `~/.lyrie/pairing.json` permissions and stale pending pairings
+  - **LY-006** Plaintext provider keys / channel tokens with `.env` mode wider than `0600`
+  - **LY-007/008/009** Unused provider keys, plaintext Daytona/Modal backend creds, `LYRIE_LOCAL_DRY_RUN=true`
+  - **LY-010/011** WebChat reachable on a public host without auth, permissive `LYRIE_WEBCHAT_ORIGINS`
+  - **LY-012/013** Stale pending edit approvals and over-permissive `~/.lyrie/edits.json` (TOCTOU diff-swap vector)
+  - **LY-014/015** Executable `.ts/.js/.py/.sh` skill files outside Shield scope; group/world-writable skills directory
+  - **LY-016/017** Cross-agent migration manifests (informational) and migrations that completed with errors
+  - **LY-018** `NODE_ENV=development` while live channel tokens are configured
+- Custom 5-zone graph for Lyrie (`Network → Channels → Shield → Engine → Memory`) with two inversion edges: `shield bypass` (LY-001/002) and `DM pairing bypass` (LY-003). Privilege-gradient diagrams now make the Shield Doctrine violation visible.
+
 ### Fixed
 
 - **Probe manifest now collects MCP host configs.** The CLI-emitted manifest (`vaso probe manifest`, consumed by `vaso-probe`) was missing the cross-host MCP config files that `vaso mcp scan` reads, so snapshot-based scans under-reported MCP findings. Added:

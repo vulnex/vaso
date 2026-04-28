@@ -38,6 +38,7 @@ const CATEGORY_LABELS: Record<CheckCategory, string> = {
   ironclaw: 'IronClaw',
   nanobot: 'Nanobot',
   zeroclaw: 'ZeroClaw',
+  lyrie: 'Lyrie',
   advisory: 'Advisories',
   'coding-agent': 'Coding Agent',
 };

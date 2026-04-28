@@ -10,6 +10,7 @@ import { nanoclawChecks } from './nanoclaw/index.js';
 import { ironclawChecks } from './ironclaw/index.js';
 import { nanobotChecks } from './nanobot/index.js';
 import { zeroclawChecks } from './zeroclaw/index.js';
+import { lyrieChecks } from './lyrie/index.js';
 import { policyChecks } from './policy/index.js';
 import { advisoryChecks } from './advisory/index.js';
 import { claudeCodeChecks } from './claude-code/index.js';
@@ -27,6 +28,7 @@ export function registerAllChecks(): void {
   checkRegistry.registerAll(ironclawChecks);
   checkRegistry.registerAll(nanobotChecks);
   checkRegistry.registerAll(zeroclawChecks);
+  checkRegistry.registerAll(lyrieChecks);
   checkRegistry.registerAll(policyChecks);
   checkRegistry.registerAll(advisoryChecks);
   checkRegistry.registerAll(claudeCodeChecks);

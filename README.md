@@ -63,6 +63,7 @@ See [doc/user-guide.md](doc/user-guide.md) for full option reference.
 - **ZeroClaw** — `~/.zeroclaw/` (Composio integration)
 - **NemoClaw** — `~/.nemoclaw/` (NVIDIA NIM, GPU isolation)
 - **Hermes** — `~/.hermes/` (API-server gateway model)
+- **Lyrie** — `~/.lyrie/` (Bun turborepo, Rust Shield Layer 1, 10-channel gateway)
 
 **Coding agents**
 
@@ -73,7 +74,7 @@ See [doc/user-guide.md](doc/user-guide.md) for full option reference.
 
 ## Security Checks
 
-146 checks organized into 12 categories:
+175 checks organized into 15 categories:
 
 | Category | IDs | Count | Description |
 |----------|-----|-------|-------------|
@@ -86,7 +87,7 @@ See [doc/user-guide.md](doc/user-guide.md) for full option reference.
 | MCP Server | MCP-001–023 | 23 | Transport security, credential exposure, tool injection, toxic flows, rug pull, stdio shell-c, world-writable command paths, streamable-HTTP origin pinning |
 | Advisory | ADV-001–005 | 5 | Vulnerability/CVE detection with version awareness |
 | Coding Agent | CC-001–012, CDX-001–009 | 21 | Claude Code (12): bypassPermissions, broad Bash allow, unsafe hooks, plaintext keys, MCP pinning, project-MCP auto-trust, helper perms, missing deny rules, additionalDirectories, status-line safety, sub-agent prompt injection, CLAUDE.md secrets. Codex (9): approval policy, sandbox mode, auth file perms, MCP pinning, shell-env policy, trusted-projects scope, AGENTS.md secrets, profile downgrade, unsafe notify command |
-| Agent-Specific | IC, NB, ZC | 38 | Per-framework checks (IronClaw 12, Nanobot 12, ZeroClaw 14) |
+| Agent-Specific | IC, NB, ZC, LY | 56 | Per-framework checks (IronClaw 12, Nanobot 12, ZeroClaw 14, Lyrie 18) |
 
 Server-only checks (gateway/network/runtime concepts) are automatically excluded for coding agents to avoid false positives — Claude Code and Codex have a different threat model than autonomous server agents.
 
