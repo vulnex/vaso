@@ -57,6 +57,20 @@ export interface GatewayInfo {
   tls?: boolean;
 }
 
+/**
+ * One model the agent is configured to use. Shape is intentionally flat so
+ * that future audit/policy work (deprecation flags, license, CVE matching)
+ * can layer on without churning callers.
+ */
+export interface ModelRef {
+  /** Model identifier as it appears in the config (e.g. "claude-opus-4-5", "nvidia/nemotron-3-super-120b-a12b"). */
+  id: string;
+  /** Provider/router when separable from the id (e.g. "ollama", "anthropic", "nvidia-nim"). */
+  provider?: string;
+  /** Disambiguator when an agent declares the same model under multiple slots — e.g. nemoclaw sandbox name, openclaw profile. */
+  via?: string;
+}
+
 export interface AgentInstallation {
   agent: AgentType;
   agentName?: string;
@@ -66,6 +80,7 @@ export interface AgentInstallation {
   skillsDir?: string;
   skillsDirs?: string[];
   gateway?: GatewayInfo;
+  models?: ModelRef[];
   profile?: string;
   user?: string;
   appBundle?: string;

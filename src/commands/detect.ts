@@ -284,6 +284,17 @@ function renderTerminal(installations: AgentInstallation[], verbose?: boolean): 
     } else {
       console.log(`  ${'Gateway:'.padEnd(14)} ${chalk.dim('none')}`);
     }
+
+    if (inst.models && inst.models.length > 0) {
+      const label = inst.models.length === 1 ? 'Model:' : `Models (${inst.models.length}):`;
+      console.log(`  ${label.padEnd(14)}`);
+      for (const m of inst.models) {
+        const id = m.provider ? `${m.provider}/${m.id}` : m.id;
+        const suffix = m.via ? chalk.dim(` (${m.via})`) : '';
+        console.log(`    ${id}${suffix}`);
+      }
+    }
+
     console.log('');
   }
 

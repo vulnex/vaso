@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import type { AgentAdapter, DetectOptions } from './adapter.js';
-import type { AgentInstallation, GatewayInfo, ZoneGraph } from '../core/types.js';
+import type { AgentInstallation, GatewayInfo, ModelRef, ParsedConfig, ZoneGraph } from '../core/types.js';
 import type { ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
@@ -84,6 +84,7 @@ export const nanobotAdapter: AgentAdapter = {
       configFiles,
       skillsDir: this.getSkillsDir(nanobotDir),
       gateway: this.getGatewayInfo(merged),
+      models: this.getModels?.(configFiles),
       cliBinary,
       version,
     }];
@@ -110,6 +111,32 @@ export const nanobotAdapter: AgentAdapter = {
       };
     }
     return undefined;
+  },
+
+  getModels(configs: ParsedConfig[]): ModelRef[] {
+    const main = configs.find(c => c.filePath.endsWith('config.json'));
+    const agents = main?.data?.agents as Record<string, unknown> | undefined;
+    const out: ModelRef[] = [];
+    const seen = new Set<string>();
+    const push = (raw: string, via?: string) => {
+      // Nanobot stores models as "<provider>/<id>" (e.g. "anthropic/claude-opus-4-5").
+      const slash = raw.indexOf('/');
+      const provider = slash !== -1 ? raw.slice(0, slash) : undefined;
+      const id = slash !== -1 ? raw.slice(slash + 1) : raw;
+      const key = `${provider ?? ''}|${id}|${via ?? ''}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      out.push({ id, provider, via });
+    };
+    const defaults = agents?.defaults as Record<string, unknown> | undefined;
+    const defaultModel = defaults?.model as string | undefined;
+    if (defaultModel) push(defaultModel);
+    for (const [name, cfg] of Object.entries(agents ?? {})) {
+      if (name === 'defaults') continue;
+      const m = (cfg as Record<string, unknown> | undefined)?.model as string | undefined;
+      if (m) push(m, name);
+    }
+    return out;
   },
 
   getMemoryFiles(installDir: string): string[] {

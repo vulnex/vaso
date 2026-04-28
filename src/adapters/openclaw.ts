@@ -1,6 +1,6 @@
 import { join, basename } from 'node:path';
 import type { AgentAdapter, DetectOptions } from './adapter.js';
-import type { AgentInstallation, GatewayInfo } from '../core/types.js';
+import type { AgentInstallation, GatewayInfo, ModelRef, ParsedConfig } from '../core/types.js';
 import type { ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
@@ -189,6 +189,7 @@ export const openclawAdapter: AgentAdapter = {
           configFiles,
           skillsDir,
           gateway: this.getGatewayInfo(merged),
+          models: this.getModels?.(configFiles),
           profile,
           user: options?.allUsers ? user : undefined,
           appBundle,
@@ -242,6 +243,7 @@ export const openclawAdapter: AgentAdapter = {
                 skillsDir: agentSkillsDirs.length > 0 ? agentSkillsDirs[agentSkillsDirs.length - 1] : undefined,
                 skillsDirs: agentSkillsDirs.length > 0 ? agentSkillsDirs : undefined,
                 gateway: this.getGatewayInfo(agentMerged),
+                models: this.getModels?.([...configFiles, ...agentConfigFiles]),
                 profile,
                 user: options?.allUsers ? user : undefined,
                 appBundle,
@@ -299,6 +301,23 @@ export const openclawAdapter: AgentAdapter = {
       authMode: (gw.auth as Record<string, unknown>)?.mode as string | undefined,
       tls: gw.tls as boolean | undefined,
     };
+  },
+
+  getModels(configs: ParsedConfig[]): ModelRef[] {
+    const main = configs.find(c => c.filePath.endsWith('openclaw.json'));
+    const providers = (main?.data?.models as Record<string, unknown> | undefined)
+      ?.providers as Record<string, unknown> | undefined;
+    if (!providers) return [];
+    const out: ModelRef[] = [];
+    for (const [provider, providerCfg] of Object.entries(providers)) {
+      const list = (providerCfg as Record<string, unknown> | undefined)?.models;
+      if (!Array.isArray(list)) continue;
+      for (const m of list) {
+        const id = (m?.id ?? m?.name) as string | undefined;
+        if (id) out.push({ id, provider });
+      }
+    }
+    return out;
   },
 
   getMemoryFiles(installDir: string): string[] {

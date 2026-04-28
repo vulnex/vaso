@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import type { AgentAdapter, DetectOptions } from './adapter.js';
-import type { AgentInstallation, GatewayInfo, ZoneGraph } from '../core/types.js';
+import type { AgentInstallation, GatewayInfo, ModelRef, ParsedConfig, ZoneGraph } from '../core/types.js';
 import type { ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
@@ -234,6 +234,7 @@ export const nemoclawAdapter: AgentAdapter = {
       configFiles,
       cliBinary,
       version,
+      models: this.getModels?.(configFiles),
     }];
   },
 
@@ -255,6 +256,20 @@ export const nemoclawAdapter: AgentAdapter = {
   getGatewayInfo(_config: Record<string, unknown>): GatewayInfo | undefined {
     // NemoClaw doesn't expose a gateway on the host — agent runs inside sandbox
     return undefined;
+  },
+
+  getModels(configs: ParsedConfig[]): ModelRef[] {
+    const sb = configs.find(c => c.filePath.endsWith('sandboxes.json'));
+    const map = sb?.data?.sandboxes as Record<string, unknown> | undefined;
+    if (!map) return [];
+    const out: ModelRef[] = [];
+    for (const [name, cfg] of Object.entries(map)) {
+      const c = cfg as Record<string, unknown> | undefined;
+      const id = c?.model as string | undefined;
+      if (!id) continue;
+      out.push({ id, provider: c?.provider as string | undefined, via: name });
+    }
+    return out;
   },
 
   getCredentialPaths(installDir: string): string[] {

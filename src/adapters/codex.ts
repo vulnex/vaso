@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import type { AgentAdapter, DetectOptions } from './adapter.js';
-import type { AgentInstallation, GatewayInfo, ZoneGraph } from '../core/types.js';
+import type { AgentInstallation, GatewayInfo, ModelRef, ParsedConfig, ZoneGraph } from '../core/types.js';
 import type { ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
@@ -75,6 +75,7 @@ export const codexAdapter: AgentAdapter = {
         version,
         installDir: codexDir,
         configFiles,
+        models: this.getModels?.(configFiles),
         user: options?.allUsers ? user : undefined,
         cliBinary,
       });
@@ -95,6 +96,15 @@ export const codexAdapter: AgentAdapter = {
 
   getGatewayInfo(_config: Record<string, unknown>): GatewayInfo | undefined {
     return undefined;
+  },
+
+  getModels(configs: ParsedConfig[]): ModelRef[] {
+    const main = configs.find(c => c.filePath.endsWith('config.toml'));
+    if (!main) return [];
+    const id = main.data?.model as string | undefined;
+    if (!id) return [];
+    const provider = main.data?.model_provider as string | undefined;
+    return [{ id, provider }];
   },
 
   getMemoryFiles(installDir: string): string[] {

@@ -26,6 +26,9 @@ export interface FSProvider {
   realpath(path: string): Promise<string>;
   exec(cmd: string, args: string[], options?: ExecOptions): Promise<ExecResult>;
   execSync(cmd: string, args: string[], options?: ExecOptions): string;
+  /** Look up an environment variable. SnapshotFSProvider reads from the
+   *  probe-collected env section; LocalFSProvider reads from process.env. */
+  getEnv(key: string): string | undefined;
   readonly platform: NodeJS.Platform;
   homedir(): string;
 }
