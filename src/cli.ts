@@ -12,6 +12,7 @@ import { hermesAdapter } from './adapters/hermes.js';
 import { lyrieAdapter } from './adapters/lyrie.js';
 import { claudeCodeAdapter } from './adapters/claude-code.js';
 import { codexAdapter } from './adapters/codex.js';
+import { opencodeAdapter } from './adapters/opencode.js';
 import { registerAllChecks } from './checks/index.js';
 import { initIOCDatabase } from './ioc/database.js';
 import { isFeedStale } from './ioc/updater.js';
@@ -53,6 +54,7 @@ adapterRegistry.register(hermesAdapter);
 adapterRegistry.register(lyrieAdapter);
 adapterRegistry.register(claudeCodeAdapter);
 adapterRegistry.register(codexAdapter);
+adapterRegistry.register(opencodeAdapter);
 registerAllChecks();
 assertZoneGraphsValid(adapterRegistry, checkRegistry, defaultZoneGraph);
 
@@ -127,7 +129,7 @@ program.helpInformation = function () {
 program
   .command('scan')
   .description('Scan installed AI agents for security issues')
-  .option('-a, --agent <type>', 'scan a specific agent (openclaw, nanoclaw, picoclaw, ironclaw, nanobot, zeroclaw, nemoclaw, hermes, lyrie, claude-code, codex)')
+  .option('-a, --agent <type>', 'scan a specific agent (openclaw, nanoclaw, picoclaw, ironclaw, nanobot, zeroclaw, nemoclaw, hermes, lyrie, claude-code, codex, opencode)')
   .option('-f, --format <format>', 'output format (terminal, json, sarif, markdown, html, csv, junit)', 'terminal')
   .option('-o, --output <file>', 'write report to file')
   .option('--save-baseline', 'save scan results as baseline')
@@ -151,7 +153,7 @@ program
 program
   .command('detect')
   .description('Detect installed AI agents')
-  .option('-a, --agent <type>', 'detect a specific agent only (openclaw, nanoclaw, picoclaw, ironclaw, nanobot, zeroclaw, nemoclaw, hermes, lyrie, claude-code, codex)')
+  .option('-a, --agent <type>', 'detect a specific agent only (openclaw, nanoclaw, picoclaw, ironclaw, nanobot, zeroclaw, nemoclaw, hermes, lyrie, claude-code, codex, opencode)')
   .option('-f, --format <format>', 'output format (terminal, json)', 'terminal')
   .option('--all-users', 'detect across all user accounts (requires root/sudo)')
   .option('--verbose', 'show search paths checked for each adapter')

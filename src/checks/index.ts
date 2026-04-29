@@ -15,6 +15,7 @@ import { policyChecks } from './policy/index.js';
 import { advisoryChecks } from './advisory/index.js';
 import { claudeCodeChecks } from './claude-code/index.js';
 import { codexChecks } from './codex/index.js';
+import { opencodeChecks } from './opencode/index.js';
 
 export function registerAllChecks(): void {
   checkRegistry.registerAll(configChecks);
@@ -33,4 +34,5 @@ export function registerAllChecks(): void {
   checkRegistry.registerAll(advisoryChecks);
   checkRegistry.registerAll(claudeCodeChecks);
   checkRegistry.registerAll(codexChecks);
+  checkRegistry.registerAll(opencodeChecks);
 }

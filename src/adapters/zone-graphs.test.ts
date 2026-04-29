@@ -19,6 +19,7 @@ import { policyChecks } from '../checks/policy/index.js';
 import { advisoryChecks } from '../checks/advisory/index.js';
 import { claudeCodeChecks } from '../checks/claude-code/index.js';
 import { codexChecks } from '../checks/codex/index.js';
+import { opencodeChecks } from '../checks/opencode/index.js';
 import { openclawAdapter } from './openclaw.js';
 import { nanoclawAdapter } from './nanoclaw.js';
 import { picoclawAdapter } from './picoclaw.js';
@@ -30,6 +31,7 @@ import { hermesAdapter } from './hermes.js';
 import { lyrieAdapter } from './lyrie.js';
 import { claudeCodeAdapter } from './claude-code.js';
 import { codexAdapter } from './codex.js';
+import { opencodeAdapter } from './opencode.js';
 
 function makeFullRegistries() {
   const checks = new CheckRegistry();
@@ -37,6 +39,7 @@ function makeFullRegistries() {
     configChecks, skillChecks, iocChecks, networkChecks, runtimeChecks,
     mcpChecks, openclawChecks, nanoclawChecks, ironclawChecks, nanobotChecks,
     zeroclawChecks, lyrieChecks, policyChecks, advisoryChecks, claudeCodeChecks, codexChecks,
+    opencodeChecks,
   ]) {
     checks.registerAll(set);
   }
@@ -44,7 +47,7 @@ function makeFullRegistries() {
   for (const a of [
     openclawAdapter, nanoclawAdapter, picoclawAdapter, ironclawAdapter,
     nanobotAdapter, zeroclawAdapter, nemoclawAdapter, hermesAdapter, lyrieAdapter,
-    claudeCodeAdapter, codexAdapter,
+    claudeCodeAdapter, codexAdapter, opencodeAdapter,
   ]) {
     adapters.register(a);
   }
@@ -65,6 +68,7 @@ describe('adapter ZoneGraphs (real check registry)', () => {
     ['lyrie', lyrieAdapter, 5],
     ['claude-code', claudeCodeAdapter, 4],
     ['codex', codexAdapter, 4],
+    ['opencode', opencodeAdapter, 4],
   ] as const)('%s graph has the expected zone count', (_name, adapter, zoneCount) => {
     const graph = adapter.getZoneGraph?.();
     expect(graph).toBeDefined();
@@ -84,7 +88,7 @@ describe('adapter ZoneGraphs (real check registry)', () => {
   it('every custom graph declares at least one inversion edge', () => {
     const customAdapters = [
       nemoclawAdapter, ironclawAdapter, nanobotAdapter, lyrieAdapter,
-      claudeCodeAdapter, codexAdapter,
+      claudeCodeAdapter, codexAdapter, opencodeAdapter,
     ];
     for (const adapter of customAdapters) {
       const graph = adapter.getZoneGraph!();
@@ -103,6 +107,7 @@ describe('adapter ZoneGraphs (real check registry)', () => {
       ['lyrie', lyrieAdapter],
       ['claude-code', claudeCodeAdapter],
       ['codex', codexAdapter],
+      ['opencode', opencodeAdapter],
     ] as const;
     for (const [name, adapter] of customAdapters) {
       const graph = adapter.getZoneGraph!();

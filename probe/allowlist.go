@@ -21,6 +21,7 @@ var commandAllowlist = map[string]bool{
 	"lyrie-shield": true,
 	"claude":       true,
 	"codex":        true,
+	"opencode":     true,
 	"cat":          true,
 	"uname":        true,
 	"hostname":     true,

@@ -34,6 +34,7 @@ var userBinDirs = []string{
 	".volta/bin",
 	".nvm/current/bin",
 	".claude/local",
+	".opencode/bin",
 	"bin",
 }
 
