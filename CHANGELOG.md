@@ -8,6 +8,73 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Four new coding-agent adapters with 38 security checks** (`GEM-`/`QC-`/`CUR-`/`GHC-`). Brings VASO to **16 adapters** and **225 total checks**. Schemas were mapped against real installs over SSH-snapshot scans, so the checks target keys actually written to disk by each tool.
+
+  - **Gemini CLI adapter** (`src/adapters/gemini.ts`): detects `~/.gemini/`, parses JSONC `settings.json`, surfaces OAuth credential files (`oauth_creds.json`, `google_accounts.json`, `mcp-oauth-tokens.json`, `a2a-oauth-tokens.json`); model extraction from `model.name`; binary `gemini`. Project-level `.gemini/settings.json` also picked up under cwd.
+
+  - **Qwen Code adapter** (`src/adapters/qwen-code.ts`): detects `~/.qwen/`, parses JSONC `settings.json`; multi-provider auth (OpenAI / Anthropic / Gemini / Dashscope / Bailian) with model resolved from `model.name` plus `security.auth.selectedType`; falls back to walking `modelProviders[]` for the active provider's id. Binary `qwen`. Project `.qwen/` also detected.
+
+  - **GitHub Copilot CLI adapter** (`src/adapters/copilot-cli.ts`): detects `~/.copilot/`, parses JSONC `config.json` (the `// User settings belong in settings.json.` comment header is stripped before parse) plus `settings.json`, `lsp-config.json`, `command-history-state.json`, and `session-state/`; project `.mcp.json` and `.github/lsp.json` picked up. Model extraction handles both `config.json` and `settings.json` shapes. Binary `copilot`.
+
+  - **Cursor CLI adapter** (`src/adapters/cursor-cli.ts`): detects `~/.cursor/`, parses `cli-config.json` and `mcp.json`; model extraction from `selectedModel.modelId` (active runtime selection) with fallback to `model.modelId`. Supports both `cursor-agent` (npm install) and `agent` (install.sh shim) binary names with `cursor-agent` preferred.
+
+  - **Gemini CLI checks** (`src/checks/gemini-cli/`, 10 checks):
+    - **GEM-001** (critical): plaintext API key under `env.*` or `mcpServers.*.env.*` (entropy + known prefixes including OpenRouter, Anthropic, OpenAI, Google `AIza`, GitHub `ghp_`, Slack `xox*`)
+    - **GEM-002** (critical): credential file permissions on `settings.json`, `oauth_creds.json`, `google_accounts.json`, `mcp-oauth-tokens.json`, `a2a-oauth-tokens.json`
+    - **GEM-003** (critical): overbroad `tools.allowed` shell rules (`run_shell_command`, `run_shell_command(*)`, `run_shell_command(bash|sh|zsh|rm|sudo|curl|...)`); honors `tools.confirmationRequired` precedence
+    - **GEM-004** (critical): `security.disableYoloMode: false` — `--yolo` CLI flag remains usable
+    - **GEM-005** (warning): `tools.sandbox: false` — tools run unsandboxed
+    - **GEM-006** (warning): `tools.sandboxNetworkAccess: true` — sandboxed tools can reach the network
+    - **GEM-007** (warning): unpinned MCP server packages (npx/pnpm/yarn/bunx/uvx/pipx without `@version` or `@sha256:`)
+    - **GEM-008** (warning): MCP server URL over plaintext `http://` (localhost exempt)
+    - **GEM-009** (warning): `general.defaultApprovalMode: "auto_edit"` — file edits run without prompting
+    - **GEM-010** (info): plaintext secrets / high-entropy strings in `~/.gemini/memory.md` or `GEMINI.md`
+
+  - **Qwen Code checks** (`src/checks/qwen-code/`, 10 checks):
+    - **QC-001** (critical): plaintext API key in `env.*`, `modelProviders[].apiKey`, or `mcpServers.*.env.*`
+    - **QC-002** (critical): credential file permissions on `settings.json`, `oauth_creds.json`, `mcp-oauth-tokens.json`, `google_accounts.json`, `.env`
+    - **QC-003** (critical): `approvalMode: "yolo"` — auto-approves every tool call
+    - **QC-004** (critical): `mcpServers.<name>.trust: true` — MCP server bypasses tool-call approval
+    - **QC-005** (warning): broad `permissions.allow` (`Shell(*)`, `Shell`, `*`, `run_shell_command`) with empty `permissions.deny`
+    - **QC-006** (warning): unpinned MCP server packages
+    - **QC-007** (warning): MCP server URL over plaintext `http://` (localhost exempt)
+    - **QC-008** (warning): `approvalMode: "auto-edit"` — file edits auto-approve
+    - **QC-009** (info): `telemetry.logPrompts: true` — prompt content uploaded to telemetry endpoint
+    - **QC-010** (info): plaintext secrets / high-entropy strings in `~/.qwen/memory.md` or `AGENTS.md`
+
+  - **Cursor CLI checks** (`src/checks/cursor-cli/`, 10 checks):
+    - **CUR-001** (critical): `sandbox.mode: "disabled"` — all Cursor tool calls execute on the host with `permissions.allow` as the only gate
+    - **CUR-002** (critical): unsafe `approvalMode` (`yolo`, `auto`, `run-everything`, `force`, `auto-everything`)
+    - **CUR-003** (critical): overbroad `Shell()` allow rules (`Shell`, `Shell(*)`, `Shell(bash|sh|zsh|fish|cmd|pwsh)`, `Shell(rm|sudo|curl|wget|nc|eval|exec)`); honors `permissions.deny` precedence
+    - **CUR-004** (critical): `cli-config.json` / `mcp.json` group/world readable — `authInfo` block contains email, userId, authId in plaintext
+    - **CUR-005** (warning): wildcard `permissions.allow` rules (`Shell(*)`, `Write(*)`, `Read(*)`, `WebFetch(*)`, `Mcp(*)`) with empty `permissions.deny`
+    - **CUR-006** (warning): MCP server URL over plaintext `http://` in `~/.cursor/mcp.json` (localhost exempt)
+    - **CUR-007** (warning): `privacyCache.ghostMode: false` or `privacyMode != 1` — code may be retained for training
+    - **CUR-008** (warning): `sandbox.networkAccess: "unrestricted"` (or `"allowed"` / `"all"` / `true`)
+    - **CUR-009** (warning): overbroad path/web rules (`Write(*)`, `Read(/)`, `WebFetch(*)`, `Mcp(*)`)
+    - **CUR-010** (info): `attribution.attributeCommitsToAgent` or `attributePRsToAgent` — agent authorship recorded in git history
+
+  - **GitHub Copilot CLI checks** (`src/checks/copilot-cli/`, 8 checks):
+    - **GHC-001** (critical): `~/.copilot/` directory or files weakened beyond owner-only (covers dir, `session-state/`, `config.json`, `settings.json`, `lsp-config.json`, `command-history-state.json`)
+    - **GHC-002** (critical): `allowAllPermissions: true` in `settings.json` — every tool call auto-approves
+    - **GHC-003** (critical): plaintext GitHub token in any config (`gho_`, `ghp_`, `ghs_`, `ghu_`, `ghr_`, `github_pat_` prefixes)
+    - **GHC-004** (warning): MCP server URL over plaintext `http://` in workspace `.mcp.json` (localhost exempt)
+    - **GHC-005** (warning): `updateChannel: "prerelease"` — auto-pulls less-vetted builds
+    - **GHC-006** (warning): `experimentalMode: true`
+    - **GHC-007** (warning): LSP server `command` containing shell metacharacters (`;&|` `` ` `` `$()<>`) — command-injection vector when the binary is shell-evaluated
+    - **GHC-008** (info): plaintext secrets / high-entropy strings in `~/.copilot/instructions/*.instructions.md` and project `.github/copilot-instructions.md`
+
+- **Custom 4-zone graphs** for each of the four new adapters (`Network → MCP/LSP → Approval/Permission → Host FS`), each with one inversion edge labeled "approval bypass" / "permission bypass" gated on the relevant critical check IDs. Graphs validated against the live check registry — registry init fails if any zone graph references an unknown ID.
+
+- **`AgentType`** extended with `'gemini-cli'`, `'qwen-code'`, `'copilot-cli'`, `'cursor-cli'`. **`CODING_AGENTS`** runtime constant grew to 7 entries; checks for the existing 12 `CFG-`/`NET-`/`RUN-`/`POL-` modules continue to skip these new coding agents via `excludedAgents`.
+
+- **Supporting infrastructure** — improvements that benefit existing adapters too:
+  - **nvm-aware binary lookup** (`src/adapters/nvm-binary.ts`): walks `~/.nvm/versions/node/*/bin/` and returns the newest match; wired into all 7 coding-agent adapters' `findCLIBinary`. Fixes the SSH non-interactive PATH miss that previously hid nvm-managed installs of `claude`/`codex`/`opencode`/`gemini`/`qwen`.
+  - **npm-global `package.json` resolver** (extends `src/adapters/version-query.ts`): `readPackageVersion` now accepts an optional `npmPackageName` and reads `<prefix>/lib/node_modules/<package>/package.json` directly via a single file-read. Snapshot-safe — no directory listing required. Each adapter declares its package name (`@anthropic-ai/claude-code`, `@openai/codex`, `@google/gemini-cli`, `@qwen-code/qwen-code`); a `npmPackageJsonGlobs` helper emits the corresponding probe globs across nvm, `~/.npm-global`, `/usr/local`, `/opt/homebrew`, etc.
+  - **Shared JSONC stripper** (`src/core/jsonc.ts`): extracted from `opencode.ts` and reused by Gemini, Qwen, and Copilot adapters whose config files start with `// ...` comment headers.
+  - **Probe command allowlist** (`probe/allowlist.go`): added `gemini`, `qwen`, `copilot`, `cursor-agent` so `<bin> --version` is no longer silently rejected. All four `vaso-probe-{linux,darwin}-{amd64,arm64}` binaries rebuilt.
+  - **`AgentInstallation.cliBinary`** is now reliably populated for nvm-managed npm installs over SSH snapshots.
+
 - **Lyrie agent adapter + 18 security checks (`LY-001`–`LY-018`).** Lyrie (`~/.lyrie/`) is a Bun turborepo with a Rust Shield (Layer 1), a 10-channel gateway (Telegram / WhatsApp / Discord / Slack / Matrix / Mattermost / IRC / Feishu / Rocket.Chat / WebChat), MCP client+server, diff-view EditEngine with operator approval, and cross-agent migration importers. New check category `lyrie` covers:
   - **LY-001/002** Shield-bypass surface (`LYRIE_SHIELD_MODE=passive`, missing `lyrie-shield` binary)
   - **LY-003** DM pairing policy `open` or unset on any of the 10 channels (Lyrie's documented legacy default — anyone can DM the agent)
