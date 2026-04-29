@@ -1,6 +1,6 @@
 export type Severity = 'critical' | 'warning' | 'info';
 export type Grade = 'A' | 'B' | 'C' | 'D' | 'F';
-export type AgentType = 'openclaw' | 'nanoclaw' | 'picoclaw' | 'mcp' | 'ironclaw' | 'nanobot' | 'zeroclaw' | 'nemoclaw' | 'hermes' | 'lyrie' | 'claude-code' | 'codex' | 'skill-audit';
+export type AgentType = 'openclaw' | 'nanoclaw' | 'picoclaw' | 'mcp' | 'ironclaw' | 'nanobot' | 'zeroclaw' | 'nemoclaw' | 'hermes' | 'lyrie' | 'claude-code' | 'codex' | 'opencode' | 'skill-audit';
 export type CheckCategory = 'config' | 'skills' | 'ioc' | 'network' | 'runtime' | 'policy' | 'mcp' | 'openclaw' | 'nanoclaw' | 'ironclaw' | 'nanobot' | 'zeroclaw' | 'lyrie' | 'advisory' | 'coding-agent';
 
 /**
@@ -8,7 +8,7 @@ export type CheckCategory = 'config' | 'skills' | 'ioc' | 'network' | 'runtime' 
  * autonomous server frameworks. Used by checks via `excludedAgents` to skip
  * server-only concepts like gateway binding, rate limiting, LaunchAgents, etc.
  */
-export const CODING_AGENTS: AgentType[] = ['claude-code', 'codex'];
+export const CODING_AGENTS: AgentType[] = ['claude-code', 'codex', 'opencode'];
 export type OutputFormat = 'terminal' | 'json' | 'sarif' | 'markdown' | 'html' | 'csv' | 'junit';
 
 export interface Evidence {

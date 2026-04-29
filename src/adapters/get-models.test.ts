@@ -5,6 +5,7 @@ import { openclawAdapter } from './openclaw.js';
 import { nemoclawAdapter } from './nemoclaw.js';
 import { claudeCodeAdapter } from './claude-code.js';
 import { codexAdapter } from './codex.js';
+import { opencodeAdapter } from './opencode.js';
 import { nanobotAdapter } from './nanobot.js';
 
 function cfg(filePath: string, data: Record<string, unknown>): ParsedConfig {
@@ -218,6 +219,40 @@ describe('adapter.getModels()', () => {
         async readFile() { throw new Error('ENOENT'); },
       } as unknown as FSProvider;
       expect(await codexAdapter.getModels!([], fakeFs)).toEqual([]);
+    });
+  });
+
+  describe('opencode', () => {
+    it('splits provider/id from top-level model', () => {
+      const configs = [
+        cfg('/u/.config/opencode/opencode.json', { model: 'anthropic/claude-opus-4-5' }),
+      ];
+      expect(opencodeAdapter.getModels!(configs)).toEqual([
+        { id: 'claude-opus-4-5', provider: 'anthropic' },
+      ]);
+    });
+
+    it('records small_model with via=small_model', () => {
+      const configs = [
+        cfg('/u/.config/opencode/opencode.json', {
+          model: 'anthropic/claude-opus-4-5',
+          small_model: 'anthropic/claude-haiku-4-5',
+        }),
+      ];
+      expect(opencodeAdapter.getModels!(configs)).toEqual([
+        { id: 'claude-opus-4-5', provider: 'anthropic' },
+        { id: 'claude-haiku-4-5', provider: 'anthropic', via: 'small_model' },
+      ]);
+    });
+
+    it('handles bare model without provider slash', () => {
+      const configs = [cfg('/u/.config/opencode/opencode.json', { model: 'gpt-4o' })];
+      expect(opencodeAdapter.getModels!(configs)).toEqual([{ id: 'gpt-4o' }]);
+    });
+
+    it('returns [] when no model field is present', () => {
+      const configs = [cfg('/u/.config/opencode/opencode.json', { share: 'manual' })];
+      expect(opencodeAdapter.getModels!(configs)).toEqual([]);
     });
   });
 
