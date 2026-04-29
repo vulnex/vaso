@@ -16,6 +16,10 @@ import { advisoryChecks } from './advisory/index.js';
 import { claudeCodeChecks } from './claude-code/index.js';
 import { codexChecks } from './codex/index.js';
 import { opencodeChecks } from './opencode/index.js';
+import { geminiCliChecks } from './gemini-cli/index.js';
+import { qwenCodeChecks } from './qwen-code/index.js';
+import { cursorCliChecks } from './cursor-cli/index.js';
+import { copilotCliChecks } from './copilot-cli/index.js';
 
 export function registerAllChecks(): void {
   checkRegistry.registerAll(configChecks);
@@ -35,4 +39,8 @@ export function registerAllChecks(): void {
   checkRegistry.registerAll(claudeCodeChecks);
   checkRegistry.registerAll(codexChecks);
   checkRegistry.registerAll(opencodeChecks);
+  checkRegistry.registerAll(geminiCliChecks);
+  checkRegistry.registerAll(qwenCodeChecks);
+  checkRegistry.registerAll(cursorCliChecks);
+  checkRegistry.registerAll(copilotCliChecks);
 }

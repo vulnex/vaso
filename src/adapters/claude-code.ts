@@ -5,12 +5,14 @@ import type { ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { loadConfig } from '../core/config-loader.js';
+import { findNvmBinary, nvmBinaryGlob, npmPackageJsonGlobs } from './nvm-binary.js';
 import { getUserHomeDirs } from './openclaw.js';
 import { queryCliVersion, readPackageVersion } from './version-query.js';
 
 const CLAUDE_DIR_NAME = '.claude';
 const SETTINGS_FILES = ['settings.json', 'settings.local.json'];
 const ROOT_STATE_FILE = '.claude.json';
+const NPM_PACKAGE_NAME = '@anthropic-ai/claude-code';
 
 const SYSTEM_CLI_PATHS = [
   '/usr/local/bin/claude',
@@ -34,6 +36,8 @@ async function findCLIBinary(home: string, fs: FSProvider): Promise<string | und
     const p = join(home, rel);
     if (await fs.access(p)) return p;
   }
+  const nvm = await findNvmBinary(home, fs, 'claude');
+  if (nvm) return nvm;
   try {
     const result = fs.execSync('which', ['claude'], { timeout: 3000 }).trim();
     if (result) return result;
@@ -113,7 +117,7 @@ export const claudeCodeAdapter: AgentAdapter = {
       }
 
       const version = queryCliVersion(cliBinary, fs)
-        ?? (await readPackageVersion(cliBinary, fs));
+        ?? (await readPackageVersion(cliBinary, fs, NPM_PACKAGE_NAME));
       const skillsDir = this.getSkillsDir(claudeDir);
 
       installations.push({
@@ -239,6 +243,8 @@ export const claudeCodeAdapter: AgentAdapter = {
         '~/.claude/skills/**',
         '~/.claude/plugins/**',
         '~/.claude/agents/**',
+        nvmBinaryGlob('claude'),
+        ...npmPackageJsonGlobs(NPM_PACKAGE_NAME),
       ],
       commands: [
         { id: 'claude-which', cmd: 'which', args: ['claude'], timeout: 3000 },

@@ -4,6 +4,8 @@ import type { AgentInstallation, GatewayInfo, ModelRef, ParsedConfig, ZoneGraph 
 import type { ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
+import { stripJsonc } from '../core/jsonc.js';
+import { findNvmBinary, nvmBinaryGlob } from './nvm-binary.js';
 import { getUserHomeDirs } from './openclaw.js';
 import { queryCliVersion, readPackageVersion } from './version-query.js';
 
@@ -38,58 +40,6 @@ function xdgDataDir(home: string, fs: FSProvider): string {
 
 const CONFIG_FILENAMES = ['opencode.jsonc', 'opencode.json'];
 
-/**
- * OpenCode supports JSONC (// comments, /* block comments, trailing commas).
- * The shared config-loader only handles strict JSON, so we strip comments and
- * trailing commas inline before parsing. Strings are preserved by tracking
- * quote/escape state.
- */
-function stripJsonc(raw: string): string {
-  let out = '';
-  let i = 0;
-  let inString = false;
-  let stringQuote: '"' | "'" | undefined;
-  while (i < raw.length) {
-    const c = raw[i];
-    const next = raw[i + 1];
-    if (inString) {
-      out += c;
-      if (c === '\\' && i + 1 < raw.length) {
-        out += raw[i + 1];
-        i += 2;
-        continue;
-      }
-      if (c === stringQuote) {
-        inString = false;
-        stringQuote = undefined;
-      }
-      i++;
-      continue;
-    }
-    if (c === '"' || c === "'") {
-      inString = true;
-      stringQuote = c as '"' | "'";
-      out += c;
-      i++;
-      continue;
-    }
-    if (c === '/' && next === '/') {
-      while (i < raw.length && raw[i] !== '\n') i++;
-      continue;
-    }
-    if (c === '/' && next === '*') {
-      i += 2;
-      while (i < raw.length && !(raw[i] === '*' && raw[i + 1] === '/')) i++;
-      i += 2;
-      continue;
-    }
-    out += c;
-    i++;
-  }
-  // Strip trailing commas before } or ]
-  return out.replace(/,(\s*[\]}])/g, '$1');
-}
-
 async function loadOpenCodeConfig(filePath: string, fs: FSProvider): Promise<ParsedConfig | undefined> {
   try {
     const raw = await fs.readFile(filePath);
@@ -108,6 +58,8 @@ async function findCLIBinary(home: string, fs: FSProvider): Promise<string | und
     const p = join(home, rel);
     if (await fs.access(p)) return p;
   }
+  const nvm = await findNvmBinary(home, fs, 'opencode');
+  if (nvm) return nvm;
   try {
     const result = fs.execSync('which', ['opencode'], { timeout: 3000 }).trim();
     if (result) return result;
@@ -238,6 +190,7 @@ export const opencodeAdapter: AgentAdapter = {
         '~/.config/opencode/agent/*.md',
         '~/.config/opencode/plugin/*.{ts,js}',
         '~/.config/opencode/plugins/*.{ts,js}',
+        nvmBinaryGlob('opencode'),
       ],
       commands: [
         { id: 'opencode-which', cmd: 'which', args: ['opencode'], timeout: 3000 },

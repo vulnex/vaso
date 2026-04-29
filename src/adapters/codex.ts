@@ -5,11 +5,13 @@ import type { ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { loadConfig } from '../core/config-loader.js';
+import { findNvmBinary, nvmBinaryGlob, npmPackageJsonGlobs } from './nvm-binary.js';
 import { getUserHomeDirs } from './openclaw.js';
 import { queryCliVersion, readPackageVersion } from './version-query.js';
 
 const CODEX_DIR_NAME = '.codex';
 const CONFIG_FILES = ['config.toml', 'auth.json'];
+const NPM_PACKAGE_NAME = '@openai/codex';
 
 const SYSTEM_CLI_PATHS = [
   '/usr/local/bin/codex',
@@ -83,6 +85,8 @@ async function findCLIBinary(home: string, fs: FSProvider): Promise<string | und
     const p = join(home, rel);
     if (await fs.access(p)) return p;
   }
+  const nvm = await findNvmBinary(home, fs, 'codex');
+  if (nvm) return nvm;
   try {
     const result = fs.execSync('which', ['codex'], { timeout: 3000 }).trim();
     if (result) return result;
@@ -118,7 +122,7 @@ export const codexAdapter: AgentAdapter = {
       }
 
       const version = queryCliVersion(cliBinary, fs)
-        ?? (await readPackageVersion(cliBinary, fs));
+        ?? (await readPackageVersion(cliBinary, fs, NPM_PACKAGE_NAME));
 
       installations.push({
         agent: 'codex',
@@ -202,6 +206,8 @@ export const codexAdapter: AgentAdapter = {
         // Session jsonls record `turn_context.model` per turn, so the latest
         // session reveals the active model when ~/.codex/config.toml has none.
         '~/.codex/sessions/*/*/*/rollout-*.jsonl',
+        nvmBinaryGlob('codex'),
+        ...npmPackageJsonGlobs(NPM_PACKAGE_NAME),
       ],
       commands: [
         { id: 'codex-which', cmd: 'which', args: ['codex'], timeout: 3000 },
