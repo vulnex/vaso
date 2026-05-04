@@ -99,6 +99,7 @@ export interface ScanContext {
 
 export interface AgentScanResult {
   agent: AgentType;
+  version?: string;
   installation: AgentInstallation;
   results: CheckResult[];
   score: number;

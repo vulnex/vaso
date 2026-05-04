@@ -87,6 +87,7 @@ export class ScanEngine {
 
     return {
       agent: installation.agent,
+      version: installation.version,
       installation,
       results,
       score,

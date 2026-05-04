@@ -7,6 +7,7 @@ describe('parseSSHTarget', () => {
       user: 'user',
       host: 'host',
       port: 22,
+      label: 'user@host',
     });
   });
 
@@ -15,6 +16,7 @@ describe('parseSSHTarget', () => {
       user: 'user',
       host: 'host',
       port: 2222,
+      label: 'user@host:2222',
     });
   });
 
@@ -23,6 +25,7 @@ describe('parseSSHTarget', () => {
       user: 'deploy',
       host: '10.0.0.1',
       port: 22,
+      label: 'deploy@10.0.0.1',
     });
   });
 
@@ -31,7 +34,18 @@ describe('parseSSHTarget', () => {
       user: 'deploy',
       host: '10.0.0.1',
       port: 22,
+      label: 'deploy@10.0.0.1',
     });
+  });
+
+  it('omits port from default label when port is 22', () => {
+    const t = parseSSHTarget('admin@example.com');
+    expect(t.label).toBe('admin@example.com');
+  });
+
+  it('includes non-default port in default label', () => {
+    const t = parseSSHTarget('admin@example.com:2200');
+    expect(t.label).toBe('admin@example.com:2200');
   });
 
   it('throws when @ is missing', () => {

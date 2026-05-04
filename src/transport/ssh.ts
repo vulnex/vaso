@@ -60,7 +60,8 @@ export function parseSSHTarget(target: string): SSHTarget {
     throw new Error(`Invalid SSH target "${target}": missing hostname`);
   }
 
-  return { user, host, port };
+  const label = port === 22 ? `${user}@${host}` : `${user}@${host}:${port}`;
+  return { user, host, port, label };
 }
 
 /**

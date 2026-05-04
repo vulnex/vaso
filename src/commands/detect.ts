@@ -1,4 +1,5 @@
 import chalk from 'chalk';
+import { writeFile } from 'node:fs/promises';
 import { adapterRegistry } from '../adapters/registry.js';
 import type { AgentInstallation, AgentType } from '../core/types.js';
 import { logError } from '../core/debug.js';
@@ -6,6 +7,7 @@ import { logError } from '../core/debug.js';
 export interface DetectCommandOptions {
   agent?: string;
   format: string;
+  output?: string;
   allUsers?: boolean;
   verbose?: boolean;
   host?: string[];
@@ -16,12 +18,21 @@ export interface DetectCommandOptions {
   saveSnapshot?: string;
 }
 
+async function emit(text: string, output?: string): Promise<void> {
+  if (output) {
+    await writeFile(output, text, 'utf-8');
+    console.log(chalk.green(`Report written to ${output}`));
+  } else {
+    console.log(text);
+  }
+}
+
 export async function runDetect(options: DetectCommandOptions): Promise<void> {
   try {
     // Snapshot-based detection
     if (options.snapshot) {
       const results = await detectFromSnapshot(options);
-      renderResults(results, options);
+      await renderResults(results, options);
       return;
     }
 
@@ -42,7 +53,7 @@ export async function runDetect(options: DetectCommandOptions): Promise<void> {
       installations = installations.filter(i => i.agent === agentType);
     }
 
-    renderResults(installations, options);
+    await renderResults(installations, options);
   } catch (err) {
     logError(chalk.red('Detection failed:'), err);
     process.exitCode = 1;
@@ -182,68 +193,72 @@ async function detectRemoteHosts(options: DetectCommandOptions): Promise<void> {
 
   // Render multi-host results
   if (options.format === 'json') {
-    console.log(JSON.stringify(results, null, 2));
+    await emit(JSON.stringify(results, null, 2), options.output);
   } else {
+    const sections: string[] = [];
     for (const hr of results) {
       const hostLabel = hr.label ?? hr.host;
-      console.log(chalk.bold(`\n── ${hostLabel} ──\n`));
+      sections.push(chalk.bold(`\n── ${hostLabel} ──\n`));
 
       if (hr.error) {
-        console.log(chalk.red(`  Error: ${hr.error}\n`));
+        sections.push(chalk.red(`  Error: ${hr.error}\n`));
         continue;
       }
 
       if (hr.installations.length === 0) {
-        console.log(chalk.yellow('  No agents detected.\n'));
+        sections.push(chalk.yellow('  No agents detected.\n'));
         continue;
       }
 
-      renderTerminal(hr.installations, options.verbose);
+      sections.push(renderTerminal(hr.installations, options.verbose));
     }
 
     const successCount = results.filter(r => !r.error).length;
     const failedCount = results.filter(r => r.error).length;
     const totalAgents = results.reduce((sum, r) => sum + r.installations.length, 0);
 
-    console.log(chalk.bold(`\n  ${successCount} host(s) scanned, ${totalAgents} agent(s) detected.`));
+    sections.push(chalk.bold(`\n  ${successCount} host(s) scanned, ${totalAgents} agent(s) detected.`));
     if (failedCount > 0) {
-      console.log(chalk.red(`  ${failedCount} host(s) failed.`));
+      sections.push(chalk.red(`  ${failedCount} host(s) failed.`));
     }
-    console.log('');
+    sections.push('');
+
+    await emit(sections.join('\n'), options.output);
   }
 }
 
-function renderResults(installations: AgentInstallation[], options: DetectCommandOptions): void {
-  if (options.format === 'json') {
-    renderJson(installations);
-  } else {
-    renderTerminal(installations, options.verbose);
-  }
+async function renderResults(installations: AgentInstallation[], options: DetectCommandOptions): Promise<void> {
+  const text = options.format === 'json'
+    ? renderJson(installations)
+    : renderTerminal(installations, options.verbose);
+  await emit(text, options.output);
 }
 
-function renderJson(installations: AgentInstallation[]): void {
-  console.log(JSON.stringify(installations, null, 2));
+function renderJson(installations: AgentInstallation[]): string {
+  return JSON.stringify(installations, null, 2);
 }
 
-function renderTerminal(installations: AgentInstallation[], verbose?: boolean): void {
+function renderTerminal(installations: AgentInstallation[], verbose?: boolean): string {
+  const lines: string[] = [];
+
   if (verbose) {
     const adapters = adapterRegistry.getAdapters();
-    console.log(chalk.dim('Adapters checked:'));
+    lines.push(chalk.dim('Adapters checked:'));
     for (const adapter of adapters) {
       const found = installations.some(i => i.agent === adapter.agent);
       const paths = adapter.getConfigPaths();
       const status = found ? chalk.green('found') : chalk.dim('not found');
-      console.log(chalk.dim(`  ${adapter.displayName}: ${status}`));
+      lines.push(chalk.dim(`  ${adapter.displayName}: ${status}`));
       for (const p of paths) {
-        console.log(chalk.dim(`    ${p}`));
+        lines.push(chalk.dim(`    ${p}`));
       }
     }
-    console.log('');
+    lines.push('');
   }
 
   if (installations.length === 0) {
-    console.log(chalk.yellow('No agents detected.'));
-    return;
+    lines.push(chalk.yellow('No agents detected.'));
+    return lines.join('\n');
   }
 
   for (const inst of installations) {
@@ -256,21 +271,21 @@ function renderTerminal(installations: AgentInstallation[], verbose?: boolean): 
       ? `${headerParts[0]} (${headerParts.slice(1).join(', ')})`
       : headerParts[0];
 
-    console.log(chalk.bold.cyan(header));
+    lines.push(chalk.bold.cyan(header));
     if (inst.agentName) {
-      console.log(`  ${'Agent name:'.padEnd(14)} ${inst.agentName}`);
+      lines.push(`  ${'Agent name:'.padEnd(14)} ${inst.agentName}`);
     }
-    console.log(`  ${'Version:'.padEnd(14)} ${inst.version ?? chalk.dim('unknown')}`);
-    console.log(`  ${'Install dir:'.padEnd(14)} ${inst.installDir}`);
-    console.log(`  ${'Config files:'.padEnd(14)} ${inst.configFiles.length}`);
-    console.log(`  ${'Skills dir:'.padEnd(14)} ${inst.skillsDir ?? chalk.dim('none')}`);
+    lines.push(`  ${'Version:'.padEnd(14)} ${inst.version ?? chalk.dim('unknown')}`);
+    lines.push(`  ${'Install dir:'.padEnd(14)} ${inst.installDir}`);
+    lines.push(`  ${'Config files:'.padEnd(14)} ${inst.configFiles.length}`);
+    lines.push(`  ${'Skills dir:'.padEnd(14)} ${inst.skillsDir ?? chalk.dim('none')}`);
 
     if (inst.cliBinary) {
-      console.log(`  ${'CLI binary:'.padEnd(14)} ${inst.cliBinary}`);
+      lines.push(`  ${'CLI binary:'.padEnd(14)} ${inst.cliBinary}`);
     }
 
     if (inst.appBundle) {
-      console.log(`  ${'App bundle:'.padEnd(14)} ${inst.appBundle}`);
+      lines.push(`  ${'App bundle:'.padEnd(14)} ${inst.appBundle}`);
     }
 
     if (inst.gateway) {
@@ -280,28 +295,30 @@ function renderTerminal(installations: AgentInstallation[], verbose?: boolean): 
       if (gw.port) parts.push(`:${gw.port}`);
       if (gw.tls) parts.push('(TLS)');
       if (gw.authMode) parts.push(`[${gw.authMode}]`);
-      console.log(`  ${'Gateway:'.padEnd(14)} ${parts.join(' ') || chalk.dim('none')}`);
+      lines.push(`  ${'Gateway:'.padEnd(14)} ${parts.join(' ') || chalk.dim('none')}`);
     } else {
-      console.log(`  ${'Gateway:'.padEnd(14)} ${chalk.dim('none')}`);
+      lines.push(`  ${'Gateway:'.padEnd(14)} ${chalk.dim('none')}`);
     }
 
     if (inst.models && inst.models.length > 0) {
       const label = inst.models.length === 1 ? 'Model:' : `Models (${inst.models.length}):`;
-      console.log(`  ${label.padEnd(14)}`);
+      lines.push(`  ${label.padEnd(14)}`);
       for (const m of inst.models) {
         const id = m.provider ? `${m.provider}/${m.id}` : m.id;
         const suffix = m.via ? chalk.dim(` (${m.via})`) : '';
-        console.log(`    ${id}${suffix}`);
+        lines.push(`    ${id}${suffix}`);
       }
     }
 
-    console.log('');
+    lines.push('');
   }
 
   const subAgents = installations.filter(i => i.agentName);
   if (subAgents.length > 0) {
-    console.log(chalk.bold(`Found ${installations.length} agent(s) (${subAgents.length} sub-agent definitions).`));
+    lines.push(chalk.bold(`Found ${installations.length} agent(s) (${subAgents.length} sub-agent definitions).`));
   } else {
-    console.log(chalk.bold(`Found ${installations.length} agent(s).`));
+    lines.push(chalk.bold(`Found ${installations.length} agent(s).`));
   }
+
+  return lines.join('\n');
 }
