@@ -36,6 +36,23 @@ async function findAppBundle(fs: FSProvider): Promise<string | undefined> {
   return undefined;
 }
 
+async function readAppVersion(fs: FSProvider): Promise<string | undefined> {
+  if (fs.platform !== 'darwin') return undefined;
+  if (!(await fs.access(APP_BUNDLE_PATH))) return undefined;
+  try {
+    const result = await fs.exec(
+      'defaults',
+      ['read', `${APP_BUNDLE_PATH}/Contents/Info.plist`, 'CFBundleShortVersionString'],
+      { timeout: 3000 },
+    );
+    if (result.exitCode === 0) {
+      const v = result.stdout.trim();
+      if (v.length > 0) return v;
+    }
+  } catch {}
+  return undefined;
+}
+
 async function loadDesktopConfig(dir: string, fs: FSProvider): Promise<ParsedConfig[]> {
   const configFiles: ParsedConfig[] = [];
   const filePath = join(dir, CONFIG_FILE);
@@ -56,6 +73,7 @@ export const claudeDesktopAdapter: AgentAdapter = {
     const installations: AgentInstallation[] = [];
 
     const appBundle = await findAppBundle(fs);
+    const version = appBundle ? await readAppVersion(fs) : undefined;
 
     for (const { home, user } of userDirs) {
       const configDir = getDesktopConfigDir(home, fs);
@@ -68,6 +86,7 @@ export const claudeDesktopAdapter: AgentAdapter = {
 
       installations.push({
         agent: 'claude-desktop',
+        version,
         installDir: configDir,
         configFiles,
         models: this.getModels?.(configFiles, fs) as ModelRef[] | undefined,
@@ -124,7 +143,9 @@ export const claudeDesktopAdapter: AgentAdapter = {
       globPatterns: [
         '~/Library/Application Support/Claude/Claude Extensions/**',
       ],
-      commands: [],
+      commands: [
+        { id: 'claude-desktop-version', cmd: 'defaults', args: ['read', `${APP_BUNDLE_PATH}/Contents/Info.plist`, 'CFBundleShortVersionString'], timeout: 3000 },
+      ],
       directoryListings: [
         '~/Library/Application Support/Claude',
         '~/Library/Application Support/Claude/Claude Extensions',
