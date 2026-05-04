@@ -1,5 +1,4 @@
 import { join } from 'node:path';
-import { readFile } from 'node:fs/promises';
 import type { AgentAdapter, DetectOptions } from './adapter.js';
 import type { AgentInstallation, GatewayInfo, ModelRef, ParsedConfig, ZoneGraph } from '../core/types.js';
 import type { ProbeManifest } from '../core/snapshot-types.js';
@@ -62,14 +61,18 @@ async function readAppVersion(fs: FSProvider): Promise<string | undefined> {
  * The picker writes the user's selection to a `model-selector-local_<acct>`
  * key in `<installDir>/Local Storage/leveldb/`. The store is binary LevelDB
  * (snappy-compressed SSTables), so we don't try to decode the format —
- * instead we scan the .ldb / .log files as a byte stream, locate the key
- * anchor, and extract the first well-formed Claude model id within the
- * following window. Local FS only: snapshot/SSH probes don't capture these
- * binary blobs and reading them as utf-8 (what `FSProvider.readFile` does)
- * would mangle the bytes.
+ * instead we scan the .ldb / .log files for the ASCII key anchor and pull
+ * out the first well-formed Claude model id within the following window.
+ *
+ * Works over both local and snapshot transports because the bytes we care
+ * about are pure ASCII: Go's JSON encoder coerces invalid UTF-8 in file
+ * content to U+FFFD on the wire, and Node's utf-8 `readFile` does the same
+ * on the local side, but neither touches valid ASCII. The ~256-char window
+ * is a heuristic — if Local Storage gets large enough that the relevant
+ * block is snappy-compressed, the value disappears entirely from both
+ * transports and we return undefined.
  */
 async function readLocalStorageModel(installDir: string, fs: FSProvider): Promise<string | undefined> {
-  if (!(fs instanceof LocalFSProvider)) return undefined;
   const ldbDir = join(installDir, ...LOCAL_STORAGE_LEVELDB);
   if (!(await fs.access(ldbDir))) return undefined;
 
@@ -86,8 +89,7 @@ async function readLocalStorageModel(installDir: string, fs: FSProvider): Promis
 
   for (const f of files) {
     try {
-      const buf = await readFile(f);
-      const text = buf.toString('latin1');
+      const text = await fs.readFile(f);
       const keyIdx = text.indexOf(SELECTOR_KEY);
       if (keyIdx < 0) continue;
       const window = text.slice(keyIdx, keyIdx + 256);
@@ -192,6 +194,12 @@ export const claudeDesktopAdapter: AgentAdapter = {
       ],
       globPatterns: [
         '~/Library/Application Support/Claude/Claude Extensions/**',
+        // Chromium Local Storage SSTables — read for the active-model
+        // sticky-selector value. Binary content gets U+FFFD-substituted in
+        // the JSON snapshot, but the ASCII anchor key and the model id
+        // survive intact, which is all readLocalStorageModel needs.
+        '~/Library/Application Support/Claude/Local Storage/leveldb/*.ldb',
+        '~/Library/Application Support/Claude/Local Storage/leveldb/*.log',
       ],
       commands: [
         { id: 'claude-desktop-version', cmd: 'defaults', args: ['read', `${APP_BUNDLE_PATH}/Contents/Info.plist`, 'CFBundleShortVersionString'], timeout: 3000 },
@@ -199,6 +207,7 @@ export const claudeDesktopAdapter: AgentAdapter = {
       directoryListings: [
         '~/Library/Application Support/Claude',
         '~/Library/Application Support/Claude/Claude Extensions',
+        '~/Library/Application Support/Claude/Local Storage/leveldb',
       ],
       envPrefixes: ['CLAUDE_', 'ANTHROPIC_'],
       systemPaths: [APP_BUNDLE_PATH],
