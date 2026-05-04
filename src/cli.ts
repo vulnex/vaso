@@ -29,7 +29,7 @@ import { setDebug } from './core/debug.js';
 import { assertZoneGraphsValid } from './core/zone-graph-validator.js';
 import { defaultZoneGraph } from './core/default-zone-graph.js';
 
-const VERSION = '0.3.0';
+const VERSION = '0.4.0';
 
 const BANNER = `
 ${chalk.red('██╗   ██╗ █████╗ ███████╗ ██████╗')}
