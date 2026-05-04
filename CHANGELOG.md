@@ -6,6 +6,8 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-05-04
+
 ### Added
 
 - **Four new coding-agent adapters with 38 security checks** (`GEM-`/`QC-`/`CUR-`/`GHC-`) plus a new Hermes check category (10 `HM-*` checks). Brings VASO to **16 adapters** and **235 total checks** across **16 categories**. Schemas were mapped against real installs over SSH-snapshot scans, so the checks target keys actually written to disk by each tool.
@@ -114,7 +116,15 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 - **Gemini CLI active-model detection from session transcripts.** `/model set <name>` without `--persist` only mutates the in-memory session — `~/.gemini/settings.json` typically contains only auth info. Resolution now matches the CLI itself (`packages/cli/src/config/config.ts:853`): `GEMINI_MODEL` env > `settings.model.name` > tail of the latest `~/.gemini/tmp/<project-id>/chats/session-*.jsonl`. The session walker picks the lex-greatest filename across all projects (timestamp prefix sorts chronologically) and reads the last `"model":"..."` record — same pattern as the existing Codex session walker. Probe manifest extended with `~/.gemini/tmp/*/chats/session-*.jsonl` and a `~/.gemini/tmp` directory listing so SSH scans collect the data. Default fallback `auto-gemini-3` is intentionally NOT surfaced — it indicates the user hasn't configured anything, not a real selection.
 
+- **`-o, --output <file>` for `vaso detect`.** Mirrors `vaso scan`'s file-write contract. Works for local detection, snapshot-based detection (`--snapshot`), and SSH multi-host detection (`--host`/`--inventory`) — JSON aggregates to a single per-host array; terminal text concatenates per-host renders with a divider. Prints the same `Report written to <path>` confirmation as `scan`.
+
+- **Top-level `version` field on `AgentScanResult`** (`src/core/types.ts:102`). Populated from `installation.version` in `engine.scanAgent`. Lets JSON consumers read `agents[i].version` directly without drilling into `agents[i].installation.version` — matches the flat shape `vaso detect` already emits.
+
+- **Default `label` on `SSHTarget`.** `parseSSHTarget` and `parseInventory` now default `target.label` to `user@host` (or `user@host:port` when port ≠ 22) when no label is supplied. Previously a bare `--host conde@example.com` left `target.label` undefined, forcing every consumer to fall back to formatting the user/host themselves. Explicit YAML `label:` entries still take precedence.
+
 ### Fixed
+
+- **`vaso scan -o` over SSH.** The `-o, --output` flag was being ignored when scanning remote hosts via `--host`/`--inventory`; results were always emitted to stdout instead of the requested file. Now writes a single aggregated file per scan: JSON gets a structured per-host array (`{target, durationMs, error, result}`); other formats get per-host renders concatenated with a plain divider for readability without ANSI escapes.
 
 - **Snapshot directory listings: trailing slashes leaking into consumers.** The Go probe (`probe/collector.go:217`) appends `/` to directory entry names so a flat list can distinguish dirs from files. That trailing slash leaked through `SnapshotFSProvider.readdir` into callers that `path.join()` the name back together, producing `//` and breaking subsequent prefix lookups. Concrete failure: gemini-cli's session-jsonl walker called `fs.readdirEntries('~/.gemini/tmp')` and got back names like `'conde/'`; `join(parent, 'conde/')` yielded `'~/.gemini/tmp/conde/'`, and `hasChildPaths` then searched with prefix `'~/.gemini/tmp/conde//'` which matched no real file path — every project subdir was marked `isDirectory=false` and the walker bailed before reaching any session file. Codex's session walker had the same latent bug (filters `/^\d+$/` would fail against `'2026/'`). Fix: strip trailing `/` in `readdir()` so all callers — including the prefix-derivation fallback — see clean basenames. Codex's session walker is now usable over SSH the moment any session JSONL exists.
 
