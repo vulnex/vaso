@@ -129,24 +129,63 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
     const successResults = hostResults.filter(hr => hr.result);
     const failedResults = hostResults.filter(hr => hr.error);
 
-    for (const hr of successResults) {
-      if (hr.result) {
-        const label = hr.target.label ?? `${hr.target.user}@${hr.target.host}`;
-        console.log(chalk.bold(`\n── ${label} (${hr.result.host ?? hr.target.host}) ──\n`));
-        console.log(reporter.render(hr.result));
+    if (options.output) {
+      // Aggregate to a single file. JSON gets a structured per-host array;
+      // text formats get the per-host renders concatenated with a plain
+      // divider so the file is readable without ANSI escapes.
+      let combined: string;
+      if (options.format === 'json') {
+        const aggregate = hostResults.map(hr => ({
+          target: {
+            user: hr.target.user,
+            host: hr.target.host,
+            port: hr.target.port,
+            label: hr.target.label,
+          },
+          durationMs: hr.durationMs,
+          error: hr.error,
+          result: hr.result,
+        }));
+        combined = JSON.stringify(aggregate, null, 2);
+      } else {
+        const sections: string[] = [];
+        for (const hr of successResults) {
+          if (!hr.result) continue;
+          const label = hr.target.label ?? `${hr.target.user}@${hr.target.host}`;
+          sections.push(`── ${label} (${hr.result.host ?? hr.target.host}) ──\n\n${reporter.render(hr.result)}`);
+        }
+        if (failedResults.length > 0) {
+          const failLines = failedResults.map(hr => {
+            const label = hr.target.label ?? `${hr.target.user}@${hr.target.host}`;
+            return `  ✗ ${label}: ${hr.error}`;
+          });
+          sections.push(`Failed hosts (${failedResults.length}):\n${failLines.join('\n')}`);
+        }
+        sections.push(`Summary: ${successResults.length} scanned, ${failedResults.length} failed`);
+        combined = sections.join('\n\n');
       }
-    }
-
-    if (failedResults.length > 0) {
-      console.log(chalk.bold(chalk.red(`\n  Failed hosts (${failedResults.length}):`)));
-      for (const hr of failedResults) {
-        const label = hr.target.label ?? `${hr.target.user}@${hr.target.host}`;
-        console.log(chalk.red(`    ✗ ${label}: ${hr.error}`));
+      await writeFile(options.output, combined, 'utf-8');
+      console.log(chalk.green(`Report written to ${options.output}`));
+    } else {
+      for (const hr of successResults) {
+        if (hr.result) {
+          const label = hr.target.label ?? `${hr.target.user}@${hr.target.host}`;
+          console.log(chalk.bold(`\n── ${label} (${hr.result.host ?? hr.target.host}) ──\n`));
+          console.log(reporter.render(hr.result));
+        }
       }
-    }
 
-    // Summary
-    console.log(chalk.bold(`\n  Summary: ${successResults.length} scanned, ${failedResults.length} failed\n`));
+      if (failedResults.length > 0) {
+        console.log(chalk.bold(chalk.red(`\n  Failed hosts (${failedResults.length}):`)));
+        for (const hr of failedResults) {
+          const label = hr.target.label ?? `${hr.target.user}@${hr.target.host}`;
+          console.log(chalk.red(`    ✗ ${label}: ${hr.error}`));
+        }
+      }
+
+      // Summary
+      console.log(chalk.bold(`\n  Summary: ${successResults.length} scanned, ${failedResults.length} failed\n`));
+    }
 
     // Exit non-zero if any host failed, or if findings meet the --fail-on threshold
     const allResults = successResults.flatMap(hr =>
