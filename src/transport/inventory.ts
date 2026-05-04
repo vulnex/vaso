@@ -41,11 +41,14 @@ export async function parseInventory(path: string): Promise<SSHTarget[]> {
     if (!entry.host) {
       throw new Error(`Inventory entry #${idx + 1} missing required "host" field`);
     }
+    const user = entry.user ?? 'root';
+    const port = entry.port ?? 22;
+    const defaultLabel = port === 22 ? `${user}@${entry.host}` : `${user}@${entry.host}:${port}`;
     return {
-      user: entry.user ?? 'root',
+      user,
       host: entry.host,
-      port: entry.port ?? 22,
-      label: entry.label,
+      port,
+      label: entry.label ?? defaultLabel,
       identity: entry.identity,
       sudo: entry.sudo,
     };

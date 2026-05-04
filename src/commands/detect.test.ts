@@ -1,4 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { runDetect } from './detect.js';
 import { adapterRegistry } from '../adapters/registry.js';
 import type { AgentInstallation } from '../core/types.js';
@@ -101,6 +104,52 @@ describe('runDetect', () => {
     const output = consoleLogs.join('\n');
     originalLog(`[detect] no agents → output: "${output}"`);
     expect(output).toContain('No agents detected.');
+  });
+
+  it('writes JSON output to file when -o is set', async () => {
+    vi.spyOn(adapterRegistry, 'detectAll').mockResolvedValue(mockInstallations);
+
+    const dir = await mkdtemp(join(tmpdir(), 'vaso-detect-out-'));
+    const outPath = join(dir, 'detect.json');
+
+    try {
+      await runDetect({ format: 'json', output: outPath });
+
+      const written = await readFile(outPath, 'utf-8');
+      const parsed = JSON.parse(written);
+      originalLog(`[detect] -o JSON file → ${parsed.length} agents in ${outPath}`);
+      expect(parsed).toHaveLength(2);
+      expect(parsed[0].agent).toBe('openclaw');
+      expect(parsed[1].agent).toBe('nanoclaw');
+
+      const stdout = consoleLogs.join('\n');
+      expect(stdout).toContain(`Report written to ${outPath}`);
+      expect(stdout).not.toContain('"agent":');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('writes terminal output to file when -o is set', async () => {
+    vi.spyOn(adapterRegistry, 'detectAll').mockResolvedValue(mockInstallations);
+
+    const dir = await mkdtemp(join(tmpdir(), 'vaso-detect-out-'));
+    const outPath = join(dir, 'detect.txt');
+
+    try {
+      await runDetect({ format: 'terminal', output: outPath });
+
+      const written = await readFile(outPath, 'utf-8');
+      originalLog(`[detect] -o terminal file → ${written.length} bytes in ${outPath}`);
+      expect(written).toContain('openclaw');
+      expect(written).toContain('nanoclaw');
+      expect(written).toContain('Found 2 agent(s).');
+
+      const stdout = consoleLogs.join('\n');
+      expect(stdout).toContain(`Report written to ${outPath}`);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   it('verbose mode shows search paths', async () => {

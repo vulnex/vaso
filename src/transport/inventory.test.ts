@@ -82,6 +82,22 @@ hosts:
     expect(targets[1].label).toBe('staging-web');
   });
 
+  it('defaults label to user@host when omitted', async () => {
+    const path = await writeTempYAML(`
+hosts:
+  - host: 10.0.0.5
+    user: ops
+  - host: 10.0.0.6
+    user: ops
+    port: 2200
+  - host: 10.0.0.7
+`);
+    const targets = await parseInventory(path);
+    expect(targets[0].label).toBe('ops@10.0.0.5');
+    expect(targets[1].label).toBe('ops@10.0.0.6:2200');
+    expect(targets[2].label).toBe('root@10.0.0.7');
+  });
+
   it('throws when host field is missing', async () => {
     const path = await writeTempYAML(`
 hosts:

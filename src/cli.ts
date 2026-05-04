@@ -163,6 +163,7 @@ program
   .description('Detect installed AI agents')
   .option('-a, --agent <type>', 'detect a specific agent only (openclaw, nanoclaw, picoclaw, ironclaw, nanobot, zeroclaw, nemoclaw, hermes, lyrie, claude-code, codex, opencode, gemini-cli, qwen-code, copilot-cli, cursor-cli)')
   .option('-f, --format <format>', 'output format (terminal, json)', 'terminal')
+  .option('-o, --output <file>', 'write report to file')
   .option('--all-users', 'detect across all user accounts (requires root/sudo)')
   .option('--verbose', 'show search paths checked for each adapter')
   .option('--host <targets...>', 'remote host(s) to detect via SSH (user@host[:port])')
