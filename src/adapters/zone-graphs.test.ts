@@ -15,6 +15,7 @@ import { ironclawChecks } from '../checks/ironclaw/index.js';
 import { nanobotChecks } from '../checks/nanobot/index.js';
 import { zeroclawChecks } from '../checks/zeroclaw/index.js';
 import { lyrieChecks } from '../checks/lyrie/index.js';
+import { hermesChecks } from '../checks/hermes/index.js';
 import { policyChecks } from '../checks/policy/index.js';
 import { advisoryChecks } from '../checks/advisory/index.js';
 import { claudeCodeChecks } from '../checks/claude-code/index.js';
@@ -38,7 +39,7 @@ function makeFullRegistries() {
   for (const set of [
     configChecks, skillChecks, iocChecks, networkChecks, runtimeChecks,
     mcpChecks, openclawChecks, nanoclawChecks, ironclawChecks, nanobotChecks,
-    zeroclawChecks, lyrieChecks, policyChecks, advisoryChecks, claudeCodeChecks, codexChecks,
+    zeroclawChecks, lyrieChecks, hermesChecks, policyChecks, advisoryChecks, claudeCodeChecks, codexChecks,
     opencodeChecks,
   ]) {
     checks.registerAll(set);
@@ -80,14 +81,13 @@ describe('adapter ZoneGraphs (real check registry)', () => {
     ['nanoclaw', nanoclawAdapter],
     ['picoclaw', picoclawAdapter],
     ['zeroclaw', zeroclawAdapter],
-    ['hermes', hermesAdapter],
   ] as const)('%s does not declare a custom graph (uses fallback)', (_name, adapter) => {
     expect(adapter.getZoneGraph).toBeUndefined();
   });
 
   it('every custom graph declares at least one inversion edge', () => {
     const customAdapters = [
-      nemoclawAdapter, ironclawAdapter, nanobotAdapter, lyrieAdapter,
+      nemoclawAdapter, ironclawAdapter, nanobotAdapter, lyrieAdapter, hermesAdapter,
       claudeCodeAdapter, codexAdapter, opencodeAdapter,
     ];
     for (const adapter of customAdapters) {
@@ -105,6 +105,7 @@ describe('adapter ZoneGraphs (real check registry)', () => {
       ['ironclaw', ironclawAdapter],
       ['nanobot', nanobotAdapter],
       ['lyrie', lyrieAdapter],
+      ['hermes', hermesAdapter],
       ['claude-code', claudeCodeAdapter],
       ['codex', codexAdapter],
       ['opencode', opencodeAdapter],

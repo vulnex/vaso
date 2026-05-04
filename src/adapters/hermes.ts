@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import type { AgentAdapter, DetectOptions } from './adapter.js';
-import type { AgentInstallation, GatewayInfo, ModelRef, ParsedConfig } from '../core/types.js';
+import type { AgentInstallation, GatewayInfo, ModelRef, ParsedConfig, ZoneGraph } from '../core/types.js';
 import type { ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
@@ -160,6 +160,75 @@ export const hermesAdapter: AgentAdapter = {
 
   getCLICommand(): string {
     return 'hermes';
+  },
+
+  // Hermes' privilege gradient: untrusted network → API-server gateway →
+  // approvals/Tirith layer → terminal/MCP/inference fan-out → host filesystem
+  // and remote inference endpoints. Inversion edges fire when the API server
+  // is reachable without auth (HM-004) or approvals are off (HM-008), when
+  // a custom inference endpoint is plaintext (HM-006) or untrusted (HM-007),
+  // or when MCP stdio is shell-c'd / world-writable (HM-010).
+  getZoneGraph(): ZoneGraph {
+    return {
+      zones: [
+        { id: 'net', label: 'Network / Browser Tabs', trustLevel: 0 },
+        { id: 'api', label: 'API Server Gateway', trustLevel: 1 },
+        { id: 'approval', label: 'Approvals + Tirith', trustLevel: 2 },
+        { id: 'tools', label: 'Terminal + MCP + Inference', trustLevel: 3 },
+        { id: 'host', label: 'Host FS + Remote Endpoints', trustLevel: 4 },
+      ],
+      components: [
+        { id: 'inbound', label: 'Network Ingress', zone: 'net' },
+        {
+          id: 'api-server',
+          label: 'Hermes API Server (8642)',
+          zone: 'api',
+          guardCheckIds: ['HM-004', 'HM-005'],
+        },
+        {
+          id: 'approval-layer',
+          label: 'Approvals + Tirith Scanner',
+          zone: 'approval',
+          guardCheckIds: ['HM-008', 'HM-009'],
+        },
+        {
+          id: 'tool-fanout',
+          label: 'Terminal + MCP + Inference',
+          zone: 'tools',
+          guardCheckIds: ['HM-001', 'HM-002', 'HM-003', 'HM-010'],
+        },
+        {
+          id: 'remote',
+          label: 'Inference Endpoints + Host FS',
+          zone: 'host',
+          guardCheckIds: ['HM-006', 'HM-007'],
+        },
+      ],
+      edges: [
+        { from: 'inbound', to: 'api-server', kind: 'data' },
+        { from: 'api-server', to: 'approval-layer', kind: 'control' },
+        { from: 'approval-layer', to: 'tool-fanout', kind: 'data' },
+        { from: 'tool-fanout', to: 'remote', kind: 'data' },
+        {
+          from: 'inbound',
+          to: 'tool-fanout',
+          label: 'unauth API bypass',
+          triggerCheckIds: ['HM-004'],
+        },
+        {
+          from: 'api-server',
+          to: 'tool-fanout',
+          label: 'approval bypass',
+          triggerCheckIds: ['HM-008'],
+        },
+        {
+          from: 'tool-fanout',
+          to: 'remote',
+          label: 'plaintext / exfil endpoint',
+          triggerCheckIds: ['HM-006', 'HM-007'],
+        },
+      ],
+    };
   },
 
   getProbeManifest(): ProbeManifest {
