@@ -95,6 +95,20 @@ describe('SnapshotFSProvider', () => {
       const provider = new SnapshotFSProvider(makeSnapshot());
       await expect(provider.readdir('/nowhere')).rejects.toThrow('ENOENT');
     });
+
+    it('strips trailing slash from dir entry names produced by the Go probe', async () => {
+      // The Go probe appends '/' to directory entries (collector.go:217). Names
+      // must come back clean so callers can path.join() without producing '//'.
+      const provider = new SnapshotFSProvider(
+        makeSnapshot({
+          directories: {
+            '/home/u/.gemini/tmp': ['conde/', 'gemini-testing/', 'README.md'],
+          },
+        }),
+      );
+      const entries = await provider.readdir('/home/u/.gemini/tmp');
+      expect(entries).toEqual(['conde', 'gemini-testing', 'README.md']);
+    });
   });
 
   // ---------------------------------------------------------------------------

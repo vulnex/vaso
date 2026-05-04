@@ -2,6 +2,10 @@ import { join, basename } from 'node:path';
 import type { FSProvider, DirentInfo, ExecResult, ExecOptions } from './fs-provider.js';
 import type { ProbeSnapshot } from './snapshot-types.js';
 
+function stripTrailingSlash(name: string): string {
+  return name.endsWith('/') ? name.slice(0, -1) : name;
+}
+
 export class SnapshotFSProvider implements FSProvider {
   readonly platform: NodeJS.Platform;
   private snapshot: ProbeSnapshot;
@@ -21,7 +25,12 @@ export class SnapshotFSProvider implements FSProvider {
 
   async readdir(path: string): Promise<string[]> {
     const listing = this.snapshot.directories[path];
-    if (listing) return listing;
+    if (listing) {
+      // The Go probe appends '/' to directory entry names so callers can tell
+      // dirs from files in a flat string list. We strip it here so consumers
+      // get clean basenames usable for path.join() without producing '//'.
+      return listing.map(stripTrailingSlash);
+    }
 
     // Try to derive directory listing from collected files
     const entries = new Set<string>();
