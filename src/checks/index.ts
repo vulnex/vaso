@@ -15,6 +15,8 @@ import { hermesChecks } from './hermes/index.js';
 import { policyChecks } from './policy/index.js';
 import { advisoryChecks } from './advisory/index.js';
 import { claudeCodeChecks } from './claude-code/index.js';
+import { claudeDesktopChecks } from './claude-desktop/index.js';
+import { chatgptDesktopChecks } from './chatgpt-desktop/index.js';
 import { codexChecks } from './codex/index.js';
 import { opencodeChecks } from './opencode/index.js';
 import { geminiCliChecks } from './gemini-cli/index.js';
@@ -39,6 +41,8 @@ export function registerAllChecks(): void {
   checkRegistry.registerAll(policyChecks);
   checkRegistry.registerAll(advisoryChecks);
   checkRegistry.registerAll(claudeCodeChecks);
+  checkRegistry.registerAll(claudeDesktopChecks);
+  checkRegistry.registerAll(chatgptDesktopChecks);
   checkRegistry.registerAll(codexChecks);
   checkRegistry.registerAll(opencodeChecks);
   checkRegistry.registerAll(geminiCliChecks);
