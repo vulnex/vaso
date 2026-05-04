@@ -8,6 +8,7 @@ import { codexAdapter } from './codex.js';
 import { opencodeAdapter } from './opencode.js';
 import { nanobotAdapter } from './nanobot.js';
 import { hermesAdapter } from './hermes.js';
+import { geminiAdapter } from './gemini.js';
 import { ironclawAdapter } from './ironclaw.js';
 import { lyrieAdapter } from './lyrie.js';
 import { nanoclawAdapter } from './nanoclaw.js';
@@ -294,6 +295,74 @@ describe('adapter.getModels()', () => {
         cfg('/u/.nanobot/config.json', { agents: { defaults: { model: 'gpt-4o' } } }),
       ];
       expect(nanobotAdapter.getModels!(configs)).toEqual([{ id: 'gpt-4o' }]);
+    });
+  });
+
+  describe('gemini-cli', () => {
+    it('reads model.name from settings.json', async () => {
+      const configs = [
+        cfg('/u/.gemini/settings.json', { model: { name: 'gemini-2.5-pro' } }),
+      ];
+      expect(await geminiAdapter.getModels!(configs)).toEqual([
+        { id: 'gemini-2.5-pro', provider: 'google' },
+      ]);
+    });
+
+    it('GEMINI_MODEL env beats settings.json (matches CLI resolution order)', async () => {
+      const configs = [
+        cfg('/u/.gemini/settings.json', { model: { name: 'gemini-2.5-pro' } }),
+      ];
+      expect(
+        await geminiAdapter.getModels!(configs, fsWithEnv({ GEMINI_MODEL: 'gemini-3-pro-preview' })),
+      ).toEqual([{ id: 'gemini-3-pro-preview', provider: 'google', via: 'GEMINI_MODEL' }]);
+    });
+
+    it('falls back to latest session jsonl when settings has no model', async () => {
+      const tree: Record<string, string[]> = {
+        '/home/u/.gemini/tmp': ['proj-aaa', 'proj-bbb'],
+        '/home/u/.gemini/tmp/proj-aaa/chats': [
+          'session-2026-04-30T10-00-12345678.jsonl',
+        ],
+        '/home/u/.gemini/tmp/proj-bbb/chats': [
+          'session-2026-05-04T08-00-87654321.jsonl', // latest by filename
+          'session-2026-05-03T14-00-87654321.jsonl',
+        ],
+      };
+      const files: Record<string, string> = {
+        '/home/u/.gemini/tmp/proj-bbb/chats/session-2026-05-04T08-00-87654321.jsonl':
+          '{"role":"user","content":"hi","model":"gemini-3-pro-preview"}\n' +
+          '{"role":"model","content":"hello","model":"gemini-3-flash-preview"}\n',
+      };
+      const fakeFs = {
+        homedir: () => '/home/u',
+        async readdirEntries(p: string) {
+          const names = tree[p];
+          if (!names) throw new Error(`ENOENT ${p}`);
+          return names.map(n => ({
+            name: n,
+            isFile: !tree[`${p}/${n}/chats`] && n.endsWith('.jsonl'),
+            isDirectory: !!tree[`${p}/${n}/chats`] || !!tree[`${p}/${n}`],
+          }));
+        },
+        async readFile(p: string) {
+          if (!(p in files)) throw new Error(`ENOENT ${p}`);
+          return files[p];
+        },
+        getEnv: () => undefined,
+      } as unknown as FSProvider;
+      expect(await geminiAdapter.getModels!([], fakeFs)).toEqual([
+        { id: 'gemini-3-flash-preview', provider: 'google', via: 'last session' },
+      ]);
+    });
+
+    it('returns [] when no settings model, no env, and no sessions tree', async () => {
+      const fakeFs = {
+        homedir: () => '/home/u',
+        async readdirEntries() { throw new Error('ENOENT'); },
+        async readFile() { throw new Error('ENOENT'); },
+        getEnv: () => undefined,
+      } as unknown as FSProvider;
+      expect(await geminiAdapter.getModels!([], fakeFs)).toEqual([]);
     });
   });
 

@@ -64,11 +64,66 @@ async function loadSettings(dir: string, fs: FSProvider): Promise<ParsedConfig[]
 }
 
 /**
+ * Walk ~/.gemini/tmp/<project-id>/chats/session-*.jsonl, collect every
+ * candidate, pick the lex-greatest filename (timestamp prefix sorts
+ * chronologically), and return the most recent `"model":"..."` from its
+ * message lines. `/model set` without `--persist` only updates this transcript,
+ * not settings.json — so this is the empirical "what model is the user
+ * actually running" when settings.json has no model.name.
+ */
+async function findLatestSessionModel(fs: FSProvider, tmpDir: string): Promise<string | undefined> {
+  let projects;
+  try {
+    projects = await fs.readdirEntries(tmpDir);
+  } catch {
+    return undefined;
+  }
+  let latestPath: string | undefined;
+  let latestName = '';
+  for (const proj of projects) {
+    if (!proj.isDirectory) continue;
+    const chatsDir = `${tmpDir}/${proj.name}/chats`;
+    let entries;
+    try {
+      entries = await fs.readdirEntries(chatsDir);
+    } catch {
+      continue;
+    }
+    for (const e of entries) {
+      if (!e.isFile) continue;
+      if (!e.name.startsWith('session-') || !e.name.endsWith('.jsonl')) continue;
+      if (e.name > latestName) {
+        latestName = e.name;
+        latestPath = `${chatsDir}/${e.name}`;
+      }
+    }
+  }
+  if (!latestPath) return undefined;
+  let content;
+  try {
+    content = await fs.readFile(latestPath);
+  } catch {
+    return undefined;
+  }
+  const re = /"model":"([^"]+)"/g;
+  let last: string | undefined;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(content)) !== null) last = m[1];
+  return last;
+}
+
+/**
  * Pull the model from settings.json. Gemini stores it under `model.name`
  * (current schema) but also recognizes a top-level `model` string in older
- * configs. Falls back to GEMINI_MODEL env if neither is set.
+ * configs. Resolution order matches the CLI's own (config.ts:853):
+ * `GEMINI_MODEL` env > `settings.model.name` > session-jsonl tail.
+ * Default fallback `auto-gemini-3` is intentionally NOT surfaced — it only
+ * indicates the user hasn't configured anything.
  */
-function extractModels(configs: ParsedConfig[], fs?: FSProvider): ModelRef[] {
+async function extractModels(configs: ParsedConfig[], fs?: FSProvider): Promise<ModelRef[]> {
+  const envModel = fs?.getEnv?.('GEMINI_MODEL');
+  if (envModel) return [{ id: envModel, provider: 'google', via: 'GEMINI_MODEL' }];
+
   for (const c of configs) {
     const model = c.data.model as Record<string, unknown> | string | undefined;
     if (typeof model === 'string' && model.length > 0) {
@@ -81,8 +136,13 @@ function extractModels(configs: ParsedConfig[], fs?: FSProvider): ModelRef[] {
       }
     }
   }
-  const envModel = fs?.getEnv?.('GEMINI_MODEL');
-  if (envModel) return [{ id: envModel, provider: 'google', via: 'GEMINI_MODEL' }];
+
+  if (fs) {
+    const home = fs.homedir();
+    const tmpDir = `${home}/.gemini/tmp`;
+    const found = await findLatestSessionModel(fs, tmpDir);
+    if (found) return [{ id: found, provider: 'google', via: 'last session' }];
+  }
   return [];
 }
 
@@ -112,7 +172,7 @@ export const geminiAdapter: AgentAdapter = {
         version,
         installDir: geminiDir,
         configFiles,
-        models: extractModels(configFiles, fs),
+        models: await extractModels(configFiles, fs),
         user: options?.allUsers ? user : undefined,
         cliBinary,
       });
@@ -130,7 +190,7 @@ export const geminiAdapter: AgentAdapter = {
           agentName: `project:${basename(cwd)}`,
           installDir: projectGeminiDir,
           configFiles: projectConfigs,
-          models: extractModels(projectConfigs, fs),
+          models: await extractModels(projectConfigs, fs),
           profile: 'project',
         });
       }
@@ -158,7 +218,7 @@ export const geminiAdapter: AgentAdapter = {
     return undefined;
   },
 
-  getModels(configs: ParsedConfig[], fs?: FSProvider): ModelRef[] {
+  async getModels(configs: ParsedConfig[], fs?: FSProvider): Promise<ModelRef[]> {
     return extractModels(configs, fs);
   },
 
@@ -201,6 +261,9 @@ export const geminiAdapter: AgentAdapter = {
         '~/.gemini/commands/*',
         '~/.gemini/policies/*',
         '~/.gemini/extensions/**',
+        // Session transcripts hold per-message `model` field — the empirical
+        // active model when settings.json has no `model.name`.
+        '~/.gemini/tmp/*/chats/session-*.jsonl',
         nvmBinaryGlob('gemini'),
         ...npmPackageJsonGlobs(NPM_PACKAGE_NAME),
       ],
@@ -214,6 +277,7 @@ export const geminiAdapter: AgentAdapter = {
         '~/.gemini/commands',
         '~/.gemini/extensions',
         '~/.gemini/policies',
+        '~/.gemini/tmp',
       ],
       envPrefixes: ['GEMINI_', 'GOOGLE_'],
       systemPaths: SYSTEM_CLI_PATHS,
