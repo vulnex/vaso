@@ -13,3 +13,5 @@ internal_data/
 probe/dist/
 probe/probe
 probe/vaso-probe
+bin/vis/
+vaso-visualizations/
