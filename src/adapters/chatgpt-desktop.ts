@@ -1,5 +1,4 @@
 import { join } from 'node:path';
-import { readFile } from 'node:fs/promises';
 import * as plist from 'plist';
 import type { AgentAdapter, DetectOptions } from './adapter.js';
 import type { AgentInstallation, GatewayInfo, ModelRef, ParsedConfig, ZoneGraph } from '../core/types.js';
@@ -25,24 +24,24 @@ const PLISTS = {
 const PAIRING_DIR = 'app_pairing_extensions';
 
 /**
- * Parse a macOS plist (XML or binary) into a plain object. Uses the `plist`
- * npm package because plutil refuses to convert NSDate/NSData-bearing plists
- * to JSON, and ChatGPT's preferences include both. Date values surface as
- * Date instances and are serialized as ISO strings before reaching checks.
+ * Convert a macOS plist (binary or XML) to a plain object via plutil. Going
+ * through `plutil -convert xml1 -o -` lets the same code path serve both
+ * local and snapshot/SSH transports: locally, the FSProvider invokes plutil
+ * directly; remotely, it returns the captured stdout the probe collected
+ * (the snapshot wire format is JSON, which would mangle binary plist bytes
+ * if we tried to ship the file content itself). Date and NSData values come
+ * through XML as strings/base64 and are normalized for JSON consumers.
  */
 async function loadPlistAsObject(filePath: string, fs: FSProvider): Promise<Record<string, unknown> | undefined> {
   if (!(await fs.access(filePath))) return undefined;
   try {
-    // The plist package only accepts string/Buffer of file contents, not paths.
-    // Use the underlying fs/promises directly — testable plist content arrives
-    // through fs.readFile in the LocalFSProvider; SnapshotFSProvider returns
-    // text for XML plists. Binary plists in snapshots aren't supported here
-    // and will fall back to undefined.
-    const isLocal = fs.platform === 'darwin' && fs instanceof LocalFSProvider;
-    const buf = isLocal
-      ? await readFile(filePath)
-      : Buffer.from(await fs.readFile(filePath));
-    const parsed = plist.parse(buf as unknown as string) as unknown;
+    const result = await fs.exec(
+      'plutil',
+      ['-convert', 'xml1', '-o', '-', filePath],
+      { timeout: 3000 },
+    );
+    if (result.exitCode !== 0 || !result.stdout) return undefined;
+    const parsed = plist.parse(result.stdout) as unknown;
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
     return normalizeForJson(parsed as Record<string, unknown>);
   } catch {
@@ -256,6 +255,16 @@ export const chatgptDesktopAdapter: AgentAdapter = {
       commands: [
         { id: 'chatgpt-version', cmd: 'defaults', args: ['read', `${APP_BUNDLE_PATH}/Contents/Info.plist`, 'CFBundleShortVersionString'], timeout: 3000 },
         { id: 'chatgpt-codesign', cmd: 'codesign', args: ['-dv', APP_BUNDLE_PATH], timeout: 5000 },
+        // Per-user plists need `~` expansion done by the probe — see
+        // expandArgsPerUser in collector.go. plutil converts binary plists
+        // (the macOS default) to XML so the JS plist parser can read them
+        // through the snapshot transport. The RemoteFeatureFlags plist's
+        // filename is workspace-namespaced and only knowable after a dir
+        // listing, so it's not capture-friendly via a static manifest and
+        // remains local-FS-only for now.
+        { id: 'chatgpt-plist-main', cmd: 'plutil', args: ['-convert', 'xml1', '-o', '-', `~/Library/Preferences/${PLISTS.main}`], timeout: 3000 },
+        { id: 'chatgpt-plist-statsig', cmd: 'plutil', args: ['-convert', 'xml1', '-o', '-', `~/Library/Preferences/${PLISTS.statsig}`], timeout: 3000 },
+        { id: 'chatgpt-plist-helper', cmd: 'plutil', args: ['-convert', 'xml1', '-o', '-', `~/Library/Preferences/${PLISTS.helper}`], timeout: 3000 },
       ],
       directoryListings: [
         '~/Library/Application Support/com.openai.chat',

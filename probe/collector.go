@@ -132,12 +132,23 @@ func Collect(manifest ProbeManifest, escalate bool) ProbeSnapshot {
 	// snapshot lookup can resolve ambiguous shared-basename commands precisely.
 	cmdPath := buildAugmentedPath(homes, os.Getenv("PATH"))
 	for _, cmdReq := range manifest.Commands {
-		out := runCommand(cmdReq, cmdPath)
-		snapshot.CommandOutputs[cmdReq.ID] = out
-		naturalKey := strings.TrimSpace(cmdReq.Cmd + " " + strings.Join(cmdReq.Args, " "))
-		if naturalKey != "" && naturalKey != cmdReq.ID {
-			if _, exists := snapshot.CommandOutputs[naturalKey]; !exists {
-				snapshot.CommandOutputs[naturalKey] = out
+		// If any arg uses ~, run the command once per discovered user with
+		// that user's home substituted. Each invocation's natural-key entry
+		// (cmd + resolved-args) is preserved so the TS-side fs.exec lookup,
+		// which constructs the full path itself, still matches. The id-keyed
+		// entry only retains the last user's output — TS callers should
+		// always go through the natural key when paths are user-scoped.
+		argSets := expandArgsPerUser(cmdReq.Args, homes)
+		for _, args := range argSets {
+			req := cmdReq
+			req.Args = args
+			out := runCommand(req, cmdPath)
+			snapshot.CommandOutputs[cmdReq.ID] = out
+			naturalKey := strings.TrimSpace(req.Cmd + " " + strings.Join(req.Args, " "))
+			if naturalKey != "" && naturalKey != cmdReq.ID {
+				if _, exists := snapshot.CommandOutputs[naturalKey]; !exists {
+					snapshot.CommandOutputs[naturalKey] = out
+				}
 			}
 		}
 	}
@@ -146,6 +157,38 @@ func Collect(manifest ProbeManifest, escalate bool) ProbeSnapshot {
 	snapshot.Env = collectEnv(manifest.EnvPrefixes)
 
 	return snapshot
+}
+
+// expandArgsPerUser returns one resolved arg vector per user when any arg
+// starts with ~/, otherwise the original args unchanged in a single-element
+// slice. Mirrors expandPaths's per-user fan-out so per-user-scoped tools
+// (plutil, defaults read on user preference plists) can be probed under
+// --all-users without forcing every adapter to specify multiple manifest
+// entries.
+func expandArgsPerUser(args []string, homes []UserHome) [][]string {
+	needsExpansion := false
+	for _, a := range args {
+		if strings.HasPrefix(a, "~/") || a == "~" {
+			needsExpansion = true
+			break
+		}
+	}
+	if !needsExpansion {
+		return [][]string{args}
+	}
+	var result [][]string
+	for _, h := range homes {
+		expanded := make([]string, len(args))
+		for i, a := range args {
+			if strings.HasPrefix(a, "~/") || a == "~" {
+				expanded[i] = filepath.Join(h.Path, strings.TrimPrefix(a, "~"))
+			} else {
+				expanded[i] = a
+			}
+		}
+		result = append(result, expanded)
+	}
+	return result
 }
 
 // expandPaths replaces ~ with each discovered user home directory.
