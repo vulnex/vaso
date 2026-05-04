@@ -7,6 +7,12 @@ import { claudeCodeAdapter } from './claude-code.js';
 import { codexAdapter } from './codex.js';
 import { opencodeAdapter } from './opencode.js';
 import { nanobotAdapter } from './nanobot.js';
+import { hermesAdapter } from './hermes.js';
+import { ironclawAdapter } from './ironclaw.js';
+import { lyrieAdapter } from './lyrie.js';
+import { nanoclawAdapter } from './nanoclaw.js';
+import { picoclawAdapter } from './picoclaw.js';
+import { zeroclawAdapter } from './zeroclaw.js';
 
 function cfg(filePath: string, data: Record<string, unknown>): ParsedConfig {
   return { raw: '', format: 'json', filePath, data };
@@ -288,6 +294,316 @@ describe('adapter.getModels()', () => {
         cfg('/u/.nanobot/config.json', { agents: { defaults: { model: 'gpt-4o' } } }),
       ];
       expect(nanobotAdapter.getModels!(configs)).toEqual([{ id: 'gpt-4o' }]);
+    });
+  });
+
+  describe('hermes', () => {
+    it('reads cli-config.yaml model.default + sibling provider', async () => {
+      const configs = [
+        cfg('/u/.hermes/cli-config.yaml', {
+          model: {
+            default: 'gpt-5.5',
+            provider: 'openai-codex',
+            base_url: 'https://chatgpt.com/backend-api/codex',
+          },
+        }),
+      ];
+      expect(await hermesAdapter.getModels!(configs)).toEqual([
+        { id: 'gpt-5.5', provider: 'openai-codex' },
+      ]);
+    });
+
+    it('also accepts model.model as alias for model.default', async () => {
+      const configs = [
+        cfg('/u/.hermes/cli-config.yaml', {
+          model: { model: 'gpt-5.5', provider: 'openai-codex' },
+        }),
+      ];
+      expect(await hermesAdapter.getModels!(configs)).toEqual([
+        { id: 'gpt-5.5', provider: 'openai-codex' },
+      ]);
+    });
+
+    it('still reads legacy config.yaml when cli-config.yaml absent', async () => {
+      const configs = [
+        cfg('/u/.hermes/config.yaml', { model: { default: 'anthropic/claude-opus-4.6' } }),
+      ];
+      expect(await hermesAdapter.getModels!(configs)).toEqual([
+        { id: 'claude-opus-4.6', provider: 'anthropic' },
+      ]);
+    });
+
+    it('keeps slashes in id when explicit provider is given (e.g. nvidia/nemotron)', async () => {
+      const configs = [
+        cfg('/u/.hermes/cli-config.yaml', {
+          model: { default: 'nvidia/nemotron-3-super-120b-a12b', provider: 'nvidia-nim' },
+        }),
+      ];
+      expect(await hermesAdapter.getModels!(configs)).toEqual([
+        { id: 'nvidia/nemotron-3-super-120b-a12b', provider: 'nvidia-nim' },
+      ]);
+    });
+
+    it('records fallback with via=fallback, inheriting provider', async () => {
+      const configs = [
+        cfg('/u/.hermes/cli-config.yaml', {
+          model: { default: 'gpt-5.5', provider: 'openai-codex', fallback: 'gpt-4o' },
+        }),
+      ];
+      expect(await hermesAdapter.getModels!(configs)).toEqual([
+        { id: 'gpt-5.5', provider: 'openai-codex' },
+        { id: 'gpt-4o', provider: 'openai-codex', via: 'fallback' },
+      ]);
+    });
+
+    it('handles top-level model as a bare string', async () => {
+      const configs = [cfg('/u/.hermes/cli-config.yaml', { model: 'gpt-4o' })];
+      expect(await hermesAdapter.getModels!(configs)).toEqual([{ id: 'gpt-4o' }]);
+    });
+
+    it('reads HERMES_DEFAULT_MODEL from .env, picking up HERMES_PROVIDER', async () => {
+      const configs = [
+        cfg('/u/.hermes/.env', {
+          HERMES_DEFAULT_MODEL: 'claude-haiku-4-5',
+          HERMES_PROVIDER: 'anthropic',
+        }),
+      ];
+      expect(await hermesAdapter.getModels!(configs)).toEqual([
+        { id: 'claude-haiku-4-5', provider: 'anthropic' },
+      ]);
+    });
+
+    it('falls back to process env HERMES_MODEL when nothing in config files', async () => {
+      expect(
+        await hermesAdapter.getModels!([], fsWithEnv({ HERMES_MODEL: 'openai/gpt-5' })),
+      ).toEqual([{ id: 'gpt-5', provider: 'openai', via: 'HERMES_MODEL' }]);
+    });
+
+    it('returns [] when no model field in config or env', async () => {
+      const configs = [cfg('/u/.hermes/cli-config.yaml', { platforms: {} })];
+      expect(await hermesAdapter.getModels!(configs)).toEqual([]);
+    });
+  });
+
+  describe('ironclaw', () => {
+    it('honors LLM_BACKEND from .env to select the matching model env var', async () => {
+      const configs = [
+        cfg('/u/.ironclaw/.env', {
+          LLM_BACKEND: 'openai_codex',
+          OPENAI_CODEX_MODEL: 'gpt-5.5',
+          ANTHROPIC_MODEL: 'claude-opus-4.6', // present but not selected
+        }),
+      ];
+      expect(await ironclawAdapter.getModels!(configs)).toEqual([
+        { id: 'gpt-5.5', provider: 'openai_codex' },
+      ]);
+    });
+
+    it('uses openai_compatible → LLM_MODEL pairing', async () => {
+      const configs = [
+        cfg('/u/.ironclaw/.env', {
+          LLM_BACKEND: 'openai_compatible',
+          LLM_MODEL: 'gpt-4o',
+        }),
+      ];
+      expect(await ironclawAdapter.getModels!(configs)).toEqual([
+        { id: 'gpt-4o', provider: 'openai_compatible' },
+      ]);
+    });
+
+    it('with no LLM_BACKEND, surfaces every populated *_MODEL env var', async () => {
+      const configs = [
+        cfg('/u/.ironclaw/.env', {
+          OPENAI_MODEL: 'gpt-4o',
+          ANTHROPIC_MODEL: 'claude-opus-4.6',
+        }),
+      ];
+      expect(await ironclawAdapter.getModels!(configs)).toEqual([
+        { id: 'gpt-4o', provider: 'openai', via: 'env-detected' },
+        { id: 'claude-opus-4.6', provider: 'anthropic', via: 'env-detected' },
+      ]);
+    });
+
+    it('falls back to process env when no .env file', async () => {
+      expect(
+        await ironclawAdapter.getModels!(
+          [],
+          fsWithEnv({ LLM_BACKEND: 'anthropic', ANTHROPIC_MODEL: 'claude-haiku-4-5' }),
+        ),
+      ).toEqual([{ id: 'claude-haiku-4-5', provider: 'anthropic' }]);
+    });
+
+    it('returns [] when no model env var is populated', async () => {
+      const configs = [cfg('/u/.ironclaw/.env', { GATEWAY_PORT: '8080' })];
+      expect(await ironclawAdapter.getModels!(configs)).toEqual([]);
+    });
+  });
+
+  describe('lyrie', () => {
+    it('reads LYRIE_MODEL from .env', async () => {
+      const configs = [cfg('/u/.lyrie/.env', { LYRIE_MODEL: 'anthropic/claude-opus-4.6' })];
+      expect(await lyrieAdapter.getModels!(configs)).toEqual([
+        { id: 'claude-opus-4.6', provider: 'anthropic' },
+      ]);
+    });
+
+    it('records LYRIE_FALLBACK_MODEL with via=fallback', async () => {
+      const configs = [
+        cfg('/u/.lyrie/.env', {
+          LYRIE_DEFAULT_MODEL: 'anthropic/claude-opus-4.6',
+          LYRIE_FALLBACK_MODEL: 'openai/gpt-4o',
+        }),
+      ];
+      expect(await lyrieAdapter.getModels!(configs)).toEqual([
+        { id: 'claude-opus-4.6', provider: 'anthropic' },
+        { id: 'gpt-4o', provider: 'openai', via: 'fallback' },
+      ]);
+    });
+
+    it('records per-channel LYRIE_<CHANNEL>_MODEL with via=<channel>', async () => {
+      const configs = [
+        cfg('/u/.lyrie/.env', {
+          LYRIE_MODEL: 'anthropic/claude-opus-4.6',
+          LYRIE_TELEGRAM_MODEL: 'openai/gpt-4o',
+          LYRIE_DISCORD_MODEL: 'google/gemini-2.5-pro',
+        }),
+      ];
+      expect(await lyrieAdapter.getModels!(configs)).toEqual([
+        { id: 'claude-opus-4.6', provider: 'anthropic' },
+        { id: 'gpt-4o', provider: 'openai', via: 'telegram' },
+        { id: 'gemini-2.5-pro', provider: 'google', via: 'discord' },
+      ]);
+    });
+
+    it('returns [] when no LYRIE_*_MODEL keys present', async () => {
+      const configs = [cfg('/u/.lyrie/.env', { ANTHROPIC_API_KEY: 'sk-...' })];
+      expect(await lyrieAdapter.getModels!(configs)).toEqual([]);
+    });
+  });
+
+  describe('nanoclaw', () => {
+    it('returns [] — model is delegated to inner CLI via SQLite agent_provider', async () => {
+      // NanoClaw doesn't pick a model; it spawns claude/codex/opencode based on
+      // a per-session field stored in SQLite. VASO can't reliably surface that.
+      const configs = [
+        cfg('/u/.config/nanoclaw/config.json', { agents: { defaults: { agent_provider: 'claude' } } }),
+      ];
+      expect(await nanoclawAdapter.getModels!(configs)).toEqual([]);
+    });
+  });
+
+  describe('picoclaw', () => {
+    it('reads model_list[] entries, surfacing default with no via', async () => {
+      const configs = [
+        cfg('/u/.picoclaw/config.json', {
+          agents: { defaults: { model_name: 'primary' } },
+          model_list: [
+            { model_name: 'primary', model: 'anthropic/claude-opus-4.6', api_key: 'sk-...' },
+            { model_name: 'cheap', model: 'openai/gpt-4o-mini', api_key: 'sk-...' },
+          ],
+        }),
+      ];
+      expect(await picoclawAdapter.getModels!(configs)).toEqual([
+        { id: 'claude-opus-4.6', provider: 'anthropic' },
+        { id: 'gpt-4o-mini', provider: 'openai', via: 'cheap' },
+      ]);
+    });
+
+    it('dedupes load-balance pool entries with the same model_name + model', async () => {
+      const configs = [
+        cfg('/u/.picoclaw/config.json', {
+          agents: { defaults: { model_name: 'primary' } },
+          model_list: [
+            { model_name: 'primary', model: 'openai/gpt-5.4', api_key: 'k1', api_base: 'h1' },
+            { model_name: 'primary', model: 'openai/gpt-5.4', api_key: 'k2', api_base: 'h2' },
+          ],
+        }),
+      ];
+      expect(await picoclawAdapter.getModels!(configs)).toEqual([
+        { id: 'gpt-5.4', provider: 'openai' },
+      ]);
+    });
+
+    it('returns [] when model_list is missing', async () => {
+      const configs = [cfg('/u/.picoclaw/config.json', { gateway: {} })];
+      expect(await picoclawAdapter.getModels!(configs)).toEqual([]);
+    });
+  });
+
+  describe('zeroclaw', () => {
+    it('reads top-level default_provider + default_model', async () => {
+      const configs = [
+        cfg('/u/.zeroclaw/config.toml', {
+          default_provider: 'anthropic',
+          default_model: 'claude-opus-4.6',
+        }),
+      ];
+      expect(await zeroclawAdapter.getModels!(configs)).toEqual([
+        { id: 'claude-opus-4.6', provider: 'anthropic' },
+      ]);
+    });
+
+    it('strips embedded base-URL from default_provider (e.g. anthropic-custom:https://...)', async () => {
+      const configs = [
+        cfg('/u/.zeroclaw/config.toml', {
+          default_provider: 'anthropic-custom:https://api.z.ai/api/anthropic',
+          default_model: 'claude-opus-4.6',
+        }),
+      ];
+      expect(await zeroclawAdapter.getModels!(configs)).toEqual([
+        { id: 'claude-opus-4.6', provider: 'anthropic-custom' },
+      ]);
+    });
+
+    it('surfaces model_routes entries with the route name as via', async () => {
+      const configs = [
+        cfg('/u/.zeroclaw/config.toml', {
+          default_provider: 'anthropic',
+          default_model: 'claude-opus-4.6',
+          model_routes: [
+            { name: 'cheap', provider: 'openai', model: 'gpt-4o-mini' },
+            { name: 'reasoner', provider: 'openai', model: 'o3-mini' },
+          ],
+        }),
+      ];
+      expect(await zeroclawAdapter.getModels!(configs)).toEqual([
+        { id: 'claude-opus-4.6', provider: 'anthropic' },
+        { id: 'gpt-4o-mini', provider: 'openai', via: 'cheap' },
+        { id: 'o3-mini', provider: 'openai', via: 'reasoner' },
+      ]);
+    });
+
+    it('records [reliability.model_fallbacks] with via=fallback:<slot>', async () => {
+      const configs = [
+        cfg('/u/.zeroclaw/config.toml', {
+          default_provider: 'anthropic',
+          default_model: 'claude-opus-4.6',
+          reliability: {
+            model_fallbacks: {
+              primary: ['openai/gpt-4o', 'google/gemini-2.5-pro'],
+            },
+          },
+        }),
+      ];
+      expect(await zeroclawAdapter.getModels!(configs)).toEqual([
+        { id: 'claude-opus-4.6', provider: 'anthropic' },
+        { id: 'gpt-4o', provider: 'openai', via: 'fallback:primary' },
+        { id: 'gemini-2.5-pro', provider: 'google', via: 'fallback:primary' },
+      ]);
+    });
+
+    it('falls back to ZEROCLAW_MODEL/PROVIDER process env when nothing in config', async () => {
+      expect(
+        await zeroclawAdapter.getModels!(
+          [],
+          fsWithEnv({ ZEROCLAW_MODEL: 'gpt-4o', ZEROCLAW_PROVIDER: 'openai' }),
+        ),
+      ).toEqual([{ id: 'gpt-4o', provider: 'openai', via: 'ZEROCLAW_MODEL' }]);
+    });
+
+    it('returns [] when no model field anywhere', async () => {
+      const configs = [cfg('/u/.zeroclaw/config.toml', { server: {} })];
+      expect(await zeroclawAdapter.getModels!(configs)).toEqual([]);
     });
   });
 });

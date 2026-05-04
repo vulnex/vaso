@@ -177,7 +177,8 @@ describe('Hermes adapter', () => {
 
   it('returns correct config paths', () => {
     const paths = hermesAdapter.getConfigPaths();
-    expect(paths).toHaveLength(2);
+    expect(paths).toHaveLength(3);
+    expect(paths).toContain(join(hermesHome, 'cli-config.yaml'));
     expect(paths).toContain(join(hermesHome, 'config.yaml'));
     expect(paths).toContain(join(hermesHome, '.env'));
   });

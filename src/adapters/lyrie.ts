@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import type { AgentAdapter, DetectOptions } from './adapter.js';
-import type { AgentInstallation, GatewayInfo, ZoneGraph } from '../core/types.js';
+import type { AgentInstallation, GatewayInfo, ModelRef, ParsedConfig, ZoneGraph } from '../core/types.js';
 import type { ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
@@ -74,6 +74,7 @@ export const lyrieAdapter: AgentAdapter = {
       configFiles,
       skillsDir: this.getSkillsDir(lyrieDir),
       gateway: this.getGatewayInfo(merged),
+      models: await this.getModels?.(configFiles, fs),
       cliBinary,
       version,
     }];
@@ -103,6 +104,43 @@ export const lyrieAdapter: AgentAdapter = {
       host: webchatHost ?? '127.0.0.1',
       port,
     };
+  },
+
+  getModels(configs: ParsedConfig[], fs?: FSProvider): ModelRef[] {
+    const out: ModelRef[] = [];
+    const seen = new Set<string>();
+    const push = (raw: unknown, via?: string): void => {
+      if (typeof raw !== 'string' || !raw.trim()) return;
+      const trimmed = raw.trim();
+      const slash = trimmed.indexOf('/');
+      const provider = slash !== -1 ? trimmed.slice(0, slash) : undefined;
+      const id = slash !== -1 ? trimmed.slice(slash + 1) : trimmed;
+      const key = `${provider ?? ''}|${id}|${via ?? ''}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      out.push({ id, ...(provider ? { provider } : {}), ...(via ? { via } : {}) });
+    };
+
+    const env = configs.find(c => c.filePath.endsWith('.env'));
+    if (env) {
+      push(env.data.LYRIE_MODEL);
+      push(env.data.LYRIE_DEFAULT_MODEL);
+      push(env.data.LYRIE_FALLBACK_MODEL, 'fallback');
+      // Per-channel overrides surfaced as `via=<channel>`
+      for (const [k, v] of Object.entries(env.data)) {
+        const m = /^LYRIE_([A-Z]+)_MODEL$/.exec(k);
+        if (!m) continue;
+        const slot = m[1].toLowerCase();
+        if (slot === 'default' || slot === 'fallback') continue;
+        if (typeof v === 'string') push(v, slot);
+      }
+    }
+
+    if (out.length === 0 && fs?.getEnv) {
+      push(fs.getEnv('LYRIE_MODEL'), 'LYRIE_MODEL');
+    }
+
+    return out;
   },
 
   getMemoryFiles(installDir: string): string[] {

@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import type { AgentAdapter, DetectOptions } from './adapter.js';
-import type { AgentInstallation, GatewayInfo, ZoneGraph } from '../core/types.js';
+import type { AgentInstallation, GatewayInfo, ModelRef, ParsedConfig, ZoneGraph } from '../core/types.js';
 import type { ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
@@ -57,6 +57,7 @@ export const ironclawAdapter: AgentAdapter = {
       configFiles,
       skillsDir: this.getSkillsDir(ironDir),
       gateway: this.getGatewayInfo(merged),
+      models: await this.getModels?.(configFiles, fs),
       cliBinary,
       version,
     }];
@@ -94,6 +95,61 @@ export const ironclawAdapter: AgentAdapter = {
     }
 
     return undefined;
+  },
+
+  getModels(configs: ParsedConfig[], fs?: FSProvider): ModelRef[] {
+    // IronClaw does not store the model in config.toml. `LLM_BACKEND` selects
+    // a backend (nearai, ollama, openai_compatible, openai, anthropic,
+    // github_copilot, tinfoil, openai_codex, gemini_oauth, minimax) and the
+    // chosen backend reads its own `<NAME>_MODEL` env var.
+    //
+    // We honor LLM_BACKEND if set; otherwise we surface every backend whose
+    // model env var is populated, so the user sees what's actually configured.
+    const out: ModelRef[] = [];
+    const seen = new Set<string>();
+
+    const BACKEND_ENV: Record<string, { model: string }> = {
+      nearai: { model: 'NEARAI_MODEL' },
+      ollama: { model: 'OLLAMA_MODEL' },
+      openai_compatible: { model: 'LLM_MODEL' },
+      openai: { model: 'OPENAI_MODEL' },
+      anthropic: { model: 'ANTHROPIC_MODEL' },
+      github_copilot: { model: 'GITHUB_COPILOT_MODEL' },
+      tinfoil: { model: 'TINFOIL_MODEL' },
+      openai_codex: { model: 'OPENAI_CODEX_MODEL' },
+      gemini_oauth: { model: 'GEMINI_MODEL' },
+      minimax: { model: 'MINIMAX_MODEL' },
+    };
+
+    const lookup = (key: string): string | undefined => {
+      // Prefer .env file over process env so a project-local override wins.
+      const env = configs.find(c => c.filePath.endsWith('.env'));
+      const fromFile = env?.data?.[key];
+      if (typeof fromFile === 'string' && fromFile.trim()) return fromFile.trim();
+      const fromProc = fs?.getEnv?.(key);
+      if (typeof fromProc === 'string' && fromProc.trim()) return fromProc.trim();
+      return undefined;
+    };
+
+    const push = (id: string | undefined, provider: string, via?: string): void => {
+      if (!id) return;
+      const key = `${provider}|${id}|${via ?? ''}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      out.push({ id, provider, ...(via ? { via } : {}) });
+    };
+
+    const selected = lookup('LLM_BACKEND');
+    if (selected && BACKEND_ENV[selected]) {
+      push(lookup(BACKEND_ENV[selected].model), selected);
+    } else {
+      // No LLM_BACKEND set — list every backend whose model env is populated.
+      for (const [backend, keys] of Object.entries(BACKEND_ENV)) {
+        push(lookup(keys.model), backend, selected ? undefined : 'env-detected');
+      }
+    }
+
+    return out;
   },
 
   getMemoryFiles(installDir: string): string[] {

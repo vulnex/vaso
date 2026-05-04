@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import type { AgentAdapter, DetectOptions } from './adapter.js';
-import type { AgentInstallation, GatewayInfo } from '../core/types.js';
+import type { AgentInstallation, GatewayInfo, ModelRef, ParsedConfig } from '../core/types.js';
 import type { ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
@@ -55,6 +55,7 @@ export const zeroclawAdapter: AgentAdapter = {
       configFiles,
       skillsDir: this.getSkillsDir(zeroDir),
       gateway: this.getGatewayInfo(merged),
+      models: await this.getModels?.(configFiles, fs),
       cliBinary,
       version,
     }];
@@ -91,6 +92,78 @@ export const zeroclawAdapter: AgentAdapter = {
     }
 
     return undefined;
+  },
+
+  getModels(configs: ParsedConfig[], fs?: FSProvider): ModelRef[] {
+    // ZeroClaw uses top-level `default_provider` + `default_model` in
+    // config.toml. Provider strings can carry an embedded base-URL in the
+    // form "<name>:<url>" (e.g. "anthropic-custom:https://api.z.ai/...").
+    // Additional models surface via `model_routes = []` and
+    // `[reliability.model_fallbacks]`. Process env: ZEROCLAW_PROVIDER /
+    // ZEROCLAW_MODEL override the file values.
+    const out: ModelRef[] = [];
+    const seen = new Set<string>();
+
+    const stripUrl = (provider: string | undefined): string | undefined => {
+      if (!provider) return undefined;
+      const colon = provider.indexOf(':');
+      return colon !== -1 ? provider.slice(0, colon) : provider;
+    };
+
+    const push = (rawId: unknown, rawProvider?: unknown, via?: string): void => {
+      if (typeof rawId !== 'string' || !rawId.trim()) return;
+      const trimmed = rawId.trim();
+      let provider =
+        typeof rawProvider === 'string' && rawProvider.trim()
+          ? stripUrl(rawProvider.trim())
+          : undefined;
+      let id = trimmed;
+      if (!provider && trimmed.includes('/')) {
+        const slash = trimmed.indexOf('/');
+        provider = trimmed.slice(0, slash);
+        id = trimmed.slice(slash + 1);
+      }
+      const key = `${provider ?? ''}|${id}|${via ?? ''}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      out.push({ id, ...(provider ? { provider } : {}), ...(via ? { via } : {}) });
+    };
+
+    const toml = configs.find(c => c.filePath.endsWith('config.toml'));
+    if (toml) {
+      push(toml.data?.default_model, toml.data?.default_provider);
+
+      // model_routes: array of { name, provider, model } or similar shapes
+      const routes = toml.data?.model_routes;
+      if (Array.isArray(routes)) {
+        for (const r of routes) {
+          const route = r as Record<string, unknown> | undefined;
+          const name = (route?.name as string | undefined) ?? (route?.id as string | undefined);
+          push(route?.model, route?.provider, name);
+        }
+      }
+
+      // [reliability.model_fallbacks]: { <key>: <model_id_or_array> }
+      const reliability = toml.data?.reliability as Record<string, unknown> | undefined;
+      const fallbacks = reliability?.model_fallbacks as Record<string, unknown> | undefined;
+      if (fallbacks) {
+        for (const [slot, val] of Object.entries(fallbacks)) {
+          if (typeof val === 'string') {
+            push(val, undefined, `fallback:${slot}`);
+          } else if (Array.isArray(val)) {
+            for (const v of val) {
+              if (typeof v === 'string') push(v, undefined, `fallback:${slot}`);
+            }
+          }
+        }
+      }
+    }
+
+    if (out.length === 0 && fs?.getEnv) {
+      push(fs.getEnv('ZEROCLAW_MODEL'), fs.getEnv('ZEROCLAW_PROVIDER'), 'ZEROCLAW_MODEL');
+    }
+
+    return out;
   },
 
   getCredentialPaths(installDir: string): string[] {
