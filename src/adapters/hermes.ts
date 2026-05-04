@@ -1,13 +1,13 @@
 import { join } from 'node:path';
 import type { AgentAdapter, DetectOptions } from './adapter.js';
-import type { AgentInstallation, GatewayInfo } from '../core/types.js';
+import type { AgentInstallation, GatewayInfo, ModelRef, ParsedConfig } from '../core/types.js';
 import type { ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { loadConfig } from '../core/config-loader.js';
 import { queryCliVersion } from './version-query.js';
 
-const CONFIG_FILENAMES = ['config.yaml', '.env'];
+const CONFIG_FILENAMES = ['cli-config.yaml', 'config.yaml', '.env'];
 
 const SYSTEM_CLI_PATHS = [
   '/usr/local/bin/hermes',
@@ -61,6 +61,7 @@ export const hermesAdapter: AgentAdapter = {
       skillsDir: this.getSkillsDir(hermesHome),
       version,
       gateway: this.getGatewayInfo(merged),
+      models: await this.getModels?.(configFiles, fs),
       cliBinary,
     }];
   },
@@ -88,6 +89,61 @@ export const hermesAdapter: AgentAdapter = {
     };
   },
 
+  getModels(configs: ParsedConfig[], fs?: FSProvider): ModelRef[] {
+    const out: ModelRef[] = [];
+    const seen = new Set<string>();
+    const push = (rawId: unknown, rawProvider?: unknown, via?: string): void => {
+      if (typeof rawId !== 'string' || !rawId.trim()) return;
+      const trimmed = rawId.trim();
+      let provider =
+        typeof rawProvider === 'string' && rawProvider.trim() ? rawProvider.trim() : undefined;
+      let id = trimmed;
+      // If no explicit provider was given but the id is "<provider>/<id>",
+      // split it. With a sibling provider field (Hermes' actual shape), keep
+      // the id intact even if it contains slashes (e.g. nvidia/nemotron-...).
+      if (!provider && trimmed.includes('/')) {
+        const slash = trimmed.indexOf('/');
+        provider = trimmed.slice(0, slash);
+        id = trimmed.slice(slash + 1);
+      }
+      const key = `${provider ?? ''}|${id}|${via ?? ''}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      out.push({ id, ...(provider ? { provider } : {}), ...(via ? { via } : {}) });
+    };
+
+    // cli-config.yaml (or legacy config.yaml): `model.default` (or `model.model`
+    // — upstream accepts both) is the active model; `model.provider` and
+    // `model.base_url` are sibling metadata for that model, not separate slots.
+    const yaml = configs.find(
+      c => c.filePath.endsWith('cli-config.yaml') || c.filePath.endsWith('config.yaml'),
+    );
+    const block = yaml?.data?.model;
+    if (typeof block === 'string') {
+      push(block);
+    } else if (block && typeof block === 'object') {
+      const m = block as Record<string, unknown>;
+      push(m.default ?? m.model, m.provider);
+      push(m.fallback, m.fallback_provider ?? m.provider, 'fallback');
+    }
+
+    // .env overrides (no slot expansion — env keys are flat by nature)
+    const env = configs.find(c => c.filePath.endsWith('.env'));
+    if (env) {
+      const envProvider = env.data.HERMES_PROVIDER;
+      push(env.data.HERMES_MODEL, envProvider, out.length ? 'HERMES_MODEL' : undefined);
+      push(env.data.HERMES_DEFAULT_MODEL, envProvider);
+      push(env.data.OPENROUTER_MODEL, 'openrouter', 'OPENROUTER_MODEL');
+    }
+
+    // Process env fallback (only when nothing was found in files)
+    if (out.length === 0 && fs?.getEnv) {
+      push(fs.getEnv('HERMES_MODEL'), fs.getEnv('HERMES_PROVIDER'), 'HERMES_MODEL');
+    }
+
+    return out;
+  },
+
   getMemoryFiles(installDir: string): string[] {
     return [
       join(installDir, 'memory'),
@@ -109,6 +165,7 @@ export const hermesAdapter: AgentAdapter = {
   getProbeManifest(): ProbeManifest {
     return {
       filePaths: [
+        '~/.hermes/cli-config.yaml',
         '~/.hermes/config.yaml',
         '~/.hermes/.env',
         '~/.hermes/credentials.json',

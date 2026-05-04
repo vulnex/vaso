@@ -1,7 +1,8 @@
 import { join } from 'node:path';
 import type { AgentAdapter, DetectOptions } from './adapter.js';
-import type { AgentInstallation, GatewayInfo } from '../core/types.js';
+import type { AgentInstallation, GatewayInfo, ModelRef, ParsedConfig } from '../core/types.js';
 import type { ProbeManifest } from '../core/snapshot-types.js';
+import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { loadConfig } from '../core/config-loader.js';
 import { queryCliVersion } from './version-query.js';
@@ -53,6 +54,7 @@ export const nanoclawAdapter: AgentAdapter = {
       installDir: configDir,
       configFiles,
       skillsDir: this.getSkillsDir(configDir),
+      models: await this.getModels?.(configFiles, fs),
       version,
     }];
   },
@@ -72,6 +74,16 @@ export const nanoclawAdapter: AgentAdapter = {
 
   getGatewayInfo(config: Record<string, unknown>): GatewayInfo | undefined {
     return undefined;
+  },
+
+  getModels(_configs: ParsedConfig[], _fs?: FSProvider): ModelRef[] {
+    // NanoClaw does not select a model itself — it shells out to an inner
+    // coding agent (claude, codex, opencode, …) chosen via the per-session
+    // `agent_provider` field, which lives in the SQLite DB, not a config
+    // file. The actual model is whatever that inner agent is configured for.
+    // VASO can't read SQLite without a DB driver dependency, and even if it
+    // could, the model question is answered by the inner agent's adapter.
+    return [];
   },
 
   getCLICommand(): string {
