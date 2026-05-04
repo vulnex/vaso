@@ -8,7 +8,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
-- **Four new coding-agent adapters with 38 security checks** (`GEM-`/`QC-`/`CUR-`/`GHC-`). Brings VASO to **16 adapters** and **225 total checks**. Schemas were mapped against real installs over SSH-snapshot scans, so the checks target keys actually written to disk by each tool.
+- **Four new coding-agent adapters with 38 security checks** (`GEM-`/`QC-`/`CUR-`/`GHC-`) plus a new Hermes check category (10 `HM-*` checks). Brings VASO to **16 adapters** and **235 total checks** across **16 categories**. Schemas were mapped against real installs over SSH-snapshot scans, so the checks target keys actually written to disk by each tool.
 
   - **Gemini CLI adapter** (`src/adapters/gemini.ts`): detects `~/.gemini/`, parses JSONC `settings.json`, surfaces OAuth credential files (`oauth_creds.json`, `google_accounts.json`, `mcp-oauth-tokens.json`, `a2a-oauth-tokens.json`); model extraction from `model.name`; binary `gemini`. Project-level `.gemini/settings.json` also picked up under cwd.
 
