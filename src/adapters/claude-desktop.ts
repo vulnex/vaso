@@ -1,4 +1,5 @@
 import { join } from 'node:path';
+import { readFile } from 'node:fs/promises';
 import type { AgentAdapter, DetectOptions } from './adapter.js';
 import type { AgentInstallation, GatewayInfo, ModelRef, ParsedConfig, ZoneGraph } from '../core/types.js';
 import type { ProbeManifest } from '../core/snapshot-types.js';
@@ -10,6 +11,9 @@ import { getUserHomeDirs } from './openclaw.js';
 const CONFIG_FILE = 'claude_desktop_config.json';
 const EXTENSIONS_DIR_NAME = 'Claude Extensions';
 const APP_BUNDLE_PATH = '/Applications/Claude.app';
+const LOCAL_STORAGE_LEVELDB = ['Local Storage', 'leveldb'];
+const SELECTOR_KEY = 'model-selector-local';
+const MODEL_ID_RE = /claude-(?:opus|sonnet|haiku)-\d+(?:-\d+)?(?:\[\d+m\])?/;
 
 /**
  * Resolve the per-user Claude Desktop config directory.
@@ -53,6 +57,47 @@ async function readAppVersion(fs: FSProvider): Promise<string | undefined> {
   return undefined;
 }
 
+/**
+ * Recover the active model id from Claude Desktop's Chromium Local Storage.
+ * The picker writes the user's selection to a `model-selector-local_<acct>`
+ * key in `<installDir>/Local Storage/leveldb/`. The store is binary LevelDB
+ * (snappy-compressed SSTables), so we don't try to decode the format —
+ * instead we scan the .ldb / .log files as a byte stream, locate the key
+ * anchor, and extract the first well-formed Claude model id within the
+ * following window. Local FS only: snapshot/SSH probes don't capture these
+ * binary blobs and reading them as utf-8 (what `FSProvider.readFile` does)
+ * would mangle the bytes.
+ */
+async function readLocalStorageModel(installDir: string, fs: FSProvider): Promise<string | undefined> {
+  if (!(fs instanceof LocalFSProvider)) return undefined;
+  const ldbDir = join(installDir, ...LOCAL_STORAGE_LEVELDB);
+  if (!(await fs.access(ldbDir))) return undefined;
+
+  let entries;
+  try {
+    entries = await fs.readdirEntries(ldbDir);
+  } catch {
+    return undefined;
+  }
+
+  const files = entries
+    .filter(e => e.isFile && (e.name.endsWith('.ldb') || e.name.endsWith('.log')))
+    .map(e => join(ldbDir, e.name));
+
+  for (const f of files) {
+    try {
+      const buf = await readFile(f);
+      const text = buf.toString('latin1');
+      const keyIdx = text.indexOf(SELECTOR_KEY);
+      if (keyIdx < 0) continue;
+      const window = text.slice(keyIdx, keyIdx + 256);
+      const match = MODEL_ID_RE.exec(window);
+      if (match) return match[0];
+    } catch {}
+  }
+  return undefined;
+}
+
 async function loadDesktopConfig(dir: string, fs: FSProvider): Promise<ParsedConfig[]> {
   const configFiles: ParsedConfig[] = [];
   const filePath = join(dir, CONFIG_FILE);
@@ -83,13 +128,18 @@ export const claudeDesktopAdapter: AgentAdapter = {
       if (!hasConfigDir && !appBundle) continue;
 
       const configFiles = hasConfigDir ? await loadDesktopConfig(configDir, fs) : [];
+      let models = this.getModels?.(configFiles, fs) as ModelRef[] | undefined;
+      if (!models || models.length === 0) {
+        const inferredId = hasConfigDir ? await readLocalStorageModel(configDir, fs) : undefined;
+        if (inferredId) models = [{ id: inferredId, provider: 'anthropic', via: 'cowork local-storage' }];
+      }
 
       installations.push({
         agent: 'claude-desktop',
         version,
         installDir: configDir,
         configFiles,
-        models: this.getModels?.(configFiles, fs) as ModelRef[] | undefined,
+        models,
         user: options?.allUsers ? user : undefined,
         appBundle,
       });
