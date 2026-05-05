@@ -1,4 +1,5 @@
-import { join, extname } from 'node:path';
+import { join, extname, dirname } from 'node:path';
+import { mkdir, writeFile } from 'node:fs/promises';
 import type { FSProvider } from './fs-provider.js';
 import { LocalFSProvider } from './local-fs-provider.js';
 
@@ -89,4 +90,16 @@ export function deepMerge(
 export async function pathExists(path: string, fs?: FSProvider): Promise<boolean> {
   const provider = fs ?? new LocalFSProvider();
   return provider.access(path);
+}
+
+/**
+ * Write text to a file path, creating any missing parent directories.
+ * Behaves like `mkdir -p $(dirname path) && cat > path`.
+ */
+export async function writeFileEnsureDir(path: string, content: string): Promise<void> {
+  const parent = dirname(path);
+  if (parent && parent !== '.' && parent !== '/') {
+    await mkdir(parent, { recursive: true });
+  }
+  await writeFile(path, content, 'utf-8');
 }

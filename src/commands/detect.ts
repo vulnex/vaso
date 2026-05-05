@@ -1,13 +1,14 @@
 import chalk from 'chalk';
-import { writeFile } from 'node:fs/promises';
 import { adapterRegistry } from '../adapters/registry.js';
 import type { AgentInstallation, AgentType } from '../core/types.js';
 import { logError } from '../core/debug.js';
+import { writeFileEnsureDir } from '../core/utils.js';
 
 export interface DetectCommandOptions {
   agent?: string;
   format: string;
   output?: string;
+  outputDir?: string;
   allUsers?: boolean;
   verbose?: boolean;
   silent?: boolean;
@@ -21,6 +22,10 @@ export interface DetectCommandOptions {
   saveSnapshot?: string;
 }
 
+function safeHostname(host: string): string {
+  return host.replace(/[^A-Za-z0-9._-]/g, '_');
+}
+
 function parsePositiveInt(raw: string | undefined, fallback: number, label: string): number {
   if (raw === undefined) return fallback;
   const n = parseInt(raw, 10);
@@ -32,7 +37,7 @@ function parsePositiveInt(raw: string | undefined, fallback: number, label: stri
 
 async function emit(text: string, output?: string, silent?: boolean): Promise<void> {
   if (output) {
-    await writeFile(output, text, 'utf-8');
+    await writeFileEnsureDir(output, text);
     if (!silent) console.log(chalk.green(`Report written to ${output}`));
   } else {
     console.log(text);
@@ -40,6 +45,18 @@ async function emit(text: string, output?: string, silent?: boolean): Promise<vo
 }
 
 export async function runDetect(options: DetectCommandOptions): Promise<void> {
+  // Top-level --silent gate (covers snapshot, SSH, and local paths uniformly)
+  if (options.silent && !options.output && !options.outputDir) {
+    console.error(chalk.red('--silent requires -o/--output or --output-dir'));
+    process.exitCode = 2;
+    return;
+  }
+  if (options.output && options.outputDir) {
+    console.error(chalk.red('--output and --output-dir are mutually exclusive'));
+    process.exitCode = 2;
+    return;
+  }
+
   try {
     // Snapshot-based detection
     if (options.snapshot) {
@@ -140,12 +157,6 @@ async function detectRemoteHosts(options: DetectCommandOptions): Promise<void> {
     return;
   }
 
-  if (silent && !options.output) {
-    console.error(chalk.red('--silent requires -o/--output'));
-    process.exitCode = 2;
-    return;
-  }
-
   let targets: SSHTarget[] = [];
 
   if (options.host) {
@@ -180,6 +191,11 @@ async function detectRemoteHosts(options: DetectCommandOptions): Promise<void> {
     await mkdir(options.saveSnapshot, { recursive: true });
   }
 
+  if (options.outputDir) {
+    const { mkdir } = await import('node:fs/promises');
+    await mkdir(options.outputDir, { recursive: true });
+  }
+
   log(chalk.bold(`\n  Detecting agents on ${targets.length} remote host(s)...\n`));
 
   async function processTarget(target: SSHTarget): Promise<HostDetectResult> {
@@ -201,7 +217,7 @@ async function detectRemoteHosts(options: DetectCommandOptions): Promise<void> {
         try {
           const { writeFile } = await import('node:fs/promises');
           const { join: joinPath } = await import('node:path');
-          const safeHost = (snapshot.hostname ?? target.host).replace(/[^A-Za-z0-9._-]/g, '_');
+          const safeHost = safeHostname(snapshot.hostname ?? target.host);
           const outPath = joinPath(options.saveSnapshot, `${safeHost}.json`);
           await writeFile(outPath, JSON.stringify(snapshot, null, 2), 'utf-8');
           log(chalk.dim(`  Saved snapshot for ${target.host} → ${outPath}`));
@@ -225,6 +241,23 @@ async function detectRemoteHosts(options: DetectCommandOptions): Promise<void> {
       outcome = { host: target.host, label: target.label, installations: [], error: (err as Error).message };
     }
 
+    // Per-host file output via --output-dir
+    if (options.outputDir && !outcome.error) {
+      try {
+        const { writeFile } = await import('node:fs/promises');
+        const { join: joinPath } = await import('node:path');
+        const safeHost = safeHostname(outcome.host);
+        const ext = options.format === 'json' ? 'json' : 'txt';
+        const outPath = joinPath(options.outputDir, `${safeHost}.${ext}`);
+        const text = options.format === 'json'
+          ? JSON.stringify(outcome.installations, null, 2)
+          : renderTerminal(outcome.installations, options.verbose);
+        await writeFile(outPath, text, 'utf-8');
+      } catch (err) {
+        log(chalk.yellow(`  Warning: failed to write output for ${target.host}: ${(err as Error).message}`));
+      }
+    }
+
     // Live progress — fires as each host completes, even before all hosts are done
     const dur = `${Date.now() - start}ms`;
     const labelStr = target.label ?? `${target.user}@${target.host}`;
@@ -238,6 +271,14 @@ async function detectRemoteHosts(options: DetectCommandOptions): Promise<void> {
   }
 
   const results = await runConcurrent(targets, concurrency, processTarget);
+
+  // When --output-dir is set, per-host files were already written above;
+  // skip the combined-output rendering branch entirely.
+  if (options.outputDir) {
+    const wrote = results.filter(r => !r.error).length;
+    log(chalk.green(`\n  Wrote ${wrote} report(s) to ${options.outputDir}/`));
+    return;
+  }
 
   // Render multi-host results
   if (options.format === 'json') {

@@ -77,38 +77,48 @@ program
   .description('VULNEX Agent Security Observer — security scanner for AI agent deployments')
   .version(VERSION, '-v, --version')
   .option('--debug', 'print full stack traces on errors')
-  .hook('preAction', async (thisCommand) => {
+  .hook('preAction', async (_thisCommand, actionCommand) => {
     setDebug(Boolean(program.opts().debug));
-    printBanner();
+
+    // Commander's preAction signature: thisCommand = the program (where the hook
+    // was registered), actionCommand = the subcommand about to run. Subcommand
+    // options like --silent live on actionCommand.opts(), not thisCommand's.
+    const subOpts = actionCommand.opts?.() ?? {};
+    const silent = Boolean(subOpts.silent);
+
+    if (!silent) printBanner();
 
     // Load user plugins from ~/.vaso/plugins/
     const userPlugins = await loadUserPlugins();
-    for (const p of userPlugins) {
-      if (p.status === 'error') {
-        console.log(chalk.yellow(`  Warning: user plugin "${p.name}" failed to load: ${p.error}\n`));
+    if (!silent) {
+      for (const p of userPlugins) {
+        if (p.status === 'error') {
+          console.log(chalk.yellow(`  Warning: user plugin "${p.name}" failed to load: ${p.error}\n`));
+        }
       }
     }
 
     // Load declarative rules only for commands that run checks (scan, fix)
-    const commandName = thisCommand.name();
+    const commandName = actionCommand.name();
     const needsRules = commandName === 'scan' || commandName === 'fix';
 
     if (needsRules) {
-      const opts = thisCommand.opts?.() ?? {};
-      const skipRules = opts.customRules === false;
+      const skipRules = subOpts.customRules === false;
 
       if (!skipRules) {
-        const extraPaths = opts.rules as string[] | undefined;
+        const extraPaths = subOpts.rules as string[] | undefined;
         const rulesResult = await loadAndRegisterRules(checkRegistry, { extraPaths });
-        for (const err of rulesResult.loadResult.allErrors) {
-          const loc = err.rule ? ` (rule ${err.rule})` : '';
-          console.log(chalk.yellow(`  Warning: rule file ${err.file}${loc}: ${err.message}\n`));
-        }
-        for (const skip of rulesResult.skipped) {
-          console.log(chalk.yellow(`  Warning: rule "${skip.id}" skipped: ${skip.reason}\n`));
-        }
-        if (rulesResult.registered.length > 0) {
-          console.log(chalk.dim(`  Loaded ${rulesResult.registered.length} declarative rule(s)\n`));
+        if (!silent) {
+          for (const err of rulesResult.loadResult.allErrors) {
+            const loc = err.rule ? ` (rule ${err.rule})` : '';
+            console.log(chalk.yellow(`  Warning: rule file ${err.file}${loc}: ${err.message}\n`));
+          }
+          for (const skip of rulesResult.skipped) {
+            console.log(chalk.yellow(`  Warning: rule "${skip.id}" skipped: ${skip.reason}\n`));
+          }
+          if (rulesResult.registered.length > 0) {
+            console.log(chalk.dim(`  Loaded ${rulesResult.registered.length} declarative rule(s)\n`));
+          }
         }
       }
     }
@@ -117,7 +127,7 @@ program
     await initAdvisoryDatabase();
 
     // Warn about stale feeds for non-update commands
-    if (thisCommand.name() !== 'update') {
+    if (!silent && actionCommand.name() !== 'update') {
       if (isFeedStale()) {
         console.log(
           chalk.yellow('  IOC feed is stale or missing. Run `vaso update` for latest threat data.\n'),
@@ -172,10 +182,11 @@ program
   .description('Detect installed AI agents')
   .option('-a, --agent <type>', 'detect a specific agent only (openclaw, nanoclaw, picoclaw, ironclaw, nanobot, zeroclaw, nemoclaw, hermes, lyrie, claude-code, codex, opencode, gemini-cli, qwen-code, copilot-cli, cursor-cli)')
   .option('-f, --format <format>', 'output format (terminal, json)', 'terminal')
-  .option('-o, --output <file>', 'write report to file')
+  .option('-o, --output <file>', 'write report to single file')
+  .option('--output-dir <dir>', 'multi-host: write one file per host as <dir>/<hostname>.<ext>')
   .option('--all-users', 'detect across all user accounts (requires root/sudo)')
   .option('--verbose', 'show search paths checked for each adapter')
-  .option('--silent', 'suppress all stdout/stderr chatter (requires -o)')
+  .option('--silent', 'suppress all stdout/stderr chatter (requires -o or --output-dir)')
   .option('--host <targets...>', 'remote host(s) to detect via SSH (user@host[:port])')
   .option('--inventory <path>', 'YAML inventory file with host definitions')
   .option('--ssh-key <path>', 'SSH identity file for remote connections')
