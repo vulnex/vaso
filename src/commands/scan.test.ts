@@ -204,4 +204,36 @@ describe('runScan', () => {
       expect(consoleErrors.some(l => l.includes('Invalid --fail-on'))).toBe(true);
     });
   });
+
+  describe('multi-host option validation', () => {
+    it('rejects non-numeric --parallel with exit 2', async () => {
+      await runScan({
+        format: 'terminal',
+        host: ['root@10.0.0.1'],
+        parallel: 'abc',
+      });
+      expect(process.exitCode).toBe(2);
+      expect(consoleErrors.some(l => l.includes('--parallel'))).toBe(true);
+    });
+
+    it('rejects --parallel=0 with exit 2', async () => {
+      await runScan({
+        format: 'terminal',
+        host: ['root@10.0.0.1'],
+        parallel: '0',
+      });
+      expect(process.exitCode).toBe(2);
+      expect(consoleErrors.some(l => l.includes('--parallel'))).toBe(true);
+    });
+
+    it('rejects negative --ssh-retries with exit 2', async () => {
+      await runScan({
+        format: 'terminal',
+        host: ['root@10.0.0.1'],
+        sshRetries: '-1',
+      });
+      expect(process.exitCode).toBe(2);
+      expect(consoleErrors.some(l => l.includes('--ssh-retries'))).toBe(true);
+    });
+  });
 });

@@ -73,11 +73,15 @@ vaso scan --host deploy@host --sudo
 | Flag | Description | Default |
 |------|-------------|---------|
 | `--host <user@host[:port]>` | Remote target (repeatable) | — |
+| `--inventory <path>` | YAML file listing hosts to scan | — |
 | `--ssh-key <path>` | SSH identity file | System default |
-| `--ssh-timeout <seconds>` | Connection timeout | 60 |
+| `--ssh-timeout <seconds>` | Per-attempt connection timeout | 60 |
+| `--ssh-retries <n>` | Additional SSH attempts after the first failure | 0 |
+| `--parallel <n>` | Max hosts to scan concurrently | 5 |
 | `--sudo` | Attempt sudo escalation on remote | false |
+| `--save-snapshot <dir>` | Write each host's collected snapshot to `<dir>/<hostname>.json` | — |
 
-VASO respects your `~/.ssh/config` for host aliases, jump hosts, and custom settings.
+All flags are accepted by both `vaso scan` and `vaso detect`. VASO respects your `~/.ssh/config` for host aliases, jump hosts, and custom settings.
 
 ### How it works
 
@@ -135,6 +139,9 @@ vaso scan --inventory hosts.yaml --sudo
 
 # Use a specific key for all hosts
 vaso scan --inventory hosts.yaml --ssh-key ~/.ssh/fleet_key
+
+# Scan 20 hosts in parallel with 2 retry attempts on transient SSH failures
+vaso scan --inventory hosts.yaml --parallel 20 --ssh-retries 2
 ```
 
 ### Per-host fields
@@ -147,6 +154,61 @@ vaso scan --inventory hosts.yaml --ssh-key ~/.ssh/fleet_key
 | `identity` | no | system default | Path to SSH key |
 | `sudo` | no | `false` | Attempt sudo escalation |
 | `label` | no | `user@host` | Human-readable label in reports |
+
+---
+
+## Performance and resilience
+
+### Concurrency (`--parallel`)
+
+By default, VASO scans up to 5 hosts at a time. Tune this for your environment:
+
+```bash
+# Big fleet, fast network — scan 20 hosts at once
+vaso scan --inventory hosts.yaml --parallel 20
+
+# Constrained environment — scan one at a time
+vaso scan --inventory hosts.yaml --parallel 1
+```
+
+VASO uses a true worker pool: as soon as one host finishes, the next queued host starts. A slow host won't block faster ones queued behind it.
+
+### Retries on transient SSH failures (`--ssh-retries`)
+
+By default, a single SSH failure (network blip, slow control-master, etc.) marks the host failed and moves on. To retry:
+
+```bash
+# Retry up to 2 times on failure (3 total attempts per host)
+vaso scan --inventory hosts.yaml --ssh-retries 2
+```
+
+Backoff is exponential: 1s before the first retry, 2s before the second, 4s before the third, capped at 8s. Each retry uses a fresh probe-binary UUID on the remote host, so it cannot collide with a half-cleaned-up previous attempt.
+
+Retries are only useful for transient errors. Misconfigurations (bad SSH key, wrong port, hostname not resolving) will fail every attempt and waste time. Start with `--ssh-retries 0` and only raise it once you observe transient failures in practice.
+
+When a retry happens, VASO prints a banner before each new attempt:
+
+```
+  Retry 1/2 for prod-agent-04: Connection reset by peer
+  Retry 2/2 for prod-agent-04: ssh: connect to host ... timed out
+```
+
+### Collect once, scan many times (`--save-snapshot`)
+
+For repeatable scanning, fetch each host's snapshot once and re-scan it offline as many times as you need — against new baselines, new rule files, or after a check-engine upgrade — without re-paying the SSH round-trip:
+
+```bash
+# Step 1: collect snapshots from the whole fleet (one SSH session per host)
+vaso scan --inventory hosts.yaml --save-snapshot ./snapshots/
+
+# Step 2: re-scan offline whenever you want
+vaso scan --snapshot ./snapshots/prod-agent-01.json
+vaso scan --snapshot ./snapshots/prod-agent-02.json --diff
+```
+
+`--save-snapshot` writes one file per host to the named directory using the host's reported hostname (sanitized to `[A-Za-z0-9._-]`). The directory is created if it doesn't exist. If two hosts report the same hostname, the second overwrites the first — use distinct hostnames or scan separately.
+
+The same flag exists on `vaso detect`, useful for inventorying agent installs across a fleet without running checks.
 
 ---
 
@@ -289,6 +351,10 @@ Permission denied (publickey,password)
 ```
 
 Verify you can SSH manually first: `ssh user@host`. If that works, VASO will too.
+
+### Transient SSH failures on a flaky link
+
+If you see intermittent `Connection reset by peer` or timeout failures against hosts that are otherwise reachable, add `--ssh-retries 2` (or higher). VASO retries with exponential backoff. Don't crank this too high — for misconfigurations (bad key, wrong port) every attempt fails and the retry is just wasted time.
 
 ### Unsupported platform
 

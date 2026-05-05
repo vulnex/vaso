@@ -31,6 +31,22 @@ vaso mcp scan
 
 Exit code 1 means critical findings were detected — use this to fail CI pipelines.
 
+## Remote / Fleet Scanning
+
+VASO can scan remote hosts over SSH or from pre-collected snapshots — no Node.js required on the target. A static Go probe binary is pushed on demand, runs once, and is removed. See [`doc/network-scanning-guide.md`](doc/network-scanning-guide.md) for the full workflow.
+
+```bash
+# Scan one remote host
+vaso scan --host root@10.0.0.5
+
+# Scan a fleet (parallel, with retry on transient SSH failures)
+vaso scan --inventory hosts.yaml --parallel 20 --ssh-retries 2
+
+# Collect snapshots once, re-scan offline against new baselines
+vaso scan --inventory hosts.yaml --save-snapshot ./snapshots/
+vaso scan --snapshot ./snapshots/prod-agent-01.json --diff
+```
+
 ## Commands
 
 | Command | Description |
@@ -191,6 +207,7 @@ VASO supports user plugins in `~/.vaso/plugins/`. Plugins can add custom checks,
 ## Documentation
 
 - [User Guide](doc/user-guide.md) — full command reference and configuration
+- [Network Scanning Guide](doc/network-scanning-guide.md) — SSH, inventory, snapshot, and fleet workflows
 - [Development Guide](doc/development-guide.md) — contributing and plugin development
 - [Testing Guide](doc/testing-guide.md) — test suite and CI setup
 
