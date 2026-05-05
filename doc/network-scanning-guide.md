@@ -80,8 +80,10 @@ vaso scan --host deploy@host --sudo
 | `--parallel <n>` | Max hosts to scan concurrently | 5 |
 | `--sudo` | Attempt sudo escalation on remote | false |
 | `--save-snapshot <dir>` | Write each host's collected snapshot to `<dir>/<hostname>.json` | — |
+| `--output-dir <dir>` | Write one report per host to `<dir>/<hostname>.<ext>` (mutually exclusive with `-o`) | — |
+| `--silent` | Suppress all stdout/stderr chatter; requires `-o` or `--output-dir` | false |
 
-All flags are accepted by both `vaso scan` and `vaso detect`. VASO respects your `~/.ssh/config` for host aliases, jump hosts, and custom settings.
+All flags except `--output-dir` are accepted by both `vaso scan` and `vaso detect`. VASO respects your `~/.ssh/config` for host aliases, jump hosts, and custom settings.
 
 ### How it works
 
@@ -158,6 +160,48 @@ vaso scan --inventory hosts.yaml --parallel 20 --ssh-retries 2
 ---
 
 ## Performance and resilience
+
+### Live progress
+
+While a fleet scan is in flight, VASO prints one line per host as it completes — even before the rest of the fleet finishes. A slow host won't blank your terminal until the end:
+
+```
+  Scanning 8 remote host(s)...
+
+  ✓ prod-agent-01 (3142ms) — score 92/100, 0C / 1W / 2I
+  ✓ prod-agent-04 (3387ms) — score 78/100, 0C / 4W / 5I
+  ✗ prod-agent-07 (15041ms): ssh: connect to host ... timed out
+  ✓ prod-agent-02 (3801ms) — score 100/100, 0C / 0W / 0I
+  ...
+```
+
+Each line shows the per-host duration, the score, and a finding-count summary (critical / warning / info). Failures show the first line of the error message.
+
+### Per-host report files (`--output-dir`)
+
+`-o file.json` aggregates all per-host results into one combined JSON document. For other formats — particularly **SARIF** and **JUnit XML**, which can't be safely text-concatenated — write one file per host with `--output-dir`:
+
+```bash
+vaso scan --inventory hosts.yaml -f sarif --output-dir ./sarif/
+# Writes ./sarif/prod-agent-01.sarif, ./sarif/prod-agent-02.sarif, ...
+```
+
+The directory is created if it doesn't exist. Filenames are the host's reported hostname (sanitized to `[A-Za-z0-9._-]`) with the format's natural extension: `.json`, `.sarif`, `.md`, `.html`, `.csv`, `.xml` for JUnit, `.txt` for terminal.
+
+`-o` and `--output-dir` are mutually exclusive. Attempting `-o file.sarif` (or `-o file.xml` with `-f junit`) on a multi-host scan is rejected with a pointer to `--output-dir`.
+
+### Silent mode (`--silent`)
+
+For scripted / cron / CI use, suppress all progress chatter. The report still goes to the file; nothing else is printed:
+
+```bash
+vaso scan --inventory hosts.yaml -o fleet-report.json --silent
+vaso scan --inventory hosts.yaml --output-dir ./reports/ -f sarif --silent
+```
+
+`--silent` requires `-o` or `--output-dir` — there's no point in suppressing console output if the report itself is going to stdout. The CLI will exit 2 with a clear error if you forget.
+
+Errors and validation failures still print to stderr, even with `--silent`. Exit codes are unchanged: 0 = clean, 1 = findings hit `--fail-on` threshold or any host failed, 2 = invalid CLI usage.
 
 ### Concurrency (`--parallel`)
 

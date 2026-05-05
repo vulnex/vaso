@@ -74,6 +74,33 @@ describe('scanMultipleHosts', () => {
     expect(results[0].durationMs).toBeGreaterThanOrEqual(0);
     expect(typeof results[0].durationMs).toBe('number');
   }, 30000);
+
+  it('fires onComplete for each host (errors included)', async () => {
+    const completions: Array<{ host: string; error?: string; durationMs: number }> = [];
+    const targets = [
+      makeTarget('192.0.2.4', 'a'),
+      makeTarget('192.0.2.5', 'b'),
+    ];
+
+    await scanMultipleHosts({
+      targets,
+      ...defaultOptions,
+      onComplete: (entry) => {
+        completions.push({
+          host: entry.target.host,
+          error: entry.error,
+          durationMs: entry.durationMs,
+        });
+      },
+    });
+
+    expect(completions).toHaveLength(2);
+    expect(completions.map(c => c.host).sort()).toEqual(['192.0.2.4', '192.0.2.5']);
+    for (const c of completions) {
+      expect(c.error).toBeDefined();
+      expect(c.durationMs).toBeGreaterThanOrEqual(0);
+    }
+  }, 60000);
 });
 
 describe('runConcurrent', () => {
