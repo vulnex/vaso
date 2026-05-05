@@ -6,7 +6,7 @@
 
 ## Overview
 
-VASO scans AI agent frameworks, interactive coding agents, and MCP server configurations for security misconfigurations, malicious code, and known threats. It runs 235 checks across 16 agents (9 autonomous frameworks + 7 coding agents) plus MCP-server scanning, using AST-based static analysis (not regex) for accurate results without ever executing scanned code.
+VASO scans AI agent frameworks, interactive coding agents, desktop AI apps, and MCP server configurations for security misconfigurations, malicious code, and known threats. It runs 252 checks across 18 agents (9 autonomous frameworks + 7 interactive coding agents + Claude Desktop + ChatGPT Desktop) plus MCP-server scanning, using AST-based static analysis (not regex) for accurate results without ever executing scanned code.
 
 ## Installation
 
@@ -84,6 +84,8 @@ See [doc/user-guide.md](doc/user-guide.md) for full option reference.
 **Coding agents**
 
 - **Claude Code** — `~/.claude/`, `~/.claude.json`, project-level `.claude/`
+- **Claude Desktop** — `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS), `%APPDATA%\Claude\claude_desktop_config.json` (Windows); MCPB extensions
+- **ChatGPT Desktop** — `/Applications/ChatGPT.app` + `~/Library/Application Support/com.openai.chat/`; preferences plist (macOS only)
 - **Codex** — `~/.codex/{config.toml,auth.json}`
 - **OpenCode** — XDG paths (`$XDG_CONFIG_HOME/opencode/`, `$XDG_DATA_HOME/opencode/`)
 - **Gemini CLI** — `~/.gemini/` (settings.json + OAuth credential files)
@@ -95,7 +97,7 @@ See [doc/user-guide.md](doc/user-guide.md) for full option reference.
 
 ## Security Checks
 
-235 checks organized into 16 categories:
+252 checks organized into 16 categories:
 
 | Category | IDs | Count | Description |
 |----------|-----|-------|-------------|
@@ -107,8 +109,8 @@ See [doc/user-guide.md](doc/user-guide.md) for full option reference.
 | Policy | POL-001–005 | 5 | DM policy, tool policy, sandbox compliance |
 | MCP Server | MCP-001–023 | 23 | Transport security, credential exposure, tool injection, toxic flows, rug pull, stdio shell-c, world-writable command paths, streamable-HTTP origin pinning |
 | Advisory | ADV-001–005 | 5 | Vulnerability/CVE detection with version awareness |
-| Coding Agent | CC, CDX, OPC, GEM, QC, CUR, GHC | 71 | Claude Code (12), Codex (9), OpenCode (12), Gemini CLI (10), Qwen Code (10), Cursor CLI (10), GitHub Copilot CLI (8) — sandbox/approval policy, plaintext credentials, MCP pinning, broad allow rules, memory-file secrets, transport security |
-| Agent-Specific | OC, NC, IC, NB, ZC, LY, HM | 77 | Per-framework checks (OpenClaw 6, NanoClaw 5, IronClaw 12, Nanobot 12, ZeroClaw 14, Lyrie 18, Hermes 10) |
+| Coding Agent | CC, CD, CG, CDX, OPC, GEM, QC, CUR, GHC | 87 | Claude Code (12), Claude Desktop (10), ChatGPT Desktop (6), Codex (9), OpenCode (12), Gemini CLI (10), Qwen Code (10), Cursor CLI (10), GitHub Copilot CLI (8) — sandbox/approval policy, plaintext credentials, MCP pinning, broad allow rules, memory-file secrets, transport security |
+| Agent-Specific | OC, NC, IC, NB, ZC, LY, HM | 78 | Per-framework checks (OpenClaw 7, NanoClaw 5, IronClaw 12, Nanobot 12, ZeroClaw 14, Lyrie 18, Hermes 10) |
 
 Server-only checks (gateway/network/runtime concepts) are automatically excluded for coding agents to avoid false positives — interactive coding CLIs have a different threat model than autonomous server agents.
 
