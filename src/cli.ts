@@ -153,8 +153,11 @@ program
   .option('--inventory <path>', 'YAML file listing hosts to scan')
   .option('--ssh-key <path>', 'SSH identity file for remote connections')
   .option('--ssh-timeout <seconds>', 'SSH connection timeout in seconds', '60')
+  .option('--ssh-retries <n>', 'additional SSH attempts after the first failure (default 0)', '0')
+  .option('--parallel <n>', 'max hosts to scan concurrently (default 5)', '5')
   .option('--sudo', 'attempt privilege escalation via sudo on remote hosts')
   .option('--snapshot <path>', 'scan from a pre-collected probe snapshot file')
+  .option('--save-snapshot <dir>', 'after fetching SSH snapshots, write each as <hostname>.json under this directory')
   .option('--no-color', 'disable colored output')
   .option('--fail-on <severity>', 'exit non-zero on findings of this severity or higher (critical, warning, info, none)', 'critical')
   .action(async (options) => {
@@ -174,6 +177,8 @@ program
   .option('--inventory <path>', 'YAML inventory file with host definitions')
   .option('--ssh-key <path>', 'SSH identity file for remote connections')
   .option('--ssh-timeout <seconds>', 'SSH connection timeout in seconds', '60')
+  .option('--ssh-retries <n>', 'additional SSH attempts after the first failure (default 0)', '0')
+  .option('--parallel <n>', 'max hosts to detect concurrently (default 5)', '5')
   .option('--snapshot <path>', 'detect from a local probe snapshot JSON file')
   .option('--save-snapshot <dir>', 'after fetching SSH snapshots, write each as <hostname>.json under this directory (for debugging)')
   .action(async (options) => {

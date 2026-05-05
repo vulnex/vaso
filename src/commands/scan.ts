@@ -24,8 +24,20 @@ export interface ScanCommandOptions {
   inventory?: string;
   sshKey?: string;
   sshTimeout?: string;
+  sshRetries?: string;
+  parallel?: string;
+  saveSnapshot?: string;
   sudo?: boolean;
   failOn?: string;
+}
+
+function parsePositiveInt(raw: string | undefined, fallback: number, label: string): number {
+  if (raw === undefined) return fallback;
+  const n = parseInt(raw, 10);
+  if (isNaN(n) || n < 0) {
+    throw new Error(`Invalid ${label} value "${raw}": expected a non-negative integer`);
+  }
+  return n;
 }
 
 export async function runScan(options: ScanCommandOptions): Promise<void> {
@@ -75,6 +87,18 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
     const { buildProbeManifest } = await import('../core/manifest-builder.js');
     type SSHTarget = import('../transport/ssh.js').SSHTarget;
 
+    let concurrency: number;
+    let retries: number;
+    try {
+      concurrency = parsePositiveInt(options.parallel, 5, '--parallel');
+      retries = parsePositiveInt(options.sshRetries, 0, '--ssh-retries');
+      if (concurrency === 0) throw new Error('--parallel must be at least 1');
+    } catch (err) {
+      console.error(chalk.red((err as Error).message));
+      process.exitCode = 2;
+      return;
+    }
+
     // Build target list
     let targets: SSHTarget[] = [];
 
@@ -115,12 +139,37 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
 
     console.log(chalk.bold(`\n  Scanning ${targets.length} remote host(s)...\n`));
 
+    let saveSnapshotDir: string | undefined;
+    if (options.saveSnapshot) {
+      const { mkdir } = await import('node:fs/promises');
+      saveSnapshotDir = options.saveSnapshot;
+      await mkdir(saveSnapshotDir, { recursive: true });
+    }
+
     const hostResults = await scanMultipleHosts({
       targets,
       transportOptions: { probeBinDir, manifest, timeout },
       scanOptions: {
         agentFilter: options.agent,
         format: options.format as any,
+      },
+      concurrency,
+      retries,
+      onSnapshot: saveSnapshotDir
+        ? async (target, snapshot) => {
+            try {
+              const { join: joinPath } = await import('node:path');
+              const safeHost = (snapshot.hostname ?? target.host).replace(/[^A-Za-z0-9._-]/g, '_');
+              const outPath = joinPath(saveSnapshotDir!, `${safeHost}.json`);
+              await writeFile(outPath, JSON.stringify(snapshot, null, 2), 'utf-8');
+              console.log(chalk.dim(`  Saved snapshot for ${target.host} → ${outPath}`));
+            } catch (err) {
+              console.log(chalk.yellow(`  Warning: failed to save snapshot for ${target.host}: ${(err as Error).message}`));
+            }
+          }
+        : undefined,
+      onRetry: (target, attempt, err) => {
+        console.log(chalk.yellow(`  Retry ${attempt}/${retries} for ${target.host}: ${err.message.split('\n')[0]}`));
       },
     });
 

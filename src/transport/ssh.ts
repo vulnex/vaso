@@ -204,6 +204,61 @@ async function detectRemotePlatform(
   return { os, arch };
 }
 
+export interface RetryOptions {
+  retries: number;
+  onRetry?: (target: SSHTarget, attempt: number, err: Error) => void;
+}
+
+interface WithRetryOptions<T> {
+  retries: number;
+  fn: () => Promise<T>;
+  onRetry?: (attempt: number, err: Error) => void;
+  /** Test seam — defaults to setTimeout-based exponential backoff. */
+  sleep?: (attempt: number) => Promise<void>;
+}
+
+const defaultSleep = (attempt: number): Promise<void> =>
+  new Promise(r => setTimeout(r, Math.min(1000 * 2 ** (attempt - 1), 8000)));
+
+/**
+ * Run an async function with exponential backoff retry.
+ * `retries` is the number of *additional* attempts after the first (so retries=2
+ * means up to 3 attempts total).
+ */
+export async function withRetry<T>(opts: WithRetryOptions<T>): Promise<T> {
+  const sleep = opts.sleep ?? defaultSleep;
+  let lastErr: unknown;
+  for (let attempt = 0; attempt <= opts.retries; attempt++) {
+    if (attempt > 0) {
+      await sleep(attempt);
+      opts.onRetry?.(attempt, lastErr as Error);
+    }
+    try {
+      return await opts.fn();
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  throw lastErr;
+}
+
+/**
+ * Run executeRemoteProbe with exponential backoff retry.
+ * Cleanup of remote /tmp files happens in executeRemoteProbe's finally block,
+ * so retries are safe — each attempt uses a fresh UUID.
+ */
+export async function executeRemoteProbeWithRetry(
+  target: SSHTarget,
+  options: SSHTransportOptions,
+  retry: RetryOptions,
+): Promise<ProbeSnapshot> {
+  return withRetry({
+    retries: retry.retries,
+    fn: () => executeRemoteProbe(target, options),
+    onRetry: retry.onRetry ? (attempt, err) => retry.onRetry!(target, attempt, err) : undefined,
+  });
+}
+
 export async function executeRemoteProbe(
   target: SSHTarget,
   options: SSHTransportOptions,

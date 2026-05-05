@@ -40,8 +40,17 @@ vaso scan [options]
 | `--all-users` | Scan all user accounts (requires root/sudo) |
 | `--fail-on <severity>` | Exit non-zero on findings of this severity or higher: `critical` (default), `warning`, `info`, or `none` |
 | `--no-color` | Disable colored terminal output |
+| `--host <target...>` | Scan one or more remote hosts via SSH (`user@host[:port]`). Variadic. |
+| `--inventory <path>` | YAML file listing hosts to scan |
+| `--ssh-key <path>` | SSH identity file for remote connections |
+| `--ssh-timeout <seconds>` | Per-attempt SSH connection timeout (default 60) |
+| `--ssh-retries <n>` | Additional SSH attempts after the first failure, with exponential backoff (default 0) |
+| `--parallel <n>` | Max hosts to scan concurrently (default 5) |
+| `--sudo` | Attempt sudo escalation on remote hosts |
+| `--snapshot <path>` | Scan from a pre-collected probe snapshot file (offline / airgapped) |
+| `--save-snapshot <dir>` | When scanning over SSH, write each host's snapshot to `<dir>/<hostname>.json` |
 
-`--debug` is also available globally to print full stack traces on errors.
+`--debug` is also available globally to print full stack traces on errors. For remote and fleet scanning details, see [`network-scanning-guide.md`](network-scanning-guide.md).
 
 Examples:
 
@@ -66,6 +75,16 @@ vaso scan --diff
 
 # Fail CI on any warning or critical finding
 vaso scan --fail-on warning
+
+# Scan a single remote host over SSH
+vaso scan --host root@10.0.0.5
+
+# Scan a fleet from an inventory file, 20 in parallel, retry transient failures
+vaso scan --inventory hosts.yaml --parallel 20 --ssh-retries 2
+
+# Collect snapshots once, re-scan offline against new baselines
+vaso scan --inventory hosts.yaml --save-snapshot ./snapshots/
+vaso scan --snapshot ./snapshots/prod-agent-01.json --diff
 ```
 
 ### `vaso detect`
@@ -80,8 +99,17 @@ vaso detect [options]
 |--------|-------------|
 | `-a, --agent <type>` | Detect a specific agent only: `openclaw`, `nanoclaw`, `picoclaw`, `ironclaw`, `nanobot`, `zeroclaw`, `nemoclaw`, `hermes`, `claude-code`, or `codex` |
 | `-f, --format <format>` | Output format: `terminal` (default) or `json` |
+| `-o, --output <file>` | Write report to a file instead of stdout |
 | `--all-users` | Detect across all user accounts (requires root/sudo) |
 | `--verbose` | Show the search paths checked for each adapter |
+| `--host <target...>` | Detect on one or more remote hosts via SSH (`user@host[:port]`). Variadic. |
+| `--inventory <path>` | YAML file listing hosts to detect against |
+| `--ssh-key <path>` | SSH identity file for remote connections |
+| `--ssh-timeout <seconds>` | Per-attempt SSH connection timeout (default 60) |
+| `--ssh-retries <n>` | Additional SSH attempts after the first failure (default 0) |
+| `--parallel <n>` | Max hosts to detect concurrently (default 5) |
+| `--snapshot <path>` | Detect from a pre-collected probe snapshot file |
+| `--save-snapshot <dir>` | When detecting over SSH, write each host's snapshot to `<dir>/<hostname>.json` |
 
 Examples:
 

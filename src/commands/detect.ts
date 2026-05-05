@@ -14,8 +14,19 @@ export interface DetectCommandOptions {
   inventory?: string;
   sshKey?: string;
   sshTimeout?: string;
+  sshRetries?: string;
+  parallel?: string;
   snapshot?: string;
   saveSnapshot?: string;
+}
+
+function parsePositiveInt(raw: string | undefined, fallback: number, label: string): number {
+  if (raw === undefined) return fallback;
+  const n = parseInt(raw, 10);
+  if (isNaN(n) || n < 0) {
+    throw new Error(`Invalid ${label} value "${raw}": expected a non-negative integer`);
+  }
+  return n;
 }
 
 async function emit(text: string, output?: string): Promise<void> {
@@ -103,15 +114,27 @@ interface HostDetectResult {
 }
 
 async function detectRemoteHosts(options: DetectCommandOptions): Promise<void> {
-  const { parseSSHTarget } = await import('../transport/ssh.js');
+  const { parseSSHTarget, executeRemoteProbeWithRetry } = await import('../transport/ssh.js');
   const { parseInventory } = await import('../transport/inventory.js');
   const { buildProbeManifest } = await import('../core/manifest-builder.js');
   const { SnapshotFSProvider } = await import('../core/snapshot-fs-provider.js');
-  const { executeRemoteProbe } = await import('../transport/ssh.js');
+  const { runConcurrent } = await import('../transport/multi-host.js');
   const { dirname, join } = await import('node:path');
   const { fileURLToPath } = await import('node:url');
 
   type SSHTarget = import('../transport/ssh.js').SSHTarget;
+
+  let concurrency: number;
+  let retries: number;
+  try {
+    concurrency = parsePositiveInt(options.parallel, 5, '--parallel');
+    retries = parsePositiveInt(options.sshRetries, 0, '--ssh-retries');
+    if (concurrency === 0) throw new Error('--parallel must be at least 1');
+  } catch (err) {
+    console.error(chalk.red((err as Error).message));
+    process.exitCode = 2;
+    return;
+  }
 
   let targets: SSHTarget[] = [];
 
@@ -142,24 +165,30 @@ async function detectRemoteHosts(options: DetectCommandOptions): Promise<void> {
   const manifest = buildProbeManifest(adapterRegistry.getAdapters());
   const timeout = parseInt(options.sshTimeout ?? '60', 10) * 1000;
 
-  console.log(chalk.bold(`\n  Detecting agents on ${targets.length} remote host(s)...\n`));
+  if (options.saveSnapshot) {
+    const { mkdir } = await import('node:fs/promises');
+    await mkdir(options.saveSnapshot, { recursive: true });
+  }
 
-  const CONCURRENCY = 5;
-  const results: HostDetectResult[] = [];
+  console.log(chalk.bold(`\n  Detecting agents on ${targets.length} remote host(s)...\n`));
 
   async function processTarget(target: SSHTarget): Promise<HostDetectResult> {
     try {
-      const snapshot = await executeRemoteProbe(target, {
-        probeBinDir,
-        manifest,
-        timeout,
-      });
+      const snapshot = await executeRemoteProbeWithRetry(
+        target,
+        { probeBinDir, manifest, timeout },
+        {
+          retries,
+          onRetry: (t, attempt, err) => {
+            console.log(chalk.yellow(`  Retry ${attempt}/${retries} for ${t.host}: ${err.message.split('\n')[0]}`));
+          },
+        },
+      );
 
       if (options.saveSnapshot) {
         try {
-          const { writeFile, mkdir } = await import('node:fs/promises');
+          const { writeFile } = await import('node:fs/promises');
           const { join: joinPath } = await import('node:path');
-          await mkdir(options.saveSnapshot, { recursive: true });
           const safeHost = (snapshot.hostname ?? target.host).replace(/[^A-Za-z0-9._-]/g, '_');
           const outPath = joinPath(options.saveSnapshot, `${safeHost}.json`);
           await writeFile(outPath, JSON.stringify(snapshot, null, 2), 'utf-8');
@@ -185,11 +214,7 @@ async function detectRemoteHosts(options: DetectCommandOptions): Promise<void> {
     }
   }
 
-  for (let i = 0; i < targets.length; i += CONCURRENCY) {
-    const batch = targets.slice(i, i + CONCURRENCY);
-    const batchResults = await Promise.all(batch.map(processTarget));
-    results.push(...batchResults);
-  }
+  const results = await runConcurrent(targets, concurrency, processTarget);
 
   // Render multi-host results
   if (options.format === 'json') {
