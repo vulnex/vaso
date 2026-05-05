@@ -1,5 +1,8 @@
-import { describe, it, expect } from 'vitest';
-import { getNestedValue, setNestedValue, deepMerge } from './utils.js';
+import { describe, it, expect, afterEach } from 'vitest';
+import { mkdtemp, rm, readFile, stat } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { getNestedValue, setNestedValue, deepMerge, writeFileEnsureDir } from './utils.js';
 
 describe('getNestedValue', () => {
   it('retrieves a nested value by dot path', () => {
@@ -70,5 +73,50 @@ describe('deepMerge', () => {
     expect(deepMerge({}, { a: 1 })).toEqual({ a: 1 });
     expect(deepMerge({ a: 1 }, {})).toEqual({ a: 1 });
     expect(deepMerge({}, {})).toEqual({});
+  });
+});
+
+describe('writeFileEnsureDir', () => {
+  const dirs: string[] = [];
+
+  afterEach(async () => {
+    for (const d of dirs) {
+      await rm(d, { recursive: true, force: true }).catch(() => {});
+    }
+    dirs.length = 0;
+  });
+
+  it('writes a file when the parent directory already exists', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'vaso-wfed-'));
+    dirs.push(root);
+    const path = join(root, 'report.json');
+    await writeFileEnsureDir(path, '{"ok":true}');
+    expect(await readFile(path, 'utf-8')).toBe('{"ok":true}');
+  });
+
+  it('creates missing intermediate directories', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'vaso-wfed-'));
+    dirs.push(root);
+    const path = join(root, 'a', 'b', 'c', 'report.json');
+    await writeFileEnsureDir(path, 'hello');
+    expect(await readFile(path, 'utf-8')).toBe('hello');
+  });
+
+  it('overwrites an existing file', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'vaso-wfed-'));
+    dirs.push(root);
+    const path = join(root, 'r.txt');
+    await writeFileEnsureDir(path, 'first');
+    await writeFileEnsureDir(path, 'second');
+    expect(await readFile(path, 'utf-8')).toBe('second');
+  });
+
+  it('does not error on a bare filename in cwd-equivalent', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'vaso-wfed-'));
+    dirs.push(root);
+    const path = join(root, 'plain.txt'); // parent is the temp dir, which exists
+    await writeFileEnsureDir(path, 'x');
+    const s = await stat(path);
+    expect(s.isFile()).toBe(true);
   });
 });

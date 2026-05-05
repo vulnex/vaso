@@ -199,9 +199,11 @@ vaso scan --inventory hosts.yaml -o fleet-report.json --silent
 vaso scan --inventory hosts.yaml --output-dir ./reports/ -f sarif --silent
 ```
 
-`--silent` requires `-o` or `--output-dir` — there's no point in suppressing console output if the report itself is going to stdout. The CLI will exit 2 with a clear error if you forget.
+`--silent` requires `-o` or `--output-dir` — there's no point in suppressing console output if the report itself is going to stdout. The CLI exits 2 with a clear error if you forget. The same rule applies to local scans (`-o` is required when `--silent` is set, regardless of whether `--host` / `--inventory` is in play).
 
-Errors and validation failures still print to stderr, even with `--silent`. Exit codes are unchanged: 0 = clean, 1 = findings hit `--fail-on` threshold or any host failed, 2 = invalid CLI usage.
+When `--silent` is set, the global VASO banner, IOC/advisory feed warnings, plugin/rule warnings, retry banners, save-snapshot lines, per-host progress, and the "Report written to" notice are all suppressed. Errors and validation failures still print to stderr. Exit codes are unchanged: 0 = clean, 1 = findings hit `--fail-on` threshold or any host failed, 2 = invalid CLI usage.
+
+If `-o <path>` points at a nested path whose parent directories don't exist (e.g. `-o reports/run-1/host.json`), VASO creates them with `mkdir -p` before writing. No need to pre-create directories.
 
 ### Concurrency (`--parallel`)
 

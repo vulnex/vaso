@@ -25,13 +25,26 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - **`-o file.sarif` / `-o file.xml` (with `-f junit`) on multi-host scans is now rejected** with exit 2 and a clear pointer to `--output-dir`. The previous text-concatenation produced invalid SARIF and invalid JUnit XML — the formats can't be safely glued together as text. Single-host scans, and other formats (`json` aggregates, `md` / `html` / `csv` / `terminal` text-concat) are unchanged.
 - **Snapshot warnings now respect `--silent`** in `vaso scan`. When scanning a non-root snapshot or echoing the source host name, those informational lines are suppressed if `--silent` is set.
 
+### Fixed
+
+- **`--silent` actually silent now.** The CLI banner and IOC/advisory feed warnings were printed by the `preAction` hook *before* the action handler saw `--silent`. The hook was also reading `thisCommand.opts()` (the program's options, always empty) instead of `actionCommand.opts()` (the subcommand's options, where `--silent` lives), so the silent gate never fired. Both fixed: hook now reads from `actionCommand` and skips the banner / plugin warnings / rules warnings / stale-feed warnings when `--silent` is set.
+- **`--silent` validation is now consistent across all scan/detect modes.** Previously only the SSH branch enforced "—silent requires `-o` or `--output-dir`"; the local and snapshot paths silently ignored a misuse. Both validations are now hoisted to the top of `runScan` / `runDetect`, so `vaso detect --silent` (no output destination) exits 2 with a clear error regardless of which scan mode would have been taken.
+- **`-o <path>` now creates missing parent directories.** Passing `-o reports/run-1/file.json` previously failed with `ENOENT` if `reports/run-1/` didn't exist. New `writeFileEnsureDir` helper in `src/core/utils.ts` does `mkdir -p $(dirname path)` before writing. Wired into both `vaso scan` and `vaso detect`.
+
+### Added
+
+- **`--output-dir <dir>` on `vaso detect`** (mirror of the `vaso scan` flag): writes one file per host as `<dir>/<safe-hostname>.<ext>` (`.json` for JSON format, `.txt` for terminal). Mutually exclusive with `-o`. Useful for fleet-detect runs where you want a separate file per host.
+
 ### Tests
 
 - `runConcurrent`: 5 new tests (input-order preservation when items finish out of order, concurrency cap honored, oversized concurrency, empty input, clamp ≤1 to a single worker).
 - `withRetry`: 5 new tests (success on first try, retry-then-succeed with `onRetry` invocation order, exhaustion throws final error, `retries: 0` short-circuits, sleep is called with `attempt` number).
 - `scanMultipleHosts.onComplete`: fires for every host with target / error / durationMs.
 - `vaso scan` validation: 8 new tests covering invalid `--parallel` (non-numeric, zero), negative `--ssh-retries`, `-o` + `--output-dir` mutex, `--silent` without an output destination (multi-host and local), `-o file.sarif` rejected for multi-host, `-o file.xml` rejected for multi-host JUnit, plus a positive test that `--silent + -o` suppresses the "Report written" message.
-- Total suite: 1595 passing.
+- `vaso scan` `-o` auto-mkdir: 1 new test confirming `mkdir(parentDir, { recursive: true })` is called before `writeFile`.
+- `vaso detect` validation: 2 new tests (`--silent` without output destination rejected, `-o + --output-dir` mutex).
+- `writeFileEnsureDir`: 4 new tests in `src/core/utils.test.ts` (existing parent, missing nested parents, overwrite, bare filename).
+- Total suite: 1602 passing.
 
 ## [0.4.0] - 2026-05-04
 

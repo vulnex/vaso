@@ -9,6 +9,7 @@ import type { ProbeSnapshot } from '../core/snapshot-types.js';
 import type { ScanOptions } from '../core/types.js';
 import { shouldFailScan, isValidFailOn, type FailOnLevel } from '../core/exit-criteria.js';
 import { logError } from '../core/debug.js';
+import { writeFileEnsureDir } from '../core/utils.js';
 import { readFile, writeFile } from 'node:fs/promises';
 
 export interface ScanCommandOptions {
@@ -62,6 +63,18 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
   const failOn: FailOnLevel = options.failOn && isValidFailOn(options.failOn) ? options.failOn : 'critical';
   if (options.failOn && !isValidFailOn(options.failOn)) {
     console.error(chalk.red(`Invalid --fail-on value "${options.failOn}". Use: critical, warning, info, or none.`));
+    process.exitCode = 2;
+    return;
+  }
+
+  // Top-level --silent / --output-dir gates (apply to all scan modes)
+  if (options.output && options.outputDir) {
+    console.error(chalk.red('--output and --output-dir are mutually exclusive'));
+    process.exitCode = 2;
+    return;
+  }
+  if (options.silent && !options.output && !options.outputDir) {
+    console.error(chalk.red('--silent requires -o/--output or --output-dir'));
     process.exitCode = 2;
     return;
   }
@@ -121,17 +134,8 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
       return;
     }
 
-    // Output mode validation
-    if (options.output && options.outputDir) {
-      console.error(chalk.red('--output and --output-dir are mutually exclusive'));
-      process.exitCode = 2;
-      return;
-    }
-    if (silent && !options.output && !options.outputDir) {
-      console.error(chalk.red('--silent requires either -o/--output or --output-dir'));
-      process.exitCode = 2;
-      return;
-    }
+    // SARIF/JUnit can't be safely text-aggregated across hosts (already gated
+    // at top level for --output + --output-dir mutex and --silent requirements).
     if (options.output && NON_AGGREGATABLE_FORMATS.has(options.format)) {
       console.error(chalk.red(
         `--output cannot aggregate ${options.format} across multiple hosts. ` +
@@ -286,7 +290,7 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
         sections.push(`Summary: ${successResults.length} scanned, ${failedResults.length} failed`);
         combined = sections.join('\n\n');
       }
-      await writeFile(options.output, combined, 'utf-8');
+      await writeFileEnsureDir(options.output, combined);
       log(chalk.green(`Report written to ${options.output}`));
     } else {
       for (const hr of successResults) {
@@ -320,13 +324,8 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
     return; // Don't fall through to local scan
   }
 
-  // Local scan: --silent requires -o (no remote hosts so --output-dir doesn't apply)
+  // Local scan (--silent + -o validation already happened at top level)
   const localSilent = !!options.silent;
-  if (localSilent && !options.output) {
-    console.error(chalk.red('--silent requires -o/--output for local scans'));
-    process.exitCode = 2;
-    return;
-  }
   const localLog = (msg: string) => { if (!localSilent) console.log(msg); };
 
   const engine = new ScanEngine(adapterRegistry, checkRegistry, snapshotFs);
@@ -385,7 +384,7 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
     const output = reporter.render(result);
 
     if (options.output) {
-      await writeFile(options.output, output, 'utf-8');
+      await writeFileEnsureDir(options.output, output);
       localLog(chalk.green(`Report written to ${options.output}`));
     } else {
       console.log(output);

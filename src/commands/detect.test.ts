@@ -152,13 +152,41 @@ describe('runDetect', () => {
     }
   });
 
+  it('rejects --silent without -o or --output-dir for local detect with exit 2', async () => {
+    const consoleErrors: string[] = [];
+    const origExitCode = process.exitCode;
+    console.error = (...args: unknown[]) => { consoleErrors.push(args.map(String).join(' ')); };
+    process.exitCode = undefined;
+    try {
+      await runDetect({ format: 'terminal', silent: true });
+      expect(process.exitCode).toBe(2);
+      expect(consoleErrors.some(l => l.includes('--silent requires'))).toBe(true);
+    } finally {
+      process.exitCode = origExitCode;
+    }
+  });
+
+  it('rejects -o + --output-dir together with exit 2', async () => {
+    const consoleErrors: string[] = [];
+    const origExitCode = process.exitCode;
+    console.error = (...args: unknown[]) => { consoleErrors.push(args.map(String).join(' ')); };
+    process.exitCode = undefined;
+    try {
+      await runDetect({ format: 'terminal', output: '/tmp/x', outputDir: '/tmp/y/' });
+      expect(process.exitCode).toBe(2);
+      expect(consoleErrors.some(l => l.includes('mutually exclusive'))).toBe(true);
+    } finally {
+      process.exitCode = origExitCode;
+    }
+  });
+
   it('verbose mode shows search paths', async () => {
     vi.spyOn(adapterRegistry, 'detectAll').mockResolvedValue([mockInstallations[0]]);
     vi.spyOn(adapterRegistry, 'getAdapters').mockReturnValue([
       {
         agent: 'openclaw',
         displayName: 'OpenClaw',
-        async detect() { return null; },
+        async detect() { return []; },
         getConfigPaths() { return ['/home/user/.openclaw/openclaw.json']; },
         getSkillsDir() { return undefined; },
         getGatewayInfo() { return undefined; },

@@ -16,12 +16,13 @@ vi.mock('../core/baseline.js', () => ({
 
 vi.mock('node:fs/promises', () => ({
   writeFile: vi.fn(),
+  mkdir: vi.fn().mockResolvedValue(undefined),
 }));
 
 import { ScanEngine } from '../core/engine.js';
 import { getReporter } from '../reporting/index.js';
 import { saveBaseline, loadBaseline, diffResults } from '../core/baseline.js';
-import { writeFile } from 'node:fs/promises';
+import { writeFile, mkdir } from 'node:fs/promises';
 import { runScan } from './scan.js';
 import type { ScanResult } from '../core/types.js';
 
@@ -31,6 +32,7 @@ const mockSaveBaseline = vi.mocked(saveBaseline);
 const mockLoadBaseline = vi.mocked(loadBaseline);
 const mockDiffResults = vi.mocked(diffResults);
 const mockWriteFile = vi.mocked(writeFile);
+const mockMkdir = vi.mocked(mkdir);
 
 function makeScanResult(overrides?: Partial<ScanResult>): ScanResult {
   return {
@@ -290,6 +292,18 @@ describe('runScan', () => {
       await runScan({ format: 'json', output: '/tmp/r.json', silent: true });
       expect(mockWriteFile).toHaveBeenCalledWith('/tmp/r.json', 'rendered output', 'utf-8');
       expect(consoleLogs.some(l => l.includes('Report written'))).toBe(false);
+    });
+  });
+
+  describe('-o auto-creates parent directory', () => {
+    it('mkdir -p the parent of -o before writing', async () => {
+      mockWriteFile.mockResolvedValue(undefined);
+      mockMkdir.mockResolvedValue(undefined as never);
+
+      await runScan({ format: 'json', output: '/tmp/reports/run-1/report.json' });
+
+      expect(mockMkdir).toHaveBeenCalledWith('/tmp/reports/run-1', { recursive: true });
+      expect(mockWriteFile).toHaveBeenCalledWith('/tmp/reports/run-1/report.json', 'rendered output', 'utf-8');
     });
   });
 });
