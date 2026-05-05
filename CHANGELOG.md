@@ -12,19 +12,26 @@ This project adheres to [Semantic Versioning](https://semver.org/).
   - `--parallel <n>` — caps concurrent SSH targets (default 5). Replaces the previously hard-coded `CONCURRENCY=5` in `src/transport/multi-host.ts` and `src/commands/detect.ts`. Validated as a non-negative integer; `--parallel 0` is rejected with exit 2.
   - `--ssh-retries <n>` — additional SSH attempts after the first failure (default 0, so existing behavior is preserved). Exponential backoff `1s → 2s → 4s`, capped at 8s. Each retry uses a fresh probe-binary UUID so it cannot collide with a half-cleaned-up previous attempt; cleanup of `/tmp/vaso-probe-<uuid>` and `/tmp/vaso-manifest-<uuid>` remains in `executeRemoteProbe`'s `finally` block. A retry banner (`Retry N/M for <host>: <reason>`) is printed before each new attempt.
   - `--save-snapshot <dir>` on `vaso scan` — already existed on `vaso detect`. Writes each host's collected `ProbeSnapshot` to `<dir>/<safe-hostname>.json` before the local scan engine runs against it. Lets users fan out once over SSH and re-scan offline against new baselines / new rule sets without re-paying the SSH round-trip.
+- **Live per-host progress for fleet scans**: `vaso scan` and `vaso detect` now print one line per host as it completes (`✓ label (Xms) — score N/100, AC / BW / CI` for scan, `✓ label (Xms) — N agent(s) detected` for detect, `✗ label (Xms): error` on failure). A slow host no longer blanks the terminal until the rest of the fleet finishes.
+- **`--silent` flag** on `vaso scan` and `vaso detect`: suppresses all stdout/stderr chatter — banner, retry banners, save-snapshot lines, per-host progress, summary, and the "Report written to" notice. Requires `-o` or `--output-dir` (the CLI rejects `--silent` without an output destination with exit 2). Errors and validation failures still print to stderr. Useful for cron / CI / scripted runs.
+- **`--output-dir <dir>` on `vaso scan`**: writes one report per host as `<dir>/<safe-hostname>.<ext>` using the format's natural extension (`json`, `sarif`, `md`, `html`, `csv`, `xml` for JUnit, `txt` for terminal). The directory is created if it doesn't exist. Mutually exclusive with `-o`.
 
 ### Changed
 
 - **Multi-host orchestrator now uses a true worker pool** instead of wave batching (`src/transport/multi-host.ts`). The previous `for (i += CONCURRENCY)` loop made a slow host in batch *N* block faster hosts queued in batch *N+1*; the new `runConcurrent<T, R>` helper launches a fresh task as soon as a slot opens up. Same exported API.
-- **`scanMultipleHosts` API extended** with three optional fields: `concurrency`, `retries`, and two callbacks `onSnapshot(target, snapshot)` (invoked once a snapshot is collected, before scanning) and `onRetry(target, attempt, err)` (invoked before each retry's sleep returns). All four are optional and default to the previous behavior.
+- **`scanMultipleHosts` API extended** with `concurrency`, `retries`, and three callbacks: `onSnapshot(target, snapshot)` (invoked once a snapshot is collected, before scanning), `onRetry(target, attempt, err)` (invoked before each retry's sleep returns), and `onComplete(entry)` (invoked after each host finishes, success or failure — the seam used by live progress and per-host file output). All optional; defaults preserve previous behavior.
 - **`vaso detect` now uses the shared transport layer.** Its inline concurrency loop and direct `executeRemoteProbe` call were replaced with `runConcurrent` + `executeRemoteProbeWithRetry` from `src/transport/`, eliminating duplicated logic between `scan` and `detect`.
 - **Generic retry helper** `withRetry<T>({ retries, fn, onRetry?, sleep? })` extracted from `executeRemoteProbeWithRetry` (`src/transport/ssh.ts`). The optional `sleep` injection seam keeps unit tests fast without faking timers.
+- **`-o file.sarif` / `-o file.xml` (with `-f junit`) on multi-host scans is now rejected** with exit 2 and a clear pointer to `--output-dir`. The previous text-concatenation produced invalid SARIF and invalid JUnit XML — the formats can't be safely glued together as text. Single-host scans, and other formats (`json` aggregates, `md` / `html` / `csv` / `terminal` text-concat) are unchanged.
+- **Snapshot warnings now respect `--silent`** in `vaso scan`. When scanning a non-root snapshot or echoing the source host name, those informational lines are suppressed if `--silent` is set.
 
 ### Tests
 
 - `runConcurrent`: 5 new tests (input-order preservation when items finish out of order, concurrency cap honored, oversized concurrency, empty input, clamp ≤1 to a single worker).
 - `withRetry`: 5 new tests (success on first try, retry-then-succeed with `onRetry` invocation order, exhaustion throws final error, `retries: 0` short-circuits, sleep is called with `attempt` number).
-- `vaso scan` validation: 3 new tests for invalid `--parallel` (non-numeric, zero) and negative `--ssh-retries` (each exits with code 2 and an actionable message). Total suite: 1588 passing.
+- `scanMultipleHosts.onComplete`: fires for every host with target / error / durationMs.
+- `vaso scan` validation: 8 new tests covering invalid `--parallel` (non-numeric, zero), negative `--ssh-retries`, `-o` + `--output-dir` mutex, `--silent` without an output destination (multi-host and local), `-o file.sarif` rejected for multi-host, `-o file.xml` rejected for multi-host JUnit, plus a positive test that `--silent + -o` suppresses the "Report written" message.
+- Total suite: 1595 passing.
 
 ## [0.4.0] - 2026-05-04
 

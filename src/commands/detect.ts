@@ -10,6 +10,7 @@ export interface DetectCommandOptions {
   output?: string;
   allUsers?: boolean;
   verbose?: boolean;
+  silent?: boolean;
   host?: string[];
   inventory?: string;
   sshKey?: string;
@@ -29,10 +30,10 @@ function parsePositiveInt(raw: string | undefined, fallback: number, label: stri
   return n;
 }
 
-async function emit(text: string, output?: string): Promise<void> {
+async function emit(text: string, output?: string, silent?: boolean): Promise<void> {
   if (output) {
     await writeFile(output, text, 'utf-8');
-    console.log(chalk.green(`Report written to ${output}`));
+    if (!silent) console.log(chalk.green(`Report written to ${output}`));
   } else {
     console.log(text);
   }
@@ -124,6 +125,9 @@ async function detectRemoteHosts(options: DetectCommandOptions): Promise<void> {
 
   type SSHTarget = import('../transport/ssh.js').SSHTarget;
 
+  const silent = !!options.silent;
+  const log = (msg: string) => { if (!silent) console.log(msg); };
+
   let concurrency: number;
   let retries: number;
   try {
@@ -132,6 +136,12 @@ async function detectRemoteHosts(options: DetectCommandOptions): Promise<void> {
     if (concurrency === 0) throw new Error('--parallel must be at least 1');
   } catch (err) {
     console.error(chalk.red((err as Error).message));
+    process.exitCode = 2;
+    return;
+  }
+
+  if (silent && !options.output) {
+    console.error(chalk.red('--silent requires -o/--output'));
     process.exitCode = 2;
     return;
   }
@@ -170,9 +180,11 @@ async function detectRemoteHosts(options: DetectCommandOptions): Promise<void> {
     await mkdir(options.saveSnapshot, { recursive: true });
   }
 
-  console.log(chalk.bold(`\n  Detecting agents on ${targets.length} remote host(s)...\n`));
+  log(chalk.bold(`\n  Detecting agents on ${targets.length} remote host(s)...\n`));
 
   async function processTarget(target: SSHTarget): Promise<HostDetectResult> {
+    const start = Date.now();
+    let outcome: HostDetectResult;
     try {
       const snapshot = await executeRemoteProbeWithRetry(
         target,
@@ -180,7 +192,7 @@ async function detectRemoteHosts(options: DetectCommandOptions): Promise<void> {
         {
           retries,
           onRetry: (t, attempt, err) => {
-            console.log(chalk.yellow(`  Retry ${attempt}/${retries} for ${t.host}: ${err.message.split('\n')[0]}`));
+            log(chalk.yellow(`  Retry ${attempt}/${retries} for ${t.host}: ${err.message.split('\n')[0]}`));
           },
         },
       );
@@ -192,9 +204,9 @@ async function detectRemoteHosts(options: DetectCommandOptions): Promise<void> {
           const safeHost = (snapshot.hostname ?? target.host).replace(/[^A-Za-z0-9._-]/g, '_');
           const outPath = joinPath(options.saveSnapshot, `${safeHost}.json`);
           await writeFile(outPath, JSON.stringify(snapshot, null, 2), 'utf-8');
-          console.log(chalk.dim(`  Saved snapshot for ${target.host} → ${outPath}`));
+          log(chalk.dim(`  Saved snapshot for ${target.host} → ${outPath}`));
         } catch (err) {
-          console.log(chalk.yellow(`  Warning: failed to save snapshot for ${target.host}: ${(err as Error).message}`));
+          log(chalk.yellow(`  Warning: failed to save snapshot for ${target.host}: ${(err as Error).message}`));
         }
       }
 
@@ -208,17 +220,28 @@ async function detectRemoteHosts(options: DetectCommandOptions): Promise<void> {
         installations = installations.filter(i => i.agent === (options.agent as AgentType));
       }
 
-      return { host: snapshot.hostname ?? target.host, label: target.label, installations };
+      outcome = { host: snapshot.hostname ?? target.host, label: target.label, installations };
     } catch (err) {
-      return { host: target.host, label: target.label, installations: [], error: (err as Error).message };
+      outcome = { host: target.host, label: target.label, installations: [], error: (err as Error).message };
     }
+
+    // Live progress — fires as each host completes, even before all hosts are done
+    const dur = `${Date.now() - start}ms`;
+    const labelStr = target.label ?? `${target.user}@${target.host}`;
+    if (outcome.error) {
+      log(chalk.red(`  ✗ ${labelStr} (${dur}): ${outcome.error.split('\n')[0]}`));
+    } else {
+      log(chalk.green(`  ✓ ${labelStr} (${dur}) — ${outcome.installations.length} agent(s) detected`));
+    }
+
+    return outcome;
   }
 
   const results = await runConcurrent(targets, concurrency, processTarget);
 
   // Render multi-host results
   if (options.format === 'json') {
-    await emit(JSON.stringify(results, null, 2), options.output);
+    await emit(JSON.stringify(results, null, 2), options.output, silent);
   } else {
     const sections: string[] = [];
     for (const hr of results) {
@@ -248,7 +271,7 @@ async function detectRemoteHosts(options: DetectCommandOptions): Promise<void> {
     }
     sections.push('');
 
-    await emit(sections.join('\n'), options.output);
+    await emit(sections.join('\n'), options.output, silent);
   }
 }
 
@@ -256,7 +279,7 @@ async function renderResults(installations: AgentInstallation[], options: Detect
   const text = options.format === 'json'
     ? renderJson(installations)
     : renderTerminal(installations, options.verbose);
-  await emit(text, options.output);
+  await emit(text, options.output, options.silent);
 }
 
 function renderJson(installations: AgentInstallation[]): string {

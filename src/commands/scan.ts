@@ -15,10 +15,12 @@ export interface ScanCommandOptions {
   agent?: string;
   format: string;
   output?: string;
+  outputDir?: string;
   saveBaseline?: boolean;
   diff?: boolean;
   allUsers?: boolean;
   color?: boolean;
+  silent?: boolean;
   snapshot?: string;
   host?: string[];
   inventory?: string;
@@ -29,6 +31,22 @@ export interface ScanCommandOptions {
   saveSnapshot?: string;
   sudo?: boolean;
   failOn?: string;
+}
+
+const FORMAT_EXT: Record<string, string> = {
+  terminal: 'txt',
+  json: 'json',
+  sarif: 'sarif',
+  markdown: 'md',
+  html: 'html',
+  csv: 'csv',
+  junit: 'xml',
+};
+
+const NON_AGGREGATABLE_FORMATS = new Set(['sarif', 'junit']);
+
+function safeHostname(host: string): string {
+  return host.replace(/[^A-Za-z0-9._-]/g, '_');
 }
 
 function parsePositiveInt(raw: string | undefined, fallback: number, label: string): number {
@@ -72,11 +90,12 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
 
     snapshotFs = new SnapshotFSProvider(snapshot);
 
-    if (snapshot.privilege && !snapshot.privilege.isRoot) {
-      console.log(chalk.yellow(`  Warning: snapshot collected as non-root user "${snapshot.privilege.username}" — scan coverage may be limited.\n`));
+    if (!options.silent) {
+      if (snapshot.privilege && !snapshot.privilege.isRoot) {
+        console.log(chalk.yellow(`  Warning: snapshot collected as non-root user "${snapshot.privilege.username}" — scan coverage may be limited.\n`));
+      }
+      console.log(chalk.dim(`  Scanning snapshot from host "${snapshot.hostname}" (${snapshot.platform})\n`));
     }
-
-    console.log(chalk.dim(`  Scanning snapshot from host "${snapshot.hostname}" (${snapshot.platform})\n`));
   }
 
   // SSH remote scanning
@@ -87,6 +106,9 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
     const { buildProbeManifest } = await import('../core/manifest-builder.js');
     type SSHTarget = import('../transport/ssh.js').SSHTarget;
 
+    const silent = !!options.silent;
+    const log = (msg: string) => { if (!silent) console.log(msg); };
+
     let concurrency: number;
     let retries: number;
     try {
@@ -95,6 +117,26 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
       if (concurrency === 0) throw new Error('--parallel must be at least 1');
     } catch (err) {
       console.error(chalk.red((err as Error).message));
+      process.exitCode = 2;
+      return;
+    }
+
+    // Output mode validation
+    if (options.output && options.outputDir) {
+      console.error(chalk.red('--output and --output-dir are mutually exclusive'));
+      process.exitCode = 2;
+      return;
+    }
+    if (silent && !options.output && !options.outputDir) {
+      console.error(chalk.red('--silent requires either -o/--output or --output-dir'));
+      process.exitCode = 2;
+      return;
+    }
+    if (options.output && NON_AGGREGATABLE_FORMATS.has(options.format)) {
+      console.error(chalk.red(
+        `--output cannot aggregate ${options.format} across multiple hosts. ` +
+        `Use --output-dir <dir> instead — each host will be written as <hostname>.${FORMAT_EXT[options.format]}.`
+      ));
       process.exitCode = 2;
       return;
     }
@@ -137,7 +179,7 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
     const manifest = buildProbeManifest(adapterRegistry.getAdapters());
     const timeout = parseInt(options.sshTimeout ?? '60', 10) * 1000;
 
-    console.log(chalk.bold(`\n  Scanning ${targets.length} remote host(s)...\n`));
+    log(chalk.bold(`\n  Scanning ${targets.length} remote host(s)...\n`));
 
     let saveSnapshotDir: string | undefined;
     if (options.saveSnapshot) {
@@ -145,6 +187,14 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
       saveSnapshotDir = options.saveSnapshot;
       await mkdir(saveSnapshotDir, { recursive: true });
     }
+
+    if (options.outputDir) {
+      const { mkdir } = await import('node:fs/promises');
+      await mkdir(options.outputDir, { recursive: true });
+    }
+
+    const reporter = getReporter(options.format as any ?? 'terminal');
+    const ext = FORMAT_EXT[options.format] ?? 'txt';
 
     const hostResults = await scanMultipleHosts({
       targets,
@@ -159,26 +209,49 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
         ? async (target, snapshot) => {
             try {
               const { join: joinPath } = await import('node:path');
-              const safeHost = (snapshot.hostname ?? target.host).replace(/[^A-Za-z0-9._-]/g, '_');
+              const safeHost = safeHostname(snapshot.hostname ?? target.host);
               const outPath = joinPath(saveSnapshotDir!, `${safeHost}.json`);
               await writeFile(outPath, JSON.stringify(snapshot, null, 2), 'utf-8');
-              console.log(chalk.dim(`  Saved snapshot for ${target.host} → ${outPath}`));
+              log(chalk.dim(`  Saved snapshot for ${target.host} → ${outPath}`));
             } catch (err) {
-              console.log(chalk.yellow(`  Warning: failed to save snapshot for ${target.host}: ${(err as Error).message}`));
+              log(chalk.yellow(`  Warning: failed to save snapshot for ${target.host}: ${(err as Error).message}`));
             }
           }
         : undefined,
       onRetry: (target, attempt, err) => {
-        console.log(chalk.yellow(`  Retry ${attempt}/${retries} for ${target.host}: ${err.message.split('\n')[0]}`));
+        log(chalk.yellow(`  Retry ${attempt}/${retries} for ${target.host}: ${err.message.split('\n')[0]}`));
+      },
+      onComplete: async (entry) => {
+        const label = entry.target.label ?? `${entry.target.user}@${entry.target.host}`;
+        const dur = `${entry.durationMs}ms`;
+        if (entry.error) {
+          log(chalk.red(`  ✗ ${label} (${dur}): ${entry.error.split('\n')[0]}`));
+        } else if (entry.result) {
+          const findings = entry.result.summary;
+          const summary = `${findings.critical}C / ${findings.warning}W / ${findings.info}I`;
+          log(chalk.green(`  ✓ ${label} (${dur}) — score ${entry.result.totalScore}/100, ${summary}`));
+
+          if (options.outputDir) {
+            try {
+              const { join: joinPath } = await import('node:path');
+              const safeHost = safeHostname(entry.result.host ?? entry.target.host);
+              const outPath = joinPath(options.outputDir, `${safeHost}.${ext}`);
+              await writeFile(outPath, reporter.render(entry.result), 'utf-8');
+            } catch (err) {
+              log(chalk.yellow(`  Warning: failed to write output for ${entry.target.host}: ${(err as Error).message}`));
+            }
+          }
+        }
       },
     });
 
     // Report results
-    const reporter = getReporter(options.format as any ?? 'terminal');
     const successResults = hostResults.filter(hr => hr.result);
     const failedResults = hostResults.filter(hr => hr.error);
 
-    if (options.output) {
+    if (options.outputDir) {
+      log(chalk.green(`\n  Wrote ${successResults.length} report(s) to ${options.outputDir}/`));
+    } else if (options.output) {
       // Aggregate to a single file. JSON gets a structured per-host array;
       // text formats get the per-host renders concatenated with a plain
       // divider so the file is readable without ANSI escapes.
@@ -214,26 +287,26 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
         combined = sections.join('\n\n');
       }
       await writeFile(options.output, combined, 'utf-8');
-      console.log(chalk.green(`Report written to ${options.output}`));
+      log(chalk.green(`Report written to ${options.output}`));
     } else {
       for (const hr of successResults) {
         if (hr.result) {
           const label = hr.target.label ?? `${hr.target.user}@${hr.target.host}`;
-          console.log(chalk.bold(`\n── ${label} (${hr.result.host ?? hr.target.host}) ──\n`));
-          console.log(reporter.render(hr.result));
+          log(chalk.bold(`\n── ${label} (${hr.result.host ?? hr.target.host}) ──\n`));
+          log(reporter.render(hr.result));
         }
       }
 
       if (failedResults.length > 0) {
-        console.log(chalk.bold(chalk.red(`\n  Failed hosts (${failedResults.length}):`)));
+        log(chalk.bold(chalk.red(`\n  Failed hosts (${failedResults.length}):`)));
         for (const hr of failedResults) {
           const label = hr.target.label ?? `${hr.target.user}@${hr.target.host}`;
-          console.log(chalk.red(`    ✗ ${label}: ${hr.error}`));
+          log(chalk.red(`    ✗ ${label}: ${hr.error}`));
         }
       }
 
       // Summary
-      console.log(chalk.bold(`\n  Summary: ${successResults.length} scanned, ${failedResults.length} failed\n`));
+      log(chalk.bold(`\n  Summary: ${successResults.length} scanned, ${failedResults.length} failed\n`));
     }
 
     // Exit non-zero if any host failed, or if findings meet the --fail-on threshold
@@ -246,6 +319,15 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
 
     return; // Don't fall through to local scan
   }
+
+  // Local scan: --silent requires -o (no remote hosts so --output-dir doesn't apply)
+  const localSilent = !!options.silent;
+  if (localSilent && !options.output) {
+    console.error(chalk.red('--silent requires -o/--output for local scans'));
+    process.exitCode = 2;
+    return;
+  }
+  const localLog = (msg: string) => { if (!localSilent) console.log(msg); };
 
   const engine = new ScanEngine(adapterRegistry, checkRegistry, snapshotFs);
 
@@ -268,7 +350,7 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
     // Save baseline if requested
     if (options.saveBaseline) {
       const path = await saveBaseline(result);
-      console.log(chalk.green(`Baseline saved to ${path}`));
+      localLog(chalk.green(`Baseline saved to ${path}`));
     }
 
     // Diff against baseline if requested
@@ -276,26 +358,26 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
       const baseline = await loadBaseline();
       if (baseline) {
         const diff = diffResults(result, baseline);
-        console.log(chalk.bold('\nDifferential Scan Results:'));
-        console.log(`  New findings: ${chalk.red(String(diff.newFindings.length))}`);
-        console.log(`  Resolved: ${chalk.green(String(diff.resolvedFindings.length))}`);
-        console.log(`  Unchanged: ${chalk.dim(String(diff.unchangedFindings.length))}`);
+        localLog(chalk.bold('\nDifferential Scan Results:'));
+        localLog(`  New findings: ${chalk.red(String(diff.newFindings.length))}`);
+        localLog(`  Resolved: ${chalk.green(String(diff.resolvedFindings.length))}`);
+        localLog(`  Unchanged: ${chalk.dim(String(diff.unchangedFindings.length))}`);
 
         if (diff.newFindings.length > 0) {
-          console.log(chalk.bold('\n  New findings:'));
+          localLog(chalk.bold('\n  New findings:'));
           for (const f of diff.newFindings) {
-            console.log(`    ${chalk.red('[NEW]')} ${f.id}: ${f.name} — ${f.message}`);
+            localLog(`    ${chalk.red('[NEW]')} ${f.id}: ${f.name} — ${f.message}`);
           }
         }
         if (diff.resolvedFindings.length > 0) {
-          console.log(chalk.bold('\n  Resolved:'));
+          localLog(chalk.bold('\n  Resolved:'));
           for (const f of diff.resolvedFindings) {
-            console.log(`    ${chalk.green('[RESOLVED]')} ${f.id}: ${f.name}`);
+            localLog(`    ${chalk.green('[RESOLVED]')} ${f.id}: ${f.name}`);
           }
         }
-        console.log('');
+        localLog('');
       } else {
-        console.log(chalk.yellow('No baseline found. Run with --save-baseline first.'));
+        localLog(chalk.yellow('No baseline found. Run with --save-baseline first.'));
       }
     }
 
@@ -304,7 +386,7 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
 
     if (options.output) {
       await writeFile(options.output, output, 'utf-8');
-      console.log(chalk.green(`Report written to ${options.output}`));
+      localLog(chalk.green(`Report written to ${options.output}`));
     } else {
       console.log(output);
     }

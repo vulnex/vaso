@@ -235,5 +235,61 @@ describe('runScan', () => {
       expect(process.exitCode).toBe(2);
       expect(consoleErrors.some(l => l.includes('--ssh-retries'))).toBe(true);
     });
+
+    it('rejects -o + --output-dir together with exit 2', async () => {
+      await runScan({
+        format: 'terminal',
+        host: ['root@10.0.0.1'],
+        output: '/tmp/report.txt',
+        outputDir: '/tmp/reports/',
+      });
+      expect(process.exitCode).toBe(2);
+      expect(consoleErrors.some(l => l.includes('mutually exclusive'))).toBe(true);
+    });
+
+    it('rejects --silent without -o or --output-dir for multi-host with exit 2', async () => {
+      await runScan({
+        format: 'terminal',
+        host: ['root@10.0.0.1'],
+        silent: true,
+      });
+      expect(process.exitCode).toBe(2);
+      expect(consoleErrors.some(l => l.includes('--silent requires'))).toBe(true);
+    });
+
+    it('rejects -o file.sarif for multi-host (cannot aggregate SARIF)', async () => {
+      await runScan({
+        format: 'sarif',
+        host: ['root@10.0.0.1'],
+        output: '/tmp/results.sarif',
+      });
+      expect(process.exitCode).toBe(2);
+      expect(consoleErrors.some(l => l.includes('--output-dir'))).toBe(true);
+    });
+
+    it('rejects -o file.xml for multi-host JUnit (cannot aggregate)', async () => {
+      await runScan({
+        format: 'junit',
+        host: ['root@10.0.0.1'],
+        output: '/tmp/results.xml',
+      });
+      expect(process.exitCode).toBe(2);
+      expect(consoleErrors.some(l => l.includes('--output-dir'))).toBe(true);
+    });
+  });
+
+  describe('local --silent', () => {
+    it('rejects --silent without -o for local scans with exit 2', async () => {
+      await runScan({ format: 'terminal', silent: true });
+      expect(process.exitCode).toBe(2);
+      expect(consoleErrors.some(l => l.includes('--silent requires'))).toBe(true);
+    });
+
+    it('--silent + -o suppresses the "Report written to" message', async () => {
+      mockWriteFile.mockResolvedValue(undefined);
+      await runScan({ format: 'json', output: '/tmp/r.json', silent: true });
+      expect(mockWriteFile).toHaveBeenCalledWith('/tmp/r.json', 'rendered output', 'utf-8');
+      expect(consoleLogs.some(l => l.includes('Report written'))).toBe(false);
+    });
   });
 });

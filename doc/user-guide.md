@@ -1,6 +1,6 @@
 # VASO User Guide
 
-VASO (VULNEX Agent Security Observer) is a security scanner for AI agent deployments. It detects misconfigurations, malicious skills, known threats, and runtime vulnerabilities across eight autonomous agent frameworks (OpenClaw, NanoClaw, PicoClaw, IronClaw, Nanobot, ZeroClaw, NemoClaw, Hermes), two interactive coding agents (Claude Code, Codex), and MCP (Model Context Protocol) server configurations.
+VASO (VULNEX Agent Security Observer) is a security scanner for AI agent deployments. It detects misconfigurations, malicious skills, known threats, and runtime vulnerabilities across nine autonomous agent frameworks (OpenClaw, NanoClaw, PicoClaw, IronClaw, Nanobot, ZeroClaw, NemoClaw, Hermes, Lyrie), seven interactive coding agents (Claude Code, Codex, OpenCode, Gemini CLI, Qwen Code, GitHub Copilot CLI, Cursor CLI), the Claude Desktop and ChatGPT desktop apps, and MCP (Model Context Protocol) server configurations.
 
 ## Installation
 
@@ -32,13 +32,15 @@ vaso scan [options]
 
 | Option | Description |
 |--------|-------------|
-| `-a, --agent <type>` | Scan a specific agent: `openclaw`, `nanoclaw`, `picoclaw`, `ironclaw`, `nanobot`, `zeroclaw`, `nemoclaw`, `hermes`, `claude-code`, or `codex` |
+| `-a, --agent <type>` | Scan a specific agent: `openclaw`, `nanoclaw`, `picoclaw`, `ironclaw`, `nanobot`, `zeroclaw`, `nemoclaw`, `hermes`, `lyrie`, `claude-code`, `claude-desktop`, `chatgpt-desktop`, `codex`, `opencode`, `gemini-cli`, `qwen-code`, `copilot-cli`, or `cursor-cli` |
 | `-f, --format <format>` | Output format: `terminal` (default), `json`, `sarif`, `markdown`, `html`, `csv`, `junit` |
-| `-o, --output <file>` | Write report to a file instead of stdout |
+| `-o, --output <file>` | Write report to a single file instead of stdout |
+| `--output-dir <dir>` | Multi-host: write one file per host as `<dir>/<hostname>.<ext>` (mutually exclusive with `-o`) |
 | `--save-baseline` | Save current results as a baseline for future comparison |
 | `--diff` | Compare results against the last saved baseline |
 | `--all-users` | Scan all user accounts (requires root/sudo) |
 | `--fail-on <severity>` | Exit non-zero on findings of this severity or higher: `critical` (default), `warning`, `info`, or `none` |
+| `--silent` | Suppress all stdout/stderr chatter; requires `-o` or `--output-dir` |
 | `--no-color` | Disable colored terminal output |
 | `--host <target...>` | Scan one or more remote hosts via SSH (`user@host[:port]`). Variadic. |
 | `--inventory <path>` | YAML file listing hosts to scan |
@@ -97,11 +99,12 @@ vaso detect [options]
 
 | Option | Description |
 |--------|-------------|
-| `-a, --agent <type>` | Detect a specific agent only: `openclaw`, `nanoclaw`, `picoclaw`, `ironclaw`, `nanobot`, `zeroclaw`, `nemoclaw`, `hermes`, `claude-code`, or `codex` |
+| `-a, --agent <type>` | Detect a specific agent only: `openclaw`, `nanoclaw`, `picoclaw`, `ironclaw`, `nanobot`, `zeroclaw`, `nemoclaw`, `hermes`, `lyrie`, `claude-code`, `claude-desktop`, `chatgpt-desktop`, `codex`, `opencode`, `gemini-cli`, `qwen-code`, `copilot-cli`, or `cursor-cli` |
 | `-f, --format <format>` | Output format: `terminal` (default) or `json` |
 | `-o, --output <file>` | Write report to a file instead of stdout |
 | `--all-users` | Detect across all user accounts (requires root/sudo) |
 | `--verbose` | Show the search paths checked for each adapter |
+| `--silent` | Suppress all stdout/stderr chatter; requires `-o` |
 | `--host <target...>` | Detect on one or more remote hosts via SSH (`user@host[:port]`). Variadic. |
 | `--inventory <path>` | YAML file listing hosts to detect against |
 | `--ssh-key <path>` | SSH identity file for remote connections |
@@ -302,7 +305,7 @@ Penalties:
 
 ## Security Checks
 
-VASO runs **146 checks across 12 categories**. The full per-check reference (descriptions, severity, fixability, evidence shape) lives in [`devnotes/checks-reference.md`](../devnotes/checks-reference.md).
+VASO runs **252 checks across 16 categories**.
 
 | Category | IDs | Count | Scope |
 |----------|-----|-------|-------|
@@ -314,16 +317,20 @@ VASO runs **146 checks across 12 categories**. The full per-check reference (des
 | Policy | POL-001–005 | 5 | DM policy, tool policy, sandbox compliance |
 | MCP Server | MCP-001–023 | 23 | Transport security, credentials, tool injection, toxic flows, rug pull, OAuth 2.1, stdio shell-c, world-writable command paths, streamable-HTTP origin pinning |
 | Advisory | ADV-001–005 | 5 | Vulnerability/CVE detection with version awareness |
+| OpenClaw | OC-* | 7 | Sub-agent config downgrade, legacy bot dirs, `OPENCLAW_HOME` redirect, profile downgrade, memory file perms, `/etc/openclaw` writable |
+| NanoClaw | NC-001–005 | 5 | Overbroad mount allowlist, allowlist-file writable, `NANOCLAW_HOME` redirect, public listener bind, skills-dir writable |
 | IronClaw | IC-001–012 | 12 | Webhook bind, sandbox, auto-approve tools |
 | Nanobot | NB-001–012 | 12 | Channel allow, shell filtering, memory injection |
 | ZeroClaw | ZC-001–014 | 14 | API keys, autonomy mode, filesystem access |
-| Coding Agent | CC-001–012, CDX-001–009 | 21 | Claude Code (12) + Codex (9): permissions, hooks, MCP pinning, memory-file secrets, notify automation |
+| Lyrie | LY-001–018 | 18 | Shield mode/binary, multi-channel DM pairing, WebChat exposure, edit-ledger perms, executable skills, cross-agent migration imports, dev-mode footguns |
+| Hermes | HM-001–010 | 10 | Plaintext API keys, env/credentials perms, API-server bind without auth, permissive CORS, plaintext inference endpoints, approvals-off, Tirith pre-exec scanner state, MCP stdio shell-c / unpinned packages |
+| Coding Agent | CC, CD, CG, CDX, OPC, GEM, QC, CUR, GHC | 87 | Claude Code (12), Claude Desktop (10), ChatGPT Desktop (6), Codex (9), OpenCode (12), Gemini CLI (10), Qwen Code (10), Cursor CLI (10), GitHub Copilot CLI (8): sandbox/approval policy, plaintext credentials, MCP pinning, broad allow rules, memory-file secrets, transport security |
 
 Server-side checks (CFG, NET, RUN, POL) are auto-excluded for coding agents since their threat model differs from server frameworks.
 
 ## Supported Agents
 
-VASO ships ten adapters. Each implements `detect()`, `getConfigPaths()`, `getSkillsDir()`, and `getGatewayInfo()` against its framework's on-disk layout.
+VASO ships eighteen adapters. Each implements `detect()`, `getConfigPaths()`, `getSkillsDir()`, and `getGatewayInfo()` against its framework's on-disk layout.
 
 ### Autonomous frameworks
 
@@ -337,13 +344,21 @@ VASO ships ten adapters. Each implements `detect()`, `getConfigPaths()`, `getSki
 | ZeroClaw | `~/.zeroclaw/`, `/etc/zeroclaw/` | TOML |
 | NemoClaw | `~/.nemoclaw/`, `/etc/nemoclaw/` | JSON, YAML |
 | Hermes | `~/.hermes/`, `/etc/hermes/` | YAML, ENV |
+| Lyrie | `~/.lyrie/` (Bun turborepo with Rust Shield, 10-channel gateway, MCP client+server) | ENV |
 
 ### Coding agents
 
 | Adapter | Config locations | Formats |
 |---------|------------------|---------|
 | Claude Code | `~/.claude/`, `~/.claude.json`, project `.claude/` | JSON |
+| Claude Desktop | `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS), `%APPDATA%\Claude\claude_desktop_config.json` (Windows); MCPB extensions under `Claude Extensions/` | JSON |
+| ChatGPT Desktop | `/Applications/ChatGPT.app` + `~/Library/Application Support/com.openai.chat/`; preferences in `~/Library/Preferences/com.openai.chat*.plist` (macOS only) | plist |
 | Codex | `~/.codex/config.toml`, `~/.codex/auth.json` | TOML, JSON |
+| OpenCode | `$XDG_CONFIG_HOME/opencode/opencode.json[c]`, `$XDG_DATA_HOME/opencode/auth.json` | JSON, JSONC |
+| Gemini CLI | `~/.gemini/settings.json`, OAuth credential files (`oauth_creds.json`, `google_accounts.json`, `mcp-oauth-tokens.json`); project `.gemini/` | JSONC |
+| Qwen Code | `~/.qwen/settings.json` (multi-provider auth: OpenAI/Anthropic/Gemini/Dashscope/Bailian); project `.qwen/` | JSONC |
+| GitHub Copilot CLI | `~/.copilot/config.json`, `settings.json`, `command-history-state.json`, `session-state/`; workspace `.mcp.json` + `.github/lsp.json` | JSONC |
+| Cursor CLI | `~/.cursor/cli-config.json`, `~/.cursor/mcp.json` | JSON |
 
 ### MCP Servers
 

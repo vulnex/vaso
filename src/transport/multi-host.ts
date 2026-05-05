@@ -30,6 +30,8 @@ export interface MultiHostScanOptions {
   onSnapshot?: (target: SSHTarget, snapshot: ProbeSnapshot) => void | Promise<void>;
   /** Invoked when an SSH attempt fails and a retry is about to happen. */
   onRetry?: (target: SSHTarget, attempt: number, err: Error) => void;
+  /** Invoked once a host's scan finishes (success or failure). Useful for live progress. */
+  onComplete?: (entry: HostScanResult) => void | Promise<void>;
 }
 
 export interface HostScanResult {
@@ -93,6 +95,7 @@ export async function scanMultipleHosts(
 
   async function processTarget(target: SSHTarget): Promise<HostScanResult> {
     const start = Date.now();
+    let entry: HostScanResult;
     try {
       const snapshot = await executeRemoteProbeWithRetry(
         target,
@@ -117,18 +120,24 @@ export async function scanMultipleHosts(
       result.host = snapshot.hostname;
       result.label = target.label;
 
-      return {
+      entry = {
         target,
         result,
         durationMs: Date.now() - start,
       };
     } catch (err) {
-      return {
+      entry = {
         target,
         error: (err as Error).message,
         durationMs: Date.now() - start,
       };
     }
+
+    if (options.onComplete) {
+      await options.onComplete(entry);
+    }
+
+    return entry;
   }
 
   return runConcurrent(targets, concurrency, processTarget);
