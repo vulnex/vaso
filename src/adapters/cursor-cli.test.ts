@@ -107,6 +107,15 @@ describe('Cursor CLI adapter', () => {
     expect(result[0].cliBinary).toBe('/usr/local/bin/cursor-agent');
   });
 
+  it('does not detect ~/.cursor/ from the Cursor IDE without CLI signals', async () => {
+    // ~/.cursor/ is shared with the Cursor IDE (argv.json, extensions/,
+    // projects/, ide_state.json). Without `cli-config.json` / `mcp.json` or
+    // a `cursor-agent` binary, this is the IDE, not the CLI.
+    setExistingPaths([cursorDir]);
+    const result = await cursorCliAdapter.detect();
+    expect(result).toEqual([]);
+  });
+
   it('returns config paths under ~/.cursor', () => {
     const paths = cursorCliAdapter.getConfigPaths();
     expect(paths).toContain(join(cursorDir, 'cli-config.json'));

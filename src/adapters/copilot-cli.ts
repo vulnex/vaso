@@ -109,6 +109,11 @@ export const copilotCliAdapter: AgentAdapter = {
 
       const configFiles = hasCopilotDir ? await loadFiles(copilotDir, USER_CONFIG_FILES, fs) : [];
 
+      // A bare ~/.copilot/ with no recognized config files and no `copilot`
+      // binary is leftover state from another tool (the Copilot IDE extension
+      // and `gh copilot` both write under ~/.copilot/ide/), not a CLI install.
+      if (configFiles.length === 0 && !cliBinary) continue;
+
       const version = queryCliVersion(cliBinary, fs)
         ?? (await readPackageVersion(cliBinary, fs));
 
