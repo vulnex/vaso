@@ -61,6 +61,12 @@ function makeScanResult(...checkIds: string[]): ScanResult {
   };
 }
 
+function makeScanResultWithEvidence(checkId: string, file: string): ScanResult {
+  const result = makeScanResult(checkId);
+  result.agents[0].results[0].evidence = [{ file }];
+  return result;
+}
+
 let consoleLogs: string[];
 const originalLog = console.log;
 const originalIsTTY = process.stdin.isTTY;
@@ -200,6 +206,20 @@ describe('RemediationEngine interactive fix', () => {
     expect(results[0].applied).toBe(false);
     expect(results[0].message).toContain('Fix failed');
     expect(results[0].message).toContain('Permission denied');
+  });
+
+  it('does not apply a fix when backing up evidence fails', async () => {
+    const check = makeFixableCheck('TST-001');
+    const registry = new CheckRegistry();
+    registry.register(check);
+    const engine = new RemediationEngine(registry);
+
+    const results = await engine.fix(makeScanResultWithEvidence('TST-001', '/definitely/not/present'), { yes: true });
+
+    expect(check.fix).not.toHaveBeenCalled();
+    expect(results).toHaveLength(1);
+    expect(results[0].applied).toBe(false);
+    expect(results[0].message).toContain('Fix failed');
   });
 
   it('warns and skips in non-TTY environment without --yes', async () => {

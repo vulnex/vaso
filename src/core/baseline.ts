@@ -34,19 +34,42 @@ export async function loadBaseline(): Promise<ScanResult | null> {
   }
 }
 
+function installationKey(agent: ScanResult['agents'][number]): string {
+  const inst = agent.installation;
+  return [
+    agent.agent,
+    inst.user ?? '',
+    inst.profile ?? '',
+    inst.agentName ?? '',
+    inst.installDir,
+  ].join(':');
+}
+
+function evidenceKey(finding: CheckResult): string {
+  if (!finding.evidence || finding.evidence.length === 0) return '';
+  return finding.evidence
+    .map(e => `${e.file}:${e.line ?? ''}:${e.detail ?? e.snippet ?? ''}`)
+    .sort()
+    .join('|');
+}
+
+function findingKey(agent: ScanResult['agents'][number], finding: CheckResult): string {
+  return `${installationKey(agent)}:${finding.id}:${evidenceKey(finding)}`;
+}
+
 export function diffResults(current: ScanResult, baseline: ScanResult): DiffResult {
   const currentFindings = new Map<string, CheckResult>();
   const baselineFindings = new Map<string, CheckResult>();
 
   for (const agent of current.agents) {
     for (const r of agent.results) {
-      if (!r.passed) currentFindings.set(`${agent.agent}:${r.id}`, r);
+      if (!r.passed) currentFindings.set(findingKey(agent, r), r);
     }
   }
 
   for (const agent of baseline.agents) {
     for (const r of agent.results) {
-      if (!r.passed) baselineFindings.set(`${agent.agent}:${r.id}`, r);
+      if (!r.passed) baselineFindings.set(findingKey(agent, r), r);
     }
   }
 

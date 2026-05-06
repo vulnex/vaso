@@ -1,6 +1,6 @@
 import type { ScanOptions, ScanResult, ScanContext, AgentScanResult, AgentInstallation } from './types.js';
 import type { CheckRegistry } from './check-registry.js';
-import type { AdapterRegistry } from '../adapters/registry.js';
+import type { AdapterDetectionError, AdapterRegistry } from '../adapters/registry.js';
 import type { MCPConfig, MCPServerSource } from '../mcp/types.js';
 import type { FSProvider } from './fs-provider.js';
 import { LocalFSProvider } from './local-fs-provider.js';
@@ -19,17 +19,21 @@ export class ScanEngine {
 
   async scan(options: ScanOptions): Promise<ScanResult> {
     // 1. Detect installed agents
-    const installations = await this.adapters.detectAll({
+    const detection = await this.adapters.detectAllDetailed({
       allUsers: options.allUsers,
       fs: this.fs,
     });
+    const installations = detection.installations;
 
     // Filter by agent if specified
     const filtered = options.agentFilter
       ? installations.filter(i => i.agent === options.agentFilter)
       : installations;
+    const detectionErrors = options.agentFilter
+      ? detection.errors.filter(e => e.agent === options.agentFilter)
+      : detection.errors;
 
-    if (filtered.length === 0) {
+    if (filtered.length === 0 && detectionErrors.length === 0) {
       return this.emptyResult(options.agentFilter);
     }
 
@@ -44,6 +48,7 @@ export class ScanEngine {
         agents.push(result.value);
       }
     }
+    agents.push(...detectionErrors.map(e => this.adapterErrorResult(e)));
 
     // 3. Compute overall results
     const allResults = agents.flatMap(a => a.results);
@@ -69,19 +74,26 @@ export class ScanEngine {
       fs: this.fs,
     };
 
-    // Get applicable checks
-    const applicable = this.checks.getApplicable(installation.agent, process.platform);
+    // Get applicable checks for the scanned filesystem, not the scanner host.
+    const applicable = this.checks.getApplicable(installation.agent, this.fs.platform);
 
     // Run all checks concurrently
     const settled = await Promise.allSettled(
       applicable.map(check => check.run(context))
     );
 
-    const results = settled
-      .filter((r): r is PromiseFulfilledResult<Awaited<ReturnType<typeof applicable[0]['run']>>> =>
-        r.status === 'fulfilled'
-      )
-      .map(r => r.value);
+    const results = settled.map((r, index) => {
+      if (r.status === 'fulfilled') return r.value;
+      const check = applicable[index];
+      return {
+        id: check.id,
+        name: check.name,
+        category: check.category,
+        severity: 'warning' as const,
+        passed: false,
+        message: `Check errored and was not completed: ${r.reason instanceof Error ? r.reason.message : String(r.reason)}`,
+      };
+    });
 
     const score = computeScore(results);
 
@@ -90,6 +102,30 @@ export class ScanEngine {
       version: installation.version,
       installation,
       results,
+      score,
+      grade: scoreToGrade(score),
+    };
+  }
+
+  private adapterErrorResult(error: AdapterDetectionError): AgentScanResult {
+    const result = {
+      id: 'ADAPTER-DETECT',
+      name: `${error.displayName} Detection Error`,
+      category: 'config' as const,
+      severity: 'warning' as const,
+      passed: false,
+      message: `Adapter detection failed: ${error.message}`,
+    };
+    const score = computeScore([result]);
+
+    return {
+      agent: error.agent,
+      installation: {
+        agent: error.agent,
+        installDir: '',
+        configFiles: [],
+      },
+      results: [result],
       score,
       grade: scoreToGrade(score),
     };
@@ -120,11 +156,18 @@ export class ScanEngine {
       mcpChecks.map(check => check.run(context))
     );
 
-    const results = settled
-      .filter((r): r is PromiseFulfilledResult<Awaited<ReturnType<typeof mcpChecks[0]['run']>>> =>
-        r.status === 'fulfilled'
-      )
-      .map(r => r.value);
+    const results = settled.map((r, index) => {
+      if (r.status === 'fulfilled') return r.value;
+      const check = mcpChecks[index];
+      return {
+        id: check.id,
+        name: check.name,
+        category: check.category,
+        severity: 'warning' as const,
+        passed: false,
+        message: `Check errored and was not completed: ${r.reason instanceof Error ? r.reason.message : String(r.reason)}`,
+      };
+    });
 
     const score = computeScore(results);
 
@@ -175,11 +218,18 @@ export class ScanEngine {
       skillChecks.map(check => check.run(context))
     );
 
-    const results = settled
-      .filter((r): r is PromiseFulfilledResult<Awaited<ReturnType<typeof skillChecks[0]['run']>>> =>
-        r.status === 'fulfilled'
-      )
-      .map(r => r.value);
+    const results = settled.map((r, index) => {
+      if (r.status === 'fulfilled') return r.value;
+      const check = skillChecks[index];
+      return {
+        id: check.id,
+        name: check.name,
+        category: check.category,
+        severity: 'warning' as const,
+        passed: false,
+        message: `Check errored and was not completed: ${r.reason instanceof Error ? r.reason.message : String(r.reason)}`,
+      };
+    });
 
     const score = computeScore(results);
 

@@ -13,10 +13,10 @@ function makeCheckResult(id: string, passed: boolean, severity: 'critical' | 'wa
   };
 }
 
-function makeScanResult(checks: CheckResult[]): ScanResult {
+function makeScanResult(checks: CheckResult[], installDir = '/tmp'): ScanResult {
   const agent: AgentScanResult = {
     agent: 'openclaw',
-    installation: { agent: 'openclaw', installDir: '/tmp', configFiles: [] },
+    installation: { agent: 'openclaw', installDir, configFiles: [] },
     results: checks,
     score: 100,
     grade: 'A',
@@ -75,5 +75,21 @@ describe('diffResults', () => {
     expect(diff.newFindings).toHaveLength(0);
     expect(diff.resolvedFindings).toHaveLength(0);
     expect(diff.unchangedFindings).toHaveLength(0);
+  });
+
+  it('does not collapse same check across different installations', () => {
+    const baseline = makeScanResult([makeCheckResult('CFG-001', false)], '/tmp/a');
+    const current: ScanResult = {
+      ...baseline,
+      agents: [
+        baseline.agents[0],
+        makeScanResult([makeCheckResult('CFG-001', false)], '/tmp/b').agents[0],
+      ],
+    };
+
+    const diff = diffResults(current, baseline);
+    expect(diff.unchangedFindings).toHaveLength(1);
+    expect(diff.newFindings).toHaveLength(1);
+    expect(diff.newFindings[0].id).toBe('CFG-001');
   });
 });

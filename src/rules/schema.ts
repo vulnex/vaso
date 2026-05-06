@@ -1,15 +1,11 @@
 import type { Operator } from './operators.js';
 import { VALID_OPERATORS } from './operators.js';
 import type { CheckCategory, AgentType, Severity } from '../core/types.js';
+import { AGENT_TYPES, CHECK_CATEGORIES } from '../core/types.js';
 
-const VALID_CATEGORIES: readonly string[] = [
-  'config', 'skills', 'ioc', 'network', 'runtime', 'policy', 'mcp',
-  'ironclaw', 'nanobot', 'zeroclaw', 'advisory',
-];
+const VALID_CATEGORIES: readonly string[] = CHECK_CATEGORIES;
 
-const VALID_AGENTS: readonly string[] = [
-  'openclaw', 'nanoclaw', 'picoclaw', 'mcp', 'ironclaw', 'nanobot', 'zeroclaw', 'skill-audit',
-];
+const VALID_AGENTS: readonly string[] = AGENT_TYPES;
 
 const VALID_SEVERITIES: readonly string[] = ['critical', 'warning', 'info'];
 
