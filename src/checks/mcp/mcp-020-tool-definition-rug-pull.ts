@@ -1,6 +1,10 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { extractToolDefinitions, diffToolBaseline } from '../../mcp/tool-baseline.js';
+import {
+  extractToolDefinitions,
+  diffToolBaseline,
+  defaultBaselineStore,
+} from '../../mcp/tool-baseline.js';
 
 export const mcp020 = defineCheck({
   id: 'MCP-020',
@@ -13,6 +17,7 @@ export const mcp020 = defineCheck({
   async run(ctx, h) {
     const evidence: Evidence[] = [];
     const sources = ctx.mcpServerSources ?? [];
+    const store = ctx.mcpToolBaselineStore ?? defaultBaselineStore();
     let anyFirstScan = false;
     let totalChanges = 0;
 
@@ -22,7 +27,7 @@ export const mcp020 = defineCheck({
       const tools = extractToolDefinitions(source.sourceCode);
       if (tools.length === 0) continue;
 
-      const { diff, isFirstScan } = await diffToolBaseline(source.serverName, tools);
+      const { diff, isFirstScan } = await diffToolBaseline(store, source, tools);
 
       if (isFirstScan) {
         anyFirstScan = true;
