@@ -18,7 +18,7 @@ export const ioc008 = defineCheck({
     if (!skillsDir) return h.passed('No skills directory found');
 
     const evidence: Evidence[] = [];
-    const files = ctx.skillFiles ?? await getSkillFiles(skillsDir);
+    const files = ctx.skillFiles ?? await getSkillFiles(skillsDir, ctx.fs);
 
     for (const file of files) {
       try {

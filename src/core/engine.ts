@@ -5,6 +5,7 @@ import type { MCPConfig, MCPServerSource } from '../mcp/types.js';
 import type { FSProvider } from './fs-provider.js';
 import { LocalFSProvider } from './local-fs-provider.js';
 import { computeScore, scoreToGrade, summarizeResults } from './scoring.js';
+import { getSkillFiles } from './utils.js';
 
 export class ScanEngine {
   private fs: FSProvider;
@@ -67,11 +68,16 @@ export class ScanEngine {
   }
 
   private async scanAgent(installation: AgentInstallation): Promise<AgentScanResult> {
+    const skillFiles = installation.skillsDir
+      ? await getSkillFiles(installation.skillsDir, this.fs)
+      : undefined;
+
     const context: ScanContext = {
       installation,
       configs: installation.configFiles,
       platform: this.fs.platform,
       fs: this.fs,
+      skillFiles,
     };
 
     // Get applicable checks for the scanned filesystem, not the scanner host.

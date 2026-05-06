@@ -178,6 +178,103 @@ describe('ScanEngine', () => {
     expect(result.agents[0].results.map(r => r.id)).toEqual(['LINUX-001']);
   });
 
+  it('populates ctx.skillFiles via the engine FS provider when skillsDir is set', async () => {
+    const installation: AgentInstallation = {
+      agent: 'openclaw',
+      installDir: '/snap/openclaw',
+      skillsDir: '/snap/openclaw/skills',
+      configFiles: [],
+    };
+
+    const adapter: AgentAdapter = {
+      agent: 'openclaw',
+      displayName: 'OpenClaw',
+      async detect() { return [installation]; },
+      getConfigPaths() { return []; },
+      getSkillsDir() { return '/snap/openclaw/skills'; },
+      getGatewayInfo() { return undefined; },
+    };
+
+    let readdirCalledWith: string | undefined;
+    const fs: FSProvider = {
+      ...mockFs('linux'),
+      async readdirEntries(dir: string) {
+        readdirCalledWith = dir;
+        return [
+          { name: 'a.py', isFile: true, isDirectory: false, parentPath: dir },
+          { name: 'b.js', isFile: true, isDirectory: false, parentPath: dir },
+          { name: 'c.txt', isFile: true, isDirectory: false, parentPath: dir },
+        ];
+      },
+    };
+
+    let captured: string[] | undefined;
+    const recorder: CheckModule = {
+      id: 'REC-001',
+      name: 'Recorder',
+      category: 'skills',
+      severity: 'info',
+      description: 'Records ctx.skillFiles',
+      async run(ctx) {
+        captured = ctx.skillFiles;
+        return {
+          id: 'REC-001',
+          name: 'Recorder',
+          category: 'skills',
+          severity: 'info',
+          passed: true,
+          message: 'recorded',
+        };
+      },
+    };
+
+    const adapters = new AdapterRegistry();
+    adapters.register(adapter);
+    const checks = new CheckRegistry();
+    checks.register(recorder);
+
+    const engine = new ScanEngine(adapters, checks, fs);
+    await engine.scan({});
+
+    expect(readdirCalledWith).toBe('/snap/openclaw/skills');
+    expect(captured).toEqual([
+      '/snap/openclaw/skills/a.py',
+      '/snap/openclaw/skills/b.js',
+    ]);
+  });
+
+  it('leaves ctx.skillFiles undefined when installation has no skillsDir', async () => {
+    let captured: string[] | undefined | 'unset' = 'unset';
+    const recorder: CheckModule = {
+      id: 'REC-002',
+      name: 'Recorder',
+      category: 'skills',
+      severity: 'info',
+      description: 'Records ctx.skillFiles',
+      async run(ctx) {
+        captured = ctx.skillFiles;
+        return {
+          id: 'REC-002',
+          name: 'Recorder',
+          category: 'skills',
+          severity: 'info',
+          passed: true,
+          message: 'recorded',
+        };
+      },
+    };
+
+    const adapters = new AdapterRegistry();
+    adapters.register(mockAdapter);
+    const checks = new CheckRegistry();
+    checks.register(recorder);
+
+    const engine = new ScanEngine(adapters, checks);
+    await engine.scan({});
+
+    expect(captured).toBeUndefined();
+  });
+
   it('reports adapter detection failures as warning findings', async () => {
     const adapters = new AdapterRegistry();
     adapters.register(mockAdapter);
