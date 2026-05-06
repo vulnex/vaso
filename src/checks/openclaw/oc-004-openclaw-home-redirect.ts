@@ -17,7 +17,7 @@ export const oc004 = defineCheck({
       return h.passed('Sub-agent installation; OC-004 only runs at top-level');
     }
 
-    const envHome = process.env.OPENCLAW_HOME;
+    const envHome = ctx.fs.getEnv('OPENCLAW_HOME');
     if (!envHome) {
       return h.passed('OPENCLAW_HOME not set');
     }

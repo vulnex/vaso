@@ -1,32 +1,31 @@
-import { homedir } from 'node:os';
 import { normalize } from 'node:path';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-
-const HOME = homedir();
 
 interface BroadPath {
   path: string;
   reason: string;
 }
 
-const BROAD_PATHS: BroadPath[] = [
-  { path: '/', reason: 'covers the entire filesystem' },
-  { path: HOME, reason: 'covers the entire home directory' },
-  { path: '/tmp', reason: 'shared by all local users' },
-  { path: '/var/tmp', reason: 'shared by all local users' },
-  { path: '/etc', reason: 'system configuration directory' },
-];
+function buildBroadPaths(home: string): BroadPath[] {
+  return [
+    { path: '/', reason: 'covers the entire filesystem' },
+    { path: home, reason: 'covers the entire home directory' },
+    { path: '/tmp', reason: 'shared by all local users' },
+    { path: '/var/tmp', reason: 'shared by all local users' },
+    { path: '/etc', reason: 'system configuration directory' },
+  ];
+}
 
-function expandHome(p: string): string {
-  if (p === '~') return HOME;
-  if (p.startsWith('~/')) return `${HOME}/${p.slice(2)}`;
+function expandHome(p: string, home: string): string {
+  if (p === '~') return home;
+  if (p.startsWith('~/')) return `${home}/${p.slice(2)}`;
   return p;
 }
 
-function isBroad(rawPath: string): BroadPath | undefined {
-  const normalized = normalize(expandHome(rawPath));
-  return BROAD_PATHS.find(b => normalized === b.path);
+function isBroad(rawPath: string, broadPaths: BroadPath[], home: string): BroadPath | undefined {
+  const normalized = normalize(expandHome(rawPath, home));
+  return broadPaths.find(b => normalized === b.path);
 }
 
 function extractTrustedPaths(data: Record<string, unknown>): string[] {
@@ -64,11 +63,13 @@ export const cdx006 = defineCheck({
 
   async run(ctx, h) {
     const evidence: Evidence[] = [];
+    const home = ctx.fs.homedir();
+    const broadPaths = buildBroadPaths(home);
 
     for (const config of ctx.configs) {
       const paths = extractTrustedPaths(config.data);
       for (const p of paths) {
-        const broad = isBroad(p);
+        const broad = isBroad(p, broadPaths, home);
         if (broad) {
           evidence.push({
             file: config.filePath,

@@ -22,6 +22,7 @@ function makeFs(overrides: Partial<FSProvider> = {}): FSProvider {
     realpath: vi.fn(),
     exec: vi.fn(),
     execSync: vi.fn(),
+    getEnv: vi.fn(() => undefined),
     homedir: () => '/home/test',
     platform: 'linux',
     ...overrides,
@@ -192,6 +193,16 @@ describe('CDX-006: Codex Trusted Projects Too Broad', () => {
     });
     const result = await check.run(makeCtx([config]));
     expect(result.passed).toBe(true);
+  });
+
+  it('uses ctx.fs.homedir() (not the scanner host) when matching $HOME as a broad path', async () => {
+    const config = makeConfig('config.toml', {
+      trusted_projects: ['/snap/remote-user'],
+    });
+    const fs = makeFs({ homedir: () => '/snap/remote-user' });
+    const result = await check.run(makeCtx([config], fs));
+    expect(result.passed).toBe(false);
+    expect(result.evidence?.[0].detail).toContain('covers the entire home directory');
   });
 });
 

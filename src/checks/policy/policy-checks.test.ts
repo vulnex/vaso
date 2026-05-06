@@ -3,6 +3,7 @@ import { mkdtemp, writeFile, mkdir, rm, chmod } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { ScanContext, ParsedConfig, AgentInstallation } from '../../core/types.js';
+import type { FSProvider } from '../../core/fs-provider.js';
 import { LocalFSProvider } from '../../core/local-fs-provider.js';
 import { pol001 } from './pol-001-exec-approval.js';
 import { pol002 } from './pol-002-log-redaction.js';
@@ -61,6 +62,32 @@ describe('POL-001: Exec Approval Required', () => {
   it('fails when AGENT_AUTO_APPROVE_TOOLS env var is set', async () => {
     process.env['AGENT_AUTO_APPROVE_TOOLS'] = 'true';
     const result = await pol001.run(makeContext([]));
+    expect(result.passed).toBe(false);
+    expect(result.evidence!.some(e => e.detail?.includes('AGENT_AUTO_APPROVE_TOOLS'))).toBe(true);
+  });
+
+  it('reads AGENT_AUTO_APPROVE_TOOLS from ctx.fs.getEnv (not process.env), so snapshot scans work', async () => {
+    delete process.env['AGENT_AUTO_APPROVE_TOOLS'];
+    const installation: AgentInstallation = {
+      agent: 'openclaw',
+      installDir: '/snap/openclaw',
+      configFiles: [],
+    };
+    const base = new LocalFSProvider();
+    const fs: FSProvider = new Proxy(base, {
+      get(target, prop, receiver) {
+        if (prop === 'getEnv') {
+          return (key: string) => (key === 'AGENT_AUTO_APPROVE_TOOLS' ? 'true' : undefined);
+        }
+        return Reflect.get(target, prop, receiver);
+      },
+    });
+    const result = await pol001.run({
+      installation,
+      configs: [],
+      platform: 'linux',
+      fs,
+    });
     expect(result.passed).toBe(false);
     expect(result.evidence!.some(e => e.detail?.includes('AGENT_AUTO_APPROVE_TOOLS'))).toBe(true);
   });

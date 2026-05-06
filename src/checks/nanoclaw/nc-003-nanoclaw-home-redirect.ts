@@ -28,8 +28,9 @@ export const nc003 = defineCheck({
         sources.push({ value: v.trim(), file: config.filePath });
       }
     }
-    if (process.env.NANOCLAW_HOME) {
-      sources.push({ value: process.env.NANOCLAW_HOME, file: '<process env>' });
+    const envValue = ctx.fs.getEnv('NANOCLAW_HOME');
+    if (envValue) {
+      sources.push({ value: envValue, file: '<process env>' });
     }
 
     let highest: 'warning' | 'critical' = 'warning';

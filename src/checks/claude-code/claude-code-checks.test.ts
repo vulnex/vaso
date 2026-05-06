@@ -22,6 +22,7 @@ function makeFs(overrides: Partial<FSProvider> = {}): FSProvider {
     realpath: vi.fn(),
     exec: vi.fn(),
     execSync: vi.fn(),
+    getEnv: vi.fn(() => undefined),
     homedir: () => '/home/test',
     platform: 'linux',
     ...overrides,
@@ -334,6 +335,16 @@ describe('CC-009: Sensitive Additional Directories', () => {
     const config = makeConfig('settings.json', { model: 'opus' });
     const result = await check.run(makeCtx([config]));
     expect(result.passed).toBe(true);
+  });
+
+  it('uses ctx.fs.homedir() (not the scanner host) to resolve ~ paths', async () => {
+    const config = makeConfig('settings.json', {
+      permissions: { additionalDirectories: ['~/.aws'] },
+    });
+    const fs = makeFs({ homedir: () => '/snap/remote-user' });
+    const result = await check.run(makeCtx([config], fs));
+    expect(result.passed).toBe(false);
+    expect(result.evidence?.[0].detail).toContain('/snap/remote-user/.aws');
   });
 });
 
