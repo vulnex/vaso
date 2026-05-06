@@ -99,6 +99,38 @@ describe('CFG-002: API Key Exposure', () => {
     console.log(`[CFG-002] .env file → passed: ${result.passed} (skipped), message: ${result.message}`);
     expect(result.passed).toBe(true);
   });
+
+  it('redacts the matched secret in evidence snippets', async () => {
+    const secret = 'sk-ant-AAAAAAAAAAAAAAAAAAAAAAAABBBBCCCC';
+    const raw = `{\n  "apiKey": "${secret}"\n}`;
+    const config = makeConfig({ apiKey: secret }, raw);
+    const result = await cfg002.run(makeContext([config]));
+
+    expect(result.passed).toBe(false);
+    expect(result.evidence?.length).toBeGreaterThan(0);
+    for (const ev of result.evidence ?? []) {
+      expect(ev.snippet).toBeDefined();
+      // The full secret must never appear in any evidence snippet.
+      expect(ev.snippet).not.toContain(secret);
+      // Surrounding context (the JSON key name) should still be preserved
+      // so users can identify which credential to rotate.
+      expect(ev.snippet).toContain('"apiKey"');
+    }
+  });
+
+  it('redacts every key in a line containing multiple distinct secrets', async () => {
+    const oai = 'sk-AAAAAAAAAAAAAAAAAAAAAAAABBBB';
+    const ghp = 'ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABBBB';
+    const raw = `{ "openai": "${oai}", "github": "${ghp}" }`;
+    const config = makeConfig({ openai: oai, github: ghp }, raw);
+    const result = await cfg002.run(makeContext([config]));
+
+    expect(result.passed).toBe(false);
+    for (const ev of result.evidence ?? []) {
+      expect(ev.snippet).not.toContain(oai);
+      expect(ev.snippet).not.toContain(ghp);
+    }
+  });
 });
 
 describe('CFG-004: TLS Not Configured', () => {

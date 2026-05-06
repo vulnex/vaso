@@ -24,3 +24,23 @@ export const OAUTH_TOKEN_VALUE_PATTERNS = [
   { pattern: /^eyJ[a-zA-Z0-9_-]+\.eyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+$/, name: 'JWT bearer token' },
   { pattern: /^ory_at_[a-zA-Z0-9_-]+/, name: 'Ory OAuth access token' },
 ];
+
+export function redactSecret(token: string): string {
+  if (token.length <= 12) return `[REDACTED:${token.length}c]`;
+  return `${token.slice(0, 4)}...${token.slice(-4)}`;
+}
+
+function withGlobalFlag(pattern: RegExp): RegExp {
+  return pattern.flags.includes('g')
+    ? pattern
+    : new RegExp(pattern.source, pattern.flags + 'g');
+}
+
+export function redactSecretsInLine(line: string, maxLen = 80): string {
+  let redacted = line;
+  for (const { pattern } of API_KEY_PATTERNS) {
+    redacted = redacted.replace(withGlobalFlag(pattern), (m) => redactSecret(m));
+  }
+  const trimmed = redacted.trim();
+  return trimmed.length > maxLen ? trimmed.slice(0, maxLen) + '...' : trimmed;
+}

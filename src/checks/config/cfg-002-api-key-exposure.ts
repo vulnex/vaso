@@ -1,6 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { API_KEY_PATTERNS } from '../../core/patterns.js';
+import { API_KEY_PATTERNS, redactSecretsInLine } from '../../core/patterns.js';
 
 export const cfg002 = defineCheck({
   id: 'CFG-002',
@@ -23,7 +23,7 @@ export const cfg002 = defineCheck({
             evidence.push({
               file: config.filePath,
               line: i + 1,
-              snippet: lines[i].trim().slice(0, 80) + (lines[i].trim().length > 80 ? '...' : ''),
+              snippet: redactSecretsInLine(lines[i]),
               detail: `Found ${name}`,
             });
           }
