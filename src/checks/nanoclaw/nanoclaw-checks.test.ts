@@ -15,9 +15,11 @@ function makeMemFs(opts: {
   exists?: Set<string>;
   modes?: Record<string, number>;
   homedir?: string;
+  env?: Record<string, string>;
 } = {}): FSProvider {
   const exists = opts.exists ?? new Set<string>();
   const modes = opts.modes ?? {};
+  const env = opts.env ?? {};
   return {
     readFile: vi.fn(async () => ''),
     readdir: vi.fn(async () => []),
@@ -31,6 +33,7 @@ function makeMemFs(opts: {
     realpath: vi.fn(async (p: string) => p),
     exec: vi.fn(),
     execSync: vi.fn(),
+    getEnv: (key: string) => env[key],
     homedir: () => opts.homedir ?? '/home/test',
     platform: 'linux',
   } as FSProvider;
@@ -158,22 +161,14 @@ describe('NC-002: Mount Allowlist File Writable', () => {
 
 describe('NC-003: NANOCLAW_HOME Redirect', () => {
   const check = nanoclawChecks.find(c => c.id === 'NC-003')!;
-  const original = process.env.NANOCLAW_HOME;
-
-  afterEach(() => {
-    if (original === undefined) delete process.env.NANOCLAW_HOME;
-    else process.env.NANOCLAW_HOME = original;
-  });
 
   it('passes when unset and no env file value', async () => {
-    delete process.env.NANOCLAW_HOME;
     const config = makeConfig('/h/.nanoclaw.env', {}, 'env');
     const result = await check.run(makeCtx({ configs: [config] }));
     expect(result.passed).toBe(true);
   });
 
   it('flags world-writable redirect via .env file (critical)', async () => {
-    delete process.env.NANOCLAW_HOME;
     const config = makeConfig('/h/.nanoclaw.env', { NANOCLAW_HOME: '/tmp/agent-home' }, 'env');
     const result = await check.run(makeCtx({ configs: [config] }));
     expect(result.passed).toBe(false);
@@ -181,7 +176,6 @@ describe('NC-003: NANOCLAW_HOME Redirect', () => {
   });
 
   it('flags non-home redirect with warning', async () => {
-    delete process.env.NANOCLAW_HOME;
     const config = makeConfig('/h/.nanoclaw.env', { NANOCLAW_HOME: '/opt/agent' }, 'env');
     const result = await check.run(makeCtx({ configs: [config] }));
     expect(result.passed).toBe(false);
@@ -189,17 +183,23 @@ describe('NC-003: NANOCLAW_HOME Redirect', () => {
   });
 
   it('passes when redirect is inside home', async () => {
-    delete process.env.NANOCLAW_HOME;
     const config = makeConfig('/h/.nanoclaw.env', { NANOCLAW_HOME: '/home/test/nanoclaw-data' }, 'env');
     const result = await check.run(makeCtx({ configs: [config], fs: makeMemFs({ homedir: '/home/test' }) }));
     expect(result.passed).toBe(true);
   });
 
-  it('honors process.env.NANOCLAW_HOME', async () => {
-    process.env.NANOCLAW_HOME = '/dev/shm/agent';
-    const result = await check.run(makeCtx());
-    expect(result.passed).toBe(false);
-    expect(result.severity).toBe('critical');
+  it('honors NANOCLAW_HOME from ctx.fs.getEnv (not process.env), so snapshot scans work', async () => {
+    const originalProcessValue = process.env.NANOCLAW_HOME;
+    delete process.env.NANOCLAW_HOME;
+    try {
+      const result = await check.run(makeCtx({
+        fs: makeMemFs({ env: { NANOCLAW_HOME: '/dev/shm/agent' } }),
+      }));
+      expect(result.passed).toBe(false);
+      expect(result.severity).toBe('critical');
+    } finally {
+      if (originalProcessValue !== undefined) process.env.NANOCLAW_HOME = originalProcessValue;
+    }
   });
 });
 

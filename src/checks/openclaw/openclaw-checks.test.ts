@@ -16,9 +16,11 @@ function makeMemFs(opts: {
   modes?: Record<string, number>;
   homedir?: string;
   platform?: NodeJS.Platform;
+  env?: Record<string, string>;
 } = {}): FSProvider {
   const exists = opts.exists ?? new Set<string>();
   const modes = opts.modes ?? {};
+  const env = opts.env ?? {};
   return {
     readFile: vi.fn(async (p: string) => {
       if (!exists.has(p)) throw new Error('ENOENT');
@@ -35,6 +37,7 @@ function makeMemFs(opts: {
     realpath: vi.fn(async (p: string) => p),
     exec: vi.fn(),
     execSync: vi.fn(),
+    getEnv: (key: string) => env[key],
     homedir: () => opts.homedir ?? '/home/test',
     platform: opts.platform ?? 'linux',
   } as FSProvider;
@@ -168,44 +171,60 @@ describe('OC-003: Legacy Bot Config Directory', () => {
 
 describe('OC-004: OPENCLAW_HOME Redirect', () => {
   const check = openclawChecks.find(c => c.id === 'OC-004')!;
-  const original = process.env.OPENCLAW_HOME;
-
-  afterEach(() => {
-    if (original === undefined) delete process.env.OPENCLAW_HOME;
-    else process.env.OPENCLAW_HOME = original;
-  });
 
   it('passes when OPENCLAW_HOME is unset', async () => {
-    delete process.env.OPENCLAW_HOME;
     const result = await check.run(makeCtx({ installDir: '/home/test/.openclaw' }));
     expect(result.passed).toBe(true);
   });
 
   it('passes when OPENCLAW_HOME points inside the user home', async () => {
-    process.env.OPENCLAW_HOME = '/home/test/custom-openclaw';
-    const result = await check.run(makeCtx({ installDir: '/home/test/custom-openclaw' }));
+    const result = await check.run(makeCtx({
+      installDir: '/home/test/custom-openclaw',
+      fs: makeMemFs({ env: { OPENCLAW_HOME: '/home/test/custom-openclaw' } }),
+    }));
     expect(result.passed).toBe(true);
   });
 
   it('flags world-writable redirect with critical severity', async () => {
-    process.env.OPENCLAW_HOME = '/tmp/openclaw-shadow';
-    const result = await check.run(makeCtx({ installDir: '/tmp/openclaw-shadow' }));
+    const result = await check.run(makeCtx({
+      installDir: '/tmp/openclaw-shadow',
+      fs: makeMemFs({ env: { OPENCLAW_HOME: '/tmp/openclaw-shadow' } }),
+    }));
     expect(result.passed).toBe(false);
     expect(result.severity).toBe('critical');
     expect(result.evidence?.[0].detail).toMatch(/world-writable/);
   });
 
   it('flags non-home, non-tmp redirect with warning severity', async () => {
-    process.env.OPENCLAW_HOME = '/opt/agent-config';
-    const result = await check.run(makeCtx({ installDir: '/opt/agent-config' }));
+    const result = await check.run(makeCtx({
+      installDir: '/opt/agent-config',
+      fs: makeMemFs({ env: { OPENCLAW_HOME: '/opt/agent-config' } }),
+    }));
     expect(result.passed).toBe(false);
     expect(result.severity).toBe('warning');
   });
 
   it('does not double-fire on installations not driven by OPENCLAW_HOME', async () => {
-    process.env.OPENCLAW_HOME = '/tmp/openclaw-shadow';
-    const result = await check.run(makeCtx({ installDir: '/home/test/.openclaw' }));
+    const result = await check.run(makeCtx({
+      installDir: '/home/test/.openclaw',
+      fs: makeMemFs({ env: { OPENCLAW_HOME: '/tmp/openclaw-shadow' } }),
+    }));
     expect(result.passed).toBe(true);
+  });
+
+  it('reads OPENCLAW_HOME from ctx.fs.getEnv (not process.env), so snapshot scans work', async () => {
+    const originalProcessValue = process.env.OPENCLAW_HOME;
+    delete process.env.OPENCLAW_HOME;
+    try {
+      const result = await check.run(makeCtx({
+        installDir: '/dev/shm/snapshot-shadow',
+        fs: makeMemFs({ env: { OPENCLAW_HOME: '/dev/shm/snapshot-shadow' } }),
+      }));
+      expect(result.passed).toBe(false);
+      expect(result.severity).toBe('critical');
+    } finally {
+      if (originalProcessValue !== undefined) process.env.OPENCLAW_HOME = originalProcessValue;
+    }
   });
 });
 

@@ -1,5 +1,4 @@
 import { describe, it, expect, vi } from 'vitest';
-import { homedir } from 'node:os';
 import type { ScanContext, ParsedConfig, AgentInstallation } from '../../core/types.js';
 import type { FSProvider } from '../../core/fs-provider.js';
 import { claudeDesktopChecks } from './index.js';
@@ -240,11 +239,27 @@ describe('CD-007: Sensitive Filesystem Server Scope', () => {
       mcpServers: {
         filesystem: {
           command: 'npx',
-          args: ['-y', '@modelcontextprotocol/server-filesystem', `${homedir()}/.ssh`],
+          args: ['-y', '@modelcontextprotocol/server-filesystem', '~/.ssh'],
         },
       },
     });
     const result = await check.run(makeCtx([config]));
+    expect(result.passed).toBe(false);
+    expect(result.severity).toBe('critical');
+  });
+
+  it('uses ctx.fs.homedir() (not the scanner host) to resolve sensitive paths', async () => {
+    const remoteHome = '/snap/remote-user';
+    const config = makeConfig('config.json', {
+      mcpServers: {
+        filesystem: {
+          command: 'npx',
+          args: ['-y', '@modelcontextprotocol/server-filesystem', `${remoteHome}/.ssh`],
+        },
+      },
+    });
+    const fs = makeFs({ homedir: () => remoteHome });
+    const result = await check.run(makeCtx([config], fs));
     expect(result.passed).toBe(false);
     expect(result.severity).toBe('critical');
   });

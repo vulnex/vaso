@@ -40,7 +40,7 @@ export const pol001 = defineCheck({
       }
     }
 
-    const envAutoApprove = process.env['AGENT_AUTO_APPROVE_TOOLS'];
+    const envAutoApprove = ctx.fs.getEnv('AGENT_AUTO_APPROVE_TOOLS');
     if (envAutoApprove === 'true' || envAutoApprove === '1' || envAutoApprove === 'all') {
       evidence.push({
         file: 'environment',
