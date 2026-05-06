@@ -84,6 +84,12 @@ describe('Codex adapter', () => {
     expect(result[0].configFiles).toHaveLength(0);
   });
 
+  it('does not detect a bare ~/.codex/ with no recognized configs and no CLI binary', async () => {
+    setExistingPaths([codexDir]);
+    const result = await codexAdapter.detect();
+    expect(result).toEqual([]);
+  });
+
   it('returns config paths under ~/.codex', () => {
     const paths = codexAdapter.getConfigPaths();
     expect(paths).toContain(join(codexDir, 'config.toml'));
