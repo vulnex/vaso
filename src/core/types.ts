@@ -108,6 +108,7 @@ export interface ScanContext {
   skillFiles?: string[];
   mcpConfigs?: import('../mcp/types.js').MCPConfig[];
   mcpServerSources?: import('../mcp/types.js').MCPServerSource[];
+  mcpToolBaselineStore?: import('../mcp/tool-baseline.js').ToolBaselineStore;
 }
 
 export interface AgentScanResult {

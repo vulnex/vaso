@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
+import type { MCPServerSource } from './types.js';
 
 export interface MCPToolDefinition {
   name: string;
@@ -11,8 +12,9 @@ export interface MCPToolDefinition {
 
 export interface ToolBaseline {
   serverName: string;
+  identity: string;
   timestamp: string;
-  tools: Record<string, string>; // tool name → SHA-256 hash
+  tools: Record<string, string>;
 }
 
 export interface ToolBaselineDiff {
@@ -21,7 +23,68 @@ export interface ToolBaselineDiff {
   removed: string[];
 }
 
-const BASELINE_DIR = join(homedir(), '.vaso', 'mcp-tool-baselines');
+export interface ToolBaselineStore {
+  load(key: string): Promise<ToolBaseline | null>;
+  save(key: string, baseline: ToolBaseline): Promise<void>;
+}
+
+export class FileToolBaselineStore implements ToolBaselineStore {
+  constructor(private readonly baseDir: string) {}
+
+  async load(key: string): Promise<ToolBaseline | null> {
+    try {
+      const raw = await readFile(join(this.baseDir, `${key}.json`), 'utf-8');
+      return JSON.parse(raw) as ToolBaseline;
+    } catch {
+      return null;
+    }
+  }
+
+  async save(key: string, baseline: ToolBaseline): Promise<void> {
+    await mkdir(this.baseDir, { recursive: true });
+    await writeFile(join(this.baseDir, `${key}.json`), JSON.stringify(baseline, null, 2), 'utf-8');
+  }
+}
+
+export class InMemoryToolBaselineStore implements ToolBaselineStore {
+  private readonly data = new Map<string, ToolBaseline>();
+
+  async load(key: string): Promise<ToolBaseline | null> {
+    return this.data.get(key) ?? null;
+  }
+
+  async save(key: string, baseline: ToolBaseline): Promise<void> {
+    this.data.set(key, baseline);
+  }
+
+  size(): number {
+    return this.data.size;
+  }
+
+  keys(): string[] {
+    return Array.from(this.data.keys());
+  }
+}
+
+export function defaultBaselineStore(): ToolBaselineStore {
+  return new FileToolBaselineStore(join(homedir(), '.vaso', 'mcp-tool-baselines'));
+}
+
+function sourceIdentity(source: MCPServerSource): string {
+  return source.localPath ?? source.packageName ?? source.serverName;
+}
+
+export function baselineKey(source: MCPServerSource): string {
+  const identity = sourceIdentity(source);
+  const hash = createHash('sha256')
+    .update(identity)
+    .update('|')
+    .update(source.serverName)
+    .digest('hex')
+    .slice(0, 16);
+  const slug = source.serverName.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 32);
+  return `${slug}-${hash}`;
+}
 
 function hashToolDefinition(tool: MCPToolDefinition): string {
   const payload = JSON.stringify({
@@ -40,41 +103,26 @@ function toolsToHashMap(tools: MCPToolDefinition[]): Record<string, string> {
   return map;
 }
 
-function baselinePath(serverName: string): string {
-  // Sanitize server name for use as filename
-  const safe = serverName.replace(/[^a-zA-Z0-9_-]/g, '_');
-  return join(BASELINE_DIR, `${safe}.json`);
-}
-
-export async function saveToolBaseline(serverName: string, tools: MCPToolDefinition[]): Promise<void> {
-  await mkdir(BASELINE_DIR, { recursive: true });
-  const baseline: ToolBaseline = {
-    serverName,
+export function makeBaseline(source: MCPServerSource, tools: MCPToolDefinition[]): ToolBaseline {
+  return {
+    serverName: source.serverName,
+    identity: sourceIdentity(source),
     timestamp: new Date().toISOString(),
     tools: toolsToHashMap(tools),
   };
-  await writeFile(baselinePath(serverName), JSON.stringify(baseline, null, 2), 'utf-8');
-}
-
-export async function loadToolBaseline(serverName: string): Promise<ToolBaseline | null> {
-  try {
-    const raw = await readFile(baselinePath(serverName), 'utf-8');
-    return JSON.parse(raw) as ToolBaseline;
-  } catch {
-    return null;
-  }
 }
 
 export async function diffToolBaseline(
-  serverName: string,
+  store: ToolBaselineStore,
+  source: MCPServerSource,
   currentTools: MCPToolDefinition[],
 ): Promise<{ diff: ToolBaselineDiff; isFirstScan: boolean }> {
-  const existing = await loadToolBaseline(serverName);
-  const currentMap = toolsToHashMap(currentTools);
+  const key = baselineKey(source);
+  const existing = await store.load(key);
+  const baseline = makeBaseline(source, currentTools);
 
   if (!existing) {
-    // First scan — save baseline and signal no comparison available
-    await saveToolBaseline(serverName, currentTools);
+    await store.save(key, baseline);
     return {
       diff: { changed: [], added: [], removed: [] },
       isFirstScan: true,
@@ -83,8 +131,7 @@ export async function diffToolBaseline(
 
   const diff: ToolBaselineDiff = { changed: [], added: [], removed: [] };
 
-  // Check for changed and added tools
-  for (const [name, hash] of Object.entries(currentMap)) {
+  for (const [name, hash] of Object.entries(baseline.tools)) {
     if (name in existing.tools) {
       if (existing.tools[name] !== hash) {
         diff.changed.push({ name, oldHash: existing.tools[name], newHash: hash });
@@ -94,15 +141,13 @@ export async function diffToolBaseline(
     }
   }
 
-  // Check for removed tools
   for (const name of Object.keys(existing.tools)) {
-    if (!(name in currentMap)) {
+    if (!(name in baseline.tools)) {
       diff.removed.push(name);
     }
   }
 
-  // Save updated baseline
-  await saveToolBaseline(serverName, currentTools);
+  await store.save(key, baseline);
 
   return { diff, isFirstScan: false };
 }
@@ -116,7 +161,6 @@ export function extractToolDefinitions(sourceCode: string): MCPToolDefinition[] 
   const seen = new Set<string>();
 
   // Pattern 1: server.tool("name", "description", { schema }, handler)
-  // Captures: name, optional description, optional schema block
   const serverToolRe = /\.tool\(\s*['"]([^'"]+)['"]\s*(?:,\s*['"]([^'"]*)['"]\s*)?(?:,\s*(\{[^}]*\})\s*)?/g;
   let match: RegExpExecArray | null;
   while ((match = serverToolRe.exec(sourceCode)) !== null) {
