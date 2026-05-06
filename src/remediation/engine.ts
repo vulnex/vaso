@@ -100,12 +100,8 @@ export class RemediationEngine {
   }
 
   private async backupFile(filePath: string): Promise<void> {
-    try {
-      const destDir = join(this.backupDir, dirname(filePath));
-      await mkdir(destDir, { recursive: true });
-      await copyFile(filePath, join(this.backupDir, filePath));
-    } catch {
-      // Best-effort backup
-    }
+    const destDir = join(this.backupDir, dirname(filePath));
+    await mkdir(destDir, { recursive: true });
+    await copyFile(filePath, join(this.backupDir, filePath));
   }
 }

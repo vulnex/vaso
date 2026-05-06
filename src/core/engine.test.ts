@@ -4,6 +4,7 @@ import { CheckRegistry } from './check-registry.js';
 import { AdapterRegistry } from '../adapters/registry.js';
 import type { CheckModule, ScanContext, CheckResult, AgentInstallation } from './types.js';
 import type { AgentAdapter } from '../adapters/adapter.js';
+import type { FSProvider } from './fs-provider.js';
 
 const mockInstallation: AgentInstallation = {
   agent: 'openclaw',
@@ -15,6 +16,15 @@ const mockAdapter: AgentAdapter = {
   agent: 'openclaw',
   displayName: 'OpenClaw',
   async detect() { return [mockInstallation]; },
+  getConfigPaths() { return []; },
+  getSkillsDir() { return undefined; },
+  getGatewayInfo() { return undefined; },
+};
+
+const failingAdapter: AgentAdapter = {
+  agent: 'codex',
+  displayName: 'Codex',
+  async detect() { throw new Error('cannot read config'); },
   getConfigPaths() { return []; },
   getSkillsDir() { return undefined; },
   getGatewayInfo() { return undefined; },
@@ -37,6 +47,24 @@ function mockCheck(id: string, passed: boolean, severity: 'critical' | 'warning'
         message: passed ? 'OK' : 'Failed',
       };
     },
+  };
+}
+
+function mockFs(platform: NodeJS.Platform): FSProvider {
+  return {
+    platform,
+    async readFile() { throw new Error('not implemented'); },
+    async readdir() { return []; },
+    async readdirEntries() { return []; },
+    async access() { return false; },
+    async stat() {
+      throw new Error('not implemented');
+    },
+    async realpath(path: string) { return path; },
+    async exec() { return { stdout: '', stderr: '', exitCode: 0 }; },
+    execSync() { return ''; },
+    getEnv() { return undefined; },
+    homedir() { return '/home/test'; },
   };
 }
 
@@ -102,7 +130,7 @@ describe('ScanEngine', () => {
     expect(result2.agents).toHaveLength(1);
   });
 
-  it('handles check failures gracefully', async () => {
+  it('reports check failures as warning findings', async () => {
     const adapters = new AdapterRegistry();
     adapters.register(mockAdapter);
 
@@ -120,10 +148,55 @@ describe('ScanEngine', () => {
     const engine = new ScanEngine(adapters, checks);
     const result = await engine.scan({});
 
-    console.log(`[ScanEngine] graceful failure → results count: ${result.agents[0].results.length}, surviving check: ${result.agents[0].results[0]?.id}:${result.agents[0].results[0]?.passed}`);
+    console.log(`[ScanEngine] graceful failure → results count: ${result.agents[0].results.length}, results: ${result.agents[0].results.map(r => `${r.id}:${r.passed}`).join(', ')}`);
 
-    // Failing check is excluded, passing check remains
-    expect(result.agents[0].results).toHaveLength(1);
-    expect(result.agents[0].results[0].passed).toBe(true);
+    expect(result.agents[0].results).toHaveLength(2);
+    const failed = result.agents[0].results.find(r => r.id === 'FAIL-001');
+    expect(failed?.passed).toBe(false);
+    expect(failed?.severity).toBe('warning');
+    expect(failed?.message).toContain('boom');
+    expect(result.summary.warning).toBe(1);
+  });
+
+  it('uses the scanned filesystem platform for applicable checks', async () => {
+    const adapters = new AdapterRegistry();
+    adapters.register(mockAdapter);
+
+    const checks = new CheckRegistry();
+    checks.register({
+      ...mockCheck('LINUX-001', true),
+      supportedPlatforms: ['linux'],
+    });
+    checks.register({
+      ...mockCheck('DARWIN-001', true),
+      supportedPlatforms: ['darwin'],
+    });
+
+    const engine = new ScanEngine(adapters, checks, mockFs('linux'));
+    const result = await engine.scan({});
+
+    expect(result.agents[0].results.map(r => r.id)).toEqual(['LINUX-001']);
+  });
+
+  it('reports adapter detection failures as warning findings', async () => {
+    const adapters = new AdapterRegistry();
+    adapters.register(mockAdapter);
+    adapters.register(failingAdapter);
+
+    const checks = new CheckRegistry();
+    checks.register(mockCheck('CFG-001', true));
+
+    const engine = new ScanEngine(adapters, checks);
+    const result = await engine.scan({});
+
+    const codex = result.agents.find(a => a.agent === 'codex');
+    expect(codex).toBeDefined();
+    expect(codex?.results).toHaveLength(1);
+    expect(codex?.results[0]).toMatchObject({
+      id: 'ADAPTER-DETECT',
+      passed: false,
+      severity: 'warning',
+    });
+    expect(codex?.results[0].message).toContain('cannot read config');
   });
 });

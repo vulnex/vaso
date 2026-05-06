@@ -3,6 +3,19 @@ export type Grade = 'A' | 'B' | 'C' | 'D' | 'F';
 export type AgentType = 'openclaw' | 'nanoclaw' | 'picoclaw' | 'mcp' | 'ironclaw' | 'nanobot' | 'zeroclaw' | 'nemoclaw' | 'hermes' | 'lyrie' | 'claude-code' | 'claude-desktop' | 'chatgpt-desktop' | 'codex' | 'opencode' | 'gemini-cli' | 'qwen-code' | 'copilot-cli' | 'cursor-cli' | 'skill-audit';
 export type CheckCategory = 'config' | 'skills' | 'ioc' | 'network' | 'runtime' | 'policy' | 'mcp' | 'openclaw' | 'nanoclaw' | 'ironclaw' | 'nanobot' | 'zeroclaw' | 'lyrie' | 'hermes' | 'advisory' | 'coding-agent';
 
+export const AGENT_TYPES: readonly AgentType[] = [
+  'openclaw', 'nanoclaw', 'picoclaw', 'mcp', 'ironclaw', 'nanobot',
+  'zeroclaw', 'nemoclaw', 'hermes', 'lyrie', 'claude-code',
+  'claude-desktop', 'chatgpt-desktop', 'codex', 'opencode',
+  'gemini-cli', 'qwen-code', 'copilot-cli', 'cursor-cli', 'skill-audit',
+];
+
+export const CHECK_CATEGORIES: readonly CheckCategory[] = [
+  'config', 'skills', 'ioc', 'network', 'runtime', 'policy', 'mcp',
+  'openclaw', 'nanoclaw', 'ironclaw', 'nanobot', 'zeroclaw', 'lyrie',
+  'hermes', 'advisory', 'coding-agent',
+];
+
 /**
  * Coding agents (interactive developer tools) — different threat model from
  * autonomous server frameworks. Used by checks via `excludedAgents` to skip

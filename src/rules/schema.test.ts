@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { validateRuleFile } from './schema.js';
+import { AGENT_TYPES, CHECK_CATEGORIES } from '../core/types.js';
 
 describe('validateRuleFile', () => {
   it('validates a correct config rule', () => {
@@ -170,6 +171,37 @@ describe('validateRuleFile', () => {
 
     expect(errors).toHaveLength(0);
     expect(rules[0].agents).toEqual(['openclaw', 'nanoclaw']);
+  });
+
+  it('accepts every supported agent and check category', () => {
+    for (const agent of AGENT_TYPES) {
+      const { errors } = validateRuleFile({
+        rules: [{
+          id: `AGENT-${agent}`,
+          name: `Rule for ${agent}`,
+          category: 'config',
+          severity: 'info',
+          description: 'Agent coverage',
+          agents: [agent],
+          config: { path: 'a', operator: 'exists' },
+        }],
+      });
+      expect(errors, agent).toHaveLength(0);
+    }
+
+    for (const category of CHECK_CATEGORIES) {
+      const { errors } = validateRuleFile({
+        rules: [{
+          id: `CAT-${category}`,
+          name: `Rule for ${category}`,
+          category,
+          severity: 'info',
+          description: 'Category coverage',
+          config: { path: 'a', operator: 'exists' },
+        }],
+      });
+      expect(errors, category).toHaveLength(0);
+    }
   });
 
   it('rejects invalid agent names', () => {
