@@ -104,6 +104,12 @@ export const cursorCliAdapter: AgentAdapter = {
 
       const configFiles = hasCursorDir ? await loadFiles(cursorDir, USER_CONFIG_FILES, fs) : [];
 
+      // ~/.cursor/ is the Cursor *IDE* config dir (argv.json, extensions/,
+      // projects/, ide_state.json). The CLI's signal is `cli-config.json` /
+      // `mcp.json` or the `cursor-agent` binary; without either, this is the
+      // IDE, not the CLI.
+      if (configFiles.length === 0 && !cliBinary) continue;
+
       const version = queryCliVersion(cliBinary, fs)
         ?? (await readPackageVersion(cliBinary, fs));
 

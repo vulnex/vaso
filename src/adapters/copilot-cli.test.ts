@@ -104,6 +104,15 @@ describe('GitHub Copilot CLI adapter', () => {
     expect(result[0].cliBinary).toBe('/usr/local/bin/copilot');
   });
 
+  it('does not detect a bare ~/.copilot/ that is leftover IDE-extension state', async () => {
+    // ~/.copilot/ exists but contains no recognized CLI config files (only
+    // ide/ from the Copilot IDE extension or `gh copilot`) and no `copilot`
+    // binary on PATH. This must not be reported as a CLI installation.
+    setExistingPaths([copilotDir]);
+    const result = await copilotCliAdapter.detect();
+    expect(result).toEqual([]);
+  });
+
   it('returns config paths under ~/.copilot', () => {
     const paths = copilotCliAdapter.getConfigPaths();
     expect(paths).toContain(join(copilotDir, 'settings.json'));
