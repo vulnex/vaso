@@ -121,6 +121,10 @@ export const codexAdapter: AgentAdapter = {
         }
       }
 
+      // A bare ~/.codex/ with no recognized config files and no `codex`
+      // binary is leftover state, not a CLI install.
+      if (configFiles.length === 0 && !cliBinary) continue;
+
       const version = queryCliVersion(cliBinary, fs)
         ?? (await readPackageVersion(cliBinary, fs, NPM_PACKAGE_NAME));
 

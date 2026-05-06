@@ -116,6 +116,10 @@ export const qwenCodeAdapter: AgentAdapter = {
 
       const configFiles = hasQwenDir ? await loadSettings(qwenDir, fs) : [];
 
+      // A bare ~/.qwen/ with no recognized config files and no `qwen` binary
+      // is leftover state, not a CLI install.
+      if (configFiles.length === 0 && !cliBinary) continue;
+
       const version = queryCliVersion(cliBinary, fs)
         ?? (await readPackageVersion(cliBinary, fs, NPM_PACKAGE_NAME));
 

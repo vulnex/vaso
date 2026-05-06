@@ -78,6 +78,12 @@ describe('Qwen Code adapter', () => {
     expect(result[0].cliBinary).toBe('/usr/local/bin/qwen');
   });
 
+  it('does not detect a bare ~/.qwen/ with no recognized configs and no CLI binary', async () => {
+    setExistingPaths([qwenDir]);
+    const result = await qwenCodeAdapter.detect();
+    expect(result).toEqual([]);
+  });
+
   it('returns config paths under ~/.qwen', () => {
     const paths = qwenCodeAdapter.getConfigPaths();
     expect(paths).toContain(join(qwenDir, 'settings.json'));

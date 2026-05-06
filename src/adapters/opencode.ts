@@ -97,9 +97,12 @@ export const opencodeAdapter: AgentAdapter = {
 
       const authPath = join(dataDir, 'auth.json');
       const hasAuth = await fs.access(authPath);
-      const hasOpenCodeBinDir = await fs.access(join(home, '.opencode'));
 
-      if (configFiles.length === 0 && !hasAuth && !cliBinary && !hasOpenCodeBinDir) continue;
+      // Require at least one positive signal — recognized config, auth file,
+      // or CLI binary. (`findCLIBinary` already covers ~/.opencode/bin/opencode,
+      // so a bare ~/.opencode/ dir alone isn't a useful signal — it would
+      // false-positive against unrelated tools sharing the directory name.)
+      if (configFiles.length === 0 && !hasAuth && !cliBinary) continue;
 
       const version = queryCliVersion(cliBinary, fs)
         ?? (await readPackageVersion(cliBinary, fs));

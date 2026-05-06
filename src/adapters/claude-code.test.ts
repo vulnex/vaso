@@ -108,6 +108,16 @@ describe('Claude Code adapter', () => {
     expect(userInstall!.configFiles.some(c => c.filePath === rootStatePath)).toBe(true);
   });
 
+  it('does not detect a bare ~/.claude/ with no settings, no .claude.json, and no CLI binary', async () => {
+    // Dir exists but contains only unrecognized state (no settings.json /
+    // settings.local.json) and there's no `claude` binary on PATH. Skipping
+    // this avoids a phantom row with `Config files: 0` and unknown version.
+    setExistingPaths([claudeDir]);
+    const result = await claudeCodeAdapter.detect();
+    const userInstalls = result.filter(r => !r.profile);
+    expect(userInstalls).toEqual([]);
+  });
+
   it('extracts version from CLI', async () => {
     const settingsPath = join(claudeDir, 'settings.json');
     setExistingPaths([claudeDir, settingsPath]);

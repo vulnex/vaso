@@ -84,6 +84,12 @@ describe('Gemini CLI adapter', () => {
     expect(result[0].configFiles).toHaveLength(0);
   });
 
+  it('does not detect a bare ~/.gemini/ with no recognized configs and no CLI binary', async () => {
+    setExistingPaths([geminiDir]);
+    const result = await geminiAdapter.detect();
+    expect(result).toEqual([]);
+  });
+
   it('returns config paths under ~/.gemini', () => {
     const paths = geminiAdapter.getConfigPaths();
     expect(paths).toContain(join(geminiDir, 'settings.json'));

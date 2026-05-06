@@ -164,6 +164,12 @@ export const geminiAdapter: AgentAdapter = {
 
       const configFiles = hasGeminiDir ? await loadSettings(geminiDir, fs) : [];
 
+      // A bare ~/.gemini/ with no recognized config files and no `gemini`
+      // binary is leftover state from another tool (Google's IDE extensions
+      // and other Gemini-branded tooling all touch this path), not a CLI
+      // install.
+      if (configFiles.length === 0 && !cliBinary) continue;
+
       const version = queryCliVersion(cliBinary, fs)
         ?? (await readPackageVersion(cliBinary, fs, NPM_PACKAGE_NAME));
 

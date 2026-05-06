@@ -116,6 +116,12 @@ export const claudeCodeAdapter: AgentAdapter = {
         } catch {}
       }
 
+      // A bare ~/.claude/ with no settings files, no successfully-parsed
+      // ~/.claude.json, and no `claude` binary is leftover state, not an
+      // install. (`hasRootState` alone counted earlier, but if loadConfig
+      // threw, configFiles is still empty and there's nothing to scan.)
+      if (configFiles.length === 0 && !cliBinary) continue;
+
       const version = queryCliVersion(cliBinary, fs)
         ?? (await readPackageVersion(cliBinary, fs, NPM_PACKAGE_NAME));
       const skillsDir = this.getSkillsDir(claudeDir);

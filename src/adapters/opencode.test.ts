@@ -102,6 +102,15 @@ describe('OpenCode adapter', () => {
     expect(result[0].cliBinary).toBe('/usr/local/bin/opencode');
   });
 
+  it('does not detect a bare ~/.opencode/ with no config, no auth, and no CLI binary', async () => {
+    // ~/.opencode/ alone (without bin/opencode, opencode.json[c], or auth.json)
+    // is not a valid install signal. findCLIBinary already covers
+    // ~/.opencode/bin/opencode, so a stray dir at this path can be ignored.
+    setExistingPaths([join(home, '.opencode')]);
+    const result = await opencodeAdapter.detect();
+    expect(result).toEqual([]);
+  });
+
   it('honors XDG_CONFIG_HOME override', async () => {
     process.env.XDG_CONFIG_HOME = '/tmp/custom-xdg';
     const configPath = '/tmp/custom-xdg/opencode/opencode.json';
