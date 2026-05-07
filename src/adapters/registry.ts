@@ -51,6 +51,10 @@ export class AdapterRegistry {
   getAdapters(): AgentAdapter[] {
     return [...this.adapters];
   }
+
+  getAdapter(agent: AgentType): AgentAdapter | undefined {
+    return this.adapters.find(a => a.agent === agent);
+  }
 }
 
 export const adapterRegistry = new AdapterRegistry();
