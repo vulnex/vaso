@@ -2,6 +2,7 @@ import { join, extname } from 'node:path';
 import type { Evidence, ScanContext } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { getIOCDatabase } from '../../ioc/database.js';
+import { ipBoundaryRegex } from './boundary.js';
 
 const SCAN_EXTENSIONS = new Set(['.js', '.ts', '.mjs', '.cjs', '.json', '.yaml', '.yml', '.env', '.sh']);
 
@@ -34,43 +35,33 @@ export const ioc001 = defineCheck({
     const dirs = [ctx.installation.installDir];
     if (ctx.installation.skillsDir) dirs.push(ctx.installation.skillsDir);
 
-    for (const config of ctx.configs) {
-      for (const ip of db.c2Ips) {
-        if (config.raw.includes(ip)) {
-          const lines = config.raw.split('\n');
-          for (let i = 0; i < lines.length; i++) {
-            if (lines[i].includes(ip)) {
-              evidence.push({
-                file: config.filePath,
-                line: i + 1,
-                snippet: lines[i].trim(),
-                detail: `Known C2 IP: ${ip}`,
-              });
-            }
+    const ipRegexes = db.c2Ips.map(ip => ({ ip, re: ipBoundaryRegex(ip) }));
+
+    const scan = (file: string, content: string) => {
+      for (const { ip, re } of ipRegexes) {
+        if (!re.test(content)) continue;
+        const lines = content.split('\n');
+        for (let i = 0; i < lines.length; i++) {
+          if (re.test(lines[i])) {
+            evidence.push({
+              file,
+              line: i + 1,
+              snippet: lines[i].trim(),
+              detail: `Known C2 IP: ${ip}`,
+            });
           }
         }
       }
+    };
+
+    for (const config of ctx.configs) {
+      scan(config.filePath, config.raw);
     }
 
     const files = await getAllFilesViaCtx(ctx, dirs);
     for (const file of files) {
       try {
-        const content = await ctx.fs.readFile(file);
-        for (const ip of db.c2Ips) {
-          if (content.includes(ip)) {
-            const lines = content.split('\n');
-            for (let i = 0; i < lines.length; i++) {
-              if (lines[i].includes(ip)) {
-                evidence.push({
-                  file,
-                  line: i + 1,
-                  snippet: lines[i].trim(),
-                  detail: `Known C2 IP: ${ip}`,
-                });
-              }
-            }
-          }
-        }
+        scan(file, await ctx.fs.readFile(file));
       } catch {}
     }
 

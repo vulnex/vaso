@@ -2,20 +2,127 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import type { ScanContext, AgentInstallation } from '../../core/types.js';
+import type { ScanContext, AgentInstallation, ParsedConfig } from '../../core/types.js';
 import { LocalFSProvider } from '../../core/local-fs-provider.js';
+import { ioc001 } from './ioc-001-c2-ips.js';
+import { ioc002 } from './ioc-002-malicious-domains.js';
 import { ioc007 } from './ioc-007-binary-patterns.js';
 import { ioc008 } from './ioc-008-virustotal.js';
 
-function makeContext(skillsDir?: string): ScanContext {
+function makeContext(skillsDir?: string, configs: ParsedConfig[] = []): ScanContext {
   const installation: AgentInstallation = {
     agent: 'openclaw',
     installDir: skillsDir ?? '/tmp/nonexistent',
     configFiles: [],
     skillsDir,
   };
-  return { installation, configs: [], platform: 'darwin', fs: new LocalFSProvider() };
+  return { installation, configs, platform: 'darwin', fs: new LocalFSProvider() };
 }
+
+function configWithRaw(raw: string): ParsedConfig {
+  return { raw, format: 'unknown', filePath: '/tmp/fake.config', data: {} };
+}
+
+describe('IOC-001: C2 IP Detection', () => {
+  // 185.199.228.220 is in the bundled C2 IP list.
+  const C2_IP = '185.199.228.220';
+
+  it('detects exact C2 IP in a config raw block', async () => {
+    const ctx = makeContext(undefined, [
+      configWithRaw(`upstream = "${C2_IP}:443"`),
+    ]);
+    const result = await ioc001.run(ctx);
+    expect(result.passed).toBe(false);
+    expect(result.evidence!.some(e => e.detail?.includes(C2_IP))).toBe(true);
+  });
+
+  it('does not match an IP that is a substring of a longer numeric run', async () => {
+    // 185.199.228.220 is a substring inside 185.199.228.2200 and 1185.199.228.220.
+    const ctx = makeContext(undefined, [
+      configWithRaw(`bogus_a = "1${C2_IP}"\nbogus_b = "${C2_IP}0"`),
+    ]);
+    const result = await ioc001.run(ctx);
+    expect(result.passed).toBe(true);
+  });
+
+  it('does not match an IP that is followed by another octet', async () => {
+    const ctx = makeContext(undefined, [
+      configWithRaw(`bogus = "${C2_IP}.5"`),
+    ]);
+    const result = await ioc001.run(ctx);
+    expect(result.passed).toBe(true);
+  });
+
+  it('matches a C2 IP at port boundary, end of line, and inside a URL', async () => {
+    const ctx = makeContext(undefined, [
+      configWithRaw([
+        `host_port = "${C2_IP}:8080"`,
+        `host_alone = "${C2_IP}"`,
+        `host_url = "https://${C2_IP}/path"`,
+      ].join('\n')),
+    ]);
+    const result = await ioc001.run(ctx);
+    expect(result.passed).toBe(false);
+    expect(result.evidence!.length).toBe(3);
+  });
+});
+
+describe('IOC-002: Malicious Domains', () => {
+  // clawhavoc.io is in the bundled malicious domain list.
+  const DOMAIN = 'clawhavoc.io';
+
+  it('detects exact domain in a config raw block', async () => {
+    const ctx = makeContext(undefined, [
+      configWithRaw(`endpoint = "https://${DOMAIN}/api"`),
+    ]);
+    const result = await ioc002.run(ctx);
+    expect(result.passed).toBe(false);
+    expect(result.evidence!.some(e => e.detail?.includes(DOMAIN))).toBe(true);
+  });
+
+  it('matches subdomain of a malicious domain', async () => {
+    const ctx = makeContext(undefined, [
+      configWithRaw(`endpoint = "https://bad.${DOMAIN}/exfil"`),
+    ]);
+    const result = await ioc002.run(ctx);
+    expect(result.passed).toBe(false);
+  });
+
+  it('does not match a domain that is a left-substring of a different label', async () => {
+    // not-clawhavoc.io is a different registration; should not match.
+    const ctx = makeContext(undefined, [
+      configWithRaw(`endpoint = "https://not-${DOMAIN}/safe"`),
+    ]);
+    const result = await ioc002.run(ctx);
+    expect(result.passed).toBe(true);
+  });
+
+  it('does not match a domain whose suffix continues past the IOC TLD', async () => {
+    // clawhavoc.iom is a different registration (.iom is a typo TLD).
+    const ctx = makeContext(undefined, [
+      configWithRaw(`endpoint = "https://${DOMAIN}m/safe"`),
+    ]);
+    const result = await ioc002.run(ctx);
+    expect(result.passed).toBe(true);
+  });
+
+  it('does not match a domain whose IOC name is followed by another label', async () => {
+    // clawhavoc.io.cn is a different domain hierarchy.
+    const ctx = makeContext(undefined, [
+      configWithRaw(`endpoint = "https://${DOMAIN}.cn/safe"`),
+    ]);
+    const result = await ioc002.run(ctx);
+    expect(result.passed).toBe(true);
+  });
+
+  it('matches case-insensitively', async () => {
+    const ctx = makeContext(undefined, [
+      configWithRaw(`endpoint = "https://ClawHavoc.IO/api"`),
+    ]);
+    const result = await ioc002.run(ctx);
+    expect(result.passed).toBe(false);
+  });
+});
 
 describe('IOC-007: Binary Pattern Match', () => {
   let tempDir: string;
