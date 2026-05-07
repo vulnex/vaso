@@ -72,12 +72,16 @@ export class ScanEngine {
       ? await getSkillFiles(installation.skillsDir, this.fs)
       : undefined;
 
+    const adapter = this.adapters.getAdapter(installation.agent);
+    const credentialPaths = adapter?.getCredentialPaths?.(installation.installDir);
+
     const context: ScanContext = {
       installation,
       configs: installation.configFiles,
       platform: this.fs.platform,
       fs: this.fs,
       skillFiles,
+      credentialPaths,
     };
 
     // Get applicable checks for the scanned filesystem, not the scanner host.

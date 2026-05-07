@@ -59,13 +59,14 @@ function makeCtx(
   agent: 'ironclaw' | 'nanobot' | 'zeroclaw' | 'openclaw',
   configs: ParsedConfig[],
   installDir?: string,
+  credentialPaths?: string[],
 ): ScanContext {
   const installation: AgentInstallation = {
     agent,
     installDir: installDir ?? TEST_DIR,
     configFiles: configs,
   };
-  return { installation, configs, platform: 'darwin', fs: new LocalFSProvider() };
+  return { installation, configs, platform: 'darwin', fs: new LocalFSProvider(), credentialPaths };
 }
 
 // ── IronClaw fix() tests ──────────────────────────────────────────────
@@ -158,13 +159,13 @@ describe('Config fix() methods', () => {
     expect(data.gateway.port).toBe(18789);
   });
 
-  it('CFG-003: fixes file permissions to 600', async () => {
+  it('CFG-003: fixes credential file permissions to 600', async () => {
     const filePath = join(TEST_DIR, 'config.json');
     await writeFile(filePath, '{}');
     await chmod(filePath, 0o644);
 
     const config = makeJsonConfig(filePath, {});
-    const ctx = makeCtx('openclaw', [config]);
+    const ctx = makeCtx('openclaw', [config], undefined, [filePath]);
 
     const before = await cfg003.run(ctx);
     expect(before.passed).toBe(false);

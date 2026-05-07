@@ -1,8 +1,12 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { mkdtemp, writeFile, rm, chmod } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import type { ScanContext, ParsedConfig, AgentInstallation } from '../../core/types.js';
 import { LocalFSProvider } from '../../core/local-fs-provider.js';
 import { cfg001 } from './cfg-001-gateway-binding.js';
 import { cfg002 } from './cfg-002-api-key-exposure.js';
+import { cfg003 } from './cfg-003-file-permissions.js';
 import { cfg004 } from './cfg-004-tls-config.js';
 import { cfg005 } from './cfg-005-shell-allowlist.js';
 import { cfg006 } from './cfg-006-workspace-restriction.js';
@@ -130,6 +134,66 @@ describe('CFG-002: API Key Exposure', () => {
       expect(ev.snippet).not.toContain(oai);
       expect(ev.snippet).not.toContain(ghp);
     }
+  });
+});
+
+describe('CFG-003: Credential Config Permissions', () => {
+  let tempDir: string;
+
+  beforeEach(async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'vaso-cfg003-'));
+  });
+
+  afterEach(async () => {
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  function makeCtxWithCreds(configs: ParsedConfig[], credentialPaths?: string[]): ScanContext {
+    const installation: AgentInstallation = {
+      agent: 'openclaw',
+      installDir: tempDir,
+      configFiles: configs,
+    };
+    return { installation, configs, platform: 'darwin', fs: new LocalFSProvider(), credentialPaths };
+  }
+
+  it('skips when adapter does not declare credential paths', async () => {
+    const filePath = join(tempDir, 'config.json');
+    await writeFile(filePath, '{}');
+    await chmod(filePath, 0o644);
+    const config: ParsedConfig = { raw: '{}', format: 'json', filePath, data: {} };
+
+    const result = await cfg003.run(makeCtxWithCreds([config]));
+    expect(result.passed).toBe(true);
+    expect(result.message).toMatch(/does not declare credential paths/i);
+  });
+
+  it('does not flag a non-credential config file even if world-readable', async () => {
+    // The same parsed config exists on disk with 0644, but the adapter has not
+    // declared it as credential-bearing — so CFG-003 must ignore it.
+    const benign = join(tempDir, 'preferences.json');
+    await writeFile(benign, '{}');
+    await chmod(benign, 0o644);
+    const config: ParsedConfig = { raw: '{}', format: 'json', filePath: benign, data: {} };
+
+    const credPath = join(tempDir, 'auth.json');
+    await writeFile(credPath, '{"token":"abc"}');
+    await chmod(credPath, 0o600);
+    const credConfig: ParsedConfig = { raw: '{"token":"abc"}', format: 'json', filePath: credPath, data: {} };
+
+    const result = await cfg003.run(makeCtxWithCreds([config, credConfig], [credPath]));
+    expect(result.passed).toBe(true);
+  });
+
+  it('flags a credential-declared config file with permissive permissions', async () => {
+    const credPath = join(tempDir, 'auth.json');
+    await writeFile(credPath, '{"token":"abc"}');
+    await chmod(credPath, 0o644);
+    const credConfig: ParsedConfig = { raw: '{"token":"abc"}', format: 'json', filePath: credPath, data: {} };
+
+    const result = await cfg003.run(makeCtxWithCreds([credConfig], [credPath]));
+    expect(result.passed).toBe(false);
+    expect(result.evidence!.some(e => e.file === credPath)).toBe(true);
   });
 });
 

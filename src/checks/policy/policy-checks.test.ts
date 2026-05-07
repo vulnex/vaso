@@ -20,13 +20,17 @@ function makeConfig(data: Record<string, unknown>): ParsedConfig {
   };
 }
 
-function makeContext(configs: ParsedConfig[], installDir = '/tmp/test-install'): ScanContext {
+function makeContext(
+  configs: ParsedConfig[],
+  installDir = '/tmp/test-install',
+  credentialPaths?: string[],
+): ScanContext {
   const installation: AgentInstallation = {
     agent: 'openclaw',
     installDir,
     configFiles: configs,
   };
-  return { installation, configs, platform: 'darwin', fs: new LocalFSProvider() };
+  return { installation, configs, platform: 'darwin', fs: new LocalFSProvider(), credentialPaths };
 }
 
 // POL-001
@@ -126,20 +130,50 @@ describe('POL-003: Session Credential Permissions', () => {
     await rm(tempDir, { recursive: true, force: true });
   });
 
-  it('fails with permissive session file', async () => {
-    await writeFile(join(tempDir, 'session.json'), '{"token": "abc"}');
-    await chmod(join(tempDir, 'session.json'), 0o644);
+  it('fails when an adapter-declared credential file is world/group readable', async () => {
+    const credPath = join(tempDir, 'session.json');
+    await writeFile(credPath, '{"token": "abc"}');
+    await chmod(credPath, 0o644);
 
-    const result = await pol003.run(makeContext([], tempDir));
+    const result = await pol003.run(makeContext([], tempDir, [credPath]));
     expect(result.passed).toBe(false);
     expect(result.evidence).toBeDefined();
   });
 
-  it('passes with restrictive session file', async () => {
-    await writeFile(join(tempDir, 'session.json'), '{"token": "abc"}');
-    await chmod(join(tempDir, 'session.json'), 0o600);
+  it('passes when adapter-declared credential file has 0600', async () => {
+    const credPath = join(tempDir, 'session.json');
+    await writeFile(credPath, '{"token": "abc"}');
+    await chmod(credPath, 0o600);
+
+    const result = await pol003.run(makeContext([], tempDir, [credPath]));
+    expect(result.passed).toBe(true);
+  });
+
+  it('skips when adapter declares no credential paths (no false positives on benign names)', async () => {
+    // Filenames that previously fired the recursive heuristic — a sample doc, a
+    // node_modules artefact, a fixture — must not produce findings now that the
+    // check only looks at adapter-declared credential paths.
+    await writeFile(join(tempDir, 'docs-auth.md'), '# Auth notes\n');
+    await writeFile(join(tempDir, 'session-helpers.js'), 'export const x = 1;');
+    await chmod(join(tempDir, 'docs-auth.md'), 0o644);
+    await chmod(join(tempDir, 'session-helpers.js'), 0o644);
 
     const result = await pol003.run(makeContext([], tempDir));
+    expect(result.passed).toBe(true);
+    expect(result.message).toMatch(/does not declare credential paths/i);
+  });
+
+  it('does not flag benign files that share a credential-like name when not declared', async () => {
+    // docs-auth.md is world-readable but not on the adapter's credential list,
+    // so it must be ignored.
+    const benign = join(tempDir, 'docs-auth.md');
+    const real = join(tempDir, 'auth.json');
+    await writeFile(benign, '# Auth notes\n');
+    await chmod(benign, 0o644);
+    await writeFile(real, '{"token":"abc"}');
+    await chmod(real, 0o600);
+
+    const result = await pol003.run(makeContext([], tempDir, [real]));
     expect(result.passed).toBe(true);
   });
 });

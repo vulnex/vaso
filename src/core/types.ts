@@ -106,6 +106,10 @@ export interface ScanContext {
   platform: NodeJS.Platform;
   fs: import('./fs-provider.js').FSProvider;
   skillFiles?: string[];
+  /** Files the adapter has declared as security-sensitive (credentials, auth
+   *  state, etc.). Used by permission checks to avoid flagging benign config
+   *  files. Pre-computed by the engine from `adapter.getCredentialPaths()`. */
+  credentialPaths?: string[];
   mcpConfigs?: import('../mcp/types.js').MCPConfig[];
   mcpServerSources?: import('../mcp/types.js').MCPServerSource[];
   mcpToolBaselineStore?: import('../mcp/tool-baseline.js').ToolBaselineStore;

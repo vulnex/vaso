@@ -1,43 +1,25 @@
-import { join } from 'node:path';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-
-const CREDENTIAL_FILE_PATTERNS = [
-  /session/i,
-  /token/i,
-  /credential/i,
-  /auth/i,
-  /\.secret_key$/i,
-];
 
 export const pol003 = defineCheck({
   id: 'POL-003',
   name: 'Session Credential Permissions',
   category: 'policy',
   severity: 'warning',
-  description: 'Check that session/token/auth files have restrictive permissions (0600)',
+  description: 'Check that adapter-declared session/token/auth files have restrictive permissions (0600)',
   supportedPlatforms: ['darwin', 'linux'],
 
   async run(ctx, h) {
-    const installDir = ctx.installation.installDir;
-
-    let entries: { name: string; isFile: boolean; isDirectory: boolean; parentPath?: string }[];
-    try {
-      entries = await ctx.fs.readdirEntries(installDir, { recursive: true });
-    } catch {
-      return h.passed('Install directory not accessible');
+    const paths = ctx.credentialPaths ?? [];
+    if (paths.length === 0) {
+      return h.passed('Adapter does not declare credential paths; skipping');
     }
 
     const evidence: Evidence[] = [];
-    for (const entry of entries) {
-      if (!entry.isFile) continue;
-
-      const matches = CREDENTIAL_FILE_PATTERNS.some(p => p.test(entry.name));
-      if (!matches) continue;
-
-      const fullPath = entry.parentPath ? join(entry.parentPath, entry.name) : join(installDir, entry.name);
+    for (const fullPath of paths) {
       try {
         const stats = await ctx.fs.stat(fullPath);
+        if (!stats.isFile()) continue;
         const mode = stats.mode & 0o777;
         if (mode & 0o077) {
           evidence.push({
@@ -46,7 +28,7 @@ export const pol003 = defineCheck({
           });
         }
       } catch {
-        // File may not be accessible
+        // File may not exist
       }
     }
 

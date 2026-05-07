@@ -4,20 +4,24 @@ import { chmodFile } from '../../remediation/config-writer.js';
 
 export const cfg003 = defineCheck({
   id: 'CFG-003',
-  name: 'File Permissions',
+  name: 'Credential Config Permissions',
   category: 'config',
   severity: 'warning',
-  description: 'Check that config files have restrictive permissions (600 or tighter)',
+  description: 'Check that credential-bearing config files have restrictive permissions (600 or tighter)',
   supportedPlatforms: ['darwin', 'linux'],
 
   async run(ctx, h) {
-    const evidence: Evidence[] = [];
+    const credentialPaths = new Set(ctx.credentialPaths ?? []);
+    if (credentialPaths.size === 0) {
+      return h.passed('Adapter does not declare credential paths; skipping');
+    }
 
+    const evidence: Evidence[] = [];
     for (const config of ctx.configs) {
+      if (!credentialPaths.has(config.filePath)) continue;
       try {
         const stats = await ctx.fs.stat(config.filePath);
         const mode = stats.mode & 0o777;
-        // Warn if group or other has any access
         if (mode & 0o077) {
           evidence.push({
             file: config.filePath,
@@ -30,16 +34,18 @@ export const cfg003 = defineCheck({
     }
 
     return h.fromEvidence(evidence, {
-      passed: 'All config files have restrictive permissions',
-      failed: (n) => `${n} config file(s) have overly permissive permissions`,
+      passed: 'All credential config files have restrictive permissions',
+      failed: (n) => `${n} credential config file(s) have overly permissive permissions`,
       fixable: true,
       fixDescription: 'Set permissions to 600 (chmod 600)',
     });
   },
 
   async fix(ctx) {
+    const credentialPaths = new Set(ctx.credentialPaths ?? []);
     let fixed = 0;
     for (const config of ctx.configs) {
+      if (!credentialPaths.has(config.filePath)) continue;
       try {
         await chmodFile(config.filePath, 0o600);
         fixed++;
