@@ -2,6 +2,7 @@ import { join, extname } from 'node:path';
 import type { Evidence, ScanContext } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { getIOCDatabase } from '../../ioc/database.js';
+import { domainBoundaryRegex } from './boundary.js';
 
 const SCAN_EXTENSIONS = new Set(['.js', '.ts', '.mjs', '.cjs', '.json', '.yaml', '.yml', '.env', '.sh', '.md']);
 
@@ -34,6 +35,11 @@ export const ioc002 = defineCheck({
     const dirs = [ctx.installation.installDir];
     if (ctx.installation.skillsDir) dirs.push(ctx.installation.skillsDir);
 
+    const domainRegexes = db.maliciousDomains.map(domain => ({
+      domain,
+      re: domainBoundaryRegex(domain),
+    }));
+
     const allContent: Array<{ file: string; content: string }> = [];
 
     for (const config of ctx.configs) {
@@ -48,18 +54,17 @@ export const ioc002 = defineCheck({
     }
 
     for (const { file, content } of allContent) {
-      for (const domain of db.maliciousDomains) {
-        if (content.includes(domain)) {
-          const lines = content.split('\n');
-          for (let i = 0; i < lines.length; i++) {
-            if (lines[i].includes(domain)) {
-              evidence.push({
-                file,
-                line: i + 1,
-                snippet: lines[i].trim(),
-                detail: `Known malicious domain: ${domain}`,
-              });
-            }
+      for (const { domain, re } of domainRegexes) {
+        if (!re.test(content)) continue;
+        const lines = content.split('\n');
+        for (let i = 0; i < lines.length; i++) {
+          if (re.test(lines[i])) {
+            evidence.push({
+              file,
+              line: i + 1,
+              snippet: lines[i].trim(),
+              detail: `Known malicious domain: ${domain}`,
+            });
           }
         }
       }
