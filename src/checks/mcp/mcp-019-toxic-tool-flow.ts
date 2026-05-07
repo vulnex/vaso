@@ -1,6 +1,5 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { extractToolDefinitions } from '../../mcp/tool-baseline.js';
 
 const SOURCE_PATTERNS = [
   /readFile(?:Sync)?/,
@@ -72,30 +71,52 @@ function classifyToolHandler(handlerCode: string): { isSource: boolean; isSink: 
   };
 }
 
+const TOOL_REGISTRATION_PATTERNS: RegExp[] = [
+  /\.tool\(\s*['"]([^'"]+)['"]/g,
+  /addTool\(\s*\{[^}]*name:\s*['"]([^'"]+)['"]/g,
+  /register[_]?[Tt]ool\(\s*['"]([^'"]+)['"]/g,
+  /\{\s*name:\s*['"]([^'"]+)['"](?:\s*,\s*description:\s*['"][^'"]*?['"])?[^}]*handler\s*:/g,
+];
+
+const MAX_HANDLER_WINDOW = 2000;
+
+interface ToolSite {
+  name: string;
+  start: number;
+}
+
+function findToolRegistrationSites(sourceCode: string): ToolSite[] {
+  const sites: ToolSite[] = [];
+  const seen = new Set<string>();
+  for (const pattern of TOOL_REGISTRATION_PATTERNS) {
+    pattern.lastIndex = 0;
+    let match: RegExpExecArray | null;
+    while ((match = pattern.exec(sourceCode)) !== null) {
+      const name = match[1];
+      if (seen.has(name)) continue;
+      seen.add(name);
+      sites.push({ name, start: match.index });
+    }
+  }
+  sites.sort((a, b) => a.start - b.start);
+  return sites;
+}
+
 /**
- * Extract tool handler bodies from source code by finding tool registrations
- * and capturing the surrounding function body.
+ * Slice each tool's handler from its registration site to the start of the next
+ * registration site, capped at MAX_HANDLER_WINDOW. Bounding by the next site
+ * prevents adjacent tools' source/sink capabilities from smearing.
  */
 function extractToolHandlers(sourceCode: string): Map<string, string> {
   const handlers = new Map<string, string>();
-  const tools = extractToolDefinitions(sourceCode);
+  const sites = findToolRegistrationSites(sourceCode);
+  if (sites.length === 0) return handlers;
 
-  if (tools.length === 0) {
-    // No explicit tool registrations found — treat entire source as a single implicit handler
-    return handlers;
-  }
-
-  for (const tool of tools) {
-    // Find the tool registration and extract a generous window of surrounding code as the handler
-    const escapedName = tool.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const toolRegex = new RegExp(`['"]${escapedName}['"]`, 'g');
-    const match = toolRegex.exec(sourceCode);
-    if (match) {
-      // Grab a window of code after the tool name (up to 2000 chars or next tool registration)
-      const start = match.index;
-      const end = Math.min(start + 2000, sourceCode.length);
-      handlers.set(tool.name, sourceCode.slice(start, end));
-    }
+  for (let i = 0; i < sites.length; i++) {
+    const { name, start } = sites[i];
+    const nextStart = i + 1 < sites.length ? sites[i + 1].start : sourceCode.length;
+    const end = Math.min(nextStart, start + MAX_HANDLER_WINDOW, sourceCode.length);
+    handlers.set(name, sourceCode.slice(start, end));
   }
 
   return handlers;
