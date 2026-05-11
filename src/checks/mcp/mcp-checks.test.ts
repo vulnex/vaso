@@ -614,6 +614,64 @@ describe('MCP-013: Missing PKCE', () => {
     expect(result.passed).toBe(false);
     expect(result.evidence!.some(e => e.detail?.includes('plain'))).toBe(true);
   });
+
+  // ----- Negative false-positive fixtures -----
+
+  it('ignores /authorize references inside line comments', async () => {
+    const commentOnly: MCPServerSource[] = [{
+      serverName: 'docs-only',
+      sourceCode: `
+        // The /authorize endpoint must use PKCE; see RFC 7636.
+        // Token exchange happens at /token with grant_type=authorization_code.
+        function unrelated() { return 42; }
+      `,
+    }];
+
+    const ctx = makeContext({ mcpServerSources: commentOnly });
+    const result = await mcp013.run(ctx);
+
+    expect(result.passed).toBe(true);
+  });
+
+  it('ignores /authorize references inside JSDoc blocks', async () => {
+    const jsdoc: MCPServerSource[] = [{
+      serverName: 'jsdoc-only',
+      sourceCode: [
+        '/**',
+        ' * Builds the OAuth request URL.',
+        ' * Hits /authorize with response_type=code and grant_type=authorization_code.',
+        ' */',
+        'function buildUrl() { return ""; }',
+      ].join('\n'),
+    }];
+
+    const ctx = makeContext({ mcpServerSources: jsdoc });
+    const result = await mcp013.run(ctx);
+
+    expect(result.passed).toBe(true);
+  });
+
+  it('passes when PKCE is present within the search window', async () => {
+    const withinWindow: MCPServerSource[] = [{
+      serverName: 'pkce-near',
+      sourceCode: [
+        'function makeUrl(challenge) {',
+        '  const codeChallenge = challenge;',
+        '  const params = new URLSearchParams({',
+        '    response_type: "code",',
+        '    code_challenge: codeChallenge,',
+        '    code_challenge_method: "S256",',
+        '  });',
+        '  return "https://idp.example.com/authorize?" + params.toString();',
+        '}',
+      ].join('\n'),
+    }];
+
+    const ctx = makeContext({ mcpServerSources: withinWindow });
+    const result = await mcp013.run(ctx);
+
+    expect(result.passed).toBe(true);
+  });
 });
 
 // ==================== MCP-014: Insecure Token Storage ====================
@@ -638,6 +696,60 @@ describe('MCP-014: Insecure Token Storage', () => {
     const result = await mcp014.run(ctx);
 
     console.log(`[MCP-014] safe → passed: ${result.passed}`);
+
+    expect(result.passed).toBe(true);
+  });
+
+  // ----- Negative false-positive fixtures -----
+
+  it('ignores token-related references inside line comments', async () => {
+    const commentOnly: MCPServerSource[] = [{
+      serverName: 'comments-only',
+      sourceCode: [
+        '// console.log(token) would leak the access_token — never do that',
+        '// localStorage.setItem("oauth_token", t) is also forbidden',
+        'function unrelated() { return 1; }',
+      ].join('\n'),
+    }];
+
+    const ctx = makeContext({ mcpServerSources: commentOnly });
+    const result = await mcp014.run(ctx);
+
+    expect(result.passed).toBe(true);
+  });
+
+  it('ignores token-related references inside JSDoc blocks', async () => {
+    const jsdoc: MCPServerSource[] = [{
+      serverName: 'jsdoc-only',
+      sourceCode: [
+        '/**',
+        ' * Token handling notes:',
+        ' * - Never call console.log with the access_token',
+        ' * - Never persist token via localStorage.setItem',
+        ' */',
+        'function unrelated() { return 1; }',
+      ].join('\n'),
+    }];
+
+    const ctx = makeContext({ mcpServerSources: jsdoc });
+    const result = await mcp014.run(ctx);
+
+    expect(result.passed).toBe(true);
+  });
+
+  it('passes when storage helper writes encrypted blobs without token-shaped argument lists', async () => {
+    const helper: MCPServerSource[] = [{
+      serverName: 'secure-helper',
+      sourceCode: [
+        'function persist(encrypted) {',
+        '  writeFileSync(path, encrypted);',
+        '  return true;',
+        '}',
+      ].join('\n'),
+    }];
+
+    const ctx = makeContext({ mcpServerSources: helper });
+    const result = await mcp014.run(ctx);
 
     expect(result.passed).toBe(true);
   });
@@ -763,6 +875,77 @@ describe('MCP-018: Missing State Parameter', () => {
     const result = await mcp018.run(ctx);
 
     console.log(`[MCP-018] safe → passed: ${result.passed}`);
+
+    expect(result.passed).toBe(true);
+  });
+
+  // ----- Negative false-positive fixtures -----
+
+  it('ignores /authorize references inside line comments', async () => {
+    const commentOnly: MCPServerSource[] = [{
+      serverName: 'comment-only',
+      sourceCode: [
+        '// Always include a state parameter when redirecting to /authorize.',
+        '// See RFC 6749 §10.12 for CSRF on the /authorization endpoint.',
+        'function unrelated() { return 1; }',
+      ].join('\n'),
+    }];
+
+    const ctx = makeContext({ mcpServerSources: commentOnly });
+    const result = await mcp018.run(ctx);
+
+    expect(result.passed).toBe(true);
+  });
+
+  it('ignores URL config constants without active construction', async () => {
+    const configConstant: MCPServerSource[] = [{
+      serverName: 'config-constant',
+      sourceCode: [
+        'const config = {',
+        '  authorization_endpoint: "https://idp.example.com/authorize",',
+        '};',
+        'module.exports = config;',
+      ].join('\n'),
+    }];
+
+    const ctx = makeContext({ mcpServerSources: configConstant });
+    const result = await mcp018.run(ctx);
+
+    expect(result.passed).toBe(true);
+  });
+
+  it('passes for static state literal when nearby code generates it dynamically', async () => {
+    const dynamicNearby: MCPServerSource[] = [{
+      serverName: 'state-dynamic',
+      sourceCode: [
+        'const state = crypto.randomBytes(16).toString("hex");',
+        'const params = new URLSearchParams({',
+        '  state: "",',
+        '});',
+        'params.set("state", state);',
+      ].join('\n'),
+    }];
+
+    const ctx = makeContext({ mcpServerSources: dynamicNearby });
+    const result = await mcp018.run(ctx);
+
+    expect(result.passed).toBe(true);
+  });
+
+  it('ignores callback handlers unrelated to OAuth (no code/grant in nearby lines)', async () => {
+    const uiCallback: MCPServerSource[] = [{
+      serverName: 'ui-callback',
+      sourceCode: [
+        'function onClickCallback(event) {',
+        '  // pure UI handler, no OAuth involved',
+        '  updateView(event.target.value);',
+        '  return false;',
+        '}',
+      ].join('\n'),
+    }];
+
+    const ctx = makeContext({ mcpServerSources: uiCallback });
+    const result = await mcp018.run(ctx);
 
     expect(result.passed).toBe(true);
   });
