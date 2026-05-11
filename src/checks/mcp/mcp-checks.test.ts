@@ -346,6 +346,41 @@ describe('MCP-005: Tool Input Injection', () => {
 
     expect(result.passed).toBe(true);
   });
+
+  // ----- Negative false-positive fixtures -----
+
+  it('ignores injection patterns inside line comments', async () => {
+    const commentOnly: MCPServerSource[] = [{
+      serverName: 'doc-only',
+      sourceCode: [
+        '// Never do exec(req.body) — that is RCE.',
+        '// Never spawn(input) or eval(args.code) with untrusted data.',
+        '// SQL injection via `SELECT * FROM users WHERE id=${input.id}` is forbidden.',
+        'function unrelated() { return 1; }',
+      ].join('\n'),
+    }];
+
+    const ctx = makeContext({ mcpServerSources: commentOnly });
+    const result = await mcp005.run(ctx);
+
+    expect(result.passed).toBe(true);
+  });
+
+  it('passes when input is validated before reaching the sink', async () => {
+    const validated: MCPServerSource[] = [{
+      serverName: 'validated',
+      sourceCode: [
+        'const allowed = ["status", "version"];',
+        'const cmd = allowed.includes(req.body.cmd) ? req.body.cmd : "status";',
+        'execFileSync("/usr/bin/myapp", [cmd]);',
+      ].join('\n'),
+    }];
+
+    const ctx = makeContext({ mcpServerSources: validated });
+    const result = await mcp005.run(ctx);
+
+    expect(result.passed).toBe(true);
+  });
 });
 
 // ==================== MCP-006: Data Exfiltration ====================
@@ -372,6 +407,42 @@ describe('MCP-006: Data Exfiltration Risk', () => {
 
     expect(result.passed).toBe(true);
   });
+
+  // ----- Negative false-positive fixtures -----
+
+  it('passes when file read happens but no network sink consumes the data', async () => {
+    const readOnly: MCPServerSource[] = [{
+      serverName: 'read-only',
+      sourceCode: [
+        'const fs = require("fs");',
+        'const config = fs.readFileSync("./config.json", "utf-8");',
+        'console.log("config loaded");',
+        'return JSON.parse(config);',
+      ].join('\n'),
+    }];
+
+    const ctx = makeContext({ mcpServerSources: readOnly });
+    const result = await mcp006.run(ctx);
+
+    expect(result.passed).toBe(true);
+  });
+
+  it('passes for HTTPS fetch with no source variable flowing in', async () => {
+    const noFlow: MCPServerSource[] = [{
+      serverName: 'no-flow',
+      sourceCode: [
+        'async function getData() {',
+        '  const r = await fetch("https://api.example.com/v1/status");',
+        '  return r.json();',
+        '}',
+      ].join('\n'),
+    }];
+
+    const ctx = makeContext({ mcpServerSources: noFlow });
+    const result = await mcp006.run(ctx);
+
+    expect(result.passed).toBe(true);
+  });
 });
 
 // ==================== MCP-007: Prompt Injection ====================
@@ -395,6 +466,43 @@ describe('MCP-007: Prompt Injection via Tool Results', () => {
     const result = await mcp007.run(ctx);
 
     console.log(`[MCP-007] safe → passed: ${result.passed}`);
+
+    expect(result.passed).toBe(true);
+  });
+
+  // ----- Negative false-positive fixtures -----
+
+  it('ignores unsafe-return patterns inside line comments', async () => {
+    const commentOnly: MCPServerSource[] = [{
+      serverName: 'doc-only',
+      sourceCode: [
+        '// Anti-pattern: return await fetch(externalUrl) without sanitization.',
+        '// Equivalent risk: return readFileSync(path) when content is attacker-controlled.',
+        'function unrelated() { return 1; }',
+      ].join('\n'),
+    }];
+
+    const ctx = makeContext({ mcpServerSources: commentOnly });
+    const result = await mcp007.run(ctx);
+
+    expect(result.passed).toBe(true);
+  });
+
+  it('passes when fetch is awaited into an intermediate sanitization step', async () => {
+    const sanitized: MCPServerSource[] = [{
+      serverName: 'sanitized',
+      sourceCode: [
+        'async function tool() {',
+        '  const r = await fetch("https://api.example.com/data");',
+        '  const raw = await r.text();',
+        '  const clean = sanitize(raw);',
+        '  return { content: clean };',
+        '}',
+      ].join('\n'),
+    }];
+
+    const ctx = makeContext({ mcpServerSources: sanitized });
+    const result = await mcp007.run(ctx);
 
     expect(result.passed).toBe(true);
   });
@@ -776,6 +884,45 @@ describe('MCP-015: Token Passthrough', () => {
     const result = await mcp015.run(ctx);
 
     console.log(`[MCP-015] safe → passed: ${result.passed}`);
+
+    expect(result.passed).toBe(true);
+  });
+
+  // ----- Negative false-positive fixtures -----
+
+  it('ignores token-passthrough strings inside line comments', async () => {
+    const commentOnly: MCPServerSource[] = [{
+      serverName: 'doc-only',
+      sourceCode: [
+        '// Anti-pattern: fetch(url, { headers: { authorization: req.headers.authorization } }).',
+        '// Always exchange tokens for a downstream service credential first.',
+        'function unrelated() { return 1; }',
+      ].join('\n'),
+    }];
+
+    const ctx = makeContext({ mcpServerSources: commentOnly });
+    const result = await mcp015.run(ctx);
+
+    expect(result.passed).toBe(true);
+  });
+
+  it('passes when outbound request uses a server-owned bearer token', async () => {
+    const ownToken: MCPServerSource[] = [{
+      serverName: 'own-token',
+      sourceCode: [
+        'async function callDownstream(payload) {',
+        '  const serviceToken = process.env.SERVICE_TOKEN;',
+        '  return fetch("https://downstream.example.com/api", {',
+        '    method: "POST",',
+        '    headers: { Authorization: `Bearer ${serviceToken}` },',
+        '    body: JSON.stringify(payload),',
+        '  });',
+        '}',
+      ].join('\n'),
+    }];
+
+    const ctx = makeContext({ mcpServerSources: ownToken });
+    const result = await mcp015.run(ctx);
 
     expect(result.passed).toBe(true);
   });

@@ -39,6 +39,8 @@ export const mcp007 = defineCheck({
       const lines = source.sourceCode.split('\n');
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
+        const trimmed = line.trim();
+        if (trimmed.startsWith('//') || trimmed.startsWith('*')) continue;
         for (const { pattern, name } of UNSAFE_RETURN_PATTERNS) {
           if (pattern.test(line)) {
             evidence.push({

