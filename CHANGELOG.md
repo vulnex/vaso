@@ -4,9 +4,37 @@ All notable changes to VASO (VULNEX Agent Security Observer) will be documented 
 
 This project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.4.1] - 2026-05-11
 
 ### Added
+
+- **Two new desktop-app adapters with 16 security checks** (`CD-001`–`CD-010`, `CG-001`–`CG-006`). Brings VASO to **18 adapters** and **251 total checks** across **16 categories**. The desktop apps are distinct from the existing `claude-code` CLI adapter — they target the standalone Claude Cowork / ChatGPT desktop applications, which have their own MCP surface, code-signing posture, and on-disk state.
+
+  - **Claude Desktop adapter** (`src/adapters/claude-desktop.ts`): detects the Claude Cowork host application on macOS (`~/Library/Application Support/Claude/claude_desktop_config.json`) and Windows (`%APPDATA%\Claude\claude_desktop_config.json`); no Linux build exists. MCPB Desktop Extensions under `Claude Extensions/` are inventoried and signature-verified. Version derived from `CFBundleShortVersionString` in the `.app`'s `Info.plist`. Active model surfaced from the Chromium Local Storage leveldb (`<installDir>/Local Storage/leveldb/`) — the picker writes the selected model id to a `model-selector-local_<account>` anchor key; the adapter scans `.ldb`/`.log` files as a byte stream, finds the anchor, and extracts the model id from the following window. Surfaced as `via: 'cowork local-storage'` in `vaso detect`.
+
+  - **ChatGPT Desktop adapter** (`src/adapters/chatgpt-desktop.ts`): macOS-only, detects `/Applications/ChatGPT.app` plus `~/Library/Application Support/com.openai.chat/`. Reads binary plists in `~/Library/Preferences/com.openai.chat*.plist` via the `plist` npm package (added as a runtime dep — `plutil -convert json` refuses to render NSDate/NSData-bearing plists). Paired connectors enumerated under `app_pairing_extensions/`. Version + bundle signature pulled via `defaults` / `codesign` against the OpenAI Team ID (`2DC432GLL2`).
+
+  - **Claude Desktop checks** (`src/checks/claude-desktop/`, 10 checks):
+    - **CD-001** (critical): plaintext API key in `mcpServers.*.env.*`
+    - **CD-002** (critical): config file world-readable when env values are present
+    - **CD-003** (warning): unpinned MCP server package (npx/pnpm/yarn/bunx/uvx/pipx without `@version` or `@sha256:`)
+    - **CD-004** (warning): MCP server URL over plaintext `http://`
+    - **CD-005** (warning): unsigned MCPB Desktop Extension under `Claude Extensions/`
+    - **CD-006** (critical): `alwaysApprove` / `autoApprove` auto-trust on MCP server
+    - **CD-007** (warning): sensitive-path filesystem-server scope (`~/.ssh`, `~/.aws`, `/`, etc.)
+    - **CD-008** (warning): stdio MCP server invoked via shell `-c`
+    - **CD-009** (warning): world-writable MCP command path
+    - **CD-010** (critical): credentials embedded directly in MCP URL or headers
+
+  - **ChatGPT Desktop checks** (`src/checks/chatgpt-desktop/`, 6 checks):
+    - **CG-001** (warning): conversation / draft `.data` files world-readable
+    - **CG-002** (warning): plaintext `userEmail` in `StatsigService.plist` (masked in evidence)
+    - **CG-003** (info): training-data opt-in active
+    - **CG-004** (info): precise-location opt-in active
+    - **CG-005** (critical): `codesign` / Team-ID mismatch on `/Applications/ChatGPT.app` (expected `2DC432GLL2`)
+    - **CG-006** (info): inventory of paired connectors in `app_pairing_extensions/`
+
+- **Snapshot/SSH transport coverage for the new desktop adapters.** The probe `allowlist.go` now permits `defaults`, `codesign`, and `plutil` (all stock Apple binaries, used read-only here for `Info.plist` reads, bundle signature verification, and plist format conversion). A new `expandArgsPerUser` helper in `probe/collector.go` fans out `~/`-prefixed command args across each discovered user, mirroring the existing per-user expansion for `filePaths`/`globPatterns`/`directoryListings`. ChatGPT Desktop's `loadPlistAsObject` now calls `fs.exec('plutil', ['-convert', 'xml1', '-o', '-', filePath])` unconditionally, so CG-002/003/004 produce identical FAIL/PASS verdicts over snapshot transport as they do locally — previously they silently passed remote even when the underlying conditions held, which was a false-negative gap. Claude Desktop's leveldb model walker also flows through `ctx.fs.readFile()` so the ASCII model-anchor extraction survives the probe's UTF-8 wire format.
 
 - **Multi-host scanning ergonomics**: `vaso scan` and `vaso detect` gain three flags that make fleet-style runs practical:
   - `--parallel <n>` — caps concurrent SSH targets (default 5). Replaces the previously hard-coded `CONCURRENCY=5` in `src/transport/multi-host.ts` and `src/commands/detect.ts`. Validated as a non-negative integer; `--parallel 0` is rejected with exit 2.
@@ -15,6 +43,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - **Live per-host progress for fleet scans**: `vaso scan` and `vaso detect` now print one line per host as it completes (`✓ label (Xms) — score N/100, AC / BW / CI` for scan, `✓ label (Xms) — N agent(s) detected` for detect, `✗ label (Xms): error` on failure). A slow host no longer blanks the terminal until the rest of the fleet finishes.
 - **`--silent` flag** on `vaso scan` and `vaso detect`: suppresses all stdout/stderr chatter — banner, retry banners, save-snapshot lines, per-host progress, summary, and the "Report written to" notice. Requires `-o` or `--output-dir` (the CLI rejects `--silent` without an output destination with exit 2). Errors and validation failures still print to stderr. Useful for cron / CI / scripted runs.
 - **`--output-dir <dir>` on `vaso scan`**: writes one report per host as `<dir>/<safe-hostname>.<ext>` using the format's natural extension (`json`, `sarif`, `md`, `html`, `csv`, `xml` for JUnit, `txt` for terminal). The directory is created if it doesn't exist. Mutually exclusive with `-o`.
+- **`--output-dir <dir>` on `vaso detect`** (mirror of the `vaso scan` flag): writes one file per host as `<dir>/<safe-hostname>.<ext>` (`.json` for JSON format, `.txt` for terminal). Mutually exclusive with `-o`. Useful for fleet-detect runs where you want a separate file per host.
 
 ### Changed
 
@@ -48,15 +77,21 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 - **`installation.skillsDirs` (plural) now drives skill-file enumeration.** OpenClaw per-agent installations declare two locations on `AgentInstallation`: the shared `~/.openclaw/skills` directory and the per-agent `~/.openclaw/agents/<name>/skills` directory. The adapter populated both — `skillsDirs` holding the full list and `skillsDir` set to the per-agent entry for backward compatibility — but the scan engine and the IOC-001 / IOC-002 directory scanners only consulted the singular field. Skills installed under the shared location silently bypassed `SKL-001..012`, `IOC-003..008`, and `IOC-001`/`IOC-002`. New `getAllSkillsDirs(installation)` helper in `core/utils.ts` returns the plural list when present and falls back to `[skillsDir]`; the engine flat-maps `getSkillFiles()` over every dir to populate `ctx.skillFiles`, and IOC-001/002 use the same helper for their scan-dir list.
 
+- **Adapter, check, and remediation-backup errors are now surfaced instead of silently dropped.** A multi-touch sweep over the scan pipeline:
+  - Adapter detection failures become `ADAPTER-DETECT` warning findings via a new `AdapterRegistry.detectAllDetailed()`; the previous `detectAll()` is kept as a back-compat wrapper that throws away the error metadata.
+  - Per-check `Promise` rejections in `scan`, `scanMCP`, and `scanSkillAudit` are now reported as warning findings instead of being filtered out of the result.
+  - Baseline diff key now includes `user/profile/agentName/installDir` plus sorted evidence, so the same check ID across two installations no longer collapses into a single baseline row.
+  - Remediation no longer swallows backup failures — the fix aborts and the user is told.
+  - `ScanEngine` filters checks by `this.fs.platform` instead of the host's `process.platform`, so snapshot/SSH scans see the scanned host's platform.
+  - `AGENT_TYPES` / `CHECK_CATEGORIES` runtime arrays moved into `core/types.ts` so the parked `rules/schema.ts` work can't drift from the union types.
+
 ### Fixed
 
 - **`--silent` actually silent now.** The CLI banner and IOC/advisory feed warnings were printed by the `preAction` hook *before* the action handler saw `--silent`. The hook was also reading `thisCommand.opts()` (the program's options, always empty) instead of `actionCommand.opts()` (the subcommand's options, where `--silent` lives), so the silent gate never fired. Both fixed: hook now reads from `actionCommand` and skips the banner / plugin warnings / rules warnings / stale-feed warnings when `--silent` is set.
 - **`--silent` validation is now consistent across all scan/detect modes.** Previously only the SSH branch enforced "—silent requires `-o` or `--output-dir`"; the local and snapshot paths silently ignored a misuse. Both validations are now hoisted to the top of `runScan` / `runDetect`, so `vaso detect --silent` (no output destination) exits 2 with a clear error regardless of which scan mode would have been taken.
 - **`-o <path>` now creates missing parent directories.** Passing `-o reports/run-1/file.json` previously failed with `ENOENT` if `reports/run-1/` didn't exist. New `writeFileEnsureDir` helper in `src/core/utils.ts` does `mkdir -p $(dirname path)` before writing. Wired into both `vaso scan` and `vaso detect`.
 
-### Added
-
-- **`--output-dir <dir>` on `vaso detect`** (mirror of the `vaso scan` flag): writes one file per host as `<dir>/<safe-hostname>.<ext>` (`.json` for JSON format, `.txt` for terminal). Mutually exclusive with `-o`. Useful for fleet-detect runs where you want a separate file per host.
+- **Phantom coding-agent installations no longer registered from unrelated tools.** A bare `~/.copilot/`, `~/.cursor/`, `~/.codex/`, `~/.qwen/`, `~/.gemini/`, `~/.claude/`, or `~/.opencode/` directory — without any recognized config files and without a CLI binary on `PATH` — used to be registered as an installation, producing phantom `vaso detect` rows with `Config files: 0` and `Version: unknown`. The Copilot IDE extension and `gh copilot` write under `~/.copilot/ide/`; `~/.cursor/` is the Cursor IDE's config dir; the others get auto-created by unrelated tooling. All seven coding-agent adapters now require at least one recognized config file or a confirmed CLI binary before registering. One regression test per adapter.
 
 ### Tests
 
