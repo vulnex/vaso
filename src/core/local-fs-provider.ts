@@ -13,6 +13,10 @@ export class LocalFSProvider implements FSProvider {
     return readFile(path, 'utf-8');
   }
 
+  async readBytes(path: string): Promise<Uint8Array> {
+    return readFile(path);
+  }
+
   async readdir(path: string): Promise<string[]> {
     return readdir(path);
   }
