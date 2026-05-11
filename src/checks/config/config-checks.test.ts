@@ -14,6 +14,7 @@ import { cfg007 } from './cfg-007-webhook-auth.js';
 import { cfg008 } from './cfg-008-sandbox-disabled.js';
 import { cfg009 } from './cfg-009-default-credentials.js';
 import { cfg010 } from './cfg-010-rate-limiting.js';
+import { cfg011 } from './cfg-011-node-cve.js';
 import { cfg012 } from './cfg-012-auth-bypass.js';
 import { cfg013 } from './cfg-013-dm-policy.js';
 import { cfg014 } from './cfg-014-tool-policy.js';
@@ -405,6 +406,32 @@ describe('CFG-015: mDNS Broadcast', () => {
     const config = makeConfig({});
     const result = await cfg015.run(makeContext([config]));
     console.log(`[CFG-015] no mdns → passed: ${result.passed}, message: ${result.message}`);
+    expect(result.passed).toBe(true);
+  });
+});
+
+describe('CFG-011: Node.js CVE-2026-21636', () => {
+  it('returns a CheckResult that reflects the running Node version', async () => {
+    const result = await cfg011.run(makeContext([makeConfig({})]));
+    expect(result.id).toBe('CFG-011');
+    expect(result.category).toBe('config');
+    expect(result.severity).toBe('warning');
+    expect(typeof result.passed).toBe('boolean');
+    // Message names the version regardless of pass/fail.
+    expect(result.message).toContain(process.version);
+  });
+
+  it('does not flag patched current Node versions', async () => {
+    // The vulnerable ranges are 18.x ≤ 18.20, 20.x ≤ 20.18, 22.x ≤ 22.12.
+    // CI and our dev machines run Node ≥ 20.19, so this should pass.
+    const major = parseInt(process.version.slice(1).split('.')[0], 10);
+    const minor = parseInt(process.version.slice(1).split('.')[1], 10);
+    const knownPatched =
+      (major === 20 && minor > 18) ||
+      (major === 22 && minor > 12) ||
+      major > 22;
+    if (!knownPatched) return; // skip silently on older test environments
+    const result = await cfg011.run(makeContext([makeConfig({})]));
     expect(result.passed).toBe(true);
   });
 });

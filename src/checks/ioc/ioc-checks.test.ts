@@ -1,11 +1,15 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { ScanContext, AgentInstallation, ParsedConfig } from '../../core/types.js';
 import { LocalFSProvider } from '../../core/local-fs-provider.js';
 import { ioc001 } from './ioc-001-c2-ips.js';
 import { ioc002 } from './ioc-002-malicious-domains.js';
+import { ioc003 } from './ioc-003-file-hash.js';
+import { ioc004 } from './ioc-004-malicious-publishers.js';
+import { ioc005 } from './ioc-005-typosquatting.js';
+import { ioc006 } from './ioc-006-skill-name-patterns.js';
 import { ioc007 } from './ioc-007-binary-patterns.js';
 import { ioc008 } from './ioc-008-virustotal.js';
 
@@ -264,5 +268,137 @@ describe('IOC-008: VirusTotal Cross-Reference', () => {
         delete process.env['VIRUSTOTAL_API_KEY'];
       }
     }
+  });
+});
+
+describe('IOC-003: File Hash Match', () => {
+  let tempDir: string;
+
+  beforeEach(async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'vaso-ioc003-'));
+  });
+
+  afterEach(async () => {
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  it('passes when no skills directory', async () => {
+    const result = await ioc003.run(makeContext(undefined));
+    expect(result.passed).toBe(true);
+  });
+
+  it('flags a file whose SHA-256 matches a bundled malicious hash', async () => {
+    // The empty-file SHA-256 (e3b0c44...855) is in the bundled FILE_HASHES list.
+    await writeFile(join(tempDir, 'empty.js'), '');
+    const result = await ioc003.run(makeContext(tempDir));
+    expect(result.passed).toBe(false);
+    expect(result.evidence![0].detail).toContain('e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855');
+  });
+
+  it('passes for files with non-listed hashes', async () => {
+    await writeFile(join(tempDir, 'benign.js'), 'console.log("hello");\n');
+    const result = await ioc003.run(makeContext(tempDir));
+    expect(result.passed).toBe(true);
+  });
+});
+
+describe('IOC-004: Malicious Publishers', () => {
+  let tempDir: string;
+
+  beforeEach(async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'vaso-ioc004-'));
+  });
+
+  afterEach(async () => {
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  it('passes when no skills directory', async () => {
+    const result = await ioc004.run(makeContext(undefined));
+    expect(result.passed).toBe(true);
+  });
+
+  it('flags a skill whose package.json author matches a malicious publisher', async () => {
+    const skillDir = join(tempDir, 'evil-skill');
+    await mkdir(skillDir, { recursive: true });
+    await writeFile(
+      join(skillDir, 'package.json'),
+      JSON.stringify({ name: 'evil-skill', author: 'clawhavoc' }),
+    );
+    const result = await ioc004.run(makeContext(tempDir));
+    expect(result.passed).toBe(false);
+    expect(result.evidence![0].detail).toContain('clawhavoc');
+  });
+
+  it('passes for skills with benign publishers', async () => {
+    const skillDir = join(tempDir, 'good-skill');
+    await mkdir(skillDir, { recursive: true });
+    await writeFile(
+      join(skillDir, 'package.json'),
+      JSON.stringify({ name: 'good-skill', author: { name: 'Acme Inc.' } }),
+    );
+    const result = await ioc004.run(makeContext(tempDir));
+    expect(result.passed).toBe(true);
+  });
+});
+
+describe('IOC-005: Typosquatting', () => {
+  let tempDir: string;
+
+  beforeEach(async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'vaso-ioc005-'));
+  });
+
+  afterEach(async () => {
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  it('passes when no skills directory', async () => {
+    const result = await ioc005.run(makeContext(undefined));
+    expect(result.passed).toBe(true);
+  });
+
+  it('flags a skill name within Levenshtein distance 2 of a trusted name', async () => {
+    // "flesystem" is distance 1 from "filesystem".
+    await mkdir(join(tempDir, 'flesystem'), { recursive: true });
+    const result = await ioc005.run(makeContext(tempDir));
+    expect(result.passed).toBe(false);
+    expect(result.evidence![0].detail).toContain('filesystem');
+  });
+
+  it('passes for skill names that are not close to any trusted name', async () => {
+    await mkdir(join(tempDir, 'unique-experimental-skill'), { recursive: true });
+    const result = await ioc005.run(makeContext(tempDir));
+    expect(result.passed).toBe(true);
+  });
+});
+
+describe('IOC-006: Skill Name Patterns', () => {
+  let tempDir: string;
+
+  beforeEach(async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'vaso-ioc006-'));
+  });
+
+  afterEach(async () => {
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  it('passes when no skills directory', async () => {
+    const result = await ioc006.run(makeContext(undefined));
+    expect(result.passed).toBe(true);
+  });
+
+  it('flags skill names matching malicious patterns (keylog)', async () => {
+    await mkdir(join(tempDir, 'awesome-keylogger'), { recursive: true });
+    const result = await ioc006.run(makeContext(tempDir));
+    expect(result.passed).toBe(false);
+    expect(result.evidence![0].detail).toContain('keylog');
+  });
+
+  it('passes for skill names that do not match any malicious pattern', async () => {
+    await mkdir(join(tempDir, 'data-export-tool'), { recursive: true });
+    const result = await ioc006.run(makeContext(tempDir));
+    expect(result.passed).toBe(true);
   });
 });

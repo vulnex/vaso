@@ -1,6 +1,9 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { mkdtemp, mkdir, writeFile, rm, chmod } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ScanContext, ParsedConfig, AgentInstallation } from '../../core/types.js';
+import { LocalFSProvider } from '../../core/local-fs-provider.js';
 import { nanobotChecks } from './index.js';
 
 const FIXTURE_DIR = join(process.cwd(), 'testing', 'fixtures', 'nanobot');
@@ -181,6 +184,161 @@ describe('NB-012: ClawHub via npx', () => {
   it('passes when no npx references', async () => {
     const raw = JSON.stringify({ skillSource: 'local' });
     const config = makeConfig('config.json', JSON.parse(raw), raw);
+    const result = await check.run(makeCtx([config]));
+    expect(result.passed).toBe(true);
+  });
+});
+
+// ---- Filesystem-backed Nanobot checks ----
+
+function makeFsCtx(configs: ParsedConfig[], installDir: string): ScanContext {
+  const installation: AgentInstallation = {
+    agent: 'nanobot',
+    installDir,
+    configFiles: configs,
+  };
+  return { installation, configs, platform: 'linux', fs: new LocalFSProvider() };
+}
+
+describe('NB-006: HEARTBEAT.md Injection Risk', () => {
+  const check = nanobotChecks.find(c => c.id === 'NB-006')!;
+  let tempDir: string;
+
+  beforeEach(async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'vaso-nb006-'));
+  });
+
+  afterEach(async () => {
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  it('passes when no HEARTBEAT.md is present', async () => {
+    const result = await check.run(makeFsCtx([], tempDir));
+    expect(result.passed).toBe(true);
+  });
+
+  it('flags HEARTBEAT.md when world-writable', async () => {
+    const heartbeat = join(tempDir, 'HEARTBEAT.md');
+    await writeFile(heartbeat, '# pulse\n');
+    await chmod(heartbeat, 0o666);
+    const result = await check.run(makeFsCtx([], tempDir));
+    expect(result.passed).toBe(false);
+    expect(result.evidence![0].detail).toContain('world-writable');
+  });
+});
+
+describe('NB-007: MEMORY.md Prompt Injection', () => {
+  const check = nanobotChecks.find(c => c.id === 'NB-007')!;
+  let tempDir: string;
+
+  beforeEach(async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'vaso-nb007-'));
+  });
+
+  afterEach(async () => {
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  it('passes when MEMORY.md is absent', async () => {
+    const result = await check.run(makeFsCtx([], tempDir));
+    expect(result.passed).toBe(true);
+  });
+
+  it('flags MEMORY.md when memory is enabled in config and file exists', async () => {
+    const memory = join(tempDir, 'MEMORY.md');
+    await writeFile(memory, '# remembered context\n');
+    const raw = JSON.stringify({ memory: true });
+    const config = makeConfig('config.json', { memory: true }, raw);
+    const result = await check.run(makeFsCtx([config], tempDir));
+    expect(result.passed).toBe(false);
+    expect(result.severity).toBe('critical');
+  });
+});
+
+describe('NB-008: Empty Bridge Token', () => {
+  const check = nanobotChecks.find(c => c.id === 'NB-008')!;
+
+  it('fails when a WhatsApp bridge channel has empty bridge_token', async () => {
+    const config = makeConfig('config.json', {
+      channels: {
+        wa: { type: 'whatsapp', bridge_token: '' },
+      },
+    });
+    const result = await check.run(makeCtx([config]));
+    expect(result.passed).toBe(false);
+  });
+
+  it('passes when bridge_token is configured', async () => {
+    const config = makeConfig('config.json', {
+      channels: {
+        wa: { type: 'whatsapp', bridge_token: 'persistent-secret' },
+      },
+    });
+    const result = await check.run(makeCtx([config]));
+    expect(result.passed).toBe(true);
+  });
+});
+
+describe('NB-009: Unencrypted Session Files', () => {
+  const check = nanobotChecks.find(c => c.id === 'NB-009')!;
+  let tempDir: string;
+
+  beforeEach(async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'vaso-nb009-'));
+  });
+
+  afterEach(async () => {
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  it('passes when no session files exist', async () => {
+    const config = makeConfig('config.json', {});
+    const result = await check.run(makeFsCtx([config], tempDir));
+    expect(result.passed).toBe(true);
+  });
+
+  it('flags session files when encryption is not configured', async () => {
+    const sessions = join(tempDir, 'sessions');
+    await mkdir(sessions, { recursive: true });
+    await writeFile(join(sessions, 'a.jsonl'), '{"role":"user"}\n');
+    const config = makeConfig('config.json', {});
+    const result = await check.run(makeFsCtx([config], tempDir));
+    expect(result.passed).toBe(false);
+  });
+
+  it('passes when session encryption is enabled', async () => {
+    const sessions = join(tempDir, 'sessions');
+    await mkdir(sessions, { recursive: true });
+    await writeFile(join(sessions, 'a.jsonl'), '{"role":"user"}\n');
+    const config = makeConfig('config.json', { sessions: { encryption: true } });
+    const result = await check.run(makeFsCtx([config], tempDir));
+    expect(result.passed).toBe(true);
+  });
+});
+
+describe('NB-010: Unrestricted Cron Channels', () => {
+  const check = nanobotChecks.find(c => c.id === 'NB-010')!;
+
+  it('fails when a cron job has no channel or recipient restriction', async () => {
+    const config = makeConfig('config.json', {
+      cron: { daily: { schedule: '0 9 * * *', message: 'morning ping' } },
+    });
+    const result = await check.run(makeCtx([config]));
+    expect(result.passed).toBe(false);
+  });
+
+  it('fails when a cron job targets channel "*"', async () => {
+    const config = makeConfig('config.json', {
+      cron: { broadcast: { schedule: '* * * * *', channel: '*' } },
+    });
+    const result = await check.run(makeCtx([config]));
+    expect(result.passed).toBe(false);
+  });
+
+  it('passes when each cron job restricts its channel', async () => {
+    const config = makeConfig('config.json', {
+      cron: { daily: { schedule: '0 9 * * *', channel: 'team-alerts', allowedRecipients: ['ops@example.com'] } },
+    });
     const result = await check.run(makeCtx([config]));
     expect(result.passed).toBe(true);
   });
