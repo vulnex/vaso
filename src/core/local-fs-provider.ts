@@ -1,6 +1,6 @@
 import { access as fsAccess, readdir, readFile, stat, realpath } from 'node:fs/promises';
 import { execFileSync, execFile } from 'node:child_process';
-import { homedir as osHomedir } from 'node:os';
+import { homedir as osHomedir, hostname as osHostname } from 'node:os';
 import { promisify } from 'node:util';
 import type { FSProvider, DirentInfo, ExecResult, ExecOptions } from './fs-provider.js';
 
@@ -89,6 +89,10 @@ export class LocalFSProvider implements FSProvider {
 
   homedir(): string {
     return osHomedir();
+  }
+
+  hostname(): string {
+    return osHostname();
   }
 
   getEnv(key: string): string | undefined {

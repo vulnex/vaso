@@ -439,7 +439,7 @@ describe('SnapshotFSProvider', () => {
   describe('hostname', () => {
     it('returns correct hostname', () => {
       const provider = new SnapshotFSProvider(makeSnapshot({ hostname: 'prod-server-01' }));
-      expect(provider.hostname).toBe('prod-server-01');
+      expect(provider.hostname()).toBe('prod-server-01');
     });
   });
 

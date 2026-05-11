@@ -40,4 +40,10 @@ export interface FSProvider {
   getEnv(key: string): string | undefined;
   readonly platform: NodeJS.Platform;
   homedir(): string;
+  /** Hostname of the machine the scan is running against. LocalFSProvider
+   *  returns `os.hostname()`; SnapshotFSProvider returns the value the probe
+   *  collected. Used by checks that need to disambiguate per-host state
+   *  (e.g. MCP tool-baseline keys when fleet-scanning two hosts whose
+   *  configs declare the same server name with no localPath/packageName). */
+  hostname(): string;
 }
