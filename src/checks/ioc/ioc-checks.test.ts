@@ -199,6 +199,39 @@ function reduce(arr) {
     const result = await ioc007.run(makeContext(tempDir));
     expect(result.passed).toBe(true);
   });
+
+  // ----- Offset-0 anchoring regression coverage -----
+
+  it('passes when "MZ" appears mid-file inside an identifier', async () => {
+    await writeFile(
+      join(tempDir, 'mz-mid.js'),
+      'function xMZx() { return 1; }\nconst MZmax = 100;\n',
+    );
+    const result = await ioc007.run(makeContext(tempDir));
+    expect(result.passed).toBe(true);
+  });
+
+  it('fails when PE/DOS "MZ" magic is at file offset 0', async () => {
+    const buf = Buffer.concat([
+      Buffer.from([0x4d, 0x5a]),
+      Buffer.from('// rest of fake js'),
+    ]);
+    await writeFile(join(tempDir, 'pe-magic.js'), buf);
+    const result = await ioc007.run(makeContext(tempDir));
+    expect(result.passed).toBe(false);
+    expect(result.evidence![0].detail).toContain('PE/DOS executable');
+  });
+
+  it('passes when ELF magic appears mid-file but not at offset 0', async () => {
+    const buf = Buffer.concat([
+      Buffer.from('// leading comment\n'),
+      Buffer.from([0x7f, 0x45, 0x4c, 0x46]),
+      Buffer.from('\n// trailing content'),
+    ]);
+    await writeFile(join(tempDir, 'elf-mid.js'), buf);
+    const result = await ioc007.run(makeContext(tempDir));
+    expect(result.passed).toBe(true);
+  });
 });
 
 describe('IOC-008: VirusTotal Cross-Reference', () => {

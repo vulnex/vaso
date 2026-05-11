@@ -23,6 +23,19 @@ export class SnapshotFSProvider implements FSProvider {
     return entry.content;
   }
 
+  async readBytes(path: string): Promise<Uint8Array> {
+    const entry = this.snapshot.files[path];
+    if (!entry || !entry.exists) {
+      throw new Error(`ENOENT: file not collected in snapshot: ${path}`);
+    }
+    // The probe stored the file as a UTF-8 string. We re-encode it here on
+    // the same encoding so ASCII-safe content (most source files, including
+    // ELF/PE magics whose first bytes are valid UTF-8 single-byte codepoints)
+    // roundtrips faithfully. Non-UTF-8 byte sequences were already replaced
+    // with U+FFFD by the probe and can't be recovered.
+    return Buffer.from(entry.content, 'utf-8');
+  }
+
   async readdir(path: string): Promise<string[]> {
     const listing = this.snapshot.directories[path];
     if (listing) {
