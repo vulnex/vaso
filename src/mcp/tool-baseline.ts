@@ -74,12 +74,14 @@ function sourceIdentity(source: MCPServerSource): string {
   return source.localPath ?? source.packageName ?? source.serverName;
 }
 
-export function baselineKey(source: MCPServerSource): string {
+export function baselineKey(source: MCPServerSource, hostname?: string): string {
   const identity = sourceIdentity(source);
   const hash = createHash('sha256')
     .update(identity)
     .update('|')
     .update(source.serverName)
+    .update('|')
+    .update(hostname ?? '')
     .digest('hex')
     .slice(0, 16);
   const slug = source.serverName.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 32);
@@ -116,8 +118,9 @@ export async function diffToolBaseline(
   store: ToolBaselineStore,
   source: MCPServerSource,
   currentTools: MCPToolDefinition[],
+  hostname?: string,
 ): Promise<{ diff: ToolBaselineDiff; isFirstScan: boolean }> {
-  const key = baselineKey(source);
+  const key = baselineKey(source, hostname);
   const existing = await store.load(key);
   const baseline = makeBaseline(source, currentTools);
 

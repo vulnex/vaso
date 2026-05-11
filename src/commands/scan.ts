@@ -343,7 +343,7 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
 
     // Set host from snapshot if scanning from snapshot
     if (snapshotFs) {
-      result.host = snapshotFs.hostname;
+      result.host = snapshotFs.hostname();
     }
 
     // Save baseline if requested

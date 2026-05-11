@@ -45,6 +45,22 @@ describe('baselineKey', () => {
     });
     expect(key).toMatch(/^[a-zA-Z0-9_-]+$/);
   });
+
+  it('separates baselines by hostname when the source identity is otherwise identical', () => {
+    // Fleet scan case: two hosts run an identical config block that names an
+    // MCP server with no localPath and no packageName. Without hostname in
+    // the key, both hosts collide onto the same baseline file and either
+    // host's drift looks like a rug pull on the other.
+    const source: MCPServerSource = { serverName: 'fs' };
+    const a = baselineKey(source, 'web-1');
+    const b = baselineKey(source, 'web-2');
+    expect(a).not.toBe(b);
+  });
+
+  it('treats undefined hostname as a stable default', () => {
+    const source: MCPServerSource = { serverName: 'fs', localPath: '/x/y' };
+    expect(baselineKey(source)).toBe(baselineKey(source, undefined));
+  });
 });
 
 describe('InMemoryToolBaselineStore', () => {

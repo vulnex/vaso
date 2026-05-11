@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { hostname as osHostname } from 'node:os';
 import { join } from 'node:path';
 import type { ScanContext, AgentInstallation } from '../../core/types.js';
 import type { MCPConfig, MCPServerSource } from '../../mcp/types.js';
@@ -1345,7 +1346,7 @@ describe('MCP-020: Tool Definition Rug Pull', () => {
   it('detects changed tool description on second scan', async () => {
     const store = new InMemoryToolBaselineStore();
     await store.save(
-      baselineKey(testSource),
+      baselineKey(testSource, osHostname()),
       makeBaseline(testSource, [{ name: 'get_data', description: 'Get some data' }]),
     );
 
@@ -1371,7 +1372,7 @@ describe('MCP-020: Tool Definition Rug Pull', () => {
   it('detects newly added tool', async () => {
     const store = new InMemoryToolBaselineStore();
     await store.save(
-      baselineKey(testSource),
+      baselineKey(testSource, osHostname()),
       makeBaseline(testSource, [{ name: 'get_data', description: 'Get some data' }]),
     );
 
@@ -1398,7 +1399,7 @@ describe('MCP-020: Tool Definition Rug Pull', () => {
   it('detects removed tool', async () => {
     const store = new InMemoryToolBaselineStore();
     await store.save(
-      baselineKey(testSource),
+      baselineKey(testSource, osHostname()),
       makeBaseline(testSource, [
         { name: 'get_data', description: 'Get some data' },
         { name: 'old_tool', description: 'An old tool' },
@@ -1426,7 +1427,7 @@ describe('MCP-020: Tool Definition Rug Pull', () => {
     const store = new InMemoryToolBaselineStore();
     // Baseline must include schema '{}' to match what extractToolDefinitions extracts.
     await store.save(
-      baselineKey(testSource),
+      baselineKey(testSource, osHostname()),
       makeBaseline(testSource, [{ name: 'get_data', description: 'Get some data', schema: '{}' }]),
     );
 

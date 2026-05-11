@@ -18,6 +18,7 @@ export const mcp020 = defineCheck({
     const evidence: Evidence[] = [];
     const sources = ctx.mcpServerSources ?? [];
     const store = ctx.mcpToolBaselineStore ?? defaultBaselineStore();
+    const hostname = ctx.fs.hostname();
     let anyFirstScan = false;
     let totalChanges = 0;
 
@@ -27,7 +28,7 @@ export const mcp020 = defineCheck({
       const tools = extractToolDefinitions(source.sourceCode);
       if (tools.length === 0) continue;
 
-      const { diff, isFirstScan } = await diffToolBaseline(store, source, tools);
+      const { diff, isFirstScan } = await diffToolBaseline(store, source, tools, hostname);
 
       if (isFirstScan) {
         anyFirstScan = true;
