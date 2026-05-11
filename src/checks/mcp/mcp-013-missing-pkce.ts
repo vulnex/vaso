@@ -29,6 +29,9 @@ export const mcp013 = defineCheck({
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
 
+        const trimmed = line.trim();
+        if (trimmed.startsWith('//') || trimmed.startsWith('*')) continue;
+
         // Detect OAuth authorize URL construction without PKCE
         if (AUTHORIZE_URL_PATTERN.test(line)) {
           const start = Math.max(0, i - SEARCH_RADIUS);
