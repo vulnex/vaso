@@ -1,6 +1,7 @@
 import { join, extname, dirname } from 'node:path';
 import { mkdir, writeFile } from 'node:fs/promises';
 import type { FSProvider } from './fs-provider.js';
+import type { AgentInstallation } from './types.js';
 import { LocalFSProvider } from './local-fs-provider.js';
 
 /**
@@ -15,6 +16,20 @@ export function getNestedValue(obj: Record<string, unknown>, path: string): unkn
 }
 
 const CODE_EXTENSIONS = new Set(['.js', '.ts', '.mjs', '.cjs', '.jsx', '.tsx', '.py', '.sh', '.bash']);
+
+/**
+ * Resolve every skills directory an installation declares. Adapters that
+ * expose multiple skills locations (e.g. OpenClaw's shared + per-agent dirs)
+ * populate `skillsDirs`; adapters that only have one populate `skillsDir`.
+ * This helper normalises both shapes into a single list so file enumeration
+ * and directory scans can walk every relevant location once.
+ */
+export function getAllSkillsDirs(installation: AgentInstallation): string[] {
+  if (installation.skillsDirs && installation.skillsDirs.length > 0) {
+    return installation.skillsDirs;
+  }
+  return installation.skillsDir ? [installation.skillsDir] : [];
+}
 
 /**
  * Recursively find all code files (JS/TS/Python/Shell) under a directory.

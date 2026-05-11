@@ -54,6 +54,7 @@ function mockFs(platform: NodeJS.Platform): FSProvider {
   return {
     platform,
     async readFile() { throw new Error('not implemented'); },
+    async readBytes() { return new Uint8Array(); },
     async readdir() { return []; },
     async readdirEntries() { return []; },
     async access() { return false; },
@@ -240,6 +241,79 @@ describe('ScanEngine', () => {
     expect(captured).toEqual([
       '/snap/openclaw/skills/a.py',
       '/snap/openclaw/skills/b.js',
+    ]);
+  });
+
+  it('aggregates ctx.skillFiles across every dir in installation.skillsDirs', async () => {
+    // OpenClaw per-agent installations declare both the shared and the per-agent
+    // skills locations via skillsDirs. ctx.skillFiles must include files from
+    // every entry so skill / IOC checks see the full surface, not just the
+    // last dir.
+    const installation: AgentInstallation = {
+      agent: 'openclaw',
+      installDir: '/snap/openclaw/agents/researcher',
+      skillsDir: '/snap/openclaw/agents/researcher/skills', // per-agent
+      skillsDirs: [
+        '/snap/openclaw/skills',                            // shared
+        '/snap/openclaw/agents/researcher/skills',          // per-agent
+      ],
+      configFiles: [],
+    };
+
+    const adapter: AgentAdapter = {
+      agent: 'openclaw',
+      displayName: 'OpenClaw',
+      async detect() { return [installation]; },
+      getConfigPaths() { return []; },
+      getSkillsDir() { return '/snap/openclaw/agents/researcher/skills'; },
+      getGatewayInfo() { return undefined; },
+    };
+
+    const filesByDir: Record<string, string[]> = {
+      '/snap/openclaw/skills': ['shared.js', 'common.py'],
+      '/snap/openclaw/agents/researcher/skills': ['agent-specific.ts'],
+    };
+
+    const fs: FSProvider = {
+      ...mockFs('linux'),
+      async readdirEntries(dir: string) {
+        const names = filesByDir[dir] ?? [];
+        return names.map(name => ({ name, isFile: true, isDirectory: false, parentPath: dir }));
+      },
+    };
+
+    let captured: string[] | undefined;
+    const recorder: CheckModule = {
+      id: 'REC-003',
+      name: 'Recorder',
+      category: 'skills',
+      severity: 'info',
+      description: 'Records ctx.skillFiles',
+      async run(ctx) {
+        captured = ctx.skillFiles;
+        return {
+          id: 'REC-003',
+          name: 'Recorder',
+          category: 'skills',
+          severity: 'info',
+          passed: true,
+          message: 'recorded',
+        };
+      },
+    };
+
+    const adapters = new AdapterRegistry();
+    adapters.register(adapter);
+    const checks = new CheckRegistry();
+    checks.register(recorder);
+
+    const engine = new ScanEngine(adapters, checks, fs);
+    await engine.scan({});
+
+    expect(captured).toEqual([
+      '/snap/openclaw/skills/shared.js',
+      '/snap/openclaw/skills/common.py',
+      '/snap/openclaw/agents/researcher/skills/agent-specific.ts',
     ]);
   });
 

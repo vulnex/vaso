@@ -5,7 +5,7 @@ import type { MCPConfig, MCPServerSource } from '../mcp/types.js';
 import type { FSProvider } from './fs-provider.js';
 import { LocalFSProvider } from './local-fs-provider.js';
 import { computeScore, scoreToGrade, summarizeResults } from './scoring.js';
-import { getSkillFiles } from './utils.js';
+import { getAllSkillsDirs, getSkillFiles } from './utils.js';
 
 export class ScanEngine {
   private fs: FSProvider;
@@ -68,8 +68,9 @@ export class ScanEngine {
   }
 
   private async scanAgent(installation: AgentInstallation): Promise<AgentScanResult> {
-    const skillFiles = installation.skillsDir
-      ? await getSkillFiles(installation.skillsDir, this.fs)
+    const skillsDirs = getAllSkillsDirs(installation);
+    const skillFiles = skillsDirs.length > 0
+      ? (await Promise.all(skillsDirs.map(d => getSkillFiles(d, this.fs)))).flat()
       : undefined;
 
     const adapter = this.adapters.getAdapter(installation.agent);
