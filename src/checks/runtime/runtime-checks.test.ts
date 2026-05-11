@@ -4,6 +4,8 @@ import type { FSProvider } from '../../core/fs-provider.js';
 import { LocalFSProvider } from '../../core/local-fs-provider.js';
 import { run001 } from './run-001-launch-agents.js';
 import { run002 } from './run-002-suspicious-cron.js';
+import { run003 } from './run-003-vscode-trojans.js';
+import { run004 } from './run-004-docker-security.js';
 import { run005 } from './run-005-process-ancestry.js';
 
 function makeContext(): ScanContext {
@@ -19,12 +21,14 @@ function makeMockedFs(filesByDir: Record<string, string[]>, platform: NodeJS.Pla
   return {
     readdir: vi.fn(async (dir: string) => filesByDir[dir] ?? []),
     readFile: vi.fn(async () => ''),
+    readBytes: vi.fn(async () => new Uint8Array()),
     readdirEntries: vi.fn(async () => []),
     access: vi.fn(async () => true),
     stat: vi.fn(),
     realpath: vi.fn(),
     exec: vi.fn(),
     execSync: vi.fn(),
+    getEnv: vi.fn(),
     homedir: () => '/home/test',
     platform,
   } as FSProvider;
@@ -89,12 +93,14 @@ describe('RUN-001: Unauthorized LaunchAgents', () => {
     const fs: FSProvider = {
       readdir: vi.fn(async () => { throw new Error('ENOENT'); }),
       readFile: vi.fn(async () => ''),
+      readBytes: vi.fn(async () => new Uint8Array()),
       readdirEntries: vi.fn(async () => []),
       access: vi.fn(async () => false),
       stat: vi.fn(),
       realpath: vi.fn(),
       exec: vi.fn(),
       execSync: vi.fn(),
+      getEnv: vi.fn(),
       homedir: () => '/home/test',
       platform: 'darwin',
     } as FSProvider;
@@ -107,6 +113,7 @@ function makeCronCtx(crontabOutput: string | Error): ScanContext {
   const fs: FSProvider = {
     readdir: vi.fn(async () => []),
     readFile: vi.fn(async () => ''),
+    readBytes: vi.fn(async () => new Uint8Array()),
     readdirEntries: vi.fn(async () => []),
     access: vi.fn(async () => false),
     stat: vi.fn(),
@@ -116,6 +123,7 @@ function makeCronCtx(crontabOutput: string | Error): ScanContext {
       if (crontabOutput instanceof Error) throw crontabOutput;
       return crontabOutput;
     }),
+    getEnv: vi.fn(),
     homedir: () => '/home/test',
     platform: 'linux',
   } as FSProvider;
@@ -182,5 +190,77 @@ describe('RUN-005: Process Ancestry Analysis', () => {
     // In a test environment, no openclaw/nanoclaw/etc processes should be running
     const result = await run005.run(makeContext());
     expect(result.passed).toBe(true);
+  });
+});
+
+describe('RUN-003: VS Code Extension Trojans', () => {
+  it('flags a known malicious VS Code extension directory', async () => {
+    const fs = makeMockedFs({
+      '/home/test/.vscode/extensions': ['clawhavoc.malicious-skill-loader-1.0.0'],
+      '/home/test/.vscode-insiders/extensions': [],
+      '/home/test/.cursor/extensions': [],
+    });
+    const result = await run003.run(makeRunCtx(fs));
+    expect(result.passed).toBe(false);
+    expect(result.severity).toBe('critical');
+    expect(result.evidence![0].detail).toContain('clawhavoc');
+  });
+
+  it('passes when no extension directory contains a known malicious ID', async () => {
+    const fs = makeMockedFs({
+      '/home/test/.vscode/extensions': [
+        'ms-python.python-2026.0.0',
+        'esbenp.prettier-vscode-9.0.0',
+      ],
+      '/home/test/.vscode-insiders/extensions': [],
+      '/home/test/.cursor/extensions': [],
+    });
+    const result = await run003.run(makeRunCtx(fs));
+    expect(result.passed).toBe(true);
+  });
+});
+
+describe('RUN-004: Docker Security', () => {
+  it('passes when /var/run/docker.sock is not accessible (or absent)', async () => {
+    const fs: FSProvider = {
+      readdir: vi.fn(async () => []),
+      readFile: vi.fn(async () => ''),
+      readBytes: vi.fn(async () => new Uint8Array()),
+      readdirEntries: vi.fn(async () => []),
+      access: vi.fn(async () => false),
+      stat: vi.fn(async () => { throw new Error('ENOENT'); }),
+      realpath: vi.fn(),
+      exec: vi.fn(),
+      execSync: vi.fn(),
+      getEnv: vi.fn(),
+      homedir: () => '/home/test',
+      platform: 'linux',
+    } as FSProvider;
+    const result = await run004.run(makeRunCtx(fs, 'linux'));
+    expect(result.passed).toBe(true);
+  });
+
+  it('flags a world-accessible docker socket', async () => {
+    const fs: FSProvider = {
+      readdir: vi.fn(async () => []),
+      readFile: vi.fn(async () => ''),
+      readBytes: vi.fn(async () => new Uint8Array()),
+      readdirEntries: vi.fn(async () => []),
+      access: vi.fn(async () => true),
+      stat: vi.fn(async () => ({
+        mode: 0o666,
+        isFile: () => false,
+        isDirectory: () => false,
+      })),
+      realpath: vi.fn(),
+      exec: vi.fn(),
+      execSync: vi.fn(),
+      getEnv: vi.fn(),
+      homedir: () => '/home/test',
+      platform: 'linux',
+    } as FSProvider;
+    const result = await run004.run(makeRunCtx(fs, 'linux'));
+    expect(result.passed).toBe(false);
+    expect(result.evidence![0].file).toBe('/var/run/docker.sock');
   });
 });

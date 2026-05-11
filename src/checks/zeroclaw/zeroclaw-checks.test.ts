@@ -1,6 +1,9 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { mkdtemp, writeFile, rm, chmod } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ScanContext, ParsedConfig, AgentInstallation } from '../../core/types.js';
+import { LocalFSProvider } from '../../core/local-fs-provider.js';
 import { zeroclawChecks } from './index.js';
 
 const FIXTURE_DIR = join(process.cwd(), 'testing', 'fixtures', 'zeroclaw');
@@ -206,6 +209,150 @@ describe('ZC-014: No OS Sandbox', () => {
       runtime: { kind: 'firejail', sandbox: 'firejail' },
     });
     const result = await check.run(makeCtx([config]));
+    expect(result.passed).toBe(true);
+  });
+});
+
+describe('ZC-004: Pairing Disabled', () => {
+  const check = zeroclawChecks.find(c => c.id === 'ZC-004')!;
+
+  it('fails when require_pairing=false', async () => {
+    const config = makeConfig('config.toml', { require_pairing: false });
+    const result = await check.run(makeCtx([config]));
+    expect(result.passed).toBe(false);
+    expect(result.severity).toBe('warning');
+  });
+
+  it('passes when require_pairing=true', async () => {
+    const config = makeConfig('config.toml', { require_pairing: true });
+    const result = await check.run(makeCtx([config]));
+    expect(result.passed).toBe(true);
+  });
+});
+
+describe('ZC-006: Workspace Unrestricted', () => {
+  const check = zeroclawChecks.find(c => c.id === 'ZC-006')!;
+
+  it('fails when workspace_only=false', async () => {
+    const config = makeConfig('config.toml', { workspace_only: false });
+    const result = await check.run(makeCtx([config]));
+    expect(result.passed).toBe(false);
+  });
+
+  it('passes when workspace_only=true', async () => {
+    const config = makeConfig('config.toml', { workspace_only: true });
+    const result = await check.run(makeCtx([config]));
+    expect(result.passed).toBe(true);
+  });
+});
+
+describe('ZC-008: Open Skills', () => {
+  const check = zeroclawChecks.find(c => c.id === 'ZC-008')!;
+
+  it('fails when skills.open_install=true', async () => {
+    const config = makeConfig('config.toml', { skills: { open_install: true } });
+    const result = await check.run(makeCtx([config]));
+    expect(result.passed).toBe(false);
+  });
+
+  it('fails when skills.sources includes a public GitHub URL', async () => {
+    const config = makeConfig('config.toml', {
+      skills: { sources: ['https://github.com/random/skill.git'] },
+    });
+    const result = await check.run(makeCtx([config]));
+    expect(result.passed).toBe(false);
+    expect(result.evidence!.some(e => e.detail?.includes('github.com'))).toBe(true);
+  });
+
+  it('passes for private skill sources only', async () => {
+    const config = makeConfig('config.toml', {
+      skills: { open_install: false, sources: ['git@gitlab.internal:vaso/skills.git'] },
+    });
+    const result = await check.run(makeCtx([config]));
+    expect(result.passed).toBe(true);
+  });
+});
+
+describe('ZC-009: WhatsApp No App Secret', () => {
+  const check = zeroclawChecks.find(c => c.id === 'ZC-009')!;
+
+  it('fails when WhatsApp channel enabled without app_secret', async () => {
+    const config = makeConfig('config.toml', {
+      channels: { whatsapp: { enabled: true } },
+    });
+    const result = await check.run(makeCtx([config]));
+    expect(result.passed).toBe(false);
+  });
+
+  it('passes when WhatsApp app_secret is set', async () => {
+    const config = makeConfig('config.toml', {
+      channels: { whatsapp: { enabled: true, app_secret: 'hmac-secret-123' } },
+    });
+    const result = await check.run(makeCtx([config]));
+    expect(result.passed).toBe(true);
+  });
+});
+
+describe('ZC-012: HTTP Tool No Allowlist', () => {
+  const check = zeroclawChecks.find(c => c.id === 'ZC-012')!;
+
+  it('fails when http tool is enabled with no allowed_domains', async () => {
+    const config = makeConfig('config.toml', {
+      tools: { http: { enabled: true } },
+    });
+    const result = await check.run(makeCtx([config]));
+    expect(result.passed).toBe(false);
+  });
+
+  it('passes when http tool has an allowed_domains list', async () => {
+    const config = makeConfig('config.toml', {
+      tools: { http: { enabled: true, allowed_domains: ['api.example.com'] } },
+    });
+    const result = await check.run(makeCtx([config]));
+    expect(result.passed).toBe(true);
+  });
+});
+
+describe('ZC-013: .secret_key Permissions', () => {
+  const check = zeroclawChecks.find(c => c.id === 'ZC-013')!;
+  let tempDir: string;
+
+  function makeFsCtx(): ScanContext {
+    const installation: AgentInstallation = {
+      agent: 'zeroclaw',
+      installDir: tempDir,
+      configFiles: [],
+    };
+    return { installation, configs: [], platform: process.platform as NodeJS.Platform, fs: new LocalFSProvider() };
+  }
+
+  beforeEach(async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'vaso-zc013-'));
+  });
+
+  afterEach(async () => {
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  it('fails when .secret_key permissions are too permissive', async () => {
+    const keyPath = join(tempDir, '.secret_key');
+    await writeFile(keyPath, 'super-secret\n');
+    await chmod(keyPath, 0o644);
+    const result = await check.run(makeFsCtx());
+    expect(result.passed).toBe(false);
+    expect(result.severity).toBe('critical');
+  });
+
+  it('passes when .secret_key has 0600 permissions', async () => {
+    const keyPath = join(tempDir, '.secret_key');
+    await writeFile(keyPath, 'super-secret\n');
+    await chmod(keyPath, 0o600);
+    const result = await check.run(makeFsCtx());
+    expect(result.passed).toBe(true);
+  });
+
+  it('passes when .secret_key is absent', async () => {
+    const result = await check.run(makeFsCtx());
     expect(result.passed).toBe(true);
   });
 });

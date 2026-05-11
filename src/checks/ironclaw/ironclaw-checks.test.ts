@@ -167,3 +167,106 @@ describe('IC-012: Docker Auto-Pull No Digest', () => {
     expect(result.passed).toBe(true);
   });
 });
+
+describe('IC-002: No TLS on Listeners', () => {
+  const check = ironclawChecks.find(c => c.id === 'IC-002')!;
+
+  it('fails when an active listener has no TLS cert configured', async () => {
+    const raw = 'GATEWAY_HOST=0.0.0.0\nGATEWAY_PORT=18789';
+    const config = makeConfig('.env', { GATEWAY_HOST: '0.0.0.0', GATEWAY_PORT: '18789' }, raw);
+    const result = await check.run(makeCtx([config]));
+    expect(result.passed).toBe(false);
+    expect(result.severity).toBe('critical');
+  });
+
+  it('passes when the active listener declares a TLS cert via env', async () => {
+    const raw = 'GATEWAY_HOST=0.0.0.0\nGATEWAY_TLS_CERT=/etc/ironclaw/gw.pem';
+    const config = makeConfig('.env', {
+      GATEWAY_HOST: '0.0.0.0',
+      GATEWAY_TLS_CERT: '/etc/ironclaw/gw.pem',
+    }, raw);
+    const result = await check.run(makeCtx([config]));
+    expect(result.passed).toBe(true);
+  });
+});
+
+describe('IC-003: Orchestrator Public Bind', () => {
+  const check = ironclawChecks.find(c => c.id === 'IC-003')!;
+
+  it('fails when ORCHESTRATOR_HOST=0.0.0.0', async () => {
+    const config = makeConfig('.env', {
+      ORCHESTRATOR_HOST: '0.0.0.0',
+      ORCHESTRATOR_PORT: '50051',
+    });
+    const result = await check.run(makeCtx([config]));
+    expect(result.passed).toBe(false);
+    expect(result.severity).toBe('critical');
+  });
+
+  it('passes when ORCHESTRATOR_HOST=127.0.0.1', async () => {
+    const config = makeConfig('.env', {
+      ORCHESTRATOR_HOST: '127.0.0.1',
+      ORCHESTRATOR_PORT: '50051',
+    });
+    const result = await check.run(makeCtx([config]));
+    expect(result.passed).toBe(true);
+  });
+});
+
+describe('IC-004: Gateway Auth Token Missing', () => {
+  const check = ironclawChecks.find(c => c.id === 'IC-004')!;
+
+  it('fails when GATEWAY_AUTH_TOKEN is not set', async () => {
+    const config = makeConfig('.env', { GATEWAY_HOST: '127.0.0.1' });
+    const result = await check.run(makeCtx([config]));
+    expect(result.passed).toBe(false);
+    expect(result.severity).toBe('warning');
+  });
+
+  it('passes when GATEWAY_AUTH_TOKEN is explicitly configured', async () => {
+    const config = makeConfig('.env', {
+      GATEWAY_HOST: '127.0.0.1',
+      GATEWAY_AUTH_TOKEN: 'persistent-secret-token',
+    });
+    const result = await check.run(makeCtx([config]));
+    expect(result.passed).toBe(true);
+  });
+});
+
+describe('IC-008: Local Tools Bypass', () => {
+  const check = ironclawChecks.find(c => c.id === 'IC-008')!;
+
+  it('fails when ALLOW_LOCAL_TOOLS is true', async () => {
+    const config = makeConfig('.env', { ALLOW_LOCAL_TOOLS: 'true' });
+    const result = await check.run(makeCtx([config]));
+    expect(result.passed).toBe(false);
+    expect(result.severity).toBe('warning');
+  });
+
+  it('passes when ALLOW_LOCAL_TOOLS is not set', async () => {
+    const config = makeConfig('.env', { });
+    const result = await check.run(makeCtx([config]));
+    expect(result.passed).toBe(true);
+  });
+});
+
+describe('IC-011: Broad Sandbox Domain Allowlist', () => {
+  const check = ironclawChecks.find(c => c.id === 'IC-011')!;
+
+  it('fails when SANDBOX_EXTRA_DOMAINS contains a wildcard', async () => {
+    const config = makeConfig('.env', {
+      SANDBOX_EXTRA_DOMAINS: '*.evil.com, api.example.com',
+    });
+    const result = await check.run(makeCtx([config]));
+    expect(result.passed).toBe(false);
+    expect(result.severity).toBe('warning');
+  });
+
+  it('passes when all allowed domains are fully qualified', async () => {
+    const config = makeConfig('.env', {
+      SANDBOX_EXTRA_DOMAINS: 'api.example.com, docs.example.com',
+    });
+    const result = await check.run(makeCtx([config]));
+    expect(result.passed).toBe(true);
+  });
+});
