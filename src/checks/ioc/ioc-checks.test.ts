@@ -167,6 +167,38 @@ describe('IOC-007: Binary Pattern Match', () => {
     expect(result.evidence).toBeDefined();
     expect(result.evidence![0].detail).toContain('Packed JS eval wrapper');
   });
+
+  // ----- Negative false-positive fixtures -----
+
+  it('passes for ordinary eval() usage that is not the packed-wrapper signature', async () => {
+    await writeFile(join(tempDir, 'eval.js'), `
+function evaluate(expr) {
+  return eval(expr);
+}
+function reduce(arr) {
+  return arr.reduce((a, b) => a + b, 0);
+}
+`);
+    const result = await ioc007.run(makeContext(tempDir));
+    expect(result.passed).toBe(true);
+  });
+
+  it('passes for high-entropy base64-looking strings without binary magic', async () => {
+    const fakeJwt =
+      'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.' +
+      'eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIn0.' +
+      'SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c';
+    await writeFile(join(tempDir, 'token.js'), `const TOKEN = '${fakeJwt}';\nmodule.exports = { TOKEN };`);
+    const result = await ioc007.run(makeContext(tempDir));
+    expect(result.passed).toBe(true);
+  });
+
+  it('passes for escaped \\x00 in string literals (not real NUL bytes)', async () => {
+    const escaped = '\\x00'.repeat(40);
+    await writeFile(join(tempDir, 'escapes.js'), `const padding = "${escaped}";`);
+    const result = await ioc007.run(makeContext(tempDir));
+    expect(result.passed).toBe(true);
+  });
 });
 
 describe('IOC-008: VirusTotal Cross-Reference', () => {
