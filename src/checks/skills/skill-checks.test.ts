@@ -131,4 +131,32 @@ ${decisions}
     expect(result.evidence![0].detail).toContain('complexFunc');
     expect(result.evidence![0].detail).toContain('17'); // 1 base + 16 ifs
   });
+
+  // ----- Negative false-positive fixtures -----
+
+  it('passes for a function exactly at the threshold (15)', async () => {
+    // 14 ifs + 1 base = complexity 15, which is NOT > 15
+    const decisions = Array.from({ length: 14 }, (_, i) =>
+      `  if (x === ${i}) return ${i};`
+    ).join('\n');
+
+    await writeFile(join(tempDir, 'edge.js'), `
+function edgeFunc(x) {
+${decisions}
+  return -1;
+}
+`);
+    const result = await skl012.run(makeContext(tempDir));
+    expect(result.passed).toBe(true);
+  });
+
+  it('passes for syntactically invalid files (recovered by parser)', async () => {
+    await writeFile(join(tempDir, 'broken.js'), `
+function (((( {
+  // intentionally broken; SKL-012 should swallow parser errors silently
+}
+`);
+    const result = await skl012.run(makeContext(tempDir));
+    expect(result.passed).toBe(true);
+  });
 });

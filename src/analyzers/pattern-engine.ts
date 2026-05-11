@@ -77,6 +77,12 @@ export function scanWithPatterns(code: string, rules?: PatternRule[]): PatternMa
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
+    // Skip JS/TS line comments and JSDoc continuation lines. Markdown
+    // headings (#) are intentionally not skipped — SKL-007 and CC-011 scan
+    // .md content where # carries meaning.
+    const trimmed = line.trimStart();
+    if (trimmed.startsWith('//') || trimmed.startsWith('*')) continue;
+
     for (const rule of patterns) {
       if (rule.pattern.test(line)) {
         matches.push({
