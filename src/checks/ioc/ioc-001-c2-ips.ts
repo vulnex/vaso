@@ -2,6 +2,7 @@ import { join, extname } from 'node:path';
 import type { Evidence, ScanContext } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { getIOCDatabase } from '../../ioc/database.js';
+import { getAllSkillsDirs } from '../../core/utils.js';
 import { ipBoundaryRegex } from './boundary.js';
 
 const SCAN_EXTENSIONS = new Set(['.js', '.ts', '.mjs', '.cjs', '.json', '.yaml', '.yml', '.env', '.sh']);
@@ -32,8 +33,7 @@ export const ioc001 = defineCheck({
   async run(ctx, h) {
     const evidence: Evidence[] = [];
     const db = getIOCDatabase();
-    const dirs = [ctx.installation.installDir];
-    if (ctx.installation.skillsDir) dirs.push(ctx.installation.skillsDir);
+    const dirs = [ctx.installation.installDir, ...getAllSkillsDirs(ctx.installation)];
 
     const ipRegexes = db.c2Ips.map(ip => ({ ip, re: ipBoundaryRegex(ip) }));
 
