@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { adapterRegistry } from './adapters/registry.js';
@@ -31,7 +34,12 @@ import { setDebug } from './core/debug.js';
 import { assertZoneGraphsValid } from './core/zone-graph-validator.js';
 import { defaultZoneGraph } from './core/default-zone-graph.js';
 
-const VERSION = '0.4.0';
+// Read version from package.json at runtime so it can never drift from the
+// manifest. tsup bundles cli.ts into dist/cli.js, which sits one directory
+// below package.json in the published layout (<pkg>/dist/cli.js → <pkg>/package.json).
+const VERSION = (JSON.parse(
+  readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'package.json'), 'utf8'),
+) as { version: string }).version;
 
 const BANNER = `
 ${chalk.red('██╗   ██╗ █████╗ ███████╗ ██████╗')}
