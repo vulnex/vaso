@@ -4,14 +4,14 @@ All notable changes to VASO (VULNEX Agent Security Observer) will be documented 
 
 This project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.4.2] - 2026-05-12
 
 ### Changed
 
 - **Install path moved from the npm registry to a GitHub source install.** The package name `vaso` on npm is squatted by an unrelated React library; users following the old `npm install -g vaso` instructions were silently installing that package instead of VASO. All install paths now point at `github:vulnex/vaso#<ref>`:
-  - `install.sh` no longer calls `npm install -g vaso`. New `resolve_version()` helper picks the install ref in this order: (1) `VASO_VERSION` env override, (2) the latest tag returned by `GET /repos/vulnex/vaso/releases/latest`, (3) a hardcoded `FALLBACK_VERSION` (`v0.4.1`) if the API call fails. The install command is now `npm install -g "github:vulnex/vaso#<ref>"`. `MIN_NODE_MAJOR` also bumped from 18 to 20 to match `package.json` engines and the rest of the docs.
-  - `action.yml` (the official GitHub Action) installs via `github:vulnex/vaso#<ref>`. The `version` input is now a git ref (tag/branch/SHA) rather than an npm dist-tag; default changed from `latest` to `v0.4.1`.
-  - `README.md` and `doc/user-guide.md` install sections rewritten to lead with the `curl | bash` one-liner and the `github:vulnex/vaso#v0.4.1` npm form, plus a short note that the bare `vaso` name on npm is unrelated.
+  - `install.sh` no longer calls `npm install -g vaso`. New `resolve_version()` helper picks the install ref in this order: (1) `VASO_VERSION` env override, (2) the latest tag returned by `GET /repos/vulnex/vaso/releases/latest`, (3) a hardcoded `FALLBACK_VERSION` (`v0.4.2`) if the API call fails. The install command is now `npm install -g "github:vulnex/vaso#<ref>"`. `MIN_NODE_MAJOR` also bumped from 18 to 20 to match `package.json` engines and the rest of the docs.
+  - `action.yml` (the official GitHub Action) installs via `github:vulnex/vaso#<ref>`. The `version` input is now a git ref (tag/branch/SHA) rather than an npm dist-tag; default changed from `latest` to `v0.4.2`.
+  - `README.md` and `doc/user-guide.md` install sections rewritten to lead with the `curl | bash` one-liner and the `github:vulnex/vaso#v0.4.2` npm form, plus a short note that the bare `vaso` name on npm is unrelated.
 - **`package.json` swaps `prepublishOnly` for `prepare`.** Git installs (`npm install -g github:vulnex/vaso#<ref>`) require a build step *during* install, which `prepublishOnly` doesn't trigger. `prepare` covers both publish and git-install paths; the build is identical (`npm run build` → tsup → `dist/cli.js`).
 
 ## [0.4.1] - 2026-05-11

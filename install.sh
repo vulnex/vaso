@@ -12,7 +12,7 @@ BOLD='\033[1m'
 
 MIN_NODE_MAJOR=20
 REPO="vulnex/vaso"
-FALLBACK_VERSION="v0.4.1"
+FALLBACK_VERSION="v0.4.2"
 
 info()  { echo -e "${CYAN}>${NC} $1"; }
 ok()    { echo -e "${GREEN}>${NC} $1"; }

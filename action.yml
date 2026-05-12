@@ -7,9 +7,9 @@ branding:
 
 inputs:
   version:
-    description: 'Git ref to install from github:vulnex/vaso (tag like v0.4.1, branch, or commit SHA).'
+    description: 'Git ref to install from github:vulnex/vaso (tag like v0.4.2, branch, or commit SHA).'
     required: false
-    default: 'v0.4.1'
+    default: 'v0.4.2'
   agent:
     description: 'Scan a single agent only (openclaw, nanoclaw, picoclaw, ironclaw, nanobot, zeroclaw, nemoclaw, hermes, claude-code, codex). Omit to scan all detected agents.'
     required: false
