@@ -103,7 +103,7 @@ See [doc/user-guide.md](doc/user-guide.md) for full option reference.
 
 ## Security Checks
 
-252 checks organized into 16 categories:
+251 checks organized into 16 categories:
 
 | Category | IDs | Count | Description |
 |----------|-----|-------|-------------|
@@ -149,7 +149,7 @@ The simplest path — drop one step into any workflow:
     format: sarif              # sarif, json, markdown, html, terminal
     # output: vaso-results.sarif  (default: vaso-results.<ext>)
     # agent: claude-code           (default: scan all detected agents)
-    # version: latest               (npm dist-tag or x.y.z)
+    # version: v0.4.2               (git ref: tag, branch, or commit SHA)
     # upload-sarif: 'true'          (auto-uploads to Code Scanning)
 ```
 
