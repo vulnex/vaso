@@ -33,6 +33,13 @@ import { checkRegistry } from './core/check-registry.js';
 import { setDebug } from './core/debug.js';
 import { assertZoneGraphsValid } from './core/zone-graph-validator.js';
 import { defaultZoneGraph } from './core/default-zone-graph.js';
+import { AGENT_TYPES } from './core/types.js';
+
+// Derive the list of scannable agent types from the canonical AGENT_TYPES array
+// so `--agent <type>` help strings can't drift as new adapters are added.
+// 'mcp' and 'skill-audit' are filtered out — they have dedicated commands
+// (`vaso mcp scan`, `vaso skill audit`) rather than being passed via --agent.
+const SCANNABLE_AGENTS = AGENT_TYPES.filter(t => t !== 'mcp' && t !== 'skill-audit').join(', ');
 
 // Read version from package.json at runtime so it can never drift from the
 // manifest. tsup bundles cli.ts into dist/cli.js, which sits one directory
@@ -159,7 +166,7 @@ program.helpInformation = function () {
 program
   .command('scan')
   .description('Scan installed AI agents for security issues')
-  .option('-a, --agent <type>', 'scan a specific agent (openclaw, nanoclaw, picoclaw, ironclaw, nanobot, zeroclaw, nemoclaw, hermes, lyrie, claude-code, codex, opencode, gemini-cli, qwen-code, copilot-cli, cursor-cli)')
+  .option('-a, --agent <type>', `scan a specific agent (${SCANNABLE_AGENTS})`)
   .option('-f, --format <format>', 'output format (terminal, json, sarif, markdown, html, csv, junit)', 'terminal')
   .option('-o, --output <file>', 'write report to file (single combined output)')
   .option('--output-dir <dir>', 'multi-host: write one file per host as <dir>/<hostname>.<ext>')
@@ -188,7 +195,7 @@ program
 program
   .command('detect')
   .description('Detect installed AI agents')
-  .option('-a, --agent <type>', 'detect a specific agent only (openclaw, nanoclaw, picoclaw, ironclaw, nanobot, zeroclaw, nemoclaw, hermes, lyrie, claude-code, codex, opencode, gemini-cli, qwen-code, copilot-cli, cursor-cli)')
+  .option('-a, --agent <type>', `detect a specific agent only (${SCANNABLE_AGENTS})`)
   .option('-f, --format <format>', 'output format (terminal, json)', 'terminal')
   .option('-o, --output <file>', 'write report to single file')
   .option('--output-dir <dir>', 'multi-host: write one file per host as <dir>/<hostname>.<ext>')

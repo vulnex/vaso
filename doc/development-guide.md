@@ -118,7 +118,7 @@ src/
   visualizations/           USecVisLib config emitters (attack-tree, privilege-gradient, component)
   plugins/                  Agent framework plugin installer (before_agent_start hook)
   user-plugins/             Drop-in loader for ~/.vaso/plugins/*.{js,mjs}
-  rules/                    Declarative YAML rules engine + loader
+  rules/                    Declarative YAML rules engine scaffolding (WIP — design only, not yet implemented)
   transport/                SSH multi-host orchestrator (worker pool + retries)
 ```
 
