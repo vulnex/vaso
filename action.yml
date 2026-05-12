@@ -7,9 +7,9 @@ branding:
 
 inputs:
   version:
-    description: 'VASO version to install (npm dist-tag or x.y.z). Defaults to latest.'
+    description: 'Git ref to install from github:vulnex/vaso (tag like v0.4.1, branch, or commit SHA).'
     required: false
-    default: 'latest'
+    default: 'v0.4.1'
   agent:
     description: 'Scan a single agent only (openclaw, nanoclaw, picoclaw, ironclaw, nanobot, zeroclaw, nemoclaw, hermes, claude-code, codex). Omit to scan all detected agents.'
     required: false
@@ -58,7 +58,7 @@ runs:
 
     - name: Install VASO
       shell: bash
-      run: npm install -g "vaso@${{ inputs.version }}"
+      run: npm install -g "github:vulnex/vaso#${{ inputs.version }}"
 
     - name: Run VASO scan
       id: run

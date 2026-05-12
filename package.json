@@ -17,7 +17,7 @@
     "test:all": "vitest run && npm run test:e2e && npm run test:integration",
     "docker:build-base": "docker build -t vaso-test-base -f testing/docker/base.Dockerfile .",
     "lint": "tsc --noEmit",
-    "prepublishOnly": "npm run build"
+    "prepare": "npm run build"
   },
   "keywords": [
     "security",
