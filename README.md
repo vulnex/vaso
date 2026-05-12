@@ -6,7 +6,7 @@
 
 ## Overview
 
-VASO scans AI agent frameworks, interactive coding agents, desktop AI apps, and MCP server configurations for security misconfigurations, malicious code, and known threats. It runs 252 checks across 18 agents (9 autonomous frameworks + 7 interactive coding agents + Claude Desktop + ChatGPT Desktop) plus MCP-server scanning, using AST-based static analysis (not regex) for accurate results without ever executing scanned code.
+VASO scans AI agent frameworks, interactive coding agents, desktop AI apps, and MCP server configurations for security misconfigurations, malicious code, and known threats. It runs 251 checks across 18 agents (9 autonomous frameworks + 7 interactive coding agents + Claude Desktop + ChatGPT Desktop) plus MCP-server scanning, using AST-based static analysis (not regex) for accurate results without ever executing scanned code.
 
 ## Installation
 
