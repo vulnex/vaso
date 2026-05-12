@@ -7,6 +7,7 @@ coverage/
 .env
 .env.local
 devnotes/
+prds/
 feed-signing-key.pem
 CLAUDE.md
 internal_data/
