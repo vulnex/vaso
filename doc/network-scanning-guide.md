@@ -37,8 +37,8 @@ vaso scan --host root@host1 --host root@host2 --host root@host3
 VASO supports password-based SSH authentication. It establishes a single ControlMaster connection with full terminal access, prompting for the password once. All subsequent operations (file transfer, probe execution, cleanup) reuse that authenticated connection without re-prompting.
 
 ```bash
-vaso scan --host conde@192.168.1.52
-# conde@192.168.1.52's password: ********
+vaso scan --host user@192.168.1.52
+# user@192.168.1.52's password: ********
 # (scans proceed with no further prompts)
 ```
 

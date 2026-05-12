@@ -21,14 +21,47 @@ src/
     openclaw.ts             OpenClaw adapter
     nanoclaw.ts             NanoClaw adapter
     picoclaw.ts             PicoClaw adapter
+    ironclaw.ts             IronClaw adapter
+    nanobot.ts              Nanobot adapter
+    zeroclaw.ts             ZeroClaw adapter
+    nemoclaw.ts             NemoClaw adapter
+    hermes.ts               Hermes adapter
+    lyrie.ts                Lyrie adapter
+    claude-code.ts          Claude Code CLI adapter
+    claude-desktop.ts       Claude Desktop / Cowork adapter
+    chatgpt-desktop.ts      ChatGPT Desktop adapter
+    codex.ts                Codex adapter
+    opencode.ts             OpenCode adapter
+    gemini.ts               Gemini CLI adapter
+    qwen-code.ts            Qwen Code adapter
+    copilot-cli.ts          GitHub Copilot CLI adapter
+    cursor-cli.ts           Cursor CLI adapter
   checks/
     index.ts                registerAllChecks() — wires all categories
-    config/                 15 configuration checks (CFG-*)
-    skills/                 10 skill code analysis checks (SKL-*)
-    ioc/                    6 IOC matching checks (IOC-*)
-    network/                4 network checks (NET-*)
-    runtime/                4 runtime checks (RUN-*)
-    mcp/                    10 MCP server security checks (MCP-*)
+    config/                 24 configuration checks (CFG-*)
+    skills/                 12 skill code analysis checks (SKL-*)
+    ioc/                    8 IOC matching checks (IOC-*)
+    network/                5 network checks (NET-*)
+    runtime/                5 runtime checks (RUN-*)
+    policy/                 5 policy checks (POL-*)
+    mcp/                    23 MCP server security checks (MCP-*)
+    advisory/               5 advisory/CVE checks (ADV-*)
+    openclaw/               6 OpenClaw-specific (OC-*)
+    nanoclaw/               5 NanoClaw-specific (NC-*)
+    ironclaw/               12 IronClaw-specific (IC-*)
+    nanobot/                12 Nanobot-specific (NB-*)
+    zeroclaw/               14 ZeroClaw-specific (ZC-*)
+    lyrie/                  18 Lyrie-specific (LY-*)
+    hermes/                 10 Hermes-specific (HM-*)
+    claude-code/            12 Claude Code-specific (CC-*)
+    claude-desktop/         10 Claude Desktop-specific (CD-*)
+    chatgpt-desktop/        6 ChatGPT Desktop-specific (CG-*)
+    codex/                  9 Codex-specific (CDX-*)
+    opencode/               12 OpenCode-specific (OPC-*)
+    gemini-cli/             10 Gemini CLI-specific (GEM-*)
+    qwen-code/              10 Qwen Code-specific (QC-*)
+    copilot-cli/            8 Copilot CLI-specific (GHC-*)
+    cursor-cli/             10 Cursor CLI-specific (CUR-*)
   analyzers/
     ast-analyzer.ts         Babel-based AST analysis with data flow tracing
     pattern-engine.ts       Regex pattern matching engine (40+ rules)
