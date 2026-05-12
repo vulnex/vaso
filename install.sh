@@ -10,8 +10,9 @@ CYAN='\033[0;36m'
 NC='\033[0m'
 BOLD='\033[1m'
 
-MIN_NODE_MAJOR=18
-PACKAGE="vaso"
+MIN_NODE_MAJOR=20
+REPO="vulnex/vaso"
+FALLBACK_VERSION="v0.4.1"
 
 info()  { echo -e "${CYAN}>${NC} $1"; }
 ok()    { echo -e "${GREEN}>${NC} $1"; }
@@ -115,8 +116,30 @@ install_node_prompt() {
   fail "Install Node.js ${MIN_NODE_MAJOR}+ and re-run this script."
 }
 
+resolve_version() {
+  if [ -n "${VASO_VERSION:-}" ]; then
+    VERSION="$VASO_VERSION"
+    info "Using VASO_VERSION=${VERSION}"
+    return
+  fi
+
+  local tag
+  tag=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" 2>/dev/null \
+    | grep -m1 '"tag_name"' \
+    | sed -E 's/.*"tag_name"[^"]*"([^"]+)".*/\1/' || true)
+
+  if [ -n "$tag" ]; then
+    VERSION="$tag"
+    ok "Latest VASO release: ${VERSION}"
+  else
+    VERSION="$FALLBACK_VERSION"
+    warn "Could not query GitHub for latest release; falling back to ${VERSION}"
+  fi
+}
+
 install_vaso() {
-  info "Installing ${PACKAGE} globally via npm..."
+  local spec="github:${REPO}#${VERSION}"
+  info "Installing VASO from ${spec}..."
   echo ""
 
   # Detect if we need sudo for global npm install
@@ -130,11 +153,11 @@ install_vaso() {
 
   if [ "$use_sudo" = true ]; then
     warn "Global npm directory requires elevated permissions."
-    info "Running: sudo npm install -g ${PACKAGE}"
-    sudo npm install -g "$PACKAGE"
+    info "Running: sudo npm install -g ${spec}"
+    sudo npm install -g "$spec"
   else
-    info "Running: npm install -g ${PACKAGE}"
-    npm install -g "$PACKAGE"
+    info "Running: npm install -g ${spec}"
+    npm install -g "$spec"
   fi
 }
 
@@ -180,5 +203,6 @@ if ! check_node; then
 fi
 
 check_npm
+resolve_version
 install_vaso
 verify_install

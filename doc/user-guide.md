@@ -4,8 +4,14 @@ VASO (VULNEX Agent Security Observer) is a security scanner for AI agent deploym
 
 ## Installation
 
+VASO is distributed from GitHub. The npm name `vaso` is held by an unrelated package; do not install that.
+
 ```bash
-npm install -g vaso
+# One-liner (Linux / macOS / WSL)
+curl -fsSL https://raw.githubusercontent.com/vulnex/vaso/main/install.sh | bash
+
+# Or directly via npm from GitHub
+npm install -g github:vulnex/vaso#v0.4.1
 ```
 
 Requirements: Node.js 20 or later.
@@ -455,7 +461,7 @@ jobs:
           node-version: '20'
 
       - name: Install VASO
-        run: npm install -g vaso
+        run: npm install -g github:vulnex/vaso#v0.4.1
 
       - name: Run VASO scan
         run: vaso scan --format sarif -o results.sarif
