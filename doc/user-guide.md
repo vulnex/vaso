@@ -219,12 +219,46 @@ vaso fix --agent openclaw
 
 Before any modification, VASO backs up affected files to `~/.vaso/backups/<timestamp>/`.
 
-### `vaso update`
+### `vaso visualize`
 
-Reload the IOC (Indicators of Compromise) threat intelligence database.
+Emit USecVisLib config files (TOML/JSON/YAML) for rendering architecture diagrams of the scan result. Use these with the external `usecvis` renderer — VASO never depends on Python, Graphviz, or a network-reachable server at scan time.
+
+```
+vaso visualize [options]
+```
+
+| Option | Description |
+|--------|-------------|
+| `-i, --input <file>` | Use an existing scan-result JSON instead of running a fresh scan |
+| `-o, --output <dir>` | Output directory for the bundle (default `./vaso-visualizations`) |
+| `--vis-format <format>` | Config file format: `toml` (default), `json`, or `yaml` |
+| `--diagrams <list>` | Comma-separated diagram types: `attack-tree`, `privilege-gradient`, `component` |
+| `-a, --agent <type>` | Scan a specific agent only when running a fresh scan |
+| `--all-users` | Scan all user accounts (requires root/sudo) |
+
+Examples:
 
 ```bash
-vaso update
+# Run a fresh scan and emit all three diagram types
+vaso visualize
+
+# Reuse an existing scan result
+vaso visualize -i scan.json -o ./diagrams
+
+# Only emit the attack-tree diagram in YAML
+vaso visualize --diagrams attack-tree --vis-format yaml
+```
+
+The output directory contains one config file per (installation × diagram) plus a `README.md` with copy-paste `usecvis` commands.
+
+### `vaso update`
+
+Reload the IOC (Indicators of Compromise) and advisory threat-intelligence databases. Both feeds are signed with a pinned Ed25519 key (`src/ioc/public-key.ts`) and rejected on version rollback — see `SECURITY.md`. The bundled databases remain the offline baseline; `vaso update` only refreshes the in-memory state with newer signed data.
+
+```bash
+vaso update           # Fetch latest signed feeds
+vaso update --force   # Update even if feeds are not stale
+vaso update --url <url>  # Custom feed URL (must still be signed with the pinned key)
 ```
 
 ### `vaso mcp scan`
@@ -283,14 +317,73 @@ vaso mcp list --path .mcp.json
 
 Terminal output shows each server's name, transport type, command/URL, and environment variable names. JSON output returns the full discovery result.
 
+### `vaso plugin`
+
+Install or remove the VASO security plugin for an agent framework (OpenClaw, NanoClaw, PicoClaw). When installed, the plugin runs a scan as a `before_agent_start` hook so the agent refuses to launch with critical findings present.
+
+```bash
+vaso plugin install -a openclaw [--force]
+vaso plugin uninstall -a openclaw
+vaso plugin status [-a openclaw] [-f terminal|json]
+```
+
+| Subcommand | Purpose |
+|------------|---------|
+| `install` | Install the plugin into the agent's plugin directory |
+| `uninstall` | Remove the plugin |
+| `status` | Show install state for one or all supported agents |
+
+### `vaso ext`
+
+Manage user plugins — drop-in `.js` / `.mjs` files in `~/.vaso/plugins/` that register custom checks, adapters, or reporters. See `examples/plugins/` for working examples.
+
+```bash
+vaso ext list [-f terminal|json]
+vaso ext info <name>
+```
+
+User plugins are loaded automatically on every CLI invocation; errors are isolated so a broken plugin can't crash the scan.
+
+### `vaso rules`
+
+Manage declarative YAML rules — write checks as data, not code. Rules live in `~/.vaso/rules/` by default and are loaded automatically on `scan` and `fix`.
+
+```bash
+vaso rules list                   # List loaded rules
+vaso rules validate <file>        # Validate a rule file without loading it
+vaso rules init [--dir <path>]    # Drop a starter rule template
+```
+
+Pass `--rules <path...>` to `vaso scan` to load extra rule files for a single run, or `--no-custom-rules` to skip the user rules directory entirely.
+
+### `vaso probe`
+
+Advanced — manage probe snapshots for remote scanning. The probe is normally push-deployed automatically by `vaso scan --host` / `--inventory`; these commands let you inspect what the probe will collect or validate a snapshot file by hand.
+
+```bash
+vaso probe manifest               # Print the manifest the probe will use
+vaso probe validate <snapshot>    # Validate a probe snapshot JSON file
+```
+
+See [`network-scanning-guide.md`](network-scanning-guide.md) for the full SSH workflow.
+
 ## Exit Codes
+
+`vaso scan` exits non-zero when findings reach the threshold set by `--fail-on`:
 
 | Code | Meaning |
 |------|---------|
-| `0` | Scan completed, no critical findings |
-| `1` | Critical findings detected (or scan failed) |
+| `0` | Scan completed; no findings at or above the `--fail-on` threshold |
+| `1` | Findings at or above the threshold (or the scan failed for another reason) |
+| `2` | Invalid CLI arguments (e.g. `--silent` without an output destination, `--parallel 0`) |
 
-This allows VASO to fail CI/CD pipelines when critical issues are found.
+`--fail-on` accepts `critical` (default), `warning`, `info`, or `none`. Use `--fail-on none` to never fail on findings — useful for scans that only produce reports.
+
+```bash
+vaso scan --fail-on critical    # Default — only critical findings fail CI
+vaso scan --fail-on warning     # Warning or critical fails CI
+vaso scan --fail-on none        # Always exit 0 unless the scan itself errors
+```
 
 ## Scoring
 
@@ -311,7 +404,7 @@ Penalties:
 
 ## Security Checks
 
-VASO runs **252 checks across 16 categories**.
+VASO runs **251 checks across 16 categories**.
 
 | Category | IDs | Count | Scope |
 |----------|-----|-------|-------|
@@ -389,9 +482,11 @@ You can also point VASO at specific config files with `vaso mcp scan --path <fil
 
 ## Output Formats
 
+Seven formats are supported via `-f / --format`. The natural extension is used when writing to `--output-dir`.
+
 ### Terminal (default)
 
-Color-coded, human-readable output with severity icons and a summary score.
+Color-coded, human-readable output with severity icons and a summary score. Use `--no-color` to disable ANSI codes when piping into a log file.
 
 ### JSON
 
@@ -415,6 +510,30 @@ vaso scan --format sarif -o results.sarif
 ### Markdown
 
 Tables and sections formatted for embedding in pull request comments, wiki pages, or documentation.
+
+### HTML
+
+Self-contained, XSS-safe HTML — single file with inline styles, no external assets. Good for archiving in artifact stores or attaching to incident tickets.
+
+```bash
+vaso scan --format html -o report.html
+```
+
+### CSV
+
+One row per finding, designed for SIEM / data-warehouse ingestion. Columns include `id`, `name`, `severity`, `category`, `agent`, `passed`, `message`, `file`, `line`.
+
+```bash
+vaso scan --format csv -o findings.csv
+```
+
+### JUnit
+
+JUnit XML — each check becomes a test case (passing or failing). Compatible with the test-result UIs in GitHub Actions, GitLab CI, Jenkins, CircleCI, etc.
+
+```bash
+vaso scan --format junit -o vaso-tests.xml
+```
 
 ## Differential Scanning
 
@@ -507,10 +626,20 @@ This runs 5 critical checks (gateway binding, API key exposure, file permissions
 
 ## Data Storage
 
+VASO keeps all local state under `~/.vaso/`:
+
 | Path | Purpose |
 |------|---------|
-| `~/.vaso/baselines/` | Saved scan baselines |
-| `~/.vaso/backups/<timestamp>/` | File backups before remediation |
+| `~/.vaso/baselines/` | Saved scan baselines for `--save-baseline` / `--diff` |
+| `~/.vaso/backups/<timestamp>/` | File backups before `vaso fix` modifies anything |
+| `~/.vaso/mcp-tool-baselines/` | Per-server tool-definition baselines for MCP-020 rug-pull detection (keyed by hostname + source) |
+| `~/.vaso/plugins/` | User-plugin drop-in directory (`vaso ext`) |
+| `~/.vaso/plugin-config.json` | Agent-plugin install state (`vaso plugin install/uninstall/status`) |
+| `~/.vaso/rules/` | Declarative YAML rules loaded automatically by `scan` and `fix` |
+| `~/.vaso/ioc/` | IOC feed cache + metadata fetched by `vaso update` |
+| `~/.vaso/advisory/` | Advisory/CVE feed cache + metadata fetched by `vaso update` |
+
+Nothing under `~/.vaso/` leaves the machine. The only outbound network call VASO ever makes is `vaso update` against the signed feed URL.
 
 ## Safety Guarantees
 
