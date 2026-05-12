@@ -221,4 +221,4 @@ VASO supports user plugins in `~/.vaso/plugins/`. Plugins can add custom checks,
 
 ## License
 
-MIT
+Apache-2.0 — see [LICENSE](LICENSE).
