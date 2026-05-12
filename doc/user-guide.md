@@ -344,18 +344,6 @@ vaso ext info <name>
 
 User plugins are loaded automatically on every CLI invocation; errors are isolated so a broken plugin can't crash the scan.
 
-### `vaso rules`
-
-Manage declarative YAML rules — write checks as data, not code. Rules live in `~/.vaso/rules/` by default and are loaded automatically on `scan` and `fix`.
-
-```bash
-vaso rules list                   # List loaded rules
-vaso rules validate <file>        # Validate a rule file without loading it
-vaso rules init [--dir <path>]    # Drop a starter rule template
-```
-
-Pass `--rules <path...>` to `vaso scan` to load extra rule files for a single run, or `--no-custom-rules` to skip the user rules directory entirely.
-
 ### `vaso probe`
 
 Advanced — manage probe snapshots for remote scanning. The probe is normally push-deployed automatically by `vaso scan --host` / `--inventory`; these commands let you inspect what the probe will collect or validate a snapshot file by hand.
@@ -616,13 +604,19 @@ vaso scan --format json -o results.json
 
 ## Zero-Dependency Quick Scan
 
-For environments without Node.js, use the Bash quick-scan script:
+For fast triage or environments without Node.js, use the Bash quick-scan script. Installed via npm, it's symlinked onto your PATH alongside `vaso`:
 
 ```bash
-bash bin/vaso-quick.sh
+vaso-quick
 ```
 
-This runs 5 critical checks (gateway binding, API key exposure, file permissions, sandbox status, auth bypass) using only standard Unix tools. No dependencies required.
+This runs 5 critical checks (gateway binding, API key exposure, file permissions, sandbox status, auth bypass) using only standard Unix tools. No Node.js or npm dependencies required at runtime.
+
+You can also run the script directly without installing anything — fetch it once and execute:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/vulnex/vaso/main/bin/vaso-quick.sh | bash
+```
 
 ## Data Storage
 
@@ -635,7 +629,6 @@ VASO keeps all local state under `~/.vaso/`:
 | `~/.vaso/mcp-tool-baselines/` | Per-server tool-definition baselines for MCP-020 rug-pull detection (keyed by hostname + source) |
 | `~/.vaso/plugins/` | User-plugin drop-in directory (`vaso ext`) |
 | `~/.vaso/plugin-config.json` | Agent-plugin install state (`vaso plugin install/uninstall/status`) |
-| `~/.vaso/rules/` | Declarative YAML rules loaded automatically by `scan` and `fix` |
 | `~/.vaso/ioc/` | IOC feed cache + metadata fetched by `vaso update` |
 | `~/.vaso/advisory/` | Advisory/CVE feed cache + metadata fetched by `vaso update` |
 

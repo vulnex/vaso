@@ -5,7 +5,8 @@
   "type": "module",
   "main": "dist/cli.js",
   "bin": {
-    "vaso": "bin/vaso"
+    "vaso": "bin/vaso",
+    "vaso-quick": "bin/vaso-quick.sh"
   },
   "scripts": {
     "build": "tsup",
