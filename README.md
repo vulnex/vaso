@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="images/vaso_logo.png" alt="VASO logo" width="320">
+</p>
+
 # VASO
 
 **VULNEX Agent Security Observer** — agent-agnostic security scanner for AI agent deployments.
