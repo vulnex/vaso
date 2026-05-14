@@ -12,7 +12,7 @@ BOLD='\033[1m'
 
 MIN_NODE_MAJOR=20
 REPO="vulnex/vaso"
-FALLBACK_VERSION="v0.4.2"
+FALLBACK_REF="main"
 
 info()  { echo -e "${CYAN}>${NC} $1"; }
 ok()    { echo -e "${GREEN}>${NC} $1"; }
@@ -131,10 +131,21 @@ resolve_version() {
   if [ -n "$tag" ]; then
     VERSION="$tag"
     ok "Latest VASO release: ${VERSION}"
-  else
-    VERSION="$FALLBACK_VERSION"
-    warn "Could not query GitHub for latest release; falling back to ${VERSION}"
+    return
   fi
+
+  tag=$(curl -fsSL "https://api.github.com/repos/${REPO}/tags" 2>/dev/null \
+    | grep -m1 '"name"' \
+    | sed -E 's/.*"name"[^"]*"([^"]+)".*/\1/' || true)
+
+  if [ -n "$tag" ]; then
+    VERSION="$tag"
+    warn "No published Release found; using latest tag ${VERSION}"
+    return
+  fi
+
+  VERSION="$FALLBACK_REF"
+  warn "No releases or tags found; falling back to ${VERSION} (untagged build)"
 }
 
 install_vaso() {
