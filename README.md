@@ -26,6 +26,20 @@ npm install -g github:vulnex/vaso#v0.4.2
 
 Requires Node.js 20+.
 
+### Build from source
+
+For development, or to install from a local checkout:
+
+```bash
+git clone https://github.com/vulnex/vaso.git
+cd vaso
+npm install
+npm run build           # produces dist/cli.js
+npm link                # optional: put `vaso` on PATH globally
+```
+
+Without `npm link`, run the CLI directly with `./bin/vaso`. Other useful scripts: `npm run dev` (rebuild on change), `npm test` (unit), `npm run test:e2e`, `npm run lint` (`tsc --noEmit`).
+
 ## Quick Start
 
 ```bash
