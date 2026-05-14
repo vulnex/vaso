@@ -4,6 +4,28 @@ All notable changes to VASO (VULNEX Agent Security Observer) will be documented 
 
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.4.3] - 2026-05-14
+
+### Changed
+
+- **License switched from MIT to Apache-2.0** to align with the rest of the VULNEX project family. `LICENSE` replaced and `package.json` `license` field updated. Source files that carried an MIT header are unchanged in their contribution terms going back through git history; new contributions land under Apache-2.0. End users who were redistributing VASO under MIT may continue to do so for the v0.4.2 and earlier releases.
+
+### Fixed
+
+- **`vaso --version` now reports the real package version** instead of a stale hardcoded literal. The CLI used to hold the version as a string constant that was never bumped past `0.4.0`, so every release since reported the wrong version when installed. The CLI now reads `version` from `package.json` at startup, making it authoritative.
+- **`install.sh` no longer hard-fails when the latest release is not yet tagged.** The previous `FALLBACK_VERSION="v0.4.2"` constant pointed at a tag that did not exist on the remote at the time of the v0.4.2 release, so the `releases/latest` API 404 cascaded into an `npm install` failure on `git checkout v0.4.2`. `resolve_version()` now falls through: `VASO_VERSION` env → `releases/latest` → `/tags` (first entry) → `main` (always installable as the default branch). Hardcoded `FALLBACK_VERSION` removed.
+
+### Added
+
+- **`Build from source` section in `README.md`**, covering the `git clone` + `npm install` + `npm run build` + optional `npm link` flow for local development and one-off builds. Sits inside the existing Installation section, before Quick Start.
+
+### Docs
+
+- Full refresh of `doc/user-guide.md` and `doc/development-guide.md` against the shipped command surface (251 checks, 18 adapters, all current flags).
+- `vaso --help` agent list now derived from `AGENT_TYPES` instead of a hand-maintained literal, so future adapters auto-appear in help output without a documentation lag. `vaso-quick` symlinked alongside `vaso` for the zero-dep quick-scan flow.
+- `bin/vaso-quick.sh` and the install path now reference the correct 251-check total (previously stale `252` in a few places).
+- VASO logo banner added to `README.md` head.
+
 ## [0.4.2] - 2026-05-12
 
 ### Changed
