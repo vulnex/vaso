@@ -21,7 +21,7 @@ VASO is distributed from GitHub. The npm name `vaso` is held by an unrelated pac
 curl -fsSL https://raw.githubusercontent.com/vulnex/vaso/main/install.sh | bash
 
 # Or directly via npm from GitHub
-npm install -g github:vulnex/vaso#v0.4.3
+npm install -g github:vulnex/vaso#v0.4.4
 ```
 
 Requires Node.js 20+.
@@ -167,7 +167,7 @@ The simplest path — drop one step into any workflow:
     format: sarif              # sarif, json, markdown, html, terminal
     # output: vaso-results.sarif  (default: vaso-results.<ext>)
     # agent: claude-code           (default: scan all detected agents)
-    # version: v0.4.3               (git ref: tag, branch, or commit SHA)
+    # version: v0.4.4               (git ref: tag, branch, or commit SHA)
     # upload-sarif: 'true'          (auto-uploads to Code Scanning)
 ```
 
@@ -177,7 +177,7 @@ The action installs the requested VASO version, runs the scan, and (when `format
 
 ```yaml
 - name: Install VASO
-  run: npm install -g github:vulnex/vaso#v0.4.3
+  run: npm install -g github:vulnex/vaso#v0.4.4
 
 - name: Run VASO scan
   run: vaso scan --format sarif -o results.sarif --fail-on critical
