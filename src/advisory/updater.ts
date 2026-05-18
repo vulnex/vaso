@@ -20,7 +20,7 @@ const METADATA_FILE = 'metadata.json';
 const FETCH_TIMEOUT_MS = 15_000;
 
 export const DEFAULT_ADVISORY_FEED_URL =
-  'https://raw.githubusercontent.com/vulnex/vaso-feeds/main/advisory-feed.json';
+  'https://raw.githubusercontent.com/vulnex/vaso/feeds/advisory-feed.json';
 
 // ── Merge logic ─────────────────────────────────────────────────────
 
