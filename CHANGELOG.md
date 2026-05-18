@@ -4,6 +4,12 @@ All notable changes to VASO (VULNEX Agent Security Observer) will be documented 
 
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.4.6] - 2026-05-18
+
+### Changed
+
+- **Feeds moved from `feeds` branch to `feeds/` folder on `main`.** Discoverability win: users browsing the repo see the published threat-intel data alongside the source code instead of having to switch branches. URLs change from `raw.githubusercontent.com/vulnex/vaso/feeds/{feed,advisory-feed}.json` to `.../vaso/main/feeds/{feed,advisory-feed}.json`. Signing key and signatures are unchanged (sigs are over file bytes, not the URL). v0.4.5 clients pointing at the old `feeds`-branch URL will keep working as long as that branch stays in place; new releases all point at the canonical `main/feeds/` path.
+
 ## [0.4.5] - 2026-05-18
 
 ### Changed

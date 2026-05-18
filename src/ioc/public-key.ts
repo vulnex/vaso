@@ -9,7 +9,7 @@ MCowBQYDK2VwAyEAJSmVPfCeHLycd5KGDiDBD0lwdK++oe4fVy6RmVedsm0=
 -----END PUBLIC KEY-----`;
 
 /** Default feed URL — can be overridden via --url */
-export const DEFAULT_FEED_URL = 'https://raw.githubusercontent.com/vulnex/vaso/feeds/feed.json';
+export const DEFAULT_FEED_URL = 'https://raw.githubusercontent.com/vulnex/vaso/main/feeds/feed.json';
 
 /** Default staleness threshold in days */
 export const DEFAULT_STALENESS_DAYS = 7;

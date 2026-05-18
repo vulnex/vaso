@@ -1,0 +1,8 @@
+{
+  "meta": {
+    "version": 1,
+    "timestamp": "2026-05-18T08:27:17.377Z",
+    "description": "VASO IOC threat feed — initial published version. Bundled data ships with each release; this feed only carries deltas added since the bundle was built."
+  },
+  "data": {}
+}
