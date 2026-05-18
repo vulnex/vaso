@@ -4,6 +4,13 @@ All notable changes to VASO (VULNEX Agent Security Observer) will be documented 
 
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.4.5] - 2026-05-18
+
+### Changed
+
+- **`vaso update` now works against a real remote feed.** The previous default feed URL pointed at `vulnex/vaso-feeds` — a separate repo that was never published — so every `vaso update` returned `HTTP 404` and silently fell back to bundled data. The feed and advisory-feed URLs now point at a `feeds` branch inside this repo: `https://raw.githubusercontent.com/vulnex/vaso/feeds/{feed,advisory-feed}.json`. The branch ships an initial v1 feed with empty `data` (the bundled IOC + advisory data covers it); subsequent versions add deltas. See `devnotes/feed-publishing.md` for the publish runbook.
+- **Ed25519 signing key rotated.** The previously-pinned public key in `src/ioc/public-key.ts` had no corresponding private key in any operator-accessible location, so no signed feed could ever have been produced against it. A fresh keypair was generated; the public key is pinned in v0.4.5 and the private key is held offline by VULNEX. Clients on v0.4.4 and earlier will reject the new feed's signature and fall back to bundled data (which still covers them).
+
 ## [0.4.4] - 2026-05-18
 
 ### Added
