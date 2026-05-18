@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
 import { generateKeyPairSync, sign, createPrivateKey } from 'node:crypto';
-import { mkdtemp, readFile, writeFile, mkdir, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
@@ -217,8 +217,8 @@ describe('isFeedStale', () => {
     await rm(tmpDir, { recursive: true, force: true });
   });
 
-  it('returns true when no metadata exists', () => {
-    expect(isFeedStale(7, tmpDir)).toBe(true);
+  it('returns false when no metadata exists (user not opted in)', () => {
+    expect(isFeedStale(7, tmpDir)).toBe(false);
   });
 
   it('returns false for recent metadata', async () => {
@@ -259,9 +259,9 @@ describe('isFeedStale', () => {
     expect(isFeedStale(0.01, tmpDir)).toBe(true);
   });
 
-  it('returns true for malformed metadata', async () => {
+  it('returns false for malformed metadata (cannot determine staleness)', async () => {
     await writeFile(join(tmpDir, 'metadata.json'), '{"invalid json');
-    expect(isFeedStale(7, tmpDir)).toBe(true);
+    expect(isFeedStale(7, tmpDir)).toBe(false);
   });
 });
 
@@ -427,6 +427,31 @@ describe('fetchAndUpdateFeed', () => {
 
     expect(result.success).toBe(true);
     expect(result.message).toContain('not newer');
+  });
+
+  it('first-time fetch proceeds without force when no metadata exists', async () => {
+    const feed = makeFeed({
+      meta: { version: 1, timestamp: new Date().toISOString(), description: 'test' },
+      data: { c2Ips: ['10.0.0.1'] },
+    });
+    const feedBytes = Buffer.from(JSON.stringify(feed));
+    const sig = signFeed(feedBytes);
+
+    vi.stubGlobal('fetch', vi.fn().mockImplementation((url: string) => {
+      if (url.endsWith('.sig')) {
+        return Promise.resolve({ ok: true, text: () => Promise.resolve(sig), arrayBuffer: () => Promise.resolve(Buffer.from(sig).buffer) });
+      }
+      return Promise.resolve({ ok: true, text: () => Promise.resolve(feedBytes.toString()), arrayBuffer: () => Promise.resolve(feedBytes.buffer.slice(feedBytes.byteOffset, feedBytes.byteOffset + feedBytes.byteLength)) });
+    }));
+
+    const result = await fetchAndUpdateFeed({
+      feedUrl: 'https://example.com/feed.json',
+      feedDir: tmpDir,
+      publicKeyPem: testPublicKeyPem,
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.feedVersion).toBe(1);
   });
 
   it('skips update when feed is not stale', async () => {

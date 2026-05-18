@@ -145,12 +145,12 @@ program
     if (!silent && actionCommand.name() !== 'update') {
       if (isFeedStale()) {
         console.log(
-          chalk.yellow('  IOC feed is stale or missing. Run `vaso update` for latest threat data.\n'),
+          chalk.yellow('  IOC feed is stale. Run `vaso update` for latest threat data.\n'),
         );
       }
       if (isAdvisoryFeedStale()) {
         console.log(
-          chalk.yellow('  Advisory feed is stale or missing. Run `vaso update` for latest advisories.\n'),
+          chalk.yellow('  Advisory feed is stale. Run `vaso update` for latest advisories.\n'),
         );
       }
     }

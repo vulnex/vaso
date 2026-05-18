@@ -1,7 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { mergeAdvisoryFeed, isAdvisoryFeedStale } from './updater.js';
 import { buildBundledAdvisoryDatabase } from './database.js';
-import type { Advisory, AdvisoryFeedData } from './advisory-types.js';
+import type { AdvisoryFeedData } from './advisory-types.js';
 
 describe('mergeAdvisoryFeed', () => {
   it('merges feed advisories into bundled database', () => {
@@ -67,7 +67,7 @@ describe('mergeAdvisoryFeed', () => {
 });
 
 describe('isAdvisoryFeedStale', () => {
-  it('returns true when metadata dir does not exist', () => {
-    expect(isAdvisoryFeedStale(7, '/nonexistent/path')).toBe(true);
+  it('returns false when metadata dir does not exist (user not opted in)', () => {
+    expect(isAdvisoryFeedStale(7, '/nonexistent/path')).toBe(false);
   });
 });

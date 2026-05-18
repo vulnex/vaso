@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { mkdir, readFile, writeFile, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
@@ -49,15 +49,22 @@ export function isAdvisoryFeedStale(
   thresholdDays: number = DEFAULT_STALENESS_DAYS,
   metadataDir: string = ADVISORY_DIR,
 ): boolean {
+  let raw: string;
   try {
-    const raw = readFileSync(join(metadataDir, METADATA_FILE), 'utf-8');
+    raw = readFileSync(join(metadataDir, METADATA_FILE), 'utf-8');
+  } catch {
+    // No metadata file: user has never fetched a remote feed.
+    // Treat as "not opted in" rather than stale — bundled data is the baseline.
+    return false;
+  }
+  try {
     const meta: AdvisoryFeedMetadata = JSON.parse(raw);
     const lastCheck = new Date(meta.lastCheckAt).getTime();
-    if (isNaN(lastCheck)) return true;
+    if (isNaN(lastCheck)) return false;
     const ageMs = Date.now() - lastCheck;
     return ageMs > thresholdDays * 24 * 60 * 60 * 1000;
   } catch {
-    return true;
+    return false;
   }
 }
 
@@ -112,7 +119,9 @@ export async function fetchAndUpdateAdvisoryFeed(
 
   await mkdir(feedDir, { recursive: true });
 
-  if (!force && !isAdvisoryFeedStale(DEFAULT_STALENESS_DAYS, feedDir)) {
+  // Unless forced, skip when a cached feed exists and isn't stale.
+  // (Missing metadata means no cache yet — proceed with the fetch.)
+  if (!force && existsSync(join(feedDir, METADATA_FILE)) && !isAdvisoryFeedStale(DEFAULT_STALENESS_DAYS, feedDir)) {
     return { success: true, message: 'Advisory feed is up to date (not stale).' };
   }
 

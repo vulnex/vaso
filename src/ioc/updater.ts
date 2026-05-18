@@ -1,5 +1,5 @@
 import { verify as cryptoVerify, createPublicKey } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { mkdir, readFile, writeFile, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
@@ -108,15 +108,22 @@ export function mergeFeedIntoDatabase(bundled: IOCDatabase, feedData: IOCFeedDat
 // ── Staleness check ─────────────────────────────────────────────────
 
 export function isFeedStale(thresholdDays: number = DEFAULT_STALENESS_DAYS, metadataDir: string = IOC_DIR): boolean {
+  let raw: string;
   try {
-    const raw = readFileSync(join(metadataDir, METADATA_FILE), 'utf-8');
+    raw = readFileSync(join(metadataDir, METADATA_FILE), 'utf-8');
+  } catch {
+    // No metadata file: user has never fetched a remote feed.
+    // Treat as "not opted in" rather than stale — bundled data is the baseline.
+    return false;
+  }
+  try {
     const meta: IOCFeedMetadata = JSON.parse(raw);
     const lastCheck = new Date(meta.lastCheckAt).getTime();
-    if (isNaN(lastCheck)) return true;
+    if (isNaN(lastCheck)) return false;
     const ageMs = Date.now() - lastCheck;
     return ageMs > thresholdDays * 24 * 60 * 60 * 1000;
   } catch {
-    return true; // no metadata = stale
+    return false;
   }
 }
 
@@ -172,8 +179,9 @@ export async function fetchAndUpdateFeed(options: FetchOptions = {}): Promise<Up
   // Ensure directory exists
   await mkdir(feedDir, { recursive: true });
 
-  // Unless forced, check staleness
-  if (!force && !isFeedStale(DEFAULT_STALENESS_DAYS, feedDir)) {
+  // Unless forced, skip when a cached feed exists and isn't stale.
+  // (Missing metadata means no cache yet — proceed with the fetch.)
+  if (!force && existsSync(join(feedDir, METADATA_FILE)) && !isFeedStale(DEFAULT_STALENESS_DAYS, feedDir)) {
     return { success: true, message: 'Feed is up to date (not stale).' };
   }
 

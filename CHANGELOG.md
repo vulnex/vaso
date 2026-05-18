@@ -4,6 +4,18 @@ All notable changes to VASO (VULNEX Agent Security Observer) will be documented 
 
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] - 0.4.4
+
+### Added
+
+### Changed
+
+### Fixed
+
+- **No more spurious "feed is stale or missing" warning on fresh installs.** `isFeedStale()` and `isAdvisoryFeedStale()` previously returned `true` whenever `~/.vaso/{ioc,advisory}/metadata.json` was absent, so every fresh install printed a stale-feed warning at the top of every `vaso scan` / `vaso detect` run and pointed the user at `vaso update`. Missing metadata now means "user has never fetched a remote feed" (bundled data is the baseline), not "stale". The warning only fires when a previously-fetched feed has aged past the 7-day threshold. `fetchAndUpdateFeed`'s internal staleness gate now explicitly checks for cache existence so first-time fetches still proceed without `--force`.
+
+### Docs
+
 ## [0.4.3] - 2026-05-14
 
 ### Changed
