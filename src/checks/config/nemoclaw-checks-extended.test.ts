@@ -71,14 +71,14 @@ describe('CFG-020: NemoClaw API Key Exposure', () => {
   it('detects plaintext API key', async () => {
     allowPath('/mock-home/.nemoclaw');
     mockReadFile.mockResolvedValue(JSON.stringify({
-      NVIDIA_API_KEY: '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',
+      NVIDIA_API_KEY: 'nvapi-FAKETESTKEYDONOTUSE00000000000000000000000000000000000000000',
     }));
     const result = await cfg020.run(makeContext());
     expect(result.passed).toBe(false);
     expect(result.severity).toBe('critical');
     expect(result.message).toContain('plaintext API keys');
     expect(result.evidence).toBeDefined();
-    expect(result.evidence!.some(e => e.detail!.includes('nvapi-mV'))).toBe(true);
+    expect(result.evidence!.some(e => e.detail!.includes('nvapi-FA'))).toBe(true);
   });
 
   it('detects overly permissive file permissions', async () => {
