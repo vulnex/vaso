@@ -1,8 +1,8 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { mkdtemp, rm, readFile, stat } from 'node:fs/promises';
+import { mkdtemp, rm, readFile, stat, mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { getNestedValue, setNestedValue, deepMerge, writeFileEnsureDir } from './utils.js';
+import { getNestedValue, setNestedValue, deepMerge, writeFileEnsureDir, getSkillFiles } from './utils.js';
 
 describe('getNestedValue', () => {
   it('retrieves a nested value by dot path', () => {
@@ -118,5 +118,71 @@ describe('writeFileEnsureDir', () => {
     await writeFileEnsureDir(path, 'x');
     const s = await stat(path);
     expect(s.isFile()).toBe(true);
+  });
+});
+
+describe('getSkillFiles', () => {
+  const roots: string[] = [];
+
+  afterEach(async () => {
+    for (const d of roots) {
+      await rm(d, { recursive: true, force: true }).catch(() => {});
+    }
+    roots.length = 0;
+  });
+
+  it('returns nothing for a non-existent directory', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'vaso-sf-'));
+    roots.push(root);
+    const files = await getSkillFiles(join(root, 'does-not-exist'));
+    expect(files).toEqual([]);
+  });
+
+  it('collects code files by extension and skips other files', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'vaso-sf-'));
+    roots.push(root);
+    await writeFile(join(root, 'a.js'), 'a');
+    await writeFile(join(root, 'b.py'), 'b');
+    await writeFile(join(root, 'README.md'), 'docs');
+    await writeFile(join(root, 'data.json'), '{}');
+    const files = await getSkillFiles(root);
+    expect(files.map(f => f.replace(root + '/', '')).sort()).toEqual(['a.js', 'b.py']);
+  });
+
+  it('excludes node_modules subtrees', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'vaso-sf-'));
+    roots.push(root);
+    await writeFile(join(root, 'skill.js'), '// user code');
+    await mkdir(join(root, 'node_modules', 'big-lib', 'dist'), { recursive: true });
+    await writeFile(join(root, 'node_modules', 'big-lib', 'index.js'), 'vendor');
+    await writeFile(join(root, 'node_modules', 'big-lib', 'dist', 'bundle.min.js'), 'vendor');
+    const files = await getSkillFiles(root);
+    expect(files).toHaveLength(1);
+    expect(files[0]).toBe(join(root, 'skill.js'));
+  });
+
+  it('excludes .git, dist, build, .venv, __pycache__, .cache, .next, venv', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'vaso-sf-'));
+    roots.push(root);
+    await writeFile(join(root, 'keep.ts'), 'k');
+    for (const excluded of ['.git', 'dist', 'build', '.venv', 'venv', '__pycache__', '.cache', '.next']) {
+      await mkdir(join(root, excluded), { recursive: true });
+      await writeFile(join(root, excluded, 'noisy.js'), 'x');
+    }
+    const files = await getSkillFiles(root);
+    expect(files).toHaveLength(1);
+    expect(files[0]).toBe(join(root, 'keep.ts'));
+  });
+
+  it('does not exclude directories whose names merely contain an excluded segment', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'vaso-sf-'));
+    roots.push(root);
+    // "distribution" and "building" should NOT be filtered (only exact segments)
+    await mkdir(join(root, 'distribution'), { recursive: true });
+    await mkdir(join(root, 'building'), { recursive: true });
+    await writeFile(join(root, 'distribution', 'a.js'), 'a');
+    await writeFile(join(root, 'building', 'b.py'), 'b');
+    const files = await getSkillFiles(root);
+    expect(files).toHaveLength(2);
   });
 });

@@ -1,4 +1,4 @@
-import { join, extname, dirname } from 'node:path';
+import { join, extname, dirname, relative, sep } from 'node:path';
 import { mkdir, writeFile } from 'node:fs/promises';
 import type { FSProvider } from './fs-provider.js';
 import type { AgentInstallation } from './types.js';
@@ -17,6 +17,33 @@ export function getNestedValue(obj: Record<string, unknown>, path: string): unkn
 
 const CODE_EXTENSIONS = new Set(['.js', '.ts', '.mjs', '.cjs', '.jsx', '.tsx', '.py', '.sh', '.bash']);
 
+// Vendor / build-output / VCS directories that AST analysis must skip. The
+// gstack skill ecosystem ships per-skill node_modules trees (hundreds of MB,
+// including minified ML bundles) directly under ~/.claude/skills/<skill>/ —
+// parsing those hangs @babel/parser for minutes and they aren't skill code
+// anyway.
+const EXCLUDED_DIRS = new Set([
+  'node_modules',
+  '.git',
+  'dist',
+  'build',
+  '.next',
+  '.cache',
+  '.venv',
+  'venv',
+  '__pycache__',
+]);
+
+function isExcludedPath(root: string, parentPath: string | undefined): boolean {
+  if (!parentPath) return false;
+  const rel = relative(root, parentPath);
+  if (!rel || rel.startsWith('..')) return false;
+  for (const segment of rel.split(sep)) {
+    if (segment && EXCLUDED_DIRS.has(segment)) return true;
+  }
+  return false;
+}
+
 /**
  * Resolve every skills directory an installation declares. Adapters that
  * expose multiple skills locations (e.g. OpenClaw's shared + per-agent dirs)
@@ -33,6 +60,8 @@ export function getAllSkillsDirs(installation: AgentInstallation): string[] {
 
 /**
  * Recursively find all code files (JS/TS/Python/Shell) under a directory.
+ * Vendor and build-output directories (node_modules, dist, .git, etc.) are
+ * skipped — see EXCLUDED_DIRS.
  */
 export async function getSkillFiles(dir: string, fs?: FSProvider): Promise<string[]> {
   const provider = fs ?? new LocalFSProvider();
@@ -40,10 +69,11 @@ export async function getSkillFiles(dir: string, fs?: FSProvider): Promise<strin
   try {
     const entries = await provider.readdirEntries(dir, { recursive: true });
     for (const entry of entries) {
-      if (entry.isFile && CODE_EXTENSIONS.has(extname(entry.name))) {
-        const fullPath = entry.parentPath ? join(entry.parentPath, entry.name) : join(dir, entry.name);
-        files.push(fullPath);
-      }
+      if (!entry.isFile) continue;
+      if (!CODE_EXTENSIONS.has(extname(entry.name))) continue;
+      if (isExcludedPath(dir, entry.parentPath)) continue;
+      const fullPath = entry.parentPath ? join(entry.parentPath, entry.name) : join(dir, entry.name);
+      files.push(fullPath);
     }
   } catch {
     // Directory may not exist
