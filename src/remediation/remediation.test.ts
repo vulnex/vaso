@@ -127,13 +127,8 @@ describe('IronClaw fix() methods', () => {
     expect(content).toContain('AGENT_AUTO_APPROVE_TOOLS=false');
   });
 
-  it('IC-002: returns guidance-only (applied: false)', async () => {
-    const config = makeEnvConfig(join(TEST_DIR, '.env'), {});
-    const ctx = makeCtx('ironclaw', [config]);
-
-    const result = await ic002.fix!(ctx);
-    expect(result.applied).toBe(false);
-    expect(result.message).toContain('Manual action required');
+  it('IC-002: is not auto-fixable (manual action only)', () => {
+    expect(ic002.fix).toBeUndefined();
   });
 });
 
@@ -235,13 +230,8 @@ describe('Nanobot fix() methods', () => {
     expect(data.tools.exec.denyList).toContain('curl');
   });
 
-  it('NB-001: returns guidance-only (applied: false)', async () => {
-    const config = makeJsonConfig(join(TEST_DIR, 'config.json'), {});
-    const ctx = makeCtx('nanobot', [config]);
-
-    const result = await nb001.fix!(ctx);
-    expect(result.applied).toBe(false);
-    expect(result.message).toContain('Manual action required');
+  it('NB-001: is not auto-fixable (manual action only)', () => {
+    expect(nb001.fix).toBeUndefined();
   });
 });
 
@@ -294,13 +284,8 @@ describe('ZeroClaw fix() methods', () => {
     expect(stats.mode & 0o777).toBe(0o600);
   });
 
-  it('ZC-002: returns guidance-only (applied: false)', async () => {
-    const config = makeTomlConfig(join(TEST_DIR, 'config.toml'), {}, '');
-    const ctx = makeCtx('zeroclaw', [config]);
-
-    const result = await zc002.fix!(ctx);
-    expect(result.applied).toBe(false);
-    expect(result.message).toContain('Manual action required');
+  it('ZC-002: is not auto-fixable (manual action only)', () => {
+    expect(zc002.fix).toBeUndefined();
   });
 });
 

@@ -25,12 +25,7 @@ export const nb001 = defineCheck({
     return h.fromEvidence(evidence, {
       passed: 'All channels have allowFrom configured',
       failed: () => 'Channels with empty allowFrom detected — no access control',
-      fixable: true,
       fixDescription: 'Add allowed user IDs to channel allowFrom arrays',
     });
-  },
-
-  async fix() {
-    return { checkId: 'NB-001', applied: false, message: 'Manual action required: add specific user IDs to the allowFrom array for each channel' };
   },
 });

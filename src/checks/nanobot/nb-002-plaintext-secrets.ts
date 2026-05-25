@@ -42,12 +42,7 @@ export const nb002 = defineCheck({
     return h.fromEvidence(evidence, {
       passed: 'No plaintext secrets found in nanobot configs',
       failed: (n) => `Found ${n} plaintext secret(s) in nanobot configs`,
-      fixable: true,
       fixDescription: 'Move secrets to environment variables or a secrets manager',
     });
-  },
-
-  async fix() {
-    return { checkId: 'NB-002', applied: false, message: 'Manual action required: move plaintext secrets to environment variables or a secrets manager' };
   },
 });

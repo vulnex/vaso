@@ -44,12 +44,7 @@ export const ic002 = defineCheck({
     return h.fromEvidence(evidence, {
       passed: 'All active listeners have TLS configured',
       failed: (n) => `Found ${n} listener(s) without TLS — traffic is unencrypted`,
-      fixable: true,
       fixDescription: 'Configure TLS certificates for each active listener (GATEWAY_TLS_CERT, HTTP_TLS_CERT, ORCHESTRATOR_TLS_CERT)',
     });
-  },
-
-  async fix() {
-    return { checkId: 'IC-002', applied: false, message: 'Manual action required: configure TLS certificates for each listener (GATEWAY_TLS_CERT, HTTP_TLS_CERT, ORCHESTRATOR_TLS_CERT) with valid cert/key file paths' };
   },
 });

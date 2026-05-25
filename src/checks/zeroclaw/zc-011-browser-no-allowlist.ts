@@ -29,12 +29,7 @@ export const zc011 = defineCheck({
     return h.fromEvidence(evidence, {
       passed: 'Browser tool has domain restrictions or is not enabled',
       failed: () => 'Browser tool enabled without domain allowlist — unrestricted web access',
-      fixable: true,
       fixDescription: 'Set tools.browser.allowed_domains to a list of trusted domains',
     });
-  },
-
-  async fix() {
-    return { checkId: 'ZC-011', applied: false, message: 'Manual action required: set tools.browser.allowed_domains to a list of trusted domains' };
   },
 });

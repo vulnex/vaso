@@ -34,12 +34,7 @@ export const nb008 = defineCheck({
     return h.fromEvidence(evidence, {
       passed: 'All bridge channels have tokens configured',
       failed: () => 'Bridge channel(s) found with empty or missing bridge_token',
-      fixable: true,
       fixDescription: 'Set a strong bridge_token for each WhatsApp bridge channel',
     });
-  },
-
-  async fix() {
-    return { checkId: 'NB-008', applied: false, message: 'Manual action required: generate and set a strong bridge_token for each WhatsApp bridge channel' };
   },
 });

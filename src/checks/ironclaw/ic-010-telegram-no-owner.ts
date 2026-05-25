@@ -35,12 +35,7 @@ export const ic010 = defineCheck({
     return h.fromEvidence(evidence, {
       passed: 'Telegram owner ID is properly configured or Telegram is not enabled',
       failed: () => 'Telegram is enabled without an owner ID — bot is accessible to any user',
-      fixable: true,
       fixDescription: 'Set TELEGRAM_OWNER_ID to your Telegram user ID in .env or telegram.owner_id in config.toml',
     });
-  },
-
-  async fix() {
-    return { checkId: 'IC-010', applied: false, message: 'Manual action required: set TELEGRAM_OWNER_ID to your numeric Telegram user ID (use @userinfobot to find it)' };
   },
 });

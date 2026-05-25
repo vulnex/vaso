@@ -29,12 +29,7 @@ export const zc012 = defineCheck({
     return h.fromEvidence(evidence, {
       passed: 'HTTP tool has domain restrictions or is not enabled',
       failed: () => 'HTTP tool enabled without domain allowlist — unrestricted outbound requests',
-      fixable: true,
       fixDescription: 'Set tools.http.allowed_domains to a list of trusted domains',
     });
-  },
-
-  async fix() {
-    return { checkId: 'ZC-012', applied: false, message: 'Manual action required: set tools.http.allowed_domains to a list of trusted domains' };
   },
 });

@@ -5,6 +5,8 @@ import chalk from 'chalk';
 import type { ScanResult, FixResult, AgentScanResult, CheckResult } from '../core/types.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import type { CheckRegistry } from '../core/check-registry.js';
+import type { AdapterRegistry } from '../adapters/registry.js';
+import { getAllSkillsDirs, getSkillFiles } from '../core/utils.js';
 import { promptForFix } from './prompt.js';
 
 export interface FixOptions {
@@ -15,7 +17,7 @@ export interface FixOptions {
 export class RemediationEngine {
   private backupDir: string;
 
-  constructor(private checks: CheckRegistry) {
+  constructor(private checks: CheckRegistry, private adapters?: AdapterRegistry) {
     this.backupDir = join(homedir(), '.vaso', 'backups', new Date().toISOString().replace(/[:.]/g, '-'));
   }
 
@@ -75,11 +77,26 @@ export class RemediationEngine {
             }
           }
 
+          // Rebuild the full ScanContext the engine produced at scan time —
+          // credentialPaths and skillFiles are adapter-derived and aren't
+          // persisted on AgentScanResult, so without re-deriving them here
+          // fixes like CFG-003 (chmod credential file) silently no-op
+          // because their ctx.credentialPaths is empty.
+          const fs = new LocalFSProvider();
+          const adapter = this.adapters?.getAdapter(agent.installation.agent);
+          const credentialPaths = adapter?.getCredentialPaths?.(agent.installation.installDir);
+          const skillsDirs = getAllSkillsDirs(agent.installation);
+          const skillFiles = skillsDirs.length > 0
+            ? (await Promise.all(skillsDirs.map(d => getSkillFiles(d, fs)))).flat()
+            : undefined;
+
           const fixResult = await check.fix({
             installation: agent.installation,
             configs: agent.installation.configFiles,
             platform: process.platform,
-            fs: new LocalFSProvider(),
+            fs,
+            credentialPaths,
+            skillFiles,
           });
 
           results.push(fixResult);

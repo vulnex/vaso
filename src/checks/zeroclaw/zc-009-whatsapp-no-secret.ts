@@ -34,12 +34,7 @@ export const zc009 = defineCheck({
     return h.fromEvidence(evidence, {
       passed: 'WhatsApp channel has app_secret configured or is not enabled',
       failed: () => 'WhatsApp channel lacks app_secret — webhooks accepted without signature verification',
-      fixable: true,
       fixDescription: 'Set channels.whatsapp.app_secret to your WhatsApp app secret for HMAC webhook verification',
     });
-  },
-
-  async fix() {
-    return { checkId: 'ZC-009', applied: false, message: 'Manual action required: set channels.whatsapp.app_secret to your WhatsApp app secret for HMAC webhook verification' };
   },
 });

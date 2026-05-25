@@ -38,12 +38,7 @@ export const nb010 = defineCheck({
     return h.fromEvidence(evidence, {
       passed: 'All cron jobs have channel/recipient restrictions',
       failed: () => 'Cron job(s) found that can target any channel without restrictions',
-      fixable: true,
       fixDescription: 'Set explicit channel and recipient restrictions for each cron job',
     });
-  },
-
-  async fix() {
-    return { checkId: 'NB-010', applied: false, message: 'Manual action required: set explicit channel and recipient restrictions for each cron job' };
   },
 });

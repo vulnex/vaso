@@ -58,12 +58,7 @@ export const nb012 = defineCheck({
     return h.fromEvidence(evidence, {
       passed: 'No npx-based skill installations found',
       failed: (n) => `Found ${n} npx-based skill reference(s) — supply chain risk`,
-      fixable: true,
       fixDescription: 'Install skills locally with pinned versions instead of using npx for remote execution',
     });
-  },
-
-  async fix() {
-    return { checkId: 'NB-012', applied: false, message: 'Manual action required: install skills locally with pinned versions instead of using npx for remote execution' };
   },
 });
