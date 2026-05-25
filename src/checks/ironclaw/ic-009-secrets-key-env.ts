@@ -53,12 +53,7 @@ export const ic009 = defineCheck({
     return h.fromEvidence(evidence, {
       passed: 'No plaintext secrets master key found in config files',
       failed: () => 'SECRETS_MASTER_KEY found in config file — should use keychain/vault',
-      fixable: true,
       fixDescription: 'Remove SECRETS_MASTER_KEY from .env and store it in the system keychain or a secrets vault',
     });
-  },
-
-  async fix() {
-    return { checkId: 'IC-009', applied: false, message: 'Manual action required: remove SECRETS_MASTER_KEY from config files and store it in the system keychain or a secrets vault' };
   },
 });

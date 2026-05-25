@@ -42,12 +42,7 @@ export const ic011 = defineCheck({
     return h.fromEvidence(evidence, {
       passed: 'No wildcard patterns in sandbox domain allowlist',
       failed: () => 'Sandbox domain allowlist contains wildcard patterns — network isolation is weakened',
-      fixable: true,
       fixDescription: 'Replace wildcard domain patterns with specific fully-qualified domain names in SANDBOX_EXTRA_DOMAINS',
     });
-  },
-
-  async fix() {
-    return { checkId: 'IC-011', applied: false, message: 'Manual action required: replace wildcard patterns in SANDBOX_EXTRA_DOMAINS with specific fully-qualified domain names' };
   },
 });

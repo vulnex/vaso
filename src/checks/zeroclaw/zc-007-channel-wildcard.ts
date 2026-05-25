@@ -34,12 +34,7 @@ export const zc007 = defineCheck({
     return h.fromEvidence(evidence, {
       passed: 'No channels have wildcard allowed_users',
       failed: (n) => `Found ${n} channel(s) with wildcard allowed_users`,
-      fixable: true,
       fixDescription: 'Replace "*" in allowed_users with explicit user identifiers',
     });
-  },
-
-  async fix() {
-    return { checkId: 'ZC-007', applied: false, message: 'Manual action required: replace "*" in allowed_users with specific user identifiers for each channel' };
   },
 });

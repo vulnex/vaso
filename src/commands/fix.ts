@@ -41,7 +41,7 @@ export async function runFix(options: FixCommandOptions): Promise<void> {
       console.log(chalk.dim('(dry run — no changes will be made)\n'));
     }
 
-    const remediation = new RemediationEngine(checkRegistry);
+    const remediation = new RemediationEngine(checkRegistry, adapterRegistry);
     const results = await remediation.fix(result, {
       dryRun: options.dryRun,
       yes: options.yes,

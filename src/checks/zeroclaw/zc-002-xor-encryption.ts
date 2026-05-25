@@ -33,12 +33,7 @@ export const zc002 = defineCheck({
     return h.fromEvidence(evidence, {
       passed: 'No legacy XOR-encrypted values found',
       failed: (n) => `Found ${n} value(s) using trivially reversible XOR cipher`,
-      fixable: true,
       fixDescription: 'Re-encrypt secrets using zeroclaw secrets encrypt with AES-256',
     });
-  },
-
-  async fix() {
-    return { checkId: 'ZC-002', applied: false, message: 'Manual action required: re-encrypt secrets using "zeroclaw secrets encrypt" with AES-256 to replace XOR-encrypted values' };
   },
 });

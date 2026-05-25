@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { ScanResult, CheckResult, FixResult, CheckModule, ScanContext } from '../core/types.js';
 import { RemediationEngine } from './engine.js';
 import { CheckRegistry } from '../core/check-registry.js';
+import { AdapterRegistry } from '../adapters/registry.js';
+import type { AgentAdapter } from '../adapters/adapter.js';
 
 // Mock prompt module
 const mockPromptForFix = vi.fn();
@@ -250,5 +252,47 @@ describe('RemediationEngine interactive fix', () => {
     expect(results).toHaveLength(1);
     expect(results[0].applied).toBe(true);
     expect(mockPromptForFix).not.toHaveBeenCalled();
+  });
+
+  it('passes adapter-derived credentialPaths through to check.fix()', async () => {
+    // Regression: without this, fixes like CFG-003 (chmod credential files)
+    // silently no-op because their fix() runs against an empty
+    // ctx.credentialPaths and finds no files to remediate.
+    let capturedCtx: ScanContext | undefined;
+    const check: CheckModule = {
+      id: 'TST-CRED',
+      name: 'Test Credential Check',
+      category: 'config',
+      severity: 'warning',
+      description: 'test',
+      run: vi.fn(),
+      fix: vi.fn(async (ctx) => {
+        capturedCtx = ctx;
+        return { checkId: 'TST-CRED', applied: true, message: 'ok' } satisfies FixResult;
+      }),
+    };
+
+    const fakeAdapter: AgentAdapter = {
+      agent: 'openclaw',
+      displayName: 'Test',
+      async detect() { return []; },
+      getConfigPaths() { return []; },
+      getSkillsDir() { return undefined; },
+      getGatewayInfo() { return undefined; },
+      getCredentialPaths(installDir: string) { return [`${installDir}/auth.json`]; },
+      getProbeManifest() { return { filePaths: [], globPatterns: [], commands: [], directoryListings: [], envPrefixes: [], systemPaths: [], systemDirListings: [] }; },
+    };
+
+    const adapters = new AdapterRegistry();
+    adapters.register(fakeAdapter);
+    const registry = new CheckRegistry();
+    registry.register(check);
+    const engine = new RemediationEngine(registry, adapters);
+
+    const scanResult = makeScanResult('TST-CRED');
+    scanResult.agents[0].installation.installDir = '/some/install';
+    await engine.fix(scanResult, { yes: true });
+
+    expect(capturedCtx?.credentialPaths).toEqual(['/some/install/auth.json']);
   });
 });
