@@ -10,6 +10,10 @@ export const AGENT_TYPES: readonly AgentType[] = [
   'gemini-cli', 'qwen-code', 'copilot-cli', 'cursor-cli', 'skill-audit',
 ];
 
+export function isScannableAgentType(v: string): v is AgentType {
+  return v !== 'mcp' && v !== 'skill-audit' && (AGENT_TYPES as readonly string[]).includes(v);
+}
+
 export const CHECK_CATEGORIES: readonly CheckCategory[] = [
   'config', 'skills', 'ioc', 'network', 'runtime', 'policy', 'mcp',
   'openclaw', 'nanoclaw', 'ironclaw', 'nanobot', 'zeroclaw', 'lyrie',
