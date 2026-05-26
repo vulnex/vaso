@@ -4,6 +4,19 @@ All notable changes to VASO (VULNEX Agent Security Observer) will be documented 
 
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.4.7] - 2026-05-26
+
+### Fixed
+
+- **`vaso fix` now actually fixes what it promises.** Two independent bugs combined to make the command lie: it would announce "Found N fixable issue(s)" and then report "0/N fixes applied" with the underlying issues intact on the next scan.
+  - `RemediationEngine` constructed an incomplete `ScanContext` when calling `check.fix()` — `credentialPaths` and `skillFiles` were both dropped, even though `ScanEngine` derives them from the adapter at scan time. `CFG-003`'s fix needed `ctx.credentialPaths` to know which file to `chmod`; with the set empty the for-loop never entered and the fix silently no-op'd with "No files to fix". `RemediationEngine` now takes the `AdapterRegistry`, re-derives both fields per agent, and passes them through — matching the construction in `engine.ts:scanAgent`.
+  - Fourteen checks (`NB-001`, `NB-002`, `NB-008`, `NB-010`, `NB-012`, `ZC-002`, `ZC-007`, `ZC-009`, `ZC-011`, `ZC-012`, `IC-002`, `IC-009`, `IC-010`, `IC-011`) declared `fixable: true` paired with a no-op `fix()` that returned `applied: false` and "Manual action required: …". This puffed up the fix UX with promises that could never be kept. Dropped the flag and the stub `fix()` from all fourteen. `fixDescription` still surfaces in scan output, so users see the manual-remediation guidance — they just no longer get told the scanner will do it for them. Fixable check count goes from 42 → 35; fleet operators comparing counts against a v0.4.6 baseline will see the drop.
+- **`vaso scan` no longer hangs indefinitely on installations that have touched gstack.** The gstack skill ecosystem ships per-skill `node_modules/` trees directly under `~/.claude/skills/<skill>/` — ~700 MB of vendored ML libraries including minified `onnxruntime-web` and `huggingface/transformers` bundles. `getSkillFiles()` walked recursively with no exclusion, then the 12 `SKL` checks AST-parsed every match through `@babel/parser`. A local `claude-code` scan went from hanging past 30 s (8,706 candidate files, 8,140 of them inside gstack vendor trees) to completing in ~25 s against actual skill code. Entries whose path traverses `node_modules`, `.git`, `dist`, `build`, `.next`, `.cache`, `.venv`, `venv`, or `__pycache__` are now filtered out — exact-segment match only, so `distribution/` and `building/` still scan.
+
+### Docs
+
+- **`SECURITY_FIXES.md`** is a new source-grounded reference for the 35-of-251 fixable split: the single rule (VASO can compute the correct value without asking), how the boundary is enforced declaratively per-check (`fixable` + `fix()` both required), the four patterns that qualify (loopback bind, boolean toggle, restrictive file mode, opinionated default list), the five reasons that disqualify (identity, trust policy, secret, workflow, external resource), and the safety net (unconditional backup, rollback, non-TTY guard, dry-run). `NB-004`'s 13-command denyList and `CFG-005`'s 8-utility safeBins are quoted verbatim so readers can audit what `vaso fix` will write before running it.
+
 ## [0.4.6] - 2026-05-18
 
 ### Changed
