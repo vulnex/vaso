@@ -33,13 +33,22 @@ import { checkRegistry } from './core/check-registry.js';
 import { setDebug } from './core/debug.js';
 import { assertZoneGraphsValid } from './core/zone-graph-validator.js';
 import { defaultZoneGraph } from './core/default-zone-graph.js';
-import { AGENT_TYPES } from './core/types.js';
+import { AGENT_TYPES, isScannableAgentType } from './core/types.js';
 
 // Derive the list of scannable agent types from the canonical AGENT_TYPES array
 // so `--agent <type>` help strings can't drift as new adapters are added.
 // 'mcp' and 'skill-audit' are filtered out — they have dedicated commands
 // (`vaso mcp scan`, `vaso skill audit`) rather than being passed via --agent.
 const SCANNABLE_AGENTS = AGENT_TYPES.filter(t => t !== 'mcp' && t !== 'skill-audit').join(', ');
+
+function validateAgentOption(options: { agent?: string }): boolean {
+  if (options.agent && !isScannableAgentType(options.agent)) {
+    console.error(chalk.red(`Invalid --agent "${options.agent}". Use one of: ${SCANNABLE_AGENTS}.`));
+    process.exitCode = 2;
+    return false;
+  }
+  return true;
+}
 
 // Read version from package.json at runtime so it can never drift from the
 // manifest. tsup bundles cli.ts into dist/cli.js, which sits one directory
@@ -188,6 +197,7 @@ program
   .option('--no-color', 'disable colored output')
   .option('--fail-on <severity>', 'exit non-zero on findings of this severity or higher (critical, warning, info, none)', 'critical')
   .action(async (options) => {
+    if (!validateAgentOption(options)) return;
     const { runScan } = await import('./commands/scan.js');
     await runScan(options);
   });
@@ -211,6 +221,7 @@ program
   .option('--snapshot <path>', 'detect from a local probe snapshot JSON file')
   .option('--save-snapshot <dir>', 'after fetching SSH snapshots, write each as <hostname>.json under this directory (for debugging)')
   .action(async (options) => {
+    if (!validateAgentOption(options)) return;
     const { runDetect } = await import('./commands/detect.js');
     await runDetect(options);
   });
@@ -223,6 +234,7 @@ program
   .option('-y, --yes', 'apply all fixes without confirmation')
   .option('--rollback', 'rollback the last fix operation')
   .action(async (options) => {
+    if (!validateAgentOption(options)) return;
     const { runFix } = await import('./commands/fix.js');
     await runFix(options);
   });
@@ -237,6 +249,7 @@ program
   .option('-a, --agent <type>', 'scan a specific agent only (when running fresh scan)')
   .option('--all-users', 'scan all user accounts (requires root/sudo)')
   .action(async (options) => {
+    if (!validateAgentOption(options)) return;
     const { runVisualize } = await import('./commands/visualize.js');
     await runVisualize(options);
   });

@@ -82,8 +82,26 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
   let snapshotFs: SnapshotFSProvider | undefined;
 
   if (options.snapshot) {
-    const raw = await readFile(options.snapshot, 'utf-8');
-    const snapshot = JSON.parse(raw) as ProbeSnapshot;
+    let raw: string;
+    try {
+      raw = await readFile(options.snapshot, 'utf-8');
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      console.error(chalk.red(code === 'ENOENT'
+        ? `Snapshot file not found: ${options.snapshot}`
+        : `Failed to read snapshot file: ${(err as Error).message}`));
+      process.exitCode = 1;
+      return;
+    }
+
+    let snapshot: ProbeSnapshot;
+    try {
+      snapshot = JSON.parse(raw) as ProbeSnapshot;
+    } catch (err) {
+      console.error(chalk.red(`Snapshot file is not valid JSON: ${(err as Error).message}`));
+      process.exitCode = 1;
+      return;
+    }
 
     // Validate required fields
     const errors: string[] = [];

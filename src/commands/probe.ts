@@ -10,8 +10,26 @@ export async function probeManifest(adapters: AdapterRegistry): Promise<void> {
 }
 
 export async function probeValidate(snapshotPath: string): Promise<void> {
-  const raw = await readFile(snapshotPath, 'utf-8');
-  const snapshot = JSON.parse(raw) as ProbeSnapshot;
+  let raw: string;
+  try {
+    raw = await readFile(snapshotPath, 'utf-8');
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    console.error(code === 'ENOENT'
+      ? `Snapshot file not found: ${snapshotPath}`
+      : `Failed to read snapshot file: ${(err as Error).message}`);
+    process.exitCode = 1;
+    return;
+  }
+
+  let snapshot: ProbeSnapshot;
+  try {
+    snapshot = JSON.parse(raw) as ProbeSnapshot;
+  } catch (err) {
+    console.error(`Snapshot file is not valid JSON: ${(err as Error).message}`);
+    process.exitCode = 1;
+    return;
+  }
 
   const errors: string[] = [];
   if (snapshot.version !== 1) errors.push(`Unsupported snapshot version: ${snapshot.version}`);
