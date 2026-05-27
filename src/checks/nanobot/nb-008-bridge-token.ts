@@ -17,7 +17,8 @@ export const nb008 = defineCheck({
       for (const [name, ch] of Object.entries(channels)) {
         const type = ch.type as string | undefined;
         const isBridge = type === 'whatsapp' || type === 'whatsapp-bridge'
-          || type === 'bridge' || ch.bridge === true;
+          || type === 'bridge' || ch.bridge === true
+          || name === 'whatsapp' || name === 'whatsapp-bridge';
 
         if (!isBridge) continue;
 

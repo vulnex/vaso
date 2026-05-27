@@ -13,7 +13,7 @@ export const nb007 = defineCheck({
   async run(ctx, h) {
     const evidence = [];
     const installDir = ctx.installation.installDir;
-    const memoryPath = join(installDir, 'MEMORY.md');
+    const memoryPath = join(installDir, 'workspace', 'memory', 'MEMORY.md');
     const memoryExists = await ctx.fs.access(memoryPath);
 
     let memoryEnabled = false;

@@ -12,7 +12,7 @@ export const nb006 = defineCheck({
   async run(ctx, h) {
     const evidence = [];
     const installDir = ctx.installation.installDir;
-    const heartbeatPath = join(installDir, 'HEARTBEAT.md');
+    const heartbeatPath = join(installDir, 'workspace', 'HEARTBEAT.md');
 
     if (await ctx.fs.access(heartbeatPath)) {
       try {

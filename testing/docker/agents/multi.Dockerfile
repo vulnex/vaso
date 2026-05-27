@@ -26,4 +26,17 @@ RUN if [ "${SCENARIO}" = "insecure" ]; then \
       chmod 600 /root/.nanoclaw.env; \
     fi
 
+# Secure scenarios additionally simulate a deployed NemoClaw sandbox so the
+# CFG-016/017/018/019 checks pass for the OpenClaw co-tenant.
+RUN if [ "${SCENARIO}" != "insecure" ]; then \
+      mkdir -p /root/.nemoclaw/state && \
+      printf '%s\n' '{' \
+        '  "lastAction": "deploy",' \
+        '  "lastRunId": "run-001",' \
+        '  "sandboxName": "openclaw-default",' \
+        '  "blueprintVersion": "1.0.0",' \
+        '  "migrationSnapshot": "/root/.nemoclaw/snapshots/run-001"' \
+        '}' > /root/.nemoclaw/state/nemoclaw.json; \
+    fi
+
 CMD ["node", "dist/cli.js", "scan", "--format", "json"]

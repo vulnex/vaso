@@ -1,5 +1,5 @@
 {
-  "version": "1.2.0",
+  "version": "1.6.0",
   "gateway": {
     "host": "127.0.0.1",
     "port": 8080,
@@ -9,7 +9,16 @@
       "bypass": false
     }
   },
-  "sandbox": true,
+  "sandbox": {
+    "enabled": true,
+    "allowedExec": ["ls", "cat", "grep", "head", "tail", "wc", "echo", "date"],
+    "allowedPaths": ["/workspace"],
+    "networkPolicy": "deny-by-default"
+  },
+  "security": {
+    "safeBins": ["ls", "cat", "grep", "head", "tail", "wc", "echo", "date"]
+  },
+  "workspace": "/workspace",
   "webhooks": [
     {
       "url": "https://example.com/hook",

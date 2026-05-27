@@ -15,6 +15,7 @@ export const zc006 = defineCheck({
 
     for (const config of ctx.configs) {
       const workspaceOnly =
+        getNestedValue(config.data, 'workspace.workspace_only') ??
         getNestedValue(config.data, 'workspace_only') ??
         config.data.WORKSPACE_ONLY;
 

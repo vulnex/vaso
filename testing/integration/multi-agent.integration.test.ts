@@ -97,8 +97,13 @@ describe('Multi-Agent Secure', () => {
     });
   });
 
-  it('should detect all three agents in secure mode', () => {
-    expect(result.agents).toHaveLength(3);
+  it('should detect all four agents in secure mode', () => {
+    // Three framework fixtures (openclaw/nanoclaw/picoclaw) plus the
+    // NemoClaw sandbox-hardening layer that the secure scenario provisions
+    // alongside OpenClaw — see testing/docker/agents/multi.Dockerfile.
+    expect(result.agents).toHaveLength(4);
+    const names = result.agents.map(a => a.agent).sort();
+    expect(names).toEqual(['nanoclaw', 'nemoclaw', 'openclaw', 'picoclaw']);
   });
 
   it('should produce high scores for all agents', () => {

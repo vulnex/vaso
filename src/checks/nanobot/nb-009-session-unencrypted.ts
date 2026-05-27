@@ -28,6 +28,7 @@ export const nb009 = defineCheck({
     }
 
     const sessionDirs = [
+      join(installDir, 'workspace', 'sessions'),
       join(installDir, 'sessions'),
       join(installDir, '.sessions'),
       join(installDir, 'data', 'sessions'),
