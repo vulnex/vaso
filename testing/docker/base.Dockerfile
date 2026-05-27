@@ -4,7 +4,7 @@ FROM node:20-slim AS builder
 WORKDIR /build
 
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN npm ci --ignore-scripts
 
 COPY tsconfig.json tsup.config.ts ./
 COPY src/ src/
