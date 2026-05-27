@@ -4,6 +4,12 @@ All notable changes to VASO (VULNEX Agent Security Observer) will be documented 
 
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.4.8] - 2026-05-27
+
+### Fixed
+
+- **Integration-tests CI is green again.** The `Build base Docker image` step (`testing/docker/base.Dockerfile`) had been failing on every push to `main` for two weeks (11 consecutive runs, since 2026-05-13). v0.4.2's switch from `prepublishOnly` to `prepare` in `package.json` — needed so `npm install -g github:vulnex/vaso#<ref>` would build during install — meant the `prepare` lifecycle now ran inside `npm ci`, which in the Dockerfile happens **before** `src/`, `tsconfig.json`, and `tsup.config.ts` are copied into the image. `tsup` then bailed with `No input files` and `npm ci` exited 1. Fix is a single token: `RUN npm ci` → `RUN npm ci --ignore-scripts`. The explicit `RUN npm run build` on the line below already runs after the source is copied, so the `prepare` script was redundant inside the image regardless. `npm install -g github:vulnex/vaso#<ref>` and `npm publish` paths are unaffected — `prepare` still fires there.
+
 ## [0.4.7] - 2026-05-26
 
 ### Fixed
