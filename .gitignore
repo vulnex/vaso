@@ -6,6 +6,10 @@ dist/
 coverage/
 .env
 .env.local
+# Test-fixture .env files contain only placeholder credentials and MUST be
+# tracked — integration tests in CI fail to build their Docker images
+# without them. See testing/fixtures/ironclaw/{insecure,secure}/.env.
+!testing/fixtures/**/.env
 devnotes/
 prds/
 feed-signing-key.pem
