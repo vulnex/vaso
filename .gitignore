@@ -16,3 +16,4 @@ probe/probe
 probe/vaso-probe
 bin/vis/
 vaso-visualizations/
+.claude/
