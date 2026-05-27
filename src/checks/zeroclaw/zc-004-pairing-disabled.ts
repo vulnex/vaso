@@ -15,6 +15,7 @@ export const zc004 = defineCheck({
 
     for (const config of ctx.configs) {
       const requirePairing =
+        getNestedValue(config.data, 'security.require_pairing') ??
         getNestedValue(config.data, 'require_pairing') ??
         config.data.REQUIRE_PAIRING;
 

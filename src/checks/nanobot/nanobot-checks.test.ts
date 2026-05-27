@@ -218,7 +218,9 @@ describe('NB-006: HEARTBEAT.md Injection Risk', () => {
   });
 
   it('flags HEARTBEAT.md when world-writable', async () => {
-    const heartbeat = join(tempDir, 'HEARTBEAT.md');
+    const workspace = join(tempDir, 'workspace');
+    await mkdir(workspace, { recursive: true });
+    const heartbeat = join(workspace, 'HEARTBEAT.md');
     await writeFile(heartbeat, '# pulse\n');
     await chmod(heartbeat, 0o666);
     const result = await check.run(makeFsCtx([], tempDir));
@@ -245,7 +247,9 @@ describe('NB-007: MEMORY.md Prompt Injection', () => {
   });
 
   it('flags MEMORY.md when memory is enabled in config and file exists', async () => {
-    const memory = join(tempDir, 'MEMORY.md');
+    const memoryDir = join(tempDir, 'workspace', 'memory');
+    await mkdir(memoryDir, { recursive: true });
+    const memory = join(memoryDir, 'MEMORY.md');
     await writeFile(memory, '# remembered context\n');
     const raw = JSON.stringify({ memory: true });
     const config = makeConfig('config.json', { memory: true }, raw);
