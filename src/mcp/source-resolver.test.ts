@@ -120,4 +120,38 @@ describe('resolveServerSources', () => {
     expect(sources[0].packageName).toBe('pkg1');
     expect(sources[1].packageName).toBe('pkg2');
   });
+
+  describe('package resolution (opt-in)', () => {
+    it('does not resolve npm packages unless resolvePackages is set', async () => {
+      const npmFetcher = vi.fn(async () => 'SHOULD NOT BE CALLED');
+      const servers = [makeServer({ command: 'npx', args: ['-y', '@mcp/server-fs'] })];
+      const sources = await resolveServerSources(servers, { npmFetcher });
+      expect(npmFetcher).not.toHaveBeenCalled();
+      expect(sources[0].sourceCode).toBeUndefined();
+    });
+
+    it('resolves npm-packaged servers when resolvePackages is set', async () => {
+      const npmFetcher = vi.fn(async () => 'RESOLVED SOURCE');
+      const servers = [makeServer({ command: 'npx', args: ['-y', '@mcp/server-fs'] })];
+      const sources = await resolveServerSources(servers, { resolvePackages: true, npmFetcher });
+      expect(npmFetcher).toHaveBeenCalledWith('@mcp/server-fs');
+      expect(sources[0].sourceCode).toBe('RESOLVED SOURCE');
+    });
+
+    it('does not resolve uvx/PyPI packages (analyzers are JS-only)', async () => {
+      const npmFetcher = vi.fn(async () => 'X');
+      const servers = [makeServer({ command: 'uvx', args: ['some-python-mcp'] })];
+      const sources = await resolveServerSources(servers, { resolvePackages: true, npmFetcher });
+      expect(npmFetcher).not.toHaveBeenCalled();
+      expect(sources[0].packageName).toBe('some-python-mcp');
+      expect(sources[0].sourceCode).toBeUndefined();
+    });
+
+    it('does not resolve local (node) servers via the fetcher', async () => {
+      const npmFetcher = vi.fn(async () => 'X');
+      const servers = [makeServer({ command: 'node', args: ['/tmp/does-not-exist.js'] })];
+      await resolveServerSources(servers, { resolvePackages: true, npmFetcher });
+      expect(npmFetcher).not.toHaveBeenCalled();
+    });
+  });
 });

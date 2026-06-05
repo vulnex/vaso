@@ -14,6 +14,7 @@ export interface MCPScanCommandOptions {
   output?: string;
   path?: string[];
   color?: boolean;
+  resolvePackages?: boolean;
 }
 
 export async function runMCPScan(options: MCPScanCommandOptions): Promise<void> {
@@ -31,9 +32,21 @@ export async function runMCPScan(options: MCPScanCommandOptions): Promise<void> 
 
     console.log(chalk.dim(`Found ${discoveryResult.totalServers} MCP server(s) across ${discoveryResult.configs.length} config(s)`));
 
-    // Resolve source code for servers with local paths
+    // Resolve source code for servers with local paths. With --resolve-packages,
+    // npm-packaged (npx) servers are also downloaded from the registry
+    // (download-only, never executed) so the AST/tool checks can analyze them.
     const allServers = discoveryResult.configs.flatMap(c => c.servers);
-    const serverSources = await resolveServerSources(allServers);
+    if (options.resolvePackages) {
+      console.log(chalk.dim('Resolving npm-packaged servers from the registry (download-only, no execution)…'));
+    }
+    const serverSources = await resolveServerSources(allServers, {
+      resolvePackages: options.resolvePackages,
+    });
+    if (options.resolvePackages) {
+      const resolved = serverSources.filter(s => s.packageName && s.sourceCode).length;
+      const packaged = serverSources.filter(s => s.packageName && !s.localPath).length;
+      console.log(chalk.dim(`Resolved source for ${resolved}/${packaged} packaged server(s) (npm only; uvx/PyPI not analyzed).`));
+    }
 
     const engine = new ScanEngine(adapterRegistry, checkRegistry);
 
