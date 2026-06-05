@@ -117,6 +117,9 @@ export interface ScanContext {
   mcpConfigs?: import('../mcp/types.js').MCPConfig[];
   mcpServerSources?: import('../mcp/types.js').MCPServerSource[];
   mcpToolBaselineStore?: import('../mcp/tool-baseline.js').ToolBaselineStore;
+  /** Cross-scan state for MCP-027 (version history) and MCP-028 (config drift).
+   *  Defaults to a file-backed store inside each check; injectable for tests. */
+  mcpStateStore?: import('../mcp/mcp-state-store.js').McpStateStore;
 }
 
 export interface AgentScanResult {

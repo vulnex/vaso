@@ -30,14 +30,20 @@ import { mcp022 } from './mcp-022-world-writable-command.js';
 import { mcp023 } from './mcp-023-streamable-http-origin-pinning.js';
 import { mcp024 } from './mcp-024-tool-description-injection.js';
 import { mcp025 } from './mcp-025-tool-name-collision.js';
+import { mcp027 } from './mcp-027-vulnerable-version.js';
+import { mcp028 } from './mcp-028-config-drift.js';
 import { mcp029 } from './mcp-029-remote-server-no-auth.js';
+import { mcp030 } from './mcp-030-untrusted-installer-source.js';
 import { mcp031 } from './mcp-031-filesystem-sensitive-path.js';
+import { mcp032 } from './mcp-032-env-dump-tool.js';
 import {
   InMemoryToolBaselineStore,
   baselineKey,
   makeBaseline,
 } from '../../mcp/tool-baseline.js';
 import type { ToolBaselineStore } from '../../mcp/tool-baseline.js';
+import { InMemoryMcpStateStore } from '../../mcp/mcp-state-store.js';
+import type { McpStateStore } from '../../mcp/mcp-state-store.js';
 
 const FIXTURES = join(__dirname, '../../../testing/fixtures/mcp');
 
@@ -68,6 +74,7 @@ function makeContext(overrides: {
   mcpConfigs?: MCPConfig[];
   mcpServerSources?: MCPServerSource[];
   mcpToolBaselineStore?: ToolBaselineStore;
+  mcpStateStore?: McpStateStore;
 } = {}): ScanContext {
   return {
     installation: baseInstallation,
@@ -1910,6 +1917,200 @@ describe('MCP-031 Filesystem Server Sensitive-Path Scope', () => {
     const result = await mcp031.run(makeContext({
       mcpConfigs: [cfg({ name: 'fs', command: 'fs-server', args: ['/'], transport: 'stdio' })],
     }));
+    expect(result.passed).toBe(true);
+  });
+});
+
+describe('MCP-027 Vulnerable / Rolled-Back MCP Version', () => {
+  function cfg(server: MCPConfig['servers'][number]): MCPConfig {
+    return { source: 'project', filePath: '/tmp/mcp.json', servers: [server] };
+  }
+
+  it('flags a version rollback below the highest previously-seen version', async () => {
+    const store = new InMemoryMcpStateStore();
+    await store.save('version-@mcp/server-fs', { highest: '2.0.0' });
+    const result = await mcp027.run(makeContext({
+      mcpConfigs: [cfg({ name: 'fs', command: 'npx', args: ['-y', '@mcp/server-fs@1.0.0'], transport: 'stdio' })],
+      mcpStateStore: store,
+    }));
+    expect(result.passed).toBe(false);
+    expect(result.evidence?.[0].detail).toContain('rolled back from 2.0.0 to 1.0.0');
+  });
+
+  it('passes and records the version on first sight', async () => {
+    const store = new InMemoryMcpStateStore();
+    const result = await mcp027.run(makeContext({
+      mcpConfigs: [cfg({ name: 'fs', command: 'npx', args: ['@mcp/server-fs@1.5.0'], transport: 'stdio' })],
+      mcpStateStore: store,
+    }));
+    expect(result.passed).toBe(true);
+    expect(await store.load('version-@mcp/server-fs')).toEqual({ highest: '1.5.0' });
+  });
+
+  it('does not flag a non-rollback (newer) version', async () => {
+    const store = new InMemoryMcpStateStore();
+    await store.save('version-pkg', { highest: '1.0.0' });
+    const result = await mcp027.run(makeContext({
+      mcpConfigs: [cfg({ name: 'p', command: 'npx', args: ['pkg@1.2.0'], transport: 'stdio' })],
+      mcpStateStore: store,
+    }));
+    expect(result.passed).toBe(true);
+    expect(await store.load('version-pkg')).toEqual({ highest: '1.2.0' });
+  });
+
+  it('skips unpinned packages (MCP-010 handles those)', async () => {
+    const store = new InMemoryMcpStateStore();
+    const result = await mcp027.run(makeContext({
+      mcpConfigs: [cfg({ name: 'p', command: 'npx', args: ['-y', 'pkg'], transport: 'stdio' })],
+      mcpStateStore: store,
+    }));
+    expect(result.passed).toBe(true);
+  });
+});
+
+describe('MCP-028 MCP Configuration Drift', () => {
+  function cfg(servers: MCPConfig['servers']): MCPConfig {
+    return { source: 'project', filePath: '/tmp/mcp.json', servers };
+  }
+
+  it('establishes a baseline on the first scan', async () => {
+    const store = new InMemoryMcpStateStore();
+    const result = await mcp028.run(makeContext({
+      mcpConfigs: [cfg([{ name: 'a', url: 'https://a.example.com/sse', transport: 'sse', env: { API_KEY: 'x' } }])],
+      mcpStateStore: store,
+    }));
+    expect(result.passed).toBe(true);
+    expect(result.severity).toBe('info');
+  });
+
+  it('flags a new server appearing after the baseline', async () => {
+    const store = new InMemoryMcpStateStore();
+    const base = makeContext({
+      mcpConfigs: [cfg([{ name: 'a', transport: 'stdio' }])],
+      mcpStateStore: store,
+    });
+    await mcp028.run(base); // establish baseline
+    const result = await mcp028.run(makeContext({
+      mcpConfigs: [cfg([{ name: 'a', transport: 'stdio' }, { name: 'b', transport: 'stdio' }])],
+      mcpStateStore: store,
+    }));
+    expect(result.passed).toBe(false);
+    expect(result.evidence?.[0].detail).toContain('appeared');
+  });
+
+  it('flags a lost version pin', async () => {
+    const store = new InMemoryMcpStateStore();
+    await mcp028.run(makeContext({
+      mcpConfigs: [cfg([{ name: 'a', command: 'npx', args: ['pkg@1.0.0'], transport: 'stdio' }])],
+      mcpStateStore: store,
+    }));
+    const result = await mcp028.run(makeContext({
+      mcpConfigs: [cfg([{ name: 'a', command: 'npx', args: ['pkg'], transport: 'stdio' }])],
+      mcpStateStore: store,
+    }));
+    expect(result.passed).toBe(false);
+    expect(result.evidence?.[0].detail).toContain('lost its version pin');
+  });
+
+  it('flags an https→http downgrade', async () => {
+    const store = new InMemoryMcpStateStore();
+    await mcp028.run(makeContext({
+      mcpConfigs: [cfg([{ name: 'a', url: 'https://a.example.com/sse', transport: 'sse' }])],
+      mcpStateStore: store,
+    }));
+    const result = await mcp028.run(makeContext({
+      mcpConfigs: [cfg([{ name: 'a', url: 'http://a.example.com/sse', transport: 'sse' }])],
+      mcpStateStore: store,
+    }));
+    expect(result.passed).toBe(false);
+    expect(result.evidence?.[0].detail).toContain('downgraded from https to http');
+  });
+
+  it('passes when nothing changed', async () => {
+    const store = new InMemoryMcpStateStore();
+    const servers: MCPConfig['servers'] = [{ name: 'a', command: 'npx', args: ['pkg@1.0.0'], transport: 'stdio' }];
+    await mcp028.run(makeContext({ mcpConfigs: [cfg(servers)], mcpStateStore: store }));
+    const result = await mcp028.run(makeContext({ mcpConfigs: [cfg(servers)], mcpStateStore: store }));
+    expect(result.passed).toBe(true);
+  });
+});
+
+describe('MCP-030 Untrusted Installer Source', () => {
+  function cfg(server: MCPConfig['servers'][number]): MCPConfig {
+    return { source: 'project', filePath: '/tmp/mcp.json', servers: [server] };
+  }
+
+  it('flags a git source', async () => {
+    const result = await mcp030.run(makeContext({
+      mcpConfigs: [cfg({ name: 'x', command: 'npx', args: ['git+https://evil.example.com/x.git'], transport: 'stdio' })],
+    }));
+    expect(result.passed).toBe(false);
+  });
+
+  it('flags a remote tarball URL', async () => {
+    const result = await mcp030.run(makeContext({
+      mcpConfigs: [cfg({ name: 'x', command: 'npx', args: ['-y', 'https://evil.example.com/x.tgz'], transport: 'stdio' })],
+    }));
+    expect(result.passed).toBe(false);
+  });
+
+  it('flags a local path source', async () => {
+    const result = await mcp030.run(makeContext({
+      mcpConfigs: [cfg({ name: 'x', command: 'npx', args: ['./local-thing'], transport: 'stdio' })],
+    }));
+    expect(result.passed).toBe(false);
+  });
+
+  it('passes a pinned registry package', async () => {
+    const result = await mcp030.run(makeContext({
+      mcpConfigs: [cfg({ name: 'x', command: 'npx', args: ['-y', '@scope/pkg@1.2.3'], transport: 'stdio' })],
+    }));
+    expect(result.passed).toBe(true);
+  });
+
+  it('does not flag a local node server (not a package runner)', async () => {
+    const result = await mcp030.run(makeContext({
+      mcpConfigs: [cfg({ name: 'x', command: 'node', args: ['/opt/server.js'], transport: 'stdio' })],
+    }));
+    expect(result.passed).toBe(true);
+  });
+});
+
+describe('MCP-032 Environment-Dump Tool', () => {
+  function source(serverName: string, code: string): MCPServerSource {
+    return { serverName, sourceCode: code };
+  }
+
+  it('flags JSON.stringify(process.env)', async () => {
+    const result = await mcp032.run(makeContext({
+      mcpServerSources: [source('s', 'return { text: JSON.stringify(process.env) };')],
+    }));
+    expect(result.passed).toBe(false);
+  });
+
+  it('flags a bare process.env spread', async () => {
+    const result = await mcp032.run(makeContext({
+      mcpServerSources: [source('s', 'const all = { ...process.env };')],
+    }));
+    expect(result.passed).toBe(false);
+  });
+
+  it('flags a printenv shell dump', async () => {
+    const result = await mcp032.run(makeContext({
+      mcpServerSources: [source('s', 'execSync("printenv");')],
+    }));
+    expect(result.passed).toBe(false);
+  });
+
+  it('does not flag reading a specific env var', async () => {
+    const result = await mcp032.run(makeContext({
+      mcpServerSources: [source('s', 'const base = process.env.API_BASE; const k = process.env["TOKEN"];')],
+    }));
+    expect(result.passed).toBe(true);
+  });
+
+  it('passes when there is no source', async () => {
+    const result = await mcp032.run(makeContext({ mcpServerSources: [{ serverName: 's' }] }));
     expect(result.passed).toBe(true);
   });
 });
