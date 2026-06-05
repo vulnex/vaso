@@ -23,6 +23,12 @@ export interface MCPServerSource {
   packageName?: string;
   localPath?: string;
   sourceCode?: string;
+  /**
+   * Tool definitions extracted from `sourceCode`, populated once by the engine
+   * (see `ScanEngine.scanMCP`) so tool-layer checks (MCP-020/024/025) share one
+   * extraction pass instead of each re-parsing the source.
+   */
+  tools?: MCPToolDefinition[];
 }
 
 export interface MCPToolDefinition {

@@ -23,9 +23,9 @@ export const mcp020 = defineCheck({
     let totalChanges = 0;
 
     for (const source of sources) {
-      if (!source.sourceCode) continue;
-
-      const tools = extractToolDefinitions(source.sourceCode);
+      // Prefer the engine-populated shared extraction; fall back for callers
+      // (e.g. unit tests) that build sources without pre-extracted tools.
+      const tools = source.tools ?? (source.sourceCode ? extractToolDefinitions(source.sourceCode) : []);
       if (tools.length === 0) continue;
 
       const { diff, isFirstScan } = await diffToolBaseline(store, source, tools, hostname);

@@ -164,7 +164,9 @@ export function extractToolDefinitions(sourceCode: string): MCPToolDefinition[] 
   const seen = new Set<string>();
 
   // Pattern 1: server.tool("name", "description", { schema }, handler)
-  const serverToolRe = /\.tool\(\s*['"]([^'"]+)['"]\s*(?:,\s*['"]([^'"]*)['"]\s*)?(?:,\s*(\{[^}]*\})\s*)?/g;
+  // Description capture tolerates escaped quotes (\") so a poisoning payload
+  // cannot evade extraction by embedding a quote mid-string.
+  const serverToolRe = /\.tool\(\s*['"]([^'"]+)['"]\s*(?:,\s*['"]((?:[^'"\\]|\\.)*)['"]\s*)?(?:,\s*(\{[^}]*\})\s*)?/g;
   let match: RegExpExecArray | null;
   while ((match = serverToolRe.exec(sourceCode)) !== null) {
     const name = match[1];
@@ -178,7 +180,7 @@ export function extractToolDefinitions(sourceCode: string): MCPToolDefinition[] 
   }
 
   // Pattern 2: addTool({ name: "...", description: "...", inputSchema: {...} })
-  const addToolRe = /addTool\(\s*\{[^}]*name:\s*['"]([^'"]+)['"][^}]*(?:description:\s*['"]([^'"]*?)['"])?/g;
+  const addToolRe = /addTool\(\s*\{[^}]*name:\s*['"]([^'"]+)['"][^}]*(?:description:\s*['"]((?:[^'"\\]|\\.)*?)['"])?/g;
   while ((match = addToolRe.exec(sourceCode)) !== null) {
     const name = match[1];
     if (seen.has(name)) continue;
@@ -190,7 +192,7 @@ export function extractToolDefinitions(sourceCode: string): MCPToolDefinition[] 
   }
 
   // Pattern 3: registerTool("name", ...) or register_tool("name", ...)
-  const registerToolRe = /register[_]?[Tt]ool\(\s*['"]([^'"]+)['"]\s*(?:,\s*['"]([^'"]*?)['"])?/g;
+  const registerToolRe = /register[_]?[Tt]ool\(\s*['"]([^'"]+)['"]\s*(?:,\s*['"]((?:[^'"\\]|\\.)*?)['"])?/g;
   while ((match = registerToolRe.exec(sourceCode)) !== null) {
     const name = match[1];
     if (seen.has(name)) continue;
@@ -202,7 +204,7 @@ export function extractToolDefinitions(sourceCode: string): MCPToolDefinition[] 
   }
 
   // Pattern 4: { name: "tool_name", description: "...", handler: ... } in tools arrays
-  const toolObjRe = /\{\s*name:\s*['"]([^'"]+)['"](?:\s*,\s*description:\s*['"]([^'"]*?)['"])?[^}]*handler\s*:/g;
+  const toolObjRe = /\{\s*name:\s*['"]([^'"]+)['"](?:\s*,\s*description:\s*['"]((?:[^'"\\]|\\.)*?)['"])?[^}]*handler\s*:/g;
   while ((match = toolObjRe.exec(sourceCode)) !== null) {
     const name = match[1];
     if (seen.has(name)) continue;
