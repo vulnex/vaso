@@ -217,3 +217,27 @@ export function extractToolDefinitions(sourceCode: string): MCPToolDefinition[] 
 
   return [...byName.values()];
 }
+
+/**
+ * Extract MCP prompt / slash-command names from server source code. Prompts
+ * surface as slash commands in MCP clients, so cross-server name collisions
+ * (MCP-026) create command-routing ambiguity the same way tool collisions do.
+ */
+export function extractPromptNames(sourceCode: string): string[] {
+  const names = new Set<string>();
+  const add = (n?: string) => {
+    if (n) names.add(n);
+  };
+
+  // Inline: server.prompt("name", ...) / registerPrompt("name", ...)
+  let match: RegExpExecArray | null;
+  const inlineRe = /(?:registerPrompt|\.prompt)\(\s*['"]([^'"]+)['"]/g;
+  while ((match = inlineRe.exec(sourceCode)) !== null) add(match[1]);
+
+  // Separated: const name = "name"; ... registerPrompt(name, config, handler)
+  const sepRe =
+    /(?:const|let|var)\s+(?:prompt)?[Nn]ame\s*=\s*['"]([^'"]+)['"][\s\S]{0,400}?registerPrompt\(/g;
+  while ((match = sepRe.exec(sourceCode)) !== null) add(match[1]);
+
+  return [...names];
+}

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { extractToolDefinitions } from './tool-baseline.js';
+import { extractToolDefinitions, extractPromptNames } from './tool-baseline.js';
 
 describe('extractToolDefinitions', () => {
   it('extracts the classic inline server.tool("name", "desc", ...) style', () => {
@@ -60,5 +60,21 @@ describe('extractToolDefinitions', () => {
 
   it('returns nothing for source without tool registrations', () => {
     expect(extractToolDefinitions('const x = 1; function f() { return x; }')).toEqual([]);
+  });
+});
+
+describe('extractPromptNames', () => {
+  it('extracts inline server.prompt and registerPrompt names', () => {
+    const names = extractPromptNames('server.prompt("code_review", {}, fn);\nregisterPrompt("summarize", config, fn);');
+    expect(names.sort()).toEqual(['code_review', 'summarize']);
+  });
+
+  it('extracts the separated const-name + registerPrompt style', () => {
+    const names = extractPromptNames('const name = "explain";\nconst config = {};\nserver.registerPrompt(name, config, fn);');
+    expect(names).toContain('explain');
+  });
+
+  it('returns nothing for source without prompts', () => {
+    expect(extractPromptNames('function f() { return 1; }')).toEqual([]);
   });
 });
