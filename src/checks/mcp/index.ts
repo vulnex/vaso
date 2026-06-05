@@ -24,8 +24,12 @@ import { mcp022 } from './mcp-022-world-writable-command.js';
 import { mcp023 } from './mcp-023-streamable-http-origin-pinning.js';
 import { mcp024 } from './mcp-024-tool-description-injection.js';
 import { mcp025 } from './mcp-025-tool-name-collision.js';
+import { mcp027 } from './mcp-027-vulnerable-version.js';
+import { mcp028 } from './mcp-028-config-drift.js';
 import { mcp029 } from './mcp-029-remote-server-no-auth.js';
+import { mcp030 } from './mcp-030-untrusted-installer-source.js';
 import { mcp031 } from './mcp-031-filesystem-sensitive-path.js';
+import { mcp032 } from './mcp-032-env-dump-tool.js';
 
 export const mcpChecks: CheckModule[] = [
   mcp001,
@@ -53,6 +57,10 @@ export const mcpChecks: CheckModule[] = [
   mcp023,
   mcp024,
   mcp025,
+  mcp027,
+  mcp028,
   mcp029,
+  mcp030,
   mcp031,
+  mcp032,
 ];

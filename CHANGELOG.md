@@ -19,11 +19,18 @@ This project adheres to [Semantic Versioning](https://semver.org/).
   - **Multi-file collection.** Real MCP servers are multi-file builds whose entry is a thin shim, so VASO concatenates all of the package's JS (entry first, capped) rather than reading only the `bin`/`main` file.
   - **Off by default** to preserve offline-first behavior; resolved packages are cached under `~/.vaso/mcp-pkg-cache/` and reused offline. Hostile configs can't redirect the fetch — only `name` / `@scope/name[@version]` specs are accepted (no git URLs, file paths, or shell-ish specs). uvx/PyPI packages are intentionally not resolved (the analyzers are JS-only); the command notes this so it isn't a silent gap.
 
+- **MCP scanning overhaul, Phase 3 — four Tier-2 MCP checks (MCP category 27 → 31, total 255 → 259).**
+  - **MCP-027 Vulnerable / Rolled-Back MCP Version** (warning, escalates to critical on a critical advisory match) — for pinned npm-packaged servers, matches the version against dependency advisories and flags rollbacks below the highest version previously seen (silently undoing a security fix). Complements MCP-010 (unpinned packages). arXiv 2503.23278 §5.3.2.
+  - **MCP-028 MCP Configuration Drift** (warning) — fingerprints each server's security posture (transport, version-pinning, http/https, auth) and flags regressions since the last scan: a new server, a lost version pin, an https→http downgrade, or removed auth. First scan establishes the baseline. arXiv 2503.23278 §5.3.3.
+  - **MCP-030 Untrusted Installer Source** (warning) — flags servers installed via a package runner from a non-registry source (git URL, VCS shorthand, remote tarball, or local path), bypassing registry provenance and version/advisory checks. Complements MCP-010. arXiv 2503.23278 §5.1.2, OWASP MCP04.
+  - **MCP-032 Environment-Dump Tool** (warning) — flags server tools that return the whole process environment (`printEnv`-style: `JSON.stringify(process.env)`, `{...process.env}`, `printenv`), leaking every secret the agent holds. Reading a specific variable is not flagged. Benefits from `--resolve-packages`. arXiv 2504.03767 (Credential Theft), SlowMist 18.
+
 ### Changed
 
 - Tool definitions are now extracted once in `ScanEngine.scanMCP()` and shared across the tool-layer checks (MCP-020/024/025) via a new `tools?` field on `MCPServerSource`, instead of each check re-parsing the server source.
 - `extractToolDefinitions()` description capture now tolerates escaped quotes, so a tool-description payload can't evade extraction by embedding a quote mid-string.
 - `resolveServerSources()` now takes an options object (`{ fs?, resolvePackages?, cacheDir?, npmFetcher? }`) instead of a positional `fs` argument.
+- New `mcpStateStore` scan-context field (`src/mcp/mcp-state-store.ts`) backs the cross-scan state for MCP-027 (package-version history) and MCP-028 (config-drift baseline); defaults to a file store under `~/.vaso/mcp-state/`.
 
 ## [0.4.8] - 2026-05-27
 
