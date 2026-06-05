@@ -31,6 +31,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - `extractToolDefinitions()` description capture now tolerates escaped quotes, so a tool-description payload can't evade extraction by embedding a quote mid-string.
 - `resolveServerSources()` now takes an options object (`{ fs?, resolvePackages?, cacheDir?, npmFetcher? }`) instead of a positional `fs` argument.
 - New `mcpStateStore` scan-context field (`src/mcp/mcp-state-store.ts`) backs the cross-scan state for MCP-027 (package-version history) and MCP-028 (config-drift baseline); defaults to a file store under `~/.vaso/mcp-state/`.
+- **`extractToolDefinitions()` now recognizes the modern MCP SDK tool style** — `const name = "…"` + a separate `const config = { description: … }` registered via `server.registerTool(name, config, …)`, plus inline `registerTool("name", { description })` and standalone `{ name, description }` objects. Previously only inline string-literal args (`server.tool("name", "desc", …)`) were parsed, so `--resolve-packages`-resolved servers (which are usually built/multi-file) yielded no tools and the tool-layer checks (MCP-020/024/025) saw nothing. Extraction is now order-independent (a richer match upgrades a name-only one). Verified against `@modelcontextprotocol/server-everything`: its tools are now extracted and MCP-032 flags its `get-env` env-dump tool.
 
 ## [0.4.8] - 2026-05-27
 

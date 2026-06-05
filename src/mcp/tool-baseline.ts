@@ -160,60 +160,60 @@ export async function diffToolBaseline(
  * Scans for common MCP SDK registration patterns.
  */
 export function extractToolDefinitions(sourceCode: string): MCPToolDefinition[] {
-  const tools: MCPToolDefinition[] = [];
-  const seen = new Set<string>();
+  const byName = new Map<string, MCPToolDefinition>();
 
-  // Pattern 1: server.tool("name", "description", { schema }, handler)
+  // Record a tool, merging so a richer later match (one that carries a
+  // description/schema) upgrades an earlier name-only one — extraction is then
+  // order-independent across the patterns below.
+  const record = (name: string, description?: string, schema?: string): void => {
+    const existing = byName.get(name);
+    if (!existing) {
+      byName.set(name, { name, description, schema });
+      return;
+    }
+    if (description && !existing.description) existing.description = description;
+    if (schema && !existing.schema) existing.schema = schema;
+  };
+
+  const runPattern = (re: RegExp, hasSchema = false): void => {
+    let match: RegExpExecArray | null;
+    while ((match = re.exec(sourceCode)) !== null) {
+      record(match[1], match[2] ?? undefined, hasSchema ? (match[3] ?? undefined) : undefined);
+    }
+  };
+
+  // Pattern 1: server.tool("name", "description", { schema }, handler).
   // Description capture tolerates escaped quotes (\") so a poisoning payload
   // cannot evade extraction by embedding a quote mid-string.
-  const serverToolRe = /\.tool\(\s*['"]([^'"]+)['"]\s*(?:,\s*['"]((?:[^'"\\]|\\.)*)['"]\s*)?(?:,\s*(\{[^}]*\})\s*)?/g;
-  let match: RegExpExecArray | null;
-  while ((match = serverToolRe.exec(sourceCode)) !== null) {
-    const name = match[1];
-    if (seen.has(name)) continue;
-    seen.add(name);
-    tools.push({
-      name,
-      description: match[2] ?? undefined,
-      schema: match[3] ?? undefined,
-    });
-  }
+  runPattern(/\.tool\(\s*['"]([^'"]+)['"]\s*(?:,\s*['"]((?:[^'"\\]|\\.)*)['"]\s*)?(?:,\s*(\{[^}]*\})\s*)?/g, true);
 
   // Pattern 2: addTool({ name: "...", description: "...", inputSchema: {...} })
-  const addToolRe = /addTool\(\s*\{[^}]*name:\s*['"]([^'"]+)['"][^}]*(?:description:\s*['"]((?:[^'"\\]|\\.)*?)['"])?/g;
-  while ((match = addToolRe.exec(sourceCode)) !== null) {
-    const name = match[1];
-    if (seen.has(name)) continue;
-    seen.add(name);
-    tools.push({
-      name,
-      description: match[2] ?? undefined,
-    });
-  }
+  runPattern(/addTool\(\s*\{[^}]*name:\s*['"]([^'"]+)['"][^}]*(?:description:\s*['"]((?:[^'"\\]|\\.)*?)['"])?/g);
 
-  // Pattern 3: registerTool("name", ...) or register_tool("name", ...)
-  const registerToolRe = /register[_]?[Tt]ool\(\s*['"]([^'"]+)['"]\s*(?:,\s*['"]((?:[^'"\\]|\\.)*?)['"])?/g;
-  while ((match = registerToolRe.exec(sourceCode)) !== null) {
-    const name = match[1];
-    if (seen.has(name)) continue;
-    seen.add(name);
-    tools.push({
-      name,
-      description: match[2] ?? undefined,
-    });
-  }
+  // Pattern 3: registerTool("name", ...) / register_tool("name", ...)
+  runPattern(/register[_]?[Tt]ool\(\s*['"]([^'"]+)['"]\s*(?:,\s*['"]((?:[^'"\\]|\\.)*?)['"])?/g);
 
-  // Pattern 4: { name: "tool_name", description: "...", handler: ... } in tools arrays
-  const toolObjRe = /\{\s*name:\s*['"]([^'"]+)['"](?:\s*,\s*description:\s*['"]((?:[^'"\\]|\\.)*?)['"])?[^}]*handler\s*:/g;
-  while ((match = toolObjRe.exec(sourceCode)) !== null) {
-    const name = match[1];
-    if (seen.has(name)) continue;
-    seen.add(name);
-    tools.push({
-      name,
-      description: match[2] ?? undefined,
-    });
-  }
+  // Pattern 4: { name: "tool_name", description: "...", handler: ... } in arrays
+  runPattern(/\{\s*name:\s*['"]([^'"]+)['"](?:\s*,\s*description:\s*['"]((?:[^'"\\]|\\.)*?)['"])?[^}]*handler\s*:/g);
 
-  return tools;
+  // The modern MCP SDK style separates the name and the config object, often
+  // across `const` declarations and one tool per module:
+  //   const name = "echo";
+  //   const config = { title: "...", description: "...", inputSchema: ... };
+  //   server.registerTool(name, config, handler);
+  // Patterns 1–4 (which expect inline string-literal args) miss this entirely,
+  // so packaged/bundled servers extracted via --resolve-packages yielded no
+  // tools. Patterns 5–7 recover the common modern shapes. The lazy length
+  // bounds keep each pairing local to one declaration/config block.
+
+  // Pattern 5: a `name`/`toolName` const, then a config object's `description:`.
+  runPattern(/(?:const|let|var)\s+(?:tool)?[Nn]ame\s*=\s*['"]([^'"]+)['"][\s\S]{0,400}?\bdescription\s*:\s*['"]((?:[^'"\\]|\\.)*?)['"]/g);
+
+  // Pattern 6: inline registerTool/tool with a config object carrying description.
+  runPattern(/(?:register[_]?[Tt]ool|\.tool)\(\s*['"]([^'"]+)['"]\s*,\s*\{[\s\S]{0,400}?\bdescription\s*:\s*['"]((?:[^'"\\]|\\.)*?)['"]/g);
+
+  // Pattern 7: an object literal with both `name:` and `description:` fields.
+  runPattern(/\bname\s*:\s*['"]([^'"]+)['"][\s\S]{0,200}?\bdescription\s*:\s*['"]((?:[^'"\\]|\\.)*?)['"]/g);
+
+  return [...byName.values()];
 }
