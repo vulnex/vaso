@@ -1,7 +1,8 @@
-import { join, dirname, resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import type { MCPServerEntry, MCPServerSource } from './types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
+import { resolveNpmPackageSource } from './package-fetcher.js';
 
 export function inferPackageName(server: MCPServerEntry): string | undefined {
   if (!server.command || !server.args?.length) return undefined;
@@ -94,11 +95,30 @@ async function findMainEntry(dir: string, fs: FSProvider): Promise<string | unde
   return undefined;
 }
 
+export interface ResolveSourcesOptions {
+  fs?: FSProvider;
+  /**
+   * When true, npm-packaged servers (npx) whose source isn't on local disk are
+   * downloaded from the registry (download-only, never executed) so the
+   * AST/tool checks can analyze them. Opt-in: off by default to preserve
+   * offline-first behavior. uvx/PyPI packages are intentionally skipped — the
+   * analyzers are JS-only, so resolving Python source wouldn't feed them.
+   */
+  resolvePackages?: boolean;
+  cacheDir?: string;
+  /** Injectable npm-spec → source resolver, for hermetic unit tests. */
+  npmFetcher?: (spec: string) => Promise<string | undefined>;
+}
+
+function isNpmCommand(cmd?: string): boolean {
+  return cmd === 'npx' || cmd === 'npx.cmd';
+}
+
 export async function resolveServerSources(
   servers: MCPServerEntry[],
-  fs?: FSProvider,
+  options: ResolveSourcesOptions = {},
 ): Promise<MCPServerSource[]> {
-  const provider = fs ?? new LocalFSProvider();
+  const provider = options.fs ?? new LocalFSProvider();
   const sources: MCPServerSource[] = [];
 
   for (const server of servers) {
@@ -117,6 +137,15 @@ export async function resolveServerSources(
           sourceCode = await readSourceFile(entry, provider);
         }
       }
+    }
+
+    // Opt-in: resolve npm-packaged servers so their source feeds the AST/tool
+    // checks. Download-only, never executed (see package-fetcher).
+    if (!sourceCode && packageName && options.resolvePackages && isNpmCommand(server.command)) {
+      const fetcher =
+        options.npmFetcher ??
+        ((spec: string) => resolveNpmPackageSource(spec, { cacheDir: options.cacheDir }));
+      sourceCode = await fetcher(packageName);
     }
 
     sources.push({

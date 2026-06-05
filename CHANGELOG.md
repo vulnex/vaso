@@ -14,10 +14,16 @@ This project adheres to [Semantic Versioning](https://semver.org/).
   - **MCP-029 Remote Server Without Authentication** (critical) — flags remotely-reachable servers (SSE / streamable-HTTP / non-loopback http(s)) configured with no credentials at all (OWASP MCP07; SlowMist 72). Localhost endpoints stay out of scope — DNS-rebinding remains MCP-023's job.
   - **MCP-031 Filesystem Server Sensitive-Path Scope** (critical) — flags servers scoped to credential stores or shell startup files (`~/.ssh`/`authorized_keys`, `~/.aws`, `~/.gnupg`, `~/.kube`, `~/.docker`, shell rc files, `/etc`) — the remote-access, credential-theft and code-execution sinks demonstrated in arXiv 2504.03767 / appsecco lab 1. Bare root/home grants stay with MCP-009 to avoid double-flagging.
 
+- **MCP scanning overhaul, Phase 2 — opt-in package source resolution (`vaso mcp scan --resolve-packages`).** Until now VASO's source-level MCP checks (the AST suite + tool-layer checks) only fired against servers whose code was on local disk; `npx`-packaged servers — the majority of real deployments — were invisible to them. With `--resolve-packages`, VASO now downloads npm-packaged servers from the registry and analyzes their source, so MCP-004/005/006/007/019 (and the Phase 1 tool-layer checks) cover packaged servers too. Verified end-to-end against `@modelcontextprotocol/server-everything`: resolution flips MCP-005/MCP-007 from "nothing to analyze" to firing on the actual package code.
+  - **Download-only, never executed.** Uses `npm pack --ignore-scripts` (fetches the tarball without running the package's lifecycle scripts) + system `tar`; the scanned package is never run, preserving VASO's "never execute scanned code" invariant.
+  - **Multi-file collection.** Real MCP servers are multi-file builds whose entry is a thin shim, so VASO concatenates all of the package's JS (entry first, capped) rather than reading only the `bin`/`main` file.
+  - **Off by default** to preserve offline-first behavior; resolved packages are cached under `~/.vaso/mcp-pkg-cache/` and reused offline. Hostile configs can't redirect the fetch — only `name` / `@scope/name[@version]` specs are accepted (no git URLs, file paths, or shell-ish specs). uvx/PyPI packages are intentionally not resolved (the analyzers are JS-only); the command notes this so it isn't a silent gap.
+
 ### Changed
 
 - Tool definitions are now extracted once in `ScanEngine.scanMCP()` and shared across the tool-layer checks (MCP-020/024/025) via a new `tools?` field on `MCPServerSource`, instead of each check re-parsing the server source.
 - `extractToolDefinitions()` description capture now tolerates escaped quotes, so a tool-description payload can't evade extraction by embedding a quote mid-string.
+- `resolveServerSources()` now takes an options object (`{ fs?, resolvePackages?, cacheDir?, npmFetcher? }`) instead of a positional `fs` argument.
 
 ## [0.4.8] - 2026-05-27
 

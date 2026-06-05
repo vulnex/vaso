@@ -113,7 +113,7 @@ describe('runMCPScan', () => {
     await runMCPScan({ format: 'json', path: ['/home/user/config.json'] });
 
     expect(mockDiscoverFromPaths).toHaveBeenCalledWith(['/home/user/config.json']);
-    expect(mockResolveServerSources).toHaveBeenCalledWith(sampleConfig.servers);
+    expect(mockResolveServerSources).toHaveBeenCalledWith(sampleConfig.servers, { resolvePackages: undefined });
     expect(mockScanMCP).toHaveBeenCalled();
     const output = consoleLogs.join('\n');
     expect(output).toContain('rendered output');

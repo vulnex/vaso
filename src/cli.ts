@@ -274,6 +274,7 @@ mcpCommand
   .option('-f, --format <format>', 'output format (terminal, json, sarif, markdown, html, csv, junit)', 'terminal')
   .option('-o, --output <file>', 'write report to file')
   .option('-p, --path <paths...>', 'specific config file paths to scan')
+  .option('--resolve-packages', 'download npm-packaged (npx) MCP servers — download-only, never executed — to analyze their source (requires network)', false)
   .option('--no-color', 'disable colored output')
   .action(async (options) => {
     const { runMCPScan } = await import('./commands/mcp.js');
