@@ -4,6 +4,21 @@ All notable changes to VASO (VULNEX Agent Security Observer) will be documented 
 
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **MCP scanning overhaul, Phase 1 — four new MCP checks (MCP category 23 → 27, total 251 → 255).** Closes the most-cited static-detectable gaps in MCP coverage, identified by mapping the existing checks against the OWASP MCP Top 10, the MCP lifecycle-threat taxonomy (Hou et al., arXiv 2503.23278), the "MCP Safety Audit" attack classes (arXiv 2504.03767), the appsecco vulnerable-MCP-servers lab, and the SlowMist MCP security checklist. Full plan and threat→check traceability in `devnotes/mcp-scanning-improvements-2026-06-05.md`.
+  - **MCP-024 Tool Description Injection** (critical) — flags toolflow-hijacking directives ("ignore previous instructions", "always prefer this tool", "do not mention", role-spoofing prefixes, `<important>` tags) and invisible/bidi Unicode hidden in MCP tool `description` fields. The client LLM reads these verbatim when choosing tools, so they steer it — or keep it silent — without the user ever seeing them. This was VASO's single biggest MCP gap (OWASP MCP03; arXiv 2503.23278 §5.2.1).
+  - **MCP-025 Cross-Server Tool-Name Collision** (warning) — flags identical or one-character-near-identical tool names exposed by different servers, the precondition for tool shadowing/impersonation (arXiv 2503.23278 §5.2.1; SlowMist 77/79).
+  - **MCP-029 Remote Server Without Authentication** (critical) — flags remotely-reachable servers (SSE / streamable-HTTP / non-loopback http(s)) configured with no credentials at all (OWASP MCP07; SlowMist 72). Localhost endpoints stay out of scope — DNS-rebinding remains MCP-023's job.
+  - **MCP-031 Filesystem Server Sensitive-Path Scope** (critical) — flags servers scoped to credential stores or shell startup files (`~/.ssh`/`authorized_keys`, `~/.aws`, `~/.gnupg`, `~/.kube`, `~/.docker`, shell rc files, `/etc`) — the remote-access, credential-theft and code-execution sinks demonstrated in arXiv 2504.03767 / appsecco lab 1. Bare root/home grants stay with MCP-009 to avoid double-flagging.
+
+### Changed
+
+- Tool definitions are now extracted once in `ScanEngine.scanMCP()` and shared across the tool-layer checks (MCP-020/024/025) via a new `tools?` field on `MCPServerSource`, instead of each check re-parsing the server source.
+- `extractToolDefinitions()` description capture now tolerates escaped quotes, so a tool-description payload can't evade extraction by embedding a quote mid-string.
+
 ## [0.4.8] - 2026-05-27
 
 ### Fixed

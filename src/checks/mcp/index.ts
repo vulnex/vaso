@@ -22,6 +22,10 @@ import { mcp020 } from './mcp-020-tool-definition-rug-pull.js';
 import { mcp021 } from './mcp-021-stdio-shell-invocation.js';
 import { mcp022 } from './mcp-022-world-writable-command.js';
 import { mcp023 } from './mcp-023-streamable-http-origin-pinning.js';
+import { mcp024 } from './mcp-024-tool-description-injection.js';
+import { mcp025 } from './mcp-025-tool-name-collision.js';
+import { mcp029 } from './mcp-029-remote-server-no-auth.js';
+import { mcp031 } from './mcp-031-filesystem-sensitive-path.js';
 
 export const mcpChecks: CheckModule[] = [
   mcp001,
@@ -47,4 +51,8 @@ export const mcpChecks: CheckModule[] = [
   mcp021,
   mcp022,
   mcp023,
+  mcp024,
+  mcp025,
+  mcp029,
+  mcp031,
 ];

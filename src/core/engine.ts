@@ -6,6 +6,7 @@ import type { FSProvider } from './fs-provider.js';
 import { LocalFSProvider } from './local-fs-provider.js';
 import { computeScore, scoreToGrade, summarizeResults } from './scoring.js';
 import { getAllSkillsDirs, getSkillFiles } from './utils.js';
+import { extractToolDefinitions } from '../mcp/tool-baseline.js';
 
 export class ScanEngine {
   private fs: FSProvider;
@@ -147,6 +148,15 @@ export class ScanEngine {
     serverSources: MCPServerSource[],
     options: ScanOptions,
   ): Promise<ScanResult> {
+    // Extract tool definitions once so the tool-layer checks (MCP-020/024/025)
+    // share a single parse of each server's source instead of re-extracting.
+    const sourcesWithTools: MCPServerSource[] = serverSources.map((source) => ({
+      ...source,
+      tools:
+        source.tools ??
+        (source.sourceCode ? extractToolDefinitions(source.sourceCode) : undefined),
+    }));
+
     const context: ScanContext = {
       installation: {
         agent: 'mcp',
@@ -157,7 +167,7 @@ export class ScanEngine {
       platform: this.fs.platform,
       fs: this.fs,
       mcpConfigs,
-      mcpServerSources: serverSources,
+      mcpServerSources: sourcesWithTools,
     };
 
     // Get only MCP-category checks
