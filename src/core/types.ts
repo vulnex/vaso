@@ -35,6 +35,12 @@ export interface Evidence {
   detail?: string;
 }
 
+/** OWASP MCP Top 10 (2025) identifier, e.g. 'MCP03'. Tags MCP-related checks so
+ *  reports can show OWASP MCP Top 10 coverage. */
+export type OwaspMcpId =
+  | 'MCP01' | 'MCP02' | 'MCP03' | 'MCP04' | 'MCP05'
+  | 'MCP06' | 'MCP07' | 'MCP08' | 'MCP09' | 'MCP10';
+
 export interface CheckResult {
   id: string;
   name: string;
@@ -56,6 +62,7 @@ export interface CheckModule {
   supportedAgents?: AgentType[];
   excludedAgents?: AgentType[];
   supportedPlatforms?: NodeJS.Platform[];
+  owaspMcp?: OwaspMcpId;
   run(context: ScanContext): Promise<CheckResult>;
   fix?(context: ScanContext): Promise<FixResult>;
 }

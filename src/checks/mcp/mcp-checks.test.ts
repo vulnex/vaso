@@ -30,12 +30,14 @@ import { mcp022 } from './mcp-022-world-writable-command.js';
 import { mcp023 } from './mcp-023-streamable-http-origin-pinning.js';
 import { mcp024 } from './mcp-024-tool-description-injection.js';
 import { mcp025 } from './mcp-025-tool-name-collision.js';
+import { mcp026 } from './mcp-026-slash-command-overlap.js';
 import { mcp027 } from './mcp-027-vulnerable-version.js';
 import { mcp028 } from './mcp-028-config-drift.js';
 import { mcp029 } from './mcp-029-remote-server-no-auth.js';
 import { mcp030 } from './mcp-030-untrusted-installer-source.js';
 import { mcp031 } from './mcp-031-filesystem-sensitive-path.js';
 import { mcp032 } from './mcp-032-env-dump-tool.js';
+import { mcp033 } from './mcp-033-long-lived-token.js';
 import {
   InMemoryToolBaselineStore,
   baselineKey,
@@ -2111,6 +2113,85 @@ describe('MCP-032 Environment-Dump Tool', () => {
 
   it('passes when there is no source', async () => {
     const result = await mcp032.run(makeContext({ mcpServerSources: [{ serverName: 's' }] }));
+    expect(result.passed).toBe(true);
+  });
+});
+
+describe('MCP-026 Slash-Command / Prompt Overlap', () => {
+  function src(serverName: string, code: string): MCPServerSource {
+    return { serverName, sourceCode: code };
+  }
+
+  it('flags the same prompt name across two servers', async () => {
+    const result = await mcp026.run(makeContext({
+      mcpServerSources: [
+        src('a', 'server.prompt("review", {}, fn);'),
+        src('b', 'server.prompt("review", {}, fn);'),
+      ],
+    }));
+    expect(result.passed).toBe(false);
+    expect(result.severity).toBe('info');
+  });
+
+  it('passes when prompt names are distinct', async () => {
+    const result = await mcp026.run(makeContext({
+      mcpServerSources: [
+        src('a', 'server.prompt("alpha", {}, fn);'),
+        src('b', 'registerPrompt("beta", config, fn);'),
+      ],
+    }));
+    expect(result.passed).toBe(true);
+  });
+
+  it('passes a single server reusing its own prompt name', async () => {
+    const result = await mcp026.run(makeContext({
+      mcpServerSources: [src('solo', 'server.prompt("p", {}, fn); server.prompt("p", {}, fn);')],
+    }));
+    expect(result.passed).toBe(true);
+  });
+});
+
+describe('MCP-033 Long-Lived / Non-Expiring Token', () => {
+  function jwt(payload: object): string {
+    const b64 = (o: object) => Buffer.from(JSON.stringify(o)).toString('base64url');
+    return `${b64({ alg: 'none' })}.${b64(payload)}.sig`;
+  }
+  function cfg(env: Record<string, string>): MCPConfig {
+    return { source: 'project', filePath: '/tmp/mcp.json', servers: [{ name: 's', url: 'https://x/sse', transport: 'sse', env }] };
+  }
+
+  it('flags a JWT with no exp claim', async () => {
+    const result = await mcp033.run(makeContext({ mcpConfigs: [cfg({ ACCESS_TOKEN: jwt({ sub: 'svc' }) })] }));
+    expect(result.passed).toBe(false);
+    expect(result.evidence?.[0].detail).toContain('never expires');
+  });
+
+  it('flags a JWT with a far-future exp', async () => {
+    const result = await mcp033.run(makeContext({ mcpConfigs: [cfg({ ACCESS_TOKEN: jwt({ exp: 9999999999 }) })] }));
+    expect(result.passed).toBe(false);
+    expect(result.evidence?.[0].detail).toContain('long-lived');
+  });
+
+  it('does not flag a short-lived/expired JWT', async () => {
+    const result = await mcp033.run(makeContext({ mcpConfigs: [cfg({ ACCESS_TOKEN: jwt({ exp: 1000000000 }) })] }));
+    expect(result.passed).toBe(true);
+  });
+
+  it('flags an opaque static token with no refresh/expiry companion', async () => {
+    const result = await mcp033.run(makeContext({ mcpConfigs: [cfg({ API_TOKEN: 'opaque-abc-123' })] }));
+    expect(result.passed).toBe(false);
+    expect(result.evidence?.[0].detail).toContain('no refresh');
+  });
+
+  it('does not flag an opaque token when a refresh token is configured', async () => {
+    const result = await mcp033.run(makeContext({
+      mcpConfigs: [cfg({ API_TOKEN: 'opaque-abc-123', REFRESH_TOKEN: 'r-xyz' })],
+    }));
+    expect(result.passed).toBe(true);
+  });
+
+  it('does not flag an env-reference placeholder', async () => {
+    const result = await mcp033.run(makeContext({ mcpConfigs: [cfg({ ACCESS_TOKEN: '${MY_TOKEN}' })] }));
     expect(result.passed).toBe(true);
   });
 });

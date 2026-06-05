@@ -1,5 +1,6 @@
 import type { ScanResult, CheckResult, Severity } from '../core/types.js';
 import type { Reporter } from './reporter.js';
+import { owaspMcpForCheckId, OWASP_MCP_TITLES } from './owasp-mcp.js';
 
 const SARIF_SEVERITY_MAP: Record<Severity, string> = {
   critical: 'error',
@@ -52,17 +53,23 @@ export class SarifReporter implements Reporter {
       }
     }
 
-    return Array.from(ruleMap.values()).map(check => ({
-      id: check.id,
-      name: check.name,
-      shortDescription: { text: check.name },
-      defaultConfiguration: {
-        level: SARIF_LEVEL_MAP[check.severity],
-      },
-      properties: {
-        category: check.category,
-      },
-    }));
+    return Array.from(ruleMap.values()).map(check => {
+      const owasp = owaspMcpForCheckId(check.id);
+      const properties: Record<string, unknown> = { category: check.category };
+      if (owasp) {
+        properties.owaspMcp = owasp;
+        properties.tags = [`owasp-mcp/${owasp}`, `OWASP MCP Top 10: ${owasp} ${OWASP_MCP_TITLES[owasp]}`];
+      }
+      return {
+        id: check.id,
+        name: check.name,
+        shortDescription: { text: check.name },
+        defaultConfiguration: {
+          level: SARIF_LEVEL_MAP[check.severity],
+        },
+        properties,
+      };
+    });
   }
 
   private buildResults(result: ScanResult) {

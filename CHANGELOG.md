@@ -25,12 +25,20 @@ This project adheres to [Semantic Versioning](https://semver.org/).
   - **MCP-030 Untrusted Installer Source** (warning) — flags servers installed via a package runner from a non-registry source (git URL, VCS shorthand, remote tarball, or local path), bypassing registry provenance and version/advisory checks. Complements MCP-010. arXiv 2503.23278 §5.1.2, OWASP MCP04.
   - **MCP-032 Environment-Dump Tool** (warning) — flags server tools that return the whole process environment (`printEnv`-style: `JSON.stringify(process.env)`, `{...process.env}`, `printenv`), leaking every secret the agent holds. Reading a specific variable is not flagged. Benefits from `--resolve-packages`. arXiv 2504.03767 (Credential Theft), SlowMist 18.
 
+- **MCP scanning overhaul, Phase 4 — two Tier-3 MCP checks (MCP category 31 → 33, total 259 → 261); the MCP-001–033 range is now complete.**
+  - **MCP-026 Slash-Command / Prompt Overlap** (info) — flags the same prompt/slash-command name registered by different servers (command-routing ambiguity / shadowing). arXiv 2503.23278 §5.2.2.
+  - **MCP-033 Long-Lived / Non-Expiring Token** (warning) — flags credentials that never expire: a JWT access token with no `exp` (or `exp` more than a year out), or an opaque hardcoded token with no refresh-token/expiry companion. `${VAR}` placeholders are ignored. arXiv 2503.23278 §5.3.1, OWASP MCP01.
+
+- **MCP scanning overhaul, Phase 5 — OWASP MCP Top 10 coverage mapping in reports.** Each MCP check (and the per-agent MCP checks) is mapped to the OWASP MCP Top 10 (2025) risk it addresses. The markdown report now ends with an "OWASP MCP Top 10 Coverage" table (per risk: which checks ran and how many fired), and SARIF rules carry `owaspMcp` + `owasp-mcp/<id>` tags for GitHub Code Scanning. 9 of the 10 risks have static checks; MCP06 (prompt injection) and MCP08 (audit/telemetry) are shown as runtime/operational gaps rather than silently omitted.
+
 ### Changed
 
 - Tool definitions are now extracted once in `ScanEngine.scanMCP()` and shared across the tool-layer checks (MCP-020/024/025) via a new `tools?` field on `MCPServerSource`, instead of each check re-parsing the server source.
 - `extractToolDefinitions()` description capture now tolerates escaped quotes, so a tool-description payload can't evade extraction by embedding a quote mid-string.
 - `resolveServerSources()` now takes an options object (`{ fs?, resolvePackages?, cacheDir?, npmFetcher? }`) instead of a positional `fs` argument.
 - New `mcpStateStore` scan-context field (`src/mcp/mcp-state-store.ts`) backs the cross-scan state for MCP-027 (package-version history) and MCP-028 (config-drift baseline); defaults to a file store under `~/.vaso/mcp-state/`.
+- New `OwaspMcpId` type and optional `CheckModule.owaspMcp` tag; `src/reporting/owasp-mcp.ts` holds the central check-ID → OWASP MCP Top 10 map and coverage helpers consumed by the markdown and SARIF reporters.
+- New `extractPromptNames()` (`src/mcp/tool-baseline.ts`) extracts MCP prompt/slash-command names for MCP-026.
 - **`extractToolDefinitions()` now recognizes the modern MCP SDK tool style** — `const name = "…"` + a separate `const config = { description: … }` registered via `server.registerTool(name, config, …)`, plus inline `registerTool("name", { description })` and standalone `{ name, description }` objects. Previously only inline string-literal args (`server.tool("name", "desc", …)`) were parsed, so `--resolve-packages`-resolved servers (which are usually built/multi-file) yielded no tools and the tool-layer checks (MCP-020/024/025) saw nothing. Extraction is now order-independent (a richer match upgrades a name-only one). Verified against `@modelcontextprotocol/server-everything`: its tools are now extracted and MCP-032 flags its `get-env` env-dump tool.
 
 ## [0.4.8] - 2026-05-27
