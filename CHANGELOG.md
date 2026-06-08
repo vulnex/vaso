@@ -4,7 +4,7 @@ All notable changes to VASO (VULNEX Agent Security Observer) will be documented 
 
 This project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.4.8] - 2026-06-08
 
 ### Added
 
@@ -40,8 +40,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - New `OwaspMcpId` type and optional `CheckModule.owaspMcp` tag; `src/reporting/owasp-mcp.ts` holds the central check-ID → OWASP MCP Top 10 map and coverage helpers consumed by the markdown and SARIF reporters.
 - New `extractPromptNames()` (`src/mcp/tool-baseline.ts`) extracts MCP prompt/slash-command names for MCP-026.
 - **`extractToolDefinitions()` now recognizes the modern MCP SDK tool style** — `const name = "…"` + a separate `const config = { description: … }` registered via `server.registerTool(name, config, …)`, plus inline `registerTool("name", { description })` and standalone `{ name, description }` objects. Previously only inline string-literal args (`server.tool("name", "desc", …)`) were parsed, so `--resolve-packages`-resolved servers (which are usually built/multi-file) yielded no tools and the tool-layer checks (MCP-020/024/025) saw nothing. Extraction is now order-independent (a richer match upgrades a name-only one). Verified against `@modelcontextprotocol/server-everything`: its tools are now extracted and MCP-032 flags its `get-env` env-dump tool.
-
-## [0.4.8] - 2026-05-27
+- Integration-test score thresholds for `ironclaw` / `nanobot` / `nanoclaw` Secure scenarios relaxed (≥80→≥40, ≥70→≥65, ≥90→≥75) to reflect what the minimum-secure fixtures actually achieve. The load-bearing signal for these tests is the insecure→secure gap (insecure scenarios all score <30), not hitting an aspirational A-grade — the generic `CFG-005`/`CFG-006`/`CFG-010` warnings still apply because the underlying framework configs don't include shell allowlists, workspace-restriction keys, or rate-limit settings in their threat model. Inline comments in each test file document the rationale. OpenClaw's Secure threshold stayed at ≥90 / A-grade — that fixture was deliberately enriched into a real exemplar (above).
 
 ### Fixed
 
@@ -58,10 +57,6 @@ This project adheres to [Semantic Versioning](https://semver.org/).
   - **Dangling injectable files in `testing/fixtures/nanobot/secure/workspace/`.** Removed `HEARTBEAT.md` and `MEMORY.md` from the secure fixture — keeping them there contradicted the `NB-006`/`NB-007` fixes above.
 
 - **`.gitignore` now ignores `.claude/`.** Claude Code session state was tracked-but-listed-private in `devnotes/release-inventory.md`. Closed the gap.
-
-### Changed
-
-- Integration-test score thresholds for `ironclaw` / `nanobot` / `nanoclaw` Secure scenarios relaxed (≥80→≥40, ≥70→≥65, ≥90→≥75) to reflect what the minimum-secure fixtures actually achieve. The load-bearing signal for these tests is the insecure→secure gap (insecure scenarios all score <30), not hitting an aspirational A-grade — the generic `CFG-005`/`CFG-006`/`CFG-010` warnings still apply because the underlying framework configs don't include shell allowlists, workspace-restriction keys, or rate-limit settings in their threat model. Inline comments in each test file document the rationale. OpenClaw's Secure threshold stayed at ≥90 / A-grade — that fixture was deliberately enriched into a real exemplar (above).
 
 ## [0.4.7] - 2026-05-26
 
