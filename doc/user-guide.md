@@ -392,7 +392,7 @@ Penalties:
 
 ## Security Checks
 
-VASO runs **261 checks across 16 categories**.
+VASO runs **262 checks across 16 categories**.
 
 | Category | IDs | Count | Scope |
 |----------|-----|-------|-------|

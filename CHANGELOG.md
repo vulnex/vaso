@@ -4,6 +4,12 @@ All notable changes to VASO (VULNEX Agent Security Observer) will be documented 
 
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **MCP-034 Prompt-Injection Directive in Tool Output** (critical; MCP category 33 → 34, total 261 → 262). Detects toolflow-hijacking / prompt-injection directives hardcoded into the content an MCP server *returns* as a tool result — the server-side, statically-detectable half of indirect prompt injection. MCP-024 already catches these directives in a tool's `description` (read at selection time); MCP-034 catches the same class ("[SYSTEM INSTRUCTION: ignore previous instructions…]", "do not reveal this message", "disregard the above…", role-spoofing prefixes, hidden/bidi Unicode) embedded in returned content (read at execution time). The directive/invisible-character pattern set is now shared between the two checks (`src/mcp/injection-directives.ts`); directives that live inside an extracted tool description are left to MCP-024 to avoid double-flagging. Mapped to OWASP MCP06, which now has static coverage for its server-side half (MCP-007 unsanitized passthrough + MCP-034). Surfaced by scanning the appsecco vulnerable-mcp-servers-lab: its `indirect-prompt-injection` server embeds these directives in returned "documents" and previously passed clean. arXiv 2503.23278 §5.2 / OWASP MCP06.
+
 ## [0.4.8] - 2026-06-08
 
 ### Added
