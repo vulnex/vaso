@@ -33,6 +33,7 @@ import { mcp031 } from './mcp-031-filesystem-sensitive-path.js';
 import { mcp032 } from './mcp-032-env-dump-tool.js';
 import { mcp033 } from './mcp-033-long-lived-token.js';
 import { mcp034 } from './mcp-034-output-injection.js';
+import { mcp035 } from './mcp-035-obfuscated-source.js';
 import { applyOwaspTags } from '../../reporting/owasp-mcp.js';
 
 export const mcpChecks: CheckModule[] = [
@@ -70,6 +71,7 @@ export const mcpChecks: CheckModule[] = [
   mcp032,
   mcp033,
   mcp034,
+  mcp035,
 ];
 
 // Tag MCP checks with their OWASP MCP Top 10 risk (registry metadata).

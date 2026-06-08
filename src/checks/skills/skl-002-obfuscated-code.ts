@@ -1,15 +1,8 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { findHighEntropyBlocks } from '../../analyzers/entropy.js';
+import { OBFUSCATION_PATTERNS } from '../../analyzers/obfuscation.js';
 import { getSkillFiles } from '../../core/utils.js';
-
-// Pattern-based obfuscation indicators that entropy alone may miss
-const OBFUSCATION_PATTERNS: { pattern: RegExp; label: string }[] = [
-  { pattern: /(\\x[0-9a-fA-F]{2}){6,}/, label: 'Hex escape sequence chain' },
-  { pattern: /[A-Za-z0-9+/]{60,}={0,2}/, label: 'Long base64-encoded string' },
-  { pattern: /String\.fromCharCode\s*\([\s\S]*?,[\s\S]*?,/, label: 'String.fromCharCode with multiple args' },
-  { pattern: /\batob\s*\(/, label: 'atob() decoding' },
-];
 
 export const skl002 = defineCheck({
   id: 'SKL-002',
