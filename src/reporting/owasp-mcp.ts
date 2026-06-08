@@ -62,6 +62,7 @@ export const CHECK_OWASP_MAP: Record<string, OwaspMcpId> = {
   'MCP-032': 'MCP01',
   'MCP-033': 'MCP01',
   'MCP-034': 'MCP06',
+  'MCP-035': 'MCP04',
   // Per-agent MCP integration checks
   'CC-005': 'MCP04',
   'CC-006': 'MCP09',

@@ -32,6 +32,16 @@ export const DIRECTIVE_PATTERNS: DirectivePattern[] = [
   { re: /\bwithout\s+(?:telling|informing|notifying|alerting)\s+(?:the\s+)?user\b/i, label: 'concealment directive ("without telling the user")' },
   { re: /(?:^|[.!?]\s+|\n)\s*(?:system|assistant|developer)\s*:/i, label: 'role-spoofing prefix ("system:" / "assistant:")' },
   { re: /\[\s*(?:system|admin|important|developer)\s+(?:instruction|prompt|note|message)\b/i, label: 'injected-instruction marker ("[SYSTEM INSTRUCTION…]")' },
+  // Role + instruction-noun lead-in ("Assistant instruction", "developer directive") — the
+  // role-spoofing prefix above only fires when the role word is immediately followed by a
+  // colon, so "Assistant instruction: …" slips past it. Restricted to assistant/developer +
+  // instruction/directive: these collocations are essentially never benign, whereas
+  // "system command" / "system message" / "model prompt" routinely are.
+  { re: /\b(?:assistant|developer)\s+(?:instructions?|directives?)\b/i, label: 'injected-instruction lead-in ("assistant instruction…")' },
+  // Bare "Instruction: <Capitalised directive>" prefix. The trailing "\s+[A-Z][a-z]" keeps
+  // this off JS/JSON property keys (`instruction: "value"` → colon is followed by a quote,
+  // not a capitalised word), so it only matches an imperative directive sentence.
+  { re: /\b[Ii]nstructions?\s*:\s+[A-Z][a-z]/, label: 'directive prefix ("Instruction: …")' },
   { re: /<\/?(?:important|system|instructions?|secret|hidden)\b[^>]*>/i, label: 'hidden-instruction tag (<important>/<system>)' },
   { re: /\byou\s+must\s+(?:always|first|immediately|secretly)\b/i, label: 'coercive directive ("you must always…")' },
 ];
