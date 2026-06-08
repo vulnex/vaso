@@ -21,3 +21,5 @@ probe/vaso-probe
 bin/vis/
 vaso-visualizations/
 .claude/
+# Internal full-scanning test kit — local/testing only, never published
+vaso_full_scanning_testing/
