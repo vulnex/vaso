@@ -392,7 +392,7 @@ Penalties:
 
 ## Security Checks
 
-VASO runs **262 checks across 16 categories**.
+VASO runs **263 checks across 16 categories**.
 
 | Category | IDs | Count | Scope |
 |----------|-----|-------|-------|
@@ -402,7 +402,7 @@ VASO runs **262 checks across 16 categories**.
 | Network | NET-001–005 | 5 | Gateway exposure, WebSocket origins, proxy bypass |
 | Runtime | RUN-001–005 | 5 | LaunchAgents, cron, Docker socket, VS Code trojans |
 | Policy | POL-001–005 | 5 | DM policy, tool policy, sandbox compliance |
-| MCP Server | MCP-001–023 | 23 | Transport security, credentials, tool injection, toxic flows, rug pull, OAuth 2.1, stdio shell-c, world-writable command paths, streamable-HTTP origin pinning |
+| MCP Server | MCP-001–035 | 35 | Transport security, credentials, tool injection, toxic flows, rug pull, OAuth 2.1, stdio shell-c, world-writable command paths, streamable-HTTP origin pinning, tool-description poisoning, cross-server tool-name collision, slash-command overlap, remote-server-without-auth, filesystem sensitive-path scope, vulnerable/rolled-back version, config drift, untrusted installer source, env-dump tool, long-lived token, prompt-injection directives in tool output, obfuscated/encoded server source; opt-in npm package source resolution (`--resolve-packages`); OWASP MCP Top 10 mapping |
 | Advisory | ADV-001–005 | 5 | Vulnerability/CVE detection with version awareness |
 | OpenClaw | OC-* | 7 | Sub-agent config downgrade, legacy bot dirs, `OPENCLAW_HOME` redirect, profile downgrade, memory file perms, `/etc/openclaw` writable |
 | NanoClaw | NC-001–005 | 5 | Overbroad mount allowlist, allowlist-file writable, `NANOCLAW_HOME` redirect, public listener bind, skills-dir writable |
