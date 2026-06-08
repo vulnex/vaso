@@ -5,9 +5,12 @@ import type { CheckModule, OwaspMcpId, ScanResult } from '../core/types.js';
  * MCP-related check ID to the OWASP MCP risk it primarily addresses, so reports
  * can show how VASO's checks line up against the OWASP MCP Top 10.
  *
- * MCP06 (prompt injection) and MCP08 (audit/telemetry) are intentionally not
- * mapped to a check — they are runtime/operational concerns outside the reach of
- * a static config/source scanner. They appear in the coverage table as gaps.
+ * MCP06 (prompt injection) has static coverage for the server-side half —
+ * MCP-007 (unsanitized passthrough) and MCP-034 (hardcoded injection directives
+ * in tool output); the runtime/contextual half remains an operational concern.
+ * MCP08 (audit/telemetry) is intentionally not mapped to a check — it is a
+ * runtime/operational concern outside the reach of a static scanner and appears
+ * in the coverage table as a gap.
  */
 
 export const OWASP_MCP_TITLES: Record<OwaspMcpId, string> = {
@@ -58,6 +61,7 @@ export const CHECK_OWASP_MAP: Record<string, OwaspMcpId> = {
   'MCP-031': 'MCP10',
   'MCP-032': 'MCP01',
   'MCP-033': 'MCP01',
+  'MCP-034': 'MCP06',
   // Per-agent MCP integration checks
   'CC-005': 'MCP04',
   'CC-006': 'MCP09',
