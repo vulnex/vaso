@@ -6,6 +6,8 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.9] - 2026-06-09
+
 ### Added
 
 - **MCP-035 Obfuscated / Encoded Server Source** (warning, drops to info when unconfirmed; MCP category 34 → 35, total 262 → 263). Flags MCP server source that hides the strings it actually uses — exfil URLs, hardcoded secrets, shell commands — behind a runtime-decoded base64/hex string-table (`Buffer.from(t[i], 'base64')`, `atob(...)`, `String.fromCharCode(...)` over a table of encoded literals). Such encoding has no legitimate purpose in server source; it exists to evade static review, including VASO's own credential/exfil/env checks. Two tiers: a decoder operating over a string-table is a **warning** (confirmed string-hiding); encoded-data patterns with no qualifying decoder are **info** (suspicious, unconfirmed). Source is available for local servers and — with `vaso mcp scan --resolve-packages` — npm-packaged ones. The obfuscation-pattern set is now shared with SKL-002 (`src/analyzers/obfuscation.ts`); MCP-035 adds decoder + string-table detection on top and deliberately omits entropy analysis (too noisy over dependency code). Surfaced by the appsecco vulnerable-mcp-servers-lab `secrets-pii` server, whose 28-entry base64 table + `_S()` decoder hid its exfil endpoints and previously evaded MCP-003/MCP-032 entirely. arXiv 2503.23278 §5.1 / OWASP MCP04.
