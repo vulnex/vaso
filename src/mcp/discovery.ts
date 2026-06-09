@@ -86,6 +86,9 @@ function parseServerEntries(data: Record<string, unknown>): MCPServerEntry[] {
       env: config.env && typeof config.env === 'object'
         ? Object.fromEntries(Object.entries(config.env as Record<string, unknown>).map(([k, v]) => [k, String(v)]))
         : undefined,
+      headers: config.headers && typeof config.headers === 'object'
+        ? Object.fromEntries(Object.entries(config.headers as Record<string, unknown>).map(([k, v]) => [k, String(v)]))
+        : undefined,
       url: config.url ? String(config.url) : undefined,
       transport,
     });

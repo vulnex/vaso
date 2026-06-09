@@ -3,6 +3,8 @@ export interface MCPServerEntry {
   command?: string;
   args?: string[];
   env?: Record<string, string>;
+  /** HTTP headers for remote (SSE / streamable-HTTP) servers — commonly carries `Authorization`. */
+  headers?: Record<string, string>;
   url?: string;
   transport: 'stdio' | 'sse' | 'streamable-http';
 }

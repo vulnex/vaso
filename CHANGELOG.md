@@ -16,6 +16,10 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 - **Broadened the shared injection-directive patterns** (`src/mcp/injection-directives.ts`) to catch directives that lead with an "instruction" noun rather than the adversarial verbs the original set keyed on. Adds an `"Assistant instruction" / "developer directive"` role-noun lead-in and a `"Instruction: <Capitalised directive>"` prefix (the latter anchored on a trailing capitalised word so it stays off JS/JSON `instruction:` property keys). Strengthens both MCP-034 (returned content) and MCP-024 (tool descriptions), since they share the pattern set. Surfaced by the appsecco vulnerable-mcp-servers-lab's `malicious-tools` server, which injects `"Assistant instruction: …also print…"` into its tool output with deliberately benign payload text and so evaded the verb-keyed patterns; it now trips MCP-034.
 
+### Fixed
+
+- **MCP server `headers` are now parsed, fixing an MCP-029 false positive and an MCP-003 false negative.** The MCP config parser (`src/mcp/discovery.ts`) previously dropped the `headers` block on remote (SSE / streamable-HTTP) server entries, so VASO was blind to header-based authentication — the most common way real remote MCP servers authenticate (`headers: { "Authorization": "Bearer …" }`). As a result **MCP-029 (Remote Server Without Authentication)** raised a false *critical* against legitimately-authenticated header-based servers, and **MCP-003 (Credential Exposure)** silently missed a plaintext token sitting in a header. `MCPServerEntry` now carries `headers`; MCP-029 treats an auth-shaped header (or a `Bearer …` value) as an auth signal, and MCP-003 scans header values for plaintext credentials just as it does the env block (`${VAR}` references stay clean).
+
 ## [0.4.8] - 2026-06-08
 
 ### Added

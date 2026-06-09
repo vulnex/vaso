@@ -51,6 +51,13 @@ function hasAuthSignal(server: MCPServerEntry, parsed: URL | null): boolean {
     if (AUTH_ENV_RE.test(key) && String(value).trim().length > 0) return true;
   }
 
+  // 1b) Any non-empty auth-shaped HTTP header (Authorization, X-Api-Key, …) —
+  // the standard way remote SSE / streamable-HTTP servers authenticate.
+  for (const [key, value] of Object.entries(server.headers ?? {})) {
+    if (AUTH_ENV_RE.test(key) && String(value).trim().length > 0) return true;
+    if (/bearer\s+\S/i.test(String(value))) return true;
+  }
+
   // 2) Credentials embedded in the URL (user:pass@) or an auth-ish query param.
   if (parsed) {
     if (parsed.username || parsed.password) return true;
