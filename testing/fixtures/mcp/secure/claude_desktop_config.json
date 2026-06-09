@@ -12,7 +12,10 @@
       }
     },
     "secure-sse": {
-      "url": "https://mcp.example.com/sse"
+      "url": "https://mcp.example.com/sse",
+      "env": {
+        "MCP_ACCESS_TOKEN": "${MCP_SSE_TOKEN}"
+      }
     }
   }
 }
