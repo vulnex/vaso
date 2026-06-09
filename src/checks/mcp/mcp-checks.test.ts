@@ -310,6 +310,41 @@ describe('MCP-003: Credential Exposure', () => {
 
     expect(result.passed).toBe(true);
   });
+
+  it('detects a plaintext token in a remote-server Authorization header', async () => {
+    const ctx = makeContext({
+      mcpConfigs: [{
+        source: 'project',
+        filePath: '/tmp/mcp.json',
+        servers: [{
+          name: 'remote',
+          url: 'https://mcp.example.com/sse',
+          transport: 'sse',
+          headers: { Authorization: 'Bearer ghp_0123456789abcdefghijklmnopqrstuvwxyz' },
+        }],
+      }],
+    });
+    const result = await mcp003.run(ctx);
+    expect(result.passed).toBe(false);
+    expect(result.evidence?.some(e => /header/.test(e.detail ?? ''))).toBe(true);
+  });
+
+  it('passes when a header uses an env reference (not plaintext)', async () => {
+    const ctx = makeContext({
+      mcpConfigs: [{
+        source: 'project',
+        filePath: '/tmp/mcp.json',
+        servers: [{
+          name: 'remote',
+          url: 'https://mcp.example.com/sse',
+          transport: 'sse',
+          headers: { Authorization: 'Bearer ${MCP_TOKEN}' },
+        }],
+      }],
+    });
+    const result = await mcp003.run(ctx);
+    expect(result.passed).toBe(true);
+  });
 });
 
 // ==================== MCP-004: Overprivileged Tools ====================
@@ -2035,6 +2070,20 @@ describe('MCP-029 Remote Server Without Authentication', () => {
       mcpConfigs: [cfg({ name: 'remote', url: 'https://mcp.example.com/sse?access_token=abc', transport: 'sse' })],
     }));
     expect(result.passed).toBe(true);
+  });
+
+  it('passes when an Authorization header is present', async () => {
+    const result = await mcp029.run(makeContext({
+      mcpConfigs: [cfg({ name: 'remote', url: 'https://mcp.example.com/sse', transport: 'sse', headers: { Authorization: 'Bearer xyz' } })],
+    }));
+    expect(result.passed).toBe(true);
+  });
+
+  it('still flags a remote server whose only header is non-auth', async () => {
+    const result = await mcp029.run(makeContext({
+      mcpConfigs: [cfg({ name: 'remote', url: 'https://mcp.example.com/sse', transport: 'sse', headers: { 'X-Trace-Id': 'abc123' } })],
+    }));
+    expect(result.passed).toBe(false);
   });
 
   it('does not flag a localhost endpoint', async () => {

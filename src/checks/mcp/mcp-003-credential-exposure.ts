@@ -20,16 +20,22 @@ export const mcp003 = defineCheck({
 
     for (const config of mcpConfigs) {
       for (const server of config.servers) {
-        if (!server.env) continue;
+        // Scan both the env block and remote-server HTTP headers — a plaintext
+        // token in `headers.Authorization` is just as exposed as one in `env`.
+        const sources: Array<[string, Record<string, string>]> = [];
+        if (server.env) sources.push(['env block', server.env]);
+        if (server.headers) sources.push(['header', server.headers]);
+        if (sources.length === 0) continue;
 
-        for (const [key, value] of Object.entries(server.env)) {
+        for (const [location, values] of sources) {
+        for (const [key, value] of Object.entries(values)) {
           // Check against known API key patterns
           for (const { pattern, name } of API_KEY_PATTERNS) {
             if (pattern.test(value)) {
               evidence.push({
                 file: config.filePath,
                 snippet: `Server "${server.name}": ${key}=${value.slice(0, 8)}${'*'.repeat(Math.max(0, value.length - 8))}`,
-                detail: `Plaintext ${name} in env block`,
+                detail: `Plaintext ${name} in ${location}`,
               });
             }
           }
@@ -47,11 +53,12 @@ export const mcp003 = defineCheck({
                 evidence.push({
                   file: config.filePath,
                   snippet: `Server "${server.name}": ${key}=${value.slice(0, 8)}...`,
-                  detail: `High-entropy value (${entropy.toFixed(1)} bits) in secret-named env var`,
+                  detail: `High-entropy value (${entropy.toFixed(1)} bits) in secret-named ${location === 'header' ? 'header' : 'env var'}`,
                 });
               }
             }
           }
+        }
         }
       }
     }
