@@ -9,8 +9,8 @@
 import { spawn, execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { writeFile, unlink } from 'node:fs/promises';
-import { join } from 'node:path';
 import type { ProbeSnapshot, ProbeManifest } from '../core/snapshot-types.js';
+import { resolveProbeBinary } from './probe-fetch.js';
 
 export interface SSHTarget {
   user: string;
@@ -279,8 +279,11 @@ export async function executeRemoteProbe(
     // 2. Detect remote platform
     const platform = await detectRemotePlatform(target, controlPath, timeout);
 
-    // 3. Select correct binary
-    const localBinary = join(options.probeBinDir, `vaso-probe-${platform.os}-${platform.arch}`);
+    // 3. Select correct binary — resolves a locally-built probe, a cached one,
+    //    or lazily downloads + verifies the matching release asset on first use.
+    const localBinary = await resolveProbeBinary(platform.os, platform.arch, {
+      probeBinDir: options.probeBinDir,
+    });
 
     // 4. Write manifest locally
     await writeFile(localManifestPath, JSON.stringify(options.manifest), 'utf-8');

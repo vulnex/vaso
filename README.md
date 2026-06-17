@@ -57,7 +57,7 @@ Exit code 1 means critical findings were detected — use this to fail CI pipeli
 
 ## Remote / Fleet Scanning
 
-VASO can scan remote hosts over SSH or from pre-collected snapshots — no Node.js required on the target. A static Go probe binary is pushed on demand, runs once, and is removed. See [`doc/network-scanning-guide.md`](doc/network-scanning-guide.md) for the full workflow.
+VASO can scan remote hosts over SSH or from pre-collected snapshots — no Node.js required on the target. A static Go probe binary is pushed on demand, runs once, and is removed. The probe matching the remote's OS/arch is fetched and SHA-256-verified automatically on first use, then cached under `~/.vaso/probe/` — so remote scanning works straight away whether you installed or cloned VASO, with no Go toolchain needed. See [`doc/network-scanning-guide.md`](doc/network-scanning-guide.md) for the full workflow.
 
 ```bash
 # Scan one remote host

@@ -6,6 +6,10 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **Remote scanning auto-fetches the `vaso-probe` binary on first use.** Until now the Go probe used for SSH/remote scanning (`vaso scan/detect --host …`) had to be hand-built (`cd probe && make`) — a source install carried no probe at all, so remote scanning silently failed. The probe is now resolved lazily (`src/transport/probe-fetch.ts`): a locally-built `probe/dist/` binary still wins (offline, dev path), otherwise VASO downloads only the single binary matching the remote's OS/arch from the current version's GitHub Release, verifies it, caches it under `~/.vaso/probe/<version>/`, and reuses it offline thereafter. The install stays Node-only — no Go toolchain on the user's machine. Integrity is anchored to the installed CLI version: a small `probe/checksums.json` ships **inside** the npm package (`package.json` `files`), and a downloaded binary is rejected unless its SHA-256 matches that shipped digest — so integrity never depends on trusting the download host, and a checksum mismatch is fatal (VASO never runs an unverified probe). Release artifacts are produced by `make checksums` in `probe/` (the same binaries hashed into `checksums.json` are uploaded as release assets, guaranteeing download == digest); a `probe-build.yml` CI job compiles all four targets to catch build breakage. Feature is purely lazy — no install-time fetch, no new prerequisites for a local scan.
+
 ## [0.4.9] - 2026-06-09
 
 ### Added
