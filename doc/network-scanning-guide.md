@@ -12,6 +12,22 @@ VASO can scan remote hosts for AI agent security issues without requiring Node.j
 
 ---
 
+## Getting the probe
+
+You do **not** build the probe yourself in the normal case — and you get the same behavior whether you **installed** VASO (`curl … | bash` / `npm i -g github:vulnex/vaso`) or **cloned and built** it. No Go toolchain is required on your machine.
+
+On your first remote scan, VASO:
+
+1. detects the target's OS/arch over SSH,
+2. uses a locally-built `probe/dist/` binary if one is present (the dev path — always wins), otherwise
+3. downloads the single `vaso-probe-<os>-<arch>` matching your VASO version from its GitHub Release, verifies the binary's SHA-256 against a checksum that ships with VASO, and caches it under `~/.vaso/probe/<version>/` for offline reuse.
+
+A checksum mismatch aborts the scan — VASO never runs an unverified probe. After the first fetch the cached binary is reused with no network access.
+
+You only need to [build the probe yourself](#building-the-probe-binaries) if you're developing the probe, running an unreleased build that has no matching release assets, targeting a platform with no published binary, or operating fully air-gapped.
+
+---
+
 ## SSH remote scanning
 
 Scan a remote host in a single command. VASO pushes the probe binary over SSH, executes it, and streams the results back.
@@ -320,7 +336,9 @@ vaso probe validate snapshot.json
 
 ## Building the probe binaries
 
-The probe must be compiled before remote scanning. Cross-compile for all supported platforms:
+You normally **don't** need to build the probe — see [Getting the probe](#getting-the-probe) for how it's fetched and verified automatically on first use (same for an installed or a cloned VASO). No Go toolchain is required on your machine.
+
+Build manually only when developing the probe, scanning a platform with no published asset, or operating fully air-gapped. A binary present in `probe/dist/` always takes precedence over the download. Cross-compile for all supported platforms:
 
 ```bash
 cd probe/

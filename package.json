@@ -54,6 +54,7 @@
   "files": [
     "dist",
     "bin",
+    "probe/checksums.json",
     "LICENSE",
     "README.md"
   ],
