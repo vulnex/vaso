@@ -1,5 +1,6 @@
 import type { ScanResult, CheckResult, Severity } from '../core/types.js';
 import type { Reporter } from './reporter.js';
+import { owaspAgenticForCheckId, OWASP_AGENTIC_TITLES } from './owasp-agentic.js';
 import { owaspMcpForCheckId, OWASP_MCP_TITLES } from './owasp-mcp.js';
 
 const SARIF_SEVERITY_MAP: Record<Severity, string> = {
@@ -56,9 +57,20 @@ export class SarifReporter implements Reporter {
     return Array.from(ruleMap.values()).map(check => {
       const owasp = owaspMcpForCheckId(check.id);
       const properties: Record<string, unknown> = { category: check.category };
+      const tags: string[] = [];
       if (owasp) {
         properties.owaspMcp = owasp;
-        properties.tags = [`owasp-mcp/${owasp}`, `OWASP MCP Top 10: ${owasp} ${OWASP_MCP_TITLES[owasp]}`];
+        tags.push(`owasp-mcp/${owasp}`, `OWASP MCP Top 10: ${owasp} ${OWASP_MCP_TITLES[owasp]}`);
+      }
+      const agentic = owaspAgenticForCheckId(check.id);
+      if (agentic.length > 0) {
+        properties.owaspAgentic = agentic;
+        for (const a of agentic) {
+          tags.push(`owasp-agentic/${a}`, `OWASP Agentic AI Top 10: ${a} ${OWASP_AGENTIC_TITLES[a]}`);
+        }
+      }
+      if (tags.length > 0) {
+        properties.tags = tags;
       }
       return {
         id: check.id,

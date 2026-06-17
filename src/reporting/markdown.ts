@@ -1,5 +1,6 @@
 import type { ScanResult, Severity } from '../core/types.js';
 import type { Reporter } from './reporter.js';
+import { renderOwaspAgenticCoverageMarkdown } from './owasp-agentic.js';
 import { renderOwaspMcpCoverageMarkdown } from './owasp-mcp.js';
 
 const SEVERITY_EMOJI: Record<Severity, string> = {
@@ -66,6 +67,11 @@ export class MarkdownReporter implements Reporter {
     const owasp = renderOwaspMcpCoverageMarkdown(result);
     if (owasp) {
       lines.push(owasp);
+    }
+
+    const owaspAgentic = renderOwaspAgenticCoverageMarkdown(result);
+    if (owaspAgentic) {
+      lines.push(owaspAgentic);
     }
 
     lines.push('---');

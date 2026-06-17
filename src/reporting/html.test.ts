@@ -166,4 +166,40 @@ describe('HtmlReporter', () => {
     const reporter = new HtmlReporter();
     expect(reporter.format).toBe('html');
   });
+
+  it('renders the OWASP Agentic AI Top 10 coverage section', () => {
+    const reporter = new HtmlReporter();
+    const output = reporter.render(makeScanResult());
+
+    expect(output).toContain('OWASP Agentic AI Top 10 Coverage');
+    expect(output).toContain('AAI001'); // CFG-002/003/005 map here
+    expect(output).toContain('Agent Authorization and Control Hijacking');
+    // AAI014 is the lone true static gap and still renders as a row
+    expect(output).toContain('AAI014');
+    expect(output).toContain('not covered (runtime/behavioral)');
+  });
+
+  it('omits the MCP coverage section when there are no MCP-mapped findings', () => {
+    const reporter = new HtmlReporter();
+    const output = reporter.render(makeScanResult());
+
+    expect(output).not.toContain('OWASP MCP Top 10 Coverage');
+  });
+
+  it('renders the MCP coverage section when MCP-mapped findings exist', () => {
+    const result = makeScanResult();
+    result.agents[0].results.push({
+      id: 'MCP-024',
+      name: 'Tool Description Injection',
+      category: 'mcp',
+      severity: 'critical',
+      passed: false,
+      message: 'Injection directive in tool description',
+    });
+    const reporter = new HtmlReporter();
+    const output = reporter.render(result);
+
+    expect(output).toContain('OWASP MCP Top 10 Coverage');
+    expect(output).toContain('MCP03'); // tool poisoning
+  });
 });

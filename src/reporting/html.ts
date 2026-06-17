@@ -1,4 +1,14 @@
 import type { ScanResult, AgentScanResult, Evidence, Grade, Severity } from '../core/types.js';
+import {
+  computeOwaspAgenticCoverage,
+  hasOwaspAgenticFindings,
+  type OwaspAgenticCoverageRow,
+} from './owasp-agentic.js';
+import {
+  computeOwaspMcpCoverage,
+  hasOwaspMcpFindings,
+  type OwaspMcpCoverageRow,
+} from './owasp-mcp.js';
 import type { Reporter } from './reporter.js';
 
 function escapeHtml(str: string): string {
@@ -183,6 +193,45 @@ const CSS = `
     content: "\\2713 ";
     color: #16a34a;
   }
+  .owasp-section {
+    background: #fff;
+    border-radius: 12px;
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  }
+  .owasp-section h2 {
+    font-size: 1.3rem;
+    color: #0f172a;
+    margin-bottom: 0.25rem;
+  }
+  .owasp-section .subtitle {
+    color: #64748b;
+    font-size: 0.85rem;
+    margin-bottom: 1rem;
+  }
+  .owasp-section td.risk-id {
+    font-weight: 700;
+    color: #0f172a;
+    white-space: nowrap;
+  }
+  .owasp-section td.checks {
+    font-size: 0.78rem;
+    color: #475569;
+    font-family: "SF Mono", Monaco, "Cascadia Code", monospace;
+  }
+  .cov-badge {
+    display: inline-block;
+    padding: 0.15rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .cov-fail { background: #fef2f2; color: #dc2626; }
+  .cov-pass { background: #f0fdf4; color: #16a34a; }
+  .cov-none { background: #f1f5f9; color: #64748b; }
+  .cov-gap  { background: #f8fafc; color: #94a3b8; border: 1px dashed #cbd5e1; }
   .footer {
     text-align: center;
     padding: 1.5rem;
@@ -232,6 +281,14 @@ export class HtmlReporter implements Reporter {
     // Agent sections
     for (const agent of result.agents) {
       lines.push(this.renderAgent(agent));
+    }
+
+    // OWASP coverage sections
+    if (hasOwaspMcpFindings(result)) {
+      lines.push(this.renderOwaspMcpCoverage(result));
+    }
+    if (hasOwaspAgenticFindings(result)) {
+      lines.push(this.renderOwaspAgenticCoverage(result));
     }
 
     // Footer
@@ -305,6 +362,76 @@ export class HtmlReporter implements Reporter {
 
     lines.push('</div>');
     return lines.join('\n');
+  }
+
+  private renderOwaspAgenticCoverage(result: ScanResult): string {
+    const rows = computeOwaspAgenticCoverage(result);
+    const lines: string[] = ['<div class="owasp-section">'];
+    lines.push('<h2>OWASP Agentic AI Top 10 Coverage</h2>');
+    lines.push(
+      '<div class="subtitle">How VASO\'s checks map to the OWASP Agentic AI Top 10 (precize list). ' +
+        'Risks with no static signal appear as gaps.</div>',
+    );
+    lines.push('<table>');
+    lines.push('<thead><tr><th>Risk</th><th>Title</th><th>Checks</th><th>Status</th></tr></thead>');
+    lines.push('<tbody>');
+    for (const row of rows) {
+      lines.push('<tr>');
+      lines.push(`<td class="risk-id">${escapeHtml(row.id)}</td>`);
+      lines.push(`<td>${escapeHtml(row.title)}</td>`);
+      lines.push(`<td class="checks">${row.checks.length > 0 ? escapeHtml(row.checks.join(', ')) : '—'}</td>`);
+      lines.push(`<td>${this.agenticStatusBadge(row)}</td>`);
+      lines.push('</tr>');
+    }
+    lines.push('</tbody></table>');
+    lines.push('</div>');
+    return lines.join('\n');
+  }
+
+  private agenticStatusBadge(row: OwaspAgenticCoverageRow): string {
+    if (!row.inCatalog) {
+      return '<span class="cov-badge cov-gap">not covered (runtime/behavioral)</span>';
+    }
+    if (!row.covered) {
+      return '<span class="cov-badge cov-none">no findings in this scan</span>';
+    }
+    if (row.failed > 0) {
+      return `<span class="cov-badge cov-fail">⚠️ ${row.failed} finding(s)</span>`;
+    }
+    return '<span class="cov-badge cov-pass">✅ pass</span>';
+  }
+
+  private renderOwaspMcpCoverage(result: ScanResult): string {
+    const rows = computeOwaspMcpCoverage(result);
+    const lines: string[] = ['<div class="owasp-section">'];
+    lines.push('<h2>OWASP MCP Top 10 Coverage</h2>');
+    lines.push(
+      '<div class="subtitle">How VASO\'s MCP checks map to the OWASP MCP Top 10 (2025).</div>',
+    );
+    lines.push('<table>');
+    lines.push('<thead><tr><th>Risk</th><th>Title</th><th>Checks</th><th>Status</th></tr></thead>');
+    lines.push('<tbody>');
+    for (const row of rows) {
+      lines.push('<tr>');
+      lines.push(`<td class="risk-id">${escapeHtml(row.id)}</td>`);
+      lines.push(`<td>${escapeHtml(row.title)}</td>`);
+      lines.push(`<td class="checks">${row.checks.length > 0 ? escapeHtml(row.checks.join(', ')) : '—'}</td>`);
+      lines.push(`<td>${this.mcpStatusBadge(row)}</td>`);
+      lines.push('</tr>');
+    }
+    lines.push('</tbody></table>');
+    lines.push('</div>');
+    return lines.join('\n');
+  }
+
+  private mcpStatusBadge(row: OwaspMcpCoverageRow): string {
+    if (!row.covered) {
+      return '<span class="cov-badge cov-gap">not covered (runtime/operational)</span>';
+    }
+    if (row.failed > 0) {
+      return `<span class="cov-badge cov-fail">⚠️ ${row.failed} finding(s)</span>`;
+    }
+    return '<span class="cov-badge cov-pass">✅ pass</span>';
   }
 
   private renderEvidence(evidence?: Evidence[]): string {
