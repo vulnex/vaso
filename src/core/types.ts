@@ -41,6 +41,15 @@ export type OwaspMcpId =
   | 'MCP01' | 'MCP02' | 'MCP03' | 'MCP04' | 'MCP05'
   | 'MCP06' | 'MCP07' | 'MCP08' | 'MCP09' | 'MCP10';
 
+/** OWASP Agentic AI Top 10 identifier, e.g. 'AAI003' (precize list). Tags checks
+ *  so reports can show Agentic AI Top 10 coverage. The list omits deprecated
+ *  (AAI004/008/010) and in-development (AAI013/015/016) entries. AAI011
+ *  (Untraceability) and AAI014 (Alignment Faking) are runtime/behavioral risks a
+ *  static scanner can't observe — they appear in coverage tables as gaps. */
+export type OwaspAgenticId =
+  | 'AAI001' | 'AAI002' | 'AAI003' | 'AAI005' | 'AAI006'
+  | 'AAI007' | 'AAI009' | 'AAI011' | 'AAI012' | 'AAI014';
+
 export interface CheckResult {
   id: string;
   name: string;
@@ -63,6 +72,7 @@ export interface CheckModule {
   excludedAgents?: AgentType[];
   supportedPlatforms?: NodeJS.Platform[];
   owaspMcp?: OwaspMcpId;
+  owaspAgentic?: OwaspAgenticId[];
   run(context: ScanContext): Promise<CheckResult>;
   fix?(context: ScanContext): Promise<FixResult>;
 }

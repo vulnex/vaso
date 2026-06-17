@@ -150,6 +150,8 @@ vaso scan --format csv -o results.csv      # CSV — one row per finding, for SI
 vaso scan --format junit -o results.xml    # JUnit XML — for CI test-result reporters
 ```
 
+Markdown and SARIF reports also include **OWASP coverage mappings** — both the [OWASP MCP Top 10](https://owasp.org/) and the [OWASP Agentic AI Top 10](https://github.com/precize/Agentic-AI-Top10-Vulnerability) — showing which checks address each risk and flagging the risks a static scanner cannot cover (e.g. AAI014 Alignment Faking).
+
 ## Scoring
 
 VASO produces a 0–100 score with a letter grade (A–F). Critical findings deduct 12 points, warnings deduct 5.

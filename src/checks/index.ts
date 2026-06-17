@@ -1,4 +1,5 @@
 import { checkRegistry } from '../core/check-registry.js';
+import { applyAgenticTags } from '../reporting/owasp-agentic.js';
 import { configChecks } from './config/index.js';
 import { skillChecks } from './skills/index.js';
 import { iocChecks } from './ioc/index.js';
@@ -49,4 +50,9 @@ export function registerAllChecks(): void {
   checkRegistry.registerAll(qwenCodeChecks);
   checkRegistry.registerAll(cursorCliChecks);
   checkRegistry.registerAll(copilotCliChecks);
+
+  // Tag every registered check with its OWASP Agentic AI Top 10 risk(s). Unlike
+  // the OWASP MCP tags (applied per-category in mcp/index.ts), the Agentic map
+  // spans all categories, so it's applied once over the full registry here.
+  applyAgenticTags(checkRegistry.getAll());
 }
