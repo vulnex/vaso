@@ -60,6 +60,12 @@ export interface CheckResult {
   evidence?: Evidence[];
   fixable?: boolean;
   fixDescription?: string;
+  /** Set by the engine when the check could not be evaluated — it threw, or its
+   *  adapter failed to detect/parse — rather than producing a real verdict.
+   *  Distinguishes "scanned and failed the check" from "scan was incomplete".
+   *  Reporters use it to report partial-scan status (e.g. SARIF
+   *  invocation.executionSuccessful) instead of claiming a clean run. */
+  errored?: boolean;
 }
 
 export interface CheckModule {

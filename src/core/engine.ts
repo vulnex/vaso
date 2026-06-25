@@ -103,6 +103,7 @@ export class ScanEngine {
         category: check.category,
         severity: 'warning' as const,
         passed: false,
+        errored: true,
         message: `Check errored and was not completed: ${r.reason instanceof Error ? r.reason.message : String(r.reason)}`,
       };
     });
@@ -126,6 +127,7 @@ export class ScanEngine {
       category: 'config' as const,
       severity: 'warning' as const,
       passed: false,
+      errored: true,
       message: `Adapter detection failed: ${error.message}`,
     };
     const score = computeScore([result]);
@@ -186,6 +188,7 @@ export class ScanEngine {
         category: check.category,
         severity: 'warning' as const,
         passed: false,
+        errored: true,
         message: `Check errored and was not completed: ${r.reason instanceof Error ? r.reason.message : String(r.reason)}`,
       };
     });
@@ -248,6 +251,7 @@ export class ScanEngine {
         category: check.category,
         severity: 'warning' as const,
         passed: false,
+        errored: true,
         message: `Check errored and was not completed: ${r.reason instanceof Error ? r.reason.message : String(r.reason)}`,
       };
     });
