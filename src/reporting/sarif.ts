@@ -1,5 +1,6 @@
 import type { ScanResult, CheckResult, Severity } from '../core/types.js';
 import type { Reporter } from './reporter.js';
+import { VERSION } from '../version.js';
 import { owaspAgenticForCheckId, OWASP_AGENTIC_TITLES } from './owasp-agentic.js';
 import { owaspMcpForCheckId, OWASP_MCP_TITLES } from './owasp-mcp.js';
 
@@ -27,7 +28,7 @@ export class SarifReporter implements Reporter {
           driver: {
             name: 'VASO',
             fullName: 'VULNEX Agent Security Observer',
-            version: '0.2.1',
+            version: VERSION,
             informationUri: 'https://github.com/vulnex/vaso',
             rules: this.buildRules(result),
           },

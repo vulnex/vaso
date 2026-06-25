@@ -4,6 +4,12 @@ All notable changes to VASO (VULNEX Agent Security Observer) will be documented 
 
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **SARIF `tool.driver.version` no longer hardcoded — it now tracks `package.json`.** `SarifReporter.render()` stamped a literal `'0.2.1'` into every SARIF report since v0.2.1, so GitHub Code Scanning's Tool filter, SARIF result-identity hashing, and provenance auditing all misreported the running VASO version (a credibility issue for security tooling whose provenance fields are part of the trust story). The CLI's `--version` already read the manifest dynamically; the SARIF reporter was the one place that did not. The runtime package.json read is now factored into a single shared module (`src/version.ts`, placed at `src/` depth 1 so the `'..'` hop reaches `package.json` in both the bundled `dist/cli.js` and unbundled vitest forms), consumed by both `cli.ts` and `sarif.ts`. A drift-guard unit test asserts `tool.driver.version` equals `package.json.version` so the two can never diverge again.
+
 ## [0.4.10] - 2026-06-17
 
 ### Added
