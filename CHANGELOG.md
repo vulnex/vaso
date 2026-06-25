@@ -6,6 +6,10 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- **Multi-agent headline score is now worst-case, not a mean.** When a scan detects more than one agent, `totalScore`/`totalGrade` previously reported the *average* of per-agent scores — so one wide-open agent could be masked by several clean ones (e.g. an insecure OpenClaw scoring 0 alongside four clean coding agents at 100 reported an overall **81/B**, hiding a critical exposure). The headline is now the *lowest* agent's score (`aggregateScore` in `src/core/scoring.ts`): a security posture is gated by its weakest agent, and a mean has the wrong failure mode here — it grows more reassuring as clean agents are added. The same scan now correctly reports **0/F**. The mean is preserved as a new secondary `ScanResult.fleetAverage` field (a fleet-health/trend metric), surfaced as a "Fleet average" line in the terminal, markdown, and HTML reports when more than one agent is present. Single-agent scans and the `--agent`-filtered case are unchanged (worst-case of one agent is that agent). No change to per-agent scoring or the penalty weights (critical −12, warning −5).
+
 ### Fixed
 
 - **SARIF `tool.driver.version` no longer hardcoded — it now tracks `package.json`.** `SarifReporter.render()` stamped a literal `'0.2.1'` into every SARIF report since v0.2.1, so GitHub Code Scanning's Tool filter, SARIF result-identity hashing, and provenance auditing all misreported the running VASO version (a credibility issue for security tooling whose provenance fields are part of the trust story). The CLI's `--version` already read the manifest dynamically; the SARIF reporter was the one place that did not. The runtime package.json read is now factored into a single shared module (`src/version.ts`, placed at `src/` depth 1 so the `'..'` hop reaches `package.json` in both the bundled `dist/cli.js` and unbundled vitest forms), consumed by both `cli.ts` and `sarif.ts`. A drift-guard unit test asserts `tool.driver.version` equals `package.json.version` so the two can never diverge again.

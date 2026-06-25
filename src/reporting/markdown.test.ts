@@ -32,6 +32,7 @@ describe('MarkdownReporter', () => {
       }],
       totalScore: 88,
       totalGrade: 'B',
+      fleetAverage: 88,
       summary: { critical: 1, warning: 0, info: 0, passed: 1, total: 2 },
     };
 

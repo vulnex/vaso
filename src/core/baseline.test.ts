@@ -26,6 +26,7 @@ function makeScanResult(checks: CheckResult[], installDir = '/tmp'): ScanResult 
     agents: [agent],
     totalScore: 100,
     totalGrade: 'A',
+    fleetAverage: 100,
     summary: { critical: 0, warning: 0, info: 0, passed: 0, total: checks.length },
   };
 }

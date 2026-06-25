@@ -48,6 +48,7 @@ function makeScanResult(overrides?: Partial<ScanResult>): ScanResult {
     }],
     totalScore: 80,
     totalGrade: 'B',
+    fleetAverage: 80,
     summary: { critical: 0, warning: 1, info: 0, passed: 0, total: 1 },
     ...overrides,
   };

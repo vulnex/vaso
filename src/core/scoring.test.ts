@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computeScore, scoreToGrade, summarizeResults } from './scoring.js';
+import { computeScore, scoreToGrade, summarizeResults, aggregateScore, meanScore } from './scoring.js';
 import type { CheckResult } from './types.js';
 
 function makeResult(overrides: Partial<CheckResult> = {}): CheckResult {
@@ -128,5 +128,35 @@ describe('summarizeResults', () => {
       passed: 0,
       total: 0,
     });
+  });
+});
+
+describe('aggregateScore (headline = worst-case)', () => {
+  it('returns the lowest agent score, not the mean', () => {
+    // A clean fleet must not mask one wide-open agent.
+    expect(aggregateScore([0, 100, 100, 100, 100])).toBe(0);
+  });
+
+  it('equals the score for a single agent', () => {
+    expect(aggregateScore([75])).toBe(75);
+  });
+
+  it('returns 100 when no agents are detected (nothing to fault)', () => {
+    expect(aggregateScore([])).toBe(100);
+  });
+});
+
+describe('meanScore (secondary fleet average)', () => {
+  it('is the rounded arithmetic mean', () => {
+    expect(meanScore([0, 100, 100, 100, 100])).toBe(80);
+    expect(meanScore([88, 85])).toBe(87); // rounds
+  });
+
+  it('equals the score for a single agent', () => {
+    expect(meanScore([75])).toBe(75);
+  });
+
+  it('returns 100 when no agents are detected', () => {
+    expect(meanScore([])).toBe(100);
   });
 });

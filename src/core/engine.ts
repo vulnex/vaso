@@ -4,7 +4,7 @@ import type { AdapterDetectionError, AdapterRegistry } from '../adapters/registr
 import type { MCPConfig, MCPServerSource } from '../mcp/types.js';
 import type { FSProvider } from './fs-provider.js';
 import { LocalFSProvider } from './local-fs-provider.js';
-import { computeScore, scoreToGrade, summarizeResults } from './scoring.js';
+import { computeScore, scoreToGrade, summarizeResults, aggregateScore, meanScore } from './scoring.js';
 import { getAllSkillsDirs, getSkillFiles } from './utils.js';
 import { extractToolDefinitions } from '../mcp/tool-baseline.js';
 
@@ -54,9 +54,10 @@ export class ScanEngine {
 
     // 3. Compute overall results
     const allResults = agents.flatMap(a => a.results);
-    const totalScore = agents.length > 0
-      ? Math.round(agents.reduce((sum, a) => sum + a.score, 0) / agents.length)
-      : 100;
+    const scores = agents.map(a => a.score);
+    // Headline is worst-case (gated by the weakest agent), not a mean — see
+    // aggregateScore. The mean is kept as a secondary fleet-health metric.
+    const totalScore = aggregateScore(scores);
     const summary = summarizeResults(allResults);
 
     return {
@@ -64,6 +65,7 @@ export class ScanEngine {
       agents,
       totalScore,
       totalGrade: scoreToGrade(totalScore),
+      fleetAverage: meanScore(scores),
       summary,
     };
   }
@@ -210,6 +212,7 @@ export class ScanEngine {
       agents: [agentResult],
       totalScore: score,
       totalGrade: scoreToGrade(score),
+      fleetAverage: score,
       summary,
     };
   }
@@ -273,6 +276,7 @@ export class ScanEngine {
       agents: [agentResult],
       totalScore: score,
       totalGrade: scoreToGrade(score),
+      fleetAverage: score,
       summary,
     };
   }
@@ -283,6 +287,7 @@ export class ScanEngine {
       agents: [],
       totalScore: 100,
       totalGrade: 'A',
+      fleetAverage: 100,
       summary: { critical: 0, warning: 0, info: 0, passed: 0, total: 0 },
     };
   }

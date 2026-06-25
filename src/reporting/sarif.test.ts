@@ -39,6 +39,7 @@ function scanWith(agents: AgentScanResult[]): ScanResult {
     agents,
     totalScore: 88,
     totalGrade: 'B',
+    fleetAverage: 88,
     summary: { critical: 1, warning: 0, info: 0, passed: 0, total: 1 },
   };
 }
@@ -74,6 +75,7 @@ describe('SarifReporter', () => {
       }],
       totalScore: 88,
       totalGrade: 'B',
+      fleetAverage: 88,
       summary: { critical: 1, warning: 0, info: 0, passed: 1, total: 2 },
     };
 
@@ -106,6 +108,7 @@ describe('SarifReporter', () => {
       agents: [],
       totalScore: 100,
       totalGrade: 'A',
+      fleetAverage: 100,
       summary: { critical: 0, warning: 0, info: 0, passed: 0, total: 0 },
     };
 

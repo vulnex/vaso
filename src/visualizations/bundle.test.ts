@@ -35,6 +35,7 @@ function scanResult(agents: AgentScanResult[]): ScanResult {
     agents,
     totalScore: 90,
     totalGrade: 'A',
+    fleetAverage: 90,
     summary: { critical: 0, warning: 0, info: 0, passed: 0, total: 0 },
   };
 }

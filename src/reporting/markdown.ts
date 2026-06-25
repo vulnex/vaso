@@ -19,6 +19,10 @@ export class MarkdownReporter implements Reporter {
     lines.push('');
     lines.push(`**Date:** ${result.timestamp}`);
     lines.push(`**Score:** ${result.totalScore}/100 (${result.totalGrade})`);
+    if (result.agents.length > 1) {
+      // Headline score is worst-case (weakest agent); show the mean as context.
+      lines.push(`**Fleet average:** ${result.fleetAverage}/100`);
+    }
     lines.push(`**Agents scanned:** ${result.agents.length}`);
     lines.push('');
 

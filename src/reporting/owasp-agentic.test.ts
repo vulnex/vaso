@@ -33,6 +33,7 @@ function resultWith(findings: { id: string; passed: boolean }[]): ScanResult {
     ],
     totalScore: 0,
     totalGrade: 'F',
+    fleetAverage: 0,
     summary: { critical: 0, warning: 0, info: 0, passed: 0, total: 0 },
   };
 }

@@ -40,6 +40,7 @@ function makeScanResult(overrides?: Partial<ScanResult>): ScanResult {
     }],
     totalScore: 65,
     totalGrade: 'C',
+    fleetAverage: 65,
     summary: { critical: 1, warning: 0, info: 0, passed: 1, total: 2 },
     ...overrides,
   };
@@ -88,6 +89,7 @@ describe('JsonReporter', () => {
       agents: [],
       totalScore: 100,
       totalGrade: 'A',
+      fleetAverage: 100,
       summary: { critical: 0, warning: 0, info: 0, passed: 0, total: 0 },
     }));
     const parsed = JSON.parse(output);

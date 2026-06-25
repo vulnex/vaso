@@ -268,6 +268,10 @@ export class HtmlReporter implements Reporter {
     lines.push(`<div class="timestamp">${escapeHtml(result.timestamp)}</div>`);
     lines.push(`<div class="score" style="color:${gradeColor(result.totalGrade)}">${result.totalScore}/100</div>`);
     lines.push(`<div class="grade" style="color:${gradeColor(result.totalGrade)}">Grade: ${escapeHtml(result.totalGrade)}</div>`);
+    if (result.agents.length > 1) {
+      // Headline score is worst-case (weakest agent); show the mean as context.
+      lines.push(`<div class="fleet-average">Fleet average: ${result.fleetAverage}/100</div>`);
+    }
     lines.push('</div>');
 
     // Summary cards
