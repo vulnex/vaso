@@ -159,8 +159,13 @@ export interface ScanResult {
   host?: string;
   label?: string;
   agents: AgentScanResult[];
+  /** Headline posture: worst-case across agents (gated by the weakest agent),
+   *  not a mean — see `aggregateScore`. `totalGrade` is its letter grade. */
   totalScore: number;
   totalGrade: Grade;
+  /** Mean of per-agent scores — secondary fleet-health/trend metric. Equals
+   *  `totalScore` for a single agent; 100 when none are detected. */
+  fleetAverage: number;
   summary: {
     critical: number;
     warning: number;

@@ -59,6 +59,7 @@ function makeScanResult(...checkIds: string[]): ScanResult {
     }],
     totalScore: 50,
     totalGrade: 'D',
+    fleetAverage: 50,
     summary: { critical: 0, warning: checkIds.length, info: 0, passed: 0, total: checkIds.length },
   };
 }

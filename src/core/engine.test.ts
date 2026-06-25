@@ -97,6 +97,48 @@ describe('ScanEngine', () => {
     expect(result.summary.passed).toBe(1);
   });
 
+  it('headline totalScore is worst-case across agents; fleetAverage is the mean', async () => {
+    const adapters = new AdapterRegistry();
+    adapters.register(mockAdapter); // openclaw
+    adapters.register({
+      agent: 'nanoclaw',
+      displayName: 'NanoClaw',
+      async detect() { return [{ agent: 'nanoclaw', installDir: '/tmp/nano', configFiles: [] }]; },
+      getConfigPaths() { return []; },
+      getSkillsDir() { return undefined; },
+      getGatewayInfo() { return undefined; },
+    });
+
+    // Nine critical checks that fail only for openclaw — flooring it to 0 while
+    // nanoclaw stays clean at 100. A mean would report ~50 ("D"), masking the
+    // wide-open agent; the worst-case headline must report 0 / F instead.
+    const checks = new CheckRegistry();
+    for (let i = 1; i <= 9; i++) {
+      const id = `CFG-10${i}`;
+      checks.register({
+        id, name: id, category: 'config', severity: 'critical', description: id,
+        async run(ctx): Promise<CheckResult> {
+          return {
+            id, name: id, category: 'config', severity: 'critical',
+            passed: ctx.installation.agent !== 'openclaw', message: 'x',
+          };
+        },
+      });
+    }
+
+    const engine = new ScanEngine(adapters, checks);
+    const result = await engine.scan({});
+
+    const openclaw = result.agents.find(a => a.agent === 'openclaw')!;
+    const nanoclaw = result.agents.find(a => a.agent === 'nanoclaw')!;
+    expect(openclaw.score).toBe(0);    // 9 × −12, clamped to 0
+    expect(nanoclaw.score).toBe(100);
+
+    expect(result.totalScore).toBe(0);      // worst-case, not the mean (50)
+    expect(result.totalGrade).toBe('F');
+    expect(result.fleetAverage).toBe(50);   // mean preserved as secondary metric
+  });
+
   it('returns empty result when no agents detected', async () => {
     const adapters = new AdapterRegistry();
     const checks = new CheckRegistry();
@@ -109,6 +151,7 @@ describe('ScanEngine', () => {
     expect(result.agents).toHaveLength(0);
     expect(result.totalScore).toBe(100);
     expect(result.totalGrade).toBe('A');
+    expect(result.fleetAverage).toBe(100);
   });
 
   it('filters by agent name', async () => {

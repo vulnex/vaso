@@ -72,6 +72,7 @@ const sampleScanResult: ScanResult = {
   ],
   totalScore: 100,
   totalGrade: 'A',
+  fleetAverage: 100,
   summary: { critical: 0, warning: 0, info: 1, passed: 2, total: 2 },
 };
 

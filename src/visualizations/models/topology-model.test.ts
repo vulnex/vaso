@@ -23,6 +23,7 @@ function scanResult(overrides: Partial<ScanResult> = {}): ScanResult {
     agents: [],
     totalScore: 80,
     totalGrade: 'B',
+    fleetAverage: 80,
     summary: { critical: 0, warning: 0, info: 0, passed: 0, total: 0 },
     ...overrides,
   };

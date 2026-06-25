@@ -154,7 +154,9 @@ Markdown and SARIF reports also include **OWASP coverage mappings** — both the
 
 ## Scoring
 
-VASO produces a 0–100 score with a letter grade (A–F). Critical findings deduct 12 points, warnings deduct 5.
+VASO produces a 0–100 score with a letter grade (A–F) per agent. Critical findings deduct 12 points, warnings deduct 5.
+
+When multiple agents are detected, the **headline score is worst-case** — the lowest-scoring agent — because a security posture is gated by its weakest agent, and a mean would grow more reassuring as clean agents are added, hiding a critical exposure in a large fleet. The mean is still reported as a secondary **Fleet average** for trend tracking.
 
 ## CI/CD Integration
 

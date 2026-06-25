@@ -98,6 +98,7 @@ function makeScanResult(overrides?: Partial<ScanResult>): ScanResult {
     }],
     totalScore: 100,
     totalGrade: 'A',
+    fleetAverage: 100,
     summary: { critical: 0, warning: 0, info: 0, passed: 0, total: 0 },
     ...overrides,
   };
@@ -107,6 +108,7 @@ function makeResultWithFindings(): ScanResult {
   return makeScanResult({
     totalScore: 35,
     totalGrade: 'F',
+    fleetAverage: 35,
     summary: { critical: 2, warning: 1, info: 1, passed: 3, total: 7 },
     agents: [{
       agent: 'openclaw',

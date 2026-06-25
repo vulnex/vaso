@@ -72,6 +72,10 @@ export class TerminalReporter implements Reporter {
     lines.push(`  Info: ${chalk.blue(String(result.summary.info))}`);
     lines.push(`  Passed: ${chalk.green(String(result.summary.passed))}`);
     lines.push(`  Overall: ${this.formatScore(result.totalScore)} (${result.totalGrade})`);
+    if (result.agents.length > 1) {
+      // Headline is worst-case (weakest agent); show the mean as context.
+      lines.push(`  Fleet average: ${result.fleetAverage}/100`);
+    }
     lines.push('');
 
     return lines.join('\n');
