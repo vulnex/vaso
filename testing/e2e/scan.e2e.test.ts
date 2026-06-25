@@ -85,9 +85,19 @@ describe('E2E: vaso scan — all agents insecure', () => {
     expect(result.totalGrade).toBeDefined();
   });
 
-  it('should produce a low score for insecure configs', () => {
-    expect(result.totalScore).toBeLessThan(50);
-    expect(result.totalGrade).toBe('F');
+  it('should produce a low score for each insecure agent', () => {
+    // Assert on the installed fixture agents, not the blended `totalScore`.
+    // `vaso scan` (no --agent) also auto-detects real agents installed on the
+    // host via system paths / PATH binaries outside the temp HOME (e.g.
+    // /Applications/ChatGPT.app, the `codex`/`claude` CLIs), each scoring ~100.
+    // Those would dilute `totalScore` on a developer machine (passing only on a
+    // clean CI runner), so per-agent assertions keep this host-independent.
+    for (const agentType of ['openclaw', 'nanoclaw', 'picoclaw', 'ironclaw', 'nanobot', 'zeroclaw']) {
+      const agent = getAgentResult(result, agentType);
+      expect(agent, `${agentType} should be detected`).toBeDefined();
+      expect(agent!.score, `${agentType} score`).toBeLessThan(50);
+      expect(agent!.grade, `${agentType} grade`).toBe('F');
+    }
   });
 });
 
@@ -133,14 +143,20 @@ describe('E2E: vaso scan — secure scenario', () => {
   });
 
   it('should produce a higher score for secure config', () => {
+    // Per-agent (not blended totalScore) so the result doesn't depend on which
+    // real agents happen to be installed on the host — see the insecure block.
     // Local e2e may score lower than Docker integration tests due to
     // environment differences (e.g., missing CLI binaries, macOS permissions).
     // Secure config should still score >= 65 (passing threshold).
-    expect(result.totalScore).toBeGreaterThanOrEqual(65);
+    const openclaw = getAgentResult(result, 'openclaw');
+    expect(openclaw).toBeDefined();
+    expect(openclaw!.score).toBeGreaterThanOrEqual(65);
   });
 
   it('should assign a passing grade', () => {
-    expect(['A', 'B', 'C']).toContain(result.totalGrade);
+    const openclaw = getAgentResult(result, 'openclaw');
+    expect(openclaw).toBeDefined();
+    expect(['A', 'B', 'C']).toContain(openclaw!.grade);
   });
 });
 
@@ -173,16 +189,27 @@ describe('E2E: vaso scan — insecure vs secure comparison', () => {
     await Promise.all([insecureEnv.cleanup(), secureEnv.cleanup()]);
   });
 
+  // Compare the openclaw agent's own score across scenarios, not the blended
+  // totalScore — `vaso scan` also detects real host-installed agents (~100
+  // each) that would otherwise pull the insecure average up on a dev machine.
   it('insecure score should be < 50 (grade F)', () => {
-    expect(insecureResult.totalScore).toBeLessThan(50);
-    expect(insecureResult.totalGrade).toBe('F');
+    const openclaw = getAgentResult(insecureResult, 'openclaw');
+    expect(openclaw).toBeDefined();
+    expect(openclaw!.score).toBeLessThan(50);
+    expect(openclaw!.grade).toBe('F');
   });
 
   it('secure score should be >= 65', () => {
-    expect(secureResult.totalScore).toBeGreaterThanOrEqual(65);
+    const openclaw = getAgentResult(secureResult, 'openclaw');
+    expect(openclaw).toBeDefined();
+    expect(openclaw!.score).toBeGreaterThanOrEqual(65);
   });
 
   it('secure score should be significantly higher', () => {
-    expect(secureResult.totalScore).toBeGreaterThan(insecureResult.totalScore + 30);
+    const insecure = getAgentResult(insecureResult, 'openclaw');
+    const secure = getAgentResult(secureResult, 'openclaw');
+    expect(insecure).toBeDefined();
+    expect(secure).toBeDefined();
+    expect(secure!.score).toBeGreaterThan(insecure!.score + 30);
   });
 });

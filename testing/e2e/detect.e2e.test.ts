@@ -66,7 +66,14 @@ describe('E2E: vaso detect', () => {
       { HOME: env.tempHome },
     ) as AgentInstallation[];
 
-    for (const inst of installations) {
+    // Only the framework fixtures are installed under the temp HOME. `vaso
+    // detect` also finds coding agents via project-relative paths (cwd) and
+    // desktop apps / CLIs via system locations (/Applications, PATH binaries)
+    // that legitimately live outside HOME — those must not be asserted here.
+    const FRAMEWORKS = ['openclaw', 'nanoclaw', 'picoclaw', 'ironclaw', 'nanobot', 'zeroclaw'];
+    const fixtureInstalls = installations.filter(i => FRAMEWORKS.includes(i.agent));
+    expect(fixtureInstalls.length).toBeGreaterThanOrEqual(6);
+    for (const inst of fixtureInstalls) {
       expect(inst.installDir).toContain(env.tempHome);
     }
   });
