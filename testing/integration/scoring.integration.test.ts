@@ -47,11 +47,21 @@ describe('End-to-End Scoring Validation', () => {
   });
 
   describe('Secure environment scoring', () => {
-    it('should have a total score of 90 or above', () => {
-      expect(secureResult.totalScore).toBeGreaterThanOrEqual(90);
+    it('should score every agent well in the secure scenario', () => {
+      // The secure scenario provisions OpenClaw *and* a NemoClaw sandbox layer
+      // (so CFG-016–019 pass — see openclaw.Dockerfile). The headline score is
+      // worst-case across agents, so assert each detected agent scores well
+      // rather than the blended total, which the previous `>= 90` check assumed
+      // was a mean.
+      for (const agent of secureResult.agents) {
+        expect(agent.score, `${agent.agent} score`).toBeGreaterThanOrEqual(80);
+        expect(['A', 'B'], `${agent.agent} grade`).toContain(agent.grade);
+      }
     });
 
-    it('should have a passing grade (A or B)', () => {
+    it('should have a passing headline grade (A or B)', () => {
+      // Worst-case headline: gated by the weakest secure agent, still a B or better.
+      expect(secureResult.totalScore).toBeGreaterThanOrEqual(80);
       expect(['A', 'B']).toContain(secureResult.totalGrade);
     });
 
@@ -92,17 +102,21 @@ describe('End-to-End Scoring Validation', () => {
   });
 
   describe('Overall score aggregation', () => {
-    it('should average scores across agents when multiple exist', async () => {
+    it('should report worst-case (minimum) as the headline and the mean as fleetAverage', async () => {
       const multiResult = await runVasoScan({
         dockerfile: 'testing/docker/agents/multi.Dockerfile',
         buildArgs: { SCENARIO: 'insecure' },
       });
 
       const agentScores = multiResult.agents.map(a => a.score);
-      const expectedTotal = Math.round(
+      // Headline is the weakest agent — a secure posture is gated by its worst
+      // agent, and a mean would let clean agents mask a wide-open one.
+      expect(multiResult.totalScore).toBe(Math.min(...agentScores));
+      // The mean is preserved as a secondary fleet-health metric.
+      const expectedMean = Math.round(
         agentScores.reduce((sum, s) => sum + s, 0) / agentScores.length
       );
-      expect(multiResult.totalScore).toBe(expectedTotal);
+      expect(multiResult.fleetAverage).toBe(expectedMean);
     });
   });
 });
