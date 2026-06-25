@@ -4,7 +4,7 @@ All notable changes to VASO (VULNEX Agent Security Observer) will be documented 
 
 This project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.4.11] - 2026-06-25
 
 ### Changed
 
