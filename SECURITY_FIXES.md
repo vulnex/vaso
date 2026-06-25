@@ -1,6 +1,6 @@
 # Auto-Fix Criteria
 
-`vaso fix` auto-remediates **36 of 251 checks** (≈14%). The other 215 surface findings and remediation guidance only. This document explains where the line is drawn, why, and exactly what VASO writes when it does fix.
+`vaso fix` auto-remediates **36 of 263 checks** (≈14%). The other 227 surface findings and remediation guidance only. This document explains where the line is drawn, why, and exactly what VASO writes when it does fix.
 
 ## The Rule
 
