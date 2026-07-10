@@ -1,6 +1,6 @@
-import type { ScanOptions, ScanResult, ScanContext, AgentScanResult, AgentInstallation } from './types.js';
+import type { ScanOptions, ScanResult, ScanContext, AgentScanResult, AgentInstallation, CheckResult } from './types.js';
 import type { CheckRegistry } from './check-registry.js';
-import type { AdapterDetectionError, AdapterRegistry } from '../adapters/registry.js';
+import type { AdapterConfigLoadError, AdapterDetectionError, AdapterRegistry } from '../adapters/registry.js';
 import type { MCPConfig, MCPServerSource } from '../mcp/types.js';
 import type { FSProvider } from './fs-provider.js';
 import { LocalFSProvider } from './local-fs-provider.js';
@@ -34,8 +34,11 @@ export class ScanEngine {
     const detectionErrors = options.agentFilter
       ? detection.errors.filter(e => e.agent === options.agentFilter)
       : detection.errors;
+    const configLoadErrors = options.agentFilter
+      ? detection.configLoadErrors.filter(e => e.agent === options.agentFilter)
+      : detection.configLoadErrors;
 
-    if (filtered.length === 0 && detectionErrors.length === 0) {
+    if (filtered.length === 0 && detectionErrors.length === 0 && configLoadErrors.length === 0) {
       return this.emptyResult(options.agentFilter);
     }
 
@@ -51,6 +54,7 @@ export class ScanEngine {
       }
     }
     agents.push(...detectionErrors.map(e => this.adapterErrorResult(e)));
+    this.foldConfigLoadErrors(agents, configLoadErrors);
 
     // 3. Compute overall results
     const allResults = agents.flatMap(a => a.results);
@@ -120,6 +124,44 @@ export class ScanEngine {
       score,
       grade: scoreToGrade(score),
     };
+  }
+
+  /** Surface config files that exist but could not be read/parsed during
+   *  detection. Adapters swallow those failures (a broken file must not abort
+   *  detection), which used to make a corrupted config indistinguishable from
+   *  a clean or absent one. Each failure becomes an `errored` result — the
+   *  same partial-scan channel as thrown checks — attached to the agent it
+   *  belongs to, or to a synthetic entry when the broken config prevented the
+   *  agent from being detected at all. */
+  private foldConfigLoadErrors(agents: AgentScanResult[], loadErrors: AdapterConfigLoadError[]): void {
+    for (const error of loadErrors) {
+      const result: CheckResult = {
+        id: 'CONFIG-LOAD',
+        name: `${error.displayName} Config Load Error`,
+        category: 'config',
+        severity: 'warning',
+        passed: false,
+        errored: true,
+        message: `Config file could not be ${error.stage === 'read' ? 'read' : 'parsed'}: ${error.filePath} — ${error.message}. Findings for this agent may be incomplete.`,
+        evidence: [{ file: error.filePath, detail: error.message }],
+      };
+
+      const agent = agents.find(a => a.agent === error.agent);
+      if (agent) {
+        agent.results.push(result);
+        agent.score = computeScore(agent.results);
+        agent.grade = scoreToGrade(agent.score);
+      } else {
+        const score = computeScore([result]);
+        agents.push({
+          agent: error.agent,
+          installation: { agent: error.agent, installDir: '', configFiles: [] },
+          results: [result],
+          score,
+          grade: scoreToGrade(score),
+        });
+      }
+    }
   }
 
   private adapterErrorResult(error: AdapterDetectionError): AgentScanResult {

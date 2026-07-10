@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { loadConfig } from './config-loader.js';
+import { loadConfig, captureConfigLoadErrors } from './config-loader.js';
 import { writeFile, mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -83,6 +83,89 @@ describe('loadConfig', () => {
     console.log(`[loadConfig] raw preserved → filePath: ${config.filePath}, raw: "${config.raw}"`);
     expect(config.raw).toBe(content);
     expect(config.filePath).toBe(filePath);
+    await cleanup();
+  });
+});
+
+describe('captureConfigLoadErrors', () => {
+  it('records a parse failure for a known format and still throws', async () => {
+    await setup();
+    const filePath = join(TEST_DIR, 'broken.json');
+    await writeFile(filePath, '{ "gateway": ');
+
+    const { result, loadErrors } = await captureConfigLoadErrors(async () => {
+      try {
+        await loadConfig(filePath);
+        return 'no-throw';
+      } catch {
+        return 'threw';
+      }
+    });
+
+    expect(result).toBe('threw');
+    expect(loadErrors).toHaveLength(1);
+    expect(loadErrors[0].filePath).toBe(filePath);
+    expect(loadErrors[0].stage).toBe('parse');
+    await cleanup();
+  });
+
+  it('does not record a missing file (probing is normal)', async () => {
+    const { loadErrors } = await captureConfigLoadErrors(async () => {
+      await expect(loadConfig(join(TEST_DIR, 'does-not-exist.json'))).rejects.toThrow();
+    });
+    expect(loadErrors).toHaveLength(0);
+  });
+
+  it('records unknown-format content no parser accepts, returning empty data', async () => {
+    await setup();
+    const filePath = join(TEST_DIR, 'config.conf');
+    // Tab-indented brace soup: rejected by JSON, YAML, and TOML alike.
+    await writeFile(filePath, '{{{\n\t::: not = [ config\n');
+
+    const { result, loadErrors } = await captureConfigLoadErrors(() => loadConfig(filePath));
+
+    expect(result.data).toEqual({});
+    expect(loadErrors).toHaveLength(1);
+    expect(loadErrors[0].stage).toBe('parse');
+    await cleanup();
+  });
+
+  it('does not record an empty unknown-format file', async () => {
+    await setup();
+    const filePath = join(TEST_DIR, 'empty.conf');
+    await writeFile(filePath, '');
+
+    const { result, loadErrors } = await captureConfigLoadErrors(() => loadConfig(filePath));
+
+    expect(result.data).toEqual({});
+    expect(loadErrors).toHaveLength(0);
+    await cleanup();
+  });
+
+  it('isolates captures across concurrent contexts', async () => {
+    await setup();
+    const brokenA = join(TEST_DIR, 'a.json');
+    const brokenB = join(TEST_DIR, 'b.json');
+    await writeFile(brokenA, 'not json');
+    await writeFile(brokenB, 'also not json');
+
+    const swallow = (p: string) => loadConfig(p).catch(() => undefined);
+    const [a, b] = await Promise.all([
+      captureConfigLoadErrors(() => swallow(brokenA)),
+      captureConfigLoadErrors(() => swallow(brokenB)),
+    ]);
+
+    expect(a.loadErrors.map(e => e.filePath)).toEqual([brokenA]);
+    expect(b.loadErrors.map(e => e.filePath)).toEqual([brokenB]);
+    await cleanup();
+  });
+
+  it('records nothing outside a capture context and does not throw', async () => {
+    await setup();
+    const filePath = join(TEST_DIR, 'broken2.json');
+    await writeFile(filePath, '{ nope');
+
+    await expect(loadConfig(filePath)).rejects.toThrow();
     await cleanup();
   });
 });
