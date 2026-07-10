@@ -1,7 +1,11 @@
 import { describe, it, expect } from 'vitest';
+import { writeFile, rm } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { ScanEngine } from './engine.js';
 import { CheckRegistry } from './check-registry.js';
 import { AdapterRegistry } from '../adapters/registry.js';
+import { loadConfig } from './config-loader.js';
 import type { CheckModule, ScanContext, CheckResult, AgentInstallation } from './types.js';
 import type { AgentAdapter } from '../adapters/adapter.js';
 import type { FSProvider } from './fs-provider.js';
@@ -412,5 +416,87 @@ describe('ScanEngine', () => {
       severity: 'warning',
     });
     expect(codex?.results[0].message).toContain('cannot read config');
+  });
+
+  describe('config load errors', () => {
+    /** Mimics real adapters: probe a config file, swallow the load failure,
+     *  and carry on — the pattern that used to hide corrupted configs. */
+    function corruptConfigAdapter(detected: boolean): AgentAdapter {
+      return {
+        agent: 'nanoclaw',
+        displayName: 'NanoClaw',
+        async detect() {
+          try {
+            await loadConfig(join(tmpdir(), `vaso-engine-test-${process.pid}-broken.json`));
+          } catch {}
+          return detected ? [{ agent: 'nanoclaw', installDir: '/tmp/nano', configFiles: [] }] : [];
+        },
+        getConfigPaths() { return []; },
+        getSkillsDir() { return undefined; },
+        getGatewayInfo() { return undefined; },
+      };
+    }
+
+    async function withBrokenConfig<T>(fn: () => Promise<T>): Promise<T> {
+      const brokenPath = join(tmpdir(), `vaso-engine-test-${process.pid}-broken.json`);
+      await writeFile(brokenPath, '{ definitely not json');
+      try {
+        return await fn();
+      } finally {
+        await rm(brokenPath, { force: true });
+      }
+    }
+
+    it('attaches an errored CONFIG-LOAD result to the detected agent and rescores it', async () => {
+      await withBrokenConfig(async () => {
+        const adapters = new AdapterRegistry();
+        adapters.register(corruptConfigAdapter(true));
+        const checks = new CheckRegistry();
+        checks.register(mockCheck('CFG-001', true));
+
+        const engine = new ScanEngine(adapters, checks);
+        const result = await engine.scan({});
+
+        expect(result.agents).toHaveLength(1);
+        const nano = result.agents[0];
+        const loadResult = nano.results.find(r => r.id === 'CONFIG-LOAD');
+        expect(loadResult).toMatchObject({ passed: false, errored: true, severity: 'warning' });
+        expect(loadResult?.message).toContain('broken.json');
+        expect(nano.score).toBe(95); // 100 - 5, rescored after the fold
+      });
+    });
+
+    it('surfaces a load error even when the broken config prevented detection', async () => {
+      await withBrokenConfig(async () => {
+        const adapters = new AdapterRegistry();
+        adapters.register(corruptConfigAdapter(false));
+        const checks = new CheckRegistry();
+        checks.register(mockCheck('CFG-001', true));
+
+        const engine = new ScanEngine(adapters, checks);
+        const result = await engine.scan({});
+
+        expect(result.agents).toHaveLength(1);
+        expect(result.agents[0].agent).toBe('nanoclaw');
+        expect(result.agents[0].results).toHaveLength(1);
+        expect(result.agents[0].results[0]).toMatchObject({ id: 'CONFIG-LOAD', errored: true });
+      });
+    });
+
+    it('agentFilter excludes other agents\' load errors', async () => {
+      await withBrokenConfig(async () => {
+        const adapters = new AdapterRegistry();
+        adapters.register(corruptConfigAdapter(false)); // nanoclaw
+        adapters.register(mockAdapter); // openclaw
+        const checks = new CheckRegistry();
+        checks.register(mockCheck('CFG-001', true));
+
+        const engine = new ScanEngine(adapters, checks);
+        const result = await engine.scan({ agentFilter: 'openclaw' });
+
+        expect(result.agents.map(a => a.agent)).toEqual(['openclaw']);
+        expect(result.agents[0].results.some(r => r.id === 'CONFIG-LOAD')).toBe(false);
+      });
+    });
   });
 });
