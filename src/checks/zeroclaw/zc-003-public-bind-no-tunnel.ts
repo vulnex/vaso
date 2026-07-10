@@ -1,6 +1,6 @@
 import { defineCheck } from '../../core/check-builder.js';
 import { getNestedValue } from '../../core/utils.js';
-import { updateTomlFile } from '../../remediation/config-writer.js';
+import { fixFirstConfig } from '../../remediation/config-writer.js';
 
 export const zc003 = defineCheck({
   id: 'ZC-003',
@@ -37,12 +37,12 @@ export const zc003 = defineCheck({
   },
 
   async fix(ctx) {
-    for (const config of ctx.configs) {
-      if (config.format === 'toml') {
-        await updateTomlFile(config.filePath, 'security.allow_public_bind', false);
-        return { checkId: 'ZC-003', applied: true, message: 'Set security.allow_public_bind=false' };
-      }
-    }
-    return { checkId: 'ZC-003', applied: false, message: 'No TOML config file found' };
+    return fixFirstConfig(ctx.configs, {
+      checkId: 'ZC-003',
+      path: 'security.allow_public_bind',
+      value: false,
+      message: 'Set security.allow_public_bind=false',
+      noConfigMessage: 'No TOML config file found',
+    });
   },
 });

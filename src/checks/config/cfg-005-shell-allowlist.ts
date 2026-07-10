@@ -1,6 +1,6 @@
 import { defineCheck } from '../../core/check-builder.js';
 import { CODING_AGENTS } from '../../core/types.js';
-import { updateConfigValue } from '../../remediation/config-writer.js';
+import { fixFirstConfig } from '../../remediation/config-writer.js';
 import { getNestedValue } from '../../core/utils.js';
 
 export const cfg005 = defineCheck({
@@ -38,12 +38,14 @@ export const cfg005 = defineCheck({
 
   async fix(ctx) {
     const safeBins = ['ls', 'cat', 'grep', 'head', 'tail', 'wc', 'echo', 'date'];
-    for (const config of ctx.configs) {
-      const keyPath = config.format === 'env' ? 'SAFE_BINS' : 'security.safeBins';
-      const value = config.format === 'env' ? safeBins.join(',') : safeBins;
-      await updateConfigValue(config, keyPath, value);
-      return { checkId: 'CFG-005', applied: true, message: 'Added safeBins allowlist with safe defaults' };
-    }
-    return { checkId: 'CFG-005', applied: false, message: 'No config file found' };
+    return fixFirstConfig(ctx.configs, {
+      checkId: 'CFG-005',
+      env: 'SAFE_BINS',
+      path: 'security.safeBins',
+      value: safeBins,
+      envValue: safeBins.join(','),
+      message: 'Added safeBins allowlist with safe defaults',
+      noConfigMessage: 'No config file found',
+    });
   },
 });

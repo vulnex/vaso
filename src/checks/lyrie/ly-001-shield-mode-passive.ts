@@ -1,6 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { updateEnvFile } from '../../remediation/config-writer.js';
+import { fixFirstConfig } from '../../remediation/config-writer.js';
 
 export const ly001 = defineCheck({
   id: 'LY-001',
@@ -30,12 +30,12 @@ export const ly001 = defineCheck({
   },
 
   async fix(ctx) {
-    for (const config of ctx.configs) {
-      if (config.format === 'env') {
-        await updateEnvFile(config.filePath, 'LYRIE_SHIELD_MODE', 'active');
-        return { checkId: 'LY-001', applied: true, message: 'Set LYRIE_SHIELD_MODE=active' };
-      }
-    }
-    return { checkId: 'LY-001', applied: false, message: 'No .env file found' };
+    return fixFirstConfig(ctx.configs, {
+      checkId: 'LY-001',
+      env: 'LYRIE_SHIELD_MODE',
+      value: 'active',
+      message: 'Set LYRIE_SHIELD_MODE=active',
+      noConfigMessage: 'No .env file found',
+    });
   },
 });

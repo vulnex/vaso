@@ -1,5 +1,5 @@
 import { defineCheck } from '../../core/check-builder.js';
-import { updateEnvFile, updateTomlFile } from '../../remediation/config-writer.js';
+import { fixFirstConfig } from '../../remediation/config-writer.js';
 import { getNestedValue } from '../../core/utils.js';
 
 export const ic006 = defineCheck({
@@ -35,16 +35,12 @@ export const ic006 = defineCheck({
   },
 
   async fix(ctx) {
-    for (const config of ctx.configs) {
-      if (config.format === 'env') {
-        await updateEnvFile(config.filePath, 'SANDBOX_POLICY', 'restricted');
-        return { checkId: 'IC-006', applied: true, message: 'Set SANDBOX_POLICY=restricted' };
-      }
-      if (config.format === 'toml') {
-        await updateTomlFile(config.filePath, 'sandbox.policy', 'restricted');
-        return { checkId: 'IC-006', applied: true, message: 'Set SANDBOX_POLICY=restricted' };
-      }
-    }
-    return { checkId: 'IC-006', applied: false, message: 'No compatible config file found' };
+    return fixFirstConfig(ctx.configs, {
+      checkId: 'IC-006',
+      env: 'SANDBOX_POLICY',
+      path: 'sandbox.policy',
+      value: 'restricted',
+      message: 'Set SANDBOX_POLICY=restricted',
+    });
   },
 });

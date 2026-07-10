@@ -1,6 +1,6 @@
 import { defineCheck } from '../../core/check-builder.js';
 import { CODING_AGENTS } from '../../core/types.js';
-import { updateConfigValue } from '../../remediation/config-writer.js';
+import { fixFirstConfig } from '../../remediation/config-writer.js';
 import { getNestedValue } from '../../core/utils.js';
 
 export const cfg001 = defineCheck({
@@ -64,11 +64,13 @@ export const cfg001 = defineCheck({
   },
 
   async fix(ctx) {
-    for (const config of ctx.configs) {
-      const keyPath = config.format === 'env' ? 'GATEWAY_HOST' : 'gateway.host';
-      await updateConfigValue(config, keyPath, '127.0.0.1');
-      return { checkId: 'CFG-001', applied: true, message: 'Set gateway host to 127.0.0.1' };
-    }
-    return { checkId: 'CFG-001', applied: false, message: 'No config file found' };
+    return fixFirstConfig(ctx.configs, {
+      checkId: 'CFG-001',
+      env: 'GATEWAY_HOST',
+      path: 'gateway.host',
+      value: '127.0.0.1',
+      message: 'Set gateway host to 127.0.0.1',
+      noConfigMessage: 'No config file found',
+    });
   },
 });

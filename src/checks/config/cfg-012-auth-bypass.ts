@@ -1,7 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { CODING_AGENTS } from '../../core/types.js';
-import { updateConfigValue } from '../../remediation/config-writer.js';
+import { fixFirstConfig } from '../../remediation/config-writer.js';
 import { getNestedValue } from '../../core/utils.js';
 
 export const cfg012 = defineCheck({
@@ -51,11 +51,13 @@ export const cfg012 = defineCheck({
   },
 
   async fix(ctx) {
-    for (const config of ctx.configs) {
-      const keyPath = config.format === 'env' ? 'AUTH_BYPASS' : 'auth.bypass';
-      await updateConfigValue(config, keyPath, false);
-      return { checkId: 'CFG-012', applied: true, message: 'Disabled auth bypass' };
-    }
-    return { checkId: 'CFG-012', applied: false, message: 'No config file found' };
+    return fixFirstConfig(ctx.configs, {
+      checkId: 'CFG-012',
+      env: 'AUTH_BYPASS',
+      path: 'auth.bypass',
+      value: false,
+      message: 'Disabled auth bypass',
+      noConfigMessage: 'No config file found',
+    });
   },
 });

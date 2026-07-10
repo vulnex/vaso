@@ -1,6 +1,6 @@
 import { defineCheck } from '../../core/check-builder.js';
 import { getNestedValue } from '../../core/utils.js';
-import { updateTomlFile } from '../../remediation/config-writer.js';
+import { fixFirstConfig } from '../../remediation/config-writer.js';
 
 const PUBLIC_URL_PATTERNS = [
   /https?:\/\/github\.com\//,
@@ -59,12 +59,12 @@ export const zc008 = defineCheck({
   },
 
   async fix(ctx) {
-    for (const config of ctx.configs) {
-      if (config.format === 'toml') {
-        await updateTomlFile(config.filePath, 'skills.open_install', false);
-        return { checkId: 'ZC-008', applied: true, message: 'Set skills.open_install=false' };
-      }
-    }
-    return { checkId: 'ZC-008', applied: false, message: 'No TOML config file found' };
+    return fixFirstConfig(ctx.configs, {
+      checkId: 'ZC-008',
+      path: 'skills.open_install',
+      value: false,
+      message: 'Set skills.open_install=false',
+      noConfigMessage: 'No TOML config file found',
+    });
   },
 });

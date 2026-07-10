@@ -1,6 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { updateEnvFile } from '../../remediation/config-writer.js';
+import { fixFirstConfig } from '../../remediation/config-writer.js';
 
 const CHANNEL_TOKEN_KEYS = [
   'TELEGRAM_BOT_TOKEN', 'LYRIE_TELEGRAM_TOKEN',
@@ -48,12 +48,12 @@ export const ly018 = defineCheck({
   },
 
   async fix(ctx) {
-    for (const config of ctx.configs) {
-      if (config.format === 'env') {
-        await updateEnvFile(config.filePath, 'NODE_ENV', 'production');
-        return { checkId: 'LY-018', applied: true, message: 'Set NODE_ENV=production' };
-      }
-    }
-    return { checkId: 'LY-018', applied: false, message: 'No .env file found' };
+    return fixFirstConfig(ctx.configs, {
+      checkId: 'LY-018',
+      env: 'NODE_ENV',
+      value: 'production',
+      message: 'Set NODE_ENV=production',
+      noConfigMessage: 'No .env file found',
+    });
   },
 });

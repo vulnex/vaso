@@ -1,6 +1,6 @@
 import { defineCheck } from '../../core/check-builder.js';
 import { getNestedValue } from '../../core/utils.js';
-import { updateJsonFile } from '../../remediation/config-writer.js';
+import { fixFirstConfig } from '../../remediation/config-writer.js';
 
 export const nb011 = defineCheck({
   id: 'NB-011',
@@ -49,12 +49,12 @@ export const nb011 = defineCheck({
 
   async fix(ctx) {
     const rateLimit = { maxPerMinute: 30, maxPerHour: 500 };
-    for (const config of ctx.configs) {
-      if (config.format === 'json') {
-        await updateJsonFile(config.filePath, 'rateLimit', rateLimit);
-        return { checkId: 'NB-011', applied: true, message: 'Added global rate limit (30/min, 500/hr)' };
-      }
-    }
-    return { checkId: 'NB-011', applied: false, message: 'No JSON config file found' };
+    return fixFirstConfig(ctx.configs, {
+      checkId: 'NB-011',
+      path: 'rateLimit',
+      value: rateLimit,
+      message: 'Added global rate limit (30/min, 500/hr)',
+      noConfigMessage: 'No JSON config file found',
+    });
   },
 });
