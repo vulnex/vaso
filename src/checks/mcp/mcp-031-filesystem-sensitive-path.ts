@@ -1,5 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { classifySensitivePath } from '../../analyzers/sensitive-paths.js';
 
 /**
  * MCP-031 — Filesystem Server Sensitive-Path Scope.
@@ -13,29 +14,9 @@ import { defineCheck } from '../../core/check-builder.js';
  *
  * This is the sharp, critical-severity sink detector; MCP-009 remains the
  * generic broad-scope (root/home) warning, so bare "/" or "~" grants are left
- * to it to avoid double-flagging.
+ * to it to avoid double-flagging. The sink catalogue is shared with SKL-013
+ * (symlink escape) via `analyzers/sensitive-paths.ts`.
  */
-
-interface SinkPattern {
-  re: RegExp;
-  label: string;
-}
-
-const SENSITIVE_SINKS: SinkPattern[] = [
-  { re: /(^|\/)\.ssh(\/|$)/i, label: 'SSH keys/config (~/.ssh)' },
-  { re: /authorized_keys/i, label: 'SSH authorized_keys (remote-access persistence)' },
-  { re: /(^|\/)\.aws(\/|$)/i, label: 'AWS credentials (~/.aws)' },
-  { re: /(^|\/)\.gnupg(\/|$)/i, label: 'GnuPG keyring (~/.gnupg)' },
-  { re: /(^|\/)\.kube(\/|$)/i, label: 'Kubernetes credentials (~/.kube)' },
-  { re: /(^|\/)\.docker(\/|$)/i, label: 'Docker credentials (~/.docker)' },
-  { re: /(^|\/)\.(bashrc|bash_profile|bash_login|bash_logout|profile|zshrc|zprofile|zshenv|zlogin)$/i, label: 'shell startup file (code-execution persistence)' },
-  { re: /^\/etc(\/|$)/i, label: 'system configuration (/etc)' },
-];
-
-function classifyArg(arg: string): string[] {
-  if (!arg || arg.startsWith('-')) return [];
-  return SENSITIVE_SINKS.filter((s) => s.re.test(arg)).map((s) => s.label);
-}
 
 export const mcp031 = defineCheck({
   id: 'MCP-031',
@@ -57,7 +38,7 @@ export const mcp031 = defineCheck({
 
         const hits = new Map<string, Set<string>>(); // label -> args
         for (const arg of candidates) {
-          for (const label of classifyArg(arg)) {
+          for (const label of classifySensitivePath(arg)) {
             if (!hits.has(label)) hits.set(label, new Set());
             hits.get(label)!.add(arg);
           }

@@ -4,6 +4,24 @@ All notable changes to VASO (VULNEX Agent Security Observer) will be documented 
 
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **GhostApproval coverage (Wiz, 2026-07-08) — a workspace symlink-escape detector plus coding-agent version advisories.** GhostApproval is a category-level flaw in AI coding assistants: a malicious repo plants a symlink disguised as an innocuous file (`project_settings.json` → `~/.ssh/authorized_keys`) and, via a README instruction, gets the agent to "update" it; the agent follows the link and writes outside the workspace (SSH-key injection, shell-rc persistence, RCE), while the confirmation prompt still shows the harmless in-workspace name (CWE-61 symlink following + CWE-451 UI misrepresentation). VASO now addresses this two ways:
+  - **SKL-013 (Workspace Symlink Escape)** — a new agent-agnostic skills check that statically flags any symlink inside a scanned skill/workspace directory whose target resolves *outside* that directory. It never follows the link for reads (`FSProvider.readlink` returns the raw stored target), so even a dangling link planted before its target exists is caught. Escapes reaching a credential store or shell startup file (shared `SENSITIVE_SINKS` catalogue with MCP-031, now in `src/analyzers/sensitive-paths.ts`) are **critical**; escapes to any other out-of-workspace location are a **warning**. Runs on every agent and, notably, under `vaso skill audit <repo>` — point it at a freshly cloned repository and it flags the escaping symlink before the agent is ever asked to touch it. Mapped to OWASP Agentic AI AAI002/AAI012/AAI005. Skills category 12 → 13; total checks 263 → 264.
+  - **Coding-agent version advisories** — `ADV-001` now fires on `coding-agent`-tagged advisories (not just `framework`), and the bundled advisory DB gains two GhostApproval entries: **CVE-2026-50549** (Cursor < 3.0.0, symlink-write bypass, critical, public PoC) and **VASO-GHOSTAPPROVAL-CC** (Claude Code < 2.1.32, symlink target hidden in the edit-confirmation dialog, warning — v2.1.32 added the symlink warning). Both are mirrored in signed advisory feed **v3** so existing installs pick them up via `vaso update`.
+
+- **Threat intel ingested from Agent Threat Rules (ATR, MIT-licensed).** Two additions curated from `github.com/Agent-Threat-Rule/agent-threat-rules` with attribution in-source:
+  - **Three confirmed-malware OpenClaw skill publishers** (`hightower6eu`, `sakaen736jih`, `52yuanchangxing`) added to the bundled IOC `maliciousPublishers` list. Per ATR's `public-blacklist.json` (2026-04-16) these three actors account for all 552 confirmed-malware skills in that dataset; because IOC-004 matches on publisher, the three entries flag every skill they ship.
+  - **CVE-2026-0755** (gemini-mcp-tool, npm, `>=1.1.2 <1.1.6`, fixed 1.1.6) added to the bundled advisory DB with an `affectedDependency` constraint, so MCP-027 flags a pinned vulnerable `gemini-mcp-tool` server spec out of the box (execAsync command injection + `@file` exfiltration, CVSS 9.8). Other ATR MCP CVEs were held back pending per-CVE version verification (only this one carried a cleanly assertable npm range; FastMCP CVE-2025-64340 was deliberately skipped to avoid a false match against the unrelated npm `fastmcp` package).
+
+### Changed
+
+- **`FSProvider` gained symlink awareness.** `DirentInfo` carries an optional `isSymbolicLink` flag (set by `LocalFSProvider` via an lstat-style read; left unset by `SnapshotFSProvider`, which cannot observe link status), and the interface adds `readlink(path)` (returns a link's raw target without resolving it or requiring the target to exist; `SnapshotFSProvider` throws since the probe does not collect link data). Existing consumers are unaffected — the flag is optional and defaults to "not a symlink".
+
+- **`vaso skill audit <dir>` now scans directories that contain symlinks even when they hold no code files.** The canonical GhostApproval repository is a disguised symlink plus a README with no scannable code; the audit previously bailed with "nothing to audit" and never ran SKL-013. It now proceeds whenever the tree contains a symlink, so the exact PoC is caught.
+
 ## [0.4.12] - 2026-07-10
 
 ### Added

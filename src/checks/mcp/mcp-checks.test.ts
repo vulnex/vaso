@@ -2216,6 +2216,21 @@ describe('MCP-027 Vulnerable / Rolled-Back MCP Version', () => {
     }));
     expect(result.passed).toBe(true);
   });
+
+  it('flags an ATR-sourced pin (gemini-mcp-tool CVE-2026-0755) and clears its fix', async () => {
+    const vuln = await mcp027.run(makeContext({
+      mcpConfigs: [cfg({ name: 'gemini', command: 'npx', args: ['-y', 'gemini-mcp-tool@1.1.3'], transport: 'stdio' })],
+      mcpStateStore: new InMemoryMcpStateStore(),
+    }));
+    expect(vuln.passed).toBe(false);
+    expect(vuln.evidence?.[0].detail).toContain('CVE-2026-0755');
+
+    const fixed = await mcp027.run(makeContext({
+      mcpConfigs: [cfg({ name: 'gemini', command: 'npx', args: ['-y', 'gemini-mcp-tool@1.1.6'], transport: 'stdio' })],
+      mcpStateStore: new InMemoryMcpStateStore(),
+    }));
+    expect(fixed.passed).toBe(true);
+  });
 });
 
 describe('MCP-028 MCP Configuration Drift', () => {

@@ -16,7 +16,10 @@ export const adv001 = defineCheck({
     const db = getAdvisoryDatabase();
     const agent = ctx.installation.agent;
     const matching = db.advisories.filter(adv => {
-      if (!adv.tags?.includes('framework')) return false;
+      // Version-based agent advisories: framework CVEs and coding-agent CVEs
+      // (e.g. GhostApproval). Dependency/MCP-package advisories are ADV-002's
+      // job and carry no such tag, so they're excluded here.
+      if (!adv.tags?.includes('framework') && !adv.tags?.includes('coding-agent')) return false;
       if (adv.agent !== agent && adv.agent !== '*') return false;
       if (adv.eolNotice) return false; // handled by ADV-003
       return satisfies(version, adv.affectedVersions);

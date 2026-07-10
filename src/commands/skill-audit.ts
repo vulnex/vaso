@@ -7,6 +7,7 @@ import { adapterRegistry } from '../adapters/registry.js';
 import { checkRegistry } from '../core/check-registry.js';
 import { getReporter } from '../reporting/index.js';
 import { getSkillFiles } from '../core/utils.js';
+import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { logError } from '../core/debug.js';
 
 export interface SkillAuditCommandOptions {
@@ -37,12 +38,24 @@ export async function runSkillAudit(skillPath: string, options: SkillAuditComman
   // Discover code files
   const skillFiles = await getSkillFiles(resolved);
 
-  if (skillFiles.length === 0) {
-    console.log(chalk.yellow(`No code files found in ${resolved}. Nothing to audit.`));
+  // Even a directory with no code files is worth auditing when it contains
+  // symlinks: the canonical GhostApproval repo is just a disguised symlink plus
+  // a README (no code), and SKL-013 walks the directory itself rather than the
+  // code-file list. Bail only when there's genuinely nothing to look at.
+  const hasSymlink = skillFiles.length === 0 && (await directoryHasSymlink(resolved));
+
+  if (skillFiles.length === 0 && !hasSymlink) {
+    console.log(chalk.yellow(`No code files or symlinks found in ${resolved}. Nothing to audit.`));
     return;
   }
 
-  console.log(chalk.dim(`Auditing ${skillFiles.length} file(s) in ${resolved}\n`));
+  console.log(
+    chalk.dim(
+      skillFiles.length > 0
+        ? `Auditing ${skillFiles.length} file(s) in ${resolved}\n`
+        : `Auditing ${resolved} for symlink escapes\n`,
+    ),
+  );
 
   try {
     const engine = new ScanEngine(adapterRegistry, checkRegistry);
@@ -69,5 +82,15 @@ export async function runSkillAudit(skillPath: string, options: SkillAuditComman
   } catch (err) {
     logError(chalk.red('Skill audit failed:'), err);
     process.exitCode = 1;
+  }
+}
+
+/** True when the directory tree contains at least one symbolic link. */
+async function directoryHasSymlink(dir: string): Promise<boolean> {
+  try {
+    const entries = await new LocalFSProvider().readdirEntries(dir, { recursive: true });
+    return entries.some((e) => e.isSymbolicLink);
+  } catch {
+    return false;
   }
 }

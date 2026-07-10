@@ -11,6 +11,7 @@ import { skl009 } from './skl-009-crypto-wallet.js';
 import { skl010 } from './skl-010-unauthorized-fs.js';
 import { skl011 } from './skl-011-dependency-audit.js';
 import { skl012 } from './skl-012-code-complexity.js';
+import { skl013 } from './skl-013-symlink-escape.js';
 
 export const skillChecks: CheckModule[] = [
   skl001,
@@ -25,4 +26,5 @@ export const skillChecks: CheckModule[] = [
   skl010,
   skl011,
   skl012,
+  skl013,
 ];

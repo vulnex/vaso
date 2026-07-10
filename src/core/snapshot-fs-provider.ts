@@ -121,6 +121,14 @@ export class SnapshotFSProvider implements FSProvider {
     throw new Error(`ENOENT: path not collected in snapshot: ${path}`);
   }
 
+  async readlink(path: string): Promise<string> {
+    // The probe does not record symlink targets, so link status can't be
+    // reconstructed from a snapshot. Callers must treat this as "unknown":
+    // readdirEntries never sets isSymbolicLink on snapshot entries, so a
+    // well-behaved consumer won't call readlink here in the first place.
+    throw new Error(`EINVAL: symlink targets not collected in snapshot: ${path}`);
+  }
+
   async exec(cmd: string, args: string[], _options?: ExecOptions): Promise<ExecResult> {
     const output = this.findCommandOutput(cmd, args);
     if (!output) {
