@@ -1,6 +1,6 @@
 import { defineCheck } from '../../core/check-builder.js';
 import { CODING_AGENTS } from '../../core/types.js';
-import { updateConfigValue } from '../../remediation/config-writer.js';
+import { fixFirstConfig } from '../../remediation/config-writer.js';
 import { getNestedValue } from '../../core/utils.js';
 
 export const cfg013 = defineCheck({
@@ -32,11 +32,13 @@ export const cfg013 = defineCheck({
   },
 
   async fix(ctx) {
-    for (const config of ctx.configs) {
-      const keyPath = config.format === 'env' ? 'DM_POLICY' : 'dm.policy';
-      await updateConfigValue(config, keyPath, 'restricted');
-      return { checkId: 'CFG-013', applied: true, message: 'Set DM policy to restricted' };
-    }
-    return { checkId: 'CFG-013', applied: false, message: 'No config file found' };
+    return fixFirstConfig(ctx.configs, {
+      checkId: 'CFG-013',
+      env: 'DM_POLICY',
+      path: 'dm.policy',
+      value: 'restricted',
+      message: 'Set DM policy to restricted',
+      noConfigMessage: 'No config file found',
+    });
   },
 });

@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { defineCheck } from '../../core/check-builder.js';
-import { updateEnvFile, updateTomlFile } from '../../remediation/config-writer.js';
+import { fixFirstConfig } from '../../remediation/config-writer.js';
 import { getNestedValue } from '../../core/utils.js';
 
 export const ic004 = defineCheck({
@@ -38,16 +38,12 @@ export const ic004 = defineCheck({
 
   async fix(ctx) {
     const token = randomBytes(32).toString('hex');
-    for (const config of ctx.configs) {
-      if (config.format === 'env') {
-        await updateEnvFile(config.filePath, 'GATEWAY_AUTH_TOKEN', token);
-        return { checkId: 'IC-004', applied: true, message: 'Generated and set persistent GATEWAY_AUTH_TOKEN' };
-      }
-      if (config.format === 'toml') {
-        await updateTomlFile(config.filePath, 'gateway.auth_token', token);
-        return { checkId: 'IC-004', applied: true, message: 'Generated and set persistent GATEWAY_AUTH_TOKEN' };
-      }
-    }
-    return { checkId: 'IC-004', applied: false, message: 'No compatible config file found' };
+    return fixFirstConfig(ctx.configs, {
+      checkId: 'IC-004',
+      env: 'GATEWAY_AUTH_TOKEN',
+      path: 'gateway.auth_token',
+      value: token,
+      message: 'Generated and set persistent GATEWAY_AUTH_TOKEN',
+    });
   },
 });

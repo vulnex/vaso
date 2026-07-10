@@ -1,5 +1,5 @@
 import { defineCheck } from '../../core/check-builder.js';
-import { updateEnvFile, updateTomlFile } from '../../remediation/config-writer.js';
+import { fixFirstConfig } from '../../remediation/config-writer.js';
 import { getNestedValue } from '../../core/utils.js';
 
 export const ic005 = defineCheck({
@@ -35,16 +35,12 @@ export const ic005 = defineCheck({
   },
 
   async fix(ctx) {
-    for (const config of ctx.configs) {
-      if (config.format === 'env') {
-        await updateEnvFile(config.filePath, 'SANDBOX_ENABLED', 'true');
-        return { checkId: 'IC-005', applied: true, message: 'Set SANDBOX_ENABLED=true' };
-      }
-      if (config.format === 'toml') {
-        await updateTomlFile(config.filePath, 'sandbox.enabled', true);
-        return { checkId: 'IC-005', applied: true, message: 'Set SANDBOX_ENABLED=true' };
-      }
-    }
-    return { checkId: 'IC-005', applied: false, message: 'No compatible config file found' };
+    return fixFirstConfig(ctx.configs, {
+      checkId: 'IC-005',
+      env: 'SANDBOX_ENABLED',
+      path: 'sandbox.enabled',
+      value: true,
+      message: 'Set SANDBOX_ENABLED=true',
+    });
   },
 });

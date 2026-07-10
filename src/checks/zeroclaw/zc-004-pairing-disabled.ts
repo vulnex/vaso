@@ -1,6 +1,6 @@
 import { defineCheck } from '../../core/check-builder.js';
 import { getNestedValue } from '../../core/utils.js';
-import { updateTomlFile } from '../../remediation/config-writer.js';
+import { fixFirstConfig } from '../../remediation/config-writer.js';
 
 export const zc004 = defineCheck({
   id: 'ZC-004',
@@ -36,12 +36,12 @@ export const zc004 = defineCheck({
   },
 
   async fix(ctx) {
-    for (const config of ctx.configs) {
-      if (config.format === 'toml') {
-        await updateTomlFile(config.filePath, 'require_pairing', true);
-        return { checkId: 'ZC-004', applied: true, message: 'Set require_pairing=true' };
-      }
-    }
-    return { checkId: 'ZC-004', applied: false, message: 'No TOML config file found' };
+    return fixFirstConfig(ctx.configs, {
+      checkId: 'ZC-004',
+      path: 'require_pairing',
+      value: true,
+      message: 'Set require_pairing=true',
+      noConfigMessage: 'No TOML config file found',
+    });
   },
 });

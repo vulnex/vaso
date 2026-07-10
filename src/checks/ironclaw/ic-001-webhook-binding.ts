@@ -1,5 +1,5 @@
 import { defineCheck } from '../../core/check-builder.js';
-import { updateEnvFile, updateTomlFile } from '../../remediation/config-writer.js';
+import { fixFirstConfig } from '../../remediation/config-writer.js';
 
 export const ic001 = defineCheck({
   id: 'IC-001',
@@ -30,16 +30,12 @@ export const ic001 = defineCheck({
   },
 
   async fix(ctx) {
-    for (const config of ctx.configs) {
-      if (config.format === 'env') {
-        await updateEnvFile(config.filePath, 'HTTP_HOST', '127.0.0.1');
-        return { checkId: 'IC-001', applied: true, message: 'Set HTTP_HOST=127.0.0.1' };
-      }
-      if (config.format === 'toml') {
-        await updateTomlFile(config.filePath, 'http.host', '127.0.0.1');
-        return { checkId: 'IC-001', applied: true, message: 'Set HTTP_HOST=127.0.0.1' };
-      }
-    }
-    return { checkId: 'IC-001', applied: false, message: 'No compatible config file found' };
+    return fixFirstConfig(ctx.configs, {
+      checkId: 'IC-001',
+      env: 'HTTP_HOST',
+      path: 'http.host',
+      value: '127.0.0.1',
+      message: 'Set HTTP_HOST=127.0.0.1',
+    });
   },
 });

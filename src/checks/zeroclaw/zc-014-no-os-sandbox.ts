@@ -1,6 +1,6 @@
 import { defineCheck } from '../../core/check-builder.js';
 import { getNestedValue } from '../../core/utils.js';
-import { updateTomlFile } from '../../remediation/config-writer.js';
+import { fixFirstConfig } from '../../remediation/config-writer.js';
 
 const KNOWN_SANDBOXES = ['firejail', 'bubblewrap', 'bwrap', 'landlock', 'docker', 'podman', 'nsjail'];
 
@@ -42,12 +42,12 @@ export const zc014 = defineCheck({
   },
 
   async fix(ctx) {
-    for (const config of ctx.configs) {
-      if (config.format === 'toml') {
-        await updateTomlFile(config.filePath, 'runtime.sandbox', 'firejail');
-        return { checkId: 'ZC-014', applied: true, message: 'Set runtime.sandbox=firejail' };
-      }
-    }
-    return { checkId: 'ZC-014', applied: false, message: 'No TOML config file found' };
+    return fixFirstConfig(ctx.configs, {
+      checkId: 'ZC-014',
+      path: 'runtime.sandbox',
+      value: 'firejail',
+      message: 'Set runtime.sandbox=firejail',
+      noConfigMessage: 'No TOML config file found',
+    });
   },
 });

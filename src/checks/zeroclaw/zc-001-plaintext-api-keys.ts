@@ -1,7 +1,7 @@
 import { defineCheck } from '../../core/check-builder.js';
 import { getNestedValue } from '../../core/utils.js';
 import { API_KEY_PATTERNS } from '../../core/patterns.js';
-import { updateTomlFile } from '../../remediation/config-writer.js';
+import { fixFirstConfig } from '../../remediation/config-writer.js';
 
 export const zc001 = defineCheck({
   id: 'ZC-001',
@@ -46,12 +46,12 @@ export const zc001 = defineCheck({
   },
 
   async fix(ctx) {
-    for (const config of ctx.configs) {
-      if (config.format === 'toml') {
-        await updateTomlFile(config.filePath, 'secrets.encrypt', true);
-        return { checkId: 'ZC-001', applied: true, message: 'Set secrets.encrypt=true — run "zeroclaw secrets encrypt" to encrypt existing keys' };
-      }
-    }
-    return { checkId: 'ZC-001', applied: false, message: 'No TOML config file found' };
+    return fixFirstConfig(ctx.configs, {
+      checkId: 'ZC-001',
+      path: 'secrets.encrypt',
+      value: true,
+      message: 'Set secrets.encrypt=true — run "zeroclaw secrets encrypt" to encrypt existing keys',
+      noConfigMessage: 'No TOML config file found',
+    });
   },
 });

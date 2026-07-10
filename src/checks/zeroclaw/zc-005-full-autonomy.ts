@@ -1,6 +1,6 @@
 import { defineCheck } from '../../core/check-builder.js';
 import { getNestedValue } from '../../core/utils.js';
-import { updateTomlFile } from '../../remediation/config-writer.js';
+import { fixFirstConfig } from '../../remediation/config-writer.js';
 
 export const zc005 = defineCheck({
   id: 'ZC-005',
@@ -33,12 +33,12 @@ export const zc005 = defineCheck({
   },
 
   async fix(ctx) {
-    for (const config of ctx.configs) {
-      if (config.format === 'toml') {
-        await updateTomlFile(config.filePath, 'autonomy.level', 'supervised');
-        return { checkId: 'ZC-005', applied: true, message: 'Set autonomy.level=supervised' };
-      }
-    }
-    return { checkId: 'ZC-005', applied: false, message: 'No TOML config file found' };
+    return fixFirstConfig(ctx.configs, {
+      checkId: 'ZC-005',
+      path: 'autonomy.level',
+      value: 'supervised',
+      message: 'Set autonomy.level=supervised',
+      noConfigMessage: 'No TOML config file found',
+    });
   },
 });

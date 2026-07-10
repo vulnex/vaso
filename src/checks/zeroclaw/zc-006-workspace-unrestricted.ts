@@ -1,6 +1,6 @@
 import { defineCheck } from '../../core/check-builder.js';
 import { getNestedValue } from '../../core/utils.js';
-import { updateTomlFile } from '../../remediation/config-writer.js';
+import { fixFirstConfig } from '../../remediation/config-writer.js';
 
 export const zc006 = defineCheck({
   id: 'ZC-006',
@@ -36,12 +36,12 @@ export const zc006 = defineCheck({
   },
 
   async fix(ctx) {
-    for (const config of ctx.configs) {
-      if (config.format === 'toml') {
-        await updateTomlFile(config.filePath, 'workspace_only', true);
-        return { checkId: 'ZC-006', applied: true, message: 'Set workspace_only=true' };
-      }
-    }
-    return { checkId: 'ZC-006', applied: false, message: 'No TOML config file found' };
+    return fixFirstConfig(ctx.configs, {
+      checkId: 'ZC-006',
+      path: 'workspace_only',
+      value: true,
+      message: 'Set workspace_only=true',
+      noConfigMessage: 'No TOML config file found',
+    });
   },
 });

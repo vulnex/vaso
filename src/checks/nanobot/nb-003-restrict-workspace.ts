@@ -1,6 +1,6 @@
 import { defineCheck } from '../../core/check-builder.js';
 import { getNestedValue } from '../../core/utils.js';
-import { updateJsonFile } from '../../remediation/config-writer.js';
+import { fixFirstConfig } from '../../remediation/config-writer.js';
 
 export const nb003 = defineCheck({
   id: 'NB-003',
@@ -37,12 +37,12 @@ export const nb003 = defineCheck({
   },
 
   async fix(ctx) {
-    for (const config of ctx.configs) {
-      if (config.format === 'json') {
-        await updateJsonFile(config.filePath, 'restrictToWorkspace', true);
-        return { checkId: 'NB-003', applied: true, message: 'Set restrictToWorkspace=true' };
-      }
-    }
-    return { checkId: 'NB-003', applied: false, message: 'No JSON config file found' };
+    return fixFirstConfig(ctx.configs, {
+      checkId: 'NB-003',
+      path: 'restrictToWorkspace',
+      value: true,
+      message: 'Set restrictToWorkspace=true',
+      noConfigMessage: 'No JSON config file found',
+    });
   },
 });

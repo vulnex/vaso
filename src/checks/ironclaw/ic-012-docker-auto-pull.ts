@@ -1,5 +1,5 @@
 import { defineCheck } from '../../core/check-builder.js';
-import { updateEnvFile, updateTomlFile } from '../../remediation/config-writer.js';
+import { fixFirstConfig } from '../../remediation/config-writer.js';
 import { getNestedValue } from '../../core/utils.js';
 
 export const ic012 = defineCheck({
@@ -45,16 +45,12 @@ export const ic012 = defineCheck({
   },
 
   async fix(ctx) {
-    for (const config of ctx.configs) {
-      if (config.format === 'env') {
-        await updateEnvFile(config.filePath, 'SANDBOX_AUTO_PULL', 'false');
-        return { checkId: 'IC-012', applied: true, message: 'Disabled SANDBOX_AUTO_PULL' };
-      }
-      if (config.format === 'toml') {
-        await updateTomlFile(config.filePath, 'sandbox.auto_pull', false);
-        return { checkId: 'IC-012', applied: true, message: 'Disabled SANDBOX_AUTO_PULL' };
-      }
-    }
-    return { checkId: 'IC-012', applied: false, message: 'No compatible config file found' };
+    return fixFirstConfig(ctx.configs, {
+      checkId: 'IC-012',
+      env: 'SANDBOX_AUTO_PULL',
+      path: 'sandbox.auto_pull',
+      value: false,
+      message: 'Disabled SANDBOX_AUTO_PULL',
+    });
   },
 });

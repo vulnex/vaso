@@ -1,7 +1,7 @@
 import { readFile, writeFile, chmod } from 'node:fs/promises';
 import YAML from 'yaml';
 import { parse as parseTOML, stringify as stringifyTOML } from 'smol-toml';
-import type { ParsedConfig } from '../core/types.js';
+import type { FixResult, ParsedConfig } from '../core/types.js';
 import { setNestedValue } from '../core/utils.js';
 
 /**
@@ -103,4 +103,52 @@ export async function updateConfigValue(config: ParsedConfig, keyPath: string, v
     default:
       throw new Error(`Cannot write to config format: ${config.format}`);
   }
+}
+
+/**
+ * Declarative one-setting fix: what to write, expressed per config dialect.
+ * `env` names the flat variable for .env files; `path` the dot-separated key
+ * for json/yaml/toml. Omitting one marks that dialect as unsupported for the
+ * fix, so those config files are skipped rather than written badly.
+ */
+export interface FixUpdateSpec {
+  checkId: string;
+  /** Flat variable name for env-format configs. Omit → env files are skipped. */
+  env?: string;
+  /** Dot-separated key path for json/yaml/toml configs. Omit → structured files are skipped. */
+  path?: string;
+  /** Value to write (structured formats; env too unless envValue is given). */
+  value: unknown;
+  /** Env-file value override for values whose String() form is wrong (e.g. arrays as CSV). */
+  envValue?: string;
+  /** Success message for the FixResult. */
+  message: string;
+  /** Not-applied message when no compatible config file exists. */
+  noConfigMessage?: string;
+}
+
+/**
+ * The fix() body shared by most single-setting remediations: walk the
+ * installation's config files, write the setting into the first one whose
+ * format the spec covers, and report applied/not-applied. Replaces the
+ * per-format if/ternary dispatch that used to be copied into every fix.
+ */
+export async function fixFirstConfig(configs: ParsedConfig[], spec: FixUpdateSpec): Promise<FixResult> {
+  for (const config of configs) {
+    if (config.format === 'env') {
+      if (spec.env === undefined) continue;
+      await updateEnvFile(config.filePath, spec.env, spec.envValue ?? String(spec.value));
+    } else if (config.format === 'json' || config.format === 'yaml' || config.format === 'toml') {
+      if (spec.path === undefined) continue;
+      await updateConfigValue(config, spec.path, spec.value);
+    } else {
+      continue; // unknown format — nothing safe to write
+    }
+    return { checkId: spec.checkId, applied: true, message: spec.message };
+  }
+  return {
+    checkId: spec.checkId,
+    applied: false,
+    message: spec.noConfigMessage ?? 'No compatible config file found',
+  };
 }

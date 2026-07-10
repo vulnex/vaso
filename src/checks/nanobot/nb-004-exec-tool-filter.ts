@@ -1,6 +1,6 @@
 import { defineCheck } from '../../core/check-builder.js';
 import { getNestedValue } from '../../core/utils.js';
-import { updateJsonFile } from '../../remediation/config-writer.js';
+import { fixFirstConfig } from '../../remediation/config-writer.js';
 
 const MIN_DENYLIST_LENGTH = 5;
 
@@ -50,12 +50,12 @@ export const nb004 = defineCheck({
 
   async fix(ctx) {
     const denyList = ['rm', 'rmdir', 'mkfs', 'dd', 'curl', 'wget', 'nc', 'chmod', 'chown', 'kill', 'shutdown', 'reboot', 'passwd'];
-    for (const config of ctx.configs) {
-      if (config.format === 'json') {
-        await updateJsonFile(config.filePath, 'tools.exec.denyList', denyList);
-        return { checkId: 'NB-004', applied: true, message: 'Added comprehensive ExecTool denyList' };
-      }
-    }
-    return { checkId: 'NB-004', applied: false, message: 'No JSON config file found' };
+    return fixFirstConfig(ctx.configs, {
+      checkId: 'NB-004',
+      path: 'tools.exec.denyList',
+      value: denyList,
+      message: 'Added comprehensive ExecTool denyList',
+      noConfigMessage: 'No JSON config file found',
+    });
   },
 });

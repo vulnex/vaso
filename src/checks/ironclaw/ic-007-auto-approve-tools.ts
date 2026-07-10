@@ -1,5 +1,5 @@
 import { defineCheck } from '../../core/check-builder.js';
-import { updateEnvFile, updateTomlFile } from '../../remediation/config-writer.js';
+import { fixFirstConfig } from '../../remediation/config-writer.js';
 import { getNestedValue } from '../../core/utils.js';
 
 export const ic007 = defineCheck({
@@ -36,16 +36,12 @@ export const ic007 = defineCheck({
   },
 
   async fix(ctx) {
-    for (const config of ctx.configs) {
-      if (config.format === 'env') {
-        await updateEnvFile(config.filePath, 'AGENT_AUTO_APPROVE_TOOLS', 'false');
-        return { checkId: 'IC-007', applied: true, message: 'Set AGENT_AUTO_APPROVE_TOOLS=false' };
-      }
-      if (config.format === 'toml') {
-        await updateTomlFile(config.filePath, 'agent.auto_approve_tools', false);
-        return { checkId: 'IC-007', applied: true, message: 'Set AGENT_AUTO_APPROVE_TOOLS=false' };
-      }
-    }
-    return { checkId: 'IC-007', applied: false, message: 'No compatible config file found' };
+    return fixFirstConfig(ctx.configs, {
+      checkId: 'IC-007',
+      env: 'AGENT_AUTO_APPROVE_TOOLS',
+      path: 'agent.auto_approve_tools',
+      value: false,
+      message: 'Set AGENT_AUTO_APPROVE_TOOLS=false',
+    });
   },
 });

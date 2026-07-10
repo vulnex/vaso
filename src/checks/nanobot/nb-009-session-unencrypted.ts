@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import { defineCheck } from '../../core/check-builder.js';
 import { getNestedValue } from '../../core/utils.js';
-import { updateJsonFile } from '../../remediation/config-writer.js';
+import { fixFirstConfig } from '../../remediation/config-writer.js';
 
 export const nb009 = defineCheck({
   id: 'NB-009',
@@ -60,12 +60,12 @@ export const nb009 = defineCheck({
   },
 
   async fix(ctx) {
-    for (const config of ctx.configs) {
-      if (config.format === 'json') {
-        await updateJsonFile(config.filePath, 'sessions.encryption', true);
-        return { checkId: 'NB-009', applied: true, message: 'Enabled session encryption' };
-      }
-    }
-    return { checkId: 'NB-009', applied: false, message: 'No JSON config file found' };
+    return fixFirstConfig(ctx.configs, {
+      checkId: 'NB-009',
+      path: 'sessions.encryption',
+      value: true,
+      message: 'Enabled session encryption',
+      noConfigMessage: 'No JSON config file found',
+    });
   },
 });

@@ -1,5 +1,5 @@
 import { defineCheck } from '../../core/check-builder.js';
-import { updateEnvFile, updateTomlFile } from '../../remediation/config-writer.js';
+import { fixFirstConfig } from '../../remediation/config-writer.js';
 import { getNestedValue } from '../../core/utils.js';
 
 export const ic008 = defineCheck({
@@ -36,16 +36,12 @@ export const ic008 = defineCheck({
   },
 
   async fix(ctx) {
-    for (const config of ctx.configs) {
-      if (config.format === 'env') {
-        await updateEnvFile(config.filePath, 'ALLOW_LOCAL_TOOLS', 'false');
-        return { checkId: 'IC-008', applied: true, message: 'Set ALLOW_LOCAL_TOOLS=false' };
-      }
-      if (config.format === 'toml') {
-        await updateTomlFile(config.filePath, 'tools.allow_local', false);
-        return { checkId: 'IC-008', applied: true, message: 'Set ALLOW_LOCAL_TOOLS=false' };
-      }
-    }
-    return { checkId: 'IC-008', applied: false, message: 'No compatible config file found' };
+    return fixFirstConfig(ctx.configs, {
+      checkId: 'IC-008',
+      env: 'ALLOW_LOCAL_TOOLS',
+      path: 'tools.allow_local',
+      value: false,
+      message: 'Set ALLOW_LOCAL_TOOLS=false',
+    });
   },
 });
