@@ -2195,6 +2195,27 @@ describe('MCP-027 Vulnerable / Rolled-Back MCP Version', () => {
     }));
     expect(result.passed).toBe(true);
   });
+
+  it('flags a pin matching a bundled MCP package advisory (CVE-2025-6514)', async () => {
+    const store = new InMemoryMcpStateStore();
+    const result = await mcp027.run(makeContext({
+      mcpConfigs: [cfg({ name: 'remote', command: 'npx', args: ['-y', 'mcp-remote@0.1.15'], transport: 'stdio' })],
+      mcpStateStore: store,
+    }));
+    expect(result.passed).toBe(false);
+    expect(result.severity).toBe('critical');
+    expect(result.evidence?.[0].detail).toContain('CVE-2025-6514');
+    expect(result.evidence?.[0].detail).toContain('fix: 0.1.16');
+  });
+
+  it('clears the fixed version of an advisory-listed package', async () => {
+    const store = new InMemoryMcpStateStore();
+    const result = await mcp027.run(makeContext({
+      mcpConfigs: [cfg({ name: 'remote', command: 'npx', args: ['-y', 'mcp-remote@0.1.16'], transport: 'stdio' })],
+      mcpStateStore: store,
+    }));
+    expect(result.passed).toBe(true);
+  });
 });
 
 describe('MCP-028 MCP Configuration Drift', () => {

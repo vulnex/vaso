@@ -4,7 +4,19 @@ All notable changes to VASO (VULNEX Agent Security Observer) will be documented 
 
 This project adheres to [Semantic Versioning](https://semver.org/).
 
-## [0.4.11] - 2026-06-25
+## [Unreleased]
+
+### Added
+
+- **Bundled MCP package advisories — MCP-027's advisory arm now fires out of the box.** The bundled advisory database gains five entries for real-world MCP package incidents, each carrying an `affectedDependency` constraint that MCP-027 matches against pinned `npx pkg@version` server specs: CVE-2025-6514 (`mcp-remote` OS command injection via a malicious server's OAuth `authorization_endpoint`, RCE, fixed 0.1.16), CVE-2025-49596 (`@modelcontextprotocol/inspector` unauthenticated proxy → browser-based RCE, fixed 0.14.1), CVE-2025-53109/53110 (`@modelcontextprotocol/server-filesystem` "EscapeRoute" symlink escape + prefix-match containment bypass, fixed 2025.7.1 — no fixed 0.x release was ever published, so the single `>=0.2.0 <2025.7.1` range covers every vulnerable published version with no false positive), and VASO-MAL-2025-001 (the `postmark-mcp` backdoor that BCC'd all outgoing mail to an attacker; no fixed version — removal + credential rotation). Until now the only `affectedDependency` advisory in the bundle was the generic `ws` DoS entry, which no realistic MCP server pin matches — MCP-027's advisory detection existed but had nothing to fire on. The same five entries shipped in advisory feed v2 (2026-07-10), so v0.4.11 installs get them via `vaso update`; a guard test (`src/ioc/published-feeds.test.ts`) verifies the published feed artifacts' signatures against the pinned key and that no advisory's constraint flags its own fixed version.
+
+### Fixed
+
+- **Config files that exist but can't be read or parsed are now surfaced instead of silently vanishing.** A corrupted config was previously indistinguishable from an absent one: `loadConfig` threw, the adapter caught and skipped the file, and the scan reported the agent as clean — or not installed at all — with no hint that findings had been lost behind a parse error. `loadConfig` now records read/parse failures (missing files excluded; probing paths that don't exist is normal) into an `AsyncLocalStorage` capture context, so its throw/return contract and every adapter's control flow are unchanged. The adapter registry runs each `detect()` inside its own capture (correct attribution even though adapters detect concurrently), and the engine folds each failure into the owning agent's results as a synthetic `CONFIG-LOAD` warning carrying `errored: true` — the same partial-scan channel as thrown checks, so SARIF `executionSuccessful`/notifications and the terminal report reflect it. When the broken config prevented the agent from being detected at all, a placeholder agent entry is created so the failure is still visible. Unknown-format content that no parser accepts (previously a silent `{}`) is captured the same way.
+
+### Changed
+
+- **`fix()` implementations share one format dispatcher (internal refactor).** 28 of the 36 automatable fixes hand-rolled the same shape — walk `ctx.configs`, branch on `config.format` to pick a writer and key naming (`HTTP_HOST` vs `http.host`), write one setting into the first compatible file, report applied/not-applied. That per-format dispatch now lives in a single `fixFirstConfig(configs, spec)` helper (`src/remediation/config-writer.ts`): a fix declares `{ env, path, value, envValue? }` and the helper routes to the right writer, skipping config files whose dialect the spec doesn't cover. Two fixes with genuinely conditional logic (LY-009, LY-011 — they only write configs that already contain the relevant key) keep their bespoke bodies. One deliberate semantic unification: fixes that previously called `updateConfigValue` on the first config unconditionally would throw on an unknown-format file; all fixes now uniformly skip unwritable formats and report "no compatible config file found" instead of erroring.
 
 ### Changed
 
