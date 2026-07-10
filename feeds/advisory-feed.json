@@ -1,8 +1,8 @@
 {
   "meta": {
-    "version": 2,
-    "timestamp": "2026-07-10T08:45:00.000Z",
-    "description": "VASO advisory feed v2 — seeds MCP package advisories (consumed by MCP-027 via affectedDependency): mcp-remote RCE, MCP Inspector RCE, filesystem-server EscapeRoute pair, postmark-mcp backdoor."
+    "version": 3,
+    "timestamp": "2026-07-10T16:15:00.000Z",
+    "description": "VASO advisory feed v3 — adds GhostApproval coding-agent advisories (consumed by ADV-001): Cursor CVE-2026-50549 symlink-write bypass and Claude Code pre-2.1.32 symlink-target misrepresentation. v2 seeded MCP package advisories (mcp-remote RCE, MCP Inspector RCE, filesystem-server EscapeRoute pair, postmark-mcp backdoor)."
   },
   "data": {
     "advisories": [
@@ -72,6 +72,31 @@
         "published": "2025-09-26",
         "tags": ["mcp", "malicious-package", "supply-chain"],
         "affectedDependency": { "name": "postmark-mcp", "versionConstraint": ">=1.0.16" }
+      },
+      {
+        "id": "CVE-2026-50549",
+        "title": "Cursor GhostApproval symlink-write sandbox bypass",
+        "agent": "cursor-cli",
+        "affectedVersions": "<3.0.0",
+        "fixedVersion": "3.0.0",
+        "severity": "critical",
+        "description": "The diff UI displays the in-workspace symlink path while the backend follows the link and writes to its resolved target on Accept, so an approved \"local\" edit can write to ~/.ssh/authorized_keys or a shell rc file (GhostApproval, CWE-61 + CWE-451).",
+        "reference": "https://www.wiz.io/blog/ghostapproval-a-trust-boundary-gap-in-ai-coding-assistants",
+        "published": "2026-07-08",
+        "exploitAvailable": true,
+        "tags": ["coding-agent", "symlink", "ghostapproval"]
+      },
+      {
+        "id": "VASO-GHOSTAPPROVAL-CC",
+        "title": "Claude Code symlink target not surfaced in edit confirmation",
+        "agent": "claude-code",
+        "affectedVersions": "<2.1.32",
+        "fixedVersion": "2.1.32",
+        "severity": "warning",
+        "description": "Before v2.1.32, the Edit/Write permission dialog showed the in-workspace filename while the agent resolved a symlink to a sensitive target, so users approved edits whose real destination was hidden (GhostApproval, CWE-451). v2.1.32 added a symlink warning in the permission dialog; later versions resolve symlinks before writing. Upgrade to restore informed consent on symlinked paths.",
+        "reference": "https://www.wiz.io/blog/ghostapproval-a-trust-boundary-gap-in-ai-coding-assistants",
+        "published": "2026-07-08",
+        "tags": ["coding-agent", "symlink", "ghostapproval"]
       }
     ]
   }
