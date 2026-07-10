@@ -23,3 +23,7 @@ vaso-visualizations/
 .claude/
 # Internal full-scanning test kit — local/testing only, never published
 vaso_full_scanning_testing/
+# Local multi-host demo inventories and captured scan snapshots — lab artifacts
+/hosts.yaml
+/bin/hosts.yaml
+/bin/snapshots/
