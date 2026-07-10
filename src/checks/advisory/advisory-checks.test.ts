@@ -72,6 +72,26 @@ describe('ADV-001: Known Framework Vulnerability', () => {
     const result = await adv001.run(ctx);
     expect(result.passed).toBe(true);
   });
+
+  it('flags a coding agent below the GhostApproval fix (Cursor CVE-2026-50549)', async () => {
+    const ctx = makeContext({ agent: 'cursor-cli', version: '2.9.0' });
+    const result = await adv001.run(ctx);
+    expect(result.passed).toBe(false);
+    expect(result.evidence?.some(e => e.detail?.includes('CVE-2026-50549'))).toBe(true);
+  });
+
+  it('passes a coding agent at the GhostApproval fix version', async () => {
+    const ctx = makeContext({ agent: 'cursor-cli', version: '3.0.0' });
+    const result = await adv001.run(ctx);
+    expect(result.passed).toBe(true);
+  });
+
+  it('flags Claude Code below the symlink-warning hardening (v2.1.32)', async () => {
+    const ctx = makeContext({ agent: 'claude-code', version: '2.1.30' });
+    const result = await adv001.run(ctx);
+    expect(result.passed).toBe(false);
+    expect(result.evidence?.some(e => e.detail?.includes('VASO-GHOSTAPPROVAL-CC'))).toBe(true);
+  });
 });
 
 describe('ADV-002: Dependency Vulnerability', () => {

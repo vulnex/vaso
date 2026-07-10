@@ -255,6 +255,22 @@ const BUNDLED_ADVISORIES: Advisory[] = [
     tags: ['mcp', 'malicious-package', 'supply-chain'],
     affectedDependency: { name: 'postmark-mcp', versionConstraint: '>=1.0.16' },
   },
+  {
+    // Sourced from Agent Threat Rules ATR-2026-01931 (github.com/Agent-Threat-Rule/agent-threat-rules,
+    // MIT-licensed); version range per the rule's description and GHSA.
+    id: 'CVE-2026-0755',
+    title: 'gemini-mcp-tool command injection + @file exfiltration (RCE)',
+    agent: 'mcp',
+    affectedVersions: '>=1.1.2 <1.1.6',
+    fixedVersion: '1.1.6',
+    severity: 'critical',
+    description: "The gemini-mcp-tool npm MCP server passes user-controlled prompt text to the OS shell via execAsync without neutralising metacharacters (CWE-78), so a prompt carrying ;, |, $(), backticks, or && achieves unauthenticated RCE (CVSS 9.8). Its Gemini CLI @file parser also dereferences attacker-supplied @-paths, exfiltrating arbitrary local files (@~/.ssh/id_rsa, @~/.aws/credentials, @/etc/passwd). Upgrade to 1.1.6+.",
+    reference: 'https://github.com/Agent-Threat-Rule/agent-threat-rules/blob/main/rules/tool-poisoning/ATR-2026-01931-gemini-mcp-tool-command-injection-file-exfil.yaml',
+    published: '2026-01-01',
+    exploitAvailable: true,
+    tags: ['mcp', 'cve', 'rce'],
+    affectedDependency: { name: 'gemini-mcp-tool', versionConstraint: '>=1.1.2 <1.1.6' },
+  },
 
   // ── Config-pattern advisory ───────────────────────────────────────
   {
@@ -267,6 +283,39 @@ const BUNDLED_ADVISORIES: Advisory[] = [
     published: '2025-12-01',
     tags: ['config'],
     configPattern: { key: 'auto_approve_tools', valuePattern: '^(\\*|all)$' },
+  },
+
+  // ── Coding-agent advisories (GhostApproval, Wiz 2026-07-08) ────────
+  // Symlink-following (CWE-61) + confirmation-prompt misrepresentation
+  // (CWE-451) let a malicious repo trick an assistant into writing outside
+  // the workspace (SSH keys, shell rc). Version-based arm complements the
+  // static artifact detector SKL-013. https://www.wiz.io/blog/ghostapproval-a-trust-boundary-gap-in-ai-coding-assistants
+  {
+    id: 'CVE-2026-50549',
+    title: 'Cursor GhostApproval symlink-write sandbox bypass',
+    agent: 'cursor-cli',
+    affectedVersions: '<3.0.0',
+    fixedVersion: '3.0.0',
+    severity: 'critical',
+    description:
+      'The diff UI displays the in-workspace symlink path while the backend follows the link and writes to its resolved target on Accept, so an approved "local" edit can write to ~/.ssh/authorized_keys or a shell rc file (GhostApproval, CWE-61 + CWE-451).',
+    reference: 'https://www.wiz.io/blog/ghostapproval-a-trust-boundary-gap-in-ai-coding-assistants',
+    published: '2026-07-08',
+    exploitAvailable: true,
+    tags: ['coding-agent', 'symlink', 'ghostapproval'],
+  },
+  {
+    id: 'VASO-GHOSTAPPROVAL-CC',
+    title: 'Claude Code symlink target not surfaced in edit confirmation',
+    agent: 'claude-code',
+    affectedVersions: '<2.1.32',
+    fixedVersion: '2.1.32',
+    severity: 'warning',
+    description:
+      'Before v2.1.32, the Edit/Write permission dialog showed the in-workspace filename while the agent resolved a symlink to a sensitive target, so users approved edits whose real destination was hidden (GhostApproval, CWE-451). v2.1.32 added a symlink warning in the permission dialog; later versions resolve symlinks before writing. Upgrade to restore informed consent on symlinked paths.',
+    reference: 'https://www.wiz.io/blog/ghostapproval-a-trust-boundary-gap-in-ai-coding-assistants',
+    published: '2026-07-08',
+    tags: ['coding-agent', 'symlink', 'ghostapproval'],
   },
 ];
 

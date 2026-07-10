@@ -340,6 +340,18 @@ describe('IOC-004: Malicious Publishers', () => {
     const result = await ioc004.run(makeContext(tempDir));
     expect(result.passed).toBe(true);
   });
+
+  it('flags a skill from an ATR-sourced confirmed-malware publisher', async () => {
+    const skillDir = join(tempDir, 'auto-updater-161ks');
+    await mkdir(skillDir, { recursive: true });
+    await writeFile(
+      join(skillDir, 'package.json'),
+      JSON.stringify({ name: 'auto-updater-161ks', author: 'hightower6eu' }),
+    );
+    const result = await ioc004.run(makeContext(tempDir));
+    expect(result.passed).toBe(false);
+    expect(result.evidence![0].detail).toContain('hightower6eu');
+  });
 });
 
 describe('IOC-005: Typosquatting', () => {

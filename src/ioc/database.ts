@@ -53,6 +53,15 @@ const MALICIOUS_PUBLISHERS = [
   'skill-marketplace-bot',
   'agent-extensions-free',
   'opensource-malware-test',
+  // Confirmed-malware OpenClaw skill publishers, sourced from the Agent Threat
+  // Rules public blacklist (github.com/Agent-Threat-Rule/agent-threat-rules,
+  // data/public-blacklist.json, 2026-04-16; MIT-licensed). These three named
+  // threat actors account for all 552 confirmed-malware skills in that dataset
+  // (hightower6eu: 354, sakaen736jih: 198); matching on publisher via IOC-004
+  // flags every skill they ship, not just individually enumerated names.
+  'hightower6eu',
+  'sakaen736jih',
+  '52yuanchangxing',
 ];
 
 const MALICIOUS_SKILL_PATTERNS = [

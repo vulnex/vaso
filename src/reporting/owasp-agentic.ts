@@ -136,6 +136,7 @@ export const CHECK_AGENTIC_MAP: Record<string, OwaspAgenticId[]> = {
   'SKL-009': ['AAI002', 'AAI005'],
   'SKL-010': ['AAI002'],
   'SKL-011': ['AAI009'],
+  'SKL-013': ['AAI002', 'AAI012', 'AAI005'],
   // Indicators of compromise (IOC)
   'IOC-001': ['AAI009', 'AAI005'],
   'IOC-002': ['AAI009', 'AAI005'],

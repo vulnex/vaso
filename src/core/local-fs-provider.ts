@@ -1,4 +1,4 @@
-import { access as fsAccess, readdir, readFile, stat, realpath } from 'node:fs/promises';
+import { access as fsAccess, readdir, readFile, stat, realpath, readlink } from 'node:fs/promises';
 import { execFileSync, execFile } from 'node:child_process';
 import { homedir as osHomedir, hostname as osHostname } from 'node:os';
 import { promisify } from 'node:util';
@@ -30,6 +30,7 @@ export class LocalFSProvider implements FSProvider {
       name: e.name,
       isFile: e.isFile(),
       isDirectory: e.isDirectory(),
+      isSymbolicLink: e.isSymbolicLink(),
       parentPath: e.parentPath,
     }));
   }
@@ -54,6 +55,10 @@ export class LocalFSProvider implements FSProvider {
 
   async realpath(path: string): Promise<string> {
     return realpath(path);
+  }
+
+  async readlink(path: string): Promise<string> {
+    return readlink(path);
   }
 
   async exec(cmd: string, args: string[], options?: ExecOptions): Promise<ExecResult> {

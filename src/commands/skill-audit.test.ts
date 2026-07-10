@@ -112,7 +112,7 @@ describe('runSkillAudit', () => {
 
     await runSkillAudit('/empty/skill', { format: 'terminal' });
 
-    expect(consoleLogs.join('\n')).toContain('No code files found');
+    expect(consoleLogs.join('\n')).toContain('No code files or symlinks found');
     expect(mockScanSkill).not.toHaveBeenCalled();
     expect(process.exitCode).toBeUndefined();
   });
