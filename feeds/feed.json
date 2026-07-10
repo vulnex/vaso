@@ -1,10 +1,59 @@
 {
   "meta": {
-    "version": 2,
-    "timestamp": "2026-07-10T08:45:00.000Z",
-    "description": "VASO IOC threat feed v2 — adds the postmark-mcp exfiltration domain (giftshop.club, Koi Security 2025-09). Bundled data ships with each release; this feed only carries deltas added since the bundle was built."
+    "version": 3,
+    "timestamp": "2026-07-10T17:30:00.000Z",
+    "description": "VASO IOC threat feed v3 — adds 3 confirmed-malware OpenClaw skill publishers (hightower6eu, sakaen736jih, 52yuanchangxing) to maliciousPublishers and 40 verified-good skill names to trustedSkillNames, sourced from Agent Threat Rules (github.com/Agent-Threat-Rule/agent-threat-rules, MIT, public-blacklist/whitelist 2026-04-16). v2 added the postmark-mcp exfiltration domain (giftshop.club). Feed carries deltas on top of the bundled data."
   },
   "data": {
-    "maliciousDomains": ["giftshop.club"]
+    "maliciousDomains": [
+      "giftshop.club"
+    ],
+    "maliciousPublishers": [
+      "hightower6eu",
+      "sakaen736jih",
+      "52yuanchangxing"
+    ],
+    "trustedSkillNames": [
+      "ai-code-assistant",
+      "ai-content-rewriter",
+      "ai-data-visualization",
+      "ai-writing-agent",
+      "audio-editor",
+      "botlearn-writer",
+      "catalan",
+      "daily-motivation",
+      "daily-reminder",
+      "dutch",
+      "email-draft-oc",
+      "english",
+      "estonian",
+      "healthy-eating",
+      "hebrew",
+      "hindi",
+      "hungarian",
+      "irish",
+      "is-token-safe",
+      "italian",
+      "kindergarten-assistant",
+      "latvian",
+      "lithuanian",
+      "market-news",
+      "memo-teller",
+      "moments-grid",
+      "narrative-voice",
+      "oc-full-ops-audit-recipe",
+      "official-layout-pro",
+      "philosophy",
+      "polish",
+      "portuguese",
+      "quant-strategy",
+      "slovak",
+      "spanish",
+      "strategic-analyst",
+      "transmissions",
+      "vietnamese",
+      "virtually-us",
+      "writing-reboot-review"
+    ]
   }
 }
