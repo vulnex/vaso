@@ -10,7 +10,7 @@
 
 ## Overview
 
-VASO scans AI agent frameworks, interactive coding agents, desktop AI apps, and MCP server configurations for security misconfigurations, malicious code, and known threats. It runs 263 checks across 18 agents (9 autonomous frameworks + 7 interactive coding agents + Claude Desktop + ChatGPT Desktop) plus MCP-server scanning, using AST-based static analysis (not regex) for accurate results without ever executing scanned code.
+VASO scans AI agent frameworks, interactive coding agents, desktop AI apps, and MCP server configurations for security misconfigurations, malicious code, and known threats. It runs 264 checks across 18 agents (9 autonomous frameworks + 7 interactive coding agents + Claude Desktop + ChatGPT Desktop) plus MCP-server scanning, using AST-based static analysis (not regex) for accurate results without ever executing scanned code.
 
 ## Installation
 
@@ -21,7 +21,7 @@ VASO is distributed from GitHub. The npm name `vaso` is held by an unrelated pac
 curl -fsSL https://raw.githubusercontent.com/vulnex/vaso/main/install.sh | bash
 
 # Or directly via npm from GitHub
-npm install -g github:vulnex/vaso#v0.4.12
+npm install -g github:vulnex/vaso#v0.4.13
 ```
 
 Requires Node.js 20+.
@@ -121,7 +121,7 @@ See [doc/user-guide.md](doc/user-guide.md) for full option reference.
 
 ## Security Checks
 
-263 checks organized into 16 categories:
+264 checks organized into 16 categories:
 
 | Category | IDs | Count | Description |
 |----------|-----|-------|-------------|
@@ -171,7 +171,7 @@ The simplest path — drop one step into any workflow:
     format: sarif              # sarif, json, markdown, html, terminal
     # output: vaso-results.sarif  (default: vaso-results.<ext>)
     # agent: claude-code           (default: scan all detected agents)
-    # version: v0.4.12              (git ref: tag, branch, or commit SHA)
+    # version: v0.4.13              (git ref: tag, branch, or commit SHA)
     # upload-sarif: 'true'          (auto-uploads to Code Scanning)
 ```
 
@@ -181,7 +181,7 @@ The action installs the requested VASO version, runs the scan, and (when `format
 
 ```yaml
 - name: Install VASO
-  run: npm install -g github:vulnex/vaso#v0.4.12
+  run: npm install -g github:vulnex/vaso#v0.4.13
 
 - name: Run VASO scan
   run: vaso scan --format sarif -o results.sarif --fail-on critical

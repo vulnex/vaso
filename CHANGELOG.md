@@ -4,7 +4,11 @@ All notable changes to VASO (VULNEX Agent Security Observer) will be documented 
 
 This project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.4.13] - 2026-08-20
+
+### Fixed
+
+- **`npm install -g github:vulnex/vaso#<tag>` (and the `install.sh` curl|bash path) no longer fail during install.** Installing from a Git tag ran the `prepare` script (`npm run build` → `tsup`), but when npm prepares a Git *dependency* it installs only **production** dependencies — so `tsup`/`typescript` (correctly declared in `devDependencies`) were absent and the build aborted with `sh: tsup: command not found`, leaving VASO uninstalled. This reproduced in a clean environment (no `NODE_ENV=production`, no `~/.npmrc`, no `omit=dev`); it was never a missing-dependency-*declaration* problem — a manual `git clone && npm ci && npm run build` always succeeded. Two changes fix the install-time path: the release tag now ships a prebuilt `dist/`, and the `prepare` hook (`scripts/prepare.mjs`) builds from source only when the toolchain is present and otherwise falls back to that prebuilt bundle. A Git-tag install therefore needs no tsup/TypeScript toolchain, while contributor clones (`npm install` with devDependencies) still auto-build. The immutable `v0.4.12` tag is left untouched; this ships as `v0.4.13`.
 
 ### Added
 

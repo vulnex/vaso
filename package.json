@@ -1,6 +1,6 @@
 {
   "name": "vaso",
-  "version": "0.4.12",
+  "version": "0.4.13",
   "description": "VULNEX Agent Security Observer — agent-agnostic security scanner for AI agent deployments",
   "type": "module",
   "main": "dist/cli.js",
@@ -18,7 +18,7 @@
     "test:all": "vitest run && npm run test:e2e && npm run test:integration",
     "docker:build-base": "docker build -t vaso-test-base -f testing/docker/base.Dockerfile .",
     "lint": "tsc --noEmit",
-    "prepare": "npm run build"
+    "prepare": "node scripts/prepare.mjs"
   },
   "keywords": [
     "security",
