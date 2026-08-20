@@ -149,27 +149,37 @@ resolve_version() {
 }
 
 install_vaso() {
-  local spec="github:${REPO}#${VERSION}"
-  info "Installing VASO from ${spec}..."
-  echo ""
+  local ver_no_v="${VERSION#v}"
+  local tarball_url="https://github.com/${REPO}/releases/download/${VERSION}/vaso-${ver_no_v}.tgz"
+  local git_spec="github:${REPO}#${VERSION}"
 
   # Detect if we need sudo for global npm install
   local npm_prefix
   npm_prefix=$(npm config get prefix 2>/dev/null)
-  local use_sudo=false
-
+  local NPM=(npm)
   if [ -n "$npm_prefix" ] && [ ! -w "$npm_prefix/lib" ] 2>/dev/null; then
-    use_sudo=true
+    warn "Global npm directory requires elevated permissions (using sudo)."
+    NPM=(sudo npm)
   fi
 
-  if [ "$use_sudo" = true ]; then
-    warn "Global npm directory requires elevated permissions."
-    info "Running: sudo npm install -g ${spec}"
-    sudo npm install -g "$spec"
-  else
-    info "Running: npm install -g ${spec}"
-    npm install -g "$spec"
+  # Prefer the self-contained release tarball. `npm install -g github:...#<tag>`
+  # is broken on npm 11+ for VASO: the global git-dependency install path
+  # mishandles the package (ignores files[], leaves an unusable install), and
+  # a source build at install time needs a toolchain the checkout lacks. The
+  # prebuilt tarball asset installs cleanly with no build step. Fall back to the
+  # git ref only when there's no release tarball (e.g. the `main` fallback).
+  if [ "$VERSION" != "$FALLBACK_REF" ]; then
+    info "Installing VASO from release tarball: ${tarball_url}"
+    echo ""
+    if "${NPM[@]}" install -g "$tarball_url"; then
+      return
+    fi
+    warn "Tarball install failed; falling back to git install (${git_spec})."
   fi
+
+  info "Installing VASO from ${git_spec}..."
+  echo ""
+  "${NPM[@]}" install -g "$git_spec"
 }
 
 verify_install() {
