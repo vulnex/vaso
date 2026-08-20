@@ -7,9 +7,9 @@ branding:
 
 inputs:
   version:
-    description: 'Git ref to install from github:vulnex/vaso (tag like v0.4.2, branch, or commit SHA).'
+    description: 'VASO version to install. A release tag (e.g. v0.4.14) installs the prebuilt release tarball; a branch or commit SHA installs from the git ref.'
     required: false
-    default: 'v0.4.13'
+    default: 'v0.4.14'
   agent:
     description: 'Scan a single agent only (openclaw, nanoclaw, picoclaw, ironclaw, nanobot, zeroclaw, nemoclaw, hermes, claude-code, codex). Omit to scan all detected agents.'
     required: false
@@ -58,7 +58,20 @@ runs:
 
     - name: Install VASO
       shell: bash
-      run: npm install -g "github:vulnex/vaso#${{ inputs.version }}"
+      run: |
+        set -euo pipefail
+        REF="${{ inputs.version }}"
+        # Release tags install the prebuilt tarball asset; `npm install -g
+        # github:...#<tag>` is broken on npm 11+ (global git-dependency install
+        # mishandles the package). Non-tag refs (branch/SHA) fall back to git.
+        if [[ "$REF" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          URL="https://github.com/vulnex/vaso/releases/download/${REF}/vaso-${REF#v}.tgz"
+          echo "Installing VASO release tarball: $URL"
+          npm install -g "$URL"
+        else
+          echo "Installing VASO from git ref: $REF"
+          npm install -g "github:vulnex/vaso#${REF}"
+        fi
 
     - name: Run VASO scan
       id: run

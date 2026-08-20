@@ -4,6 +4,12 @@ All notable changes to VASO (VULNEX Agent Security Observer) will be documented 
 
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.4.14] - 2026-08-20
+
+### Fixed
+
+- **`install.sh` (curl|bash) now installs a prebuilt release tarball, fixing global install on npm 11+.** v0.4.13 made `dist/` ship in the tag so a git install needs no build toolchain, but that only fixed *local* (`npm install github:…`) installs. `npm install -g github:vulnex/vaso#<tag>` — which `install.sh`, the README one-liner, and the GitHub Action all used — is **broken on npm 11+**: the global git-dependency install path mishandles the package (it stops honoring `files[]` and leaves an unusable, partially-extracted install; the new default lifecycle-script deferral makes it worse). The install path no longer builds or git-installs at all: each release now ships a **prebuilt npm tarball** (`vaso-<version>.tgz`, produced by `npm pack`, `dist/` included) as a GitHub Release asset, and `install.sh` runs `npm install -g <tarball-url>` (falling back to the git ref only when no release tarball exists). Tarball installs skip git-prep and lifecycle scripts entirely, so they work on npm 11+. The README/user-guide install commands and `action.yml` now install the tarball too; installing via `npm install -g github:vulnex/vaso#<tag>` is no longer recommended (a note in the README explains why). No code/CLI behavior change — this is packaging/distribution only; the checks, adapters, and total (264) are unchanged from v0.4.13.
+
 ## [0.4.13] - 2026-08-20
 
 ### Fixed

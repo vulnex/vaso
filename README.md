@@ -17,14 +17,16 @@ VASO scans AI agent frameworks, interactive coding agents, desktop AI apps, and 
 VASO is distributed from GitHub. The npm name `vaso` is held by an unrelated package; do not install that.
 
 ```bash
-# One-liner (Linux / macOS / WSL)
+# One-liner (Linux / macOS / WSL) — recommended
 curl -fsSL https://raw.githubusercontent.com/vulnex/vaso/main/install.sh | bash
 
-# Or directly via npm from GitHub
-npm install -g github:vulnex/vaso#v0.4.13
+# Or install the prebuilt release tarball directly with npm
+npm install -g https://github.com/vulnex/vaso/releases/download/v0.4.14/vaso-0.4.14.tgz
 ```
 
 Requires Node.js 20+.
+
+> **Note:** install the release **tarball**, not `npm install -g github:vulnex/vaso#<tag>`. On npm 11+, the global git-dependency install path mishandles the package and leaves an unusable install; the prebuilt tarball has no build step and installs cleanly.
 
 ### Build from source
 
@@ -171,7 +173,7 @@ The simplest path — drop one step into any workflow:
     format: sarif              # sarif, json, markdown, html, terminal
     # output: vaso-results.sarif  (default: vaso-results.<ext>)
     # agent: claude-code           (default: scan all detected agents)
-    # version: v0.4.13              (git ref: tag, branch, or commit SHA)
+    # version: v0.4.14              (release tag)
     # upload-sarif: 'true'          (auto-uploads to Code Scanning)
 ```
 
@@ -181,7 +183,7 @@ The action installs the requested VASO version, runs the scan, and (when `format
 
 ```yaml
 - name: Install VASO
-  run: npm install -g github:vulnex/vaso#v0.4.13
+  run: npm install -g https://github.com/vulnex/vaso/releases/download/v0.4.14/vaso-0.4.14.tgz
 
 - name: Run VASO scan
   run: vaso scan --format sarif -o results.sarif --fail-on critical
