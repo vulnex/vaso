@@ -27,3 +27,4 @@ vaso_full_scanning_testing/
 /hosts.yaml
 /bin/hosts.yaml
 /bin/snapshots/
+.gstack/
