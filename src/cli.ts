@@ -1,24 +1,7 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { adapterRegistry } from './adapters/registry.js';
-import { openclawAdapter } from './adapters/openclaw.js';
-import { nanoclawAdapter } from './adapters/nanoclaw.js';
-import { picoclawAdapter } from './adapters/picoclaw.js';
-import { ironclawAdapter } from './adapters/ironclaw.js';
-import { nanobotAdapter } from './adapters/nanobot.js';
-import { zeroclawAdapter } from './adapters/zeroclaw.js';
-import { nemoclawAdapter } from './adapters/nemoclaw.js';
-import { hermesAdapter } from './adapters/hermes.js';
-import { lyrieAdapter } from './adapters/lyrie.js';
-import { claudeCodeAdapter } from './adapters/claude-code.js';
-import { claudeDesktopAdapter } from './adapters/claude-desktop.js';
-import { chatgptDesktopAdapter } from './adapters/chatgpt-desktop.js';
-import { codexAdapter } from './adapters/codex.js';
-import { opencodeAdapter } from './adapters/opencode.js';
-import { geminiAdapter } from './adapters/gemini.js';
-import { qwenCodeAdapter } from './adapters/qwen-code.js';
-import { copilotCliAdapter } from './adapters/copilot-cli.js';
-import { cursorCliAdapter } from './adapters/cursor-cli.js';
+import { registerAllAdapters } from './adapters/index.js';
 import { registerAllChecks } from './checks/index.js';
 import { initIOCDatabase } from './ioc/database.js';
 import { isFeedStale } from './ioc/updater.js';
@@ -64,24 +47,7 @@ function printBanner(): void {
 }
 
 // Register adapters and checks
-adapterRegistry.register(openclawAdapter);
-adapterRegistry.register(nanoclawAdapter);
-adapterRegistry.register(picoclawAdapter);
-adapterRegistry.register(ironclawAdapter);
-adapterRegistry.register(nanobotAdapter);
-adapterRegistry.register(zeroclawAdapter);
-adapterRegistry.register(nemoclawAdapter);
-adapterRegistry.register(hermesAdapter);
-adapterRegistry.register(lyrieAdapter);
-adapterRegistry.register(claudeCodeAdapter);
-adapterRegistry.register(claudeDesktopAdapter);
-adapterRegistry.register(chatgptDesktopAdapter);
-adapterRegistry.register(codexAdapter);
-adapterRegistry.register(opencodeAdapter);
-adapterRegistry.register(geminiAdapter);
-adapterRegistry.register(qwenCodeAdapter);
-adapterRegistry.register(copilotCliAdapter);
-adapterRegistry.register(cursorCliAdapter);
+registerAllAdapters();
 registerAllChecks();
 assertZoneGraphsValid(adapterRegistry, checkRegistry, defaultZoneGraph);
 

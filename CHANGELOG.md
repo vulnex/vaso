@@ -4,6 +4,16 @@ All notable changes to VASO (VULNEX Agent Security Observer) will be documented 
 
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **Library entry point — VASO is now embeddable as a programmatic API, not just a CLI.** New `src/index.ts` builds to `dist/index.js` (+ `dist/index.d.ts` type declarations), wired via `package.json` `main`/`types`/`exports`; the CLI bundle and `bin/vaso` are unchanged. The exported surface is the seams a downstream tool needs to run scans in-process: the core types, the `FSProvider` contract (including the new tri-state permission API) with both providers, `ScanEngine` + scoring, `loadConfig`, the adapter seam (`AgentAdapter`, `adapterRegistry`, new `allAdapters`/`registerAllAdapters()` — also adopted by the CLI, replacing 18 hand-rolled registration lines), the check seam (`checkRegistry`, `registerAllChecks`, `defineCheck`), IOC/advisory database init, the reporter seam (`getReporter`/`registerReporter`), and `VERSION`. A guard test (`src/index.test.ts`) registers the full built-in set through the library surface (18 adapters, 264 checks) and runs a hermetic end-to-end programmatic scan.
+
+### Changed
+
+- **Permission checks now query the platform through a tri-state `FSProvider` capability instead of doing POSIX mode math themselves.** `FSProvider` gains `PermissionFacts` (semantic group/world read-write-exec flags plus an `octal`/`description` for evidence text) and an optional `permissions(path)` method returning facts or `'unsupported'`; a new `src/core/permissions.ts` module (`queryPermissions()` + `readableByOthers`/`writableByOthers`/`accessibleByOthers` predicates) is the single place checks obtain them. `queryPermissions` prefers the provider's own capability, answers `'unsupported'` on win32 when the provider has none (mode bits are fake there and must never be interpreted), and otherwise derives facts from `stat()` mode bits — so the 28 permission-based checks across 15 categories no longer touch raw modes at all. Checks treat `'unsupported'` as "cannot evaluate" and skip cleanly rather than reading garbage. Behavior on darwin/linux is unchanged (identical findings, messages, and octal evidence for all realistic modes; octal is now zero-padded to three digits, visible only for modes below `0o100`). `LocalFSProvider` and `SnapshotFSProvider` implement the capability explicitly (snapshots mirror their existing stat semantics: real probe-collected file modes, fabricated `755` for directories). This lands the platform seam for Windows support: a provider that evaluates ACLs can answer for win32 by implementing one method, with no per-check changes.
+
 ## [0.4.14] - 2026-08-20
 
 ### Fixed

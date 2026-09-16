@@ -3,7 +3,15 @@
   "version": "0.4.14",
   "description": "VULNEX Agent Security Observer — agent-agnostic security scanner for AI agent deployments",
   "type": "module",
-  "main": "dist/cli.js",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
   "bin": {
     "vaso": "bin/vaso",
     "vaso-quick": "bin/vaso-quick.sh"
