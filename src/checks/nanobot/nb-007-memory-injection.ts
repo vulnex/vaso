@@ -1,5 +1,6 @@
 import { join } from 'node:path';
 import { defineCheck } from '../../core/check-builder.js';
+import { queryPermissions } from '../../core/permissions.js';
 import { getNestedValue } from '../../core/utils.js';
 
 export const nb007 = defineCheck({
@@ -34,8 +35,9 @@ export const nb007 = defineCheck({
 
     if (memoryExists && memoryEnabled) {
       try {
-        const info = await ctx.fs.stat(memoryPath);
-        const worldWritable = (info.mode & 0o002) !== 0;
+        const perms = await queryPermissions(ctx.fs, memoryPath);
+        // 'unsupported' → treat as not writable; the loaded-into-prompt detail still applies
+        const worldWritable = perms !== 'unsupported' && perms.worldWrite;
 
         evidence.push({
           file: memoryPath,

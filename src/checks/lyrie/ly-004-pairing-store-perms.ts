@@ -1,6 +1,7 @@
 import { join } from 'node:path';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { queryPermissions, accessibleByOthers } from '../../core/permissions.js';
 
 export const ly004 = defineCheck({
   id: 'LY-004',
@@ -17,12 +18,11 @@ export const ly004 = defineCheck({
 
     const evidence: Evidence[] = [];
     try {
-      const stat = await ctx.fs.stat(path);
-      const perms = stat.mode & 0o777;
-      if ((perms & 0o077) !== 0) {
+      const perms = await queryPermissions(ctx.fs, path);
+      if (perms !== 'unsupported' && accessibleByOthers(perms)) {
         evidence.push({
           file: path,
-          snippet: `mode 0${perms.toString(8)}`,
+          snippet: `mode 0${perms.octal}`,
           detail: 'pairing.json is over-permissive — other local users can read or modify the DM allowlist',
         });
       }

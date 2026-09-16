@@ -1,5 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { queryPermissions } from '../../core/permissions.js';
 
 const PACKAGE_RUNNERS = new Set(['npx', 'pnpm', 'yarn', 'bunx', 'uvx', 'pipx']);
 const PINNED = /@\d+\.\d+\.\d+/;
@@ -45,12 +46,11 @@ export const hm010 = defineCheck({
         // World-writable command path
         if (command.startsWith('/')) {
           try {
-            const stat = await ctx.fs.stat(command);
-            const perms = stat.mode & 0o777;
-            if ((perms & 0o002) !== 0) {
+            const perms = await queryPermissions(ctx.fs, command);
+            if (perms !== 'unsupported' && perms.worldWrite) {
               evidence.push({
                 file: config.filePath,
-                snippet: `${command} (mode 0${perms.toString(8)})`,
+                snippet: `${command} (mode 0${perms.octal})`,
                 detail: `MCP server command is world-writable — any local user can replace it before launch`,
               });
             }

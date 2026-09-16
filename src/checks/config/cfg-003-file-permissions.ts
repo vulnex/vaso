@@ -1,5 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { accessibleByOthers, queryPermissions } from '../../core/permissions.js';
 import { chmodFile } from '../../remediation/config-writer.js';
 
 export const cfg003 = defineCheck({
@@ -20,12 +21,11 @@ export const cfg003 = defineCheck({
     for (const config of ctx.configs) {
       if (!credentialPaths.has(config.filePath)) continue;
       try {
-        const stats = await ctx.fs.stat(config.filePath);
-        const mode = stats.mode & 0o777;
-        if (mode & 0o077) {
+        const perms = await queryPermissions(ctx.fs, config.filePath);
+        if (perms !== 'unsupported' && accessibleByOthers(perms)) {
           evidence.push({
             file: config.filePath,
-            detail: `Permissions: ${mode.toString(8)} (should be 600 or tighter)`,
+            detail: `Permissions: ${perms.octal} (should be 600 or tighter)`,
           });
         }
       } catch {

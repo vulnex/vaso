@@ -14,6 +14,41 @@ export interface DirentInfo {
   parentPath?: string;
 }
 
+/**
+ * Provider-neutral answer to "who besides the owner can touch this path".
+ *
+ * On POSIX the facts are derived from mode bits (group/world triads). A
+ * Windows provider derives them from ACL evaluation instead — grants to
+ * Everyone map to the `world*` flags, grants to Users / Authenticated Users
+ * to the `group*` flags — so checks written against these facts are
+ * platform-neutral without ever seeing win32's fake mode bits.
+ */
+export interface PermissionFacts {
+  groupRead: boolean;
+  groupWrite: boolean;
+  groupExec: boolean;
+  worldRead: boolean;
+  worldWrite: boolean;
+  worldExec: boolean;
+  /**
+   * Octal permission string like "644" when the facts came from POSIX mode
+   * bits; unset when they came from ACLs. Checks embed it in evidence
+   * snippets that historically printed the raw mode.
+   */
+  octal?: string;
+  /** Short human description of the source, e.g. `mode 644` or an ACL grant summary. */
+  description: string;
+}
+
+/**
+ * Tri-state permission answer (see devnotes commercial design §3): facts when
+ * the provider can genuinely evaluate them, `'unsupported'` when it cannot
+ * (e.g. POSIX providers on win32, where mode bits are fake). Checks must
+ * treat `'unsupported'` as "cannot evaluate" and skip cleanly — never as
+ * "safe" or "unsafe".
+ */
+export type PermissionQuery = PermissionFacts | 'unsupported';
+
 export interface ExecResult {
   stdout: string;
   stderr: string;
@@ -51,6 +86,16 @@ export interface FSProvider {
    * path is not a symlink. SnapshotFSProvider throws (link data isn't collected).
    */
   readlink(path: string): Promise<string>;
+  /**
+   * Semantic permission query (tri-state — see PermissionQuery). Optional
+   * capability: providers that can evaluate real permissions implement it;
+   * checks go through `queryPermissions()` in core/permissions.ts, which
+   * prefers this method and otherwise falls back to POSIX mode bits from
+   * `stat()` — or `'unsupported'` on win32, so mode math is never trusted
+   * there. A Windows ACL provider makes win32 answerable by implementing
+   * this method.
+   */
+  permissions?(path: string): Promise<PermissionQuery>;
   exec(cmd: string, args: string[], options?: ExecOptions): Promise<ExecResult>;
   execSync(cmd: string, args: string[], options?: ExecOptions): string;
   /** Look up an environment variable. SnapshotFSProvider reads from the

@@ -1,6 +1,7 @@
 import { join } from 'node:path';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { queryPermissions, accessibleByOthers } from '../../core/permissions.js';
 
 const PROTECTED_FILES = [
   'config.json',
@@ -26,12 +27,12 @@ export const ghc001 = defineCheck({
       const path = subdir === '.' ? ctx.installation.installDir : join(ctx.installation.installDir, subdir);
       if (!(await ctx.fs.access(path))) continue;
       try {
-        const stat = await ctx.fs.stat(path);
-        const perms = stat.mode & 0o777;
-        if ((perms & 0o077) !== 0) {
+        const perms = await queryPermissions(ctx.fs, path);
+        // 'unsupported' (no evaluable permission model) → nothing to flag
+        if (perms !== 'unsupported' && accessibleByOthers(perms)) {
           evidence.push({
             file: path,
-            snippet: `mode 0${perms.toString(8)}`,
+            snippet: `mode 0${perms.octal}`,
             detail: `${subdir === '.' ? '~/.copilot/' : `${subdir}/`} is readable or writable by group/other — auth/session state may leak`,
           });
         }
@@ -42,12 +43,11 @@ export const ghc001 = defineCheck({
       const filePath = join(ctx.installation.installDir, filename);
       if (!(await ctx.fs.access(filePath))) continue;
       try {
-        const stat = await ctx.fs.stat(filePath);
-        const perms = stat.mode & 0o777;
-        if ((perms & 0o077) !== 0) {
+        const perms = await queryPermissions(ctx.fs, filePath);
+        if (perms !== 'unsupported' && accessibleByOthers(perms)) {
           evidence.push({
             file: filePath,
-            snippet: `mode 0${perms.toString(8)}`,
+            snippet: `mode 0${perms.octal}`,
             detail: `${filename} is readable or writable by group/other`,
           });
         }

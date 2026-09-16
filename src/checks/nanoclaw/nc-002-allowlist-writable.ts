@@ -1,5 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { queryPermissions, writableByOthers } from '../../core/permissions.js';
 import { chmodFile } from '../../remediation/config-writer.js';
 
 export const nc002 = defineCheck({
@@ -17,12 +18,11 @@ export const nc002 = defineCheck({
     for (const config of ctx.configs) {
       if (!config.filePath.endsWith('mount-allowlist.json')) continue;
       try {
-        const stats = await ctx.fs.stat(config.filePath);
-        const mode = stats.mode & 0o777;
-        if (mode & 0o022) {
+        const perms = await queryPermissions(ctx.fs, config.filePath);
+        if (perms !== 'unsupported' && writableByOthers(perms)) {
           evidence.push({
             file: config.filePath,
-            detail: `Permissions ${mode.toString(8)} — group or world writable (should be 600)`,
+            detail: `Permissions ${perms.octal} — group or world writable (should be 600)`,
           });
         }
       } catch {

@@ -1,6 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { join } from 'node:path';
 import { defineCheck } from '../../core/check-builder.js';
+import { queryPermissions, writableByOthers } from '../../core/permissions.js';
 
 const SYSTEM_DIR = '/etc/openclaw';
 const CONFIG_FILENAMES = [
@@ -32,12 +33,11 @@ export const oc007 = defineCheck({
     const evidence: Evidence[] = [];
 
     try {
-      const dirStats = await ctx.fs.stat(SYSTEM_DIR);
-      const dirMode = dirStats.mode & 0o777;
-      if (dirMode & 0o022) {
+      const dirPerms = await queryPermissions(ctx.fs, SYSTEM_DIR);
+      if (dirPerms !== 'unsupported' && writableByOthers(dirPerms)) {
         evidence.push({
           file: SYSTEM_DIR,
-          detail: `Directory permissions ${dirMode.toString(8)} — group or world writable (should be 755 or tighter)`,
+          detail: `Directory permissions ${dirPerms.octal} — group or world writable (should be 755 or tighter)`,
         });
       }
     } catch {
@@ -48,12 +48,11 @@ export const oc007 = defineCheck({
       const filePath = join(SYSTEM_DIR, name);
       if (!(await ctx.fs.access(filePath))) continue;
       try {
-        const stats = await ctx.fs.stat(filePath);
-        const mode = stats.mode & 0o777;
-        if (mode & 0o022) {
+        const perms = await queryPermissions(ctx.fs, filePath);
+        if (perms !== 'unsupported' && writableByOthers(perms)) {
           evidence.push({
             file: filePath,
-            detail: `File permissions ${mode.toString(8)} — group or world writable`,
+            detail: `File permissions ${perms.octal} — group or world writable`,
           });
         }
       } catch {

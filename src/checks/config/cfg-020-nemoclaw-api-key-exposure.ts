@@ -1,6 +1,7 @@
 import { join } from 'node:path';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { accessibleByOthers, queryPermissions } from '../../core/permissions.js';
 import { chmodFile } from '../../remediation/config-writer.js';
 
 const CREDENTIAL_FILE = 'credentials.json';
@@ -27,13 +28,12 @@ export const cfg020 = defineCheck({
     // Check file permissions (unix only)
     if (ctx.fs.platform === 'darwin' || ctx.fs.platform === 'linux') {
       try {
-        const stats = await ctx.fs.stat(credPath);
-        const mode = stats.mode & 0o777;
-        if (mode & 0o077) {
+        const perms = await queryPermissions(ctx.fs, credPath);
+        if (perms !== 'unsupported' && accessibleByOthers(perms)) {
           hasLoosePerms = true;
           evidence.push({
             file: credPath,
-            detail: `Permissions: ${mode.toString(8)} — group/other can read credentials (should be 600)`,
+            detail: `Permissions: ${perms.octal} — group/other can read credentials (should be 600)`,
           });
         }
       } catch {}

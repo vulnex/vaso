@@ -1,6 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { join } from 'node:path';
 import { defineCheck } from '../../core/check-builder.js';
+import { accessibleByOthers, queryPermissions } from '../../core/permissions.js';
 import { chmodFile } from '../../remediation/config-writer.js';
 
 const MEMORY_FILES = ['memory.json', 'conversations.db'];
@@ -24,12 +25,11 @@ export const oc006 = defineCheck({
       const filePath = join(ctx.installation.installDir, name);
       if (!(await ctx.fs.access(filePath))) continue;
       try {
-        const stats = await ctx.fs.stat(filePath);
-        const mode = stats.mode & 0o777;
-        if (mode & 0o077) {
+        const perms = await queryPermissions(ctx.fs, filePath);
+        if (perms !== 'unsupported' && accessibleByOthers(perms)) {
           evidence.push({
             file: filePath,
-            detail: `Permissions: ${mode.toString(8)} — should be 600 (owner-only)`,
+            detail: `Permissions: ${perms.octal} — should be 600 (owner-only)`,
           });
         }
       } catch {

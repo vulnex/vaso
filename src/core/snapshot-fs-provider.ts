@@ -1,5 +1,6 @@
 import { join, basename } from 'node:path';
-import type { FSProvider, DirentInfo, ExecResult, ExecOptions } from './fs-provider.js';
+import type { FSProvider, DirentInfo, ExecResult, ExecOptions, PermissionQuery } from './fs-provider.js';
+import { posixPermissionFacts } from './permissions.js';
 import type { ProbeSnapshot } from './snapshot-types.js';
 
 function stripTrailingSlash(name: string): string {
@@ -113,6 +114,20 @@ export class SnapshotFSProvider implements FSProvider {
       };
     }
     throw new Error(`ENOENT: path not collected in snapshot: ${path}`);
+  }
+
+  async permissions(path: string): Promise<PermissionQuery> {
+    // The probe is POSIX-only today, but guard anyway: a future win32
+    // snapshot's mode field would be fake and must not be interpreted.
+    if (this.platform === 'win32') {
+      return 'unsupported';
+    }
+    // Mirrors stat(): file modes are real probe-collected data; directory
+    // modes are the same fabricated 0o755 stat() reports (the probe doesn't
+    // collect dir modes), so dir-permission checks behave identically to the
+    // pre-tri-state stat-math path on snapshots.
+    const st = await this.stat(path);
+    return posixPermissionFacts(st.mode);
   }
 
   async realpath(path: string): Promise<string> {

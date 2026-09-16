@@ -1,5 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { accessibleByOthers, queryPermissions } from '../../core/permissions.js';
 
 export const pol003 = defineCheck({
   id: 'POL-003',
@@ -20,11 +21,11 @@ export const pol003 = defineCheck({
       try {
         const stats = await ctx.fs.stat(fullPath);
         if (!stats.isFile()) continue;
-        const mode = stats.mode & 0o777;
-        if (mode & 0o077) {
+        const perms = await queryPermissions(ctx.fs, fullPath);
+        if (perms !== 'unsupported' && accessibleByOthers(perms)) {
           evidence.push({
             file: fullPath,
-            detail: `Permissions: ${mode.toString(8)} (should be 600 or tighter)`,
+            detail: `Permissions: ${perms.octal} (should be 600 or tighter)`,
           });
         }
       } catch {

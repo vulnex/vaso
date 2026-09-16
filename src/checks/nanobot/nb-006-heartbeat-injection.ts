@@ -1,5 +1,6 @@
 import { join } from 'node:path';
 import { defineCheck } from '../../core/check-builder.js';
+import { queryPermissions } from '../../core/permissions.js';
 
 export const nb006 = defineCheck({
   id: 'NB-006',
@@ -16,9 +17,10 @@ export const nb006 = defineCheck({
 
     if (await ctx.fs.access(heartbeatPath)) {
       try {
-        const info = await ctx.fs.stat(heartbeatPath);
-        const worldWritable = (info.mode & 0o002) !== 0;
-        const groupWritable = (info.mode & 0o020) !== 0;
+        const perms = await queryPermissions(ctx.fs, heartbeatPath);
+        // 'unsupported' → treat as not writable; existence detail below still applies
+        const worldWritable = perms !== 'unsupported' && perms.worldWrite;
+        const groupWritable = perms !== 'unsupported' && perms.groupWrite;
 
         if (worldWritable) {
           evidence.push({

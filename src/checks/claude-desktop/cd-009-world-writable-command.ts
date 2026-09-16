@@ -1,6 +1,7 @@
 import { dirname } from 'node:path';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { queryPermissions } from '../../core/permissions.js';
 
 export const cd009 = defineCheck({
   id: 'CD-009',
@@ -24,11 +25,11 @@ export const cd009 = defineCheck({
         if (typeof command !== 'string' || !command.startsWith('/')) continue;
 
         try {
-          const stat = await ctx.fs.stat(command);
-          if ((stat.mode & 0o002) !== 0) {
+          const perms = await queryPermissions(ctx.fs, command);
+          if (perms !== 'unsupported' && perms.worldWrite) {
             evidence.push({
               file: config.filePath,
-              snippet: `mcpServers.${name}.command = ${command} (mode ${(stat.mode & 0o777).toString(8)})`,
+              snippet: `mcpServers.${name}.command = ${command} (mode ${perms.octal})`,
               detail: 'MCP command binary is world-writable — any local user can replace it and run code as you',
             });
             continue;
@@ -39,11 +40,11 @@ export const cd009 = defineCheck({
 
         try {
           const parent = dirname(command);
-          const parentStat = await ctx.fs.stat(parent);
-          if ((parentStat.mode & 0o002) !== 0) {
+          const parentPerms = await queryPermissions(ctx.fs, parent);
+          if (parentPerms !== 'unsupported' && parentPerms.worldWrite) {
             evidence.push({
               file: config.filePath,
-              snippet: `${parent} (mode ${(parentStat.mode & 0o777).toString(8)})`,
+              snippet: `${parent} (mode ${parentPerms.octal})`,
               detail: `Parent directory of MCP command is world-writable — attacker can swap ${command}`,
             });
           }

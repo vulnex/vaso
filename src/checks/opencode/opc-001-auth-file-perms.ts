@@ -1,5 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { queryPermissions, accessibleByOthers } from '../../core/permissions.js';
 
 export const opc001 = defineCheck({
   id: 'OPC-001',
@@ -19,12 +20,12 @@ export const opc001 = defineCheck({
     for (const authPath of paths) {
       if (!(await ctx.fs.access(authPath))) continue;
       try {
-        const stat = await ctx.fs.stat(authPath);
-        const perms = stat.mode & 0o777;
-        if ((perms & 0o077) !== 0) {
+        const perms = await queryPermissions(ctx.fs, authPath);
+        // 'unsupported' (no evaluable permission model) → nothing to flag
+        if (perms !== 'unsupported' && accessibleByOthers(perms)) {
           evidence.push({
             file: authPath,
-            snippet: `mode 0${perms.toString(8)}`,
+            snippet: `mode 0${perms.octal}`,
             detail: 'auth.json is readable or writable by group/other — credentials may be exposed',
           });
         }

@@ -1,5 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { queryPermissions } from '../../core/permissions.js';
 
 export const cc007 = defineCheck({
   id: 'CC-007',
@@ -28,11 +29,11 @@ export const cc007 = defineCheck({
           });
           continue;
         }
-        const stat = await ctx.fs.stat(path);
-        if ((stat.mode & 0o002) !== 0) {
+        const perms = await queryPermissions(ctx.fs, path);
+        if (perms !== 'unsupported' && perms.worldWrite) {
           evidence.push({
             file: config.filePath,
-            snippet: `${path} (mode ${(stat.mode & 0o777).toString(8)})`,
+            snippet: `${path} (mode ${perms.octal})`,
             detail: 'apiKeyHelper is world-writable — any local user can replace it and exfiltrate the key',
           });
         }

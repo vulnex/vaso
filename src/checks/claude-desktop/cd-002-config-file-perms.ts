@@ -1,5 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { queryPermissions, readableByOthers } from '../../core/permissions.js';
 
 export const cd002 = defineCheck({
   id: 'CD-002',
@@ -30,12 +31,11 @@ export const cd002 = defineCheck({
       if (!hasEnv) continue;
 
       try {
-        const stat = await ctx.fs.stat(config.filePath);
-        const mode = stat.mode & 0o777;
-        if ((mode & 0o044) !== 0) {
+        const perms = await queryPermissions(ctx.fs, config.filePath);
+        if (perms !== 'unsupported' && readableByOthers(perms)) {
           evidence.push({
             file: config.filePath,
-            snippet: `mode ${mode.toString(8)}`,
+            snippet: `mode ${perms.octal}`,
             detail: 'config holds mcpServers.*.env values and is group/world-readable — any local user can read embedded secrets',
           });
         }

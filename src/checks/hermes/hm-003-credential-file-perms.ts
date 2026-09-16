@@ -1,6 +1,7 @@
 import { join } from 'node:path';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { queryPermissions, accessibleByOthers } from '../../core/permissions.js';
 
 const SENSITIVE_FILES = [
   'credentials.json',
@@ -28,11 +29,11 @@ export const hm003 = defineCheck({
       try {
         const stat = await ctx.fs.stat(filePath);
         if (!stat.isFile()) return;
-        const perms = stat.mode & 0o777;
-        if ((perms & 0o077) !== 0) {
+        const perms = await queryPermissions(ctx.fs, filePath);
+        if (perms !== 'unsupported' && accessibleByOthers(perms)) {
           evidence.push({
             file: filePath,
-            snippet: `mode 0${perms.toString(8)}`,
+            snippet: `mode 0${perms.octal}`,
             detail: 'Credential file readable by group or other users',
           });
         }

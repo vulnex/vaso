@@ -1,6 +1,7 @@
 import { join } from 'node:path';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { queryPermissions, accessibleByOthers } from '../../core/permissions.js';
 
 const CREDENTIAL_FILES = [
   'settings.json',
@@ -25,12 +26,12 @@ export const gem002 = defineCheck({
       const filePath = join(ctx.installation.installDir, filename);
       if (!(await ctx.fs.access(filePath))) continue;
       try {
-        const stat = await ctx.fs.stat(filePath);
-        const perms = stat.mode & 0o777;
-        if ((perms & 0o077) !== 0) {
+        const perms = await queryPermissions(ctx.fs, filePath);
+        // 'unsupported' (no evaluable permission model) → nothing to flag
+        if (perms !== 'unsupported' && accessibleByOthers(perms)) {
           evidence.push({
             file: filePath,
-            snippet: `mode 0${perms.toString(8)}`,
+            snippet: `mode 0${perms.octal}`,
             detail: `${filename} is readable or writable by group/other — credentials may leak`,
           });
         }

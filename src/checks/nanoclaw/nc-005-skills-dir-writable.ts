@@ -1,6 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { join } from 'node:path';
 import { defineCheck } from '../../core/check-builder.js';
+import { queryPermissions, writableByOthers } from '../../core/permissions.js';
 
 export const nc005 = defineCheck({
   id: 'NC-005',
@@ -19,12 +20,11 @@ export const nc005 = defineCheck({
 
     const evidence: Evidence[] = [];
     try {
-      const stats = await ctx.fs.stat(skillsDir);
-      const mode = stats.mode & 0o777;
-      if (mode & 0o022) {
+      const perms = await queryPermissions(ctx.fs, skillsDir);
+      if (perms !== 'unsupported' && writableByOthers(perms)) {
         evidence.push({
           file: skillsDir,
-          detail: `Permissions ${mode.toString(8)} — directory writable by group or world; arbitrary skills can be planted`,
+          detail: `Permissions ${perms.octal} — directory writable by group or world; arbitrary skills can be planted`,
         });
       }
     } catch {

@@ -1,5 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { queryPermissions } from '../../core/permissions.js';
 import { CODING_AGENTS } from '../../core/types.js';
 
 export const run004 = defineCheck({
@@ -15,12 +16,11 @@ export const run004 = defineCheck({
     const evidence: Evidence[] = [];
 
     try {
-      const stats = await ctx.fs.stat('/var/run/docker.sock');
-      const mode = stats.mode & 0o777;
-      if (mode & 0o006) {
+      const perms = await queryPermissions(ctx.fs, '/var/run/docker.sock');
+      if (perms !== 'unsupported' && (perms.worldRead || perms.worldWrite)) {
         evidence.push({
           file: '/var/run/docker.sock',
-          detail: `Docker socket permissions: ${mode.toString(8)} — world-accessible`,
+          detail: `Docker socket permissions: ${perms.octal} — world-accessible`,
         });
       }
     } catch {

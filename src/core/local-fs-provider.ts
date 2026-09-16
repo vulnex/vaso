@@ -2,7 +2,8 @@ import { access as fsAccess, readdir, readFile, stat, realpath, readlink } from 
 import { execFileSync, execFile } from 'node:child_process';
 import { homedir as osHomedir, hostname as osHostname } from 'node:os';
 import { promisify } from 'node:util';
-import type { FSProvider, DirentInfo, ExecResult, ExecOptions } from './fs-provider.js';
+import type { FSProvider, DirentInfo, ExecResult, ExecOptions, PermissionQuery } from './fs-provider.js';
+import { posixPermissionFacts } from './permissions.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -51,6 +52,16 @@ export class LocalFSProvider implements FSProvider {
       isFile: () => s.isFile(),
       isDirectory: () => s.isDirectory(),
     };
+  }
+
+  async permissions(path: string): Promise<PermissionQuery> {
+    // POSIX mode bits are fake on win32 — only a provider with real ACL
+    // evaluation (commercial WindowsFSProvider) may answer there.
+    if (this.platform === 'win32') {
+      return 'unsupported';
+    }
+    const s = await stat(path);
+    return posixPermissionFacts(s.mode);
   }
 
   async realpath(path: string): Promise<string> {

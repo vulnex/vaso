@@ -1,6 +1,7 @@
 import { join } from 'node:path';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { queryPermissions } from '../../core/permissions.js';
 
 const SCAN_DIR_PREFIXES = [
   'conversations-v3-',
@@ -51,12 +52,12 @@ export const cg001 = defineCheck({
         if (sampled >= MAX_SAMPLES) break;
         const fullPath = join(subDir, f.name);
         try {
-          const stat = await ctx.fs.stat(fullPath);
+          const perms = await queryPermissions(ctx.fs, fullPath);
           // Other-readable bit set => any local user (or backup target) can list/read
-          if ((stat.mode & 0o004) !== 0) {
+          if (perms !== 'unsupported' && perms.worldRead) {
             evidence.push({
               file: subDir,
-              snippet: `${f.name} (mode ${(stat.mode & 0o777).toString(8)})`,
+              snippet: `${f.name} (mode ${perms.octal})`,
               detail: 'Workspace artifact is other-readable — even when encrypted, filenames/sizes/count leak to local processes and backups',
             });
             break;

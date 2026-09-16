@@ -1,5 +1,6 @@
 import { join } from 'node:path';
 import { defineCheck } from '../../core/check-builder.js';
+import { queryPermissions } from '../../core/permissions.js';
 import { chmodFile } from '../../remediation/config-writer.js';
 
 export const zc013 = defineCheck({
@@ -15,12 +16,11 @@ export const zc013 = defineCheck({
     const evidence = [];
     const keyPath = join(ctx.installation.installDir, '.secret_key');
     try {
-      const stats = await ctx.fs.stat(keyPath);
-      const mode = stats.mode & 0o777;
-      if (mode !== 0o600) {
+      const perms = await queryPermissions(ctx.fs, keyPath);
+      if (perms !== 'unsupported' && perms.octal !== '600') {
         evidence.push({
           file: keyPath,
-          detail: `File permissions are ${mode.toString(8)} — should be 600`,
+          detail: `File permissions are ${perms.octal} — should be 600`,
         });
       }
     } catch {}
