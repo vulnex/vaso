@@ -33,8 +33,8 @@ function makeCtx(configs: ParsedConfig[], fs?: FSProvider): ScanContext {
 }
 
 describe('Gemini CLI checks', () => {
-  it('exports 10 checks', () => {
-    expect(geminiCliChecks).toHaveLength(10);
+  it('exports 11 checks', () => {
+    expect(geminiCliChecks).toHaveLength(11);
   });
 
   it('all checks have coding-agent category and supportedAgents', () => {
@@ -291,6 +291,33 @@ describe('GEM-010: Memory File Secrets', () => {
       readFile: vi.fn(async () => '# Project notes\n\nUse git for version control.\n'),
     });
     const result = await check.run(makeCtx([], fs));
+    expect(result.passed).toBe(true);
+  });
+});
+
+describe('GEM-011: Trusted Folder Too Broad', () => {
+  const check = geminiCliChecks.find(c => c.id === 'GEM-011')!;
+
+  it('flags home directory with TRUST_FOLDER', async () => {
+    const result = await check.run(makeCtx([makeConfig('/home/test/.gemini/trustedFolders.json', {
+      '/home/test': 'TRUST_FOLDER',
+    })]));
+    expect(result.passed).toBe(false);
+    expect(result.evidence?.[0]?.detail).toContain('home directory');
+  });
+
+  it('passes specific project folders and non-trust levels', async () => {
+    const result = await check.run(makeCtx([makeConfig('/home/test/.gemini/trustedFolders.json', {
+      '/home/test/projects/app': 'TRUST_FOLDER',
+      '/tmp': 'DO_NOT_TRUST',
+    })]));
+    expect(result.passed).toBe(true);
+  });
+
+  it('ignores non-trustedFolders config files', async () => {
+    const result = await check.run(makeCtx([makeConfig('/home/test/.gemini/settings.json', {
+      '/': 'TRUST_FOLDER',
+    })]));
     expect(result.passed).toBe(true);
   });
 });

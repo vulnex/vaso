@@ -1,5 +1,5 @@
 {
-  "version": "0.4.14",
+  "version": "1.0.0",
   "binaries": {
     "vaso-probe-darwin-amd64": "sha256:badd47eee4b94f2051d6a4e40012c588215f5abcd27f321c0827ebab6c65b223",
     "vaso-probe-darwin-arm64": "sha256:2486d1b97ee558a573c1a47f708ea1e10f371321fc5f58633a5fc7d8d5c867e2",

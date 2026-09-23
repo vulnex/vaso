@@ -30,6 +30,17 @@ export const cfg001 = defineCheck({
         });
       }
 
+      // Symbolic bind modes (OpenClaw 2026.x schema: gateway.bind = "loopback" | "lan" | "all")
+      const bind = getNestedValue(config.data, 'gateway.bind') ?? getNestedValue(config.data, 'bind');
+      if (typeof bind === 'string' && ['all', 'lan', ...WILDCARD_BINDS].includes(bind.toLowerCase())) {
+        evidence.push({
+          file: config.filePath,
+          detail: bind.toLowerCase() === 'lan'
+            ? 'Gateway bind mode "lan" — accessible from the local network'
+            : `Gateway bind mode "${bind}" — accessible from all network interfaces`,
+        });
+      }
+
       // Also check raw content for grep-style detection
       const hasWildcard = WILDCARD_BINDS.some(w => config.raw.includes(w));
       if (hasWildcard) {

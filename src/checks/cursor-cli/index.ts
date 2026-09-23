@@ -9,6 +9,10 @@ import { cur007 } from './cur-007-privacy-mode.js';
 import { cur008 } from './cur-008-sandbox-network.js';
 import { cur009 } from './cur-009-overbroad-paths.js';
 import { cur010 } from './cur-010-attribution.js';
+import { cur011 } from './cur-011-hooks-fail-open.js';
+import { cur012 } from './cur-012-workspace-trust.js';
+import { cur013 } from './cur-013-state-db-perms.js';
+import { cur014 } from './cur-014-autorun-instructions.js';
 
 export const cursorCliChecks: CheckModule[] = [
   cur001,
@@ -21,4 +25,8 @@ export const cursorCliChecks: CheckModule[] = [
   cur008,
   cur009,
   cur010,
+  cur011,
+  cur012,
+  cur013,
+  cur014,
 ];

@@ -33,8 +33,8 @@ function makeCtx(configs: ParsedConfig[], fs?: FSProvider): ScanContext {
 }
 
 describe('Copilot CLI checks', () => {
-  it('exports 8 checks with correct shape', () => {
-    expect(copilotCliChecks).toHaveLength(8);
+  it('exports 9 checks with correct shape', () => {
+    expect(copilotCliChecks).toHaveLength(9);
     for (const check of copilotCliChecks) {
       expect(check.category).toBe('coding-agent');
       expect(check.supportedAgents).toContain('copilot-cli');
@@ -193,6 +193,38 @@ describe('GHC-008: Instruction File Secrets', () => {
       readFile: vi.fn(async () => '# Project notes\n\nUse git for VCS.\n'),
     });
     const result = await check.run(makeCtx([], fs));
+    expect(result.passed).toBe(true);
+  });
+});
+
+describe('GHC-009: Trusted Folder Too Broad', () => {
+  const check = copilotCliChecks.find(c => c.id === 'GHC-009')!;
+
+  it('flags home directory in trustedFolders', async () => {
+    const result = await check.run(makeCtx([makeConfig('config.json', {
+      trustedFolders: ['/home/test'],
+    })]));
+    expect(result.passed).toBe(false);
+    expect(result.evidence?.[0]?.detail).toContain('home directory');
+  });
+
+  it('flags / and /tmp entries', async () => {
+    const result = await check.run(makeCtx([makeConfig('config.json', {
+      trustedFolders: ['/', '/tmp'],
+    })]));
+    expect(result.passed).toBe(false);
+    expect(result.evidence).toHaveLength(2);
+  });
+
+  it('passes for specific project folders', async () => {
+    const result = await check.run(makeCtx([makeConfig('config.json', {
+      trustedFolders: ['/home/test/projects/myrepo'],
+    })]));
+    expect(result.passed).toBe(true);
+  });
+
+  it('passes when trustedFolders is absent', async () => {
+    const result = await check.run(makeCtx([makeConfig('config.json', {})]));
     expect(result.passed).toBe(true);
   });
 });

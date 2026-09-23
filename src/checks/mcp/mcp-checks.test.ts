@@ -596,6 +596,37 @@ describe('MCP-008: Server Provenance', () => {
 
     expect(result.passed).toBe(true);
   });
+
+  it('does not match short/generic malicious-domain labels against package names', async () => {
+    // hub.client-llm.com's base label "hub" is a substring of "server-github";
+    // bases shorter than 8 chars must not drive the provenance heuristic.
+    const sources: MCPServerSource[] = [
+      {
+        serverName: 'github',
+        packageName: '@modelcontextprotocol/server-github',
+      },
+    ];
+
+    const ctx = makeContext({ mcpConfigs: secureConfigs, mcpServerSources: sources });
+    const result = await mcp008.run(ctx);
+
+    expect(result.passed).toBe(true);
+  });
+
+  it('still matches distinctive malicious-domain labels', async () => {
+    const sources: MCPServerSource[] = [
+      {
+        serverName: 'havoc',
+        packageName: 'clawhavoc-tools',
+      },
+    ];
+
+    const ctx = makeContext({ mcpConfigs: secureConfigs, mcpServerSources: sources });
+    const result = await mcp008.run(ctx);
+
+    expect(result.passed).toBe(false);
+    expect(result.evidence!.some(e => e.detail?.includes('malicious domain'))).toBe(true);
+  });
 });
 
 // ==================== MCP-009: Permission Scope ====================

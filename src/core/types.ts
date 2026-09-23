@@ -1,13 +1,14 @@
 export type Severity = 'critical' | 'warning' | 'info';
 export type Grade = 'A' | 'B' | 'C' | 'D' | 'F';
-export type AgentType = 'openclaw' | 'nanoclaw' | 'picoclaw' | 'mcp' | 'ironclaw' | 'nanobot' | 'zeroclaw' | 'nemoclaw' | 'hermes' | 'lyrie' | 'claude-code' | 'claude-desktop' | 'chatgpt-desktop' | 'codex' | 'opencode' | 'gemini-cli' | 'qwen-code' | 'copilot-cli' | 'cursor-cli' | 'skill-audit';
+export type AgentType = 'openclaw' | 'nanoclaw' | 'picoclaw' | 'mcp' | 'ironclaw' | 'nanobot' | 'zeroclaw' | 'nemoclaw' | 'hermes' | 'lyrie' | 'claude-code' | 'claude-desktop' | 'chatgpt-desktop' | 'codex' | 'opencode' | 'gemini-cli' | 'qwen-code' | 'copilot-cli' | 'cursor-cli' | 'windsurf' | 'devin' | 'meta-muse' | 'comet' | 'skill-audit';
 export type CheckCategory = 'config' | 'skills' | 'ioc' | 'network' | 'runtime' | 'policy' | 'mcp' | 'openclaw' | 'nanoclaw' | 'ironclaw' | 'nanobot' | 'zeroclaw' | 'lyrie' | 'hermes' | 'advisory' | 'coding-agent';
 
 export const AGENT_TYPES: readonly AgentType[] = [
   'openclaw', 'nanoclaw', 'picoclaw', 'mcp', 'ironclaw', 'nanobot',
   'zeroclaw', 'nemoclaw', 'hermes', 'lyrie', 'claude-code',
   'claude-desktop', 'chatgpt-desktop', 'codex', 'opencode',
-  'gemini-cli', 'qwen-code', 'copilot-cli', 'cursor-cli', 'skill-audit',
+  'gemini-cli', 'qwen-code', 'copilot-cli', 'cursor-cli',
+  'windsurf', 'devin', 'meta-muse', 'comet', 'skill-audit',
 ];
 
 export function isScannableAgentType(v: string): v is AgentType {
@@ -25,7 +26,7 @@ export const CHECK_CATEGORIES: readonly CheckCategory[] = [
  * autonomous server frameworks. Used by checks via `excludedAgents` to skip
  * server-only concepts like gateway binding, rate limiting, LaunchAgents, etc.
  */
-export const CODING_AGENTS: AgentType[] = ['claude-code', 'claude-desktop', 'chatgpt-desktop', 'codex', 'opencode', 'gemini-cli', 'qwen-code', 'copilot-cli', 'cursor-cli'];
+export const CODING_AGENTS: AgentType[] = ['claude-code', 'claude-desktop', 'chatgpt-desktop', 'codex', 'opencode', 'gemini-cli', 'qwen-code', 'copilot-cli', 'cursor-cli', 'windsurf', 'devin', 'meta-muse', 'comet'];
 export type OutputFormat = 'terminal' | 'json' | 'sarif' | 'markdown' | 'html' | 'csv' | 'junit';
 
 export interface Evidence {

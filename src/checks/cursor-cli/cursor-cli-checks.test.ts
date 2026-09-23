@@ -34,7 +34,7 @@ function makeCtx(configs: ParsedConfig[], fs?: FSProvider): ScanContext {
 
 describe('Cursor CLI checks', () => {
   it('exports 10 checks with correct shape', () => {
-    expect(cursorCliChecks).toHaveLength(10);
+    expect(cursorCliChecks).toHaveLength(14);
     for (const check of cursorCliChecks) {
       expect(check.category).toBe('coding-agent');
       expect(check.supportedAgents).toContain('cursor-cli');
@@ -231,6 +231,113 @@ describe('CUR-010: Attribution', () => {
   it('passes when attribution is off', async () => {
     const result = await check.run(makeCtx([makeConfig('cli-config.json', {
       attribution: { attributeCommitsToAgent: false, attributePRsToAgent: false },
+    })]));
+    expect(result.passed).toBe(true);
+  });
+});
+
+describe('CUR-011: Hooks Fail-Open', () => {
+  const check = cursorCliChecks.find(c => c.id === 'CUR-011')!;
+
+  it('flags hook commands without failClosed', async () => {
+    const result = await check.run(makeCtx([makeConfig('/home/test/.cursor/hooks.json', {
+      version: 1,
+      hooks: { beforeShellExecution: [{ command: '/usr/local/bin/guard.sh' }] },
+    })]));
+    expect(result.passed).toBe(false);
+  });
+
+  it('passes fail-closed hooks and configs without hooks', async () => {
+    const result = await check.run(makeCtx([makeConfig('/home/test/.cursor/hooks.json', {
+      hooks: { beforeShellExecution: [{ command: 'guard.sh', failClosed: true }] },
+    }), makeConfig('/home/test/.cursor/cli-config.json', {})]));
+    expect(result.passed).toBe(true);
+  });
+});
+
+describe('CUR-012: Workspace Trust Disabled', () => {
+  const check = cursorCliChecks.find(c => c.id === 'CUR-012')!;
+
+  it('flags IDE settings without workspace trust enabled', async () => {
+    const result = await check.run(makeCtx([makeConfig('/home/test/.config/Cursor/User/settings.json', {
+      'window.commandCenter': 1,
+    })]));
+    expect(result.passed).toBe(false);
+  });
+
+  it('flags explicit false', async () => {
+    const result = await check.run(makeCtx([makeConfig('/home/test/.config/Cursor/User/settings.json', {
+      'security.workspace.trust.enabled': false,
+    })]));
+    expect(result.passed).toBe(false);
+  });
+
+  it('passes when trust enabled', async () => {
+    const result = await check.run(makeCtx([makeConfig('/home/test/.config/Cursor/User/settings.json', {
+      'security.workspace.trust.enabled': true,
+    })]));
+    expect(result.passed).toBe(true);
+  });
+
+  it('passes when no IDE settings present (CLI-only install)', async () => {
+    const result = await check.run(makeCtx([makeConfig('/home/test/.cursor/cli-config.json', {})]));
+    expect(result.passed).toBe(true);
+  });
+});
+
+describe('CUR-013: Session Database Permissions', () => {
+  const check = cursorCliChecks.find(c => c.id === 'CUR-013')!;
+
+  it('flags world-readable state.vscdb', async () => {
+    const fs = makeFs({
+      stat: vi.fn(async () => ({ mode: 0o644, isFile: () => true, isDirectory: () => false })),
+    });
+    const result = await check.run(makeCtx([], fs));
+    expect(result.passed).toBe(false);
+    expect(result.evidence?.[0]?.detail).toContain('accessToken');
+  });
+
+  it('passes 0600 state.vscdb', async () => {
+    const fs = makeFs({
+      stat: vi.fn(async () => ({ mode: 0o600, isFile: () => true, isDirectory: () => false })),
+    });
+    const result = await check.run(makeCtx([], fs));
+    expect(result.passed).toBe(true);
+  });
+
+  it('passes when db absent', async () => {
+    const fs = makeFs({
+      stat: vi.fn(async () => { throw new Error('ENOENT'); }),
+    });
+    const result = await check.run(makeCtx([], fs));
+    expect(result.passed).toBe(true);
+  });
+});
+
+describe('CUR-014: Auto-Run Instructions Too Broad', () => {
+  const check = cursorCliChecks.find(c => c.id === 'CUR-014')!;
+
+  it('flags blanket allow instructions', async () => {
+    const result = await check.run(makeCtx([makeConfig('/home/test/.cursor/permissions.json', {
+      autoRun: { allow_instructions: ['run any command'], block_instructions: ['rm'] },
+    })]));
+    expect(result.passed).toBe(false);
+  });
+
+  it('flags dangerous command grants and missing block list', async () => {
+    const result = await check.run(makeCtx([makeConfig('/home/test/.cursor/permissions.json', {
+      autoRun: { allow_instructions: ['allow curl requests'] },
+    })]));
+    expect(result.passed).toBe(false);
+    expect(result.evidence?.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('passes scoped instructions with a block list', async () => {
+    const result = await check.run(makeCtx([makeConfig('/home/test/.cursor/permissions.json', {
+      autoRun: {
+        allow_instructions: ['npm test', 'git status'],
+        block_instructions: ['anything touching credentials'],
+      },
     })]));
     expect(result.passed).toBe(true);
   });

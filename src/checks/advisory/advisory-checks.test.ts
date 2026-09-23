@@ -46,9 +46,19 @@ describe('ADV-001: Known Framework Vulnerability', () => {
   });
 
   it('passes for fixed version', async () => {
-    const ctx = makeContext({ agent: 'openclaw', version: '1.6.0' });
+    // 2026.4.20 is the fixed version of the newest bundled OpenClaw advisory
+    // (CVE-2026-44999) and clears every earlier calver + synthetic 1.x range.
+    const ctx = makeContext({ agent: 'openclaw', version: '2026.4.20' });
     const result = await adv001.run(ctx);
     expect(result.passed).toBe(true);
+  });
+
+  it('flags a current-era calver version below the real CVE fixes', async () => {
+    // 2026.3.13 (a real in-the-wild version) is below CVE-2026-35641's 2026.3.24 fix
+    const ctx = makeContext({ agent: 'openclaw', version: '2026.3.13' });
+    const result = await adv001.run(ctx);
+    expect(result.passed).toBe(false);
+    expect(result.evidence?.some(e => e.detail?.includes('CVE-2026-35641'))).toBe(true);
   });
 
   it('passes when version not detected', async () => {

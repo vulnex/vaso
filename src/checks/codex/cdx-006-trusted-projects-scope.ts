@@ -1,32 +1,6 @@
-import { normalize } from 'node:path';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-
-interface BroadPath {
-  path: string;
-  reason: string;
-}
-
-function buildBroadPaths(home: string): BroadPath[] {
-  return [
-    { path: '/', reason: 'covers the entire filesystem' },
-    { path: home, reason: 'covers the entire home directory' },
-    { path: '/tmp', reason: 'shared by all local users' },
-    { path: '/var/tmp', reason: 'shared by all local users' },
-    { path: '/etc', reason: 'system configuration directory' },
-  ];
-}
-
-function expandHome(p: string, home: string): string {
-  if (p === '~') return home;
-  if (p.startsWith('~/')) return `${home}/${p.slice(2)}`;
-  return p;
-}
-
-function isBroad(rawPath: string, broadPaths: BroadPath[], home: string): BroadPath | undefined {
-  const normalized = normalize(expandHome(rawPath, home));
-  return broadPaths.find(b => normalized === b.path);
-}
+import { buildBroadPaths, isBroadPath } from '../../analyzers/broad-paths.js';
 
 function extractTrustedPaths(data: Record<string, unknown>): string[] {
   const paths: string[] = [];
@@ -69,7 +43,7 @@ export const cdx006 = defineCheck({
     for (const config of ctx.configs) {
       const paths = extractTrustedPaths(config.data);
       for (const p of paths) {
-        const broad = isBroad(p, broadPaths, home);
+        const broad = isBroadPath(p, broadPaths, home);
         if (broad) {
           evidence.push({
             file: config.filePath,

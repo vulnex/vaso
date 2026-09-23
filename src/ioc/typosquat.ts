@@ -36,14 +36,17 @@ export function detectTyposquatting(
   maxDistance = 2,
 ): TyposquatMatch | null {
   const normalized = skillName.toLowerCase().replace(/[-_]/g, '');
+  const normalizedTrusted = trustedNames.map(t => t.toLowerCase().replace(/[-_]/g, ''));
 
-  for (const trusted of trustedNames) {
-    const normalizedTrusted = trusted.toLowerCase().replace(/[-_]/g, '');
+  // A name that IS a trusted name can't be a typosquat of a neighboring
+  // trusted name (server-github is distance 2 from server-gitlab; both are
+  // legitimate). Without this, every trusted pair within maxDistance of each
+  // other flags itself.
+  if (normalizedTrusted.includes(normalized)) return null;
 
-    // Exact match = not typosquatting
-    if (normalized === normalizedTrusted) continue;
-
-    const distance = levenshteinDistance(normalized, normalizedTrusted);
+  for (let i = 0; i < trustedNames.length; i++) {
+    const trusted = trustedNames[i];
+    const distance = levenshteinDistance(normalized, normalizedTrusted[i]);
     if (distance > 0 && distance <= maxDistance) {
       return { skillName, trustedName: trusted, distance };
     }

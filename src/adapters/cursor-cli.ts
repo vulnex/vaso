@@ -10,7 +10,41 @@ import { getUserHomeDirs } from './openclaw.js';
 import { queryCliVersion, readPackageVersion } from './version-query.js';
 
 const CURSOR_DIR_NAME = '.cursor';
-const USER_CONFIG_FILES = ['cli-config.json', 'mcp.json'];
+// cli-config.json / mcp.json are CLI+IDE shared; permissions.json,
+// sandbox.json, and hooks.json are the IDE's machine-wide Auto-run /
+// sandbox / hooks configuration (also honored by the CLI since Cursor 3.x).
+const USER_CONFIG_FILES = ['cli-config.json', 'mcp.json', 'permissions.json', 'sandbox.json', 'hooks.json'];
+
+const IDE_APP_BUNDLE = '/Applications/Cursor.app';
+
+// The Cursor IDE (VS Code fork) keeps User/settings.json + globalStorage
+// under the per-OS user-data dir. settings.json carries workspace-trust
+// config; globalStorage/state.vscdb carries session JWTs in plaintext.
+function ideUserDataDir(home: string, fs: FSProvider): string | undefined {
+  if (fs.platform === 'darwin') return join(home, 'Library', 'Application Support', 'Cursor');
+  if (fs.platform === 'linux') return join(home, '.config', 'Cursor');
+  if (fs.platform === 'win32') {
+    const appData = fs.getEnv('APPDATA');
+    if (appData) return join(appData, 'Cursor');
+  }
+  return undefined;
+}
+
+async function readIdeVersion(fs: FSProvider): Promise<string | undefined> {
+  if (fs.platform !== 'darwin') return undefined;
+  try {
+    const result = await fs.exec(
+      'defaults',
+      ['read', `${IDE_APP_BUNDLE}/Contents/Info.plist`, 'CFBundleShortVersionString'],
+      { timeout: 3000 },
+    );
+    if (result.exitCode === 0) {
+      const v = result.stdout.trim();
+      if (v.length > 0) return v;
+    }
+  } catch {}
+  return undefined;
+}
 
 // Cursor CLI ships two binary names depending on install path:
 //   - install.sh (curl|bash) puts `agent` at ~/.local/bin/agent
@@ -104,23 +138,38 @@ export const cursorCliAdapter: AgentAdapter = {
 
       const configFiles = hasCursorDir ? await loadFiles(cursorDir, USER_CONFIG_FILES, fs) : [];
 
-      // ~/.cursor/ is the Cursor *IDE* config dir (argv.json, extensions/,
-      // projects/, ide_state.json). The CLI's signal is `cli-config.json` /
-      // `mcp.json` or the `cursor-agent` binary; without either, this is the
-      // IDE, not the CLI.
-      if (configFiles.length === 0 && !cliBinary) continue;
+      // IDE surface: the VS Code-fork user-data dir carries settings.json
+      // (workspace trust) and globalStorage/state.vscdb (plaintext session
+      // JWTs). Loaded alongside the ~/.cursor configs so IDE-only installs
+      // are scanned too.
+      const userDataDir = ideUserDataDir(home, fs);
+      const ideAppExists = fs.platform === 'darwin' && (await fs.access(IDE_APP_BUNDLE));
+      let ideSettingsLoaded = false;
+      if (userDataDir) {
+        const ideSettings = await loadFiles(join(userDataDir, 'User'), ['settings.json'], fs);
+        ideSettingsLoaded = ideSettings.length > 0;
+        configFiles.push(...ideSettings);
+      }
+
+      // ~/.cursor/ alone (argv.json, extensions/) isn't a CLI signal, but the
+      // IDE app bundle or its settings are an IDE install worth scanning.
+      if (configFiles.length === 0 && !cliBinary && !ideAppExists) continue;
 
       const version = queryCliVersion(cliBinary, fs)
-        ?? (await readPackageVersion(cliBinary, fs));
+        ?? (await readPackageVersion(cliBinary, fs))
+        ?? (ideAppExists ? await readIdeVersion(fs) : undefined);
 
       installations.push({
         agent: 'cursor-cli',
+        agentName: !cliBinary && (ideAppExists || ideSettingsLoaded) ? 'cursor (IDE)' : undefined,
         version,
         installDir: cursorDir,
         configFiles,
+        skillsDir: this.getSkillsDir(cursorDir),
         models: extractModels(configFiles),
         user: options?.allUsers ? user : undefined,
         cliBinary,
+        appBundle: ideAppExists ? IDE_APP_BUNDLE : undefined,
       });
     }
 
@@ -149,8 +198,9 @@ export const cursorCliAdapter: AgentAdapter = {
     return USER_CONFIG_FILES.map(f => join(cursorDir, f));
   },
 
-  getSkillsDir(_installDir: string): string | undefined {
-    return undefined;
+  getSkillsDir(installDir: string): string | undefined {
+    // Cursor CLI syncs installed skills to ~/.cursor/skills-cursor/
+    return join(installDir, 'skills-cursor');
   },
 
   getGatewayInfo(_config: Record<string, unknown>): GatewayInfo | undefined {

@@ -10,7 +10,7 @@
 
 ## Overview
 
-VASO scans AI agent frameworks, interactive coding agents, desktop AI apps, and MCP server configurations for security misconfigurations, malicious code, and known threats. It runs 264 checks across 18 agents (9 autonomous frameworks + 7 interactive coding agents + Claude Desktop + ChatGPT Desktop) plus MCP-server scanning, using AST-based static analysis (not regex) for accurate results without ever executing scanned code.
+VASO scans AI agent frameworks, interactive coding agents, desktop AI apps, and MCP server configurations for security misconfigurations, malicious code, and known threats. It runs 291 checks across 22 agents (9 autonomous frameworks + 9 interactive coding agents + 4 agentic desktop apps) plus MCP-server scanning, using AST-based static analysis (not regex) for accurate results without ever executing scanned code.
 
 ## Installation
 
@@ -21,7 +21,7 @@ VASO is distributed from GitHub. The npm name `vaso` is held by an unrelated pac
 curl -fsSL https://raw.githubusercontent.com/vulnex/vaso/main/install.sh | bash
 
 # Or install the prebuilt release tarball directly with npm
-npm install -g https://github.com/vulnex/vaso/releases/download/v0.4.14/vaso-0.4.14.tgz
+npm install -g https://github.com/vulnex/vaso/releases/download/v1.0.0/vaso-1.0.0.tgz
 ```
 
 Requires Node.js 20+.
@@ -81,7 +81,7 @@ vaso scan --snapshot ./snapshots/prod-agent-01.json --diff
 | `vaso detect` | List detected agent installations |
 | `vaso fix` | Auto-remediate fixable findings |
 | `vaso visualize` | Emit USecVisLib config files for visualization |
-| `vaso update` | Reload IOC threat intelligence database |
+| `vaso update` | Fetch signed threat-feed updates (published at least monthly — see [SECURITY.md](SECURITY.md#threat-feed-updates)) |
 | `vaso mcp scan` | Scan MCP server configurations |
 | `vaso mcp list` | List discovered MCP servers |
 | `vaso skill audit <path>` | Audit a skill directory before installing |
@@ -117,26 +117,33 @@ See [doc/user-guide.md](doc/user-guide.md) for full option reference.
 - **Gemini CLI** — `~/.gemini/` (settings.json + OAuth credential files)
 - **Qwen Code** — `~/.qwen/` (multi-provider auth: OpenAI / Anthropic / Gemini / Dashscope / Bailian)
 - **GitHub Copilot CLI** — `~/.copilot/` + workspace `.mcp.json` + `.github/lsp.json`
-- **Cursor CLI** — `~/.cursor/` (cli-config.json + mcp.json)
+- **Cursor CLI/IDE** — `~/.cursor/` (cli-config.json, mcp.json, permissions.json, sandbox.json, hooks.json) + IDE user settings
+- **Windsurf / Devin Desktop** — `~/.codeium/windsurf/`, `~/.config/devin/`, editor user-data dirs (both generations)
+- **Devin CLI** — `~/.config/devin/` (config.json, mcp_config.json) + `~/.local/share/devin/credentials.toml`
+
+**Agentic desktop apps**
+
+- **Meta Muse** — `/Applications/Muse.app` + `com.meta.endo` preferences (macOS; initial coverage)
+- **Perplexity Comet** — `/Applications/Comet.app` + Chromium profile (extension inventory, session data)
 
 **MCP servers** — Claude Desktop, Claude Code, Cursor, Windsurf, VS Code, project-level configs
 
 ## Security Checks
 
-264 checks organized into 16 categories:
+291 checks organized into 16 categories:
 
 | Category | IDs | Count | Description |
 |----------|-----|-------|-------------|
 | Configuration | CFG-001–024 | 24 | Gateway binding, API keys, TLS, permissions, sandbox, NemoClaw hardening |
-| Skill Code | SKL-001–012 | 12 | AST data-flow, obfuscation, eval/exec, reverse shells |
+| Skill Code | SKL-001–013 | 13 | AST data-flow, obfuscation, eval/exec, reverse shells, workspace symlink escape |
 | IOC Matching | IOC-001–008 | 8 | C2 IPs, malicious domains, typosquatting, file hashes |
 | Network | NET-001–005 | 5 | Gateway exposure, WebSocket origins, proxy bypass |
 | Runtime | RUN-001–005 | 5 | LaunchAgents, cron, Docker socket, VS Code trojans |
 | Policy | POL-001–005 | 5 | DM policy, tool policy, sandbox compliance |
 | MCP Server | MCP-001–035 | 35 | Transport security, credential exposure, tool injection, toxic flows, rug pull, stdio shell-c, world-writable command paths, streamable-HTTP origin pinning, tool-description poisoning, cross-server tool-name collision, slash-command overlap, remote-server-without-auth, filesystem sensitive-path scope, vulnerable/rolled-back version, config drift, untrusted installer source, env-dump tool, long-lived token, hardcoded prompt-injection directives in tool output, obfuscated/encoded server source; opt-in npm package source resolution; OWASP MCP Top 10 coverage mapping |
 | Advisory | ADV-001–005 | 5 | Vulnerability/CVE detection with version awareness |
-| Coding Agent | CC, CD, CG, CDX, OPC, GEM, QC, CUR, GHC | 87 | Claude Code (12), Claude Desktop (10), ChatGPT Desktop (6), Codex (9), OpenCode (12), Gemini CLI (10), Qwen Code (10), Cursor CLI (10), GitHub Copilot CLI (8) — sandbox/approval policy, plaintext credentials, MCP pinning, broad allow rules, memory-file secrets, transport security |
-| Agent-Specific | OC, NC, IC, NB, ZC, LY, HM | 78 | Per-framework checks (OpenClaw 7, NanoClaw 5, IronClaw 12, Nanobot 12, ZeroClaw 14, Lyrie 18, Hermes 10) |
+| Coding Agent | CC, CD, CG, CDX, OPC, GEM, QC, CUR, GHC, WS, DEV, MM, PC | 114 | Claude Code (12), Claude Desktop (10), ChatGPT Desktop (6), Codex (10), OpenCode (12), Gemini CLI (11), Qwen Code (10), Cursor (14), GitHub Copilot CLI (9), Windsurf/Devin Desktop (8), Devin CLI (7), Meta Muse (3), Perplexity Comet (2) — sandbox/approval policy, plaintext credentials, MCP pinning, broad allow rules, memory-file secrets, transport security |
+| Agent-Specific | OC, NC, IC, NB, ZC, LY, HM | 77 | Per-framework checks (OpenClaw 6, NanoClaw 5, IronClaw 12, Nanobot 12, ZeroClaw 14, Lyrie 18, Hermes 10) |
 
 Server-only checks (gateway/network/runtime concepts) are automatically excluded for coding agents to avoid false positives — interactive coding CLIs have a different threat model than autonomous server agents.
 
@@ -173,7 +180,7 @@ The simplest path — drop one step into any workflow:
     format: sarif              # sarif, json, markdown, html, terminal
     # output: vaso-results.sarif  (default: vaso-results.<ext>)
     # agent: claude-code           (default: scan all detected agents)
-    # version: v0.4.14              (release tag)
+    # version: v1.0.0              (release tag)
     # upload-sarif: 'true'          (auto-uploads to Code Scanning)
 ```
 
@@ -183,7 +190,7 @@ The action installs the requested VASO version, runs the scan, and (when `format
 
 ```yaml
 - name: Install VASO
-  run: npm install -g https://github.com/vulnex/vaso/releases/download/v0.4.14/vaso-0.4.14.tgz
+  run: npm install -g https://github.com/vulnex/vaso/releases/download/v1.0.0/vaso-1.0.0.tgz
 
 - name: Run VASO scan
   run: vaso scan --format sarif -o results.sarif --fail-on critical

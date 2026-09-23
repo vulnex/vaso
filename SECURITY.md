@@ -8,8 +8,8 @@ Security fixes land on the latest released minor version. Older versions do not 
 
 | Version | Supported |
 |---------|-----------|
-| 0.4.x   | Yes       |
-| < 0.4   | No        |
+| 1.0.x   | Yes       |
+| < 1.0   | No        |
 
 ## Reporting a Vulnerability
 
@@ -56,6 +56,16 @@ Out of scope:
 - Vulnerabilities in third-party MCP servers — report upstream to the server's maintainer.
 - Issues that require an attacker to already have write access to the user's home directory or VASO config files.
 - Social-engineering attacks against VASO maintainers.
+
+## Threat Feed Updates
+
+VASO ships with bundled IOC and advisory data in every release, and `vaso update` fetches Ed25519-signed remote feeds on top of it.
+
+- **Cadence:** feeds are reviewed and republished **at least monthly**, whether or not new intelligence has landed (a publish with no new entries still refreshes the review timestamp).
+- **Out-of-band:** actively exploited vulnerabilities or confirmed malware in the agent/MCP ecosystem trigger an immediate feed publish, independent of the monthly cycle.
+- **Provenance:** every feed entry carries a reference to its primary source (CVE record, vendor advisory, or researcher write-up). Feed versions are monotonically increasing and clients reject rollbacks.
+
+The current feed version and publish timestamp are visible in `feeds/feed.json` / `feeds/advisory-feed.json` (`meta.version`, `meta.timestamp`) on the `main` branch.
 
 ## Hardening Stance
 

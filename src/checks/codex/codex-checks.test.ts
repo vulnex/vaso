@@ -39,8 +39,8 @@ function makeCtx(configs: ParsedConfig[], fs?: FSProvider): ScanContext {
 }
 
 describe('Codex checks', () => {
-  it('exports 9 checks', () => {
-    expect(codexChecks).toHaveLength(9);
+  it('exports 10 checks', () => {
+    expect(codexChecks).toHaveLength(10);
   });
 
   it('all checks have coding-agent category and supportedAgents', () => {
@@ -355,6 +355,52 @@ describe('CDX-009: Codex Unsafe Notify Command', () => {
 
   it('passes when notify is an empty array', async () => {
     const result = await check.run(makeCtx([makeConfig('config.toml', { notify: [] })]));
+    expect(result.passed).toBe(true);
+  });
+});
+
+describe('CDX-010: Over-Broad Command Allow Rules', () => {
+  const check = codexChecks.find(c => c.id === 'CDX-010')!;
+
+  function rulesFs(content: string): FSProvider {
+    return makeFs({
+      access: vi.fn(async () => true),
+      readdir: vi.fn(async () => ['default.rules']),
+      readFile: vi.fn(async () => content),
+    });
+  }
+
+  it('flags a bare curl allow rule', async () => {
+    const fs = rulesFs('prefix_rule(pattern=["curl"], decision="allow")\n');
+    const result = await check.run(makeCtx([], fs));
+    expect(result.passed).toBe(false);
+    expect(result.evidence?.[0]?.detail).toContain('curl');
+  });
+
+  it('flags an unconstrained shell -lc rule and a flags-only interpreter rule', async () => {
+    const fs = rulesFs([
+      'prefix_rule(pattern=["/bin/bash", "-lc"], decision="allow")',
+      'prefix_rule(pattern=["perl", "-0pi"], decision="allow")',
+    ].join('\n'));
+    const result = await check.run(makeCtx([], fs));
+    expect(result.passed).toBe(false);
+    expect(result.evidence).toHaveLength(2);
+  });
+
+  it('passes scoped prefixes and ignores deny rules', async () => {
+    const fs = rulesFs([
+      'prefix_rule(pattern=["npm", "run", "build"], decision="allow")',
+      'prefix_rule(pattern=["git", "status"], decision="allow")',
+      'prefix_rule(pattern=["curl"], decision="deny")',
+      'prefix_rule(pattern=["/bin/bash", "-lc", "rg -n pattern src/"], decision="allow")',
+    ].join('\n'));
+    const result = await check.run(makeCtx([], fs));
+    expect(result.passed).toBe(true);
+  });
+
+  it('passes when rules directory is absent', async () => {
+    const fs = makeFs({ access: vi.fn(async () => false) });
+    const result = await check.run(makeCtx([], fs));
     expect(result.passed).toBe(true);
   });
 });

@@ -1,6 +1,6 @@
 # VASO User Guide
 
-VASO (VULNEX Agent Security Observer) is a security scanner for AI agent deployments. It detects misconfigurations, malicious skills, known threats, and runtime vulnerabilities across nine autonomous agent frameworks (OpenClaw, NanoClaw, PicoClaw, IronClaw, Nanobot, ZeroClaw, NemoClaw, Hermes, Lyrie), seven interactive coding agents (Claude Code, Codex, OpenCode, Gemini CLI, Qwen Code, GitHub Copilot CLI, Cursor CLI), the Claude Desktop and ChatGPT desktop apps, and MCP (Model Context Protocol) server configurations.
+VASO (VULNEX Agent Security Observer) is a security scanner for AI agent deployments. It detects misconfigurations, malicious skills, known threats, and runtime vulnerabilities across nine autonomous agent frameworks (OpenClaw, NanoClaw, PicoClaw, IronClaw, Nanobot, ZeroClaw, NemoClaw, Hermes, Lyrie), nine interactive coding agents (Claude Code, Codex, OpenCode, Gemini CLI, Qwen Code, GitHub Copilot CLI, Cursor CLI/IDE, Windsurf/Devin Desktop, Devin CLI), four agentic desktop apps (Claude Desktop, ChatGPT Desktop, Meta Muse, Perplexity Comet), and MCP (Model Context Protocol) server configurations.
 
 ## Installation
 
@@ -11,7 +11,7 @@ VASO is distributed from GitHub. The npm name `vaso` is held by an unrelated pac
 curl -fsSL https://raw.githubusercontent.com/vulnex/vaso/main/install.sh | bash
 
 # Or install the prebuilt release tarball directly with npm
-npm install -g https://github.com/vulnex/vaso/releases/download/v0.4.14/vaso-0.4.14.tgz
+npm install -g https://github.com/vulnex/vaso/releases/download/v1.0.0/vaso-1.0.0.tgz
 ```
 
 Requirements: Node.js 20 or later.
@@ -40,7 +40,7 @@ vaso scan [options]
 
 | Option | Description |
 |--------|-------------|
-| `-a, --agent <type>` | Scan a specific agent: `openclaw`, `nanoclaw`, `picoclaw`, `ironclaw`, `nanobot`, `zeroclaw`, `nemoclaw`, `hermes`, `lyrie`, `claude-code`, `claude-desktop`, `chatgpt-desktop`, `codex`, `opencode`, `gemini-cli`, `qwen-code`, `copilot-cli`, or `cursor-cli` |
+| `-a, --agent <type>` | Scan a specific agent: `openclaw`, `nanoclaw`, `picoclaw`, `ironclaw`, `nanobot`, `zeroclaw`, `nemoclaw`, `hermes`, `lyrie`, `claude-code`, `claude-desktop`, `chatgpt-desktop`, `codex`, `opencode`, `gemini-cli`, `qwen-code`, `copilot-cli`, `cursor-cli`, `windsurf`, `devin`, `meta-muse`, or `comet` |
 | `-f, --format <format>` | Output format: `terminal` (default), `json`, `sarif`, `markdown`, `html`, `csv`, `junit` |
 | `-o, --output <file>` | Write report to a single file instead of stdout |
 | `--output-dir <dir>` | Multi-host: write one file per host as `<dir>/<hostname>.<ext>` (mutually exclusive with `-o`) |
@@ -107,7 +107,7 @@ vaso detect [options]
 
 | Option | Description |
 |--------|-------------|
-| `-a, --agent <type>` | Detect a specific agent only: `openclaw`, `nanoclaw`, `picoclaw`, `ironclaw`, `nanobot`, `zeroclaw`, `nemoclaw`, `hermes`, `lyrie`, `claude-code`, `claude-desktop`, `chatgpt-desktop`, `codex`, `opencode`, `gemini-cli`, `qwen-code`, `copilot-cli`, or `cursor-cli` |
+| `-a, --agent <type>` | Detect a specific agent only: `openclaw`, `nanoclaw`, `picoclaw`, `ironclaw`, `nanobot`, `zeroclaw`, `nemoclaw`, `hermes`, `lyrie`, `claude-code`, `claude-desktop`, `chatgpt-desktop`, `codex`, `opencode`, `gemini-cli`, `qwen-code`, `copilot-cli`, `cursor-cli`, `windsurf`, `devin`, `meta-muse`, or `comet` |
 | `-f, --format <format>` | Output format: `terminal` (default) or `json` |
 | `-o, --output <file>` | Write report to a file instead of stdout |
 | `--all-users` | Detect across all user accounts (requires root/sudo) |
@@ -257,6 +257,8 @@ The output directory contains one config file per (installation × diagram) plus
 
 Reload the IOC (Indicators of Compromise) and advisory threat-intelligence databases. Both feeds are signed with a pinned Ed25519 key (`src/ioc/public-key.ts`) and rejected on version rollback — see `SECURITY.md`. The bundled databases remain the offline baseline; `vaso update` only refreshes the in-memory state with newer signed data.
 
+Feeds are published **at least monthly**, with out-of-band publishes for actively exploited issues — see the "Threat Feed Updates" section of `SECURITY.md` for the full policy.
+
 ```bash
 vaso update           # Fetch latest signed feeds
 vaso update --force   # Update even if feeds are not stale
@@ -394,26 +396,26 @@ Penalties:
 
 ## Security Checks
 
-VASO runs **264 checks across 16 categories**.
+VASO runs **291 checks across 16 categories**.
 
 | Category | IDs | Count | Scope |
 |----------|-----|-------|-------|
 | Configuration | CFG-001–024 | 24 | Gateway binding, API keys, TLS, permissions, sandbox, NemoClaw hardening |
-| Skill Code | SKL-001–012 | 12 | AST data-flow, obfuscation, eval/exec, reverse shells |
+| Skill Code | SKL-001–013 | 13 | AST data-flow, obfuscation, eval/exec, reverse shells, workspace symlink escape |
 | IOC Matching | IOC-001–008 | 8 | C2 IPs, malicious domains, typosquatting, file hashes |
 | Network | NET-001–005 | 5 | Gateway exposure, WebSocket origins, proxy bypass |
 | Runtime | RUN-001–005 | 5 | LaunchAgents, cron, Docker socket, VS Code trojans |
 | Policy | POL-001–005 | 5 | DM policy, tool policy, sandbox compliance |
 | MCP Server | MCP-001–035 | 35 | Transport security, credentials, tool injection, toxic flows, rug pull, OAuth 2.1, stdio shell-c, world-writable command paths, streamable-HTTP origin pinning, tool-description poisoning, cross-server tool-name collision, slash-command overlap, remote-server-without-auth, filesystem sensitive-path scope, vulnerable/rolled-back version, config drift, untrusted installer source, env-dump tool, long-lived token, prompt-injection directives in tool output, obfuscated/encoded server source; opt-in npm package source resolution (`--resolve-packages`); OWASP MCP Top 10 mapping |
 | Advisory | ADV-001–005 | 5 | Vulnerability/CVE detection with version awareness |
-| OpenClaw | OC-* | 7 | Sub-agent config downgrade, legacy bot dirs, `OPENCLAW_HOME` redirect, profile downgrade, memory file perms, `/etc/openclaw` writable |
+| OpenClaw | OC-* | 6 | Sub-agent config downgrade, legacy bot dirs, `OPENCLAW_HOME` redirect, profile downgrade, memory file perms, `/etc/openclaw` writable |
 | NanoClaw | NC-001–005 | 5 | Overbroad mount allowlist, allowlist-file writable, `NANOCLAW_HOME` redirect, public listener bind, skills-dir writable |
 | IronClaw | IC-001–012 | 12 | Webhook bind, sandbox, auto-approve tools |
 | Nanobot | NB-001–012 | 12 | Channel allow, shell filtering, memory injection |
 | ZeroClaw | ZC-001–014 | 14 | API keys, autonomy mode, filesystem access |
 | Lyrie | LY-001–018 | 18 | Shield mode/binary, multi-channel DM pairing, WebChat exposure, edit-ledger perms, executable skills, cross-agent migration imports, dev-mode footguns |
 | Hermes | HM-001–010 | 10 | Plaintext API keys, env/credentials perms, API-server bind without auth, permissive CORS, plaintext inference endpoints, approvals-off, Tirith pre-exec scanner state, MCP stdio shell-c / unpinned packages |
-| Coding Agent | CC, CD, CG, CDX, OPC, GEM, QC, CUR, GHC | 87 | Claude Code (12), Claude Desktop (10), ChatGPT Desktop (6), Codex (9), OpenCode (12), Gemini CLI (10), Qwen Code (10), Cursor CLI (10), GitHub Copilot CLI (8): sandbox/approval policy, plaintext credentials, MCP pinning, broad allow rules, memory-file secrets, transport security |
+| Coding Agent | CC, CD, CG, CDX, OPC, GEM, QC, CUR, GHC, WS, DEV, MM, PC | 114 | Claude Code (12), Claude Desktop (10), ChatGPT Desktop (6), Codex (10), OpenCode (12), Gemini CLI (11), Qwen Code (10), Cursor (14), GitHub Copilot CLI (9), Windsurf/Devin Desktop (8), Devin CLI (7), Meta Muse (3), Perplexity Comet (2): sandbox/approval policy, plaintext credentials, MCP pinning, broad allow rules, memory-file secrets, transport security |
 
 Server-side checks (CFG, NET, RUN, POL) are auto-excluded for coding agents since their threat model differs from server frameworks.
 
@@ -570,7 +572,7 @@ jobs:
           node-version: '20'
 
       - name: Install VASO
-        run: npm install -g https://github.com/vulnex/vaso/releases/download/v0.4.14/vaso-0.4.14.tgz
+        run: npm install -g https://github.com/vulnex/vaso/releases/download/v1.0.0/vaso-1.0.0.tgz
 
       - name: Run VASO scan
         run: vaso scan --format sarif -o results.sarif

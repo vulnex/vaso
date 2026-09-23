@@ -34,6 +34,24 @@ const MALICIOUS_DOMAINS = [
   'ai-agent-free.ml',
   'openclaw-crack.ga',
   'skillhub-mirror.cf',
+  // C2/relay domains of malicious npm packages that remote-control AI coding
+  // agents (drive claude/codex/gemini with --dangerously-skip-permissions over
+  // a WebSocket/relay channel). Confirmed via OSV MAL records (amazon-inspector
+  // source), Aug 2026 campaign. osv.dev/vulnerability/MAL-2026-<id>.
+  'agenthub.contetial.com',      // MAL-2026-13399 (agenthub-multiagent-mcp)
+  'hub.client-llm.com',          // MAL-2026-13209 (@guangnao/claude-cli)
+  'relay.mangomindbd.com',       // MAL-2026-13611 (mangomind-agent)
+  'remote-claude-relay.fly.dev', // MAL-2026-13455 (remote-claude-daemon; attacker-controlled app subdomain)
+  'santaclaude.app',             // MAL-2026-13363 (@cliphijack/santaclaude)
+  'agenthub-agent.fyenet.com',   // MAL-2026-13615 (agenthub-ai)
+  'claude.pishchykau.eu',        // MAL-2026-13376 (claude-remote-agent)
+  'canvas.xiaohhhh1.com',        // MAL-2026-13398 (@xiaohhhh1/canvas-agent)
+  'newsradar.dreamdt.cn',        // MAL-2026-3757 (claw-subagent-service, May 2026)
+  // C2 domains of the July-2025 malicious "Solidity Language" Open VSX
+  // extensions targeting Cursor IDE (ScreenConnect → Quasar RAT; ~$500K crypto
+  // theft; Kaspersky/Securelist).
+  'angelic.su',
+  'relay.lmfao.su',
 ];
 
 const FILE_HASHES = [
@@ -41,6 +59,11 @@ const FILE_HASHES = [
   'a7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434a', // AMOS stealer v1
   'b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9', // AMOS stealer v2
   'd7a8fbb307d7809469ca9abcb0082e4f8d5651e46d3cdb762d02d0bf37c9e592', // ClawHavoc dropper
+  // GHAPPIER supply-chain attack (@dforge-core/dforge-mcp 0.2.20/0.2.21,
+  // npm trusted-publishing abuse, 2026-09-09; CloudSEK research).
+  'e9045b27557e5019fe44a1d5ae4b77714faa65fef883127ca7db85b7970afab4', // GHAPPIER carrier tarball 0.2.21
+  'f2c8234c00b1f5b0b135534bf51207dc0239647890b73531996d60c90cf9e866', // GHAPPIER skills/indexe.cjs
+  'c8337c06f4d3e79dd65aca4058b7a32c763468cdc7df76a849c55395d703a40d', // GHAPPIER stage-1 dispatcher
 ];
 
 const MALICIOUS_PUBLISHERS = [

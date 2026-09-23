@@ -18,6 +18,10 @@ import { geminiAdapter } from './gemini.js';
 import { qwenCodeAdapter } from './qwen-code.js';
 import { copilotCliAdapter } from './copilot-cli.js';
 import { cursorCliAdapter } from './cursor-cli.js';
+import { windsurfAdapter } from './windsurf.js';
+import { devinAdapter } from './devin.js';
+import { metaMuseAdapter } from './meta-muse.js';
+import { cometAdapter } from './comet.js';
 
 /** Every built-in adapter, in registration order. */
 export const allAdapters: AgentAdapter[] = [
@@ -39,6 +43,10 @@ export const allAdapters: AgentAdapter[] = [
   qwenCodeAdapter,
   copilotCliAdapter,
   cursorCliAdapter,
+  windsurfAdapter,
+  devinAdapter,
+  metaMuseAdapter,
+  cometAdapter,
 ];
 
 /** Register every built-in adapter into the shared adapterRegistry —

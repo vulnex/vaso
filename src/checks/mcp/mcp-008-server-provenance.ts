@@ -35,8 +35,13 @@ export const mcp008 = defineCheck({
       }
 
       for (const domain of ioc.maliciousDomains) {
+        // Only use the domain's first label when it is distinctive enough to
+        // imply provenance (≥8 chars). Short/generic labels ("hub", "relay",
+        // "claude", "canvas" — C2 hosts of the 2026 agent-remote-control
+        // campaign) substring-match unrelated legitimate packages like
+        // @modelcontextprotocol/server-github.
         const domainBase = domain.split('.')[0];
-        if (normalizedPkg.includes(domainBase)) {
+        if (domainBase.length >= 8 && normalizedPkg.includes(domainBase)) {
           evidence.push({
             file: findConfigFile(mcpConfigs, source.serverName),
             snippet: `Server "${source.serverName}": package ${packageName}`,

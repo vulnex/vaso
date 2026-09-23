@@ -24,6 +24,10 @@ import { geminiCliChecks } from './gemini-cli/index.js';
 import { qwenCodeChecks } from './qwen-code/index.js';
 import { cursorCliChecks } from './cursor-cli/index.js';
 import { copilotCliChecks } from './copilot-cli/index.js';
+import { windsurfChecks } from './windsurf-app/index.js';
+import { devinChecks } from './devin/index.js';
+import { metaMuseChecks } from './meta-muse/index.js';
+import { cometChecks } from './comet/index.js';
 
 export function registerAllChecks(): void {
   checkRegistry.registerAll(configChecks);
@@ -50,6 +54,10 @@ export function registerAllChecks(): void {
   checkRegistry.registerAll(qwenCodeChecks);
   checkRegistry.registerAll(cursorCliChecks);
   checkRegistry.registerAll(copilotCliChecks);
+  checkRegistry.registerAll(windsurfChecks);
+  checkRegistry.registerAll(devinChecks);
+  checkRegistry.registerAll(metaMuseChecks);
+  checkRegistry.registerAll(cometChecks);
 
   // Tag every registered check with its OWASP Agentic AI Top 10 risk(s). Unlike
   // the OWASP MCP tags (applied per-category in mcp/index.ts), the Agentic map

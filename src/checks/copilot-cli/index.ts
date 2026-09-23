@@ -7,6 +7,7 @@ import { ghc005 } from './ghc-005-prerelease-channel.js';
 import { ghc006 } from './ghc-006-experimental-mode.js';
 import { ghc007 } from './ghc-007-lsp-command-injection.js';
 import { ghc008 } from './ghc-008-instructions-secrets.js';
+import { ghc009 } from './ghc-009-trusted-folders.js';
 
 export const copilotCliChecks: CheckModule[] = [
   ghc001,
@@ -17,4 +18,5 @@ export const copilotCliChecks: CheckModule[] = [
   ghc006,
   ghc007,
   ghc008,
+  ghc009,
 ];

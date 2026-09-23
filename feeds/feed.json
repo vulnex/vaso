@@ -1,12 +1,23 @@
 {
   "meta": {
-    "version": 3,
-    "timestamp": "2026-07-10T17:30:00.000Z",
-    "description": "VASO IOC threat feed v3 — adds 3 confirmed-malware OpenClaw skill publishers (hightower6eu, sakaen736jih, 52yuanchangxing) to maliciousPublishers and 40 verified-good skill names to trustedSkillNames, sourced from Agent Threat Rules (github.com/Agent-Threat-Rule/agent-threat-rules, MIT, public-blacklist/whitelist 2026-04-16). v2 added the postmark-mcp exfiltration domain (giftshop.club). Feed carries deltas on top of the bundled data."
+    "version": 4,
+    "timestamp": "2026-09-23T00:00:00.000Z",
+    "description": "VASO IOC threat feed v4 (cumulative over v3) — adds 9 C2/relay domains of the Aug-2026 malicious npm package campaign that remote-controls AI coding agents (OSV MAL records, amazon-inspector source) and 3 SHA-256 hashes from the GHAPPIER @dforge-core/dforge-mcp supply-chain attack (2026-09-09, CloudSEK). Retains v3 publishers and trusted skill names. Also adds 2 C2 domains from the malicious Solidity-extension campaign targeting Cursor IDE (Jul 2025, Kaspersky)."
   },
   "data": {
     "maliciousDomains": [
-      "giftshop.club"
+      "giftshop.club",
+      "agenthub.contetial.com",
+      "hub.client-llm.com",
+      "relay.mangomindbd.com",
+      "remote-claude-relay.fly.dev",
+      "santaclaude.app",
+      "agenthub-agent.fyenet.com",
+      "claude.pishchykau.eu",
+      "canvas.xiaohhhh1.com",
+      "newsradar.dreamdt.cn",
+      "angelic.su",
+      "relay.lmfao.su"
     ],
     "maliciousPublishers": [
       "hightower6eu",
@@ -54,6 +65,11 @@
       "vietnamese",
       "virtually-us",
       "writing-reboot-review"
+    ],
+    "fileHashes": [
+      "e9045b27557e5019fe44a1d5ae4b77714faa65fef883127ca7db85b7970afab4",
+      "f2c8234c00b1f5b0b135534bf51207dc0239647890b73531996d60c90cf9e866",
+      "c8337c06f4d3e79dd65aca4058b7a32c763468cdc7df76a849c55395d703a40d"
     ]
   }
 }

@@ -9,6 +9,7 @@ import { gem007 } from './gem-007-unpinned-mcp.js';
 import { gem008 } from './gem-008-mcp-http.js';
 import { gem009 } from './gem-009-auto-edit.js';
 import { gem010 } from './gem-010-memory-secrets.js';
+import { gem011 } from './gem-011-trusted-folders.js';
 
 export const geminiCliChecks: CheckModule[] = [
   gem001,
@@ -21,4 +22,5 @@ export const geminiCliChecks: CheckModule[] = [
   gem008,
   gem009,
   gem010,
+  gem011,
 ];
