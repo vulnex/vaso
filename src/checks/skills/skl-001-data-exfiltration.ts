@@ -9,7 +9,7 @@ export const skl001 = defineCheck({
   name: 'Data Exfiltration Flow',
   category: 'skills',
   severity: 'critical',
-  description: 'Detect data flows from file/env sources to network sinks (AST-based)',
+  description: 'Detect data flows from file/env sources to network or process-execution sinks (AST-based)',
 
   async run(ctx, h) {
     const skillsDir = ctx.installation.skillsDir;
@@ -40,7 +40,7 @@ export const skl001 = defineCheck({
     markTestCode(evidence, ctx.installation);
     return h.fromEvidence(evidence, {
       passed: 'No data exfiltration flows detected',
-      failed: (n) => `Found ${n} data exfiltration flow(s) — data flowing from sources to network sinks`,
+      failed: (n) => `Found ${n} data exfiltration flow(s) — data flowing from sources to network or process sinks`,
     });
   },
 });

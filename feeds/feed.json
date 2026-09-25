@@ -1,10 +1,13 @@
 {
   "meta": {
-    "version": 4,
-    "timestamp": "2026-09-23T00:00:00.000Z",
-    "description": "VASO IOC threat feed v4 (cumulative over v3) — adds 9 C2/relay domains of the Aug-2026 malicious npm package campaign that remote-controls AI coding agents (OSV MAL records, amazon-inspector source) and 3 SHA-256 hashes from the GHAPPIER @dforge-core/dforge-mcp supply-chain attack (2026-09-09, CloudSEK). Retains v3 publishers and trusted skill names. Also adds 2 C2 domains from the malicious Solidity-extension campaign targeting Cursor IDE (Jul 2025, Kaspersky)."
+    "version": 5,
+    "timestamp": "2026-09-25T00:00:00.000Z",
+    "description": "VASO IOC threat feed v5 (cumulative over v4) — adds the ClawHavoc AMOS stealer C2 IP 91.92.242.30 shared by all 335 AMOS-delivering ClawHub skills (Koi Security; The Hacker News 2026-02; OWASP Agentic Skills Top 10; Unit 42). Retains all v4 domains, GHAPPIER hashes, publishers and trusted skill names."
   },
   "data": {
+    "c2Ips": [
+      "91.92.242.30"
+    ],
     "maliciousDomains": [
       "giftshop.club",
       "agenthub.contetial.com",

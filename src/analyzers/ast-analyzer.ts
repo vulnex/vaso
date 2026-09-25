@@ -65,6 +65,8 @@ export function analyzeCode(code: string, filename = 'unknown.js'): DataFlowResu
 
   const sourceVars = new Set<string>();
   const networkImports = new Set<string>();
+  // Subset of sinks that spawn processes (child_process) rather than open connections
+  const processImports = new Set<string>();
 
   try {
     traverse(ast, {
@@ -76,8 +78,10 @@ export function analyzeCode(code: string, filename = 'unknown.js'): DataFlowResu
           }
         }
         if (source === 'child_process') {
+          // Still a sink (spawned commands can exfiltrate), but a process one
           for (const spec of path.node.specifiers) {
             networkImports.add(spec.local.name);
+            processImports.add(spec.local.name);
           }
         }
       },
@@ -174,7 +178,9 @@ export function analyzeCode(code: string, filename = 'unknown.js'): DataFlowResu
                   sink: propName,
                   line,
                   snippet: snippet.slice(0, 120),
-                  description: `Data flows from "${sourceVar}" to network sink "${propName}"`,
+                  description: processImports.has(propName) || EXEC_FUNCTIONS.has(propName)
+                    ? `Data flows from "${sourceVar}" into process execution "${propName}"`
+                    : `Data flows from "${sourceVar}" to network sink "${propName}"`,
                 });
               }
             }

@@ -71,6 +71,11 @@ export interface CheckResult {
    *  Reporters use it to report partial-scan status (e.g. SARIF
    *  invocation.executionSuccessful) instead of claiming a clean run. */
   errored?: boolean;
+  /** Set by the engine on a sub-installation (e.g. an OpenClaw `agents/<name>`
+   *  profile) when the parent installation already reports this exact finding.
+   *  The result is passed through as `passed: true` so the finding counts once;
+   *  `message` names where it is reported. */
+  inherited?: boolean;
 }
 
 export interface CheckModule {

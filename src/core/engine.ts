@@ -5,6 +5,7 @@ import type { MCPConfig, MCPServerSource } from '../mcp/types.js';
 import type { FSProvider } from './fs-provider.js';
 import { LocalFSProvider } from './local-fs-provider.js';
 import { computeScore, scoreToGrade, summarizeResults, aggregateScore, meanScore } from './scoring.js';
+import { dedupeInheritedFindings } from './inherited-findings.js';
 import { getAllSkillsDirs, getSkillFiles } from './utils.js';
 import { extractToolDefinitions } from '../mcp/tool-baseline.js';
 
@@ -55,6 +56,7 @@ export class ScanEngine {
     }
     agents.push(...detectionErrors.map(e => this.adapterErrorResult(e)));
     this.foldConfigLoadErrors(agents, configLoadErrors);
+    dedupeInheritedFindings(agents);
 
     // 3. Compute overall results
     const allResults = agents.flatMap(a => a.results);
