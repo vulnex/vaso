@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { MCPDiscovery } from './discovery.js';
+import type { FSProvider } from '../core/fs-provider.js';
 import { join } from 'node:path';
 
 const FIXTURES = join(__dirname, '../../testing/fixtures/mcp');
@@ -94,5 +95,30 @@ describe('MCPDiscovery', () => {
 
     expect(result.configs).toHaveLength(2);
     expect(result.totalServers).toBe(7);
+  });
+});
+
+describe('MCPDiscovery — Devin CLI locations', () => {
+  it('discovers user and project Devin MCP configs (JSONC tolerated)', async () => {
+    const files: Record<string, string> = {
+      '/home/t/.config/devin/mcp_config.json':
+        '{\n  // user-level\n  "mcpServers": { "gh": { "command": "npx", "args": ["-y", "@x/gh@1.0.0"] } }\n}',
+      '/proj/.devin/mcp_config.local.json':
+        '{ "mcpServers": { "remote": { "url": "http://mcp.example.test/mcp", "transport": "http" } } }',
+    };
+    const fs = {
+      homedir: () => '/home/t',
+      access: async (p: string) => p in files,
+      readFile: async (p: string) => files[p],
+    } as unknown as FSProvider;
+    const prevXdg = process.env.XDG_CONFIG_HOME;
+    delete process.env.XDG_CONFIG_HOME;
+    try {
+      const result = await new MCPDiscovery(fs).discover('linux', '/proj');
+      expect(result.configs.map(c => c.source)).toEqual(['Devin CLI', 'Devin CLI (local)']);
+      expect(result.totalServers).toBe(2);
+    } finally {
+      if (prevXdg !== undefined) process.env.XDG_CONFIG_HOME = prevXdg;
+    }
   });
 });

@@ -1,5 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { buildBroadPaths, isBroadPath } from '../../analyzers/broad-paths.js';
 
 // Commands whose unrestricted Exec() allowance hands the agent arbitrary
 // code execution or network egress.
@@ -8,7 +9,12 @@ const DANGEROUS_COMMANDS = new Set([
   'npx', 'ssh', 'sudo', 'chmod', 'rm',
 ]);
 
+// Bare `**` is cwd-relative (workspace-wide); broad absolute/home globs such as
+// `/**` or `~/**` are resolved via the shared broad-path catalogue.
 const WILDCARD_RESOURCES = new Set(['*', '**']);
+
+// `mcp__*` auto-approves every tool on every configured MCP server.
+const ALL_MCP_TOOLS = 'mcp__*';
 
 interface ParsedRule {
   action: string;
@@ -22,6 +28,12 @@ function parseRule(entry: string): ParsedRule | undefined {
   return { action: m[1], resource: m[2]?.trim() };
 }
 
+/** Strip trailing glob segments: `/**` → `/`, `~/**` → `~`, `/tmp/*` → `/tmp`. */
+function globBase(resource: string): string {
+  const base = resource.replace(/(?:\/\*{1,2})+$/, '');
+  return base === '' ? '/' : base;
+}
+
 /** First token of an Exec resource, path-stripped: `Exec(/bin/bash -c)` → `bash`. */
 function execCommandName(resource: string): string {
   const first = resource.split(/\s+/)[0] ?? '';
@@ -33,12 +45,24 @@ export const dev001 = defineCheck({
   name: 'Devin Over-Broad Permission Rules',
   category: 'coding-agent',
   severity: 'critical',
-  description: 'Detect Devin permission allow rules granting unrestricted execution (Exec(*), Write(**), shell/network commands) or an allow list with no deny guardrails',
-  supportedAgents: ['devin'],
+  description: 'Detect Devin permission allow rules granting unrestricted execution (exec, Exec(*), edit, Write(**), Write(/**), mcp__*, shell/network commands) or an allow list with no deny guardrails',
+  // Devin Desktop 3.x (windsurf adapter) reads the same ~/.config/devin/config.json permissions
+  supportedAgents: ['devin', 'windsurf'],
 
   async run(ctx, h) {
     const criticalEvidence: Evidence[] = [];
     const warningEvidence: Evidence[] = [];
+    const home = ctx.fs.homedir();
+    // Scratch dirs (/tmp, /var/tmp) are routine write targets — only whole-disk,
+    // whole-home, and /etc write grants are critical here.
+    const broadPaths = buildBroadPaths(home).filter(b => !b.path.endsWith('tmp'));
+
+    // Devin merges permission lists across config levels, so a deny rule in
+    // any of this installation's files guards the allow rules in the others.
+    const hasAnyDeny = ctx.configs.some(c => {
+      const p = c.data.permissions as Record<string, unknown> | undefined;
+      return Array.isArray(p?.deny) && p.deny.some(e => typeof e === 'string');
+    });
 
     for (const config of ctx.configs) {
       const permissions = config.data.permissions as Record<string, unknown> | undefined;
@@ -47,15 +71,24 @@ export const dev001 = defineCheck({
       const allow = Array.isArray(permissions.allow)
         ? (permissions.allow as unknown[]).filter((e): e is string => typeof e === 'string')
         : [];
-      const deny = Array.isArray(permissions.deny)
-        ? (permissions.deny as unknown[]).filter((e): e is string => typeof e === 'string')
-        : [];
 
       for (const entry of allow) {
+        if (entry.trim() === ALL_MCP_TOOLS) {
+          criticalEvidence.push({
+            file: config.filePath,
+            snippet: `permissions.allow: "${entry}"`,
+            detail: 'Allow rule for every MCP tool on every server — any tool a server exposes (including ones added later) runs without approval',
+          });
+          continue;
+        }
+
         const rule = parseRule(entry);
         if (!rule) continue;
+        // Scope rules are capitalized (`Exec(...)`), tool rules lowercase (`exec`)
+        const action = rule.action.toLowerCase();
+        const unscoped = rule.resource === undefined || rule.resource === '';
 
-        if (rule.action === 'Exec' && (rule.resource === undefined || rule.resource === '' || WILDCARD_RESOURCES.has(rule.resource))) {
+        if (action === 'exec' && (unscoped || WILDCARD_RESOURCES.has(rule.resource!))) {
           criticalEvidence.push({
             file: config.filePath,
             snippet: `permissions.allow: "${entry}"`,
@@ -64,16 +97,36 @@ export const dev001 = defineCheck({
           continue;
         }
 
-        if (rule.action === 'Write' && rule.resource !== undefined && WILDCARD_RESOURCES.has(rule.resource)) {
+        if ((action === 'edit' || action === 'write') && unscoped) {
           criticalEvidence.push({
             file: config.filePath,
             snippet: `permissions.allow: "${entry}"`,
-            detail: 'Unrestricted Write wildcard — the agent may modify any file without approval',
+            detail: 'Unrestricted file-edit tool allow — the agent may modify any file, inside or outside the workspace, without approval',
           });
           continue;
         }
 
-        if (rule.action === 'Exec' && rule.resource) {
+        if (action === 'write' && rule.resource) {
+          if (WILDCARD_RESOURCES.has(rule.resource)) {
+            criticalEvidence.push({
+              file: config.filePath,
+              snippet: `permissions.allow: "${entry}"`,
+              detail: 'Unrestricted Write wildcard — the agent may modify any file in the workspace (including .devin/ config and hooks) without approval',
+            });
+            continue;
+          }
+          const broad = isBroadPath(globBase(rule.resource), broadPaths, home);
+          if (broad) {
+            criticalEvidence.push({
+              file: config.filePath,
+              snippet: `permissions.allow: "${entry}"`,
+              detail: `Write allow rule ${broad.reason} — the agent may modify files there without approval`,
+            });
+            continue;
+          }
+        }
+
+        if (action === 'exec' && rule.resource) {
           const cmd = execCommandName(rule.resource);
           if (DANGEROUS_COMMANDS.has(cmd)) {
             criticalEvidence.push({
@@ -85,7 +138,7 @@ export const dev001 = defineCheck({
         }
       }
 
-      if (allow.length > 0 && deny.length === 0) {
+      if (allow.length > 0 && !hasAnyDeny) {
         warningEvidence.push({
           file: config.filePath,
           snippet: `permissions.allow has ${allow.length} rule(s), deny is empty`,

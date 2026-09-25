@@ -402,3 +402,140 @@ describe('DEV-007: Devin Global AGENTS.md Secret Leak', () => {
     expect(result.passed).toBe(true);
   });
 });
+
+// Regressions from live validation against Devin CLI 3000.11.3 (bundled docs
+// reference/permissions.mdx, extensibility/rules.mdx; real credentials.toml).
+describe('Devin live-validation fixes', () => {
+  const FAKE_DEVIN_TOKEN = 'devin-' + 'Ab3$x.Q9-'.repeat(20);
+
+  function makeProjectCtx(configs: ParsedConfig[], fs?: FSProvider): ScanContext {
+    const installation: AgentInstallation = {
+      agent: 'devin',
+      agentName: 'project:app',
+      installDir: '/work/app/.devin',
+      configFiles: configs,
+      profile: 'project',
+    };
+    return { installation, configs, platform: 'linux', fs: fs ?? makeFs() };
+  }
+
+  describe('DEV-001', () => {
+    const check = devinChecks.find(c => c.id === 'DEV-001')!;
+    const run = (allow: string[], deny: string[] = ['Exec(rm)']) =>
+      check.run(makeCtx([makeConfig('config.json', { permissions: { allow, deny } })]));
+
+    it('flags lowercase tool-based exec and edit allows', async () => {
+      const result = await run(['exec', 'edit']);
+      expect(result.passed).toBe(false);
+      expect(result.severity).toBe('critical');
+      expect(result.evidence).toHaveLength(2);
+    });
+
+    it('flags mcp__* (every MCP tool) but not a single server or tool', async () => {
+      const result = await run(['mcp__*', 'mcp__github__*', 'mcp__github__list_issues']);
+      expect(result.evidence).toHaveLength(1);
+      expect(result.evidence?.[0].snippet).toContain('mcp__*');
+    });
+
+    it('flags absolute and home-wide Write globs', async () => {
+      const result = await run(['Write(/**)', 'Write(~/**)', 'Write(/etc/**)']);
+      expect(result.severity).toBe('critical');
+      expect(result.evidence).toHaveLength(3);
+      expect(result.evidence?.[0].detail).toContain('entire filesystem');
+      expect(result.evidence?.[1].detail).toContain('home directory');
+    });
+
+    it('does not flag scoped or scratch-dir Write globs', async () => {
+      const result = await run(['Write(src/**)', 'Write(/tmp/**)', 'Write(~/projects/app/**)']);
+      expect(result.passed).toBe(true);
+    });
+
+    it('also runs for Devin Desktop 3.x (windsurf adapter shares ~/.config/devin/config.json)', () => {
+      expect(check.supportedAgents).toEqual(expect.arrayContaining(['devin', 'windsurf']));
+    });
+
+    it('treats deny rules as merged across the installation\'s config files', async () => {
+      const allowOnly = makeConfig('config.local.json', { permissions: { allow: ['Exec(git)'] } });
+      const withDeny = makeConfig('config.json', { permissions: { deny: ['Exec(rm)'] } });
+      const result = await check.run(makeCtx([allowOnly, withDeny]));
+      expect(result.passed).toBe(true);
+    });
+  });
+
+  describe('DEV-002', () => {
+    const check = devinChecks.find(c => c.id === 'DEV-002')!;
+
+    it('does not re-report the user credentials file on a project installation', async () => {
+      const fs = makeFs({
+        stat: vi.fn(async () => ({ mode: 0o664, isFile: () => true, isDirectory: () => false })),
+      });
+      const result = await check.run(makeProjectCtx([], fs));
+      expect(result.passed).toBe(true);
+      expect(result.message).toContain('user installation');
+    });
+  });
+
+  describe('DEV-003', () => {
+    const check = devinChecks.find(c => c.id === 'DEV-003')!;
+
+    it('passes an auth scheme wrapping an interpolated secret', async () => {
+      const config = makeConfig('mcp_config.json', {
+        mcpServers: {
+          remote: {
+            url: 'https://mcp.example.com',
+            headers: { Authorization: 'Bearer ${env:MCP_TOKEN}' },
+          },
+        },
+      });
+      const result = await check.run(makeCtx([config]));
+      expect(result.passed).toBe(true);
+    });
+
+    it('flags a real-format devin- token under a non-secret-looking key name', async () => {
+      const config = makeConfig('mcp_config.local.json', {
+        mcpServers: { a: { command: 'npx', env: { DEVIN_CONFIG: FAKE_DEVIN_TOKEN } } },
+      });
+      const result = await check.run(makeCtx([config]));
+      expect(result.passed).toBe(false);
+      expect(result.evidence?.[0].detail).toContain('Devin API token');
+    });
+  });
+
+  describe('DEV-007', () => {
+    const check = devinChecks.find(c => c.id === 'DEV-007')!;
+
+    it('scans the project root rules files and .devin/rules, not .devin/AGENTS.md', async () => {
+      const files: Record<string, string> = {
+        '/work/app/AGENTS.local.md': `token ${FAKE_DEVIN_TOKEN}\n`,
+        '/work/app/.devin/rules/deploy.md': 'Use sk-ant-' + 'A'.repeat(40) + ' for deploys\n',
+      };
+      const access = vi.fn(async (p: string) => p in files);
+      const fs = makeFs({
+        access,
+        readFile: vi.fn(async (p: string) => files[p]),
+        readdir: vi.fn(async (p: string) => (p === '/work/app/.devin/rules' ? ['deploy.md', 'notes.txt'] : [])),
+      });
+      const result = await check.run(makeProjectCtx([], fs));
+      expect(result.passed).toBe(false);
+      expect(result.evidence?.map(e => e.file)).toEqual(
+        expect.arrayContaining(['/work/app/AGENTS.local.md', '/work/app/.devin/rules/deploy.md']),
+      );
+      expect(access).not.toHaveBeenCalledWith('/work/app/.devin/AGENTS.md');
+    });
+
+    it('scans ~/.devin global rules for the user installation', async () => {
+      const files: Record<string, string> = {
+        '/home/test/.devin/global_rules.md': `key: ${FAKE_DEVIN_TOKEN}\n`,
+      };
+      const fs = makeFs({
+        access: vi.fn(async (p: string) => p in files),
+        readFile: vi.fn(async (p: string) => files[p]),
+        readdir: vi.fn(async () => []),
+      });
+      const result = await check.run(makeCtx([], fs));
+      expect(result.passed).toBe(false);
+      expect(result.evidence?.[0].file).toBe('/home/test/.devin/global_rules.md');
+      expect(result.evidence?.[0].detail).toContain('Devin API token');
+    });
+  });
+});

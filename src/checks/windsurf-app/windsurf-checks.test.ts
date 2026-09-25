@@ -443,3 +443,43 @@ describe('WS-008: Windsurf Editor State DB Readable', () => {
     expect(result.message).toContain('not applicable');
   });
 });
+
+// Devin Desktop 3.x: execution-gate settings come from ~/.codeium/windsurf/user_settings.pb,
+// projected by the adapter onto the nested `windsurf` object.
+describe('WS-001/WS-002 on Devin Desktop 3.x (user_settings.pb)', () => {
+  const ws001 = windsurfChecks.find(c => c.id === 'WS-001')!;
+  const ws002 = windsurfChecks.find(c => c.id === 'WS-002')!;
+  const pb = (windsurf: Record<string, unknown>) =>
+    makeConfig('/home/test/.codeium/windsurf/user_settings.pb', { windsurf });
+
+  it('WS-001 fails critical on a Turbo policy decoded from user_settings.pb', async () => {
+    const result = await ws001.run(makeCtx([pb({ autoExecutionPolicy: 'turbo' })]));
+    expect(result.passed).toBe(false);
+    expect(result.severity).toBe('critical');
+    expect(result.evidence?.[0].file).toContain('user_settings.pb');
+  });
+
+  it('WS-001 warns on turbo web-request auto-execution', async () => {
+    const result = await ws001.run(makeCtx([pb({ autoExecutionPolicy: 'off', webRequestsAutoExecutionPolicy: 'turbo' })]));
+    expect(result.passed).toBe(false);
+    expect(result.severity).toBe('warning');
+    expect(result.evidence?.[0].detail).toContain('Web requests');
+  });
+
+  it('WS-001 says the product default applies when no policy is set anywhere', async () => {
+    const result = await ws001.run(makeCtx([pb({})]));
+    expect(result.passed).toBe(true);
+    expect(result.message).toContain('product default');
+  });
+
+  it('WS-002 flags a bare shell in the decoded allowlist', async () => {
+    const result = await ws002.run(makeCtx([pb({ cascadeCommandsAllowList: ['bash'] })]));
+    expect(result.passed).toBe(false);
+  });
+
+  it('WS-002 reports that no allowlist is configured rather than a clean allowlist', async () => {
+    const result = await ws002.run(makeCtx([pb({})]));
+    expect(result.passed).toBe(true);
+    expect(result.message).toContain('No Cascade command allowlist configured');
+  });
+});

@@ -1,4 +1,4 @@
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { AgentAdapter, DetectOptions } from './adapter.js';
 import type { AgentInstallation, GatewayInfo, ParsedConfig, ZoneGraph } from '../core/types.js';
 import type { ProbeManifest } from '../core/snapshot-types.js';
@@ -8,6 +8,7 @@ import { loadConfig } from '../core/config-loader.js';
 import { stripJsonc } from '../core/jsonc.js';
 import { getUserHomeDirs } from './openclaw.js';
 import { queryCliVersion } from './version-query.js';
+import { decodeWindsurfUserSettings, toWindsurfSettingsData } from './windsurf-user-settings.js';
 
 // Windsurf IDE was rebranded Devin Desktop on 2026-06-02. One adapter covers
 // both generations: legacy installs keep the Windsurf app bundle / user-data
@@ -18,6 +19,10 @@ const APP_BUNDLES = ['/Applications/Windsurf.app', '/Applications/Devin.app'];
 const CLI_NAMES = ['windsurf', 'devin-desktop'];
 const EDITOR_DIR_NAMES = ['Windsurf', 'Devin'];
 const MCP_CONFIG_FILE = 'mcp_config.json';
+// 3.x: Cascade execution-gate settings (protobuf) — see windsurf-user-settings.ts
+const USER_SETTINGS_FILE = 'user_settings.pb';
+// 3.x: Devin agent config shared with Devin CLI (`permissions` allow/deny/ask)
+const DEVIN_CONFIG_FILE = 'config.json';
 
 const SYSTEM_CLI_PATHS = CLI_NAMES.flatMap(name => [
   `/usr/local/bin/${name}`,
@@ -57,6 +62,45 @@ function editorUserDataDirs(home: string, fs: FSProvider): string[] {
   return EDITOR_DIR_NAMES.map(n => join(home, '.config', n));
 }
 
+/**
+ * Linux/Windows install roots (the dir holding `resources/app/product.json`).
+ * Linux: .deb/.rpm installs under /usr/share or /opt, or the release tarball
+ * extracted anywhere — commonly the home dir (`~/devin-desktop`, `~/Windsurf`).
+ * Windows: the per-user installer's %LOCALAPPDATA%\Programs\<name>.
+ */
+const LINUX_SYSTEM_ROOTS = [
+  '/usr/share/windsurf', '/usr/share/devin-desktop',
+  '/opt/windsurf', '/opt/Windsurf', '/opt/devin-desktop', '/opt/Devin',
+];
+const HOME_ROOT_NAMES = ['devin-desktop', 'Devin', 'windsurf', 'Windsurf'];
+
+function installRootCandidates(home: string, fs: FSProvider): string[] {
+  if (fs.platform === 'win32') {
+    const localAppData = fs.getEnv('LOCALAPPDATA') ?? join(home, 'AppData', 'Local');
+    return ['Windsurf', 'Devin', 'devin-desktop'].map(n => join(localAppData, 'Programs', n));
+  }
+  return [
+    ...LINUX_SYSTEM_ROOTS,
+    ...HOME_ROOT_NAMES.map(n => join(home, n)),
+    ...HOME_ROOT_NAMES.map(n => join(home, '.local', 'share', n)),
+    ...HOME_ROOT_NAMES.map(n => join(home, 'Applications', n)),
+  ];
+}
+
+/**
+ * The CLI launcher lives at `<root>/bin/<name>` (symlinked from /usr/bin on
+ * package installs) or is the main binary at `<root>/<name>`.
+ */
+async function rootsFromCliBinary(cliBinary: string | undefined, fs: FSProvider): Promise<string[]> {
+  if (!cliBinary) return [];
+  try {
+    const real = await fs.realpath(cliBinary);
+    return [dirname(dirname(real)), dirname(real)];
+  } catch {
+    return [];
+  }
+}
+
 async function findAppBundle(fs: FSProvider): Promise<string | undefined> {
   if (fs.platform !== 'darwin') return undefined;
   for (const bundle of APP_BUNDLES) {
@@ -71,13 +115,13 @@ interface ProductInfo {
 }
 
 /**
- * Parse <app>/Contents/Resources/app/product.json. `applicationName` is
+ * Parse product.json — <app>/Contents/Resources/app/ on macOS,
+ * <root>/resources/app/ on Linux/Windows. `applicationName` is
  * "windsurf" (legacy) or "devin-desktop" (new). The build version lives in
  * `windsurfVersion` (e.g. 1.9566.11); `productVersion` is the newer key and
  * plain `version` is the underlying VS Code version — try in that order.
  */
-async function readProductInfo(appBundle: string, fs: FSProvider): Promise<ProductInfo> {
-  const productPath = join(appBundle, 'Contents', 'Resources', 'app', 'product.json');
+async function readProductInfo(productPath: string, fs: FSProvider): Promise<ProductInfo> {
   try {
     const data = JSON.parse(await fs.readFile(productPath)) as Record<string, unknown>;
     const version = [data.windsurfVersion, data.productVersion, data.version]
@@ -123,12 +167,30 @@ export const windsurfAdapter: AgentAdapter = {
     const installations: AgentInstallation[] = [];
 
     const appBundle = await findAppBundle(fs);
-    const product: ProductInfo = appBundle ? await readProductInfo(appBundle, fs) : {};
+    const macProduct: ProductInfo = appBundle
+      ? await readProductInfo(join(appBundle, 'Contents', 'Resources', 'app', 'product.json'), fs)
+      : {};
     const cliBinary = await findCLIBinary(fs);
+    const cliRoots = appBundle ? [] : await rootsFromCliBinary(cliBinary, fs);
 
     for (const { home, user } of userDirs) {
       const agentDir = codeiumAgentDir(home);
       const hasAgentDir = await fs.access(agentDir);
+
+      // Linux/Windows: first install root with a readable product.json.
+      let installRoot: string | undefined;
+      let product = macProduct;
+      if (!appBundle) {
+        for (const root of [...cliRoots, ...installRootCandidates(home, fs)]) {
+          const productPath = join(root, 'resources', 'app', 'product.json');
+          if (!(await fs.access(productPath))) continue;
+          const info = await readProductInfo(productPath, fs);
+          if (!info.applicationName && !info.version) continue;
+          installRoot = root;
+          product = info;
+          break;
+        }
+      }
 
       const existingUserDataDirs: string[] = [];
       for (const dir of editorUserDataDirs(home, fs)) {
@@ -136,7 +198,7 @@ export const windsurfAdapter: AgentAdapter = {
       }
 
       // Any positive signal → installed.
-      if (!hasAgentDir && existingUserDataDirs.length === 0 && !appBundle && !cliBinary) continue;
+      if (!hasAgentDir && existingUserDataDirs.length === 0 && !appBundle && !installRoot && !cliBinary) continue;
 
       const configFiles: ParsedConfig[] = [];
 
@@ -152,6 +214,29 @@ export const windsurfAdapter: AgentAdapter = {
         } catch {}
       }
 
+      // 3.x execution-gate settings, projected onto windsurf.* keys.
+      const userSettingsPath = join(agentDir, USER_SETTINGS_FILE);
+      if (await fs.access(userSettingsPath)) {
+        try {
+          const decoded = decodeWindsurfUserSettings(await fs.readBytes(userSettingsPath));
+          if (decoded) {
+            configFiles.push({
+              raw: '',
+              format: 'unknown',
+              filePath: userSettingsPath,
+              data: toWindsurfSettingsData(decoded),
+            });
+          }
+        } catch {}
+      }
+
+      // 3.x Devin agent config (permission rules), shared with Devin CLI.
+      const devinConfigPath = join(devinConfigDir(home, fs), DEVIN_CONFIG_FILE);
+      if (await fs.access(devinConfigPath)) {
+        const parsed = await loadJsoncConfig(devinConfigPath, fs);
+        if (parsed) configFiles.push(parsed);
+      }
+
       // Editor settings (windsurf.* keys).
       for (const dir of existingUserDataDirs) {
         const settingsPath = join(dir, 'User', 'settings.json');
@@ -165,6 +250,8 @@ export const windsurfAdapter: AgentAdapter = {
 
       const isDevinGeneration = product.applicationName === 'devin-desktop'
         || appBundle === '/Applications/Devin.app';
+      // Only the resolved app location is reported; cliBinary stays separate.
+      const resolvedAppBundle = appBundle ?? installRoot;
 
       installations.push({
         agent: 'windsurf',
@@ -173,7 +260,7 @@ export const windsurfAdapter: AgentAdapter = {
         installDir: hasAgentDir ? agentDir : (existingUserDataDirs[0] ?? agentDir),
         configFiles,
         user: options?.allUsers ? user : undefined,
-        appBundle,
+        appBundle: resolvedAppBundle,
         cliBinary,
       });
     }
@@ -187,6 +274,8 @@ export const windsurfAdapter: AgentAdapter = {
     return [
       join(codeiumAgentDir(home), MCP_CONFIG_FILE),
       join(devinConfigDir(home, fs), MCP_CONFIG_FILE),
+      join(codeiumAgentDir(home), USER_SETTINGS_FILE),
+      join(devinConfigDir(home, fs), DEVIN_CONFIG_FILE),
       ...editorUserDataDirs(home, fs).map(dir => join(dir, 'User', 'settings.json')),
     ];
   },
@@ -234,6 +323,8 @@ export const windsurfAdapter: AgentAdapter = {
         '~/.codeium/config.json',
         '~/.codeium/windsurf/memories/global_rules.md',
         '~/.config/devin/mcp_config.json',
+        '~/.codeium/windsurf/user_settings.pb',
+        '~/.config/devin/config.json',
         '~/Library/Application Support/Windsurf/User/settings.json',
         '~/Library/Application Support/Devin/User/settings.json',
         '~/.config/Windsurf/User/settings.json',
@@ -291,7 +382,7 @@ export const windsurfAdapter: AgentAdapter = {
           id: 'exec-gate',
           label: 'Auto-Execution Policy',
           zone: 'exec',
-          guardCheckIds: ['WS-001', 'WS-002', 'WS-006'],
+          guardCheckIds: ['WS-001', 'WS-002', 'WS-006', 'DEV-001'],
         },
         {
           id: 'fs',

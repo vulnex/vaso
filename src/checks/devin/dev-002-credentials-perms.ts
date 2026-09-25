@@ -30,6 +30,12 @@ export const dev002 = defineCheck({
   supportedAgents: ['devin'],
 
   async run(ctx, h) {
+    // credentials.toml is per-user; the project-scoped installation would
+    // otherwise re-report the same file.
+    if (ctx.installation.profile === 'project') {
+      return h.passed('credentials.toml is user-level — evaluated on the user installation');
+    }
+
     const credPath = credentialsPath(ctx);
     if (!(await ctx.fs.access(credPath))) {
       return h.passed('Devin credentials.toml not present');

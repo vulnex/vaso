@@ -2,6 +2,7 @@ import { join } from 'node:path';
 import type { MCPConfig, MCPServerEntry, MCPDiscoveryResult } from './types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
+import { stripJsonc } from '../core/jsonc.js';
 
 interface ConfigLocation {
   source: string;
@@ -48,6 +49,15 @@ function getGlobalConfigLocations(platform: NodeJS.Platform, home: string): Conf
     path: join(home, '.codeium', 'windsurf', 'mcp_config.json'),
   });
 
+  // Devin CLI (XDG config dir on POSIX, %APPDATA%\devin on Windows)
+  const devinConfigDir = platform === 'win32'
+    ? join(process.env.APPDATA ?? join(home, 'AppData', 'Roaming'), 'devin')
+    : join(process.env.XDG_CONFIG_HOME?.trim() || join(home, '.config'), 'devin');
+  locations.push({
+    source: 'Devin CLI',
+    path: join(devinConfigDir, 'mcp_config.json'),
+  });
+
   return locations;
 }
 
@@ -56,6 +66,8 @@ function getProjectConfigLocations(projectDir: string): ConfigLocation[] {
     { source: 'Claude Code (project)', path: join(projectDir, '.mcp.json') },
     { source: 'Cursor (project)', path: join(projectDir, '.cursor', 'mcp.json') },
     { source: 'Windsurf (project)', path: join(projectDir, '.windsurf', 'mcp.json') },
+    { source: 'Devin CLI (project)', path: join(projectDir, '.devin', 'mcp_config.json') },
+    { source: 'Devin CLI (local)', path: join(projectDir, '.devin', 'mcp_config.local.json') },
     { source: 'VS Code', path: join(projectDir, '.vscode', 'mcp.json') },
     { source: 'Generic MCP', path: join(projectDir, 'mcp.json') },
   ];
@@ -121,7 +133,7 @@ export class MCPDiscovery {
 
       try {
         const raw = await this.fs.readFile(location.path);
-        const data = JSON.parse(raw) as Record<string, unknown>;
+        const data = JSON.parse(stripJsonc(raw)) as Record<string, unknown>;
         const servers = parseServerEntries(data);
 
         if (servers.length > 0) {
@@ -148,7 +160,7 @@ export class MCPDiscovery {
 
       try {
         const raw = await this.fs.readFile(filePath);
-        const data = JSON.parse(raw) as Record<string, unknown>;
+        const data = JSON.parse(stripJsonc(raw)) as Record<string, unknown>;
         const servers = parseServerEntries(data);
 
         if (servers.length > 0) {

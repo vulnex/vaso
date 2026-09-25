@@ -50,10 +50,13 @@ export const ws002 = defineCheck({
 
   async run(ctx, h) {
     const evidence: Evidence[] = [];
+    let allowListFound = false;
 
+    // Sources: settings.json, or on 3.x user_settings.pb projected onto the same keys.
     for (const config of ctx.configs) {
       const allowList = stringEntries(windsurfSetting(config.data, 'cascadeCommandsAllowList'));
       if (allowList.length === 0) continue;
+      allowListFound = true;
 
       for (const entry of allowList) {
         if (!dangerousEntry(entry)) continue;
@@ -72,6 +75,10 @@ export const ws002 = defineCheck({
           detail: 'Non-trivial command allowlist with no deny list — add explicit deny rules for destructive commands',
         });
       }
+    }
+
+    if (!allowListFound) {
+      return h.passed('No Cascade command allowlist configured (settings.json / user_settings.pb)');
     }
 
     return h.fromEvidence(evidence, {

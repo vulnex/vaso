@@ -13,7 +13,9 @@ export const API_KEY_PATTERNS = [
   { pattern: /xoxp-[0-9]+-[0-9a-zA-Z]+/, name: 'Slack User token' },
   { pattern: /-----BEGIN (?:RSA |EC )?PRIVATE KEY-----/, name: 'Private key' },
   { pattern: /\b[0-9]{10}:[A-Za-z0-9_-]{35,}\b/, name: 'Telegram Bot token' },
-  { pattern: /\bcog_[a-zA-Z0-9]{16,}/, name: 'Devin API token' },
+  // Live Devin CLI 3000.x credentials.toml tokens: `devin-` + ~180 chars incl. `$ . -`
+  { pattern: /\bdevin-[A-Za-z0-9$._-]{60,}/, name: 'Devin API token' },
+  { pattern: /\bcog_[a-zA-Z0-9]{16,}/, name: 'Devin API token (cog_)' },
   { pattern: /\bapk_(?:user_)?[a-zA-Z0-9]{16,}/, name: 'Devin API key (legacy)' },
   // Vellum keys have no documented prefix — match by env-var assignment only.
   { pattern: /VELLUM_API_KEY\s*[=:]\s*['"]?[a-zA-Z0-9._-]{20,}/, name: 'Vellum API key assignment' },

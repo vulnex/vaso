@@ -1,9 +1,12 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { API_KEY_PATTERNS } from '../../core/patterns.js';
 
-// Devin supports secret interpolation: ${env:VAR} and ${file:/path}. Any
-// other value is a literal stored in plaintext on disk.
-const INTERPOLATED = /^\$\{(?:env|file):[^}]*\}$/;
+// Devin supports secret interpolation: ${env:VAR} and ${file:/path}, also
+// embedded in a larger value (`Bearer ${env:TOKEN}`). Whatever remains after
+// removing interpolations and an auth scheme is a literal stored on disk.
+const INTERPOLATION = /\$\{(?:env|file):[^}]*\}/g;
+const AUTH_SCHEME = /^\s*(?:Bearer|Basic|Token)\b\s*/i;
 
 const SECRET_KEY_HINT = /(KEY|TOKEN|SECRET|PASS|API|AUTH)/i;
 const MIN_SECRET_LENGTH = 8;
@@ -12,8 +15,18 @@ function mask(value: string): string {
   return `${value.slice(0, 4)}…(${value.length} chars)`;
 }
 
+/** The literal (non-interpolated) part of a value, or '' when fully interpolated. */
+function literalPart(value: unknown): string {
+  if (typeof value !== 'string') return '';
+  return value.replace(INTERPOLATION, '').replace(AUTH_SCHEME, '').trim();
+}
+
 function isLiteralSecret(value: unknown): value is string {
-  return typeof value === 'string' && value.length > 0 && !INTERPOLATED.test(value);
+  return literalPart(value).length > 0;
+}
+
+function knownTokenName(value: string): string | undefined {
+  return API_KEY_PATTERNS.find(p => p.pattern.test(value))?.name;
 }
 
 export const dev003 = defineCheck({
@@ -21,7 +34,7 @@ export const dev003 = defineCheck({
   name: 'Devin Plaintext Secrets in MCP Config',
   category: 'coding-agent',
   severity: 'critical',
-  description: 'Detect literal secrets in Devin mcpServers env/headers/oauthClientSecret instead of ${env:VAR}/${file:/path} interpolation — including Devin API tokens (cog_ current; apk_/apk_user_ legacy)',
+  description: 'Detect literal secrets in Devin mcpServers env/headers/oauthClientSecret instead of ${env:VAR}/${file:/path} interpolation — including Devin API tokens (devin- current; cog_/apk_/apk_user_ legacy)',
   supportedAgents: ['devin'],
 
   async run(ctx, h) {
@@ -50,12 +63,18 @@ export const dev003 = defineCheck({
           const map = server[field];
           if (!map || typeof map !== 'object' || Array.isArray(map)) continue;
           for (const [key, value] of Object.entries(map as Record<string, unknown>)) {
-            if (!SECRET_KEY_HINT.test(key)) continue;
-            if (!isLiteralSecret(value) || value.length < MIN_SECRET_LENGTH) continue;
+            if (typeof value !== 'string') continue;
+            const literal = literalPart(value);
+            // A recognizable token format is a finding under any key name
+            const tokenName = knownTokenName(literal);
+            if (!tokenName && !SECRET_KEY_HINT.test(key)) continue;
+            if (literal.length < MIN_SECRET_LENGTH) continue;
             evidence.push({
               file: config.filePath,
               snippet: `mcpServers.${name}.${field}.${key}: ${mask(value)}`,
-              detail: `Literal secret-like value for "${key}" in MCP ${field} — use \${env:VAR} or \${file:/path} interpolation`,
+              detail: tokenName
+                ? `Plaintext ${tokenName} in MCP ${field} "${key}" — use \${env:VAR} or \${file:/path} interpolation`
+                : `Literal secret-like value for "${key}" in MCP ${field} — use \${env:VAR} or \${file:/path} interpolation`,
             });
           }
         }
