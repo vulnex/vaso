@@ -55,3 +55,34 @@ func TestCollectFileMetadataOnlyAndBudget(t *testing.T) {
 		t.Fatalf("budget not enforced: %+v truncated=%v", e, c.truncated)
 	}
 }
+
+func TestCollectPathRecordsDirectoriesAndAncestors(t *testing.T) {
+	root := t.TempDir()
+	dataDir := filepath.Join(root, "Library", "App Support", "com.example")
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(filepath.Join(root, "Library"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(filepath.Join(root, "Library"), 0o755)
+	file := filepath.Join(dataDir, "prefs.json")
+	if err := os.WriteFile(file, []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	snap := ProbeSnapshot{Files: map[string]FileEntry{}, Directories: map[string][]string{}, DirectoryModes: map[string]int{}}
+	c := &collector{budget: 1 << 20}
+	c.collectPath(&snap, dataDir, false, true) // a directory requested as a "file path"
+	c.collectPath(&snap, file, false, false)
+	recordAncestorModes(&snap)
+
+	if _, isFile := snap.Files[dataDir]; isFile {
+		t.Fatalf("directory recorded as a file entry")
+	}
+	if snap.DirectoryModes[dataDir] != 0o755 || len(snap.Directories[dataDir]) != 1 {
+		t.Fatalf("directory mode/listing missing: mode=%o listing=%v", snap.DirectoryModes[dataDir], snap.Directories[dataDir])
+	}
+	if snap.DirectoryModes[filepath.Join(root, "Library")] != 0o700 {
+		t.Fatalf("ancestor mode not recorded: %v", snap.DirectoryModes)
+	}
+}

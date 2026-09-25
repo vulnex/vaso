@@ -151,12 +151,12 @@ func Collect(manifest ProbeManifest, escalate bool) ProbeSnapshot {
 	// Expand and collect file paths
 	expandedPaths := expandPaths(manifest.FilePaths, homes)
 	for _, p := range expandedPaths {
-		snapshot.Files[p] = c.collectFile(p, false)
+		c.collectPath(&snapshot, p, false, true)
 	}
 
 	// Expand and collect system paths (not expanded per-user)
 	for _, p := range manifest.SystemPaths {
-		snapshot.Files[p] = c.collectFile(p, false)
+		c.collectPath(&snapshot, p, false, true)
 	}
 
 	// Expand and collect glob patterns
@@ -171,7 +171,7 @@ func Collect(manifest ProbeManifest, escalate bool) ProbeSnapshot {
 				continue
 			}
 			if _, exists := snapshot.Files[match]; !exists {
-				snapshot.Files[match] = c.collectFile(match, false)
+				c.collectPath(&snapshot, match, false, false)
 			}
 		}
 	}
@@ -187,7 +187,7 @@ func Collect(manifest ProbeManifest, escalate bool) ProbeSnapshot {
 				continue
 			}
 			if _, exists := snapshot.Files[match]; !exists {
-				snapshot.Files[match] = c.collectFile(match, true)
+				c.collectPath(&snapshot, match, true, false)
 			}
 		}
 	}
@@ -243,6 +243,11 @@ func Collect(manifest ProbeManifest, escalate bool) ProbeSnapshot {
 			}
 		}
 	}
+
+	// Record the mode of every ancestor of what was collected, so the TS side
+	// can tell whether a parent directory blocks other users (parent-directory
+	// mitigation) exactly as a local scan does.
+	recordAncestorModes(&snapshot)
 
 	// Collect filtered environment variables
 	snapshot.Env = collectEnv(manifest.EnvPrefixes)
@@ -330,6 +335,51 @@ func (c *collector) collectFile(path string, metadataOnly bool) FileEntry {
 		Content: string(content),
 		Mode:    mode,
 		Exists:  true,
+	}
+}
+
+// collectPath records p as a directory (mode, plus its listing when listDir)
+// or as a file. Directories used to be stored as file entries (os.ReadFile
+// fails, Exists+Mode kept), which made them look like files remotely.
+func (c *collector) collectPath(snapshot *ProbeSnapshot, p string, metadataOnly, listDir bool) {
+	info, err := os.Stat(p)
+	if err == nil && info.IsDir() {
+		snapshot.DirectoryModes[p] = int(info.Mode().Perm())
+		if listDir {
+			if listing := collectDirectory(p); listing != nil {
+				snapshot.Directories[p] = listing
+			}
+		}
+		return
+	}
+	snapshot.Files[p] = c.collectFile(p, metadataOnly)
+}
+
+// recordAncestorModes stats each parent directory of every collected file and
+// directory (once each) up to the filesystem root.
+func recordAncestorModes(snapshot *ProbeSnapshot) {
+	seen := make(map[string]bool)
+	visit := func(p string) {
+		for dir := filepath.Dir(p); ; dir = filepath.Dir(dir) {
+			if seen[dir] {
+				return
+			}
+			seen[dir] = true
+			if _, ok := snapshot.DirectoryModes[dir]; !ok {
+				recordDirMode(snapshot.DirectoryModes, dir)
+			}
+			if parent := filepath.Dir(dir); parent == dir {
+				return
+			}
+		}
+	}
+	for p, e := range snapshot.Files {
+		if e.Exists {
+			visit(p)
+		}
+	}
+	for d := range snapshot.Directories {
+		visit(d)
 	}
 }
 

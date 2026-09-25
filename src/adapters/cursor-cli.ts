@@ -233,8 +233,10 @@ export const cursorCliAdapter: AgentAdapter = {
   getProbeManifest(): ProbeManifest {
     return {
       filePaths: [
-        '~/.cursor/cli-config.json',
-        '~/.cursor/mcp.json',
+        ...USER_CONFIG_FILES.map(f => `~/.cursor/${f}`),
+        // IDE user-data settings (workspace trust) — macOS and Linux
+        '~/Library/Application Support/Cursor/User/settings.json',
+        '~/.config/Cursor/User/settings.json',
         // User-relative CLI install locations — both names supported
         '~/.local/bin/cursor-agent',
         '~/.npm-global/bin/cursor-agent',
@@ -248,7 +250,13 @@ export const cursorCliAdapter: AgentAdapter = {
         '~/.cursor/extensions/**',
         nvmBinaryGlob('cursor-agent'),
       ],
+      // IDE state DBs hold session JWTs: CUR-013 / POL-003 need permissions only
+      metadataGlobPatterns: [
+        '~/Library/Application Support/Cursor/User/globalStorage/state.vscdb',
+        '~/.config/Cursor/User/globalStorage/state.vscdb',
+      ],
       commands: [
+        { id: 'cursor-ide-version', cmd: 'defaults', args: ['read', `${IDE_APP_BUNDLE}/Contents/Info.plist`, 'CFBundleShortVersionString'], timeout: 3000 },
         { id: 'cursor-agent-which', cmd: 'which', args: ['cursor-agent'], timeout: 3000 },
         { id: 'cursor-agent-version', cmd: 'cursor-agent', args: ['--version'], timeout: 15000 },
       ],
@@ -258,7 +266,8 @@ export const cursorCliAdapter: AgentAdapter = {
         '~/.cursor/extensions',
       ],
       envPrefixes: ['CURSOR_'],
-      systemPaths: SYSTEM_CLI_PATHS,
+      // IDE-only installs are detected by the app bundle (macOS)
+      systemPaths: [...SYSTEM_CLI_PATHS, IDE_APP_BUNDLE],
       systemDirListings: [],
     };
   },
