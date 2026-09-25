@@ -4,7 +4,7 @@ All notable changes to VASO (VULNEX Agent Security Observer) will be documented 
 
 This project adheres to [Semantic Versioning](https://semver.org/).
 
-## [1.0.0] - 2026-09-23
+## [1.0.0] - 2026-09-25
 
 **First stable release.** The CLI surface and the programmatic library API (`vaso` package exports) are now covered by semantic versioning: breaking changes to either require a major version bump. Threat feeds are published at least monthly from this release onward (see SECURITY.md "Threat Feed Updates").
 
