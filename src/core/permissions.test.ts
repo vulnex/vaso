@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { FSProvider, PermissionFacts } from './fs-provider.js';
 import {
+  markUnreachable,
   posixPermissionFacts,
   queryPermissions,
   readableByOthers,
@@ -102,3 +103,59 @@ describe('queryPermissions', () => {
     await expect(queryPermissions(fs, '/gone')).rejects.toThrow('ENOENT');
   });
 });
+
+describe('markUnreachable (parent-directory mitigation)', () => {
+  // Path → mode; unlisted paths are ordinary 0755 dirs
+  function fsModes(modes: Record<string, number>, platform: NodeJS.Platform = 'darwin'): FSProvider {
+    return {
+      platform,
+      stat: vi.fn(async (p: string) => ({
+        mode: modes[p] ?? 0o755,
+        isFile: () => p in modes,
+        isDirectory: () => !(p in modes),
+      })),
+    } as unknown as FSProvider;
+  }
+
+  it('mitigates a 0644 file under macOS ~/Library (0700)', async () => {
+    const file = '/Users/u/Library/Application Support/com.meta.endo/analytics';
+    const evidence = [{ file, detail: 'Readable by other local users' }];
+    await markUnreachable(fsModes({ [file]: 0o755, '/Users/u/Library': 0o700 }), evidence);
+    expect(evidence[0]).toMatchObject({ mitigated: true });
+    expect(evidence[0].detail).toContain('/Users/u/Library (700)');
+  });
+
+  it('does not mitigate when every ancestor is traversable', async () => {
+    const evidence = [{ file: '/tmp/x/secret', detail: 'd' }];
+    await markUnreachable(fsModes({ '/tmp/x/secret': 0o644 }), evidence);
+    expect(evidence[0]).not.toHaveProperty('mitigated');
+    expect(evidence[0].detail).toBe('d');
+  });
+
+  it('notes a world-only barrier but keeps group exposure live', async () => {
+    const evidence = [{ file: '/home/u/.x/cred', detail: 'd' }];
+    await markUnreachable(fsModes({ '/home/u/.x/cred': 0o664, '/home/u': 0o750 }, 'linux'), evidence);
+    expect(evidence[0]).not.toHaveProperty('mitigated');
+    expect(evidence[0].detail).toContain('group access remains');
+  });
+
+  it('mitigates a world-only exposure behind a 0750 home', async () => {
+    const evidence = [{ file: '/home/u/.x/cred', detail: 'd' }];
+    await markUnreachable(fsModes({ '/home/u/.x/cred': 0o604, '/home/u': 0o750 }, 'linux'), evidence);
+    expect(evidence[0]).toMatchObject({ mitigated: true });
+  });
+
+  it('treats unknown ancestors as traversable and skips non-path evidence', async () => {
+    const fs = {
+      platform: 'linux',
+      stat: vi.fn(async (p: string) => {
+        if (p === '/srv/app/key') return { mode: 0o644, isFile: () => true, isDirectory: () => false };
+        throw new Error('ENOENT');
+      }),
+    } as unknown as FSProvider;
+    const evidence = [{ file: '/srv/app/key' }, { file: 'mcpServers.x.env' }];
+    await markUnreachable(fs, evidence);
+    expect(evidence.some(e => 'mitigated' in e)).toBe(false);
+  });
+});
+

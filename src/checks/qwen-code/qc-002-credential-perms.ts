@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { queryPermissions, accessibleByOthers } from '../../core/permissions.js';
+import { accessibleByOthers, markUnreachable, queryPermissions } from '../../core/permissions.js';
 
 const CREDENTIAL_FILES = [
   'settings.json',
@@ -38,6 +38,7 @@ export const qc002 = defineCheck({
       } catch {}
     }
 
+    await markUnreachable(ctx.fs, evidence);
     return h.fromEvidence(evidence, {
       passed: 'Qwen credential files have restricted permissions',
       failed: (n) => `Found ${n} Qwen credential file(s) with overly permissive mode`,

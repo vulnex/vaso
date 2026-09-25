@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { queryPermissions, readableByOthers } from '../../core/permissions.js';
+import { markUnreachable, queryPermissions, readableByOthers } from '../../core/permissions.js';
 
 export const ws007 = defineCheck({
   id: 'WS-007',
@@ -34,6 +34,7 @@ export const ws007 = defineCheck({
       // Can't stat — skip silently
     }
 
+    await markUnreachable(ctx.fs, evidence);
     return h.fromEvidence(evidence, {
       passed: 'Legacy Codeium config.json has restricted permissions',
       failed: () => 'Legacy Codeium config.json is readable by other users — restrict it to 0600',

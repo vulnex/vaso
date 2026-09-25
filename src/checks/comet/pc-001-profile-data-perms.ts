@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { queryPermissions, readableByOthers } from '../../core/permissions.js';
+import { markUnreachable, queryPermissions, readableByOthers } from '../../core/permissions.js';
 
 // Session-credential files inside the Chromium profile. Values are encrypted
 // with the OS keychain/DPAPI, but loose file modes still expose them to
@@ -41,6 +41,7 @@ export const pc001 = defineCheck({
       }
     }
 
+    await markUnreachable(ctx.fs, evidence);
     return h.fromEvidence(evidence, {
       passed: 'Comet profile data is not readable by other users',
       failed: (n) => `Found ${n} Comet profile file(s) readable by other users`,

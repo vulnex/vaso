@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { accessibleByOthers, queryPermissions } from '../../core/permissions.js';
+import { accessibleByOthers, markUnreachable, queryPermissions } from '../../core/permissions.js';
 
 export const cdx003 = defineCheck({
   id: 'CDX-003',
@@ -30,6 +30,7 @@ export const cdx003 = defineCheck({
       // Can't stat — skip silently
     }
 
+    await markUnreachable(ctx.fs, evidence);
     return h.fromEvidence(evidence, {
       passed: 'Codex auth.json has restricted permissions',
       failed: () => 'Codex auth.json is over-permissive — restrict it to 0600',

@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { queryPermissions, readableByOthers } from '../../core/permissions.js';
+import { markUnreachable, queryPermissions, readableByOthers } from '../../core/permissions.js';
 
 export const mm003 = defineCheck({
   id: 'MM-003',
@@ -44,6 +44,7 @@ export const mm003 = defineCheck({
       }
     }
 
+    await markUnreachable(ctx.fs, evidence);
     return h.fromEvidence(evidence, {
       passed: 'Muse application data is not readable by other users',
       failed: (n) => `Found ${n} Muse data path(s) readable by other users`,

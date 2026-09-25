@@ -22,13 +22,16 @@ interface FsOverrides {
 }
 
 function makeFs(o: FsOverrides = {}): FSProvider {
+  const isAncestor = (p: string) =>
+    [...Object.keys(o.modes ?? {}), ...Object.keys(o.files ?? {})].some(k => k.startsWith(p === '/' ? p : `${p}/`));
   const exists = (p: string) =>
     p in (o.files ?? {}) || p in (o.modes ?? {}) || p in (o.dirs ?? {}) || p in (o.dirEntries ?? {});
 
   return {
     access: vi.fn(async (p: string) => exists(p)),
     stat: vi.fn(async (p: string) => ({
-      mode: o.modes?.[p] ?? 0o600,
+      // Ancestors of known paths are ordinary traversable dirs (parent-dir mitigation)
+      mode: o.modes?.[p] ?? (isAncestor(p) ? 0o755 : 0o600),
       isFile: () => true,
       isDirectory: () => p in (o.dirs ?? {}) || p in (o.dirEntries ?? {}),
     })),

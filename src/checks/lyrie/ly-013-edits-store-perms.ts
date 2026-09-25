@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { queryPermissions, accessibleByOthers } from '../../core/permissions.js';
+import { accessibleByOthers, markUnreachable, queryPermissions } from '../../core/permissions.js';
 
 export const ly013 = defineCheck({
   id: 'LY-013',
@@ -30,6 +30,7 @@ export const ly013 = defineCheck({
       // skip
     }
 
+    await markUnreachable(ctx.fs, evidence);
     return h.fromEvidence(evidence, {
       passed: 'edits.json has restrictive permissions',
       failed: () => 'edits.json is over-permissive',

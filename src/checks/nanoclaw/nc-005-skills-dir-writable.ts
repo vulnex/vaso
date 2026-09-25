@@ -1,7 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { join } from 'node:path';
 import { defineCheck } from '../../core/check-builder.js';
-import { queryPermissions, writableByOthers } from '../../core/permissions.js';
+import { markUnreachable, queryPermissions, writableByOthers } from '../../core/permissions.js';
 
 export const nc005 = defineCheck({
   id: 'NC-005',
@@ -31,6 +31,7 @@ export const nc005 = defineCheck({
       // skip
     }
 
+    await markUnreachable(ctx.fs, evidence);
     return h.fromEvidence(evidence, {
       passed: 'Skills directory has restrictive permissions',
       failed: () => 'Skills directory writable by other users',

@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { queryPermissions, accessibleByOthers } from '../../core/permissions.js';
+import { accessibleByOthers, markUnreachable, queryPermissions } from '../../core/permissions.js';
 
 const SENSITIVE_FILES = [
   'credentials.json',
@@ -60,6 +60,7 @@ export const hm003 = defineCheck({
       }
     }
 
+    await markUnreachable(ctx.fs, evidence);
     return h.fromEvidence(evidence, {
       passed: 'Hermes credential files have restricted permissions',
       failed: (n) => `Found ${n} Hermes credential file(s) with over-permissive mode`,

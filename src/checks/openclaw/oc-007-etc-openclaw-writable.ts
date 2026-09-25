@@ -1,7 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { join } from 'node:path';
 import { defineCheck } from '../../core/check-builder.js';
-import { queryPermissions, writableByOthers } from '../../core/permissions.js';
+import { markUnreachable, queryPermissions, writableByOthers } from '../../core/permissions.js';
 
 const SYSTEM_DIR = '/etc/openclaw';
 const CONFIG_FILENAMES = [
@@ -60,6 +60,7 @@ export const oc007 = defineCheck({
       }
     }
 
+    await markUnreachable(ctx.fs, evidence);
     return h.fromEvidence(evidence, {
       passed: '/etc/openclaw and its configs are not group/world writable',
       failed: (n) => `${n} entry under /etc/openclaw ${n === 1 ? 'is' : 'are'} writable by non-root users`,

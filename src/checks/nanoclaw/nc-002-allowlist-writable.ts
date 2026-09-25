@@ -1,6 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { queryPermissions, writableByOthers } from '../../core/permissions.js';
+import { markUnreachable, queryPermissions, writableByOthers } from '../../core/permissions.js';
 import { chmodFile } from '../../remediation/config-writer.js';
 
 export const nc002 = defineCheck({
@@ -30,6 +30,7 @@ export const nc002 = defineCheck({
       }
     }
 
+    await markUnreachable(ctx.fs, evidence);
     return h.fromEvidence(evidence, {
       passed: 'mount-allowlist.json is not group/world writable',
       failed: () => 'mount-allowlist.json is writable by other users',

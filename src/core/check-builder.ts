@@ -28,6 +28,7 @@ export interface CheckHelpers {
    * Build from an evidence array. `passed` inferred from `evidence.length === 0`,
    * message templated from `passed`/`failed` strings. Empty evidence returns
    * `evidence: undefined` (not `[]`) to match downstream conventions.
+   * When every evidence item is `mitigated`, severity drops to 'info'.
    */
   fromEvidence(
     evidence: Evidence[],
@@ -82,7 +83,8 @@ export function defineCheck(args: DefineCheckArgs): CheckModule {
         passed: evidence.length === 0,
         message: evidence.length === 0 ? opts.passed : opts.failed(evidence.length),
         evidence,
-        severity: opts.severity,
+        // Every finding blocked by parent-directory permissions → informational
+        severity: evidence.length > 0 && evidence.every(e => e.mitigated) ? 'info' : opts.severity,
         fixable: opts.fixable,
         fixDescription: opts.fixDescription,
       });

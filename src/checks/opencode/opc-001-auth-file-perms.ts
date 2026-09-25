@@ -1,6 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { queryPermissions, accessibleByOthers } from '../../core/permissions.js';
+import { accessibleByOthers, markUnreachable, queryPermissions } from '../../core/permissions.js';
 
 export const opc001 = defineCheck({
   id: 'OPC-001',
@@ -34,6 +34,7 @@ export const opc001 = defineCheck({
       }
     }
 
+    await markUnreachable(ctx.fs, evidence);
     return h.fromEvidence(evidence, {
       passed: 'OpenCode auth.json has restricted permissions',
       failed: () => 'OpenCode auth.json is over-permissive — restrict it to 0600',

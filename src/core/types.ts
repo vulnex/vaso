@@ -34,6 +34,8 @@ export interface Evidence {
   line?: number;
   snippet?: string;
   detail?: string;
+  /** Exposure blocked by parent-directory permissions (see `markUnreachable`). */
+  mitigated?: boolean;
 }
 
 /** OWASP MCP Top 10 (2025) identifier, e.g. 'MCP03'. Tags MCP-related checks so

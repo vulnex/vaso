@@ -1,4 +1,6 @@
+import { dirname, isAbsolute } from 'node:path';
 import type { FSProvider, PermissionFacts, PermissionQuery } from './fs-provider.js';
+import type { Evidence } from './types.js';
 
 /**
  * Semantic permission queries for checks.
@@ -70,4 +72,65 @@ export function accessibleByOthers(f: PermissionFacts): boolean {
     f.groupRead || f.groupWrite || f.groupExec ||
     f.worldRead || f.worldWrite || f.worldExec
   );
+}
+
+/**
+ * Mark permission findings that other users cannot actually reach.
+ *
+ * A group/world-accessible file is only exposed if every ancestor directory
+ * is traversable (x bit) by that same class: `~/Library` (0700) on macOS or
+ * `/home/<user>` (0750) on Ubuntu blocks world access to everything beneath.
+ * For each evidence item whose file grants group and/or world access, walk
+ * the ancestors; when every class the file exposes is blocked by some
+ * ancestor, set `mitigated` and name the blocking directory in `detail`.
+ * Findings are downgraded (see `fromEvidence`), never dropped — the mode is
+ * still wrong and becomes live if the parent is ever loosened.
+ *
+ * Unknown ancestors (stat errors, 'unsupported') count as traversable, so
+ * remote/snapshot providers without ancestor data keep full severity.
+ */
+export async function markUnreachable(fs: FSProvider, evidence: Evidence[]): Promise<void> {
+  const cache = new Map<string, PermissionFacts | undefined>();
+  const factsOf = async (p: string): Promise<PermissionFacts | undefined> => {
+    if (cache.has(p)) return cache.get(p);
+    let facts: PermissionFacts | undefined;
+    try {
+      const q = await queryPermissions(fs, p);
+      facts = q === 'unsupported' ? undefined : q;
+    } catch {
+      facts = undefined;
+    }
+    cache.set(p, facts);
+    return facts;
+  };
+
+  for (const e of evidence) {
+    if (!e.file || !isAbsolute(e.file)) continue;
+    const facts = await factsOf(e.file);
+    if (!facts) continue;
+    const groupExposed = facts.groupRead || facts.groupWrite || facts.groupExec;
+    const worldExposed = facts.worldRead || facts.worldWrite || facts.worldExec;
+    if (!groupExposed && !worldExposed) continue;
+
+    let groupBarrier: string | undefined;
+    let worldBarrier: string | undefined;
+    for (let dir = dirname(e.file); ; dir = dirname(dir)) {
+      const a = await factsOf(dir);
+      if (a) {
+        if (!groupBarrier && !a.groupExec) groupBarrier = `${dir} (${a.octal})`;
+        if (!worldBarrier && !a.worldExec) worldBarrier = `${dir} (${a.octal})`;
+      }
+      if (dirname(dir) === dir) break;
+    }
+
+    const groupBlocked = !groupExposed || groupBarrier !== undefined;
+    const worldBlocked = !worldExposed || worldBarrier !== undefined;
+    if (groupBlocked && worldBlocked) {
+      e.mitigated = true;
+      const barrier = worldBarrier ?? groupBarrier;
+      e.detail = `${e.detail ? `${e.detail} — ` : ''}mitigated: not reachable by other users, parent ${barrier} blocks traversal`;
+    } else if (worldExposed && worldBarrier) {
+      e.detail = `${e.detail ? `${e.detail} — ` : ''}world access blocked by parent ${worldBarrier}; group access remains`;
+    }
+  }
 }

@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import type { Evidence, ScanContext } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { queryPermissions, readableByOthers } from '../../core/permissions.js';
+import { markUnreachable, queryPermissions, readableByOthers } from '../../core/permissions.js';
 
 /**
  * Resolve credentials.toml the same way the adapter does: XDG data dir on
@@ -59,6 +59,7 @@ export const dev002 = defineCheck({
       // Can't stat — skip silently
     }
 
+    await markUnreachable(ctx.fs, evidence);
     return h.fromEvidence(evidence, {
       passed: 'Devin credentials.toml has restricted permissions',
       failed: () => 'Devin credentials.toml is readable by other users — the API token it holds never expires',

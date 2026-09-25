@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { queryPermissions, readableByOthers } from '../../core/permissions.js';
+import { markUnreachable, queryPermissions, readableByOthers } from '../../core/permissions.js';
 
 // The Cursor IDE stores its session credentials in plaintext SQLite:
 // state.vscdb ItemTable keys cursorAuth/accessToken (JWT) and
@@ -45,6 +45,7 @@ export const cur013 = defineCheck({
       }
     }
 
+    await markUnreachable(ctx.fs, evidence);
     return h.fromEvidence(evidence, {
       passed: 'Cursor session database is not readable by other users',
       failed: (n) => `Found ${n} Cursor state.vscdb file(s) readable by other users`,

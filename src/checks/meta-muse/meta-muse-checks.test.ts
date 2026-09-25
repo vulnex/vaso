@@ -81,15 +81,25 @@ describe('MM-001: Codesign / Team ID', () => {
 describe('MM-002: Analytics Telemetry Active', () => {
   const check = metaMuseChecks.find(c => c.id === 'MM-002')!;
 
-  it('flags analytics session keys and Sparkle auto-update', async () => {
+  it('flags analytics session keys but not enabled auto-updates (the healthy default)', async () => {
     const result = await check.run(makeCtx([makeConfig('/Users/test/Library/Preferences/com.meta.endo.plist', {
       endo_analytics_session_id: 'F933D4AD',
       endo_analytics_last_event_at: '1790061524',
       SUEnableAutomaticChecks: 1,
+      SUAutomaticallyUpdate: true,
     })]));
     expect(result.passed).toBe(false);
     expect(result.severity).toBe('info');
-    expect(result.evidence).toHaveLength(2);
+    expect(result.evidence).toHaveLength(1);
+  });
+
+  it('flags disabled Sparkle update checks and automatic installs', async () => {
+    const result = await check.run(makeCtx([makeConfig('/Users/test/Library/Preferences/com.meta.endo.plist', {
+      SUEnableAutomaticChecks: 0,
+      SUAutomaticallyUpdate: false,
+    })]));
+    expect(result.passed).toBe(false);
+    expect(result.evidence?.map(e => e.snippet)).toEqual(['SUEnableAutomaticChecks = 0', 'SUAutomaticallyUpdate = 0']);
   });
 
   it('passes with no analytics state', async () => {

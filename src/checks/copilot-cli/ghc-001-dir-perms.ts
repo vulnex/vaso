@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { queryPermissions, accessibleByOthers } from '../../core/permissions.js';
+import { accessibleByOthers, markUnreachable, queryPermissions } from '../../core/permissions.js';
 
 const PROTECTED_FILES = [
   'config.json',
@@ -54,6 +54,7 @@ export const ghc001 = defineCheck({
       } catch {}
     }
 
+    await markUnreachable(ctx.fs, evidence);
     return h.fromEvidence(evidence, {
       passed: 'Copilot CLI directory and config files are owner-only',
       failed: (n) => `Found ${n} Copilot CLI path(s) with overly permissive mode`,

@@ -1,6 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { queryPermissions, readableByOthers } from '../../core/permissions.js';
+import { markUnreachable, queryPermissions, readableByOthers } from '../../core/permissions.js';
 
 export const cd002 = defineCheck({
   id: 'CD-002',
@@ -44,6 +44,7 @@ export const cd002 = defineCheck({
       }
     }
 
+    await markUnreachable(ctx.fs, evidence);
     return h.fromEvidence(evidence, {
       passed: 'claude_desktop_config.json is not group/world-readable (or holds no env material)',
       failed: (n) => `Found ${n} config file(s) with permissive read perms`,

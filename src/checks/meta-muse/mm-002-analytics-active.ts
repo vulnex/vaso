@@ -6,7 +6,7 @@ export const mm002 = defineCheck({
   name: 'Muse Analytics Telemetry Active',
   category: 'coding-agent',
   severity: 'info',
-  description: 'Report when Muse analytics/telemetry sessions are active on this machine (FBAnalytics + endo_analytics preference keys)',
+  description: 'Report when Muse analytics/telemetry sessions are active on this machine (FBAnalytics + endo_analytics preference keys) or Sparkle auto-updates are disabled',
   supportedAgents: ['meta-muse'],
   supportedPlatforms: ['darwin'],
 
@@ -28,19 +28,26 @@ export const mm002 = defineCheck({
         });
       }
 
-      if (config.data.SUEnableAutomaticChecks === 1 || config.data.SUEnableAutomaticChecks === true) {
-        evidence.push({
-          file: config.filePath,
-          snippet: 'SUEnableAutomaticChecks = 1',
-          detail: 'Sparkle auto-update checks enabled (informational — verify the appcast host is expected)',
-        });
+      // Sparkle auto-update disabled → security fixes stop arriving. Enabled
+      // (the default) is the healthy state and is not reported.
+      for (const key of ['SUEnableAutomaticChecks', 'SUAutomaticallyUpdate'] as const) {
+        const value = config.data[key];
+        if (value === 0 || value === false) {
+          evidence.push({
+            file: config.filePath,
+            snippet: `${key} = 0`,
+            detail: key === 'SUEnableAutomaticChecks'
+              ? 'Sparkle update checks disabled — Muse will not learn about security updates'
+              : 'Sparkle automatic install disabled — security updates wait for a manual install',
+          });
+        }
       }
     }
 
     return h.fromEvidence(evidence, {
       passed: 'No Muse analytics/telemetry state found',
-      failed: (n) => `Found ${n} telemetry/auto-update indicator(s) in Muse preferences`,
-      fixDescription: 'Review Muse’s privacy settings once configurable; restrict analytics if organizational policy requires it',
+      failed: (n) => `Found ${n} telemetry / disabled-update indicator(s) in Muse preferences`,
+      fixDescription: 'Review Muse’s privacy settings once configurable; restrict analytics if organizational policy requires it; keep automatic updates enabled',
     });
   },
 });

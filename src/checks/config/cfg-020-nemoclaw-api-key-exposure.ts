@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { accessibleByOthers, queryPermissions } from '../../core/permissions.js';
+import { accessibleByOthers, markUnreachable, queryPermissions } from '../../core/permissions.js';
 import { chmodFile } from '../../remediation/config-writer.js';
 
 const CREDENTIAL_FILE = 'credentials.json';
@@ -24,6 +24,7 @@ export const cfg020 = defineCheck({
     const evidence: Evidence[] = [];
     let hasPlaintextKey = false;
     let hasLoosePerms = false;
+    let permEvidence: Evidence | undefined;
 
     // Check file permissions (unix only)
     if (ctx.fs.platform === 'darwin' || ctx.fs.platform === 'linux') {
@@ -31,10 +32,13 @@ export const cfg020 = defineCheck({
         const perms = await queryPermissions(ctx.fs, credPath);
         if (perms !== 'unsupported' && accessibleByOthers(perms)) {
           hasLoosePerms = true;
-          evidence.push({
+          permEvidence = {
             file: credPath,
             detail: `Permissions: ${perms.octal} — group/other can read credentials (should be 600)`,
-          });
+          };
+          // Only the permission finding can be mitigated by parent dirs
+          await markUnreachable(ctx.fs, [permEvidence]);
+          evidence.push(permEvidence);
         }
       } catch {}
     }
@@ -76,6 +80,8 @@ export const cfg020 = defineCheck({
             hasLoosePerms && 'overly permissive file permissions',
           ].filter(Boolean).join(', ')}`,
       evidence,
+      // Loose perms alone, unreachable through parent dirs → informational
+      severity: !hasPlaintextKey && permEvidence?.mitigated ? 'info' : undefined,
       fixable: hasLoosePerms,
       fixDescription: hasLoosePerms ? 'Set credentials.json permissions to 600 (owner read/write only)' : undefined,
     });

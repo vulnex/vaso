@@ -1,6 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { accessibleByOthers, queryPermissions } from '../../core/permissions.js';
+import { accessibleByOthers, markUnreachable, queryPermissions } from '../../core/permissions.js';
 
 export const pol003 = defineCheck({
   id: 'POL-003',
@@ -33,6 +33,7 @@ export const pol003 = defineCheck({
       }
     }
 
+    await markUnreachable(ctx.fs, evidence);
     return h.fromEvidence(evidence, {
       passed: 'All session/credential files have restrictive permissions',
       failed: (n) => `${n} session/credential file(s) have overly permissive permissions`,

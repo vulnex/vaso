@@ -1,6 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { queryPermissions, accessibleByOthers } from '../../core/permissions.js';
+import { accessibleByOthers, markUnreachable, queryPermissions } from '../../core/permissions.js';
 
 const SECRET_KEY_PATTERN = /(_API_KEY|_TOKEN|_SECRET|_KEY|BEARER|PASSWORD)\s*=/i;
 
@@ -31,6 +31,7 @@ export const hm002 = defineCheck({
         // Can't stat — skip
       }
     }
+    await markUnreachable(ctx.fs, evidence);
     return h.fromEvidence(evidence, {
       passed: 'Secret-bearing Hermes .env files have restricted permissions',
       failed: () => 'Hermes .env contains secrets and is over-permissive — restrict to 0600',

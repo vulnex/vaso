@@ -1,6 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { accessibleByOthers, queryPermissions } from '../../core/permissions.js';
+import { accessibleByOthers, markUnreachable, queryPermissions } from '../../core/permissions.js';
 import { chmodFile } from '../../remediation/config-writer.js';
 
 export const cfg003 = defineCheck({
@@ -33,6 +33,7 @@ export const cfg003 = defineCheck({
       }
     }
 
+    await markUnreachable(ctx.fs, evidence);
     return h.fromEvidence(evidence, {
       passed: 'All credential config files have restrictive permissions',
       failed: (n) => `${n} credential config file(s) have overly permissive permissions`,

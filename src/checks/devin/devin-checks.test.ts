@@ -134,7 +134,12 @@ describe('DEV-002: Devin Credentials File Permissions', () => {
   it('fails when credentials.toml is readable by others', async () => {
     const fs = makeFs({
       access: vi.fn(async () => true),
-      stat: vi.fn(async () => ({ mode: 0o644, isFile: () => true, isDirectory: () => false })),
+      // Only the file is loose; parent dirs are ordinary traversable dirs
+      stat: vi.fn(async (p: string) => ({
+        mode: p.endsWith('credentials.toml') ? 0o644 : 0o755,
+        isFile: () => p.endsWith('credentials.toml'),
+        isDirectory: () => !p.endsWith('credentials.toml'),
+      })),
     });
     const result = await check.run(makeCtx([], fs));
     expect(result.passed).toBe(false);
@@ -147,6 +152,36 @@ describe('DEV-002: Devin Credentials File Permissions', () => {
     const fs = makeFs({ access });
     await check.run(makeCtx([], fs));
     expect(access).toHaveBeenCalledWith('/home/test/.local/share/devin/credentials.toml');
+  });
+
+  it('downgrades to info when a parent directory blocks other users (e.g. 0750 home)', async () => {
+    const fs = makeFs({
+      access: vi.fn(async () => true),
+      stat: vi.fn(async (p: string) => ({
+        mode: p.endsWith('credentials.toml') ? 0o604 : p === '/home/test' ? 0o750 : 0o755,
+        isFile: () => p.endsWith('credentials.toml'),
+        isDirectory: () => !p.endsWith('credentials.toml'),
+      })),
+    });
+    const result = await check.run(makeCtx([], fs));
+    expect(result.passed).toBe(false);
+    expect(result.severity).toBe('info');
+    expect(result.evidence?.[0].detail).toContain('mitigated');
+    expect(result.evidence?.[0].detail).toContain('/home/test (750)');
+  });
+
+  it('keeps full severity when a 0750 home still lets the group read a 0664 file', async () => {
+    const fs = makeFs({
+      access: vi.fn(async () => true),
+      stat: vi.fn(async (p: string) => ({
+        mode: p.endsWith('credentials.toml') ? 0o664 : p === '/home/test' ? 0o750 : 0o755,
+        isFile: () => p.endsWith('credentials.toml'),
+        isDirectory: () => !p.endsWith('credentials.toml'),
+      })),
+    });
+    const result = await check.run(makeCtx([], fs));
+    expect(result.severity).toBe('critical');
+    expect(result.evidence?.[0].detail).toContain('group access remains');
   });
 
   it('passes when credentials.toml is mode 0600', async () => {

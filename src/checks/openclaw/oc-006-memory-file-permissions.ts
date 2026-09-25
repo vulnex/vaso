@@ -1,7 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { join } from 'node:path';
 import { defineCheck } from '../../core/check-builder.js';
-import { accessibleByOthers, queryPermissions } from '../../core/permissions.js';
+import { accessibleByOthers, markUnreachable, queryPermissions } from '../../core/permissions.js';
 import { chmodFile } from '../../remediation/config-writer.js';
 
 const MEMORY_FILES = ['memory.json', 'conversations.db'];
@@ -37,6 +37,7 @@ export const oc006 = defineCheck({
       }
     }
 
+    await markUnreachable(ctx.fs, evidence);
     return h.fromEvidence(evidence, {
       passed: 'Memory files are owner-only (or absent)',
       failed: (n) => `${n} memory file${n === 1 ? '' : 's'} readable by group/other`,

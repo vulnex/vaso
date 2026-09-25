@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { queryPermissions, readableByOthers } from '../../core/permissions.js';
+import { markUnreachable, queryPermissions, readableByOthers } from '../../core/permissions.js';
 
 const EDITOR_DIR_NAMES = ['Windsurf', 'Devin'];
 
@@ -52,6 +52,7 @@ export const ws008 = defineCheck({
       }
     }
 
+    await markUnreachable(ctx.fs, evidence);
     return h.fromEvidence(evidence, {
       passed: 'Windsurf editor state DB has restricted permissions (or is absent)',
       failed: (n) => `Found ${n} editor state DB file(s) readable by other users`,
