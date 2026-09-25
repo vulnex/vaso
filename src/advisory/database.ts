@@ -838,6 +838,103 @@ const BUNDLED_ADVISORIES: Advisory[] = [
     tags: ['mcp', 'cve'],
     affectedDependency: { name: '@dynatrace-oss/dynatrace-mcp-server', versionConstraint: '<2.0.0' },
   },
+
+  // ── 2026-09-25: Devin CLI security fixes ───────────────────────────
+  // From the Devin CLI stable changelog bundled with 3000.11.3 (no CVE IDs
+  // assigned). Devin versions are calver 2026.M.D-N (N = build, ordered as a
+  // prerelease of 2026.M.D) and later 3000.x.y, so '<3000.x.y' also covers
+  // every 2026.* build.
+  {
+    id: 'VASO-DEVIN-2026-001',
+    title: 'Devin CLI edit tools write through symlinks (approved edit redirected)',
+    agent: 'devin',
+    affectedVersions: '<3000.3.27',
+    fixedVersion: '3000.3.27',
+    severity: 'critical',
+    description:
+      'Before v3000.3.27 the edit, write, apply_patch and notebook_edit tools followed symlinks, so an edit the user approved on an in-workspace path could be redirected to an unexpected target such as a shell rc file or credential (GhostApproval class, CWE-61). v3000.3.27 refuses to write through a symlink. Source: Devin CLI stable changelog.',
+    reference: 'https://github.com/CognitionAI/devin-cli/releases',
+    published: '2026-08-01',
+    tags: ['coding-agent', 'symlink', 'ghostapproval'],
+  },
+  {
+    id: 'VASO-DEVIN-2026-002',
+    title: 'Devin CLI deny rules bypassable (base directory, Windows command chains)',
+    agent: 'devin',
+    affectedVersions: '<3000.3.22',
+    fixedVersion: '3000.3.22',
+    severity: 'critical',
+    description:
+      'Before v3000.3.22 a recursive deny rule such as Read(/etc/**) did not cover the base directory itself, and on Windows a denied command hidden behind a safe leading command in a &&, || or & chain (e.g. Get-ChildItem && git push) was not blocked because the PowerShell parser collapsed the chain into one scope. Source: Devin CLI stable changelog.',
+    reference: 'https://github.com/CognitionAI/devin-cli/releases',
+    published: '2026-07-29',
+    tags: ['coding-agent', 'permissions', 'bypass'],
+  },
+  {
+    id: 'VASO-DEVIN-2026-003',
+    title: 'Devin CLI permission rules mismatch on paths containing glob metacharacters',
+    agent: 'devin',
+    affectedVersions: '<3000.5.20',
+    fixedVersion: '3000.5.20',
+    severity: 'warning',
+    description:
+      'Before v3000.5.20 permission rules did not match correctly when a workspace, config or granted directory name contained glob metacharacters ([, ], {, }, *, ?), so allow/deny rules could apply to the wrong paths. Source: Devin CLI stable changelog.',
+    reference: 'https://github.com/CognitionAI/devin-cli/releases',
+    published: '2026-08-21',
+    tags: ['coding-agent', 'permissions'],
+  },
+  {
+    id: 'VASO-DEVIN-2026-004',
+    title: 'Devin CLI discards all user settings on a single invalid config value',
+    agent: 'devin',
+    affectedVersions: '<3000.5.20',
+    fixedVersion: '3000.5.20',
+    severity: 'warning',
+    description:
+      'Before v3000.5.20 a single invalid value in config.json caused all user settings to be discarded — including permission deny/ask rules — so one typo silently removed configured guardrails. Source: Devin CLI stable changelog.',
+    reference: 'https://github.com/CognitionAI/devin-cli/releases',
+    published: '2026-08-21',
+    tags: ['coding-agent', 'permissions', 'config'],
+  },
+  {
+    id: 'VASO-DEVIN-2026-005',
+    title: 'Devin CLI /add-dir attaches untrusted directories without a workspace-trust check',
+    agent: 'devin',
+    affectedVersions: '<3000.4.16',
+    fixedVersion: '3000.4.16',
+    severity: 'warning',
+    description:
+      'Before v3000.4.16 /add-dir attached a directory without checking workspace trust, so an untrusted directory\'s rules, skills and config could be loaded into the session. v3000.4.16 checks trust and revokes sandbox write access when the directory is removed. Source: Devin CLI stable changelog.',
+    reference: 'https://github.com/CognitionAI/devin-cli/releases',
+    published: '2026-08-10',
+    tags: ['coding-agent', 'workspace-trust'],
+  },
+  {
+    id: 'VASO-DEVIN-2026-006',
+    title: 'Devin CLI autonomous mode auto-approved tools that run outside the sandbox',
+    agent: 'devin',
+    affectedVersions: '<2026.4.9-0',
+    fixedVersion: '2026.4.9-0',
+    severity: 'warning',
+    description:
+      'Before v2026.4.9-0 autonomous mode silently auto-approved privacy-sensitive tools (computer use, screen recording, browser) that operate outside the OS sandbox, and ACP sessions silently fell back to local CLI credentials instead of requiring host-provided ones. Source: Devin CLI stable changelog.',
+    reference: 'https://github.com/CognitionAI/devin-cli/releases',
+    published: '2026-04-09',
+    tags: ['coding-agent', 'auto-approve', 'sandbox'],
+  },
+  {
+    id: 'VASO-DEVIN-2026-007',
+    title: 'Devin CLI ignored blocking pre-user-prompt hooks',
+    agent: 'devin',
+    affectedVersions: '<2026.5.26-0',
+    fixedVersion: '2026.5.26-0',
+    severity: 'warning',
+    description:
+      'Before v2026.5.26-0 a pre-user-prompt hook that exited with code 2 (block) was silently ignored, so policy hooks meant to stop a prompt did not take effect. Source: Devin CLI stable changelog.',
+    reference: 'https://github.com/CognitionAI/devin-cli/releases',
+    published: '2026-05-26',
+    tags: ['coding-agent', 'hooks'],
+  },
 ];
 
 let _db: AdvisoryDatabase | null = null;

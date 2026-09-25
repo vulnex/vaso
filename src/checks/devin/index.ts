@@ -6,6 +6,9 @@ import { dev004 } from './dev-004-unpinned-mcp.js';
 import { dev005 } from './dev-005-insecure-mcp-url.js';
 import { dev006 } from './dev-006-hooks-present.js';
 import { dev007 } from './dev-007-agents-md-secrets.js';
+import { dev008 } from './dev-008-workspace-trust.js';
+import { dev009 } from './dev-009-required-plugins.js';
+import { dev010 } from './dev-010-sandbox-exclusions.js';
 
 export const devinChecks: CheckModule[] = [
   dev001,
@@ -15,4 +18,7 @@ export const devinChecks: CheckModule[] = [
   dev005,
   dev006,
   dev007,
+  dev008,
+  dev009,
+  dev010,
 ];

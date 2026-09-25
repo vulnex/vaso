@@ -4,6 +4,7 @@ import {
   getAdvisoryDatabase,
   reloadAdvisoryDatabase,
 } from './database.js';
+import { satisfies } from '../core/semver.js';
 
 describe('AdvisoryDatabase', () => {
   beforeEach(() => {
@@ -74,3 +75,27 @@ describe('AdvisoryDatabase', () => {
     expect(cfgs.length).toBeGreaterThan(0);
   });
 });
+
+// Devin CLI versions: calver 2026.M.D-N (N = build, ordered as a prerelease of
+// 2026.M.D), then 3000.x.y. Ranges must hold across both schemes.
+describe('Devin CLI advisories — version ranges', () => {
+  const devin = buildBundledAdvisoryDatabase().advisories.filter(a => a.agent === 'devin');
+  const affecting = (v: string) => devin.filter(a => satisfies(v, a.affectedVersions)).map(a => a.id).sort();
+
+  it('ships the seven changelog-derived advisories', () => {
+    expect(devin.map(a => a.id).sort()).toEqual([1, 2, 3, 4, 5, 6, 7].map(n => `VASO-DEVIN-2026-00${n}`));
+  });
+
+  it('flags nothing on the validated live version 3000.11.3', () => {
+    expect(affecting('3000.11.3')).toEqual([]);
+  });
+
+  it('orders 2026.* builds below 3000.x and respects -N build boundaries', () => {
+    expect(affecting('3000.3.26')).toEqual(['VASO-DEVIN-2026-001', 'VASO-DEVIN-2026-003', 'VASO-DEVIN-2026-004', 'VASO-DEVIN-2026-005']);
+    expect(affecting('2026.4.8-3')).toContain('VASO-DEVIN-2026-006');
+    expect(affecting('2026.4.9-0')).not.toContain('VASO-DEVIN-2026-006');
+    expect(affecting('2026.5.26-0')).not.toContain('VASO-DEVIN-2026-007');
+    expect(affecting('2026.5.20-2')).toContain('VASO-DEVIN-2026-007');
+  });
+});
+

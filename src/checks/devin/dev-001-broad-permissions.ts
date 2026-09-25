@@ -4,7 +4,7 @@ import { buildBroadPaths, isBroadPath } from '../../analyzers/broad-paths.js';
 
 // Commands whose unrestricted Exec() allowance hands the agent arbitrary
 // code execution or network egress.
-const DANGEROUS_COMMANDS = new Set([
+export const DANGEROUS_COMMANDS = new Set([
   'curl', 'wget', 'bash', 'sh', 'zsh', 'perl', 'python', 'node',
   'npx', 'ssh', 'sudo', 'chmod', 'rm',
 ]);
@@ -22,7 +22,7 @@ interface ParsedRule {
 }
 
 /** Parse Devin's `Action(resource)` permission syntax; bare `Action` allowed. */
-function parseRule(entry: string): ParsedRule | undefined {
+export function parseRule(entry: string): ParsedRule | undefined {
   const m = /^([A-Za-z_]+)\s*(?:\((.*)\))?$/.exec(entry.trim());
   if (!m) return undefined;
   return { action: m[1], resource: m[2]?.trim() };
@@ -35,7 +35,7 @@ function globBase(resource: string): string {
 }
 
 /** First token of an Exec resource, path-stripped: `Exec(/bin/bash -c)` → `bash`. */
-function execCommandName(resource: string): string {
+export function execCommandName(resource: string): string {
   const first = resource.split(/\s+/)[0] ?? '';
   return first.split('/').pop() ?? first;
 }

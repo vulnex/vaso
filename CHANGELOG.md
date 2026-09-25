@@ -4,6 +4,20 @@ All notable changes to VASO (VULNEX Agent Security Observer) will be documented 
 
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **Three Devin CLI checks from the vendor's 3000.11.3 docs and binary (checks 291 → 294; Devin CLI 7 → 10).**
+  - **DEV-008 Workspace Trust Bypassed or Over-Broad** (critical) — `skip_workspace_trust: true` or `respect_workspace_trust: false` in Devin config (both keys present in the 3000.11.3 binary), or an entry in `~/.local/share/devin/cli/trusted_workspaces.json` covering `/`, the home directory, `/tmp` or `/etc`. With trust off or over-broad, a cloned repo's `.devin/` hooks, MCP servers and plugins load without a prompt.
+  - **DEV-009 Repository Config Auto-Installs Plugins** (warning; critical for `http://` sources) — `requiredPlugins` in a committed project `.devin/config.json`, which Devin auto-installs (recursively) for everyone who opens the repo.
+  - **DEV-010 Over-Broad Sandbox Exclusions** (critical for `Exec(*)`/`Exec(**)`, warning for shells/interpreters/downloaders) — `sandbox.excluded.allow` rules run matching commands outside the OS sandbox with no prompt.
+- **Seven Devin CLI advisories (VASO-DEVIN-2026-001–007)** from the vendor's stable changelog (no CVE IDs assigned): edit tools writing through symlinks (`<3000.3.27`), deny-rule bypasses on base directories and Windows command chains (`<3000.3.22`), glob-metacharacter rule mismatch and settings reset on an invalid config value (`<3000.5.20`), `/add-dir` skipping workspace trust (`<3000.4.16`), autonomous mode auto-approving tools outside the sandbox (`<2026.4.9-0`), and ignored blocking pre-prompt hooks (`<2026.5.26-0`). Ranges are tested across Devin's calver `2026.M.D-N` and `3000.x.y` schemes. Mirrored in signed advisory feed v5 for clients on 1.0.0.
+
+### Changed
+
+- **Devin adapter matches Devin's own discovery.** Project config is found by walking up from the working directory to the repo root (nearest `.git`/`.jj`), including nested `.devin/` dirs in between; the standalone `.devin/hooks.v1.json` hooks file is loaded (DEV-006 now sees it); and skill roots (`~/.config/devin/skills`, `~/.config/cognition/skills`, `~/.agents/skills`, and the project `.devin/`, `.cognition/`, `.agents/` equivalents) are recorded so the SKL checks run on Devin skills. Running from `$HOME` does not duplicate user skill roots as project ones.
+
 ## [1.0.0] - 2026-09-25
 
 **First stable release.** The CLI surface and the programmatic library API (`vaso` package exports) are now covered by semantic versioning: breaking changes to either require a major version bump. Threat feeds are published at least monthly from this release onward (see SECURITY.md "Threat Feed Updates").

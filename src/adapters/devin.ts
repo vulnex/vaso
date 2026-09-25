@@ -1,4 +1,4 @@
-import { basename, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import type { AgentAdapter, DetectOptions } from './adapter.js';
 import type { AgentInstallation, GatewayInfo, ParsedConfig } from '../core/types.js';
 import type { ProbeManifest } from '../core/snapshot-types.js';
@@ -30,6 +30,40 @@ const PROJECT_CONFIG_FILES = [
   join('.devin', 'mcp_config.json'),
   join('.devin', 'mcp_config.local.json'),
 ];
+
+/** Standalone project hooks file — the whole file is the hooks object. */
+const PROJECT_HOOKS_FILE = join('.devin', 'hooks.v1.json');
+
+// Skill roots from `devin skills paths` (3000.11.3): <name>/SKILL.md beneath each.
+const USER_SKILL_DIRS = [join('.config', 'devin', 'skills'), join('.config', 'cognition', 'skills'), join('.agents', 'skills')];
+const PROJECT_SKILL_DIRS = [join('.devin', 'skills'), join('.cognition', 'skills'), join('.agents', 'skills')];
+
+/**
+ * Devin finds the project root by walking up from cwd to the nearest `.git`
+ * or `.jj` directory and loads `.devin/` from there; nested `.devin/` dirs
+ * between root and cwd also apply (closer wins). Returns the dirs to load,
+ * root first. Without a repo marker only cwd itself is considered.
+ */
+async function projectDirs(cwd: string, fs: FSProvider): Promise<{ root: string; dirs: string[] }> {
+  const chain: string[] = [];
+  for (let dir = cwd; ; dir = dirname(dir)) {
+    chain.push(dir);
+    if (await fs.access(join(dir, '.git')) || await fs.access(join(dir, '.jj'))) {
+      return { root: dir, dirs: chain.reverse() };
+    }
+    if (dirname(dir) === dir) break;
+  }
+  return { root: cwd, dirs: [cwd] };
+}
+
+async function existingDirs(base: string, rels: string[], fs: FSProvider): Promise<string[]> {
+  const found: string[] = [];
+  for (const rel of rels) {
+    const dir = join(base, rel);
+    if (await fs.access(dir)) found.push(dir);
+  }
+  return found;
+}
 
 /**
  * Devin CLI (Cognition) follows the XDG Base Directory spec on POSIX:
@@ -121,12 +155,15 @@ export const devinAdapter: AgentAdapter = {
 
       // Devin is a Rust binary — `devin --version` is fast; keep the timeout tight.
       const version = queryCliVersion(cliBinary, fs, { timeoutMs: 3000 });
+      const skillsDirs = await existingDirs(home, USER_SKILL_DIRS, fs);
 
       installations.push({
         agent: 'devin',
         version,
         installDir: configDir,
         configFiles,
+        skillsDir: skillsDirs[0],
+        skillsDirs: skillsDirs.length > 0 ? skillsDirs : undefined,
         user: options?.allUsers ? user : undefined,
         cliBinary,
       });
@@ -134,19 +171,34 @@ export const devinAdapter: AgentAdapter = {
 
     // Project-level: <cwd>/.devin/{config,mcp_config}[.local].json
     const cwd = process.cwd();
+    const { root, dirs } = await projectDirs(cwd, fs);
+    // Running from $HOME makes project paths coincide with user ones — skip those
+    const alreadyLoaded = new Set(installations.flatMap(i => i.configFiles.map(c => c.filePath)));
+    const userSkillsDirs = new Set(installations.flatMap(i => i.skillsDirs ?? []));
     const projectConfigs: ParsedConfig[] = [];
-    for (const rel of PROJECT_CONFIG_FILES) {
-      const filePath = join(cwd, rel);
-      if (!(await fs.access(filePath))) continue;
-      const parsed = await loadDevinConfig(filePath, fs);
-      if (parsed) projectConfigs.push(parsed);
+    const projectSkillsDirs: string[] = [];
+    for (const dir of dirs) {
+      for (const rel of PROJECT_CONFIG_FILES) {
+        const filePath = join(dir, rel);
+        if (alreadyLoaded.has(filePath) || !(await fs.access(filePath))) continue;
+        const parsed = await loadDevinConfig(filePath, fs);
+        if (parsed) projectConfigs.push(parsed);
+      }
+      const hooksPath = join(dir, PROJECT_HOOKS_FILE);
+      if (await fs.access(hooksPath)) {
+        const parsed = await loadDevinConfig(hooksPath, fs);
+        if (parsed) projectConfigs.push({ ...parsed, data: { hooks: parsed.data } });
+      }
+      projectSkillsDirs.push(...(await existingDirs(dir, PROJECT_SKILL_DIRS, fs)).filter(d => !userSkillsDirs.has(d)));
     }
-    if (projectConfigs.length > 0) {
+    if (projectConfigs.length > 0 || projectSkillsDirs.length > 0) {
       installations.push({
         agent: 'devin',
-        agentName: `project:${basename(cwd)}`,
-        installDir: join(cwd, '.devin'),
+        agentName: `project:${basename(root)}`,
+        installDir: join(root, '.devin'),
         configFiles: projectConfigs,
+        skillsDir: projectSkillsDirs[0],
+        skillsDirs: projectSkillsDirs.length > 0 ? projectSkillsDirs : undefined,
         profile: 'project',
       });
     }
@@ -161,9 +213,10 @@ export const devinAdapter: AgentAdapter = {
     return USER_CONFIG_FILES.map(f => join(configDir, f));
   },
 
-  getSkillsDir(_installDir: string): string | undefined {
-    // Devin CLI has no fixed skills directory surface.
-    return undefined;
+  getSkillsDir(installDir: string): string | undefined {
+    // Primary skill root beside the config: ~/.config/devin/skills or <root>/.devin/skills.
+    // detect() also records the other roots (cognition/, .agents/) in skillsDirs.
+    return join(installDir, 'skills');
   },
 
   getGatewayInfo(_config: Record<string, unknown>): GatewayInfo | undefined {

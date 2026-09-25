@@ -39,8 +39,8 @@ function makeCtx(configs: ParsedConfig[], fs?: FSProvider): ScanContext {
 }
 
 describe('Devin checks', () => {
-  it('exports 7 checks', () => {
-    expect(devinChecks).toHaveLength(7);
+  it('exports 10 checks', () => {
+    expect(devinChecks).toHaveLength(10);
   });
 
   it('all checks have coding-agent category and supportedAgents', () => {
@@ -52,7 +52,7 @@ describe('Devin checks', () => {
 
   it('all check IDs start with DEV-', () => {
     for (const check of devinChecks) {
-      expect(check.id).toMatch(/^DEV-00[1-7]$/);
+      expect(check.id).toMatch(/^DEV-0(0[1-9]|10)$/);
     }
   });
 });
@@ -574,3 +574,84 @@ describe('Devin live-validation fixes', () => {
     });
   });
 });
+
+describe('DEV-008: Devin Workspace Trust Bypassed or Over-Broad', () => {
+  const check = devinChecks.find(c => c.id === 'DEV-008')!;
+  const TRUST = '/home/test/.local/share/devin/cli/trusted_workspaces.json';
+  const trustFs = (paths: string[]) => makeFs({
+    access: vi.fn(async (p: string) => p === TRUST),
+    readFile: vi.fn(async () => JSON.stringify({ trusted_paths: paths })),
+  });
+
+  it('flags skip_workspace_trust: true and respect_workspace_trust: false', async () => {
+    const result = await check.run(makeCtx([
+      makeConfig('config.json', { skip_workspace_trust: true, respect_workspace_trust: false }),
+    ], trustFs([])));
+    expect(result.passed).toBe(false);
+    expect(result.severity).toBe('critical');
+    expect(result.evidence).toHaveLength(2);
+  });
+
+  it('flags trusted workspaces covering home or / but not a single repo', async () => {
+    const result = await check.run(makeCtx([], trustFs(['/home/test', '/', '/home/test/work/app'])));
+    expect(result.evidence?.map(e => e.snippet)).toEqual(['trusted_paths: "/home/test"', 'trusted_paths: "/"']);
+  });
+
+  it('passes with trust enforced and narrow trusted paths', async () => {
+    const result = await check.run(makeCtx([makeConfig('config.json', { skip_workspace_trust: false })], trustFs(['/home/test/work/app'])));
+    expect(result.passed).toBe(true);
+  });
+});
+
+describe('DEV-009: Devin Repository Config Auto-Installs Plugins', () => {
+  const check = devinChecks.find(c => c.id === 'DEV-009')!;
+  const projectCtx = (configs: ParsedConfig[]): ScanContext => ({
+    installation: { agent: 'devin', installDir: '/work/app/.devin', configFiles: configs, profile: 'project' },
+    configs, platform: 'linux', fs: makeFs(),
+  });
+
+  it('warns on requiredPlugins in a committed project config', async () => {
+    const result = await check.run(projectCtx([makeConfig('/work/app/.devin/config.json', {
+      requiredPlugins: ['acme/secure-base', { source: 'github', repo: 'acme/audit-logging' }],
+    })]));
+    expect(result.passed).toBe(false);
+    expect(result.severity).toBe('warning');
+    expect(result.evidence).toHaveLength(2);
+  });
+
+  it('is critical for plaintext http:// plugin sources', async () => {
+    const result = await check.run(projectCtx([makeConfig('/work/app/.devin/config.json', {
+      requiredPlugins: [{ source: 'url', url: 'http://git.example.test/p.git' }],
+    })]));
+    expect(result.severity).toBe('critical');
+  });
+
+  it('ignores gitignored config.local.json and user-level config', async () => {
+    const local = await check.run(projectCtx([makeConfig('/work/app/.devin/config.local.json', { requiredPlugins: ['a/b'] })]));
+    const user = await check.run(makeCtx([makeConfig('/home/test/.config/devin/config.json', { requiredPlugins: ['a/b'] })]));
+    expect(local.passed).toBe(true);
+    expect(user.passed).toBe(true);
+  });
+});
+
+describe('DEV-010: Devin Over-Broad Sandbox Exclusions', () => {
+  const check = devinChecks.find(c => c.id === 'DEV-010')!;
+  const run = (allow: string[]) => check.run(makeCtx([makeConfig('config.json', { sandbox: { excluded: { allow } } })]));
+
+  it('is critical when every command is excluded', async () => {
+    const result = await run(['Exec(**)']);
+    expect(result.severity).toBe('critical');
+  });
+
+  it('warns when a shell or downloader is excluded', async () => {
+    const result = await run(['Exec(bash)', 'Exec(curl *)']);
+    expect(result.severity).toBe('warning');
+    expect(result.evidence).toHaveLength(2);
+  });
+
+  it('passes scoped exclusions like the documented git example', async () => {
+    const result = await run(['Exec(git status *)']);
+    expect(result.passed).toBe(true);
+  });
+});
+
