@@ -8,6 +8,7 @@ import { loadConfig } from '../core/config-loader.js';
 import { findNvmBinary, nvmBinaryGlob, npmPackageJsonGlobs } from './nvm-binary.js';
 import { getUserHomeDirs } from './openclaw.js';
 import { queryCliVersion, readPackageVersion } from './version-query.js';
+import { withoutLoadedConfigs } from './project-configs.js';
 
 const CLAUDE_DIR_NAME = '.claude';
 const SETTINGS_FILES = ['settings.json', 'settings.local.json'];
@@ -142,7 +143,7 @@ export const claudeCodeAdapter: AgentAdapter = {
     const cwd = process.cwd();
     const projectClaudeDir = join(cwd, CLAUDE_DIR_NAME);
     if (await fs.access(projectClaudeDir)) {
-      const projectConfigs = await loadSettingsFiles(projectClaudeDir, fs);
+      const projectConfigs = withoutLoadedConfigs(await loadSettingsFiles(projectClaudeDir, fs), installations);
       if (projectConfigs.length > 0) {
         installations.push({
           agent: 'claude-code',

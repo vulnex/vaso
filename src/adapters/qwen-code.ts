@@ -8,6 +8,7 @@ import { stripJsonc } from '../core/jsonc.js';
 import { findNvmBinary, nvmBinaryGlob, npmPackageJsonGlobs } from './nvm-binary.js';
 import { getUserHomeDirs } from './openclaw.js';
 import { queryCliVersion, readPackageVersion } from './version-query.js';
+import { withoutLoadedConfigs } from './project-configs.js';
 
 const QWEN_DIR_NAME = '.qwen';
 const SETTINGS_FILE = 'settings.json';
@@ -138,7 +139,7 @@ export const qwenCodeAdapter: AgentAdapter = {
     const cwd = process.cwd();
     const projectQwenDir = join(cwd, QWEN_DIR_NAME);
     if (await fs.access(projectQwenDir)) {
-      const projectConfigs = await loadSettings(projectQwenDir, fs);
+      const projectConfigs = withoutLoadedConfigs(await loadSettings(projectQwenDir, fs), installations);
       if (projectConfigs.length > 0) {
         installations.push({
           agent: 'qwen-code',
