@@ -61,7 +61,8 @@
   },
   "files": [
     "dist",
-    "bin",
+    "bin/vaso",
+    "bin/vaso-quick.sh",
     "probe/checksums.json",
     "LICENSE",
     "README.md"
