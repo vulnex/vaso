@@ -246,6 +246,7 @@ export const hermesAdapter: AgentAdapter = {
       commands: [
         { id: 'hermes-which', cmd: 'which', args: ['hermes'], timeout: 3000 },
         { id: 'hermes-version', cmd: 'hermes', args: ['version'], timeout: 15000 },
+        { id: 'hermes-version-flag', cmd: 'hermes', args: ['--version'], timeout: 15000 },
       ],
       directoryListings: [
         '~/.hermes',

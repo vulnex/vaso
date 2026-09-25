@@ -10,6 +10,7 @@ export function buildProbeManifest(adapters: AgentAdapter[]): ProbeManifest {
     envPrefixes: [],
     systemPaths: [],
     systemDirListings: [],
+    metadataGlobPatterns: [],
   };
 
   for (const adapter of adapters) {
@@ -22,6 +23,7 @@ export function buildProbeManifest(adapters: AgentAdapter[]): ProbeManifest {
       merged.envPrefixes.push(...m.envPrefixes);
       if (m.systemPaths) merged.systemPaths!.push(...m.systemPaths);
       if (m.systemDirListings) merged.systemDirListings!.push(...m.systemDirListings);
+      if (m.metadataGlobPatterns) merged.metadataGlobPatterns!.push(...m.metadataGlobPatterns);
     }
   }
 
@@ -34,9 +36,17 @@ export function buildProbeManifest(adapters: AgentAdapter[]): ProbeManifest {
     { id: 'launchctl-list', cmd: 'launchctl', args: ['list'], timeout: 5000 },
   );
 
-  // Add runtime check paths
-  merged.directoryListings.push('~/Library/LaunchAgents');
-  merged.systemDirListings!.push('/Library/LaunchAgents', '/Library/LaunchDaemons');
+  // Add runtime check paths — RUN-001 lists these dirs and reads matching
+  // units/plists to see what they execute (systemd on Linux, launchd on macOS)
+  merged.directoryListings.push('~/Library/LaunchAgents', '~/.config/systemd/user');
+  merged.systemDirListings!.push('/Library/LaunchAgents', '/Library/LaunchDaemons', '/etc/systemd/system');
+  merged.globPatterns.push(
+    '~/Library/LaunchAgents/*.plist',
+    '~/.config/systemd/user/*.service*',
+    '/Library/LaunchAgents/*.plist',
+    '/Library/LaunchDaemons/*.plist',
+    '/etc/systemd/system/*.service',
+  );
 
   // MCP host configs that aren't owned by any single adapter
   // (Claude Desktop, Cursor, Windsurf — consumed by `vaso mcp scan`)
@@ -54,6 +64,7 @@ export function buildProbeManifest(adapters: AgentAdapter[]): ProbeManifest {
   merged.envPrefixes = [...new Set(merged.envPrefixes)];
   merged.systemPaths = [...new Set(merged.systemPaths!)];
   merged.systemDirListings = [...new Set(merged.systemDirListings!)];
+  merged.metadataGlobPatterns = [...new Set(merged.metadataGlobPatterns!)];
 
   // Deduplicate commands by id
   const seen = new Set<string>();

@@ -6,6 +6,9 @@ export interface ProbeManifest {
   envPrefixes: string[];
   systemPaths?: string[];
   systemDirListings?: string[];
+  /** Globs recorded as metadata only (exists + mode, no content) — private
+   *  data where checks need permissions, e.g. conversation stores. */
+  metadataGlobPatterns?: string[];
 }
 
 export interface CommandRequest {
@@ -26,6 +29,10 @@ export interface ProbeSnapshot {
   directories: Record<string, string[]>;
   commandOutputs: Record<string, CommandOutput>;
   env: Record<string, string>;
+  /** Permission bits of listed directories and user homes (probe ≥ 1.0.0). */
+  directoryModes?: Record<string, number>;
+  /** The probe's content budget ran out; later files carry metadata only. */
+  truncated?: boolean;
 }
 
 export interface PrivilegeInfo {
@@ -42,6 +49,9 @@ export interface FileEntry {
   content: string;
   mode: number;
   exists: boolean;
+  /** Exists, but content was deliberately not collected (size cap, content
+   *  budget, binary asset, or a metadata-only glob). */
+  contentOmitted?: boolean;
 }
 
 export interface CommandOutput {

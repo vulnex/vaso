@@ -34,7 +34,8 @@ const EXCLUDED_DIRS = new Set([
   '__pycache__',
 ]);
 
-function isExcludedPath(root: string, parentPath: string | undefined): boolean {
+/** True when parentPath lies under a vendor/build/VCS dir (EXCLUDED_DIRS) below root. */
+export function isExcludedPath(root: string, parentPath: string | undefined): boolean {
   if (!parentPath) return false;
   const rel = relative(root, parentPath);
   if (!rel || rel.startsWith('..')) return false;

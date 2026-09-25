@@ -100,6 +100,13 @@ function establishControlMaster(target: SSHTarget, controlPath: string, timeout:
 }
 
 /**
+ * Largest probe output accepted. V8 strings cap near 512 MiB (0x1fffffe8
+ * chars); decoding a larger buffer used to crash the CLI outright. The probe
+ * budgets its own content (256 MiB) so this is a backstop for older probes.
+ */
+export const MAX_REMOTE_OUTPUT_BYTES = 460 * 1024 * 1024;
+
+/**
  * Run ssh/scp over an existing ControlMaster socket.
  * No password prompt — the connection is already authenticated.
  */
@@ -116,10 +123,29 @@ function runOverControl(
 
     const chunks: Buffer[] = [];
     const errChunks: Buffer[] = [];
-    child.stdout.on('data', (d: Buffer) => chunks.push(d));
+    let received = 0;
+    let oversized = false;
+    child.stdout.on('data', (d: Buffer) => {
+      received += d.length;
+      if (received > MAX_REMOTE_OUTPUT_BYTES) {
+        if (!oversized) {
+          oversized = true;
+          chunks.length = 0;
+          child.kill();
+        }
+        return;
+      }
+      chunks.push(d);
+    });
     child.stderr.on('data', (d: Buffer) => errChunks.push(d));
 
     child.on('close', (code) => {
+      if (oversized) {
+        reject(new Error(
+          `Remote probe output exceeded ${Math.round(MAX_REMOTE_OUTPUT_BYTES / 1024 / 1024)} MiB and was aborted — ` +
+          'the host has unusually large agent data; update to the current vaso-probe, which budgets its output.'));
+        return;
+      }
       const stdout = Buffer.concat(chunks).toString('utf-8');
       const stderr = Buffer.concat(errChunks).toString('utf-8');
       if (code === 0) {

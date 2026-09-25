@@ -1,3 +1,4 @@
+import type { FSProvider } from '../core/fs-provider.js';
 import type { AgentType, AgentInstallation, GatewayInfo, ModelRef, ParsedConfig, ZoneGraph } from '../core/types.js';
 
 export interface DetectOptions {
@@ -20,7 +21,9 @@ export interface AgentAdapter {
    *  async; callers should `await`. */
   getModels?(configs: ParsedConfig[], fs?: import('../core/fs-provider.js').FSProvider): ModelRef[] | Promise<ModelRef[]>;
   getMemoryFiles?(installDir: string): string[];
-  getCredentialPaths?(installDir: string): string[];
+  /** `fs` is the provider being scanned (a remote snapshot on --host); adapters
+   *  resolving paths from $HOME must use it, not the scanner host's home. */
+  getCredentialPaths?(installDir: string, fs?: FSProvider): string[];
   getCLICommand?(): string;
   getProbeManifest?(): import('../core/snapshot-types.js').ProbeManifest;
   getZoneGraph?(): ZoneGraph;

@@ -463,3 +463,36 @@ describe('SnapshotFSProvider', () => {
     });
   });
 });
+
+// Remote-scan parity fixes found by the 2026-09-25 deep test (Mac/Linux over SSH).
+describe('SnapshotFSProvider — probe ≥ 1.0.0 fields', () => {
+  it('treats omitted content as unreadable, not empty', async () => {
+    const provider = new SnapshotFSProvider(makeSnapshot({
+      files: { '/home/testuser/.codex/sessions/a.jsonl': { content: '', mode: 0o600, exists: true, contentOmitted: true } },
+    }));
+    await expect(provider.readFile('/home/testuser/.codex/sessions/a.jsonl')).rejects.toThrow('content not collected');
+    expect(await provider.access('/home/testuser/.codex/sessions/a.jsonl')).toBe(true);
+  });
+
+  it('keeps directory-ness from the probe listing (OpenClaw agents/<name>/)', async () => {
+    const provider = new SnapshotFSProvider(makeSnapshot({
+      directories: { '/home/testuser/.openclaw/agents': ['main/', 'skill-creator/', 'notes.txt'] },
+    }));
+    const entries = await provider.readdirEntries('/home/testuser/.openclaw/agents');
+    expect(entries.filter(e => e.isDirectory).map(e => e.name)).toEqual(['main', 'skill-creator']);
+    expect(entries.find(e => e.name === 'notes.txt')?.isDirectory).toBe(false);
+  });
+
+  it('answers directory permissions from recorded modes and refuses to guess otherwise', async () => {
+    const provider = new SnapshotFSProvider(makeSnapshot({
+      directories: { '/home/testuser/.copilot': ['config.json'], '/home/testuser/.other': [] },
+      directoryModes: { '/home/testuser/.copilot': 0o700 },
+    }));
+    const known = await provider.permissions('/home/testuser/.copilot');
+    expect(known).not.toBe('unsupported');
+    expect(known !== 'unsupported' && known.octal).toBe('700');
+    expect(await provider.permissions('/home/testuser/.other')).toBe('unsupported');
+    expect((await provider.stat('/home/testuser/.copilot')).mode).toBe(0o700);
+  });
+});
+

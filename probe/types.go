@@ -9,6 +9,10 @@ type ProbeManifest struct {
 	EnvPrefixes       []string         `json:"envPrefixes"`
 	SystemPaths       []string         `json:"systemPaths,omitempty"`
 	SystemDirListings []string         `json:"systemDirListings,omitempty"`
+	// Globs whose matches are recorded as metadata only (exists + mode, no
+	// content) — for private data where checks only need permissions, such
+	// as conversation stores and session transcripts.
+	MetadataGlobPatterns []string `json:"metadataGlobPatterns,omitempty"`
 }
 
 // CommandRequest describes a command to execute during probing.
@@ -29,8 +33,14 @@ type ProbeSnapshot struct {
 	Privilege      PrivilegeInfo            `json:"privilege"`
 	Files          map[string]FileEntry     `json:"files"`
 	Directories    map[string][]string      `json:"directories"`
-	CommandOutputs map[string]CommandOutput  `json:"commandOutputs"`
+	CommandOutputs map[string]CommandOutput `json:"commandOutputs"`
 	Env            map[string]string        `json:"env"`
+	// Permission bits of listed directories and user homes, so remote
+	// permission checks evaluate real modes instead of guessing.
+	DirectoryModes map[string]int `json:"directoryModes,omitempty"`
+	// True when the content budget was exhausted and later files were
+	// recorded as metadata only.
+	Truncated bool `json:"truncated,omitempty"`
 }
 
 // PrivilegeInfo describes the privilege level of the probe process.
@@ -49,6 +59,9 @@ type FileEntry struct {
 	Content string `json:"content"`
 	Mode    int    `json:"mode"`
 	Exists  bool   `json:"exists"`
+	// Set when the file exists but its content was deliberately not collected
+	// (over the per-file cap, over the total budget, or a metadata-only glob).
+	ContentOmitted bool `json:"contentOmitted,omitempty"`
 }
 
 // CommandOutput holds the result of an executed command.

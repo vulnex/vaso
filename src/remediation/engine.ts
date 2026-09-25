@@ -84,7 +84,7 @@ export class RemediationEngine {
           // because their ctx.credentialPaths is empty.
           const fs = new LocalFSProvider();
           const adapter = this.adapters?.getAdapter(agent.installation.agent);
-          const credentialPaths = adapter?.getCredentialPaths?.(agent.installation.installDir);
+          const credentialPaths = adapter?.getCredentialPaths?.(agent.installation.installDir, fs);
           const skillsDirs = getAllSkillsDirs(agent.installation);
           const skillFiles = skillsDirs.length > 0
             ? (await Promise.all(skillsDirs.map(d => getSkillFiles(d, fs)))).flat()

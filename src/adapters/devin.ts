@@ -228,14 +228,14 @@ export const devinAdapter: AgentAdapter = {
     return [join(installDir, 'AGENTS.md')];
   },
 
-  getCredentialPaths(installDir: string): string[] {
+  getCredentialPaths(installDir: string, scanFs?: FSProvider): string[] {
     // Project installations (<root>/.devin) hold no credentials; returning the
     // user file here would duplicate POL-003 findings per project.
     if (basename(installDir) === '.devin') return [];
     // installDir is the config dir; credentials.toml lives in the data dir,
     // resolved from the current user's $HOME (XDG-aware). The stored API
     // token is persistent and non-expiring.
-    const fs = new LocalFSProvider();
+    const fs = scanFs ?? new LocalFSProvider();
     const home = fs.homedir();
     return [join(devinDataDir(home, fs), 'credentials.toml')];
   },

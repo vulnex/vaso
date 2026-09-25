@@ -64,4 +64,12 @@ describe('Devin adapter — project discovery, hooks file, skills', () => {
     expect(installs).toHaveLength(1);
     expect(installs[0].skillsDirs).toEqual([`${HOME}/.config/devin/skills`, `${HOME}/.agents/skills`]);
   });
+
+  it('resolves credential paths against the scanned host, not the scanner', () => {
+    const remote = makeFs({});
+    expect(devinAdapter.getCredentialPaths!(`${HOME}/.config/devin`, remote))
+      .toEqual([`${HOME}/.local/share/devin/credentials.toml`]);
+    expect(devinAdapter.getCredentialPaths!('/work/app/.devin', remote)).toEqual([]);
+  });
 });
+

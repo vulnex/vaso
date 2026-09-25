@@ -299,8 +299,8 @@ export const windsurfAdapter: AgentAdapter = {
     return [join(codeiumAgentDir(fs.homedir()), 'memories', 'global_rules.md')];
   },
 
-  getCredentialPaths(_installDir: string): string[] {
-    const fs = new LocalFSProvider();
+  getCredentialPaths(_installDir: string, scanFs?: FSProvider): string[] {
+    const fs = scanFs ?? new LocalFSProvider();
     const home = fs.homedir();
     return [
       // Legacy plaintext Codeium API key.
@@ -329,10 +329,21 @@ export const windsurfAdapter: AgentAdapter = {
         '~/Library/Application Support/Devin/User/settings.json',
         '~/.config/Windsurf/User/settings.json',
         '~/.config/Devin/User/settings.json',
+        // Linux per-user install roots (tarball extracts) → product.json version
+        ...HOME_ROOT_NAMES.flatMap(n => [
+          `~/${n}/resources/app/product.json`,
+          `~/.local/share/${n}/resources/app/product.json`,
+        ]),
       ],
       globPatterns: [
         '~/.codeium/windsurf/global_workflows/*.md',
         '~/.codeium/windsurf/memories/*.md',
+      ],
+      // Editor state DBs hold the auth token: WS-008 / POL-003 need their
+      // permissions only — never ship the content.
+      metadataGlobPatterns: [
+        '~/Library/Application Support/{Windsurf,Devin}/User/globalStorage/state.vscdb',
+        '~/.config/{Windsurf,Devin}/User/globalStorage/state.vscdb',
       ],
       commands: [
         { id: 'windsurf-which', cmd: 'which', args: ['windsurf'], timeout: 3000 },
@@ -352,6 +363,7 @@ export const windsurfAdapter: AgentAdapter = {
       systemPaths: [
         ...APP_BUNDLES,
         ...APP_BUNDLES.map(b => join(b, 'Contents', 'Resources', 'app', 'product.json')),
+        ...LINUX_SYSTEM_ROOTS.map(r => join(r, 'resources', 'app', 'product.json')),
         ...SYSTEM_CLI_PATHS,
       ],
       systemDirListings: [],

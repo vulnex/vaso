@@ -38,6 +38,8 @@ export interface HostScanResult {
   target: SSHTarget;
   result?: ScanResult;
   error?: string;
+  /** Non-fatal notes about scan completeness (e.g. probe content budget hit). */
+  warnings?: string[];
   durationMs: number;
 }
 
@@ -124,6 +126,9 @@ export async function scanMultipleHosts(
         target,
         result,
         durationMs: Date.now() - start,
+        ...(snapshot.truncated ? {
+          warnings: ['vaso-probe content budget reached — some large agent/skill files were recorded as metadata only and not analysed'],
+        } : {}),
       };
     } catch (err) {
       entry = {

@@ -252,6 +252,7 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
           const findings = entry.result.summary;
           const summary = `${findings.critical}C / ${findings.warning}W / ${findings.info}I`;
           log(chalk.green(`  ✓ ${label} (${dur}) — score ${entry.result.totalScore}/100, ${summary}`));
+          for (const w of entry.warnings ?? []) log(chalk.yellow(`    ! ${w}`));
 
           if (options.outputDir) {
             try {
@@ -404,6 +405,14 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
     if (options.output) {
       await writeFileEnsureDir(options.output, output);
       localLog(chalk.green(`Report written to ${options.output}`));
+    } else if (options.outputDir) {
+      // Same <dir>/<hostname>.<ext> layout as multi-host scans, for the local host
+      const { join: joinPath } = await import('node:path');
+      const { hostname } = await import('node:os');
+      const ext = FORMAT_EXT[scanOptions.format ?? 'terminal'] ?? 'txt';
+      const outPath = joinPath(options.outputDir, `${safeHostname(hostname())}.${ext}`);
+      await writeFileEnsureDir(outPath, output);
+      localLog(chalk.green(`Report written to ${outPath}`));
     } else {
       console.log(output);
     }

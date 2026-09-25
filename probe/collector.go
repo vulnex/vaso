@@ -23,6 +23,69 @@ const defaultCommandTimeout = 5000 // ms
 // V8's ~512 MB max-string limit on the consuming Node side.
 const maxFileContentBytes = 1 << 20 // 1 MiB
 
+// Total content budget for one snapshot. Real hosts with many agent plugins
+// matched ~48k files / 700 MB through recursive skill globs, which the Node
+// side cannot hold in one string. Past the budget, files are still recorded
+// (exists + mode) but without content, and the snapshot is marked Truncated.
+const maxTotalContentBytes = 256 << 20 // 256 MiB (JSON-escaped, still well under V8's ~512 MB string limit)
+
+// Vendor / build-output / VCS directories skipped inside glob matches — kept
+// in sync with EXCLUDED_DIRS in src/core/utils.ts (the local skill walk), so a
+// remote scan sees the same files a local one analyses.
+var excludedGlobDirs = map[string]bool{
+	"node_modules": true,
+	".git":         true,
+	"dist":         true,
+	"build":        true,
+	".next":        true,
+	".cache":       true,
+	".venv":        true,
+	"venv":         true,
+	"__pycache__":  true,
+}
+
+// Binary/asset types no check reads — recorded as metadata only so images,
+// fonts, archives and compiled artefacts in skill trees don't spend the budget.
+var metadataOnlyExtensions = map[string]bool{
+	".png": true, ".jpg": true, ".jpeg": true, ".gif": true, ".webp": true, ".ico": true, ".bmp": true,
+	".woff": true, ".woff2": true, ".ttf": true, ".otf": true, ".eot": true,
+	".mp3": true, ".mp4": true, ".mov": true, ".wav": true, ".webm": true,
+	".zip": true, ".gz": true, ".tgz": true, ".tar": true, ".jar": true, ".7z": true, ".pdf": true,
+	".node": true, ".so": true, ".dylib": true, ".dll": true, ".exe": true, ".wasm": true, ".bin": true,
+	".pyc": true, ".db": true, ".sqlite": true, ".sqlite3": true,
+}
+
+// collector carries per-snapshot state (the remaining content budget).
+type collector struct {
+	budget    int64
+	truncated bool
+}
+
+// inExcludedDir reports whether match lies under an excluded directory that
+// the glob reached through a wildcard. Segments above the pattern's static
+// base (a user named "build") and directories the pattern names literally
+// (npm package.json globs that target .../node_modules/<pkg>/package.json)
+// don't count.
+func inExcludedDir(pattern, match string) bool {
+	slashPattern := filepath.ToSlash(pattern)
+	base, _ := doublestar.SplitPattern(slashPattern)
+	rel, err := filepath.Rel(filepath.FromSlash(base), match)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		return false
+	}
+	literal := make(map[string]bool)
+	for _, seg := range strings.Split(slashPattern, "/") {
+		literal[seg] = true
+	}
+	parts := strings.Split(filepath.ToSlash(rel), "/")
+	for _, seg := range parts[:len(parts)-1] {
+		if excludedGlobDirs[seg] && !literal[seg] {
+			return true
+		}
+	}
+	return false
+}
+
 // Common per-user bin dirs that hold CLIs we care about. Non-interactive SSH
 // sessions inherit a minimal PATH that excludes these, so we prepend them
 // before running version/which probes.
@@ -75,7 +138,9 @@ func Collect(manifest ProbeManifest, escalate bool) ProbeSnapshot {
 		Directories:    make(map[string][]string),
 		CommandOutputs: make(map[string]CommandOutput),
 		Env:            make(map[string]string),
+		DirectoryModes: make(map[string]int),
 	}
+	c := &collector{budget: maxTotalContentBytes}
 
 	// Track scanned users
 	for _, h := range homes {
@@ -86,12 +151,12 @@ func Collect(manifest ProbeManifest, escalate bool) ProbeSnapshot {
 	// Expand and collect file paths
 	expandedPaths := expandPaths(manifest.FilePaths, homes)
 	for _, p := range expandedPaths {
-		snapshot.Files[p] = collectFile(p)
+		snapshot.Files[p] = c.collectFile(p, false)
 	}
 
 	// Expand and collect system paths (not expanded per-user)
 	for _, p := range manifest.SystemPaths {
-		snapshot.Files[p] = collectFile(p)
+		snapshot.Files[p] = c.collectFile(p, false)
 	}
 
 	// Expand and collect glob patterns
@@ -102,8 +167,27 @@ func Collect(manifest ProbeManifest, escalate bool) ProbeSnapshot {
 			continue
 		}
 		for _, match := range matches {
+			if inExcludedDir(pattern, match) {
+				continue
+			}
 			if _, exists := snapshot.Files[match]; !exists {
-				snapshot.Files[match] = collectFile(match)
+				snapshot.Files[match] = c.collectFile(match, false)
+			}
+		}
+	}
+
+	// Metadata-only globs: existence + mode, never content
+	for _, pattern := range expandPaths(manifest.MetadataGlobPatterns, homes) {
+		matches, err := doublestar.FilepathGlob(pattern)
+		if err != nil {
+			continue
+		}
+		for _, match := range matches {
+			if inExcludedDir(pattern, match) {
+				continue
+			}
+			if _, exists := snapshot.Files[match]; !exists {
+				snapshot.Files[match] = c.collectFile(match, true)
 			}
 		}
 	}
@@ -116,6 +200,7 @@ func Collect(manifest ProbeManifest, escalate bool) ProbeSnapshot {
 	for _, dir := range expandedDirs {
 		if listing := collectDirectory(dir); listing != nil {
 			snapshot.Directories[dir] = listing
+			recordDirMode(snapshot.DirectoryModes, dir)
 		}
 	}
 
@@ -123,7 +208,13 @@ func Collect(manifest ProbeManifest, escalate bool) ProbeSnapshot {
 	for _, dir := range manifest.SystemDirListings {
 		if listing := collectDirectory(dir); listing != nil {
 			snapshot.Directories[dir] = listing
+			recordDirMode(snapshot.DirectoryModes, dir)
 		}
+	}
+	// Home dirs gate traversal for everything beneath them (parent-directory
+	// mitigation on the TS side needs their real modes).
+	for _, h := range homes {
+		recordDirMode(snapshot.DirectoryModes, h.Path)
 	}
 
 	// Run allowed commands with PATH extended to include per-user bin dirs.
@@ -155,6 +246,7 @@ func Collect(manifest ProbeManifest, escalate bool) ProbeSnapshot {
 
 	// Collect filtered environment variables
 	snapshot.Env = collectEnv(manifest.EnvPrefixes)
+	snapshot.Truncated = c.truncated
 
 	return snapshot
 }
@@ -207,37 +299,44 @@ func expandPaths(paths []string, homes []UserHome) []string {
 	return expanded
 }
 
-// collectFile reads a file and returns its content and mode. Files exceeding
-// maxFileContentBytes are stat'd only — the snapshot records Exists+Mode but
-// no content, which is sufficient for adapters that just need to verify a CLI
-// binary's presence without parsing it.
-func collectFile(path string) FileEntry {
+// collectFile reads a file and returns its content and mode. Content is
+// omitted (Exists+Mode only, ContentOmitted set) for metadata-only requests,
+// files over maxFileContentBytes, and once the snapshot's total content budget
+// is spent — enough for adapters that only need presence or permissions.
+func (c *collector) collectFile(path string, metadataOnly bool) FileEntry {
 	info, err := os.Stat(path)
 	if err != nil {
 		return FileEntry{Exists: false}
 	}
 
 	mode := int(info.Mode().Perm())
+	omitted := FileEntry{Exists: true, Mode: mode, ContentOmitted: true}
 
-	if info.Size() > maxFileContentBytes {
-		return FileEntry{
-			Exists: true,
-			Mode:   mode,
-		}
+	if metadataOnly || info.Size() > maxFileContentBytes || metadataOnlyExtensions[strings.ToLower(filepath.Ext(path))] {
+		return omitted
+	}
+	if info.Size() > c.budget {
+		c.truncated = true
+		return omitted
 	}
 
 	content, err := os.ReadFile(path)
 	if err != nil {
-		return FileEntry{
-			Exists: true,
-			Mode:   mode,
-		}
+		return FileEntry{Exists: true, Mode: mode}
 	}
+	c.budget -= int64(len(content))
 
 	return FileEntry{
 		Content: string(content),
 		Mode:    mode,
 		Exists:  true,
+	}
+}
+
+// recordDirMode stores a directory's permission bits when it can be stat'd.
+func recordDirMode(modes map[string]int, dir string) {
+	if info, err := os.Stat(dir); err == nil && info.IsDir() {
+		modes[dir] = int(info.Mode().Perm())
 	}
 }
 

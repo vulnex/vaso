@@ -207,11 +207,15 @@ export const codexAdapter: AgentAdapter = {
         '~/.cargo/bin/codex',
       ],
       globPatterns: [
-        // Session jsonls record `turn_context.model` per turn, so the latest
-        // session reveals the active model when ~/.codex/config.toml has none.
-        '~/.codex/sessions/*/*/*/rollout-*.jsonl',
+        // Prefix allow rules (CDX-010)
+        '~/.codex/rules/*.rules',
         nvmBinaryGlob('codex'),
         ...npmPackageJsonGlobs(NPM_PACKAGE_NAME),
+      ],
+      // Session transcripts are private; remotely only their presence is
+      // recorded (the last-session model hint is local-scan only).
+      metadataGlobPatterns: [
+        '~/.codex/sessions/*/*/*/rollout-*.jsonl',
       ],
       commands: [
         { id: 'codex-which', cmd: 'which', args: ['codex'], timeout: 3000 },

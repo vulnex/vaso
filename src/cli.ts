@@ -135,7 +135,7 @@ program
   .option('-a, --agent <type>', `scan a specific agent (${SCANNABLE_AGENTS})`)
   .option('-f, --format <format>', 'output format (terminal, json, sarif, markdown, html, csv, junit)', 'terminal')
   .option('-o, --output <file>', 'write report to file (single combined output)')
-  .option('--output-dir <dir>', 'multi-host: write one file per host as <dir>/<hostname>.<ext>')
+  .option('--output-dir <dir>', 'write one file per host as <dir>/<hostname>.<ext> (local scans use the local hostname)')
   .option('--save-baseline', 'save scan results as baseline')
   .option('--diff', 'compare against saved baseline')
   .option('--all-users', 'scan all user accounts (requires root/sudo)')
@@ -177,6 +177,7 @@ program
   .option('--parallel <n>', 'max hosts to detect concurrently (default 5)', '5')
   .option('--snapshot <path>', 'detect from a local probe snapshot JSON file')
   .option('--save-snapshot <dir>', 'after fetching SSH snapshots, write each as <hostname>.json under this directory (for debugging)')
+  .option('--no-color', 'disable colored output')
   .action(async (options) => {
     if (!validateAgentOption(options)) return;
     const { runDetect } = await import('./commands/detect.js');

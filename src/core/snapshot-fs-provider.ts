@@ -21,6 +21,11 @@ export class SnapshotFSProvider implements FSProvider {
     if (!entry || !entry.exists) {
       throw new Error(`ENOENT: file not collected in snapshot: ${path}`);
     }
+    if (entry.contentOmitted || typeof entry.content !== 'string') {
+      // Present on the host, content deliberately not shipped (size cap,
+      // budget, binary asset, metadata-only glob) — unreadable, not empty.
+      throw new Error(`EACCES: content not collected in snapshot: ${path}`);
+    }
     return entry.content;
   }
 
@@ -28,6 +33,9 @@ export class SnapshotFSProvider implements FSProvider {
     const entry = this.snapshot.files[path];
     if (!entry || !entry.exists) {
       throw new Error(`ENOENT: file not collected in snapshot: ${path}`);
+    }
+    if (entry.contentOmitted || typeof entry.content !== 'string') {
+      throw new Error(`EACCES: content not collected in snapshot: ${path}`);
     }
     // The probe stored the file as a UTF-8 string. We re-encode it here on
     // the same encoding so ASCII-safe content (most source files, including
@@ -73,11 +81,15 @@ export class SnapshotFSProvider implements FSProvider {
       return this.readdirRecursive(path);
     }
 
+    // The probe marks directory entries with a trailing '/'; readdir() strips
+    // it, so read the raw listing to keep that information.
+    const rawDirs = new Set(
+      (this.snapshot.directories[path] ?? []).filter(n => n.endsWith('/')).map(stripTrailingSlash));
     const names = await this.readdir(path);
     return names.map(name => {
       const fullPath = join(path, name);
       const isFile = fullPath in this.snapshot.files && this.snapshot.files[fullPath].exists;
-      const isDir = fullPath in this.snapshot.directories ||
+      const isDir = rawDirs.has(name) || fullPath in this.snapshot.directories ||
         this.hasChildPaths(fullPath);
       return {
         name,
@@ -108,27 +120,35 @@ export class SnapshotFSProvider implements FSProvider {
     }
     if (this.directoryExists(path) || this.hasChildPaths(path)) {
       return {
-        mode: 0o755,
+        // Real mode when the probe recorded it; 0o755 is a placeholder only —
+        // permission checks go through permissions(), which won't guess.
+        mode: this.snapshot.directoryModes?.[path] ?? 0o755,
         isFile: () => false,
         isDirectory: () => true,
       };
     }
     throw new Error(`ENOENT: path not collected in snapshot: ${path}`);
   }
-
+  /**
+   * Tri-state permission answer: real facts for collected files and for
+   * directories whose mode the probe recorded; 'unsupported' otherwise, so
+   * permission checks skip instead of evaluating an invented mode (a guessed
+   * 0o755 made every remote directory look group/world-readable).
+   */
   async permissions(path: string): Promise<PermissionQuery> {
     // The probe is POSIX-only today, but guard anyway: a future win32
     // snapshot's mode field would be fake and must not be interpreted.
-    if (this.platform === 'win32') {
-      return 'unsupported';
-    }
-    // Mirrors stat(): file modes are real probe-collected data; directory
-    // modes are the same fabricated 0o755 stat() reports (the probe doesn't
-    // collect dir modes), so dir-permission checks behave identically to the
-    // pre-tri-state stat-math path on snapshots.
-    const st = await this.stat(path);
-    return posixPermissionFacts(st.mode);
+    if (this.platform === 'win32') return 'unsupported';
+    const fileEntry = this.snapshot.files[path];
+    if (fileEntry?.exists) return posixPermissionFacts(fileEntry.mode);
+    const dirMode = this.snapshot.directoryModes?.[path];
+    if (dirMode !== undefined) return posixPermissionFacts(dirMode);
+    if (this.directoryExists(path) || this.hasChildPaths(path)) return 'unsupported';
+    throw new Error(`ENOENT: path not collected in snapshot: ${path}`);
   }
+
+
+
 
   async realpath(path: string): Promise<string> {
     // Snapshots don't resolve symlinks — return as-is if path exists

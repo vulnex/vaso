@@ -83,7 +83,7 @@ export class ScanEngine {
       : undefined;
 
     const adapter = this.adapters.getAdapter(installation.agent);
-    const credentialPaths = adapter?.getCredentialPaths?.(installation.installDir);
+    const credentialPaths = adapter?.getCredentialPaths?.(installation.installDir, this.fs);
 
     const context: ScanContext = {
       installation,

@@ -3,6 +3,7 @@ import type { Evidence, ScanContext } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { scanWithPatterns, SECURITY_PATTERNS } from '../../analyzers/pattern-engine.js';
 import { markTestCode } from '../../analyzers/test-paths.js';
+import { isExcludedPath } from '../../core/utils.js';
 
 const DOC_EXTENSIONS = new Set(['.md', '.txt', '.rst']);
 const PROMPT_INJECTION_RULES = SECURITY_PATTERNS.filter(r => r.category === 'prompt-injection');
@@ -12,7 +13,8 @@ async function getDocFiles(dir: string, fs: ScanContext['fs']): Promise<string[]
   try {
     const entries = await fs.readdirEntries(dir, { recursive: true });
     for (const entry of entries) {
-      if (entry.isFile) {
+      // Same vendor/build/VCS exclusions as the code walk (node_modules READMEs aren't skill docs)
+      if (entry.isFile && !isExcludedPath(dir, entry.parentPath)) {
         const ext = extname(entry.name);
         const name = entry.name.toUpperCase();
         if (DOC_EXTENSIONS.has(ext) || name === 'SKILL.MD' || name === 'README.MD') {

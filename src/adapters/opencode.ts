@@ -161,12 +161,12 @@ export const opencodeAdapter: AgentAdapter = {
     ];
   },
 
-  getCredentialPaths(_installDir: string): string[] {
+  getCredentialPaths(_installDir: string, scanFs?: FSProvider): string[] {
     // installDir is the XDG config dir; auth.json lives in the data dir, which
-    // we resolve from the current user's $HOME (XDG-aware). Cross-user `--all-users`
+    // we resolve from the scanned host's $HOME (XDG-aware). Cross-user `--all-users`
     // resolution would need the per-user home, but that's not a use case OpenCode
     // currently supports — it's user-installed only.
-    const fs = new LocalFSProvider();
+    const fs = scanFs ?? new LocalFSProvider();
     const home = fs.homedir();
     return [join(xdgDataDir(home, fs), 'auth.json')];
   },

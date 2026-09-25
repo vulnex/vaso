@@ -250,6 +250,9 @@ export const chatgptDesktopAdapter: AgentAdapter = {
       globPatterns: [
         '~/Library/Preferences/com.openai.chat.RemoteFeatureFlags.*.plist',
         '~/Library/Application Support/com.openai.chat/app_pairing_extensions/**',
+      ],
+      // Conversation stores: CG-001 needs only their permissions — never ship content
+      metadataGlobPatterns: [
         '~/Library/Application Support/com.openai.chat/conversations-v3-*/**',
       ],
       commands: [
