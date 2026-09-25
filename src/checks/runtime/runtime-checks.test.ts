@@ -6,6 +6,7 @@ import { run001 } from './run-001-launch-agents.js';
 import { run002 } from './run-002-suspicious-cron.js';
 import { run003 } from './run-003-vscode-trojans.js';
 import { run004 } from './run-004-docker-security.js';
+import { launchdCommand, systemdCommand } from './run-001-launch-agents.js';
 import { run005 } from './run-005-process-ancestry.js';
 
 function makeContext(): ScanContext {
@@ -277,3 +278,49 @@ describe('RUN-004: Docker Security', () => {
     });
   }
 });
+
+// Real units from the Linux test box: OpenClaw's own gateway service must not
+// read as malware persistence; a keyword-named binary elsewhere still does.
+describe('RUN-001: agent services vs. suspicious persistence', () => {
+  const UNIT_DIR = '/home/test/.config/systemd/user';
+  function linuxFs(units: Record<string, string>): FSProvider {
+    return {
+      readdir: vi.fn(async (dir: string) => (dir === UNIT_DIR ? Object.keys(units) : [])),
+      readFile: vi.fn(async (p: string) => units[p.slice(UNIT_DIR.length + 1)] ?? ''),
+      homedir: () => '/home/test',
+      platform: 'linux',
+    } as unknown as FSProvider;
+  }
+
+  it('reports the installed OpenClaw gateway (CLI wrapper and node forms) as info', async () => {
+    const fs = linuxFs({
+      'openclaw-gateway.service': '[Service]\nExecStart=/home/test/.local/bin/openclaw gateway --port 18789\n',
+      'openclaw-gateway.service.bak':
+        '[Service]\nExecStart=/usr/bin/node /home/test/.nvm/versions/node/v22.22.1/lib/node_modules/openclaw/dist/index.js gateway\n',
+    });
+    const result = await run001.run(makeRunCtx(fs, 'linux'));
+    expect(result.passed).toBe(false);
+    expect(result.severity).toBe('info');
+    expect(result.message).toContain('all run an installed agent');
+    expect(result.evidence?.every(e => e.mitigated)).toBe(true);
+  });
+
+  it('keeps warning severity for a keyword-named binary outside install roots', async () => {
+    const fs = linuxFs({
+      'openclaw-gateway.service': '[Service]\nExecStart=/home/test/.local/bin/openclaw gateway\n',
+      'clawbot-update.service': '[Service]\nExecStart=/tmp/.x/clawbot --daemon\n',
+    });
+    const result = await run001.run(makeRunCtx(fs, 'linux'));
+    expect(result.severity).toBe('warning');
+    expect(result.message).toBe('Found 1 suspicious persistence mechanism(s)');
+    const bad = result.evidence!.find(e => !e.mitigated)!;
+    expect(bad.detail).toContain('/tmp/.x/clawbot');
+  });
+
+  it('parses ExecStart prefixes/quotes and launchd Program/ProgramArguments', () => {
+    expect(systemdCommand('ExecStart=-"/opt/My App/bin/nanobot" run')).toEqual(['/opt/My App/bin/nanobot', 'run']);
+    const plist = '<dict><key>ProgramArguments</key><array><string>/opt/homebrew/bin/openclaw</string><string>gateway</string></array></dict>';
+    expect(launchdCommand(plist)).toEqual(['/opt/homebrew/bin/openclaw', 'gateway']);
+  });
+});
+

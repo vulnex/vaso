@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { levenshteinDistance, detectTyposquatting } from './typosquat.js';
+import { levenshteinDistance, detectTyposquatting, typoDistance } from './typosquat.js';
 
 describe('levenshteinDistance', () => {
   it('returns 0 for identical strings', () => {
@@ -84,3 +84,25 @@ describe('detectTyposquatting', () => {
     expect(result!.trustedName).toBe('weather');
   });
 });
+
+describe('detectTyposquatting — length-scaled tolerance (fewer dictionary-word hits)', () => {
+  it('no longer flags "research" as a typosquat of "web-search"', () => {
+    expect(detectTyposquatting('research', ['web-search'])).toBeNull();
+  });
+
+  it('counts an adjacent transposition as one edit', () => {
+    expect(typoDistance('githbu', 'github')).toBe(1);
+    expect(detectTyposquatting('githbu', ['github'])?.trustedName).toBe('github');
+  });
+
+  it('requires an exact match for short names and allows 2 edits for long ones', () => {
+    expect(detectTyposquatting('fsx', ['fs'])).toBeNull();
+    expect(detectTyposquatting('mcp-server-gitub', ['mcp-server-github'])?.distance).toBe(1);
+    expect(detectTyposquatting('mcpservr-gthub', ['mcp-server-github'])?.distance).toBe(2);
+  });
+
+  it('honours an explicit maxDistance', () => {
+    expect(detectTyposquatting('research', ['web-search'], 2)?.trustedName).toBe('web-search');
+  });
+});
+
