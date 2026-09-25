@@ -28,7 +28,10 @@ function packedFiles(): string[] {
     encoding: 'utf-8',
     stdio: ['ignore', 'pipe', 'ignore'],
   });
-  const parsed = JSON.parse(out) as unknown;
+  // Some npm versions (10.8) still run `prepare` under --ignore-scripts and its
+  // build log lands on stdout before the JSON — parse from the JSON's start.
+  const start = out.search(/^[[{]/m);
+  const parsed = JSON.parse(start >= 0 ? out.slice(start) : out) as unknown;
   // npm 10 prints an array, newer npm an object keyed by package name
   const entry = Array.isArray(parsed) ? parsed[0] : Object.values(parsed as Record<string, unknown>)[0];
   return (entry as { files: { path: string }[] }).files.map(f => f.path);
