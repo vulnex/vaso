@@ -3,6 +3,7 @@ import { defineCheck } from '../../core/check-builder.js';
 import { analyzeCode } from '../../analyzers/ast-analyzer.js';
 import { scanWithPatterns, SECURITY_PATTERNS } from '../../analyzers/pattern-engine.js';
 import { getSkillFiles } from '../../core/utils.js';
+import { markTestCode } from '../../analyzers/test-paths.js';
 
 const CRED_HARVEST_RULES = SECURITY_PATTERNS.filter(r => r.category === 'credential-harvest');
 
@@ -49,6 +50,7 @@ export const skl006 = defineCheck({
       } catch {}
     }
 
+    markTestCode(evidence, ctx.installation);
     return h.fromEvidence(evidence, {
       passed: 'No credential harvesting patterns detected',
       failed: (n) => `Found ${n} credential harvesting indicator(s)`,

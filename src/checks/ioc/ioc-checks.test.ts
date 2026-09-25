@@ -2,6 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { createHash } from 'node:crypto';
+import { getIOCDatabase, reloadIOCDatabase } from '../../ioc/database.js';
 import type { ScanContext, AgentInstallation, ParsedConfig } from '../../core/types.js';
 import { LocalFSProvider } from '../../core/local-fs-provider.js';
 import { ioc001 } from './ioc-001-c2-ips.js';
@@ -28,8 +30,8 @@ function configWithRaw(raw: string): ParsedConfig {
 }
 
 describe('IOC-001: C2 IP Detection', () => {
-  // 185.199.228.220 is in the bundled C2 IP list.
-  const C2_IP = '185.199.228.220';
+  // 91.92.242.30 (ClawHavoc AMOS C2) is in the bundled C2 IP list.
+  const C2_IP = '91.92.242.30';
 
   it('detects exact C2 IP in a config raw block', async () => {
     const ctx = makeContext(undefined, [
@@ -41,7 +43,7 @@ describe('IOC-001: C2 IP Detection', () => {
   });
 
   it('does not match an IP that is a substring of a longer numeric run', async () => {
-    // 185.199.228.220 is a substring inside 185.199.228.2200 and 1185.199.228.220.
+    // 91.92.242.30 is a substring inside 91.92.242.300 and 191.92.242.30.
     const ctx = makeContext(undefined, [
       configWithRaw(`bogus_a = "1${C2_IP}"\nbogus_b = "${C2_IP}0"`),
     ]);
@@ -72,8 +74,8 @@ describe('IOC-001: C2 IP Detection', () => {
 });
 
 describe('IOC-002: Malicious Domains', () => {
-  // clawhavoc.io is in the bundled malicious domain list.
-  const DOMAIN = 'clawhavoc.io';
+  // santaclaude.app (MAL-2026-13363) is in the bundled malicious domain list.
+  const DOMAIN = 'santaclaude.app';
 
   it('detects exact domain in a config raw block', async () => {
     const ctx = makeContext(undefined, [
@@ -93,7 +95,7 @@ describe('IOC-002: Malicious Domains', () => {
   });
 
   it('does not match a domain that is a left-substring of a different label', async () => {
-    // not-clawhavoc.io is a different registration; should not match.
+    // not-santaclaude.app is a different registration; should not match.
     const ctx = makeContext(undefined, [
       configWithRaw(`endpoint = "https://not-${DOMAIN}/safe"`),
     ]);
@@ -102,7 +104,7 @@ describe('IOC-002: Malicious Domains', () => {
   });
 
   it('does not match a domain whose suffix continues past the IOC TLD', async () => {
-    // clawhavoc.iom is a different registration (.iom is a typo TLD).
+    // santaclaude.appm is a different registration (.appm is a different TLD).
     const ctx = makeContext(undefined, [
       configWithRaw(`endpoint = "https://${DOMAIN}m/safe"`),
     ]);
@@ -111,7 +113,7 @@ describe('IOC-002: Malicious Domains', () => {
   });
 
   it('does not match a domain whose IOC name is followed by another label', async () => {
-    // clawhavoc.io.cn is a different domain hierarchy.
+    // santaclaude.app.cn is a different domain hierarchy.
     const ctx = makeContext(undefined, [
       configWithRaw(`endpoint = "https://${DOMAIN}.cn/safe"`),
     ]);
@@ -121,7 +123,7 @@ describe('IOC-002: Malicious Domains', () => {
 
   it('matches case-insensitively', async () => {
     const ctx = makeContext(undefined, [
-      configWithRaw(`endpoint = "https://ClawHavoc.IO/api"`),
+      configWithRaw(`endpoint = "https://SantaClaude.APP/api"`),
     ]);
     const result = await ioc002.run(ctx);
     expect(result.passed).toBe(false);
@@ -287,12 +289,24 @@ describe('IOC-003: File Hash Match', () => {
     expect(result.passed).toBe(true);
   });
 
-  it('flags a file whose SHA-256 matches a bundled malicious hash', async () => {
-    // The empty-file SHA-256 (e3b0c44...855) is in the bundled FILE_HASHES list.
-    await writeFile(join(tempDir, 'empty.js'), '');
+  it('flags a file whose SHA-256 matches a known malicious hash', async () => {
+    const payload = 'vaso-ioc003-marker-payload';
+    const hash = createHash('sha256').update(payload).digest('hex');
+    getIOCDatabase().fileHashes.push(hash);
+    try {
+      await writeFile(join(tempDir, 'dropper.js'), payload);
+      const result = await ioc003.run(makeContext(tempDir));
+      expect(result.passed).toBe(false);
+      expect(result.evidence![0].detail).toContain(hash);
+    } finally {
+      reloadIOCDatabase();
+    }
+  });
+
+  it('never flags empty files (empty __init__.py etc.)', async () => {
+    await writeFile(join(tempDir, '__init__.py'), '');
     const result = await ioc003.run(makeContext(tempDir));
-    expect(result.passed).toBe(false);
-    expect(result.evidence![0].detail).toContain('e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855');
+    expect(result.passed).toBe(true);
   });
 
   it('passes for files with non-listed hashes', async () => {
@@ -323,11 +337,11 @@ describe('IOC-004: Malicious Publishers', () => {
     await mkdir(skillDir, { recursive: true });
     await writeFile(
       join(skillDir, 'package.json'),
-      JSON.stringify({ name: 'evil-skill', author: 'clawhavoc' }),
+      JSON.stringify({ name: 'evil-skill', author: 'hightower6eu' }),
     );
     const result = await ioc004.run(makeContext(tempDir));
     expect(result.passed).toBe(false);
-    expect(result.evidence![0].detail).toContain('clawhavoc');
+    expect(result.evidence![0].detail).toContain('hightower6eu');
   });
 
   it('passes for skills with benign publishers', async () => {

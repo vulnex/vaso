@@ -97,6 +97,16 @@ describe('HM-001 plaintext API keys', () => {
     const result = await check.run(makeCtx([cfg]));
     expect(result.passed).toBe(false);
   });
+  it('does not treat long prose (personality prompts with emoji) as a credential', async () => {
+    const cfg = makeYaml('/h/.hermes/config.yaml', {
+      agent: { personalities: {
+        kawaii: 'You are a kawaii assistant! ✨ Use cute expressions like (◕‿◕), ★ and ♡ — end with ~nya (｡♥‿♥｡)',
+        hype: 'YOU ARE THE HYPE BOT 🔥🚀💯 — every answer is LEGENDARY, use ALL CAPS and emoji 🎉⚡️🙌',
+      } },
+    });
+    const result = await check.run(makeCtx([cfg]));
+    expect(result.passed).toBe(true);
+  });
 });
 
 describe('HM-002 .env permissions', () => {

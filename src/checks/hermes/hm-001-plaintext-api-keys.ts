@@ -24,6 +24,9 @@ function isSecret(value: string): boolean {
   if (value.length < MIN_LEN) return false;
   if (ENV_REF.test(value)) return false;
   if (KNOWN_PREFIXES.some(p => p.test(value))) return true;
+  // Secrets are single tokens; prose (personality prompts, descriptions —
+  // emoji push its entropy past the threshold) is not a credential.
+  if (/\s/.test(value)) return false;
   return shannonEntropy(value) > HIGH_ENTROPY;
 }
 

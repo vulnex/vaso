@@ -2,6 +2,7 @@ import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { scanWithPatterns, SECURITY_PATTERNS } from '../../analyzers/pattern-engine.js';
 import { getSkillFiles } from '../../core/utils.js';
+import { markTestCode } from '../../analyzers/test-paths.js';
 
 const REVERSE_SHELL_RULES = SECURITY_PATTERNS.filter(r => r.category === 'reverse-shell');
 
@@ -35,6 +36,7 @@ export const skl005 = defineCheck({
       } catch {}
     }
 
+    markTestCode(evidence, ctx.installation);
     return h.fromEvidence(evidence, {
       passed: 'No reverse shell patterns detected',
       failed: (n) => `Found ${n} reverse shell pattern(s)`,

@@ -2,6 +2,7 @@ import { join } from 'node:path';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { getIOCDatabase } from '../../ioc/database.js';
+import { markTestCode } from '../../analyzers/test-paths.js';
 
 const MALICIOUS_PACKAGES = new Set([
   'event-stream',
@@ -97,6 +98,7 @@ export const skl011 = defineCheck({
       }
     }
 
+    markTestCode(evidence, ctx.installation);
     return h.fromEvidence(evidence, {
       passed: 'All skill dependencies are clean',
       failed: (n) => `Found ${n} dependency issue(s)`,

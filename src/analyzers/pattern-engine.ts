@@ -43,7 +43,7 @@ export const SECURITY_PATTERNS: PatternRule[] = [
 
   // Exfiltration (from openclaw-security-monitor + B@dskills)
   { id: 'EX-001', pattern: /\.postMessage\s*\(.*\btransfer\b/i, category: 'exfiltration', severity: 'warning', description: 'postMessage with transfer' },
-  { id: 'EX-002', pattern: /\bwebhook\b.*\bsend|post\b/i, category: 'exfiltration', severity: 'warning', description: 'Webhook exfiltration pattern' },
+  { id: 'EX-002', pattern: /\bwebhook\b.*\b(?:send|post)\b/i, category: 'exfiltration', severity: 'warning', description: 'Webhook exfiltration pattern' },
   { id: 'EX-003', pattern: /dns.*(?:lookup|resolve).*(?:encode|btoa|Buffer)/i, category: 'exfiltration', severity: 'critical', description: 'DNS exfiltration' },
 
   // Prompt injection indicators
@@ -55,7 +55,7 @@ export const SECURITY_PATTERNS: PatternRule[] = [
   // Crypto wallet targeting (from openclaw-security-monitor)
   { id: 'CW-001', pattern: /\b[13][a-km-zA-HJ-NP-Z1-9]{25,34}\b/, category: 'crypto-wallet', severity: 'warning', description: 'Bitcoin address pattern' },
   { id: 'CW-002', pattern: /\b0x[0-9a-fA-F]{40}\b/, category: 'crypto-wallet', severity: 'warning', description: 'Ethereum address pattern' },
-  { id: 'CW-003', pattern: /\bcoinbase\b.*\bapi|key|secret\b/i, category: 'crypto-wallet', severity: 'warning', description: 'Coinbase API access' },
+  { id: 'CW-003', pattern: /\bcoinbase\b.*\b(?:api|key|secret)\b/i, category: 'crypto-wallet', severity: 'warning', description: 'Coinbase API access' },
 
   // Obfuscation indicators (from Sclawhub)
   { id: 'OB-001', pattern: /\bBuffer\.from\s*\([^,]+,\s*['"]base64['"]\)/i, category: 'obfuscation', severity: 'warning', description: 'Base64 decode operation' },

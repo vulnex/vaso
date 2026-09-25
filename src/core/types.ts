@@ -34,7 +34,9 @@ export interface Evidence {
   line?: number;
   snippet?: string;
   detail?: string;
-  /** Exposure blocked by parent-directory permissions (see `markUnreachable`). */
+  /** Exposure blocked by parent-directory permissions (`markUnreachable`) or the
+   *  finding sits in skill test/fixture code (`markTestCode`). When every item
+   *  is mitigated, `fromEvidence` reports the result at 'info'. */
   mitigated?: boolean;
 }
 

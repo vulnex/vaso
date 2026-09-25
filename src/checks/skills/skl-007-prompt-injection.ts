@@ -2,6 +2,7 @@ import { join, extname } from 'node:path';
 import type { Evidence, ScanContext } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { scanWithPatterns, SECURITY_PATTERNS } from '../../analyzers/pattern-engine.js';
+import { markTestCode } from '../../analyzers/test-paths.js';
 
 const DOC_EXTENSIONS = new Set(['.md', '.txt', '.rst']);
 const PROMPT_INJECTION_RULES = SECURITY_PATTERNS.filter(r => r.category === 'prompt-injection');
@@ -54,6 +55,7 @@ export const skl007 = defineCheck({
       } catch {}
     }
 
+    markTestCode(evidence, ctx.installation);
     return h.fromEvidence(evidence, {
       passed: 'No prompt injection patterns found in skill docs',
       failed: (n) => `Found ${n} prompt injection pattern(s) in skill documentation`,

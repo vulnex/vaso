@@ -76,7 +76,7 @@ describe('SKL-011: Dependency Audit', () => {
     const skillDir = join(tempDir, 'scoped-skill');
     await mkdir(skillDir, { recursive: true });
     await writeFile(join(skillDir, 'package.json'), JSON.stringify({
-      dependencies: { '@clawhavoc/toolkit': '^1.0.0' },
+      dependencies: { '@hightower6eu/toolkit': '^1.0.0' },
     }));
     await writeFile(join(skillDir, 'package-lock.json'), '{}');
 

@@ -263,4 +263,17 @@ describe('RUN-004: Docker Security', () => {
     expect(result.passed).toBe(false);
     expect(result.evidence![0].file).toBe('/var/run/docker.sock');
   });
+
+  // Connecting to a Unix socket requires write permission
+  for (const [mode, why] of [[0o755, 'Docker Desktop on macOS'], [0o660, 'root:docker group on Linux']] as const) {
+    it(`passes a ${mode.toString(8)} socket (${why}) — not connectable by other users`, async () => {
+      const fs = {
+        access: vi.fn(async () => true),
+        stat: vi.fn(async () => ({ mode, isFile: () => false, isDirectory: () => false })),
+        platform: 'linux',
+      } as unknown as FSProvider;
+      const result = await run004.run(makeRunCtx(fs, 'linux'));
+      expect(result.passed).toBe(true);
+    });
+  }
 });

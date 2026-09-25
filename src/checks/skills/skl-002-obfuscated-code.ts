@@ -3,6 +3,7 @@ import { defineCheck } from '../../core/check-builder.js';
 import { findHighEntropyBlocks } from '../../analyzers/entropy.js';
 import { OBFUSCATION_PATTERNS } from '../../analyzers/obfuscation.js';
 import { getSkillFiles } from '../../core/utils.js';
+import { markTestCode } from '../../analyzers/test-paths.js';
 
 export const skl002 = defineCheck({
   id: 'SKL-002',
@@ -56,6 +57,7 @@ export const skl002 = defineCheck({
       } catch {}
     }
 
+    markTestCode(evidence, ctx.installation);
     return h.fromEvidence(evidence, {
       passed: 'No obfuscated code blocks detected',
       failed: (n) => `Found ${n} obfuscated code block(s) — possible obfuscation`,

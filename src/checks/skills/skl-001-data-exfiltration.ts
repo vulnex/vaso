@@ -2,6 +2,7 @@ import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { analyzeCode } from '../../analyzers/ast-analyzer.js';
 import { getSkillFiles } from '../../core/utils.js';
+import { markTestCode } from '../../analyzers/test-paths.js';
 
 export const skl001 = defineCheck({
   id: 'SKL-001',
@@ -36,6 +37,7 @@ export const skl001 = defineCheck({
       }
     }
 
+    markTestCode(evidence, ctx.installation);
     return h.fromEvidence(evidence, {
       passed: 'No data exfiltration flows detected',
       failed: (n) => `Found ${n} data exfiltration flow(s) — data flowing from sources to network sinks`,

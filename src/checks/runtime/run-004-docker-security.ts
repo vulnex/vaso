@@ -17,10 +17,13 @@ export const run004 = defineCheck({
 
     try {
       const perms = await queryPermissions(ctx.fs, '/var/run/docker.sock');
-      if (perms !== 'unsupported' && (perms.worldRead || perms.worldWrite)) {
+      // Connecting to a Unix socket needs write permission: world-writable is
+      // "any local user controls Docker"; 755 is not. Group write (660
+      // root:docker) is the intended Linux setup.
+      if (perms !== 'unsupported' && perms.worldWrite) {
         evidence.push({
           file: '/var/run/docker.sock',
-          detail: `Docker socket permissions: ${perms.octal} — world-accessible`,
+          detail: `Docker socket permissions: ${perms.octal} — world-writable, any local user can drive the Docker daemon (root-equivalent)`,
         });
       }
     } catch {

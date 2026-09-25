@@ -2,6 +2,7 @@ import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { analyzeCode } from '../../analyzers/ast-analyzer.js';
 import { getSkillFiles } from '../../core/utils.js';
+import { markTestCode } from '../../analyzers/test-paths.js';
 
 export const skl008 = defineCheck({
   id: 'SKL-008',
@@ -34,6 +35,7 @@ export const skl008 = defineCheck({
       } catch {}
     }
 
+    markTestCode(evidence, ctx.installation);
     return h.fromEvidence(evidence, {
       passed: 'No suspicious network calls detected',
       failed: (n) => `Found ${n} suspicious network call(s)`,

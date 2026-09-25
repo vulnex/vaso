@@ -3,6 +3,7 @@ import _traverse from '@babel/traverse';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { getSkillFiles } from '../../core/utils.js';
+import { markTestCode } from '../../analyzers/test-paths.js';
 
 // Handle ESM/CJS interop
 const traverse = typeof _traverse === 'function' ? _traverse : (_traverse as { default: typeof _traverse }).default;
@@ -85,6 +86,7 @@ export const skl012 = defineCheck({
       }
     }
 
+    markTestCode(evidence, ctx.installation);
     return h.fromEvidence(evidence, {
       passed: 'All functions are within complexity threshold',
       failed: (n) => `Found ${n} function(s) exceeding complexity threshold of ${COMPLEXITY_THRESHOLD}`,

@@ -16,24 +16,18 @@ export interface IOCDatabase {
 }
 
 // Ported from openclaw-security-monitor IOC data
+// Never add documentation/test values here: RFC 5737 ranges (192.0.2/24,
+// 198.51.100/24, 203.0.113/24) and scanme.nmap.org (45.33.32.156) shipped as
+// "C2" in v0.1.0 and matched benign content (e.g. Google API discovery docs).
+// Guarded by src/ioc/database.test.ts.
 const C2_IPS = [
-  '185.199.228.220',
-  '45.33.32.156',
-  '198.51.100.1',
-  '203.0.113.42',
-  '192.0.2.100',
+  // ClawHavoc (Jan 2026): the AMOS stealer C2 shared by all 335 AMOS-delivering
+  // ClawHub skills (Koi Security; The Hacker News 2026-02; OWASP Agentic
+  // Skills Top 10 case studies; Unit 42).
+  '91.92.242.30',
 ];
 
 const MALICIOUS_DOMAINS = [
-  'clawhavoc.io',
-  'claw-payload.net',
-  'openclaw-update.xyz',
-  'skill-cdn.ru',
-  'agent-tools.cc',
-  'clawbot-plugins.tk',
-  'ai-agent-free.ml',
-  'openclaw-crack.ga',
-  'skillhub-mirror.cf',
   // C2/relay domains of malicious npm packages that remote-control AI coding
   // agents (drive claude/codex/gemini with --dangerously-skip-permissions over
   // a WebSocket/relay channel). Confirmed via OSV MAL records (amazon-inspector
@@ -54,11 +48,11 @@ const MALICIOUS_DOMAINS = [
   'relay.lmfao.su',
 ];
 
+// Real, sourced SHA-256 hashes only. v0.1.0 shipped textbook test vectors
+// here (empty file, "hello world", "quick brown fox", SHA3-256 of "") labelled
+// as malware, flagging every empty __init__.py as critical. Guarded by
+// src/ioc/database.test.ts.
 const FILE_HASHES = [
-  'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855', // empty file
-  'a7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434a', // AMOS stealer v1
-  'b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9', // AMOS stealer v2
-  'd7a8fbb307d7809469ca9abcb0082e4f8d5651e46d3cdb762d02d0bf37c9e592', // ClawHavoc dropper
   // GHAPPIER supply-chain attack (@dforge-core/dforge-mcp 0.2.20/0.2.21,
   // npm trusted-publishing abuse, 2026-09-09; CloudSEK research).
   'e9045b27557e5019fe44a1d5ae4b77714faa65fef883127ca7db85b7970afab4', // GHAPPIER carrier tarball 0.2.21
@@ -67,15 +61,6 @@ const FILE_HASHES = [
 ];
 
 const MALICIOUS_PUBLISHERS = [
-  'clawhavoc',
-  'bloom-security',
-  'openclaw-official-tools',
-  'free-claw-plugins',
-  'ai-toolbox-pro',
-  'claw-community-contrib',
-  'skill-marketplace-bot',
-  'agent-extensions-free',
-  'opensource-malware-test',
   // Confirmed-malware OpenClaw skill publishers, sourced from the Agent Threat
   // Rules public blacklist (github.com/Agent-Threat-Rule/agent-threat-rules,
   // data/public-blacklist.json, 2026-04-16; MIT-licensed). These three named

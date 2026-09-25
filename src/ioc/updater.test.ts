@@ -156,13 +156,13 @@ describe('mergeFeedIntoDatabase', () => {
     expect(merged.c2Ips).toContain('10.0.0.1');
     expect(merged.c2Ips).toContain('10.0.0.2');
     // Bundled IPs still present
-    expect(merged.c2Ips).toContain('185.199.228.220');
+    expect(merged.c2Ips).toContain('91.92.242.30');
   });
 
   it('deduplicates strings', () => {
-    const feedData: IOCFeedData = { c2Ips: ['185.199.228.220', '10.0.0.1'] };
+    const feedData: IOCFeedData = { c2Ips: ['91.92.242.30', '10.0.0.1'] };
     const merged = mergeFeedIntoDatabase(bundled, feedData);
-    const count = merged.c2Ips.filter((ip) => ip === '185.199.228.220').length;
+    const count = merged.c2Ips.filter((ip) => ip === '91.92.242.30').length;
     expect(count).toBe(1);
   });
 

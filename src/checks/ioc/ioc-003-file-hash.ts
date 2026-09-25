@@ -24,6 +24,8 @@ export const ioc003 = defineCheck({
     for (const file of files) {
       try {
         const content = await ctx.fs.readFile(file);
+        // Empty files carry no payload and share one universal hash
+        if (content.length === 0) continue;
         const hash = createHash('sha256').update(content).digest('hex');
 
         if (hashSet.has(hash)) {

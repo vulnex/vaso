@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { scanWithPatterns } from './pattern-engine.js';
+import { SECURITY_PATTERNS, scanWithPatterns } from './pattern-engine.js';
 
 describe('Pattern Engine', () => {
   describe('Reverse shells', () => {
@@ -129,3 +129,24 @@ describe('Pattern Engine', () => {
     });
   });
 });
+
+// A top-level `a.*b|c|d` alternation parses as `(a.*b) | c | d`, so any line
+// containing `c` matched — "Coinbase API access" fired on every line with
+// "key" (3,747 hits in one real skills dir).
+describe('Pattern Engine — alternation precedence', () => {
+  const rule = (id: string) => SECURITY_PATTERNS.find(r => r.id === id)!;
+
+  it('CW-003 needs "coinbase" before api/key/secret', () => {
+    expect(rule('CW-003').pattern.test('return [ws._cells[key] for key in sorted(ws._cells)]')).toBe(false);
+    expect(rule('CW-003').pattern.test('client_secret = load()')).toBe(false);
+    expect(rule('CW-003').pattern.test('coinbase_client = Client(api_key, api_secret)')).toBe(false); // no \bcoinbase\b
+    expect(rule('CW-003').pattern.test('const coinbase = new Coinbase({ apiKey: key })')).toBe(true);
+  });
+
+  it('EX-002 needs "webhook" before send/post', () => {
+    expect(rule('EX-002').pattern.test('res = requests.post(url, json=body)')).toBe(false);
+    expect(rule('EX-002').pattern.test('webhook.send(JSON.stringify(process.env))')).toBe(true);
+    expect(rule('EX-002').pattern.test('await fetch(webhookUrl); // webhook post')).toBe(true);
+  });
+});
+

@@ -2,6 +2,7 @@ import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { scanWithPatterns, SECURITY_PATTERNS } from '../../analyzers/pattern-engine.js';
 import { getSkillFiles } from '../../core/utils.js';
+import { markTestCode } from '../../analyzers/test-paths.js';
 
 const CRYPTO_RULES = SECURITY_PATTERNS.filter(r => r.category === 'crypto-wallet');
 
@@ -35,6 +36,7 @@ export const skl009 = defineCheck({
       } catch {}
     }
 
+    markTestCode(evidence, ctx.installation);
     return h.fromEvidence(evidence, {
       passed: 'No crypto wallet targeting patterns detected',
       failed: (n) => `Found ${n} crypto wallet targeting pattern(s)`,

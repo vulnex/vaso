@@ -616,8 +616,8 @@ describe('MCP-008: Server Provenance', () => {
   it('still matches distinctive malicious-domain labels', async () => {
     const sources: MCPServerSource[] = [
       {
-        serverName: 'havoc',
-        packageName: 'clawhavoc-tools',
+        serverName: 'santa',
+        packageName: 'santaclaude-tools',
       },
     ];
 
