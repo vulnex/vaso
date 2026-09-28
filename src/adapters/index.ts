@@ -9,6 +9,7 @@ import { zeroclawAdapter } from './zeroclaw.js';
 import { nemoclawAdapter } from './nemoclaw.js';
 import { hermesAdapter } from './hermes.js';
 import { lyrieAdapter } from './lyrie.js';
+import { atomicAgentAdapter } from './atomic-agent.js';
 import { claudeCodeAdapter } from './claude-code.js';
 import { claudeDesktopAdapter } from './claude-desktop.js';
 import { chatgptDesktopAdapter } from './chatgpt-desktop.js';
@@ -34,6 +35,7 @@ export const allAdapters: AgentAdapter[] = [
   nemoclawAdapter,
   hermesAdapter,
   lyrieAdapter,
+  atomicAgentAdapter,
   claudeCodeAdapter,
   claudeDesktopAdapter,
   chatgptDesktopAdapter,

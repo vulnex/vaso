@@ -110,6 +110,7 @@ describe('MCPDiscovery — Devin CLI locations', () => {
       homedir: () => '/home/t',
       access: async (p: string) => p in files,
       readFile: async (p: string) => files[p],
+      getEnv: () => undefined,
     } as unknown as FSProvider;
     const prevXdg = process.env.XDG_CONFIG_HOME;
     delete process.env.XDG_CONFIG_HOME;
@@ -120,5 +121,61 @@ describe('MCPDiscovery — Devin CLI locations', () => {
     } finally {
       if (prevXdg !== undefined) process.env.XDG_CONFIG_HOME = prevXdg;
     }
+  });
+});
+
+describe('MCPDiscovery — Atomic Agent', () => {
+  const config = JSON.stringify({
+    version: 72,
+    mcp: {
+      servers: [
+        { name: 'docs', enabled: true, trust: 'pure_read', env: { DOCS_TOKEN: 'x' },
+          transport: { kind: 'stdio', command: 'npx', args: ['-y', '@x/docs'] } },
+        { name: 'remote', enabled: true,
+          transport: { kind: 'streamable_http', url: 'https://mcp.example.test/mcp', headers: { Authorization: 'Bearer t' } } },
+        { name: 'legacy', enabled: true, transport: { kind: 'sse', url: 'http://10.0.0.5/sse' } },
+        { name: 'off', enabled: false, transport: { kind: 'stdio', command: 'node' } },
+      ],
+    },
+  });
+
+  function makeFs(files: Record<string, string>, env: Record<string, string> = {}): FSProvider {
+    return {
+      homedir: () => '/home/t',
+      access: async (p: string) => p in files,
+      readFile: async (p: string) => files[p],
+      getEnv: (k: string) => env[k],
+    } as unknown as FSProvider;
+  }
+
+  it('parses mcp.servers[] from ~/.atomic-agent/config.json, skipping disabled servers', async () => {
+    const result = await new MCPDiscovery(makeFs({ '/home/t/.atomic-agent/config.json': config })).discover('linux');
+    expect(result.configs).toHaveLength(1);
+    const [cfg] = result.configs;
+    expect(cfg.source).toBe('Atomic Agent');
+    expect(cfg.servers.map(s => [s.name, s.transport])).toEqual([
+      ['docs', 'stdio'],
+      ['remote', 'streamable-http'],
+      ['legacy', 'sse'],
+    ]);
+    expect(cfg.servers[0]).toMatchObject({ command: 'npx', args: ['-y', '@x/docs'], env: { DOCS_TOKEN: 'x' } });
+    expect(cfg.servers[1].headers).toEqual({ Authorization: 'Bearer t' });
+  });
+
+  it('honours ATOMIC_AGENT_STATE_DIR', async () => {
+    const fs = makeFs({ '/srv/atomic/config.json': config }, { ATOMIC_AGENT_STATE_DIR: '/srv/atomic' });
+    const result = await new MCPDiscovery(fs).discover('linux');
+    expect(result.configs.map(c => c.filePath)).toEqual(['/srv/atomic/config.json']);
+  });
+
+  it('accepts the Atomic Agent dialect via --paths', async () => {
+    const result = await new MCPDiscovery(makeFs({ '/tmp/c.json': config })).discoverFromPaths(['/tmp/c.json']);
+    expect(result.totalServers).toBe(3);
+  });
+
+  it('ignores a config.json with no MCP servers', async () => {
+    const empty = JSON.stringify({ version: 72, mcp: { servers: [] } });
+    const result = await new MCPDiscovery(makeFs({ '/home/t/.atomic-agent/config.json': empty })).discover('linux');
+    expect(result.configs).toEqual([]);
   });
 });

@@ -9,7 +9,8 @@ export const cfg007 = defineCheck({
   category: 'config',
   severity: 'warning',
   description: 'Check if webhooks are configured without authentication',
-  excludedAgents: CODING_AGENTS,
+  // Atomic Agent webhooks are a name-keyed map with their own secret check (AT-008).
+  excludedAgents: [...CODING_AGENTS, 'atomic-agent'],
 
   async run(ctx, h) {
     const evidence: Evidence[] = [];

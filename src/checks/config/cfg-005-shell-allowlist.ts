@@ -9,7 +9,8 @@ export const cfg005 = defineCheck({
   category: 'config',
   severity: 'warning',
   description: 'Check if a shell command allowlist (safeBins) is configured',
-  excludedAgents: CODING_AGENTS,
+  // Atomic Agent has no shell allowlist key — its shell gate is the approval ladder (AT-001).
+  excludedAgents: [...CODING_AGENTS, 'atomic-agent'],
 
   async run(ctx, h) {
     let found = false;

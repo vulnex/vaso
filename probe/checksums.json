@@ -1,9 +1,9 @@
 {
   "version": "1.0.0",
   "binaries": {
-    "vaso-probe-darwin-amd64": "sha256:22e5408418dc321f5c292939ce2cb01b9b5442150487fc895c676568560d8016",
-    "vaso-probe-darwin-arm64": "sha256:68671c78620a1dc6ae1b5a05bea03c929697671fccb7800e3398b8e7fa662c75",
-    "vaso-probe-linux-amd64": "sha256:3d8962a06c036d54fad5f051a4468ad56743f40e7f781534d655ca744231f6e9",
-    "vaso-probe-linux-arm64": "sha256:1236c10d1d15f45cff350eb72e1f80cd3ed3aaf1e39eabc1ffbe9b563267b36e"
+    "vaso-probe-darwin-amd64": "sha256:a1b2568cd199910bcbded1c4eba574ff5e2b26d5eb5ab21c4477c94bf3775ed2",
+    "vaso-probe-darwin-arm64": "sha256:bef8ffb673d03370a35996c9377cf66b24d22290a21251fb4fea727394749d5b",
+    "vaso-probe-linux-amd64": "sha256:16be5045839a69dfce82215f7af446928025c754b6f767dad0bfbfbc9e39f511",
+    "vaso-probe-linux-arm64": "sha256:5b4fe8eb06f209e1048e14ee0ae48b9f2e66921b488ad873c7fb27059b19b288"
   }
 }

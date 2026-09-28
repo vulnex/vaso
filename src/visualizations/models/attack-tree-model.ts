@@ -40,6 +40,7 @@ const CATEGORY_LABELS: Record<CheckCategory, string> = {
   zeroclaw: 'ZeroClaw',
   lyrie: 'Lyrie',
   hermes: 'Hermes',
+  'atomic-agent': 'Atomic Agent',
   advisory: 'Advisories',
   'coding-agent': 'Coding Agent',
 };

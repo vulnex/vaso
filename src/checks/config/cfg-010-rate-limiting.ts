@@ -9,7 +9,8 @@ export const cfg010 = defineCheck({
   category: 'config',
   severity: 'warning',
   description: 'Check if rate limiting is configured for the gateway',
-  excludedAgents: CODING_AGENTS,
+  // Atomic Agent has no gateway to rate-limit (its HTTP service is flag-configured).
+  excludedAgents: [...CODING_AGENTS, 'atomic-agent'],
 
   async run(ctx, h) {
     let found = false;

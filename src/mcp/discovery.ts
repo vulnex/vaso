@@ -7,6 +7,8 @@ import { stripJsonc } from '../core/jsonc.js';
 interface ConfigLocation {
   source: string;
   path: string;
+  /** Config dialect; defaults to the common `mcpServers` map. */
+  shape?: 'atomic-agent';
 }
 
 function getGlobalConfigLocations(platform: NodeJS.Platform, home: string): ConfigLocation[] {
@@ -61,6 +63,12 @@ function getGlobalConfigLocations(platform: NodeJS.Platform, home: string): Conf
   return locations;
 }
 
+/** Atomic Agent: `mcp.servers[]` in `<stateDir>/config.json`. */
+function getAtomicAgentLocation(home: string, fs: FSProvider): ConfigLocation {
+  const stateDir = fs.getEnv('ATOMIC_AGENT_STATE_DIR')?.trim() || join(home, '.atomic-agent');
+  return { source: 'Atomic Agent', path: join(stateDir, 'config.json'), shape: 'atomic-agent' };
+}
+
 function getProjectConfigLocations(projectDir: string): ConfigLocation[] {
   return [
     { source: 'Claude Code (project)', path: join(projectDir, '.mcp.json') },
@@ -109,6 +117,43 @@ function parseServerEntries(data: Record<string, unknown>): MCPServerEntry[] {
   return servers;
 }
 
+const ATOMIC_TRANSPORTS: Record<string, MCPServerEntry['transport']> = {
+  stdio: 'stdio',
+  streamable_http: 'streamable-http',
+  sse: 'sse',
+};
+
+/** Atomic Agent's array form: `{ name, enabled, transport: { kind, command, args, url, headers }, env }`.
+ *  Disabled servers are never connected, so they are skipped. */
+function parseAtomicAgentEntries(data: Record<string, unknown>): MCPServerEntry[] {
+  const mcp = data.mcp as Record<string, unknown> | undefined;
+  if (!mcp || typeof mcp !== 'object' || !Array.isArray(mcp.servers)) return [];
+  const stringMap = (v: unknown): Record<string, string> | undefined =>
+    v && typeof v === 'object' && !Array.isArray(v)
+      ? Object.fromEntries(Object.entries(v as Record<string, unknown>).map(([k, val]) => [k, String(val)]))
+      : undefined;
+
+  const servers: MCPServerEntry[] = [];
+  for (const raw of mcp.servers as unknown[]) {
+    if (!raw || typeof raw !== 'object') continue;
+    const entry = raw as Record<string, unknown>;
+    if (entry.enabled === false || typeof entry.name !== 'string') continue;
+    const t = entry.transport as Record<string, unknown> | undefined;
+    const transport = ATOMIC_TRANSPORTS[String(t?.kind)];
+    if (!t || !transport) continue;
+    servers.push({
+      name: entry.name,
+      command: typeof t.command === 'string' ? t.command : undefined,
+      args: Array.isArray(t.args) ? t.args.map(String) : undefined,
+      env: stringMap(entry.env),
+      headers: stringMap(t.headers),
+      url: typeof t.url === 'string' ? t.url : undefined,
+      transport,
+    });
+  }
+  return servers;
+}
+
 export class MCPDiscovery {
   private fs: FSProvider;
 
@@ -125,6 +170,7 @@ export class MCPDiscovery {
 
     const locations = [
       ...getGlobalConfigLocations(platform, home),
+      getAtomicAgentLocation(home, this.fs),
       ...(projectDir ? getProjectConfigLocations(projectDir) : []),
     ];
 
@@ -134,7 +180,9 @@ export class MCPDiscovery {
       try {
         const raw = await this.fs.readFile(location.path);
         const data = JSON.parse(stripJsonc(raw)) as Record<string, unknown>;
-        const servers = parseServerEntries(data);
+        const servers = location.shape === 'atomic-agent'
+          ? parseAtomicAgentEntries(data)
+          : parseServerEntries(data);
 
         if (servers.length > 0) {
           configs.push({
@@ -161,7 +209,7 @@ export class MCPDiscovery {
       try {
         const raw = await this.fs.readFile(filePath);
         const data = JSON.parse(stripJsonc(raw)) as Record<string, unknown>;
-        const servers = parseServerEntries(data);
+        const servers = data.mcpServers ? parseServerEntries(data) : parseAtomicAgentEntries(data);
 
         if (servers.length > 0) {
           configs.push({

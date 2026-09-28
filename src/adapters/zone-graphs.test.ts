@@ -15,6 +15,7 @@ import { ironclawChecks } from '../checks/ironclaw/index.js';
 import { nanobotChecks } from '../checks/nanobot/index.js';
 import { zeroclawChecks } from '../checks/zeroclaw/index.js';
 import { lyrieChecks } from '../checks/lyrie/index.js';
+import { atomicAgentChecks } from '../checks/atomic-agent/index.js';
 import { hermesChecks } from '../checks/hermes/index.js';
 import { policyChecks } from '../checks/policy/index.js';
 import { advisoryChecks } from '../checks/advisory/index.js';
@@ -30,6 +31,7 @@ import { zeroclawAdapter } from './zeroclaw.js';
 import { nemoclawAdapter } from './nemoclaw.js';
 import { hermesAdapter } from './hermes.js';
 import { lyrieAdapter } from './lyrie.js';
+import { atomicAgentAdapter } from './atomic-agent.js';
 import { claudeCodeAdapter } from './claude-code.js';
 import { codexAdapter } from './codex.js';
 import { opencodeAdapter } from './opencode.js';
@@ -39,7 +41,7 @@ function makeFullRegistries() {
   for (const set of [
     configChecks, skillChecks, iocChecks, networkChecks, runtimeChecks,
     mcpChecks, openclawChecks, nanoclawChecks, ironclawChecks, nanobotChecks,
-    zeroclawChecks, lyrieChecks, hermesChecks, policyChecks, advisoryChecks, claudeCodeChecks, codexChecks,
+    zeroclawChecks, lyrieChecks, hermesChecks, atomicAgentChecks, policyChecks, advisoryChecks, claudeCodeChecks, codexChecks,
     opencodeChecks,
   ]) {
     checks.registerAll(set);
@@ -48,7 +50,7 @@ function makeFullRegistries() {
   for (const a of [
     openclawAdapter, nanoclawAdapter, picoclawAdapter, ironclawAdapter,
     nanobotAdapter, zeroclawAdapter, nemoclawAdapter, hermesAdapter, lyrieAdapter,
-    claudeCodeAdapter, codexAdapter, opencodeAdapter,
+    atomicAgentAdapter, claudeCodeAdapter, codexAdapter, opencodeAdapter,
   ]) {
     adapters.register(a);
   }
@@ -67,6 +69,7 @@ describe('adapter ZoneGraphs (real check registry)', () => {
     ['ironclaw', ironclawAdapter, 4],
     ['nanobot', nanobotAdapter, 4],
     ['lyrie', lyrieAdapter, 5],
+    ['atomic-agent', atomicAgentAdapter, 4],
     ['claude-code', claudeCodeAdapter, 4],
     ['codex', codexAdapter, 4],
     ['opencode', opencodeAdapter, 4],
@@ -87,7 +90,7 @@ describe('adapter ZoneGraphs (real check registry)', () => {
 
   it('every custom graph declares at least one inversion edge', () => {
     const customAdapters = [
-      nemoclawAdapter, ironclawAdapter, nanobotAdapter, lyrieAdapter, hermesAdapter,
+      nemoclawAdapter, ironclawAdapter, nanobotAdapter, lyrieAdapter, hermesAdapter, atomicAgentAdapter,
       claudeCodeAdapter, codexAdapter, opencodeAdapter,
     ];
     for (const adapter of customAdapters) {
@@ -106,6 +109,7 @@ describe('adapter ZoneGraphs (real check registry)', () => {
       ['nanobot', nanobotAdapter],
       ['lyrie', lyrieAdapter],
       ['hermes', hermesAdapter],
+      ['atomic-agent', atomicAgentAdapter],
       ['claude-code', claudeCodeAdapter],
       ['codex', codexAdapter],
       ['opencode', opencodeAdapter],

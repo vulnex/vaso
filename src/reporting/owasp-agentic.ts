@@ -236,6 +236,18 @@ export const CHECK_AGENTIC_MAP: Record<string, OwaspAgenticId[]> = {
   'HM-008': ['AAI012', 'AAI001'],
   'HM-009': ['AAI012', 'AAI002'],
   'HM-010': ['AAI009', 'AAI002'],
+  // Atomic Agent (AT)
+  'AT-001': ['AAI012', 'AAI001'],
+  'AT-002': ['AAI001', 'AAI005'],
+  'AT-003': ['AAI012', 'AAI005'],
+  'AT-004': ['AAI001'],
+  'AT-005': ['AAI001'],
+  'AT-006': ['AAI012', 'AAI009'],
+  'AT-007': ['AAI009', 'AAI002'],
+  'AT-008': ['AAI003', 'AAI001'],
+  'AT-009': ['AAI012', 'AAI002'],
+  'AT-010': ['AAI009', 'AAI003'],
+  'AT-011': ['AAI006'],
   // Coding agents (CC/CD/CG/CDX/OPC/GEM/QC/CUR/GHC)
   'CC-001': ['AAI012', 'AAI001'],
   'CC-002': ['AAI001', 'AAI002'],

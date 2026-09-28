@@ -8,7 +8,8 @@ export const cfg006 = defineCheck({
   category: 'config',
   severity: 'warning',
   description: 'Check if filesystem access is restricted to a workspace directory',
-  excludedAgents: CODING_AGENTS,
+  // Atomic Agent confines reads via agent.readScope (AT-002), not a workspace key.
+  excludedAgents: [...CODING_AGENTS, 'atomic-agent'],
 
   async run(ctx, h) {
     let found = false;

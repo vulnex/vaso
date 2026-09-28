@@ -35,6 +35,7 @@ src/
     nemoclaw.ts             NemoClaw adapter
     hermes.ts               Hermes adapter
     lyrie.ts                Lyrie adapter
+    atomic-agent.ts         Atomic Agent adapter
     claude-code.ts          Claude Code CLI adapter
     claude-desktop.ts       Claude Desktop / Cowork adapter
     chatgpt-desktop.ts      ChatGPT Desktop adapter
@@ -61,6 +62,7 @@ src/
     zeroclaw/               14 ZeroClaw-specific (ZC-*)
     lyrie/                  18 Lyrie-specific (LY-*)
     hermes/                 10 Hermes-specific (HM-*)
+    atomic-agent/           11 Atomic Agent-specific (AT-*)
     claude-code/            12 Claude Code-specific (CC-*)
     claude-desktop/         10 Claude Desktop-specific (CD-*)
     chatgpt-desktop/        6 ChatGPT Desktop-specific (CG-*)
@@ -185,7 +187,7 @@ Every security check implements this interface:
 interface CheckModule {
   id: string;                              // e.g. 'CFG-001', 'SKL-003', 'LY-018'
   name: string;                            // Human-readable name
-  category: CheckCategory;                 // one of 16 categories — see src/core/types.ts
+  category: CheckCategory;                 // one of 17 categories — see src/core/types.ts
   severity: Severity;                      // 'critical' | 'warning' | 'info'
   description: string;                     // What this check does
 
@@ -199,7 +201,7 @@ interface CheckModule {
 }
 ```
 
-`CheckCategory` is the union: `'config' | 'skills' | 'ioc' | 'network' | 'runtime' | 'policy' | 'mcp' | 'openclaw' | 'nanoclaw' | 'ironclaw' | 'nanobot' | 'zeroclaw' | 'lyrie' | 'hermes' | 'advisory' | 'coding-agent'`. `AgentType` is similarly defined in `src/core/types.ts` — re-check the source rather than relying on a frozen list here.
+`CheckCategory` is the union: `'config' | 'skills' | 'ioc' | 'network' | 'runtime' | 'policy' | 'mcp' | 'openclaw' | 'nanoclaw' | 'ironclaw' | 'nanobot' | 'zeroclaw' | 'lyrie' | 'hermes' | 'atomic-agent' | 'advisory' | 'coding-agent'`. `AgentType` is similarly defined in `src/core/types.ts` — re-check the source rather than relying on a frozen list here.
 
 ### ScanContext
 
@@ -329,6 +331,7 @@ Current prefix landscape (one prefix per directory under `src/checks/`):
 | `zeroclaw/` | ZC | ZeroClaw-specific |
 | `lyrie/` | LY | Lyrie-specific |
 | `hermes/` | HM | Hermes-specific |
+| `atomic-agent/` | AT | Atomic Agent-specific |
 | `claude-code/` | CC | Claude Code CLI-specific |
 | `claude-desktop/` | CD | Claude Desktop / Cowork-specific |
 | `chatgpt-desktop/` | CG | ChatGPT Desktop-specific |
