@@ -1,5 +1,6 @@
 import { join } from 'node:path';
 import type { FSProvider } from '../core/fs-provider.js';
+import { nodeManagerPackageJsonGlobs } from './cli-installs.js';
 
 /**
  * Look for a binary under any nvm-managed Node version. nvm installs node
@@ -46,12 +47,14 @@ export function nvmBinaryGlob(binaryName: string): string {
  * it into their probe manifest's globPatterns.
  */
 export function npmPackageJsonGlobs(packageName: string): string[] {
-  return [
+  return [...new Set([
+    ...nodeManagerPackageJsonGlobs(packageName),
     `~/.nvm/versions/node/*/lib/node_modules/${packageName}/package.json`,
     `~/.npm-global/lib/node_modules/${packageName}/package.json`,
     `~/.volta/tools/image/packages/${packageName}/package.json`,
     `/usr/local/lib/node_modules/${packageName}/package.json`,
     `/usr/lib/node_modules/${packageName}/package.json`,
     `/opt/homebrew/lib/node_modules/${packageName}/package.json`,
-  ];
+    `~/.volta/tools/image/packages/${packageName}/lib/node_modules/${packageName}/package.json`,
+  ])];
 }

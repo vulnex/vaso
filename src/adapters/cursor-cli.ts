@@ -6,7 +6,7 @@ import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { loadConfig } from '../core/config-loader.js';
 import { nvmBinaryGlob } from './nvm-binary.js';
-import { discoverCliInstalls } from './cli-installs.js';
+import { discoverCliInstalls, retainedVersionGlobs, type RetainedVersionsDir } from './cli-installs.js';
 import { getUserHomeDirs } from './openclaw.js';
 import { queryCliVersion, readPackageVersion } from './version-query.js';
 import { withoutLoadedConfigs } from './project-configs.js';
@@ -69,6 +69,9 @@ const USER_CLI_RELATIVE_PATHS = [
   '.cursor/bin/agent',
 ];
 
+// install.sh keeps each past version in <ver>/ — each is a runnable copy.
+const RETAINED_VERSIONS: RetainedVersionsDir[] = [{ dir: '.local/share/cursor-agent/versions', binary: 'cursor-agent' }];
+
 async function loadFiles(dir: string, names: string[], fs: FSProvider): Promise<ParsedConfig[]> {
   const out: ParsedConfig[] = [];
   for (const name of names) {
@@ -121,6 +124,7 @@ export const cursorCliAdapter: AgentAdapter = {
         names: ['cursor-agent'],
         systemPaths: SYSTEM_CLI_PATHS,
         userRelPaths: USER_CLI_RELATIVE_PATHS,
+        retainedVersions: RETAINED_VERSIONS,
         version: async (bin, canExec) => (canExec ? queryCliVersion(bin, fs) : undefined)
           ?? (await readPackageVersion(bin, fs)),
       });
@@ -244,6 +248,7 @@ export const cursorCliAdapter: AgentAdapter = {
       ],
       // IDE state DBs hold session JWTs: CUR-013 / POL-003 need permissions only
       metadataGlobPatterns: [
+        ...retainedVersionGlobs(RETAINED_VERSIONS),
         '~/Library/Application Support/Cursor/User/globalStorage/state.vscdb',
         '~/.config/Cursor/User/globalStorage/state.vscdb',
       ],

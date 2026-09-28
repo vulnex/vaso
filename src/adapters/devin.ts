@@ -6,7 +6,7 @@ import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { stripJsonc } from '../core/jsonc.js';
 import { getUserHomeDirs } from './openclaw.js';
-import { discoverCliInstalls } from './cli-installs.js';
+import { discoverCliInstalls, retainedVersionGlobs, type RetainedVersionsDir } from './cli-installs.js';
 import { queryCliVersion } from './version-query.js';
 
 const SYSTEM_CLI_PATHS = [
@@ -17,6 +17,9 @@ const SYSTEM_CLI_PATHS = [
 const USER_CLI_RELATIVE_PATHS = [
   '.local/bin/devin',
 ];
+
+// Devin's updater keeps each version in _versions/<ver>/ — each is a runnable copy.
+const RETAINED_VERSIONS: RetainedVersionsDir[] = [{ dir: '.local/share/devin/cli/_versions', binary: 'bin/devin' }];
 
 // User-level config filenames under the Devin config dir. Both are JSON with
 // comments tolerated (stripped via stripJsonc). `mcpServers` may appear in
@@ -123,6 +126,7 @@ export const devinAdapter: AgentAdapter = {
         names: ['devin'],
         systemPaths: SYSTEM_CLI_PATHS,
         userRelPaths: USER_CLI_RELATIVE_PATHS,
+        retainedVersions: RETAINED_VERSIONS,
         version: (bin, canExec) => (canExec ? queryCliVersion(bin, fs, { timeoutMs: 3000 }) : undefined),
       });
       const cliBinary = installs.primary?.path;
@@ -237,6 +241,8 @@ export const devinAdapter: AgentAdapter = {
 
   getProbeManifest(): ProbeManifest {
     return {
+      // Past versions kept by the updater — existence only
+      metadataGlobPatterns: retainedVersionGlobs(RETAINED_VERSIONS),
       filePaths: [
         '~/.config/devin/config.json',
         '~/.config/devin/mcp_config.json',

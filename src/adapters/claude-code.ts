@@ -6,7 +6,7 @@ import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { loadConfig } from '../core/config-loader.js';
 import { nvmBinaryGlob, npmPackageJsonGlobs } from './nvm-binary.js';
-import { discoverCliInstalls } from './cli-installs.js';
+import { discoverCliInstalls, retainedVersionGlobs, type RetainedVersionsDir } from './cli-installs.js';
 import { getUserHomeDirs } from './openclaw.js';
 import { queryCliVersion, readPackageVersion } from './version-query.js';
 import { withoutLoadedConfigs } from './project-configs.js';
@@ -29,6 +29,9 @@ const USER_CLI_RELATIVE_PATHS = [
   '.claude/local/claude',
   '.bun/bin/claude',
 ];
+
+// Native installer keeps past versions as <ver> binaries — each is a runnable copy.
+const RETAINED_VERSIONS: RetainedVersionsDir[] = [{ dir: '.local/share/claude/versions' }];
 
 async function loadSettingsFiles(dir: string, fs: FSProvider) {
   const configFiles = [];
@@ -91,6 +94,7 @@ export const claudeCodeAdapter: AgentAdapter = {
         names: ['claude'],
         systemPaths: SYSTEM_CLI_PATHS,
         userRelPaths: USER_CLI_RELATIVE_PATHS,
+        retainedVersions: RETAINED_VERSIONS,
         version: async (bin, canExec) => (canExec ? queryCliVersion(bin, fs) : undefined)
           ?? (await readPackageVersion(bin, fs, NPM_PACKAGE_NAME)),
       });
@@ -221,6 +225,8 @@ export const claudeCodeAdapter: AgentAdapter = {
 
   getProbeManifest(): ProbeManifest {
     return {
+      // Past versions kept by the updater — existence only
+      metadataGlobPatterns: retainedVersionGlobs(RETAINED_VERSIONS),
       filePaths: [
         '~/.claude/settings.json',
         '~/.claude/settings.local.json',

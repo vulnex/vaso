@@ -9,6 +9,8 @@ interface FakeHost {
   nvm?: string[];
   links?: Record<string, string>;
   kind?: 'local' | 'snapshot';
+  /** Extra directory listings (path → entry names). */
+  dirs?: Record<string, string[]>;
 }
 
 function makeFs(h: FakeHost): FSProvider {
@@ -21,6 +23,7 @@ function makeFs(h: FakeHost): FSProvider {
     realpath: vi.fn(async (p: string) => h.links?.[p] ?? p),
     readdirEntries: vi.fn(async (p: string) => {
       if (p === nvmRoot && h.nvm) return h.nvm.map(name => ({ name, isDirectory: true, isFile: false }) as DirentInfo);
+      if (h.dirs?.[p]) return h.dirs[p].map(name => ({ name, isDirectory: true, isFile: false }) as DirentInfo);
       throw new Error('ENOENT');
     }),
     execSync: vi.fn((cmd: string) => {
@@ -117,6 +120,72 @@ describe('discoverCliInstalls', () => {
       const r = await discoverCliInstalls('/home/t', makeFs(host), spec(host, { version }));
       expect(r.others, kind).toHaveLength(expected);
     }
+  });
+
+  it('finds copies under fnm, asdf, mise, n and pnpm', async () => {
+    const host: FakeHost = {
+      which: '/opt/homebrew/bin/codex',
+      dirs: {
+        '/home/t/.local/share/fnm/node-versions': ['v20.1.0'],
+        '/home/t/.asdf/installs/nodejs': ['22.0.0'],
+        '/home/t/.local/share/mise/installs/node': ['24.1.0'],
+        '/usr/local/n/versions/node': ['18.0.0'],
+      },
+      bins: {
+        '/opt/homebrew/bin/codex': '0.160.0',
+        '/home/t/.local/share/fnm/node-versions/v20.1.0/installation/bin/codex': '0.100.0',
+        '/home/t/.asdf/installs/nodejs/22.0.0/bin/codex': '0.110.0',
+        '/home/t/.local/share/mise/installs/node/24.1.0/bin/codex': '0.120.0',
+        '/usr/local/n/versions/node/18.0.0/bin/codex': '0.90.0',
+        '/home/t/.local/share/pnpm/codex': '0.130.0',
+      },
+    };
+    const r = await discoverCliInstalls('/home/t', makeFs(host), spec(host));
+    expect(r.others.map(o => o.version).sort()).toEqual(['0.100.0', '0.110.0', '0.120.0', '0.130.0', '0.90.0']);
+  });
+
+  it('reports versions an updater retains on disk, versioned by name, skipping the active one', async () => {
+    const store = '/home/t/.local/share/claude/versions';
+    const host: FakeHost = {
+      which: '/home/t/.local/bin/claude',
+      links: { '/home/t/.local/bin/claude': `${store}/2.1.270` },
+      dirs: { [store]: ['2.1.270', '2.1.71', 'current'] },
+      bins: {
+        '/home/t/.local/bin/claude': '2.1.270',
+        [`${store}/2.1.270`]: 'x',
+        [`${store}/2.1.71`]: 'x',
+        [`${store}/current`]: 'x',
+      },
+    };
+    const version = vi.fn((bin: string) => host.bins[bin]);
+    const r = await discoverCliInstalls('/home/t', makeFs(host), {
+      names: ['claude'], retainedVersions: [{ dir: '.local/share/claude/versions' }], version,
+    });
+    expect(r.primary).toEqual({ path: '/home/t/.local/bin/claude', version: '2.1.270' });
+    expect(r.others).toEqual([{ path: `${store}/2.1.71`, version: '2.1.71' }]);
+    // Retained versions come from the entry name — never executed
+    expect(version.mock.calls.map(c => c[0])).not.toContain(`${store}/2.1.71`);
+  });
+
+  it('retained versions with a binary inside each version dir', async () => {
+    const store = '/home/t/.local/share/cursor-agent/versions';
+    const host: FakeHost = {
+      kind: 'snapshot',
+      which: '/home/t/.local/bin/cursor-agent',
+      dirs: { [store]: ['2026.04.28-e984b46', '2026.09.23-86fc751'] },
+      bins: {
+        '/home/t/.local/bin/cursor-agent': '2026.09.23-86fc751',
+        [`${store}/2026.04.28-e984b46/cursor-agent`]: 'x',
+        [`${store}/2026.09.23-86fc751/cursor-agent`]: 'x',
+      },
+    };
+    const r = await discoverCliInstalls('/home/t', makeFs(host), {
+      names: ['cursor-agent'],
+      retainedVersions: [{ dir: '.local/share/cursor-agent/versions', binary: 'cursor-agent' }],
+      version: (bin) => host.bins[bin],
+    });
+    // Snapshot: no realpath, but the active version equals the primary's and collapses
+    expect(r.others).toEqual([{ path: `${store}/2026.04.28-e984b46/cursor-agent`, version: '2026.04.28-e984b46' }]);
   });
 
   it('returns nothing when no copy exists', async () => {
