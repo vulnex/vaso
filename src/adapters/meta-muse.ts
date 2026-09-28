@@ -94,7 +94,10 @@ export const metaMuseAdapter: AgentAdapter = {
   getProbeManifest(): ProbeManifest {
     return {
       filePaths: [`~/Library/Preferences/${PREFS_PLIST}`],
-      globPatterns: [`~/Library/Application Support/${BUNDLE_ID}/**`],
+      globPatterns: [],
+      // App data (analytics store, caches) is private — MM-003 checks
+      // permissions only, so collect existence + mode, never content.
+      metadataGlobPatterns: [`~/Library/Application Support/${BUNDLE_ID}/**`],
       commands: [
         { id: 'muse-version', cmd: 'defaults', args: ['read', `${APP_BUNDLE_PATH}/Contents/Info.plist`, 'CFBundleShortVersionString'], timeout: 3000 },
         { id: 'muse-codesign', cmd: 'codesign', args: ['-dv', APP_BUNDLE_PATH], timeout: 5000 },

@@ -1,6 +1,7 @@
 import { join } from 'node:path';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { isExcludedPath } from '../../core/utils.js';
 import { API_KEY_PATTERNS } from '../../core/patterns.js';
 
 const CREDENTIAL_FILES = new Set([
@@ -37,6 +38,8 @@ export const pol005 = defineCheck({
     for (const entry of entries) {
       if (!entry.isFile) continue;
       if (!CREDENTIAL_FILES.has(entry.name)) continue;
+      // Vendored packages ship sample .env/credential files, not the user's
+      if (isExcludedPath(installDir, entry.parentPath)) continue;
 
       const fullPath = entry.parentPath ? join(entry.parentPath, entry.name) : join(installDir, entry.name);
       try {

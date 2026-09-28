@@ -195,11 +195,13 @@ export const copilotCliAdapter: AgentAdapter = {
 
   getProbeManifest(): ProbeManifest {
     return {
+      // Past prompts and session state are private — GHC-001 only needs their
+      // permissions, so collect existence + mode, never content.
+      metadataGlobPatterns: ['~/.copilot/command-history-state.json', '~/.copilot/session-state/*'],
       filePaths: [
         '~/.copilot/config.json',
         '~/.copilot/settings.json',
         '~/.copilot/lsp-config.json',
-        '~/.copilot/command-history-state.json',
         '~/.config/gh/hosts.yml',
         // User-relative CLI install locations
         '~/.local/bin/copilot',
@@ -211,7 +213,6 @@ export const copilotCliAdapter: AgentAdapter = {
         // package.json of every npm-global copy — versions non-primary copies on remote scans
         ...npmPackageJsonGlobs('@github/copilot'),
         '~/.copilot/instructions/*.instructions.md',
-        '~/.copilot/session-state/*.json',
         nvmBinaryGlob('copilot'),
       ],
       commands: [

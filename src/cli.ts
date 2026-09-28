@@ -10,7 +10,7 @@ import { isAdvisoryFeedStale } from './advisory/updater.js';
 import { loadUserPlugins } from './user-plugins/loader.js';
 import { loadAndRegisterRules } from './rules/index.js';
 import { checkRegistry } from './core/check-registry.js';
-import { setDebug } from './core/debug.js';
+import { logError, setDebug } from './core/debug.js';
 import { assertZoneGraphsValid } from './core/zone-graph-validator.js';
 import { defaultZoneGraph } from './core/default-zone-graph.js';
 import { AGENT_TYPES, isScannableAgentType } from './core/types.js';
@@ -373,4 +373,10 @@ probeCmd
     await probeValidate(path);
   });
 
-program.parse();
+// Async actions: an error thrown inside any command handler must surface as
+// VASO's one-line error (full stack with --debug), not a raw unhandled
+// rejection. Exit 2 = VASO itself could not complete (bad input, runtime error).
+program.parseAsync().catch((err: unknown) => {
+  logError(chalk.red('Error:'), err);
+  process.exitCode = 2;
+});

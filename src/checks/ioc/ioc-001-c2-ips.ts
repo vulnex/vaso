@@ -1,27 +1,8 @@
-import { join, extname } from 'node:path';
-import type { Evidence, ScanContext } from '../../core/types.js';
+import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { getIOCDatabase } from '../../ioc/database.js';
-import { getAllSkillsDirs } from '../../core/utils.js';
+import { iocScanFiles, readScanFile } from './scan-files.js';
 import { ipBoundaryRegex } from './boundary.js';
-
-const SCAN_EXTENSIONS = new Set(['.js', '.ts', '.mjs', '.cjs', '.json', '.yaml', '.yml', '.env', '.sh']);
-
-async function getAllFilesViaCtx(ctx: ScanContext, dirs: string[]): Promise<string[]> {
-  const files: string[] = [];
-  for (const dir of dirs) {
-    try {
-      const entries = await ctx.fs.readdirEntries(dir, { recursive: true });
-      for (const entry of entries) {
-        if (entry.isFile && SCAN_EXTENSIONS.has(extname(entry.name))) {
-          const fullPath = entry.parentPath ? join(entry.parentPath, entry.name) : join(dir, entry.name);
-          files.push(fullPath);
-        }
-      }
-    } catch {}
-  }
-  return files;
-}
 
 export const ioc001 = defineCheck({
   id: 'IOC-001',
@@ -33,7 +14,6 @@ export const ioc001 = defineCheck({
   async run(ctx, h) {
     const evidence: Evidence[] = [];
     const db = getIOCDatabase();
-    const dirs = [ctx.installation.installDir, ...getAllSkillsDirs(ctx.installation)];
 
     const ipRegexes = db.c2Ips.map(ip => ({ ip, re: ipBoundaryRegex(ip) }));
 
@@ -58,11 +38,9 @@ export const ioc001 = defineCheck({
       scan(config.filePath, config.raw);
     }
 
-    const files = await getAllFilesViaCtx(ctx, dirs);
-    for (const file of files) {
-      try {
-        scan(file, await ctx.fs.readFile(file));
-      } catch {}
+    for (const file of await iocScanFiles(ctx)) {
+      const content = await readScanFile(ctx, file);
+      if (content !== undefined) scan(file, content);
     }
 
     return h.fromEvidence(evidence, {

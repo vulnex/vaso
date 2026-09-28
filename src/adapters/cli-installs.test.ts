@@ -11,6 +11,8 @@ interface FakeHost {
   kind?: 'local' | 'snapshot';
   /** Extra directory listings (path → entry names). */
   dirs?: Record<string, string[]>;
+  /** Readable file contents (e.g. nvm alias files). */
+  files?: Record<string, string>;
 }
 
 function makeFs(h: FakeHost): FSProvider {
@@ -21,6 +23,10 @@ function makeFs(h: FakeHost): FSProvider {
     kind: h.kind ?? 'local',
     access: vi.fn(async (p: string) => p in h.bins),
     realpath: vi.fn(async (p: string) => h.links?.[p] ?? p),
+    readFile: vi.fn(async (p: string) => {
+      if (h.files && p in h.files) return h.files[p];
+      throw new Error('ENOENT');
+    }),
     readdirEntries: vi.fn(async (p: string) => {
       if (p === nvmRoot && h.nvm) return h.nvm.map(name => ({ name, isDirectory: true, isFile: false }) as DirentInfo);
       if (h.dirs?.[p]) return h.dirs[p].map(name => ({ name, isDirectory: true, isFile: false }) as DirentInfo);
@@ -186,6 +192,78 @@ describe('discoverCliInstalls', () => {
     });
     // Snapshot: no realpath, but the active version equals the primary's and collapses
     expect(r.others).toEqual([{ path: `${store}/2026.04.28-e984b46/cursor-agent`, version: '2026.04.28-e984b46' }]);
+  });
+
+  it("prefers nvm's default Node copy over a system copy a non-interactive PATH finds", async () => {
+    const nvm = '/home/t/.nvm/versions/node';
+    const host: FakeHost = {
+      which: '/usr/local/bin/codex',
+      nvm: ['v22.22.1', 'v24.21.0', 'v22.3.0'],
+      files: { '/home/t/.nvm/alias/default': '22\n' },
+      bins: {
+        '/usr/local/bin/codex': '0.111.0',
+        [`${nvm}/v22.22.1/bin/codex`]: '0.154.0',
+        [`${nvm}/v24.21.0/bin/codex`]: '0.158.0',
+      },
+    };
+    const r = await discoverCliInstalls('/home/t', makeFs(host), spec(host));
+    expect(r.primary).toEqual({ path: `${nvm}/v22.22.1/bin/codex`, version: '0.154.0' });
+    expect(r.others.map(o => o.version).sort()).toEqual(['0.111.0', '0.158.0']);
+  });
+
+  it('keeps the PATH copy when nvm default is system, unresolvable, or which already hit nvm', async () => {
+    const nvm = '/home/t/.nvm/versions/node';
+    const bins = { '/usr/local/bin/codex': '0.111.0', [`${nvm}/v22.22.1/bin/codex`]: '0.154.0', [`${nvm}/v24.21.0/bin/codex`]: '0.158.0' };
+    for (const [alias, which, expected] of [
+      ['system', '/usr/local/bin/codex', '0.111.0'],
+      ['18', '/usr/local/bin/codex', '0.111.0'],
+      ['22', `${nvm}/v24.21.0/bin/codex`, '0.158.0'],
+    ] as const) {
+      const host: FakeHost = { which, nvm: ['v22.22.1', 'v24.21.0'], files: { '/home/t/.nvm/alias/default': alias }, bins };
+      const r = await discoverCliInstalls('/home/t', makeFs(host), spec(host));
+      expect(r.primary?.version, alias).toBe(expected);
+    }
+  });
+
+  it('keeps a user-dir PATH hit over the nvm default copy (user dirs often precede nvm)', async () => {
+    const nvm = '/home/t/.nvm/versions/node';
+    const host: FakeHost = {
+      which: '/home/t/.local/bin/openclaw',
+      nvm: ['v22.22.1'],
+      files: { '/home/t/.nvm/alias/default': '22' },
+      bins: { '/home/t/.local/bin/openclaw': '2026.9.4', [`${nvm}/v22.22.1/bin/openclaw`]: '2026.3.13' },
+    };
+    const r = await discoverCliInstalls('/home/t', makeFs(host), { ...spec(host), names: ['openclaw'] });
+    expect(r.primary?.version).toBe('2026.9.4');
+    expect(r.others).toEqual([{ path: `${nvm}/v22.22.1/bin/openclaw`, version: '2026.3.13' }]);
+  });
+
+  it('on a snapshot, the nvm-default primary is versioned from files, not the PATH copy output', async () => {
+    const nvm = '/home/t/.nvm/versions/node';
+    const host: FakeHost = {
+      kind: 'snapshot',
+      which: '/usr/local/bin/codex',
+      nvm: ['v22.22.1'],
+      files: { '/home/t/.nvm/alias/default': '22' },
+      bins: { '/usr/local/bin/codex': '0.111.0', [`${nvm}/v22.22.1/bin/codex`]: '0.154.0' },
+    };
+    const calls: Array<[string, boolean]> = [];
+    const r = await discoverCliInstalls('/home/t', makeFs(host), spec(host, {
+      version: (bin, canExec) => { calls.push([bin, canExec]); return host.bins[bin]; },
+    }));
+    expect(r.primary).toEqual({ path: `${nvm}/v22.22.1/bin/codex`, version: '0.154.0' });
+    expect(calls).toContainEqual([`${nvm}/v22.22.1/bin/codex`, false]);
+    expect(calls).toContainEqual(['/usr/local/bin/codex', true]);
+  });
+
+  it('resolves lts/<name> and node aliases', async () => {
+    const nvm = '/home/t/.nvm/versions/node';
+    const bins = { '/usr/bin/codex': '0.1.0', [`${nvm}/v20.20.1/bin/codex`]: '0.2.0', [`${nvm}/v24.21.0/bin/codex`]: '0.3.0' };
+    const lts: FakeHost = { which: '/usr/bin/codex', nvm: ['v20.20.1', 'v24.21.0'], bins,
+      files: { '/home/t/.nvm/alias/default': 'lts/iron', '/home/t/.nvm/alias/lts/iron': 'v20.20.1' } };
+    expect((await discoverCliInstalls('/home/t', makeFs(lts), spec(lts))).primary?.version).toBe('0.2.0');
+    const node: FakeHost = { ...lts, files: { '/home/t/.nvm/alias/default': 'node' } };
+    expect((await discoverCliInstalls('/home/t', makeFs(node), spec(node))).primary?.version).toBe('0.3.0');
   });
 
   it('returns nothing when no copy exists', async () => {

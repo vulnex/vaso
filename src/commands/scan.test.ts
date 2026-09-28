@@ -138,12 +138,12 @@ describe('runScan', () => {
     expect(process.exitCode).toBe(1);
   });
 
-  it('sets exit code 1 on error', async () => {
+  it('sets exit code 2 when VASO itself fails (1 is reserved for findings)', async () => {
     const mockScan = vi.fn().mockRejectedValue(new Error('scan failed'));
     mockScanEngine.mockImplementation(function () { return { scan: mockScan } as any; });
 
     await runScan({ format: 'terminal' });
-    expect(process.exitCode).toBe(1);
+    expect(process.exitCode).toBe(2);
     expect(consoleErrors.some(l => l.includes('Scan failed'))).toBe(true);
   });
 

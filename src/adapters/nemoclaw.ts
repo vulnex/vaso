@@ -1,4 +1,4 @@
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { AgentAdapter, DetectOptions } from './adapter.js';
 import type { AgentInstallation, GatewayInfo, ModelRef, ParsedConfig, ZoneGraph } from '../core/types.js';
 import type { ProbeManifest } from '../core/snapshot-types.js';
@@ -51,6 +51,10 @@ async function findCLIInstalls(home: string, fs: FSProvider) {
       try { real = await fs.realpath(bin); } catch {}
       const isCurrent = hasSource && (bin === join(home, '.local', 'bin', 'nemoclaw') || real.startsWith(`${src}/`));
       if (isCurrent) return readSourceInstallVersion(home, fs);
+      // An npm-global copy that is an `npm link` of a current checkout carries
+      // the build identity (snapshots can't follow the link to tell).
+      const identity = await readBuildIdentity(join(dirname(dirname(bin)), 'lib', 'node_modules', 'nemoclaw'), fs);
+      if (identity) return identity;
       return (await readPackageVersion(bin, fs, 'nemoclaw'))
         ?? (canExec ? queryCliVersion(bin, fs, { argSets: [['--version']] }) : undefined);
     },
@@ -71,14 +75,21 @@ function nodeModulesPackageJsonCandidates(home: string): string[] {
   ];
 }
 
-/** Version of a current-generation install: dist/build-identity.json, then .version. */
-async function readSourceInstallVersion(home: string, fs: FSProvider): Promise<string | undefined> {
-  const root = sourceDir(home);
+/** `nemoclawVersion` from `<root>/dist/build-identity.json`. */
+async function readBuildIdentity(root: string, fs: FSProvider): Promise<string | undefined> {
   try {
     const identity = JSON.parse(await fs.readFile(join(root, 'dist', 'build-identity.json'))) as Record<string, unknown>;
     const v = identity.nemoclawVersion;
     if (typeof v === 'string' && /^\d+\.\d+\.\d+/.test(v)) return v;
   } catch {}
+  return undefined;
+}
+
+/** Version of a current-generation install: dist/build-identity.json, then .version. */
+async function readSourceInstallVersion(home: string, fs: FSProvider): Promise<string | undefined> {
+  const root = sourceDir(home);
+  const identity = await readBuildIdentity(root, fs);
+  if (identity) return identity;
   try {
     const v = (await fs.readFile(join(root, '.version'))).trim().replace(/^v/, '');
     if (/^\d+\.\d+\.\d+/.test(v)) return v;
@@ -341,6 +352,8 @@ export const nemoclawAdapter: AgentAdapter = {
         '~/.volta/tools/image/packages/nemoclaw/package.json',
       ],
       globPatterns: [
+        // npm-linked copies under each nvm Node (remote: the link isn't followable)
+        '~/.nvm/versions/node/*/lib/node_modules/nemoclaw/dist/build-identity.json',
         '~/.nemoclaw/blueprints/**',
         '~/.nemoclaw/policies/**',
         // nvm installs live under a per-version subdir.

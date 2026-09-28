@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { parseSSHTarget, withRetry } from './ssh.js';
+import { describeConnectFailure, parseSSHTarget, withRetry } from './ssh.js';
 
 describe('parseSSHTarget', () => {
   it('parses user@host with default port 22', () => {
@@ -136,5 +136,19 @@ describe('withRetry', () => {
     expect(sleep).toHaveBeenCalledTimes(2);
     expect(sleep).toHaveBeenNthCalledWith(1, 1);
     expect(sleep).toHaveBeenNthCalledWith(2, 2);
+  });
+});
+
+describe('describeConnectFailure', () => {
+  const t = { user: 'u', host: 'h' };
+  it('reports a spawn timeout (no exit code) as a timeout with the configured seconds', () => {
+    expect(describeConnectFailure(t, null, 'SIGTERM', 3000)).toMatch(/u@h timed out after 3s/);
+  });
+  it('explains ssh exit 255', () => {
+    expect(describeConnectFailure(t, 255, null, 60000)).toMatch(/ssh exit 255: connection refused, unknown host, or authentication rejected/);
+  });
+  it('names other signals and exit codes', () => {
+    expect(describeConnectFailure(t, null, 'SIGKILL', 60000)).toMatch(/terminated by SIGKILL/);
+    expect(describeConnectFailure(t, 1, null, 60000)).toMatch(/failed \(ssh exit 1\)/);
   });
 });

@@ -10,7 +10,17 @@ describe('buildProbeManifest', () => {
     expect(manifest.metadataGlobPatterns).toEqual(expect.arrayContaining([
       '~/.codex/sessions/*/*/*/rollout-*.jsonl',
       '~/Library/Application Support/com.openai.chat/conversations-v3-*/**',
+      '~/.gemini/tmp/*/chats/session-*.jsonl',
+      '~/.copilot/command-history-state.json',
+      '~/.copilot/session-state/*',
+      '~/Library/Application Support/com.meta.endo/**',
     ]));
+    // Never also collected with content
+    const content = [...manifest.globPatterns, ...manifest.filePaths];
+    for (const p of ['~/.gemini/tmp/*/chats/session-*.jsonl', '~/.copilot/command-history-state.json',
+      '~/.copilot/session-state/*.json', '~/Library/Application Support/com.meta.endo/**']) {
+      expect(content).not.toContain(p);
+    }
     for (const g of manifest.metadataGlobPatterns ?? []) expect(manifest.globPatterns).not.toContain(g);
   });
 

@@ -64,6 +64,26 @@ export function parseSSHTarget(target: string): SSHTarget {
   return { user, host, port, label };
 }
 
+/** Human-readable reason an `ssh` connection attempt ended. */
+export function describeConnectFailure(
+  target: Pick<SSHTarget, 'user' | 'host'>,
+  code: number | null,
+  signal: NodeJS.Signals | null,
+  timeoutMs: number,
+): string {
+  const who = `${target.user}@${target.host}`;
+  if (code === null) {
+    // spawn()'s timeout kills ssh with a signal and reports no exit code
+    return signal === 'SIGTERM' || signal === null
+      ? `SSH connection to ${who} timed out after ${Math.round(timeoutMs / 1000)}s (host unreachable or not answering; raise --ssh-timeout if it is just slow)`
+      : `SSH connection to ${who} was terminated by ${signal}`;
+  }
+  if (code === 255) {
+    return `SSH connection to ${who} failed (ssh exit 255: connection refused, unknown host, or authentication rejected — check the host, user and --ssh-key)`;
+  }
+  return `SSH connection to ${who} failed (ssh exit ${code})`;
+}
+
 /**
  * Establish a ControlMaster SSH connection. This is the only step that
  * may prompt for a password — all subsequent ssh/scp commands multiplex
@@ -78,7 +98,8 @@ function establishControlMaster(target: SSHTarget, controlPath: string, timeout:
       '-o', `ControlPath=${controlPath}`,
       '-o', 'ControlPersist=120',
       '-o', 'StrictHostKeyChecking=accept-new',
-      '-o', 'ConnectTimeout=10',
+      // Honor --ssh-timeout for the TCP/handshake phase too (was fixed at 10 s)
+      '-o', `ConnectTimeout=${Math.max(1, Math.ceil(timeout / 1000))}`,
       '-p', String(target.port),
     ];
     if (target.identity) args.push('-i', target.identity);
@@ -91,9 +112,9 @@ function establishControlMaster(target: SSHTarget, controlPath: string, timeout:
 
     // ControlPersist keeps the connection alive in the background after
     // the master process exits, so we wait for it to fork and return.
-    child.on('close', (code) => {
-      if (code === 0) resolve();
-      else reject(new Error(`SSH connection to ${target.user}@${target.host} failed (exit ${code})`));
+    child.on('close', (code, signal) => {
+      if (code === 0) return resolve();
+      reject(new Error(describeConnectFailure(target, code, signal, timeout)));
     });
     child.on('error', reject);
   });
@@ -295,10 +316,12 @@ export async function executeRemoteProbe(
   const remoteProbePath = `/tmp/vaso-probe-${uuid}`;
   const remoteManifestPath = `/tmp/vaso-manifest-${uuid}.json`;
   const localManifestPath = `/tmp/vaso-manifest-local-${uuid}.json`;
+  let connected = false;
 
   try {
     // 1. Establish authenticated connection (may prompt for password once)
     await establishControlMaster(target, controlPath, timeout);
+    connected = true;
 
     // All subsequent commands reuse the authenticated connection — no more prompts
 
@@ -330,11 +353,13 @@ export async function executeRemoteProbe(
   } finally {
     // Clean up local temp file
     await unlink(localManifestPath).catch(() => {});
-    // Clean up remote temp files (best effort)
-    try {
-      await runOverControl('ssh', controlSSHArgs(target, controlPath, [`rm -f ${remoteProbePath} ${remoteManifestPath}`]), { timeout: 10000 });
-    } catch { /* best effort */ }
-    // Close the control master connection
-    closeControlMaster(target, controlPath);
+    // Remote cleanup needs the control connection; without it ssh would dial
+    // the (unreachable) host again and stall the failure by up to 10 s.
+    if (connected) {
+      try {
+        await runOverControl('ssh', controlSSHArgs(target, controlPath, [`rm -f ${remoteProbePath} ${remoteManifestPath}`]), { timeout: 10000 });
+      } catch { /* best effort */ }
+      closeControlMaster(target, controlPath);
+    }
   }
 }

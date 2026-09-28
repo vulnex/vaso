@@ -35,6 +35,10 @@ export function buildProbeManifest(adapters: AgentAdapter[]): ProbeManifest {
     }
   }
 
+  // nvm's default alias — tells CLI discovery which Node an interactive shell runs
+  merged.filePaths.push('~/.nvm/alias/default');
+  merged.globPatterns.push('~/.nvm/alias/lts/*');
+
   // Add common runtime/network check commands
   merged.commands.push(
     { id: 'netstat-tcp', cmd: 'netstat', args: ['-an', '-p', 'tcp'], timeout: 5000 },

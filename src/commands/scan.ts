@@ -7,7 +7,7 @@ import { saveBaseline, loadBaseline, diffResults } from '../core/baseline.js';
 import { SnapshotFSProvider } from '../core/snapshot-fs-provider.js';
 import type { ProbeSnapshot } from '../core/snapshot-types.js';
 import type { ScanOptions } from '../core/types.js';
-import { shouldFailScan, isValidFailOn, type FailOnLevel } from '../core/exit-criteria.js';
+import { shouldFailScan, isValidFailOn, EXIT_FINDINGS, EXIT_INCOMPLETE, EXIT_USAGE, type FailOnLevel } from '../core/exit-criteria.js';
 import { logError } from '../core/debug.js';
 import { writeFileEnsureDir } from '../core/utils.js';
 import { readFile, writeFile } from 'node:fs/promises';
@@ -90,7 +90,7 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
       console.error(chalk.red(code === 'ENOENT'
         ? `Snapshot file not found: ${options.snapshot}`
         : `Failed to read snapshot file: ${(err as Error).message}`));
-      process.exitCode = 1;
+      process.exitCode = EXIT_USAGE;
       return;
     }
 
@@ -99,7 +99,7 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
       snapshot = JSON.parse(raw) as ProbeSnapshot;
     } catch (err) {
       console.error(chalk.red(`Snapshot file is not valid JSON: ${(err as Error).message}`));
-      process.exitCode = 1;
+      process.exitCode = EXIT_USAGE;
       return;
     }
 
@@ -115,7 +115,7 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
     if (errors.length > 0) {
       console.error(chalk.red('Invalid snapshot file:'));
       for (const e of errors) console.error(chalk.red(`  - ${e}`));
-      process.exitCode = 1;
+      process.exitCode = EXIT_USAGE;
       return;
     }
 
@@ -187,7 +187,7 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
 
     if (targets.length === 0) {
       console.error(chalk.red('No scan targets specified'));
-      process.exitCode = 1;
+      process.exitCode = EXIT_USAGE;
       return;
     }
 
@@ -332,12 +332,15 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
       log(chalk.bold(`\n  Summary: ${successResults.length} scanned, ${failedResults.length} failed\n`));
     }
 
-    // Exit non-zero if any host failed, or if findings meet the --fail-on threshold
+    // 3 if any host could not be scanned (takes precedence), else 1 when
+    // findings meet the --fail-on threshold
     const allResults = successResults.flatMap(hr =>
       hr.result?.agents.flatMap(a => a.results) ?? []
     );
-    if (shouldFailScan(allResults, failOn) || failedResults.length > 0) {
-      process.exitCode = 1;
+    if (failedResults.length > 0) {
+      process.exitCode = EXIT_INCOMPLETE;
+    } else if (shouldFailScan(allResults, failOn)) {
+      process.exitCode = EXIT_FINDINGS;
     }
 
     return; // Don't fall through to local scan
@@ -420,10 +423,10 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
     // Exit non-zero if findings meet the --fail-on threshold (default: critical only)
     const allResults = result.agents.flatMap(a => a.results);
     if (shouldFailScan(allResults, failOn)) {
-      process.exitCode = 1;
+      process.exitCode = EXIT_FINDINGS;
     }
   } catch (err) {
     logError(chalk.red('Scan failed:'), err);
-    process.exitCode = 1;
+    process.exitCode = EXIT_USAGE;
   }
 }

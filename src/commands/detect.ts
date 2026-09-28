@@ -1,4 +1,5 @@
 import chalk from 'chalk';
+import { EXIT_INCOMPLETE, EXIT_USAGE } from '../core/exit-criteria.js';
 import { adapterRegistry } from '../adapters/registry.js';
 import type { AgentInstallation, AgentType } from '../core/types.js';
 import { logError } from '../core/debug.js';
@@ -85,7 +86,7 @@ export async function runDetect(options: DetectCommandOptions): Promise<void> {
     await renderResults(installations, options);
   } catch (err) {
     logError(chalk.red('Detection failed:'), err);
-    process.exitCode = 1;
+    process.exitCode = EXIT_USAGE;
   }
 }
 
@@ -104,7 +105,7 @@ async function detectFromSnapshot(options: DetectCommandOptions): Promise<AgentI
   if (errors.length > 0) {
     console.error(chalk.red('Invalid snapshot file:'));
     for (const e of errors) console.error(chalk.red(`  - ${e}`));
-    process.exitCode = 1;
+    process.exitCode = EXIT_USAGE;
     return [];
   }
 
@@ -177,7 +178,7 @@ async function detectRemoteHosts(options: DetectCommandOptions): Promise<void> {
 
   if (targets.length === 0) {
     console.error(chalk.red('No detection targets specified'));
-    process.exitCode = 1;
+    process.exitCode = EXIT_USAGE;
     return;
   }
 
@@ -271,6 +272,8 @@ async function detectRemoteHosts(options: DetectCommandOptions): Promise<void> {
   }
 
   const results = await runConcurrent(targets, concurrency, processTarget);
+  // Scan incomplete: one or more hosts could not be reached/probed
+  if (results.some(r => r.error)) process.exitCode = EXIT_INCOMPLETE;
 
   // When --output-dir is set, per-host files were already written above;
   // skip the combined-output rendering branch entirely.

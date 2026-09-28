@@ -1,8 +1,25 @@
-import type { Evidence } from '../../core/types.js';
+import type { AgentType, Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { CODING_AGENTS } from '../../core/types.js';
 
-const AGENT_KEYWORDS = ['openclaw', 'nanoclaw', 'picoclaw', 'ironclaw', 'nanobot', 'zeroclaw'];
+/**
+ * Process names (substring of `ps -o comm`, which Linux truncates to 15
+ * chars) that belong to each agent. Only the scanned installation's own
+ * processes are examined — one process must not be reported under every
+ * framework installed on the host.
+ */
+const AGENT_PROCESS_NAMES: Partial<Record<AgentType, string[]>> = {
+  openclaw: ['openclaw'],
+  nanoclaw: ['nanoclaw'],
+  picoclaw: ['picoclaw'],
+  ironclaw: ['ironclaw'],
+  nanobot: ['nanobot'],
+  zeroclaw: ['zeroclaw'],
+  nemoclaw: ['nemoclaw', 'openshell'],
+  hermes: ['hermes'],
+  lyrie: ['lyrie'],
+  'atomic-agent': ['atomic-agent', 'atag'],
+};
 
 const SUSPICIOUS_PARENTS = new Set([
   'curl', 'wget', 'nc', 'ncat', 'netcat',
@@ -37,6 +54,7 @@ export const run005 = defineCheck({
       return h.passed('Could not retrieve process list');
     }
 
+    const keywords = AGENT_PROCESS_NAMES[ctx.installation.agent] ?? [ctx.installation.agent];
     const evidence: Evidence[] = [];
     const processMap = new Map<number, ProcessInfo>();
     const agentPids: number[] = [];
@@ -57,7 +75,7 @@ export const run005 = defineCheck({
       processMap.set(pid, { ppid, comm });
 
       const commLower = comm.toLowerCase();
-      for (const keyword of AGENT_KEYWORDS) {
+      for (const keyword of keywords) {
         if (commLower.includes(keyword)) {
           agentPids.push(pid);
           break;

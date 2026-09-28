@@ -1,5 +1,12 @@
 import type { CheckResult, Severity } from './types.js';
 
+/** Exit codes: 0 clean · 1 findings at/above --fail-on · 2 invalid usage or
+ *  VASO error · 3 scan incomplete (one or more hosts could not be scanned —
+ *  takes precedence over 1, so CI can tell "unscanned" from "findings"). */
+export const EXIT_FINDINGS = 1;
+export const EXIT_USAGE = 2;
+export const EXIT_INCOMPLETE = 3;
+
 export type FailOnLevel = 'critical' | 'warning' | 'info' | 'none';
 
 export const FAIL_ON_LEVELS: readonly FailOnLevel[] = ['critical', 'warning', 'info', 'none'] as const;

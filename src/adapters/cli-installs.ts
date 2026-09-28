@@ -24,6 +24,8 @@ import { compareVersions } from '../core/semver.js';
 
 /** Install dirs every CLI is looked for in, besides the adapter's own. */
 const COMMON_SYSTEM_BIN_DIRS = ['/opt/homebrew/bin', '/usr/local/bin', '/usr/bin'];
+/** Dirs an interactive shell's nvm-default Node bin is placed ahead of. */
+const SYSTEM_BIN_DIRS = [...COMMON_SYSTEM_BIN_DIRS, '/bin', '/usr/sbin', '/snap/bin'];
 const COMMON_USER_BIN_DIRS = [
   '.local/bin', '.npm-global/bin', '.volta/bin', '.bun/bin',
   // pnpm global bin (PNPM_HOME default on Linux / macOS)
@@ -127,6 +129,33 @@ async function retainedCopies(home: string, fs: FSProvider, spec: CliInstallSpec
   return out;
 }
 
+/**
+ * Bin dir of nvm's default Node — what an interactive shell puts first on PATH
+ * (nvm.sh prepends it). Resolves `~/.nvm/alias/default`: an exact version,
+ * a prefix (`22` → newest installed v22.x), `node`/`stable` (newest), or
+ * `lts/<name>` via `~/.nvm/alias/lts/`. `system` or unresolvable → undefined.
+ */
+export async function nvmDefaultBinDir(home: string, fs: FSProvider): Promise<string | undefined> {
+  const nvmDir = join(home, '.nvm');
+  const read = async (p: string): Promise<string | undefined> => {
+    try { return (await fs.readFile(p)).trim() || undefined; } catch { return undefined; }
+  };
+  let alias = await read(join(nvmDir, 'alias', 'default'));
+  for (let hops = 0; alias?.startsWith('lts/') && hops < 3; hops++) {
+    alias = await read(join(nvmDir, 'alias', 'lts', alias.slice(4)));
+  }
+  if (!alias || alias === 'system') return undefined;
+  const root = join(nvmDir, 'versions', 'node');
+  const installed = (await listNames(root, fs)).filter(v => /^v\d/.test(v));
+  const want = alias.replace(/^v/, '');
+  const matches = alias === 'node' || alias === 'stable'
+    ? installed
+    : installed.filter(v => v.slice(1) === want || v.slice(1).startsWith(`${want}.`));
+  if (matches.length === 0) return undefined;
+  const newest = matches.sort((a, b) => compareVersions(b.slice(1), a.slice(1)))[0];
+  return join(root, newest, 'bin');
+}
+
 function whichPath(name: string, fs: FSProvider): string | undefined {
   try {
     const out = fs.execSync('which', [name], { timeout: 3000 }).trim().split('\n')[0]?.trim();
@@ -137,8 +166,20 @@ function whichPath(name: string, fs: FSProvider): string | undefined {
 }
 
 /** Candidate paths in discovery order, PATH-resolved first. */
-async function candidatePaths(home: string, fs: FSProvider, spec: CliInstallSpec): Promise<{ resolved?: string; paths: string[] }> {
-  const resolved = spec.names.map(n => whichPath(n, fs)).find(Boolean);
+async function candidatePaths(home: string, fs: FSProvider, spec: CliInstallSpec): Promise<{ resolved?: string; onPath?: string; paths: string[] }> {
+  const onPath = spec.names.map(n => whichPath(n, fs)).find(Boolean);
+  let resolved = onPath;
+  // A non-interactive PATH (cron, CI, the remote probe) lacks nvm, so `which`
+  // can land on a system copy that interactive shells shadow: nvm.sh puts the
+  // default Node's bin ahead of the system dirs. User dirs (~/.local/bin, …)
+  // are often ahead of nvm, so only a system-dir hit is overridden.
+  if (spec.nvm !== false && (!resolved || SYSTEM_BIN_DIRS.some(d => resolved!.startsWith(`${d}/`)))) {
+    const defaultBin = await nvmDefaultBinDir(home, fs);
+    for (const name of defaultBin ? spec.names : []) {
+      const p = join(defaultBin!, name);
+      if (await fs.access(p)) { resolved = p; break; }
+    }
+  }
   const paths: string[] = [];
   if (spec.preferPath) paths.push(spec.preferPath);
   if (resolved) paths.push(resolved);
@@ -154,11 +195,11 @@ async function candidatePaths(home: string, fs: FSProvider, spec: CliInstallSpec
       for (const name of spec.names) paths.push(join(dir, name));
     }
   }
-  return { resolved, paths: [...new Set(paths)] };
+  return { resolved, onPath, paths: [...new Set(paths)] };
 }
 
 export async function discoverCliInstalls(home: string, fs: FSProvider, spec: CliInstallSpec): Promise<CliInstalls> {
-  const { resolved, paths } = await candidatePaths(home, fs, spec);
+  const { resolved, onPath, paths } = await candidatePaths(home, fs, spec);
   const live = fs.kind !== 'snapshot';
 
   // Existing copies, deduplicated by what they resolve to (symlinked shims,
@@ -175,9 +216,9 @@ export async function discoverCliInstalls(home: string, fs: FSProvider, spec: Cl
   }
   const installs: CliInstall[] = [];
   for (const path of found) {
-    // The PATH-resolved copy may always be run: on snapshots its `<name>
-    // --version` output was collected for exactly that binary.
-    const version = await spec.version(path, live || path === resolved);
+    // On snapshots only the copy `which` found may be "run": its `<name>
+    // --version` output is the one the probe collected.
+    const version = await spec.version(path, live || path === onPath);
     installs.push({ path, ...(version ? { version } : {}) });
   }
   // Past versions an updater keeps on disk: runnable by path, off PATH. The

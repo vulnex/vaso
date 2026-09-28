@@ -237,6 +237,10 @@ export const geminiAdapter: AgentAdapter = {
 
   getProbeManifest(): ProbeManifest {
     return {
+      // Chat transcripts are private conversation content — existence only.
+      // (Locally the latest one still supplies the active model when
+      // settings.json has none; remote scans rely on settings.json.)
+      metadataGlobPatterns: ['~/.gemini/tmp/*/chats/session-*.jsonl'],
       filePaths: [
         '~/.gemini/settings.json',
         '~/.gemini/memory.md',
@@ -259,9 +263,6 @@ export const geminiAdapter: AgentAdapter = {
         '~/.gemini/commands/*',
         '~/.gemini/policies/*',
         '~/.gemini/extensions/**',
-        // Session transcripts hold per-message `model` field — the empirical
-        // active model when settings.json has no `model.name`.
-        '~/.gemini/tmp/*/chats/session-*.jsonl',
         nvmBinaryGlob('gemini'),
         ...npmPackageJsonGlobs(NPM_PACKAGE_NAME),
       ],

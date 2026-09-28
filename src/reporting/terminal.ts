@@ -2,6 +2,11 @@ import chalk from 'chalk';
 import type { ScanResult, CheckResult, Severity } from '../core/types.js';
 import type { Reporter } from './reporter.js';
 
+/** Evidence items listed per finding in terminal output. */
+const MAX_TERMINAL_EVIDENCE = 20;
+/** Examples listed when every item of a finding is mitigated. */
+const MAX_MITIGATED_EXAMPLES = 5;
+
 const SEVERITY_COLORS: Record<Severity, (s: string) => string> = {
   critical: chalk.red,
   warning: chalk.yellow,
@@ -87,11 +92,24 @@ export class TerminalReporter implements Reporter {
     let line = `    ${colorFn(`[${icon}]`)} ${result.id}: ${result.name}`;
     line += `\n      ${result.message}`;
     if (result.evidence) {
-      for (const e of result.evidence) {
+      // Evidence can run to thousands of items (a large skill suite). List the
+      // live ones up to a cap and summarize mitigated items — test/fixture code
+      // or files unreachable through parent dirs; the file formats keep all.
+      const live = result.evidence.filter(e => !e.mitigated);
+      const mitigated = result.evidence.filter(e => e.mitigated);
+      const shown = live.length > 0 ? live : mitigated;
+      const cap = live.length > 0 ? MAX_TERMINAL_EVIDENCE : MAX_MITIGATED_EXAMPLES;
+      for (const e of shown.slice(0, cap)) {
         line += `\n      ${chalk.dim(`${e.file}${e.line ? `:${e.line}` : ''}`)}`;
         if (e.snippet) {
           line += `\n      ${chalk.dim(e.snippet)}`;
         }
+      }
+      if (shown.length > cap) {
+        line += `\n      ${chalk.dim(`… ${shown.length - cap} more (full list: --format json, markdown or html)`)}`;
+      }
+      if (live.length > 0 && mitigated.length > 0) {
+        line += `\n      ${chalk.dim(`+ ${mitigated.length} mitigated (test/fixture code or unreachable through parent directories) — not listed`)}`;
       }
     }
     if (result.fixable) {

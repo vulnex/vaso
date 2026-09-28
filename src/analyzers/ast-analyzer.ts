@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { parse } from '@babel/parser';
 import _traverse from '@babel/traverse';
 import type { Node } from '@babel/types';
@@ -49,9 +50,31 @@ const SENSITIVE_PATHS = [
   /secret/i,
 ];
 
+// Several checks (SKL-001/003/006/008/010, MCP-004/006) analyze the same
+// files in one scan; parse each distinct file once. Keyed by a content hash so
+// the cache never holds file contents.
+const MAX_CACHED_ANALYSES = 10_000;
+const analysisCache = new Map<string, DataFlowResult[]>();
+
 export function analyzeCode(code: string, filename = 'unknown.js'): DataFlowResult[] {
+  const key = `${filename}\0${createHash('sha1').update(code).digest('base64')}`;
+  const cached = analysisCache.get(key);
+  if (cached) return cached.map(r => ({ ...r }));
+  const results = analyzeUncached(code);
+  if (analysisCache.size >= MAX_CACHED_ANALYSES) {
+    analysisCache.delete(analysisCache.keys().next().value!);
+  }
+  analysisCache.set(key, results);
+  return results.map(r => ({ ...r }));
+}
+
+function analyzeUncached(code: string): DataFlowResult[] {
   const results: DataFlowResult[] = [];
   let ast: ReturnType<typeof parse>;
+  // Split once: re-splitting the file per call expression made analysis
+  // quadratic in file size.
+  let lines: string[] | undefined;
+  const lineText = (line: number): string => (lines ??= code.split('\n'))[line - 1]?.trim() ?? '';
 
   try {
     ast = parse(code, {
@@ -89,7 +112,7 @@ export function analyzeCode(code: string, filename = 'unknown.js'): DataFlowResu
       CallExpression(path) {
         const node = path.node;
         const line = node.loc?.start.line ?? 0;
-        const snippet = code.split('\n')[line - 1]?.trim() ?? '';
+        const snippet = lineText(line);
 
         // Detect eval/exec
         if (node.callee.type === 'Identifier' && EXEC_FUNCTIONS.has(node.callee.name)) {
@@ -274,7 +297,7 @@ export function analyzeCode(code: string, filename = 'unknown.js'): DataFlowResu
         const node = path.node;
         if (node.callee.type === 'Identifier' && node.callee.name === 'Function') {
           const line = node.loc?.start.line ?? 0;
-          const snippet = code.split('\n')[line - 1]?.trim() ?? '';
+          const snippet = lineText(line);
           results.push({
             type: 'eval-exec',
             line,
@@ -284,7 +307,7 @@ export function analyzeCode(code: string, filename = 'unknown.js'): DataFlowResu
         }
         if (node.callee.type === 'Identifier' && node.callee.name === 'WebSocket') {
           const line = node.loc?.start.line ?? 0;
-          const snippet = code.split('\n')[line - 1]?.trim() ?? '';
+          const snippet = lineText(line);
           results.push({
             type: 'suspicious-network',
             sink: 'WebSocket',

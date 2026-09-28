@@ -132,6 +132,29 @@ describe('TerminalReporter', () => {
     expect(output).toContain('host: 0.0.0.0');
   });
 
+  it('caps live evidence and summarizes mitigated items', () => {
+    const base = makeScanResult();
+    const live = Array.from({ length: 25 }, (_, i) => ({ file: `/s/live-${i}.ts`, line: i + 1 }));
+    const mitigated = Array.from({ length: 40 }, (_, i) => ({ file: `/s/test/t-${i}.test.ts`, mitigated: true }));
+    base.agents[0].results[0].evidence = [...live, ...mitigated];
+    const output = new TerminalReporter().render(base);
+    expect(output).toContain('/s/live-19.ts');
+    expect(output).not.toContain('/s/live-20.ts');
+    expect(output).toContain('… 5 more (full list: --format json, markdown or html)');
+    expect(output).toContain('+ 40 mitigated');
+    expect(output).not.toContain('/s/test/t-0.test.ts');
+  });
+
+  it('lists a few examples when every item is mitigated', () => {
+    const base = makeScanResult();
+    base.agents[0].results[0].evidence = Array.from({ length: 12 }, (_, i) => ({ file: `/s/test/t-${i}.ts`, mitigated: true }));
+    const output = new TerminalReporter().render(base);
+    expect(output).toContain('/s/test/t-4.ts');
+    expect(output).not.toContain('/s/test/t-5.ts');
+    expect(output).toContain('… 7 more');
+    expect(output).not.toContain('mitigated (test');
+  });
+
   it('shows fixable hint', () => {
     const reporter = new TerminalReporter();
     const output = reporter.render(makeScanResult());

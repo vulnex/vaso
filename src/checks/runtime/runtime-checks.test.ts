@@ -187,6 +187,28 @@ describe('RUN-005: Process Ancestry Analysis', () => {
     expect(run005.supportedPlatforms).toEqual(['darwin', 'linux']);
   });
 
+  it("reports only the scanned installation's own processes", async () => {
+    const ps = [
+      '  PID  PPID COMM',
+      '  100     1 python3',
+      '  200   100 openclaw',
+      '  300     1 bash',
+      '  400   300 hermes',
+    ].join('\n');
+    const fs = makeMockedFs({});
+    (fs.execSync as ReturnType<typeof vi.fn>).mockReturnValue(ps);
+    const ctxFor = (agent: AgentInstallation['agent']): ScanContext => ({
+      installation: { agent, installDir: '/h', configFiles: [] }, configs: [], platform: 'linux', fs,
+    });
+    const openclaw = await run005.run(ctxFor('openclaw'));
+    expect(openclaw.passed).toBe(false);
+    expect(openclaw.evidence?.[0].detail).toContain('"openclaw" (PID 200) has suspicious parent "python3"');
+    // The same process is not attributed to other frameworks on the host
+    expect((await run005.run(ctxFor('atomic-agent'))).passed).toBe(true);
+    // Hermes processes are examined for Hermes (bash parent is not suspicious by name)
+    expect((await run005.run(ctxFor('hermes'))).passed).toBe(true);
+  });
+
   it('passes when no agent processes are running', async () => {
     // In a test environment, no openclaw/nanoclaw/etc processes should be running
     const result = await run005.run(makeContext());

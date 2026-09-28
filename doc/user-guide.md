@@ -368,15 +368,16 @@ See [`network-scanning-guide.md`](network-scanning-guide.md) for the full SSH wo
 | Code | Meaning |
 |------|---------|
 | `0` | Scan completed; no findings at or above the `--fail-on` threshold |
-| `1` | Findings at or above the threshold (or the scan failed for another reason) |
-| `2` | Invalid CLI arguments (e.g. `--silent` without an output destination, `--parallel 0`) |
+| `1` | Findings at or above the threshold |
+| `2` | VASO could not run: invalid CLI arguments (e.g. `--silent` without an output destination, `--parallel 0`), an unreadable snapshot or inventory file, or an internal error |
+| `3` | Scan incomplete: one or more remote hosts could not be scanned (unreachable, authentication failed, probe error). Takes precedence over `1`, so CI can tell "not scanned" apart from "findings" |
 
 `--fail-on` accepts `critical` (default), `warning`, `info`, or `none`. Use `--fail-on none` to never fail on findings — useful for scans that only produce reports.
 
 ```bash
 vaso scan --fail-on critical    # Default — only critical findings fail CI
 vaso scan --fail-on warning     # Warning or critical fails CI
-vaso scan --fail-on none        # Always exit 0 unless the scan itself errors
+vaso scan --fail-on none        # Exit 0 unless VASO errors (2) or a host is unreachable (3)
 ```
 
 ## Scoring
