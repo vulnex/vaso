@@ -4,22 +4,6 @@ All notable changes to VASO (VULNEX Agent Security Observer) will be documented 
 
 This project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
-
-### Fixed
-
-- **Agent versions reflect what you run, and every installed copy is checked.** Adapters used to stop at the first binary in a fixed list (`/usr/local/bin` before `/opt/homebrew/bin`, system before user and nvm). They reported one version, often a stale copy nobody runs, and hid other copies entirely. Live examples: Claude Code reported as 2.1.175 when 2.1.281 was on PATH; Codex as 0.111.0 with 0.130.0, 0.154.0 and 0.158.0 also installed; an OpenClaw 2026.3.13 copy under an nvm Node version (7 advisories) never flagged because the primary copy was current.
-  - A shared resolver (`src/adapters/cli-installs.ts`) now finds every copy of each agent CLI: the adapter's known paths, system prefixes, user bin dirs and every nvm Node version, deduplicated by symlink target. The primary is the PATH-resolved copy (else the newest), and other copies at a different version are recorded as `AgentInstallation.otherInstalls` (shown by `vaso detect`). Used by all 18 CLI adapters.
-  - ADV-001, ADV-003 and ADV-004 evaluate every copy; a finding for a non-primary copy names its path and version.
-  - OpenClaw's installed CLI version now takes precedence over the version recorded in `openclaw.json` (the build that last wrote the config). Lyrie no longer reports a placeholder `0.1.0` when its version is unknown. PicoClaw and NanoClaw now record their CLI binary.
-  - Remote scans inventory every copy as metadata-only probe entries and version non-primary copies from their npm `package.json`, since only the PATH-resolved copy's `--version` output is collected. Remote and local results match. `FSProvider` gains an optional `kind` (`'local'` / `'snapshot'`).
-
-- **NemoClaw: current (install.sh, v0.0.x) installs are detected correctly.** Validated against a live v0.0.124 upgrade on Linux, locally and over `--host`.
-  - Version comes from `~/.nemoclaw/source/dist/build-identity.json` (then `source/.version`). NemoClaw's `package.json` is pinned at `0.1.0` in every release, so an upgraded v0.0.124 install was reported as 0.1.0. The CLI binary is now the `~/.local/bin/nemoclaw` shim rather than a stale legacy `/usr/bin/nemoclaw` left behind by the old npm-global package.
-  - CFG-017 and CFG-018 no longer report a running sandbox as "not deployed": current releases stop writing `state/nemoclaw.json`, so a registered, non-pending entry in `sandboxes.json` now counts as deployed. CFG-018 and CFG-019 read the blueprint bundled in `~/.nemoclaw/source/nemoclaw-blueprint` (CFG-019 reports its image-digest pin). CFG-022 no longer reports "no policies": current releases strip `policies` from the registry and keep applied presets in the OpenShell gateway, so it defers to `nemoclaw list` rather than guessing.
-  - CFG-020 notes that a remaining `credentials.json` is a legacy file. Current NemoClaw keeps credentials in the OpenShell gateway and deletes that file once onboarding migrates every key.
-  - The remote-probe manifest collects the new version and blueprint files.
-
 ## [1.0.0] - 2026-09-25
 
 **First stable release.** The CLI surface and the programmatic library API (`vaso` package exports) are now covered by semantic versioning: breaking changes to either require a major version bump. Threat feeds are published at least monthly from this release onward (see SECURITY.md "Threat Feed Updates").
@@ -65,6 +49,18 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - **Threat-feed publishing cadence is now a documented commitment.** `SECURITY.md` gains a "Threat Feed Updates" section: feeds are reviewed and republished at least monthly (a publish with no new entries still refreshes the review timestamp), actively exploited issues trigger an out-of-band publish, and every feed entry carries a primary-source reference. The README command table and the user guide's `vaso update` section point to the policy.
 
 ### Fixed
+
+- **Agent versions reflect what you run, and every installed copy is checked.** Adapters used to stop at the first binary in a fixed list (`/usr/local/bin` before `/opt/homebrew/bin`, system before user and nvm). They reported one version, often a stale copy nobody runs, and hid other copies entirely. Live examples: Claude Code reported as 2.1.175 when 2.1.281 was on PATH; Codex as 0.111.0 with 0.130.0, 0.154.0 and 0.158.0 also installed; an OpenClaw 2026.3.13 copy under an nvm Node version (7 advisories) never flagged because the primary copy was current.
+  - A shared resolver (`src/adapters/cli-installs.ts`) now finds every copy of each agent CLI: the adapter's known paths, system prefixes, user bin dirs and every nvm Node version, deduplicated by symlink target. The primary is the PATH-resolved copy (else the newest), and other copies at a different version are recorded as `AgentInstallation.otherInstalls` (shown by `vaso detect`). Used by all 18 CLI adapters.
+  - ADV-001, ADV-003 and ADV-004 evaluate every copy; a finding for a non-primary copy names its path and version.
+  - OpenClaw's installed CLI version now takes precedence over the version recorded in `openclaw.json` (the build that last wrote the config). Lyrie no longer reports a placeholder `0.1.0` when its version is unknown. PicoClaw and NanoClaw now record their CLI binary.
+  - Remote scans inventory every copy as metadata-only probe entries and version non-primary copies from their npm `package.json`, since only the PATH-resolved copy's `--version` output is collected. Remote and local results match. `FSProvider` gains an optional `kind` (`'local'` / `'snapshot'`).
+
+- **NemoClaw: current (install.sh, v0.0.x) installs are detected correctly.** Validated against a live v0.0.124 upgrade on Linux, locally and over `--host`.
+  - Version comes from `~/.nemoclaw/source/dist/build-identity.json` (then `source/.version`). NemoClaw's `package.json` is pinned at `0.1.0` in every release, so an upgraded v0.0.124 install was reported as 0.1.0. The CLI binary is now the `~/.local/bin/nemoclaw` shim rather than a stale legacy `/usr/bin/nemoclaw` left behind by the old npm-global package.
+  - CFG-017 and CFG-018 no longer report a running sandbox as "not deployed": current releases stop writing `state/nemoclaw.json`, so a registered, non-pending entry in `sandboxes.json` now counts as deployed. CFG-018 and CFG-019 read the blueprint bundled in `~/.nemoclaw/source/nemoclaw-blueprint` (CFG-019 reports its image-digest pin). CFG-022 no longer reports "no policies": current releases strip `policies` from the registry and keep applied presets in the OpenShell gateway, so it defers to `nemoclaw list` rather than guessing.
+  - CFG-020 notes that a remaining `credentials.json` is a legacy file. Current NemoClaw keeps credentials in the OpenShell gateway and deletes that file once onboarding migrates every key.
+  - The remote-probe manifest collects the new version and blueprint files.
 
 - **npm package contents are an explicit allowlist.** `package.json` `files` names `bin/vaso` and `bin/vaso-quick.sh` instead of the whole `bin/` directory (npm does not apply `.gitignore` inside a listed directory), and a guard test (`src/package-contents.test.ts`) runs `npm pack --dry-run` and fails on any file outside the allowlist.
 
