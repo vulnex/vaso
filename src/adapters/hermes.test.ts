@@ -123,7 +123,8 @@ describe('Hermes adapter', () => {
       if (path === configPath) return mockConfig(configPath, {});
       throw new Error('ENOENT');
     });
-    mockExecFileSync.mockReturnValue('Hermes Agent v0.6.0\n' as any);
+    mockExecFileSync.mockImplementation(((cmd: string) =>
+      cmd === 'which' ? '/usr/local/bin/hermes\n' : 'Hermes Agent v0.6.0\n') as any);
 
     const result = await hermesAdapter.detect();
     expect(result).toHaveLength(1);

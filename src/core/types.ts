@@ -135,6 +135,16 @@ export interface AgentInstallation {
   user?: string;
   appBundle?: string;
   cliBinary?: string;
+  /** Other copies of the agent's CLI on the host whose version differs from
+   *  `version` — e.g. an older npm global or another nvm Node version's copy.
+   *  Advisory checks evaluate each one. */
+  otherInstalls?: CliInstall[];
+}
+
+/** One copy of an agent CLI: its path and (when determinable) version. */
+export interface CliInstall {
+  path: string;
+  version?: string;
 }
 
 export interface ScanContext {

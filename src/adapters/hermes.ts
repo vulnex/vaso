@@ -5,6 +5,7 @@ import type { ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { loadConfig } from '../core/config-loader.js';
+import { discoverCliInstalls } from './cli-installs.js';
 import { queryCliVersion } from './version-query.js';
 
 const CONFIG_FILENAMES = ['cli-config.yaml', 'config.yaml', '.env'];
@@ -44,15 +45,20 @@ export const hermesAdapter: AgentAdapter = {
 
     if (configFiles.length === 0) return [];
 
-    const version = queryCliVersion(await findCLIBinary(home, fs), fs, { argSets: [['version'], ['--version']] });
+    const installs = await discoverCliInstalls(home, fs, {
+      names: ['hermes'],
+      systemPaths: SYSTEM_CLI_PATHS,
+      userRelPaths: USER_CLI_RELATIVE_PATHS,
+      version: (bin, canExec) => (canExec ? queryCliVersion(bin, fs, { argSets: [['version'], ['--version']] }) : undefined),
+    });
+    const cliBinary = installs.primary?.path;
+    const version = installs.primary?.version;
 
     // Merge all config data to extract gateway info
     const merged: Record<string, unknown> = {};
     for (const c of configFiles) {
       Object.assign(merged, c.data);
     }
-
-    const cliBinary = await findCLIBinary(home, fs);
 
     return [{
       agent: 'hermes',
@@ -63,6 +69,7 @@ export const hermesAdapter: AgentAdapter = {
       gateway: this.getGatewayInfo(merged),
       models: await this.getModels?.(configFiles, fs),
       cliBinary,
+      otherInstalls: installs.others.length > 0 ? installs.others : undefined,
     }];
   },
 
@@ -263,19 +270,4 @@ export const hermesAdapter: AgentAdapter = {
     };
   },
 };
-
-async function findCLIBinary(home: string, fs: FSProvider): Promise<string | undefined> {
-  for (const p of SYSTEM_CLI_PATHS) {
-    if (await fs.access(p)) return p;
-  }
-  for (const rel of USER_CLI_RELATIVE_PATHS) {
-    const p = join(home, rel);
-    if (await fs.access(p)) return p;
-  }
-  try {
-    const result = fs.execSync('which', ['hermes'], { timeout: 3000 }).trim();
-    if (result) return result;
-  } catch {}
-  return undefined;
-}
 

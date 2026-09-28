@@ -5,6 +5,7 @@ import type { ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { loadConfig } from '../core/config-loader.js';
+import { discoverCliInstalls } from './cli-installs.js';
 import { queryCliVersion } from './version-query.js';
 
 const CONFIG_FILENAMES = [
@@ -34,7 +35,12 @@ export const ironclawAdapter: AgentAdapter = {
     }
 
     // Also check for CLI binary
-    const cliBinary = await findCLIBinary(home, fs);
+    const installs = await discoverCliInstalls(home, fs, {
+      names: ['ironclaw'],
+      userRelPaths: ['.cargo/bin/ironclaw'],
+      version: async (bin, canExec) => (canExec ? queryCliVersion(bin, fs) : undefined),
+    });
+    const cliBinary = installs.primary?.path;
 
     if (configFiles.length === 0 && !cliBinary) return [];
 
@@ -47,9 +53,9 @@ export const ironclawAdapter: AgentAdapter = {
     // Extract version from TOML config, fallback to CLI
     const tomlConfig = configFiles.find(c => c.filePath.endsWith('.toml'));
     const version =
+      installs.primary?.version ??
       (tomlConfig?.data?.version as string) ??
-      ((tomlConfig?.data?.package as Record<string, unknown>)?.version as string) ??
-      queryCliVersion(cliBinary ?? 'ironclaw', fs);
+      ((tomlConfig?.data?.package as Record<string, unknown>)?.version as string);
 
     return [{
       agent: 'ironclaw',
@@ -59,6 +65,7 @@ export const ironclawAdapter: AgentAdapter = {
       gateway: this.getGatewayInfo(merged),
       models: await this.getModels?.(configFiles, fs),
       cliBinary,
+      otherInstalls: installs.others.length > 0 ? installs.others : undefined,
       version,
     }];
   },
@@ -243,14 +250,3 @@ export const ironclawAdapter: AgentAdapter = {
   },
 };
 
-async function findCLIBinary(home: string, fs: FSProvider): Promise<string | undefined> {
-  const cargoPath = join(home, '.cargo', 'bin', 'ironclaw');
-  if (await fs.access(cargoPath)) return cargoPath;
-
-  try {
-    const result = fs.execSync('which', ['ironclaw'], { timeout: 3000 }).trim();
-    if (result) return result;
-  } catch {}
-
-  return undefined;
-}

@@ -6,6 +6,8 @@ import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { loadConfig } from '../core/config-loader.js';
 import { deepMerge } from '../core/utils.js';
+import { discoverCliInstalls } from './cli-installs.js';
+import { npmPackageJsonGlobs } from './nvm-binary.js';
 import { queryCliVersion, readPackageVersion } from './version-query.js';
 
 const CONFIG_FILENAMES = [
@@ -100,29 +102,6 @@ function getSearchDirs(home: string, profile?: string, fs?: FSProvider): string[
 /**
  * Find the first existing CLI binary path.
  */
-async function findCLIBinary(home: string, fs: FSProvider): Promise<string | undefined> {
-  // Check system paths
-  for (const p of SYSTEM_CLI_PATHS) {
-    if (await fs.access(p)) return p;
-  }
-
-  // Check user-relative paths
-  for (const rel of USER_CLI_RELATIVE_PATHS) {
-    const p = join(home, rel);
-    if (await fs.access(p)) return p;
-  }
-
-  // Try which/command lookup
-  try {
-    const result = fs.execSync('which', ['openclaw'], { timeout: 3000 }).trim();
-    if (result) return result;
-  } catch {
-    // Not in PATH
-  }
-
-  return undefined;
-}
-
 /**
  * Check for macOS .app bundle.
  */
@@ -144,7 +123,14 @@ export const openclawAdapter: AgentAdapter = {
     const installations: AgentInstallation[] = [];
 
     for (const { home, user } of userDirs) {
-      const cliBinary = await findCLIBinary(home, fs);
+      const installs = await discoverCliInstalls(home, fs, {
+        names: ['openclaw'],
+        systemPaths: SYSTEM_CLI_PATHS,
+        userRelPaths: USER_CLI_RELATIVE_PATHS,
+        version: async (bin, canExec) => (canExec ? queryCliVersion(bin, fs, { argSets: [['--version'], ['version']] }) : undefined)
+          ?? (await readPackageVersion(bin, fs, 'openclaw')),
+      });
+      const cliBinary = installs.primary?.path;
       const searchDirs = getSearchDirs(home, profile, fs);
       let foundForUser = false;
 
@@ -164,16 +150,15 @@ export const openclawAdapter: AgentAdapter = {
 
         if (configFiles.length === 0) continue;
 
-        // Extract version from openclaw.json (top-level `version`, or
-        // `meta.lastTouchedVersion` written by the wizard), fallback to CLI,
-        // then package.json near the binary.
+        // The installed CLI is what runs, so its version wins; openclaw.json's
+        // top-level `version` / `meta.lastTouchedVersion` (the build that last
+        // wrote the config) is the fallback for config-only installs.
         const mainConfig = configFiles.find(c => c.filePath.endsWith('openclaw.json'));
         const meta = mainConfig?.data?.meta as Record<string, unknown> | undefined;
-        const version = (mainConfig?.data?.version as string)
+        const version = installs.primary?.version
+          ?? (mainConfig?.data?.version as string)
           ?? (meta?.lastTouchedVersion as string)
-          ?? (meta?.lastRunVersion as string)
-          ?? (cliBinary ? queryCliVersion(cliBinary, fs, { argSets: [['--version'], ['version']] }) : undefined)
-          ?? (cliBinary ? await readPackageVersion(cliBinary, fs) : undefined);
+          ?? (meta?.lastRunVersion as string);
         const skillsDir = this.getSkillsDir(dir);
 
         // Merge all config data to extract gateway info
@@ -194,6 +179,7 @@ export const openclawAdapter: AgentAdapter = {
           user: options?.allUsers ? user : undefined,
           appBundle,
           cliBinary,
+          otherInstalls: installs.others.length > 0 ? installs.others : undefined,
         };
         installations.push(globalInstallation);
 
@@ -248,6 +234,7 @@ export const openclawAdapter: AgentAdapter = {
                 user: options?.allUsers ? user : undefined,
                 appBundle,
                 cliBinary,
+                otherInstalls: installs.others.length > 0 ? installs.others : undefined,
               });
             }
           } catch {
@@ -263,8 +250,10 @@ export const openclawAdapter: AgentAdapter = {
         installations.push({
           agent: 'openclaw',
           installDir: join(home, '.openclaw'),
+          version: installs.primary?.version,
           configFiles: [],
           cliBinary,
+          otherInstalls: installs.others.length > 0 ? installs.others : undefined,
           appBundle,
           profile,
           user: options?.allUsers ? user : undefined,
@@ -369,6 +358,8 @@ export const openclawAdapter: AgentAdapter = {
         '~/bin/openclaw',
       ],
       globPatterns: [
+        // package.json of every npm-global copy — versions non-primary copies on remote scans
+        ...npmPackageJsonGlobs('openclaw'),
         '~/.openclaw/skills/**',
         '~/.openclaw/custom_skills/**',
         '~/.openclaw/agents/*/agent.yaml',

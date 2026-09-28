@@ -5,6 +5,7 @@ import type { ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { loadConfig } from '../core/config-loader.js';
+import { discoverCliInstalls } from './cli-installs.js';
 import { queryCliVersion, readPackageVersion } from './version-query.js';
 
 const SYSTEM_CLI_PATHS = [
@@ -61,7 +62,14 @@ export const nanobotAdapter: AgentAdapter = {
     }
 
     // Also check for CLI binary
-    const cliBinary = await findCLIBinary(home, fs);
+    const installs = await discoverCliInstalls(home, fs, {
+      names: ['nanobot'],
+      systemPaths: SYSTEM_CLI_PATHS,
+      userRelPaths: USER_CLI_RELATIVE_PATHS,
+      version: async (bin, canExec) => (canExec ? queryCliVersion(bin, fs) : undefined)
+        ?? (await readPackageVersion(bin, fs)),
+    });
+    const cliBinary = installs.primary?.path;
 
     if (configFiles.length === 0 && !cliBinary) return [];
 
@@ -73,9 +81,8 @@ export const nanobotAdapter: AgentAdapter = {
     // Extract version: config field > CLI exec > package.json next to binary
     // > known npm-global package.json roots.
     const mainConfig = configFiles.find(c => c.filePath.endsWith('config.json'));
-    const version = (mainConfig?.data?.version as string)
-      ?? queryCliVersion(cliBinary, fs)
-      ?? (await readPackageVersion(cliBinary, fs))
+    const version = installs.primary?.version
+      ?? (mainConfig?.data?.version as string)
       ?? (await readNodePackageVersion(fs));
 
     return [{
@@ -86,6 +93,7 @@ export const nanobotAdapter: AgentAdapter = {
       gateway: this.getGatewayInfo(merged),
       models: await this.getModels?.(configFiles),
       cliBinary,
+      otherInstalls: installs.others.length > 0 ? installs.others : undefined,
       version,
     }];
   },
@@ -240,17 +248,3 @@ export const nanobotAdapter: AgentAdapter = {
   },
 };
 
-async function findCLIBinary(home: string, fs: FSProvider): Promise<string | undefined> {
-  for (const p of SYSTEM_CLI_PATHS) {
-    if (await fs.access(p)) return p;
-  }
-  for (const rel of USER_CLI_RELATIVE_PATHS) {
-    const p = join(home, rel);
-    if (await fs.access(p)) return p;
-  }
-  try {
-    const result = fs.execSync('which', ['nanobot'], { timeout: 3000 }).trim();
-    if (result) return result;
-  } catch {}
-  return undefined;
-}

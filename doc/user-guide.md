@@ -101,6 +101,8 @@ vaso scan --snapshot ./snapshots/prod-agent-01.json --diff
 
 Lists installed AI agents without running any security checks. Useful for verifying which agents VASO can see before running a full scan.
 
+The reported version is that of the CLI your `PATH` resolves. Other copies of the same agent at different versions (an older npm global, a copy under another nvm Node version) are listed as **Other copies**, and the advisory checks (ADV-001/003/004) evaluate each of them, so a vulnerable leftover is flagged even when the copy you run is current.
+
 ```
 vaso detect [options]
 ```

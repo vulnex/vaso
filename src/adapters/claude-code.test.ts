@@ -125,11 +125,13 @@ describe('Claude Code adapter', () => {
       if (path === settingsPath) return mockConfig(settingsPath, {});
       throw new Error('ENOENT');
     });
-    mockExecFileSync.mockReturnValue('1.4.2 (Claude Code)\n' as any);
+    mockExecFileSync.mockImplementation(((cmd: string) =>
+      cmd === 'which' ? '/usr/local/bin/claude\n' : '1.4.2 (Claude Code)\n') as any);
 
     const result = await claudeCodeAdapter.detect();
     const userInstall = result.find(r => !r.profile);
     expect(userInstall!.version).toBe('1.4.2');
+    expect(userInstall!.cliBinary).toBe('/usr/local/bin/claude');
   });
 
   it('returns config paths under ~/.claude', () => {

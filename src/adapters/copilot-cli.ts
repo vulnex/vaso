@@ -6,7 +6,8 @@ import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { loadConfig } from '../core/config-loader.js';
 import { stripJsonc } from '../core/jsonc.js';
-import { findNvmBinary, nvmBinaryGlob } from './nvm-binary.js';
+import { nvmBinaryGlob, npmPackageJsonGlobs } from './nvm-binary.js';
+import { discoverCliInstalls } from './cli-installs.js';
 import { getUserHomeDirs } from './openclaw.js';
 import { queryCliVersion, readPackageVersion } from './version-query.js';
 
@@ -30,23 +31,6 @@ const USER_CLI_RELATIVE_PATHS = [
   '.volta/bin/copilot',
   '.bun/bin/copilot',
 ];
-
-async function findCLIBinary(home: string, fs: FSProvider): Promise<string | undefined> {
-  for (const p of SYSTEM_CLI_PATHS) {
-    if (await fs.access(p)) return p;
-  }
-  for (const rel of USER_CLI_RELATIVE_PATHS) {
-    const p = join(home, rel);
-    if (await fs.access(p)) return p;
-  }
-  const nvm = await findNvmBinary(home, fs, 'copilot');
-  if (nvm) return nvm;
-  try {
-    const result = fs.execSync('which', ['copilot'], { timeout: 3000 }).trim();
-    if (result) return result;
-  } catch {}
-  return undefined;
-}
 
 /**
  * Copilot CLI's `config.json` opens with a `// User settings belong in
@@ -102,7 +86,14 @@ export const copilotCliAdapter: AgentAdapter = {
 
     for (const { home, user } of userDirs) {
       const copilotDir = join(home, COPILOT_DIR_NAME);
-      const cliBinary = await findCLIBinary(home, fs);
+      const installs = await discoverCliInstalls(home, fs, {
+        names: ['copilot'],
+        systemPaths: SYSTEM_CLI_PATHS,
+        userRelPaths: USER_CLI_RELATIVE_PATHS,
+        version: async (bin, canExec) => (canExec ? queryCliVersion(bin, fs) : undefined)
+          ?? (await readPackageVersion(bin, fs, '@github/copilot')),
+      });
+      const cliBinary = installs.primary?.path;
       const hasCopilotDir = await fs.access(copilotDir);
 
       if (!hasCopilotDir && !cliBinary) continue;
@@ -114,8 +105,7 @@ export const copilotCliAdapter: AgentAdapter = {
       // and `gh copilot` both write under ~/.copilot/ide/), not a CLI install.
       if (configFiles.length === 0 && !cliBinary) continue;
 
-      const version = queryCliVersion(cliBinary, fs)
-        ?? (await readPackageVersion(cliBinary, fs));
+      const version = installs.primary?.version;
 
       installations.push({
         agent: 'copilot-cli',
@@ -125,6 +115,7 @@ export const copilotCliAdapter: AgentAdapter = {
         models: extractModels(configFiles),
         user: options?.allUsers ? user : undefined,
         cliBinary,
+        otherInstalls: installs.others.length > 0 ? installs.others : undefined,
       });
     }
 
@@ -217,6 +208,8 @@ export const copilotCliAdapter: AgentAdapter = {
         '~/.bun/bin/copilot',
       ],
       globPatterns: [
+        // package.json of every npm-global copy — versions non-primary copies on remote scans
+        ...npmPackageJsonGlobs('@github/copilot'),
         '~/.copilot/instructions/*.instructions.md',
         '~/.copilot/session-state/*.json',
         nvmBinaryGlob('copilot'),

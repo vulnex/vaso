@@ -8,6 +8,7 @@ import { posixPermissionFacts } from './permissions.js';
 const execFileAsync = promisify(execFile);
 
 export class LocalFSProvider implements FSProvider {
+  readonly kind = 'local' as const;
   readonly platform = process.platform;
 
   async readFile(path: string): Promise<string> {

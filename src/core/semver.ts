@@ -85,6 +85,14 @@ function matchComparator(version: SemVer, comp: Comparator): boolean {
  * Supports: <, <=, >, >=, = operators.
  * Example: ">=1.2.0 <1.5.0"
  */
+/** Compare two version strings; unparseable versions sort before parseable ones. */
+export function compareVersions(a: string, b: string): number {
+  const pa = parseSemVer(a);
+  const pb = parseSemVer(b);
+  if (!pa || !pb) return pa ? 1 : pb ? -1 : 0;
+  return compareSemVer(pa, pb);
+}
+
 export function satisfies(version: string, constraint: string): boolean {
   const ver = parseSemVer(version);
   if (!ver) return false;

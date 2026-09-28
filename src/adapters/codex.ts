@@ -5,7 +5,8 @@ import type { ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { loadConfig } from '../core/config-loader.js';
-import { findNvmBinary, nvmBinaryGlob, npmPackageJsonGlobs } from './nvm-binary.js';
+import { nvmBinaryGlob, npmPackageJsonGlobs } from './nvm-binary.js';
+import { discoverCliInstalls } from './cli-installs.js';
 import { getUserHomeDirs } from './openclaw.js';
 import { queryCliVersion, readPackageVersion } from './version-query.js';
 
@@ -77,23 +78,6 @@ async function findLatestSessionModel(fs: FSProvider, sessionsDir: string): Prom
   return last;
 }
 
-async function findCLIBinary(home: string, fs: FSProvider): Promise<string | undefined> {
-  for (const p of SYSTEM_CLI_PATHS) {
-    if (await fs.access(p)) return p;
-  }
-  for (const rel of USER_CLI_RELATIVE_PATHS) {
-    const p = join(home, rel);
-    if (await fs.access(p)) return p;
-  }
-  const nvm = await findNvmBinary(home, fs, 'codex');
-  if (nvm) return nvm;
-  try {
-    const result = fs.execSync('which', ['codex'], { timeout: 3000 }).trim();
-    if (result) return result;
-  } catch {}
-  return undefined;
-}
-
 export const codexAdapter: AgentAdapter = {
   agent: 'codex',
   displayName: 'Codex',
@@ -105,7 +89,14 @@ export const codexAdapter: AgentAdapter = {
 
     for (const { home, user } of userDirs) {
       const codexDir = join(home, CODEX_DIR_NAME);
-      const cliBinary = await findCLIBinary(home, fs);
+      const installs = await discoverCliInstalls(home, fs, {
+        names: ['codex'],
+        systemPaths: SYSTEM_CLI_PATHS,
+        userRelPaths: USER_CLI_RELATIVE_PATHS,
+        version: async (bin, canExec) => (canExec ? queryCliVersion(bin, fs) : undefined)
+          ?? (await readPackageVersion(bin, fs, NPM_PACKAGE_NAME)),
+      });
+      const cliBinary = installs.primary?.path;
       const hasCodexDir = await fs.access(codexDir);
 
       if (!hasCodexDir && !cliBinary) continue;
@@ -125,8 +116,7 @@ export const codexAdapter: AgentAdapter = {
       // binary is leftover state, not a CLI install.
       if (configFiles.length === 0 && !cliBinary) continue;
 
-      const version = queryCliVersion(cliBinary, fs)
-        ?? (await readPackageVersion(cliBinary, fs, NPM_PACKAGE_NAME));
+      const version = installs.primary?.version;
 
       installations.push({
         agent: 'codex',
@@ -136,6 +126,7 @@ export const codexAdapter: AgentAdapter = {
         models: await this.getModels?.(configFiles, fs),
         user: options?.allUsers ? user : undefined,
         cliBinary,
+        otherInstalls: installs.others.length > 0 ? installs.others : undefined,
       });
     }
 

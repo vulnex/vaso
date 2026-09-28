@@ -114,7 +114,8 @@ describe('NanoClaw adapter', () => {
       }
       throw new Error('ENOENT');
     });
-    mockExecFileSync.mockReturnValue('nanoclaw 1.5.0\n' as any);
+    mockExecFileSync.mockImplementation(((cmd: string) =>
+      cmd === 'which' ? '/usr/local/bin/nanoclaw\n' : 'nanoclaw 1.5.0\n') as any);
 
     const result = await nanoclawAdapter.detect();
     expect(result).toHaveLength(1);

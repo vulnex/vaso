@@ -8,6 +8,7 @@ function stripTrailingSlash(name: string): string {
 }
 
 export class SnapshotFSProvider implements FSProvider {
+  readonly kind = 'snapshot' as const;
   readonly platform: NodeJS.Platform;
   private snapshot: ProbeSnapshot;
 

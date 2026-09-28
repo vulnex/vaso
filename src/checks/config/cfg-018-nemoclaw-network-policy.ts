@@ -1,6 +1,7 @@
 import { join } from 'node:path';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { findBlueprintDir, registeredSandboxes } from './nemoclaw-state.js';
 
 export const cfg018 = defineCheck({
   id: 'CFG-018',
@@ -12,12 +13,15 @@ export const cfg018 = defineCheck({
 
   async run(ctx, h) {
     const stateFile = join(ctx.fs.homedir(), '.nemoclaw', 'state', 'nemoclaw.json');
-    if (!(await ctx.fs.access(stateFile))) {
+    const hasState = await ctx.fs.access(stateFile);
+    const registry = hasState ? undefined : await registeredSandboxes(ctx.fs);
+    if (!hasState && !(registry && registry.sandboxes.length > 0)) {
       return h.result({
         passed: false,
         message: 'NemoClaw not deployed — no network policy enforcement',
       });
     }
+    const deploymentRecord = hasState ? stateFile : registry!.file;
 
     // Find the active blueprint to check its policy config
     let blueprintDir: string | undefined;
@@ -33,26 +37,15 @@ export const cfg018 = defineCheck({
       }
     } catch {}
 
-    // If we can't find the blueprint locally, check the installed NemoClaw package
-    if (!blueprintDir) {
-      // Try global npm installation path
-      const globalPaths = [
-        '/usr/local/lib/node_modules/nemoclaw/nemoclaw-blueprint',
-        join(ctx.fs.homedir(), '.npm-global', 'lib', 'node_modules', 'nemoclaw', 'nemoclaw-blueprint'),
-      ];
-      for (const p of globalPaths) {
-        if (await ctx.fs.access(p)) {
-          blueprintDir = p;
-          break;
-        }
-      }
-    }
+    // Otherwise the blueprint bundled with the installed NemoClaw
+    // (~/.nemoclaw/source on current installs, node_modules on legacy ones)
+    blueprintDir ??= await findBlueprintDir(ctx.fs);
 
     if (!blueprintDir) {
       return h.result({
         passed: true,
         message: 'NemoClaw is deployed but blueprint policies could not be located for inspection',
-        evidence: [{ file: stateFile, detail: 'Sandbox deployed — network policy assumed active via OpenShell enforcement' }],
+        evidence: [{ file: deploymentRecord, detail: 'Sandbox deployed — network policy assumed active via OpenShell enforcement' }],
       });
     }
 
@@ -92,6 +85,13 @@ export const cfg018 = defineCheck({
           });
         }
       } catch {}
+    }
+
+    if (!hasState) {
+      evidence.push({
+        file: deploymentRecord,
+        detail: 'Applied presets are held by the OpenShell gateway (`nemoclaw list` shows them), not on disk',
+      });
     }
 
     return h.result({

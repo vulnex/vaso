@@ -5,11 +5,17 @@ import type { ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { loadConfig } from '../core/config-loader.js';
+import { discoverCliInstalls } from './cli-installs.js';
 import { queryCliVersion, readPackageVersion } from './version-query.js';
 
-// NemoClaw is shipped as an npm-global Node.js script (the binary at
-// /usr/bin/nemoclaw is `#!/usr/bin/env node`), so its canonical version source
-// is the package.json next to whichever node_modules/nemoclaw the bin links into.
+// Two install generations:
+//  - Current (install.sh, v0.0.x tags): the repo is checked out to
+//    ~/.nemoclaw/source, npm-linked into the active Node's global prefix, and
+//    fronted by a ~/.local/bin/nemoclaw shim. package.json is pinned at 0.1.0
+//    in every release, so the version comes from source/dist/build-identity.json
+//    (then source/.version) — the same order `nemoclaw --version` uses.
+//  - Legacy (early 2026): an npm-global package (/usr/bin/nemoclaw →
+//    node_modules/nemoclaw), versioned only by that package.json.
 const SYSTEM_CLI_PATHS = [
   '/usr/local/bin/nemoclaw',
   '/usr/bin/nemoclaw',
@@ -23,19 +29,32 @@ const USER_CLI_RELATIVE_PATHS = [
   '.bun/bin/nemoclaw',
 ];
 
-async function findCLIBinary(home: string, fs: FSProvider): Promise<string | undefined> {
-  for (const p of SYSTEM_CLI_PATHS) {
-    if (await fs.access(p)) return p;
-  }
-  for (const rel of USER_CLI_RELATIVE_PATHS) {
-    const p = join(home, rel);
-    if (await fs.access(p)) return p;
-  }
-  try {
-    const result = fs.execSync('which', ['nemoclaw'], { timeout: 3000 }).trim();
-    if (result) return result;
-  } catch {}
-  return undefined;
+/** The installer-managed checkout, when this is a current-generation install. */
+function sourceDir(home: string): string {
+  return join(home, '.nemoclaw', 'source');
+}
+
+/** Every nemoclaw CLI copy. A current install's ~/.local/bin shim is primary
+ *  over a legacy npm-global left in /usr/bin — login shells put ~/.local/bin
+ *  first, so it is the one users run. Each copy is versioned by the install
+ *  generation it belongs to. */
+async function findCLIInstalls(home: string, fs: FSProvider) {
+  const src = sourceDir(home);
+  const hasSource = await fs.access(src);
+  return discoverCliInstalls(home, fs, {
+    names: ['nemoclaw'],
+    systemPaths: SYSTEM_CLI_PATHS,
+    userRelPaths: USER_CLI_RELATIVE_PATHS,
+    preferPath: hasSource ? join(home, '.local', 'bin', 'nemoclaw') : undefined,
+    version: async (bin, canExec) => {
+      let real = bin;
+      try { real = await fs.realpath(bin); } catch {}
+      const isCurrent = hasSource && (bin === join(home, '.local', 'bin', 'nemoclaw') || real.startsWith(`${src}/`));
+      if (isCurrent) return readSourceInstallVersion(home, fs);
+      return (await readPackageVersion(bin, fs, 'nemoclaw'))
+        ?? (canExec ? queryCliVersion(bin, fs, { argSets: [['--version']] }) : undefined);
+    },
+  });
 }
 
 // Candidate package.json locations for npm-globally-installed nemoclaw.
@@ -50,6 +69,21 @@ function nodeModulesPackageJsonCandidates(home: string): string[] {
     `${home}/.bun/install/global/node_modules/nemoclaw/package.json`,
     `${home}/.volta/tools/image/packages/nemoclaw/package.json`,
   ];
+}
+
+/** Version of a current-generation install: dist/build-identity.json, then .version. */
+async function readSourceInstallVersion(home: string, fs: FSProvider): Promise<string | undefined> {
+  const root = sourceDir(home);
+  try {
+    const identity = JSON.parse(await fs.readFile(join(root, 'dist', 'build-identity.json'))) as Record<string, unknown>;
+    const v = identity.nemoclawVersion;
+    if (typeof v === 'string' && /^\d+\.\d+\.\d+/.test(v)) return v;
+  } catch {}
+  try {
+    const v = (await fs.readFile(join(root, '.version'))).trim().replace(/^v/, '');
+    if (/^\d+\.\d+\.\d+/.test(v)) return v;
+  } catch {}
+  return undefined;
 }
 
 async function readNodePackageVersion(fs: FSProvider): Promise<string | undefined> {
@@ -186,16 +220,17 @@ export const nemoclawAdapter: AgentAdapter = {
     // Directory exists but no config files means NemoClaw is not actually installed
     if (configFiles.length === 0) return [];
 
-    // NemoClaw ships primarily as an npm-global Node.js package; its binary
-    // shim has no version flag (`nemoclaw --version` is treated as an unknown
-    // subcommand). Try sources in this order:
-    //   1. node_modules/nemoclaw/package.json at known global-install roots.
-    //   2. Walk up from the resolved CLI binary looking for a package.json.
+    // Version sources, in order:
+    //   1. The primary CLI copy (current install: source build identity;
+    //      legacy npm-global: its package.json — the legacy CLI has no version flag).
+    //   2. The same sources without a resolvable binary.
     //   3. Python fallbacks for any python-packaged fork.
-    //   4. CLI subcommand attempts (none currently print a version).
-    const cliBinary = await findCLIBinary(home, fs);
-    let version = (await readNodePackageVersion(fs))
-      ?? (await readPackageVersion(cliBinary, fs))
+    //   4. CLI subcommand attempts.
+    const installs = await findCLIInstalls(home, fs);
+    const cliBinary = installs.primary?.path;
+    let version = installs.primary?.version
+      ?? (await readSourceInstallVersion(home, fs))
+      ?? (await readNodePackageVersion(fs))
       ?? parsePyMetadataVersion(fs, 'python3')
       ?? parsePyMetadataVersion(fs, 'python')
       ?? parsePipShowVersion(fs, ['pip3', 'show', 'nemoclaw'])
@@ -233,6 +268,7 @@ export const nemoclawAdapter: AgentAdapter = {
       installDir: nemoDir,
       configFiles,
       cliBinary,
+      otherInstalls: installs.others.length > 0 ? installs.others : undefined,
       version,
       models: await this.getModels?.(configFiles),
     }];
@@ -287,7 +323,15 @@ export const nemoclawAdapter: AgentAdapter = {
         '~/.nemoclaw/credentials.json',
         '~/.nemoclaw/config.json',
         '~/.nemoclaw/state/nemoclaw.json',
-        // NemoClaw is shipped as an npm-global Node.js package — its
+        // Current installs: version identity of the ~/.nemoclaw/source checkout
+        // and the ~/.local/bin shim.
+        '~/.nemoclaw/source/dist/build-identity.json',
+        '~/.nemoclaw/source/.version',
+        '~/.local/bin/nemoclaw',
+        // Bundled blueprint (CFG-018 base policy, CFG-019 image digest pin)
+        '~/.nemoclaw/source/nemoclaw-blueprint/blueprint.yaml',
+        '~/.nemoclaw/source/nemoclaw-blueprint/policies/openclaw-sandbox.yaml',
+        // Legacy installs: NemoClaw was shipped as an npm-global Node.js package — its
         // package.json holds the canonical version. Cover the common
         // global-install prefixes.
         '/usr/lib/node_modules/nemoclaw/package.json',
@@ -335,6 +379,10 @@ export const nemoclawAdapter: AgentAdapter = {
       ],
       directoryListings: [
         '~/.nemoclaw',
+        '~/.nemoclaw/source',
+        '~/.nemoclaw/source/nemoclaw-blueprint',
+        '~/.nemoclaw/source/nemoclaw-blueprint/policies',
+        '~/.nemoclaw/source/nemoclaw-blueprint/policies/presets',
         '~/.nemoclaw/state',
         '~/.nemoclaw/blueprints',
         '~/.nemoclaw/policies',

@@ -5,6 +5,7 @@ import type { ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { loadConfig } from '../core/config-loader.js';
+import { discoverCliInstalls } from './cli-installs.js';
 import { queryCliVersion } from './version-query.js';
 
 export const nanoclawAdapter: AgentAdapter = {
@@ -47,7 +48,11 @@ export const nanoclawAdapter: AgentAdapter = {
 
     // Extract version from config, fallback to CLI
     const mainConfig = configFiles.find(c => c.filePath.endsWith('config.json'));
-    const version = (mainConfig?.data?.version as string) ?? queryCliVersion('nanoclaw', fs);
+    const installs = await discoverCliInstalls(home, fs, {
+      names: ['nanoclaw'],
+      version: (bin, canExec) => (canExec ? queryCliVersion(bin, fs) : undefined),
+    });
+    const version = installs.primary?.version ?? (mainConfig?.data?.version as string);
 
     return [{
       agent: 'nanoclaw',
@@ -56,6 +61,8 @@ export const nanoclawAdapter: AgentAdapter = {
       skillsDir: this.getSkillsDir(configDir),
       models: await this.getModels?.(configFiles, fs),
       version,
+      cliBinary: installs.primary?.path,
+      otherInstalls: installs.others.length > 0 ? installs.others : undefined,
     }];
   },
 

@@ -1,0 +1,126 @@
+import { describe, it, expect, vi } from 'vitest';
+import type { FSProvider, DirentInfo } from '../core/fs-provider.js';
+import { discoverCliInstalls, type CliInstallSpec } from './cli-installs.js';
+
+interface FakeHost {
+  /** Existing binaries → version they report. */
+  bins: Record<string, string>;
+  which?: string;
+  nvm?: string[];
+  links?: Record<string, string>;
+  kind?: 'local' | 'snapshot';
+}
+
+function makeFs(h: FakeHost): FSProvider {
+  const nvmRoot = '/home/t/.nvm/versions/node';
+  return {
+    homedir: () => '/home/t',
+    platform: 'linux',
+    kind: h.kind ?? 'local',
+    access: vi.fn(async (p: string) => p in h.bins),
+    realpath: vi.fn(async (p: string) => h.links?.[p] ?? p),
+    readdirEntries: vi.fn(async (p: string) => {
+      if (p === nvmRoot && h.nvm) return h.nvm.map(name => ({ name, isDirectory: true, isFile: false }) as DirentInfo);
+      throw new Error('ENOENT');
+    }),
+    execSync: vi.fn((cmd: string) => {
+      if (cmd === 'which' && h.which) return `${h.which}\n`;
+      throw new Error('not found');
+    }),
+    getEnv: vi.fn(() => undefined),
+  } as unknown as FSProvider;
+}
+
+function spec(h: FakeHost, extra: Partial<CliInstallSpec> = {}): CliInstallSpec {
+  return { names: ['codex'], version: (bin) => h.bins[bin], ...extra };
+}
+
+describe('discoverCliInstalls', () => {
+  it('prefers the PATH-resolved copy and reports every other version', async () => {
+    const host: FakeHost = {
+      which: '/opt/homebrew/bin/codex',
+      bins: {
+        '/usr/local/bin/codex': '0.144.4',
+        '/opt/homebrew/bin/codex': '0.154.0',
+      },
+    };
+    const r = await discoverCliInstalls('/home/t', makeFs(host), spec(host));
+    expect(r.primary).toEqual({ path: '/opt/homebrew/bin/codex', version: '0.154.0' });
+    expect(r.others).toEqual([{ path: '/usr/local/bin/codex', version: '0.144.4' }]);
+  });
+
+  it('finds copies in every nvm Node version', async () => {
+    const host: FakeHost = {
+      which: '/usr/local/bin/codex',
+      nvm: ['v22.22.1', 'v24.21.0', 'v20.20.1'],
+      bins: {
+        '/usr/local/bin/codex': '0.111.0',
+        '/usr/bin/codex': '0.130.0',
+        '/home/t/.nvm/versions/node/v22.22.1/bin/codex': '0.154.0',
+        '/home/t/.nvm/versions/node/v24.21.0/bin/codex': '0.158.0',
+      },
+    };
+    const r = await discoverCliInstalls('/home/t', makeFs(host), spec(host));
+    expect(r.primary?.version).toBe('0.111.0');
+    expect(r.others.map(o => o.version).sort()).toEqual(['0.130.0', '0.154.0', '0.158.0']);
+  });
+
+  it('without a PATH match, the newest copy is primary', async () => {
+    const host: FakeHost = {
+      bins: {
+        '/usr/local/bin/codex': '0.111.0',
+        '/home/t/.local/bin/codex': '0.154.0',
+      },
+    };
+    const r = await discoverCliInstalls('/home/t', makeFs(host), spec(host));
+    expect(r.primary?.path).toBe('/home/t/.local/bin/codex');
+    expect(r.others.map(o => o.version)).toEqual(['0.111.0']);
+  });
+
+  it('collapses symlinked duplicates and same-version copies', async () => {
+    const host: FakeHost = {
+      which: '/usr/bin/codex',
+      links: { '/usr/local/bin/codex': '/usr/bin/codex' },
+      nvm: ['v22.22.1', 'v24.21.0'],
+      bins: {
+        '/usr/bin/codex': '0.130.0',
+        '/usr/local/bin/codex': '0.130.0',
+        '/home/t/.nvm/versions/node/v22.22.1/bin/codex': '0.154.0',
+        '/home/t/.nvm/versions/node/v24.21.0/bin/codex': '0.154.0',
+      },
+    };
+    const r = await discoverCliInstalls('/home/t', makeFs(host), spec(host));
+    expect(r.primary?.path).toBe('/usr/bin/codex');
+    expect(r.others).toHaveLength(1);
+    expect(r.others[0].version).toBe('0.154.0');
+  });
+
+  it('on a snapshot only the PATH-resolved copy may be executed', async () => {
+    const host: FakeHost = {
+      kind: 'snapshot',
+      which: '/home/t/.local/bin/codex',
+      bins: { '/home/t/.local/bin/codex': '0.154.0', '/usr/local/bin/codex': '0.111.0' },
+    };
+    const calls: Array<[string, boolean]> = [];
+    const r = await discoverCliInstalls('/home/t', makeFs(host), spec(host, {
+      version: (bin, canExec) => { calls.push([bin, canExec]); return host.bins[bin]; },
+    }));
+    expect(calls).toEqual([['/home/t/.local/bin/codex', true], ['/usr/local/bin/codex', false]]);
+    expect(r.others).toHaveLength(1);
+  });
+
+  it('drops unversioned copies on snapshots (a second link to the same install) but keeps them locally', async () => {
+    const bins = { '/home/t/.local/bin/codex': '0.154.0', '/home/t/.bun/bin/codex': '' };
+    const version = (bin: string) => bins[bin as keyof typeof bins] || undefined;
+    for (const [kind, expected] of [['snapshot', 0], ['local', 1]] as const) {
+      const host: FakeHost = { kind, which: '/home/t/.local/bin/codex', bins };
+      const r = await discoverCliInstalls('/home/t', makeFs(host), spec(host, { version }));
+      expect(r.others, kind).toHaveLength(expected);
+    }
+  });
+
+  it('returns nothing when no copy exists', async () => {
+    const host: FakeHost = { bins: {} };
+    expect(await discoverCliInstalls('/home/t', makeFs(host), spec(host))).toEqual({ others: [] });
+  });
+});

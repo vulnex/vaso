@@ -102,11 +102,11 @@ describe('OpenClaw per-agent discovery', () => {
     ]);
 
     // readdir is called for the agents/ directory (getUserHomeDirs doesn't call readdir when not root)
-    mockReaddir
-      .mockResolvedValueOnce([
+    // Keyed by path: other lookups (e.g. nvm version dirs) list nothing
+    mockReaddir.mockImplementation((async (dir: unknown) => (dir === agentsDir ? [
         mockDirent('researcher', true),
         mockDirent('coder', true),
-      ] as any);
+      ] : [])) as any);
 
     mockLoadConfig.mockImplementation(async (path) => {
       if (path === globalConfigPath) {
@@ -195,8 +195,8 @@ describe('OpenClaw per-agent discovery', () => {
 
     setExistingPaths([openclawDir, configPath, agentsDir, assistantDir]);
 
-    mockReaddir
-      .mockResolvedValueOnce([mockDirent('assistant', true)] as any);
+    // Keyed by path: other lookups (e.g. nvm version dirs) list nothing
+    mockReaddir.mockImplementation((async (dir: unknown) => (dir === agentsDir ? [mockDirent('assistant', true)] : [])) as any);
 
     mockLoadConfig.mockImplementation(async (path) => {
       if (path === configPath) return mockConfig(configPath, { sandbox: true });
@@ -219,8 +219,8 @@ describe('OpenClaw per-agent discovery', () => {
 
     setExistingPaths([openclawDir, configPath, agentsDir, agentDir, cliBinPath]);
 
-    mockReaddir
-      .mockResolvedValueOnce([mockDirent('test-agent', true)] as any);
+    // Keyed by path: other lookups (e.g. nvm version dirs) list nothing
+    mockReaddir.mockImplementation((async (dir: unknown) => (dir === agentsDir ? [mockDirent('test-agent', true)] : [])) as any);
 
     mockLoadConfig.mockImplementation(async (path) => {
       if (path === configPath) return mockConfig(configPath, {});
@@ -241,11 +241,11 @@ describe('OpenClaw per-agent discovery', () => {
 
     setExistingPaths([openclawDir, configPath, agentsDir]);
 
-    mockReaddir
-      .mockResolvedValueOnce([
+    // Keyed by path: other lookups (e.g. nvm version dirs) list nothing
+    mockReaddir.mockImplementation((async (dir: unknown) => (dir === agentsDir ? [
         mockDirent('README.md', false),
         mockDirent('.DS_Store', false),
-      ] as any);
+      ] : [])) as any);
 
     mockLoadConfig.mockImplementation(async (path) => {
       if (path === configPath) return mockConfig(configPath, {});

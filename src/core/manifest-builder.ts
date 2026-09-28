@@ -1,5 +1,6 @@
 import type { AgentAdapter } from '../adapters/adapter.js';
 import type { ProbeManifest } from './snapshot-types.js';
+import { cliInstallGlobs, cliInstallSystemPaths } from '../adapters/cli-installs.js';
 
 export function buildProbeManifest(adapters: AgentAdapter[]): ProbeManifest {
   const merged: ProbeManifest = {
@@ -24,6 +25,13 @@ export function buildProbeManifest(adapters: AgentAdapter[]): ProbeManifest {
       if (m.systemPaths) merged.systemPaths!.push(...m.systemPaths);
       if (m.systemDirListings) merged.systemDirListings!.push(...m.systemDirListings);
       if (m.metadataGlobPatterns) merged.metadataGlobPatterns!.push(...m.metadataGlobPatterns);
+    }
+    // Every copy of the agent's CLI (system prefixes, user bin dirs, each nvm
+    // Node version) so remote scans inventory old copies too. Existence is all
+    // discovery needs — never ship the binaries themselves.
+    const cli = adapter.getCLICommand?.();
+    if (cli) {
+      merged.metadataGlobPatterns!.push(...cliInstallGlobs([cli]), ...cliInstallSystemPaths([cli]));
     }
   }
 
@@ -64,7 +72,9 @@ export function buildProbeManifest(adapters: AgentAdapter[]): ProbeManifest {
   merged.envPrefixes = [...new Set(merged.envPrefixes)];
   merged.systemPaths = [...new Set(merged.systemPaths!)];
   merged.systemDirListings = [...new Set(merged.systemDirListings!)];
-  merged.metadataGlobPatterns = [...new Set(merged.metadataGlobPatterns!)];
+  // Paths already collected with content need no metadata-only duplicate
+  const collected = new Set([...merged.globPatterns, ...merged.filePaths, ...merged.systemPaths!]);
+  merged.metadataGlobPatterns = [...new Set(merged.metadataGlobPatterns!)].filter(g => !collected.has(g));
 
   // Deduplicate commands by id
   const seen = new Set<string>();

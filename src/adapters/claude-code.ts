@@ -5,7 +5,8 @@ import type { ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { loadConfig } from '../core/config-loader.js';
-import { findNvmBinary, nvmBinaryGlob, npmPackageJsonGlobs } from './nvm-binary.js';
+import { nvmBinaryGlob, npmPackageJsonGlobs } from './nvm-binary.js';
+import { discoverCliInstalls } from './cli-installs.js';
 import { getUserHomeDirs } from './openclaw.js';
 import { queryCliVersion, readPackageVersion } from './version-query.js';
 import { withoutLoadedConfigs } from './project-configs.js';
@@ -28,23 +29,6 @@ const USER_CLI_RELATIVE_PATHS = [
   '.claude/local/claude',
   '.bun/bin/claude',
 ];
-
-async function findCLIBinary(home: string, fs: FSProvider): Promise<string | undefined> {
-  for (const p of SYSTEM_CLI_PATHS) {
-    if (await fs.access(p)) return p;
-  }
-  for (const rel of USER_CLI_RELATIVE_PATHS) {
-    const p = join(home, rel);
-    if (await fs.access(p)) return p;
-  }
-  const nvm = await findNvmBinary(home, fs, 'claude');
-  if (nvm) return nvm;
-  try {
-    const result = fs.execSync('which', ['claude'], { timeout: 3000 }).trim();
-    if (result) return result;
-  } catch {}
-  return undefined;
-}
 
 async function loadSettingsFiles(dir: string, fs: FSProvider) {
   const configFiles = [];
@@ -103,7 +87,14 @@ export const claudeCodeAdapter: AgentAdapter = {
       const claudeDir = join(home, CLAUDE_DIR_NAME);
       const rootStateFile = join(home, ROOT_STATE_FILE);
 
-      const cliBinary = await findCLIBinary(home, fs);
+      const installs = await discoverCliInstalls(home, fs, {
+        names: ['claude'],
+        systemPaths: SYSTEM_CLI_PATHS,
+        userRelPaths: USER_CLI_RELATIVE_PATHS,
+        version: async (bin, canExec) => (canExec ? queryCliVersion(bin, fs) : undefined)
+          ?? (await readPackageVersion(bin, fs, NPM_PACKAGE_NAME)),
+      });
+      const cliBinary = installs.primary?.path;
       const hasClaudeDir = await fs.access(claudeDir);
       const hasRootState = await fs.access(rootStateFile);
 
@@ -123,8 +114,7 @@ export const claudeCodeAdapter: AgentAdapter = {
       // threw, configFiles is still empty and there's nothing to scan.)
       if (configFiles.length === 0 && !cliBinary) continue;
 
-      const version = queryCliVersion(cliBinary, fs)
-        ?? (await readPackageVersion(cliBinary, fs, NPM_PACKAGE_NAME));
+      const version = installs.primary?.version;
       const skillsDir = this.getSkillsDir(claudeDir);
 
       installations.push({
@@ -136,6 +126,7 @@ export const claudeCodeAdapter: AgentAdapter = {
         models: await this.getModels?.(configFiles, fs),
         user: options?.allUsers ? user : undefined,
         cliBinary,
+        otherInstalls: installs.others.length > 0 ? installs.others : undefined,
       });
     }
 

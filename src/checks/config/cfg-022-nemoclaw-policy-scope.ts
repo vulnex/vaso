@@ -45,10 +45,18 @@ export const cfg022 = defineCheck({
       return h.passed('No sandboxes defined in NemoClaw configuration');
     }
 
+    // Current releases strip `policies` from the registry on every load/save —
+    // applied presets are held by the OpenShell gateway — so only entries that
+    // still record them (legacy installs) can be judged from disk.
+    const withPolicies = Object.entries(config.sandboxes).filter(([, s]) => Array.isArray(s.policies));
+    if (withPolicies.length === 0) {
+      return h.passed('NemoClaw policy presets are held by the OpenShell gateway, not on disk — run `nemoclaw list` to review them');
+    }
+
     const evidence: Evidence[] = [];
     let narrowCount = 0;
 
-    for (const [name, sandbox] of Object.entries(config.sandboxes)) {
+    for (const [name, sandbox] of withPolicies) {
       const policies = sandbox.policies ?? [];
       const missing = RECOMMENDED_POLICIES.filter(p => !policies.includes(p));
 

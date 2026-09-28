@@ -60,7 +60,7 @@ export const cfg020 = defineCheck({
             const redacted = value.slice(0, 8) + '...' + value.slice(-4);
             evidence.push({
               file: credPath,
-              detail: `Plaintext key "${key}": ${redacted} (${value.length} chars)`,
+              detail: `Plaintext key "${key}": ${redacted} (${value.length} chars) — legacy file; current NemoClaw keeps credentials in the OpenShell gateway and deletes it once onboarding migrates every key`,
             });
           }
         }

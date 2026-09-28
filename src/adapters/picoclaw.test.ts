@@ -131,7 +131,8 @@ describe('PicoClaw adapter', () => {
       if (path === configPath) return mockConfig(configPath, {});
       throw new Error('ENOENT');
     });
-    mockExecFileSync.mockReturnValue('picoclaw version 3.2.1\n' as any);
+    mockExecFileSync.mockImplementation(((cmd: string) =>
+      cmd === 'which' ? '/usr/local/bin/picoclaw\n' : 'picoclaw version 3.2.1\n') as any);
 
     const result = await picoclawAdapter.detect();
     expect(result).toHaveLength(1);

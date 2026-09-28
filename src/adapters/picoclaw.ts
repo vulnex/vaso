@@ -4,6 +4,7 @@ import type { AgentInstallation, GatewayInfo, ModelRef, ParsedConfig } from '../
 import type { ProbeManifest } from '../core/snapshot-types.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { loadConfig } from '../core/config-loader.js';
+import { discoverCliInstalls } from './cli-installs.js';
 import { queryCliVersion } from './version-query.js';
 
 export const picoclawAdapter: AgentAdapter = {
@@ -40,7 +41,11 @@ export const picoclawAdapter: AgentAdapter = {
 
     // Extract version from config, fallback to CLI
     const mainConfig = configFiles.find(c => c.filePath.endsWith('config.json'));
-    const version = (mainConfig?.data?.version as string) ?? queryCliVersion('picoclaw', fs);
+    const installs = await discoverCliInstalls(home, fs, {
+      names: ['picoclaw'],
+      version: (bin, canExec) => (canExec ? queryCliVersion(bin, fs) : undefined),
+    });
+    const version = installs.primary?.version ?? (mainConfig?.data?.version as string);
 
     return [{
       agent: 'picoclaw',
@@ -50,6 +55,8 @@ export const picoclawAdapter: AgentAdapter = {
       gateway: this.getGatewayInfo(merged),
       models: await this.getModels?.(configFiles),
       version,
+      cliBinary: installs.primary?.path,
+      otherInstalls: installs.others.length > 0 ? installs.others : undefined,
     }];
   },
 

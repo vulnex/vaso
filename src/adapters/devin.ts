@@ -6,6 +6,7 @@ import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { stripJsonc } from '../core/jsonc.js';
 import { getUserHomeDirs } from './openclaw.js';
+import { discoverCliInstalls } from './cli-installs.js';
 import { queryCliVersion } from './version-query.js';
 
 const SYSTEM_CLI_PATHS = [
@@ -105,24 +106,6 @@ async function loadDevinConfig(filePath: string, fs: FSProvider): Promise<Parsed
   }
 }
 
-async function findCLIBinary(home: string, fs: FSProvider): Promise<string | undefined> {
-  for (const p of SYSTEM_CLI_PATHS) {
-    if (await fs.access(p)) return p;
-  }
-  for (const rel of USER_CLI_RELATIVE_PATHS) {
-    const p = join(home, rel);
-    if (await fs.access(p)) return p;
-  }
-  try {
-    // Exact-name lookup only. Machines with Devin Desktop also ship a
-    // `devin-desktop` binary (the editor) — `which devin` cannot match it,
-    // and we must never treat it as the CLI.
-    const result = fs.execSync('which', ['devin'], { timeout: 3000 }).trim();
-    if (result) return result;
-  } catch {}
-  return undefined;
-}
-
 export const devinAdapter: AgentAdapter = {
   agent: 'devin',
   displayName: 'Devin CLI',
@@ -135,7 +118,14 @@ export const devinAdapter: AgentAdapter = {
     for (const { home, user } of userDirs) {
       const configDir = devinConfigDir(home, fs);
       const dataDir = devinDataDir(home, fs);
-      const cliBinary = await findCLIBinary(home, fs);
+      const installs = await discoverCliInstalls(home, fs, {
+        // Exact name only — Devin Desktop ships a `devin-desktop` editor binary.
+        names: ['devin'],
+        systemPaths: SYSTEM_CLI_PATHS,
+        userRelPaths: USER_CLI_RELATIVE_PATHS,
+        version: (bin, canExec) => (canExec ? queryCliVersion(bin, fs, { timeoutMs: 3000 }) : undefined),
+      });
+      const cliBinary = installs.primary?.path;
 
       const hasConfigDir = await fs.access(configDir);
       const hasCredentials = await fs.access(join(dataDir, 'credentials.toml'));
@@ -154,7 +144,7 @@ export const devinAdapter: AgentAdapter = {
       }
 
       // Devin is a Rust binary — `devin --version` is fast; keep the timeout tight.
-      const version = queryCliVersion(cliBinary, fs, { timeoutMs: 3000 });
+      const version = installs.primary?.version;
       const skillsDirs = await existingDirs(home, USER_SKILL_DIRS, fs);
 
       installations.push({
@@ -166,6 +156,7 @@ export const devinAdapter: AgentAdapter = {
         skillsDirs: skillsDirs.length > 0 ? skillsDirs : undefined,
         user: options?.allUsers ? user : undefined,
         cliBinary,
+        otherInstalls: installs.others.length > 0 ? installs.others : undefined,
       });
     }
 

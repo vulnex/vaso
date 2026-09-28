@@ -1,6 +1,7 @@
 import { defineCheck } from '../../core/check-builder.js';
 import { getAdvisoryDatabase } from '../../advisory/database.js';
 import { satisfies } from '../../core/semver.js';
+import { describeAffected, describeVersion, installedVersions, type InstalledVersion } from './installed-versions.js';
 
 export const adv001 = defineCheck({
   id: 'ADV-001',
@@ -10,31 +11,45 @@ export const adv001 = defineCheck({
   description: 'Check installed agent version against known CVEs and security advisories',
 
   async run(ctx, h) {
-    const version = ctx.installation.version;
-    if (!version) return h.passed('Agent version not detected — skipping advisory check');
+    const versions = installedVersions(ctx.installation);
+    if (versions.length === 0) return h.passed('Agent version not detected — skipping advisory check');
 
     const db = getAdvisoryDatabase();
     const agent = ctx.installation.agent;
-    const matching = db.advisories.filter(adv => {
+    const candidates = db.advisories.filter(adv => {
       // Version-based agent advisories: framework CVEs and coding-agent CVEs
       // (e.g. GhostApproval). Dependency/MCP-package advisories are ADV-002's
       // job and carry no such tag, so they're excluded here.
       if (!adv.tags?.includes('framework') && !adv.tags?.includes('coding-agent')) return false;
       if (adv.agent !== agent && adv.agent !== '*') return false;
-      if (adv.eolNotice) return false; // handled by ADV-003
-      return satisfies(version, adv.affectedVersions);
+      return !adv.eolNotice; // EOL notices are ADV-003's
     });
 
-    if (matching.length === 0) return h.passed(`No known vulnerabilities for ${agent} v${version}`);
+    // Every installed copy is evaluated: an older copy left on disk stays runnable.
+    const evidence = [];
+    const affected: InstalledVersion[] = [];
+    const advisoryIds = new Set<string>();
+    for (const v of versions) {
+      const matching = candidates.filter(adv => satisfies(v.version, adv.affectedVersions));
+      if (matching.length === 0) continue;
+      affected.push(v);
+      for (const adv of matching) {
+        advisoryIds.add(adv.id);
+        evidence.push({
+          file: v.path ?? adv.reference ?? adv.id,
+          detail: `${adv.id}: ${adv.title} (severity: ${adv.severity}${adv.fixedVersion ? `, fix: v${adv.fixedVersion}` : ''})${v.path ? ` — affects installed copy ${describeVersion(v)}` : ''}`,
+        });
+      }
+    }
 
-    const evidence = matching.map(adv => ({
-      file: adv.reference ?? adv.id,
-      detail: `${adv.id}: ${adv.title} (severity: ${adv.severity}${adv.fixedVersion ? `, fix: v${adv.fixedVersion}` : ''})`,
-    }));
+    if (affected.length === 0) {
+      return h.passed(`No known vulnerabilities for ${agent} ${versions.map(describeVersion).join(', ')}`);
+    }
 
+    const n = advisoryIds.size;
     return h.result({
       passed: false,
-      message: `${matching.length} known vulnerabilit${matching.length === 1 ? 'y' : 'ies'} affect ${agent} v${version}`,
+      message: `${n} known vulnerabilit${n === 1 ? 'y' : 'ies'} affect ${describeAffected(agent, affected)}`,
       evidence,
     });
   },

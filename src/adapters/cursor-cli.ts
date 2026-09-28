@@ -5,7 +5,8 @@ import type { ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { loadConfig } from '../core/config-loader.js';
-import { findNvmBinary, nvmBinaryGlob } from './nvm-binary.js';
+import { nvmBinaryGlob } from './nvm-binary.js';
+import { discoverCliInstalls } from './cli-installs.js';
 import { getUserHomeDirs } from './openclaw.js';
 import { queryCliVersion, readPackageVersion } from './version-query.js';
 import { withoutLoadedConfigs } from './project-configs.js';
@@ -68,23 +69,6 @@ const USER_CLI_RELATIVE_PATHS = [
   '.cursor/bin/agent',
 ];
 
-async function findCLIBinary(home: string, fs: FSProvider): Promise<string | undefined> {
-  for (const p of SYSTEM_CLI_PATHS) {
-    if (await fs.access(p)) return p;
-  }
-  for (const rel of USER_CLI_RELATIVE_PATHS) {
-    const p = join(home, rel);
-    if (await fs.access(p)) return p;
-  }
-  const nvm = await findNvmBinary(home, fs, 'cursor-agent');
-  if (nvm) return nvm;
-  try {
-    const result = fs.execSync('which', ['cursor-agent'], { timeout: 3000 }).trim();
-    if (result) return result;
-  } catch {}
-  return undefined;
-}
-
 async function loadFiles(dir: string, names: string[], fs: FSProvider): Promise<ParsedConfig[]> {
   const out: ParsedConfig[] = [];
   for (const name of names) {
@@ -132,7 +116,15 @@ export const cursorCliAdapter: AgentAdapter = {
 
     for (const { home, user } of userDirs) {
       const cursorDir = join(home, CURSOR_DIR_NAME);
-      const cliBinary = await findCLIBinary(home, fs);
+      // `agent` is only trusted at the known Cursor paths in USER_CLI_RELATIVE_PATHS.
+      const installs = await discoverCliInstalls(home, fs, {
+        names: ['cursor-agent'],
+        systemPaths: SYSTEM_CLI_PATHS,
+        userRelPaths: USER_CLI_RELATIVE_PATHS,
+        version: async (bin, canExec) => (canExec ? queryCliVersion(bin, fs) : undefined)
+          ?? (await readPackageVersion(bin, fs)),
+      });
+      const cliBinary = installs.primary?.path;
       const hasCursorDir = await fs.access(cursorDir);
 
       if (!hasCursorDir && !cliBinary) continue;
@@ -156,8 +148,7 @@ export const cursorCliAdapter: AgentAdapter = {
       // IDE app bundle or its settings are an IDE install worth scanning.
       if (configFiles.length === 0 && !cliBinary && !ideAppExists) continue;
 
-      const version = queryCliVersion(cliBinary, fs)
-        ?? (await readPackageVersion(cliBinary, fs))
+      const version = installs.primary?.version
         ?? (ideAppExists ? await readIdeVersion(fs) : undefined);
 
       installations.push({
@@ -170,6 +161,7 @@ export const cursorCliAdapter: AgentAdapter = {
         models: extractModels(configFiles),
         user: options?.allUsers ? user : undefined,
         cliBinary,
+        otherInstalls: installs.others.length > 0 ? installs.others : undefined,
         appBundle: ideAppExists ? IDE_APP_BUNDLE : undefined,
       });
     }

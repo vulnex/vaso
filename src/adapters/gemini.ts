@@ -5,7 +5,8 @@ import type { ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { stripJsonc } from '../core/jsonc.js';
-import { findNvmBinary, nvmBinaryGlob, npmPackageJsonGlobs } from './nvm-binary.js';
+import { nvmBinaryGlob, npmPackageJsonGlobs } from './nvm-binary.js';
+import { discoverCliInstalls } from './cli-installs.js';
 import { getUserHomeDirs } from './openclaw.js';
 import { queryCliVersion, readPackageVersion } from './version-query.js';
 import { withoutLoadedConfigs } from './project-configs.js';
@@ -27,23 +28,6 @@ const USER_CLI_RELATIVE_PATHS = [
   '.volta/bin/gemini',
   '.bun/bin/gemini',
 ];
-
-async function findCLIBinary(home: string, fs: FSProvider): Promise<string | undefined> {
-  for (const p of SYSTEM_CLI_PATHS) {
-    if (await fs.access(p)) return p;
-  }
-  for (const rel of USER_CLI_RELATIVE_PATHS) {
-    const p = join(home, rel);
-    if (await fs.access(p)) return p;
-  }
-  const nvm = await findNvmBinary(home, fs, 'gemini');
-  if (nvm) return nvm;
-  try {
-    const result = fs.execSync('which', ['gemini'], { timeout: 3000 }).trim();
-    if (result) return result;
-  } catch {}
-  return undefined;
-}
 
 async function loadJsoncConfig(filePath: string, fs: FSProvider): Promise<ParsedConfig | undefined> {
   try {
@@ -158,7 +142,14 @@ export const geminiAdapter: AgentAdapter = {
 
     for (const { home, user } of userDirs) {
       const geminiDir = join(home, GEMINI_DIR_NAME);
-      const cliBinary = await findCLIBinary(home, fs);
+      const installs = await discoverCliInstalls(home, fs, {
+        names: ['gemini'],
+        systemPaths: SYSTEM_CLI_PATHS,
+        userRelPaths: USER_CLI_RELATIVE_PATHS,
+        version: async (bin, canExec) => (canExec ? queryCliVersion(bin, fs) : undefined)
+          ?? (await readPackageVersion(bin, fs, NPM_PACKAGE_NAME)),
+      });
+      const cliBinary = installs.primary?.path;
       const hasGeminiDir = await fs.access(geminiDir);
 
       if (!hasGeminiDir && !cliBinary) continue;
@@ -171,8 +162,7 @@ export const geminiAdapter: AgentAdapter = {
       // install.
       if (configFiles.length === 0 && !cliBinary) continue;
 
-      const version = queryCliVersion(cliBinary, fs)
-        ?? (await readPackageVersion(cliBinary, fs, NPM_PACKAGE_NAME));
+      const version = installs.primary?.version;
 
       installations.push({
         agent: 'gemini-cli',
@@ -182,6 +172,7 @@ export const geminiAdapter: AgentAdapter = {
         models: await extractModels(configFiles, fs),
         user: options?.allUsers ? user : undefined,
         cliBinary,
+        otherInstalls: installs.others.length > 0 ? installs.others : undefined,
       });
     }
 

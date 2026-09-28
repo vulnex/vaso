@@ -1,6 +1,7 @@
 import { join } from 'node:path';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { findBlueprintDir } from './nemoclaw-state.js';
 
 export const cfg019 = defineCheck({
   id: 'CFG-019',
@@ -65,6 +66,23 @@ export const cfg019 = defineCheck({
             });
           }
         }
+      } catch {}
+    }
+
+    // Bundled blueprint of the installed NemoClaw: current releases pin the
+    // sandbox image by digest in blueprint.yaml (top-level `digest:`).
+    const bundled = await findBlueprintDir(ctx.fs);
+    if (bundled) {
+      const manifestPath = join(bundled, 'blueprint.yaml');
+      try {
+        const content = await ctx.fs.readFile(manifestPath);
+        const digest = /^digest:\s*["']?(sha256:[a-f0-9]{64})/m.exec(content)?.[1];
+        evidence.push({
+          file: manifestPath,
+          detail: digest
+            ? `Bundled blueprint pins the sandbox image by digest (${digest.slice(0, 19)}…)`
+            : 'Bundled blueprint manifest present (no image digest pin found)',
+        });
       } catch {}
     }
 

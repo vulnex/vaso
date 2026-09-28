@@ -373,6 +373,12 @@ function renderTerminal(installations: AgentInstallation[], verbose?: boolean): 
       lines.push(`  ${'CLI binary:'.padEnd(14)} ${inst.cliBinary}`);
     }
 
+    // Other copies at a different version (older globals, other nvm Nodes)
+    for (const [i, copy] of (inst.otherInstalls ?? []).entries()) {
+      const label = i === 0 ? 'Other copies:' : '';
+      lines.push(`  ${label.padEnd(14)} ${copy.path} ${copy.version ? `(${copy.version})` : chalk.dim('(version unknown)')}`);
+    }
+
     if (inst.appBundle) {
       lines.push(`  ${'App bundle:'.padEnd(14)} ${inst.appBundle}`);
     }

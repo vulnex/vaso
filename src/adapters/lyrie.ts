@@ -5,6 +5,7 @@ import type { ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { loadConfig } from '../core/config-loader.js';
+import { discoverCliInstalls } from './cli-installs.js';
 import { queryCliVersion, readPackageVersion } from './version-query.js';
 
 const RUNTIME_FILES = ['.env'];
@@ -44,7 +45,14 @@ export const lyrieAdapter: AgentAdapter = {
       }
     }
 
-    const cliBinary = await findCLIBinary(home, fs);
+    const installs = await discoverCliInstalls(home, fs, {
+      names: ['lyrie'],
+      systemPaths: SYSTEM_CLI_PATHS,
+      userRelPaths: USER_CLI_RELATIVE_PATHS,
+      version: async (bin, canExec) => (canExec ? queryCliVersion(bin, fs, { argSets: [['--version'], ['version']] }) : undefined)
+        ?? (await readPackageVersion(bin, fs)),
+    });
+    const cliBinary = installs.primary?.path;
 
     if (!hasRuntime && !cliBinary) return [];
 
@@ -63,10 +71,7 @@ export const lyrieAdapter: AgentAdapter = {
       Object.assign(merged, c.data);
     }
 
-    const version =
-      queryCliVersion(cliBinary, fs, { argSets: [['--version'], ['version']] }) ??
-      (await readPackageVersion(cliBinary, fs)) ??
-      '0.1.0';
+    const version = installs.primary?.version;
 
     return [{
       agent: 'lyrie',
@@ -76,6 +81,7 @@ export const lyrieAdapter: AgentAdapter = {
       gateway: this.getGatewayInfo(merged),
       models: await this.getModels?.(configFiles, fs),
       cliBinary,
+      otherInstalls: installs.others.length > 0 ? installs.others : undefined,
       version,
     }];
   },
@@ -273,17 +279,3 @@ export const lyrieAdapter: AgentAdapter = {
   },
 };
 
-async function findCLIBinary(home: string, fs: FSProvider): Promise<string | undefined> {
-  for (const p of SYSTEM_CLI_PATHS) {
-    if (await fs.access(p)) return p;
-  }
-  for (const rel of USER_CLI_RELATIVE_PATHS) {
-    const p = join(home, rel);
-    if (await fs.access(p)) return p;
-  }
-  try {
-    const result = fs.execSync('which', ['lyrie'], { timeout: 3000 }).trim();
-    if (result) return result;
-  } catch {}
-  return undefined;
-}

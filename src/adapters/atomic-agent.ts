@@ -6,6 +6,7 @@ import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { loadConfig } from '../core/config-loader.js';
 import { getUserHomeDirs } from './openclaw.js';
+import { discoverCliInstalls } from './cli-installs.js';
 import { queryCliVersion } from './version-query.js';
 
 // Installer (`curl -fsSL https://atomicagent.io/install | sh`) drops a Node SEA
@@ -34,21 +35,6 @@ export function atomicAgentStateDir(home: string, fs: FSProvider): string {
   return override || join(home, '.atomic-agent');
 }
 
-async function findCLIBinary(home: string, fs: FSProvider): Promise<string | undefined> {
-  for (const p of SYSTEM_CLI_PATHS) {
-    if (await fs.access(p)) return p;
-  }
-  for (const rel of USER_CLI_RELATIVE_PATHS) {
-    const p = join(home, rel);
-    if (await fs.access(p)) return p;
-  }
-  try {
-    const result = fs.execSync('which', ['atomic-agent'], { timeout: 3000 }).trim();
-    if (result) return result;
-  } catch {}
-  return undefined;
-}
-
 export const atomicAgentAdapter: AgentAdapter = {
   agent: 'atomic-agent',
   displayName: 'Atomic Agent',
@@ -74,10 +60,16 @@ export const atomicAgentAdapter: AgentAdapter = {
       // config.json is written on first run; a bare state dir is not an install.
       if (configFiles.length === 0) continue;
 
-      const cliBinary = await findCLIBinary(home, fs);
+      const installs = await discoverCliInstalls(home, fs, {
+        names: ['atomic-agent'],
+        systemPaths: SYSTEM_CLI_PATHS,
+        userRelPaths: USER_CLI_RELATIVE_PATHS,
+        version: (bin, canExec) => (canExec ? queryCliVersion(bin, fs, { timeoutMs: 10000 }) : undefined),
+      });
+      const cliBinary = installs.primary?.path;
       // `atomic-agent --version` prints "atomic-agent 0.6.5"; the SEA binary
       // starts Node, so allow more than a native binary would need.
-      const version = queryCliVersion(cliBinary, fs, { timeoutMs: 10000 });
+      const version = installs.primary?.version;
 
       const configJson = configFiles.find(c => c.filePath.endsWith('config.json'));
       installations.push({
@@ -90,6 +82,7 @@ export const atomicAgentAdapter: AgentAdapter = {
         models: await this.getModels?.(configFiles, fs),
         user: options?.allUsers ? user : undefined,
         cliBinary,
+        otherInstalls: installs.others.length > 0 ? installs.others : undefined,
       });
     }
 

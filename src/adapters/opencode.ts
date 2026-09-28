@@ -5,7 +5,8 @@ import type { ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { stripJsonc } from '../core/jsonc.js';
-import { findNvmBinary, nvmBinaryGlob } from './nvm-binary.js';
+import { nvmBinaryGlob, npmPackageJsonGlobs } from './nvm-binary.js';
+import { discoverCliInstalls } from './cli-installs.js';
 import { getUserHomeDirs } from './openclaw.js';
 import { queryCliVersion, readPackageVersion } from './version-query.js';
 
@@ -50,23 +51,6 @@ async function loadOpenCodeConfig(filePath: string, fs: FSProvider): Promise<Par
   }
 }
 
-async function findCLIBinary(home: string, fs: FSProvider): Promise<string | undefined> {
-  for (const p of SYSTEM_CLI_PATHS) {
-    if (await fs.access(p)) return p;
-  }
-  for (const rel of USER_CLI_RELATIVE_PATHS) {
-    const p = join(home, rel);
-    if (await fs.access(p)) return p;
-  }
-  const nvm = await findNvmBinary(home, fs, 'opencode');
-  if (nvm) return nvm;
-  try {
-    const result = fs.execSync('which', ['opencode'], { timeout: 3000 }).trim();
-    if (result) return result;
-  } catch {}
-  return undefined;
-}
-
 function splitProviderModel(spec: string): { id: string; provider?: string } {
   const idx = spec.indexOf('/');
   if (idx === -1) return { id: spec };
@@ -85,7 +69,14 @@ export const opencodeAdapter: AgentAdapter = {
     for (const { home, user } of userDirs) {
       const configDir = xdgConfigDir(home, fs);
       const dataDir = xdgDataDir(home, fs);
-      const cliBinary = await findCLIBinary(home, fs);
+      const installs = await discoverCliInstalls(home, fs, {
+        names: ['opencode'],
+        systemPaths: SYSTEM_CLI_PATHS,
+        userRelPaths: USER_CLI_RELATIVE_PATHS,
+        version: async (bin, canExec) => (canExec ? queryCliVersion(bin, fs) : undefined)
+          ?? (await readPackageVersion(bin, fs, 'opencode-ai')),
+      });
+      const cliBinary = installs.primary?.path;
 
       const configFiles: ParsedConfig[] = [];
       for (const name of CONFIG_FILENAMES) {
@@ -104,8 +95,7 @@ export const opencodeAdapter: AgentAdapter = {
       // false-positive against unrelated tools sharing the directory name.)
       if (configFiles.length === 0 && !hasAuth && !cliBinary) continue;
 
-      const version = queryCliVersion(cliBinary, fs)
-        ?? (await readPackageVersion(cliBinary, fs));
+      const version = installs.primary?.version;
 
       installations.push({
         agent: 'opencode',
@@ -115,6 +105,7 @@ export const opencodeAdapter: AgentAdapter = {
         models: await this.getModels?.(configFiles),
         user: options?.allUsers ? user : undefined,
         cliBinary,
+        otherInstalls: installs.others.length > 0 ? installs.others : undefined,
       });
     }
 
@@ -190,6 +181,8 @@ export const opencodeAdapter: AgentAdapter = {
         '~/.npm-global/bin/opencode',
       ],
       globPatterns: [
+        // package.json of every npm-global copy — versions non-primary copies on remote scans
+        ...npmPackageJsonGlobs('opencode-ai'),
         '~/.config/opencode/agent/*.md',
         '~/.config/opencode/plugin/*.{ts,js}',
         '~/.config/opencode/plugins/*.{ts,js}',

@@ -101,7 +101,7 @@ describe('CFG-017: NemoClaw Sandbox Active', () => {
   it('fails when state file does not exist', async () => {
     const result = await cfg017.run(makeContext());
     expect(result.passed).toBe(false);
-    expect(result.message).toContain('not found');
+    expect(result.message).toContain('not deployed');
   });
 
   it('fails when state file has no action or runId', async () => {
@@ -243,5 +243,67 @@ describe('CFG-019: NemoClaw Blueprint Integrity', () => {
   it('has correct metadata', () => {
     expect(cfg019.severity).toBe('info');
     expect(cfg019.supportedAgents).toEqual(['openclaw', 'nemoclaw']);
+  });
+});
+
+// --- Current (install.sh, v0.0.x) layout: no state file, registry + ~/.nemoclaw/source ---
+
+describe('NemoClaw current-install layout (v0.0.124)', () => {
+  const registry = JSON.stringify({
+    defaultSandbox: 'my-assistant',
+    sandboxes: {
+      'my-assistant': { name: 'my-assistant', agent: 'openclaw', model: 'nvidia/nemotron-3-super-120b-a12b' },
+      'half-made': { name: 'half-made', pendingRouteReservation: true },
+    },
+  });
+  const blueprint = '/mock-home/.nemoclaw/source/nemoclaw-blueprint';
+
+  function currentInstall(files: Record<string, string> = {}) {
+    const all: Record<string, string> = { '/mock-home/.nemoclaw/sandboxes.json': registry, ...files };
+    mockAccess.mockImplementation(async (p) => {
+      const path = p as string;
+      if (path in all || path === '/mock-home/.nemoclaw' || path.startsWith(blueprint)) return;
+      throw new Error('ENOENT');
+    });
+    mockReadFile.mockImplementation(async (p) => {
+      const path = p as string;
+      if (path in all) return all[path];
+      throw new Error('ENOENT');
+    });
+  }
+
+  it('CFG-017 treats a registered, non-pending sandbox as deployed', async () => {
+    currentInstall();
+    const result = await cfg017.run(makeContext());
+    expect(result.passed).toBe(true);
+    expect(result.message).toContain('my-assistant');
+    expect(result.message).not.toContain('half-made');
+  });
+
+  it('CFG-017 still fails when only pending reservations exist', async () => {
+    currentInstall({
+      '/mock-home/.nemoclaw/sandboxes.json': JSON.stringify({ sandboxes: { x: { name: 'x', pendingCreateIdentity: 'id' } } }),
+    });
+    expect((await cfg017.run(makeContext())).passed).toBe(false);
+  });
+
+  it('CFG-018 inspects the blueprint bundled in ~/.nemoclaw/source', async () => {
+    currentInstall({ [`${blueprint}/policies/openclaw-sandbox.yaml`]: '# deny by default\nversion: 1\n' });
+    mockReaddir.mockImplementation(async (p) => {
+      if ((p as string) === `${blueprint}/policies/presets`) return ['npm.yaml', 'pypi.yaml'] as never;
+      throw new Error('ENOENT');
+    });
+    const result = await cfg018.run(makeContext());
+    expect(result.passed).toBe(true);
+    const files = (result.evidence ?? []).map(e => e.file);
+    expect(files).toContain(`${blueprint}/policies/openclaw-sandbox.yaml`);
+    expect(files).toContain('/mock-home/.nemoclaw/sandboxes.json');
+  });
+
+  it('CFG-019 reports the digest-pinned bundled blueprint', async () => {
+    currentInstall({ [`${blueprint}/blueprint.yaml`]: `version: "0.1.0"\ndigest: "sha256:${'b'.repeat(64)}"\n` });
+    const result = await cfg019.run(makeContext());
+    expect(result.passed).toBe(true);
+    expect(result.evidence?.[0].detail).toContain('pins the sandbox image by digest');
   });
 });

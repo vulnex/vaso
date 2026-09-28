@@ -102,6 +102,10 @@ export interface FSProvider {
    *  probe-collected env section; LocalFSProvider reads from process.env. */
   getEnv(key: string): string | undefined;
   readonly platform: NodeJS.Platform;
+  /** `'snapshot'` when commands were collected ahead of time by the probe:
+   *  `exec` then answers by command name, so running a second copy of a CLI
+   *  by full path returns the first copy's output. Absent → treated as live. */
+  readonly kind?: 'local' | 'snapshot';
   homedir(): string;
   /** Hostname of the machine the scan is running against. LocalFSProvider
    *  returns `os.hostname()`; SnapshotFSProvider returns the value the probe

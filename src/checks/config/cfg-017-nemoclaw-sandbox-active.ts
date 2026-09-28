@@ -1,5 +1,6 @@
 import { join } from 'node:path';
 import { defineCheck } from '../../core/check-builder.js';
+import { registeredSandboxes } from './nemoclaw-state.js';
 
 export const cfg017 = defineCheck({
   id: 'CFG-017',
@@ -13,9 +14,20 @@ export const cfg017 = defineCheck({
     const stateFile = join(ctx.fs.homedir(), '.nemoclaw', 'state', 'nemoclaw.json');
 
     if (!(await ctx.fs.access(stateFile))) {
+      // Current releases no longer write the state file; the sandbox registry
+      // is the persisted record of deployments.
+      const registry = await registeredSandboxes(ctx.fs);
+      if (registry && registry.sandboxes.length > 0) {
+        const names = registry.sandboxes.map(s => s.entry.stopped === true ? `${s.name} (stopped)` : s.name);
+        return h.result({
+          passed: true,
+          message: `NemoClaw sandbox(es) deployed: ${names.join(', ')}`,
+          evidence: [{ file: registry.file, detail: `Registered sandboxes: ${names.join(', ')}` }],
+        });
+      }
       return h.result({
         passed: false,
-        message: 'NemoClaw state file not found — sandbox not deployed',
+        message: 'NemoClaw sandbox not deployed — no state file and no registered sandbox',
       });
     }
 

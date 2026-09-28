@@ -21,4 +21,13 @@ describe('buildProbeManifest', () => {
     expect(manifest.filePaths).toContain('~/devin-desktop/resources/app/product.json');
     expect(manifest.commands.some(c => c.cmd === 'hermes' && c.args.join(' ') === '--version')).toBe(true);
   });
+
+  it('inventories every CLI copy (system prefixes, user bins, each nvm Node) as metadata only', () => {
+    const everywhere = [...manifest.metadataGlobPatterns!, ...manifest.globPatterns, ...manifest.filePaths];
+    for (const cli of ['codex', 'openclaw', 'atomic-agent', 'devin']) {
+      expect(everywhere).toContain(`~/.nvm/versions/node/*/bin/${cli}`);
+      expect(everywhere).toContain(`~/.local/bin/${cli}`);
+    }
+    expect([...manifest.metadataGlobPatterns!, ...manifest.systemPaths!]).toEqual(expect.arrayContaining(['/usr/bin/codex', '/opt/homebrew/bin/claude', '/usr/bin/openclaw']));
+  });
 });

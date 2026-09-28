@@ -207,3 +207,56 @@ describe('ADV-005: Config-Based Advisory', () => {
     expect(result.passed).toBe(true);
   });
 });
+
+describe('Advisory checks evaluate every installed CLI copy', () => {
+  beforeEach(() => reloadAdvisoryDatabase());
+
+  const oldCopy = '/home/u/.nvm/versions/node/v22.22.1/bin/openclaw';
+
+  it('ADV-001 flags a vulnerable older copy even when the primary is fixed', async () => {
+    const ctx = makeContext({
+      agent: 'openclaw',
+      version: '2026.9.4',
+      otherInstalls: [{ path: oldCopy, version: '2026.3.13' }],
+    });
+    const result = await adv001.run(ctx);
+    expect(result.passed).toBe(false);
+    expect(result.message).toContain(`v2026.3.13 at ${oldCopy}`);
+    const hit = result.evidence?.find(e => e.detail?.includes('CVE-2026-35641'));
+    expect(hit?.file).toBe(oldCopy);
+    expect(hit?.detail).toContain('affects installed copy');
+  });
+
+  it('ADV-001 passes when every copy is fixed, and ignores copies of unknown version', async () => {
+    const ctx = makeContext({
+      agent: 'openclaw',
+      version: '2026.9.4',
+      otherInstalls: [{ path: '/usr/bin/openclaw', version: '2026.4.20' }, { path: '/opt/openclaw' }],
+    });
+    expect((await adv001.run(ctx)).passed).toBe(true);
+  });
+
+  it('ADV-001 reports primary and copy together, counting each advisory once', async () => {
+    const ctx = makeContext({
+      agent: 'openclaw',
+      version: '2026.3.13',
+      otherInstalls: [{ path: oldCopy, version: '2026.3.10' }],
+    });
+    const result = await adv001.run(ctx);
+    expect(result.message).toMatch(/affect openclaw v2026\.3\.13 \(and v2026\.3\.10 at /);
+    const count = Number(/^(\d+) known/.exec(result.message)?.[1]);
+    const ids = new Set(result.evidence!.map(e => e.detail!.split(':')[0]));
+    expect(count).toBe(ids.size);
+  });
+
+  it('ADV-001 still runs when only another copy has a known version', async () => {
+    const ctx = makeContext({
+      agent: 'openclaw',
+      version: undefined,
+      otherInstalls: [{ path: oldCopy, version: '2026.3.13' }],
+    });
+    const result = await adv001.run(ctx);
+    expect(result.passed).toBe(false);
+    expect(result.message).toContain(`an installed openclaw copy (v2026.3.13 at ${oldCopy})`);
+  });
+});
