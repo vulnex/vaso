@@ -193,11 +193,12 @@ describe('Config fix() methods', () => {
 // ── Nanobot fix() tests ───────────────────────────────────────────────
 
 describe('Nanobot fix() methods', () => {
-  it('NB-003: fixes restrictToWorkspace in JSON', async () => {
+  it('NB-003: sets tools.restrictToWorkspace (nanobot rejects unknown top-level keys)', async () => {
     const filePath = join(TEST_DIR, 'config.json');
-    await writeFile(filePath, JSON.stringify({ restrictToWorkspace: false }, null, 2) + '\n');
+    const seed = { tools: { restrictToWorkspace: false } };
+    await writeFile(filePath, JSON.stringify(seed, null, 2) + '\n');
 
-    const config = makeJsonConfig(filePath, { restrictToWorkspace: false });
+    const config = makeJsonConfig(filePath, seed);
     const ctx = makeCtx('nanobot', [config]);
 
     const before = await nb003.run(ctx);
@@ -207,27 +208,12 @@ describe('Nanobot fix() methods', () => {
     expect(result.applied).toBe(true);
 
     const data = JSON.parse(await readFile(filePath, 'utf-8'));
-    expect(data.restrictToWorkspace).toBe(true);
+    expect(data.tools.restrictToWorkspace).toBe(true);
+    expect(data.restrictToWorkspace).toBeUndefined();
   });
 
-  it('NB-004: adds comprehensive denyList to exec tool', async () => {
-    const filePath = join(TEST_DIR, 'config.json');
-    await writeFile(filePath, JSON.stringify({ tools: { exec: {} } }, null, 2) + '\n');
-
-    const config = makeJsonConfig(filePath, { tools: { exec: {} } });
-    const ctx = makeCtx('nanobot', [config]);
-
-    const before = await nb004.run(ctx);
-    expect(before.passed).toBe(false);
-
-    const result = await nb004.fix!(ctx);
-    expect(result.applied).toBe(true);
-
-    const data = JSON.parse(await readFile(filePath, 'utf-8'));
-    expect(data.tools.exec.denyList).toBeInstanceOf(Array);
-    expect(data.tools.exec.denyList.length).toBeGreaterThanOrEqual(5);
-    expect(data.tools.exec.denyList).toContain('rm');
-    expect(data.tools.exec.denyList).toContain('curl');
+  it('NB-004: is guidance-only (the exec deny list is regex patterns plus a built-in list)', () => {
+    expect(nb004.fix).toBeUndefined();
   });
 
   it('NB-001: is not auto-fixable (manual action only)', () => {
