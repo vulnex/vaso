@@ -1,0 +1,27 @@
+# IronClaw 1.x (Reborn) insecure boot config — ~/.ironclaw/reborn/config.toml
+# Every setting below trips one IC check; all keys are valid for the
+# deny_unknown_fields schema. (`ironclaw serve` itself refuses local-dev-yolo
+# on a non-loopback bind — this file is a scanner fixture, not a deployment.)
+api_version = "ironclaw.runtime/v1"
+
+[boot]
+profile = "local-dev-yolo"
+
+[identity]
+default_owner = "reborn-cli"
+
+[policy]
+default_approval_policy = "minimal"
+
+[skills]
+regex_activation_enabled = true
+
+[llm.default]
+provider_id = "ollama"
+model = "llama3.2"
+base_url = "http://10.20.30.40:11434"
+
+[webui]
+listen_host = "0.0.0.0"
+listen_port = 3000
+allowed_origins = ["null", "http://chat.example.com"]

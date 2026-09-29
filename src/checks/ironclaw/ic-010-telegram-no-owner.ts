@@ -1,41 +1,51 @@
+import { join } from 'node:path';
 import { defineCheck } from '../../core/check-builder.js';
-import { getNestedValue } from '../../core/utils.js';
+import { isLegacy, isLegacyUnused, legacyEnv, str } from './layout.js';
+
+/*
+ * 0.x only. Telegram is a WASM channel installed into
+ * `$WASM_CHANNELS_DIR` (default ~/.ironclaw/channels); its bot token lives in
+ * the encrypted secrets store, not in env (TELEGRAM_TOKEN, which this check
+ * used to read, never existed). TELEGRAM_OWNER_ID (env) pins the bot to one
+ * Telegram user; without it (and without an owner id in the settings DB) the
+ * bot answers anyone who completes DM pairing.
+ * 1.x configures Telegram as a WebUI extension — its `[telegram]` config
+ * section is retired and inert, so there is nothing static to evaluate.
+ */
 
 export const ic010 = defineCheck({
   id: 'IC-010',
-  name: 'Telegram Without Owner ID',
+  name: 'Telegram Channel Without Owner ID (0.x)',
   category: 'ironclaw',
   severity: 'warning',
-  description: 'Check if Telegram integration is enabled but TELEGRAM_OWNER_ID is not set',
+  description: 'Check if the IronClaw 0.x Telegram WASM channel is installed without TELEGRAM_OWNER_ID pinning it to one user',
   supportedAgents: ['ironclaw'],
 
   async run(ctx, h) {
-    const evidence = [];
+    if (!isLegacy(ctx)) return h.passed('Not applicable to IronClaw 1.x (Telegram is a WebUI extension)');
+    if (isLegacyUnused(ctx)) return h.passed('0.x configuration is not used by the installed IronClaw 1.x binary');
 
-    for (const config of ctx.configs) {
-      const telegramToken =
-        (config.data.TELEGRAM_TOKEN as string | undefined) ??
-        (getNestedValue(config.data, 'telegram.token') as string | undefined);
-
-      const telegramOwnerId =
-        (config.data.TELEGRAM_OWNER_ID as string | undefined) ??
-        (getNestedValue(config.data, 'telegram.owner_id') as string | undefined) ??
-        (getNestedValue(config.data, 'telegram.ownerId') as string | undefined);
-
-      if (telegramToken && telegramToken.trim() !== '') {
-        if (!telegramOwnerId || telegramOwnerId.trim() === '') {
-          evidence.push({
-            file: config.filePath,
-            detail: 'Telegram is enabled (TELEGRAM_TOKEN set) but TELEGRAM_OWNER_ID is empty — any Telegram user can interact with the bot',
-          });
-        }
-      }
+    const env = legacyEnv(ctx);
+    const channelsDir = str(env?.data?.WASM_CHANNELS_DIR) || join(ctx.installation.installDir, 'channels');
+    let installed: string | undefined;
+    try {
+      installed = (await ctx.fs.readdir(channelsDir)).find(n => /telegram/i.test(n));
+    } catch {
+      installed = undefined;
     }
+    if (!installed) return h.passed('Telegram channel is not installed');
 
-    return h.fromEvidence(evidence, {
-      passed: 'Telegram owner ID is properly configured or Telegram is not enabled',
-      failed: () => 'Telegram is enabled without an owner ID — bot is accessible to any user',
-      fixDescription: 'Set TELEGRAM_OWNER_ID to your Telegram user ID in .env or telegram.owner_id in config.toml',
+    const owner = str(env?.data?.TELEGRAM_OWNER_ID);
+    if (owner) return h.passed('Telegram channel is pinned to an owner (TELEGRAM_OWNER_ID)');
+
+    return h.result({
+      passed: false,
+      message: 'Telegram channel installed without an owner ID — any Telegram user can reach the agent via DM pairing',
+      evidence: [{
+        file: join(channelsDir, installed),
+        detail: 'TELEGRAM_OWNER_ID is not set in .env (an owner id set via the settings database is not visible to static scanning)',
+      }],
+      fixDescription: 'Set TELEGRAM_OWNER_ID=<your numeric Telegram user id> in ~/.ironclaw/.env',
     });
   },
 });

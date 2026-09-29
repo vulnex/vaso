@@ -11,6 +11,8 @@ import { ic009 } from './ic-009-secrets-key-env.js';
 import { ic010 } from './ic-010-telegram-no-owner.js';
 import { ic011 } from './ic-011-broad-sandbox-domains.js';
 import { ic012 } from './ic-012-docker-auto-pull.js';
+import { ic013 } from './ic-013-webui-allowed-origins.js';
+import { ic014 } from './ic-014-state-db-permissions.js';
 
 export const ironclawChecks: CheckModule[] = [
   ic001,
@@ -25,4 +27,6 @@ export const ironclawChecks: CheckModule[] = [
   ic010,
   ic011,
   ic012,
+  ic013,
+  ic014,
 ];

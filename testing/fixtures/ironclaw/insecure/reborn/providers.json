@@ -1,0 +1,13 @@
+[
+  {
+    "id": "lan-vllm",
+    "aliases": [],
+    "protocol": "open_ai_completions",
+    "api_key_env": "LAN_VLLM_API_KEY",
+    "api_key_required": true,
+    "default_base_url": "http://10.20.30.40:8000/v1",
+    "default_model": "qwen3-32b",
+    "model_env": "LAN_VLLM_MODEL",
+    "description": "Self-hosted vLLM on the LAN over cleartext HTTP (fixture)"
+  }
+]

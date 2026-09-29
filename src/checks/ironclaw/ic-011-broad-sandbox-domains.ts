@@ -1,48 +1,45 @@
+import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { getNestedValue } from '../../core/utils.js';
+import { isLegacy, isLegacyUnused, legacySetting, lineOf, str } from './layout.js';
+
+/*
+ * 0.x only: SANDBOX_EXTRA_DOMAINS (comma-separated env) /
+ * [sandbox].extra_allowed_domains (config.toml overlay array) extends the
+ * sandbox egress-proxy allowlist. Wildcards reopen exfiltration paths from
+ * sandboxed tool runs. (The old `sandbox.extra_domains` key never existed.)
+ */
 
 export const ic011 = defineCheck({
   id: 'IC-011',
-  name: 'Broad Sandbox Domain Allowlist',
+  name: 'Broad Sandbox Domain Allowlist (0.x)',
   category: 'ironclaw',
   severity: 'warning',
-  description: 'Check if SANDBOX_EXTRA_DOMAINS contains wildcard patterns that weaken network isolation',
+  description: 'Check if IronClaw 0.x SANDBOX_EXTRA_DOMAINS / [sandbox].extra_allowed_domains contains wildcard patterns that weaken sandbox network isolation',
   supportedAgents: ['ironclaw'],
 
   async run(ctx, h) {
-    const evidence = [];
+    if (!isLegacy(ctx)) return h.passed('Not applicable to IronClaw 1.x');
+    if (isLegacyUnused(ctx)) return h.passed('0.x configuration is not used by the installed IronClaw 1.x binary');
 
-    for (const config of ctx.configs) {
-      const extraDomains =
-        (config.data.SANDBOX_EXTRA_DOMAINS as string | undefined) ??
-        (getNestedValue(config.data, 'sandbox.extra_domains') as string | string[] | undefined) ??
-        (getNestedValue(config.data, 'sandbox.extraDomains') as string | string[] | undefined);
-
-      if (!extraDomains) continue;
-
-      const domainList = Array.isArray(extraDomains)
-        ? extraDomains
-        : extraDomains.split(',').map(d => d.trim());
-
-      const wildcards = domainList.filter(d => {
-        if (d === '*') return true;
-        if (d.startsWith('*.')) return true;
-        if (d.includes('*')) return true;
-        return false;
+    const evidence: Evidence[] = [];
+    for (const s of legacySetting(ctx, 'SANDBOX_EXTRA_DOMAINS', 'sandbox.extra_allowed_domains')) {
+      const list = Array.isArray(s.value)
+        ? s.value.map(v => str(v) ?? '')
+        : (str(s.value) ?? '').split(',').map(d => d.trim());
+      const wildcards = list.filter(d => d.includes('*'));
+      if (wildcards.length === 0) continue;
+      const line = lineOf(s.config, s.config.format === 'env' ? s.key : 'extra_allowed_domains');
+      evidence.push({
+        file: s.file,
+        ...(line ? { line } : {}),
+        detail: `${s.key} contains wildcard patterns: ${wildcards.join(', ')} — weakens sandbox network isolation`,
       });
-
-      if (wildcards.length > 0) {
-        evidence.push({
-          file: config.filePath,
-          detail: `SANDBOX_EXTRA_DOMAINS contains wildcard patterns: ${wildcards.join(', ')} — weakens network isolation`,
-        });
-      }
     }
 
     return h.fromEvidence(evidence, {
-      passed: 'No wildcard patterns in sandbox domain allowlist',
+      passed: 'No wildcard patterns in the sandbox domain allowlist',
       failed: () => 'Sandbox domain allowlist contains wildcard patterns — network isolation is weakened',
-      fixDescription: 'Replace wildcard domain patterns with specific fully-qualified domain names in SANDBOX_EXTRA_DOMAINS',
+      fixDescription: 'Replace wildcard entries in SANDBOX_EXTRA_DOMAINS with specific fully-qualified domain names',
     });
   },
 });
