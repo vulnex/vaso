@@ -21,6 +21,11 @@ type CommandRequest struct {
 	Cmd     string   `json:"cmd"`
 	Args    []string `json:"args"`
 	Timeout int      `json:"timeout,omitempty"` // ms, default 5000
+	// IsolateHome runs the command with HOME, XDG dirs and cwd pointed at a
+	// throwaway directory (removed afterwards): agent CLIs may initialize
+	// state in the user's home on any invocation, and a scan must not modify
+	// what it scans.
+	IsolateHome bool `json:"isolateHome,omitempty"`
 }
 
 // ProbeSnapshot is the complete output of a probe run.

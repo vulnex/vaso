@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"strings"
 	"time"
@@ -442,6 +441,18 @@ func resolveBinary(cmd, augmentedPath string) string {
 // augmented PATH is searched for bare commands and also propagated to the
 // child process so spawned scripts (e.g. node-based CLI shims) can resolve
 // their own dependencies.
+// setEnv replaces or appends KEY=value in an environment slice.
+func setEnv(env []string, key, value string) []string {
+	prefix := key + "="
+	for i, e := range env {
+		if strings.HasPrefix(e, prefix) {
+			env[i] = prefix + value
+			return env
+		}
+	}
+	return append(env, prefix+value)
+}
+
 func runCommand(req CommandRequest, augmentedPath string) CommandOutput {
 	if !IsAllowed(req.Cmd) {
 		return CommandOutput{
@@ -461,21 +472,27 @@ func runCommand(req CommandRequest, augmentedPath string) CommandOutput {
 	resolved := resolveBinary(req.Cmd, augmentedPath)
 	cmd := exec.CommandContext(ctx, resolved, req.Args...)
 
+	env := os.Environ()
 	if augmentedPath != "" {
-		env := os.Environ()
-		hasPath := false
-		for i, e := range env {
-			if strings.HasPrefix(e, "PATH=") {
-				env[i] = "PATH=" + augmentedPath
-				hasPath = true
-				break
-			}
-		}
-		if !hasPath {
-			env = append(env, "PATH="+augmentedPath)
-		}
-		cmd.Env = env
+		env = setEnv(env, "PATH", augmentedPath)
 	}
+	if req.IsolateHome {
+		home, err := os.MkdirTemp("", "vaso-exec-")
+		if err == nil {
+			defer os.RemoveAll(home)
+			for k, v := range map[string]string{
+				"HOME":            home,
+				"XDG_CONFIG_HOME": filepath.Join(home, ".config"),
+				"XDG_DATA_HOME":   filepath.Join(home, ".local", "share"),
+				"XDG_CACHE_HOME":  filepath.Join(home, ".cache"),
+				"XDG_STATE_HOME":  filepath.Join(home, ".local", "state"),
+			} {
+				env = setEnv(env, k, v)
+			}
+			cmd.Dir = home
+		}
+	}
+	cmd.Env = env
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -499,9 +516,30 @@ func runCommand(req CommandRequest, augmentedPath string) CommandOutput {
 	}
 }
 
-// secretEnvName matches variable names that carry credentials. Their values
-// never leave the host: checks only need to know such a variable is set.
-var secretEnvName = regexp.MustCompile(`(?i)(KEY|TOKEN|SECRET|PASS|PASSWD|PASSWORD|PASSPHRASE|CREDENTIAL|AUTH|COOKIE|SESSION)`)
+// secretEnvParts are name segments (split on "_") that mark a credential.
+// Their values never leave the host: checks only need to know such a variable
+// is set. Names ending in a location suffix (…_KEY_PATH, …_TOKEN_FILE) hold a
+// path, not the secret, and adapters need them to find credential files.
+var secretEnvParts = map[string]bool{
+	"KEY": true, "KEYS": true, "APIKEY": true, "TOKEN": true, "TOKENS": true,
+	"SECRET": true, "SECRETS": true, "PASS": true, "PASSWD": true, "PASSWORD": true,
+	"PASSPHRASE": true, "CREDENTIAL": true, "CREDENTIALS": true, "AUTH": true,
+	"COOKIE": true, "SESSION": true,
+}
+var locationEnvSuffix = map[string]bool{"PATH": true, "DIR": true, "FILE": true, "HOME": true, "URL": true}
+
+func isSecretEnvName(name string) bool {
+	parts := strings.Split(strings.ToUpper(name), "_")
+	if locationEnvSuffix[parts[len(parts)-1]] {
+		return false
+	}
+	for _, p := range parts {
+		if secretEnvParts[p] {
+			return true
+		}
+	}
+	return false
+}
 
 // redactedEnvValue replaces the value of a credential-bearing variable.
 const redactedEnvValue = "[redacted]"
@@ -519,7 +557,7 @@ func collectEnv(prefixes []string) map[string]string {
 		val := parts[1]
 		for _, prefix := range prefixes {
 			if strings.HasPrefix(key, prefix) {
-				if secretEnvName.MatchString(key) {
+				if isSecretEnvName(key) {
 					val = redactedEnvValue
 				}
 				result[key] = val

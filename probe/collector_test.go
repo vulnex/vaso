@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -93,6 +94,8 @@ func TestCollectEnvRedactsCredentials(t *testing.T) {
 	t.Setenv("VASOTEST_KEY_PASSPHRASE", "hunter2")
 	t.Setenv("VASOTEST_HOME", "/srv/agent")
 	t.Setenv("VASOTEST_BASE_URL", "http://127.0.0.1:11434")
+	t.Setenv("VASOTEST_SSH_KEY_PATH", "/srv/keys/agent.key")
+	t.Setenv("VASOTEST_KEYBOARD", "us")
 
 	env := collectEnv([]string{"VASOTEST_"})
 	for _, k := range []string{"VASOTEST_API_KEY", "VASOTEST_BOT_TOKEN", "VASOTEST_KEY_PASSPHRASE"} {
@@ -100,7 +103,26 @@ func TestCollectEnvRedactsCredentials(t *testing.T) {
 			t.Errorf("%s = %q, want redacted", k, env[k])
 		}
 	}
-	if env["VASOTEST_HOME"] != "/srv/agent" || env["VASOTEST_BASE_URL"] != "http://127.0.0.1:11434" {
+	if env["VASOTEST_HOME"] != "/srv/agent" || env["VASOTEST_BASE_URL"] != "http://127.0.0.1:11434" ||
+		env["VASOTEST_SSH_KEY_PATH"] != "/srv/keys/agent.key" || env["VASOTEST_KEYBOARD"] != "us" {
 		t.Errorf("non-secret values changed: %v", env)
+	}
+}
+
+func TestRunCommandIsolateHome(t *testing.T) {
+	commandAllowlist["sh"] = true
+	defer delete(commandAllowlist, "sh")
+	realHome, _ := os.UserHomeDir()
+	out := runCommand(CommandRequest{ID: "t", Cmd: "sh", Args: []string{"-c", "echo $HOME; pwd; touch $HOME/marker"}, IsolateHome: true}, "")
+	lines := strings.Fields(out.Stdout)
+	if len(lines) < 2 || lines[0] == realHome || filepath.Base(lines[0]) != filepath.Base(lines[1]) {
+		t.Fatalf("HOME not isolated: %q", out.Stdout)
+	}
+	if _, err := os.Stat(lines[0]); !os.IsNotExist(err) {
+		t.Fatalf("isolated home %s not removed", lines[0])
+	}
+	plain := runCommand(CommandRequest{ID: "t", Cmd: "sh", Args: []string{"-c", "echo $HOME"}}, "")
+	if strings.TrimSpace(plain.Stdout) != realHome {
+		t.Fatalf("HOME changed without IsolateHome: %q", plain.Stdout)
 	}
 }
