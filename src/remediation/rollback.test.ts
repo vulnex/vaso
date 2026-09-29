@@ -3,6 +3,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 vi.mock('node:fs/promises', () => ({
   readdir: vi.fn(),
   copyFile: vi.fn(),
+  stat: vi.fn(async () => ({ mode: 0o100644 })),
+  chmod: vi.fn(),
 }));
 
 vi.mock('node:os', () => ({
@@ -13,12 +15,14 @@ vi.mock('../core/utils.js', () => ({
   pathExists: vi.fn(),
 }));
 
-import { readdir, copyFile } from 'node:fs/promises';
+import { readdir, copyFile, stat, chmod } from 'node:fs/promises';
 import { pathExists } from '../core/utils.js';
 import { rollback } from './rollback.js';
 
 const mockReaddir = vi.mocked(readdir);
 const mockCopyFile = vi.mocked(copyFile);
+const mockStat = vi.mocked(stat);
+const mockChmod = vi.mocked(chmod);
 const mockPathExists = vi.mocked(pathExists);
 
 describe('rollback', () => {
@@ -26,6 +30,7 @@ describe('rollback', () => {
 
   beforeEach(() => {
     vi.resetAllMocks();
+    mockStat.mockResolvedValue({ mode: 0o100644 } as Awaited<ReturnType<typeof stat>>);
     consoleLogs = [];
     vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
       consoleLogs.push(args.map(String).join(' '));
@@ -101,6 +106,10 @@ describe('rollback', () => {
 
     await rollback();
     expect(consoleLogs.some(l => l.includes('2 file(s) restored'))).toBe(true);
+    if (process.platform !== 'win32') {
+      // original permissions come back with the content
+      expect(mockChmod).toHaveBeenCalledWith('/etc/config.yaml', 0o644);
+    }
   });
 
   it('handles copy failure gracefully', async () => {

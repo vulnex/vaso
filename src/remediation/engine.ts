@@ -119,12 +119,17 @@ export class RemediationEngine {
     return results;
   }
 
+  /** Files already backed up in this run: the first copy (the original) wins —
+   *  a later fix on the same file must not overwrite it with fixed content. */
+  private backedUp = new Set<string>();
+
   private async backupFile(filePath: string): Promise<void> {
     // Evidence can name a directory (permission fixes) or something that is
     // not a path at all (`ps`, an advisory URL); only regular files are copied.
     // A missing file still fails the backup (and so blocks the fix).
-    if (!isAbsolute(filePath)) return;
+    if (!isAbsolute(filePath) || this.backedUp.has(filePath)) return;
     if ((await stat(filePath)).isDirectory()) return;
+    this.backedUp.add(filePath);
     const destDir = join(this.backupDir, dirname(filePath));
     await mkdir(destDir, { recursive: true });
     await copyFile(filePath, join(this.backupDir, filePath));

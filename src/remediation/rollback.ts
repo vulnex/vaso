@@ -1,4 +1,4 @@
-import { readdir, copyFile } from 'node:fs/promises';
+import { readdir, copyFile, stat, chmod } from 'node:fs/promises';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import chalk from 'chalk';
@@ -47,6 +47,11 @@ export async function rollback(timestamp?: string): Promise<void> {
     const originalPath = backupFilePath.slice(backupDir.length);
     try {
       await copyFile(backupFilePath, originalPath);
+      // The backup copy kept the original permissions; restore them too
+      // (permission fixes such as chmod 600 are part of the rollback).
+      if (process.platform !== 'win32') {
+        await chmod(originalPath, (await stat(backupFilePath)).mode & 0o7777);
+      }
       console.log(`  ${chalk.green('+')} Restored ${originalPath}`);
       restored++;
     } catch (err) {

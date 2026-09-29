@@ -238,6 +238,39 @@ describe('RemediationEngine interactive fix', () => {
     expect(psResults[0].applied).toBe(true);
   });
 
+  it.skipIf(process.platform === 'win32')('keeps the original file as the backup when two fixes change it in one run', async () => {
+    const { mkdtemp, writeFile, readFile, readdir, rm } = await import('node:fs/promises');
+    const { join } = await import('node:path');
+    const home = await mkdtemp(join(tmpdir(), 'vaso-engine-'));
+    const savedHome = process.env.HOME;
+    process.env.HOME = home;
+    try {
+      const file = join(home, 'config.json');
+      await writeFile(file, 'original');
+      const bump = (id: string): CheckModule => {
+        const c = makeFixableCheck(id);
+        c.fix = vi.fn(async () => {
+          await writeFile(file, `${await readFile(file, 'utf-8')}+${id}`);
+          return { checkId: id, applied: true, message: `Fixed ${id}` };
+        });
+        return c;
+      };
+      const registry = new CheckRegistry();
+      registry.register(bump('TST-001'));
+      registry.register(bump('TST-002'));
+      const result = makeScanResult('TST-001', 'TST-002');
+      result.agents[0].installation.configFiles = [{ raw: '', format: 'json', filePath: file, data: {} }];
+      await new RemediationEngine(registry).fix(result, { yes: true });
+
+      expect(await readFile(file, 'utf-8')).toBe('original+TST-001+TST-002');
+      const [stamp] = await readdir(join(home, '.vaso', 'backups'));
+      expect(await readFile(join(home, '.vaso', 'backups', stamp, file), 'utf-8')).toBe('original');
+    } finally {
+      process.env.HOME = savedHome;
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
   it('warns and skips in non-TTY environment without --yes', async () => {
     Object.defineProperty(process.stdin, 'isTTY', { value: false, writable: true, configurable: true });
 
