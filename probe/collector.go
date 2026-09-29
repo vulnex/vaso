@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"time"
@@ -498,7 +499,15 @@ func runCommand(req CommandRequest, augmentedPath string) CommandOutput {
 	}
 }
 
-// collectEnv returns environment variables that match any of the given prefixes.
+// secretEnvName matches variable names that carry credentials. Their values
+// never leave the host: checks only need to know such a variable is set.
+var secretEnvName = regexp.MustCompile(`(?i)(KEY|TOKEN|SECRET|PASS|PASSWD|PASSWORD|PASSPHRASE|CREDENTIAL|AUTH|COOKIE|SESSION)`)
+
+// redactedEnvValue replaces the value of a credential-bearing variable.
+const redactedEnvValue = "[redacted]"
+
+// collectEnv returns environment variables that match any of the given
+// prefixes, with credential-bearing values redacted.
 func collectEnv(prefixes []string) map[string]string {
 	result := make(map[string]string)
 	for _, env := range os.Environ() {
@@ -510,6 +519,9 @@ func collectEnv(prefixes []string) map[string]string {
 		val := parts[1]
 		for _, prefix := range prefixes {
 			if strings.HasPrefix(key, prefix) {
+				if secretEnvName.MatchString(key) {
+					val = redactedEnvValue
+				}
 				result[key] = val
 				break
 			}

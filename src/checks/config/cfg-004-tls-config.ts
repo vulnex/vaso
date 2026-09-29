@@ -1,6 +1,8 @@
 import { defineCheck } from '../../core/check-builder.js';
 import { CODING_AGENTS } from '../../core/types.js';
 
+const LOOPBACK_HOST = /^(?:localhost|127(?:\.\d{1,3}){3}|\[?::1\]?)$/i;
+
 export const cfg004 = defineCheck({
   id: 'CFG-004',
   name: 'TLS Not Configured',
@@ -15,6 +17,11 @@ export const cfg004 = defineCheck({
     }
 
     const gw = ctx.installation.gateway;
+    // TLS protects traffic crossing a network; a loopback-only listener
+    // never does.
+    if (gw.host && LOOPBACK_HOST.test(gw.host.trim())) {
+      return h.passed(`Gateway is bound to loopback (${gw.host}) — TLS not required`);
+    }
     const hasTls = gw.tls === true;
 
     // Also check raw config for tls/ssl mentions

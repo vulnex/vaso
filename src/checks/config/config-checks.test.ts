@@ -80,6 +80,11 @@ describe('CFG-001: Gateway Binding', () => {
     expect(result.evidence?.[0].line).toBeGreaterThan(0);
   });
 
+  it.each(['*', 'localhost,0.0.0.0'])('flags gateway.host %s', async (host) => {
+    const data = { gateway: { host } };
+    expect((await cfg001.run(makeContext([makeConfig(data, JSON.stringify(data))]))).passed).toBe(false);
+  });
+
   it('reports gateway.host once', async () => {
     const data = { gateway: { host: '0.0.0.0' } };
     const result = await cfg001.run(makeContext([makeConfig(data, JSON.stringify(data, null, 2))]));
@@ -109,6 +114,15 @@ describe('CFG-002: API Key Exposure', () => {
     const result = await cfg002.run(makeContext([config]));
     console.log(`[CFG-002] AWS key in config → passed: ${result.passed}, message: ${result.message}`);
     expect(result.passed).toBe(false);
+  });
+
+  it.each([
+    ['sk-proj-' + 'Ab3_d-EfGh'.repeat(4)],
+    ['sk-svcacct-' + 'Zy9-xW_vU8'.repeat(4)],
+    ['sk-or-v1-' + '0123456789abcdef'.repeat(4)],
+  ])('detects current-format provider key %s', async (key) => {
+    const raw = `{\n  "apiKey": "${key}"\n}`;
+    expect((await cfg002.run(makeContext([makeConfig({ apiKey: key }, raw)]))).passed).toBe(false);
   });
 
   it('passes with clean config', async () => {
@@ -225,9 +239,9 @@ describe('CFG-003: Credential Config Permissions', () => {
 
 describe('CFG-004: TLS Not Configured', () => {
   it('fails when TLS is not configured', async () => {
-    const config = makeConfig({ gateway: { host: '127.0.0.1', tls: false } });
+    const config = makeConfig({ gateway: { host: '0.0.0.0', tls: false } });
     const ctx = makeContext([config]);
-    ctx.installation.gateway = { host: '127.0.0.1', tls: false };
+    ctx.installation.gateway = { host: '0.0.0.0', tls: false };
     const result = await cfg004.run(ctx);
     console.log(`[CFG-004] tls=false → passed: ${result.passed}, message: ${result.message}`);
     expect(result.passed).toBe(false);
@@ -241,6 +255,14 @@ describe('CFG-004: TLS Not Configured', () => {
     const result = await cfg004.run(ctx);
     console.log(`[CFG-004] tls=true → passed: ${result.passed}, message: ${result.message}`);
     expect(result.passed).toBe(true);
+  });
+});
+
+describe('CFG-004: loopback gateways', () => {
+  it.each(['127.0.0.1', 'localhost', '::1'])('does not require TLS on %s', async (host) => {
+    const ctx = makeContext([makeConfig({ gateway: { host } })]);
+    ctx.installation.gateway = { host };
+    expect((await cfg004.run(ctx)).passed).toBe(true);
   });
 });
 

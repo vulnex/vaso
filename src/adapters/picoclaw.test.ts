@@ -335,20 +335,22 @@ describe('PicoClaw adapter', () => {
       expect((await net001.run(ctxFor(inst, fs))).passed).toBe(false);
     });
 
-    it('CFG-002 sees plaintext keys in .security.yml but not enc:// / file:// references', async () => {
+    it('CFG-002 treats .security.yml as the secret store and flags keys leaked into config.json', async () => {
       const plain = 'model_list:\n  gpt-5.4:0:\n    api_keys:\n      - "sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789"\n';
       const fsPlain = makeFs({ files: onboardFiles(onboardConfig(), plain) });
       const [a] = await picoclawAdapter.detect({ fs: fsPlain });
-      const ra = await cfg002.run(ctxFor(a, fsPlain));
-      expect(ra.passed).toBe(false);
-      expect(ra.evidence?.[0].file).toBe(`${PICO}/.security.yml`);
+      // Keys belong in .security.yml (0600, CFG-003 checks its mode)
+      expect((await cfg002.run(ctxFor(a, fsPlain))).passed).toBe(true);
       // model with a key is now reported as in use
       expect(a.models).toContainEqual({ id: 'gpt-5.4', provider: 'openai', via: 'gpt-5.4' });
 
-      const enc = 'model_list:\n  gpt-5.4:0:\n    api_keys:\n      - "enc://q83vEjRWeJASNFZ4kBI0VniQEjRWeJASNFZ4kBI0Vng="\n      - "file://openai.key"\n';
-      const fsEnc = makeFs({ files: onboardFiles(onboardConfig(), enc) });
-      const [b] = await picoclawAdapter.detect({ fs: fsEnc });
-      expect((await cfg002.run(ctxFor(b, fsEnc))).passed).toBe(true);
+      const leaked = onboardConfig();
+      (leaked.model_list as Record<string, unknown>[])[0].api_key = 'sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789';
+      const fsLeak = makeFs({ files: onboardFiles(leaked) });
+      const [b] = await picoclawAdapter.detect({ fs: fsLeak });
+      const rb = await cfg002.run(ctxFor(b, fsLeak));
+      expect(rb.passed).toBe(false);
+      expect(rb.evidence?.[0].file).toBe(`${PICO}/config.json`);
     });
 
     it('CFG-003 checks .security.yml / auth.json permissions', async () => {

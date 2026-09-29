@@ -86,3 +86,21 @@ func TestCollectPathRecordsDirectoriesAndAncestors(t *testing.T) {
 		t.Fatalf("ancestor mode not recorded: %v", snap.DirectoryModes)
 	}
 }
+
+func TestCollectEnvRedactsCredentials(t *testing.T) {
+	t.Setenv("VASOTEST_API_KEY", "sk-live-secret")
+	t.Setenv("VASOTEST_BOT_TOKEN", "123:abc")
+	t.Setenv("VASOTEST_KEY_PASSPHRASE", "hunter2")
+	t.Setenv("VASOTEST_HOME", "/srv/agent")
+	t.Setenv("VASOTEST_BASE_URL", "http://127.0.0.1:11434")
+
+	env := collectEnv([]string{"VASOTEST_"})
+	for _, k := range []string{"VASOTEST_API_KEY", "VASOTEST_BOT_TOKEN", "VASOTEST_KEY_PASSPHRASE"} {
+		if env[k] != redactedEnvValue {
+			t.Errorf("%s = %q, want redacted", k, env[k])
+		}
+	}
+	if env["VASOTEST_HOME"] != "/srv/agent" || env["VASOTEST_BASE_URL"] != "http://127.0.0.1:11434" {
+		t.Errorf("non-secret values changed: %v", env)
+	}
+}

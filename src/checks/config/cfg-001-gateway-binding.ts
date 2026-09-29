@@ -47,7 +47,10 @@ export const cfg001 = defineCheck({
 
       const WILDCARD_BINDS = ['0.0.0.0', '[::]', '::'];
 
-      if (typeof host === 'string' && WILDCARD_BINDS.includes(host)) {
+      // A host may be a comma-separated list, and `*` means every interface
+      // (PicoClaw's gateway.host accepts both).
+      const hostParts = typeof host === 'string' ? host.split(',').map(p => p.trim()) : [];
+      if (hostParts.some(p => p === '*' || WILDCARD_BINDS.includes(p))) {
         gatewayKey = true;
         evidence.push({
           file: config.filePath,

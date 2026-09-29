@@ -186,6 +186,12 @@ describe('POL-004: Sandbox Policy Enforcement', () => {
     expect(result.passed).toBe(false);
   });
 
+  it('ignores an empty or disabled sandbox section', async () => {
+    for (const data of [{ isolation: {} }, { isolation: { enabled: false, expose_paths: [] } }]) {
+      expect((await pol004.run(makeContext([makeConfig(data)]))).passed).toBe(true);
+    }
+  });
+
   it('passes when sandbox has 2+ constraints', async () => {
     const config = makeConfig({
       sandbox: {

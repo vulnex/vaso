@@ -3,6 +3,9 @@
 // trailing bytes when a token is longer than expected; with a trailing \b, the
 // match fails entirely and the whole token slips through unredacted.
 export const API_KEY_PATTERNS = [
+  // Current OpenAI keys carry a scope segment and may contain - and _.
+  { pattern: /sk-(?:proj|svcacct|admin)-[A-Za-z0-9_-]{20,}/, name: 'OpenAI API key' },
+  { pattern: /sk-or-v1-[a-f0-9]{32,}/, name: 'OpenRouter API key' },
   { pattern: /sk-[a-zA-Z0-9]{20,}/, name: 'OpenAI API key' },
   { pattern: /sk-ant-[a-zA-Z0-9-]{20,}/, name: 'Anthropic API key' },
   { pattern: /AKIA[0-9A-Z]{16,}/, name: 'AWS Access Key' },

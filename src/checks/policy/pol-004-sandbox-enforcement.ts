@@ -22,6 +22,12 @@ export const pol004 = defineCheck({
       if (!sandbox || sandbox === false || sandbox === 'disabled' || sandbox === 'off' || sandbox === 'none') {
         continue;
       }
+      // An empty or explicitly disabled sandbox section (e.g. PicoClaw's
+      // default `"isolation": {}`) is not an enabled sandbox.
+      if (typeof sandbox === 'object' && !Array.isArray(sandbox)) {
+        const obj = sandbox as Record<string, unknown>;
+        if (Object.keys(obj).length === 0 || obj.enabled === false) continue;
+      }
 
       let constraints = 0;
       const sandboxObj = typeof sandbox === 'object' ? sandbox as Record<string, unknown> : config.data;
