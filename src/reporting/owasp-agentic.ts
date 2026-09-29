@@ -206,6 +206,8 @@ export const CHECK_AGENTIC_MAP: Record<string, OwaspAgenticId[]> = {
   'ZC-012': ['AAI005'],
   'ZC-013': ['AAI001'],
   'ZC-014': ['AAI002', 'AAI005'],
+  'ZC-015': ['AAI002', 'AAI012'],
+  'ZC-016': ['AAI001', 'AAI005'],
   // Lyrie (LY)
   'LY-001': ['AAI012', 'AAI002'],
   'LY-002': ['AAI012', 'AAI002'],
@@ -225,6 +227,8 @@ export const CHECK_AGENTIC_MAP: Record<string, OwaspAgenticId[]> = {
   'LY-016': ['AAI007', 'AAI009'],
   'LY-017': ['AAI007', 'AAI006'],
   'LY-018': ['AAI005'],
+  'LY-019': ['AAI002', 'AAI009'],
+  'LY-020': ['AAI006', 'AAI001'],
   // Hermes (HM)
   'HM-001': ['AAI001'],
   'HM-002': ['AAI001'],
