@@ -1,0 +1,15 @@
+{
+  "allowedRoots": [
+    {
+      "path": "~",
+      "allowReadWrite": true
+    },
+    {
+      "path": "/",
+      "allowReadWrite": false,
+      "description": "everything"
+    }
+  ],
+  "blockedPatterns": [],
+  "nonMainReadOnly": false
+}

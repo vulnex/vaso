@@ -1,0 +1,20 @@
+{
+  "allowedRoots": [
+    {
+      "path": "~/projects",
+      "allowReadWrite": true,
+      "description": "Development projects"
+    },
+    {
+      "path": "~/Documents/work",
+      "allowReadWrite": false,
+      "description": "Work documents (read-only)"
+    }
+  ],
+  "blockedPatterns": [
+    "password",
+    "secret",
+    "token"
+  ],
+  "nonMainReadOnly": true
+}

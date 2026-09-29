@@ -551,13 +551,19 @@ describe('adapter.getModels()', () => {
   });
 
   describe('nanoclaw', () => {
-    it('returns [] — model is delegated to inner CLI via SQLite agent_provider', async () => {
-      // NanoClaw doesn't pick a model; it spawns claude/codex/opencode based on
-      // a per-session field stored in SQLite. VASO can't reliably surface that.
+    it('returns [] without NANOCLAW_DEFAULT_MODEL — per-group models live in data/v2.db', async () => {
       const configs = [
-        cfg('/u/.config/nanoclaw/config.json', { agents: { defaults: { agent_provider: 'claude' } } }),
+        { ...cfg('/u/nanoclaw/.env', { ASSISTANT_NAME: 'Andy' }), format: 'env' as const },
+        cfg('/u/.config/nanoclaw/mount-allowlist.json', { allowedRoots: [], blockedPatterns: [] }),
       ];
       expect(await nanoclawAdapter.getModels!(configs)).toEqual([]);
+    });
+
+    it('reads the instance default model from <checkout>/.env', async () => {
+      const configs = [
+        { ...cfg('/u/nanoclaw/.env', { NANOCLAW_DEFAULT_MODEL: 'claude-opus-4-7' }), format: 'env' as const },
+      ];
+      expect(await nanoclawAdapter.getModels!(configs)).toEqual([{ id: 'claude-opus-4-7', provider: 'claude' }]);
     });
   });
 

@@ -17,35 +17,44 @@ describe('NanoClaw Insecure', () => {
     });
   });
 
-  it('should detect the NanoClaw agent', () => {
+  it('should detect the NanoClaw v2 checkout with its package.json version', () => {
     const agent = getAgentResult(result, 'nanoclaw');
     expect(agent).toBeDefined();
-    expect(agent!.agent).toBe('nanoclaw');
+    expect(agent!.installation.installDir).toBe('/root/nanoclaw');
+    expect(agent!.installation.version).toBe('2.4.0');
+    expect(agent!.installation.configFiles.map(c => c.filePath)).toEqual([
+      '/root/nanoclaw/.env',
+      '/root/.config/nanoclaw/mount-allowlist.json',
+    ]);
   });
 
-  it('should detect gateway bound to 0.0.0.0 (CFG-001)', () => {
-    const check = expectCheckFailed(result, 'CFG-001');
+  it('should detect home/filesystem allowedRoots (NC-001)', () => {
+    const check = expectCheckFailed(result, 'NC-001');
     expect(check.severity).toBe('critical');
   });
 
-  it('should detect sandbox disabled (CFG-008)', () => {
-    const check = expectCheckFailed(result, 'CFG-008');
+  it('should detect a world-writable mount allowlist (NC-002)', () => {
+    const check = expectCheckFailed(result, 'NC-002');
     expect(check.severity).toBe('critical');
   });
 
-  it('should detect auth bypass (CFG-012)', () => {
-    const check = expectCheckFailed(result, 'CFG-012');
+  it('should detect a world-writable checkout / data dir (NC-003)', () => {
+    const check = expectCheckFailed(result, 'NC-003');
     expect(check.severity).toBe('critical');
   });
 
-  it('should detect open DM policy (CFG-013)', () => {
-    const check = expectCheckFailed(result, 'CFG-013');
+  it('should detect the Slack webhook listener on 0.0.0.0 (NC-004)', () => {
+    const check = expectCheckFailed(result, 'NC-004');
     expect(check.severity).toBe('warning');
   });
 
-  it('should detect permissive tool policy (CFG-014)', () => {
-    const check = expectCheckFailed(result, 'CFG-014');
+  it('should detect a world-writable container/skills dir (NC-005)', () => {
+    const check = expectCheckFailed(result, 'NC-005');
     expect(check.severity).toBe('warning');
+  });
+
+  it('should detect a world-readable .env (CFG-003)', () => {
+    expectCheckFailed(result, 'CFG-003');
   });
 
   it('should detect eval/exec in malicious skill (SKL-003)', () => {
@@ -80,22 +89,17 @@ describe('NanoClaw Secure', () => {
     expect(agent).toBeDefined();
   });
 
-  it('should pass gateway binding check (CFG-001)', () => {
-    expectCheckPassed(result, 'CFG-001');
+  it('should pass every NanoClaw check', () => {
+    for (const id of ['NC-001', 'NC-002', 'NC-003', 'NC-004', 'NC-005']) {
+      expectCheckPassed(result, id);
+    }
   });
 
-  it('should pass sandbox check (CFG-008)', () => {
-    expectCheckPassed(result, 'CFG-008');
-  });
-
-  it('should pass rate limiting check (CFG-010)', () => {
-    expectCheckPassed(result, 'CFG-010');
+  it('should pass credential permissions (CFG-003)', () => {
+    expectCheckPassed(result, 'CFG-003');
   });
 
   it('should produce a high security score', () => {
-    // Generic CFG-005/006 warnings still apply to the minimum-secure
-    // NanoClaw fixture; the gap from insecure to secure is the load-bearing
-    // signal, not an aspirational A-grade.
     const agent = getAgentResult(result, 'nanoclaw');
     expect(agent).toBeDefined();
     expect(agent!.score).toBeGreaterThanOrEqual(75);

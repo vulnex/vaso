@@ -1,50 +1,83 @@
-import type { Evidence } from '../../core/types.js';
+import { join } from 'node:path';
 import { defineCheck } from '../../core/check-builder.js';
-import { markUnreachable, queryPermissions, writableByOthers } from '../../core/permissions.js';
+import { markUnreachable, queryPermissions } from '../../core/permissions.js';
 import { chmodFile } from '../../remediation/config-writer.js';
+import { NANOCLAW_HOST_SECRET_FILES } from '../../adapters/nanoclaw.js';
+import { Findings, groupOnlyNote, hostConfigDir } from './shared.js';
 
+/**
+ * ~/.config/nanoclaw holds the mount allowlist — deliberately outside the
+ * checkout so agents cannot edit the rules that govern them — plus the
+ * community-portal identity: account.json / registry-auth.json (install
+ * tokens) and device-key.json (device private key). Upstream writes the
+ * secrets 0600 under a 0700 dir, but `setup --step mounts` creates the dir and
+ * the allowlist with the process umask (0775/0664 on Debian/Ubuntu).
+ */
 export const nc002 = defineCheck({
   id: 'NC-002',
-  name: 'Mount Allowlist File Writable',
+  name: 'Mount Allowlist / Host Config Exposed',
   category: 'nanoclaw',
   severity: 'critical',
-  description: 'Verify mount-allowlist.json is not group/world-writable. A writable allowlist lets any local user grant the agent additional filesystem scope.',
+  description: 'Verify ~/.config/nanoclaw and mount-allowlist.json are not writable by other users (a writable allowlist grants agents more host filesystem), and that account.json, registry-auth.json and device-key.json are not readable by other users.',
   supportedAgents: ['nanoclaw'],
   supportedPlatforms: ['darwin', 'linux'],
 
   async run(ctx, h) {
-    const evidence: Evidence[] = [];
+    const dir = hostConfigDir(ctx);
+    const findings = new Findings();
 
-    for (const config of ctx.configs) {
-      if (!config.filePath.endsWith('mount-allowlist.json')) continue;
+    const writable = [
+      { path: dir, what: 'config directory (its entries, including the allowlist, can be replaced)' },
+      { path: join(dir, 'mount-allowlist.json'), what: 'mount allowlist' },
+    ];
+    for (const { path, what } of writable) {
       try {
-        const perms = await queryPermissions(ctx.fs, config.filePath);
-        if (perms !== 'unsupported' && writableByOthers(perms)) {
-          evidence.push({
-            file: config.filePath,
-            detail: `Permissions ${perms.octal} — group or world writable (should be 600)`,
-          });
-        }
+        const perms = await queryPermissions(ctx.fs, path);
+        if (perms === 'unsupported' || !(perms.groupWrite || perms.worldWrite)) continue;
+        findings.add(
+          { file: path, detail: `Permissions ${perms.octal ?? perms.description} — ${what} writable by ${perms.worldWrite ? 'any local user' : 'the group'}${groupOnlyNote(perms.worldWrite)}` },
+          perms.worldWrite ? 'critical' : 'info',
+        );
       } catch {
-        // skip
+        // absent
       }
     }
 
-    await markUnreachable(ctx.fs, evidence);
-    return h.fromEvidence(evidence, {
-      passed: 'mount-allowlist.json is not group/world writable',
-      failed: () => 'mount-allowlist.json is writable by other users',
+    for (const name of NANOCLAW_HOST_SECRET_FILES) {
+      const path = join(dir, name);
+      try {
+        const perms = await queryPermissions(ctx.fs, path);
+        if (perms === 'unsupported' || !(perms.groupRead || perms.worldRead)) continue;
+        findings.add(
+          { file: path, detail: `Permissions ${perms.octal ?? perms.description} — ${name} (install token / device key) readable by ${perms.worldRead ? 'any local user' : 'the group'}${groupOnlyNote(perms.worldRead)}` },
+          perms.worldRead ? 'critical' : 'info',
+        );
+      } catch {
+        // absent
+      }
+    }
+
+    await markUnreachable(ctx.fs, findings.evidence);
+    return h.fromEvidence(findings.evidence, {
+      passed: 'NanoClaw host config (mount allowlist, identity files) is owner-only',
+      failed: (n) => `${n} NanoClaw host config path${n === 1 ? ' is' : 's are'} accessible to other users`,
+      severity: findings.severity('critical'),
       fixable: true,
-      fixDescription: 'chmod 600 mount-allowlist.json',
+      fixDescription: 'chmod 700 ~/.config/nanoclaw; chmod 600 mount-allowlist.json account.json registry-auth.json device-key.json',
     });
   },
 
   async fix(ctx) {
+    const dir = hostConfigDir(ctx);
+    const targets: Array<[string, number]> = [
+      [dir, 0o700],
+      ...['mount-allowlist.json', ...NANOCLAW_HOST_SECRET_FILES].map((n): [string, number] => [join(dir, n), 0o600]),
+    ];
     let fixed = 0;
-    for (const config of ctx.configs) {
-      if (!config.filePath.endsWith('mount-allowlist.json')) continue;
+    for (const [path, mode] of targets) {
+      if (!(await ctx.fs.access(path))) continue;
       try {
-        await chmodFile(config.filePath, 0o600);
+        await chmodFile(path, mode);
         fixed++;
       } catch {
         // skip
@@ -53,7 +86,7 @@ export const nc002 = defineCheck({
     return {
       checkId: 'NC-002',
       applied: fixed > 0,
-      message: fixed > 0 ? `Set 0600 on mount-allowlist.json` : 'No allowlist file to fix',
+      message: fixed > 0 ? `Restricted ${fixed} NanoClaw host config path(s) to the owner` : 'No NanoClaw host config to fix',
     };
   },
 });

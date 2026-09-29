@@ -1,282 +1,348 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { join } from 'node:path';
-import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, rmSync, statSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import type { ScanContext, ParsedConfig, AgentInstallation } from '../../core/types.js';
 import type { FSProvider } from '../../core/fs-provider.js';
+import type { ProbeSnapshot } from '../../core/snapshot-types.js';
+import { SnapshotFSProvider } from '../../core/snapshot-fs-provider.js';
 import { LocalFSProvider } from '../../core/local-fs-provider.js';
 import { nanoclawChecks } from './index.js';
+import { installedChannels } from './nc-004-webhook-listener-public-bind.js';
 
-function makeConfig(filePath: string, data: Record<string, unknown>, format: ParsedConfig['format'] = 'json'): ParsedConfig {
-  return { raw: JSON.stringify(data), format, filePath, data };
+const HOME = '/home/test';
+const CHECKOUT = `${HOME}/nanoclaw`;
+const CONFIG_DIR = `${HOME}/.config/nanoclaw`;
+const ALLOWLIST_PATH = `${CONFIG_DIR}/mount-allowlist.json`;
+
+const byId = (id: string) => nanoclawChecks.find(c => c.id === id)!;
+
+function allowlist(data: Record<string, unknown>, filePath = ALLOWLIST_PATH): ParsedConfig {
+  return { raw: JSON.stringify(data), format: 'json', filePath, data };
 }
 
-function makeMemFs(opts: {
-  exists?: Set<string>;
-  modes?: Record<string, number>;
-  homedir?: string;
-  env?: Record<string, string>;
-} = {}): FSProvider {
-  const exists = opts.exists ?? new Set<string>();
-  const modes = opts.modes ?? {};
-  const env = opts.env ?? {};
-  return {
-    readFile: vi.fn(async () => ''),
-    readdir: vi.fn(async () => []),
-    readdirEntries: vi.fn(async () => []),
-    access: vi.fn(async (p: string) => exists.has(p)),
-    stat: vi.fn(async (p: string) => {
-      if (!exists.has(p)) throw new Error('ENOENT');
-      const mode = modes[p] ?? 0o600;
-      return { mode, isFile: () => true, isDirectory: () => false };
-    }),
-    realpath: vi.fn(async (p: string) => p),
-    exec: vi.fn(),
-    execSync: vi.fn(),
-    getEnv: (key: string) => env[key],
-    homedir: () => opts.homedir ?? '/home/test',
+function env(data: Record<string, string>, filePath = `${CHECKOUT}/.env`): ParsedConfig {
+  return { raw: Object.entries(data).map(([k, v]) => `${k}=${v}`).join('\n'), format: 'env', filePath, data };
+}
+
+type Entry = string | { content?: string; mode?: number };
+
+/** Snapshot FS: files with modes, plus recorded directory modes (tri-state permissions). */
+function snapFs(files: Record<string, Entry>, dirModes: Record<string, number> = {}, envVars: Record<string, string> = {}): FSProvider {
+  const snap: ProbeSnapshot = {
+    version: 1,
+    hostname: 'test-host',
     platform: 'linux',
-  } as FSProvider;
+    homedir: HOME,
+    timestamp: '2026-09-29T00:00:00Z',
+    privilege: { uid: 1000, username: 'test', isRoot: false, sudoAvailable: false, escalated: false, scannedUsers: ['test'], skippedPaths: [] },
+    files: Object.fromEntries(Object.entries(files).map(([p, e]) => {
+      const entry = typeof e === 'string' ? { content: e } : e;
+      return [p, { content: entry.content ?? '', mode: entry.mode ?? 0o100600, exists: true }];
+    })),
+    directories: {},
+    directoryModes: { '/': 0o755, '/home': 0o755, [HOME]: 0o755, ...dirModes },
+    commandOutputs: {},
+    env: envVars,
+  };
+  return new SnapshotFSProvider(snap);
 }
 
-function makeCtx(opts: {
-  configs?: ParsedConfig[];
-  installDir?: string;
-  skillsDir?: string;
-  fs?: FSProvider;
-} = {}): ScanContext {
+function ctx(opts: { configs?: ParsedConfig[]; installDir?: string; skillsDir?: string; fs?: FSProvider } = {}): ScanContext {
+  const installDir = opts.installDir ?? CHECKOUT;
   const installation: AgentInstallation = {
     agent: 'nanoclaw',
-    installDir: opts.installDir ?? '/home/test/.config/nanoclaw',
+    installDir,
     configFiles: opts.configs ?? [],
     skillsDir: opts.skillsDir,
   };
-  return {
-    installation,
-    configs: opts.configs ?? [],
-    platform: 'linux',
-    fs: opts.fs ?? makeMemFs(),
-  };
+  return { installation, configs: opts.configs ?? [], platform: 'linux', fs: opts.fs ?? snapFs({}) };
 }
 
 describe('NanoClaw checks', () => {
-  it('exports 5 checks', () => {
-    expect(nanoclawChecks).toHaveLength(5);
-  });
-
-  it('all checks have nanoclaw category and supportedAgents=["nanoclaw"]', () => {
+  it('exports 5 checks with the nanoclaw category and NC-0NN ids', () => {
+    expect(nanoclawChecks.map(c => c.id)).toEqual(['NC-001', 'NC-002', 'NC-003', 'NC-004', 'NC-005']);
     for (const check of nanoclawChecks) {
       expect(check.category).toBe('nanoclaw');
       expect(check.supportedAgents).toEqual(['nanoclaw']);
     }
   });
 
-  it('all check IDs match NC-0NN', () => {
-    for (const check of nanoclawChecks) {
-      expect(check.id).toMatch(/^NC-0\d{2}$/);
+  it('only NC-002 is fixable (chmod) — no check writes config keys', () => {
+    expect(nanoclawChecks.filter(c => c.fix).map(c => c.id)).toEqual(['NC-002']);
+  });
+
+  it('never throws on odd allowlist / env shapes', async () => {
+    const odd: ParsedConfig[] = [
+      allowlist({ allowedRoots: null, blockedPatterns: 'x' }),
+      allowlist({ allowedRoots: [null, 7, 'relative', { path: 42 }, { path: '' }, {}] }),
+      allowlist({}),
+      env({}),
+    ];
+    for (const config of odd) {
+      for (const check of nanoclawChecks) {
+        await expect(check.run(ctx({ configs: [config] }))).resolves.toBeDefined();
+        await expect(check.run(ctx({ configs: [config], installDir: CONFIG_DIR }))).resolves.toBeDefined();
+      }
     }
   });
 });
 
-describe('NC-001: Overbroad Mount Allowlist', () => {
-  const check = nanoclawChecks.find(c => c.id === 'NC-001')!;
+describe('NC-001: Overbroad Mount Allowlist (allowedRoots)', () => {
+  const check = byId('NC-001');
+  const run = (roots: unknown[], installDir = CHECKOUT) =>
+    check.run(ctx({ configs: [allowlist({ allowedRoots: roots, blockedPatterns: [] })], installDir }));
 
-  it('flags root path "/"', async () => {
-    const config = makeConfig('/h/.config/nanoclaw/mount-allowlist.json', { allowedPaths: ['/'] });
-    const result = await check.run(makeCtx({ configs: [config] }));
-    expect(result.passed).toBe(false);
-    expect(result.severity).toBe('critical');
+  it('flags the setup default "~" read-write as critical (live-install shape)', async () => {
+    const r = await check.run(ctx({
+      configs: [allowlist({ allowedRoots: [{ path: '~', allowReadWrite: true }], blockedPatterns: [], nonMainReadOnly: false })],
+      installDir: CONFIG_DIR,
+    }));
+    expect(r.passed).toBe(false);
+    expect(r.severity).toBe('critical');
+    expect(r.evidence?.[0].detail).toMatch(/whole home directory.*writable/);
   });
 
-  it('flags ~/.ssh', async () => {
-    const config = makeConfig('/h/.config/nanoclaw/mount-allowlist.json', { allowedPaths: ['~/.ssh'] });
-    const result = await check.run(makeCtx({ configs: [config] }));
-    expect(result.passed).toBe(false);
-    expect(result.evidence?.[0].detail).toMatch(/credentials directory/);
+  it('flags "~" read-only too — blocked patterns only guard the mount root', async () => {
+    const r = await run([{ path: '~', allowReadWrite: false }]);
+    expect(r.severity).toBe('critical');
+    expect(r.evidence?.[0].detail).toMatch(/read-only/);
   });
 
-  it('flags /etc', async () => {
-    const config = makeConfig('/h/.config/nanoclaw/mount-allowlist.json', { allowedPaths: ['/etc'] });
-    const result = await check.run(makeCtx({ configs: [config] }));
-    expect(result.passed).toBe(false);
-  });
-
-  it('flags entire home expansion', async () => {
-    const config = makeConfig('/h/.config/nanoclaw/mount-allowlist.json', { allowedPaths: ['/home/test'] });
-    const result = await check.run(makeCtx({ configs: [config], fs: makeMemFs({ homedir: '/home/test' }) }));
-    expect(result.passed).toBe(false);
-    expect(result.evidence?.[0].detail).toMatch(/entire user home/);
-  });
-
-  it('passes for narrow project paths', async () => {
-    const config = makeConfig('/h/.config/nanoclaw/mount-allowlist.json', { allowedPaths: ['/home/test/projects/foo', '/tmp/scratch'] });
-    const result = await check.run(makeCtx({ configs: [config], fs: makeMemFs({ homedir: '/home/test' }) }));
-    expect(result.passed).toBe(true);
-  });
-
-  it('handles object entries with path field', async () => {
-    const config = makeConfig('/h/.config/nanoclaw/mount-allowlist.json', { allowedPaths: [{ path: '/etc', mode: 'r' }] });
-    const result = await check.run(makeCtx({ configs: [config] }));
-    expect(result.passed).toBe(false);
-  });
-
-  it('passes when no mount-allowlist.json present', async () => {
-    const config = makeConfig('/h/.config/nanoclaw/config.json', { foo: 'bar' });
-    const result = await check.run(makeCtx({ configs: [config] }));
-    expect(result.passed).toBe(true);
-  });
-});
-
-describe('NC-002: Mount Allowlist File Writable', () => {
-  const check = nanoclawChecks.find(c => c.id === 'NC-002')!;
-  let tmpRoot: string;
-
-  beforeEach(() => {
-    tmpRoot = mkdtempSync(join(tmpdir(), 'vaso-nc002-'));
-  });
-
-  afterEach(() => {
-    rmSync(tmpRoot, { recursive: true, force: true });
-  });
-
-  it('passes for 0600', async () => {
-    const path = join(tmpRoot, 'mount-allowlist.json');
-    writeFileSync(path, '{}');
-    chmodSync(path, 0o600);
-    const config = makeConfig(path, {});
-    const result = await check.run(makeCtx({ configs: [config], fs: new LocalFSProvider() }));
-    expect(result.passed).toBe(true);
-  });
-
-  it('flags 0666', async () => {
-    const path = join(tmpRoot, 'mount-allowlist.json');
-    writeFileSync(path, '{}');
-    chmodSync(path, 0o666);
-    const config = makeConfig(path, {});
-    const result = await check.run(makeCtx({ configs: [config], fs: new LocalFSProvider() }));
-    expect(result.passed).toBe(false);
-    // Real FS: macOS per-user temp dirs are 0700, so parent-dir mitigation
-    // legitimately downgrades there; Linux /tmp (1777) keeps it critical.
-    expect(result.severity).toBe(result.evidence?.every(e => e.mitigated) ? 'info' : 'critical');
-  });
-});
-
-describe('NC-003: NANOCLAW_HOME Redirect', () => {
-  const check = nanoclawChecks.find(c => c.id === 'NC-003')!;
-
-  it('passes when unset and no env file value', async () => {
-    const config = makeConfig('/h/.nanoclaw.env', {}, 'env');
-    const result = await check.run(makeCtx({ configs: [config] }));
-    expect(result.passed).toBe(true);
-  });
-
-  it('flags world-writable redirect via .env file (critical)', async () => {
-    const config = makeConfig('/h/.nanoclaw.env', { NANOCLAW_HOME: '/tmp/agent-home' }, 'env');
-    const result = await check.run(makeCtx({ configs: [config] }));
-    expect(result.passed).toBe(false);
-    expect(result.severity).toBe('critical');
-  });
-
-  it('flags non-home redirect with warning', async () => {
-    const config = makeConfig('/h/.nanoclaw.env', { NANOCLAW_HOME: '/opt/agent' }, 'env');
-    const result = await check.run(makeCtx({ configs: [config] }));
-    expect(result.passed).toBe(false);
-    expect(result.severity).toBe('warning');
-  });
-
-  it('passes when redirect is inside home', async () => {
-    const config = makeConfig('/h/.nanoclaw.env', { NANOCLAW_HOME: '/home/test/nanoclaw-data' }, 'env');
-    const result = await check.run(makeCtx({ configs: [config], fs: makeMemFs({ homedir: '/home/test' }) }));
-    expect(result.passed).toBe(true);
-  });
-
-  it('honors NANOCLAW_HOME from ctx.fs.getEnv (not process.env), so snapshot scans work', async () => {
-    const originalProcessValue = process.env.NANOCLAW_HOME;
-    delete process.env.NANOCLAW_HOME;
-    try {
-      const result = await check.run(makeCtx({
-        fs: makeMemFs({ env: { NANOCLAW_HOME: '/dev/shm/agent' } }),
-      }));
-      expect(result.passed).toBe(false);
-      expect(result.severity).toBe('critical');
-    } finally {
-      if (originalProcessValue !== undefined) process.env.NANOCLAW_HOME = originalProcessValue;
+  it('flags "/", ancestors of home and the Docker socket tree', async () => {
+    for (const p of ['/', '/home', '/var', '/run', '/proc']) {
+      const r = await run([{ path: p, allowReadWrite: false }]);
+      expect(r.passed, p).toBe(false);
+      expect(r.severity, p).toBe('critical');
     }
   });
+
+  it('system directories: critical when writable, warning when read-only', async () => {
+    expect((await run([{ path: '/etc', allowReadWrite: true }])).severity).toBe('critical');
+    expect((await run([{ path: '/etc', allowReadWrite: false }])).severity).toBe('warning');
+  });
+
+  it('flags a root containing the NanoClaw checkout (.env secrets, host code)', async () => {
+    const r = await run([{ path: '~/nanoclaw', allowReadWrite: true }]);
+    expect(r.severity).toBe('critical');
+    expect(r.evidence?.[0].detail).toMatch(/NanoClaw checkout/);
+    // relative roots resolve against the checkout (the service cwd)
+    expect((await run([{ path: '.', allowReadWrite: false }])).passed).toBe(false);
+  });
+
+  it('~/.config: critical when writable, warning read-only', async () => {
+    expect((await run([{ path: '~/.config', allowReadWrite: true }])).severity).toBe('critical');
+    expect((await run([{ path: '~/.config', allowReadWrite: false }])).severity).toBe('warning');
+  });
+
+  it('honors the legacy readOnly key and defaults to read-only', async () => {
+    expect((await run([{ path: '/etc', readOnly: false }])).severity).toBe('critical');
+    expect((await run([{ path: '/etc' }])).severity).toBe('warning');
+  });
+
+  it('passes for project roots and built-in-blocked credential stores', async () => {
+    const r = await run([
+      { path: '~/projects', allowReadWrite: true, description: 'Development projects' },
+      { path: '~/repos', allowReadWrite: true },
+      { path: '~/Documents/work', allowReadWrite: false },
+      { path: '~/.ssh', allowReadWrite: false },
+      { path: '/var/lib/data-share', allowReadWrite: false },
+    ]);
+    expect(r.passed).toBe(true);
+  });
+
+  it('passes without an allowlist or with the --empty template', async () => {
+    expect((await check.run(ctx())).passed).toBe(true);
+    const empty = allowlist({ allowedRoots: [], blockedPatterns: [], nonMainReadOnly: true });
+    expect((await check.run(ctx({ configs: [empty] }))).passed).toBe(true);
+  });
+
+  it('ignores the v1 allowedPaths/mounts keys (not read by NanoClaw v2)', async () => {
+    const v1 = allowlist({ allowedPaths: ['/'], mounts: ['/etc'] });
+    const r = await check.run(ctx({ configs: [v1] }));
+    expect(r.passed).toBe(true);
+  });
 });
 
-describe('NC-004: NANOCLAW_PORT Bound Publicly', () => {
-  const check = nanoclawChecks.find(c => c.id === 'NC-004')!;
+describe('NC-002: Mount Allowlist / Host Config Exposed', () => {
+  const check = byId('NC-002');
+  const cfg = [allowlist({ allowedRoots: [], blockedPatterns: [] })];
 
-  it('flags NANOCLAW_HOST=0.0.0.0', async () => {
-    const config = makeConfig('/h/.nanoclaw.env', { NANOCLAW_HOST: '0.0.0.0', NANOCLAW_PORT: '8080' }, 'env');
-    const result = await check.run(makeCtx({ configs: [config] }));
-    expect(result.passed).toBe(false);
-    expect(result.severity).toBe('warning');
+  it('umask-002 layout (dir 775, allowlist 664) is info-only, not "writable by other users"', async () => {
+    const fs = snapFs({ [ALLOWLIST_PATH]: { content: '{}', mode: 0o100664 } }, { [`${HOME}/.config`]: 0o755, [CONFIG_DIR]: 0o775 });
+    const r = await check.run(ctx({ configs: cfg, installDir: CONFIG_DIR, fs }));
+    expect(r.passed).toBe(false);
+    expect(r.severity).toBe('info');
+    expect(r.evidence).toHaveLength(2);
+    expect(r.evidence?.[0].detail).toMatch(/group only/);
   });
 
-  it('flags NANOCLAW_PORT without HOST', async () => {
-    const config = makeConfig('/h/.nanoclaw.env', { NANOCLAW_PORT: '8080' }, 'env');
-    const result = await check.run(makeCtx({ configs: [config] }));
-    expect(result.passed).toBe(false);
-    expect(result.evidence?.[0].detail).toMatch(/without NANOCLAW_HOST/);
+  it('world-writable allowlist is critical', async () => {
+    const fs = snapFs({ [ALLOWLIST_PATH]: { content: '{}', mode: 0o100666 } }, { [`${HOME}/.config`]: 0o755, [CONFIG_DIR]: 0o755 });
+    const r = await check.run(ctx({ configs: cfg, fs }));
+    expect(r.severity).toBe('critical');
+    expect(r.evidence?.[0].detail).toMatch(/any local user/);
   });
 
-  it('passes for loopback', async () => {
-    const config = makeConfig('/h/.nanoclaw.env', { NANOCLAW_HOST: '127.0.0.1', NANOCLAW_PORT: '8080' }, 'env');
-    const result = await check.run(makeCtx({ configs: [config] }));
-    expect(result.passed).toBe(true);
+  it('world-readable identity files are critical; 0600 passes', async () => {
+    const bad = snapFs({
+      [ALLOWLIST_PATH]: { content: '{}', mode: 0o100600 },
+      [`${CONFIG_DIR}/device-key.json`]: { mode: 0o100644 },
+      [`${CONFIG_DIR}/account.json`]: { mode: 0o100600 },
+    }, { [`${HOME}/.config`]: 0o755, [CONFIG_DIR]: 0o755 });
+    const r = await check.run(ctx({ configs: cfg, fs: bad }));
+    expect(r.severity).toBe('critical');
+    expect(r.evidence?.map(e => e.file)).toEqual([`${CONFIG_DIR}/device-key.json`]);
+
+    const good = snapFs({
+      [ALLOWLIST_PATH]: { content: '{}', mode: 0o100600 },
+      [`${CONFIG_DIR}/device-key.json`]: { mode: 0o100600 },
+    }, { [`${HOME}/.config`]: 0o755, [CONFIG_DIR]: 0o700 });
+    expect((await check.run(ctx({ configs: cfg, fs: good }))).passed).toBe(true);
   });
 
-  it('passes when no PORT is configured', async () => {
-    const config = makeConfig('/h/.nanoclaw.env', { NANOCLAW_HOME: '/tmp' }, 'env');
-    const result = await check.run(makeCtx({ configs: [config] }));
-    expect(result.passed).toBe(true);
+  it('world findings behind a 0750 home are mitigated to info', async () => {
+    const fs = snapFs({ [ALLOWLIST_PATH]: { content: '{}', mode: 0o100666 } }, { [HOME]: 0o750, [`${HOME}/.config`]: 0o755, [CONFIG_DIR]: 0o700 });
+    const r = await check.run(ctx({ configs: cfg, fs }));
+    expect(r.severity).toBe('info');
+    expect(r.evidence?.[0].mitigated).toBe(true);
+  });
+
+  describe('fix', () => {
+    let root: string;
+    beforeEach(() => { root = realpathSync(mkdtempSync(join(tmpdir(), 'vaso-nc002-'))); });
+    afterEach(() => rmSync(root, { recursive: true, force: true }));
+
+    it('chmods the dir 700 and existing files 600', async () => {
+      const dir = join(root, '.config', 'nanoclaw');
+      mkdirSync(dir, { recursive: true });
+      chmodSync(dir, 0o775);
+      const allow = join(dir, 'mount-allowlist.json');
+      writeFileSync(allow, '{"allowedRoots":[],"blockedPatterns":[]}');
+      chmodSync(allow, 0o664);
+      const res = await check.fix!(ctx({ configs: [allowlist({}, allow)], fs: new LocalFSProvider() }));
+      expect(res.applied).toBe(true);
+      expect(statSync(dir).mode & 0o777).toBe(0o700);
+      expect(statSync(allow).mode & 0o777).toBe(0o600);
+    });
   });
 });
 
-describe('NC-005: Skills Directory World-Writable', () => {
-  const check = nanoclawChecks.find(c => c.id === 'NC-005')!;
-  let tmpRoot: string;
+describe('NC-003: Checkout or State Directory Exposed', () => {
+  const check = byId('NC-003');
 
-  beforeEach(() => {
-    tmpRoot = mkdtempSync(join(tmpdir(), 'vaso-nc005-'));
+  it('passes when no checkout was located', async () => {
+    expect((await check.run(ctx({ installDir: CONFIG_DIR }))).passed).toBe(true);
   });
 
-  afterEach(() => {
-    rmSync(tmpRoot, { recursive: true, force: true });
+  it('group-writable checkout (775) with a 700 data dir is info-only', async () => {
+    const fs = snapFs({ [`${CHECKOUT}/data/install-id`]: { mode: 0o100664 } }, { [CHECKOUT]: 0o775, [`${CHECKOUT}/data`]: 0o700 });
+    const r = await check.run(ctx({ fs }));
+    expect(r.passed).toBe(false);
+    expect(r.severity).toBe('info');
+    expect(r.evidence?.map(e => e.file)).toEqual([CHECKOUT]);
   });
 
-  it('passes when skills dir is 0755', async () => {
-    const skillsDir = join(tmpRoot, 'skills');
-    mkdirSync(skillsDir);
-    chmodSync(skillsDir, 0o755);
-    const result = await check.run(makeCtx({
-      installDir: tmpRoot,
-      skillsDir,
-      fs: new LocalFSProvider(),
-    }));
-    expect(result.passed).toBe(true);
+  it('world-writable data dir / socket is critical', async () => {
+    const fs = snapFs({
+      [`${CHECKOUT}/data/ncl.sock`]: { mode: 0o140666 },
+      [`${CHECKOUT}/data/v2.db`]: { mode: 0o100644 },
+    }, { [CHECKOUT]: 0o755, [`${CHECKOUT}/data`]: 0o777 });
+    const r = await check.run(ctx({ fs }));
+    expect(r.severity).toBe('critical');
+    expect(r.evidence?.map(e => e.file)).toEqual([`${CHECKOUT}/data`, `${CHECKOUT}/data/ncl.sock`, `${CHECKOUT}/data/v2.db`]);
   });
 
-  it('flags 0777', async () => {
-    const skillsDir = join(tmpRoot, 'skills');
-    mkdirSync(skillsDir);
-    chmodSync(skillsDir, 0o777);
-    const result = await check.run(makeCtx({
-      installDir: tmpRoot,
-      skillsDir,
-      fs: new LocalFSProvider(),
-    }));
-    expect(result.passed).toBe(false);
+  it('flags a checkout inside /tmp and NANOCLAW_TEMPLATES_DIR in a temp dir', async () => {
+    const r = await check.run(ctx({ installDir: '/tmp/nanoclaw', fs: snapFs({}, {}, { NANOCLAW_TEMPLATES_DIR: '/dev/shm/tpl' }) }));
+    expect(r.severity).toBe('critical');
+    expect(r.evidence?.map(e => e.detail).join('\n')).toMatch(/temp location[\s\S]*NANOCLAW_TEMPLATES_DIR/);
   });
 
-  it('passes when skills dir does not exist', async () => {
-    const result = await check.run(makeCtx({
-      installDir: tmpRoot,
-      skillsDir: join(tmpRoot, 'nonexistent'),
-      fs: new LocalFSProvider(),
-    }));
-    expect(result.passed).toBe(true);
+  it('owner-only checkout passes; unknown directory modes are skipped', async () => {
+    const fs = snapFs({ [`${CHECKOUT}/data/v2.db`]: { mode: 0o100600 } }, { [CHECKOUT]: 0o755, [`${CHECKOUT}/data`]: 0o700 });
+    expect((await check.run(ctx({ fs }))).passed).toBe(true);
+    const unknown = snapFs({ [`${CHECKOUT}/package.json`]: '{}' });
+    expect((await check.run(ctx({ fs: unknown }))).passed).toBe(true);
+  });
+});
+
+describe('NC-004: Webhook Listener Bound to All Interfaces', () => {
+  const check = byId('NC-004');
+  const barrel = `${CHECKOUT}/src/channels/index.ts`;
+  const BARREL_HEAD = [
+    '// Channel self-registration barrel.',
+    '// Each import triggers the channel module\'s registerChannelAdapter() call.',
+    "import './cli.js';",
+  ].join('\n');
+
+  it('parses channel imports and ignores comments', () => {
+    expect(installedChannels(`${BARREL_HEAD}\n// import './slack.js';\nimport './telegram.js';\nimport "./whatsapp-cloud.js"`))
+      .toEqual(['cli', 'telegram', 'whatsapp-cloud']);
+  });
+
+  it('default checkout (cli only) opens no listener', async () => {
+    const fs = snapFs({ [barrel]: BARREL_HEAD });
+    const r = await check.run(ctx({ configs: [env({ WEBHOOK_PORT: '3000' })], fs }));
+    expect(r.passed).toBe(true);
+  });
+
+  it('polling/gateway channels (telegram, discord) open no listener', async () => {
+    const fs = snapFs({ [barrel]: `${BARREL_HEAD}\nimport './telegram.js';\nimport './discord.js';` });
+    expect((await check.run(ctx({ fs }))).passed).toBe(true);
+  });
+
+  it('flags webhook channels with the configured port', async () => {
+    const fs = snapFs({ [barrel]: `${BARREL_HEAD}\nimport './slack.js';\nimport './github.js';` });
+    const r = await check.run(ctx({ configs: [env({ WEBHOOK_PORT: '8443' })], fs }));
+    expect(r.passed).toBe(false);
+    expect(r.severity).toBe('warning');
+    expect(r.evidence?.[0].detail).toMatch(/slack, github → listener on 0\.0\.0\.0:8443/);
+    expect(r.fixable).toBe(false);
+  });
+
+  it('Slack in Socket Mode (SLACK_APP_TOKEN) is not a webhook channel', async () => {
+    const fs = snapFs({ [barrel]: `${BARREL_HEAD}\nimport './slack.js';` });
+    const r = await check.run(ctx({ configs: [env({ SLACK_APP_TOKEN: 'xapp-fake' })], fs }));
+    expect(r.passed).toBe(true);
+  });
+
+  it('defaults the port to 3000', async () => {
+    const fs = snapFs({ [barrel]: `${BARREL_HEAD}\nimport './teams.js';` });
+    const r = await check.run(ctx({ fs }));
+    expect(r.evidence?.[0].detail).toMatch(/0\.0\.0\.0:3000/);
+  });
+});
+
+describe('NC-005: Skills Directory Writable by Others', () => {
+  const check = byId('NC-005');
+  const skills = `${CHECKOUT}/container/skills`;
+
+  it('passes without a checkout', async () => {
+    expect((await check.run(ctx({ installDir: CONFIG_DIR }))).passed).toBe(true);
+  });
+
+  it('world-writable container/skills is a warning; group-only operator skills are info', async () => {
+    const fs = snapFs({
+      [`${skills}/welcome/SKILL.md`]: '# welcome',
+      [`${CHECKOUT}/.claude/skills/setup/SKILL.md`]: { mode: 0o100664 },
+    }, { [CHECKOUT]: 0o755, [`${CHECKOUT}/container`]: 0o755, [skills]: 0o777, [`${CHECKOUT}/.claude`]: 0o755, [`${CHECKOUT}/.claude/skills`]: 0o775 });
+    const r = await check.run(ctx({ skillsDir: skills, fs }));
+    expect(r.severity).toBe('warning');
+    expect(r.evidence?.map(e => e.file)).toEqual([skills, `${CHECKOUT}/.claude/skills`]);
+  });
+
+  describe('local', () => {
+    let root: string;
+    beforeEach(() => { root = realpathSync(mkdtempSync(join(tmpdir(), 'vaso-nc005-'))); });
+    afterEach(() => rmSync(root, { recursive: true, force: true }));
+
+    it('0755 skills dirs pass', async () => {
+      const dir = join(root, 'container', 'skills');
+      mkdirSync(dir, { recursive: true });
+      chmodSync(dir, 0o755);
+      const r = await check.run(ctx({ installDir: root, skillsDir: dir, fs: new LocalFSProvider() }));
+      expect(r.passed).toBe(true);
+    });
   });
 });

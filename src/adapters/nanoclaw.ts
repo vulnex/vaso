@@ -1,119 +1,312 @@
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import type { AgentAdapter, DetectOptions } from './adapter.js';
 import type { AgentInstallation, GatewayInfo, ModelRef, ParsedConfig } from '../core/types.js';
 import type { ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { loadConfig } from '../core/config-loader.js';
-import { discoverCliInstalls } from './cli-installs.js';
-import { queryCliVersion } from './version-query.js';
+import { getUserHomeDirs } from './openclaw.js';
+
+/**
+ * NanoClaw v2 (github.com/nanocoai/nanoclaw) is not a package or a binary: it
+ * runs as `node dist/index.js` from a git checkout, wherever the user cloned it.
+ * Everything the host reads lives in two places:
+ *
+ *   <checkout>/              .env (secrets + host settings), data/ (central
+ *                            v2.db, per-session DBs, ncl.sock admin socket),
+ *                            groups/, container/skills/ (mounted into every
+ *                            agent container), .claude/skills/ (operator skills),
+ *                            src/channels/index.ts (installed channel barrel)
+ *   ~/.config/nanoclaw/      mount-allowlist.json (kept outside the checkout so
+ *                            agents cannot edit it), account.json,
+ *                            registry-auth.json, device-key.json, host-id
+ *
+ * The version exists only in `<checkout>/package.json` (`bin` is `ncl`, an
+ * admin client with no --version). There is no NANOCLAW_HOME / NANOCLAW_PORT /
+ * ~/.nanoclaw.env / ~/.config/nanoclaw/config.json in v2.
+ */
+
+/** Checkout-name globs (per user home), kept in sync with the probe manifest. */
+const CHECKOUT_NAME_RE = /nanoclaw/i;
+/** Case-insensitive `*nanoclaw*` for the probe's doublestar globs. */
+const CHECKOUT_NAME_GLOB = '*[nN][aA][nN][oO][cC][lL][aA][wW]*';
+/** Common parent directories people clone into (one level below home). */
+const CHECKOUT_PARENTS = [
+  'src', 'code', 'Code', 'projects', 'Projects', 'dev', 'Developer', 'git',
+  'repos', 'workspace', 'work', 'github',
+];
+
+/** Service definitions written by `setup --step service` (per-checkout slug). */
+const SYSTEMD_UNIT_RE = /^nanoclaw-v2-[a-z0-9_-]+\.service$/;
+const LAUNCHD_PLIST_RE = /^com\.nanoclaw-v2-[a-z0-9_-]+\.plist$/;
+
+/** Host-side identity/credential files under ~/.config/nanoclaw (never content). */
+export const NANOCLAW_HOST_SECRET_FILES = ['account.json', 'registry-auth.json', 'device-key.json'];
+const CONFIG_DIR_MARKERS = ['mount-allowlist.json', ...NANOCLAW_HOST_SECRET_FILES, 'host-id'];
+
+export function nanoclawConfigDir(home: string): string {
+  return join(home, '.config', 'nanoclaw');
+}
+
+/** True when `installDir` is a checkout (not the ~/.config/nanoclaw fallback). */
+export function isNanoclawCheckout(installDir: string): boolean {
+  return !(basename(installDir) === 'nanoclaw' && basename(dirname(installDir)) === '.config');
+}
+
+async function readCheckoutVersion(dir: string, fs: FSProvider): Promise<string | null | undefined> {
+  // null → package.json readable but not NanoClaw; undefined → unreadable
+  try {
+    const pkg = JSON.parse(await fs.readFile(join(dir, 'package.json'))) as Record<string, unknown>;
+    if (pkg?.name !== 'nanoclaw') return null;
+    return typeof pkg.version === 'string' ? pkg.version : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function safeReaddir(fs: FSProvider, dir: string): Promise<string[]> {
+  try {
+    return await fs.readdir(dir);
+  } catch {
+    return [];
+  }
+}
+
+function expandHomePath(p: string, home: string): string {
+  if (p === '~') return home;
+  if (p.startsWith('~/')) return join(home, p.slice(2));
+  return p;
+}
+
+/** Checkout directories named by installed service definitions (authoritative). */
+async function serviceCheckouts(home: string, fs: FSProvider): Promise<string[]> {
+  const out: string[] = [];
+  const unitDirs = [join(home, '.config', 'systemd', 'user'), '/etc/systemd/system'];
+  for (const dir of unitDirs) {
+    for (const name of await safeReaddir(fs, dir)) {
+      if (!SYSTEMD_UNIT_RE.test(name)) continue;
+      try {
+        const unit = await fs.readFile(join(dir, name));
+        const wd = /^\s*WorkingDirectory\s*=\s*(.+?)\s*$/m.exec(unit)?.[1];
+        const exec = /^\s*ExecStart\s*=\s*\S+\s+(\S+)\/dist\/index\.js\b/m.exec(unit)?.[1];
+        const dirPath = wd ?? exec;
+        if (dirPath) out.push(expandHomePath(dirPath, home));
+      } catch {}
+    }
+  }
+  const agentsDir = join(home, 'Library', 'LaunchAgents');
+  for (const name of await safeReaddir(fs, agentsDir)) {
+    if (!LAUNCHD_PLIST_RE.test(name)) continue;
+    try {
+      const plist = await fs.readFile(join(agentsDir, name));
+      const wd = /<key>\s*WorkingDirectory\s*<\/key>\s*<string>([^<]+)<\/string>/.exec(plist)?.[1];
+      if (wd) out.push(wd.trim());
+    } catch {}
+  }
+  return out;
+}
+
+/** Checkout candidates found by name: ~/<*nanoclaw*> and ~/<parent>/<*nanoclaw*>. */
+async function namedCheckoutCandidates(home: string, fs: FSProvider): Promise<string[]> {
+  const out: string[] = [];
+  for (const name of await safeReaddir(fs, home)) {
+    if (CHECKOUT_NAME_RE.test(name)) out.push(join(home, name));
+  }
+  for (const parent of CHECKOUT_PARENTS) {
+    for (const name of await safeReaddir(fs, join(home, parent))) {
+      if (CHECKOUT_NAME_RE.test(name)) out.push(join(home, parent, name));
+    }
+  }
+  return out;
+}
+
+/** `~/.local/bin/ncl` is a symlink to `<checkout>/bin/ncl` (setup service step). */
+async function nclCheckout(home: string, fs: FSProvider): Promise<string | undefined> {
+  const link = join(home, '.local', 'bin', 'ncl');
+  try {
+    const target = await fs.realpath(link);
+    if (target !== link && target.endsWith('/bin/ncl')) return dirname(dirname(target));
+  } catch {}
+  return undefined;
+}
+
+export interface NanoclawCheckout {
+  dir: string;
+  version?: string;
+}
+
+/**
+ * Locate NanoClaw checkouts for one user. Service units / launchd plists are
+ * authoritative (accepted even when the checkout isn't readable, e.g. a remote
+ * snapshot that didn't collect it — but not a stale unit on a live host);
+ * name-based candidates and the `ncl` symlink must carry a package.json named
+ * "nanoclaw".
+ */
+export async function findNanoclawCheckouts(home: string, fs: FSProvider): Promise<NanoclawCheckout[]> {
+  const found: NanoclawCheckout[] = [];
+  const seen = new Set<string>();
+  const add = async (dir: string, authoritative: boolean): Promise<void> => {
+    let key = dir;
+    try { key = await fs.realpath(dir); } catch {}
+    if (seen.has(key)) return;
+    const version = await readCheckoutVersion(dir, fs);
+    if (version === null) return;
+    // Every NanoClaw package.json carries a version; without one only a
+    // service definition vouches for the directory.
+    if (version === undefined && !(authoritative && (fs.kind === 'snapshot' || await fs.access(dir)))) return;
+    seen.add(key);
+    found.push({ dir, version: version ?? undefined });
+  };
+
+  for (const dir of await serviceCheckouts(home, fs)) await add(dir, true);
+  const ncl = await nclCheckout(home, fs);
+  if (ncl) await add(ncl, false);
+  for (const dir of await namedCheckoutCandidates(home, fs)) await add(dir, false);
+  return found;
+}
+
+async function tryLoad(path: string, fs: FSProvider, into: ParsedConfig[]): Promise<void> {
+  try {
+    if (await fs.access(path)) into.push(await loadConfig(path, fs));
+  } catch {}
+}
 
 export const nanoclawAdapter: AgentAdapter = {
   agent: 'nanoclaw',
   displayName: 'NanoClaw',
 
-  async detect(_options?: DetectOptions): Promise<AgentInstallation[]> {
-    const fs = _options?.fs ?? new LocalFSProvider();
-    const home = fs.homedir();
-    const configDir = join(home, '.config', 'nanoclaw');
-    const envPath = join(home, '.nanoclaw.env');
-    const configFiles = [];
+  async detect(options?: DetectOptions): Promise<AgentInstallation[]> {
+    const fs = options?.fs ?? new LocalFSProvider();
+    const userDirs = await getUserHomeDirs(options?.allUsers, fs);
+    const installations: AgentInstallation[] = [];
 
-    // Check .env file with NanoClaw vars
-    if (await fs.access(envPath)) {
-      try {
-        const config = await loadConfig(envPath, fs);
-        if (config.data.NANOCLAW_HOME || config.data.NANOCLAW_PORT) {
-          configFiles.push(config);
-        }
-      } catch {}
+    for (const { home, user } of userDirs) {
+      const configDir = nanoclawConfigDir(home);
+      const hostConfigs: ParsedConfig[] = [];
+      await tryLoad(join(configDir, 'mount-allowlist.json'), fs, hostConfigs);
+
+      const checkouts = await findNanoclawCheckouts(home, fs);
+      for (const { dir, version } of checkouts) {
+        const configFiles: ParsedConfig[] = [];
+        await tryLoad(join(dir, '.env'), fs, configFiles);
+        // The allowlist governs every checkout this user runs.
+        configFiles.push(...hostConfigs);
+        installations.push({
+          agent: 'nanoclaw',
+          version,
+          installDir: dir,
+          configFiles,
+          skillsDir: this.getSkillsDir(dir),
+          models: await this.getModels?.(configFiles, fs),
+          user: options?.allUsers ? user : undefined,
+        });
+      }
+      if (checkouts.length > 0) continue;
+
+      // No checkout found (cloned somewhere unusual, or only `setup --step
+      // mounts` has run): report the host config dir so the allowlist and
+      // identity files are still assessed.
+      let hasMarker = false;
+      for (const name of CONFIG_DIR_MARKERS) {
+        if (await fs.access(join(configDir, name))) { hasMarker = true; break; }
+      }
+      if (!hasMarker) continue;
+      installations.push({
+        agent: 'nanoclaw',
+        installDir: configDir,
+        configFiles: hostConfigs,
+        skillsDir: undefined,
+        models: [],
+        user: options?.allUsers ? user : undefined,
+      });
     }
 
-    // Check config dir
-    const mountAllowlistPath = join(configDir, 'mount-allowlist.json');
-    if (await fs.access(mountAllowlistPath)) {
-      try {
-        configFiles.push(await loadConfig(mountAllowlistPath, fs));
-      } catch {}
-    }
-
-    const configPath = join(configDir, 'config.json');
-    if (await fs.access(configPath)) {
-      try {
-        configFiles.push(await loadConfig(configPath, fs));
-      } catch {}
-    }
-
-    if (configFiles.length === 0) return [];
-
-    // Extract version from config, fallback to CLI
-    const mainConfig = configFiles.find(c => c.filePath.endsWith('config.json'));
-    const installs = await discoverCliInstalls(home, fs, {
-      names: ['nanoclaw'],
-      version: (bin, canExec) => (canExec ? queryCliVersion(bin, fs) : undefined),
-    });
-    const version = installs.primary?.version ?? (mainConfig?.data?.version as string);
-
-    return [{
-      agent: 'nanoclaw',
-      installDir: configDir,
-      configFiles,
-      skillsDir: this.getSkillsDir(configDir),
-      models: await this.getModels?.(configFiles, fs),
-      version,
-      cliBinary: installs.primary?.path,
-      otherInstalls: installs.others.length > 0 ? installs.others : undefined,
-    }];
+    return installations;
   },
 
   getConfigPaths(): string[] {
     const home = new LocalFSProvider().homedir();
     return [
-      join(home, '.nanoclaw.env'),
-      join(home, '.config', 'nanoclaw', 'config.json'),
-      join(home, '.config', 'nanoclaw', 'mount-allowlist.json'),
+      join(home, 'nanoclaw', '.env'),
+      join(nanoclawConfigDir(home), 'mount-allowlist.json'),
     ];
   },
 
   getSkillsDir(installDir: string): string | undefined {
-    return join(installDir, 'skills');
+    // Skills mounted into every agent container. `.claude/skills` holds the
+    // operator's Claude Code skills (upstream setup/add-* flows) — NC-005
+    // checks its permissions, but it is not agent-executed code.
+    return isNanoclawCheckout(installDir) ? join(installDir, 'container', 'skills') : undefined;
   },
 
-  getGatewayInfo(config: Record<string, unknown>): GatewayInfo | undefined {
+  getGatewayInfo(_config: Record<string, unknown>): GatewayInfo | undefined {
+    // NanoClaw has no gateway/API server. Its only listener is the webhook
+    // server (0.0.0.0:WEBHOOK_PORT, hardcoded bind), started only when a
+    // webhook-mode channel is installed — assessed by NC-004, which knows
+    // whether one is. Admin access is the data/ncl.sock unix socket.
     return undefined;
   },
 
-  getModels(_configs: ParsedConfig[], _fs?: FSProvider): ModelRef[] {
-    // NanoClaw does not select a model itself — it shells out to an inner
-    // coding agent (claude, codex, opencode, …) chosen via the per-session
-    // `agent_provider` field, which lives in the SQLite DB, not a config
-    // file. The actual model is whatever that inner agent is configured for.
-    // VASO can't read SQLite without a DB driver dependency, and even if it
-    // could, the model question is answered by the inner agent's adapter.
-    return [];
+  getModels(configs: ParsedConfig[]): ModelRef[] {
+    // Agents run inside containers via a provider (claude by default);
+    // NANOCLAW_DEFAULT_MODEL is the instance-wide default model, applied at
+    // spawn when a group has none. Per-group models live in data/v2.db.
+    const env = configs.find(c => c.format === 'env' && c.filePath.endsWith('.env'))?.data;
+    const model = typeof env?.NANOCLAW_DEFAULT_MODEL === 'string' ? env.NANOCLAW_DEFAULT_MODEL.trim() : '';
+    if (!model) return [];
+    const provider = typeof env?.DEFAULT_AGENT_PROVIDER === 'string' && env.DEFAULT_AGENT_PROVIDER.trim()
+      ? env.DEFAULT_AGENT_PROVIDER.trim().toLowerCase()
+      : 'claude';
+    return [{ id: model, provider }];
   },
 
-  getCLICommand(): string {
-    return 'nanoclaw';
+  getMemoryFiles(installDir: string): string[] {
+    if (!isNanoclawCheckout(installDir)) return [];
+    return [
+      join(installDir, 'data', 'v2.db'),
+      join(installDir, 'data', 'v2-sessions'),
+      join(installDir, 'groups'),
+    ];
+  },
+
+  getCredentialPaths(installDir: string): string[] {
+    return isNanoclawCheckout(installDir) ? [join(installDir, '.env')] : [];
   },
 
   getProbeManifest(): ProbeManifest {
+    // Same candidates detect() walks: ~/<*nanoclaw*> and ~/<parent>/<*nanoclaw*>.
+    const checkoutGlobs = [
+      `~/${CHECKOUT_NAME_GLOB}`,
+      `~/{${CHECKOUT_PARENTS.join(',')}}/${CHECKOUT_NAME_GLOB}`,
+    ];
     return {
       filePaths: [
-        '~/.nanoclaw.env',
-        '~/.config/nanoclaw/config.json',
         '~/.config/nanoclaw/mount-allowlist.json',
       ],
       globPatterns: [
-        '~/.config/nanoclaw/skills/**',
+        ...checkoutGlobs.flatMap(c => [
+          `${c}/package.json`,
+          `${c}/.env`,
+          `${c}/src/channels/index.ts`,
+          `${c}/container/skills/**`,
+        ]),
+        '~/.config/systemd/user/nanoclaw-v2-*.service',
+        '~/Library/LaunchAgents/com.nanoclaw-v2-*.plist',
       ],
-      commands: [
-        { id: 'nanoclaw-which', cmd: 'which', args: ['nanoclaw'], timeout: 3000 },
-        { id: 'nanoclaw-version', cmd: 'nanoclaw', args: ['--version'], timeout: 15000 },
+      // Central/session databases, the admin socket, operator skills and the
+      // host identity/credential files: permissions only, content never shipped.
+      metadataGlobPatterns: [
+        ...checkoutGlobs.flatMap(c => [
+          `${c}/data/*`,
+          `${c}/dist/index.js`,
+          `${c}/.claude/skills/*/SKILL.md`,
+        ]),
+        '~/.config/nanoclaw/*',
+        '~/.local/bin/ncl',
       ],
+      commands: [],
       directoryListings: [
         '~/.config/nanoclaw',
-        '~/.config/nanoclaw/skills',
       ],
       envPrefixes: ['NANOCLAW_'],
       systemPaths: [],
@@ -121,4 +314,3 @@ export const nanoclawAdapter: AgentAdapter = {
     };
   },
 };
-
