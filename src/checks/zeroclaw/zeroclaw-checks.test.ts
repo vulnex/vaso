@@ -171,13 +171,14 @@ level = "full"
     expect(gatewayPosture({ gateway: { host: '::1' } }).hostExposed).toBe(false);
   });
 
-  it('finds plaintext secrets but not enc2:/enc:/op:// values', () => {
+  it('finds plaintext secrets but not enc2:/enc:/op:// values or ${VAR} references', () => {
     const found = findPlaintextSecrets({
       providers: { models: { openai: { main: { api_key: 'sk-plain', model: 'gpt-4o' } } } },
       reliability: { api_keys: ['sk-a', 'enc2:ab'] },
       channels: { telegram: { main: { bot_token: 'op://vault/item/field' } } },
       http_request: { secrets: { github: 'ghp_plain' } },
       composio: { api_key: 'enc:00ff' },
+      gateway: { webhook_secret: '${ZC_WEBHOOK_SECRET}' },
       secrets: { encrypt: false },
       profiles: { 'openai:default': { accessToken: 'plain-token' } },
     }).map(s => s.path);

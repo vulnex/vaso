@@ -18,6 +18,16 @@ describe('buildProbeManifest', () => {
     for (const p of stores) expect(content).not.toContain(p);
   });
 
+  it('runs agent CLIs with an isolated HOME, system tools with the real one', () => {
+    const byId = new Map(manifest.commands.map(c => [c.id, c]));
+    for (const id of ['hermes-version', 'cursor-agent-version', 'gemini-version', 'copilot-version', 'nemoclaw-pip3-show']) {
+      expect(byId.get(id)?.isolateHome, id).toBe(true);
+    }
+    for (const id of ['claude-which', 'ps-ancestry', 'crontab-list', 'chatgpt-plist-main', 'claude-desktop-version']) {
+      expect(byId.get(id)?.isolateHome, id).toBeUndefined();
+    }
+  });
+
   it('keeps private session/conversation stores metadata-only', () => {
     expect(manifest.metadataGlobPatterns).toEqual(expect.arrayContaining([
       '~/.codex/sessions/*/*/*/rollout-*.jsonl',

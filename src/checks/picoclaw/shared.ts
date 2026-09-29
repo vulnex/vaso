@@ -5,12 +5,16 @@ const NON_MAIN_CONFIGS = new Set(['auth.json', 'launcher-config.json', '.securit
 
 /** The agent's config.json (possibly relocated/renamed via PICOCLAW_CONFIG). */
 export function picoMainConfigs(configs: ParsedConfig[]): ParsedConfig[] {
-  return configs.filter(c => c.format === 'json' && !NON_MAIN_CONFIGS.has(basename(c.filePath)));
+  return configs.filter(c => c.format === 'json' && isObject(c.data) && !NON_MAIN_CONFIGS.has(basename(c.filePath)));
 }
 
 /** The web launcher's settings (`launcher-config.json`, next to config.json). */
 export function picoLauncherConfigs(configs: ParsedConfig[]): ParsedConfig[] {
-  return configs.filter(c => c.format === 'json' && basename(c.filePath) === 'launcher-config.json');
+  return configs.filter(c => c.format === 'json' && isObject(c.data) && basename(c.filePath) === 'launcher-config.json');
+}
+
+function isObject(v: unknown): boolean {
+  return !!v && typeof v === 'object' && !Array.isArray(v);
 }
 
 export function asRecord(v: unknown): Record<string, unknown> | undefined {
@@ -60,4 +64,23 @@ export function enabledChannels(data: Record<string, unknown>): PicoChannel[] {
  */
 export function isChatChannel(ch: PicoChannel): boolean {
   return ch.type !== 'pico' && ch.type !== 'maixcam';
+}
+
+/**
+ * Compile a PicoClaw (Go RE2) pattern as a JS RegExp. Leading inline flag
+ * groups such as `(?i)` or `(?is)` — valid in Go, a syntax error in JS — are
+ * translated to RegExp flags. Returns undefined when it still doesn't parse.
+ */
+export function compileGoRegex(pattern: string): RegExp | undefined {
+  let src = pattern;
+  let flags = '';
+  for (let m = /^\(\?([imsU]+)\)/.exec(src); m; m = /^\(\?([imsU]+)\)/.exec(src)) {
+    for (const f of m[1]) if (f !== 'U' && !flags.includes(f)) flags += f;
+    src = src.slice(m[0].length);
+  }
+  try {
+    return new RegExp(src, flags);
+  } catch {
+    return undefined;
+  }
 }

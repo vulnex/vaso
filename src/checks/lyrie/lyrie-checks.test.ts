@@ -207,6 +207,11 @@ describe('LY-003: DM policy open on live channel', () => {
     expect(r.evidence![0].detail).toMatch(/telegram/);
   });
 
+  it('counts a ${VAR} token as enabled (Bun expands it at startup)', async () => {
+    const r = await check('LY-003').run(makeCtx([makeEnv({ LYRIE_DISCORD_TOKEN: '${DISCORD_TOKEN}' })]));
+    expect(r.passed).toBe(false);
+  });
+
   it('passes for Telegram with an allowlist (enforced by its AuthChecker)', async () => {
     const r = await check('LY-003').run(makeCtx([makeEnv({ LYRIE_TELEGRAM_TOKEN: '1:x', LYRIE_TELEGRAM_USERS: '12345' })]));
     expect(r.passed).toBe(true);
@@ -520,7 +525,7 @@ describe('LY-018: NODE_ENV=development disables Shield SSRF guard', () => {
 
 describe('LY-019: skill sandbox root over-broad', () => {
   it('fails for /, ~, $HOME and /home', async () => {
-    for (const root of ['/', '~', HOME, `${HOME}/`, '/home']) {
+    for (const root of ['/', '~', HOME, `${HOME}/`, '/home', '$HOME', '${HOME}']) {
       const r = await check('LY-019').run(makeCtx([makeEnv({ LYRIE_FS_ROOT: root })]));
       expect(r.passed, root).toBe(false);
     }

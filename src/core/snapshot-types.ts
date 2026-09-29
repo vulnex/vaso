@@ -16,6 +16,8 @@ export interface CommandRequest {
   cmd: string;
   args: string[];
   timeout?: number;
+  /** Run with a throwaway HOME/XDG dirs and cwd (agent CLI version queries). */
+  isolateHome?: boolean;
 }
 
 export interface ProbeSnapshot {

@@ -25,7 +25,8 @@ export function queryCliVersion(
 
   for (const args of argSets) {
     try {
-      const output = fs.execSync(binary, [...args], { timeout }).trim();
+      // Some CLIs write state into the user's home on any invocation.
+      const output = fs.execSync(binary, [...args], { timeout, isolateHome: true }).trim();
       const m = SEMVER_RE.exec(output);
       if (m?.[1]) return m[1];
     } catch {}

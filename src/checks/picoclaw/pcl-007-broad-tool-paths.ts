@@ -1,14 +1,14 @@
 import { join } from 'node:path';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { asRecord, picoMainConfigs, stringList } from './shared.js';
+import { asRecord, compileGoRegex, picoMainConfigs, stringList } from './shared.js';
 
 /** Sensitive files a path allowance must not reach. */
-function sensitiveTargets(home: string): string[] {
+function sensitiveTargets(home: string, picoHome: string): string[] {
   return [
     join(home, '.ssh', 'id_ed25519'),
     join(home, '.aws', 'credentials'),
-    join(home, '.picoclaw', '.security.yml'),
+    join(picoHome, '.security.yml'),
     join(home, '.bashrc'),
     '/etc/shadow',
   ];
@@ -25,17 +25,13 @@ export const pcl007 = defineCheck({
   async run(ctx, h) {
     const evidence: Evidence[] = [];
     let writes = false;
-    const targets = sensitiveTargets(ctx.fs.homedir());
+    const targets = sensitiveTargets(ctx.fs.homedir(), ctx.installation.installDir);
     for (const config of picoMainConfigs(ctx.configs)) {
       const tools = asRecord(config.data.tools) ?? {};
       for (const [key, write] of [['allow_read_paths', false], ['allow_write_paths', true]] as const) {
         for (const pattern of stringList(tools[key])) {
-          let re: RegExp;
-          try {
-            re = new RegExp(pattern);
-          } catch {
-            continue;
-          }
+          const re = compileGoRegex(pattern);
+          if (!re) continue;
           const hits = targets.filter(t => re.test(t));
           if (hits.length === 0) continue;
           if (write) writes = true;

@@ -2,7 +2,7 @@ import { normalize } from 'node:path';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { buildBroadPaths, expandHome, isBroadPath } from '../../analyzers/broad-paths.js';
-import { envString, isRealValue, lyrieEnvConfigs } from './env.js';
+import { envString, expandHomeRef, isConfigured, lyrieEnvConfigs } from './env.js';
 
 /**
  * packages/core/src/skills/builtin-executors.ts: the code-execution and
@@ -25,8 +25,11 @@ export const ly019 = defineCheck({
     const evidence: Evidence[] = [];
 
     for (const config of lyrieEnvConfigs(ctx.configs)) {
-      const root = envString(config, 'LYRIE_FS_ROOT');
-      if (!root || !isRealValue(root)) continue;
+      const raw = envString(config, 'LYRIE_FS_ROOT');
+      if (!raw || !isConfigured(raw)) continue;
+      const root = expandHomeRef(raw, home);
+      // Other ${VAR} references can't be resolved statically
+      if (/\$\{?[A-Za-z_]/.test(root)) continue;
 
       const hit = isBroadPath(root, broad, home);
       const abs = normalize(expandHome(root, home)).replace(/(.)\/+$/, '$1');
@@ -35,7 +38,7 @@ export const ly019 = defineCheck({
 
       evidence.push({
         file: config.filePath,
-        snippet: `LYRIE_FS_ROOT=${root}`,
+        snippet: `LYRIE_FS_ROOT=${raw}`,
         detail: `Skill sandbox root ${hit ? hit.reason : 'contains the home directory'} — built-in code/file skills are not confined`,
       });
     }

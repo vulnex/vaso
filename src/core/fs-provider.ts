@@ -59,6 +59,12 @@ export interface ExecOptions {
   timeout?: number;
   encoding?: string;
   cwd?: string;
+  /** Run with HOME/XDG dirs and cwd pointed at a throwaway directory that is
+   *  removed afterwards. Used for agent CLI version queries: several CLIs
+   *  initialize state in the user's home on any invocation (Hermes creates
+   *  ~/.hermes, Cursor ~/.cursor/cli-config.json, …), and a scan must not
+   *  modify what it scans. */
+  isolateHome?: boolean;
 }
 
 export interface FSProvider {

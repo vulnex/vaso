@@ -153,8 +153,11 @@ function parseShape(shape: ConfigLocation['shape'], data: Record<string, unknown
       return parseAtomicAgentEntries(data);
     case 'nanobot':
       return parseServerMap(tools?.mcpServers ?? tools?.mcp_servers);
-    case 'picoclaw':
-      return parseServerMap((tools?.mcp as Record<string, unknown> | undefined)?.servers);
+    case 'picoclaw': {
+      // tools.mcp.enabled: false switches off the whole MCP integration
+      const mcp = tools?.mcp as Record<string, unknown> | undefined;
+      return mcp?.enabled === false ? [] : parseServerMap(mcp?.servers);
+    }
     default:
       return parseServerEntries(data);
   }

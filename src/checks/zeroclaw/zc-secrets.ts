@@ -31,9 +31,11 @@ function isSecretKey(k: string): boolean {
   return SECRET_KEYS.has(n) || n.endsWith('_api_key');
 }
 
-/** A stored value is protected when it is ChaCha20 (`enc2:`), legacy XOR (`enc:`) or a 1Password ref. */
+/** A stored value is protected when it is ChaCha20 (`enc2:`), legacy XOR
+ *  (`enc:`), a 1Password ref, or a `${VAR}` reference resolved from the
+ *  environment at load time. */
 export function isProtectedSecret(v: string): boolean {
-  return v.startsWith('enc2:') || v.startsWith('enc:') || v.startsWith('op://');
+  return v.startsWith('enc2:') || v.startsWith('enc:') || v.startsWith('op://') || /^\$\{[A-Za-z_][A-Za-z0-9_]*\}$/.test(v);
 }
 
 export interface PlaintextSecret {

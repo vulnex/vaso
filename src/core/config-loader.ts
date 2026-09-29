@@ -83,6 +83,18 @@ export async function loadConfig(filePath: string, fs?: FSProvider): Promise<Par
     });
   }
 
+  // An agent config is a mapping; a document whose top level is null, an
+  // array or a scalar can't configure anything, and handing it to checks as
+  // `data` would make every key lookup throw.
+  if (data !== UNPARSEABLE && (data === null || typeof data !== 'object' || Array.isArray(data))) {
+    recordLoadError({
+      filePath,
+      stage: 'parse',
+      message: `Top-level value is ${data === null ? 'null' : Array.isArray(data) ? 'an array' : `a ${typeof data}`}, not a mapping`,
+    });
+    data = {};
+  }
+
   return { raw, format, filePath, data: data === UNPARSEABLE ? {} : data };
 }
 
@@ -126,12 +138,16 @@ function parseEnv(raw: string): Record<string, unknown> {
     if (!trimmed || trimmed.startsWith('#')) continue;
     const eqIndex = trimmed.indexOf('=');
     if (eqIndex === -1) continue;
-    const key = trimmed.slice(0, eqIndex).trim();
+    // dotenv/shell style: `export KEY=value` sets KEY
+    const key = trimmed.slice(0, eqIndex).trim().replace(/^export\s+/, '');
     let value = trimmed.slice(eqIndex + 1).trim();
-    // Strip surrounding quotes
-    if ((value.startsWith('"') && value.endsWith('"')) ||
-        (value.startsWith("'") && value.endsWith("'"))) {
-      value = value.slice(1, -1);
+    const quote = value[0];
+    if ((quote === '"' || quote === "'") && value.indexOf(quote, 1) > 0) {
+      // Quoted value: everything up to the closing quote (a trailing comment may follow)
+      value = value.slice(1, value.indexOf(quote, 1));
+    } else {
+      // Unquoted value: ` #` starts an inline comment
+      value = value.replace(/\s+#.*$/, '');
     }
     data[key] = value;
   }

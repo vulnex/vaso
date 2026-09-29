@@ -33,6 +33,15 @@ export type {
 } from './core/fs-provider.js';
 export { LocalFSProvider } from './core/local-fs-provider.js';
 export { SnapshotFSProvider } from './core/snapshot-fs-provider.js';
+// Remote-probe snapshot/manifest shapes (SnapshotFSProvider input, AgentAdapter.getProbeManifest)
+export type {
+  ProbeSnapshot,
+  ProbeManifest,
+  CommandRequest,
+  CommandOutput,
+  FileEntry,
+  PrivilegeInfo,
+} from './core/snapshot-types.js';
 export {
   queryPermissions,
   posixPermissionFacts,
@@ -53,6 +62,7 @@ export {
 
 // Config loading
 export { loadConfig } from './core/config-loader.js';
+export type { ConfigLoadError } from './core/config-loader.js';
 
 // Adapter seam
 export type { AgentAdapter, DetectOptions } from './adapters/adapter.js';
@@ -68,6 +78,12 @@ export { allAdapters, registerAllAdapters } from './adapters/index.js';
 export { checkRegistry, CheckRegistry } from './core/check-registry.js';
 export { registerAllChecks } from './checks/index.js';
 export { defineCheck } from './core/check-builder.js';
+export type { DefineCheckArgs, CheckHelpers } from './core/check-builder.js';
+
+// MCP types referenced by ScanContext and ScanEngine.scanMCP
+export type { MCPConfig, MCPServerEntry, MCPServerSource, MCPDiscoveryResult } from './mcp/types.js';
+export type { ToolBaselineStore } from './mcp/tool-baseline.js';
+export type { McpStateStore } from './mcp/mcp-state-store.js';
 
 // Bundled threat data (must be initialized before IOC/advisory checks run)
 export { initIOCDatabase } from './ioc/database.js';

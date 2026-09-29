@@ -42,11 +42,13 @@ export const cfg001 = defineCheck({
     let gatewayKey = false;
 
     for (const config of ctx.configs) {
-      const host =
-        getNestedValue(config.data, 'gateway.host') ??
-        getNestedValue(config.data, 'server.host') ??
-        getNestedValue(config.data, 'host') ??
-        config.data.GATEWAY_HOST;
+      // The first host key present is the gateway's; the walk below skips
+      // only that one (and a flagged bind), so a second wildcard listener
+      // such as server.host is still reported.
+      const hostPath = ['gateway.host', 'server.host', 'host', 'GATEWAY_HOST']
+        .find(p => getNestedValue(config.data, p) != null);
+      const host = hostPath ? getNestedValue(config.data, hostPath) : undefined;
+      const reported = new Set<string>(hostPath ? [hostPath] : []);
 
       const WILDCARD_BINDS = ['0.0.0.0', '[::]', '::'];
 
@@ -63,6 +65,8 @@ export const cfg001 = defineCheck({
 
       // Symbolic bind modes (OpenClaw 2026.x schema: gateway.bind = "loopback" | "lan" | "all")
       const bind = getNestedValue(config.data, 'gateway.bind') ?? getNestedValue(config.data, 'bind');
+      if (getNestedValue(config.data, 'gateway.bind') !== undefined) reported.add('gateway.bind');
+      else if (getNestedValue(config.data, 'bind') !== undefined) reported.add('bind');
       if (typeof bind === 'string' && ['all', 'lan', ...WILDCARD_BINDS].includes(bind.toLowerCase())) {
         gatewayKey = true;
         evidence.push({
@@ -79,7 +83,6 @@ export const cfg001 = defineCheck({
       // `enabled: false` and a 0.0.0.0 placeholder — are not reported.
       if (config.data && Object.keys(config.data).length > 0) {
         const lines = config.raw.split('\n');
-        const reported = new Set(['gateway.host', 'server.host', 'host', 'GATEWAY_HOST', 'gateway.bind', 'bind']);
         for (const hit of wildcardListeners(config.data, WILDCARD_BINDS)) {
           if (reported.has(hit.path)) continue;
           const line = lines.findIndex(l => l.includes(hit.key) && l.includes(hit.value));

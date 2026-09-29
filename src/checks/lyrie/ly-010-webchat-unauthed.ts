@@ -1,6 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { envString, envTrue, isRealValue, lyrieEnvConfigs } from './env.js';
+import { envString, envTrue, isConfigured, lyrieEnvConfigs } from './env.js';
 
 function isLoopback(host: string): boolean {
   const h = host.replace(/^\[|\]$/g, '').toLowerCase();
@@ -29,7 +29,7 @@ export const ly010 = defineCheck({
 
       const host = envString(config, 'LYRIE_WEBCHAT_HOST') || '127.0.0.1';
       if (isLoopback(host)) continue;
-      if (isRealValue(envString(config, 'LYRIE_WEBCHAT_TOKEN'))) continue;
+      if (isConfigured(envString(config, 'LYRIE_WEBCHAT_TOKEN'))) continue;
 
       const port = envString(config, 'LYRIE_WEBCHAT_PORT') || '7777';
       evidence.push({

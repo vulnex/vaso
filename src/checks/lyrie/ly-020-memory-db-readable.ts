@@ -3,7 +3,7 @@ import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { markUnreachable } from '../../core/permissions.js';
 import { lyrieStateDir } from '../../adapters/lyrie.js';
-import { envString, isRealValue, lyrieEnvConfigs } from './env.js';
+import { envString, isConfigured, lyrieEnvConfigs } from './env.js';
 import { worldAccessEvidence } from './state-perms.js';
 
 /**
@@ -22,7 +22,7 @@ export const ly020 = defineCheck({
 
   async run(ctx, h) {
     const encrypted = lyrieEnvConfigs(ctx.configs)
-      .some(c => isRealValue(envString(c, 'LYRIE_MEMORY_KEY')));
+      .some(c => isConfigured(envString(c, 'LYRIE_MEMORY_KEY')));
     if (encrypted) return h.passed('Memory rows are encrypted at rest (LYRIE_MEMORY_KEY set)');
 
     const memoryDir = join(lyrieStateDir(ctx.fs), 'memory');

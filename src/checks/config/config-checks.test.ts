@@ -85,6 +85,13 @@ describe('CFG-001: Gateway Binding', () => {
     expect((await cfg001.run(makeContext([makeConfig(data, JSON.stringify(data))]))).passed).toBe(false);
   });
 
+  it('still reports a wildcard server.host / host when gateway.host is loopback', async () => {
+    for (const data of [{ gateway: { host: '127.0.0.1' }, server: { host: '0.0.0.0' } }, { gateway: { host: '127.0.0.1' }, host: '0.0.0.0' }]) {
+      const r = await cfg001.run(makeContext([makeConfig(data, JSON.stringify(data, null, 2))]));
+      expect(r.passed, JSON.stringify(data)).toBe(false);
+    }
+  });
+
   it('reports gateway.host once', async () => {
     const data = { gateway: { host: '0.0.0.0' } };
     const result = await cfg001.run(makeContext([makeConfig(data, JSON.stringify(data, null, 2))]));

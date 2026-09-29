@@ -1,4 +1,4 @@
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, isAbsolute, join } from 'node:path';
 import type { AgentAdapter, DetectOptions } from './adapter.js';
 import type { AgentInstallation, GatewayInfo, ModelRef, ParsedConfig } from '../core/types.js';
 import type { ProbeManifest } from '../core/snapshot-types.js';
@@ -44,12 +44,16 @@ function expandTilde(p: string, home: string): string {
  * Homebrew var dir on macOS). Env vars come from the scanned host (`fs.getEnv`).
  */
 export async function zeroclawDirs(home: string, fs: FSProvider): Promise<{ configDir: string; dataDir: string }> {
-  const configEnv = fs.getEnv('ZEROCLAW_CONFIG_DIR')?.trim();
+  // Env vars and the Homebrew var dir describe the scanning user's install;
+  // other users (--all-users) only have their own ~/.zeroclaw.
+  const ownHome = home === fs.homedir();
+  const env = (name: string) => (ownHome ? fs.getEnv(name)?.trim() : undefined);
+  const configEnv = env('ZEROCLAW_CONFIG_DIR');
   if (configEnv) {
     const configDir = expandTilde(configEnv, home);
     return { configDir, dataDir: join(configDir, 'data') };
   }
-  const dataEnv = fs.getEnv('ZEROCLAW_DATA_DIR')?.trim() || fs.getEnv('ZEROCLAW_WORKSPACE')?.trim();
+  const dataEnv = env('ZEROCLAW_DATA_DIR') || env('ZEROCLAW_WORKSPACE');
   if (dataEnv) {
     // resolve_config_dir_for_data
     const data = expandTilde(dataEnv, home);
@@ -60,7 +64,7 @@ export async function zeroclawDirs(home: string, fs: FSProvider): Promise<{ conf
     return { configDir: data, dataDir: join(data, 'data') };
   }
   const defaultDir = join(home, '.zeroclaw');
-  if (fs.platform === 'darwin' && !(await fs.access(join(defaultDir, 'config.toml')))) {
+  if (ownHome && fs.platform === 'darwin' && !(await fs.access(join(defaultDir, 'config.toml')))) {
     for (const brew of HOMEBREW_CONFIG_DIRS) {
       if (await fs.access(join(brew, 'config.toml'))) return { configDir: brew, dataDir: join(brew, 'workspace') };
     }
@@ -101,7 +105,7 @@ async function skillRoots(configDir: string, data: Record<string, unknown>, home
     const dir = asRecord(raw)?.directory;
     if (typeof dir === 'string' && dir.trim()) {
       const d = expandTilde(dir.trim(), home);
-      candidates.push(d.startsWith('/') ? d : join(configDir, d));
+      candidates.push(isAbsolute(d) ? d : join(configDir, d));
     }
   }
   const skills = asRecord(data.skills);
@@ -128,8 +132,11 @@ export const zeroclawAdapter: AgentAdapter = {
     const userDirs = await getUserHomeDirs(options?.allUsers, fs);
     const installations: AgentInstallation[] = [];
 
+    const seen = new Set<string>();
     for (const { home, user } of userDirs) {
       const { configDir } = await zeroclawDirs(home, fs);
+      if (seen.has(configDir)) continue;
+      seen.add(configDir);
       const configFiles: ParsedConfig[] = [];
       for (const name of CONFIG_FILENAMES) {
         const filePath = join(configDir, name);
@@ -304,6 +311,8 @@ export const zeroclawAdapter: AgentAdapter = {
         '~/.zeroclaw/data/*/*',
         '~/.zeroclaw/state/*',
         '~/.zeroclaw/agents/*/workspace/*.md',
+        // Homebrew service installs (macOS) keep the config under var/
+        ...HOMEBREW_CONFIG_DIRS.map(d => `${d}/.secret_key`),
       ],
       commands: [
         { id: 'zeroclaw-which', cmd: 'which', args: ['zeroclaw'], timeout: 3000 },
@@ -318,8 +327,11 @@ export const zeroclawAdapter: AgentAdapter = {
         '~/.cargo/bin',
       ],
       envPrefixes: ['ZEROCLAW_'],
-      systemPaths: SYSTEM_CLI_PATHS,
-      systemDirListings: [],
+      systemPaths: [
+        ...SYSTEM_CLI_PATHS,
+        ...HOMEBREW_CONFIG_DIRS.flatMap(d => CONFIG_FILENAMES.map(f => `${d}/${f}`)),
+      ],
+      systemDirListings: [...HOMEBREW_CONFIG_DIRS],
     };
   },
 };

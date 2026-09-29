@@ -68,6 +68,10 @@ describe('PicoClaw checks', () => {
   });
 
   it('never throws on odd shapes', async () => {
+    for (const c of picoclawChecks) {
+      const nullCfg = { raw: 'null', format: 'json', filePath: CONFIG, data: null } as unknown as ParsedConfig;
+      await expect(c.run(ctx([nullCfg]))).resolves.toBeDefined();
+    }
     const odd: Json[] = [
       {}, { agents: null, tools: 'x', channel_list: [] },
       { channel_list: { a: null, b: 7, c: { enabled: true } }, tools: { exec: null, allow_read_paths: ['(', 3] } },
@@ -97,6 +101,11 @@ describe('PCL-002 exec guard', () => {
     expect((await byId('PCL-002').run(ctx([cfg(onboard({ tools: { exec: { enable_deny_patterns: false } } }))]))).passed).toBe(false);
     expect((await byId('PCL-002').run(ctx([cfg(onboard({ tools: { exec: { custom_allow_patterns: ['.*'] } } }))]))).passed).toBe(false);
     expect((await byId('PCL-002').run(ctx([cfg(onboard({ tools: { exec: { custom_allow_patterns: ['^git status$'] } } }))]))).passed).toBe(true);
+  });
+
+  it('understands Go inline flags in patterns', async () => {
+    expect((await byId('PCL-002').run(ctx([cfg(onboard({ tools: { exec: { custom_allow_patterns: ['(?i).*'] } } }))]))).passed).toBe(false);
+    expect((await byId('PCL-007').run(ctx([cfg(onboard({ tools: { allow_read_paths: ['(?i)^/'] } }))]))).passed).toBe(false);
   });
 
   it('ignores a disabled exec tool', async () => {

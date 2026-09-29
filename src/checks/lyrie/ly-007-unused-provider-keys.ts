@@ -1,6 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { envString, envTrue, isRealValue, lyrieEnvConfigs } from './env.js';
+import { envString, envTrue, isConfigured, lyrieEnvConfigs } from './env.js';
 
 /** Cloud keys ModelRouter.initialize() registers (packages/core/src/index.ts). */
 const CLOUD_PROVIDER_KEYS = [
@@ -32,7 +32,7 @@ export const ly007 = defineCheck({
       const requireLocal = envTrue(config, 'LYRIE_REQUIRE_LOCAL');
       if (!localMode && !requireLocal) continue;
 
-      const keys = CLOUD_PROVIDER_KEYS.filter(k => isRealValue(envString(config, k)));
+      const keys = CLOUD_PROVIDER_KEYS.filter(k => isConfigured(envString(config, k)));
       if (keys.length === 0) continue;
 
       const intent = requireLocal ? 'LYRIE_REQUIRE_LOCAL=true' : 'LYRIE_MODE=local';

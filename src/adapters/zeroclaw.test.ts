@@ -119,6 +119,18 @@ describe('ZeroClaw adapter', () => {
     expect((await zeroclawDirs('/home/t', fs)).configDir).toBe('/opt/homebrew/var/zeroclaw');
   });
 
+  it('applies env overrides and the Homebrew dir only to the scanning user (--all-users)', async () => {
+    const fs = makeFs({
+      platform: 'darwin',
+      env: { ZEROCLAW_CONFIG_DIR: '/srv/zc' },
+      files: { '/opt/homebrew/var/zeroclaw/config.toml': V3 },
+    });
+    expect((await zeroclawDirs('/home/t', fs)).configDir).toBe('/srv/zc');
+    expect((await zeroclawDirs('/home/other', fs)).configDir).toBe('/home/other/.zeroclaw');
+    const brew = makeFs({ platform: 'darwin', files: { '/opt/homebrew/var/zeroclaw/config.toml': V3 } });
+    expect((await zeroclawDirs('/home/other', brew)).configDir).toBe('/home/other/.zeroclaw');
+  });
+
   it('adds a custom agent workspace, bundle directories and the open-skills checkout', async () => {
     const cfg = `${V3}
 [agents.coder]

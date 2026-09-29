@@ -1,6 +1,6 @@
 import type { Evidence, ParsedConfig } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { envString, isRealValue, lyrieEnvConfigs } from './env.js';
+import { envString, isConfigured, lyrieEnvConfigs } from './env.js';
 
 interface ChannelSpec {
   name: string;
@@ -46,7 +46,7 @@ export const ly003 = defineCheck({
     const evidence: Evidence[] = [];
     for (const config of lyrieEnvConfigs(ctx.configs)) {
       for (const ch of CHANNELS) {
-        if (!ch.enableKeys.every(k => isRealValue(envString(config, k)))) continue;
+        if (!ch.enableKeys.every(k => isConfigured(envString(config, k)))) continue;
 
         const raw = envString(config, ch.policyKey);
         const policy = raw?.toLowerCase();

@@ -219,6 +219,12 @@ describe('MCPDiscovery — agent frameworks', () => {
     });
   });
 
+  it('skips PicoClaw servers when tools.mcp.enabled is false', async () => {
+    const off = JSON.stringify({ tools: { mcp: { enabled: false, servers: { gh: { enabled: true, command: 'npx' } } } } });
+    const result = await new MCPDiscovery(makeFs({ '/home/t/.picoclaw/config.json': off })).discover('linux');
+    expect(result.configs).toEqual([]);
+  });
+
   it('honours PICOCLAW_HOME and PICOCLAW_CONFIG', async () => {
     const home = await new MCPDiscovery(makeFs({ '/srv/pico/config.json': picoclaw }, { PICOCLAW_HOME: '/srv/pico' })).discover('linux');
     expect(home.configs.map(c => c.filePath)).toEqual(['/srv/pico/config.json']);

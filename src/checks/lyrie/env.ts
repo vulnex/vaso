@@ -30,6 +30,22 @@ export function isRealValue(v: unknown): boolean {
   return true;
 }
 
+/**
+ * True when the key is configured: non-empty and not an `.env.example`
+ * placeholder. A `${VAR}` reference counts — Bun expands it when Lyrie starts
+ * (use isRealValue to ask whether a literal secret is stored in the file).
+ */
+export function isConfigured(v: unknown): boolean {
+  if (typeof v !== 'string') return false;
+  const s = v.trim();
+  return s !== '' && !s.endsWith('...') && !/^<[^>]*>$/.test(s);
+}
+
+/** Expand a leading `$HOME` / `${HOME}` / `~` (Bun expands env references in .env). */
+export function expandHomeRef(v: string, home: string): string {
+  return v.replace(/^(?:\$\{HOME\}|\$HOME\b|~(?=\/|$))/, home);
+}
+
 /** Lyrie's boolean env parsing is `=== "true"` (a few keys also accept "1"). */
 export function envTrue(config: ParsedConfig, key: string, acceptOne = false): boolean {
   const v = envString(config, key)?.toLowerCase();

@@ -42,8 +42,10 @@ ${chalk.dim(`  VULNEX Agent Security Observer v${VERSION}`)}
 ${chalk.dim('  Agent-agnostic security scanner for AI deployments')}
 `;
 
+/** Banner and loader warnings go to stderr so stdout carries only command
+ *  output (`vaso scan -f json | jq`, `vaso probe manifest > m.json`). */
 function printBanner(): void {
-  console.log(BANNER);
+  console.error(BANNER);
 }
 
 // Register adapters and checks
@@ -74,7 +76,7 @@ program
     if (!silent) {
       for (const p of userPlugins) {
         if (p.status === 'error') {
-          console.log(chalk.yellow(`  Warning: user plugin "${p.name}" failed to load: ${p.error}\n`));
+          console.error(chalk.yellow(`  Warning: user plugin "${p.name}" failed to load: ${p.error}\n`));
         }
       }
     }
@@ -146,8 +148,8 @@ program
   .option('--inventory <path>', 'YAML file listing hosts to scan')
   .option('--ssh-key <path>', 'SSH identity file for remote connections')
   .option('--ssh-timeout <seconds>', 'SSH connection timeout in seconds', '60')
-  .option('--ssh-retries <n>', 'additional SSH attempts after the first failure (default 0)', '0')
-  .option('--parallel <n>', 'max hosts to scan concurrently (default 5)', '5')
+  .option('--ssh-retries <n>', 'additional SSH attempts after the first failure', '0')
+  .option('--parallel <n>', 'max hosts to scan concurrently', '5')
   .option('--sudo', 'attempt privilege escalation via sudo on remote hosts')
   .option('--snapshot <path>', 'scan from a pre-collected probe snapshot file')
   .option('--save-snapshot <dir>', 'after fetching SSH snapshots, write each as <hostname>.json under this directory')
@@ -173,8 +175,8 @@ program
   .option('--inventory <path>', 'YAML inventory file with host definitions')
   .option('--ssh-key <path>', 'SSH identity file for remote connections')
   .option('--ssh-timeout <seconds>', 'SSH connection timeout in seconds', '60')
-  .option('--ssh-retries <n>', 'additional SSH attempts after the first failure (default 0)', '0')
-  .option('--parallel <n>', 'max hosts to detect concurrently (default 5)', '5')
+  .option('--ssh-retries <n>', 'additional SSH attempts after the first failure', '0')
+  .option('--parallel <n>', 'max hosts to detect concurrently', '5')
   .option('--snapshot <path>', 'detect from a local probe snapshot JSON file')
   .option('--save-snapshot <dir>', 'after fetching SSH snapshots, write each as <hostname>.json under this directory (for debugging)')
   .option('--no-color', 'disable colored output')

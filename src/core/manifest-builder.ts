@@ -2,6 +2,8 @@ import type { AgentAdapter } from '../adapters/adapter.js';
 import type { ProbeManifest } from './snapshot-types.js';
 import { cliInstallGlobs, cliInstallSystemPaths } from '../adapters/cli-installs.js';
 
+const SYSTEM_TOOLS = new Set(['which', 'defaults', 'codesign', 'plutil', 'netstat', 'ss', 'ps', 'crontab', 'launchctl']);
+
 export function buildProbeManifest(adapters: AgentAdapter[]): ProbeManifest {
   const merged: ProbeManifest = {
     filePaths: [],
@@ -80,6 +82,12 @@ export function buildProbeManifest(adapters: AgentAdapter[]): ProbeManifest {
   // Paths already collected with content need no metadata-only duplicate
   const collected = new Set([...merged.globPatterns, ...merged.filePaths, ...merged.systemPaths!]);
   merged.metadataGlobPatterns = [...new Set(merged.metadataGlobPatterns!)].filter(g => !collected.has(g));
+
+  // Agent CLIs run with a throwaway HOME: several initialize state in the
+  // user's home on any invocation (a scan must not modify what it scans).
+  // System tools keep the real HOME — some read the user's preferences.
+  merged.commands = merged.commands.map(c =>
+    SYSTEM_TOOLS.has(c.cmd) ? c : { ...c, isolateHome: true });
 
   // Deduplicate commands by id
   const seen = new Set<string>();

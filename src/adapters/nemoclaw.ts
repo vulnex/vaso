@@ -120,7 +120,7 @@ const DIST_INFO_SUFFIX = ['.dist-info', '.egg-info'] as const;
 
 function tryExec(fs: FSProvider, argv: [string, ...string[]]): string | undefined {
   try {
-    return fs.execSync(argv[0], argv.slice(1), { timeout: 10000 });
+    return fs.execSync(argv[0], argv.slice(1), { timeout: 10000, isolateHome: true });
   } catch {
     return undefined;
   }

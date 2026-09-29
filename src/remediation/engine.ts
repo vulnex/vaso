@@ -70,11 +70,14 @@ export class RemediationEngine {
         }
 
         try {
-          // Backup affected files
-          if (finding.evidence) {
-            for (const e of finding.evidence) {
-              await this.backupFile(e.file);
-            }
+          // Back up the evidence files and every config file of the
+          // installation: config fixes write to the first config, which is
+          // not necessarily one the evidence names.
+          const toBackUp = new Set<string>();
+          for (const e of finding.evidence ?? []) if (e.file) toBackUp.add(e.file);
+          for (const c of agent.installation.configFiles ?? []) toBackUp.add(c.filePath);
+          for (const file of toBackUp) {
+            await this.backupFile(file);
           }
 
           // Rebuild the full ScanContext the engine produced at scan time —

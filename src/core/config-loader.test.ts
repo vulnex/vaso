@@ -87,6 +87,40 @@ describe('loadConfig', () => {
   });
 });
 
+describe('loadConfig — .env syntax', () => {
+  it('handles export prefixes, inline comments and quoted values', async () => {
+    await setup();
+    const filePath = join(TEST_DIR, 'agent.env');
+    await writeFile(filePath, [
+      'export API_KEY=abc123',
+      'NODE_ENV=development # local dev',
+      'URL=http://x.test/#frag',
+      'QUOTED="a # not a comment" # but this is',
+      "SINGLE='x'",
+      'EMPTY=',
+    ].join('\n'));
+    const { data } = await loadConfig(filePath);
+    expect(data).toEqual({
+      API_KEY: 'abc123', NODE_ENV: 'development', URL: 'http://x.test/#frag',
+      QUOTED: 'a # not a comment', SINGLE: 'x', EMPTY: '',
+    });
+    await cleanup();
+  });
+});
+
+describe('loadConfig — non-mapping documents', () => {
+  it.each([['null.json', 'null'], ['list.json', '[1,2]'], ['scalar.yaml', 'just text\n'], ['num.json', '42']])(
+    '%s loads as {} and records a parse error', async (name, content) => {
+      await setup();
+      const filePath = join(TEST_DIR, name);
+      await writeFile(filePath, content);
+      const { result, loadErrors } = await captureConfigLoadErrors(() => loadConfig(filePath));
+      expect(result.data).toEqual({});
+      expect(loadErrors[0]?.message).toMatch(/not a mapping/);
+      await cleanup();
+    });
+});
+
 describe('captureConfigLoadErrors', () => {
   it('records a parse failure for a known format and still throws', async () => {
     await setup();

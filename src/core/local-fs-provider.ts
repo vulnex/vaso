@@ -1,11 +1,31 @@
 import { access as fsAccess, readdir, readFile, stat, realpath, readlink } from 'node:fs/promises';
 import { execFileSync, execFile } from 'node:child_process';
-import { homedir as osHomedir, hostname as osHostname } from 'node:os';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { homedir as osHomedir, hostname as osHostname, tmpdir } from 'node:os';
 import { promisify } from 'node:util';
 import type { FSProvider, DirentInfo, ExecResult, ExecOptions, PermissionQuery } from './fs-provider.js';
 import { posixPermissionFacts } from './permissions.js';
 
 const execFileAsync = promisify(execFile);
+
+/** Throwaway HOME for `isolateHome` execs; `cleanup` removes it. */
+function isolatedEnv(options?: ExecOptions): { env?: NodeJS.ProcessEnv; cwd?: string; cleanup: () => void } {
+  if (!options?.isolateHome) return { cwd: options?.cwd, cleanup: () => {} };
+  const home = mkdtempSync(join(tmpdir(), 'vaso-exec-'));
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    HOME: home,
+    USERPROFILE: home,
+    APPDATA: join(home, 'AppData', 'Roaming'),
+    LOCALAPPDATA: join(home, 'AppData', 'Local'),
+    XDG_CONFIG_HOME: join(home, '.config'),
+    XDG_DATA_HOME: join(home, '.local', 'share'),
+    XDG_CACHE_HOME: join(home, '.cache'),
+    XDG_STATE_HOME: join(home, '.local', 'state'),
+  };
+  return { env, cwd: options.cwd ?? home, cleanup: () => rmSync(home, { recursive: true, force: true }) };
+}
 
 export class LocalFSProvider implements FSProvider {
   readonly kind = 'local' as const;
@@ -74,11 +94,13 @@ export class LocalFSProvider implements FSProvider {
   }
 
   async exec(cmd: string, args: string[], options?: ExecOptions): Promise<ExecResult> {
+    const iso = isolatedEnv(options);
     try {
       const result = await execFileAsync(cmd, args, {
         encoding: 'utf-8',
         timeout: options?.timeout ?? 10000,
-        cwd: options?.cwd,
+        cwd: iso.cwd,
+        ...(iso.env ? { env: iso.env } : {}),
       });
       return {
         stdout: result.stdout,
@@ -92,16 +114,24 @@ export class LocalFSProvider implements FSProvider {
         stderr: e.stderr ?? '',
         exitCode: e.status ?? e.code ?? 1,
       };
+    } finally {
+      iso.cleanup();
     }
   }
 
   execSync(cmd: string, args: string[], options?: ExecOptions): string {
-    return execFileSync(cmd, args, {
-      encoding: 'utf-8',
-      timeout: options?.timeout ?? 10000,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      cwd: options?.cwd,
-    }).toString();
+    const iso = isolatedEnv(options);
+    try {
+      return execFileSync(cmd, args, {
+        encoding: 'utf-8',
+        timeout: options?.timeout ?? 10000,
+        stdio: ['pipe', 'pipe', 'pipe'],
+        cwd: iso.cwd,
+        ...(iso.env ? { env: iso.env } : {}),
+      }).toString();
+    } finally {
+      iso.cleanup();
+    }
   }
 
   homedir(): string {

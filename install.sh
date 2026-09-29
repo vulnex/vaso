@@ -157,7 +157,11 @@ install_vaso() {
   local npm_prefix
   npm_prefix=$(npm config get prefix 2>/dev/null)
   local NPM=(npm)
-  if [ -n "$npm_prefix" ] && [ ! -w "$npm_prefix/lib" ] 2>/dev/null; then
+  # npm creates <prefix>/lib on first install, so a missing lib dir in a
+  # writable prefix doesn't need sudo.
+  local npm_target="$npm_prefix/lib"
+  [ -e "$npm_target" ] || npm_target="$npm_prefix"
+  if [ -n "$npm_prefix" ] && [ ! -w "$npm_target" ] 2>/dev/null; then
     warn "Global npm directory requires elevated permissions (using sudo)."
     NPM=(sudo npm)
   fi
