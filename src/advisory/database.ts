@@ -756,6 +756,19 @@ const BUNDLED_ADVISORIES: Advisory[] = [
     published: '2026-05-26',
     tags: ['coding-agent', 'hooks'],
   },
+  // ── Lyrie ──────────────────────────────────────────────────────────
+  {
+    id: 'VASO-LYRIE-2026-001',
+    title: 'Lyrie grants home-directory access by hardcoded chat ID',
+    agent: 'lyrie',
+    affectedVersions: '<=3.4.0',
+    severity: 'warning',
+    description:
+      'LyrieEngine.buildConversation() compares the message chat ID (router source "<channel>:<chatId>") with two hardcoded IDs and, on a match, tells the model it has full system access with the working directory set to $HOME and resets Shield paths to the defaults (home, cwd, /tmp). Every other sender is told it is sandboxed, but only two further hardcoded IDs get Shield-scoped paths — all others keep the full default paths, so the sandbox is prompt-only. Present in every release through v3.4.0; no fixed release. Mitigate with a DM policy of pairing or closed (LYRIE_<CH>_DM_POLICY) and channel allowlists.',
+    reference: 'https://github.com/OTT-Cybersecurity-LLC/lyrie-ai/blob/v3.4.0/packages/core/src/engine/lyrie-engine.ts#L358-L375',
+    published: '2026-09-29',
+    tags: ['framework'],
+  },
 ];
 
 let _db: AdvisoryDatabase | null = null;
