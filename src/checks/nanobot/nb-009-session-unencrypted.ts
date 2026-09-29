@@ -1,71 +1,52 @@
 import { join } from 'node:path';
 import { defineCheck } from '../../core/check-builder.js';
-import { getNestedValue } from '../../core/utils.js';
-import { fixFirstConfig } from '../../remediation/config-writer.js';
+import type { ScanContext } from '../../core/types.js';
+import { readableByOthersEvidence, workspaceDir } from './shared.js';
+
+const HISTORY_FILE = /\.(?:jsonl|json)$/;
+
+async function listFiles(ctx: ScanContext, dir: string): Promise<string[]> {
+  try {
+    return (await ctx.fs.readdirEntries(dir)).filter(e => !e.isDirectory).map(e => join(dir, e.name));
+  } catch {
+    return [];
+  }
+}
+
+async function listDirs(ctx: ScanContext, dir: string): Promise<string[]> {
+  try {
+    return (await ctx.fs.readdirEntries(dir)).filter(e => e.isDirectory).map(e => join(dir, e.name));
+  } catch {
+    return [];
+  }
+}
 
 export const nb009 = defineCheck({
   id: 'NB-009',
-  name: 'Unencrypted Session Files',
+  name: 'Chat History Readable by Other Users',
   category: 'nanobot',
   severity: 'warning',
-  description: 'Check if session files (JSONL) exist without encryption configured',
+  description: 'nanobot stores conversation history in plaintext (there is no encryption option): ~/.nanobot/sessions/<workspace-id>/*.jsonl, <workspace>/memory/history.jsonl and ~/.nanobot/history/cli_history. They hold everything users and tools said — often pasted secrets and personal data — and must be owner-only.',
   supportedAgents: ['nanobot'],
+  supportedPlatforms: ['darwin', 'linux'],
 
   async run(ctx, h) {
-    const evidence = [];
-    const installDir = ctx.installation.installDir;
-
-    let encryptionEnabled = false;
-    for (const config of ctx.configs) {
-      const encryption = getNestedValue(config.data, 'sessions.encryption')
-        ?? getNestedValue(config.data, 'session.encryption')
-        ?? getNestedValue(config.data, 'encryption');
-
-      if (encryption === true || (typeof encryption === 'object' && encryption !== null)) {
-        encryptionEnabled = true;
-        break;
-      }
+    const dataDir = ctx.installation.installDir;
+    const sessionsDir = join(dataDir, 'sessions');
+    const files: string[] = [];
+    // sessions/<workspace-id>/*.jsonl, plus legacy flat sessions/*.jsonl
+    files.push(...(await listFiles(ctx, sessionsDir)).filter(f => HISTORY_FILE.test(f)));
+    for (const sub of await listDirs(ctx, sessionsDir)) {
+      files.push(...(await listFiles(ctx, sub)).filter(f => HISTORY_FILE.test(f)));
     }
+    files.push(join(workspaceDir(ctx), 'memory', 'history.jsonl'));
+    files.push(join(dataDir, 'history', 'cli_history'));
 
-    const sessionDirs = [
-      join(installDir, 'workspace', 'sessions'),
-      join(installDir, 'sessions'),
-      join(installDir, '.sessions'),
-      join(installDir, 'data', 'sessions'),
-    ];
-
-    let sessionFilesFound = false;
-    for (const dir of sessionDirs) {
-      try {
-        const entries = await ctx.fs.readdir(dir);
-        const jsonlFiles = entries.filter(f => f.endsWith('.jsonl') || f.endsWith('.session'));
-        if (jsonlFiles.length > 0) {
-          sessionFilesFound = true;
-          if (!encryptionEnabled) {
-            evidence.push({
-              file: dir,
-              detail: `Found ${jsonlFiles.length} session file(s) in ${dir} without encryption — conversation history is stored in plaintext`,
-            });
-          }
-        }
-      } catch {}
-    }
-
+    const evidence = await readableByOthersEvidence(ctx, files.map(path => ({ path, what: 'Chat history' })));
     return h.fromEvidence(evidence, {
-      passed: sessionFilesFound ? 'Session files found with encryption enabled' : 'No session files found',
-      failed: () => 'Session files found without encryption — plaintext conversation history',
-      fixable: true,
-      fixDescription: 'Enable session encryption in config: "sessions": { "encryption": true }',
-    });
-  },
-
-  async fix(ctx) {
-    return fixFirstConfig(ctx.configs, {
-      checkId: 'NB-009',
-      path: 'sessions.encryption',
-      value: true,
-      message: 'Enabled session encryption',
-      noConfigMessage: 'No JSON config file found',
+      passed: 'Chat history files are owner-only (or absent)',
+      failed: (n) => `${n} chat history file(s) readable by other users`,
+      fixDescription: 'chmod 700 ~/.nanobot/sessions ~/.nanobot/history ~/.nanobot/workspace/memory and chmod 600 the history files',
     });
   },
 });

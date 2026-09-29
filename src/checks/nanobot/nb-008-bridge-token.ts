@@ -1,41 +1,84 @@
+import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { asRecord, getPath, isLoopbackHost, nanobotConfigs, nonEmptyString, pick } from './shared.js';
+
+/*
+ * The websocket channel is nanobot's WebUI/client bridge and is always on
+ * (channels/websocket/manifest.py: default_enabled, always_enabled). Defaults:
+ * host 127.0.0.1, port 8765, websocketRequiresToken true, allowFrom ["*"].
+ * Handshake auth (webui/gateway_endpoint.py): a static `token`, else an issued
+ * short-lived token when websocketRequiresToken is true, else nothing. Tokens
+ * are issued by tokenIssuePath, protected by tokenIssueSecret (or token).
+ * No Origin check — any web page can open ws://127.0.0.1:8765.
+ * The schema only rejects an unauthenticated 0.0.0.0 / :: bind; a specific
+ * LAN address without auth loads fine.
+ */
 
 export const nb008 = defineCheck({
   id: 'NB-008',
-  name: 'Empty Bridge Token',
+  name: 'WebSocket / WebUI Channel Without Authentication',
   category: 'nanobot',
-  severity: 'warning',
-  description: 'Check if WhatsApp bridge is enabled but bridge_token is empty or unset',
+  severity: 'critical',
+  description: 'Check the always-on websocket channel (WebUI and client bridge): websocketRequiresToken false with no static token, or a token-issue endpoint with no tokenIssueSecret, lets anyone who can reach the socket drive the agent — critical on a non-loopback bind, warning on loopback (no Origin check, so any web page in the user\'s browser can connect). Also flags plaintext ws:// on non-loopback binds and tools.webuiAllowRemotePackageInstall.',
   supportedAgents: ['nanobot'],
 
   async run(ctx, h) {
-    const evidence = [];
-    for (const config of ctx.configs) {
-      const channels = config.data.channels as Record<string, Record<string, unknown>> | undefined;
-      if (!channels || typeof channels !== 'object') continue;
+    const evidence: Evidence[] = [];
+    let critical = false;
 
-      for (const [name, ch] of Object.entries(channels)) {
-        const type = ch.type as string | undefined;
-        const isBridge = type === 'whatsapp' || type === 'whatsapp-bridge'
-          || type === 'bridge' || ch.bridge === true
-          || name === 'whatsapp' || name === 'whatsapp-bridge';
+    for (const config of nanobotConfigs(ctx.configs)) {
+      const ws = asRecord(getPath(config.data, 'channels.websocket')) ?? {};
+      if (ws.enabled !== false) {
+        const unixSocket = nonEmptyString(pick(ws, 'unixSocketPath'));
+        const hostRaw = pick(ws, 'host');
+        const host = nonEmptyString(hostRaw) ? hostRaw.trim() : '127.0.0.1';
+        const local = unixSocket || isLoopbackHost(host);
+        const token = nonEmptyString(pick(ws, 'token'));
+        const issueSecret = nonEmptyString(pick(ws, 'tokenIssueSecret'));
+        const issuePath = nonEmptyString(pick(ws, 'tokenIssuePath'));
+        const proxyAuth = asRecord(pick(ws, 'trustedProxyAuth')) !== undefined;
+        const requiresToken = pick(ws, 'websocketRequiresToken') !== false;
+        const where = unixSocket ? 'a unix socket' : `${host}:${typeof ws.port === 'number' ? ws.port : 8765}`;
 
-        if (!isBridge) continue;
+        let hole: string | undefined;
+        if (!token && !requiresToken && !proxyAuth) {
+          hole = 'websocketRequiresToken is false and no static token is set — connections are unauthenticated';
+        } else if (!token && !issueSecret && issuePath && !proxyAuth) {
+          hole = `tokenIssuePath ${JSON.stringify(pick(ws, 'tokenIssuePath'))} has no tokenIssueSecret — anyone can mint connection tokens`;
+        }
 
-        const token = ch.bridge_token ?? ch.bridgeToken ?? ch.token;
-
-        if (!token || (typeof token === 'string' && token.trim() === '')) {
+        if (hole) {
+          if (!local) critical = true;
           evidence.push({
             file: config.filePath,
-            detail: `Channel "${name}" has WhatsApp bridge enabled but bridge_token is empty or unset — unauthenticated bridge access`,
+            snippet: `channels.websocket on ${where}`,
+            detail: local
+              ? `${hole}; bound to loopback, but without an Origin check any web page the user opens can connect and drive the agent`
+              : `${hole}; bound to ${host}, reachable from the network`,
+          });
+        } else if (!local && !nonEmptyString(pick(ws, 'sslCertfile')) && !proxyAuth) {
+          evidence.push({
+            file: config.filePath,
+            snippet: `channels.websocket on ${where}`,
+            detail: `WebSocket channel bound to ${host} without sslCertfile — connection tokens travel over plaintext ws://`,
           });
         }
       }
+
+      if (getPath(config.data, 'tools.webuiAllowRemotePackageInstall') === true) {
+        evidence.push({
+          file: config.filePath,
+          snippet: 'tools.webuiAllowRemotePackageInstall: true',
+          detail: 'Non-local WebUI clients may install packages and agent skills on this host',
+        });
+      }
     }
+
     return h.fromEvidence(evidence, {
-      passed: 'All bridge channels have tokens configured',
-      failed: () => 'Bridge channel(s) found with empty or missing bridge_token',
-      fixDescription: 'Set a strong bridge_token for each WhatsApp bridge channel',
+      passed: 'WebSocket/WebUI channel requires authentication',
+      failed: (n) => `${n} WebSocket/WebUI exposure issue(s)`,
+      severity: evidence.length > 0 && !critical ? 'warning' : undefined,
+      fixDescription: 'Keep channels.websocket.websocketRequiresToken true (default) and set tokenIssueSecret (`nanobot onboard` generates one) or a static token; bind host to 127.0.0.1 unless remote access is required, and then set sslCertfile/sslKeyfile; leave tools.webuiAllowRemotePackageInstall false',
     });
   },
 });

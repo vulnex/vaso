@@ -275,18 +275,16 @@ describe('adapter.getModels()', () => {
       ]);
     });
 
-    it('records per-agent overrides with via=agent-name', () => {
+    it('records modelPresets entries with via=preset:<name>', () => {
       const configs = [
         cfg('/u/.nanobot/config.json', {
-          agents: {
-            defaults: { model: 'anthropic/claude-opus-4-5' },
-            researcher: { model: 'openai/gpt-4o' },
-          },
+          agents: { defaults: { model: 'anthropic/claude-opus-4-5' } },
+          modelPresets: { researcher: { model: 'openai/gpt-4o' } },
         }),
       ];
       expect(nanobotAdapter.getModels!(configs)).toEqual([
         { id: 'claude-opus-4-5', provider: 'anthropic' },
-        { id: 'gpt-4o', provider: 'openai', via: 'researcher' },
+        { id: 'gpt-4o', provider: 'openai', via: 'preset:researcher' },
       ]);
     });
 
