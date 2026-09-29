@@ -179,3 +179,55 @@ describe('MCPDiscovery — Atomic Agent', () => {
     expect(result.configs).toEqual([]);
   });
 });
+
+describe('MCPDiscovery — agent frameworks', () => {
+  function makeFs(files: Record<string, string>, env: Record<string, string> = {}): FSProvider {
+    return {
+      homedir: () => '/home/t',
+      access: async (p: string) => p in files,
+      readFile: async (p: string) => files[p],
+      getEnv: (k: string) => env[k],
+    } as unknown as FSProvider;
+  }
+
+  const nanobot = JSON.stringify({
+    tools: { mcpServers: {
+      fs: { command: 'npx', args: ['-y', '@modelcontextprotocol/server-filesystem', '/'] },
+      remote: { type: 'streamableHttp', url: 'https://mcp.example.test/v1' },
+    } },
+  });
+  const picoclaw = JSON.stringify({
+    tools: { mcp: { servers: {
+      gh: { enabled: true, command: 'npx', args: ['-y', '@x/github'], env: { GH_TOKEN: 't' } },
+      events: { enabled: true, type: 'sse', url: 'http://10.0.0.5:9000/events' },
+      off: { enabled: false, command: 'node' },
+    } } },
+  });
+  const lyrie = JSON.stringify({ mcpServers: { memory: { command: 'bunx', args: ['mcp-memory'] } } });
+
+  it('finds Nanobot tools.mcpServers, PicoClaw tools.mcp.servers and Lyrie ~/.lyrie/mcp.json', async () => {
+    const result = await new MCPDiscovery(makeFs({
+      '/home/t/.nanobot/config.json': nanobot,
+      '/home/t/.picoclaw/config.json': picoclaw,
+      '/home/t/.lyrie/mcp.json': lyrie,
+    })).discover('linux');
+    const bySource = Object.fromEntries(result.configs.map(c => [c.source, c.servers.map(s => [s.name, s.transport])]));
+    expect(bySource).toEqual({
+      Nanobot: [['fs', 'stdio'], ['remote', 'streamable-http']],
+      PicoClaw: [['gh', 'stdio'], ['events', 'sse']],
+      Lyrie: [['memory', 'stdio']],
+    });
+  });
+
+  it('honours PICOCLAW_HOME and PICOCLAW_CONFIG', async () => {
+    const home = await new MCPDiscovery(makeFs({ '/srv/pico/config.json': picoclaw }, { PICOCLAW_HOME: '/srv/pico' })).discover('linux');
+    expect(home.configs.map(c => c.filePath)).toEqual(['/srv/pico/config.json']);
+    const cfg = await new MCPDiscovery(makeFs({ '/etc/pc.json': picoclaw }, { PICOCLAW_CONFIG: '/etc/pc.json' })).discover('linux');
+    expect(cfg.configs.map(c => c.filePath)).toEqual(['/etc/pc.json']);
+  });
+
+  it('accepts the framework dialects via --paths', async () => {
+    const fs = makeFs({ '/a.json': nanobot, '/b.json': picoclaw });
+    expect((await new MCPDiscovery(fs).discoverFromPaths(['/a.json', '/b.json'])).totalServers).toBe(4);
+  });
+});

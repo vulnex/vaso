@@ -67,6 +67,7 @@ export function buildProbeManifest(adapters: AgentAdapter[]): ProbeManifest {
     '~/.config/Claude/claude_desktop_config.json',
     '~/.cursor/mcp.json',
     '~/.codeium/windsurf/mcp_config.json',
+    '~/.lyrie/mcp.json',
   );
 
   // Deduplicate

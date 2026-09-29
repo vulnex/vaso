@@ -8,7 +8,7 @@ interface ConfigLocation {
   source: string;
   path: string;
   /** Config dialect; defaults to the common `mcpServers` map. */
-  shape?: 'atomic-agent';
+  shape?: 'atomic-agent' | 'nanobot' | 'picoclaw';
 }
 
 function getGlobalConfigLocations(platform: NodeJS.Platform, home: string): ConfigLocation[] {
@@ -69,6 +69,19 @@ function getAtomicAgentLocation(home: string, fs: FSProvider): ConfigLocation {
   return { source: 'Atomic Agent', path: join(stateDir, 'config.json'), shape: 'atomic-agent' };
 }
 
+/** Agent frameworks that keep MCP servers in their own config files. */
+function getFrameworkLocations(home: string, fs: FSProvider): ConfigLocation[] {
+  const picoHome = fs.getEnv('PICOCLAW_HOME')?.trim() || join(home, '.picoclaw');
+  return [
+    // Nanobot (HKUDS): `tools.mcpServers` in ~/.nanobot/config.json
+    { source: 'Nanobot', path: join(home, '.nanobot', 'config.json'), shape: 'nanobot' },
+    // PicoClaw: `tools.mcp.servers` in $PICOCLAW_CONFIG or <home>/config.json
+    { source: 'PicoClaw', path: fs.getEnv('PICOCLAW_CONFIG')?.trim() || join(picoHome, 'config.json'), shape: 'picoclaw' },
+    // Lyrie: ~/.lyrie/mcp.json (`mcpServers`)
+    { source: 'Lyrie', path: join(home, '.lyrie', 'mcp.json') },
+  ];
+}
+
 function getProjectConfigLocations(projectDir: string): ConfigLocation[] {
   return [
     { source: 'Claude Code (project)', path: join(projectDir, '.mcp.json') },
@@ -81,16 +94,28 @@ function getProjectConfigLocations(projectDir: string): ConfigLocation[] {
   ];
 }
 
-function parseServerEntries(data: Record<string, unknown>): MCPServerEntry[] {
+/** Explicit transport names used by the supported config dialects. */
+const TRANSPORT_TYPES: Record<string, MCPServerEntry['transport']> = {
+  stdio: 'stdio',
+  sse: 'sse',
+  http: 'streamable-http',
+  'streamable-http': 'streamable-http',
+  streamableHttp: 'streamable-http',
+};
+
+/** A `name → { command, args, env, url, headers, type? }` server map.
+ *  Servers explicitly disabled (`enabled: false`) are never connected. */
+function parseServerMap(map: unknown): MCPServerEntry[] {
   const servers: MCPServerEntry[] = [];
-  const mcpServers = data.mcpServers as Record<string, Record<string, unknown>> | undefined;
-  if (!mcpServers || typeof mcpServers !== 'object') return servers;
+  if (!map || typeof map !== 'object' || Array.isArray(map)) return servers;
 
-  for (const [name, config] of Object.entries(mcpServers)) {
-    if (!config || typeof config !== 'object') continue;
+  for (const [name, raw] of Object.entries(map as Record<string, unknown>)) {
+    if (!raw || typeof raw !== 'object') continue;
+    const config = raw as Record<string, unknown>;
+    if (config.enabled === false) continue;
 
-    let transport: MCPServerEntry['transport'] = 'stdio';
-    if (config.url) {
+    let transport: MCPServerEntry['transport'] = TRANSPORT_TYPES[String(config.type)] ?? 'stdio';
+    if (!TRANSPORT_TYPES[String(config.type)] && config.url) {
       const url = String(config.url);
       if (url.includes('/sse')) {
         transport = 'sse';
@@ -115,6 +140,24 @@ function parseServerEntries(data: Record<string, unknown>): MCPServerEntry[] {
   }
 
   return servers;
+}
+
+function parseServerEntries(data: Record<string, unknown>): MCPServerEntry[] {
+  return parseServerMap(data.mcpServers);
+}
+
+function parseShape(shape: ConfigLocation['shape'], data: Record<string, unknown>): MCPServerEntry[] {
+  const tools = data.tools as Record<string, unknown> | undefined;
+  switch (shape) {
+    case 'atomic-agent':
+      return parseAtomicAgentEntries(data);
+    case 'nanobot':
+      return parseServerMap(tools?.mcpServers ?? tools?.mcp_servers);
+    case 'picoclaw':
+      return parseServerMap((tools?.mcp as Record<string, unknown> | undefined)?.servers);
+    default:
+      return parseServerEntries(data);
+  }
 }
 
 const ATOMIC_TRANSPORTS: Record<string, MCPServerEntry['transport']> = {
@@ -171,6 +214,7 @@ export class MCPDiscovery {
     const locations = [
       ...getGlobalConfigLocations(platform, home),
       getAtomicAgentLocation(home, this.fs),
+      ...getFrameworkLocations(home, this.fs),
       ...(projectDir ? getProjectConfigLocations(projectDir) : []),
     ];
 
@@ -180,9 +224,7 @@ export class MCPDiscovery {
       try {
         const raw = await this.fs.readFile(location.path);
         const data = JSON.parse(stripJsonc(raw)) as Record<string, unknown>;
-        const servers = location.shape === 'atomic-agent'
-          ? parseAtomicAgentEntries(data)
-          : parseServerEntries(data);
+        const servers = parseShape(location.shape, data);
 
         if (servers.length > 0) {
           configs.push({
@@ -209,7 +251,12 @@ export class MCPDiscovery {
       try {
         const raw = await this.fs.readFile(filePath);
         const data = JSON.parse(stripJsonc(raw)) as Record<string, unknown>;
-        const servers = data.mcpServers ? parseServerEntries(data) : parseAtomicAgentEntries(data);
+        const tools = data.tools as Record<string, unknown> | undefined;
+        const shape: ConfigLocation['shape'] = data.mcpServers ? undefined
+          : tools?.mcpServers || tools?.mcp_servers ? 'nanobot'
+          : (tools?.mcp as Record<string, unknown> | undefined)?.servers ? 'picoclaw'
+          : 'atomic-agent';
+        const servers = parseShape(shape, data);
 
         if (servers.length > 0) {
           configs.push({
