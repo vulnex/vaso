@@ -383,7 +383,7 @@ Penalties:
 
 ## Security Checks
 
-VASO runs **311 checks across 17 categories**.
+VASO runs **318 checks across 18 categories**.
 
 | Category | IDs | Count | Scope |
 |----------|-----|-------|-------|
@@ -397,6 +397,7 @@ VASO runs **311 checks across 17 categories**.
 | Advisory | ADV-001–005 | 5 | Vulnerability/CVE detection with version awareness |
 | OpenClaw | OC-* | 6 | Sub-agent config downgrade, legacy bot dirs, `OPENCLAW_HOME` redirect, profile downgrade, memory file perms, `/etc/openclaw` writable |
 | NanoClaw | NC-001–005 | 5 | Overbroad mount allowlist (`allowedRoots`), host config/credential exposure, checkout/state exposure, webhook listener on all interfaces, skills dirs writable |
+| PicoClaw | PCL-001–007 | 7 | Workspace restriction off, exec deny list disabled or bypassed, channels open to any sender (empty `allow_from` allows everyone), exec reachable from chat channels, weakly guarded `pico` WebSocket, public web launcher without a dashboard password, tool path allowances reaching credentials |
 | IronClaw | IC-001–014 | 14 | 1.x (Reborn) and 0.x: WebUI/listener bind, cleartext LLM endpoints, WebUI token and master-key exposure, `local-dev-yolo` host access, approval policy, sandbox (0.x), permissive WebUI CORS, world-readable state DB |
 | Nanobot | NB-001–012 | 12 | Open channels (`allowFrom: ["*"]`, open DM policy), plaintext secrets, workspace restriction, exec sandbox/allow patterns, SSRF whitelist, writable prompt/memory/cron files, unauthenticated WebUI, readable chat history, API server exposure, unpinned MCP packages |
 | ZeroClaw | ZC-001–016 | 16 | V3 schema: plaintext/XOR secrets, gateway bind and pairing, `full` risk level, filesystem scope, open peer groups, open skills/scripts, WhatsApp session perms, browser/HTTP private-host access, sandbox, unrestricted commands/auto-approve, relaxed gateway safeguards |

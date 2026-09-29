@@ -35,6 +35,7 @@ const CATEGORY_LABELS: Record<CheckCategory, string> = {
   mcp: 'MCP',
   openclaw: 'OpenClaw',
   nanoclaw: 'NanoClaw',
+  picoclaw: 'PicoClaw',
   ironclaw: 'IronClaw',
   nanobot: 'Nanobot',
   zeroclaw: 'ZeroClaw',

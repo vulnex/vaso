@@ -1,7 +1,7 @@
 export type Severity = 'critical' | 'warning' | 'info';
 export type Grade = 'A' | 'B' | 'C' | 'D' | 'F';
 export type AgentType = 'openclaw' | 'nanoclaw' | 'picoclaw' | 'mcp' | 'ironclaw' | 'nanobot' | 'zeroclaw' | 'nemoclaw' | 'hermes' | 'lyrie' | 'atomic-agent' | 'claude-code' | 'claude-desktop' | 'chatgpt-desktop' | 'codex' | 'opencode' | 'gemini-cli' | 'qwen-code' | 'copilot-cli' | 'cursor-cli' | 'windsurf' | 'devin' | 'meta-muse' | 'comet' | 'skill-audit';
-export type CheckCategory = 'config' | 'skills' | 'ioc' | 'network' | 'runtime' | 'policy' | 'mcp' | 'openclaw' | 'nanoclaw' | 'ironclaw' | 'nanobot' | 'zeroclaw' | 'lyrie' | 'hermes' | 'atomic-agent' | 'advisory' | 'coding-agent';
+export type CheckCategory = 'config' | 'skills' | 'ioc' | 'network' | 'runtime' | 'policy' | 'mcp' | 'openclaw' | 'nanoclaw' | 'picoclaw' | 'ironclaw' | 'nanobot' | 'zeroclaw' | 'lyrie' | 'hermes' | 'atomic-agent' | 'advisory' | 'coding-agent';
 
 export const AGENT_TYPES: readonly AgentType[] = [
   'openclaw', 'nanoclaw', 'picoclaw', 'mcp', 'ironclaw', 'nanobot',
@@ -17,7 +17,7 @@ export function isScannableAgentType(v: string): v is AgentType {
 
 export const CHECK_CATEGORIES: readonly CheckCategory[] = [
   'config', 'skills', 'ioc', 'network', 'runtime', 'policy', 'mcp',
-  'openclaw', 'nanoclaw', 'ironclaw', 'nanobot', 'zeroclaw', 'lyrie',
+  'openclaw', 'nanoclaw', 'picoclaw', 'ironclaw', 'nanobot', 'zeroclaw', 'lyrie',
   'hermes', 'atomic-agent', 'advisory', 'coding-agent',
 ];
 

@@ -185,7 +185,7 @@ Every security check implements this interface:
 interface CheckModule {
   id: string;                              // e.g. 'CFG-001', 'SKL-003', 'LY-018'
   name: string;                            // Human-readable name
-  category: CheckCategory;                 // one of 17 categories — see src/core/types.ts
+  category: CheckCategory;                 // one of 18 categories — see src/core/types.ts
   severity: Severity;                      // 'critical' | 'warning' | 'info'
   description: string;                     // What this check does
 

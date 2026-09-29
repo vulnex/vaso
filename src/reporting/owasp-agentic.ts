@@ -231,6 +231,13 @@ export const CHECK_AGENTIC_MAP: Record<string, OwaspAgenticId[]> = {
   'LY-018': ['AAI005'],
   'LY-019': ['AAI002', 'AAI009'],
   'LY-020': ['AAI006', 'AAI001'],
+  'PCL-001': ['AAI002', 'AAI009'],
+  'PCL-002': ['AAI002', 'AAI012'],
+  'PCL-003': ['AAI001', 'AAI003'],
+  'PCL-004': ['AAI002', 'AAI003'],
+  'PCL-005': ['AAI001', 'AAI005'],
+  'PCL-006': ['AAI001', 'AAI005'],
+  'PCL-007': ['AAI002', 'AAI009'],
   // Hermes (HM)
   'HM-001': ['AAI001'],
   'HM-002': ['AAI001'],
