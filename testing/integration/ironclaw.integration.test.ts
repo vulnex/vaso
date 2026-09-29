@@ -7,134 +7,131 @@ import {
   expectCheckPassed,
 } from './helpers.js';
 
-describe('IronClaw Insecure', () => {
+describe('IronClaw 1.x (Reborn) Insecure', () => {
   let result: ScanResult;
 
   beforeAll(async () => {
     result = await runVasoScan({
       dockerfile: 'testing/docker/agents/ironclaw.Dockerfile',
-      buildArgs: { SCENARIO: 'insecure' },
+      buildArgs: { SCENARIO: 'insecure', LAYOUT: 'reborn' },
     });
   });
 
-  it('should detect the IronClaw agent', () => {
+  it('should detect the IronClaw Reborn installation', () => {
     const agent = getAgentResult(result, 'ironclaw');
     expect(agent).toBeDefined();
-    expect(agent!.agent).toBe('ironclaw');
+    expect(agent!.installation.installDir).toBe('/root/.ironclaw/reborn');
+    expect(agent!.installation.version).toBe('1.4.0');
   });
 
-  it('should detect HTTP webhook public bind (IC-001)', () => {
-    const check = expectCheckFailed(result, 'IC-001');
-    expect(check.severity).toBe('critical');
+  it('should detect the WebChat listener on 0.0.0.0 (IC-001)', () => {
+    expect(expectCheckFailed(result, 'IC-001').severity).toBe('warning');
   });
 
-  it('should detect no TLS on listeners (IC-002)', () => {
-    const check = expectCheckFailed(result, 'IC-002');
-    expect(check.severity).toBe('critical');
+  it('should detect the cleartext LLM endpoint (IC-002)', () => {
+    expect(expectCheckFailed(result, 'IC-002').severity).toBe('warning');
   });
 
-  it('should detect orchestrator public bind (IC-003)', () => {
-    const check = expectCheckFailed(result, 'IC-003');
-    expect(check.severity).toBe('critical');
+  it('should detect the world-readable webui-token (IC-004)', () => {
+    expect(expectCheckFailed(result, 'IC-004').severity).toBe('critical');
   });
 
-  it('should detect missing gateway auth token (IC-004)', () => {
-    const check = expectCheckFailed(result, 'IC-004');
-    expect(check.severity).toBe('warning');
+  it('should detect the local-dev-yolo profile (IC-006)', () => {
+    expect(expectCheckFailed(result, 'IC-006').severity).toBe('critical');
   });
 
-  it('should detect sandbox disabled (IC-005)', () => {
-    const check = expectCheckFailed(result, 'IC-005');
-    expect(check.severity).toBe('critical');
+  it('should detect the minimal approval policy (IC-007)', () => {
+    expect(expectCheckFailed(result, 'IC-007').severity).toBe('warning');
   });
 
-  it('should detect full access sandbox policy (IC-006)', () => {
-    const check = expectCheckFailed(result, 'IC-006');
-    expect(check.severity).toBe('critical');
+  it('should detect the world-readable master key (IC-009)', () => {
+    expect(expectCheckFailed(result, 'IC-009').severity).toBe('critical');
   });
 
-  it('should detect auto-approve tools (IC-007)', () => {
-    const check = expectCheckFailed(result, 'IC-007');
-    expect(check.severity).toBe('critical');
+  it('should detect permissive CORS origins (IC-013)', () => {
+    expect(expectCheckFailed(result, 'IC-013').severity).toBe('warning');
   });
 
-  it('should detect local tools bypass (IC-008)', () => {
-    const check = expectCheckFailed(result, 'IC-008');
-    expect(check.severity).toBe('warning');
-  });
-
-  it('should detect secrets key in env (IC-009)', () => {
-    const check = expectCheckFailed(result, 'IC-009');
-    expect(check.severity).toBe('critical');
-  });
-
-  it('should detect Telegram without owner ID (IC-010)', () => {
-    const check = expectCheckFailed(result, 'IC-010');
-    expect(check.severity).toBe('warning');
-  });
-
-  it('should detect broad sandbox domains (IC-011)', () => {
-    const check = expectCheckFailed(result, 'IC-011');
-    expect(check.severity).toBe('warning');
-  });
-
-  it('should detect Docker auto-pull without digest (IC-012)', () => {
-    const check = expectCheckFailed(result, 'IC-012');
-    expect(check.severity).toBe('warning');
-  });
-
-  it('should also detect generic checks (CFG-001)', () => {
-    expectCheckFailed(result, 'CFG-001');
-  });
-
-  it('should produce a low security score', () => {
-    const agent = getAgentResult(result, 'ironclaw');
-    expect(agent).toBeDefined();
-    expect(agent!.score).toBeLessThan(30);
+  it('should detect the world-readable state database (IC-014)', () => {
+    expect(expectCheckFailed(result, 'IC-014').severity).toBe('warning');
   });
 
   it('should assign a failing grade', () => {
     const agent = getAgentResult(result, 'ironclaw');
-    expect(agent).toBeDefined();
+    expect(agent!.score).toBeLessThan(30);
     expect(agent!.grade).toBe('F');
   });
 });
 
-describe('IronClaw Secure', () => {
+describe('IronClaw 1.x (Reborn) Secure', () => {
   let result: ScanResult;
 
   beforeAll(async () => {
     result = await runVasoScan({
       dockerfile: 'testing/docker/agents/ironclaw.Dockerfile',
-      buildArgs: { SCENARIO: 'secure' },
+      buildArgs: { SCENARIO: 'secure', LAYOUT: 'reborn' },
     });
   });
 
-  it('should detect the IronClaw agent', () => {
+  it('should pass every IronClaw check on a stock onboard config', () => {
+    for (const id of ['IC-001', 'IC-002', 'IC-004', 'IC-006', 'IC-007', 'IC-009', 'IC-013', 'IC-014']) {
+      expectCheckPassed(result, id);
+    }
+  });
+
+  it('should produce a high security score', () => {
     const agent = getAgentResult(result, 'ironclaw');
     expect(agent).toBeDefined();
+    expect(agent!.score).toBeGreaterThanOrEqual(70);
+  });
+});
+
+describe('IronClaw 0.x (legacy) Insecure', () => {
+  let result: ScanResult;
+
+  beforeAll(async () => {
+    result = await runVasoScan({
+      dockerfile: 'testing/docker/agents/ironclaw.Dockerfile',
+      buildArgs: { SCENARIO: 'insecure', LAYOUT: 'legacy' },
+    });
   });
 
-  it('should pass webhook binding check (IC-001)', () => {
-    expectCheckPassed(result, 'IC-001');
-  });
-
-  it('should pass sandbox check (IC-005)', () => {
-    expectCheckPassed(result, 'IC-005');
-  });
-
-  it('should pass auto-approve check (IC-007)', () => {
-    expectCheckPassed(result, 'IC-007');
-  });
-
-  it('should produce a noticeably higher security score than insecure', () => {
-    // Secure-fixture floor. The minimum-secure IronClaw fixture still trips
-    // generic CFG-* warnings the framework-specific config doesn't address
-    // (shell allowlist, workspace restriction, rate limit). The check that
-    // matters here is the gap from insecure (<30) to secure — not hitting
-    // an aspirational A/B threshold.
+  it('should detect the legacy installation', () => {
     const agent = getAgentResult(result, 'ironclaw');
     expect(agent).toBeDefined();
-    expect(agent!.score).toBeGreaterThanOrEqual(40);
+    expect(agent!.installation.profile).toBe('legacy');
+    expect(agent!.installation.version).toBe('0.29.1');
+  });
+
+  it('should detect legacy misconfigurations', () => {
+    expect(expectCheckFailed(result, 'IC-001').severity).toBe('warning');   // HTTP_HOST / GATEWAY_HOST 0.0.0.0
+    expect(expectCheckFailed(result, 'IC-002').severity).toBe('warning');   // OLLAMA_BASE_URL http:// LAN
+    expect(expectCheckFailed(result, 'IC-004').severity).toBe('warning');   // gateway token in config.toml
+    expect(expectCheckFailed(result, 'IC-005').severity).toBe('warning');   // SANDBOX_ENABLED=false
+    expect(expectCheckFailed(result, 'IC-006').severity).toBe('critical');  // full_access + allow
+    expect(expectCheckFailed(result, 'IC-007').severity).toBe('critical');  // AGENT_AUTO_APPROVE_TOOLS
+    expect(expectCheckFailed(result, 'IC-008').severity).toBe('warning');   // ALLOW_LOCAL_TOOLS
+    expect(expectCheckFailed(result, 'IC-009').severity).toBe('critical');  // SECRETS_MASTER_KEY in .env
+    expect(expectCheckFailed(result, 'IC-010').severity).toBe('warning');   // telegram without owner
+    expect(expectCheckFailed(result, 'IC-011').severity).toBe('warning');   // wildcard domains
+    expect(expectCheckFailed(result, 'IC-012').severity).toBe('warning');   // auto-pull by tag
+    expect(expectCheckFailed(result, 'IC-014').severity).toBe('warning');   // world-readable ironclaw.db
+  });
+});
+
+describe('IronClaw 0.x (legacy) Secure', () => {
+  let result: ScanResult;
+
+  beforeAll(async () => {
+    result = await runVasoScan({
+      dockerfile: 'testing/docker/agents/ironclaw.Dockerfile',
+      buildArgs: { SCENARIO: 'secure', LAYOUT: 'legacy' },
+    });
+  });
+
+  it('should pass the legacy IronClaw checks', () => {
+    for (const id of ['IC-001', 'IC-005', 'IC-006', 'IC-007', 'IC-008', 'IC-009', 'IC-011', 'IC-012']) {
+      expectCheckPassed(result, id);
+    }
   });
 });

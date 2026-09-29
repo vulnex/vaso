@@ -1,0 +1,13 @@
+[
+  {
+    "id": "example-openrouter",
+    "aliases": [],
+    "protocol": "open_ai_completions",
+    "api_key_env": "ACME_OPENROUTER_KEY",
+    "api_key_required": true,
+    "default_base_url": "https://openrouter.ai/api/v1",
+    "default_model": "anthropic/claude-3.5-sonnet",
+    "model_env": "ACME_OPENROUTER_MODEL",
+    "description": "Tenant-pinned OpenRouter route (example; rename or delete)"
+  }
+]

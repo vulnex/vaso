@@ -1,15 +1,11 @@
-[gateway]
-host = "0.0.0.0"
-port = 8080
-tls = false
+# IronClaw 0.x (legacy) settings overlay — ~/.ironclaw/config.toml
+[channels]
+gateway_auth_token = "fixture-gateway-token-not-real"
 
-[orchestrator]
-host = "0.0.0.0"
-port = 50051
+[agent]
+auto_approve_tools = true
 
 [sandbox]
 enabled = false
 policy = "full_access"
-
-[agent]
-auto_approve_tools = true
+extra_allowed_domains = ["*"]

@@ -506,6 +506,18 @@ describe('adapter.getModels()', () => {
       const configs = [cfg('/u/.ironclaw/.env', { GATEWAY_PORT: '8080' })];
       expect(await ironclawAdapter.getModels!(configs)).toEqual([]);
     });
+
+    it('1.x: reads [llm.default] provider_id + model from the Reborn config.toml', async () => {
+      const configs = [
+        cfg('/u/.ironclaw/reborn/config.toml', {
+          api_version: 'ironclaw.runtime/v1',
+          llm: { default: { provider_id: 'ollama', model: 'llama3.2' } },
+        }),
+      ];
+      expect(await ironclawAdapter.getModels!(configs)).toEqual([
+        { id: 'llama3.2', provider: 'ollama' },
+      ]);
+    });
   });
 
   describe('lyrie', () => {

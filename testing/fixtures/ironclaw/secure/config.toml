@@ -1,15 +1,7 @@
-[gateway]
-host = "127.0.0.1"
-port = 8080
-tls = true
-
-[orchestrator]
-host = "127.0.0.1"
-port = 50051
+# IronClaw 0.x (legacy) settings overlay — ~/.ironclaw/config.toml
+[agent]
+auto_approve_tools = false
 
 [sandbox]
 enabled = true
-policy = "restricted"
-
-[agent]
-auto_approve_tools = false
+policy = "readonly"
