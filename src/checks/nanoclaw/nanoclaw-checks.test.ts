@@ -117,6 +117,21 @@ describe('NC-001: Overbroad Mount Allowlist (allowedRoots)', () => {
     }
   });
 
+  it('judges roots inside a home that lives under a system dir (root: /root) as home paths', async () => {
+    const rootHome = new SnapshotFSProvider({
+      version: 1, hostname: 'test-host', platform: 'linux', homedir: '/root', timestamp: '2026-09-29T00:00:00Z',
+      privilege: { uid: 0, username: 'root', isRoot: true, sudoAvailable: false, escalated: false, scannedUsers: ['root'], skippedPaths: [] },
+      files: {}, directories: {}, directoryModes: { '/': 0o755, '/root': 0o700 }, commandOutputs: {}, env: {},
+    });
+    const config = allowlist({ allowedRoots: [{ path: '~/projects', allowReadWrite: true }, { path: '~/Documents/work', allowReadWrite: false }] },
+      '/root/.config/nanoclaw/mount-allowlist.json');
+    const r = await check.run({
+      installation: { agent: 'nanoclaw', installDir: '/root/nanoclaw', configFiles: [config] },
+      configs: [config], platform: 'linux', fs: rootHome,
+    });
+    expect(r.passed).toBe(true);
+  });
+
   it('system directories: critical when writable, warning when read-only', async () => {
     expect((await run([{ path: '/etc', allowReadWrite: true }])).severity).toBe('critical');
     expect((await run([{ path: '/etc', allowReadWrite: false }])).severity).toBe('warning');

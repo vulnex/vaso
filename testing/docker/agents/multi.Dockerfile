@@ -8,22 +8,20 @@ ARG SCENARIO=insecure
 # OpenClaw
 COPY testing/fixtures/openclaw/${SCENARIO}/ /root/.openclaw/
 
-# NanoClaw
-COPY testing/fixtures/nanoclaw/${SCENARIO}/ /root/.config/nanoclaw/
-COPY testing/fixtures/nanoclaw/${SCENARIO}/.nanoclaw.env /root/.nanoclaw.env
+# NanoClaw (v2: git checkout + host config dir)
+COPY testing/fixtures/nanoclaw/${SCENARIO}/checkout/ /root/nanoclaw/
+COPY testing/fixtures/nanoclaw/${SCENARIO}/config/ /root/.config/nanoclaw/
 
 # PicoClaw
 COPY testing/fixtures/picoclaw/${SCENARIO}/ /root/.picoclaw/
 
 # Set permissions
 RUN if [ "${SCENARIO}" = "insecure" ]; then \
-      chmod -R 644 /root/.openclaw/ /root/.config/nanoclaw/ /root/.picoclaw/; \
-      find /root/.openclaw /root/.config/nanoclaw /root/.picoclaw -type d -exec chmod 755 {} +; \
-      chmod 644 /root/.nanoclaw.env; \
+      chmod -R 644 /root/.openclaw/ /root/.config/nanoclaw/ /root/.picoclaw/ /root/nanoclaw/; \
+      find /root/.openclaw /root/.config/nanoclaw /root/.picoclaw /root/nanoclaw -type d -exec chmod 755 {} +; \
     else \
-      chmod -R 600 /root/.openclaw/ /root/.config/nanoclaw/ /root/.picoclaw/; \
-      find /root/.openclaw /root/.config/nanoclaw /root/.picoclaw -type d -exec chmod 700 {} +; \
-      chmod 600 /root/.nanoclaw.env; \
+      chmod -R 600 /root/.openclaw/ /root/.config/nanoclaw/ /root/.picoclaw/ /root/nanoclaw/; \
+      find /root/.openclaw /root/.config/nanoclaw /root/.picoclaw /root/nanoclaw -type d -exec chmod 700 {} +; \
     fi
 
 # Secure scenarios additionally simulate a deployed NemoClaw sandbox so the

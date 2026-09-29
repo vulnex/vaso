@@ -23,10 +23,10 @@ describe('PicoClaw Insecure', () => {
     expect(agent!.agent).toBe('picoclaw');
   });
 
-  it('should detect plaintext API keys in .security.yml (CFG-002)', () => {
-    const check = expectCheckFailed(result, 'CFG-002');
-    expect(check.severity).toBe('critical');
-    expect(check.evidence?.some(e => e.file?.endsWith('/.picoclaw/.security.yml'))).toBe(true);
+  it('treats .security.yml as the secret store (CFG-002), leaving its exposure to CFG-003', () => {
+    const agent = getAgentResult(result, 'picoclaw');
+    const check = agent!.results.find(r => r.id === 'CFG-002');
+    expect(check?.evidence?.some(e => e.file?.endsWith('/.picoclaw/.security.yml')) ?? false).toBe(false);
   });
 
   it('should detect gateway bound to 0.0.0.0 (CFG-001)', () => {

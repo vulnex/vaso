@@ -1,3 +1,4 @@
+import { tmpdir } from 'node:os';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { ScanResult, CheckResult, FixResult, CheckModule, ScanContext } from '../core/types.js';
 import { RemediationEngine } from './engine.js';
@@ -223,6 +224,18 @@ describe('RemediationEngine interactive fix', () => {
     expect(results).toHaveLength(1);
     expect(results[0].applied).toBe(false);
     expect(results[0].message).toContain('Fix failed');
+  });
+
+  it('applies a fix whose evidence names a directory or a non-path', async () => {
+    const check = makeFixableCheck('TST-001');
+    const registry = new CheckRegistry();
+    registry.register(check);
+    const engine = new RemediationEngine(registry);
+
+    const dirResults = await engine.fix(makeScanResultWithEvidence('TST-001', tmpdir()), { yes: true });
+    expect(dirResults[0].applied).toBe(true);
+    const psResults = await engine.fix(makeScanResultWithEvidence('TST-001', 'ps'), { yes: true });
+    expect(psResults[0].applied).toBe(true);
   });
 
   it('warns and skips in non-TTY environment without --yes', async () => {

@@ -1,5 +1,5 @@
-import { mkdir, copyFile, readFile, writeFile } from 'node:fs/promises';
-import { join, dirname } from 'node:path';
+import { mkdir, copyFile, readFile, writeFile, stat } from 'node:fs/promises';
+import { join, dirname, isAbsolute } from 'node:path';
 import { homedir } from 'node:os';
 import chalk from 'chalk';
 import type { ScanResult, FixResult, AgentScanResult, CheckResult } from '../core/types.js';
@@ -117,6 +117,11 @@ export class RemediationEngine {
   }
 
   private async backupFile(filePath: string): Promise<void> {
+    // Evidence can name a directory (permission fixes) or something that is
+    // not a path at all (`ps`, an advisory URL); only regular files are copied.
+    // A missing file still fails the backup (and so blocks the fix).
+    if (!isAbsolute(filePath)) return;
+    if ((await stat(filePath)).isDirectory()) return;
     const destDir = join(this.backupDir, dirname(filePath));
     await mkdir(destDir, { recursive: true });
     await copyFile(filePath, join(this.backupDir, filePath));

@@ -77,7 +77,9 @@ function classify(root: Root, home: string, checkout: string | undefined): { det
   if (KERNEL_DIRS.some(d => contains(abs, d) || contains(d, abs))) {
     return { severity: 'critical', detail: `${label} exposes kernel interface ${abs} (container escape)` };
   }
-  if (SYSTEM_DIRS.some(d => contains(d, abs))) {
+  // Paths inside the user's home are judged below, even when home itself is
+  // under a system directory (root's home is /root).
+  if (!contains(home, abs) && SYSTEM_DIRS.some(d => contains(d, abs))) {
     return {
       severity: root.readWrite ? 'critical' : 'warning',
       detail: `${label} exposes system directory ${abs}${root.readWrite ? ' writable — host takeover' : ''}`,
