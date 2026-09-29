@@ -1,38 +1,47 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { envString, envTrue, isRealValue, lyrieEnvConfigs } from './env.js';
 
-const PUBLIC_HOSTS = new Set(['0.0.0.0', '::', '0:0:0:0:0:0:0:0']);
+function isLoopback(host: string): boolean {
+  const h = host.replace(/^\[|\]$/g, '').toLowerCase();
+  return h === 'localhost' || h === '::1' || h.startsWith('127.');
+}
 
+/**
+ * gateway/src/index.ts: WebChat starts only with LYRIE_WEBCHAT_ENABLED=true;
+ * host LYRIE_WEBCHAT_HOST (default 127.0.0.1), port LYRIE_WEBCHAT_PORT
+ * (default 7777), auth LYRIE_WEBCHAT_TOKEN. In 3.4.0 the WebChat server is
+ * a skeleton (Bun.serve commented out) and the token is not checked
+ * anywhere, so this is configuration risk rather than a live listener.
+ */
 export const ly010 = defineCheck({
   id: 'LY-010',
-  name: 'WebChat Unauthenticated and Non-Loopback',
+  name: 'WebChat Enabled on Non-Loopback Host Without Token',
   category: 'lyrie',
-  severity: 'critical',
-  description: 'Detect WebChat enabled with no auth token and bound to a non-loopback host — anyone reachable on the network can talk to the agent.',
+  severity: 'warning',
+  description: 'Detect LYRIE_WEBCHAT_ENABLED=true with LYRIE_WEBCHAT_HOST set to a non-loopback address and no LYRIE_WEBCHAT_TOKEN. Lyrie 3.4.0 ships the WebChat listener as a skeleton (nothing binds yet), so this is a latent exposure: the configuration asks for an unauthenticated chat endpoint reachable from the network.',
   supportedAgents: ['lyrie'],
 
   async run(ctx, h) {
     const evidence: Evidence[] = [];
-    for (const config of ctx.configs) {
-      const port = config.data.LYRIE_WEBCHAT_PORT as string | undefined;
-      if (!port) continue;
+    for (const config of lyrieEnvConfigs(ctx.configs)) {
+      if (!envTrue(config, 'LYRIE_WEBCHAT_ENABLED')) continue;
 
-      const host = (config.data.LYRIE_WEBCHAT_HOST as string | undefined) ?? '127.0.0.1';
-      const authToken = config.data.LYRIE_WEBCHAT_AUTH_TOKEN as string | undefined;
-      const hasAuth = typeof authToken === 'string' && authToken.trim() !== '' && !/^\$\{?[A-Z_]+\}?$/.test(authToken.trim());
-      const isPublic = PUBLIC_HOSTS.has(host) || (!host.startsWith('127.') && host !== 'localhost' && host !== '::1');
+      const host = envString(config, 'LYRIE_WEBCHAT_HOST') || '127.0.0.1';
+      if (isLoopback(host)) continue;
+      if (isRealValue(envString(config, 'LYRIE_WEBCHAT_TOKEN'))) continue;
 
-      if (isPublic && !hasAuth) {
-        evidence.push({
-          file: config.filePath,
-          detail: `WebChat bound to ${host}:${port} with no LYRIE_WEBCHAT_AUTH_TOKEN — agent is reachable unauthenticated`,
-        });
-      }
+      const port = envString(config, 'LYRIE_WEBCHAT_PORT') || '7777';
+      evidence.push({
+        file: config.filePath,
+        snippet: `LYRIE_WEBCHAT_HOST=${host}`,
+        detail: `WebChat enabled on ${host}:${port} with no LYRIE_WEBCHAT_TOKEN — anyone who can reach it could talk to the agent (the 3.4.0 WebChat listener is not wired yet, so nothing binds today)`,
+      });
     }
     return h.fromEvidence(evidence, {
-      passed: 'WebChat is loopback-only or has an auth token',
-      failed: () => 'WebChat is reachable on a public interface without authentication',
-      fixDescription: 'Set LYRIE_WEBCHAT_HOST=127.0.0.1, or set a strong LYRIE_WEBCHAT_AUTH_TOKEN and put TLS-terminating proxy in front',
+      passed: 'WebChat is disabled, loopback-only, or has a token',
+      failed: () => 'WebChat configured on a network interface without authentication',
+      fixDescription: 'Set LYRIE_WEBCHAT_HOST=127.0.0.1 (front it with an authenticating TLS proxy if remote access is needed), set a strong LYRIE_WEBCHAT_TOKEN, or remove LYRIE_WEBCHAT_ENABLED',
     });
   },
 });

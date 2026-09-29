@@ -1,170 +1,204 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { join } from 'node:path';
-import { lyrieAdapter } from './lyrie.js';
+import { describe, it, expect } from 'vitest';
+import type { FSProvider } from '../core/fs-provider.js';
+import type { ProbeSnapshot } from '../core/snapshot-types.js';
+import { SnapshotFSProvider } from '../core/snapshot-fs-provider.js';
+import { lyrieAdapter, findLyrieCheckouts, isLyrieCheckout, lyrieShieldBinaryPaths } from './lyrie.js';
 
-vi.mock('node:fs/promises', () => ({
-  access: vi.fn(),
-  readdir: vi.fn(),
-  readFile: vi.fn(),
-  stat: vi.fn(),
-  realpath: vi.fn(),
-}));
+const HOME = '/home/test';
+const STATE = `${HOME}/.lyrie`;
+const PKG = (version: string, name = 'lyrie-agent') => JSON.stringify({ name, version, workspaces: ['packages/core'] });
 
-vi.mock('node:child_process', () => ({
-  execFileSync: vi.fn(),
-  execFile: vi.fn(),
-}));
-
-vi.mock('../core/config-loader.js', () => ({
-  loadConfig: vi.fn(),
-}));
-
-import { access } from 'node:fs/promises';
-import { loadConfig } from '../core/config-loader.js';
-import { execFileSync } from 'node:child_process';
-
-const mockAccess = vi.mocked(access);
-const mockLoadConfig = vi.mocked(loadConfig);
-const mockExecFileSync = vi.mocked(execFileSync);
-
-function setExistingPaths(paths: string[]): void {
-  const pathSet = new Set(paths);
-  mockAccess.mockImplementation(async (path) => {
-    if (pathSet.has(path as string)) return undefined;
-    throw new Error('ENOENT');
-  });
+/** In-memory FSProvider: `files` have content, `dirs` exist, `env` is the host env. */
+function memFs(files: Record<string, string>, dirs: string[] = [], env: Record<string, string> = {}): FSProvider {
+  const has = (p: string) => p in files || dirs.includes(p)
+    || Object.keys(files).some(f => f.startsWith(`${p}/`));
+  return {
+    readFile: async (p: string) => {
+      if (!(p in files)) throw new Error(`ENOENT: ${p}`);
+      return files[p];
+    },
+    readBytes: async () => new Uint8Array(),
+    readdir: async () => [],
+    readdirEntries: async () => [],
+    access: async (p: string) => has(p),
+    stat: async () => ({ mode: 0o600, isFile: () => true, isDirectory: () => false }),
+    realpath: async (p: string) => p,
+    readlink: async () => { throw new Error('not a link'); },
+    exec: async () => ({ stdout: '', stderr: '', exitCode: 1 }),
+    execSync: () => { throw new Error('exec not expected'); },
+    getEnv: (k: string) => env[k],
+    platform: 'linux',
+    homedir: () => HOME,
+    hostname: () => 'test-host',
+  } as FSProvider;
 }
 
-function mockEnv(filePath: string, data: Record<string, unknown> = {}) {
+/** Live-like layout: checkout at ~/lyrie-ai (.env from .env.example + real
+ *  keys), ~/.lyrie state from the Python CLI and a nanobot migration. */
+function liveLayout(extra: Record<string, string> = {}): Record<string, string> {
   return {
-    raw: Object.entries(data).map(([k, v]) => `${k}=${v}`).join('\n'),
-    format: 'env' as const,
-    filePath,
-    data,
+    [`${HOME}/lyrie-ai/package.json`]: PKG('3.4.0'),
+    [`${HOME}/lyrie-ai/.env`]: [
+      'ANTHROPIC_API_KEY=sk-ant-...',
+      'LYRIE_MODE=hybrid',
+      'LYRIE_SHIELD_MODE=active',
+      'NODE_ENV=development',
+      'ANTHROPIC_API_KEY=sk-ant-api03-TESTTESTTEST',
+      'LYRIE_TELEGRAM_TOKEN=7000000001:AAtest',
+      'LYRIE_WEBCHAT_ENABLED=true',
+      'LYRIE_WEBCHAT_HOST=0.0.0.0',
+    ].join('\n'),
+    [`${STATE}/config.json`]: JSON.stringify({ ANTHROPIC_API_KEY: 'sk-ant-api03-TEST' }),
+    [`${STATE}/migrations/nanobot-1.json`]: JSON.stringify({ platform: 'nanobot', success: true, errors: [] }),
+    ...extra,
   };
 }
 
 describe('Lyrie adapter', () => {
-  beforeEach(() => {
-    vi.resetAllMocks();
-    mockExecFileSync.mockImplementation(() => { throw new Error('not found'); });
+  it('returns [] when neither a checkout nor ~/.lyrie state exists', async () => {
+    expect(await lyrieAdapter.detect({ fs: memFs({}) })).toEqual([]);
   });
 
-  it('returns empty array when nothing found', async () => {
-    setExistingPaths([]);
-    const result = await lyrieAdapter.detect();
-    expect(result).toEqual([]);
+  it('detects the checkout, loads its .env and the Python CLI key store, version from package.json', async () => {
+    const [inst] = await lyrieAdapter.detect({ fs: memFs(liveLayout(), [`${STATE}/skills`]) });
+    expect(inst.agent).toBe('lyrie');
+    expect(inst.installDir).toBe(`${HOME}/lyrie-ai`);
+    expect(inst.version).toBe('3.4.0');
+    expect(inst.cliBinary).toBeUndefined();
+    expect(inst.configFiles.map(c => c.filePath)).toEqual([`${HOME}/lyrie-ai/.env`, `${STATE}/config.json`]);
+    const env = inst.configFiles[0];
+    expect(env.format).toBe('env');
+    expect(env.data.LYRIE_TELEGRAM_TOKEN).toBe('7000000001:AAtest');
+    expect(env.data.ANTHROPIC_API_KEY).toBe('sk-ant-api03-TESTTESTTEST'); // last duplicate wins
+    expect(inst.skillsDir).toBe(`${STATE}/skills`);
+    // WebChat is enabled on 0.0.0.0 but 3.4.0 binds nothing — no gateway reported
+    expect(inst.gateway).toBeUndefined();
   });
 
-  it('detects installation from ~/.lyrie/memory', async () => {
-    const home = process.env.HOME || '/home/testuser';
-    const memoryDir = join(home, '.lyrie', 'memory');
-    const envPath = join(home, '.lyrie', '.env');
+  it('never reports the Python lyrie CLI (lyrie-omega) version as the agent version', async () => {
+    const fs = memFs({ [`${STATE}/config.json`]: '{}', [`${HOME}/.local/bin/lyrie`]: '#!/usr/bin/env python3' });
+    const [inst] = await lyrieAdapter.detect({ fs });
+    expect(inst.installDir).toBe(STATE);
+    expect(inst.version).toBeUndefined();
+    expect(inst.otherInstalls).toBeUndefined();
+  });
 
-    setExistingPaths([memoryDir, envPath]);
-    mockLoadConfig.mockImplementation(async (path) => {
-      if (path === envPath) return mockEnv(envPath, { LYRIE_SHIELD_MODE: 'active' });
-      throw new Error('ENOENT');
+  it('ignores directories whose package.json is not lyrie-agent', async () => {
+    const fs = memFs({ [`${HOME}/lyrie/package.json`]: PKG('1.0.0', 'lyrie-website') });
+    expect(await lyrieAdapter.detect({ fs })).toEqual([]);
+    expect(await isLyrieCheckout(`${HOME}/lyrie`, fs)).toBe(false);
+  });
+
+  it('finds a checkout cloned into ~/.lyrie by the upstream installer', async () => {
+    const fs = memFs({ [`${STATE}/package.json`]: PKG('3.4.0'), [`${STATE}/.env`]: 'NODE_ENV=production' });
+    const [inst] = await lyrieAdapter.detect({ fs });
+    expect(inst.installDir).toBe(STATE);
+    expect(inst.version).toBe('3.4.0');
+    expect(inst.configFiles.map(c => c.filePath)).toEqual([`${STATE}/.env`]);
+  });
+
+  it('prefers the checkout referenced by the installed service unit and lists other checkouts', async () => {
+    const files = {
+      [`${HOME}/lyrie-ai/package.json`]: PKG('3.3.0'),
+      [`${HOME}/lyrie-ai/.env`]: 'NODE_ENV=production',
+      [`${HOME}/work/lyrie-prod/package.json`]: PKG('3.4.0'),
+      [`${HOME}/work/lyrie-prod/.env`]: 'LYRIE_TELEGRAM_TOKEN=1:x',
+      [`${HOME}/.config/systemd/user/ai-lyrie-daemon.service`]: [
+        '[Service]',
+        'Type=simple',
+        `ExecStart=${HOME}/.bun/bin/bun run ${HOME}/work/lyrie-prod/scripts/daemon.ts --channel telegram --interval 5m`,
+      ].join('\n'),
+    };
+    const fs = memFs(files);
+    const checkouts = await findLyrieCheckouts(fs);
+    expect(checkouts.map(c => c.dir)).toEqual([`${HOME}/work/lyrie-prod`, `${HOME}/lyrie-ai`]);
+
+    const [inst] = await lyrieAdapter.detect({ fs });
+    expect(inst.installDir).toBe(`${HOME}/work/lyrie-prod`);
+    expect(inst.version).toBe('3.4.0');
+    expect(inst.configFiles.map(c => c.filePath)).toEqual([`${HOME}/work/lyrie-prod/.env`, `${HOME}/lyrie-ai/.env`]);
+    expect(inst.otherInstalls).toEqual([{ path: `${HOME}/lyrie-ai`, version: '3.3.0' }]);
+  });
+
+  it('reads the checkout from a launchd plist ProgramArguments', async () => {
+    const files = {
+      [`${HOME}/code/agents/lyrie/package.json`]: PKG('3.4.0'),
+      [`${HOME}/Library/LaunchAgents/ai.lyrie.daemon.plist`]:
+        `<plist><dict><key>ProgramArguments</key><array><string>/opt/homebrew/bin/bun</string><string>run</string><string>${HOME}/code/agents/lyrie/scripts/daemon.ts</string></array></dict></plist>`,
+    };
+    const [inst] = await lyrieAdapter.detect({ fs: memFs(files) });
+    expect(inst.installDir).toBe(`${HOME}/code/agents/lyrie`);
+  });
+
+  it('detects the same install over a remote snapshot (probe-collected files only)', async () => {
+    const files: ProbeSnapshot['files'] = {};
+    for (const [path, content] of Object.entries(liveLayout())) {
+      files[path] = { content, mode: path.endsWith('/.env') ? 0o664 : 0o600, exists: true };
+    }
+    // Candidates the probe looked for but did not find
+    files[`${HOME}/lyrie/package.json`] = { content: '', mode: 0, exists: false };
+    files[`${STATE}/package.json`] = { content: '', mode: 0, exists: false };
+    const fs = new SnapshotFSProvider({
+      version: 1, hostname: 'remote', platform: 'linux', homedir: HOME, timestamp: '2026-01-01T00:00:00Z',
+      privilege: { uid: 1000, username: 'test', isRoot: false, sudoAvailable: false, escalated: false, scannedUsers: ['test'], skippedPaths: [] },
+      files, directories: {}, commandOutputs: {}, env: {},
     });
-
-    const result = await lyrieAdapter.detect();
-    expect(result).toHaveLength(1);
-    expect(result[0].agent).toBe('lyrie');
-    expect(result[0].installDir).toBe(join(home, '.lyrie'));
-    expect(result[0].configFiles).toHaveLength(1);
+    const [inst] = await lyrieAdapter.detect({ fs });
+    expect(inst.installDir).toBe(`${HOME}/lyrie-ai`);
+    expect(inst.version).toBe('3.4.0');
+    expect(inst.configFiles.map(c => c.filePath)).toEqual([`${HOME}/lyrie-ai/.env`, `${STATE}/config.json`]);
   });
 
-  it('detects installation from pairing.json alone', async () => {
-    const home = process.env.HOME || '/home/testuser';
-    const pairingPath = join(home, '.lyrie', 'pairing.json');
-
-    setExistingPaths([pairingPath]);
-    mockLoadConfig.mockImplementation(async () => { throw new Error('ENOENT'); });
-
-    const result = await lyrieAdapter.detect();
-    expect(result).toHaveLength(1);
-    expect(result[0].agent).toBe('lyrie');
+  it('detects state-only installs (pairing.json / migrations)', async () => {
+    const [inst] = await lyrieAdapter.detect({ fs: memFs({ [`${STATE}/pairing.json`]: '{"pending":[],"approved":[]}' }) });
+    expect(inst.installDir).toBe(STATE);
+    expect(inst.configFiles).toEqual([]);
   });
 
-  it('extracts WebChat gateway info when port is set', async () => {
-    const home = process.env.HOME || '/home/testuser';
-    const memoryDir = join(home, '.lyrie', 'memory');
-    const envPath = join(home, '.lyrie', '.env');
-
-    setExistingPaths([memoryDir, envPath]);
-    mockLoadConfig.mockImplementation(async (path) => {
-      if (path === envPath) {
-        return mockEnv(envPath, {
-          LYRIE_WEBCHAT_HOST: '0.0.0.0',
-          LYRIE_WEBCHAT_PORT: '8765',
-        });
-      }
-      throw new Error('ENOENT');
-    });
-
-    const result = await lyrieAdapter.detect();
-    expect(result[0].gateway).toEqual({ host: '0.0.0.0', port: 8765 });
+  it('credential paths are the checkout .env and ~/.lyrie/config.json on the scanned host', () => {
+    const fs = memFs({});
+    expect(lyrieAdapter.getCredentialPaths!(`${HOME}/lyrie-ai`, fs)).toEqual([
+      `${HOME}/lyrie-ai/.env`,
+      `${STATE}/config.json`,
+    ]);
   });
 
-  it('returns no gateway info when WebChat not configured', async () => {
-    const home = process.env.HOME || '/home/testuser';
-    const memoryDir = join(home, '.lyrie', 'memory');
-
-    setExistingPaths([memoryDir]);
-    mockLoadConfig.mockImplementation(async () => { throw new Error('ENOENT'); });
-
-    const result = await lyrieAdapter.detect();
-    expect(result[0].gateway).toBeUndefined();
+  it('Shield binary paths match AgenticThreatBridge.findDefaultBinary', () => {
+    expect(lyrieShieldBinaryPaths('/srv/lyrie')).toEqual([
+      '/srv/lyrie/packages/shield/target/release/lyrie-shield',
+      '/srv/lyrie/packages/shield/target/debug/lyrie-shield',
+    ]);
   });
 
-  it('detects CLI binary via which fallback', async () => {
-    setExistingPaths([]);
-    mockExecFileSync.mockReturnValue('/usr/local/bin/lyrie\n' as any);
-
-    const result = await lyrieAdapter.detect();
-    expect(result).toHaveLength(1);
-    expect(result[0].cliBinary).toBe('/usr/local/bin/lyrie');
-  });
-
-  it('returns correct skills dir', () => {
-    expect(lyrieAdapter.getSkillsDir('/home/user/.lyrie'))
-      .toBe(join('/home/user/.lyrie', 'skills'));
-  });
-
-  it('returns correct config paths', () => {
-    const paths = lyrieAdapter.getConfigPaths();
-    expect(paths.some(p => p.endsWith('.env'))).toBe(true);
-  });
-
-  it('returns memory files', () => {
-    const files = lyrieAdapter.getMemoryFiles!('/home/user/.lyrie');
-    expect(files).toContain('/home/user/.lyrie/memory/lyrie-memory.db');
-    expect(files).toContain('/home/user/.lyrie/edits.json');
-    expect(files).toContain('/home/user/.lyrie/pairing.json');
-  });
-
-  it('returns CLI command', () => {
-    expect(lyrieAdapter.getCLICommand!()).toBe('lyrie');
+  it('has no CLI command (the `lyrie` binary is the separate lyrie-omega product)', () => {
+    expect(lyrieAdapter.getCLICommand).toBeUndefined();
   });
 
   it('zone graph has 5 zones with shield-bypass and pairing-bypass inversions', () => {
     const graph = lyrieAdapter.getZoneGraph!();
     expect(graph.zones).toHaveLength(5);
     const inversions = graph.edges.filter(e => e.triggerCheckIds && e.triggerCheckIds.length > 0);
-    expect(inversions).toHaveLength(2);
     expect(inversions.map(e => e.label)).toEqual(
       expect.arrayContaining(['shield bypass', 'DM pairing bypass']),
     );
   });
 
-  it('probe manifest covers memory archive, migrations, and channel env prefixes', () => {
-    const manifest = lyrieAdapter.getProbeManifest!();
-    expect(manifest.filePaths).toContain('~/.lyrie/.env');
-    expect(manifest.globPatterns).toContain('~/.lyrie/memory/archive/*.db');
-    expect(manifest.globPatterns).toContain('~/.lyrie/migrations/*.json');
-    expect(manifest.envPrefixes).toContain('LYRIE_');
-    expect(manifest.envPrefixes).toContain('TELEGRAM_');
-    expect(manifest.envPrefixes).toContain('DAYTONA_');
-    expect(manifest.envPrefixes).toContain('MODAL_');
+  it('probe manifest ships checkout configs and keeps memory/binaries metadata-only', () => {
+    const m = lyrieAdapter.getProbeManifest!();
+    expect(m.filePaths).toEqual(expect.arrayContaining([
+      '~/lyrie-ai/.env', '~/lyrie-ai/package.json', '~/.lyrie/.env', '~/.lyrie/package.json',
+      '~/.lyrie/config.json', '~/.lyrie/pairing.json', '~/.lyrie/edits.json', '~/.lyrie/mcp.json',
+      '~/.config/systemd/user/ai-lyrie-daemon.service', '~/Library/LaunchAgents/ai.lyrie.daemon.plist',
+    ]));
+    expect(m.globPatterns).toContain('~/.lyrie/migrations/*.json');
+    expect(m.metadataGlobPatterns).toEqual(expect.arrayContaining([
+      '~/.lyrie/memory/lyrie-memory.db',
+      '~/.lyrie/memory/archive/*',
+      '~/lyrie-ai/packages/shield/target/release/lyrie-shield',
+    ]));
+    const content = [...m.filePaths, ...m.globPatterns];
+    expect(content.some(p => p.includes('/memory/'))).toBe(false);
+    expect(m.envPrefixes).toContain('LYRIE_');
+    expect(m.commands).toEqual([]);
   });
 });

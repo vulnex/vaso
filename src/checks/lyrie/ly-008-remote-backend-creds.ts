@@ -1,51 +1,44 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { envString, isRealValue, lyrieEnvConfigs } from './env.js';
 
+/**
+ * packages/core/src/backends/factory.ts: LYRIE_BACKEND=daytona|modal runs
+ * scans in a remote sandbox (DAYTONA_API_KEY / MODAL_TOKEN_ID+SECRET), which
+ * uploads the scanned repository to that provider.
+ */
 export const ly008 = defineCheck({
   id: 'LY-008',
-  name: 'Remote Backend Credentials in Plaintext .env',
+  name: 'Remote Scan Backend With Plaintext Credentials',
   category: 'lyrie',
   severity: 'warning',
-  description: 'Detect LYRIE_BACKEND=daytona or modal with API credentials stored plaintext in .env — every Lyrie scan ships repo contents to the remote backend.',
+  description: 'Detect LYRIE_BACKEND=daytona or modal with DAYTONA_API_KEY / MODAL_TOKEN_* stored in plaintext in the .env — every Lyrie scan ships the target repository to the remote sandbox provider, and the long-lived provider credential sits on disk.',
   supportedAgents: ['lyrie'],
 
   async run(ctx, h) {
     const evidence: Evidence[] = [];
-    for (const config of ctx.configs) {
-      const backend = config.data.LYRIE_BACKEND as string | undefined;
-      if (backend !== 'daytona' && backend !== 'modal') continue;
-
-      const isPlaceholder = (v: string) => /^\$\{?[A-Z_]+\}?$/.test(v.trim());
-
-      if (backend === 'daytona') {
-        const key = config.data.DAYTONA_API_KEY as string | undefined;
-        if (key && key.trim() !== '' && !isPlaceholder(key)) {
-          evidence.push({
-            file: config.filePath,
-            detail: 'LYRIE_BACKEND=daytona with plaintext DAYTONA_API_KEY — every scan exfiltrates repo contents to Daytona',
-          });
-        }
+    for (const config of lyrieEnvConfigs(ctx.configs)) {
+      const backend = envString(config, 'LYRIE_BACKEND')?.toLowerCase();
+      if (backend === 'daytona' && isRealValue(envString(config, 'DAYTONA_API_KEY'))) {
+        evidence.push({
+          file: config.filePath,
+          snippet: 'LYRIE_BACKEND=daytona',
+          detail: 'Scans run on Daytona with a plaintext DAYTONA_API_KEY — repository contents leave the host',
+        });
       }
-
-      if (backend === 'modal') {
-        const tokenId = config.data.MODAL_TOKEN_ID as string | undefined;
-        const tokenSecret = config.data.MODAL_TOKEN_SECRET as string | undefined;
-        if (
-          (tokenId && tokenId.trim() !== '' && !isPlaceholder(tokenId)) ||
-          (tokenSecret && tokenSecret.trim() !== '' && !isPlaceholder(tokenSecret))
-        ) {
-          evidence.push({
-            file: config.filePath,
-            detail: 'LYRIE_BACKEND=modal with plaintext MODAL_TOKEN_* — every scan exfiltrates repo contents to Modal',
-          });
-        }
+      if (backend === 'modal' && (isRealValue(envString(config, 'MODAL_TOKEN_ID')) || isRealValue(envString(config, 'MODAL_TOKEN_SECRET')))) {
+        evidence.push({
+          file: config.filePath,
+          snippet: 'LYRIE_BACKEND=modal',
+          detail: 'Scans run on Modal with plaintext MODAL_TOKEN_* — repository contents leave the host',
+        });
       }
     }
 
     return h.fromEvidence(evidence, {
-      passed: 'No remote-backend credentials in plaintext .env',
-      failed: () => 'Remote backend uses plaintext credentials and exfiltrates scan inputs',
-      fixDescription: 'Move DAYTONA_API_KEY / MODAL_TOKEN_* to a secrets manager and reference via $ENV_VAR substitution; or set LYRIE_BACKEND=local',
+      passed: 'No remote scan backend with plaintext credentials',
+      failed: () => 'Remote scan backend configured with plaintext credentials',
+      fixDescription: 'Unset LYRIE_BACKEND (defaults to local), or inject DAYTONA_API_KEY / MODAL_TOKEN_* from a secrets manager at runtime instead of the .env',
     });
   },
 });

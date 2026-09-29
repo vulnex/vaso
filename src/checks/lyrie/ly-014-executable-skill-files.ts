@@ -1,19 +1,27 @@
 import { join } from 'node:path';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { lyrieStateDir } from '../../adapters/lyrie.js';
 
-const EXECUTABLE_EXTS = ['.ts', '.js', '.mjs', '.py', '.sh'];
+const EXECUTABLE_EXTS = ['.ts', '.js', '.mjs', '.cjs', '.py', '.sh'];
 
+/**
+ * Lyrie's SkillLoader only reads SKILL.md manifests (prompt content that
+ * passes the Shield's input scan); code shipped beside them runs when the
+ * agent invokes it through its exec/code tools, where the Shield applies
+ * only its fixed dangerous-command patterns. Inventory, not a verdict — the
+ * SKL-* checks analyze the code itself.
+ */
 export const ly014 = defineCheck({
   id: 'LY-014',
-  name: 'Executable Skill Files Outside Shield Scope',
+  name: 'Executable Code in Lyrie Skills Directory',
   category: 'lyrie',
-  severity: 'warning',
-  description: 'Detect executable skill files (.ts/.js/.py/.sh) in the skills directory. Lyrie\'s SkillManager Shield filter applies to declarative SKILL.md content; executable code paths are run by the skill\'s own loader and may not pass through the Shield gate.',
+  severity: 'info',
+  description: 'Inventory executable files (.ts/.js/.py/.sh) in ~/.lyrie/skills. Lyrie loads skills as SKILL.md prompt manifests; bundled scripts run when a skill tells the agent to execute them, where the Shield only applies its fixed dangerous-command patterns. Review their provenance (SKL-* checks analyze the code).',
   supportedAgents: ['lyrie'],
 
   async run(ctx, h) {
-    const skillsDir = ctx.installation.skillsDir ?? join(ctx.installation.installDir, 'skills');
+    const skillsDir = ctx.installation.skillsDir ?? join(lyrieStateDir(ctx.fs), 'skills');
     if (!(await ctx.fs.access(skillsDir))) return h.passed('Skills directory not present');
 
     const evidence: Evidence[] = [];
@@ -26,9 +34,10 @@ export const ly014 = defineCheck({
       });
 
       if (executables.length > 0) {
+        const names = executables.slice(0, 5).map(e => e.name).join(', ');
         evidence.push({
           file: skillsDir,
-          detail: `${executables.length} executable skill file(s) found — confirm each is registered through SkillManager so Shield scans its output`,
+          detail: `${executables.length} executable file(s) in skills (${names}${executables.length > 5 ? ', …' : ''}) — verify their source before the agent runs them`,
         });
       }
     } catch {
@@ -36,9 +45,9 @@ export const ly014 = defineCheck({
     }
 
     return h.fromEvidence(evidence, {
-      passed: 'No executable skill files found outside Shield scope',
-      failed: () => 'Executable skill files present — verify Shield coverage',
-      fixDescription: 'Audit each .ts/.js/.py skill: register it through Lyrie\'s SkillManager so its output passes through `SkillManager.shieldFilter`, or move it out of the skills directory',
+      passed: 'No executable code in the skills directory',
+      failed: () => 'Executable code present in the skills directory',
+      fixDescription: 'Review each script\'s origin; remove skills you did not install deliberately (migrated skills land here too)',
     });
   },
 });
