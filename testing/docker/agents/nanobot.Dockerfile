@@ -30,12 +30,7 @@ RUN if [ "${SCENARIO}" = "insecure" ]; then \
     fi
 
 # Fake CLI binary printing nanobot's `--version` format ("🐈 nanobot v<ver>",
-# emoji omitted). Insecure scenarios use a version inside the bundled
-# advisory ranges so ADV-001/004 fire; secure scenarios use a later one.
-RUN if [ "${SCENARIO}" = "insecure" ]; then \
-      echo '#!/bin/sh\necho "nanobot v1.0.0"' > /usr/local/bin/nanobot; \
-    else \
-      echo '#!/bin/sh\necho "nanobot v1.4.0"' > /usr/local/bin/nanobot; \
-    fi && chmod +x /usr/local/bin/nanobot
+# emoji omitted).
+RUN echo '#!/bin/sh\necho "nanobot v0.3.5"' > /usr/local/bin/nanobot && chmod +x /usr/local/bin/nanobot
 
 CMD ["node", "dist/cli.js", "scan", "--format", "json"]
