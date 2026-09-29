@@ -31,8 +31,9 @@ export const cfg001 = defineCheck({
   severity: 'critical',
   description: 'Check if gateway is bound to 0.0.0.0 (all interfaces), exposing it to the network',
   // Lyrie's only listener setting is LYRIE_WEBCHAT_HOST, which nothing binds
-  // in 3.4.0; LY-010 reports it with the right context.
-  excludedAgents: [...CODING_AGENTS, 'lyrie'],
+  // in 3.4.0; LY-010 reports it with the right context. IronClaw's listeners
+  // are IC-001's (its schemas have no gateway.host for this fix to write).
+  excludedAgents: [...CODING_AGENTS, 'lyrie', 'ironclaw'],
 
   async run(ctx, h) {
     const evidence: Evidence[] = [];

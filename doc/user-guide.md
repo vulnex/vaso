@@ -399,7 +399,7 @@ Penalties:
 
 ## Security Checks
 
-VASO runs **305 checks across 17 categories**.
+VASO runs **311 checks across 17 categories**.
 
 | Category | IDs | Count | Scope |
 |----------|-----|-------|-------|
@@ -412,11 +412,11 @@ VASO runs **305 checks across 17 categories**.
 | MCP Server | MCP-001–035 | 35 | Transport security, credentials, tool injection, toxic flows, rug pull, OAuth 2.1, stdio shell-c, world-writable command paths, streamable-HTTP origin pinning, tool-description poisoning, cross-server tool-name collision, slash-command overlap, remote-server-without-auth, filesystem sensitive-path scope, vulnerable/rolled-back version, config drift, untrusted installer source, env-dump tool, long-lived token, prompt-injection directives in tool output, obfuscated/encoded server source; opt-in npm package source resolution (`--resolve-packages`); OWASP MCP Top 10 mapping |
 | Advisory | ADV-001–005 | 5 | Vulnerability/CVE detection with version awareness |
 | OpenClaw | OC-* | 6 | Sub-agent config downgrade, legacy bot dirs, `OPENCLAW_HOME` redirect, profile downgrade, memory file perms, `/etc/openclaw` writable |
-| NanoClaw | NC-001–005 | 5 | Overbroad mount allowlist, allowlist-file writable, `NANOCLAW_HOME` redirect, public listener bind, skills-dir writable |
-| IronClaw | IC-001–012 | 12 | Webhook bind, sandbox, auto-approve tools |
-| Nanobot | NB-001–012 | 12 | Channel allow, shell filtering, memory injection |
-| ZeroClaw | ZC-001–014 | 14 | API keys, autonomy mode, filesystem access |
-| Lyrie | LY-001–018 | 18 | Shield mode/binary, multi-channel DM pairing, WebChat exposure, edit-ledger perms, executable skills, cross-agent migration imports, dev-mode footguns |
+| NanoClaw | NC-001–005 | 5 | Overbroad mount allowlist (`allowedRoots`), host config/credential exposure, checkout/state exposure, webhook listener on all interfaces, skills dirs writable |
+| IronClaw | IC-001–014 | 14 | 1.x (Reborn) and 0.x: WebUI/listener bind, cleartext LLM endpoints, WebUI token and master-key exposure, `local-dev-yolo` host access, approval policy, sandbox (0.x), permissive WebUI CORS, world-readable state DB |
+| Nanobot | NB-001–012 | 12 | Open channels (`allowFrom: ["*"]`, open DM policy), plaintext secrets, workspace restriction, exec sandbox/allow patterns, SSRF whitelist, writable prompt/memory/cron files, unauthenticated WebUI, readable chat history, API server exposure, unpinned MCP packages |
+| ZeroClaw | ZC-001–016 | 16 | V3 schema: plaintext/XOR secrets, gateway bind and pairing, `full` risk level, filesystem scope, open peer groups, open skills/scripts, WhatsApp session perms, browser/HTTP private-host access, sandbox, unrestricted commands/auto-approve, relaxed gateway safeguards |
+| Lyrie | LY-001–020 | 20 | Checkout `.env` + `~/.lyrie` state: Shield mode/binary, channel DM policy, secrets-file perms, WebChat exposure/origins, pairing and edit ledgers, local-mode leaks, `NODE_ENV=development` SSRF gap, broad `LYRIE_FS_ROOT`, readable memory DB |
 | Hermes | HM-001–010 | 10 | Plaintext API keys, env/credentials perms, API-server bind without auth, permissive CORS, plaintext inference endpoints, approvals-off, Tirith pre-exec scanner state, MCP stdio shell-c / unpinned packages |
 | Atomic Agent | AT-001–011 | 11 | Raised approval ladder (level 4/5), unrestricted read scope, unapproved HTTP egress, plaintext secrets in config.json, `.env`/mail-session perms, `pure_read` MCP trust, MCP stdio/transport hygiene, secretless webhooks, subscription-CLI lockdown overrides, plaintext inference endpoints, world/group-readable memory, sessions and traces |
 | Coding Agent | CC, CD, CG, CDX, OPC, GEM, QC, CUR, GHC, WS, DEV, MM, PC | 117 | Claude Code (12), Claude Desktop (10), ChatGPT Desktop (6), Codex (10), OpenCode (12), Gemini CLI (11), Qwen Code (10), Cursor (14), GitHub Copilot CLI (9), Windsurf/Devin Desktop (8), Devin CLI (10), Meta Muse (3), Perplexity Comet (2): sandbox/approval policy, plaintext credentials, MCP pinning, broad allow rules, memory-file secrets, transport security |
@@ -432,14 +432,14 @@ VASO ships eighteen adapters. Each implements `detect()`, `getConfigPaths()`, `g
 | Adapter | Config locations | Formats |
 |---------|------------------|---------|
 | OpenClaw | `$OPENCLAW_HOME`, `~/.openclaw`, `~/.clawdbot`, `~/.moltbot`, `/etc/openclaw` | JSON, YAML, ENV |
-| NanoClaw | `~/.nanoclaw.env`, `~/.config/nanoclaw/` | JSON, ENV |
-| PicoClaw | `~/.picoclaw/config.json`, `~/.picoclaw/auth.json` | JSON |
-| IronClaw | `~/.ironclaw/`, `/etc/ironclaw/` | TOML |
-| Nanobot | `~/.nanobot/`, project-local | JSON |
-| ZeroClaw | `~/.zeroclaw/`, `/etc/zeroclaw/` | TOML |
+| NanoClaw | v2 git checkout (`package.json`, `.env`; found via its service unit or common locations), `~/.config/nanoclaw/mount-allowlist.json` | JSON, ENV |
+| PicoClaw | `$PICOCLAW_HOME` (default `~/.picoclaw`): `config.json`, `.security.yml`, `auth.json`, `launcher-config.json`; skills in `workspace/skills` | JSON, YAML |
+| IronClaw | 1.x: `$IRONCLAW_REBORN_HOME` (default `~/.ironclaw/reborn/`); 0.x: `~/.ironclaw/` | TOML, JSON, ENV |
+| Nanobot | `~/.nanobot/config.json` + workspace (`agents.defaults.workspace`) | JSON |
+| ZeroClaw | `$ZEROCLAW_CONFIG_DIR` (default `~/.zeroclaw/`): `config.toml` (V3), `auth-profiles.json` | TOML, JSON |
 | NemoClaw | `~/.nemoclaw/`, `/etc/nemoclaw/` | JSON, YAML |
 | Hermes | `~/.hermes/`, `/etc/hermes/` | YAML, ENV |
-| Lyrie | `~/.lyrie/` (Bun turborepo with Rust Shield, 10-channel gateway, MCP client+server) | ENV |
+| Lyrie | git checkout `.env` (found via its service unit or common locations, `package.json` name `lyrie-agent`) + `~/.lyrie/` state (`config.json`, `mcp.json`, pairing/edit ledgers, memory) | ENV, JSON |
 | Atomic Agent | `~/.atomic-agent/` or `$ATOMIC_AGENT_STATE_DIR` (config.json, .env, skills/; MCP servers also discovered by `vaso mcp`) | JSON, ENV |
 
 ### Coding agents

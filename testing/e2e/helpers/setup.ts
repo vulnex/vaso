@@ -15,7 +15,10 @@ export type Scenario = 'insecure' | 'secure';
 interface AgentFixtureSpec {
   /** Path(s) under temp HOME to install fixtures */
   targetDirs: string[];
-  /** Extra files at the HOME root level (e.g., .nanoclaw.env) */
+  /** Fixture subdirectory → HOME-relative target, when the fixture spans
+   *  several locations (copied instead of the whole fixture per target dir) */
+  subdirs?: Record<string, string>;
+  /** Extra files at the HOME root level */
   rootFiles?: string[];
   /** Post-copy hook for special handling */
   postCopy?: (tempHome: string, scenario: Scenario) => Promise<void>;
@@ -30,20 +33,9 @@ const AGENT_SPECS: Record<AgentName, AgentFixtureSpec> = {
     targetDirs: ['.openclaw'],
   },
   nanoclaw: {
-    targetDirs: ['.config/nanoclaw'],
-    rootFiles: ['.nanoclaw.env'],
-    postCopy: async (tempHome: string) => {
-      // Rewrite NANOCLAW_HOME from Docker path to temp path
-      const envPath = join(tempHome, '.nanoclaw.env');
-      if (existsSync(envPath)) {
-        let content = await readFile(envPath, 'utf-8');
-        content = content.replace(
-          /NANOCLAW_HOME=.*/,
-          `NANOCLAW_HOME=${join(tempHome, '.config/nanoclaw')}`
-        );
-        await writeFile(envPath, content);
-      }
-    },
+    // v2 runs from a git checkout; the mount allowlist lives outside it
+    targetDirs: ['nanoclaw', '.config/nanoclaw'],
+    subdirs: { checkout: 'nanoclaw', config: '.config/nanoclaw' },
   },
   picoclaw: {
     targetDirs: ['.picoclaw'],
@@ -95,13 +87,17 @@ export async function createE2EEnvironment(options: CreateE2EOptions = {}): Prom
     }
 
     // Copy fixture contents to each target directory
-    for (const targetDir of spec.targetDirs) {
+    for (const [sub, target] of Object.entries(spec.subdirs ?? {})) {
+      await mkdir(join(tempHome, target), { recursive: true });
+      await cp(join(fixtureDir, sub), join(tempHome, target), { recursive: true });
+    }
+    for (const targetDir of spec.subdirs ? [] : spec.targetDirs) {
       const targetPath = join(tempHome, targetDir);
       await mkdir(targetPath, { recursive: true });
       await cp(fixtureDir, targetPath, { recursive: true });
     }
 
-    // Copy root-level files (e.g., .nanoclaw.env lives at HOME root, not in .config/)
+    // Copy root-level files
     if (spec.rootFiles) {
       for (const rootFile of spec.rootFiles) {
         const srcFile = join(fixtureDir, rootFile);

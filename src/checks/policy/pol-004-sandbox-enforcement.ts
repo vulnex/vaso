@@ -9,7 +9,8 @@ export const pol004 = defineCheck({
   category: 'policy',
   severity: 'warning',
   description: 'Verify that enabled sandboxes have substantive constraints (exec, filesystem, network)',
-  excludedAgents: CODING_AGENTS,
+  // IronClaw's sandbox keys are IC-005/006/011/012's.
+  excludedAgents: [...CODING_AGENTS, 'ironclaw'],
 
   async run(ctx, h) {
     const evidence: Evidence[] = [];
