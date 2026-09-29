@@ -1,48 +1,46 @@
+import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { getNestedValue } from '../../core/utils.js';
 import { fixFirstConfig } from '../../remediation/config-writer.js';
+import { asRecord, getPath, nanobotConfigs } from './shared.js';
 
 export const nb003 = defineCheck({
   id: 'NB-003',
   name: 'Workspace Restriction Disabled',
   category: 'nanobot',
   severity: 'warning',
-  description: 'Check if restrictToWorkspace is false, allowing file access outside the workspace',
+  description: 'Check tools.restrictToWorkspace (default false). When off, the file tools (read/write/edit/list) and shell exec path guards accept any path the user can reach — ~/.ssh, ~/.aws, other projects, and nanobot\'s own config.json with its API keys.',
   supportedAgents: ['nanobot'],
 
   async run(ctx, h) {
-    const evidence = [];
-    for (const config of ctx.configs) {
-      const restrict = getNestedValue(config.data, 'restrictToWorkspace')
-        ?? getNestedValue(config.data, 'security.restrictToWorkspace');
-
-      if (restrict === false) {
-        evidence.push({
-          file: config.filePath,
-          detail: 'restrictToWorkspace is explicitly set to false — agent can access files outside workspace',
-        });
-      } else if (restrict === undefined) {
-        evidence.push({
-          file: config.filePath,
-          detail: 'restrictToWorkspace is not configured (defaults to false) — agent can access files outside workspace',
-        });
-      }
+    const evidence: Evidence[] = [];
+    for (const config of nanobotConfigs(ctx.configs)) {
+      const tools = asRecord(config.data.tools);
+      // Current key, then the legacy tools.exec.restrictToWorkspace that the
+      // loader migrates when the current key is absent.
+      const current = getPath(config.data, 'tools.restrictToWorkspace');
+      const restrict = current ?? getPath(tools, 'exec.restrictToWorkspace');
+      if (restrict === true) continue;
+      evidence.push({
+        file: config.filePath,
+        snippet: `tools.restrictToWorkspace: ${restrict === undefined ? '(unset, defaults to false)' : JSON.stringify(restrict)}`,
+        detail: 'File and shell tools may access paths outside the agent workspace',
+      });
     }
     return h.fromEvidence(evidence, {
-      passed: 'Workspace restriction is enabled',
-      failed: () => 'Workspace restriction is disabled — agent can access files outside its workspace',
-      fixable: true,
-      fixDescription: 'Set "restrictToWorkspace": true in config',
+      passed: 'tools.restrictToWorkspace is enabled',
+      failed: () => 'Workspace restriction is disabled — agent tools can reach files outside the workspace',
+      fixable: evidence.length > 0,
+      fixDescription: 'Set "tools": { "restrictToWorkspace": true } in ~/.nanobot/config.json',
     });
   },
 
   async fix(ctx) {
-    return fixFirstConfig(ctx.configs, {
+    return fixFirstConfig(nanobotConfigs(ctx.configs), {
       checkId: 'NB-003',
-      path: 'restrictToWorkspace',
+      path: 'tools.restrictToWorkspace',
       value: true,
-      message: 'Set restrictToWorkspace=true',
-      noConfigMessage: 'No JSON config file found',
+      message: 'Set tools.restrictToWorkspace=true',
+      noConfigMessage: 'No nanobot config.json found',
     });
   },
 });

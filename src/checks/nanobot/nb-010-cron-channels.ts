@@ -1,44 +1,29 @@
+import { join } from 'node:path';
 import { defineCheck } from '../../core/check-builder.js';
+import { workspaceDir, worldWritable } from './shared.js';
 
 export const nb010 = defineCheck({
   id: 'NB-010',
-  name: 'Unrestricted Cron Channels',
+  name: 'Cron Job Store Writable by Other Users',
   category: 'nanobot',
   severity: 'warning',
-  description: 'Check if cron jobs can target any channel or recipient without restrictions',
+  description: 'nanobot\'s scheduler runs the jobs in <workspace>/cron/jobs.json (legacy: ~/.nanobot/cron/jobs.json) as agent turns — each payload message is executed with the agent\'s tools and can deliver results to any channel recipient. A world-writable job store or cron directory lets any local user schedule commands and exfiltration as the nanobot user.',
   supportedAgents: ['nanobot'],
+  supportedPlatforms: ['darwin', 'linux'],
 
   async run(ctx, h) {
-    const evidence = [];
-    for (const config of ctx.configs) {
-      const cron = config.data.cron ?? config.data.cronJobs ?? config.data.scheduledTasks;
-      if (!cron || typeof cron !== 'object') continue;
-
-      const jobs = Array.isArray(cron) ? cron : Object.entries(cron).map(([name, job]) => ({ name, ...(job as object) }));
-
-      for (const job of jobs) {
-        const j = job as Record<string, unknown>;
-        const name = j.name ?? j.id ?? 'unnamed';
-        const targetChannel = j.channel ?? j.targetChannel;
-        const allowedRecipients = j.allowedRecipients ?? j.recipients;
-
-        if (!targetChannel && !allowedRecipients) {
-          evidence.push({
-            file: config.filePath,
-            detail: `Cron job "${name}" has no channel or recipient restriction — can target any channel`,
-          });
-        } else if (targetChannel === '*' || targetChannel === 'all') {
-          evidence.push({
-            file: config.filePath,
-            detail: `Cron job "${name}" targets all channels ("${targetChannel}") — unrestricted broadcast`,
-          });
-        }
-      }
-    }
+    const cronDir = join(workspaceDir(ctx), 'cron');
+    const legacyDir = join(ctx.installation.installDir, 'cron');
+    const evidence = await worldWritable(ctx, [
+      { path: join(cronDir, 'jobs.json'), what: 'The cron job store' },
+      { path: cronDir, what: 'The cron directory (jobs.json can be replaced)' },
+      { path: join(legacyDir, 'jobs.json'), what: 'The legacy cron job store (migrated on startup)' },
+      { path: legacyDir, what: 'The legacy cron directory' },
+    ]);
     return h.fromEvidence(evidence, {
-      passed: 'All cron jobs have channel/recipient restrictions',
-      failed: () => 'Cron job(s) found that can target any channel without restrictions',
-      fixDescription: 'Set explicit channel and recipient restrictions for each cron job',
+      passed: 'Cron job store is not writable by other users',
+      failed: (n) => `${n} cron location(s) writable by other local users — scheduled agent turns can be injected`,
+      fixDescription: 'chmod 700 <workspace>/cron and chmod 600 <workspace>/cron/jobs.json',
     });
   },
 });

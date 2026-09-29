@@ -1,56 +1,30 @@
 import { join } from 'node:path';
 import { defineCheck } from '../../core/check-builder.js';
-import { queryPermissions } from '../../core/permissions.js';
+import { getPath, nanobotConfigs, workspaceDir, worldWritable } from './shared.js';
 
 export const nb006 = defineCheck({
   id: 'NB-006',
-  name: 'HEARTBEAT.md Injection Risk',
+  name: 'HEARTBEAT.md Writable by Other Users',
   category: 'nanobot',
   severity: 'warning',
-  description: 'Check if HEARTBEAT.md exists in workspace and is potentially writable/injectable',
+  description: 'The gateway heartbeat (gateway.heartbeat, every 30 min by default) reads <workspace>/HEARTBEAT.md and runs the tasks it lists as autonomous agent turns with full tool access. A world-writable HEARTBEAT.md (or workspace directory) lets any local user schedule commands as the nanobot user. The file existing is by design and not a finding.',
   supportedAgents: ['nanobot'],
+  supportedPlatforms: ['darwin', 'linux'],
 
   async run(ctx, h) {
-    const evidence = [];
-    const installDir = ctx.installation.installDir;
-    const heartbeatPath = join(installDir, 'workspace', 'HEARTBEAT.md');
-
-    if (await ctx.fs.access(heartbeatPath)) {
-      try {
-        const perms = await queryPermissions(ctx.fs, heartbeatPath);
-        // 'unsupported' → treat as not writable; existence detail below still applies
-        const worldWritable = perms !== 'unsupported' && perms.worldWrite;
-        const groupWritable = perms !== 'unsupported' && perms.groupWrite;
-
-        if (worldWritable) {
-          evidence.push({
-            file: heartbeatPath,
-            detail: 'HEARTBEAT.md is world-writable — any process can inject content',
-          });
-        } else if (groupWritable) {
-          evidence.push({
-            file: heartbeatPath,
-            detail: 'HEARTBEAT.md is group-writable — other group members can inject content',
-          });
-        } else {
-          evidence.push({
-            file: heartbeatPath,
-            detail: 'HEARTBEAT.md exists in workspace — content may be loaded by the agent and could be a prompt injection vector',
-          });
-        }
-      } catch {
-        evidence.push({
-          file: heartbeatPath,
-          detail: 'HEARTBEAT.md exists but permissions could not be checked',
-        });
-      }
+    const data = nanobotConfigs(ctx.configs)[0]?.data;
+    if (getPath(data, 'gateway.heartbeat.enabled') === false) {
+      return h.passed('Gateway heartbeat is disabled (gateway.heartbeat.enabled: false)');
     }
-
+    const ws = workspaceDir(ctx);
+    const evidence = await worldWritable(ctx, [
+      { path: join(ws, 'HEARTBEAT.md'), what: 'HEARTBEAT.md (periodic autonomous task list)' },
+      { path: ws, what: 'The agent workspace directory (HEARTBEAT.md can be replaced)' },
+    ]);
     return h.fromEvidence(evidence, {
-      passed: 'No HEARTBEAT.md found in workspace',
-      failed: () => 'HEARTBEAT.md present in workspace — potential injection vector',
-      fixable: false,
-      fixDescription: 'Review HEARTBEAT.md content and set restrictive file permissions (chmod 600)',
+      passed: 'HEARTBEAT.md is not writable by other users',
+      failed: () => 'HEARTBEAT.md can be modified by other local users — injected tasks run autonomously',
+      fixDescription: 'chmod o-w the workspace directory and HEARTBEAT.md (e.g. chmod 700 ~/.nanobot/workspace; chmod 600 ~/.nanobot/workspace/HEARTBEAT.md)',
     });
   },
 });

@@ -1,12 +1,37 @@
-import { join } from 'node:path';
+import { basename, dirname, isAbsolute, join } from 'node:path';
 import type { AgentAdapter, DetectOptions } from './adapter.js';
 import type { AgentInstallation, GatewayInfo, ModelRef, ParsedConfig, ZoneGraph } from '../core/types.js';
 import type { ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { loadConfig } from '../core/config-loader.js';
+import { getUserHomeDirs } from './openclaw.js';
 import { discoverCliInstalls } from './cli-installs.js';
-import { queryCliVersion, readPackageVersion } from './version-query.js';
+import { queryCliVersion } from './version-query.js';
+
+/*
+ * Nanobot (HKUDS/nanobot, PyPI `nanobot-ai`) — a Python agent framework.
+ *
+ * Layout (nanobot/config/{loader,paths}.py):
+ *   ~/.nanobot/config.json         — the only settings file (camelCase JSON,
+ *                                    secrets inline or as ${VAR} references)
+ *   ~/.nanobot/pairing.json        — approved channel senders (DM pairing)
+ *   ~/.nanobot/auth/{mcp,xai}.json — OAuth token stores (0600, dir 0700)
+ *   ~/.nanobot/whatsapp-auth/      — native WhatsApp linked-device session
+ *   ~/.nanobot/sessions/<ws-id>/   — chat history (*.jsonl)
+ *   <workspace>/                   — agents.defaults.workspace, default
+ *                                    ~/.nanobot/workspace: AGENTS.md, SOUL.md,
+ *                                    USER.md, HEARTBEAT.md, memory/, skills/,
+ *                                    plugins/, cron/jobs.json
+ *
+ * The data dir is the config file's parent; the only relocation is the
+ * `--config` / `--workspace` CLI flags (there is no NANOBOT_HOME). NANOBOT_*
+ * env overrides only apply when no config file exists (the loader uses
+ * Config.model_validate, which bypasses pydantic-settings sources).
+ *
+ * Nanobot is not an npm package — the npm `nanobot` name belongs to an
+ * unrelated project, so no package.json version lookups.
+ */
 
 const SYSTEM_CLI_PATHS = [
   '/usr/local/bin/nanobot',
@@ -14,32 +39,113 @@ const SYSTEM_CLI_PATHS = [
   '/usr/bin/nanobot',
 ];
 
+// `uv tool install nanobot-ai` and `pipx install nanobot-ai` both link the
+// entry point into ~/.local/bin; `pip install --user` does too on Linux.
 const USER_CLI_RELATIVE_PATHS = [
   '.local/bin/nanobot',
-  '.npm-global/bin/nanobot',
-  '.volta/bin/nanobot',
-  '.bun/bin/nanobot',
 ];
 
-function nodeModulesPackageJsonCandidates(home: string): string[] {
-  return [
-    '/usr/lib/node_modules/nanobot/package.json',
-    '/usr/local/lib/node_modules/nanobot/package.json',
-    '/opt/homebrew/lib/node_modules/nanobot/package.json',
-    `${home}/.npm-global/lib/node_modules/nanobot/package.json`,
-    `${home}/.bun/install/global/node_modules/nanobot/package.json`,
-    `${home}/.volta/tools/image/packages/nanobot/package.json`,
-  ];
+/** Isolated venvs the Python tool installers create for `nanobot-ai`. */
+const USER_VENV_RELATIVE_PATHS = [
+  '.local/share/uv/tools/nanobot-ai',
+  '.local/share/pipx/venvs/nanobot-ai',
+];
+
+const DIST_INFO_RE = /^nanobot_ai-(\d+\.\d+\.\d+[0-9A-Za-z.+-]*)\.dist-info$/;
+
+export const NANOBOT_DEFAULT_GATEWAY_PORT = 18790;
+
+function asRecord(v: unknown): Record<string, unknown> | undefined {
+  return v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : undefined;
 }
 
-async function readNodePackageVersion(fs: FSProvider): Promise<string | undefined> {
-  const home = fs.homedir();
-  for (const p of nodeModulesPackageJsonCandidates(home)) {
-    try {
-      const raw = await fs.readFile(p);
-      const pkg = JSON.parse(raw);
-      if (pkg.version && /^\d+\.\d+\.\d+/.test(pkg.version)) return pkg.version;
-    } catch {}
+/** The user's home for an install: the parent of a default `~/.nanobot` data dir. */
+function homeForInstall(installDir: string, fs: FSProvider): string {
+  return basename(installDir) === '.nanobot' ? dirname(installDir) : fs.homedir();
+}
+
+/** Expand `~` and `${VAR}` the way nanobot does (Path.expanduser + env refs). */
+function expandPath(raw: string, home: string, fs: FSProvider): string | undefined {
+  let value = raw.trim();
+  if (!value) return undefined;
+  let unresolved = false;
+  value = value.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (_m, name: string) => {
+    const v = fs.getEnv(name);
+    if (v === undefined) unresolved = true;
+    return v ?? '';
+  });
+  if (unresolved) return undefined;
+  if (value === '~') return home;
+  if (value.startsWith('~/')) return join(home, value.slice(2));
+  return isAbsolute(value) ? value : join(home, value);
+}
+
+/**
+ * Resolve the agent workspace for a nanobot data dir: `agents.defaults.workspace`
+ * from config.json, else NANOBOT_AGENTS__DEFAULTS__WORKSPACE (only honored by
+ * nanobot when the key is absent), else `<home>/.nanobot/workspace`.
+ */
+export function nanobotWorkspaceDir(
+  installDir: string,
+  configData: Record<string, unknown> | undefined,
+  fs: FSProvider,
+): string {
+  const home = homeForInstall(installDir, fs);
+  const configured = asRecord(asRecord(asRecord(configData)?.agents)?.defaults)?.workspace;
+  if (typeof configured === 'string') {
+    const p = expandPath(configured, home, fs);
+    if (p) return p;
+  } else {
+    const env = fs.getEnv('NANOBOT_AGENTS__DEFAULTS__WORKSPACE');
+    if (env) {
+      const p = expandPath(env, home, fs);
+      if (p) return p;
+    }
+  }
+  return join(home, '.nanobot', 'workspace');
+}
+
+async function listNames(dir: string, fs: FSProvider): Promise<string[]> {
+  try {
+    return await fs.readdir(dir);
+  } catch {
+    return [];
+  }
+}
+
+/** Version from `<venv>/lib/python3.*\/site-packages/nanobot_ai-<ver>.dist-info`. */
+async function venvDistVersion(venv: string, fs: FSProvider): Promise<string | undefined> {
+  const libDir = join(venv, 'lib');
+  for (const py of await listNames(libDir, fs)) {
+    if (!py.startsWith('python')) continue;
+    // site-packages (venvs, pip) or dist-packages (Debian system pip)
+    for (const pkgDir of ['site-packages', 'dist-packages']) {
+      for (const entry of await listNames(join(libDir, py, pkgDir), fs)) {
+        const m = DIST_INFO_RE.exec(entry);
+        if (m) return m[1];
+      }
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Package-metadata version of a nanobot entry point: the venv behind the
+ * (resolved) binary, then the known uv / pipx venvs. File-only, so it works on
+ * snapshots where `nanobot --version` can't be run for this copy.
+ */
+async function readDistVersion(bin: string, home: string, fs: FSProvider): Promise<string | undefined> {
+  const venvs: string[] = [];
+  try {
+    venvs.push(dirname(dirname(await fs.realpath(bin))));
+  } catch {}
+  venvs.push(dirname(dirname(bin)));
+  if (bin === join(home, '.local', 'bin', 'nanobot')) {
+    venvs.push(...USER_VENV_RELATIVE_PATHS.map(p => join(home, p)));
+  }
+  for (const venv of [...new Set(venvs)]) {
+    const v = await venvDistVersion(venv, fs);
+    if (v) return v;
   }
   return undefined;
 }
@@ -48,61 +154,64 @@ export const nanobotAdapter: AgentAdapter = {
   agent: 'nanobot',
   displayName: 'Nanobot',
 
-  async detect(_options?: DetectOptions): Promise<AgentInstallation[]> {
-    const fs = _options?.fs ?? new LocalFSProvider();
-    const home = fs.homedir();
-    const nanobotDir = join(home, '.nanobot');
-    const configFiles = [];
+  async detect(options?: DetectOptions): Promise<AgentInstallation[]> {
+    const fs = options?.fs ?? new LocalFSProvider();
+    const userDirs = await getUserHomeDirs(options?.allUsers, fs);
+    const installations: AgentInstallation[] = [];
 
-    const configPath = join(nanobotDir, 'config.json');
-    if (await fs.access(configPath)) {
-      try {
-        configFiles.push(await loadConfig(configPath, fs));
-      } catch {}
+    for (const { home, user } of userDirs) {
+      const dataDir = join(home, '.nanobot');
+      const configFiles: ParsedConfig[] = [];
+      const configPath = join(dataDir, 'config.json');
+      if (await fs.access(configPath)) {
+        try {
+          configFiles.push(await loadConfig(configPath, fs));
+        } catch {}
+      }
+
+      const installs = await discoverCliInstalls(home, fs, {
+        names: ['nanobot'],
+        systemPaths: SYSTEM_CLI_PATHS,
+        userRelPaths: USER_CLI_RELATIVE_PATHS,
+        // A Python CLI: never in a Node version manager's globals.
+        nvm: false,
+        // `nanobot --version` prints "🐈 nanobot v0.3.5".
+        version: async (bin, canExec) => (canExec ? queryCliVersion(bin, fs) : undefined)
+          ?? (await readDistVersion(bin, home, fs)),
+      });
+      const cliBinary = installs.primary?.path;
+
+      if (configFiles.length === 0 && !cliBinary) continue;
+      // The CLI alone (never onboarded) is still an install worth versioning,
+      // but only report it once — for the scanning user.
+      if (configFiles.length === 0 && options?.allUsers && home !== fs.homedir()) continue;
+
+      const configData = configFiles[0]?.data;
+      const workspace = nanobotWorkspaceDir(dataDir, configData, fs);
+      const skillsDirs = [join(workspace, 'skills')];
+      if (await fs.access(join(workspace, 'plugins'))) skillsDirs.push(join(workspace, 'plugins'));
+
+      installations.push({
+        agent: 'nanobot',
+        installDir: dataDir,
+        configFiles,
+        skillsDir: skillsDirs[0],
+        skillsDirs,
+        gateway: configFiles.length > 0 ? this.getGatewayInfo(configData ?? {}) : undefined,
+        models: await this.getModels?.(configFiles, fs),
+        user: options?.allUsers ? user : undefined,
+        cliBinary,
+        otherInstalls: installs.others.length > 0 ? installs.others : undefined,
+        version: installs.primary?.version,
+      });
     }
 
-    // Also check for CLI binary
-    const installs = await discoverCliInstalls(home, fs, {
-      names: ['nanobot'],
-      systemPaths: SYSTEM_CLI_PATHS,
-      userRelPaths: USER_CLI_RELATIVE_PATHS,
-      version: async (bin, canExec) => (canExec ? queryCliVersion(bin, fs) : undefined)
-        ?? (await readPackageVersion(bin, fs)),
-    });
-    const cliBinary = installs.primary?.path;
-
-    if (configFiles.length === 0 && !cliBinary) return [];
-
-    const merged: Record<string, unknown> = {};
-    for (const c of configFiles) {
-      Object.assign(merged, c.data);
-    }
-
-    // Extract version: config field > CLI exec > package.json next to binary
-    // > known npm-global package.json roots.
-    const mainConfig = configFiles.find(c => c.filePath.endsWith('config.json'));
-    const version = installs.primary?.version
-      ?? (mainConfig?.data?.version as string)
-      ?? (await readNodePackageVersion(fs));
-
-    return [{
-      agent: 'nanobot',
-      installDir: nanobotDir,
-      configFiles,
-      skillsDir: this.getSkillsDir(nanobotDir),
-      gateway: this.getGatewayInfo(merged),
-      models: await this.getModels?.(configFiles),
-      cliBinary,
-      otherInstalls: installs.others.length > 0 ? installs.others : undefined,
-      version,
-    }];
+    return installations;
   },
 
   getConfigPaths(): string[] {
     const home = new LocalFSProvider().homedir();
-    return [
-      join(home, '.nanobot', 'config.json'),
-    ];
+    return [join(home, '.nanobot', 'config.json')];
   },
 
   getSkillsDir(installDir: string): string | undefined {
@@ -110,54 +219,84 @@ export const nanobotAdapter: AgentAdapter = {
   },
 
   getGatewayInfo(config: Record<string, unknown>): GatewayInfo | undefined {
-    const host = config.host as string | undefined;
-    const port = config.port as number | undefined;
-    if (host || port) {
-      return {
-        host: host ?? '0.0.0.0',
-        port: port ?? 18790,
-      };
-    }
-    return undefined;
+    // `nanobot gateway` listens on gateway.host:gateway.port (a health
+    // endpoint); both default to 127.0.0.1:18790 (GatewayConfig).
+    const gateway = asRecord(config.gateway);
+    const host = typeof gateway?.host === 'string' && gateway.host.trim() ? gateway.host.trim() : '127.0.0.1';
+    const port = typeof gateway?.port === 'number' ? gateway.port : NANOBOT_DEFAULT_GATEWAY_PORT;
+    return { host, port };
   },
 
   getModels(configs: ParsedConfig[]): ModelRef[] {
     const main = configs.find(c => c.filePath.endsWith('config.json'));
-    const agents = main?.data?.agents as Record<string, unknown> | undefined;
+    const data = main?.data;
+    const defaults = asRecord(asRecord(data?.agents)?.defaults);
+    const presets = asRecord(data?.modelPresets) ?? asRecord(data?.model_presets);
     const out: ModelRef[] = [];
     const seen = new Set<string>();
-    const push = (raw: string, via?: string) => {
-      // Nanobot stores models as "<provider>/<id>" (e.g. "anthropic/claude-opus-4-5").
-      const slash = raw.indexOf('/');
-      const provider = slash !== -1 ? raw.slice(0, slash) : undefined;
-      const id = slash !== -1 ? raw.slice(slash + 1) : raw;
+
+    // Models are "<provider>/<id>" (e.g. "anthropic/claude-opus-4-5") when the
+    // provider is "auto"; an explicit provider routes the whole string to it.
+    const push = (raw: unknown, forcedProvider: unknown, via?: string) => {
+      if (typeof raw !== 'string' || !raw.trim()) return;
+      const model = raw.trim();
+      let provider: string | undefined;
+      let id = model;
+      if (typeof forcedProvider === 'string' && forcedProvider && forcedProvider !== 'auto') {
+        provider = forcedProvider;
+      } else {
+        const slash = model.indexOf('/');
+        if (slash !== -1) {
+          provider = model.slice(0, slash);
+          id = model.slice(slash + 1);
+        }
+      }
       const key = `${provider ?? ''}|${id}|${via ?? ''}`;
       if (seen.has(key)) return;
       seen.add(key);
-      out.push({ id, provider, via });
+      out.push({ id, ...(provider ? { provider } : {}), ...(via ? { via } : {}) });
     };
-    const defaults = agents?.defaults as Record<string, unknown> | undefined;
-    const defaultModel = defaults?.model as string | undefined;
-    if (defaultModel) push(defaultModel);
-    for (const [name, cfg] of Object.entries(agents ?? {})) {
-      if (name === 'defaults') continue;
-      const m = (cfg as Record<string, unknown> | undefined)?.model as string | undefined;
-      if (m) push(m, name);
+
+    // Active model: the selected preset, else the agents.defaults fields.
+    const activePreset = typeof defaults?.modelPreset === 'string' ? defaults.modelPreset : undefined;
+    const active = activePreset && activePreset !== 'default' ? asRecord(presets?.[activePreset]) : undefined;
+    if (active) push(active.model, active.provider);
+    else push(defaults?.model, defaults?.provider);
+
+    for (const [name, preset] of Object.entries(presets ?? {})) {
+      if (name === activePreset) continue;
+      const p = asRecord(preset);
+      if (p) push(p.model, p.provider, `preset:${name}`);
+    }
+    // Inline fallback models ({model, provider}); string entries name presets.
+    if (Array.isArray(defaults?.fallbackModels)) {
+      for (const fb of defaults.fallbackModels) {
+        const f = asRecord(fb);
+        if (f) push(f.model, f.provider, 'fallback');
+      }
     }
     return out;
   },
 
   getMemoryFiles(installDir: string): string[] {
+    const ws = join(installDir, 'workspace');
     return [
-      join(installDir, 'workspace', 'memory', 'MEMORY.md'),
-      join(installDir, 'workspace', 'HEARTBEAT.md'),
-      join(installDir, 'workspace', 'SOUL.md'),
+      join(ws, 'memory', 'MEMORY.md'),
+      join(ws, 'memory', 'history.jsonl'),
+      join(ws, 'SOUL.md'),
+      join(ws, 'USER.md'),
+      join(ws, 'AGENTS.md'),
+      join(ws, 'HEARTBEAT.md'),
     ];
   },
 
   getCredentialPaths(installDir: string): string[] {
     return [
       join(installDir, 'config.json'),
+      join(installDir, 'pairing.json'),
+      join(installDir, 'auth', 'mcp.json'),
+      join(installDir, 'auth', 'xai.json'),
+      join(installDir, 'whatsapp-auth', 'neonize.db'),
     ];
   },
 
@@ -169,25 +308,30 @@ export const nanobotAdapter: AgentAdapter = {
     return {
       filePaths: [
         '~/.nanobot/config.json',
-        '~/.nanobot/workspace/memory/MEMORY.md',
-        '~/.nanobot/workspace/HEARTBEAT.md',
-        '~/.nanobot/workspace/SOUL.md',
-        // User-relative CLI install locations.
+        // User-relative CLI install location — kept in sync with USER_CLI_RELATIVE_PATHS
         '~/.local/bin/nanobot',
-        '~/.npm-global/bin/nanobot',
-        '~/.volta/bin/nanobot',
-        '~/.bun/bin/nanobot',
-        // npm-global package.json (canonical version source for Node CLIs).
-        '/usr/lib/node_modules/nanobot/package.json',
-        '/usr/local/lib/node_modules/nanobot/package.json',
-        '/opt/homebrew/lib/node_modules/nanobot/package.json',
-        '~/.npm-global/lib/node_modules/nanobot/package.json',
-        '~/.bun/install/global/node_modules/nanobot/package.json',
-        '~/.volta/tools/image/packages/nanobot/package.json',
       ],
       globPatterns: [
+        // Skill / plugin code for the SKL analyzers.
         '~/.nanobot/workspace/skills/**',
-        '~/.nvm/versions/node/*/lib/node_modules/nanobot/package.json',
+        '~/.nanobot/workspace/plugins/**',
+      ],
+      // Credentials, chat history, memory and prompt files: the checks only
+      // need existence + mode — content never leaves the host. The dist-info
+      // entry carries the installed version in its directory name.
+      metadataGlobPatterns: [
+        '~/.nanobot/pairing.json',
+        '~/.nanobot/auth/*',
+        '~/.nanobot/whatsapp-auth/*',
+        '~/.nanobot/sessions/*',
+        '~/.nanobot/sessions/*/*',
+        '~/.nanobot/history/*',
+        '~/.nanobot/cron/*',
+        '~/.nanobot/workspace/*.md',
+        '~/.nanobot/workspace/memory/*',
+        '~/.nanobot/workspace/cron/*',
+        '~/.local/share/uv/tools/nanobot-ai/lib/python3*/site-packages/nanobot_ai-*.dist-info/METADATA',
+        '~/.local/share/pipx/venvs/nanobot-ai/lib/python3*/site-packages/nanobot_ai-*.dist-info/METADATA',
       ],
       commands: [
         { id: 'nanobot-which', cmd: 'which', args: ['nanobot'], timeout: 3000 },
@@ -195,8 +339,13 @@ export const nanobotAdapter: AgentAdapter = {
       ],
       directoryListings: [
         '~/.nanobot',
+        '~/.nanobot/auth',
+        '~/.nanobot/sessions',
         '~/.nanobot/workspace',
+        '~/.nanobot/workspace/memory',
+        '~/.nanobot/workspace/cron',
         '~/.nanobot/workspace/skills',
+        '~/.nanobot/workspace/plugins',
       ],
       envPrefixes: ['NANOBOT_'],
       systemPaths: SYSTEM_CLI_PATHS,
@@ -204,33 +353,40 @@ export const nanobotAdapter: AgentAdapter = {
     };
   },
 
+  // Privilege gradient: chat channels / WebUI / API callers → agent loop →
+  // tools (shell exec, web fetch, MCP) → host filesystem and secrets.
   getZoneGraph(): ZoneGraph {
     return {
       zones: [
-        { id: 'chat', label: 'Chat Platforms', trustLevel: 0 },
-        { id: 'core', label: 'Bot Core', trustLevel: 1 },
-        { id: 'exec', label: 'Shell Exec', trustLevel: 2 },
-        { id: 'host', label: 'Host FS', trustLevel: 3 },
+        { id: 'chat', label: 'Channels / WebUI / API', trustLevel: 0 },
+        { id: 'core', label: 'Agent Loop', trustLevel: 1 },
+        { id: 'exec', label: 'Tools (Shell, Web, MCP)', trustLevel: 2 },
+        { id: 'host', label: 'Host FS + Secrets', trustLevel: 3 },
       ],
       components: [
-        { id: 'edge', label: 'Discord/Slack Edge', zone: 'chat' },
+        {
+          id: 'edge',
+          label: 'Chat Channels, WebSocket/WebUI, OpenAI-compatible API',
+          zone: 'chat',
+          guardCheckIds: ['NB-001', 'NB-008', 'NB-011'],
+        },
         {
           id: 'bot',
-          label: 'Nanobot Core',
+          label: 'Agent Loop (prompt files, heartbeat, cron)',
           zone: 'core',
-          guardCheckIds: ['NB-001', 'NB-008', 'NB-010', 'NB-011', 'NB-012'],
+          guardCheckIds: ['NB-006', 'NB-007', 'NB-010'],
         },
         {
           id: 'shell',
-          label: 'Tool/Shell Execution',
+          label: 'Shell Exec / Web Fetch / MCP Servers',
           zone: 'exec',
-          guardCheckIds: ['NB-004', 'NB-005', 'NB-006', 'NB-007', 'NB-009'],
+          guardCheckIds: ['NB-004', 'NB-005', 'NB-012'],
         },
         {
           id: 'fs',
-          label: 'Host Filesystem',
+          label: 'Host Filesystem, config.json Secrets, Session History',
           zone: 'host',
-          guardCheckIds: ['NB-002', 'NB-003'],
+          guardCheckIds: ['NB-002', 'NB-003', 'NB-009'],
         },
       ],
       edges: [
@@ -240,11 +396,10 @@ export const nanobotAdapter: AgentAdapter = {
         {
           from: 'edge',
           to: 'fs',
-          label: 'channel-driven exec',
-          triggerCheckIds: ['NB-001', 'NB-004'],
+          label: 'untrusted sender drives unconfined exec',
+          triggerCheckIds: ['NB-001', 'NB-004', 'NB-008', 'NB-011'],
         },
       ],
     };
   },
 };
-

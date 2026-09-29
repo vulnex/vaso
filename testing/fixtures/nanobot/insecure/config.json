@@ -1,44 +1,76 @@
 {
-  "host": "0.0.0.0",
-  "port": 18790,
-  "restrictToWorkspace": false,
-  "openaiApiKey": "sk-abc123def456ghi789jkl012mno345pqr678stu901vwx",
-  "anthropicApiKey": "sk-ant-abc123-def456ghi789jkl012mno345pqr678stu901vwxyz",
+  "agents": {
+    "defaults": {
+      "workspace": "~/.nanobot/workspace",
+      "modelPreset": null,
+      "model": "anthropic/claude-opus-4-5",
+      "provider": "auto",
+      "fallbackModels": []
+    }
+  },
   "channels": {
+    "sendProgress": true,
+    "sendToolHints": true,
+    "sendMaxRetries": 3,
+    "transcriptionProvider": "groq",
+    "transcriptionLanguage": null,
     "telegram": {
       "enabled": true,
-      "allowFrom": [],
-      "bridgeToken": ""
-    },
-    "whatsapp": {
-      "enabled": true,
-      "allowFrom": [],
-      "bridge_token": ""
-    },
-    "discord": {
-      "enabled": true,
-      "allowFrom": []
+      "token": "7000000001:AAFixtureFixtureFixtureFixtureFixt01",
+      "allowFrom": ["*"],
+      "groupPolicy": "mention"
     },
     "slack": {
       "enabled": true,
-      "allowFrom": []
+      "botToken": "",
+      "appToken": "",
+      "allowFrom": [],
+      "dm": { "enabled": true, "policy": "open", "allowFrom": [] }
+    },
+    "msteams": {
+      "enabled": false,
+      "allowFrom": [],
+      "host": "0.0.0.0",
+      "port": 3978
+    },
+    "websocket": {
+      "enabled": true,
+      "host": "172.17.0.2",
+      "port": 8765,
+      "websocketRequiresToken": false
     }
+  },
+  "providers": {
+    "openai": { "apiKey": "sk-abc123def456ghi789jkl012mno345pqr678stu901vwx", "apiBase": null },
+    "anthropic": { "apiKey": "sk-ant-abc123-def456ghi789jkl012mno345pqr678stu901vwxyz", "apiBase": null },
+    "openrouter": { "apiKey": null, "apiBase": null }
+  },
+  "api": { "host": "172.17.0.2", "port": 8900, "timeout": 120.0, "apiKey": "" },
+  "gateway": {
+    "host": "127.0.0.1",
+    "port": 18790,
+    "heartbeat": { "enabled": true, "intervalS": 1800 }
   },
   "tools": {
+    "web": { "enable": true, "proxy": null, "fetch": { "useJinaReader": true } },
     "exec": {
-      "enabled": true,
-      "denyList": ["rm", "shutdown"]
+      "enable": true,
+      "timeout": 60,
+      "sandbox": "",
+      "sandboxRoBinds": [],
+      "sandboxRwBinds": [],
+      "allowPatterns": [".*"],
+      "denyPatterns": []
     },
-    "webFetch": {
-      "enabled": true
+    "maxSessionMessagesPerMinute": 6,
+    "restrictToWorkspace": false,
+    "webuiAllowRemotePackageInstall": true,
+    "ssrfWhitelist": ["169.254.0.0/16"],
+    "mcpServers": {
+      "filesystem": {
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-filesystem", "/"]
+      }
     }
-  },
-  "cron": [
-    {
-      "schedule": "*/30 * * * *",
-      "channel": "*",
-      "message": "heartbeat check"
-    }
-  ],
-  "skillSource": "npx"
+  }
 }

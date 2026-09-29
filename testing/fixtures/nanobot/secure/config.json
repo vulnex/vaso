@@ -1,25 +1,60 @@
 {
-  "host": "127.0.0.1",
-  "port": 18790,
-  "restrictToWorkspace": true,
+  "agents": {
+    "defaults": {
+      "workspace": "~/.nanobot/workspace",
+      "modelPreset": null,
+      "model": "anthropic/claude-opus-4-5",
+      "provider": "auto",
+      "fallbackModels": []
+    }
+  },
   "channels": {
+    "sendProgress": true,
+    "sendMaxRetries": 3,
+    "transcriptionLanguage": null,
     "telegram": {
       "enabled": true,
+      "token": "${TELEGRAM_BOT_TOKEN}",
       "allowFrom": ["123456789"],
-      "rateLimit": { "maxRequests": 10, "windowMs": 60000 }
+      "groupPolicy": "mention"
+    },
+    "websocket": {
+      "enabled": true,
+      "host": "127.0.0.1",
+      "port": 8765,
+      "websocketRequiresToken": true,
+      "tokenIssueSecret": "${NANOBOT_WS_SECRET}"
     }
+  },
+  "providers": {
+    "anthropic": { "apiKey": "${ANTHROPIC_API_KEY}", "apiBase": null }
+  },
+  "api": { "host": "127.0.0.1", "port": 8900, "timeout": 120.0, "apiKey": "" },
+  "gateway": {
+    "host": "127.0.0.1",
+    "port": 18790,
+    "heartbeat": { "enabled": true, "intervalS": 1800 }
   },
   "tools": {
+    "web": { "enable": true, "proxy": null },
     "exec": {
-      "enabled": true,
-      "denyList": ["rm", "shutdown", "reboot", "mkfs", "dd", "kill", "killall", "pkill", "halt", "poweroff"]
+      "enable": true,
+      "timeout": 60,
+      "sandbox": "bwrap",
+      "sandboxRoBinds": [],
+      "sandboxRwBinds": [],
+      "allowPatterns": [],
+      "denyPatterns": []
     },
-    "webFetch": {
-      "enabled": true,
-      "blockedHosts": ["localhost", "127.0.0.1", "0.0.0.0", "169.254.169.254", "10.*", "172.16.*", "192.168.*"]
+    "maxSessionMessagesPerMinute": 6,
+    "restrictToWorkspace": true,
+    "webuiAllowRemotePackageInstall": false,
+    "ssrfWhitelist": ["100.64.0.0/10"],
+    "mcpServers": {
+      "memory": {
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-memory@2025.8.4"]
+      }
     }
-  },
-  "sessions": {
-    "encryption": true
   }
 }

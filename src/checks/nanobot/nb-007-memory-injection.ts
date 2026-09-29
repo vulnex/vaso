@@ -1,68 +1,32 @@
 import { join } from 'node:path';
 import { defineCheck } from '../../core/check-builder.js';
-import { queryPermissions } from '../../core/permissions.js';
-import { getNestedValue } from '../../core/utils.js';
+import { workspaceDir, worldWritable } from './shared.js';
 
 export const nb007 = defineCheck({
   id: 'NB-007',
-  name: 'MEMORY.md Prompt Injection',
+  name: 'Prompt Files Writable by Other Users',
   category: 'nanobot',
   severity: 'critical',
-  description: 'Check if MEMORY.md is loaded into the system prompt — persistent prompt injection vector',
+  description: 'nanobot builds every system prompt from workspace files — AGENTS.md, SOUL.md, USER.md and memory/MEMORY.md — and loads skills from <workspace>/skills and plugins/. If any of them (or their directories) is world-writable, any local user can plant persistent instructions or skills that run with the agent\'s tools. The files existing is by design and not a finding.',
   supportedAgents: ['nanobot'],
+  supportedPlatforms: ['darwin', 'linux'],
 
   async run(ctx, h) {
-    const evidence = [];
-    const installDir = ctx.installation.installDir;
-    const memoryPath = join(installDir, 'workspace', 'memory', 'MEMORY.md');
-    const memoryExists = await ctx.fs.access(memoryPath);
-
-    let memoryEnabled = false;
-    for (const config of ctx.configs) {
-      const memoryConfig = getNestedValue(config.data, 'memory')
-        ?? getNestedValue(config.data, 'systemPrompt.memory')
-        ?? getNestedValue(config.data, 'agent.memory');
-
-      if (memoryConfig !== undefined && memoryConfig !== false) {
-        memoryEnabled = true;
-      }
-
-      const raw = config.raw;
-      if (raw.includes('MEMORY.md') || raw.includes('memory.md')) {
-        memoryEnabled = true;
-      }
-    }
-
-    if (memoryExists && memoryEnabled) {
-      try {
-        const perms = await queryPermissions(ctx.fs, memoryPath);
-        // 'unsupported' → treat as not writable; the loaded-into-prompt detail still applies
-        const worldWritable = perms !== 'unsupported' && perms.worldWrite;
-
-        evidence.push({
-          file: memoryPath,
-          detail: worldWritable
-            ? 'MEMORY.md is world-writable AND loaded into system prompt — critical prompt injection risk'
-            : 'MEMORY.md is loaded into system prompt — content becomes part of agent instructions and can persistently alter behavior',
-        });
-      } catch {
-        evidence.push({
-          file: memoryPath,
-          detail: 'MEMORY.md exists and memory is enabled — persistent prompt injection vector',
-        });
-      }
-    } else if (memoryExists) {
-      evidence.push({
-        file: memoryPath,
-        detail: 'MEMORY.md exists in workspace — verify it is not loaded into system prompt',
-      });
-    }
-
+    const ws = workspaceDir(ctx);
+    const evidence = await worldWritable(ctx, [
+      { path: join(ws, 'AGENTS.md'), what: 'AGENTS.md (system prompt)' },
+      { path: join(ws, 'SOUL.md'), what: 'SOUL.md (system prompt)' },
+      { path: join(ws, 'USER.md'), what: 'USER.md (system prompt)' },
+      { path: join(ws, 'memory', 'MEMORY.md'), what: 'memory/MEMORY.md (long-term memory in the system prompt)' },
+      { path: join(ws, 'memory'), what: 'The memory directory' },
+      { path: join(ws, 'skills'), what: 'The workspace skills directory' },
+      { path: join(ws, 'plugins'), what: 'The workspace plugins directory' },
+      { path: ws, what: 'The agent workspace directory (prompt files can be replaced)' },
+    ]);
     return h.fromEvidence(evidence, {
-      passed: 'No MEMORY.md prompt injection risk detected',
-      failed: () => 'MEMORY.md may be injected into system prompt — persistent prompt injection vector',
-      fixable: false,
-      fixDescription: 'Restrict write access to MEMORY.md (chmod 400) and audit its contents regularly',
+      passed: 'Prompt, memory and skill locations are not writable by other users',
+      failed: (n) => `${n} prompt/memory/skill location(s) writable by other local users — persistent prompt injection`,
+      fixDescription: 'Remove world write access: chmod 700 ~/.nanobot/workspace ~/.nanobot/workspace/{memory,skills,plugins}; chmod 600 the .md files',
     });
   },
 });
