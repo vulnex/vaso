@@ -49,6 +49,12 @@ describe('PicoClaw Insecure', () => {
     expect(check.severity).toBe('critical');
   });
 
+  it('should detect PicoClaw-specific exposures (PCL-001/002/003/004/006)', () => {
+    for (const id of ['PCL-001', 'PCL-002', 'PCL-003', 'PCL-004', 'PCL-006']) expectCheckFailed(result, id);
+    expect(expectCheckFailed(result, 'PCL-003').severity).toBe('critical');
+    expect(expectCheckFailed(result, 'PCL-006').severity).toBe('critical');
+  });
+
   it('should produce a low security score', () => {
     const agent = getAgentResult(result, 'picoclaw');
     expect(agent).toBeDefined();
@@ -85,6 +91,10 @@ describe('PicoClaw Secure', () => {
 
   it('should pass API key check — secrets are enc:// (CFG-002)', () => {
     expectCheckPassed(result, 'CFG-002');
+  });
+
+  it('should pass every PicoClaw-specific check (PCL-001–007)', () => {
+    for (let n = 1; n <= 7; n++) expectCheckPassed(result, `PCL-00${n}`);
   });
 
   it('should produce a high security score', () => {
