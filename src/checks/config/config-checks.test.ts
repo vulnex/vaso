@@ -61,6 +61,31 @@ describe('CFG-001: Gateway Binding', () => {
     expect(result.passed).toBe(true);
   });
 
+  it('ignores wildcard listeners in disabled sections (config templates)', async () => {
+    const data = {
+      gateway: { host: 'localhost', port: 18790 },
+      channel_list: { line: { enabled: false, settings: { webhook_host: '0.0.0.0' } } },
+    };
+    const raw = JSON.stringify(data, null, 2);
+    const result = await cfg001.run(makeContext([makeConfig(data, raw)]));
+    expect(result.passed).toBe(true);
+  });
+
+  it('flags a wildcard listener in an enabled section', async () => {
+    const data = { channels: { msteams: { enabled: true, host: '0.0.0.0', port: 3978 } } };
+    const raw = JSON.stringify(data, null, 2);
+    const result = await cfg001.run(makeContext([makeConfig(data, raw)]));
+    expect(result.passed).toBe(false);
+    expect(result.evidence?.[0].detail).toContain('channels.msteams.host');
+    expect(result.evidence?.[0].line).toBeGreaterThan(0);
+  });
+
+  it('reports gateway.host once', async () => {
+    const data = { gateway: { host: '0.0.0.0' } };
+    const result = await cfg001.run(makeContext([makeConfig(data, JSON.stringify(data, null, 2))]));
+    expect(result.evidence).toHaveLength(1);
+  });
+
   it('passes with no gateway config', async () => {
     const config = makeConfig({});
     const result = await cfg001.run(makeContext([config]));

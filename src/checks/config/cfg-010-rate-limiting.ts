@@ -1,5 +1,6 @@
 import { defineCheck } from '../../core/check-builder.js';
 import { CODING_AGENTS } from '../../core/types.js';
+import { NATIVE_POLICY_FRAMEWORKS } from './native-policy-frameworks.js';
 import { fixFirstConfig } from '../../remediation/config-writer.js';
 import { getNestedValue } from '../../core/utils.js';
 
@@ -10,7 +11,8 @@ export const cfg010 = defineCheck({
   severity: 'warning',
   description: 'Check if rate limiting is configured for the gateway',
   // Atomic Agent has no gateway to rate-limit (its HTTP service is flag-configured).
-  excludedAgents: [...CODING_AGENTS, 'atomic-agent'],
+  // The other frameworks listed have no rateLimit key; writing one breaks strict loaders.
+  excludedAgents: [...CODING_AGENTS, ...NATIVE_POLICY_FRAMEWORKS],
 
   async run(ctx, h) {
     let found = false;

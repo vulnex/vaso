@@ -2,12 +2,14 @@ import { basename, join, normalize } from 'node:path';
 import type { Evidence, ScanContext } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { CODING_AGENTS } from '../../core/types.js';
+import { agentsNamedIn } from './agent-names.js';
 
 const SUSPICIOUS_KEYWORDS = [
   'claw',          // catches openclaw, nanoclaw, picoclaw, ironclaw, zeroclaw, nemoclaw, clawdbot
   'nanobot',
   'moltbot',
   'hermes-agent',  // specific enough to avoid Facebook Hermes / unrelated tooling
+  'lyrie',
 ];
 
 const INTERPRETERS = new Set(['node', 'nodejs', 'bun', 'deno', 'python', 'python3', 'uv', 'uvx']);
@@ -78,6 +80,18 @@ async function classify(
   return { file, detail: `${kind} references "${keyword}"${runs}, not a recognized agent install location` };
 }
 
+/**
+ * A service that runs another framework's own install is reported under that
+ * framework's installation only — one unit must not appear under every agent
+ * on the host. Suspicious units (not running a recognized install) and units
+ * naming no known framework are reported under each agent.
+ */
+function keep(evidence: Evidence[], entry: string, ctx: ScanContext, item: Evidence): void {
+  const owners = agentsNamedIn(entry);
+  if (item.mitigated && owners.length > 0 && !owners.includes(ctx.installation.agent)) return;
+  evidence.push(item);
+}
+
 export const run001 = defineCheck({
   id: 'RUN-001',
   name: 'Unauthorized LaunchAgents',
@@ -105,7 +119,7 @@ export const run001 = defineCheck({
             const lower = entry.toLowerCase();
             for (const keyword of SUSPICIOUS_KEYWORDS) {
               if (lower.includes(keyword)) {
-                evidence.push(await classify(ctx, join(dir, entry), keyword, 'LaunchAgent', launchdCommand));
+                keep(evidence, entry, ctx, await classify(ctx, join(dir, entry), keyword, 'LaunchAgent', launchdCommand));
                 break;
               }
             }
@@ -128,7 +142,7 @@ export const run001 = defineCheck({
             const lower = entry.toLowerCase();
             for (const keyword of SUSPICIOUS_KEYWORDS) {
               if (lower.includes(keyword)) {
-                evidence.push(await classify(ctx, join(dir, entry), keyword, 'Systemd service', systemdCommand));
+                keep(evidence, entry, ctx, await classify(ctx, join(dir, entry), keyword, 'Systemd service', systemdCommand));
                 break;
               }
             }

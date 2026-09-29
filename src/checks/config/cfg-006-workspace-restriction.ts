@@ -1,5 +1,6 @@
 import { defineCheck } from '../../core/check-builder.js';
 import { CODING_AGENTS } from '../../core/types.js';
+import { NATIVE_POLICY_FRAMEWORKS } from './native-policy-frameworks.js';
 import { getNestedValue } from '../../core/utils.js';
 
 export const cfg006 = defineCheck({
@@ -9,7 +10,8 @@ export const cfg006 = defineCheck({
   severity: 'warning',
   description: 'Check if filesystem access is restricted to a workspace directory',
   // Atomic Agent confines reads via agent.readScope (AT-002), not a workspace key.
-  excludedAgents: [...CODING_AGENTS, 'atomic-agent'],
+  // The other frameworks listed scope the filesystem in their own schemas (framework checks).
+  excludedAgents: [...CODING_AGENTS, ...NATIVE_POLICY_FRAMEWORKS],
 
   async run(ctx, h) {
     let found = false;

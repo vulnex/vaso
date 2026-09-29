@@ -1,5 +1,6 @@
 import { defineCheck } from '../../core/check-builder.js';
 import { CODING_AGENTS } from '../../core/types.js';
+import { NATIVE_POLICY_FRAMEWORKS } from './native-policy-frameworks.js';
 import { fixFirstConfig } from '../../remediation/config-writer.js';
 import { getNestedValue } from '../../core/utils.js';
 
@@ -10,7 +11,9 @@ export const cfg005 = defineCheck({
   severity: 'warning',
   description: 'Check if a shell command allowlist (safeBins) is configured',
   // Atomic Agent has no shell allowlist key — its shell gate is the approval ladder (AT-001).
-  excludedAgents: [...CODING_AGENTS, 'atomic-agent'],
+  // The other frameworks listed gate commands in their own schemas (framework checks);
+  // writing security.safeBins into them makes strict config loaders reject the file.
+  excludedAgents: [...CODING_AGENTS, ...NATIVE_POLICY_FRAMEWORKS],
 
   async run(ctx, h) {
     let found = false;

@@ -80,6 +80,22 @@ describe('RUN-001: Unauthorized LaunchAgents', () => {
     expect(result.passed).toBe(false);
   });
 
+  it('leaves another framework\'s own service to that framework (Linux)', async () => {
+    const fs = makeMockedFs({ '/home/test/.config/systemd/user': ['nanobot-gateway.service'] }, 'linux');
+    (fs.readFile as ReturnType<typeof vi.fn>).mockResolvedValue(
+      '[Service]\nExecStart=/home/test/.local/bin/nanobot gateway\n');
+    const result = await run001.run(makeRunCtx(fs, 'linux'));
+    expect(result.passed).toBe(true);
+  });
+
+  it('still reports a suspicious unit named after another framework', async () => {
+    const fs = makeMockedFs({ '/home/test/.config/systemd/user': ['nanobot-gateway.service'] }, 'linux');
+    (fs.readFile as ReturnType<typeof vi.fn>).mockResolvedValue(
+      '[Service]\nExecStart=/tmp/nanobot gateway\n');
+    const result = await run001.run(makeRunCtx(fs, 'linux'));
+    expect(result.passed).toBe(false);
+  });
+
   it('does not match the generic word "skill"', async () => {
     const fs = makeMockedFs({
       '/home/test/Library/LaunchAgents': ['com.amazon.alexa.skill-builder.plist'],

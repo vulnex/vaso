@@ -23,6 +23,25 @@ export interface AdapterDetectionResult {
   configLoadErrors: AdapterConfigLoadError[];
 }
 
+/**
+ * Versions are strings everywhere downstream (advisory range matching,
+ * reporters). A version lifted from a parsed config can be a number or an
+ * object — coerce finite numbers, drop anything else.
+ */
+function coerceVersion(v: unknown): string | undefined {
+  if (typeof v === 'string') return v.trim() || undefined;
+  if (typeof v === 'number' && Number.isFinite(v)) return String(v);
+  return undefined;
+}
+
+export function normalizeVersions(inst: AgentInstallation): AgentInstallation {
+  const out: AgentInstallation = { ...inst, version: coerceVersion(inst.version) };
+  if (inst.otherInstalls) {
+    out.otherInstalls = inst.otherInstalls.map(o => ({ ...o, version: coerceVersion(o.version) }));
+  }
+  return out;
+}
+
 export class AdapterRegistry {
   private adapters: AgentAdapter[] = [];
 
@@ -45,7 +64,7 @@ export class AdapterRegistry {
       const result = results[i];
       const adapter = this.adapters[i];
       if (result.status === 'fulfilled') {
-        installations.push(...result.value.result);
+        installations.push(...result.value.result.map(normalizeVersions));
         configLoadErrors.push(
           ...result.value.loadErrors.map(e => ({
             ...e,
