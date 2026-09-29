@@ -16,15 +16,16 @@ describe('AdvisoryDatabase', () => {
     expect(db.advisories.length).toBeGreaterThan(10);
   });
 
-  it('contains advisories for all agent types', () => {
+  it('only ships sourced advisories', () => {
+    // Every CVE/GHSA entry cites its source. IDs in the CVE namespace must be
+    // real records for the product described — early scaffolding shipped
+    // invented CVE-2026-400xx entries whose IDs belong to unrelated products.
     const db = buildBundledAdvisoryDatabase();
-    const agents = new Set(db.advisories.map(a => a.agent));
-    expect(agents.has('openclaw')).toBe(true);
-    expect(agents.has('nanoclaw')).toBe(true);
-    expect(agents.has('picoclaw')).toBe(true);
-    expect(agents.has('ironclaw')).toBe(true);
-    expect(agents.has('nanobot')).toBe(true);
-    expect(agents.has('zeroclaw')).toBe(true);
+    for (const adv of db.advisories) {
+      if (/^(CVE|GHSA)-/.test(adv.id)) expect(adv.reference, adv.id).toMatch(/^https:\/\//);
+      expect(adv.reference ?? '').not.toContain('vulnex/vaso-advisories');
+      expect(adv.id).not.toMatch(/^CVE-2026-40(0\d\d|100)$/);
+    }
   });
 
   it('has unique advisory IDs', () => {
@@ -49,12 +50,6 @@ describe('AdvisoryDatabase', () => {
   it('getAdvisoryDatabase returns bundled data when uninitialized', () => {
     const db = getAdvisoryDatabase();
     expect(db.advisories.length).toBeGreaterThan(0);
-  });
-
-  it('contains EOL notices', () => {
-    const db = buildBundledAdvisoryDatabase();
-    const eol = db.advisories.filter(a => a.eolNotice);
-    expect(eol.length).toBeGreaterThan(0);
   });
 
   it('contains advisories with known exploits', () => {

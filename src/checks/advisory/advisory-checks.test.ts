@@ -6,7 +6,7 @@ import { adv002 } from './adv-002-dependency-vuln.js';
 import { adv003 } from './adv-003-eol-version.js';
 import { adv004 } from './adv-004-known-exploit.js';
 import { adv005 } from './adv-005-config-advisory.js';
-import { reloadAdvisoryDatabase } from '../../advisory/database.js';
+import { getAdvisoryDatabase, reloadAdvisoryDatabase } from '../../advisory/database.js';
 
 function makeContext(overrides: Partial<AgentInstallation> = {}, configs?: ParsedConfig[]): ScanContext {
   const installation: AgentInstallation = {
@@ -37,17 +37,17 @@ describe('ADV-001: Known Framework Vulnerability', () => {
   beforeEach(() => reloadAdvisoryDatabase());
 
   it('detects known vulnerability for affected version', async () => {
-    // OpenClaw 1.4.0 should be affected by CVE-2026-40001 (affects <1.5.3)
-    const ctx = makeContext({ agent: 'openclaw', version: '1.4.0' });
+    // OpenClaw 2026.3.20 is below CVE-2026-35641's 2026.3.24 fix
+    const ctx = makeContext({ agent: 'openclaw', version: '2026.3.20' });
     const result = await adv001.run(ctx);
     expect(result.passed).toBe(false);
     expect(result.evidence?.length).toBeGreaterThan(0);
-    expect(result.evidence?.[0].detail).toContain('CVE-2026-40001');
+    expect(result.evidence?.some(e => e.detail?.includes('CVE-2026-35641'))).toBe(true);
   });
 
   it('passes for fixed version', async () => {
     // 2026.4.20 is the fixed version of the newest bundled OpenClaw advisory
-    // (CVE-2026-44999) and clears every earlier calver + synthetic 1.x range.
+    // (CVE-2026-44999) and clears every earlier calver range.
     const ctx = makeContext({ agent: 'openclaw', version: '2026.4.20' });
     const result = await adv001.run(ctx);
     expect(result.passed).toBe(true);
@@ -69,11 +69,11 @@ describe('ADV-001: Known Framework Vulnerability', () => {
   });
 
   it('detects vulnerabilities for other agents', async () => {
-    // IronClaw 0.3.0 should be affected by CVE-2026-40030 (affects <0.4.0)
-    const ctx = makeContext({ agent: 'ironclaw', version: '0.3.0' });
+    // Gemini CLI 0.39.0 is below CVE-2026-12537's 0.39.1 fix
+    const ctx = makeContext({ agent: 'gemini-cli', version: '0.39.0' });
     const result = await adv001.run(ctx);
     expect(result.passed).toBe(false);
-    expect(result.evidence?.some(e => e.detail?.includes('CVE-2026-40030'))).toBe(true);
+    expect(result.evidence?.some(e => e.detail?.includes('CVE-2026-12537'))).toBe(true);
   });
 
   it('passes for unaffected agent', async () => {
@@ -123,7 +123,12 @@ describe('ADV-002: Dependency Vulnerability', () => {
 describe('ADV-003: End-of-Life Version', () => {
   beforeEach(() => reloadAdvisoryDatabase());
 
-  it('detects EOL OpenClaw 0.x version', async () => {
+  it('detects an end-of-life version from an EOL notice', async () => {
+    // No EOL notices ship bundled today; feed-delivered ones are merged into the DB.
+    getAdvisoryDatabase().advisories.push({
+      id: 'TEST-EOL', title: 'test EOL notice', agent: 'openclaw', affectedVersions: '<2026.0.0',
+      severity: 'warning', description: 'test EOL notice', published: '2026-01-01', eolNotice: true,
+    });
     const ctx = makeContext({ agent: 'openclaw', version: '0.9.5' });
     const result = await adv003.run(ctx);
     expect(result.passed).toBe(false);
@@ -148,8 +153,8 @@ describe('ADV-004: Known Exploit Available', () => {
   beforeEach(() => reloadAdvisoryDatabase());
 
   it('detects exploitable vulnerability', async () => {
-    // OpenClaw 1.4.0 is affected by CVE-2026-40001 which has exploitAvailable
-    const ctx = makeContext({ agent: 'openclaw', version: '1.4.0' });
+    // Cursor 2.9.0 is affected by CVE-2026-50549, which has exploitAvailable
+    const ctx = makeContext({ agent: 'cursor-cli', version: '2.9.0' });
     const result = await adv004.run(ctx);
     expect(result.passed).toBe(false);
     expect(result.message).toContain('IMMEDIATE UPDATE');
@@ -157,7 +162,7 @@ describe('ADV-004: Known Exploit Available', () => {
   });
 
   it('passes for fixed version', async () => {
-    const ctx = makeContext({ agent: 'openclaw', version: '1.6.0' });
+    const ctx = makeContext({ agent: 'cursor-cli', version: '3.0.0' });
     const result = await adv004.run(ctx);
     expect(result.passed).toBe(true);
   });
@@ -169,8 +174,8 @@ describe('ADV-004: Known Exploit Available', () => {
   });
 
   it('detects exploitable vulnerability for other agents', async () => {
-    // NanoClaw 2.2.0 affected by CVE-2026-40010 (exploitAvailable, affects <2.3.1)
-    const ctx = makeContext({ agent: 'nanoclaw', version: '2.2.0' });
+    // Gemini CLI 0.39.0 is affected by CVE-2026-12537 (exploitAvailable, fixed in 0.39.1)
+    const ctx = makeContext({ agent: 'gemini-cli', version: '0.39.0' });
     const result = await adv004.run(ctx);
     expect(result.passed).toBe(false);
   });

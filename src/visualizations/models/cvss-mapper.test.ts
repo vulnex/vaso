@@ -30,7 +30,7 @@ describe('mapToCvss', () => {
   it('extracts numeric CVSS from evidence detail', () => {
     const r = result({
       severity: 'warning',
-      evidence: [{ file: 'CVE-2026-40001', detail: 'gateway bypass, cvss=9.8, exploit available' }],
+      evidence: [{ file: 'CVE-2026-35641', detail: 'gateway bypass, cvss=9.8, exploit available' }],
     });
     expect(mapToCvss(r)).toEqual({ score: 9.8, source: 'real' });
   });
