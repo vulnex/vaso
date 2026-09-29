@@ -85,11 +85,8 @@ vaso scan --snapshot ./snapshots/prod-agent-01.json --diff
 | `vaso mcp scan` | Scan MCP server configurations |
 | `vaso mcp list` | List discovered MCP servers |
 | `vaso skill audit <path>` | Audit a skill directory before installing |
-| `vaso plugin install <path>` | Install a user plugin |
-| `vaso plugin uninstall <name>` | Remove a user plugin |
-| `vaso plugin status` | List installed plugins |
-| `vaso ext list` | List available extensions |
-| `vaso ext info <name>` | Show extension details |
+| `vaso ext list` | List loaded user plugins (drop-in `~/.vaso/plugins/*.js`) |
+| `vaso ext info <name>` | Show a user plugin's details |
 
 See [doc/user-guide.md](doc/user-guide.md) for full option reference.
 

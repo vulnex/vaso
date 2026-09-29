@@ -113,12 +113,10 @@ src/
     update.ts               vaso update handler
     mcp.ts                  vaso mcp scan/list handler
     skill-audit.ts          vaso skill audit handler
-    plugin.ts               vaso plugin install/uninstall/status handler
     user-plugin.ts          vaso ext list/info handler
     rules.ts                vaso rules list/validate/init handler
     probe.ts                vaso probe manifest/validate handler
   visualizations/           USecVisLib config emitters (attack-tree, privilege-gradient, component)
-  plugins/                  Agent framework plugin installer (before_agent_start hook)
   user-plugins/             Drop-in loader for ~/.vaso/plugins/*.{js,mjs}
   rules/                    Declarative YAML rules engine scaffolding (WIP — design only, not yet implemented)
   transport/                SSH multi-host orchestrator (worker pool + retries)

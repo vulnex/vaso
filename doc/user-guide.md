@@ -323,22 +323,6 @@ vaso mcp list --path .mcp.json
 
 Terminal output shows each server's name, transport type, command/URL, and environment variable names. JSON output returns the full discovery result.
 
-### `vaso plugin`
-
-Install or remove the VASO security plugin for an agent framework (OpenClaw, NanoClaw, PicoClaw). When installed, the plugin runs a scan as a `before_agent_start` hook so the agent refuses to launch with critical findings present.
-
-```bash
-vaso plugin install -a openclaw [--force]
-vaso plugin uninstall -a openclaw
-vaso plugin status [-a openclaw] [-f terminal|json]
-```
-
-| Subcommand | Purpose |
-|------------|---------|
-| `install` | Install the plugin into the agent's plugin directory |
-| `uninstall` | Remove the plugin |
-| `status` | Show install state for one or all supported agents |
-
 ### `vaso ext`
 
 Manage user plugins — drop-in `.js` / `.mjs` files in `~/.vaso/plugins/` that register custom checks, adapters, or reporters. See `examples/plugins/` for working examples.
@@ -637,7 +621,6 @@ VASO keeps all local state under `~/.vaso/`:
 | `~/.vaso/backups/<timestamp>/` | File backups before `vaso fix` modifies anything |
 | `~/.vaso/mcp-tool-baselines/` | Per-server tool-definition baselines for MCP-020 rug-pull detection (keyed by hostname + source) |
 | `~/.vaso/plugins/` | User-plugin drop-in directory (`vaso ext`) |
-| `~/.vaso/plugin-config.json` | Agent-plugin install state (`vaso plugin install/uninstall/status`) |
 | `~/.vaso/ioc/` | IOC feed cache + metadata fetched by `vaso update` |
 | `~/.vaso/advisory/` | Advisory/CVE feed cache + metadata fetched by `vaso update` |
 

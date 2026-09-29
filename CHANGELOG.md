@@ -104,6 +104,10 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - **HM-001 no longer treats prose as a credential.** Values containing whitespace (e.g. Hermes personality prompts, whose emoji push Shannon entropy past the threshold) are only flagged when they match a known key prefix.
 - **RUN-004 no longer flags a world-*readable* Docker socket.** Connecting to a Unix socket needs write permission, so only a world-writable socket (any local user can drive the daemon) is reported; `755` (Docker Desktop on macOS) and `660 root:docker` pass.
 
+### Removed
+
+- **`vaso plugin install/uninstall/status`.** The command wrote a `vaso-security.mjs` start hook into `~/.openclaw/plugins`, `~/.config/nanoclaw/plugins` and `~/.picoclaw/plugins`, but no current release of those frameworks loads plugins from there (PicoClaw is a Go binary, NanoClaw v2 has no plugin loader, OpenClaw 2026.x installs manifest-based plugins with `openclaw plugins install`), so it reported success and did nothing. It is removed rather than shipped as a stable command; user plugins (`~/.vaso/plugins/`, `vaso ext`) are unaffected.
+
 ### Changed
 
 - **Devin adapter matches Devin's own discovery.** Project config is found by walking up from the working directory to the repo root (nearest `.git`/`.jj`), including nested `.devin/` dirs in between; the standalone `.devin/hooks.v1.json` hooks file is loaded (DEV-006 now sees it); and skill roots (`~/.config/devin/skills`, `~/.config/cognition/skills`, `~/.agents/skills`, and the project `.devin/`, `.cognition/`, `.agents/` equivalents) are recorded so the SKL checks run on Devin skills. Running from `$HOME` does not duplicate user skill roots as project ones.
