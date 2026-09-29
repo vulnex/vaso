@@ -17,9 +17,12 @@ import { ly015 } from './ly-015-skills-dir-writable.js';
 import { ly016 } from './ly-016-migration-import-detected.js';
 import { ly017 } from './ly-017-migration-errors.js';
 import { ly018 } from './ly-018-node-env-development.js';
+import { ly019 } from './ly-019-fs-root-broad.js';
+import { ly020 } from './ly-020-memory-db-readable.js';
 
 export const lyrieChecks: CheckModule[] = [
   ly001, ly002, ly003, ly004, ly005, ly006,
   ly007, ly008, ly009, ly010, ly011, ly012,
   ly013, ly014, ly015, ly016, ly017, ly018,
+  ly019, ly020,
 ];

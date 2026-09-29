@@ -1,59 +1,55 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { fixFirstConfig } from '../../remediation/config-writer.js';
+import { envString, lyrieEnvConfigs } from './env.js';
 
-const CHANNEL_TOKEN_KEYS = [
-  'TELEGRAM_BOT_TOKEN', 'LYRIE_TELEGRAM_TOKEN',
-  'DISCORD_BOT_TOKEN', 'LYRIE_DISCORD_TOKEN',
-  'SLACK_BOT_TOKEN', 'LYRIE_SLACK_TOKEN',
-  'LYRIE_WHATSAPP_TOKEN',
-  'LYRIE_MATRIX_TOKEN',
-  'LYRIE_MATTERMOST_TOKEN',
-  'LYRIE_FEISHU_TOKEN',
-  'LYRIE_ROCKETCHAT_TOKEN',
-] as const;
-
-function isPresent(v: unknown): boolean {
-  return typeof v === 'string' && v.trim() !== '' && !/^\$\{?[A-Z_]+\}?$/.test(v.trim());
+/**
+ * ShieldManager.isUrlSafe() (packages/core/src/engine/shield-manager.ts)
+ * blocks web_fetch/web_search to localhost, 127.0.0.1, 0.0.0.0, 10/8,
+ * 192.168/16, 172.16.x, ::1, *.internal and *.local — unless
+ * NODE_ENV === "development", in which case it allows them. .env.example
+ * ships NODE_ENV=development, so a copied config disables the SSRF guard.
+ */
+function isDevelopment(v: string | undefined): boolean {
+  return v?.toLowerCase() === 'development';
 }
 
 export const ly018 = defineCheck({
   id: 'LY-018',
-  name: 'Development NODE_ENV with Production Channels',
+  name: 'NODE_ENV=development Disables Shield SSRF Guard',
   category: 'lyrie',
-  severity: 'critical',
-  description: 'Detect NODE_ENV=development while one or more channel tokens are configured — verbose logging and dev-only paths are active alongside live channel bots, risking secret leakage in logs.',
+  severity: 'warning',
+  description: 'Detect NODE_ENV=development in the Lyrie .env (the .env.example default). In development mode the Shield\'s URL filter lets web_fetch/web_search reach localhost, private networks (10/8, 192.168/16, 172.16) and *.internal/*.local hosts, so a prompt-injected agent can probe and pull data from internal services.',
   supportedAgents: ['lyrie'],
 
   async run(ctx, h) {
     const evidence: Evidence[] = [];
-    for (const config of ctx.configs) {
-      const nodeEnv = config.data.NODE_ENV as string | undefined;
-      if (nodeEnv && nodeEnv !== 'development') continue;
-      // Treat unset NODE_ENV the same as development (Lyrie's default per config.ts)
-      const liveChannels = CHANNEL_TOKEN_KEYS.filter(k => isPresent(config.data[k]));
-      if (liveChannels.length === 0) continue;
-
+    for (const config of lyrieEnvConfigs(ctx.configs)) {
+      if (!isDevelopment(envString(config, 'NODE_ENV'))) continue;
       evidence.push({
         file: config.filePath,
-        detail: `NODE_ENV=${nodeEnv ?? 'development (default)'} with ${liveChannels.length} channel token(s) configured — debug logs may leak secrets and message content`,
+        snippet: 'NODE_ENV=development',
+        detail: 'Shield URL filter allows requests to localhost and private/internal addresses (SSRF guard off)',
       });
     }
     return h.fromEvidence(evidence, {
-      passed: 'NODE_ENV is production or no channels are configured',
-      failed: () => 'NODE_ENV=development with live channel tokens configured',
+      passed: 'NODE_ENV is not development — Shield blocks internal URLs',
+      failed: () => 'NODE_ENV=development turns off the Shield\'s internal-address URL blocking',
       fixable: true,
-      fixDescription: 'Set NODE_ENV=production in .env when running Lyrie with real channel tokens',
+      fixDescription: 'Set NODE_ENV=production in the Lyrie .env',
     });
   },
 
   async fix(ctx) {
-    return fixFirstConfig(ctx.configs, {
-      checkId: 'LY-018',
-      env: 'NODE_ENV',
-      value: 'production',
-      message: 'Set NODE_ENV=production',
-      noConfigMessage: 'No .env file found',
-    });
+    return fixFirstConfig(
+      lyrieEnvConfigs(ctx.configs).filter(c => isDevelopment(envString(c, 'NODE_ENV'))),
+      {
+        checkId: 'LY-018',
+        env: 'NODE_ENV',
+        value: 'production',
+        message: 'Set NODE_ENV=production',
+        noConfigMessage: 'No .env with NODE_ENV=development found',
+      },
+    );
   },
 });

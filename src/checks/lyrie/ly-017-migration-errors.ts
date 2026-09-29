@@ -1,24 +1,18 @@
 import { join } from 'node:path';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-
-interface MigrationManifest {
-  platform?: string;
-  errors?: string[];
-  warnings?: string[];
-  success?: boolean;
-}
+import { lyrieStateDir } from '../../adapters/lyrie.js';
 
 export const ly017 = defineCheck({
   id: 'LY-017',
   name: 'Cross-Agent Migration Errors',
   category: 'lyrie',
   severity: 'warning',
-  description: 'Detect ~/.lyrie/migrations/*.json manifests with non-empty errors[] or success=false — a partially imported state may leave dangling references, corrupt memory, or skipped Shield-gating.',
+  description: 'Detect ~/.lyrie/migrations/*.json manifests with non-empty errors[] or success=false — a partially imported state may leave dangling references or half-imported memory and skills.',
   supportedAgents: ['lyrie'],
 
   async run(ctx, h) {
-    const dir = join(ctx.installation.installDir, 'migrations');
+    const dir = join(lyrieStateDir(ctx.fs), 'migrations');
     if (!(await ctx.fs.access(dir))) return h.passed('No migrations recorded');
 
     const evidence: Evidence[] = [];
@@ -27,14 +21,15 @@ export const ly017 = defineCheck({
       for (const name of entries.filter(n => n.endsWith('.json'))) {
         const path = join(dir, name);
         try {
-          const raw = await ctx.fs.readFile(path);
-          const data = JSON.parse(raw) as MigrationManifest;
+          const data = JSON.parse(await ctx.fs.readFile(path)) as Record<string, unknown> | null;
+          if (!data || typeof data !== 'object') continue;
           const failed = data.success === false;
-          const hasErrors = Array.isArray(data.errors) && data.errors.length > 0;
-          if (failed || hasErrors) {
+          const errors = Array.isArray(data.errors) ? data.errors.length : 0;
+          if (failed || errors > 0) {
+            const platform = typeof data.platform === 'string' ? data.platform : 'unknown';
             evidence.push({
               file: path,
-              detail: `Migration from "${data.platform ?? 'unknown'}" reported ${data.errors?.length ?? 0} error(s)${failed ? ' and was marked unsuccessful' : ''}`,
+              detail: `Migration from "${platform}" reported ${errors} error(s)${failed ? ' and was marked unsuccessful' : ''}`,
             });
           }
         } catch {
@@ -48,7 +43,7 @@ export const ly017 = defineCheck({
     return h.fromEvidence(evidence, {
       passed: 'All recorded migrations completed cleanly',
       failed: () => 'One or more migrations completed with errors',
-      fixDescription: 'Re-run `lyrie migrate --from <platform>` for the affected import, or clear the partial state from ~/.lyrie/memory/lyrie-memory.db',
+      fixDescription: 'Inspect the manifest errors, then re-run `bun run migrate --from <platform>` in the Lyrie checkout or remove the partially imported skills/memory',
     });
   },
 });

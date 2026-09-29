@@ -1,41 +1,46 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { updateEnvFile } from '../../remediation/config-writer.js';
+import { fixFirstConfig } from '../../remediation/config-writer.js';
+import { envTrue, lyrieEnvConfigs } from './env.js';
 
+/** backends/factory.ts: dryRun = LYRIE_LOCAL_DRY_RUN === "1" || === "true". */
 export const ly009 = defineCheck({
   id: 'LY-009',
-  name: 'Lyrie Local Dry-Run Enabled',
+  name: 'Lyrie Local Backend Dry-Run Enabled',
   category: 'lyrie',
   severity: 'warning',
-  description: 'Detect LYRIE_LOCAL_DRY_RUN=true — backend returns empty SARIF without running Lyrie. Operators may believe scans are running when they are not.',
+  description: 'Detect LYRIE_LOCAL_DRY_RUN=true (or 1) — the local scan backend returns an empty SARIF without running Lyrie, so security scans report "no findings" without scanning anything.',
   supportedAgents: ['lyrie'],
 
   async run(ctx, h) {
     const evidence: Evidence[] = [];
-    for (const config of ctx.configs) {
-      const dryRun = config.data.LYRIE_LOCAL_DRY_RUN as string | undefined;
-      if (dryRun === 'true' || dryRun === '1') {
+    for (const config of lyrieEnvConfigs(ctx.configs)) {
+      if (envTrue(config, 'LYRIE_LOCAL_DRY_RUN', true)) {
         evidence.push({
           file: config.filePath,
-          detail: 'LYRIE_LOCAL_DRY_RUN=true — Lyrie reports no findings without scanning',
+          snippet: 'LYRIE_LOCAL_DRY_RUN=true',
+          detail: 'Local backend in dry-run mode — scans return empty results without scanning',
         });
       }
     }
     return h.fromEvidence(evidence, {
       passed: 'Dry-run mode is not enabled',
-      failed: () => 'Dry-run mode is on — Lyrie returns empty SARIF without running',
+      failed: () => 'Dry-run mode is on — Lyrie returns empty SARIF without scanning',
       fixable: true,
-      fixDescription: 'Remove LYRIE_LOCAL_DRY_RUN from .env (or set it to false)',
+      fixDescription: 'Set LYRIE_LOCAL_DRY_RUN=false (or remove it) in the .env',
     });
   },
 
   async fix(ctx) {
-    for (const config of ctx.configs) {
-      if (config.format === 'env' && 'LYRIE_LOCAL_DRY_RUN' in config.data) {
-        await updateEnvFile(config.filePath, 'LYRIE_LOCAL_DRY_RUN', 'false');
-        return { checkId: 'LY-009', applied: true, message: 'Set LYRIE_LOCAL_DRY_RUN=false' };
-      }
-    }
-    return { checkId: 'LY-009', applied: false, message: 'No .env file found' };
+    return fixFirstConfig(
+      lyrieEnvConfigs(ctx.configs).filter(c => envTrue(c, 'LYRIE_LOCAL_DRY_RUN', true)),
+      {
+        checkId: 'LY-009',
+        env: 'LYRIE_LOCAL_DRY_RUN',
+        value: 'false',
+        message: 'Set LYRIE_LOCAL_DRY_RUN=false',
+        noConfigMessage: 'No .env with LYRIE_LOCAL_DRY_RUN enabled found',
+      },
+    );
   },
 });

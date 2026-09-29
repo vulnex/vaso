@@ -509,43 +509,25 @@ describe('adapter.getModels()', () => {
   });
 
   describe('lyrie', () => {
-    it('reads LYRIE_MODEL from .env', async () => {
-      const configs = [cfg('/u/.lyrie/.env', { LYRIE_MODEL: 'anthropic/claude-opus-4.6' })];
+    it('reads LYRIE_MODEL from the checkout .env (provider/model form)', async () => {
+      const configs = [cfg('/u/lyrie-ai/.env', { LYRIE_MODEL: 'anthropic/claude-opus-4.6' })];
       expect(await lyrieAdapter.getModels!(configs)).toEqual([
         { id: 'claude-opus-4.6', provider: 'anthropic' },
       ]);
     });
 
-    it('records LYRIE_FALLBACK_MODEL with via=fallback', async () => {
+    it('pairs LYRIE_MODEL with LYRIE_PROVIDER', async () => {
+      const configs = [cfg('/u/lyrie-ai/.env', { LYRIE_PROVIDER: 'ollama', LYRIE_MODEL: 'llama3.3:70b' })];
+      expect(await lyrieAdapter.getModels!(configs)).toEqual([
+        { id: 'llama3.3:70b', provider: 'ollama' },
+      ]);
+    });
+
+    it('ignores the Python CLI key store and returns [] without LYRIE_MODEL', async () => {
       const configs = [
-        cfg('/u/.lyrie/.env', {
-          LYRIE_DEFAULT_MODEL: 'anthropic/claude-opus-4.6',
-          LYRIE_FALLBACK_MODEL: 'openai/gpt-4o',
-        }),
+        cfg('/u/lyrie-ai/.env', { ANTHROPIC_API_KEY: 'sk-...', LYRIE_PROVIDER: 'anthropic' }),
+        cfg('/u/.lyrie/config.json', { LYRIE_MODEL: 'not-a-lyrie-setting' }),
       ];
-      expect(await lyrieAdapter.getModels!(configs)).toEqual([
-        { id: 'claude-opus-4.6', provider: 'anthropic' },
-        { id: 'gpt-4o', provider: 'openai', via: 'fallback' },
-      ]);
-    });
-
-    it('records per-channel LYRIE_<CHANNEL>_MODEL with via=<channel>', async () => {
-      const configs = [
-        cfg('/u/.lyrie/.env', {
-          LYRIE_MODEL: 'anthropic/claude-opus-4.6',
-          LYRIE_TELEGRAM_MODEL: 'openai/gpt-4o',
-          LYRIE_DISCORD_MODEL: 'google/gemini-2.5-pro',
-        }),
-      ];
-      expect(await lyrieAdapter.getModels!(configs)).toEqual([
-        { id: 'claude-opus-4.6', provider: 'anthropic' },
-        { id: 'gpt-4o', provider: 'openai', via: 'telegram' },
-        { id: 'gemini-2.5-pro', provider: 'google', via: 'discord' },
-      ]);
-    });
-
-    it('returns [] when no LYRIE_*_MODEL keys present', async () => {
-      const configs = [cfg('/u/.lyrie/.env', { ANTHROPIC_API_KEY: 'sk-...' })];
       expect(await lyrieAdapter.getModels!(configs)).toEqual([]);
     });
   });
