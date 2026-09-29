@@ -14,7 +14,7 @@ VASO can scan remote hosts for AI agent security issues without requiring Node.j
 
 ## Getting the probe
 
-You do **not** build the probe yourself in the normal case — and you get the same behavior whether you **installed** VASO (`curl … | bash` / `npm i -g github:vulnex/vaso`) or **cloned and built** it. No Go toolchain is required on your machine.
+You do **not** build the probe yourself in the normal case — and you get the same behavior whether you **installed** VASO (`curl … | bash` / `npm install -g` the release tarball, as in the [README](../README.md#installation)) or **cloned and built** it. No Go toolchain is required on your machine.
 
 On your first remote scan, VASO:
 
@@ -96,10 +96,10 @@ vaso scan --host deploy@host --sudo
 | `--parallel <n>` | Max hosts to scan concurrently | 5 |
 | `--sudo` | Attempt sudo escalation on remote | false |
 | `--save-snapshot <dir>` | Write each host's collected snapshot to `<dir>/<hostname>.json` | — |
-| `--output-dir <dir>` | Write one report per host to `<dir>/<hostname>.<ext>` (mutually exclusive with `-o`) | — |
+| `--output-dir <dir>` | Write one report per host to `<dir>/<hostname>.<ext>` (mutually exclusive with `-o`; local `vaso scan` uses the local hostname) | — |
 | `--silent` | Suppress all stdout/stderr chatter; requires `-o` or `--output-dir` | false |
 
-All flags except `--output-dir` are accepted by both `vaso scan` and `vaso detect`. VASO respects your `~/.ssh/config` for host aliases, jump hosts, and custom settings.
+All flags except `--sudo` are accepted by both `vaso scan` and `vaso detect` (`--sudo` is `scan`-only). VASO respects your `~/.ssh/config` for host aliases, jump hosts, and custom settings.
 
 ### How it works
 
@@ -215,7 +215,7 @@ vaso scan --inventory hosts.yaml -o fleet-report.json --silent
 vaso scan --inventory hosts.yaml --output-dir ./reports/ -f sarif --silent
 ```
 
-`--silent` requires `-o` or `--output-dir` — there's no point in suppressing console output if the report itself is going to stdout. The CLI exits 2 with a clear error if you forget. The same rule applies to local scans (`-o` is required when `--silent` is set, regardless of whether `--host` / `--inventory` is in play).
+`--silent` requires `-o` or `--output-dir` — there's no point in suppressing console output if the report itself is going to stdout. The CLI exits 2 with a clear error if you forget. The same rule applies to local scans (`-o` or `--output-dir` is required when `--silent` is set, regardless of whether `--host` / `--inventory` is in play). `--output-dir` also works for a local `vaso scan`: the report is written to `<dir>/<local-hostname>.<ext>`.
 
 When `--silent` is set, the global VASO banner, IOC/advisory feed warnings, plugin/rule warnings, retry banners, save-snapshot lines, per-host progress, and the "Report written to" notice are all suppressed. Errors and validation failures still print to stderr. Exit codes are unchanged: 0 = clean, 1 = findings hit `--fail-on` threshold, 2 = invalid usage or VASO error, 3 = one or more hosts could not be scanned (takes precedence over 1).
 
@@ -428,13 +428,13 @@ Unsupported platform on host: freebsd/amd64
 
 The probe supports Linux and macOS only. Use the snapshot workflow: run the probe manually on the host and transfer the snapshot.
 
-### Probe binary not found
+### Probe download failed
 
 ```
-ENOENT: no such file or directory, 'probe/dist/vaso-probe-linux-amd64'
+Failed to download vaso-probe for linux/amd64 from https://github.com/vulnex/vaso/releases/download/v1.0.0/vaso-probe-linux-amd64: ...
 ```
 
-Build the probe binaries first: `cd probe && make all`.
+The probe is downloaded automatically from the GitHub Release matching your VASO version, SHA-256-verified against the checksums bundled with VASO, and cached under `~/.vaso/probe/<version>/` — you don't normally build it. This error means the scanning machine couldn't reach GitHub (or the release has no asset for that platform). Retry with network access, or, for offline/air-gapped use or an unsupported platform, [build the probe locally](#building-the-probe-binaries) (`cd probe && make all`); a binary in `probe/dist/` always takes precedence over the download.
 
 ### Limited scan coverage warning
 

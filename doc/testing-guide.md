@@ -1,14 +1,15 @@
 # VASO Testing Guide
 
-Guide for running, writing, and maintaining VASO's test suites — unit tests and Docker-based integration tests.
+Guide for running, writing, and maintaining VASO's test suites — unit tests, fixture-based E2E tests, and Docker-based integration tests.
 
 ## Test Suites Overview
 
 | Suite | Command | What it tests | Duration |
 |-------|---------|---------------|----------|
 | Unit | `npm test` | Individual components in isolation | ~1s |
+| E2E | `npm run test:e2e` | The built CLI against temp fixture directories (no Docker) | ~30s |
 | Integration | `npm run test:integration` | End-to-end scans in Docker containers | ~2-5 min |
-| All | `npm run test:all` | Unit then integration | ~3-6 min |
+| All | `npm run test:all` | Unit, then E2E, then integration | ~3-6 min |
 
 ## Unit Tests
 
@@ -39,7 +40,7 @@ npx vitest run --coverage
 | `src/core/config-loader.test.ts` | JSON, YAML, `.env` parsing |
 | `src/core/scoring.test.ts` | Score computation, grading, summaries |
 | `src/core/baseline.test.ts` | Differential scan diffing |
-| `src/checks/config/config-checks.test.ts` | All 15 config checks |
+| `src/checks/config/config-checks.test.ts` | Config checks (CFG-001–024, with NemoClaw CFG-016–024 also in `nemoclaw-checks*.test.ts`) |
 | `src/analyzers/ast-analyzer.test.ts` | AST data flow, eval/exec, network detection |
 | `src/analyzers/pattern-engine.test.ts` | Regex pattern matching across categories |
 | `src/analyzers/entropy.test.ts` | Shannon entropy and obfuscation detection |
@@ -84,6 +85,16 @@ describe('CFG-001 Gateway Binding', () => {
 });
 ```
 
+## E2E Tests
+
+E2E tests (`testing/e2e/`) spawn `node dist/cli.js` as a child process with an isolated temporary `HOME` populated from fixtures, and assert on the CLI's output and exit codes — `scan`, `detect`, `mcp scan` / `mcp list` (including real MCP server packages), and every output format. No Docker is needed. The global setup builds `dist/` if it is missing; rebuild after source changes so the suite doesn't test a stale bundle.
+
+```bash
+npm run test:e2e
+# equivalent to:
+npx vitest run -c testing/vitest.config.e2e.ts
+```
+
 ## Integration Tests
 
 Integration tests run VASO inside Docker containers with realistic agent installations. They validate that the full pipeline — adapter detection, config parsing, check execution, and scoring — works end-to-end against known environments.
@@ -104,7 +115,12 @@ npm run test:integration
 
 # Run a specific integration test file
 npx vitest run --config testing/vitest.config.integration.ts testing/integration/openclaw.integration.test.ts
+
+# On a loaded machine, run files sequentially to avoid Docker build contention and timeouts
+npx vitest run --config testing/vitest.config.integration.ts --no-file-parallelism
 ```
+
+The containers run the built `dist/cli.js` — run `npm run build` first after source changes.
 
 ### How It Works
 
@@ -114,8 +130,9 @@ npx vitest run --config testing/vitest.config.integration.ts testing/integration
 
 2. **Agent images** extend the base and copy fixture files to the expected detection paths:
    - OpenClaw: `/root/.openclaw/`
-   - NanoClaw: `/root/.config/nanoclaw/` + `/root/.nanoclaw.env`
+   - NanoClaw: v2 checkout at `/root/nanoclaw/` (`.env`, `data/`, `container/skills/`) + `/root/.config/nanoclaw/` (mount allowlist)
    - PicoClaw: `/root/.picoclaw/`
+   - IronClaw, Nanobot, ZeroClaw, and MCP configs: see their Dockerfiles under `testing/docker/agents/`
 
 3. **testcontainers** starts each container, executes `node dist/cli.js scan --format json` via `exec()`, and captures the JSON output.
 
@@ -129,27 +146,45 @@ testing/
     base.Dockerfile                 # Multi-stage VASO build
     agents/
       openclaw.Dockerfile           # OpenClaw fixtures
-      nanoclaw.Dockerfile           # NanoClaw fixtures
+      nanoclaw.Dockerfile           # NanoClaw v2 checkout + host config dir
       picoclaw.Dockerfile           # PicoClaw fixtures
-      multi.Dockerfile              # All three agents
+      ironclaw.Dockerfile           # IronClaw (1.x Reborn + 0.x) fixtures
+      nanobot.Dockerfile            # Nanobot fixtures
+      zeroclaw.Dockerfile           # ZeroClaw fixtures
+      mcp.Dockerfile                # MCP server configs
+      multi.Dockerfile              # OpenClaw + NanoClaw + PicoClaw
   fixtures/
     openclaw/
       insecure/                     # Deliberately vulnerable configs + skills
       secure/                       # Hardened configs + benign skills
-    nanoclaw/
-      insecure/
-      secure/
-    picoclaw/
-      insecure/
-      secure/
+    nanoclaw/{insecure,secure}/     # checkout/ + config/
+    picoclaw/{insecure,secure}/
+    ironclaw/{insecure,secure}/
+    nanobot/{insecure,secure}/
+    zeroclaw/{insecure,secure}/
+    mcp/{insecure,secure,mcp-server-source}/
+  e2e/
+    helpers/                        # cli-runner, fixture setup, MCP config builders
+    global-setup.ts                 # Builds dist/ if missing
+    global-teardown.ts
+    scan.e2e.test.ts
+    detect.e2e.test.ts
+    mcp-scan.e2e.test.ts
+    mcp-list.e2e.test.ts
+    output-formats.e2e.test.ts
   integration/
     helpers.ts                      # Test utilities
     openclaw.integration.test.ts
     nanoclaw.integration.test.ts
     picoclaw.integration.test.ts
+    ironclaw.integration.test.ts
+    nanobot.integration.test.ts
+    zeroclaw.integration.test.ts
+    mcp.integration.test.ts
     multi-agent.integration.test.ts
     scoring.integration.test.ts
-  vitest.config.integration.ts      # Separate vitest config with extended timeouts
+  vitest.config.e2e.ts              # E2E vitest config
+  vitest.config.integration.ts      # Integration vitest config with extended timeouts
   docker-compose.yml                # Manual testing shortcut
 ```
 
@@ -219,8 +254,8 @@ Each fixture set is designed to trigger (or not trigger) specific checks.
 - `eval()`, `exec()` calls — triggers SKL-003
 - `bash -i >& /dev/tcp/...` patterns — triggers SKL-005
 - "ignore all previous instructions" in SKILL.md — triggers SKL-007
-- Known C2 IP `185.199.228.220` in code — triggers IOC-001
-- Known domain `clawhavoc.io` in code — triggers IOC-002
+- Known ClawHavoc C2 IP `91.92.242.30` in code — triggers IOC-001
+- Known malicious domain `santaclaude.app` in code — triggers IOC-002
 - Skill directory named `filesystm` (distance 1 from `filesystem`) — triggers IOC-005
 
 **Secure fixtures** contain:

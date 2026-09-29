@@ -11,11 +11,11 @@ inputs:
     required: false
     default: 'v1.0.0'
   agent:
-    description: 'Scan a single agent only (openclaw, nanoclaw, picoclaw, ironclaw, nanobot, zeroclaw, nemoclaw, hermes, claude-code, codex). Omit to scan all detected agents.'
+    description: 'Scan a single agent only (openclaw, nanoclaw, picoclaw, ironclaw, nanobot, zeroclaw, nemoclaw, hermes, lyrie, atomic-agent, claude-code, claude-desktop, chatgpt-desktop, codex, opencode, gemini-cli, qwen-code, copilot-cli, cursor-cli, windsurf, devin, meta-muse, comet). Omit to scan all detected agents.'
     required: false
     default: ''
   format:
-    description: 'Output format: terminal, json, sarif, markdown, or html.'
+    description: 'Output format: terminal, json, sarif, markdown, html, csv, or junit.'
     required: false
     default: 'sarif'
   output:
@@ -94,6 +94,8 @@ runs:
             json) VASO_OUTPUT="vaso-results.json" ;;
             markdown) VASO_OUTPUT="vaso-results.md" ;;
             html) VASO_OUTPUT="vaso-results.html" ;;
+            csv) VASO_OUTPUT="vaso-results.csv" ;;
+            junit) VASO_OUTPUT="vaso-results.xml" ;;
             terminal) VASO_OUTPUT="" ;;
             *) VASO_OUTPUT="vaso-results.txt" ;;
           esac

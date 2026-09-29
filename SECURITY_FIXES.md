@@ -1,6 +1,6 @@
 # Auto-Fix Criteria
 
-`vaso fix` auto-remediates **36 of 264 checks** (≈14%). The other 228 surface findings and remediation guidance only. This document explains where the line is drawn, why, and exactly what VASO writes when it does fix.
+`vaso fix` auto-remediates **36 of 318 checks** (≈11%). The other 282 surface findings and remediation guidance only. This document explains where the line is drawn, why, and exactly what VASO writes when it does fix.
 
 ## The Rule
 
@@ -27,46 +27,52 @@ Replace public-bound listeners with `127.0.0.1`.
 
 | Check | Field | Written value |
 |---|---|---|
-| CFG-001 | `gateway.host` | `127.0.0.1` |
-| IC-001 | `HTTP_HOST` / `http.host` | `127.0.0.1` |
-| IC-003 | `ORCHESTRATOR_HOST` / `orchestrator.host` | `127.0.0.1` |
-| NC-004 | NanoClaw listener host | `127.0.0.1` |
-| ZC-003 | ZeroClaw bind | `127.0.0.1` |
+| CFG-001 | `gateway.host` (or `GATEWAY_HOST` for env) | `127.0.0.1` |
+| IC-001 | `[webui].listen_host` (current) / `HTTP_HOST`, `GATEWAY_HOST` (0.x) | `127.0.0.1` |
+| ZC-003 | `gateway.host`, `gateway.allow_public_bind` | `127.0.0.1`, `false` |
 
-### Boolean toggle to safe default
+### Setting to safe default
 
 | Check | Field | Written value |
 |---|---|---|
-| CFG-008 | `sandbox` | `true` |
-| CFG-010 | `rateLimit` | enabled with safe defaults |
-| CFG-012 | auth bypass | `false` |
-| IC-005 | sandbox | `true` |
-| IC-006 | sandbox full-access | `false` |
-| IC-007 | `AGENT_AUTO_APPROVE_TOOLS` | `false` |
-| IC-008 | local tools bypass | `false` |
-| IC-012 | docker auto-pull | `false` |
-| NB-003 | `restrictToWorkspace` | `true` |
-| NB-005 | SSRF webfetch | restricted |
-| NB-009 | session encryption | enabled |
-| NB-011 | rate limit | enabled |
-| ZC-001 | `secrets.encrypt` | `true` |
-| ZC-004 | pairing enabled | `true` |
-| ZC-005 | `autonomy.level` | `supervised` |
-| ZC-006 | workspace restriction | enabled |
-| ZC-008 | open skills | locked down |
-| ZC-014 | OS sandbox | enabled |
-| LY-001 | shield mode | `enforce` (was passive) |
-| LY-009 | dry-run | disabled |
+| CFG-008 | `sandbox` (or `SANDBOX`) | `true` |
+| CFG-010 | `rateLimit` (or `RATE_LIMIT`) | `{ max: 60, window: "1m" }` (`60/1m`) |
+| CFG-012 | `auth.bypass` (or `AUTH_BYPASS`) | `false` |
+| CFG-013 | `dm.policy` (or `DM_POLICY`) | `restricted` |
+| IC-005 | `SANDBOX_ENABLED` / `sandbox.enabled` (0.x) | `true` |
+| IC-006 | `[boot].profile` (current) / `SANDBOX_POLICY` (0.x) | `local-dev` / `readonly` |
+| IC-007 | `[policy].default_approval_policy` (current) / `AGENT_AUTO_APPROVE_TOOLS` (0.x) | `ask_destructive` / `false` |
+| IC-008 | `ALLOW_LOCAL_TOOLS` (0.x) | `false` |
+| IC-012 | `sandbox.auto_pull_image` / `SANDBOX_AUTO_PULL` (0.x) | `false` |
+| NB-003 | `tools.restrictToWorkspace` | `true` |
+| ZC-001 | `secrets.encrypt` | `true` (secrets must then be re-entered) |
+| ZC-004 | `gateway.require_pairing` | `true` |
+| ZC-005 | `risk_profiles.<alias>.level` on full-autonomy profiles | `supervised` |
+| ZC-006 | `workspace_only` / `agents.<alias>.workspace.unrestricted_filesystem` | `true` / `false` |
+| ZC-008 | `skills.open_skills_enabled`, `skills.allow_scripts` | `false` |
+| ZC-011 | risk-profile `auto_approve` | `browser` removed |
+| ZC-012 | `http_request.allow_private_hosts` | `false` |
+| ZC-014 | risk-profile `sandbox_enabled` (and `sandbox_backend` when `none`) | `true` (`auto`) |
+| ZC-016 | `gateway.allow_self_upgrade`, `trust_forwarded_headers`, `allow_remote_admin`; zeroed rate limits | `false`; pair `10`/min, webhook `60`/min |
+| LY-001 | `LYRIE_SHIELD_MODE` | `active` (was passive or invalid) |
+| LY-009 | `LYRIE_LOCAL_DRY_RUN` | `false` |
 | LY-018 | `NODE_ENV` | `production` (was development) |
+| AT-002 | `agent.readScope` | `working-dir` |
+| AT-003 | `http.approvalMode` | `writes` |
+| PCL-001 | `agents.defaults.restrict_to_workspace` | `true` |
+| PCL-002 | `tools.exec.enable_deny_patterns` | `true` |
+| PCL-004 | `tools.exec.allow_remote` | `false` |
 
 ### Restrictive file mode
 
-`chmod 600` on credential-bearing files.
+`chmod 600` on credential-bearing files (`700` on directories).
 
 | Check | Target |
 |---|---|
 | CFG-003 | adapter-declared credential paths |
-| OC-006 | OpenClaw memory file |
+| CFG-020 | NemoClaw `~/.nemoclaw/credentials.json` |
+| OC-006 | OpenClaw memory files (`memory.json`, `conversations.db`) |
+| NC-002 | `~/.config/nanoclaw/` (700) and its allowlist/secret files (600) |
 | ZC-013 | ZeroClaw `.secret_key` |
 
 ### Inject an opinionated default list
@@ -75,10 +81,7 @@ When the security posture requires a baseline list and any reasonable user wants
 
 | Check | Field | Written value |
 |---|---|---|
-| NB-004 | `tools.exec.denyList` | `rm, rmdir, mkfs, dd, curl, wget, nc, chmod, chown, kill, shutdown, reboot, passwd` (13 commands) |
 | CFG-005 | `security.safeBins` (or `SAFE_BINS` for env) | `ls, cat, grep, head, tail, wc, echo, date` (8 read-only utilities) |
-| LY-011 | WebChat CORS | restricted to localhost origins |
-| CFG-020 | NemoClaw API key handling | redacted-env pattern |
 
 ## What Is Not Auto-Fixable
 
@@ -87,10 +90,10 @@ Five reasons. Each rules out auto-fix even when the finding is critical.
 | Reason | Example checks | Why VASO refuses |
 |---|---|---|
 | Identity data required | NB-001 channel `allowFrom`; IC-010 `TELEGRAM_OWNER_ID` | VASO doesn't know which users you trust |
-| Trust-policy input required | ZC-011/012 `allowed_domains`; IC-011 sandbox domains | VASO doesn't know which domains you trust |
+| Trust-policy input required | IC-011 sandbox domains; NB-005 SSRF whitelist; PCL-007 tool path allowances | VASO doesn't know which domains or paths you trust |
 | Secret material required | NB-002 plaintext keys; ZC-002 XOR re-encrypt; IC-009 keychain migration | The fix requires entering a fresh credential or invoking an external secrets manager |
 | User-driven workflow | NB-012 npx → pinned install; CD-005 unsigned MCPB extension | The fix is a multi-step process, not a single config write |
-| External resource required | IC-002 TLS — needs your cert/key paths; CG-005 codesign mismatch | The fix requires files VASO can't generate |
+| External resource required | IC-002 cleartext LLM endpoint — needs an HTTPS endpoint; CG-005 codesign mismatch | The fix requires resources VASO can't generate |
 
 For all of the above, the check's `fixDescription` is still surfaced in scan output so users see the remediation step. They just don't get told the scanner will perform it.
 
@@ -112,4 +115,4 @@ If you're authoring a check and considering whether to make it fixable, ask:
 
 If yes, declare `fixable: true` in the `run()` result and implement `fix()` using the writers in `src/remediation/config-writer.ts` (`updateJsonFile`, `updateTomlFile`, `updateEnvFile`, `chmodFile`). If no, return `fixable: false` (or omit the field) and rely on `fixDescription` to surface the manual remediation guidance.
 
-The 14 checks cleaned up in this commit chain (`NB-001/002/008/010/012`, `ZC-002/007/009/011/012`, `IC-002/009/010/011`) violated this rule — they declared `fixable: true` paired with a stub `fix()` that returned `applied: false` and "Manual action required". Either pattern alone — `fixable: false` with no `fix()`, or `fixable: true` with a working `fix()` — is honest; the hybrid is not.
+The 14 checks cleaned up in an earlier commit chain (`NB-001/002/008/010/012`, `ZC-002/007/009/011/012`, `IC-002/009/010/011`) violated this rule — they declared `fixable: true` paired with a stub `fix()` that returned `applied: false` and "Manual action required". Either pattern alone — `fixable: false` with no `fix()`, or `fixable: true` with a working `fix()` — is honest; the hybrid is not. ZC-011 and ZC-012 have since regained working fixes that write a single safe value (drop `browser` from `auto_approve`; set `allow_private_hosts = false`); narrowing their host allowlists remains manual.

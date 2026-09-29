@@ -43,7 +43,7 @@ vaso scan [options]
 | `-a, --agent <type>` | Scan a specific agent: `openclaw`, `nanoclaw`, `picoclaw`, `ironclaw`, `nanobot`, `zeroclaw`, `nemoclaw`, `hermes`, `lyrie`, `atomic-agent`, `claude-code`, `claude-desktop`, `chatgpt-desktop`, `codex`, `opencode`, `gemini-cli`, `qwen-code`, `copilot-cli`, `cursor-cli`, `windsurf`, `devin`, `meta-muse`, or `comet` |
 | `-f, --format <format>` | Output format: `terminal` (default), `json`, `sarif`, `markdown`, `html`, `csv`, `junit` |
 | `-o, --output <file>` | Write report to a single file instead of stdout |
-| `--output-dir <dir>` | Multi-host: write one file per host as `<dir>/<hostname>.<ext>` (mutually exclusive with `-o`) |
+| `--output-dir <dir>` | Write one file per host as `<dir>/<hostname>.<ext>`; local scans use the local hostname (mutually exclusive with `-o`) |
 | `--save-baseline` | Save current results as a baseline for future comparison |
 | `--diff` | Compare results against the last saved baseline |
 | `--all-users` | Scan all user accounts (requires root/sudo) |
@@ -112,9 +112,10 @@ vaso detect [options]
 | `-a, --agent <type>` | Detect a specific agent only: `openclaw`, `nanoclaw`, `picoclaw`, `ironclaw`, `nanobot`, `zeroclaw`, `nemoclaw`, `hermes`, `lyrie`, `atomic-agent`, `claude-code`, `claude-desktop`, `chatgpt-desktop`, `codex`, `opencode`, `gemini-cli`, `qwen-code`, `copilot-cli`, `cursor-cli`, `windsurf`, `devin`, `meta-muse`, or `comet` |
 | `-f, --format <format>` | Output format: `terminal` (default) or `json` |
 | `-o, --output <file>` | Write report to a file instead of stdout |
+| `--output-dir <dir>` | Multi-host: write one file per host as `<dir>/<hostname>.<ext>` (mutually exclusive with `-o`) |
 | `--all-users` | Detect across all user accounts (requires root/sudo) |
 | `--verbose` | Show the search paths checked for each adapter |
-| `--silent` | Suppress all stdout/stderr chatter; requires `-o` |
+| `--silent` | Suppress all stdout/stderr chatter; requires `-o` or `--output-dir` |
 | `--host <target...>` | Detect on one or more remote hosts via SSH (`user@host[:port]`). Variadic. |
 | `--inventory <path>` | YAML file listing hosts to detect against |
 | `--ssh-key <path>` | SSH identity file for remote connections |
@@ -123,6 +124,7 @@ vaso detect [options]
 | `--parallel <n>` | Max hosts to detect concurrently (default 5) |
 | `--snapshot <path>` | Detect from a pre-collected probe snapshot file |
 | `--save-snapshot <dir>` | When detecting over SSH, write each host's snapshot to `<dir>/<hostname>.json` |
+| `--no-color` | Disable colored terminal output |
 
 Examples:
 
@@ -257,7 +259,7 @@ The output directory contains one config file per (installation × diagram) plus
 
 ### `vaso update`
 
-Reload the IOC (Indicators of Compromise) and advisory threat-intelligence databases. Both feeds are signed with a pinned Ed25519 key (`src/ioc/public-key.ts`) and rejected on version rollback — see `SECURITY.md`. The bundled databases remain the offline baseline; `vaso update` only refreshes the in-memory state with newer signed data.
+Fetch the IOC (Indicators of Compromise) and advisory threat-intelligence feeds. Both feeds are signed with a pinned Ed25519 key (`src/ioc/public-key.ts`) and rejected on version rollback — see `SECURITY.md`. Verified feeds are cached under `~/.vaso/ioc/` and `~/.vaso/advisory/` (feed, signature, and `metadata.json`) and loaded on top of the bundled databases, which remain the offline baseline.
 
 Feeds are published **at least monthly**, with out-of-band publishes for actively exploited issues — see the "Threat Feed Updates" section of `SECURITY.md` for the full policy.
 
@@ -269,7 +271,7 @@ vaso update --url <url>  # Custom feed URL (must still be signed with the pinned
 
 ### `vaso mcp scan`
 
-Scan MCP (Model Context Protocol) server configurations for security issues. This auto-discovers MCP configs from Claude Desktop, Claude Code, Cursor, Windsurf, VS Code, and project-level config files.
+Scan MCP (Model Context Protocol) server configurations for security issues. This auto-discovers MCP configs from Claude Desktop, Claude Code, Cursor, Windsurf, Devin CLI, Atomic Agent, Nanobot, PicoClaw, Lyrie, VS Code, and project-level config files.
 
 ```
 vaso mcp scan [options]
@@ -280,6 +282,7 @@ vaso mcp scan [options]
 | `-f, --format <format>` | Output format: `terminal` (default), `json`, `sarif`, `markdown`, `html`, `csv`, `junit` |
 | `-o, --output <file>` | Write report to a file instead of stdout |
 | `-p, --path <paths...>` | Specific config file paths to scan (skips auto-discovery) |
+| `--resolve-packages` | Download npm-packaged (`npx`) MCP servers — download only, never executed — and analyze their source. Requires network access |
 | `--no-color` | Disable colored terminal output |
 
 Examples:
@@ -293,6 +296,9 @@ vaso mcp scan --path ~/.claude/mcp.json
 
 # Generate JSON report
 vaso mcp scan --format json -o mcp-report.json
+
+# Also fetch and analyze the source of npx-launched servers
+vaso mcp scan --resolve-packages
 ```
 
 ### `vaso mcp list`
@@ -406,11 +412,11 @@ VASO runs **318 checks across 18 categories**.
 | Atomic Agent | AT-001–011 | 11 | Raised approval ladder (level 4/5), unrestricted read scope, unapproved HTTP egress, plaintext secrets in config.json, `.env`/mail-session perms, `pure_read` MCP trust, MCP stdio/transport hygiene, secretless webhooks, subscription-CLI lockdown overrides, plaintext inference endpoints, world/group-readable memory, sessions and traces |
 | Coding Agent | CC, CD, CG, CDX, OPC, GEM, QC, CUR, GHC, WS, DEV, MM, PC | 117 | Claude Code (12), Claude Desktop (10), ChatGPT Desktop (6), Codex (10), OpenCode (12), Gemini CLI (11), Qwen Code (10), Cursor (14), GitHub Copilot CLI (9), Windsurf/Devin Desktop (8), Devin CLI (10), Meta Muse (3), Perplexity Comet (2): sandbox/approval policy, plaintext credentials, MCP pinning, broad allow rules, memory-file secrets, transport security |
 
-Server-side checks (CFG, NET, RUN, POL) are auto-excluded for coding agents since their threat model differs from server frameworks.
+Server-only checks (gateway/network/runtime concepts, mostly in CFG, NET, RUN, and POL) are automatically excluded for coding agents and desktop apps to avoid false positives — interactive coding CLIs have a different threat model than autonomous server agents.
 
 ## Supported Agents
 
-VASO ships eighteen adapters. Each implements `detect()`, `getConfigPaths()`, `getSkillsDir()`, and `getGatewayInfo()` against its framework's on-disk layout.
+VASO ships twenty-three adapters. Each implements `detect()`, `getConfigPaths()`, `getSkillsDir()`, and `getGatewayInfo()` against its framework's on-disk layout.
 
 ### Autonomous frameworks
 
@@ -427,19 +433,28 @@ VASO ships eighteen adapters. Each implements `detect()`, `getConfigPaths()`, `g
 | Lyrie | git checkout `.env` (found via its service unit or common locations, `package.json` name `lyrie-agent`) + `~/.lyrie/` state (`config.json`, `mcp.json`, pairing/edit ledgers, memory) | ENV, JSON |
 | Atomic Agent | `~/.atomic-agent/` or `$ATOMIC_AGENT_STATE_DIR` (config.json, .env, skills/; MCP servers also discovered by `vaso mcp`) | JSON, ENV |
 
-### Coding agents
+### Interactive coding agents
 
 | Adapter | Config locations | Formats |
 |---------|------------------|---------|
 | Claude Code | `~/.claude/`, `~/.claude.json`, project `.claude/` | JSON |
-| Claude Desktop | `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS), `%APPDATA%\Claude\claude_desktop_config.json` (Windows); MCPB extensions under `Claude Extensions/` | JSON |
-| ChatGPT Desktop | `/Applications/ChatGPT.app` + `~/Library/Application Support/com.openai.chat/`; preferences in `~/Library/Preferences/com.openai.chat*.plist` (macOS only) | plist |
 | Codex | `~/.codex/config.toml`, `~/.codex/auth.json` | TOML, JSON |
 | OpenCode | `$XDG_CONFIG_HOME/opencode/opencode.json[c]`, `$XDG_DATA_HOME/opencode/auth.json` | JSON, JSONC |
 | Gemini CLI | `~/.gemini/settings.json`, OAuth credential files (`oauth_creds.json`, `google_accounts.json`, `mcp-oauth-tokens.json`); project `.gemini/` | JSONC |
 | Qwen Code | `~/.qwen/settings.json` (multi-provider auth: OpenAI/Anthropic/Gemini/Dashscope/Bailian); project `.qwen/` | JSONC |
 | GitHub Copilot CLI | `~/.copilot/config.json`, `settings.json`, `command-history-state.json`, `session-state/`; workspace `.mcp.json` + `.github/lsp.json` | JSONC |
-| Cursor CLI | `~/.cursor/cli-config.json`, `~/.cursor/mcp.json` | JSON |
+| Cursor CLI/IDE | `~/.cursor/` (`cli-config.json`, `mcp.json`, `permissions.json`, `sandbox.json`, `hooks.json`); project `.cursor/`; IDE user-data dir (`~/Library/Application Support/Cursor/`, `~/.config/Cursor/`, `%APPDATA%\Cursor\`: `User/settings.json`, `User/globalStorage/state.vscdb`); IDE-only installs via `/Applications/Cursor.app` | JSON |
+| Windsurf / Devin Desktop | `~/.codeium/windsurf/` (`mcp_config.json`, memories, workflows, `user_settings.pb`), `~/.config/devin/mcp_config.json`; editor user-data `{Windsurf,Devin}` dirs (`~/Library/Application Support/`, `~/.config/`, `%APPDATA%`); version from the app's `product.json` | JSON |
+| Devin CLI | `$XDG_CONFIG_HOME/devin/` (default `~/.config/devin/`: `config.json`, `mcp_config.json`, `AGENTS.md`), `$XDG_DATA_HOME/devin/credentials.toml`; project `.devin/` (found by walking up to the repo root) incl. `hooks.v1.json`; `%APPDATA%\devin\` on Windows | JSONC, TOML |
+
+### Agentic desktop apps
+
+| Adapter | Config locations | Formats |
+|---------|------------------|---------|
+| Claude Desktop | `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS), `%APPDATA%\Claude\claude_desktop_config.json` (Windows); MCPB extensions under `Claude Extensions/` | JSON |
+| ChatGPT Desktop | `/Applications/ChatGPT.app` + `~/Library/Application Support/com.openai.chat/`; preferences in `~/Library/Preferences/com.openai.chat*.plist` (macOS only) | plist |
+| Meta Muse | `/Applications/Muse.app`, `~/Library/Preferences/com.meta.endo.plist`, `~/Library/Application Support/com.meta.endo/` (macOS only; initial coverage) | plist |
+| Perplexity Comet | `/Applications/Comet.app` + Chromium profile `~/Library/Application Support/Comet/` (macOS) or `%LOCALAPPDATA%\Perplexity\Comet\User Data` (Windows): session-data permissions, extension inventory | — |
 
 ### MCP Servers
 
@@ -452,11 +467,17 @@ VASO auto-discovers MCP server configurations from multiple sources:
 - `~/.claude/mcp.json` (Claude Code)
 - `~/.cursor/mcp.json` (Cursor)
 - `~/.codeium/windsurf/mcp_config.json` (Windsurf)
+- `$XDG_CONFIG_HOME/devin/mcp_config.json` (Devin CLI / Devin Desktop; default `~/.config/devin/`, `%APPDATA%\devin\` on Windows)
+- `~/.atomic-agent/config.json` or `$ATOMIC_AGENT_STATE_DIR/config.json` (Atomic Agent `mcp.servers[]`)
+- `~/.nanobot/config.json` (Nanobot)
+- `$PICOCLAW_CONFIG` or `$PICOCLAW_HOME/config.json` (PicoClaw; default `~/.picoclaw/config.json`)
+- `~/.lyrie/mcp.json` (Lyrie)
 
 **Project-level configs:**
 - `.mcp.json` (Claude Code project)
 - `.cursor/mcp.json` (Cursor project)
 - `.windsurf/mcp.json` (Windsurf project)
+- `.devin/mcp_config.json`, `.devin/mcp_config.local.json` (Devin CLI project)
 - `.vscode/mcp.json` (VS Code)
 - `mcp.json` (Generic MCP)
 
@@ -503,7 +524,7 @@ vaso scan --format html -o report.html
 
 ### CSV
 
-One row per finding, designed for SIEM / data-warehouse ingestion. Columns include `id`, `name`, `severity`, `category`, `agent`, `passed`, `message`, `file`, `line`.
+One row per finding, designed for SIEM / data-warehouse ingestion. Columns: `timestamp`, `agent`, `agent_name`, `check_id`, `check_name`, `category`, `severity`, `passed`, `message`, `file`, `line`, `snippet`, `detail`.
 
 ```bash
 vaso scan --format csv -o findings.csv
@@ -624,8 +645,14 @@ VASO keeps all local state under `~/.vaso/`:
 | `~/.vaso/plugins/` | User-plugin drop-in directory (`vaso ext`) |
 | `~/.vaso/ioc/` | IOC feed cache + metadata fetched by `vaso update` |
 | `~/.vaso/advisory/` | Advisory/CVE feed cache + metadata fetched by `vaso update` |
+| `~/.vaso/probe/` | Downloaded `vaso-probe` binaries for remote scanning |
 
-Nothing under `~/.vaso/` leaves the machine. The only outbound network call VASO ever makes is `vaso update` against the signed feed URL.
+Nothing under `~/.vaso/` leaves the machine. VASO makes outbound network calls only in these cases:
+
+- `vaso update` — fetches the signed IOC/advisory feeds
+- `vaso mcp scan --resolve-packages` (opt-in) — downloads npm package tarballs for source analysis; they are never executed
+- `--host` / `--inventory` remote scans — connect over SSH and, on first use, download the `vaso-probe` binary from GitHub Releases (SHA-256-verified, cached under `~/.vaso/probe/`)
+- IOC-008 (opt-in) — queries VirusTotal with skill-file hashes only when `VIRUSTOTAL_API_KEY` is set
 
 ## Safety Guarantees
 

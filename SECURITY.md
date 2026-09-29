@@ -72,7 +72,7 @@ The current feed version and publish timestamp are visible in `feeds/feed.json` 
 VASO is built defense-first:
 
 - **No execution of scanned code.** All analysis is static (Babel AST, regex, entropy). Removing this property would be a regression.
-- **No outbound network calls during scans.** Only `vaso update` reaches the network, and only to fetch signed IOC feeds.
+- **No outbound network calls during local scans by default.** Network access happens only in: `vaso update` (signed IOC/advisory feeds); opt-in `vaso mcp scan --resolve-packages` (downloads npm tarballs — never executed — for source analysis); remote scans with `--host`, which connect over SSH and, on first use, download the `vaso-probe` binary from GitHub Releases (SHA-256-verified against bundled checksums); and IOC-008, which queries VirusTotal only when `VIRUSTOTAL_API_KEY` is set.
 - **Bundled, signed IOC feeds.** Remote feeds are verified with a pinned Ed25519 key and rejected on version rollback.
 - **No data exfiltration.** Scan results stay local unless the user explicitly redirects them.
 

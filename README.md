@@ -95,7 +95,7 @@ See [doc/user-guide.md](doc/user-guide.md) for full option reference.
 **Autonomous frameworks**
 
 - **OpenClaw** — `~/.openclaw`, `~/.clawdbot`, `~/.moltbot`, `/etc/openclaw`
-- **NanoClaw** — `~/.nanoclaw.env`, `~/.config/nanoclaw/`
+- **NanoClaw** — v2 git checkout (`<checkout>/.env`, `data/`, `groups/`) + `~/.config/nanoclaw/` (mount allowlist)
 - **PicoClaw** — `~/.picoclaw/`
 - **IronClaw** — `~/.ironclaw/` (TOML, gRPC gateway)
 - **Nanobot** — `~/.nanobot/` (Discord/Slack bot framework)
@@ -105,11 +105,9 @@ See [doc/user-guide.md](doc/user-guide.md) for full option reference.
 - **Lyrie** — `~/.lyrie/` (Bun turborepo, Rust Shield Layer 1, 10-channel gateway)
 - **Atomic Agent** — `~/.atomic-agent/` or `$ATOMIC_AGENT_STATE_DIR` (config.json + .env; local-first operator agent with approval ladder, MCP, skills, Telegram/Discord channels, HTTP service)
 
-**Coding agents**
+**Interactive coding agents**
 
 - **Claude Code** — `~/.claude/`, `~/.claude.json`, project-level `.claude/`
-- **Claude Desktop** — `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS), `%APPDATA%\Claude\claude_desktop_config.json` (Windows); MCPB extensions
-- **ChatGPT Desktop** — `/Applications/ChatGPT.app` + `~/Library/Application Support/com.openai.chat/`; preferences plist (macOS only)
 - **Codex** — `~/.codex/{config.toml,auth.json}`
 - **OpenCode** — XDG paths (`$XDG_CONFIG_HOME/opencode/`, `$XDG_DATA_HOME/opencode/`)
 - **Gemini CLI** — `~/.gemini/` (settings.json + OAuth credential files)
@@ -121,6 +119,8 @@ See [doc/user-guide.md](doc/user-guide.md) for full option reference.
 
 **Agentic desktop apps**
 
+- **Claude Desktop** — `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS), `%APPDATA%\Claude\claude_desktop_config.json` (Windows); MCPB extensions
+- **ChatGPT Desktop** — `/Applications/ChatGPT.app` + `~/Library/Application Support/com.openai.chat/`; preferences plist (macOS only)
 - **Meta Muse** — `/Applications/Muse.app` + `com.meta.endo` preferences (macOS; initial coverage)
 - **Perplexity Comet** — `/Applications/Comet.app` + Chromium profile (extension inventory, session data)
 
@@ -157,7 +157,7 @@ vaso scan --format csv -o results.csv      # CSV — one row per finding, for SI
 vaso scan --format junit -o results.xml    # JUnit XML — for CI test-result reporters
 ```
 
-Markdown and SARIF reports also include **OWASP coverage mappings** — both the [OWASP MCP Top 10](https://owasp.org/) and the [OWASP Agentic AI Top 10](https://github.com/precize/Agentic-AI-Top10-Vulnerability) — showing which checks address each risk and flagging the risks a static scanner cannot cover (e.g. AAI014 Alignment Faking).
+Markdown, SARIF, and HTML reports also include **OWASP coverage mappings** — both the [OWASP MCP Top 10](https://owasp.org/) and the [OWASP Agentic AI Top 10](https://github.com/precize/Agentic-AI-Top10-Vulnerability) — showing which checks address each risk and flagging the risks a static scanner cannot cover (e.g. AAI014 Alignment Faking).
 
 ## Scoring
 
@@ -172,10 +172,10 @@ When multiple agents are detected, the **headline score is worst-case** — the 
 The simplest path — drop one step into any workflow:
 
 ```yaml
-- uses: vulnex/vaso@v1
+- uses: vulnex/vaso@v1.0.0
   with:
     fail-on: critical          # or warning, info, none
-    format: sarif              # sarif, json, markdown, html, terminal
+    format: sarif              # sarif, json, markdown, html, csv, junit, terminal
     # output: vaso-results.sarif  (default: vaso-results.<ext>)
     # agent: claude-code           (default: scan all detected agents)
     # version: v1.0.0              (release tag)

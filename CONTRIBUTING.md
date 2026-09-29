@@ -66,7 +66,7 @@ The most common contribution. Steps:
 3. Register it in the category's `index.ts`.
 4. **Add a unit test** in the same directory: `<id>-<short-name>.test.ts`. Cover the passing case, the failing case, and at least one edge case (missing config, malformed input, etc.).
 5. Update `CHANGELOG.md` under `[Unreleased]`.
-6. If the check increases the total count, update the count in `CLAUDE.md` and `README.md`.
+6. If the check increases the total count, update the counts in `README.md`, `doc/user-guide.md`, and `doc/development-guide.md`.
 
 Check IDs follow the pattern `<CATEGORY>-<NNN>`. Reserve a sequential ID; don't reuse retired ones.
 
@@ -75,11 +75,11 @@ Check IDs follow the pattern `<CATEGORY>-<NNN>`. Reserve a sequential ID; don't 
 Less common but well-supported:
 
 1. Create `src/adapters/<agent>.ts` implementing the `AgentAdapter` interface.
-2. Register it in `src/cli.ts` via `adapterRegistry.register()`.
+2. Add it to the `allAdapters` array in `src/adapters/index.ts` (registered at startup by `registerAllAdapters()`).
 3. Add a `getZoneGraph()` if the agent has a non-trivial trust topology (otherwise the default 4-zone fallback is used).
 4. Add detection tests in `src/adapters/<agent>.test.ts`.
 5. If the agent is an interactive coding CLI (different threat model from autonomous server agents), add it to the `CODING_AGENTS` runtime constant in `src/core/types.ts` so the server-only checks correctly skip it.
-6. Document the adapter in `CLAUDE.md` and `README.md`.
+6. Document the adapter in `README.md`, `doc/user-guide.md`, and `doc/development-guide.md`.
 
 See [doc/development-guide.md](doc/development-guide.md) for the full reference.
 
@@ -88,7 +88,7 @@ See [doc/development-guide.md](doc/development-guide.md) for the full reference.
 - TypeScript strict mode, ESM only (`"type": "module"`).
 - Don't add comments that just restate what the code does. Comment only the *why* when it's non-obvious.
 - No `eval`, no dynamic `require`, no execution of scanned code. VASO is static-analysis only — this is a hard constraint.
-- No outbound network calls during scans. The only allowed network access is in `vaso update` and only against signed IOC feeds.
+- No outbound network calls during scans by default. The only network access is `vaso update` (signed feeds), opt-in `vaso mcp scan --resolve-packages` (npm tarball download, never executed), `--host` remote scans (SSH plus the checksum-verified probe download from GitHub Releases), and the opt-in VirusTotal lookup in IOC-008 (`VIRUSTOTAL_API_KEY`). Don't add new ones.
 - Prefer parsing libraries (`yaml`, `smol-toml`, `@babel/parser`) over hand-rolled regex when reading user-supplied config.
 - New code paths must have unit tests. PRs that don't add tests for new behavior will be asked to add them.
 
@@ -110,7 +110,7 @@ No Conventional Commits prefix is used; please match existing style.
 - [ ] `npm run lint` passes (no type errors)
 - [ ] `npm run build` produces a clean `dist/cli.js`
 - [ ] `CHANGELOG.md` updated under `[Unreleased]`
-- [ ] If check count or adapter list changed: `README.md` and `CLAUDE.md` updated to match
+- [ ] If check count or adapter list changed: `README.md`, `doc/user-guide.md`, and `doc/development-guide.md` updated to match
 - [ ] No bundled secrets, signing keys, or proprietary IOC data
 - [ ] No outbound network calls in scan paths
 

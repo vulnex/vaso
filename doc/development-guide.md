@@ -7,6 +7,7 @@ Technical reference for extending VASO with new security checks, agent adapters,
 ```
 src/
   cli.ts                    Entry point — registers adapters, checks, wires commands
+  index.ts                  Library entry (programmatic API) → dist/index.js + .d.ts
   core/
     types.ts                All shared interfaces
     engine.ts               ScanEngine — orchestrates detection + checks + scoring
@@ -25,7 +26,9 @@ src/
     debug.ts                --debug flag plumbing
   adapters/
     adapter.ts              AgentAdapter interface
+    index.ts                allAdapters array + registerAllAdapters()
     registry.ts             AdapterRegistry — parallel agent detection
+    cli-installs.ts         discoverCliInstalls() — every copy of a CLI (PATH, nvm/fnm/asdf/mise/volta/n, retained versions)
     openclaw.ts             OpenClaw adapter
     nanoclaw.ts             NanoClaw adapter
     picoclaw.ts             PicoClaw adapter
@@ -44,34 +47,43 @@ src/
     gemini.ts               Gemini CLI adapter
     qwen-code.ts            Qwen Code adapter
     copilot-cli.ts          GitHub Copilot CLI adapter
-    cursor-cli.ts           Cursor CLI adapter
+    cursor-cli.ts           Cursor CLI/IDE adapter
+    windsurf.ts             Windsurf / Devin Desktop adapter
+    devin.ts                Devin CLI adapter
+    meta-muse.ts            Meta Muse adapter
+    comet.ts                Perplexity Comet adapter
   checks/
     index.ts                registerAllChecks() — wires all categories
     config/                 24 configuration checks (CFG-*)
-    skills/                 12 skill code analysis checks (SKL-*)
+    skills/                 13 skill code analysis checks (SKL-*)
     ioc/                    8 IOC matching checks (IOC-*)
     network/                5 network checks (NET-*)
     runtime/                5 runtime checks (RUN-*)
     policy/                 5 policy checks (POL-*)
-    mcp/                    23 MCP server security checks (MCP-*)
+    mcp/                    35 MCP server security checks (MCP-*)
     advisory/               5 advisory/CVE checks (ADV-*)
     openclaw/               6 OpenClaw-specific (OC-*)
     nanoclaw/               5 NanoClaw-specific (NC-*)
-    ironclaw/               12 IronClaw-specific (IC-*)
+    picoclaw/               7 PicoClaw-specific (PCL-*)
+    ironclaw/               14 IronClaw-specific (IC-*)
     nanobot/                12 Nanobot-specific (NB-*)
-    zeroclaw/               14 ZeroClaw-specific (ZC-*)
-    lyrie/                  18 Lyrie-specific (LY-*)
+    zeroclaw/               16 ZeroClaw-specific (ZC-*)
+    lyrie/                  20 Lyrie-specific (LY-*)
     hermes/                 10 Hermes-specific (HM-*)
     atomic-agent/           11 Atomic Agent-specific (AT-*)
     claude-code/            12 Claude Code-specific (CC-*)
     claude-desktop/         10 Claude Desktop-specific (CD-*)
     chatgpt-desktop/        6 ChatGPT Desktop-specific (CG-*)
-    codex/                  9 Codex-specific (CDX-*)
+    codex/                  10 Codex-specific (CDX-*)
     opencode/               12 OpenCode-specific (OPC-*)
-    gemini-cli/             10 Gemini CLI-specific (GEM-*)
+    gemini-cli/             11 Gemini CLI-specific (GEM-*)
     qwen-code/              10 Qwen Code-specific (QC-*)
-    copilot-cli/            8 Copilot CLI-specific (GHC-*)
-    cursor-cli/             10 Cursor CLI-specific (CUR-*)
+    copilot-cli/            9 Copilot CLI-specific (GHC-*)
+    cursor-cli/             14 Cursor CLI/IDE-specific (CUR-*)
+    windsurf-app/           8 Windsurf / Devin Desktop-specific (WS-*)
+    devin/                  10 Devin CLI-specific (DEV-*)
+    meta-muse/              3 Meta Muse-specific (MM-*)
+    comet/                  2 Perplexity Comet-specific (PC-*)
   analyzers/
     ast-analyzer.ts         Babel-based AST analysis with data flow tracing
     pattern-engine.ts       Regex pattern matching engine (SECURITY_PATTERNS)
@@ -80,6 +92,7 @@ src/
     types.ts                MCP-specific interfaces (MCPServerEntry, MCPConfig, etc.)
     discovery.ts            MCPDiscovery — auto-discovers MCP configs across tools
     source-resolver.ts      Resolves MCP server source code for static analysis
+    package-fetcher.ts      Opt-in npm tarball download for --resolve-packages (never executed)
     tool-baseline.ts        ToolBaselineStore — MCP-020 rug-pull baseline persistence
   ioc/
     database.ts             Bundled threat intelligence data
@@ -153,11 +166,13 @@ reading from a real disk or from a frozen probe snapshot.
 
 ```
 1. MCPDiscovery.discover() probes known config locations for MCP configs
-   — Claude Desktop, Claude Code, Cursor, Windsurf, VS Code, project-level
+   — Claude Desktop, Claude Code, Cursor, Windsurf, Devin CLI (global +
+     project .devin/mcp_config[.local].json), Atomic Agent, Nanobot,
+     PicoClaw, Lyrie, VS Code, project-level
 2. resolveServerSources() resolves local paths to server source code
 3. ScanEngine.scanMCP() builds a ScanContext with mcpConfigs +
    mcpServerSources + (optionally) mcpToolBaselineStore for MCP-020
-4. MCP checks (MCP-001 to MCP-023) run against the context
+4. MCP checks (MCP-001 to MCP-035) run against the context
 5. Results are scored, graded, and rendered as with agent scans
 ```
 
@@ -199,7 +214,7 @@ interface CheckModule {
 }
 ```
 
-`CheckCategory` is the union: `'config' | 'skills' | 'ioc' | 'network' | 'runtime' | 'policy' | 'mcp' | 'openclaw' | 'nanoclaw' | 'ironclaw' | 'nanobot' | 'zeroclaw' | 'lyrie' | 'hermes' | 'atomic-agent' | 'advisory' | 'coding-agent'`. `AgentType` is similarly defined in `src/core/types.ts` — re-check the source rather than relying on a frozen list here.
+`CheckCategory` is the union: `'config' | 'skills' | 'ioc' | 'network' | 'runtime' | 'policy' | 'mcp' | 'openclaw' | 'nanoclaw' | 'picoclaw' | 'ironclaw' | 'nanobot' | 'zeroclaw' | 'lyrie' | 'hermes' | 'atomic-agent' | 'advisory' | 'coding-agent'`. `AgentType` is similarly defined in `src/core/types.ts` — re-check the source rather than relying on a frozen list here.
 
 ### ScanContext
 
@@ -324,6 +339,7 @@ Current prefix landscape (one prefix per directory under `src/checks/`):
 | `advisory/` | ADV | Version-aware CVE detection |
 | `openclaw/` | OC | OpenClaw-specific |
 | `nanoclaw/` | NC | NanoClaw-specific |
+| `picoclaw/` | PCL | PicoClaw-specific |
 | `ironclaw/` | IC | IronClaw-specific |
 | `nanobot/` | NB | Nanobot-specific |
 | `zeroclaw/` | ZC | ZeroClaw-specific |
@@ -338,9 +354,13 @@ Current prefix landscape (one prefix per directory under `src/checks/`):
 | `gemini-cli/` | GEM | Gemini CLI-specific |
 | `qwen-code/` | QC | Qwen Code-specific |
 | `copilot-cli/` | GHC | GitHub Copilot CLI-specific |
-| `cursor-cli/` | CUR | Cursor CLI-specific |
+| `cursor-cli/` | CUR | Cursor CLI/IDE-specific |
+| `windsurf-app/` | WS | Windsurf / Devin Desktop-specific |
+| `devin/` | DEV | Devin CLI-specific |
+| `meta-muse/` | MM | Meta Muse-specific |
+| `comet/` | PC | Perplexity Comet-specific |
 
-PicoClaw deliberately has no dedicated category — its config surface is fully covered by generic CFG/SKL/ADV/IOC. Don't pad parity.
+The per-product coding-agent and desktop-app directories (`claude-code/` through `comet/`) all use the single `coding-agent` category.
 
 ### 2. Create the Check File
 
@@ -653,13 +673,18 @@ For SSH/snapshot support, also implement `getProbeManifest()` — it tells the s
 
 ### 3. Register the Adapter
 
-In `src/cli.ts`:
+Add it to the `allAdapters` array in `src/adapters/index.ts`. `registerAllAdapters()` (called by `src/cli.ts` at startup, and exported by the library entry) registers every entry:
 
 ```typescript
-import { megaclawAdapter } from './adapters/megaclaw.js';
+import { megaclawAdapter } from './megaclaw.js';
 
-adapterRegistry.register(megaclawAdapter);
+export const allAdapters: AgentAdapter[] = [
+  // ... existing adapters
+  megaclawAdapter,
+];
 ```
+
+`src/index.test.ts` asserts the adapter and check totals — update it when you add an adapter or checks.
 
 ### 4. Agent-Specific Checks
 
@@ -758,7 +783,7 @@ In `src/cli.ts`, the `--format` option already accepts any string and is unioned
 
 ## Adding a New Check Category
 
-You only need a new category when an existing one doesn't fit. The 16 existing categories cover broad ground; check whether your new check belongs in one of them first.
+You only need a new category when an existing one doesn't fit. The 18 existing categories cover broad ground; check whether your new check belongs in one of them first.
 
 ### 1. Extend CheckCategory
 
@@ -780,7 +805,7 @@ export const <category>Checks: CheckModule[] = [example001];
 
 ### 3. Register in the Master Index
 
-Edit `src/checks/index.ts` and append the new category to the imports and the `registerAllChecks()` body. The full body currently registers 24 arrays — one per `src/checks/*/` directory:
+Edit `src/checks/index.ts` and append the new category to the imports and the `registerAllChecks()` body. The full body currently registers 30 arrays — one per `src/checks/*/` directory:
 
 ```typescript
 import { <category>Checks } from './<category>/index.js';
@@ -886,32 +911,34 @@ const blocks = findHighEntropyBlocks(code);
 The bundled IOC database is in `src/ioc/database.ts`. To add new indicators:
 
 ```typescript
-// In database.ts, add to the appropriate array:
-const C2_IPS: string[] = [
+// In database.ts, add to the appropriate array, with a source reference:
+const C2_IPS = [
   // ... existing IPs
-  '203.0.113.99',  // New C2 IP from threat report
+  '<ip>',  // <campaign> — <primary source URL>
 ];
 
-const MALICIOUS_DOMAINS: string[] = [
+const MALICIOUS_DOMAINS = [
   // ... existing domains
-  'evil-skills.example.com',
+  '<domain>',  // <campaign> — <primary source URL>
 ];
 ```
+
+Only add verified, sourced indicators. `src/ioc/database.test.ts` rejects placeholder values in both the bundled database and `feeds/feed.json`: well-known test-vector hashes and documentation (RFC 5737), private (RFC 1918), loopback, link-local, and scan-test IPs. Test fixtures should use a real indicator already in the database (e.g. the ClawHavoc C2 `91.92.242.30`).
 
 The `vaso update` command fetches signed remote IOC and advisory feeds. Feeds are verified with a pinned Ed25519 public key (`src/ioc/public-key.ts`), and rejected on version rollback to prevent downgrade attacks. The bundled `database.ts` indicators remain the offline baseline — VASO is always usable without ever reaching the network. See `src/ioc/updater.ts` and `src/advisory/updater.ts` for the fetch + verify flow.
 
 ### Typosquatting Detection
 
-Add trusted skill names to `src/ioc/typosquat.ts`:
+Add trusted skill names to `TRUSTED_SKILL_NAMES` in `src/ioc/database.ts` (MCP packages go in `TRUSTED_MCP_PACKAGES`):
 
 ```typescript
-const TRUSTED_SKILLS: string[] = [
+const TRUSTED_SKILL_NAMES = [
   // ... existing names
   'new-trusted-skill',
 ];
 ```
 
-Skills with a Levenshtein distance <= 2 from any trusted name are flagged.
+`src/ioc/typosquat.ts` compares names case-insensitively with `-`/`_` removed, using optimal string alignment distance (Levenshtein where an adjacent transposition counts as one edit). The allowed distance scales with the trusted name's length: names of 4 characters or fewer must match exactly, 5–9 characters allow 1 edit, 10+ allow 2. An exact match with any trusted name is never flagged.
 
 ---
 
@@ -927,7 +954,7 @@ Defined in `src/core/scoring.ts`:
 
 Grades: A (90+), B (80+), C (70+), D (60+), F (<60).
 
-When multiple agents are scanned, the total score is the average of per-agent scores.
+When multiple agents are scanned, the headline `totalScore`/`totalGrade` is worst-case — the lowest per-agent score — so one weak agent can't be averaged away. The mean is still reported as `ScanResult.fleetAverage`.
 
 ---
 
@@ -952,22 +979,22 @@ Plist files (`.plist`, used by Claude Desktop and ChatGPT Desktop adapters) are 
 ## Build and Test
 
 ```bash
-npm run build          # tsup: src/cli.ts → dist/cli.js (single ESM bundle)
+npm run build          # tsup: src/cli.ts → dist/cli.js, src/index.ts → dist/index.js + .d.ts
 npm test               # vitest: run all tests
 npx vitest run <path>  # Run a single test file
 npm run lint           # tsc --noEmit (type checking only)
 npm run dev            # tsup --watch (rebuild on change)
 ```
 
-The build produces a single `dist/cli.js` file (~850 KB, plus a `.map`) with all dependencies bundled except Node.js built-ins.
+The build produces `dist/cli.js` (~1.2 MB, plus a `.map`) with all dependencies bundled except Node.js built-ins, and the library bundle `dist/index.js` + `dist/index.d.ts`.
 
 For SSH/snapshot scanning, the static Go probe under `probe/` is built separately:
 
 ```bash
-cd probe && go build -o vaso-probe .
+cd probe && make all    # cross-compiles into probe/dist/
 ```
 
-The probe is push-deployed at scan time, runs once, and is removed. Users never install or run it manually.
+A binary in `probe/dist/` takes precedence; otherwise VASO downloads the matching release asset and verifies it against `probe/checksums.json`. For `--host` scans the probe is push-deployed, runs once, and is removed. For air-gapped hosts or platforms without SSH access, the probe can be run manually on the target and the resulting snapshot scanned with `vaso scan --snapshot` — see [`network-scanning-guide.md`](network-scanning-guide.md).
 
 ---
 
