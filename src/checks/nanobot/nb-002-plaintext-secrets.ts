@@ -1,7 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { markUnreachable, queryPermissions } from '../../core/permissions.js';
-import { asRecord, nanobotConfigs } from './shared.js';
+import { queryPermissions } from '../../core/permissions.js';
+import { asRecord, nanobotConfigs, worldTraversalBarrier } from './shared.js';
 
 // Secret-bearing leaf keys in nanobot's schema: providers.<p>.apiKey,
 // api.apiKey, tools.web.search.apiKey, channel credentials (telegram.token,
@@ -62,13 +62,11 @@ export const nb002 = defineCheck({
       let exposure = '';
       try {
         const perms = await queryPermissions(ctx.fs, config.filePath);
-        if (perms !== 'unsupported' && perms.worldRead) {
-          const probe: Evidence[] = [{ file: config.filePath }];
-          await markUnreachable(ctx.fs, probe);
-          if (!probe[0].mitigated) {
-            exposed = true;
-            exposure = ` — and config.json (mode 0${perms.octal}) is readable by all users`;
-          }
+        // Critical only when every user can actually reach the file: a
+        // parent without world traversal (e.g. a 0750 home) blocks it.
+        if (perms !== 'unsupported' && perms.worldRead && !(await worldTraversalBarrier(ctx, config.filePath))) {
+          exposed = true;
+          exposure = ` — and config.json (mode 0${perms.octal}) is readable by all users`;
         }
       } catch {
         // permissions unknown — keep default severity

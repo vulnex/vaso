@@ -241,6 +241,21 @@ describe('NB-002: plaintext secrets in config.json', () => {
   });
 });
 
+describe('NB-002: parent traversal', () => {
+  it('stays a warning when a 0750 home blocks world access to a 0664 config', async () => {
+    const ctx = await makeCtx(merge(onboardConfig(), {
+      providers: { anthropic: { apiKey: 'sk-ant-test-0123456789abcdefghij' } },
+    }));
+    await chmod(ctx.configs[0].filePath, 0o664);
+    await chmod(dataDir, 0o775);
+    await chmod(home, 0o750);
+    const r = await check('NB-002').run(ctx);
+    expect(r.passed).toBe(false);
+    expect(r.severity).toBe('warning');
+    expect(JSON.stringify(r.evidence)).not.toContain('readable by all users');
+  });
+});
+
 describe('NB-003: tools.restrictToWorkspace', () => {
   it('fails when false or unset and fixes the real key', async () => {
     const ctx = await makeCtx(onboardConfig());

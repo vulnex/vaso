@@ -29,12 +29,14 @@ export const adv001 = defineCheck({
     const evidence = [];
     const affected: InstalledVersion[] = [];
     const advisoryIds = new Set<string>();
+    const matchedSeverities = new Set<string>();
     for (const v of versions) {
       const matching = candidates.filter(adv => satisfies(v.version, adv.affectedVersions));
       if (matching.length === 0) continue;
       affected.push(v);
       for (const adv of matching) {
         advisoryIds.add(adv.id);
+        matchedSeverities.add(adv.severity);
         evidence.push({
           file: v.path ?? adv.reference ?? adv.id,
           detail: `${adv.id}: ${adv.title} (severity: ${adv.severity}${adv.fixedVersion ? `, fix: v${adv.fixedVersion}` : ''})${v.path ? ` — affects installed copy ${describeVersion(v)}` : ''}`,
@@ -46,9 +48,12 @@ export const adv001 = defineCheck({
       return h.passed(`No known vulnerabilities for ${agent} ${versions.map(describeVersion).join(', ')}`);
     }
 
+    // Report at the most severe matched advisory's level (the check default is critical)
+    const severity = matchedSeverities.has('critical') ? 'critical' : matchedSeverities.has('warning') ? 'warning' : 'info';
     const n = advisoryIds.size;
     return h.result({
       passed: false,
+      severity,
       message: `${n} known vulnerabilit${n === 1 ? 'y' : 'ies'} affect ${describeAffected(agent, affected)}`,
       evidence,
     });

@@ -61,6 +61,15 @@ describe('ADV-001: Known Framework Vulnerability', () => {
     expect(result.evidence?.some(e => e.detail?.includes('CVE-2026-35641'))).toBe(true);
   });
 
+  it('reports at the matched advisory severity', async () => {
+    // VASO-LYRIE-2026-001 is a warning-level advisory
+    const result = await adv001.run(makeContext({ agent: 'lyrie', version: '3.4.0' }));
+    expect(result.passed).toBe(false);
+    expect(result.severity).toBe('warning');
+    // OpenClaw 2026.3.13 matches critical advisories
+    expect((await adv001.run(makeContext({ agent: 'openclaw', version: '2026.3.13' }))).severity).toBe('critical');
+  });
+
   it('passes when version not detected', async () => {
     const ctx = makeContext({ agent: 'openclaw', version: undefined });
     const result = await adv001.run(ctx);

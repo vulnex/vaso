@@ -109,7 +109,7 @@ export async function worldWritable(
 
 /** First ancestor directory other users cannot traverse (no world x bit).
  *  Unknown ancestors count as traversable, like markUnreachable. */
-async function worldTraversalBarrier(ctx: ScanContext, path: string): Promise<string | undefined> {
+export async function worldTraversalBarrier(ctx: ScanContext, path: string): Promise<string | undefined> {
   for (let dir = dirname(path); ; dir = dirname(dir)) {
     try {
       const q = await queryPermissions(ctx.fs, dir);
