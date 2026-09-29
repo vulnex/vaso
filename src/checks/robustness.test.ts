@@ -18,10 +18,10 @@ function emptyFs(): SnapshotFSProvider {
   });
 }
 
-// The config loader turns a non-mapping top level into {} (see
-// config-loader.test.ts), so hostile values only occur below the top level.
+// The config loader turns a null/scalar top level into {} (see
+// config-loader.test.ts); mappings and lists reach checks.
 const SHAPES: unknown[] = [
-  {},
+  {}, [], [null, 1, 'x', { gateway: null }], [{ id: 'p', default_model: null }],
   { gateway: null, channels: null, tools: null, agents: null, mcpServers: null, permissions: null },
   { gateway: [], channels: [1, null], tools: 'x', agents: { defaults: null, list: 'x' }, mcpServers: { a: null, b: 3 } },
   { channel_list: { a: null, b: { enabled: true, allow_from: null, settings: null } }, providers: { x: null } },

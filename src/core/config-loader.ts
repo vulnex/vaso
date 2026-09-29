@@ -83,14 +83,14 @@ export async function loadConfig(filePath: string, fs?: FSProvider): Promise<Par
     });
   }
 
-  // An agent config is a mapping; a document whose top level is null, an
-  // array or a scalar can't configure anything, and handing it to checks as
-  // `data` would make every key lookup throw.
-  if (data !== UNPARSEABLE && (data === null || typeof data !== 'object' || Array.isArray(data))) {
+  // A document whose top level is null or a scalar can't configure anything,
+  // and handing it to checks as `data` would make key lookups throw. Arrays
+  // stay: some agents keep list-shaped files (IronClaw's providers.json).
+  if (data !== UNPARSEABLE && (data === null || typeof data !== 'object')) {
     recordLoadError({
       filePath,
       stage: 'parse',
-      message: `Top-level value is ${data === null ? 'null' : Array.isArray(data) ? 'an array' : `a ${typeof data}`}, not a mapping`,
+      message: `Top-level value is ${data === null ? 'null' : `a ${typeof data}`}, not a mapping or list`,
     });
     data = {};
   }

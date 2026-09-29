@@ -109,7 +109,7 @@ describe('loadConfig — .env syntax', () => {
 });
 
 describe('loadConfig — non-mapping documents', () => {
-  it.each([['null.json', 'null'], ['list.json', '[1,2]'], ['scalar.yaml', 'just text\n'], ['num.json', '42']])(
+  it.each([['null.json', 'null'], ['scalar.yaml', 'just text\n'], ['num.json', '42']])(
     '%s loads as {} and records a parse error', async (name, content) => {
       await setup();
       const filePath = join(TEST_DIR, name);
@@ -119,6 +119,16 @@ describe('loadConfig — non-mapping documents', () => {
       expect(loadErrors[0]?.message).toMatch(/not a mapping/);
       await cleanup();
     });
+
+  it('keeps list-shaped documents (e.g. IronClaw providers.json)', async () => {
+    await setup();
+    const filePath = join(TEST_DIR, 'providers.json');
+    await writeFile(filePath, '[{"id":"p","default_model":"m"}]');
+    const { result, loadErrors } = await captureConfigLoadErrors(() => loadConfig(filePath));
+    expect(result.data).toEqual([{ id: 'p', default_model: 'm' }]);
+    expect(loadErrors).toEqual([]);
+    await cleanup();
+  });
 });
 
 describe('captureConfigLoadErrors', () => {
