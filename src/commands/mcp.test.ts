@@ -136,7 +136,7 @@ describe('runMCPScan', () => {
 
     await runMCPScan({ format: 'json', path: ['/nonexistent'] });
 
-    const output = consoleLogs.join('\n');
+    const output = consoleErrorLogs.join('\n');
     expect(output).toContain('No MCP servers found');
     expect(mockScanMCP).not.toHaveBeenCalled();
   });

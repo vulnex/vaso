@@ -112,7 +112,7 @@ describe('runSkillAudit', () => {
 
     await runSkillAudit('/empty/skill', { format: 'terminal' });
 
-    expect(consoleLogs.join('\n')).toContain('No code files or symlinks found');
+    expect(consoleErrorLogs.join('\n')).toContain('No code files or symlinks found');
     expect(mockScanSkill).not.toHaveBeenCalled();
     expect(process.exitCode).toBeUndefined();
   });
@@ -153,7 +153,7 @@ describe('runSkillAudit', () => {
     await runSkillAudit('/tmp/skill', { format: 'json', output: '/tmp/report.json' });
 
     expect(mockWriteFile).toHaveBeenCalledWith('/tmp/report.json', 'rendered output', 'utf-8');
-    expect(consoleLogs.join('\n')).toContain('Report written to');
+    expect(consoleErrorLogs.join('\n')).toContain('Report written to');
   });
 
   it('handles scan engine errors gracefully', async () => {

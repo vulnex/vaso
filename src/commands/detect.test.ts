@@ -123,7 +123,8 @@ describe('runDetect', () => {
       expect(parsed[1].agent).toBe('nanoclaw');
 
       const stdout = consoleLogs.join('\n');
-      expect(stdout).toContain(`Report written to ${outPath}`);
+      // status goes to stderr; stdout stays clean
+      expect(consoleErrorLogs.join('\n')).toContain(`Report written to ${outPath}`);
       expect(stdout).not.toContain('"agent":');
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -146,7 +147,8 @@ describe('runDetect', () => {
       expect(written).toContain('Found 2 agent(s).');
 
       const stdout = consoleLogs.join('\n');
-      expect(stdout).toContain(`Report written to ${outPath}`);
+      // status goes to stderr; stdout stays clean
+      expect(consoleErrorLogs.join('\n')).toContain(`Report written to ${outPath}`);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

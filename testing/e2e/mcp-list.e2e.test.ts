@@ -42,11 +42,8 @@ describe('E2E: vaso mcp list', () => {
       { HOME: tempDir },
     );
 
-    const output = result.stdout + result.stderr;
-    const jsonStart = output.indexOf('{');
-    expect(jsonStart).not.toBe(-1);
-
-    const parsed = JSON.parse(output.slice(jsonStart));
+    // stdout is the report alone (banner goes to stderr), so it pipes to jq
+    const parsed = JSON.parse(result.stdout);
     expect(parsed.totalServers).toBe(4);
   });
 });

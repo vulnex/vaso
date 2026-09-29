@@ -90,7 +90,7 @@ describe('runScan', () => {
     mockSaveBaseline.mockResolvedValue('/tmp/baseline.json');
     await runScan({ format: 'terminal', saveBaseline: true });
     expect(mockSaveBaseline).toHaveBeenCalled();
-    expect(consoleLogs.some(l => l.includes('Baseline saved'))).toBe(true);
+    expect(consoleErrors.some(l => l.includes('Baseline saved'))).toBe(true);
   });
 
   it('diffs against baseline when flag set', async () => {
@@ -104,13 +104,13 @@ describe('runScan', () => {
 
     await runScan({ format: 'terminal', diff: true });
     expect(mockDiffResults).toHaveBeenCalled();
-    expect(consoleLogs.some(l => l.includes('Differential'))).toBe(true);
+    expect(consoleErrors.some(l => l.includes('Differential'))).toBe(true);
   });
 
   it('shows no baseline message when none found', async () => {
     mockLoadBaseline.mockResolvedValue(null);
     await runScan({ format: 'terminal', diff: true });
-    expect(consoleLogs.some(l => l.includes('No baseline found'))).toBe(true);
+    expect(consoleErrors.some(l => l.includes('No baseline found'))).toBe(true);
   });
 
   it('writes to file when output option set', async () => {
@@ -263,7 +263,7 @@ describe('runScan', () => {
     it('rejects -o file.sarif for multi-host (cannot aggregate SARIF)', async () => {
       await runScan({
         format: 'sarif',
-        host: ['root@10.0.0.1'],
+        host: ['root@10.0.0.1', 'root@10.0.0.2'],
         output: '/tmp/results.sarif',
       });
       expect(process.exitCode).toBe(2);
@@ -273,7 +273,7 @@ describe('runScan', () => {
     it('rejects -o file.xml for multi-host JUnit (cannot aggregate)', async () => {
       await runScan({
         format: 'junit',
-        host: ['root@10.0.0.1'],
+        host: ['root@10.0.0.1', 'root@10.0.0.2'],
         output: '/tmp/results.xml',
       });
       expect(process.exitCode).toBe(2);

@@ -16,9 +16,9 @@ export async function runRulesList(options: RulesListOptions): Promise<void> {
   if (result.allErrors.length > 0) {
     for (const err of result.allErrors) {
       const loc = err.rule ? ` (rule ${err.rule})` : '';
-      console.log(chalk.yellow(`  Warning: ${err.file}${loc}: ${err.message}`));
+      console.error(chalk.yellow(`  Warning: ${err.file}${loc}: ${err.message}`));
     }
-    console.log();
+    console.error();
   }
 
   if (result.allRules.length === 0) {

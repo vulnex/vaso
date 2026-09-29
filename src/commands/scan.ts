@@ -123,9 +123,9 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
 
     if (!options.silent) {
       if (snapshot.privilege && !snapshot.privilege.isRoot) {
-        console.log(chalk.yellow(`  Warning: snapshot collected as non-root user "${snapshot.privilege.username}" — scan coverage may be limited.\n`));
+        console.error(chalk.yellow(`  Warning: snapshot collected as non-root user "${snapshot.privilege.username}" — scan coverage may be limited.\n`));
       }
-      console.log(chalk.dim(`  Scanning snapshot from host "${snapshot.hostname}" (${snapshot.platform})\n`));
+      console.error(chalk.dim(`  Scanning snapshot from host "${snapshot.hostname}" (${snapshot.platform})\n`));
     }
   }
 
@@ -138,7 +138,8 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
     type SSHTarget = import('../transport/ssh.js').SSHTarget;
 
     const silent = !!options.silent;
-    const log = (msg: string) => { if (!silent) console.log(msg); };
+    // Progress and status go to stderr; stdout carries only report output.
+    const log = (msg: string) => { if (!silent) console.error(msg); };
 
     let concurrency: number;
     let retries: number;
@@ -148,17 +149,6 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
       if (concurrency === 0) throw new Error('--parallel must be at least 1');
     } catch (err) {
       console.error(chalk.red((err as Error).message));
-      process.exitCode = 2;
-      return;
-    }
-
-    // SARIF/JUnit can't be safely text-aggregated across hosts (already gated
-    // at top level for --output + --output-dir mutex and --silent requirements).
-    if (options.output && NON_AGGREGATABLE_FORMATS.has(options.format)) {
-      console.error(chalk.red(
-        `--output cannot aggregate ${options.format} across multiple hosts. ` +
-        `Use --output-dir <dir> instead — each host will be written as <hostname>.${FORMAT_EXT[options.format]}.`
-      ));
       process.exitCode = 2;
       return;
     }
@@ -188,6 +178,17 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
     if (targets.length === 0) {
       console.error(chalk.red('No scan targets specified'));
       process.exitCode = EXIT_USAGE;
+      return;
+    }
+
+    // SARIF/JUnit documents can't be concatenated across hosts; one host is
+    // written as-is, several need one file per host.
+    if (targets.length > 1 && !options.outputDir && NON_AGGREGATABLE_FORMATS.has(options.format)) {
+      console.error(chalk.red(
+        `${options.format} can't be combined across ${targets.length} hosts. ` +
+        `Use --output-dir <dir> instead — each host will be written as <hostname>.${FORMAT_EXT[options.format]}.`
+      ));
+      process.exitCode = 2;
       return;
     }
 
@@ -279,6 +280,7 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
       // text formats get the per-host renders concatenated with a plain
       // divider so the file is readable without ANSI escapes.
       let combined: string;
+      const single = hostResults.length === 1 && successResults.length === 1 && successResults[0].result;
       if (options.format === 'json') {
         const aggregate = hostResults.map(hr => ({
           target: {
@@ -292,6 +294,8 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
           result: hr.result,
         }));
         combined = JSON.stringify(aggregate, null, 2);
+      } else if (single) {
+        combined = reporter.render(single);
       } else {
         const sections: string[] = [];
         for (const hr of successResults) {
@@ -311,12 +315,21 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
       }
       await writeFileEnsureDir(options.output, combined);
       log(chalk.green(`Report written to ${options.output}`));
+    } else if (options.format === 'json') {
+      // Same per-host array as --output, so stdout pipes into jq
+      console.log(JSON.stringify(hostResults.map(hr => ({
+        target: { user: hr.target.user, host: hr.target.host, port: hr.target.port, label: hr.target.label },
+        durationMs: hr.durationMs,
+        error: hr.error,
+        result: hr.result,
+      })), null, 2));
+      if (failedResults.length > 0) log(chalk.red(`  ${failedResults.length} host(s) failed — see "error" entries`));
     } else {
       for (const hr of successResults) {
         if (hr.result) {
           const label = hr.target.label ?? `${hr.target.user}@${hr.target.host}`;
-          log(chalk.bold(`\n── ${label} (${hr.result.host ?? hr.target.host}) ──\n`));
-          log(reporter.render(hr.result));
+          if (hostResults.length > 1) log(chalk.bold(`\n── ${label} (${hr.result.host ?? hr.target.host}) ──\n`));
+          console.log(reporter.render(hr.result));
         }
       }
 
@@ -348,7 +361,7 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
 
   // Local scan (--silent + -o validation already happened at top level)
   const localSilent = !!options.silent;
-  const localLog = (msg: string) => { if (!localSilent) console.log(msg); };
+  const localLog = (msg: string) => { if (!localSilent) console.error(msg); };
 
   const engine = new ScanEngine(adapterRegistry, checkRegistry, snapshotFs);
 

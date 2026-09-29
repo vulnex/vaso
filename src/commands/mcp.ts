@@ -26,18 +26,18 @@ export async function runMCPScan(options: MCPScanCommandOptions): Promise<void> 
       : await discovery.discover(process.platform, process.cwd());
 
     if (discoveryResult.totalServers === 0) {
-      console.log(chalk.yellow('No MCP servers found. Nothing to scan.'));
+      console.error(chalk.yellow('No MCP servers found. Nothing to scan.'));
       return;
     }
 
-    console.log(chalk.dim(`Found ${discoveryResult.totalServers} MCP server(s) across ${discoveryResult.configs.length} config(s)`));
+    console.error(chalk.dim(`Found ${discoveryResult.totalServers} MCP server(s) across ${discoveryResult.configs.length} config(s)`));
 
     // Resolve source code for servers with local paths. With --resolve-packages,
     // npm-packaged (npx) servers are also downloaded from the registry
     // (download-only, never executed) so the AST/tool checks can analyze them.
     const allServers = discoveryResult.configs.flatMap(c => c.servers);
     if (options.resolvePackages) {
-      console.log(chalk.dim('Resolving npm-packaged servers from the registry (download-only, no execution)…'));
+      console.error(chalk.dim('Resolving npm-packaged servers from the registry (download-only, no execution)…'));
     }
     const serverSources = await resolveServerSources(allServers, {
       resolvePackages: options.resolvePackages,
@@ -45,7 +45,7 @@ export async function runMCPScan(options: MCPScanCommandOptions): Promise<void> 
     if (options.resolvePackages) {
       const resolved = serverSources.filter(s => s.packageName && s.sourceCode).length;
       const packaged = serverSources.filter(s => s.packageName && !s.localPath).length;
-      console.log(chalk.dim(`Resolved source for ${resolved}/${packaged} packaged server(s) (npm only; uvx/PyPI not analyzed).`));
+      console.error(chalk.dim(`Resolved source for ${resolved}/${packaged} packaged server(s) (npm only; uvx/PyPI not analyzed).`));
     }
 
     const engine = new ScanEngine(adapterRegistry, checkRegistry);
@@ -61,7 +61,7 @@ export async function runMCPScan(options: MCPScanCommandOptions): Promise<void> 
 
     if (options.output) {
       await writeFile(options.output, output, 'utf-8');
-      console.log(chalk.green(`Report written to ${options.output}`));
+      console.error(chalk.green(`Report written to ${options.output}`));
     } else {
       console.log(output);
     }
@@ -86,13 +86,13 @@ export async function runMCPList(options: { format: string; path?: string[] }): 
       ? await discovery.discoverFromPaths(options.path)
       : await discovery.discover(process.platform, process.cwd());
 
-    if (result.totalServers === 0) {
-      console.log(chalk.yellow('No MCP servers found.'));
+    if (options.format === 'json') {
+      console.log(JSON.stringify(result, null, 2));
       return;
     }
 
-    if (options.format === 'json') {
-      console.log(JSON.stringify(result, null, 2));
+    if (result.totalServers === 0) {
+      console.log(chalk.yellow('No MCP servers found.'));
       return;
     }
 

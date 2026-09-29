@@ -45,11 +45,11 @@ export async function runSkillAudit(skillPath: string, options: SkillAuditComman
   const hasSymlink = skillFiles.length === 0 && (await directoryHasSymlink(resolved));
 
   if (skillFiles.length === 0 && !hasSymlink) {
-    console.log(chalk.yellow(`No code files or symlinks found in ${resolved}. Nothing to audit.`));
+    console.error(chalk.yellow(`No code files or symlinks found in ${resolved}. Nothing to audit.`));
     return;
   }
 
-  console.log(
+  console.error(
     chalk.dim(
       skillFiles.length > 0
         ? `Auditing ${skillFiles.length} file(s) in ${resolved}\n`
@@ -68,7 +68,7 @@ export async function runSkillAudit(skillPath: string, options: SkillAuditComman
 
     if (options.output) {
       await writeFile(options.output, output, 'utf-8');
-      console.log(chalk.green(`Report written to ${options.output}`));
+      console.error(chalk.green(`Report written to ${options.output}`));
     } else {
       console.log(output);
     }

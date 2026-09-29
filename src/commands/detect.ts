@@ -39,7 +39,7 @@ function parsePositiveInt(raw: string | undefined, fallback: number, label: stri
 async function emit(text: string, output?: string, silent?: boolean): Promise<void> {
   if (output) {
     await writeFileEnsureDir(output, text);
-    if (!silent) console.log(chalk.green(`Report written to ${output}`));
+    if (!silent) console.error(chalk.green(`Report written to ${output}`));
   } else {
     console.log(text);
   }
@@ -111,7 +111,7 @@ async function detectFromSnapshot(options: DetectCommandOptions): Promise<AgentI
 
   const snapshotFs = new SnapshotFSProvider(snapshot);
 
-  console.log(chalk.dim(`  Detecting agents from snapshot "${snapshot.hostname}" (${snapshot.platform})\n`));
+  console.error(chalk.dim(`  Detecting agents from snapshot "${snapshot.hostname}" (${snapshot.platform})\n`));
 
   let installations = await adapterRegistry.detectAll({
     allUsers: options.allUsers,
@@ -144,7 +144,7 @@ async function detectRemoteHosts(options: DetectCommandOptions): Promise<void> {
   type SSHTarget = import('../transport/ssh.js').SSHTarget;
 
   const silent = !!options.silent;
-  const log = (msg: string) => { if (!silent) console.log(msg); };
+  const log = (msg: string) => { if (!silent) console.error(msg); };
 
   let concurrency: number;
   let retries: number;

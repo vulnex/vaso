@@ -63,17 +63,14 @@ export async function runVasoJSON(
   env: Record<string, string> = {},
 ): Promise<ScanResult> {
   const result = await runVasoCLI([...args, '--format', 'json'], env);
-  const output = result.stdout + result.stderr;
-
-  const jsonStart = output.indexOf('{');
-  if (jsonStart === -1) {
+  // stdout carries only the report (banner/warnings go to stderr)
+  try {
+    return JSON.parse(result.stdout) as ScanResult;
+  } catch {
     throw new Error(
-      `No JSON object found in CLI output (exit code ${result.exitCode}):\n${output}`
+      `stdout is not a JSON document (exit code ${result.exitCode}):\n${result.stdout}\n--- stderr ---\n${result.stderr}`
     );
   }
-
-  const jsonStr = extractJson(output, jsonStart);
-  return JSON.parse(jsonStr) as ScanResult;
 }
 
 /**
@@ -84,96 +81,11 @@ export async function runVasoJSONArray(
   env: Record<string, string> = {},
 ): Promise<unknown[]> {
   const result = await runVasoCLI([...args, '--format', 'json'], env);
-  const output = result.stdout + result.stderr;
-
-  const arrayStart = output.indexOf('[');
-  if (arrayStart === -1) {
+  try {
+    return JSON.parse(result.stdout) as unknown[];
+  } catch {
     throw new Error(
-      `No JSON array found in CLI output (exit code ${result.exitCode}):\n${output}`
+      `stdout is not a JSON array (exit code ${result.exitCode}):\n${result.stdout}\n--- stderr ---\n${result.stderr}`
     );
   }
-
-  const jsonStr = extractJsonArray(output, arrayStart);
-  return JSON.parse(jsonStr) as unknown[];
-}
-
-/**
- * Extract a JSON object string from text, handling nested braces and string escapes.
- * Reused from testing/integration/helpers.ts.
- */
-function extractJson(text: string, start: number): string {
-  let depth = 0;
-  let inString = false;
-  let escape = false;
-
-  for (let i = start; i < text.length; i++) {
-    const ch = text[i];
-
-    if (escape) {
-      escape = false;
-      continue;
-    }
-
-    if (ch === '\\' && inString) {
-      escape = true;
-      continue;
-    }
-
-    if (ch === '"' && !escape) {
-      inString = !inString;
-      continue;
-    }
-
-    if (inString) continue;
-
-    if (ch === '{') depth++;
-    if (ch === '}') {
-      depth--;
-      if (depth === 0) {
-        return text.slice(start, i + 1);
-      }
-    }
-  }
-
-  return text.slice(start);
-}
-
-/**
- * Extract a JSON array string from text, handling nested brackets and string escapes.
- */
-function extractJsonArray(text: string, start: number): string {
-  let depth = 0;
-  let inString = false;
-  let escape = false;
-
-  for (let i = start; i < text.length; i++) {
-    const ch = text[i];
-
-    if (escape) {
-      escape = false;
-      continue;
-    }
-
-    if (ch === '\\' && inString) {
-      escape = true;
-      continue;
-    }
-
-    if (ch === '"' && !escape) {
-      inString = !inString;
-      continue;
-    }
-
-    if (inString) continue;
-
-    if (ch === '[') depth++;
-    if (ch === ']') {
-      depth--;
-      if (depth === 0) {
-        return text.slice(start, i + 1);
-      }
-    }
-  }
-
-  return text.slice(start);
 }
