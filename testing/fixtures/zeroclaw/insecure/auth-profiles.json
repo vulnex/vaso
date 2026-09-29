@@ -1,12 +1,16 @@
 {
+  "schema_version": 1,
+  "updated_at": "2026-09-01T00:00:00Z",
+  "active_profiles": { "openai": "default" },
   "profiles": {
-    "default": {
-      "provider": "openai",
-      "apiKey": "sk-abc123def456ghi789jkl012mno345pqr678stu901vwx"
-    },
-    "backup": {
-      "provider": "anthropic",
-      "apiKey": "sk-ant-abc123-def456ghi789jkl012mno345pqr678stu901vwxyz"
+    "openai:default": {
+      "model_provider": "openai",
+      "profile_name": "default",
+      "kind": "oauth",
+      "access_token": "sk-abc123def456ghi789jkl012mno345pqr678stu901vwx",
+      "refresh_token": "rt-fake-refresh-token-0123456789abcdef",
+      "created_at": "2026-09-01T00:00:00Z",
+      "updated_at": "2026-09-01T00:00:00Z"
     }
   }
 }

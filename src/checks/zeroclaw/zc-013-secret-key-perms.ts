@@ -1,6 +1,7 @@
 import { join } from 'node:path';
+import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { queryPermissions } from '../../core/permissions.js';
+import { accessibleByOthers, markUnreachable, queryPermissions } from '../../core/permissions.js';
 import { chmodFile } from '../../remediation/config-writer.js';
 
 export const zc013 = defineCheck({
@@ -8,28 +9,32 @@ export const zc013 = defineCheck({
   name: '.secret_key Permissions',
   category: 'zeroclaw',
   severity: 'critical',
-  description: 'Check if .secret_key file has overly permissive file permissions',
+  description:
+    'Check that the ChaCha20 master key (<config dir>/.secret_key) is owner-only — anyone who can read it decrypts every enc2: secret in config.toml and auth-profiles.json',
   supportedAgents: ['zeroclaw'],
   supportedPlatforms: ['linux', 'darwin'],
 
   async run(ctx, h) {
-    const evidence = [];
+    const evidence: Evidence[] = [];
     const keyPath = join(ctx.installation.installDir, '.secret_key');
     try {
       const perms = await queryPermissions(ctx.fs, keyPath);
-      if (perms !== 'unsupported' && perms.octal !== '600') {
+      if (perms !== 'unsupported' && accessibleByOthers(perms)) {
         evidence.push({
           file: keyPath,
           detail: `File permissions are ${perms.octal} — should be 600`,
         });
       }
-    } catch {}
+    } catch {
+      // No key yet: created on first secret encryption.
+    }
 
+    await markUnreachable(ctx.fs, evidence);
     return h.fromEvidence(evidence, {
-      passed: '.secret_key has appropriate permissions',
-      failed: () => '.secret_key has overly permissive file permissions',
+      passed: '.secret_key is owner-only (or not created yet)',
+      failed: () => '.secret_key is accessible to other users',
       fixable: true,
-      fixDescription: 'Run: chmod 600 ~/.zeroclaw/.secret_key',
+      fixDescription: 'Run: chmod 600 <config dir>/.secret_key',
     });
   },
 

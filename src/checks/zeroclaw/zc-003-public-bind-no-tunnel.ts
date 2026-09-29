@@ -1,48 +1,55 @@
 import { defineCheck } from '../../core/check-builder.js';
-import { getNestedValue } from '../../core/utils.js';
-import { fixFirstConfig } from '../../remediation/config-writer.js';
+import type { Evidence } from '../../core/types.js';
+import { gatewayPosture, mainConfig, tomlLine, writeMainConfig } from './zc-config.js';
 
 export const zc003 = defineCheck({
   id: 'ZC-003',
-  name: 'Public Bind Without Tunnel',
+  name: 'Gateway Exposed Without TLS or Tunnel',
   category: 'zeroclaw',
-  severity: 'critical',
-  description: 'Detect allow_public_bind=true combined with no tunnel provider configured',
+  severity: 'warning',
+  description:
+    'Detect a gateway bound beyond loopback ([gateway] host, or allow_public_bind=true for `--host` binds) with no tunnel and no [gateway.tls] — pairing codes and bearer tokens travel in cleartext; critical when pairing is also disabled',
   supportedAgents: ['zeroclaw'],
 
   async run(ctx, h) {
-    const evidence = [];
+    const config = mainConfig(ctx.configs);
+    if (!config) return h.passed('No ZeroClaw config.toml found');
+    const gw = gatewayPosture(config.data);
+    const evidence: Evidence[] = [];
 
-    for (const config of ctx.configs) {
-      const publicBind = getNestedValue(config.data, 'security.allow_public_bind')
-        ?? getNestedValue(config.data, 'allow_public_bind');
-      const tunnelProvider = getNestedValue(config.data, 'tunnel.provider');
-
-      if (publicBind === true || publicBind === 'true') {
-        if (!tunnelProvider || tunnelProvider === 'none') {
-          evidence.push({
-            file: config.filePath,
-            detail: `allow_public_bind=true with tunnel.provider=${tunnelProvider ?? 'not set'} — server is directly exposed to the internet`,
-          });
-        }
+    if ((gw.hostExposed || gw.allowPublicBind) && !gw.tunnelActive && !gw.tlsEnabled) {
+      if (gw.hostExposed) {
+        evidence.push({
+          file: config.filePath,
+          ...tomlLine(config.raw, 'gateway', 'host'),
+          detail: `gateway.host = ${gw.host} — gateway listens beyond loopback with tunnel_provider=none and TLS disabled`,
+        });
+      }
+      if (gw.allowPublicBind) {
+        evidence.push({
+          file: config.filePath,
+          ...tomlLine(config.raw, 'gateway', 'allow_public_bind'),
+          detail: 'gateway.allow_public_bind = true — non-loopback binds (e.g. `zeroclaw gateway start --host 0.0.0.0`) are accepted without a tunnel or TLS',
+        });
       }
     }
 
     return h.fromEvidence(evidence, {
-      passed: 'Public bind is disabled or a tunnel provider is configured',
-      failed: () => 'Server is directly exposed — public bind enabled without tunnel',
+      passed: 'Gateway is loopback-only, tunnelled, or TLS-protected',
+      failed: () => 'Gateway is exposed beyond loopback without TLS or a tunnel',
+      severity: evidence.length > 0 && !gw.requirePairing ? 'critical' : undefined,
       fixable: true,
-      fixDescription: 'Set tunnel.provider to a supported provider (e.g., cloudflare, ngrok) or disable allow_public_bind',
+      fixDescription:
+        'Set [gateway] host = "127.0.0.1" and allow_public_bind = false, or front the gateway with a tunnel ([tunnel] tunnel_provider) / enable [gateway.tls]',
     });
   },
 
   async fix(ctx) {
-    return fixFirstConfig(ctx.configs, {
-      checkId: 'ZC-003',
-      path: 'security.allow_public_bind',
-      value: false,
-      message: 'Set security.allow_public_bind=false',
-      noConfigMessage: 'No TOML config file found',
-    });
+    return writeMainConfig(
+      ctx,
+      'ZC-003',
+      [['gateway.host', '127.0.0.1'], ['gateway.allow_public_bind', false]],
+      'Set gateway.host=127.0.0.1 and gateway.allow_public_bind=false',
+    );
   },
 });
