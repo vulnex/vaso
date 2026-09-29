@@ -47,7 +47,10 @@ const EXCLUDED_USERS = new Set(['Shared', 'Guest', '.localized']);
  */
 export async function getUserHomeDirs(allUsers?: boolean, fs?: FSProvider): Promise<Array<{ home: string; user: string }>> {
   const _fs = fs ?? new LocalFSProvider();
-  if (allUsers && process.getuid?.() === 0) {
+  // Privilege of the scanned host: the local process, or the remote probe
+  // (a --sudo snapshot scanned from an unprivileged workstation).
+  const privileged = _fs.isPrivileged ? _fs.isPrivileged() : process.getuid?.() === 0;
+  if (allUsers && privileged) {
     const baseDir = _fs.platform === 'darwin' ? '/Users' : '/home';
     try {
       const entries = await _fs.readdirEntries(baseDir);

@@ -134,6 +134,10 @@ export class LocalFSProvider implements FSProvider {
     }
   }
 
+  isPrivileged(): boolean {
+    return process.getuid?.() === 0;
+  }
+
   homedir(): string {
     return osHomedir();
   }

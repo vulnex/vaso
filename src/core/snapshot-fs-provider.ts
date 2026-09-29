@@ -58,8 +58,10 @@ export class SnapshotFSProvider implements FSProvider {
     // Try to derive directory listing from collected files
     const entries = new Set<string>();
     const prefix = path.endsWith('/') ? path : path + '/';
-    for (const filePath of Object.keys(this.snapshot.files)) {
-      if (filePath.startsWith(prefix)) {
+    // Files the probe looked for but did not find are recorded with
+    // exists: false — they must not appear in a synthesized listing.
+    for (const [filePath, entry] of Object.entries(this.snapshot.files)) {
+      if (entry.exists && filePath.startsWith(prefix)) {
         const relative = filePath.slice(prefix.length);
         const firstSegment = relative.split('/')[0];
         if (firstSegment) entries.add(firstSegment);
@@ -206,6 +208,11 @@ export class SnapshotFSProvider implements FSProvider {
 
   get privilege() {
     return this.snapshot.privilege;
+  }
+
+  /** The probe ran as root (directly or via --sudo). */
+  isPrivileged(): boolean {
+    return this.snapshot.privilege?.isRoot === true;
   }
 
   /**

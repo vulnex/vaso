@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { join } from 'node:path';
 import { openclawAdapter, getUserHomeDirs } from './openclaw.js';
+import { SnapshotFSProvider } from '../core/snapshot-fs-provider.js';
 
 // Mock modules
 vi.mock('node:fs/promises', () => ({
@@ -240,5 +241,28 @@ describe('getUserHomeDirs', () => {
   it('returns current user home when allUsers is undefined', async () => {
     const dirs = await getUserHomeDirs();
     expect(dirs).toHaveLength(1);
+  });
+
+  // A --sudo remote scan runs the probe as root while the CLI runs as a normal
+  // user: the scanned host's privilege decides, not the local process uid.
+  const snapshot = (isRoot: boolean) => new SnapshotFSProvider({
+    version: 1, hostname: 'h', platform: 'linux', homedir: isRoot ? '/root' : '/home/scanner', timestamp: '2026-09-29T00:00:00Z',
+    privilege: { uid: isRoot ? 0 : 1000, username: isRoot ? 'root' : 'scanner', isRoot, sudoAvailable: true, escalated: isRoot, scannedUsers: [], skippedPaths: [] },
+    files: {
+      '/home/alice/.picoclaw/config.json': { content: '{}', mode: 0o100600, exists: true },
+      '/home/bob/.zeroclaw/config.toml': { content: '', mode: 0o100600, exists: true },
+      '/root/.bashrc': { content: '', mode: 0o100644, exists: true },
+    },
+    directories: { '/home': ['alice/', 'bob/'] }, directoryModes: {}, commandOutputs: {}, env: {},
+  } as unknown as ConstructorParameters<typeof SnapshotFSProvider>[0]);
+
+  it('enumerates every user on a root (--sudo) snapshot', async () => {
+    const dirs = await getUserHomeDirs(true, snapshot(true));
+    expect(dirs.map(d => d.user).sort()).toEqual(['alice', 'bob', 'root']);
+  });
+
+  it('keeps to the probe user on a non-root snapshot', async () => {
+    const dirs = await getUserHomeDirs(true, snapshot(false));
+    expect(dirs).toEqual([{ home: '/home/scanner', user: 'scanner' }]);
   });
 });

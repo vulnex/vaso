@@ -91,6 +91,19 @@ describe('SnapshotFSProvider', () => {
       expect(entries).toContain('package.json');
     });
 
+    it('leaves files the probe did not find out of a derived listing', async () => {
+      const provider = new SnapshotFSProvider(
+        makeSnapshot({
+          files: {
+            '/root/.config/systemd/user/agent.service': { content: '', mode: 0, exists: false },
+            '/root/.config/systemd/user/other.service': { content: '', mode: 0, exists: false },
+          },
+        }),
+      );
+      await expect(provider.readdir('/root/.config/systemd/user')).rejects.toThrow('ENOENT');
+      expect(await provider.access('/root/.config/systemd/user')).toBe(false);
+    });
+
     it('throws ENOENT for uncollected directory', async () => {
       const provider = new SnapshotFSProvider(makeSnapshot());
       await expect(provider.readdir('/nowhere')).rejects.toThrow('ENOENT');

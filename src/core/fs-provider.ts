@@ -112,6 +112,10 @@ export interface FSProvider {
    *  `exec` then answers by command name, so running a second copy of a CLI
    *  by full path returns the first copy's output. Absent → treated as live. */
   readonly kind?: 'local' | 'snapshot';
+  /** True when the scan runs with root privileges on the scanned host (so
+   *  other users' homes are readable). LocalFSProvider checks the process
+   *  uid; SnapshotFSProvider reports the probe's privilege. Absent → false. */
+  isPrivileged?(): boolean;
   homedir(): string;
   /** Hostname of the machine the scan is running against. LocalFSProvider
    *  returns `os.hostname()`; SnapshotFSProvider returns the value the probe

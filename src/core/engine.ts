@@ -1,3 +1,4 @@
+import { dirname } from 'node:path';
 import type { ScanOptions, ScanResult, ScanContext, AgentScanResult, AgentInstallation, CheckResult } from './types.js';
 import type { CheckRegistry } from './check-registry.js';
 import type { AdapterConfigLoadError, AdapterDetectionError, AdapterRegistry } from '../adapters/registry.js';
@@ -157,7 +158,8 @@ export class ScanEngine {
         const score = computeScore([result]);
         agents.push({
           agent: error.agent,
-          installation: { agent: error.agent, installDir: '', configFiles: [] },
+          // The unreadable config's directory is the best location we have
+          installation: { agent: error.agent, installDir: dirname(error.filePath), configFiles: [] },
           results: [result],
           score,
           grade: scoreToGrade(score),

@@ -21,6 +21,8 @@ export interface MultiHostScanOptions {
   scanOptions: {
     agentFilter?: string;
     format?: string;
+    /** Scan every user's home collected by the probe (root/--sudo scans). */
+    allUsers?: boolean;
   };
   /** Max hosts to scan concurrently. Default: 5. */
   concurrency?: number;
@@ -117,6 +119,7 @@ export async function scanMultipleHosts(
       const engine = new ScanEngine(adapterRegistry, checkRegistry, snapshotFs);
       const result = await engine.scan({
         agentFilter: scanOptions.agentFilter,
+        allUsers: scanOptions.allUsers,
       });
 
       result.host = snapshot.hostname;

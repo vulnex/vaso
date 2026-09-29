@@ -225,6 +225,7 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
       scanOptions: {
         agentFilter: options.agent,
         format: options.format as any,
+        allUsers: options.allUsers,
       },
       concurrency,
       retries,
