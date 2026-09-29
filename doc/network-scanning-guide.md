@@ -204,7 +204,7 @@ vaso scan --inventory hosts.yaml -f sarif --output-dir ./sarif/
 
 The directory is created if it doesn't exist. Filenames are the host's reported hostname (sanitized to `[A-Za-z0-9._-]`) with the format's natural extension: `.json`, `.sarif`, `.md`, `.html`, `.csv`, `.xml` for JUnit, `.txt` for terminal.
 
-`-o` and `--output-dir` are mutually exclusive. Attempting `-o file.sarif` (or `-o file.xml` with `-f junit`) on a multi-host scan is rejected with a pointer to `--output-dir`.
+`-o` and `--output-dir` are mutually exclusive. A single-host scan can write SARIF or JUnit to `-o` or stdout; with several hosts, `-f sarif`/`-f junit` without `--output-dir` is rejected with a pointer to `--output-dir`. Progress lines go to stderr, so `vaso scan --host … -f json | jq` receives just the JSON host array.
 
 ### Silent mode (`--silent`)
 
