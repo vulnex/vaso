@@ -13,6 +13,8 @@ import { zc011 } from './zc-011-browser-no-allowlist.js';
 import { zc012 } from './zc-012-http-no-allowlist.js';
 import { zc013 } from './zc-013-secret-key-perms.js';
 import { zc014 } from './zc-014-no-os-sandbox.js';
+import { zc015 } from './zc-015-unrestricted-shell.js';
+import { zc016 } from './zc-016-gateway-trust-settings.js';
 
 export const zeroclawChecks: CheckModule[] = [
   zc001,
@@ -29,4 +31,6 @@ export const zeroclawChecks: CheckModule[] = [
   zc012,
   zc013,
   zc014,
+  zc015,
+  zc016,
 ];

@@ -1,40 +1,58 @@
+import { isAbsolute, join } from 'node:path';
 import { defineCheck } from '../../core/check-builder.js';
-import { getNestedValue } from '../../core/utils.js';
+import type { Evidence } from '../../core/types.js';
+import { accessibleByOthers, markUnreachable, queryPermissions } from '../../core/permissions.js';
+import { asRecord, isTrue, mainConfig } from './zc-config.js';
 
+/**
+ * Upstream now refuses unsigned WhatsApp Cloud webhooks (no app_secret → 401),
+ * so the old "no HMAC secret" finding no longer exists. The remaining
+ * WhatsApp exposure is WhatsApp Web mode: `session_path` holds the linked
+ * device's session keys, and anyone who can read it can take over the account.
+ */
 export const zc009 = defineCheck({
   id: 'ZC-009',
-  name: 'WhatsApp No App Secret',
+  name: 'WhatsApp Web Session Store Exposed',
   category: 'zeroclaw',
-  severity: 'warning',
-  description: 'Detect WhatsApp channel enabled without app_secret — webhooks accepted without HMAC verification',
+  severity: 'critical',
+  description:
+    'Detect an enabled [channels.whatsapp.<alias>] in WhatsApp Web mode whose session_path (linked-device session keys) is accessible to other local users',
   supportedAgents: ['zeroclaw'],
+  supportedPlatforms: ['linux', 'darwin'],
 
   async run(ctx, h) {
-    const evidence = [];
+    const config = mainConfig(ctx.configs);
+    if (!config) return h.passed('No ZeroClaw config.toml found');
+    const whatsapp = asRecord(asRecord(config.data.channels)?.whatsapp);
+    if (!whatsapp) return h.passed('No WhatsApp channel configured');
 
-    for (const config of ctx.configs) {
-      const whatsappChannel =
-        getNestedValue(config.data, 'channels.whatsapp') as Record<string, unknown> | undefined;
-
-      if (!whatsappChannel || typeof whatsappChannel !== 'object') continue;
-
-      const enabled = whatsappChannel.enabled;
-      const appSecret = whatsappChannel.app_secret;
-
-      if (enabled === true || enabled === 'true' || enabled === undefined) {
-        if (!appSecret || (typeof appSecret === 'string' && appSecret.trim() === '')) {
+    const home = ctx.fs.homedir();
+    const evidence: Evidence[] = [];
+    for (const [alias, raw] of Object.entries(whatsapp)) {
+      const inst = asRecord(raw);
+      if (!inst || !isTrue(inst.enabled)) continue;
+      if (typeof inst.session_path !== 'string' || !inst.session_path.trim()) continue;
+      let p = inst.session_path.trim();
+      if (p === '~' || p.startsWith('~/')) p = join(home, p.slice(1));
+      if (!isAbsolute(p)) continue; // relative to the daemon's cwd — not resolvable statically
+      try {
+        const perms = await queryPermissions(ctx.fs, p);
+        if (perms !== 'unsupported' && accessibleByOthers(perms)) {
           evidence.push({
-            file: config.filePath,
-            detail: 'WhatsApp channel enabled without app_secret — webhook payloads are not HMAC-verified',
+            file: p,
+            detail: `channels.whatsapp.${alias}.session_path is ${perms.octal} — WhatsApp Web session keys readable by other users (account takeover)`,
           });
         }
+      } catch {
+        // Session not created yet, or not visible to this scan.
       }
     }
 
+    await markUnreachable(ctx.fs, evidence);
     return h.fromEvidence(evidence, {
-      passed: 'WhatsApp channel has app_secret configured or is not enabled',
-      failed: () => 'WhatsApp channel lacks app_secret — webhooks accepted without signature verification',
-      fixDescription: 'Set channels.whatsapp.app_secret to your WhatsApp app secret for HMAC webhook verification',
+      passed: 'No exposed WhatsApp Web session store',
+      failed: (n) => `${n} WhatsApp Web session store(s) accessible to other users`,
+      fixDescription: 'chmod 600 the session database (700 for a directory) and keep it under a private directory',
     });
   },
 });

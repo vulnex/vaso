@@ -586,19 +586,51 @@ describe('adapter.getModels()', () => {
   });
 
   describe('zeroclaw', () => {
-    it('reads top-level default_provider + default_model', async () => {
+    it('resolves each agent model_provider through [providers.models.<type>.<alias>] (V3)', async () => {
       const configs = [
         cfg('/u/.zeroclaw/config.toml', {
-          default_provider: 'anthropic',
-          default_model: 'claude-opus-4.6',
+          schema_version: 3,
+          agents: { assistant: { enabled: true, model_provider: 'ollama.local' } },
+          providers: { models: { ollama: { local: { model: 'llama3.2' } } } },
+        }),
+      ];
+      expect(await zeroclawAdapter.getModels!(configs)).toEqual([{ id: 'llama3.2', provider: 'ollama' }]);
+    });
+
+    it('tags per-agent models, fallbacks and model_routes; skips disabled agents', async () => {
+      const configs = [
+        cfg('/u/.zeroclaw/config.toml', {
+          agents: {
+            main: { model_provider: 'anthropic.default' },
+            cheap: { model_provider: 'openai.mini' },
+            off: { enabled: false, model_provider: 'openai.off' },
+          },
+          providers: {
+            models: {
+              anthropic: { default: { model: 'claude-opus-4.6', fallback: ['openai.mini'], fallback_models: ['claude-sonnet-4.5'] } },
+              openai: { mini: { model: 'gpt-4o-mini' }, off: { model: 'gpt-4o' } },
+            },
+          },
+          model_routes: [{ hint: 'reasoning', model_provider: 'openai.mini', model: 'o3-mini' }],
         }),
       ];
       expect(await zeroclawAdapter.getModels!(configs)).toEqual([
-        { id: 'claude-opus-4.6', provider: 'anthropic' },
+        { id: 'claude-opus-4.6', provider: 'anthropic', via: 'agent:main' },
+        { id: 'claude-sonnet-4.5', provider: 'anthropic', via: 'fallback:anthropic.default' },
+        { id: 'gpt-4o-mini', provider: 'openai', via: 'fallback:anthropic.default' },
+        { id: 'gpt-4o-mini', provider: 'openai', via: 'agent:cheap' },
+        { id: 'o3-mini', provider: 'openai', via: 'reasoning' },
       ]);
     });
 
-    it('strips embedded base-URL from default_provider (e.g. anthropic-custom:https://...)', async () => {
+    it('lists every configured provider model when no agents are declared', async () => {
+      const configs = [
+        cfg('/u/.zeroclaw/config.toml', { providers: { models: { openai: { a: { model: 'gpt-4o' } } } } }),
+      ];
+      expect(await zeroclawAdapter.getModels!(configs)).toEqual([{ id: 'gpt-4o', provider: 'openai' }]);
+    });
+
+    it('falls back to pre-V3 default_provider/default_model (provider URL suffix stripped)', async () => {
       const configs = [
         cfg('/u/.zeroclaw/config.toml', {
           default_provider: 'anthropic-custom:https://api.z.ai/api/anthropic',
@@ -610,55 +642,9 @@ describe('adapter.getModels()', () => {
       ]);
     });
 
-    it('surfaces model_routes entries with the route name as via', async () => {
-      const configs = [
-        cfg('/u/.zeroclaw/config.toml', {
-          default_provider: 'anthropic',
-          default_model: 'claude-opus-4.6',
-          model_routes: [
-            { name: 'cheap', provider: 'openai', model: 'gpt-4o-mini' },
-            { name: 'reasoner', provider: 'openai', model: 'o3-mini' },
-          ],
-        }),
-      ];
-      expect(await zeroclawAdapter.getModels!(configs)).toEqual([
-        { id: 'claude-opus-4.6', provider: 'anthropic' },
-        { id: 'gpt-4o-mini', provider: 'openai', via: 'cheap' },
-        { id: 'o3-mini', provider: 'openai', via: 'reasoner' },
-      ]);
-    });
-
-    it('records [reliability.model_fallbacks] with via=fallback:<slot>', async () => {
-      const configs = [
-        cfg('/u/.zeroclaw/config.toml', {
-          default_provider: 'anthropic',
-          default_model: 'claude-opus-4.6',
-          reliability: {
-            model_fallbacks: {
-              primary: ['openai/gpt-4o', 'google/gemini-2.5-pro'],
-            },
-          },
-        }),
-      ];
-      expect(await zeroclawAdapter.getModels!(configs)).toEqual([
-        { id: 'claude-opus-4.6', provider: 'anthropic' },
-        { id: 'gpt-4o', provider: 'openai', via: 'fallback:primary' },
-        { id: 'gemini-2.5-pro', provider: 'google', via: 'fallback:primary' },
-      ]);
-    });
-
-    it('falls back to ZEROCLAW_MODEL/PROVIDER process env when nothing in config', async () => {
-      expect(
-        await zeroclawAdapter.getModels!(
-          [],
-          fsWithEnv({ ZEROCLAW_MODEL: 'gpt-4o', ZEROCLAW_PROVIDER: 'openai' }),
-        ),
-      ).toEqual([{ id: 'gpt-4o', provider: 'openai', via: 'ZEROCLAW_MODEL' }]);
-    });
-
     it('returns [] when no model field anywhere', async () => {
-      const configs = [cfg('/u/.zeroclaw/config.toml', { server: {} })];
-      expect(await zeroclawAdapter.getModels!(configs)).toEqual([]);
+      expect(await zeroclawAdapter.getModels!([cfg('/u/.zeroclaw/config.toml', { gateway: {} })])).toEqual([]);
+      expect(await zeroclawAdapter.getModels!([])).toEqual([]);
     });
   });
 });

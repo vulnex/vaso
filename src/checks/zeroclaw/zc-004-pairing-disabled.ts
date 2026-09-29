@@ -1,47 +1,50 @@
 import { defineCheck } from '../../core/check-builder.js';
-import { getNestedValue } from '../../core/utils.js';
-import { fixFirstConfig } from '../../remediation/config-writer.js';
+import type { Evidence } from '../../core/types.js';
+import { gatewayPosture, mainConfig, tomlLine, writeMainConfig } from './zc-config.js';
 
 export const zc004 = defineCheck({
   id: 'ZC-004',
-  name: 'Pairing Disabled',
+  name: 'Gateway Pairing Disabled',
   category: 'zeroclaw',
   severity: 'warning',
-  description: 'Detect require_pairing=false which allows unauthenticated device connections',
+  description:
+    'Detect [gateway] require_pairing=false — the gateway accepts every bearer token (fails open), so any caller can drive the agent; critical when the gateway is reachable beyond loopback or through a tunnel',
   supportedAgents: ['zeroclaw'],
 
   async run(ctx, h) {
-    const evidence = [];
+    const config = mainConfig(ctx.configs);
+    if (!config) return h.passed('No ZeroClaw config.toml found');
+    const gw = gatewayPosture(config.data);
+    const evidence: Evidence[] = [];
+    const reachable = gw.hostExposed || gw.allowPublicBind || gw.tunnelActive;
 
-    for (const config of ctx.configs) {
-      const requirePairing =
-        getNestedValue(config.data, 'security.require_pairing') ??
-        getNestedValue(config.data, 'require_pairing') ??
-        config.data.REQUIRE_PAIRING;
-
-      if (requirePairing === false || requirePairing === 'false') {
-        evidence.push({
-          file: config.filePath,
-          detail: 'require_pairing=false — any device can connect without authentication',
-        });
-      }
+    if (!gw.requirePairing) {
+      const where = gw.tunnelActive
+        ? `published through the ${gw.tunnelProvider} tunnel`
+        : gw.hostExposed
+          ? `bound to ${gw.host}`
+          : gw.allowPublicBind
+            ? 'allowed to bind publicly (allow_public_bind=true)'
+            : `on ${gw.host} (any local process or user can reach it)`;
+      evidence.push({
+        file: config.filePath,
+        ...tomlLine(config.raw, 'gateway', 'require_pairing'),
+        detail:
+          `gateway.require_pairing = false — API, dashboard and /webhook accept unauthenticated requests; gateway ${where}` +
+          (gw.webhookSecret ? '' : '; no gateway.webhook_secret either'),
+      });
     }
 
     return h.fromEvidence(evidence, {
-      passed: 'Device pairing is required',
-      failed: () => 'Device pairing is disabled — unauthenticated connections allowed',
+      passed: 'Gateway pairing is required',
+      failed: () => 'Gateway pairing is disabled — unauthenticated callers can control the agent',
+      severity: evidence.length > 0 && reachable ? 'critical' : undefined,
       fixable: true,
-      fixDescription: 'Set require_pairing=true to enforce device authentication',
+      fixDescription: 'Set [gateway] require_pairing = true and pair clients via the one-time pairing code',
     });
   },
 
   async fix(ctx) {
-    return fixFirstConfig(ctx.configs, {
-      checkId: 'ZC-004',
-      path: 'require_pairing',
-      value: true,
-      message: 'Set require_pairing=true',
-      noConfigMessage: 'No TOML config file found',
-    });
+    return writeMainConfig(ctx, 'ZC-004', [['gateway.require_pairing', true]], 'Set gateway.require_pairing=true');
   },
 });

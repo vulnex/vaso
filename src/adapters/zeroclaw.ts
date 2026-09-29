@@ -1,176 +1,274 @@
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import type { AgentAdapter, DetectOptions } from './adapter.js';
 import type { AgentInstallation, GatewayInfo, ModelRef, ParsedConfig } from '../core/types.js';
 import type { ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { loadConfig } from '../core/config-loader.js';
-import { getNestedValue } from '../core/utils.js';
+import { getUserHomeDirs } from './openclaw.js';
 import { discoverCliInstalls } from './cli-installs.js';
 import { queryCliVersion } from './version-query.js';
 
-const CONFIG_FILENAMES = [
-  'config.toml',
-  'auth-profiles.json',
-];
+/**
+ * ZeroClaw (zeroclaw-labs/zeroclaw, Rust) — V3 config schema (zeroclaw ≥ 0.8).
+ *
+ * Layout under the config dir (`~/.zeroclaw` by default):
+ *   config.toml           V3 config (`schema_version = 3`); V1/V2 files are
+ *                         migrated on load, leaving `config.toml.backup`
+ *   .secret_key           ChaCha20-Poly1305 master key for `enc2:` secrets
+ *   auth-profiles.json    provider OAuth / subscription tokens
+ *   agents/<alias>/workspace/   per-agent MEMORY.md, IDENTITY.md, SOUL.md, skills/
+ *   shared/skills/<bundle>/     skill bundles
+ *   data/                 SQLite memory, sessions, cost, cron, tls, daemon.sock, traces
+ */
+
+/** Files loaded as configs (secret stores included, so CFG-002/003 see them). */
+const CONFIG_FILENAMES = ['config.toml', 'auth-profiles.json'];
+
+/** `install.sh` / `cargo install` drop the binary in `$CARGO_HOME/bin`. */
+const USER_CLI_RELATIVE_PATHS = ['.cargo/bin/zeroclaw'];
+const SYSTEM_CLI_PATHS = ['/usr/local/bin/zeroclaw', '/opt/homebrew/bin/zeroclaw', '/usr/bin/zeroclaw'];
+
+/** Homebrew installs keep config under `<prefix>/var/zeroclaw`. */
+const HOMEBREW_CONFIG_DIRS = ['/opt/homebrew/var/zeroclaw', '/usr/local/var/zeroclaw'];
+
+function expandTilde(p: string, home: string): string {
+  if (p === '~') return home;
+  if (p.startsWith('~/')) return join(home, p.slice(2));
+  return p;
+}
+
+/**
+ * Upstream `resolve_runtime_config_dirs`: ZEROCLAW_CONFIG_DIR >
+ * ZEROCLAW_DATA_DIR > ZEROCLAW_WORKSPACE (deprecated) > ~/.zeroclaw (>
+ * Homebrew var dir on macOS). Env vars come from the scanned host (`fs.getEnv`).
+ */
+export async function zeroclawDirs(home: string, fs: FSProvider): Promise<{ configDir: string; dataDir: string }> {
+  const configEnv = fs.getEnv('ZEROCLAW_CONFIG_DIR')?.trim();
+  if (configEnv) {
+    const configDir = expandTilde(configEnv, home);
+    return { configDir, dataDir: join(configDir, 'data') };
+  }
+  const dataEnv = fs.getEnv('ZEROCLAW_DATA_DIR')?.trim() || fs.getEnv('ZEROCLAW_WORKSPACE')?.trim();
+  if (dataEnv) {
+    // resolve_config_dir_for_data
+    const data = expandTilde(dataEnv, home);
+    if (await fs.access(join(data, 'config.toml'))) return { configDir: data, dataDir: join(data, 'data') };
+    const legacy = join(dirname(data), '.zeroclaw');
+    if (await fs.access(join(legacy, 'config.toml'))) return { configDir: legacy, dataDir: data };
+    if (['data', 'workspace'].includes(basename(data))) return { configDir: legacy, dataDir: data };
+    return { configDir: data, dataDir: join(data, 'data') };
+  }
+  const defaultDir = join(home, '.zeroclaw');
+  if (fs.platform === 'darwin' && !(await fs.access(join(defaultDir, 'config.toml')))) {
+    for (const brew of HOMEBREW_CONFIG_DIRS) {
+      if (await fs.access(join(brew, 'config.toml'))) return { configDir: brew, dataDir: join(brew, 'workspace') };
+    }
+  }
+  return { configDir: defaultDir, dataDir: join(defaultDir, 'data') };
+}
+
+function asRecord(v: unknown): Record<string, unknown> | undefined {
+  return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : undefined;
+}
+
+async function listDirs(dir: string, fs: FSProvider): Promise<string[]> {
+  try {
+    const entries = await fs.readdirEntries(dir);
+    return entries.filter(e => e.isDirectory).map(e => e.name);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Skill roots: each agent's `<workspace>/skills` (agents from config.toml and
+ * the `agents/` dir; `[agents.<a>.workspace] path` overrides the location),
+ * `shared/skills` (bundles, or `[skill_bundles.<b>] directory`), and the
+ * open-skills checkout when `[skills] open_skills_enabled`.
+ */
+async function skillRoots(configDir: string, data: Record<string, unknown>, home: string, fs: FSProvider): Promise<string[]> {
+  const candidates: string[] = [];
+  const agents = asRecord(data.agents) ?? {};
+  const aliases = new Set([...Object.keys(agents), ...(await listDirs(join(configDir, 'agents'), fs))]);
+  for (const alias of aliases) {
+    const ws = asRecord(asRecord(agents[alias])?.workspace);
+    const custom = typeof ws?.path === 'string' && ws.path.trim() ? expandTilde(ws.path.trim(), home) : undefined;
+    candidates.push(join(custom ?? join(configDir, 'agents', alias, 'workspace'), 'skills'));
+  }
+  candidates.push(join(configDir, 'shared', 'skills'));
+  for (const raw of Object.values(asRecord(data.skill_bundles) ?? {})) {
+    const dir = asRecord(raw)?.directory;
+    if (typeof dir === 'string' && dir.trim()) {
+      const d = expandTilde(dir.trim(), home);
+      candidates.push(d.startsWith('/') ? d : join(configDir, d));
+    }
+  }
+  const skills = asRecord(data.skills);
+  if (skills?.open_skills_enabled === true) {
+    const dir = typeof skills.open_skills_dir === 'string' && skills.open_skills_dir.trim()
+      ? expandTilde(skills.open_skills_dir.trim(), home)
+      : join(home, 'open-skills');
+    candidates.push(dir);
+  }
+  const out: string[] = [];
+  for (const c of candidates) {
+    if (out.includes(c)) continue;
+    if (await fs.access(c)) out.push(c);
+  }
+  return out;
+}
 
 export const zeroclawAdapter: AgentAdapter = {
   agent: 'zeroclaw',
   displayName: 'ZeroClaw',
 
-  async detect(_options?: DetectOptions): Promise<AgentInstallation[]> {
-    const fs = _options?.fs ?? new LocalFSProvider();
-    const home = fs.homedir();
-    const zeroDir = join(home, '.zeroclaw');
-    const configFiles = [];
+  async detect(options?: DetectOptions): Promise<AgentInstallation[]> {
+    const fs = options?.fs ?? new LocalFSProvider();
+    const userDirs = await getUserHomeDirs(options?.allUsers, fs);
+    const installations: AgentInstallation[] = [];
 
-    for (const filename of CONFIG_FILENAMES) {
-      const filePath = join(zeroDir, filename);
-      if (await fs.access(filePath)) {
+    for (const { home, user } of userDirs) {
+      const { configDir } = await zeroclawDirs(home, fs);
+      const configFiles: ParsedConfig[] = [];
+      for (const name of CONFIG_FILENAMES) {
+        const filePath = join(configDir, name);
         try {
-          configFiles.push(await loadConfig(filePath, fs));
+          if (await fs.access(filePath)) configFiles.push(await loadConfig(filePath, fs));
         } catch {}
       }
+
+      const installs = await discoverCliInstalls(home, fs, {
+        names: ['zeroclaw'],
+        systemPaths: SYSTEM_CLI_PATHS,
+        userRelPaths: USER_CLI_RELATIVE_PATHS,
+        // `zeroclaw --version` → "zeroclaw 0.8.5" (optionally followed by a build id).
+        version: async (bin, canExec) => (canExec ? queryCliVersion(bin, fs) : undefined),
+      });
+      const cliBinary = installs.primary?.path;
+      if (configFiles.length === 0 && !cliBinary) continue;
+
+      const main = configFiles.find(c => c.filePath.endsWith('config.toml'));
+      const data = main?.data ?? {};
+      const skillsDirs = await skillRoots(configDir, data, home, fs);
+
+      installations.push({
+        agent: 'zeroclaw',
+        installDir: configDir,
+        configFiles,
+        skillsDir: skillsDirs[0] ?? this.getSkillsDir(configDir),
+        skillsDirs: skillsDirs.length > 0 ? skillsDirs : undefined,
+        gateway: main ? this.getGatewayInfo(data) : undefined,
+        models: await this.getModels?.(configFiles, fs),
+        user: options?.allUsers ? user : undefined,
+        cliBinary,
+        otherInstalls: installs.others.length > 0 ? installs.others : undefined,
+        version: installs.primary?.version,
+      });
     }
-
-    // Also check for CLI binary
-    const installs = await discoverCliInstalls(home, fs, {
-      names: ['zeroclaw'],
-      userRelPaths: ['.cargo/bin/zeroclaw'],
-      version: async (bin, canExec) => (canExec ? queryCliVersion(bin, fs) : undefined),
-    });
-    const cliBinary = installs.primary?.path;
-
-    if (configFiles.length === 0 && !cliBinary) return [];
-
-    const merged: Record<string, unknown> = {};
-    for (const c of configFiles) {
-      Object.assign(merged, c.data);
-    }
-
-    // Extract version from TOML config, fallback to CLI
-    const tomlConfig = configFiles.find(c => c.filePath.endsWith('.toml'));
-    const version =
-      installs.primary?.version ??
-      (tomlConfig?.data?.version as string) ??
-      ((tomlConfig?.data?.package as Record<string, unknown>)?.version as string);
-
-    return [{
-      agent: 'zeroclaw',
-      installDir: zeroDir,
-      configFiles,
-      skillsDir: this.getSkillsDir(zeroDir),
-      gateway: this.getGatewayInfo(merged),
-      models: await this.getModels?.(configFiles, fs),
-      cliBinary,
-      otherInstalls: installs.others.length > 0 ? installs.others : undefined,
-      version,
-    }];
+    return installations;
   },
 
   getConfigPaths(): string[] {
     const home = new LocalFSProvider().homedir();
-    const zeroDir = join(home, '.zeroclaw');
-    return CONFIG_FILENAMES.map(f => join(zeroDir, f));
+    return CONFIG_FILENAMES.map(f => join(home, '.zeroclaw', f));
   },
 
   getSkillsDir(installDir: string): string | undefined {
-    return join(installDir, 'workspace', 'skills');
+    return join(installDir, 'shared', 'skills');
   },
 
   getGatewayInfo(config: Record<string, unknown>): GatewayInfo | undefined {
-    // Check [server] section first, then [gateway]
-    const serverHost = getNestedValue(config, 'server.host') as string | undefined;
-    const serverPort = getNestedValue(config, 'server.port') as number | undefined;
-    if (serverHost || serverPort) {
-      return {
-        host: serverHost,
-        port: serverPort ?? 3000,
-      };
-    }
-
-    const gwHost = getNestedValue(config, 'gateway.host') as string | undefined;
-    const gwPort = getNestedValue(config, 'gateway.port') as number | undefined;
-    if (gwHost || gwPort) {
-      return {
-        host: gwHost,
-        port: gwPort ?? 3000,
-      };
-    }
-
-    return undefined;
+    // The daemon always serves the gateway; [gateway] only overrides defaults
+    // (host 127.0.0.1, port 42617, pairing required, no TLS).
+    const gw = asRecord(config.gateway) ?? {};
+    const host = typeof gw.host === 'string' && gw.host.trim() ? gw.host.trim() : '127.0.0.1';
+    const port = typeof gw.port === 'number' ? gw.port : 42617;
+    return {
+      host,
+      port,
+      authMode: gw.require_pairing === false ? 'none' : 'pairing',
+      tls: asRecord(gw.tls)?.enabled === true,
+    };
   },
 
-  getModels(configs: ParsedConfig[], fs?: FSProvider): ModelRef[] {
-    // ZeroClaw uses top-level `default_provider` + `default_model` in
-    // config.toml. Provider strings can carry an embedded base-URL in the
-    // form "<name>:<url>" (e.g. "anthropic-custom:https://api.z.ai/...").
-    // Additional models surface via `model_routes = []` and
-    // `[reliability.model_fallbacks]`. Process env: ZEROCLAW_PROVIDER /
-    // ZEROCLAW_MODEL override the file values.
+  getModels(configs: ParsedConfig[]): ModelRef[] {
     const out: ModelRef[] = [];
     const seen = new Set<string>();
-
-    const stripUrl = (provider: string | undefined): string | undefined => {
-      if (!provider) return undefined;
-      const colon = provider.indexOf(':');
-      return colon !== -1 ? provider.slice(0, colon) : provider;
-    };
-
-    const push = (rawId: unknown, rawProvider?: unknown, via?: string): void => {
+    const push = (rawId: unknown, provider?: string, via?: string): void => {
       if (typeof rawId !== 'string' || !rawId.trim()) return;
-      const trimmed = rawId.trim();
-      let provider =
-        typeof rawProvider === 'string' && rawProvider.trim()
-          ? stripUrl(rawProvider.trim())
-          : undefined;
-      let id = trimmed;
-      if (!provider && trimmed.includes('/')) {
-        const slash = trimmed.indexOf('/');
-        provider = trimmed.slice(0, slash);
-        id = trimmed.slice(slash + 1);
-      }
+      const id = rawId.trim();
       const key = `${provider ?? ''}|${id}|${via ?? ''}`;
       if (seen.has(key)) return;
       seen.add(key);
       out.push({ id, ...(provider ? { provider } : {}), ...(via ? { via } : {}) });
     };
 
-    const toml = configs.find(c => c.filePath.endsWith('config.toml'));
-    if (toml) {
-      push(toml.data?.default_model, toml.data?.default_provider);
+    const data = configs.find(c => c.filePath.endsWith('config.toml'))?.data;
+    if (!data) return out;
 
-      // model_routes: array of { name, provider, model } or similar shapes
-      const routes = toml.data?.model_routes;
-      if (Array.isArray(routes)) {
-        for (const r of routes) {
-          const route = r as Record<string, unknown> | undefined;
-          const name = (route?.name as string | undefined) ?? (route?.id as string | undefined);
-          push(route?.model, route?.provider, name);
+    // [providers.models.<type>.<alias>] model / fallback_models / fallback refs.
+    const models = asRecord(asRecord(data.providers)?.models) ?? {};
+    const resolve = (ref: unknown): { type: string; entry: Record<string, unknown> } | undefined => {
+      if (typeof ref !== 'string' || !ref.includes('.')) return undefined;
+      const [type, alias] = ref.trim().split('.', 2);
+      const entry = asRecord(asRecord(models[type])?.[alias]);
+      return entry ? { type, entry } : undefined;
+    };
+    const pushProvider = (ref: string, via?: string): void => {
+      const r = resolve(ref);
+      if (!r) return;
+      push(r.entry.model, r.type, via);
+      if (Array.isArray(r.entry.fallback_models)) {
+        for (const m of r.entry.fallback_models) push(m, r.type, `fallback:${ref}`);
+      }
+      if (Array.isArray(r.entry.fallback)) {
+        for (const f of r.entry.fallback) {
+          const fr = resolve(f);
+          if (fr) push(fr.entry.model, fr.type, `fallback:${ref}`);
         }
       }
+    };
 
-      // [reliability.model_fallbacks]: { <key>: <model_id_or_array> }
-      const reliability = toml.data?.reliability as Record<string, unknown> | undefined;
-      const fallbacks = reliability?.model_fallbacks as Record<string, unknown> | undefined;
-      if (fallbacks) {
-        for (const [slot, val] of Object.entries(fallbacks)) {
-          if (typeof val === 'string') {
-            push(val, undefined, `fallback:${slot}`);
-          } else if (Array.isArray(val)) {
-            for (const v of val) {
-              if (typeof v === 'string') push(v, undefined, `fallback:${slot}`);
-            }
-          }
-        }
+    // Each enabled agent's model_provider; with several agents, tag by alias.
+    const agents = Object.entries(asRecord(data.agents) ?? {})
+      .map(([alias, a]) => [alias, asRecord(a)] as const)
+      .filter(([, a]) => a && a.enabled !== false);
+    for (const [alias, a] of agents) {
+      if (typeof a!.model_provider === 'string') {
+        pushProvider(a!.model_provider, agents.length > 1 ? `agent:${alias}` : undefined);
+      }
+    }
+    if (agents.length === 0) {
+      for (const [type, aliases] of Object.entries(models)) {
+        for (const alias of Object.keys(asRecord(aliases) ?? {})) pushProvider(`${type}.${alias}`);
       }
     }
 
-    if (out.length === 0 && fs?.getEnv) {
-      push(fs.getEnv('ZEROCLAW_MODEL'), fs.getEnv('ZEROCLAW_PROVIDER'), 'ZEROCLAW_MODEL');
+    // model_routes = [{ hint, model_provider, model }]
+    if (Array.isArray(data.model_routes)) {
+      for (const r of data.model_routes) {
+        const route = asRecord(r);
+        if (!route) continue;
+        const type = typeof route.model_provider === 'string' ? route.model_provider.split('.')[0] : undefined;
+        push(route.model, type, typeof route.hint === 'string' ? route.hint : undefined);
+      }
     }
 
+    // Pre-V3 (never-migrated) configs: top-level default_provider/default_model.
+    if (out.length === 0 && typeof data.default_model === 'string') {
+      const p = typeof data.default_provider === 'string' ? data.default_provider.split(':')[0] : undefined;
+      push(data.default_model, p);
+    }
     return out;
+  },
+
+  getMemoryFiles(installDir: string): string[] {
+    return [
+      join(installDir, 'data', 'memory', 'brain.db'),
+      join(installDir, 'data', 'sessions', 'sessions.db'),
+      join(installDir, 'data', 'sessions', 'acp-sessions.db'),
+    ];
   },
 
   getCredentialPaths(installDir: string): string[] {
@@ -178,6 +276,7 @@ export const zeroclawAdapter: AgentAdapter = {
       join(installDir, 'config.toml'),
       join(installDir, 'auth-profiles.json'),
       join(installDir, '.secret_key'),
+      join(installDir, 'config.toml.backup'),
     ];
   },
 
@@ -190,10 +289,21 @@ export const zeroclawAdapter: AgentAdapter = {
       filePaths: [
         '~/.zeroclaw/config.toml',
         '~/.zeroclaw/auth-profiles.json',
-        '~/.zeroclaw/.secret_key',
+        // Pre-migration V1/V2 config: may still hold plaintext/legacy secrets (ZC-001/002).
+        '~/.zeroclaw/config.toml.backup',
       ],
       globPatterns: [
-        '~/.zeroclaw/workspace/skills/**',
+        '~/.zeroclaw/agents/*/workspace/skills/**',
+        '~/.zeroclaw/shared/skills/**',
+      ],
+      // Key material, memory, sessions, traces and per-agent memory/identity
+      // markdown — permissions only, content never shipped.
+      metadataGlobPatterns: [
+        '~/.zeroclaw/.secret_key',
+        '~/.zeroclaw/data/*',
+        '~/.zeroclaw/data/*/*',
+        '~/.zeroclaw/state/*',
+        '~/.zeroclaw/agents/*/workspace/*.md',
       ],
       commands: [
         { id: 'zeroclaw-which', cmd: 'which', args: ['zeroclaw'], timeout: 3000 },
@@ -201,14 +311,15 @@ export const zeroclawAdapter: AgentAdapter = {
       ],
       directoryListings: [
         '~/.zeroclaw',
-        '~/.zeroclaw/workspace',
-        '~/.zeroclaw/workspace/skills',
+        '~/.zeroclaw/agents',
+        '~/.zeroclaw/shared',
+        '~/.zeroclaw/shared/skills',
+        '~/.zeroclaw/data',
         '~/.cargo/bin',
       ],
       envPrefixes: ['ZEROCLAW_'],
-      systemPaths: [],
+      systemPaths: SYSTEM_CLI_PATHS,
       systemDirListings: [],
     };
   },
 };
-

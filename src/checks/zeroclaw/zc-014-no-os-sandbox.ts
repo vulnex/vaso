@@ -1,53 +1,60 @@
 import { defineCheck } from '../../core/check-builder.js';
-import { getNestedValue } from '../../core/utils.js';
-import { fixFirstConfig } from '../../remediation/config-writer.js';
+import type { Evidence } from '../../core/types.js';
+import { asRecord, effectiveProfiles, isFalse, mainConfig, profileLabel, writeMainConfig, type EffectiveProfile } from './zc-config.js';
 
-const KNOWN_SANDBOXES = ['firejail', 'bubblewrap', 'bwrap', 'landlock', 'docker', 'podman', 'nsjail'];
+function backendNone(p: EffectiveProfile): boolean {
+  return typeof p.profile.sandbox_backend === 'string' && p.profile.sandbox_backend.trim().toLowerCase() === 'none';
+}
+
+function sandboxOff(p: EffectiveProfile): boolean {
+  return !p.legacy && (isFalse(p.profile.sandbox_enabled) || backendNone(p));
+}
+
+function nativeRuntime(data: Record<string, unknown>): boolean {
+  const kind = asRecord(data.runtime)?.kind;
+  return kind === undefined || (typeof kind === 'string' && kind.trim().toLowerCase() === 'native');
+}
 
 export const zc014 = defineCheck({
   id: 'ZC-014',
-  name: 'No OS Sandbox',
+  name: 'Sandbox Disabled',
   category: 'zeroclaw',
   severity: 'warning',
-  description: 'Detect runtime.kind=native without OS-level sandboxing (Firejail, Bubblewrap, Landlock)',
+  description:
+    'Detect a risk profile with sandbox_enabled=false or sandbox_backend="none" while [runtime] kind is native — shell and tool subprocesses run with no OS-level isolation (Landlock/Firejail/Bubblewrap/Docker/Seatbelt)',
   supportedAgents: ['zeroclaw'],
 
   async run(ctx, h) {
-    const evidence = [];
-
-    for (const config of ctx.configs) {
-      const runtimeKind = getNestedValue(config.data, 'runtime.kind');
-      const runtimeSandbox = getNestedValue(config.data, 'runtime.sandbox');
-
-      if (runtimeKind === 'native') {
-        const hasSandbox =
-          typeof runtimeSandbox === 'string' &&
-          KNOWN_SANDBOXES.includes(runtimeSandbox.toLowerCase());
-
-        if (!hasSandbox) {
-          evidence.push({
-            file: config.filePath,
-            detail: `runtime.kind=native with runtime.sandbox=${runtimeSandbox ?? 'not set'} — no OS-level isolation`,
-          });
-        }
-      }
+    const config = mainConfig(ctx.configs);
+    if (!config) return h.passed('No ZeroClaw config.toml found');
+    if (!nativeRuntime(config.data)) return h.passed('Runtime is not native (container/remote isolation)');
+    const evidence: Evidence[] = [];
+    for (const p of effectiveProfiles(config.data)) {
+      if (!sandboxOff(p)) continue;
+      evidence.push({
+        file: config.filePath,
+        detail: `${profileLabel(p)}: ${backendNone(p) ? 'sandbox_backend = "none"' : 'sandbox_enabled = false'} with the native runtime — no OS-level isolation`,
+      });
     }
-
     return h.fromEvidence(evidence, {
-      passed: 'Runtime has OS-level sandboxing or is not running in native mode',
-      failed: () => 'Native runtime without OS-level sandboxing — process isolation is missing',
+      passed: 'No agent risk profile disables the sandbox',
+      failed: (n) => `${n} risk profile(s) run tools without an OS sandbox`,
       fixable: true,
-      fixDescription: 'Set runtime.sandbox to a supported sandbox (firejail, bubblewrap, landlock) or use runtime.kind=docker',
+      fixDescription:
+        'Set sandbox_enabled = true (and sandbox_backend = "auto" or a specific backend) on the risk profile, or run with [runtime] kind = "docker"',
     });
   },
 
   async fix(ctx) {
-    return fixFirstConfig(ctx.configs, {
-      checkId: 'ZC-014',
-      path: 'runtime.sandbox',
-      value: 'firejail',
-      message: 'Set runtime.sandbox=firejail',
-      noConfigMessage: 'No TOML config file found',
-    });
+    const config = mainConfig(ctx.configs);
+    const updates: Array<[string, unknown]> = [];
+    if (config && nativeRuntime(config.data)) {
+      for (const p of effectiveProfiles(config.data)) {
+        if (!sandboxOff(p)) continue;
+        updates.push([`${p.path}.sandbox_enabled`, true]);
+        if (backendNone(p)) updates.push([`${p.path}.sandbox_backend`, 'auto']);
+      }
+    }
+    return writeMainConfig(ctx, 'ZC-014', updates, 'Enabled the sandbox on risk profiles (sandbox_enabled=true)');
   },
 });
