@@ -3,7 +3,9 @@ FROM ${BASE_IMAGE}
 
 ARG SCENARIO=insecure
 
-# Copy PicoClaw fixtures to the expected detection path
+# Copy PicoClaw fixtures to the default PICOCLAW_HOME (~/.picoclaw):
+# config.json (schema v3), .security.yml, auth.json, launcher-config.json,
+# workspace/skills/
 COPY testing/fixtures/picoclaw/${SCENARIO}/ /root/.picoclaw/
 
 # Set permissions

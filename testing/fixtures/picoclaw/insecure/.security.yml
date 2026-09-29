@@ -1,0 +1,15 @@
+channel_list:
+  telegram:
+    settings:
+      token: "1234567890:AAFixtureTelegramBotTokenInsecure0123"
+model_list:
+  claude-sonnet-4.6:0:
+    api_keys:
+      - "sk-ant-api03-insecure-test-key-0123456789abcdef"
+  gpt-5.4:0:
+    api_keys:
+      - "sk-insecurefixturekey0123456789abcdefABCDEF"
+web:
+  brave: {}
+skills:
+  registries: {}

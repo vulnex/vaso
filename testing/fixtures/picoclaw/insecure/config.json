@@ -1,16 +1,118 @@
 {
+  "session": {
+    "dimensions": [
+      "chat"
+    ]
+  },
+  "version": 3,
+  "isolation": {},
+  "agents": {
+    "defaults": {
+      "workspace": "~/.picoclaw/workspace",
+      "restrict_to_workspace": false,
+      "allow_read_outside_workspace": true,
+      "provider": "",
+      "model_name": "claude-sonnet-4.6",
+      "max_tokens": 32768,
+      "max_tool_iterations": 50
+    }
+  },
+  "channel_list": {
+    "telegram": {
+      "enabled": true,
+      "type": "telegram",
+      "allow_from": [],
+      "typing": {
+        "enabled": true
+      },
+      "settings": {
+        "use_markdown_v2": false
+      }
+    },
+    "pico": {
+      "enabled": false,
+      "type": "pico",
+      "settings": {
+        "max_connections": 100,
+        "ping_interval": 30
+      }
+    },
+    "maixcam": {
+      "enabled": false,
+      "type": "maixcam",
+      "settings": {
+        "host": "0.0.0.0",
+        "port": 18790
+      }
+    }
+  },
+  "model_list": [
+    {
+      "model_name": "claude-sonnet-4.6",
+      "provider": "anthropic",
+      "model": "claude-sonnet-4-6",
+      "api_base": "https://api.anthropic.com/v1"
+    },
+    {
+      "model_name": "gpt-5.4",
+      "provider": "openai",
+      "model": "gpt-5.4",
+      "api_base": "https://api.openai.com/v1"
+    }
+  ],
   "gateway": {
     "host": "0.0.0.0",
-    "port": 7070
+    "port": 18790,
+    "hot_reload": false,
+    "log_level": "warn"
   },
-  "sandbox": false,
-  "auth": {
-    "mode": "none"
-  },
-  "dm": {
-    "policy": "open"
+  "hooks": {
+    "enabled": true,
+    "defaults": {
+      "observer_timeout_ms": 500,
+      "interceptor_timeout_ms": 5000,
+      "approval_timeout_ms": 60000
+    }
   },
   "tools": {
-    "policy": "allow_all"
+    "allow_read_paths": null,
+    "allow_write_paths": null,
+    "filter_sensitive_data": false,
+    "filter_min_length": 8,
+    "exec": {
+      "enabled": true,
+      "enable_deny_patterns": false,
+      "allow_remote": true,
+      "custom_deny_patterns": null,
+      "custom_allow_patterns": null,
+      "timeout_seconds": 60
+    },
+    "cron": {
+      "enabled": true,
+      "exec_timeout_minutes": 5,
+      "allow_command": true
+    },
+    "mcp": {
+      "enabled": false,
+      "discovery": {
+        "enabled": false
+      }
+    },
+    "skills": {
+      "enabled": true,
+      "registries": {
+        "clawhub": {
+          "base_url": "https://clawhub.ai",
+          "enabled": true
+        }
+      }
+    },
+    "install_skill": {
+      "enabled": true
+    }
+  },
+  "heartbeat": {
+    "enabled": true,
+    "interval": 30
   }
 }
