@@ -1,0 +1,13 @@
+channel_list:
+  telegram:
+    settings:
+      token: "enc://c2VjdXJlLWZpeHR1cmUtc2FsdC1ub25jZS1jaXBoZXJ0ZXh0LXRlbGVncmFt"
+model_list:
+  claude-sonnet-4.6:0:
+    api_keys:
+      - "enc://c2VjdXJlLWZpeHR1cmUtc2FsdC1ub25jZS1jaXBoZXJ0ZXh0LWFudGhyb3BpYw=="
+  gpt-5.4:0: {}
+web:
+  brave: {}
+skills:
+  registries: {}

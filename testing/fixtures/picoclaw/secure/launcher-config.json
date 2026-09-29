@@ -1,0 +1,6 @@
+{
+  "port": 18800,
+  "public": false,
+  "allow_localhost_bypass": true,
+  "dashboard_password_hash": "$2a$10$fixturefixturefixturefixtureOu7x0Vd2Jm3cQ0L1nZ7aY5eWkQy"
+}

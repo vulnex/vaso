@@ -23,9 +23,10 @@ describe('PicoClaw Insecure', () => {
     expect(agent!.agent).toBe('picoclaw');
   });
 
-  it('should detect exposed API key in auth.json (CFG-002)', () => {
+  it('should detect plaintext API keys in .security.yml (CFG-002)', () => {
     const check = expectCheckFailed(result, 'CFG-002');
     expect(check.severity).toBe('critical');
+    expect(check.evidence?.some(e => e.file?.endsWith('/.picoclaw/.security.yml'))).toBe(true);
   });
 
   it('should detect gateway bound to 0.0.0.0 (CFG-001)', () => {
@@ -33,19 +34,14 @@ describe('PicoClaw Insecure', () => {
     expect(check.severity).toBe('critical');
   });
 
-  it('should detect sandbox disabled (CFG-008)', () => {
-    const check = expectCheckFailed(result, 'CFG-008');
+  it('should detect the gateway exposed on all interfaces (NET-001)', () => {
+    const check = expectCheckFailed(result, 'NET-001');
     expect(check.severity).toBe('critical');
   });
 
-  it('should detect default credentials (CFG-009)', () => {
-    const check = expectCheckFailed(result, 'CFG-009');
-    expect(check.severity).toBe('critical');
-  });
-
-  it('should detect auth mode none (CFG-012)', () => {
-    const check = expectCheckFailed(result, 'CFG-012');
-    expect(check.severity).toBe('critical');
+  it('should detect world-readable secret files (CFG-003)', () => {
+    const check = expectCheckFailed(result, 'CFG-003');
+    expect(check.evidence?.some(e => e.file?.endsWith('/.picoclaw/.security.yml'))).toBe(true);
   });
 
   it('should detect malicious domain in skill (IOC-002)', () => {
@@ -79,11 +75,15 @@ describe('PicoClaw Secure', () => {
     expectCheckPassed(result, 'CFG-001');
   });
 
-  it('should pass sandbox check (CFG-008)', () => {
-    expectCheckPassed(result, 'CFG-008');
+  it('should pass the NET-001 exposure check (loopback gateway)', () => {
+    expectCheckPassed(result, 'NET-001');
   });
 
-  it('should pass API key check (CFG-002)', () => {
+  it('should pass the credential permission check (CFG-003)', () => {
+    expectCheckPassed(result, 'CFG-003');
+  });
+
+  it('should pass API key check — secrets are enc:// (CFG-002)', () => {
     expectCheckPassed(result, 'CFG-002');
   });
 
