@@ -35,7 +35,8 @@ export const cfg005 = defineCheck({
       message: found
         ? 'Shell command allowlist (safeBins) is configured'
         : 'No shell command allowlist — agents can execute any command',
-      fixable: true,
+      // The fix writes into the first config file; without one there is nothing to fix
+      fixable: ctx.configs.length > 0,
       fixDescription: 'Add safeBins allowlist to config',
     });
   },

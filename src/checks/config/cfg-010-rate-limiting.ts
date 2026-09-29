@@ -35,7 +35,8 @@ export const cfg010 = defineCheck({
       message: found
         ? 'Rate limiting is configured'
         : 'No rate limiting configured — gateway is vulnerable to abuse',
-      fixable: true,
+      // The fix writes into the first config file; without one there is nothing to fix
+      fixable: ctx.configs.length > 0,
       fixDescription: 'Add rate limiting configuration',
     });
   },
