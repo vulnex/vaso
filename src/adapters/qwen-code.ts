@@ -181,13 +181,12 @@ export const qwenCodeAdapter: AgentAdapter = {
 
   getProbeManifest(): ProbeManifest {
     return {
+      // OAuth/account token stores — QC-002 checks permissions only
+      metadataGlobPatterns: AUTH_FILES.map(f => `~/.qwen/${f}`),
       filePaths: [
         '~/.qwen/settings.json',
         '~/.qwen/memory.md',
         '~/.qwen/AGENTS.md',
-        '~/.qwen/oauth_creds.json',
-        '~/.qwen/mcp-oauth-tokens.json',
-        '~/.qwen/google_accounts.json',
         '~/.qwen/installation_id',
         // User-relative CLI install locations — kept in sync with USER_CLI_RELATIVE_PATHS
         '~/.local/bin/qwen',

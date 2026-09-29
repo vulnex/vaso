@@ -106,7 +106,8 @@ describe('Gemini CLI adapter', () => {
   it('returns probe manifest with expected paths and env prefixes', () => {
     const manifest = geminiAdapter.getProbeManifest!();
     expect(manifest.filePaths).toContain('~/.gemini/settings.json');
-    expect(manifest.filePaths).toContain('~/.gemini/oauth_creds.json');
+    expect(manifest.metadataGlobPatterns).toContain('~/.gemini/oauth_creds.json');
+    expect(manifest.filePaths).not.toContain('~/.gemini/oauth_creds.json');
     expect(manifest.envPrefixes).toContain('GEMINI_');
     expect(manifest.envPrefixes).toContain('GOOGLE_');
   });

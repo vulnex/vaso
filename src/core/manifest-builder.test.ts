@@ -6,6 +6,18 @@ import { allAdapters } from '../adapters/index.js';
 describe('buildProbeManifest', () => {
   const manifest = buildProbeManifest(allAdapters as AgentAdapter[]);
 
+  it('ships credential token stores with permissions only (checks never read them)', () => {
+    const stores = [
+      '~/.claude/.credentials.json',
+      '~/.local/share/devin/credentials.toml',
+      '~/.gemini/oauth_creds.json', '~/.gemini/google_accounts.json', '~/.gemini/mcp-oauth-tokens.json',
+      '~/.qwen/oauth_creds.json', '~/.qwen/mcp-oauth-tokens.json', '~/.qwen/google_accounts.json',
+    ];
+    expect(manifest.metadataGlobPatterns).toEqual(expect.arrayContaining(stores));
+    const content = [...manifest.globPatterns, ...manifest.filePaths];
+    for (const p of stores) expect(content).not.toContain(p);
+  });
+
   it('keeps private session/conversation stores metadata-only', () => {
     expect(manifest.metadataGlobPatterns).toEqual(expect.arrayContaining([
       '~/.codex/sessions/*/*/*/rollout-*.jsonl',

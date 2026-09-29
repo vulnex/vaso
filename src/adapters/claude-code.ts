@@ -226,12 +226,12 @@ export const claudeCodeAdapter: AgentAdapter = {
   getProbeManifest(): ProbeManifest {
     return {
       // Past versions kept by the updater — existence only
-      metadataGlobPatterns: retainedVersionGlobs(RETAINED_VERSIONS),
+      // OAuth token store — permissions only, never content
+      metadataGlobPatterns: [...retainedVersionGlobs(RETAINED_VERSIONS), '~/.claude/.credentials.json'],
       filePaths: [
         '~/.claude/settings.json',
         '~/.claude/settings.local.json',
         '~/.claude/CLAUDE.md',
-        '~/.claude/.credentials.json',
         '~/.claude/mcp.json',
         '~/.claude.json',
         // User-relative CLI install locations — kept in sync with USER_CLI_RELATIVE_PATHS

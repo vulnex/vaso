@@ -240,15 +240,15 @@ export const geminiAdapter: AgentAdapter = {
       // Chat transcripts are private conversation content — existence only.
       // (Locally the latest one still supplies the active model when
       // settings.json has none; remote scans rely on settings.json.)
-      metadataGlobPatterns: ['~/.gemini/tmp/*/chats/session-*.jsonl'],
+      metadataGlobPatterns: [
+        '~/.gemini/tmp/*/chats/session-*.jsonl',
+        // OAuth/account token stores — GEM-002 checks permissions only
+        ...AUTH_FILES.map(f => `~/.gemini/${f}`),
+      ],
       filePaths: [
         '~/.gemini/settings.json',
         '~/.gemini/memory.md',
         '~/.gemini/GEMINI.md',
-        '~/.gemini/oauth_creds.json',
-        '~/.gemini/google_accounts.json',
-        '~/.gemini/mcp-oauth-tokens.json',
-        '~/.gemini/a2a-oauth-tokens.json',
         '~/.gemini/installation_id',
         '~/.gemini/trustedFolders.json',
         '~/.gemini/policy_integrity.json',

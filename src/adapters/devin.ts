@@ -241,13 +241,13 @@ export const devinAdapter: AgentAdapter = {
 
   getProbeManifest(): ProbeManifest {
     return {
-      // Past versions kept by the updater — existence only
-      metadataGlobPatterns: retainedVersionGlobs(RETAINED_VERSIONS),
+      // Past versions kept by the updater, and the API token store (DEV-002
+      // checks its permissions) — existence/permissions only
+      metadataGlobPatterns: [...retainedVersionGlobs(RETAINED_VERSIONS), '~/.local/share/devin/credentials.toml'],
       filePaths: [
         '~/.config/devin/config.json',
         '~/.config/devin/mcp_config.json',
         '~/.config/devin/AGENTS.md',
-        '~/.local/share/devin/credentials.toml',
         // User-relative CLI install location — kept in sync with USER_CLI_RELATIVE_PATHS
         '~/.local/bin/devin',
       ],
