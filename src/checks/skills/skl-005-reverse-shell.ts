@@ -3,6 +3,7 @@ import { defineCheck } from '../../core/check-builder.js';
 import { scanWithPatterns, SECURITY_PATTERNS } from '../../analyzers/pattern-engine.js';
 import { getSkillFiles } from '../../core/utils.js';
 import { markTestCode } from '../../analyzers/test-paths.js';
+import { readCappedFile } from '../../core/file-limits.js';
 
 const REVERSE_SHELL_RULES = SECURITY_PATTERNS.filter(r => r.category === 'reverse-shell');
 
@@ -22,7 +23,7 @@ export const skl005 = defineCheck({
 
     for (const file of files) {
       try {
-        const code = await ctx.fs.readFile(file);
+        const code = await readCappedFile(ctx.fs, file);
         const matches = scanWithPatterns(code, REVERSE_SHELL_RULES);
 
         for (const match of matches) {

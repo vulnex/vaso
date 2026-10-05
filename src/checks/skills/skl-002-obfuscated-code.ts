@@ -4,6 +4,7 @@ import { findHighEntropyBlocks } from '../../analyzers/entropy.js';
 import { OBFUSCATION_PATTERNS } from '../../analyzers/obfuscation.js';
 import { getSkillFiles } from '../../core/utils.js';
 import { markTestCode } from '../../analyzers/test-paths.js';
+import { readCappedFile } from '../../core/file-limits.js';
 
 export const skl002 = defineCheck({
   id: 'SKL-002',
@@ -21,7 +22,7 @@ export const skl002 = defineCheck({
 
     for (const file of files) {
       try {
-        const code = await ctx.fs.readFile(file);
+        const code = await readCappedFile(ctx.fs, file);
 
         // Entropy-based detection
         const blocks = findHighEntropyBlocks(code);

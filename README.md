@@ -120,7 +120,7 @@ See [doc/user-guide.md](doc/user-guide.md) for full option reference.
 **Agentic desktop apps**
 
 - **Claude Desktop** — `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS), `%APPDATA%\Claude\claude_desktop_config.json` (Windows); MCPB extensions
-- **ChatGPT Desktop** — `/Applications/ChatGPT.app` + `~/Library/Application Support/com.openai.chat/`; preferences plist (macOS only)
+- **ChatGPT Desktop** — `/Applications/ChatGPT.app` and `/Applications/ChatGPT (Classic).app` + `~/Library/Application Support/com.openai.chat/`; preferences plist (macOS only)
 - **Meta Muse** — `/Applications/Muse.app` + `com.meta.endo` preferences (macOS; initial coverage)
 - **Perplexity Comet** — `/Applications/Comet.app` + Chromium profile (extension inventory, session data)
 

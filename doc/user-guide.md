@@ -452,7 +452,7 @@ VASO ships twenty-three adapters. Each implements `detect()`, `getConfigPaths()`
 | Adapter | Config locations | Formats |
 |---------|------------------|---------|
 | Claude Desktop | `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS), `%APPDATA%\Claude\claude_desktop_config.json` (Windows); MCPB extensions under `Claude Extensions/` | JSON |
-| ChatGPT Desktop | `/Applications/ChatGPT.app` + `~/Library/Application Support/com.openai.chat/`; preferences in `~/Library/Preferences/com.openai.chat*.plist` (macOS only) | plist |
+| ChatGPT Desktop | `/Applications/ChatGPT.app` (current app, `com.openai.codex`) and `/Applications/ChatGPT (Classic).app` (`com.openai.chat`) + `~/Library/Application Support/com.openai.chat/`; preferences in `~/Library/Preferences/com.openai.chat*.plist` (macOS only) | plist |
 | Meta Muse | `/Applications/Muse.app`, `~/Library/Preferences/com.meta.endo.plist`, `~/Library/Application Support/com.meta.endo/` (macOS only; initial coverage) | plist |
 | Perplexity Comet | `/Applications/Comet.app` + Chromium profile `~/Library/Application Support/Comet/` (macOS) or `%LOCALAPPDATA%\Perplexity\Comet\User Data` (Windows): session-data permissions, extension inventory | — |
 

@@ -509,3 +509,42 @@ describe('SnapshotFSProvider — probe ≥ 1.0.0 fields', () => {
   });
 });
 
+
+describe('SnapshotFSProvider — symlinks (probe ≥ 1.0.1)', () => {
+  const skills = '/home/testuser/.claude/skills';
+  const snapshot = makeSnapshot({
+    files: {
+      [`${skills}/gstack/browse/src/lib.ts`]: { content: 'x', mode: 0o644, exists: true },
+      [`${skills}/browse/SKILL.md`]: { content: '# skill', mode: 0o644, exists: true },
+      [`${skills}/browse/own.ts`]: { content: 'y', mode: 0o644, exists: true },
+    },
+    directories: { [`${skills}/browse`]: ['SKILL.md', 'own.ts', 'src'] },
+    symlinks: {
+      [`${skills}/browse/SKILL.md`]: `${skills}/gstack/browse/SKILL.md`,
+      [`${skills}/browse/src`]: `${skills}/gstack/browse/src`,
+    },
+  });
+  const fs = new SnapshotFSProvider(snapshot);
+
+  it('lists symlinks as links, never as the file or directory they point to', async () => {
+    const entries = await fs.readdirEntries(`${skills}/browse`);
+    expect(entries.find(e => e.name === 'SKILL.md')).toMatchObject({ isFile: false, isDirectory: false, isSymbolicLink: true });
+    expect(entries.find(e => e.name === 'src')).toMatchObject({ isSymbolicLink: true });
+    expect(entries.find(e => e.name === 'own.ts')).toMatchObject({ isFile: true });
+
+    const recursive = await fs.readdirEntries(skills, { recursive: true });
+    const files = recursive.filter(e => e.isFile).map(e => `${e.parentPath}/${e.name}`);
+    expect(files.sort()).toEqual([`${skills}/browse/own.ts`, `${skills}/gstack/browse/src/lib.ts`]);
+    expect(recursive.filter(e => e.isSymbolicLink).map(e => e.name).sort()).toEqual(['SKILL.md', 'src']);
+  });
+
+  it('answers readlink from recorded targets', async () => {
+    expect(await fs.readlink(`${skills}/browse/src`)).toBe(`${skills}/gstack/browse/src`);
+    await expect(fs.readlink(`${skills}/browse/own.ts`)).rejects.toThrow();
+  });
+
+  it('keeps old snapshots (no symlinks field) unchanged', async () => {
+    const old = new SnapshotFSProvider(makeSnapshot({ files: { [`${skills}/a/x.ts`]: { content: 'x', mode: 0o644, exists: true } } }));
+    expect((await old.readdirEntries(skills, { recursive: true }))[0]).toMatchObject({ isFile: true });
+  });
+});

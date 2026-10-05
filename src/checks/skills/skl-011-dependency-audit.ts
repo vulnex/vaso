@@ -3,6 +3,7 @@ import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { getIOCDatabase } from '../../ioc/database.js';
 import { markTestCode } from '../../analyzers/test-paths.js';
+import { readCappedFile } from '../../core/file-limits.js';
 
 const MALICIOUS_PACKAGES = new Set([
   'event-stream',
@@ -48,7 +49,7 @@ export const skl011 = defineCheck({
 
       let pkgData: Record<string, unknown>;
       try {
-        const raw = await ctx.fs.readFile(pkgPath);
+        const raw = await readCappedFile(ctx.fs, pkgPath);
         pkgData = JSON.parse(raw) as Record<string, unknown>;
       } catch {
         continue; // No package.json in this skill

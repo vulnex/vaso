@@ -25,6 +25,16 @@ export function getReporter(format: string): Reporter {
   return factory();
 }
 
+/** Whether a report format is available (built-in or registered by a user plugin). */
+export function isReportFormat(format: string): boolean {
+  return Object.prototype.hasOwnProperty.call(reporters, format);
+}
+
+/** Every available report format, built-in and plugin-registered. */
+export function reportFormats(): string[] {
+  return Object.keys(reporters);
+}
+
 export function registerReporter(format: string, factory: () => Reporter): void {
   reporters[format] = factory;
 }

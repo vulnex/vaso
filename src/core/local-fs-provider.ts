@@ -6,6 +6,7 @@ import { homedir as osHomedir, hostname as osHostname, tmpdir } from 'node:os';
 import { promisify } from 'node:util';
 import type { FSProvider, DirentInfo, ExecResult, ExecOptions, PermissionQuery } from './fs-provider.js';
 import { posixPermissionFacts } from './permissions.js';
+import { parsePrivateGroups } from './private-groups.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -83,6 +84,27 @@ export class LocalFSProvider implements FSProvider {
     }
     const s = await stat(path);
     return posixPermissionFacts(s.mode);
+  }
+
+  async ownership(path: string): Promise<{ uid: number; gid: number } | undefined> {
+    if (this.platform === 'win32') return undefined;
+    const s = await stat(path);
+    return { uid: s.uid, gid: s.gid };
+  }
+
+  private privateGroupsCache?: Promise<ReadonlyMap<number, number>>;
+
+  privateGroups(): Promise<ReadonlyMap<number, number>> {
+    this.privateGroupsCache ??= (async () => {
+      if (this.platform !== 'linux') return new Map<number, number>();
+      try {
+        const [passwd, group] = await Promise.all([readFile('/etc/passwd', 'utf-8'), readFile('/etc/group', 'utf-8')]);
+        return parsePrivateGroups(passwd, group);
+      } catch {
+        return new Map<number, number>();
+      }
+    })();
+    return this.privateGroupsCache;
   }
 
   async realpath(path: string): Promise<string> {

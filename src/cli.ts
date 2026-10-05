@@ -15,6 +15,7 @@ import { assertZoneGraphsValid } from './core/zone-graph-validator.js';
 import { defaultZoneGraph } from './core/default-zone-graph.js';
 import { AGENT_TYPES, isScannableAgentType } from './core/types.js';
 import { VERSION } from './version.js';
+import { isReportFormat, reportFormats } from './reporting/index.js';
 
 // Derive the list of scannable agent types from the canonical AGENT_TYPES array
 // so `--agent <type>` help strings can't drift as new adapters are added.
@@ -30,6 +31,25 @@ function validateAgentOption(options: { agent?: string }): boolean {
   }
   return true;
 }
+
+/**
+ * Reject an unknown --format before any work starts (a scan used to run to
+ * completion and only then fail to render). Report commands accept every
+ * registered reporter, including user-plugin ones (loaded in preAction).
+ */
+function validateFormatOption(options: { format?: string }, allowed?: readonly string[]): boolean {
+  const format = options.format;
+  if (format === undefined) return true;
+  const valid = allowed ? allowed.includes(format) : isReportFormat(format);
+  if (!valid) {
+    console.error(chalk.red(`Invalid --format "${format}". Use one of: ${(allowed ?? reportFormats()).join(', ')}.`));
+    process.exitCode = 2;
+    return false;
+  }
+  return true;
+}
+
+const LISTING_FORMATS = ['terminal', 'json'] as const;
 
 const BANNER = `
 ${chalk.red('██╗   ██╗ █████╗ ███████╗ ██████╗')}
@@ -156,7 +176,7 @@ program
   .option('--no-color', 'disable colored output')
   .option('--fail-on <severity>', 'exit non-zero on findings of this severity or higher (critical, warning, info, none)', 'critical')
   .action(async (options) => {
-    if (!validateAgentOption(options)) return;
+    if (!validateAgentOption(options) || !validateFormatOption(options)) return;
     const { runScan } = await import('./commands/scan.js');
     await runScan(options);
   });
@@ -181,7 +201,7 @@ program
   .option('--save-snapshot <dir>', 'after fetching SSH snapshots, write each as <hostname>.json under this directory (for debugging)')
   .option('--no-color', 'disable colored output')
   .action(async (options) => {
-    if (!validateAgentOption(options)) return;
+    if (!validateAgentOption(options) || !validateFormatOption(options, LISTING_FORMATS)) return;
     const { runDetect } = await import('./commands/detect.js');
     await runDetect(options);
   });
@@ -237,6 +257,7 @@ mcpCommand
   .option('--resolve-packages', 'download npm-packaged (npx) MCP servers — download-only, never executed — to analyze their source (requires network)', false)
   .option('--no-color', 'disable colored output')
   .action(async (options) => {
+    if (!validateFormatOption(options)) return;
     const { runMCPScan } = await import('./commands/mcp.js');
     await runMCPScan(options);
   });
@@ -247,6 +268,7 @@ mcpCommand
   .option('-f, --format <format>', 'output format (terminal, json)', 'terminal')
   .option('-p, --path <paths...>', 'specific config file paths to scan')
   .action(async (options) => {
+    if (!validateFormatOption(options, LISTING_FORMATS)) return;
     const { runMCPList } = await import('./commands/mcp.js');
     await runMCPList(options);
   });
@@ -263,6 +285,7 @@ skillCommand
   .option('-o, --output <file>', 'write report to file')
   .option('--no-color', 'disable colored output')
   .action(async (path: string, options: Record<string, unknown>) => {
+    if (!validateFormatOption(options as { format?: string })) return;
     const { runSkillAudit } = await import('./commands/skill-audit.js');
     await runSkillAudit(path, options as { format: string; output?: string; color?: boolean });
   });

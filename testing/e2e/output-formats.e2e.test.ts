@@ -30,6 +30,21 @@ describe('E2E: output formats', () => {
     expect(Array.isArray(parsed.agents)).toBe(true);
   });
 
+  it('--format json lists config files by path only — no raw contents or parsed data', async () => {
+    const result = await runVasoCLI(['scan', '--format', 'json'], { HOME: env.tempHome });
+    const parsed = JSON.parse(result.stdout);
+    const configFiles = parsed.agents.flatMap((a: { installation: { configFiles: unknown[] } }) => a.installation.configFiles);
+    expect(configFiles.length).toBeGreaterThan(0);
+    for (const c of configFiles) expect(Object.keys(c as object).sort()).toEqual(['filePath', 'format']);
+  });
+
+  it('rejects an unknown --format with exit 2 before scanning', async () => {
+    const result = await runVasoCLI(['scan', '--format', 'xml'], { HOME: env.tempHome });
+    expect(result.exitCode).toBe(2);
+    expect(result.stderr).toContain('Invalid --format "xml"');
+    expect(result.stdout).toBe('');
+  });
+
   it('--format sarif should produce valid SARIF output', async () => {
     const result = await runVasoCLI(
       ['scan', '--format', 'sarif'],

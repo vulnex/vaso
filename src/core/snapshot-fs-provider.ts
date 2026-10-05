@@ -89,8 +89,14 @@ export class SnapshotFSProvider implements FSProvider {
     const rawDirs = new Set(
       (this.snapshot.directories[path] ?? []).filter(n => n.endsWith('/')).map(stripTrailingSlash));
     const names = await this.readdir(path);
+    const symlinks = this.snapshot.symlinks ?? {};
     return names.map(name => {
       const fullPath = join(path, name);
+      // Like a local readdir: a symlink is listed as a link, never as the
+      // file or directory it points to
+      if (fullPath in symlinks) {
+        return { name, isFile: false, isDirectory: false, isSymbolicLink: true, parentPath: path };
+      }
       const isFile = fullPath in this.snapshot.files && this.snapshot.files[fullPath].exists;
       const isDir = rawDirs.has(name) || fullPath in this.snapshot.directories ||
         this.hasChildPaths(fullPath);
@@ -153,6 +159,15 @@ export class SnapshotFSProvider implements FSProvider {
 
 
 
+  async ownership(path: string): Promise<{ uid: number; gid: number } | undefined> {
+    const owner = this.snapshot.owners?.[path];
+    return owner ? { uid: owner[0], gid: owner[1] } : undefined;
+  }
+
+  async privateGroups(): Promise<ReadonlyMap<number, number>> {
+    return new Map(Object.entries(this.snapshot.privateGroups ?? {}).map(([gid, uid]) => [Number(gid), uid]));
+  }
+
   async realpath(path: string): Promise<string> {
     // Snapshots don't resolve symlinks — return as-is if path exists
     if (await this.access(path)) return path;
@@ -160,11 +175,11 @@ export class SnapshotFSProvider implements FSProvider {
   }
 
   async readlink(path: string): Promise<string> {
-    // The probe does not record symlink targets, so link status can't be
-    // reconstructed from a snapshot. Callers must treat this as "unknown":
-    // readdirEntries never sets isSymbolicLink on snapshot entries, so a
-    // well-behaved consumer won't call readlink here in the first place.
-    throw new Error(`EINVAL: symlink targets not collected in snapshot: ${path}`);
+    // Probes ≥ 1.0.1 record link targets for symlinks they meet; older
+    // snapshots have none, and their entries are never marked as links.
+    const target = this.snapshot.symlinks?.[path];
+    if (target !== undefined) return target;
+    throw new Error(`EINVAL: symlink target not collected in snapshot: ${path}`);
   }
 
   async exec(cmd: string, args: string[], _options?: ExecOptions): Promise<ExecResult> {
@@ -243,17 +258,23 @@ export class SnapshotFSProvider implements FSProvider {
     const results: DirentInfo[] = [];
     const prefix = basePath.endsWith('/') ? basePath : basePath + '/';
 
-    for (const [filePath, entry] of Object.entries(this.snapshot.files)) {
-      if (!filePath.startsWith(prefix) || !entry.exists) continue;
+    const symlinks = this.snapshot.symlinks ?? {};
+    const entry = (filePath: string, isLink: boolean): DirentInfo => {
       const relative = filePath.slice(prefix.length);
       const name = relative.split('/').pop() || relative;
       const parentPath = filePath.slice(0, filePath.length - name.length - 1) || basePath;
-      results.push({
-        name,
-        isFile: true,
-        isDirectory: false,
-        parentPath,
-      });
+      return isLink
+        ? { name, isFile: false, isDirectory: false, isSymbolicLink: true, parentPath }
+        : { name, isFile: true, isDirectory: false, parentPath };
+    };
+
+    for (const [filePath, file] of Object.entries(this.snapshot.files)) {
+      if (!filePath.startsWith(prefix) || !file.exists) continue;
+      results.push(entry(filePath, filePath in symlinks));
+    }
+    // Links to directories have no file entry; list them as links too
+    for (const linkPath of Object.keys(symlinks)) {
+      if (linkPath.startsWith(prefix) && !(linkPath in this.snapshot.files)) results.push(entry(linkPath, true));
     }
 
     return results;

@@ -2,16 +2,9 @@ import { join } from 'node:path';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { queryPermissions } from '../../core/permissions.js';
+import { CHATGPT_WORKSPACE_DIR_PREFIXES } from '../../adapters/chatgpt-desktop.js';
 
-const SCAN_DIR_PREFIXES = [
-  'conversations-v3-',
-  'drafts-v2-',
-  'gizmos-',
-  'system-hints-',
-  'health-system-hints-',
-  'pinned-items-user-',
-  'order-orders-',
-];
+const SCAN_DIR_PREFIXES = CHATGPT_WORKSPACE_DIR_PREFIXES;
 const MAX_SAMPLES = 3;
 
 export const cg001 = defineCheck({

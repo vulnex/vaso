@@ -3,6 +3,7 @@ import { defineCheck } from '../../core/check-builder.js';
 import { analyzeCode } from '../../analyzers/ast-analyzer.js';
 import { getSkillFiles } from '../../core/utils.js';
 import { markTestCode } from '../../analyzers/test-paths.js';
+import { readCappedFile } from '../../core/file-limits.js';
 
 export const skl010 = defineCheck({
   id: 'SKL-010',
@@ -20,7 +21,7 @@ export const skl010 = defineCheck({
 
     for (const file of files) {
       try {
-        const code = await ctx.fs.readFile(file);
+        const code = await readCappedFile(ctx.fs, file);
         const flows = analyzeCode(code, file);
         const fsAccess = flows.filter(f => f.type === 'fs-access');
 

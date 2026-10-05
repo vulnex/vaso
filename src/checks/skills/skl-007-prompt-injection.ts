@@ -4,6 +4,7 @@ import { defineCheck } from '../../core/check-builder.js';
 import { scanWithPatterns, SECURITY_PATTERNS } from '../../analyzers/pattern-engine.js';
 import { markTestCode } from '../../analyzers/test-paths.js';
 import { isExcludedPath } from '../../core/utils.js';
+import { readCappedFile } from '../../core/file-limits.js';
 
 const DOC_EXTENSIONS = new Set(['.md', '.txt', '.rst']);
 const PROMPT_INJECTION_RULES = SECURITY_PATTERNS.filter(r => r.category === 'prompt-injection');
@@ -43,7 +44,7 @@ export const skl007 = defineCheck({
 
     for (const file of files) {
       try {
-        const content = await ctx.fs.readFile(file);
+        const content = await readCappedFile(ctx.fs, file);
         const matches = scanWithPatterns(content, PROMPT_INJECTION_RULES);
 
         for (const match of matches) {

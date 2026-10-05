@@ -26,11 +26,21 @@ describe('Multi-user host (root, --all-users)', () => {
   });
 
   it('judges permissions per user home (private home mitigates, open home does not)', () => {
-    const cfg003 = (dir: string) => result.agents
-      .find(a => a.installation.installDir === dir)!.results.find(r => r.id === 'CFG-003')!;
-    expect(cfg003('/home/bob/.nanobot').passed).toBe(false);
-    expect(cfg003('/home/bob/.nanobot').severity).not.toBe('info');
-    expect(cfg003('/home/alice/.nanobot').severity).toBe('info');
+    // The config's mode is reported once per installation — by the agent's own
+    // check when it covers the file, else by CFG-003 (generic duplicates are
+    // dropped) — so look for whichever result carries it.
+    const permFinding = (dir: string) => {
+      const file = `${dir}/config.json`;
+      return result.agents.find(a => a.installation.installDir === dir)!.results
+        .filter(r => !r.passed)
+        .flatMap(r => (r.evidence ?? []).filter(e => e.file === file && /permissions?[:\s]+0?[0-7]{3}|readable/i.test(`${e.snippet ?? ''} ${e.detail ?? ''}`)).map(e => ({ r, e })))[0];
+    };
+    const bob = permFinding('/home/bob/.nanobot');
+    expect(bob).toBeDefined();
+    expect(bob.e.mitigated).toBeFalsy();
+    expect(bob.r.severity).not.toBe('info');
+    const alice = permFinding('/home/alice/.nanobot');
+    expect(alice?.e.mitigated).toBe(true);
   });
 
   it('completes without errored checks', () => {

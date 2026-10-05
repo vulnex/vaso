@@ -126,3 +126,69 @@ func TestRunCommandIsolateHome(t *testing.T) {
 		t.Fatalf("HOME changed without IsolateHome: %q", plain.Stdout)
 	}
 }
+
+func TestCollectDoesNotFollowSymlinkedDirsAndRecordsLinks(t *testing.T) {
+	root := t.TempDir()
+	real := filepath.Join(root, "real", "src")
+	skill := filepath.Join(root, "skills", "browse")
+	for _, d := range []string{real, skill} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(real, "lib.ts"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skill, "own.ts"), []byte("y"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	linkDir := filepath.Join(skill, "src")
+	linkFile := filepath.Join(skill, "SKILL.md")
+	if err := os.Symlink(real, linkDir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(real, "lib.ts"), linkFile); err != nil {
+		t.Fatal(err)
+	}
+
+	snap := Collect(ProbeManifest{
+		GlobPatterns:      []string{filepath.Join(root, "skills") + "/**"},
+		DirectoryListings: []string{skill},
+	}, false)
+
+	if _, ok := snap.Files[filepath.Join(linkDir, "lib.ts")]; ok {
+		t.Fatal("followed a symlinked directory")
+	}
+	if _, ok := snap.Files[filepath.Join(skill, "own.ts")]; !ok {
+		t.Fatal("regular file not collected")
+	}
+	if snap.Symlinks[linkDir] != real || snap.Symlinks[linkFile] != filepath.Join(real, "lib.ts") {
+		t.Fatalf("symlinks not recorded: %v", snap.Symlinks)
+	}
+}
+
+func TestParsePrivateGroups(t *testing.T) {
+	passwd := "root:x:0:0:root:/root:/bin/bash\ncarol:x:1000:1000:Carol:/home/carol:/bin/bash\nalice:x:1001:100:,,,:/home/alice:/bin/bash\nbob:x:1002:100::/home/bob:/bin/sh\nshared:x:1003:1003::/home/shared:/bin/sh\n"
+	group := "root:x:0:\ncarol:x:1000:\nusers:x:100:\nshared:x:1003:alice\ndocker:x:983:carol\n"
+	got := parsePrivateGroups(passwd, group)
+	want := map[string]int{"0": 0, "1000": 1000}
+	if len(got) != len(want) || got["0"] != 0 || got["1000"] != 1000 {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+}
+
+func TestCollectRecordsOwners(t *testing.T) {
+	root := t.TempDir()
+	f := filepath.Join(root, "cfg.json")
+	if err := os.WriteFile(f, []byte("{}"), 0o664); err != nil {
+		t.Fatal(err)
+	}
+	snap := Collect(ProbeManifest{FilePaths: []string{f}}, false)
+	owner, ok := snap.Owners[f]
+	if !ok || owner[0] != os.Getuid() || owner[1] != os.Getgid() {
+		t.Fatalf("owner not recorded: %v (uid %d gid %d)", snap.Owners[f], os.Getuid(), os.Getgid())
+	}
+	if _, ok := snap.Owners[root]; !ok {
+		t.Fatalf("ancestor directory owner not recorded")
+	}
+}

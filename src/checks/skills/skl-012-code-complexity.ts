@@ -4,6 +4,7 @@ import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { getSkillFiles } from '../../core/utils.js';
 import { markTestCode } from '../../analyzers/test-paths.js';
+import { readCappedFile } from '../../core/file-limits.js';
 
 // Handle ESM/CJS interop
 const traverse = typeof _traverse === 'function' ? _traverse : (_traverse as { default: typeof _traverse }).default;
@@ -39,7 +40,7 @@ export const skl012 = defineCheck({
 
     for (const file of files) {
       try {
-        const code = await ctx.fs.readFile(file);
+        const code = await readCappedFile(ctx.fs, file);
         let ast: ReturnType<typeof parse>;
         try {
           ast = parse(code, {

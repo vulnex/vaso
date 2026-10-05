@@ -7,6 +7,7 @@ import type { FSProvider } from './fs-provider.js';
 import { LocalFSProvider } from './local-fs-provider.js';
 import { computeScore, scoreToGrade, summarizeResults, aggregateScore, meanScore } from './scoring.js';
 import { dedupeInheritedFindings } from './inherited-findings.js';
+import { dedupePermissionFindings } from './duplicate-findings.js';
 import { getAllSkillsDirs, getSkillFiles } from './utils.js';
 import { extractToolDefinitions } from '../mcp/tool-baseline.js';
 
@@ -103,7 +104,7 @@ export class ScanEngine {
       applicable.map(check => check.run(context))
     );
 
-    const results = settled.map((r, index) => {
+    const results = dedupePermissionFindings(settled.map((r, index) => {
       if (r.status === 'fulfilled') return r.value;
       const check = applicable[index];
       return {
@@ -115,7 +116,7 @@ export class ScanEngine {
         errored: true,
         message: `Check errored and was not completed: ${r.reason instanceof Error ? r.reason.message : String(r.reason)}`,
       };
-    });
+    }));
 
     const score = computeScore(results);
 

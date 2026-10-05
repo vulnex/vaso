@@ -89,7 +89,8 @@ export interface FSProvider {
    * to `~/.ssh/authorized_keys` planted by a malicious repo still returns its
    * literal target), and it does not follow multi-hop chains — it reports one
    * link's own target string as stored on disk (may be relative). Throws if the
-   * path is not a symlink. SnapshotFSProvider throws (link data isn't collected).
+   * path is not a symlink. SnapshotFSProvider answers from the targets the
+   * probe recorded (probe ≥ 1.0.1) and throws otherwise.
    */
   readlink(path: string): Promise<string>;
   /**
@@ -102,6 +103,11 @@ export interface FSProvider {
    * this method.
    */
   permissions?(path: string): Promise<PermissionQuery>;
+  /** Owner uid/gid of a path (POSIX). Optional; undefined means unknown. */
+  ownership?(path: string): Promise<{ uid: number; gid: number } | undefined>;
+  /** User-private groups on the scanned host: gid → the one user (uid) it
+   *  serves (see core/private-groups.ts). Optional; Linux only. */
+  privateGroups?(): Promise<ReadonlyMap<number, number>>;
   exec(cmd: string, args: string[], options?: ExecOptions): Promise<ExecResult>;
   execSync(cmd: string, args: string[], options?: ExecOptions): string;
   /** Look up an environment variable. SnapshotFSProvider reads from the

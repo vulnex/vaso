@@ -3,6 +3,7 @@ import { defineCheck } from '../../core/check-builder.js';
 import { scanWithPatterns, SECURITY_PATTERNS } from '../../analyzers/pattern-engine.js';
 import { getSkillFiles } from '../../core/utils.js';
 import { markTestCode } from '../../analyzers/test-paths.js';
+import { readCappedFile } from '../../core/file-limits.js';
 
 const CRYPTO_RULES = SECURITY_PATTERNS.filter(r => r.category === 'crypto-wallet');
 
@@ -22,7 +23,7 @@ export const skl009 = defineCheck({
 
     for (const file of files) {
       try {
-        const code = await ctx.fs.readFile(file);
+        const code = await readCappedFile(ctx.fs, file);
         const matches = scanWithPatterns(code, CRYPTO_RULES);
 
         for (const match of matches) {

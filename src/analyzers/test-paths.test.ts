@@ -39,6 +39,18 @@ describe('markTestCode', () => {
     expect(evidence[1].mitigated).toBeUndefined();
   });
 
+  it('marks CI configuration and scripts (.github/, .gitlab/, …) as not loaded', () => {
+    const evidence: Evidence[] = [
+      { file: `${ROOT}/gstack/.github/scripts/qualify-dia-macos.ts`, detail: 'macOS Keychain access' },
+      { file: `${ROOT}/gstack/.gitlab/ci.yml`, detail: 'Curl-pipe-shell execution' },
+      { file: `${ROOT}/gstack/github/notes.ts`, detail: 'spawn() call detected' },
+    ];
+    markTestCode(evidence, { skillsDir: ROOT });
+    expect(evidence[0].detail).toBe('macOS Keychain access — in CI configuration, not loaded by the agent');
+    expect(evidence[1].mitigated).toBe(true);
+    expect(evidence[2].mitigated).toBeUndefined();
+  });
+
   it('considers every skills dir and does nothing without one', () => {
     const extra = '/opt/agent/skills';
     const evidence: Evidence[] = [{ file: `${extra}/s/tests/x.py` }];

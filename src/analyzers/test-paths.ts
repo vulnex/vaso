@@ -12,6 +12,8 @@ const TEST_DIRS = new Set([
   'testdata', 'test-data', '__mocks__', 'e2e',
 ]);
 const TEST_FILE = /(?:\.(?:test|spec)\.[cm]?[jt]sx?$|^test_.+\.py$|_test\.(?:py|go)$)/;
+// CI configuration and scripts run by a CI service, never loaded by the agent.
+const CI_DIRS = new Set(['.github', '.gitlab', '.circleci', '.buildkite']);
 
 /**
  * Only path segments *below* a skills root count, so a user named "test"
@@ -19,14 +21,22 @@ const TEST_FILE = /(?:\.(?:test|spec)\.[cm]?[jt]sx?$|^test_.+\.py$|_test\.(?:py|
  * into test code. Files outside every root are never test code.
  */
 export function isTestPath(file: string, roots: string[]): boolean {
-  const root = roots.find(r => file === r || file.startsWith(r.endsWith('/') ? r : `${r}/`));
-  if (!root) return false;
-  const parts = file.slice(root.length).split(/[\\/]/).filter(p => p.length > 0);
-  const name = parts[parts.length - 1] ?? '';
-  return TEST_FILE.test(name) || parts.slice(0, -1).some(p => TEST_DIRS.has(p));
+  return notLoadedReason(file, roots) !== undefined;
 }
 
-/** Mark evidence located in skill test/fixture code as mitigated (see `fromEvidence`). */
+/** Why a file under a skills root is not loaded by the agent, if it isn't. */
+function notLoadedReason(file: string, roots: string[]): string | undefined {
+  const root = roots.find(r => file === r || file.startsWith(r.endsWith('/') ? r : `${r}/`));
+  if (!root) return undefined;
+  const parts = file.slice(root.length).split(/[\\/]/).filter(p => p.length > 0);
+  const name = parts[parts.length - 1] ?? '';
+  const dirs = parts.slice(0, -1);
+  if (TEST_FILE.test(name) || dirs.some(p => TEST_DIRS.has(p))) return 'in test/fixture code';
+  if (dirs.some(p => CI_DIRS.has(p))) return 'in CI configuration';
+  return undefined;
+}
+
+/** Mark evidence located in skill test/fixture code or CI configuration as mitigated (see `fromEvidence`). */
 export function markTestCode(
   evidence: Evidence[],
   installation: Pick<AgentInstallation, 'skillsDir' | 'skillsDirs'>,
@@ -35,8 +45,10 @@ export function markTestCode(
     .filter((r): r is string => typeof r === 'string' && r.length > 0);
   if (roots.length === 0) return;
   for (const e of evidence) {
-    if (!e.file || e.mitigated || !isTestPath(e.file, roots)) continue;
+    if (!e.file || e.mitigated) continue;
+    const reason = notLoadedReason(e.file, roots);
+    if (!reason) continue;
     e.mitigated = true;
-    e.detail = `${e.detail ? `${e.detail} — ` : ''}in test/fixture code, not loaded by the agent`;
+    e.detail = `${e.detail ? `${e.detail} — ` : ''}${reason}, not loaded by the agent`;
   }
 }

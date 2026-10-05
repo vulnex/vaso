@@ -8,6 +8,11 @@ import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { getUserHomeDirs } from './openclaw.js';
 
 const APP_BUNDLE_PATH = '/Applications/ChatGPT.app';
+// OpenAI's current ChatGPT.app (bundle com.openai.codex, Codex-based) replaced
+// the original app, which the update moved to "ChatGPT (Classic).app" (bundle
+// com.openai.chat). Account settings and conversation stores below belong to
+// the Classic app; the new app keeps only updater/UI preferences.
+export const CLASSIC_APP_BUNDLE_PATH = '/Applications/ChatGPT (Classic).app';
 const BUNDLE_ID = 'com.openai.chat';
 const APP_SUPPORT_REL = ['Library', 'Application Support', BUNDLE_ID];
 const PREFS_REL = ['Library', 'Preferences'];
@@ -22,6 +27,18 @@ const PLISTS = {
 };
 
 const PAIRING_DIR = 'app_pairing_extensions';
+
+/** Workspace data dirs under Application Support (CG-001 checks their modes;
+ *  the probe collects them metadata-only — content is private). */
+export const CHATGPT_WORKSPACE_DIR_PREFIXES = [
+  'conversations-v3-',
+  'drafts-v2-',
+  'gizmos-',
+  'system-hints-',
+  'health-system-hints-',
+  'pinned-items-user-',
+  'order-orders-',
+];
 
 /**
  * Convert a macOS plist (binary or XML) to a plain object via plutil. Going
@@ -111,12 +128,12 @@ async function findRemoteFlagsPlist(prefsDir: string, fs: FSProvider): Promise<s
   return undefined;
 }
 
-async function readAppVersion(fs: FSProvider): Promise<string | undefined> {
-  if (!(await fs.access(APP_BUNDLE_PATH))) return undefined;
+async function readAppVersion(fs: FSProvider, bundle: string): Promise<string | undefined> {
+  if (!(await fs.access(bundle))) return undefined;
   try {
     const result = await fs.exec(
       'defaults',
-      ['read', `${APP_BUNDLE_PATH}/Contents/Info.plist`, 'CFBundleShortVersionString'],
+      ['read', `${bundle}/Contents/Info.plist`, 'CFBundleShortVersionString'],
       { timeout: 3000 },
     );
     if (result.exitCode === 0) {
@@ -139,14 +156,19 @@ export const chatgptDesktopAdapter: AgentAdapter = {
     const installations: AgentInstallation[] = [];
 
     const appExists = await fs.access(APP_BUNDLE_PATH);
-    const version = appExists ? await readAppVersion(fs) : undefined;
+    const classicExists = await fs.access(CLASSIC_APP_BUNDLE_PATH);
+    // ChatGPT.app is the primary copy; the Classic app is another installed copy
+    const appBundle = appExists ? APP_BUNDLE_PATH : classicExists ? CLASSIC_APP_BUNDLE_PATH : undefined;
+    const version = appBundle ? await readAppVersion(fs, appBundle) : undefined;
+    const classicVersion = appExists && classicExists ? await readAppVersion(fs, CLASSIC_APP_BUNDLE_PATH) : undefined;
+    const otherInstalls = appExists && classicExists ? [{ path: CLASSIC_APP_BUNDLE_PATH, version: classicVersion }] : undefined;
 
     for (const { home, user } of userDirs) {
       const supportDir = join(home, ...APP_SUPPORT_REL);
       const prefsDir = join(home, ...PREFS_REL);
 
       const hasSupportDir = await fs.access(supportDir);
-      if (!hasSupportDir && !appExists) continue;
+      if (!hasSupportDir && !appBundle) continue;
 
       const configFiles: ParsedConfig[] = [];
 
@@ -175,7 +197,8 @@ export const chatgptDesktopAdapter: AgentAdapter = {
         configFiles,
         models: this.getModels?.(configFiles) as ModelRef[] | undefined,
         user: options?.allUsers ? user : undefined,
-        appBundle: appExists ? APP_BUNDLE_PATH : undefined,
+        appBundle,
+        otherInstalls,
       });
     }
 
@@ -251,13 +274,17 @@ export const chatgptDesktopAdapter: AgentAdapter = {
         '~/Library/Preferences/com.openai.chat.RemoteFeatureFlags.*.plist',
         '~/Library/Application Support/com.openai.chat/app_pairing_extensions/**',
       ],
-      // Conversation stores: CG-001 needs only their permissions — never ship content
-      metadataGlobPatterns: [
-        '~/Library/Application Support/com.openai.chat/conversations-v3-*/**',
-      ],
+      // Workspace data (conversations, drafts, gizmos, …): CG-001 needs only their
+      // permissions — never ship content. Dir modes come from the same entries.
+      metadataGlobPatterns: CHATGPT_WORKSPACE_DIR_PREFIXES.flatMap(p => [
+        `~/Library/Application Support/com.openai.chat/${p}*`,
+        `~/Library/Application Support/com.openai.chat/${p}*/**`,
+      ]),
       commands: [
         { id: 'chatgpt-version', cmd: 'defaults', args: ['read', `${APP_BUNDLE_PATH}/Contents/Info.plist`, 'CFBundleShortVersionString'], timeout: 3000 },
         { id: 'chatgpt-codesign', cmd: 'codesign', args: ['-dv', APP_BUNDLE_PATH], timeout: 5000 },
+        { id: 'chatgpt-classic-version', cmd: 'defaults', args: ['read', `${CLASSIC_APP_BUNDLE_PATH}/Contents/Info.plist`, 'CFBundleShortVersionString'], timeout: 3000 },
+        { id: 'chatgpt-classic-codesign', cmd: 'codesign', args: ['-dv', CLASSIC_APP_BUNDLE_PATH], timeout: 5000 },
         // Per-user plists need `~` expansion done by the probe — see
         // expandArgsPerUser in collector.go. plutil converts binary plists
         // (the macOS default) to XML so the JS plist parser can read them
@@ -275,7 +302,7 @@ export const chatgptDesktopAdapter: AgentAdapter = {
         '~/Library/Preferences',
       ],
       envPrefixes: ['OPENAI_'],
-      systemPaths: [APP_BUNDLE_PATH],
+      systemPaths: [APP_BUNDLE_PATH, CLASSIC_APP_BUNDLE_PATH],
       systemDirListings: [],
     };
   },

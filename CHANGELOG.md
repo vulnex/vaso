@@ -4,6 +4,23 @@ All notable changes to VASO (VULNEX Agent Security Observer) will be documented 
 
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **ChatGPT Desktop: OpenAI's new app layout.** The current `ChatGPT.app` is bundle `com.openai.codex` (Codex-based), and the update moves the original app to `ChatGPT (Classic).app` (`com.openai.chat`). CG-005 raised a critical "bundle swapped" finding on the genuine, OpenAI-signed new app and never verified the Classic one. Both bundles are now recognized: `ChatGPT.app` is the primary copy and the Classic app is reported as another installed copy with its own version; CG-005 checks each against the OpenAI Team ID and its expected identifier.
+- **Group permissions on Linux user-private groups.** On Debian/Ubuntu-style systems (a per-user group of the same name, umask 002), files are 664 and directories 775, but the group reaches nobody except the owner. Permission checks treated those group bits as exposure — several agent checks rated group-readable credential files critical. Group access is now disregarded on Linux when a path's group is its owner's private group (named after a single local account that has it as primary group and no other members), including on parent directories, so a 0750 home now blocks traversal like 0700. The probe reports file/directory owners and the host's private groups (numeric ids only) so remote scans match.
+- **Duplicate permission findings.** CFG-003 and POL-003 both reported every credential config file, often alongside the agent's own permission check (DEV-002, GEM-002, QC-002, CUR-004, …), and each copy cost score. Within an installation, a generic permission finding is now dropped when a more specific check reports that file's mode (agent checks first, then CFG-003 ahead of POL-003); a finding about something else in the same file never hides a permission finding.
+- **Skill CI configuration is not agent code.** Findings in a skill's `.github/`, `.gitlab/`, `.circleci/` or `.buildkite/` are downgraded like test/fixture code ("in CI configuration, not loaded by the agent").
+- **Remote scans match local scans more closely:**
+  - The probe no longer descends into symlinked directories (a local directory walk lists a link without following it), which duplicated every file a skill symlinks in from elsewhere. Symlinks are recorded with their targets, so remote listings show them as links and SKL-013 (workspace symlink escape) now works on remote and snapshot scans.
+  - File content is scanned up to 5 MiB on both sides: the probe's per-file cap was 1 MiB while local skill checks read files of any size.
+  - The probe collects metadata for every ChatGPT workspace store CG-001 checks (drafts, gizmos, system hints, pinned items, orders), not just conversations.
+- **`--format` is validated before any work.** An unknown format used to fail only after a full scan; `scan`, `detect`, `mcp scan`, `mcp list` and `skill audit` now reject it immediately (exit 2), listing the formats available (including user-plugin reporters).
+- **`--save-snapshot` on a local scan is an error.** It only applies to `--host`/`--inventory` scans and was silently ignored; `scan` and `detect` now exit 2 with a message.
+
+Probe changes in this release (symlink handling, 5 MiB content cap, ownership and private groups) require the 1.0.1 probe binaries; older probes keep working with the previous behavior.
+
 ## [1.0.0] - 2026-10-05
 
 **First stable release.** The CLI surface and the programmatic library API (`vaso` package exports) are now covered by semantic versioning: breaking changes to either require a major version bump. Threat feeds are published at least monthly from this release onward (see SECURITY.md "Threat Feed Updates").

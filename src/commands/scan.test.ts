@@ -250,6 +250,12 @@ describe('runScan', () => {
       expect(consoleErrors.some(l => l.includes('mutually exclusive'))).toBe(true);
     });
 
+    it('rejects --save-snapshot on a local scan with exit 2', async () => {
+      await runScan({ format: 'terminal', saveSnapshot: '/tmp/snaps' });
+      expect(process.exitCode).toBe(2);
+      expect(consoleErrors.some(l => l.includes('--save-snapshot applies to remote scans only'))).toBe(true);
+    });
+
     it('rejects --silent without -o or --output-dir for multi-host with exit 2', async () => {
       await runScan({
         format: 'terminal',

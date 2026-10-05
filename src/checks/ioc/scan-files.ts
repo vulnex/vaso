@@ -4,8 +4,8 @@ import { getAllSkillsDirs, isExcludedPath } from '../../core/utils.js';
 
 const SCAN_EXTENSIONS = new Set(['.js', '.ts', '.mjs', '.cjs', '.json', '.yaml', '.yml', '.env', '.sh']);
 
-/** Larger files are bundles or data dumps, not hand-written code or config. */
-export const MAX_SCAN_FILE_BYTES = 5 * 1024 * 1024;
+export { MAX_SCAN_FILE_BYTES } from '../../core/file-limits.js';
+import { MAX_SCAN_FILE_BYTES } from '../../core/file-limits.js';
 
 /** Drop dirs nested inside another listed dir (skills under the install dir) — walk each tree once. */
 function outermost(dirs: string[]): string[] {
@@ -50,7 +50,7 @@ export async function iocScanFiles(ctx: ScanContext): Promise<string[]> {
 export async function readScanFile(ctx: ScanContext, file: string): Promise<string | undefined> {
   try {
     const content = await ctx.fs.readFile(file);
-    return content.length > MAX_SCAN_FILE_BYTES ? undefined : content;
+    return Buffer.byteLength(content, 'utf-8') > MAX_SCAN_FILE_BYTES ? undefined : content;
   } catch {
     return undefined;
   }

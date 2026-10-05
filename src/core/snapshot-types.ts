@@ -35,6 +35,12 @@ export interface ProbeSnapshot {
   directoryModes?: Record<string, number>;
   /** The probe's content budget ran out; later files carry metadata only. */
   truncated?: boolean;
+  /** Symlinks seen in listings and glob matches, path → link target (probe ≥ 1.0.1). */
+  symlinks?: Record<string, string>;
+  /** Owner [uid, gid] of collected files and directories (probe ≥ 1.0.1). */
+  owners?: Record<string, [number, number]>;
+  /** User-private groups on the host, gid → uid (probe ≥ 1.0.1, Linux). */
+  privateGroups?: Record<string, number>;
 }
 
 export interface PrivilegeInfo {

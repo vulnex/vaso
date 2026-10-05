@@ -46,6 +46,15 @@ type ProbeSnapshot struct {
 	// True when the content budget was exhausted and later files were
 	// recorded as metadata only.
 	Truncated bool `json:"truncated,omitempty"`
+	// Symlinks met in directory listings and glob matches (path → link
+	// target), so the CLI lists them as links like a local readdir does, and
+	// symlink checks (SKL-013) can evaluate targets remotely.
+	Symlinks map[string]string `json:"symlinks,omitempty"`
+	// Owner [uid, gid] of collected files and directories, and the host's
+	// user-private groups (gid → uid), so group bits on 664 files in an
+	// owner-only group are not reported as exposure.
+	Owners        map[string][2]int `json:"owners,omitempty"`
+	PrivateGroups map[string]int    `json:"privateGroups,omitempty"`
 }
 
 // PrivilegeInfo describes the privilege level of the probe process.

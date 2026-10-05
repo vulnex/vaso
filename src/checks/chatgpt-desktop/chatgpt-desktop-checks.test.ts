@@ -231,6 +231,29 @@ describe('CG-005: ChatGPT.app Codesign / Team ID', () => {
     expect(result.passed).toBe(false);
   });
 
+  const signed = (id: string, team = '2DC432GLL2') => ({ stdout: '', stderr: `Executable=x\nIdentifier=${id}\nTeamIdentifier=${team}\n`, exitCode: 0 });
+
+  it('accepts the current ChatGPT.app (com.openai.codex) next to ChatGPT (Classic).app (com.openai.chat)', async () => {
+    const exec = vi.fn(async (_cmd: string, args: string[]) =>
+      signed(args[1] === '/Applications/ChatGPT.app' ? 'com.openai.codex' : 'com.openai.chat'));
+    const result = await check.run(makeCtx([], makeFs({ exec }), '/Applications/ChatGPT.app'));
+    expect(result.passed).toBe(true);
+    expect(exec.mock.calls.map(c => c[1][1])).toEqual(['/Applications/ChatGPT.app', '/Applications/ChatGPT (Classic).app']);
+  });
+
+  it('flags a Classic app that is not com.openai.chat, or a bundle with a foreign Team ID', async () => {
+    const swapped = vi.fn(async (_cmd: string, args: string[]) =>
+      signed(args[1] === '/Applications/ChatGPT.app' ? 'com.openai.codex' : 'com.example.fake'));
+    const r1 = await check.run(makeCtx([], makeFs({ exec: swapped }), '/Applications/ChatGPT.app'));
+    expect(r1.passed).toBe(false);
+    expect(r1.evidence?.[0].file).toBe('/Applications/ChatGPT (Classic).app');
+
+    const foreign = vi.fn(async () => signed('com.openai.codex', 'ABCDE12345'));
+    const r2 = await check.run(makeCtx([], makeFs({ exec: foreign }), '/Applications/ChatGPT.app'));
+    expect(r2.passed).toBe(false);
+    expect(r2.severity).toBe('critical');
+  });
+
   it('passes (no-op) when ChatGPT.app is not installed', async () => {
     const result = await check.run(makeCtx([], makeFs(), undefined));
     expect(result.passed).toBe(true);

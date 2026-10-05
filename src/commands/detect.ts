@@ -58,6 +58,12 @@ export async function runDetect(options: DetectCommandOptions): Promise<void> {
     process.exitCode = 2;
     return;
   }
+  // Snapshots are what a remote scan collects; a local scan has none to save
+  if (options.saveSnapshot && !options.host?.length && !options.inventory) {
+    console.error(chalk.red('--save-snapshot applies to remote scans only (use with --host or --inventory)'));
+    process.exitCode = 2;
+    return;
+  }
 
   try {
     // Snapshot-based detection

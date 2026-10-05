@@ -21,7 +21,7 @@ const defaultCommandTimeout = 5000 // ms
 // resolve to executables or large data files — without it, a single ~100 MB
 // CLI binary in ~/.claude/local/claude would balloon the JSON snapshot past
 // V8's ~512 MB max-string limit on the consuming Node side.
-const maxFileContentBytes = 1 << 20 // 1 MiB
+const maxFileContentBytes = 5 << 20 // 5 MiB — matches the CLI's MAX_SCAN_FILE_BYTES (src/core/file-limits.ts)
 
 // Total content budget for one snapshot. Real hosts with many agent plugins
 // matched ~48k files / 700 MB through recursive skill globs, which the Node
@@ -139,6 +139,9 @@ func Collect(manifest ProbeManifest, escalate bool) ProbeSnapshot {
 		CommandOutputs: make(map[string]CommandOutput),
 		Env:            make(map[string]string),
 		DirectoryModes: make(map[string]int),
+		Symlinks:       make(map[string]string),
+		Owners:         make(map[string][2]int),
+		PrivateGroups:  collectPrivateGroups(),
 	}
 	c := &collector{budget: maxTotalContentBytes}
 
@@ -162,7 +165,10 @@ func Collect(manifest ProbeManifest, escalate bool) ProbeSnapshot {
 	// Expand and collect glob patterns
 	expandedGlobs := expandPaths(manifest.GlobPatterns, homes)
 	for _, pattern := range expandedGlobs {
-		matches, err := doublestar.FilepathGlob(pattern)
+		// Never descend into symlinked directories: a local readdir lists the
+		// link without following it, so following here duplicated every file
+		// a skill symlinks in from elsewhere. The link itself still matches.
+		matches, err := doublestar.FilepathGlob(pattern, doublestar.WithNoFollow())
 		if err != nil {
 			continue
 		}
@@ -170,6 +176,7 @@ func Collect(manifest ProbeManifest, escalate bool) ProbeSnapshot {
 			if inExcludedDir(pattern, match) {
 				continue
 			}
+			recordSymlink(snapshot.Symlinks, match)
 			if _, exists := snapshot.Files[match]; !exists {
 				c.collectPath(&snapshot, match, false, false)
 			}
@@ -178,7 +185,7 @@ func Collect(manifest ProbeManifest, escalate bool) ProbeSnapshot {
 
 	// Metadata-only globs: existence + mode, never content
 	for _, pattern := range expandPaths(manifest.MetadataGlobPatterns, homes) {
-		matches, err := doublestar.FilepathGlob(pattern)
+		matches, err := doublestar.FilepathGlob(pattern, doublestar.WithNoFollow())
 		if err != nil {
 			continue
 		}
@@ -186,6 +193,7 @@ func Collect(manifest ProbeManifest, escalate bool) ProbeSnapshot {
 			if inExcludedDir(pattern, match) {
 				continue
 			}
+			recordSymlink(snapshot.Symlinks, match)
 			if _, exists := snapshot.Files[match]; !exists {
 				c.collectPath(&snapshot, match, true, false)
 			}
@@ -198,23 +206,23 @@ func Collect(manifest ProbeManifest, escalate bool) ProbeSnapshot {
 	// report the directory as "present".
 	expandedDirs := expandPaths(manifest.DirectoryListings, homes)
 	for _, dir := range expandedDirs {
-		if listing := collectDirectory(dir); listing != nil {
+		if listing := collectDirectory(dir, snapshot.Symlinks); listing != nil {
 			snapshot.Directories[dir] = listing
-			recordDirMode(snapshot.DirectoryModes, dir)
+			recordDirMode(&snapshot, dir)
 		}
 	}
 
 	// Collect system directory listings (not expanded per-user)
 	for _, dir := range manifest.SystemDirListings {
-		if listing := collectDirectory(dir); listing != nil {
+		if listing := collectDirectory(dir, snapshot.Symlinks); listing != nil {
 			snapshot.Directories[dir] = listing
-			recordDirMode(snapshot.DirectoryModes, dir)
+			recordDirMode(&snapshot, dir)
 		}
 	}
 	// Home dirs gate traversal for everything beneath them (parent-directory
 	// mitigation on the TS side needs their real modes).
 	for _, h := range homes {
-		recordDirMode(snapshot.DirectoryModes, h.Path)
+		recordDirMode(&snapshot, h.Path)
 	}
 
 	// Run allowed commands with PATH extended to include per-user bin dirs.
@@ -343,10 +351,13 @@ func (c *collector) collectFile(path string, metadataOnly bool) FileEntry {
 // fails, Exists+Mode kept), which made them look like files remotely.
 func (c *collector) collectPath(snapshot *ProbeSnapshot, p string, metadataOnly, listDir bool) {
 	info, err := os.Stat(p)
+	if err == nil {
+		recordOwner(snapshot, p, info)
+	}
 	if err == nil && info.IsDir() {
 		snapshot.DirectoryModes[p] = int(info.Mode().Perm())
 		if listDir {
-			if listing := collectDirectory(p); listing != nil {
+			if listing := collectDirectory(p, snapshot.Symlinks); listing != nil {
 				snapshot.Directories[p] = listing
 			}
 		}
@@ -366,7 +377,7 @@ func recordAncestorModes(snapshot *ProbeSnapshot) {
 			}
 			seen[dir] = true
 			if _, ok := snapshot.DirectoryModes[dir]; !ok {
-				recordDirMode(snapshot.DirectoryModes, dir)
+				recordDirMode(snapshot, dir)
 			}
 			if parent := filepath.Dir(dir); parent == dir {
 				return
@@ -384,9 +395,20 @@ func recordAncestorModes(snapshot *ProbeSnapshot) {
 }
 
 // recordDirMode stores a directory's permission bits when it can be stat'd.
-func recordDirMode(modes map[string]int, dir string) {
+func recordDirMode(snapshot *ProbeSnapshot, dir string) {
 	if info, err := os.Stat(dir); err == nil && info.IsDir() {
-		modes[dir] = int(info.Mode().Perm())
+		snapshot.DirectoryModes[dir] = int(info.Mode().Perm())
+		recordOwner(snapshot, dir, info)
+	}
+}
+
+// recordOwner stores a path's [uid, gid] when the platform reports it.
+func recordOwner(snapshot *ProbeSnapshot, p string, info os.FileInfo) {
+	if snapshot.Owners == nil {
+		return
+	}
+	if uid, gid, ok := fileOwner(info); ok {
+		snapshot.Owners[p] = [2]int{uid, gid}
 	}
 }
 
@@ -394,7 +416,7 @@ func recordDirMode(modes map[string]int, dir string) {
 // directory doesn't exist or cannot be read; the caller treats that as a
 // signal to skip storing the entry entirely so that consumers don't mistake
 // "we tried to list this and it wasn't there" for "this directory exists".
-func collectDirectory(dir string) []string {
+func collectDirectory(dir string, symlinks map[string]string) []string {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil
@@ -408,9 +430,23 @@ func collectDirectory(dir string) []string {
 		if entry.IsDir() {
 			name += "/"
 		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			recordSymlink(symlinks, filepath.Join(dir, name))
+		}
 		names = append(names, name)
 	}
 	return names
+}
+
+// recordSymlink stores p's link target when p is a symlink.
+func recordSymlink(symlinks map[string]string, p string) {
+	info, err := os.Lstat(p)
+	if err != nil || info.Mode()&os.ModeSymlink == 0 {
+		return
+	}
+	if target, err := os.Readlink(p); err == nil {
+		symlinks[p] = target
+	}
 }
 
 // resolveBinary searches augmentedPath for a bare command name. Go's

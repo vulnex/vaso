@@ -4,6 +4,7 @@ import { analyzeCode } from '../../analyzers/ast-analyzer.js';
 import { scanWithPatterns, SECURITY_PATTERNS } from '../../analyzers/pattern-engine.js';
 import { getSkillFiles } from '../../core/utils.js';
 import { markTestCode } from '../../analyzers/test-paths.js';
+import { readCappedFile } from '../../core/file-limits.js';
 
 const CRED_HARVEST_RULES = SECURITY_PATTERNS.filter(r => r.category === 'credential-harvest');
 
@@ -23,7 +24,7 @@ export const skl006 = defineCheck({
 
     for (const file of files) {
       try {
-        const code = await ctx.fs.readFile(file);
+        const code = await readCappedFile(ctx.fs, file);
 
         // Pattern-based detection
         const matches = scanWithPatterns(code, CRED_HARVEST_RULES);

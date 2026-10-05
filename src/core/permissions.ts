@@ -46,14 +46,37 @@ export function posixPermissionFacts(mode: number): PermissionFacts {
  * flows are unchanged.
  */
 export async function queryPermissions(fs: FSProvider, path: string): Promise<PermissionQuery> {
+  let facts: PermissionQuery;
   if (fs.permissions) {
-    return fs.permissions(path);
-  }
-  if (fs.platform === 'win32') {
+    facts = await fs.permissions(path);
+  } else if (fs.platform === 'win32') {
     return 'unsupported';
+  } else {
+    facts = posixPermissionFacts((await fs.stat(path)).mode);
   }
-  const st = await fs.stat(path);
-  return posixPermissionFacts(st.mode);
+  return facts === 'unsupported' ? facts : withoutPrivateGroupAccess(fs, path, facts);
+}
+
+/**
+ * On Linux, group bits on a path whose group is its owner's private group
+ * (Debian/Ubuntu umask 002: 664 files, 775 dirs) grant nobody else access —
+ * drop them. Applies to ancestors too, so a 0750 home with a private group
+ * blocks traversal like 0700. Unknown ownership leaves the facts unchanged.
+ */
+async function withoutPrivateGroupAccess(fs: FSProvider, path: string, facts: PermissionFacts): Promise<PermissionFacts> {
+  if (fs.platform !== 'linux' || !fs.ownership || !fs.privateGroups) return facts;
+  if (!facts.groupRead && !facts.groupWrite && !facts.groupExec) return facts;
+  const owner = await fs.ownership(path).catch(() => undefined);
+  if (!owner) return facts;
+  const groups = await fs.privateGroups().catch(() => undefined);
+  if (groups?.get(owner.gid) !== owner.uid) return facts;
+  return {
+    ...facts,
+    groupRead: false,
+    groupWrite: false,
+    groupExec: false,
+    description: `${facts.description} (group is the owner's private group)`,
+  };
 }
 
 /** Group or world can read (POSIX `mode & 0o044`). */

@@ -168,6 +168,20 @@ describe('runDetect', () => {
     }
   });
 
+  it('rejects --save-snapshot without --host/--inventory with exit 2', async () => {
+    const consoleErrors: string[] = [];
+    const origExitCode = process.exitCode;
+    console.error = (...args: unknown[]) => { consoleErrors.push(args.map(String).join(' ')); };
+    process.exitCode = undefined;
+    try {
+      await runDetect({ format: 'terminal', saveSnapshot: '/tmp/snaps' });
+      expect(process.exitCode).toBe(2);
+      expect(consoleErrors.some(l => l.includes('--save-snapshot applies to remote scans only'))).toBe(true);
+    } finally {
+      process.exitCode = origExitCode;
+    }
+  });
+
   it('rejects -o + --output-dir together with exit 2', async () => {
     const consoleErrors: string[] = [];
     const origExitCode = process.exitCode;
