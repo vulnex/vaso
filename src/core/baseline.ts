@@ -1,7 +1,9 @@
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { readFile, mkdir, chmod } from 'node:fs/promises';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import type { ScanResult, CheckResult } from './types.js';
+import { writeFileOwnerOnly } from './utils.js';
+import { toReportJson } from '../reporting/serialize.js';
 
 const BASELINES_DIR = join(homedir(), '.vaso', 'baselines');
 
@@ -12,14 +14,17 @@ export interface DiffResult {
 }
 
 export async function saveBaseline(result: ScanResult): Promise<string> {
-  await mkdir(BASELINES_DIR, { recursive: true });
+  // Scan history is private: owner-only dir and files, config contents stripped
+  await mkdir(BASELINES_DIR, { recursive: true, mode: 0o700 });
+  await chmod(BASELINES_DIR, 0o700);
   const filename = `baseline-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
   const filePath = join(BASELINES_DIR, filename);
-  await writeFile(filePath, JSON.stringify(result, null, 2), 'utf-8');
+  const json = toReportJson(result);
+  await writeFileOwnerOnly(filePath, json);
 
   // Also save as "latest"
   const latestPath = join(BASELINES_DIR, 'latest.json');
-  await writeFile(latestPath, JSON.stringify(result, null, 2), 'utf-8');
+  await writeFileOwnerOnly(latestPath, json);
 
   return filePath;
 }

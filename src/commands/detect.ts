@@ -3,7 +3,8 @@ import { EXIT_INCOMPLETE, EXIT_USAGE } from '../core/exit-criteria.js';
 import { adapterRegistry } from '../adapters/registry.js';
 import type { AgentInstallation, AgentType } from '../core/types.js';
 import { logError } from '../core/debug.js';
-import { writeFileEnsureDir } from '../core/utils.js';
+import { writeFileEnsureDir, writeFileOwnerOnly } from '../core/utils.js';
+import { toReportJson } from '../reporting/serialize.js';
 
 export interface DetectCommandOptions {
   agent?: string;
@@ -220,7 +221,8 @@ async function detectRemoteHosts(options: DetectCommandOptions): Promise<void> {
           const { join: joinPath } = await import('node:path');
           const safeHost = safeHostname(snapshot.hostname ?? target.host);
           const outPath = joinPath(options.saveSnapshot, `${safeHost}.json`);
-          await writeFile(outPath, JSON.stringify(snapshot, null, 2), 'utf-8');
+          // Snapshots hold collected file contents by design — owner-only
+          await writeFileOwnerOnly(outPath, JSON.stringify(snapshot, null, 2));
           log(chalk.dim(`  Saved snapshot for ${target.host} → ${outPath}`));
         } catch (err) {
           log(chalk.yellow(`  Warning: failed to save snapshot for ${target.host}: ${(err as Error).message}`));
@@ -251,7 +253,7 @@ async function detectRemoteHosts(options: DetectCommandOptions): Promise<void> {
         const ext = options.format === 'json' ? 'json' : 'txt';
         const outPath = joinPath(options.outputDir, `${safeHost}.${ext}`);
         const text = options.format === 'json'
-          ? JSON.stringify(outcome.installations, null, 2)
+          ? toReportJson(outcome.installations)
           : renderTerminal(outcome.installations, options.verbose);
         await writeFile(outPath, text, 'utf-8');
       } catch (err) {
@@ -285,7 +287,7 @@ async function detectRemoteHosts(options: DetectCommandOptions): Promise<void> {
 
   // Render multi-host results
   if (options.format === 'json') {
-    await emit(JSON.stringify(results, null, 2), options.output, silent);
+    await emit(toReportJson(results), options.output, silent);
   } else {
     const sections: string[] = [];
     for (const hr of results) {
@@ -327,7 +329,7 @@ async function renderResults(installations: AgentInstallation[], options: Detect
 }
 
 function renderJson(installations: AgentInstallation[]): string {
-  return JSON.stringify(installations, null, 2);
+  return toReportJson(installations);
 }
 
 function renderTerminal(installations: AgentInstallation[], verbose?: boolean): string {

@@ -1,5 +1,5 @@
 import { join, extname, dirname, relative, sep } from 'node:path';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, writeFile } from 'node:fs/promises';
 import type { FSProvider } from './fs-provider.js';
 import type { AgentInstallation } from './types.js';
 import { LocalFSProvider } from './local-fs-provider.js';
@@ -142,6 +142,16 @@ export async function pathExists(path: string, fs?: FSProvider): Promise<boolean
  * Write text to a file path, creating any missing parent directories.
  * Behaves like `mkdir -p $(dirname path) && cat > path`.
  */
+/**
+ * Write a file readable by its owner only — for output that holds collected
+ * file contents (probe snapshots) or scan history (baselines). `mode` alone
+ * only applies when the file is created, so an existing file is chmod-ed too.
+ */
+export async function writeFileOwnerOnly(path: string, content: string): Promise<void> {
+  await writeFile(path, content, { encoding: 'utf-8', mode: 0o600 });
+  await chmod(path, 0o600);
+}
+
 export async function writeFileEnsureDir(path: string, content: string): Promise<void> {
   const parent = dirname(path);
   if (parent && parent !== '.' && parent !== '/') {

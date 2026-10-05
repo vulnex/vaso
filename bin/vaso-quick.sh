@@ -53,7 +53,7 @@ fi
 # Check 3: File permissions
 echo -e "${BOLD}Checking file permissions...${NC}"
 PERM_ISSUES=0
-for f in "$INSTALL_DIR"/*.json "$INSTALL_DIR"/*.yaml "$INSTALL_DIR"/.env 2>/dev/null; do
+for f in "$INSTALL_DIR"/*.json "$INSTALL_DIR"/*.yaml "$INSTALL_DIR"/.env; do
   [ -f "$f" ] || continue
   PERMS=$(stat -f '%Lp' "$f" 2>/dev/null || stat -c '%a' "$f" 2>/dev/null)
   if [ "${PERMS:-644}" != "600" ] && [ "${PERMS:-644}" != "400" ]; then

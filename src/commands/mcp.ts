@@ -8,6 +8,7 @@ import { MCPDiscovery } from '../mcp/discovery.js';
 import { resolveServerSources } from '../mcp/source-resolver.js';
 import type { ScanOptions } from '../core/types.js';
 import { logError } from '../core/debug.js';
+import { toReportJson } from '../reporting/serialize.js';
 
 export interface MCPScanCommandOptions {
   format: string;
@@ -87,7 +88,7 @@ export async function runMCPList(options: { format: string; path?: string[] }): 
       : await discovery.discover(process.platform, process.cwd());
 
     if (options.format === 'json') {
-      console.log(JSON.stringify(result, null, 2));
+      console.log(toReportJson(result));
       return;
     }
 

@@ -96,4 +96,15 @@ describe('JsonReporter', () => {
     expect(parsed.agents).toEqual([]);
     expect(parsed.totalScore).toBe(100);
   });
+
+  it('never serializes config file contents (plaintext secrets stay in memory)', () => {
+    const secret = 'nvapi-FAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE';
+    const result = makeScanResult();
+    result.agents[0].installation.configFiles = [{ filePath: '/home/user/.openclaw/.env', format: 'env', raw: `NVIDIA_API_KEY=${secret}`, data: { NVIDIA_API_KEY: secret } }];
+    const out = new JsonReporter().render(result);
+    expect(out).not.toContain(secret);
+    expect(JSON.parse(out).agents[0].installation.configFiles).toEqual([{ filePath: '/home/user/.openclaw/.env', format: 'env' }]);
+    // The in-memory result is not modified
+    expect(result.agents[0].installation.configFiles[0].raw).toContain(secret);
+  });
 });

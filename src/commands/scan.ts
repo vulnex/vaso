@@ -9,8 +9,9 @@ import type { ProbeSnapshot } from '../core/snapshot-types.js';
 import type { ScanOptions } from '../core/types.js';
 import { shouldFailScan, isValidFailOn, EXIT_FINDINGS, EXIT_INCOMPLETE, EXIT_USAGE, type FailOnLevel } from '../core/exit-criteria.js';
 import { logError } from '../core/debug.js';
-import { writeFileEnsureDir } from '../core/utils.js';
+import { writeFileEnsureDir, writeFileOwnerOnly } from '../core/utils.js';
 import { readFile, writeFile } from 'node:fs/promises';
+import { toReportJson } from '../reporting/serialize.js';
 
 export interface ScanCommandOptions {
   agent?: string;
@@ -235,7 +236,8 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
               const { join: joinPath } = await import('node:path');
               const safeHost = safeHostname(snapshot.hostname ?? target.host);
               const outPath = joinPath(saveSnapshotDir!, `${safeHost}.json`);
-              await writeFile(outPath, JSON.stringify(snapshot, null, 2), 'utf-8');
+              // Snapshots hold collected file contents by design — owner-only
+              await writeFileOwnerOnly(outPath, JSON.stringify(snapshot, null, 2));
               log(chalk.dim(`  Saved snapshot for ${target.host} → ${outPath}`));
             } catch (err) {
               log(chalk.yellow(`  Warning: failed to save snapshot for ${target.host}: ${(err as Error).message}`));
@@ -294,7 +296,7 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
           error: hr.error,
           result: hr.result,
         }));
-        combined = JSON.stringify(aggregate, null, 2);
+        combined = toReportJson(aggregate);
       } else if (single) {
         combined = reporter.render(single);
       } else {
@@ -318,12 +320,12 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
       log(chalk.green(`Report written to ${options.output}`));
     } else if (options.format === 'json') {
       // Same per-host array as --output, so stdout pipes into jq
-      console.log(JSON.stringify(hostResults.map(hr => ({
+      console.log(toReportJson(hostResults.map(hr => ({
         target: { user: hr.target.user, host: hr.target.host, port: hr.target.port, label: hr.target.label },
         durationMs: hr.durationMs,
         error: hr.error,
         result: hr.result,
-      })), null, 2));
+      }))));
       if (failedResults.length > 0) log(chalk.red(`  ${failedResults.length} host(s) failed — see "error" entries`));
     } else {
       for (const hr of successResults) {
