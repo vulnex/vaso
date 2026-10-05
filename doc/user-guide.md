@@ -1,6 +1,6 @@
 # VASO User Guide
 
-VASO (VULNEX Agent Security Observer) is a security scanner for AI agent deployments. It detects misconfigurations, malicious skills, known threats, and runtime vulnerabilities across ten autonomous agent frameworks (OpenClaw, NanoClaw, PicoClaw, IronClaw, Nanobot, ZeroClaw, NemoClaw, Hermes, Lyrie, Atomic Agent), nine interactive coding agents (Claude Code, Codex, OpenCode, Gemini CLI, Qwen Code, GitHub Copilot CLI, Cursor CLI/IDE, Windsurf/Devin Desktop, Devin CLI), four agentic desktop apps (Claude Desktop, ChatGPT Desktop, Meta Muse, Perplexity Comet), and MCP (Model Context Protocol) server configurations.
+VASO (VULNEX Agent Security Observer) is a security scanner for AI agent deployments. It detects misconfigurations, malicious skills, known threats, and runtime vulnerabilities across ten autonomous agent frameworks (OpenClaw, NanoClaw, PicoClaw, IronClaw, Nanobot, ZeroClaw, NemoClaw, Hermes, Lyrie, Atomic Agent), ten interactive coding agents (Claude Code, Codex, OpenCode, Gemini CLI, Qwen Code, GitHub Copilot CLI, Cursor CLI/IDE, Windsurf/Devin Desktop, Devin CLI, Abacus.AI CLI/Desktop), four agentic desktop apps (Claude Desktop, ChatGPT Desktop, Meta Muse, Perplexity Comet), and MCP (Model Context Protocol) server configurations.
 
 ## Installation
 
@@ -40,7 +40,7 @@ vaso scan [options]
 
 | Option | Description |
 |--------|-------------|
-| `-a, --agent <type>` | Scan a specific agent: `openclaw`, `nanoclaw`, `picoclaw`, `ironclaw`, `nanobot`, `zeroclaw`, `nemoclaw`, `hermes`, `lyrie`, `atomic-agent`, `claude-code`, `claude-desktop`, `chatgpt-desktop`, `codex`, `opencode`, `gemini-cli`, `qwen-code`, `copilot-cli`, `cursor-cli`, `windsurf`, `devin`, `meta-muse`, or `comet` |
+| `-a, --agent <type>` | Scan a specific agent: `openclaw`, `nanoclaw`, `picoclaw`, `ironclaw`, `nanobot`, `zeroclaw`, `nemoclaw`, `hermes`, `lyrie`, `atomic-agent`, `claude-code`, `claude-desktop`, `chatgpt-desktop`, `codex`, `opencode`, `gemini-cli`, `qwen-code`, `copilot-cli`, `cursor-cli`, `windsurf`, `devin`, `abacus`, `meta-muse`, or `comet` |
 | `-f, --format <format>` | Output format: `terminal` (default), `json`, `sarif`, `markdown`, `html`, `csv`, `junit` |
 | `-o, --output <file>` | Write report to a single file instead of stdout |
 | `--output-dir <dir>` | Write one file per host as `<dir>/<hostname>.<ext>`; local scans use the local hostname (mutually exclusive with `-o`) |
@@ -109,7 +109,7 @@ vaso detect [options]
 
 | Option | Description |
 |--------|-------------|
-| `-a, --agent <type>` | Detect a specific agent only: `openclaw`, `nanoclaw`, `picoclaw`, `ironclaw`, `nanobot`, `zeroclaw`, `nemoclaw`, `hermes`, `lyrie`, `atomic-agent`, `claude-code`, `claude-desktop`, `chatgpt-desktop`, `codex`, `opencode`, `gemini-cli`, `qwen-code`, `copilot-cli`, `cursor-cli`, `windsurf`, `devin`, `meta-muse`, or `comet` |
+| `-a, --agent <type>` | Detect a specific agent only: `openclaw`, `nanoclaw`, `picoclaw`, `ironclaw`, `nanobot`, `zeroclaw`, `nemoclaw`, `hermes`, `lyrie`, `atomic-agent`, `claude-code`, `claude-desktop`, `chatgpt-desktop`, `codex`, `opencode`, `gemini-cli`, `qwen-code`, `copilot-cli`, `cursor-cli`, `windsurf`, `devin`, `abacus`, `meta-muse`, or `comet` |
 | `-f, --format <format>` | Output format: `terminal` (default) or `json` |
 | `-o, --output <file>` | Write report to a file instead of stdout |
 | `--output-dir <dir>` | Multi-host: write one file per host as `<dir>/<hostname>.<ext>` (mutually exclusive with `-o`) |
@@ -389,7 +389,7 @@ Penalties:
 
 ## Security Checks
 
-VASO runs **318 checks across 18 categories**.
+VASO runs **333 checks across 18 categories**.
 
 | Category | IDs | Count | Scope |
 |----------|-----|-------|-------|
@@ -410,13 +410,13 @@ VASO runs **318 checks across 18 categories**.
 | Lyrie | LY-001–020 | 20 | Checkout `.env` + `~/.lyrie` state: Shield mode/binary, channel DM policy, secrets-file perms, WebChat exposure/origins, pairing and edit ledgers, local-mode leaks, `NODE_ENV=development` SSRF gap, broad `LYRIE_FS_ROOT`, readable memory DB |
 | Hermes | HM-001–010 | 10 | Plaintext API keys, env/credentials perms, API-server bind without auth, permissive CORS, plaintext inference endpoints, approvals-off, Tirith pre-exec scanner state, MCP stdio shell-c / unpinned packages |
 | Atomic Agent | AT-001–011 | 11 | Raised approval ladder (level 4/5), unrestricted read scope, unapproved HTTP egress, plaintext secrets in config.json, `.env`/mail-session perms, `pure_read` MCP trust, MCP stdio/transport hygiene, secretless webhooks, subscription-CLI lockdown overrides, plaintext inference endpoints, world/group-readable memory, sessions and traces |
-| Coding Agent | CC, CD, CG, CDX, OPC, GEM, QC, CUR, GHC, WS, DEV, MM, PC | 117 | Claude Code (12), Claude Desktop (10), ChatGPT Desktop (6), Codex (10), OpenCode (12), Gemini CLI (11), Qwen Code (10), Cursor (14), GitHub Copilot CLI (9), Windsurf/Devin Desktop (8), Devin CLI (10), Meta Muse (3), Perplexity Comet (2): sandbox/approval policy, plaintext credentials, MCP pinning, broad allow rules, memory-file secrets, transport security |
+| Coding Agent | CC, CD, CG, CDX, OPC, GEM, QC, CUR, GHC, WS, DEV, ABA, MM, PC | 132 | Claude Code (12), Claude Desktop (10), ChatGPT Desktop (6), Codex (10), OpenCode (12), Gemini CLI (11), Qwen Code (10), Cursor (14), GitHub Copilot CLI (9), Windsurf/Devin Desktop (8), Devin CLI (10), Abacus.AI CLI/Desktop (15), Meta Muse (3), Perplexity Comet (2): sandbox/approval policy, plaintext credentials, MCP pinning, broad allow rules, memory-file secrets, transport security |
 
 Server-only checks (gateway/network/runtime concepts, mostly in CFG, NET, RUN, and POL) are automatically excluded for coding agents and desktop apps to avoid false positives — interactive coding CLIs have a different threat model than autonomous server agents.
 
 ## Supported Agents
 
-VASO ships twenty-three adapters. Each implements `detect()`, `getConfigPaths()`, `getSkillsDir()`, and `getGatewayInfo()` against its framework's on-disk layout.
+VASO ships twenty-four adapters. Each implements `detect()`, `getConfigPaths()`, `getSkillsDir()`, and `getGatewayInfo()` against its framework's on-disk layout.
 
 ### Autonomous frameworks
 
@@ -446,6 +446,7 @@ VASO ships twenty-three adapters. Each implements `detect()`, `getConfigPaths()`
 | Cursor CLI/IDE | `~/.cursor/` (`cli-config.json`, `mcp.json`, `permissions.json`, `sandbox.json`, `hooks.json`); project `.cursor/`; IDE user-data dir (`~/Library/Application Support/Cursor/`, `~/.config/Cursor/`, `%APPDATA%\Cursor\`: `User/settings.json`, `User/globalStorage/state.vscdb`); IDE-only installs via `/Applications/Cursor.app` | JSON |
 | Windsurf / Devin Desktop | `~/.codeium/windsurf/` (`mcp_config.json`, memories, workflows, `user_settings.pb`), `~/.config/devin/mcp_config.json`; editor user-data `{Windsurf,Devin}` dirs (`~/Library/Application Support/`, `~/.config/`, `%APPDATA%`); version from the app's `product.json` | JSON |
 | Devin CLI | `$XDG_CONFIG_HOME/devin/` (default `~/.config/devin/`: `config.json`, `mcp_config.json`, `AGENTS.md`), `$XDG_DATA_HOME/devin/credentials.toml`; project `.devin/` (found by walking up to the repo root) incl. `hooks.v1.json`; `%APPDATA%\devin\` on Windows | JSONC, TOML |
+| Abacus.AI CLI / AbacusAI Desktop | `~/.abacusai/` (`config.json`, `mcp.json`, `trusted-workspaces.json`, `keystore.enc`, `desktop/mcp-<mode>.json`, `desktop/agent-config-<mode>.json`), project `<workspace>/.abacusai/` (ignored until the workspace is trusted); AbacusAI Desktop user data (`~/.config/AbacusAI Desktop`, `~/Library/Application Support/AbacusAI Desktop`); CLI copies: `~/.abacusai/bin`, npm `@abacus-ai/cli`, `~/.abacusai/versions/`, the desktop app's bundled CLI | JSON |
 
 ### Agentic desktop apps
 

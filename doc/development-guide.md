@@ -50,6 +50,7 @@ src/
     cursor-cli.ts           Cursor CLI/IDE adapter
     windsurf.ts             Windsurf / Devin Desktop adapter
     devin.ts                Devin CLI adapter
+    abacus.ts               Abacus.AI CLI / AbacusAI Desktop adapter
     meta-muse.ts            Meta Muse adapter
     comet.ts                Perplexity Comet adapter
   checks/
@@ -82,6 +83,7 @@ src/
     cursor-cli/             14 Cursor CLI/IDE-specific (CUR-*)
     windsurf-app/           8 Windsurf / Devin Desktop-specific (WS-*)
     devin/                  10 Devin CLI-specific (DEV-*)
+    abacus/                 15 Abacus.AI CLI/Desktop-specific (ABA-*)
     meta-muse/              3 Meta Muse-specific (MM-*)
     comet/                  2 Perplexity Comet-specific (PC-*)
   analyzers/
@@ -357,6 +359,7 @@ Current prefix landscape (one prefix per directory under `src/checks/`):
 | `cursor-cli/` | CUR | Cursor CLI/IDE-specific |
 | `windsurf-app/` | WS | Windsurf / Devin Desktop-specific |
 | `devin/` | DEV | Devin CLI-specific |
+| `abacus/` | ABA | Abacus.AI CLI / AbacusAI Desktop-specific |
 | `meta-muse/` | MM | Meta Muse-specific |
 | `comet/` | PC | Perplexity Comet-specific |
 

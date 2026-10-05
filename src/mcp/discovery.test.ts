@@ -237,3 +237,33 @@ describe('MCPDiscovery — agent frameworks', () => {
     expect((await new MCPDiscovery(fs).discoverFromPaths(['/a.json', '/b.json'])).totalServers).toBe(4);
   });
 });
+
+describe('MCPDiscovery — Abacus.AI', () => {
+  it('reads mcp.json maps, the config.json array, desktop per-mode files and project configs, skipping disabled servers', async () => {
+    const files: Record<string, string> = {
+      '/home/t/.abacusai/mcp.json': JSON.stringify({ mcpServers: {
+        gh: { command: 'npx', args: ['-y', '@x/gh@1.0.0'] },
+        off: { command: 'npx', args: ['evil'], disabled: true },
+      } }),
+      '/home/t/.abacusai/config.json': JSON.stringify({ permissionMode: 'supervise', mcpServers: [{ name: 'db', command: 'uvx', args: ['mcp-server-sqlite'] }] }),
+      '/home/t/.abacusai/desktop/mcp-cowork.json': JSON.stringify({ mcpServers: { remote: { type: 'http', url: 'https://mcp.example.test/mcp' } } }),
+      '/proj/.abacusai/mcp.json': JSON.stringify({ mcpServers: { local: { command: 'node', args: ['srv.js'] } } }),
+    };
+    const fs = {
+      homedir: () => '/home/t',
+      access: async (p: string) => p in files,
+      readFile: async (p: string) => files[p],
+      getEnv: () => undefined,
+    } as unknown as FSProvider;
+
+    const result = await new MCPDiscovery(fs).discover('linux', '/proj');
+    const abacus = result.configs.filter(c => c.source.startsWith('Abacus'));
+    expect(abacus.map(c => [c.source, c.servers.map(s => s.name)])).toEqual([
+      ['Abacus.AI', ['gh']],
+      ['Abacus.AI', ['db']],
+      ['AbacusAI Desktop (cowork)', ['remote']],
+      ['Abacus.AI (project)', ['local']],
+    ]);
+    expect(abacus[2].servers[0].transport).toBe('streamable-http');
+  });
+});

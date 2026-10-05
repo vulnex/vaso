@@ -1,6 +1,9 @@
 package main
 
-import "path/filepath"
+import (
+	"path/filepath"
+	"strings"
+)
 
 var commandAllowlist = map[string]bool{
 	"netstat":      true,
@@ -32,17 +35,20 @@ var commandAllowlist = map[string]bool{
 	"devin-desktop": true,
 	// Atomic Agent — version/which probe
 	"atomic-agent": true,
-	"cat":          true,
-	"uname":        true,
-	"hostname":     true,
-	"ls":           true,
-	"stat":         true,
-	"id":           true,
-	"crontab":      true,
-	"pip":          true,
-	"pip3":         true,
-	"python":       true,
-	"python3":      true,
+	// Abacus.AI CLI (alias abacus) — version/which probe
+	"abacusai": true,
+	"abacus":   true,
+	"cat":      true,
+	"uname":    true,
+	"hostname": true,
+	"ls":       true,
+	"stat":     true,
+	"id":       true,
+	"crontab":  true,
+	"pip":      true,
+	"pip3":     true,
+	"python":   true,
+	"python3":  true,
 	// macOS info-only inspection commands. Used by claude-desktop and
 	// chatgpt-desktop adapters to read app metadata: defaults reads the
 	// CFBundleShortVersionString from app Info.plists and converts user
@@ -58,4 +64,28 @@ var commandAllowlist = map[string]bool{
 // IsAllowed returns true if the command base name is in the allowlist.
 func IsAllowed(cmd string) bool {
 	return commandAllowlist[filepath.Base(cmd)]
+}
+
+// installOnRunTargets maps an allowlisted command to the package directory of
+// a wrapper that installs software when run. The Abacus.AI npm shim
+// (@abacus-ai/cli) downloads a ~130 MB native binary into $HOME whenever its
+// cache is missing — always the case under the isolated HOME used for version
+// queries — so it is never executed; its version comes from package.json.
+var installOnRunTargets = map[string]string{
+	"abacusai": "node_modules/@abacus-ai/cli/",
+	"abacus":   "node_modules/@abacus-ai/cli/",
+}
+
+// InstallsOnRun reports whether running the resolved binary for cmd would
+// install software instead of just answering.
+func InstallsOnRun(cmd, resolved string) bool {
+	marker, ok := installOnRunTargets[filepath.Base(cmd)]
+	if !ok {
+		return false
+	}
+	real, err := filepath.EvalSymlinks(resolved)
+	if err != nil {
+		real = resolved
+	}
+	return strings.Contains(filepath.ToSlash(real), marker)
 }

@@ -126,3 +126,48 @@ func TestRunCommandIsolateHome(t *testing.T) {
 		t.Fatalf("HOME changed without IsolateHome: %q", plain.Stdout)
 	}
 }
+
+func TestInstallOnRunWrapperNotExecuted(t *testing.T) {
+	root := t.TempDir()
+	pkg := filepath.Join(root, "lib", "node_modules", "@abacus-ai", "cli", "scripts", "npm-wrapper")
+	if err := os.MkdirAll(pkg, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(root, "ran")
+	shim := filepath.Join(pkg, "shim.cjs")
+	if err := os.WriteFile(shim, []byte("#!/bin/sh\ntouch "+marker+"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	binDir := filepath.Join(root, "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(shim, filepath.Join(binDir, "abacusai")); err != nil {
+		t.Fatal(err)
+	}
+
+	out := runCommand(CommandRequest{ID: "abacusai-version", Cmd: "abacusai", Args: []string{"--version"}, Timeout: 3000, IsolateHome: true}, binDir)
+	if out.ExitCode != -1 || !strings.Contains(out.Stderr, "install-on-run") {
+		t.Fatalf("expected the shim to be refused, got %+v", out)
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("the npm shim was executed")
+	}
+
+	// A native binary of the same name still runs.
+	native := filepath.Join(root, "native")
+	if err := os.MkdirAll(native, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(native, "abacusai"), []byte("#!/bin/sh\necho 'Abacus.AI CLI version 2.10.2'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	out = runCommand(CommandRequest{ID: "abacusai-version", Cmd: "abacusai", Args: []string{"--version"}, Timeout: 3000, IsolateHome: true}, native)
+	if out.ExitCode != 0 || !strings.Contains(out.Stdout, "2.10.2") {
+		t.Fatalf("expected the native binary to run, got %+v", out)
+	}
+
+	if InstallsOnRun("claude", shim) {
+		t.Fatal("only listed commands are guarded")
+	}
+}
