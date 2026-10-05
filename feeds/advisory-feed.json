@@ -1,8 +1,8 @@
 {
   "meta": {
-    "version": 3,
-    "timestamp": "2026-07-10T16:15:00.000Z",
-    "description": "VASO advisory feed v3 — adds GhostApproval coding-agent advisories (consumed by ADV-001): Cursor CVE-2026-50549 symlink-write bypass and Claude Code pre-2.1.32 symlink-target misrepresentation. v2 seeded MCP package advisories (mcp-remote RCE, MCP Inspector RCE, filesystem-server EscapeRoute pair, postmark-mcp backdoor)."
+    "version": 7,
+    "timestamp": "2026-10-05T00:00:00.000Z",
+    "description": "VASO advisory feed v7 (cumulative over v6) — October 2026 refresh: adds 68 advisories — 17 OpenClaw (2026.4.22–2026.8.1 fixes, incl. the 2026-09-11 owner-authorization batch), 6 NemoClaw (NVIDIA bulletins 5837/5872), 4 Nanobot, 3 Hermes, 4 NanoClaw, 1 ZeroClaw, 3 Codex CLI (incl. GitSpawn), 3 OpenCode, 3 Claude Code, 2 Claude Desktop, 2 Cursor, 1 Gemini CLI, 1 Copilot CLI, and 18 npm MCP packages (10 CVE/GHSA incl. @zereight/mcp-gitlab and @bytebase/dbhub, 8 OSV MAL malicious packages). Retains all v6 advisories."
   },
   "data": {
     "advisories": [
@@ -17,8 +17,15 @@
         "reference": "https://github.com/advisories/GHSA-6xpm-ggf7-wc3p",
         "published": "2025-07-09",
         "exploitAvailable": true,
-        "tags": ["mcp", "cve", "rce"],
-        "affectedDependency": { "name": "mcp-remote", "versionConstraint": ">=0.0.5 <0.1.16" }
+        "tags": [
+          "mcp",
+          "cve",
+          "rce"
+        ],
+        "affectedDependency": {
+          "name": "mcp-remote",
+          "versionConstraint": ">=0.0.5 <0.1.16"
+        }
       },
       {
         "id": "CVE-2025-49596",
@@ -31,8 +38,15 @@
         "reference": "https://nvd.nist.gov/vuln/detail/CVE-2025-49596",
         "published": "2025-06-13",
         "exploitAvailable": true,
-        "tags": ["mcp", "cve", "rce"],
-        "affectedDependency": { "name": "@modelcontextprotocol/inspector", "versionConstraint": "<0.14.1" }
+        "tags": [
+          "mcp",
+          "cve",
+          "rce"
+        ],
+        "affectedDependency": {
+          "name": "@modelcontextprotocol/inspector",
+          "versionConstraint": "<0.14.1"
+        }
       },
       {
         "id": "CVE-2025-53109",
@@ -45,8 +59,15 @@
         "reference": "https://cymulate.com/blog/cve-2025-53109-53110-escaperoute-anthropic/",
         "published": "2025-07-01",
         "exploitAvailable": true,
-        "tags": ["mcp", "cve", "sandbox-escape"],
-        "affectedDependency": { "name": "@modelcontextprotocol/server-filesystem", "versionConstraint": ">=0.2.0 <2025.7.1" }
+        "tags": [
+          "mcp",
+          "cve",
+          "sandbox-escape"
+        ],
+        "affectedDependency": {
+          "name": "@modelcontextprotocol/server-filesystem",
+          "versionConstraint": ">=0.2.0 <2025.7.1"
+        }
       },
       {
         "id": "CVE-2025-53110",
@@ -58,8 +79,15 @@
         "description": "Path validation in @modelcontextprotocol/server-filesystem used a naive string-prefix check, so any path that merely starts with an allowed directory string (e.g. /tmp/allowed_dir-evil next to /tmp/allowed_dir) is treated as in scope, allowing listing, reading, and writing outside the configured sandbox. CVSS 7.3.",
         "reference": "https://cymulate.com/blog/cve-2025-53109-53110-escaperoute-anthropic/",
         "published": "2025-07-01",
-        "tags": ["mcp", "cve", "sandbox-escape"],
-        "affectedDependency": { "name": "@modelcontextprotocol/server-filesystem", "versionConstraint": ">=0.2.0 <2025.7.1" }
+        "tags": [
+          "mcp",
+          "cve",
+          "sandbox-escape"
+        ],
+        "affectedDependency": {
+          "name": "@modelcontextprotocol/server-filesystem",
+          "versionConstraint": ">=0.2.0 <2025.7.1"
+        }
       },
       {
         "id": "VASO-MAL-2025-001",
@@ -70,8 +98,15 @@
         "description": "The postmark-mcp npm package impersonated Postmark Labs' MCP server; version 1.0.16 added a hidden BCC of every email sent through the server to an attacker address at giftshop.club (first confirmed malicious MCP server in the wild, Koi Security). The package was removed from npm; any remaining install at 1.0.16 or later is backdoored and should be removed, and mail credentials rotated. There is no fixed version — use the official Postmark-published server instead.",
         "reference": "https://www.koi.ai/blog/postmark-mcp-npm-malicious-backdoor-email-theft",
         "published": "2025-09-26",
-        "tags": ["mcp", "malicious-package", "supply-chain"],
-        "affectedDependency": { "name": "postmark-mcp", "versionConstraint": ">=1.0.16" }
+        "tags": [
+          "mcp",
+          "malicious-package",
+          "supply-chain"
+        ],
+        "affectedDependency": {
+          "name": "postmark-mcp",
+          "versionConstraint": ">=1.0.16"
+        }
       },
       {
         "id": "CVE-2026-50549",
@@ -84,7 +119,11 @@
         "reference": "https://www.wiz.io/blog/ghostapproval-a-trust-boundary-gap-in-ai-coding-assistants",
         "published": "2026-07-08",
         "exploitAvailable": true,
-        "tags": ["coding-agent", "symlink", "ghostapproval"]
+        "tags": [
+          "coding-agent",
+          "symlink",
+          "ghostapproval"
+        ]
       },
       {
         "id": "VASO-GHOSTAPPROVAL-CC",
@@ -96,7 +135,1924 @@
         "description": "Before v2.1.32, the Edit/Write permission dialog showed the in-workspace filename while the agent resolved a symlink to a sensitive target, so users approved edits whose real destination was hidden (GhostApproval, CWE-451). v2.1.32 added a symlink warning in the permission dialog; later versions resolve symlinks before writing. Upgrade to restore informed consent on symlinked paths.",
         "reference": "https://www.wiz.io/blog/ghostapproval-a-trust-boundary-gap-in-ai-coding-assistants",
         "published": "2026-07-08",
-        "tags": ["coding-agent", "symlink", "ghostapproval"]
+        "tags": [
+          "coding-agent",
+          "symlink",
+          "ghostapproval"
+        ]
+      },
+      {
+        "id": "CVE-2026-35641",
+        "title": "OpenClaw arbitrary malicious code execution",
+        "agent": "openclaw",
+        "affectedVersions": "<2026.3.24",
+        "fixedVersion": "2026.3.24",
+        "severity": "critical",
+        "description": "OpenClaw before 2026.3.24 allows arbitrary malicious code execution. Fixed alongside CVE-2026-35653 (browser.request /reset-profile bypass) and CVE-2026-35668 (sandbox media-root bypass) in the same release.",
+        "reference": "https://nvd.nist.gov/vuln/detail/CVE-2026-35641",
+        "published": "2026-03-30",
+        "tags": [
+          "framework",
+          "cve"
+        ]
+      },
+      {
+        "id": "CVE-2026-35653",
+        "title": "OpenClaw browser.request profile-reset bypass",
+        "agent": "openclaw",
+        "affectedVersions": "<2026.3.24",
+        "fixedVersion": "2026.3.24",
+        "severity": "warning",
+        "description": "browser.request allows a POST to /reset-profile that bypasses intended browser-profile isolation.",
+        "reference": "https://nvd.nist.gov/vuln/detail/CVE-2026-35653",
+        "published": "2026-03-30",
+        "tags": [
+          "framework",
+          "cve"
+        ]
+      },
+      {
+        "id": "CVE-2026-35668",
+        "title": "OpenClaw sandbox media-root bypass",
+        "agent": "openclaw",
+        "affectedVersions": "<2026.3.24",
+        "fixedVersion": "2026.3.24",
+        "severity": "warning",
+        "description": "The sandbox media-root restriction can be bypassed, exposing files outside the intended media directory.",
+        "reference": "https://nvd.nist.gov/vuln/detail/CVE-2026-35668",
+        "published": "2026-03-30",
+        "tags": [
+          "framework",
+          "cve"
+        ]
+      },
+      {
+        "id": "CVE-2026-41363",
+        "title": "OpenClaw Feishu extension filesystem sandbox bypass",
+        "agent": "openclaw",
+        "affectedVersions": ">=2026.2.6 <2026.3.28",
+        "fixedVersion": "2026.3.28",
+        "severity": "warning",
+        "description": "The Feishu extension can access the filesystem outside its sandbox.",
+        "reference": "https://nvd.nist.gov/vuln/detail/CVE-2026-41363",
+        "published": "2026-03-31",
+        "tags": [
+          "framework",
+          "cve"
+        ]
+      },
+      {
+        "id": "CVE-2026-42436",
+        "title": "OpenClaw browser snapshot leaks page content",
+        "agent": "openclaw",
+        "affectedVersions": "<2026.4.14",
+        "fixedVersion": "2026.4.14",
+        "severity": "warning",
+        "description": "Browser snapshots capture and expose page content beyond the intended scope.",
+        "reference": "https://nvd.nist.gov/vuln/detail/CVE-2026-42436",
+        "published": "2026-04-17",
+        "tags": [
+          "framework",
+          "cve"
+        ]
+      },
+      {
+        "id": "CVE-2026-43567",
+        "title": "OpenClaw screen_record outPath guard bypass",
+        "agent": "openclaw",
+        "affectedVersions": "<2026.4.10",
+        "fixedVersion": "2026.4.10",
+        "severity": "warning",
+        "description": "screen_record accepts outPath values that bypass the output-path guard, writing outside the allowed directory.",
+        "reference": "https://nvd.nist.gov/vuln/detail/CVE-2026-43567",
+        "published": "2026-04-17",
+        "tags": [
+          "framework",
+          "cve"
+        ]
+      },
+      {
+        "id": "CVE-2026-44999",
+        "title": "OpenClaw cron events recorded as trusted",
+        "agent": "openclaw",
+        "affectedVersions": "<2026.4.20",
+        "fixedVersion": "2026.4.20",
+        "severity": "info",
+        "description": "Cron-originated events are recorded with trusted provenance, weakening event-source auditing.",
+        "reference": "https://nvd.nist.gov/vuln/detail/CVE-2026-44999",
+        "published": "2026-04-25",
+        "tags": [
+          "framework",
+          "cve"
+        ]
+      },
+      {
+        "id": "CVE-2026-55607",
+        "title": "Claude Code sandbox escape via git worktree path confusion",
+        "agent": "claude-code",
+        "affectedVersions": ">=2.1.38 <2.1.163",
+        "fixedVersion": "2.1.163",
+        "severity": "critical",
+        "description": "Git worktree path confusion lets code run unsandboxed, escaping the Claude Code sandbox.",
+        "reference": "https://github.com/advisories/GHSA-7835-87q9-rgvv",
+        "published": "2026-07-24",
+        "tags": [
+          "coding-agent",
+          "cve",
+          "sandbox-escape"
+        ]
+      },
+      {
+        "id": "CVE-2026-54316",
+        "title": "Claude Code data exfiltration via pre-approved HuggingFace domain",
+        "agent": "claude-code",
+        "affectedVersions": ">=0.2.54 <2.1.163",
+        "fixedVersion": "2.1.163",
+        "severity": "warning",
+        "description": "A pre-approved external domain could be abused to exfiltrate data without a permission prompt.",
+        "reference": "https://github.com/advisories/GHSA-fg94-h982-f3mm",
+        "published": "2026-06-17",
+        "tags": [
+          "coding-agent",
+          "cve"
+        ]
+      },
+      {
+        "id": "CVE-2026-46406",
+        "title": "Claude Code /copy insecure temp file with symlink-write window",
+        "agent": "claude-code",
+        "affectedVersions": ">=2.1.59 <2.1.128",
+        "fixedVersion": "2.1.128",
+        "severity": "warning",
+        "description": "The /copy command wrote a predictable temp file, allowing a local attacker to redirect the write via symlink.",
+        "reference": "https://github.com/advisories/GHSA-4vp2-6q8c-pvq2",
+        "published": "2026-06-25",
+        "tags": [
+          "coding-agent",
+          "cve",
+          "symlink"
+        ]
+      },
+      {
+        "id": "CVE-2026-50548",
+        "title": "Cursor DuneSlide working-directory command execution",
+        "agent": "cursor-cli",
+        "affectedVersions": "<3.0.0",
+        "fixedVersion": "3.0.0",
+        "severity": "critical",
+        "description": "Working-directory manipulation allows command execution outside the approved scope (DuneSlide; CVSS 9.8). Companion to the GhostApproval fix in the same release.",
+        "reference": "https://github.com/advisories/GHSA-3p48-7v9f-v5cw",
+        "published": "2026-06-25",
+        "exploitAvailable": true,
+        "tags": [
+          "coding-agent",
+          "cve"
+        ]
+      },
+      {
+        "id": "CVE-2026-45033",
+        "title": "Copilot CLI arbitrary command execution via nested bare repo (core.fsmonitor)",
+        "agent": "copilot-cli",
+        "affectedVersions": "<1.0.43",
+        "fixedVersion": "1.0.43",
+        "severity": "critical",
+        "description": "A malicious repository containing a nested bare repo with a crafted core.fsmonitor config executes arbitrary commands when Copilot CLI operates in it (CVSS 8.5).",
+        "reference": "https://github.com/advisories/GHSA-9ccr-r5hg-74gf",
+        "published": "2026-05-11",
+        "tags": [
+          "coding-agent",
+          "cve"
+        ]
+      },
+      {
+        "id": "CVE-2026-12537",
+        "title": "Gemini CLI OS command injection via crafted .gemini/.env before sandbox start",
+        "agent": "gemini-cli",
+        "affectedVersions": "<0.39.1",
+        "fixedVersion": "0.39.1",
+        "severity": "critical",
+        "description": "Container-launcher command injection reachable before the sandbox starts; bypasses folder trust and the --yolo allowlist (CVSS 10.0). Publicized at Black Hat 2026.",
+        "reference": "https://github.com/advisories/GHSA-wpqr-6v78-jr5g",
+        "published": "2026-04-24",
+        "exploitAvailable": true,
+        "tags": [
+          "coding-agent",
+          "cve"
+        ]
+      },
+      {
+        "id": "VASO-MAL-2026-GHAPPIER",
+        "title": "GHAPPIER: @dforge-core/dforge-mcp backdoored via npm trusted-publishing abuse",
+        "agent": "mcp",
+        "affectedVersions": ">=0.2.20 <0.2.22",
+        "severity": "critical",
+        "description": "On 2026-09-09 an attacker held the maintainer account ~105 minutes and published backdoored 0.2.20/0.2.21 with verified npm provenance; a 4-stage loader activates when the MCP server launches. npm unpublished both versions — the range fires only on cached/lockfile remnants, which is exactly the rug-pull case. Remove and rotate credentials; 0.2.22+ is a clean restore.",
+        "reference": "https://www.infosecurity-magazine.com/news/attackers-abuse-npm-trusted/",
+        "published": "2026-09-09",
+        "tags": [
+          "mcp",
+          "malicious-package",
+          "supply-chain"
+        ],
+        "affectedDependency": {
+          "name": "@dforge-core/dforge-mcp",
+          "versionConstraint": ">=0.2.20 <0.2.22"
+        }
+      },
+      {
+        "id": "MAL-2026-13399",
+        "title": "agenthub-multiagent-mcp: malicious package remote-controls AI coding agents",
+        "agent": "mcp",
+        "affectedVersions": ">=0.0.0",
+        "severity": "critical",
+        "description": "Attacker-created npm package; opens a relay to agenthub.contetial.com and drives local coding agents with --dangerously-skip-permissions. All versions malicious — remove.",
+        "reference": "https://osv.dev/vulnerability/MAL-2026-13399",
+        "published": "2026-08-06",
+        "tags": [
+          "mcp",
+          "malicious-package"
+        ],
+        "affectedDependency": {
+          "name": "agenthub-multiagent-mcp",
+          "versionConstraint": ">=0.0.0"
+        }
+      },
+      {
+        "id": "MAL-2026-13414",
+        "title": "@atom8n/inspector 0.17.32: malicious MCP Inspector impersonation",
+        "agent": "mcp",
+        "affectedVersions": ">=0.17.32 <0.17.33",
+        "severity": "critical",
+        "description": "Malicious package impersonating the MCP Inspector tooling namespace (OSV MAL record, amazon-inspector source). Remove.",
+        "reference": "https://osv.dev/vulnerability/MAL-2026-13414",
+        "published": "2026-08-06",
+        "tags": [
+          "mcp",
+          "malicious-package"
+        ],
+        "affectedDependency": {
+          "name": "@atom8n/inspector",
+          "versionConstraint": ">=0.17.32 <0.17.33"
+        }
+      },
+      {
+        "id": "CVE-2025-58444",
+        "title": "MCP Inspector RCE via XSS from an untrusted MCP server",
+        "agent": "mcp",
+        "affectedVersions": "<0.16.6",
+        "fixedVersion": "0.16.6",
+        "severity": "critical",
+        "description": "A malicious MCP server can achieve code execution in the Inspector via cross-site scripting (companion to CVE-2025-49596).",
+        "reference": "https://github.com/advisories/GHSA-g9hg-qhmf-q45m",
+        "published": "2025-09-08",
+        "tags": [
+          "mcp",
+          "cve",
+          "rce"
+        ],
+        "affectedDependency": {
+          "name": "@modelcontextprotocol/inspector",
+          "versionConstraint": "<0.16.6"
+        }
+      },
+      {
+        "id": "CVE-2026-54052",
+        "title": "n8n-mcp cross-tenant workflow-backup credential theft (multi-tenant HTTP)",
+        "agent": "mcp",
+        "affectedVersions": "<2.56.1",
+        "fixedVersion": "2.56.1",
+        "severity": "critical",
+        "description": "In multi-tenant HTTP mode any authenticated tenant can read or delete other tenants’ workflow version backups, including embedded API keys and Bearer tokens (CVSS 9.9). stdio single-user deployments unaffected.",
+        "reference": "https://github.com/advisories/GHSA-j6r7-6fhx-77wx",
+        "published": "2026-07-14",
+        "tags": [
+          "mcp",
+          "cve"
+        ],
+        "affectedDependency": {
+          "name": "n8n-mcp",
+          "versionConstraint": "<2.56.1"
+        }
+      },
+      {
+        "id": "CVE-2026-55608",
+        "title": "n8n-mcp default-scope workflow backups exposed to other tenants",
+        "agent": "mcp",
+        "affectedVersions": "<2.57.4",
+        "fixedVersion": "2.57.4",
+        "severity": "warning",
+        "description": "Incorrect authorization can expose default-scope workflow version backups to tenants in multi-tenant HTTP mode.",
+        "reference": "https://github.com/advisories/GHSA-2cf7-hpwf-47h9",
+        "published": "2026-07-14",
+        "tags": [
+          "mcp",
+          "cve"
+        ],
+        "affectedDependency": {
+          "name": "n8n-mcp",
+          "versionConstraint": "<2.57.4"
+        }
+      },
+      {
+        "id": "CVE-2026-61559",
+        "title": "@zereight/mcp-gitlab SSRF",
+        "agent": "mcp",
+        "affectedVersions": ">=0.0.1 <2.1.27",
+        "fixedVersion": "2.1.27",
+        "severity": "critical",
+        "description": "Server-side request forgery in the GitLab MCP server.",
+        "reference": "https://github.com/advisories/GHSA-2h44-8472-frjj",
+        "published": "2026-09-15",
+        "tags": [
+          "mcp",
+          "cve"
+        ],
+        "affectedDependency": {
+          "name": "@zereight/mcp-gitlab",
+          "versionConstraint": ">=0.0.1 <2.1.27"
+        }
+      },
+      {
+        "id": "CVE-2026-61568",
+        "title": "@zereight/mcp-gitlab DNS rebinding against local streamable-HTTP transport",
+        "agent": "mcp",
+        "affectedVersions": "<2.1.30",
+        "fixedVersion": "2.1.30",
+        "severity": "critical",
+        "description": "DNS rebinding lets a malicious website reach the locally-bound streamable-HTTP transport.",
+        "reference": "https://github.com/advisories/GHSA-vmp7-252j-cwp7",
+        "published": "2026-09-15",
+        "tags": [
+          "mcp",
+          "cve"
+        ],
+        "affectedDependency": {
+          "name": "@zereight/mcp-gitlab",
+          "versionConstraint": "<2.1.30"
+        }
+      },
+      {
+        "id": "CVE-2026-46519",
+        "title": "mcp-server-kubernetes tool access-control bypass",
+        "agent": "mcp",
+        "affectedVersions": "<3.6.0",
+        "fixedVersion": "3.6.0",
+        "severity": "critical",
+        "description": "Tool access-control restrictions can be bypassed, exposing cluster operations beyond the configured allowlist.",
+        "reference": "https://github.com/advisories/GHSA-cr22-wjx7-2w6m",
+        "published": "2026-05-21",
+        "tags": [
+          "mcp",
+          "cve"
+        ],
+        "affectedDependency": {
+          "name": "mcp-server-kubernetes",
+          "versionConstraint": "<3.6.0"
+        }
+      },
+      {
+        "id": "CVE-2026-47250",
+        "title": "mcp-server-kubernetes kubectl flag injection leaks service-account tokens",
+        "agent": "mcp",
+        "affectedVersions": "<3.7.0",
+        "fixedVersion": "3.7.0",
+        "severity": "warning",
+        "description": "kubectl argument/flag injection through tool parameters can exfiltrate service-account tokens.",
+        "reference": "https://github.com/advisories/GHSA-6mx4-4h42-r8vh",
+        "published": "2026-06-05",
+        "tags": [
+          "mcp",
+          "cve"
+        ],
+        "affectedDependency": {
+          "name": "mcp-server-kubernetes",
+          "versionConstraint": "<3.7.0"
+        }
+      },
+      {
+        "id": "CVE-2026-45805",
+        "title": "@penpot/mcp unauthenticated /execute REPL bound to 0.0.0.0 (RCE)",
+        "agent": "mcp",
+        "affectedVersions": "<2.15.0",
+        "fixedVersion": "2.15.0",
+        "severity": "critical",
+        "description": "The server exposes an unauthenticated REPL endpoint on all interfaces, allowing remote code execution.",
+        "reference": "https://github.com/advisories/GHSA-22qr-rp27-j9wm",
+        "published": "2026-05-19",
+        "tags": [
+          "mcp",
+          "cve",
+          "rce"
+        ],
+        "affectedDependency": {
+          "name": "@penpot/mcp",
+          "versionConstraint": "<2.15.0"
+        }
+      },
+      {
+        "id": "CVE-2026-50143",
+        "title": "@apify/actors-mcp-server path authority injection leaks Apify token",
+        "agent": "mcp",
+        "affectedVersions": "<0.10.11",
+        "fixedVersion": "0.10.11",
+        "severity": "warning",
+        "description": "Path authority injection can redirect API calls, leaking the configured Apify token (also covers the CVE-2026-46341 domain-allowlist bypass fixed earlier in 0.9.21).",
+        "reference": "https://github.com/advisories/GHSA-6gr2-qh89-hxwm",
+        "published": "2026-07-01",
+        "tags": [
+          "mcp",
+          "cve"
+        ],
+        "affectedDependency": {
+          "name": "@apify/actors-mcp-server",
+          "versionConstraint": "<0.10.11"
+        }
+      },
+      {
+        "id": "CVE-2026-48797",
+        "title": "@mcptoolshop/backpropagate --auth/--share flags not enforced",
+        "agent": "mcp",
+        "affectedVersions": ">=1.1.0 <1.2.0",
+        "fixedVersion": "1.2.0",
+        "severity": "critical",
+        "description": "Authentication and sharing restrictions requested via CLI flags are not enforced, leaving the server open.",
+        "reference": "https://github.com/advisories/GHSA-f65r-h4g3-3h9h",
+        "published": "2026-06-26",
+        "tags": [
+          "mcp",
+          "cve"
+        ],
+        "affectedDependency": {
+          "name": "@mcptoolshop/backpropagate",
+          "versionConstraint": ">=1.1.0 <1.2.0"
+        }
+      },
+      {
+        "id": "CVE-2026-53957",
+        "title": "@contentful/mcp-server LLM-controlled host/proxy exfiltration",
+        "agent": "mcp",
+        "affectedVersions": "<1.7.19",
+        "fixedVersion": "1.7.19",
+        "severity": "warning",
+        "description": "LLM-controlled host/proxy parameters can redirect requests to attacker infrastructure, exfiltrating data (also fixed in @contentful/mcp-tools 0.4.5).",
+        "reference": "https://github.com/advisories/GHSA-2xhg-73j7-rrgx",
+        "published": "2026-08-19",
+        "tags": [
+          "mcp",
+          "cve"
+        ],
+        "affectedDependency": {
+          "name": "@contentful/mcp-server",
+          "versionConstraint": "<1.7.19"
+        }
+      },
+      {
+        "id": "CVE-2026-54504",
+        "title": "@andrea9293/mcp-documentation-server web UI binds all interfaces without auth",
+        "agent": "mcp",
+        "affectedVersions": ">=1.13.0 <1.13.1",
+        "fixedVersion": "1.13.1",
+        "severity": "critical",
+        "description": "The bundled web UI listens on all interfaces with no authentication.",
+        "reference": "https://github.com/advisories/GHSA-6f5r-5672-72j7",
+        "published": "2026-07-15",
+        "tags": [
+          "mcp",
+          "cve"
+        ],
+        "affectedDependency": {
+          "name": "@andrea9293/mcp-documentation-server",
+          "versionConstraint": ">=1.13.0 <1.13.1"
+        }
+      },
+      {
+        "id": "CVE-2026-54561",
+        "title": "mcp-memory-keeper arbitrary file read via context_import",
+        "agent": "mcp",
+        "affectedVersions": "<0.13.0",
+        "fixedVersion": "0.13.0",
+        "severity": "warning",
+        "description": "context_import accepts arbitrary paths, allowing file reads outside the intended store.",
+        "reference": "https://github.com/advisories/GHSA-f7wf-v2vw-mpcx",
+        "published": "2026-07-17",
+        "tags": [
+          "mcp",
+          "cve"
+        ],
+        "affectedDependency": {
+          "name": "mcp-memory-keeper",
+          "versionConstraint": "<0.13.0"
+        }
+      },
+      {
+        "id": "CVE-2026-54688",
+        "title": "mcp-searxng SSRF: web_url_read guard off by default",
+        "agent": "mcp",
+        "affectedVersions": "<1.2.1",
+        "fixedVersion": "1.2.1",
+        "severity": "warning",
+        "description": "web_url_read performs server-side fetches without the SSRF guard enabled by default (CVE-2026-54689 covers hardened-mode bypasses fixed in the same release).",
+        "reference": "https://github.com/advisories/GHSA-q87f-qc2r-2gw4",
+        "published": "2026-08-19",
+        "tags": [
+          "mcp",
+          "cve"
+        ],
+        "affectedDependency": {
+          "name": "mcp-searxng",
+          "versionConstraint": "<1.2.1"
+        }
+      },
+      {
+        "id": "CVE-2026-55557",
+        "title": "browse-mcp arbitrary file write via download/state paths",
+        "agent": "mcp",
+        "affectedVersions": "<0.8.2",
+        "fixedVersion": "0.8.2",
+        "severity": "critical",
+        "description": "Download and state file paths are attacker-influenceable, allowing arbitrary file writes on the host.",
+        "reference": "https://github.com/advisories/GHSA-m9mq-7m7q-xc6p",
+        "published": "2026-08-25",
+        "tags": [
+          "mcp",
+          "cve"
+        ],
+        "affectedDependency": {
+          "name": "browse-mcp",
+          "versionConstraint": "<0.8.2"
+        }
+      },
+      {
+        "id": "CVE-2026-49857",
+        "title": "auth-fetch-mcp SSRF bypass via IPv4-mapped IPv6 loopback",
+        "agent": "mcp",
+        "affectedVersions": "<3.0.2",
+        "fixedVersion": "3.0.2",
+        "severity": "warning",
+        "description": "IPv4-mapped IPv6 loopback addresses bypass the SSRF denylist.",
+        "reference": "https://github.com/advisories/GHSA-pvrj-8cg3-j5f8",
+        "published": "2026-07-01",
+        "tags": [
+          "mcp",
+          "cve"
+        ],
+        "affectedDependency": {
+          "name": "auth-fetch-mcp",
+          "versionConstraint": "<3.0.2"
+        }
+      },
+      {
+        "id": "CVE-2026-59176",
+        "title": "functype-mcp-server RCE via package-alias in unsanitized pnpm install",
+        "agent": "mcp",
+        "affectedVersions": "<1.4.4",
+        "fixedVersion": "1.4.4",
+        "severity": "critical",
+        "description": "Unsanitized package names reach pnpm install, where npm alias syntax achieves remote code execution.",
+        "reference": "https://github.com/advisories/GHSA-wcjj-9m6g-2fr2",
+        "published": "2026-09-09",
+        "tags": [
+          "mcp",
+          "cve",
+          "rce"
+        ],
+        "affectedDependency": {
+          "name": "functype-mcp-server",
+          "versionConstraint": "<1.4.4"
+        }
+      },
+      {
+        "id": "CVE-2026-53765",
+        "title": "chrome-devtools-mcp daemon.pid follows symlinks in /tmp",
+        "agent": "mcp",
+        "affectedVersions": ">=0.20.0 <1.1.0",
+        "fixedVersion": "1.1.0",
+        "severity": "warning",
+        "description": "The daemon PID file in /tmp follows symlinks, allowing a local attacker to redirect the write.",
+        "reference": "https://github.com/advisories/GHSA-3pvj-jv98-qhjq",
+        "published": "2026-06-17",
+        "tags": [
+          "mcp",
+          "cve",
+          "symlink"
+        ],
+        "affectedDependency": {
+          "name": "chrome-devtools-mcp",
+          "versionConstraint": ">=0.20.0 <1.1.0"
+        }
+      },
+      {
+        "id": "GHSA-p7w7-4929-vpj5",
+        "title": "@dynatrace-oss/dynatrace-mcp-server HTTP transport missing authentication",
+        "agent": "mcp",
+        "affectedVersions": "<2.0.0",
+        "fixedVersion": "2.0.0",
+        "severity": "warning",
+        "description": "The HTTP transport accepts requests without authentication (CWE-306, CVSS 7.5). No 1.9.x release exists, so <2.0.0 covers all affected versions.",
+        "reference": "https://github.com/advisories/GHSA-p7w7-4929-vpj5",
+        "published": "2026-06-09",
+        "tags": [
+          "mcp",
+          "cve"
+        ],
+        "affectedDependency": {
+          "name": "@dynatrace-oss/dynatrace-mcp-server",
+          "versionConstraint": "<2.0.0"
+        }
+      },
+      {
+        "id": "CVE-2025-54135",
+        "title": "Cursor CurXecute: prompt injection writes .cursor/mcp.json → RCE",
+        "agent": "cursor-cli",
+        "affectedVersions": "<1.3.0",
+        "fixedVersion": "1.3.0",
+        "severity": "critical",
+        "description": "A prompt-injected agent could write .cursor/mcp.json, auto-registering an attacker MCP server that executes on the host (CVSS 8.6).",
+        "reference": "https://www.tenable.com/blog/faq-cve-2025-54135-cve-2025-54136-vulnerabilities-in-cursor-curxecute-mcpoison",
+        "published": "2025-08-01",
+        "exploitAvailable": true,
+        "tags": [
+          "coding-agent",
+          "cve",
+          "rce"
+        ]
+      },
+      {
+        "id": "CVE-2025-54136",
+        "title": "Cursor MCPoison: MCP config swap after one-time approval",
+        "agent": "cursor-cli",
+        "affectedVersions": "<1.3.9",
+        "fixedVersion": "1.3.9",
+        "severity": "warning",
+        "description": "An approved MCP server entry could be silently swapped for a malicious command without re-approval.",
+        "reference": "https://www.tenable.com/blog/faq-cve-2025-54135-cve-2025-54136-vulnerabilities-in-cursor-curxecute-mcpoison",
+        "published": "2025-08-01",
+        "tags": [
+          "coding-agent",
+          "cve"
+        ]
+      },
+      {
+        "id": "CVE-2025-59944",
+        "title": "Cursor RCE via folder-open task auto-run (workspace trust off by default)",
+        "agent": "cursor-cli",
+        "affectedVersions": "<1.7.0",
+        "fixedVersion": "1.7.0",
+        "severity": "critical",
+        "description": "With workspace trust disabled by default, a malicious repository auto-executes tasks on folder open. Fixed alongside CVE-2025-61590 in 1.7.",
+        "reference": "https://www.geordie.ai/resources/technical-advisory-multiple-vulnerabilities-in-cursor-ai-code-editor/",
+        "published": "2025-10-01",
+        "tags": [
+          "coding-agent",
+          "cve",
+          "rce"
+        ]
+      },
+      {
+        "id": "CVE-2026-26268",
+        "title": "Cursor sandbox escape via Git hooks",
+        "agent": "cursor-cli",
+        "affectedVersions": "<2.5.0",
+        "fixedVersion": "2.5.0",
+        "severity": "critical",
+        "description": "Agent-written Git hooks executed outside the sandbox, escaping the approval model.",
+        "reference": "https://github.com/advisories/GHSA-8pcm-8jpx-hv8r",
+        "published": "2026-02-13",
+        "tags": [
+          "coding-agent",
+          "cve",
+          "sandbox-escape"
+        ]
+      },
+      {
+        "id": "CVE-2025-62353",
+        "title": "Windsurf Cascade path traversal bypasses auto-execution policy (RCE)",
+        "agent": "windsurf",
+        "affectedVersions": "<=1.12.12",
+        "severity": "critical",
+        "description": "Path traversal in the codebase_search/write_to_file tools was reachable via indirect prompt injection and bypassed both auto-execution=off and the command deny-list (CVSS 9.8, HiddenLayer). The vendor did not publish an exact fixed version — update to the current Devin Desktop release.",
+        "reference": "https://nvd.nist.gov/vuln/detail/CVE-2025-62353",
+        "published": "2025-10-17",
+        "exploitAvailable": true,
+        "tags": [
+          "coding-agent",
+          "cve",
+          "rce"
+        ]
+      },
+      {
+        "id": "VASO-DEVIN-2026-001",
+        "title": "Devin CLI edit tools write through symlinks (approved edit redirected)",
+        "agent": "devin",
+        "affectedVersions": "<3000.3.27",
+        "fixedVersion": "3000.3.27",
+        "severity": "critical",
+        "description": "Before v3000.3.27 the edit, write, apply_patch and notebook_edit tools followed symlinks, so an edit the user approved on an in-workspace path could be redirected to an unexpected target such as a shell rc file or credential (GhostApproval class, CWE-61). v3000.3.27 refuses to write through a symlink. Source: Devin CLI stable changelog.",
+        "reference": "https://github.com/CognitionAI/devin-cli/releases",
+        "published": "2026-08-01",
+        "tags": [
+          "coding-agent",
+          "symlink",
+          "ghostapproval"
+        ]
+      },
+      {
+        "id": "VASO-DEVIN-2026-002",
+        "title": "Devin CLI deny rules bypassable (base directory, Windows command chains)",
+        "agent": "devin",
+        "affectedVersions": "<3000.3.22",
+        "fixedVersion": "3000.3.22",
+        "severity": "critical",
+        "description": "Before v3000.3.22 a recursive deny rule such as Read(/etc/**) did not cover the base directory itself, and on Windows a denied command hidden behind a safe leading command in a &&, || or & chain (e.g. Get-ChildItem && git push) was not blocked because the PowerShell parser collapsed the chain into one scope. Source: Devin CLI stable changelog.",
+        "reference": "https://github.com/CognitionAI/devin-cli/releases",
+        "published": "2026-07-29",
+        "tags": [
+          "coding-agent",
+          "permissions",
+          "bypass"
+        ]
+      },
+      {
+        "id": "VASO-DEVIN-2026-003",
+        "title": "Devin CLI permission rules mismatch on paths containing glob metacharacters",
+        "agent": "devin",
+        "affectedVersions": "<3000.5.20",
+        "fixedVersion": "3000.5.20",
+        "severity": "warning",
+        "description": "Before v3000.5.20 permission rules did not match correctly when a workspace, config or granted directory name contained glob metacharacters ([, ], {, }, *, ?), so allow/deny rules could apply to the wrong paths. Source: Devin CLI stable changelog.",
+        "reference": "https://github.com/CognitionAI/devin-cli/releases",
+        "published": "2026-08-21",
+        "tags": [
+          "coding-agent",
+          "permissions"
+        ]
+      },
+      {
+        "id": "VASO-DEVIN-2026-004",
+        "title": "Devin CLI discards all user settings on a single invalid config value",
+        "agent": "devin",
+        "affectedVersions": "<3000.5.20",
+        "fixedVersion": "3000.5.20",
+        "severity": "warning",
+        "description": "Before v3000.5.20 a single invalid value in config.json caused all user settings to be discarded — including permission deny/ask rules — so one typo silently removed configured guardrails. Source: Devin CLI stable changelog.",
+        "reference": "https://github.com/CognitionAI/devin-cli/releases",
+        "published": "2026-08-21",
+        "tags": [
+          "coding-agent",
+          "permissions",
+          "config"
+        ]
+      },
+      {
+        "id": "VASO-DEVIN-2026-005",
+        "title": "Devin CLI /add-dir attaches untrusted directories without a workspace-trust check",
+        "agent": "devin",
+        "affectedVersions": "<3000.4.16",
+        "fixedVersion": "3000.4.16",
+        "severity": "warning",
+        "description": "Before v3000.4.16 /add-dir attached a directory without checking workspace trust, so an untrusted directory's rules, skills and config could be loaded into the session. v3000.4.16 checks trust and revokes sandbox write access when the directory is removed. Source: Devin CLI stable changelog.",
+        "reference": "https://github.com/CognitionAI/devin-cli/releases",
+        "published": "2026-08-10",
+        "tags": [
+          "coding-agent",
+          "workspace-trust"
+        ]
+      },
+      {
+        "id": "VASO-DEVIN-2026-006",
+        "title": "Devin CLI autonomous mode auto-approved tools that run outside the sandbox",
+        "agent": "devin",
+        "affectedVersions": "<2026.4.9-0",
+        "fixedVersion": "2026.4.9-0",
+        "severity": "warning",
+        "description": "Before v2026.4.9-0 autonomous mode silently auto-approved privacy-sensitive tools (computer use, screen recording, browser) that operate outside the OS sandbox, and ACP sessions silently fell back to local CLI credentials instead of requiring host-provided ones. Source: Devin CLI stable changelog.",
+        "reference": "https://github.com/CognitionAI/devin-cli/releases",
+        "published": "2026-04-09",
+        "tags": [
+          "coding-agent",
+          "auto-approve",
+          "sandbox"
+        ]
+      },
+      {
+        "id": "VASO-DEVIN-2026-007",
+        "title": "Devin CLI ignored blocking pre-user-prompt hooks",
+        "agent": "devin",
+        "affectedVersions": "<2026.5.26-0",
+        "fixedVersion": "2026.5.26-0",
+        "severity": "warning",
+        "description": "Before v2026.5.26-0 a pre-user-prompt hook that exited with code 2 (block) was silently ignored, so policy hooks meant to stop a prompt did not take effect. Source: Devin CLI stable changelog.",
+        "reference": "https://github.com/CognitionAI/devin-cli/releases",
+        "published": "2026-05-26",
+        "tags": [
+          "coding-agent",
+          "hooks"
+        ]
+      },
+      {
+        "id": "VASO-LYRIE-2026-001",
+        "title": "Lyrie grants home-directory access by hardcoded chat ID",
+        "agent": "lyrie",
+        "affectedVersions": "<=3.4.0",
+        "severity": "warning",
+        "description": "LyrieEngine.buildConversation() compares the message chat ID (router source \"<channel>:<chatId>\") with two hardcoded IDs and, on a match, tells the model it has full system access with the working directory set to $HOME and resets Shield paths to the defaults (home, cwd, /tmp). Every other sender is told it is sandboxed, but only two further hardcoded IDs get Shield-scoped paths — all others keep the full default paths, so the sandbox is prompt-only. Present in every release through v3.4.0; no fixed release. Mitigate with a DM policy of pairing or closed (LYRIE_<CH>_DM_POLICY) and channel allowlists.",
+        "reference": "https://github.com/OTT-Cybersecurity-LLC/lyrie-ai/blob/v3.4.0/packages/core/src/engine/lyrie-engine.ts#L358-L375",
+        "published": "2026-09-29",
+        "tags": [
+          "framework"
+        ]
+      },
+      {
+        "id": "CVE-2026-45004",
+        "title": "OpenClaw: code execution via attacker-controlled setup-api.js loaded from cwd",
+        "agent": "openclaw",
+        "affectedVersions": "<2026.4.23",
+        "fixedVersion": "2026.4.23",
+        "severity": "warning",
+        "description": "The bundled plugin setup resolver could fall back to process.cwd(), so running OpenClaw from a malicious repo containing extensions/<plugin>/setup-api.js executed that JavaScript as the user. Upgrade to 2026.4.23+.",
+        "reference": "https://github.com/openclaw/openclaw/security/advisories/GHSA-r39h-4c2p-3jxp",
+        "published": "2026-04-24",
+        "tags": [
+          "framework",
+          "cve"
+        ]
+      },
+      {
+        "id": "GHSA-cwj3-vqpp-pmxr",
+        "title": "OpenClaw: gateway config mutation guard allowed unsafe model-driven config writes",
+        "agent": "openclaw",
+        "affectedVersions": "<2026.4.23",
+        "fixedVersion": "2026.4.23",
+        "severity": "warning",
+        "description": "The denylist guarding agent-driven gateway config.apply/config.patch was incomplete, so a prompt-injected model could persist changes to exec, network/TLS, credential-forwarding, hook and policy settings that survive restart. Upgrade to 2026.4.23+ (fail-closed allowlist).",
+        "reference": "https://github.com/openclaw/openclaw/security/advisories/GHSA-cwj3-vqpp-pmxr",
+        "published": "2026-04-24",
+        "tags": [
+          "framework"
+        ]
+      },
+      {
+        "id": "CVE-2026-44118",
+        "title": "OpenClaw: MCP loopback accepted spoofable owner-context headers",
+        "agent": "openclaw",
+        "affectedVersions": "<2026.4.22",
+        "fixedVersion": "2026.4.22",
+        "severity": "warning",
+        "description": "The loopback MCP path trusted a sender-owner request header, so a non-owner loopback client could pose as the owner for owner-gated operations. Fixed in 2026.4.22 with separate owner and non-owner bearer tokens.",
+        "reference": "https://github.com/openclaw/openclaw/security/advisories/GHSA-r6xh-pqhr-v4xh",
+        "published": "2026-04-23",
+        "tags": [
+          "framework",
+          "cve"
+        ]
+      },
+      {
+        "id": "CVE-2026-53810",
+        "title": "OpenClaw: marketplace extension metadata could point at unscanned payloads",
+        "agent": "openclaw",
+        "affectedVersions": "<2026.5.18",
+        "fixedVersion": "2026.5.18",
+        "severity": "warning",
+        "description": "Runtime extension metadata in a marketplace package could redirect loading to hidden package content outside the scanned entry points, loading unreviewed plugin code. Upgrade to 2026.5.18+ and keep plugin allowlists explicit.",
+        "reference": "https://github.com/openclaw/openclaw/security/advisories/GHSA-v6r2-jh58-xx6w",
+        "published": "2026-05-28",
+        "tags": [
+          "framework",
+          "cve"
+        ]
+      },
+      {
+        "id": "CVE-2026-53817",
+        "title": "OpenClaw: Control UI locality spoofing could mint a durable admin device token",
+        "agent": "openclaw",
+        "affectedVersions": "<2026.5.22",
+        "fixedVersion": "2026.5.22",
+        "severity": "warning",
+        "description": "In LAN or shared-token Control UI deployments, a caller could spoof locality during pairing and get a persistent admin device token that survives gateway-token rotation. Upgrade to 2026.5.22+ and remove unexpected paired devices.",
+        "reference": "https://github.com/openclaw/openclaw/security/advisories/GHSA-chr9-m4q2-76hw",
+        "published": "2026-05-28",
+        "tags": [
+          "framework",
+          "cve"
+        ]
+      },
+      {
+        "id": "CVE-2026-53843",
+        "title": "OpenClaw: pairing-scoped session could restore revoked node token authority",
+        "agent": "openclaw",
+        "affectedVersions": "<2026.5.26",
+        "fixedVersion": "2026.5.26",
+        "severity": "warning",
+        "description": "A surviving pairing-scoped device session could regain node WebSocket authority after its node token was revoked, weakening revocation. Upgrade to 2026.5.26+, restart the gateway and re-pair affected devices.",
+        "reference": "https://github.com/openclaw/openclaw/security/advisories/GHSA-q99w-vh6v-q3v7",
+        "published": "2026-05-28",
+        "tags": [
+          "framework",
+          "cve"
+        ]
+      },
+      {
+        "id": "GHSA-8v95-qqcm-qp9h",
+        "title": "OpenClaw: device.pair.approve could bypass role-management checks",
+        "agent": "openclaw",
+        "affectedVersions": ">=2026.1.20 <2026.5.27",
+        "fixedVersion": "2026.5.27",
+        "severity": "warning",
+        "description": "A lower-trust caller could approve device pairings without the required role-management authorization (CVSS 8.8). Upgrade to 2026.5.27+.",
+        "reference": "https://github.com/openclaw/openclaw/security/advisories/GHSA-8v95-qqcm-qp9h",
+        "published": "2026-06-30",
+        "tags": [
+          "framework"
+        ]
+      },
+      {
+        "id": "GHSA-575v-8hfq-m3mc",
+        "title": "OpenClaw: sandbox bind mounts could bypass parent-directory denylist checks",
+        "agent": "openclaw",
+        "affectedVersions": "<2026.6.6",
+        "fixedVersion": "2026.6.6",
+        "severity": "warning",
+        "description": "Sandbox bind-mount validation could be bypassed through parent-directory/symlink paths (CWE-22/59), exposing denylisted host paths to the sandbox. Upgrade to 2026.6.6+.",
+        "reference": "https://github.com/openclaw/openclaw/security/advisories/GHSA-575v-8hfq-m3mc",
+        "published": "2026-06-30",
+        "tags": [
+          "framework"
+        ]
+      },
+      {
+        "id": "GHSA-9969-8g9h-rxwm",
+        "title": "OpenClaw: host exec environment filtering could allow Git ext transport",
+        "agent": "openclaw",
+        "affectedVersions": "<=2026.6.1",
+        "fixedVersion": "2026.6.6",
+        "severity": "warning",
+        "description": "Host exec environment filtering did not block Git ext:: transport configuration, letting a lower-trust input run commands beyond its authorization (CWE-78). Upgrade to 2026.6.6+.",
+        "reference": "https://github.com/openclaw/openclaw/security/advisories/GHSA-9969-8g9h-rxwm",
+        "published": "2026-06-30",
+        "tags": [
+          "framework"
+        ]
+      },
+      {
+        "id": "GHSA-wwx7-573h-pqwc",
+        "title": "OpenClaw: /mcp set could let non-owner senders persist stdio MCP commands",
+        "agent": "openclaw",
+        "affectedVersions": "<2026.7.1",
+        "fixedVersion": "2026.7.1",
+        "severity": "warning",
+        "description": "An authorized non-owner channel sender could use /mcp set or /mcp unset to persist an attacker-chosen stdio MCP command that runs as the OpenClaw user. Upgrade to 2026.7.1+, disable MCP chat commands in external channels and audit configured MCP servers.",
+        "reference": "https://github.com/openclaw/openclaw/security/advisories/GHSA-wwx7-573h-pqwc",
+        "published": "2026-09-11",
+        "tags": [
+          "framework"
+        ]
+      },
+      {
+        "id": "CVE-2026-100587",
+        "title": "OpenClaw: Codex computer-use install could omit owner authorization",
+        "agent": "openclaw",
+        "affectedVersions": "<2026.7.1",
+        "fixedVersion": "2026.7.1",
+        "severity": "warning",
+        "description": "A non-owner channel sender could install a Codex plugin whose MCP process then starts on the host with OpenClaw's privileges. Upgrade to 2026.7.1+ and review installed Codex plugins.",
+        "reference": "https://github.com/openclaw/openclaw/security/advisories/GHSA-pjjr-5qhr-5w6r",
+        "published": "2026-09-11",
+        "tags": [
+          "framework",
+          "cve"
+        ]
+      },
+      {
+        "id": "CVE-2026-100585",
+        "title": "OpenClaw: Claude permission replies via MCP channel could omit owner authorization",
+        "agent": "openclaw",
+        "affectedVersions": "<2026.7.1",
+        "fixedVersion": "2026.7.1",
+        "severity": "warning",
+        "description": "An authorized non-owner channel sender could approve or deny a pending Claude Code permission request through the MCP channel bridge, approving actions meant for the owner. Upgrade to 2026.7.1+.",
+        "reference": "https://github.com/openclaw/openclaw/security/advisories/GHSA-p5g8-m35v-7m82",
+        "published": "2026-09-11",
+        "tags": [
+          "framework",
+          "cve"
+        ]
+      },
+      {
+        "id": "CVE-2026-100586",
+        "title": "OpenClaw: Codex bind could omit owner authorization",
+        "agent": "openclaw",
+        "affectedVersions": "<2026.7.1",
+        "fixedVersion": "2026.7.1",
+        "severity": "warning",
+        "description": "An authorized non-owner channel sender could bind a conversation to the native Codex runtime and start host-capable Codex turns, reaching the files, tools and processes available to it. Upgrade to 2026.7.1+.",
+        "reference": "https://github.com/openclaw/openclaw/security/advisories/GHSA-9p6m-2872-xm7x",
+        "published": "2026-09-11",
+        "tags": [
+          "framework",
+          "cve"
+        ]
+      },
+      {
+        "id": "CVE-2026-100552",
+        "title": "OpenClaw: Codex native tools could ignore per-chat tool policy",
+        "agent": "openclaw",
+        "affectedVersions": "<2026.8.1",
+        "fixedVersion": "2026.8.1",
+        "severity": "warning",
+        "description": "A conversation-level tools.allow rule filtered OpenClaw tools but not the shell, process, file and patch tools owned by the Codex app-server runtime, so participants in a restricted chat could still reach them. Upgrade to 2026.8.1+.",
+        "reference": "https://github.com/openclaw/openclaw/security/advisories/GHSA-wwcw-jfpp-gpxw",
+        "published": "2026-09-11",
+        "tags": [
+          "framework",
+          "cve"
+        ]
+      },
+      {
+        "id": "GHSA-224w-vfr9-h35c",
+        "title": "OpenClaw: Google Meet node commands could skip exec approvals",
+        "agent": "openclaw",
+        "affectedVersions": ">=2026.5.1 <2026.7.1",
+        "fixedVersion": "2026.7.1",
+        "severity": "warning",
+        "description": "googlemeet.chrome accepted caller-supplied audio command arrays and ran them on a paired node outside the system.run approval path. Upgrade to 2026.7.1+, or remove googlemeet.chrome from allowed node commands.",
+        "reference": "https://github.com/openclaw/openclaw/security/advisories/GHSA-224w-vfr9-h35c",
+        "published": "2026-09-11",
+        "tags": [
+          "framework"
+        ]
+      },
+      {
+        "id": "GHSA-ghpx-6xwq-2w4w",
+        "title": "OpenClaw: exec wrapper allowlists could trust arbitrary inner commands",
+        "agent": "openclaw",
+        "affectedVersions": ">=2026.3.22 <2026.8.1",
+        "fixedVersion": "2026.8.1",
+        "severity": "warning",
+        "description": "Once a command-running wrapper was allowlisted or permanently approved, later agent turns could swap in any inner command without a new prompt. Upgrade to 2026.8.1+ and remove standing approvals for wrapper executables.",
+        "reference": "https://github.com/openclaw/openclaw/security/advisories/GHSA-ghpx-6xwq-2w4w",
+        "published": "2026-09-11",
+        "tags": [
+          "framework"
+        ]
+      },
+      {
+        "id": "GHSA-5mrc-77hj-xjxv",
+        "title": "OpenClaw: workspace CLOUDSDK_PYTHON_ARGS could execute code during Gmail setup",
+        "agent": "openclaw",
+        "affectedVersions": ">=2026.3.28 <2026.8.1",
+        "fixedVersion": "2026.8.1",
+        "severity": "warning",
+        "description": "An untrusted workspace .env could set CLOUDSDK_PYTHON_ARGS, which gcloud passed to Python during Gmail setup, running attacker code as the host user. Upgrade to 2026.8.1+ and only run Gmail setup from trusted workspaces.",
+        "reference": "https://github.com/openclaw/openclaw/security/advisories/GHSA-5mrc-77hj-xjxv",
+        "published": "2026-09-11",
+        "tags": [
+          "framework"
+        ]
+      },
+      {
+        "id": "CVE-2026-65105",
+        "title": "NemoClaw: inference service reachable without authentication",
+        "agent": "nemoclaw",
+        "affectedVersions": "<0.0.25",
+        "fixedVersion": "0.0.25",
+        "severity": "warning",
+        "description": "NemoClaw for Linux's inference server setup exposed the inference service to adjacent-network attackers without authentication (CWE-306, CVSS 8.1). Update to 0.0.25+.",
+        "reference": "https://github.com/NVIDIA/product-security/tree/main/2026/5872",
+        "published": "2026-08-25",
+        "tags": [
+          "framework",
+          "cve"
+        ]
+      },
+      {
+        "id": "CVE-2026-65098",
+        "title": "NemoClaw: weak authentication in remote-access helper workflow",
+        "agent": "nemoclaw",
+        "affectedVersions": "<0.0.4",
+        "fixedVersion": "0.0.4",
+        "severity": "warning",
+        "description": "The remote-access helper workflow used weak authentication (CWE-1390), which could lead to code execution. Update to 0.0.4+.",
+        "reference": "https://github.com/NVIDIA/product-security/tree/main/2026/5872",
+        "published": "2026-08-25",
+        "tags": [
+          "framework",
+          "cve"
+        ]
+      },
+      {
+        "id": "CVE-2026-65081",
+        "title": "NemoClaw: installation process could execute untrusted code",
+        "agent": "nemoclaw",
+        "affectedVersions": "<0.0.21",
+        "fixedVersion": "0.0.21",
+        "severity": "warning",
+        "description": "The NemoClaw for Linux installation process could execute untrusted code (CWE-494). Update to 0.0.21+ and reinstall from the official repo.",
+        "reference": "https://github.com/NVIDIA/product-security/tree/main/2026/5872",
+        "published": "2026-08-25",
+        "tags": [
+          "framework",
+          "cve"
+        ]
+      },
+      {
+        "id": "CVE-2026-65097",
+        "title": "NemoClaw: installation scripts download code without integrity check",
+        "agent": "nemoclaw",
+        "affectedVersions": "<0.0.21",
+        "fixedVersion": "0.0.21",
+        "severity": "warning",
+        "description": "The installation scripts downloaded code without an integrity check (CWE-494), allowing code execution through tampered downloads. Update to 0.0.21+.",
+        "reference": "https://github.com/NVIDIA/product-security/tree/main/2026/5872",
+        "published": "2026-08-25",
+        "tags": [
+          "framework",
+          "cve"
+        ]
+      },
+      {
+        "id": "CVE-2026-65090",
+        "title": "NemoClaw: OS command injection in NIM management component",
+        "agent": "nemoclaw",
+        "affectedVersions": "<0.0.17",
+        "fixedVersion": "0.0.17",
+        "severity": "warning",
+        "description": "A local attacker could inject OS commands through the NIM management component (CWE-78, CVSS 7.8). Update to 0.0.17+.",
+        "reference": "https://github.com/NVIDIA/product-security/tree/main/2026/5872",
+        "published": "2026-08-25",
+        "tags": [
+          "framework",
+          "cve"
+        ]
+      },
+      {
+        "id": "CVE-2026-24222",
+        "title": "NemoClaw: prompt injection could exfiltrate unrestricted host env vars from sandbox",
+        "agent": "nemoclaw",
+        "affectedVersions": "<0.0.18",
+        "fixedVersion": "0.0.18",
+        "severity": "warning",
+        "description": "Sandbox initialization did not restrict host environment variables, so prompt-injected content could make the agent read and exfiltrate them (CVSS 8.6). Update to 0.0.18+.",
+        "reference": "https://github.com/NVIDIA/product-security/tree/main/2026/5837",
+        "published": "2026-04-28",
+        "tags": [
+          "framework",
+          "cve"
+        ]
+      },
+      {
+        "id": "CVE-2026-101885",
+        "title": "ZeroClaw: plugin install wasm_path traversal writes files outside plugins dir",
+        "agent": "zeroclaw",
+        "affectedVersions": "<0.8.5",
+        "fixedVersion": "0.8.5",
+        "severity": "warning",
+        "description": "In builds with the plugins-wasm feature, a malicious plugin manifest's wasm_path (../ or absolute) wrote attacker bytes to any path such as shell startup files, giving code execution; the lean official binaries are not affected. Upgrade to 0.8.5+.",
+        "reference": "https://github.com/zeroclaw-labs/zeroclaw/security/advisories/GHSA-93f6-34w8-5g98",
+        "published": "2026-09-05",
+        "tags": [
+          "framework",
+          "cve"
+        ]
+      },
+      {
+        "id": "CVE-2026-92576",
+        "title": "Nanobot: WebFetch SSRF to cloud metadata/internal hosts",
+        "agent": "nanobot",
+        "affectedVersions": "<0.3.0",
+        "fixedVersion": "0.3.0",
+        "severity": "critical",
+        "description": "WebFetchTool._validate_url() did not block private, loopback or metadata addresses, so chat messages could make the bot fetch cloud IAM credentials and internal services (CVSS 9.3). Upgrade nanobot-ai to 0.3.0+.",
+        "reference": "https://github.com/HKUDS/nanobot/security/advisories/GHSA-vc5v-6vwm-wf9m",
+        "published": "2026-09-02",
+        "tags": [
+          "framework",
+          "cve"
+        ]
+      },
+      {
+        "id": "CVE-2026-49139",
+        "title": "Nanobot: Teams serviceUrl poisoning leaks Bot Framework bearer tokens",
+        "agent": "nanobot",
+        "affectedVersions": "<0.2.1",
+        "fixedVersion": "0.2.1",
+        "severity": "warning",
+        "description": "A forged inbound Teams activity with an attacker serviceUrl poisoned the stored conversation reference, so later replies sent token-bearing requests to the attacker. Upgrade to 0.2.1+.",
+        "reference": "https://nvd.nist.gov/vuln/detail/CVE-2026-49139",
+        "published": "2026-06-01",
+        "tags": [
+          "framework",
+          "cve"
+        ]
+      },
+      {
+        "id": "CVE-2026-49138",
+        "title": "Nanobot: web_fetch SSRF via 3xx redirect to private addresses",
+        "agent": "nanobot",
+        "affectedVersions": "<0.2.1",
+        "fixedVersion": "0.2.1",
+        "severity": "warning",
+        "description": "web_fetch followed redirects before validating the final URL, so it could reach loopback or private hosts. Upgrade nanobot-ai to 0.2.1+.",
+        "reference": "https://github.com/advisories/GHSA-434r-7c99-hwf3",
+        "published": "2026-06-01",
+        "tags": [
+          "framework",
+          "cve"
+        ]
+      },
+      {
+        "id": "CVE-2026-19243",
+        "title": "Nanobot: ExecTool shell allowlist bypass enables OS command injection",
+        "agent": "nanobot",
+        "affectedVersions": "<=0.2.1",
+        "fixedVersion": "0.3.0",
+        "severity": "warning",
+        "description": "ExecTool._guard_command/_spawn validation could be bypassed to run commands outside the shell allowlist; a public PoC exists. Upgrade to 0.3.0.",
+        "reference": "https://nvd.nist.gov/vuln/detail/CVE-2026-19243",
+        "published": "2026-08-07",
+        "exploitAvailable": true,
+        "tags": [
+          "framework",
+          "cve"
+        ]
+      },
+      {
+        "id": "CVE-2026-53869",
+        "title": "Hermes Agent: DNS rebinding on WebSocket endpoints (/api/pty, /api/ws)",
+        "agent": "hermes",
+        "affectedVersions": "<0.16.0",
+        "fixedVersion": "0.16.0",
+        "severity": "warning",
+        "description": "FastAPI Host/Origin middleware did not run on WebSocket upgrades for /api/pty, /api/ws, /api/pub and /api/events, letting DNS-rebinding pages inject commands or read terminal output. Upgrade hermes-agent to 0.16.0+.",
+        "reference": "https://github.com/advisories/GHSA-4pqm-j46f-795x",
+        "published": "2026-06-17",
+        "tags": [
+          "framework",
+          "cve"
+        ]
+      },
+      {
+        "id": "CVE-2026-53870",
+        "title": "Hermes Agent: response_store.db / webhook_subscriptions.json world-readable",
+        "agent": "hermes",
+        "affectedVersions": "<0.16.0",
+        "fixedVersion": "0.16.0",
+        "severity": "warning",
+        "description": "These files were created with mode 0644, exposing conversation history, tool payloads and per-route HMAC secrets to local users. Upgrade to 0.16.0+ and chmod 600 the existing files.",
+        "reference": "https://github.com/advisories/GHSA-99f9-j8r3-p853",
+        "published": "2026-06-17",
+        "tags": [
+          "framework",
+          "cve"
+        ]
+      },
+      {
+        "id": "CVE-2026-9368",
+        "title": "Hermes Agent: execute_code environment-variable handling sandbox issue",
+        "agent": "hermes",
+        "affectedVersions": "<0.11.0",
+        "fixedVersion": "0.11.0",
+        "severity": "warning",
+        "description": "Environment-variable handling in tools/code_execution_tool.py execute_code weakened the sandbox; a public exploit gist exists. Upgrade hermes-agent to 0.11.0+.",
+        "reference": "https://github.com/advisories/GHSA-wm96-9gfh-vvgq",
+        "published": "2026-05-24",
+        "exploitAvailable": true,
+        "tags": [
+          "framework",
+          "cve"
+        ]
+      },
+      {
+        "id": "CVE-2026-56402",
+        "title": "NanoClaw: approval responses accepted without responder role check",
+        "agent": "nanoclaw",
+        "affectedVersions": "<2.1.17",
+        "fixedVersion": "2.1.17",
+        "severity": "warning",
+        "description": "handleApprovalsResponse did not verify the responder's role, so anyone holding a valid questionId could approve privileged actions such as package installs. Upgrade to 2.1.17+.",
+        "reference": "https://nvd.nist.gov/vuln/detail/CVE-2026-56402",
+        "published": "2026-06-23",
+        "tags": [
+          "framework",
+          "cve"
+        ]
+      },
+      {
+        "id": "CVE-2026-56693",
+        "title": "NanoClaw: create_agent lets confined containers write central config",
+        "agent": "nanoclaw",
+        "affectedVersions": "<2.1.17",
+        "fixedVersion": "2.1.17",
+        "severity": "warning",
+        "description": "The create_agent delivery action did privileged central-database writes without host-side authorization, letting confined agent containers create agent groups, container configs and destinations. Upgrade to 2.1.17+.",
+        "reference": "https://nvd.nist.gov/vuln/detail/CVE-2026-56693",
+        "published": "2026-06-23",
+        "tags": [
+          "framework",
+          "cve"
+        ]
+      },
+      {
+        "id": "CVE-2026-56692",
+        "title": "NanoClaw: symlink following in forwardAttachedFiles exfiltrates host files",
+        "agent": "nanoclaw",
+        "affectedVersions": "<2.1.17",
+        "fixedVersion": "2.1.17",
+        "severity": "warning",
+        "description": "forwardAttachedFiles copied attachments with fs.copyFileSync and followed symlinks without containment checks, so container agents could exfiltrate files readable on the host. Upgrade to 2.1.17+.",
+        "reference": "https://nvd.nist.gov/vuln/detail/CVE-2026-56692",
+        "published": "2026-06-23",
+        "tags": [
+          "framework",
+          "cve"
+        ]
+      },
+      {
+        "id": "CVE-2026-56694",
+        "title": "NanoClaw: forged channel-approval callback wires channels to out-of-scope groups",
+        "agent": "nanoclaw",
+        "affectedVersions": "<2.1.0",
+        "fixedVersion": "2.1.0",
+        "severity": "warning",
+        "description": "handleChannelApprovalResponse did not check admin scope over the target group, so scoped admins could connect channels to restricted agent groups. Upgrade to 2.1.0+.",
+        "reference": "https://nvd.nist.gov/vuln/detail/CVE-2026-56694",
+        "published": "2026-06-23",
+        "tags": [
+          "framework",
+          "cve"
+        ]
+      },
+      {
+        "id": "CVE-2026-19591",
+        "title": "Codex CLI PowerShell stop-parsing (--%) misclassified as safe, approval bypass",
+        "agent": "codex",
+        "affectedVersions": ">=0.72.0 <0.131.0",
+        "fixedVersion": "0.131.0",
+        "severity": "warning",
+        "description": "Codex's command-safety parser read PowerShell's --% token differently from PowerShell itself, so a malicious repo could get a file-writing git command run without approval, which can rewrite Codex config and launch an attacker MCP server. Upgrade to 0.131.0.",
+        "reference": "https://www.cve.org/CVERecord?id=CVE-2026-19591",
+        "published": "2026-09-01",
+        "tags": [
+          "coding-agent",
+          "cve"
+        ]
+      },
+      {
+        "id": "CVE-2026-19592",
+        "title": "Codex CLI runs repo-local core.fsmonitor helper outside sandbox (GitSpawn)",
+        "agent": "codex",
+        "affectedVersions": ">=0.102.0 <0.131.0",
+        "fixedVersion": "0.131.0",
+        "severity": "warning",
+        "description": "While collecting git metadata, Codex did not disable the repo-local core.fsmonitor setting, so a repository delivered with its .git/config intact could run attacker code outside the sandbox with no prompt. Upgrade to 0.131.0.",
+        "reference": "https://www.cve.org/CVERecord?id=CVE-2026-19592",
+        "published": "2026-09-01",
+        "tags": [
+          "coding-agent",
+          "cve"
+        ]
+      },
+      {
+        "id": "CVE-2025-59532",
+        "title": "Codex sandbox bypass due to bug in path configuration logic",
+        "agent": "codex",
+        "affectedVersions": ">=0.2.0 <0.39.0",
+        "fixedVersion": "0.39.0",
+        "severity": "warning",
+        "description": "A bug in Codex's sandbox path configuration let model-generated cwd values widen the writable root, allowing file writes and command execution outside the workspace. Upgrade to 0.39.0.",
+        "reference": "https://github.com/openai/codex/security/advisories/GHSA-w5fx-fh39-j5rw",
+        "published": "2025-09-19",
+        "tags": [
+          "coding-agent",
+          "cve"
+        ]
+      },
+      {
+        "id": "GHSA-632h-h47v-g4x4",
+        "title": "OpenCode serve: cross-site /global/upgrade request installs arbitrary npm package",
+        "agent": "opencode",
+        "affectedVersions": ">=1.14.30 <1.18.22",
+        "fixedVersion": "1.18.22",
+        "severity": "warning",
+        "description": "For npm/pnpm/Bun-managed installs running `opencode serve`, a web page could send a cross-site POST to /global/upgrade with an arbitrary package spec whose lifecycle scripts then ran (RCE). Upgrade to 1.18.22, or don't run `opencode serve` from a package-manager install.",
+        "reference": "https://github.com/anomalyco/opencode/security/advisories/GHSA-632h-h47v-g4x4",
+        "published": "2026-09-24",
+        "tags": [
+          "coding-agent"
+        ]
+      },
+      {
+        "id": "CVE-2026-22813",
+        "title": "OpenCode web UI XSS lets malicious website run local commands via /pty",
+        "agent": "opencode",
+        "affectedVersions": "<1.1.10",
+        "fixedVersion": "1.1.10",
+        "severity": "critical",
+        "description": "A malicious website could abuse the OpenCode web UI's server-URL override to get XSS on localhost:4096 and spawn arbitrary processes through the /pty API. Upgrade to 1.1.10.",
+        "reference": "https://github.com/anomalyco/opencode/security/advisories/GHSA-c83v-7274-4vgp",
+        "published": "2026-01-13",
+        "tags": [
+          "coding-agent",
+          "cve"
+        ]
+      },
+      {
+        "id": "CVE-2026-22812",
+        "title": "OpenCode unauthenticated HTTP server allows arbitrary command execution",
+        "agent": "opencode",
+        "affectedVersions": "<1.0.216",
+        "fixedVersion": "1.0.216",
+        "severity": "warning",
+        "description": "OpenCode started an unauthenticated HTTP server with permissive CORS, exposing shell and pty endpoints to any local process or website. Upgrade to 1.0.216.",
+        "reference": "https://github.com/anomalyco/opencode/security/advisories/GHSA-vxw4-wv6m-9hhh",
+        "published": "2026-01-13",
+        "tags": [
+          "coding-agent",
+          "cve"
+        ]
+      },
+      {
+        "id": "CVE-2026-13745",
+        "title": "Gemini CLI untrusted .env overrides GEMINI_CLI_HOME, bypassing folder trust (RCE)",
+        "agent": "gemini-cli",
+        "affectedVersions": "<0.39.1",
+        "fixedVersion": "0.39.1",
+        "severity": "warning",
+        "description": "Starting Gemini CLI in an untrusted directory let a .env file override GEMINI_CLI_HOME, loading attacker configuration and bypassing folder-trust prompts, leading to code execution. Upgrade to 0.39.1.",
+        "reference": "https://www.cve.org/CVERecord?id=CVE-2026-13745",
+        "published": "2026-09-10",
+        "tags": [
+          "coding-agent",
+          "cve"
+        ]
+      },
+      {
+        "id": "CVE-2026-29783",
+        "title": "Copilot CLI dangerous shell expansion patterns enable arbitrary code execution",
+        "agent": "copilot-cli",
+        "affectedVersions": "<0.0.423",
+        "fixedVersion": "0.0.423",
+        "severity": "warning",
+        "description": "Bash parameter-transformation patterns slipped past Copilot CLI's read-only command classification, so prompt injection could run hidden commands. Upgrade to 0.0.423.",
+        "reference": "https://github.com/github/copilot-cli/security/advisories/GHSA-g8r9-g2v8-jv6f",
+        "published": "2026-03-06",
+        "tags": [
+          "coding-agent",
+          "cve"
+        ]
+      },
+      {
+        "id": "GHSA-v234-4jrq-mgg6",
+        "title": "Claude Desktop macOS: malicious file in Cowork folder could run commands on open",
+        "agent": "claude-desktop",
+        "affectedVersions": ">=1.1.3918 <1.15962.0",
+        "fixedVersion": "1.15962.0",
+        "severity": "warning",
+        "description": "Claude Desktop's list of executable file types blocked from opening out of a Cowork shared folder missed a type macOS runs on open, so an agent-written file could run commands on the host when the user opened it. Update to 1.15962.0 or later.",
+        "reference": "https://github.com/anthropics/claude-code/security/advisories/GHSA-v234-4jrq-mgg6",
+        "published": "2026-09-25",
+        "tags": [
+          "coding-agent"
+        ]
+      },
+      {
+        "id": "CVE-2026-103012",
+        "title": "Claude Code: managed settings not applied when stored API key preferred over SSO",
+        "agent": "claude-code",
+        "affectedVersions": ">=2.0.68 <2.1.260",
+        "fixedVersion": "2.1.260",
+        "severity": "info",
+        "description": "Claude Code fetched server-managed settings with a stored API key instead of the Enterprise/Team sign-in; when that key was rejected, the session ran without org policy or with a stale cached copy. Update to 2.1.260 or later.",
+        "reference": "https://github.com/anthropics/claude-code/security/advisories/GHSA-gfvf-j8jh-jxxw",
+        "published": "2026-09-29",
+        "tags": [
+          "coding-agent",
+          "cve"
+        ]
+      },
+      {
+        "id": "CVE-2026-40068",
+        "title": "Claude Code trust dialog bypass via git worktree spoofing allows code execution",
+        "agent": "claude-code",
+        "affectedVersions": ">=2.1.63 <2.1.84",
+        "fixedVersion": "2.1.84",
+        "severity": "warning",
+        "description": "A spoofed git worktree could bypass the workspace trust dialog and lead to arbitrary code execution. Update to 2.1.84 or later.",
+        "reference": "https://github.com/anthropics/claude-code/security/advisories/GHSA-q5hj-mxqh-vv77",
+        "published": "2026-04-24",
+        "tags": [
+          "coding-agent",
+          "cve"
+        ]
+      },
+      {
+        "id": "CVE-2026-39861",
+        "title": "Claude Code sandbox escape via symlink following allows file write outside workspace",
+        "agent": "claude-code",
+        "affectedVersions": "<2.1.64",
+        "fixedVersion": "2.1.64",
+        "severity": "warning",
+        "description": "Following symlinks let sandboxed commands write files outside the workspace. Update to 2.1.64 or later.",
+        "reference": "https://github.com/anthropics/claude-code/security/advisories/GHSA-vp62-r36r-9xqp",
+        "published": "2026-04-21",
+        "tags": [
+          "coding-agent",
+          "cve"
+        ]
+      },
+      {
+        "id": "CVE-2026-44467",
+        "title": "Claude Desktop SSH remote sessions skip host key comparison (MITM)",
+        "agent": "claude-desktop",
+        "affectedVersions": ">=1.2581.0 <1.4304.0",
+        "fixedVersion": "1.4304.0",
+        "severity": "warning",
+        "description": "Claude Desktop's SSH remote development only checked that the hostname existed in known_hosts and never compared the presented key, allowing man-in-the-middle attacks. Update to 1.4304.0 or later.",
+        "reference": "https://github.com/anthropics/claude-code/security/advisories/GHSA-3rwf-2g6p-c2f9",
+        "published": "2026-05-06",
+        "tags": [
+          "coding-agent",
+          "cve"
+        ]
+      },
+      {
+        "id": "CVE-2026-73217",
+        "title": "Cursor macOS Auto-Run sandbox escape via tampered Python virtualenv",
+        "agent": "cursor-cli",
+        "affectedVersions": "<3.1.2",
+        "fixedVersion": "3.1.2",
+        "severity": "warning",
+        "description": "An agent in Auto-Run Sandbox mode could replace a venv's Python executable, which the Microsoft Python extension then ran outside the sandbox. Update to 3.1.2.",
+        "reference": "https://github.com/cursor/cursor/security/advisories/GHSA-p9g2-cr55-cw9c",
+        "published": "2026-07-14",
+        "tags": [
+          "coding-agent",
+          "cve"
+        ]
+      },
+      {
+        "id": "CVE-2026-73218",
+        "title": "Cursor macOS Auto-Run sandbox escape via privileged Dev Container launch",
+        "agent": "cursor-cli",
+        "affectedVersions": "<3.0.0",
+        "fixedVersion": "3.0.0",
+        "severity": "warning",
+        "description": "With Docker Desktop and the Dev Containers CLI installed, a sandboxed agent could launch a privileged container mounting virtiofs0, gaining home-directory read/write and host command execution. Update to 3.0.0.",
+        "reference": "https://github.com/cursor/cursor/security/advisories/GHSA-v4xv-rqh3-w9mc",
+        "published": "2026-07-14",
+        "tags": [
+          "coding-agent",
+          "cve"
+        ]
+      },
+      {
+        "id": "CVE-2026-61560",
+        "title": "@zereight/mcp-gitlab: unauthenticated SSE + upload_markdown arbitrary file read (PAT theft)",
+        "agent": "mcp",
+        "affectedVersions": ">=0.0.0 <2.1.27",
+        "fixedVersion": "2.1.27",
+        "severity": "critical",
+        "description": "SSE transport exposes all tools without auth and upload_markdown reads arbitrary local files, so a network attacker can read /proc/self/environ to steal GITLAB_PERSONAL_ACCESS_TOKEN (default for Docker deployments). Upgrade to 2.1.27+ (2.1.30+ for related fixes) and rotate the GitLab token.",
+        "reference": "https://github.com/advisories/GHSA-cv3r-c5h8-f4g5",
+        "published": "2026-09-16",
+        "exploitAvailable": true,
+        "tags": [
+          "mcp",
+          "cve"
+        ],
+        "affectedDependency": {
+          "name": "@zereight/mcp-gitlab",
+          "versionConstraint": ">=0.0.0 <2.1.27"
+        }
+      },
+      {
+        "id": "GHSA-5648-rgj9-v224",
+        "title": "@zereight/mcp-gitlab: execute_graphql bypasses read-only mode and project allow-list",
+        "agent": "mcp",
+        "affectedVersions": ">=0.0.0 <2.1.30",
+        "fixedVersion": "2.1.30",
+        "severity": "warning",
+        "description": "Five defects defeat the server's safety controls; execute_graphql bypasses both read-only mode and GITLAB_ALLOWED_PROJECT_IDS, and Streamable HTTP auth can be bypassed in some deployments, reachable via prompt injection. Upgrade to 2.1.30+.",
+        "reference": "https://github.com/advisories/GHSA-5648-rgj9-v224",
+        "published": "2026-09-15",
+        "exploitAvailable": true,
+        "tags": [
+          "mcp",
+          "cve"
+        ],
+        "affectedDependency": {
+          "name": "@zereight/mcp-gitlab",
+          "versionConstraint": ">=0.0.0 <2.1.30"
+        }
+      },
+      {
+        "id": "CVE-2026-61742",
+        "title": "DBHub HTTP transport DNS rebinding allows unauthenticated browser-origin SQL execution",
+        "agent": "mcp",
+        "affectedVersions": ">=0.0.0 <0.22.5",
+        "fixedVersion": "0.22.5",
+        "severity": "critical",
+        "description": "The unauthenticated HTTP MCP endpoint (--transport http) only checks Origin hostname == Host hostname, which DNS rebinding defeats, letting a malicious web page run SQL against connected databases. Upgrade @bytebase/dbhub to 0.22.5+ and prefer stdio transport.",
+        "reference": "https://github.com/advisories/GHSA-fm8p-53ww-hf6w",
+        "published": "2026-09-24",
+        "exploitAvailable": true,
+        "tags": [
+          "mcp",
+          "cve"
+        ],
+        "affectedDependency": {
+          "name": "@bytebase/dbhub",
+          "versionConstraint": ">=0.0.0 <0.22.5"
+        }
+      },
+      {
+        "id": "CVE-2026-61788",
+        "title": "@bytebase/dbhub read-only mode does not prevent database writes",
+        "agent": "mcp",
+        "affectedVersions": ">=0.0.0 <0.22.6",
+        "fixedVersion": "0.22.6",
+        "severity": "warning",
+        "description": "readonly=true on execute_sql never enables connection-level read-only (gated on an unpopulated config value); a first-keyword classifier is the only guard, so side-effecting SELECTs can write data or, with privileged roles, arbitrary files. Upgrade to 0.22.6+ and use a least-privilege DB role.",
+        "reference": "https://github.com/advisories/GHSA-mwwr-p57h-56pf",
+        "published": "2026-09-24",
+        "exploitAvailable": true,
+        "tags": [
+          "mcp",
+          "cve"
+        ],
+        "affectedDependency": {
+          "name": "@bytebase/dbhub",
+          "versionConstraint": ">=0.0.0 <0.22.6"
+        }
+      },
+      {
+        "id": "CVE-2026-61612",
+        "title": "@aborruso/ckan-mcp-server SSRF via DNS-resolved internal IP (incomplete fix)",
+        "agent": "mcp",
+        "affectedVersions": ">=0.0.0 <0.4.108",
+        "fixedVersion": "0.4.108",
+        "severity": "warning",
+        "description": "validateServerUrl checks only the hostname string and never resolves DNS, so a server_url resolving to loopback or 169.254.169.254 reaches internal services and cloud metadata (third bypass after CVE-2026-33060/CVE-2026-53509). Upgrade to 0.4.108+.",
+        "reference": "https://github.com/advisories/GHSA-798p-78g2-v556",
+        "published": "2026-09-22",
+        "exploitAvailable": true,
+        "tags": [
+          "mcp",
+          "cve"
+        ],
+        "affectedDependency": {
+          "name": "@aborruso/ckan-mcp-server",
+          "versionConstraint": ">=0.0.0 <0.4.108"
+        }
+      },
+      {
+        "id": "CVE-2026-61647",
+        "title": "@roomi-fields/notebooklm-mcp path traversal in vault_batch allows arbitrary file write",
+        "agent": "mcp",
+        "affectedVersions": ">=1.6.0 <2.0.3",
+        "fixedVersion": "2.0.3",
+        "severity": "warning",
+        "description": "vault_batch (and POST /batch-to-vault) passes caller-supplied vault_dir/slug_prefix to the filesystem without containment, so a prompt-injected LLM can write .md/.json files anywhere the process can write. Upgrade to 2.0.3+.",
+        "reference": "https://github.com/advisories/GHSA-jjhp-8crj-mppq",
+        "published": "2026-09-22",
+        "tags": [
+          "mcp",
+          "cve"
+        ],
+        "affectedDependency": {
+          "name": "@roomi-fields/notebooklm-mcp",
+          "versionConstraint": ">=1.6.0 <2.0.3"
+        }
+      },
+      {
+        "id": "CVE-2026-86439",
+        "title": "Knowns MCP docs/memory tools path traversal: arbitrary .md read/write/delete",
+        "agent": "mcp",
+        "affectedVersions": ">=0.0.0 <0.30.0",
+        "fixedVersion": "0.30.0",
+        "severity": "warning",
+        "description": "The Knowns MCP docs and memory tools join user-controlled paths without containment, allowing file read, write and deletion outside the project sandbox (docs.update newPath deletes via Rename under a write capability). Upgrade knowns to 0.30.0+.",
+        "reference": "https://github.com/advisories/GHSA-9gfj-28hw-jchp",
+        "published": "2026-09-25",
+        "tags": [
+          "mcp",
+          "cve"
+        ],
+        "affectedDependency": {
+          "name": "knowns",
+          "versionConstraint": ">=0.0.0 <0.30.0"
+        }
+      },
+      {
+        "id": "MAL-2026-16409",
+        "title": "Malicious npm package ubiquiti-agents-link-mcp (host identity exfiltration via npx)",
+        "agent": "mcp",
+        "affectedVersions": ">=0.0.0",
+        "severity": "critical",
+        "description": "The bin entry runs execSync('id'), collects username and hostname and POSTs them to an oastify.com OAST endpoint; the name matches an npx command referenced by a vendor UI. Remove it from MCP configs and treat the host as exposed.",
+        "reference": "https://osv.dev/vulnerability/MAL-2026-16409",
+        "published": "2026-09-22",
+        "tags": [
+          "mcp",
+          "malicious-package",
+          "supply-chain"
+        ],
+        "affectedDependency": {
+          "name": "ubiquiti-agents-link-mcp",
+          "versionConstraint": ">=0.0.0"
+        }
+      },
+      {
+        "id": "MAL-2026-16422",
+        "title": "Malicious npm package @httttt/mcp-npx-fetch-1",
+        "agent": "mcp",
+        "affectedVersions": ">=0.0.0",
+        "severity": "critical",
+        "description": "GitHub flagged this package as malware; any machine that installed or ran it should be considered fully compromised. Remove it from MCP configs and rotate all secrets from a clean machine.",
+        "reference": "https://github.com/advisories/GHSA-q6m6-3rfx-7f62",
+        "published": "2026-09-23",
+        "tags": [
+          "mcp",
+          "malicious-package",
+          "supply-chain"
+        ],
+        "affectedDependency": {
+          "name": "@httttt/mcp-npx-fetch-1",
+          "versionConstraint": ">=0.0.0"
+        }
+      },
+      {
+        "id": "MAL-2026-14315",
+        "title": "Malicious npm package @httttt/mcp-demo (unauthenticated exec_command MCP tool)",
+        "agent": "mcp",
+        "affectedVersions": ">=0.0.0",
+        "severity": "critical",
+        "description": "Registers an exec_command MCP tool that pipes client-supplied strings straight to child_process.exec with no allowlist or confirmation, giving whoever controls the MCP channel arbitrary command execution. Remove it and rotate credentials.",
+        "reference": "https://osv.dev/vulnerability/MAL-2026-14315",
+        "published": "2026-08-20",
+        "tags": [
+          "mcp",
+          "malicious-package",
+          "supply-chain"
+        ],
+        "affectedDependency": {
+          "name": "@httttt/mcp-demo",
+          "versionConstraint": ">=0.0.0"
+        }
+      },
+      {
+        "id": "MAL-2026-16061",
+        "title": "Malicious npm package @yongot/canary-mcp-isolation (postinstall beacon + IMDS probe)",
+        "agent": "mcp",
+        "affectedVersions": ">=0.0.0",
+        "severity": "critical",
+        "description": "A postinstall script and the module itself run beacon.js, which posts the hostname to a webhook.site collector and probes the cloud metadata services (169.254.169.254, metadata.google.internal). Remove it and review cloud credentials.",
+        "reference": "https://osv.dev/vulnerability/MAL-2026-16061",
+        "published": "2026-09-09",
+        "tags": [
+          "mcp",
+          "malicious-package",
+          "supply-chain"
+        ],
+        "affectedDependency": {
+          "name": "@yongot/canary-mcp-isolation",
+          "versionConstraint": ">=0.0.0"
+        }
+      },
+      {
+        "id": "MAL-2026-16062",
+        "title": "Malicious npm package @yongot/canary-mcp-test (postinstall id/hostname exfiltration)",
+        "agent": "mcp",
+        "affectedVersions": ">=0.0.0",
+        "severity": "critical",
+        "description": "A postinstall hook and the main module run beacon.js, which executes `id` and sends its output and the hostname to a webhook.site collector. Remove it from MCP configs.",
+        "reference": "https://osv.dev/vulnerability/MAL-2026-16062",
+        "published": "2026-09-09",
+        "tags": [
+          "mcp",
+          "malicious-package",
+          "supply-chain"
+        ],
+        "affectedDependency": {
+          "name": "@yongot/canary-mcp-test",
+          "versionConstraint": ">=0.0.0"
+        }
+      },
+      {
+        "id": "MAL-2026-17536",
+        "title": "Malicious typosquat @angulaar/cli impersonating Angular CLI (incl. its MCP server)",
+        "agent": "mcp",
+        "affectedVersions": ">=0.0.0",
+        "severity": "critical",
+        "description": "One-character typosquat of @angular/cli with cloned source whose `ng mcp` code requires a swapped '@modelcontextprotocol/server@2.0.0' dependency (dependency-confusion vector that runs on install and on every `ng mcp`). Replace it with @angular/cli in MCP configs and audit the host.",
+        "reference": "https://osv.dev/vulnerability/MAL-2026-17536",
+        "published": "2026-10-05",
+        "tags": [
+          "mcp",
+          "malicious-package",
+          "supply-chain"
+        ],
+        "affectedDependency": {
+          "name": "@angulaar/cli",
+          "versionConstraint": ">=0.0.0"
+        }
+      },
+      {
+        "id": "MAL-2026-5480",
+        "title": "Malicious typosquat mcp-server-notion (unscoped impersonation of Notion MCP server)",
+        "agent": "mcp",
+        "affectedVersions": ">=0.0.0",
+        "severity": "critical",
+        "description": "Takes the unscoped name to catch misrouted installs of the Notion MCP server; postinstall sends the hostname, cwd, npm user agent and platform to a workers.dev collector. Use the official scoped package.",
+        "reference": "https://osv.dev/vulnerability/MAL-2026-5480",
+        "published": "2026-06-09",
+        "tags": [
+          "mcp",
+          "malicious-package",
+          "supply-chain"
+        ],
+        "affectedDependency": {
+          "name": "mcp-server-notion",
+          "versionConstraint": ">=0.0.0"
+        }
+      },
+      {
+        "id": "MAL-2026-5484",
+        "title": "Malicious typosquat mcp-server-sequential-thinking (impersonates official server)",
+        "agent": "mcp",
+        "affectedVersions": ">=0.0.0",
+        "severity": "critical",
+        "description": "Impersonates @modelcontextprotocol/server-sequential-thinking; both npm install (postinstall) and `npx mcp-server-sequential-thinking` run index.js, which POSTs host details to a remote collector. Use @modelcontextprotocol/server-sequential-thinking instead.",
+        "reference": "https://osv.dev/vulnerability/MAL-2026-5484",
+        "published": "2026-06-09",
+        "tags": [
+          "mcp",
+          "malicious-package",
+          "supply-chain"
+        ],
+        "affectedDependency": {
+          "name": "mcp-server-sequential-thinking",
+          "versionConstraint": ">=0.0.0"
+        }
+      },
+      {
+        "id": "CVE-2026-58485",
+        "title": "mcp-searxng web_url_read SSRF via DNS-resolved private hostname",
+        "agent": "mcp",
+        "affectedVersions": ">=0.0.0 <1.7.1",
+        "fixedVersion": "1.7.1",
+        "severity": "warning",
+        "description": "assertUrlAllowed checks only the hostname string, so domains resolving to private or loopback IPs (e.g. nip.io) bypass the blocklist and let web_url_read fetch internal resources. Upgrade to 1.7.1+.",
+        "reference": "https://github.com/advisories/GHSA-mrvx-jmjw-vggc",
+        "published": "2026-06-19",
+        "exploitAvailable": true,
+        "tags": [
+          "mcp",
+          "cve"
+        ],
+        "affectedDependency": {
+          "name": "mcp-searxng",
+          "versionConstraint": ">=0.0.0 <1.7.1"
+        }
+      },
+      {
+        "id": "CVE-2026-50287",
+        "title": "@agenticmail/mcp Streamable HTTP lacks auth; master-key tools callable remotely",
+        "agent": "mcp",
+        "affectedVersions": ">=0.0.0 <0.9.27",
+        "fixedVersion": "0.9.27",
+        "severity": "warning",
+        "description": "With --http or MCP_HTTP=1, the /mcp endpoint accepts unauthenticated sessions and forwards master-only tool calls using the server's own AGENTICMAIL_MASTER_KEY. Upgrade to 0.9.27+ or use stdio.",
+        "reference": "https://github.com/advisories/GHSA-63gr-g7jc-v8rg",
+        "published": "2026-06-01",
+        "exploitAvailable": true,
+        "tags": [
+          "mcp",
+          "cve"
+        ],
+        "affectedDependency": {
+          "name": "@agenticmail/mcp",
+          "versionConstraint": ">=0.0.0 <0.9.27"
+        }
+      },
+      {
+        "id": "CVE-2026-44895",
+        "title": "@yoda.digital/gitlab-mcp-server SSE transport: no auth + wildcard CORS (86 GitLab tools)",
+        "agent": "mcp",
+        "affectedVersions": ">=0.0.0 <0.6.0",
+        "fixedVersion": "0.6.0",
+        "severity": "warning",
+        "description": "With USE_SSE=true the HTTP server has no authentication and sends Access-Control-Allow-Origin *, exposing every GitLab tool, destructive ones included, to any reachable client or web page. Upgrade to 0.6.0+.",
+        "reference": "https://github.com/advisories/GHSA-8jr5-6gvj-rfpf",
+        "published": "2026-05-09",
+        "exploitAvailable": true,
+        "tags": [
+          "mcp",
+          "cve"
+        ],
+        "affectedDependency": {
+          "name": "@yoda.digital/gitlab-mcp-server",
+          "versionConstraint": ">=0.0.0 <0.6.0"
+        }
       }
     ]
   }

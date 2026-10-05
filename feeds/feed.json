@@ -1,12 +1,54 @@
 {
   "meta": {
-    "version": 3,
-    "timestamp": "2026-07-10T17:30:00.000Z",
-    "description": "VASO IOC threat feed v3 — adds 3 confirmed-malware OpenClaw skill publishers (hightower6eu, sakaen736jih, 52yuanchangxing) to maliciousPublishers and 40 verified-good skill names to trustedSkillNames, sourced from Agent Threat Rules (github.com/Agent-Threat-Rule/agent-threat-rules, MIT, public-blacklist/whitelist 2026-04-16). v2 added the postmark-mcp exfiltration domain (giftshop.club). Feed carries deltas on top of the bundled data."
+    "version": 6,
+    "timestamp": "2026-10-05T00:00:00.000Z",
+    "description": "VASO IOC threat feed v6 (cumulative over v5) — October 2026 refresh: MemTensor/sckit worm (trojanized OpenClaw memory plugin @memtensor/memos-cloud-openclaw-plugin + PyPI MemoryOS; C2 skyleen.fr, 12 sckit binaries; StepSecurity/SafeDep/Aikido), Carbonato Hermes-Agent botnet C2s (ThreatDown), Deadbugz malicious MCP server (Pillar), ChainDrop/keyv npm worm planting .claude/settings.json hooks (Datadog/Aikido/Socket), @7nohe codegen compromise AI-tool config tamperer (Socket), Unit 42 malicious ClawHub skills, and fake Claude/Codex installer ClickFix domains (Intellibron). Adds 7 C2 IPs, 21 domains, 26 SHA-256 hashes. Retains all v5 entries."
   },
   "data": {
+    "c2Ips": [
+      "91.92.242.30",
+      "139.84.223.178",
+      "45.79.183.61",
+      "91.99.195.164",
+      "213.136.79.115",
+      "213.136.83.197",
+      "190.211.124.187",
+      "2.26.75.16"
+    ],
     "maliciousDomains": [
-      "giftshop.club"
+      "giftshop.club",
+      "agenthub.contetial.com",
+      "hub.client-llm.com",
+      "relay.mangomindbd.com",
+      "remote-claude-relay.fly.dev",
+      "santaclaude.app",
+      "agenthub-agent.fyenet.com",
+      "claude.pishchykau.eu",
+      "canvas.xiaohhhh1.com",
+      "newsradar.dreamdt.cn",
+      "angelic.su",
+      "relay.lmfao.su",
+      "skyleen.fr",
+      "productivity-suite-mcp.onrender.com",
+      "npm-cache.com",
+      "js-mirror.com",
+      "pypi-get.com",
+      "awqhnjewqjkl.icu",
+      "carbonato-proxy-drab.vercel.app",
+      "carbonato-proxy-zeta.vercel.app",
+      "carbonato-proxy-zeta-2.vercel.app",
+      "install.app-distribution.net",
+      "laosji.net",
+      "openclawcli.vercel.app",
+      "primemetricsa.com",
+      "claudescript.top",
+      "creativecommunityinfo.art",
+      "code.codixcody.com",
+      "mycodingtoolsd.com",
+      "codex-promo.com",
+      "cladehub.com",
+      "cladesktop-apps.com",
+      "too.clawddddd.com"
     ],
     "maliciousPublishers": [
       "hightower6eu",
@@ -54,6 +96,37 @@
       "vietnamese",
       "virtually-us",
       "writing-reboot-review"
+    ],
+    "fileHashes": [
+      "e9045b27557e5019fe44a1d5ae4b77714faa65fef883127ca7db85b7970afab4",
+      "f2c8234c00b1f5b0b135534bf51207dc0239647890b73531996d60c90cf9e866",
+      "c8337c06f4d3e79dd65aca4058b7a32c763468cdc7df76a849c55395d703a40d",
+      "381ac6dc1715d9298fe81b2a53a11f7b7d78e361ee3a6619ad54f8c4b062cc18",
+      "e077c387b223811064b7bbc5a55a0182fca9bf50894f949ff284d4be87d44b26",
+      "65faf8ccbcf5b34eb4f72c71bf82815fa9c1e2f947b9c898491540e866132c31",
+      "f8ccdd1da7dff1aef16377a2842bc7acf7c516e32122dd6e42dc4a4e57653fce",
+      "56cd3416d2ec2aa7e7cec2a06010cf0b58eb09c0a5486809df52afeaca8f14be",
+      "d6b3e77c36ee8017c9bf30d1da7218ec0ea843768d313eb8e35845c8a9b38a26",
+      "9de0d5b0ca184f71f630be5781d134998883a02d5d7bc65aeb9559d8f9efb364",
+      "5405e330507602e803f7dd6f2a9d4555aec8558ab222b51413594a962da6888a",
+      "c1b0998347b489582bae7b7f4930f9831d9ef4b6bc150cfd488ee1a43272dd36",
+      "8f647f17a1934679c4095e21bee2b9bd83e28476603758bc91408a0c8443e3b4",
+      "16de381deb978744535b10f68fe15165251374b86eef18ffc2c47f61ea673047",
+      "f7c4014e284f3d56c452b8b222a287c54f73dc4a40a7e022e765ac8376362947",
+      "14eb4ce01dd4307759887ff819359b70d7d9ff709ecde039a5abc1aac325b128",
+      "927387d0cfac1118df4b383decc2ea6ba49c9d2f98b47098bcbcba1efc026e1f",
+      "fd3ca4007b225fdf8de7af4345a19179d5efa8c4bb9205f88cda806e5684b1eb",
+      "54dc7ea54a1317cca0e890a2770630cf7fa6c97813e0cb9d2caa93012b350668",
+      "9fc2570b7cef51c1b8df116d144d11ff4096357be7d2c4c6367cfc2509cf1bcc",
+      "b49afb7dba04cd99b357ce7c652c823a3707f28e130bd5c6645851a7adc030d6",
+      "59370c67b54a0ccaedd265e2356f04540b2fba1e1845300ef6de4d5437d99380",
+      "d3246926b20a8d021ed7de0ac8e9eee1dda986088f84ba18f31cb2042a121f5d",
+      "818aea6143282b352fdfdc0f3ebf77a36e54eb3befb5cad1a355a99ab97c6aa7",
+      "881ce5cb124c4d2e814783724cc1388f6a1cbf6eee274c3f3366e77ba3503ad7",
+      "b30eaed1f7478c28f4ec50d07ed5ef014ffbc4b2bc5a38d689ba9f7abb5e19c2",
+      "b6c7e0bf573b1c7d9d3a05eb08d26579199515b847df984862805f44a7af8007",
+      "ebb73dbb5aac1f6fe1a88e8f26126a1e1aa34c9f3345ad4345189b40d9bf1d1d",
+      "f4e41aa269c88bf11a2022701a9cf41e9a186aa1b224d837c31bf34e0b875d0e"
     ]
   }
 }
