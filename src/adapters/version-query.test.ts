@@ -131,6 +131,29 @@ describe('readPackageVersion', () => {
     expect(result).toBe('3.4.5');
   });
 
+  it('with a package name, skips unrelated package.json files on the walk up', async () => {
+    // Native install under $HOME: walking up reaches ~/package.json (a user project)
+    const fs = mkPkgFs({
+      realpath: { '/home/test/.local/bin/claude': '/home/test/.local/share/claude/versions/2.1.90' },
+      files: {
+        '/home/test/package.json': JSON.stringify({ name: 'my-app', version: '0.1.0' }),
+      },
+    });
+    expect(await readPackageVersion('/home/test/.local/bin/claude', fs, '@anthropic-ai/claude-code')).toBeUndefined();
+    // Without a name the walk keeps its old, permissive behaviour
+    expect(await readPackageVersion('/home/test/.local/bin/claude', fs)).toBe('0.1.0');
+  });
+
+  it('with a package name, accepts that package\'s own manifest', async () => {
+    const fs = mkPkgFs({
+      realpath: { '/usr/local/bin/claude': '/usr/local/lib/node_modules/@anthropic-ai/claude-code/cli.js' },
+      files: {
+        '/usr/local/lib/node_modules/@anthropic-ai/claude-code/package.json': JSON.stringify({ name: '@anthropic-ai/claude-code', version: '2.1.90' }),
+      },
+    });
+    expect(await readPackageVersion('/usr/local/bin/claude', fs, '@anthropic-ai/claude-code')).toBe('2.1.90');
+  });
+
   it('finds nvm-installed npm-global package by walking lib/node_modules (object bin)', async () => {
     const binary = '/home/test/.nvm/versions/node/v22.22.1/bin/gemini';
     const nodeModules = '/home/test/.nvm/versions/node/v22.22.1/lib/node_modules';

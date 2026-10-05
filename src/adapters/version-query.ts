@@ -42,7 +42,8 @@ export function queryCliVersion(
  *
  * Three-stage lookup, each succeeds in different environments:
  *   1. realpath + walk-up — works on local FS where the FSProvider can
- *      resolve the binary's symlink target.
+ *      resolve the binary's symlink target. With `npmPackageName`, only a
+ *      package.json whose `name` matches is accepted.
  *   2. Direct npm-global lookup — when `npmPackageName` is provided, reads
  *      `<prefix>/lib/node_modules/<package>/package.json` directly. This is
  *      the snapshot-friendly path: no directory listing is needed, only a
@@ -71,7 +72,10 @@ export async function readPackageVersion(
       try {
         const raw = await fs.readFile(pkgPath);
         const pkg = JSON.parse(raw);
-        if (pkg.version && SEMVER_RE.test(pkg.version)) {
+        // With a package name, only that package's manifest counts — walking up
+        // from a native install must not pick up an unrelated ~/package.json.
+        const matches = !npmPackageName || pkg.name === npmPackageName;
+        if (matches && pkg.version && SEMVER_RE.test(pkg.version)) {
           return pkg.version;
         }
       } catch {
