@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"encoding/base64"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -291,5 +293,31 @@ func TestBuildAugmentedPathAddsPackageManagerDirs(t *testing.T) {
 	tail := strings.Join(got[len(got)-5:], ":")
 	if tail != "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin:/snap/bin" {
 		t.Fatalf("session PATH must keep its order, package dirs appended once: %v", got)
+	}
+}
+
+func TestCollectShipsBinaryFilesAsBase64(t *testing.T) {
+	root := t.TempDir()
+	bin := filepath.Join(root, "user_settings.pb")
+	raw := []byte{0x0a, 0x05, 't', 'u', 'r', 'b', 'o', 0xff, 0xfe, 0x00, 0x80}
+	if err := os.WriteFile(bin, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	text := filepath.Join(root, "config.json")
+	if err := os.WriteFile(text, []byte(`{"a":"é"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	snap := Collect(ProbeManifest{FilePaths: []string{bin, text}}, false)
+
+	b := snap.Files[bin]
+	if b.Encoding != "base64" {
+		t.Fatalf("binary file not base64-encoded: %+v", b)
+	}
+	got, err := base64.StdEncoding.DecodeString(b.Content)
+	if err != nil || !bytes.Equal(got, raw) {
+		t.Fatalf("bytes did not round-trip: %v %v", got, err)
+	}
+	if tx := snap.Files[text]; tx.Encoding != "" || tx.Content != `{"a":"é"}` {
+		t.Fatalf("UTF-8 text must stay plain: %+v", tx)
 	}
 }

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"runtime"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/bmatcuk/doublestar/v4"
 )
@@ -361,13 +363,19 @@ func (c *collector) collectFile(path string, metadataOnly bool) FileEntry {
 	if err != nil {
 		return FileEntry{Exists: true, Mode: mode}
 	}
-	c.budget -= int64(len(content))
+	return c.fileContent(content, mode)
+}
 
-	return FileEntry{
-		Content: string(content),
-		Mode:    mode,
-		Exists:  true,
+// fileContent stores text as-is and anything that is not valid UTF-8 as
+// base64, charging the budget for what is actually shipped.
+func (c *collector) fileContent(content []byte, mode int) FileEntry {
+	entry := FileEntry{Content: string(content), Mode: mode, Exists: true}
+	if !utf8.Valid(content) {
+		entry.Content = base64.StdEncoding.EncodeToString(content)
+		entry.Encoding = "base64"
 	}
+	c.budget -= int64(len(entry.Content))
+	return entry
 }
 
 // collectPath records p as a directory (mode, plus its listing when listDir)

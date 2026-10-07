@@ -70,12 +70,11 @@ export interface ExecOptions {
 export interface FSProvider {
   readFile(path: string): Promise<string>;
   /**
-   * Read raw bytes. LocalFSProvider returns the file's actual bytes;
-   * SnapshotFSProvider returns a UTF-8 re-encoding of the collected text
-   * content, which is best-effort: any bytes the probe couldn't represent
-   * as valid UTF-8 were already replaced before reaching the snapshot.
-   * Callers doing byte-level checks (e.g. magic-byte anchoring) should
-   * treat snapshot results accordingly.
+   * Read raw bytes. LocalFSProvider returns the file's actual bytes, and so
+   * does SnapshotFSProvider for snapshots from probe ≥ 1.0.1 (non-UTF-8 files
+   * are shipped base64-encoded). From older probes it returns a UTF-8
+   * re-encoding of the collected text, where invalid byte sequences were
+   * already replaced — byte-level checks must treat those accordingly.
    */
   readBytes(path: string): Promise<Uint8Array>;
   readdir(path: string): Promise<string[]>;

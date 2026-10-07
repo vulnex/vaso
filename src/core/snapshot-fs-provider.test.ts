@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { SnapshotFSProvider } from './snapshot-fs-provider.js';
 import type { ProbeSnapshot } from './snapshot-types.js';
+import { decodeWindsurfUserSettings } from '../adapters/windsurf-user-settings.js';
 
 function makeSnapshot(overrides: Partial<ProbeSnapshot> = {}): ProbeSnapshot {
   return {
@@ -547,4 +548,42 @@ describe('SnapshotFSProvider — symlinks (probe ≥ 1.0.1)', () => {
     const old = new SnapshotFSProvider(makeSnapshot({ files: { [`${skills}/a/x.ts`]: { content: 'x', mode: 0o644, exists: true } } }));
     expect((await old.readdirEntries(skills, { recursive: true }))[0]).toMatchObject({ isFile: true });
   });
+
+  describe('binary files (base64 transport, probe >= 1.0.1)', () => {
+    const raw = new Uint8Array([0x0a, 0x05, 0x74, 0x75, 0x72, 0x62, 0x6f, 0xff, 0xfe, 0x00, 0x80]);
+    const fs = new SnapshotFSProvider(makeSnapshot({
+      files: {
+        '/b.bin': { content: Buffer.from(raw).toString('base64'), mode: 0o644, exists: true, encoding: 'base64' },
+        '/t.txt': { content: 'héllo', mode: 0o644, exists: true },
+      },
+    }));
+
+    it('returns the exact bytes of a base64 entry', async () => {
+      expect(Buffer.from(await fs.readBytes('/b.bin')).equals(Buffer.from(raw))).toBe(true);
+    });
+
+    it('decodes base64 entries in readFile like a local utf-8 read', async () => {
+      expect(await fs.readFile('/b.bin')).toBe(Buffer.from(raw).toString('utf-8'));
+    });
+
+    it('leaves plain text entries untouched', async () => {
+      expect(await fs.readFile('/t.txt')).toBe('héllo');
+      expect(Buffer.from(await fs.readBytes('/t.txt')).toString('utf-8')).toBe('héllo');
+    });
+
+    it('lets a remote scan decode Windsurf 3.x user_settings.pb', async () => {
+      // field 52: a non-UTF-8 blob (the model catalogue); field 27 = 3: Turbo
+      const pb = Buffer.from([0x08, 0x01, 0xa2, 0x03, 0x04, 0xff, 0xfe, 0xc0, 0x80, 0xd8, 0x01, 0x03]);
+      const snap = new SnapshotFSProvider(makeSnapshot({
+        files: { '/s.pb': { content: pb.toString('base64'), mode: 0o644, exists: true, encoding: 'base64' } },
+      }));
+      expect(decodeWindsurfUserSettings(await snap.readBytes('/s.pb'))?.autoExecutionPolicy).toBe('turbo');
+      // The old text transport mangled the same bytes beyond decoding
+      const legacy = new SnapshotFSProvider(makeSnapshot({
+        files: { '/s.pb': { content: pb.toString('utf-8'), mode: 0o644, exists: true } },
+      }));
+      expect(decodeWindsurfUserSettings(await legacy.readBytes('/s.pb'))?.autoExecutionPolicy).not.toBe('turbo');
+    });
+  });
 });
+

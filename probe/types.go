@@ -88,6 +88,10 @@ type FileEntry struct {
 	// Set when the file exists but its content was deliberately not collected
 	// (over the per-file cap, over the total budget, or a metadata-only glob).
 	ContentOmitted bool `json:"contentOmitted,omitempty"`
+	// "base64" when the file is not valid UTF-8 (binary: protobuf settings,
+	// keystores…) and Content holds its bytes base64-encoded; a JSON string
+	// would replace invalid sequences and lose them. Empty means UTF-8 text.
+	Encoding string `json:"encoding,omitempty"`
 }
 
 // CommandOutput holds the result of an executed command.

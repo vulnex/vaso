@@ -27,7 +27,8 @@ export class SnapshotFSProvider implements FSProvider {
       // budget, binary asset, metadata-only glob) — unreadable, not empty.
       throw new Error(`EACCES: content not collected in snapshot: ${path}`);
     }
-    return entry.content;
+    // Binary files arrive base64-encoded; decode as a local utf-8 read would
+    return entry.encoding === 'base64' ? Buffer.from(entry.content, 'base64').toString('utf-8') : entry.content;
   }
 
   async readBytes(path: string): Promise<Uint8Array> {
@@ -38,12 +39,10 @@ export class SnapshotFSProvider implements FSProvider {
     if (entry.contentOmitted || typeof entry.content !== 'string') {
       throw new Error(`EACCES: content not collected in snapshot: ${path}`);
     }
-    // The probe stored the file as a UTF-8 string. We re-encode it here on
-    // the same encoding so ASCII-safe content (most source files, including
-    // ELF/PE magics whose first bytes are valid UTF-8 single-byte codepoints)
-    // roundtrips faithfully. Non-UTF-8 byte sequences were already replaced
-    // with U+FFFD by the probe and can't be recovered.
-    return Buffer.from(entry.content, 'utf-8');
+    // Probe ≥ 1.0.1 ships non-UTF-8 files base64-encoded, so their bytes are
+    // exact. Text arrives as a UTF-8 string and re-encodes faithfully; from
+    // older probes, invalid byte sequences were already replaced with U+FFFD.
+    return entry.encoding === 'base64' ? Buffer.from(entry.content, 'base64') : Buffer.from(entry.content, 'utf-8');
   }
 
   async readdir(path: string): Promise<string[]> {
