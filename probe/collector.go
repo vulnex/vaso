@@ -106,6 +106,9 @@ var userBinDirs = []string{
 	"bin",
 }
 
+// Package-manager bin dirs missing from a minimal non-interactive PATH.
+var systemBinDirs = []string{"/opt/homebrew/bin", "/usr/local/bin", "/snap/bin"}
+
 // buildAugmentedPath prepends each home's user bin dirs to PATH (current-user
 // home first), so commands like `claude --version` resolve under non-interactive
 // SSH where rc-file PATH additions don't apply.
@@ -116,10 +119,23 @@ func buildAugmentedPath(homes []UserHome, basePath string) string {
 			prefix = append(prefix, filepath.Join(h.Path, d))
 		}
 	}
-	if basePath == "" {
-		return strings.Join(prefix, string(os.PathListSeparator))
+	parts := prefix
+	if basePath != "" {
+		parts = append(parts, basePath)
 	}
-	return strings.Join(prefix, string(os.PathListSeparator)) + string(os.PathListSeparator) + basePath
+	// Package-manager bin dirs a login shell adds (Homebrew's path_helper /
+	// shellenv, snapd's profile.d) but a non-interactive SSH session lacks —
+	// appended after the session PATH so its order still wins.
+	present := make(map[string]bool)
+	for _, d := range filepath.SplitList(basePath) {
+		present[d] = true
+	}
+	for _, d := range systemBinDirs {
+		if !present[d] {
+			parts = append(parts, d)
+		}
+	}
+	return strings.Join(parts, string(os.PathListSeparator))
 }
 
 // Collect executes the probe manifest and returns a snapshot.

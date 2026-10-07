@@ -30,6 +30,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - **Remote scans match local scans more closely:**
   - The probe no longer descends into symlinked directories (a local directory walk lists a link without following it), which duplicated every file a skill symlinks in from elsewhere. Symlinks are recorded with their targets, so remote listings show them as links and SKL-013 (workspace symlink escape) now works on remote and snapshot scans.
   - File content is scanned up to 5 MiB on both sides: the probe's per-file cap was 1 MiB while local skill checks read files of any size.
+  - The probe also looks for commands in `/opt/homebrew/bin`, `/usr/local/bin` and `/snap/bin`, which a login shell adds but a non-interactive SSH session lacks (after the session's own PATH, so its order still wins). Homebrew-installed CLIs, including OpenShell on macOS, were not found or versioned on remote scans.
   - The probe collects metadata for every ChatGPT workspace store CG-001 checks (drafts, gizmos, system hints, pinned items, orders), not just conversations.
 - **`--format` is validated before any work.** An unknown format used to fail only after a full scan; `scan`, `detect`, `mcp scan`, `mcp list` and `skill audit` now reject it immediately (exit 2), listing the formats available (including user-plugin reporters).
 - **`--save-snapshot` on a local scan is an error.** It only applies to `--host`/`--inventory` scans and was silently ignored; `scan` and `detect` now exit 2 with a message.

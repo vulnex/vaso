@@ -281,3 +281,15 @@ func TestExpandForEach(t *testing.T) {
 		t.Fatalf("expected cap %d, got %d", maxForEachItems, len(got))
 	}
 }
+
+func TestBuildAugmentedPathAddsPackageManagerDirs(t *testing.T) {
+	homes := []UserHome{{Path: "/Users/u"}}
+	got := strings.Split(buildAugmentedPath(homes, "/usr/bin:/bin:/usr/local/bin"), ":")
+	if got[0] != "/Users/u/.local/bin" {
+		t.Fatalf("user bin dirs must come first: %v", got)
+	}
+	tail := strings.Join(got[len(got)-5:], ":")
+	if tail != "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin:/snap/bin" {
+		t.Fatalf("session PATH must keep its order, package dirs appended once: %v", got)
+	}
+}
