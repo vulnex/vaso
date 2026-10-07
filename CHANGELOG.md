@@ -6,6 +6,14 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **Abacus.AI CLI and AbacusAI Desktop support (agents 23 → 24; checks 318 → 333; new ABA-001–015 in the `coding-agent` category).** Built from the 2.10.2 CLI and the 2.2.4 desktop app installed live on Linux, with their config schema, workspace-trust rules and file modes verified against the running software.
+  - **Adapter** (`abacus`): `~/.abacusai/` (`config.json`, `mcp.json`, `trusted-workspaces.json`, the encrypted `keystore.enc`) and the desktop app's per-mode `desktop/mcp-<mode>.json` and `desktop/agent-config-<mode>.json`; project `<workspace>/.abacusai/` as a separate installation; skills under `~/.abacusai/skills`, `~/.agents/skills` and their project equivalents; AbacusAI Desktop user data (`~/.config/AbacusAI Desktop`, `~/Library/Application Support/AbacusAI Desktop`). Every CLI copy is found and versioned — the installer's `~/.abacusai/bin/abacusai`, npm `@abacus-ai/cli` under any Node version manager, updater-retained `~/.abacusai/versions/<ver>`, and the CLI bundled in `/opt/AbacusAI Desktop` and `/Applications/AbacusAI Desktop.app`. The npm package is a shim that downloads and installs the native binary when its cache is missing, so it is never executed (locally or by the probe); its version comes from `package.json`.
+  - **Checks:** unsupervised / auto permission mode, including `ABACUS_PERMISSION_MODE` (ABA-001, fixable); over-broad `permissions.allow` rules (ABA-002); keystore and desktop key-store/cookie permissions — the keystore key derives from hostname + `$USER`, so read access means decryption (ABA-003); plaintext secrets in MCP env/headers/OAuth (ABA-004); plaintext provider API keys instead of `apiKeyEnvVar` (ABA-005); unpinned MCP packages (ABA-006); plaintext http:// MCP URLs (ABA-007); blanket MCP `autoApprove` (ABA-008); `ABACUS_TRUST_WORKSPACE` or a trusted workspace covering /, home, /tmp or /etc — trust is inherited by every directory beneath (ABA-009); `loadExternalMcpConfigs` pulling in Cursor/VS Code/Claude Desktop/Windsurf servers (ABA-010, fixable); http:// or non-abacus.ai API base URLs (ABA-011); secrets in `AGENTS.md` (ABA-012); sensitive `additionalDirectories` (ABA-013); auto-update off or a pre-release channel (ABA-014); world-writable state, a world-readable prompt history (`history.jsonl`) and logs, and world-writable desktop state files (ABA-015). Settings from an untrusted workspace's `.abacusai/` are reported but downgraded, since the CLI ignores them until the workspace is trusted.
+  - `vaso mcp` discovers Abacus.AI MCP servers (`mcp.json`, the `config.json` array form, the desktop's per-mode files and project `.abacusai/`), skipping servers marked `disabled`.
+  - Probe: `abacusai`/`abacus` added to the command allowlist; `~/.abacusai/bin` joins the user bin dirs searched under non-interactive SSH; the keystore, prompt history, session metadata, logs and desktop key stores are collected as metadata only.
+
 ### Fixed
 
 - **ChatGPT Desktop: OpenAI's new app layout.** The current `ChatGPT.app` is bundle `com.openai.codex` (Codex-based), and the update moves the original app to `ChatGPT (Classic).app` (`com.openai.chat`). CG-005 raised a critical "bundle swapped" finding on the genuine, OpenAI-signed new app and never verified the Classic one. Both bundles are now recognized: `ChatGPT.app` is the primary copy and the Classic app is reported as another installed copy with its own version; CG-005 checks each against the OpenAI Team ID and its expected identifier.
@@ -19,7 +27,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - **`--format` is validated before any work.** An unknown format used to fail only after a full scan; `scan`, `detect`, `mcp scan`, `mcp list` and `skill audit` now reject it immediately (exit 2), listing the formats available (including user-plugin reporters).
 - **`--save-snapshot` on a local scan is an error.** It only applies to `--host`/`--inventory` scans and was silently ignored; `scan` and `detect` now exit 2 with a message.
 
-Probe changes in this release (symlink handling, 5 MiB content cap, ownership and private groups) require the 1.0.1 probe binaries; older probes keep working with the previous behavior.
+Probe changes in this release (Abacus.AI allowlist and install-on-run guard, symlink handling, 5 MiB content cap, ownership and private groups) require the 1.0.1 probe binaries; older probes keep working with the previous behavior.
 
 ## [1.0.0] - 2026-10-05
 

@@ -8,7 +8,7 @@ interface ConfigLocation {
   source: string;
   path: string;
   /** Config dialect; defaults to the common `mcpServers` map. */
-  shape?: 'atomic-agent' | 'nanobot' | 'picoclaw';
+  shape?: 'atomic-agent' | 'nanobot' | 'picoclaw' | 'abacus' | 'abacus-config';
 }
 
 function getGlobalConfigLocations(platform: NodeJS.Platform, home: string): ConfigLocation[] {
@@ -51,6 +51,15 @@ function getGlobalConfigLocations(platform: NodeJS.Platform, home: string): Conf
     path: join(home, '.codeium', 'windsurf', 'mcp_config.json'),
   });
 
+  // Abacus.AI CLI + desktop: mcp.json and the desktop's per-mode files are
+  // server maps; config.json carries an array form.
+  locations.push(
+    { source: 'Abacus.AI', path: join(home, '.abacusai', 'mcp.json'), shape: 'abacus' },
+    { source: 'Abacus.AI', path: join(home, '.abacusai', 'config.json'), shape: 'abacus-config' },
+    { source: 'AbacusAI Desktop (code)', path: join(home, '.abacusai', 'desktop', 'mcp-code.json'), shape: 'abacus' },
+    { source: 'AbacusAI Desktop (cowork)', path: join(home, '.abacusai', 'desktop', 'mcp-cowork.json'), shape: 'abacus' },
+  );
+
   // Devin CLI (XDG config dir on POSIX, %APPDATA%\devin on Windows)
   const devinConfigDir = platform === 'win32'
     ? join(process.env.APPDATA ?? join(home, 'AppData', 'Roaming'), 'devin')
@@ -89,6 +98,8 @@ function getProjectConfigLocations(projectDir: string): ConfigLocation[] {
     { source: 'Windsurf (project)', path: join(projectDir, '.windsurf', 'mcp.json') },
     { source: 'Devin CLI (project)', path: join(projectDir, '.devin', 'mcp_config.json') },
     { source: 'Devin CLI (local)', path: join(projectDir, '.devin', 'mcp_config.local.json') },
+    { source: 'Abacus.AI (project)', path: join(projectDir, '.abacusai', 'mcp.json'), shape: 'abacus' },
+    { source: 'Abacus.AI (project)', path: join(projectDir, '.abacusai', 'config.json'), shape: 'abacus-config' },
     { source: 'VS Code', path: join(projectDir, '.vscode', 'mcp.json') },
     { source: 'Generic MCP', path: join(projectDir, 'mcp.json') },
   ];
@@ -153,6 +164,10 @@ function parseShape(shape: ConfigLocation['shape'], data: Record<string, unknown
       return parseAtomicAgentEntries(data);
     case 'nanobot':
       return parseServerMap(tools?.mcpServers ?? tools?.mcp_servers);
+    case 'abacus':
+      return parseServerMap(withoutDisabled(data.mcpServers));
+    case 'abacus-config':
+      return parseServerMap(abacusArrayToMap(data.mcpServers));
     case 'picoclaw': {
       // tools.mcp.enabled: false switches off the whole MCP integration
       const mcp = tools?.mcp as Record<string, unknown> | undefined;
@@ -161,6 +176,26 @@ function parseShape(shape: ConfigLocation['shape'], data: Record<string, unknown
     default:
       return parseServerEntries(data);
   }
+}
+
+/** Abacus.AI marks switched-off servers `disabled: true`; they are never launched. */
+function withoutDisabled(map: unknown): unknown {
+  if (!map || typeof map !== 'object' || Array.isArray(map)) return map;
+  return Object.fromEntries(Object.entries(map as Record<string, unknown>).filter(
+    ([, v]) => !(v && typeof v === 'object' && (v as Record<string, unknown>).disabled === true),
+  ));
+}
+
+/** Abacus.AI config.json form: `mcpServers: [{ name, command, args, env }]`. */
+function abacusArrayToMap(list: unknown): Record<string, unknown> {
+  if (!Array.isArray(list)) return {};
+  const map: Record<string, unknown> = {};
+  for (const entry of list) {
+    if (entry && typeof entry === 'object' && typeof (entry as Record<string, unknown>).name === 'string') {
+      map[(entry as Record<string, unknown>).name as string] = entry;
+    }
+  }
+  return map;
 }
 
 const ATOMIC_TRANSPORTS: Record<string, MCPServerEntry['transport']> = {

@@ -95,6 +95,9 @@ var userBinDirs = []string{
 	".cargo/bin",
 	".npm-global/bin",
 	".volta/bin",
+	// Self-installed agent CLIs whose installer only edits interactive rc files;
+	// ahead of nvm so a native install wins over a stale npm copy, as in a shell.
+	".abacusai/bin",
 	".nvm/current/bin",
 	".claude/local",
 	".opencode/bin",
@@ -506,6 +509,12 @@ func runCommand(req CommandRequest, augmentedPath string) CommandOutput {
 	defer cancel()
 
 	resolved := resolveBinary(req.Cmd, augmentedPath)
+	if InstallsOnRun(req.Cmd, resolved) {
+		return CommandOutput{
+			Stderr:   fmt.Sprintf("%s is an install-on-run wrapper; not executed", resolved),
+			ExitCode: -1,
+		}
+	}
 	cmd := exec.CommandContext(ctx, resolved, req.Args...)
 
 	env := os.Environ()

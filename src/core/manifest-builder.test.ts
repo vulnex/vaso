@@ -12,6 +12,7 @@ describe('buildProbeManifest', () => {
       '~/.local/share/devin/credentials.toml',
       '~/.gemini/oauth_creds.json', '~/.gemini/google_accounts.json', '~/.gemini/mcp-oauth-tokens.json',
       '~/.qwen/oauth_creds.json', '~/.qwen/mcp-oauth-tokens.json', '~/.qwen/google_accounts.json',
+      '~/.abacusai/keystore.enc*',
     ];
     expect(manifest.metadataGlobPatterns).toEqual(expect.arrayContaining(stores));
     const content = [...manifest.globPatterns, ...manifest.filePaths];
@@ -20,7 +21,7 @@ describe('buildProbeManifest', () => {
 
   it('runs agent CLIs with an isolated HOME, system tools with the real one', () => {
     const byId = new Map(manifest.commands.map(c => [c.id, c]));
-    for (const id of ['hermes-version', 'cursor-agent-version', 'gemini-version', 'copilot-version', 'nemoclaw-pip3-show']) {
+    for (const id of ['hermes-version', 'cursor-agent-version', 'gemini-version', 'copilot-version', 'nemoclaw-pip3-show', 'abacusai-version']) {
       expect(byId.get(id)?.isolateHome, id).toBe(true);
     }
     for (const id of ['claude-which', 'ps-ancestry', 'crontab-list', 'chatgpt-plist-main', 'claude-desktop-version']) {
@@ -36,11 +37,14 @@ describe('buildProbeManifest', () => {
       '~/.copilot/command-history-state.json',
       '~/.copilot/session-state/*',
       '~/Library/Application Support/com.meta.endo/**',
+      '~/.abacusai/history.jsonl',
+      '~/.abacusai/projects/**',
     ]));
     // Never also collected with content
     const content = [...manifest.globPatterns, ...manifest.filePaths];
     for (const p of ['~/.gemini/tmp/*/chats/session-*.jsonl', '~/.copilot/command-history-state.json',
-      '~/.copilot/session-state/*.json', '~/Library/Application Support/com.meta.endo/**']) {
+      '~/.copilot/session-state/*.json', '~/Library/Application Support/com.meta.endo/**',
+      '~/.abacusai/history.jsonl', '~/.abacusai/projects/**']) {
       expect(content).not.toContain(p);
     }
     for (const g of manifest.metadataGlobPatterns ?? []) expect(manifest.globPatterns).not.toContain(g);

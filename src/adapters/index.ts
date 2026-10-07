@@ -23,6 +23,7 @@ import { windsurfAdapter } from './windsurf.js';
 import { devinAdapter } from './devin.js';
 import { metaMuseAdapter } from './meta-muse.js';
 import { cometAdapter } from './comet.js';
+import { abacusAdapter } from './abacus.js';
 
 /** Every built-in adapter, in registration order. */
 export const allAdapters: AgentAdapter[] = [
@@ -49,6 +50,7 @@ export const allAdapters: AgentAdapter[] = [
   devinAdapter,
   metaMuseAdapter,
   cometAdapter,
+  abacusAdapter,
 ];
 
 /** Register every built-in adapter into the shared adapterRegistry —
