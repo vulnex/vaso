@@ -14,6 +14,7 @@ import { zeroclawChecks } from './zeroclaw/index.js';
 import { lyrieChecks } from './lyrie/index.js';
 import { hermesChecks } from './hermes/index.js';
 import { atomicAgentChecks } from './atomic-agent/index.js';
+import { openshellChecks } from './openshell/index.js';
 import { picoclawChecks } from './picoclaw/index.js';
 import { policyChecks } from './policy/index.js';
 import { advisoryChecks } from './advisory/index.js';
@@ -47,6 +48,7 @@ export function registerAllChecks(): void {
   checkRegistry.registerAll(lyrieChecks);
   checkRegistry.registerAll(hermesChecks);
   checkRegistry.registerAll(atomicAgentChecks);
+  checkRegistry.registerAll(openshellChecks);
   checkRegistry.registerAll(picoclawChecks);
   checkRegistry.registerAll(policyChecks);
   checkRegistry.registerAll(advisoryChecks);

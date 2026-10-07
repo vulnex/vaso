@@ -38,17 +38,20 @@ var commandAllowlist = map[string]bool{
 	// Abacus.AI CLI (alias abacus) — version/which probe
 	"abacusai": true,
 	"abacus":   true,
-	"cat":      true,
-	"uname":    true,
-	"hostname": true,
-	"ls":       true,
-	"stat":     true,
-	"id":       true,
-	"crontab":  true,
-	"pip":      true,
-	"pip3":     true,
-	"python":   true,
-	"python3":  true,
+	// NVIDIA OpenShell — version/which probe and read-only gateway queries
+	// (sandbox list, per-sandbox and global policy get)
+	"openshell": true,
+	"cat":       true,
+	"uname":     true,
+	"hostname":  true,
+	"ls":        true,
+	"stat":      true,
+	"id":        true,
+	"crontab":   true,
+	"pip":       true,
+	"pip3":      true,
+	"python":    true,
+	"python3":   true,
 	// macOS info-only inspection commands. Used by claude-desktop and
 	// chatgpt-desktop adapters to read app metadata: defaults reads the
 	// CFBundleShortVersionString from app Info.plists and converts user

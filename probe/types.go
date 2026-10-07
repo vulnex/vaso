@@ -26,6 +26,18 @@ type CommandRequest struct {
 	// state in the user's home on any invocation, and a scan must not modify
 	// what it scans.
 	IsolateHome bool `json:"isolateHome,omitempty"`
+	// ForEach runs the command once per item of an earlier command's JSON
+	// output, substituting {field} placeholders in Args (see expandForEach).
+	ForEach *CommandForEach `json:"forEach,omitempty"`
+}
+
+// CommandForEach names the earlier command (by ID) whose stdout is JSON, the
+// top-level key of the array to iterate (a bare top-level array is accepted
+// too), and the string fields of each item substituted for {field} in Args.
+type CommandForEach struct {
+	From   string   `json:"from"`
+	Array  string   `json:"array"`
+	Fields []string `json:"fields"`
 }
 
 // ProbeSnapshot is the complete output of a probe run.

@@ -7,6 +7,7 @@ import { ironclawAdapter } from './ironclaw.js';
 import { nanobotAdapter } from './nanobot.js';
 import { zeroclawAdapter } from './zeroclaw.js';
 import { nemoclawAdapter } from './nemoclaw.js';
+import { openshellAdapter } from './openshell.js';
 import { hermesAdapter } from './hermes.js';
 import { lyrieAdapter } from './lyrie.js';
 import { atomicAgentAdapter } from './atomic-agent.js';
@@ -34,6 +35,7 @@ export const allAdapters: AgentAdapter[] = [
   nanobotAdapter,
   zeroclawAdapter,
   nemoclawAdapter,
+  openshellAdapter,
   hermesAdapter,
   lyrieAdapter,
   atomicAgentAdapter,

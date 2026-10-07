@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -235,5 +236,48 @@ func TestInstallOnRunWrapperNotExecuted(t *testing.T) {
 
 	if InstallsOnRun("claude", shim) {
 		t.Fatal("only listed commands are guarded")
+	}
+}
+
+func TestExpandForEach(t *testing.T) {
+	req := CommandRequest{
+		ID: "openshell-sandbox-policy", Cmd: "openshell",
+		Args:    []string{"policy", "get", "{name}", "--workspace", "{workspace}", "--full", "-o", "json"},
+		ForEach: &CommandForEach{From: "list", Array: "sandboxes", Fields: []string{"name", "workspace"}},
+	}
+	want := []string{"policy", "get", "box-1", "--workspace", "default", "--full", "-o", "json"}
+
+	// 0.1.x shape: {"sandboxes": [...]}; malformed and option-like values are skipped
+	obj := `{"sandboxes":[{"name":"box-1","workspace":"default"},{"name":"--evil","workspace":"default"},{"name":"a/b","workspace":"x"},{"name":"nows"}]}`
+	got := expandForEach(req, map[string]CommandOutput{"list": {Stdout: obj}})
+	if len(got) != 1 || strings.Join(got[0], " ") != strings.Join(want, " ") {
+		t.Fatalf("object form: got %v", got)
+	}
+
+	// 0.0.x shape: a bare array
+	got = expandForEach(req, map[string]CommandOutput{"list": {Stdout: `[{"name":"box-1","workspace":"default"}]`}})
+	if len(got) != 1 || strings.Join(got[0], " ") != strings.Join(want, " ") {
+		t.Fatalf("array form: got %v", got)
+	}
+
+	// Failed, missing or non-JSON source → no runs
+	for name, outputs := range map[string]map[string]CommandOutput{
+		"failed":   {"list": {Stdout: obj, ExitCode: 1}},
+		"missing":  {},
+		"not json": {"list": {Stdout: "No sandboxes found."}},
+	} {
+		if got := expandForEach(req, outputs); len(got) != 0 {
+			t.Fatalf("%s: expected no runs, got %v", name, got)
+		}
+	}
+
+	// Capped
+	var many []string
+	for i := 0; i < maxForEachItems+5; i++ {
+		many = append(many, fmt.Sprintf(`{"name":"b%d","workspace":"w"}`, i))
+	}
+	got = expandForEach(req, map[string]CommandOutput{"list": {Stdout: "[" + strings.Join(many, ",") + "]"}})
+	if len(got) != maxForEachItems {
+		t.Fatalf("expected cap %d, got %d", maxForEachItems, len(got))
 	}
 }

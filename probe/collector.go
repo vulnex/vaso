@@ -3,10 +3,12 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"time"
@@ -241,6 +243,9 @@ func Collect(manifest ProbeManifest, escalate bool) ProbeSnapshot {
 		// entry only retains the last user's output — TS callers should
 		// always go through the natural key when paths are user-scoped.
 		argSets := expandArgsPerUser(cmdReq.Args, homes)
+		if cmdReq.ForEach != nil {
+			argSets = expandForEach(cmdReq, snapshot.CommandOutputs)
+		}
 		for _, args := range argSets {
 			req := cmdReq
 			req.Args = args
@@ -730,4 +735,68 @@ func DefaultManifest() ProbeManifest {
 			"/etc/nanoclaw",
 		},
 	}
+}
+
+// forEachValue is what a substituted item field may look like: an identifier
+// (sandbox and workspace names), never an option (leading '-') or a path.
+var forEachValue = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
+
+const maxForEachItems = 100
+
+// expandForEach builds one argument list per item of the JSON array produced
+// by an earlier command (req.ForEach.From), replacing each {field} placeholder
+// in req.Args with the item's value. Items with a missing or malformed field
+// are skipped; a failed or non-JSON source yields no runs.
+func expandForEach(req CommandRequest, outputs map[string]CommandOutput) [][]string {
+	spec := req.ForEach
+	src, ok := outputs[spec.From]
+	if !ok || src.ExitCode != 0 {
+		return nil
+	}
+	var parsed interface{}
+	if err := json.Unmarshal([]byte(src.Stdout), &parsed); err != nil {
+		return nil
+	}
+	items, isList := parsed.([]interface{})
+	if !isList {
+		obj, isObj := parsed.(map[string]interface{})
+		if !isObj {
+			return nil
+		}
+		if items, isList = obj[spec.Array].([]interface{}); !isList {
+			return nil
+		}
+	}
+	var out [][]string
+	for _, item := range items {
+		if len(out) >= maxForEachItems {
+			break
+		}
+		fields, isObj := item.(map[string]interface{})
+		if !isObj {
+			continue
+		}
+		values := make(map[string]string, len(spec.Fields))
+		valid := true
+		for _, f := range spec.Fields {
+			v, isStr := fields[f].(string)
+			if !isStr || !forEachValue.MatchString(v) {
+				valid = false
+				break
+			}
+			values[f] = v
+		}
+		if !valid {
+			continue
+		}
+		args := make([]string, len(req.Args))
+		for i, a := range req.Args {
+			for f, v := range values {
+				a = strings.ReplaceAll(a, "{"+f+"}", v)
+			}
+			args[i] = a
+		}
+		out = append(out, args)
+	}
+	return out
 }

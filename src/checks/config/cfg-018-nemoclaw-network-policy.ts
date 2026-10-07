@@ -90,7 +90,7 @@ export const cfg018 = defineCheck({
     if (!hasState) {
       evidence.push({
         file: deploymentRecord,
-        detail: 'Applied presets are held by the OpenShell gateway (`nemoclaw list` shows them), not on disk',
+        detail: 'Applied presets are held by the OpenShell gateway, not on disk — the OpenShell checks (OSH-011–OSH-014) evaluate each sandbox\'s effective policy',
       });
     }
 

@@ -85,9 +85,11 @@ export function buildProbeManifest(adapters: AgentAdapter[]): ProbeManifest {
 
   // Agent CLIs run with a throwaway HOME: several initialize state in the
   // user's home on any invocation (a scan must not modify what it scans).
-  // System tools keep the real HOME — some read the user's preferences.
+  // System tools keep the real HOME — some read the user's preferences — and so
+  // do agent commands that explicitly opt out (`isolateHome: false`): read-only
+  // queries that need the user's registered state, verified side-effect free.
   merged.commands = merged.commands.map(c =>
-    SYSTEM_TOOLS.has(c.cmd) ? c : { ...c, isolateHome: true });
+    SYSTEM_TOOLS.has(c.cmd) || c.isolateHome === false ? c : { ...c, isolateHome: true });
 
   // Deduplicate commands by id
   const seen = new Set<string>();

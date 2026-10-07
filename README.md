@@ -10,7 +10,7 @@
 
 ## Overview
 
-VASO scans AI agent frameworks, interactive coding agents, desktop AI apps, and MCP server configurations for security misconfigurations, malicious code, and known threats. It runs 333 checks across 24 agents (10 autonomous frameworks + 10 interactive coding agents + 4 agentic desktop apps) plus MCP-server scanning, using AST-based static analysis (not regex) for accurate results without ever executing scanned code.
+VASO scans AI agent frameworks, interactive coding agents, desktop AI apps, and MCP server configurations for security misconfigurations, malicious code, and known threats. It runs 347 checks across 25 agents (10 autonomous frameworks + the NVIDIA OpenShell sandbox runtime + 10 interactive coding agents + 4 agentic desktop apps) plus MCP-server scanning, using AST-based static analysis (not regex) for accurate results without ever executing scanned code.
 
 ## Installation
 
@@ -105,6 +105,9 @@ See [doc/user-guide.md](doc/user-guide.md) for full option reference.
 - **Lyrie** — `~/.lyrie/` (Bun turborepo, Rust Shield Layer 1, 10-channel gateway)
 - **Atomic Agent** — `~/.atomic-agent/` or `$ATOMIC_AGENT_STATE_DIR` (config.json + .env; local-first operator agent with approval ladder, MCP, skills, Telegram/Discord channels, HTTP service)
 
+**Agent sandbox runtime**
+- **NVIDIA OpenShell** — `~/.config/openshell/` (CLI gateways, `gateway.toml`, `gateway.env`), `~/.local/state/openshell/` (gateway database, keys, sandbox tokens), Homebrew/snap gateway configs; with the CLI installed, each sandbox's effective policy is read from the gateway (read-only)
+
 **Interactive coding agents**
 
 - **Claude Code** — `~/.claude/`, `~/.claude.json`, project-level `.claude/`
@@ -129,7 +132,7 @@ See [doc/user-guide.md](doc/user-guide.md) for full option reference.
 
 ## Security Checks
 
-333 checks organized into 18 categories:
+347 checks organized into 19 categories:
 
 | Category | IDs | Count | Description |
 |----------|-----|-------|-------------|
@@ -143,6 +146,7 @@ See [doc/user-guide.md](doc/user-guide.md) for full option reference.
 | Advisory | ADV-001–005 | 5 | Vulnerability/CVE detection with version awareness |
 | Coding Agent | CC, CD, CG, CDX, OPC, GEM, QC, CUR, GHC, WS, DEV, ABA, MM, PC | 132 | Claude Code (12), Claude Desktop (10), ChatGPT Desktop (6), Codex (10), OpenCode (12), Gemini CLI (11), Qwen Code (10), Cursor (14), GitHub Copilot CLI (9), Windsurf/Devin Desktop (8), Devin CLI (10), Abacus.AI CLI/Desktop (15), Meta Muse (3), Perplexity Comet (2) — sandbox/approval policy, plaintext credentials, MCP pinning, broad allow rules, memory-file secrets, transport security |
 | Agent-Specific | OC, NC, PCL, IC, NB, ZC, LY, HM, AT | 101 | Per-framework checks (OpenClaw 6, NanoClaw 5, PicoClaw 7, IronClaw 14, Nanobot 12, ZeroClaw 16, Lyrie 20, Hermes 10, Atomic Agent 11) |
+| OpenShell | OSH-001–014 | 14 | NVIDIA OpenShell gateway: TLS off, unauthenticated users, plaintext OIDC, non-expiring session credentials, fail-open policy validation and extensions, resource admission off, readable keys/tokens/credential database, writable config, CLI without TLS verification; sandbox policies: any-program network rules, uninspected/unenforced egress, broad address ranges, writable system paths |
 
 Server-only checks (gateway/network/runtime concepts) are automatically excluded for coding agents to avoid false positives — interactive coding CLIs have a different threat model than autonomous server agents.
 

@@ -3,7 +3,7 @@ import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { CODING_AGENTS } from '../../core/types.js';
 
-const AGENT_PORTS = [18789, 18790, 3000, 8080, 8443];
+const AGENT_PORTS = [18789, 18790, 3000, 8080, 8443, 17670];
 
 function checkPort(host: string, port: number, timeout = 1000): Promise<boolean> {
   return new Promise((resolve) => {

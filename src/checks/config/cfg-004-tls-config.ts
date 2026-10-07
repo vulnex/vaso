@@ -9,7 +9,8 @@ export const cfg004 = defineCheck({
   category: 'config',
   severity: 'warning',
   description: 'Check if TLS/HTTPS is configured for the gateway',
-  excludedAgents: CODING_AGENTS,
+  // OpenShell: OSH-001 reports disable_tls with the listener context
+  excludedAgents: [...CODING_AGENTS, 'openshell'],
 
   async run(ctx, h) {
     if (!ctx.installation.gateway) {

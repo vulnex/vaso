@@ -29,6 +29,31 @@ describe('buildProbeManifest', () => {
     }
   });
 
+  it('runs OpenShell gateway queries with the real HOME, expanding per sandbox', () => {
+    const byId = new Map(manifest.commands.map(c => [c.id, c]));
+    expect(byId.get('openshell-version')?.isolateHome).toBe(true);
+    for (const id of ['openshell-sandbox-list', 'openshell-sandbox-policy', 'openshell-global-policy']) {
+      expect(byId.get(id)?.isolateHome, id).toBe(false);
+    }
+    expect(byId.get('openshell-sandbox-policy')?.forEach).toEqual({ from: 'openshell-sandbox-list', array: 'sandboxes', fields: ['name', 'workspace'] });
+    // The only real-HOME agent commands: read-only queries verified side-effect free
+    const realHomeAgentCmds = manifest.commands.filter(c => c.isolateHome === false).map(c => c.id);
+    expect(realHomeAgentCmds.sort()).toEqual(['openshell-global-policy', 'openshell-sandbox-list', 'openshell-sandbox-policy']);
+  });
+
+  it('keeps OpenShell keys, tokens and the credential database metadata-only', () => {
+    expect(manifest.metadataGlobPatterns).toEqual(expect.arrayContaining([
+      '~/.config/openshell/gateways/*/mtls/*',
+      '~/.config/openshell/gateways/*/oidc_token.json',
+      '~/.local/state/openshell/gateway/openshell.db*',
+      '~/.local/state/openshell/gateway/credentials/*',
+      '~/.local/state/openshell/docker-sandbox-tokens/**',
+      '/opt/homebrew/var/openshell/tls/ca.key',
+    ]));
+    const content = [...manifest.globPatterns, ...manifest.filePaths];
+    expect(content.filter(p => /openshell.*(?:mtls|\.key|signing|credentials|tokens|\.db)/.test(p))).toEqual([]);
+  });
+
   it('keeps private session/conversation stores metadata-only', () => {
     expect(manifest.metadataGlobPatterns).toEqual(expect.arrayContaining([
       '~/.codex/sessions/*/*/*/rollout-*.jsonl',

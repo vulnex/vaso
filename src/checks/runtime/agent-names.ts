@@ -13,7 +13,9 @@ export const AGENT_PROCESS_NAMES: Partial<Record<AgentType, string[]>> = {
   ironclaw: ['ironclaw'],
   nanobot: ['nanobot'],
   zeroclaw: ['zeroclaw'],
-  nemoclaw: ['nemoclaw', 'openshell'],
+  nemoclaw: ['nemoclaw'],
+  // ps truncates comm to 15 chars: openshell-gatew(ay), openshell-super(visor)
+  openshell: ['openshell'],
   hermes: ['hermes'],
   lyrie: ['lyrie'],
   'atomic-agent': ['atomic-agent', 'atag'],

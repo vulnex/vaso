@@ -42,6 +42,7 @@ const CATEGORY_LABELS: Record<CheckCategory, string> = {
   lyrie: 'Lyrie',
   hermes: 'Hermes',
   'atomic-agent': 'Atomic Agent',
+  openshell: 'OpenShell',
   advisory: 'Advisories',
   'coding-agent': 'Coding Agent',
 };

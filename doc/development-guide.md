@@ -36,6 +36,7 @@ src/
     nanobot.ts              Nanobot adapter
     zeroclaw.ts             ZeroClaw adapter
     nemoclaw.ts             NemoClaw adapter
+    openshell.ts            NVIDIA OpenShell adapter
     hermes.ts               Hermes adapter
     lyrie.ts                Lyrie adapter
     atomic-agent.ts         Atomic Agent adapter
@@ -72,6 +73,7 @@ src/
     lyrie/                  20 Lyrie-specific (LY-*)
     hermes/                 10 Hermes-specific (HM-*)
     atomic-agent/           11 Atomic Agent-specific (AT-*)
+    openshell/              14 NVIDIA OpenShell-specific (OSH-*)
     claude-code/            12 Claude Code-specific (CC-*)
     claude-desktop/         10 Claude Desktop-specific (CD-*)
     chatgpt-desktop/        6 ChatGPT Desktop-specific (CG-*)
@@ -202,7 +204,7 @@ Every security check implements this interface:
 interface CheckModule {
   id: string;                              // e.g. 'CFG-001', 'SKL-003', 'LY-018'
   name: string;                            // Human-readable name
-  category: CheckCategory;                 // one of 18 categories — see src/core/types.ts
+  category: CheckCategory;                 // one of 19 categories — see src/core/types.ts
   severity: Severity;                      // 'critical' | 'warning' | 'info'
   description: string;                     // What this check does
 
@@ -348,6 +350,7 @@ Current prefix landscape (one prefix per directory under `src/checks/`):
 | `lyrie/` | LY | Lyrie-specific |
 | `hermes/` | HM | Hermes-specific |
 | `atomic-agent/` | AT | Atomic Agent-specific |
+| `openshell/` | OSH | NVIDIA OpenShell-specific |
 | `claude-code/` | CC | Claude Code CLI-specific |
 | `claude-desktop/` | CD | Claude Desktop / Cowork-specific |
 | `chatgpt-desktop/` | CG | ChatGPT Desktop-specific |

@@ -50,7 +50,7 @@ export const cfg022 = defineCheck({
     // still record them (legacy installs) can be judged from disk.
     const withPolicies = Object.entries(config.sandboxes).filter(([, s]) => Array.isArray(s.policies));
     if (withPolicies.length === 0) {
-      return h.passed('NemoClaw policy presets are held by the OpenShell gateway, not on disk — run `nemoclaw list` to review them');
+      return h.passed('NemoClaw policy presets are held by the OpenShell gateway, not on disk — evaluated by the OpenShell checks (OSH-011–OSH-014)');
     }
 
     const evidence: Evidence[] = [];

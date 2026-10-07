@@ -7,5 +7,5 @@ import type { AgentType } from '../../core/types.js';
  * strictly — an unknown key written by a fix makes the agent refuse to start.
  */
 export const NATIVE_POLICY_FRAMEWORKS: AgentType[] = [
-  'atomic-agent', 'picoclaw', 'nanoclaw', 'ironclaw', 'zeroclaw', 'nanobot', 'lyrie',
+  'atomic-agent', 'picoclaw', 'nanoclaw', 'ironclaw', 'zeroclaw', 'nanobot', 'lyrie', 'openshell',
 ];

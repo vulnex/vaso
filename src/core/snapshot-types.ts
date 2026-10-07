@@ -18,6 +18,19 @@ export interface CommandRequest {
   timeout?: number;
   /** Run with a throwaway HOME/XDG dirs and cwd (agent CLI version queries). */
   isolateHome?: boolean;
+  /** Run once per item of an earlier command's JSON output (probe ≥ 1.0.1),
+   *  substituting `{field}` placeholders in `args`. Each run is stored under its
+   *  natural `<cmd> <args>` key, so `fs.exec` with the substituted args finds it. */
+  forEach?: CommandForEach;
+}
+
+export interface CommandForEach {
+  /** `id` of an earlier command whose stdout is JSON. */
+  from: string;
+  /** Top-level key of the array to iterate. */
+  array: string;
+  /** String fields of each item, substituted for `{field}` in args. */
+  fields: string[];
 }
 
 export interface ProbeSnapshot {
