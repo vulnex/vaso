@@ -39,7 +39,7 @@ export class SnapshotFSProvider implements FSProvider {
     if (entry.contentOmitted || typeof entry.content !== 'string') {
       throw new Error(`EACCES: content not collected in snapshot: ${path}`);
     }
-    // Probe ≥ 1.0.1 ships non-UTF-8 files base64-encoded, so their bytes are
+    // Probe ≥ 1.1.0 ships non-UTF-8 files base64-encoded, so their bytes are
     // exact. Text arrives as a UTF-8 string and re-encodes faithfully; from
     // older probes, invalid byte sequences were already replaced with U+FFFD.
     return entry.encoding === 'base64' ? Buffer.from(entry.content, 'base64') : Buffer.from(entry.content, 'utf-8');
@@ -174,7 +174,7 @@ export class SnapshotFSProvider implements FSProvider {
   }
 
   async readlink(path: string): Promise<string> {
-    // Probes ≥ 1.0.1 record link targets for symlinks they meet; older
+    // Probes ≥ 1.1.0 record link targets for symlinks they meet; older
     // snapshots have none, and their entries are never marked as links.
     const target = this.snapshot.symlinks?.[path];
     if (target !== undefined) return target;

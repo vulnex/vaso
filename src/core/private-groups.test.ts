@@ -58,7 +58,7 @@ describe('queryPermissions — user-private groups', () => {
     expect(evidence[0].mitigated).toBe(true);
   });
 
-  it('works from a remote snapshot (probe ≥ 1.0.1) and is a no-op for older snapshots', async () => {
+  it('works from a remote snapshot (probe ≥ 1.1.0) and is a no-op for older snapshots', async () => {
     const base = {
       version: 1, hostname: 'h', platform: 'linux', homedir: '/home/carol', timestamp: 't',
       privilege: { uid: 1000, username: 'carol', isRoot: false, sudoAvailable: false, escalated: false, scannedUsers: [], skippedPaths: [] },

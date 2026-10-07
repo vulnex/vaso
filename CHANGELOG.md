@@ -6,6 +6,10 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-10-07
+
+Adds Abacus.AI CLI / AbacusAI Desktop and NVIDIA OpenShell support — 25 agents, 347 checks in 19 categories — and fixes remote-scan parity, permission false positives and output issues found in live testing. The `LICENSE` copyright line now reads "Copyright 2026 VULNEX". Remote scans need the 1.1.0 probe binaries for the new probe behavior (fetched and verified automatically on first `--host` use); older probes keep working with the previous behavior.
+
 ### Added
 
 - **Abacus.AI CLI and AbacusAI Desktop support (agents 23 → 24; checks 318 → 333; new ABA-001–015 in the `coding-agent` category).** Built from the 2.10.2 CLI and the 2.2.4 desktop app installed live on Linux, with their config schema, workspace-trust rules and file modes verified against the running software.
@@ -39,7 +43,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - **`--format` is validated before any work.** An unknown format used to fail only after a full scan; `scan`, `detect`, `mcp scan`, `mcp list` and `skill audit` now reject it immediately (exit 2), listing the formats available (including user-plugin reporters).
 - **`--save-snapshot` on a local scan is an error.** It only applies to `--host`/`--inventory` scans and was silently ignored; `scan` and `detect` now exit 2 with a message.
 
-Probe changes in this release (Abacus.AI allowlist and install-on-run guard, OpenShell allowlist and per-item commands, base64 transport for binary files, package-manager bin dirs, symlink handling, 5 MiB content cap, ownership and private groups) require the 1.0.1 probe binaries; older probes keep working with the previous behavior.
+Probe changes in this release (Abacus.AI allowlist and install-on-run guard, OpenShell allowlist and per-item commands, base64 transport for binary files, package-manager bin dirs, symlink handling, 5 MiB content cap, ownership and private groups) require the 1.1.0 probe binaries; older probes keep working with the previous behavior.
 
 ## [1.0.0] - 2026-10-05
 

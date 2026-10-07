@@ -64,7 +64,7 @@ export const skl013 = defineCheck({
     if (dirs.length === 0) return h.passed('No skills/workspace directory to scan for symlinks');
 
     // Providers that can't observe link status (mocks, snapshots from probes
-    // before 1.0.1) never set isSymbolicLink — nothing to do there.
+    // before 1.1.0) never set isSymbolicLink — nothing to do there.
     if (typeof ctx.fs.readlink !== 'function') {
       return h.passed('Symlink status unavailable for this scan source');
     }

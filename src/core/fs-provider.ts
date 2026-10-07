@@ -71,7 +71,7 @@ export interface FSProvider {
   readFile(path: string): Promise<string>;
   /**
    * Read raw bytes. LocalFSProvider returns the file's actual bytes, and so
-   * does SnapshotFSProvider for snapshots from probe ≥ 1.0.1 (non-UTF-8 files
+   * does SnapshotFSProvider for snapshots from probe ≥ 1.1.0 (non-UTF-8 files
    * are shipped base64-encoded). From older probes it returns a UTF-8
    * re-encoding of the collected text, where invalid byte sequences were
    * already replaced — byte-level checks must treat those accordingly.
@@ -89,7 +89,7 @@ export interface FSProvider {
    * literal target), and it does not follow multi-hop chains — it reports one
    * link's own target string as stored on disk (may be relative). Throws if the
    * path is not a symlink. SnapshotFSProvider answers from the targets the
-   * probe recorded (probe ≥ 1.0.1) and throws otherwise.
+   * probe recorded (probe ≥ 1.1.0) and throws otherwise.
    */
   readlink(path: string): Promise<string>;
   /**

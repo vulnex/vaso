@@ -18,7 +18,7 @@ export interface CommandRequest {
   timeout?: number;
   /** Run with a throwaway HOME/XDG dirs and cwd (agent CLI version queries). */
   isolateHome?: boolean;
-  /** Run once per item of an earlier command's JSON output (probe ≥ 1.0.1),
+  /** Run once per item of an earlier command's JSON output (probe ≥ 1.1.0),
    *  substituting `{field}` placeholders in `args`. Each run is stored under its
    *  natural `<cmd> <args>` key, so `fs.exec` with the substituted args finds it. */
   forEach?: CommandForEach;
@@ -48,11 +48,11 @@ export interface ProbeSnapshot {
   directoryModes?: Record<string, number>;
   /** The probe's content budget ran out; later files carry metadata only. */
   truncated?: boolean;
-  /** Symlinks seen in listings and glob matches, path → link target (probe ≥ 1.0.1). */
+  /** Symlinks seen in listings and glob matches, path → link target (probe ≥ 1.1.0). */
   symlinks?: Record<string, string>;
-  /** Owner [uid, gid] of collected files and directories (probe ≥ 1.0.1). */
+  /** Owner [uid, gid] of collected files and directories (probe ≥ 1.1.0). */
   owners?: Record<string, [number, number]>;
-  /** User-private groups on the host, gid → uid (probe ≥ 1.0.1, Linux). */
+  /** User-private groups on the host, gid → uid (probe ≥ 1.1.0, Linux). */
   privateGroups?: Record<string, number>;
 }
 
@@ -74,7 +74,7 @@ export interface FileEntry {
    *  budget, binary asset, or a metadata-only glob). */
   contentOmitted?: boolean;
   /** `'base64'` when the file is not valid UTF-8 and `content` holds its bytes
-   *  base64-encoded (probe ≥ 1.0.1); absent means UTF-8 text. */
+   *  base64-encoded (probe ≥ 1.1.0); absent means UTF-8 text. */
   encoding?: 'base64';
 }
 

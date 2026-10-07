@@ -511,7 +511,7 @@ describe('SnapshotFSProvider — probe ≥ 1.0.0 fields', () => {
 });
 
 
-describe('SnapshotFSProvider — symlinks (probe ≥ 1.0.1)', () => {
+describe('SnapshotFSProvider — symlinks (probe ≥ 1.1.0)', () => {
   const skills = '/home/testuser/.claude/skills';
   const snapshot = makeSnapshot({
     files: {
@@ -549,7 +549,7 @@ describe('SnapshotFSProvider — symlinks (probe ≥ 1.0.1)', () => {
     expect((await old.readdirEntries(skills, { recursive: true }))[0]).toMatchObject({ isFile: true });
   });
 
-  describe('binary files (base64 transport, probe >= 1.0.1)', () => {
+  describe('binary files (base64 transport, probe >= 1.1.0)', () => {
     const raw = new Uint8Array([0x0a, 0x05, 0x74, 0x75, 0x72, 0x62, 0x6f, 0xff, 0xfe, 0x00, 0x80]);
     const fs = new SnapshotFSProvider(makeSnapshot({
       files: {
