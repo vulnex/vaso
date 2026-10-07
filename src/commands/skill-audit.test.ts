@@ -15,6 +15,14 @@ vi.mock('../core/utils.js', () => ({
   getSkillFiles: (...args: unknown[]) => mockGetSkillFiles(...args),
 }));
 
+// Mock the directory walk (symlinks / documentation files)
+const mockReaddirEntries = vi.fn();
+vi.mock('../core/local-fs-provider.js', () => ({
+  LocalFSProvider: vi.fn().mockImplementation(function () {
+    return { readdirEntries: (...args: unknown[]) => mockReaddirEntries(...args) };
+  }),
+}));
+
 // Mock ScanEngine
 const mockScanSkill = vi.fn();
 vi.mock('../core/engine.js', () => ({
@@ -110,11 +118,25 @@ describe('runSkillAudit', () => {
     mockStat.mockResolvedValue({ isDirectory: () => true });
     mockGetSkillFiles.mockResolvedValue([]);
 
+    mockReaddirEntries.mockResolvedValue([]);
+
     await runSkillAudit('/empty/skill', { format: 'terminal' });
 
-    expect(consoleErrorLogs.join('\n')).toContain('No code files or symlinks found');
+    expect(consoleErrorLogs.join('\n')).toContain('No code, documentation or symlinks found');
     expect(mockScanSkill).not.toHaveBeenCalled();
     expect(process.exitCode).toBeUndefined();
+  });
+
+  it('audits an instructions-only skill (SKILL.md, no code) for prompt injection', async () => {
+    mockStat.mockResolvedValue({ isDirectory: () => true });
+    mockGetSkillFiles.mockResolvedValue([]);
+    mockReaddirEntries.mockResolvedValue([{ name: 'SKILL.md', isFile: true, isDirectory: false }]);
+    mockScanSkill.mockResolvedValue(sampleScanResult);
+
+    await runSkillAudit('/tmp/md-skill', { format: 'json' });
+
+    expect(mockScanSkill).toHaveBeenCalledWith(expect.stringContaining('md-skill'), [], expect.anything());
+    expect(consoleErrorLogs.join('\n')).toContain('Auditing 1 documentation file(s)');
   });
 
   it('runs scan and renders output on happy path', async () => {

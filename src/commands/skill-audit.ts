@@ -38,14 +38,15 @@ export async function runSkillAudit(skillPath: string, options: SkillAuditComman
   // Discover code files
   const skillFiles = await getSkillFiles(resolved);
 
-  // Even a directory with no code files is worth auditing when it contains
-  // symlinks: the canonical GhostApproval repo is just a disguised symlink plus
-  // a README (no code), and SKL-013 walks the directory itself rather than the
-  // code-file list. Bail only when there's genuinely nothing to look at.
-  const hasSymlink = skillFiles.length === 0 && (await directoryHasSymlink(resolved));
+  // Even a directory with no code files is worth auditing: an instructions-only
+  // skill (SKILL.md) is what SKL-007 checks for prompt injection, and the
+  // canonical GhostApproval repo is just a disguised symlink plus a README —
+  // SKL-007 and SKL-013 walk the directory itself, not the code-file list.
+  // Bail only when there's genuinely nothing to look at.
+  const contents = skillFiles.length === 0 ? await directoryContents(resolved) : { symlink: false, docs: 0 };
 
-  if (skillFiles.length === 0 && !hasSymlink) {
-    console.error(chalk.yellow(`No code files or symlinks found in ${resolved}. Nothing to audit.`));
+  if (skillFiles.length === 0 && !contents.symlink && contents.docs === 0) {
+    console.error(chalk.yellow(`No code, documentation or symlinks found in ${resolved}. Nothing to audit.`));
     return;
   }
 
@@ -53,7 +54,9 @@ export async function runSkillAudit(skillPath: string, options: SkillAuditComman
     chalk.dim(
       skillFiles.length > 0
         ? `Auditing ${skillFiles.length} file(s) in ${resolved}\n`
-        : `Auditing ${resolved} for symlink escapes\n`,
+        : contents.docs > 0
+          ? `Auditing ${contents.docs} documentation file(s) in ${resolved}\n`
+          : `Auditing ${resolved} for symlink escapes\n`,
     ),
   );
 
@@ -85,12 +88,17 @@ export async function runSkillAudit(skillPath: string, options: SkillAuditComman
   }
 }
 
-/** True when the directory tree contains at least one symbolic link. */
-async function directoryHasSymlink(dir: string): Promise<boolean> {
+const DOC_FILE = /\.(?:md|txt|rst)$/i;
+
+/** Symlinks and documentation files (SKILL.md, README…) in the directory tree. */
+async function directoryContents(dir: string): Promise<{ symlink: boolean; docs: number }> {
   try {
     const entries = await new LocalFSProvider().readdirEntries(dir, { recursive: true });
-    return entries.some((e) => e.isSymbolicLink);
+    return {
+      symlink: entries.some((e) => e.isSymbolicLink),
+      docs: entries.filter((e) => e.isFile && DOC_FILE.test(e.name)).length,
+    };
   } catch {
-    return false;
+    return { symlink: false, docs: 0 };
   }
 }

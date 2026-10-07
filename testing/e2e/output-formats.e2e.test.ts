@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { createE2EEnvironment, type E2EEnvironment } from './helpers/setup.js';
 import { runVasoCLI } from './helpers/cli-runner.js';
 
@@ -36,6 +38,21 @@ describe('E2E: output formats', () => {
     const configFiles = parsed.agents.flatMap((a: { installation: { configFiles: unknown[] } }) => a.installation.configFiles);
     expect(configFiles.length).toBeGreaterThan(0);
     for (const c of configFiles) expect(Object.keys(c as object).sort()).toEqual(['filePath', 'format']);
+  });
+
+  it('keeps stale-feed warnings out of stdout (JSON reports and probe manifest stay parseable)', async () => {
+    const iocDir = join(env.tempHome, '.vaso', 'ioc');
+    mkdirSync(iocDir, { recursive: true });
+    writeFileSync(join(iocDir, 'metadata.json'), JSON.stringify({ version: 1, lastCheckAt: '2020-01-01T00:00:00Z', lastUpdateAt: '2020-01-01T00:00:00Z' }));
+    try {
+      for (const args of [['scan', '--format', 'json'], ['probe', 'manifest'], ['mcp', 'list', '-f', 'json']]) {
+        const result = await runVasoCLI(args, { HOME: env.tempHome });
+        expect(() => JSON.parse(result.stdout), args.join(' ')).not.toThrow();
+        expect(result.stderr, args.join(' ')).toContain('IOC feed is stale');
+      }
+    } finally {
+      rmSync(join(env.tempHome, '.vaso', 'ioc'), { recursive: true, force: true });
+    }
   });
 
   it('rejects an unknown --format with exit 2 before scanning', async () => {

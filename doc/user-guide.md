@@ -53,7 +53,7 @@ vaso scan [options]
 | `--host <target...>` | Scan one or more remote hosts via SSH (`user@host[:port]`). Variadic. |
 | `--inventory <path>` | YAML file listing hosts to scan |
 | `--ssh-key <path>` | SSH identity file for remote connections |
-| `--ssh-timeout <seconds>` | Per-attempt SSH connection timeout (default 60) |
+| `--ssh-timeout <seconds>` | Per-attempt SSH connection timeout (default 60); uploading and running the probe may take up to 10 minutes |
 | `--ssh-retries <n>` | Additional SSH attempts after the first failure, with exponential backoff (default 0) |
 | `--parallel <n>` | Max hosts to scan concurrently (default 5) |
 | `--sudo` | Attempt sudo escalation on remote hosts |
@@ -119,7 +119,7 @@ vaso detect [options]
 | `--host <target...>` | Detect on one or more remote hosts via SSH (`user@host[:port]`). Variadic. |
 | `--inventory <path>` | YAML file listing hosts to detect against |
 | `--ssh-key <path>` | SSH identity file for remote connections |
-| `--ssh-timeout <seconds>` | Per-attempt SSH connection timeout (default 60) |
+| `--ssh-timeout <seconds>` | Per-attempt SSH connection timeout (default 60); uploading and running the probe may take up to 10 minutes |
 | `--ssh-retries <n>` | Additional SSH attempts after the first failure (default 0) |
 | `--parallel <n>` | Max hosts to detect concurrently (default 5) |
 | `--snapshot <path>` | Detect from a pre-collected probe snapshot file |

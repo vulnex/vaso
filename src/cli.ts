@@ -114,13 +114,13 @@ program
         if (!silent) {
           for (const err of rulesResult.loadResult.allErrors) {
             const loc = err.rule ? ` (rule ${err.rule})` : '';
-            console.log(chalk.yellow(`  Warning: rule file ${err.file}${loc}: ${err.message}\n`));
+            console.error(chalk.yellow(`  Warning: rule file ${err.file}${loc}: ${err.message}\n`));
           }
           for (const skip of rulesResult.skipped) {
-            console.log(chalk.yellow(`  Warning: rule "${skip.id}" skipped: ${skip.reason}\n`));
+            console.error(chalk.yellow(`  Warning: rule "${skip.id}" skipped: ${skip.reason}\n`));
           }
           if (rulesResult.registered.length > 0) {
-            console.log(chalk.dim(`  Loaded ${rulesResult.registered.length} declarative rule(s)\n`));
+            console.error(chalk.dim(`  Loaded ${rulesResult.registered.length} declarative rule(s)\n`));
           }
         }
       }
@@ -129,15 +129,16 @@ program
     await initIOCDatabase();
     await initAdvisoryDatabase();
 
-    // Warn about stale feeds for non-update commands
+    // Warn about stale feeds for non-update commands. Diagnostics go to stderr
+    // with the banner: stdout carries reports (`-f json`) and `probe manifest`.
     if (!silent && actionCommand.name() !== 'update') {
       if (isFeedStale()) {
-        console.log(
+        console.error(
           chalk.yellow('  IOC feed is stale. Run `vaso update` for latest threat data.\n'),
         );
       }
       if (isAdvisoryFeedStale()) {
-        console.log(
+        console.error(
           chalk.yellow('  Advisory feed is stale. Run `vaso update` for latest advisories.\n'),
         );
       }

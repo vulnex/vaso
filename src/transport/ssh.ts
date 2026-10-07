@@ -160,7 +160,7 @@ function runOverControl(
     });
     child.stderr.on('data', (d: Buffer) => errChunks.push(d));
 
-    child.on('close', (code) => {
+    child.on('close', (code, signal) => {
       if (oversized) {
         reject(new Error(
           `Remote probe output exceeded ${Math.round(MAX_REMOTE_OUTPUT_BYTES / 1024 / 1024)} MiB and was aborted — ` +
@@ -171,6 +171,9 @@ function runOverControl(
       const stderr = Buffer.concat(errChunks).toString('utf-8');
       if (code === 0) {
         resolve({ stdout, stderr });
+      } else if (code === null && signal && options.timeout) {
+        // spawn()'s timeout kills the child with a signal and no exit code
+        reject(new Error(`${cmd === 'scp' ? 'Upload' : 'Remote command'} did not finish within ${Math.round(options.timeout / 1000)}s and was stopped: ${args.slice(-1).join(' ')}`));
       } else {
         reject(new Error(`Command failed: ${cmd} ${args.slice(-1).join(' ')}\n${stderr || stdout}`.trim()));
       }
@@ -306,11 +309,17 @@ export async function executeRemoteProbeWithRetry(
   });
 }
 
+/** Upper bound for uploading and running the probe (independent of --ssh-timeout). */
+export const PROBE_RUN_TIMEOUT_MS = 10 * 60 * 1000;
+
 export async function executeRemoteProbe(
   target: SSHTarget,
   options: SSHTransportOptions,
 ): Promise<ProbeSnapshot> {
+  // --ssh-timeout bounds connecting (handshake, platform detection). Uploading
+  // and running the probe take longer on large hosts and get their own limit.
   const timeout = options.timeout ?? 60000;
+  const runTimeout = Math.max(timeout, PROBE_RUN_TIMEOUT_MS);
   const uuid = randomUUID().slice(0, 8);
   const controlPath = `/tmp/vaso-ssh-${uuid}`;
   const remoteProbePath = `/tmp/vaso-probe-${uuid}`;
@@ -338,15 +347,15 @@ export async function executeRemoteProbe(
     await writeFile(localManifestPath, JSON.stringify(options.manifest), 'utf-8');
 
     // 5. Push binary + manifest to remote
-    await runOverControl('scp', controlSCPArgs(target, controlPath, localBinary, remoteProbePath), { timeout });
-    await runOverControl('scp', controlSCPArgs(target, controlPath, localManifestPath, remoteManifestPath), { timeout });
+    await runOverControl('scp', controlSCPArgs(target, controlPath, localBinary, remoteProbePath), { timeout: runTimeout });
+    await runOverControl('scp', controlSCPArgs(target, controlPath, localManifestPath, remoteManifestPath), { timeout: runTimeout });
 
     // 6. Make probe executable
     await runOverControl('ssh', controlSSHArgs(target, controlPath, [`chmod +x ${remoteProbePath}`]), { timeout: 10000 });
 
     // 7. Execute probe
     const probeCmd = `${remoteProbePath} --manifest ${remoteManifestPath}${target.sudo ? ' --escalate' : ''}`;
-    const { stdout } = await runOverControl('ssh', controlSSHArgs(target, controlPath, [probeCmd]), { timeout });
+    const { stdout } = await runOverControl('ssh', controlSSHArgs(target, controlPath, [probeCmd]), { timeout: runTimeout });
 
     // 8. Parse snapshot
     return JSON.parse(stdout) as ProbeSnapshot;
