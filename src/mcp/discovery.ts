@@ -282,9 +282,10 @@ export class MCPDiscovery {
 
   async discoverFromPaths(paths: string[]): Promise<MCPDiscoveryResult> {
     const configs: MCPConfig[] = [];
+    const unreadable: string[] = [];
 
     for (const filePath of paths) {
-      if (!await this.fs.access(filePath)) continue;
+      if (!await this.fs.access(filePath)) { unreadable.push(filePath); continue; }
 
       try {
         const raw = await this.fs.readFile(filePath);
@@ -304,11 +305,12 @@ export class MCPDiscovery {
           });
         }
       } catch {
-        // Skip unparseable configs
+        // The caller named this file — report it rather than scan nothing
+        unreadable.push(filePath);
       }
     }
 
     const totalServers = configs.reduce((sum, c) => sum + c.servers.length, 0);
-    return { configs, totalServers };
+    return { configs, totalServers, ...(unreadable.length > 0 ? { unreadable } : {}) };
   }
 }

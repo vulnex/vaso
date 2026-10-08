@@ -9,6 +9,16 @@ import { resolveServerSources } from '../mcp/source-resolver.js';
 import type { ScanOptions } from '../core/types.js';
 import { logError } from '../core/debug.js';
 import { toReportJson } from '../reporting/serialize.js';
+import { EXIT_USAGE } from '../core/exit-criteria.js';
+import type { MCPDiscoveryResult } from '../mcp/types.js';
+
+/** Paths named with -p must exist and parse; otherwise nothing would be scanned silently. */
+function reportUnreadable(result: MCPDiscoveryResult): boolean {
+  if (!result.unreadable?.length) return false;
+  for (const p of result.unreadable) console.error(chalk.red(`Cannot read MCP config (missing or not valid JSON): ${p}`));
+  process.exitCode = EXIT_USAGE;
+  return true;
+}
 
 export interface MCPScanCommandOptions {
   format: string;
@@ -25,6 +35,7 @@ export async function runMCPScan(options: MCPScanCommandOptions): Promise<void> 
     const discoveryResult = options.path
       ? await discovery.discoverFromPaths(options.path)
       : await discovery.discover(process.platform, process.cwd());
+    if (reportUnreadable(discoveryResult)) return;
 
     if (discoveryResult.totalServers === 0) {
       console.error(chalk.yellow('No MCP servers found. Nothing to scan.'));
@@ -75,7 +86,7 @@ export async function runMCPScan(options: MCPScanCommandOptions): Promise<void> 
     }
   } catch (err) {
     logError(chalk.red('MCP scan failed:'), err);
-    process.exitCode = 1;
+    process.exitCode = EXIT_USAGE;
   }
 }
 
@@ -86,6 +97,7 @@ export async function runMCPList(options: { format: string; path?: string[] }): 
     const result = options.path
       ? await discovery.discoverFromPaths(options.path)
       : await discovery.discover(process.platform, process.cwd());
+    if (reportUnreadable(result)) return;
 
     if (options.format === 'json') {
       console.log(toReportJson(result));
@@ -122,6 +134,6 @@ export async function runMCPList(options: { format: string; path?: string[] }): 
     }
   } catch (err) {
     logError(chalk.red('MCP list failed:'), err);
-    process.exitCode = 1;
+    process.exitCode = EXIT_USAGE;
   }
 }

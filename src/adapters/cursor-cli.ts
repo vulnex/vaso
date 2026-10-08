@@ -244,6 +244,8 @@ export const cursorCliAdapter: AgentAdapter = {
       globPatterns: [
         '~/.cursor/rules/*.mdc',
         '~/.cursor/extensions/**',
+        // Installed skills (getSkillsDir) — SKL/IOC checks read them
+        '~/.cursor/skills-cursor/**',
         nvmBinaryGlob('cursor-agent'),
       ],
       // IDE state DBs hold session JWTs: CUR-013 / POL-003 need permissions only

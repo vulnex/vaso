@@ -302,6 +302,10 @@ export const zeroclawAdapter: AgentAdapter = {
       globPatterns: [
         '~/.zeroclaw/agents/*/workspace/skills/**',
         '~/.zeroclaw/shared/skills/**',
+        // open-skills checkout at its default location (`[skills] open_skills_enabled`)
+        '~/open-skills/**',
+        // Homebrew service installs keep agents and bundles under var/
+        ...HOMEBREW_CONFIG_DIRS.flatMap(d => [`${d}/agents/*/workspace/skills/**`, `${d}/shared/skills/**`]),
       ],
       // Key material, memory, sessions, traces and per-agent memory/identity
       // markdown — permissions only, content never shipped.

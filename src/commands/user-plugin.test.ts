@@ -103,10 +103,10 @@ describe('runExtInfo', () => {
     expect(consoleLogs.some(l => l.includes('1.0.0'))).toBe(true);
   });
 
-  it('sets exit code 1 when not found', async () => {
+  it('sets exit code 2 (usage) when not found', async () => {
     mockGetLoadedPlugins.mockReturnValue([]);
     await runExtInfo('nonexistent', {});
-    expect(process.exitCode).toBe(1);
+    expect(process.exitCode).toBe(2);
     expect(consoleErrors.some(l => l.includes('not found'))).toBe(true);
   });
 
@@ -125,7 +125,7 @@ describe('runExtInfo', () => {
     await runExtInfo('missing', { format: 'json' });
     const jsonLine = consoleLogs.find(l => l.includes('"error"'));
     expect(jsonLine).toBeDefined();
-    expect(process.exitCode).toBe(1);
+    expect(process.exitCode).toBe(2);
   });
 
   it('shows registered checks section', async () => {

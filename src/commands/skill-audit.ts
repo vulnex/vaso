@@ -9,6 +9,7 @@ import { getReporter } from '../reporting/index.js';
 import { getSkillFiles } from '../core/utils.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { logError } from '../core/debug.js';
+import { EXIT_USAGE } from '../core/exit-criteria.js';
 
 export interface SkillAuditCommandOptions {
   format: string;
@@ -25,13 +26,13 @@ export async function runSkillAudit(skillPath: string, options: SkillAuditComman
     pathStat = await stat(resolved);
   } catch {
     console.error(chalk.red(`Path does not exist: ${resolved}`));
-    process.exitCode = 1;
+    process.exitCode = EXIT_USAGE;
     return;
   }
 
   if (!pathStat.isDirectory()) {
     console.error(chalk.red(`Path is not a directory: ${resolved}`));
-    process.exitCode = 1;
+    process.exitCode = EXIT_USAGE;
     return;
   }
 
@@ -84,7 +85,7 @@ export async function runSkillAudit(skillPath: string, options: SkillAuditComman
     }
   } catch (err) {
     logError(chalk.red('Skill audit failed:'), err);
-    process.exitCode = 1;
+    process.exitCode = EXIT_USAGE;
   }
 }
 

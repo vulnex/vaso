@@ -249,6 +249,8 @@ export const abacusAdapter: AgentAdapter = {
         ...nodeManagerPackageJsonGlobs(NPM_PACKAGE_NAME),
         ...['/usr/local', '/usr', '/opt/homebrew'].map(p => `${p}/lib/node_modules/${NPM_PACKAGE_NAME}/package.json`),
         `~/.npm-global/lib/node_modules/${NPM_PACKAGE_NAME}/package.json`,
+        // User skill roots — SKL/IOC checks read them
+        ...USER_SKILL_DIRS.map(d => `~/${d}/**`),
       ],
       // Credential stores, session metadata, logs and past versions:
       // existence and permissions only, never content

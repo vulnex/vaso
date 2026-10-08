@@ -18,6 +18,8 @@ export interface MCPConfig {
 export interface MCPDiscoveryResult {
   configs: MCPConfig[];
   totalServers: number;
+  /** Explicitly given paths (discoverFromPaths) that are missing or not valid JSON/JSONC. */
+  unreadable?: string[];
 }
 
 export interface MCPServerSource {

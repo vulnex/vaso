@@ -91,4 +91,31 @@ describe('buildProbeManifest', () => {
     }
     expect([...manifest.metadataGlobPatterns!, ...manifest.systemPaths!]).toEqual(expect.arrayContaining(['/usr/bin/codex', '/opt/homebrew/bin/claude', '/usr/bin/openclaw']));
   });
+
+  // Remote scans see only what the manifest collects: a skills dir it misses
+  // makes every SKL/IOC check pass vacuously on --host / --snapshot scans.
+  it('collects every skills dir an adapter reports, so remote skill checks have code to read', () => {
+    for (const adapter of allAdapters as AgentAdapter[]) {
+      const dir = adapter.getSkillsDir?.('/x');
+      if (!dir) continue;
+      const globs = adapter.getProbeManifest?.().globPatterns ?? [];
+      // getSkillsDir(installDir) → '<installDir>/<suffix>'; some ignore installDir
+      const suffix = dir.startsWith('/x/') ? dir.slice(3) : dir.split('/').slice(-2).join('/');
+      expect(globs.some(g => g.endsWith(`/${suffix}/**`)), `${adapter.agent}: no '…/${suffix}/**' glob`).toBe(true);
+    }
+  });
+
+  it('collects user-scope skill roots beyond getSkillsDir (shared ~/.agents, legacy dirs, open-skills)', () => {
+    const byAgent = new Map((allAdapters as AgentAdapter[]).map(a => [a.agent, a.getProbeManifest?.().globPatterns ?? []]));
+    const expected: Record<string, string[]> = {
+      'cursor-cli': ['~/.cursor/skills-cursor/**'],
+      abacus: ['~/.abacusai/skills/**', '~/.agents/skills/**'],
+      devin: ['~/.config/devin/skills/**', '~/.config/cognition/skills/**', '~/.agents/skills/**'],
+      openclaw: ['~/.openclaw/skills/**', '~/.clawdbot/skills/**', '~/.moltbot/skills/**', '/etc/openclaw/skills/**'],
+      zeroclaw: ['~/.zeroclaw/shared/skills/**', '~/open-skills/**', '/opt/homebrew/var/zeroclaw/shared/skills/**'],
+    };
+    for (const [agent, globs] of Object.entries(expected)) {
+      expect(byAgent.get(agent as AgentAdapter['agent']), agent).toEqual(expect.arrayContaining(globs));
+    }
+  });
 });

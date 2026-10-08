@@ -239,6 +239,18 @@ describe('runScan', () => {
       expect(consoleErrors.some(l => l.includes('--ssh-retries'))).toBe(true);
     });
 
+    it.each(['abc', '0', '5s', '-3'])('rejects --ssh-timeout %s with exit 2 before connecting', async (sshTimeout) => {
+      await runScan({ format: 'terminal', host: ['root@10.0.0.1'], sshTimeout });
+      expect(process.exitCode).toBe(2);
+      expect(consoleErrors.some(l => l.includes('--ssh-timeout'))).toBe(true);
+    });
+
+    it('rejects --parallel with trailing garbage (2x) with exit 2', async () => {
+      await runScan({ format: 'terminal', host: ['root@10.0.0.1'], parallel: '2x' });
+      expect(process.exitCode).toBe(2);
+      expect(consoleErrors.some(l => l.includes('--parallel'))).toBe(true);
+    });
+
     it('rejects -o + --output-dir together with exit 2', async () => {
       await runScan({
         format: 'terminal',

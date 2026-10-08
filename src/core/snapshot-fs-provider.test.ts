@@ -319,6 +319,39 @@ describe('SnapshotFSProvider', () => {
       const provider = new SnapshotFSProvider(makeSnapshot());
       await expect(provider.realpath('/nonexistent')).rejects.toThrow('ENOENT');
     });
+
+    it('follows recorded symlinks like a local realpath (npm bin shim → package)', async () => {
+      const bin = '/home/testuser/.nvm/versions/node/v22.0.0/bin/abacusai';
+      const provider = new SnapshotFSProvider(makeSnapshot({
+        files: { [bin]: { content: '', mode: 0o755, exists: true } },
+        symlinks: { [bin]: '../lib/node_modules/@abacus-ai/cli/scripts/shim.cjs' },
+      }));
+      expect(await provider.realpath(bin))
+        .toBe('/home/testuser/.nvm/versions/node/v22.0.0/lib/node_modules/@abacus-ai/cli/scripts/shim.cjs');
+    });
+
+    it('resolves symlinked path components, absolute targets and chains', async () => {
+      const provider = new SnapshotFSProvider(makeSnapshot({
+        files: { '/home/testuser/.local/bin/claude': { content: '', mode: 0o755, exists: true } },
+        symlinks: {
+          '/home/testuser/.local/bin/claude': '/home/testuser/.local/share/claude/current',
+          '/home/testuser/.local/share/claude/current': 'versions/2.1.40',
+          '/home/testuser/link-dir': '/opt/real',
+        },
+        directoryModes: { '/opt/real': 0o755 },
+      }));
+      expect(await provider.realpath('/home/testuser/.local/bin/claude'))
+        .toBe('/home/testuser/.local/share/claude/versions/2.1.40');
+      expect(await provider.realpath('/home/testuser/link-dir')).toBe('/opt/real');
+    });
+
+    it('keeps the path on a symlink loop', async () => {
+      const provider = new SnapshotFSProvider(makeSnapshot({
+        files: { '/a': { content: '', mode: 0o644, exists: true } },
+        symlinks: { '/a': '/b', '/b': '/a' },
+      }));
+      expect(await provider.realpath('/a')).toBe('/a');
+    });
   });
 
   // ---------------------------------------------------------------------------
@@ -542,6 +575,19 @@ describe('SnapshotFSProvider — symlinks (probe ≥ 1.1.0)', () => {
   it('answers readlink from recorded targets', async () => {
     expect(await fs.readlink(`${skills}/browse/src`)).toBe(`${skills}/gstack/browse/src`);
     await expect(fs.readlink(`${skills}/browse/own.ts`)).rejects.toThrow();
+  });
+
+  it('treats a directory with a recorded mode as existing, even when empty (glob root, no listing)', async () => {
+    const provider = new SnapshotFSProvider(makeSnapshot({
+      directoryModes: { '/home/testuser/.abacusai/skills': 0o755, '/home/testuser/.cursor/skills-cursor/empty-skill': 0o755 },
+    }));
+    expect(await provider.access('/home/testuser/.abacusai/skills')).toBe(true);
+    expect((await provider.stat('/home/testuser/.abacusai/skills')).isDirectory()).toBe(true);
+    expect(await provider.readdir('/home/testuser/.abacusai/skills')).toEqual([]);
+    expect(await provider.readdir('/home/testuser/.cursor/skills-cursor')).toEqual(['empty-skill']);
+    const [entry] = await provider.readdirEntries('/home/testuser/.cursor/skills-cursor');
+    expect(entry).toMatchObject({ name: 'empty-skill', isDirectory: true, isFile: false });
+    expect(await provider.access('/home/testuser/.abacusai/missing')).toBe(false);
   });
 
   it('keeps old snapshots (no symlinks field) unchanged', async () => {

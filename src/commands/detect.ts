@@ -30,8 +30,8 @@ function safeHostname(host: string): string {
 
 function parsePositiveInt(raw: string | undefined, fallback: number, label: string): number {
   if (raw === undefined) return fallback;
-  const n = parseInt(raw, 10);
-  if (isNaN(n) || n < 0) {
+  const n = Number(raw);
+  if (!/^\d+$/.test(raw.trim()) || !Number.isSafeInteger(n)) {
     throw new Error(`Invalid ${label} value "${raw}": expected a non-negative integer`);
   }
   return n;
@@ -155,10 +155,13 @@ async function detectRemoteHosts(options: DetectCommandOptions): Promise<void> {
 
   let concurrency: number;
   let retries: number;
+  let sshTimeoutSec: number;
   try {
     concurrency = parsePositiveInt(options.parallel, 5, '--parallel');
     retries = parsePositiveInt(options.sshRetries, 0, '--ssh-retries');
     if (concurrency === 0) throw new Error('--parallel must be at least 1');
+    sshTimeoutSec = parsePositiveInt(options.sshTimeout, 60, '--ssh-timeout');
+    if (sshTimeoutSec === 0) throw new Error('--ssh-timeout must be at least 1');
   } catch (err) {
     console.error(chalk.red((err as Error).message));
     process.exitCode = 2;
@@ -192,7 +195,7 @@ async function detectRemoteHosts(options: DetectCommandOptions): Promise<void> {
   const vasoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
   const probeBinDir = join(vasoRoot, 'probe', 'dist');
   const manifest = buildProbeManifest(adapterRegistry.getAdapters());
-  const timeout = parseInt(options.sshTimeout ?? '60', 10) * 1000;
+  const timeout = sshTimeoutSec * 1000;
 
   if (options.saveSnapshot) {
     const { mkdir } = await import('node:fs/promises');

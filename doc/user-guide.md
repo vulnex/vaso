@@ -171,7 +171,7 @@ vaso skill audit ./skills/web-scraper --format json -o audit.json
 vaso skill audit ./skills/new-skill && echo "Safe to install"
 ```
 
-Exit code 1 is returned if any critical findings are detected. If the path does not exist, is not a directory, or contains no code files, VASO reports the issue and exits without scanning.
+Exit code 1 is returned if any critical findings are detected. If the path does not exist or is not a directory, VASO exits with code 2 without scanning; a directory with no code or skill documentation files is reported as having nothing to audit (exit 0).
 
 ### `vaso fix`
 
@@ -281,7 +281,7 @@ vaso mcp scan [options]
 |--------|-------------|
 | `-f, --format <format>` | Output format: `terminal` (default), `json`, `sarif`, `markdown`, `html`, `csv`, `junit` |
 | `-o, --output <file>` | Write report to a file instead of stdout |
-| `-p, --path <paths...>` | Specific config file paths to scan (skips auto-discovery) |
+| `-p, --path <paths...>` | Specific config file paths to scan (skips auto-discovery). A path that is missing or not valid JSON/JSONC is an error (exit 2) |
 | `--resolve-packages` | Download npm-packaged (`npx`) MCP servers — download only, never executed — and analyze their source. Requires network access |
 | `--no-color` | Disable colored terminal output |
 
@@ -361,6 +361,8 @@ See [`network-scanning-guide.md`](network-scanning-guide.md) for the full SSH wo
 | `1` | Findings at or above the threshold |
 | `2` | VASO could not run: invalid CLI arguments (e.g. `--silent` without an output destination, `--parallel 0`), an unreadable snapshot or inventory file, or an internal error |
 | `3` | Scan incomplete: one or more remote hosts could not be scanned (unreachable, authentication failed, probe error). Takes precedence over `1`, so CI can tell "not scanned" apart from "findings" |
+
+The other commands use the same codes: `skill audit` and `mcp scan` exit `1` on critical findings, and every command exits `2` when it cannot run — a missing or unreadable input (`skill audit <path>`, `mcp scan/list --path`, `visualize -i`, `probe validate`), an unknown name (`ext info`), or an invalid option value such as `--ssh-timeout abc`. `probe validate` exits `1` when the snapshot is readable JSON but fails validation.
 
 `--fail-on` accepts `critical` (default), `warning`, `info`, or `none`. Use `--fail-on none` to never fail on findings — useful for scans that only produce reports.
 

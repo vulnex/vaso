@@ -6,6 +6,13 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Remote scans read Cursor, Abacus.AI and Devin skills.** The probe manifest did not collect `~/.cursor/skills-cursor/`, `~/.abacusai/skills/` and `~/.agents/skills/` (Abacus.AI), or `~/.config/devin/skills/`, `~/.config/cognition/skills/` and `~/.agents/skills/` (Devin CLI), so on `--host`/`--snapshot` scans every skill and IOC check for those agents passed without reading any skill code. Also collected now: OpenClaw skills under the legacy `~/.clawdbot`/`~/.moltbot` dirs and `/etc/openclaw`, ZeroClaw's default `~/open-skills` checkout and its Homebrew service dirs. A test now requires every adapter's skills dir to be in its probe manifest. No probe update needed.
+- **Snapshots resolve symlinks and empty directories like a local scan.** `realpath()` on a snapshot follows the link targets the 1.1.0 probe records, so an npm bin shim resolves into its package: the Abacus.AI npm copy (and other npm-installed CLIs reached through a bin link) is now versioned on remote scans instead of being dropped. A directory the probe found empty (e.g. a skills dir that is a symlink to an empty folder) now exists remotely, as it does locally.
+- **`--ssh-timeout` is validated.** A non-numeric or zero value (`abc`, `5s`, `0`) used to reach every host as an invalid timeout and fail them all (exit 3); `scan` and `detect` now reject it before connecting (exit 2). `--parallel` and `--ssh-retries` no longer accept trailing characters (`2x`).
+- **Errors no longer look like findings or a clean run.** `skill audit` on a missing path or a file, `visualize -i` with a missing or unreadable scan result, `probe validate` on a missing or non-JSON file, and `ext info` with an unknown plugin exited 1 (the "findings" code); they exit 2. `mcp scan`/`mcp list --path` with a missing or unparseable file reported "No MCP servers found" and exited 0, so a typo passed CI; they now name the file and exit 2. Internal errors in `skill audit`, `mcp scan` and `mcp list` exit 2 as well.
+
 ## [1.1.0] - 2026-10-07
 
 Adds Abacus.AI CLI / AbacusAI Desktop and NVIDIA OpenShell support — 25 agents, 347 checks in 19 categories — and fixes remote-scan parity, permission false positives and output issues found in live testing. The `LICENSE` copyright line now reads "Copyright 2026 VULNEX". Remote scans need the 1.1.0 probe binaries for the new probe behavior (fetched and verified automatically on first `--host` use); older probes keep working with the previous behavior.

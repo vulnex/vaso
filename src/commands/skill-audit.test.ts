@@ -99,7 +99,7 @@ describe('runSkillAudit', () => {
 
     await runSkillAudit('/nonexistent', { format: 'terminal' });
 
-    expect(process.exitCode).toBe(1);
+    expect(process.exitCode).toBe(2);
     expect(consoleErrorLogs.join('\n')).toContain('Path does not exist');
     expect(mockScanSkill).not.toHaveBeenCalled();
   });
@@ -109,7 +109,7 @@ describe('runSkillAudit', () => {
 
     await runSkillAudit('/some/file.txt', { format: 'terminal' });
 
-    expect(process.exitCode).toBe(1);
+    expect(process.exitCode).toBe(2);
     expect(consoleErrorLogs.join('\n')).toContain('Path is not a directory');
     expect(mockScanSkill).not.toHaveBeenCalled();
   });
@@ -185,7 +185,7 @@ describe('runSkillAudit', () => {
 
     await runSkillAudit('/tmp/skill', { format: 'terminal' });
 
-    expect(process.exitCode).toBe(1);
+    expect(process.exitCode).toBe(2);
     expect(consoleErrorLogs.join('\n')).toContain('Skill audit failed');
   });
 });

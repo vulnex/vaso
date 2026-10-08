@@ -58,7 +58,7 @@ export async function runExtInfo(name: string, options: { format?: string }): Pr
         console.log(chalk.dim(`  Available plugins: ${available.join(', ')}\n`));
       }
     }
-    process.exitCode = 1;
+    process.exitCode = 2;
     return;
   }
 

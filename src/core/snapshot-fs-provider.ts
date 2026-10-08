@@ -1,4 +1,4 @@
-import { join, basename } from 'node:path';
+import { join, basename, posix } from 'node:path';
 import type { FSProvider, DirentInfo, ExecResult, ExecOptions, PermissionQuery } from './fs-provider.js';
 import { posixPermissionFacts } from './permissions.js';
 import type { ProbeSnapshot } from './snapshot-types.js';
@@ -66,7 +66,8 @@ export class SnapshotFSProvider implements FSProvider {
         if (firstSegment) entries.add(firstSegment);
       }
     }
-    for (const dirPath of Object.keys(this.snapshot.directories)) {
+    const dirPaths = [...Object.keys(this.snapshot.directories), ...Object.keys(this.snapshot.directoryModes ?? {})];
+    for (const dirPath of dirPaths) {
       if (dirPath.startsWith(prefix) && dirPath !== path) {
         const relative = dirPath.slice(prefix.length);
         const firstSegment = relative.split('/')[0];
@@ -75,6 +76,8 @@ export class SnapshotFSProvider implements FSProvider {
     }
 
     if (entries.size > 0) return [...entries];
+    // A directory the probe stat'ed but found nothing to collect in is empty
+    if (this.snapshot.directoryModes?.[path] !== undefined) return [];
     throw new Error(`ENOENT: directory not collected in snapshot: ${path}`);
   }
 
@@ -97,8 +100,7 @@ export class SnapshotFSProvider implements FSProvider {
         return { name, isFile: false, isDirectory: false, isSymbolicLink: true, parentPath: path };
       }
       const isFile = fullPath in this.snapshot.files && this.snapshot.files[fullPath].exists;
-      const isDir = rawDirs.has(name) || fullPath in this.snapshot.directories ||
-        this.hasChildPaths(fullPath);
+      const isDir = rawDirs.has(name) || this.directoryExists(fullPath) || this.hasChildPaths(fullPath);
       return {
         name,
         isFile: isFile && !isDir,
@@ -168,9 +170,32 @@ export class SnapshotFSProvider implements FSProvider {
   }
 
   async realpath(path: string): Promise<string> {
-    // Snapshots don't resolve symlinks — return as-is if path exists
-    if (await this.access(path)) return path;
-    throw new Error(`ENOENT: path not collected in snapshot: ${path}`);
+    if (!(await this.access(path)) && !(path in (this.snapshot.symlinks ?? {}))) {
+      throw new Error(`ENOENT: path not collected in snapshot: ${path}`);
+    }
+    return this.resolveSymlinks(path);
+  }
+
+  /**
+   * Follows the link targets the probe recorded (≥ 1.1.0), component by
+   * component like a local realpath — so an npm bin shim resolves into its
+   * package and copies dedupe by what they point to. Links the probe never
+   * met stay as they are (older snapshots have none).
+   */
+  private resolveSymlinks(path: string): string {
+    const symlinks = this.snapshot.symlinks ?? {};
+    let rest = posix.normalize(path).split('/').filter(Boolean);
+    let current = '/';
+    for (let hops = 0; rest.length > 0;) {
+      const next = posix.join(current, rest.shift()!);
+      const target = symlinks[next];
+      if (target === undefined) { current = next; continue; }
+      if (++hops > 40) return path; // loop — give up like ELOOP, keep the path
+      const resolved = posix.isAbsolute(target) ? target : posix.join(posix.dirname(next), target);
+      rest = [...posix.normalize(resolved).split('/').filter(Boolean), ...rest];
+      current = '/';
+    }
+    return current;
   }
 
   async readlink(path: string): Promise<string> {
@@ -237,6 +262,9 @@ export class SnapshotFSProvider implements FSProvider {
    * detections, so they're filtered out here.
    */
   private directoryExists(path: string): boolean {
+    // The probe records a mode only for directories it stat'ed successfully
+    // (glob roots, ancestors), so an empty directory still exists remotely
+    if (this.snapshot.directoryModes?.[path] !== undefined) return true;
     if (!(path in this.snapshot.directories)) return false;
     const listing = this.snapshot.directories[path];
     return Array.isArray(listing);

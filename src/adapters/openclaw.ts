@@ -371,6 +371,8 @@ export const openclawAdapter: AgentAdapter = {
         '~/.openclaw/agents/*/config.json',
         '~/.openclaw/agents/*/.env',
         '~/.openclaw/agents/*/skills/**',
+        // Legacy dirs and the system-wide config load skills the same way
+        ...['~/.clawdbot', '~/.moltbot', '/etc/openclaw'].flatMap(d => [`${d}/skills/**`, `${d}/agents/*/skills/**`]),
       ],
       commands: [
         { id: 'openclaw-which', cmd: 'which', args: ['openclaw'], timeout: 3000 },

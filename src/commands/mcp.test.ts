@@ -141,6 +141,16 @@ describe('runMCPScan', () => {
     expect(mockScanMCP).not.toHaveBeenCalled();
   });
 
+  it('exits 2 when an explicit --path is missing or unparseable (not a silent "nothing found")', async () => {
+    mockDiscoverFromPaths.mockResolvedValue({ ...emptyDiscoveryResult, unreadable: ['/nonexistent/mcp.json'] });
+
+    await runMCPScan({ format: 'json', path: ['/nonexistent/mcp.json'] });
+
+    expect(process.exitCode).toBe(2);
+    expect(consoleErrorLogs.join('\n')).toContain('Cannot read MCP config (missing or not valid JSON): /nonexistent/mcp.json');
+    expect(mockScanMCP).not.toHaveBeenCalled();
+  });
+
   it('sets exitCode=1 on critical failures', async () => {
     mockDiscoverFromPaths.mockResolvedValue(sampleDiscoveryResult);
     mockResolveServerSources.mockResolvedValue([]);
@@ -194,6 +204,15 @@ describe('runMCPList', () => {
 
     const output = consoleLogs.join('\n');
     expect(output).toContain('No MCP servers found');
+  });
+
+  it('exits 2 and prints no JSON when an explicit --path is unreadable', async () => {
+    mockDiscoverFromPaths.mockResolvedValue({ ...sampleDiscoveryResult, unreadable: ['/bad.json'] });
+
+    await runMCPList({ format: 'json', path: ['/config.json', '/bad.json'] });
+
+    expect(process.exitCode).toBe(2);
+    expect(consoleLogs.join('\n')).toBe('');
   });
 
   it('uses platform discovery when no path given', async () => {

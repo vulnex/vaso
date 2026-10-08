@@ -251,7 +251,8 @@ export const devinAdapter: AgentAdapter = {
         // User-relative CLI install location — kept in sync with USER_CLI_RELATIVE_PATHS
         '~/.local/bin/devin',
       ],
-      globPatterns: [],
+      // User skill roots — SKL/IOC checks read them
+      globPatterns: USER_SKILL_DIRS.map(d => `~/${d}/**`),
       commands: [
         { id: 'devin-which', cmd: 'which', args: ['devin'], timeout: 3000 },
         { id: 'devin-version', cmd: 'devin', args: ['--version'], timeout: 3000 },

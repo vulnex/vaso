@@ -182,6 +182,20 @@ describe('runDetect', () => {
     }
   });
 
+  it('rejects a non-numeric --ssh-timeout with exit 2 before connecting', async () => {
+    const consoleErrors: string[] = [];
+    const origExitCode = process.exitCode;
+    console.error = (...args: unknown[]) => { consoleErrors.push(args.map(String).join(' ')); };
+    process.exitCode = undefined;
+    try {
+      await runDetect({ format: 'terminal', host: ['root@10.0.0.1'], sshTimeout: 'abc' });
+      expect(process.exitCode).toBe(2);
+      expect(consoleErrors.some(l => l.includes('--ssh-timeout'))).toBe(true);
+    } finally {
+      process.exitCode = origExitCode;
+    }
+  });
+
   it('rejects -o + --output-dir together with exit 2', async () => {
     const consoleErrors: string[] = [];
     const origExitCode = process.exitCode;

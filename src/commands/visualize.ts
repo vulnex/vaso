@@ -44,7 +44,7 @@ export async function runVisualize(options: VisualizeCommandOptions): Promise<vo
   } catch (err) {
     logError('visualize: scan-result', err);
     console.error(chalk.red(`Failed to obtain scan result: ${(err as Error).message}`));
-    process.exitCode = 1;
+    process.exitCode = 2;
     return;
   }
 
@@ -62,7 +62,7 @@ export async function runVisualize(options: VisualizeCommandOptions): Promise<vo
   } catch (err) {
     logError('visualize: emit-bundle', err);
     console.error(chalk.red(`Failed to write bundle: ${(err as Error).message}`));
-    process.exitCode = 1;
+    process.exitCode = 2;
   }
 }
 

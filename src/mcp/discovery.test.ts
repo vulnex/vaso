@@ -2,10 +2,36 @@ import { describe, it, expect } from 'vitest';
 import { MCPDiscovery } from './discovery.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { join } from 'node:path';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 
 const FIXTURES = join(__dirname, '../../testing/fixtures/mcp');
 
 describe('MCPDiscovery', () => {
+  it('reports explicit paths that are missing or not valid JSON as unreadable', async () => {
+    const discovery = new MCPDiscovery();
+    const dir = await mkdtemp(join(tmpdir(), 'vaso-mcp-unreadable-'));
+    try {
+      const broken = join(dir, 'broken.json');
+      const empty = join(dir, 'empty.json');
+      await writeFile(broken, '{ "mcpServers": ');
+      await writeFile(empty, '{}');
+      const result = await discovery.discoverFromPaths([
+        join(FIXTURES, 'secure/claude_desktop_config.json'), join(dir, 'missing.json'), broken, empty,
+      ]);
+      expect(result.totalServers).toBe(3);
+      // A valid config with no servers is not an error
+      expect(result.unreadable).toEqual([join(dir, 'missing.json'), broken]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('omits unreadable when every explicit path parsed', async () => {
+    const result = await new MCPDiscovery().discoverFromPaths([join(FIXTURES, 'secure/claude_desktop_config.json')]);
+    expect(result.unreadable).toBeUndefined();
+  });
+
   it('discovers servers from insecure fixture config', async () => {
     const discovery = new MCPDiscovery();
     const result = await discovery.discoverFromPaths([
