@@ -1,3 +1,4 @@
+import type { Platform } from './types.js';
 export interface ProbeManifest {
   filePaths: string[];
   globPatterns: string[];
@@ -36,7 +37,7 @@ export interface CommandForEach {
 export interface ProbeSnapshot {
   version: 1;
   hostname: string;
-  platform: NodeJS.Platform;
+  platform: Platform;
   homedir: string;
   timestamp: string;
   privilege: PrivilegeInfo;

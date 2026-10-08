@@ -27,6 +27,11 @@ export const CHECK_CATEGORIES: readonly CheckCategory[] = [
  * server-only concepts like gateway binding, rate limiting, LaunchAgents, etc.
  */
 export const CODING_AGENTS: AgentType[] = ['claude-code', 'claude-desktop', 'chatgpt-desktop', 'codex', 'opencode', 'gemini-cli', 'qwen-code', 'copilot-cli', 'cursor-cli', 'windsurf', 'devin', 'meta-muse', 'comet', 'abacus'];
+/**
+ * Host OS, as `process.platform` reports it. Spelled out (same values as
+ * Node's `Platform`) so the published typings don't need @types/node.
+ */
+export type Platform = 'aix' | 'android' | 'darwin' | 'freebsd' | 'haiku' | 'linux' | 'openbsd' | 'sunos' | 'win32' | 'cygwin' | 'netbsd';
 export type OutputFormat = 'terminal' | 'json' | 'sarif' | 'markdown' | 'html' | 'csv' | 'junit';
 
 export interface Evidence {
@@ -86,7 +91,7 @@ export interface CheckModule {
   description: string;
   supportedAgents?: AgentType[];
   excludedAgents?: AgentType[];
-  supportedPlatforms?: NodeJS.Platform[];
+  supportedPlatforms?: Platform[];
   owaspMcp?: OwaspMcpId;
   owaspAgentic?: OwaspAgenticId[];
   run(context: ScanContext): Promise<CheckResult>;
@@ -150,7 +155,7 @@ export interface CliInstall {
 export interface ScanContext {
   installation: AgentInstallation;
   configs: ParsedConfig[];
-  platform: NodeJS.Platform;
+  platform: Platform;
   fs: import('./fs-provider.js').FSProvider;
   skillFiles?: string[];
   /** Files the adapter has declared as security-sensitive (credentials, auth

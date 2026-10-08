@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -26,6 +27,14 @@ const defaultCommandTimeout = 5000 // ms
 // CLI binary in ~/.claude/local/claude would balloon the JSON snapshot past
 // V8's ~512 MB max-string limit on the consuming Node side.
 const maxFileContentBytes = 5 << 20 // 5 MiB — matches the CLI's MAX_SCAN_FILE_BYTES (src/core/file-limits.ts)
+
+// maxConfigContentBytes bounds config files named explicitly in the manifest
+// (filePaths/systemPaths). A local scan parses configs of any size, so a
+// config padded past 5 MiB must not drop out of remote scans; binaries named
+// there (CLI paths) keep the 5 MiB limit.
+const maxConfigContentBytes = 32 << 20
+
+var configExtensions = map[string]bool{".json": true, ".jsonc": true, ".json5": true, ".yaml": true, ".yml": true, ".toml": true, ".env": true, ".md": true}
 
 // Total content budget for one snapshot. Real hosts with many agent plugins
 // matched ~48k files / 700 MB through recursive skill globs, which the Node
@@ -343,6 +352,10 @@ func expandPaths(paths []string, homes []UserHome) []string {
 // files over maxFileContentBytes, and once the snapshot's total content budget
 // is spent — enough for adapters that only need presence or permissions.
 func (c *collector) collectFile(path string, metadataOnly bool) FileEntry {
+	return c.collectFileLimit(path, metadataOnly, maxFileContentBytes)
+}
+
+func (c *collector) collectFileLimit(path string, metadataOnly bool, limit int64) FileEntry {
 	info, err := os.Stat(path)
 	if err != nil {
 		return FileEntry{Exists: false}
@@ -351,7 +364,7 @@ func (c *collector) collectFile(path string, metadataOnly bool) FileEntry {
 	mode := int(info.Mode().Perm())
 	omitted := FileEntry{Exists: true, Mode: mode, ContentOmitted: true}
 
-	if metadataOnly || info.Size() > maxFileContentBytes || metadataOnlyExtensions[strings.ToLower(filepath.Ext(path))] {
+	if metadataOnly || info.Size() > limit || metadataOnlyExtensions[strings.ToLower(filepath.Ext(path))] {
 		return omitted
 	}
 	if info.Size() > c.budget {
@@ -359,9 +372,28 @@ func (c *collector) collectFile(path string, metadataOnly bool) FileEntry {
 		return omitted
 	}
 
-	content, err := os.ReadFile(path)
+	// Only regular files have content. A FIFO blocks forever and a device
+	// such as /dev/zero (size 0 to Stat) never ends; either can be planted
+	// in a skill directory. The check is on the opened file, so swapping the
+	// path between Stat and Open doesn't get around it.
+	if !info.Mode().IsRegular() {
+		return omitted
+	}
+	f, err := openForRead(path)
 	if err != nil {
 		return FileEntry{Exists: true, Mode: mode}
+	}
+	defer f.Close()
+	if opened, err := f.Stat(); err != nil || !opened.Mode().IsRegular() {
+		return omitted
+	}
+	// Bounded even if the file grows after Stat
+	content, err := io.ReadAll(io.LimitReader(f, limit+1))
+	if err != nil {
+		return FileEntry{Exists: true, Mode: mode}
+	}
+	if int64(len(content)) > limit {
+		return omitted
 	}
 	return c.fileContent(content, mode)
 }
@@ -395,7 +427,11 @@ func (c *collector) collectPath(snapshot *ProbeSnapshot, p string, metadataOnly,
 		}
 		return
 	}
-	snapshot.Files[p] = c.collectFile(p, metadataOnly)
+	limit := int64(maxFileContentBytes)
+	if listDir && configExtensions[strings.ToLower(filepath.Ext(p))] {
+		limit = maxConfigContentBytes // a config named explicitly, not a glob match
+	}
+	snapshot.Files[p] = c.collectFileLimit(p, metadataOnly, limit)
 }
 
 // recordAncestorModes stats each parent directory of every collected file and

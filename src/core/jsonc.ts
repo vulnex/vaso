@@ -5,6 +5,7 @@
  * handles strict JSON.
  */
 export function stripJsonc(raw: string): string {
+  raw = raw.replace(/^\uFEFF/, '');
   let out = '';
   let i = 0;
   let inString = false;

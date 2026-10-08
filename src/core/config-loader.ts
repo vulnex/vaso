@@ -40,7 +40,10 @@ function recordLoadError(error: ConfigLoadError): void {
  *  node fs errors (`code === 'ENOENT'`) and SnapshotFSProvider's plain Errors
  *  whose message leads with "ENOENT". */
 function isFileNotFound(error: unknown): boolean {
-  if ((error as NodeJS.ErrnoException | null)?.code === 'ENOENT') return true;
+  // A directory where a config file is expected configures nothing — the
+  // agent can't read it either (and a snapshot has no file entry for it)
+  const code = (error as NodeJS.ErrnoException | null)?.code;
+  if (code === 'ENOENT' || code === 'EISDIR') return true;
   return error instanceof Error && error.message.startsWith('ENOENT');
 }
 
@@ -53,7 +56,8 @@ export async function loadConfig(filePath: string, fs?: FSProvider): Promise<Par
 
   let raw: string;
   try {
-    raw = await provider.readFile(filePath);
+    // Editors on Windows save JSON with a UTF-8 BOM; JSON.parse rejects it
+    raw = (await provider.readFile(filePath)).replace(/^\uFEFF/, '');
   } catch (error) {
     if (!isFileNotFound(error)) {
       recordLoadError({ filePath, stage: 'read', message: errorMessage(error) });

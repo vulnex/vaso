@@ -60,6 +60,33 @@ func TestCollectFileMetadataOnlyAndBudget(t *testing.T) {
 	}
 }
 
+func TestCollectPathAllowsLargeExplicitConfigs(t *testing.T) {
+	dir := t.TempDir()
+	big := bytes.Repeat([]byte("x"), 6<<20) // over the 5 MiB glob limit
+	cfg := filepath.Join(dir, "config.json")
+	bin := filepath.Join(dir, "agent")
+	for _, p := range []string{cfg, bin} {
+		if err := os.WriteFile(p, big, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	snap := ProbeSnapshot{Files: map[string]FileEntry{}, Directories: map[string][]string{}, DirectoryModes: map[string]int{}}
+	c := &collector{budget: 64 << 20}
+	c.collectPath(&snap, cfg, false, true) // explicit filePath
+	c.collectPath(&snap, bin, false, true) // explicit, but not a config
+	if e := snap.Files[cfg]; e.ContentOmitted || len(e.Content) != len(big) {
+		t.Fatalf("explicit config over 5 MiB not collected: omitted=%v len=%d", e.ContentOmitted, len(e.Content))
+	}
+	if !snap.Files[bin].ContentOmitted {
+		t.Fatalf("explicit non-config over 5 MiB should stay omitted")
+	}
+	glob := ProbeSnapshot{Files: map[string]FileEntry{}, Directories: map[string][]string{}, DirectoryModes: map[string]int{}}
+	c.collectPath(&glob, cfg, false, false) // glob match
+	if !glob.Files[cfg].ContentOmitted {
+		t.Fatalf("glob match over 5 MiB should stay omitted")
+	}
+}
+
 func TestCollectPathRecordsDirectoriesAndAncestors(t *testing.T) {
 	root := t.TempDir()
 	dataDir := filepath.Join(root, "Library", "App Support", "com.example")

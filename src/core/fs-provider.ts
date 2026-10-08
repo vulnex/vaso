@@ -1,3 +1,4 @@
+import type { Platform } from './types.js';
 export interface DirentInfo {
   name: string;
   isFile: boolean;
@@ -112,7 +113,7 @@ export interface FSProvider {
   /** Look up an environment variable. SnapshotFSProvider reads from the
    *  probe-collected env section; LocalFSProvider reads from process.env. */
   getEnv(key: string): string | undefined;
-  readonly platform: NodeJS.Platform;
+  readonly platform: Platform;
   /** `'snapshot'` when commands were collected ahead of time by the probe:
    *  `exec` then answers by command name, so running a second copy of a CLI
    *  by full path returns the first copy's output. Absent → treated as live. */

@@ -1,10 +1,11 @@
 import { access as fsAccess, readdir, readFile, stat, realpath, readlink } from 'node:fs/promises';
 import { execFileSync, execFile } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { constants as fsConstants, mkdtempSync, rmSync, type Dirent } from 'node:fs';
 import { join } from 'node:path';
 import { homedir as osHomedir, hostname as osHostname, tmpdir } from 'node:os';
 import { promisify } from 'node:util';
 import type { FSProvider, DirentInfo, ExecResult, ExecOptions, PermissionQuery } from './fs-provider.js';
+import type { Platform } from './types.js';
 import { posixPermissionFacts } from './permissions.js';
 import { parsePrivateGroups } from './private-groups.js';
 
@@ -28,16 +29,48 @@ function isolatedEnv(options?: ExecOptions): { env?: NodeJS.ProcessEnv; cwd?: st
   return { env, cwd: options.cwd ?? home, cleanup: () => rmSync(home, { recursive: true, force: true }) };
 }
 
+/**
+ * Reads a regular file only. A FIFO where a config is expected would block
+ * the scan forever and a device such as /dev/zero never ends; both can be
+ * planted in a scanned directory. stat() follows symlinks, so a link to a
+ * device is caught too; O_NONBLOCK keeps a FIFO swapped in after the check
+ * from blocking (the read then sees end-of-file).
+ */
+async function readRegularFile(path: string): Promise<Buffer>;
+async function readRegularFile(path: string, encoding: 'utf-8'): Promise<string>;
+async function readRegularFile(path: string, encoding?: 'utf-8'): Promise<Buffer | string> {
+  let info: Awaited<ReturnType<typeof stat>> | undefined;
+  try { info = await stat(path); } catch { /* readFile reports a missing/unreadable path */ }
+  if (info?.isDirectory?.()) {
+    throw Object.assign(new Error(`EISDIR: illegal operation on a directory, read '${path}'`), { code: 'EISDIR' });
+  }
+  if (info?.isFile && !info.isFile()) {
+    throw Object.assign(new Error(`EINVAL: not a regular file, refusing to read: ${path}`), { code: 'EINVAL' });
+  }
+  const flag = fsConstants.O_RDONLY | (fsConstants.O_NONBLOCK ?? 0);
+  return encoding ? readFile(path, { encoding, flag }) : readFile(path, { flag });
+}
+
+function toDirentInfo(e: Dirent): DirentInfo {
+  return {
+    name: e.name,
+    isFile: e.isFile(),
+    isDirectory: e.isDirectory(),
+    isSymbolicLink: e.isSymbolicLink(),
+    parentPath: e.parentPath,
+  };
+}
+
 export class LocalFSProvider implements FSProvider {
   readonly kind = 'local' as const;
-  readonly platform = process.platform;
+  readonly platform: Platform = process.platform;
 
   async readFile(path: string): Promise<string> {
-    return readFile(path, 'utf-8');
+    return readRegularFile(path, 'utf-8');
   }
 
   async readBytes(path: string): Promise<Uint8Array> {
-    return readFile(path);
+    return readRegularFile(path);
   }
 
   async readdir(path: string): Promise<string[]> {
@@ -45,17 +78,28 @@ export class LocalFSProvider implements FSProvider {
   }
 
   async readdirEntries(path: string, options?: { recursive?: boolean }): Promise<DirentInfo[]> {
-    const entries = await readdir(path, {
-      withFileTypes: true,
-      recursive: options?.recursive ?? false,
-    });
-    return entries.map(e => ({
-      name: e.name,
-      isFile: e.isFile(),
-      isDirectory: e.isDirectory(),
-      isSymbolicLink: e.isSymbolicLink(),
-      parentPath: e.parentPath,
-    }));
+    if (!options?.recursive) return (await readdir(path, { withFileTypes: true })).map(toDirentInfo);
+    // Node's recursive readdir rejects the whole walk on the first unreadable
+    // subdirectory, so one chmod-000 folder inside a skill would hide every
+    // file beside it. Walk by hand and skip what can't be listed, as the
+    // probe does; only an unreadable root is an error. Symlinked directories
+    // are listed, not entered.
+    const results: DirentInfo[] = [];
+    const pending = [path];
+    for (let dir = pending.pop(); dir !== undefined; dir = pending.pop()) {
+      let entries;
+      try {
+        entries = await readdir(dir, { withFileTypes: true });
+      } catch (err) {
+        if (dir === path) throw err;
+        continue;
+      }
+      for (const e of entries) {
+        results.push(toDirentInfo(e));
+        if (e.isDirectory()) pending.push(join(dir, e.name));
+      }
+    }
+    return results;
   }
 
   async access(path: string): Promise<boolean> {

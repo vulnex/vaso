@@ -14,6 +14,7 @@ import { ic002 } from '../checks/ironclaw/ic-002-no-tls.js';
 
 // Config checks
 import { cfg001 } from '../checks/config/cfg-001-gateway-binding.js';
+import { cfg012 } from '../checks/config/cfg-012-auth-bypass.js';
 import { cfg003 } from '../checks/config/cfg-003-file-permissions.js';
 import { cfg008 } from '../checks/config/cfg-008-sandbox-disabled.js';
 
@@ -152,6 +153,47 @@ describe('Config fix() methods', () => {
     expect(data.gateway.host).toBe('127.0.0.1');
     // Preserve existing keys
     expect(data.gateway.port).toBe(18789);
+  });
+
+  it('CFG-001: rebinds OpenClaw 2026.x gateway.bind to "loopback" in the file that has it (no gateway.host)', async () => {
+    const first = join(TEST_DIR, 'agent.json');
+    const main = join(TEST_DIR, 'openclaw.json');
+    const mainData = { gateway: { bind: 'lan', port: 18789 } };
+    await writeFile(first, '{}\n');
+    await writeFile(main, JSON.stringify(mainData, null, 2) + '\n');
+    const ctx = makeCtx('openclaw', [makeJsonConfig(first, {}), makeJsonConfig(main, mainData)]);
+
+    expect((await cfg001.run(ctx)).fixable).toBe(true);
+    const result = await cfg001.fix!(ctx);
+    expect(result.applied).toBe(true);
+
+    expect(JSON.parse(await readFile(main, 'utf-8'))).toEqual({ gateway: { bind: 'loopback', port: 18789 } });
+    expect(await readFile(first, 'utf-8')).toBe('{}\n');
+  });
+
+  it('CFG-012: flips an explicit bypass flag in place and leaves auth mode "none" to the user', async () => {
+    const filePath = join(TEST_DIR, 'config.json');
+    const data = { gateway: { auth: { bypass: true } } };
+    await writeFile(filePath, JSON.stringify(data, null, 2) + '\n');
+    const result = await cfg012.fix!(makeCtx('openclaw', [makeJsonConfig(filePath, data)]));
+    expect(result.applied).toBe(true);
+    expect(JSON.parse(await readFile(filePath, 'utf-8'))).toEqual({ gateway: { auth: { bypass: false } } });
+
+    const none = { gateway: { auth: { mode: 'none' } } };
+    await writeFile(filePath, JSON.stringify(none) + '\n');
+    const ctx = makeCtx('openclaw', [makeJsonConfig(filePath, none)]);
+    expect((await cfg012.run(ctx)).fixable).toBe(false);
+    expect((await cfg012.fix!(ctx)).applied).toBe(false);
+    expect(JSON.parse(await readFile(filePath, 'utf-8'))).toEqual(none);
+  });
+
+  it('CFG-008: flips the boolean sandbox switch that is off, where it is', async () => {
+    const filePath = join(TEST_DIR, 'config.json');
+    const data = { security: { sandbox: false } };
+    await writeFile(filePath, JSON.stringify(data, null, 2) + '\n');
+    const result = await cfg008.fix!(makeCtx('openclaw', [makeJsonConfig(filePath, data)]));
+    expect(result.applied).toBe(true);
+    expect(JSON.parse(await readFile(filePath, 'utf-8'))).toEqual({ security: { sandbox: true } });
   });
 
   it('CFG-003: fixes credential file permissions to 600', async () => {

@@ -235,7 +235,7 @@ vaso visualize [options]
 
 | Option | Description |
 |--------|-------------|
-| `-i, --input <file>` | Use an existing scan-result JSON instead of running a fresh scan |
+| `-i, --input <file>` | Use an existing scan-result JSON instead of running a fresh scan. A `--host`/`--inventory` JSON report works too: one host is written to the output directory, several hosts to one subdirectory each (hosts that were not scanned are skipped) |
 | `-o, --output <dir>` | Output directory for the bundle (default `./vaso-visualizations`) |
 | `--vis-format <format>` | Config file format: `toml` (default), `json`, or `yaml` |
 | `--diagrams <list>` | Comma-separated diagram types: `attack-tree`, `privilege-gradient`, `component` |
@@ -271,7 +271,7 @@ vaso update --url <url>  # Custom feed URL (must still be signed with the pinned
 
 ### `vaso mcp scan`
 
-Scan MCP (Model Context Protocol) server configurations for security issues. This auto-discovers MCP configs from Claude Desktop, Claude Code, Cursor, Windsurf, Devin CLI, Atomic Agent, Nanobot, PicoClaw, Lyrie, VS Code, and project-level config files.
+Scan MCP (Model Context Protocol) server configurations for security issues. This auto-discovers MCP configs from Claude Desktop, Claude Code, Gemini CLI, Qwen Code, Codex, Cursor, Windsurf, Devin CLI, Abacus.AI, Atomic Agent, Nanobot, PicoClaw, Lyrie, VS Code, and project-level config files.
 
 ```
 vaso mcp scan [options]
@@ -362,7 +362,7 @@ See [`network-scanning-guide.md`](network-scanning-guide.md) for the full SSH wo
 | `2` | VASO could not run: invalid CLI arguments (e.g. `--silent` without an output destination, `--parallel 0`), an unreadable snapshot or inventory file, or an internal error |
 | `3` | Scan incomplete: one or more remote hosts could not be scanned (unreachable, authentication failed, probe error). Takes precedence over `1`, so CI can tell "not scanned" apart from "findings" |
 
-The other commands use the same codes: `skill audit` and `mcp scan` exit `1` on critical findings, and every command exits `2` when it cannot run — a missing or unreadable input (`skill audit <path>`, `mcp scan/list --path`, `visualize -i`, `probe validate`), an unknown name (`ext info`), or an invalid option value such as `--ssh-timeout abc`. `probe validate` exits `1` when the snapshot is readable JSON but fails validation.
+The other commands use the same codes: `skill audit` and `mcp scan` exit `1` on critical findings, and every command exits `2` when it cannot run — a command-line error (unknown option or command, a missing or extra argument), a missing or unreadable input (`skill audit <path>`, `mcp scan/list --path`, `visualize -i`, `probe validate`), an unknown name (`ext info`), or an invalid option value such as `--ssh-timeout abc`. `probe validate` exits `1` when the snapshot is readable JSON but fails validation.
 
 `--fail-on` accepts `critical` (default), `warning`, `info`, or `none`. Use `--fail-on none` to never fail on findings — useful for scans that only produce reports.
 
@@ -474,10 +474,14 @@ VASO auto-discovers MCP server configurations from multiple sources:
 - `~/Library/Application Support/Claude/claude_desktop_config.json` (Claude Desktop, macOS)
 - `~/.config/Claude/claude_desktop_config.json` (Claude Desktop, Linux)
 - `%APPDATA%\Claude\claude_desktop_config.json` (Claude Desktop, Windows)
-- `~/.claude/mcp.json` (Claude Code)
+- `~/.claude.json` (Claude Code: user-scope `mcpServers` and each project's local-scope `projects.<path>.mcpServers`, as written by `claude mcp add`) and `~/.claude/mcp.json`
+- `~/.gemini/settings.json` (Gemini CLI `mcpServers`; `httpUrl` is streamable HTTP, `url` is SSE)
+- `~/.qwen/settings.json` (Qwen Code `mcpServers`)
+- `$CODEX_HOME/config.toml` (Codex `[mcp_servers.<name>]`; default `~/.codex/`)
 - `~/.cursor/mcp.json` (Cursor)
 - `~/.codeium/windsurf/mcp_config.json` (Windsurf)
 - `$XDG_CONFIG_HOME/devin/mcp_config.json` (Devin CLI / Devin Desktop; default `~/.config/devin/`, `%APPDATA%\devin\` on Windows)
+- `~/.abacusai/mcp.json`, `~/.abacusai/config.json` (array form) and `~/.abacusai/desktop/mcp-<mode>.json` (Abacus.AI CLI / AbacusAI Desktop; servers marked `disabled` are skipped)
 - `~/.atomic-agent/config.json` or `$ATOMIC_AGENT_STATE_DIR/config.json` (Atomic Agent `mcp.servers[]`)
 - `~/.nanobot/config.json` (Nanobot)
 - `$PICOCLAW_CONFIG` or `$PICOCLAW_HOME/config.json` (PicoClaw; default `~/.picoclaw/config.json`)
@@ -488,10 +492,11 @@ VASO auto-discovers MCP server configurations from multiple sources:
 - `.cursor/mcp.json` (Cursor project)
 - `.windsurf/mcp.json` (Windsurf project)
 - `.devin/mcp_config.json`, `.devin/mcp_config.local.json` (Devin CLI project)
+- `.abacusai/mcp.json`, `.abacusai/config.json` (Abacus.AI project)
 - `.vscode/mcp.json` (VS Code)
 - `mcp.json` (Generic MCP)
 
-You can also point VASO at specific config files with `vaso mcp scan --path <file>`.
+JSON files may be JSONC (comments, trailing commas) and may start with a UTF-8 byte-order mark. You can also point VASO at specific config files with `vaso mcp scan --path <file>`; a `.toml` path is read as a Codex config.
 
 ## Output Formats
 

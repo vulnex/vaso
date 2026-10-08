@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import type { Evidence } from '../../core/types.js';
+import type { Evidence, Platform } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { markUnreachable, queryPermissions, readableByOthers } from '../../core/permissions.js';
 
@@ -9,7 +9,7 @@ const EDITOR_DIR_NAMES = ['Windsurf', 'Devin'];
  * Per-OS editor user-data dirs. Only darwin/linux are probed — on other
  * platforms the POSIX permission model doesn't apply and the check skips.
  */
-function userDataDirs(home: string, platform: NodeJS.Platform): string[] | undefined {
+function userDataDirs(home: string, platform: Platform): string[] | undefined {
   if (platform === 'darwin') {
     return EDITOR_DIR_NAMES.map(n => join(home, 'Library', 'Application Support', n));
   }

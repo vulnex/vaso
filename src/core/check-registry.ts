@@ -1,4 +1,4 @@
-import type { CheckModule, AgentType, CheckCategory } from './types.js';
+import type { CheckModule, AgentType, CheckCategory, Platform } from './types.js';
 
 export class CheckRegistry {
   private checks: CheckModule[] = [];
@@ -31,13 +31,13 @@ export class CheckRegistry {
     );
   }
 
-  getForPlatform(platform: NodeJS.Platform): CheckModule[] {
+  getForPlatform(platform: Platform): CheckModule[] {
     return this.checks.filter(c =>
       !c.supportedPlatforms || c.supportedPlatforms.includes(platform)
     );
   }
 
-  getApplicable(agent: AgentType, platform: NodeJS.Platform): CheckModule[] {
+  getApplicable(agent: AgentType, platform: Platform): CheckModule[] {
     return this.checks.filter(c => {
       const agentMatch = !c.supportedAgents || c.supportedAgents.includes(agent);
       const notExcluded = !c.excludedAgents?.includes(agent);

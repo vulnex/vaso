@@ -29,9 +29,9 @@ function makeConfig(data: Record<string, unknown>, raw?: string): ParsedConfig {
   };
 }
 
-function makeContext(configs: ParsedConfig[]): ScanContext {
+function makeContext(configs: ParsedConfig[], agent: AgentInstallation['agent'] = 'openclaw'): ScanContext {
   const installation: AgentInstallation = {
-    agent: 'openclaw',
+    agent,
     installDir: '/tmp/test-openclaw',
     configFiles: configs,
     gateway: configs.length > 0
@@ -273,19 +273,39 @@ describe('CFG-004: loopback gateways', () => {
   });
 });
 
+// Generic keys apply to plugin adapters; built-in frameworks use their own schemas
+const PLUGIN_AGENT = 'plugin-agent' as AgentInstallation['agent'];
+
 describe('CFG-005: Missing Shell Allowlist', () => {
   it('fails when no safeBins configured', async () => {
     const config = makeConfig({});
-    const result = await cfg005.run(makeContext([config]));
+    const result = await cfg005.run(makeContext([config], PLUGIN_AGENT));
     console.log(`[CFG-005] no safeBins → passed: ${result.passed}, message: ${result.message}`);
     expect(result.passed).toBe(false);
   });
 
   it('passes when safeBins configured', async () => {
     const config = makeConfig({ security: { safeBins: ['ls', 'cat', 'grep'] } });
-    const result = await cfg005.run(makeContext([config]));
+    const result = await cfg005.run(makeContext([config], PLUGIN_AGENT));
     console.log(`[CFG-005] safeBins=[ls,cat,grep] → passed: ${result.passed}, message: ${result.message}`);
     expect(result.passed).toBe(true);
+  });
+
+  describe('OpenClaw 2026.x exec policy', () => {
+    it.each([
+      [{}, false, 'OpenClaw default'],
+      [{ tools: { exec: { security: 'full' } } }, false, 'tools.exec.security'],
+      [{ tools: { exec: { mode: 'full' } } }, false, 'tools.exec.mode'],
+      [{ tools: { exec: { mode: 'ask' } } }, true, 'tools.exec.mode'],
+      [{ tools: { exec: { security: 'allowlist' } } }, true, 'tools.exec.security'],
+      // security.safeBins is not an OpenClaw key: it doesn't restrict anything
+      [{ security: { safeBins: ['ls'] } }, false, 'OpenClaw default'],
+    ])('%j → passed %s (%s)', async (data, passed, source) => {
+      const result = await cfg005.run(makeContext([makeConfig(data)]));
+      expect(result.passed).toBe(passed);
+      expect(result.message).toContain(source);
+      expect(result.fixable).toBe(false); // guidance only: OpenClaw rejects unknown/mixed keys
+    });
   });
 });
 
@@ -376,16 +396,22 @@ describe('CFG-009: Default Credentials', () => {
 });
 
 describe('CFG-010: Rate Limiting', () => {
+  it('passes on OpenClaw, which rate-limits gateway auth by default', async () => {
+    const result = await cfg010.run(makeContext([makeConfig({})]));
+    expect(result.passed).toBe(true);
+    expect(result.fixable).toBeFalsy();
+  });
+
   it('fails when no rate limiting', async () => {
     const config = makeConfig({});
-    const result = await cfg010.run(makeContext([config]));
+    const result = await cfg010.run(makeContext([config], PLUGIN_AGENT));
     console.log(`[CFG-010] no rate limit → passed: ${result.passed}, message: ${result.message}`);
     expect(result.passed).toBe(false);
   });
 
   it('passes when rate limiting configured', async () => {
     const config = makeConfig({ rateLimit: { max: 100, window: '1m' } });
-    const result = await cfg010.run(makeContext([config]));
+    const result = await cfg010.run(makeContext([config], PLUGIN_AGENT));
     console.log(`[CFG-010] rateLimit={max:100,window:1m} → passed: ${result.passed}, message: ${result.message}`);
     expect(result.passed).toBe(true);
   });
@@ -400,11 +426,16 @@ describe('CFG-012: Auth Bypass', () => {
     expect(result.severity).toBe('critical');
   });
 
-  it('fails when auth mode is none', async () => {
+  it('fails when auth mode is none, without offering a fix (it needs a credential)', async () => {
     const config = makeConfig({ gateway: { auth: { mode: 'none' } } });
     const result = await cfg012.run(makeContext([config]));
     console.log(`[CFG-012] auth.mode="none" → passed: ${result.passed}, message: ${result.message}`);
     expect(result.passed).toBe(false);
+    expect(result.fixable).toBe(false);
+  });
+
+  it('offers a fix only for an explicit bypass flag', async () => {
+    expect((await cfg012.run(makeContext([makeConfig({ auth: { bypass: true } })]))).fixable).toBe(true);
   });
 
   it('passes with proper auth', async () => {

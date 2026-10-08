@@ -4,6 +4,16 @@ import { CODING_AGENTS } from '../../core/types.js';
 import { fixFirstConfig } from '../../remediation/config-writer.js';
 import { getNestedValue } from '../../core/utils.js';
 
+const BYPASS_KEYS = ['auth.bypass', 'gateway.auth.bypass', 'security.authBypass', 'noAuth'];
+
+function bypassKey(data: Record<string, unknown>): string | undefined {
+  return BYPASS_KEYS.find(k => getNestedValue(data, k) !== undefined);
+}
+
+function isTrue(v: unknown): boolean {
+  return v === true || v === 'true' || v === 1;
+}
+
 export const cfg012 = defineCheck({
   id: 'CFG-012',
   name: 'Auth Bypass Enabled',
@@ -14,14 +24,13 @@ export const cfg012 = defineCheck({
 
   async run(ctx, h) {
     const evidence: Evidence[] = [];
+    let bypassFlag = false;
 
     for (const config of ctx.configs) {
-      const authBypass = getNestedValue(config.data, 'auth.bypass') ??
-                         getNestedValue(config.data, 'gateway.auth.bypass') ??
-                         getNestedValue(config.data, 'security.authBypass') ??
-                         getNestedValue(config.data, 'noAuth');
+      const authBypass = bypassKey(config.data) !== undefined ? getNestedValue(config.data, bypassKey(config.data)!) : undefined;
 
-      if (authBypass === true || authBypass === 'true' || authBypass === 1) {
+      if (isTrue(authBypass)) {
+        bypassFlag = true;
         evidence.push({
           file: config.filePath,
           detail: 'Authentication bypass is enabled',
@@ -45,19 +54,24 @@ export const cfg012 = defineCheck({
         ? 'Authentication bypass is not enabled'
         : 'Authentication bypass is enabled — anyone can access the agent',
       evidence,
-      fixable: true,
-      fixDescription: 'Disable auth bypass and set proper auth mode',
+      // Only an explicit bypass flag can be switched off safely; an auth mode
+      // of "none" needs a real token or password (OpenClaw: gateway.auth.mode
+      // "token" plus gateway.auth.token), which a fix can't invent.
+      fixable: bypassFlag,
+      fixDescription: bypassFlag
+        ? 'Turn the auth bypass flag off'
+        : 'Set an auth mode with a credential (e.g. OpenClaw: `openclaw config set gateway.auth.mode token` and a gateway.auth.token)',
     });
   },
 
   async fix(ctx) {
-    return fixFirstConfig(ctx.configs, {
-      checkId: 'CFG-012',
-      env: 'AUTH_BYPASS',
-      path: 'auth.bypass',
-      value: false,
-      message: 'Disabled auth bypass',
-      noConfigMessage: 'No config file found',
-    });
+    // Flip the flag that is set, in the file it is in — never add a new key
+    for (const config of ctx.configs) {
+      const key = bypassKey(config.data);
+      if (key && isTrue(getNestedValue(config.data, key))) {
+        return fixFirstConfig([config], { checkId: 'CFG-012', path: key, value: false, message: `Set ${key} to false` });
+      }
+    }
+    return { checkId: 'CFG-012', applied: false, message: 'No auth bypass flag is set (auth mode "none" needs a credential configured by hand)' };
   },
 });

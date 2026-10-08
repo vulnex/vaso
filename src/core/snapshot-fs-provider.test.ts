@@ -577,6 +577,35 @@ describe('SnapshotFSProvider — symlinks (probe ≥ 1.1.0)', () => {
     await expect(fs.readlink(`${skills}/browse/own.ts`)).rejects.toThrow();
   });
 
+  it('lists dangling and looping symlinks as links, like a local readdir', async () => {
+    const skills = '/home/testuser/.claude/skills';
+    const provider = new SnapshotFSProvider(makeSnapshot({
+      files: {
+        [`${skills}/s/SKILL.md`]: { content: '# s', mode: 0o644, exists: true },
+        [`${skills}/dangling`]: { mode: 0, exists: false },
+        [`${skills}/loop-a`]: { mode: 0, exists: false },
+      },
+      symlinks: { [`${skills}/dangling`]: '/nonexistent/target', [`${skills}/loop-a`]: 'loop-a' },
+    }));
+    const links = (await provider.readdirEntries(skills, { recursive: true })).filter(e => e.isSymbolicLink).map(e => e.name);
+    expect(links.sort()).toEqual(['dangling', 'loop-a']);
+    expect((await provider.readdir(skills)).sort()).toEqual(['dangling', 'loop-a', 's']);
+  });
+
+  it('treats a directory named in its parent listing as existing (OpenClaw agents/<name>/)', async () => {
+    const provider = new SnapshotFSProvider(makeSnapshot({
+      directories: { '/home/testuser/.openclaw/agents': ['main/', 'notes.txt'] },
+    }));
+    expect(await provider.readdirEntries('/home/testuser/.openclaw/agents/main', { recursive: true })).toEqual([]);
+    expect(await provider.access('/home/testuser/.openclaw/agents/main')).toBe(true);
+    expect(await provider.access('/home/testuser/.openclaw/agents/other')).toBe(false);
+  });
+
+  it('rejects a recursive listing of a directory that was not collected, like a local walk', async () => {
+    const provider = new SnapshotFSProvider(makeSnapshot());
+    await expect(provider.readdirEntries('/home/testuser/Library/Application Support/Claude', { recursive: true })).rejects.toThrow('ENOENT');
+  });
+
   it('treats a directory with a recorded mode as existing, even when empty (glob root, no listing)', async () => {
     const provider = new SnapshotFSProvider(makeSnapshot({
       directoryModes: { '/home/testuser/.abacusai/skills': 0o755, '/home/testuser/.cursor/skills-cursor/empty-skill': 0o755 },

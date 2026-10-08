@@ -110,8 +110,11 @@ export async function resolveNpmPackageSource(
 
 export function parsePackFilename(stdout: string): string | undefined {
   try {
-    const arr = JSON.parse(stdout);
-    if (Array.isArray(arr) && arr[0]?.filename) return basename(String(arr[0].filename));
+    const parsed = JSON.parse(stdout);
+    // npm ≤ 11: `[{ filename, … }]`; npm 12: `{ "<name>": { filename, … } }`
+    const entry = Array.isArray(parsed) ? parsed[0] : parsed && typeof parsed === 'object' ? Object.values(parsed)[0] : undefined;
+    const filename = (entry as { filename?: unknown } | undefined)?.filename;
+    if (filename) return basename(String(filename));
   } catch {
     const last = stdout
       .split('\n')

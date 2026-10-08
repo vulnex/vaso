@@ -3,6 +3,10 @@ import { CODING_AGENTS } from '../../core/types.js';
 import { fixFirstConfig } from '../../remediation/config-writer.js';
 import { getNestedValue } from '../../core/utils.js';
 
+function sandboxKey(data: Record<string, unknown>): string | undefined {
+  return ['sandbox', 'security.sandbox', 'isolation'].find(k => getNestedValue(data, k) !== undefined);
+}
+
 export const cfg008 = defineCheck({
   id: 'CFG-008',
   name: 'Sandbox Disabled',
@@ -13,17 +17,18 @@ export const cfg008 = defineCheck({
 
   async run(ctx, h) {
     for (const config of ctx.configs) {
-      const sandbox = getNestedValue(config.data, 'sandbox') ??
-                      getNestedValue(config.data, 'security.sandbox') ??
-                      getNestedValue(config.data, 'isolation');
+      const key = sandboxKey(config.data);
+      const sandbox = key ? getNestedValue(config.data, key) : undefined;
 
       if (sandbox === false || sandbox === 'disabled' || sandbox === 'off' || sandbox === 'none') {
         return h.result({
           passed: false,
           message: 'Code sandbox is explicitly disabled — skills run without isolation',
-          evidence: [{ file: config.filePath, detail: `sandbox: ${String(sandbox)}` }],
-          fixable: true,
-          fixDescription: 'Enable sandbox mode',
+          evidence: [{ file: config.filePath, detail: `${key}: ${String(sandbox)}` }],
+          // A boolean switch can be flipped in place; a string mode's enabled
+          // value differs per framework, so that is left to the user
+          fixable: sandbox === false,
+          fixDescription: `Enable sandbox mode (${key})`,
         });
       }
     }
@@ -31,14 +36,14 @@ export const cfg008 = defineCheck({
     return h.passed('Sandbox is not explicitly disabled');
   },
 
+  // Flip the switch that is off, in the file it is in — never add a key
   async fix(ctx) {
-    return fixFirstConfig(ctx.configs, {
-      checkId: 'CFG-008',
-      env: 'SANDBOX',
-      path: 'sandbox',
-      value: true,
-      message: 'Enabled sandbox mode',
-      noConfigMessage: 'No config file found',
-    });
+    for (const config of ctx.configs) {
+      const key = sandboxKey(config.data);
+      if (key && getNestedValue(config.data, key) === false) {
+        return fixFirstConfig([config], { checkId: 'CFG-008', path: key, value: true, message: `Set ${key} to true` });
+      }
+    }
+    return { checkId: 'CFG-008', applied: false, message: 'No boolean sandbox switch is turned off' };
   },
 });

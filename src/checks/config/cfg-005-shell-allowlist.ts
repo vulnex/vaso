@@ -1,8 +1,36 @@
-import { defineCheck } from '../../core/check-builder.js';
+import { defineCheck, type CheckHelpers } from '../../core/check-builder.js';
+import type { ScanContext } from '../../core/types.js';
 import { CODING_AGENTS } from '../../core/types.js';
 import { NATIVE_POLICY_FRAMEWORKS } from './native-policy-frameworks.js';
 import { fixFirstConfig } from '../../remediation/config-writer.js';
 import { getNestedValue } from '../../core/utils.js';
+
+/**
+ * OpenClaw 2026.x: host exec policy is `tools.exec.mode` (deny | allowlist |
+ * ask | auto | full), or the legacy `tools.exec.security` it replaces. Unset
+ * means "full" on gateway/node hosts — any command runs. Its schema rejects
+ * unknown keys and mixed mode/legacy objects, so this is guidance only:
+ * `openclaw config set` validates the change.
+ */
+function openclawExecPolicy(ctx: ScanContext, h: CheckHelpers) {
+  let effective = 'full';
+  let source = 'default';
+  for (const config of ctx.configs) {
+    const mode = getNestedValue(config.data, 'tools.exec.mode');
+    const legacy = getNestedValue(config.data, 'tools.exec.security');
+    if (typeof mode === 'string') { effective = mode; source = 'tools.exec.mode'; break; }
+    if (typeof legacy === 'string') { effective = legacy; source = 'tools.exec.security'; break; }
+  }
+  const unrestricted = effective === 'full';
+  return h.result({
+    passed: !unrestricted,
+    message: unrestricted
+      ? `Host exec policy is "full" (${source === 'default' ? 'OpenClaw default' : source}) — the agent can run any command without an allowlist`
+      : `Host exec policy is "${effective}" (${source})`,
+    fixable: false,
+    fixDescription: 'Run `openclaw config set tools.exec.mode ask` (allowlist, ask on misses) or `allowlist`; replace any legacy tools.exec.security/ask in the same object',
+  });
+}
 
 export const cfg005 = defineCheck({
   id: 'CFG-005',
@@ -13,9 +41,12 @@ export const cfg005 = defineCheck({
   // Atomic Agent has no shell allowlist key — its shell gate is the approval ladder (AT-001).
   // The other frameworks listed gate commands in their own schemas (framework checks);
   // writing security.safeBins into them makes strict config loaders reject the file.
-  excludedAgents: [...CODING_AGENTS, ...NATIVE_POLICY_FRAMEWORKS],
+  // Hermes gates commands through approvals (HM-008; its command_allowlist
+  // auto-approves rather than restricts) and NemoClaw through sandbox policy.
+  excludedAgents: [...CODING_AGENTS, ...NATIVE_POLICY_FRAMEWORKS, 'hermes', 'nemoclaw'],
 
   async run(ctx, h) {
+    if (ctx.installation.agent === 'openclaw') return openclawExecPolicy(ctx, h);
     let found = false;
 
     for (const config of ctx.configs) {

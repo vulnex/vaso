@@ -1,7 +1,8 @@
-import { join, basename, posix } from 'node:path';
+import { join, basename, dirname, posix } from 'node:path';
 import type { FSProvider, DirentInfo, ExecResult, ExecOptions, PermissionQuery } from './fs-provider.js';
 import { posixPermissionFacts } from './permissions.js';
 import type { ProbeSnapshot } from './snapshot-types.js';
+import type { Platform } from './types.js';
 
 function stripTrailingSlash(name: string): string {
   return name.endsWith('/') ? name.slice(0, -1) : name;
@@ -9,12 +10,12 @@ function stripTrailingSlash(name: string): string {
 
 export class SnapshotFSProvider implements FSProvider {
   readonly kind = 'snapshot' as const;
-  readonly platform: NodeJS.Platform;
+  readonly platform: Platform;
   private snapshot: ProbeSnapshot;
 
   constructor(snapshot: ProbeSnapshot) {
     this.snapshot = snapshot;
-    this.platform = snapshot.platform as NodeJS.Platform;
+    this.platform = snapshot.platform as Platform;
   }
 
   async readFile(path: string): Promise<string> {
@@ -66,7 +67,11 @@ export class SnapshotFSProvider implements FSProvider {
         if (firstSegment) entries.add(firstSegment);
       }
     }
-    const dirPaths = [...Object.keys(this.snapshot.directories), ...Object.keys(this.snapshot.directoryModes ?? {})];
+    const dirPaths = [
+      ...Object.keys(this.snapshot.directories),
+      ...Object.keys(this.snapshot.directoryModes ?? {}),
+      ...Object.keys(this.snapshot.symlinks ?? {}),
+    ];
     for (const dirPath of dirPaths) {
       if (dirPath.startsWith(prefix) && dirPath !== path) {
         const relative = dirPath.slice(prefix.length);
@@ -83,6 +88,10 @@ export class SnapshotFSProvider implements FSProvider {
 
   async readdirEntries(path: string, options?: { recursive?: boolean }): Promise<DirentInfo[]> {
     if (options?.recursive) {
+      // Like a local walk: a directory that isn't there is an error, not empty
+      if (!this.directoryExists(path) && !this.hasChildPaths(path)) {
+        throw new Error(`ENOENT: directory not collected in snapshot: ${path}`);
+      }
       return this.readdirRecursive(path);
     }
 
@@ -265,6 +274,9 @@ export class SnapshotFSProvider implements FSProvider {
     // The probe records a mode only for directories it stat'ed successfully
     // (glob roots, ancestors), so an empty directory still exists remotely
     if (this.snapshot.directoryModes?.[path] !== undefined) return true;
+    // Listed as a directory (trailing '/') in its parent's listing
+    const parent = this.snapshot.directories[dirname(path)];
+    if (Array.isArray(parent) && parent.includes(`${basename(path)}/`)) return true;
     if (!(path in this.snapshot.directories)) return false;
     const listing = this.snapshot.directories[path];
     return Array.isArray(listing);
@@ -299,9 +311,10 @@ export class SnapshotFSProvider implements FSProvider {
       if (!filePath.startsWith(prefix) || !file.exists) continue;
       results.push(entry(filePath, filePath in symlinks));
     }
-    // Links to directories have no file entry; list them as links too
+    // Links to directories have no file entry, and dangling or looping links
+    // a non-existent one; a local listing shows them all as links
     for (const linkPath of Object.keys(symlinks)) {
-      if (linkPath.startsWith(prefix) && !(linkPath in this.snapshot.files)) results.push(entry(linkPath, true));
+      if (linkPath.startsWith(prefix) && !this.snapshot.files[linkPath]?.exists) results.push(entry(linkPath, true));
     }
 
     return results;

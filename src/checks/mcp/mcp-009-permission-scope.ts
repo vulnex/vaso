@@ -17,6 +17,12 @@ const SOURCE_PERMISSION_PATTERNS = [
   { pattern: /readdir(?:Sync)?\s*\(\s*['"](?:\/|~)/i, name: 'Reading root or home directory' },
 ];
 
+/** `/`, `~`, `$HOME` or the home directory itself, or a recursive `/**` glob. */
+function isBroadScopeArg(arg: string, home: string): boolean {
+  const a = arg.trim().replace(/(.)\/+$/, '$1');
+  return a === '/' || a === '~' || a === '$HOME' || a === '${HOME}' || (home !== '' && a === home) || arg.includes('/**');
+}
+
 export const mcp009 = defineCheck({
   id: 'MCP-009',
   name: 'Permission Scope',
@@ -27,6 +33,7 @@ export const mcp009 = defineCheck({
 
   async run(ctx, h) {
     const evidence: Evidence[] = [];
+    const home = ctx.fs.homedir().replace(/\/+$/, '');
     const mcpConfigs = ctx.mcpConfigs ?? [];
     const sources = ctx.mcpServerSources ?? [];
 
@@ -44,15 +51,13 @@ export const mcp009 = defineCheck({
         }
 
         // Check args for excessive file system scope
-        if (server.args) {
-          const argsStr = server.args.join(' ');
-          if (/(?:^|\s)\/\s|(?:^|\s)~\s/i.test(argsStr) || argsStr.includes('/**')) {
-            evidence.push({
-              file: config.filePath,
-              snippet: `Server "${server.name}": args=${server.args.join(' ')}`,
-              detail: 'Server arguments grant access to broad filesystem paths',
-            });
-          }
+        // (each argument on its own: the root path is usually the last one)
+        if (server.args?.some(arg => isBroadScopeArg(arg, home))) {
+          evidence.push({
+            file: config.filePath,
+            snippet: `Server "${server.name}": args=${server.args.join(' ')}`,
+            detail: 'Server arguments grant access to broad filesystem paths',
+          });
         }
       }
     }

@@ -653,6 +653,18 @@ describe('MCP-009: Permission Scope', () => {
 
     expect(result.passed).toBe(true);
   });
+
+  it.each([['/'], ['~'], ['~/'], ['$HOME'], ['/home/u/**']])(
+    'flags a filesystem server scoped to %s as its last argument', async (scope) => {
+      const fsServer = (args: string[]): MCPConfig[] => [{
+        source: 'Claude Code', filePath: '/home/u/.claude.json',
+        servers: [{ name: 'files', command: 'npx', args, transport: 'stdio' }],
+      }];
+      const flagged = await mcp009.run(makeContext({ mcpConfigs: fsServer(['-y', '@modelcontextprotocol/server-filesystem', scope]) }));
+      expect(flagged.passed).toBe(false);
+      const scoped = await mcp009.run(makeContext({ mcpConfigs: fsServer(['-y', '@modelcontextprotocol/server-filesystem', '/home/u/projects/app']) }));
+      expect(scoped.passed).toBe(true);
+    });
 });
 
 // ==================== MCP-010: Rug Pull Risk ====================

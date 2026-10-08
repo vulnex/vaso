@@ -12,9 +12,19 @@ export const cfg010 = defineCheck({
   description: 'Check if rate limiting is configured for the gateway',
   // Atomic Agent has no gateway to rate-limit (its HTTP service is flag-configured).
   // The other frameworks listed have no rateLimit key; writing one breaks strict loaders.
-  excludedAgents: [...CODING_AGENTS, ...NATIVE_POLICY_FRAMEWORKS],
+  // Hermes and NemoClaw have no rate-limit setting either.
+  excludedAgents: [...CODING_AGENTS, ...NATIVE_POLICY_FRAMEWORKS, 'hermes', 'nemoclaw'],
 
   async run(ctx, h) {
+    // OpenClaw 2026.x throttles gateway auth by default (10 attempts per 60 s,
+    // 5 min lockout); gateway.auth.rateLimit only tunes it, and the generic
+    // rateLimit key this fix would write is rejected by its schema.
+    if (ctx.installation.agent === 'openclaw') {
+      const tuned = ctx.configs.some(c => getNestedValue(c.data, 'gateway.auth.rateLimit') !== undefined);
+      return h.passed(tuned
+        ? 'Gateway auth rate limiting is configured (gateway.auth.rateLimit)'
+        : 'Gateway auth attempts are rate-limited by OpenClaw\'s default (10 per minute, 5 minute lockout)');
+    }
     let found = false;
 
     for (const config of ctx.configs) {

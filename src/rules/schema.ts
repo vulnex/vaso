@@ -1,6 +1,6 @@
 import type { Operator } from './operators.js';
 import { VALID_OPERATORS } from './operators.js';
-import type { CheckCategory, AgentType, Severity } from '../core/types.js';
+import type { CheckCategory, AgentType, Severity, Platform } from '../core/types.js';
 import { AGENT_TYPES, CHECK_CATEGORIES } from '../core/types.js';
 
 const VALID_CATEGORIES: readonly string[] = CHECK_CATEGORIES;
@@ -47,7 +47,7 @@ export interface DeclarativeRule {
   severity: Severity;
   description: string;
   agents?: AgentType[];
-  platforms?: NodeJS.Platform[];
+  platforms?: Platform[];
   config?: RawConfigRule;
   pattern?: RawPatternRule;
   file_exists?: RawFileExistsRule;
@@ -221,7 +221,7 @@ export function validateRuleFile(data: unknown): { rules: DeclarativeRule[]; err
         severity: r.severity as Severity,
         description: r.description as string,
         agents: r.agents as AgentType[] | undefined,
-        platforms: r.platforms as NodeJS.Platform[] | undefined,
+        platforms: r.platforms as Platform[] | undefined,
         config: r.config as RawConfigRule | undefined,
         pattern: r.pattern as RawPatternRule | undefined,
         file_exists: r.file_exists as RawFileExistsRule | undefined,

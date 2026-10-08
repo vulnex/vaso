@@ -7,6 +7,7 @@ import type {
   FixResult,
   ScanContext,
   Severity,
+  Platform,
 } from './types.js';
 
 export interface CheckHelpers {
@@ -56,7 +57,7 @@ export interface DefineCheckArgs {
   description: string;
   supportedAgents?: AgentType[];
   excludedAgents?: AgentType[];
-  supportedPlatforms?: NodeJS.Platform[];
+  supportedPlatforms?: Platform[];
   run(ctx: ScanContext, h: CheckHelpers): Promise<CheckResult>;
   fix?(ctx: ScanContext): Promise<FixResult>;
 }

@@ -27,6 +27,11 @@ describe('isRegistrySpec', () => {
 });
 
 describe('parsePackFilename', () => {
+  it('reads npm 12 output, an object keyed by package name', () => {
+    const out = JSON.stringify({ 'mcp-remote': { id: 'mcp-remote@0.14.3', filename: 'mcp-remote-0.14.3.tgz' } }, null, 2);
+    expect(parsePackFilename(out)).toBe('mcp-remote-0.14.3.tgz');
+  });
+
   it('parses npm pack --json output', () => {
     const out = JSON.stringify([{ filename: 'modelcontextprotocol-server-fs-1.0.0.tgz' }]);
     expect(parsePackFilename(out)).toBe('modelcontextprotocol-server-fs-1.0.0.tgz');

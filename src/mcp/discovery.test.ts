@@ -1,9 +1,10 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { MCPDiscovery } from './discovery.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { join } from 'node:path';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
+import { LocalFSProvider } from '../core/local-fs-provider.js';
 
 const FIXTURES = join(__dirname, '../../testing/fixtures/mcp');
 
@@ -291,5 +292,49 @@ describe('MCPDiscovery — Abacus.AI', () => {
       ['Abacus.AI (project)', ['local']],
     ]);
     expect(abacus[2].servers[0].transport).toBe('streamable-http');
+  });
+
+  describe('agent config locations', () => {
+    let home: string;
+    class HomeFS extends LocalFSProvider { homedir() { return home; } getEnv() { return undefined; } }
+
+    beforeAll(async () => {
+      home = await mkdtemp(join(tmpdir(), 'vaso-mcp-home-'));
+      const w = async (rel: string, body: string) => {
+        await mkdir(join(home, rel, '..'), { recursive: true });
+        await writeFile(join(home, rel), body);
+      };
+      await w('.claude.json', JSON.stringify({
+        mcpServers: { user: { type: 'stdio', command: 'npx', args: ['-y', 'a-mcp'] } },
+        projects: { '/repo': { mcpServers: { local: { type: 'http', url: 'https://x.example/mcp' } } }, '/empty': { mcpServers: {} } },
+      }));
+      await w('.gemini/settings.json', '{\n  // jsonc\n  "mcpServers": {"g": {"httpUrl": "http://g.example/mcp"}, "s": {"url": "http://g.example/sse"}},\n}');
+      await w('.qwen/settings.json', JSON.stringify({ mcpServers: { q: { command: 'uvx', args: ['q-mcp'] } } }));
+      await w('.codex/config.toml', '[mcp_servers.c]\ncommand = "npx"\nargs = ["-y", "c-mcp"]\n');
+      await w('.cursor/mcp.json', '\uFEFF' + JSON.stringify({ mcpServers: { bom: { command: 'node', args: ['s.js'] } } }));
+    });
+    afterAll(() => rm(home, { recursive: true, force: true }));
+
+    it('discovers Claude Code (user + per-project), Gemini, Qwen, Codex and BOM-prefixed configs', async () => {
+      const result = await new MCPDiscovery(new HomeFS()).discover('linux');
+      const bySource = Object.fromEntries(result.configs.map(c => [c.source, c.servers.map(s => `${s.name}:${s.transport}`)]));
+      expect(bySource).toMatchObject({
+        'Claude Code': ['user:stdio'],
+        'Claude Code (project /repo)': ['local:streamable-http'],
+        'Gemini CLI': ['g:streamable-http', 's:sse'],
+        'Qwen Code': ['q:stdio'],
+        Codex: ['c:stdio'],
+        Cursor: ['bom:stdio'],
+      });
+      expect(bySource['Claude Code (project /empty)']).toBeUndefined();
+      const gemini = result.configs.find(c => c.source === 'Gemini CLI')!;
+      expect(gemini.servers[0].url).toBe('http://g.example/mcp');
+    });
+
+    it('parses an explicit config.toml / .claude.json path the same way', async () => {
+      const result = await new MCPDiscovery(new HomeFS()).discoverFromPaths([join(home, '.codex/config.toml'), join(home, '.claude.json')]);
+      expect(result.configs.map(c => c.source)).toEqual(['Custom', 'Custom', 'Claude Code (project /repo)']);
+      expect(result.unreadable).toBeUndefined();
+    });
   });
 });

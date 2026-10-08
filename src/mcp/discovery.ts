@@ -3,15 +3,17 @@ import type { MCPConfig, MCPServerEntry, MCPDiscoveryResult } from './types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { stripJsonc } from '../core/jsonc.js';
+import { parse as parseTOML } from 'smol-toml';
+import type { Platform } from '../core/types.js';
 
 interface ConfigLocation {
   source: string;
   path: string;
   /** Config dialect; defaults to the common `mcpServers` map. */
-  shape?: 'atomic-agent' | 'nanobot' | 'picoclaw' | 'abacus' | 'abacus-config';
+  shape?: 'atomic-agent' | 'nanobot' | 'picoclaw' | 'abacus' | 'abacus-config' | 'claude-json' | 'codex';
 }
 
-function getGlobalConfigLocations(platform: NodeJS.Platform, home: string): ConfigLocation[] {
+function getGlobalConfigLocations(platform: Platform, home: string): ConfigLocation[] {
   const locations: ConfigLocation[] = [];
 
   // Claude Desktop
@@ -33,11 +35,18 @@ function getGlobalConfigLocations(platform: NodeJS.Platform, home: string): Conf
     });
   }
 
-  // Claude Code
-  locations.push({
-    source: 'Claude Code',
-    path: join(home, '.claude', 'mcp.json'),
-  });
+  // Claude Code: `claude mcp add` writes user-scope servers (and local-scope
+  // ones, per project) to ~/.claude.json
+  locations.push(
+    { source: 'Claude Code', path: join(home, '.claude.json'), shape: 'claude-json' },
+    { source: 'Claude Code', path: join(home, '.claude', 'mcp.json') },
+  );
+
+  // Gemini CLI / Qwen Code: `mcpServers` in settings.json (JSONC)
+  locations.push(
+    { source: 'Gemini CLI', path: join(home, '.gemini', 'settings.json') },
+    { source: 'Qwen Code', path: join(home, '.qwen', 'settings.json') },
+  );
 
   // Cursor
   locations.push({
@@ -70,6 +79,12 @@ function getGlobalConfigLocations(platform: NodeJS.Platform, home: string): Conf
   });
 
   return locations;
+}
+
+/** Codex: `[mcp_servers.<name>]` tables in `$CODEX_HOME/config.toml` (default ~/.codex). */
+function getCodexLocation(home: string, fs: FSProvider): ConfigLocation {
+  const codexHome = fs.getEnv('CODEX_HOME')?.trim() || join(home, '.codex');
+  return { source: 'Codex', path: join(codexHome, 'config.toml'), shape: 'codex' };
 }
 
 /** Atomic Agent: `mcp.servers[]` in `<stateDir>/config.json`. */
@@ -126,7 +141,11 @@ function parseServerMap(map: unknown): MCPServerEntry[] {
     if (config.enabled === false) continue;
 
     let transport: MCPServerEntry['transport'] = TRANSPORT_TYPES[String(config.type)] ?? 'stdio';
-    if (!TRANSPORT_TYPES[String(config.type)] && config.url) {
+    // Gemini CLI / Qwen Code: `httpUrl` is streamable HTTP, `url` is SSE
+    const httpUrl = typeof config.httpUrl === 'string' ? config.httpUrl : undefined;
+    if (!TRANSPORT_TYPES[String(config.type)] && httpUrl && !config.url) {
+      transport = 'streamable-http';
+    } else if (!TRANSPORT_TYPES[String(config.type)] && config.url) {
       const url = String(config.url);
       if (url.includes('/sse')) {
         transport = 'sse';
@@ -145,7 +164,7 @@ function parseServerMap(map: unknown): MCPServerEntry[] {
       headers: config.headers && typeof config.headers === 'object'
         ? Object.fromEntries(Object.entries(config.headers as Record<string, unknown>).map(([k, v]) => [k, String(v)]))
         : undefined,
-      url: config.url ? String(config.url) : undefined,
+      url: config.url ? String(config.url) : httpUrl,
       transport,
     });
   }
@@ -168,6 +187,8 @@ function parseShape(shape: ConfigLocation['shape'], data: Record<string, unknown
       return parseServerMap(withoutDisabled(data.mcpServers));
     case 'abacus-config':
       return parseServerMap(abacusArrayToMap(data.mcpServers));
+    case 'codex':
+      return parseServerMap(data.mcp_servers);
     case 'picoclaw': {
       // tools.mcp.enabled: false switches off the whole MCP integration
       const mcp = tools?.mcp as Record<string, unknown> | undefined;
@@ -235,6 +256,18 @@ function parseAtomicAgentEntries(data: Record<string, unknown>): MCPServerEntry[
   return servers;
 }
 
+/** Local-scope servers `claude mcp add` stores per project under `projects.<path>.mcpServers`. */
+function claudeProjectConfigs(filePath: string, data: Record<string, unknown>): MCPConfig[] {
+  const projects = data.projects;
+  if (!projects || typeof projects !== 'object' || Array.isArray(projects)) return [];
+  const configs: MCPConfig[] = [];
+  for (const [projectPath, project] of Object.entries(projects as Record<string, unknown>)) {
+    const servers = parseServerMap((project as Record<string, unknown> | null)?.mcpServers);
+    if (servers.length > 0) configs.push({ source: `Claude Code (project ${projectPath})`, filePath, servers });
+  }
+  return configs;
+}
+
 export class MCPDiscovery {
   private fs: FSProvider;
 
@@ -243,7 +276,7 @@ export class MCPDiscovery {
   }
 
   async discover(
-    platform: NodeJS.Platform = process.platform,
+    platform: Platform = process.platform,
     projectDir?: string,
   ): Promise<MCPDiscoveryResult> {
     const configs: MCPConfig[] = [];
@@ -251,6 +284,7 @@ export class MCPDiscovery {
 
     const locations = [
       ...getGlobalConfigLocations(platform, home),
+      getCodexLocation(home, this.fs),
       getAtomicAgentLocation(home, this.fs),
       ...getFrameworkLocations(home, this.fs),
       ...(projectDir ? getProjectConfigLocations(projectDir) : []),
@@ -261,7 +295,9 @@ export class MCPDiscovery {
 
       try {
         const raw = await this.fs.readFile(location.path);
-        const data = JSON.parse(stripJsonc(raw)) as Record<string, unknown>;
+        const data = (location.shape === 'codex'
+          ? parseTOML(raw.replace(/^\uFEFF/, ''))
+          : JSON.parse(stripJsonc(raw))) as Record<string, unknown>;
         const servers = parseShape(location.shape, data);
 
         if (servers.length > 0) {
@@ -271,6 +307,7 @@ export class MCPDiscovery {
             servers,
           });
         }
+        if (location.shape === 'claude-json') configs.push(...claudeProjectConfigs(location.path, data));
       } catch {
         // Skip unparseable configs
       }
@@ -289,9 +326,11 @@ export class MCPDiscovery {
 
       try {
         const raw = await this.fs.readFile(filePath);
-        const data = JSON.parse(stripJsonc(raw)) as Record<string, unknown>;
+        const isToml = filePath.toLowerCase().endsWith('.toml');
+        const data = (isToml ? parseTOML(raw.replace(/^\uFEFF/, '')) : JSON.parse(stripJsonc(raw))) as Record<string, unknown>;
         const tools = data.tools as Record<string, unknown> | undefined;
-        const shape: ConfigLocation['shape'] = data.mcpServers ? undefined
+        const shape: ConfigLocation['shape'] = isToml ? 'codex'
+          : data.mcpServers ? undefined
           : tools?.mcpServers || tools?.mcp_servers ? 'nanobot'
           : (tools?.mcp as Record<string, unknown> | undefined)?.servers ? 'picoclaw'
           : 'atomic-agent';
@@ -304,6 +343,8 @@ export class MCPDiscovery {
             servers,
           });
         }
+        // ~/.claude.json: local-scope servers per project
+        configs.push(...claudeProjectConfigs(filePath, data));
       } catch {
         // The caller named this file — report it rather than scan nothing
         unreadable.push(filePath);

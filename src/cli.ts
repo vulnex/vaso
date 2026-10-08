@@ -79,6 +79,10 @@ program
   .name('vaso')
   .description('VULNEX Agent Security Observer — security scanner for AI agent deployments')
   .version(VERSION, '-v, --version')
+  // Parse errors (unknown option/command, missing or extra argument) are
+  // usage errors — exit 2, not commander's 1, which CI reads as "findings".
+  // Set before the subcommands are defined: they inherit it. Help/version exit 0.
+  .exitOverride(err => process.exit(err.exitCode === 0 ? 0 : 2))
   .option('--debug', 'print full stack traces on errors')
   .hook('preAction', async (_thisCommand, actionCommand) => {
     setDebug(Boolean(program.opts().debug));

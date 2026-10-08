@@ -24,6 +24,11 @@ function wildcardListeners(data: unknown, wildcards: string[], path = '', depth 
   return hits;
 }
 
+const HOST_PATHS = ['gateway.host', 'server.host', 'host', 'GATEWAY_HOST'];
+const WILDCARD_ADDRS = ['0.0.0.0', '[::]', '::'];
+/** Bind values that expose the listener beyond loopback (symbolic modes and wildcard addresses). */
+const SYMBOLIC_EXPOSED = ['all', 'lan', ...WILDCARD_ADDRS];
+
 export const cfg001 = defineCheck({
   id: 'CFG-001',
   name: 'Gateway Binding',
@@ -45,8 +50,7 @@ export const cfg001 = defineCheck({
       // The first host key present is the gateway's; the walk below skips
       // only that one (and a flagged bind), so a second wildcard listener
       // such as server.host is still reported.
-      const hostPath = ['gateway.host', 'server.host', 'host', 'GATEWAY_HOST']
-        .find(p => getNestedValue(config.data, p) != null);
+      const hostPath = HOST_PATHS.find(p => getNestedValue(config.data, p) != null);
       const host = hostPath ? getNestedValue(config.data, hostPath) : undefined;
       const reported = new Set<string>(hostPath ? [hostPath] : []);
 
@@ -67,7 +71,7 @@ export const cfg001 = defineCheck({
       const bind = getNestedValue(config.data, 'gateway.bind') ?? getNestedValue(config.data, 'bind');
       if (getNestedValue(config.data, 'gateway.bind') !== undefined) reported.add('gateway.bind');
       else if (getNestedValue(config.data, 'bind') !== undefined) reported.add('bind');
-      if (typeof bind === 'string' && ['all', 'lan', ...WILDCARD_BINDS].includes(bind.toLowerCase())) {
+      if (typeof bind === 'string' && SYMBOLIC_EXPOSED.includes(bind.toLowerCase())) {
         gatewayKey = true;
         evidence.push({
           file: config.filePath,
@@ -120,18 +124,35 @@ export const cfg001 = defineCheck({
         : 'Gateway is bound to 0.0.0.0 — accessible from all network interfaces',
       evidence: uniqueEvidence,
       fixable: gatewayKey,
-      fixDescription: 'Rebind gateway to 127.0.0.1',
+      fixDescription: 'Rebind the gateway to loopback (127.0.0.1, or gateway.bind "loopback")',
     });
   },
 
+  // Rewrite the key that is exposed, in the file it is in. OpenClaw 2026.x
+  // has no gateway.host (its schema rejects unknown keys): its listener is
+  // the symbolic gateway.bind, whose local-only value is "loopback".
   async fix(ctx) {
-    return fixFirstConfig(ctx.configs, {
-      checkId: 'CFG-001',
-      env: 'GATEWAY_HOST',
-      path: 'gateway.host',
-      value: '127.0.0.1',
-      message: 'Set gateway host to 127.0.0.1',
-      noConfigMessage: 'No config file found',
-    });
+    for (const config of ctx.configs) {
+      for (const path of ['gateway.bind', 'bind']) {
+        const bind = getNestedValue(config.data, path);
+        if (typeof bind === 'string' && SYMBOLIC_EXPOSED.includes(bind.toLowerCase())) {
+          return fixFirstConfig([config], {
+            checkId: 'CFG-001', path, value: 'loopback', message: `Set ${path} to "loopback"`,
+          });
+        }
+      }
+      const hostPath = HOST_PATHS.find(p => getNestedValue(config.data, p) != null);
+      const host = hostPath ? getNestedValue(config.data, hostPath) : undefined;
+      if (typeof host === 'string' && host.split(',').some(p => p.trim() === '*' || WILDCARD_ADDRS.includes(p.trim()))) {
+        return fixFirstConfig([config], {
+          checkId: 'CFG-001',
+          env: hostPath === 'GATEWAY_HOST' ? 'GATEWAY_HOST' : undefined,
+          path: hostPath === 'GATEWAY_HOST' ? undefined : hostPath,
+          value: '127.0.0.1',
+          message: `Set ${hostPath} to 127.0.0.1`,
+        });
+      }
+    }
+    return { checkId: 'CFG-001', applied: false, message: 'No wildcard gateway listener found to rebind' };
   },
 });
