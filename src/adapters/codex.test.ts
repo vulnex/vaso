@@ -90,10 +90,18 @@ describe('Codex adapter', () => {
     expect(result).toEqual([]);
   });
 
-  it('returns config paths under ~/.codex', () => {
+  it('returns config paths under ~/.codex, never the auth.json token store', () => {
     const paths = codexAdapter.getConfigPaths();
     expect(paths).toContain(join(codexDir, 'config.toml'));
-    expect(paths).toContain(join(codexDir, 'auth.json'));
+    expect(paths).not.toContain(join(codexDir, 'auth.json'));
+  });
+
+  it('detects a signed-in install with no config.toml or binary, without parsing auth.json', async () => {
+    setExistingPaths([codexDir, join(codexDir, 'auth.json')]);
+    const result = await codexAdapter.detect();
+    expect(result).toHaveLength(1);
+    expect(result[0].configFiles).toEqual([]);
+    expect(mockLoadConfig).not.toHaveBeenCalledWith(join(codexDir, 'auth.json'), expect.anything());
   });
 
   it('has no skills dir', () => {
@@ -111,7 +119,9 @@ describe('Codex adapter', () => {
   it('returns probe manifest with expected paths', () => {
     const manifest = codexAdapter.getProbeManifest!();
     expect(manifest.filePaths).toContain('~/.codex/config.toml');
-    expect(manifest.filePaths).toContain('~/.codex/auth.json');
+    // OAuth tokens: permissions only (CDX-003), never shipped off the host
+    expect(manifest.filePaths).not.toContain('~/.codex/auth.json');
+    expect(manifest.metadataGlobPatterns).toContain('~/.codex/auth.json');
     expect(manifest.envPrefixes).toContain('CODEX_');
     expect(manifest.envPrefixes).toContain('OPENAI_');
   });

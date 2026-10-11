@@ -9,10 +9,12 @@
  *       label: prod-1
  *       identity: ~/.ssh/id_prod
  *       sudo: true
+ *     - host: ops@10.0.1.6:2222   # user@host[:port], as with --host
  */
 
 import { readFile } from 'node:fs/promises';
 import { parse as parseYAML } from 'yaml';
+import { parseSSHTarget } from './ssh.js';
 import type { SSHTarget } from './ssh.js';
 
 interface InventoryFile {
@@ -41,12 +43,29 @@ export async function parseInventory(path: string): Promise<SSHTarget[]> {
     if (!entry.host) {
       throw new Error(`Inventory entry #${idx + 1} missing required "host" field`);
     }
-    const user = entry.user ?? 'root';
-    const port = entry.port ?? 22;
-    const defaultLabel = port === 22 ? `${user}@${entry.host}` : `${user}@${entry.host}:${port}`;
+    // `host: user@host[:port]` is read like `--host`; it used to become
+    // `root@user@host`, which ssh can only reject.
+    let host = String(entry.host);
+    let user = entry.user;
+    let port = entry.port;
+    if (host.includes('@')) {
+      const parsed = parseSSHTarget(host);
+      if (user !== undefined && user !== parsed.user) {
+        throw new Error(`Inventory entry #${idx + 1}: host "${host}" names user "${parsed.user}" but "user" is "${user}"`);
+      }
+      if (port !== undefined && parsed.port !== 22 && port !== parsed.port) {
+        throw new Error(`Inventory entry #${idx + 1}: host "${host}" names port ${parsed.port} but "port" is ${port}`);
+      }
+      host = parsed.host;
+      user = parsed.user;
+      port = port ?? parsed.port;
+    }
+    user = user ?? 'root';
+    port = port ?? 22;
+    const defaultLabel = port === 22 ? `${user}@${host}` : `${user}@${host}:${port}`;
     return {
       user,
-      host: entry.host,
+      host,
       port,
       label: entry.label ?? defaultLabel,
       identity: entry.identity,

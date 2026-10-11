@@ -144,7 +144,8 @@ describe('OpenCode adapter', () => {
     const manifest = opencodeAdapter.getProbeManifest!();
     expect(manifest.filePaths).toContain('~/.config/opencode/opencode.json');
     expect(manifest.filePaths).toContain('~/.config/opencode/opencode.jsonc');
-    expect(manifest.filePaths).toContain('~/.local/share/opencode/auth.json');
+    expect(manifest.filePaths).not.toContain('~/.local/share/opencode/auth.json');
+    expect(manifest.metadataGlobPatterns).toContain('~/.local/share/opencode/auth.json');
     expect(manifest.envPrefixes).toContain('OPENCODE_');
     expect(manifest.envPrefixes).toContain('XDG_');
   });

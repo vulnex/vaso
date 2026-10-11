@@ -195,9 +195,9 @@ describe('Hermes adapter', () => {
     expect(manifest.globPatterns).toContain('~/.hermes/skills/**');
     expect(manifest.globPatterns).toContain('~/.hermes/optional-skills/**');
     expect(manifest.envPrefixes).toContain('HERMES_');
-    expect(manifest.commands).toHaveLength(3);
-    // Current Hermes CLIs answer `--version`, not `version` — both are probed
-    expect(manifest.commands.map(c => c.args.join(' '))).toEqual(expect.arrayContaining(['version', '--version']));
+    expect(manifest.commands).toHaveLength(2);
+    // `hermes version` installs dependencies in a fresh data root — only --version runs
+    expect(manifest.commands.map(c => c.args.join(' '))).toEqual(['hermes', '--version']);
   });
 
   it('returns credential paths', () => {

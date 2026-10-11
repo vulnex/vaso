@@ -49,7 +49,12 @@ export const hermesAdapter: AgentAdapter = {
       names: ['hermes'],
       systemPaths: SYSTEM_CLI_PATHS,
       userRelPaths: USER_CLI_RELATIVE_PATHS,
-      version: (bin, canExec) => (canExec ? queryCliVersion(bin, fs, { argSets: [['version'], ['--version']] }) : undefined),
+      // `--version` only. Hermes has no `version` subcommand, and in a fresh
+      // data root (the throwaway HOME version queries run under) it installs
+      // its Python dependencies before parsing arguments — hundreds of MB per
+      // scan. `--version` exits without writing; a git checkout then reports
+      // no version (its version comes from `git describe`).
+      version: (bin, canExec) => (canExec ? queryCliVersion(bin, fs) : undefined),
     });
     const cliBinary = installs.primary?.path;
     const version = installs.primary?.version;
@@ -244,7 +249,12 @@ export const hermesAdapter: AgentAdapter = {
         '~/.hermes/cli-config.yaml',
         '~/.hermes/config.yaml',
         '~/.hermes/.env',
+      ],
+      // Credential stores — permissions only (HM-003), never content
+      metadataGlobPatterns: [
         '~/.hermes/credentials.json',
+        '~/.hermes/auth.json',
+        '~/.hermes/mcp-tokens/*.json',
       ],
       globPatterns: [
         '~/.hermes/skills/**',
@@ -252,7 +262,6 @@ export const hermesAdapter: AgentAdapter = {
       ],
       commands: [
         { id: 'hermes-which', cmd: 'which', args: ['hermes'], timeout: 3000 },
-        { id: 'hermes-version', cmd: 'hermes', args: ['version'], timeout: 15000 },
         { id: 'hermes-version-flag', cmd: 'hermes', args: ['--version'], timeout: 15000 },
       ],
       directoryListings: [

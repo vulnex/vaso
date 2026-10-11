@@ -11,7 +11,9 @@ import { getUserHomeDirs } from './openclaw.js';
 import { queryCliVersion, readPackageVersion } from './version-query.js';
 
 const CODEX_DIR_NAME = '.codex';
-const CONFIG_FILES = ['config.toml', 'auth.json'];
+// auth.json holds OAuth tokens; only its presence and permissions matter
+// (CDX-003), so it is never parsed.
+const CONFIG_FILES = ['config.toml'];
 const NPM_PACKAGE_NAME = '@openai/codex';
 
 const SYSTEM_CLI_PATHS = [
@@ -112,9 +114,10 @@ export const codexAdapter: AgentAdapter = {
         }
       }
 
-      // A bare ~/.codex/ with no recognized config files and no `codex`
-      // binary is leftover state, not a CLI install.
-      if (configFiles.length === 0 && !cliBinary) continue;
+      // A bare ~/.codex/ with no config, no sign-in and no `codex` binary is
+      // leftover state, not a CLI install.
+      const signedIn = hasCodexDir && (await fs.access(join(codexDir, 'auth.json')));
+      if (configFiles.length === 0 && !signedIn && !cliBinary) continue;
 
       const version = installs.primary?.version;
 
@@ -187,7 +190,6 @@ export const codexAdapter: AgentAdapter = {
     return {
       filePaths: [
         '~/.codex/config.toml',
-        '~/.codex/auth.json',
         '~/.codex/instructions.md',
         '~/.codex/AGENTS.md',
         // User-relative CLI install locations — kept in sync with USER_CLI_RELATIVE_PATHS
@@ -206,6 +208,8 @@ export const codexAdapter: AgentAdapter = {
       // Session transcripts are private; remotely only their presence is
       // recorded (the last-session model hint is local-scan only).
       metadataGlobPatterns: [
+        // OAuth token store — permissions only (CDX-003), never content
+        '~/.codex/auth.json',
         '~/.codex/sessions/*/*/*/rollout-*.jsonl',
       ],
       commands: [

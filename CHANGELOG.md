@@ -6,6 +6,14 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Remote scans no longer copy agent OAuth tokens off the host.** The probe collected the full contents of Codex's `~/.codex/auth.json` (id, access and refresh tokens), and OpenCode's, Hermes' and OpenClaw's token stores were listed the same way, though only their permissions are checked; a `--save-snapshot` file then held the tokens. They are now collected as permissions and existence only, like Claude Code's credentials file, and a local scan no longer parses Codex's `auth.json` either. Hermes' `auth.json` and `mcp-tokens/*.json`, which HM-003 checks, are now collected for remote scans too. NemoClaw's legacy `credentials.json` (CFG-020 reports plaintext keys in it) and PicoClaw's `auth.json` (its provider names) are still read.
+- **MCP scans no longer read a server's executable as its source.** A native server binary launched by path (ChatGPT's `node_repl`, a Rust or Go server) was read as text, and its bytes tripped MCP-034's invisible-character test (critical), MCP-035, MCP-018 and MCP-007. Binary content is never analyzed now.
+- **Package runners given by path are recognized.** A config that runs `/Users/me/.local/bin/uvx` or an nvm `npx` was treated as a local program — the runner binary itself was read as server source — and its package was never checked. The runner is identified by name; its package is read from `--from` (uvx) or `--package` (npx) when present, skipping option values: in `uvx --link-mode copy --from godot-ai==3.2.5 godot-ai`, MCP-010 used to take `copy` for the package.
+- **Scanning a host with Hermes no longer installs Hermes' dependencies.** vaso ran `hermes version` to read the version. Hermes has no such subcommand, but in a fresh data root — the throwaway home version queries run under — it installs its Python dependencies before parsing arguments: up to 335 MB downloaded per scan, about 15 s, and partial installs left in `/tmp` after the query timed out (local and remote scans). Only `hermes --version` runs now; it writes nothing. A git checkout of Hermes still reports no version (it comes from `git describe`).
+- **Inventory hosts accept `user@host[:port]`.** `host: deploy@10.0.1.5` became `root@deploy@10.0.1.5`, which every SSH server rejects; the host field is now read like `--host`, and a `user`/`port` field that contradicts it is an error. The inventory format is documented in the user guide.
+
 ## [1.2.0] - 2026-10-11
 
 ### Added

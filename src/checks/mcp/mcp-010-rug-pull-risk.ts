@@ -1,6 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { uvRunScript } from '../../mcp/source-resolver.js';
+import { inferPackageName, runnerName, uvRunScript } from '../../mcp/source-resolver.js';
 
 function isVersionPinned(packageArg: string): boolean {
   // Scoped packages: @scope/name@version
@@ -38,12 +38,12 @@ export const mcp010 = defineCheck({
       for (const server of config.servers) {
         if (!server.command || !server.args?.length) continue;
 
-        const cmd = server.command;
+        const cmd = runnerName(server.command);
         const args = server.args;
 
-        // npx without version pinning
-        if (cmd === 'npx' || cmd === 'npx.cmd') {
-          const packageArg = args.find(a => !a.startsWith('-'));
+        // npx without version pinning (the command may be a path to npx)
+        if (cmd === 'npx' || cmd === 'bunx' || cmd === 'pnpx') {
+          const packageArg = inferPackageName(server);
           const isUnpinned = packageArg && !isVersionPinned(packageArg);
 
           if (isUnpinned) {
@@ -67,7 +67,8 @@ export const mcp010 = defineCheck({
         // uvx without version pinning. `uv [--directory d] run server.py` runs a
         // local script — there is no package to pin.
         if (cmd === 'uvx' || (cmd === 'uv' && !uvRunScript(args))) {
-          const packageArg = args.find(a => !a.startsWith('-') && a !== 'run' && a !== 'tool');
+          // `uvx --link-mode copy --from pkg==1.2 tool`: the spec is --from's value.
+          const packageArg = inferPackageName(server);
           if (packageArg && !packageArg.includes('==') && !packageArg.includes('>=')) {
             evidence.push({
               file: config.filePath,

@@ -5,25 +5,58 @@ import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { packageExtractDir, resolveNpmPackageSource } from './package-fetcher.js';
 import { collectServerDependencies } from './server-dependencies.js';
 
+/**
+ * A command's executable name, also when the config gives it as a path —
+ * desktop configs often spell out `/Users/me/.local/bin/uvx` or an nvm `npx`.
+ */
+export function runnerName(command: string): string {
+  return basename(command.replace(/\\/g, '/')).replace(/\.(?:cmd|exe)$/i, '');
+}
+
+/** Runners that fetch and run a published package. */
+const PACKAGE_RUNNERS = new Set(['npx', 'bunx', 'uvx', 'pnpx', 'pipx']);
+
+/** npx/bunx options that consume the next argument. */
+const NPX_VALUE_FLAGS = new Set(['--registry', '--cache', '--userconfig', '--prefix', '-c', '--call', '--node-options', '--workspace', '-w']);
+
+/**
+ * The package spec a runner installs: the value of `--package`/`-p` (npx) or
+ * `--from` (uvx) when given, otherwise the first argument that is not an
+ * option or an option's value (`uvx --link-mode copy --from x==1 x` → `x==1`).
+ */
+function runnerPackageSpec(args: string[], valueFlags: Set<string>, packageFlags: Set<string>): string | undefined {
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (packageFlags.has(arg)) return args[i + 1];
+    const inline = /^(--[\w-]+)=(.+)$/.exec(arg);
+    if (inline && packageFlags.has(inline[1])) return inline[2];
+    if (valueFlags.has(arg)) { i++; continue; }
+    if (arg.startsWith('-')) continue;
+    return arg;
+  }
+  return undefined;
+}
+
 export function inferPackageName(server: MCPServerEntry): string | undefined {
   if (!server.command || !server.args?.length) return undefined;
 
-  const cmd = server.command;
+  const cmd = runnerName(server.command);
   const args = server.args;
 
-  // npx @scope/package or npx package
-  if (cmd === 'npx' || cmd === 'npx.cmd') {
-    // Skip flags like -y, --yes, -p, --package
-    for (const arg of args) {
-      if (arg.startsWith('-')) continue;
-      return arg;
-    }
+  // npx @scope/package, npx -y pkg@1.2.3, npx -p pkg command
+  if (cmd === 'npx' || cmd === 'bunx' || cmd === 'pnpx') {
+    return runnerPackageSpec(args, NPX_VALUE_FLAGS, new Set(['-p', '--package']));
   }
 
-  // uvx package
-  if (cmd === 'uvx' || cmd === 'uv') {
-    // `uv [--directory d] run server.py` runs a local script, not a package.
-    if (cmd === 'uv' && uvRunScript(args)) return undefined;
+  // uvx package, uvx --from package==1.2 command
+  if (cmd === 'uvx') {
+    return runnerPackageSpec(args, UV_VALUE_FLAGS, new Set(['--from']));
+  }
+
+  // uv tool run / uv run <package>; `uv [--directory d] run server.py` runs a
+  // local script, not a package.
+  if (cmd === 'uv') {
+    if (uvRunScript(args)) return undefined;
     for (let i = 0; i < args.length; i++) {
       const arg = args[i];
       if (UV_VALUE_FLAGS.has(arg)) { i++; continue; }
@@ -32,14 +65,7 @@ export function inferPackageName(server: MCPServerEntry): string | undefined {
     }
   }
 
-  // node /path/to/server.js -> try to find package.json
-  if (cmd === 'node' || cmd === 'node.exe') {
-    for (const arg of args) {
-      if (arg.startsWith('-')) continue;
-      return undefined; // local path, handled by resolveLocalPath
-    }
-  }
-
+  // node /path/to/server.js — a local path, handled by resolveLocalPath
   return undefined;
 }
 
@@ -54,7 +80,9 @@ const UV_VALUE_FLAGS = new Set([
   '--directory', '--project', '--python', '-p', '--with', '--with-editable',
   '--with-requirements', '--from', '--env-file', '--index', '--index-url',
   '--default-index', '--extra-index-url', '--extra', '--group', '--package',
-  '--config-file', '--cache-dir',
+  '--config-file', '--cache-dir', '--link-mode', '--index-strategy', '--keyring-provider',
+  '--constraints', '--overrides', '--prerelease', '--resolution', '--exclude-newer',
+  '--refresh-package', '--reinstall-package', '--upgrade-package',
 ]);
 
 /**
@@ -115,6 +143,9 @@ export function resolveLocalPath(server: MCPServerEntry): string | undefined {
   const cmd = server.command;
   const args = server.args ?? [];
 
+  // A package runner given by path runs a published package, not this file.
+  if (PACKAGE_RUNNERS.has(runnerName(cmd))) return undefined;
+
   // Interpreter + script, also when the interpreter is given by path — an
   // absolute nvm `node` or venv `python` is the norm in desktop configs, and
   // reading the interpreter binary as "server source" analyzed nothing.
@@ -151,6 +182,10 @@ function sourceLanguage(server: MCPServerEntry, path: string | undefined, code: 
 async function readSourceFile(filePath: string, fs: FSProvider): Promise<string | undefined> {
   try {
     const content = await fs.readFile(filePath);
+    // A native executable (a Mach-O / ELF server binary launched by path) is
+    // not source: read as text, its bytes match "invisible character" and
+    // "encoded string" patterns everywhere.
+    if (content.slice(0, 8192).includes('\u0000')) return undefined;
     return content;
   } catch {
     return undefined;
@@ -203,7 +238,8 @@ export interface ResolveSourcesOptions {
 }
 
 function isNpmCommand(cmd?: string): boolean {
-  return cmd === 'npx' || cmd === 'npx.cmd';
+  const runner = cmd ? runnerName(cmd) : '';
+  return runner === 'npx' || runner === 'bunx' || runner === 'pnpx';
 }
 
 export async function resolveServerSources(

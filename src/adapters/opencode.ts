@@ -173,12 +173,15 @@ export const opencodeAdapter: AgentAdapter = {
         '~/.config/opencode/opencode.jsonc',
         '~/.config/opencode/AGENTS.md',
         '~/.config/opencode/CLAUDE.md',
-        '~/.local/share/opencode/auth.json',
         // User-relative CLI install locations — kept in sync with USER_CLI_RELATIVE_PATHS
         '~/.opencode/bin/opencode',
         '~/.local/bin/opencode',
         '~/.bun/bin/opencode',
         '~/.npm-global/bin/opencode',
+      ],
+      // Provider token store — existence and permissions only, never content
+      metadataGlobPatterns: [
+        '~/.local/share/opencode/auth.json',
       ],
       globPatterns: [
         // package.json of every npm-global copy — versions non-primary copies on remote scans

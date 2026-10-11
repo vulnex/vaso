@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { inferPackageName, resolveLocalPath, resolveServerSources, resolveSourcePaths } from './source-resolver.js';
+import { inferPackageName, resolveLocalPath, resolveServerSources, resolveSourcePaths, runnerName } from './source-resolver.js';
 import type { MCPServerEntry } from './types.js';
 
 function makeServer(overrides?: Partial<MCPServerEntry>): MCPServerEntry {
@@ -265,5 +265,44 @@ describe('data files and --source paths', () => {
     const { sources, unreadable } = await resolveSourcePaths([join(dir, 'missing'), dir]);
     expect(sources).toEqual([]);
     expect(unreadable).toEqual([join(dir, 'missing'), dir]);
+  });
+});
+
+describe('package runners given by path, and their options', () => {
+  // Shape of a real Claude Code / Cursor / Codex config (godot-ai via uv).
+  const uvxServer = makeServer({
+    command: '/Users/me/.local/bin/uvx',
+    args: ['--link-mode', 'copy', '--from', 'godot-ai==3.2.5', 'godot-ai', 'attach', '--port', '8000'],
+  });
+
+  it('names the runner whatever its path or extension', () => {
+    expect(runnerName('/Users/me/.local/bin/uvx')).toBe('uvx');
+    expect(runnerName('C:\\Program Files\\nodejs\\npx.cmd')).toBe('npx');
+  });
+
+  it('reads the package from --from / --package, skipping option values', () => {
+    expect(inferPackageName(uvxServer)).toBe('godot-ai==3.2.5');
+    expect(inferPackageName(makeServer({ command: '/opt/node/bin/npx', args: ['-y', '--package', '@scope/srv@1.0.0', 'srv-cli'] })))
+      .toBe('@scope/srv@1.0.0');
+    expect(inferPackageName(makeServer({ command: 'npx', args: ['--registry', 'https://r.example.com', 'pkg'] }))).toBe('pkg');
+  });
+
+  it('never treats a runner as a local file to read', () => {
+    expect(resolveLocalPath(uvxServer)).toBeUndefined();
+  });
+
+  describe('native executables', () => {
+    let dir: string;
+    beforeEach(() => {
+      dir = mkdtempSync(join(tmpdir(), 'vaso-bin-'));
+      return () => rmSync(dir, { recursive: true, force: true });
+    });
+
+    it('does not read a binary server as source', async () => {
+      const bin = join(dir, 'node_repl');
+      writeFileSync(bin, Buffer.from([0xcf, 0xfa, 0xed, 0xfe, 0x0c, 0x00, 0x00, 0x01, 0xad, 0x41, 0x42]));
+      const [source] = await resolveServerSources([makeServer({ command: bin, args: [] })]);
+      expect(source.sourceCode).toBeUndefined();
+    });
   });
 });

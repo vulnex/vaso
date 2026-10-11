@@ -3072,3 +3072,23 @@ describe('MCP-027 shipped dependencies', () => {
     expect((await run({ serverName: 'new', dependencies: [sdk({ version: '1.31.0' })] })).passed).toBe(true);
   });
 });
+
+describe('MCP-010 with runners given by path', () => {
+  const cfg = (server: MCPConfig['servers'][number]): MCPConfig[] => [{ source: 'Codex', filePath: '/tmp/config.toml', servers: [server] }];
+
+  it('reads a pinned --from spec, not an option value (godot-ai via uvx)', async () => {
+    const result = await mcp010.run(makeContext({
+      mcpConfigs: cfg({ name: 'godot-ai', command: '/Users/me/.local/bin/uvx', transport: 'stdio',
+        args: ['--link-mode', 'copy', '--from', 'godot-ai==3.2.5', 'godot-ai', 'attach'] }),
+    }));
+    expect(result.passed).toBe(true);
+  });
+
+  it('still flags an unpinned package behind an absolute npx', async () => {
+    const result = await mcp010.run(makeContext({
+      mcpConfigs: cfg({ name: 'x', command: '/opt/node/bin/npx', transport: 'stdio', args: ['-y', 'some-mcp-server'] }),
+    }));
+    expect(result.passed).toBe(false);
+    expect(result.evidence?.[0].snippet).toContain('npx some-mcp-server');
+  });
+});

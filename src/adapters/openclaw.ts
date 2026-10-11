@@ -349,8 +349,6 @@ export const openclawAdapter: AgentAdapter = {
         '~/.moltbot/config.json',
         '~/.moltbot/gateway.yaml',
         '~/.moltbot/.env',
-        '~/.openclaw/credentials.json',
-        '~/.openclaw/auth.json',
         '~/.openclaw/memory.json',
         '~/.openclaw/conversations.db',
         // User-relative CLI install locations — kept in sync with USER_CLI_RELATIVE_PATHS
@@ -359,6 +357,11 @@ export const openclawAdapter: AgentAdapter = {
         '~/.nvm/current/bin/openclaw',
         '~/.npm-global/bin/openclaw',
         '~/bin/openclaw',
+      ],
+      // Credential stores — permissions only, never content
+      metadataGlobPatterns: [
+        '~/.openclaw/credentials.json',
+        '~/.openclaw/auth.json',
       ],
       globPatterns: [
         // package.json of every npm-global copy — versions non-primary copies on remote scans

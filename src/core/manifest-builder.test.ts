@@ -13,6 +13,11 @@ describe('buildProbeManifest', () => {
       '~/.gemini/oauth_creds.json', '~/.gemini/google_accounts.json', '~/.gemini/mcp-oauth-tokens.json',
       '~/.qwen/oauth_creds.json', '~/.qwen/mcp-oauth-tokens.json', '~/.qwen/google_accounts.json',
       '~/.abacusai/keystore.enc*',
+      // OAuth / provider tokens no check reads (found in a remote snapshot, 2026-10-11)
+      '~/.codex/auth.json',
+      '~/.local/share/opencode/auth.json',
+      '~/.hermes/credentials.json', '~/.hermes/auth.json', '~/.hermes/mcp-tokens/*.json',
+      '~/.openclaw/credentials.json', '~/.openclaw/auth.json',
     ];
     expect(manifest.metadataGlobPatterns).toEqual(expect.arrayContaining(stores));
     const content = [...manifest.globPatterns, ...manifest.filePaths];
@@ -21,7 +26,7 @@ describe('buildProbeManifest', () => {
 
   it('runs agent CLIs with an isolated HOME, system tools with the real one', () => {
     const byId = new Map(manifest.commands.map(c => [c.id, c]));
-    for (const id of ['hermes-version', 'cursor-agent-version', 'gemini-version', 'copilot-version', 'nemoclaw-pip3-show', 'abacusai-version']) {
+    for (const id of ['hermes-version-flag', 'cursor-agent-version', 'gemini-version', 'copilot-version', 'nemoclaw-pip3-show', 'abacusai-version']) {
       expect(byId.get(id)?.isolateHome, id).toBe(true);
     }
     for (const id of ['claude-which', 'ps-ancestry', 'crontab-list', 'chatgpt-plist-main', 'claude-desktop-version']) {
@@ -117,5 +122,10 @@ describe('buildProbeManifest', () => {
     for (const [agent, globs] of Object.entries(expected)) {
       expect(byAgent.get(agent as AgentAdapter['agent']), agent).toEqual(expect.arrayContaining(globs));
     }
+  });
+
+  it('never runs `hermes version` (installs dependencies in a fresh data root)', () => {
+    const hermes = manifest.commands.filter((c) => c.cmd === 'hermes');
+    expect(hermes.map((c) => c.args)).toEqual([['--version']]);
   });
 });

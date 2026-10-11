@@ -98,6 +98,30 @@ hosts:
     expect(targets[2].label).toBe('root@10.0.0.7');
   });
 
+  it('reads user@host[:port] in the host field like --host', async () => {
+    const path = await writeTempYAML(`hosts:
+  - host: alice@192.0.2.10
+  - host: ops@192.0.2.11:2222
+  - host: ops@192.0.2.12
+    user: ops
+    port: 2200
+`);
+    const targets = await parseInventory(path);
+    expect(targets.map((t) => [t.user, t.host, t.port, t.label])).toEqual([
+      ['alice', '192.0.2.10', 22, 'alice@192.0.2.10'],
+      ['ops', '192.0.2.11', 2222, 'ops@192.0.2.11:2222'],
+      ['ops', '192.0.2.12', 2200, 'ops@192.0.2.12:2200'],
+    ]);
+  });
+
+  it('rejects a host field whose user contradicts the user field', async () => {
+    const path = await writeTempYAML(`hosts:
+  - host: alice@192.0.2.10
+    user: root
+`);
+    await expect(parseInventory(path)).rejects.toThrow('names user "alice" but "user" is "root"');
+  });
+
   it('throws when host field is missing', async () => {
     const path = await writeTempYAML(`
 hosts:

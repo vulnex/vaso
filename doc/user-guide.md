@@ -97,6 +97,19 @@ vaso scan --inventory hosts.yaml --save-snapshot ./snapshots/
 vaso scan --snapshot ./snapshots/prod-agent-01.json --diff
 ```
 
+An inventory is a YAML list of hosts. `host` takes a hostname or `user@host[:port]` (as `--host` does); `user` defaults to `root`, `port` to 22:
+
+```yaml
+hosts:
+  - host: deploy@10.0.1.5        # user@host, like --host
+  - host: 10.0.1.6
+    user: ops
+    port: 2222
+    label: prod-agent-02         # name used in reports and snapshot files
+    identity: ~/.ssh/id_prod     # per-host key (default: --ssh-key)
+    sudo: true                   # run the probe with sudo (multi-user scans)
+```
+
 ### `vaso detect`
 
 Lists installed AI agents without running any security checks. Useful for verifying which agents VASO can see before running a full scan.
