@@ -5,7 +5,7 @@ import { adapterRegistry } from '../adapters/registry.js';
 import { checkRegistry } from '../core/check-registry.js';
 import { getReporter } from '../reporting/index.js';
 import { MCPDiscovery } from '../mcp/discovery.js';
-import { resolveServerSources } from '../mcp/source-resolver.js';
+import { resolveServerSources, resolveSourcePaths } from '../mcp/source-resolver.js';
 import type { ScanOptions } from '../core/types.js';
 import { logError } from '../core/debug.js';
 import { toReportJson } from '../reporting/serialize.js';
@@ -26,23 +26,41 @@ export interface MCPScanCommandOptions {
   path?: string[];
   color?: boolean;
   resolvePackages?: boolean;
+  /** MCP server source to analyze directly (entry files or checkouts). */
+  source?: string[];
 }
 
 export async function runMCPScan(options: MCPScanCommandOptions): Promise<void> {
   const discovery = new MCPDiscovery();
 
   try {
-    const discoveryResult = options.path
-      ? await discovery.discoverFromPaths(options.path)
-      : await discovery.discover(process.platform, process.cwd());
+    // --source alone audits that code only; with -p, those configs as well.
+    const sourceOnly = Boolean(options.source?.length) && !options.path;
+    const discoveryResult: MCPDiscoveryResult = sourceOnly
+      ? { configs: [], totalServers: 0 }
+      : options.path
+        ? await discovery.discoverFromPaths(options.path)
+        : await discovery.discover(process.platform, process.cwd());
     if (reportUnreadable(discoveryResult)) return;
 
-    if (discoveryResult.totalServers === 0) {
+    const direct = options.source?.length ? await resolveSourcePaths(options.source) : { sources: [], unreadable: [] };
+    if (direct.unreadable.length > 0) {
+      for (const p of direct.unreadable) console.error(chalk.red(`No MCP server source at: ${p}`));
+      process.exitCode = EXIT_USAGE;
+      return;
+    }
+
+    if (discoveryResult.totalServers === 0 && direct.sources.length === 0) {
       console.error(chalk.yellow('No MCP servers found. Nothing to scan.'));
       return;
     }
 
-    console.error(chalk.dim(`Found ${discoveryResult.totalServers} MCP server(s) across ${discoveryResult.configs.length} config(s)`));
+    if (discoveryResult.totalServers > 0) {
+      console.error(chalk.dim(`Found ${discoveryResult.totalServers} MCP server(s) across ${discoveryResult.configs.length} config(s)`));
+    }
+    if (direct.sources.length > 0) {
+      console.error(chalk.dim(`Analyzing source of ${direct.sources.length} MCP server(s) given with --source`));
+    }
 
     // Resolve source code for servers with local paths. With --resolve-packages,
     // npm-packaged (npx) servers are also downloaded from the registry
@@ -66,7 +84,7 @@ export async function runMCPScan(options: MCPScanCommandOptions): Promise<void> 
       format: options.format as 'terminal' | 'json' | 'sarif' | 'markdown',
     };
 
-    const result = await engine.scanMCP(discoveryResult.configs, serverSources, scanOptions);
+    const result = await engine.scanMCP(discoveryResult.configs, [...serverSources, ...direct.sources], scanOptions);
 
     const reporter = getReporter(scanOptions.format ?? 'terminal');
     const output = reporter.render(result);

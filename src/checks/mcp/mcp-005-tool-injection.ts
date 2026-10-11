@@ -2,21 +2,26 @@ import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { findTaintedSinks } from '../../analyzers/tool-input-taint.js';
 import { analyzePythonSinks } from '../../analyzers/python-sinks.js';
+import { sourceSegments, segmentSnippet } from '../../mcp/source-segments.js';
 
-// Patterns indicating unsanitized input flowing to dangerous sinks
+const INPUT = String.raw`(?:req|input|args|params|query|body|tool_input|message)\b`;
+
+/**
+ * Query and file-write sinks that take tool input, matched per statement.
+ * Code and command sinks (eval, Function, vm, child_process; Python exec,
+ * subprocess, os.system) are traced through variables by findTaintedSinks /
+ * analyzePythonSinks — a line regex for those misfired on every bundled module
+ * that mentions child_process near a variable named `args`.
+ */
 const INJECTION_PATTERNS = [
-  { pattern: /exec\s*\(\s*(?:req|input|args|params|query|body|tool_input|message)/i, name: 'Command injection via user input' },
-  { pattern: /spawn\s*\(\s*(?:req|input|args|params|query|body|tool_input|message)/i, name: 'Process spawn with user input' },
-  { pattern: /eval\s*\(\s*(?:req|input|args|params|query|body|tool_input|message)/i, name: 'Eval with user input' },
-  // A template only matters when it builds a query; error/log messages that
-  // interpolate `request.params.name` are not injection. Code and command
-  // sinks reached through templates are traced by findTaintedSinks.
-  { pattern: /`[^`]*\b(?:SELECT|INSERT\s+INTO|UPDATE|DELETE\s+FROM)\b[^`]*\$\{\s*(?:req|input|args|params|query|body|tool_input|message)\b/, name: 'SQL injection via template literal' },
-  { pattern: /writeFile(?:Sync)?\s*\(\s*(?:req|input|args|params|query|body|tool_input|message)/i, name: 'File write with user-controlled path' },
-  { pattern: /sql\s*[`"'].*\$\{/i, name: 'Potential SQL injection via template literal' },
-  { pattern: /\.query\s*\(\s*[`"'].*\+/i, name: 'Potential SQL injection via concatenation' },
-  { pattern: /child_process.*(?:req|input|args|params|query|body|tool_input)/i, name: 'Child process with user input' },
-  { pattern: /new\s+Function\s*\(\s*(?:req|input|args|params|query|body|tool_input)/i, name: 'Dynamic Function constructor with user input' },
+  // A template builds a query only when it holds SQL; error/log messages that
+  // interpolate `request.params.name` are not injection. Tagged templates
+  // (sql`… ${id}`) are parameterized by the library and safe.
+  { pattern: new RegExp(String.raw`(?<!\w)\`[^\`]*\b(?:SELECT|INSERT\s+INTO|UPDATE|DELETE\s+FROM)\b[^\`]*\$\{\s*` + INPUT), name: 'SQL injection via template literal' },
+  { pattern: new RegExp(String.raw`\.(?:query|execute|raw)\s*\(\s*["'\`][^"'\`]*["'\`]\s*\+\s*` + INPUT), name: 'SQL injection via concatenation' },
+  // Python DB-API: f-string, %-format or concatenation into execute().
+  { pattern: /\.execute(?:many)?\s*\(\s*(?:f["'][^"']*\b(?:SELECT|INSERT|UPDATE|DELETE)\b[^"']*\{|["'][^"']*\b(?:SELECT|INSERT|UPDATE|DELETE)\b[^"']*["']\s*(?:%|\+|\.format\())/i, name: 'SQL injection via string formatting' },
+  { pattern: new RegExp(String.raw`writeFile(?:Sync)?\s*\(\s*` + INPUT, 'i'), name: 'File write with user-controlled path' },
 ];
 
 export const mcp005 = defineCheck({
@@ -56,21 +61,12 @@ export const mcp005 = defineCheck({
         }
       }
 
-      const lines = source.sourceCode.split('\n');
-      for (let i = 0; i < lines.length; i++) {
-        if (reported.has(i + 1)) continue;
-        const line = lines[i];
-        const trimmed = line.trim();
-        if (trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('#')) continue;
+      for (const segment of sourceSegments(source.sourceCode)) {
+        if (reported.has(segment.line)) continue;
         for (const { pattern, name } of INJECTION_PATTERNS) {
-          if (pattern.test(line)) {
-            reported.add(i + 1);
-            evidence.push({
-              file,
-              line: i + 1,
-              snippet: line.trim().slice(0, 120),
-              detail: name,
-            });
+          if (pattern.test(segment.text)) {
+            reported.add(segment.line);
+            evidence.push({ file, line: segment.line, snippet: segmentSnippet(segment), detail: name });
             break;
           }
         }

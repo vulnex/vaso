@@ -34,6 +34,12 @@ export interface MCPServerSource {
    */
   language?: 'javascript' | 'python';
   /**
+   * Text files the server reads at runtime — named in its source and present
+   * next to its entry file (a `documents/` folder of RAG content, prompt
+   * files). Returned to the model as tool output, so MCP-034 reads them too.
+   */
+  dataFiles?: MCPDataFile[];
+  /**
    * Tool definitions extracted from `sourceCode`, populated once by the engine
    * (see `ScanEngine.scanMCP`) so tool-layer checks (MCP-020/024/025) share one
    * extraction pass instead of each re-parsing the source.
@@ -45,4 +51,9 @@ export interface MCPToolDefinition {
   name: string;
   description?: string;
   schema?: string;
+}
+
+export interface MCPDataFile {
+  path: string;
+  content: string;
 }

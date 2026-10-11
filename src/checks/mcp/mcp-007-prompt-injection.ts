@@ -1,12 +1,15 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { sourceSegments, segmentSnippet } from '../../mcp/source-segments.js';
 
 // Patterns indicating raw external content returned unsanitized in tool results
 const UNSAFE_RETURN_PATTERNS = [
-  { pattern: /return\s+(?:await\s+)?(?:fetch|axios|got|request)\s*\(/, name: 'Raw HTTP response returned as tool result' },
+  // A fetch() result is a Response object; it becomes content once its body is
+  // read. `return await fetch(tokenEndpoint, …)` in an OAuth helper is not a
+  // tool result.
+  { pattern: /return\s+(?:await\s+)?\(?\s*(?:await\s+)?(?:fetch|axios|got|request)\s*\(.*\)\s*\)?\s*\.(?:text|json)\s*\(/, name: 'Raw HTTP response returned as tool result' },
   { pattern: /return\s+(?:await\s+)?(?:readFile|readFileSync)\s*\(/, name: 'Raw file content returned as tool result' },
-  { pattern: /return\s+(?:await\s+)?(?:\.text\(\)|\.json\(\)|\.body)/, name: 'Raw response body returned as tool result' },
-  { pattern: /content\s*:\s*(?:await\s+)?(?:fetch|response|res)/, name: 'External content injected into tool result' },
+  { pattern: /content\s*:\s*(?:await\s+)?(?:fetch|response|res)\b/, name: 'External content injected into tool result' },
   { pattern: /tool_result.*(?:fetch|http|request)/i, name: 'External fetch in tool result handler' },
   { pattern: /innerHTML|outerHTML|document\.write/i, name: 'DOM manipulation from external content' },
 ];
@@ -36,17 +39,13 @@ export const mcp007 = defineCheck({
       // Check if the source has any sanitization
       const hasSanitization = SANITIZATION_PATTERNS.some(p => p.test(source.sourceCode!));
 
-      const lines = source.sourceCode.split('\n');
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
-        const trimmed = line.trim();
-        if (trimmed.startsWith('//') || trimmed.startsWith('*')) continue;
+      for (const segment of sourceSegments(source.sourceCode)) {
         for (const { pattern, name } of UNSAFE_RETURN_PATTERNS) {
-          if (pattern.test(line)) {
+          if (pattern.test(segment.text)) {
             evidence.push({
               file: source.localPath ?? source.serverName,
-              line: i + 1,
-              snippet: line.trim().slice(0, 120),
+              line: segment.line,
+              snippet: segmentSnippet(segment),
               detail: hasSanitization
                 ? `${name} (sanitization detected elsewhere — verify coverage)`
                 : `${name} (no sanitization detected)`,

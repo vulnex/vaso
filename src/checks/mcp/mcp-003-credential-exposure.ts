@@ -2,6 +2,7 @@ import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { API_KEY_PATTERNS } from '../../core/patterns.js';
 import { shannonEntropy } from '../../analyzers/entropy.js';
+import { findSourceSecrets } from '../../analyzers/source-secrets.js';
 
 const HIGH_ENTROPY_THRESHOLD = 4.5;
 const MIN_SECRET_LENGTH = 16;
@@ -11,7 +12,7 @@ export const mcp003 = defineCheck({
   name: 'Credential Exposure',
   category: 'mcp',
   severity: 'critical',
-  description: 'Check for plaintext secrets in MCP server env blocks and config values',
+  description: 'Check for plaintext secrets in MCP server env blocks, config values and server source',
   supportedAgents: ['mcp'],
 
   async run(ctx, h) {
@@ -63,10 +64,27 @@ export const mcp003 = defineCheck({
       }
     }
 
+    // Only config values can be moved out automatically; source can't.
+    const configFindings = evidence.length;
+
+    // Credentials compiled into the server itself ship to every install.
+    for (const source of ctx.mcpServerSources ?? []) {
+      if (!source.sourceCode) continue;
+      const file = source.localPath ?? source.packageName ?? source.serverName;
+      for (const secret of findSourceSecrets(source.sourceCode)) {
+        evidence.push({
+          file,
+          line: secret.line,
+          snippet: `${secret.key ? `${secret.key}: ` : ''}${secret.masked}`,
+          detail: `Hardcoded ${secret.kind === 'secret-named value' ? 'credential' : secret.kind} in server "${source.serverName}" source — anyone with the package or checkout can use it; load it from the environment instead`,
+        });
+      }
+    }
+
     return h.fromEvidence(evidence, {
-      passed: 'No plaintext credentials found in MCP configs',
-      failed: (n) => `Found ${n} exposed credential(s) in MCP configs`,
-      fixable: evidence.length > 0,
+      passed: 'No plaintext credentials found in MCP configs or server source',
+      failed: (n) => `Found ${n} exposed credential(s) in MCP configs or server source`,
+      fixable: configFindings > 0,
       fixDescription: 'Move secrets to environment variables or a secrets manager',
     });
   },

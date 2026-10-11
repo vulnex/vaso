@@ -1,5 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { AUTHORIZE_ROUTE, OAUTH_REQUEST_CONTEXT } from '../../mcp/oauth-context.js';
+import { sourceSegments, nearbyText } from '../../mcp/source-segments.js';
 
 const AUTHORIZE_URL_PATTERN = /\/authorize|\/authorization/;
 const STATE_PARAM_PATTERN = /state/;
@@ -35,31 +37,29 @@ export const mcp018 = defineCheck({
 
     for (const source of mcpServerSources) {
       if (!source.sourceCode) continue;
-      const lines = source.sourceCode.split('\n');
+      const segments = sourceSegments(source.sourceCode);
       const filePath = source.localPath ?? source.serverName;
 
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
+      for (let i = 0; i < segments.length; i++) {
+        const line = segments[i].text;
 
         // Skip comment lines
         if (line.trim().startsWith('//') || line.trim().startsWith('*')) continue;
 
         // Detect OAuth authorize URL construction without state
-        if (AUTHORIZE_URL_PATTERN.test(line)) {
+        if (AUTHORIZE_URL_PATTERN.test(line) && !AUTHORIZE_ROUTE.test(line)) {
           // Only flag lines that show active URL construction, not config constants
           const isUrlConstruction = URL_CONSTRUCTION_PATTERN.test(line);
           const isConfigConstant = /^\s*\w+\s*[:=]\s*['"]https?:\/\//.test(line) && !isUrlConstruction;
 
           if (!isConfigConstant) {
-            const start = Math.max(0, i - SEARCH_RADIUS);
-            const end = Math.min(lines.length, i + SEARCH_RADIUS + 1);
-            const nearbyCode = lines.slice(start, end).join('\n');
+            const nearbyCode = nearbyText(segments, i, SEARCH_RADIUS);
 
             if (!STATE_PARAM_PATTERN.test(nearbyCode)) {
               evidence.push({
                 file: filePath,
-                line: i + 1,
-                snippet: line.trim(),
+                line: segments[i].line,
+                snippet: line.trim().slice(0, 120),
                 detail: 'OAuth authorization URL constructed without state parameter — vulnerable to CSRF',
               });
             }
@@ -68,16 +68,16 @@ export const mcp018 = defineCheck({
 
         // Detect hardcoded/static state values
         if (STATIC_STATE_PATTERN.test(line) && /state/.test(line)) {
-          const start = Math.max(0, i - 5);
-          const end = Math.min(lines.length, i + 5 + 1);
-          const nearbyCode = lines.slice(start, end).join('\n');
+          const nearbyCode = nearbyText(segments, i, 5);
 
           const isDynamic = DYNAMIC_STATE_PATTERNS.some(p => p.test(nearbyCode));
-          if (!isDynamic) {
+          // Only an authorization-request state matters; `state: "finished"`
+          // on a queue item or parser result is not OAuth.
+          if (!isDynamic && OAUTH_REQUEST_CONTEXT.test(nearbyCode)) {
             evidence.push({
               file: filePath,
-              line: i + 1,
-              snippet: line.trim(),
+              line: segments[i].line,
+              snippet: line.trim().slice(0, 120),
               detail: 'Static/hardcoded state value — state must be a unique random value per request',
             });
           }
@@ -85,9 +85,7 @@ export const mcp018 = defineCheck({
 
         // Detect callback handlers that don't verify state
         if (CALLBACK_HANDLER_PATTERN.test(line)) {
-          const start = i;
-          const end = Math.min(lines.length, i + SEARCH_RADIUS + 1);
-          const nearbyCode = lines.slice(start, end).join('\n');
+          const nearbyCode = segments.slice(i, i + SEARCH_RADIUS + 1).map((s) => s.text).join('\n');
 
           if (STATE_PARAM_PATTERN.test(nearbyCode) === false ||
               (STATE_PARAM_PATTERN.test(nearbyCode) && !STATE_VERIFY_PATTERN.test(nearbyCode))) {
@@ -95,8 +93,8 @@ export const mcp018 = defineCheck({
             if (/code|authorization_code|grant/.test(nearbyCode)) {
               evidence.push({
                 file: filePath,
-                line: i + 1,
-                snippet: line.trim(),
+                line: segments[i].line,
+                snippet: line.trim().slice(0, 120),
                 detail: 'OAuth callback handler does not verify state parameter — vulnerable to CSRF',
               });
             }

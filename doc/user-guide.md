@@ -283,6 +283,7 @@ vaso mcp scan [options]
 | `-o, --output <file>` | Write report to a file instead of stdout |
 | `-p, --path <paths...>` | Specific config file paths to scan (skips auto-discovery). A path that is missing or not valid JSON/JSONC is an error (exit 2) |
 | `--resolve-packages` | Download npm-packaged (`npx`) MCP servers — download only, never executed — and analyze their source. Requires network access |
+| `--source <paths...>` | Analyze MCP server source directly — an entry file or a server checkout. For server authors, and for remote servers whose code you have but only connect to (`npx mcp-remote https://…`). On its own it scans only these servers (no config discovery); with `-p`, both. A path with no server source is an error (exit 2) |
 | `--no-color` | Disable colored terminal output |
 
 Examples:
@@ -299,7 +300,12 @@ vaso mcp scan --format json -o mcp-report.json
 
 # Also fetch and analyze the source of npx-launched servers
 vaso mcp scan --resolve-packages
+
+# Audit a server's own code (a checkout or its entry file) — e.g. before publishing it
+vaso mcp scan --source ./my-mcp-server
 ```
+
+Servers run from local files are analyzed whether they are JavaScript/TypeScript (`node server.js`) or Python (`python3 server.py`, a virtualenv interpreter, `uv run server.py`). Text files a server names in its code and reads at runtime (a `documents/` folder it returns to the model) are checked for injected instructions too. Remote servers reached through a local bridge (`npx mcp-remote <url>`, `npx supergateway --sse <url>`) get the same transport and authentication checks as `url` entries.
 
 ### `vaso mcp list`
 
@@ -401,7 +407,7 @@ VASO runs **347 checks across 19 categories**.
 | Network | NET-001–005 | 5 | Gateway exposure, WebSocket origins, proxy bypass |
 | Runtime | RUN-001–005 | 5 | LaunchAgents, cron, Docker socket, VS Code trojans |
 | Policy | POL-001–005 | 5 | DM policy, tool policy, sandbox compliance |
-| MCP Server | MCP-001–035 | 35 | Transport security, credentials, tool injection, toxic flows, rug pull, OAuth 2.1, stdio shell-c, world-writable command paths, streamable-HTTP origin pinning, tool-description poisoning, cross-server tool-name collision, slash-command overlap, remote-server-without-auth, filesystem sensitive-path scope, vulnerable/rolled-back version, config drift, untrusted installer source, env-dump tool, long-lived token, prompt-injection directives in tool output, obfuscated/encoded server source; opt-in npm package source resolution (`--resolve-packages`); OWASP MCP Top 10 mapping |
+| MCP Server | MCP-001–035 | 35 | Transport security, credentials, tool injection, toxic flows, rug pull, OAuth 2.1, stdio shell-c, world-writable command paths, streamable-HTTP origin pinning, tool-description poisoning, cross-server tool-name collision, slash-command overlap, remote-server-without-auth, filesystem sensitive-path scope, vulnerable/rolled-back version, config drift, untrusted installer source, env-dump tool, long-lived token, prompt-injection directives in tool output, obfuscated/encoded server source (with what it hides), lookalike/typosquatted server names, credentials hardcoded in server source, servers listening on all interfaces without authentication, disabled Host/Origin (DNS-rebinding) protection; JavaScript and Python server source; remotes behind `mcp-remote`/`supergateway`; opt-in npm package source resolution (`--resolve-packages`); direct source audit (`--source`); OWASP MCP Top 10 mapping |
 | Advisory | ADV-001–005 | 5 | Vulnerability/CVE detection with version awareness |
 | OpenClaw | OC-* | 6 | Sub-agent config downgrade, legacy bot dirs, `OPENCLAW_HOME` redirect, profile downgrade, memory file perms, `/etc/openclaw` writable |
 | NanoClaw | NC-001–005 | 5 | Overbroad mount allowlist (`allowedRoots`), host config/credential exposure, checkout/state exposure, webhook listener on all interfaces, skills dirs writable |

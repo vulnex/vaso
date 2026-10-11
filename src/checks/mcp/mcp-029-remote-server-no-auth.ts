@@ -85,6 +85,7 @@ export const mcp029 = defineCheck({
 
   async run(ctx, h) {
     const evidence: Evidence[] = [];
+    let confirmed = false;
 
     for (const config of ctx.mcpConfigs ?? []) {
       for (const server of config.servers) {
@@ -110,15 +111,31 @@ export const mcp029 = defineCheck({
 
         if (hasAuthSignal(server, parsed)) continue;
 
+        const snippet = `Server "${server.name}": ${transport}${endpoint.via ? ` via ${endpoint.via}` : ''} ${parsed.origin}`;
+        // Clients that dial an https `url` themselves (Claude Code, Cursor,
+        // VS Code) run OAuth when the server asks, so a missing static
+        // credential there can't be judged from the config. Plaintext http
+        // rules OAuth out (the MCP auth spec requires HTTPS), and supergateway
+        // only sends static headers — those are confirmed unauthenticated.
+        if (!endpoint.via && parsed.protocol === 'https:') {
+          evidence.push({
+            file: config.filePath,
+            snippet,
+            detail: `Remote MCP server "${server.name}" (${parsed.host}) has no static credential in the config — fine if the server requires OAuth (the client signs in on demand); otherwise anyone who can reach it can invoke its tools. Verify the server rejects unauthenticated requests`,
+          });
+          continue;
+        }
+        confirmed = true;
         evidence.push({
           file: config.filePath,
-          snippet: `Server "${server.name}": ${transport}${endpoint.via ? ` via ${endpoint.via}` : ''} ${parsed.origin}`,
+          snippet,
           detail: `Remote MCP server "${server.name}" (${parsed.host}) is configured with no authentication — any party that can reach this endpoint can invoke its tools, and a MITM can impersonate it`,
         });
       }
     }
 
     return h.fromEvidence(evidence, {
+      severity: confirmed ? undefined : 'info',
       passed: 'All remotely-reachable MCP servers carry authentication credentials',
       failed: (n) => `Found ${n} remote MCP server(s) configured without authentication`,
       fixDescription:

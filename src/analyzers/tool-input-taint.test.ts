@@ -40,19 +40,44 @@ server.tool('run', { cmd: z.string() }, async ({ cmd }) => {
   it('follows reassignments and member access on child_process', () => {
     const code = `
 const cp = require('child_process');
-function handle(args) {
+function handle(request) {
   let command = 'ls';
-  command = args.command;
+  command = request.params.arguments.command;
   cp.execSync(command);
 }`;
     expect(findTaintedSinks(code, 'cp.js')).toEqual([
-      expect.objectContaining({ sink: 'cp.execSync', origin: 'command ← args' }),
+      expect.objectContaining({ sink: 'cp.execSync', origin: 'command ← request' }),
     ]);
   });
 
+  it('carries tool input into helpers through their call sites', () => {
+    const code = `
+const { exec } = require('child_process');
+class Server {
+  setup() {
+    this.server.setRequestHandler(CallToolRequestSchema, async (request) => this.run(request.params.arguments));
+  }
+  async run(args) { return runShell(args.cmd); }
+}
+function runShell(cmd) { exec(cmd); }`;
+    expect(findTaintedSinks(code, 'helpers.js')).toEqual([
+      expect.objectContaining({ sink: 'exec', origin: 'cmd ← caller' }),
+    ]);
+  });
+
+  it('does not treat a CLI entry point parameter named args as tool input (supergateway)', () => {
+    const code = `
+import { spawn } from 'node:child_process';
+export async function stdioToSse(args) {
+  const { stdioCmd, port } = args;
+  const child = spawn(stdioCmd, { shell: true });
+}`;
+    expect(findTaintedSinks(code, 'gateway.js')).toEqual([]);
+  });
+
   it('checks spawn argv only through a shell', () => {
-    const viaShell = `function h(input) { spawn('sh', ['-c', input.script]); }`;
-    const direct = `function h(input) { spawn('/usr/bin/grep', [input.pattern, 'log.txt']); }`;
+    const viaShell = `server.tool('s', {}, async (input) => { spawn('sh', ['-c', input.script]); });`;
+    const direct = `server.tool('s', {}, async (input) => { spawn('/usr/bin/grep', [input.pattern, 'log.txt']); });`;
     expect(findTaintedSinks(viaShell, 'a.js')).toHaveLength(1);
     expect(findTaintedSinks(direct, 'b.js')).toEqual([]);
   });

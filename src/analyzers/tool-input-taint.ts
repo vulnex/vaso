@@ -14,10 +14,10 @@
  */
 
 import { createHash } from 'node:crypto';
-import { parse } from '@babel/parser';
 import _traverse from '@babel/traverse';
 import type { Binding, NodePath } from '@babel/traverse';
 import type { Node } from '@babel/types';
+import { parseJs, sourceChunks } from './js-parse.js';
 
 const traverse = typeof _traverse === 'function' ? _traverse : (_traverse as { default: typeof _traverse }).default;
 
@@ -30,9 +30,13 @@ export interface TaintedSink {
   origin: string;
 }
 
-const INPUT_NAMES = new Set([
-  'req', 'request', 'input', 'args', 'params', 'query', 'body', 'tool_input', 'toolInput', 'message',
-]);
+/**
+ * Parameter names that mean tool/request input wherever they appear. Generic
+ * names (`args`, `input`, `params`, `options`) are not on the list: a CLI's
+ * `main(args)` spawning the command its operator configured is not
+ * injection. Those parameters count only through a handler or a call site.
+ */
+const INPUT_NAMES = new Set(['req', 'request', 'tool_input', 'toolInput', 'tool_args', 'toolArgs']);
 
 /** Methods whose function argument is an MCP tool/request handler. */
 const HANDLER_REGISTRARS = new Set(['tool', 'registerTool', 'setRequestHandler']);
@@ -51,7 +55,9 @@ export function findTaintedSinks(code: string, filename = 'unknown.js'): Tainted
   const key = `${filename}\0${createHash('sha1').update(code).digest('base64')}`;
   const cached = cache.get(key);
   if (cached) return cached.map((s) => ({ ...s }));
-  const results = analyze(code);
+  const results = sourceChunks(code).flatMap((chunk) =>
+    analyze(chunk.code).map((sink) => ({ ...sink, line: sink.line + chunk.startLine - 1 })),
+  );
   if (cache.size >= MAX_CACHED) cache.delete(cache.keys().next().value!);
   cache.set(key, results);
   return results.map((s) => ({ ...s }));
@@ -79,16 +85,8 @@ function isChildProcess(path: NodePath, name: string): boolean {
 }
 
 function analyze(code: string): TaintedSink[] {
-  let ast: ReturnType<typeof parse>;
-  try {
-    ast = parse(code, {
-      sourceType: 'unambiguous',
-      plugins: ['typescript', 'jsx', 'decorators'],
-      errorRecovery: true,
-    });
-  } catch {
-    return [];
-  }
+  const ast = parseJs(code);
+  if (!ast) return [];
 
   let lines: string[] | undefined;
   const lineText = (line: number): string => (lines ??= code.split('\n'))[line - 1]?.trim() ?? '';
@@ -96,6 +94,8 @@ function analyze(code: string): TaintedSink[] {
   // Pass 1: functions registered as tool/request handlers — all their
   // parameters carry tool input.
   const handlers = new WeakSet<Node>();
+  // Parameters (by position) of local functions that are called with tool input.
+  const taintedParams = new WeakMap<Node, Set<number>>();
   const results: TaintedSink[] = [];
 
   try {
@@ -110,7 +110,7 @@ function analyze(code: string): TaintedSink[] {
       },
     });
 
-    const memo = new Map<Binding, string | null>();
+    let memo = new Map<Binding, string | null>();
 
     const bindingOrigin = (binding: Binding, depth: number): string | undefined => {
       if (memo.has(binding)) return memo.get(binding) ?? undefined;
@@ -119,7 +119,15 @@ function analyze(code: string): TaintedSink[] {
       const name = binding.identifier.name;
 
       if (binding.kind === 'param') {
-        if (handlers.has(binding.scope.block) || INPUT_NAMES.has(name)) origin = name;
+        const fn = binding.scope.block;
+        if (handlers.has(fn) || INPUT_NAMES.has(name)) {
+          origin = name;
+        } else if (fn.type.includes('Function') || fn.type === 'ClassMethod' || fn.type === 'ObjectMethod') {
+          const params = (fn as { params?: Node[] }).params ?? [];
+          const id = binding.identifier;
+          const index = params.findIndex((p) => (p.start ?? -1) <= (id.start ?? 0) && (id.end ?? 0) <= (p.end ?? -1));
+          if (index !== -1 && taintedParams.get(fn)?.has(index)) origin = `${name} ← caller`;
+        }
       } else if (depth < MAX_DEPTH && (binding.kind === 'const' || binding.kind === 'let' || binding.kind === 'var')) {
         const declarator = binding.path;
         if (declarator.isVariableDeclarator()) {
@@ -173,6 +181,34 @@ function analyze(code: string): TaintedSink[] {
       }
     };
 
+    // Pass 1b: carry tool input into local functions through their call sites
+    // (`this.getFolderSize(request.params.arguments)` taints `getFolderSize(args)`),
+    // to a fixpoint — a few rounds covers handler → helper → helper chains.
+    for (let round = 0; round < 4; round++) {
+      let changed = false;
+      memo = new Map();
+      traverse(ast, {
+        CallExpression(path) {
+          const targets = localCallees(path);
+          if (targets.length === 0) return;
+          const args = path.get('arguments') as NodePath[];
+          args.forEach((arg, index) => {
+            if (!arg.node || !expressionOrigin(arg, 0)) return;
+            for (const target of targets) {
+              const set = taintedParams.get(target) ?? new Set<number>();
+              if (!set.has(index)) {
+                set.add(index);
+                taintedParams.set(target, set);
+                changed = true;
+              }
+            }
+          });
+        },
+      });
+      if (!changed) break;
+    }
+    memo = new Map();
+
     // Pass 2: sinks.
     traverse(ast, {
       'CallExpression|NewExpression'(path: NodePath) {
@@ -221,4 +257,33 @@ function processArgs(sink: string, args: NodePath[]): NodePath[] {
       p.type === 'ObjectProperty' && p.key.type === 'Identifier' && p.key.name === 'shell' &&
       p.value.type === 'BooleanLiteral' && p.value.value));
   return viaShell ? args.slice(0, 2) : args.slice(0, 1);
+}
+
+/**
+ * Functions defined in this file that a call expression invokes: a function
+ * declaration / function-valued variable called by name, or a method of the
+ * enclosing class called through `this`.
+ */
+function localCallees(path: NodePath): Node[] {
+  if (!path.isCallExpression()) return [];
+  const callee = path.node.callee;
+  if (callee.type === 'Identifier') {
+    const binding = path.scope.getBinding(callee.name);
+    const node = binding?.path.node;
+    if (!node) return [];
+    if (node.type === 'FunctionDeclaration') return [node];
+    if (node.type === 'VariableDeclarator' && (node.init?.type === 'ArrowFunctionExpression' || node.init?.type === 'FunctionExpression')) {
+      return [node.init];
+    }
+    return [];
+  }
+  if (callee.type === 'MemberExpression' && callee.object.type === 'ThisExpression' && callee.property.type === 'Identifier') {
+    const name = callee.property.name;
+    const classBody = path.findParent((p) => p.isClassBody());
+    if (!classBody?.isClassBody()) return [];
+    return classBody.node.body.filter(
+      (m) => (m.type === 'ClassMethod' || m.type === 'ClassPrivateMethod') && m.key.type === 'Identifier' && m.key.name === name,
+    );
+  }
+  return [];
 }

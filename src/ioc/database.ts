@@ -117,7 +117,12 @@ const BINARY_PATTERNS: BinaryPattern[] = [
   { name: 'Packed JS eval wrapper', pattern: /eval\(function\(p,a,c,k,e/, type: 'regex' },
 ];
 
+// Every name here resolves on its registry (checked 2026-10-11): an entry that
+// doesn't exist is worse than none — an exact match is exempt from the
+// typosquat test, so an unclaimed "trusted" name is free for an attacker to
+// register. npm unless marked (PyPI).
 const TRUSTED_MCP_PACKAGES = [
+  // Model Context Protocol reference servers (npm; several now archived upstream).
   '@modelcontextprotocol/server-filesystem',
   '@modelcontextprotocol/server-github',
   '@modelcontextprotocol/server-gitlab',
@@ -125,15 +130,42 @@ const TRUSTED_MCP_PACKAGES = [
   '@modelcontextprotocol/server-memory',
   '@modelcontextprotocol/server-postgres',
   '@modelcontextprotocol/server-puppeteer',
-  '@modelcontextprotocol/server-sequentialthinker',
+  '@modelcontextprotocol/server-sequential-thinking',
   '@modelcontextprotocol/server-slack',
-  '@modelcontextprotocol/server-sqlite',
   '@modelcontextprotocol/server-brave-search',
-  '@modelcontextprotocol/server-fetch',
   '@modelcontextprotocol/server-everything',
+  '@modelcontextprotocol/server-redis',
+  '@modelcontextprotocol/server-gdrive',
+  '@modelcontextprotocol/server-aws-kb-retrieval',
+  '@modelcontextprotocol/server-everart',
+  // Reference servers published to PyPI (run with uvx).
   'mcp-server-fetch',
   'mcp-server-sqlite',
-  'mcp-server-filesystem',
+  'mcp-server-git',
+  'mcp-server-time',
+  // Vendor and widely used community servers (npm).
+  '@playwright/mcp',
+  '@upstash/context7-mcp',
+  '@notionhq/notion-mcp-server',
+  '@sentry/mcp-server',
+  '@stripe/mcp',
+  '@supabase/mcp-server-supabase',
+  '@cloudflare/mcp-server-cloudflare',
+  '@heroku/mcp-server',
+  '@hubspot/mcp-server',
+  '@azure/mcp',
+  '@browsermcp/mcp',
+  '@21st-dev/magic',
+  '@agentdeskai/browser-tools-mcp',
+  'firecrawl-mcp',
+  'tavily-mcp',
+  'exa-mcp-server',
+  'mongodb-mcp-server',
+  'figma-developer-mcp',
+  'mcp-server-kubernetes',
+  'task-master-ai',
+  'mcp-remote',
+  'supergateway',
 ];
 
 let _db: IOCDatabase | null = null;

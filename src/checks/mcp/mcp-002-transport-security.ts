@@ -1,6 +1,18 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { remoteEndpoint } from '../../mcp/remote-endpoint.js';
+import { sourceSegments, segmentSnippet } from '../../mcp/source-segments.js';
+
+/** Server code binding a listener to every interface. */
+const ALL_INTERFACES_BIND = [
+  /\.listen\(\s*[^,()]+,\s*["'`]0\.0\.0\.0["'`]/, // app.listen(PORT, "0.0.0.0")
+  /\bhost\s*[:=]\s*["'`]0\.0\.0\.0["'`]/, // { host: '0.0.0.0' }, uvicorn.run(app, host="0.0.0.0")
+  /["'`]--host["'`]\s*,\s*["'`]0\.0\.0\.0["'`]/,
+];
+
+/** Any sign the server authenticates callers. */
+const AUTH_IN_SOURCE =
+  /requireBearerAuth|bearerAuth|verify(?:Access)?Token|TokenVerifier|AuthSettings|BearerAuthBackend|authenticate|passport|jsonwebtoken|jwt\.verify|oauth|basicAuth|x-api-key|api[_-]?key|authorization/i;
 
 export const mcp002 = defineCheck({
   id: 'MCP-002',
@@ -65,6 +77,20 @@ export const mcp002 = defineCheck({
           }
         }
       }
+    }
+
+    // Server source (local, --resolve-packages, --source): an HTTP listener on
+    // every interface with no authentication anywhere in the code.
+    for (const source of ctx.mcpServerSources ?? []) {
+      if (!source.sourceCode || AUTH_IN_SOURCE.test(source.sourceCode)) continue;
+      const bind = sourceSegments(source.sourceCode).find((seg) => ALL_INTERFACES_BIND.some((re) => re.test(seg.text)));
+      if (!bind) continue;
+      evidence.push({
+        file: source.localPath ?? source.packageName ?? source.serverName,
+        line: bind.line,
+        snippet: segmentSnippet(bind),
+        detail: `Server "${source.serverName}" listens on every network interface (0.0.0.0) and its code has no authentication — anyone who can reach the host can call its tools`,
+      });
     }
 
     return h.fromEvidence(evidence, {

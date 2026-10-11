@@ -1,5 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { AUTHORIZE_ROUTE } from '../../mcp/oauth-context.js';
+import { sourceSegments, nearbyText } from '../../mcp/source-segments.js';
 
 const AUTHORIZE_URL_PATTERN = /\/authorize|\/authorization/;
 const CODE_CHALLENGE_PATTERN = /code_challenge/;
@@ -23,26 +25,25 @@ export const mcp013 = defineCheck({
 
     for (const source of mcpServerSources) {
       if (!source.sourceCode) continue;
-      const lines = source.sourceCode.split('\n');
+      const segments = sourceSegments(source.sourceCode);
       const filePath = source.localPath ?? source.serverName;
 
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
+      for (let i = 0; i < segments.length; i++) {
+        const line = segments[i].text;
 
         const trimmed = line.trim();
         if (trimmed.startsWith('//') || trimmed.startsWith('*')) continue;
 
         // Detect OAuth authorize URL construction without PKCE
-        if (AUTHORIZE_URL_PATTERN.test(line)) {
-          const start = Math.max(0, i - SEARCH_RADIUS);
-          const end = Math.min(lines.length, i + SEARCH_RADIUS + 1);
-          const nearbyCode = lines.slice(start, end).join('\n');
+        // A route the server handles forwards the client's PKCE parameters.
+        if (AUTHORIZE_URL_PATTERN.test(line) && !AUTHORIZE_ROUTE.test(line)) {
+          const nearbyCode = nearbyText(segments, i, SEARCH_RADIUS);
 
           if (!CODE_CHALLENGE_PATTERN.test(nearbyCode)) {
             evidence.push({
               file: filePath,
-              line: i + 1,
-              snippet: line.trim(),
+              line: segments[i].line,
+              snippet: line.trim().slice(0, 120),
               detail: 'OAuth authorization URL constructed without PKCE code_challenge parameter',
             });
           }
@@ -52,23 +53,21 @@ export const mcp013 = defineCheck({
         if (PLAIN_CHALLENGE_PATTERN.test(line)) {
           evidence.push({
             file: filePath,
-            line: i + 1,
-            snippet: line.trim(),
+            line: segments[i].line,
+            snippet: line.trim().slice(0, 120),
             detail: 'PKCE code_challenge_method set to "plain" — must use "S256" for security',
           });
         }
 
         // Detect token exchange without code_verifier
         if (TOKEN_EXCHANGE_PATTERN.test(line) && /grant_type.*authorization_code|authorization_code.*grant_type/.test(line)) {
-          const start = Math.max(0, i - SEARCH_RADIUS);
-          const end = Math.min(lines.length, i + SEARCH_RADIUS + 1);
-          const nearbyCode = lines.slice(start, end).join('\n');
+          const nearbyCode = nearbyText(segments, i, SEARCH_RADIUS);
 
           if (!CODE_VERIFIER_PATTERN.test(nearbyCode)) {
             evidence.push({
               file: filePath,
-              line: i + 1,
-              snippet: line.trim(),
+              line: segments[i].line,
+              snippet: line.trim().slice(0, 120),
               detail: 'Token exchange with authorization_code grant but no code_verifier — PKCE not enforced',
             });
           }

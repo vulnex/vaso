@@ -81,3 +81,26 @@ describe('IOC data integrity — no placeholder / test-vector indicators', () =>
   }
 });
 
+describe('trusted MCP packages', () => {
+  const trusted = buildBundledDatabase().trustedMCPPackages;
+
+  it('has no duplicates', () => {
+    expect(new Set(trusted).size).toBe(trusted.length);
+  });
+
+  // An exact match is exempt from the typosquat test, so a name that doesn't
+  // exist on its registry is one an attacker could claim. These were listed
+  // once and never existed (checked 2026-10-11).
+  it.each([
+    '@modelcontextprotocol/server-sequentialthinker',
+    '@modelcontextprotocol/server-sqlite',
+    '@modelcontextprotocol/server-fetch',
+    'mcp-server-filesystem',
+  ])('does not list the non-existent package %s', (name) => {
+    expect(trusted).not.toContain(name);
+  });
+
+  it('lists the real sequential-thinking server', () => {
+    expect(trusted).toContain('@modelcontextprotocol/server-sequential-thinking');
+  });
+});

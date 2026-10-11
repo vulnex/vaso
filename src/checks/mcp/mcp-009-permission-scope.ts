@@ -1,5 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { sourceSegments, segmentSnippet } from '../../mcp/source-segments.js';
 
 // Patterns indicating disproportionate resource access in server names/packages
 const OVERPRIVILEGED_PATTERNS = [
@@ -12,7 +13,6 @@ const SOURCE_PERMISSION_PATTERNS = [
   { pattern: /chmod\s*\(\s*['"]?(?:0?777|0?666)/i, name: 'World-writable permissions' },
   { pattern: /--privileged/i, name: 'Docker privileged mode' },
   { pattern: /listen\s*\(\s*(?:0|80|443|8080|3000)\s*[,)]/i, name: 'Binding to well-known port' },
-  { pattern: /process\.env\.HOME|process\.env\.USERPROFILE/i, name: 'Accessing user home directory' },
   { pattern: /glob\s*\(\s*['"](?:\/|\*\*)/i, name: 'Recursive filesystem globbing from root' },
   { pattern: /readdir(?:Sync)?\s*\(\s*['"](?:\/|~)/i, name: 'Reading root or home directory' },
 ];
@@ -66,14 +66,15 @@ export const mcp009 = defineCheck({
     for (const source of sources) {
       if (!source.sourceCode) continue;
 
-      const lines = source.sourceCode.split('\n');
-      for (let i = 0; i < lines.length; i++) {
+      // Reading $HOME to locate a config file is not a scope grant; the
+      // patterns below are operations that widen what the server can touch.
+      for (const segment of sourceSegments(source.sourceCode)) {
         for (const { pattern, name } of SOURCE_PERMISSION_PATTERNS) {
-          if (pattern.test(lines[i])) {
+          if (pattern.test(segment.text)) {
             evidence.push({
               file: source.localPath ?? source.serverName,
-              line: i + 1,
-              snippet: lines[i].trim().slice(0, 120),
+              line: segment.line,
+              snippet: segmentSnippet(segment),
               detail: name,
             });
           }

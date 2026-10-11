@@ -1,13 +1,38 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { sourceSegments } from '../../mcp/source-segments.js';
 
-const DANGEROUS_SCOPE_PATTERNS = [
-  { pattern: /scope['":\s]*['"]?\*['"]?/i, detail: 'Wildcard scope — grants unrestricted access' },
-  { pattern: /scope['":\s]*['"]?[^'"]*\ball\b/i, detail: 'Scope includes "all" — grants full access' },
-  { pattern: /scope['":\s]*['"]?[^'"]*\badmin\b/i, detail: 'Scope includes "admin" — grants administrative access' },
-  { pattern: /scope['":\s]*['"]?[^'"]*\broot\b/i, detail: 'Scope includes "root" — grants root-level access' },
-  { pattern: /scope['":\s]*['"]?[^'"]*\bfull[_-]?access\b/i, detail: 'Scope includes full-access pattern' },
+/** Value tests applied to an OAuth scope string (not to the whole line). */
+const DANGEROUS_SCOPE_VALUES = [
+  { pattern: /(?:^|[\s,+])\*(?:$|[\s,+])/, detail: 'Wildcard scope — grants unrestricted access' },
+  { pattern: /\ball\b/i, detail: 'Scope includes "all" — grants full access' },
+  { pattern: /\badmin\b/i, detail: 'Scope includes "admin" — grants administrative access' },
+  { pattern: /\broot\b/i, detail: 'Scope includes "root" — grants root-level access' },
+  { pattern: /\bfull[_-]?access\b/i, detail: 'Scope includes full-access pattern' },
 ];
+
+/**
+ * OAuth scope values in source: `scope: "…"` / `scopes = '…'` / `scope = […]`
+ * and `?scope=…` / `&scope=…` in a URL. Matching only the value keeps
+ * `const [project, scope] = …` or prose about "Resource Type and Scope" out.
+ */
+const SCOPE_VALUE = /\bscopes?["']?\s*[:=]\s*(?:["'`]([^"'`]*)["'`]|\[([^\]]*)\])|[?&]scope=([^&"'`\s]*)/gi;
+
+function scopeValues(text: string): string[] {
+  const out: string[] = [];
+  for (const m of text.matchAll(SCOPE_VALUE)) {
+    const raw = m[1] ?? m[2] ?? m[3] ?? '';
+    let value = raw.replace(/\+/g, ' ');
+    try {
+      value = decodeURIComponent(value);
+    } catch {
+      // malformed %-escape — judge the raw text
+    }
+    out.push(value.replace(/["'`]/g, ''));
+  }
+  return out;
+}
+
 
 const MAX_SCOPE_COUNT = 10;
 
@@ -57,25 +82,25 @@ export const mcp017 = defineCheck({
     // Source scan: check for broad scope patterns in code
     for (const source of mcpServerSources) {
       if (!source.sourceCode) continue;
-      const lines = source.sourceCode.split('\n');
+      const segments = sourceSegments(source.sourceCode);
       const filePath = source.localPath ?? source.serverName;
 
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
+      for (let i = 0; i < segments.length; i++) {
+        const line = segments[i].text;
 
         // Skip comment lines
         if (line.trim().startsWith('//') || line.trim().startsWith('*')) continue;
 
-        for (const { pattern, detail } of DANGEROUS_SCOPE_PATTERNS) {
-          if (pattern.test(line)) {
-            evidence.push({
-              file: filePath,
-              line: i + 1,
-              snippet: line.trim(),
-              detail,
-            });
-            break;
-          }
+        const broad = scopeValues(line)
+          .flatMap((value) => DANGEROUS_SCOPE_VALUES.filter(({ pattern }) => pattern.test(value)))
+          .at(0);
+        if (broad) {
+          evidence.push({
+            file: filePath,
+            line: segments[i].line,
+            snippet: line.trim().slice(0, 120),
+            detail: broad.detail,
+          });
         }
 
         // Check for excessive inline scope lists
@@ -87,8 +112,8 @@ export const mcp017 = defineCheck({
             if (!alreadyCaught) {
               evidence.push({
                 file: filePath,
-                line: i + 1,
-                snippet: line.trim(),
+                line: segments[i].line,
+                snippet: line.trim().slice(0, 120),
                 detail: `Excessive scope count (${scopes.length}) — apply principle of least privilege`,
               });
             }

@@ -93,7 +93,11 @@ export const mcp028 = defineCheck({
 
     const current = buildSnapshot(configs);
     const baseline = await store.load<DriftSnapshot>(DRIFT_KEY);
-    await store.save(DRIFT_KEY, current);
+    // Merge, don't replace: one baseline serves every scan, and a scan of a
+    // single config (`mcp scan -p other.json`, `--source` only) must not
+    // erase the entries of configs it didn't look at — the next full scan
+    // would report all of them as new.
+    await store.save(DRIFT_KEY, { ...(baseline ?? {}), ...current });
 
     if (!baseline) {
       return h.result({

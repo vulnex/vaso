@@ -1,5 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { sourceSegments } from '../../mcp/source-segments.js';
 
 const LOCALHOST_EXCEPTIONS = ['localhost', '127.0.0.1', '[::1]'];
 
@@ -10,9 +11,12 @@ function isLocalhostUrl(url: string): boolean {
 const SOURCE_REDIRECT_PATTERNS = [
   { pattern: /redirect_uri['":\s]*['"]?http:\/\/(?!localhost|127\.0\.0\.1|\[::1\])/, detail: 'HTTP redirect_uri (must use HTTPS for OAuth 2.1)' },
   { pattern: /redirect_uri['":\s]*['"]?\*/, detail: 'Wildcard redirect_uri pattern — allows open redirect attacks' },
-  { pattern: /redirect_uri['":\s]*['"]?.*\.\./, detail: 'Path traversal in redirect_uri' },
-  { pattern: /redirect.*(?:req\.query|req\.params|request\.query|params\.)/, detail: 'User-controlled redirect target — potential open redirect' },
-  { pattern: /callback.*(?:req\.query|req\.params|request\.query|params\.).*redirect/, detail: 'User-controlled redirect in callback handler' },
+  { pattern: /redirect_uri['":\s]*['"`][^'"`]*\.\.[\/\\]/, detail: 'Path traversal in redirect_uri' },
+  // An open redirect needs a redirect *sink* fed by the request. Reading
+  // `redirect_uri` from a token request to pass on for verification is the
+  // protocol, not a redirect.
+  { pattern: /\.redirect\s*\(\s*(?:\d{3}\s*,\s*)?(?:(?:req|request)\.(?:query|params|body)\b|(?:\w+\.)?(?:searchParams|params|query)\.get\s*\()/, detail: 'User-controlled redirect target — potential open redirect' },
+  { pattern: /\bLocation["']?\s*:\s*(?:(?:req|request)\.(?:query|params|body)\b|(?:\w+\.)?(?:searchParams|params|query)\.get\s*\()/, detail: 'User-controlled Location header — potential open redirect' },
 ];
 
 export const mcp016 = defineCheck({
@@ -48,11 +52,11 @@ export const mcp016 = defineCheck({
     // Source scan: check for insecure redirect patterns in code
     for (const source of mcpServerSources) {
       if (!source.sourceCode) continue;
-      const lines = source.sourceCode.split('\n');
+      const segments = sourceSegments(source.sourceCode);
       const filePath = source.localPath ?? source.serverName;
 
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
+      for (let i = 0; i < segments.length; i++) {
+        const line = segments[i].text;
 
         // Skip comment lines
         if (line.trim().startsWith('//') || line.trim().startsWith('*')) continue;
@@ -61,8 +65,8 @@ export const mcp016 = defineCheck({
           if (pattern.test(line)) {
             evidence.push({
               file: filePath,
-              line: i + 1,
-              snippet: line.trim(),
+              line: segments[i].line,
+              snippet: line.trim().slice(0, 120),
               detail,
             });
             break;

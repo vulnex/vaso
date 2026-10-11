@@ -1,6 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { analyzeObfuscation } from '../../analyzers/obfuscation.js';
+import type { RevealedStrings } from '../../analyzers/obfuscation.js';
 
 /**
  * MCP-035 — Obfuscated / Encoded Server Source.
@@ -53,7 +54,8 @@ export const mcp035 = defineCheck({
           detail:
             `Encoded string-table obfuscation: ${report.decoderLabels.join(', ')} decodes ` +
             `${report.encodedLiteralCount} encoded literal(s) at runtime — hides the strings the ` +
-            `server actually uses (URLs, secrets, commands) from static review`,
+            `server actually uses (URLs, secrets, commands) from static review` +
+            describeRevealed(report.revealed),
         });
         for (const hit of report.hits.slice(0, 5)) {
           evidence.push({ file, line: hit.line, snippet: hit.snippet, detail: hit.label });
@@ -83,3 +85,19 @@ export const mcp035 = defineCheck({
     });
   },
 });
+
+/** "; decoded, they include …" — kinds and hosts only, never the hidden values. */
+function describeRevealed(revealed: RevealedStrings | undefined): string {
+  if (!revealed) return '';
+  const parts: string[] = [];
+  for (const kind of revealed.secretKinds) parts.push(`a ${kind}`);
+  if (revealed.emailDomains.length > 0) {
+    parts.push(`${revealed.emailDomains.length === 1 ? 'an email address' : 'email addresses'} at ${revealed.emailDomains.join(', ')} (personal data)`);
+  }
+  if (revealed.urlHosts.length > 0) {
+    const shown = revealed.urlHosts.slice(0, 5).join(', ');
+    const more = revealed.urlHosts.length > 5 ? ` and ${revealed.urlHosts.length - 5} more` : '';
+    parts.push(`URLs on ${shown}${more}`);
+  }
+  return parts.length > 0 ? `; decoded, they include ${parts.join('; ')}` : '';
+}

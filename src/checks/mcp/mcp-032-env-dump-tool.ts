@@ -26,8 +26,11 @@ const BENIGN_PROCESS_ENV_PREFIX = new RegExp(
   [
     String.raw`\b(?:hasOwn|hasOwnProperty(?:\.call)?|Reflect\.has)\s*\(\s*$`,
     String.raw`\bin\s+$`,
-    String.raw`\benv\s*:\s*(?:\{\s*(?:[^{}]*,\s*)?\.\.\.\s*)?$`,
-    String.raw`\b(?:const|let|var)\s+\w*[eE]nv\w*\s*=\s*\{\s*(?:[^{}]*,\s*)?\.\.\.\s*$`,
+    // `env:` option of a child process — directly, spread, or one branch of a
+    // ternary; no call in between (`env: JSON.stringify(process.env)` is not).
+    String.raw`\benv\s*:[^;{}()]*(?:\{\s*(?:[^{}()]*,\s*)?\.\.\.\s*)?$`,
+    // An env-named variable taking the environment (or a fallback/spread of it).
+    String.raw`\b\w*[eE]nv\w*\s*=\s*(?:[^;=(){}]*(?:\?\?|\|\||\?|:)\s*)?(?:\{\s*(?:[^{}()]*,\s*)?\.\.\.\s*)?$`,
   ].join('|'),
 );
 
@@ -81,10 +84,11 @@ function dumpReasons(code: string): Set<string> {
     if (callee) {
       // Handed to a config reader / loader: it reads keys, it doesn't dump.
       if (!DUMPING_CALLEES.test(callee)) continue;
-      // `Object.keys(process.env).filter(…)` picks its own variables (the
-      // `debug` package does this in nearly every bundle).
-      const after = code.slice(m.index + m[0].length, m.index + m[0].length + 40);
-      if (/(?:entries|keys)$/.test(callee) && /^\s*\)\s*\.\s*filter\s*\(/.test(after)) continue;
+      // `Object.keys(process.env).filter(…)` or a loop that keeps only names
+      // with its own prefix picks its own variables (the `debug` package does
+      // this in nearly every bundle).
+      const after = code.slice(m.index + m[0].length, m.index + m[0].length + 120).split(';')[0];
+      if (/(?:entries|keys)$/.test(callee) && /\.\s*filter\s*\(|startsWith\s*\(|\.test\s*\(|\.match\s*\(/.test(after)) continue;
     }
     reasons.add('returns/serializes the whole process.env');
     break;

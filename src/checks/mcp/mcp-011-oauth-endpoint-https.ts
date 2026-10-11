@@ -1,5 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { sourceSegments } from '../../mcp/source-segments.js';
 
 const OAUTH_URL_ENV_PATTERNS = /(?:oauth|auth|token|authorize)[_-]?(?:url|endpoint|uri|server)/i;
 
@@ -51,16 +52,16 @@ export const mcp011 = defineCheck({
     // Source scan: check for HTTP OAuth URLs in code
     for (const source of mcpServerSources) {
       if (!source.sourceCode) continue;
-      const lines = source.sourceCode.split('\n');
+      const segments = sourceSegments(source.sourceCode);
 
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
+      for (let i = 0; i < segments.length; i++) {
+        const line = segments[i].text;
         for (const { pattern, detail } of SOURCE_HTTP_OAUTH_PATTERNS) {
           if (pattern.test(line)) {
             evidence.push({
               file: source.localPath ?? source.serverName,
-              line: i + 1,
-              snippet: line.trim(),
+              line: segments[i].line,
+              snippet: line.trim().slice(0, 120),
               detail,
             });
           }

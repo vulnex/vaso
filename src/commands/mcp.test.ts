@@ -17,8 +17,10 @@ vi.mock('../mcp/discovery.js', () => ({
 
 // Mock resolveServerSources
 const mockResolveServerSources = vi.fn().mockResolvedValue([]);
+const mockResolveSourcePaths = vi.fn().mockResolvedValue({ sources: [], unreadable: [] });
 vi.mock('../mcp/source-resolver.js', () => ({
   resolveServerSources: (...args: unknown[]) => mockResolveServerSources(...args),
+  resolveSourcePaths: (...args: unknown[]) => mockResolveSourcePaths(...args),
 }));
 
 // Mock ScanEngine
@@ -222,5 +224,43 @@ describe('runMCPList', () => {
 
     expect(mockDiscover).toHaveBeenCalledWith(process.platform, process.cwd());
     expect(mockDiscoverFromPaths).not.toHaveBeenCalled();
+  });
+});
+
+describe('runMCPScan --source', () => {
+  const direct = { serverName: 'my-server', localPath: '/src/my-server/index.js', sourceCode: 'x' };
+
+  it('scans only the given source, without config discovery', async () => {
+    mockResolveSourcePaths.mockResolvedValue({ sources: [direct], unreadable: [] });
+    mockResolveServerSources.mockResolvedValue([]);
+    mockScanMCP.mockResolvedValue(sampleScanResult);
+
+    await runMCPScan({ format: 'json', source: ['/src/my-server'] });
+
+    expect(mockDiscover).not.toHaveBeenCalled();
+    expect(mockDiscoverFromPaths).not.toHaveBeenCalled();
+    expect(mockResolveSourcePaths).toHaveBeenCalledWith(['/src/my-server']);
+    expect(mockScanMCP).toHaveBeenCalledWith([], [direct], expect.anything());
+  });
+
+  it('adds the source to the servers of the configs given with -p', async () => {
+    mockDiscoverFromPaths.mockResolvedValue(sampleDiscoveryResult);
+    mockResolveServerSources.mockResolvedValue([{ serverName: 'filesystem' }]);
+    mockResolveSourcePaths.mockResolvedValue({ sources: [direct], unreadable: [] });
+    mockScanMCP.mockResolvedValue(sampleScanResult);
+
+    await runMCPScan({ format: 'json', path: ['/home/user/config.json'], source: ['/src/my-server'] });
+
+    expect(mockScanMCP).toHaveBeenCalledWith(sampleDiscoveryResult.configs, [{ serverName: 'filesystem' }, direct], expect.anything());
+  });
+
+  it('exits 2 when a source path holds no server source', async () => {
+    mockResolveSourcePaths.mockResolvedValue({ sources: [], unreadable: ['/src/typo'] });
+
+    await runMCPScan({ format: 'json', source: ['/src/typo'] });
+
+    expect(process.exitCode).toBe(2);
+    expect(consoleErrorLogs.join('\n')).toContain('No MCP server source at: /src/typo');
+    expect(mockScanMCP).not.toHaveBeenCalled();
   });
 });

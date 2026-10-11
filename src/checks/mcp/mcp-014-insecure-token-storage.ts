@@ -1,16 +1,38 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { nearbyText, sourceSegments, withoutStringText } from '../../mcp/source-segments.js';
 
-const INSECURE_TOKEN_PATTERNS = [
-  { pattern: /console\.log\s*\(.*(?:token|access_token|refresh_token|bearer)/i, detail: 'OAuth token logged to console' },
+/** A token *value* in code: a variable/property, not the word in a message. */
+const TOKEN_REF = String.raw`\b(?:access_?token|refresh_?token|id_?token|oauth_?token|bearer_?token|token|tokens|bearer)\b`;
+
+const CREDENTIAL_TOKEN_REF = String.raw`\b(?:access_?token|refresh_?token|id_?token|auth_?token|oauth\w*|bearer\w*)\b`;
+
+interface TokenPattern {
+  pattern: RegExp;
+  detail: string;
+  /** Match against the statement with string-literal text blanked. */
+  codeOnly?: boolean;
+  /** A file write; owner-only permissions (0600) make it a protected cache. */
+  fileWrite?: boolean;
+}
+
+const INSECURE_TOKEN_PATTERNS: TokenPattern[] = [
+  // `console.log("refreshed access token")` logs a message, not a token.
+  { pattern: new RegExp(String.raw`console\.(?:log|info|warn|error|debug)\s*\([^;]*` + TOKEN_REF, 'i'), detail: 'OAuth token logged to console', codeOnly: true },
+  // Storage keys are strings, so these match the literal text.
   { pattern: /localStorage\.setItem\s*\(.*(?:token|oauth|bearer)/i, detail: 'OAuth token stored in localStorage (vulnerable to XSS)' },
   { pattern: /sessionStorage\.setItem\s*\(.*(?:token|oauth|bearer)/i, detail: 'OAuth token stored in sessionStorage (vulnerable to XSS)' },
-  { pattern: /writeFile(?:Sync)?\s*\(.*(?:token|oauth|bearer)/i, detail: 'OAuth token written to file without encryption' },
-  { pattern: /(?:access_token|bearer|refresh_token|token).*[?&].*=/, detail: 'OAuth token passed in URL query parameter' },
-  { pattern: /[?&](?:access_token|token|bearer)=/, detail: 'OAuth token in URL query parameter' },
-  { pattern: /url\s*[\+\`].*(?:token|access_token)/, detail: 'OAuth token interpolated into URL' },
-  { pattern: /(?:token|access_token|bearer)\s*\+\s*['"`]/, detail: 'OAuth token concatenated into string (potential URL leak)' },
+  // A bare `token` written to a file is as often a lock/ownership token; only
+  // credential names count here.
+  { pattern: new RegExp(String.raw`writeFile(?:Sync)?\s*\([^;]*` + CREDENTIAL_TOKEN_REF, 'i'), detail: 'OAuth token written to file without encryption', codeOnly: true, fileWrite: true },
+  // A real query string carrying the token, or a URL builder setting it.
+  { pattern: /[?&](?:access_token|refresh_token|id_token|token|bearer)=/, detail: 'OAuth token in URL query parameter' },
+  { pattern: /searchParams\.(?:set|append)\s*\(\s*["'`](?:access_token|refresh_token|id_token|token)["'`]/, detail: 'OAuth token in URL query parameter' },
 ];
+
+/** Owner-only file mode (0o600 / 0600 / 384) set on the write — a protected credential cache. */
+const OWNER_ONLY_MODE = /\bmode\s*:\s*(?:0o?600|384)\b|chmod(?:Sync)?\s*\([^)]*,\s*(?:0o?600|384)\s*\)/;
+
 
 export const mcp014 = defineCheck({
   id: 'MCP-014',
@@ -26,21 +48,23 @@ export const mcp014 = defineCheck({
 
     for (const source of mcpServerSources) {
       if (!source.sourceCode) continue;
-      const lines = source.sourceCode.split('\n');
+      const segments = sourceSegments(source.sourceCode);
       const filePath = source.localPath ?? source.serverName;
 
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
+      for (let i = 0; i < segments.length; i++) {
+        const line = segments[i].text;
 
         // Skip comment lines
         if (line.trim().startsWith('//') || line.trim().startsWith('*')) continue;
 
-        for (const { pattern, detail } of INSECURE_TOKEN_PATTERNS) {
-          if (pattern.test(line)) {
+        const code = withoutStringText(line);
+        for (const { pattern, detail, codeOnly, fileWrite } of INSECURE_TOKEN_PATTERNS) {
+          if (pattern.test(codeOnly ? code : line)) {
+            if (fileWrite && OWNER_ONLY_MODE.test(nearbyText(segments, i, 2))) break;
             evidence.push({
               file: filePath,
-              line: i + 1,
-              snippet: line.trim(),
+              line: segments[i].line,
+              snippet: line.trim().slice(0, 120),
               detail,
             });
             break; // One finding per line

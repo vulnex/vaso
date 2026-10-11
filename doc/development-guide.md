@@ -92,10 +92,19 @@ src/
     ast-analyzer.ts         Babel-based AST analysis with data flow tracing
     pattern-engine.ts       Regex pattern matching engine (SECURITY_PATTERNS)
     entropy.ts              Shannon entropy for obfuscation detection
+    js-parse.ts             Shared Babel parse cache; splits --resolve-packages concatenations per file
+    tool-input-taint.ts     MCP-005: tool input traced through variables/call sites into code & command sinks
+    python-sinks.ts         MCP-004/005 for Python servers (line-level: subprocess, eval, path traversal)
+    string-literals.ts      String contents by line (MCP-034 judges text, not code)
+    source-secrets.ts       MCP-003: credentials hardcoded in server source (masked evidence)
   mcp/
     types.ts                MCP-specific interfaces (MCPServerEntry, MCPConfig, etc.)
     discovery.ts            MCPDiscovery — auto-discovers MCP configs across tools
-    source-resolver.ts      Resolves MCP server source code for static analysis
+    source-resolver.ts      Resolves MCP server source (node/python/uv, --source paths, data files)
+    remote-endpoint.ts      Remote URL of a server entry, direct or via mcp-remote / supergateway
+    source-segments.ts      Statement-sized units of (possibly minified) source for regex checks
+    oauth-context.ts        OAuth context tests shared by MCP-013/018
+    package-name.ts         Package/spec name normalization (bare name, service core) for MCP-008
     package-fetcher.ts      Opt-in npm tarball download for --resolve-packages (never executed)
     tool-baseline.ts        ToolBaselineStore — MCP-020 rug-pull baseline persistence
   ioc/

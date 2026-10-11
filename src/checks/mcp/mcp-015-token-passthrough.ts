@@ -1,14 +1,15 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { sourceSegments } from '../../mcp/source-segments.js';
 
 const TOKEN_PASSTHROUGH_PATTERNS = [
   { pattern: /req(?:uest)?\.headers\.authorization.*(?:fetch|http\.request|axios|got|request\()/i, detail: 'Inbound authorization header forwarded to outbound request' },
   { pattern: /(?:fetch|http\.request|axios|got|request)\s*\(.*req(?:uest)?\.headers\.authorization/i, detail: 'Inbound authorization header passed to outbound request' },
-  { pattern: /(?:context|ctx)\.token.*(?:fetch|http\.request|axios|got)/i, detail: 'Context token forwarded to downstream API call' },
-  { pattern: /(?:fetch|http\.request|axios|got).*(?:context|ctx)\.token/i, detail: 'Context token passed to downstream API' },
+  { pattern: /(?:fetch|http\.request|axios|got)\s*\([^;]*\b(?:context|ctx)\.token\b/i, detail: 'Context token passed to downstream API' },
   { pattern: /headers\s*:\s*\{[^}]*authorization\s*:\s*req(?:uest)?\.headers/i, detail: 'Authorization header copied from inbound to outbound request' },
   { pattern: /headers\s*:\s*\{[^}]*[Bb]earer\s*.*req(?:uest)?\.headers/i, detail: 'Bearer token extracted from request and forwarded downstream' },
-  { pattern: /authorization\s*:\s*[`'"]\s*Bearer\s*\$\{.*(?:req|request|ctx|context).*token/i, detail: 'Token from request context interpolated into outbound Authorization header' },
+  // The interpolated expression itself must be the inbound request's token.
+  { pattern: /authorization\s*:\s*`\s*Bearer\s*\$\{\s*(?:req|request|ctx|context)\b[^}]*token[^}]*\}/i, detail: 'Token from request context interpolated into outbound Authorization header' },
 ];
 
 export const mcp015 = defineCheck({
@@ -25,11 +26,11 @@ export const mcp015 = defineCheck({
 
     for (const source of mcpServerSources) {
       if (!source.sourceCode) continue;
-      const lines = source.sourceCode.split('\n');
+      const segments = sourceSegments(source.sourceCode);
       const filePath = source.localPath ?? source.serverName;
 
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
+      for (let i = 0; i < segments.length; i++) {
+        const line = segments[i].text;
 
         // Skip comment lines
         if (line.trim().startsWith('//') || line.trim().startsWith('*')) continue;
@@ -38,8 +39,8 @@ export const mcp015 = defineCheck({
           if (pattern.test(line)) {
             evidence.push({
               file: filePath,
-              line: i + 1,
-              snippet: line.trim(),
+              line: segments[i].line,
+              snippet: line.trim().slice(0, 120),
               detail,
             });
             break;

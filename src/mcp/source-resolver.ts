@@ -1,5 +1,5 @@
-import { basename, join, resolve } from 'node:path';
-import type { MCPServerEntry, MCPServerSource } from './types.js';
+import { basename, dirname, extname, join, resolve } from 'node:path';
+import type { MCPDataFile, MCPServerEntry, MCPServerSource } from './types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { resolveNpmPackageSource } from './package-fetcher.js';
@@ -217,15 +217,18 @@ export async function resolveServerSources(
     const localPath = resolveLocalPath(server);
 
     let sourceCode: string | undefined;
+    let entryFile: string | undefined;
 
     if (localPath) {
       sourceCode = await readSourceFile(localPath, provider);
+      if (sourceCode) entryFile = localPath;
 
       // If it's a directory, find the main entry
       if (!sourceCode) {
         const entry = await findMainEntry(localPath, provider);
         if (entry) {
           sourceCode = await readSourceFile(entry, provider);
+          if (sourceCode) entryFile = entry;
         }
       }
     }
@@ -248,8 +251,158 @@ export async function resolveServerSources(
     if (sourceCode && sourceLanguage(server, localPath, sourceCode) === 'python') {
       source.language = 'python';
     }
+    if (sourceCode && entryFile) {
+      const dataFiles = await referencedDataFiles(entryFile, sourceCode, provider);
+      if (dataFiles.length > 0) source.dataFiles = dataFiles;
+    }
     sources.push(source);
   }
 
   return sources;
+}
+
+const DATA_EXTENSIONS = new Set(['.txt', '.md', '.json', '.html', '.htm', '.csv', '.yaml', '.yml', '.xml']);
+const SOURCE_EXTENSIONS = new Set(['.js', '.mjs', '.cjs', '.ts', '.py']);
+/** Names that exist next to server code but are tooling, not runtime data. */
+const NOT_DATA = new Set(['node_modules', 'package.json', 'package-lock.json', 'tsconfig.json', 'pyproject.toml', 'README.md', 'CHANGELOG.md', 'LICENSE.md']);
+const MAX_PATH_CANDIDATES = 200;
+const MAX_DATA_FILES = 50;
+const MAX_DATA_FILE_BYTES = 256 * 1024;
+/** A relative file or folder name in a string literal: `'documents'`, `"prompts/system.md"`. */
+const PATH_LITERAL = /["'`]([A-Za-z0-9_][\w.-]*(?:\/[\w.-]+)*)["'`]/g;
+
+/**
+ * Text files a local server reads at runtime: a file or folder named in a
+ * string literal of its source that exists next to its entry file
+ * (`join(__dirname, 'documents', id)` → `documents/*`). Files merely shipped
+ * alongside (README, LICENSE) are not included — a README quoting an attack
+ * is not the attack.
+ */
+async function referencedDataFiles(entryFile: string, code: string, fs: FSProvider): Promise<MCPDataFile[]> {
+  const base = dirname(entryFile);
+  const names = new Set<string>();
+  for (const m of code.matchAll(PATH_LITERAL)) {
+    const name = m[1];
+    // A data-file name, or a bare folder name; not dotted identifiers or versions.
+    const ext = extname(name).toLowerCase();
+    if (ext ? !DATA_EXTENSIONS.has(ext) : name.length > 40) continue;
+    if (NOT_DATA.has(name.split('/')[0])) continue;
+    names.add(name);
+    if (names.size >= MAX_PATH_CANDIDATES) break;
+  }
+
+  const files: string[] = [];
+  for (const name of names) {
+    const path = join(base, name);
+    if (path === entryFile || files.length >= MAX_DATA_FILES) continue;
+    try {
+      const st = await fs.stat(path);
+      if (st.isFile() && DATA_EXTENSIONS.has(extname(path).toLowerCase())) {
+        files.push(path);
+      } else if (st.isDirectory() && !name.startsWith('.')) {
+        for (const entry of await fs.readdir(path)) {
+          if (DATA_EXTENSIONS.has(extname(entry).toLowerCase())) files.push(join(path, entry));
+        }
+      }
+    } catch {
+      // not there — just a string
+    }
+  }
+
+  const out: MCPDataFile[] = [];
+  for (const path of files.slice(0, MAX_DATA_FILES)) {
+    const content = await readSourceFile(path, fs);
+    if (content !== undefined && content.length <= MAX_DATA_FILE_BYTES) out.push({ path, content });
+  }
+  return out;
+}
+
+/** Server code a source tree names explicitly: imports the MCP SDK or FastMCP. */
+const MCP_SDK_REFERENCE = /@modelcontextprotocol\/sdk|\bfrom\s+mcp\b|\bimport\s+mcp\b|\bFastMCP\b/;
+
+/**
+ * The server code in a directory without a declared entry: its top-level
+ * source files that use the MCP SDK (or all of them when none says so).
+ */
+async function serverFilesIn(dir: string, fs: FSProvider): Promise<string[]> {
+  let names: string[];
+  try {
+    names = await fs.readdir(dir);
+  } catch {
+    return [];
+  }
+  const candidates = names.filter((n) => SOURCE_EXTENSIONS.has(extname(n).toLowerCase())).sort().map((n) => join(dir, n));
+  const usingSdk: string[] = [];
+  for (const file of candidates) {
+    const code = await readSourceFile(file, fs);
+    if (code && MCP_SDK_REFERENCE.test(code)) usingSdk.push(file);
+  }
+  return usingSdk.length > 0 ? usingSdk : candidates;
+}
+
+async function packageJsonName(dir: string, fs: FSProvider): Promise<string | undefined> {
+  try {
+    const name = JSON.parse(await fs.readFile(join(dir, 'package.json'))).name;
+    return typeof name === 'string' && name ? name : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export interface SourcePathResolution {
+  sources: MCPServerSource[];
+  /** Paths that don't exist or hold no readable server source. */
+  unreadable: string[];
+}
+
+/**
+ * MCP server source given directly (`vaso mcp scan --source <path>`): an entry
+ * file, or a server checkout whose entry is found as for a local server
+ * (package.json main/bin, index.js, server.py, …) or, failing that, its
+ * top-level files that use the MCP SDK. For server authors, and for remote
+ * servers whose code you have but whose process you only connect to.
+ */
+export async function resolveSourcePaths(paths: string[], options: { fs?: FSProvider } = {}): Promise<SourcePathResolution> {
+  const fs = options.fs ?? new LocalFSProvider();
+  const sources: MCPServerSource[] = [];
+  const unreadable: string[] = [];
+
+  for (const given of paths) {
+    const path = resolve(given);
+    let files: string[] = [];
+    try {
+      const st = await fs.stat(path);
+      if (st.isFile()) files = [path];
+      else if (st.isDirectory()) {
+        const entry = await findMainEntry(path, fs);
+        files = entry ? [entry] : await serverFilesIn(path, fs);
+      }
+    } catch {
+      // reported below
+    }
+
+    const parts: string[] = [];
+    for (const file of files) {
+      const code = await readSourceFile(file, fs);
+      if (code !== undefined) parts.push(files.length > 1 ? `// === ${basename(file)} ===\n${code}` : code);
+    }
+    if (parts.length === 0) {
+      unreadable.push(given);
+      continue;
+    }
+
+    const sourceCode = parts.join('\n\n');
+    const entryFile = files[0];
+    const source: MCPServerSource = { serverName: basename(path), localPath: entryFile, sourceCode };
+    // The name it is published under, for the provenance (typosquat) check.
+    const packageName = await packageJsonName(dirname(entryFile), fs);
+    if (packageName) source.packageName = packageName;
+    const python = files.every((f) => f.endsWith('.py')) || /^#!.*\bpython/.test(sourceCode);
+    if (python) source.language = 'python';
+    const dataFiles = await referencedDataFiles(entryFile, sourceCode, fs);
+    if (dataFiles.length > 0) source.dataFiles = dataFiles;
+    sources.push(source);
+  }
+
+  return { sources, unreadable };
 }

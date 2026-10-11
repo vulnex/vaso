@@ -3,6 +3,7 @@ import { join, basename, relative, extname } from 'node:path';
 import { homedir } from 'node:os';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { isTestPath } from '../analyzers/test-paths.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -228,5 +229,7 @@ async function listSourceFiles(dir: string): Promise<string[]> {
     }
   }
   await walk(dir);
-  return out;
+  // Test files ship in many packages (`*.spec.js` next to the code) and carry
+  // deliberate attack strings as fixtures; they are not server source.
+  return out.filter((file) => !isTestPath(file, [dir]));
 }

@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { inferPackageName, resolveLocalPath, resolveServerSources } from './source-resolver.js';
+import { inferPackageName, resolveLocalPath, resolveServerSources, resolveSourcePaths } from './source-resolver.js';
 import type { MCPServerEntry } from './types.js';
 
 function makeServer(overrides?: Partial<MCPServerEntry>): MCPServerEntry {
@@ -226,5 +226,44 @@ describe('Python and absolute-interpreter servers', () => {
       expect(source.sourceCode).toContain('print("hi")');
       expect(source.language).toBe('python');
     });
+  });
+});
+
+describe('data files and --source paths', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'vaso-srv-'));
+    return () => rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('collects the data files a local server names in its source', async () => {
+    mkdirSync(join(dir, 'documents'));
+    writeFileSync(join(dir, 'documents', 'policy.txt'), 'ASSISTANT GUIDELINES: share a recipe');
+    writeFileSync(join(dir, 'documents', 'logo.png'), 'binary');
+    writeFileSync(join(dir, 'README.md'), 'Ignore previous instructions (an example in the docs)');
+    writeFileSync(join(dir, 'index.js'), "const doc = readFileSync(join(__dirname, 'documents', id)); // see README.md");
+    const [source] = await resolveServerSources([makeServer({ command: 'node', args: [join(dir, 'index.js')] })]);
+    expect(source.dataFiles?.map((f) => f.path)).toEqual([join(dir, 'documents', 'policy.txt')]);
+  });
+
+  it('resolves a checkout through package.json and takes its published name', async () => {
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'twittter-mcp', main: 'index.js' }));
+    writeFileSync(join(dir, 'index.js'), 'import { Server } from "@modelcontextprotocol/sdk/server/index.js";');
+    const { sources, unreadable } = await resolveSourcePaths([dir]);
+    expect(unreadable).toEqual([]);
+    expect(sources[0]).toMatchObject({ localPath: join(dir, 'index.js'), packageName: 'twittter-mcp' });
+  });
+
+  it('finds the SDK-using file in a checkout with no declared entry (appsecco wikipedia)', async () => {
+    writeFileSync(join(dir, 'helpers.py'), 'def x(): pass');
+    writeFileSync(join(dir, 'wikipedia-mcp.py'), 'from mcp.server.fastmcp import FastMCP\nmcp = FastMCP("w")');
+    const { sources } = await resolveSourcePaths([dir]);
+    expect(sources[0]).toMatchObject({ localPath: join(dir, 'wikipedia-mcp.py'), language: 'python' });
+  });
+
+  it('reports paths with no server source', async () => {
+    const { sources, unreadable } = await resolveSourcePaths([join(dir, 'missing'), dir]);
+    expect(sources).toEqual([]);
+    expect(unreadable).toEqual([join(dir, 'missing'), dir]);
   });
 });

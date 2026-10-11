@@ -1,7 +1,45 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { detectTyposquatting } from '../../ioc/typosquat.js';
+import { allowedTypoEdits, detectTyposquatting, typoDistance } from '../../ioc/typosquat.js';
+import { WELL_KNOWN_MCP_SERVICES } from '../../ioc/mcp-services.js';
+import { bareName, serviceCore } from '../../mcp/package-name.js';
+
+/**
+ * The well-known service a name imitates, if it is one typo away from it:
+ * `twittter-mcp` → twitter, `githbu-server` → github. Same first letter (a
+ * squat keeps the look of the brand), and for short services only the edits
+ * squatters use — a doubled, dropped or swapped letter — not a substitution
+ * (`stack` is a word, not a `slack` squat).
+ */
+function imitatedService(name: string): string | undefined {
+  const core = serviceCore(name);
+  if (core.length < 5 || (WELL_KNOWN_MCP_SERVICES as readonly string[]).includes(core)) return undefined;
+  for (const service of WELL_KNOWN_MCP_SERVICES) {
+    if (core[0] !== service[0]) continue;
+    const distance = typoDistance(core, service);
+    if (distance === 0 || distance > allowedTypoEdits(service.length)) continue;
+    const substitution = core.length === service.length && [...core].sort().join('') !== [...service].sort().join('');
+    if (substitution && service.length <= 6) continue;
+    return service;
+  }
+  return undefined;
+}
 import { getIOCDatabase } from '../../ioc/database.js';
+
+/**
+ * A full-name typosquat whose difference also holds for the distinctive part:
+ * two edits inside `mcp-server-…` boilerplate are tolerated by length, but
+ * `mcp-server-sketch` is not a typo of `mcp-server-fetch` (cores sketch/fetch
+ * differ by two in five letters).
+ */
+function confirmedTyposquat(packageName: string, trusted: string[]): ReturnType<typeof detectTyposquatting> {
+  const match = detectTyposquatting(packageName, trusted);
+  if (!match) return null;
+  const core = serviceCore(packageName);
+  const trustedCore = serviceCore(match.trustedName);
+  if (core && trustedCore && typoDistance(core, trustedCore) > allowedTypoEdits(trustedCore.length)) return null;
+  return match;
+}
 
 export const mcp008 = defineCheck({
   id: 'MCP-008',
@@ -19,9 +57,14 @@ export const mcp008 = defineCheck({
 
     const trustedPackages = ioc.trustedMCPPackages ?? [];
 
+    const reportedServers = new Set<string>();
+
     for (const source of sources) {
-      const packageName = source.packageName;
+      // Compare the name, not the spec: `server-githbu@1.0.0` is a typo of
+      // `server-github` whatever version it pins.
+      const packageName = source.packageName ? bareName(source.packageName) : undefined;
       if (!packageName) continue;
+      const before = evidence.length;
 
       const normalizedPkg = packageName.toLowerCase();
       for (const publisher of ioc.maliciousPublishers) {
@@ -50,13 +93,20 @@ export const mcp008 = defineCheck({
         }
       }
 
-      if (trustedPackages.length > 0) {
-        const typosquat = detectTyposquatting(packageName, trustedPackages);
-        if (typosquat) {
+      const typosquat = trustedPackages.length > 0 ? confirmedTyposquat(packageName, trustedPackages) : null;
+      if (typosquat) {
+        evidence.push({
+          file: findConfigFile(mcpConfigs, source.serverName),
+          snippet: `Server "${source.serverName}": package ${packageName}`,
+          detail: `Possible typosquat of "${typosquat.trustedName}" (distance: ${typosquat.distance})`,
+        });
+      } else if (!trustedPackages.includes(packageName)) {
+        const service = imitatedService(packageName);
+        if (service) {
           evidence.push({
             file: findConfigFile(mcpConfigs, source.serverName),
             snippet: `Server "${source.serverName}": package ${packageName}`,
-            detail: `Possible typosquat of "${typosquat.trustedName}" (distance: ${typosquat.distance})`,
+            detail: `Package name imitates "${service}" with a typo — lookalike packages are a common way to get a malicious server installed; confirm this is the service's official package`,
           });
         }
       }
@@ -69,6 +119,22 @@ export const mcp008 = defineCheck({
             detail: `Package name matches suspicious pattern: ${pattern.source}`,
           });
         }
+      }
+      if (evidence.length > before) reportedServers.add(source.serverName);
+    }
+
+    // Servers run from a local path have no package name — only the name the
+    // user gave them in the config (the appsecco lab's "twittter-mcp").
+    for (const config of mcpConfigs) {
+      for (const server of config.servers) {
+        if (reportedServers.has(server.name)) continue;
+        const service = imitatedService(server.name);
+        if (!service) continue;
+        evidence.push({
+          file: config.filePath,
+          snippet: `Server "${server.name}"`,
+          detail: `Server name imitates "${service}" with a typo — check that the server is the service's official one and not a lookalike`,
+        });
       }
     }
 

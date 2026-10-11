@@ -30,14 +30,15 @@ export const DIRECTIVE_PATTERNS: DirectivePattern[] = [
   { re: /\bdo\s+not\s+(?:mention|tell|inform|reveal|disclose|notify)\b/i, label: 'concealment directive ("do not mention")' },
   { re: /\bdon'?t\s+(?:mention|tell|inform|reveal|disclose|notify)\b/i, label: 'concealment directive ("don\'t tell")' },
   { re: /\bwithout\s+(?:telling|informing|notifying|alerting)\s+(?:the\s+)?user\b/i, label: 'concealment directive ("without telling the user")' },
-  { re: /(?:^|[.!?]\s+|\n)\s*(?:system|assistant|developer)\s*:/i, label: 'role-spoofing prefix ("system:" / "assistant:")' },
+  // Followed by text: a bare "System:" label in a prompt builder is not a spoofed turn.
+  { re: /(?:^|[.!?]\s+|\n)\s*(?:system|assistant|developer)\s*:\s*\S/i, label: 'role-spoofing prefix ("system:" / "assistant:")' },
   { re: /\[\s*(?:system|admin|important|developer)\s+(?:instruction|prompt|note|message)\b/i, label: 'injected-instruction marker ("[SYSTEM INSTRUCTION…]")' },
   // Role + instruction-noun lead-in ("Assistant instruction", "developer directive") — the
   // role-spoofing prefix above only fires when the role word is immediately followed by a
   // colon, so "Assistant instruction: …" slips past it. Restricted to assistant/developer +
   // instruction/directive: these collocations are essentially never benign, whereas
   // "system command" / "system message" / "model prompt" routinely are.
-  { re: /\b(?:assistant|developer)\s+(?:instructions?|directives?)\b/i, label: 'injected-instruction lead-in ("assistant instruction…")' },
+  { re: /\b(?:assistant|developer)\s+(?:instructions?|directives?|guidelines?|rules)\b/i, label: 'injected-instruction lead-in ("assistant instruction…")' },
   // Bare "Instruction: <Capitalised directive>" prefix. The trailing "\s+[A-Z][a-z]" keeps
   // this off JS/JSON property keys (`instruction: "value"` → colon is followed by a quote,
   // not a capitalised word), so it only matches an imperative directive sentence.
@@ -68,6 +69,17 @@ export function isInvisibleCodePoint(cp: number): boolean {
 
 export function describeChar(cp: number): string {
   return `U+${cp.toString(16).toUpperCase().padStart(4, '0')}`;
+}
+
+/**
+ * Labels that, on their own, are weak evidence: "you must first connect a tab"
+ * or "always use this tool for X" is ordinary guidance in error messages,
+ * prompts and tool docs. They count alongside a strong directive.
+ */
+const WEAK_LABEL = /^(?:tool-priority directive|coercive directive)/;
+
+export function isWeakDirective(label: string): boolean {
+  return WEAK_LABEL.test(label);
 }
 
 /**
