@@ -13,7 +13,8 @@ export const adv002 = defineCheck({
 
   async run(ctx, h) {
     const db = getAdvisoryDatabase();
-    const depAdvisories = db.advisories.filter(a => a.affectedDependency);
+    // package.json / Cargo.toml names; a PyPI advisory's `mcp` is another package.
+    const depAdvisories = db.advisories.filter(a => a.affectedDependency && a.affectedDependency.ecosystem !== 'pypi');
     if (depAdvisories.length === 0) return h.passed('No dependency advisories in database');
 
     const evidence: Evidence[] = [];

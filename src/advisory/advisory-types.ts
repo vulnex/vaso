@@ -16,7 +16,18 @@ export interface Advisory {
   /** Dot-path config key + value regex to match against parsed configs */
   configPattern?: { key: string; valuePattern: string };
   /** Dependency name for package.json/Cargo.toml scanning */
-  affectedDependency?: { name: string; versionConstraint: string };
+  affectedDependency?: {
+    name: string;
+    versionConstraint: string;
+    /** Registry the name belongs to; absent means npm. PyPI's `mcp` is not npm's `mcp`. */
+    ecosystem?: 'npm' | 'pypi';
+  };
+  /**
+   * The feature of the dependency the vulnerability needs (an HTTP transport,
+   * the OAuth client). When the depending code is available and doesn't match
+   * `sourcePattern`, a match is reported as not applying to that code.
+   */
+  appliesWhen?: { sourcePattern: string; usage: string };
 }
 
 export interface AdvisoryFeedMetadata {

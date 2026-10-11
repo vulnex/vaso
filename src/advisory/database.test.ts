@@ -94,3 +94,28 @@ describe('Devin CLI advisories — version ranges', () => {
   });
 });
 
+describe('MCP SDK advisories', () => {
+  const sdkAdvisories = buildBundledAdvisoryDatabase().advisories.filter(
+    (a) => a.affectedDependency && ['@modelcontextprotocol/sdk', 'mcp'].includes(a.affectedDependency.name),
+  );
+
+  it('ships the GitHub-advisory set for both SDKs', () => {
+    expect(sdkAdvisories.map((a) => a.id).sort()).toEqual([
+      'CVE-2025-53365', 'CVE-2025-53366', 'CVE-2025-66414', 'CVE-2025-66416',
+      'CVE-2026-0621', 'CVE-2026-104850', 'CVE-2026-25536', 'CVE-2026-52869', 'CVE-2026-52870', 'CVE-2026-59950',
+    ]);
+  });
+
+  it.each(sdkAdvisories.map((a) => [a.id, a] as const))('%s: fix not flagged, usage pattern compiles', (_id, adv) => {
+    expect(adv.fixedVersion).toBeTruthy();
+    expect(satisfies(adv.fixedVersion!, adv.affectedDependency!.versionConstraint)).toBe(false);
+    expect(() => new RegExp(adv.appliesWhen!.sourcePattern)).not.toThrow();
+    // The Python SDK is `mcp` on PyPI — never an npm name.
+    expect(adv.affectedDependency!.ecosystem ?? 'npm').toBe(adv.affectedDependency!.name === 'mcp' ? 'pypi' : 'npm');
+  });
+
+  it('has unique ids across the bundle', () => {
+    const ids = buildBundledAdvisoryDatabase().advisories.map((a) => a.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+});

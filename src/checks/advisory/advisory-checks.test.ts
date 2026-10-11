@@ -1,4 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { ScanContext, AgentInstallation, ParsedConfig } from '../../core/types.js';
 import { LocalFSProvider } from '../../core/local-fs-provider.js';
 import { adv001 } from './adv-001-version-vuln.js';
@@ -120,6 +123,18 @@ describe('ADV-002: Dependency Vulnerability', () => {
     const ctx = makeContext({ installDir: '/nonexistent' });
     const result = await adv002.run(ctx);
     expect(result.passed).toBe(true);
+  });
+
+  it('does not match a PyPI advisory against an npm package of the same name', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'vaso-adv002-'));
+    try {
+      // The Python SDK is `mcp` on PyPI; an npm dependency called `mcp` is another package.
+      writeFileSync(join(dir, 'package.json'), JSON.stringify({ dependencies: { mcp: '1.0.0' } }));
+      const result = await adv002.run(makeContext({ installDir: dir }));
+      expect(result.passed).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('has correct metadata', () => {

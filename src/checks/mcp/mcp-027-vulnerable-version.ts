@@ -4,16 +4,23 @@ import { defineCheck } from '../../core/check-builder.js';
 import { getAdvisoryDatabase } from '../../advisory/database.js';
 import { satisfies, parseSemVer, compareSemVer } from '../../core/semver.js';
 import { defaultMcpStateStore } from '../../mcp/mcp-state-store.js';
+import { rangeEntirelyAffected } from '../../core/version-range.js';
+import type { Advisory } from '../../advisory/advisory-types.js';
 
 /**
  * MCP-027 — Vulnerable / Rolled-Back MCP Version.
  *
  * Update-phase risks from Hou et al. arXiv 2503.23278 §5.3.2: re-deploying a
  * known-vulnerable MCP server version, or rolling a server back to an older
- * version (silently undoing a security fix). Two detections:
+ * version (silently undoing a security fix). Three detections:
  *  - advisory match: the pinned `pkg@version` matches a dependency advisory.
  *  - rollback: the pinned version is lower than the highest version previously
  *    seen for that package (tracked in the cross-scan state store).
+ *  - shipped dependency: a package the server's project ships with (the MCP
+ *    SDK, …) matches an advisory — exact versions from the installed copy or
+ *    lockfile, a declared range only when every version it admits is affected.
+ *    An advisory scoped to a feature the server's code doesn't use is reported
+ *    as mitigated.
  *
  * MCP-010 covers *unpinned* packages; this covers *pinned-but-bad* versions.
  */
@@ -47,7 +54,7 @@ export const mcp027 = defineCheck({
   category: 'mcp',
   severity: 'warning',
   description:
-    'Detect MCP server packages pinned to a known-vulnerable version or rolled back below a previously-seen version',
+    'Detect MCP server packages pinned to a known-vulnerable version, rolled back below a previously-seen version, or shipping a known-vulnerable dependency such as an old MCP SDK',
   supportedAgents: ['mcp'],
 
   async run(ctx, h) {
@@ -71,7 +78,7 @@ export const mcp027 = defineCheck({
         // 1) Known-vulnerable version (advisory database).
         for (const adv of depAdvisories) {
           const dep = adv.affectedDependency!;
-          if (dep.name !== name) continue;
+          if (dep.name !== name || (dep.ecosystem ?? 'npm') !== 'npm') continue;
           if (!satisfies(version, dep.versionConstraint)) continue;
           if (adv.severity === 'critical') maxSeverity = 'critical';
           evidence.push({
@@ -101,9 +108,38 @@ export const mcp027 = defineCheck({
       }
     }
 
+    // 3) Packages a server ships with (its SDK and other dependencies), read
+    // from the installed copy, lockfile or declared range of its project.
+    for (const source of ctx.mcpServerSources ?? []) {
+      for (const dep of source.dependencies ?? []) {
+        for (const adv of depAdvisories) {
+          const target = adv.affectedDependency!;
+          if (target.name !== dep.name || (target.ecosystem ?? 'npm') !== dep.ecosystem) continue;
+          const affected = dep.version
+            ? satisfies(dep.version, target.versionConstraint)
+            : dep.range !== undefined && rangeEntirelyAffected(dep.range, dep.ecosystem, target.versionConstraint, adv.fixedVersion);
+          if (!affected) continue;
+
+          const shown = dep.version ? `${dep.name}@${dep.version}` : `${dep.name} ${dep.range}`;
+          const notUsed = featureNotUsed(adv, source.sourceCode);
+          if (!notUsed && adv.severity === 'critical') maxSeverity = 'critical';
+          evidence.push({
+            file: dep.source,
+            snippet: `Server "${source.serverName}": ${shown}`,
+            detail:
+              `${adv.id}: server "${source.serverName}" ships ${shown}, affected by "${adv.title}"` +
+              ` (severity: ${adv.severity}${adv.fixedVersion ? `, fix: ${adv.fixedVersion}` : ''})` +
+              (notUsed ? ` — applies to ${adv.appliesWhen!.usage}, which this server's code doesn't use` : ''),
+            ...(notUsed ? { mitigated: true } : {}),
+          });
+        }
+      }
+    }
+
+    const allMitigated = evidence.length > 0 && evidence.every((e) => e.mitigated);
     return h.result({
       passed: evidence.length === 0,
-      severity: maxSeverity,
+      severity: allMitigated ? 'info' : maxSeverity,
       message:
         evidence.length === 0
           ? 'No MCP server packages are on a known-vulnerable or rolled-back version'
@@ -118,4 +154,17 @@ export const mcp027 = defineCheck({
 function basename(p: string): string {
   const idx = Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'));
   return idx >= 0 ? p.slice(idx + 1) : p;
+}
+
+/**
+ * The advisory needs a feature (an HTTP transport, the OAuth client) that the
+ * server's own code shows no sign of using. Unknown when there is no source.
+ */
+function featureNotUsed(adv: Advisory, sourceCode: string | undefined): boolean {
+  if (!adv.appliesWhen || !sourceCode) return false;
+  try {
+    return !new RegExp(adv.appliesWhen.sourcePattern).test(sourceCode);
+  } catch {
+    return false; // a malformed pattern from a feed proves nothing
+  }
 }

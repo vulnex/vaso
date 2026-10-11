@@ -70,6 +70,11 @@ function sanitizeSpec(spec: string): string {
  * under `~/.vaso/mcp-pkg-cache/` and reused offline. Any failure (network,
  * missing binary, bad spec) degrades gracefully to `undefined`.
  */
+/** Where a resolved package is extracted (its `package.json` is here once fetched). */
+export function packageExtractDir(spec: string, cacheDir: string = defaultPackageCacheDir()): string {
+  return join(cacheDir, sanitizeSpec(spec), 'package');
+}
+
 export async function resolveNpmPackageSource(
   spec: string,
   options: PackageFetchOptions = {},

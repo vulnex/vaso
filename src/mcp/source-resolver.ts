@@ -2,7 +2,8 @@ import { basename, dirname, extname, join, resolve } from 'node:path';
 import type { MCPDataFile, MCPServerEntry, MCPServerSource } from './types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
-import { resolveNpmPackageSource } from './package-fetcher.js';
+import { packageExtractDir, resolveNpmPackageSource } from './package-fetcher.js';
+import { collectServerDependencies } from './server-dependencies.js';
 
 export function inferPackageName(server: MCPServerEntry): string | undefined {
   if (!server.command || !server.args?.length) return undefined;
@@ -235,11 +236,13 @@ export async function resolveServerSources(
 
     // Opt-in: resolve npm-packaged servers so their source feeds the AST/tool
     // checks. Download-only, never executed (see package-fetcher).
+    let packageDir: string | undefined;
     if (!sourceCode && packageName && options.resolvePackages && isNpmCommand(server.command)) {
       const fetcher =
         options.npmFetcher ??
         ((spec: string) => resolveNpmPackageSource(spec, { cacheDir: options.cacheDir }));
       sourceCode = await fetcher(packageName);
+      if (sourceCode) packageDir = packageExtractDir(packageName, options.cacheDir);
     }
 
     const source: MCPServerSource = {
@@ -255,6 +258,12 @@ export async function resolveServerSources(
       const dataFiles = await referencedDataFiles(entryFile, sourceCode, provider);
       if (dataFiles.length > 0) source.dataFiles = dataFiles;
     }
+    const dependencies = entryFile
+      ? await collectServerDependencies(entryFile, source.language ?? 'javascript', provider)
+      : packageDir
+        ? await collectServerDependencies(join(packageDir, 'package.json'), 'javascript', provider, { searchParents: false })
+        : [];
+    if (dependencies.length > 0) source.dependencies = dependencies;
     sources.push(source);
   }
 
@@ -401,6 +410,8 @@ export async function resolveSourcePaths(paths: string[], options: { fs?: FSProv
     if (python) source.language = 'python';
     const dataFiles = await referencedDataFiles(entryFile, sourceCode, fs);
     if (dataFiles.length > 0) source.dataFiles = dataFiles;
+    const dependencies = await collectServerDependencies(entryFile, source.language ?? 'javascript', fs);
+    if (dependencies.length > 0) source.dependencies = dependencies;
     sources.push(source);
   }
 

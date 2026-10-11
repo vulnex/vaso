@@ -1,3 +1,5 @@
+import type { ServerDependency } from './server-dependencies.js';
+
 export interface MCPServerEntry {
   name: string;
   command?: string;
@@ -39,6 +41,8 @@ export interface MCPServerSource {
    * files). Returned to the model as tool output, so MCP-034 reads them too.
    */
   dataFiles?: MCPDataFile[];
+  /** Packages the server ships with (its manifest/lockfile/installed copies), for MCP-027. */
+  dependencies?: ServerDependency[];
   /**
    * Tool definitions extracted from `sourceCode`, populated once by the engine
    * (see `ScanEngine.scanMCP`) so tool-layer checks (MCP-020/024/025) share one
