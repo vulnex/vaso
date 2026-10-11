@@ -8,8 +8,8 @@ Security fixes land on the latest released minor version. Older versions do not 
 
 | Version | Supported |
 |---------|-----------|
-| 1.0.x   | Yes       |
-| < 1.0   | No        |
+| 1.2.x   | Yes       |
+| < 1.2   | No        |
 
 ## Reporting a Vulnerability
 

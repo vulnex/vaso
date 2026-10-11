@@ -6,6 +6,8 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-10-11
+
 ### Added
 
 - **MCP-027 checks the MCP SDK a server ships with.** A server's dependencies are read from its project — the installed copy in `node_modules` or a `.venv`, then the lockfile (`package-lock.json`, `uv.lock`, `poetry.lock`), then `package.json` / `requirements*.txt` / `pyproject.toml` — and matched against advisories. A declared range counts only when no fixed release fits it (`^0.5.0`, not `^1.0.4`). Ten advisories for the TypeScript SDK (`@modelcontextprotocol/sdk`) and the Python SDK (`mcp` on PyPI) are bundled from the GitHub Advisory Database: CVE-2025-66414, CVE-2026-0621, CVE-2026-25536, CVE-2026-104850, CVE-2025-66416, CVE-2026-52869, CVE-2026-52870, CVE-2026-59950, CVE-2025-53366, CVE-2025-53365. Most need a particular SDK feature (an HTTP transport, the OAuth client, resource templates); when the server's code shows no use of it, the match is reported as not applying, at info. Advisories can now name their registry (`affectedDependency.ecosystem`), so the Python SDK's `mcp` never matches an npm package of that name (ADV-002 included).
