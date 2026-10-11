@@ -1,8 +1,8 @@
 {
   "meta": {
-    "version": 7,
-    "timestamp": "2026-10-05T00:00:00.000Z",
-    "description": "VASO advisory feed v7 (cumulative over v6) — October 2026 refresh: adds 68 advisories — 17 OpenClaw (2026.4.22–2026.8.1 fixes, incl. the 2026-09-11 owner-authorization batch), 6 NemoClaw (NVIDIA bulletins 5837/5872), 4 Nanobot, 3 Hermes, 4 NanoClaw, 1 ZeroClaw, 3 Codex CLI (incl. GitSpawn), 3 OpenCode, 3 Claude Code, 2 Claude Desktop, 2 Cursor, 1 Gemini CLI, 1 Copilot CLI, and 18 npm MCP packages (10 CVE/GHSA incl. @zereight/mcp-gitlab and @bytebase/dbhub, 8 OSV MAL malicious packages). Retains all v6 advisories."
+    "version": 8,
+    "timestamp": "2026-10-11T00:00:00.000Z",
+    "description": "VASO advisory feed v8 (cumulative over v7) — adds 10 MCP SDK advisories from the GitHub Advisory Database: 4 for the TypeScript SDK @modelcontextprotocol/sdk (CVE-2025-66414, CVE-2026-0621, CVE-2026-25536, CVE-2026-104850) and 6 for the Python SDK mcp on PyPI (CVE-2025-66416, CVE-2026-52869, CVE-2026-52870, CVE-2026-59950, CVE-2025-53366, CVE-2025-53365). Introduces affectedDependency.ecosystem and appliesWhen, ignored by older clients. Retains all v7 advisories."
   },
   "data": {
     "advisories": [
@@ -2052,6 +2052,263 @@
         "affectedDependency": {
           "name": "@yoda.digital/gitlab-mcp-server",
           "versionConstraint": ">=0.0.0 <0.6.0"
+        }
+      },
+      {
+        "id": "CVE-2025-66414",
+        "title": "MCP TypeScript SDK does not enable DNS rebinding protection by default",
+        "agent": "mcp",
+        "affectedVersions": "<1.24.0",
+        "fixedVersion": "1.24.0",
+        "severity": "warning",
+        "description": "An HTTP-based MCP server running on localhost without authentication (StreamableHTTPServerTransport or SSEServerTransport without enableDnsRebindingProtection) can be reached by a malicious website through DNS rebinding, which can then invoke its tools and read its resources. stdio servers are not affected.",
+        "reference": "https://github.com/advisories/GHSA-w48q-cv73-mx4w",
+        "published": "2025-12-02",
+        "tags": [
+          "mcp",
+          "cve",
+          "sdk",
+          "dns-rebinding"
+        ],
+        "affectedDependency": {
+          "name": "@modelcontextprotocol/sdk",
+          "versionConstraint": "<1.24.0"
+        },
+        "appliesWhen": {
+          "sourcePattern": "StreamableHTTPServerTransport|SSEServerTransport",
+          "usage": "HTTP server transports"
+        }
+      },
+      {
+        "id": "CVE-2026-0621",
+        "title": "MCP TypeScript SDK UriTemplate ReDoS",
+        "agent": "mcp",
+        "affectedVersions": ">=1.3.0 <1.25.2",
+        "fixedVersion": "1.25.2",
+        "severity": "warning",
+        "description": "The regex built for exploded URI-template variables ({/id*}, {?tags*}) backtracks catastrophically; a client sending a crafted URI in resources/read pins the server CPU and denies service to all clients. Affects servers that register resource templates with exploded variables.",
+        "reference": "https://github.com/advisories/GHSA-8r9q-7v3j-jr4g",
+        "published": "2026-01-05",
+        "tags": [
+          "mcp",
+          "cve",
+          "sdk",
+          "dos"
+        ],
+        "affectedDependency": {
+          "name": "@modelcontextprotocol/sdk",
+          "versionConstraint": ">=1.3.0 <1.25.2"
+        },
+        "appliesWhen": {
+          "sourcePattern": "ResourceTemplate|UriTemplate",
+          "usage": "resource templates"
+        }
+      },
+      {
+        "id": "CVE-2026-25536",
+        "title": "MCP TypeScript SDK cross-client data leak via shared server/transport instances",
+        "agent": "mcp",
+        "affectedVersions": ">=1.10.0 <=1.25.3",
+        "fixedVersion": "1.26.0",
+        "severity": "warning",
+        "description": "Reusing one StreamableHTTPServerTransport across client requests lets colliding JSON-RPC message IDs route one client's responses to another, and reusing one McpServer/Server across transports mixes sessions — common in stateless HTTP deployments.",
+        "reference": "https://github.com/advisories/GHSA-345p-7cg4-v4c7",
+        "published": "2026-02-04",
+        "tags": [
+          "mcp",
+          "cve",
+          "sdk",
+          "data-leak"
+        ],
+        "affectedDependency": {
+          "name": "@modelcontextprotocol/sdk",
+          "versionConstraint": ">=1.10.0 <=1.25.3"
+        },
+        "appliesWhen": {
+          "sourcePattern": "StreamableHTTPServerTransport|SSEServerTransport",
+          "usage": "HTTP server transports"
+        }
+      },
+      {
+        "id": "CVE-2026-104850",
+        "title": "MCP TypeScript SDK OAuth client sends credentials to an authorization server chosen by the MCP server",
+        "agent": "mcp",
+        "affectedVersions": ">=1.12.0 <1.31.0",
+        "fixedVersion": "1.31.0",
+        "severity": "warning",
+        "description": "The SDK OAuth client let the MCP server name the authorization server that receives the client's credentials; a malicious or compromised server could collect the stored refresh_token and client_secret with no user interaction. Affects code using the SDK OAuth client (authProvider, withOAuth(), auth(), fetchToken()). CVSS 7.5.",
+        "reference": "https://github.com/advisories/GHSA-6qxp-vccf-f47h",
+        "published": "2026-10-06",
+        "tags": [
+          "mcp",
+          "cve",
+          "sdk",
+          "oauth",
+          "credential-theft"
+        ],
+        "affectedDependency": {
+          "name": "@modelcontextprotocol/sdk",
+          "versionConstraint": ">=1.12.0 <1.31.0"
+        },
+        "appliesWhen": {
+          "sourcePattern": "authProvider|withOAuth\\s*\\(|fetchToken\\s*\\(",
+          "usage": "the SDK OAuth client"
+        }
+      },
+      {
+        "id": "CVE-2025-66416",
+        "title": "MCP Python SDK does not enable DNS rebinding protection by default",
+        "agent": "mcp",
+        "affectedVersions": "<1.23.0",
+        "fixedVersion": "1.23.0",
+        "severity": "warning",
+        "description": "A FastMCP server using the Streamable HTTP or SSE transport on localhost without authentication or TransportSecuritySettings can be reached by a malicious website through DNS rebinding, which can then invoke its tools. stdio servers are not affected.",
+        "reference": "https://github.com/advisories/GHSA-9h52-p55h-vw2f",
+        "published": "2025-12-02",
+        "tags": [
+          "mcp",
+          "cve",
+          "sdk",
+          "dns-rebinding"
+        ],
+        "affectedDependency": {
+          "name": "mcp",
+          "versionConstraint": "<1.23.0",
+          "ecosystem": "pypi"
+        },
+        "appliesWhen": {
+          "sourcePattern": "streamable_http_app|sse_app|SseServerTransport|StreamableHTTPSessionManager|transport\\s*=\\s*[\"'](?:sse|streamable-http|http)[\"']",
+          "usage": "HTTP server transports"
+        }
+      },
+      {
+        "id": "CVE-2026-52869",
+        "title": "MCP Python SDK HTTP transports serve session requests without verifying the authenticated principal",
+        "agent": "mcp",
+        "affectedVersions": "<1.27.2",
+        "fixedVersion": "1.27.2",
+        "severity": "warning",
+        "description": "The SSE and stateful Streamable HTTP transports routed requests to a session by its ID alone, so anyone who learned or guessed a session ID could act on it whatever bearer token they held. Affects authenticated HTTP servers. CVSS 7.1.",
+        "reference": "https://github.com/advisories/GHSA-jpw9-pfvf-9f58",
+        "published": "2026-07-16",
+        "tags": [
+          "mcp",
+          "cve",
+          "sdk",
+          "session-hijack"
+        ],
+        "affectedDependency": {
+          "name": "mcp",
+          "versionConstraint": "<1.27.2",
+          "ecosystem": "pypi"
+        },
+        "appliesWhen": {
+          "sourcePattern": "streamable_http_app|sse_app|SseServerTransport|StreamableHTTPSessionManager|transport\\s*=\\s*[\"'](?:sse|streamable-http|http)[\"']",
+          "usage": "HTTP server transports"
+        }
+      },
+      {
+        "id": "CVE-2026-52870",
+        "title": "MCP Python SDK experimental task handlers let any client read and cancel other clients' tasks",
+        "agent": "mcp",
+        "affectedVersions": ">=1.23.0 <1.27.2",
+        "fixedVersion": "1.27.2",
+        "severity": "warning",
+        "description": "With server.experimental.enable_tasks(), the default tasks/list, tasks/get, tasks/result and tasks/cancel handlers did not check which session created a task, so on a multi-client server any client could observe, read and cancel others' tasks. CVSS 7.6.",
+        "reference": "https://github.com/advisories/GHSA-hvrp-rf83-w775",
+        "published": "2026-07-16",
+        "tags": [
+          "mcp",
+          "cve",
+          "sdk",
+          "data-leak"
+        ],
+        "affectedDependency": {
+          "name": "mcp",
+          "versionConstraint": ">=1.23.0 <1.27.2",
+          "ecosystem": "pypi"
+        },
+        "appliesWhen": {
+          "sourcePattern": "enable_tasks",
+          "usage": "experimental tasks (enable_tasks)"
+        }
+      },
+      {
+        "id": "CVE-2026-59950",
+        "title": "MCP Python SDK WebSocket server transport does not validate Host/Origin",
+        "agent": "mcp",
+        "affectedVersions": "<1.28.1",
+        "fixedVersion": "1.28.1",
+        "severity": "warning",
+        "description": "The deprecated WebSocket server transport accepted the handshake without any Host or Origin check, so a web page could connect to the server. Affects only applications that wire mcp.server.websocket.websocket_server into an ASGI app themselves.",
+        "reference": "https://github.com/advisories/GHSA-vj7q-gjh5-988w",
+        "published": "2026-07-16",
+        "tags": [
+          "mcp",
+          "cve",
+          "sdk",
+          "dns-rebinding"
+        ],
+        "affectedDependency": {
+          "name": "mcp",
+          "versionConstraint": "<1.28.1",
+          "ecosystem": "pypi"
+        },
+        "appliesWhen": {
+          "sourcePattern": "websocket_server",
+          "usage": "the WebSocket server transport"
+        }
+      },
+      {
+        "id": "CVE-2025-53366",
+        "title": "MCP Python SDK FastMCP validation error causes denial of service",
+        "agent": "mcp",
+        "affectedVersions": "<1.9.4",
+        "fixedVersion": "1.9.4",
+        "severity": "warning",
+        "description": "A malformed request raises an unhandled validation error in the FastMCP server, leaving it unavailable (500 errors) until restarted.",
+        "reference": "https://github.com/advisories/GHSA-3qhf-m339-9g5v",
+        "published": "2025-07-04",
+        "tags": [
+          "mcp",
+          "cve",
+          "sdk",
+          "dos"
+        ],
+        "affectedDependency": {
+          "name": "mcp",
+          "versionConstraint": "<1.9.4",
+          "ecosystem": "pypi"
+        },
+        "appliesWhen": {
+          "sourcePattern": "FastMCP",
+          "usage": "FastMCP"
+        }
+      },
+      {
+        "id": "CVE-2025-53365",
+        "title": "MCP Python SDK Streamable HTTP unhandled exception causes denial of service",
+        "agent": "mcp",
+        "affectedVersions": "<1.10.0",
+        "fixedVersion": "1.10.0",
+        "severity": "warning",
+        "description": "A client that triggers an exception after opening a Streamable HTTP session causes an uncaught ClosedResourceError that crashes the server until restarted.",
+        "reference": "https://github.com/advisories/GHSA-j975-95f5-7wqh",
+        "published": "2025-07-04",
+        "tags": [
+          "mcp",
+          "cve",
+          "sdk",
+          "dos"
+        ],
+        "affectedDependency": {
+          "name": "mcp",
+          "versionConstraint": "<1.10.0",
+          "ecosystem": "pypi"
+        },
+        "appliesWhen": {
+          "sourcePattern": "streamable_http_app|StreamableHTTPSessionManager|transport\\s*=\\s*[\"'](?:streamable-http|http)[\"']",
+          "usage": "the Streamable HTTP transport"
         }
       }
     ]
