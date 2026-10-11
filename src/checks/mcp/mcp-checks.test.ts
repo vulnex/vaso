@@ -2501,3 +2501,189 @@ describe('MCP-033 Long-Lived / Non-Expiring Token', () => {
     expect(result.passed).toBe(true);
   });
 });
+
+// ============ Remote servers reached through a stdio bridge ============
+describe('Remote servers behind mcp-remote / supergateway', () => {
+  function cfg(server: MCPConfig['servers'][number]): MCPConfig[] {
+    return [{ source: 'Claude Desktop', filePath: '/tmp/claude_desktop_config.json', servers: [server] }];
+  }
+  const bridged = (name: string, args: string[]) => cfg({ name, command: 'npx', args, transport: 'stdio' });
+
+  it('MCP-002 flags plaintext only when mcp-remote is told --allow-http', async () => {
+    const allowed = await mcp002.run(makeContext({
+      mcpConfigs: bridged('r', ['-y', 'mcp-remote@0.14.3', 'http://agents.example.com/mcp', '--allow-http']),
+    }));
+    expect(allowed.passed).toBe(false);
+    expect(allowed.evidence?.[0].detail).toMatch(/--allow-http/);
+
+    // Without the flag mcp-remote refuses a non-localhost http:// URL.
+    const refused = await mcp002.run(makeContext({
+      mcpConfigs: bridged('r', ['-y', 'mcp-remote@0.14.3', 'http://agents.example.com/mcp']),
+    }));
+    expect(refused.passed).toBe(true);
+  });
+
+  it('MCP-002 flags plaintext through supergateway', async () => {
+    const result = await mcp002.run(makeContext({
+      mcpConfigs: bridged('g', ['-y', 'supergateway', '--sse', 'http://agents.example.com/sse']),
+    }));
+    expect(result.passed).toBe(false);
+    expect(result.evidence?.[0].snippet).toMatch(/via supergateway/);
+  });
+
+  it('MCP-023 sees a streamable-HTTP remote behind mcp-remote', async () => {
+    const result = await mcp023.run(makeContext({
+      mcpConfigs: bridged('r', ['-y', 'mcp-remote', 'https://mcp.example.com/mcp']),
+    }));
+    expect(result.passed).toBe(false);
+    const local = await mcp023.run(makeContext({
+      mcpConfigs: bridged('r', ['-y', 'mcp-remote', 'http://localhost:3000/mcp']),
+    }));
+    expect(local.passed).toBe(true);
+  });
+
+  it('MCP-029 flags supergateway without credentials and accepts --oauth2Bearer', async () => {
+    const open = await mcp029.run(makeContext({
+      mcpConfigs: bridged('g', ['-y', 'supergateway', '--sse', 'https://agents.example.com/sse']),
+    }));
+    expect(open.passed).toBe(false);
+    const authed = await mcp029.run(makeContext({
+      mcpConfigs: bridged('g', ['-y', 'supergateway', '--sse', 'https://agents.example.com/sse', '--oauth2Bearer', '${TOKEN}']),
+    }));
+    expect(authed.passed).toBe(true);
+  });
+
+  it('MCP-029 does not flag mcp-remote, which authenticates via OAuth on demand', async () => {
+    const result = await mcp029.run(makeContext({
+      mcpConfigs: bridged('linear', ['-y', 'mcp-remote', 'https://mcp.linear.app/sse']),
+    }));
+    expect(result.passed).toBe(true);
+  });
+});
+
+// ============ Python servers ============
+describe('Python MCP server source', () => {
+  // Shape of the appsecco vulnerable-mcp-server-filesystem-workspace-actions server.
+  const workspaceServer: MCPServerSource = {
+    serverName: 'workspace-actions',
+    localPath: '/srv/workspace-actions-mcp.py',
+    language: 'python',
+    sourceCode: [
+      'import os, sys, asyncio',
+      'def get_full_path(workspace_dir, relative_path):',
+      '    return os.path.join(workspace_dir, relative_path)',
+      'def read_file(path):',
+      '    with open(get_full_path(WS, path)) as f:',
+      '        return f.read()',
+      'async def execute_code(code):',
+      "    p = await asyncio.create_subprocess_exec(sys.executable, '-c', code)",
+    ].join('\n'),
+  };
+
+  it('MCP-004 reports Python command execution', async () => {
+    const result = await mcp004.run(makeContext({ mcpServerSources: [workspaceServer] }));
+    expect(result.passed).toBe(false);
+    expect(result.evidence?.map(e => e.line)).toEqual([8]);
+  });
+
+  it('MCP-005 reports path traversal and python -c code execution', async () => {
+    const result = await mcp005.run(makeContext({ mcpServerSources: [workspaceServer] }));
+    expect(result.passed).toBe(false);
+    expect(result.evidence?.map(e => e.line)).toEqual([3, 8]);
+  });
+
+  it('MCP-006 does not run the JavaScript data-flow analyzer on Python', async () => {
+    const result = await mcp006.run(makeContext({ mcpServerSources: [workspaceServer] }));
+    expect(result.passed).toBe(true);
+  });
+});
+
+// ============ False-positive regressions from real packages ============
+describe('MCP-005 sink-anchored tracing', () => {
+  it('ignores tool names interpolated into error messages', async () => {
+    const result = await mcp005.run(makeContext({
+      mcpServerSources: [{
+        serverName: 'errors',
+        sourceCode: 'server.setRequestHandler(S, async (request) => {\n  throw new Error(`Unknown tool: ${request.params.name}`);\n});',
+      }],
+    }));
+    expect(result.passed).toBe(true);
+  });
+
+  it('reports the eval that receives a renamed tool argument, at the eval line', async () => {
+    const result = await mcp005.run(makeContext({
+      mcpServerSources: [{
+        serverName: 'qotd',
+        sourceCode: [
+          'server.setRequestHandler(S, async (request) => {',
+          '  const format = request.params.arguments?.format;',
+          '  return eval(`(() => ${format})()`);',
+          '});',
+        ].join('\n'),
+      }],
+    }));
+    expect(result.passed).toBe(false);
+    expect(result.evidence).toHaveLength(1);
+    expect(result.evidence?.[0]).toMatchObject({ line: 3, detail: 'eval() receives tool input (format ← request)' });
+  });
+});
+
+describe('MCP-032 benign whole-environment uses', () => {
+  const run = (code: string) => mcp032.run(makeContext({ mcpServerSources: [{ serverName: 's', sourceCode: code }] }));
+
+  it.each([
+    ['membership test (mcp-remote)', 'if (!Object.hasOwn(process.env, envVarName)) log("missing");'],
+    ['`in` test', 'if (key in process.env) use(key);'],
+    ['`||` next to a variable named env (mcp-remote)', 'env = env || new SchemaEnv({ schema });'],
+    ['env pass-through to a child', 'spawn(cmd, args, { env: { ...process.env, FOO: "1" } });'],
+    ['multi-line env pass-through', 'new StdioClientTransport({\n  env: {\n    PATH: p,\n    ...process.env,\n  },\n});'],
+    ['env-named copy for a child', 'const childEnv = { ...process.env, DEBUG: "1" };'],
+    ['default parameter (context7-mcp)', 'export function telemetryIsDisabled(environment = process.env) { return environment.X; }'],
+    ['config reader argument', 'const cfg = loadConfig(process.env);'],
+    ['filtered key enumeration (debug package)', 'inspectOpts = Object.keys(process.env).filter(e => /^debug_/i.test(e));'],
+    ['Python env copy for subprocess', 'env = os.environ.copy()\nsubprocess.run(cmd, env=env)'],
+    ['printenv of one variable', 'execSync("printenv HOME");'],
+  ])('passes: %s', async (_label, code) => {
+    expect((await run(code)).passed).toBe(true);
+  });
+
+  it.each([
+    ['unfiltered Object.entries', 'return { text: Object.entries(process.env).map(([k, v]) => `${k}=${v}`).join("\\n") };'],
+    ['util.inspect', 'return { text: util.inspect(process.env) };'],
+    ['Python json.dumps(os.environ)', 'return json.dumps(dict(os.environ))'],
+    ['Python return os.environ', 'def get_env():\n    return os.environ.copy()'],
+    ['piped env in a shell string', 'execSync("env | sort");'],
+    ['bare env command', 'subprocess.check_output(["env"])'],
+  ])('flags: %s', async (_label, code) => {
+    expect((await run(code)).passed).toBe(false);
+  });
+});
+
+describe('MCP-035 bundle false positives', () => {
+  it('does not treat PascalCase identifiers in a bundle as an encoded string-table (mcp-remote)', async () => {
+    const code = [
+      'const names = ["UntitledSingleSelectEnumSchemaSchema", "ClientHttpFailedToOpenStream", "ResourceNotFound", "ToolUseContentSchema"];',
+      'function b64(val) { return atob(val); }',
+      'const parsedHeader = JSON.parse(atob(header));',
+      'const s = String.fromCharCode(...bytes); const u = unescape(x);',
+    ].join('\n');
+    const result = await mcp035.run(makeContext({ mcpServerSources: [{ serverName: 'bundle', sourceCode: code }] }));
+    expect(result.passed).toBe(true);
+  });
+});
+
+describe('uv run of a local script (MCP quickstart form)', () => {
+  const quickstart: MCPConfig[] = [{
+    source: 'Claude Desktop',
+    filePath: '/tmp/claude_desktop_config.json',
+    servers: [{ name: 'weather', command: 'uv', args: ['--directory', '/Users/me/weather', 'run', 'weather.py'], transport: 'stdio' }],
+  }];
+
+  it('MCP-010 does not ask to pin a local script', async () => {
+    expect((await mcp010.run(makeContext({ mcpConfigs: quickstart }))).passed).toBe(true);
+  });
+
+  it('MCP-030 does not treat --directory as an install source', async () => {
+    expect((await mcp030.run(makeContext({ mcpConfigs: quickstart }))).passed).toBe(true);
+  });
+});

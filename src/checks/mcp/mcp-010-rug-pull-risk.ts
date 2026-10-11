@@ -1,5 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { uvRunScript } from '../../mcp/source-resolver.js';
 
 function isVersionPinned(packageArg: string): boolean {
   // Scoped packages: @scope/name@version
@@ -63,8 +64,9 @@ export const mcp010 = defineCheck({
           }
         }
 
-        // uvx without version pinning
-        if (cmd === 'uvx' || cmd === 'uv') {
+        // uvx without version pinning. `uv [--directory d] run server.py` runs a
+        // local script — there is no package to pin.
+        if (cmd === 'uvx' || (cmd === 'uv' && !uvRunScript(args))) {
           const packageArg = args.find(a => !a.startsWith('-') && a !== 'run' && a !== 'tool');
           if (packageArg && !packageArg.includes('==') && !packageArg.includes('>=')) {
             evidence.push({

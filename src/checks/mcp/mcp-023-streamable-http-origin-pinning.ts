@@ -1,5 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { remoteEndpoint } from '../../mcp/remote-endpoint.js';
 
 const LOCALHOST_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '0:0:0:0:0:0:0:1']);
 
@@ -39,17 +40,20 @@ export const mcp023 = defineCheck({
 
     for (const config of mcpConfigs) {
       for (const server of config.servers) {
-        if (server.transport !== 'streamable-http') continue;
-        if (!server.url) continue;
+        // A direct `url` entry, or one dialed through `npx mcp-remote <url>` /
+        // `supergateway --streamableHttp <url>`.
+        const endpoint = remoteEndpoint(server);
+        if (!endpoint || endpoint.transport !== 'streamable-http') continue;
 
-        const host = extractHostname(server.url);
+        const host = extractHostname(endpoint.url);
         if (!host || LOCALHOST_HOSTS.has(host)) continue;
 
         if (hasOriginPinning(server.args ?? [])) continue;
 
+        const through = endpoint.via ? ` via ${endpoint.via}` : '';
         evidence.push({
           file: config.filePath,
-          snippet: `Server "${server.name}" (${server.transport}): ${server.url}`,
+          snippet: `Server "${server.name}" (${endpoint.transport}${through}): ${endpoint.url}`,
           detail: `Streamable-HTTP server reachable at "${host}" with no --allowed-origins / --host pin in args. The 2025 MCP spec requires Origin validation and localhost binding to prevent DNS rebinding attacks against local servers; remote servers must validate Origin per spec §6.2`,
         });
       }

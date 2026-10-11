@@ -1,4 +1,4 @@
-import { join, resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import type { MCPServerEntry, MCPServerSource } from './types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
@@ -21,7 +21,11 @@ export function inferPackageName(server: MCPServerEntry): string | undefined {
 
   // uvx package
   if (cmd === 'uvx' || cmd === 'uv') {
-    for (const arg of args) {
+    // `uv [--directory d] run server.py` runs a local script, not a package.
+    if (cmd === 'uv' && uvRunScript(args)) return undefined;
+    for (let i = 0; i < args.length; i++) {
+      const arg = args[i];
+      if (UV_VALUE_FLAGS.has(arg)) { i++; continue; }
       if (arg === 'run' || arg === 'tool' || arg.startsWith('-')) continue;
       return arg;
     }
@@ -38,18 +42,92 @@ export function inferPackageName(server: MCPServerEntry): string | undefined {
   return undefined;
 }
 
+/** `python`, `python3`, `python3.12`, `py` — bare or as a path (`.venv/bin/python`). */
+const PYTHON_INTERPRETER = /^(?:python(?:\d+(?:\.\d+)?)?|py)(?:\.exe)?$/i;
+
+/** Python options that consume the next argument. */
+const PYTHON_VALUE_FLAGS = new Set(['-W', '-X', '-Q']);
+
+/** uv options (global and `run`) that consume the next argument. */
+const UV_VALUE_FLAGS = new Set([
+  '--directory', '--project', '--python', '-p', '--with', '--with-editable',
+  '--with-requirements', '--from', '--env-file', '--index', '--index-url',
+  '--default-index', '--extra-index-url', '--extra', '--group', '--package',
+  '--config-file', '--cache-dir',
+]);
+
+/**
+ * The script a `uv … run …` invocation executes, resolved against
+ * `--directory` (the MCP quickstart form is `uv --directory <dir> run server.py`).
+ * Undefined when the run target is a package/console script, not a `.py` file.
+ */
+export function uvRunScript(args: string[]): string | undefined {
+  let directory: string | undefined;
+  let afterRun = false;
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === '--directory' || arg === '--project') {
+      directory = args[++i];
+      continue;
+    }
+    if (arg.startsWith('--directory=')) {
+      directory = arg.slice('--directory='.length);
+      continue;
+    }
+    if (UV_VALUE_FLAGS.has(arg)) { i++; continue; }
+    if (arg.startsWith('-')) continue;
+    if (!afterRun) {
+      if (arg !== 'run') return undefined; // `uv tool run`, `uv pip …` — not a script
+      afterRun = true;
+      continue;
+    }
+    // First `.py` positional after `run`: covers `run server.py`,
+    // `run python server.py` and `run mcp run server.py`.
+    if (arg.endsWith('.py')) return directory ? resolve(directory, arg) : resolve(arg);
+  }
+  return undefined;
+}
+
+function pythonScript(args: string[]): string | undefined {
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === '-m' || arg === '-c') return undefined; // module / inline code, no file
+    if (PYTHON_VALUE_FLAGS.has(arg)) { i++; continue; }
+    if (arg.startsWith('-')) continue;
+    return resolve(arg);
+  }
+  return undefined;
+}
+
+/** The interpreter a command names, judged by basename so `/…/.venv/bin/python` counts. */
+function interpreterOf(command: string): 'node' | 'python' | 'uv' | undefined {
+  const base = basename(command.replace(/\\/g, '/'));
+  if (base === 'node' || base === 'node.exe') return 'node';
+  if (base === 'uv' || base === 'uv.exe') return 'uv';
+  if (PYTHON_INTERPRETER.test(base)) return 'python';
+  return undefined;
+}
+
 export function resolveLocalPath(server: MCPServerEntry): string | undefined {
-  if (!server.command || !server.args?.length) return undefined;
+  if (!server.command) return undefined;
 
   const cmd = server.command;
-  const args = server.args;
+  const args = server.args ?? [];
 
-  // node /path/to/server.js
-  if (cmd === 'node' || cmd === 'node.exe') {
-    for (const arg of args) {
-      if (arg.startsWith('-')) continue;
-      return resolve(arg);
-    }
+  // Interpreter + script, also when the interpreter is given by path — an
+  // absolute nvm `node` or venv `python` is the norm in desktop configs, and
+  // reading the interpreter binary as "server source" analyzed nothing.
+  switch (interpreterOf(cmd)) {
+    case 'node':
+      for (const arg of args) {
+        if (arg.startsWith('-')) continue;
+        return resolve(arg);
+      }
+      return undefined;
+    case 'python':
+      return pythonScript(args);
+    case 'uv':
+      return uvRunScript(args);
   }
 
   // Direct path execution
@@ -58,6 +136,15 @@ export function resolveLocalPath(server: MCPServerEntry): string | undefined {
   }
 
   return undefined;
+}
+
+/** Python when run through a Python interpreter/uv, named `.py`, or with a python shebang. */
+function sourceLanguage(server: MCPServerEntry, path: string | undefined, code: string): 'javascript' | 'python' {
+  const interpreter = server.command ? interpreterOf(server.command) : undefined;
+  if (interpreter === 'python' || interpreter === 'uv') return 'python';
+  if (path?.endsWith('.py')) return 'python';
+  if (/^#!.*\bpython/.test(code)) return 'python';
+  return 'javascript';
 }
 
 async function readSourceFile(filePath: string, fs: FSProvider): Promise<string | undefined> {
@@ -85,8 +172,11 @@ async function findMainEntry(dir: string, fs: FSProvider): Promise<string | unde
     }
   }
 
-  // Common entry points
-  const candidates = ['index.js', 'index.ts', 'src/index.js', 'src/index.ts', 'main.js', 'server.js'];
+  // Common entry points (a Python package dir runs its __main__.py)
+  const candidates = [
+    'index.js', 'index.ts', 'src/index.js', 'src/index.ts', 'main.js', 'server.js',
+    '__main__.py', 'server.py', 'main.py',
+  ];
   for (const candidate of candidates) {
     const fullPath = join(dir, candidate);
     if (await fs.access(fullPath)) return fullPath;
@@ -101,8 +191,9 @@ export interface ResolveSourcesOptions {
    * When true, npm-packaged servers (npx) whose source isn't on local disk are
    * downloaded from the registry (download-only, never executed) so the
    * AST/tool checks can analyze them. Opt-in: off by default to preserve
-   * offline-first behavior. uvx/PyPI packages are intentionally skipped — the
-   * analyzers are JS-only, so resolving Python source wouldn't feed them.
+   * offline-first behavior. uvx/PyPI packages are not fetched (only the npm
+   * download path exists); local Python scripts are read from disk and get the
+   * Python sink analyzer.
    */
   resolvePackages?: boolean;
   cacheDir?: string;
@@ -148,12 +239,16 @@ export async function resolveServerSources(
       sourceCode = await fetcher(packageName);
     }
 
-    sources.push({
+    const source: MCPServerSource = {
       serverName: server.name,
       packageName,
       localPath,
       sourceCode,
-    });
+    };
+    if (sourceCode && sourceLanguage(server, localPath, sourceCode) === 'python') {
+      source.language = 'python';
+    }
+    sources.push(source);
   }
 
   return sources;

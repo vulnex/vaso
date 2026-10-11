@@ -37,8 +37,33 @@ const DECODER_PATTERNS: ObfuscationPattern[] = [
   { pattern: /\bdecodeURIComponent\s*\(\s*escape\s*\(/, label: 'decodeURIComponent(escape(…))' },
 ];
 
-/** A quoted base64-ish literal long enough to plausibly hold a hidden string. */
-const ENCODED_LITERAL = /['"`][A-Za-z0-9+/]{16,}={0,2}['"`]/g;
+/** A quoted base64-alphabet literal long enough to plausibly hold a hidden string. */
+const ENCODED_LITERAL = /['"`]([A-Za-z0-9+/]{16,}={0,2})['"`]/g;
+
+/**
+ * Whether a base64-alphabet literal is actually shaped like base64 rather
+ * than an identifier, path or hash that happens to use the same characters
+ * (`"authorizationEndpointUrl"`, `"/usr/local/bin/node"`, a hex digest): padded
+ * or a whole number of 4-char groups, mixed case, and dense in case switches
+ * and digits, and not a run of camelCase/PascalCase words. camelCase words sit
+ * near 0.2 on that density; base64 of text sits around 0.45.
+ */
+export function looksBase64Encoded(literal: string): boolean {
+  if (!(literal.endsWith('=') || literal.length % 4 === 0)) return false;
+  if (!/[a-z]/.test(literal) || !/[A-Z]/.test(literal)) return false;
+  // camelCase / PascalCase identifiers (`UntitledSingleSelectEnumSchema`)
+  // switch case at every word boundary; base64 has runs of capitals.
+  if (/^(?:[A-Z]?[a-z]+\d*)+$/.test(literal)) return false;
+  let signal = 0;
+  for (let i = 0; i < literal.length; i++) {
+    const c = literal[i];
+    if (c >= '0' && c <= '9') { signal++; continue; }
+    const p = literal[i - 1];
+    if (!p || !/[A-Za-z]/.test(c) || !/[A-Za-z]/.test(p)) continue;
+    if ((c >= 'a') !== (p >= 'a')) signal++;
+  }
+  return signal / literal.length >= 0.3;
+}
 
 /** Lowest count of encoded literals that, with a decoder, reads as a string-table. */
 const STRING_TABLE_MIN_LITERALS = 3;
@@ -84,8 +109,9 @@ export function analyzeObfuscation(code: string): ObfuscationReport {
     const line = lines[i];
     if (isComment(line)) continue;
 
-    const encoded = line.match(ENCODED_LITERAL);
-    if (encoded) encodedLiteralCount += encoded.length;
+    for (const m of line.matchAll(ENCODED_LITERAL)) {
+      if (looksBase64Encoded(m[1])) encodedLiteralCount++;
+    }
 
     for (const { pattern, label } of OBFUSCATION_PATTERNS) {
       if (pattern.test(line)) {

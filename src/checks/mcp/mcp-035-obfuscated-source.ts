@@ -59,8 +59,11 @@ export const mcp035 = defineCheck({
           evidence.push({ file, line: hit.line, snippet: hit.snippet, detail: hit.label });
         }
       } else {
-        // tier === 'encoded' — decoder-less: informational only.
-        for (const hit of report.hits.slice(0, 5)) {
+        // tier === 'encoded' — decoder-less: informational only. A bare atob()
+        // decodes runtime data (JWTs, data URLs); with no encoded literals for
+        // it to unpack it is not evidence of hidden strings.
+        const encodedHits = report.hits.filter((hit) => hit.label !== 'atob() decoding');
+        for (const hit of encodedHits.slice(0, 5)) {
           evidence.push({
             file,
             line: hit.line,

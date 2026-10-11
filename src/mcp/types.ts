@@ -28,6 +28,12 @@ export interface MCPServerSource {
   localPath?: string;
   sourceCode?: string;
   /**
+   * Language of `sourceCode`. Python servers (`python3 server.py`, `uv run
+   * server.py`) skip the Babel-based analyzers and get the Python sink analyzer
+   * instead; absent means JavaScript/TypeScript.
+   */
+  language?: 'javascript' | 'python';
+  /**
    * Tool definitions extracted from `sourceCode`, populated once by the engine
    * (see `ScanEngine.scanMCP`) so tool-layer checks (MCP-020/024/025) share one
    * extraction pass instead of each re-parsing the source.

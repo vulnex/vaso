@@ -1,6 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import type { MCPServerEntry } from '../../mcp/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { uvRunScript } from '../../mcp/source-resolver.js';
 
 /**
  * MCP-030 — Untrusted Installer Source.
@@ -66,6 +67,8 @@ export const mcp030 = defineCheck({
       for (const server of config.servers) {
         const cmd = server.command ? basename(server.command) : undefined;
         if (!cmd || !PACKAGE_RUNNERS.has(cmd)) continue;
+        // `uv [--directory d] run server.py` runs a local script; nothing is installed.
+        if (cmd === 'uv' && uvRunScript(server.args ?? [])) continue;
 
         const spec = firstInstallSpec(server);
         if (!spec) continue;

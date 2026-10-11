@@ -1,6 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import type { MCPServerEntry } from '../../mcp/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { remoteEndpoint } from '../../mcp/remote-endpoint.js';
 
 /**
  * MCP-029 — Remote Server Without Authentication.
@@ -15,7 +16,7 @@ import { defineCheck } from '../../core/check-builder.js';
 const AUTH_ENV_RE =
   /(authorization|auth[_-]?token|access[_-]?token|refresh[_-]?token|id[_-]?token|api[_-]?key|apikey|bearer|oauth|client[_-]?secret|secret|token|password|passwd|credential)/i;
 
-const AUTH_ARG_RE = /^(--header|--auth|--authorization|--token|--bearer|--api-?key|-H)$/i;
+const AUTH_ARG_RE = /^(--header|--auth|--authorization|--token|--bearer|--oauth2-?bearer|--api-?key|-H)(=.*)?$/i;
 
 const QUERY_TOKEN_KEYS = new Set([
   'token',
@@ -87,11 +88,20 @@ export const mcp029 = defineCheck({
 
     for (const config of ctx.mcpConfigs ?? []) {
       for (const server of config.servers) {
-        const isRemoteTransport = server.transport === 'sse' || server.transport === 'streamable-http';
-        const parsed = server.url ? parseUrl(server.url) : null;
+        // A direct `url` entry, or one dialed through a stdio bridge
+        // (`npx mcp-remote <url>`, `supergateway --sse <url>`).
+        const endpoint = remoteEndpoint(server);
+        if (!endpoint) continue; // stdio / local — out of scope
+        // mcp-remote runs an OAuth client and authenticates whenever the server
+        // demands it; no static credential in the config proves nothing there.
+        if (endpoint.negotiatesOAuth) continue;
+
+        const transport = endpoint.via ? endpoint.transport : server.transport;
+        const isRemoteTransport = transport === 'sse' || transport === 'streamable-http';
+        const parsed = parseUrl(endpoint.url);
         const isHttpUrl = parsed?.protocol === 'http:' || parsed?.protocol === 'https:';
 
-        if (!isRemoteTransport && !isHttpUrl) continue; // stdio / local — out of scope
+        if (!isRemoteTransport && !isHttpUrl) continue;
 
         // Only flag endpoints we can confirm are non-loopback; a remote
         // transport with no resolvable host gives us nothing to assert.
@@ -102,7 +112,7 @@ export const mcp029 = defineCheck({
 
         evidence.push({
           file: config.filePath,
-          snippet: `Server "${server.name}": ${server.transport} ${parsed.origin}`,
+          snippet: `Server "${server.name}": ${transport}${endpoint.via ? ` via ${endpoint.via}` : ''} ${parsed.origin}`,
           detail: `Remote MCP server "${server.name}" (${parsed.host}) is configured with no authentication — any party that can reach this endpoint can invoke its tools, and a MITM can impersonate it`,
         });
       }

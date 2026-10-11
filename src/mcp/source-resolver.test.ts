@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { resolve } from 'node:path';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { inferPackageName, resolveLocalPath, resolveServerSources } from './source-resolver.js';
 import type { MCPServerEntry } from './types.js';
 
@@ -152,6 +154,77 @@ describe('resolveServerSources', () => {
       const servers = [makeServer({ command: 'node', args: ['/tmp/does-not-exist.js'] })];
       await resolveServerSources(servers, { resolvePackages: true, npmFetcher });
       expect(npmFetcher).not.toHaveBeenCalled();
+    });
+  });
+});
+
+describe('Python and absolute-interpreter servers', () => {
+  it('resolves python/python3/py scripts, skipping options and their values', () => {
+    expect(resolveLocalPath(makeServer({ command: 'python3', args: ['/srv/server.py', '/ws'] }))).toBe(resolve('/srv/server.py'));
+    expect(resolveLocalPath(makeServer({ command: 'python', args: ['-u', '-X', 'utf8', '/srv/server.py'] }))).toBe(resolve('/srv/server.py'));
+    expect(resolveLocalPath(makeServer({ command: 'py', args: ['C:/mcp/server.py'] }))).toBe(resolve('C:/mcp/server.py'));
+  });
+
+  it('resolves the script, not the interpreter, when the interpreter is a path', () => {
+    expect(resolveLocalPath(makeServer({ command: '/home/u/.venv/bin/python3.12', args: ['/srv/server.py'] })))
+      .toBe(resolve('/srv/server.py'));
+    expect(resolveLocalPath(makeServer({ command: '/home/u/.nvm/versions/node/v22.1.0/bin/node', args: ['/srv/index.js'] })))
+      .toBe(resolve('/srv/index.js'));
+  });
+
+  it('has no file for python -m / -c', () => {
+    expect(resolveLocalPath(makeServer({ command: 'python3', args: ['-m', 'mcp_server_git'] }))).toBeUndefined();
+    expect(resolveLocalPath(makeServer({ command: 'python3', args: ['-c', 'print(1)'] }))).toBeUndefined();
+  });
+
+  it('resolves uv run scripts against --directory (MCP quickstart form)', () => {
+    expect(resolveLocalPath(makeServer({ command: 'uv', args: ['--directory', '/srv/weather', 'run', 'weather.py'] })))
+      .toBe(resolve('/srv/weather/weather.py'));
+    expect(resolveLocalPath(makeServer({ command: 'uv', args: ['run', '--with', 'mcp[cli]', 'mcp', 'run', '/srv/server.py'] })))
+      .toBe(resolve('/srv/server.py'));
+    expect(resolveLocalPath(makeServer({ command: 'uv', args: ['run', 'mcp-server-sqlite'] }))).toBeUndefined();
+  });
+
+  it('does not report a uv run script or its --directory as a package', () => {
+    expect(inferPackageName(makeServer({ command: 'uv', args: ['--directory', '/srv/weather', 'run', 'weather.py'] })))
+      .toBeUndefined();
+    expect(inferPackageName(makeServer({ command: 'uv', args: ['--directory', '/srv/x', 'run', 'mcp-server-x'] })))
+      .toBe('mcp-server-x');
+  });
+
+  describe('language tagging', () => {
+    let dir: string;
+    beforeEach(() => {
+      dir = mkdtempSync(join(tmpdir(), 'vaso-src-'));
+      return () => rmSync(dir, { recursive: true, force: true });
+    });
+
+    it('tags python scripts and leaves JavaScript untagged', async () => {
+      writeFileSync(join(dir, 'server.py'), 'import os\n');
+      writeFileSync(join(dir, 'index.js'), 'console.log(1)\n');
+      writeFileSync(join(dir, 'tool'), '#!/usr/bin/env python3\nprint(1)\n');
+      const sources = await resolveServerSources([
+        makeServer({ name: 'py', command: '/opt/venv/bin/python', args: [join(dir, 'server.py')] }),
+        makeServer({ name: 'uv', command: 'uv', args: ['--directory', dir, 'run', 'server.py'] }),
+        makeServer({ name: 'js', command: 'node', args: [join(dir, 'index.js')] }),
+        makeServer({ name: 'shebang', command: join(dir, 'tool') }),
+      ]);
+      expect(sources.map((s) => [s.serverName, s.language, Boolean(s.sourceCode)])).toEqual([
+        ['py', 'python', true],
+        ['uv', 'python', true],
+        ['js', undefined, true],
+        ['shebang', 'python', true],
+      ]);
+    });
+
+    it('runs a Python package directory through its __main__.py', async () => {
+      mkdirSync(join(dir, 'pkg'));
+      writeFileSync(join(dir, 'pkg', '__main__.py'), 'print("hi")\n');
+      const [source] = await resolveServerSources([
+        makeServer({ command: 'python3', args: [join(dir, 'pkg')] }),
+      ]);
+      expect(source.sourceCode).toContain('print("hi")');
+      expect(source.language).toBe('python');
     });
   });
 });

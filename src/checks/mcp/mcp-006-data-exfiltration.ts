@@ -16,6 +16,8 @@ export const mcp006 = defineCheck({
 
     for (const source of sources) {
       if (!source.sourceCode) continue;
+      // The data-flow analyzer parses JavaScript; Python source has no AST here.
+      if (source.language === 'python') continue;
 
       const results = analyzeCode(source.sourceCode, source.localPath ?? source.serverName);
 

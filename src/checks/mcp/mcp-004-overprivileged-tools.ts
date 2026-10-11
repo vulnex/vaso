@@ -1,6 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { analyzeCode } from '../../analyzers/ast-analyzer.js';
+import { analyzePythonSinks } from '../../analyzers/python-sinks.js';
 
 export const mcp004 = defineCheck({
   id: 'MCP-004',
@@ -16,6 +17,21 @@ export const mcp004 = defineCheck({
 
     for (const source of sources) {
       if (!source.sourceCode) continue;
+
+      if (source.language === 'python') {
+        for (const finding of analyzePythonSinks(source.sourceCode)) {
+          if (finding.kind === 'injection') continue;
+          evidence.push({
+            file: source.localPath ?? source.serverName,
+            line: finding.line,
+            snippet: finding.snippet,
+            detail: finding.kind === 'exec'
+              ? `Command execution: ${finding.description}`
+              : `Sensitive file access: ${finding.description}`,
+          });
+        }
+        continue;
+      }
 
       const results = analyzeCode(source.sourceCode, source.localPath ?? source.serverName);
 
