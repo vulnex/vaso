@@ -1,7 +1,42 @@
-import type { Evidence } from '../../core/types.js';
+import type { Evidence, Severity } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { analyzeCode } from '../../analyzers/ast-analyzer.js';
+import { analyzeCode, type DataFlowResult } from '../../analyzers/ast-analyzer.js';
 import { analyzePythonSinks } from '../../analyzers/python-sinks.js';
+import { findTaintedSinks } from '../../analyzers/tool-input-taint.js';
+
+/**
+ * Commands that are an attack on their own, whoever supplies them: download
+ * and run, reverse shells, decode and run, shell -c wrappers around those.
+ */
+const DANGEROUS_COMMAND = new RegExp([
+  String.raw`\b(?:curl|wget)\b[^|;&]*\|\s*(?:sudo\s+)?(?:ba|z|da)?sh\b`,
+  String.raw`\b(?:nc|ncat|netcat|socat)\s+(?:-\w+\s+)*[\w.$\{]`,
+  String.raw`/dev/tcp/`,
+  String.raw`\bbase64\s+(?:-d|--decode|-D)\b`,
+  String.raw`\bpowershell(?:\.exe)?\b.*\s-(?:e|enc|encodedcommand)\b`,
+  String.raw`\bmkfifo\b`,
+  String.raw`\bchmod\s+\+x\b`,
+  String.raw`\brm\s+-rf\s+(?:~|/|\$HOME)(?:\s|$)`,
+].join('|'), 'i');
+
+/**
+ * How serious an exec/eval call is. Being able to run a fixed or configured
+ * command (`spawn("kubectl", args)`, `git ls-files`, a library's code
+ * generator) is what many servers are for — an inventory item at info. It is
+ * critical when tool input reaches it (MCP-005 traces the same call), when the
+ * command is an attack in itself, or when the code it runs is decoded at
+ * runtime.
+ */
+function execLevel(finding: DataFlowResult, taintedLines: Set<number>): { severity: Severity; why: string } {
+  if (taintedLines.has(finding.line)) return { severity: 'critical', why: 'tool input reaches it' };
+  if (finding.decoded) return { severity: 'critical', why: 'it runs code decoded at runtime' };
+  if (finding.command && DANGEROUS_COMMAND.test(finding.command)) return { severity: 'critical', why: `the command is an attack on its own (${finding.command.slice(0, 60)})` };
+  const what = /eval|Function/.test(finding.description) ? 'code' : 'command';
+  return {
+    severity: 'info',
+    why: finding.dynamic ? `the ${what} is built at runtime; no tool input was traced into it` : `the ${what} is fixed`,
+  };
+}
 
 export const mcp004 = defineCheck({
   id: 'MCP-004',
@@ -13,6 +48,8 @@ export const mcp004 = defineCheck({
 
   async run(ctx, h) {
     const evidence: Evidence[] = [];
+    // Python findings and sensitive-path reads stay critical; JS exec calls are tiered.
+    let severity: Severity = 'info';
     const sources = ctx.mcpServerSources ?? [];
 
     for (const source of sources) {
@@ -21,6 +58,7 @@ export const mcp004 = defineCheck({
       if (source.language === 'python') {
         for (const finding of analyzePythonSinks(source.sourceCode)) {
           if (finding.kind === 'injection') continue;
+          severity = 'critical';
           evidence.push({
             file: source.localPath ?? source.serverName,
             line: finding.line,
@@ -33,23 +71,27 @@ export const mcp004 = defineCheck({
         continue;
       }
 
-      const results = analyzeCode(source.sourceCode, source.localPath ?? source.serverName);
+      const file = source.localPath ?? source.serverName;
+      const results = analyzeCode(source.sourceCode, file);
+      const taintedLines = new Set(
+        findTaintedSinks(source.sourceCode, file).filter((t) => t.kind === 'code' || t.kind === 'process').map((t) => t.line),
+      );
 
-      const execFindings = results.filter(r => r.type === 'eval-exec');
-      const fsFindings = results.filter(r => r.type === 'fs-access');
-
-      for (const finding of execFindings) {
+      for (const finding of results.filter(r => r.type === 'eval-exec')) {
+        const { severity: level, why } = execLevel(finding, taintedLines);
+        if (level === 'critical') severity = 'critical';
         evidence.push({
-          file: source.localPath ?? source.serverName,
+          file,
           line: finding.line,
           snippet: finding.snippet,
-          detail: `Command execution: ${finding.description}`,
+          detail: `Command execution: ${finding.description} — ${why}`,
         });
       }
 
-      for (const finding of fsFindings) {
+      for (const finding of results.filter(r => r.type === 'fs-access')) {
+        severity = 'critical';
         evidence.push({
-          file: source.localPath ?? source.serverName,
+          file,
           line: finding.line,
           snippet: finding.snippet,
           detail: `Sensitive file access: ${finding.description}`,
@@ -57,9 +99,15 @@ export const mcp004 = defineCheck({
       }
     }
 
-    return h.fromEvidence(evidence, {
-      passed: 'No overprivileged operations found in MCP server source',
-      failed: (n) => `Found ${n} overprivileged operation(s) in MCP server source`,
+    return h.result({
+      passed: evidence.length === 0,
+      severity,
+      message: evidence.length === 0
+        ? 'No overprivileged operations found in MCP server source'
+        : severity === 'critical'
+          ? `Found ${evidence.length} overprivileged operation(s) in MCP server source`
+          : `Found ${evidence.length} command execution capability(ies) in MCP server source — fixed or server-built commands, none reached by tool input`,
+      evidence,
     });
   },
 });

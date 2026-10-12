@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { parse } from '@babel/parser';
 import _traverse from '@babel/traverse';
 import type { Node } from '@babel/types';
+import { sourceChunks } from './js-parse.js';
 
 // Handle ESM/CJS interop
 const traverse = typeof _traverse === 'function' ? _traverse : (_traverse as { default: typeof _traverse }).default;
@@ -9,7 +10,20 @@ const traverse = typeof _traverse === 'function' ? _traverse : (_traverse as { d
 export interface DataFlowResult {
   type: 'source-to-sink' | 'eval-exec' | 'suspicious-network' | 'fs-access';
   source?: string;
+  /** source-to-sink: what the source variable holds — file contents or environment values. */
+  sourceKind?: 'file' | 'env';
   sink?: string;
+  /** source-to-sink: the receiver of a member-call sink (`axios` in `axios.post`, `res` in `res.send`). */
+  sinkObject?: string;
+  /**
+   * eval-exec: the call's static command/code text — string and template
+   * parts, `${…}` for interpolations; absent when the argument is computed.
+   */
+  command?: string;
+  /** eval-exec: the argument is (or contains) a runtime-computed value. */
+  dynamic?: boolean;
+  /** eval-exec: the argument is decoded at runtime (atob, base64 Buffer, fromCharCode). */
+  decoded?: boolean;
   line: number;
   snippet: string;
   description: string;
@@ -60,7 +74,10 @@ export function analyzeCode(code: string, filename = 'unknown.js'): DataFlowResu
   const key = `${filename}\0${createHash('sha1').update(code).digest('base64')}`;
   const cached = analysisCache.get(key);
   if (cached) return cached.map(r => ({ ...r }));
-  const results = analyzeUncached(code);
+  // Per file: resolved npm packages are several modules joined with headers,
+  // which don't parse as one program.
+  const results = sourceChunks(code).flatMap((chunk) =>
+    analyzeUncached(chunk.code).map((r) => ({ ...r, line: r.line + chunk.startLine - 1 })));
   if (analysisCache.size >= MAX_CACHED_ANALYSES) {
     analysisCache.delete(analysisCache.keys().next().value!);
   }
@@ -86,7 +103,11 @@ function analyzeUncached(code: string): DataFlowResult[] {
     return results;
   }
 
-  const sourceVars = new Set<string>();
+  // Variable → what it holds. Matched in sink arguments as a whole identifier:
+  // a substring test made a minified `o` match every `output`.
+  const sourceVars = new Map<string, 'file' | 'env'>();
+  const mentions = (argStr: string, name: string): boolean =>
+    new RegExp(`(?<![\\w$.])${name.replace(/[.$]/g, '\\$&')}(?![\\w$])`).test(argStr);
   const networkImports = new Set<string>();
   // Subset of sinks that spawn processes (child_process) rather than open connections
   const processImports = new Set<string>();
@@ -121,6 +142,7 @@ function analyzeUncached(code: string): DataFlowResult[] {
             line,
             snippet: snippet.slice(0, 120),
             description: `${node.callee.name}() call detected`,
+            ...commandText(node.arguments),
           });
         }
 
@@ -155,7 +177,7 @@ function analyzeUncached(code: string): DataFlowResult[] {
           // Track variable assignment for data-flow
           const parent = path.parent;
           if (parent?.type === 'VariableDeclarator' && parent.id.type === 'Identifier') {
-            sourceVars.add(parent.id.name);
+            sourceVars.set(parent.id.name, 'file');
           }
         }
 
@@ -185,7 +207,7 @@ function analyzeUncached(code: string): DataFlowResult[] {
             // Track variable assignment for data-flow
             const parent = path.parent;
             if (parent?.type === 'VariableDeclarator' && parent.id.type === 'Identifier') {
-              sourceVars.add(parent.id.name);
+              sourceVars.set(parent.id.name, 'file');
             }
           }
 
@@ -193,12 +215,18 @@ function analyzeUncached(code: string): DataFlowResult[] {
           if (SINKS.has(propName) || networkImports.has(propName)) {
             // Check if any source variables flow into this call
             const argStr = code.slice(node.arguments[0]?.start ?? 0, node.arguments[node.arguments.length - 1]?.end ?? 0);
-            for (const sourceVar of sourceVars) {
-              if (argStr.includes(sourceVar)) {
+            const receiver = node.callee.object;
+            const sinkObject = receiver.type === 'Identifier'
+              ? receiver.name
+              : receiver.type === 'MemberExpression' && receiver.property.type === 'Identifier' ? receiver.property.name : undefined;
+            for (const [sourceVar, sourceKind] of sourceVars) {
+              if (mentions(argStr, sourceVar)) {
                 results.push({
                   type: 'source-to-sink',
                   source: sourceVar,
+                  sourceKind,
                   sink: propName,
+                  ...(sinkObject ? { sinkObject } : {}),
                   line,
                   snippet: snippet.slice(0, 120),
                   description: processImports.has(propName) || EXEC_FUNCTIONS.has(propName)
@@ -215,7 +243,7 @@ function analyzeUncached(code: string): DataFlowResult[] {
             node.callee.object.type === 'Identifier' &&
             (node.callee.object as { name: string }).name === 'process'
           ) {
-            sourceVars.add('process.env');
+            sourceVars.set('process.env', 'env');
           }
 
           // Detect child_process methods
@@ -227,6 +255,7 @@ function analyzeUncached(code: string): DataFlowResult[] {
                 line,
                 snippet: snippet.slice(0, 120),
                 description: `${obj.name}.${propName}() — command execution`,
+                ...commandText(node.arguments),
               });
             }
           }
@@ -252,15 +281,16 @@ function analyzeUncached(code: string): DataFlowResult[] {
             }
 
             // Check data-flow into fetch
-            for (const sourceVar of sourceVars) {
+            for (const [sourceVar, sourceKind] of sourceVars) {
               const argStr = code.slice(
                 node.arguments[0]?.start ?? 0,
                 node.arguments[node.arguments.length - 1]?.end ?? 0,
               );
-              if (argStr.includes(sourceVar)) {
+              if (mentions(argStr, sourceVar)) {
                 results.push({
                   type: 'source-to-sink',
                   source: sourceVar,
+                  sourceKind,
                   sink: 'fetch',
                   line,
                   snippet: snippet.slice(0, 120),
@@ -288,7 +318,7 @@ function analyzeUncached(code: string): DataFlowResult[] {
           init.object.property.type === 'Identifier' &&
           init.object.property.name === 'env'
         ) {
-          sourceVars.add(id.name);
+          sourceVars.set(id.name, 'env');
         }
       },
 
@@ -303,6 +333,7 @@ function analyzeUncached(code: string): DataFlowResult[] {
             line,
             snippet: snippet.slice(0, 120),
             description: 'new Function() constructor — dynamic code execution',
+            ...commandText(node.arguments),
           });
         }
         if (node.callee.type === 'Identifier' && node.callee.name === 'WebSocket') {
@@ -323,4 +354,55 @@ function analyzeUncached(code: string): DataFlowResult[] {
   }
 
   return results;
+}
+
+type ArgNode = Node | { type: string };
+
+/**
+ * Static text of a command/code argument list: string literals and template
+ * quasis as written, `${…}` for interpolations, array elements (spawn argv)
+ * joined with spaces. Flags computed values and runtime decoding.
+ */
+function commandText(args: ArgNode[]): Pick<DataFlowResult, 'command' | 'dynamic' | 'decoded'> {
+  let dynamic = false;
+  let decoded = false;
+  const text = (node: ArgNode | null | undefined, depth = 0): string => {
+    if (!node || depth > 6) return '';
+    const n = node as Node;
+    switch (n.type) {
+      case 'StringLiteral':
+        return n.value;
+      case 'TemplateLiteral':
+        return n.quasis.map((q, i) => (q.value.cooked ?? '') + (i < n.expressions.length ? (dynamic = true, '${…}') : '')).join('');
+      case 'ArrayExpression':
+        return n.elements.map((e) => text(e as ArgNode, depth + 1)).join(' ');
+      case 'BinaryExpression':
+        return n.operator === '+' ? text(n.left, depth + 1) + text(n.right, depth + 1) : ((dynamic = true), '');
+      case 'CallExpression': {
+        const src = calleeText(n.callee);
+        const bufferToString = src === '.toString' && n.callee.type === 'MemberExpression' &&
+          n.callee.object.type === 'CallExpression' && calleeText(n.callee.object.callee) === 'Buffer.from';
+        if (bufferToString || /^(?:atob|String\.fromCharCode|unescape)$/.test(src)) decoded = true;
+        if (n.callee.type === 'MemberExpression' && n.callee.object.type === 'CallExpression') text(n.callee.object, depth + 1);
+        dynamic = true;
+        return '${…}';
+      }
+      case 'ObjectExpression':
+        return ''; // spawn/exec options
+      default:
+        dynamic = true;
+        return '${…}';
+    }
+  };
+  const command = args.slice(0, 2).map((a) => text(a)).filter(Boolean).join(' ').trim();
+  return { ...(command && command !== '${…}' ? { command } : {}), ...(dynamic ? { dynamic } : {}), ...(decoded ? { decoded } : {}) };
+}
+
+function calleeText(callee: Node): string {
+  if (callee.type === 'Identifier') return callee.name;
+  if (callee.type === 'MemberExpression' && callee.property.type === 'Identifier') {
+    const obj = callee.object.type === 'Identifier' ? callee.object.name : '';
+    return obj ? `${obj}.${callee.property.name}` : `.${callee.property.name}`;
+  }
+  return '';
 }

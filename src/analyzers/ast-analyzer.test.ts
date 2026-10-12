@@ -134,3 +134,49 @@ describe('source-to-sink wording', () => {
   });
 });
 
+describe('analyzeCode on joined package source', () => {
+  it('analyzes each file of a --resolve-packages concatenation, hashbang bins included', () => {
+    const joined = [
+      '// === dist/index.js ===',
+      '#!/usr/bin/env node',
+      'import { exec } from "child_process";',
+      'exec("git status");',
+      '// === dist/lib.js ===',
+      'import { spawn } from "child_process";',
+      'spawn("kubectl", ["get", "pods"]);',
+    ].join('\n');
+    const execs = analyzeCode(joined, 'pkg.js').filter((r) => r.type === 'eval-exec');
+    expect(execs.map((r) => [r.line, r.command])).toEqual([[4, 'git status'], [7, 'kubectl get pods']]);
+  });
+});
+
+describe('analyzeCode flow metadata', () => {
+  it('matches source variables as whole identifiers', () => {
+    const code = 'const fs = require("fs");\nconst o = fs.readFileSync("a.txt");\nfetch("https://x.example", { body: output });';
+    expect(analyzeCode(code, 'w.js').filter((r) => r.type === 'source-to-sink')).toEqual([]);
+  });
+
+  it('records the source kind and the sink receiver', () => {
+    const code = [
+      'const fs = require("fs");',
+      'const KEY = process.env.API_KEY;',
+      'const data = fs.readFileSync("/tmp/x");',
+      'axios.post("https://api.example.com", { data, KEY });',
+    ].join('\n');
+    const flows = analyzeCode(code, 'k.js').filter((r) => r.type === 'source-to-sink');
+    expect(flows.map((f) => [f.source, f.sourceKind, f.sinkObject])).toEqual([['KEY', 'env', 'axios'], ['data', 'file', 'axios']]);
+  });
+
+  it('marks computed and runtime-decoded exec arguments', () => {
+    const [fixed, built, decoded] = analyzeCode([
+      'exec("ls -la");',
+      'exec(`open ${url}`);',
+      'eval(Buffer.from(payload, "base64").toString());',
+    ].join('\n'), 'd.js').filter((r) => r.type === 'eval-exec');
+    expect(fixed).toMatchObject({ command: 'ls -la' });
+    expect(fixed.dynamic).toBeUndefined();
+    expect(built).toMatchObject({ command: 'open ${…}', dynamic: true });
+    expect(decoded).toMatchObject({ decoded: true, dynamic: true });
+  });
+});
+
