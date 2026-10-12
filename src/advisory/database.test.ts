@@ -4,7 +4,7 @@ import {
   getAdvisoryDatabase,
   reloadAdvisoryDatabase,
 } from './database.js';
-import { satisfies } from '../core/semver.js';
+import { parseSemVer, satisfies } from '../core/semver.js';
 import { DEPRECATED_NPM_PACKAGES, LIBRARY_ADVISORIES } from './library-advisories.js';
 
 describe('AdvisoryDatabase', () => {
@@ -131,7 +131,12 @@ describe('MCP SDK advisories', () => {
       const dep = adv.affectedDependency!;
       expect(dep.versionConstraint).toBe(adv.affectedVersions);
       for (const fixed of adv.fixedVersion?.split(', ') ?? []) {
+        expect(parseSemVer(fixed), `fixedVersion ${fixed}`).not.toBeNull();
         expect(satisfies(fixed, dep.versionConstraint), `${fixed} is fixed`).toBe(false);
+      }
+      // Every comparator parses — one that doesn't makes the advisory match nothing.
+      for (const token of dep.versionConstraint.split(/\s+/).filter((t) => t !== '||')) {
+        expect(parseSemVer(token.replace(/^(>=|<=|>|<|=)/, '')), `${token} in ${dep.versionConstraint}`).not.toBeNull();
       }
       // PyPI names are PEP 503-normalized, as server-dependencies reads them.
       if (dep.ecosystem === 'pypi') expect(dep.name).toBe(dep.name.toLowerCase().replace(/[-_.]+/g, '-'));

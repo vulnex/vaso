@@ -24,6 +24,15 @@ function full(version: string): string | undefined {
   return `${m[1]}.${m[2] ?? 0}.${m[3] ?? 0}${m[4] ?? ''}`;
 }
 
+/**
+ * A version padded to x.y.z for comparison (`5.3` → `5.3.0`): PyPI releases
+ * and lockfiles often have two parts, which `satisfies()` can't parse.
+ * Returned unchanged when it isn't a plain release number.
+ */
+export function fullVersion(version: string): string {
+  return full(version) ?? version;
+}
+
 function bump(version: string, part: 'major' | 'minor' | 'patch'): string {
   const v = parseSemVer(version)!;
   if (part === 'major') return `${v.major + 1}.0.0`;

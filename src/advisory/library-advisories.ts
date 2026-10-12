@@ -8,6 +8,7 @@ import type { Advisory } from './advisory-types.js';
  *
  * Ranges, fixes and severities from the GitHub Advisory Database (verified
  * 2026-10-12). GHSA critical → critical, high/moderate → warning, low → info.
+ * Versions are written x.y.z (GHSA's `5.4` is `5.4.0`) so every constraint parses.
  * An advisory covering several release lines lists one range per line,
  * joined with `||`, and every fixed release.
  */
@@ -108,7 +109,7 @@ export const LIBRARY_ADVISORIES: Advisory[] = [
   lib('CVE-2024-37891', 'GHSA-34jh-p97f-mpxf', 'pypi', 'urllib3', '<1.26.19 || >=2.0.0 <2.2.2', '1.26.19, 2.2.2', 'warning', '2024-06-17',
     'urllib3 keeps Proxy-Authorization on cross-origin redirects',
     'A Proxy-Authorization header set by hand is not stripped when a redirect crosses origins.'),
-  lib('CVE-2020-14343', 'GHSA-8q59-q68h-6hv4', 'pypi', 'pyyaml', '<5.4', '5.4', 'critical', '2021-03-25',
+  lib('CVE-2020-14343', 'GHSA-8q59-q68h-6hv4', 'pypi', 'pyyaml', '<5.4.0', '5.4.0', 'critical', '2021-03-25',
     'Arbitrary code execution when PyYAML loads untrusted YAML',
     'yaml.full_load / FullLoader construct arbitrary Python objects from crafted YAML (an incomplete fix for CVE-2020-1747).'),
   lib('CVE-2024-47874', 'GHSA-f96h-pmfr-66vw', 'pypi', 'starlette', '<0.40.0', '0.40.0', 'warning', '2024-10-15',

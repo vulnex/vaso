@@ -4,7 +4,7 @@ import { defineCheck } from '../../core/check-builder.js';
 import { getAdvisoryDatabase } from '../../advisory/database.js';
 import { satisfies, parseSemVer, compareSemVer } from '../../core/semver.js';
 import { defaultMcpStateStore } from '../../mcp/mcp-state-store.js';
-import { rangeEntirelyAffected } from '../../core/version-range.js';
+import { fullVersion, rangeEntirelyAffected } from '../../core/version-range.js';
 import type { Advisory } from '../../advisory/advisory-types.js';
 import { DEPRECATED_NPM_PACKAGES } from '../../advisory/library-advisories.js';
 
@@ -123,7 +123,7 @@ export const mcp027 = defineCheck({
           const target = adv.affectedDependency!;
           if (target.name !== dep.name || (target.ecosystem ?? 'npm') !== dep.ecosystem) continue;
           const affected = dep.version
-            ? satisfies(dep.version, target.versionConstraint)
+            ? satisfies(fullVersion(dep.version), target.versionConstraint)
             : dep.range !== undefined && rangeEntirelyAffected(dep.range, dep.ecosystem, target.versionConstraint, adv.fixedVersion);
           if (!affected) continue;
 

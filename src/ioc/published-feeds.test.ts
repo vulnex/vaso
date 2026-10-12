@@ -3,9 +3,10 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { verify, createPublicKey } from 'node:crypto';
 import { IOC_FEED_PUBLIC_KEY } from './public-key.js';
-import { satisfies, parseSemVer } from '../core/semver.js';
+import { satisfies, parseSemVer, constraintBranches } from '../core/semver.js';
 import type { IOCFeed, IOCFeedData } from './feed-types.js';
 import type { AdvisoryFeed } from '../advisory/advisory-types.js';
+import { LIBRARY_ADVISORIES } from '../advisory/library-advisories.js';
 
 /**
  * Guards on the *published* feed artifacts in feeds/ — the hand-edited JSON
@@ -85,15 +86,22 @@ describe('advisory-feed.json data', () => {
       (c): c is string => Boolean(c)
     );
     for (const constraint of constraints) {
-      for (const token of constraint.trim().split(/\s+/)) {
-        const version = token.replace(/^(>=|<=|>|<|=)/, '');
-        expect(parseSemVer(version), `unparseable version in "${constraint}"`).not.toBeNull();
+      // `||` separates one range per release line.
+      for (const branch of constraintBranches(constraint)) {
+        for (const token of branch.split(/\s+/)) {
+          const version = token.replace(/^(>=|<=|>|<|=)/, '');
+          expect(parseSemVer(version), `unparseable version in "${constraint}"`).not.toBeNull();
+        }
       }
     }
 
-    // A fixed version must not be flagged by its own advisory.
+    // A fixed version must not be flagged by its own advisory; a multi-line
+    // advisory lists every line's fix, comma-separated.
     if (adv.fixedVersion && adv.affectedDependency) {
-      expect(satisfies(adv.fixedVersion, adv.affectedDependency.versionConstraint)).toBe(false);
+      for (const fixed of adv.fixedVersion.split(', ')) {
+        expect(parseSemVer(fixed), `unparseable fixedVersion "${adv.fixedVersion}"`).not.toBeNull();
+        expect(satisfies(fixed, adv.affectedDependency.versionConstraint)).toBe(false);
+      }
     }
   });
 });
@@ -121,5 +129,15 @@ describe('advisory feed v2 known-version spot checks', () => {
     expect(satisfies('2025.7.1', constraint('CVE-2025-53109'))).toBe(false);
     expect(satisfies('2025.7.29', constraint('CVE-2025-53110'))).toBe(false);
     expect(satisfies('1.0.15', constraint('VASO-MAL-2025-001'))).toBe(false);
+  });
+});
+
+describe('advisory feed mirrors the bundled library advisories', () => {
+  const feed = readFeed<AdvisoryFeed>('advisory-feed.json');
+  const byId = new Map(feed.data.advisories.map((a) => [a.id, a]));
+
+  it.each(LIBRARY_ADVISORIES.map((a) => [a.id, a] as const))('%s is in the feed, identical to the bundle', (id, adv) => {
+    // The feed overrides a bundled advisory with the same id; they must agree.
+    expect(byId.get(id)).toEqual(adv);
   });
 });

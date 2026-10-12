@@ -3178,6 +3178,14 @@ describe('MCP-027 library advisories, deprecations and OSV results', () => {
     expect(result.evidence!.find((e) => e.detail!.startsWith('GHSA-xxjr'))!.detail).toContain('OSV.dev');
   });
 
+  it('matches a two-part PyPI version from a lockfile (PyYAML 5.3)', async () => {
+    const result = await run({ serverName: 'py', dependencies: [{ name: 'pyyaml', ecosystem: 'pypi', version: '5.3', source: '/srv/uv.lock' }] });
+    expect(result.evidence!.map((e) => e.detail!.split(':')[0])).toEqual(['CVE-2020-14343']);
+    expect(result.severity).toBe('critical');
+    const fixed = await run({ serverName: 'py', dependencies: [{ name: 'pyyaml', ecosystem: 'pypi', version: '5.4', source: '/srv/uv.lock' }] });
+    expect(fixed.passed).toBe(true);
+  });
+
   it('keeps a low-severity-only result at info', async () => {
     const result = await run({ serverName: 'x', dependencies: [dep('express', '4.19.2')] }); // only the low XSS advisory
     expect(result.passed).toBe(false);
