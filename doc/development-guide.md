@@ -93,7 +93,8 @@ src/
     pattern-engine.ts       Regex pattern matching engine (SECURITY_PATTERNS)
     entropy.ts              Shannon entropy for obfuscation detection
     js-parse.ts             Shared Babel parse cache; splits --resolve-packages concatenations per file
-    tool-input-taint.ts     MCP-005: tool input traced through variables/call sites into code & command sinks
+    tool-input-taint.ts     MCP-005/009: tool input traced through variables/call sites into code, command & fs-path sinks
+    tool-result-flow.ts     MCP-007: fetched/read content traced into tool-result text blocks (JS AST; Python tool functions)
     python-sinks.ts         MCP-004/005 for Python servers (line-level: subprocess, eval, path traversal)
     string-literals.ts      String contents by line (MCP-034 judges text, not code)
     source-secrets.ts       MCP-003: credentials hardcoded in server source (masked evidence)
@@ -106,6 +107,8 @@ src/
     oauth-context.ts        OAuth context tests shared by MCP-013/018
     package-name.ts         Package/spec name normalization (bare name, service core) for MCP-008
     package-fetcher.ts      Opt-in npm tarball download for --resolve-packages (never executed)
+    server-dependencies.ts  Dependencies a server ships (installed > lockfile > declared; npm + PyPI) for MCP-027
+    osv-audit.ts            Opt-in OSV.dev lookup of those dependency versions (--audit-deps)
     tool-baseline.ts        ToolBaselineStore — MCP-020 rug-pull baseline persistence
   ioc/
     database.ts             Bundled threat intelligence data
@@ -115,6 +118,7 @@ src/
     typosquat.ts            Levenshtein distance for typosquatting
   advisory/
     database.ts             Bundled CVE/advisory data + ADV-* check support
+    library-advisories.ts   Bundled npm/PyPI library advisories + always-deprecated npm packages (MCP-027)
     updater.ts              Signed advisory feed fetcher
   remediation/
     engine.ts               RemediationEngine — backup + fix orchestration

@@ -260,6 +260,7 @@ mcpCommand
   .option('-o, --output <file>', 'write report to file')
   .option('-p, --path <paths...>', 'specific config file paths to scan')
   .option('--resolve-packages', 'download npm-packaged (npx) MCP servers — download-only, never executed — to analyze their source (requires network)', false)
+  .option('--audit-deps', 'look up the exact versions of MCP servers\' dependencies in OSV.dev for known vulnerabilities — sends package names and versions only, never code (requires network)', false)
   .option('--source <paths...>', 'analyze MCP server source directly — an entry file or a server checkout (for server authors, or remote servers whose code you have); alone, skips config discovery')
   .option('--no-color', 'disable colored output')
   .action(async (options) => {

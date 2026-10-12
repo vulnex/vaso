@@ -118,3 +118,10 @@ describe('satisfies', () => {
     expect(satisfies('1.2.4', '1.2.3')).toBe(false);
   });
 });
+
+describe('satisfies with || alternatives', () => {
+  const ws = '>=2.1.0 <5.2.4 || >=6.0.0 <6.2.3 || >=7.0.0 <7.5.10 || >=8.0.0 <8.17.1';
+  it.each([['7.4.6', true], ['8.17.0', true], ['5.2.4', false], ['7.5.10', false], ['8.17.1', false], ['2.0.0', false]])('%s → %s', (v, hit) => {
+    expect(satisfies(v, ws)).toBe(hit);
+  });
+});

@@ -12,6 +12,7 @@
 import { dirname, join } from 'node:path';
 import { parse as parseToml } from 'smol-toml';
 import type { FSProvider } from '../core/fs-provider.js';
+import type { Severity } from '../core/types.js';
 import { exactVersion } from '../core/version-range.js';
 
 export interface ServerDependency {
@@ -23,6 +24,19 @@ export interface ServerDependency {
   range?: string;
   /** File the version or range was read from. */
   source: string;
+  /** Advisories OSV.dev lists for this exact version (`--audit-deps` only). */
+  vulnerabilities?: DependencyVulnerability[];
+}
+
+export interface DependencyVulnerability {
+  /** CVE when OSV knows one, else the OSV id (GHSA-…, PYSEC-…). */
+  id: string;
+  /** The other ids of the same advisory. */
+  aliases: string[];
+  summary: string;
+  severity: Severity;
+  fixedVersion?: string;
+  reference: string;
 }
 
 /** How far above the entry file to look for the project manifest. */

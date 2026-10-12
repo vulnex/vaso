@@ -58,7 +58,7 @@ export const mcp034 = defineCheck({
       for (const unit of units) {
         if (unit.description || reported.has(unit.line)) continue;
         const trimmed = unit.text.trim();
-        const reasons = analyzeText(unit.text);
+        const reasons = analyzeText(unit.text, { steering: true });
         if (reasons.length === 0) continue;
         // Owned by MCP-024 if this text carries (or is a fragment of) an
         // extracted tool description.
@@ -82,7 +82,7 @@ export const mcp034 = defineCheck({
       for (const data of source.dataFiles ?? []) {
         const lines = data.content.split('\n');
         for (let i = 0; i < lines.length; i++) {
-          const reasons = analyzeText(lines[i], { checkInvisible: true });
+          const reasons = analyzeText(lines[i], { checkInvisible: true, steering: true });
           if (reasons.length === 0) continue;
           const strong = reasons.some((r) => !isWeakDirective(r));
           if (strong) sawStrong = true;

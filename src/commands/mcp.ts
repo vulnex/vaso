@@ -6,6 +6,7 @@ import { checkRegistry } from '../core/check-registry.js';
 import { getReporter } from '../reporting/index.js';
 import { MCPDiscovery } from '../mcp/discovery.js';
 import { resolveServerSources, resolveSourcePaths } from '../mcp/source-resolver.js';
+import { auditDependencies } from '../mcp/osv-audit.js';
 import type { ScanOptions } from '../core/types.js';
 import { logError } from '../core/debug.js';
 import { toReportJson } from '../reporting/serialize.js';
@@ -26,6 +27,8 @@ export interface MCPScanCommandOptions {
   path?: string[];
   color?: boolean;
   resolvePackages?: boolean;
+  /** Look up dependency versions in OSV.dev (network, opt-in). */
+  auditDeps?: boolean;
   /** MCP server source to analyze directly (entry files or checkouts). */
   source?: string[];
 }
@@ -78,13 +81,25 @@ export async function runMCPScan(options: MCPScanCommandOptions): Promise<void> 
       console.error(chalk.dim(`Resolved source for ${resolved}/${packaged} packaged server(s) (npm only; uvx/PyPI not analyzed).`));
     }
 
+    const allSources = [...serverSources, ...direct.sources];
+    if (options.auditDeps) {
+      console.error(chalk.dim('Looking up dependency versions in OSV.dev (package names and versions only)…'));
+      const audit = await auditDependencies(allSources);
+      if (audit.error) {
+        console.error(chalk.yellow(`OSV.dev lookup failed (${audit.error}) — dependencies were checked against bundled advisories only.`));
+      } else {
+        const ranged = audit.rangeOnly > 0 ? `; ${audit.rangeOnly} known only by a declared range were not looked up` : '';
+        console.error(chalk.dim(`Looked up ${audit.queried} dependency version(s): ${audit.vulnerable} with known vulnerabilities${ranged}.`));
+      }
+    }
+
     const engine = new ScanEngine(adapterRegistry, checkRegistry);
 
     const scanOptions: ScanOptions = {
       format: options.format as 'terminal' | 'json' | 'sarif' | 'markdown',
     };
 
-    const result = await engine.scanMCP(discoveryResult.configs, [...serverSources, ...direct.sources], scanOptions);
+    const result = await engine.scanMCP(discoveryResult.configs, allSources, scanOptions);
 
     const reporter = getReporter(scanOptions.format ?? 'terminal');
     const output = reporter.render(result);

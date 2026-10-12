@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { findTaintedSinks } from './tool-input-taint.js';
+import { confinesPaths, findTaintedSinks } from './tool-input-taint.js';
+import { sourceChunks } from './js-parse.js';
 
 describe('findTaintedSinks', () => {
   it('traces a renamed tool argument into an eval template (appsecco malicious-code-exec)', () => {
@@ -101,5 +102,77 @@ async function status() {
 
   it('returns nothing for unparseable input', () => {
     expect(findTaintedSinks('def x(:\n  pass', 'x.py')).toEqual([]);
+  });
+});
+
+describe('findTaintedSinks: file paths', () => {
+  const server = (body: string) => `
+import { promises as fs } from "fs";
+import path from "path";
+class S {
+  setup() {
+    this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
+      return this.handle(request.params.arguments);
+    });
+  }
+  async handle(args) {
+${body}
+  }
+}`;
+
+  it('classifies fs calls fed by tool input (appsecco outdated-packages)', () => {
+    const sinks = findTaintedSinks(server(`
+    const items = await fs.readdir(args.path);
+    const stats = await fs.stat(path.join(args.path, "x"));
+    const text = await fs.readFile(args.path, "utf8");
+    await fs.writeFile(args.dest, text);`), 'fs.js');
+    expect(sinks.map((s) => [s.sink, s.kind])).toEqual([
+      ['fs.readdir', 'file-meta'], ['fs.stat', 'file-meta'], ['fs.readFile', 'file-read'], ['fs.writeFile', 'file-write'],
+    ]);
+    expect(sinks[0].origin).toContain('args');
+  });
+
+  it('recognizes named fs imports and require destructuring, not same-named locals', () => {
+    const named = `import { readFile } from "node:fs/promises";
+server.tool("read", {}, async ({ file }) => ({ content: [{ type: "text", text: await readFile(file, "utf8") }] }));`;
+    expect(findTaintedSinks(named).map((s) => s.kind)).toEqual(['file-read']);
+    const required = `const { existsSync } = require("fs");
+function check(request) { return existsSync(request.params.arguments.path); }`;
+    expect(findTaintedSinks(required).map((s) => s.kind)).toEqual(['file-meta']);
+    const local = `function readFile(p) { return cache[p]; }
+function get(request) { return readFile(request.params.name); }`;
+    expect(findTaintedSinks(local)).toEqual([]);
+  });
+
+  it('ignores paths the operator configured', () => {
+    expect(findTaintedSinks(`import fs from "fs";
+const root = process.argv[2];
+server.tool("list", {}, async () => ({ content: [{ type: "text", text: fs.readdirSync(root).join("\\n") }] }));`)).toEqual([]);
+  });
+});
+
+describe('confinesPaths', () => {
+  it('needs a resolved path compared against a base', () => {
+    expect(confinesPaths('const full = path.resolve(root, p); if (!full.startsWith(root)) throw new Error("outside");')).toBe(true);
+    expect(confinesPaths('const rel = path.relative(base, fs.realpathSync(p)); if (rel.startsWith("..")) deny();')).toBe(true);
+    // A literal-prefix check is about URLs or flags, not containment.
+    expect(confinesPaths('const u = new URL(path.resolve(x)); if (u.href.startsWith("https:")) ok();')).toBe(false);
+    expect(confinesPaths('fs.readFile(args.path)')).toBe(false);
+  });
+});
+
+describe('sourceChunks', () => {
+  it('neutralizes a bin file\'s hashbang after its --resolve-packages header', () => {
+    const joined = ['// === dist/index.js ===', '#!/usr/bin/env node', 'eval(x);', '// === dist/lib.js ===', 'run();'].join('\n');
+    const chunks = sourceChunks(joined);
+    expect(chunks.map((c) => c.startLine)).toEqual([1, 4]);
+    expect(chunks[0].code.split('\n')[1]).toBe('///usr/bin/env node');
+    // A hashbang on line 1 of a single file is legal and left alone.
+    expect(sourceChunks('#!/usr/bin/env node\nrun();')[0].code.startsWith('#!')).toBe(true);
+  });
+
+  it('lets the taint analyzer read a resolved package whose entry has a hashbang', () => {
+    const joined = ['// === dist/index.js ===', '#!/usr/bin/env node', 'server.tool("e", {}, async ({ code }) => eval(code));'].join('\n');
+    expect(findTaintedSinks(joined).map((s) => [s.sink, s.line])).toEqual([['eval', 3]]);
   });
 });

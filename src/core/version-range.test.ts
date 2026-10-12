@@ -55,3 +55,19 @@ describe('exactVersion', () => {
     expect(exactVersion(spec)).toBe(version);
   });
 });
+
+describe('rangeEntirelyAffected with || branches', () => {
+  const axios = '<0.30.0 || >=1.0.0 <1.8.2';
+  it('judges a range against the branch it falls in, bounded by that branch', () => {
+    expect(rangeEntirelyAffected('~0.21.1', 'npm', axios, '0.30.0, 1.8.2')).toBe(true);
+    expect(rangeEntirelyAffected('~1.7.0', 'npm', axios, '0.30.0, 1.8.2')).toBe(true);
+    // ^1.7.0 admits 1.8.2+, which is fixed.
+    expect(rangeEntirelyAffected('^1.7.0', 'npm', axios, '0.30.0, 1.8.2')).toBe(false);
+    // Spans both release lines' fixes.
+    expect(rangeEntirelyAffected('>=0.21.0', 'npm', axios, '0.30.0, 1.8.2')).toBe(false);
+  });
+  it('treats an inclusive branch top as the last affected release', () => {
+    expect(rangeEntirelyAffected('~2.88.0', 'npm', '<=2.88.2 || >=3.0.0 <3.0.1', undefined)).toBe(false);
+    expect(rangeEntirelyAffected('>=2.88.0 <=2.88.2', 'npm', '<=2.88.2 || >=3.0.0 <3.0.1', undefined)).toBe(true);
+  });
+});

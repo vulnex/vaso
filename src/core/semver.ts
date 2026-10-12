@@ -81,9 +81,9 @@ function matchComparator(version: SemVer, comp: Comparator): boolean {
 
 /**
  * Check if a version satisfies a constraint string.
- * Tokens separated by spaces are ANDed together.
+ * Tokens separated by spaces are ANDed together; `||` separates alternatives.
  * Supports: <, <=, >, >=, = operators.
- * Example: ">=1.2.0 <1.5.0"
+ * Example: ">=1.2.0 <1.5.0", ">=6.0.0 <6.2.3 || >=7.0.0 <7.5.10"
  */
 /** Compare two version strings; unparseable versions sort before parseable ones. */
 export function compareVersions(a: string, b: string): number {
@@ -93,9 +93,19 @@ export function compareVersions(a: string, b: string): number {
   return compareSemVer(pa, pb);
 }
 
+/**
+ * A constraint's `||`-separated alternatives (`>=7.0.0 <7.5.10 || >=8.0.0
+ * <8.17.1`): an advisory with one affected range per release line.
+ */
+export function constraintBranches(constraint: string): string[] {
+  return constraint.split('||').map((b) => b.trim()).filter(Boolean);
+}
+
 export function satisfies(version: string, constraint: string): boolean {
   const ver = parseSemVer(version);
   if (!ver) return false;
+  const branches = constraintBranches(constraint);
+  if (branches.length > 1) return branches.some((b) => satisfies(version, b));
 
   const tokens = constraint.trim().split(/\s+/);
   for (const token of tokens) {

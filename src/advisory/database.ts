@@ -1,4 +1,5 @@
 import type { Advisory } from './advisory-types.js';
+import { LIBRARY_ADVISORIES } from './library-advisories.js';
 
 export interface AdvisoryDatabase {
   advisories: Advisory[];
@@ -923,7 +924,7 @@ let _initialized = false;
 
 export function buildBundledAdvisoryDatabase(): AdvisoryDatabase {
   return {
-    advisories: [...BUNDLED_ADVISORIES],
+    advisories: [...BUNDLED_ADVISORIES, ...LIBRARY_ADVISORIES],
   };
 }
 

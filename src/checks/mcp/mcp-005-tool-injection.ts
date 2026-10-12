@@ -1,6 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { findTaintedSinks } from '../../analyzers/tool-input-taint.js';
+import { confinesPaths, findTaintedSinks } from '../../analyzers/tool-input-taint.js';
 import { analyzePythonSinks } from '../../analyzers/python-sinks.js';
 import { sourceSegments, segmentSnippet } from '../../mcp/source-segments.js';
 
@@ -48,15 +48,22 @@ export const mcp005 = defineCheck({
           evidence.push({ file, line: finding.line, snippet: finding.snippet, detail: finding.description });
         }
       } else {
-        // Tool input traced through variables into eval/Function/vm/child_process.
+        // Tool input traced through variables into eval/Function/vm/child_process,
+        // and into the path of a file read or write when nothing confines it to
+        // a base directory (listing/stat-only paths are MCP-009's).
+        const confined = confinesPaths(source.sourceCode);
         for (const sink of findTaintedSinks(source.sourceCode, file)) {
-          if (reported.has(sink.line)) continue;
+          if (reported.has(sink.line) || sink.kind === 'file-meta') continue;
+          const fileSink = sink.kind === 'file-read' || sink.kind === 'file-write';
+          if (fileSink && confined) continue;
           reported.add(sink.line);
           evidence.push({
             file,
             line: sink.line,
             snippet: sink.snippet,
-            detail: `${sink.sink}() receives tool input (${sink.origin})`,
+            detail: fileSink
+              ? `${sink.sink}() ${sink.kind === 'file-read' ? 'reads' : 'writes'} a path taken from tool input (${sink.origin}) with no containment check — the caller can ${sink.kind === 'file-read' ? 'read' : 'write'} any file the server can (path traversal)`
+              : `${sink.sink}() receives tool input (${sink.origin})`,
           });
         }
       }

@@ -1,63 +1,66 @@
-import type { Evidence } from '../../core/types.js';
+import type { Evidence, Severity } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { sourceSegments, segmentSnippet } from '../../mcp/source-segments.js';
+import { findExternalContentFlows, type ExternalContentFlow } from '../../analyzers/tool-result-flow.js';
 
-// Patterns indicating raw external content returned unsanitized in tool results
-const UNSAFE_RETURN_PATTERNS = [
-  // A fetch() result is a Response object; it becomes content once its body is
-  // read. `return await fetch(tokenEndpoint, …)` in an OAuth helper is not a
-  // tool result.
-  { pattern: /return\s+(?:await\s+)?\(?\s*(?:await\s+)?(?:fetch|axios|got|request)\s*\(.*\)\s*\)?\s*\.(?:text|json)\s*\(/, name: 'Raw HTTP response returned as tool result' },
-  { pattern: /return\s+(?:await\s+)?(?:readFile|readFileSync)\s*\(/, name: 'Raw file content returned as tool result' },
-  { pattern: /content\s*:\s*(?:await\s+)?(?:fetch|response|res)\b/, name: 'External content injected into tool result' },
-  { pattern: /tool_result.*(?:fetch|http|request)/i, name: 'External fetch in tool result handler' },
-  { pattern: /innerHTML|outerHTML|document\.write/i, name: 'DOM manipulation from external content' },
-];
+/**
+ * MCP-007 — external content returned as a tool result. Fetched pages and
+ * read files go to the model verbatim; if someone else writes that content,
+ * they can plant instructions in it (indirect prompt injection). Traced from
+ * the HTTP call or file read to the `{ type: 'text', text }` block (JS), or
+ * from the HTTP call in a tool function (Python) — see tool-result-flow.
+ *
+ * Warning when anyone can write the content: a URL the caller chooses, or a
+ * host where anyone can publish. A fixed API, or a file the server reads, is
+ * reported at info — a reminder that the content is passed through unfiltered.
+ */
 
-// Patterns indicating sanitization is present (reduce false positives)
-const SANITIZATION_PATTERNS = [
-  /sanitize|escape|encode|strip|clean|purify|validate/i,
-  /DOMPurify|xss|helmet/i,
-  /\.replace\(.*<.*>/i,
-];
+function describe(flow: ExternalContentFlow): { detail: string; severity: Severity } {
+  if (flow.via === 'file') {
+    return { severity: 'info', detail: `File content (${flow.source}) is returned to the model as a tool result unfiltered — instructions planted in the file reach the model` };
+  }
+  if (flow.callerChosenUrl) {
+    return { severity: 'warning', detail: `Fetches a URL the caller chooses (${flow.source}) and returns the response to the model unfiltered — any page, including one an attacker wrote, can inject instructions` };
+  }
+  if (flow.openContentHost) {
+    return { severity: 'warning', detail: `Returns content from ${flow.host}, where anyone can publish, to the model unfiltered (${flow.source}) — planted text reaches the model as tool output` };
+  }
+  return { severity: 'info', detail: `Returns an HTTP response${flow.host ? ` from ${flow.host}` : ''} (${flow.source}) to the model unfiltered — whoever controls that service controls the text the model reads` };
+}
 
 export const mcp007 = defineCheck({
   id: 'MCP-007',
   name: 'Prompt Injection via Tool Results',
   category: 'mcp',
   severity: 'warning',
-  description: 'Detect raw external content returned unsanitized in MCP tool results',
+  description: 'Detect external content (fetched pages, read files) returned unfiltered in MCP tool results',
   supportedAgents: ['mcp'],
 
   async run(ctx, h) {
     const evidence: Evidence[] = [];
-    const sources = ctx.mcpServerSources ?? [];
+    let severity: Severity = 'info';
 
-    for (const source of sources) {
+    for (const source of ctx.mcpServerSources ?? []) {
       if (!source.sourceCode) continue;
-
-      // Check if the source has any sanitization
-      const hasSanitization = SANITIZATION_PATTERNS.some(p => p.test(source.sourceCode!));
-
-      for (const segment of sourceSegments(source.sourceCode)) {
-        for (const { pattern, name } of UNSAFE_RETURN_PATTERNS) {
-          if (pattern.test(segment.text)) {
-            evidence.push({
-              file: source.localPath ?? source.serverName,
-              line: segment.line,
-              snippet: segmentSnippet(segment),
-              detail: hasSanitization
-                ? `${name} (sanitization detected elsewhere — verify coverage)`
-                : `${name} (no sanitization detected)`,
-            });
-          }
-        }
+      const file = source.localPath ?? source.serverName;
+      const seen = new Set<number>();
+      for (const flow of findExternalContentFlows(source.sourceCode, source.language ?? 'javascript', file)) {
+        if (seen.has(flow.line)) continue;
+        seen.add(flow.line);
+        const { detail, severity: level } = describe(flow);
+        if (level === 'warning') severity = 'warning';
+        evidence.push({ file, line: flow.line, snippet: flow.snippet, detail });
       }
     }
 
-    return h.fromEvidence(evidence, {
-      passed: 'No prompt injection risks detected in MCP tool results',
-      failed: (n) => `Found ${n} potential prompt injection vector(s) in MCP tool results`,
+    return h.result({
+      passed: evidence.length === 0,
+      severity,
+      message: evidence.length === 0
+        ? 'No external content is returned unfiltered in MCP tool results'
+        : `Found ${evidence.length} tool result(s) returning external content unfiltered`,
+      evidence,
+      fixDescription:
+        'Treat fetched pages and files as data, not instructions: restrict fetch tools to the hosts they need, mark returned content as untrusted, and strip or flag instruction-like text before returning it',
     });
   },
 });

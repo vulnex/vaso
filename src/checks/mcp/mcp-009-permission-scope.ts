@@ -1,6 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { sourceSegments, segmentSnippet } from '../../mcp/source-segments.js';
+import { confinesPaths, findTaintedSinks } from '../../analyzers/tool-input-taint.js';
 
 // Patterns indicating disproportionate resource access in server names/packages
 const OVERPRIVILEGED_PATTERNS = [
@@ -65,6 +66,23 @@ export const mcp009 = defineCheck({
     // Check source code for excessive permission patterns
     for (const source of sources) {
       if (!source.sourceCode) continue;
+
+      // A tool that lists, stats or probes whatever path the caller names
+      // reaches the whole host (reads and writes of such paths are MCP-005's).
+      if (source.language !== 'python' && !confinesPaths(source.sourceCode)) {
+        const file = source.localPath ?? source.serverName;
+        const seen = new Set<number>();
+        for (const sink of findTaintedSinks(source.sourceCode, file)) {
+          if (sink.kind !== 'file-meta' || seen.has(sink.line)) continue;
+          seen.add(sink.line);
+          evidence.push({
+            file,
+            line: sink.line,
+            snippet: sink.snippet,
+            detail: `${sink.sink}() takes its path from tool input (${sink.origin}) with no base-directory check — the tool reaches any path on the host`,
+          });
+        }
+      }
 
       // Reading $HOME to locate a config file is not a scope grant; the
       // patterns below are operations that widen what the server can touch.

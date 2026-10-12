@@ -23,6 +23,12 @@ vi.mock('../mcp/source-resolver.js', () => ({
   resolveSourcePaths: (...args: unknown[]) => mockResolveSourcePaths(...args),
 }));
 
+// Mock the OSV lookup (network)
+const mockAuditDependencies = vi.fn();
+vi.mock('../mcp/osv-audit.js', () => ({
+  auditDependencies: (...args: unknown[]) => mockAuditDependencies(...args),
+}));
+
 // Mock ScanEngine
 const mockScanMCP = vi.fn();
 vi.mock('../core/engine.js', () => ({
@@ -105,6 +111,22 @@ afterEach(() => {
 });
 
 describe('runMCPScan', () => {
+  it('looks dependencies up in OSV only with --audit-deps, and keeps scanning when OSV fails', async () => {
+    mockDiscoverFromPaths.mockResolvedValue(sampleDiscoveryResult);
+    const sources = [{ serverName: 'filesystem', dependencies: [{ name: 'lodash', ecosystem: 'npm', version: '4.17.20', source: 'p' }] }];
+    mockResolveServerSources.mockResolvedValue(sources);
+    mockScanMCP.mockResolvedValue(sampleScanResult);
+    mockAuditDependencies.mockReset();
+
+    await runMCPScan({ format: 'json', path: ['/home/user/config.json'] });
+    expect(mockAuditDependencies).not.toHaveBeenCalled();
+
+    mockAuditDependencies.mockResolvedValue({ queried: 1, vulnerable: 0, rangeOnly: 0, error: 'OSV returned HTTP 503' });
+    await runMCPScan({ format: 'json', path: ['/home/user/config.json'], auditDeps: true });
+    expect(mockAuditDependencies).toHaveBeenCalledWith(sources);
+    expect(mockScanMCP).toHaveBeenLastCalledWith(sampleDiscoveryResult.configs, sources, expect.anything());
+  });
+
   it('scans servers discovered from explicit path', async () => {
     mockDiscoverFromPaths.mockResolvedValue(sampleDiscoveryResult);
     mockResolveServerSources.mockResolvedValue([

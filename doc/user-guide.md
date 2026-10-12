@@ -296,6 +296,7 @@ vaso mcp scan [options]
 | `-o, --output <file>` | Write report to a file instead of stdout |
 | `-p, --path <paths...>` | Specific config file paths to scan (skips auto-discovery). A path that is missing or not valid JSON/JSONC is an error (exit 2) |
 | `--resolve-packages` | Download npm-packaged (`npx`) MCP servers — download only, never executed — and analyze their source. Requires network access |
+| `--audit-deps` | Look up the exact versions of the servers' dependencies (from their lockfiles or installed copies) in [OSV.dev](https://osv.dev) for known vulnerabilities, in addition to the bundled advisories. Sends package names and versions only — never code, paths or config. Dependencies known only by a declared range are not looked up. If OSV can't be reached the scan continues with bundled advisories. Requires network access |
 | `--source <paths...>` | Analyze MCP server source directly — an entry file or a server checkout. For server authors, and for remote servers whose code you have but only connect to (`npx mcp-remote https://…`). On its own it scans only these servers (no config discovery); with `-p`, both. A path with no server source is an error (exit 2) |
 | `--no-color` | Disable colored terminal output |
 
@@ -316,6 +317,9 @@ vaso mcp scan --resolve-packages
 
 # Audit a server's own code (a checkout or its entry file) — e.g. before publishing it
 vaso mcp scan --source ./my-mcp-server
+
+# Also check every dependency version the servers ship against OSV.dev
+vaso mcp scan --audit-deps
 ```
 
 Servers run from local files are analyzed whether they are JavaScript/TypeScript (`node server.js`) or Python (`python3 server.py`, a virtualenv interpreter, `uv run server.py`). Text files a server names in its code and reads at runtime (a `documents/` folder it returns to the model) are checked for injected instructions too. Remote servers reached through a local bridge (`npx mcp-remote <url>`, `npx supergateway --sse <url>`) get the same transport and authentication checks as `url` entries.
@@ -420,7 +424,7 @@ VASO runs **347 checks across 19 categories**.
 | Network | NET-001–005 | 5 | Gateway exposure, WebSocket origins, proxy bypass |
 | Runtime | RUN-001–005 | 5 | LaunchAgents, cron, Docker socket, VS Code trojans |
 | Policy | POL-001–005 | 5 | DM policy, tool policy, sandbox compliance |
-| MCP Server | MCP-001–035 | 35 | Transport security, credentials, tool injection, toxic flows, rug pull, OAuth 2.1, stdio shell-c, world-writable command paths, streamable-HTTP origin pinning, tool-description poisoning, cross-server tool-name collision, slash-command overlap, remote-server-without-auth, filesystem sensitive-path scope, vulnerable/rolled-back version, config drift, untrusted installer source, env-dump tool, long-lived token, prompt-injection directives in tool output, obfuscated/encoded server source (with what it hides), lookalike/typosquatted server names, credentials hardcoded in server source, servers listening on all interfaces without authentication, disabled Host/Origin (DNS-rebinding) protection; known-vulnerable MCP SDK versions a server ships with (from its lockfile, installed copy or manifest); JavaScript and Python server source; remotes behind `mcp-remote`/`supergateway`; opt-in npm package source resolution (`--resolve-packages`); direct source audit (`--source`); OWASP MCP Top 10 mapping |
+| MCP Server | MCP-001–035 | 35 | Transport security, credentials, tool injection, toxic flows, rug pull, OAuth 2.1, stdio shell-c, world-writable command paths, streamable-HTTP origin pinning, tool-description poisoning, cross-server tool-name collision, slash-command overlap, remote-server-without-auth, filesystem sensitive-path scope, vulnerable/rolled-back version, config drift, untrusted installer source, env-dump tool, long-lived token, prompt-injection directives in tool output, obfuscated/encoded server source (with what it hides), lookalike/typosquatted server names, credentials hardcoded in server source, servers listening on all interfaces without authentication, disabled Host/Origin (DNS-rebinding) protection; known-vulnerable MCP SDK and library versions a server ships with (from its lockfile, installed copy or manifest), deprecated packages, opt-in OSV.dev lookup (`--audit-deps`); tools that read, write or list any path the caller names; fetched pages and files returned unfiltered as tool results (higher when the caller picks the URL or anyone can publish on the host); JavaScript and Python server source; remotes behind `mcp-remote`/`supergateway`; opt-in npm package source resolution (`--resolve-packages`); direct source audit (`--source`); OWASP MCP Top 10 mapping |
 | Advisory | ADV-001–005 | 5 | Vulnerability/CVE detection with version awareness |
 | OpenClaw | OC-* | 6 | Sub-agent config downgrade, legacy bot dirs, `OPENCLAW_HOME` redirect, profile downgrade, memory file perms, `/etc/openclaw` writable |
 | NanoClaw | NC-001–005 | 5 | Overbroad mount allowlist (`allowedRoots`), host config/credential exposure, checkout/state exposure, webhook listener on all interfaces, skills dirs writable |
@@ -685,6 +689,7 @@ Nothing under `~/.vaso/` leaves the machine. VASO makes outbound network calls o
 
 - `vaso update` — fetches the signed IOC/advisory feeds
 - `vaso mcp scan --resolve-packages` (opt-in) — downloads npm package tarballs for source analysis; they are never executed
+- `vaso mcp scan --audit-deps` (opt-in) — sends the names and exact versions of MCP servers' dependencies to OSV.dev (no code, paths or config)
 - `--host` / `--inventory` remote scans — connect over SSH and, on first use, download the `vaso-probe` binary from GitHub Releases (SHA-256-verified, cached under `~/.vaso/probe/`)
 - IOC-008 (opt-in) — queries VirusTotal with skill-file hashes only when `VIRUSTOTAL_API_KEY` is set
 

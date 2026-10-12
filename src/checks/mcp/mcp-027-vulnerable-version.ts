@@ -6,6 +6,7 @@ import { satisfies, parseSemVer, compareSemVer } from '../../core/semver.js';
 import { defaultMcpStateStore } from '../../mcp/mcp-state-store.js';
 import { rangeEntirelyAffected } from '../../core/version-range.js';
 import type { Advisory } from '../../advisory/advisory-types.js';
+import { DEPRECATED_NPM_PACKAGES } from '../../advisory/library-advisories.js';
 
 /**
  * MCP-027 — Vulnerable / Rolled-Back MCP Version.
@@ -54,7 +55,7 @@ export const mcp027 = defineCheck({
   category: 'mcp',
   severity: 'warning',
   description:
-    'Detect MCP server packages pinned to a known-vulnerable version, rolled back below a previously-seen version, or shipping a known-vulnerable dependency such as an old MCP SDK',
+    'Detect MCP server packages pinned to a known-vulnerable version, rolled back below a previously-seen version, or shipping a known-vulnerable or deprecated dependency such as an old MCP SDK',
   supportedAgents: ['mcp'],
 
   async run(ctx, h) {
@@ -110,8 +111,14 @@ export const mcp027 = defineCheck({
 
     // 3) Packages a server ships with (its SDK and other dependencies), read
     // from the installed copy, lockfile or declared range of its project.
+    // Bundled advisories first; then, with --audit-deps, what OSV.dev lists
+    // (skipping advisories a bundled entry already reported); then packages
+    // deprecated outright.
+    let liveWarning = evidence.length > 0;
     for (const source of ctx.mcpServerSources ?? []) {
       for (const dep of source.dependencies ?? []) {
+        const shown = dep.version ? `${dep.name}@${dep.version}` : `${dep.name} ${dep.range}`;
+        const reported = new Set<string>();
         for (const adv of depAdvisories) {
           const target = adv.affectedDependency!;
           if (target.name !== dep.name || (target.ecosystem ?? 'npm') !== dep.ecosystem) continue;
@@ -120,9 +127,13 @@ export const mcp027 = defineCheck({
             : dep.range !== undefined && rangeEntirelyAffected(dep.range, dep.ecosystem, target.versionConstraint, adv.fixedVersion);
           if (!affected) continue;
 
-          const shown = dep.version ? `${dep.name}@${dep.version}` : `${dep.name} ${dep.range}`;
+          reported.add(adv.id);
+          if (adv.reference) reported.add(adv.reference.split('/').pop()!);
           const notUsed = featureNotUsed(adv, source.sourceCode);
-          if (!notUsed && adv.severity === 'critical') maxSeverity = 'critical';
+          if (!notUsed) {
+            if (adv.severity === 'critical') maxSeverity = 'critical';
+            if (adv.severity !== 'info') liveWarning = true;
+          }
           evidence.push({
             file: dep.source,
             snippet: `Server "${source.serverName}": ${shown}`,
@@ -133,13 +144,35 @@ export const mcp027 = defineCheck({
             ...(notUsed ? { mitigated: true } : {}),
           });
         }
+
+        for (const vuln of dep.vulnerabilities ?? []) {
+          if ([vuln.id, ...vuln.aliases].some((id) => reported.has(id))) continue;
+          if (vuln.severity === 'critical') maxSeverity = 'critical';
+          if (vuln.severity !== 'info') liveWarning = true;
+          evidence.push({
+            file: dep.source,
+            snippet: `Server "${source.serverName}": ${shown}`,
+            detail:
+              `${vuln.id}: server "${source.serverName}" ships ${shown}, affected by "${vuln.summary}"` +
+              ` (severity: ${vuln.severity}${vuln.fixedVersion ? `, fix: ${vuln.fixedVersion}` : ''}; OSV.dev ${vuln.reference})`,
+          });
+        }
+
+        const deprecated = dep.ecosystem === 'npm' ? DEPRECATED_NPM_PACKAGES[dep.name] : undefined;
+        if (deprecated) {
+          evidence.push({
+            file: dep.source,
+            snippet: `Server "${source.serverName}": ${shown}`,
+            detail: `server "${source.serverName}" ships ${dep.name}, which is ${deprecated} — it gets no security fixes`,
+          });
+        }
       }
     }
 
-    const allMitigated = evidence.length > 0 && evidence.every((e) => e.mitigated);
     return h.result({
       passed: evidence.length === 0,
-      severity: allMitigated ? 'info' : maxSeverity,
+      // Only mitigated matches, low-severity advisories or deprecations: info.
+      severity: liveWarning ? maxSeverity : 'info',
       message:
         evidence.length === 0
           ? 'No MCP server packages are on a known-vulnerable or rolled-back version'

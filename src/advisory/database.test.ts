@@ -5,6 +5,7 @@ import {
   reloadAdvisoryDatabase,
 } from './database.js';
 import { satisfies } from '../core/semver.js';
+import { DEPRECATED_NPM_PACKAGES, LIBRARY_ADVISORIES } from './library-advisories.js';
 
 describe('AdvisoryDatabase', () => {
   beforeEach(() => {
@@ -117,5 +118,42 @@ describe('MCP SDK advisories', () => {
   it('has unique ids across the bundle', () => {
     const ids = buildBundledAdvisoryDatabase().advisories.map((a) => a.id);
     expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  describe('library advisories', () => {
+    it('are in the bundle', () => {
+      const ids = new Set(buildBundledAdvisoryDatabase().advisories.map((a) => a.id));
+      for (const adv of LIBRARY_ADVISORIES) expect(ids.has(adv.id), adv.id).toBe(true);
+    });
+
+    it.each(LIBRARY_ADVISORIES.map((a) => [a.id, a] as const))('%s: sourced, fixes not flagged, constraint parses', (_id, adv) => {
+      expect(adv.reference).toMatch(/^https:\/\/github\.com\/advisories\/GHSA-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}$/);
+      const dep = adv.affectedDependency!;
+      expect(dep.versionConstraint).toBe(adv.affectedVersions);
+      for (const fixed of adv.fixedVersion?.split(', ') ?? []) {
+        expect(satisfies(fixed, dep.versionConstraint), `${fixed} is fixed`).toBe(false);
+      }
+      // PyPI names are PEP 503-normalized, as server-dependencies reads them.
+      if (dep.ecosystem === 'pypi') expect(dep.name).toBe(dep.name.toLowerCase().replace(/[-_.]+/g, '-'));
+      // agent 'mcp' keeps them out of agent-version checks (ADV-001/003/004).
+      expect(adv.agent).toBe('mcp');
+      expect(adv.exploitAvailable).toBeUndefined();
+    });
+
+    it('match the appsecco outdated-packages pins', () => {
+      const hits = (name: string, version: string) =>
+        LIBRARY_ADVISORIES.filter((a) => a.affectedDependency!.name === name && satisfies(version, a.affectedDependency!.versionConstraint)).map((a) => a.id);
+      expect(hits('lodash', '4.17.20')).toEqual(['CVE-2021-23337', 'CVE-2020-28500']);
+      expect(hits('ws', '7.4.6')).toEqual(['CVE-2024-37890']);
+      expect(hits('minimist', '1.2.5')).toEqual(['CVE-2021-44906']);
+      // Fixed in the pinned release: no finding.
+      expect(hits('node-fetch', '2.6.7')).toEqual([]);
+      expect(hits('lodash', '4.17.21')).toEqual([]);
+    });
+
+    it('lists only packages deprecated in every version', () => {
+      expect(Object.keys(DEPRECATED_NPM_PACKAGES)).toContain('request');
+      expect(Object.keys(DEPRECATED_NPM_PACKAGES)).not.toContain('glob');
+    });
   });
 });

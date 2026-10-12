@@ -6,7 +6,7 @@
  * without a lockfile evidence of a vulnerable install.
  */
 
-import { compareSemVer, parseSemVer, satisfies } from './semver.js';
+import { compareSemVer, constraintBranches, parseSemVer, satisfies } from './semver.js';
 
 export interface VersionBounds {
   /** Lowest admitted version (inclusive); '0.0.0' when unbounded below. */
@@ -118,7 +118,10 @@ export function exactVersion(spec: string): string | undefined {
 /**
  * Whether every version a range admits falls inside an affected constraint:
  * the lowest admitted version is affected, and the range ends at or below the
- * first fixed release (or its inclusive top is itself affected).
+ * first fixed release (or its inclusive top is itself affected). With several
+ * affected branches (`… || …`), the range must sit inside one of them, bounded
+ * by that branch's own upper comparator — one fixed version can't speak for
+ * every release line.
  */
 export function rangeEntirelyAffected(
   range: string,
@@ -128,10 +131,32 @@ export function rangeEntirelyAffected(
 ): boolean {
   const bounds = rangeBounds(range, ecosystem);
   if (!bounds) return false;
+  const branches = constraintBranches(affected);
+  if (branches.length > 1) {
+    return branches.some((branch) => withinBranch(bounds, branch, branchUpperBound(branch)));
+  }
+  return withinBranch(bounds, affected, fixedVersion);
+}
+
+function withinBranch(bounds: VersionBounds, affected: string, fixedVersion: string | undefined): boolean {
   if (!satisfies(bounds.min, affected)) return false;
   if (bounds.maxInclusive) return satisfies(bounds.maxInclusive, affected);
   if (!bounds.maxExclusive || !fixedVersion) return false;
   const top = parseSemVer(bounds.maxExclusive);
   const fixed = parseSemVer(fixedVersion);
   return Boolean(top && fixed && compareSemVer(top, fixed) <= 0);
+}
+
+/** `>=7.0.0 <7.5.10` → `7.5.10`; `<=2.88.2` → `2.88.3`; undefined when unbounded above. */
+function branchUpperBound(branch: string): string | undefined {
+  for (const token of branch.split(/\s+/)) {
+    const lt = /^<(\d.*)$/.exec(token);
+    if (lt) return full(lt[1]);
+    const le = /^<=(\d.*)$/.exec(token);
+    if (le) {
+      const v = full(le[1]);
+      return v ? bump(v, 'patch') : undefined;
+    }
+  }
+  return undefined;
 }

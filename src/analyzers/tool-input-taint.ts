@@ -1,7 +1,7 @@
 /**
- * Tool-input → code/command sink tracing for JavaScript MCP server source
- * (MCP-005). A sink call (`eval`, `Function`, `vm.run*`, child_process
- * `exec`/`spawn`/…) is reported only when one of its arguments is derived from
+ * Tool-input → sink tracing for JavaScript MCP server source (MCP-005,
+ * MCP-009). A sink call (`eval`, `Function`, `vm.run*`, child_process
+ * `exec`/`spawn`/…, an `fs` call's path) is reported only when one of its arguments is derived from
  * tool input: a parameter of a tool handler (`server.tool(…, handler)`,
  * `registerTool`, `setRequestHandler(…, handler)`) or a parameter
  * conventionally named for input (`request`, `args`, `params`, …), followed
@@ -28,7 +28,14 @@ export interface TaintedSink {
   sink: string;
   /** How the argument reaches tool input, e.g. `format ← request`. */
   origin: string;
+  /**
+   * `code`/`process`: the input runs. `file-read`/`file-write`: it names the
+   * file read or written; `file-meta`: the path listed, stat'ed or probed.
+   */
+  kind: SinkKind;
 }
+
+export type SinkKind = 'code' | 'process' | 'file-read' | 'file-write' | 'file-meta';
 
 /**
  * Parameter names that mean tool/request input wherever they appear. Generic
@@ -44,6 +51,22 @@ const HANDLER_REGISTRARS = new Set(['tool', 'registerTool', 'setRequestHandler']
 const CODE_SINKS = new Set(['eval', 'Function']);
 const PROCESS_SINKS = new Set(['exec', 'execSync', 'spawn', 'spawnSync', 'execFile', 'execFileSync']);
 const VM_SINKS = new Set(['runInNewContext', 'runInThisContext', 'runInContext', 'compileFunction']);
+/** fs calls by what they do with their path argument(s). */
+export const FS_CALLS: Record<string, { kind: 'file-read' | 'file-write' | 'file-meta'; paths: number }> = {
+  ...Object.fromEntries(['readFile', 'readFileSync', 'createReadStream', 'open', 'openSync', 'readJson', 'readJsonSync']
+    .map((n) => [n, { kind: 'file-read' as const, paths: 1 }])),
+  ...Object.fromEntries(['writeFile', 'writeFileSync', 'appendFile', 'appendFileSync', 'createWriteStream', 'rm', 'rmSync',
+    'rmdir', 'rmdirSync', 'unlink', 'unlinkSync', 'mkdir', 'mkdirSync', 'chmod', 'chmodSync', 'truncate', 'truncateSync',
+    'outputFile', 'outputFileSync', 'writeJson', 'writeJsonSync', 'remove', 'removeSync']
+    .map((n) => [n, { kind: 'file-write' as const, paths: 1 }])),
+  ...Object.fromEntries(['rename', 'renameSync', 'copyFile', 'copyFileSync', 'cp', 'cpSync', 'symlink', 'symlinkSync', 'link', 'linkSync', 'copy', 'move']
+    .map((n) => [n, { kind: 'file-write' as const, paths: 2 }])),
+  ...Object.fromEntries(['readdir', 'readdirSync', 'opendir', 'opendirSync', 'stat', 'statSync', 'lstat', 'lstatSync',
+    'access', 'accessSync', 'exists', 'existsSync', 'realpath', 'realpathSync', 'pathExists', 'pathExistsSync']
+    .map((n) => [n, { kind: 'file-meta' as const, paths: 1 }])),
+};
+export const FS_MODULE = /^(?:node:)?fs(?:\/promises)?$|^(?:fs-extra|graceful-fs)$/;
+const FS_NAMES = new Set(['fs', 'fsp', 'fsPromises', 'fse']);
 const SHELLS = /^(?:\/(?:usr\/)?bin\/)?(?:sh|bash|zsh|dash|cmd(?:\.exe)?|powershell(?:\.exe)?|pwsh)$/i;
 const CHILD_PROCESS_NAMES = new Set(['child_process', 'childProcess', 'cp']);
 
@@ -64,7 +87,7 @@ export function findTaintedSinks(code: string, filename = 'unknown.js'): Tainted
 }
 
 /** Module specifier a binding was imported/required from, if any. */
-function bindingModule(binding: Binding | undefined): string | undefined {
+export function bindingModule(binding: Binding | undefined): string | undefined {
   if (!binding) return undefined;
   const parent = binding.path.parentPath?.node;
   if (parent?.type === 'ImportDeclaration') return parent.source.value;
@@ -82,6 +105,30 @@ function isChildProcess(path: NodePath, name: string): boolean {
   const mod = bindingModule(path.scope.getBinding(name));
   if (mod) return mod === 'child_process' || mod === 'node:child_process';
   return CHILD_PROCESS_NAMES.has(name);
+}
+
+/** `fs`, `fsp`, `import { promises as fs } from 'fs'`, `fs.promises`. */
+export function isFsObject(path: NodePath, object: Node): boolean {
+  if (object.type === 'MemberExpression') {
+    return object.property.type === 'Identifier' && object.property.name === 'promises' && isFsObject(path, object.object);
+  }
+  if (object.type !== 'Identifier') return false;
+  const binding = path.scope.getBinding(object.name);
+  const mod = bindingModule(binding);
+  if (mod) return FS_MODULE.test(mod);
+  return !binding && FS_NAMES.has(object.name);
+}
+
+/**
+ * Evidence that the file confines caller-named paths to a base directory: a
+ * path is resolved (`path.resolve`, `realpath`, `normalize`) and compared
+ * against a base (`.startsWith(base)`, `path.relative`, an is-inside helper).
+ * Same file-level rule as the Python analyzer.
+ */
+export function confinesPaths(code: string): boolean {
+  const resolves = /\b(?:resolve|realpath(?:Sync)?|normalize)\s*\(/.test(code);
+  const confines = /\.startsWith\s*\(\s*(?!["'`])|\bpath\.relative\s*\(|\bis(?:Path)?(?:Inside|Within|Subdir|SubPath)\w*\s*\(/i.test(code);
+  return resolves && confines;
 }
 
 function analyze(code: string): TaintedSink[] {
@@ -169,13 +216,13 @@ function analyze(code: string): TaintedSink[] {
       return found;
     };
 
-    const report = (path: NodePath<Node>, sink: string, candidates: NodePath[]): void => {
+    const report = (path: NodePath<Node>, sink: string, candidates: NodePath[], kind: SinkKind): void => {
       for (const arg of candidates) {
         if (!arg.node) continue;
         const origin = expressionOrigin(arg, 0);
         if (origin) {
           const line = path.node.loc?.start.line ?? 0;
-          results.push({ line, snippet: lineText(line).slice(0, 120), sink, origin });
+          results.push({ line, snippet: lineText(line).slice(0, 120), sink, origin, kind });
           return;
         }
       }
@@ -217,21 +264,32 @@ function analyze(code: string): TaintedSink[] {
         const args = path.get('arguments') as NodePath[];
 
         if (callee.type === 'Identifier') {
-          if (CODE_SINKS.has(callee.name)) return report(path, callee.name, args);
+          if (CODE_SINKS.has(callee.name)) return report(path, callee.name, args, 'code');
           if (PROCESS_SINKS.has(callee.name) && path.isCallExpression()) {
-            return report(path, callee.name, processArgs(callee.name, args));
+            return report(path, callee.name, processArgs(callee.name, args), 'process');
+          }
+          // `import { readFile } from 'fs/promises'`, `const { stat } = require('fs')`
+          const fsCall = FS_CALLS[callee.name];
+          if (fsCall && FS_MODULE.test(bindingModule(path.scope.getBinding(callee.name)) ?? '')) {
+            return report(path, callee.name, args.slice(0, fsCall.paths), fsCall.kind);
           }
           return;
         }
 
-        if (callee.type === 'MemberExpression' && callee.object.type === 'Identifier' && callee.property.type === 'Identifier') {
-          const obj = callee.object.name;
+        if (callee.type === 'MemberExpression' && callee.property.type === 'Identifier') {
           const prop = callee.property.name;
+          const fsCall = FS_CALLS[prop];
+          if (fsCall && isFsObject(path, callee.object)) {
+            const shown = callee.object.type === 'Identifier' ? callee.object.name : 'fs.promises';
+            return report(path, `${shown}.${prop}`, args.slice(0, fsCall.paths), fsCall.kind);
+          }
+          if (callee.object.type !== 'Identifier') return;
+          const obj = callee.object.name;
           if (PROCESS_SINKS.has(prop) && isChildProcess(path, obj)) {
-            return report(path, `${obj}.${prop}`, processArgs(prop, args));
+            return report(path, `${obj}.${prop}`, processArgs(prop, args), 'process');
           }
           if ((VM_SINKS.has(prop) || prop === 'Script') && (obj === 'vm' || bindingModule(path.scope.getBinding(obj))?.endsWith('vm'))) {
-            return report(path, `${obj}.${prop}`, args);
+            return report(path, `${obj}.${prop}`, args, 'code');
           }
         }
       },
@@ -264,7 +322,7 @@ function processArgs(sink: string, args: NodePath[]): NodePath[] {
  * declaration / function-valued variable called by name, or a method of the
  * enclosing class called through `this`.
  */
-function localCallees(path: NodePath): Node[] {
+export function localCallees(path: NodePath): Node[] {
   if (!path.isCallExpression()) return [];
   const callee = path.node.callee;
   if (callee.type === 'Identifier') {

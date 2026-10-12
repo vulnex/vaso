@@ -51,17 +51,26 @@ const FILE_MARKER = /^\/\/ === .+ ===$/;
  * `// === path ===` headers). Joined ES modules don't parse as one program —
  * duplicate top-level names, mixed module types — so each file is parsed on
  * its own. Single-file source is one chunk.
+ *
+ * A bin file's `#!/usr/bin/env node` lands on the line after its header, where
+ * it is a syntax error (a hashbang is only legal on line 1) and the whole file
+ * fails to parse; it is turned into a comment of the same length.
  */
 export function sourceChunks(code: string): SourceChunk[] {
   const lines = code.split('\n');
   const chunks: SourceChunk[] = [];
+  const chunk = (from: number, to: number): SourceChunk => {
+    const part = lines.slice(from, to);
+    if (FILE_MARKER.test(part[0] ?? '') && part[1]?.startsWith('#!')) part[1] = `//${part[1].slice(2)}`;
+    return { startLine: from + 1, code: part.join('\n') };
+  };
   let start = 0;
   for (let i = 0; i < lines.length; i++) {
     if (i > start && FILE_MARKER.test(lines[i])) {
-      chunks.push({ startLine: start + 1, code: lines.slice(start, i).join('\n') });
+      chunks.push(chunk(start, i));
       start = i;
     }
   }
-  chunks.push({ startLine: start + 1, code: lines.slice(start).join('\n') });
+  chunks.push(chunk(start, lines.length));
   return chunks;
 }
