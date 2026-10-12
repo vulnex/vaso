@@ -1,8 +1,8 @@
 {
   "meta": {
-    "version": 8,
-    "timestamp": "2026-10-11T00:00:00.000Z",
-    "description": "VASO advisory feed v8 (cumulative over v7) — adds 10 MCP SDK advisories from the GitHub Advisory Database: 4 for the TypeScript SDK @modelcontextprotocol/sdk (CVE-2025-66414, CVE-2026-0621, CVE-2026-25536, CVE-2026-104850) and 6 for the Python SDK mcp on PyPI (CVE-2025-66416, CVE-2026-52869, CVE-2026-52870, CVE-2026-59950, CVE-2025-53366, CVE-2025-53365). Introduces affectedDependency.ecosystem and appliesWhen, ignored by older clients. Retains all v7 advisories."
+    "version": 9,
+    "timestamp": "2026-10-12T00:00:00.000Z",
+    "description": "VASO advisory feed v9 (cumulative over v8) — adds 35 library advisories from the GitHub Advisory Database for packages MCP servers commonly ship (26 npm: lodash, axios, minimist, handlebars, jsonwebtoken, ws, moment, request, express, body-parser, socket.io, xml2js, validator, multer, async; 9 PyPI: requests, jinja2, urllib3, pyyaml, starlette, h11, aiohttp), matched by MCP-027 against a server's dependencies. Advisories spanning several release lines use || constraints, which clients before the release that understands them treat as no match. Retains all v8 advisories."
   },
   "data": {
     "advisories": [
@@ -2309,6 +2309,714 @@
         "appliesWhen": {
           "sourcePattern": "streamable_http_app|StreamableHTTPSessionManager|transport\\s*=\\s*[\"'](?:streamable-http|http)[\"']",
           "usage": "the Streamable HTTP transport"
+        }
+      },
+      {
+        "id": "CVE-2021-23337",
+        "title": "Command injection in lodash",
+        "agent": "mcp",
+        "affectedVersions": "<4.17.21",
+        "fixedVersion": "4.17.21",
+        "severity": "warning",
+        "description": "lodash.template() compiles the `variable` option and imports into the template function unescaped, so attacker-influenced template options run as code.",
+        "reference": "https://github.com/advisories/GHSA-35jh-r3h4-6jhm",
+        "published": "2021-05-06",
+        "tags": [
+          "dependency",
+          "cve",
+          "npm"
+        ],
+        "affectedDependency": {
+          "name": "lodash",
+          "versionConstraint": "<4.17.21"
+        }
+      },
+      {
+        "id": "CVE-2020-28500",
+        "title": "Regular expression denial of service in lodash",
+        "agent": "mcp",
+        "affectedVersions": ">=4.0.0 <4.17.21",
+        "fixedVersion": "4.17.21",
+        "severity": "warning",
+        "description": "toNumber, trim and trimEnd backtrack catastrophically on crafted input, pinning the CPU.",
+        "reference": "https://github.com/advisories/GHSA-29mw-wpgm-hmr9",
+        "published": "2022-01-06",
+        "tags": [
+          "dependency",
+          "cve",
+          "npm"
+        ],
+        "affectedDependency": {
+          "name": "lodash",
+          "versionConstraint": ">=4.0.0 <4.17.21"
+        }
+      },
+      {
+        "id": "CVE-2020-8203",
+        "title": "Prototype pollution in lodash",
+        "agent": "mcp",
+        "affectedVersions": ">=3.7.0 <4.17.19",
+        "fixedVersion": "4.17.19",
+        "severity": "warning",
+        "description": "zipObjectDeep() writes through `__proto__` paths, letting crafted keys modify Object.prototype.",
+        "reference": "https://github.com/advisories/GHSA-p6mc-m468-83gw",
+        "published": "2020-07-15",
+        "tags": [
+          "dependency",
+          "cve",
+          "npm"
+        ],
+        "affectedDependency": {
+          "name": "lodash",
+          "versionConstraint": ">=3.7.0 <4.17.19"
+        }
+      },
+      {
+        "id": "CVE-2021-3749",
+        "title": "Regular expression denial of service in axios",
+        "agent": "mcp",
+        "affectedVersions": "<0.21.2",
+        "fixedVersion": "0.21.2",
+        "severity": "warning",
+        "description": "The trim() helper backtracks catastrophically on crafted header or response content.",
+        "reference": "https://github.com/advisories/GHSA-cph5-m8f7-6c5x",
+        "published": "2021-09-01",
+        "tags": [
+          "dependency",
+          "cve",
+          "npm"
+        ],
+        "affectedDependency": {
+          "name": "axios",
+          "versionConstraint": "<0.21.2"
+        }
+      },
+      {
+        "id": "CVE-2023-45857",
+        "title": "axios leaks the XSRF-TOKEN to third-party hosts",
+        "agent": "mcp",
+        "affectedVersions": ">=0.8.1 <0.28.0 || >=1.0.0 <1.6.0",
+        "fixedVersion": "0.28.0, 1.6.0",
+        "severity": "warning",
+        "description": "The XSRF-TOKEN cookie value is sent in the X-XSRF-TOKEN header with every request, including requests to other hosts.",
+        "reference": "https://github.com/advisories/GHSA-wf5p-g6vw-rhxx",
+        "published": "2023-11-08",
+        "tags": [
+          "dependency",
+          "cve",
+          "npm"
+        ],
+        "affectedDependency": {
+          "name": "axios",
+          "versionConstraint": ">=0.8.1 <0.28.0 || >=1.0.0 <1.6.0"
+        }
+      },
+      {
+        "id": "CVE-2025-27152",
+        "title": "axios SSRF and credential leakage via absolute URLs",
+        "agent": "mcp",
+        "affectedVersions": "<0.30.0 || >=1.0.0 <1.8.2",
+        "fixedVersion": "0.30.0, 1.8.2",
+        "severity": "warning",
+        "description": "An absolute URL passed to a client configured with baseURL is requested as-is, so headers and credentials meant for the base host go to an attacker-chosen host.",
+        "reference": "https://github.com/advisories/GHSA-jr5f-v2jv-69x6",
+        "published": "2025-03-07",
+        "tags": [
+          "dependency",
+          "cve",
+          "npm"
+        ],
+        "affectedDependency": {
+          "name": "axios",
+          "versionConstraint": "<0.30.0 || >=1.0.0 <1.8.2"
+        }
+      },
+      {
+        "id": "CVE-2025-58754",
+        "title": "axios denial of service through unbounded data: URIs",
+        "agent": "mcp",
+        "affectedVersions": ">=0.28.0 <0.30.2 || >=1.0.0 <1.12.0",
+        "fixedVersion": "0.30.2, 1.12.0",
+        "severity": "warning",
+        "description": "A data: URI is decoded into memory without honoring maxContentLength, so a crafted URL exhausts memory.",
+        "reference": "https://github.com/advisories/GHSA-4hjh-wcwx-xvwj",
+        "published": "2025-09-11",
+        "tags": [
+          "dependency",
+          "cve",
+          "npm"
+        ],
+        "affectedDependency": {
+          "name": "axios",
+          "versionConstraint": ">=0.28.0 <0.30.2 || >=1.0.0 <1.12.0"
+        }
+      },
+      {
+        "id": "CVE-2021-44906",
+        "title": "Prototype pollution in minimist",
+        "agent": "mcp",
+        "affectedVersions": "<0.2.4 || >=1.0.0 <1.2.6",
+        "fixedVersion": "0.2.4, 1.2.6",
+        "severity": "critical",
+        "description": "Crafted arguments (`--__proto__.x`, constructor paths) modify Object.prototype.",
+        "reference": "https://github.com/advisories/GHSA-xvch-5gv4-984h",
+        "published": "2022-03-18",
+        "tags": [
+          "dependency",
+          "cve",
+          "npm"
+        ],
+        "affectedDependency": {
+          "name": "minimist",
+          "versionConstraint": "<0.2.4 || >=1.0.0 <1.2.6"
+        }
+      },
+      {
+        "id": "CVE-2021-23369",
+        "title": "Remote code execution in handlebars when compiling templates",
+        "agent": "mcp",
+        "affectedVersions": "<4.7.7",
+        "fixedVersion": "4.7.7",
+        "severity": "critical",
+        "description": "Compiling an attacker-supplied template with the strict/compat options runs arbitrary code.",
+        "reference": "https://github.com/advisories/GHSA-f2jv-r9rf-7988",
+        "published": "2021-05-06",
+        "tags": [
+          "dependency",
+          "cve",
+          "npm"
+        ],
+        "affectedDependency": {
+          "name": "handlebars",
+          "versionConstraint": "<4.7.7"
+        }
+      },
+      {
+        "id": "CVE-2021-23383",
+        "title": "Prototype pollution in handlebars",
+        "agent": "mcp",
+        "affectedVersions": "<4.7.7",
+        "fixedVersion": "4.7.7",
+        "severity": "critical",
+        "description": "Compiling a crafted template can modify Object.prototype and lead to code execution.",
+        "reference": "https://github.com/advisories/GHSA-765h-qjxv-5f44",
+        "published": "2022-02-10",
+        "tags": [
+          "dependency",
+          "cve",
+          "npm"
+        ],
+        "affectedDependency": {
+          "name": "handlebars",
+          "versionConstraint": "<4.7.7"
+        }
+      },
+      {
+        "id": "CVE-2022-23540",
+        "title": "jsonwebtoken signature validation bypass via the default algorithm",
+        "agent": "mcp",
+        "affectedVersions": "<9.0.0",
+        "fixedVersion": "9.0.0",
+        "severity": "warning",
+        "description": "jwt.verify() without an explicit algorithms list accepts the `none` algorithm when no secret is passed, so unsigned tokens verify.",
+        "reference": "https://github.com/advisories/GHSA-qwph-4952-7xr6",
+        "published": "2022-12-22",
+        "tags": [
+          "dependency",
+          "cve",
+          "npm"
+        ],
+        "affectedDependency": {
+          "name": "jsonwebtoken",
+          "versionConstraint": "<9.0.0"
+        }
+      },
+      {
+        "id": "CVE-2022-23541",
+        "title": "jsonwebtoken forgeable tokens through key confusion",
+        "agent": "mcp",
+        "affectedVersions": "<=8.5.1",
+        "fixedVersion": "9.0.0",
+        "severity": "warning",
+        "description": "A key-retrieval function that can return either a public or a secret key lets an HS256 token signed with the public key verify.",
+        "reference": "https://github.com/advisories/GHSA-hjrf-2m68-5959",
+        "published": "2022-12-22",
+        "tags": [
+          "dependency",
+          "cve",
+          "npm"
+        ],
+        "affectedDependency": {
+          "name": "jsonwebtoken",
+          "versionConstraint": "<=8.5.1"
+        }
+      },
+      {
+        "id": "CVE-2022-23539",
+        "title": "jsonwebtoken accepts legacy, insecure key types",
+        "agent": "mcp",
+        "affectedVersions": "<=8.5.1",
+        "fixedVersion": "9.0.0",
+        "severity": "warning",
+        "description": "Legacy keys such as DSA are accepted for signing and verification.",
+        "reference": "https://github.com/advisories/GHSA-8cf7-32gw-wr33",
+        "published": "2022-12-22",
+        "tags": [
+          "dependency",
+          "cve",
+          "npm"
+        ],
+        "affectedDependency": {
+          "name": "jsonwebtoken",
+          "versionConstraint": "<=8.5.1"
+        }
+      },
+      {
+        "id": "CVE-2024-37890",
+        "title": "ws denial of service with many HTTP headers",
+        "agent": "mcp",
+        "affectedVersions": ">=2.1.0 <5.2.4 || >=6.0.0 <6.2.3 || >=7.0.0 <7.5.10 || >=8.0.0 <8.17.1",
+        "fixedVersion": "5.2.4, 6.2.3, 7.5.10, 8.17.1",
+        "severity": "warning",
+        "description": "An upgrade request whose header count exceeds server.maxHeadersCount crashes a ws server.",
+        "reference": "https://github.com/advisories/GHSA-3h5v-q93c-6h6q",
+        "published": "2024-06-17",
+        "tags": [
+          "dependency",
+          "cve",
+          "npm"
+        ],
+        "affectedDependency": {
+          "name": "ws",
+          "versionConstraint": ">=2.1.0 <5.2.4 || >=6.0.0 <6.2.3 || >=7.0.0 <7.5.10 || >=8.0.0 <8.17.1"
+        }
+      },
+      {
+        "id": "CVE-2022-24785",
+        "title": "Path traversal in moment.locale",
+        "agent": "mcp",
+        "affectedVersions": "<2.29.2",
+        "fixedVersion": "2.29.2",
+        "severity": "warning",
+        "description": "A user-controlled locale string (`../../file`) loads an arbitrary file as a locale module.",
+        "reference": "https://github.com/advisories/GHSA-8hfj-j24r-96c4",
+        "published": "2022-04-04",
+        "tags": [
+          "dependency",
+          "cve",
+          "npm"
+        ],
+        "affectedDependency": {
+          "name": "moment",
+          "versionConstraint": "<2.29.2"
+        }
+      },
+      {
+        "id": "CVE-2022-31129",
+        "title": "Regular expression denial of service in moment",
+        "agent": "mcp",
+        "affectedVersions": ">=2.18.0 <2.29.4",
+        "fixedVersion": "2.29.4",
+        "severity": "warning",
+        "description": "RFC 2822 date parsing is quadratic on long crafted input.",
+        "reference": "https://github.com/advisories/GHSA-wc69-rhjr-hc9g",
+        "published": "2022-07-06",
+        "tags": [
+          "dependency",
+          "cve",
+          "npm"
+        ],
+        "affectedDependency": {
+          "name": "moment",
+          "versionConstraint": ">=2.18.0 <2.29.4"
+        }
+      },
+      {
+        "id": "CVE-2023-28155",
+        "title": "Server-side request forgery in request (deprecated, no fix)",
+        "agent": "mcp",
+        "affectedVersions": "<=2.88.2",
+        "severity": "warning",
+        "description": "A cross-protocol redirect bypasses SSRF protections. request is deprecated and will not be fixed; move to fetch, undici or axios.",
+        "reference": "https://github.com/advisories/GHSA-p8p7-x288-28g6",
+        "published": "2023-03-16",
+        "tags": [
+          "dependency",
+          "cve",
+          "npm"
+        ],
+        "affectedDependency": {
+          "name": "request",
+          "versionConstraint": "<=2.88.2"
+        }
+      },
+      {
+        "id": "CVE-2024-29041",
+        "title": "Open redirect in express with malformed URLs",
+        "agent": "mcp",
+        "affectedVersions": "<4.19.2",
+        "fixedVersion": "4.19.2",
+        "severity": "warning",
+        "description": "res.location()/res.redirect() encode a user-supplied URL so that allow-list checks on it are bypassed.",
+        "reference": "https://github.com/advisories/GHSA-rv95-896h-c2vc",
+        "published": "2024-03-25",
+        "tags": [
+          "dependency",
+          "cve",
+          "npm"
+        ],
+        "affectedDependency": {
+          "name": "express",
+          "versionConstraint": "<4.19.2"
+        }
+      },
+      {
+        "id": "CVE-2024-43796",
+        "title": "XSS via response.redirect() in express",
+        "agent": "mcp",
+        "affectedVersions": "<4.20.0",
+        "fixedVersion": "4.20.0",
+        "severity": "info",
+        "description": "Untrusted input passed to res.redirect() can execute script in the redirect page.",
+        "reference": "https://github.com/advisories/GHSA-qw6h-vgh9-j6wx",
+        "published": "2024-09-10",
+        "tags": [
+          "dependency",
+          "cve",
+          "npm"
+        ],
+        "affectedDependency": {
+          "name": "express",
+          "versionConstraint": "<4.20.0"
+        }
+      },
+      {
+        "id": "CVE-2024-45590",
+        "title": "body-parser denial of service with URL encoding enabled",
+        "agent": "mcp",
+        "affectedVersions": "<1.20.3",
+        "fixedVersion": "1.20.3",
+        "severity": "warning",
+        "description": "A crafted urlencoded body floods the parser, denying service.",
+        "reference": "https://github.com/advisories/GHSA-qwcr-r2fm-qrc7",
+        "published": "2024-09-10",
+        "tags": [
+          "dependency",
+          "cve",
+          "npm"
+        ],
+        "affectedDependency": {
+          "name": "body-parser",
+          "versionConstraint": "<1.20.3"
+        }
+      },
+      {
+        "id": "CVE-2024-38355",
+        "title": "socket.io crashes on an unhandled error event",
+        "agent": "mcp",
+        "affectedVersions": "<2.5.1 || >=3.0.0 <4.6.2",
+        "fixedVersion": "2.5.1, 4.6.2",
+        "severity": "warning",
+        "description": "A specially crafted packet triggers an uncaught exception that kills the server process.",
+        "reference": "https://github.com/advisories/GHSA-25hc-qcg6-38wj",
+        "published": "2024-06-19",
+        "tags": [
+          "dependency",
+          "cve",
+          "npm"
+        ],
+        "affectedDependency": {
+          "name": "socket.io",
+          "versionConstraint": "<2.5.1 || >=3.0.0 <4.6.2"
+        }
+      },
+      {
+        "id": "CVE-2023-0842",
+        "title": "Prototype pollution in xml2js",
+        "agent": "mcp",
+        "affectedVersions": "<0.5.0",
+        "fixedVersion": "0.5.0",
+        "severity": "warning",
+        "description": "Parsing crafted XML lets an attacker edit or add properties of the resulting object prototype.",
+        "reference": "https://github.com/advisories/GHSA-776f-qx25-q3cc",
+        "published": "2023-04-05",
+        "tags": [
+          "dependency",
+          "cve",
+          "npm"
+        ],
+        "affectedDependency": {
+          "name": "xml2js",
+          "versionConstraint": "<0.5.0"
+        }
+      },
+      {
+        "id": "CVE-2021-3765",
+        "title": "Regular expression denial of service in validator",
+        "agent": "mcp",
+        "affectedVersions": "<13.7.0",
+        "fixedVersion": "13.7.0",
+        "severity": "warning",
+        "description": "rtrim() backtracks catastrophically on crafted input.",
+        "reference": "https://github.com/advisories/GHSA-qgmg-gppg-76g5",
+        "published": "2021-11-03",
+        "tags": [
+          "dependency",
+          "cve",
+          "npm"
+        ],
+        "affectedDependency": {
+          "name": "validator",
+          "versionConstraint": "<13.7.0"
+        }
+      },
+      {
+        "id": "CVE-2025-47935",
+        "title": "multer denial of service via memory leaks",
+        "agent": "mcp",
+        "affectedVersions": "<2.0.0",
+        "fixedVersion": "2.0.0",
+        "severity": "warning",
+        "description": "Streams left open on aborted uploads leak memory and file descriptors until the server is exhausted. Multer 1.x is deprecated.",
+        "reference": "https://github.com/advisories/GHSA-44fp-w29j-9vj5",
+        "published": "2025-05-19",
+        "tags": [
+          "dependency",
+          "cve",
+          "npm"
+        ],
+        "affectedDependency": {
+          "name": "multer",
+          "versionConstraint": "<2.0.0"
+        }
+      },
+      {
+        "id": "CVE-2025-47944",
+        "title": "multer denial of service from malformed multipart requests",
+        "agent": "mcp",
+        "affectedVersions": ">=1.4.4-lts.1 <2.0.0",
+        "fixedVersion": "2.0.0",
+        "severity": "warning",
+        "description": "A malformed multipart upload crashes the process with an unhandled exception.",
+        "reference": "https://github.com/advisories/GHSA-4pg4-qvpc-4q3h",
+        "published": "2025-05-19",
+        "tags": [
+          "dependency",
+          "cve",
+          "npm"
+        ],
+        "affectedDependency": {
+          "name": "multer",
+          "versionConstraint": ">=1.4.4-lts.1 <2.0.0"
+        }
+      },
+      {
+        "id": "CVE-2021-43138",
+        "title": "Prototype pollution in async",
+        "agent": "mcp",
+        "affectedVersions": ">=2.0.0 <2.6.4 || >=3.0.0 <3.2.2",
+        "fixedVersion": "2.6.4, 3.2.2",
+        "severity": "warning",
+        "description": "mapValues() lets crafted input modify Object.prototype.",
+        "reference": "https://github.com/advisories/GHSA-fwr7-v2mv-hh25",
+        "published": "2022-04-07",
+        "tags": [
+          "dependency",
+          "cve",
+          "npm"
+        ],
+        "affectedDependency": {
+          "name": "async",
+          "versionConstraint": ">=2.0.0 <2.6.4 || >=3.0.0 <3.2.2"
+        }
+      },
+      {
+        "id": "CVE-2024-35195",
+        "title": "requests keeps verify=False for later requests in a Session",
+        "agent": "mcp",
+        "affectedVersions": "<2.32.0",
+        "fixedVersion": "2.32.0",
+        "severity": "warning",
+        "description": "Once a Session makes a request with verify=False, later requests to the same host skip certificate verification too.",
+        "reference": "https://github.com/advisories/GHSA-9wx4-h78v-vm56",
+        "published": "2024-05-20",
+        "tags": [
+          "dependency",
+          "cve",
+          "pypi"
+        ],
+        "affectedDependency": {
+          "name": "requests",
+          "versionConstraint": "<2.32.0",
+          "ecosystem": "pypi"
+        }
+      },
+      {
+        "id": "CVE-2023-32681",
+        "title": "requests leaks Proxy-Authorization to destination servers",
+        "agent": "mcp",
+        "affectedVersions": ">=2.3.0 <2.31.0",
+        "fixedVersion": "2.31.0",
+        "severity": "warning",
+        "description": "Proxy credentials are forwarded to the destination server on HTTPS redirects.",
+        "reference": "https://github.com/advisories/GHSA-j8r2-6x86-q33q",
+        "published": "2023-05-22",
+        "tags": [
+          "dependency",
+          "cve",
+          "pypi"
+        ],
+        "affectedDependency": {
+          "name": "requests",
+          "versionConstraint": ">=2.3.0 <2.31.0",
+          "ecosystem": "pypi"
+        }
+      },
+      {
+        "id": "CVE-2024-56326",
+        "title": "Jinja sandbox breakout through an indirect reference to format",
+        "agent": "mcp",
+        "affectedVersions": "<=3.1.4",
+        "fixedVersion": "3.1.5",
+        "severity": "warning",
+        "description": "A template rendered in the sandbox can reach str.format indirectly and run arbitrary Python.",
+        "reference": "https://github.com/advisories/GHSA-q2x7-8rv6-6q7h",
+        "published": "2024-12-23",
+        "tags": [
+          "dependency",
+          "cve",
+          "pypi"
+        ],
+        "affectedDependency": {
+          "name": "jinja2",
+          "versionConstraint": "<=3.1.4",
+          "ecosystem": "pypi"
+        }
+      },
+      {
+        "id": "CVE-2025-27516",
+        "title": "Jinja sandbox breakout through the attr filter",
+        "agent": "mcp",
+        "affectedVersions": "<=3.1.5",
+        "fixedVersion": "3.1.6",
+        "severity": "warning",
+        "description": "The |attr filter can select the format method of a string, escaping the sandbox to run arbitrary Python.",
+        "reference": "https://github.com/advisories/GHSA-cpwx-vrp4-4pq7",
+        "published": "2025-03-05",
+        "tags": [
+          "dependency",
+          "cve",
+          "pypi"
+        ],
+        "affectedDependency": {
+          "name": "jinja2",
+          "versionConstraint": "<=3.1.5",
+          "ecosystem": "pypi"
+        }
+      },
+      {
+        "id": "CVE-2024-37891",
+        "title": "urllib3 keeps Proxy-Authorization on cross-origin redirects",
+        "agent": "mcp",
+        "affectedVersions": "<1.26.19 || >=2.0.0 <2.2.2",
+        "fixedVersion": "1.26.19, 2.2.2",
+        "severity": "warning",
+        "description": "A Proxy-Authorization header set by hand is not stripped when a redirect crosses origins.",
+        "reference": "https://github.com/advisories/GHSA-34jh-p97f-mpxf",
+        "published": "2024-06-17",
+        "tags": [
+          "dependency",
+          "cve",
+          "pypi"
+        ],
+        "affectedDependency": {
+          "name": "urllib3",
+          "versionConstraint": "<1.26.19 || >=2.0.0 <2.2.2",
+          "ecosystem": "pypi"
+        }
+      },
+      {
+        "id": "CVE-2020-14343",
+        "title": "Arbitrary code execution when PyYAML loads untrusted YAML",
+        "agent": "mcp",
+        "affectedVersions": "<5.4.0",
+        "fixedVersion": "5.4.0",
+        "severity": "critical",
+        "description": "yaml.full_load / FullLoader construct arbitrary Python objects from crafted YAML (an incomplete fix for CVE-2020-1747).",
+        "reference": "https://github.com/advisories/GHSA-8q59-q68h-6hv4",
+        "published": "2021-03-25",
+        "tags": [
+          "dependency",
+          "cve",
+          "pypi"
+        ],
+        "affectedDependency": {
+          "name": "pyyaml",
+          "versionConstraint": "<5.4.0",
+          "ecosystem": "pypi"
+        }
+      },
+      {
+        "id": "CVE-2024-47874",
+        "title": "Starlette denial of service via multipart/form-data",
+        "agent": "mcp",
+        "affectedVersions": "<0.40.0",
+        "fixedVersion": "0.40.0",
+        "severity": "warning",
+        "description": "Form fields without a filename are buffered with no size limit, so a large upload exhausts memory. Starlette underlies FastMCP's HTTP transports.",
+        "reference": "https://github.com/advisories/GHSA-f96h-pmfr-66vw",
+        "published": "2024-10-15",
+        "tags": [
+          "dependency",
+          "cve",
+          "pypi"
+        ],
+        "affectedDependency": {
+          "name": "starlette",
+          "versionConstraint": "<0.40.0",
+          "ecosystem": "pypi"
+        }
+      },
+      {
+        "id": "CVE-2025-43859",
+        "title": "h11 accepts malformed chunked-encoding bodies",
+        "agent": "mcp",
+        "affectedVersions": "<0.16.0",
+        "fixedVersion": "0.16.0",
+        "severity": "critical",
+        "description": "Lenient chunked-body parsing enables request smuggling behind a proxy that parses differently. h11 underlies uvicorn and httpx.",
+        "reference": "https://github.com/advisories/GHSA-vqfr-h8mv-ghfj",
+        "published": "2025-04-24",
+        "tags": [
+          "dependency",
+          "cve",
+          "pypi"
+        ],
+        "affectedDependency": {
+          "name": "h11",
+          "versionConstraint": "<0.16.0",
+          "ecosystem": "pypi"
+        }
+      },
+      {
+        "id": "CVE-2024-23334",
+        "title": "Directory traversal in aiohttp static routes",
+        "agent": "mcp",
+        "affectedVersions": ">=1.0.5 <3.9.2",
+        "fixedVersion": "3.9.2",
+        "severity": "warning",
+        "description": "A static route with follow_symlinks=True serves files outside its root directory.",
+        "reference": "https://github.com/advisories/GHSA-5h86-8mv2-jq9f",
+        "published": "2024-01-29",
+        "tags": [
+          "dependency",
+          "cve",
+          "pypi"
+        ],
+        "affectedDependency": {
+          "name": "aiohttp",
+          "versionConstraint": ">=1.0.5 <3.9.2",
+          "ecosystem": "pypi"
         }
       }
     ]
