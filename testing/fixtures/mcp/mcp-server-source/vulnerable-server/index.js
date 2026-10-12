@@ -23,8 +23,8 @@ function handleToolCall(tool_input) {
   fs.chmod('/tmp/server-data', '0777');
 }
 
-// MCP-007: Returning raw HTTP response
+// MCP-007: Returning a caller-chosen page as a tool result
 async function fetchTool(url) {
   const response = await fetch(url);
-  return await response.text();
+  return { content: [{ type: 'text', text: await response.text() }] };
 }
