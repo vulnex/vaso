@@ -1,6 +1,7 @@
 import chalk from 'chalk';
 import { EXIT_INCOMPLETE, EXIT_USAGE } from '../core/exit-criteria.js';
 import { adapterRegistry } from '../adapters/registry.js';
+import { allUsersCoverageWarning } from '../adapters/openclaw.js';
 import type { AgentInstallation, AgentType } from '../core/types.js';
 import { logError } from '../core/debug.js';
 import { writeFileEnsureDir, writeFileOwnerOnly } from '../core/utils.js';
@@ -80,6 +81,10 @@ export async function runDetect(options: DetectCommandOptions): Promise<void> {
     }
 
     // Local detection
+    if (options.allUsers && !options.silent) {
+      const coverage = allUsersCoverageWarning();
+      if (coverage) console.error(chalk.yellow(`  ! ${coverage}`));
+    }
     let installations = await adapterRegistry.detectAll({
       allUsers: options.allUsers,
     });
@@ -119,6 +124,10 @@ async function detectFromSnapshot(options: DetectCommandOptions): Promise<AgentI
   const snapshotFs = new SnapshotFSProvider(snapshot);
 
   console.error(chalk.dim(`  Detecting agents from snapshot "${snapshot.hostname}" (${snapshot.platform})\n`));
+  if (options.allUsers) {
+    const coverage = allUsersCoverageWarning(snapshotFs);
+    if (coverage) console.error(chalk.yellow(`  ! ${coverage}`));
+  }
 
   let installations = await adapterRegistry.detectAll({
     allUsers: options.allUsers,
@@ -239,6 +248,10 @@ async function detectRemoteHosts(options: DetectCommandOptions): Promise<void> {
       }
 
       const snapshotFs = new SnapshotFSProvider(snapshot);
+      if (options.allUsers) {
+        const coverage = allUsersCoverageWarning(snapshotFs);
+        if (coverage) log(chalk.yellow(`  ! ${target.label ?? target.host}: ${coverage}`));
+      }
       let installations = await adapterRegistry.detectAll({
         allUsers: options.allUsers,
         fs: snapshotFs,

@@ -64,17 +64,24 @@ export function parseSSHTarget(target: string): SSHTarget {
   return { user, host, port, label };
 }
 
-/** Human-readable reason an `ssh` connection attempt ended. */
+/**
+ * Human-readable reason an `ssh` connection attempt ended. `elapsedMs` tells
+ * ssh's own `ConnectTimeout` (exit 255 once the timeout has passed — it races
+ * the spawn timer, and wins when the event loop is busy scanning another
+ * host) apart from a refusal or a rejected key, which fail fast.
+ */
 export function describeConnectFailure(
   target: Pick<SSHTarget, 'user' | 'host'>,
   code: number | null,
   signal: NodeJS.Signals | null,
   timeoutMs: number,
+  elapsedMs = 0,
 ): string {
   const who = `${target.user}@${target.host}`;
-  if (code === null) {
+  const timedOut = code === 255 && elapsedMs >= timeoutMs - CONNECT_TIMEOUT_SLACK_MS;
+  if (code === null || timedOut) {
     // spawn()'s timeout kills ssh with a signal and reports no exit code
-    return signal === 'SIGTERM' || signal === null
+    return signal === 'SIGTERM' || signal === null || timedOut
       ? `SSH connection to ${who} timed out after ${Math.round(timeoutMs / 1000)}s (host unreachable or not answering; raise --ssh-timeout if it is just slow)`
       : `SSH connection to ${who} was terminated by ${signal}`;
   }
@@ -83,6 +90,9 @@ export function describeConnectFailure(
   }
   return `SSH connection to ${who} failed (ssh exit ${code})`;
 }
+
+/** ssh's ConnectTimeout fires on whole seconds; allow for timer and start-up skew. */
+const CONNECT_TIMEOUT_SLACK_MS = 500;
 
 /**
  * Establish a ControlMaster SSH connection. This is the only step that
@@ -105,6 +115,7 @@ function establishControlMaster(target: SSHTarget, controlPath: string, timeout:
     if (target.identity) args.push('-i', target.identity);
     args.push(`${target.user}@${target.host}`, '-N'); // -N: no remote command, just connect
 
+    const started = Date.now();
     const child = spawn('ssh', args, {
       stdio: 'inherit', // Full terminal access for password prompts
       timeout,
@@ -114,7 +125,7 @@ function establishControlMaster(target: SSHTarget, controlPath: string, timeout:
     // the master process exits, so we wait for it to fork and return.
     child.on('close', (code, signal) => {
       if (code === 0) return resolve();
-      reject(new Error(describeConnectFailure(target, code, signal, timeout)));
+      reject(new Error(describeConnectFailure(target, code, signal, timeout, Date.now() - started)));
     });
     child.on('error', reject);
   });

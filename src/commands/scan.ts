@@ -5,6 +5,7 @@ import { checkRegistry } from '../core/check-registry.js';
 import { getReporter } from '../reporting/index.js';
 import { saveBaseline, loadBaseline, diffResults } from '../core/baseline.js';
 import { SnapshotFSProvider } from '../core/snapshot-fs-provider.js';
+import { allUsersCoverageWarning } from '../adapters/openclaw.js';
 import type { ProbeSnapshot } from '../core/snapshot-types.js';
 import type { ScanOptions } from '../core/types.js';
 import { shouldFailScan, isValidFailOn, EXIT_FINDINGS, EXIT_INCOMPLETE, EXIT_USAGE, type FailOnLevel } from '../core/exit-criteria.js';
@@ -376,6 +377,10 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
   const localLog = (msg: string) => { if (!localSilent) console.error(msg); };
 
   const engine = new ScanEngine(adapterRegistry, checkRegistry, snapshotFs);
+  if (options.allUsers) {
+    const coverage = allUsersCoverageWarning(snapshotFs);
+    if (coverage) localLog(chalk.yellow(`  ! ${coverage}`));
+  }
 
   const scanOptions: ScanOptions = {
     agentFilter: options.agent,

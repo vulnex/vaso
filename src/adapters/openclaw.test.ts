@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { join } from 'node:path';
-import { openclawAdapter, getUserHomeDirs } from './openclaw.js';
+import { openclawAdapter, getUserHomeDirs, allUsersCoverageWarning } from './openclaw.js';
 import { SnapshotFSProvider } from '../core/snapshot-fs-provider.js';
 
 // Mock modules
@@ -264,5 +264,12 @@ describe('getUserHomeDirs', () => {
   it('keeps to the probe user on a non-root snapshot', async () => {
     const dirs = await getUserHomeDirs(true, snapshot(false));
     expect(dirs).toEqual([{ home: '/home/scanner', user: 'scanner' }]);
+  });
+
+  it('warns that --all-users covered one home when the scan is not privileged', () => {
+    expect(allUsersCoverageWarning(snapshot(false))).toBe(
+      "--all-users needs root to read other users' homes; only /home/scanner was covered (run as root, or add --sudo for remote hosts)",
+    );
+    expect(allUsersCoverageWarning(snapshot(true))).toBeUndefined();
   });
 });

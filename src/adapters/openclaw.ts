@@ -41,6 +41,18 @@ const APP_BUNDLE_PATH = '/Applications/OpenClaw.app';
 const EXCLUDED_USERS = new Set(['Shared', 'Guest', '.localized']);
 
 /**
+ * The warning to show when `--all-users` can't do what it says: without root
+ * (locally, or for the remote probe), other users' homes are unreadable and
+ * only the scanning user's home is covered — which a report doesn't show.
+ */
+export function allUsersCoverageWarning(fs?: FSProvider): string | undefined {
+  const _fs = fs ?? new LocalFSProvider();
+  const privileged = _fs.isPrivileged ? _fs.isPrivileged() : process.getuid?.() === 0;
+  if (privileged) return undefined;
+  return `--all-users needs root to read other users' homes; only ${_fs.homedir()} was covered (run as root, or add --sudo for remote hosts)`;
+}
+
+/**
  * Get home directories to scan.
  * If allUsers is true and running as root, enumerate all user home dirs.
  * Otherwise return only the current user's home dir.

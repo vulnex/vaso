@@ -6,6 +6,11 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **`--all-users` says when it can't cover other users.** Without root, other users' homes are unreadable and only the scanning user's home was scanned, but the report looked like a multi-user scan. `scan` and `detect` now warn (locally, and per host for a remote probe that didn't run as root) and name the one home that was covered.
+- **An SSH connect timeout is reported as a timeout.** When ssh's own `ConnectTimeout` ended the connection — it races the `--ssh-timeout` timer, and wins while another host's scan keeps the CLI busy — the error said "connection refused, unknown host, or authentication rejected". An ssh failure at or after the connect timeout now reads "timed out after N s".
+
 ## [1.2.0] - 2026-10-12
 
 ### Added

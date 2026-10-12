@@ -147,6 +147,13 @@ describe('describeConnectFailure', () => {
   it('explains ssh exit 255', () => {
     expect(describeConnectFailure(t, 255, null, 60000)).toMatch(/ssh exit 255: connection refused, unknown host, or authentication rejected/);
   });
+  it("reports ssh exit 255 after the connect timeout as a timeout (ssh's ConnectTimeout won the race)", () => {
+    expect(describeConnectFailure(t, 255, null, 5000, 5004)).toMatch(/u@h timed out after 5s/);
+    // Seen with a busy event loop: the exit is handled late, still a timeout.
+    expect(describeConnectFailure(t, 255, null, 5000, 22889)).toMatch(/timed out after 5s/);
+    // A fast 255 (refused, unknown host, rejected key) keeps its explanation.
+    expect(describeConnectFailure(t, 255, null, 5000, 120)).toMatch(/connection refused, unknown host/);
+  });
   it('names other signals and exit codes', () => {
     expect(describeConnectFailure(t, null, 'SIGKILL', 60000)).toMatch(/terminated by SIGKILL/);
     expect(describeConnectFailure(t, 1, null, 60000)).toMatch(/failed \(ssh exit 1\)/);

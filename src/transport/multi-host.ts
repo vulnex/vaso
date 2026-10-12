@@ -125,13 +125,21 @@ export async function scanMultipleHosts(
       result.host = snapshot.hostname;
       result.label = target.label;
 
+      const warnings: string[] = [];
+      if (snapshot.truncated) {
+        warnings.push('vaso-probe content budget reached — some large agent/skill files were recorded as metadata only and not analysed');
+      }
+      if (scanOptions.allUsers) {
+        const { allUsersCoverageWarning } = await import('../adapters/openclaw.js');
+        const coverage = allUsersCoverageWarning(snapshotFs);
+        if (coverage) warnings.push(coverage);
+      }
+
       entry = {
         target,
         result,
         durationMs: Date.now() - start,
-        ...(snapshot.truncated ? {
-          warnings: ['vaso-probe content budget reached — some large agent/skill files were recorded as metadata only and not analysed'],
-        } : {}),
+        ...(warnings.length > 0 ? { warnings } : {}),
       };
     } catch (err) {
       entry = {
