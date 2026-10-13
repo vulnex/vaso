@@ -21,7 +21,7 @@ VASO is distributed from GitHub. The npm name `vaso` is held by an unrelated pac
 curl -fsSL https://raw.githubusercontent.com/vulnex/vaso/main/install.sh | bash
 
 # Or install the prebuilt release tarball directly with npm
-npm install -g https://github.com/vulnex/vaso/releases/download/v1.2.0/vaso-1.2.0.tgz
+npm install -g https://github.com/vulnex/vaso/releases/download/v1.2.1/vaso-1.2.1.tgz
 ```
 
 Requires Node.js 20+.
@@ -177,13 +177,13 @@ When multiple agents are detected, the **headline score is worst-case** — the 
 The simplest path — drop one step into any workflow:
 
 ```yaml
-- uses: vulnex/vaso@v1.2.0
+- uses: vulnex/vaso@v1.2.1
   with:
     fail-on: critical          # or warning, info, none
     format: sarif              # sarif, json, markdown, html, csv, junit, terminal
     # output: vaso-results.sarif  (default: vaso-results.<ext>)
     # agent: claude-code           (default: scan all detected agents)
-    # version: v1.2.0              (release tag)
+    # version: v1.2.1              (release tag)
     # upload-sarif: 'true'          (auto-uploads to Code Scanning)
 ```
 
@@ -193,7 +193,7 @@ The action installs the requested VASO version, runs the scan, and (when `format
 
 ```yaml
 - name: Install VASO
-  run: npm install -g https://github.com/vulnex/vaso/releases/download/v1.2.0/vaso-1.2.0.tgz
+  run: npm install -g https://github.com/vulnex/vaso/releases/download/v1.2.1/vaso-1.2.1.tgz
 
 - name: Run VASO scan
   run: vaso scan --format sarif -o results.sarif --fail-on critical

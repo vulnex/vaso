@@ -6,6 +6,8 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-10-13
+
 ### Added
 
 - **Skills installed as symlinks are scanned.** Tools such as gstack install each skill as a link into their own checkout (`~/.codex/skills/<name>` → `~/tools/…`). The skill walk listed the link and stopped, so none of that code reached the SKL/IOC checks. Links whose target lies outside the skills directory are now followed (cycle-safe, each target once; links back into the tree are not walked twice), locally and by the remote probe, and findings name the path the agent uses. IOC-004–006 count a linked skill directory as a skill. SKL-013 reports a whole skill linked in from a checkout at info on an installed agent (`vaso skill audit` still judges it).
