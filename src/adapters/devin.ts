@@ -248,6 +248,8 @@ export const devinAdapter: AgentAdapter = {
         '~/.config/devin/config.json',
         '~/.config/devin/mcp_config.json',
         '~/.config/devin/AGENTS.md',
+        // Workspace trust list (DEV-008) — paths only
+        '~/.local/share/devin/cli/trusted_workspaces.json',
         // User-relative CLI install location — kept in sync with USER_CLI_RELATIVE_PATHS
         '~/.local/bin/devin',
       ],

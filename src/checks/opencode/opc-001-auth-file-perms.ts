@@ -1,4 +1,6 @@
+import { join } from 'node:path';
 import type { Evidence } from '../../core/types.js';
+import { xdgConfigDir, xdgDataDir } from '../../adapters/opencode.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { accessibleByOthers, markUnreachable, queryPermissions } from '../../core/permissions.js';
 
@@ -12,8 +14,13 @@ export const opc001 = defineCheck({
   supportedPlatforms: ['darwin', 'linux'],
 
   async run(ctx, h) {
+    // The scanning user's install follows $XDG_DATA_HOME (the adapter
+    // resolved installDir from $XDG_CONFIG_HOME the same way); another
+    // user's is the default layout next to their config dir.
+    const home = ctx.fs.homedir();
+    const own = ctx.installation.installDir === xdgConfigDir(home, ctx.fs);
     const paths = ctx.installation.agent === 'opencode'
-      ? [`${dataDirFromInstall(ctx.installation.installDir)}/auth.json`]
+      ? [join(own ? xdgDataDir(home, ctx.fs) : dataDirFromInstall(ctx.installation.installDir), 'auth.json')]
       : [];
 
     const evidence: Evidence[] = [];

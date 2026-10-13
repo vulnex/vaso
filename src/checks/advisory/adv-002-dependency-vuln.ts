@@ -3,6 +3,8 @@ import type { Evidence, ScanContext } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { getAdvisoryDatabase } from '../../advisory/database.js';
 import { satisfies } from '../../core/semver.js';
+import { fullVersion, rangeEntirelyAffected } from '../../core/version-range.js';
+import { collectServerDependencies } from '../../mcp/server-dependencies.js';
 
 export const adv002 = defineCheck({
   id: 'ADV-002',
@@ -20,18 +22,31 @@ export const adv002 = defineCheck({
     const evidence: Evidence[] = [];
     const installDir = ctx.installation.installDir;
 
-    const deps = await loadPackageJsonDeps(ctx, installDir);
+    // npm: the installed copy, else the lockfile, else the declared range —
+    // a range counts only when every version it admits is affected (as MCP-027).
+    const npmDeps = await collectServerDependencies(join(installDir, 'package.json'), 'javascript', ctx.fs, { searchParents: false });
     const cargoDeps = await loadCargoTomlDeps(ctx, installDir);
-    const allDeps = { ...deps, ...cargoDeps };
 
     for (const adv of depAdvisories) {
       const dep = adv.affectedDependency!;
-      const installedVersion = allDeps[dep.name];
-      if (!installedVersion) continue;
-      if (satisfies(installedVersion, dep.versionConstraint)) {
+      const npm = npmDeps.find(d => d.name === dep.name);
+      if (npm) {
+        const affected = npm.version
+          ? satisfies(fullVersion(npm.version), dep.versionConstraint)
+          : npm.range !== undefined && rangeEntirelyAffected(npm.range, 'npm', dep.versionConstraint, adv.fixedVersion);
+        if (affected) {
+          evidence.push({
+            file: npm.source,
+            detail: `${adv.id}: ${dep.name}${npm.version ? `@${npm.version}` : ` ${npm.range}`} — ${adv.title}`,
+          });
+        }
+        continue;
+      }
+      const cargoVersion = cargoDeps[dep.name];
+      if (cargoVersion && satisfies(cargoVersion, dep.versionConstraint)) {
         evidence.push({
-          file: installDir,
-          detail: `${adv.id}: ${dep.name}@${installedVersion} — ${adv.title}`,
+          file: join(installDir, 'Cargo.toml'),
+          detail: `${adv.id}: ${dep.name}@${cargoVersion} — ${adv.title}`,
         });
       }
     }
@@ -42,19 +57,6 @@ export const adv002 = defineCheck({
     });
   },
 });
-
-async function loadPackageJsonDeps(ctx: ScanContext, dir: string): Promise<Record<string, string>> {
-  try {
-    const raw = await ctx.fs.readFile(join(dir, 'package.json'));
-    const pkg = JSON.parse(raw);
-    return {
-      ...(pkg.dependencies ?? {}),
-      ...(pkg.devDependencies ?? {}),
-    };
-  } catch {
-    return {};
-  }
-}
 
 async function loadCargoTomlDeps(ctx: ScanContext, dir: string): Promise<Record<string, string>> {
   try {

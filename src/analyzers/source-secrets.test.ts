@@ -36,6 +36,15 @@ describe('findSourceSecrets', () => {
     expect(findSourceSecrets(code)).toEqual([]);
   });
 
+  it.each([
+    ['apiKey', `const apiKey = "${KEY}";`],
+    ['token', `client({ token: "${KEY}" })`],
+    ['password', `password: '${KEY}',`],
+    ['secret', `secret = "${KEY}"`],
+  ])('finds a bare %s assignment', (key, code) => {
+    expect(findSourceSecrets(code).map((s) => s.key)).toEqual([key]);
+  });
+
   it('finds a Python module-level key', () => {
     expect(findSourceSecrets('API_KEY = "sk-a8f3K29dLw0qZx7Rt5Yu1Mn4Bv6"')).toHaveLength(1);
   });

@@ -5,6 +5,7 @@ vi.mock('node:fs/promises', () => ({
   copyFile: vi.fn(),
   stat: vi.fn(async () => ({ mode: 0o100644 })),
   chmod: vi.fn(),
+  rename: vi.fn(),
 }));
 
 vi.mock('node:os', () => ({

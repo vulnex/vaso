@@ -27,13 +27,13 @@ const USER_CLI_RELATIVE_PATHS = [
 //   $XDG_CONFIG_HOME/opencode/opencode.json[c]   — primary config
 //   $XDG_DATA_HOME/opencode/auth.json            — credentials (0600)
 //   $XDG_DATA_HOME/opencode/AGENTS.md            — global memory file
-function xdgConfigDir(home: string, fs: FSProvider): string {
+export function xdgConfigDir(home: string, fs: FSProvider): string {
   return fs.getEnv('XDG_CONFIG_HOME')?.trim()
     ? join(fs.getEnv('XDG_CONFIG_HOME')!, 'opencode')
     : join(home, '.config', 'opencode');
 }
 
-function xdgDataDir(home: string, fs: FSProvider): string {
+export function xdgDataDir(home: string, fs: FSProvider): string {
   return fs.getEnv('XDG_DATA_HOME')?.trim()
     ? join(fs.getEnv('XDG_DATA_HOME')!, 'opencode')
     : join(home, '.local', 'share', 'opencode');
@@ -83,6 +83,13 @@ export const opencodeAdapter: AgentAdapter = {
         const filePath = join(configDir, name);
         if (!(await fs.access(filePath))) continue;
         const parsed = await loadOpenCodeConfig(filePath, fs);
+        if (parsed) configFiles.push(parsed);
+      }
+      // $OPENCODE_CONFIG: an extra config file merged over the global one
+      // (the scanning user's environment only)
+      const extra = home === fs.homedir() ? fs.getEnv('OPENCODE_CONFIG')?.trim() : undefined;
+      if (extra && !configFiles.some(c => c.filePath === extra) && await fs.access(extra)) {
+        const parsed = await loadOpenCodeConfig(extra, fs);
         if (parsed) configFiles.push(parsed);
       }
 
@@ -169,6 +176,8 @@ export const opencodeAdapter: AgentAdapter = {
   getProbeManifest(): ProbeManifest {
     return {
       filePaths: [
+        // extra config file named by $OPENCODE_CONFIG (expanded by the probe)
+        '${OPENCODE_CONFIG}',
         '~/.config/opencode/opencode.json',
         '~/.config/opencode/opencode.jsonc',
         '~/.config/opencode/AGENTS.md',

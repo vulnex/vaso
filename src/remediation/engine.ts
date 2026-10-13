@@ -1,4 +1,4 @@
-import { mkdir, copyFile, readFile, writeFile, stat } from 'node:fs/promises';
+import { mkdir, copyFile, readFile, writeFile, stat, chmod } from 'node:fs/promises';
 import { join, dirname, isAbsolute } from 'node:path';
 import { homedir } from 'node:os';
 import chalk from 'chalk';
@@ -130,8 +130,15 @@ export class RemediationEngine {
     if (!isAbsolute(filePath) || this.backedUp.has(filePath)) return;
     if ((await stat(filePath)).isDirectory()) return;
     this.backedUp.add(filePath);
+    // Backups keep the originals' modes (rollback restores them), so a copy
+    // of a world-readable .env stays world-readable — the tree must be
+    // owner-only. `mode` applies to every directory mkdir creates; the
+    // backups root may predate this, so it is tightened explicitly.
+    const backupsRoot = dirname(this.backupDir);
+    await mkdir(backupsRoot, { recursive: true, mode: 0o700 });
+    if (process.platform !== 'win32') await chmod(backupsRoot, 0o700);
     const destDir = join(this.backupDir, dirname(filePath));
-    await mkdir(destDir, { recursive: true });
+    await mkdir(destDir, { recursive: true, mode: 0o700 });
     await copyFile(filePath, join(this.backupDir, filePath));
   }
 }

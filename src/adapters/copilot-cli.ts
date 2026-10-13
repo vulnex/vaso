@@ -16,7 +16,8 @@ const COPILOT_DIR_NAME = '.copilot';
 // written under ~/.copilot/. Older docs reference `settings.json` and
 // `lsp-config.json`; we still probe for them so the adapter survives a
 // future schema change without code edits.
-const USER_CONFIG_FILES = ['config.json', 'settings.json', 'lsp-config.json'];
+// mcp-config.json: user-level MCP servers (GHC-003/004)
+const USER_CONFIG_FILES = ['config.json', 'settings.json', 'lsp-config.json', 'mcp-config.json'];
 const PROJECT_CONFIG_FILES = ['.mcp.json'];
 
 const SYSTEM_CLI_PATHS = [
@@ -75,6 +76,16 @@ function extractModels(configs: ParsedConfig[]): ModelRef[] {
   return [];
 }
 
+/**
+ * ~/.copilot, or $COPILOT_HOME for the scanning user (it takes precedence over
+ * the legacy --config-dir). Another user's environment isn't observable.
+ */
+export function copilotHome(home: string, fs: FSProvider): string {
+  const env = home === fs.homedir() ? fs.getEnv?.('COPILOT_HOME')?.trim() : undefined;
+  if (!env) return join(home, COPILOT_DIR_NAME);
+  return env === '~' || env.startsWith('~/') ? join(home, env.slice(1)) : env;
+}
+
 export const copilotCliAdapter: AgentAdapter = {
   agent: 'copilot-cli',
   displayName: 'GitHub Copilot CLI',
@@ -85,7 +96,7 @@ export const copilotCliAdapter: AgentAdapter = {
     const installations: AgentInstallation[] = [];
 
     for (const { home, user } of userDirs) {
-      const copilotDir = join(home, COPILOT_DIR_NAME);
+      const copilotDir = copilotHome(home, fs);
       const installs = await discoverCliInstalls(home, fs, {
         names: ['copilot'],
         systemPaths: SYSTEM_CLI_PATHS,
@@ -116,10 +127,16 @@ export const copilotCliAdapter: AgentAdapter = {
         user: options?.allUsers ? user : undefined,
         cliBinary,
         otherInstalls: installs.others.length > 0 ? installs.others : undefined,
+        // User skills (documented in the config-dir reference)
+        skillsDir: await fs.access(join(copilotDir, 'skills')) ? join(copilotDir, 'skills') : undefined,
       });
     }
 
-    // Project-level: .mcp.json (workspace MCP servers) and .github/lsp.json
+    // Project-level: .mcp.json (workspace MCP servers), .github/lsp.json and
+    // .github/copilot-instructions.md — only where Copilot CLI is installed:
+    // .mcp.json is also Claude Code's project file, and a repo is not a
+    // Copilot install by itself.
+    if (installations.length === 0) return installations;
     const cwd = process.cwd();
     const projectConfigs: ParsedConfig[] = [];
     for (const name of PROJECT_CONFIG_FILES) {
@@ -135,7 +152,8 @@ export const copilotCliAdapter: AgentAdapter = {
         projectConfigs.push(await loadConfig(githubLspPath, fs));
       } catch {}
     }
-    if (projectConfigs.length > 0) {
+    const hasInstructions = await fs.access(join(cwd, '.github', 'copilot-instructions.md'));
+    if (projectConfigs.length > 0 || hasInstructions) {
       installations.push({
         agent: 'copilot-cli',
         agentName: `project:${basename(cwd)}`,
@@ -149,15 +167,15 @@ export const copilotCliAdapter: AgentAdapter = {
   },
 
   getConfigPaths(): string[] {
-    const home = new LocalFSProvider().homedir();
-    const copilotDir = join(home, COPILOT_DIR_NAME);
+    const fs = new LocalFSProvider();
+    const copilotDir = copilotHome(fs.homedir(), fs);
     return USER_CONFIG_FILES.map(f => join(copilotDir, f));
   },
 
-  getSkillsDir(_installDir: string): string | undefined {
-    // Copilot CLI explicitly stopped loading ~/.claude/ skills/agents in
-    // 1.0.36. Custom skills are not a documented surface today.
-    return undefined;
+  getSkillsDir(installDir: string): string | undefined {
+    // <config dir>/skills (Copilot stopped loading ~/.claude/ skills in 1.0.36);
+    // detect() sets it on the user install only — a project install's dir is the repo
+    return join(installDir, 'skills');
   },
 
   getGatewayInfo(_config: Record<string, unknown>): GatewayInfo | undefined {
@@ -202,6 +220,8 @@ export const copilotCliAdapter: AgentAdapter = {
         '~/.copilot/config.json',
         '~/.copilot/settings.json',
         '~/.copilot/lsp-config.json',
+        '~/.copilot/mcp-config.json',
+        '~/.copilot/copilot-instructions.md',
         '~/.config/gh/hosts.yml',
         // User-relative CLI install locations
         '~/.local/bin/copilot',
@@ -213,6 +233,7 @@ export const copilotCliAdapter: AgentAdapter = {
         // package.json of every npm-global copy — versions non-primary copies on remote scans
         ...npmPackageJsonGlobs('@github/copilot'),
         '~/.copilot/instructions/*.instructions.md',
+        '~/.copilot/skills/**',
         nvmBinaryGlob('copilot'),
       ],
       commands: [
@@ -222,6 +243,7 @@ export const copilotCliAdapter: AgentAdapter = {
       directoryListings: [
         '~/.copilot',
         '~/.copilot/instructions',
+        '~/.copilot/skills',
         '~/.copilot/session-state',
         '~/.copilot/logs',
       ],

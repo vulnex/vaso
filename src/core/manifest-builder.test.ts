@@ -59,6 +59,19 @@ describe('buildProbeManifest', () => {
     expect(content.filter(p => /openshell.*(?:mtls|\.key|signing|credentials|tokens|\.db)/.test(p))).toEqual([]);
   });
 
+  it('adds a ${VAR} twin for every path under an env-relocatable tree', () => {
+    expect(manifest.filePaths).toEqual(expect.arrayContaining([
+      '~/.picoclaw/config.json', '${PICOCLAW_HOME}/config.json', '${PICOCLAW_CONFIG}',
+      '${CODEX_HOME}/config.toml', '${CLAUDE_CONFIG_DIR}/settings.json', '${CLAUDE_CONFIG_DIR}/.claude.json',
+      '${OPENSHELL_SANDBOX_POLICY}',
+    ]));
+    expect(manifest.globPatterns).toEqual(expect.arrayContaining(['${HERMES_HOME}/skills/**']));
+    expect(manifest.directoryListings).toEqual(expect.arrayContaining(['${XDG_CONFIG_HOME}/opencode']));
+    // privacy holds for twins: a metadata-only path's twin is metadata-only too
+    expect(manifest.metadataGlobPatterns).toEqual(expect.arrayContaining(['${OPENCLAW_HOME}/memory.json']));
+    expect([...manifest.filePaths, ...manifest.globPatterns]).not.toContain('${OPENCLAW_HOME}/memory.json');
+  });
+
   it('keeps private session/conversation stores metadata-only', () => {
     expect(manifest.metadataGlobPatterns).toEqual(expect.arrayContaining([
       '~/.codex/sessions/*/*/*/rollout-*.jsonl',
@@ -69,9 +82,14 @@ describe('buildProbeManifest', () => {
       '~/Library/Application Support/com.meta.endo/**',
       '~/.abacusai/history.jsonl',
       '~/.abacusai/projects/**',
+      '~/.openclaw/memory.json',
+      '~/.openclaw/conversations.db',
+      '~/Library/Application Support/Claude/Local Storage/leveldb/*.ldb',
+      '~/Library/Application Support/Claude/Local Storage/leveldb/*.log',
     ]));
     // Never also collected with content
     const content = [...manifest.globPatterns, ...manifest.filePaths];
+    expect(content.filter(p => /conversation|Local Storage|\/memory\.json$/.test(p))).toEqual([]);
     for (const p of ['~/.gemini/tmp/*/chats/session-*.jsonl', '~/.copilot/command-history-state.json',
       '~/.copilot/session-state/*.json', '~/Library/Application Support/com.meta.endo/**',
       '~/.abacusai/history.jsonl', '~/.abacusai/projects/**']) {

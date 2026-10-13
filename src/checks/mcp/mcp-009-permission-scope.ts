@@ -11,7 +11,8 @@ const OVERPRIVILEGED_PATTERNS = [
 
 // Source code patterns indicating excessive permissions
 const SOURCE_PERMISSION_PATTERNS = [
-  { pattern: /chmod\s*\(\s*['"]?(?:0?777|0?666)/i, name: 'World-writable permissions' },
+  // fs.chmod(Sync)(path, 0o777), os.chmod(path, 0o666), chmod('777'), `chmod -R 777 …`, `chmod o+w …`
+  { pattern: /\bchmod(?:Sync)?\s*\((?:[^()]*?,\s*)?['"]?(?:0o?|0)?(?:777|666)\b|\bchmod(?:Sync)?\s*\([^()]*?,\s*(?:511|438)\s*\)|\bchmod\s+(?:-R\s+)?(?:0?777|0?666|[ao]\+w)\b/i, name: 'World-writable permissions' },
   { pattern: /--privileged/i, name: 'Docker privileged mode' },
   { pattern: /listen\s*\(\s*(?:0|80|443|8080|3000)\s*[,)]/i, name: 'Binding to well-known port' },
   { pattern: /glob\s*\(\s*['"](?:\/|\*\*)/i, name: 'Recursive filesystem globbing from root' },

@@ -36,6 +36,14 @@ function allowPath(...paths: string[]) {
   });
 }
 
+/** Exactly these paths exist (a dir without its contents). */
+function allowExact(...paths: string[]) {
+  mockAccess.mockImplementation(async (p) => {
+    if (paths.includes(p as string)) return;
+    throw new Error('ENOENT');
+  });
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   mockAccess.mockRejectedValue(new Error('ENOENT'));
@@ -98,7 +106,14 @@ describe('CFG-016: NemoClaw Hardening', () => {
 // --- CFG-017: NemoClaw Sandbox Active ---
 
 describe('CFG-017: NemoClaw Sandbox Active', () => {
-  it('fails when state file does not exist', async () => {
+  it('is not applicable without NemoClaw (CFG-016 recommends it)', async () => {
+    const result = await cfg017.run(makeContext());
+    expect(result.passed).toBe(true);
+    expect(result.message).toContain('not installed');
+  });
+
+  it('fails when NemoClaw is installed but no sandbox is deployed', async () => {
+    allowExact('/mock-home/.nemoclaw');
     const result = await cfg017.run(makeContext());
     expect(result.passed).toBe(false);
     expect(result.message).toContain('not deployed');
@@ -142,7 +157,12 @@ describe('CFG-017: NemoClaw Sandbox Active', () => {
 // --- CFG-018: NemoClaw Network Policy ---
 
 describe('CFG-018: NemoClaw Network Policy', () => {
+  it('is not applicable without NemoClaw', async () => {
+    expect((await cfg018.run(makeContext())).passed).toBe(true);
+  });
+
   it('fails when NemoClaw not deployed', async () => {
+    allowExact('/mock-home/.nemoclaw');
     const result = await cfg018.run(makeContext());
     expect(result.passed).toBe(false);
     expect(result.message).toContain('not deployed');
@@ -188,9 +208,9 @@ describe('CFG-018: NemoClaw Network Policy', () => {
 // --- CFG-019: NemoClaw Blueprint Integrity ---
 
 describe('CFG-019: NemoClaw Blueprint Integrity', () => {
-  it('fails when NemoClaw not installed', async () => {
+  it('is not applicable when NemoClaw is not installed', async () => {
     const result = await cfg019.run(makeContext());
-    expect(result.passed).toBe(false);
+    expect(result.passed).toBe(true);
     expect(result.message).toContain('not installed');
   });
 

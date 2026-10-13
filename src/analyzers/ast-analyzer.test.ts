@@ -39,6 +39,15 @@ describe('AST Analyzer', () => {
       expect(results.some(r => r.type === 'fs-access')).toBe(true);
     });
 
+    it('reads credential files by name, not every path containing "secret"', () => {
+      const hit = (path: string) => analyzeCode(`const fs = require('fs');\nfs.readFileSync('${path}');`, `${path.length}.js`)
+        .some(r => r.type === 'fs-access');
+      expect(hit('./docs/secretary-notes.md')).toBe(false);
+      expect(hit('./credentials-guide.md')).toBe(false);
+      expect(hit('/srv/app/config/secrets.json')).toBe(true);
+      expect(hit('/home/u/.git-credentials')).toBe(true);
+    });
+
     it('detects /etc/passwd reading', () => {
       const code = `
         const fs = require('fs');

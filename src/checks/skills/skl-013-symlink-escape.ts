@@ -28,11 +28,21 @@ import { classifySensitivePath } from '../../analyzers/sensitive-paths.js';
  * agent is ever asked to touch it.
  */
 
+async function isDirectory(fs: { stat(p: string): Promise<{ isDirectory(): boolean }> }, path: string): Promise<boolean> {
+  try {
+    return (await fs.stat(path)).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
 interface SymlinkFinding {
   linkPath: string;
   rawTarget: string;
   resolvedTarget: string;
   sensitiveLabels: string[];
+  /** A whole skill linked into an installed agent's skills dir (`skills/x → ~/checkout/x`). */
+  skillInstall: boolean;
 }
 
 function resolveTarget(rawTarget: string, linkDir: string, home: string): string {
@@ -103,7 +113,12 @@ export const skl013 = defineCheck({
             ...classifySensitivePath(rawTarget),
           ]),
         ];
-        findings.push({ linkPath, rawTarget, resolvedTarget, sensitiveLabels });
+        // Tools such as gstack install each skill as a link into their
+        // checkout — the normal layout of an agent's skills dir, not a
+        // workspace file in disguise. `vaso skill audit` keeps judging it.
+        const skillInstall = ctx.installation.agent !== 'skill-audit' && sensitiveLabels.length === 0 &&
+          resolve(dirname(linkPath)) === root && await isDirectory(ctx.fs, linkPath);
+        findings.push({ linkPath, rawTarget, resolvedTarget, sensitiveLabels, skillInstall });
       }
     }
 
@@ -117,10 +132,12 @@ export const skl013 = defineCheck({
       snippet: `${f.linkPath} → ${f.rawTarget}`,
       detail: f.sensitiveLabels.length > 0
         ? `Symlink resolves outside the workspace to ${f.sensitiveLabels.join(', ')} (${f.resolvedTarget}). An agent instructed to edit this "local" file writes to the sensitive target instead — GhostApproval-style informed-consent bypass.`
-        : `Symlink resolves outside the workspace to ${f.resolvedTarget}. A write the user believes is workspace-local lands outside the project.`,
+        : f.skillInstall
+          ? `Skill installed as a link to ${f.resolvedTarget} — its code is scanned there; edits to it change the source checkout.`
+          : `Symlink resolves outside the workspace to ${f.resolvedTarget}. A write the user believes is workspace-local lands outside the project.`,
     }));
 
-    const severity: Severity = anySensitive ? 'critical' : 'warning';
+    const severity: Severity = anySensitive ? 'critical' : findings.every((f) => f.skillInstall) ? 'info' : 'warning';
     const sensitiveCount = findings.filter((f) => f.sensitiveLabels.length > 0).length;
 
     return h.result({

@@ -223,6 +223,8 @@ export const openshellAdapter: AgentAdapter = {
     const tlsKeys = (dir: string) => [`${dir}/ca.key`, `${dir}/server/tls.key`, `${dir}/client/tls.key`, `${dir}/jwt/signing.pem`];
     return {
       filePaths: [
+        // The default sandbox policy file (OSH-011–014; expanded by the probe)
+        '${OPENSHELL_SANDBOX_POLICY}',
         '~/.config/openshell/gateway.toml',
         '~/.config/openshell/gateway.env',
         '~/.config/openshell/active_gateway',

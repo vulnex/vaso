@@ -28,6 +28,8 @@ interface InventoryFile {
   }>;
 }
 
+const INVENTORY_KEYS = new Set(['host', 'user', 'port', 'label', 'identity', 'sudo']);
+
 /**
  * Parse a YAML inventory file and return an array of SSHTarget objects.
  */
@@ -40,6 +42,18 @@ export async function parseInventory(path: string): Promise<SSHTarget[]> {
   }
 
   return doc.hosts.map((entry, idx) => {
+    if (!entry || typeof entry !== 'object') {
+      throw new Error(`Inventory entry #${idx + 1} must be a mapping with a "host" field`);
+    }
+    // A misspelt key (`sshKey:` for `identity:`) would otherwise be dropped
+    // silently and the scan would run with a different key, user or port.
+    const unknown = Object.keys(entry).filter((k) => !INVENTORY_KEYS.has(k));
+    if (unknown.length > 0) {
+      throw new Error(
+        `Inventory entry #${idx + 1}: unknown field${unknown.length > 1 ? 's' : ''} ${unknown.map((k) => `"${k}"`).join(', ')} ` +
+        `(expected ${[...INVENTORY_KEYS].join(', ')})`,
+      );
+    }
     if (!entry.host) {
       throw new Error(`Inventory entry #${idx + 1} missing required "host" field`);
     }

@@ -171,6 +171,21 @@ describe('CC-004: Plaintext API Key in Config', () => {
     expect(result.severity).toBe('critical');
   });
 
+  it('reads per-project servers in ~/.claude.json and Authorization headers', async () => {
+    const token = 'ghp_' + 'a1B2c3D4e5'.repeat(4);
+    const config = makeConfig('.claude.json', {
+      projects: { '/repo': { mcpServers: { gh: { command: 'npx', env: { GITHUB_TOKEN: token } } } } },
+      mcpServers: { api: { type: 'http', url: 'https://x', headers: { Authorization: `Bearer ${token}` } } },
+    });
+    const result = await check.run(makeCtx([config]));
+    expect(result.evidence?.map(e => e.snippet?.split('=')[0])).toEqual([
+      'mcpServers.api.headers.Authorization',
+      'projects[/repo].mcpServers.gh.env.GITHUB_TOKEN',
+    ]);
+    const ref = makeConfig('.claude.json', { mcpServers: { api: { headers: { Authorization: 'Bearer ${API_TOKEN}' } } } });
+    expect((await check.run(makeCtx([ref]))).passed).toBe(true);
+  });
+
   it('passes when env value references an environment variable', async () => {
     const config = makeConfig('settings.json', {
       env: { ANTHROPIC_API_KEY: '${ANTHROPIC_API_KEY}' },
@@ -266,6 +281,22 @@ describe('CC-007: apiKeyHelper Script Permissions', () => {
     expect(result.passed).toBe(false);
   });
 
+  it('expands ~, puts evidence on the script, and does not guess on snapshots', async () => {
+    const config = makeConfig('settings.json', { apiKeyHelper: '~/bin/get-key.sh --profile x' });
+    const seen: string[] = [];
+    const fs = makeFs({
+      access: vi.fn(async (p: string) => { seen.push(p); return true; }),
+      stat: vi.fn(async () => ({ mode: 0o777, isFile: () => true, isDirectory: () => false })),
+    });
+    const result = await check.run(makeCtx([config], fs));
+    expect(seen[0]).toBe(`${fs.homedir()}/bin/get-key.sh`);
+    expect(result.evidence?.[0].file).toBe(`${fs.homedir()}/bin/get-key.sh`);
+
+    const snapFs = makeFs({ access: vi.fn(async () => false) });
+    Object.assign(snapFs, { kind: 'snapshot' });
+    expect((await check.run(makeCtx([config], snapFs))).passed).toBe(true);
+  });
+
   it('passes when no apiKeyHelper is configured', async () => {
     const config = makeConfig('settings.json', { model: 'opus' });
     const result = await check.run(makeCtx([config]));
@@ -294,6 +325,15 @@ describe('CC-008: Missing Sensitive Deny Rules', () => {
     });
     const result = await check.run(makeCtx([config]));
     expect(result.passed).toBe(true);
+  });
+
+  it('recognizes the space-wildcard and bare forms of a deny rule', async () => {
+    for (const deny of [['Bash(rm *)'], ['Bash(sudo)'], ['Bash(curl *)', 'Bash(rm *)'], ['Bash']]) {
+      const config = makeConfig('settings.json', { permissions: { allow: ['Bash(git *)'], deny } });
+      expect((await check.run(makeCtx([config]))).passed, deny.join()).toBe(true);
+    }
+    const unrelated = makeConfig('settings.json', { permissions: { allow: ['Bash(git *)'], deny: ['Bash(rmdir *)', 'Read(.env)'] } });
+    expect((await check.run(makeCtx([unrelated]))).passed).toBe(false);
   });
 
   it('passes when no allow list is configured', async () => {
@@ -424,6 +464,19 @@ describe('CC-012: Memory File Secret Leak', () => {
     const fs = makeFs({ access: vi.fn(async () => false) });
     const result = await check.run(makeCtx([], fs));
     expect(result.passed).toBe(true);
+  });
+
+  it('reads the repo CLAUDE.md and CLAUDE.local.md on a project install', async () => {
+    const key = 'sk-ant-' + 'A'.repeat(40) + 'q9Wz1XYz';
+    const fs = makeFs({
+      access: vi.fn(async (p: string) => p === '/repo/CLAUDE.local.md'),
+      readFile: vi.fn(async () => `token: ${key}`),
+    });
+    const ctx = makeCtx([], fs);
+    ctx.installation = { ...ctx.installation, installDir: '/repo/.claude', profile: 'project' };
+    const result = await check.run(ctx);
+    expect(result.passed).toBe(false);
+    expect(result.evidence?.[0].file).toBe('/repo/CLAUDE.local.md');
   });
 
   it('fails when CLAUDE.md contains an Anthropic key', async () => {

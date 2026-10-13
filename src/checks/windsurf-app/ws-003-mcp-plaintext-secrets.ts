@@ -16,9 +16,14 @@ const HIGH_ENTROPY_THRESHOLD = 4.5;
 const ENTROPY_MIN_LENGTH = 20;
 const MIN_LENGTH = 8;
 
-/** Windsurf's secret interpolation forms — these are the safe way to reference secrets. */
-function isInterpolated(value: string): boolean {
-  return value.startsWith('${env:') || value.startsWith('${file:');
+/** Windsurf's secret interpolation forms — the safe way to reference secrets,
+ *  also inside a larger value (`Bearer ${env:TOKEN}`). */
+const INTERPOLATION = /\$\{(?:env|file):[^}]*\}/g;
+const AUTH_SCHEME = /^\s*(?:Bearer|Basic|Token)\b\s*/i;
+
+/** What is stored on disk once interpolations and an auth scheme are removed. */
+function literalPart(value: string): string {
+  return value.replace(INTERPOLATION, '').replace(AUTH_SCHEME, '').trim();
 }
 
 function isPlaceholder(value: string): boolean {
@@ -31,9 +36,10 @@ function isPlaceholder(value: string): boolean {
   return false;
 }
 
-function isLiteralSecret(key: string, value: string): boolean {
+function isLiteralSecret(key: string, raw: string): boolean {
+  const value = literalPart(raw);
   if (value.length < MIN_LENGTH) return false;
-  if (isInterpolated(value) || isPlaceholder(value)) return false;
+  if (isPlaceholder(value)) return false;
   if (KNOWN_KEY_PREFIXES.some(p => p.test(value))) return true;
   if (SECRET_KEY_NAMES.test(key)) return true;
   return value.length >= ENTROPY_MIN_LENGTH && shannonEntropy(value) > HIGH_ENTROPY_THRESHOLD;

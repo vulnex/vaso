@@ -76,7 +76,7 @@ const MALICIOUS_SKILL_PATTERNS = [
   /claw.*havoc/i,
   /openclaw.*crack/i,
   /free.*premium/i,
-  /hack.*tool/i,
+  /\bhack(?:ing)?[-_ ]?tools?\b/i,
   /stealer/i,
   /keylog/i,
   /rat[-_]?tool/i,

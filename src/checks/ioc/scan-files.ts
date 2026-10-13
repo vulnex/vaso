@@ -1,6 +1,7 @@
 import { extname, join, relative, isAbsolute } from 'node:path';
 import type { ScanContext } from '../../core/types.js';
 import { getAllSkillsDirs, isExcludedPath } from '../../core/utils.js';
+import { followSkillLinks } from '../../core/skill-walk.js';
 
 const SCAN_EXTENSIONS = new Set(['.js', '.ts', '.mjs', '.cjs', '.json', '.yaml', '.yml', '.env', '.sh']);
 
@@ -27,12 +28,19 @@ export async function iocScanFiles(ctx: ScanContext): Promise<string[]> {
   const dirs = outermost([ctx.installation.installDir, ...getAllSkillsDirs(ctx.installation)]);
   const skip = new Set(ctx.configs.map(c => c.filePath));
   const files: string[] = [];
+  const skillsDirs = getAllSkillsDirs(ctx.installation);
   for (const dir of dirs) {
     let entries;
     try {
       entries = await ctx.fs.readdirEntries(dir, { recursive: true });
     } catch {
       continue;
+    }
+    // Skills symlinked in from outside the tree: the listing shows the link only
+    for (const skills of skillsDirs) {
+      const rel = relative(dir, skills);
+      if (rel.startsWith('..') || isAbsolute(rel)) continue;
+      entries = entries.concat(await followSkillLinks(ctx.fs, skills, entries));
     }
     for (const entry of entries) {
       if (!entry.isFile || !SCAN_EXTENSIONS.has(extname(entry.name))) continue;

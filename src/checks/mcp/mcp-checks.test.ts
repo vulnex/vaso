@@ -828,6 +828,45 @@ describe('MCP-013: Missing PKCE', () => {
 
   // ----- Negative false-positive fixtures -----
 
+  it('accepts a Python callback that looks state up and hands it to a validator (MCP python-sdk simple-auth)', async () => {
+    const code = [
+      'async def handle_login_callback(self, request: Request) -> Response:',
+      '    form = await request.form()',
+      '    state = form.get("state")',
+      '    if not username or not password or not state:',
+      '        raise HTTPException(400, "Missing state")',
+      '    redirect_uri = await self.handle_simple_callback(username, password, state)',
+      '    code = new_authorization_code()',
+    ].join('\n');
+    const result = await mcp018.run(makeContext({ mcpServerSources: [{ serverName: 'simple-auth', language: 'python', sourceCode: code }] }));
+    expect(result.passed).toBe(true);
+  });
+
+  it('accepts a route that delegates the request to a validating callback (python-sdk simple-auth)', async () => {
+    const code = [
+      'async def login_callback_handler(request: Request) -> Response:',
+      '    # Handle simple authentication callback',
+      '    return await oauth_provider.handle_login_callback(request)',
+      'routes.append(Route("/login/callback", endpoint=login_callback_handler, methods=["POST"]))',
+      'code = create_code()',
+    ].join('\n');
+    const result = await mcp018.run(makeContext({ mcpServerSources: [{ serverName: 'sa', language: 'python', sourceCode: code }] }));
+    expect(result.passed).toBe(true);
+  });
+
+  it('accepts Flask-style state checks (quoted keys, state only on the right of !=)', async () => {
+    const code = [
+      '@app.route("/callback")',
+      'def handle_oauth_callback():',
+      '    returned = request.args.get("state")',
+      '    if returned != session.pop("oauth_state", None):',
+      '        abort(400)',
+      '    code = request.args.get("code")',
+    ].join('\n');
+    const result = await mcp018.run(makeContext({ mcpServerSources: [{ serverName: 'flask', language: 'python', sourceCode: code }] }));
+    expect(result.passed).toBe(true);
+  });
+
   it('ignores /authorize references inside line comments', async () => {
     const commentOnly: MCPServerSource[] = [{
       serverName: 'docs-only',
@@ -1730,20 +1769,27 @@ describe('MCP-022: Server Command in World-Writable Path', () => {
 
 // ==================== MCP-023: Streamable-HTTP Without Origin Pinning ====================
 describe('MCP-023: Streamable-HTTP Server Without Origin Pinning', () => {
-  it('fails for streamable-http on a remote URL with no origin allowlist', async () => {
+  it('fails for streamable-http on a LAN host with no origin allowlist', async () => {
+    for (const url of ['http://172.16.4.20:8080/mcp', 'http://nas.local/mcp', 'http://10.1.2.3/mcp', 'http://mcpbox:3000/mcp']) {
+      const cfg: MCPConfig = {
+        source: 'project',
+        filePath: '/tmp/mcp.json',
+        servers: [{ name: 'risky', url, transport: 'streamable-http' }],
+      };
+      const result = await mcp023.run(makeContext({ mcpConfigs: [cfg] }));
+      expect(result.passed, url).toBe(false);
+      expect(result.severity).toBe('warning');
+      expect(result.evidence?.[0].detail).toMatch(/DNS rebinding/);
+    }
+  });
+
+  it('leaves a public remote server to its own Origin handling', async () => {
     const cfg: MCPConfig = {
       source: 'project',
       filePath: '/tmp/mcp.json',
-      servers: [{
-        name: 'risky',
-        url: 'https://mcp.example.com/sse',
-        transport: 'streamable-http',
-      }],
+      servers: [{ name: 'remote', url: 'https://mcp.example.com/mcp', transport: 'streamable-http', headers: { Authorization: 'Bearer ${TOKEN}' } }],
     };
-    const result = await mcp023.run(makeContext({ mcpConfigs: [cfg] }));
-    expect(result.passed).toBe(false);
-    expect(result.severity).toBe('warning');
-    expect(result.evidence?.[0].detail).toMatch(/DNS rebinding|2025 MCP spec/);
+    expect((await mcp023.run(makeContext({ mcpConfigs: [cfg] }))).passed).toBe(true);
   });
 
   it('passes when streamable-http URL is localhost', async () => {
@@ -2551,7 +2597,7 @@ describe('Remote servers behind mcp-remote / supergateway', () => {
 
   it('MCP-023 sees a streamable-HTTP remote behind mcp-remote', async () => {
     const result = await mcp023.run(makeContext({
-      mcpConfigs: bridged('r', ['-y', 'mcp-remote', 'https://mcp.example.com/mcp']),
+      mcpConfigs: bridged('r', ['-y', 'mcp-remote', 'http://192.168.0.9:3000/mcp']),
     }));
     expect(result.passed).toBe(false);
     const local = await mcp023.run(makeContext({
@@ -2618,6 +2664,23 @@ describe('Python MCP server source', () => {
 
 // ============ False-positive regressions from real packages ============
 describe('MCP-005 sink-anchored tracing', () => {
+  it.each([
+    `cur.execute(f"SELECT * FROM users WHERE name = '{name}'")`,
+    `cur.execute("SELECT * FROM t WHERE n = '%s'" % name)`,
+  ])('flags Python SQL built with quoted values: %s', async (line) => {
+    const result = await mcp005.run(makeContext({
+      mcpServerSources: [{ serverName: 'db', language: 'python', sourceCode: `@mcp.tool()\ndef find(name: str):\n    ${line}` }],
+    }));
+    expect(result.passed).toBe(false);
+  });
+
+  it('leaves a parameterized Python query alone', async () => {
+    const result = await mcp005.run(makeContext({
+      mcpServerSources: [{ serverName: 'db', language: 'python', sourceCode: '@mcp.tool()\ndef find(name: str):\n    cur.execute("SELECT * FROM t WHERE n = ?", (name,))' }],
+    }));
+    expect(result.passed).toBe(true);
+  });
+
   it('ignores tool names interpolated into error messages', async () => {
     const result = await mcp005.run(makeContext({
       mcpServerSources: [{
@@ -2874,6 +2937,21 @@ describe('MCP-009 source scope', () => {
     const result = await mcp009.run(makeContext({
       mcpServerSources: [{ serverName: 's', sourceCode: 'const cfg = join(process.env.HOME, ".config", "srv.json");' }],
     }));
+    expect(result.passed).toBe(true);
+  });
+
+  it.each([
+    "fs.chmodSync('/var/x', 0o777);",
+    'os.chmod(path, 0o666)',
+    "execSync('chmod -R 777 /srv/data')",
+    'fs.chmodSync(p, 511);',
+  ])('flags a world-writable chmod: %s', async (sourceCode) => {
+    const result = await mcp009.run(makeContext({ mcpServerSources: [{ serverName: 's', sourceCode }] }));
+    expect(result.evidence?.map(e => e.detail ?? '').join()).toMatch(/World-writable/);
+  });
+
+  it('leaves owner-only chmod alone', async () => {
+    const result = await mcp009.run(makeContext({ mcpServerSources: [{ serverName: 's', sourceCode: "fs.chmodSync('/srv/777data', 0o600);" }] }));
     expect(result.passed).toBe(true);
   });
 });

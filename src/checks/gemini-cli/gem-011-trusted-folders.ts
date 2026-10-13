@@ -1,4 +1,6 @@
-import type { Evidence } from '../../core/types.js';
+import { join } from 'node:path';
+import type { Evidence, ParsedConfig } from '../../core/types.js';
+import { stripJsonc } from '../../core/jsonc.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { buildBroadPaths, isBroadPath } from '../../analyzers/broad-paths.js';
 
@@ -15,8 +17,21 @@ export const gem011 = defineCheck({
     const home = ctx.fs.homedir();
     const broadPaths = buildBroadPaths(home);
 
-    for (const config of ctx.configs) {
-      if (!config.filePath.endsWith('trustedFolders.json')) continue;
+    // trustedFolders.json is not a settings file the adapter loads: read it
+    // from the user install (Gemini CLI keeps folder trust user-level only).
+    const files: ParsedConfig[] = ctx.configs.filter(c => c.filePath.endsWith('trustedFolders.json'));
+    const userFile = join(ctx.installation.installDir, 'trustedFolders.json');
+    if (ctx.installation.profile !== 'project' && !files.some(f => f.filePath === userFile) && await ctx.fs.access(userFile)) {
+      try {
+        const raw = await ctx.fs.readFile(userFile);
+        const data = JSON.parse(stripJsonc(raw));
+        if (data && typeof data === 'object' && !Array.isArray(data)) files.push({ raw, format: 'json', filePath: userFile, data });
+      } catch {
+        // unreadable or not JSON — nothing to judge
+      }
+    }
+
+    for (const config of files) {
       for (const [path, level] of Object.entries(config.data)) {
         if (typeof level !== 'string' || !/^trust/i.test(level)) continue;
         const broad = isBroadPath(path, broadPaths, home);

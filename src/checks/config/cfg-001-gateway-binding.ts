@@ -1,5 +1,5 @@
 import { defineCheck } from '../../core/check-builder.js';
-import { CODING_AGENTS, type Evidence } from '../../core/types.js';
+import { CODING_AGENTS, type Evidence, type FixResult } from '../../core/types.js';
 import { fixFirstConfig } from '../../remediation/config-writer.js';
 import { getNestedValue } from '../../core/utils.js';
 
@@ -131,28 +131,37 @@ export const cfg001 = defineCheck({
   // Rewrite the key that is exposed, in the file it is in. OpenClaw 2026.x
   // has no gateway.host (its schema rejects unknown keys): its listener is
   // the symbolic gateway.bind, whose local-only value is "loopback".
+  // Every exposed file is rewritten (openclaw.json and a sub-agent's file,
+  // a JSON config and its .env), so one run leaves no listener behind.
   async fix(ctx) {
+    const done: string[] = [];
     for (const config of ctx.configs) {
-      for (const path of ['gateway.bind', 'bind']) {
+      let result: FixResult | undefined;
+      const symbolic = ['gateway.bind', 'bind'].find(path => {
         const bind = getNestedValue(config.data, path);
-        if (typeof bind === 'string' && SYMBOLIC_EXPOSED.includes(bind.toLowerCase())) {
-          return fixFirstConfig([config], {
-            checkId: 'CFG-001', path, value: 'loopback', message: `Set ${path} to "loopback"`,
+        return typeof bind === 'string' && SYMBOLIC_EXPOSED.includes(bind.toLowerCase());
+      });
+      if (symbolic) {
+        result = await fixFirstConfig([config], {
+          checkId: 'CFG-001', path: symbolic, value: 'loopback', message: `Set ${symbolic} to "loopback"`,
+        });
+      } else {
+        const hostPath = HOST_PATHS.find(p => getNestedValue(config.data, p) != null);
+        const host = hostPath ? getNestedValue(config.data, hostPath) : undefined;
+        if (typeof host === 'string' && host.split(',').some(p => p.trim() === '*' || WILDCARD_ADDRS.includes(p.trim()))) {
+          result = await fixFirstConfig([config], {
+            checkId: 'CFG-001',
+            env: hostPath === 'GATEWAY_HOST' ? 'GATEWAY_HOST' : undefined,
+            path: hostPath === 'GATEWAY_HOST' ? undefined : hostPath,
+            value: '127.0.0.1',
+            message: `Set ${hostPath} to 127.0.0.1`,
           });
         }
       }
-      const hostPath = HOST_PATHS.find(p => getNestedValue(config.data, p) != null);
-      const host = hostPath ? getNestedValue(config.data, hostPath) : undefined;
-      if (typeof host === 'string' && host.split(',').some(p => p.trim() === '*' || WILDCARD_ADDRS.includes(p.trim()))) {
-        return fixFirstConfig([config], {
-          checkId: 'CFG-001',
-          env: hostPath === 'GATEWAY_HOST' ? 'GATEWAY_HOST' : undefined,
-          path: hostPath === 'GATEWAY_HOST' ? undefined : hostPath,
-          value: '127.0.0.1',
-          message: `Set ${hostPath} to 127.0.0.1`,
-        });
-      }
+      if (result?.applied) done.push(`${result.message} in ${config.filePath}`);
     }
-    return { checkId: 'CFG-001', applied: false, message: 'No wildcard gateway listener found to rebind' };
+    return done.length > 0
+      ? { checkId: 'CFG-001', applied: true, message: done.join('; ') }
+      : { checkId: 'CFG-001', applied: false, message: 'No wildcard gateway listener found to rebind' };
   },
 });

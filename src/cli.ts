@@ -217,7 +217,7 @@ program
   .option('-a, --agent <type>', 'fix a specific agent')
   .option('--dry-run', 'show what would be fixed without making changes')
   .option('-y, --yes', 'apply all fixes without confirmation')
-  .option('--rollback', 'rollback the last fix operation')
+  .option('--rollback [backup]', 'undo the last fix run (again for the one before); or restore a named backup from ~/.vaso/backups')
   .action(async (options) => {
     if (!validateAgentOption(options)) return;
     const { runFix } = await import('./commands/fix.js');
@@ -262,6 +262,7 @@ mcpCommand
   .option('--resolve-packages', 'download npm-packaged (npx) MCP servers — download-only, never executed — to analyze their source (requires network)', false)
   .option('--audit-deps', 'look up the exact versions of MCP servers\' dependencies in OSV.dev for known vulnerabilities — sends package names and versions only, never code (requires network)', false)
   .option('--source <paths...>', 'analyze MCP server source directly — an entry file or a server checkout (for server authors, or remote servers whose code you have); alone, skips config discovery')
+  .option('--fail-on <severity>', 'exit non-zero on findings of this severity or higher (critical, warning, info, none)', 'critical')
   .option('--no-color', 'disable colored output')
   .action(async (options) => {
     if (!validateFormatOption(options)) return;
@@ -290,11 +291,12 @@ skillCommand
   .argument('<path>', 'path to skill directory')
   .option('-f, --format <format>', 'output format (terminal, json, sarif, markdown, html, csv, junit)', 'terminal')
   .option('-o, --output <file>', 'write report to file')
+  .option('--fail-on <severity>', 'exit non-zero on findings of this severity or higher (critical, warning, info, none)', 'critical')
   .option('--no-color', 'disable colored output')
   .action(async (path: string, options: Record<string, unknown>) => {
     if (!validateFormatOption(options as { format?: string })) return;
     const { runSkillAudit } = await import('./commands/skill-audit.js');
-    await runSkillAudit(path, options as { format: string; output?: string; color?: boolean });
+    await runSkillAudit(path, options as { format: string; output?: string; color?: boolean; failOn?: string });
   });
 
 const extCommand = program

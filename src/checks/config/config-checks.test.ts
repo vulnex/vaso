@@ -317,11 +317,41 @@ describe('CFG-006: Workspace Restriction', () => {
     expect(result.passed).toBe(false);
   });
 
-  it('passes when workspace configured', async () => {
+  it('passes when workspace configured (generic schema)', async () => {
     const config = makeConfig({ workspace: '/home/user/projects' });
-    const result = await cfg006.run(makeContext([config]));
+    const result = await cfg006.run(makeContext([config], 'custom-agent' as AgentInstallation['agent']));
     console.log(`[CFG-006] workspace=/home/user/projects → passed: ${result.passed}, message: ${result.message}`);
     expect(result.passed).toBe(true);
+  });
+});
+
+describe('CFG-006 on OpenClaw', () => {
+  it('reads tools.fs.workspaceOnly, not the workspace location', async () => {
+    expect((await cfg006.run(makeContext([makeConfig({ agents: { defaults: { workspace: '~/w' } } })]))).passed).toBe(false);
+    expect((await cfg006.run(makeContext([makeConfig({ tools: { fs: { workspaceOnly: true } } })]))).passed).toBe(true);
+  });
+});
+
+describe('OpenClaw 2026.x keys in CFG-008/013', () => {
+  it('CFG-008 flags agents.defaults.sandbox.mode "off"', async () => {
+    expect((await cfg008.run(makeContext([makeConfig({ agents: { defaults: { sandbox: { mode: 'off' } } } })]))).passed).toBe(false);
+    expect((await cfg008.run(makeContext([makeConfig({ agents: { defaults: { sandbox: { mode: 'all' } } } })]))).passed).toBe(true);
+  });
+  it('CFG-013 flags channels.<ch>.dmPolicy "open"', async () => {
+    const r = await cfg013.run(makeContext([makeConfig({ channels: { telegram: { dmPolicy: 'open' }, slack: { dmPolicy: 'pairing' } } })]));
+    expect(r.passed).toBe(false);
+    expect(r.message).toContain('telegram');
+    expect(r.message).not.toContain('slack');
+    expect((await cfg013.run(makeContext([makeConfig({ channels: { slack: { dmPolicy: 'allowlist' } } })]))).passed).toBe(true);
+  });
+});
+
+describe('CFG-015 on OpenClaw discovery.mdns.mode', () => {
+  it('flags only mode "full"', async () => {
+    for (const [mode, passed] of [['off', true], ['minimal', true], ['full', false]] as const) {
+      const r = await cfg015.run(makeContext([makeConfig({ discovery: { mdns: { mode } } })]));
+      expect(r.passed, mode).toBe(passed);
+    }
   });
 });
 

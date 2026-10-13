@@ -1,9 +1,10 @@
-import { basename, dirname, extname, join, resolve } from 'node:path';
+import { basename, dirname, extname, join, relative, resolve } from 'node:path';
 import type { MCPDataFile, MCPServerEntry, MCPServerSource } from './types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { packageExtractDir, resolveNpmPackageSource } from './package-fetcher.js';
 import { collectServerDependencies } from './server-dependencies.js';
+import { parse as parseTOML } from 'smol-toml';
 
 /**
  * A command's executable name, also when the config gives it as a path —
@@ -385,6 +386,78 @@ async function serverFilesIn(dir: string, fs: FSProvider): Promise<string[]> {
   return usingSdk.length > 0 ? usingSdk : candidates;
 }
 
+/** Directories inside a Python package that are not server code. */
+const PY_SKIP_DIRS = new Set(['tests', 'test', '__pycache__', '.venv', 'venv', 'node_modules', '.git', 'build', 'dist', 'site-packages']);
+const MAX_PY_PACKAGE_FILES = 200;
+
+/** Every module of a Python package directory, entry-relevant first, tests and caches skipped. */
+async function pythonModules(pkgDir: string, fs: FSProvider): Promise<string[]> {
+  const files: string[] = [];
+  const pending = [pkgDir];
+  for (let dir = pending.shift(); dir !== undefined && files.length < MAX_PY_PACKAGE_FILES; dir = pending.shift()) {
+    let entries;
+    try {
+      entries = await fs.readdirEntries(dir);
+    } catch {
+      continue;
+    }
+    for (const e of [...entries].sort((a, b) => a.name.localeCompare(b.name))) {
+      if (e.isDirectory && !PY_SKIP_DIRS.has(e.name) && !e.name.startsWith('.')) pending.push(join(dir, e.name));
+      else if (e.isFile && e.name.endsWith('.py') && !/^test_|_test\.py$|^conftest\.py$/.test(e.name)) files.push(join(dir, e.name));
+    }
+  }
+  // __main__ / server first: the entry the console script or `python -m` runs
+  const rank = (f: string) => (/(?:^|\/)(?:__main__|server)\.py$/.test(f) ? 0 : 1);
+  return files.sort((a, b) => rank(a) - rank(b)).slice(0, MAX_PY_PACKAGE_FILES);
+}
+
+/**
+ * A Python server checkout (`pyproject.toml` + `src/<pkg>/` or `<pkg>/`): the
+ * package its console script runs (`[project.scripts] x = "pkg.server:main"`),
+ * else the package that imports the MCP SDK. Undefined when the directory is
+ * not laid out as a Python package.
+ */
+async function pythonPackageFiles(dir: string, fs: FSProvider): Promise<string[] | undefined> {
+  const roots = [join(dir, 'src'), dir];
+  // Top-level modules of the console scripts: `x = "pkg.server:main"` → pkg
+  const scriptPackages = new Set<string>();
+  try {
+    const project = (parseTOML(await fs.readFile(join(dir, 'pyproject.toml'))) as Record<string, unknown>).project as Record<string, unknown> | undefined;
+    const scripts = project?.scripts && typeof project.scripts === 'object' ? Object.values(project.scripts as Record<string, unknown>) : [];
+    for (const target of scripts) {
+      const mod = typeof target === 'string' ? target.split(':')[0].trim().split('.')[0] : '';
+      if (mod) scriptPackages.add(mod);
+    }
+  } catch {
+    // no pyproject, or not TOML
+  }
+  const candidates = new Set(scriptPackages);
+  for (const root of roots) {
+    let entries;
+    try {
+      entries = await fs.readdirEntries(root);
+    } catch {
+      continue;
+    }
+    for (const e of entries) if (e.isDirectory && !PY_SKIP_DIRS.has(e.name) && !e.name.startsWith('.')) candidates.add(e.name);
+  }
+  for (const name of candidates) {
+    for (const root of roots) {
+      const pkg = join(root, name);
+      if (!(await fs.access(join(pkg, '__init__.py'))) && !(await fs.access(join(pkg, '__main__.py')))) continue;
+      const modules = await pythonModules(pkg, fs);
+      if (modules.length === 0) continue;
+      // The console script's package is the server; any other must use the SDK
+      if (scriptPackages.has(name)) return modules;
+      for (const f of modules) {
+        const code = await readSourceFile(f, fs);
+        if (code && MCP_SDK_REFERENCE.test(code)) return modules;
+      }
+    }
+  }
+  return undefined;
+}
+
 async function packageJsonName(dir: string, fs: FSProvider): Promise<string | undefined> {
   try {
     const name = JSON.parse(await fs.readFile(join(dir, 'package.json'))).name;
@@ -421,6 +494,11 @@ export async function resolveSourcePaths(paths: string[], options: { fs?: FSProv
       else if (st.isDirectory()) {
         const entry = await findMainEntry(path, fs);
         files = entry ? [entry] : await serverFilesIn(path, fs);
+        // A Python package checkout (pyproject + src/<pkg>/): all its modules
+        if (!entry && (files.length === 0 || files.every((f) => f.endsWith('.py')))) {
+          const pkgFiles = await pythonPackageFiles(path, fs);
+          if (pkgFiles) files = pkgFiles;
+        }
       }
     } catch {
       // reported below
@@ -429,7 +507,7 @@ export async function resolveSourcePaths(paths: string[], options: { fs?: FSProv
     const parts: string[] = [];
     for (const file of files) {
       const code = await readSourceFile(file, fs);
-      if (code !== undefined) parts.push(files.length > 1 ? `// === ${basename(file)} ===\n${code}` : code);
+      if (code !== undefined) parts.push(files.length > 1 ? `// === ${relative(path, file) || basename(file)} ===\n${code}` : code);
     }
     if (parts.length === 0) {
       unreadable.push(given);
@@ -439,6 +517,7 @@ export async function resolveSourcePaths(paths: string[], options: { fs?: FSProv
     const sourceCode = parts.join('\n\n');
     const entryFile = files[0];
     const source: MCPServerSource = { serverName: basename(path), localPath: entryFile, sourceCode };
+    if (parts.length > 1) source.sourceRoot = path;
     // The name it is published under, for the provenance (typosquat) check.
     const packageName = await packageJsonName(dirname(entryFile), fs);
     if (packageName) source.packageName = packageName;

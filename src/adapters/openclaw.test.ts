@@ -221,6 +221,22 @@ describe('OpenClaw adapter', () => {
   });
 });
 
+describe('OpenClaw getGatewayInfo (2026.x schema)', () => {
+  const info = (gateway: Record<string, unknown>) => openclawAdapter.getGatewayInfo!({ gateway });
+  it('resolves gateway.bind modes to a listen address', () => {
+    expect(info({ bind: 'loopback' })?.host).toBe('127.0.0.1');
+    expect(info({ bind: 'lan' })?.host).toBe('0.0.0.0');
+    expect(info({ bind: 'custom', customBindHost: '10.0.0.5' })?.host).toBe('10.0.0.5');
+    expect(info({ bind: 'auto' })?.host).toBeUndefined();
+    expect(info({ host: '127.0.0.1', bind: 'lan' })?.host).toBe('127.0.0.1');
+  });
+  it('reads tls as an object or a boolean', () => {
+    expect(info({ tls: { enabled: true } })?.tls).toBe(true);
+    expect(info({ tls: { enabled: false } })?.tls).toBe(false);
+    expect(info({ tls: true })?.tls).toBe(true);
+  });
+});
+
 describe('getUserHomeDirs', () => {
   beforeEach(() => {
     vi.resetAllMocks();

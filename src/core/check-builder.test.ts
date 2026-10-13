@@ -100,6 +100,7 @@ describe('defineCheck', () => {
       const check = defineCheck({
         id: 'R', name: 'R', category: 'config', severity: 'warning', description: '',
         run: async (_c, h) => h.result({ passed: false, message: 'bad', fixable: true, fixDescription: 'do X' }),
+        fix: async () => ({ checkId: 'R', applied: true, message: '' }),
       });
       const r = await check.run(minimalCtx);
       expect(r.fixable).toBe(true);
@@ -142,5 +143,19 @@ describe('defineCheck', () => {
       const r = await check.run(minimalCtx);
       expect(r.severity).toBe('critical');
     });
+  });
+
+  it('never reports fixable for a check without fix()', async () => {
+    const run = async (_c: unknown, h: Parameters<Parameters<typeof defineCheck>[0]['run']>[1]) =>
+      h.fromEvidence([{ file: '/x' }], { passed: 'ok', failed: () => 'bad', fixable: true, fixDescription: 'do it' });
+    const noFix = defineCheck({ id: 'N', name: 'N', category: 'mcp', severity: 'warning', description: '', run });
+    const r = await noFix.run(minimalCtx);
+    expect(r.fixable).toBe(false);
+    expect(r.fixDescription).toBe('do it');
+    const withFix = defineCheck({
+      id: 'Y', name: 'Y', category: 'mcp', severity: 'warning', description: '', run,
+      fix: async () => ({ checkId: 'Y', applied: true, message: '' }),
+    });
+    expect((await withFix.run(minimalCtx)).fixable).toBe(true);
   });
 });

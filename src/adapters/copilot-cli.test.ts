@@ -54,6 +54,23 @@ describe('GitHub Copilot CLI adapter', () => {
     expect(result).toEqual([]);
   });
 
+  it('does not treat a repo with .mcp.json as a Copilot install when Copilot is absent', async () => {
+    // .mcp.json is also Claude Code's project file
+    setExistingPaths([join(process.cwd(), '.mcp.json')]);
+    mockLoadConfig.mockResolvedValue(mockConfig(join(process.cwd(), '.mcp.json'), { mcpServers: {} }));
+    expect(await copilotCliAdapter.detect()).toEqual([]);
+  });
+
+  it('adds the project install next to an installed Copilot CLI', async () => {
+    const settingsPath = join(copilotDir, 'settings.json');
+    const mcpPath = join(process.cwd(), '.mcp.json');
+    setExistingPaths([copilotDir, settingsPath, mcpPath]);
+    mockLoadConfig.mockImplementation(async (path) => mockConfig(path as string, {}));
+    const result = await copilotCliAdapter.detect();
+    expect(result.map(i => i.profile)).toEqual([undefined, 'project']);
+    expect(result[1].installDir).toBe(process.cwd());
+  });
+
   it('detects installation from settings.json and extracts model', async () => {
     const settingsPath = join(copilotDir, 'settings.json');
     setExistingPaths([copilotDir, settingsPath]);
@@ -137,5 +154,15 @@ describe('GitHub Copilot CLI adapter', () => {
     const paths = copilotCliAdapter.getCredentialPaths!(copilotDir);
     expect(paths).toContain(join(copilotDir, 'config.json'));
     expect(paths).toContain(join(copilotDir, 'settings.json'));
+  });
+});
+
+describe('copilotHome', () => {
+  const fsWith = (env: Record<string, string>, home = '/home/u') => ({ homedir: () => home, getEnv: (k: string) => env[k] }) as unknown as import('../core/fs-provider.js').FSProvider;
+  it('honours $COPILOT_HOME for the scanning user', async () => {
+    const { copilotHome } = await import('./copilot-cli.js');
+    expect(copilotHome('/home/u', fsWith({}))).toBe('/home/u/.copilot');
+    expect(copilotHome('/home/u', fsWith({ COPILOT_HOME: '/srv/cp' }))).toBe('/srv/cp');
+    expect(copilotHome('/home/x', fsWith({ COPILOT_HOME: '/srv/cp' }))).toBe('/home/x/.copilot');
   });
 });

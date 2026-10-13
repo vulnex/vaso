@@ -64,8 +64,12 @@ export const ghc008 = defineCheck({
   async run(ctx, h) {
     const evidence: Evidence[] = [];
 
-    // Project-level instructions
-    await scanFile(join(process.cwd(), '.github', 'copilot-instructions.md'), ctx, evidence);
+    // Project-level instructions, on the project install (installDir = the repo)
+    if (ctx.installation.profile === 'project') {
+      await scanFile(join(ctx.installation.installDir, '.github', 'copilot-instructions.md'), ctx, evidence);
+    } else {
+      await scanFile(join(ctx.installation.installDir, 'copilot-instructions.md'), ctx, evidence);
+    }
 
     // User-level instructions/*.instructions.md
     const userInstrDir = join(ctx.installation.installDir, 'instructions');

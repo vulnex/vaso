@@ -343,6 +343,7 @@ export const nanobotAdapter: AgentAdapter = {
         '~/.nanobot/sessions',
         '~/.nanobot/workspace',
         '~/.nanobot/workspace/memory',
+        '~/.nanobot/cron',
         '~/.nanobot/workspace/cron',
         '~/.nanobot/workspace/skills',
         '~/.nanobot/workspace/plugins',

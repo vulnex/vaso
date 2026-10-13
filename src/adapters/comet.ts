@@ -108,6 +108,9 @@ export const cometAdapter: AgentAdapter = {
         { id: 'comet-version', cmd: 'defaults', args: ['read', `${APP_BUNDLE_PATH}/Contents/Info.plist`, 'CFBundleShortVersionString'], timeout: 3000 },
         { id: 'comet-codesign', cmd: 'codesign', args: ['-dv', APP_BUNDLE_PATH], timeout: 5000 },
       ],
+      // Session credentials and connector config — PC-001 checks permissions only
+      metadataGlobPatterns: ['Cookies', 'Login Data', 'Web Data', 'Preferences']
+        .map(f => `~/Library/Application Support/Comet/Default/${f}`),
       directoryListings: [
         '~/Library/Application Support/Comet',
         '~/Library/Application Support/Comet/Default',

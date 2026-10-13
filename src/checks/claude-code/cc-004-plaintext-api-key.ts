@@ -33,6 +33,23 @@ function walkEnv(env: Record<string, unknown>, file: string, prefix: string, evi
   }
 }
 
+const AUTH_SCHEME = /^\s*(?:Bearer|Basic|Token)\b\s*/i;
+
+/** Secrets in each server's env and headers (`Authorization: Bearer …`). */
+function walkServers(servers: unknown, file: string, prefix: string, evidence: Evidence[]): void {
+  if (!servers || typeof servers !== 'object') return;
+  for (const [name, server] of Object.entries(servers as Record<string, unknown>)) {
+    if (!server || typeof server !== 'object') continue;
+    const { env, headers } = server as Record<string, unknown>;
+    if (env && typeof env === 'object') walkEnv(env as Record<string, unknown>, file, `${prefix}${name}.env.`, evidence);
+    if (headers && typeof headers === 'object') {
+      const literal = Object.fromEntries(Object.entries(headers as Record<string, unknown>)
+        .map(([k, v]) => [k, typeof v === 'string' ? v.replace(AUTH_SCHEME, '').trim() : v]));
+      walkEnv(literal, file, `${prefix}${name}.headers.`, evidence);
+    }
+  }
+}
+
 export const cc004 = defineCheck({
   id: 'CC-004',
   name: 'Plaintext API Key in Config',
@@ -50,14 +67,13 @@ export const cc004 = defineCheck({
         walkEnv(env, config.filePath, 'env.', evidence);
       }
 
-      const mcpServers = config.data.mcpServers as Record<string, unknown> | undefined;
-      if (mcpServers && typeof mcpServers === 'object') {
-        for (const [name, server] of Object.entries(mcpServers)) {
-          if (!server || typeof server !== 'object') continue;
-          const serverEnv = (server as Record<string, unknown>).env as Record<string, unknown> | undefined;
-          if (serverEnv && typeof serverEnv === 'object') {
-            walkEnv(serverEnv, config.filePath, `mcpServers.${name}.env.`, evidence);
-          }
+      walkServers(config.data.mcpServers, config.filePath, 'mcpServers.', evidence);
+      // `claude mcp add` (default local scope) writes per-project servers to
+      // ~/.claude.json under projects[path].mcpServers
+      const projects = config.data.projects;
+      if (projects && typeof projects === 'object') {
+        for (const [projectPath, project] of Object.entries(projects as Record<string, unknown>)) {
+          walkServers((project as Record<string, unknown> | null)?.mcpServers, config.filePath, `projects[${projectPath}].mcpServers.`, evidence);
         }
       }
     }

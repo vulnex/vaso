@@ -69,6 +69,20 @@ describe('OPC-001: Auth file permissions', () => {
     expect(result.passed).toBe(false);
   });
 
+  it('follows $XDG_DATA_HOME for the scanning user', async () => {
+    const env: Record<string, string> = { XDG_CONFIG_HOME: '/x/cfg', XDG_DATA_HOME: '/x/data' };
+    const fs = makeFs({
+      getEnv: vi.fn((k: string) => env[k]),
+      access: vi.fn(async (p: string) => p === '/x/data/opencode/auth.json'),
+      stat: vi.fn(async () => ({ mode: 0o644, isFile: () => true, isDirectory: () => false })),
+    });
+    const ctx = makeCtx([], fs);
+    ctx.installation = { ...ctx.installation, installDir: '/x/cfg/opencode' };
+    const result = await check.run(ctx);
+    expect(result.passed).toBe(false);
+    expect(result.evidence?.[0].file).toBe('/x/data/opencode/auth.json');
+  });
+
   it('passes when auth.json is mode 0600', async () => {
     const fs = makeFs({
       access: vi.fn(async () => true),

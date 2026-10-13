@@ -182,7 +182,7 @@ export const qwenCodeAdapter: AgentAdapter = {
   getProbeManifest(): ProbeManifest {
     return {
       // OAuth/account token stores — QC-002 checks permissions only
-      metadataGlobPatterns: AUTH_FILES.map(f => `~/.qwen/${f}`),
+      metadataGlobPatterns: [...AUTH_FILES.map(f => `~/.qwen/${f}`), '~/.qwen/.env'],
       filePaths: [
         '~/.qwen/settings.json',
         '~/.qwen/memory.md',

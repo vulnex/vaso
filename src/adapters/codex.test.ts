@@ -104,8 +104,8 @@ describe('Codex adapter', () => {
     expect(mockLoadConfig).not.toHaveBeenCalledWith(join(codexDir, 'auth.json'), expect.anything());
   });
 
-  it('has no skills dir', () => {
-    expect(codexAdapter.getSkillsDir(codexDir)).toBeUndefined();
+  it('keeps user skills in <CODEX_HOME>/skills', () => {
+    expect(codexAdapter.getSkillsDir(codexDir)).toBe(join(codexDir, 'skills'));
   });
 
   it('has no gateway', () => {
@@ -124,5 +124,16 @@ describe('Codex adapter', () => {
     expect(manifest.metadataGlobPatterns).toContain('~/.codex/auth.json');
     expect(manifest.envPrefixes).toContain('CODEX_');
     expect(manifest.envPrefixes).toContain('OPENAI_');
+  });
+});
+
+describe('codexHome', () => {
+  const fsWith = (env: Record<string, string>, home = '/home/u') => ({ homedir: () => home, getEnv: (k: string) => env[k] }) as unknown as import('../core/fs-provider.js').FSProvider;
+  it('honours $CODEX_HOME for the scanning user only', async () => {
+    const { codexHome } = await import('./codex.js');
+    expect(codexHome('/home/u', fsWith({}))).toBe('/home/u/.codex');
+    expect(codexHome('/home/u', fsWith({ CODEX_HOME: '/srv/codex' }))).toBe('/srv/codex');
+    expect(codexHome('/home/u', fsWith({ CODEX_HOME: '~/alt' }))).toBe('/home/u/alt');
+    expect(codexHome('/home/other', fsWith({ CODEX_HOME: '/srv/codex' }))).toBe('/home/other/.codex');
   });
 });

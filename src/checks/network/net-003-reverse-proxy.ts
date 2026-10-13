@@ -3,6 +3,9 @@ import { defineCheck } from '../../core/check-builder.js';
 import { CODING_AGENTS } from '../../core/types.js';
 import { getNestedValue } from '../../core/utils.js';
 
+/** A trusted-proxy entry that matches every client. */
+const ANY_ADDRESS = /^(?:\*|0\.0\.0\.0\/0|::\/0|0\.0\.0\.0)$/;
+
 export const net003 = defineCheck({
   id: 'NET-003',
   name: 'Reverse Proxy Bypass',
@@ -21,6 +24,15 @@ export const net003 = defineCheck({
 
       if (trustProxy === true || trustProxy === 'all') {
         evidence.push({ file: config.filePath, detail: `trustProxy: ${String(trustProxy)}` });
+      }
+
+      // OpenClaw 2026.x: gateway.trustedProxies is a list of addresses/CIDRs
+      const proxies = getNestedValue(config.data, 'gateway.trustedProxies');
+      if (Array.isArray(proxies)) {
+        const any = proxies.filter(p => typeof p === 'string' && ANY_ADDRESS.test(p.trim()));
+        if (any.length > 0) {
+          evidence.push({ file: config.filePath, detail: `gateway.trustedProxies: ${any.join(', ')} — every address is a trusted proxy` });
+        }
       }
     }
 

@@ -22,7 +22,7 @@ export const SECURITY_PATTERNS: PatternRule[] = [
   { id: 'RS-002', pattern: /\bnc\b.*-e\s+(?:\/bin\/(?:ba)?sh|cmd)/i, category: 'reverse-shell', severity: 'critical', description: 'Netcat reverse shell' },
   { id: 'RS-003', pattern: /\bnet\.connect\s*\(.*\bchild_process\b/i, category: 'reverse-shell', severity: 'critical', description: 'Node.js net.connect reverse shell' },
   { id: 'RS-004', pattern: /\bnew\s+WebSocket\b.*\bchild_process\b/is, category: 'reverse-shell', severity: 'critical', description: 'WebSocket reverse shell' },
-  { id: 'RS-005', pattern: /\bSocket\b.*\b(?:subprocess|exec|spawn)\b/i, category: 'reverse-shell', severity: 'critical', description: 'Socket-based reverse shell' },
+  { id: 'RS-005', pattern: /\bsocket\b.*(?:\bsubprocess\.|\b(?:exec|execSync|spawn|spawnSync|popen)\s*\(|\bos\.dup2\s*\()/i, category: 'reverse-shell', severity: 'critical', description: 'Socket-based reverse shell' },
   { id: 'RS-006', pattern: /python\S*\s+-c\s+['"]import\s+socket/i, category: 'reverse-shell', severity: 'critical', description: 'Python reverse shell' },
   { id: 'RS-007', pattern: /\bsocat\b.*\bexec:/i, category: 'reverse-shell', severity: 'critical', description: 'Socat reverse shell' },
 
@@ -48,7 +48,7 @@ export const SECURITY_PATTERNS: PatternRule[] = [
 
   // Prompt injection indicators
   { id: 'PI-001', pattern: /ignore\s+(?:all\s+)?(?:previous|above|prior)\s+instructions/i, category: 'prompt-injection', severity: 'warning', description: 'Prompt injection — instruction override' },
-  { id: 'PI-002', pattern: /you\s+are\s+now\s+(?:a|an|in)\s+/i, category: 'prompt-injection', severity: 'warning', description: 'Prompt injection — role reassignment' },
+  { id: 'PI-002', pattern: /you\s+are\s+now\s+(?:(?:a|an)\s+|in\s+(?:[\w-]+\s+){0,2}(?:mode|persona)\b)/i, category: 'prompt-injection', severity: 'warning', description: 'Prompt injection — role reassignment' },
   { id: 'PI-003', pattern: /system\s*:\s*you\s+(?:must|should|are)/i, category: 'prompt-injection', severity: 'warning', description: 'Prompt injection — fake system prompt' },
   { id: 'PI-004', pattern: /\[SYSTEM\]|\[ADMIN\]|<\|system\|>/i, category: 'prompt-injection', severity: 'warning', description: 'Prompt injection — delimiter escape' },
 

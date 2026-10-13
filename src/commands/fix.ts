@@ -10,12 +10,13 @@ export interface FixCommandOptions {
   agent?: string;
   dryRun?: boolean;
   yes?: boolean;
-  rollback?: boolean;
+  /** true = the latest backup; a string names one (timestamp or part of it). */
+  rollback?: boolean | string;
 }
 
 export async function runFix(options: FixCommandOptions): Promise<void> {
   if (options.rollback) {
-    await rollback();
+    await rollback(typeof options.rollback === 'string' ? options.rollback : undefined);
     return;
   }
 

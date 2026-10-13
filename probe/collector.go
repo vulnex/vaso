@@ -213,6 +213,7 @@ func Collect(manifest ProbeManifest, escalate bool) ProbeSnapshot {
 				c.collectPath(&snapshot, match, false, false)
 			}
 		}
+		c.followLinkedTrees(&snapshot, pattern, matches, false)
 	}
 
 	// Metadata-only globs: existence + mode, never content
@@ -230,6 +231,7 @@ func Collect(manifest ProbeManifest, escalate bool) ProbeSnapshot {
 				c.collectPath(&snapshot, match, true, false)
 			}
 		}
+		c.followLinkedTrees(&snapshot, pattern, matches, true)
 	}
 
 	// Expand and collect directory listings. Only non-nil listings are stored:
@@ -332,9 +334,41 @@ func expandArgsPerUser(args []string, homes []UserHome) [][]string {
 }
 
 // expandPaths replaces ~ with each discovered user home directory.
+// envPathPrefix matches a manifest path rooted at an environment variable:
+// `${PICOCLAW_HOME}/config.json`, `${XDG_CONFIG_HOME}/opencode/**`.
+var envPathPrefix = regexp.MustCompile(`^\$\{([A-Za-z_][A-Za-z0-9_]*)\}(/.*)?$`)
+
+// expandEnvPath resolves `${NAME}` + rest from the probe's environment — the
+// scanned user's, where an agent relocated with PICOCLAW_HOME or
+// XDG_CONFIG_HOME keeps its files. Unset or relative values expand to
+// nothing; a leading `~` is the probe user's home.
+func expandEnvPath(name, rest string) (string, bool) {
+	val := strings.TrimSpace(os.Getenv(name))
+	if val == "" {
+		return "", false
+	}
+	if val == "~" || strings.HasPrefix(val, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", false
+		}
+		val = filepath.Join(home, strings.TrimPrefix(val, "~"))
+	}
+	if !filepath.IsAbs(val) {
+		return "", false
+	}
+	return filepath.Clean(val) + rest, true
+}
+
 func expandPaths(paths []string, homes []UserHome) []string {
 	var expanded []string
 	for _, p := range paths {
+		if m := envPathPrefix.FindStringSubmatch(p); m != nil {
+			if exp, ok := expandEnvPath(m[1], m[2]); ok {
+				expanded = append(expanded, exp)
+			}
+			continue
+		}
 		if strings.HasPrefix(p, "~/") || p == "~" {
 			for _, h := range homes {
 				exp := filepath.Join(h.Path, strings.TrimPrefix(p, "~"))
@@ -504,6 +538,76 @@ func collectDirectory(dir string, symlinks map[string]string) []string {
 		names = append(names, name)
 	}
 	return names
+}
+
+// maxLinkDepth bounds how many symlinks deep followLinkedTrees goes.
+const maxLinkDepth = 8
+
+// followLinkedTrees collects, under the link's own path, the directories a
+// `<root>/**` glob reached only as symlinks pointing outside root — skills
+// are often installed as a link into a checkout elsewhere, and the agent
+// loads what it points to. A link back into the tree (or to a parent of it)
+// is skipped: that content is already collected. Mirrors walkSkillTree in
+// src/core/skill-walk.ts so local and remote scans read the same files.
+func (c *collector) followLinkedTrees(snapshot *ProbeSnapshot, pattern string, matches []string, metadataOnly bool) {
+	if !strings.HasSuffix(filepath.ToSlash(pattern), "/**") {
+		return
+	}
+	rootReal, err := filepath.EvalSymlinks(strings.TrimSuffix(filepath.ToSlash(pattern), "/**"))
+	if err != nil {
+		return
+	}
+	visited := map[string]bool{rootReal: true}
+	c.followFrom(snapshot, pattern, matches, []string{rootReal}, visited, 0, metadataOnly)
+}
+
+func (c *collector) followFrom(snapshot *ProbeSnapshot, pattern string, matches []string, roots []string, visited map[string]bool, depth int, metadataOnly bool) {
+	if depth >= maxLinkDepth {
+		return
+	}
+	for _, m := range matches {
+		info, err := os.Lstat(m)
+		if err != nil || info.Mode()&os.ModeSymlink == 0 || inExcludedDir(pattern, m) {
+			continue
+		}
+		real, err := filepath.EvalSymlinks(m)
+		if err != nil || visited[real] || relatedToAny(real, roots) {
+			continue
+		}
+		if st, err := os.Stat(m); err != nil || !st.IsDir() {
+			continue // a file link was collected (followed) by the glob itself
+		}
+		visited[real] = true
+		sub, err := doublestar.FilepathGlob(filepath.Join(m, "**"), doublestar.WithNoFollow())
+		if err != nil {
+			continue
+		}
+		for _, sm := range sub {
+			if inExcludedDir(pattern, sm) {
+				continue
+			}
+			recordSymlink(snapshot.Symlinks, sm)
+			if _, exists := snapshot.Files[sm]; !exists {
+				c.collectPath(snapshot, sm, metadataOnly, false)
+			}
+		}
+		c.followFrom(snapshot, pattern, sub, append(append([]string{}, roots...), real), visited, depth+1, metadataOnly)
+	}
+}
+
+// relatedToAny reports whether p is inside one of dirs or contains one.
+func relatedToAny(p string, dirs []string) bool {
+	for _, d := range dirs {
+		if within(p, d) || within(d, p) {
+			return true
+		}
+	}
+	return false
+}
+
+func within(p, dir string) bool {
+	rel, err := filepath.Rel(dir, p)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 // recordSymlink stores p's link target when p is a symlink.

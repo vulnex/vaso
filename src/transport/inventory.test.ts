@@ -38,6 +38,23 @@ hosts:
     expect(targets[1].user).toBe('deploy');
   });
 
+  it('rejects a misspelt field instead of dropping it', async () => {
+    const path = await writeTempYAML(`
+hosts:
+  - host: server1.example.com
+    sshKey: ~/.ssh/id_prod
+`);
+    await expect(parseInventory(path)).rejects.toThrow(/entry #1: unknown field "sshKey".*identity/);
+  });
+
+  it('rejects an entry that is not a mapping', async () => {
+    const path = await writeTempYAML(`
+hosts:
+  - server1.example.com
+`);
+    await expect(parseInventory(path)).rejects.toThrow(/entry #1 must be a mapping/);
+  });
+
   it('defaults user to root when not specified', async () => {
     const path = await writeTempYAML(`
 hosts:

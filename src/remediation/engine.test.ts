@@ -265,6 +265,10 @@ describe('RemediationEngine interactive fix', () => {
       expect(await readFile(file, 'utf-8')).toBe('original+TST-001+TST-002');
       const [stamp] = await readdir(join(home, '.vaso', 'backups'));
       expect(await readFile(join(home, '.vaso', 'backups', stamp, file), 'utf-8')).toBe('original');
+      // Copies keep the originals' modes, so the tree is owner-only
+      const { stat } = await import('node:fs/promises');
+      expect((await stat(join(home, '.vaso', 'backups'))).mode & 0o777).toBe(0o700);
+      expect((await stat(join(home, '.vaso', 'backups', stamp))).mode & 0o777).toBe(0o700);
     } finally {
       process.env.HOME = savedHome;
       await rm(home, { recursive: true, force: true });

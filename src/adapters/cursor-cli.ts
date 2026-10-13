@@ -130,8 +130,8 @@ export const cursorCliAdapter: AgentAdapter = {
       });
       const cliBinary = installs.primary?.path;
       const hasCursorDir = await fs.access(cursorDir);
-
-      if (!hasCursorDir && !cliBinary) continue;
+      // No early exit without ~/.cursor: an IDE-only install (app bundle,
+      // user-data settings) is still a Cursor install — decided below.
 
       const configFiles = hasCursorDir ? await loadFiles(cursorDir, USER_CONFIG_FILES, fs) : [];
 

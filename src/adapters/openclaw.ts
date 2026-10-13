@@ -5,7 +5,7 @@ import type { ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { loadConfig } from '../core/config-loader.js';
-import { deepMerge } from '../core/utils.js';
+import { deepMerge, getNestedValue } from '../core/utils.js';
 import { discoverCliInstalls } from './cli-installs.js';
 import { npmPackageJsonGlobs } from './nvm-binary.js';
 import { queryCliVersion, readPackageVersion } from './version-query.js';
@@ -101,12 +101,15 @@ function getSearchDirs(home: string, profile?: string, fs?: FSProvider): string[
     dirs.unshift(join(home, `.openclaw-${profile}`));
   }
 
-  if (process.env.OPENCLAW_HOME) {
-    dirs.unshift(process.env.OPENCLAW_HOME);
+  // The scanned host's environment (a snapshot's on remote scans)
+  const provider = fs ?? new LocalFSProvider();
+  const openclawHome = provider.getEnv('OPENCLAW_HOME');
+  if (openclawHome) {
+    dirs.unshift(openclawHome);
   }
 
   // System-wide config (only once, not per-user)
-  const currentHome = fs ? fs.homedir() : new LocalFSProvider().homedir();
+  const currentHome = provider.homedir();
   if (home === currentHome) {
     dirs.push('/etc/openclaw');
   }
@@ -126,13 +129,25 @@ async function findAppBundle(fs: FSProvider): Promise<string | undefined> {
   return undefined;
 }
 
+/** The listen address an OpenClaw `gateway.bind` mode resolves to. `auto`
+ *  and `tailnet` depend on the host's interfaces, so they stay unknown. */
+function openclawBindHost(bind: unknown, customBindHost: unknown): string | undefined {
+  switch (typeof bind === 'string' ? bind.toLowerCase() : undefined) {
+    case 'loopback': return '127.0.0.1';
+    case 'lan':
+    case 'all': return '0.0.0.0';
+    case 'custom': return typeof customBindHost === 'string' ? customBindHost : undefined;
+    default: return undefined;
+  }
+}
+
 export const openclawAdapter: AgentAdapter = {
   agent: 'openclaw',
   displayName: 'OpenClaw',
 
   async detect(options?: DetectOptions): Promise<AgentInstallation[]> {
     const fs = options?.fs ?? new LocalFSProvider();
-    const profile = process.env.OPENCLAW_PROFILE || undefined;
+    const profile = fs.getEnv('OPENCLAW_PROFILE') || undefined;
     const userDirs = await getUserHomeDirs(options?.allUsers, fs);
     const appBundle = await findAppBundle(fs);
     const installations: AgentInstallation[] = [];
@@ -182,12 +197,27 @@ export const openclawAdapter: AgentAdapter = {
           Object.assign(merged, c.data);
         }
 
+        // Skill roots OpenClaw loads besides <dir>/skills: the workspace's
+        // skills/ (agents.defaults.workspace, default <dir>/workspace) and
+        // skills.load.extraDirs.
+        const expand = (p: string) => (p === '~' || p.startsWith('~/') ? join(home, p.slice(1)) : p);
+        const workspace = getNestedValue(merged, 'agents.defaults.workspace');
+        const extraDirs = getNestedValue(merged, 'skills.load.extraDirs');
+        const roots = [
+          skillsDir,
+          join(typeof workspace === 'string' && workspace.trim() ? expand(workspace.trim()) : join(dir, 'workspace'), 'skills'),
+          ...(Array.isArray(extraDirs) ? extraDirs.filter((d): d is string => typeof d === 'string' && d.trim() !== '').map(d => expand(d.trim())) : []),
+        ].filter((d): d is string => Boolean(d));
+        const skillsDirs: string[] = [];
+        for (const d of [...new Set(roots)]) if (d === skillsDir || await fs.access(d)) skillsDirs.push(d);
+
         const globalInstallation: AgentInstallation = {
           agent: 'openclaw',
           version,
           installDir: dir,
           configFiles,
           skillsDir,
+          skillsDirs: skillsDirs.length > 1 ? skillsDirs : undefined,
           gateway: this.getGatewayInfo(merged),
           models: await this.getModels?.(configFiles),
           profile,
@@ -281,7 +311,7 @@ export const openclawAdapter: AgentAdapter = {
 
   getConfigPaths(): string[] {
     const _fs = new LocalFSProvider();
-    const dirs = getSearchDirs(_fs.homedir(), process.env.OPENCLAW_PROFILE || undefined, _fs);
+    const dirs = getSearchDirs(_fs.homedir(), _fs.getEnv('OPENCLAW_PROFILE') || undefined, _fs);
     return dirs.flatMap(dir =>
       CONFIG_FILENAMES.map(f => join(dir, f))
     );
@@ -298,12 +328,18 @@ export const openclawAdapter: AgentAdapter = {
   getGatewayInfo(config: Record<string, unknown>): GatewayInfo | undefined {
     const gw = config.gateway as Record<string, unknown> | undefined;
     if (!gw) return undefined;
+    // 2026.x schema: gateway.bind = auto | lan | loopback | custom | tailnet
+    // (+ gateway.customBindHost) and gateway.tls = { enabled, … }; older
+    // configs used gateway.host and a boolean tls.
+    const tls = gw.tls && typeof gw.tls === 'object'
+      ? (gw.tls as Record<string, unknown>).enabled === true
+      : gw.tls as boolean | undefined;
 
     return {
-      host: gw.host as string | undefined,
+      host: (gw.host as string | undefined) ?? openclawBindHost(gw.bind, gw.customBindHost),
       port: gw.port as number | undefined,
       authMode: (gw.auth as Record<string, unknown>)?.mode as string | undefined,
-      tls: gw.tls as boolean | undefined,
+      tls,
     };
   },
 
@@ -361,8 +397,6 @@ export const openclawAdapter: AgentAdapter = {
         '~/.moltbot/config.json',
         '~/.moltbot/gateway.yaml',
         '~/.moltbot/.env',
-        '~/.openclaw/memory.json',
-        '~/.openclaw/conversations.db',
         // User-relative CLI install locations — kept in sync with USER_CLI_RELATIVE_PATHS
         '~/.volta/bin/openclaw',
         '~/.local/bin/openclaw',
@@ -370,16 +404,26 @@ export const openclawAdapter: AgentAdapter = {
         '~/.npm-global/bin/openclaw',
         '~/bin/openclaw',
       ],
-      // Credential stores — permissions only, never content
+      // Credential stores and conversation memory — permissions only (OC-006),
+      // never content
       metadataGlobPatterns: [
         '~/.openclaw/credentials.json',
         '~/.openclaw/auth.json',
+        '~/.openclaw/memory.json',
+        '~/.openclaw/conversations.db',
       ],
       globPatterns: [
         // package.json of every npm-global copy — versions non-primary copies on remote scans
         ...npmPackageJsonGlobs('openclaw'),
         '~/.openclaw/skills/**',
         '~/.openclaw/custom_skills/**',
+        // default workspace's skills/ (a custom agents.defaults.workspace is local-only)
+        '~/.openclaw/workspace/skills/**',
+        // profile installs (OPENCLAW_PROFILE=<p> → ~/.openclaw-<p>)
+        '~/.openclaw-*/openclaw.json',
+        '~/.openclaw-*/config.json',
+        '~/.openclaw-*/config.yaml',
+        '~/.openclaw-*/skills/**',
         '~/.openclaw/agents/*/agent.yaml',
         '~/.openclaw/agents/*/agent.json',
         '~/.openclaw/agents/*/config.yaml',

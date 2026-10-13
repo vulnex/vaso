@@ -23,11 +23,12 @@ function makeFs(overrides: Partial<FSProvider> = {}): FSProvider {
   } as FSProvider;
 }
 
-function makeCtx(configs: ParsedConfig[], fs?: FSProvider): ScanContext {
+function makeCtx(configs: ParsedConfig[], fs?: FSProvider, project = false): ScanContext {
   const installation: AgentInstallation = {
     agent: 'copilot-cli',
-    installDir: '/home/test/.copilot',
+    installDir: project ? '/home/test/repo' : '/home/test/.copilot',
     configFiles: configs,
+    ...(project ? { profile: 'project' } : {}),
   };
   return { installation, configs, platform: 'linux', fs: fs ?? makeFs() };
 }
@@ -66,6 +67,29 @@ describe('GHC-001: Directory Permissions', () => {
     });
     const result = await check.run(makeCtx([], fs));
     expect(result.passed).toBe(true);
+  });
+});
+
+describe('Copilot checks on the project install (installDir = the repo)', () => {
+  it('GHC-001 does not judge the repo directory as ~/.copilot', async () => {
+    const fs = makeFs({ stat: vi.fn(async () => ({ mode: 0o755, isFile: () => false, isDirectory: () => true })) });
+    expect((await copilotCliChecks.find(c => c.id === 'GHC-001')!.run(makeCtx([], fs, true))).passed).toBe(true);
+  });
+
+  it('GHC-007 reads .github/lsp.json and GHC-008 .github/copilot-instructions.md only there', async () => {
+    const read: string[] = [];
+    const fs = makeFs({
+      access: vi.fn(async () => true),
+      readdirEntries: vi.fn(async () => []),
+      readFile: vi.fn(async (p: string) => { read.push(p); return '{}'; }),
+    });
+    await copilotCliChecks.find(c => c.id === 'GHC-007')!.run(makeCtx([], fs, true));
+    await copilotCliChecks.find(c => c.id === 'GHC-008')!.run(makeCtx([], fs, true));
+    expect(read).toEqual(['/home/test/repo/.github/lsp.json', '/home/test/repo/.github/copilot-instructions.md']);
+    read.length = 0;
+    await copilotCliChecks.find(c => c.id === 'GHC-007')!.run(makeCtx([], fs));
+    await copilotCliChecks.find(c => c.id === 'GHC-008')!.run(makeCtx([], fs));
+    expect(read).toEqual(['/home/test/.copilot/lsp-config.json', '/home/test/.copilot/copilot-instructions.md']);
   });
 });
 

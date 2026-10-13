@@ -194,10 +194,11 @@ export const claudeDesktopAdapter: AgentAdapter = {
       ],
       globPatterns: [
         '~/Library/Application Support/Claude/Claude Extensions/**',
-        // Chromium Local Storage SSTables — read for the active-model
-        // sticky-selector value. Binary content gets U+FFFD-substituted in
-        // the JSON snapshot, but the ASCII anchor key and the model id
-        // survive intact, which is all readLocalStorageModel needs.
+      ],
+      // Chromium Local Storage holds the web app's session state, not just
+      // the active-model selector local scans read from it — never shipped
+      // (remote scans report no model, like Gemini's chat logs).
+      metadataGlobPatterns: [
         '~/Library/Application Support/Claude/Local Storage/leveldb/*.ldb',
         '~/Library/Application Support/Claude/Local Storage/leveldb/*.log',
       ],

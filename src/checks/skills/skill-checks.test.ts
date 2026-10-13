@@ -49,14 +49,25 @@ describe('SKL-011: Dependency Audit', () => {
     const skillDir = join(tempDir, 'bad-skill');
     await mkdir(skillDir, { recursive: true });
     await writeFile(join(skillDir, 'package.json'), JSON.stringify({
-      dependencies: { 'event-stream': '^3.3.4' },
+      dependencies: { 'event-stream': '3.3.6', 'flatmap-stream': '^0.1.0' },
     }));
     await writeFile(join(skillDir, 'package-lock.json'), '{}');
 
     const result = await skl011.run(makeContext(tempDir));
     expect(result.passed).toBe(false);
     expect(result.evidence).toBeDefined();
-    expect(result.evidence!.some(e => e.detail?.includes('event-stream'))).toBe(true);
+    expect(result.evidence!.some(e => e.detail?.includes('event-stream@3.3.6'))).toBe(true);
+    expect(result.evidence!.some(e => e.detail?.includes('Known malicious package: flatmap-stream'))).toBe(true);
+  });
+
+  it('leaves clean releases of once-hijacked packages alone', async () => {
+    const skillDir = join(tempDir, 'ok-skill');
+    await mkdir(skillDir, { recursive: true });
+    await writeFile(join(skillDir, 'package.json'), JSON.stringify({
+      dependencies: { colors: '1.4.0', rc: '^1.2.8', 'ua-parser-js': '1.0.37', 'event-stream': '^3.3.4' },
+    }));
+    await writeFile(join(skillDir, 'package-lock.json'), '{}');
+    expect((await skl011.run(makeContext(tempDir))).passed).toBe(true);
   });
 
   it('reports missing lockfile', async () => {

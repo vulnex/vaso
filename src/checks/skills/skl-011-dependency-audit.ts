@@ -4,19 +4,24 @@ import { defineCheck } from '../../core/check-builder.js';
 import { getIOCDatabase } from '../../ioc/database.js';
 import { markTestCode } from '../../analyzers/test-paths.js';
 import { readCappedFile } from '../../core/file-limits.js';
+import { collectServerDependencies } from '../../mcp/server-dependencies.js';
+import { exactVersion } from '../../core/version-range.js';
 
-const MALICIOUS_PACKAGES = new Set([
-  'event-stream',
-  'flatmap-stream',
-  'ua-parser-js',
-  'coa',
-  'rc',
-  'colors',
-  'faker',
-  'node-ipc',
-  'peacenotwar',
-  'es5-ext',
-]);
+/**
+ * Packages hijacked or sabotaged in specific releases (npm has since pulled
+ * them) — flagged only at those versions; '*' = malicious in every version.
+ */
+const COMPROMISED_VERSIONS: Record<string, readonly string[] | '*'> = {
+  'flatmap-stream': '*',
+  'peacenotwar': '*',
+  'event-stream': ['3.3.6'],
+  'ua-parser-js': ['0.7.29', '0.8.0', '1.0.0'],
+  'coa': ['2.0.3', '2.0.4', '2.1.1', '2.1.3', '3.0.1', '3.1.3'],
+  'rc': ['1.2.9', '1.3.9', '2.3.9'],
+  'colors': ['1.4.1', '1.4.2'],
+  'faker': ['6.6.6'],
+  'node-ipc': ['9.2.2', '10.1.1', '10.1.2', '10.1.3', '11.0.0', '11.1.0'],
+};
 
 const LOCKFILES = ['package-lock.json', 'yarn.lock', 'pnpm-lock.yaml'];
 
@@ -63,14 +68,21 @@ export const skl011 = defineCheck({
       const depNames = Object.keys(allDeps);
       if (depNames.length === 0) continue;
 
-      // Check for malicious packages
-      for (const dep of depNames) {
-        if (MALICIOUS_PACKAGES.has(dep)) {
-          evidence.push({
-            file: pkgPath,
-            detail: `Known malicious package: ${dep}`,
-          });
+      // Known-compromised releases, judged by the version that would run:
+      // the installed copy, else the lockfile, else an exact pin
+      const resolved = await collectServerDependencies(pkgPath, 'javascript', ctx.fs, { searchParents: false });
+      for (const dep of resolved) {
+        const bad = COMPROMISED_VERSIONS[dep.name];
+        if (!bad) continue;
+        const version = dep.version ?? (dep.range !== undefined ? exactVersion(dep.range) : undefined);
+        if (bad === '*') {
+          evidence.push({ file: dep.source, detail: `Known malicious package: ${dep.name}` });
+        } else if (version && bad.includes(version)) {
+          evidence.push({ file: dep.source, detail: `Known compromised release: ${dep.name}@${version}` });
         }
+      }
+
+      for (const dep of depNames) {
 
         // Check scoped package publishers
         const scopeMatch = dep.match(/^@([^/]+)\//);

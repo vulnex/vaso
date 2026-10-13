@@ -1,12 +1,16 @@
-import { readdir, copyFile, stat, chmod } from 'node:fs/promises';
+import { readdir, copyFile, stat, chmod, rename } from 'node:fs/promises';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import chalk from 'chalk';
 import { pathExists } from '../core/utils.js';
 
+/** A backup already restored: kept, but no longer "the last fix run". */
+const RESTORED_PREFIX = 'restored-';
+
 /**
  * Restore files from a VASO backup directory.
- * If no timestamp is given, uses the most recent backup.
+ * If no timestamp is given, uses the most recent backup not yet restored —
+ * so repeated rollbacks undo fix runs one at a time, newest first.
  */
 export async function rollback(timestamp?: string): Promise<void> {
   const backupsDir = join(homedir(), '.vaso', 'backups');
@@ -18,19 +22,28 @@ export async function rollback(timestamp?: string): Promise<void> {
 
   const entries = await readdir(backupsDir, { withFileTypes: true });
   const dirs = entries.filter(e => e.isDirectory()).map(e => e.name).sort();
+  const pending = dirs.filter(d => !d.startsWith(RESTORED_PREFIX));
 
-  if (dirs.length === 0) {
-    console.log(chalk.yellow('No backup directories found.'));
+  if (dirs.length === 0 || (!timestamp && pending.length === 0)) {
+    console.log(chalk.yellow(dirs.length === 0
+      ? 'No backup directories found.'
+      : 'Every backup has already been restored. Name one to restore it again: vaso fix --rollback <backup>'));
+    if (dirs.length > 0) console.log(`Available backups: ${dirs.join(', ')}`);
     return;
   }
 
-  const target = timestamp
-    ? dirs.find(d => d.includes(timestamp))
-    : dirs[dirs.length - 1];
+  const exact = timestamp ? dirs.filter(d => d === timestamp || d === `${RESTORED_PREFIX}${timestamp}`) : [];
+  const matches = !timestamp ? [pending[pending.length - 1]]
+    : exact.length > 0 ? exact
+    : dirs.filter(d => d.includes(timestamp));
+  const target = matches.length === 1 ? matches[0] : undefined;
 
   if (!target) {
-    console.log(chalk.red(`No backup matching "${timestamp}" found.`));
+    console.log(chalk.red(matches.length > 1
+      ? `"${timestamp}" matches ${matches.length} backups — be more specific.`
+      : `No backup matching "${timestamp}" found.`));
     console.log(`Available backups: ${dirs.join(', ')}`);
+    process.exitCode = 2;
     return;
   }
 
@@ -57,6 +70,12 @@ export async function rollback(timestamp?: string): Promise<void> {
     } catch (err) {
       console.log(`  ${chalk.red('x')} Failed to restore ${originalPath}: ${(err as Error).message}`);
     }
+  }
+
+  // Retire the backup so the next rollback undoes the fix run before it.
+  // A partial restore stays pending, to be retried.
+  if (restored === files.length && !target.startsWith(RESTORED_PREFIX)) {
+    await rename(backupDir, join(backupsDir, `${RESTORED_PREFIX}${target}`));
   }
 
   console.log(`\n${chalk.bold('Rollback complete:')} ${restored} file(s) restored`);

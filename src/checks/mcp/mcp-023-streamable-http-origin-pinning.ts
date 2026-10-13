@@ -22,6 +22,21 @@ function extractHostname(url: string): string | undefined {
   }
 }
 
+/**
+ * A host on the user's own network. DNS rebinding lets a web page reach
+ * these — not a public server, whose Origin handling a client config can't
+ * show (the server-source arm below reads it when the code is available).
+ */
+function isPrivateNetworkHost(host: string): boolean {
+  const h = host.replace(/^\[|\]$/g, '');
+  if (/^10\./.test(h) || /^192\.168\./.test(h) || /^169\.254\./.test(h)) return true;
+  const m = /^172\.(\d+)\./.exec(h);
+  if (m && Number(m[1]) >= 16 && Number(m[1]) <= 31) return true;
+  if (/^f[cd][0-9a-f]{2}:/i.test(h) || /^fe80:/i.test(h)) return true;
+  // mDNS / internal names and single-label hosts resolve on the LAN
+  return /\.(?:local|lan|internal|home\.arpa|localdomain)$/i.test(h) || (!h.includes('.') && !h.includes(':'));
+}
+
 function hasOriginPinning(args: readonly string[]): boolean {
   const joined = args.join(' ');
   return ORIGIN_FLAG_PATTERNS.some(p => p.test(joined));
@@ -42,7 +57,7 @@ export const mcp023 = defineCheck({
   name: 'Streamable-HTTP Server Without Origin Pinning',
   category: 'mcp',
   severity: 'warning',
-  description: 'Detect streamable-HTTP MCP servers reachable on a non-localhost URL with no apparent Origin/host allowlist — DNS-rebinding hardening required by the 2025 MCP spec',
+  description: 'Detect streamable-HTTP MCP servers on the local network with no apparent Origin/host allowlist, and server code that switches Host/Origin validation off — DNS-rebinding hardening required by the 2025 MCP spec',
   supportedAgents: ['mcp'],
 
   async run(ctx, h) {
@@ -57,7 +72,7 @@ export const mcp023 = defineCheck({
         if (!endpoint || endpoint.transport !== 'streamable-http') continue;
 
         const host = extractHostname(endpoint.url);
-        if (!host || LOCALHOST_HOSTS.has(host)) continue;
+        if (!host || LOCALHOST_HOSTS.has(host) || !isPrivateNetworkHost(host)) continue;
 
         if (hasOriginPinning(server.args ?? [])) continue;
 
@@ -65,7 +80,7 @@ export const mcp023 = defineCheck({
         evidence.push({
           file: config.filePath,
           snippet: `Server "${server.name}" (${endpoint.transport}${through}): ${endpoint.url}`,
-          detail: `Streamable-HTTP server reachable at "${host}" with no --allowed-origins / --host pin in args. The 2025 MCP spec requires Origin validation and localhost binding to prevent DNS rebinding attacks against local servers; remote servers must validate Origin per spec §6.2`,
+          detail: `Streamable-HTTP server on the local network ("${host}") with no --allowed-origins / --host pin in args. A web page can reach LAN services through DNS rebinding unless the server validates Origin (MCP spec 2025, §6.2) — confirm it does, or bind it to localhost`,
         });
       }
     }
@@ -88,7 +103,7 @@ export const mcp023 = defineCheck({
     }
 
     return h.fromEvidence(evidence, {
-      passed: 'Streamable-HTTP MCP servers are localhost-bound or carry an explicit origin allowlist',
+      passed: 'No LAN streamable-HTTP MCP server without Origin pinning, and no server code disabling Host/Origin validation',
       failed: (n) => `Found ${n} streamable-HTTP MCP server(s) without visible Origin/host pinning`,
       fixDescription: 'For local servers, pin the URL to 127.0.0.1/localhost. For remote servers, configure an allowed-origins allowlist and enforce Origin validation server-side.',
     });

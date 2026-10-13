@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ScanContext, AgentInstallation, ParsedConfig } from '../../core/types.js';
@@ -132,6 +132,26 @@ describe('ADV-002: Dependency Vulnerability', () => {
       writeFileSync(join(dir, 'package.json'), JSON.stringify({ dependencies: { mcp: '1.0.0' } }));
       const result = await adv002.run(makeContext({ installDir: dir }));
       expect(result.passed).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('judges ranges like MCP-027 and prefers the installed copy', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'vaso-adv002-'));
+    try {
+      // every version ~0.0.9 admits is affected (>=0.0.5 <0.1.16)
+      writeFileSync(join(dir, 'package.json'), JSON.stringify({ dependencies: { 'mcp-remote': '~0.0.9' } }));
+      expect((await adv002.run(makeContext({ installDir: dir }))).passed).toBe(false);
+      // ^0.1.0 admits fixed releases — not judged from the range alone
+      writeFileSync(join(dir, 'package.json'), JSON.stringify({ dependencies: { 'mcp-remote': '^0.1.0' } }));
+      expect((await adv002.run(makeContext({ installDir: dir }))).passed).toBe(true);
+      // …but the installed copy is what runs
+      mkdirSync(join(dir, 'node_modules', 'mcp-remote'), { recursive: true });
+      writeFileSync(join(dir, 'node_modules', 'mcp-remote', 'package.json'), JSON.stringify({ name: 'mcp-remote', version: '0.1.10' }));
+      const r = await adv002.run(makeContext({ installDir: dir }));
+      expect(r.passed).toBe(false);
+      expect(r.evidence?.[0].detail).toContain('mcp-remote@0.1.10');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

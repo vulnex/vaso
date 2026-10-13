@@ -21,6 +21,14 @@ export function isValidFailOn(value: string): value is FailOnLevel {
   return (FAIL_ON_LEVELS as readonly string[]).includes(value);
 }
 
+/** The --fail-on level, or undefined (after printing why) when invalid. */
+export function parseFailOn(value: string | undefined, fallback: FailOnLevel = 'critical'): FailOnLevel | undefined {
+  if (value === undefined) return fallback;
+  if (isValidFailOn(value)) return value;
+  console.error(`Invalid --fail-on value "${value}". Use: critical, warning, info, or none.`);
+  return undefined;
+}
+
 /**
  * Returns true if any failing result meets or exceeds the threshold.
  * `none` always returns false (exit-code escalation disabled).

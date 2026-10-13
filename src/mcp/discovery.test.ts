@@ -28,6 +28,27 @@ describe('MCPDiscovery', () => {
     }
   });
 
+  it('reads VS Code `servers`, Windsurf `serverUrl`, and skips disabled servers', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'vaso-mcp-dialects-'));
+    try {
+      const vscode = join(dir, 'vscode.json');
+      const windsurf = join(dir, 'windsurf.json');
+      await writeFile(vscode, JSON.stringify({ inputs: [], servers: { gh: { type: 'http', url: 'https://api.example.com/mcp' } } }));
+      await writeFile(windsurf, JSON.stringify({ mcpServers: {
+        remote: { serverUrl: 'http://10.0.0.5/mcp' },
+        off: { command: 'npx', args: ['x'], disabled: true },
+      } }));
+      const result = await new MCPDiscovery().discoverFromPaths([vscode, windsurf]);
+      const servers = result.configs.flatMap(c => c.servers);
+      expect(servers.map(s => [s.name, s.url, s.transport])).toEqual([
+        ['gh', 'https://api.example.com/mcp', 'streamable-http'],
+        ['remote', 'http://10.0.0.5/mcp', 'streamable-http'],
+      ]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it('omits unreadable when every explicit path parsed', async () => {
     const result = await new MCPDiscovery().discoverFromPaths([join(FIXTURES, 'secure/claude_desktop_config.json')]);
     expect(result.unreadable).toBeUndefined();

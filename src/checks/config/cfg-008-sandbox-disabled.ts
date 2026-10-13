@@ -4,7 +4,8 @@ import { fixFirstConfig } from '../../remediation/config-writer.js';
 import { getNestedValue } from '../../core/utils.js';
 
 function sandboxKey(data: Record<string, unknown>): string | undefined {
-  return ['sandbox', 'security.sandbox', 'isolation'].find(k => getNestedValue(data, k) !== undefined);
+  // agents.defaults.sandbox.mode: OpenClaw 2026.x (off | non-main | all)
+  return ['sandbox', 'security.sandbox', 'isolation', 'agents.defaults.sandbox.mode'].find(k => getNestedValue(data, k) !== undefined);
 }
 
 export const cfg008 = defineCheck({

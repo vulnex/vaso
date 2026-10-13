@@ -44,6 +44,12 @@ export interface MCPServerSource {
   /** Packages the server ships with (its manifest/lockfile/installed copies), for MCP-027. */
   dependencies?: ServerDependency[];
   /**
+   * Directory the `// === <file> ===` markers in a multi-file `sourceCode`
+   * are relative to — evidence lines in the joined text are mapped back to
+   * `<sourceRoot>/<file>` (see mapSourceEvidence).
+   */
+  sourceRoot?: string;
+  /**
    * Tool definitions extracted from `sourceCode`, populated once by the engine
    * (see `ScanEngine.scanMCP`) so tool-layer checks (MCP-020/024/025) share one
    * extraction pass instead of each re-parsing the source.

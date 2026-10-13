@@ -268,7 +268,7 @@ export const abacusAdapter: AgentAdapter = {
         { id: 'abacusai-which', cmd: 'which', args: ['abacusai'], timeout: 3000 },
         { id: 'abacusai-version', cmd: 'abacusai', args: ['--version'], timeout: 5000 },
       ],
-      directoryListings: [`~/${ABACUS_DIR}`, `~/${ABACUS_DIR}/desktop`, `~/${ABACUS_DIR}/versions`, desktopLinux, desktopMac],
+      directoryListings: [`~/${ABACUS_DIR}`, `~/${ABACUS_DIR}/desktop`, `~/${ABACUS_DIR}/versions`, `~/${ABACUS_DIR}/bin`, desktopLinux, desktopMac],
       envPrefixes: ['ABACUS_', 'CODELLM_'],
       systemPaths: [...SYSTEM_CLI_PATHS, DESKTOP_APP_LINUX, DESKTOP_APP_MAC],
       systemDirListings: [],

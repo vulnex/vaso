@@ -300,6 +300,8 @@ export const nanoclawAdapter: AgentAdapter = {
           `${c}/data/*`,
           `${c}/dist/index.js`,
           `${c}/.claude/skills/*/SKILL.md`,
+          // the dir itself, so NC-005 sees its mode while it is still empty
+          `${c}/.claude/skills`,
         ]),
         '~/.config/nanoclaw/*',
         '~/.local/bin/ncl',

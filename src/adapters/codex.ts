@@ -80,6 +80,17 @@ async function findLatestSessionModel(fs: FSProvider, sessionsDir: string): Prom
   return last;
 }
 
+/**
+ * ~/.codex, or $CODEX_HOME for the scanning user (Codex keeps config, auth,
+ * rules, AGENTS.md and sessions there). Another user's environment isn't
+ * observable, so --all-users homes use the default.
+ */
+export function codexHome(home: string, fs: FSProvider): string {
+  const env = home === fs.homedir() ? fs.getEnv?.('CODEX_HOME')?.trim() : undefined;
+  if (!env) return join(home, CODEX_DIR_NAME);
+  return env === '~' || env.startsWith('~/') ? join(home, env.slice(1)) : env;
+}
+
 export const codexAdapter: AgentAdapter = {
   agent: 'codex',
   displayName: 'Codex',
@@ -90,7 +101,7 @@ export const codexAdapter: AgentAdapter = {
     const installations: AgentInstallation[] = [];
 
     for (const { home, user } of userDirs) {
-      const codexDir = join(home, CODEX_DIR_NAME);
+      const codexDir = codexHome(home, fs);
       const installs = await discoverCliInstalls(home, fs, {
         names: ['codex'],
         systemPaths: SYSTEM_CLI_PATHS,
@@ -126,6 +137,7 @@ export const codexAdapter: AgentAdapter = {
         version,
         installDir: codexDir,
         configFiles,
+        skillsDir: await fs.access(join(codexDir, 'skills')) ? join(codexDir, 'skills') : undefined,
         models: await this.getModels?.(configFiles, fs),
         user: options?.allUsers ? user : undefined,
         cliBinary,
@@ -137,13 +149,14 @@ export const codexAdapter: AgentAdapter = {
   },
 
   getConfigPaths(): string[] {
-    const home = new LocalFSProvider().homedir();
-    const codexDir = join(home, CODEX_DIR_NAME);
+    const fs = new LocalFSProvider();
+    const codexDir = codexHome(fs.homedir(), fs);
     return CONFIG_FILES.map(f => join(codexDir, f));
   },
 
-  getSkillsDir(_installDir: string): string | undefined {
-    return undefined;
+  getSkillsDir(installDir: string): string | undefined {
+    // $CODEX_HOME/skills/<name>/SKILL.md (often links into a tool's checkout)
+    return join(installDir, 'skills');
   },
 
   getGatewayInfo(_config: Record<string, unknown>): GatewayInfo | undefined {
@@ -162,8 +175,7 @@ export const codexAdapter: AgentAdapter = {
     // rollout-*.jsonl as `turn_context.model`. The latest such record is the
     // most recently active model.
     if (!fs) return [];
-    const home = fs.homedir();
-    const sessionsDir = `${home}/.codex/sessions`;
+    const sessionsDir = join(codexHome(fs.homedir(), fs), 'sessions');
     const found = await findLatestSessionModel(fs, sessionsDir);
     return found ? [{ id: found, via: 'last session' }] : [];
   },
@@ -202,6 +214,8 @@ export const codexAdapter: AgentAdapter = {
       globPatterns: [
         // Prefix allow rules (CDX-010)
         '~/.codex/rules/*.rules',
+        // User skills (SKL/IOC checks; skill links are followed by the probe)
+        '~/.codex/skills/**',
         nvmBinaryGlob('codex'),
         ...npmPackageJsonGlobs(NPM_PACKAGE_NAME),
       ],
@@ -219,6 +233,7 @@ export const codexAdapter: AgentAdapter = {
       directoryListings: [
         '~/.codex',
         '~/.codex/sessions',
+        '~/.codex/skills',
       ],
       envPrefixes: ['CODEX_', 'OPENAI_'],
       systemPaths: SYSTEM_CLI_PATHS,

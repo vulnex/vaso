@@ -28,7 +28,8 @@ export const hermesAdapter: AgentAdapter = {
   async detect(_options?: DetectOptions): Promise<AgentInstallation[]> {
     const fs = _options?.fs ?? new LocalFSProvider();
     const home = fs.homedir();
-    const hermesHome = process.env.HERMES_HOME ?? join(home, '.hermes');
+    // The scanned host's environment (a snapshot's on remote scans)
+    const hermesHome = fs.getEnv('HERMES_HOME') || join(home, '.hermes');
 
     if (!(await fs.access(hermesHome))) return [];
 
@@ -79,8 +80,8 @@ export const hermesAdapter: AgentAdapter = {
   },
 
   getConfigPaths(): string[] {
-    const home = new LocalFSProvider().homedir();
-    const hermesHome = process.env.HERMES_HOME ?? join(home, '.hermes');
+    const fs = new LocalFSProvider();
+    const hermesHome = fs.getEnv('HERMES_HOME') || join(fs.homedir(), '.hermes');
     return CONFIG_FILENAMES.map(f => join(hermesHome, f));
   },
 

@@ -11,6 +11,7 @@ import type { ScanOptions } from '../core/types.js';
 import { shouldFailScan, isValidFailOn, EXIT_FINDINGS, EXIT_INCOMPLETE, EXIT_USAGE, type FailOnLevel } from '../core/exit-criteria.js';
 import { logError } from '../core/debug.js';
 import { writeFileEnsureDir, writeFileOwnerOnly } from '../core/utils.js';
+import { HostFileNames, safeHostname } from '../transport/host-files.js';
 import { readFile, writeFile } from 'node:fs/promises';
 import { toReportJson } from '../reporting/serialize.js';
 
@@ -47,10 +48,6 @@ const FORMAT_EXT: Record<string, string> = {
 };
 
 const NON_AGGREGATABLE_FORMATS = new Set(['sarif', 'junit']);
-
-function safeHostname(host: string): string {
-  return host.replace(/[^A-Za-z0-9._-]/g, '_');
-}
 
 function parsePositiveInt(raw: string | undefined, fallback: number, label: string): number {
   if (raw === undefined) return fallback;
@@ -229,6 +226,9 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
 
     const reporter = getReporter(options.format as any ?? 'terminal');
     const ext = FORMAT_EXT[options.format] ?? 'txt';
+    // One name per target for its snapshot and its report
+    const hostFiles = new HostFileNames();
+    const targetLabel = (t: { label?: string; user: string; host: string }) => t.label ?? `${t.user}@${t.host}`;
 
     const hostResults = await scanMultipleHosts({
       targets,
@@ -244,7 +244,7 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
         ? async (target, snapshot) => {
             try {
               const { join: joinPath } = await import('node:path');
-              const safeHost = safeHostname(snapshot.hostname ?? target.host);
+              const safeHost = hostFiles.claim(snapshot.hostname ?? target.host, targetLabel(target));
               const outPath = joinPath(saveSnapshotDir!, `${safeHost}.json`);
               // Snapshots hold collected file contents by design — owner-only
               await writeFileOwnerOnly(outPath, JSON.stringify(snapshot, null, 2));
@@ -271,9 +271,10 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
           if (options.outputDir) {
             try {
               const { join: joinPath } = await import('node:path');
-              const safeHost = safeHostname(entry.result.host ?? entry.target.host);
+              const safeHost = hostFiles.claim(entry.result.host ?? entry.target.host, targetLabel(entry.target));
               const outPath = joinPath(options.outputDir, `${safeHost}.${ext}`);
               await writeFile(outPath, reporter.render(entry.result), 'utf-8');
+              log(chalk.dim(`    → ${outPath}`));
             } catch (err) {
               log(chalk.yellow(`  Warning: failed to write output for ${entry.target.host}: ${(err as Error).message}`));
             }

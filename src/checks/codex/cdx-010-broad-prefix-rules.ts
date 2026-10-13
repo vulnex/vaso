@@ -44,7 +44,83 @@ export function classifyPrefixPattern(pattern: string[]): string | undefined {
   return undefined;
 }
 
-const RULE_RE = /prefix_rule\(\s*pattern\s*=\s*(\[.*?\])\s*,\s*decision\s*=\s*"([a-z_]+)"/;
+/**
+ * A Starlark list literal of strings (or nested lists of alternatives) at
+ * `src[i]` — either quote style, trailing commas. Returns the value and the
+ * index after it, or undefined when it is anything else.
+ */
+function parseList(src: string, i: number): { value: Array<string | string[]>; end: number } | undefined {
+  const skip = () => { while (i < src.length && /[\s,]/.test(src[i])) i++; };
+  if (src[i] !== '[') return undefined;
+  i++;
+  const out: Array<string | string[]> = [];
+  for (;;) {
+    skip();
+    if (src[i] === ']') return { value: out, end: i + 1 };
+    if (src[i] === '[') {
+      const inner = parseList(src, i);
+      if (!inner || inner.value.some(v => typeof v !== 'string')) return undefined;
+      out.push(inner.value as string[]);
+      i = inner.end;
+      continue;
+    }
+    const q = src[i];
+    if (q !== '"' && q !== "'") return undefined;
+    let str = '';
+    for (i++; i < src.length && src[i] !== q; i++) {
+      if (src[i] === '\\') i++;
+      str += src[i] ?? '';
+    }
+    if (i >= src.length) return undefined;
+    out.push(str);
+    i++;
+  }
+}
+
+/** Every concrete prefix a pattern with alternatives stands for (capped). */
+function expandAlternatives(pattern: Array<string | string[]>): string[][] {
+  let out: string[][] = [[]];
+  for (const el of pattern) {
+    const alts = typeof el === 'string' ? [el] : el;
+    out = out.flatMap(prefix => alts.map(a => [...prefix, a])).slice(0, 64);
+  }
+  return out;
+}
+
+interface PrefixRule { line: number; text: string; patterns: string[][]; decision: string }
+
+/**
+ * `prefix_rule(pattern = [...], decision = "...", …)` calls in a .rules
+ * (Starlark) file, in any argument order, across lines. `decision` defaults
+ * to "allow" (Codex execpolicy).
+ */
+export function parsePrefixRules(content: string): PrefixRule[] {
+  const rules: PrefixRule[] = [];
+  const call = /\bprefix_rule\s*\(/g;
+  for (let m = call.exec(content); m; m = call.exec(content)) {
+    // the call's argument text, up to its balanced closing paren
+    let depth = 1;
+    let j = m.index + m[0].length;
+    let quote: string | undefined;
+    for (; j < content.length && depth > 0; j++) {
+      const c = content[j];
+      if (quote) {
+        if (c === '\\') j++;
+        else if (c === quote) quote = undefined;
+      } else if (c === '"' || c === "'") quote = c;
+      else if (c === '(') depth++;
+      else if (c === ')') depth--;
+    }
+    const args = content.slice(m.index + m[0].length, j - 1);
+    const pat = /\bpattern\s*=\s*/.exec(args);
+    const list = pat ? parseList(args, pat.index + pat[0].length) : undefined;
+    if (!list) continue;
+    const decision = /\bdecision\s*=\s*["']([a-z_]+)["']/.exec(args)?.[1] ?? 'allow';
+    const line = content.slice(0, m.index).split('\n').length;
+    rules.push({ line, text: content.slice(m.index, j).replace(/\s+/g, ' '), patterns: expandAlternatives(list.value), decision });
+  }
+  return rules;
+}
 
 export const cdx010 = defineCheck({
   id: 'CDX-010',
@@ -76,25 +152,14 @@ export const cdx010 = defineCheck({
         continue;
       }
 
-      const lines = content.split('\n');
-      for (let i = 0; i < lines.length; i++) {
-        const m = RULE_RE.exec(lines[i]);
-        if (!m || m[2] !== 'allow') continue;
-
-        let pattern: unknown;
-        try {
-          pattern = JSON.parse(m[1]);
-        } catch {
-          continue; // unparseable patterns are long/specific ones — prefix is constrained
-        }
-        if (!Array.isArray(pattern) || !pattern.every(p => typeof p === 'string')) continue;
-
-        const reason = classifyPrefixPattern(pattern);
+      for (const rule of parsePrefixRules(content)) {
+        if (rule.decision !== 'allow') continue;
+        const reason = rule.patterns.map(classifyPrefixPattern).find(Boolean);
         if (reason) {
           evidence.push({
             file,
-            line: i + 1,
-            snippet: lines[i].trim().slice(0, 160),
+            line: rule.line,
+            snippet: rule.text.slice(0, 160),
             detail: reason,
           });
         }

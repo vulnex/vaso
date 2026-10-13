@@ -106,3 +106,12 @@ describe('detectTyposquatting — length-scaled tolerance (fewer dictionary-word
   });
 });
 
+describe('isInflection', () => {
+  it('tells word forms from typos', async () => {
+    const { isInflection, detectTyposquatting } = await import('./typosquat.js');
+    for (const [a, b] of [['calendars', 'calendar'], ['translate', 'translator'], ['calculators', 'calculator']]) expect(isInflection(a, b), a).toBe(true);
+    for (const [a, b] of [['calendr', 'calendar'], ['weahter', 'weather'], ['githubhelpr', 'githubhelper'], ['calculater', 'calculator']]) expect(isInflection(a, b), a).toBe(false);
+    expect(detectTyposquatting('calendars', ['calendar'])).toBeNull();
+    expect(detectTyposquatting('calendr', ['calendar'])).not.toBeNull();
+  });
+});

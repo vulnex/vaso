@@ -133,6 +133,21 @@ export interface FixUpdateSpec {
  * format the spec covers, and report applied/not-applied. Replaces the
  * per-format if/ternary dispatch that used to be copied into every fix.
  */
+/**
+ * Like fixFirstConfig, but for a setting that is wrong in several files at
+ * once (user + desktop config, parent + sub-agent): writes it into every
+ * compatible file given, so one `vaso fix` run leaves none behind.
+ */
+export async function fixEveryConfig(configs: ParsedConfig[], spec: FixUpdateSpec): Promise<FixResult> {
+  let fixed = 0;
+  for (const config of configs) {
+    const r = await fixFirstConfig([config], spec);
+    if (r.applied) fixed++;
+  }
+  if (fixed === 0) return fixFirstConfig([], spec);
+  return { checkId: spec.checkId, applied: true, message: fixed > 1 ? `${spec.message} (${fixed} files)` : spec.message };
+}
+
 export async function fixFirstConfig(configs: ParsedConfig[], spec: FixUpdateSpec): Promise<FixResult> {
   for (const config of configs) {
     if (config.format === 'env') {

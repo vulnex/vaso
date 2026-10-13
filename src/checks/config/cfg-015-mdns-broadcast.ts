@@ -18,7 +18,10 @@ export const cfg015 = defineCheck({
 
       if (mdns === true || (typeof mdns === 'object' && mdns !== null)) {
         const mdnsObj = typeof mdns === 'object' ? mdns as Record<string, unknown> : {};
-        const broadcast = mdnsObj.broadcast ?? mdnsObj.enabled ?? true;
+        // OpenClaw 2026.x: discovery.mdns.mode = off | minimal | full
+        const broadcast = typeof mdnsObj.mode === 'string'
+          ? mdnsObj.mode.toLowerCase() === 'full'
+          : mdnsObj.broadcast ?? mdnsObj.enabled ?? true;
         if (broadcast === true || broadcast === 'full') {
           return h.result({
             passed: false,

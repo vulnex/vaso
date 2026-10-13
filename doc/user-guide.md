@@ -43,7 +43,7 @@ vaso scan [options]
 | `-a, --agent <type>` | Scan a specific agent: `openclaw`, `nanoclaw`, `picoclaw`, `ironclaw`, `nanobot`, `zeroclaw`, `nemoclaw`, `openshell`, `hermes`, `lyrie`, `atomic-agent`, `claude-code`, `claude-desktop`, `chatgpt-desktop`, `codex`, `opencode`, `gemini-cli`, `qwen-code`, `copilot-cli`, `cursor-cli`, `windsurf`, `devin`, `abacus`, `meta-muse`, or `comet` |
 | `-f, --format <format>` | Output format: `terminal` (default), `json`, `sarif`, `markdown`, `html`, `csv`, `junit` |
 | `-o, --output <file>` | Write report to a single file instead of stdout |
-| `--output-dir <dir>` | Write one file per host as `<dir>/<hostname>.<ext>`; local scans use the local hostname (mutually exclusive with `-o`) |
+| `--output-dir <dir>` | Write one file per host as `<dir>/<hostname>.<ext>`; local scans use the local hostname (mutually exclusive with `-o`). A second target reporting the same hostname (two users on one machine, cloned VMs) is written as `<hostname>--<user@host>.<ext>`; `--save-snapshot` files are named the same way |
 | `--save-baseline` | Save current results as a baseline for future comparison |
 | `--diff` | Compare results against the last saved baseline |
 | `--all-users` | Scan all user accounts (requires root/sudo) |
@@ -105,10 +105,12 @@ hosts:
   - host: 10.0.1.6
     user: ops
     port: 2222
-    label: prod-agent-02         # name used in reports and snapshot files
+    label: prod-agent-02         # name shown in progress output and reports
     identity: ~/.ssh/id_prod     # per-host key (default: --ssh-key)
     sudo: true                   # run the probe with sudo (multi-user scans)
 ```
+
+Any other key is an error (exit 2) — a misspelt `identity` would otherwise be ignored and the scan would use a different key.
 
 ### `vaso detect`
 
@@ -169,6 +171,7 @@ vaso skill audit <path> [options]
 |--------|-------------|
 | `-f, --format <format>` | Output format: `terminal` (default), `json`, `sarif`, `markdown`, `html`, `csv`, `junit` |
 | `-o, --output <file>` | Write report to a file instead of stdout |
+| `--fail-on <severity>` | Exit 1 on findings of this severity or higher: `critical` (default), `warning`, `info`, `none` |
 | `--no-color` | Disable colored terminal output |
 
 Examples:
@@ -184,7 +187,7 @@ vaso skill audit ./skills/web-scraper --format json -o audit.json
 vaso skill audit ./skills/new-skill && echo "Safe to install"
 ```
 
-Exit code 1 is returned if any critical findings are detected. If the path does not exist or is not a directory, VASO exits with code 2 without scanning; a directory with no code or skill documentation files is reported as having nothing to audit (exit 0).
+Exit code 1 is returned if any finding at or above `--fail-on` (default `critical`) is detected. If the path does not exist or is not a directory, VASO exits with code 2 without scanning; only an empty directory is reported as having nothing to audit (exit 0) — documentation, `package.json` and config files are audited too (SKL-007, IOC checks). Skills symlinked in from elsewhere are followed and scanned.
 
 ### `vaso fix`
 
@@ -199,7 +202,7 @@ vaso fix [options]
 | `-a, --agent <type>` | Fix a specific agent |
 | `--dry-run` | Preview fixes without applying them |
 | `-y, --yes` | Apply all fixes without prompting |
-| `--rollback` | Undo the last fix operation |
+| `--rollback [backup]` | Undo the last fix run; run it again to undo the one before. Name a backup (from `~/.vaso/backups/`, owner-only) to restore that one |
 
 When neither `--yes` nor `--dry-run` is set, VASO enters **interactive mode** and prompts for each fixable finding:
 
@@ -284,7 +287,7 @@ vaso update --url <url>  # Custom feed URL (must still be signed with the pinned
 
 ### `vaso mcp scan`
 
-Scan MCP (Model Context Protocol) server configurations for security issues. This auto-discovers MCP configs from Claude Desktop, Claude Code, Gemini CLI, Qwen Code, Codex, Cursor, Windsurf, Devin CLI, Abacus.AI, Atomic Agent, Nanobot, PicoClaw, Lyrie, VS Code, and project-level config files.
+Scan MCP (Model Context Protocol) server configurations for security issues. This auto-discovers MCP configs from Claude Desktop, Claude Code, Gemini CLI, Qwen Code, Codex, GitHub Copilot CLI, Cursor, Windsurf, Devin CLI, Abacus.AI, Atomic Agent, Nanobot, PicoClaw, Lyrie, VS Code (user and project `mcp.json`), and project-level config files. `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `COPILOT_HOME` and `GEMINI_CLI_HOME` relocations are followed.
 
 ```
 vaso mcp scan [options]
@@ -297,7 +300,8 @@ vaso mcp scan [options]
 | `-p, --path <paths...>` | Specific config file paths to scan (skips auto-discovery). A path that is missing or not valid JSON/JSONC is an error (exit 2) |
 | `--resolve-packages` | Download npm-packaged (`npx`) MCP servers — download only, never executed — and analyze their source. Requires network access |
 | `--audit-deps` | Look up the exact versions of the servers' dependencies (from their lockfiles or installed copies) in [OSV.dev](https://osv.dev) for known vulnerabilities, in addition to the bundled advisories. Sends package names and versions only — never code, paths or config. Dependencies known only by a declared range are not looked up. If OSV can't be reached the scan continues with bundled advisories. Requires network access |
-| `--source <paths...>` | Analyze MCP server source directly — an entry file or a server checkout. For server authors, and for remote servers whose code you have but only connect to (`npx mcp-remote https://…`). On its own it scans only these servers (no config discovery); with `-p`, both. A path with no server source is an error (exit 2) |
+| `--fail-on <severity>` | Exit 1 on findings of this severity or higher: `critical` (default), `warning`, `info`, `none` |
+| `--source <paths...>` | Analyze MCP server source directly — an entry file, a server checkout, or a Python package checkout (`pyproject.toml` + `src/<pkg>/`, all of its modules). For server authors, and for remote servers whose code you have but only connect to (`npx mcp-remote https://…`). On its own it scans only these servers (no config discovery); with `-p`, both. A path with no server source is an error (exit 2) |
 | `--no-color` | Disable colored terminal output |
 
 Examples:

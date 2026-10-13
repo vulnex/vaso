@@ -29,15 +29,18 @@ export const ws005 = defineCheck({
 
       for (const [name, server] of Object.entries(servers)) {
         if (!server || typeof server !== 'object') continue;
-        // Windsurf's remote-server key is `serverUrl` (not `url`).
-        const serverUrl = (server as Record<string, unknown>).serverUrl;
+        // Windsurf's remote-server key is `serverUrl`; the Devin-format
+        // mcp_config.json Devin Desktop shares uses `url`.
+        const entry = server as Record<string, unknown>;
+        const key = typeof entry.serverUrl === 'string' ? 'serverUrl' : 'url';
+        const serverUrl = entry[key];
         if (typeof serverUrl !== 'string') continue;
         if (!serverUrl.startsWith('http://')) continue;
         if (isLoopbackHttp(serverUrl)) continue;
 
         evidence.push({
           file: config.filePath,
-          snippet: `mcpServers.${name}.serverUrl: ${serverUrl}`,
+          snippet: `mcpServers.${name}.${key}: ${serverUrl}`,
           detail: 'Non-loopback MCP server over plaintext HTTP — headers (auth tokens) and tool traffic can be intercepted or tampered with',
         });
       }

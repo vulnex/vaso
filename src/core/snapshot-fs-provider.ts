@@ -307,14 +307,29 @@ export class SnapshotFSProvider implements FSProvider {
         : { name, isFile: true, isDirectory: false, parentPath };
     };
 
+    // Like a local walk, never descend through a symlinked directory: the
+    // probe collects what a skill link points to under the link's path
+    // (walkSkillTree follows it explicitly), but a plain listing stops at it.
+    const behindLink = (filePath: string): boolean => {
+      const parts = filePath.slice(prefix.length).split('/');
+      let current = basePath;
+      for (const part of parts.slice(0, -1)) {
+        current = posix.join(current, part);
+        if (current in symlinks) return true;
+      }
+      return false;
+    };
+
     for (const [filePath, file] of Object.entries(this.snapshot.files)) {
-      if (!filePath.startsWith(prefix) || !file.exists) continue;
+      if (!filePath.startsWith(prefix) || !file.exists || behindLink(filePath)) continue;
       results.push(entry(filePath, filePath in symlinks));
     }
     // Links to directories have no file entry, and dangling or looping links
     // a non-existent one; a local listing shows them all as links
     for (const linkPath of Object.keys(symlinks)) {
-      if (linkPath.startsWith(prefix) && !this.snapshot.files[linkPath]?.exists) results.push(entry(linkPath, true));
+      if (linkPath.startsWith(prefix) && !this.snapshot.files[linkPath]?.exists && !behindLink(linkPath)) {
+        results.push(entry(linkPath, true));
+      }
     }
 
     return results;

@@ -4,6 +4,10 @@ import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { stripJsonc } from '../core/jsonc.js';
 import { parse as parseTOML } from 'smol-toml';
+import { claudeConfigPaths } from '../adapters/claude-code.js';
+import { codexHome } from '../adapters/codex.js';
+import { copilotHome } from '../adapters/copilot-cli.js';
+import { geminiHome } from '../adapters/gemini.js';
 import type { Platform } from '../core/types.js';
 
 interface ConfigLocation {
@@ -13,7 +17,7 @@ interface ConfigLocation {
   shape?: 'atomic-agent' | 'nanobot' | 'picoclaw' | 'abacus' | 'abacus-config' | 'claude-json' | 'codex';
 }
 
-function getGlobalConfigLocations(platform: Platform, home: string): ConfigLocation[] {
+function getGlobalConfigLocations(platform: Platform, home: string, fs: FSProvider): ConfigLocation[] {
   const locations: ConfigLocation[] = [];
 
   // Claude Desktop
@@ -37,14 +41,19 @@ function getGlobalConfigLocations(platform: Platform, home: string): ConfigLocat
 
   // Claude Code: `claude mcp add` writes user-scope servers (and local-scope
   // ones, per project) to ~/.claude.json
+  // ($CLAUDE_CONFIG_DIR holds both when set)
+  const claude = claudeConfigPaths(home, fs);
   locations.push(
-    { source: 'Claude Code', path: join(home, '.claude.json'), shape: 'claude-json' },
-    { source: 'Claude Code', path: join(home, '.claude', 'mcp.json') },
+    { source: 'Claude Code', path: claude.rootStateFile, shape: 'claude-json' },
+    { source: 'Claude Code', path: join(claude.claudeDir, 'mcp.json') },
   );
+
+  // Copilot CLI: user-level servers in <config dir>/mcp-config.json ($COPILOT_HOME)
+  locations.push({ source: 'Copilot CLI', path: join(copilotHome(home, fs), 'mcp-config.json') });
 
   // Gemini CLI / Qwen Code: `mcpServers` in settings.json (JSONC)
   locations.push(
-    { source: 'Gemini CLI', path: join(home, '.gemini', 'settings.json') },
+    { source: 'Gemini CLI', path: join(geminiHome(home, fs), 'settings.json') },
     { source: 'Qwen Code', path: join(home, '.qwen', 'settings.json') },
   );
 
@@ -53,6 +62,14 @@ function getGlobalConfigLocations(platform: Platform, home: string): ConfigLocat
     source: 'Cursor',
     path: join(home, '.cursor', 'mcp.json'),
   });
+
+  // VS Code user-level mcp.json (`servers` map) in the per-OS user-data dir
+  const vscodeUser = platform === 'darwin'
+    ? join(home, 'Library', 'Application Support', 'Code', 'User')
+    : platform === 'win32'
+      ? join(process.env.APPDATA ?? join(home, 'AppData', 'Roaming'), 'Code', 'User')
+      : join(process.env.XDG_CONFIG_HOME?.trim() || join(home, '.config'), 'Code', 'User');
+  locations.push({ source: 'VS Code', path: join(vscodeUser, 'mcp.json') });
 
   // Windsurf
   locations.push({
@@ -83,8 +100,7 @@ function getGlobalConfigLocations(platform: Platform, home: string): ConfigLocat
 
 /** Codex: `[mcp_servers.<name>]` tables in `$CODEX_HOME/config.toml` (default ~/.codex). */
 function getCodexLocation(home: string, fs: FSProvider): ConfigLocation {
-  const codexHome = fs.getEnv('CODEX_HOME')?.trim() || join(home, '.codex');
-  return { source: 'Codex', path: join(codexHome, 'config.toml'), shape: 'codex' };
+  return { source: 'Codex', path: join(codexHome(home, fs), 'config.toml'), shape: 'codex' };
 }
 
 /** Atomic Agent: `mcp.servers[]` in `<stateDir>/config.json`. */
@@ -130,7 +146,8 @@ const TRANSPORT_TYPES: Record<string, MCPServerEntry['transport']> = {
 };
 
 /** A `name → { command, args, env, url, headers, type? }` server map.
- *  Servers explicitly disabled (`enabled: false`) are never connected. */
+ *  Servers explicitly disabled (`enabled: false`, Windsurf's `disabled: true`)
+ *  are never connected. */
 function parseServerMap(map: unknown): MCPServerEntry[] {
   const servers: MCPServerEntry[] = [];
   if (!map || typeof map !== 'object' || Array.isArray(map)) return servers;
@@ -138,15 +155,17 @@ function parseServerMap(map: unknown): MCPServerEntry[] {
   for (const [name, raw] of Object.entries(map as Record<string, unknown>)) {
     if (!raw || typeof raw !== 'object') continue;
     const config = raw as Record<string, unknown>;
-    if (config.enabled === false) continue;
+    if (config.enabled === false || config.disabled === true) continue;
+    // Windsurf / Devin Desktop name the remote URL `serverUrl`
+    const url = typeof config.url === 'string' ? config.url
+      : typeof config.serverUrl === 'string' ? config.serverUrl : undefined;
 
     let transport: MCPServerEntry['transport'] = TRANSPORT_TYPES[String(config.type)] ?? 'stdio';
     // Gemini CLI / Qwen Code: `httpUrl` is streamable HTTP, `url` is SSE
     const httpUrl = typeof config.httpUrl === 'string' ? config.httpUrl : undefined;
-    if (!TRANSPORT_TYPES[String(config.type)] && httpUrl && !config.url) {
+    if (!TRANSPORT_TYPES[String(config.type)] && httpUrl && !url) {
       transport = 'streamable-http';
-    } else if (!TRANSPORT_TYPES[String(config.type)] && config.url) {
-      const url = String(config.url);
+    } else if (!TRANSPORT_TYPES[String(config.type)] && url) {
       if (url.includes('/sse')) {
         transport = 'sse';
       } else {
@@ -164,7 +183,7 @@ function parseServerMap(map: unknown): MCPServerEntry[] {
       headers: config.headers && typeof config.headers === 'object'
         ? Object.fromEntries(Object.entries(config.headers as Record<string, unknown>).map(([k, v]) => [k, String(v)]))
         : undefined,
-      url: config.url ? String(config.url) : httpUrl,
+      url: url ?? httpUrl,
       transport,
     });
   }
@@ -173,7 +192,8 @@ function parseServerMap(map: unknown): MCPServerEntry[] {
 }
 
 function parseServerEntries(data: Record<string, unknown>): MCPServerEntry[] {
-  return parseServerMap(data.mcpServers);
+  // VS Code's mcp.json keys its servers `servers`
+  return parseServerMap(data.mcpServers ?? data.servers);
 }
 
 function parseShape(shape: ConfigLocation['shape'], data: Record<string, unknown>): MCPServerEntry[] {
@@ -283,7 +303,7 @@ export class MCPDiscovery {
     const home = this.fs.homedir();
 
     const locations = [
-      ...getGlobalConfigLocations(platform, home),
+      ...getGlobalConfigLocations(platform, home, this.fs),
       getCodexLocation(home, this.fs),
       getAtomicAgentLocation(home, this.fs),
       ...getFrameworkLocations(home, this.fs),
@@ -330,7 +350,7 @@ export class MCPDiscovery {
         const data = (isToml ? parseTOML(raw.replace(/^\uFEFF/, '')) : JSON.parse(stripJsonc(raw))) as Record<string, unknown>;
         const tools = data.tools as Record<string, unknown> | undefined;
         const shape: ConfigLocation['shape'] = isToml ? 'codex'
-          : data.mcpServers ? undefined
+          : data.mcpServers || data.servers ? undefined
           : tools?.mcpServers || tools?.mcp_servers ? 'nanobot'
           : (tools?.mcp as Record<string, unknown> | undefined)?.servers ? 'picoclaw'
           : 'atomic-agent';

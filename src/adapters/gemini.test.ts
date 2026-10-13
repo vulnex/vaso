@@ -123,3 +123,13 @@ describe('Gemini CLI adapter', () => {
     expect(files).toContain(join(geminiDir, 'GEMINI.md'));
   });
 });
+
+describe('geminiHome', () => {
+  const fsWith = (env: Record<string, string>, home = '/home/u') => ({ homedir: () => home, getEnv: (k: string) => env[k] }) as unknown as import('../core/fs-provider.js').FSProvider;
+  it('puts .gemini under $GEMINI_CLI_HOME for the scanning user', async () => {
+    const { geminiHome } = await import('./gemini.js');
+    expect(geminiHome('/home/u', fsWith({}))).toBe('/home/u/.gemini');
+    expect(geminiHome('/home/u', fsWith({ GEMINI_CLI_HOME: '/srv/job' }))).toBe('/srv/job/.gemini');
+    expect(geminiHome('/home/x', fsWith({ GEMINI_CLI_HOME: '/srv/job' }))).toBe('/home/x/.gemini');
+  });
+});

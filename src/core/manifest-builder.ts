@@ -4,6 +4,41 @@ import { cliInstallGlobs, cliInstallSystemPaths } from '../adapters/cli-installs
 
 const SYSTEM_TOOLS = new Set(['which', 'defaults', 'codesign', 'plutil', 'netstat', 'ss', 'ps', 'crontab', 'launchctl']);
 
+/**
+ * Home-relative trees an environment variable relocates, as the adapters
+ * resolve them (fs.getEnv on the scanned host). Every manifest path under one
+ * also gets a `${VAR}/…` twin, which the probe (≥ 1.2.1) expands from its own
+ * environment — so an install moved with PICOCLAW_HOME or XDG_CONFIG_HOME is
+ * collected on remote scans too. The `~/…` original stays: an older probe
+ * ignores what it can't expand. Longest prefix first.
+ */
+export const RELOCATABLE_TREES: ReadonlyArray<readonly [prefix: string, relocated: readonly string[]]> = [
+  ['~/.ironclaw/reborn/', ['${IRONCLAW_REBORN_HOME}/']],
+  ['~/.local/share/', ['${XDG_DATA_HOME}/']],
+  ['~/.local/state/', ['${XDG_STATE_HOME}/']],
+  ['~/.config/', ['${XDG_CONFIG_HOME}/']],
+  ['~/.picoclaw/', ['${PICOCLAW_HOME}/']],
+  ['~/.atomic-agent/', ['${ATOMIC_AGENT_STATE_DIR}/']],
+  ['~/.zeroclaw/', ['${ZEROCLAW_CONFIG_DIR}/', '${ZEROCLAW_DATA_DIR}/', '${ZEROCLAW_WORKSPACE}/']],
+  ['~/.hermes/', ['${HERMES_HOME}/']],
+  ['~/.openclaw/', ['${OPENCLAW_HOME}/']],
+  ['~/.codex/', ['${CODEX_HOME}/']],
+  ['~/.claude/', ['${CLAUDE_CONFIG_DIR}/']],
+  ['~/.copilot/', ['${COPILOT_HOME}/']],
+  // GEMINI_CLI_HOME replaces the home directory the .gemini folder lives in
+  ['~/.gemini/', ['${GEMINI_CLI_HOME}/.gemini/']],
+];
+
+function withRelocatedTwins(paths: string[]): string[] {
+  const out = [...paths];
+  for (const p of paths) {
+    const tree = RELOCATABLE_TREES.find(([prefix]) => p.startsWith(prefix));
+    if (!tree) continue;
+    for (const relocated of tree[1]) out.push(relocated + p.slice(tree[0].length));
+  }
+  return out;
+}
+
 export function buildProbeManifest(adapters: AgentAdapter[]): ProbeManifest {
   const merged: ProbeManifest = {
     filePaths: [],
@@ -53,6 +88,9 @@ export function buildProbeManifest(adapters: AgentAdapter[]): ProbeManifest {
   // Add runtime check paths — RUN-001 lists these dirs and reads matching
   // units/plists to see what they execute (systemd on Linux, launchd on macOS)
   merged.directoryListings.push('~/Library/LaunchAgents', '~/.config/systemd/user');
+  // RUN-003 lists installed editor extensions; RUN-004 reads the Docker socket's mode
+  merged.directoryListings.push('~/.vscode/extensions', '~/.vscode-insiders/extensions', '~/.cursor/extensions');
+  merged.systemPaths!.push('/var/run/docker.sock');
   merged.systemDirListings!.push('/Library/LaunchAgents', '/Library/LaunchDaemons', '/etc/systemd/system');
   merged.globPatterns.push(
     '~/Library/LaunchAgents/*.plist',
@@ -72,10 +110,11 @@ export function buildProbeManifest(adapters: AgentAdapter[]): ProbeManifest {
     '~/.lyrie/mcp.json',
   );
 
-  // Deduplicate
-  merged.filePaths = [...new Set(merged.filePaths)];
-  merged.globPatterns = [...new Set(merged.globPatterns)];
-  merged.directoryListings = [...new Set(merged.directoryListings)];
+  // Deduplicate (after adding the env-relocated twins)
+  merged.filePaths = [...new Set(withRelocatedTwins(merged.filePaths))];
+  merged.globPatterns = [...new Set(withRelocatedTwins(merged.globPatterns))];
+  merged.directoryListings = [...new Set(withRelocatedTwins(merged.directoryListings))];
+  merged.metadataGlobPatterns = withRelocatedTwins(merged.metadataGlobPatterns!);
   merged.envPrefixes = [...new Set(merged.envPrefixes)];
   merged.systemPaths = [...new Set(merged.systemPaths!)];
   merged.systemDirListings = [...new Set(merged.systemDirListings!)];

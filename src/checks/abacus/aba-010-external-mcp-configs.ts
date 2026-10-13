@@ -1,6 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { fixFirstConfig } from '../../remediation/config-writer.js';
+import { fixEveryConfig } from '../../remediation/config-writer.js';
 import { markUntrustedProject, settingsConfigs } from './shared.js';
 
 export const aba010 = defineCheck({
@@ -32,7 +32,7 @@ export const aba010 = defineCheck({
   },
 
   async fix(ctx) {
-    return fixFirstConfig(settingsConfigs(ctx.configs).filter(c => c.data.loadExternalMcpConfigs === true), {
+    return fixEveryConfig(settingsConfigs(ctx.configs).filter(c => c.data.loadExternalMcpConfigs === true), {
       checkId: 'ABA-010',
       path: 'loadExternalMcpConfigs',
       value: false,

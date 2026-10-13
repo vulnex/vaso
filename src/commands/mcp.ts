@@ -10,7 +10,7 @@ import { auditDependencies } from '../mcp/osv-audit.js';
 import type { ScanOptions } from '../core/types.js';
 import { logError } from '../core/debug.js';
 import { toReportJson } from '../reporting/serialize.js';
-import { EXIT_USAGE } from '../core/exit-criteria.js';
+import { EXIT_FINDINGS, EXIT_USAGE, parseFailOn, shouldFailScan } from '../core/exit-criteria.js';
 import type { MCPDiscoveryResult } from '../mcp/types.js';
 
 /** Paths named with -p must exist and parse; otherwise nothing would be scanned silently. */
@@ -31,10 +31,16 @@ export interface MCPScanCommandOptions {
   auditDeps?: boolean;
   /** MCP server source to analyze directly (entry files or checkouts). */
   source?: string[];
+  failOn?: string;
 }
 
 export async function runMCPScan(options: MCPScanCommandOptions): Promise<void> {
   const discovery = new MCPDiscovery();
+  const failOn = parseFailOn(options.failOn);
+  if (!failOn) {
+    process.exitCode = EXIT_USAGE;
+    return;
+  }
 
   try {
     // --source alone audits that code only; with -p, those configs as well.
@@ -111,11 +117,8 @@ export async function runMCPScan(options: MCPScanCommandOptions): Promise<void> 
       console.log(output);
     }
 
-    const hasCritical = result.agents.some(a =>
-      a.results.some(r => r.severity === 'critical' && !r.passed)
-    );
-    if (hasCritical) {
-      process.exitCode = 1;
+    if (shouldFailScan(result.agents.flatMap(a => a.results), failOn)) {
+      process.exitCode = EXIT_FINDINGS;
     }
   } catch (err) {
     logError(chalk.red('MCP scan failed:'), err);

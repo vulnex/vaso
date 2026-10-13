@@ -97,7 +97,15 @@ export function defineCheck(args: DefineCheckArgs): CheckModule {
 
   const module: CheckModule = {
     ...meta,
-    run: (ctx) => run(ctx, helpers),
+    // `fixable` promises `vaso fix` can act — never true for a check that
+    // has no fix() (the description still says how to fix it by hand).
+    run: fix
+      ? (ctx) => run(ctx, helpers)
+      : async (ctx) => {
+          const r = await run(ctx, helpers);
+          if (r.fixable) r.fixable = false;
+          return r;
+        },
   };
 
   if (fix) module.fix = fix;

@@ -122,7 +122,7 @@ describe('runSkillAudit', () => {
 
     await runSkillAudit('/empty/skill', { format: 'terminal' });
 
-    expect(consoleErrorLogs.join('\n')).toContain('No code, documentation or symlinks found');
+    expect(consoleErrorLogs.join('\n')).toContain('is empty. Nothing to audit');
     expect(mockScanSkill).not.toHaveBeenCalled();
     expect(process.exitCode).toBeUndefined();
   });
@@ -136,7 +136,38 @@ describe('runSkillAudit', () => {
     await runSkillAudit('/tmp/md-skill', { format: 'json' });
 
     expect(mockScanSkill).toHaveBeenCalledWith(expect.stringContaining('md-skill'), [], expect.anything());
-    expect(consoleErrorLogs.join('\n')).toContain('Auditing 1 documentation file(s)');
+    expect(consoleErrorLogs.join('\n')).toContain('(no code files)');
+  });
+
+  it('audits a directory holding only metadata and config (IOC checks read them)', async () => {
+    mockStat.mockResolvedValue({ isDirectory: () => true });
+    mockGetSkillFiles.mockResolvedValue([]);
+    mockReaddirEntries.mockResolvedValue([
+      { name: 'package.json', isFile: true, isDirectory: false },
+      { name: 'config.json', isFile: true, isDirectory: false },
+    ]);
+    mockScanSkill.mockResolvedValue(sampleScanResult);
+
+    await runSkillAudit('/tmp/meta-skill', { format: 'json' });
+
+    expect(mockScanSkill).toHaveBeenCalled();
+  });
+
+  it('fails on warnings with --fail-on warning; rejects a bad level', async () => {
+    mockStat.mockResolvedValue({ isDirectory: () => true });
+    mockGetSkillFiles.mockResolvedValue(['/tmp/skill/index.js']);
+    mockScanSkill.mockResolvedValue({
+      ...sampleScanResult,
+      agents: [{ ...sampleScanResult.agents[0], results: [{ id: 'SKL-007', name: 'x', category: 'skills', severity: 'warning', passed: false, message: 'm' }] }],
+    });
+    await runSkillAudit('/tmp/skill', { format: 'json' });
+    expect(process.exitCode).toBeUndefined();
+    await runSkillAudit('/tmp/skill', { format: 'json', failOn: 'warning' });
+    expect(process.exitCode).toBe(1);
+    process.exitCode = undefined;
+    await runSkillAudit('/tmp/skill', { format: 'json', failOn: 'bogus' });
+    expect(process.exitCode).toBe(2);
+    process.exitCode = undefined;
   });
 
   it('runs scan and renders output on happy path', async () => {

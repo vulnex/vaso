@@ -25,9 +25,18 @@ function csvEscape(value: string): string {
   return value;
 }
 
+/** A text cell a spreadsheet would evaluate as a formula (CWE-1236). */
+const FORMULA_START = /^[=+\-@\t\r]/;
+
 function row(values: readonly (string | number | boolean | undefined)[]): string {
   return values
-    .map(v => v === undefined || v === null ? '' : csvEscape(String(v)))
+    .map(v => {
+      if (v === undefined || v === null) return '';
+      // Snippets and messages quote scanned files, which the file's author
+      // controls — `=HYPERLINK(…)` in a skill must not run in Excel.
+      const text = typeof v === 'string' && FORMULA_START.test(v) ? `'${v}` : String(v);
+      return csvEscape(text);
+    })
     .join(',');
 }
 

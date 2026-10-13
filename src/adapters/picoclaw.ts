@@ -370,6 +370,8 @@ export const picoclawAdapter: AgentAdapter = {
   getProbeManifest(): ProbeManifest {
     return {
       filePaths: [
+        // $PICOCLAW_CONFIG names the config file itself (expanded by the probe)
+        '${PICOCLAW_CONFIG}',
         '~/.picoclaw/config.json',
         '~/.picoclaw/.security.yml',
         '~/.picoclaw/auth.json',

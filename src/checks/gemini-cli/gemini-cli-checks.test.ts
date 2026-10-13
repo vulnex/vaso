@@ -314,6 +314,17 @@ describe('GEM-011: Trusted Folder Too Broad', () => {
     expect(result.passed).toBe(true);
   });
 
+  it('reads ~/.gemini/trustedFolders.json itself (the adapter does not load it)', async () => {
+    const fs = makeFs({
+      access: vi.fn(async (p: string) => p === '/home/test/.gemini/trustedFolders.json'),
+      readFile: vi.fn(async () => JSON.stringify({ '/': 'TRUST_FOLDER', '/home/test/app': 'TRUST_FOLDER' })),
+    });
+    const result = await check.run(makeCtx([], fs));
+    expect(result.passed).toBe(false);
+    expect(result.evidence).toHaveLength(1);
+    expect(result.evidence?.[0].file).toBe('/home/test/.gemini/trustedFolders.json');
+  });
+
   it('ignores non-trustedFolders config files', async () => {
     const result = await check.run(makeCtx([makeConfig('/home/test/.gemini/settings.json', {
       '/': 'TRUST_FOLDER',

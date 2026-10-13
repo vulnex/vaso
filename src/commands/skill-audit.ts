@@ -9,16 +9,22 @@ import { getReporter } from '../reporting/index.js';
 import { getSkillFiles } from '../core/utils.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { logError } from '../core/debug.js';
-import { EXIT_USAGE } from '../core/exit-criteria.js';
+import { EXIT_FINDINGS, EXIT_USAGE, parseFailOn, shouldFailScan } from '../core/exit-criteria.js';
 
 export interface SkillAuditCommandOptions {
   format: string;
   output?: string;
   color?: boolean;
+  failOn?: string;
 }
 
 export async function runSkillAudit(skillPath: string, options: SkillAuditCommandOptions): Promise<void> {
   const resolved = resolve(skillPath);
+  const failOn = parseFailOn(options.failOn);
+  if (!failOn) {
+    process.exitCode = EXIT_USAGE;
+    return;
+  }
 
   // Validate path exists and is a directory
   let pathStat;
@@ -40,24 +46,21 @@ export async function runSkillAudit(skillPath: string, options: SkillAuditComman
   const skillFiles = await getSkillFiles(resolved);
 
   // Even a directory with no code files is worth auditing: an instructions-only
-  // skill (SKILL.md) is what SKL-007 checks for prompt injection, and the
-  // canonical GhostApproval repo is just a disguised symlink plus a README —
-  // SKL-007 and SKL-013 walk the directory itself, not the code-file list.
-  // Bail only when there's genuinely nothing to look at.
-  const contents = skillFiles.length === 0 ? await directoryContents(resolved) : { symlink: false, docs: 0 };
-
-  if (skillFiles.length === 0 && !contents.symlink && contents.docs === 0) {
-    console.error(chalk.yellow(`No code, documentation or symlinks found in ${resolved}. Nothing to audit.`));
+  // skill (SKILL.md) is what SKL-007 checks for prompt injection, the
+  // GhostApproval repo is a disguised symlink plus a README, and IOC checks
+  // read package.json / config files and skill directory names. Bail only on
+  // an empty directory.
+  const entries = skillFiles.length === 0 ? await directoryEntryCount(resolved) : skillFiles.length;
+  if (entries === 0) {
+    console.error(chalk.yellow(`${resolved} is empty. Nothing to audit.`));
     return;
   }
 
   console.error(
     chalk.dim(
       skillFiles.length > 0
-        ? `Auditing ${skillFiles.length} file(s) in ${resolved}\n`
-        : contents.docs > 0
-          ? `Auditing ${contents.docs} documentation file(s) in ${resolved}\n`
-          : `Auditing ${resolved} for symlink escapes\n`,
+        ? `Auditing ${skillFiles.length} code file(s) in ${resolved}\n`
+        : `Auditing ${resolved} (no code files)\n`,
     ),
   );
 
@@ -77,11 +80,8 @@ export async function runSkillAudit(skillPath: string, options: SkillAuditComman
       console.log(output);
     }
 
-    const hasCritical = result.agents.some(a =>
-      a.results.some(r => r.severity === 'critical' && !r.passed)
-    );
-    if (hasCritical) {
-      process.exitCode = 1;
+    if (shouldFailScan(result.agents.flatMap(a => a.results), failOn)) {
+      process.exitCode = EXIT_FINDINGS;
     }
   } catch (err) {
     logError(chalk.red('Skill audit failed:'), err);
@@ -89,17 +89,11 @@ export async function runSkillAudit(skillPath: string, options: SkillAuditComman
   }
 }
 
-const DOC_FILE = /\.(?:md|txt|rst)$/i;
-
-/** Symlinks and documentation files (SKILL.md, README…) in the directory tree. */
-async function directoryContents(dir: string): Promise<{ symlink: boolean; docs: number }> {
+/** How many entries the directory tree holds (0 when unreadable). */
+async function directoryEntryCount(dir: string): Promise<number> {
   try {
-    const entries = await new LocalFSProvider().readdirEntries(dir, { recursive: true });
-    return {
-      symlink: entries.some((e) => e.isSymbolicLink),
-      docs: entries.filter((e) => e.isFile && DOC_FILE.test(e.name)).length,
-    };
+    return (await new LocalFSProvider().readdirEntries(dir, { recursive: true })).length;
   } catch {
-    return { symlink: false, docs: 0 };
+    return 0;
   }
 }

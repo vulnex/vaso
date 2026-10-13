@@ -32,8 +32,10 @@ export const aba004 = defineCheck({
         const map = server[field];
         if (!map || typeof map !== 'object' || Array.isArray(map)) continue;
         for (const [key, value] of Object.entries(map as Record<string, unknown>)) {
-          if (typeof value !== 'string' || isEnvReference(value)) continue;
+          if (typeof value !== 'string') continue;
+          // `Bearer ${MCP_TOKEN}` is a reference too — judge what follows the scheme
           const literal = value.replace(AUTH_SCHEME, '').trim();
+          if (isEnvReference(literal)) continue;
           const token = API_KEY_PATTERNS.find(p => p.pattern.test(literal))?.name;
           if (!token && (!SECRET_KEY_HINT.test(key) || literal.length < MIN_SECRET_LENGTH)) continue;
           evidence.push({

@@ -14,10 +14,8 @@ export const cfg019 = defineCheck({
   async run(ctx, h) {
     const nemoDir = join(ctx.fs.homedir(), '.nemoclaw');
     if (!(await ctx.fs.access(nemoDir))) {
-      return h.result({
-        passed: false,
-        message: 'NemoClaw not installed — blueprint integrity check not applicable',
-      });
+      // CFG-016 recommends NemoClaw; nothing to verify without it
+      return h.passed('NemoClaw not installed — blueprint integrity check not applicable');
     }
 
     const evidence: Evidence[] = [];

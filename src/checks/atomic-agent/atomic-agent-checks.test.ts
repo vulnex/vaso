@@ -140,15 +140,16 @@ describe('AT-003 HTTP tool without approval', () => {
 });
 
 describe('AT-004 plaintext secrets in config.json', () => {
-  it('flags provider apiKey, secret headers, MCP env/headers and webhook secrets — masked', async () => {
+  it('flags provider apiKey, secret headers and MCP env/headers — masked', async () => {
     const cfg = makeJson({
       llm: { providers: [{ id: 'or', kind: 'openrouter', apiKey: 'sk-or-v1-abcdefghijklmnop', headers: { 'X-Api-Key': 'abcdefgh12345678' } }] },
       mcp: { servers: [{ name: 'gh', enabled: true, env: { GITHUB_TOKEN: 'ghp_' + 'a'.repeat(36) }, transport: { kind: 'streamable_http', url: 'https://x', headers: { Authorization: 'Bearer abcdefgh12345' } } }] },
       webhooks: { gh: { userMessageTemplate: 'x', secret: 'hunter2hunter2' } },
     });
-    const r = await check('AT-004').run(makeCtx([cfg]));
+    const r = await check('AT-004').run(makeCtx([cfg], makeFs({ modes: { [CONFIG_PATH]: 0o100600 } })));
     expect(r.passed).toBe(false);
-    expect(r.evidence).toHaveLength(5);
+    // The webhook secret can only live in config.json (AT-008 asks for it)
+    expect(r.evidence).toHaveLength(4);
     const text = JSON.stringify(r.evidence);
     expect(text).not.toContain('sk-or-v1-abcdefghijklmnop');
     expect(text).not.toContain('hunter2hunter2');
@@ -160,6 +161,15 @@ describe('AT-004 plaintext secrets in config.json', () => {
       mcp: { servers: [{ name: 'fs', enabled: true, env: { LOG_LEVEL: 'debugging' }, transport: { kind: 'stdio', command: 'node' } }] },
     });
     expect((await check('AT-004').run(makeCtx([cfg]))).passed).toBe(true);
+  });
+
+  it('flags a webhook secret only when config.json is readable by other users', async () => {
+    const cfg = makeJson({ webhooks: { gh: { userMessageTemplate: 'x', secret: 'hunter2hunter2' } } });
+    expect((await check('AT-004').run(makeCtx([cfg], makeFs({ modes: { [CONFIG_PATH]: 0o100600 } })))).passed).toBe(true);
+    const r = await check('AT-004').run(makeCtx([cfg], makeFs({ modes: { [CONFIG_PATH]: 0o100644 } })));
+    expect(r.passed).toBe(false);
+    expect(r.evidence![0].snippet).toContain('webhooks.gh.secret');
+    expect(JSON.stringify(r.evidence)).not.toContain('hunter2hunter2');
   });
 
   it('notes when config.json is readable by other users', async () => {

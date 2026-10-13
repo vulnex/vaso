@@ -1,6 +1,6 @@
 import type { Evidence, ParsedConfig } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { fixFirstConfig } from '../../remediation/config-writer.js';
+import { fixEveryConfig } from '../../remediation/config-writer.js';
 import { isProjectInstall, markUntrustedProject, settingsConfigs } from './shared.js';
 
 // The CLI normalizes the value (trim, lowercase, `_`/space → `-`) and accepts
@@ -76,7 +76,7 @@ export const aba001 = defineCheck({
   },
 
   async fix(ctx) {
-    return fixFirstConfig(unsafeModeConfigs(ctx.configs), {
+    return fixEveryConfig(unsafeModeConfigs(ctx.configs), {
       checkId: 'ABA-001',
       path: 'permissionMode',
       value: 'supervise',

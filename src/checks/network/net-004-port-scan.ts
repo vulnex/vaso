@@ -23,7 +23,12 @@ export const net004 = defineCheck({
   description: 'Check for agent services listening on known ports',
   excludedAgents: CODING_AGENTS,
 
-  async run(_ctx, h) {
+  async run(ctx, h) {
+    // A live probe of 127.0.0.1 here would test the scanning machine, not the
+    // host a snapshot came from.
+    if (ctx.fs.kind === 'snapshot') {
+      return h.passed('Not checked on remote/snapshot scans — listening ports are not collected');
+    }
     const evidence: Evidence[] = [];
 
     await Promise.allSettled(

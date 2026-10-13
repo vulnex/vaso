@@ -20,7 +20,8 @@ const INJECTION_PATTERNS = [
   { pattern: new RegExp(String.raw`(?<!\w)\`[^\`]*\b(?:SELECT|INSERT\s+INTO|UPDATE|DELETE\s+FROM)\b[^\`]*\$\{\s*` + INPUT), name: 'SQL injection via template literal' },
   { pattern: new RegExp(String.raw`\.(?:query|execute|raw)\s*\(\s*["'\`][^"'\`]*["'\`]\s*\+\s*` + INPUT), name: 'SQL injection via concatenation' },
   // Python DB-API: f-string, %-format or concatenation into execute().
-  { pattern: /\.execute(?:many)?\s*\(\s*(?:f["'][^"']*\b(?:SELECT|INSERT|UPDATE|DELETE)\b[^"']*\{|["'][^"']*\b(?:SELECT|INSERT|UPDATE|DELETE)\b[^"']*["']\s*(?:%|\+|\.format\())/i, name: 'SQL injection via string formatting' },
+  // The string runs to its own closing quote: f"… WHERE name = '{name}'" quotes the value inside.
+  { pattern: /\.execute(?:many)?\s*\(\s*(?:f(["'])(?:(?!\1).)*?\b(?:SELECT|INSERT|UPDATE|DELETE)\b(?:(?!\1).)*?\{|(["'])(?:(?!\2).)*?\b(?:SELECT|INSERT|UPDATE|DELETE)\b(?:(?!\2).)*?\2\s*(?:%|\+|\.format\())/i, name: 'SQL injection via string formatting' },
   { pattern: new RegExp(String.raw`writeFile(?:Sync)?\s*\(\s*` + INPUT, 'i'), name: 'File write with user-controlled path' },
 ];
 

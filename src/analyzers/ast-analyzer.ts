@@ -60,8 +60,12 @@ const SENSITIVE_PATHS = [
   /\/\.env/i,
   /\/etc\/(?:passwd|shadow|hosts)/i,
   /\/\.docker\/config/i,
-  /credentials/i,
-  /secret/i,
+  // credential stores by file name — not any path containing the word
+  // (`docs/secretary-notes.md`, `credentials-guide.md`)
+  /(?:^|[\/])\.?credentials(?:\.(?:json|toml|ya?ml|csv|ini|db))?$/i,
+  /(?:^|[\/])\.?secrets?(?:\.(?:json|toml|ya?ml|env|txt))?$/i,
+  /client_secret[\w.-]*\.json$/i,
+  /(?:^|[\/])\.(?:git-credentials|netrc|pgpass)$/i,
 ];
 
 // Several checks (SKL-001/003/006/008/010, MCP-004/006) analyze the same

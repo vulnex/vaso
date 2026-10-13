@@ -16,6 +16,23 @@ export const cfg013 = defineCheck({
                        getNestedValue(config.data, 'messaging.dm') ??
                        getNestedValue(config.data, 'directMessage.policy');
 
+      // OpenClaw 2026.x: per channel, channels.<ch>.dmPolicy = pairing | allowlist | open | disabled
+      const channels = config.data.channels;
+      const openChannels = channels && typeof channels === 'object'
+        ? Object.entries(channels as Record<string, unknown>)
+            .filter(([, ch]) => (ch as Record<string, unknown> | null)?.dmPolicy === 'open')
+            .map(([name]) => name)
+        : [];
+      if (openChannels.length > 0) {
+        return h.result({
+          passed: false,
+          message: `DM policy is open on ${openChannels.join(', ')} — anyone can message the agent directly`,
+          evidence: openChannels.map(name => ({ file: config.filePath, detail: `channels.${name}.dmPolicy: open` })),
+          fixable: false,
+          fixDescription: 'Set channels.<channel>.dmPolicy to "pairing" or "allowlist"',
+        });
+      }
+
       if (dmPolicy === 'open' || dmPolicy === 'unrestricted' || dmPolicy === 'allow_all') {
         return h.result({
           passed: false,

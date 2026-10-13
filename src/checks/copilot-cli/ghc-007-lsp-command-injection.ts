@@ -42,8 +42,13 @@ export const ghc007 = defineCheck({
   async run(ctx, h) {
     const evidence: Evidence[] = [];
 
-    await scanLspConfig(join(ctx.installation.installDir, 'lsp-config.json'), ctx, evidence);
-    await scanLspConfig(join(process.cwd(), '.github', 'lsp.json'), ctx, evidence);
+    // The project install (installDir = the repo) carries .github/lsp.json
+    await scanLspConfig(
+      ctx.installation.profile === 'project'
+        ? join(ctx.installation.installDir, '.github', 'lsp.json')
+        : join(ctx.installation.installDir, 'lsp-config.json'),
+      ctx, evidence,
+    );
 
     return h.fromEvidence(evidence, {
       passed: 'Copilot CLI LSP server commands have no shell metacharacters',

@@ -238,6 +238,10 @@ export const atomicAgentAdapter: AgentAdapter = {
       metadataGlobPatterns: [
         '~/.atomic-agent/*.sqlite',
         '~/.atomic-agent/traces/*',
+        // Session tokens and channel session state (AT-005/AT-011)
+        '~/.atomic-agent/atomic-mail/session.json',
+        '~/.atomic-agent/*-session.json',
+        '~/.atomic-agent/*-sessions.json',
       ],
       commands: [
         { id: 'atomic-agent-which', cmd: 'which', args: ['atomic-agent'], timeout: 3000 },

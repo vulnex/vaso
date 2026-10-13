@@ -123,12 +123,22 @@ async function extractModels(configs: ParsedConfig[], fs?: FSProvider): Promise<
   }
 
   if (fs) {
-    const home = fs.homedir();
-    const tmpDir = `${home}/.gemini/tmp`;
+    const tmpDir = join(geminiHome(fs.homedir(), fs), 'tmp');
     const found = await findLatestSessionModel(fs, tmpDir);
     if (found) return [{ id: found, provider: 'google', via: 'last session' }];
   }
   return [];
+}
+
+/**
+ * ~/.gemini, or $GEMINI_CLI_HOME/.gemini for the scanning user (the variable
+ * replaces the home directory Gemini CLI keeps .gemini in). Another user's
+ * environment isn't observable.
+ */
+export function geminiHome(home: string, fs: FSProvider): string {
+  const env = home === fs.homedir() ? fs.getEnv?.('GEMINI_CLI_HOME')?.trim() : undefined;
+  if (!env) return join(home, GEMINI_DIR_NAME);
+  return join(env === '~' || env.startsWith('~/') ? join(home, env.slice(1)) : env, GEMINI_DIR_NAME);
 }
 
 export const geminiAdapter: AgentAdapter = {
@@ -141,7 +151,7 @@ export const geminiAdapter: AgentAdapter = {
     const installations: AgentInstallation[] = [];
 
     for (const { home, user } of userDirs) {
-      const geminiDir = join(home, GEMINI_DIR_NAME);
+      const geminiDir = geminiHome(home, fs);
       const installs = await discoverCliInstalls(home, fs, {
         names: ['gemini'],
         systemPaths: SYSTEM_CLI_PATHS,
@@ -198,9 +208,8 @@ export const geminiAdapter: AgentAdapter = {
   },
 
   getConfigPaths(): string[] {
-    const home = new LocalFSProvider().homedir();
-    const geminiDir = join(home, GEMINI_DIR_NAME);
-    return [join(geminiDir, SETTINGS_FILE)];
+    const fs = new LocalFSProvider();
+    return [join(geminiHome(fs.homedir(), fs), SETTINGS_FILE)];
   },
 
   getSkillsDir(installDir: string): string | undefined {
@@ -244,6 +253,7 @@ export const geminiAdapter: AgentAdapter = {
         '~/.gemini/tmp/*/chats/session-*.jsonl',
         // OAuth/account token stores — GEM-002 checks permissions only
         ...AUTH_FILES.map(f => `~/.gemini/${f}`),
+        '~/.gemini/.env',
       ],
       filePaths: [
         '~/.gemini/settings.json',

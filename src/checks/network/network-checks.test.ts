@@ -87,6 +87,25 @@ describe('NET-003: Reverse Proxy Bypass', () => {
     const result = await net003.run(makeContext(undefined, [config]));
     expect(result.passed).toBe(true);
   });
+
+  it('reads OpenClaw gateway.trustedProxies', async () => {
+    const open = makeConfig({ gateway: { trustedProxies: ['10.0.0.1', '0.0.0.0/0'] } });
+    expect((await net003.run(makeContext(undefined, [open]))).passed).toBe(false);
+    const scoped = makeConfig({ gateway: { trustedProxies: ['10.0.0.0/8'] } });
+    expect((await net003.run(makeContext(undefined, [scoped]))).passed).toBe(true);
+  });
+});
+
+describe('NET-004 / CFG-011 on snapshot scans', () => {
+  it('do not report the scanning machine as the scanned host', async () => {
+    const ctx = makeContext();
+    const snapCtx = { ...ctx, fs: Object.assign(Object.create(ctx.fs), { kind: 'snapshot' as const }) };
+    const r = await net004.run(snapCtx);
+    expect(r.passed).toBe(true);
+    expect(r.message).toContain('Not checked on remote/snapshot scans');
+    const { cfg011 } = await import('../config/cfg-011-node-cve.js');
+    expect((await cfg011.run(snapCtx)).message).toContain('Not checked on remote/snapshot scans');
+  });
 });
 
 describe('NET-004: Agent Service Port Scan', () => {

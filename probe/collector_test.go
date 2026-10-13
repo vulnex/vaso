@@ -157,7 +157,9 @@ func TestRunCommandIsolateHome(t *testing.T) {
 	}
 }
 
-func TestCollectDoesNotFollowSymlinkedDirsAndRecordsLinks(t *testing.T) {
+// A link into a checkout outside the skills tree is followed (the agent loads
+// it); links back into the tree are not (TestGlobFollowsSkillLinksOutsideTheTree).
+func TestCollectFollowsOutsideSkillLinksAndRecordsLinks(t *testing.T) {
 	root := t.TempDir()
 	real := filepath.Join(root, "real", "src")
 	skill := filepath.Join(root, "skills", "browse")
@@ -186,8 +188,8 @@ func TestCollectDoesNotFollowSymlinkedDirsAndRecordsLinks(t *testing.T) {
 		DirectoryListings: []string{skill},
 	}, false)
 
-	if _, ok := snap.Files[filepath.Join(linkDir, "lib.ts")]; ok {
-		t.Fatal("followed a symlinked directory")
+	if _, ok := snap.Files[filepath.Join(linkDir, "lib.ts")]; !ok {
+		t.Fatal("did not follow a skill symlinked in from outside the tree")
 	}
 	if _, ok := snap.Files[filepath.Join(skill, "own.ts")]; !ok {
 		t.Fatal("regular file not collected")
@@ -346,5 +348,38 @@ func TestCollectShipsBinaryFilesAsBase64(t *testing.T) {
 	}
 	if tx := snap.Files[text]; tx.Encoding != "" || tx.Content != `{"a":"é"}` {
 		t.Fatalf("UTF-8 text must stay plain: %+v", tx)
+	}
+}
+
+func TestExpandPathsResolvesEnvRootedPaths(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("VASOTEST_REL", "relative/dir")
+	t.Setenv("VASOTEST_ABS", "/srv/pico/")
+	t.Setenv("VASOTEST_TILDE", "~/alt")
+	t.Setenv("VASOTEST_EMPTY", "")
+	homes := []UserHome{{Username: "u", Path: home}}
+	got := expandPaths([]string{
+		"${VASOTEST_ABS}/config.json",
+		"${VASOTEST_TILDE}/skills/**",
+		"${VASOTEST_REL}/x",
+		"${VASOTEST_EMPTY}/x",
+		"${VASOTEST_UNSET}/x",
+		"${VASOTEST_ABS}",
+		"~/.picoclaw/config.json",
+	}, homes)
+	want := []string{
+		"/srv/pico/config.json",
+		filepath.Join(home, "alt") + "/skills/**",
+		"/srv/pico",
+		filepath.Join(home, ".picoclaw/config.json"),
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("got %v, want %v", got, want)
+		}
 	}
 }

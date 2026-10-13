@@ -180,7 +180,10 @@ describe('MCP checks (ABA-004/006/007/008) over both config shapes', () => {
   });
 
   it('ABA-004 ignores environment references', async () => {
-    const r = await check('ABA-004').run(userCtx([cfg(USER_MCP, { mcpServers: { a: { command: 'x', env: { API_KEY: '${API_KEY}' } } } })]));
+    const r = await check('ABA-004').run(userCtx([cfg(USER_MCP, { mcpServers: {
+      a: { command: 'x', env: { API_KEY: '${API_KEY}' } },
+      b: { type: 'http', url: 'https://mcp.example.com/mcp', headers: { Authorization: 'Bearer ${MCP_TOKEN}', 'X-Api-Key': '$KEY' } },
+    } })]));
     expect(r.passed).toBe(true);
   });
 

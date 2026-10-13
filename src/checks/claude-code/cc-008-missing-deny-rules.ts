@@ -8,6 +8,16 @@ const RECOMMENDED_DENY_PATTERNS = [
   'Bash(curl:*)',
 ];
 
+/** Whether a deny rule covers `Bash(<cmd>:*)` — written as `Bash(cmd:*)`,
+ *  `Bash(cmd *)`, `Bash(cmd)`, or a rule denying all of Bash. */
+function denies(rule: string, pattern: string): boolean {
+  const cmd = /^Bash\((\w+):\*\)$/.exec(pattern)?.[1];
+  if (!cmd) return rule === pattern;
+  const r = rule.replace(/\s+/g, ' ').trim();
+  if (r === 'Bash' || r === 'Bash(*)') return true;
+  return new RegExp(`^Bash\\( ?${cmd}(?::\\*| \\*|) ?\\)$`).test(r);
+}
+
 export const cc008 = defineCheck({
   id: 'CC-008',
   name: 'Missing Sensitive Deny Rules',
@@ -27,7 +37,7 @@ export const cc008 = defineCheck({
       if (!Array.isArray(allow) || allow.length === 0) continue;
 
       const denyList = Array.isArray(deny) ? deny.filter((d): d is string => typeof d === 'string') : [];
-      const missing = RECOMMENDED_DENY_PATTERNS.filter(p => !denyList.includes(p));
+      const missing = RECOMMENDED_DENY_PATTERNS.filter(p => !denyList.some(rule => denies(rule, p)));
 
       if (missing.length === RECOMMENDED_DENY_PATTERNS.length) {
         evidence.push({

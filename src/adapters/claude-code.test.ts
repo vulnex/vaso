@@ -162,3 +162,13 @@ describe('Claude Code adapter', () => {
     expect(manifest.envPrefixes).toContain('CLAUDE_');
   });
 });
+
+describe('claudeConfigPaths', () => {
+  const fsWith = (env: Record<string, string>, home = '/home/u') => ({ homedir: () => home, getEnv: (k: string) => env[k] }) as unknown as import('../core/fs-provider.js').FSProvider;
+  it('moves ~/.claude and ~/.claude.json into $CLAUDE_CONFIG_DIR', async () => {
+    const { claudeConfigPaths } = await import('./claude-code.js');
+    expect(claudeConfigPaths('/home/u', fsWith({}))).toEqual({ claudeDir: '/home/u/.claude', rootStateFile: '/home/u/.claude.json' });
+    expect(claudeConfigPaths('/home/u', fsWith({ CLAUDE_CONFIG_DIR: '/srv/cc' }))).toEqual({ claudeDir: '/srv/cc', rootStateFile: '/srv/cc/.claude.json' });
+    expect(claudeConfigPaths('/home/x', fsWith({ CLAUDE_CONFIG_DIR: '/srv/cc' })).claudeDir).toBe('/home/x/.claude');
+  });
+});

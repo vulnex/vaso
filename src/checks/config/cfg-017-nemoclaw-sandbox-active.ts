@@ -11,6 +11,10 @@ export const cfg017 = defineCheck({
   supportedAgents: ['openclaw', 'nemoclaw'],
 
   async run(ctx, h) {
+    // OpenClaw without NemoClaw: CFG-016 carries the recommendation
+    if (!(await ctx.fs.access(join(ctx.fs.homedir(), '.nemoclaw')))) {
+      return h.passed('NemoClaw not installed — not applicable (see CFG-016)');
+    }
     const stateFile = join(ctx.fs.homedir(), '.nemoclaw', 'state', 'nemoclaw.json');
 
     if (!(await ctx.fs.access(stateFile))) {

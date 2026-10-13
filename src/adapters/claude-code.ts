@@ -77,6 +77,18 @@ function inferPlanDefaultModel(rootState?: Record<string, unknown>): ModelRef | 
   return undefined;
 }
 
+/**
+ * ~/.claude and ~/.claude.json, or $CLAUDE_CONFIG_DIR (which holds both) for
+ * the scanning user. Another user's environment isn't observable, so
+ * --all-users homes use the defaults.
+ */
+export function claudeConfigPaths(home: string, fs: FSProvider): { claudeDir: string; rootStateFile: string } {
+  const env = home === fs.homedir() ? fs.getEnv?.('CLAUDE_CONFIG_DIR')?.trim() : undefined;
+  if (!env) return { claudeDir: join(home, CLAUDE_DIR_NAME), rootStateFile: join(home, ROOT_STATE_FILE) };
+  const dir = env === '~' || env.startsWith('~/') ? join(home, env.slice(1)) : env;
+  return { claudeDir: dir, rootStateFile: join(dir, ROOT_STATE_FILE) };
+}
+
 export const claudeCodeAdapter: AgentAdapter = {
   agent: 'claude-code',
   displayName: 'Claude Code',
@@ -87,8 +99,7 @@ export const claudeCodeAdapter: AgentAdapter = {
     const installations: AgentInstallation[] = [];
 
     for (const { home, user } of userDirs) {
-      const claudeDir = join(home, CLAUDE_DIR_NAME);
-      const rootStateFile = join(home, ROOT_STATE_FILE);
+      const { claudeDir, rootStateFile } = claudeConfigPaths(home, fs);
 
       const installs = await discoverCliInstalls(home, fs, {
         names: ['claude'],
@@ -156,11 +167,11 @@ export const claudeCodeAdapter: AgentAdapter = {
   },
 
   getConfigPaths(): string[] {
-    const home = new LocalFSProvider().homedir();
-    const claudeDir = join(home, CLAUDE_DIR_NAME);
+    const fs = new LocalFSProvider();
+    const { claudeDir, rootStateFile } = claudeConfigPaths(fs.homedir(), fs);
     return [
       ...SETTINGS_FILES.map(f => join(claudeDir, f)),
-      join(home, ROOT_STATE_FILE),
+      rootStateFile,
     ];
   },
 
@@ -234,6 +245,8 @@ export const claudeCodeAdapter: AgentAdapter = {
         '~/.claude/CLAUDE.md',
         '~/.claude/mcp.json',
         '~/.claude.json',
+        // $CLAUDE_CONFIG_DIR keeps .claude.json inside it (expanded by the probe)
+        '${CLAUDE_CONFIG_DIR}/.claude.json',
         // User-relative CLI install locations — kept in sync with USER_CLI_RELATIVE_PATHS
         // so findCLIBinary can resolve the binary in remote snapshots where the
         // non-interactive SSH PATH may not include the install dir.

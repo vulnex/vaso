@@ -5,6 +5,7 @@ import { scanWithPatterns, SECURITY_PATTERNS } from '../../analyzers/pattern-eng
 import { markTestCode } from '../../analyzers/test-paths.js';
 import { isExcludedPath } from '../../core/utils.js';
 import { readCappedFile } from '../../core/file-limits.js';
+import { walkSkillTree } from '../../core/skill-walk.js';
 
 const DOC_EXTENSIONS = new Set(['.md', '.txt', '.rst']);
 const PROMPT_INJECTION_RULES = SECURITY_PATTERNS.filter(r => r.category === 'prompt-injection');
@@ -12,7 +13,7 @@ const PROMPT_INJECTION_RULES = SECURITY_PATTERNS.filter(r => r.category === 'pro
 async function getDocFiles(dir: string, fs: ScanContext['fs']): Promise<string[]> {
   const files: string[] = [];
   try {
-    const entries = await fs.readdirEntries(dir, { recursive: true });
+    const entries = await walkSkillTree(fs, dir);
     for (const entry of entries) {
       // Same vendor/build/VCS exclusions as the code walk (node_modules READMEs aren't skill docs)
       if (entry.isFile && !isExcludedPath(dir, entry.parentPath)) {

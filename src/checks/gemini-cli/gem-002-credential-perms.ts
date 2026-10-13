@@ -9,6 +9,8 @@ const CREDENTIAL_FILES = [
   'google_accounts.json',
   'mcp-oauth-tokens.json',
   'a2a-oauth-tokens.json',
+  // Gemini CLI loads GEMINI_API_KEY and friends from ~/.gemini/.env
+  '.env',
 ];
 
 export const gem002 = defineCheck({

@@ -27,6 +27,19 @@ describe('loadConfig', () => {
     await cleanup();
   });
 
+  it('parses JSONC (comments, trailing commas) as VS Code-family editors write it', async () => {
+    await setup();
+    const filePath = join(TEST_DIR, 'settings.json');
+    const raw = '{\n  // trust\n  "security.workspace.trust.enabled": false,\n  "url": "http://x//y",\n}\n';
+    await writeFile(filePath, raw);
+    const config = await loadConfig(filePath);
+    expect(config.data).toEqual({ 'security.workspace.trust.enabled': false, url: 'http://x//y' });
+    expect(config.raw).toBe(raw);
+    await writeFile(filePath, '{ "a": ');
+    await expect(loadConfig(filePath)).rejects.toThrow();
+    await cleanup();
+  });
+
   it('parses YAML config', async () => {
     await setup();
     const filePath = join(TEST_DIR, 'config.yaml');

@@ -1,6 +1,7 @@
 import { join } from 'node:path';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { listSkillDirs } from '../../core/skill-walk.js';
 import { getIOCDatabase } from '../../ioc/database.js';
 
 export const ioc004 = defineCheck({
@@ -19,7 +20,7 @@ export const ioc004 = defineCheck({
     if (!skillsDir) return h.passed('No skills directory found');
 
     try {
-      const entries = await ctx.fs.readdirEntries(skillsDir);
+      const entries = await listSkillDirs(ctx.fs, skillsDir);
       for (const entry of entries) {
         if (!entry.isDirectory) continue;
 

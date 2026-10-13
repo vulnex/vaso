@@ -76,31 +76,39 @@ export const at004 = defineCheck({
         }
       });
 
+      // Webhook secrets have no .env form — upstream compares the header with
+      // webhooks.<name>.secret itself, and AT-008 asks for one — so they are
+      // only a finding when config.json is readable by other users.
+      const webhookSecrets: Evidence[] = [];
       for (const [name, hook] of Object.entries(asRecord(config.data.webhooks) ?? {})) {
         const secret = asRecord(hook)?.secret;
         if (typeof secret === 'string' && secret.length > 0) {
-          found.push({
+          webhookSecrets.push({
             file,
             snippet: `webhooks.${name}.secret: ${mask(secret)}`,
-            detail: 'Webhook shared secret stored in config.json',
+            detail: 'Webhook shared secret in a config.json other users can read',
           });
         }
       }
 
-      if (found.length === 0) continue;
+      if (found.length === 0 && webhookSecrets.length === 0) continue;
       // Readable by other local users → the exposure is live, not just at-rest.
+      let readableMode: string | undefined;
       try {
         const perms = await queryPermissions(ctx.fs, file);
-        if (perms !== 'unsupported' && accessibleByOthers(perms)) {
-          for (const e of found) e.detail += ` (config.json is mode 0${perms.octal} — readable by other users)`;
-        }
+        if (perms !== 'unsupported' && accessibleByOthers(perms)) readableMode = perms.octal;
       } catch {}
+      if (readableMode) {
+        for (const e of found) e.detail += ` (config.json is mode 0${readableMode} — readable by other users)`;
+        for (const e of webhookSecrets) e.detail += ` (mode 0${readableMode})`;
+        found.push(...webhookSecrets);
+      }
       evidence.push(...found);
     }
     return h.fromEvidence(evidence, {
       passed: 'No plaintext credentials in Atomic Agent config.json',
       failed: (n) => `Found ${n} plaintext credential(s) in Atomic Agent config.json`,
-      fixDescription: 'Move secrets to ~/.atomic-agent/.env (chmod 600) and reference them by name (llm.providers[].apiKeyEnvVar); rotate any exposed credential',
+      fixDescription: 'Move secrets to ~/.atomic-agent/.env (chmod 600) and reference them by name (llm.providers[].apiKeyEnvVar); webhook secrets can only live in config.json — chmod 600 it; rotate any exposed credential',
     });
   },
 });

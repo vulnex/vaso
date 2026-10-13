@@ -67,6 +67,24 @@ export function allowedTypoEdits(trustedLength: number): number {
   return 2;
 }
 
+/** Endings added to a whole word (`calendar` → `calendars`). */
+const ADDED_ENDINGS = new Set(['s', 'es', 'ing', 'ed']);
+/** Endings that replace a final `e` (`translate` → `translator`). */
+const E_ENDINGS = new Set(['or', 'er', 'ors', 'ers', 'ion', 'ions', 'ing', 'ed', 'es']);
+
+/**
+ * `calendars` / `calendar`, `translate` / `translator`: another form of the
+ * same word — an ordinary name, not a lookalike. A typo changes the stem
+ * (`calendr`, `weahter`, `githubhelpr`, `calculater`).
+ */
+export function isInflection(a: string, b: string): boolean {
+  let i = 0;
+  while (i < a.length && i < b.length && a[i] === b[i]) i++;
+  if (i < 4) return false;
+  const [x, y] = [a.slice(i), b.slice(i)].sort((p, q) => p.length - q.length);
+  return (x === '' && ADDED_ENDINGS.has(y)) || (x === 'e' && E_ENDINGS.has(y));
+}
+
 export function detectTyposquatting(
   skillName: string,
   trustedNames: string[],
@@ -83,6 +101,7 @@ export function detectTyposquatting(
 
   for (let i = 0; i < trustedNames.length; i++) {
     const trusted = trustedNames[i];
+    if (isInflection(normalized, normalizedTrusted[i])) continue;
     const limit = maxDistance ?? allowedTypoEdits(normalizedTrusted[i].length);
     const distance = typoDistance(normalized, normalizedTrusted[i]);
     if (distance > 0 && distance <= limit) {

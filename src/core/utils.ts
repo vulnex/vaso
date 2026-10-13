@@ -2,6 +2,7 @@ import { join, extname, dirname, relative, sep } from 'node:path';
 import { chmod, mkdir, writeFile } from 'node:fs/promises';
 import type { FSProvider } from './fs-provider.js';
 import type { AgentInstallation } from './types.js';
+import { walkSkillTree } from './skill-walk.js';
 import { LocalFSProvider } from './local-fs-provider.js';
 
 /**
@@ -68,7 +69,8 @@ export async function getSkillFiles(dir: string, fs?: FSProvider): Promise<strin
   const provider = fs ?? new LocalFSProvider();
   const files: string[] = [];
   try {
-    const entries = await provider.readdirEntries(dir, { recursive: true });
+    // Follows symlinked skills that point outside the tree (walkSkillTree)
+    const entries = await walkSkillTree(provider, dir);
     for (const entry of entries) {
       if (!entry.isFile) continue;
       if (!CODE_EXTENSIONS.has(extname(entry.name))) continue;

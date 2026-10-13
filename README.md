@@ -128,7 +128,7 @@ See [doc/user-guide.md](doc/user-guide.md) for full option reference.
 - **Meta Muse** — `/Applications/Muse.app` + `com.meta.endo` preferences (macOS; initial coverage)
 - **Perplexity Comet** — `/Applications/Comet.app` + Chromium profile (extension inventory, session data)
 
-**MCP servers** — Claude Desktop, Claude Code, Cursor, Windsurf, Devin CLI, Abacus.AI, Atomic Agent, Nanobot, PicoClaw, Lyrie, VS Code, project-level configs
+**MCP servers** — Claude Desktop, Claude Code, Codex, Gemini CLI, Qwen Code, GitHub Copilot CLI, Cursor, Windsurf, Devin CLI, Abacus.AI, Atomic Agent, Nanobot, PicoClaw, Lyrie, VS Code, project-level configs
 
 ## Security Checks
 

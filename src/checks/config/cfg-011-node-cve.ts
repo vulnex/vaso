@@ -13,7 +13,12 @@ export const cfg011 = defineCheck({
   severity: 'warning',
   description: 'Check if the Node.js version is vulnerable to CVE-2026-21636',
 
-  async run(_ctx, h) {
+  async run(ctx, h) {
+    // process.version is the Node running VASO — on a remote or snapshot
+    // scan that is the scanning machine, not the scanned host.
+    if (ctx.fs.kind === 'snapshot') {
+      return h.passed('Not checked on remote/snapshot scans — the scanned host\'s Node.js version is not collected');
+    }
     let nodeVersion: string;
     try {
       nodeVersion = process.version; // v20.11.0

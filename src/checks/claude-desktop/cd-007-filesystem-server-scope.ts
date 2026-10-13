@@ -5,18 +5,20 @@ import { defineCheck } from '../../core/check-builder.js';
 interface SensitiveTarget {
   path: string;
   reason: string;
+  /** Sensitive only as a whole: a folder inside it (`~/Documents/work`) is fine. */
+  broad?: boolean;
 }
 
 function buildSensitiveTargets(home: string): SensitiveTarget[] {
   return [
-    { path: home, reason: 'entire user home directory — too broad' },
+    { path: home, reason: 'entire user home directory — too broad', broad: true },
     { path: join(home, '.ssh'), reason: 'contains SSH private keys' },
     { path: join(home, '.aws'), reason: 'contains AWS credentials' },
     { path: join(home, '.gnupg'), reason: 'contains GPG private keys' },
     { path: join(home, '.kube'), reason: 'contains Kubernetes credentials' },
     { path: join(home, '.docker'), reason: 'contains Docker registry credentials' },
     { path: join(home, '.netrc'), reason: 'contains plaintext FTP/HTTP credentials' },
-    { path: '/', reason: 'root of the filesystem — total exposure' },
+    { path: '/', reason: 'root of the filesystem — total exposure', broad: true },
     { path: '/etc', reason: 'system configuration directory' },
     { path: '/var', reason: 'system runtime/log directory' },
     { path: '/Library', reason: 'macOS system Library' },
@@ -39,9 +41,15 @@ function isFilesystemServer(name: string, command?: string, args?: string[]): bo
   return /server-filesystem/i.test(cmdLine);
 }
 
+function isWithin(path: string, dir: string): boolean {
+  return path === dir || path.startsWith(dir.endsWith('/') ? dir : dir + '/');
+}
+
+/** A grant covers a sensitive path when it is that path, one of its parents
+ *  (`/Users` exposes `~/.ssh`), or — except for broad ones — inside it. */
 function matchesSensitive(dir: string, targets: SensitiveTarget[], home: string): SensitiveTarget | undefined {
-  const normalized = normalize(expandHome(dir, home));
-  return targets.find(t => normalized === t.path || normalized.startsWith(t.path + '/'));
+  const normalized = normalize(expandHome(dir, home)).replace(/(.)\/+$/, '$1');
+  return targets.find(t => isWithin(t.path, normalized) || (!t.broad && isWithin(normalized, t.path)));
 }
 
 export const cd007 = defineCheck({

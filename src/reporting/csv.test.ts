@@ -129,4 +129,19 @@ describe('CsvReporter', () => {
     const r = rows(new CsvReporter().render(result));
     expect(r[1][2]).toBe('subagent-a');
   });
+
+  it('neutralizes cells a spreadsheet would run as a formula', () => {
+    const result = makeScanResult();
+    result.agents[0].results[0].evidence = [
+      { file: '/x/skill.md', line: 3, snippet: '=HYPERLINK("http://evil","x")', detail: '+cmd' },
+      { file: '@x', line: 4, snippet: '-2+3', detail: 'plain' },
+    ];
+    const r = rows(new CsvReporter().render(result));
+    expect(r[1][11]).toBe(`'=HYPERLINK("http://evil","x")`);
+    expect(r[1][12]).toBe(`'+cmd`);
+    expect(r[2][9]).toBe(`'@x`);
+    expect(r[2][10]).toBe('4');
+    expect(r[2][11]).toBe(`'-2+3`);
+    expect(r[2][12]).toBe('plain');
+  });
 });

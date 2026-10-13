@@ -5,6 +5,7 @@ import { allUsersCoverageWarning } from '../adapters/openclaw.js';
 import type { AgentInstallation, AgentType } from '../core/types.js';
 import { logError } from '../core/debug.js';
 import { writeFileEnsureDir, writeFileOwnerOnly } from '../core/utils.js';
+import { HostFileNames } from '../transport/host-files.js';
 import { toReportJson } from '../reporting/serialize.js';
 
 export interface DetectCommandOptions {
@@ -23,10 +24,6 @@ export interface DetectCommandOptions {
   parallel?: string;
   snapshot?: string;
   saveSnapshot?: string;
-}
-
-function safeHostname(host: string): string {
-  return host.replace(/[^A-Za-z0-9._-]/g, '_');
 }
 
 function parsePositiveInt(raw: string | undefined, fallback: number, label: string): number {
@@ -218,6 +215,10 @@ async function detectRemoteHosts(options: DetectCommandOptions): Promise<void> {
 
   log(chalk.bold(`\n  Detecting agents on ${targets.length} remote host(s)...\n`));
 
+  // One name per target for its snapshot and its report
+  const hostFiles = new HostFileNames();
+  const targetLabel = (t: SSHTarget) => t.label ?? `${t.user}@${t.host}`;
+
   async function processTarget(target: SSHTarget): Promise<HostDetectResult> {
     const start = Date.now();
     let outcome: HostDetectResult;
@@ -237,7 +238,7 @@ async function detectRemoteHosts(options: DetectCommandOptions): Promise<void> {
         try {
           const { writeFile } = await import('node:fs/promises');
           const { join: joinPath } = await import('node:path');
-          const safeHost = safeHostname(snapshot.hostname ?? target.host);
+          const safeHost = hostFiles.claim(snapshot.hostname ?? target.host, targetLabel(target));
           const outPath = joinPath(options.saveSnapshot, `${safeHost}.json`);
           // Snapshots hold collected file contents by design — owner-only
           await writeFileOwnerOnly(outPath, JSON.stringify(snapshot, null, 2));
@@ -271,7 +272,7 @@ async function detectRemoteHosts(options: DetectCommandOptions): Promise<void> {
       try {
         const { writeFile } = await import('node:fs/promises');
         const { join: joinPath } = await import('node:path');
-        const safeHost = safeHostname(outcome.host);
+        const safeHost = hostFiles.claim(outcome.host, targetLabel(target));
         const ext = options.format === 'json' ? 'json' : 'txt';
         const outPath = joinPath(options.outputDir, `${safeHost}.${ext}`);
         const text = options.format === 'json'

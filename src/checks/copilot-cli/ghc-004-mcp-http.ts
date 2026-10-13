@@ -1,7 +1,5 @@
-import { join } from 'node:path';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { stripJsonc } from '../../core/jsonc.js';
 
 const URL_FIELDS = ['url', 'httpUrl', 'sseUrl'];
 
@@ -22,23 +20,12 @@ export const ghc004 = defineCheck({
     // Use already-parsed .mcp.json from ctx.configs (the adapter appends
     // project-level .mcp.json to the config list).
     for (const c of ctx.configs) {
-      if (c.filePath.endsWith('.mcp.json')) {
+      // project .mcp.json, user <config dir>/mcp-config.json
+      if (c.filePath.endsWith('.mcp.json') || c.filePath.endsWith('/mcp-config.json')) {
         sources.push({ path: c.filePath, data: c.data });
       }
     }
 
-    // Also probe cwd directly for the case where the project install wasn't
-    // detected as a separate installation (e.g. when a user runs `vaso scan`
-    // from inside a repo that just has a .mcp.json but no ~/.copilot/ state).
-    const cwdMcp = join(process.cwd(), '.mcp.json');
-    const alreadyHandled = sources.some(s => s.path === cwdMcp);
-    if (!alreadyHandled && (await ctx.fs.access(cwdMcp))) {
-      try {
-        const raw = await ctx.fs.readFile(cwdMcp);
-        const data = JSON.parse(stripJsonc(raw)) as Record<string, unknown>;
-        sources.push({ path: cwdMcp, data });
-      } catch {}
-    }
 
     for (const { path, data } of sources) {
       const servers = data.mcpServers as Record<string, unknown> | undefined;

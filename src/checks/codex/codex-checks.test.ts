@@ -404,3 +404,26 @@ describe('CDX-010: Over-Broad Command Allow Rules', () => {
     expect(result.passed).toBe(true);
   });
 });
+
+describe('CDX-010 rule parsing', () => {
+  it('reads every prefix_rule form Codex accepts', async () => {
+    const { parsePrefixRules } = await import('./cdx-010-broad-prefix-rules.js');
+    const rules = parsePrefixRules([
+      'prefix_rule(decision = "allow", pattern = ["curl"])',
+      "prefix_rule(pattern = ['bash', '-c'])",
+      'prefix_rule(',
+      '    pattern = [["python3", "node"], "-e",],',
+      '    justification = "scripts (ok)",',
+      ')',
+      'prefix_rule(pattern = ["rm"], decision = "forbidden")',
+      'prefix_rule(pattern = ["git", ["status", "diff"]], decision = "allow")',
+    ].join('\n'));
+    expect(rules.map(r => [r.line, r.decision, r.patterns])).toEqual([
+      [1, 'allow', [['curl']]],
+      [2, 'allow', [['bash', '-c']]],
+      [3, 'allow', [['python3', '-e'], ['node', '-e']]],
+      [7, 'forbidden', [['rm']]],
+      [8, 'allow', [['git', 'status'], ['git', 'diff']]],
+    ]);
+  });
+});

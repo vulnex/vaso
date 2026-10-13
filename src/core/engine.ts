@@ -9,6 +9,7 @@ import { computeScore, scoreToGrade, summarizeResults, aggregateScore, meanScore
 import { dedupeInheritedFindings } from './inherited-findings.js';
 import { dedupePermissionFindings } from './duplicate-findings.js';
 import { getAllSkillsDirs, getSkillFiles } from './utils.js';
+import { mapSourceEvidence } from '../mcp/source-locations.js';
 import { extractToolDefinitions } from '../mcp/tool-baseline.js';
 
 export class ScanEngine {
@@ -241,6 +242,9 @@ export class ScanEngine {
         message: `Check errored and was not completed: ${r.reason instanceof Error ? r.reason.message : String(r.reason)}`,
       };
     });
+
+    // Evidence lines in a multi-file server's joined source → file + line
+    mapSourceEvidence(results, sourcesWithTools);
 
     const score = computeScore(results);
 

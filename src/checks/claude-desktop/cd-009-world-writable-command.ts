@@ -27,10 +27,12 @@ export const cd009 = defineCheck({
         try {
           const perms = await queryPermissions(ctx.fs, command);
           if (perms !== 'unsupported' && perms.worldWrite) {
+            // Evidence on the binary itself, not the config (whose own mode
+            // other checks report — a shared file would hide that finding)
             evidence.push({
-              file: config.filePath,
+              file: command,
               snippet: `mcpServers.${name}.command = ${command} (mode ${perms.octal})`,
-              detail: 'MCP command binary is world-writable — any local user can replace it and run code as you',
+              detail: `MCP command binary (set in ${config.filePath}) is world-writable — any local user can replace it and run code as you`,
             });
             continue;
           }
@@ -43,7 +45,7 @@ export const cd009 = defineCheck({
           const parentPerms = await queryPermissions(ctx.fs, parent);
           if (parentPerms !== 'unsupported' && parentPerms.worldWrite) {
             evidence.push({
-              file: config.filePath,
+              file: parent,
               snippet: `${parent} (mode ${parentPerms.octal})`,
               detail: `Parent directory of MCP command is world-writable — attacker can swap ${command}`,
             });

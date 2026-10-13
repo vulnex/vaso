@@ -21,6 +21,8 @@ export const ghc001 = defineCheck({
   supportedPlatforms: ['darwin', 'linux'],
 
   async run(ctx, h) {
+    // A project install is the repo checkout, not ~/.copilot
+    if (ctx.installation.profile === 'project') return h.passed('Project configuration — ~/.copilot permissions are checked on the user install');
     const evidence: Evidence[] = [];
 
     for (const subdir of PROTECTED_DIRS) {

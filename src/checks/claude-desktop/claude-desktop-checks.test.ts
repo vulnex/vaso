@@ -277,6 +277,20 @@ describe('CD-007: Sensitive Filesystem Server Scope', () => {
     expect(result.passed).toBe(true);
   });
 
+  it('passes a folder inside the home directory, fails the home dir and its parents', async () => {
+    const home = '/Users/me';
+    const fs = makeFs({ homedir: () => home });
+    const fsServer = (path: string) => makeConfig('config.json', {
+      mcpServers: { filesystem: { command: 'npx', args: ['-y', '@modelcontextprotocol/server-filesystem', path] } },
+    });
+    for (const ok of ['~/Documents/work', `${home}/projects`, '~/.sshkeys-notes']) {
+      expect((await check.run(makeCtx([fsServer(ok)], fs))).passed, ok).toBe(true);
+    }
+    for (const bad of ['~', `${home}/`, '/Users', '/', '~/.ssh/keys', '~/.aws']) {
+      expect((await check.run(makeCtx([fsServer(bad)], fs))).passed, bad).toBe(false);
+    }
+  });
+
   it('only inspects filesystem-server entries (skips others)', async () => {
     const config = makeConfig('config.json', {
       mcpServers: {

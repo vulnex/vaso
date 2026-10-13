@@ -16,7 +16,12 @@ const DYNAMIC_STATE_PATTERNS = [
 ];
 // Match function definitions or route handlers for callbacks, not URL string values
 const CALLBACK_HANDLER_PATTERN = /(?:function\s+\w*[Cc]allback|handle.*[Cc]allback|\.(?:get|post|all)\s*\(\s*['"].*callback)/;
-const STATE_VERIFY_PATTERN = /state.*(?:===|!==|==|!=|verify|check|match|compare)|(?:verify|check|match|compare).*state/i;
+// Comparing state, or (Python) looking it up / rejecting it / handing it to a
+// validating callback: `state_mapping.get(state)`, `if not state`, `state in
+// pending`, `self.handle_simple_callback(user, pw, state)`.
+const STATE_VERIFY_PATTERN = /state.*(?:===|!==|==|!=|verify|check|match|compare|valid)|(?:verify|check|match|compare|valid).*state|\.(?:get|pop)\(\s*["']?\w*state\b|\[\s*\w*state\s*\]|\bstate\w*\s+(?:not\s+)?in\b|\bnot\s+\w*state\b|\w*(?:callback|verify|validate)\w*\([^)]*\bstate\b/i;
+/** A thin route that hands the whole request to a handler that does the checking. */
+const DELEGATES_REQUEST = /\breturn\s+(?:await\s+)?[\w.]*(?:callback|verify|validate)\w*\(\s*req(?:uest)?\s*\)/i;
 
 // Pattern to detect active URL construction vs config constants
 const URL_CONSTRUCTION_PATTERN = /[?&]|URLSearchParams|\.search|\.href|redirect\s*\(|fetch\s*\(|window\.location|\+\s*['"`]|`[^`]*\$\{/;
@@ -87,6 +92,7 @@ export const mcp018 = defineCheck({
         if (CALLBACK_HANDLER_PATTERN.test(line)) {
           const nearbyCode = segments.slice(i, i + SEARCH_RADIUS + 1).map((s) => s.text).join('\n');
 
+          if (DELEGATES_REQUEST.test(nearbyCode)) continue;
           if (STATE_PARAM_PATTERN.test(nearbyCode) === false ||
               (STATE_PARAM_PATTERN.test(nearbyCode) && !STATE_VERIFY_PATTERN.test(nearbyCode))) {
             // Only flag if this looks like it's handling an OAuth callback

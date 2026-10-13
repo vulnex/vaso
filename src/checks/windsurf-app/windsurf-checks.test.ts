@@ -188,10 +188,21 @@ describe('WS-003: Windsurf Plaintext Secrets in MCP Config', () => {
           env: { GITHUB_TOKEN: '${env:GITHUB_TOKEN}' },
           headers: { Authorization: '${file:/home/test/.secrets/token}' },
         },
+        remote: {
+          serverUrl: 'https://mcp.example.com',
+          headers: { Authorization: 'Bearer ${env:TOK}', 'X-Api-Key': 'key-${env:A}-${env:B}' },
+        },
       },
     });
     const result = await check.run(makeCtx([config]));
     expect(result.passed).toBe(true);
+  });
+
+  it('flags the literal part of a partly interpolated value', async () => {
+    const config = makeConfig('mcp_config.json', {
+      mcpServers: { remote: { serverUrl: 'https://x', headers: { Authorization: 'Bearer abcd1234efgh5678 ${env:X}' } } },
+    });
+    expect((await check.run(makeCtx([config]))).passed).toBe(false);
   });
 
   it('skips placeholders, booleans and numbers', async () => {
@@ -313,6 +324,13 @@ describe('WS-005: Windsurf Insecure MCP Server URL', () => {
     });
     const result = await check.run(makeCtx([config]));
     expect(result.passed).toBe(true);
+  });
+
+  it('reads the `url` key of the Devin-format config too', async () => {
+    const config = makeConfig('mcp_config.json', { mcpServers: { r: { url: 'http://mcp.example.com/mcp' } } });
+    const result = await check.run(makeCtx([config]));
+    expect(result.passed).toBe(false);
+    expect(result.evidence?.[0].snippet).toContain('.url:');
   });
 });
 

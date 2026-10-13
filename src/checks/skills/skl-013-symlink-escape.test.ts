@@ -71,6 +71,19 @@ describe('SKL-013: Workspace Symlink Escape', () => {
     expect(result.severity).toBe('warning');
   });
 
+  it('reports a whole skill linked in from a checkout as info on an installed agent', async () => {
+    mkdirSync(join(outside, 'browse'));
+    writeFileSync(join(outside, 'browse', 'SKILL.md'), '# browse');
+    symlinkSync(join(outside, 'browse'), join(workspace, 'browse'));
+
+    const ctx = makeCtx(workspace);
+    ctx.installation = { ...ctx.installation, agent: 'codex' };
+    const result = await skl013.run(ctx);
+    expect(result.passed).toBe(false);
+    expect(result.severity).toBe('info');
+    expect(result.evidence?.[0].detail).toContain('Skill installed as a link');
+  });
+
   it('ignores symlinks that stay inside the workspace', async () => {
     const target = join(workspace, 'real.txt');
     writeFileSync(target, 'hi');

@@ -193,6 +193,25 @@ describe('runMCPScan', () => {
 
     expect(process.exitCode).toBe(1);
   });
+
+  it('honours --fail-on (warning findings, none, invalid level)', async () => {
+    mockDiscoverFromPaths.mockResolvedValue(sampleDiscoveryResult);
+    mockResolveServerSources.mockResolvedValue([]);
+    mockScanMCP.mockResolvedValue({
+      ...sampleScanResult,
+      agents: [{
+        ...sampleScanResult.agents[0],
+        results: [{ id: 'MCP-010', name: 'Rug pull', category: 'mcp', severity: 'warning', passed: false, message: 'unpinned' }],
+      }],
+    });
+    await runMCPScan({ format: 'json', path: ['/config.json'] });
+    expect(process.exitCode).toBeUndefined();
+    await runMCPScan({ format: 'json', path: ['/config.json'], failOn: 'warning' });
+    expect(process.exitCode).toBe(1);
+    process.exitCode = undefined;
+    await runMCPScan({ format: 'json', path: ['/config.json'], failOn: 'nope' });
+    expect(process.exitCode).toBe(2);
+  });
 });
 
 describe('runMCPList', () => {

@@ -155,6 +155,25 @@ describe('Config fix() methods', () => {
     expect(data.gateway.port).toBe(18789);
   });
 
+  it('CFG-001: rewrites every exposed file in one run (openclaw.json + sub-agent, JSON + .env)', async () => {
+    const main = join(TEST_DIR, 'openclaw.json');
+    const sub = join(TEST_DIR, 'agent.json');
+    const env = join(TEST_DIR, '.env');
+    await writeFile(main, JSON.stringify({ gateway: { bind: 'lan' } }, null, 2) + '\n');
+    await writeFile(sub, JSON.stringify({ gateway: { bind: 'all' } }, null, 2) + '\n');
+    await writeFile(env, 'GATEWAY_HOST=0.0.0.0\n');
+    const ctx = makeCtx('openclaw', [
+      makeJsonConfig(main, { gateway: { bind: 'lan' } }),
+      makeJsonConfig(sub, { gateway: { bind: 'all' } }),
+      makeEnvConfig(env, { GATEWAY_HOST: '0.0.0.0' }),
+    ]);
+    const result = await cfg001.fix!(ctx);
+    expect(result.applied).toBe(true);
+    expect(JSON.parse(await readFile(main, 'utf-8')).gateway.bind).toBe('loopback');
+    expect(JSON.parse(await readFile(sub, 'utf-8')).gateway.bind).toBe('loopback');
+    expect(await readFile(env, 'utf-8')).toContain('GATEWAY_HOST=127.0.0.1');
+  });
+
   it('CFG-001: rebinds OpenClaw 2026.x gateway.bind to "loopback" in the file that has it (no gateway.host)', async () => {
     const first = join(TEST_DIR, 'agent.json');
     const main = join(TEST_DIR, 'openclaw.json');
@@ -320,28 +339,67 @@ describe('ZeroClaw fix() methods', () => {
 // ── Rollback tests ────────────────────────────────────────────────────
 
 describe('rollback', () => {
-  it('restores files from a backup directory', async () => {
-    // Create a "backup" directory structure simulating what RemediationEngine creates
-    const backupBase = join(homedir(), '.vaso', 'backups');
-    const backupTimestamp = `test-rollback-${Date.now()}`;
-    const backupDir = join(backupBase, backupTimestamp);
+  // rollback() reads ~/.vaso/backups — point HOME at a throwaway dir
+  let savedHome: string | undefined;
+  let home: string;
+  beforeEach(async () => {
+    savedHome = process.env.HOME;
+    home = join(TEST_DIR, 'home');
+    await mkdir(home, { recursive: true });
+    process.env.HOME = home;
+  });
+  afterEach(() => {
+    process.env.HOME = savedHome;
+  });
 
-    // The original file
+  async function makeBackup(stamp: string, file: string, content: string): Promise<void> {
+    const backupFile = join(homedir(), '.vaso', 'backups', stamp, file);
+    await mkdir(join(backupFile, '..'), { recursive: true });
+    await writeFile(backupFile, content);
+  }
+
+  it('restores files from a backup directory', async () => {
     const originalFile = join(TEST_DIR, 'original.env');
     await writeFile(originalFile, 'KEY=modified\n');
+    await makeBackup('test-rollback', originalFile, 'KEY=original\n');
 
-    // Create backup with original content
-    const backupFilePath = join(backupDir, originalFile);
-    await mkdir(join(backupDir, TEST_DIR), { recursive: true });
-    await writeFile(backupFilePath, 'KEY=original\n');
+    await rollback('test-rollback');
 
-    // Rollback should restore
-    await rollback(backupTimestamp);
+    expect(await readFile(originalFile, 'utf-8')).toBe('KEY=original\n');
+  });
 
-    const content = await readFile(originalFile, 'utf-8');
-    expect(content).toBe('KEY=original\n');
+  it('undoes fix runs one at a time, newest first', async () => {
+    const file = join(TEST_DIR, 'config.json');
+    // run 1 changed v0 → v1, run 2 changed v1 → v2
+    await makeBackup('2026-10-13T08-00-00-000Z', file, 'v0');
+    await makeBackup('2026-10-13T09-00-00-000Z', file, 'v1');
+    await writeFile(file, 'v2');
 
-    // Cleanup backup
-    await rm(backupDir, { recursive: true, force: true });
+    await rollback();
+    expect(await readFile(file, 'utf-8')).toBe('v1');
+    await rollback();
+    expect(await readFile(file, 'utf-8')).toBe('v0');
+
+    // Nothing left to undo: the file stays as it is
+    await rollback();
+    expect(await readFile(file, 'utf-8')).toBe('v0');
+
+    // A restored backup can still be named explicitly
+    await rollback('2026-10-13T09-00-00-000Z');
+    expect(await readFile(file, 'utf-8')).toBe('v1');
+  });
+
+  it('refuses an ambiguous backup name', async () => {
+    const file = join(TEST_DIR, 'config.json');
+    await makeBackup('2026-10-13T08-00-00-000Z', file, 'v0');
+    await makeBackup('2026-10-13T09-00-00-000Z', file, 'v1');
+    await writeFile(file, 'v2');
+    const savedExit = process.exitCode;
+
+    await rollback('2026-10-13');
+
+    expect(await readFile(file, 'utf-8')).toBe('v2');
+    expect(process.exitCode).toBe(2);
+    process.exitCode = savedExit;
   });
 });

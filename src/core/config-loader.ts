@@ -4,6 +4,7 @@ import YAML from 'yaml';
 import { parse as parseTOML } from 'smol-toml';
 import type { ParsedConfig } from './types.js';
 import type { FSProvider } from './fs-provider.js';
+import { stripJsonc } from './jsonc.js';
 import { LocalFSProvider } from './local-fs-provider.js';
 
 /** A config file that exists but could not be read or parsed. Without this
@@ -123,7 +124,18 @@ function detectFormat(ext: string, filePath: string): ParsedConfig['format'] {
 function parseContent(raw: string, format: ParsedConfig['format']): Record<string, unknown> {
   switch (format) {
     case 'json':
-      return JSON.parse(raw);
+      try {
+        return JSON.parse(raw);
+      } catch (err) {
+        // VS Code-family settings (Cursor, Windsurf, Code) are JSONC:
+        // comments and trailing commas. Strict JSON first, so a real syntax
+        // error still reports the original message.
+        try {
+          return JSON.parse(stripJsonc(raw));
+        } catch {
+          throw err;
+        }
+      }
     case 'yaml':
       return YAML.parse(raw) ?? {};
     case 'env':

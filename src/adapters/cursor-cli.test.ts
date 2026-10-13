@@ -54,6 +54,21 @@ describe('Cursor CLI adapter', () => {
     expect(result).toEqual([]);
   });
 
+  it.skipIf(process.platform !== 'linux' && process.platform !== 'darwin')('detects an IDE-only install that has no ~/.cursor', async () => {
+    const userData = process.platform === 'darwin'
+      ? join(home, 'Library', 'Application Support', 'Cursor', 'User', 'settings.json')
+      : join(home, '.config', 'Cursor', 'User', 'settings.json');
+    setExistingPaths([userData]);
+    mockLoadConfig.mockImplementation(async (path) => {
+      if (path === userData) return mockConfig(userData, { 'security.workspace.trust.enabled': false });
+      throw new Error('ENOENT');
+    });
+    const result = await cursorCliAdapter.detect();
+    expect(result).toHaveLength(1);
+    expect(result[0].agentName).toBe('cursor (IDE)');
+    expect(result[0].configFiles.map(c => c.filePath)).toEqual([userData]);
+  });
+
   it('detects installation from cli-config.json', async () => {
     const configPath = join(cursorDir, 'cli-config.json');
     setExistingPaths([cursorDir, configPath]);

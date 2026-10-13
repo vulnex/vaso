@@ -11,9 +11,22 @@ export const cfg006 = defineCheck({
   description: 'Check if filesystem access is restricted to a workspace directory',
   // Atomic Agent confines reads via agent.readScope (AT-002), not a workspace key.
   // The other frameworks listed scope the filesystem in their own schemas (framework checks).
-  excludedAgents: [...CODING_AGENTS, ...NATIVE_POLICY_FRAMEWORKS],
+  // Hermes and NemoClaw (OpenShell sandbox) have no such keys either.
+  excludedAgents: [...CODING_AGENTS, ...NATIVE_POLICY_FRAMEWORKS, 'hermes', 'nemoclaw'],
 
   async run(ctx, h) {
+    // OpenClaw 2026.x: the fs tools are confined by tools.fs.workspaceOnly
+    // (agents.defaults.workspace only says where the workspace is).
+    if (ctx.installation.agent === 'openclaw') {
+      const restricted = ctx.configs.some(c => getNestedValue(c.data, 'tools.fs.workspaceOnly') === true);
+      return h.result({
+        passed: restricted,
+        message: restricted
+          ? 'File tools are confined to the workspace (tools.fs.workspaceOnly)'
+          : 'File tools can read and write outside the workspace — tools.fs.workspaceOnly is not set',
+      });
+    }
+
     let found = false;
 
     for (const config of ctx.configs) {
