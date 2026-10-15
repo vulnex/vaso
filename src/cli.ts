@@ -244,7 +244,7 @@ program
   .description('Update the IOC and advisory databases from the signed remote feeds')
   .option('--url <url>', 'custom IOC feed URL')
   .option('--advisory-url <url>', 'custom advisory feed URL')
-  .option('--force', 'force update even if feed is not stale')
+  .option('--force', 're-install the cached feed version (never an older one)')
   .action(async (options) => {
     const { runUpdate } = await import('./commands/update.js');
     await runUpdate(options);

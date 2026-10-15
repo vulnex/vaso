@@ -280,10 +280,13 @@ Fetch the IOC (Indicators of Compromise) and advisory threat-intelligence feeds.
 Feeds are published **at least monthly**, with out-of-band publishes for actively exploited issues — see the "Threat Feed Updates" section of `SECURITY.md` for the full policy.
 
 ```bash
-vaso update           # Fetch latest signed feeds
-vaso update --force   # Update even if feeds are not stale
-vaso update --url <url>  # Custom feed URL (must still be signed with the pinned key)
+vaso update                      # Fetch the latest signed feeds (whatever the cache's age)
+vaso update --force              # Also re-install a feed of the cached version (repairs a damaged cache)
+vaso update --url <url>          # Custom IOC feed URL (must still be signed with the pinned key)
+vaso update --advisory-url <url> # Custom advisory feed URL (same signature requirement)
 ```
+
+A feed older than the cached one is never installed, `--force` included. `vaso update` exits 2 when either feed can't be fetched or verified, so a cron job or CI step notices.
 
 ### `vaso mcp scan`
 
@@ -667,7 +670,7 @@ For fast triage or environments without Node.js, use the Bash quick-scan script.
 vaso-quick
 ```
 
-This runs 5 critical checks (gateway binding, API key exposure, file permissions, sandbox status, auth bypass) using only standard Unix tools. No Node.js or npm dependencies required at runtime.
+This runs 5 critical checks against an OpenClaw install (gateway binding, API key exposure, file permissions, sandbox status, auth bypass) using only standard Unix tools; it honours `OPENCLAW_STATE_DIR` and `OPENCLAW_HOME` and reads JSON, JSON5 and YAML configs. It exits 1 when any check fails and 0 otherwise. No Node.js or npm dependencies required at runtime.
 
 You can also run the script directly without installing anything — fetch it once and execute:
 

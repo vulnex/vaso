@@ -160,10 +160,14 @@ describe('runUpdate', () => {
     mockFetchAdvisory.mockResolvedValue({ success: true, message: 'ok' });
     mockGetAdvisory.mockReturnValue({ advisories: [] } as any);
 
-    await runUpdate({ url: 'https://custom.feed/ioc', force: false });
+    await runUpdate({ url: 'https://custom.feed/ioc' });
+    // An explicit update always fetches; only --force re-installs the same version
     expect(mockFetchIOC).toHaveBeenCalledWith(
-      expect.objectContaining({ feedUrl: 'https://custom.feed/ioc', force: false }),
+      expect.objectContaining({ feedUrl: 'https://custom.feed/ioc', force: true, reinstall: false }),
     );
+    await runUpdate({ force: true });
+    expect(mockFetchIOC).toHaveBeenLastCalledWith(expect.objectContaining({ reinstall: true }));
+    expect(mockFetchAdvisory).toHaveBeenLastCalledWith(expect.objectContaining({ reinstall: true }));
   });
 
   it('reports merged IOC database totals', async () => {

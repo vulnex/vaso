@@ -427,6 +427,13 @@ describe('fetchAndUpdateFeed', () => {
 
     expect(result.success).toBe(true);
     expect(result.message).toContain('not newer');
+
+    // Neither --force (staleness) nor reinstall accepts an older signed feed
+    const forced = await fetchAndUpdateFeed({
+      feedUrl: 'https://example.com/feed.json', feedDir: tmpDir, publicKeyPem: testPublicKeyPem, force: true, reinstall: true,
+    });
+    expect(forced.message).toContain('not newer');
+    expect(JSON.parse(await readFile(join(tmpDir, 'metadata.json'), 'utf-8')).feedVersion).toBe(5);
   });
 
   it('first-time fetch proceeds without force when no metadata exists', async () => {

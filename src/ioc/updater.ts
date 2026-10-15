@@ -170,7 +170,12 @@ export async function loadCachedFeed(
 
 export interface FetchOptions {
   feedUrl?: string;
+  /** Fetch even when the cached feed isn't stale. */
   force?: boolean;
+  /** Re-install a feed of the same version as the cache (repairs a damaged
+   *  cache). An older feed is never installed — that would roll back
+   *  indicators with a replayed, validly signed old feed. */
+  reinstall?: boolean;
   feedDir?: string;
   publicKeyPem?: string;
 }
@@ -244,7 +249,7 @@ export async function fetchAndUpdateFeed(options: FetchOptions = {}): Promise<Up
   }
 
   // Reject downgrades
-  if (feed.meta.version <= currentVersion && !force) {
+  if (feed.meta.version < currentVersion || (feed.meta.version === currentVersion && !options.reinstall)) {
     return {
       success: true,
       message: `Feed version ${feed.meta.version} is not newer than cached version ${currentVersion}.`,

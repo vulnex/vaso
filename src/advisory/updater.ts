@@ -109,7 +109,12 @@ export async function loadCachedAdvisoryFeed(
 
 export interface AdvisoryFetchOptions {
   feedUrl?: string;
+  /** Fetch even when the cached feed isn't stale. */
   force?: boolean;
+  /** Re-install a feed of the same version as the cache (repairs a damaged
+   *  cache). An older feed is never installed — that would roll back
+   *  indicators with a replayed, validly signed old feed. */
+  reinstall?: boolean;
   feedDir?: string;
   publicKeyPem?: string;
 }
@@ -181,7 +186,7 @@ export async function fetchAndUpdateAdvisoryFeed(
     return { success: false, message: 'Invalid advisory feed JSON.' };
   }
 
-  if (feed.meta.version <= currentVersion && !force) {
+  if (feed.meta.version < currentVersion || (feed.meta.version === currentVersion && !options.reinstall)) {
     return {
       success: true,
       message: `Advisory feed version ${feed.meta.version} is not newer than cached version ${currentVersion}.`,

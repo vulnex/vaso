@@ -21,7 +21,11 @@ echo -e "\n${BOLD}VASO Quick Scan${NC}"
 echo -e "${CYAN}Zero-dependency critical security check${NC}\n"
 
 # Detect OpenClaw installation
-DIRS=("$HOME/.openclaw" "$HOME/.clawdbot" "$HOME/.moltbot" "/etc/openclaw")
+# OpenClaw's relocation variables: OPENCLAW_STATE_DIR is the state directory
+# itself, OPENCLAW_HOME replaces the home directory
+DIRS=()
+[ -n "${OPENCLAW_STATE_DIR:-}" ] && DIRS+=("$OPENCLAW_STATE_DIR")
+DIRS+=("${OPENCLAW_HOME:-$HOME}/.openclaw" "$HOME/.clawdbot" "$HOME/.moltbot" "/etc/openclaw")
 INSTALL_DIR=""
 for d in "${DIRS[@]}"; do
   if [ -d "$d" ]; then INSTALL_DIR="$d"; break; fi
@@ -34,17 +38,34 @@ fi
 
 echo -e "Agent: ${BOLD}OpenClaw${NC} ($INSTALL_DIR)\n"
 
+# Top-level config files, each flattened to one line so a nested key
+# (`sandbox: { mode: "off" }`, JSON5 or YAML, over several lines) still matches
+CONFIGS=()
+for f in "$INSTALL_DIR"/*.json "$INSTALL_DIR"/*.json5 "$INSTALL_DIR"/*.yaml "$INSTALL_DIR"/*.yml; do
+  [ -f "$f" ] && CONFIGS+=("$f")
+done
+config_matches() {
+  local f
+  for f in ${CONFIGS[@]+"${CONFIGS[@]}"}; do
+    tr '\n\r\t' '   ' < "$f" 2>/dev/null | grep -qE "$1" && return 0
+  done
+  return 1
+}
+# A key, quoted or not (JSON, JSON5, YAML)
+K() { printf '["\x27]?%s["\x27]?[[:space:]]*:[[:space:]]*' "$1"; }
+
 # Check 1: Gateway binding (0.0.0.0)
 echo -e "${BOLD}Checking gateway binding...${NC}"
-if grep -rq '0\.0\.0\.0' "$INSTALL_DIR"/*.json "$INSTALL_DIR"/*.yaml 2>/dev/null; then
-  fail "Gateway bound to 0.0.0.0 — exposed to all interfaces" 12
+# 2026.x: gateway.bind = "loopback" | "lan" | "all" | "auto"; older: an address
+if config_matches "0\.0\.0\.0|$(K bind)[\"']?(lan|all|auto|::)[\"']?([[:space:],}]|$)"; then
+  fail "Gateway bound to all interfaces (0.0.0.0 / bind lan|all|auto)" 12
 else
   pass "Gateway not bound to 0.0.0.0"
 fi
 
 # Check 2: API key exposure
 echo -e "${BOLD}Checking for exposed API keys...${NC}"
-if grep -rqE '(sk-[a-zA-Z0-9]{20,}|AKIA[0-9A-Z]{16}|ghp_[a-zA-Z0-9]{36})' "$INSTALL_DIR" 2>/dev/null; then
+if grep -rqE --exclude-dir=node_modules --exclude-dir=.git '(sk-(ant-|proj-)?[A-Za-z0-9_-]{20,}|AKIA[0-9A-Z]{16}|ghp_[a-zA-Z0-9]{36}|github_pat_[A-Za-z0-9_]{22,})' "$INSTALL_DIR" 2>/dev/null; then
   fail "API keys found in config files" 12
 else
   pass "No exposed API keys found"
@@ -53,9 +74,10 @@ fi
 # Check 3: File permissions
 echo -e "${BOLD}Checking file permissions...${NC}"
 PERM_ISSUES=0
-for f in "$INSTALL_DIR"/*.json "$INSTALL_DIR"/*.yaml "$INSTALL_DIR"/.env; do
+for f in ${CONFIGS[@]+"${CONFIGS[@]}"} "$INSTALL_DIR"/.env; do
   [ -f "$f" ] || continue
-  PERMS=$(stat -f '%Lp' "$f" 2>/dev/null || stat -c '%a' "$f" 2>/dev/null)
+  # GNU stat first: on Linux `stat -f` is filesystem status and "succeeds"
+  PERMS=$(stat -c '%a' "$f" 2>/dev/null || stat -f '%Lp' "$f" 2>/dev/null)
   if [ "${PERMS:-644}" != "600" ] && [ "${PERMS:-644}" != "400" ]; then
     PERM_ISSUES=$((PERM_ISSUES + 1))
   fi
@@ -68,7 +90,8 @@ fi
 
 # Check 4: Sandbox disabled
 echo -e "${BOLD}Checking sandbox status...${NC}"
-if grep -rqE '"sandbox"\s*:\s*(false|"disabled"|"off")' "$INSTALL_DIR" 2>/dev/null; then
+# `sandbox: false|"off"`, or 2026.x `agents.defaults.sandbox.mode: "off"`
+if config_matches "$(K sandbox)(false|[\"'](disabled|off|none)[\"'])|$(K sandbox)(\{[^}]*)?$(K mode)[\"']?(off|disabled|none)"; then
   fail "Sandbox is disabled — skills run without isolation" 12
 else
   pass "Sandbox is not explicitly disabled"
@@ -76,7 +99,7 @@ fi
 
 # Check 5: Auth bypass
 echo -e "${BOLD}Checking auth configuration...${NC}"
-if grep -rqE '"bypass"\s*:\s*true|"mode"\s*:\s*"none"' "$INSTALL_DIR" 2>/dev/null; then
+if config_matches "$(K bypass)true|$(K auth)(\{[^}]*)?$(K mode)[\"']?none"; then
   fail "Authentication bypass is enabled" 12
 else
   pass "Auth bypass is not enabled"
@@ -99,3 +122,6 @@ else
   echo -e "${COLOR}${BOLD}Score: $SCORE/100 ($GRADE) — $FINDINGS finding(s)${NC}"
 fi
 echo ""
+
+# Non-zero on findings, like `vaso scan` (every check here is critical-class)
+[ "$FINDINGS" -eq 0 ] || exit 1

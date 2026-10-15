@@ -24,7 +24,10 @@ async function updateIocFeed(options: UpdateOptions): Promise<boolean> {
 
   const result = await fetchAndUpdateFeed({
     feedUrl: options.url,
-    force: options.force ?? true, // CLI update always forces by default
+    // An explicit `vaso update` fetches whatever the cache's age; --force
+    // also re-installs the current version
+    force: true,
+    reinstall: options.force === true,
   });
 
   if (!result.success) {
@@ -69,7 +72,8 @@ async function updateAdvisoryFeed(options: UpdateOptions): Promise<boolean> {
 
   const advResult = await fetchAndUpdateAdvisoryFeed({
     feedUrl: options.advisoryUrl,
-    force: options.force ?? true,
+    force: true,
+    reinstall: options.force === true,
   });
 
   if (!advResult.success) {
