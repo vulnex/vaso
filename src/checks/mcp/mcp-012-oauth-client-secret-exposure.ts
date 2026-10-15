@@ -1,6 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { API_KEY_PATTERNS, OAUTH_SECRET_PATTERNS, OAUTH_TOKEN_VALUE_PATTERNS, isPlaceholderSecret } from '../../core/patterns.js';
+import { API_KEY_PATTERNS, OAUTH_SECRET_PATTERNS, OAUTH_TOKEN_VALUE_PATTERNS, isEnvReference, isPlaceholderSecret } from '../../core/patterns.js';
 import { shannonEntropy } from '../../analyzers/entropy.js';
 
 const HIGH_ENTROPY_THRESHOLD = 4.5;
@@ -28,8 +28,8 @@ export const mcp012 = defineCheck({
         if (!server.env) continue;
 
         for (const [key, value] of Object.entries(server.env)) {
-          // Skip env var references like ${VAR}
-          if (/^\$\{.*\}$/.test(value) || /^\$[A-Z_]+$/.test(value)) continue;
+          // A reference to a variable or file, in any agent's syntax
+          if (isEnvReference(value)) continue;
           if (isPlaceholderSecret(value)) continue;
           // A recognized vendor credential (GitHub PAT, OpenAI key, …) is
           // MCP-003's finding; reporting it here too counts one secret twice.

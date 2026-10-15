@@ -121,3 +121,28 @@ describe('isPlaceholderSecret', () => {
     ]) expect(isPlaceholderSecret(v), v).toBe(false);
   });
 });
+
+describe('envReference', () => {
+  it('recognizes every agent\'s reference syntax', async () => {
+    const { envReference } = await import('./patterns.js');
+    expect(envReference('${env:TOKEN}')).toBe('env-colon');
+    expect(envReference('${file:/run/secrets/x}')).toBe('env-colon');
+    expect(envReference('{env:TOKEN}')).toBe('brace-env');
+    expect(envReference('${TOKEN}')).toBe('dollar-brace');
+    expect(envReference('${TOKEN:-dev}')).toBe('dollar-brace');
+    expect(envReference('$TOKEN')).toBe('dollar');
+    expect(envReference('Bearer ${MCP_TOKEN}')).toBe('dollar-brace');
+    expect(envReference('$env:TOKEN')).toBe('powershell');
+    expect(envReference('%TOKEN%')).toBe('percent');
+    expect(envReference('GITHUB_PERSONAL_ACCESS_TOKEN')).toBe('name');
+  });
+
+  it('never treats a stored credential as a reference', async () => {
+    const { envReference } = await import('./patterns.js');
+    for (const v of ['sk-live-abcdef1234567890', 'Bearer sk-live-abcdef1234567890', 'AKIAZ3MPLE7TOKENX2QR', 'Bearer ${A} sk-live-abc123def456',
+      '${TOKEN:-sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123}', '${TOKEN:-a1b2c3d4e5f6g7h8i9j0}', 'hunter2hunter2', 'abc_def']) {
+      expect(envReference(v), v).toBeUndefined();
+    }
+  });
+});
+

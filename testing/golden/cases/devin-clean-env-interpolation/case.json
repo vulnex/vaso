@@ -1,0 +1,10 @@
+{
+  "agent": "devin",
+  "source": "docs.devin.ai/cli/extensibility/mcp/configuration \u2014 Devin expands only ${env:VAR} and ${file:/path}; golden-corpus finding: ${VAR} was a critical DEV-003 plaintext secret",
+  "pass": [
+    "DEV-003"
+  ],
+  "modes": {
+    ".local/share/devin/credentials.toml": "600"
+  }
+}

@@ -1,6 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { API_KEY_PATTERNS, isPlaceholderSecret } from '../../core/patterns.js';
+import { API_KEY_PATTERNS, envReference, isPlaceholderSecret } from '../../core/patterns.js';
 
 // Devin supports secret interpolation: ${env:VAR} and ${file:/path}, also
 // embedded in a larger value (`Bearer ${env:TOKEN}`). Whatever remains after
@@ -23,7 +23,25 @@ function literalPart(value: unknown): string {
 
 function isLiteralSecret(value: unknown): value is string {
   const literal = literalPart(value);
-  return literal.length > 0 && !isPlaceholderSecret(literal);
+  return literal.length > 0 && !isPlaceholderSecret(literal) && !envReference(literal);
+}
+
+/**
+ * A reference in a syntax Devin doesn't expand (`${VAR}`, `$VAR`, `{env:VAR}`,
+ * a bare variable name): Devin passes the text to the server as is. Nothing
+ * is stored, so it isn't a plaintext secret — but the server gets no
+ * credential. Reported as info.
+ */
+function unexpandedReference(value: unknown, where: string, file: string): Evidence | undefined {
+  if (typeof value !== 'string') return undefined;
+  const form = envReference(value);
+  if (!form || form === 'env-colon') return undefined;
+  return {
+    file,
+    snippet: `${where}: ${value.trim().slice(0, 60)}`,
+    detail: 'Not Devin interpolation syntax — Devin expands only ${env:VAR} and ${file:/path}, so the MCP server receives this text literally (no credential is stored here)',
+    mitigated: true,
+  };
 }
 
 function knownTokenName(value: string): string | undefined {
@@ -51,6 +69,8 @@ export const dev003 = defineCheck({
 
         // A literal oauthClientSecret is always a finding — the field is a
         // secret by definition.
+        const oauthRef = unexpandedReference(server.oauthClientSecret, `mcpServers.${name}.oauthClientSecret`, config.filePath);
+        if (oauthRef) evidence.push(oauthRef);
         if (isLiteralSecret(server.oauthClientSecret)) {
           evidence.push({
             file: config.filePath,
@@ -65,6 +85,11 @@ export const dev003 = defineCheck({
           if (!map || typeof map !== 'object' || Array.isArray(map)) continue;
           for (const [key, value] of Object.entries(map as Record<string, unknown>)) {
             if (typeof value !== 'string') continue;
+            const ref = unexpandedReference(value, `mcpServers.${name}.${field}.${key}`, config.filePath);
+            if (ref) {
+              evidence.push(ref);
+              continue;
+            }
             const literal = literalPart(value);
             if (isPlaceholderSecret(literal)) continue; // a docs example (ghp_your_token)
             // A recognizable token format is a finding under any key name

@@ -1,6 +1,6 @@
 import { basename, dirname, join } from 'node:path';
 import type { Evidence, ParsedConfig, ScanContext } from '../../core/types.js';
-import { API_KEY_PATTERNS, isPlaceholderSecret } from '../../core/patterns.js';
+import { API_KEY_PATTERNS, isPlaceholderSecret, isEnvReference } from '../../core/patterns.js';
 import { shannonEntropy } from '../../analyzers/entropy.js';
 
 /**
@@ -133,9 +133,7 @@ export function canonicalSystemPath(path: string): string {
 }
 
 /** A value that references the environment instead of holding a literal secret. */
-export function isEnvReference(value: string): boolean {
-  return /^\s*\$\{?[A-Za-z_][A-Za-z0-9_]*\}?\s*$/.test(value) || /^\s*\$\{(?:env|file):[^}]+\}\s*$/.test(value);
-}
+export { isEnvReference };
 
 // Key names that hold a credential by definition, vs. names that merely
 // mention auth (AUTH_MODE, GITHUB_API_URL, SESSION_DIR) and need a

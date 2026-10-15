@@ -225,6 +225,27 @@ describe('DEV-003: Devin Plaintext Secrets in MCP Config', () => {
     expect(result.severity).toBe('critical');
   });
 
+  it('reports ${VAR} / $VAR / {env:VAR} / a bare name as an unexpanded reference (info), not a secret', async () => {
+    const config = makeConfig('mcp_config.json', {
+      mcpServers: {
+        a: { command: 'npx', env: { GITHUB_TOKEN: '${GITHUB_TOKEN}', B_TOKEN: '$B_TOKEN', C_TOKEN: '{env:C_TOKEN}', D_TOKEN: 'D_TOKEN_VALUE' } },
+        b: { url: 'https://mcp.example.com', headers: { Authorization: 'Bearer ${API_TOKEN}' }, oauthClientSecret: '${CLIENT_SECRET}' },
+      },
+    });
+    const r = await check.run(makeCtx([config]));
+    expect(r.passed).toBe(false);
+    expect(r.severity).toBe('info');
+    expect(r.evidence!.every(e => e.mitigated && /Not Devin interpolation syntax/.test(e.detail ?? ''))).toBe(true);
+    expect(r.evidence).toHaveLength(6);
+  });
+
+  it('passes on Devin\'s own ${env:VAR} / ${file:/path} interpolation', async () => {
+    const config = makeConfig('mcp_config.json', {
+      mcpServers: { a: { url: 'https://x', headers: { Authorization: 'Bearer ${env:API_TOKEN}' }, oauthClientSecret: '${file:/run/secrets/c}' } },
+    });
+    expect((await check.run(makeCtx([config]))).passed).toBe(true);
+  });
+
   it('passes on the docs placeholder ghp_your_token', async () => {
     const config = makeConfig('mcp_config.json', {
       mcpServers: { github: { command: 'npx', env: { GITHUB_TOKEN: 'ghp_your_token' } } },

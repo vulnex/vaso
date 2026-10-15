@@ -180,6 +180,21 @@ describe('AT-004 plaintext secrets in config.json', () => {
     expect((await check('AT-004').run(makeCtx([cfg]))).passed).toBe(true);
   });
 
+  it('does not report variable references as stored secrets (corpus: Bearer ${MCP_TOKEN})', async () => {
+    const cfg = makeJson({
+      llm: { providers: [{ id: 'or', kind: 'openrouter', apiKey: '${OPENROUTER_API_KEY}' }] },
+      mcp: { servers: [{ name: 'gh', enabled: true, env: { GITHUB_TOKEN: 'GITHUB_PERSONAL_ACCESS_TOKEN', API_KEY: '$API_KEY' }, transport: { kind: 'streamable_http', url: 'https://x', headers: { Authorization: 'Bearer ${MCP_TOKEN}' } } }] },
+    });
+    expect((await check('AT-004').run(makeCtx([cfg]))).passed).toBe(true);
+  });
+
+  it('still reports a literal token beside an auth scheme', async () => {
+    const cfg = makeJson({ mcp: { servers: [{ name: 'x', enabled: true, transport: { kind: 'streamable_http', url: 'https://x', headers: { Authorization: 'Bearer sk-live-abcdef1234567890' } } }] } });
+    const r = await check('AT-004').run(makeCtx([cfg]));
+    expect(r.passed).toBe(false);
+    expect(r.severity).toBe('critical');
+  });
+
   it('flags a webhook secret only when config.json is readable by other users', async () => {
     const cfg = makeJson({ webhooks: { gh: { userMessageTemplate: 'x', secret: 'hunter2hunter2' } } });
     expect((await check('AT-004').run(makeCtx([cfg], makeFs({ modes: { [CONFIG_PATH]: 0o100600 } })))).passed).toBe(true);

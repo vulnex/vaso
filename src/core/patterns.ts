@@ -47,6 +47,55 @@ export function isPlaceholderSecret(value: string): boolean {
   return PLACEHOLDER_WORD.test(v);
 }
 
+/**
+ * How an agent config refers to a value kept elsewhere instead of storing it.
+ * Each agent expands its own forms (verified 2026-10-15):
+ *  - Claude Code `.mcp.json`: `${VAR}`, `${VAR:-default}` (code.claude.com/docs/en/mcp)
+ *  - Gemini CLI / Qwen Code settings: `$VAR`, `${VAR}`, `${VAR:-default}` (geminicli.com/docs/reference/configuration)
+ *  - Devin CLI, Windsurf/Devin Desktop: `${env:VAR}`, `${file:/path}` only (docs.devin.ai/cli/extensibility/mcp/configuration)
+ *  - Cursor `mcp.json`: `${env:NAME}` only (cursor.com/docs/mcp)
+ *  - OpenCode: `{env:VAR}`, `{file:path}` only (opencode.ai/docs/config)
+ * A form the agent doesn't expand reaches the server as literal text — a
+ * broken config, not a stored credential.
+ */
+export type EnvReferenceForm = 'env-colon' | 'brace-env' | 'dollar-brace' | 'dollar' | 'powershell' | 'percent' | 'name';
+
+const AUTH_SCHEME_PREFIX = /^\s*(?:Bearer|Basic|Token)\s+/i;
+const ENV_REFERENCE_FORMS: Array<[EnvReferenceForm, RegExp]> = [
+  ['env-colon', /^\$\{(?:env|file):[^}]+\}$/],
+  ['brace-env', /^\{(?:env|file):[^}]+\}$/],
+  ['dollar-brace', /^\$\{[A-Za-z_][A-Za-z0-9_]*(?::?[-=?+][^}]*)?\}$/],
+  ['dollar', /^\$[A-Za-z_][A-Za-z0-9_]*$/],
+  ['powershell', /^\$env:[A-Za-z_][A-Za-z0-9_]*$/i],
+  ['percent', /^%[A-Za-z_][A-Za-z0-9_]*%$/],
+  // Just a variable's NAME (`GITHUB_TOKEN`): upper snake case with at least
+  // one underscore — no generated key looks like that
+  ['name', /^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+$/],
+];
+
+/**
+ * The reference form when a value (after an optional `Bearer `/`Basic `/
+ * `Token ` scheme) is wholly a reference to an environment variable or file,
+ * never a stored credential; undefined for anything else, including a
+ * literal secret written beside a reference.
+ */
+export function envReference(value: string): EnvReferenceForm | undefined {
+  const v = value.replace(AUTH_SCHEME_PREFIX, '').trim();
+  if (v === '' || v.length > 256) return undefined;
+  const form = ENV_REFERENCE_FORMS.find(([, re]) => re.test(v))?.[0];
+  if (form === 'name' && (v.length > 64 || API_KEY_PATTERNS.some(p => p.pattern.test(v)))) return undefined;
+  // `${VAR:-default}`: a credential written as the default is stored all the same
+  const fallback = form === 'dollar-brace' ? /^\$\{[A-Za-z_][A-Za-z0-9_]*:?[-=?+](.*)\}$/.exec(v)?.[1] : undefined;
+  if (fallback && !isPlaceholderSecret(fallback)
+    && (API_KEY_PATTERNS.some(p => p.pattern.test(fallback)) || /^(?=.*[A-Za-z])(?=.*\d)[^\s/]{16,}$/.test(fallback))) return undefined;
+  return form;
+}
+
+/** A reference to a variable or file (any agent's syntax), not a stored secret. */
+export function isEnvReference(value: string): boolean {
+  return envReference(value) !== undefined;
+}
+
 export const OAUTH_SECRET_PATTERNS = [
   { pattern: /^client_secret$/i, name: 'OAuth client secret (key name)' },
   { pattern: /^oauth[_-]?(?:client[_-]?)?secret$/i, name: 'OAuth secret (key name)' },

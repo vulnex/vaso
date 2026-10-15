@@ -1,0 +1,11 @@
+{
+  "agent": "atomic-agent",
+  "source": "golden-corpus finding: \"Bearer ${MCP_TOKEN}\", a variable name and \"${VAR}\" apiKey were critical AT-004 literal secrets; nothing is stored (base: atomic-clean)",
+  "pass": [
+    "AT-004"
+  ],
+  "modes": {
+    ".atomic-agent": "700",
+    ".atomic-agent/config.json": "600"
+  }
+}

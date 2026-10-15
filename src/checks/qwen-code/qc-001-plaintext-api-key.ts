@@ -1,7 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { shannonEntropy } from '../../analyzers/entropy.js';
-import { isPlaceholderSecret } from '../../core/patterns.js';
+import { isEnvReference, isPlaceholderSecret } from '../../core/patterns.js';
 
 const KNOWN_KEY_PREFIXES = [
   /^sk-or-v1-[A-Za-z0-9]{32,}/,
@@ -13,14 +13,13 @@ const KNOWN_KEY_PREFIXES = [
 ];
 const HIGH_ENTROPY_THRESHOLD = 4.5;
 const MIN_LENGTH = 20;
-const ENV_REF_PATTERN = /^\$\{?[A-Z_][A-Z0-9_]*\}?$/;
 // Authorization-style header values carry the secret after the scheme
 const AUTH_SCHEME = /^(?:bearer|basic|token)\s+/i;
 
 function isSecretValue(value: string): boolean {
   if (value.length < MIN_LENGTH) return false;
   if (isPlaceholderSecret(value)) return false;
-  if (ENV_REF_PATTERN.test(value)) return false;
+  if (isEnvReference(value)) return false;
   if (KNOWN_KEY_PREFIXES.some(p => p.test(value))) return true;
   return shannonEntropy(value) > HIGH_ENTROPY_THRESHOLD;
 }

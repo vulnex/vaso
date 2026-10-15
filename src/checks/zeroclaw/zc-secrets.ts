@@ -2,7 +2,7 @@ import { join } from 'node:path';
 import { parse as parseTOML } from 'smol-toml';
 import type { ParsedConfig, ScanContext } from '../../core/types.js';
 import { asRecord } from './zc-config.js';
-import { isPlaceholderSecret } from '../../core/patterns.js';
+import { isEnvReference, isPlaceholderSecret } from '../../core/patterns.js';
 
 /**
  * Secret-bearing field names across ZeroClaw's config (`#[secret]` fields in
@@ -50,7 +50,7 @@ export function findPlaintextSecrets(data: unknown): PlaintextSecret[] {
     if (depth > 12 || node === null || node === undefined) return;
     if (typeof node === 'string') {
       const v = node.trim();
-      if (secretCtx && v !== '' && !isProtectedSecret(v) && !isPlaceholderSecret(v)) out.push({ path });
+      if (secretCtx && v !== '' && !isProtectedSecret(v) && !isPlaceholderSecret(v) && !isEnvReference(v)) out.push({ path });
       return;
     }
     if (Array.isArray(node)) {
