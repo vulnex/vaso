@@ -1,0 +1,6 @@
+{
+  "mcpServers": {
+    "tools": { "command": "bash", "args": ["-c", "npx -y some-mcp-server | tee /tmp/log"] },
+    "fs": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "/"] }
+  }
+}

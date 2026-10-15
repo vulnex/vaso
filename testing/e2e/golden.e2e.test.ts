@@ -43,6 +43,9 @@ const CLI = join(ROOT, 'dist/cli.js');
 const CASES = join(ROOT, 'testing/golden/cases');
 
 interface GoldenCase {
+  /** `vaso mcp scan` instead of `scan -a`: config paths under home (`-p`) and
+   *  server source paths (`--source`). agent must be "mcp"; no parity/fix. */
+  mcp?: { paths?: string[]; source?: string[] };
   agent: string;
   source: string;
   clean?: boolean;
@@ -78,9 +81,14 @@ function run(args: string[], home: string, cmd = process.execPath): Promise<{ co
   });
 }
 
-async function scan(home: string, agent: string, extra: string[] = []): Promise<ScanResult> {
+async function scan(home: string, agent: string, extra: string[] = [], mcp?: GoldenCase['mcp']): Promise<ScanResult> {
   const out = join(home, '..', `scan-${Date.now()}-${Math.random().toString(36).slice(2)}.json`);
-  const r = await run(['scan', '-a', agent, '-f', 'json', '-o', out, ...extra], home);
+  const args = mcp
+    ? ['mcp', 'scan', '-f', 'json', '-o', out,
+      ...(mcp.paths?.length ? ['-p', ...mcp.paths.map(p => join(home, p))] : []),
+      ...(mcp.source?.length ? ['--source', ...mcp.source.map(p => join(home, p))] : [])]
+    : ['scan', '-a', agent, '-f', 'json', '-o', out, ...extra];
+  const r = await run(args, home);
   if (r.code > 1) throw new Error(`scan exited ${r.code}: ${r.stderr}`);
   return JSON.parse(await readFile(out, 'utf-8')) as ScanResult;
 }
@@ -146,7 +154,7 @@ describe.each(caseNames)('golden: %s', (name) => {
     home = join(work, 'home');
     await materialize(join(CASES, name, 'home'), home);
     for (const [path, mode] of Object.entries(spec.modes ?? {})) await chmod(join(home, path), parseInt(mode, 8));
-    local = (await scan(home, spec.agent)).agents.filter(a => a.agent === spec.agent);
+    local = (await scan(home, spec.agent, [], spec.mcp)).agents.filter(a => a.agent === spec.agent);
   }, 120_000);
 
   afterAll(async () => {
@@ -176,7 +184,7 @@ describe.each(caseNames)('golden: %s', (name) => {
     }
   });
 
-  it.skipIf(skip || spec.parity === false || !goAvailable)('remote (probe snapshot) reaches the same verdicts', async () => {
+  it.skipIf(skip || spec.parity === false || Boolean(spec.mcp) || !goAvailable)('remote (probe snapshot) reaches the same verdicts', async () => {
     const manifest = join(work, 'manifest.json');
     const snapshot = join(work, 'snapshot.json');
     await writeFile(manifest, (await run(['probe', 'manifest'], home)).stdout);
@@ -188,7 +196,7 @@ describe.each(caseNames)('golden: %s', (name) => {
     expect(key(remote)).toEqual(key(local));
   }, 120_000);
 
-  it.skipIf(skip || !spec.fix)('fix resolves the findings without breaking others, and rollback restores every file', async () => {
+  it.skipIf(skip || !spec.fix || Boolean(spec.mcp))('fix resolves the findings without breaking others, and rollback restores every file', async () => {
     const before = await treeHash(home, join(home, '.vaso'));
     const fixed = await run(['fix', '-a', spec.agent, '-y'], home);
     expect(fixed.code, fixed.stdout + fixed.stderr).toBe(0);

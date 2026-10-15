@@ -1,0 +1,6 @@
+{
+  "agent": "mcp",
+  "source": "Shell-wrapped and unpinned MCP servers; filesystem server rooted at /",
+  "mcp": { "paths": ["mcp.json"] },
+  "fail": { "MCP-010": "any", "MCP-021": "any" }
+}

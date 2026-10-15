@@ -1,0 +1,6 @@
+{
+  "agent": "mcp",
+  "source": "MCP quickstart shapes (modelcontextprotocol.io) with exact pins and an env reference",
+  "mcp": { "paths": ["mcp.json"] },
+  "clean": true
+}
