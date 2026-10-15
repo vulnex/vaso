@@ -32,3 +32,4 @@ vaso_full_scanning_testing/
 # node_modules/ and dist/ inside them are test data and must be tracked
 !testing/golden/**
 testing/golden/**/.DS_Store
+testing/golden/**/.fakeosh/calls.log
