@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { mkdtempSync, writeFileSync, rmSync, statSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { planExec, rootSafePath } from './exec-safety.js';
+import { planExec, primaryGid, rootSafePath } from './exec-safety.js';
 
 const posix = process.platform !== 'win32';
 
@@ -47,7 +47,24 @@ describe('planExec', () => {
       const plan = planExec(bin, { isolateHome: false });
       expect(plan.refuse).toBeUndefined();
       expect(plan.uid).toBe(st.uid);
-      expect(plan.gid).toBe(st.gid);
+      // the owner's primary group, not the file's (a /private/tmp file is group wheel)
+      expect(plan.gid).toBe(primaryGid(st.uid));
+      expect(plan.gid).toBe(process.getgid?.());
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it.skipIf(process.platform !== 'darwin')('as root: a user binary made in /private/tmp (group wheel) still runs with the owner\'s group', () => {
+    const dir = mkdtempSync('/private/tmp/vaso-exec-gid-');
+    const bin = join(dir, 'codex');
+    writeFileSync(bin, '#!/bin/sh\necho 1\n', { mode: 0o755 });
+    vi.spyOn(process, 'getuid').mockReturnValue(0);
+    try {
+      expect(statSync(bin).gid).toBe(0); // wheel, inherited from the sticky dir
+      const plan = planExec(bin, { isolateHome: false });
+      expect(plan.gid).not.toBe(0);
+      expect(plan.gid).toBe(primaryGid(statSync(bin).uid));
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

@@ -198,3 +198,38 @@ func TestUnlistableSkillDirCollectsKnownNames(t *testing.T) {
 		}
 	}
 }
+
+func TestDropCredentialUsesOwnersPrimaryGroup(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "tool")
+	if err := os.WriteFile(f, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner, fileGid, _ := fileOwner(info)
+	if owner == 0 {
+		t.Skip("needs a non-root file owner")
+	}
+	saved := primaryGid
+	defer func() { primaryGid = saved }()
+	primaryGid = func(uid int) (int, bool) { return 4242, uid == owner }
+
+	uid, gid, userOwned, refuse := dropCredential(info)
+	if refuse != "" || !userOwned || uid != owner || gid != 4242 || gid == fileGid {
+		t.Fatalf("got uid=%d gid=%d userOwned=%v refuse=%q (file gid %d)", uid, gid, userOwned, refuse, fileGid)
+	}
+
+	primaryGid = func(int) (int, bool) { return 0, false }
+	if _, _, _, refuse := dropCredential(info); refuse == "" {
+		t.Fatal("an owner without an account must be refused")
+	}
+}
+
+func TestPrimaryGidResolvesTheCurrentUser(t *testing.T) {
+	g, ok := primaryGid(os.Getuid())
+	if !ok || g != os.Getgid() {
+		t.Fatalf("primaryGid(%d) = %d,%v; want %d", os.Getuid(), g, ok, os.Getgid())
+	}
+}

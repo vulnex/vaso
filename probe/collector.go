@@ -781,7 +781,9 @@ func runCommand(req CommandRequest, augmentedPath string) CommandOutput {
 		if err != nil || statErr != nil {
 			return CommandOutput{Stderr: fmt.Sprintf("%s not found", req.Cmd), ExitCode: -1}
 		}
-		if uid, gid, ok := fileOwner(info); ok && uid != 0 {
+		if uid, gid, userOwned, refuse := dropCredential(info); refuse != "" {
+			return CommandOutput{Stderr: fmt.Sprintf("%s %s", real, refuse), ExitCode: -1}
+		} else if userOwned {
 			dropUID, dropGID = uid, gid
 			dropTo(cmd, uid, gid)
 		} else if !rootSafe(real) {
@@ -1142,4 +1144,21 @@ func (c *collector) withHead(e FileEntry, path string, info os.FileInfo) FileEnt
 		c.budget -= int64(len(e.Head))
 	}
 	return e
+}
+
+// dropCredential is who a user-owned binary runs as under root: its owner,
+// with the owner's own primary group — never the file's group (a file made in
+// a sticky root-owned directory, macOS /private/tmp, gets group wheel).
+// userOwned is false for a root-owned binary; refuse is set when the owner
+// has no account to resolve.
+func dropCredential(info os.FileInfo) (uid, gid int, userOwned bool, refuse string) {
+	uid, _, ok := fileOwner(info)
+	if !ok || uid == 0 {
+		return 0, 0, false, ""
+	}
+	gid, found := primaryGid(uid)
+	if !found {
+		return 0, 0, false, fmt.Sprintf("is owned by uid %d, which has no account to run it as", uid)
+	}
+	return uid, gid, true, ""
 }

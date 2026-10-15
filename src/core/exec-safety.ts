@@ -1,4 +1,5 @@
 import { statSync, realpathSync, mkdtempSync, chownSync, rmSync, type Stats } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { delimiter, dirname, isAbsolute, join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -66,6 +67,17 @@ function resolveOnPath(cmd: string, pathVar: string | undefined): string | undef
   return undefined;
 }
 
+/** Primary group of the account with this uid (root-owned /usr/bin/id, as the probe does). */
+export function primaryGid(uid: number): number | undefined {
+  try {
+    const out = execFileSync('/usr/bin/id', ['-g', String(uid)], { encoding: 'utf-8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] });
+    const gid = Number.parseInt(out.trim(), 10);
+    return Number.isInteger(gid) && gid >= 0 ? gid : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function planExec(cmd: string, options: { isolateHome?: boolean; cwd?: string; path?: string } | undefined): ExecPlan {
   let env: NodeJS.ProcessEnv | undefined;
   let cwd = options?.cwd;
@@ -86,8 +98,12 @@ export function planExec(cmd: string, options: { isolateHome?: boolean; cwd?: st
       return { refuse: `${cmd} not found`, cleanup };
     }
     if (st.uid !== 0) {
+      // The owner's own primary group, never the file's: a file created in a
+      // sticky root-owned directory (macOS /private/tmp) gets group wheel
+      const primary = primaryGid(st.uid);
+      if (primary === undefined) return { refuse: `${resolved} is owned by uid ${st.uid}, which has no account to run it as`, cleanup };
       uid = st.uid;
-      gid = st.gid;
+      gid = primary;
     } else if (!rootSafePath(resolved)) {
       return { refuse: `${resolved} is writable by a non-root user; not run as root`, cleanup };
     }

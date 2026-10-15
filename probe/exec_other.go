@@ -8,3 +8,4 @@ var runningAsRoot = func() bool { return false }
 
 func dropTo(cmd *exec.Cmd, uid, gid int) {}
 func rootSafe(path string) bool          { return true }
+func primaryGid(uid int) (int, bool)     { return 0, false }

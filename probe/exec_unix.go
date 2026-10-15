@@ -5,7 +5,10 @@ package main
 import (
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"syscall"
 )
 
@@ -19,6 +22,26 @@ func dropTo(cmd *exec.Cmd, uid, gid int) {
 
 // writableByOthers: a non-root owner, or group/other write without the
 // sticky bit (a sticky dir lets others add files but not replace root's).
+// primaryGid is the primary group of the account with this uid — what the
+// account's own processes run with. A binary dropped to its owner must not
+// keep the FILE's group: a file created in a sticky root-owned directory
+// (macOS /private/tmp) gets group wheel, which reads e.g. /etc/sudoers.
+// os/user without cgo reads /etc/passwd only (no macOS directory accounts),
+// so /usr/bin/id answers when it can't.
+var primaryGid = func(uid int) (int, bool) {
+	if u, err := user.LookupId(strconv.Itoa(uid)); err == nil {
+		if g, err := strconv.Atoi(u.Gid); err == nil {
+			return g, true
+		}
+	}
+	out, err := exec.Command("/usr/bin/id", "-g", strconv.Itoa(uid)).Output()
+	if err != nil {
+		return 0, false
+	}
+	g, err := strconv.Atoi(strings.TrimSpace(string(out)))
+	return g, err == nil
+}
+
 func writableByOthers(info os.FileInfo) bool {
 	uid, _, ok := fileOwner(info)
 	if !ok || uid != 0 {
