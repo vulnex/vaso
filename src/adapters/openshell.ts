@@ -5,6 +5,7 @@ import type { CommandForEach, ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { loadConfig } from '../core/config-loader.js';
+import { pathPresent } from './load-if-present.js';
 import { getUserHomeDirs } from './openclaw.js';
 import { discoverCliInstalls } from './cli-installs.js';
 import { queryCliVersion } from './version-query.js';
@@ -68,8 +69,9 @@ export function expandHome(value: string, home: string): string {
 }
 
 async function firstExisting(paths: string[], fs: FSProvider): Promise<string | undefined> {
+  // An unreadable file counts: loading it then reports CONFIG-LOAD
   for (const p of paths) {
-    if (await fs.access(p)) return p;
+    if (await pathPresent(p, fs)) return p;
   }
   return undefined;
 }

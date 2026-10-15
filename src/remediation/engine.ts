@@ -11,6 +11,16 @@ import { promptForFix } from './prompt.js';
 import { readRegularFile, regularMode } from './safe-file.js';
 import { sha256, writeManifest, type BackupManifest } from './backup-manifest.js';
 
+/**
+ * Whether `vaso fix` should act on a result: a failing fixable finding, or a
+ * folded generic one (CFG-003/POL-003 counted under an agent check, passing,
+ * but still carrying the chmod fix — see duplicate-findings.ts). The fix
+ * command and the engine must agree on this, or folded fixes never run.
+ */
+export function isFixableResult(r: CheckResult): boolean {
+  return Boolean(r.fixable) && (!r.passed || Boolean(r.foldedInto));
+}
+
 export interface FixOptions {
   dryRun?: boolean;
   yes?: boolean;
@@ -35,7 +45,7 @@ export class RemediationEngine {
 
     for (const agent of scanResult.agents) {
       // A folded generic finding (see foldedInto) passes but keeps its fix
-      const fixable = agent.results.filter(r => r.fixable && (!r.passed || r.foldedInto));
+      const fixable = agent.results.filter(isFixableResult);
 
       if (fixable.length === 0) continue;
 
@@ -48,7 +58,7 @@ export class RemediationEngine {
 
         if (options.dryRun) {
           console.log(`  ${chalk.yellow('[dry-run]')} ${finding.id}: ${finding.fixDescription ?? 'would fix'}`);
-          results.push({ checkId: finding.id, applied: false, message: `Dry run: ${finding.fixDescription}` });
+          results.push({ checkId: finding.id, applied: false, skipped: true, message: `Dry run: ${finding.fixDescription}` });
           continue;
         }
 
@@ -57,12 +67,12 @@ export class RemediationEngine {
           const response = await promptForFix(finding);
 
           if (response === 'no') {
-            results.push({ checkId: finding.id, applied: false, message: 'Skipped by user' });
+            results.push({ checkId: finding.id, applied: false, skipped: true, message: 'Skipped by user' });
             continue;
           }
 
           if (response === 'quit') {
-            results.push({ checkId: finding.id, applied: false, message: 'Skipped by user' });
+            results.push({ checkId: finding.id, applied: false, skipped: true, message: 'Skipped by user' });
             return results;
           }
 
@@ -112,7 +122,7 @@ export class RemediationEngine {
 
           await this.recordAfterState();
           results.push(fixResult);
-          const icon = fixResult.applied ? chalk.green('+') : chalk.red('x');
+          const icon = fixResult.applied ? chalk.green('+') : fixResult.alreadyDone ? chalk.dim('=') : chalk.red('x');
           console.log(`  ${icon} ${finding.id}: ${fixResult.message}`);
         } catch (err) {
           results.push({

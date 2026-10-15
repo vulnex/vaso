@@ -280,21 +280,23 @@ func Collect(manifest ProbeManifest, escalate bool) ProbeSnapshot {
 	// Expand and collect directory listings. Only non-nil listings are stored:
 	// a nil result means the directory doesn't exist or can't be read, and
 	// inserting a key with a nil value would cause downstream consumers to
-	// report the directory as "present".
+	// report the directory as "present". A directory that exists but can't be
+	// listed (mode 000) still gets its mode recorded, so it is present
+	// remotely the way it is locally.
 	expandedDirs := expandPaths(manifest.DirectoryListings, homes)
 	for _, dir := range expandedDirs {
 		if listing := collectDirectory(dir, snapshot.Symlinks); listing != nil {
 			snapshot.Directories[dir] = listing
-			recordDirMode(&snapshot, dir)
 		}
+		recordDirMode(&snapshot, dir)
 	}
 
 	// Collect system directory listings (not expanded per-user)
 	for _, dir := range manifest.SystemDirListings {
 		if listing := collectDirectory(dir, snapshot.Symlinks); listing != nil {
 			snapshot.Directories[dir] = listing
-			recordDirMode(&snapshot, dir)
 		}
+		recordDirMode(&snapshot, dir)
 	}
 	// Home dirs gate traversal for everything beneath them (parent-directory
 	// mitigation on the TS side needs their real modes).
@@ -463,7 +465,9 @@ func (c *collector) collectFileLimit(path string, metadataOnly bool, limit int64
 	}
 	f, err := openForRead(path)
 	if err != nil {
-		return FileEntry{Exists: true, Mode: mode}
+		// Present but unreadable (mode 000, an ACL): say so — shipping it as
+		// an empty file would let the CLI judge content that isn't there.
+		return FileEntry{Exists: true, Mode: mode, Denied: true}
 	}
 	defer f.Close()
 	if opened, err := f.Stat(); err != nil || !opened.Mode().IsRegular() {
@@ -535,7 +539,9 @@ func recordAncestorModes(snapshot *ProbeSnapshot) {
 		}
 	}
 	for p, e := range snapshot.Files {
-		if e.Exists {
+		// A denied file's parents too: the unreadable directory that denied
+		// it is what a local scan runs into (EACCES, not "missing")
+		if e.Exists || e.Denied {
 			visit(p)
 		}
 	}

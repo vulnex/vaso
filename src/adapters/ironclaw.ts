@@ -5,6 +5,7 @@ import type { ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { loadConfig } from '../core/config-loader.js';
+import { loadConfigIfPresent, pathPresent } from './load-if-present.js';
 import { getUserHomeDirs } from './openclaw.js';
 import { discoverCliInstalls } from './cli-installs.js';
 import { queryCliVersion } from './version-query.js';
@@ -109,7 +110,7 @@ async function loadExisting(dir: string, names: string[], fs: FSProvider): Promi
   for (const name of names) {
     const filePath = join(dir, name);
     try {
-      if (await fs.access(filePath)) out.push(await loadConfig(filePath, fs));
+      { const loaded = await loadConfigIfPresent(filePath, fs); if (loaded) out.push(loaded); }
     } catch {
       // Unreadable/unparseable files surface as CONFIG-LOAD via captureConfigLoadErrors.
     }
@@ -247,11 +248,11 @@ export const ironclawAdapter: AgentAdapter = {
       // ── 1.x Reborn ─────────────────────────────────────────────────────
       const rebornConfigs = await loadExisting(rebornHome, REBORN_CONFIG_FILES, fs);
       let rebornPresent = rebornConfigs.length > 0
-        || await fs.access(join(rebornHome, REBORN_WEBUI_TOKEN_FILE))
-        || await fs.access(join(rebornHome, '.onboard-completed.json'));
+        || await pathPresent(join(rebornHome, REBORN_WEBUI_TOKEN_FILE), fs)
+        || await pathPresent(join(rebornHome, '.onboard-completed.json'), fs);
       if (!rebornPresent) {
         for (const sub of REBORN_STORAGE_SUBDIRS) {
-          if (await fs.access(join(rebornHome, sub))) { rebornPresent = true; break; }
+          if (await pathPresent(join(rebornHome, sub), fs)) { rebornPresent = true; break; }
         }
       }
 

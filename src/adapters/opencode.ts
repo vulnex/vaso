@@ -9,6 +9,7 @@ import { nvmBinaryGlob, npmPackageJsonGlobs } from './nvm-binary.js';
 import { discoverCliInstalls } from './cli-installs.js';
 import { getUserHomeDirs } from './openclaw.js';
 import { queryCliVersion, readPackageVersion } from './version-query.js';
+import { loadConfigIfPresent } from './load-if-present.js';
 import { withoutLoadedConfigs } from './project-configs.js';
 
 const SYSTEM_CLI_PATHS = [
@@ -43,20 +44,15 @@ export function xdgDataDir(home: string, fs: FSProvider): string {
 const CONFIG_FILENAMES = ['opencode.jsonc', 'opencode.json'];
 
 async function loadOpenCodeConfig(filePath: string, fs: FSProvider): Promise<ParsedConfig | undefined> {
-  try {
-    const raw = await fs.readFile(filePath);
-    const data = JSON.parse(stripJsonc(raw)) as Record<string, unknown>;
-    return { raw, format: 'json', filePath, data };
-  } catch {
-    return undefined;
-  }
+  // The shared loader parses JSON, JSONC and JSON5 and reports an unreadable
+  // or unparseable file as CONFIG-LOAD instead of dropping the agent silently
+  return loadConfigIfPresent(filePath, fs);
 }
 
 async function loadConfigsIn(dir: string, fs: FSProvider): Promise<ParsedConfig[]> {
   const out: ParsedConfig[] = [];
   for (const name of CONFIG_FILENAMES) {
     const filePath = join(dir, name);
-    if (!(await fs.access(filePath))) continue;
     const parsed = await loadOpenCodeConfig(filePath, fs);
     if (parsed) out.push(parsed);
   }

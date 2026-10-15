@@ -147,7 +147,9 @@ export class ScanEngine {
         severity: 'warning',
         passed: false,
         errored: true,
-        message: `Config file could not be ${error.stage === 'read' ? 'read' : 'parsed'}: ${error.filePath} — ${error.message}. Findings for this agent may be incomplete.`,
+        message: error.directory
+          ? `Config directory could not be read: ${error.filePath} — ${error.message}. Its config files were not checked; findings for this agent may be incomplete.`
+          : `Config file could not be ${error.stage === 'read' ? 'read' : 'parsed'}: ${error.filePath} — ${error.message}. Findings for this agent may be incomplete.`,
         evidence: [{ file: error.filePath, detail: error.message }],
       };
 
@@ -161,7 +163,7 @@ export class ScanEngine {
         agents.push({
           agent: error.agent,
           // The unreadable config's directory is the best location we have
-          installation: { agent: error.agent, installDir: dirname(error.filePath), configFiles: [] },
+          installation: { agent: error.agent, installDir: error.directory ? error.filePath : dirname(error.filePath), configFiles: [] },
           results: [result],
           score,
           grade: scoreToGrade(score),

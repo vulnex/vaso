@@ -4,7 +4,8 @@ vi.mock('../core/engine.js', () => ({
   ScanEngine: vi.fn(),
 }));
 
-vi.mock('../remediation/engine.js', () => ({
+vi.mock('../remediation/engine.js', async (orig) => ({
+  ...(await orig<typeof import('../remediation/engine.js')>()),
   RemediationEngine: vi.fn(),
 }));
 
@@ -97,6 +98,25 @@ describe('runFix', () => {
     );
   });
 
+  it('runs fixes for folded findings (passing, fixable, foldedInto) — they are the only chmod fix', async () => {
+    const mockScan = vi.fn().mockResolvedValue({
+      agents: [{
+        agent: 'gemini-cli',
+        results: [
+          { id: 'GEM-002', passed: false },
+          { id: 'POL-003', passed: true, fixable: true, foldedInto: 'GEM-002' },
+        ],
+      }],
+    });
+    mockScanEngine.mockImplementation(function () { return { scan: mockScan } as any; });
+    const mockFix = vi.fn().mockResolvedValue([{ applied: true }]);
+    mockRemediationEngine.mockImplementation(function () { return { fix: mockFix } as any; });
+
+    await runFix({ yes: true });
+    expect(mockFix).toHaveBeenCalled();
+    expect(consoleLogs.some(l => l.includes('No fixable issues'))).toBe(false);
+  });
+
   it('reports applied fix count', async () => {
     const mockScan = vi.fn().mockResolvedValue({
       agents: [{
@@ -116,7 +136,10 @@ describe('runFix', () => {
     mockRemediationEngine.mockImplementation(function () { return { fix: mockFix } as any; });
 
     await runFix({});
-    expect(consoleLogs.some(l => l.includes('1/2 fixes applied'))).toBe(true);
+    expect(consoleLogs.some(l => l.includes('1 applied, 1 not applied'))).toBe(true);
+    // an unapplied fix leaves its finding open
+    expect(process.exitCode).toBe(1);
+    process.exitCode = undefined;
   });
 
   it('sets exit code 1 on error', async () => {

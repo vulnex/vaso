@@ -2,7 +2,7 @@ import chalk from 'chalk';
 import { ScanEngine } from '../core/engine.js';
 import { adapterRegistry } from '../adapters/registry.js';
 import { checkRegistry } from '../core/check-registry.js';
-import { RemediationEngine } from '../remediation/engine.js';
+import { RemediationEngine, isFixableResult } from '../remediation/engine.js';
 import { rollback } from '../remediation/rollback.js';
 import { logError } from '../core/debug.js';
 
@@ -37,7 +37,7 @@ export async function runFix(options: FixCommandOptions): Promise<void> {
       return;
     }
 
-    const fixable = result.agents.flatMap(a => a.results.filter(r => !r.passed && r.fixable));
+    const fixable = result.agents.flatMap(a => a.results.filter(isFixableResult));
     if (fixable.length === 0) {
       console.log(chalk.green('No fixable issues found.'));
       return;
@@ -56,7 +56,16 @@ export async function runFix(options: FixCommandOptions): Promise<void> {
     });
 
     const applied = results.filter(r => r.applied).length;
-    console.log(`\n${chalk.bold('Summary:')} ${applied}/${results.length} fixes applied`);
+    const done = results.filter(r => !r.applied && r.alreadyDone).length;
+    const skipped = results.filter(r => !r.applied && r.skipped).length;
+    const failed = results.length - applied - done - skipped;
+    const parts = [`${applied} applied`];
+    if (done) parts.push(`${done} already in place`);
+    if (skipped) parts.push(options.dryRun ? `${skipped} would be applied` : `${skipped} skipped`);
+    if (failed) parts.push(`${failed} not applied`);
+    console.log(`\n${chalk.bold('Summary:')} ${parts.join(', ')}`);
+    // A fix that was refused or failed leaves its finding open
+    if (failed > 0) process.exitCode = 1;
   } catch (err) {
     logError(chalk.red('Fix failed:'), err);
     process.exitCode = 1;

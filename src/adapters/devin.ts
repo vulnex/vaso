@@ -4,10 +4,10 @@ import type { AgentInstallation, GatewayInfo, ParsedConfig } from '../core/types
 import type { ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
-import { stripJsonc } from '../core/jsonc.js';
 import { getUserHomeDirs } from './openclaw.js';
 import { discoverCliInstalls, retainedVersionGlobs, type RetainedVersionsDir } from './cli-installs.js';
 import { queryCliVersion } from './version-query.js';
+import { loadConfigIfPresent } from './load-if-present.js';
 import { windsurfPresent } from './windsurf.js';
 
 const SYSTEM_CLI_PATHS = [
@@ -119,13 +119,9 @@ export async function devinCliPresent(home: string, fs: FSProvider): Promise<boo
 }
 
 async function loadDevinConfig(filePath: string, fs: FSProvider): Promise<ParsedConfig | undefined> {
-  try {
-    const raw = await fs.readFile(filePath);
-    const data = JSON.parse(stripJsonc(raw)) as Record<string, unknown>;
-    return { raw, format: 'json', filePath, data };
-  } catch {
-    return undefined;
-  }
+  // The shared loader parses JSON, JSONC and JSON5 and reports an unreadable
+  // or unparseable file as CONFIG-LOAD instead of dropping the agent silently
+  return loadConfigIfPresent(filePath, fs);
 }
 
 export const devinAdapter: AgentAdapter = {
@@ -164,7 +160,6 @@ export const devinAdapter: AgentAdapter = {
       if (hasConfigDir) {
         for (const name of USER_CONFIG_FILES) {
           const filePath = join(configDir, name);
-          if (!(await fs.access(filePath))) continue;
           const parsed = await loadDevinConfig(filePath, fs);
           if (parsed) configFiles.push(parsed);
         }
@@ -198,12 +193,12 @@ export const devinAdapter: AgentAdapter = {
     for (const dir of dirs) {
       for (const rel of PROJECT_CONFIG_FILES) {
         const filePath = join(dir, rel);
-        if (alreadyLoaded.has(filePath) || !(await fs.access(filePath))) continue;
+        if (alreadyLoaded.has(filePath)) continue;
         const parsed = await loadDevinConfig(filePath, fs);
         if (parsed) projectConfigs.push(parsed);
       }
       const hooksPath = join(dir, PROJECT_HOOKS_FILE);
-      if (await fs.access(hooksPath)) {
+      {
         const parsed = await loadDevinConfig(hooksPath, fs);
         if (parsed) projectConfigs.push({ ...parsed, data: { hooks: parsed.data } });
       }

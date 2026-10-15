@@ -4,11 +4,11 @@ import type { AgentInstallation, GatewayInfo, ModelRef, ParsedConfig, ZoneGraph 
 import type { ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
-import { stripJsonc } from '../core/jsonc.js';
 import { nvmBinaryGlob, npmPackageJsonGlobs } from './nvm-binary.js';
 import { discoverCliInstalls } from './cli-installs.js';
 import { getUserHomeDirs } from './openclaw.js';
 import { queryCliVersion, readPackageVersion } from './version-query.js';
+import { loadConfigIfPresent } from './load-if-present.js';
 import { withoutLoadedConfigs } from './project-configs.js';
 
 const GEMINI_DIR_NAME = '.gemini';
@@ -30,19 +30,14 @@ const USER_CLI_RELATIVE_PATHS = [
 ];
 
 async function loadJsoncConfig(filePath: string, fs: FSProvider): Promise<ParsedConfig | undefined> {
-  try {
-    const raw = await fs.readFile(filePath);
-    const data = JSON.parse(stripJsonc(raw)) as Record<string, unknown>;
-    return { raw, format: 'json', filePath, data };
-  } catch {
-    return undefined;
-  }
+  // The shared loader parses JSON, JSONC and JSON5 and reports an unreadable
+  // or unparseable file as CONFIG-LOAD instead of dropping the agent silently
+  return loadConfigIfPresent(filePath, fs);
 }
 
 async function loadSettings(dir: string, fs: FSProvider): Promise<ParsedConfig[]> {
   const out: ParsedConfig[] = [];
   const filePath = join(dir, SETTINGS_FILE);
-  if (!(await fs.access(filePath))) return out;
   const parsed = await loadJsoncConfig(filePath, fs);
   if (parsed) out.push(parsed);
   return out;
@@ -168,9 +163,7 @@ export const geminiAdapter: AgentAdapter = {
     const installations: AgentInstallation[] = [];
     // Machine-wide, so attributed to the first user install only
     const systemPath = geminiSystemSettingsPath(fs);
-    let systemSettings: ParsedConfig | undefined = (await fs.access(systemPath))
-      ? await loadJsoncConfig(systemPath, fs)
-      : undefined;
+    let systemSettings: ParsedConfig | undefined = await loadJsoncConfig(systemPath, fs);
 
     for (const { home, user } of userDirs) {
       const geminiDir = geminiHome(home, fs);

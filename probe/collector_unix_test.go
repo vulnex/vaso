@@ -112,3 +112,36 @@ func TestRootResolvesSystemBinariesBeforeUserDirs(t *testing.T) {
 		t.Fatal("/bin/sh should be root-safe")
 	}
 }
+
+func TestUnlistableDirectoryStillRecorded(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root lists any directory")
+	}
+	root := t.TempDir()
+	profile := filepath.Join(root, "Comet")
+	if err := os.Mkdir(profile, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(profile, 0); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(profile, 0o755)
+
+	snap := Collect(ProbeManifest{DirectoryListings: []string{profile}}, false)
+	if _, listed := snap.Directories[profile]; listed {
+		t.Fatal("an unreadable directory has no listing")
+	}
+	if mode, ok := snap.DirectoryModes[profile]; !ok || mode != 0 {
+		t.Fatalf("unreadable directory not recorded as present: %v", snap.DirectoryModes)
+	}
+
+	// A config behind it is denied, and the directory that denied it is recorded
+	cfg := filepath.Join(profile, "config.json")
+	snap = Collect(ProbeManifest{FilePaths: []string{cfg}}, false)
+	if e := snap.Files[cfg]; !e.Denied || e.Exists {
+		t.Fatalf("config behind a mode-000 directory: %+v", e)
+	}
+	if mode, ok := snap.DirectoryModes[profile]; !ok || mode != 0 {
+		t.Fatalf("denying directory not recorded: %v", snap.DirectoryModes)
+	}
+}

@@ -672,7 +672,45 @@ describe('SnapshotFSProvider denied entries', () => {
     });
     expect(await fs.access('/h/.claude/settings.json')).toBe(false);
     await expect(fs.stat('/h/.claude/settings.json')).rejects.toMatchObject({ code: 'EACCES' });
-    await expect(fs.readFile('/h/.claude/settings.json')).rejects.toMatchObject({ code: 'EACCES' });
+    await expect(fs.readFile('/h/.claude/settings.json')).rejects.toMatchObject({
+      code: 'EACCES', message: "EACCES: permission denied, open '/h/.claude/settings.json'",
+    });
+  });
+
+  it('answers EACCES for a mode-000 directory the probe saw but could not list', async () => {
+    const snap = (isRoot: boolean): ProbeSnapshot => ({
+      version: 1, hostname: 'h', platform: 'darwin', homedir: '/h', timestamp: 't',
+      privilege: { uid: isRoot ? 0 : 1, username: 'u', isRoot, sudoAvailable: false, escalated: false, scannedUsers: ['u'], skippedPaths: [] },
+      files: { '/h/.copilot/config.json': { content: '', mode: 0, exists: false, denied: true } },
+      directories: { '/h/empty': [] }, commandOutputs: {}, env: {},
+      directoryModes: { '/h/.copilot': 0, '/h/empty': 0o700 },
+    });
+    const fs = new SnapshotFSProvider(snap(false));
+    expect(await fs.access('/h/.copilot')).toBe(true);
+    await expect(fs.readdir('/h/.copilot')).rejects.toMatchObject({ code: 'EACCES' });
+    await expect(fs.readdirEntries('/h/.copilot', { recursive: true })).rejects.toMatchObject({ code: 'EACCES' });
+    expect(await fs.readdir('/h/empty')).toEqual([]);
+    // root reads any directory: an empty listing stays empty
+    expect(await new SnapshotFSProvider(snap(true)).readdir('/h/.copilot')).toEqual([]);
+  });
+
+  it('answers EACCES (like the kernel) for any path behind a directory without search permission', async () => {
+    const snap = (isRoot: boolean): ProbeSnapshot => ({
+      version: 1, hostname: 'h', platform: 'linux', homedir: '/h', timestamp: 't',
+      privilege: { uid: isRoot ? 0 : 1, username: 'u', isRoot, sudoAvailable: false, escalated: false, scannedUsers: ['u'], skippedPaths: [] },
+      files: {}, directories: {}, commandOutputs: {}, env: {},
+      directoryModes: { '/h': 0o755, '/h/.ironclaw': 0 },
+    });
+    const fs = new SnapshotFSProvider(snap(false));
+    await expect(fs.stat('/h/.ironclaw/reborn/webui-token')).rejects.toMatchObject({ code: 'EACCES' });
+    await expect(fs.readFile('/h/.ironclaw/.env')).rejects.toMatchObject({ code: 'EACCES' });
+    await expect(fs.stat('/h/.other/x')).rejects.toThrow(/ENOENT/);
+    // a directory implied only by denied files under it is just as unreachable
+    const implied = new SnapshotFSProvider({ ...snap(false), files: { '/h/.ironclaw/reborn/config.toml': { content: '', mode: 0, exists: false, denied: true } } });
+    expect(await implied.access('/h/.ironclaw/reborn')).toBe(false);
+    await expect(implied.stat('/h/.ironclaw/reborn')).rejects.toMatchObject({ code: 'EACCES' });
+    await expect(implied.readdirEntries('/h/.ironclaw/reborn', { recursive: true })).rejects.toMatchObject({ code: 'EACCES' });
+    await expect(new SnapshotFSProvider(snap(true)).stat('/h/.ironclaw/x')).rejects.toThrow(/ENOENT/);
   });
 });
 

@@ -4,7 +4,7 @@ import type { AgentInstallation, GatewayInfo, ModelRef, ParsedConfig } from '../
 import type { ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
-import { loadConfig } from '../core/config-loader.js';
+import { loadConfigIfPresent } from './load-if-present.js';
 import { getUserHomeDirs } from './openclaw.js';
 
 /**
@@ -166,9 +166,8 @@ export async function findNanoclawCheckouts(home: string, fs: FSProvider): Promi
 }
 
 async function tryLoad(path: string, fs: FSProvider, into: ParsedConfig[]): Promise<void> {
-  try {
-    if (await fs.access(path)) into.push(await loadConfig(path, fs));
-  } catch {}
+  const loaded = await loadConfigIfPresent(path, fs);
+  if (loaded) into.push(loaded);
 }
 
 export const nanoclawAdapter: AgentAdapter = {

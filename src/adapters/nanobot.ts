@@ -5,6 +5,7 @@ import type { ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { loadConfig } from '../core/config-loader.js';
+import { loadConfigIfPresent } from './load-if-present.js';
 import { getUserHomeDirs } from './openclaw.js';
 import { discoverCliInstalls } from './cli-installs.js';
 import { queryCliVersion } from './version-query.js';
@@ -163,10 +164,9 @@ export const nanobotAdapter: AgentAdapter = {
       const dataDir = join(home, '.nanobot');
       const configFiles: ParsedConfig[] = [];
       const configPath = join(dataDir, 'config.json');
-      if (await fs.access(configPath)) {
-        try {
-          configFiles.push(await loadConfig(configPath, fs));
-        } catch {}
+      {
+        const loaded = await loadConfigIfPresent(configPath, fs);
+        if (loaded) configFiles.push(loaded);
       }
 
       const installs = await discoverCliInstalls(home, fs, {

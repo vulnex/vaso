@@ -308,6 +308,7 @@ export async function restrictFilesToOwner(checkId: string, paths: Iterable<stri
     checkId,
     applied: fixed > 0,
     message: fixed > 0 ? `Removed group/other access from ${fixed} file(s)` : 'Files are already owner-only',
+    ...(fixed === 0 ? { alreadyDone: true } : {}),
   };
 }
 
@@ -414,7 +415,7 @@ export async function fixFirstConfig(configs: ParsedConfig[], spec: FixUpdateSpe
     }
     return { checkId: spec.checkId, applied: true, message: spec.message };
   }
-  if (setIn) return { checkId: spec.checkId, applied: false, message: `${spec.message} — already set in ${setIn}` };
+  if (setIn) return { checkId: spec.checkId, applied: false, alreadyDone: true, message: `${spec.message} — already set in ${setIn}` };
   return {
     checkId: spec.checkId,
     applied: false,

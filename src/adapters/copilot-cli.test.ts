@@ -88,30 +88,21 @@ describe('GitHub Copilot CLI adapter', () => {
     expect(result[0].models).toEqual([{ id: 'claude-sonnet-4.5', provider: 'github-copilot' }]);
   });
 
-  it('parses JSONC config.json (with leading // comment header)', async () => {
+  it('loads config.json through the shared (JSONC-tolerant) config loader', async () => {
+    // config.json starts with a `// managed automatically` comment header;
+    // loadConfig's lenient JSON parser handles it (config-loader.test.ts)
     const configPath = join(copilotDir, 'config.json');
     setExistingPaths([copilotDir, configPath]);
-    // mockReadFile is hoisted via vitest mock above
-    const { readFile } = await import('node:fs/promises');
-    vi.mocked(readFile).mockImplementation(async (p) => {
-      if (p === configPath) {
-        return `// User settings belong in settings.json.
-// This file is managed automatically.
-{
-  "firstLaunchAt": "2026-04-29T10:30:05.040Z",
-  "lastLoggedInUser": { "host": "https://github.com", "login": "vulnex" }
-}`;
-      }
+    const data = { firstLaunchAt: '2026-04-29T10:30:05.040Z', lastLoggedInUser: { host: 'https://github.com', login: 'vulnex' } };
+    mockLoadConfig.mockImplementation(async (p) => {
+      if (p === configPath) return mockConfig(configPath, data);
       throw new Error('ENOENT');
     });
 
     const result = await copilotCliAdapter.detect();
     expect(result).toHaveLength(1);
     expect(result[0].configFiles).toHaveLength(1);
-    expect(result[0].configFiles[0].data).toEqual({
-      firstLaunchAt: '2026-04-29T10:30:05.040Z',
-      lastLoggedInUser: { host: 'https://github.com', login: 'vulnex' },
-    });
+    expect(result[0].configFiles[0].data).toEqual(data);
   });
 
   it('reports installation when CLI binary exists but no config dir', async () => {

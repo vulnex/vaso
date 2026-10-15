@@ -228,6 +228,11 @@ export interface FixResult {
   applied: boolean;
   message: string;
   backupPath?: string;
+  /** Nothing to change: the state the fix sets is already in place (another
+   *  fix in the same run got there first). Not a failure. */
+  alreadyDone?: boolean;
+  /** Not attempted: a dry run, or declined at the prompt. */
+  skipped?: boolean;
 }
 
 /**

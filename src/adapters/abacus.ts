@@ -4,10 +4,10 @@ import type { AgentInstallation, GatewayInfo, ModelRef, ParsedConfig } from '../
 import type { ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
-import { stripJsonc } from '../core/jsonc.js';
 import { getUserHomeDirs } from './openclaw.js';
 import { discoverCliInstalls, nodeManagerPackageJsonGlobs, retainedVersionGlobs, type RetainedVersionsDir } from './cli-installs.js';
 import { queryCliVersion, readPackageVersion } from './version-query.js';
+import { loadConfigIfPresent } from './load-if-present.js';
 import { withoutLoadedConfigs } from './project-configs.js';
 
 /**
@@ -83,14 +83,10 @@ export function abacusDesktopDataDir(home: string, fs: FSProvider): string {
 }
 
 async function loadJson(filePath: string, fs: FSProvider): Promise<ParsedConfig | undefined> {
-  try {
-    const raw = await fs.readFile(filePath);
-    const data = JSON.parse(stripJsonc(raw)) as unknown;
-    if (!data || typeof data !== 'object' || Array.isArray(data)) return undefined;
-    return { raw, format: 'json', filePath, data: data as Record<string, unknown> };
-  } catch {
-    return undefined;
-  }
+  // The shared loader parses JSON/JSONC/JSON5 and reports an unreadable or
+  // unparseable file as CONFIG-LOAD instead of dropping it silently
+  const parsed = await loadConfigIfPresent(filePath, fs);
+  return parsed && parsed.data && typeof parsed.data === 'object' && !Array.isArray(parsed.data) ? parsed : undefined;
 }
 
 async function existingDirs(base: string, rels: string[], fs: FSProvider): Promise<string[]> {
@@ -137,7 +133,6 @@ export const abacusAdapter: AgentAdapter = {
           ...DESKTOP_CONFIG_FILES.map(f => join(configDir, 'desktop', f)),
         ];
         for (const filePath of paths) {
-          if (!(await fs.access(filePath))) continue;
           const parsed = await loadJson(filePath, fs);
           if (parsed) configFiles.push(parsed);
         }
@@ -164,7 +159,6 @@ export const abacusAdapter: AgentAdapter = {
     const projectConfigs: ParsedConfig[] = [];
     for (const rel of PROJECT_CONFIG_FILES) {
       const filePath = join(cwd, rel);
-      if (!(await fs.access(filePath))) continue;
       const parsed = await loadJson(filePath, fs);
       if (parsed) projectConfigs.push(parsed);
     }

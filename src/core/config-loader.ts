@@ -1,4 +1,4 @@
-import { extname } from 'node:path';
+import { dirname, extname } from 'node:path';
 import { parseYamlSafe } from './yaml-safe.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { parse as parseTOML } from 'smol-toml';
@@ -15,6 +15,9 @@ export interface ConfigLoadError {
   filePath: string;
   stage: 'read' | 'parse';
   message: string;
+  /** filePath is the unreadable directory every attempted config sits behind
+   *  (one finding for the directory, not one per file name tried in it). */
+  directory?: boolean;
 }
 
 const loadErrorStore = new AsyncLocalStorage<ConfigLoadError[]>();
@@ -34,7 +37,34 @@ export async function captureConfigLoadErrors<T>(
 }
 
 function recordLoadError(error: ConfigLoadError): void {
-  loadErrorStore.getStore()?.push(error);
+  const store = loadErrorStore.getStore();
+  if (!store || store.some(e => e.filePath === error.filePath && e.stage === error.stage)) return;
+  store.push(error);
+}
+
+/**
+ * The directory that denied access to `filePath`, when the file itself can't
+ * even be stat'ed (it sits under a directory without search permission). An
+ * adapter tries several file names there; all of them fail the same way,
+ * existing or not, so the directory is what gets reported.
+ */
+async function deniedAncestor(filePath: string, fs: FSProvider): Promise<string | undefined> {
+  const code = (err: unknown) => (err as NodeJS.ErrnoException | null)?.code;
+  try {
+    await fs.stat(filePath);
+    return undefined; // the file is reachable; it is the file that's unreadable
+  } catch (err) {
+    if (code(err) !== 'EACCES' && code(err) !== 'EPERM') return undefined;
+  }
+  for (let dir = dirname(filePath); dir !== dirname(dir); dir = dirname(dir)) {
+    try {
+      await fs.stat(dir);
+      return dir;
+    } catch {
+      // still behind it
+    }
+  }
+  return undefined;
 }
 
 /** Missing files are a normal probe outcome, not a load failure. Matches both
@@ -61,7 +91,10 @@ export async function loadConfig(filePath: string, fs?: FSProvider): Promise<Par
     raw = (await provider.readFile(filePath)).replace(/^\uFEFF/, '');
   } catch (error) {
     if (!isFileNotFound(error)) {
-      recordLoadError({ filePath, stage: 'read', message: errorMessage(error) });
+      const dir = await deniedAncestor(filePath, provider).catch(() => undefined);
+      recordLoadError(dir
+        ? { filePath: dir, stage: 'read', message: `EACCES: permission denied, scandir '${dir}'`, directory: true }
+        : { filePath, stage: 'read', message: errorMessage(error) });
     }
     throw error;
   }
@@ -106,6 +139,8 @@ export async function loadConfig(filePath: string, fs?: FSProvider): Promise<Par
 function detectFormat(ext: string, filePath: string): ParsedConfig['format'] {
   switch (ext) {
     case '.json':
+    case '.jsonc':
+    case '.json5':
       return 'json';
     case '.yaml':
     case '.yml':

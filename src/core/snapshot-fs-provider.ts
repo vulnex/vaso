@@ -22,6 +22,7 @@ export class SnapshotFSProvider implements FSProvider {
     const entry = this.snapshot.files[path];
     if (entry?.denied) throw deniedError(path);
     if (!entry || !entry.exists) {
+      if (this.behindUnsearchable(path)) throw deniedError(path);
       throw new Error(`ENOENT: file not collected in snapshot: ${path}`);
     }
     if (entry.contentOmitted || typeof entry.content !== 'string') {
@@ -36,6 +37,7 @@ export class SnapshotFSProvider implements FSProvider {
   async readBytes(path: string): Promise<Uint8Array> {
     const entry = this.snapshot.files[path];
     if (!entry || !entry.exists) {
+      if (this.behindUnsearchable(path)) throw deniedError(path);
       throw new Error(`ENOENT: file not collected in snapshot: ${path}`);
     }
     if (entry.contentOmitted || typeof entry.content !== 'string') {
@@ -55,6 +57,10 @@ export class SnapshotFSProvider implements FSProvider {
       // get clean basenames usable for path.join() without producing '//'.
       return listing.map(stripTrailingSlash);
     }
+
+    // A local readdir fails here even when files inside were read by name
+    if (this.unlistable(path)) throw deniedError(path, 'scandir');
+    if (this.behindUnsearchable(path)) throw deniedError(path, 'scandir');
 
     // Try to derive directory listing from collected files
     const entries = new Set<string>();
@@ -93,6 +99,7 @@ export class SnapshotFSProvider implements FSProvider {
       if (!this.directoryExists(path) && !this.hasChildPaths(path)) {
         throw new Error(`ENOENT: directory not collected in snapshot: ${path}`);
       }
+      if (this.unlistable(path) || this.behindUnsearchable(path)) throw deniedError(path, 'scandir');
       return this.readdirRecursive(path);
     }
 
@@ -124,6 +131,7 @@ export class SnapshotFSProvider implements FSProvider {
     const fileEntry = this.snapshot.files[path];
     if (fileEntry?.exists) return true;
     if (this.directoryExists(path)) return true;
+    if (this.behindUnsearchable(path)) return false;
     // Check if any collected path starts with this as a directory
     if (this.hasChildPaths(path)) return true;
     return false;
@@ -131,7 +139,9 @@ export class SnapshotFSProvider implements FSProvider {
 
   async stat(path: string): Promise<{ mode: number; isFile(): boolean; isDirectory(): boolean }> {
     const fileEntry = this.snapshot.files[path];
-    if (fileEntry?.denied) throw deniedError(path);
+    // Denied at stat (inside an unreadable dir): the local stat fails too.
+    // Denied only at open: the mode is known, the content isn't.
+    if (fileEntry?.denied && !fileEntry.exists) throw deniedError(path, 'stat');
     if (fileEntry?.exists) {
       return {
         mode: fileEntry.mode,
@@ -139,6 +149,9 @@ export class SnapshotFSProvider implements FSProvider {
         isDirectory: () => false,
       };
     }
+    // Behind an unsearchable directory a local stat fails, even for a
+    // directory the denied files under it imply
+    if (!this.directoryExists(path) && this.behindUnsearchable(path)) throw deniedError(path, 'stat');
     if (this.directoryExists(path) || this.hasChildPaths(path)) {
       return {
         // Real mode when the probe recorded it; 0o755 is a placeholder only —
@@ -261,6 +274,31 @@ export class SnapshotFSProvider implements FSProvider {
   }
 
   /** The probe ran as root (directly or via --sudo). */
+  /**
+   * A directory the probe saw but could not list: no read bit for anyone and
+   * no listing (an unprivileged probe can't read a mode-000 directory, and
+   * neither can a local scan by the same user).
+   */
+  private unlistable(path: string): boolean {
+    const mode = this.snapshot.directoryModes?.[path];
+    return mode !== undefined && (mode & 0o444) === 0 && !this.snapshot.directories[path] && !this.isPrivileged();
+  }
+
+  /**
+   * Under a directory the probe recorded without search (x) permission: a
+   * local stat or open of anything there fails with EACCES, existing or not,
+   * so the snapshot answers the same instead of ENOENT.
+   */
+  private behindUnsearchable(path: string): boolean {
+    if (this.isPrivileged()) return false;
+    const modes = this.snapshot.directoryModes ?? {};
+    for (let dir = dirname(path); dir !== dirname(dir); dir = dirname(dir)) {
+      const mode = modes[dir];
+      if (mode !== undefined && (mode & 0o111) === 0) return true;
+    }
+    return false;
+  }
+
   isPrivileged(): boolean {
     return this.snapshot.privilege?.isRoot === true;
   }
@@ -287,7 +325,9 @@ export class SnapshotFSProvider implements FSProvider {
   private hasChildPaths(path: string): boolean {
     const prefix = path.endsWith('/') ? path : path + '/';
     for (const [key, entry] of Object.entries(this.snapshot.files)) {
-      if (key.startsWith(prefix) && entry.exists) return true;
+      // A file the probe was denied under this path proves the directory
+      // exists — it is there, just unreadable (chmod 000), as a local scan sees it
+      if (key.startsWith(prefix) && (entry.exists || entry.denied)) return true;
     }
     for (const [key, listing] of Object.entries(this.snapshot.directories)) {
       if (key.startsWith(prefix) && Array.isArray(listing)) return true;
@@ -395,8 +435,9 @@ export class SnapshotFSProvider implements FSProvider {
 }
 
 /** The error a local read of a path behind an unreadable directory raises. */
-function deniedError(path: string): NodeJS.ErrnoException {
-  const err: NodeJS.ErrnoException = new Error(`EACCES: permission denied on the scanned host: ${path}`);
+function deniedError(path: string, syscall = 'open'): NodeJS.ErrnoException {
+  // Worded like Node's own error so local and remote reports match
+  const err: NodeJS.ErrnoException = new Error(`EACCES: permission denied, ${syscall} '${path}'`);
   err.code = 'EACCES';
   return err;
 }

@@ -6,6 +6,20 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Security
+
+- **`vaso fix` never writes or chmods through a symlink and never blocks on a FIFO.** Every fix and backup opens its target with `O_NOFOLLOW | O_NONBLOCK` and works only on regular files (`src/remediation/safe-file.ts`): a config replaced by a symlink is refused ("is a symlink — vaso fix won't write it") instead of having the link target rewritten, and a FIFO or device in place of a config is refused instead of hanging the run. Backup copies are written owner-only.
+- **Rollback is exact.** Each backup records a manifest (full mode including setuid/setgid, content hash before and after the fix, the modes of directories a fix may chmod). Rollback restores file and directory modes exactly, restores read-only files, and leaves alone a file edited after the fix (reported, exit 2) instead of discarding the edit. Backups from older versions still restore.
+- **A root scan never runs another user's binaries as root.** Under `--all-users` as root and in a probe run with `--sudo`, an agent CLI owned by a user is version-queried as that user, a root-owned one only when no other user could have replaced it or a directory above it, and the PATH it gets keeps only root-safe directories; the probe resolves system directories before user ones when it runs as root (probe ≥ 1.3.1).
+- **Version queries run in a minimal environment.** Relocation variables such as `CODEX_HOME` or `CLAUDE_CONFIG_DIR` no longer reach an isolated version query (they pointed the CLI back at the user's real state directory), and the throwaway HOME falls back to `/tmp` when `TMPDIR` is unusable.
+
+### Fixed
+
+- **`vaso fix` applies fixes for findings folded into an agent check** (CFG-003/POL-003 permission findings reported under the agent's own check); they were listed but skipped.
+- **The fix summary says what happened**: applied, already in place, skipped (or would be applied, with `--dry-run`) and not applied are counted separately, and `vaso fix` exits 1 when a fix failed.
+- **Every adapter reports an unreadable or unparseable config as CONFIG-LOAD.** The 1.3.0 change covered only some agents; the rest (Gemini CLI, Qwen Code, Devin, Abacus, OpenCode, Atomic Agent, Hermes, IronClaw, PicoClaw, ZeroClaw, Nanobot, NemoClaw, NanoClaw, OpenShell, Copilot CLI) still dropped a config behind a chmod-000 directory and scored the install clean. `.jsonc` and `.json5` files load as JSON. A config directory that can't be searched is one CONFIG-LOAD finding for the directory instead of one per file name tried in it.
+- **Remote scans match local ones for unreadable files and directories.** The probe marks a file it can stat but not open as present and denied (so its mode is still checked), and records a directory it can't list (a mode-000 browser profile was missing remotely, so Perplexity Comet went undetected); the snapshot reader raises the same permission error a local read does (probe ≥ 1.3.1).
+
 ## [1.3.0] - 2026-10-15
 
 ### Security

@@ -5,6 +5,7 @@ import type { ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { loadConfig } from '../core/config-loader.js';
+import { loadConfigIfPresent } from './load-if-present.js';
 import { getUserHomeDirs } from './openclaw.js';
 import { discoverCliInstalls } from './cli-installs.js';
 import { queryCliVersion } from './version-query.js';
@@ -52,8 +53,9 @@ export const atomicAgentAdapter: AgentAdapter = {
       for (const name of CONFIG_FILENAMES) {
         const filePath = join(stateDir, name);
         try {
-          if (await fs.access(filePath)) {
-            configFiles.push(await loadConfig(filePath, fs));
+          {
+            const loaded = await loadConfigIfPresent(filePath, fs);
+            if (loaded) configFiles.push(loaded);
           }
         } catch {}
       }

@@ -5,6 +5,7 @@ import type { ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { loadConfig } from '../core/config-loader.js';
+import { loadConfigIfPresent } from './load-if-present.js';
 import { discoverCliInstalls } from './cli-installs.js';
 import { queryCliVersion, readPackageVersion } from './version-query.js';
 
@@ -198,34 +199,30 @@ export const nemoclawAdapter: AgentAdapter = {
 
     // Load sandboxes.json — primary config describing sandbox deployments
     const sandboxesPath = join(nemoDir, 'sandboxes.json');
-    if (await fs.access(sandboxesPath)) {
-      try {
-        configFiles.push(await loadConfig(sandboxesPath, fs));
-      } catch {}
+    {
+      const loaded = await loadConfigIfPresent(sandboxesPath, fs);
+      if (loaded) configFiles.push(loaded);
     }
 
     // Load credentials.json
     const credPath = join(nemoDir, 'credentials.json');
-    if (await fs.access(credPath)) {
-      try {
-        configFiles.push(await loadConfig(credPath, fs));
-      } catch {}
+    {
+      const loaded = await loadConfigIfPresent(credPath, fs);
+      if (loaded) configFiles.push(loaded);
     }
 
     // Load config.json if present
     const configPath = join(nemoDir, 'config.json');
-    if (await fs.access(configPath)) {
-      try {
-        configFiles.push(await loadConfig(configPath, fs));
-      } catch {}
+    {
+      const loaded = await loadConfigIfPresent(configPath, fs);
+      if (loaded) configFiles.push(loaded);
     }
 
     // Load state file for deployment info
     const statePath = join(nemoDir, 'state', 'nemoclaw.json');
-    if (await fs.access(statePath)) {
-      try {
-        configFiles.push(await loadConfig(statePath, fs));
-      } catch {}
+    {
+      const loaded = await loadConfigIfPresent(statePath, fs);
+      if (loaded) configFiles.push(loaded);
     }
 
     // Directory exists but no config files means NemoClaw is not actually installed

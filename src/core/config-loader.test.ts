@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { loadConfig, captureConfigLoadErrors } from './config-loader.js';
-import { writeFile, mkdir, rm } from 'node:fs/promises';
+import { writeFile, mkdir, rm, chmod } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -37,6 +37,14 @@ describe('loadConfig', () => {
     expect(config.raw).toBe(raw);
     await writeFile(filePath, '{ "a": ');
     await expect(loadConfig(filePath)).rejects.toThrow();
+    await cleanup();
+  });
+
+  it('parses JSON behind a leading // comment header (Copilot config.json)', async () => {
+    await setup();
+    const filePath = join(TEST_DIR, 'config.json');
+    await writeFile(filePath, '// User settings belong in settings.json.\n// This file is managed automatically.\n{\n  "login": "x"\n}\n');
+    expect((await loadConfig(filePath)).data).toEqual({ login: 'x' });
     await cleanup();
   });
 
@@ -145,6 +153,26 @@ describe('loadConfig — non-mapping documents', () => {
 });
 
 describe('captureConfigLoadErrors', () => {
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+    'reports a mode-000 directory once, not each config name tried behind it', async () => {
+      await setup();
+      const dir = join(TEST_DIR, '.agent');
+      await mkdir(dir);
+      await writeFile(join(dir, 'config.json'), '{}');
+      await chmod(dir, 0);
+      try {
+        const { loadErrors } = await captureConfigLoadErrors(async () => {
+          for (const name of ['config.json', 'config.toml', 'settings.json']) {
+            await loadConfig(join(dir, name)).catch(() => undefined);
+          }
+        });
+        expect(loadErrors).toEqual([expect.objectContaining({ filePath: dir, stage: 'read', directory: true })]);
+      } finally {
+        await chmod(dir, 0o755);
+        await cleanup();
+      }
+    });
+
   it('records a parse failure for a known format and still throws', async () => {
     await setup();
     const filePath = join(TEST_DIR, 'broken.json');

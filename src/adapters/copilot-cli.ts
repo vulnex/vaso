@@ -6,7 +6,6 @@ import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { loadConfig } from '../core/config-loader.js';
 import { loadConfigIfPresent } from './load-if-present.js';
-import { stripJsonc } from '../core/jsonc.js';
 import { nvmBinaryGlob, npmPackageJsonGlobs } from './nvm-binary.js';
 import { discoverCliInstalls } from './cli-installs.js';
 import { getUserHomeDirs } from './openclaw.js';
@@ -40,26 +39,14 @@ const USER_CLI_RELATIVE_PATHS = [
 
 /**
  * Copilot CLI's `config.json` opens with a `// User settings belong in
- * settings.json.` comment line — strict JSON parsers will reject it. We
- * read the file ourselves, strip JSONC syntax, then parse. Falls back to
- * the shared `loadConfig` (which auto-detects format) for non-JSONC files.
+ * settings.json.` comment line; the shared loader parses JSONC, and reports
+ * an unreadable or unparseable file as CONFIG-LOAD instead of dropping it.
  */
 async function loadFiles(dir: string, names: string[], fs: FSProvider): Promise<ParsedConfig[]> {
   const out: ParsedConfig[] = [];
   for (const name of names) {
-    const filePath = join(dir, name);
-    if (!(await fs.access(filePath))) continue;
-    if (name.endsWith('.json')) {
-      try {
-        const raw = await fs.readFile(filePath);
-        const data = JSON.parse(stripJsonc(raw)) as Record<string, unknown>;
-        out.push({ raw, format: 'json', filePath, data });
-        continue;
-      } catch {}
-    }
-    try {
-      out.push(await loadConfig(filePath, fs));
-    } catch {}
+    const loaded = await loadConfigIfPresent(join(dir, name), fs);
+    if (loaded) out.push(loaded);
   }
   return out;
 }
