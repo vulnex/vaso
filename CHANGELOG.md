@@ -28,6 +28,10 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - **Files the probe left out say why** (per-file limit, content budget, binary asset; probe ≥ 1.3.1): budget-omitted skill files were listed as "larger than 5 MiB", and an oversized `~/.claude.json` as a permission error.
 - IOC-007 lists a skill binary over the 5 MiB scan limit as not scanned instead of dropping it silently.
 - **A `$HOME` reached through a symlink no longer doubles coding-agent findings.** Scanning from home, the working directory is the real path while `$HOME` may be a symlinked spelling (macOS `/var` → `/private/var`, a home on a linked volume); Claude Code, Abacus, Cursor, Gemini CLI, OpenCode and Qwen Code then reported the user's own config a second time as a project.
+- **MCP-034 false criticals removed**: soft hyphens, codepage/charset tables, sets of zero-width characters a sanitizer strips, and `<system tmp>`-style prose are no longer reported as hidden instructions. Zero-width hidden text, tag-character payloads and real `<system>` tags still are.
+- **MCP-006 no longer reports a WebSocket client as exfiltration.** Opening a connection sends nothing; file or environment contents sent out over HTTP are still reported.
+- **Windows `cmd /c npx …`, the documented way to start MCP servers on Windows, is no longer a shell-injection finding** unless it chains commands or redirects (`&`, `|`, `<`, `>`, `^`). The package it wraps, and packages run with `bun x`, are now checked for a version pin. Messages name the real wrapper (`cmd /c`, `pwsh -Command`), and unpinned-package messages read correctly.
+- **`vaso mcp` finds servers in VS Code `settings.json` (`mcp.servers`) and in a project's `.codex/config.toml`.** `mcp scan` writes an empty, clean report for JSON, SARIF and other machine formats when no servers are found. MCP-027 keeps rollback history recorded by earlier versions.
 
 ## [1.3.0] - 2026-10-15
 
