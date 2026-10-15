@@ -1,0 +1,7 @@
+{
+  "agent": "claude-code",
+  "source": "The same download-and-run line in an executable skill script: critical",
+  "fail": {
+    "SKL-004": "critical"
+  }
+}

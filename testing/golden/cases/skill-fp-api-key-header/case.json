@@ -1,0 +1,7 @@
+{
+  "agent": "claude-code",
+  "source": "An API key sent in the headers of its own API is not exfiltration (same rule for tracked and inline values)",
+  "pass": [
+    "SKL-001"
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "agent": "claude-code",
+  "source": "True positive: a clipboard hijacker swapping copied addresses for a hardcoded one",
+  "fail": {
+    "SKL-009": "warning"
+  }
+}

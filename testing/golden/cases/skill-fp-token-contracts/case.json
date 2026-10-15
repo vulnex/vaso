@@ -1,0 +1,7 @@
+{
+  "agent": "claude-code",
+  "source": "Corpus FP: a crypto skill listing public token contracts (SKL-009 reported one warning per address)",
+  "info": [
+    "SKL-009"
+  ]
+}

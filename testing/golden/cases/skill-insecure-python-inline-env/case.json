@@ -1,0 +1,7 @@
+{
+  "agent": "claude-code",
+  "source": "Corpus FN: the whole environment posted inline (json=dict(os.environ)) \u2014 the variable form was already caught",
+  "fail": {
+    "SKL-001": "critical"
+  }
+}

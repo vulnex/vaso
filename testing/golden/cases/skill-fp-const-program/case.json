@@ -1,0 +1,7 @@
+{
+  "agent": "claude-code",
+  "source": "Corpus FP: spawnSync(FFMPEG, \u2026) with a module-level constant program starts a known program without a shell",
+  "info": [
+    "SKL-003"
+  ]
+}

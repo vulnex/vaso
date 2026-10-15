@@ -1,0 +1,7 @@
+{
+  "agent": "claude-code",
+  "source": "Corpus FP shape (Hermes inference-sh-cli): a named https installer in skill documentation is a warning, not critical",
+  "fail": {
+    "SKL-004": "warning"
+  }
+}

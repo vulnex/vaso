@@ -1,0 +1,7 @@
+{
+  "agent": "claude-code",
+  "source": "Corpus FP: a 0x-prefixed hash is not base64, and atob() over a JWT payload decodes no hidden literal",
+  "pass": [
+    "SKL-002"
+  ]
+}
