@@ -8,8 +8,8 @@ import { basename } from 'node:path';
  * `pnpm dlx pkg@1.2.3` as "dlx", `pipx run pkg==1` as "run", and treated
  * `uvx --from pkg==1.2.3 cmd` (uv's documented exact pin) as unpinned.
  *
- * Runners: npx, bunx, pnpx, `pnpm dlx`, `yarn dlx`, `npm exec`/`npm x`,
- * uvx, `uv tool run`, `pipx run`.
+ * Runners: npx, bunx, `bun x`, pnpx, `pnpm dlx`, `yarn dlx`, `npm exec`/`npm x`,
+ * uvx, `uv tool run`, `pipx run` — also behind Windows' `cmd /c` wrapper.
  */
 
 export type PinKind =
@@ -40,6 +40,26 @@ export function commandName(command: string): string {
 }
 
 // Options that consume the next argument
+/**
+ * The program a Windows `cmd /c` (or `/k`) wrapper runs — the documented way to
+ * start `npx` servers on Windows (`"command": "cmd", "args": ["/c", "npx", …]`).
+ * The rest may be separate arguments or one string. `plain` when no argument
+ * carries cmd's own syntax (`&`, `|`, `<`, `>`, `^`): then it is a program
+ * invocation, not a shell script.
+ */
+export function windowsCmdTarget(command: unknown, rawArgs: unknown): { command: string; args: string[]; plain: boolean } | undefined {
+  if (typeof command !== 'string' || commandName(command).toLowerCase() !== 'cmd') return undefined;
+  const args = Array.isArray(rawArgs) ? rawArgs.filter((a): a is string => typeof a === 'string') : [];
+  let i = 0;
+  while (i < args.length && /^\/[dsqaun]$|^\/[ef]:(?:on|off)$|^\/v(?::(?:on|off))?$/i.test(args[i])) i++;
+  if (i >= args.length || !/^\/[ck]$/i.test(args[i])) return undefined;
+  let rest = args.slice(i + 1);
+  if (rest.length === 1 && /\s/.test(rest[0]) && !/["']/.test(rest[0])) rest = rest[0].trim().split(/\s+/);
+  if (rest.length === 0 || !rest[0]) return undefined;
+  const plain = rest.every(a => !/[&|<>^]/.test(a)) && !/["']/.test(rest[0]);
+  return { command: rest[0], args: rest.slice(1), plain };
+}
+
 const NPX_VALUE_FLAGS = new Set(['--registry', '--cache', '--userconfig', '--prefix', '-c', '--call', '--node-options', '--workspace', '-w', '--shell', '--script-shell']);
 const UV_VALUE_FLAGS = new Set([
   '--directory', '--project', '--python', '-p', '--with', '--with-editable',
@@ -81,6 +101,8 @@ function afterSubcommand(args: string[], words: string[][]): string[] | undefine
 /** What `command args…` installs, if it is a package runner. */
 export function runnerPackage(command: unknown, rawArgs: unknown): RunnerPackage | undefined {
   if (typeof command !== 'string' || !command) return undefined;
+  const wrapped = windowsCmdTarget(command, rawArgs);
+  if (wrapped) return runnerPackage(wrapped.command, wrapped.args);
   const args = Array.isArray(rawArgs) ? rawArgs.filter((a): a is string => typeof a === 'string') : [];
   const cmd = commandName(command);
   let runner = cmd;
@@ -92,6 +114,14 @@ export function runnerPackage(command: unknown, rawArgs: unknown): RunnerPackage
       ecosystem = 'npm';
       spec = packageArg(args, NPX_VALUE_FLAGS, new Set(['-p', '--package']));
       break;
+    case 'bun': {
+      const rest = afterSubcommand(args, [['x']]);
+      if (!rest) return undefined; // `bun run script.ts` runs a local file
+      runner = 'bun x';
+      ecosystem = 'npm';
+      spec = packageArg(rest, NPX_VALUE_FLAGS, new Set(['-p', '--package']));
+      break;
+    }
     case 'pnpm': case 'yarn': {
       const rest = afterSubcommand(args, [['dlx']]);
       if (!rest) return undefined;

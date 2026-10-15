@@ -1,6 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { shellCommandWrapper } from '../../mcp/shell-wrapper.js';
+import { shellCommandWrapper, shellInvocation } from '../../mcp/shell-wrapper.js';
 import { codexProfileName } from '../../adapters/codex.js';
 
 const INTERPRETERS = /^(?:python[\d.]*|node|bun|deno|ruby|perl|bash|sh|zsh|osascript)$/;
@@ -28,7 +28,7 @@ function inspectNotify(notify: unknown): NotifyFinding[] {
   const shell = shellCommandWrapper(cmd, argv.slice(1));
   if (shell) {
     findings.push({
-      reason: `invokes ${shell} -c, so any variable Codex injects is parsed as shell — same risk class as Claude Code unsafe hooks`,
+      reason: `invokes ${shellInvocation(shell)}, so any variable Codex injects is parsed as shell — same risk class as Claude Code unsafe hooks`,
     });
   }
 

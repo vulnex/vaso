@@ -16,7 +16,7 @@ interface ConfigLocation {
   source: string;
   path: string;
   /** Config dialect; defaults to the common `mcpServers` map. */
-  shape?: 'atomic-agent' | 'nanobot' | 'picoclaw' | 'abacus' | 'abacus-config' | 'claude-json' | 'codex' | 'opencode' | 'hermes';
+  shape?: 'atomic-agent' | 'nanobot' | 'picoclaw' | 'abacus' | 'abacus-config' | 'claude-json' | 'codex' | 'opencode' | 'hermes' | 'vscode-settings';
   /** Value substituted for `${extensionPath}` (Gemini CLI extensions). */
   extensionPath?: string;
 }
@@ -73,7 +73,11 @@ function getGlobalConfigLocations(platform: Platform, home: string, fs: FSProvid
     : platform === 'win32'
       ? join(process.env.APPDATA ?? join(home, 'AppData', 'Roaming'), 'Code', 'User')
       : join(process.env.XDG_CONFIG_HOME?.trim() || join(home, '.config'), 'Code', 'User');
-  locations.push({ source: 'VS Code', path: join(vscodeUser, 'mcp.json') });
+  locations.push(
+    { source: 'VS Code', path: join(vscodeUser, 'mcp.json') },
+    // Older form, still read: `"mcp": { "servers": {…} }` in user settings.json
+    { source: 'VS Code (settings.json)', path: join(vscodeUser, 'settings.json'), shape: 'vscode-settings' },
+  );
 
   // Windsurf
   locations.push({
@@ -160,6 +164,9 @@ function getProjectConfigLocations(projectDir: string): ConfigLocation[] {
     { source: 'Abacus.AI (project)', path: join(projectDir, '.abacusai', 'mcp.json'), shape: 'abacus' },
     { source: 'Abacus.AI (project)', path: join(projectDir, '.abacusai', 'config.json'), shape: 'abacus-config' },
     { source: 'VS Code', path: join(projectDir, '.vscode', 'mcp.json') },
+    { source: 'VS Code (settings.json)', path: join(projectDir, '.vscode', 'settings.json'), shape: 'vscode-settings' },
+    // Codex loads a trusted project's `.codex/config.toml` over the user config
+    { source: 'Codex (project)', path: join(projectDir, '.codex', 'config.toml'), shape: 'codex' },
     { source: 'Generic MCP', path: join(projectDir, 'mcp.json') },
   ];
 }
@@ -241,6 +248,10 @@ function parseShape(shape: ConfigLocation['shape'], data: Record<string, unknown
       return parseServerMap(opencodeServers(data.mcp));
     case 'hermes':
       return parseServerMap(data.mcp_servers);
+    case 'vscode-settings': {
+      const mcp = data.mcp as Record<string, unknown> | undefined;
+      return mcp && typeof mcp === 'object' && !Array.isArray(mcp.servers) ? parseServerMap(mcp.servers) : [];
+    }
     case 'picoclaw': {
       // tools.mcp.enabled: false switches off the whole MCP integration
       const mcp = tools?.mcp as Record<string, unknown> | undefined;
@@ -485,6 +496,7 @@ function shapeOf(format: 'json' | 'toml' | 'yaml', data: Record<string, unknown>
   if ((tools?.mcp as Record<string, unknown> | undefined)?.servers) return 'picoclaw';
   const mcp = data.mcp as Record<string, unknown> | undefined;
   if (mcp && typeof mcp === 'object' && Array.isArray(mcp.servers)) return 'atomic-agent';
+  if (mcp && typeof mcp === 'object' && mcp.servers && typeof mcp.servers === 'object') return 'vscode-settings';
   if (mcp && typeof mcp === 'object') return 'opencode';
   return 'atomic-agent';
 }

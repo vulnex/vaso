@@ -112,7 +112,8 @@ export const mcp034 = defineCheck({
       for (let i = 0; i < lines.length; i++) {
         const decoded = python ? decodeUnicodeEscapes(lines[i]) : lines[i];
         // A quoted constant naming one invisible character (`split('\u200b')`).
-        const text = decoded.replace(/(["'`])([^"'`]{1,3})\1/gu, (m, _q: string, body: string) => (isInvisibleConstant(body) ? '' : m));
+        const text = decoded.replace(/(["'`])([^"'`]{1,8})\1/gu, (m, _q: string, body: string) => (isInvisibleConstant(body) ? '' : m));
+        if (isCharacterTable(text)) continue;
         const invisible = hiddenCharacters(text);
         if (invisible.length === 0 || ownedByDescription(decoded.trim()) || ownedByDescription(foldWhitespace(decoded))) continue;
         hiddenAt.set(i + 1, invisible);
@@ -154,6 +155,20 @@ function isProse(text: string): boolean {
   if ((text.match(/[A-Za-z]{3,}/g) ?? []).length < 2) return false;
   const nonAscii = new Set([...text].filter((c) => (c.codePointAt(0) ?? 0) > 0x7f && /[\p{L}\p{M}\p{N}\p{P}\p{S}]/u.test(c)));
   return nonAscii.size <= 8;
+}
+
+/**
+ * A line that is a character table — a codepage map, a strip/escape set — not
+ * text: long, and nearly every character on it different (pdf.js-style
+ * `chars: "€‚ƒ„…\xad®¯…"` tables carry soft hyphens and bidi marks as entries).
+ * Prose repeats its letters.
+ */
+function isCharacterTable(line: string): boolean {
+  const chars = [...line.trim()];
+  if (chars.length < 32) return false;
+  // Tag characters and variation selectors spell text by themselves
+  if (chars.some((c) => { const cp = c.codePointAt(0) ?? 0; return (cp >= 0xe0000 && cp <= 0xe01ef) || (cp >= 0xfe00 && cp <= 0xfe0f); })) return false;
+  return new Set(chars).size / chars.length >= 0.6;
 }
 
 /** A line's text as it appears inside a description: trimmed, quotes and commas dropped. */

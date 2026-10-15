@@ -18,7 +18,7 @@ function checkServer(name: string, server: ServerSpec, file: string, evidence: E
   evidence.push({
     file,
     snippet: `mcpServers.${name}: ${command} ${args.join(' ')}`,
-    detail: `MCP server runs ${pinProblem(pkg)} — supply chain risk`,
+    detail: `MCP server package ${pinProblem(pkg)} — supply chain risk`,
   });
 }
 

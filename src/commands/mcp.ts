@@ -65,7 +65,9 @@ export async function runMCPScan(options: MCPScanCommandOptions): Promise<void> 
 
     if (discoveryResult.totalServers === 0 && direct.sources.length === 0) {
       console.error(chalk.yellow('No MCP servers found. Nothing to scan.'));
-      return;
+      // A machine-readable report is still written (an empty, clean one): CI
+      // that uploads -o report.sarif / parses JSON otherwise finds no file.
+      if ((options.format ?? 'terminal') === 'terminal' && !options.output) return;
     }
 
     if (discoveryResult.totalServers > 0) {

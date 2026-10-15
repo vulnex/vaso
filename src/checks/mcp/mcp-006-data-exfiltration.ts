@@ -40,7 +40,9 @@ export const mcp006 = defineCheck({
       const results = analyzeCode(source.sourceCode, source.localPath ?? source.serverName);
 
       const exfilFindings = results.filter(isExfiltration);
-      const suspiciousNet = results.filter(r => r.type === 'suspicious-network');
+      // Opening a WebSocket sends nothing by itself — a CDP/debugger or
+      // realtime client (@metamask/device-mcp) is not exfiltration
+      const suspiciousNet = results.filter(r => r.type === 'suspicious-network' && r.sink !== 'WebSocket');
 
       for (const finding of exfilFindings) {
         evidence.push({

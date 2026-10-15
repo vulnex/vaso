@@ -46,7 +46,8 @@ export const DIRECTIVE_PATTERNS: DirectivePattern[] = [
   // this off JS/JSON property keys (`instruction: "value"` → colon is followed by a quote,
   // not a capitalised word), so it only matches an imperative directive sentence.
   { re: /\b[Ii]nstructions?\s*:\s+[A-Z][a-z]/, label: 'directive prefix ("Instruction: …")' },
-  { re: /<\/?(?:important|system|instructions?)\b[^>]*>/i, label: 'hidden-instruction tag (<important>/<system>)' },
+  // A tag, optionally with attributes — not prose in angle brackets (`<system tmp>/cache`)
+  { re: /<\/?(?:important|system|instructions?)(?:\s+[\w:-]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+))*\s*\/?>/i, label: 'hidden-instruction tag (<important>/<system>)' },
   // <secret>/<hidden> are also CLI usage placeholders (`--client-secret <secret>`);
   // as a hiding tag they open a block (end of line) or wrap text up to a close tag.
   { re: /<(secret|hidden)>(?:\s*$|[^<]*<\/\1>)|<\/(?:secret|hidden)>\s*$/im, label: 'hidden-instruction tag (<secret>/<hidden>)' },
@@ -153,6 +154,10 @@ export function hiddenCharacters(text: string): string[] {
 }
 
 function isBenignRun(run: number[], prev: string | undefined, next: string | undefined, lineHasEmoji: boolean): boolean {
+  // Soft hyphens mark hyphenation points; they carry no text of their own
+  // (charset tables, sanitizers and hyphenated words are full of them), and a
+  // directive broken up by them is still matched after folding.
+  if (run.every((cp) => cp === 0x00ad)) return true;
   // England/Scotland/Wales flags: black flag + tag letters + cancel tag.
   if (run.every(isTag)) {
     return prev?.codePointAt(0) === 0x1f3f4 && run.length <= 7 && run[run.length - 1] === 0xe007f;
@@ -172,8 +177,14 @@ function isBenignRun(run: number[], prev: string | undefined, next: string | und
  * hidden from a reader.
  */
 export function isInvisibleConstant(text: string): boolean {
-  const chars = [...text];
-  return chars.length > 0 && chars.length <= 3 && chars.every((c) => isInvisibleCodePoint(c.codePointAt(0) ?? 0));
+  const cps = [...text].map((c) => c.codePointAt(0) ?? 0);
+  if (cps.length === 0 || !cps.every(isInvisibleCodePoint)) return false;
+  if (cps.length <= 3) return true;
+  // A set of distinct zero-width/bidi characters is a sanitizer's table
+  // (`str.translate(dict.fromkeys(map(ord, "\u200b\u200c\u200d\u2060\ufeff")))`);
+  // a payload repeats its alphabet, and tag characters and variation
+  // selectors encode text on their own.
+  return cps.length <= 8 && new Set(cps).size === cps.length && !cps.some((cp) => isTag(cp) || isVariationSelector(cp));
 }
 
 /**

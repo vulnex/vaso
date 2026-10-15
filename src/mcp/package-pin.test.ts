@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { runnerPackage, classifyNpm, classifyPypi } from './package-pin.js';
+import { runnerPackage, classifyNpm, classifyPypi, pinProblem } from './package-pin.js';
 
 const pin = (cmd: string, ...args: string[]) => runnerPackage(cmd, args)?.pin;
 const pkg = (cmd: string, ...args: string[]) => runnerPackage(cmd, args);
@@ -18,6 +18,20 @@ describe('runnerPackage', () => {
     expect(pkg('uv', 'tool', 'run', 'mcp-server-git==1.0.0')).toMatchObject({ runner: 'uv tool run', pin: 'exact' });
     expect(pkg('pipx', 'run', '--spec', 'pkg==1.0', 'pkg')).toMatchObject({ runner: 'pipx run', pin: 'exact' });
     expect(pkg('pipx', 'run', 'pkg')).toMatchObject({ pin: 'none' });
+  });
+
+  it('reads `bun x` and packages behind Windows\' `cmd /c` wrapper', () => {
+    expect(pkg('bun', 'x', 'some-mcp')).toMatchObject({ runner: 'bun x', name: 'some-mcp', pin: 'none' });
+    expect(pkg('bun', 'x', 'some-mcp@1.2.3')).toMatchObject({ pin: 'exact' });
+    expect(pkg('bun', 'run', 'server.ts')).toBeUndefined();
+    // the documented Windows form: unpinned package must not hide behind cmd
+    expect(pkg('cmd', '/c', 'npx', '-y', '@modelcontextprotocol/server-github')).toMatchObject({ runner: 'npx', name: '@modelcontextprotocol/server-github', pin: 'none' });
+    expect(pkg('cmd.exe', '/d', '/c', 'npx -y pkg@1.0.0')).toMatchObject({ pin: 'exact' });
+    expect(pkg('cmd', '/c', 'node', 'server.js')).toBeUndefined();
+  });
+
+  it('describes the problem as a clause of its own', () => {
+    expect(pinProblem(pkg('npx', '-y', 'pkg')!)).toBe('"pkg" via npx has no version pin');
   });
 
   it('is not fooled by subcommands, local scripts or other commands', () => {

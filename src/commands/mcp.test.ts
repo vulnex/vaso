@@ -155,14 +155,24 @@ describe('runMCPScan', () => {
     expect(mockDiscoverFromPaths).not.toHaveBeenCalled();
   });
 
-  it('prints message and returns when no servers found', async () => {
+  it('prints message and returns when no servers found (terminal)', async () => {
     mockDiscoverFromPaths.mockResolvedValue(emptyDiscoveryResult);
 
-    await runMCPScan({ format: 'json', path: ['/nonexistent'] });
+    await runMCPScan({ format: 'terminal', path: ['/nonexistent'] });
 
     const output = consoleErrorLogs.join('\n');
     expect(output).toContain('No MCP servers found');
     expect(mockScanMCP).not.toHaveBeenCalled();
+  });
+
+  it('still writes a (clean) machine-readable report when no servers found', async () => {
+    mockDiscoverFromPaths.mockResolvedValue(emptyDiscoveryResult);
+    mockScanMCP.mockResolvedValue(sampleScanResult);
+
+    await runMCPScan({ format: 'json', path: ['/nonexistent'] });
+
+    expect(consoleErrorLogs.join('\n')).toContain('No MCP servers found');
+    expect(mockScanMCP).toHaveBeenCalled();
   });
 
   it('exits 2 when an explicit --path is missing or unparseable (not a silent "nothing found")', async () => {

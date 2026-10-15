@@ -33,7 +33,7 @@ export const cdx004 = defineCheck({
         evidence.push({
           file: config.filePath,
           snippet: `mcp_servers.${name}: ${command} ${argList.join(' ')}`,
-          detail: `Runs ${pinProblem(pkg)} — supply chain risk`,
+          detail: `${pinProblem(pkg)} — supply chain risk`,
         });
       }
     }

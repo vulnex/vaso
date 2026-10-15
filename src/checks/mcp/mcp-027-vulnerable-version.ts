@@ -66,6 +66,17 @@ export const mcp027 = defineCheck({
     const db = getAdvisoryDatabase();
     const depAdvisories = db.advisories.filter((a) => a.affectedDependency);
     const store = ctx.mcpStateStore ?? defaultMcpStateStore();
+    // Servers per package: a pre-1.3.0 history (keyed by package alone)
+    // belongs to a server only when it is the one using that package.
+    const serversPerPackage = new Map<string, number>();
+    for (const config of ctx.mcpConfigs ?? []) {
+      for (const server of config.servers) {
+        const spec = npmInstallSpec(server);
+        if (!spec) continue;
+        const { name } = parsePackageSpec(spec);
+        serversPerPackage.set(name, (serversPerPackage.get(name) ?? 0) + 1);
+      }
+    }
 
     for (const config of ctx.mcpConfigs ?? []) {
       for (const server of config.servers) {
@@ -96,7 +107,8 @@ export const mcp027 = defineCheck({
           // versions of one package would otherwise "roll back" every scan.
           const serverId = createHash('sha256').update(`${config.filePath}\0${server.name}`).digest('hex').slice(0, 12);
           const key = `version-${name}-${serverId}`;
-          const prev = await store.load<VersionState>(key);
+          let prev = await store.load<VersionState>(key);
+          if (!prev && serversPerPackage.get(name) === 1) prev = await store.load<VersionState>(`version-${name}`);
           const prevParsed = prev?.highest ? parseSemVer(prev.highest) : null;
 
           if (prevParsed && compareSemVer(parsed, prevParsed) < 0) {

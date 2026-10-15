@@ -1,7 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { runnerPackage, isPinnedOrLocal, pinProblem } from '../../mcp/package-pin.js';
-import { shellCommandWrapper } from '../../mcp/shell-wrapper.js';
+import { shellCommandWrapper, shellInvocation } from '../../mcp/shell-wrapper.js';
 import { queryPermissions } from '../../core/permissions.js';
 import { asRecord, atomicConfigs, isEnabled, isLoopbackHost, mcpServers, serverName, urlHost } from './shared.js';
 
@@ -49,7 +49,7 @@ export const at007 = defineCheck({
           evidence.push({
             file: config.filePath,
             snippet: `mcp.servers[${name}]: ${invocation}`,
-            detail: `MCP server invoked via "${shellCommandWrapper(command, argList)} -c …" — argv injection becomes shell injection`,
+            detail: `MCP server invoked via "${shellInvocation(shellCommandWrapper(command, argList)!)} …" — argv injection becomes shell injection`,
           });
         }
 
@@ -73,7 +73,7 @@ export const at007 = defineCheck({
           evidence.push({
             file: config.filePath,
             snippet: `mcp.servers[${name}]: ${invocation}`,
-            detail: `Runs ${pinProblem(pkg)} — every launch may fetch a different release`,
+            detail: `${pinProblem(pkg)} — every launch may fetch a different release`,
           });
         }
       }

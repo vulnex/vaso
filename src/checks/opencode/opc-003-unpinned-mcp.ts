@@ -29,7 +29,7 @@ function checkLocal(name: string, server: LocalServer, file: string, evidence: E
       evidence.push({
         file,
         snippet: `mcp.${name}.command = ${cmd.join(' ')}`,
-        detail: `MCP server runs ${pinProblem(pkg)} — supply chain risk`,
+        detail: `MCP server package ${pinProblem(pkg)} — supply chain risk`,
       });
     }
     return;

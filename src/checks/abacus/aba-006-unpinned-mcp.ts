@@ -23,7 +23,7 @@ export const aba006 = defineCheck({
       evidence.push({
         file: config.filePath,
         snippet: `${path}: ${server.command} ${args.join(' ')}`,
-        detail: `Runs ${pinProblem(pkg)} — every launch fetches whatever is published`,
+        detail: `${pinProblem(pkg)} — every launch fetches whatever is published`,
       });
     }
 

@@ -33,7 +33,7 @@ export const gem007 = defineCheck({
         evidence.push({
           file: config.filePath,
           snippet: `mcpServers.${name}: ${command} ${argList.join(' ')}`,
-          detail: `Runs ${pinProblem(pkg)} — supply chain risk`,
+          detail: `${pinProblem(pkg)} — supply chain risk`,
         });
       }
     }

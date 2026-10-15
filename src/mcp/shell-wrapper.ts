@@ -1,4 +1,4 @@
-import { commandName } from './package-pin.js';
+import { commandName, windowsCmdTarget } from './package-pin.js';
 
 /**
  * Whether `command args…` runs its arguments through a shell interpreter
@@ -28,9 +28,22 @@ export function shellCommandWrapper(command: unknown, rawArgs: unknown): string 
     }
     return undefined;
   }
-  if (shell === 'cmd' && args.some(a => /^\/[ck]$/i.test(a))) return shell;
+  if (shell === 'cmd' && args.some(a => /^\/[ck]$/i.test(a))) {
+    // `cmd /c npx -y pkg` is how MCP servers are documented to start on
+    // Windows: a program invocation, not a shell script. Only cmd syntax
+    // (&, |, <, >, ^) or an unparseable wrapped command makes it one.
+    const target = windowsCmdTarget(command, args);
+    return target?.plain ? undefined : shell;
+  }
   if ((shell === 'powershell' || shell === 'pwsh') && args.some(a => /^-(?:c|command|encodedcommand|e|ec)$/i.test(a))) return shell;
   return undefined;
+}
+
+/** How the wrapper is written for `shell`, for messages: `bash -c`, `cmd /c`, `powershell -Command`. */
+export function shellInvocation(shell: string): string {
+  if (shell === 'cmd') return 'cmd /c';
+  if (shell === 'powershell' || shell === 'pwsh') return `${shell} -Command`;
+  return `${shell} -c`;
 }
 
 const POSIX_SHELLS = new Set(['sh', 'bash', 'zsh', 'fish', 'dash', 'ksh', 'mksh', 'ash', 'busybox']);

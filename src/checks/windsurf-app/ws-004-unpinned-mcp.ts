@@ -32,7 +32,7 @@ export const ws004 = defineCheck({
         evidence.push({
           file: config.filePath,
           snippet: `mcpServers.${name}: ${command} ${argList.join(' ')}`,
-          detail: `Runs ${pinProblem(pkg)} — supply chain risk (rug pull / compromised release auto-adopted)`,
+          detail: `${pinProblem(pkg)} — supply chain risk (rug pull / compromised release auto-adopted)`,
         });
       }
     }

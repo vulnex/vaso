@@ -422,3 +422,37 @@ describe('MCPDiscovery — Abacus.AI', () => {
     });
   });
 });
+
+describe('MCPDiscovery — VS Code settings.json and Codex project config', () => {
+  it('reads `mcp.servers` from VS Code settings.json and `[mcp_servers]` from a project .codex/config.toml', async () => {
+    const files: Record<string, string> = {
+      '/Users/t/Library/Application Support/Code/User/settings.json':
+        '{\n  // user settings\n  "editor.tabSize": 2,\n  "mcp": { "servers": { "s_vscode_settings": { "command": "npx", "args": ["x"] } } }\n}',
+      '/proj/.codex/config.toml': '[mcp_servers.s_codex_proj]\ncommand = "npx"\nargs = ["x"]\n',
+      '/proj/.vscode/settings.json': '{ "editor.fontSize": 12 }',
+    };
+    const fs = {
+      homedir: () => '/Users/t',
+      access: async (p: string) => p in files,
+      readFile: async (p: string) => files[p],
+      getEnv: () => undefined,
+    } as unknown as FSProvider;
+    const result = await new MCPDiscovery(fs).discover('darwin', '/proj');
+    const names = result.configs.flatMap(c => c.servers.map(s => `${c.source}:${s.name}`));
+    expect(names).toContain('VS Code (settings.json):s_vscode_settings');
+    expect(names).toContain('Codex (project):s_codex_proj');
+    expect(result.totalServers).toBe(2);
+  });
+
+  it('recognizes the VS Code settings dialect via --paths', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'vaso-vss-'));
+    try {
+      const p = join(dir, 'settings.json');
+      await writeFile(p, '{ "mcp": { "servers": { "a": { "command": "node", "args": ["s.js"] } } } }');
+      const result = await new MCPDiscovery(new LocalFSProvider()).discoverFromPaths([p]);
+      expect(result.configs[0]?.servers.map(s => s.name)).toEqual(['a']);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});

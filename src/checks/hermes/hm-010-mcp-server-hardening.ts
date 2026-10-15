@@ -1,7 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { runnerPackage, isPinnedOrLocal, pinProblem } from '../../mcp/package-pin.js';
-import { shellCommandWrapper } from '../../mcp/shell-wrapper.js';
+import { shellCommandWrapper, shellInvocation } from '../../mcp/shell-wrapper.js';
 import { queryPermissions } from '../../core/permissions.js';
 
 
@@ -36,7 +36,7 @@ export const hm010 = defineCheck({
           evidence.push({
             file: config.filePath,
             snippet: `mcp_servers.${name}: ${command} ${argList.join(' ')}`,
-            detail: `MCP server invoked via "${shellCommandWrapper(command, argList)} -c …" — argv injection becomes shell injection`,
+            detail: `MCP server invoked via "${shellInvocation(shellCommandWrapper(command, argList)!)} …" — argv injection becomes shell injection`,
           });
         }
 
@@ -62,7 +62,7 @@ export const hm010 = defineCheck({
           evidence.push({
             file: config.filePath,
             snippet: `mcp_servers.${name}: ${command} ${argList.join(' ')}`,
-            detail: `Runs ${pinProblem(pkg)} — supply-chain risk`,
+            detail: `${pinProblem(pkg)} — supply-chain risk`,
           });
         }
       }
