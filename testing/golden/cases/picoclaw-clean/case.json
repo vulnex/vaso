@@ -1,0 +1,10 @@
+{
+  "agent": "picoclaw",
+  "source": "PicoClaw 0.3 secure config \u2014 schema verified on a live install (deep test 2026-10-13/15 fixture)",
+  "clean": true,
+  "modes": {
+    ".picoclaw/config.json": "600",
+    ".picoclaw/launcher-config.json": "600",
+    ".picoclaw/.security.yml": "600"
+  }
+}

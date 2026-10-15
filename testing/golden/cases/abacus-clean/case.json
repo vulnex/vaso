@@ -1,0 +1,15 @@
+{
+  "agent": "abacus",
+  "source": "Abacus.AI CLI 2.10 + Desktop secure state dir \u2014 schema verified on a live install (deep test 2026-10-13/15 fixture)",
+  "clean": true,
+  "modes": {
+    "Library/Application Support/AbacusAI Desktop/provider-keys.json": "600",
+    "Library/Application Support/AbacusAI Desktop/state.json": "600",
+    ".abacusai/keystore.enc": "600",
+    ".abacusai/config.json": "600",
+    ".abacusai/trusted-workspaces.json": "600",
+    ".abacusai/history.jsonl": "600",
+    ".abacusai/mcp.json": "600",
+    ".abacusai": "700"
+  }
+}

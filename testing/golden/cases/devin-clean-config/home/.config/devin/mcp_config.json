@@ -1,0 +1,18 @@
+{
+ "mcpServers": {
+  "server-name": {
+   "command": "executable",
+   "args": [
+    "arg1",
+    "arg2"
+   ],
+   "env": {
+    "KEY": "value"
+   }
+  },
+  "remote-server": {
+   "url": "https://mcp.example.com/mcp",
+   "transport": "http"
+  }
+ }
+}

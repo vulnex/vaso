@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict>
+<key>Label</key><string>com.ironclaw.reborn</string>
+<key>ProgramArguments</key><array>
+<string>/usr/local/bin/ironclaw</string><string>serve</string>
+<string>--host</string>
+<string>0.0.0.0</string>
+<string>--confirm-host-access</string>
+</array>
+<key>EnvironmentVariables</key><dict>
+<key>IRONCLAW_REBORN_PROFILE</key>
+<string>local-dev-yolo</string>
+</dict>
+</dict></plist>

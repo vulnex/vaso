@@ -1,0 +1,24 @@
+approval_policy = "on-request"  # Other options: never or { granular = { ... } }
+approvals_reviewer = "user"     # Or "auto_review" for automatic review
+sandbox_mode = "workspace-write"
+allow_login_shell = false       # Optional hardening: disallow login shells for shell tools
+
+# Example granular approval policy:
+# approval_policy = { granular = {
+#   sandbox_approval = true,
+#   rules = true,
+#   mcp_elicitations = true,
+#   request_permissions = false,
+#   skill_approval = false
+# } }
+
+[sandbox_workspace_write]
+exclude_tmpdir_env_var = false  # Allow $TMPDIR
+exclude_slash_tmp = false       # Allow /tmp
+writable_roots = ["/Users/YOU/.pyenv/shims"]
+network_access = false          # Opt in to outbound network
+
+[auto_review]
+policy = """
+Use your organization's automatic review policy.
+"""

@@ -1,0 +1,10 @@
+{
+  "agent": "qwen-code",
+  "source": "Lower regression: provider docs placeholder keys are not leaked secrets (realworld qwen-code-users_configuration_model-providers-8)",
+  "pass": [
+    "QC-001"
+  ],
+  "modes": {
+    ".qwen/settings.json": "600"
+  }
+}

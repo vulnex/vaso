@@ -1,0 +1,19 @@
+{
+ "permissions": {
+  "allow": [
+   "Read(src/**)",
+   "Exec(git status)",
+   "Exec(git diff)",
+   "Exec(npm run lint)"
+  ],
+  "deny": [
+   "Exec(rm)",
+   "Exec(sudo)",
+   "Write(.env*)"
+  ],
+  "ask": [
+   "Write(**)",
+   "exec"
+  ]
+ }
+}

@@ -1,0 +1,31 @@
+[openshell]
+version = 2
+
+[openshell.gateway]
+bind_address = "0.0.0.0:17670"
+disable_tls = true
+ssh_session_ttl_secs = 0
+policy_validation_failure_mode = "retain_last_valid"
+
+[openshell.gateway.auth]
+allow_unauthenticated_users = true
+
+[openshell.gateway.oidc]
+issuer = "http://idp.example.com/realms/x"
+dangerously_allow_insecure_http = true
+
+[[openshell.gateway.interceptors]]
+name = "audit"
+grpc_endpoint = "http://10.1.2.3:9000"
+failure_policy = "fail_open"
+
+[[openshell.supervisor.middleware]]
+name = "dlp"
+grpc_endpoint = "http://10.1.2.4:9001"
+allow_insecure_transport = true
+
+[openshell.drivers.docker]
+allow_driver_config = true
+
+[openshell.drivers.docker.resource_admission]
+enabled = false

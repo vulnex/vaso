@@ -1,0 +1,79 @@
+{
+  "agents": {
+    "defaults": {
+      "workspace": "~/.nanobot/workspace",
+      "model": "anthropic/claude-opus-4-5",
+      "provider": "auto"
+    }
+  },
+  "providers": {
+    "anthropic": {
+      "apiKey": "sk-ant-realkey0123456789abcdef"
+    }
+  },
+  "channels": {
+    "sendProgress": true,
+    "telegram": {
+      "enabled": true,
+      "token": "123456:ABCDEF_realtoken",
+      "allowFrom": [
+        "*"
+      ]
+    },
+    "slack": {
+      "enabled": true,
+      "botToken": "xoxb-real",
+      "appToken": "xapp-real",
+      "allowFrom": []
+    },
+    "websocket": {
+      "enabled": true,
+      "host": "0.0.0.0",
+      "port": 8765,
+      "websocketRequiresToken": false
+    }
+  },
+  "tools": {
+    "restrictToWorkspace": false,
+    "ssrfWhitelist": [
+      "169.254.0.0/16",
+      "0.0.0.0/0",
+      "10.0.0.0/8"
+    ],
+    "exec": {
+      "enable": true,
+      "allowPatterns": [
+        ".*"
+      ]
+    },
+    "webuiAllowRemotePackageInstall": true,
+    "mcpServers": {
+      "fs": {
+        "command": "npx",
+        "args": [
+          "-y",
+          "@modelcontextprotocol/server-filesystem",
+          "/"
+        ]
+      },
+      "fetch": {
+        "command": "uvx",
+        "args": [
+          "mcp-server-fetch"
+        ]
+      }
+    }
+  },
+  "api": {
+    "host": "10.20.30.20",
+    "port": 8900,
+    "apiKey": ""
+  },
+  "gateway": {
+    "host": "0.0.0.0",
+    "port": 18790,
+    "heartbeat": {
+      "enabled": true
+    }
+  }
+}

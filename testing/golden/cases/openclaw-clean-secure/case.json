@@ -1,0 +1,9 @@
+{
+  "agent": "openclaw",
+  "source": "OpenClaw 2026.9.4 secure config \u2014 schema verified on a live install (deep test 2026-10-13/15 fixture)",
+  "clean": true,
+  "modes": {
+    ".openclaw/openclaw.json": "600",
+    ".openclaw": "700"
+  }
+}

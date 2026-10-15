@@ -1,0 +1,7 @@
+{
+  "agent": "opencode",
+  "source": "RW14 regression: documented default `\"bash\": \"allow\"` is info, like an empty config (opencode.ai/docs/permissions)",
+  "info": [
+    "OPC-002"
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "port": 18800,
+  "public": true,
+  "allowed_cidrs": [],
+  "trusted_proxy_cidrs": [
+    "0.0.0.0/0"
+  ],
+  "launcher_token": "legacytoken123"
+}

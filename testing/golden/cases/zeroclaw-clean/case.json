@@ -1,0 +1,9 @@
+{
+  "agent": "zeroclaw",
+  "source": "ZeroClaw V3 secure config \u2014 schema verified on a live install (deep test 2026-10-13/15 fixture)",
+  "clean": true,
+  "modes": {
+    ".zeroclaw/config.toml": "600",
+    ".zeroclaw/.secret_key": "600"
+  }
+}

@@ -1,0 +1,20 @@
+{
+ "locations": {
+  "C:\\src\\my-repo": {
+   "tool_approvals": [
+    {
+     "kind": "mcp",
+     "serverName": "github-mcp-server",
+     "toolName": "search_code"
+    },
+    {
+     "kind": "memory"
+    },
+    {
+     "kind": "extension-permission-access",
+     "extensionName": "my-extension"
+    }
+   ]
+  }
+ }
+}

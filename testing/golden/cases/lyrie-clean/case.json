@@ -1,0 +1,11 @@
+{
+  "agent": "lyrie",
+  "source": "Lyrie checkout with Shield active, paired channels \u2014 schema verified on a live install (deep test 2026-10-13/15 fixture)",
+  "clean": true,
+  "modes": {
+    ".lyrie/memory/lyrie-memory.db": "600",
+    "lyrie-ai/.env": "600",
+    ".lyrie": "700",
+    ".lyrie/memory": "700"
+  }
+}

@@ -1,0 +1,7 @@
+[
+  {
+    "id": "lan-llm",
+    "default_base_url": "http://10.0.0.5:8000/v1",
+    "default_model": "m"
+  }
+]

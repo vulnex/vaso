@@ -1,0 +1,17 @@
+{
+ "permissions": {
+  "allow": [
+   "Read(**)",
+   "Write(src/**)",
+   "Write(tests/**)",
+   "Exec(npm)",
+   "Exec(git)",
+   "Exec(node)"
+  ],
+  "deny": [
+   "Exec(rm -rf)",
+   "Exec(sudo)",
+   "Write(.env*)"
+  ]
+ }
+}

@@ -1,0 +1,9 @@
+{
+  "agent": "picoclaw",
+  "source": "github.com/sipeed/picoclaw config.example.json (realworld picoclaw-example)",
+  "clean": true,
+  "modes": {
+    ".picoclaw/config.json": "600",
+    ".picoclaw": "700"
+  }
+}

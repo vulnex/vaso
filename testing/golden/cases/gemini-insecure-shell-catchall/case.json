@@ -1,0 +1,7 @@
+{
+  "agent": "gemini-cli",
+  "source": "vendor docs example-derived: tools.allowed with a shell catch-all (realworld gemini-cli-allowed-shell)",
+  "fail": {
+    "GEM-003": "critical"
+  }
+}

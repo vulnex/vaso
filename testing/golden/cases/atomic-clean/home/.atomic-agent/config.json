@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 72,
+  "agent": {
+    "approvalLevel": 3,
+    "readScope": "working-dir"
+  },
+  "http": {
+    "enabled": true,
+    "approvalMode": "never",
+    "hostAllowlist": [
+      "api.github.com"
+    ]
+  },
+  "localModels": {
+    "mode": "external",
+    "url": "http://127.0.0.1:8080"
+  },
+  "llm": {
+    "activeTextProvider": "main",
+    "providers": [
+      {
+        "id": "main",
+        "kind": "anthropic",
+        "model": "claude-x",
+        "apiKeyEnvVar": "ANTHROPIC_API_KEY"
+      }
+    ]
+  },
+  "mcp": {
+    "servers": [
+      {
+        "name": "fs",
+        "trust": "approval_gated",
+        "transport": {
+          "kind": "stdio",
+          "command": "npx",
+          "args": [
+            "-y",
+            "@modelcontextprotocol/server-filesystem@1.2.3"
+          ]
+        }
+      },
+      {
+        "name": "py",
+        "transport": {
+          "kind": "stdio",
+          "command": "uvx",
+          "args": [
+            "mcp-server-time==2025.9.25"
+          ]
+        }
+      }
+    ]
+  },
+  "webhooks": {
+    "hook": {
+      "secret": "s3cretvalue-long-fixture",
+      "prompt": "x"
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "agent": "comet",
+  "source": "Comet profile with an installed extension \u2014 inventoried (PC-002)",
+  "modes": {
+    "Library/Application Support/Comet": "700",
+    "Library/Application Support/Comet/Default": "700"
+  },
+  "skipOn": [
+    "linux",
+    "win32"
+  ],
+  "fail": {
+    "PC-002": "any"
+  }
+}

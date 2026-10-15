@@ -1,0 +1,15 @@
+{
+  "agent": "ironclaw",
+  "source": "IronClaw 1.x Reborn secure config \u2014 schema verified on a live install (deep test 2026-10-13/15 fixture)",
+  "clean": true,
+  "modes": {
+    ".ironclaw/reborn/webui-token": "600",
+    ".ironclaw/reborn/providers.json": "600",
+    ".ironclaw/reborn/config.toml": "600",
+    ".ironclaw/reborn/local-dev/.reborn-local-dev-secrets-master-key": "600",
+    ".ironclaw/reborn/local-dev/reborn-local-dev.db": "600",
+    ".ironclaw": "700",
+    ".ironclaw/reborn": "700",
+    ".ironclaw/reborn/local-dev": "700"
+  }
+}

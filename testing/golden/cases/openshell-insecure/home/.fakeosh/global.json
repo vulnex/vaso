@@ -1,0 +1,1 @@
+{"policy":{"version":1,"network_policies":{"lan":{"endpoints":[{"allowed_ips":["::/0"],"port":443},{"host":"HOST.openshell.internal","port":9000}],"binaries":[{"path":"/usr/bin/curl"}]}}}}

@@ -1,0 +1,9 @@
+{
+  "agent": "openclaw",
+  "source": "docs.openclaw.ai hardened gateway base: loopback, token auth, workspace-only fs, exec allowlist (realworld vendor-doc variant (docs.openclaw.ai gateway configuration): openclaw-00base)",
+  "clean": true,
+  "modes": {
+    ".openclaw/openclaw.json": "600",
+    ".openclaw": "700"
+  }
+}

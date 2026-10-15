@@ -1,0 +1,1 @@
+{ "gateway": { "bind": "all", "tls": { "enabled": false }, "auth": { "mode": "none" } } }

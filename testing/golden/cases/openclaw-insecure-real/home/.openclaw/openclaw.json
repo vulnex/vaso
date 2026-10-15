@@ -1,0 +1,17 @@
+{
+  "meta": { "lastTouchedVersion": "2026.9.4" },
+  "gateway": {
+    "mode": "local",
+    "bind": "lan",
+    "port": 18789,
+    "auth": { "mode": "none" },
+    "tls": { "enabled": false },
+    "trustedProxies": ["0.0.0.0/0"]
+  },
+  "discovery": { "mdns": { "mode": "full" } },
+  "channels": { "telegram": { "enabled": true, "dmPolicy": "open", "allowFrom": ["*"] } },
+  "tools": { "exec": { "mode": "full" } },
+  "agents": { "defaults": { "sandbox": { "mode": "off" } } },
+  "logging": { "redactSensitive": "off" },
+  "models": { "providers": { "openai": { "apiKey": "sk-proj-AbCdEfGhIjKlMnOpQrStUvWxYz0123456789abcdEF", "models": [ { "id": "gpt-5" } ] } } }
+}

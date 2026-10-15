@@ -1,0 +1,9 @@
+{
+  "agent": "nanobot",
+  "source": "github.com/HKUDS/nanobot README telegram example + documented restrictToWorkspace/exec sandbox",
+  "modes": {
+    ".nanobot": "700",
+    ".nanobot/config.json": "600"
+  },
+  "clean": true
+}

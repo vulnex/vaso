@@ -1,0 +1,20 @@
+{
+  "agent": "lyrie",
+  "source": "Lyrie: passive Shield, open channels, dry-run, dev NODE_ENV \u2014 schema verified on a live install (deep test 2026-10-13/15 fixture)",
+  "fail": {
+    "LY-003": "critical",
+    "LY-009": "warning",
+    "LY-018": "warning",
+    "LY-010": "warning"
+  },
+  "fix": {
+    "resolves": [
+      "LY-001",
+      "LY-009",
+      "LY-018"
+    ]
+  },
+  "modes": {
+    ".lyrie/skills": "777"
+  }
+}

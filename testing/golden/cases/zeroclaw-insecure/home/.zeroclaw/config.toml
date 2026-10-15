@@ -1,0 +1,84 @@
+schema_version = 3
+
+[secrets]
+encrypt = false
+
+[providers.models.openai.main]
+model = "gpt-5"
+api_key = "sk-plaintextsecretvalue1234567890abcd"
+
+[providers.models.anthropic.legacy]
+model = "claude-x"
+api_key = "enc:deadbeef0011"
+
+[gateway]
+host = "0.0.0.0"
+allow_public_bind = true
+require_pairing = false
+allow_self_upgrade = true
+trust_forwarded_headers = true
+allow_remote_admin = true
+pair_rate_limit_per_minute = 0
+webhook_rate_limit_per_minute = 0
+
+[agents.main]
+model_provider = "openai.main"
+risk_profile = "default"
+
+[agents.main.workspace]
+unrestricted_filesystem = true
+
+[agents.ops]
+model_provider = "openai.main"
+risk_profile = "yolo"
+
+[risk_profiles.default]
+level = "supervised"
+workspace_only = false
+allowed_roots = ["/"]
+sandbox_enabled = false
+allowed_commands = ["*"]
+block_high_risk_commands = false
+auto_approve = ["shell", "file_write", "browser"]
+
+[risk_profiles.yolo]
+level = "full"
+sandbox_backend = "none"
+
+[channels.telegram.main]
+enabled = true
+allowed_users = ["*"]
+
+[peer_groups.public]
+channel = "telegram.main"
+external_peers = ["*"]
+agents = ["main"]
+
+[channels.whatsapp.web]
+enabled = true
+session_path = "{{HOME}}/wa/session.db"
+
+[skills]
+open_skills_enabled = true
+allow_scripts = true
+registry_url = "http://registry.example.com/skills"
+
+[composio]
+enabled = true
+
+[browser]
+enabled = true
+automation_enabled = true
+allowed_private_hosts = ["*"]
+
+[http_request]
+enabled = true
+allow_private_hosts = true
+allowed_private_hosts = ["*"]
+
+[web_fetch]
+allowed_private_hosts = ["*"]
+
+[text_browser]
+enabled = true
+allowed_private_hosts = ["*"]

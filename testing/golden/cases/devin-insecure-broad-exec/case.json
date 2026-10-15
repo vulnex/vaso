@@ -1,0 +1,10 @@
+{
+  "agent": "devin",
+  "source": "vendor docs example-derived: broad Exec allow rule (realworld devin-cli_reference_permissions-12)",
+  "fail": {
+    "DEV-001": "critical"
+  },
+  "modes": {
+    ".local/share/devin/credentials.toml": "600"
+  }
+}

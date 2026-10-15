@@ -1,0 +1,23 @@
+{
+  "agents": {
+    "defaults": {
+      "workspace": "~/.nanobot/workspace",
+      "model": "anthropic/claude-sonnet-4-5"
+    }
+  },
+  "channels": {
+    "telegram": {
+      "enabled": true,
+      "token": "${TELEGRAM_BOT_TOKEN}",
+      "allowFrom": [
+        "123456789"
+      ]
+    }
+  },
+  "tools": {
+    "restrictToWorkspace": true,
+    "exec": {
+      "sandbox": "bwrap"
+    }
+  }
+}

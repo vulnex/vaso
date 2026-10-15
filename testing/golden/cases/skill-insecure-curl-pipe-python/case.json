@@ -1,0 +1,7 @@
+{
+  "agent": "claude-code",
+  "source": "True positive twin of RW5: python runs the downloaded program from stdin",
+  "fail": {
+    "SKL-004": "critical"
+  }
+}

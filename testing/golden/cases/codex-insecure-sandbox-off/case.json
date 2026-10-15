@@ -1,0 +1,8 @@
+{
+  "agent": "codex",
+  "source": "vendor docs example-derived: danger-full-access with approvals off (realworld codex-config-advanced-14 shape)",
+  "fail": {
+    "CDX-001": "critical",
+    "CDX-002": "critical"
+  }
+}

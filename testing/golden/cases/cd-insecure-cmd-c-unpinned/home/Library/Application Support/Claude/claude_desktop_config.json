@@ -1,0 +1,27 @@
+{
+  "mcpServers": {
+    "a": {
+      "command": "cmd",
+      "args": [
+        "/c",
+        "npx",
+        "-y",
+        "@modelcontextprotocol/server-memory"
+      ]
+    },
+    "b": {
+      "command": "bun",
+      "args": [
+        "x",
+        "mcp-server-time"
+      ]
+    },
+    "c": {
+      "command": "cmd",
+      "args": [
+        "/c",
+        "npx -y @modelcontextprotocol/server-fetch@2025.4.7 & calc.exe"
+      ]
+    }
+  }
+}

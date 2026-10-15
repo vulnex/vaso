@@ -1,0 +1,12 @@
+{
+  "agent": "nanoclaw",
+  "source": "NanoClaw mount allowlist granting the whole home, writable by others (NC-001/NC-002; nanoclaw docs mount-allowlist.json)",
+  "modes": {
+    ".config/nanoclaw/mount-allowlist.json": "666",
+    "nanoclaw/.env": "600"
+  },
+  "fail": {
+    "NC-001": "any",
+    "NC-002": "any"
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "agent": "qwen-code",
+  "source": "vendor docs example: qwen-code model providers (realworld qwen-code-users_configuration_model-providers-6)",
+  "clean": true,
+  "modes": {
+    ".qwen/settings.json": "600"
+  }
+}

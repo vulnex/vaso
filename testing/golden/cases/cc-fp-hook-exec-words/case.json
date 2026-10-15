@@ -1,0 +1,7 @@
+{
+  "agent": "claude-code",
+  "source": "RW6 regression: hooks running `docker compose exec` / `npm exec` and constant single-quoted bash -c (hooks docs shapes)",
+  "pass": [
+    "CC-003"
+  ]
+}

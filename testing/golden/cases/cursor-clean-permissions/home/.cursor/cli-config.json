@@ -1,0 +1,19 @@
+{
+ "permissions": {
+  "allow": [
+   "Shell(ls)",
+   "Shell(git)",
+   "Read(src/**/*.ts)",
+   "Write(package.json)",
+   "WebFetch(docs.github.com)",
+   "WebFetch(*.github.com)",
+   "Mcp(datadog:*)"
+  ],
+  "deny": [
+   "Shell(rm)",
+   "Read(.env*)",
+   "Write(**/*.key)",
+   "WebFetch(malicious-site.com)"
+  ]
+ }
+}

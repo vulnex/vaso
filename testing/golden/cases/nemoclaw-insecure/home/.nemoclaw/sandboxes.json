@@ -1,0 +1,1 @@
+{"defaultSandbox":"my-assistant","sandboxes":{"my-assistant":{"name":"my-assistant","model":"nvidia/nemotron-3-super-120b-a12b","provider":"nvidia-prod","gpuEnabled":true,"policies":["pypi","npm"]}}}

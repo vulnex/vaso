@@ -1,0 +1,10 @@
+{
+  "agent": "qwen-code",
+  "source": "vendor docs example-derived: MCP server with trust:true (realworld qwen-code-developers_tools_mcp-server-5)",
+  "fail": {
+    "QC-004": "critical"
+  },
+  "modes": {
+    ".qwen/settings.json": "600"
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "agent": "openclaw",
+  "source": "RW13: Tailscale Funnel publishes the gateway to the internet (docs.openclaw.ai gateway/tailscale; realworld openclaw-gateway_tailscale-2)",
+  "fail": {
+    "NET-001": "warning"
+  },
+  "modes": {
+    ".openclaw/openclaw.json": "600",
+    ".openclaw": "700"
+  }
+}

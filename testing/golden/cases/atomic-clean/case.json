@@ -1,0 +1,10 @@
+{
+  "agent": "atomic-agent",
+  "source": "Atomic Agent with secrets in .env, approval-gated MCP, allowlisted HTTP \u2014 schema verified on a live install (deep test 2026-10-13/15 fixture)",
+  "modes": {
+    ".atomic-agent": "700",
+    ".atomic-agent/config.json": "600",
+    ".atomic-agent/.env": "600"
+  },
+  "clean": true
+}

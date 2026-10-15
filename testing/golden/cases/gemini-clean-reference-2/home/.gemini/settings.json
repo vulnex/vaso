@@ -1,0 +1,237 @@
+{
+ "gemma-4-31b-it": {
+  "default": "gemma-4-31b-it"
+ },
+ "gemma-4-26b-a4b-it": {
+  "default": "gemma-4-26b-a4b-it"
+ },
+ "gemini-3.1-pro-preview": {
+  "default": "gemini-3.1-pro-preview",
+  "contexts": [
+   {
+    "condition": {
+     "hasAccessToPreview": false
+    },
+    "target": "gemini-2.5-pro"
+   },
+   {
+    "condition": {
+     "useCustomTools": true
+    },
+    "target": "gemini-3.1-pro-preview-customtools"
+   }
+  ]
+ },
+ "gemini-3.1-pro-preview-customtools": {
+  "default": "gemini-3.1-pro-preview-customtools",
+  "contexts": [
+   {
+    "condition": {
+     "hasAccessToPreview": false
+    },
+    "target": "gemini-2.5-pro"
+   }
+  ]
+ },
+ "gemini-3-flash-preview": {
+  "default": "gemini-3-flash-preview",
+  "contexts": [
+   {
+    "condition": {
+     "hasAccessToPreview": false,
+     "useLatestFlash": true
+    },
+    "target": "gemini-3.8-flash"
+   },
+   {
+    "condition": {
+     "hasAccessToPreview": false,
+     "useLatestFlash": false
+    },
+    "target": "gemini-3.5-flash"
+   }
+  ]
+ },
+ "gemini-3.5-flash": {
+  "default": "gemini-3.5-flash",
+  "contexts": [
+   {
+    "condition": {
+     "useLatestFlash": true
+    },
+    "target": "gemini-3.8-flash"
+   }
+  ]
+ },
+ "gemini-3.8-flash": {
+  "default": "gemini-3.8-flash",
+  "contexts": [
+   {
+    "condition": {
+     "useLatestFlash": false
+    },
+    "target": "gemini-3.5-flash"
+   }
+  ]
+ },
+ "gemini-2.5-flash": {
+  "default": "gemini-2.5-flash",
+  "contexts": [
+   {
+    "condition": {
+     "useLatestFlash": true
+    },
+    "target": "gemini-3.8-flash"
+   }
+  ]
+ },
+ "gemini-3-pro-preview": {
+  "default": "gemini-3-pro-preview",
+  "contexts": [
+   {
+    "condition": {
+     "hasAccessToPreview": false
+    },
+    "target": "gemini-2.5-pro"
+   },
+   {
+    "condition": {
+     "useGemini3_1": true,
+     "useCustomTools": true
+    },
+    "target": "gemini-3.1-pro-preview-customtools"
+   },
+   {
+    "condition": {
+     "useGemini3_1": true
+    },
+    "target": "gemini-3.1-pro-preview"
+   }
+  ]
+ },
+ "auto": {
+  "default": "gemini-3-pro-preview",
+  "contexts": [
+   {
+    "condition": {
+     "hasAccessToPreview": false
+    },
+    "target": "gemini-2.5-pro"
+   },
+   {
+    "condition": {
+     "useGemini3_1": true,
+     "useCustomTools": true
+    },
+    "target": "gemini-3.1-pro-preview-customtools"
+   },
+   {
+    "condition": {
+     "useGemini3_1": true
+    },
+    "target": "gemini-3.1-pro-preview"
+   }
+  ]
+ },
+ "pro": {
+  "default": "gemini-3-pro-preview",
+  "contexts": [
+   {
+    "condition": {
+     "hasAccessToPreview": false
+    },
+    "target": "gemini-2.5-pro"
+   },
+   {
+    "condition": {
+     "useGemini3_1": true,
+     "useCustomTools": true
+    },
+    "target": "gemini-3.1-pro-preview-customtools"
+   },
+   {
+    "condition": {
+     "useGemini3_1": true
+    },
+    "target": "gemini-3.1-pro-preview"
+   }
+  ]
+ },
+ "gemini-3.1-flash-lite": {
+  "default": "gemini-3.1-flash-lite",
+  "contexts": [
+   {
+    "condition": {
+     "useLatestFlashLite": true
+    },
+    "target": "gemini-3.5-flash-lite"
+   }
+  ]
+ },
+ "gemini-3.5-flash-lite": {
+  "default": "gemini-3.5-flash-lite",
+  "contexts": [
+   {
+    "condition": {
+     "useLatestFlashLite": false
+    },
+    "target": "gemini-3.1-flash-lite"
+   }
+  ]
+ },
+ "flash": {
+  "default": "gemini-3-flash-preview",
+  "contexts": [
+   {
+    "condition": {
+     "useLatestFlash": true
+    },
+    "target": "gemini-3.8-flash"
+   },
+   {
+    "condition": {
+     "hasAccessToPreview": false
+    },
+    "target": "gemini-3.5-flash"
+   }
+  ]
+ },
+ "flash-lite": {
+  "default": "gemini-3.1-flash-lite",
+  "contexts": [
+   {
+    "condition": {
+     "useLatestFlashLite": true
+    },
+    "target": "gemini-3.5-flash-lite"
+   }
+  ]
+ },
+ "auto-gemini-3": {
+  "default": "gemini-3-pro-preview",
+  "contexts": [
+   {
+    "condition": {
+     "hasAccessToPreview": false
+    },
+    "target": "gemini-2.5-pro"
+   },
+   {
+    "condition": {
+     "useGemini3_1": true,
+     "useCustomTools": true
+    },
+    "target": "gemini-3.1-pro-preview-customtools"
+   },
+   {
+    "condition": {
+     "useGemini3_1": true
+    },
+    "target": "gemini-3.1-pro-preview"
+   }
+  ]
+ },
+ "auto-gemini-2.5": {
+  "default": "gemini-2.5-pro"
+ }
+}

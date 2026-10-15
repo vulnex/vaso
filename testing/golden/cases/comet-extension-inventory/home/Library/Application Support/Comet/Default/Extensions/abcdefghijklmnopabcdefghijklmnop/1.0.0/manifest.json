@@ -1,0 +1,10 @@
+{
+  "manifest_version": 3,
+  "name": "Fixture Helper",
+  "version": "1.0.0",
+  "permissions": [
+    "tabs",
+    "cookies",
+    "<all_urls>"
+  ]
+}

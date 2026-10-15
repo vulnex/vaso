@@ -1,0 +1,7 @@
+{
+  "agent": "claude-code",
+  "source": "Lower regression: documentation placeholder API key in env is not a leaked secret",
+  "pass": [
+    "CC-004"
+  ]
+}

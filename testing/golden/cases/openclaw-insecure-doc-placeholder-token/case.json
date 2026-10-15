@@ -1,0 +1,11 @@
+{
+  "agent": "openclaw",
+  "source": "CFG-009: a token copied from the docs (`replace-with-long-random-token`) is a weak credential when deployed (hardened-baseline doc)",
+  "fail": {
+    "CFG-009": "critical"
+  },
+  "modes": {
+    ".openclaw/openclaw.json": "600",
+    ".openclaw": "700"
+  }
+}

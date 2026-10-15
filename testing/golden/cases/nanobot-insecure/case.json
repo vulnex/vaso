@@ -1,0 +1,27 @@
+{
+  "agent": "nanobot",
+  "source": "nanobot: open channels, public gateway, plaintext keys \u2014 schema verified on a live install (deep test 2026-10-13/15 fixture)",
+  "fail": {
+    "NB-001": "critical",
+    "NB-003": "warning",
+    "NB-004": "critical",
+    "CFG-001": "critical"
+  },
+  "fix": {
+    "resolves": [
+      "NB-003"
+    ]
+  },
+  "modes": {
+    ".nanobot/workspace/HEARTBEAT.md": "666",
+    ".nanobot/workspace/USER.md": "666",
+    ".nanobot/workspace/SOUL.md": "666",
+    ".nanobot/workspace/AGENTS.md": "666",
+    ".nanobot/workspace/memory/MEMORY.md": "666",
+    ".nanobot/workspace/cron/jobs.json": "666",
+    ".nanobot/workspace": "777",
+    ".nanobot/workspace/memory": "777",
+    ".nanobot/workspace/skills": "777",
+    ".nanobot/workspace/cron": "777"
+  }
+}

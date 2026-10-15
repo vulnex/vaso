@@ -1,0 +1,11 @@
+{
+  "agent": "hermes",
+  "source": "Hermes with API server on loopback, key in .env, smart approvals, Tirith on \u2014 schema verified on a live install (deep test 2026-10-13/15 fixture)",
+  "modes": {
+    ".hermes": "700",
+    ".hermes/config.yaml": "600",
+    ".hermes/.env": "600",
+    ".hermes/bin/tirith": "755"
+  },
+  "clean": true
+}

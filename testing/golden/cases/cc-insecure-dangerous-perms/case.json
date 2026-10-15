@@ -1,0 +1,8 @@
+{
+  "agent": "claude-code",
+  "source": "vendor docs example-derived: permissions docs, bypass mode + broad Bash allow (realworld claude-code-perm-dangerous)",
+  "fail": {
+    "CC-001": "critical",
+    "CC-002": "warning"
+  }
+}

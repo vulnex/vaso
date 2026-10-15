@@ -1,0 +1,16 @@
+{
+  "agent": "openclaw",
+  "source": "OpenClaw 2026.x schema: sandbox off, open DMs, trust-all proxy, sub-agent override \u2014 schema verified on a live install (deep test 2026-10-13/15 fixture)",
+  "fail": {
+    "CFG-008": "critical",
+    "CFG-012": "critical",
+    "CFG-013": "warning",
+    "NET-003": "warning",
+    "CFG-002": "critical"
+  },
+  "fix": {
+    "resolves": [
+      "CFG-001"
+    ]
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "sandbox": {
+    "mode": "disabled"
+  },
+  "permissions": {
+    "allow": [
+      "Shell(ls)"
+    ],
+    "deny": []
+  }
+}

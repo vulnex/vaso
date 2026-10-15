@@ -1,0 +1,10 @@
+{
+  "agent": "nanoclaw",
+  "source": "NanoClaw checkout shipping advisory-listed MCP packages (ADV-002) \u2014 schema verified on a live install (deep test 2026-10-13/15 fixture)",
+  "fail": {
+    "ADV-002": "warning"
+  },
+  "modes": {
+    "nanoclaw/.env": "600"
+  }
+}

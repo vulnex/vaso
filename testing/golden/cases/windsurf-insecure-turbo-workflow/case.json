@@ -1,0 +1,11 @@
+{
+  "agent": "windsurf",
+  "source": "Global workflow with a // turbo-all directive (docs.windsurf.com workflows)",
+  "skipOn": [
+    "linux",
+    "win32"
+  ],
+  "fail": {
+    "WS-006": "any"
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "agent": "claude-code",
+  "source": "Plaintext Anthropic key in settings env (fake key shaped like a real one)",
+  "fail": {
+    "CC-004": "critical"
+  }
+}

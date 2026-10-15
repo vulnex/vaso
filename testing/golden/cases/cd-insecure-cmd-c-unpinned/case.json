@@ -1,0 +1,12 @@
+{
+  "agent": "claude-desktop",
+  "source": "RW11: the package behind `cmd /c npx` / `bun x` is still judged for pinning; chaining with & is a shell script",
+  "skipOn": [
+    "linux",
+    "win32"
+  ],
+  "fail": {
+    "CD-003": "warning",
+    "CD-008": "any"
+  }
+}

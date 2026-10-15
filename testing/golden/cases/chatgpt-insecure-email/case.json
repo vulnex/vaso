@@ -1,0 +1,17 @@
+{
+  "agent": "chatgpt-desktop",
+  "source": "StatsigService.plist holding the signed-in email in plaintext (CG-002)",
+  "modes": {
+    "Library/Application Support/com.openai.chat": "700"
+  },
+  "cleanIgnore": [
+    "CG-005"
+  ],
+  "skipOn": [
+    "linux",
+    "win32"
+  ],
+  "fail": {
+    "CG-002": "any"
+  }
+}

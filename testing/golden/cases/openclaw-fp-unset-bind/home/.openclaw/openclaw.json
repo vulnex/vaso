@@ -1,0 +1,4 @@
+{
+  gateway: { mode: "local", port: 18789, auth: { mode: "token", token: "Kq9vX2mL7pR4tW8zB1cN6yH3jF5dS0aGe" } },
+  tools: { fs: { workspaceOnly: true }, exec: { security: "allowlist", ask: "on-miss" } },
+}

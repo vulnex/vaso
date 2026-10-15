@@ -1,0 +1,17 @@
+{
+  "agent": "chatgpt-desktop",
+  "source": "ChatGPT Desktop profile with owner-only workspace data and training/location sharing off",
+  "modes": {
+    "Library/Application Support/com.openai.chat": "700",
+    "Library/Application Support/com.openai.chat/conversations-v3-abc": "700",
+    "Library/Application Support/com.openai.chat/conversations-v3-abc/c1.data": "600"
+  },
+  "clean": true,
+  "cleanIgnore": [
+    "CG-005"
+  ],
+  "skipOn": [
+    "linux",
+    "win32"
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "agent": "nanobot",
+  "source": "nanobot config with workspace restriction + sandboxed exec \u2014 schema verified on a live install (deep test 2026-10-13/15 fixture)",
+  "clean": true,
+  "modes": {
+    ".nanobot/config.json": "600",
+    ".nanobot/workspace/HEARTBEAT.md": "600",
+    ".nanobot/workspace/AGENTS.md": "600",
+    ".nanobot/workspace/memory/history.jsonl": "600",
+    ".nanobot/sessions/abc/s1.jsonl": "600",
+    ".nanobot/workspace": "700",
+    ".nanobot/sessions": "700",
+    ".nanobot/workspace/memory": "700",
+    ".nanobot/sessions/abc": "700"
+  }
+}

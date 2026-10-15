@@ -1,0 +1,18 @@
+{
+  "agent": "openclaw",
+  "source": "gateway bound to all interfaces with auth mode none (realworld vendor-doc variant (docs.openclaw.ai gateway configuration): openclaw-bind_no_auth)",
+  "fail": {
+    "CFG-001": "critical",
+    "CFG-012": "critical",
+    "NET-001": "critical"
+  },
+  "fix": {
+    "resolves": [
+      "CFG-001"
+    ]
+  },
+  "modes": {
+    ".openclaw/openclaw.json": "600",
+    ".openclaw": "700"
+  }
+}

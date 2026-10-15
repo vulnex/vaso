@@ -1,0 +1,16 @@
+{
+  "agent": "hermes",
+  "source": "Hermes: unauthenticated public API server, CORS *, approvals off, plaintext keys \u2014 schema verified on a live install (deep test 2026-10-13/15 fixture)",
+  "fail": {
+    "HM-004": "critical",
+    "HM-005": "warning",
+    "HM-006": "critical",
+    "HM-008": "critical"
+  },
+  "fix": {
+    "resolves": []
+  },
+  "modes": {
+    "tools/mcp-bin": "777"
+  }
+}

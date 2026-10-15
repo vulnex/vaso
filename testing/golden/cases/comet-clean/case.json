@@ -1,0 +1,16 @@
+{
+  "agent": "comet",
+  "source": "Comet profile with owner-only session stores, no extensions",
+  "modes": {
+    "Library/Application Support/Comet": "700",
+    "Library/Application Support/Comet/Default": "700",
+    "Library/Application Support/Comet/Default/Cookies": "600",
+    "Library/Application Support/Comet/Default/Login Data": "600",
+    "Library/Application Support/Comet/Default/Preferences": "600"
+  },
+  "clean": true,
+  "skipOn": [
+    "linux",
+    "win32"
+  ]
+}

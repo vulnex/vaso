@@ -1,0 +1,16 @@
+{
+  "agent": "ironclaw",
+  "source": "IronClaw 1.x: public listeners, cleartext LLM endpoint, unrestricted host access \u2014 schema verified on a live install (deep test 2026-10-13/15 fixture)",
+  "fail": {
+    "IC-001": "warning",
+    "IC-002": "warning",
+    "IC-006": "critical",
+    "NET-001": "critical"
+  },
+  "info": [
+    "IC-007"
+  ],
+  "fix": {
+    "resolves": []
+  }
+}

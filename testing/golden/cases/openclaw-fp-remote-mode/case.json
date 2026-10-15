@@ -1,0 +1,13 @@
+{
+  "agent": "openclaw",
+  "source": "RW8 regression: gateway.mode remote runs no local listener \u2014 no bind/TLS finding (docs.openclaw.ai gateway/remote; realworld openclaw-gateway_remote-0)",
+  "pass": [
+    "CFG-001",
+    "CFG-004",
+    "NET-001"
+  ],
+  "modes": {
+    ".openclaw/openclaw.json": "600",
+    ".openclaw": "700"
+  }
+}

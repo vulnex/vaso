@@ -1,0 +1,14 @@
+{
+  "agent": "meta-muse",
+  "source": "Muse preferences with analytics identity keys and Sparkle auto-update checks off (MM-002)",
+  "modes": {
+    "Library/Application Support/com.meta.endo": "700"
+  },
+  "skipOn": [
+    "linux",
+    "win32"
+  ],
+  "fail": {
+    "MM-002": "any"
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "agent": "openshell",
+  "source": "OpenShell gateway with TLS, OIDC, expiring creds \u2014 schema verified on a live install (deep test 2026-10-13/15 fixture)",
+  "clean": true,
+  "modes": {
+    "policy.yaml": "600",
+    ".config/openshell/gateway.toml": "600",
+    ".config/openshell/gateway.env": "600",
+    ".config/openshell/active_gateway": "600",
+    ".config/openshell/gateways/remote/metadata.json": "600",
+    ".config/openshell/gateways/remote/mtls/tls.key": "600",
+    ".local/state/openshell/docker-sandbox-tokens/default/sb1/token": "600",
+    ".local/state/openshell/tls/ca.key": "600",
+    ".local/state/openshell/tls/jwt/signing.pem": "600",
+    ".local/state/openshell/tls/server/tls.key": "600",
+    ".local/state/openshell/tls/client/tls.key": "600",
+    ".local/state/openshell/gateway/openshell.db": "600",
+    ".local/state/openshell/gateway/credentials/key-encryption-key.bin": "600",
+    ".config/openshell": "700",
+    ".config/openshell/gateways": "700",
+    ".config/openshell/gateways/remote": "700",
+    ".local/state/openshell": "700"
+  }
+}

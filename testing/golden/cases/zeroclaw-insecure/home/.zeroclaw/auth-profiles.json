@@ -1,0 +1,7 @@
+{
+  "profiles": {
+    "openai": {
+      "access_token": "plaintext-oauth-token-xyz"
+    }
+  }
+}

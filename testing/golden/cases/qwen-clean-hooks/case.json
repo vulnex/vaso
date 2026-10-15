@@ -1,0 +1,8 @@
+{
+  "agent": "qwen-code",
+  "source": "vendor docs example: qwen-code hooks (realworld qwen-code-users_features_hooks-29)",
+  "clean": true,
+  "modes": {
+    ".qwen/settings.json": "600"
+  }
+}

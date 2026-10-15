@@ -1,0 +1,12 @@
+{
+  "agent": "claude-desktop",
+  "source": "RW9/RW11 regression: documented Windows `cmd /c npx -y pkg@x.y.z` is a program call, not a shell script",
+  "skipOn": [
+    "linux",
+    "win32"
+  ],
+  "pass": [
+    "CD-008",
+    "CD-003"
+  ]
+}

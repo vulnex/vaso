@@ -1,0 +1,1 @@
+{"policy":{"version":1,"network_policies":{"mcp":{"endpoints":[{"host":"mcp.example.com","port":443,"protocol":"mcp","mcp":{"allow_all_known_mcp_methods":true}},{"host":"api.example.com","port":443,"protocol":"rest","rules":[{"allow":{"method":"GET","path":"/**"}}]}],"binaries":[{"path":"**"}]}}}}

@@ -1,0 +1,7 @@
+{
+  "agent": "opencode",
+  "source": "RW14 regression: scoped external_directory allow for one project tree (permissions docs)",
+  "info": [
+    "OPC-002"
+  ]
+}

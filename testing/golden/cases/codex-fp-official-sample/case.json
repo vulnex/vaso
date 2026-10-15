@@ -1,0 +1,7 @@
+{
+  "agent": "codex",
+  "source": "RW14 regression: the official sample config.toml (inherit=all with default secret excludes) \u2014 CDX-005 must not be critical",
+  "info": [
+    "CDX-005"
+  ]
+}

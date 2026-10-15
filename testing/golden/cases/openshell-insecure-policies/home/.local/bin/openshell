@@ -1,0 +1,8 @@
+#!/bin/sh
+case "$*" in
+  "--version") echo "openshell 0.1.2";;
+  "sandbox list --all-workspaces -o json") echo '{"sandboxes":[{"name":"sb1","workspace":"default"},{"name":"bad;name","workspace":"default"}]}';;
+  "policy get sb1 --workspace default --full -o json") echo '{"policy":{"filesystem_policy":{"read_write":["/etc"]},"network_policies":{"r":{"endpoints":[{"host":"x.example.com","port":443,"tls":"skip"},{"allowed_ips":["0.0.0.0/0"],"port":443}],"binaries":[{"path":"/**"}]}}}}';;
+  "policy get --global --full -o json") echo '{"policy":{"filesystem_policy":{"read_write":["/usr"]}}}';;
+  *) echo "unexpected: $*" >&2; exit 1;;
+esac

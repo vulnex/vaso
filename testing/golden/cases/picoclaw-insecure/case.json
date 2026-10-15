@@ -1,0 +1,16 @@
+{
+  "agent": "picoclaw",
+  "source": "PicoClaw: open channels, exec without guard, exposed launcher \u2014 schema verified on a live install (deep test 2026-10-13/15 fixture)",
+  "fail": {
+    "PCL-002": "critical",
+    "PCL-003": "critical",
+    "PCL-006": "critical",
+    "PCL-001": "warning"
+  },
+  "fix": {
+    "resolves": [
+      "PCL-001",
+      "PCL-004"
+    ]
+  }
+}

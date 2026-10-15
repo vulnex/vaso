@@ -1,0 +1,4 @@
+{ "permissionMode": "supervise", "permissions": { "allow": ["Bash(git log *)", "Read"] },
+  "mcpServers": [ { "name": "fs", "command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem@2025.8.21"], "env": { "API_KEY": "${FS_KEY}" } } ],
+  "providers": { "local": { "apiKeyEnvVar": "LOCAL_KEY", "options": { "baseURL": "http://127.0.0.1:8000/v1" } } },
+  "autoUpdate": "auto", "additionalDirectories": ["~/code/shared"] }

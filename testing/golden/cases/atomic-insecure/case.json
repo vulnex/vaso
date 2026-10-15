@@ -1,0 +1,19 @@
+{
+  "agent": "atomic-agent",
+  "source": "Atomic Agent: raised approval ladder, unrestricted read scope, open HTTP egress, plaintext keys \u2014 schema verified on a live install (deep test 2026-10-13/15 fixture)",
+  "fail": {
+    "AT-001": "critical",
+    "AT-002": "warning",
+    "AT-003": "warning",
+    "AT-004": "critical",
+    "AT-009": "critical"
+  },
+  "fix": {
+    "resolves": [
+      "AT-002"
+    ]
+  },
+  "modes": {
+    "tools/mcp-bin": "777"
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "agent": "copilot-cli",
+  "source": "Legacy allowAllPermissions + a plaintext OAuth token in config.json",
+  "fail": {
+    "GHC-002": "any",
+    "GHC-003": "critical"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "agent": "claude-code",
+  "source": "RW1 regression: Anthropic skills shapes \u2014 subprocess.run([\"soffice\", ...], env=...) and lsof text=True are not exfiltration (github.com/anthropics/skills xlsx/docx scripts)",
+  "pass": [
+    "SKL-001"
+  ],
+  "info": [
+    "SKL-003"
+  ]
+}

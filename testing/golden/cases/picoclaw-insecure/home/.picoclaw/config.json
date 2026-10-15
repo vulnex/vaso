@@ -1,0 +1,57 @@
+{
+  "version": 3,
+  "agents": {
+    "defaults": {
+      "workspace": "~/.picoclaw/workspace",
+      "restrict_to_workspace": false,
+      "model_name": "gpt"
+    }
+  },
+  "model_list": [
+    {
+      "model_name": "gpt",
+      "model": "openai/gpt-4o"
+    }
+  ],
+  "channel_list": {
+    "telegram": {
+      "enabled": true,
+      "type": "telegram",
+      "allow_from": []
+    },
+    "discord": {
+      "enabled": true,
+      "type": "discord",
+      "allow_from": [
+        "*"
+      ]
+    },
+    "pico": {
+      "enabled": true,
+      "type": "pico",
+      "settings": {
+        "allow_origins": [],
+        "allow_token_query": true
+      }
+    }
+  },
+  "tools": {
+    "exec": {
+      "enabled": true,
+      "enable_deny_patterns": false,
+      "custom_allow_patterns": [
+        "(?i).*"
+      ]
+    },
+    "allow_read_paths": [
+      ".*"
+    ],
+    "allow_write_paths": [
+      "^/etc/.*"
+    ]
+  },
+  "gateway": {
+    "host": "0.0.0.0",
+    "port": 18790
+  }
+}

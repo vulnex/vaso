@@ -1,0 +1,5 @@
+{ "mcpServers": {
+  "remote": { "type": "http", "url": "http://mcp.example.com/mcp", "headers": { "Authorization": "Bearer abcdefghijklmnop1234" }, "autoApprove": true },
+  "oauthy": { "type": "http", "url": "https://mcp.example.com/x", "oauth": { "clientId": "x", "clientSecret": "supersecretvalue123" }, "autoApprove": ["*"] },
+  "off": { "command": "npx", "args": ["evil-pkg"], "disabled": true }
+} }

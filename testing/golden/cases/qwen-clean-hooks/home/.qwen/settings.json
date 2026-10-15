@@ -1,0 +1,9 @@
+{
+ "stop_hook_active": "true when this turn is continuing because a stop hook blocked the previous stop check (still true after tool calls made during that continuation); false on the first check and again once the stop is allowed, the blocking cap is reached, the user steers or sends new input, or a new turn, retry or goal turn starts",
+ "last_assistant_message": "the last message from the assistant",
+ "context_usage": "ratio of context window used (may exceed 1 when tokens exceed window; optional)",
+ "context_limit": "context window size in tokens (optional)",
+ "input_tokens": "prompt token count (may include output tokens depending on provider; optional)",
+ "background_tasks": "array of background tasks, each with id, status, agent_type, started_at and optional description",
+ "crons": "array of scheduled jobs, each with id, schedule, prompt, recurring, enabled and optional next_run and last_run"
+}

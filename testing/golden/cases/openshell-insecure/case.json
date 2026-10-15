@@ -1,0 +1,23 @@
+{
+  "agent": "openshell",
+  "source": "OpenShell gateway: no TLS on 0.0.0.0, unauthenticated users, non-expiring creds, fail-open policy \u2014 schema verified on a live install (deep test 2026-10-13/15 fixture)",
+  "fail": {
+    "OSH-001": "critical",
+    "OSH-002": "critical",
+    "OSH-004": "warning",
+    "OSH-005": "warning",
+    "OSH-007": "critical"
+  },
+  "fix": {
+    "resolves": [
+      "OSH-002",
+      "OSH-005"
+    ]
+  },
+  "modes": {
+    "policy.yaml": "600",
+    "policy-file.yaml": "600",
+    ".config/openshell/gateway.toml": "666",
+    ".config/openshell/gateways/remote/metadata.json": "666"
+  }
+}

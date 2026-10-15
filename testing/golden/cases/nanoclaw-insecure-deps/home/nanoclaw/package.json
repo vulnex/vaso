@@ -1,0 +1,1 @@
+{"name": "nanoclaw", "version": "2.4.0", "dependencies": {"@modelcontextprotocol/sdk": "^1.20.0", "mcp-remote": "0.1.10", "express": "^4.18.0"}}

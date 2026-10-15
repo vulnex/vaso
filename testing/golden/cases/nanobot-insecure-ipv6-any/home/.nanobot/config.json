@@ -1,0 +1,12 @@
+{
+  "gateway": {
+    "host": "[::]",
+    "port": 18790
+  },
+  "tools": {
+    "restrictToWorkspace": true,
+    "exec": {
+      "sandbox": "bwrap"
+    }
+  }
+}

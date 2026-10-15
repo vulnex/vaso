@@ -1,0 +1,20 @@
+{
+  "agent": {"approvalLevel": 5, "readScope": "unrestricted"},
+  "llm": {
+    "activeTextProvider": "main",
+    "providers": [
+      {"id": "main", "kind": "openai", "model": "gpt-5", "baseUrl": "http://llm.example.net/v1", "apiKey": "sk-literalkey1234567890abcdef",
+       "headers": {"Authorization": "Bearer abcdefghijklmnop"}},
+      {"id": "cc", "kind": "subscription-cli", "subscriptionCli": {"cli": "claude", "extraArgs": ["--dangerously-skip-permissions"]}}
+    ]
+  },
+  "localModels": {"mode": "external", "url": "http://10.0.0.5:8080"},
+  "mcp": {"servers": [
+    {"name": "reader", "enabled": true, "trust": "pure_read", "transport": {"kind": "stdio", "command": "npx", "args": ["-y", "some-mcp-server"]},
+     "env": {"GITHUB_TOKEN": "ghp_abcdefghijklmnopqrstuvwxyz0123456789"}},
+    {"name": "shelly", "transport": {"kind": "stdio", "command": "bash", "args": ["-c", "node s.js"]}},
+    {"name": "ww", "transport": {"kind": "stdio", "command": "{{HOME}}/tools/mcp-bin", "args": []}},
+    {"name": "remote", "transport": {"kind": "streamable_http", "url": "http://mcp.example.org/mcp"}}
+  ]},
+  "webhooks": {"open": {"prompt": "x"}, "withsecret": {"secret": "hooksecretvalue123"}}
+}

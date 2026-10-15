@@ -1,0 +1,12 @@
+{
+  "agent": "nanobot",
+  "source": "nanobot docs/configuration default (realworld nanobot-docs_chat-apps-0): insecure defaults restrictToWorkspace=false and unsandboxed exec are warnings",
+  "fail": {
+    "NB-003": "warning",
+    "NB-004": "warning"
+  },
+  "modes": {
+    ".nanobot/config.json": "600",
+    ".nanobot": "700"
+  }
+}

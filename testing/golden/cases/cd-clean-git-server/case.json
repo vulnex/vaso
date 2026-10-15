@@ -1,0 +1,12 @@
+{
+  "agent": "claude-desktop",
+  "source": "vendor docs example: modelcontextprotocol git server README (realworld claude-desktop-srv-git-8)",
+  "clean": true,
+  "skipOn": [
+    "linux",
+    "win32"
+  ],
+  "cleanIgnore": [
+    "CD-005"
+  ]
+}

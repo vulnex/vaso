@@ -18,10 +18,16 @@ import type { AgentScanResult, ScanResult, Severity } from '../../src/core/types
  *            vendor-secure config must not be flagged
  *   fail     { "<check id>": "<severity>" | "any" } — must be reported
  *   pass     [ "<check id>" ] — must pass (a fixed false positive)
+ *   info     [ "<check id>" ] — may be reported, but at info severity at most
+ *            (a fixed false positive that stays as advice)
  *   fix      { "resolves": [ids] } — `vaso fix -y` resolves them without
  *            breaking any other check, and `--rollback` restores every file
  *   parity   false to skip the probe-snapshot comparison (default: compared
  *            whenever Go is available to build the probe)
+ *   cleanIgnore  check ids `clean` doesn't count — checks that read the host
+ *            rather than the fixture (app bundles in /Applications, codesign).
+ *            Advisory (ADV-*) results are never counted by `clean`: they
+ *            follow the version of whatever agent binary the host has
  *   modes    { "<path under home>": "600" } — git keeps only 644/755 file
  *            modes and none for directories, so permissions are set here
  *
@@ -39,8 +45,10 @@ interface GoldenCase {
   clean?: boolean;
   fail?: Record<string, Severity | 'any'>;
   pass?: string[];
+  info?: string[];
   fix?: { resolves: string[] };
   parity?: boolean;
+  cleanIgnore?: string[];
   modes?: Record<string, string>;
   /** Skip on these platforms (fixtures relying on POSIX modes). */
   skipOn?: NodeJS.Platform[];
@@ -150,8 +158,14 @@ describe.each(caseNames)('golden: %s', (name) => {
     for (const id of spec.pass ?? []) {
       expect(results.filter(r => r.id === id && !r.passed).map(r => r.message), `${id} should pass`).toEqual([]);
     }
+    for (const id of spec.info ?? []) {
+      const severe = results.filter(r => r.id === id && !r.passed && r.severity !== 'info');
+      expect(severe.map(r => `${r.severity}: ${r.message}`), `${id} should be info at most`).toEqual([]);
+    }
     if (spec.clean) {
-      const flagged = results.filter(r => r.errored || (!r.passed && SEVERE.has(r.severity)));
+      const ignored = new Set(spec.cleanIgnore ?? []);
+      const flagged = results.filter(r => r.category !== 'advisory' && !ignored.has(r.id)
+        && (r.errored || (!r.passed && SEVERE.has(r.severity))));
       expect(flagged.map(r => `${r.id} ${r.severity}: ${r.message}`), 'vendor-secure config flagged').toEqual([]);
     }
   });
@@ -179,9 +193,12 @@ describe.each(caseNames)('golden: %s', (name) => {
       expect(afterResults.filter(r => r.id === id && !r.passed).map(r => r.message), `${id} after fix`).toEqual([]);
     }
     // A fix must not make another check fail (or error) that passed before
-    const passedBefore = new Set(local.flatMap(a => a.results).filter(r => r.passed).map(r => r.id));
-    const broken = afterResults.filter(r => passedBefore.has(r.id) && (!r.passed || r.errored));
-    expect(broken.map(r => `${r.id}: ${r.message}`), 'checks broken by the fix').toEqual([]);
+    // on the same installation
+    const passedBefore = new Set(local.flatMap(a => a.results.filter(r => r.passed).map(r => `${a.installation.installDir}\0${r.id}`)));
+    const broken = after.flatMap(a => a.results
+      .filter(r => passedBefore.has(`${a.installation.installDir}\0${r.id}`) && (!r.passed || r.errored))
+      .map(r => `${a.installation.installDir}: ${r.id}: ${r.message}`));
+    expect(broken, 'checks broken by the fix').toEqual([]);
 
     const rolled = await run(['fix', '--rollback'], home);
     expect(rolled.code, rolled.stdout + rolled.stderr).toBe(0);

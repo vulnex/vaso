@@ -1,0 +1,8 @@
+{
+  "agent": "codex",
+  "source": "Lower regression: approval never + read-only sandbox is the documented read-only CI preset (CDX-001 info)",
+  "info": [
+    "CDX-001",
+    "CDX-002"
+  ]
+}

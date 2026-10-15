@@ -1,0 +1,13 @@
+{
+ "mcpServers": {
+  "nodeServer": {
+   "command": "node",
+   "args": [
+    "dist/server.js",
+    "--verbose"
+   ],
+   "cwd": "./mcp-servers/node",
+   "trust": true
+  }
+ }
+}

@@ -1,0 +1,13 @@
+{
+  "agent": "windsurf",
+  "source": "Windsurf mcp_config.json with a literal token, unpinned package and http:// URL",
+  "skipOn": [
+    "linux",
+    "win32"
+  ],
+  "fail": {
+    "WS-003": "any",
+    "WS-004": "warning",
+    "WS-005": "any"
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "agent": "devin",
+  "source": "vendor docs example: docs.devin.ai cli config file (realworld devin-cli_reference_configuration_config-file-3)",
+  "clean": true,
+  "modes": {
+    ".local/share/devin/credentials.toml": "600"
+  }
+}

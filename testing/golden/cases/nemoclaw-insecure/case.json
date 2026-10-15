@@ -1,0 +1,11 @@
+{
+  "agent": "nemoclaw",
+  "source": "NemoClaw with a plaintext NVIDIA key and GPU passthrough \u2014 schema verified on a live install (deep test 2026-10-13/15 fixture)",
+  "fail": {
+    "CFG-020": "critical",
+    "CFG-021": "warning"
+  },
+  "fix": {
+    "resolves": []
+  }
+}

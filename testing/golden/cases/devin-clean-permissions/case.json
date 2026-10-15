@@ -1,0 +1,8 @@
+{
+  "agent": "devin",
+  "source": "vendor docs example: docs.devin.ai cli permissions (realworld devin-cli_reference_permissions-13)",
+  "clean": true,
+  "modes": {
+    ".local/share/devin/credentials.toml": "600"
+  }
+}

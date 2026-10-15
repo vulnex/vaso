@@ -1,0 +1,11 @@
+{
+  "agent": "nanobot",
+  "source": "RW12: NET-001 must catch a gateway bound to [::] (all IPv6 interfaces)",
+  "modes": {
+    ".nanobot": "700",
+    ".nanobot/config.json": "600"
+  },
+  "fail": {
+    "NET-001": "critical"
+  }
+}

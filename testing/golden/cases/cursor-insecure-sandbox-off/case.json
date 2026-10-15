@@ -1,0 +1,7 @@
+{
+  "agent": "cursor-cli",
+  "source": "sandbox.mode disabled in cli-config.json",
+  "fail": {
+    "CUR-001": "any"
+  }
+}

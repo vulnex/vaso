@@ -1,0 +1,9 @@
+[openshell]
+version = 2
+
+[openshell.gateway]
+bind_address = "127.0.0.1:17670"
+policy_validation_failure_mode = "fail_closed"
+
+[openshell.gateway.auth]
+allow_unauthenticated_users = false

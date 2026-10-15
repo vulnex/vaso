@@ -1,0 +1,15 @@
+{
+  "agent": "opencode",
+  "source": "OPC-001 fix round-trip: auth.json readable by others",
+  "modes": {
+    ".local/share/opencode/auth.json": "644"
+  },
+  "fail": {
+    "OPC-001": "any"
+  },
+  "fix": {
+    "resolves": [
+      "OPC-001"
+    ]
+  }
+}

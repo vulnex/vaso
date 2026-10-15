@@ -1,0 +1,38 @@
+{
+ "env": {
+  "ANTHROPIC_API_KEY": "sk-ant-your-actual-anthropic-key-here"
+ },
+ "modelProviders": {
+  "anthropic": [
+   {
+    "id": "claude-3-5-sonnet",
+    "name": "Claude 3.5 Sonnet",
+    "envKey": "ANTHROPIC_API_KEY",
+    "baseUrl": "https://api.anthropic.com/v1",
+    "generationConfig": {
+     "timeout": 120000,
+     "maxRetries": 3,
+     "contextWindowSize": 200000,
+     "samplingParams": {
+      "temperature": 0.7,
+      "max_tokens": 8192,
+      "top_p": 0.9
+     }
+    }
+   },
+   {
+    "id": "claude-3-opus",
+    "name": "Claude 3 Opus",
+    "envKey": "ANTHROPIC_API_KEY",
+    "baseUrl": "https://api.anthropic.com/v1",
+    "generationConfig": {
+     "timeout": 180000,
+     "samplingParams": {
+      "temperature": 0.3,
+      "max_tokens": 4096
+     }
+    }
+   }
+  ]
+ }
+}

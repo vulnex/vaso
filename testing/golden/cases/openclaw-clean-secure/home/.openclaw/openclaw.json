@@ -1,0 +1,47 @@
+{
+  "meta": {
+    "lastTouchedVersion": "2026.9.4"
+  },
+  "gateway": {
+    "mode": "local",
+    "bind": "loopback",
+    "port": 18789,
+    "auth": {
+      "mode": "token",
+      "token": "Zq8xW2mN4pR7tY1uI3oP5aS6dF9gH0jK"
+    },
+    "tls": {
+      "enabled": true
+    }
+  },
+  "discovery": {
+    "mdns": {
+      "mode": "off"
+    }
+  },
+  "channels": {
+    "telegram": {
+      "enabled": true,
+      "dmPolicy": "pairing"
+    }
+  },
+  "tools": {
+    "exec": {
+      "mode": "allowlist"
+    },
+    "fs": {
+      "workspaceOnly": true
+    }
+  },
+  "agents": {
+    "defaults": {
+      "workspace": "~/.openclaw/workspace",
+      "sandbox": {
+        "mode": "all"
+      }
+    }
+  },
+  "logging": {
+    "redactSensitive": "tools"
+  }
+}

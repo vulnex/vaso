@@ -1,0 +1,14 @@
+{
+  "agent": "windsurf",
+  "source": "docs.windsurf.com MCP config: pinned stdio server, secrets via ${env:} interpolation",
+  "modes": {
+    ".codeium": "700",
+    ".codeium/windsurf": "700",
+    ".codeium/windsurf/mcp_config.json": "600"
+  },
+  "clean": true,
+  "skipOn": [
+    "linux",
+    "win32"
+  ]
+}

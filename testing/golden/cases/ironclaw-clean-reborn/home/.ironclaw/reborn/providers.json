@@ -1,0 +1,7 @@
+[
+  {
+    "id": "local-ollama",
+    "default_base_url": "http://127.0.0.1:11434",
+    "default_model": "llama3"
+  }
+]

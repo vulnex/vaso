@@ -1,0 +1,17 @@
+api_version = "v1"
+
+[boot]
+profile = "local-dev-yolo"
+
+[webui]
+listen_host = "0.0.0.0"
+listen_port = 3000
+allowed_origins = ["null", "http://lan.example:3000", "https://*.example.com"]
+
+[policy]
+default_approval_policy = "minimal"
+
+[llm.default]
+provider_id = "ollama"
+model = "llama3"
+base_url = "http://10.20.30.50:11434"

@@ -1,0 +1,8 @@
+{
+  "agent": "claude-code",
+  "source": "RW5 regression: `curl \u2026 | python -m json.tool` / `| python -c` read data, they do not execute the download; the word \"keychain\" alone is not keychain access",
+  "pass": [
+    "SKL-004",
+    "SKL-006"
+  ]
+}

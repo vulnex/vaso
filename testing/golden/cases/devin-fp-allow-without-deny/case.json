@@ -1,0 +1,10 @@
+{
+  "agent": "devin",
+  "source": "Lower regression: narrow allow rules with no deny list is info (as CC-008)",
+  "modes": {
+    ".local/share/devin/credentials.toml": "600"
+  },
+  "info": [
+    "DEV-001"
+  ]
+}

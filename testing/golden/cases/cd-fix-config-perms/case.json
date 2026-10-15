@@ -1,0 +1,19 @@
+{
+  "agent": "claude-desktop",
+  "source": "CD-002 fix round-trip: config holding env secrets is world-readable",
+  "modes": {
+    "Library/Application Support/Claude/claude_desktop_config.json": "644"
+  },
+  "skipOn": [
+    "linux",
+    "win32"
+  ],
+  "fail": {
+    "CD-002": "any"
+  },
+  "fix": {
+    "resolves": [
+      "CD-002"
+    ]
+  }
+}

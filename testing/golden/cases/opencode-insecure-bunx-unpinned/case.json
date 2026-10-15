@@ -1,0 +1,7 @@
+{
+  "agent": "opencode",
+  "source": "RW11: `bun x` MCP server without a version pin (mcp-servers docs, realworld opencode-mcp-servers-10)",
+  "fail": {
+    "OPC-003": "warning"
+  }
+}

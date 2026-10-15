@@ -1,0 +1,10 @@
+{
+  "agent": "ironclaw",
+  "source": "IronClaw 0.x legacy ~/.ironclaw/.env, secure \u2014 schema verified on a live install (deep test 2026-10-13/15 fixture)",
+  "clean": true,
+  "modes": {
+    ".ironclaw/ironclaw.db": "600",
+    ".ironclaw/.env": "600",
+    ".ironclaw/channels/telegram.wasm": "600"
+  }
+}

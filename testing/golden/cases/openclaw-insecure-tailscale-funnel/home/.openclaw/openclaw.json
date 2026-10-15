@@ -1,0 +1,7 @@
+{
+  gateway: {
+    bind: "loopback",
+    tailscale: { mode: "funnel" },
+    auth: { mode: "password", password: "replace-me" },
+  },
+}

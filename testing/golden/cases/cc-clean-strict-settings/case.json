@@ -1,0 +1,5 @@
+{
+  "agent": "claude-code",
+  "source": "vendor docs example: code.claude.com/docs/en/settings \u2014 strict managed-style settings (realworld claude-code-settings-strict)",
+  "clean": true
+}

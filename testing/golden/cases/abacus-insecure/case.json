@@ -1,0 +1,25 @@
+{
+  "agent": "abacus",
+  "source": "Abacus.AI: unsupervised mode, broad allow rules, plaintext MCP secrets, external MCP import \u2014 schema verified on a live install (deep test 2026-10-13/15 fixture)",
+  "fail": {
+    "ABA-001": "critical",
+    "ABA-002": "critical",
+    "ABA-004": "critical",
+    "ABA-007": "critical",
+    "ABA-010": "warning"
+  },
+  "fix": {
+    "resolves": [
+      "ABA-001",
+      "ABA-010"
+    ]
+  },
+  "modes": {
+    "Library/Application Support/AbacusAI Desktop/state.json": "666",
+    ".abacusai/config.json": "600",
+    ".abacusai/trusted-workspaces.json": "600",
+    ".abacusai/mcp.json": "600",
+    ".abacusai/desktop/agent-config-code.json": "600",
+    ".abacusai/desktop/mcp-cowork.json": "600"
+  }
+}

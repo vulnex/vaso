@@ -1,0 +1,7 @@
+{
+  "agent": "cursor-cli",
+  "source": "RW7 regression: afterFileEdit/stop hooks gate nothing, so they cannot fail open (cursor.com/docs/agent/hooks)",
+  "pass": [
+    "CUR-011"
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "agent": "cursor-cli",
+  "source": "vendor docs example: beforeShellExecution guard without failClosed (realworld cursor-cli-hooks-2)",
+  "fail": {
+    "CUR-011": "warning"
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "agent": "opencode",
+  "source": "Global allow for every tool incl. external_directory (permissions docs shape)",
+  "fail": {
+    "OPC-002": "critical"
+  }
+}

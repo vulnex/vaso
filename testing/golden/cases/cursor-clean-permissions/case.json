@@ -1,0 +1,8 @@
+{
+  "agent": "cursor-cli",
+  "source": "vendor docs example: cursor.com/docs/cli/reference/permissions (realworld cursor-cli-cli_reference_permissions-0)",
+  "clean": true,
+  "cleanIgnore": [
+    "CUR-013"
+  ]
+}

@@ -1,0 +1,48 @@
+# realistic Homebrew-style 0.1.x config
+[openshell]
+version = 2
+
+[openshell.gateway]
+name = "openshell"
+bind_address = "127.0.0.1:17670"
+log_level = "info"
+compute_driver = "docker"
+ssh_session_ttl_secs = 3600
+policy_validation_failure_mode = "fail_closed"
+enable_loopback_service_http = true
+
+[openshell.gateway.tls]
+cert_path = "~/.local/state/openshell/tls/server/tls.crt"
+key_path = "~/.local/state/openshell/tls/server/tls.key"
+client_ca_path = "~/.local/state/openshell/tls/ca.crt"
+
+[openshell.gateway.auth]
+allow_unauthenticated_users = false
+
+[[openshell.gateway.interceptors]]
+name = "quota"
+grpc_endpoint = "unix:///run/openshell/interceptors/quota.sock"
+failure_policy = "fail_closed"
+binding_policy = "allowlist"
+
+[[openshell.gateway.interceptors]]
+name = "audit-log"
+grpc_endpoint = "https://audit.corp:9443"
+binding_policy = "exact"
+failure_policy = "fail_open"
+[[openshell.gateway.interceptors.bindings]]
+rpc = "openshell.v1.OpenShell/CreateSandbox"
+phases = ["post_commit"]
+failure_policy = "fail_open"
+
+[[openshell.supervisor.middleware]]
+name = "local-content-guard"
+grpc_endpoint = "https://host.openshell.internal:50051"
+allow_insecure_transport = false
+
+[openshell.drivers.docker]
+default_image = "nvcr.io/nvidia/base/ubuntu:24.04"
+allow_driver_config = false
+
+[openshell.drivers.docker.resource_admission]
+enabled = true

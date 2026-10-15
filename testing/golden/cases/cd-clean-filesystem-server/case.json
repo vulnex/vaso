@@ -1,0 +1,12 @@
+{
+  "agent": "claude-desktop",
+  "source": "vendor docs example: modelcontextprotocol filesystem server README (realworld claude-desktop-srv-filesystem-0)",
+  "clean": true,
+  "skipOn": [
+    "linux",
+    "win32"
+  ],
+  "cleanIgnore": [
+    "CD-005"
+  ]
+}

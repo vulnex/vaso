@@ -1,0 +1,13 @@
+{
+  "agent": "openclaw",
+  "source": "RW8 regression: an unset gateway.bind is loopback in OpenClaw 2026.9.4 \u2014 no TLS finding",
+  "modes": {
+    ".openclaw": "700",
+    ".openclaw/openclaw.json": "600"
+  },
+  "pass": [
+    "CFG-001",
+    "CFG-004",
+    "NET-001"
+  ]
+}

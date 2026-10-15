@@ -1,0 +1,7 @@
+model_list:
+  gpt:
+    api_keys:
+      - sk-proj-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+channel_list:
+  telegram:
+    token: "123456:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
