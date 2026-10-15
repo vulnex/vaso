@@ -8,6 +8,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Security
 
+- **New check OC-008 flags OpenClaw overrides that `openclaw security audit` also flags**: elevated exec open to everyone on a channel (`tools.elevated.allowFrom: ["*"]`, critical), HTTP `/tools/invoke` re-enabling exec or control tools (`gateway.tools.allow`), X-Real-IP fallback, dangerous node commands, caller-chosen hook session keys, hooks on `/`, and browser access to private networks — severity follows whether the gateway is reachable beyond loopback. CFG-015 rates OpenClaw mDNS `full` mode a warning when the gateway is reachable. 348 checks.
 - **`vaso update` never installs an older feed.** `--force` only re-installs the cached version; before, every update accepted a replayed older signed feed.
 - **Credentials quoted in findings are masked** (URL passwords, `?access_token=`-style parameters, `--token=` arguments) in every report format, baselines and `vaso mcp list`.
 - **`vaso fix` never writes or chmods through a symlink and never blocks on a FIFO.** Every fix and backup opens its target with `O_NOFOLLOW | O_NONBLOCK` and works only on regular files (`src/remediation/safe-file.ts`): a config replaced by a symlink is refused ("is a symlink — vaso fix won't write it") instead of having the link target rewritten, and a FIFO or device in place of a config is refused instead of hanging the run. Backup copies are written owner-only.
