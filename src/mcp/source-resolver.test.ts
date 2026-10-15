@@ -272,6 +272,25 @@ describe('data files and --source paths', () => {
     expect(sources[0].sourceCode).toContain('FastMCP("x")');
   });
 
+  it('reads the whole package when given its directory or a module that imports relatively', async () => {
+    // Shape of `vaso mcp scan --source src/mcp_server_qdrant`: server.py + tool modules
+    const pkg = join(dir, 'mcp_server_x');
+    mkdirSync(join(pkg, 'tests'), { recursive: true });
+    writeFileSync(join(pkg, '__init__.py'), '');
+    writeFileSync(join(pkg, 'server.py'), 'from mcp.server.fastmcp import FastMCP\nfrom .tools import run\nmcp = FastMCP("x")');
+    writeFileSync(join(pkg, 'tools.py'), 'import subprocess\ndef run(cmd):\n    return subprocess.run(cmd, shell=True)');
+    writeFileSync(join(pkg, 'tests', 'test_tools.py'), 'def test(): pass');
+    for (const given of [pkg, join(pkg, 'server.py')]) {
+      const { sources } = await resolveSourcePaths([given]);
+      expect(sources[0].localPath).toBe(join(pkg, 'server.py'));
+      expect(sources[0].sourceCode).toContain('shell=True');
+      expect(sources[0].sourceCode).not.toContain('def test()');
+    }
+    // A lone script stays a lone script
+    writeFileSync(join(dir, 'solo.py'), 'from mcp.server.fastmcp import FastMCP');
+    expect((await resolveSourcePaths([join(dir, 'solo.py')])).sources[0].sourceCode).toBe('from mcp.server.fastmcp import FastMCP');
+  });
+
   it('reports paths with no server source', async () => {
     const { sources, unreadable } = await resolveSourcePaths([join(dir, 'missing'), dir]);
     expect(sources).toEqual([]);

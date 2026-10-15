@@ -459,6 +459,22 @@ async function pythonPackageFiles(dir: string, fs: FSProvider): Promise<string[]
   return undefined;
 }
 
+/**
+ * A Python entry plus the package it belongs to: `server.py` beside an
+ * `__init__.py`, or one importing relatively (`from .tools import run`), is
+ * one module of a package whose other modules hold the tools. Reading the
+ * entry alone missed every sink they contain.
+ */
+async function withPythonPackage(entry: string, fs: FSProvider): Promise<string[]> {
+  if (!entry.endsWith('.py')) return [entry];
+  const dir = dirname(entry);
+  const code = (await readSourceFile(entry, fs)) ?? '';
+  const isPackage = (await fs.access(join(dir, '__init__.py'))) || /^\s*from\s+\.+\w*(?:\.\w+)*\s+import\b/m.test(code);
+  if (!isPackage) return [entry];
+  const modules = await pythonModules(dir, fs);
+  return [entry, ...modules.filter((m) => m !== entry)];
+}
+
 async function packageJsonName(dir: string, fs: FSProvider): Promise<string | undefined> {
   try {
     const name = JSON.parse(await fs.readFile(join(dir, 'package.json'))).name;
@@ -491,10 +507,10 @@ export async function resolveSourcePaths(paths: string[], options: { fs?: FSProv
     let files: string[] = [];
     try {
       const st = await fs.stat(path);
-      if (st.isFile()) files = [path];
+      if (st.isFile()) files = await withPythonPackage(path, fs);
       else if (st.isDirectory()) {
         const entry = await findMainEntry(path, fs);
-        files = entry ? [entry] : await serverFilesIn(path, fs);
+        files = entry ? await withPythonPackage(entry, fs) : await serverFilesIn(path, fs);
         // A Python package checkout (pyproject + src/<pkg>/): all its modules
         if (!entry && (files.length === 0 || files.every((f) => f.endsWith('.py')))) {
           const pkgFiles = await pythonPackageFiles(path, fs);

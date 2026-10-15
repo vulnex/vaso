@@ -145,6 +145,19 @@ describe('analyzePythonSinks', () => {
     });
   });
 
+  it('does not mistake a method named eval for eval() (excel-mcp-server calc engine)', () => {
+    const code = [
+      'class Evaluator:',
+      '    def eval(self, node: Node, array: bool = False) -> Value:',
+      '        return self.visit(node)',
+      '    async def exec(self, stmt):',
+      '        return self.eval(stmt)',
+      'def run(expr):',
+      '    return eval(expr)',
+    ].join('\n');
+    expect(analyzePythonSinks(code).filter((f) => f.kind === 'exec').map((f) => f.line)).toEqual([7]);
+  });
+
   describe('analyzePythonCapabilities (skill code)', () => {
     it('reports exec, eval, network and file reads', () => {
       const code = [

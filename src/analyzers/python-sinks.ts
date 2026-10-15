@@ -34,7 +34,8 @@ export interface PythonSinkFinding {
 }
 
 const EXEC_SINKS: Array<{ re: RegExp; name: (m: RegExpMatchArray) => string }> = [
-  { re: /(?<![\w.])(eval|exec)\s*\(/, name: (m) => m[1] },
+  // Not a definition of a function or method named eval/exec (`def eval(self, node)`)
+  { re: /(?<![\w.])(?<!\bdef\s+)(eval|exec)\s*\(/, name: (m) => m[1] },
   { re: /\bsubprocess\.(run|call|check_call|check_output|Popen|getoutput|getstatusoutput)\s*\(/, name: (m) => `subprocess.${m[1]}` },
   { re: /\bos\.(system|popen|exec[lv]p?e?|spawn[lv]p?e?|posix_spawnp?)\s*\(/, name: (m) => `os.${m[1]}` },
   { re: /\basyncio\.create_subprocess_(exec|shell)\s*\(/, name: (m) => `asyncio.create_subprocess_${m[1]}` },
@@ -44,7 +45,7 @@ const EXEC_SINKS: Array<{ re: RegExp; name: (m: RegExpMatchArray) => string }> =
 
 const INJECTION_RULES: Array<{ re: RegExp; description: string }> = [
   {
-    re: /(?<![\w.])(?:eval|exec)\s*\(\s*(?!["')]|r["']|b["'])/,
+    re: /(?<![\w.])(?<!\bdef\s+)(?:eval|exec)\s*\(\s*(?!["')]|r["']|b["'])/,
     description: 'eval()/exec() of a non-literal expression — caller-controlled code runs in the server',
   },
   {
