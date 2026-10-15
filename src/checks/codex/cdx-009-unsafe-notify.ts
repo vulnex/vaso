@@ -1,8 +1,8 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { shellCommandWrapper } from '../../mcp/shell-wrapper.js';
 
-const SHELL_BINS = new Set(['sh', 'bash', 'zsh', 'fish', 'dash', 'ksh']);
-const SHELL_EXEC_FLAGS = new Set(['-c', '-cu', '-uc']);
+const INTERPRETERS = /^(?:python[\d.]*|node|bun|deno|ruby|perl|bash|sh|zsh|osascript)$/;
 const EVAL_LIKE = new Set(['eval', 'exec']);
 const WORLD_WRITABLE_DIRS = ['/tmp/', '/var/tmp/', '/private/tmp/'];
 
@@ -24,9 +24,10 @@ function inspectNotify(notify: unknown): NotifyFinding[] {
   const cmd = argv[0];
   const base = basename(cmd);
 
-  if (SHELL_BINS.has(base) && argv.slice(1).some(a => SHELL_EXEC_FLAGS.has(a))) {
+  const shell = shellCommandWrapper(cmd, argv.slice(1));
+  if (shell) {
     findings.push({
-      reason: `invokes ${base} -c, so any variable Codex injects is parsed as shell — same risk class as Claude Code unsafe hooks`,
+      reason: `invokes ${shell} -c, so any variable Codex injects is parsed as shell — same risk class as Claude Code unsafe hooks`,
     });
   }
 
@@ -34,7 +35,10 @@ function inspectNotify(notify: unknown): NotifyFinding[] {
     findings.push({ reason: `top-level command is "${base}" — dynamic input becomes code` });
   }
 
-  if (cmd && !cmd.startsWith('/') && !cmd.startsWith('~') && !cmd.startsWith('./') && !cmd.startsWith('../')) {
+  // A standard interpreter running an absolute script (`["python3", "/abs/notify.py"]`,
+  // the form Codex documents) is as PATH-resolved as any command — not flagged.
+  const interpreterWithScript = INTERPRETERS.test(base) && argv.slice(1).some(a => a.startsWith('/') || a.startsWith('~/'));
+  if (cmd && !interpreterWithScript && !cmd.startsWith('/') && !cmd.startsWith('~') && !cmd.startsWith('./') && !cmd.startsWith('../')) {
     findings.push({
       reason: `relative command name "${cmd}" — resolved via $PATH at session-end, vulnerable to PATH hijack`,
     });

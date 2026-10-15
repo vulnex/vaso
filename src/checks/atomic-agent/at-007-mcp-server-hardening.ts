@@ -1,13 +1,10 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { runnerPackage, isPinnedOrLocal, pinProblem } from '../../mcp/package-pin.js';
+import { shellCommandWrapper } from '../../mcp/shell-wrapper.js';
 import { queryPermissions } from '../../core/permissions.js';
 import { asRecord, atomicConfigs, isEnabled, isLoopbackHost, mcpServers, serverName, urlHost } from './shared.js';
 
-const PACKAGE_RUNNERS = new Set(['npx', 'pnpm', 'yarn', 'bunx', 'uvx', 'pipx']);
-const PINNED = /@\d+\.\d+\.\d+/;
-const SHA_PINNED = /(?:@sha256:|#[a-f0-9]{7,40})/i;
-const PYPI_PINNED = /==\d/;
-const SHELL_C = /^(?:bash|sh|zsh|fish|cmd|powershell|pwsh)$/i;
 
 export const at007 = defineCheck({
   id: 'AT-007',
@@ -46,14 +43,13 @@ export const at007 = defineCheck({
         const argList = Array.isArray(transport.args)
           ? (transport.args as unknown[]).filter((a): a is string => typeof a === 'string')
           : [];
-        const baseCmd = command.split('/').pop() ?? command;
         const invocation = `${command} ${argList.join(' ')}`.trim();
 
-        if (SHELL_C.test(baseCmd) && argList.includes('-c')) {
+        if (shellCommandWrapper(command, argList)) {
           evidence.push({
             file: config.filePath,
             snippet: `mcp.servers[${name}]: ${invocation}`,
-            detail: `MCP server invoked via "${baseCmd} -c …" — argv injection becomes shell injection`,
+            detail: `MCP server invoked via "${shellCommandWrapper(command, argList)} -c …" — argv injection becomes shell injection`,
           });
         }
 
@@ -72,15 +68,13 @@ export const at007 = defineCheck({
           }
         }
 
-        if (PACKAGE_RUNNERS.has(baseCmd)) {
-          const pkgArg = argList.find(a => !a.startsWith('-'));
-          if (pkgArg && !PINNED.test(pkgArg) && !SHA_PINNED.test(pkgArg) && !PYPI_PINNED.test(pkgArg)) {
-            evidence.push({
-              file: config.filePath,
-              snippet: `mcp.servers[${name}]: ${invocation}`,
-              detail: `Runs "${pkgArg}" via ${baseCmd} with no version pin — every launch may fetch a different release`,
-            });
-          }
+        const pkg = runnerPackage(command, argList);
+        if (pkg && !isPinnedOrLocal(pkg)) {
+          evidence.push({
+            file: config.filePath,
+            snippet: `mcp.servers[${name}]: ${invocation}`,
+            detail: `Runs ${pinProblem(pkg)} — every launch may fetch a different release`,
+          });
         }
       }
     }

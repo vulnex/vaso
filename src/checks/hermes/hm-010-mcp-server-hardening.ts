@@ -1,11 +1,9 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { runnerPackage, isPinnedOrLocal, pinProblem } from '../../mcp/package-pin.js';
+import { shellCommandWrapper } from '../../mcp/shell-wrapper.js';
 import { queryPermissions } from '../../core/permissions.js';
 
-const PACKAGE_RUNNERS = new Set(['npx', 'pnpm', 'yarn', 'bunx', 'uvx', 'pipx']);
-const PINNED = /@\d+\.\d+\.\d+/;
-const SHA_PINNED = /(?:@sha256:|#[a-f0-9]{7,40})/i;
-const SHELL_C = /^(?:bash|sh|zsh|fish|cmd|powershell|pwsh)$/i;
 
 export const hm010 = defineCheck({
   id: 'HM-010',
@@ -32,14 +30,13 @@ export const hm010 = defineCheck({
         const argList = Array.isArray(args)
           ? (args as unknown[]).filter((a): a is string => typeof a === 'string')
           : [];
-        const baseCmd = command.split('/').pop() ?? command;
 
         // Shell-c invocation: `bash -c "..."` lets injected args run anything
-        if (SHELL_C.test(baseCmd) && argList.includes('-c')) {
+        if (shellCommandWrapper(command, argList)) {
           evidence.push({
             file: config.filePath,
             snippet: `mcp_servers.${name}: ${command} ${argList.join(' ')}`,
-            detail: `MCP server invoked via "${baseCmd} -c …" — argv injection becomes shell injection`,
+            detail: `MCP server invoked via "${shellCommandWrapper(command, argList)} -c …" — argv injection becomes shell injection`,
           });
         }
 
@@ -60,15 +57,13 @@ export const hm010 = defineCheck({
         }
 
         // Unpinned package runner
-        if (PACKAGE_RUNNERS.has(baseCmd)) {
-          const pkgArg = argList.find(a => !a.startsWith('-'));
-          if (pkgArg && !PINNED.test(pkgArg) && !SHA_PINNED.test(pkgArg)) {
-            evidence.push({
-              file: config.filePath,
-              snippet: `mcp_servers.${name}: ${command} ${argList.join(' ')}`,
-              detail: `Runs "${pkgArg}" via ${baseCmd} with no version pin — supply-chain risk`,
-            });
-          }
+        const pkg = runnerPackage(command, argList);
+        if (pkg && !isPinnedOrLocal(pkg)) {
+          evidence.push({
+            file: config.filePath,
+            snippet: `mcp_servers.${name}: ${command} ${argList.join(' ')}`,
+            detail: `Runs ${pinProblem(pkg)} — supply-chain risk`,
+          });
         }
       }
     }

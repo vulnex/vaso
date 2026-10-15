@@ -1,31 +1,24 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { runnerPackage, isPinnedOrLocal, pinProblem } from '../../mcp/package-pin.js';
 
 interface ServerSpec {
   command?: string;
   args?: unknown;
 }
 
-const PACKAGE_RUNNERS = new Set(['npx', 'pnpm', 'yarn', 'bunx', 'uvx', 'pipx']);
-const PINNED_PACKAGE = /@\d+\.\d+\.\d+/;
-const SHA_PINNED = /(?:@sha256:|#[a-f0-9]{7,40})/i;
 
 function checkServer(name: string, server: ServerSpec, file: string, evidence: Evidence[]): void {
   const command = server.command;
   if (typeof command !== 'string') return;
-  const baseCmd = command.split('/').pop() ?? command;
-  if (!PACKAGE_RUNNERS.has(baseCmd)) return;
-
+  const pkg = runnerPackage(command, server.args);
+  if (!pkg || isPinnedOrLocal(pkg)) return;
   const args = Array.isArray(server.args) ? (server.args as unknown[]).filter((a): a is string => typeof a === 'string') : [];
-  const pkgArg = args.find(a => !a.startsWith('-'));
-  if (!pkgArg) return;
-
-  if (PINNED_PACKAGE.test(pkgArg) || SHA_PINNED.test(pkgArg)) return;
 
   evidence.push({
     file,
     snippet: `mcpServers.${name}: ${command} ${args.join(' ')}`,
-    detail: `MCP server runs "${pkgArg}" via ${baseCmd} with no version pin — supply chain risk`,
+    detail: `MCP server runs ${pinProblem(pkg)} — supply chain risk`,
   });
 }
 

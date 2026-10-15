@@ -1,10 +1,8 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { runnerPackage, isPinnedOrLocal, pinProblem } from '../../mcp/package-pin.js';
 import { markUntrustedProject, mcpServers } from './shared.js';
 
-const PACKAGE_RUNNERS = new Set(['npx', 'uvx', 'bunx', 'pnpx']);
-const PINNED = /@\d+\.\d+\.\d+|==\d+\.\d+/;
-const SHA_PINNED = /(?:@sha256:|#[a-f0-9]{7,40})/i;
 
 export const aba006 = defineCheck({
   id: 'ABA-006',
@@ -19,15 +17,13 @@ export const aba006 = defineCheck({
 
     for (const { config, server, path } of mcpServers(ctx.configs)) {
       if (typeof server.command !== 'string') continue;
-      const runner = server.command.split(/[\\/]/).pop() ?? server.command;
-      if (!PACKAGE_RUNNERS.has(runner)) continue;
+      const pkg = runnerPackage(server.command, server.args);
+      if (!pkg || isPinnedOrLocal(pkg)) continue;
       const args = Array.isArray(server.args) ? server.args.filter((a): a is string => typeof a === 'string') : [];
-      const pkg = args.find(a => !a.startsWith('-'));
-      if (!pkg || PINNED.test(pkg) || SHA_PINNED.test(pkg)) continue;
       evidence.push({
         file: config.filePath,
         snippet: `${path}: ${server.command} ${args.join(' ')}`,
-        detail: `Runs "${pkg}" via ${runner} with no version pin — every launch fetches whatever is published`,
+        detail: `Runs ${pinProblem(pkg)} — every launch fetches whatever is published`,
       });
     }
 

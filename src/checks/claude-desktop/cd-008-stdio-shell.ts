@@ -1,13 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-
-const SHELL_BINS = new Set(['sh', 'bash', 'zsh', 'fish', 'dash', 'ksh']);
-const SHELL_EXEC_FLAGS = new Set(['-c', '-cu', '-uc']);
-
-function basename(p: string): string {
-  const idx = Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'));
-  return idx >= 0 ? p.slice(idx + 1) : p;
-}
+import { shellCommandWrapper } from '../../mcp/shell-wrapper.js';
 
 export const cd008 = defineCheck({
   id: 'CD-008',
@@ -33,9 +26,8 @@ export const cd008 = defineCheck({
           ? (server.args as unknown[]).filter((a): a is string => typeof a === 'string')
           : [];
 
-        const base = basename(command);
-        if (!SHELL_BINS.has(base)) continue;
-        if (!args.some(a => SHELL_EXEC_FLAGS.has(a))) continue;
+        const base = shellCommandWrapper(command, args);
+        if (!base) continue;
 
         evidence.push({
           file: config.filePath,

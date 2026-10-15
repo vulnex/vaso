@@ -1,11 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { runnerPackage, isPinnedOrLocal, pinProblem } from '../../mcp/package-pin.js';
 
-const PACKAGE_RUNNERS = new Set(['npx', 'uvx']);
-// Matches name@1.2.3 and @scope/name@1.2.3 (the pattern can appear anywhere
-// in the argument, which covers scoped packages).
-const PINNED_PACKAGE = /@\d+\.\d+\.\d+/;
-const SHA_PINNED = /(?:@sha256:|#[a-f0-9]{7,40})/i;
 
 export const dev004 = defineCheck({
   id: 'DEV-004',
@@ -28,22 +24,16 @@ export const dev004 = defineCheck({
         const args = (server as Record<string, unknown>).args;
         if (typeof command !== 'string') continue;
 
-        const baseCmd = command.split('/').pop() ?? command;
-        if (!PACKAGE_RUNNERS.has(baseCmd)) continue;
-
+        const pkg = runnerPackage(command, args);
+        if (!pkg || isPinnedOrLocal(pkg)) continue;
         const argList = Array.isArray(args)
           ? (args as unknown[]).filter((a): a is string => typeof a === 'string')
           : [];
-        // Skip runner flags (-y, --yes, …); the first non-flag arg is the package
-        const pkgArg = argList.find(a => !a.startsWith('-'));
-        if (!pkgArg) continue;
-
-        if (PINNED_PACKAGE.test(pkgArg) || SHA_PINNED.test(pkgArg)) continue;
 
         evidence.push({
           file: config.filePath,
           snippet: `mcpServers.${name}: ${command} ${argList.join(' ')}`,
-          detail: `Runs "${pkgArg}" via ${baseCmd} with no version pin — supply chain risk`,
+          detail: `Runs ${pinProblem(pkg)} — supply chain risk`,
         });
       }
     }

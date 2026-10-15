@@ -1,9 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { runnerPackage, isPinnedOrLocal, pinProblem } from '../../mcp/package-pin.js';
 
-const PACKAGE_RUNNERS = new Set(['npx', 'pnpm', 'yarn', 'bunx', 'uvx', 'pipx']);
-const PINNED_PACKAGE = /@\d+\.\d+\.\d+/;
-const SHA_PINNED = /(?:@sha256:|#[a-f0-9]{7,40})/i;
 
 interface LocalServer {
   type?: string;
@@ -24,20 +22,24 @@ function checkLocal(name: string, server: LocalServer, file: string, evidence: E
 
   const baseCmd = exec.split('/').pop() ?? exec;
 
-  // (a) Bare runner with no version pin → supply chain risk
-  if (PACKAGE_RUNNERS.has(baseCmd)) {
-    const pkgArg = cmd.slice(1).find(a => typeof a === 'string' && !a.startsWith('-')) as string | undefined;
-    if (pkgArg && !PINNED_PACKAGE.test(pkgArg) && !SHA_PINNED.test(pkgArg)) {
+  // (a) Package runner with no version pin → supply chain risk
+  const pkg = runnerPackage(exec, cmd.slice(1));
+  if (pkg) {
+    if (!isPinnedOrLocal(pkg)) {
       evidence.push({
         file,
         snippet: `mcp.${name}.command = ${cmd.join(' ')}`,
-        detail: `MCP server runs "${pkgArg}" via ${baseCmd} with no version pin — supply chain risk`,
+        detail: `MCP server runs ${pinProblem(pkg)} — supply chain risk`,
       });
     }
     return;
   }
 
-  // (b) Bare bin name (not absolute, not ./relative) → PATH injection risk
+  // (b) Bare bin name (not absolute, not ./relative) → PATH injection risk.
+  // A standard interpreter running an absolute script (`node /abs/server.js`) is the norm.
+  const interpreterWithScript = /^(?:node|bun|deno|python[\d.]*|ruby|perl)$/.test(exec)
+    && cmd.slice(1).some(a => typeof a === 'string' && (a.startsWith('/') || a.startsWith('~/')));
+  if (interpreterWithScript) return;
   if (!exec.startsWith('/') && !exec.startsWith('./') && !exec.startsWith('../') && !exec.startsWith('~')) {
     evidence.push({
       file,

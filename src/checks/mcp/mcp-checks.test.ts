@@ -3409,6 +3409,27 @@ describe('MCP-034 steering text in returned content', () => {
 describe('MCP-010 with runners given by path', () => {
   const cfg = (server: MCPConfig['servers'][number]): MCPConfig[] => [{ source: 'Codex', filePath: '/tmp/config.toml', servers: [server] }];
 
+  it('reads every runner\'s pin the way the runner does', async () => {
+    const run = (command: string, args: string[]) => mcp010.run(makeContext({ mcpConfigs: cfg({ name: 's', command, args, transport: 'stdio' }) }));
+    for (const [command, args] of [
+      ['uvx', ['--from', 'mcp-server-time==2025.9.25', 'mcp-server-time']],
+      ['uvx', ['mcp-server-fetch@2025.4.7']],
+      ['pnpm', ['dlx', 'pkg@1.2.3']],
+      ['pipx', ['run', '--spec', 'pkg==1.0', 'pkg']],
+      ['npx', ['--package=pkg@1.2.3', 'bin']],
+    ] as Array<[string, string[]]>) {
+      expect((await run(command, args)).passed, `${command} ${args.join(' ')}`).toBe(true);
+    }
+    for (const [command, args] of [
+      ['npx', ['-y', 'pkg@next']],
+      ['npx', ['pkg@^1.2.0']],
+      ['uvx', ['pkg>=1.0']],
+      ['pnpm', ['dlx', 'pkg']],
+    ] as Array<[string, string[]]>) {
+      expect((await run(command, args)).passed, `${command} ${args.join(' ')}`).toBe(false);
+    }
+  });
+
   it('reads a pinned --from spec, not an option value (godot-ai via uvx)', async () => {
     const result = await mcp010.run(makeContext({
       mcpConfigs: cfg({ name: 'godot-ai', command: '/Users/me/.local/bin/uvx', transport: 'stdio',

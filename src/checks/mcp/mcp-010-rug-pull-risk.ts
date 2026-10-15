@@ -1,26 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { inferPackageName, runnerName, uvRunScript } from '../../mcp/source-resolver.js';
-
-function isVersionPinned(packageArg: string): boolean {
-  // Scoped packages: @scope/name@version
-  if (packageArg.startsWith('@')) {
-    const afterScope = packageArg.indexOf('/', 1);
-    if (afterScope === -1) return false;
-    const rest = packageArg.slice(afterScope + 1);
-    // Must have @version after the package name, and not @latest
-    const atIdx = rest.indexOf('@');
-    if (atIdx === -1) return false;
-    const version = rest.slice(atIdx + 1);
-    return version !== 'latest' && version.length > 0;
-  }
-
-  // Unscoped packages: name@version
-  const atIdx = packageArg.indexOf('@');
-  if (atIdx === -1) return false;
-  const version = packageArg.slice(atIdx + 1);
-  return version !== 'latest' && version.length > 0;
-}
+import { runnerPackage, isPinnedOrLocal, pinProblem } from '../../mcp/package-pin.js';
 
 export const mcp010 = defineCheck({
   id: 'MCP-010',
@@ -38,44 +18,22 @@ export const mcp010 = defineCheck({
       for (const server of config.servers) {
         if (!server.command || !server.args?.length) continue;
 
-        const cmd = runnerName(server.command);
-        const args = server.args;
-
-        // npx without version pinning (the command may be a path to npx)
-        if (cmd === 'npx' || cmd === 'bunx' || cmd === 'pnpx') {
-          const packageArg = inferPackageName(server);
-          const isUnpinned = packageArg && !isVersionPinned(packageArg);
-
-          if (isUnpinned) {
-            evidence.push({
-              file: config.filePath,
-              snippet: `Server "${server.name}": npx ${packageArg}`,
-              detail: 'Package not version-pinned — npx will always fetch latest, enabling rug-pull attacks',
-            });
-
-            // Only flag auto-install when package is also unpinned
-            if (args.some(a => a === '-y' || a === '--yes')) {
-              evidence.push({
-                file: config.filePath,
-                snippet: `Server "${server.name}": npx -y (auto-install)`,
-                detail: 'Auto-install enabled with unpinned package — will install without confirmation',
-              });
-            }
-          }
-        }
-
-        // uvx without version pinning. `uv [--directory d] run server.py` runs a
-        // local script — there is no package to pin.
-        if (cmd === 'uvx' || (cmd === 'uv' && !uvRunScript(args))) {
-          // `uvx --link-mode copy --from pkg==1.2 tool`: the spec is --from's value.
-          const packageArg = inferPackageName(server);
-          if (packageArg && !packageArg.includes('==') && !packageArg.includes('>=')) {
-            evidence.push({
-              file: config.filePath,
-              snippet: `Server "${server.name}": ${cmd} ${packageArg}`,
-              detail: 'Python package not version-pinned — enables rug-pull attacks',
-            });
-          }
+        const pkg = runnerPackage(server.command, server.args);
+        if (!pkg || isPinnedOrLocal(pkg)) continue;
+        evidence.push({
+          file: config.filePath,
+          snippet: `Server "${server.name}": ${pkg.runner} ${pkg.spec}`,
+          detail: pkg.ecosystem === 'npm'
+            ? `Package ${pinProblem(pkg)} — every launch fetches what the registry serves, enabling rug-pull attacks`
+            : `Python package ${pinProblem(pkg)} — enables rug-pull attacks`,
+        });
+        // Auto-install without a prompt makes an unpinned package worse
+        if (pkg.ecosystem === 'npm' && server.args.some(a => a === '-y' || a === '--yes')) {
+          evidence.push({
+            file: config.filePath,
+            snippet: `Server "${server.name}": ${pkg.runner} -y (auto-install)`,
+            detail: 'Auto-install enabled with unpinned package — will install without confirmation',
+          });
         }
       }
     }
@@ -83,7 +41,6 @@ export const mcp010 = defineCheck({
     return h.fromEvidence(evidence, {
       passed: 'MCP server packages are properly version-pinned',
       failed: (n) => `Found ${n} supply chain risk(s) from unpinned versions`,
-      fixable: evidence.length > 0,
       fixDescription: 'Pin package versions (e.g., npx @scope/package@1.2.3)',
     });
   },
