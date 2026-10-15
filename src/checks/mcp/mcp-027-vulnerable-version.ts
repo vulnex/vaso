@@ -68,12 +68,14 @@ export const mcp027 = defineCheck({
     const store = ctx.mcpStateStore ?? defaultMcpStateStore();
     // Servers per package: a pre-1.3.0 history (keyed by package alone)
     // belongs to a server only when it is the one using that package.
+    // Unpinned servers never record a version, so they don't count.
     const serversPerPackage = new Map<string, number>();
     for (const config of ctx.mcpConfigs ?? []) {
       for (const server of config.servers) {
         const spec = npmInstallSpec(server);
         if (!spec) continue;
-        const { name } = parsePackageSpec(spec);
+        const { name, version } = parsePackageSpec(spec);
+        if (!version || !parseSemVer(version)) continue;
         serversPerPackage.set(name, (serversPerPackage.get(name) ?? 0) + 1);
       }
     }

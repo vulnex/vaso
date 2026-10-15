@@ -2289,6 +2289,12 @@ describe('MCP-027 Vulnerable / Rolled-Back MCP Version', () => {
     const shared = new InMemoryMcpStateStore();
     await shared.save('version-@mcp/server-fs', { highest: '2.0.0' });
     expect((await scan027(shared, ['a', '@mcp/server-fs@1.0.0'], ['b', '@mcp/server-fs@1.0.0'])).passed).toBe(true);
+
+    // an unpinned server on the same package never recorded a version: the
+    // history is still the pinned one's
+    const withUnpinned = new InMemoryMcpStateStore();
+    await withUnpinned.save('version-@mcp/server-fs', { highest: '2.0.0' });
+    expect((await scan027(withUnpinned, ['a', '@mcp/server-fs@1.0.0'], ['b', '@mcp/server-fs'])).passed).toBe(false);
   });
 
   it('passes and records the version on first sight', async () => {
