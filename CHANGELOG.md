@@ -8,6 +8,8 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Security
 
+- **`vaso update` never installs an older feed.** `--force` only re-installs the cached version; before, every update accepted a replayed older signed feed.
+- **Credentials quoted in findings are masked** (URL passwords, `?access_token=`-style parameters, `--token=` arguments) in every report format, baselines and `vaso mcp list`.
 - **`vaso fix` never writes or chmods through a symlink and never blocks on a FIFO.** Every fix and backup opens its target with `O_NOFOLLOW | O_NONBLOCK` and works only on regular files (`src/remediation/safe-file.ts`): a config replaced by a symlink is refused ("is a symlink — vaso fix won't write it") instead of having the link target rewritten, and a FIFO or device in place of a config is refused instead of hanging the run. Backup copies are written owner-only.
 - **Rollback is exact.** Each backup records a manifest (full mode including setuid/setgid, content hash before and after the fix, the modes of directories a fix may chmod). Rollback restores file and directory modes exactly, restores read-only files, and leaves alone a file edited after the fix (reported, exit 2) instead of discarding the edit. Backups from older versions still restore.
 - **A root scan never runs another user's binaries as root.** Under `--all-users` as root and in a probe run with `--sudo`, an agent CLI owned by a user is version-queried as that user, a root-owned one only when no other user could have replaced it or a directory above it, and the PATH it gets keeps only root-safe directories; the probe resolves system directories before user ones when it runs as root (probe ≥ 1.3.1).
@@ -43,6 +45,11 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - **OPC-002 judges the effective permission.** OpenCode's allow-by-default tools are info whether set or not; critical is kept for `external_directory` allow, broad external paths and dangerous scoped bash rules. Scoped `external_directory` rules are no longer treated as global.
 - Codex: `approval_policy = "never"` with a read-only sandbox, and `inherit = "all"` with secret filtering or an `include_only` allowlist, are info; CDX-002 names network access when that is the only weakness. DEV-001's missing-deny finding is info, as in CC-008.
 - **Documentation placeholders are no longer reported as leaked secrets** (`sk-ant-your-…`, `ghp_your_token`, `sk-ant-...`, AWS `…EXAMPLE` keys) by any plaintext-secret check.
+- **The GitHub Action uploads SARIF when there are findings.** It used to stop the step before recording the report path.
+- **Remote scans read the same files as local ones**: dependency lockfiles and installed copies for ADV-002, skill directories that can't be listed, and credential files (metadata only). Snapshots record the probe version, and scans warn when it is older (probe ≥ 1.3.1); snapshot field types are validated.
+- **Quieter `--diff`:** findings are matched by location, there is one baseline per agent and host, and reports name the VASO version.
+- `detect --output-dir` works locally and on snapshots; `--no-color`/`NO_COLOR` win over `FORCE_COLOR`; `--parallel`, `--ssh-timeout` and `--ssh-retries` are validated on every scan; a plugin reporter can't replace a built-in format; terminal output shows line breaks in scanned values as `\n`; JSON5/JSONC line comments end at CR; shell, data and Python files are no longer parsed as JavaScript.
+- `vaso-quick.sh` reads OpenClaw 2026 configs and exits 1 on findings; the npm tarball ships `scripts/prepare.mjs`.
 
 ## [1.3.0] - 2026-10-15
 
