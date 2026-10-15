@@ -6,6 +6,8 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-10-15
+
 ### Security
 
 - **`vaso fix --rollback` no longer writes through symlinks.** A restored file that has been replaced by a symlink (or by anything but a regular file) since the fix run is skipped with a message instead of having the backup copied and chmod-ed onto the link target. The backup stays pending.

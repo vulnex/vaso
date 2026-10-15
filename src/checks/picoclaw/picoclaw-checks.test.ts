@@ -186,7 +186,7 @@ describe('PCL-007 broad tool paths', () => {
 describe('PCL-007 private host whitelist and relocated config', () => {
   it('flags SSRF allowances that re-open loopback, metadata or every host', async () => {
     const r = await byId('PCL-007').run(ctx([cfg(onboard({
-      tools: { web: { private_host_whitelist: ['*', '127.0.0.1', '169.254.169.254', '10.0.0.0/8', 'nas.lan', '192.168.1.20'] } },
+      tools: { web: { private_host_whitelist: ['*', '127.0.0.1', '169.254.169.254', '10.0.0.0/8', 'nas.lan', '10.66.0.20'] } },
     }))]));
     expect(r.passed).toBe(false);
     expect(r.severity).toBe('warning');

@@ -7,9 +7,9 @@ branding:
 
 inputs:
   version:
-    description: 'VASO version to install. A release tag (e.g. v1.2.1) installs the prebuilt release tarball; a branch or commit SHA installs from the git ref.'
+    description: 'VASO version to install. A release tag (e.g. v1.3.0) installs the prebuilt release tarball; a branch or commit SHA installs from the git ref.'
     required: false
-    default: 'v1.2.1'
+    default: 'v1.3.0'
   agent:
     description: 'Scan a single agent only (openclaw, nanoclaw, picoclaw, ironclaw, nanobot, zeroclaw, nemoclaw, openshell, hermes, lyrie, atomic-agent, claude-code, claude-desktop, chatgpt-desktop, codex, opencode, gemini-cli, qwen-code, copilot-cli, cursor-cli, windsurf, devin, abacus, meta-muse, comet). Omit to scan all detected agents.'
     required: false

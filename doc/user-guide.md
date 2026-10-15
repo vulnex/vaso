@@ -11,7 +11,7 @@ VASO is distributed from GitHub. The npm name `vaso` is held by an unrelated pac
 curl -fsSL https://raw.githubusercontent.com/vulnex/vaso/main/install.sh | bash
 
 # Or install the prebuilt release tarball directly with npm
-npm install -g https://github.com/vulnex/vaso/releases/download/v1.2.1/vaso-1.2.1.tgz
+npm install -g https://github.com/vulnex/vaso/releases/download/v1.3.0/vaso-1.3.0.tgz
 ```
 
 Requirements: Node.js 20 or later.
@@ -625,7 +625,7 @@ jobs:
           node-version: '20'
 
       - name: Install VASO
-        run: npm install -g https://github.com/vulnex/vaso/releases/download/v1.2.1/vaso-1.2.1.tgz
+        run: npm install -g https://github.com/vulnex/vaso/releases/download/v1.3.0/vaso-1.3.0.tgz
 
       - name: Run VASO scan
         run: vaso scan --format sarif -o results.sarif
