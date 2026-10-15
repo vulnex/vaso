@@ -240,7 +240,7 @@ describe('POL-005: Plaintext Credential Files', () => {
     expect(result.evidence?.map(e => e.file)).toEqual([join(tempDir, 'a', 'b', '.npmrc')]);
   });
 
-  it('lists a credential file a remote snapshot holds without content as unverified (info)', async () => {
+  it('passes, saying it could not check, for a credential file a remote snapshot holds without content', async () => {
     const { SnapshotFSProvider } = await import('../../core/snapshot-fs-provider.js');
     const fs = new SnapshotFSProvider({
       version: 1, hostname: 'h', platform: 'linux', homedir: '/h', timestamp: 't',
@@ -250,8 +250,9 @@ describe('POL-005: Plaintext Credential Files', () => {
     });
     const ctx = { ...makeContext([], '/h/.agent'), fs };
     const result = await pol005.run(ctx);
-    expect(result.evidence?.[0]).toMatchObject({ file: '/h/.agent/.npmrc', mitigated: true });
-    expect(result.severity).toBe('info');
+    // Nothing was read, so nothing was found — a pass that says why, not "found 1 plaintext credential"
+    expect(result.passed).toBe(true);
+    expect(result.message).toMatch(/1 credential file\(s\) present; their content is not collected by remote scans/);
   });
 
   it('passes with clean credential file', async () => {

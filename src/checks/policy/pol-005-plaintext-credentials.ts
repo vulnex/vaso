@@ -108,6 +108,11 @@ export const pol005 = defineCheck({
       }
     }
 
+    // Only files a remote scan couldn't read: nothing was found, and saying
+    // "found N plaintext credentials" would claim what was never checked
+    if (evidence.length > 0 && evidence.every(e => e.mitigated)) {
+      return h.passed(`${evidence.length} credential file(s) present; their content is not collected by remote scans — scan the host locally to check them for plaintext keys`);
+    }
     return h.fromEvidence(evidence, {
       passed: 'No plaintext credentials found in common credential files',
       failed: (n) => `Found ${n} plaintext credential(s) in credential files`,
