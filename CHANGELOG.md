@@ -39,6 +39,10 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - CFG-009 flags credentials copied from documentation (`replace-with-…`, `your_token`, `<token>`, `abcd1234…`); CFG-001 names a host set only by an env override and no longer offers a file fix for it.
 - `vaso fix` restricts Atomic Agent `atomic-mail/session.json` and Hermes `auth.json` / `mcp-tokens/*.json` (AT-005, HM-003); NanoClaw checkouts under `~/projects` and `~/Projects` are one install in macOS snapshots.
 - IC-007 reports IronClaw 1.x `default_approval_policy = "minimal"` as info, since 1.4 doesn't enforce `[policy]` yet; ZC-014 no longer implies the `auto` backend means a sandbox is active and points at `zeroclaw security status`.
+- **Coding-agent checks follow each vendor's documented semantics.** CC-003 no longer flags `docker compose exec`/`npm exec` or constant single-quoted `bash -c` hooks; CC-002 judges the allowed command (either wildcard syntax) instead of any trailing wildcard; CUR-011 covers only hooks that can block an action.
+- **OPC-002 judges the effective permission.** OpenCode's allow-by-default tools are info whether set or not; critical is kept for `external_directory` allow, broad external paths and dangerous scoped bash rules. Scoped `external_directory` rules are no longer treated as global.
+- Codex: `approval_policy = "never"` with a read-only sandbox, and `inherit = "all"` with secret filtering or an `include_only` allowlist, are info; CDX-002 names network access when that is the only weakness. DEV-001's missing-deny finding is info, as in CC-008.
+- **Documentation placeholders are no longer reported as leaked secrets** (`sk-ant-your-…`, `ghp_your_token`, `sk-ant-...`, AWS `…EXAMPLE` keys) by any plaintext-secret check.
 
 ## [1.3.0] - 2026-10-15
 
