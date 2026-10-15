@@ -455,6 +455,11 @@ func (c *collector) collectFileLimit(path string, metadataOnly bool, limit int64
 	ext := strings.ToLower(filepath.Ext(path))
 	assetOnly := metadataOnlyExtensions[ext] && !(c.inSkillTree && skillBinaryExtensions[ext])
 	switch {
+	// Not a regular file (a FIFO, a device, a link to /dev/tty) before
+	// anything else: a metadata-only credential path replaced by one must not
+	// look like a credential file with a mode to fix — locally it isn't one
+	case !info.Mode().IsRegular():
+		return omitted("special")
 	case metadataOnly:
 		return omitted("metadata")
 	case assetOnly:

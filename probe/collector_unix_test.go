@@ -233,3 +233,14 @@ func TestPrimaryGidResolvesTheCurrentUser(t *testing.T) {
 		t.Fatalf("primaryGid(%d) = %d,%v; want %d", os.Getuid(), g, ok, os.Getgid())
 	}
 }
+
+func TestMetadataOnlyFifoIsSpecial(t *testing.T) {
+	fifo := filepath.Join(t.TempDir(), "auth.json")
+	if err := syscall.Mkfifo(fifo, 0o644); err != nil {
+		t.Skip(err)
+	}
+	c := &collector{budget: 1 << 20}
+	if e := c.collectFileLimit(fifo, true, 1<<20); e.Omitted != "special" {
+		t.Fatalf("metadata-only FIFO recorded as %+v", e)
+	}
+}
