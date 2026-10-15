@@ -1,6 +1,6 @@
 import { join, extname, dirname, relative, sep } from 'node:path';
 import { chmod, mkdir, writeFile } from 'node:fs/promises';
-import type { FSProvider } from './fs-provider.js';
+import type { DirentInfo, FSProvider } from './fs-provider.js';
 import type { AgentInstallation } from './types.js';
 import { walkSkillTree } from './skill-walk.js';
 import { LocalFSProvider } from './local-fs-provider.js';
@@ -106,7 +106,40 @@ export async function getSkillFiles(dir: string, fs?: FSProvider): Promise<strin
   } catch {
     // Directory may not exist
   }
+  // A skill directory the scan can enter but not list (mode 111) hides every
+  // file in it from the walk, while the agent still loads SKILL.md by name
+  for (const skillDir of await unlistableSkillDirs(dir, provider)) {
+    const skillMd = join(skillDir, 'SKILL.md');
+    if (!files.includes(skillMd) && await provider.access(skillMd)) files.push(skillMd);
+  }
   return files;
+}
+
+/**
+ * Skill directories directly under `skillsDir` that exist but can't be
+ * listed (EACCES — e.g. mode 111): their files can only be reached by name.
+ * SKL-002 reports them; getSkillFiles still reads their SKILL.md.
+ */
+export async function unlistableSkillDirs(skillsDir: string, fs?: FSProvider): Promise<string[]> {
+  const provider = fs ?? new LocalFSProvider();
+  let entries: DirentInfo[];
+  try {
+    entries = await provider.readdirEntries(skillsDir);
+  } catch {
+    return [];
+  }
+  const out: string[] = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory) continue;
+    const dir = join(skillsDir, entry.name);
+    try {
+      await provider.readdirEntries(dir);
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException | null)?.code;
+      if (code === 'EACCES' || code === 'EPERM') out.push(dir);
+    }
+  }
+  return out;
 }
 
 /** Any execute bit set — what makes an extensionless file a script or program. */

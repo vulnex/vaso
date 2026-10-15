@@ -145,3 +145,29 @@ func TestUnlistableDirectoryStillRecorded(t *testing.T) {
 		t.Fatalf("denying directory not recorded: %v", snap.DirectoryModes)
 	}
 }
+
+func TestUnlistableSkillDirKeepsSkillMd(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root lists any directory")
+	}
+	root := t.TempDir()
+	skill := filepath.Join(root, "skills", "helper")
+	if err := os.MkdirAll(skill, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skill, "SKILL.md"), []byte("# helper"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(skill, 0o111); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(skill, 0o755)
+
+	snap := Collect(ProbeManifest{GlobPatterns: []string{filepath.Join(root, "skills") + "/**"}}, false)
+	if e := snap.Files[filepath.Join(skill, "SKILL.md")]; !e.Exists || e.Content != "# helper" {
+		t.Fatalf("SKILL.md of an unlistable skill dir not collected: %+v", e)
+	}
+	if snap.DirectoryModes[skill] != 0o111 {
+		t.Fatalf("mode of the unlistable skill dir not recorded: %v", snap.DirectoryModes)
+	}
+}

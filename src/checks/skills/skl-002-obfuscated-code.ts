@@ -4,6 +4,7 @@ import { findHighEntropyBlocks } from '../../analyzers/entropy.js';
 import { OBFUSCATION_PATTERNS, isBenignEncodedData } from '../../analyzers/obfuscation.js';
 import { ScanLimitError } from '../../core/file-limits.js';
 import { readSkillText, skillFilesOf, skillsDirsOf } from './skill-files.js';
+import { unlistableSkillDirs } from '../../core/utils.js';
 import { markTestCode } from '../../analyzers/test-paths.js';
 import { ANALYSIS_NESTING_LIMIT, overNestedLines } from '../../analyzers/js-parse.js';
 
@@ -75,6 +76,17 @@ export const skl002 = defineCheck({
         // Padding a file past the size limit hides it from every content
         // check — reported here once (informational) so it stays visible.
         if (err instanceof ScanLimitError) evidence.push({ file, detail: err.detail, mitigated: true });
+      }
+    }
+
+    // A skill directory the scan can't list (mode 111) hides its scripts from
+    // every check while the agent still loads its SKILL.md by name
+    for (const skillsDir of skillsDirsOf(ctx)) {
+      for (const dir of await unlistableSkillDirs(skillsDir, ctx.fs)) {
+        evidence.push({
+          file: dir,
+          detail: 'Skill directory can be entered but not listed — its files are hidden from review and from these checks (the agent still loads SKILL.md by name)',
+        });
       }
     }
 

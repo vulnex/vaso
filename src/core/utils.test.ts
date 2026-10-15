@@ -217,3 +217,25 @@ describe('getSkillFiles', () => {
     expect(files).toHaveLength(2);
   });
 });
+
+describe.skipIf(process.platform === 'win32' || process.getuid?.() === 0)('unlistable skill directories', () => {
+  it('still yields SKILL.md of a skill dir that can be entered but not listed', async () => {
+    const { mkdtemp, mkdir, writeFile, chmod, rm } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const { getSkillFiles, unlistableSkillDirs } = await import('./utils.js');
+    const root = await mkdtemp(join(tmpdir(), 'vaso-skx-'));
+    const skill = join(root, 'helper');
+    await mkdir(skill);
+    await writeFile(join(skill, 'SKILL.md'), '# helper');
+    await writeFile(join(skill, 'run.js'), 'x');
+    await chmod(skill, 0o111);
+    try {
+      expect(await unlistableSkillDirs(root)).toEqual([skill]);
+      expect(await getSkillFiles(root)).toEqual([join(skill, 'SKILL.md')]);
+    } finally {
+      await chmod(skill, 0o755);
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});

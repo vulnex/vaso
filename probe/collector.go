@@ -257,6 +257,9 @@ func Collect(manifest ProbeManifest, escalate bool) ProbeSnapshot {
 			}
 		}
 		c.followLinkedTrees(&snapshot, pattern, matches, false)
+		if c.inSkillTree {
+			c.collectUnlistableSkills(&snapshot, pattern)
+		}
 	}
 	c.inSkillTree = false
 
@@ -1077,4 +1080,34 @@ func expandForEach(req CommandRequest, outputs map[string]CommandOutput) [][]str
 		out = append(out, args)
 	}
 	return out
+}
+
+// collectUnlistableSkills handles a skill directory that can be entered but
+// not listed (mode 111): a glob sees nothing in it, yet the agent still loads
+// SKILL.md by name. Its mode is recorded and SKILL.md collected, as a local
+// scan reads it. The root is the pattern's literal prefix before "/**".
+func (c *collector) collectUnlistableSkills(snapshot *ProbeSnapshot, pattern string) {
+	i := strings.Index(pattern, "/**")
+	if i <= 0 || strings.ContainsAny(pattern[:i], "*?[{") {
+		return
+	}
+	root := pattern[:i]
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		dir := filepath.Join(root, e.Name())
+		if _, err := os.ReadDir(dir); err == nil || !os.IsPermission(err) {
+			continue
+		}
+		recordDirMode(snapshot, dir)
+		skill := filepath.Join(dir, "SKILL.md")
+		if _, exists := snapshot.Files[skill]; !exists {
+			c.collectPath(snapshot, skill, false, false)
+		}
+	}
 }
