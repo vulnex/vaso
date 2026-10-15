@@ -33,7 +33,7 @@ export interface CommandForEach {
   /** String fields of each item, substituted for `{field}` in args. */
   fields: string[];
   /** Value for a field an item lacks (null/empty) — e.g. an OpenShell sandbox
-   *  listed without a workspace lives in `default` (probe ≥ 1.2.2; older probes skip the item). */
+   *  listed without a workspace lives in `default` (probe ≥ 1.3.0; older probes skip the item). */
   defaults?: Record<string, string>;
 }
 
@@ -81,7 +81,7 @@ export interface FileEntry {
    *  base64-encoded (probe ≥ 1.1.0); absent means UTF-8 text. */
   encoding?: 'base64';
   /** Stat failed with permission denied (under a chmod-000 directory): may
-   *  exist but can't be read (probe ≥ 1.2.2). */
+   *  exist but can't be read (probe ≥ 1.3.0). */
   denied?: boolean;
 }
 
