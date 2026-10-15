@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import _traverse from '@babel/traverse';
 import type { Node } from '@babel/types';
-import { parseLenient, sourceChunks, type JsAst } from './js-parse.js';
+import { mayBeJavaScript, parseLenient, sourceChunks, type JsAst } from './js-parse.js';
 import { sinkCallee } from './tool-input-taint.js';
 
 // Handle ESM/CJS interop
@@ -81,6 +81,7 @@ const MAX_CACHED_ANALYSES = 10_000;
 const analysisCache = new Map<string, DataFlowResult[]>();
 
 export function analyzeCode(code: string, filename = 'unknown.js'): DataFlowResult[] {
+  if (!mayBeJavaScript(filename)) return [];
   const key = `${filename}\0${createHash('sha1').update(code).digest('base64')}`;
   const cached = analysisCache.get(key);
   if (cached) return cached.map(r => ({ ...r }));

@@ -28,11 +28,43 @@ export function parseJs(code: string): JsAst | undefined {
 }
 
 function babelParse(code: string): JsAst {
-  return parse(code, {
-    sourceType: 'unambiguous',
-    plugins: ['typescript', 'jsx', 'decorators'],
-    errorRecovery: true,
-  });
+  // With errorRecovery Babel builds an error object for every recoverable
+  // syntax error, and capturing each one's stack dominated the parse of
+  // garbage input (a 2 MB file of them: seconds). The errors' stacks are
+  // never used.
+  const limit = Error.stackTraceLimit;
+  Error.stackTraceLimit = 0;
+  try {
+    return parse(code, {
+      sourceType: 'unambiguous',
+      plugins: ['typescript', 'jsx', 'decorators'],
+      errorRecovery: true,
+    });
+  } finally {
+    Error.stackTraceLimit = limit;
+  }
+}
+
+/**
+ * Files that are certainly not JavaScript/TypeScript. Skill trees hold shell
+ * scripts, data and docs next to code; parsing them as JavaScript finds
+ * nothing real and, with error recovery, can take seconds per file. A name
+ * without a known extension (an MCP server name, an extensionless bin) is
+ * still parsed.
+ */
+const NOT_JS_EXTENSIONS = new Set([
+  '.sh', '.bash', '.zsh', '.fish', '.ps1', '.psm1', '.bat', '.cmd',
+  '.json', '.jsonc', '.json5', '.yaml', '.yml', '.toml', '.ini', '.cfg', '.conf', '.env',
+  '.txt', '.csv', '.tsv', '.log', '.xml', '.html', '.htm', '.css', '.scss', '.svg', '.md', '.mdx', '.rst',
+  '.py', '.rb', '.go', '.rs', '.java', '.kt', '.swift', '.c', '.h', '.cc', '.cpp', '.hpp', '.cs', '.php', '.pl', '.lua', '.r', '.sql',
+]);
+
+/** Whether `filename` could hold JavaScript/TypeScript (see NOT_JS_EXTENSIONS). */
+export function mayBeJavaScript(filename: string): boolean {
+  const dot = filename.lastIndexOf('.');
+  const slash = Math.max(filename.lastIndexOf('/'), filename.lastIndexOf('\\'));
+  if (dot <= slash + 1) return true;
+  return !NOT_JS_EXTENSIONS.has(filename.slice(dot).toLowerCase());
 }
 
 /**

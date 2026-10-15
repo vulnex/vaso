@@ -3,7 +3,7 @@ import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { readSkillText, skillFilesOf, skillsDirsOf } from './skill-files.js';
 import { markTestCode } from '../../analyzers/test-paths.js';
-import { parseJs } from '../../analyzers/js-parse.js';
+import { mayBeJavaScript, parseJs } from '../../analyzers/js-parse.js';
 
 // Handle ESM/CJS interop
 const traverse = typeof _traverse === 'function' ? _traverse : (_traverse as { default: typeof _traverse }).default;
@@ -42,6 +42,9 @@ export const skl012 = defineCheck({
       try {
         const code = await readSkillText(ctx.fs, file, 'code');
         if (code === undefined) continue;
+        // Shell, Python and data files aren't JavaScript; Babel's error
+        // recovery would invent functions in them
+        if (!mayBeJavaScript(file)) continue;
         const ast = parseJs(code);
         if (!ast) continue;
 

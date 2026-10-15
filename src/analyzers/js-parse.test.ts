@@ -54,3 +54,19 @@ describe('JS direct process starts (SKL-003 tier)', () => {
     expect(flow("const { spawn } = require('child_process');\nspawn(prog, args);")?.noShell).toBeUndefined();
   });
 });
+
+describe('analysis cost on non-JavaScript input', () => {
+  it('only parses names that may be JavaScript', async () => {
+    const { mayBeJavaScript } = await import('./js-parse.js');
+    for (const f of ['a.js', 'b.mjs', 'c.tsx', 'bin/tool', '@scope/server-x', 'my.server']) expect(mayBeJavaScript(f), f).toBe(true);
+    for (const f of ['run.sh', 'data.json', 'x.yaml', 'tool.py', 'README.md']) expect(mayBeJavaScript(f), f).toBe(false);
+  });
+
+  it('keeps an error-recovery parse of garbage fast (no stack capture per error)', () => {
+    const garbage = 'x '.repeat(200_000);
+    const start = Date.now();
+    parseLenient(garbage);
+    expect(Date.now() - start).toBeLessThan(4000);
+    expect(Error.stackTraceLimit).toBeGreaterThan(0); // restored
+  });
+});
