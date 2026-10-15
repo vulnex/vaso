@@ -47,7 +47,7 @@ export const DIRECTIVE_PATTERNS: DirectivePattern[] = [
   // not a capitalised word), so it only matches an imperative directive sentence.
   { re: /\b[Ii]nstructions?\s*:\s+[A-Z][a-z]/, label: 'directive prefix ("Instruction: …")' },
   // A tag, optionally with attributes — not prose in angle brackets (`<system tmp>/cache`)
-  { re: /<\/?(?:important|system|instructions?)(?:\s+[\w:-]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+))*\s*\/?>/i, label: 'hidden-instruction tag (<important>/<system>)' },
+  { re: /<\/?(?:important|system|instructions?)(?:\s+[\w:-]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>"']+))*\s*\/?>/i, label: 'hidden-instruction tag (<important>/<system>)' },
   // <secret>/<hidden> are also CLI usage placeholders (`--client-secret <secret>`);
   // as a hiding tag they open a block (end of line) or wrap text up to a close tag.
   { re: /<(secret|hidden)>(?:\s*$|[^<]*<\/\1>)|<\/(?:secret|hidden)>\s*$/im, label: 'hidden-instruction tag (<secret>/<hidden>)' },

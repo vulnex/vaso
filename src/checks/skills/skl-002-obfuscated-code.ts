@@ -31,6 +31,8 @@ export const skl002 = defineCheck({
         // Entropy-based detection. Data URIs and integrity digests are
         // high-entropy by nature, not hidden code.
         const blocks = findHighEntropyBlocks(code).filter(b => !isBenignEncodedData(lines[b.line - 1]));
+        // One finding per line (a Set: scanning the evidence for each match was quadratic)
+        const reportedLines = new Set(blocks.map(b => b.line));
         for (const block of blocks) {
           evidence.push({
             file,
@@ -52,8 +54,8 @@ export const skl002 = defineCheck({
               if (label === 'Long base64-encoded string' && isBenignEncodedData(line)) continue;
               if (label === 'atob() decoding' && !hasEncodedLiterals) continue;
               // Avoid duplicate evidence on the same line
-              const alreadyReported = evidence.some(e => e.file === file && e.line === i + 1);
-              if (!alreadyReported) {
+              if (!reportedLines.has(i + 1)) {
+                reportedLines.add(i + 1);
                 evidence.push({
                   file,
                   line: i + 1,

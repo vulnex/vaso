@@ -104,7 +104,9 @@ function trimUrlTail(url: string): string {
 }
 
 /** URLs in free text end at whitespace, a double quote or `<>`. */
-const URL_IN_TEXT = /\b[a-z][a-z0-9+.-]*:\/\/[^\s"<>]+/gi;
+// The scheme is bounded: an unbounded `[a-z0-9+.-]*` rescanned the rest of a
+// long `a-a-a…` token from every word boundary (quadratic)
+const URL_IN_TEXT = /\b[a-z][a-z0-9+.-]{0,31}:\/\/[^\s"<>]+/gi;
 /** `Authorization: Bearer x`, `X-Api-Key: x`, `Cookie: x` header lines. */
 const SECRET_HEADER = /(^|[\s"'])((?:proxy-)?authorization|cookie|x-[\w-]*(?:key|token|secret|auth|session)[\w-]*|api[_-]?key)(\s*:\s*)((?:bearer|basic|token|bot|digest)\s+)?([^\s"',;]+)/gi;
 /** `NAME=value` where NAME looks like a credential (env lines, `docker -e`, `env K=V cmd`, inline `sh -c`). */

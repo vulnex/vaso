@@ -19,7 +19,7 @@ const TARGETING = [
   /\b(?:seed\s*phrase|mnemonic|private[\s_-]*key|secret[\s_-]*recovery)\b/i,
 ];
 /** A transfer whose destination is written into the code. */
-const TRANSFER_TO_LITERAL = /\b(?:transfer|sendTransaction|send_transaction|sendTransfer|transferFrom|safeTransfer)\s*\([^)]*(?:0x[0-9a-fA-F]{40}|\b[13][a-km-zA-HJ-NP-Z1-9]{25,34}\b)/;
+const TRANSFER_TO_LITERAL = /\b(?:transfer|sendTransaction|send_transaction|sendTransfer|transferFrom|safeTransfer)\s*\([^)]{0,200}?(?:0x[0-9a-fA-F]{40}|\b[13][a-km-zA-HJ-NP-Z1-9]{25,34}\b)/;
 
 export const skl009 = defineCheck({
   id: 'SKL-009',
