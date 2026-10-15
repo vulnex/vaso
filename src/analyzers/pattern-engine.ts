@@ -36,9 +36,11 @@ export const SECURITY_PATTERNS: PatternRule[] = [
   // `| /bin/zsh`); `\b` keeps `| shasum` out.
   { id: 'CP-001', pattern: /curl\s+[^|]*\|\s*(?:sudo\s+(?:-\S+\s+)*)?(?:env\s+(?:[^\s=]+=\S*\s+)*)?(?:\S*\/)?(?:ba|z|k|da|fi)?sh\b/i, category: 'curl-pipe', severity: 'critical', description: 'Curl-pipe-shell execution' },
   { id: 'CP-002', pattern: /wget\s+[^|]*\|\s*(?:sudo\s+(?:-\S+\s+)*)?(?:env\s+(?:[^\s=]+=\S*\s+)*)?(?:\S*\/)?(?:ba|z|k|da|fi)?sh\b/i, category: 'curl-pipe', severity: 'critical', description: 'Wget-pipe-shell execution' },
-  // Only when Python reads its program from stdin (`| python`, `| python3 -`):
-  // `| python -m json.tool` and `| python -c "…"` read the download as data
-  { id: 'CP-003', pattern: /curl\s+[^|]*\|\s*(?:sudo\s+(?:-\S+\s+)*)?(?:\S*\/)?python[\d.]*\b(?:\s+-(?![cm]\b)[A-Za-z]+)*(?:\s+-)?\s*(?=$|[;&|)'"`#\n])/i, category: 'curl-pipe', severity: 'critical', description: 'Curl-pipe-python execution' },
+  // Only when Python runs the download: its program from stdin (`| python`,
+  // `| python3 - --args`, `| python3 /dev/stdin`) or `-c` code that executes
+  // stdin (`exec(sys.stdin.read())`). `| python -m json.tool` and
+  // `| python -c "print(…)"` read the download as data.
+  { id: 'CP-003', pattern: /(?:curl|wget)\s+[^|]*\|\s*(?:sudo\s+(?:-\S+\s+)*)?(?:env\s+(?:[^\s=]+=\S*\s+)*)?(?:\S*\/)?python[\d.]*\b(?:\s+-(?![cm]\b)[A-Za-z]+)*(?:\s*(?=$|[;&|)'"`#\n])|\s+-(?=\s|$)|\s+\/dev\/stdin\b|\s+-c\s+["'][^"'\n]{0,200}\bexec\s*\(\s*(?:sys\.stdin\.read|open\(\s*(?:0|["']\/dev\/stdin["'])\s*\)\.read))/i, category: 'curl-pipe', severity: 'critical', description: 'Curl-pipe-python execution' },
   // Download executed without a pipe: `bash <(curl …)`, `sh -c "$(curl …)"`,
   // `eval "$(wget -qO- …)"`, `source <(curl …)`
   { id: 'CP-004', pattern: /(?:\b(?:ba|z|k|da)?sh|\bsource|(?:^|[\s;&|])\.)\s+<\(\s*(?:curl|wget)\b/i, category: 'curl-pipe', severity: 'critical', description: 'Shell process substitution of a download' },

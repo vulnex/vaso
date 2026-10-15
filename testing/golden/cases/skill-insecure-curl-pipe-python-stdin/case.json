@@ -1,0 +1,7 @@
+{
+  "agent": "claude-code",
+  "source": "dt13 RG3: curl piped to python3 - <args> / -c exec(sys.stdin.read()) runs the download",
+  "fail": {
+    "SKL-004": "critical"
+  }
+}

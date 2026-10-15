@@ -1,0 +1,7 @@
+{
+  "agent": "claude-code",
+  "source": "dt13 RG3: python reading a download as data is not curl-pipe execution",
+  "pass": [
+    "SKL-004"
+  ]
+}
