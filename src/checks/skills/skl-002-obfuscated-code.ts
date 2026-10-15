@@ -6,7 +6,7 @@ import { ScanLimitError } from '../../core/file-limits.js';
 import { readSkillText, skillFilesOf, skillsDirsOf } from './skill-files.js';
 import { unlistableSkillDirs } from '../../core/utils.js';
 import { markTestCode } from '../../analyzers/test-paths.js';
-import { ANALYSIS_NESTING_LIMIT, overNestedLines } from '../../analyzers/js-parse.js';
+import { analysisEvasion } from '../../analyzers/ast-analyzer.js';
 
 export const skl002 = defineCheck({
   id: 'SKL-002',
@@ -67,15 +67,15 @@ export const skl002 = defineCheck({
           }
         }
 
-        // Nesting past what the parser survives hides the file from the AST checks
-        const deep = overNestedLines(code)[0];
+        // Code built to overflow the parser hides itself from the AST checks
+        const deep = analysisEvasion(code, file);
         if (deep !== undefined) {
-          const text = lines[deep - 1].trim();
+          const text = (lines[deep - 1] ?? '').trim();
           evidence.push({
             file,
             line: deep,
             snippet: text.slice(0, 80) + (text.length > 80 ? '...' : ''),
-            detail: `Brackets nested more than ${ANALYSIS_NESTING_LIMIT} levels deep — enough to crash code analysis; the over-nested lines are skipped by the other skill checks`,
+            detail: 'Code nested or chained deeply enough to crash the JavaScript parser (brackets, templates, `?:`/`!` chains) — the statement is skipped by the other skill checks',
           });
         }
       } catch (err) {

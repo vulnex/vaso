@@ -1,0 +1,9 @@
+{
+  "agent": "claude-code",
+  "source": "dt13 RG1: parser-overflow evasion (multiline) must not hide exfiltration or exec, and is itself reported",
+  "fail": {
+    "SKL-001": "critical",
+    "SKL-003": "critical",
+    "SKL-002": "warning"
+  }
+}

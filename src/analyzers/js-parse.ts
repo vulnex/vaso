@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { parse } from '@babel/parser';
+import { VISITOR_KEYS } from '@babel/types';
 
 export type JsAst = ReturnType<typeof parse>;
 
@@ -68,25 +69,184 @@ export function mayBeJavaScript(filename: string): boolean {
 }
 
 /**
- * Babel's parser recurses once per bracket level and overflows Node's stack
- * at around 250 levels — a kilobyte of `[[[…]]]` that runs fine made the
- * whole file unparseable, so every AST check saw nothing in it. When that
- * happens the over-nested lines are blanked (line numbers kept) and the rest
- * parsed; SKL-002/MCP-035 report the nesting itself (`overNestedLines`).
+ * Babel's parser recurses once per nesting level and overflows Node's stack
+ * at around 250 — a kilobyte of `[[[…]]]`, a `1?1?…:1` chain, `!!!…1` or
+ * nested templates, all of which run fine, made the whole file unparseable,
+ * so every AST check saw nothing in it. When that happens the file is split
+ * into top-level statements; each one Babel can't parse on its own is
+ * blanked (newlines kept, so line numbers hold) and the rest parsed again.
+ * The blanked lines are recorded (`evadedLines`) for SKL-002/MCP-035.
  */
 export function parseLenient(code: string): JsAst | undefined {
+  return parseLenientReport(code).ast;
+}
+
+const MAX_EVASION_RECORDS = 4096;
+/** content hash → first lines of statements blanked to parse it ([] = parsed whole) */
+const evasionRecords = new Map<string, number[]>();
+
+function contentKey(code: string): string {
+  return createHash('sha1').update(code).digest('base64');
+}
+
+function record(code: string, lines: number[]): void {
+  if (evasionRecords.size >= MAX_EVASION_RECORDS) evasionRecords.delete(evasionRecords.keys().next().value!);
+  evasionRecords.set(contentKey(code), lines);
+}
+
+export function parseLenientReport(code: string): { ast?: JsAst; evaded: number[] } {
+  let text = code;
+  let evaded: number[] = [];
+  let ast: JsAst | undefined;
   try {
-    return babelParse(code);
+    ast = babelParse(code);
   } catch (err) {
-    if (!(err instanceof RangeError)) return undefined;
+    if (!(err instanceof RangeError)) {
+      record(code, []);
+      return { evaded: [] };
+    }
+    const bombs = topLevelSegments(code).filter(seg => {
+      const segText = code.slice(seg.start, seg.end);
+      if (!/\S/.test(segText)) return false;
+      try {
+        babelParse(segText);
+        return false;
+      } catch (e) {
+        return e instanceof RangeError;
+      }
+    });
+    evaded = bombs.map(b => b.line);
+    text = blankRanges(code, bombs);
+    try {
+      ast = bombs.length > 0 ? babelParse(text) : undefined;
+    } catch {
+      ast = undefined;
+    }
   }
-  const blank = new Set(overNestedLines(code));
-  if (blank.size === 0) return undefined;
-  try {
-    return babelParse(code.split('\n').map((line, i) => (blank.has(i + 1) ? '' : line)).join('\n'));
-  } catch {
-    return undefined;
+  // Parsed, but nested deeper than the (recursive) traversal survives —
+  // `!!!…1` or `a+b+…` thousands deep parse iteratively and then overflow
+  // every AST check's walk
+  const deep = ast ? ast.program.body.filter(stmt => astDeeperThan(stmt, AST_DEPTH_LIMIT)) : [];
+  if (deep.length > 0) {
+    evaded = [...evaded, ...deep.map(stmt => stmt.loc?.start.line ?? 1)].sort((a, b) => a - b);
+    text = blankRanges(text, deep.map(stmt => ({ start: stmt.start ?? 0, end: stmt.end ?? 0 })));
+    try {
+      ast = babelParse(text);
+    } catch {
+      ast = undefined;
+    }
   }
+  record(code, evaded);
+  return { ast, evaded };
+}
+
+/** AST depth past which a recursive walk risks overflowing the stack. */
+const AST_DEPTH_LIMIT = 500;
+
+/** Whether `node`'s subtree is deeper than `limit` — measured without recursion. */
+function astDeeperThan(node: object, limit: number): boolean {
+  const stack: Array<[Record<string, unknown>, number]> = [[node as Record<string, unknown>, 1]];
+  while (stack.length > 0) {
+    const [n, d] = stack.pop()!;
+    if (d > limit) return true;
+    for (const key of VISITOR_KEYS[n.type as string] ?? []) {
+      const child = n[key];
+      if (Array.isArray(child)) {
+        for (const c of child) if (c && typeof c === 'object') stack.push([c as Record<string, unknown>, d + 1]);
+      } else if (child && typeof child === 'object') {
+        stack.push([child as Record<string, unknown>, d + 1]);
+      }
+    }
+  }
+  return false;
+}
+
+/** `code` with the given ranges replaced by spaces (newlines kept). */
+function blankRanges(code: string, ranges: Array<{ start: number; end: number }>): string {
+  let out = '';
+  let at = 0;
+  for (const r of [...ranges].sort((a, b) => a.start - b.start)) {
+    if (r.start < at) continue;
+    out += code.slice(at, r.start) + code.slice(r.start, r.end).replace(/[^\n]/g, ' ');
+    at = r.end;
+  }
+  return out + code.slice(at);
+}
+
+/**
+ * Lines (1-based) of the statements that had to be blanked for `code` to
+ * parse, when it has been parsed (by `parseLenient`); undefined when it
+ * hasn't been seen.
+ */
+export function recordedEvasion(code: string): number[] | undefined {
+  return evasionRecords.get(contentKey(code));
+}
+
+interface Segment { start: number; end: number; line: number }
+
+/**
+ * Top-level statements of `code`, split at `;` or a newline outside any
+ * bracket, string, template or comment. A single non-recursive pass — it
+ * must work on exactly the input that overflows a recursive parser. Regex
+ * literals aren't recognized (a quote or bracket inside one can merge or
+ * split statements, which only makes the blanked region coarser).
+ */
+export function topLevelSegments(code: string): Segment[] {
+  const out: Segment[] = [];
+  let depth = 0;
+  // Template nesting: each frame is a template literal (`tpl`) or a `${…}`
+  // inside one, with the bracket depth it opened at
+  const frames: Array<{ kind: 'tpl' | 'expr'; depth: number }> = [];
+  let quote = '';
+  let comment: '' | 'line' | 'block' = '';
+  let start = 0;
+  let startLine = 1;
+  let line = 1;
+  const cut = (end: number): void => {
+    out.push({ start, end, line: startLine });
+    start = end;
+    startLine = line;
+  };
+  for (let i = 0; i < code.length; i++) {
+    const c = code[i];
+    const top = frames[frames.length - 1];
+    if (c === '\n') {
+      line++;
+      if (comment === 'line') comment = '';
+      if (quote) quote = ''; // an unterminated '…' or "…" ends at the line
+      if (!comment && depth === 0 && frames.length === 0) cut(i + 1);
+      continue;
+    }
+    if (comment === 'line') continue;
+    if (comment === 'block') {
+      if (c === '*' && code[i + 1] === '/') { comment = ''; i++; }
+      continue;
+    }
+    if (quote) {
+      if (c === '\\') i++;
+      else if (c === quote) quote = '';
+      continue;
+    }
+    if (top?.kind === 'tpl') {
+      if (c === '\\') i++;
+      else if (c === '`') frames.pop();
+      else if (c === '$' && code[i + 1] === '{') { frames.push({ kind: 'expr', depth }); depth++; i++; }
+      continue;
+    }
+    if (c === '/' && code[i + 1] === '/') { comment = 'line'; i++; continue; }
+    if (c === '/' && code[i + 1] === '*') { comment = 'block'; i++; continue; }
+    if (c === "'" || c === '"') { quote = c; continue; }
+    if (c === '`') { frames.push({ kind: 'tpl', depth }); continue; }
+    if (c === '(' || c === '[' || c === '{') depth++;
+    else if (c === ')' || c === ']' || c === '}') {
+      if (depth > 0) depth--;
+      if (c === '}' && top?.kind === 'expr' && depth === top.depth) frames.pop();
+    } else if (c === ';' && depth === 0 && frames.length === 0) {
+      cut(i + 1);
+    }
+  }
+  if (start < code.length) cut(code.length);
+  return out;
 }
 
 /** Bracket depth past which code is treated as built to defeat analysis (Babel overflows near 250). */

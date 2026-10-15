@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import _traverse from '@babel/traverse';
 import type { Node } from '@babel/types';
-import { mayBeJavaScript, parseLenient, sourceChunks, type JsAst } from './js-parse.js';
+import { mayBeJavaScript, parseLenient, parseLenientReport, recordedEvasion, sourceChunks, type JsAst } from './js-parse.js';
 import { sinkCallee } from './tool-input-taint.js';
 
 // Handle ESM/CJS interop
@@ -94,6 +94,21 @@ export function analyzeCode(code: string, filename = 'unknown.js'): DataFlowResu
   }
   analysisCache.set(key, results);
   return results.map(r => ({ ...r }));
+}
+
+/**
+ * First line (1-based) of code in `code` that defeats the parser — a
+ * statement nested or chained deeply enough to overflow it, which the AST
+ * checks skip — or undefined. Shares the parse with analyzeCode.
+ */
+export function analysisEvasion(code: string, filename = 'unknown.js'): number | undefined {
+  if (!mayBeJavaScript(filename)) return undefined;
+  analyzeCode(code, filename);
+  for (const chunk of sourceChunks(code)) {
+    const lines = recordedEvasion(chunk.code) ?? parseLenientReport(chunk.code).evaded;
+    if (lines.length > 0) return lines[0] + chunk.startLine - 1;
+  }
+  return undefined;
 }
 
 function analyzeUncached(code: string): DataFlowResult[] {

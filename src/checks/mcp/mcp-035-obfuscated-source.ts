@@ -1,7 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { analyzeObfuscation } from '../../analyzers/obfuscation.js';
-import { ANALYSIS_NESTING_LIMIT, overNestedLines } from '../../analyzers/js-parse.js';
+import { analysisEvasion } from '../../analyzers/ast-analyzer.js';
 import type { RevealedStrings } from '../../analyzers/obfuscation.js';
 import { analyzeStringTable } from '../../mcp/string-table.js';
 
@@ -52,8 +52,8 @@ export const mcp035 = defineCheck({
       const table = analyzeStringTable(source.sourceCode);
       const file = source.localPath ?? source.packageName ?? source.serverName;
 
-      // Nesting past what the parser survives hides the code from MCP-004/005/006
-      const deep = overNestedLines(source.sourceCode)[0];
+      // Code built to overflow the parser hides itself from MCP-004/005/006
+      const deep = source.language === 'python' ? undefined : analysisEvasion(source.sourceCode, file);
       if (deep !== undefined) {
         sawDeepNesting = true;
         const text = source.sourceCode.split('\n')[deep - 1]?.trim() ?? '';
@@ -61,7 +61,7 @@ export const mcp035 = defineCheck({
           file,
           line: deep,
           snippet: text.slice(0, 80) + (text.length > 80 ? '...' : ''),
-          detail: `Brackets nested more than ${ANALYSIS_NESTING_LIMIT} levels deep — enough to crash code analysis; the over-nested lines are skipped by the other MCP source checks`,
+          detail: 'Code nested or chained deeply enough to crash the JavaScript parser (brackets, templates, `?:`/`!` chains) — the statement is skipped by the other MCP source checks',
         });
       }
 
