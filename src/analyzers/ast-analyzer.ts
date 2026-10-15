@@ -24,6 +24,12 @@ export interface DataFlowResult {
   dynamic?: boolean;
   /** eval-exec: the argument is decoded at runtime (atob, base64 Buffer, fromCharCode). */
   decoded?: boolean;
+  /**
+   * eval-exec: a process started directly (no shell, not an interpreter
+   * given code) — what runs is a program with arguments, not code built at
+   * runtime. Set by the Python analyzer.
+   */
+  noShell?: boolean;
   line: number;
   snippet: string;
   description: string;

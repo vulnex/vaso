@@ -32,12 +32,17 @@ export const skl003 = defineCheck({
           // its job; only commands built at runtime or decoded are dynamic
           // execution. Constant ones stay listed, informationally (as MCP-004).
           const constant = flow.command !== undefined && !flow.dynamic && !flow.decoded;
+          // A program started directly (no shell, no interpreter given code)
+          // runs with runtime arguments; it isn't code built at runtime
+          const direct = !constant && flow.noShell === true && !flow.decoded;
           evidence.push({
             file,
             line: flow.line,
             snippet: flow.snippet,
-            detail: constant ? `${flow.description} — constant command "${flow.command}"` : flow.description,
-            ...(constant ? { mitigated: true } : {}),
+            detail: constant
+              ? `${flow.description} — constant command "${flow.command}"`
+              : direct ? `${flow.description} — runs a program directly (no shell)` : flow.description,
+            ...(constant || direct ? { mitigated: true } : {}),
           });
         }
       } catch {}

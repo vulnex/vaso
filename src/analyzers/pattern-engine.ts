@@ -36,7 +36,9 @@ export const SECURITY_PATTERNS: PatternRule[] = [
   // `| /bin/zsh`); `\b` keeps `| shasum` out.
   { id: 'CP-001', pattern: /curl\s+[^|]*\|\s*(?:sudo\s+(?:-\S+\s+)*)?(?:env\s+(?:\S+=\S*\s+)*)?(?:\S*\/)?(?:ba|z|k|da|fi)?sh\b/i, category: 'curl-pipe', severity: 'critical', description: 'Curl-pipe-shell execution' },
   { id: 'CP-002', pattern: /wget\s+[^|]*\|\s*(?:sudo\s+(?:-\S+\s+)*)?(?:env\s+(?:\S+=\S*\s+)*)?(?:\S*\/)?(?:ba|z|k|da|fi)?sh\b/i, category: 'curl-pipe', severity: 'critical', description: 'Wget-pipe-shell execution' },
-  { id: 'CP-003', pattern: /curl\s+[^|]*\|\s*python/i, category: 'curl-pipe', severity: 'critical', description: 'Curl-pipe-python execution' },
+  // Only when Python reads its program from stdin (`| python`, `| python3 -`):
+  // `| python -m json.tool` and `| python -c "…"` read the download as data
+  { id: 'CP-003', pattern: /curl\s+[^|]*\|\s*(?:sudo\s+(?:-\S+\s+)*)?(?:\S*\/)?python[\d.]*\b(?:\s+-(?![cm]\b)[A-Za-z]+)*(?:\s+-)?\s*(?=$|[;&|)'"`#\n])/i, category: 'curl-pipe', severity: 'critical', description: 'Curl-pipe-python execution' },
   // Download executed without a pipe: `bash <(curl …)`, `sh -c "$(curl …)"`,
   // `eval "$(wget -qO- …)"`, `source <(curl …)`
   { id: 'CP-004', pattern: /(?:\b(?:ba|z|k|da)?sh|\bsource|(?:^|[\s;&|])\.)\s+<\(\s*(?:curl|wget)\b/i, category: 'curl-pipe', severity: 'critical', description: 'Shell process substitution of a download' },
@@ -52,7 +54,8 @@ export const SECURITY_PATTERNS: PatternRule[] = [
   { id: 'CH-005', pattern: /\/\.docker\/config\.json/i, category: 'credential-harvest', severity: 'critical', description: 'Docker config access' },
   { id: 'CH-006', pattern: /\/\.netrc/i, category: 'credential-harvest', severity: 'warning', description: '.netrc file access' },
   { id: 'CH-007', pattern: /\/\.npmrc/i, category: 'credential-harvest', severity: 'warning', description: '.npmrc file access (may contain auth tokens)' },
-  { id: 'CH-008', pattern: /keychain|SecItemCopyMatching|security\s+find-generic-password/i, category: 'credential-harvest', severity: 'critical', description: 'macOS Keychain access' },
+  // Reading the keychain — not the word (`# don't use the OS keychain`)
+  { id: 'CH-008', pattern: /\bsecurity\s+(?:find-(?:generic|internet)-password|dump-keychain|export\s+-k)\b|\bSec(?:ItemCopyMatching|KeychainFind(?:Generic|Internet)Password)\b|\/Library\/Keychains\/|\blogin\.keychain(?:-db)?\b|\bchainbreaker\b/i, category: 'credential-harvest', severity: 'critical', description: 'macOS Keychain access' },
 
   // Exfiltration (from openclaw-security-monitor + B@dskills)
   { id: 'EX-001', pattern: /\.postMessage\s*\(.*\btransfer\b/i, category: 'exfiltration', severity: 'warning', description: 'postMessage with transfer' },

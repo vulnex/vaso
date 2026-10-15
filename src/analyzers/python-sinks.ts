@@ -481,19 +481,70 @@ export function analyzePythonCapabilities(code: string): PythonCapability[] {
   return out;
 }
 
+/** What a tracked variable holds. `envall` is the whole environment (`dict(os.environ)`). */
+type SourceKind = 'file' | 'env' | 'envall';
+
+/** A call's top-level arguments: positional values, and keyword name → value. */
+function splitArgs(args: string): { positional: string[]; keywords: Map<string, string> } {
+  const positional: string[] = [];
+  const keywords = new Map<string, string>();
+  for (const part of topLevelParts(args)) {
+    const kw = /^\s*([A-Za-z_]\w*)\s*=(?!=)\s*([\s\S]*)$/.exec(part);
+    if (kw) keywords.set(kw[1], kw[2]);
+    else if (part.trim()) positional.push(part.trim());
+  }
+  return { positional, keywords };
+}
+
+/** Programs whose arguments leave the machine: an env secret in their argv is sent somewhere. */
+const NETWORK_PROGRAM = /^(?:curl|wget|nc|ncat|netcat|socat|scp|sftp|ftp|rsync|ssh|telnet)$/;
+
+/** The literal program a process call runs, when it is written out. */
+function literalProgram(first: string | undefined): string | undefined {
+  if (!first) return undefined;
+  const head = first.startsWith('[') ? topLevelParts(first.slice(1, first.lastIndexOf(']')))[0] ?? '' : first;
+  const lit = /^\s*[rRbBuU]?(["'])([^"']+)\1\s*$/.exec(head);
+  return lit ? lit[2].trim().split(/\s+/)[0].split('/').pop() : undefined;
+}
+
+/** Process calls that run a program directly, without a shell (unless `shell=True`). */
+const DIRECT_EXEC = /^(?:subprocess\.(?:run|call|check_call|check_output|Popen)|asyncio\.create_subprocess_exec)$/;
+
 /**
  * Python skill code in the shape the skill checks read from `analyzeCode`
  * (SKL-001/003/006/010): eval-exec calls, reads of credential paths, and
  * file/environment values flowing into a network or process call.
+ *
+ * Precision (real skills: Anthropic's xlsx/pptx/skill-creator, Hermes'
+ * bundled set): sources are tracked per function, never across them; only
+ * argument values count, never keyword names (`text=True`, `data=body`);
+ * `env=`/`cwd=` and other process options aren't data the process sends; and
+ * a single environment value (a user agent, an API key in the headers of the
+ * API it belongs to) is exfiltration only in a request body or in the argv of
+ * a network program — file contents and the whole environment, anywhere.
  */
 export function analyzePythonDataFlow(code: string): DataFlowResult[] {
   const out: DataFlowResult[] = [];
   const rewrite = aliasRewriter(code);
   const lines = codeLines(code);
-  const sourceVars = new Map<string, 'file' | 'env'>();
-  for (const stmt of statements(lines)) {
+  const stmts = statements(lines);
+  const fns = functionsOf(stmts);
+  const scopes = new Map<PyFunction | undefined, Map<string, SourceKind>>([[undefined, new Map()]]);
+  const scopeOf = (fn: PyFunction | undefined): Map<string, SourceKind> => {
+    let m = scopes.get(fn);
+    if (!m) scopes.set(fn, (m = new Map()));
+    return m;
+  };
+  const report = (kind: SourceKind): 'file' | 'env' => (kind === 'file' ? 'file' : 'env');
+
+  stmts.forEach((stmt, i) => {
     const text = rewrite(stmt.text);
     const snippet = lines.find((l) => l.line === stmt.line)!.text.trim().slice(0, 120);
+    // Enclosing functions, outermost first; module-level names are visible too
+    const enclosing = fns.filter((f) => i > f.start && i < f.end);
+    const visible = new Map<string, SourceKind>(scopes.get(undefined));
+    for (const f of enclosing) for (const [v, k] of scopes.get(f) ?? []) visible.set(v, k);
+    const local = scopeOf(enclosing.at(-1));
 
     for (const { re, name } of EXEC_SINKS) {
       const m = re.exec(text);
@@ -501,10 +552,25 @@ export function analyzePythonDataFlow(code: string): DataFlowResult[] {
       const args = callArgs(text, (m.index ?? 0) + m[0].length - 1);
       const sink = name(m);
       const { command, dynamic } = commandOf(args);
-      out.push({ type: 'eval-exec', line: stmt.line, snippet, description: `${sink}() call detected`, ...(command ? { command } : {}), ...(dynamic ? { dynamic } : {}), ...(DECODES.test(args) ? { decoded: true } : {}) });
-      for (const [v, kind] of sourceVars) {
-        if (mentions(args, v)) {
-          out.push({ type: 'source-to-sink', source: v, sourceKind: kind, sink, line: stmt.line, snippet, description: `Data flows from "${v}" into process execution "${sink}"` });
+      const { positional, keywords } = splitArgs(args);
+      const shell = /^True\b/.test(keywords.get('shell')?.trim() ?? '');
+      const program = literalProgram(positional[0]);
+      // Run directly, the program can't be a shell or an interpreter given code to run
+      const noShell = DIRECT_EXEC.test(sink) && !shell
+        && !SHELL_PROGRAM.test(positional[0]?.replace(/^\[\s*/, '') ?? '')
+        && !/["']-c["']/.test(positional.join(','));
+      out.push({
+        type: 'eval-exec', line: stmt.line, snippet, description: `${sink}() call detected`,
+        ...(command ? { command } : {}), ...(dynamic ? { dynamic } : {}), ...(DECODES.test(args) ? { decoded: true } : {}),
+        ...(noShell ? { noShell } : {}),
+      });
+      if (sink !== 'eval' && sink !== 'exec') {
+        // What the process gets: its argv and stdin, not env=/cwd=/timeout=
+        const sent = [...positional, keywords.get('args') ?? '', keywords.get('input') ?? ''].join(',');
+        for (const [v, kind] of visible) {
+          if (!mentions(sent, v)) continue;
+          if (kind === 'env' && !(program && NETWORK_PROGRAM.test(program))) continue;
+          out.push({ type: 'source-to-sink', source: v, sourceKind: report(kind), sink, line: stmt.line, snippet, description: `Data flows from "${v}" into process execution "${sink}"` });
         }
       }
       break;
@@ -521,29 +587,35 @@ export function analyzePythonDataFlow(code: string): DataFlowResult[] {
 
     const net = NETWORK_CALLS.exec(text);
     if (net) {
-      const args = callArgs(text, text.indexOf('(', net.index));
-      for (const [v, kind] of sourceVars) {
-        if (mentions(args, v)) {
-          out.push({ type: 'source-to-sink', source: v, sourceKind: kind, sink: net[1] ?? 'urlopen', line: stmt.line, snippet, description: `Data flows from "${v}" to network sink "${net[0].replace(/\s*\($/, '')}"` });
-        }
+      const { positional, keywords } = splitArgs(callArgs(text, text.indexOf('(', net.index)));
+      const all = [...positional, ...keywords.values()].join(',');
+      // A request body, or the payload of a raw socket send
+      const rawSend = /^(?:send|sendall|sendto|sendmail|write)$/.test(net[1] ?? '');
+      const body = [...(rawSend ? positional : positional.slice(1)), ...['data', 'json', 'files', 'content', 'body', 'msg'].map((k) => keywords.get(k) ?? '')].join(',');
+      for (const [v, kind] of visible) {
+        if (!mentions(kind === 'env' ? body : all, v)) continue;
+        out.push({ type: 'source-to-sink', source: v, sourceKind: report(kind), sink: net[1] ?? 'urlopen', line: stmt.line, snippet, description: `Data flows from "${v}" to network sink "${net[0].replace(/\s*\($/, '')}"` });
       }
     }
 
     // Track what assignments hold: file contents, environment values, or
-    // values derived from either.
+    // values derived from either; a plain reassignment clears the name.
     const assign = /^\s*([A-Za-z_]\w*)\s*(?::[^=]+)?=(?!=)\s*([\s\S]+)$/.exec(text);
     if (assign) {
-      const rhs = assign[2];
-      if (FILE_READS.test(rhs)) sourceVars.set(assign[1], 'file');
-      else if (/\bos\.(?:environ|getenv)\b/.test(rhs)) sourceVars.set(assign[1], 'env');
+      const [, target, rhs] = assign;
+      const values = rhs.replace(/\b[A-Za-z_]\w*\s*=(?!=)/g, ' ');
+      if (FILE_READS.test(rhs)) local.set(target, 'file');
+      else if (/\bos\.environ\b(?!\s*(?:\[|\.get\b|\.setdefault\b|\.pop\b))/.test(rhs)) local.set(target, 'envall');
+      else if (/\bos\.(?:environ|getenv)\b/.test(rhs)) local.set(target, 'env');
       else {
-        const from = [...sourceVars].find(([v]) => mentions(rhs, v));
-        if (from) sourceVars.set(assign[1], from[1]);
+        const from = [...visible].find(([v]) => mentions(values, v));
+        if (from) local.set(target, from[1]);
+        else local.delete(target);
       }
     }
     // `with open(p) as f:` binds a file handle
     const withOpen = /\bwith\s+open\s*\([^)]*\)\s+as\s+(\w+)/.exec(text);
-    if (withOpen) sourceVars.set(withOpen[1], 'file');
-  }
+    if (withOpen) local.set(withOpen[1], 'file');
+  });
   return out;
 }
