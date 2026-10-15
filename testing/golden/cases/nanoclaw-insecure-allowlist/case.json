@@ -1,12 +1,19 @@
 {
   "agent": "nanoclaw",
-  "source": "NanoClaw mount allowlist granting the whole home, writable by others (NC-001/NC-002; nanoclaw docs mount-allowlist.json)",
+  "source": "NanoClaw mount allowlist granting the whole home, writable by others (NC-001/NC-002; nanoclaw docs mount-allowlist.json); fix round-trip covers the config directory NC-002 chmods (rollback must restore its 755)",
   "modes": {
     ".config/nanoclaw/mount-allowlist.json": "666",
-    "nanoclaw/.env": "600"
+    "nanoclaw/.env": "600",
+    ".config/nanoclaw": "755"
   },
   "fail": {
     "NC-001": "any",
     "NC-002": "any"
-  }
+  },
+  "fix": {
+    "resolves": [
+      "NC-002"
+    ]
+  },
+  "reachable": true
 }

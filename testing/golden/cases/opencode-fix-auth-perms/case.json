@@ -11,5 +11,6 @@
     "resolves": [
       "OPC-001"
     ]
-  }
+  },
+  "reachable": true
 }

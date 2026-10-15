@@ -1,0 +1,16 @@
+{
+  "agent": "hermes",
+  "source": "HM-003 fix round-trip: Hermes auth.json and mcp-tokens/*.json readable by others in a reachable home (fix added in 1.3.1; rollback must restore modes)",
+  "reachable": true,
+  "modes": {
+    ".hermes": "755",
+    ".hermes/config.yaml": "600",
+    ".hermes/.env": "600",
+    ".hermes/bin/tirith": "755",
+    ".hermes/auth.json": "644",
+    ".hermes/mcp-tokens": "755",
+    ".hermes/mcp-tokens/github.json": "644"
+  },
+  "fail": { "HM-003": "any" },
+  "fix": { "resolves": ["HM-003"] }
+}

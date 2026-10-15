@@ -28,6 +28,9 @@ import type { AgentScanResult, ScanResult, Severity } from '../../src/core/types
  *            rather than the fixture (app bundles in /Applications, codesign).
  *            Advisory (ADV-*) results are never counted by `clean`: they
  *            follow the version of whatever agent binary the host has
+ *   reachable true: the home lives where other users can reach it (/tmp,
+ *            755) — a permission finding behind a private temp dir is
+ *            mitigated and has nothing to fix
  *   modes    { "<path under home>": "600" } — git keeps only 644/755 file
  *            modes and none for directories, so permissions are set here
  *
@@ -50,6 +53,7 @@ interface GoldenCase {
   parity?: boolean;
   cleanIgnore?: string[];
   modes?: Record<string, string>;
+  reachable?: boolean;
   /** Skip on these platforms (fixtures relying on POSIX modes). */
   skipOn?: NodeJS.Platform[];
 }
@@ -136,7 +140,9 @@ describe.each(caseNames)('golden: %s', (name) => {
 
   beforeAll(async () => {
     if (skip) return;
-    work = await mkdtemp(join(tmpdir(), `vaso-golden-${name}-`));
+    const reachable = spec.reachable && process.platform !== 'win32';
+    work = await mkdtemp(join(reachable ? '/tmp' : tmpdir(), `vaso-golden-${name}-`));
+    if (reachable) await chmod(work, 0o755);
     home = join(work, 'home');
     await materialize(join(CASES, name, 'home'), home);
     for (const [path, mode] of Object.entries(spec.modes ?? {})) await chmod(join(home, path), parseInt(mode, 8));

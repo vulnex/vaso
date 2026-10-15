@@ -12,5 +12,6 @@
     "resolves": [
       "CDX-003"
     ]
-  }
+  },
+  "reachable": true
 }

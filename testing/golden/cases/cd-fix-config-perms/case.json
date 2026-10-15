@@ -15,5 +15,6 @@
     "resolves": [
       "CD-002"
     ]
-  }
+  },
+  "reachable": true
 }
