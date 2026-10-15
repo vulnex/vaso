@@ -7,6 +7,7 @@ import { saveBaseline, loadBaseline, diffResults } from '../core/baseline.js';
 import { SnapshotFSProvider } from '../core/snapshot-fs-provider.js';
 import { allUsersCoverageWarning } from '../adapters/openclaw.js';
 import type { ProbeSnapshot } from '../core/snapshot-types.js';
+import { parseRemoteOptions, type RemoteOptionValues } from './remote-options.js';
 import { loadSnapshotFile, SnapshotLoadError, snapshotErrorLines, SNAPSHOT_TRUNCATED_WARNING } from '../core/snapshot-load.js';
 import type { ScanOptions } from '../core/types.js';
 import { shouldFailScan, isValidFailOn, EXIT_FINDINGS, EXIT_INCOMPLETE, EXIT_USAGE, type FailOnLevel } from '../core/exit-criteria.js';
@@ -50,14 +51,6 @@ const FORMAT_EXT: Record<string, string> = {
 
 const NON_AGGREGATABLE_FORMATS = new Set(['sarif', 'junit']);
 
-function parsePositiveInt(raw: string | undefined, fallback: number, label: string): number {
-  if (raw === undefined) return fallback;
-  const n = Number(raw);
-  if (!/^\d+$/.test(raw.trim()) || !Number.isSafeInteger(n)) {
-    throw new Error(`Invalid ${label} value "${raw}": expected a non-negative integer`);
-  }
-  return n;
-}
 
 export async function runScan(options: ScanCommandOptions): Promise<void> {
   const failOn: FailOnLevel = options.failOn && isValidFailOn(options.failOn) ? options.failOn : 'critical';
@@ -81,6 +74,14 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
   // Snapshots are what a remote scan collects; a local scan has none to save
   if (options.saveSnapshot && !options.host?.length && !options.inventory) {
     console.error(chalk.red('--save-snapshot applies to remote scans only (use with --host or --inventory)'));
+    process.exitCode = 2;
+    return;
+  }
+  let remoteValues: RemoteOptionValues;
+  try {
+    remoteValues = parseRemoteOptions(options);
+  } catch (err) {
+    console.error(chalk.red((err as Error).message));
     process.exitCode = 2;
     return;
   }
@@ -121,20 +122,7 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
     // Progress and status go to stderr; stdout carries only report output.
     const log = (msg: string) => { if (!silent) console.error(msg); };
 
-    let concurrency: number;
-    let retries: number;
-    let sshTimeoutSec: number;
-    try {
-      concurrency = parsePositiveInt(options.parallel, 5, '--parallel');
-      retries = parsePositiveInt(options.sshRetries, 0, '--ssh-retries');
-      if (concurrency === 0) throw new Error('--parallel must be at least 1');
-      sshTimeoutSec = parsePositiveInt(options.sshTimeout, 60, '--ssh-timeout');
-      if (sshTimeoutSec === 0) throw new Error('--ssh-timeout must be at least 1');
-    } catch (err) {
-      console.error(chalk.red((err as Error).message));
-      process.exitCode = 2;
-      return;
-    }
+    const { concurrency, retries, sshTimeoutSec } = remoteValues;
 
     // Build target list
     let targets: SSHTarget[] = [];

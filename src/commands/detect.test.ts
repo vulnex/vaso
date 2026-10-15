@@ -211,6 +211,21 @@ describe('runDetect', () => {
     }
   });
 
+  it('rejects invalid --parallel / --ssh-timeout on a local detect too (exit 2)', async () => {
+    const spy = vi.spyOn(adapterRegistry, 'detectAll').mockResolvedValue(mockInstallations);
+    const origExitCode = process.exitCode;
+    try {
+      for (const bad of [{ parallel: '0' }, { sshTimeout: 'abc' }, { sshRetries: '-1' }]) {
+        process.exitCode = undefined;
+        await runDetect({ format: 'terminal', ...bad });
+        expect(process.exitCode).toBe(2);
+      }
+      expect(spy).not.toHaveBeenCalled();
+    } finally {
+      process.exitCode = origExitCode;
+    }
+  });
+
   it('rejects -o + --output-dir together with exit 2', async () => {
     const consoleErrors: string[] = [];
     const origExitCode = process.exitCode;

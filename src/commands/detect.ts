@@ -5,6 +5,7 @@ import { allUsersCoverageWarning } from '../adapters/openclaw.js';
 import type { AgentInstallation, AgentType } from '../core/types.js';
 import { logError } from '../core/debug.js';
 import { writeFileEnsureDir, writeFileOwnerOnly } from '../core/utils.js';
+import { parseRemoteOptions, type RemoteOptionValues } from './remote-options.js';
 import { HostFileNames, safeHostname } from '../transport/host-files.js';
 import { join as joinPath } from 'node:path';
 import { toReportJson } from '../reporting/serialize.js';
@@ -27,14 +28,6 @@ export interface DetectCommandOptions {
   saveSnapshot?: string;
 }
 
-function parsePositiveInt(raw: string | undefined, fallback: number, label: string): number {
-  if (raw === undefined) return fallback;
-  const n = Number(raw);
-  if (!/^\d+$/.test(raw.trim()) || !Number.isSafeInteger(n)) {
-    throw new Error(`Invalid ${label} value "${raw}": expected a non-negative integer`);
-  }
-  return n;
-}
 
 async function emit(text: string, output?: string, silent?: boolean): Promise<void> {
   if (output) {
@@ -63,6 +56,14 @@ export async function runDetect(options: DetectCommandOptions): Promise<void> {
     process.exitCode = 2;
     return;
   }
+  let remoteValues: RemoteOptionValues;
+  try {
+    remoteValues = parseRemoteOptions(options);
+  } catch (err) {
+    console.error(chalk.red((err as Error).message));
+    process.exitCode = 2;
+    return;
+  }
 
   try {
     // Snapshot-based detection
@@ -74,7 +75,7 @@ export async function runDetect(options: DetectCommandOptions): Promise<void> {
 
     // SSH remote detection
     if (options.host || options.inventory) {
-      await detectRemoteHosts(options);
+      await detectRemoteHosts(options, remoteValues);
       return;
     }
 
@@ -142,7 +143,7 @@ interface HostDetectResult {
   error?: string;
 }
 
-async function detectRemoteHosts(options: DetectCommandOptions): Promise<void> {
+async function detectRemoteHosts(options: DetectCommandOptions, remoteValues: RemoteOptionValues): Promise<void> {
   const { parseSSHTarget, executeRemoteProbeWithRetry, uniqueTargets } = await import('../transport/ssh.js');
   const { parseInventory } = await import('../transport/inventory.js');
   const { buildProbeManifest } = await import('../core/manifest-builder.js');
@@ -156,20 +157,7 @@ async function detectRemoteHosts(options: DetectCommandOptions): Promise<void> {
   const silent = !!options.silent;
   const log = (msg: string) => { if (!silent) console.error(msg); };
 
-  let concurrency: number;
-  let retries: number;
-  let sshTimeoutSec: number;
-  try {
-    concurrency = parsePositiveInt(options.parallel, 5, '--parallel');
-    retries = parsePositiveInt(options.sshRetries, 0, '--ssh-retries');
-    if (concurrency === 0) throw new Error('--parallel must be at least 1');
-    sshTimeoutSec = parsePositiveInt(options.sshTimeout, 60, '--ssh-timeout');
-    if (sshTimeoutSec === 0) throw new Error('--ssh-timeout must be at least 1');
-  } catch (err) {
-    console.error(chalk.red((err as Error).message));
-    process.exitCode = 2;
-    return;
-  }
+  const { concurrency, retries, sshTimeoutSec } = remoteValues;
 
   let targets: SSHTarget[] = [];
 
