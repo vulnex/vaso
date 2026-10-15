@@ -450,3 +450,33 @@ func TestCollectFileRecordsPermissionDenied(t *testing.T) {
 		t.Fatalf("a missing file is not denied: %+v", e)
 	}
 }
+
+func TestOmittedReasonAndJSONBudget(t *testing.T) {
+	root := t.TempDir()
+	big := filepath.Join(root, "big.js")
+	if err := os.WriteFile(big, []byte(strings.Repeat("a", 2048)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c := &collector{budget: 1 << 20}
+	if e := c.collectFileLimit(big, false, 1024); e.Omitted != "size" || !e.ContentOmitted {
+		t.Fatalf("over the per-file cap: %+v", e)
+	}
+	if e := c.collectFileLimit(big, true, 1<<20); e.Omitted != "metadata" {
+		t.Fatalf("metadata-only: %+v", e)
+	}
+
+	// Escaped characters are charged at their JSON size
+	esc := filepath.Join(root, "esc.js")
+	if err := os.WriteFile(esc, []byte(strings.Repeat("<", 100)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c = &collector{budget: 1000}
+	c.collectFileLimit(esc, false, 1<<20)
+	if c.budget != 1000-600 {
+		t.Fatalf("budget charged %d, want 600", 1000-c.budget)
+	}
+	c.budget = 50
+	if e := c.collectFileLimit(esc, false, 1<<20); e.Omitted != "budget" || !c.truncated {
+		t.Fatalf("budget exhausted: %+v truncated=%v", e, c.truncated)
+	}
+}

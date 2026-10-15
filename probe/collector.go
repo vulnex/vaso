@@ -444,16 +444,23 @@ func (c *collector) collectFileLimit(path string, metadataOnly bool, limit int64
 	}
 
 	mode := int(info.Mode().Perm())
-	omitted := FileEntry{Exists: true, Mode: mode, ContentOmitted: true}
+	omitted := func(reason string) FileEntry {
+		return FileEntry{Exists: true, Mode: mode, ContentOmitted: true, Omitted: reason}
+	}
 
 	ext := strings.ToLower(filepath.Ext(path))
 	assetOnly := metadataOnlyExtensions[ext] && !(c.inSkillTree && skillBinaryExtensions[ext])
-	if metadataOnly || info.Size() > limit || assetOnly {
-		return omitted
+	switch {
+	case metadataOnly:
+		return omitted("metadata")
+	case assetOnly:
+		return omitted("asset")
+	case info.Size() > limit:
+		return omitted("size")
 	}
 	if info.Size() > c.budget {
 		c.truncated = true
-		return omitted
+		return omitted("budget")
 	}
 
 	// Only regular files have content. A FIFO blocks forever and a device
@@ -461,7 +468,7 @@ func (c *collector) collectFileLimit(path string, metadataOnly bool, limit int64
 	// in a skill directory. The check is on the opened file, so swapping the
 	// path between Stat and Open doesn't get around it.
 	if !info.Mode().IsRegular() {
-		return omitted
+		return omitted("special")
 	}
 	f, err := openForRead(path)
 	if err != nil {
@@ -471,7 +478,7 @@ func (c *collector) collectFileLimit(path string, metadataOnly bool, limit int64
 	}
 	defer f.Close()
 	if opened, err := f.Stat(); err != nil || !opened.Mode().IsRegular() {
-		return omitted
+		return omitted("special")
 	}
 	// Bounded even if the file grows after Stat
 	content, err := io.ReadAll(io.LimitReader(f, limit+1))
@@ -479,7 +486,7 @@ func (c *collector) collectFileLimit(path string, metadataOnly bool, limit int64
 		return FileEntry{Exists: true, Mode: mode}
 	}
 	if int64(len(content)) > limit {
-		return omitted
+		return omitted("size")
 	}
 	return c.fileContent(content, mode)
 }
@@ -492,8 +499,27 @@ func (c *collector) fileContent(content []byte, mode int) FileEntry {
 		entry.Content = base64.StdEncoding.EncodeToString(content)
 		entry.Encoding = "base64"
 	}
-	c.budget -= int64(len(entry.Content))
+	c.budget -= jsonSize(entry.Content)
 	return entry
+}
+
+// jsonSize is what s costs in the snapshot JSON: the encoder escapes <, >, &,
+// control characters and U+2028/2029 as \uXXXX (6 bytes) and quotes and
+// backslashes as 2. Charging raw bytes let 129 MiB of such text become a
+// 519 MiB snapshot, over what the CLI accepts, without being marked truncated.
+func jsonSize(s string) int64 {
+	n := int64(len(s))
+	for i := 0; i < len(s); i++ {
+		switch b := s[i]; {
+		case b == '<' || b == '>' || b == '&' || b < 0x20:
+			n += 5
+		case b == '"' || b == '\\':
+			n++
+		case b == 0xE2 && i+2 < len(s) && s[i+1] == 0x80 && (s[i+2] == 0xA8 || s[i+2] == 0xA9):
+			n += 3 // 3-byte rune → 6-byte escape
+		}
+	}
+	return n
 }
 
 // collectPath records p as a directory (mode, plus its listing when listDir)

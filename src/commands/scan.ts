@@ -7,7 +7,7 @@ import { saveBaseline, loadBaseline, diffResults } from '../core/baseline.js';
 import { SnapshotFSProvider } from '../core/snapshot-fs-provider.js';
 import { allUsersCoverageWarning } from '../adapters/openclaw.js';
 import type { ProbeSnapshot } from '../core/snapshot-types.js';
-import { loadSnapshotFile, SnapshotLoadError, snapshotErrorLines } from '../core/snapshot-load.js';
+import { loadSnapshotFile, SnapshotLoadError, snapshotErrorLines, SNAPSHOT_TRUNCATED_WARNING } from '../core/snapshot-load.js';
 import type { ScanOptions } from '../core/types.js';
 import { shouldFailScan, isValidFailOn, EXIT_FINDINGS, EXIT_INCOMPLETE, EXIT_USAGE, type FailOnLevel } from '../core/exit-criteria.js';
 import { logError } from '../core/debug.js';
@@ -104,6 +104,7 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
       if (snapshot.privilege && !snapshot.privilege.isRoot) {
         console.error(chalk.yellow(`  Warning: snapshot collected as non-root user "${snapshot.privilege.username}" — scan coverage may be limited.\n`));
       }
+      if (snapshot.truncated) console.error(chalk.yellow(`  Warning: ${SNAPSHOT_TRUNCATED_WARNING}.\n`));
       console.error(chalk.dim(`  Scanning snapshot from host "${snapshot.hostname}" (${snapshot.platform})\n`));
     }
   }

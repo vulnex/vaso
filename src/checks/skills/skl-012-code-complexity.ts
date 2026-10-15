@@ -1,14 +1,16 @@
-import { parse } from '@babel/parser';
 import _traverse from '@babel/traverse';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { readSkillText, skillFilesOf, skillsDirsOf } from './skill-files.js';
 import { markTestCode } from '../../analyzers/test-paths.js';
+import { parseJs } from '../../analyzers/js-parse.js';
 
 // Handle ESM/CJS interop
 const traverse = typeof _traverse === 'function' ? _traverse : (_traverse as { default: typeof _traverse }).default;
 
 const COMPLEXITY_THRESHOLD = 15;
+
+const FUNCTION_NODES = new Set(['FunctionDeclaration', 'FunctionExpression', 'ArrowFunctionExpression', 'ObjectMethod']);
 
 const DECISION_NODES = new Set([
   'IfStatement',
@@ -40,47 +42,37 @@ export const skl012 = defineCheck({
       try {
         const code = await readSkillText(ctx.fs, file, 'code');
         if (code === undefined) continue;
-        let ast: ReturnType<typeof parse>;
-        try {
-          ast = parse(code, {
-            sourceType: 'unambiguous',
-            plugins: ['typescript', 'jsx', 'decorators'],
-            errorRecovery: true,
-          });
-        } catch {
-          continue;
-        }
+        const ast = parseJs(code);
+        if (!ast) continue;
 
+        // One pass: a decision point counts toward every function it sits in
+        // (nested ones included). A sub-traversal per function made this
+        // quadratic in nesting depth on large bundles.
+        const open: Array<{ node: Record<string, unknown>; complexity: number; start: number; line: number }> = [];
+        const found: Array<{ start: number; ev: Evidence }> = [];
         traverse(ast, {
-          'FunctionDeclaration|FunctionExpression|ArrowFunctionExpression|ObjectMethod'(path) {
-            let complexity = 1;
-
-            path.traverse({
-              enter(innerPath) {
-                if (DECISION_NODES.has(innerPath.node.type)) {
-                  complexity++;
-                }
-              },
-            });
-
-            if (complexity > COMPLEXITY_THRESHOLD) {
-              const node = path.node as unknown as Record<string, unknown>;
-              const id = node.id as { name: string } | null | undefined;
-              const key = node.key as { name?: string; value?: string } | undefined;
-              const funcName =
-                id?.name ??
-                (key && 'name' in key ? key.name : undefined) ??
-                '<anonymous>';
-              const line = path.node.loc?.start.line ?? 0;
-
-              evidence.push({
-                file,
-                line,
-                detail: `Function "${funcName}" has cyclomatic complexity ${complexity} (threshold: ${COMPLEXITY_THRESHOLD})`,
-              });
+          enter(path) {
+            if (FUNCTION_NODES.has(path.node.type)) {
+              open.push({ node: path.node as unknown as Record<string, unknown>, complexity: 1, start: path.node.start ?? 0, line: path.node.loc?.start.line ?? 0 });
+            } else if (DECISION_NODES.has(path.node.type)) {
+              for (const fn of open) fn.complexity++;
             }
           },
+          exit(path) {
+            if (!FUNCTION_NODES.has(path.node.type)) return;
+            const fn = open.pop();
+            if (!fn || fn.complexity <= COMPLEXITY_THRESHOLD) return;
+            const id = fn.node.id as { name: string } | null | undefined;
+            const key = fn.node.key as { name?: string; value?: string } | undefined;
+            const funcName = id?.name ?? (key && 'name' in key ? key.name : undefined) ?? '<anonymous>';
+            found.push({
+              start: fn.start,
+              ev: { file, line: fn.line, detail: `Function "${funcName}" has cyclomatic complexity ${fn.complexity} (threshold: ${COMPLEXITY_THRESHOLD})` },
+            });
+          },
         });
+        // Source order, as before (exit order is innermost-first)
+        evidence.push(...found.sort((a, b) => a.start - b.start).map(f => f.ev));
       } catch {
         // Skip unreadable files
       }

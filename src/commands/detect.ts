@@ -101,7 +101,7 @@ export async function runDetect(options: DetectCommandOptions): Promise<void> {
 
 async function detectFromSnapshot(options: DetectCommandOptions): Promise<AgentInstallation[]> {
   const { SnapshotFSProvider } = await import('../core/snapshot-fs-provider.js');
-  const { loadSnapshotFile, SnapshotLoadError, snapshotErrorLines } = await import('../core/snapshot-load.js');
+  const { loadSnapshotFile, SnapshotLoadError, snapshotErrorLines, SNAPSHOT_TRUNCATED_WARNING } = await import('../core/snapshot-load.js');
   let snapshot;
   try {
     snapshot = await loadSnapshotFile(options.snapshot!);
@@ -115,6 +115,7 @@ async function detectFromSnapshot(options: DetectCommandOptions): Promise<AgentI
   const snapshotFs = new SnapshotFSProvider(snapshot);
 
   console.error(chalk.dim(`  Detecting agents from snapshot "${snapshot.hostname}" (${snapshot.platform})\n`));
+  if (snapshot.truncated) console.error(chalk.yellow(`  ! ${SNAPSHOT_TRUNCATED_WARNING}`));
   if (options.allUsers) {
     const coverage = allUsersCoverageWarning(snapshotFs);
     if (coverage) console.error(chalk.yellow(`  ! ${coverage}`));

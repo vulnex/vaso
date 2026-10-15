@@ -21,6 +21,12 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - **Every adapter reports an unreadable or unparseable config as CONFIG-LOAD.** The 1.3.0 change covered only some agents; the rest (Gemini CLI, Qwen Code, Devin, Abacus, OpenCode, Atomic Agent, Hermes, IronClaw, PicoClaw, ZeroClaw, Nanobot, NemoClaw, NanoClaw, OpenShell, Copilot CLI) still dropped a config behind a chmod-000 directory and scored the install clean. `.jsonc` and `.json5` files load as JSON. A config directory that can't be searched is one CONFIG-LOAD finding for the directory instead of one per file name tried in it.
 - **Remote scans match local ones for unreadable files and directories.** The probe marks a file it can stat but not open as present and denied (so its mode is still checked), and records a directory it can't list (a mode-000 browser profile was missing remotely, so Perplexity Comet went undetected); the snapshot reader raises the same permission error a local read does (probe ≥ 1.3.1).
 - SKL-002/MCP-035's `String.fromCharCode` pattern ran in quadratic time on a long line (two minutes on a 4 MB line); its argument spans are now bounded.
+- **Skill trees with many symlinked directories scan in linear time again** (6,000 links: 133 s → 4 s); the 1.3.0 link-following compared every link with every directory already walked.
+- **SKL-012 measures complexity in one pass** over the shared parse instead of re-parsing each file and walking every function separately, which was quadratic in nesting depth (a 1 MB file nested 150 levels: 55 s → 4 s).
+- **A `--snapshot` scan or detect warns when the snapshot is truncated** (the probe's content budget ran out), as `--host` scans already did.
+- **The probe charges its content budget for what it ships**: escaped JSON characters count at their encoded size, so a snapshot can no longer outgrow what the CLI accepts without being marked truncated (probe ≥ 1.3.1).
+- **Files the probe left out say why** (per-file limit, content budget, binary asset; probe ≥ 1.3.1): budget-omitted skill files were listed as "larger than 5 MiB", and an oversized `~/.claude.json` as a permission error.
+- IOC-007 lists a skill binary over the 5 MiB scan limit as not scanned instead of dropping it silently.
 
 ## [1.3.0] - 2026-10-15
 

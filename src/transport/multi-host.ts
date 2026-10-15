@@ -8,6 +8,7 @@
 import type { SSHTarget } from './ssh.js';
 import type { ProbeManifest, ProbeSnapshot } from '../core/snapshot-types.js';
 import type { ScanResult } from '../core/types.js';
+import { SNAPSHOT_TRUNCATED_WARNING } from '../core/snapshot-load.js';
 
 export interface TransportOptions {
   probeBinDir: string;
@@ -127,7 +128,7 @@ export async function scanMultipleHosts(
 
       const warnings: string[] = [];
       if (snapshot.truncated) {
-        warnings.push('vaso-probe content budget reached — some large agent/skill files were recorded as metadata only and not analysed');
+        warnings.push(SNAPSHOT_TRUNCATED_WARNING);
       }
       if (scanOptions.allUsers) {
         const { allUsersCoverageWarning } = await import('../adapters/openclaw.js');

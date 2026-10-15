@@ -53,7 +53,7 @@ func TestGlobFollowsSkillLinksOutsideTheTree(t *testing.T) {
 	must(os.WriteFile(filepath.Join(checkout, "index.js"), []byte("eval(x)"), 0o644))
 	must(os.WriteFile(filepath.Join(checkout, "lib", "util.js"), []byte("y"), 0o644))
 	must(os.Symlink(checkout, filepath.Join(skills, "linked")))
-	must(os.Symlink(filepath.Join(skills, "local"), filepath.Join(skills, "alias")))       // into the tree
+	must(os.Symlink(filepath.Join(skills, "local"), filepath.Join(skills, "alias")))        // into the tree
 	must(os.Symlink(filepath.Join(base, "checkout"), filepath.Join(checkout, "lib", "up"))) // back up: cycle
 
 	snap := Collect(ProbeManifest{GlobPatterns: []string{skills + "/**"}}, false)

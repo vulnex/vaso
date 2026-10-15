@@ -15,9 +15,23 @@ export const MAX_SCAN_FILE_BYTES = 5 * 1024 * 1024;
  * content), which reads the same way.
  */
 export class ScanLimitError extends Error {
-  constructor(readonly path: string) {
-    super(`${path} exceeds the ${MAX_SCAN_FILE_BYTES}-byte scan limit`);
+  /**
+   * `size` — over MAX_SCAN_FILE_BYTES; `budget` — a snapshot whose probe ran
+   * out of content budget before this file; `omitted` — a snapshot that holds
+   * no content for it for another reason (binary asset, metadata only).
+   */
+  constructor(readonly path: string, readonly reason: 'size' | 'budget' | 'omitted' = 'size') {
+    super(reason === 'size'
+      ? `${path} exceeds the ${MAX_SCAN_FILE_BYTES}-byte scan limit`
+      : `${path}: content not collected by the remote probe`);
     this.name = 'ScanLimitError';
+  }
+
+  /** Evidence detail for the skipped file. */
+  get detail(): string {
+    if (this.reason === 'budget') return "not scanned: the remote probe's content budget ran out before this file";
+    if (this.reason === 'omitted') return 'not scanned: content not collected by the remote probe';
+    return OVER_LIMIT_DETAIL;
   }
 }
 
@@ -38,8 +52,12 @@ async function knownOverLimit(fs: FSProvider, path: string): Promise<boolean> {
   }
 }
 
-function omittedFromSnapshot(fs: FSProvider, err: unknown): boolean {
-  return fs.kind === 'snapshot' && err instanceof Error && err.message.includes('content not collected');
+/** Why a snapshot holds no content for a file, when that is what `err` says. */
+function omittedFromSnapshot(fs: FSProvider, err: unknown): ScanLimitError['reason'] | undefined {
+  if (fs.kind !== 'snapshot' || !(err instanceof Error) || !err.message.includes('content not collected')) return undefined;
+  if (err.message.includes('content budget')) return 'budget';
+  if (err.message.includes('asset') || err.message.includes('metadata') || err.message.includes('regular file')) return 'omitted';
+  return 'size'; // the per-file cap — or a probe < 1.3.1, which doesn't say
 }
 
 /** Read a file for content scanning; throws ScanLimitError when it exceeds MAX_SCAN_FILE_BYTES. */
@@ -49,7 +67,8 @@ export async function readCappedFile(fs: FSProvider, path: string): Promise<stri
   try {
     content = await fs.readFile(path);
   } catch (err) {
-    if (omittedFromSnapshot(fs, err)) throw new ScanLimitError(path);
+    const reason = omittedFromSnapshot(fs, err);
+    if (reason) throw new ScanLimitError(path, reason);
     throw err;
   }
   if (Buffer.byteLength(content, 'utf-8') > MAX_SCAN_FILE_BYTES) throw new ScanLimitError(path);
@@ -63,7 +82,8 @@ export async function readCappedBytes(fs: FSProvider, path: string): Promise<Uin
   try {
     bytes = await fs.readBytes(path);
   } catch (err) {
-    if (omittedFromSnapshot(fs, err)) throw new ScanLimitError(path);
+    const reason = omittedFromSnapshot(fs, err);
+    if (reason) throw new ScanLimitError(path, reason);
     throw err;
   }
   if (bytes.byteLength > MAX_SCAN_FILE_BYTES) throw new ScanLimitError(path);

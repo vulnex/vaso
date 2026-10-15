@@ -714,3 +714,24 @@ describe('SnapshotFSProvider denied entries', () => {
   });
 });
 
+
+describe('SnapshotFSProvider omitted content', () => {
+  it('says why the probe left content out, and file-limits maps it to a scan-limit reason', async () => {
+    const { readCappedFile, ScanLimitError } = await import('./file-limits.js');
+    const fs = new SnapshotFSProvider({
+      version: 1, hostname: 'h', platform: 'linux', homedir: '/h', timestamp: 't',
+      privilege: { uid: 1, username: 'u', isRoot: false, sudoAvailable: false, escalated: false, scannedUsers: ['u'], skippedPaths: [] },
+      files: {
+        '/h/big.json': { content: '', mode: 0o600, exists: true, contentOmitted: true, omitted: 'size' },
+        '/h/late.js': { content: '', mode: 0o644, exists: true, contentOmitted: true, omitted: 'budget' },
+        '/h/old.js': { content: '', mode: 0o644, exists: true, contentOmitted: true },
+      },
+      directories: {}, commandOutputs: {}, env: {},
+    });
+    await expect(fs.readFile('/h/big.json')).rejects.toThrow("larger than the probe's per-file limit");
+    const reason = (p: string) => readCappedFile(fs, p).then(() => undefined, (e: unknown) => (e instanceof ScanLimitError ? e.reason : 'other'));
+    expect(await reason('/h/late.js')).toBe('budget');
+    expect(await reason('/h/big.json')).toBe('size');
+    expect(await reason('/h/old.js')).toBe('size'); // probes < 1.3.1 give no reason
+  });
+});

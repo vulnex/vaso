@@ -108,3 +108,7 @@ export async function loadSnapshotFile(path: string): Promise<ProbeSnapshot> {
 export function snapshotErrorLines(err: SnapshotLoadError): string[] {
   return [err.message, ...err.problems.map(p => `  - ${p}`)];
 }
+
+/** Warning for a snapshot whose probe ran out of content budget (`truncated`). */
+export const SNAPSHOT_TRUNCATED_WARNING =
+  'vaso-probe content budget reached — some large agent/skill files were recorded as metadata only and not analysed';

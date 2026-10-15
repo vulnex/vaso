@@ -91,6 +91,11 @@ type FileEntry struct {
 	// Set when the file exists but its content was deliberately not collected
 	// (over the per-file cap, over the total budget, or a metadata-only glob).
 	ContentOmitted bool `json:"contentOmitted,omitempty"`
+	// Why the content was omitted (probe ≥ 1.3.1): "size" (over the per-file
+	// cap), "budget" (the snapshot's content budget ran out), "asset" (binary
+	// asset recorded as metadata), "metadata" (a metadata-only request), or
+	// "special" (not a regular file).
+	Omitted string `json:"omitted,omitempty"`
 	// "base64" when the file is not valid UTF-8 (binary: protobuf settings,
 	// keystores…) and Content holds its bytes base64-encoded; a JSON string
 	// would replace invalid sequences and lose them. Empty means UTF-8 text.

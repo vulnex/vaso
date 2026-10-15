@@ -2,7 +2,7 @@ import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { getIOCDatabase } from '../../ioc/database.js';
 import { skillFilesOf, skillsDirsOf } from '../skills/skill-files.js';
-import { readCappedBytes } from '../../core/file-limits.js';
+import { readCappedBytes, ScanLimitError } from '../../core/file-limits.js';
 
 function bytesStartWith(haystack: Uint8Array, needle: Uint8Array): boolean {
   if (haystack.length < needle.length) return false;
@@ -30,36 +30,40 @@ export const ioc007 = defineCheck({
 
     for (const file of files) {
       let matched: { name: string } | undefined;
+      let bytes: Uint8Array | undefined;
+      try {
+        bytes = await readCappedBytes(ctx.fs, file);
+      } catch (err) {
+        // A large native helper is exactly what this check is for: say it
+        // wasn't read rather than dropping it silently
+        if (err instanceof ScanLimitError) evidence.push({ file, detail: err.detail, mitigated: true });
+        continue;
+      }
 
       // Buffer patterns represent executable magic bytes and must match at
       // file offset 0. Reading the file as bytes lets us avoid the latin1
       // substring search, which used to match the 2-byte PE magic ("MZ")
       // anywhere in the file — including inside identifiers like "xMZx".
       if (bufferPatterns.length > 0) {
-        try {
-          const bytes = await readCappedBytes(ctx.fs, file);
-          for (const bp of bufferPatterns) {
-            if (bytesStartWith(bytes, bp.pattern as Uint8Array)) {
-              matched = { name: bp.name };
-              break;
-            }
+        for (const bp of bufferPatterns) {
+          if (bytesStartWith(bytes, bp.pattern as Uint8Array)) {
+            matched = { name: bp.name };
+            break;
           }
-        } catch {}
+        }
       }
 
       // Regex patterns operate on file text (e.g. packed-JS wrappers).
       if (!matched) {
         const regexPatterns = db.binaryPatterns.filter(bp => bp.type === 'regex');
         if (regexPatterns.length > 0) {
-          try {
-            const content = Buffer.from(await readCappedBytes(ctx.fs, file)).toString('utf-8');
-            for (const bp of regexPatterns) {
-              if ((bp.pattern as RegExp).test(content)) {
-                matched = { name: bp.name };
-                break;
-              }
+          const content = Buffer.from(bytes).toString('utf-8');
+          for (const bp of regexPatterns) {
+            if ((bp.pattern as RegExp).test(content)) {
+              matched = { name: bp.name };
+              break;
             }
-          } catch {}
+          }
         }
       }
 

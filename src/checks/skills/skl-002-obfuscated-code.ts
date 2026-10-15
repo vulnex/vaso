@@ -2,7 +2,7 @@ import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { findHighEntropyBlocks } from '../../analyzers/entropy.js';
 import { OBFUSCATION_PATTERNS, isBenignEncodedData } from '../../analyzers/obfuscation.js';
-import { OVER_LIMIT_DETAIL, ScanLimitError } from '../../core/file-limits.js';
+import { ScanLimitError } from '../../core/file-limits.js';
 import { readSkillText, skillFilesOf, skillsDirsOf } from './skill-files.js';
 import { markTestCode } from '../../analyzers/test-paths.js';
 import { ANALYSIS_NESTING_LIMIT, overNestedLines } from '../../analyzers/js-parse.js';
@@ -74,7 +74,7 @@ export const skl002 = defineCheck({
       } catch (err) {
         // Padding a file past the size limit hides it from every content
         // check — reported here once (informational) so it stays visible.
-        if (err instanceof ScanLimitError) evidence.push({ file, detail: OVER_LIMIT_DETAIL, mitigated: true });
+        if (err instanceof ScanLimitError) evidence.push({ file, detail: err.detail, mitigated: true });
       }
     }
 

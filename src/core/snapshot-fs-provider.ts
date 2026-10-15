@@ -1,7 +1,7 @@
 import { join, basename, dirname, posix } from 'node:path';
 import type { FSProvider, DirentInfo, ExecResult, ExecOptions, PermissionQuery } from './fs-provider.js';
 import { posixPermissionFacts } from './permissions.js';
-import type { ProbeSnapshot } from './snapshot-types.js';
+import type { FileEntry, ProbeSnapshot } from './snapshot-types.js';
 import type { Platform } from './types.js';
 
 function stripTrailingSlash(name: string): string {
@@ -28,7 +28,7 @@ export class SnapshotFSProvider implements FSProvider {
     if (entry.contentOmitted || typeof entry.content !== 'string') {
       // Present on the host, content deliberately not shipped (size cap,
       // budget, binary asset, metadata-only glob) — unreadable, not empty.
-      throw new Error(`EACCES: content not collected in snapshot: ${path}`);
+      throw omittedError(path, entry.omitted);
     }
     // Binary files arrive base64-encoded; decode as a local utf-8 read would
     return entry.encoding === 'base64' ? Buffer.from(entry.content, 'base64').toString('utf-8') : entry.content;
@@ -41,7 +41,7 @@ export class SnapshotFSProvider implements FSProvider {
       throw new Error(`ENOENT: file not collected in snapshot: ${path}`);
     }
     if (entry.contentOmitted || typeof entry.content !== 'string') {
-      throw new Error(`EACCES: content not collected in snapshot: ${path}`);
+      throw omittedError(path, entry.omitted);
     }
     // Probe ≥ 1.1.0 ships non-UTF-8 files base64-encoded, so their bytes are
     // exact. Text arrives as a UTF-8 string and re-encodes faithfully; from
@@ -432,6 +432,20 @@ export class SnapshotFSProvider implements FSProvider {
       return suffix.toLowerCase().includes(cleaned.toLowerCase());
     });
   }
+}
+
+const OMITTED_WHY: Record<NonNullable<FileEntry['omitted']>, string> = {
+  size: "larger than the probe's per-file limit",
+  budget: "the probe's content budget ran out",
+  asset: 'binary asset, recorded as metadata',
+  metadata: 'recorded as metadata only',
+  special: 'not a regular file',
+};
+
+/** A file present on the host whose content the probe did not ship. */
+function omittedError(path: string, reason: FileEntry['omitted']): Error {
+  const why = reason ? ` (${OMITTED_WHY[reason] ?? reason})` : '';
+  return new Error(`EACCES: content not collected in snapshot${why}: ${path}`);
 }
 
 /** The error a local read of a path behind an unreadable directory raises. */

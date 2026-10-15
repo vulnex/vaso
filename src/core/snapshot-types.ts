@@ -77,6 +77,8 @@ export interface FileEntry {
   /** Exists, but content was deliberately not collected (size cap, content
    *  budget, binary asset, or a metadata-only glob). */
   contentOmitted?: boolean;
+  /** Why the content was omitted (probe ≥ 1.3.1). */
+  omitted?: 'size' | 'budget' | 'asset' | 'metadata' | 'special';
   /** `'base64'` when the file is not valid UTF-8 and `content` holds its bytes
    *  base64-encoded (probe ≥ 1.1.0); absent means UTF-8 text. */
   encoding?: 'base64';

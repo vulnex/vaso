@@ -1,4 +1,4 @@
-import { basename, join, relative, isAbsolute } from 'node:path';
+import { basename, dirname, join, relative, isAbsolute } from 'node:path';
 import type { DirentInfo, FSProvider } from './fs-provider.js';
 
 /**
@@ -20,6 +20,57 @@ function isWithin(path: string, dir: string): boolean {
   return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
 }
 
+/**
+ * Real directories already walked. Lookups go up the path (ancestors) or use
+ * an index of descendants, never over the whole set: scanning every visited
+ * path per link made a tree of thousands of linked skills quadratic.
+ */
+class Visited {
+  private readonly paths = new Set<string>();
+  /** ancestor → visited paths strictly below it */
+  private readonly below = new Map<string, string[]>();
+
+  constructor(first: string) {
+    this.add(first);
+  }
+
+  has(path: string): boolean {
+    return this.paths.has(path);
+  }
+
+  add(path: string): void {
+    if (this.paths.has(path)) return;
+    this.paths.add(path);
+    for (let a = dirname(path); ; a = dirname(a)) {
+      const list = this.below.get(a);
+      if (list) list.push(path);
+      else this.below.set(a, [path]);
+      if (dirname(a) === a) break;
+    }
+  }
+
+  /** `path` or a directory above it has been walked. */
+  covers(path: string): boolean {
+    for (let p = path; ; p = dirname(p)) {
+      if (this.paths.has(p)) return true;
+      if (dirname(p) === p) return false;
+    }
+  }
+
+  /** Walked paths strictly inside `dir`. */
+  inside(dir: string): string[] {
+    return this.below.get(dir) ?? [];
+  }
+}
+
+/** Some directory from `path` up to (not including) `stop` is in `set`. */
+function underAny(path: string, stop: string, set: Set<string>): boolean {
+  for (let p = path; p !== stop && dirname(p) !== p; p = dirname(p)) {
+    if (set.has(p)) return true;
+  }
+  return false;
+}
+
 async function realOrSelf(fs: FSProvider, path: string): Promise<string> {
   try {
     return await fs.realpath(path);
@@ -35,8 +86,8 @@ async function realOrSelf(fs: FSProvider, path: string): Promise<string> {
  * readdirEntries when `root` itself can't be listed.
  */
 export async function walkSkillTree(fs: FSProvider, root: string): Promise<DirentInfo[]> {
-  const visited = new Set<string>([await realOrSelf(fs, root)]);
-  return walk(fs, root, [...visited], visited, 0, true);
+  const real = await realOrSelf(fs, root);
+  return walk(fs, root, [real], new Visited(real), 0, true);
 }
 
 /**
@@ -46,7 +97,7 @@ export async function walkSkillTree(fs: FSProvider, root: string): Promise<Diren
  */
 export async function followSkillLinks(fs: FSProvider, root: string, entries: DirentInfo[]): Promise<DirentInfo[]> {
   const rootReal = await realOrSelf(fs, root);
-  const visited = new Set<string>([rootReal]);
+  const visited = new Visited(rootReal);
   const prefix = root.endsWith('/') ? root : root + '/';
   const links = entries.filter(e => e.isSymbolicLink && (e.parentPath === root || (e.parentPath ?? '').startsWith(prefix)));
   return (await follow(fs, root, links, [rootReal], visited, 0)).filter(e => !e.isSymbolicLink || !links.includes(e));
@@ -56,7 +107,7 @@ async function walk(
   fs: FSProvider,
   dir: string,
   roots: string[],
-  visited: Set<string>,
+  visited: Visited,
   depth: number,
   isRoot: boolean,
 ): Promise<DirentInfo[]> {
@@ -71,12 +122,9 @@ async function walk(
     // Parts of this target already walked through a more specific link
     // (`ext-skill` → ~/dev/ext-skill before `chain/devlink` → ~/dev)
     const real = roots[roots.length - 1];
-    const taken = [...visited].filter(v => v !== real && isWithin(v, real));
-    if (taken.length > 0) {
-      entries = entries.filter(e => {
-        const entryReal = join(real, relative(dir, e.parentPath ?? dir), e.name);
-        return !taken.some(v => isWithin(entryReal, v));
-      });
+    const taken = new Set(visited.inside(real));
+    if (taken.size > 0) {
+      entries = entries.filter(e => !underAny(join(real, relative(dir, e.parentPath ?? dir), e.name), real, taken));
     }
   }
   return follow(fs, dir, entries, roots, visited, depth);
@@ -88,7 +136,7 @@ async function follow(
   dir: string,
   entries: DirentInfo[],
   roots: string[],
-  visited: Set<string>,
+  visited: Visited,
   depth: number,
 ): Promise<DirentInfo[]> {
   const out: DirentInfo[] = [];
@@ -139,7 +187,7 @@ async function follow(
   // most specific link.
   dirLinks.sort((a, b) => b.real.length - a.real.length);
   for (const { entry, parent, link, real } of dirLinks) {
-    if ([...visited].some(v => isWithin(real, v))) {
+    if (visited.covers(real)) {
       out.push(entry);
       continue;
     }
