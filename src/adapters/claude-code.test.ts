@@ -19,7 +19,7 @@ vi.mock('../core/config-loader.js', () => ({
   loadConfig: vi.fn(),
 }));
 
-import { access } from 'node:fs/promises';
+import { access, realpath } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import { loadConfig } from '../core/config-loader.js';
 
@@ -51,6 +51,8 @@ describe('Claude Code adapter', () => {
   beforeEach(() => {
     vi.resetAllMocks();
     mockExecFileSync.mockImplementation(() => { throw new Error('not found'); });
+    // Paths resolve to themselves (no symlinks in these fixtures)
+    vi.mocked(realpath).mockImplementation(async (p) => String(p));
   });
 
   it('returns empty array when no .claude dir, no .claude.json, and no CLI binary', async () => {

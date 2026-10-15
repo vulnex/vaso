@@ -211,7 +211,7 @@ export const cursorCliAdapter: AgentAdapter = {
     const cwd = process.cwd();
     const projectCursorDir = join(cwd, CURSOR_DIR_NAME);
     if (await fs.access(projectCursorDir)) {
-      const projectConfigs = withoutLoadedConfigs(await loadFiles(projectCursorDir, ['mcp.json', 'cli.json'], fs), installations);
+      const projectConfigs = await withoutLoadedConfigs(await loadFiles(projectCursorDir, ['mcp.json', 'cli.json'], fs), installations, fs);
       if (projectConfigs.length > 0) {
         installations.push({
           agent: 'cursor-cli',

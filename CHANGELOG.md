@@ -27,6 +27,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - **The probe charges its content budget for what it ships**: escaped JSON characters count at their encoded size, so a snapshot can no longer outgrow what the CLI accepts without being marked truncated (probe ≥ 1.3.1).
 - **Files the probe left out say why** (per-file limit, content budget, binary asset; probe ≥ 1.3.1): budget-omitted skill files were listed as "larger than 5 MiB", and an oversized `~/.claude.json` as a permission error.
 - IOC-007 lists a skill binary over the 5 MiB scan limit as not scanned instead of dropping it silently.
+- **A `$HOME` reached through a symlink no longer doubles coding-agent findings.** Scanning from home, the working directory is the real path while `$HOME` may be a symlinked spelling (macOS `/var` → `/private/var`, a home on a linked volume); Claude Code, Abacus, Cursor, Gemini CLI, OpenCode and Qwen Code then reported the user's own config a second time as a project.
 
 ## [1.3.0] - 2026-10-15
 

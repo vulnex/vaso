@@ -164,7 +164,7 @@ export const abacusAdapter: AgentAdapter = {
     }
     const userSkillDirs = new Set(installations.flatMap(i => i.skillsDirs ?? []));
     const projectSkillDirs = (await existingDirs(cwd, PROJECT_SKILL_DIRS, fs)).filter(d => !userSkillDirs.has(d));
-    const configs = withoutLoadedConfigs(projectConfigs, installations);
+    const configs = await withoutLoadedConfigs(projectConfigs, installations, fs);
     if (configs.length > 0 || projectSkillDirs.length > 0) {
       installations.push({
         agent: 'abacus',

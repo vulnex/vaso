@@ -22,6 +22,7 @@ function makeFs(files: Record<string, string>, platform: NodeJS.Platform = 'linu
       return files[p];
     },
     readdirEntries: async () => [],
+    realpath: async (p: string) => p,
     execSync: () => { throw new Error('not found'); },
     exec: async () => ({ exitCode: 1, stdout: '', stderr: '' }),
   } as unknown as FSProvider;

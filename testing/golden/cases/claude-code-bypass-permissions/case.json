@@ -1,0 +1,6 @@
+{
+  "agent": "claude-code",
+  "source": "Claude Code settings docs (permissions.defaultMode); deep-test fixture shape",
+  "fail": { "CC-001": "critical" },
+  "modes": { ".claude": "700", ".claude/settings.json": "600" }
+}

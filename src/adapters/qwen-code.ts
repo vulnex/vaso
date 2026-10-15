@@ -175,7 +175,7 @@ export const qwenCodeAdapter: AgentAdapter = {
     const cwd = process.cwd();
     const projectQwenDir = join(cwd, QWEN_DIR_NAME);
     if (await fs.access(projectQwenDir)) {
-      const projectConfigs = withoutLoadedConfigs(await loadSettings(projectQwenDir, fs), installations);
+      const projectConfigs = await withoutLoadedConfigs(await loadSettings(projectQwenDir, fs), installations, fs);
       if (projectConfigs.length > 0) {
         installations.push({
           agent: 'qwen-code',

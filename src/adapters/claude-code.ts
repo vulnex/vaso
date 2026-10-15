@@ -164,10 +164,10 @@ export const claudeCodeAdapter: AgentAdapter = {
     const cwd = process.cwd();
     const projectClaudeDir = join(cwd, CLAUDE_DIR_NAME);
     if (!installations.some(i => i.installDir === projectClaudeDir)) {
-      const projectConfigs = withoutLoadedConfigs([
+      const projectConfigs = await withoutLoadedConfigs([
         ...(await fs.access(projectClaudeDir) ? await loadSettingsFiles(projectClaudeDir, fs) : []),
         ...[await loadConfigIfPresent(join(cwd, PROJECT_MCP_FILE), fs)].filter(c => c !== undefined),
-      ], installations);
+      ], installations, fs);
       const hasMemory = (await Promise.all(projectMemoryPaths(cwd).map(p => fs.access(p)))).some(Boolean);
       if (projectConfigs.length > 0 || hasMemory) {
         // The project runs under the scanning user's claude — its version

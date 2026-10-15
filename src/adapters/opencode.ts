@@ -167,7 +167,7 @@ export const opencodeAdapter: AgentAdapter = {
     // Outermost first — the config nearest the cwd wins the merge
     for (const dir of [...dirs].reverse()) projectConfigs.push(...await loadConfigsIn(dir, fs));
     const projectDir = join(root, '.opencode');
-    const fresh = withoutLoadedConfigs(projectConfigs, installations);
+    const fresh = await withoutLoadedConfigs(projectConfigs, installations, fs);
     const isUserDir = installations.some(i => i.installDir === projectDir);
     if (!isUserDir && (fresh.length > 0 || await fs.access(projectDir))) {
       installations.push({

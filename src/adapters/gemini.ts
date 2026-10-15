@@ -210,7 +210,7 @@ export const geminiAdapter: AgentAdapter = {
     const cwd = process.cwd();
     const projectGeminiDir = join(cwd, GEMINI_DIR_NAME);
     if (await fs.access(projectGeminiDir)) {
-      const projectConfigs = withoutLoadedConfigs(await loadSettings(projectGeminiDir, fs), installations);
+      const projectConfigs = await withoutLoadedConfigs(await loadSettings(projectGeminiDir, fs), installations, fs);
       if (projectConfigs.length > 0) {
         installations.push({
           agent: 'gemini-cli',
