@@ -156,6 +156,8 @@ export async function loadCachedFeed(
       // Tampered — delete both files
       await unlink(feedPath).catch(() => {});
       await unlink(sigPath).catch(() => {});
+      // Bundled data still applies, but the user should know the update is gone
+      console.error(`Warning: the cached IOC feed failed signature verification and was removed; run \`vaso update\` to re-install it.`);
       return null;
     }
 
@@ -189,9 +191,13 @@ export async function fetchAndUpdateFeed(options: FetchOptions = {}): Promise<Up
   // Ensure directory exists
   await mkdir(feedDir, { recursive: true });
 
+  // A cached feed that is missing or fails its signature (deleted on load)
+  // is no cache at all: fetch, and re-install even the same version
+  const cacheUsable = (await loadCachedFeed(feedDir, publicKeyPem)) !== null;
+
   // Unless forced, skip when a cached feed exists and isn't stale.
   // (Missing metadata means no cache yet — proceed with the fetch.)
-  if (!force && existsSync(join(feedDir, METADATA_FILE)) && !isFeedStale(DEFAULT_STALENESS_DAYS, feedDir)) {
+  if (!force && cacheUsable && existsSync(join(feedDir, METADATA_FILE)) && !isFeedStale(DEFAULT_STALENESS_DAYS, feedDir)) {
     return { success: true, message: 'Feed is up to date (not stale).' };
   }
 
@@ -249,7 +255,7 @@ export async function fetchAndUpdateFeed(options: FetchOptions = {}): Promise<Up
   }
 
   // Reject downgrades
-  if (feed.meta.version < currentVersion || (feed.meta.version === currentVersion && !options.reinstall)) {
+  if (feed.meta.version < currentVersion || (feed.meta.version === currentVersion && !options.reinstall && cacheUsable)) {
     return {
       success: true,
       message: `Feed version ${feed.meta.version} is not newer than cached version ${currentVersion}.`,

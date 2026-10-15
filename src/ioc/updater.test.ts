@@ -436,6 +436,26 @@ describe('fetchAndUpdateFeed', () => {
     expect(JSON.parse(await readFile(join(tmpDir, 'metadata.json'), 'utf-8')).feedVersion).toBe(5);
   });
 
+  it('re-installs the same version when the cached feed is missing, without --force', async () => {
+    const meta: IOCFeedMetadata = {
+      lastUpdated: new Date().toISOString(), feedVersion: 4,
+      feedUrl: 'https://example.com/feed.json', lastCheckAt: new Date().toISOString(), // not stale
+    };
+    await writeFile(join(tmpDir, 'metadata.json'), JSON.stringify(meta)); // feed.json itself is gone
+    const feed = makeFeed({ meta: { version: 4, timestamp: new Date().toISOString(), description: 'same' }, data: { c2Ips: ['10.0.0.9'] } });
+    const feedBytes = Buffer.from(JSON.stringify(feed));
+    const sig = signFeed(feedBytes);
+    vi.stubGlobal('fetch', vi.fn().mockImplementation((url: string) => {
+      const body = url.endsWith('.sig') ? Buffer.from(sig) : feedBytes;
+      return Promise.resolve({ ok: true, text: () => Promise.resolve(body.toString()), arrayBuffer: () => Promise.resolve(body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength)) });
+    }));
+
+    const result = await fetchAndUpdateFeed({ feedUrl: 'https://example.com/feed.json', feedDir: tmpDir, publicKeyPem: testPublicKeyPem });
+    expect(result.success).toBe(true);
+    expect(result.feedVersion).toBe(4);
+    expect(JSON.parse(await readFile(join(tmpDir, 'feed.json'), 'utf-8')).meta.version).toBe(4);
+  });
+
   it('first-time fetch proceeds without force when no metadata exists', async () => {
     const feed = makeFeed({
       meta: { version: 1, timestamp: new Date().toISOString(), description: 'test' },
@@ -470,6 +490,10 @@ describe('fetchAndUpdateFeed', () => {
       lastCheckAt: new Date().toISOString(),
     };
     await writeFile(join(tmpDir, 'metadata.json'), JSON.stringify(meta));
+    // and a valid cached feed (a missing or tampered one is re-fetched)
+    const cached = Buffer.from(JSON.stringify(makeFeed({ meta: { version: 1, timestamp: new Date().toISOString(), description: 'c' }, data: {} })));
+    await writeFile(join(tmpDir, 'feed.json'), cached);
+    await writeFile(join(tmpDir, 'feed.json.sig'), signFeed(cached));
 
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
