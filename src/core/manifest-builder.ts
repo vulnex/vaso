@@ -1,3 +1,5 @@
+import { CREDENTIAL_FILE_NAMES, CREDENTIAL_SEARCH_DEPTH } from '../checks/policy/pol-005-plaintext-credentials.js';
+import { getAdvisoryDatabase } from '../advisory/database.js';
 import type { AgentAdapter } from '../adapters/adapter.js';
 import type { ProbeManifest } from './snapshot-types.js';
 import { cliInstallGlobs, cliInstallSystemPaths } from '../adapters/cli-installs.js';
@@ -42,6 +44,59 @@ function withRelocatedTwins(paths: string[]): string[] {
     const tree = RELOCATABLE_TREES.find(([prefix]) => p.startsWith(prefix));
     if (!tree) continue;
     for (const relocated of tree[1]) out.push(relocated + p.slice(tree[0].length));
+  }
+  return out;
+}
+
+/**
+ * For every requested `<dir>/package.json`: `<dir>/package-lock.json` and
+ * `<dir>/node_modules/<name>/package.json` for the npm packages advisories
+ * name (not the whole tree). Literal `node_modules` segments are collected
+ * by the probe (only wildcard-reached vendor dirs are skipped).
+ */
+function dependencyPaths(paths: string[]): string[] {
+  const names = [...new Set(getAdvisoryDatabase().advisories
+    .map(a => a.affectedDependency)
+    .filter(d => d && (d.ecosystem === 'npm' || d.ecosystem === undefined))
+    .map(d => d!.name)
+    .filter(n => /^(@[a-z0-9._~-]+\/)?[a-z0-9._~-]+$/i.test(n)))].sort();
+  // One brace alternative per npm scope keeps the manifest small:
+  // `{a,b}` for unscoped names, `@scope/{x,y}` per scope
+  const byScope = new Map<string, string[]>();
+  for (const n of names) {
+    const [scope, rest] = n.startsWith('@') ? [n.slice(0, n.indexOf('/')), n.slice(n.indexOf('/') + 1)] : ['', n];
+    byScope.set(scope, [...(byScope.get(scope) ?? []), rest]);
+  }
+  const alt = (xs: string[]) => (xs.length === 1 ? xs[0] : `{${xs.join(',')}}`);
+  const groups = [...byScope].map(([scope, xs]) => (scope ? `${scope}/${alt(xs)}` : alt(xs)));
+  const out: string[] = [];
+  for (const p of paths) {
+    if (!p.endsWith('/package.json')) continue;
+    const dir = p.slice(0, -'/package.json'.length);
+    out.push(`${dir}/package-lock.json`);
+    for (const group of groups) out.push(`${dir}/node_modules/${group}/package.json`);
+  }
+  return out;
+}
+
+/**
+ * POL-005 looks for well-known credential file names (.npmrc, .netrc, …) up
+ * to CREDENTIAL_SEARCH_DEPTH levels below an install directory. Record the
+ * same names at the same depths under each directory an adapter reads a
+ * config or package file from (home-relative ones only) — existence and mode,
+ * never content.
+ */
+function credentialFileGlobs(paths: string[]): string[] {
+  const names = `{${CREDENTIAL_FILE_NAMES.join(',')}}`;
+  const dirs = new Set<string>();
+  for (const p of paths) {
+    if (!p.startsWith('~/') || p.includes('**') || p.includes('/node_modules/')) continue;
+    const dir = p.slice(0, p.lastIndexOf('/'));
+    if (dir.length > 2) dirs.add(dir);
+  }
+  const out: string[] = [];
+  for (const dir of dirs) {
+    for (let depth = 0; depth <= CREDENTIAL_SEARCH_DEPTH; depth++) out.push(`${dir}/${'*/'.repeat(depth)}${names}`);
   }
   return out;
 }
@@ -116,6 +171,15 @@ export function buildProbeManifest(adapters: AgentAdapter[]): ProbeManifest {
     '~/.codeium/windsurf/mcp_config.json',
     '~/.lyrie/mcp.json',
   );
+
+  // ADV-002 reads, next to an install's package.json, its lockfile and the
+  // installed copy of each dependency an advisory names — ship the same
+  // files, or a remote scan judges by the declared range alone
+  const adapterPaths = [...merged.filePaths, ...merged.globPatterns];
+  merged.globPatterns.push(...dependencyPaths(adapterPaths));
+  // Credential files are metadata only: their contents are secrets, and a
+  // remote scan must not copy them to the scanning machine
+  merged.metadataGlobPatterns!.push(...credentialFileGlobs(adapterPaths));
 
   // Deduplicate (after adding the env-relocated twins)
   merged.filePaths = [...new Set(withRelocatedTwins(merged.filePaths))];

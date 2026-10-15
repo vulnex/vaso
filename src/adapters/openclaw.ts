@@ -417,6 +417,8 @@ export const openclawAdapter: AgentAdapter = {
         '~/.openclaw/config.json',
         '~/.openclaw/gateway.yaml',
         '~/.openclaw/.env',
+        // ADV-002 reads the state dir's package.json (installed plugins)
+        '~/.openclaw/package.json',
         '~/.clawdbot/openclaw.json',
         '~/.clawdbot/config.yaml',
         '~/.clawdbot/config.json',

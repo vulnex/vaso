@@ -24,6 +24,20 @@ describe('buildProbeManifest', () => {
     for (const p of stores) expect(content).not.toContain(p);
   });
 
+  it("asks for POL-005's credential files as metadata only, two levels deep", () => {
+    const cred = manifest.metadataGlobPatterns!.filter(g => g.includes('.netrc'));
+    expect(cred).toEqual(expect.arrayContaining([
+      '~/.openclaw/{.npmrc,.netrc,.pgpass,.my.cnf,.s3cfg,credentials,secrets.txt,.boto,.pypirc,.authinfo}',
+      '~/.openclaw/*/*/{.npmrc,.netrc,.pgpass,.my.cnf,.s3cfg,credentials,secrets.txt,.boto,.pypirc,.authinfo}',
+    ]));
+    expect([...manifest.globPatterns, ...manifest.filePaths].filter(g => g.includes('.netrc'))).toEqual([]);
+  });
+
+  it("ships the installed copies of advisory-named dependencies next to an install's package.json", () => {
+    expect(manifest.globPatterns.some(g => g.startsWith('~/.openclaw/node_modules/{') && g.includes('postmark-mcp'))).toBe(true);
+    expect(manifest.globPatterns).toContain('~/.openclaw/package-lock.json');
+  });
+
   it('runs agent CLIs with an isolated HOME, system tools with the real one', () => {
     const byId = new Map(manifest.commands.map(c => [c.id, c]));
     for (const id of ['hermes-version-flag', 'cursor-agent-version', 'gemini-version', 'copilot-version', 'nemoclaw-pip3-show', 'abacusai-version']) {

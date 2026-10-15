@@ -1,4 +1,5 @@
 import { join } from 'node:path';
+import type { DirentInfo, FSProvider } from '../../core/fs-provider.js';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { isExcludedPath } from '../../core/utils.js';
@@ -17,6 +18,39 @@ const CREDENTIAL_FILES = new Set([
   '.authinfo',
 ]);
 
+/**
+ * How far below the install directory credential files are looked for. The
+ * remote probe collects these names at the same depths
+ * (`credentialFileGlobs` in manifest-builder.ts), so local and remote scans
+ * agree; an unbounded walk also crawled whole session and cache trees.
+ */
+export const CREDENTIAL_SEARCH_DEPTH = 2;
+export const CREDENTIAL_FILE_NAMES: readonly string[] = [...CREDENTIAL_FILES];
+
+async function credentialCandidates(fs: FSProvider, root: string): Promise<DirentInfo[]> {
+  const out: DirentInfo[] = [];
+  let level = [root];
+  for (let depth = 0; depth <= CREDENTIAL_SEARCH_DEPTH && level.length > 0; depth++) {
+    const next: string[] = [];
+    for (const dir of level) {
+      let entries: DirentInfo[];
+      try {
+        entries = await fs.readdirEntries(dir);
+      } catch (err) {
+        if (dir === root) throw err;
+        continue;
+      }
+      for (const e of entries) {
+        const parentPath = e.parentPath ?? dir;
+        if (e.isFile && CREDENTIAL_FILES.has(e.name)) out.push({ ...e, parentPath });
+        else if (e.isDirectory && !isExcludedPath(root, join(parentPath, e.name))) next.push(join(parentPath, e.name));
+      }
+    }
+    level = next;
+  }
+  return out;
+}
+
 export const pol005 = defineCheck({
   id: 'POL-005',
   name: 'Plaintext Credential Files',
@@ -29,7 +63,7 @@ export const pol005 = defineCheck({
 
     let entries: { name: string; isFile: boolean; isDirectory: boolean; parentPath?: string }[];
     try {
-      entries = await ctx.fs.readdirEntries(installDir, { recursive: true });
+      entries = await credentialCandidates(ctx.fs, installDir);
     } catch {
       return h.passed('Install directory not accessible');
     }
@@ -61,8 +95,16 @@ export const pol005 = defineCheck({
             }
           }
         }
-      } catch {
-        // File may not be readable
+      } catch (err) {
+        // A remote snapshot records credential files without their content
+        // (privacy): say the file is there, unverified, rather than nothing
+        if (ctx.fs.kind === 'snapshot' && err instanceof Error && err.message.includes('content not collected')) {
+          evidence.push({
+            file: fullPath,
+            detail: 'Credential file present; its content is not collected by remote scans — scan the host locally to check it for plaintext keys',
+            mitigated: true,
+          });
+        }
       }
     }
 

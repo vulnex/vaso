@@ -143,9 +143,12 @@ export class SnapshotFSProvider implements FSProvider {
     // Denied only at open: the mode is known, the content isn't.
     if (fileEntry?.denied && !fileEntry.exists) throw deniedError(path, 'stat');
     if (fileEntry?.exists) {
+      // A FIFO, socket or device (probe >= 1.3.1 says so) is not a regular
+      // file, as a local stat reports it
+      const special = fileEntry.omitted === 'special';
       return {
         mode: fileEntry.mode,
-        isFile: () => true,
+        isFile: () => !special,
         isDirectory: () => false,
       };
     }

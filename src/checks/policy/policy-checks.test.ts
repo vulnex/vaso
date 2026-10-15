@@ -231,6 +231,29 @@ describe('POL-005: Plaintext Credential Files', () => {
     expect(result.evidence).toBeDefined();
   });
 
+  it('looks two directory levels deep, not further (the remote probe collects the same depths)', async () => {
+    const key = '//registry.npmjs.org/:_authToken=ghp_abcdefghijklmnopqrstuvwxyz1234567890';
+    await mkdir(join(tempDir, 'a', 'b', 'c'), { recursive: true });
+    await writeFile(join(tempDir, 'a', 'b', '.npmrc'), key);
+    await writeFile(join(tempDir, 'a', 'b', 'c', '.netrc'), 'machine x password ghp_abcdefghijklmnopqrstuvwxyz1234567890');
+    const result = await pol005.run(makeContext([], tempDir));
+    expect(result.evidence?.map(e => e.file)).toEqual([join(tempDir, 'a', 'b', '.npmrc')]);
+  });
+
+  it('lists a credential file a remote snapshot holds without content as unverified (info)', async () => {
+    const { SnapshotFSProvider } = await import('../../core/snapshot-fs-provider.js');
+    const fs = new SnapshotFSProvider({
+      version: 1, hostname: 'h', platform: 'linux', homedir: '/h', timestamp: 't',
+      privilege: { uid: 1, username: 'u', isRoot: false, sudoAvailable: false, escalated: false, scannedUsers: ['u'], skippedPaths: [] },
+      files: { '/h/.agent/.npmrc': { content: '', mode: 0o600, exists: true, contentOmitted: true, omitted: 'metadata' } },
+      directories: {}, commandOutputs: {}, env: {}, directoryModes: { '/h/.agent': 0o700 },
+    });
+    const ctx = { ...makeContext([], '/h/.agent'), fs };
+    const result = await pol005.run(ctx);
+    expect(result.evidence?.[0]).toMatchObject({ file: '/h/.agent/.npmrc', mitigated: true });
+    expect(result.severity).toBe('info');
+  });
+
   it('passes with clean credential file', async () => {
     await writeFile(join(tempDir, '.npmrc'), 'registry=https://registry.npmjs.org/');
 

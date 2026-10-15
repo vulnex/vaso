@@ -735,3 +735,19 @@ describe('SnapshotFSProvider omitted content', () => {
     expect(await reason('/h/old.js')).toBe('size'); // probes < 1.3.1 give no reason
   });
 });
+
+describe('SnapshotFSProvider special files', () => {
+  it('does not report a FIFO or device (omitted: special) as a regular file', async () => {
+    const fs = new SnapshotFSProvider({
+      version: 1, hostname: 'h', platform: 'linux', homedir: '/h', timestamp: 't',
+      privilege: { uid: 1, username: 'u', isRoot: false, sudoAvailable: false, escalated: false, scannedUsers: ['u'], skippedPaths: [] },
+      files: {
+        '/h/.gemini/oauth_creds.json': { content: '', mode: 0o644, exists: true, contentOmitted: true, omitted: 'special' },
+        '/h/.gemini/settings.json': { content: '{}', mode: 0o644, exists: true },
+      },
+      directories: {}, commandOutputs: {}, env: {},
+    });
+    expect((await fs.stat('/h/.gemini/oauth_creds.json')).isFile()).toBe(false);
+    expect((await fs.stat('/h/.gemini/settings.json')).isFile()).toBe(true);
+  });
+});
