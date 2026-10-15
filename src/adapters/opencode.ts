@@ -11,6 +11,7 @@ import { getUserHomeDirs } from './openclaw.js';
 import { queryCliVersion, readPackageVersion } from './version-query.js';
 import { loadConfigIfPresent } from './load-if-present.js';
 import { withoutLoadedConfigs } from './project-configs.js';
+import { xdgPath } from './env-path.js';
 
 const SYSTEM_CLI_PATHS = [
   '/usr/local/bin/opencode',
@@ -30,15 +31,13 @@ const USER_CLI_RELATIVE_PATHS = [
 //   $XDG_DATA_HOME/opencode/auth.json            — credentials (0600)
 //   $XDG_DATA_HOME/opencode/AGENTS.md            — global memory file
 export function xdgConfigDir(home: string, fs: FSProvider): string {
-  return fs.getEnv('XDG_CONFIG_HOME')?.trim()
-    ? join(fs.getEnv('XDG_CONFIG_HOME')!, 'opencode')
-    : join(home, '.config', 'opencode');
+  const xdg = xdgPath(fs.getEnv('XDG_CONFIG_HOME'));
+  return xdg ? join(xdg, 'opencode') : join(home, '.config', 'opencode');
 }
 
 export function xdgDataDir(home: string, fs: FSProvider): string {
-  return fs.getEnv('XDG_DATA_HOME')?.trim()
-    ? join(fs.getEnv('XDG_DATA_HOME')!, 'opencode')
-    : join(home, '.local', 'share', 'opencode');
+  const xdg = xdgPath(fs.getEnv('XDG_DATA_HOME'));
+  return xdg ? join(xdg, 'opencode') : join(home, '.local', 'share', 'opencode');
 }
 
 const CONFIG_FILENAMES = ['opencode.jsonc', 'opencode.json'];

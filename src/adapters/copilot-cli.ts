@@ -10,6 +10,7 @@ import { nvmBinaryGlob, npmPackageJsonGlobs } from './nvm-binary.js';
 import { discoverCliInstalls } from './cli-installs.js';
 import { getUserHomeDirs } from './openclaw.js';
 import { queryCliVersion, readPackageVersion } from './version-query.js';
+import { envPath } from './env-path.js';
 
 const COPILOT_DIR_NAME = '.copilot';
 // Empirically (Copilot CLI 1.0.39 post-login), only `config.json` is
@@ -73,9 +74,7 @@ function extractModels(configs: ParsedConfig[]): ModelRef[] {
  * the legacy --config-dir). Another user's environment isn't observable.
  */
 export function copilotHome(home: string, fs: FSProvider): string {
-  const env = home === fs.homedir() ? fs.getEnv?.('COPILOT_HOME')?.trim() : undefined;
-  if (!env) return join(home, COPILOT_DIR_NAME);
-  return env === '~' || env.startsWith('~/') ? join(home, env.slice(1)) : env;
+  return envPath(home === fs.homedir() ? fs.getEnv?.('COPILOT_HOME') : undefined, home) ?? join(home, COPILOT_DIR_NAME);
 }
 
 async function userSkillDirs(home: string, copilotDir: string, fs: FSProvider): Promise<Pick<AgentInstallation, 'skillsDir' | 'skillsDirs'>> {

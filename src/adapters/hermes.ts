@@ -9,6 +9,7 @@ import { loadConfigIfPresent } from './load-if-present.js';
 import { hermesApiServer, isTruthy, HERMES_API_DEFAULT_HOST, HERMES_API_DEFAULT_PORT } from './hermes-api-server.js';
 import { discoverCliInstalls } from './cli-installs.js';
 import { queryCliVersion } from './version-query.js';
+import { envPath } from './env-path.js';
 
 const CONFIG_FILENAMES = ['cli-config.yaml', 'config.yaml', '.env'];
 
@@ -50,7 +51,7 @@ export const hermesAdapter: AgentAdapter = {
     const fs = _options?.fs ?? new LocalFSProvider();
     const home = fs.homedir();
     // The scanned host's environment (a snapshot's on remote scans)
-    const hermesHome = fs.getEnv('HERMES_HOME') || join(home, '.hermes');
+    const hermesHome = envPath(fs.getEnv('HERMES_HOME'), home) ?? join(home, '.hermes');
 
     if (!(await fs.access(hermesHome))) return [];
 
@@ -111,7 +112,7 @@ export const hermesAdapter: AgentAdapter = {
 
   getConfigPaths(): string[] {
     const fs = new LocalFSProvider();
-    const hermesHome = fs.getEnv('HERMES_HOME') || join(fs.homedir(), '.hermes');
+    const hermesHome = envPath(fs.getEnv('HERMES_HOME'), fs.homedir()) ?? join(fs.homedir(), '.hermes');
     return CONFIG_FILENAMES.map(f => join(hermesHome, f));
   },
 

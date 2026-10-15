@@ -9,6 +9,7 @@ import { loadConfigIfPresent, pathPresent } from './load-if-present.js';
 import { getUserHomeDirs } from './openclaw.js';
 import { discoverCliInstalls } from './cli-installs.js';
 import { queryCliVersion } from './version-query.js';
+import { envPath, xdgPath } from './env-path.js';
 
 /*
  * IronClaw ships two incompatible generations:
@@ -66,8 +67,7 @@ export function isIronclawLegacy(inst: Pick<AgentInstallation, 'profile'>): bool
 function envOverride(fs: FSProvider, home: string, key: string): string | undefined {
   // Relocation env vars describe the scanning user's session only.
   if (home !== fs.homedir()) return undefined;
-  const value = fs.getEnv(key)?.trim();
-  return value ? value : undefined;
+  return envPath(fs.getEnv(key), home);
 }
 
 /** 1.x state root: `$IRONCLAW_REBORN_HOME`, else `<home>/.ironclaw/reborn`. */
@@ -82,7 +82,7 @@ export function ironclawLegacyDir(home: string, fs: FSProvider): string {
 
 /** Service unit files that may carry `IRONCLAW_REBORN_PROFILE` / `serve` flags. */
 export function ironclawServiceUnitPaths(home: string, fs: FSProvider): string[] {
-  const xdg = home === fs.homedir() ? fs.getEnv('XDG_CONFIG_HOME')?.trim() : undefined;
+  const xdg = home === fs.homedir() ? xdgPath(fs.getEnv('XDG_CONFIG_HOME')) : undefined;
   const paths = [join(xdg || join(home, '.config'), 'systemd', 'user', REBORN_SYSTEMD_UNIT)];
   if (xdg) paths.push(join(home, '.config', 'systemd', 'user', REBORN_SYSTEMD_UNIT));
   paths.push(join(home, 'Library', 'LaunchAgents', REBORN_LAUNCHD_PLIST));

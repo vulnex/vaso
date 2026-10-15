@@ -9,6 +9,7 @@ import { nvmBinaryGlob, npmPackageJsonGlobs } from './nvm-binary.js';
 import { discoverCliInstalls } from './cli-installs.js';
 import { getUserHomeDirs } from './openclaw.js';
 import { queryCliVersion, readPackageVersion } from './version-query.js';
+import { envPath } from './env-path.js';
 
 const CODEX_DIR_NAME = '.codex';
 // auth.json holds OAuth tokens; only its presence and permissions matter
@@ -124,9 +125,7 @@ function trustedProjects(configs: ParsedConfig[]): string[] {
  * observable, so --all-users homes use the default.
  */
 export function codexHome(home: string, fs: FSProvider): string {
-  const env = home === fs.homedir() ? fs.getEnv?.('CODEX_HOME')?.trim() : undefined;
-  if (!env) return join(home, CODEX_DIR_NAME);
-  return env === '~' || env.startsWith('~/') ? join(home, env.slice(1)) : env;
+  return envPath(home === fs.homedir() ? fs.getEnv?.('CODEX_HOME') : undefined, home) ?? join(home, CODEX_DIR_NAME);
 }
 
 /**

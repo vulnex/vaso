@@ -9,6 +9,7 @@ import { discoverCliInstalls, retainedVersionGlobs, type RetainedVersionsDir } f
 import { queryCliVersion } from './version-query.js';
 import { loadConfigIfPresent } from './load-if-present.js';
 import { windsurfPresent } from './windsurf.js';
+import { xdgPath } from './env-path.js';
 
 const SYSTEM_CLI_PATHS = [
   '/usr/local/bin/devin',
@@ -85,9 +86,8 @@ export function devinConfigDir(home: string, fs: FSProvider): string {
       ? join(appData, 'devin')
       : join(home, 'AppData', 'Roaming', 'devin');
   }
-  return fs.getEnv('XDG_CONFIG_HOME')?.trim()
-    ? join(fs.getEnv('XDG_CONFIG_HOME')!, 'devin')
-    : join(home, '.config', 'devin');
+  const xdg = xdgPath(fs.getEnv('XDG_CONFIG_HOME'));
+  return xdg ? join(xdg, 'devin') : join(home, '.config', 'devin');
 }
 
 export function devinDataDir(home: string, fs: FSProvider): string {
@@ -95,9 +95,8 @@ export function devinDataDir(home: string, fs: FSProvider): string {
     // Windows keeps credentials.toml alongside the config
     return devinConfigDir(home, fs);
   }
-  return fs.getEnv('XDG_DATA_HOME')?.trim()
-    ? join(fs.getEnv('XDG_DATA_HOME')!, 'devin')
-    : join(home, '.local', 'share', 'devin');
+  const xdg = xdgPath(fs.getEnv('XDG_DATA_HOME'));
+  return xdg ? join(xdg, 'devin') : join(home, '.local', 'share', 'devin');
 }
 
 /**

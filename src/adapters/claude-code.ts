@@ -11,6 +11,7 @@ import { discoverCliInstalls, retainedVersionGlobs, type RetainedVersionsDir } f
 import { getUserHomeDirs } from './openclaw.js';
 import { queryCliVersion, readPackageVersion } from './version-query.js';
 import { withoutLoadedConfigs } from './project-configs.js';
+import { envPath } from './env-path.js';
 
 const CLAUDE_DIR_NAME = '.claude';
 const SETTINGS_FILES = ['settings.json', 'settings.local.json'];
@@ -94,9 +95,8 @@ function inferPlanDefaultModel(rootState?: Record<string, unknown>): ModelRef | 
  * --all-users homes use the defaults.
  */
 export function claudeConfigPaths(home: string, fs: FSProvider): { claudeDir: string; rootStateFile: string } {
-  const env = home === fs.homedir() ? fs.getEnv?.('CLAUDE_CONFIG_DIR')?.trim() : undefined;
-  if (!env) return { claudeDir: join(home, CLAUDE_DIR_NAME), rootStateFile: join(home, ROOT_STATE_FILE) };
-  const dir = env === '~' || env.startsWith('~/') ? join(home, env.slice(1)) : env;
+  const dir = envPath(home === fs.homedir() ? fs.getEnv?.('CLAUDE_CONFIG_DIR') : undefined, home);
+  if (!dir) return { claudeDir: join(home, CLAUDE_DIR_NAME), rootStateFile: join(home, ROOT_STATE_FILE) };
   return { claudeDir: dir, rootStateFile: join(dir, ROOT_STATE_FILE) };
 }
 

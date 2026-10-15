@@ -10,6 +10,7 @@ import { getUserHomeDirs } from './openclaw.js';
 import { discoverCliInstalls } from './cli-installs.js';
 import { queryCliVersion } from './version-query.js';
 import { applyEnvOverrides, type EnvOverrideSpec, type EnvValueType } from './env-overrides.js';
+import { envPath } from './env-path.js';
 
 /**
  * ZeroClaw (zeroclaw-labs/zeroclaw, Rust) — V3 config schema (zeroclaw ≥ 0.8).
@@ -52,13 +53,14 @@ export async function zeroclawDirs(home: string, fs: FSProvider): Promise<{ conf
   const env = (name: string) => (ownHome ? fs.getEnv(name)?.trim() : undefined);
   const configEnv = env('ZEROCLAW_CONFIG_DIR');
   if (configEnv) {
-    const configDir = expandTilde(configEnv, home);
+    // absolute, so scan and fix agree on the file (`ZEROCLAW_CONFIG_DIR=.zeroclaw`)
+    const configDir = envPath(configEnv, home) ?? configEnv;
     return { configDir, dataDir: join(configDir, 'data') };
   }
   const dataEnv = env('ZEROCLAW_DATA_DIR') || env('ZEROCLAW_WORKSPACE');
   if (dataEnv) {
     // resolve_config_dir_for_data
-    const data = expandTilde(dataEnv, home);
+    const data = envPath(dataEnv, home) ?? dataEnv; // `ZEROCLAW_DATA_DIR=0` too
     if (await fs.access(join(data, 'config.toml'))) return { configDir: data, dataDir: join(data, 'data') };
     const legacy = join(dirname(data), '.zeroclaw');
     if (await fs.access(join(legacy, 'config.toml'))) return { configDir: legacy, dataDir: data };

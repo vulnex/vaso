@@ -9,6 +9,7 @@ import { loadConfigIfPresent } from './load-if-present.js';
 import { getUserHomeDirs } from './openclaw.js';
 import { discoverCliInstalls } from './cli-installs.js';
 import { queryCliVersion } from './version-query.js';
+import { envPath } from './env-path.js';
 
 // Installer (`curl -fsSL https://atomicagent.io/install | sh`) drops a Node SEA
 // binary plus the `atag` alias symlink into ~/.local/bin.
@@ -32,8 +33,7 @@ const CONFIG_FILENAMES = ['config.json', '.env'];
  * host's environment (the snapshot's env on --host scans).
  */
 export function atomicAgentStateDir(home: string, fs: FSProvider): string {
-  const override = fs.getEnv('ATOMIC_AGENT_STATE_DIR')?.trim();
-  return override || join(home, '.atomic-agent');
+  return envPath(fs.getEnv('ATOMIC_AGENT_STATE_DIR'), home) ?? join(home, '.atomic-agent');
 }
 
 export const atomicAgentAdapter: AgentAdapter = {
