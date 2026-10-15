@@ -54,7 +54,7 @@ describe('OpenClaw Insecure', () => {
     expect(check.severity).toBe('critical');
   });
 
-  it('should detect missing rate limiting (CFG-010)', () => {
+  it('should detect a gateway auth rate limit tuned too weak (CFG-010)', () => {
     const check = expectCheckFailed(result, 'CFG-010');
     expect(check.severity).toBe('warning');
   });

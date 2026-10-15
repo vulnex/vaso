@@ -1,7 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { accessibleByOthers, markUnreachable, queryPermissions } from '../../core/permissions.js';
-import { chmodFile } from '../../remediation/config-writer.js';
+import { restrictFilesToOwner } from '../../remediation/config-writer.js';
 
 export const cfg003 = defineCheck({
   id: 'CFG-003',
@@ -38,26 +38,12 @@ export const cfg003 = defineCheck({
       passed: 'All credential config files have restrictive permissions',
       failed: (n) => `${n} credential config file(s) have overly permissive permissions`,
       fixable: true,
-      fixDescription: 'Set permissions to 600 (chmod 600)',
+      fixDescription: 'Remove group/other access (chmod go-rwx)',
     });
   },
 
   async fix(ctx) {
     const credentialPaths = new Set(ctx.credentialPaths ?? []);
-    let fixed = 0;
-    for (const config of ctx.configs) {
-      if (!credentialPaths.has(config.filePath)) continue;
-      try {
-        await chmodFile(config.filePath, 0o600);
-        fixed++;
-      } catch {
-        // File may not exist
-      }
-    }
-    return {
-      checkId: 'CFG-003',
-      applied: fixed > 0,
-      message: fixed > 0 ? `Set permissions to 600 on ${fixed} file(s)` : 'No files to fix',
-    };
+    return restrictFilesToOwner('CFG-003', ctx.configs.map(c => c.filePath).filter(p => credentialPaths.has(p)));
   },
 });

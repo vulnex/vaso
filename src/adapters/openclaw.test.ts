@@ -183,12 +183,12 @@ describe('OpenClaw adapter', () => {
     expect(result[0].installDir).toBe(join(home, '.openclaw'));
   });
 
-  it('includes OPENCLAW_HOME in search dirs', async () => {
-    const home = process.env.HOME || '/home/testuser';
+  it('reads OPENCLAW_HOME as a replacement home directory ($OPENCLAW_HOME/.openclaw)', async () => {
     process.env.OPENCLAW_HOME = '/opt/openclaw';
-    const configPath = join('/opt/openclaw', 'openclaw.json');
+    const dir = join('/opt/openclaw', '.openclaw');
+    const configPath = join(dir, 'openclaw.json');
 
-    setExistingPaths(['/opt/openclaw', configPath]);
+    setExistingPaths([dir, configPath]);
     mockLoadConfig.mockImplementation(async (path) => {
       if (path === configPath) {
         return mockConfig(configPath, { version: '3.0.0' });
@@ -198,8 +198,26 @@ describe('OpenClaw adapter', () => {
 
     const result = await openclawAdapter.detect();
     expect(result).toHaveLength(1);
-    expect(result[0].installDir).toBe('/opt/openclaw');
+    expect(result[0].installDir).toBe(dir);
     expect(result[0].version).toBe('3.0.0');
+  });
+
+  it('reads OPENCLAW_STATE_DIR as the state dir and OPENCLAW_CONFIG_PATH as its config file', async () => {
+    process.env.OPENCLAW_STATE_DIR = '/srv/oc-state';
+    process.env.OPENCLAW_CONFIG_PATH = '/etc/oc/main.json5';
+
+    setExistingPaths(['/srv/oc-state', '/etc/oc/main.json5']);
+    mockLoadConfig.mockImplementation(async (path) => {
+      if (path === '/etc/oc/main.json5') return mockConfig(path as string, { version: '3.1.0' });
+      throw new Error('ENOENT');
+    });
+
+    const result = await openclawAdapter.detect();
+    expect(result).toHaveLength(1);
+    expect(result[0].installDir).toBe('/srv/oc-state');
+    expect(result[0].configFiles.map(c => c.filePath)).toEqual(['/etc/oc/main.json5']);
+    delete process.env.OPENCLAW_STATE_DIR;
+    delete process.env.OPENCLAW_CONFIG_PATH;
   });
 
   it('does not set user field when allUsers is not set', async () => {

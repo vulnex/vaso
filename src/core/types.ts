@@ -70,6 +70,10 @@ export interface CheckResult {
   evidence?: Evidence[];
   fixable?: boolean;
   fixDescription?: string;
+  /** Id of another check whose fix() resolves this finding — set when a
+   *  generic finding with a fix (CFG-003 chmod) is folded into an
+   *  agent-specific one without a fix. `vaso fix` runs that check's fix. */
+  fixedBy?: string;
   /** Set by the engine when the check could not be evaluated — it threw, or its
    *  adapter failed to detect/parse — rather than producing a real verdict.
    *  Distinguishes "scanned and failed the check" from "scan was incomplete".

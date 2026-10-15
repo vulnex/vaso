@@ -59,7 +59,7 @@ export const skl007 = defineCheck({
       } catch {}
     }
 
-    markTestCode(evidence, ctx.installation);
+    await markTestCode(evidence, ctx.installation, ctx.fs);
     return h.fromEvidence(evidence, {
       passed: 'No prompt injection patterns found in skill docs',
       failed: (n) => `Found ${n} prompt injection pattern(s) in skill documentation`,

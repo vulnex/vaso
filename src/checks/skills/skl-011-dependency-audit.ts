@@ -111,7 +111,7 @@ export const skl011 = defineCheck({
       }
     }
 
-    markTestCode(evidence, ctx.installation);
+    await markTestCode(evidence, ctx.installation, ctx.fs);
     return h.fromEvidence(evidence, {
       passed: 'All skill dependencies are clean',
       failed: (n) => `Found ${n} dependency issue(s)`,

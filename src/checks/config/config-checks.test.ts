@@ -304,7 +304,7 @@ describe('CFG-005: Missing Shell Allowlist', () => {
       const result = await cfg005.run(makeContext([makeConfig(data)]));
       expect(result.passed).toBe(passed);
       expect(result.message).toContain(source);
-      expect(result.fixable).toBe(false); // guidance only: OpenClaw rejects unknown/mixed keys
+      expect(result.fixable).toBeFalsy(); // guidance only: OpenClaw rejects unknown/mixed keys
     });
   });
 });
@@ -430,6 +430,15 @@ describe('CFG-010: Rate Limiting', () => {
     const result = await cfg010.run(makeContext([makeConfig({})]));
     expect(result.passed).toBe(true);
     expect(result.fixable).toBeFalsy();
+  });
+
+  it('fails on OpenClaw when gateway.auth.rateLimit is tuned too weak', async () => {
+    const weak = makeConfig({ gateway: { auth: { rateLimit: { maxAttempts: 100000, lockoutMs: 0 } } } });
+    const result = await cfg010.run(makeContext([weak]));
+    expect(result.passed).toBe(false);
+    expect(result.message).toContain('maxAttempts 100000');
+    const sane = makeConfig({ gateway: { auth: { rateLimit: { maxAttempts: 20, windowMs: 60000, lockoutMs: 300000 } } } });
+    expect((await cfg010.run(makeContext([sane]))).passed).toBe(true);
   });
 
   it('fails when no rate limiting', async () => {

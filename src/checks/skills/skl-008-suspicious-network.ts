@@ -36,7 +36,7 @@ export const skl008 = defineCheck({
       } catch {}
     }
 
-    markTestCode(evidence, ctx.installation);
+    await markTestCode(evidence, ctx.installation, ctx.fs);
     return h.fromEvidence(evidence, {
       passed: 'No suspicious network calls detected',
       failed: (n) => `Found ${n} suspicious network call(s)`,

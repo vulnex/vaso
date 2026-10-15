@@ -14,14 +14,18 @@ const SYSTEM_TOOLS = new Set(['which', 'defaults', 'codesign', 'plutil', 'netsta
  */
 export const RELOCATABLE_TREES: ReadonlyArray<readonly [prefix: string, relocated: readonly string[]]> = [
   ['~/.ironclaw/reborn/', ['${IRONCLAW_REBORN_HOME}/']],
+  // 0.x state root
+  ['~/.ironclaw/', ['${IRONCLAW_BASE_DIR}/']],
   ['~/.local/share/', ['${XDG_DATA_HOME}/']],
   ['~/.local/state/', ['${XDG_STATE_HOME}/']],
   ['~/.config/', ['${XDG_CONFIG_HOME}/']],
   ['~/.picoclaw/', ['${PICOCLAW_HOME}/']],
   ['~/.atomic-agent/', ['${ATOMIC_AGENT_STATE_DIR}/']],
-  ['~/.zeroclaw/', ['${ZEROCLAW_CONFIG_DIR}/', '${ZEROCLAW_DATA_DIR}/', '${ZEROCLAW_WORKSPACE}/']],
+  // ZEROCLAW_DATA_DIR/WORKSPACE: config in the dir itself or, legacy, in <parent>/.zeroclaw
+  ['~/.zeroclaw/', ['${ZEROCLAW_CONFIG_DIR}/', '${ZEROCLAW_DATA_DIR}/', '${ZEROCLAW_WORKSPACE}/', '${ZEROCLAW_DATA_DIR}/../.zeroclaw/', '${ZEROCLAW_WORKSPACE}/../.zeroclaw/']],
   ['~/.hermes/', ['${HERMES_HOME}/']],
-  ['~/.openclaw/', ['${OPENCLAW_HOME}/']],
+  // OPENCLAW_HOME replaces the home directory; OPENCLAW_STATE_DIR is the state dir itself
+  ['~/.openclaw/', ['${OPENCLAW_HOME}/.openclaw/', '${OPENCLAW_STATE_DIR}/']],
   ['~/.codex/', ['${CODEX_HOME}/']],
   ['~/.claude/', ['${CLAUDE_CONFIG_DIR}/']],
   ['~/.copilot/', ['${COPILOT_HOME}/']],

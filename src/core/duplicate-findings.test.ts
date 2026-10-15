@@ -28,6 +28,16 @@ describe('dedupePermissionFindings', () => {
     expect(pol.message).toContain('other files reported by DEV-002');
   });
 
+  it('hands CFG-003\'s fix to an owner check that has none', () => {
+    const out = dedupePermissionFindings([
+      r('LY-006', [{ file: '/h/lyrie/.env', detail: 'Permissions: 644 (should be 600 or tighter)' }]),
+      r('CFG-003', [perm('/h/lyrie/.env')], { fixable: true, fixDescription: 'Set permissions to 600 (chmod 600)' }),
+    ]);
+    expect(out.find(x => x.id === 'CFG-003')?.passed).toBe(true);
+    const owner = out.find(x => x.id === 'LY-006')!;
+    expect(owner).toMatchObject({ passed: false, fixable: true, fixedBy: 'CFG-003' });
+  });
+
   it('never drops a permission finding because another check flagged something else in that file', () => {
     const out = dedupePermissionFindings([
       r('QC-001', [{ file: '/h/.qwen/settings.json', detail: 'Plaintext secret in Qwen settings' }]),

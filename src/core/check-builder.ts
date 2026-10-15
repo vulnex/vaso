@@ -75,7 +75,8 @@ export function defineCheck(args: DefineCheckArgs): CheckModule {
         passed: r.passed,
         message: r.message,
         evidence: r.evidence && r.evidence.length > 0 ? r.evidence : undefined,
-        fixable: r.fixable,
+        // Nothing to fix on a pass
+        fixable: r.passed ? undefined : r.fixable,
         fixDescription: r.fixDescription,
       };
     },

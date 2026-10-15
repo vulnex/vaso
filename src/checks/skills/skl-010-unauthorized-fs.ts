@@ -36,7 +36,7 @@ export const skl010 = defineCheck({
       } catch {}
     }
 
-    markTestCode(evidence, ctx.installation);
+    await markTestCode(evidence, ctx.installation, ctx.fs);
     return h.fromEvidence(evidence, {
       passed: 'No unauthorized filesystem access detected',
       failed: (n) => `Found ${n} unauthorized filesystem access(es)`,

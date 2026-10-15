@@ -68,8 +68,9 @@ describe('buildProbeManifest', () => {
     expect(manifest.globPatterns).toEqual(expect.arrayContaining(['${HERMES_HOME}/skills/**']));
     expect(manifest.directoryListings).toEqual(expect.arrayContaining(['${XDG_CONFIG_HOME}/opencode']));
     // privacy holds for twins: a metadata-only path's twin is metadata-only too
-    expect(manifest.metadataGlobPatterns).toEqual(expect.arrayContaining(['${OPENCLAW_HOME}/memory.json']));
-    expect([...manifest.filePaths, ...manifest.globPatterns]).not.toContain('${OPENCLAW_HOME}/memory.json');
+    expect(manifest.metadataGlobPatterns).toEqual(expect.arrayContaining(['${OPENCLAW_HOME}/.openclaw/memory.json', '${OPENCLAW_STATE_DIR}/memory.json']));
+    expect([...manifest.filePaths, ...manifest.globPatterns]).not.toContain('${OPENCLAW_HOME}/.openclaw/memory.json');
+    expect([...manifest.filePaths, ...manifest.globPatterns]).not.toContain('${OPENCLAW_STATE_DIR}/memory.json');
   });
 
   it('keeps private session/conversation stores metadata-only', () => {

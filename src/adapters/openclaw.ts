@@ -87,34 +87,43 @@ export async function getUserHomeDirs(allUsers?: boolean, fs?: FSProvider): Prom
 }
 
 /**
- * Get OpenClaw config directories for a given home directory,
- * optionally including profile-specific directories.
+ * OpenClaw config directories for a home directory, as OpenClaw resolves them
+ * (verified with `openclaw config file` 2026.9.4):
+ *   OPENCLAW_HOME=X       replaces the home directory: X/.openclaw[-<profile>]
+ *   OPENCLAW_STATE_DIR=X  is the state directory itself: X/openclaw.json
+ *   OPENCLAW_CONFIG_PATH  names the config file (see openclawConfigPathOverride)
+ * The variables are the scanning user's (a snapshot's on remote scans), so
+ * they apply to that user's home only.
  */
 function getSearchDirs(home: string, profile?: string, fs?: FSProvider): string[] {
+  const provider = fs ?? new LocalFSProvider();
+  const ownHome = home === provider.homedir();
+  const env = (name: string) => (ownHome ? provider.getEnv(name)?.trim() || undefined : undefined);
+  const base = env('OPENCLAW_HOME') ?? home;
   const dirs = [
-    join(home, '.openclaw'),
-    join(home, '.clawdbot'),
-    join(home, '.moltbot'),
+    join(base, '.openclaw'),
+    join(base, '.clawdbot'),
+    join(base, '.moltbot'),
   ];
 
   if (profile) {
-    dirs.unshift(join(home, `.openclaw-${profile}`));
+    dirs.unshift(join(base, `.openclaw-${profile}`));
   }
 
-  // The scanned host's environment (a snapshot's on remote scans)
-  const provider = fs ?? new LocalFSProvider();
-  const openclawHome = provider.getEnv('OPENCLAW_HOME');
-  if (openclawHome) {
-    dirs.unshift(openclawHome);
-  }
+  const stateDir = env('OPENCLAW_STATE_DIR');
+  if (stateDir) dirs.unshift(stateDir);
 
   // System-wide config (only once, not per-user)
-  const currentHome = provider.homedir();
-  if (home === currentHome) {
+  if (ownHome) {
     dirs.push('/etc/openclaw');
   }
 
   return dirs;
+}
+
+/** OPENCLAW_CONFIG_PATH: the config file OpenClaw loads instead of <state dir>/openclaw.json. */
+function openclawConfigPathOverride(home: string, fs: FSProvider): string | undefined {
+  return home === fs.homedir() ? fs.getEnv('OPENCLAW_CONFIG_PATH')?.trim() || undefined : undefined;
 }
 
 /**
@@ -164,12 +173,15 @@ export const openclawAdapter: AgentAdapter = {
       const searchDirs = getSearchDirs(home, profile, fs);
       let foundForUser = false;
 
-      for (const dir of searchDirs) {
-        if (!(await fs.access(dir))) continue;
+      const configPathOverride = openclawConfigPathOverride(home, fs);
+      for (const [dirIndex, dir] of searchDirs.entries()) {
+        // OPENCLAW_CONFIG_PATH replaces the primary (first) dir's openclaw.json
+        const overrideHere = dirIndex === 0 ? configPathOverride : undefined;
+        if (!(await fs.access(dir)) && !(overrideHere && await fs.access(overrideHere))) continue;
 
         const configFiles = [];
         for (const filename of CONFIG_FILENAMES) {
-          const filePath = join(dir, filename);
+          const filePath = overrideHere && filename === 'openclaw.json' ? overrideHere : join(dir, filename);
           try {
             const config = await loadConfig(filePath, fs);
             configFiles.push(config);
@@ -382,6 +394,9 @@ export const openclawAdapter: AgentAdapter = {
   getProbeManifest(): ProbeManifest {
     return {
       filePaths: [
+        // OPENCLAW_CONFIG_PATH names the config file (expanded by the probe);
+        // OPENCLAW_HOME / OPENCLAW_STATE_DIR twins come from RELOCATABLE_TREES
+        '${OPENCLAW_CONFIG_PATH}',
         '~/.openclaw/openclaw.json',
         '~/.openclaw/config.yaml',
         '~/.openclaw/config.json',

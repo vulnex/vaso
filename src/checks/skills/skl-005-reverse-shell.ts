@@ -37,7 +37,7 @@ export const skl005 = defineCheck({
       } catch {}
     }
 
-    markTestCode(evidence, ctx.installation);
+    await markTestCode(evidence, ctx.installation, ctx.fs);
     return h.fromEvidence(evidence, {
       passed: 'No reverse shell patterns detected',
       failed: (n) => `Found ${n} reverse shell pattern(s)`,

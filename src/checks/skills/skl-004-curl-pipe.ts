@@ -37,7 +37,7 @@ export const skl004 = defineCheck({
       } catch {}
     }
 
-    markTestCode(evidence, ctx.installation);
+    await markTestCode(evidence, ctx.installation, ctx.fs);
     return h.fromEvidence(evidence, {
       passed: 'No curl-pipe execution patterns detected',
       failed: (n) => `Found ${n} curl-pipe execution pattern(s)`,

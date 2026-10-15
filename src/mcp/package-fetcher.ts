@@ -236,5 +236,5 @@ async function listSourceFiles(dir: string): Promise<string[]> {
   await walk(dir);
   // Test files ship in many packages (`*.spec.js` next to the code) and carry
   // deliberate attack strings as fixtures; they are not server source.
-  return out.filter((file) => !isTestPath(file, [dir]));
+  return out.filter((file) => !isTestPath(file, [dir], { rootIsUnit: true }));
 }

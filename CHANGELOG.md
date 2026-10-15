@@ -14,8 +14,21 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - **`--snapshot` files are held to what the probe can produce**: at most the remote-output cap overall, 32 MiB per file (base64 allowance) and the 256 MiB content budget. A hand-made snapshot with a huge file exhausted memory. `scan`, `detect` and `probe validate` share one loader, which also requires an absolute `homedir` and a well-formed `privilege` block.
 - **Feed and probe downloads are size-capped before verification** (16 MiB per feed, 4 KiB per signature, 64 MiB per probe binary).
 
+### Changed
+
+- **Permission fixes clear group/other bits instead of setting 600** (CFG-003, and POL-003, which now has a fix): a 400 file no longer gains owner write. POL-003's fix reaches credential files that aren't loaded configs (`credentials.json`, `auth.json`, token stores), which CFG-003 never touched.
+- **OpenClaw's relocation variables follow OpenClaw** (verified with `openclaw config file` 2026.9.4): `OPENCLAW_HOME` replaces the home directory (`$OPENCLAW_HOME/.openclaw`), `OPENCLAW_STATE_DIR` is the state directory itself, and `OPENCLAW_CONFIG_PATH` names the config file. VASO read `OPENCLAW_HOME` as the state directory and ignored the other two, so relocated installs were missed. OC-004 covers all three; remote scans collect them (probe ≥ 1.2.2 for paths that leave the variable's directory).
+- **Hermes API server settings are read from every documented place**: `API_SERVER_*` in `.env` (which win), `gateway.api_server` in `config.yaml`, and `platforms.api_server.extra`. The gateway is reported only when the API server is enabled or bound explicitly. HM-005 no longer flags unset CORS origins — Hermes then sends no CORS headers and refuses browser origins; it flags `*`.
+- **CFG-010 on OpenClaw flags gateway auth throttling tuned too weak** (`gateway.auth.rateLimit` with more than 100 attempts per window, no lockout, or a sub-second window); OpenClaw's default throttle still passes.
+
 ### Fixed
 
+- **OpenClaw configs written in JSON5** (unquoted keys, single quotes, comments — the format OpenClaw documents and accepts) were a CONFIG-LOAD warning and the install got no checks. `.json` configs now parse as JSON, then JSONC, then JSON5, and fixes can write to them (as plain JSON; comments are not kept).
+- **`vaso fix` tightens secret files reported by agent-specific checks.** When LY-006, HM-002, AT-005 (and similar) report a file CFG-003 also flags, the duplicate CFG-003 finding was dropped together with its chmod fix, so `vaso fix` left the file readable. The agent check now carries the fix (`fixedBy`).
+- **Skills named `test`, `spec`, `fixtures`, … are no longer treated as test code.** Only directories inside a skill count as test/fixture code, and test-dir code the skill's SKILL.md or package.json points at (`node test/run.js`) is not downgraded. A skill could hide every finding behind its directory name.
+- **MCP-027 tracks rollbacks per server.** Two servers pinning different versions of the same package reported "rolled back" on every scan.
+- **Remote scans collect relocated IronClaw 0.x (`IRONCLAW_BASE_DIR`) and ZeroClaw configs found next to a `ZEROCLAW_DATA_DIR`/`ZEROCLAW_WORKSPACE`** (legacy `<parent>/.zeroclaw`); the probe now normalizes expanded paths.
+- A passing result never reports `fixable`.
 - **`scan --save-baseline --diff` compared the scan with itself** — the new baseline was saved before the old one was loaded, so no regression was ever reported. The diff is now taken first, and reports carry it as `baselineDiff` (new / resolved finding ids), not only stderr.
 - **`vaso update` reports failure.** It exited 0 on a bad signature or an unreachable feed, and a failed IOC update skipped the advisory update. Both feeds now update independently and either failing exits 2. `--advisory-url` sets the advisory feed (`--url` stays the IOC feed).
 - **An unreadable config directory is a finding, not a clean scan.** A chmod-000 `~/.claude` (or Codex, Copilot, Cursor, Windsurf, Claude Desktop, Lyrie config) dropped its files silently and scored 100; it now yields CONFIG-LOAD.

@@ -87,7 +87,7 @@ export const skl012 = defineCheck({
       }
     }
 
-    markTestCode(evidence, ctx.installation);
+    await markTestCode(evidence, ctx.installation, ctx.fs);
     return h.fromEvidence(evidence, {
       passed: 'All functions are within complexity threshold',
       failed: (n) => `Found ${n} function(s) exceeding complexity threshold of ${COMPLEXITY_THRESHOLD}`,

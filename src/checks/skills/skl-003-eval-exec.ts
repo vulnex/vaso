@@ -36,7 +36,7 @@ export const skl003 = defineCheck({
       } catch {}
     }
 
-    markTestCode(evidence, ctx.installation);
+    await markTestCode(evidence, ctx.installation, ctx.fs);
     return h.fromEvidence(evidence, {
       passed: 'No eval/exec usage detected',
       failed: (n) => `Found ${n} dynamic code execution call(s)`,

@@ -51,7 +51,7 @@ export const skl006 = defineCheck({
       } catch {}
     }
 
-    markTestCode(evidence, ctx.installation);
+    await markTestCode(evidence, ctx.installation, ctx.fs);
     return h.fromEvidence(evidence, {
       passed: 'No credential harvesting patterns detected',
       failed: (n) => `Found ${n} credential harvesting indicator(s)`,

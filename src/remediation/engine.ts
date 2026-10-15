@@ -40,7 +40,9 @@ export class RemediationEngine {
       console.log(`  ${fixable.length} fixable issue(s) found\n`);
 
       for (const finding of fixable) {
-        const check = this.checks.getAll().find(c => c.id === finding.id);
+        // A finding may be resolved by another check's fix (see fixedBy)
+        const fixId = finding.fixedBy ?? finding.id;
+        const check = this.checks.getAll().find(c => c.id === fixId);
         if (!check?.fix) continue;
 
         if (options.dryRun) {

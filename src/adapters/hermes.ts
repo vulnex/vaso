@@ -5,6 +5,7 @@ import type { ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { loadConfig } from '../core/config-loader.js';
+import { hermesApiServer, isTruthy, HERMES_API_DEFAULT_HOST, HERMES_API_DEFAULT_PORT } from './hermes-api-server.js';
 import { discoverCliInstalls } from './cli-installs.js';
 import { queryCliVersion } from './version-query.js';
 
@@ -90,15 +91,17 @@ export const hermesAdapter: AgentAdapter = {
   },
 
   getGatewayInfo(config: Record<string, unknown>): GatewayInfo | undefined {
-    const platforms = config.platforms as Record<string, unknown> | undefined;
-    const apiServer = platforms?.api_server as Record<string, unknown> | undefined;
-
-    // Hermes gateway defaults: 127.0.0.1:8642
-    if (!apiServer && !platforms) return undefined;
-
+    // `config` is config.yaml merged with .env (env keys at the top level)
+    const api = hermesApiServer([
+      { format: 'env', data: config },
+      { format: 'yaml', data: config },
+    ]);
+    // Only a listening API server is a gateway: enabled, or bound somewhere explicitly
+    if (!isTruthy(api.enabled?.value) && !api.host) return undefined;
+    const port = Number(api.port?.value);
     return {
-      host: (apiServer?.host as string) ?? '127.0.0.1',
-      port: (apiServer?.port as number) ?? 8642,
+      host: api.host?.value ?? HERMES_API_DEFAULT_HOST,
+      port: Number.isInteger(port) && port > 0 ? port : HERMES_API_DEFAULT_PORT,
     };
   },
 

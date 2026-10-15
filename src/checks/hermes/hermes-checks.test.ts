@@ -167,14 +167,22 @@ describe('HM-004 API server bind without auth', () => {
     const result = await check.run(makeCtx([cfg]));
     expect(result.passed).toBe(true);
   });
+  it('reads host and key from config.yaml gateway.api_server', async () => {
+    const open = makeYaml('/h/.hermes/config.yaml', { gateway: { api_server: { host: '0.0.0.0' } } });
+    expect((await check.run(makeCtx([open]))).passed).toBe(false);
+    const keyed = makeYaml('/h/.hermes/config.yaml', { gateway: { api_server: { host: '0.0.0.0', key: 'secret-token' } } });
+    expect((await check.run(makeCtx([keyed]))).passed).toBe(true);
+    const extra = makeYaml('/h/.hermes/config.yaml', { platforms: { api_server: { extra: { host: '0.0.0.0', key: 'k' } } } });
+    expect((await check.run(makeCtx([extra]))).passed).toBe(true);
+  });
 });
 
 describe('HM-005 permissive CORS', () => {
   const check = hermesChecks.find(c => c.id === 'HM-005')!;
-  it('flags non-loopback bind with empty CORS', async () => {
+  it('passes a non-loopback bind with no CORS origins (Hermes sends no CORS headers)', async () => {
     const cfg = makeEnv('/h/.hermes/.env', { API_SERVER_HOST: '0.0.0.0' });
     const result = await check.run(makeCtx([cfg]));
-    expect(result.passed).toBe(false);
+    expect(result.passed).toBe(true);
   });
   it('flags wildcard CORS', async () => {
     const cfg = makeEnv('/h/.hermes/.env', { API_SERVER_HOST: '0.0.0.0', API_SERVER_CORS_ORIGINS: '*' });

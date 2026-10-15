@@ -1,6 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { accessibleByOthers, markUnreachable, queryPermissions } from '../../core/permissions.js';
+import { restrictFilesToOwner } from '../../remediation/config-writer.js';
 
 export const pol003 = defineCheck({
   id: 'POL-003',
@@ -37,6 +38,14 @@ export const pol003 = defineCheck({
     return h.fromEvidence(evidence, {
       passed: 'All session/credential files have restrictive permissions',
       failed: (n) => `${n} session/credential file(s) have overly permissive permissions`,
+      fixable: true,
+      fixDescription: 'Remove group/other access (chmod go-rwx)',
     });
+  },
+
+  // Credential files that aren't loaded configs (credentials.json, auth.json,
+  // token stores) are only reported here; CFG-003's fix never reached them.
+  async fix(ctx) {
+    return restrictFilesToOwner('POL-003', ctx.credentialPaths ?? []);
   },
 });

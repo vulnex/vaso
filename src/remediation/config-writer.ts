@@ -1,8 +1,9 @@
-import { readFile, writeFile, chmod } from 'node:fs/promises';
+import { readFile, writeFile, chmod, stat } from 'node:fs/promises';
 import YAML from 'yaml';
 import { parse as parseTOML, stringify as stringifyTOML } from 'smol-toml';
 import type { FixResult, ParsedConfig } from '../core/types.js';
 import { setNestedValue } from '../core/utils.js';
+import { parseJsonLenient } from '../core/jsonc.js';
 
 /**
  * Update or insert a key=value pair in a .env file.
@@ -43,7 +44,9 @@ export async function updateEnvFile(filePath: string, key: string, value: string
  */
 export async function updateJsonFile(filePath: string, keyPath: string, value: unknown): Promise<void> {
   const content = await readFile(filePath, 'utf-8');
-  const obj = JSON.parse(content);
+  // JSONC/JSON5 configs load (see config-loader) — the fix must read them too.
+  // They are written back as plain JSON, which both formats accept.
+  const obj = parseJsonLenient(content.replace(/^\uFEFF/, '')) as Record<string, unknown>;
 
   // Detect indentation from the file
   const indentMatch = content.match(/^(\s+)/m);
@@ -79,6 +82,35 @@ export async function updateTomlFile(filePath: string, keyPath: string, value: u
  */
 export async function chmodFile(filePath: string, mode: number): Promise<void> {
   await chmod(filePath, mode);
+}
+
+/**
+ * Make a file owner-only by clearing its group/other bits — never by setting
+ * 600, which would give a 400 file owner write. Files already owner-only are
+ * left alone. Returns whether the mode changed.
+ */
+export async function restrictToOwner(filePath: string): Promise<boolean> {
+  const mode = (await stat(filePath)).mode & 0o7777;
+  if ((mode & 0o077) === 0) return false;
+  await chmod(filePath, mode & 0o7700);
+  return true;
+}
+
+/** restrictToOwner over a list of files (missing ones skipped); the result of a fix(). */
+export async function restrictFilesToOwner(checkId: string, paths: Iterable<string>): Promise<FixResult> {
+  let fixed = 0;
+  for (const path of paths) {
+    try {
+      if (await restrictToOwner(path)) fixed++;
+    } catch {
+      // File may not exist
+    }
+  }
+  return {
+    checkId,
+    applied: fixed > 0,
+    message: fixed > 0 ? `Removed group/other access from ${fixed} file(s)` : 'No files to fix',
+  };
 }
 
 /**

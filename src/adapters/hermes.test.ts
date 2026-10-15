@@ -158,12 +158,19 @@ describe('Hermes adapter', () => {
     });
   });
 
-  it('returns default gateway info when platforms key exists but no api_server details', () => {
-    const info = hermesAdapter.getGatewayInfo({ platforms: {} });
-    expect(info).toEqual({
-      host: '127.0.0.1',
-      port: 8642,
-    });
+  it('reports no gateway while the API server is disabled (the default)', () => {
+    expect(hermesAdapter.getGatewayInfo({ platforms: {} })).toBeUndefined();
+  });
+
+  it('reads the API server from .env, gateway.api_server and platforms.api_server.extra', () => {
+    expect(hermesAdapter.getGatewayInfo({ API_SERVER_ENABLED: 'true' })).toEqual({ host: '127.0.0.1', port: 8642 });
+    expect(hermesAdapter.getGatewayInfo({ gateway: { api_server: { enabled: true, host: '0.0.0.0', port: 9000 } } }))
+      .toEqual({ host: '0.0.0.0', port: 9000 });
+    expect(hermesAdapter.getGatewayInfo({ platforms: { api_server: { extra: { host: '0.0.0.0' } } } }))
+      .toEqual({ host: '0.0.0.0', port: 8642 });
+    // Environment variables take precedence over config.yaml
+    expect(hermesAdapter.getGatewayInfo({ API_SERVER_HOST: '127.0.0.1', gateway: { api_server: { host: '0.0.0.0' } } }))
+      .toEqual({ host: '127.0.0.1', port: 8642 });
   });
 
   it('returns undefined gateway info when no platforms config', () => {

@@ -357,7 +357,10 @@ func expandEnvPath(name, rest string) (string, bool) {
 	if !filepath.IsAbs(val) {
 		return "", false
 	}
-	return filepath.Clean(val) + rest, true
+	// Clean the whole path: a twin may step out of the variable's directory
+	// (`${ZEROCLAW_DATA_DIR}/../.zeroclaw/` — the legacy config next to a data
+	// dir), and snapshot keys must match the paths adapters join.
+	return filepath.Clean(filepath.Clean(val) + rest), true
 }
 
 func expandPaths(paths []string, homes []UserHome) []string {

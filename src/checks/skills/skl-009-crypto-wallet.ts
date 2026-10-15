@@ -37,7 +37,7 @@ export const skl009 = defineCheck({
       } catch {}
     }
 
-    markTestCode(evidence, ctx.installation);
+    await markTestCode(evidence, ctx.installation, ctx.fs);
     return h.fromEvidence(evidence, {
       passed: 'No crypto wallet targeting patterns detected',
       failed: (n) => `Found ${n} crypto wallet targeting pattern(s)`,

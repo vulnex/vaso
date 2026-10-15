@@ -6,7 +6,11 @@
     "tls": false,
     "auth": {
       "mode": "none",
-      "bypass": true
+      "bypass": true,
+      "rateLimit": {
+        "maxAttempts": 100000,
+        "lockoutMs": 0
+      }
     }
   },
   "apiKey": "sk-abc123def456ghi789jkl012mno345pqr678stu901vwx",

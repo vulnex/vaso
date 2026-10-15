@@ -38,7 +38,7 @@ export const skl001 = defineCheck({
       }
     }
 
-    markTestCode(evidence, ctx.installation);
+    await markTestCode(evidence, ctx.installation, ctx.fs);
     return h.fromEvidence(evidence, {
       passed: 'No data exfiltration flows detected',
       failed: (n) => `Found ${n} data exfiltration flow(s) — data flowing from sources to network or process sinks`,

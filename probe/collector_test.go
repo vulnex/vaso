@@ -366,12 +366,14 @@ func TestExpandPathsResolvesEnvRootedPaths(t *testing.T) {
 		"${VASOTEST_EMPTY}/x",
 		"${VASOTEST_UNSET}/x",
 		"${VASOTEST_ABS}",
+		"${VASOTEST_ABS}/../.zeroclaw/config.toml",
 		"~/.picoclaw/config.json",
 	}, homes)
 	want := []string{
 		"/srv/pico/config.json",
 		filepath.Join(home, "alt") + "/skills/**",
 		"/srv/pico",
+		"/srv/.zeroclaw/config.toml",
 		filepath.Join(home, ".picoclaw/config.json"),
 	}
 	if len(got) != len(want) {

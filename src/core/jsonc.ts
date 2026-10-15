@@ -1,3 +1,4 @@
+import { parseJson5 } from './json5.js';
 /**
  * Strip JSONC comments (// ..., /* ... *\/) and trailing commas from a string,
  * preserving string contents. Used by adapters whose configs are JSON-with-
@@ -48,4 +49,26 @@ export function stripJsonc(raw: string): string {
     i++;
   }
   return out.replace(/,(\s*[\]}])/g, '$1');
+}
+
+/**
+ * Parse a `.json` config the way the agents themselves accept it: strict JSON,
+ * then JSONC (VS Code-family settings: comments, trailing commas), then JSON5
+ * (OpenClaw's openclaw.json: unquoted keys, single quotes, …). A real syntax
+ * error reports the strict parser's message.
+ */
+export function parseJsonLenient(raw: string): unknown {
+  try {
+    return JSON.parse(raw);
+  } catch (err) {
+    try {
+      return JSON.parse(stripJsonc(raw));
+    } catch {
+      try {
+        return parseJson5(raw);
+      } catch {
+        throw err;
+      }
+    }
+  }
 }

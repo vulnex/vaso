@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { Evidence, Severity } from '../../core/types.js';
 import type { MCPServerEntry } from '../../mcp/types.js';
 import { defineCheck } from '../../core/check-builder.js';
@@ -91,7 +92,10 @@ export const mcp027 = defineCheck({
 
         // 2) Version rollback vs. the highest version previously seen.
         if (parsed) {
-          const key = `version-${name}`;
+          // Per server, not per package: two servers pinning different
+          // versions of one package would otherwise "roll back" every scan.
+          const serverId = createHash('sha256').update(`${config.filePath}\0${server.name}`).digest('hex').slice(0, 12);
+          const key = `version-${name}-${serverId}`;
           const prev = await store.load<VersionState>(key);
           const prevParsed = prev?.highest ? parseSemVer(prev.highest) : null;
 

@@ -58,7 +58,7 @@ export const skl002 = defineCheck({
       } catch {}
     }
 
-    markTestCode(evidence, ctx.installation);
+    await markTestCode(evidence, ctx.installation, ctx.fs);
     return h.fromEvidence(evidence, {
       passed: 'No obfuscated code blocks detected',
       failed: (n) => `Found ${n} obfuscated code block(s) — possible obfuscation`,

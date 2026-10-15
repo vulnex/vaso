@@ -2262,36 +2262,41 @@ describe('MCP-027 Vulnerable / Rolled-Back MCP Version', () => {
     return { source: 'project', filePath: '/tmp/mcp.json', servers: [server] };
   }
 
+  const scan027 = (store: InMemoryMcpStateStore, ...servers: Array<[string, string]>) => mcp027.run(makeContext({
+    mcpConfigs: [{
+      ...cfg({ name: servers[0][0], command: 'npx', args: ['-y', servers[0][1]], transport: 'stdio' }),
+      servers: servers.map(([name, spec]) => ({ name, command: 'npx', args: ['-y', spec], transport: 'stdio' as const })),
+    }],
+    mcpStateStore: store,
+  }));
+
   it('flags a version rollback below the highest previously-seen version', async () => {
     const store = new InMemoryMcpStateStore();
-    await store.save('version-@mcp/server-fs', { highest: '2.0.0' });
-    const result = await mcp027.run(makeContext({
-      mcpConfigs: [cfg({ name: 'fs', command: 'npx', args: ['-y', '@mcp/server-fs@1.0.0'], transport: 'stdio' })],
-      mcpStateStore: store,
-    }));
+    expect((await scan027(store, ['fs', '@mcp/server-fs@2.0.0'])).passed).toBe(true);
+    const result = await scan027(store, ['fs', '@mcp/server-fs@1.0.0']);
     expect(result.passed).toBe(false);
     expect(result.evidence?.[0].detail).toContain('rolled back from 2.0.0 to 1.0.0');
   });
 
   it('passes and records the version on first sight', async () => {
     const store = new InMemoryMcpStateStore();
-    const result = await mcp027.run(makeContext({
-      mcpConfigs: [cfg({ name: 'fs', command: 'npx', args: ['@mcp/server-fs@1.5.0'], transport: 'stdio' })],
-      mcpStateStore: store,
-    }));
-    expect(result.passed).toBe(true);
-    expect(await store.load('version-@mcp/server-fs')).toEqual({ highest: '1.5.0' });
+    expect((await scan027(store, ['fs', '@mcp/server-fs@1.5.0'])).passed).toBe(true);
+    // recorded: a later downgrade is caught
+    expect((await scan027(store, ['fs', '@mcp/server-fs@1.4.0'])).passed).toBe(false);
   });
 
   it('does not flag a non-rollback (newer) version', async () => {
     const store = new InMemoryMcpStateStore();
-    await store.save('version-pkg', { highest: '1.0.0' });
-    const result = await mcp027.run(makeContext({
-      mcpConfigs: [cfg({ name: 'p', command: 'npx', args: ['pkg@1.2.0'], transport: 'stdio' })],
-      mcpStateStore: store,
-    }));
-    expect(result.passed).toBe(true);
-    expect(await store.load('version-pkg')).toEqual({ highest: '1.2.0' });
+    await scan027(store, ['p', 'pkg@1.0.0']);
+    expect((await scan027(store, ['p', 'pkg@1.2.0'])).passed).toBe(true);
+  });
+
+  it('tracks versions per server: two servers pinning one package at different versions never "roll back"', async () => {
+    const store = new InMemoryMcpStateStore();
+    for (let i = 0; i < 3; i++) {
+      const result = await scan027(store, ['old', '@mcp/server-fs@2025.7.1'], ['new', '@mcp/server-fs@2025.8.21']);
+      expect(result.passed).toBe(true);
+    }
   });
 
   it('skips unpinned packages (MCP-010 handles those)', async () => {
