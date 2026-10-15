@@ -101,6 +101,23 @@ describe('CFG-009 documentation placeholders', () => {
   });
 });
 
+describe('CFG-009 severity follows how far the gateway can be reached', () => {
+  const oc = (gateway: Record<string, unknown>) =>
+    cfg009.run(ctx('openclaw', [json('/h/.openclaw/openclaw.json', { gateway: { ...gateway, auth: { mode: 'token', token: 'replace-with-long-random-token' } } })]));
+  it('warning on a loopback-only gateway, critical once it is reachable', async () => {
+    expect((await oc({})).severity).toBe('warning');
+    expect((await oc({ bind: 'loopback' })).severity).toBe('warning');
+    expect((await oc({ bind: 'lan' })).severity).toBe('critical');
+    expect((await oc({ bind: 'loopback', tailscale: { mode: 'funnel' } })).severity).toBe('critical');
+  });
+  it('uses the detected gateway host for other agents; unknown exposure stays critical', async () => {
+    const cfg = json('/h/.x/config.json', { auth: { token: 'changeme' } });
+    expect((await cfg009.run(ctx('hermes', [cfg], { gateway: { host: '127.0.0.1', port: 8642 } }))).severity).toBe('warning');
+    expect((await cfg009.run(ctx('hermes', [cfg], { gateway: { host: '0.0.0.0', port: 8642 } }))).severity).toBe('critical');
+    expect((await cfg009.run(ctx('hermes', [cfg]))).severity).toBe('critical');
+  });
+});
+
 describe('CFG-001 with a host set only by an env override', () => {
   it('reports the variable and offers no file fix', async () => {
     const fakeFs = { getEnv: (n: string) => (n === 'ZEROCLAW_GATEWAY_HOST' ? '0.0.0.0' : undefined) } as unknown as FSProvider;

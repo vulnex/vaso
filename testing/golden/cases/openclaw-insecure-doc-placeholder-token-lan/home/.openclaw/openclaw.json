@@ -1,0 +1,22 @@
+{
+  gateway: {
+    mode: "local",
+    bind: "lan",
+    auth: { mode: "token", token: "replace-with-long-random-token" },
+  },
+  session: {
+    dmScope: "per-channel-peer",
+  },
+  tools: {
+    profile: "messaging",
+    deny: ["group:automation", "group:runtime", "group:fs", "sessions_spawn", "sessions_send"],
+    fs: { workspaceOnly: true },
+    exec: { security: "deny", ask: "always" },
+    elevated: { enabled: false },
+    sessions: { visibility: "agent" },
+    agentToAgent: { enabled: false },
+  },
+  channels: {
+    whatsapp: { dmPolicy: "pairing", groups: { "*": { requireMention: true } } },
+  },
+}

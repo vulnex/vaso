@@ -1,8 +1,8 @@
 {
   "agent": "openclaw",
-  "source": "CFG-009: a token copied from the docs (`replace-with-long-random-token`) is a weak credential when deployed (hardened-baseline doc)",
+  "source": "CFG-009: a token copied from the docs (`replace-with-long-random-token`) is a weak credential when deployed (hardened-baseline doc) \u2014 loopback-only gateway: warning (reachable twin: openclaw-insecure-doc-placeholder-token-lan)",
   "fail": {
-    "CFG-009": "critical"
+    "CFG-009": "warning"
   },
   "modes": {
     ".openclaw/openclaw.json": "600",

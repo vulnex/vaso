@@ -1,0 +1,11 @@
+{
+  "agent": "openclaw",
+  "source": "CFG-009: the same docs placeholder token on a LAN-bound gateway is critical",
+  "fail": {
+    "CFG-009": "critical"
+  },
+  "modes": {
+    ".openclaw/openclaw.json": "600",
+    ".openclaw": "700"
+  }
+}
