@@ -16,6 +16,9 @@ import { defaultZoneGraph } from './core/default-zone-graph.js';
 import { AGENT_TYPES, isScannableAgentType } from './core/types.js';
 import { VERSION } from './version.js';
 import { isReportFormat, reportFormats } from './reporting/index.js';
+import { colorDisabled } from './core/color.js';
+
+if (colorDisabled(process.argv.slice(2), process.env)) chalk.level = 0;
 
 // Derive the list of scannable agent types from the canonical AGENT_TYPES array
 // so `--agent <type>` help strings can't drift as new adapters are added.
