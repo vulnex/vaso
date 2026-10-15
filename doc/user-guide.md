@@ -290,7 +290,7 @@ A feed older than the cached one is never installed, `--force` included. `vaso u
 
 ### `vaso mcp scan`
 
-Scan MCP (Model Context Protocol) server configurations for security issues. This auto-discovers MCP configs from Claude Desktop, Claude Code, Gemini CLI, Qwen Code, Codex, GitHub Copilot CLI, Cursor, Windsurf, Devin CLI, Abacus.AI, Atomic Agent, Nanobot, PicoClaw, Lyrie, VS Code (user and project `mcp.json`), and project-level config files. `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `COPILOT_HOME` and `GEMINI_CLI_HOME` relocations are followed.
+Scan MCP (Model Context Protocol) server configurations for security issues. This auto-discovers MCP configs from Claude Desktop, Claude Code, Gemini CLI, Qwen Code, Codex, GitHub Copilot CLI, Cursor, Windsurf, Devin CLI, Abacus.AI (CLI and Desktop), OpenCode (including `$OPENCODE_CONFIG`), Hermes, Atomic Agent, Nanobot, PicoClaw, Lyrie, VS Code (user and project `mcp.json`), and project-level config files. `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `COPILOT_HOME` and `GEMINI_CLI_HOME` relocations are followed.
 
 ```
 vaso mcp scan [options]
@@ -300,11 +300,11 @@ vaso mcp scan [options]
 |--------|-------------|
 | `-f, --format <format>` | Output format: `terminal` (default), `json`, `sarif`, `markdown`, `html`, `csv`, `junit` |
 | `-o, --output <file>` | Write report to a file instead of stdout |
-| `-p, --path <paths...>` | Specific config file paths to scan (skips auto-discovery). A path that is missing or not valid JSON/JSONC is an error (exit 2) |
+| `-p, --path <paths...>` | Specific config file paths to scan (skips auto-discovery). `.toml` files are read as TOML (Codex) and `.yaml`/`.yml` as YAML (Hermes), anything else as JSON/JSONC. A path that is missing or doesn't parse is an error (exit 2) |
 | `--resolve-packages` | Download npm-packaged (`npx`) MCP servers — download only, never executed — and analyze their source. Requires network access |
 | `--audit-deps` | Look up the exact versions of the servers' dependencies (from their lockfiles or installed copies) in [OSV.dev](https://osv.dev) for known vulnerabilities, in addition to the bundled advisories. Sends package names and versions only — never code, paths or config. Dependencies known only by a declared range are not looked up. If OSV can't be reached the scan continues with bundled advisories. Requires network access |
 | `--fail-on <severity>` | Exit 1 on findings of this severity or higher: `critical` (default), `warning`, `info`, `none` |
-| `--source <paths...>` | Analyze MCP server source directly — an entry file, a server checkout, or a Python package checkout (`pyproject.toml` + `src/<pkg>/`, all of its modules). For server authors, and for remote servers whose code you have but only connect to (`npx mcp-remote https://…`). On its own it scans only these servers (no config discovery); with `-p`, both. A path with no server source is an error (exit 2) |
+| `--source <paths...>` | Analyze MCP server source directly — an entry file, a server checkout, or a Python package checkout (`pyproject.toml` + `src/<pkg>/`, all of its modules). For server authors, and for remote servers whose code you have but only connect to (`npx mcp-remote https://…`). On its own it scans only these servers (no config discovery); with `-p`, both. A path with no server source is reported and the rest are scanned, with exit 3 (incomplete); if nothing at all is scannable, exit 2 |
 | `--no-color` | Disable colored terminal output |
 
 Examples:
@@ -392,7 +392,7 @@ See [`network-scanning-guide.md`](network-scanning-guide.md) for the full SSH wo
 | `2` | VASO could not run: invalid CLI arguments (e.g. `--silent` without an output destination, `--parallel 0`), an unreadable snapshot or inventory file, or an internal error |
 | `3` | Scan incomplete: one or more remote hosts could not be scanned (unreachable, authentication failed, probe error). Takes precedence over `1`, so CI can tell "not scanned" apart from "findings" |
 
-The other commands use the same codes: `skill audit` and `mcp scan` exit `1` on critical findings, and every command exits `2` when it cannot run — a command-line error (unknown option or command, a missing or extra argument), a missing or unreadable input (`skill audit <path>`, `mcp scan/list --path`, `visualize -i`, `probe validate`), an unknown name (`ext info`), or an invalid option value such as `--ssh-timeout abc`. `probe validate` exits `1` when the snapshot is readable JSON but fails validation.
+The other commands use the same codes: `skill audit` and `mcp scan` exit `1` on critical findings, and every command exits `2` when it cannot run — a command-line error (unknown option or command, a missing or extra argument), a missing or unreadable input (`skill audit <path>`, `mcp scan/list --path`, `visualize -i`, `probe validate`), an unknown name (`ext info`), or an invalid option value such as `--ssh-timeout abc`. `probe validate` exits `2` for any snapshot it can't use — unreadable, not JSON, or failing validation (over the probe's size limits, a relative `homedir`, a malformed `privilege` block).
 
 `--fail-on` accepts `critical` (default), `warning`, `info`, or `none`. Use `--fail-on none` to never fail on findings — useful for scans that only produce reports.
 
@@ -433,7 +433,7 @@ VASO runs **347 checks across 19 categories**.
 | Policy | POL-001–005 | 5 | DM policy, tool policy, sandbox compliance |
 | MCP Server | MCP-001–035 | 35 | Transport security, credentials, tool injection, toxic flows, rug pull, OAuth 2.1, stdio shell-c, world-writable command paths, streamable-HTTP origin pinning, tool-description poisoning, cross-server tool-name collision, slash-command overlap, remote-server-without-auth, filesystem sensitive-path scope, vulnerable/rolled-back version, config drift, untrusted installer source, env-dump tool, long-lived token, prompt-injection directives in tool output, obfuscated/encoded server source (with what it hides), lookalike/typosquatted server names, credentials hardcoded in server source, servers listening on all interfaces without authentication, disabled Host/Origin (DNS-rebinding) protection; known-vulnerable MCP SDK and library versions a server ships with (from its lockfile, installed copy or manifest), deprecated packages, opt-in OSV.dev lookup (`--audit-deps`); tools that read, write or list any path the caller names; fetched pages and files returned unfiltered as tool results (higher when the caller picks the URL or anyone can publish on the host); JavaScript and Python server source; remotes behind `mcp-remote`/`supergateway`; opt-in npm package source resolution (`--resolve-packages`); direct source audit (`--source`); OWASP MCP Top 10 mapping |
 | Advisory | ADV-001–005 | 5 | Vulnerability/CVE detection with version awareness |
-| OpenClaw | OC-* | 6 | Sub-agent config downgrade, legacy bot dirs, `OPENCLAW_HOME` redirect, profile downgrade, memory file perms, `/etc/openclaw` writable |
+| OpenClaw | OC-* | 6 | Sub-agent config downgrade, legacy bot dirs, `OPENCLAW_HOME`/`OPENCLAW_STATE_DIR`/`OPENCLAW_CONFIG_PATH` redirect, profile downgrade, memory file perms, `/etc/openclaw` writable |
 | NanoClaw | NC-001–005 | 5 | Overbroad mount allowlist (`allowedRoots`), host config/credential exposure, checkout/state exposure, webhook listener on all interfaces, skills dirs writable |
 | PicoClaw | PCL-001–007 | 7 | Workspace restriction off, exec deny list disabled or bypassed, channels open to any sender (empty `allow_from` allows everyone), exec reachable from chat channels, weakly guarded `pico` WebSocket, public web launcher without a dashboard password, tool path allowances reaching credentials |
 | IronClaw | IC-001–014 | 14 | 1.x (Reborn) and 0.x: WebUI/listener bind, cleartext LLM endpoints, WebUI token and master-key exposure, `local-dev-yolo` host access, approval policy, sandbox (0.x), permissive WebUI CORS, world-readable state DB |
@@ -455,7 +455,7 @@ VASO ships twenty-five adapters. Each implements `detect()`, `getConfigPaths()`,
 
 | Adapter | Config locations | Formats |
 |---------|------------------|---------|
-| OpenClaw | `$OPENCLAW_HOME`, `~/.openclaw`, `~/.clawdbot`, `~/.moltbot`, `/etc/openclaw` | JSON, YAML, ENV |
+| OpenClaw | `$OPENCLAW_STATE_DIR` (the state directory), `$OPENCLAW_HOME/.openclaw` (`OPENCLAW_HOME` replaces the home directory), `~/.openclaw`, `~/.clawdbot`, `~/.moltbot`, `/etc/openclaw`; `$OPENCLAW_CONFIG_PATH` names the config file | JSON5/JSON, YAML, ENV |
 | NanoClaw | v2 git checkout (`package.json`, `.env`; found via its service unit or common locations), `~/.config/nanoclaw/mount-allowlist.json` | JSON, ENV |
 | PicoClaw | `$PICOCLAW_HOME` (default `~/.picoclaw`): `config.json`, `.security.yml`, `auth.json`, `launcher-config.json`; skills in `workspace/skills` | JSON, YAML |
 | IronClaw | 1.x: `$IRONCLAW_REBORN_HOME` (default `~/.ironclaw/reborn/`); 0.x: `~/.ironclaw/` | TOML, JSON, ENV |
@@ -470,7 +470,7 @@ VASO ships twenty-five adapters. Each implements `detect()`, `getConfigPaths()`,
 
 | Adapter | Config locations | Formats |
 |---------|------------------|---------|
-| NVIDIA OpenShell | `$XDG_CONFIG_HOME/openshell/` (`gateway.toml`, `gateway.env` — which can redirect the TOML, database and TLS dir, as NemoClaw does — `active_gateway`, `gateways/<name>/`), `$XDG_STATE_HOME/openshell/` (gateway database, key-encryption key, TLS, sandbox tokens), Homebrew `<prefix>/var/openshell/`, snap `/var/snap/openshell/common/`. With the `openshell` CLI installed, VASO reads each sandbox's effective policy and the global policy from the user's active gateway with read-only queries (`sandbox list`, `policy get`); `$OPENSHELL_SANDBOX_POLICY` is read too. Remote scans run the same queries through the probe. NemoClaw installs report their gateway here | TOML, ENV, JSON, YAML |
+| NVIDIA OpenShell | `$XDG_CONFIG_HOME/openshell/` (`gateway.toml`, `gateway.env` — which can redirect the TOML, database and TLS dir, as NemoClaw does — `active_gateway`, `gateways/<name>/`), `$XDG_STATE_HOME/openshell/` (gateway database, key-encryption key, TLS, sandbox tokens), Homebrew `<prefix>/var/openshell/`, snap per-user `~/snap/openshell/common/` (`.config/openshell/gateway.toml`, state, TLS) with `/var/snap/openshell/common/gateway.toml` as fallback. With the `openshell` CLI installed, VASO reads each sandbox's effective policy and the global policy from the user's active gateway with read-only queries (`sandbox list`, `policy get`); `$OPENSHELL_SANDBOX_POLICY` is read too. Remote scans run the same queries through the probe. NemoClaw installs report their gateway here | TOML, ENV, JSON, YAML |
 
 ### Interactive coding agents
 
@@ -569,7 +569,7 @@ vaso scan --format html -o report.html
 
 ### CSV
 
-One row per finding, designed for SIEM / data-warehouse ingestion. Columns: `timestamp`, `agent`, `agent_name`, `check_id`, `check_name`, `category`, `severity`, `passed`, `message`, `file`, `line`, `snippet`, `detail`.
+One row per check result and evidence item — a passed check is one row with `passed=true`, a failed one a row per piece of evidence — designed for SIEM / data-warehouse ingestion (filter on `passed` for findings only). Cells that would start a spreadsheet formula are prefixed with `'`. Columns: `timestamp`, `agent`, `agent_name`, `check_id`, `check_name`, `category`, `severity`, `passed`, `message`, `file`, `line`, `snippet`, `detail`.
 
 ```bash
 vaso scan --format csv -o findings.csv

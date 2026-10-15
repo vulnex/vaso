@@ -781,7 +781,7 @@ const reporters: Record<string, () => Reporter> = {
 };
 ```
 
-You can also register reporters dynamically — this is the path user plugins under `~/.vaso/plugins/` use:
+You can also register reporters dynamically — this is the path user plugins under `~/.vaso/plugins/` use. A name that is already taken (a built-in format or another plugin's) is refused:
 
 ```typescript
 import { registerReporter } from './reporting/index.js';
@@ -791,7 +791,7 @@ registerReporter('my-format', () => new MyReporter());
 
 ### 3. Wire the CLI Option
 
-In `src/cli.ts`, the `--format` option already accepts any string and is unioned in `OutputFormat` for type-safety inside the engine. Update the help string when adding a new format:
+In `src/cli.ts`, `--format` is checked before any work starts (`validateFormatOption()` against `reportFormats()`, which includes plugin-registered formats), so a registered reporter is accepted automatically; add the name to `OutputFormat` for type-safety inside the engine and update the help string:
 
 ```typescript
 .option('-f, --format <format>',
@@ -802,7 +802,7 @@ In `src/cli.ts`, the `--format` option already accepts any string and is unioned
 
 ## Adding a New Check Category
 
-You only need a new category when an existing one doesn't fit. The 18 existing categories cover broad ground; check whether your new check belongs in one of them first.
+You only need a new category when an existing one doesn't fit. The 19 existing categories cover broad ground; check whether your new check belongs in one of them first.
 
 ### 1. Extend CheckCategory
 

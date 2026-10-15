@@ -158,7 +158,7 @@ vaso scan --format json -o report.json # JSON — structured, machine-readable
 vaso scan --format sarif -o results.sarif  # SARIF — GitHub Code Scanning compatible
 vaso scan --format markdown -o report.md   # Markdown — for PR comments
 vaso scan --format html -o report.html     # HTML — standalone report
-vaso scan --format csv -o results.csv      # CSV — one row per finding, for SIEM ingestion
+vaso scan --format csv -o results.csv      # CSV — one row per check result/evidence item, for SIEM ingestion
 vaso scan --format junit -o results.xml    # JUnit XML — for CI test-result reporters
 ```
 
@@ -244,7 +244,7 @@ bash bin/vaso-quick.sh
 
 ## Plugin System
 
-VASO supports user plugins in `~/.vaso/plugins/`. Plugins can add custom checks, output formatters, and agent adapters. See [doc/development-guide.md](doc/development-guide.md) for the plugin API.
+VASO supports user plugins in `~/.vaso/plugins/`. Plugins can add custom checks, output formatters, and agent adapters. See [examples/plugins/README.md](examples/plugins/README.md) for the plugin API (`registerCheck`, `registerAdapter`, `registerReporter`) with working examples, and [doc/development-guide.md](doc/development-guide.md) for VASO's internals.
 
 ## Documentation
 

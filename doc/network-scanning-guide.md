@@ -90,7 +90,7 @@ vaso scan --host deploy@host --sudo
 |------|-------------|---------|
 | `--host <user@host[:port]>` | Remote target (repeatable) | — |
 | `--inventory <path>` | YAML file listing hosts to scan | — |
-| `--ssh-key <path>` | SSH identity file | System default |
+| `--ssh-key <path>` | SSH identity file (for inventory hosts, used only where the entry sets no `identity`) | System default |
 | `--ssh-timeout <seconds>` | Per-attempt connection timeout | 60 |
 | `--ssh-retries <n>` | Additional SSH attempts after the first failure | 0 |
 | `--parallel <n>` | Max hosts to scan concurrently | 5 |
@@ -169,7 +169,7 @@ vaso scan --inventory hosts.yaml --parallel 20 --ssh-retries 2
 | `host` | yes | — | Hostname or IP |
 | `user` | no | `root` | SSH username |
 | `port` | no | `22` | SSH port |
-| `identity` | no | system default | Path to SSH key |
+| `identity` | no | `--ssh-key`, else system default | Path to SSH key; a host's own `identity` wins over `--ssh-key` |
 | `sudo` | no | `false` | Attempt sudo escalation |
 | `label` | no | `user@host` | Human-readable label in reports |
 
@@ -268,7 +268,7 @@ vaso scan --snapshot ./snapshots/prod-agent-01.json
 vaso scan --snapshot ./snapshots/prod-agent-02.json --diff
 ```
 
-`--save-snapshot` writes one file per host to the named directory using the host's reported hostname (sanitized to `[A-Za-z0-9._-]`). The directory is created if it doesn't exist. If two hosts report the same hostname, the second overwrites the first — use distinct hostnames or scan separately.
+`--save-snapshot` writes one file per host to the named directory using the host's reported hostname (sanitized to `[A-Za-z0-9._-]`). The directory is created if it doesn't exist. If two targets report the same hostname (two users on one machine, cloned VMs), the first keeps `<hostname>.json` and the next is written as `<hostname>--<user@host>.json`, so nothing is overwritten. Report files from `--output-dir` are named the same way.
 
 The same flag exists on `vaso detect`, useful for inventorying agent installs across a fleet without running checks.
 
@@ -426,7 +426,7 @@ If you see intermittent `Connection reset by peer` or timeout failures against h
 Unsupported platform on host: freebsd/amd64
 ```
 
-The probe supports Linux and macOS only. Use the snapshot workflow: run the probe manually on the host and transfer the snapshot.
+Published probe binaries cover Linux and macOS (amd64/arm64), and remote scans deploy only those. The probe is plain Go, so for another Unix you can build it yourself (`cd probe && GOOS=freebsd GOARCH=amd64 go build -trimpath -o vaso-probe .`), run it on the host with the manifest from `vaso probe manifest`, and scan the result with `vaso scan --snapshot` (see the snapshot workflow above). Agent adapters are written for Linux, macOS and Windows layouts, so coverage on other systems is best-effort.
 
 ### Probe download failed
 
