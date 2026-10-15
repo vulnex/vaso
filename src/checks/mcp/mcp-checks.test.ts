@@ -2753,6 +2753,19 @@ describe('MCP-005 sink-anchored tracing', () => {
 });
 
 describe('MCP-032 benign whole-environment uses', () => {
+  it('ignores printenv/env in lists of command names (highlight.js / Prism grammars, allowlists) but flags them run', async () => {
+    const run32 = (sourceCode: string) => mcp032.run(makeContext({ mcpServerSources: [{ serverName: 's', sourceCode }] }));
+    const lists = [
+      'const kw = { built_in: "hchk|ping|pkill|popd|pr|printcap|printenv|ps|pushd" };',
+      'const SAFE = ["link","logname","printenv","printf","pwd"];',
+      'function:{pattern:/(^|[\\s;|&]|[<>]\\()(?:add|apropos|env|grep)(?=$|[)\\s;|&])/},',
+    ];
+    for (const src of lists) expect((await run32(src)).passed, src).toBe(true);
+    for (const src of ['execSync("printenv")', 'exec("env | grep AWS", cb)', 'const out = run_shell("echo; printenv | sort")']) {
+      expect((await run32(src)).passed, src).toBe(false);
+    }
+  });
+
   const run = (code: string) => mcp032.run(makeContext({ mcpServerSources: [{ serverName: 's', sourceCode: code }] }));
 
   it.each([

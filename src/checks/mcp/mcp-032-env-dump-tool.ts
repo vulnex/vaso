@@ -94,13 +94,21 @@ const LINE_PATTERNS: DumpPattern[] = [
     label: 'returns the whole os.environ',
   },
   { re: /\{\s*os\.environ\s*\}/, label: 'formats the whole os.environ into a string' },
-  // Shell environment dump: `printenv` with no variable name, or `env` alone / piped.
-  { re: /\bprintenv\b(?!\s+[A-Za-z_$])/, label: 'runs a shell environment dump (printenv/env)' },
+  // Shell environment dump: `printenv` with no variable name, run as a
+  // command — a shell string that starts with it or reaches it after `;`,
+  // `&&`, `| ` or `$(`. The bare word in a list of command names (syntax
+  // highlighter keywords `…|printcap|printenv|ps|…`, allowlists) runs nothing.
   {
-    re: /\b(?:exec|execSync|spawn|spawnSync|execFile|execFileSync|system|popen|check_output|run|call|Popen|create_subprocess_(?:exec|shell))\s*\(\s*\[?\s*["'`](?:\/usr\/bin\/)?env["'`]/,
+    re: /["'`](?:[^"'`\n]*?(?:;|&&|\|\s|\$\())?\s*printenv\b(?!\s+[A-Za-z_$])[^"'`\n]*["'`](?!\s*[,\]])/,
     label: 'runs a shell environment dump (printenv/env)',
   },
-  { re: /["'`][^"'`\n]*?\benv\s*\|(?!\|)/, label: 'runs a shell environment dump (printenv/env)' },
+  {
+    re: /\b(?:exec|execSync|spawn|spawnSync|execFile|execFileSync|system|popen|check_output|run|call|Popen|create_subprocess_(?:exec|shell))\s*\(\s*\[?\s*["'`](?:\/usr\/bin\/)?(?:print)?env["'`]/,
+    label: 'runs a shell environment dump (printenv/env)',
+  },
+  // `env | grep …` as a command (start of the string or after `;`/`&&`/`| `/`$(`),
+  // not `env` inside a `…|env|…` keyword alternation (Prism's bash grammar)
+  { re: /["'`](?:[^"'`\n]*?(?:;|&&|\|\s|\$\())?\s*env\s+\|\s/, label: 'runs a shell environment dump (printenv/env)' },
 ];
 
 function isCommentLine(line: string): boolean {
