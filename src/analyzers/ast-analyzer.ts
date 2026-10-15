@@ -27,7 +27,7 @@ export interface DataFlowResult {
   /**
    * eval-exec: a process started directly (no shell, not an interpreter
    * given code) — what runs is a program with arguments, not code built at
-   * runtime. Set by the Python analyzer.
+   * runtime.
    */
   noShell?: boolean;
   line: number;
@@ -153,6 +153,7 @@ function analyzeUncached(code: string): DataFlowResult[] {
               ? `${name}() — command execution`
               : `${name}() call detected`,
             ...commandText(node.arguments),
+            ...(runsDirectly(name, node.arguments) ? { noShell: true } : {}),
           });
         }
 
@@ -266,6 +267,7 @@ function analyzeUncached(code: string): DataFlowResult[] {
                 snippet: snippet.slice(0, 120),
                 description: `${obj.name}.${propName}() — command execution`,
                 ...commandText(node.arguments),
+                ...(runsDirectly(propName, node.arguments) ? { noShell: true } : {}),
               });
             }
           }
@@ -377,6 +379,30 @@ type ArgNode = Node | { type: string };
  * quasis as written, `${…}` for interpolations, array elements (spawn argv)
  * joined with spaces. Flags computed values and runtime decoding.
  */
+/** child_process calls that start a program without a shell (unless `shell: true`). */
+const DIRECT_EXEC_FUNCTIONS = new Set(['execFile', 'execFileSync', 'spawn', 'spawnSync']);
+const SHELL_OR_INTERPRETER = /^(?:.*\/)?(?:sh|bash|zsh|dash|ksh|fish|cmd(?:\.exe)?|powershell(?:\.exe)?|pwsh|node|deno|bun|python[\d.]*|perl|ruby|php|osascript)$/i;
+
+/**
+ * A program started directly — `execFileSync('git', [...])`, `spawn('ffmpeg', args)`:
+ * the program is a literal that is neither a shell nor an interpreter (which
+ * would run code given as an argument), and no `shell: true` option. What it
+ * runs is a known program with runtime arguments, not code built at runtime
+ * (same rule as the Python analyzer's subprocess without shell=True).
+ */
+function runsDirectly(name: string, args: ArgNode[]): boolean {
+  if (!DIRECT_EXEC_FUNCTIONS.has(name.slice(name.lastIndexOf('.') + 1))) return false;
+  const program = args[0] as Node | undefined;
+  if (program?.type !== 'StringLiteral' || SHELL_OR_INTERPRETER.test(program.value.trim())) return false;
+  return !args.some(a => {
+    const n = a as Node;
+    return n.type === 'ObjectExpression' && n.properties.some(p =>
+      p.type === 'ObjectProperty'
+      && ((p.key.type === 'Identifier' && p.key.name === 'shell') || (p.key.type === 'StringLiteral' && p.key.value === 'shell'))
+      && !(p.value.type === 'BooleanLiteral' && !p.value.value));
+  });
+}
+
 function commandText(args: ArgNode[]): Pick<DataFlowResult, 'command' | 'dynamic' | 'decoded'> {
   let dynamic = false;
   let decoded = false;

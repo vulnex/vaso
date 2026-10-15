@@ -39,3 +39,18 @@ describe('analyzeObfuscation fromCharCode pattern', () => {
       .toContain('String.fromCharCode with multiple args');
   });
 });
+
+describe('JS direct process starts (SKL-003 tier)', () => {
+  const flow = (code: string) => analyzeCode(code, `direct-${code.length}-${code.charCodeAt(30)}.js`).find(f => f.type === 'eval-exec');
+  it('marks a literal non-shell program without shell: true as direct', () => {
+    expect(flow("const { execFileSync } = require('child_process');\nexecFileSync('git', ['log', process.argv[2]]);")?.noShell).toBe(true);
+    expect(flow("const cp = require('child_process');\ncp.spawn('ffmpeg', args, { cwd: dir });")?.noShell).toBe(true);
+  });
+  it('keeps shells, interpreters, shell: true and exec() as code execution', () => {
+    expect(flow("const { spawn } = require('child_process');\nspawn('bash', ['-c', cmd]);")?.noShell).toBeUndefined();
+    expect(flow("const { execFileSync } = require('child_process');\nexecFileSync('node', ['-e', code]);")?.noShell).toBeUndefined();
+    expect(flow("const { spawn } = require('child_process');\nspawn('git', args, { shell: true });")?.noShell).toBeUndefined();
+    expect(flow("const { exec } = require('child_process');\nexec(cmd);")?.noShell).toBeUndefined();
+    expect(flow("const { spawn } = require('child_process');\nspawn(prog, args);")?.noShell).toBeUndefined();
+  });
+});
