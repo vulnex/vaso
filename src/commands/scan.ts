@@ -234,7 +234,11 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
           log(chalk.red(`  ✗ ${label} (${dur}): ${entry.error.split('\n')[0]}`));
         } else if (entry.result) {
           // A baseline per scanned host, as for a local or snapshot scan
-          await applyBaseline(entry.result, { agent: options.agent, host: entry.result.host ?? entry.target.host }, options, log);
+          // Keyed by the target, not the hostname it reports: two inventory
+          // hosts can report the same name and would share one baseline
+          const t = entry.target;
+          const targetKey = t.label ?? `${t.user ? `${t.user}@` : ''}${t.host}${t.port ? `:${t.port}` : ''}`;
+          await applyBaseline(entry.result, { agent: options.agent, host: targetKey }, options, log);
           const findings = entry.result.summary;
           const summary = `${findings.critical}C / ${findings.warning}W / ${findings.info}I`;
           log(chalk.green(`  ✓ ${label} (${dur}) — score ${entry.result.totalScore}/100, ${summary}`));
@@ -419,7 +423,16 @@ async function applyBaseline(
   localLog: (msg: string) => void,
 ): Promise<void> {
   if (options.diff) {
-    const baseline = await loadBaseline(baselineScope);
+    let baseline = await loadBaseline(baselineScope);
+    let mismatched = false;
+    // A pre-1.3.1 latest.json may have been saved with -a for other agents:
+    // comparing it with this scan would show everything as new or resolved
+    const types = (r: ScanResult) => [...new Set(r.agents.map(a => a.agent))].sort().join(',');
+    if (baseline && baseline.vasoVersion === undefined && types(baseline) !== types(result)) {
+      localLog(chalk.yellow(`The saved baseline covers other agents (${types(baseline) || 'none'}) — not compared. Run with --save-baseline to start a new one.`));
+      baseline = null;
+      mismatched = true;
+    }
     if (baseline) {
       const diff = diffResults(result, baseline);
       result.baselineDiff = {
@@ -449,7 +462,7 @@ async function applyBaseline(
         }
       }
       localLog('');
-    } else {
+    } else if (!mismatched) {
       localLog(chalk.yellow('No baseline found. Run with --save-baseline first.'));
     }
   }

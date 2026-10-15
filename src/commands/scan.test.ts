@@ -107,6 +107,18 @@ describe('runScan', () => {
     expect(consoleErrors.some(l => l.includes('Differential'))).toBe(true);
   });
 
+  it('does not compare with a pre-1.3.1 baseline that covers other agents', async () => {
+    const legacy = makeScanResult();
+    legacy.agents = legacy.agents.map(a => ({ ...a, agent: 'hermes' as const }));
+    delete (legacy as { vasoVersion?: string }).vasoVersion;
+    mockLoadBaseline.mockResolvedValue(legacy);
+    mockDiffResults.mockClear();
+    await runScan({ format: 'terminal', diff: true });
+    expect(mockDiffResults).not.toHaveBeenCalled();
+    expect(consoleErrors.some(l => l.includes('covers other agents'))).toBe(true);
+    expect(consoleErrors.some(l => l.includes('No baseline found'))).toBe(false);
+  });
+
   it('shows no baseline message when none found', async () => {
     mockLoadBaseline.mockResolvedValue(null);
     await runScan({ format: 'terminal', diff: true });
