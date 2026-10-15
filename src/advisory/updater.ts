@@ -139,38 +139,36 @@ export async function fetchAndUpdateAdvisoryFeed(
     // No existing metadata
   }
 
-  let feedResponse: Response;
-  let sigResponse: Response;
-  try {
+  // Feed, then signature — one at a time, each body read before the next
+  // request: two parallel responses with one body left unread can trip
+  // undici when the server closes the connection.
+  const get = async (url: string, maxBytes: number): Promise<{ status: number; body?: Buffer }> => {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
     try {
-      [feedResponse, sigResponse] = await Promise.all([
-        fetch(feedUrl, { signal: controller.signal }),
-        fetch(feedUrl + '.sig', { signal: controller.signal }),
-      ]);
+      const res = await fetch(url, { signal: controller.signal });
+      if (!res.ok) {
+        await res.body?.cancel().catch(() => undefined);
+        return { status: res.status };
+      }
+      return { status: res.status, body: await readBodyCapped(res, maxBytes) };
     } finally {
       clearTimeout(timeout);
     }
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { success: false, message: `Failed to fetch advisory feed: ${msg}` };
-  }
-
-  if (!feedResponse.ok) {
-    return { success: false, message: `Advisory feed fetch failed: HTTP ${feedResponse.status}` };
-  }
-  if (!sigResponse.ok) {
-    return { success: false, message: `Advisory signature fetch failed: HTTP ${sigResponse.status}` };
-  }
+  };
 
   let feedBytes: Buffer;
   let sigBase64: string;
   try {
-    feedBytes = await readBodyCapped(feedResponse, MAX_FEED_BYTES);
-    sigBase64 = (await readBodyCapped(sigResponse, MAX_SIGNATURE_BYTES)).toString('utf-8').trim();
+    const feedRes = await get(feedUrl, MAX_FEED_BYTES);
+    if (!feedRes.body) return { success: false, message: `Advisory feed fetch failed: HTTP ${feedRes.status}` };
+    const sigRes = await get(feedUrl + '.sig', MAX_SIGNATURE_BYTES);
+    if (!sigRes.body) return { success: false, message: `Advisory signature fetch failed: HTTP ${sigRes.status}` };
+    feedBytes = feedRes.body;
+    sigBase64 = sigRes.body.toString('utf-8').trim();
   } catch (err) {
-    return { success: false, message: `Failed to read advisory feed: ${(err as Error).message}` };
+    const msg = err instanceof Error ? err.message : String(err);
+    return { success: false, message: `Failed to fetch advisory feed: ${msg}` };
   }
 
   let feed: AdvisoryFeed;

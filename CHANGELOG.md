@@ -45,10 +45,20 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - **`vaso mcp` discovers more configs** — OpenCode `mcp`, Hermes `mcp_servers`, legacy Devin `config.json`, Gemini/Qwen/OpenCode project settings, Gemini extensions; `-p` accepts YAML and the Abacus array form and warns about files with no servers; configs are deduped by realpath.
 - **`mcp scan --source` continues past a bad path**, reports it, and exits 3 (incomplete).
 
+- **IOC-007 rates a bare executable header (ELF/Mach-O/PE) as a warning** — opaque native code in a skill can't be reviewed, but the header alone isn't a payload; shellcode padding and packed-eval wrappers stay critical.
+- **SKL-003 reports constant commands informationally** (`execFileSync('git', ['status'])`, `subprocess.run(['git','status'])`); commands built at runtime or decoded stay critical.
+- Codex skill roots include `~/.agents/skills` and `/etc/codex/skills`; Qwen Code system settings (`QWEN_CODE_SYSTEM_SETTINGS_PATH`/`QWEN_CODE_SYSTEM_DEFAULTS_PATH`, `/etc/qwen-code/settings.json`, macOS `/Library/Application Support/QwenCode/settings.json`) are loaded.
+
 ### Fixed
 
+- **Config fixes no longer report "applied" for a value already set** — a file shared by several installs (OpenClaw's openclaw.json and its sub-agents) is checked on disk before writing, so one fix isn't counted twice.
+- IOC-001/002 read Markdown only inside skill trees — elsewhere in an install dir it is the agent's own data (Claude Code project memory), which quoted whatever the user discussed.
+- Remote scans report an unreadable config directory like local ones (probe records permission-denied files; probe ≥ 1.2.2).
+- CFG-004 follows the merged gateway TLS setting, so a sub-agent that turns TLS off is reported; NET-001 (like CFG-001) defers to HM-004 for a Hermes API server that requires a key; MCP-008 no longer treats `context7` as a typo of itself; MCP-032 accepts compiled-TypeScript environment fallbacks; MCP-028 messages no longer say "MCP server Server".
+- `vaso update` fetches the feed and its signature one after the other (an unread parallel response could crash the fetch); `fix --rollback` exits 2 when a file is left unrestored; `--host user@host:99999` is rejected (exit 2) instead of read as a host name; inventory fields are type-checked (`sudo: "yes"`, `identity: 123`).
+
 - **OpenClaw configs written in JSON5** (unquoted keys, single quotes, comments — the format OpenClaw documents and accepts) were a CONFIG-LOAD warning and the install got no checks. `.json` configs now parse as JSON, then JSONC, then JSON5, and fixes can write to them (as plain JSON; comments are not kept).
-- **`vaso fix` tightens secret files reported by agent-specific checks.** When LY-006, HM-002, AT-005 (and similar) report a file CFG-003 also flags, the duplicate CFG-003 finding was dropped together with its chmod fix, so `vaso fix` left the file readable. The agent check now carries the fix (`fixedBy`).
+- **`vaso fix` tightens secret files reported by agent-specific checks.** When LY-006, HM-002, AT-005 (and similar) report a file CFG-003/POL-003 also flags, the duplicate generic finding was dropped together with its chmod fix, so `vaso fix` left the file readable. The generic result now stays fixable while counted once (`foldedInto` names the check that reports it).
 - **Skills named `test`, `spec`, `fixtures`, … are no longer treated as test code.** Only directories inside a skill count as test/fixture code, and test-dir code the skill's SKILL.md or package.json points at (`node test/run.js`) is not downgraded. A skill could hide every finding behind its directory name.
 - **MCP-027 tracks rollbacks per server.** Two servers pinning different versions of the same package reported "rolled back" on every scan.
 - **Remote scans collect relocated IronClaw 0.x (`IRONCLAW_BASE_DIR`) and ZeroClaw configs found next to a `ZEROCLAW_DATA_DIR`/`ZEROCLAW_WORKSPACE`** (legacy `<parent>/.zeroclaw`); the probe now normalizes expanded paths.

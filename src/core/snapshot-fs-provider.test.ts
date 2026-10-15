@@ -662,3 +662,17 @@ describe('SnapshotFSProvider — symlinks (probe ≥ 1.1.0)', () => {
   });
 });
 
+describe('SnapshotFSProvider denied entries', () => {
+  it('answers EACCES (not ENOENT) for a file the probe could not stat', async () => {
+    const fs = new SnapshotFSProvider({
+      version: 1, hostname: 'h', platform: 'linux', homedir: '/h', timestamp: 't',
+      privilege: { uid: 1, username: 'u', isRoot: false, sudoAvailable: false, escalated: false, scannedUsers: ['u'], skippedPaths: [] },
+      files: { '/h/.claude/settings.json': { content: '', mode: 0, exists: false, denied: true } },
+      directories: {}, commandOutputs: {}, env: {},
+    });
+    expect(await fs.access('/h/.claude/settings.json')).toBe(false);
+    await expect(fs.stat('/h/.claude/settings.json')).rejects.toMatchObject({ code: 'EACCES' });
+    await expect(fs.readFile('/h/.claude/settings.json')).rejects.toMatchObject({ code: 'EACCES' });
+  });
+});
+

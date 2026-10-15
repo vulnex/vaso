@@ -7,6 +7,8 @@ describe('parseSSHTarget', () => {
     expect(() => parseSSHTarget('-oProxyCommand=x@192.0.2.1')).toThrow(/may not start with "-"/);
     expect(() => parseSSHTarget('u@-oProxyCommand=x')).toThrow(/may not start with "-"/);
     expect(() => parseSSHTarget('u ser@host')).toThrow(/whitespace/);
+    expect(() => parseSSHTarget('u@192.0.2.1:99999')).toThrow(/port must be/);
+    expect(() => parseSSHTarget('u@192.0.2.1:0')).toThrow(/port must be/);
   });
 
   it('dedupes repeated targets', () => {
@@ -79,10 +81,8 @@ describe('parseSSHTarget', () => {
     expect(result.port).toBe(22);
   });
 
-  it('ignores port 0 (out of valid range)', () => {
-    const result = parseSSHTarget('user@host:0');
-    expect(result.host).toBe('host:0');
-    expect(result.port).toBe(22);
+  it('rejects port 0 instead of reading "host:0" as a host name', () => {
+    expect(() => parseSSHTarget('user@host:0')).toThrow(/port must be/);
   });
 
   it('uses last colon for port when multiple colons present', () => {

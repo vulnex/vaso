@@ -28,11 +28,16 @@ export const skl003 = defineCheck({
         const execFlows = flows.filter(f => f.type === 'eval-exec');
 
         for (const flow of execFlows) {
+          // A fixed command (`execFileSync('git', ['status'])`) is a skill doing
+          // its job; only commands built at runtime or decoded are dynamic
+          // execution. Constant ones stay listed, informationally (as MCP-004).
+          const constant = flow.command !== undefined && !flow.dynamic && !flow.decoded;
           evidence.push({
             file,
             line: flow.line,
             snippet: flow.snippet,
-            detail: flow.description,
+            detail: constant ? `${flow.description} — constant command "${flow.command}"` : flow.description,
+            ...(constant ? { mitigated: true } : {}),
           });
         }
       } catch {}

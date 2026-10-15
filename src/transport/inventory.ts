@@ -57,6 +57,16 @@ export async function parseInventory(path: string): Promise<SSHTarget[]> {
     if (!entry.host) {
       throw new Error(`Inventory entry #${idx + 1} missing required "host" field`);
     }
+    // Wrong types would be coerced silently (`sudo: "yes"`, `identity: 123`)
+    const typed: Array<[string, unknown, string]> = [
+      ['host', entry.host, 'string'], ['user', entry.user, 'string'], ['label', entry.label, 'string'],
+      ['identity', entry.identity, 'string'], ['sudo', entry.sudo, 'boolean'],
+    ];
+    for (const [key, value, type] of typed) {
+      if (value !== undefined && typeof value !== type) {
+        throw new Error(`Inventory entry #${idx + 1}: "${key}" must be a ${type}`);
+      }
+    }
     // `host: user@host[:port]` is read like `--host`; it used to become
     // `root@user@host`, which ssh can only reject.
     let host = String(entry.host);

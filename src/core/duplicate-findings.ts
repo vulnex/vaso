@@ -41,17 +41,9 @@ export function dedupePermissionFindings(results: CheckResult[]): CheckResult[] 
       const owners = [...new Set(r.evidence.filter(e => e.file && reportedBy.has(e.file)).map(e => reportedBy.get(e.file)!))];
       deduped.set(id, own.length > 0
         ? { ...r, evidence: own, message: `${r.message} (other files reported by ${owners.join(', ')})` }
-        : { ...r, passed: true, evidence: undefined, fixable: undefined, message: `Reported by ${owners.join(', ')}` });
-      // Fully folded into the owners, which keep the finding — but the fix
-      // (chmod) lives here: hand it over, or `vaso fix` would leave the file loose.
-      if (own.length === 0 && r.fixable) {
-        for (const ownerId of owners) {
-          const owner = deduped.get(ownerId) ?? results.find(x => x.id === ownerId);
-          if (owner && !owner.fixable) {
-            deduped.set(ownerId, { ...owner, fixable: true, fixDescription: r.fixDescription, fixedBy: r.fixedBy ?? id });
-          }
-        }
-      }
+        // Folded: counted once, under the owner — but this check's fix (chmod)
+        // still covers exactly these files, so it stays available to `vaso fix`.
+        : { ...r, passed: true, foldedInto: owners.join(', '), message: `Reported by ${owners.join(', ')}` });
     }
     // Later generic checks yield to this one
     record(deduped.get(id) ?? r);

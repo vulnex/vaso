@@ -199,6 +199,23 @@ function add(a, b) { return a + b; }
     expect(result.passed).toBe(true);
   });
 
+  it('reports constant commands informationally and built ones as critical', async () => {
+    await writeFile(join(tempDir, 'run.js'), `const cp = require('child_process');
+cp.execFileSync('git', ['status']);
+cp.execSync('git status');
+`);
+    await writeFile(join(tempDir, 'run.py'), `import subprocess\nsubprocess.run(['git', 'status'])\n`);
+    const constant = await skl003.run(makeContext(tempDir));
+    expect(constant.severity).toBe('info');
+    expect(constant.evidence?.every(e => e.mitigated)).toBe(true);
+
+    await writeFile(join(tempDir, 'bad.js'), `const cp = require('child_process');
+cp.execSync(\`rm -rf \${process.argv[2]}\`);
+`);
+    const built = await skl003.run(makeContext(tempDir));
+    expect(built.severity).toBe('critical');
+  });
+
   it('fails with eval()', async () => {
     await writeFile(join(tempDir, 'evil.js'), `
 const code = 'alert(1)';

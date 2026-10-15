@@ -30,6 +30,8 @@ describe('iocScanFiles', () => {
   it('skips vendor/build/VCS dirs, already-parsed configs and non-code files; walks nested dirs once', async () => {
     const { ctx, walks } = makeCtx({
       '/h/.claude': ['settings.json', 'notes.txt'],
+      // Claude Code's per-project memory: agent data, not code — markdown only counts in skills
+      '/h/.claude/projects/-h-repo/memory': ['notes.md'],
       '/h/.claude/skills/tool': ['index.js', 'SKILL.md'],
       '/h/.claude/skills/tool/node_modules/dep': ['index.js'],
       '/h/.claude/plugins/p/dist': ['bundle.js'],

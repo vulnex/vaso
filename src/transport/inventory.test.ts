@@ -172,4 +172,9 @@ hosts:
     await expect(parseInventory(await writeTempYAML('hosts:\n  - host: 192.0.2.1\n    port: abc\n'))).rejects.toThrow(/port must be/);
     await expect(parseInventory(await writeTempYAML('hosts:\n  - host: "@192.0.2.1"\n'))).rejects.toThrow(/missing user/);
   });
+
+  it('rejects wrongly typed fields', async () => {
+    await expect(parseInventory(await writeTempYAML('hosts:\n  - host: u@192.0.2.1\n    sudo: "yes"\n'))).rejects.toThrow(/"sudo" must be a boolean/);
+    await expect(parseInventory(await writeTempYAML('hosts:\n  - host: u@192.0.2.1\n    identity: 123\n'))).rejects.toThrow(/"identity" must be a string/);
+  });
 });

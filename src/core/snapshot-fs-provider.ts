@@ -20,6 +20,7 @@ export class SnapshotFSProvider implements FSProvider {
 
   async readFile(path: string): Promise<string> {
     const entry = this.snapshot.files[path];
+    if (entry?.denied) throw deniedError(path);
     if (!entry || !entry.exists) {
       throw new Error(`ENOENT: file not collected in snapshot: ${path}`);
     }
@@ -130,6 +131,7 @@ export class SnapshotFSProvider implements FSProvider {
 
   async stat(path: string): Promise<{ mode: number; isFile(): boolean; isDirectory(): boolean }> {
     const fileEntry = this.snapshot.files[path];
+    if (fileEntry?.denied) throw deniedError(path);
     if (fileEntry?.exists) {
       return {
         mode: fileEntry.mode,
@@ -390,4 +392,11 @@ export class SnapshotFSProvider implements FSProvider {
       return suffix.toLowerCase().includes(cleaned.toLowerCase());
     });
   }
+}
+
+/** The error a local read of a path behind an unreadable directory raises. */
+function deniedError(path: string): NodeJS.ErrnoException {
+  const err: NodeJS.ErrnoException = new Error(`EACCES: permission denied on the scanned host: ${path}`);
+  err.code = 'EACCES';
+  return err;
 }

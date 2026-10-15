@@ -424,3 +424,29 @@ func TestSkillTreesKeepBuildOutputAndBinaries(t *testing.T) {
 		t.Fatalf("inside a skill tree a .node file ships its content, got %+v", e)
 	}
 }
+
+func TestCollectFileRecordsPermissionDenied(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads through chmod 000")
+	}
+	dir := t.TempDir()
+	locked := filepath.Join(dir, "locked")
+	if err := os.Mkdir(locked, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(locked, "settings.json"), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(locked, 0); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(locked, 0o700)
+	c := &collector{budget: 1 << 20}
+	e := c.collectFile(filepath.Join(locked, "settings.json"), false)
+	if e.Exists || !e.Denied {
+		t.Fatalf("want denied, not absent: %+v", e)
+	}
+	if e := c.collectFile(filepath.Join(dir, "missing.json"), false); e.Denied {
+		t.Fatalf("a missing file is not denied: %+v", e)
+	}
+}

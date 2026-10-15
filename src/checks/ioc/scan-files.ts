@@ -11,6 +11,10 @@ const SCAN_EXTENSIONS = new Set([
   '.json', '.jsonc', '.json5', '.yaml', '.yml', '.toml', '.env', '.ini', '.cfg', '.conf',
   '.md',
 ]);
+// Markdown only inside skill trees: elsewhere in an install dir it is the
+// agent's own data — Claude Code's per-project memory notes, plans, transcripts
+// — which quote whatever the user discussed (and the probe doesn't collect).
+const SKILL_ONLY_EXTENSIONS = new Set(['.md']);
 
 export { MAX_SCAN_FILE_BYTES } from '../../core/file-limits.js';
 import { readCappedFile } from '../../core/file-limits.js';
@@ -55,9 +59,11 @@ export async function iocScanFiles(ctx: ScanContext): Promise<string[]> {
       entries = entries.concat(await followSkillLinks(ctx.fs, skills, entries));
     }
     for (const entry of entries) {
-      if (!entry.isFile || !SCAN_EXTENSIONS.has(extname(entry.name).toLowerCase())) continue;
+      const ext = extname(entry.name).toLowerCase();
+      if (!entry.isFile || !SCAN_EXTENSIONS.has(ext)) continue;
       // Build output is skill code inside a skill tree, a build artefact elsewhere
       const skillsRoot = entry.parentPath ? skillsDirs.find(s => within(entry.parentPath!, s)) : undefined;
+      if (!skillsRoot && SKILL_ONLY_EXTENSIONS.has(ext)) continue;
       if (skillsRoot ? isExcludedPath(skillsRoot, entry.parentPath, { keepBuildOutput: true }) || isExcludedPath(dir, skillsRoot)
         : isExcludedPath(dir, entry.parentPath)) continue;
       const fullPath = entry.parentPath ? join(entry.parentPath, entry.name) : join(dir, entry.name);

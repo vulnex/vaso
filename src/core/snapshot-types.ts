@@ -80,6 +80,9 @@ export interface FileEntry {
   /** `'base64'` when the file is not valid UTF-8 and `content` holds its bytes
    *  base64-encoded (probe ≥ 1.1.0); absent means UTF-8 text. */
   encoding?: 'base64';
+  /** Stat failed with permission denied (under a chmod-000 directory): may
+   *  exist but can't be read (probe ≥ 1.2.2). */
+  denied?: boolean;
 }
 
 export interface CommandOutput {

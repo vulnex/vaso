@@ -112,17 +112,17 @@ export const mcp028 = defineCheck({
 
     // Evidence names the config file and server; the baseline key
     // (`<source>::<server>`) is internal.
-    const where = new Map<string, { file: string; snippet: string }>();
+    const where = new Map<string, { file: string; snippet: string; label?: string }>();
     for (const config of configs) {
       for (const server of config.servers) {
-        where.set(`${config.source}::${server.name}`, { file: config.filePath, snippet: `Server "${server.name}" (${config.source})` });
+        where.set(`${config.source}::${server.name}`, { file: config.filePath, snippet: `Server "${server.name}" (${config.source})`, label: `"${server.name}" (${config.source})` });
       }
     }
     const evidence: Evidence[] = [];
     for (const [key, now] of Object.entries(current)) {
       const before = baseline[key];
-      const at = where.get(key) ?? { file: key, snippet: key };
-      const name = at.snippet;
+      const { label, ...at } = where.get(key) ?? { file: key, snippet: key };
+      const name = label ?? at.snippet;
       if (!before) {
         evidence.push({ ...at, detail: `New MCP server ${name} appeared since the last scan` });
         continue;

@@ -59,6 +59,16 @@ describe('Qwen Code adapter', () => {
     expect(result[0].models).toEqual([{ id: 'qwen-coder-plus', provider: 'openai' }]);
   });
 
+  it('loads the system settings file named by QWEN_CODE_SYSTEM_SETTINGS_PATH', async () => {
+    const settingsPath = join(qwenDir, 'settings.json');
+    process.env.QWEN_CODE_SYSTEM_SETTINGS_PATH = '/srv/qwen/system.json';
+    setExistingPaths([qwenDir, settingsPath, '/srv/qwen/system.json']);
+    mockReadFile.mockImplementation(async (p) => JSON.stringify(p === '/srv/qwen/system.json' ? { tools: { approvalMode: 'yolo' } } : {}));
+    const [inst] = await qwenCodeAdapter.detect();
+    expect(inst.configFiles.map(c => c.filePath)).toEqual([settingsPath, '/srv/qwen/system.json']);
+    delete process.env.QWEN_CODE_SYSTEM_SETTINGS_PATH;
+  });
+
   it('falls back to modelProviders when no model.name', async () => {
     const settingsPath = join(qwenDir, 'settings.json');
     setExistingPaths([qwenDir, settingsPath]);

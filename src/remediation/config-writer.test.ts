@@ -9,6 +9,7 @@ import {
   updateTomlFile,
   chmodFile,
   updateConfigValue,
+  fixFirstConfig,
 } from './config-writer.js';
 import type { ParsedConfig } from '../core/types.js';
 
@@ -311,3 +312,21 @@ describe('updateConfigValue dispatcher', () => {
     await expect(updateConfigValue(config, 'key', 'val')).rejects.toThrow('Cannot write to config format');
   });
 });
+
+describe('fixFirstConfig idempotence', () => {
+  it('does not report a fix as applied when the file already holds the value', async () => {
+    const { mkdtemp, writeFile: wf, rm: rmrf } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join: j } = await import('node:path');
+    const dir = await mkdtemp(j(tmpdir(), 'vaso-idem-'));
+    const file = j(dir, 'openclaw.json');
+    await wf(file, JSON.stringify({ gateway: { auth: { bypass: false } } }));
+    // The scan saw bypass: true (stale snapshot); the file was fixed since
+    const stale = { filePath: file, format: 'json' as const, raw: '', data: { gateway: { auth: { bypass: true } } } };
+    const r = await fixFirstConfig([stale], { checkId: 'CFG-012', path: 'gateway.auth.bypass', value: false, message: 'Set gateway.auth.bypass to false' });
+    expect(r.applied).toBe(false);
+    expect(r.message).toContain('already set');
+    await rmrf(dir, { recursive: true, force: true });
+  });
+});
+

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { codexAdapter } from './codex.js';
 
 vi.mock('node:fs/promises', () => ({
@@ -74,6 +74,19 @@ describe('Codex adapter', () => {
     expect(result[0].agent).toBe('codex');
     expect(result[0].installDir).toBe(codexDir);
     expect(result[0].configFiles).toHaveLength(1);
+  });
+
+  it('lists the cross-agent ~/.agents/skills dir as a skill root', async () => {
+    const configPath = join(codexDir, 'config.toml');
+    const agentsSkills = join(dirname(codexDir), '.agents', 'skills');
+    setExistingPaths([codexDir, configPath, join(codexDir, 'skills'), agentsSkills]);
+    mockLoadConfig.mockImplementation(async (path) => {
+      if (path === configPath) return mockConfig(configPath, {});
+      throw new Error('ENOENT');
+    });
+    const [inst] = await codexAdapter.detect();
+    expect(inst.skillsDir).toBe(join(codexDir, 'skills'));
+    expect(inst.skillsDirs).toEqual([join(codexDir, 'skills'), agentsSkills]);
   });
 
   it('reports installation when CLI binary exists but no config dir', async () => {

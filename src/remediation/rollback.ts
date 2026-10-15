@@ -87,6 +87,11 @@ export async function rollback(timestamp?: string): Promise<void> {
   }
 
   console.log(`\n${chalk.bold('Rollback complete:')} ${restored} file(s) restored`);
+  // A file left unrestored (skipped symlink, copy error) is an incomplete rollback
+  if (restored < files.length) {
+    console.log(chalk.yellow(`  ${files.length - restored} file(s) not restored — the backup stays pending`));
+    process.exitCode = 2;
+  }
 }
 
 async function collectFiles(dir: string): Promise<string[]> {

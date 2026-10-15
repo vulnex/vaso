@@ -129,6 +129,19 @@ export function codexHome(home: string, fs: FSProvider): string {
   return env === '~' || env.startsWith('~/') ? join(home, env.slice(1)) : env;
 }
 
+/**
+ * Skill roots Codex loads (developers.openai.com Codex "Agent skills"):
+ * $CODEX_HOME/skills, the cross-agent user dir ~/.agents/skills, and the
+ * administrator dir /etc/codex/skills. Only existing ones are listed.
+ */
+async function codexSkillDirs(home: string, codexDir: string, fs: FSProvider): Promise<Pick<AgentInstallation, 'skillsDir' | 'skillsDirs'>> {
+  const candidates = [join(codexDir, 'skills'), join(home, '.agents', 'skills')];
+  if (home === fs.homedir()) candidates.push('/etc/codex/skills');
+  const dirs: string[] = [];
+  for (const d of candidates) if (await fs.access(d)) dirs.push(d);
+  return dirs.length > 0 ? { skillsDir: dirs[0], ...(dirs.length > 1 ? { skillsDirs: dirs } : {}) } : {};
+}
+
 export const codexAdapter: AgentAdapter = {
   agent: 'codex',
   displayName: 'Codex',
@@ -174,7 +187,7 @@ export const codexAdapter: AgentAdapter = {
         version,
         installDir: codexDir,
         configFiles,
-        skillsDir: await fs.access(join(codexDir, 'skills')) ? join(codexDir, 'skills') : undefined,
+        ...(await codexSkillDirs(home, codexDir, fs)),
         models: await this.getModels?.(configFiles, fs),
         user: options?.allUsers ? user : undefined,
         cliBinary,
@@ -278,6 +291,9 @@ export const codexAdapter: AgentAdapter = {
         '~/.codex/*.config.toml',
         // User skills (SKL/IOC checks; skill links are followed by the probe)
         '~/.codex/skills/**',
+        // Cross-agent user skills and the administrator skills dir
+        '~/.agents/skills/**',
+        '/etc/codex/skills/**',
         nvmBinaryGlob('codex'),
         ...npmPackageJsonGlobs(NPM_PACKAGE_NAME),
       ],
@@ -296,6 +312,8 @@ export const codexAdapter: AgentAdapter = {
         '~/.codex',
         '~/.codex/sessions',
         '~/.codex/skills',
+        '~/.agents/skills',
+        '/etc/codex/skills',
       ],
       envPrefixes: ['CODEX_', 'OPENAI_'],
       systemPaths: SYSTEM_CLI_PATHS,

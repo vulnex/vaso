@@ -37,6 +37,16 @@ describe('NET-005: Active Connection Monitoring', () => {
 });
 
 describe('NET-001: Gateway Internet Exposure', () => {
+  it('defers to HM-004 for a Hermes API server that requires a key', async () => {
+    const env = (data: Record<string, unknown>): ParsedConfig => ({ raw: '', format: 'env', filePath: '/h/.hermes/.env', data });
+    const keyed = makeContext({ host: '0.0.0.0', port: 8642 }, [env({ API_SERVER_HOST: '0.0.0.0', API_SERVER_KEY: 'k' })]);
+    keyed.installation.agent = 'hermes';
+    expect((await net001.run(keyed)).passed).toBe(true);
+    const open = makeContext({ host: '0.0.0.0', port: 8642 }, [env({ API_SERVER_HOST: '0.0.0.0' })]);
+    open.installation.agent = 'hermes';
+    expect((await net001.run(open)).passed).toBe(false);
+  });
+
   it('fails when gateway is bound to 0.0.0.0', async () => {
     const result = await net001.run(makeContext({ host: '0.0.0.0', port: 18789 }));
     expect(result.passed).toBe(false);

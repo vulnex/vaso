@@ -163,6 +163,8 @@ describe('IOC-007: Binary Pattern Match', () => {
     expect(result.passed).toBe(false);
     expect(result.evidence).toBeDefined();
     expect(result.evidence![0].detail).toContain('ELF binary');
+    // an executable header alone is opaque code, not a payload
+    expect(result.severity).toBe('warning');
   });
 
   it('fails when file contains packed JS eval wrapper', async () => {
@@ -172,6 +174,7 @@ describe('IOC-007: Binary Pattern Match', () => {
     expect(result.passed).toBe(false);
     expect(result.evidence).toBeDefined();
     expect(result.evidence![0].detail).toContain('Packed JS eval wrapper');
+    expect(result.severity).toBe('critical');
   });
 
   // ----- Negative false-positive fixtures -----

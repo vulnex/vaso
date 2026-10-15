@@ -45,10 +45,10 @@ export function parseSSHTarget(target: string): SSHTarget {
   const colonIdx = rest.lastIndexOf(':');
   if (colonIdx !== -1) {
     const maybePart = rest.slice(colonIdx + 1);
-    const parsed = parseInt(maybePart, 10);
-    if (!isNaN(parsed) && parsed > 0 && parsed <= 65535) {
+    if (/^\d+$/.test(maybePart)) {
+      // `host:99999` names a port, just not a valid one — not a host called that
       host = rest.slice(0, colonIdx);
-      port = parsed;
+      port = Number(maybePart);
     } else {
       host = rest;
     }

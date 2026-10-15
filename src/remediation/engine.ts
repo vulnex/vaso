@@ -1,6 +1,7 @@
 import { mkdir, copyFile, readFile, writeFile, stat, chmod } from 'node:fs/promises';
 import { join, dirname, isAbsolute } from 'node:path';
 import { homedir } from 'node:os';
+import { constants as fsConstants } from 'node:fs';
 import chalk from 'chalk';
 import type { ScanResult, FixResult, AgentScanResult, CheckResult } from '../core/types.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
@@ -32,7 +33,8 @@ export class RemediationEngine {
     }
 
     for (const agent of scanResult.agents) {
-      const fixable = agent.results.filter(r => !r.passed && r.fixable);
+      // A folded generic finding (see foldedInto) passes but keeps its fix
+      const fixable = agent.results.filter(r => r.fixable && (!r.passed || r.foldedInto));
 
       if (fixable.length === 0) continue;
 
@@ -40,9 +42,7 @@ export class RemediationEngine {
       console.log(`  ${fixable.length} fixable issue(s) found\n`);
 
       for (const finding of fixable) {
-        // A finding may be resolved by another check's fix (see fixedBy)
-        const fixId = finding.fixedBy ?? finding.id;
-        const check = this.checks.getAll().find(c => c.id === fixId);
+        const check = this.checks.getAll().find(c => c.id === finding.id);
         if (!check?.fix) continue;
 
         if (options.dryRun) {
@@ -141,6 +141,10 @@ export class RemediationEngine {
     if (process.platform !== 'win32') await chmod(backupsRoot, 0o700);
     const destDir = join(this.backupDir, dirname(filePath));
     await mkdir(destDir, { recursive: true, mode: 0o700 });
-    await copyFile(filePath, join(this.backupDir, filePath));
+    // COPYFILE_EXCL: the first copy is the original; a later fix in the same
+    // run must not replace it with an already-fixed file.
+    await copyFile(filePath, join(this.backupDir, filePath), fsConstants.COPYFILE_EXCL).catch((err: NodeJS.ErrnoException) => {
+      if (err.code !== 'EEXIST') throw err;
+    });
   }
 }

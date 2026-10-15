@@ -49,6 +49,23 @@ async function loadSettings(dir: string, fs: FSProvider): Promise<ParsedConfig[]
   return out;
 }
 
+const SYSTEM_SETTINGS_DARWIN = '/Library/Application Support/QwenCode/settings.json';
+const SYSTEM_SETTINGS_LINUX = '/etc/qwen-code/settings.json';
+const SYSTEM_SETTINGS_WIN32 = 'C:\\ProgramData\\qwen-code\\settings.json';
+
+/**
+ * Machine-wide settings, which override user and project settings (Qwen Code
+ * settings.md "Configuration layers"): $QWEN_CODE_SYSTEM_SETTINGS_PATH, else a
+ * per-OS location. $QWEN_CODE_SYSTEM_DEFAULTS_PATH holds defaults under them.
+ */
+export function qwenSystemSettingsPaths(fs: FSProvider): string[] {
+  const env = (name: string) => fs.getEnv?.(name)?.trim() || undefined;
+  const settings = env('QWEN_CODE_SYSTEM_SETTINGS_PATH')
+    ?? (fs.platform === 'darwin' ? SYSTEM_SETTINGS_DARWIN : fs.platform === 'win32' ? SYSTEM_SETTINGS_WIN32 : SYSTEM_SETTINGS_LINUX);
+  const defaults = env('QWEN_CODE_SYSTEM_DEFAULTS_PATH');
+  return defaults ? [settings, defaults] : [settings];
+}
+
 /**
  * Qwen Code is multi-provider (OpenAI-compatible / Dashscope / Anthropic /
  * Gemini), so the model id alone doesn't tell us the provider — we look at
@@ -115,12 +132,19 @@ export const qwenCodeAdapter: AgentAdapter = {
     const fs = options?.fs ?? new LocalFSProvider();
     const userDirs = await getUserHomeDirs(options?.allUsers, fs);
     const installations: AgentInstallation[] = [];
+    // Machine-wide, so attributed to the first user install only
+    const systemSettings: ParsedConfig[] = [];
+    for (const path of qwenSystemSettingsPaths(fs)) {
+      if (!(await fs.access(path))) continue;
+      const parsed = await loadJsoncConfig(path, fs);
+      if (parsed) systemSettings.push(parsed);
+    }
 
     for (const { home, user } of userDirs) {
       const qwenDir = qwenHome(home, fs);
       const installs = await discoverCliInstalls(home, fs, {
         names: ['qwen'],
-        systemPaths: SYSTEM_CLI_PATHS,
+        systemPaths: [...SYSTEM_CLI_PATHS, SYSTEM_SETTINGS_DARWIN, SYSTEM_SETTINGS_LINUX],
         userRelPaths: USER_CLI_RELATIVE_PATHS,
         version: async (bin, canExec) => (canExec ? queryCliVersion(bin, fs) : undefined)
           ?? (await readPackageVersion(bin, fs, NPM_PACKAGE_NAME)),
@@ -131,6 +155,9 @@ export const qwenCodeAdapter: AgentAdapter = {
       if (!hasQwenDir && !cliBinary) continue;
 
       const configFiles = hasQwenDir ? await loadSettings(qwenDir, fs) : [];
+      if (systemSettings.length > 0 && (configFiles.length > 0 || cliBinary)) {
+        configFiles.push(...systemSettings.splice(0));
+      }
 
       // A bare ~/.qwen/ with no recognized config files and no `qwen` binary
       // is leftover state, not a CLI install.
@@ -209,6 +236,8 @@ export const qwenCodeAdapter: AgentAdapter = {
       // OAuth/account token stores — QC-002 checks permissions only
       metadataGlobPatterns: [...AUTH_FILES.map(f => `~/.qwen/${f}`), '~/.qwen/.env'],
       filePaths: [
+        '${QWEN_CODE_SYSTEM_SETTINGS_PATH}',
+        '${QWEN_CODE_SYSTEM_DEFAULTS_PATH}',
         '~/.qwen/settings.json',
         '~/.qwen/memory.md',
         '~/.qwen/QWEN.md',

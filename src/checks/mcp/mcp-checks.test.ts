@@ -3689,6 +3689,10 @@ describe('Remaining false positives from the corpus', () => {
       'const c = loadConfig(argv, process.env);',
       'dotenv.config({ processEnv: process.env });',
       'Object.assign(process.env, { FOO: "1" });',
+      // compiled TypeScript (corpus: @shopify/dev-mcp, @wix/mcp)
+      'const t = (e == null ? void 0 : e.env) ?? process.env;',
+      'spawn(cmd, args, { env: (opts.inherit ? base : {}) ?? process.env });',
+      'const cfg = (0, config_1.parseEnvironment)(process.env);',
     ]) {
       expect((await mcp032.run(makeContext({ mcpServerSources: [src(code)] }))).passed, code).toBe(true);
     }
@@ -3700,7 +3704,7 @@ describe('Remaining false positives from the corpus', () => {
   });
 
   it('MCP-008 ignores numeric instance suffixes', async () => {
-    const configs: MCPConfig[] = [{ source: 'c', filePath: '/c.json', servers: ['github2', 'postgres-1', 'server-github-4', 'server-filesystem-0'].map((name) => ({ name, command: 'node', transport: 'stdio' as const })) }];
+    const configs: MCPConfig[] = [{ source: 'c', filePath: '/c.json', servers: ['github2', 'postgres-1', 'server-github-4', 'server-filesystem-0', 'context7', 'context7-mcp-13'].map((name) => ({ name, command: 'node', transport: 'stdio' as const })) }];
     expect((await mcp008.run(makeContext({ mcpConfigs: configs }))).passed).toBe(true);
   });
 

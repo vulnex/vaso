@@ -77,7 +77,9 @@ export const cfg004 = defineCheck({
       }
     }
 
-    const passed = hasTls || tlsInConfig;
+    // The adapter's merged view wins when it knows: a sub-agent config that
+    // turns TLS off overrides the global file that turned it on.
+    const passed = typeof gw.tls === 'boolean' ? gw.tls : hasTls || tlsInConfig;
 
     return h.result({
       passed,

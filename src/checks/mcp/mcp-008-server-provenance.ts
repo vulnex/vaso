@@ -14,8 +14,13 @@ import { bareName, serviceCore } from '../../mcp/package-name.js';
 function imitatedService(name: string): string | undefined {
   // A numeric suffix tells instances apart (`github2`, `postgres-1`); it is
   // not a typo of the service name.
-  const core = serviceCore(name).replace(/\d+$/, '');
-  if (core.length < 5 || (WELL_KNOWN_MCP_SERVICES as readonly string[]).includes(core)) return undefined;
+  const known = WELL_KNOWN_MCP_SERVICES as readonly string[];
+  // Whole numeric segments (`-13`, `_2`) are instance numbers; drop them first
+  const raw = serviceCore(name.replace(/[-_.\s]\d+(?=$|[-_.\s])/g, ''));
+  // …unless the digits are part of a known name (`context7`)
+  if (known.includes(raw)) return undefined;
+  const core = raw.replace(/\d+$/, '');
+  if (core.length < 5 || known.includes(core)) return undefined;
   for (const service of WELL_KNOWN_MCP_SERVICES) {
     if (core[0] !== service[0]) continue;
     const distance = typoDistance(core, service);

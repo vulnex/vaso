@@ -25,6 +25,8 @@ export const ioc007 = defineCheck({
 
     const db = getIOCDatabase();
     const files = await skillFilesOf(ctx);
+    const bufferPatterns = db.binaryPatterns.filter(bp => bp.type === 'buffer');
+    let payloadMatch = false;
 
     for (const file of files) {
       let matched: { name: string } | undefined;
@@ -33,7 +35,6 @@ export const ioc007 = defineCheck({
       // file offset 0. Reading the file as bytes lets us avoid the latin1
       // substring search, which used to match the 2-byte PE magic ("MZ")
       // anywhere in the file — including inside identifiers like "xMZx".
-      const bufferPatterns = db.binaryPatterns.filter(bp => bp.type === 'buffer');
       if (bufferPatterns.length > 0) {
         try {
           const bytes = await readCappedBytes(ctx.fs, file);
@@ -63,16 +64,23 @@ export const ioc007 = defineCheck({
       }
 
       if (matched) {
+        const formatOnly = bufferPatterns.some(bp => bp.name === matched!.name);
+        if (!formatOnly) payloadMatch = true;
         evidence.push({
           file,
-          detail: `Binary pattern matched: ${matched.name}`,
+          detail: formatOnly
+            ? `Compiled executable (${matched.name}) — its code can't be reviewed or analysed`
+            : `Binary pattern matched: ${matched.name}`,
         });
       }
     }
 
+    // An executable header alone says "opaque native code", not "malicious":
+    // a warning. Shellcode padding or a packed-eval wrapper stays critical.
     return h.fromEvidence(evidence, {
       passed: 'No suspicious binary patterns found in skill files',
       failed: (n) => `Found ${n} file(s) with suspicious binary patterns`,
+      severity: payloadMatch ? 'critical' : 'warning',
     });
   },
 });

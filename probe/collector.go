@@ -415,7 +415,7 @@ func (c *collector) collectFile(path string, metadataOnly bool) FileEntry {
 func (c *collector) collectFileLimit(path string, metadataOnly bool, limit int64) FileEntry {
 	info, err := os.Stat(path)
 	if err != nil {
-		return FileEntry{Exists: false}
+		return FileEntry{Exists: false, Denied: os.IsPermission(err)}
 	}
 
 	mode := int(info.Mode().Perm())

@@ -2,7 +2,8 @@ import { readFile, writeFile, chmod, stat } from 'node:fs/promises';
 import YAML from 'yaml';
 import { parse as parseTOML, stringify as stringifyTOML } from 'smol-toml';
 import type { FixResult, ParsedConfig } from '../core/types.js';
-import { setNestedValue } from '../core/utils.js';
+import { getNestedValue, setNestedValue } from '../core/utils.js';
+import { loadConfig } from '../core/config-loader.js';
 import { parseJsonLenient } from '../core/jsonc.js';
 
 /**
@@ -377,8 +378,31 @@ export async function fixEveryConfig(configs: ParsedConfig[], spec: FixUpdateSpe
   return { checkId: spec.checkId, applied: true, message: fixed > 1 ? `${spec.message} (${fixed} files)` : spec.message };
 }
 
+/**
+ * Whether the file on disk already holds the value a fix would write. Configs
+ * in a fix run are the scan's snapshot: a file shared by several installs
+ * (OpenClaw's openclaw.json and its sub-agents) may have been fixed a moment
+ * ago — that is not another applied fix.
+ */
+async function alreadySet(config: ParsedConfig, spec: FixUpdateSpec): Promise<boolean> {
+  try {
+    const current = await loadConfig(config.filePath);
+    if (config.format === 'env') {
+      return spec.env !== undefined && current.data[spec.env] === (spec.envValue ?? String(spec.value));
+    }
+    return spec.path !== undefined && JSON.stringify(getNestedValue(current.data, spec.path)) === JSON.stringify(spec.value);
+  } catch {
+    return false;
+  }
+}
+
 export async function fixFirstConfig(configs: ParsedConfig[], spec: FixUpdateSpec): Promise<FixResult> {
+  let setIn: string | undefined;
   for (const config of configs) {
+    if (await alreadySet(config, spec)) {
+      setIn ??= config.filePath;
+      continue;
+    }
     if (config.format === 'env') {
       if (spec.env === undefined) continue;
       await updateEnvFile(config.filePath, spec.env, spec.envValue ?? String(spec.value));
@@ -390,6 +414,7 @@ export async function fixFirstConfig(configs: ParsedConfig[], spec: FixUpdateSpe
     }
     return { checkId: spec.checkId, applied: true, message: spec.message };
   }
+  if (setIn) return { checkId: spec.checkId, applied: false, message: `${spec.message} — already set in ${setIn}` };
   return {
     checkId: spec.checkId,
     applied: false,

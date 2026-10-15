@@ -130,6 +130,8 @@ describe('rollback', () => {
     await rollback();
     expect(consoleLogs.some(l => l.includes('Failed to restore'))).toBe(true);
     expect(consoleLogs.some(l => l.includes('0 file(s) restored'))).toBe(true);
+    expect(process.exitCode).toBe(2);
+    process.exitCode = undefined;
   });
 
   it('refuses to restore through a symlink that replaced the original', async () => {
@@ -148,5 +150,7 @@ describe('rollback', () => {
     expect(mockChmod).not.toHaveBeenCalled();
     expect(consoleLogs.some(l => l.includes('now a symlink'))).toBe(true);
     expect(consoleLogs.some(l => l.includes('0 file(s) restored'))).toBe(true);
+    expect(process.exitCode).toBe(2);
+    process.exitCode = undefined;
   });
 });

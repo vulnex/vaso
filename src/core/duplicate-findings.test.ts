@@ -28,14 +28,14 @@ describe('dedupePermissionFindings', () => {
     expect(pol.message).toContain('other files reported by DEV-002');
   });
 
-  it('hands CFG-003\'s fix to an owner check that has none', () => {
+  it('keeps a folded CFG-003 fixable (counted once, still fixed by `vaso fix`)', () => {
     const out = dedupePermissionFindings([
       r('LY-006', [{ file: '/h/lyrie/.env', detail: 'Permissions: 644 (should be 600 or tighter)' }]),
-      r('CFG-003', [perm('/h/lyrie/.env')], { fixable: true, fixDescription: 'Set permissions to 600 (chmod 600)' }),
+      r('CFG-003', [perm('/h/lyrie/.env')], { fixable: true, fixDescription: 'Remove group/other access' }),
     ]);
-    expect(out.find(x => x.id === 'CFG-003')?.passed).toBe(true);
-    const owner = out.find(x => x.id === 'LY-006')!;
-    expect(owner).toMatchObject({ passed: false, fixable: true, fixedBy: 'CFG-003' });
+    expect(out.find(x => x.id === 'CFG-003')).toMatchObject({ passed: true, fixable: true, foldedInto: 'LY-006' });
+    expect(out.find(x => x.id === 'LY-006')).toMatchObject({ passed: false });
+    expect(out.find(x => x.id === 'LY-006')?.fixable).toBeUndefined();
   });
 
   it('never drops a permission finding because another check flagged something else in that file', () => {

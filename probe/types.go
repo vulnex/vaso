@@ -95,6 +95,9 @@ type FileEntry struct {
 	// keystores…) and Content holds its bytes base64-encoded; a JSON string
 	// would replace invalid sequences and lose them. Empty means UTF-8 text.
 	Encoding string `json:"encoding,omitempty"`
+	// Set when stat failed with permission denied (e.g. under a chmod-000
+	// directory): the file may exist but can't be read — not "absent".
+	Denied bool `json:"denied,omitempty"`
 }
 
 // CommandOutput holds the result of an executed command.

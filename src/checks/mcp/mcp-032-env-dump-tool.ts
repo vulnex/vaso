@@ -33,8 +33,11 @@ const BENIGN_PROCESS_ENV_PREFIX = new RegExp(
     String.raw`\b\w*[eE]nv\w*\s*=\s*(?:[^;=(){}]*(?:\?\?|\|\||\?|:)\s*)?(?:\{\s*(?:[^{}()]*,\s*)?\.\.\.\s*)?$`,
     // An env-named option (`dotenv.config({ processEnv: process.env })`).
     String.raw`\b\w*[eE]nv\w*["']?\s*:\s*$`,
-    // A fallback for a caller-supplied environment (`o.env ?? process.env`).
-    String.raw`\.\w*[eE]nv\w*\s*(?:\?\?|\|\|)\s*$`,
+    // A fallback for a caller-supplied environment (`o.env ?? process.env`,
+    // compiled optional chaining `(o == null ? void 0 : o.env) ?? process.env`).
+    String.raw`\.\w*[eE]nv\w*\)?\s*(?:\?\?|\|\|)\s*$`,
+    // `env: (…) ?? process.env` — an env option falling back to the environment
+    String.raw`\benv\s*:\s*\([^;]*\)\s*(?:\?\?|\|\|)\s*$`,
     // Destructuring picks named keys: `const { API_BASE, API_KEY } = process.env`.
     String.raw`\}\s*=\s*$`,
     // `typeof process.env`
@@ -62,7 +65,10 @@ function enclosingCallee(before: string): string | undefined {
       depth--;
     } else if (c === '(') {
       if (depth > 0) { depth--; continue; }
-      return /([A-Za-z_$][\w$.]*)\s*$/.exec(before.slice(0, i))?.[1];
+      const head = before.slice(0, i);
+      // Compiled module calls: `(0, x.parseEnvironment)(process.env)`
+      return /\(\s*0\s*,\s*([A-Za-z_$][\w$.]*)\s*\)\s*$/.exec(head)?.[1]
+        ?? /([A-Za-z_$][\w$.]*)\s*$/.exec(head)?.[1];
     } else if (c === ';') return undefined;
   }
   return undefined;
