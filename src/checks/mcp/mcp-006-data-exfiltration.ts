@@ -8,15 +8,17 @@ const OUTBOUND_METHODS = new Set(['fetch', 'request', 'get', 'post', 'put', 'pat
 
 /**
  * What counts as exfiltration from an MCP server: file contents, or the whole
- * environment, sent out over HTTP. A single credential from the environment
+ * environment, sent out over HTTP or a client WebSocket the server opened. A single credential from the environment
  * going to an API (`Authorization: Bearer ${API_KEY}`) is how API servers
  * work, and `res.send(data)` / `stream.write(data)` answer the server's own
  * client — neither is reported. (Skill checks keep the broader rule.)
  */
 function isExfiltration(r: DataFlowResult): boolean {
   if (r.type !== 'source-to-sink') return false;
-  if (r.sourceKind === 'env' && r.source !== 'process.env') return false;
+  if (r.sourceKind === 'env' && !r.wholeEnv) return false;
   if (r.sink === 'fetch') return true;
+  // Sent on a socket the server opened to a remote endpoint (`new WebSocket(url)`)
+  if (r.sink === 'send' && r.socketClient) return true;
   return OUTBOUND_METHODS.has(r.sink ?? '') && HTTP_RECEIVER.test(r.sinkObject ?? '');
 }
 

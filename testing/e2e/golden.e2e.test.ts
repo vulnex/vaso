@@ -22,6 +22,8 @@ import type { AgentScanResult, ScanResult, Severity } from '../../src/core/types
  *            (a fixed false positive that stays as advice)
  *   fix      { "resolves": [ids] } — `vaso fix -y` resolves them without
  *            breaking any other check, and `--rollback` restores every file
+ *   mcpConfig  path under home of an MCP config: run `vaso mcp scan -p` on it
+ *            (agent `mcp`; local only, no probe comparison or fix)
  *   parity   false to skip the probe-snapshot comparison (default: compared
  *            whenever Go is available to build the probe)
  *   cleanIgnore  check ids `clean` doesn't count — checks that read the host
@@ -54,11 +56,17 @@ interface GoldenCase {
   info?: string[];
   fix?: { resolves: string[] };
   parity?: boolean;
+  mcpConfig?: string;
   cleanIgnore?: string[];
   modes?: Record<string, string>;
   reachable?: boolean;
   /** Skip on these platforms (fixtures relying on POSIX modes). */
   skipOn?: NodeJS.Platform[];
+}
+
+/** `mcpConfig: "<path>"` is shorthand for `mcp: { paths: ["<path>"] }`. */
+function mcpOf(spec: GoldenCase): GoldenCase['mcp'] {
+  return spec.mcp ?? (spec.mcpConfig ? { paths: [spec.mcpConfig] } : undefined);
 }
 
 const caseNames = existsSync(CASES)
@@ -154,7 +162,7 @@ describe.each(caseNames)('golden: %s', (name) => {
     home = join(work, 'home');
     await materialize(join(CASES, name, 'home'), home);
     for (const [path, mode] of Object.entries(spec.modes ?? {})) await chmod(join(home, path), parseInt(mode, 8));
-    local = (await scan(home, spec.agent, [], spec.mcp)).agents.filter(a => a.agent === spec.agent);
+    local = (await scan(home, spec.agent, [], mcpOf(spec))).agents.filter(a => a.agent === spec.agent);
   }, 120_000);
 
   afterAll(async () => {
@@ -184,7 +192,7 @@ describe.each(caseNames)('golden: %s', (name) => {
     }
   });
 
-  it.skipIf(skip || spec.parity === false || Boolean(spec.mcp) || !goAvailable)('remote (probe snapshot) reaches the same verdicts', async () => {
+  it.skipIf(skip || spec.parity === false || Boolean(mcpOf(spec)) || !goAvailable)('remote (probe snapshot) reaches the same verdicts', async () => {
     const manifest = join(work, 'manifest.json');
     const snapshot = join(work, 'snapshot.json');
     await writeFile(manifest, (await run(['probe', 'manifest'], home)).stdout);
@@ -196,7 +204,7 @@ describe.each(caseNames)('golden: %s', (name) => {
     expect(key(remote)).toEqual(key(local));
   }, 120_000);
 
-  it.skipIf(skip || !spec.fix || Boolean(spec.mcp))('fix resolves the findings without breaking others, and rollback restores every file', async () => {
+  it.skipIf(skip || !spec.fix || Boolean(mcpOf(spec)))('fix resolves the findings without breaking others, and rollback restores every file', async () => {
     const before = await treeHash(home, join(home, '.vaso'));
     const fixed = await run(['fix', '-a', spec.agent, '-y'], home);
     expect(fixed.code, fixed.stdout + fixed.stderr).toBe(0);

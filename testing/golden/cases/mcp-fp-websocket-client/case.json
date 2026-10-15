@@ -1,0 +1,8 @@
+{
+  "agent": "mcp",
+  "source": "dt13 RG4: a WebSocket client sending its own protocol messages is not exfiltration",
+  "mcpConfig": "mcp.json",
+  "pass": [
+    "MCP-006"
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "agent": "mcp",
+  "source": "dt13 RG4/RG12: file + env sent on a client WebSocket; hidden tag characters in a result string on a description line",
+  "mcpConfig": "mcp.json",
+  "fail": {
+    "MCP-006": "critical",
+    "MCP-034": "critical"
+  }
+}

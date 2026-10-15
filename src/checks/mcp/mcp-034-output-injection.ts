@@ -110,6 +110,9 @@ export const mcp034 = defineCheck({
       const lines = source.sourceCode.split('\n');
       const hiddenAt = new Map<number, string[]>();
       for (let i = 0; i < lines.length; i++) {
+        // A line holding a tool description is judged string by string below:
+        // the description belongs to MCP-024, a result string beside it doesn't
+        if (!python && descriptionLines.has(i + 1)) continue;
         const decoded = python ? decodeUnicodeEscapes(lines[i]) : lines[i];
         // A quoted constant naming one invisible character (`split('\u200b')`).
         const text = decoded.replace(/(["'`])([^"'`]{1,8})\1/gu, (m, _q: string, body: string) => (isInvisibleConstant(body) ? '' : m));
@@ -118,15 +121,20 @@ export const mcp034 = defineCheck({
         if (invisible.length === 0 || ownedByDescription(decoded.trim()) || ownedByDescription(foldWhitespace(decoded))) continue;
         hiddenAt.set(i + 1, invisible);
       }
+      const fromStrings = new Set<number>();
       if (!python) {
         for (const unit of units) {
-          if (unit.description || hiddenAt.has(unit.line) || !isProse(unit.text)) continue;
+          // Tag characters spell hidden text even after one visible word ("done…")
+          if (unit.description || hiddenAt.has(unit.line) || !(isProse(unit.text) || hasTagCharacters(unit.text))) continue;
           const invisible = hiddenCharacters(unit.text);
-          if (invisible.length > 0 && !isInvisibleConstant(unit.text)) hiddenAt.set(unit.line, invisible);
+          if (invisible.length > 0 && !isInvisibleConstant(unit.text)) {
+            hiddenAt.set(unit.line, invisible);
+            fromStrings.add(unit.line);
+          }
         }
       }
       for (const [line, invisible] of [...hiddenAt].sort((a, b) => a[0] - b[0])) {
-        if (reported.has(line) || descriptionLines.has(line)) continue;
+        if (reported.has(line) || (descriptionLines.has(line) && !fromStrings.has(line))) continue;
         sawStrong = true;
         evidence.push({
           file,
@@ -146,6 +154,11 @@ export const mcp034 = defineCheck({
     });
   },
 });
+
+/** Unicode tag characters (U+E0000–E007F), which spell invisible ASCII. */
+function hasTagCharacters(text: string): boolean {
+  return /[\u{E0000}-\u{E007F}]/u.test(text);
+}
 
 /**
  * A string value that reads as text — two or more words, few distinct

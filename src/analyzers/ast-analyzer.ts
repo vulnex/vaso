@@ -15,6 +15,10 @@ export interface DataFlowResult {
   sink?: string;
   /** source-to-sink: the receiver of a member-call sink (`axios` in `axios.post`, `res` in `res.send`). */
   sinkObject?: string;
+  /** source-to-sink: the sink is `send` on a client socket the code opened (`new WebSocket(url)`). */
+  socketClient?: boolean;
+  /** source-to-sink: the source is the whole environment (`process.env`, or a variable holding it). */
+  wholeEnv?: boolean;
   /**
    * eval-exec: the call's static command/code text — string and template
    * parts, `${…}` for interpolations; absent when the argument is computed.
@@ -41,6 +45,9 @@ const SOURCES = new Set([
 ]);
 
 const ENV_SOURCES = new Set(['env']);
+
+/** Programs whose arguments go over the network (as in the Python analyzer). */
+const NETWORK_PROGRAM = /^(?:curl|wget|nc|ncat|netcat|socat|scp|sftp|ftp|rsync|ssh|telnet)$/;
 
 const SINKS = new Set([
   'fetch', 'request', 'get', 'post', 'put', 'patch',
@@ -145,14 +152,29 @@ function analyzeUncached(code: string): DataFlowResult[] {
   // `axios.post(url, process.env.KEY)`), by the rules of the Python analyzer:
   // the whole environment anywhere in the call, a single value only in the
   // request body (an API key in the headers of its own API is not a leak).
-  const inlineEnv = (args: Node[], sinkName: string): string[] => {
+  const inlineEnv = (args: Node[], sinkName: string): string[] => inlineSources(args, sinkName, false)
+    .filter(([, kind]) => kind === 'env').map(([name]) => name);
+  /**
+   * Sources written inline in a sink call: file contents (`readFileSync(…)`)
+   * and the whole environment anywhere in it; a single environment value in
+   * a request body — or, for a network program's argv (`allEnv`), anywhere.
+   */
+  const inlineSources = (args: Node[], sinkName: string, allEnv: boolean): Array<[string, 'file' | 'env']> => {
     if (args.length === 0) return [];
     const all = code.slice(args[0].start ?? 0, args[args.length - 1].end ?? 0);
-    const out: string[] = [];
-    if (/(?<![\w$.])process\.env(?![\w$]|\s*(?:\.|\[|\?\.))/.test(all)) out.push('process.env');
-    for (const m of requestBody(args, sinkName).matchAll(/(?<![\w$.])process\.env(?:\.[A-Za-z_$][\w$]*|\[[^\]]+\])/g)) out.push(m[0]);
+    const out: Array<[string, 'file' | 'env']> = [];
+    const file = all.match(/(?<![\w$])(?:fs\.)?(?:promises\.)?readFile(?:Sync)?\s*\(/);
+    if (file) out.push([`${file[0].replace(/\s*\($/, '')}()`, 'file']);
+    if (/(?<![\w$])(?<!(?:^|[^.])\.)process\.env(?![\w$]|\s*(?:\.|\[|\?\.))/.test(all)) out.push(['process.env', 'env']);
+    const single = allEnv ? all : requestBody(args, sinkName);
+    for (const m of single.matchAll(/(?<![\w$.])process\.env(?:\.[A-Za-z_$][\w$]*|\[[^\]]+\])/g)) out.push([m[0], 'env']);
     return out;
   };
+  // Client sockets the code opens (`const ws = new WebSocket(url)`): `ws.send(…)`
+  // goes to that remote endpoint, unlike a server socket answering its client
+  const clientSockets = new Set<string>();
+  // Variables holding the whole environment (`const e = process.env`, `{ ...process.env }`)
+  const wholeEnvVars = new Set<string>();
   const requestBody = (args: Node[], sinkName: string): string => {
     const text = (n: Node | undefined) => (n ? code.slice(n.start ?? 0, n.end ?? 0) : '');
     const parts: string[] = [];
@@ -210,6 +232,41 @@ function analyzeUncached(code: string): DataFlowResult[] {
             ...commandText(node.arguments),
             ...(runsDirectly(name, node.arguments, constStrings) ? { noShell: true } : {}),
           });
+          if (sink?.kind === 'process' || !sink) {
+            // What the process gets: file contents or the whole environment in
+            // its arguments, or — for a network client (curl, nc, scp…) — any
+            // environment value: `execFile('curl', ['-d', JSON.stringify(process.env), url])`
+            // argv only: an options object (`{ env: process.env, cwd }`) configures
+            // the child, it isn't data the child receives
+            const args = (node.arguments as Node[]).filter(a => a.type !== 'ObjectExpression');
+            const first = args[0];
+            const program = first?.type === 'StringLiteral' ? first.value
+              : first?.type === 'Identifier' ? constStrings.get(first.name) : undefined;
+            const network = program !== undefined && NETWORK_PROGRAM.test(program.split('/').pop() ?? '');
+            const pairs = inlineSources(args, name, network);
+            // Variables only for a bare call: member calls (`cp.exec(x)`) are
+            // matched against tracked variables in the sink branch below
+            const argStr = args.length > 0 ? code.slice(args[0].start ?? 0, args[args.length - 1].end ?? 0) : '';
+            if (node.callee.type === 'Identifier') {
+              for (const [v, kind] of sourceVars) {
+                if ((kind === 'file' || network || v === 'process.env' || wholeEnvVars.has(v)) && mentions(argStr, v) && !pairs.some(([n]) => n === v)) pairs.push([v, kind]);
+              }
+            }
+            for (const [sourceVar, sourceKind] of pairs) {
+              if (sourceKind === 'env' && sourceVar !== 'process.env' && !wholeEnvVars.has(sourceVar) && !network) continue;
+              results.push({
+                type: 'source-to-sink',
+                source: sourceVar,
+                sourceKind,
+                sink: name,
+                line,
+                snippet: snippet.slice(0, 120),
+                description: network
+                  ? `Data flows from "${sourceVar}" to network program "${program}"`
+                  : `Data flows from "${sourceVar}" into process execution "${name}"`,
+              });
+            }
+          }
         }
 
         // Detect require('child_process')
@@ -286,8 +343,10 @@ function analyzeUncached(code: string): DataFlowResult[] {
               ? receiver.name
               : receiver.type === 'MemberExpression' && receiver.property.type === 'Identifier' ? receiver.property.name : undefined;
             const processSink = processImports.has(propName) || EXEC_FUNCTIONS.has(propName);
-            const inline = processSink ? [] : inlineEnv(node.arguments as Node[], propName);
-            for (const [sourceVar, sourceKind] of new Map<string, 'file' | 'env'>([...sourceVars, ...inline.map(v => [v, 'env'] as const)])) {
+            const inlinePairs = processSink ? [] : inlineSources(node.arguments as Node[], propName, false);
+            const inline = inlinePairs.map(([name]) => name);
+            const socketClient = propName === 'send' && sinkObject !== undefined && clientSockets.has(sinkObject);
+            for (const [sourceVar, sourceKind] of new Map<string, 'file' | 'env'>([...sourceVars, ...inlinePairs])) {
               if (inline.includes(sourceVar) || mentions(argStr, sourceVar)) {
                 results.push({
                   type: 'source-to-sink',
@@ -295,6 +354,7 @@ function analyzeUncached(code: string): DataFlowResult[] {
                   sourceKind,
                   sink: propName,
                   ...(sinkObject ? { sinkObject } : {}),
+                  ...(socketClient ? { socketClient } : {}),
                   line,
                   snippet: snippet.slice(0, 120),
                   description: processImports.has(propName) || EXEC_FUNCTIONS.has(propName)
@@ -354,8 +414,9 @@ function analyzeUncached(code: string): DataFlowResult[] {
             }
 
             // Check data-flow into fetch
-            const inline = inlineEnv(node.arguments as Node[], 'fetch');
-            for (const [sourceVar, sourceKind] of new Map<string, 'file' | 'env'>([...sourceVars, ...inline.map(v => [v, 'env'] as const)])) {
+            const inlinePairs = inlineSources(node.arguments as Node[], 'fetch', false);
+            const inline = inlinePairs.map(([name]) => name);
+            for (const [sourceVar, sourceKind] of new Map<string, 'file' | 'env'>([...sourceVars, ...inlinePairs])) {
               const argStr = code.slice(
                 node.arguments[0]?.start ?? 0,
                 node.arguments[node.arguments.length - 1]?.end ?? 0,
@@ -382,6 +443,20 @@ function analyzeUncached(code: string): DataFlowResult[] {
         if (!init) return;
         const id = path.node.id;
         if (id.type !== 'Identifier') return;
+
+        if (init.type === 'NewExpression' && (
+          (init.callee.type === 'Identifier' && init.callee.name === 'WebSocket')
+          || (init.callee.type === 'MemberExpression' && init.callee.property.type === 'Identifier' && init.callee.property.name === 'WebSocket')
+        )) clientSockets.add(id.name);
+
+        const initText = code.slice(init.start ?? 0, init.end ?? 0);
+        // Assigned, spread, or copied/serialized whole (not passed to some other call)
+        const copies = init.type !== 'CallExpression'
+          || /^(?:JSON\.stringify|Object\.assign|Object\.entries|structuredClone)\s*\(/.test(initText);
+        if (copies && /(?<![\w$])(?<!(?:^|[^.])\.)process\.env(?![\w$]|\s*(?:\.|\[|\?\.))/.test(initText)) {
+          sourceVars.set(id.name, 'env');
+          wholeEnvVars.add(id.name);
+        }
 
         // Track process.env.X assignments
         if (
@@ -427,6 +502,9 @@ function analyzeUncached(code: string): DataFlowResult[] {
     // Traverse errors shouldn't crash the analysis
   }
 
+  for (const r of results) {
+    if (r.type === 'source-to-sink' && r.sourceKind === 'env' && (r.source === 'process.env' || wholeEnvVars.has(r.source ?? ''))) r.wholeEnv = true;
+  }
   return results;
 }
 

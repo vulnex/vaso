@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "srv": {
+      "command": "node",
+      "args": [
+        "{{HOME}}/srv/index.js"
+      ]
+    }
+  }
+}
