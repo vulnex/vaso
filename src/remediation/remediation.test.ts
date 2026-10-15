@@ -217,10 +217,12 @@ describe('Config fix() methods', () => {
 
   it('CFG-003: fixes credential file permissions to 600', async () => {
     const filePath = join(TEST_DIR, 'config.json');
-    await writeFile(filePath, '{}');
+    // A declared credential path counts when it holds a secret
+    const data = { apiKey: 'sk-ant-api03-Ab3dEf6hIj9kLm2nOp5qRs8tUv' };
+    await writeFile(filePath, JSON.stringify(data));
     await chmod(filePath, 0o644);
 
-    const config = makeJsonConfig(filePath, {});
+    const config = makeJsonConfig(filePath, data);
     const ctx = makeCtx('openclaw', [config], undefined, [filePath]);
 
     const before = await cfg003.run(ctx);

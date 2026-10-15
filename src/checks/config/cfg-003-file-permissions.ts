@@ -6,7 +6,8 @@ import { configHoldsSecret } from '../../core/secret-values.js';
 import { basename } from 'node:path';
 
 /** Files that are credentials by what they are, whatever they hold right now. */
-const CREDENTIAL_FILE_NAME = /(?:^\.env(?:\.|$)|credential|auth|token|secret|keystore|\.key$|\.pem$)/i;
+// PicoClaw's .security.yml is its secret store (the place api keys move to)
+const CREDENTIAL_FILE_NAME = /(?:^\.env(?:\.|$)|^\.security\.ya?ml$|credential|auth|token|secret|keystore|\.key$|\.pem$)/i;
 
 /**
  * A declared credential path that is ordinary settings (an agent's
