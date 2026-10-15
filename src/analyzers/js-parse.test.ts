@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { overNestedLines, parseLenient, ANALYSIS_NESTING_LIMIT } from './js-parse.js';
+import { overNestedLines, parseLenient, ANALYSIS_NESTING_LIMIT, parseJs, cachedLargeAsts } from './js-parse.js';
 import { analyzeCode } from './ast-analyzer.js';
 import { analyzeObfuscation } from './obfuscation.js';
 
@@ -131,5 +131,15 @@ describe('traverse-overflow shapes (dt13 perf2)', () => {
     expect(flows.some(f => f.type === 'eval-exec' && f.line === 5)).toBe(true);
     expect(flows.some(f => f.type === 'source-to-sink' && f.line === 4 && f.source === 'k')).toBe(true);
     expect(lineFallback('const a = 1;\nconsole.log(a);\n')).toEqual([]);
+  });
+});
+
+describe('parseJs cache', () => {
+  it('keeps at most one AST of a large source (a skill tree of bundles must not pin gigabytes)', () => {
+    const big = (n: number) => `var x${n} = [${'1,'.repeat(150_000)}1];`;
+    parseJs(big(1));
+    parseJs(big(2));
+    parseJs(big(3));
+    expect(cachedLargeAsts()).toBe(1);
   });
 });

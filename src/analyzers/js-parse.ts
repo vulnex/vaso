@@ -10,7 +10,15 @@ export type JsAst = ReturnType<typeof parse>;
  * each distinct source once. A handful of ASTs at most — they are large.
  */
 const MAX_CACHED_ASTS = 4;
+/** An AST is ~100× its source: at most one AST of a source this large stays cached. */
+const LARGE_SOURCE = 256 * 1024;
 const cache = new Map<string, JsAst | null>();
+const largeKeys = new Set<string>();
+
+/** How many cached ASTs come from large sources (for tests). */
+export function cachedLargeAsts(): number {
+  return [...largeKeys].filter(k => cache.has(k)).length;
+}
 
 /** Parse JavaScript/TypeScript leniently; undefined when it isn't parseable. */
 export function parseJs(code: string): JsAst | undefined {
@@ -23,7 +31,18 @@ export function parseJs(code: string): JsAst | undefined {
     return hit ?? undefined;
   }
   const ast = parseLenient(code) ?? null;
-  if (cache.size >= MAX_CACHED_ASTS) cache.delete(cache.keys().next().value!);
+  // A skill tree of multi-megabyte bundles kept four huge ASTs alive across
+  // files (gigabytes); the checks that share a parse read one file at a time
+  if (code.length > LARGE_SOURCE) {
+    for (const k of largeKeys) cache.delete(k);
+    largeKeys.clear();
+    largeKeys.add(key);
+  }
+  if (cache.size >= MAX_CACHED_ASTS) {
+    const oldest = cache.keys().next().value!;
+    cache.delete(oldest);
+    largeKeys.delete(oldest);
+  }
   cache.set(key, ast);
   return ast ?? undefined;
 }
