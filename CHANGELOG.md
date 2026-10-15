@@ -50,6 +50,8 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - **Quieter `--diff`:** findings are matched by location, there is one baseline per agent and host, and reports name the VASO version.
 - `detect --output-dir` works locally and on snapshots; `--no-color`/`NO_COLOR` win over `FORCE_COLOR`; `--parallel`, `--ssh-timeout` and `--ssh-retries` are validated on every scan; a plugin reporter can't replace a built-in format; terminal output shows line breaks in scanned values as `\n`; JSON5/JSONC line comments end at CR; shell, data and Python files are no longer parsed as JavaScript.
 - `vaso-quick.sh` reads OpenClaw 2026 configs and exits 1 on findings; the npm tarball ships `scripts/prepare.mjs`.
+- **Variable references are no longer reported as plaintext secrets.** `Bearer ${VAR}`, `${VAR:-default}`, `{env:VAR}`, `%VAR%` and bare variable names are recognised by every config-secret check (AT-004, CC-004, CD-001, GEM-001, QC-001, HM-001, MCP-003, MCP-012, WS-003, ZeroClaw, Abacus). A credential written as a `${VAR:-…}` fallback is still reported.
+- DEV-003 reports `${VAR}`/`$VAR` in a Devin MCP config as info: Devin expands only `${env:VAR}` and `${file:/path}`, so the server receives the text literally.
 
 ## [1.3.0] - 2026-10-15
 
