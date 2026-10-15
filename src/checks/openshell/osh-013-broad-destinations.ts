@@ -22,7 +22,12 @@ export const osh013 = defineCheck({
     const warning: Evidence[] = [];
     for (const { ref, rule, endpoint: e } of endpoints(await sandboxPolicies(ctx))) {
       const where = `network_policies.${rule} → ${describeEndpoint(e)}`;
-      for (const cidr of Array.isArray(e.allowed_ips) ? e.allowed_ips : []) {
+      // With a host, allowed_ips only constrain what that name may resolve to
+      // ("host + allowed_ips — domain must resolve to an IP in the allowlist",
+      // OpenShell generate-sandbox-policy skill, Private IP Destinations); a
+      // range opens to any name only on a hostless endpoint
+      const named = typeof e.host === 'string' && e.host.trim() !== '' && e.host.trim() !== '*';
+      for (const cidr of !named && Array.isArray(e.allowed_ips) ? e.allowed_ips : []) {
         if (typeof cidr !== 'string') continue;
         const len = prefixLength(cidr);
         const v6 = cidr.includes(':');

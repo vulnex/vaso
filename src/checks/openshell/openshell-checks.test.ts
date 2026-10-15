@@ -318,6 +318,20 @@ describe('sandbox policies', () => {
     expect(r.evidence!.map(e => e.snippet!.split(': ').pop())).toEqual(['allowed_ips 0.0.0.0/0', 'allowed_ips 10.0.0.0/8', 'network_policies.wide → host.openshell.internal:5000']);
   });
 
+  it('OSH-013 leaves allowed_ips that constrain a named host alone (NemoClaw local-inference preset)', async () => {
+    const preset = {
+      version: 1,
+      network_policies: {
+        local_inference: {
+          endpoints: [{ host: 'inference.lan', port: 11434, protocol: 'rest', enforcement: 'enforce', allowed_ips: ['10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16'] }],
+          binaries: [{ path: '/usr/bin/curl' }],
+        },
+      },
+    };
+    const r = await check('OSH-013').run(ctx([], cliFs({ sandboxes: [{ name: 'box', workspace: 'default' }] }, { 'default/box': preset }), { cli: 'openshell' }));
+    expect(r.passed).toBe(true);
+  });
+
   it('never attributes the scanning user\'s gateway or environment to another user\'s install', async () => {
     const fs = cliFs({ sandboxes: [{ name: 'box', workspace: 'default' }] }, { 'default/box': risky }, undefined, {
       env: { OPENSHELL_GATEWAY_INSECURE: '1', OPENSHELL_SANDBOX_POLICY: '/p.yaml' },
