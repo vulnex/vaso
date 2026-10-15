@@ -1,4 +1,6 @@
-import { readdir, copyFile, stat, lstat, chmod, rename } from 'node:fs/promises';
+import { readdir, readFile, writeFile, stat, lstat, rename } from 'node:fs/promises';
+import { readRegularFile, writeRegularFile, chmodNoFollow } from './safe-file.js';
+import { MANIFEST_NAME, readManifest, sha256, type ManifestEntry } from './backup-manifest.js';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import chalk from 'chalk';
@@ -51,7 +53,10 @@ export async function rollback(timestamp?: string): Promise<void> {
   console.log(chalk.cyan(`Restoring from backup: ${target}`));
 
   // Collect all files recursively from the backup directory
-  const files = await collectFiles(backupDir);
+  const manifest = await readManifest(backupDir);
+  const files = (await collectFiles(backupDir)).filter(f => f !== join(backupDir, MANIFEST_NAME));
+  const dirModes = Object.entries(manifest?.entries ?? {}).filter(([, e]) => e.kind === 'dir');
+  const total = files.length + dirModes.length;
   let restored = 0;
 
   for (const backupFilePath of files) {
@@ -59,19 +64,10 @@ export async function rollback(timestamp?: string): Promise<void> {
     // Strip the backup dir prefix to recover the original absolute path
     const originalPath = backupFilePath.slice(backupDir.length);
     try {
-      // Never write through a link or onto a non-file: whatever replaced the
-      // original since the fix (a symlink to another file, a directory) is
-      // not ours to overwrite — and copyFile/chmod would follow a symlink.
-      const current = await lstat(originalPath).catch(() => undefined);
-      if (current && !current.isFile()) {
-        console.log(`  ${chalk.red('x')} Skipped ${originalPath}: it is now ${current.isSymbolicLink() ? 'a symlink' : 'not a regular file'}; restore it by hand from ${backupFilePath}`);
+      const note = await restoreFile(backupFilePath, originalPath, manifest?.entries[originalPath]);
+      if (note) {
+        console.log(`  ${chalk.yellow('!')} Skipped ${originalPath}: ${note}; the original is in ${backupFilePath}`);
         continue;
-      }
-      await copyFile(backupFilePath, originalPath);
-      // The backup copy kept the original permissions; restore them too
-      // (permission fixes such as chmod 600 are part of the rollback).
-      if (process.platform !== 'win32') {
-        await chmod(originalPath, (await stat(backupFilePath)).mode & 0o7777);
       }
       console.log(`  ${chalk.green('+')} Restored ${originalPath}`);
       restored++;
@@ -80,18 +76,64 @@ export async function rollback(timestamp?: string): Promise<void> {
     }
   }
 
+  // Directory modes a fix changed (NC-002 makes the allowlist dir owner-only)
+  for (const [dir, entry] of dirModes) {
+    try {
+      const st = await lstat(dir);
+      if (!st.isDirectory()) {
+        console.log(`  ${chalk.yellow('!')} Skipped ${dir}: it is no longer a directory`);
+        continue;
+      }
+      await chmodNoFollow(dir, entry.mode);
+      restored++;
+    } catch (err) {
+      console.log(`  ${chalk.red('x')} Failed to restore the mode of ${dir}: ${(err as Error).message}`);
+    }
+  }
+
   // Retire the backup so the next rollback undoes the fix run before it.
   // A partial restore stays pending, to be retried.
-  if (restored === files.length && !target.startsWith(RESTORED_PREFIX)) {
+  if (restored === total && !target.startsWith(RESTORED_PREFIX)) {
     await rename(backupDir, join(backupsDir, `${RESTORED_PREFIX}${target}`));
   }
 
-  console.log(`\n${chalk.bold('Rollback complete:')} ${restored} file(s) restored`);
-  // A file left unrestored (skipped symlink, copy error) is an incomplete rollback
-  if (restored < files.length) {
-    console.log(chalk.yellow(`  ${files.length - restored} file(s) not restored — the backup stays pending`));
+  console.log(`\n${chalk.bold('Rollback complete:')} ${restored} item(s) restored`);
+  // Anything left unrestored (skipped symlink, edited since the fix, copy
+  // error) is an incomplete rollback
+  if (restored < total) {
+    console.log(chalk.yellow(`  ${total - restored} item(s) not restored — the backup stays pending`));
     process.exitCode = 2;
   }
+}
+
+/**
+ * Put one backed-up file back. Returns why it was skipped, if it was:
+ * whatever replaced the original (a symlink, a pipe) is not ours to
+ * overwrite, and a file edited since the fix keeps the edit — rollback must
+ * not silently discard work. A read-only original is made writable for the
+ * restore, then given its exact recorded mode (setuid included).
+ */
+async function restoreFile(backupPath: string, originalPath: string, entry: ManifestEntry | undefined): Promise<string | undefined> {
+  const current = await lstat(originalPath).catch(() => undefined);
+  if (current && !current.isFile()) {
+    return `it is now ${current.isSymbolicLink() ? 'a symlink' : 'not a regular file'}`;
+  }
+  const original = await readFile(backupPath);
+  const mode = entry?.mode ?? ((await stat(backupPath)).mode & 0o7777);
+  if (current) {
+    const now = await readRegularFile(originalPath).then(sha256, () => undefined);
+    if (entry?.after && now !== undefined && now !== entry.after && now !== entry.before) {
+      return 'it was changed after the fix';
+    }
+    if (now === undefined || now !== (entry?.before ?? sha256(original))) {
+      await chmodNoFollow(originalPath, 0o600);
+      await writeRegularFile(originalPath, original);
+    }
+  } else {
+    await writeFile(originalPath, original, { flag: 'wx', mode: 0o600 });
+  }
+  if (process.platform !== 'win32') await chmodNoFollow(originalPath, mode);
+  return undefined;
 }
 
 async function collectFiles(dir: string): Promise<string[]> {

@@ -1,4 +1,4 @@
-import { readFile, writeFile, chmod, stat } from 'node:fs/promises';
+import { readRegularFile, writeRegularFile, chmodNoFollow, regularMode } from './safe-file.js';
 import YAML from 'yaml';
 import { parse as parseTOML, stringify as stringifyTOML } from 'smol-toml';
 import type { FixResult, ParsedConfig } from '../core/types.js';
@@ -11,7 +11,7 @@ import { parseJsonLenient } from '../core/jsonc.js';
  * Preserves comments and line ordering.
  */
 export async function updateEnvFile(filePath: string, key: string, value: string): Promise<void> {
-  const content = await readFile(filePath, 'utf-8');
+  const content = (await readRegularFile(filePath)).toString('utf-8');
   const lines = content.split('\n');
   let found = false;
 
@@ -37,14 +37,14 @@ export async function updateEnvFile(filePath: string, key: string, value: string
     lines.splice(insertIndex, 0, `${key}=${value}`);
   }
 
-  await writeFile(filePath, lines.join('\n'), 'utf-8');
+  await writeRegularFile(filePath, lines.join('\n'));
 }
 
 /**
  * Update a nested value in a JSON file, detecting and preserving indentation.
  */
 export async function updateJsonFile(filePath: string, keyPath: string, value: unknown): Promise<void> {
-  const content = await readFile(filePath, 'utf-8');
+  const content = (await readRegularFile(filePath)).toString('utf-8');
   // JSONC/JSON5 configs load (see config-loader) — the fix must read them too.
   // They are written back as plain JSON, which both formats accept.
   const obj = parseJsonLenient(content.replace(/^\uFEFF/, '')) as Record<string, unknown>;
@@ -54,18 +54,18 @@ export async function updateJsonFile(filePath: string, keyPath: string, value: u
   const indent = indentMatch ? indentMatch[1].length : 2;
 
   setNestedValue(obj, keyPath, value);
-  await writeFile(filePath, JSON.stringify(obj, null, indent) + '\n', 'utf-8');
+  await writeRegularFile(filePath, JSON.stringify(obj, null, indent) + '\n');
 }
 
 /**
  * Update a nested value in a YAML file using Document API to preserve comments and structure.
  */
 export async function updateYamlFile(filePath: string, keyPath: string, value: unknown): Promise<void> {
-  const content = await readFile(filePath, 'utf-8');
+  const content = (await readRegularFile(filePath)).toString('utf-8');
   const doc = YAML.parseDocument(content);
   const keys = keyPath.split('.');
   doc.setIn(keys, value);
-  await writeFile(filePath, doc.toString(), 'utf-8');
+  await writeRegularFile(filePath, doc.toString());
 }
 
 /** Split a TOML key (`a."b.c".d`) into its segments; undefined when malformed. */
@@ -255,7 +255,7 @@ function editTomlText(content: string, path: string[], value: unknown): string |
  * arrays of tables) fall back to a full smol-toml re-serialization.
  */
 export async function updateTomlFile(filePath: string, keyPath: string, value: unknown): Promise<void> {
-  const content = await readFile(filePath, 'utf-8');
+  const content = (await readRegularFile(filePath)).toString('utf-8');
   const obj = parseTOML(content) as Record<string, unknown>;
   setNestedValue(obj, keyPath, value);
 
@@ -263,7 +263,7 @@ export async function updateTomlFile(filePath: string, keyPath: string, value: u
   if (edited !== undefined) {
     try {
       if (tomlEqual(parseTOML(edited), obj)) {
-        await writeFile(filePath, edited, 'utf-8');
+        await writeRegularFile(filePath, edited);
         return;
       }
     } catch {
@@ -272,14 +272,14 @@ export async function updateTomlFile(filePath: string, keyPath: string, value: u
   }
   const rewritten = stringifyTOML(obj) + '\n';
   parseTOML(rewritten);
-  await writeFile(filePath, rewritten, 'utf-8');
+  await writeRegularFile(filePath, rewritten);
 }
 
 /**
  * Set file permissions (chmod). Only effective on darwin/linux.
  */
 export async function chmodFile(filePath: string, mode: number): Promise<void> {
-  await chmod(filePath, mode);
+  await chmodNoFollow(filePath, mode);
 }
 
 /**
@@ -288,9 +288,9 @@ export async function chmodFile(filePath: string, mode: number): Promise<void> {
  * left alone. Returns whether the mode changed.
  */
 export async function restrictToOwner(filePath: string): Promise<boolean> {
-  const mode = (await stat(filePath)).mode & 0o7777;
+  const { mode } = await regularMode(filePath);
   if ((mode & 0o077) === 0) return false;
-  await chmod(filePath, mode & 0o7700);
+  await chmodNoFollow(filePath, mode & 0o7700);
   return true;
 }
 

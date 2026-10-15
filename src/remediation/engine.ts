@@ -1,7 +1,6 @@
-import { mkdir, copyFile, readFile, writeFile, stat, chmod } from 'node:fs/promises';
+import { mkdir, writeFile, chmod } from 'node:fs/promises';
 import { join, dirname, isAbsolute } from 'node:path';
 import { homedir } from 'node:os';
-import { constants as fsConstants } from 'node:fs';
 import chalk from 'chalk';
 import type { ScanResult, FixResult, AgentScanResult, CheckResult } from '../core/types.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
@@ -9,6 +8,8 @@ import type { CheckRegistry } from '../core/check-registry.js';
 import type { AdapterRegistry } from '../adapters/registry.js';
 import { getAllSkillsDirs, getSkillFiles } from '../core/utils.js';
 import { promptForFix } from './prompt.js';
+import { readRegularFile, regularMode } from './safe-file.js';
+import { sha256, writeManifest, type BackupManifest } from './backup-manifest.js';
 
 export interface FixOptions {
   dryRun?: boolean;
@@ -109,6 +110,7 @@ export class RemediationEngine {
             skillFiles,
           });
 
+          await this.recordAfterState();
           results.push(fixResult);
           const icon = fixResult.applied ? chalk.green('+') : chalk.red('x');
           console.log(`  ${icon} ${finding.id}: ${fixResult.message}`);
@@ -126,30 +128,54 @@ export class RemediationEngine {
     return results;
   }
 
-  /** Files already backed up in this run: the first copy (the original) wins —
-   *  a later fix on the same file must not overwrite it with fixed content. */
-  private backedUp = new Set<string>();
+  /** The run's backup manifest (see backup-manifest.ts); the first backup of a
+   *  path is the original — a later fix on the same file must not replace it. */
+  private manifest: BackupManifest = { version: 1, entries: {} };
 
+  /**
+   * Back up what a fix may touch: a regular file is copied (with its full
+   * mode and hash in the manifest), a directory gets its mode recorded (fixes
+   * chmod directories). A symlink, FIFO or device refuses the backup — and so
+   * the fix: `vaso fix` never writes through a link or blocks on a pipe.
+   * Evidence can name something that is not a path at all (`ps`, a URL).
+   */
   private async backupFile(filePath: string): Promise<void> {
-    // Evidence can name a directory (permission fixes) or something that is
-    // not a path at all (`ps`, an advisory URL); only regular files are copied.
-    // A missing file still fails the backup (and so blocks the fix).
-    if (!isAbsolute(filePath) || this.backedUp.has(filePath)) return;
-    if ((await stat(filePath)).isDirectory()) return;
-    this.backedUp.add(filePath);
-    // Backups keep the originals' modes (rollback restores them), so a copy
-    // of a world-readable .env stays world-readable — the tree must be
-    // owner-only. `mode` applies to every directory mkdir creates; the
-    // backups root may predate this, so it is tightened explicitly.
+    if (!isAbsolute(filePath) || this.manifest.entries[filePath]) return;
+    const { mode, dir } = await regularMode(filePath);
+    await this.ensureBackupDir();
+    if (dir) {
+      this.manifest.entries[filePath] = { kind: 'dir', mode };
+    } else {
+      const content = await readRegularFile(filePath);
+      const destDir = join(this.backupDir, dirname(filePath));
+      await mkdir(destDir, { recursive: true, mode: 0o700 });
+      // Owner-only copy: the original's mode lives in the manifest
+      await writeFile(join(this.backupDir, filePath), content, { mode: 0o600, flag: 'wx' });
+      this.manifest.entries[filePath] = { kind: 'file', mode, before: sha256(content) };
+    }
+    await writeManifest(this.backupDir, this.manifest);
+  }
+
+  /** Hash every backed-up file as the fixes left it, so rollback can tell a later edit from the fix. */
+  private async recordAfterState(): Promise<void> {
+    let changed = false;
+    for (const [path, entry] of Object.entries(this.manifest.entries)) {
+      if (entry.kind !== 'file') continue;
+      const after = await readRegularFile(path).then(sha256, () => undefined);
+      if (after !== entry.after) {
+        entry.after = after;
+        changed = true;
+      }
+    }
+    if (changed) await writeManifest(this.backupDir, this.manifest);
+  }
+
+  private async ensureBackupDir(): Promise<void> {
+    // Backups hold copies of secrets: the tree is owner-only. The backups
+    // root may predate this, so it is tightened explicitly.
     const backupsRoot = dirname(this.backupDir);
     await mkdir(backupsRoot, { recursive: true, mode: 0o700 });
     if (process.platform !== 'win32') await chmod(backupsRoot, 0o700);
-    const destDir = join(this.backupDir, dirname(filePath));
-    await mkdir(destDir, { recursive: true, mode: 0o700 });
-    // COPYFILE_EXCL: the first copy is the original; a later fix in the same
-    // run must not replace it with an already-fixed file.
-    await copyFile(filePath, join(this.backupDir, filePath), fsConstants.COPYFILE_EXCL).catch((err: NodeJS.ErrnoException) => {
-      if (err.code !== 'EEXIST') throw err;
-    });
+    await mkdir(this.backupDir, { recursive: true, mode: 0o700 });
   }
 }
