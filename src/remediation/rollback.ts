@@ -121,7 +121,11 @@ async function restoreFile(backupPath: string, originalPath: string, entry: Mani
   }
   const original = await readFile(backupPath);
   const mode = entry?.mode ?? ((await stat(backupPath)).mode & 0o7777);
-  if (current) {
+  if (current && entry?.after !== undefined && entry.after === entry.before) {
+    // The fix run never changed this file's content (it was backed up as a
+    // precaution, or only chmod-ed): there is no content to restore, and an
+    // edit made since is the user's — keep it and restore just the mode
+  } else if (current) {
     const now = await readRegularFile(originalPath).then(sha256, () => undefined);
     if (entry?.after && now !== undefined && now !== entry.after && now !== entry.before) {
       return 'it was changed after the fix';

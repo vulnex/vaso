@@ -129,6 +129,20 @@ describe('fix + rollback (real files)', () => {
     expect(process.exitCode).toBe(2);
   });
 
+  it('does not block on a file the fix never changed, edited since', async () => {
+    const fixed = join(home.dir, 'openclaw.json');
+    const untouched = join(home.dir, '.env');
+    await writeFile(fixed, '{"a":1}\n');
+    await writeFile(untouched, 'A=1\n');
+    // the fix edits one file; the other is only backed up (it is in the evidence)
+    await runFix(fixed, p => writeRegularFile(p, '{"a":2}\n'), [fixed, untouched]);
+    await writeFile(untouched, 'A=1\nB=2\n'); // the user's later edit
+    await rollback();
+    expect(await readFile(fixed, 'utf-8')).toBe('{"a":1}\n');
+    expect(await readFile(untouched, 'utf-8')).toBe('A=1\nB=2\n');
+    expect(process.exitCode).toBeUndefined();
+  });
+
   it.skipIf(!posix)('never writes through a symlink that replaced the original', async () => {
     const f = join(home.dir, 'settings.json');
     const canary = join(home.dir, 'canary.txt');
