@@ -374,9 +374,20 @@ function analyze(code: string): TaintedSink[] {
       return undefined;
     };
 
-    /** First tool-input origin among a local function's return values. */
+    /** First tool-input origin among a local function's return values.
+     *  Memoized per function: recomputing it at every call site was
+     *  exponential in call depth (a 1 KB file of nested helpers stalled a scan). */
+    const returnMemo = new Map<Node, string | null>();
     const returnOrigin = (fn: NodePath, depth: number): string | undefined => {
       if (depth >= MAX_DEPTH) return undefined;
+      const known = returnMemo.get(fn.node);
+      if (known !== undefined) return known ?? undefined;
+      returnMemo.set(fn.node, null); // recursion through itself carries nothing new
+      const origin = computeReturnOrigin(fn, depth);
+      returnMemo.set(fn.node, origin ?? null);
+      return origin;
+    };
+    const computeReturnOrigin = (fn: NodePath, depth: number): string | undefined => {
       const name = (fn.node as { id?: { name?: string } }).id?.name ?? 'function';
       if (fn.isArrowFunctionExpression() && !fn.get('body').isBlockStatement()) {
         const from = expressionOrigin(fn.get('body') as NodePath, depth + 1);

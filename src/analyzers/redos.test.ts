@@ -46,3 +46,13 @@ describe('dt13 perf: linear on adversarial input', () => {
     expect(maskCredentialsInText('see https://user:hunter22@example.com/x')).not.toContain('hunter22');
   });
 });
+
+describe('dt14 perf: tool-input tracing is linear in call depth', () => {
+  it('nested local helpers, each calling the previous one ten times', async () => {
+    const { findTaintedSinks } = await import('./tool-input-taint.js');
+    const fns = ['function f0(x) { return x; }'];
+    for (let i = 1; i <= 9; i++) fns.push(`function f${i}(x) { return ${Array.from({ length: 10 }, () => `f${i - 1}(x)`).join(' + ')}; }`);
+    const code = `${fns.join('\n')}\nserver.tool('t', {}, async ({ cmd }) => { require('child_process').exec(f9(cmd)); });\n`;
+    expect(timed(() => findTaintedSinks(code, 'nested.js'))).toBeLessThan(2000);
+  });
+});

@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import _traverse from '@babel/traverse';
 import type { Node } from '@babel/types';
+import type { NodePath } from '@babel/traverse';
 import { mayBeJavaScript, parseLenientReport, recordedEvasion, sourceChunks, type JsAst } from './js-parse.js';
 import { sinkCallee } from './tool-input-taint.js';
 
@@ -208,7 +209,16 @@ function analyzeUncached(code: string): DataFlowResult[] {
   // goes to that remote endpoint, unlike a server socket answering its client
   const clientSockets = new Set<string>();
   // Variables holding the whole environment (`const e = process.env`, `{ ...process.env }`)
+  // Variables holding the whole environment, by binding: minified code reuses
+  // short names, and a parameter `t` in one function is not the `process.env`
+  // copy `t` in another. Names only for unbound (global) assignments.
   const wholeEnvVars = new Set<string>();
+  const wholeEnvBindings = new Set<object>();
+  const wholeEnvAt = (p: NodePath, v: string): boolean => {
+    if (v === 'process.env') return true;
+    const binding = p.scope.getBinding(v);
+    return binding ? wholeEnvBindings.has(binding) : wholeEnvVars.has(v);
+  };
   const requestBody = (args: Node[], sinkName: string): string => {
     const text = (n: Node | undefined) => (n ? code.slice(n.start ?? 0, n.end ?? 0) : '');
     const parts: string[] = [];
@@ -272,7 +282,9 @@ function analyzeUncached(code: string): DataFlowResult[] {
             // environment value: `execFile('curl', ['-d', JSON.stringify(process.env), url])`
             // argv only: an options object (`{ env: process.env, cwd }`) configures
             // the child, it isn't data the child receives
-            const args = (node.arguments as Node[]).filter(a => a.type !== 'ObjectExpression');
+            // (and a callback isn't argv either)
+            const args = (node.arguments as Node[]).filter(a =>
+              a.type !== 'ObjectExpression' && a.type !== 'FunctionExpression' && a.type !== 'ArrowFunctionExpression');
             const first = args[0];
             const program = first?.type === 'StringLiteral' ? first.value
               : first?.type === 'Identifier' ? constStrings.get(first.name) : undefined;
@@ -280,18 +292,21 @@ function analyzeUncached(code: string): DataFlowResult[] {
             const pairs = inlineSources(args, name, network);
             // Variables only for a bare call: member calls (`cp.exec(x)`) are
             // matched against tracked variables in the sink branch below
-            const argStr = args.length > 0 ? code.slice(args[0].start ?? 0, args[args.length - 1].end ?? 0) : '';
+            // Each argument's own text: a span from first to last argument took
+            // in an options object between them (`execFile(p, argv, {env}, cb)`)
+            const argStr = args.map(a => code.slice(a.start ?? 0, a.end ?? 0)).join(' ');
             if (node.callee.type === 'Identifier') {
               for (const [v, kind] of sourceVars) {
-                if ((kind === 'file' || network || v === 'process.env' || wholeEnvVars.has(v)) && mentions(argStr, v) && !pairs.some(([n]) => n === v)) pairs.push([v, kind]);
+                if ((kind === 'file' || network || wholeEnvAt(path, v)) && mentions(argStr, v) && !pairs.some(([n]) => n === v)) pairs.push([v, kind]);
               }
             }
             for (const [sourceVar, sourceKind] of pairs) {
-              if (sourceKind === 'env' && sourceVar !== 'process.env' && !wholeEnvVars.has(sourceVar) && !network) continue;
+              if (sourceKind === 'env' && !wholeEnvAt(path, sourceVar) && !network) continue;
               results.push({
                 type: 'source-to-sink',
                 source: sourceVar,
                 sourceKind,
+                ...(sourceKind === 'env' && wholeEnvAt(path, sourceVar) ? { wholeEnv: true } : {}),
                 sink: name,
                 line,
                 snippet: snippet.slice(0, 120),
@@ -386,6 +401,7 @@ function analyzeUncached(code: string): DataFlowResult[] {
                   type: 'source-to-sink',
                   source: sourceVar,
                   sourceKind,
+                  ...(sourceKind === 'env' && wholeEnvAt(path, sourceVar) ? { wholeEnv: true } : {}),
                   sink: propName,
                   ...(sinkObject ? { sinkObject } : {}),
                   ...(socketClient ? { socketClient } : {}),
@@ -460,6 +476,7 @@ function analyzeUncached(code: string): DataFlowResult[] {
                   type: 'source-to-sink',
                   source: sourceVar,
                   sourceKind,
+                  ...(sourceKind === 'env' && wholeEnvAt(path, sourceVar) ? { wholeEnv: true } : {}),
                   sink: 'fetch',
                   line,
                   snippet: snippet.slice(0, 120),
@@ -489,7 +506,9 @@ function analyzeUncached(code: string): DataFlowResult[] {
           || /^(?:JSON\.stringify|Object\.assign|Object\.entries|structuredClone)\s*\(/.test(initText);
         if (copies && /(?<![\w$])(?<!(?:^|[^.])\.)process\.env(?![\w$]|\s*(?:\.|\[|\?\.))/.test(initText)) {
           sourceVars.set(id.name, 'env');
-          wholeEnvVars.add(id.name);
+          const binding = path.scope.getBinding(id.name);
+          if (binding) wholeEnvBindings.add(binding);
+          else wholeEnvVars.add(id.name);
         }
 
         // Track process.env.X assignments
@@ -537,7 +556,7 @@ function analyzeUncached(code: string): DataFlowResult[] {
   }
 
   for (const r of results) {
-    if (r.type === 'source-to-sink' && r.sourceKind === 'env' && (r.source === 'process.env' || wholeEnvVars.has(r.source ?? ''))) r.wholeEnv = true;
+    if (r.type === 'source-to-sink' && r.sourceKind === 'env' && r.source === 'process.env') r.wholeEnv = true;
   }
   return results;
 }
