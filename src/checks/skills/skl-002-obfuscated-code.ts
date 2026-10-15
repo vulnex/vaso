@@ -5,6 +5,7 @@ import { OBFUSCATION_PATTERNS, isBenignEncodedData } from '../../analyzers/obfus
 import { OVER_LIMIT_DETAIL, ScanLimitError } from '../../core/file-limits.js';
 import { readSkillText, skillFilesOf, skillsDirsOf } from './skill-files.js';
 import { markTestCode } from '../../analyzers/test-paths.js';
+import { ANALYSIS_NESTING_LIMIT, overNestedLines } from '../../analyzers/js-parse.js';
 
 export const skl002 = defineCheck({
   id: 'SKL-002',
@@ -57,6 +58,18 @@ export const skl002 = defineCheck({
               }
             }
           }
+        }
+
+        // Nesting past what the parser survives hides the file from the AST checks
+        const deep = overNestedLines(code)[0];
+        if (deep !== undefined) {
+          const text = lines[deep - 1].trim();
+          evidence.push({
+            file,
+            line: deep,
+            snippet: text.slice(0, 80) + (text.length > 80 ? '...' : ''),
+            detail: `Brackets nested more than ${ANALYSIS_NESTING_LIMIT} levels deep — enough to crash code analysis; the over-nested lines are skipped by the other skill checks`,
+          });
         }
       } catch (err) {
         // Padding a file past the size limit hides it from every content

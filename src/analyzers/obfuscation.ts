@@ -26,7 +26,9 @@ export interface ObfuscationPattern {
 export const OBFUSCATION_PATTERNS: ObfuscationPattern[] = [
   { pattern: /(\\x[0-9a-fA-F]{2}){6,}/, label: 'Hex escape sequence chain' },
   { pattern: /[A-Za-z0-9+/]{60,}={0,2}/, label: 'Long base64-encoded string' },
-  { pattern: /String\.fromCharCode\s*\([\s\S]*?,[\s\S]*?,/, label: 'String.fromCharCode with multiple args' },
+  // Bounded argument spans: a lazy [\s\S]*? rescanned the rest of the line from
+  // every call, quadratic on a multi-megabyte line of them
+  { pattern: /String\.fromCharCode\s*\(\s*[^,()]{0,100},\s*[^,()]{0,100},/, label: 'String.fromCharCode with multiple args' },
   { pattern: /\batob\s*\(/, label: 'atob() decoding' },
 ];
 

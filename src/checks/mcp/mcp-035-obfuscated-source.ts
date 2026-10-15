@@ -1,6 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { analyzeObfuscation } from '../../analyzers/obfuscation.js';
+import { ANALYSIS_NESTING_LIMIT, overNestedLines } from '../../analyzers/js-parse.js';
 import type { RevealedStrings } from '../../analyzers/obfuscation.js';
 import { analyzeStringTable } from '../../mcp/string-table.js';
 
@@ -38,6 +39,7 @@ export const mcp035 = defineCheck({
   async run(ctx, h) {
     const evidence: Evidence[] = [];
     let sawStringTable = false;
+    let sawDeepNesting = false;
 
     for (const source of ctx.mcpServerSources ?? []) {
       if (!source.sourceCode) continue;
@@ -48,9 +50,22 @@ export const mcp035 = defineCheck({
       // Python decoders included, and `atob` beside a few base64-shaped
       // identifiers no longer counts.
       const table = analyzeStringTable(source.sourceCode);
-      if (!table.confirmed && report.tier === 'none') continue;
-
       const file = source.localPath ?? source.packageName ?? source.serverName;
+
+      // Nesting past what the parser survives hides the code from MCP-004/005/006
+      const deep = overNestedLines(source.sourceCode)[0];
+      if (deep !== undefined) {
+        sawDeepNesting = true;
+        const text = source.sourceCode.split('\n')[deep - 1]?.trim() ?? '';
+        evidence.push({
+          file,
+          line: deep,
+          snippet: text.slice(0, 80) + (text.length > 80 ? '...' : ''),
+          detail: `Brackets nested more than ${ANALYSIS_NESTING_LIMIT} levels deep — enough to crash code analysis; the over-nested lines are skipped by the other MCP source checks`,
+        });
+      }
+
+      if (!table.confirmed && report.tier === 'none') continue;
 
       if (table.confirmed) {
         sawStringTable = true;
@@ -87,7 +102,7 @@ export const mcp035 = defineCheck({
     return h.fromEvidence(evidence, {
       passed: 'No obfuscated/encoded MCP server source detected',
       failed: (n) => `Found ${n} obfuscation indicator(s) in MCP server source`,
-      severity: sawStringTable ? 'warning' : 'info',
+      severity: sawStringTable || sawDeepNesting ? 'warning' : 'info',
       fixDescription:
         'Ship MCP server source in clear text; do not decode tables of base64/hex literals at runtime — encoding hides the server’s real behavior (endpoints, secrets, commands) from review',
     });

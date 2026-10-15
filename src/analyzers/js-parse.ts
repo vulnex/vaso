@@ -21,19 +21,86 @@ export function parseJs(code: string): JsAst | undefined {
     cache.set(key, hit);
     return hit ?? undefined;
   }
-  let ast: JsAst | null;
-  try {
-    ast = parse(code, {
-      sourceType: 'unambiguous',
-      plugins: ['typescript', 'jsx', 'decorators'],
-      errorRecovery: true,
-    });
-  } catch {
-    ast = null;
-  }
+  const ast = parseLenient(code) ?? null;
   if (cache.size >= MAX_CACHED_ASTS) cache.delete(cache.keys().next().value!);
   cache.set(key, ast);
   return ast ?? undefined;
+}
+
+function babelParse(code: string): JsAst {
+  return parse(code, {
+    sourceType: 'unambiguous',
+    plugins: ['typescript', 'jsx', 'decorators'],
+    errorRecovery: true,
+  });
+}
+
+/**
+ * Babel's parser recurses once per bracket level and overflows Node's stack
+ * at around 250 levels — a kilobyte of `[[[…]]]` that runs fine made the
+ * whole file unparseable, so every AST check saw nothing in it. When that
+ * happens the over-nested lines are blanked (line numbers kept) and the rest
+ * parsed; SKL-002/MCP-035 report the nesting itself (`overNestedLines`).
+ */
+export function parseLenient(code: string): JsAst | undefined {
+  try {
+    return babelParse(code);
+  } catch (err) {
+    if (!(err instanceof RangeError)) return undefined;
+  }
+  const blank = new Set(overNestedLines(code));
+  if (blank.size === 0) return undefined;
+  try {
+    return babelParse(code.split('\n').map((line, i) => (blank.has(i + 1) ? '' : line)).join('\n'));
+  } catch {
+    return undefined;
+  }
+}
+
+/** Bracket depth past which code is treated as built to defeat analysis (Babel overflows near 250). */
+export const ANALYSIS_NESTING_LIMIT = 200;
+
+/**
+ * 1-based lines where `(`/`[`/`{` nesting exceeds `limit`. A single pass that
+ * skips string, template and comment contents; regex literals aren't
+ * recognized, which only matters for brackets inside them.
+ */
+export function overNestedLines(code: string, limit = ANALYSIS_NESTING_LIMIT): number[] {
+  const out: number[] = [];
+  let depth = 0;
+  let line = 1;
+  let flagged = false;
+  let quote = '';
+  let comment: '' | 'line' | 'block' = '';
+  for (let i = 0; i < code.length; i++) {
+    const c = code[i];
+    if (c === '\n') {
+      line++;
+      flagged = false;
+      if (comment === 'line') comment = '';
+      if (quote === "'" || quote === '"') quote = '';
+      continue;
+    }
+    if (comment === 'line') continue;
+    if (comment === 'block') {
+      if (c === '*' && code[i + 1] === '/') { comment = ''; i++; }
+      continue;
+    }
+    if (quote) {
+      if (c === '\\') i++;
+      else if (c === quote) quote = '';
+      continue;
+    }
+    if (c === '/' && code[i + 1] === '/') { comment = 'line'; i++; continue; }
+    if (c === '/' && code[i + 1] === '*') { comment = 'block'; i++; continue; }
+    if (c === "'" || c === '"' || c === '`') { quote = c; continue; }
+    if (c === '(' || c === '[' || c === '{') {
+      if (++depth > limit && !flagged) { out.push(line); flagged = true; }
+    } else if ((c === ')' || c === ']' || c === '}') && depth > 0) {
+      depth--;
+    }
+  }
+  return out;
 }
 
 export interface SourceChunk {

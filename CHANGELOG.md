@@ -12,6 +12,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - **Rollback is exact.** Each backup records a manifest (full mode including setuid/setgid, content hash before and after the fix, the modes of directories a fix may chmod). Rollback restores file and directory modes exactly, restores read-only files, and leaves alone a file edited after the fix (reported, exit 2) instead of discarding the edit. Backups from older versions still restore.
 - **A root scan never runs another user's binaries as root.** Under `--all-users` as root and in a probe run with `--sudo`, an agent CLI owned by a user is version-queried as that user, a root-owned one only when no other user could have replaced it or a directory above it, and the PATH it gets keeps only root-safe directories; the probe resolves system directories before user ones when it runs as root (probe ≥ 1.3.1).
 - **Version queries run in a minimal environment.** Relocation variables such as `CODEX_HOME` or `CLAUDE_CONFIG_DIR` no longer reach an isolated version query (they pointed the CLI back at the user's real state directory), and the throwaway HOME falls back to `/tmp` when `TMPDIR` is unusable.
+- **Deeply nested code no longer hides a skill or MCP server from code analysis.** About a kilobyte of nested brackets (`[[[…]]]`, valid JavaScript) overflowed the parser, the file was skipped, and its critical findings (SKL-001/003, MCP-004/005) disappeared. The over-nested lines are now set aside and the rest of the file analysed, and SKL-002 / MCP-035 report nesting past 200 levels as a warning.
 
 ### Fixed
 
@@ -19,6 +20,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - **The fix summary says what happened**: applied, already in place, skipped (or would be applied, with `--dry-run`) and not applied are counted separately, and `vaso fix` exits 1 when a fix failed.
 - **Every adapter reports an unreadable or unparseable config as CONFIG-LOAD.** The 1.3.0 change covered only some agents; the rest (Gemini CLI, Qwen Code, Devin, Abacus, OpenCode, Atomic Agent, Hermes, IronClaw, PicoClaw, ZeroClaw, Nanobot, NemoClaw, NanoClaw, OpenShell, Copilot CLI) still dropped a config behind a chmod-000 directory and scored the install clean. `.jsonc` and `.json5` files load as JSON. A config directory that can't be searched is one CONFIG-LOAD finding for the directory instead of one per file name tried in it.
 - **Remote scans match local ones for unreadable files and directories.** The probe marks a file it can stat but not open as present and denied (so its mode is still checked), and records a directory it can't list (a mode-000 browser profile was missing remotely, so Perplexity Comet went undetected); the snapshot reader raises the same permission error a local read does (probe ≥ 1.3.1).
+- SKL-002/MCP-035's `String.fromCharCode` pattern ran in quadratic time on a long line (two minutes on a 4 MB line); its argument spans are now bounded.
 
 ## [1.3.0] - 2026-10-15
 

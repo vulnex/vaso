@@ -1,8 +1,7 @@
 import { createHash } from 'node:crypto';
-import { parse } from '@babel/parser';
 import _traverse from '@babel/traverse';
 import type { Node } from '@babel/types';
-import { sourceChunks } from './js-parse.js';
+import { parseLenient, sourceChunks, type JsAst } from './js-parse.js';
 import { sinkCallee } from './tool-input-taint.js';
 
 // Handle ESM/CJS interop
@@ -92,21 +91,15 @@ export function analyzeCode(code: string, filename = 'unknown.js'): DataFlowResu
 
 function analyzeUncached(code: string): DataFlowResult[] {
   const results: DataFlowResult[] = [];
-  let ast: ReturnType<typeof parse>;
+  let ast: JsAst;
   // Split once: re-splitting the file per call expression made analysis
   // quadratic in file size.
   let lines: string[] | undefined;
   const lineText = (line: number): string => (lines ??= code.split('\n'))[line - 1]?.trim() ?? '';
 
-  try {
-    ast = parse(code, {
-      sourceType: 'unambiguous',
-      plugins: ['typescript', 'jsx', 'decorators'],
-      errorRecovery: true,
-    });
-  } catch {
-    return results;
-  }
+  const parsed = parseLenient(code);
+  if (!parsed) return results;
+  ast = parsed;
 
   // Variable → what it holds. Matched in sink arguments as a whole identifier:
   // a substring test made a minified `o` match every `output`.
