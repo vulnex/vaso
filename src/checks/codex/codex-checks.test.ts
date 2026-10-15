@@ -520,7 +520,7 @@ describe('CDX-003 fix', () => {
     const check = codexChecks.find(c => c.id === 'CDX-003')!;
     const ctx = makeCtx([]);
     ctx.installation = { ...ctx.installation, installDir: dir };
-    expect((await check.run({ ...ctx, fs: makeFs({ stat: vi.fn(async () => ({ mode: 0o100644, isFile: () => true, isDirectory: () => false })) }) })).fixable).toBe(true);
+    expect((await check.run({ ...ctx, fs: makeFs({ stat: vi.fn(async (p: string) => (p.endsWith('auth.json') ? { mode: 0o100644, isFile: () => true, isDirectory: () => false } : { mode: 0o40755, isFile: () => false, isDirectory: () => true })) }) })).fixable).toBe(true);
     const r = await check.fix!(ctx);
     expect(r.applied).toBe(true);
     expect(statSync(join(dir, 'auth.json')).mode & 0o777).toBe(0o600);

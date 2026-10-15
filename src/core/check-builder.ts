@@ -81,13 +81,16 @@ export function defineCheck(args: DefineCheckArgs): CheckModule {
       };
     },
     fromEvidence(evidence, opts) {
+      // Every finding mitigated (blocked by parent-directory permissions, test
+      // code, an untrusted project…) → informational, and nothing for
+      // `vaso fix` to do: a fix is offered only for live exposure
+      const allMitigated = evidence.length > 0 && evidence.every(e => e.mitigated);
       return helpers.result({
         passed: evidence.length === 0,
         message: evidence.length === 0 ? opts.passed : opts.failed(evidence.length),
         evidence,
-        // Every finding blocked by parent-directory permissions → informational
-        severity: evidence.length > 0 && evidence.every(e => e.mitigated) ? 'info' : opts.severity,
-        fixable: opts.fixable,
+        severity: allMitigated ? 'info' : opts.severity,
+        fixable: opts.fixable && !allMitigated,
         fixDescription: opts.fixDescription,
       });
     },

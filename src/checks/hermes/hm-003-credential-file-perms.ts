@@ -65,7 +65,7 @@ export const hm003 = defineCheck({
     return h.fromEvidence(evidence, {
       passed: 'Hermes credential files have restricted permissions',
       failed: (n) => `Found ${n} Hermes credential file(s) with over-permissive mode`,
-      fixable: evidence.some(e => !e.mitigated),
+      fixable: true,
       fixDescription: 'Remove group/other access from ~/.hermes/credentials.json, auth.json and mcp-tokens/*.json (whichever exist)',
     });
   },

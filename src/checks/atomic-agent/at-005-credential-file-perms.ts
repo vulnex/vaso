@@ -41,7 +41,7 @@ export const at005 = defineCheck({
     return h.fromEvidence(evidence, {
       passed: 'Atomic Agent credential files are owner-only',
       failed: (n) => `${n} Atomic Agent credential file(s) readable beyond the owner — restrict to 0600`,
-      fixable: evidence.some(e => !e.mitigated),
+      fixable: true,
       fixDescription: 'Remove group/other access from ~/.atomic-agent/.env and ~/.atomic-agent/atomic-mail/session.json',
     });
   },

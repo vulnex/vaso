@@ -159,3 +159,24 @@ describe('defineCheck', () => {
     expect((await withFix.run(minimalCtx)).fixable).toBe(true);
   });
 });
+
+describe('fromEvidence fixable rule', () => {
+  const check = (evidence: Evidence[]) => defineCheck({
+    id: 'TST-FIX', name: 't', category: 'config', severity: 'warning', description: 't',
+    async run(_ctx, h) { return h.fromEvidence(evidence, { passed: 'ok', failed: n => `${n}`, fixable: true }); },
+    async fix() { return { checkId: 'TST-FIX', applied: true, message: 'x' }; },
+  });
+  const ctx = {} as ScanContext;
+
+  it('offers the fix while any evidence is live', async () => {
+    const r = await check([{ file: '/a', mitigated: true }, { file: '/b' }]).run(ctx);
+    expect(r.fixable).toBe(true);
+    expect(r.severity).toBe('warning');
+  });
+
+  it('offers no fix when every finding is mitigated (nothing exposed)', async () => {
+    const r = await check([{ file: '/a', mitigated: true }]).run(ctx);
+    expect(r.fixable).toBe(false);
+    expect(r.severity).toBe('info');
+  });
+});
