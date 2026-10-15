@@ -2093,7 +2093,7 @@ const reveal = (i) => atob(T[i]);`;
 
   it('reports info severity for encoded data with no runtime decoder', async () => {
     // A single long base64 blob, no decode call — suspicious but unconfirmed.
-    const code = `const EMBEDDED = "${'A'.repeat(80)}";
+    const code = `const EMBEDDED = "${Buffer.from('some embedded configuration payload that is long enough to matter').toString('base64')}";
 export function noop() { return EMBEDDED.length; }`;
     const result = await mcp035.run(makeContext({ mcpServerSources: [src('blob', code)] }));
     expect(result.passed).toBe(false);

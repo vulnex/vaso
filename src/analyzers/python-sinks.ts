@@ -33,6 +33,11 @@ export interface PythonSinkFinding {
   toolInput?: string;
 }
 
+/** `text` with string-literal contents replaced by spaces (same length, quotes kept). */
+function blankStrings(text: string): string {
+  return text.replace(/(["'])(?:\\.|(?!\1|\\).)*\1/g, (m) => m[0] + ' '.repeat(m.length - 2) + m[m.length - 1]);
+}
+
 const EXEC_SINKS: Array<{ re: RegExp; name: (m: RegExpMatchArray) => string }> = [
   // Not a definition of a function or method named eval/exec (`def eval(self, node)`)
   { re: /(?<![\w.])(?<!\bdef\s+)(eval|exec)\s*\(/, name: (m) => m[1] },
@@ -389,7 +394,8 @@ export function analyzePythonSinks(code: string): PythonSinkFinding[] {
   stmts.forEach((stmt, i) => {
     const text = rewrite(stmt.text);
     for (const { re, name } of EXEC_SINKS) {
-      const m = re.exec(text);
+      // Matched on code only: `"eval": "eval() has…"` is a string, not a call
+      const m = re.exec(blankStrings(text));
       if (!m) continue;
       const sink = name(m);
       const args = callArgs(text, (m.index ?? 0) + m[0].length - 1);
@@ -458,6 +464,8 @@ export interface PythonCapability {
   dynamic?: boolean;
 }
 
+/** Client/connection constructors among NETWORK_CALLS: they open nothing and send nothing. */
+const CLIENT_CONSTRUCTORS = /^(?:Client|AsyncClient|Session|ClientSession|PoolManager|ProxyManager|HTTPConnection|HTTPSConnection|SSHClient|FTP|FTP_TLS|SMTP|SMTP_SSL|socket|create_connection)$/;
 const NETWORK_CALLS = /\b(?:requests|httpx|aiohttp|urllib\.request|urllib3|http\.client|socket|ftplib|smtplib|paramiko)\s*\.\s*(\w+)\s*\(|\burlopen\s*\(|\bClientSession\s*\(|\bcreate_connection\s*\(/;
 const FILE_READS = /\bopen\s*\([^)]*\)|\.read_(?:text|bytes)\s*\(|\bshutil\.copy\w*\s*\(/;
 
@@ -474,7 +482,8 @@ export function analyzePythonCapabilities(code: string): PythonCapability[] {
     const text = rewrite(stmt.text);
     const snippet = lines.find((l) => l.line === stmt.line)!.text.trim().slice(0, 120);
     for (const { re, name } of EXEC_SINKS) {
-      const m = re.exec(text);
+      // Matched on code only: `"eval": "eval() has…"` is a string, not a call
+      const m = re.exec(blankStrings(text));
       if (!m) continue;
       const sink = name(m);
       const { dynamic } = commandOf(callArgs(text, (m.index ?? 0) + m[0].length - 1));
@@ -570,7 +579,8 @@ export function analyzePythonDataFlow(code: string): DataFlowResult[] {
     const local = scopeOf(enclosing.at(-1));
 
     for (const { re, name } of EXEC_SINKS) {
-      const m = re.exec(text);
+      // Matched on code only: `"eval": "eval() has…"` is a string, not a call
+      const m = re.exec(blankStrings(text));
       if (!m) continue;
       const args = callArgs(text, (m.index ?? 0) + m[0].length - 1);
       const sink = name(m);
@@ -609,7 +619,9 @@ export function analyzePythonDataFlow(code: string): DataFlowResult[] {
     }
 
     const net = NETWORK_CALLS.exec(text);
-    if (net) {
+    // Building a client or connection (`httpx.Client(base_url=url)`) sends nothing
+    const constructs = net !== null && CLIENT_CONSTRUCTORS.test(net[1] ?? (/\w+/.exec(net[0])?.[0] ?? ''));
+    if (net && !constructs) {
       const { positional, keywords } = splitArgs(callArgs(text, text.indexOf('(', net.index)));
       const all = [...positional, ...keywords.values()].join(',');
       // A request body, or the payload of a raw socket send

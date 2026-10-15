@@ -147,11 +147,32 @@ export function isBenignEncodedData(line: string): boolean {
   const runs = line.match(LONG_RUN) ?? [];
   // Hex digests / client IDs, and file paths (`node_modules/ajv/dist/…`):
   // every `/`-separated piece an ordinary word.
-  const isPath = (run: string) => run.split('/').filter(Boolean).length >= 3 &&
-    run.split('/').filter(Boolean).every((part) => /^[A-Za-z][a-z0-9]*(?:[A-Z][a-z0-9]*)*$/.test(part));
   // `0x`-prefixed too: hashes, Ethereum addresses, transaction ids
   const isHexDigest = (run: string) => /^(?:0x)?[0-9a-f]+$/i.test(run) && /\d/.test(run) && /[a-f]/i.test(run);
-  return runs.length > 0 && runs.every((run) => isHexDigest(run) || isPath(run));
+  // A path piece may be a commit SHA (`raw.githubusercontent.com/o/r/2fff013a…/x`)
+  const isPath = (run: string) => run.split('/').filter(Boolean).length >= 3 &&
+    run.split('/').filter(Boolean).every((part) => /^[A-Za-z][a-z0-9]*(?:[A-Z][a-z0-9]*)*$/.test(part) || (part.length >= 7 && isHexDigest(part)));
+  // Encoded data mixes cases; one case throughout is a constant, a protein or DNA sequence
+  const isSingleCase = (run: string) => !/[a-z]/.test(run) || !/[A-Z]/.test(run);
+  // An identifier made of words (`SageMakerInferenceComponentConcurrentRequests…`)
+  const isWords = (run: string) => /^[A-Z]?[a-z]+(?:\d+[A-Z]?[a-z]+|[A-Z][a-z]+)*\d*$/.test(run);
+  return runs.length > 0 && runs.every((run) => isHexDigest(run) || isPath(run) || isSingleCase(run) || isWords(run));
+}
+
+const HEX_CHAIN = /(?:\\x[0-9a-fA-F]{2}){6,}/g;
+
+/**
+ * A line whose `\x..` escape chains are binary data — mostly unprintable
+ * bytes (a PNG header in a bytes literal) — not text hidden as escapes
+ * (`"\x68\x74\x74\x70…"` spells "http").
+ */
+export function isBinaryHexEscapes(line: string): boolean {
+  const chains = line.match(HEX_CHAIN) ?? [];
+  return chains.length > 0 && chains.every((chain) => {
+    const bytes = chain.split('\\x').filter(Boolean).map((h) => parseInt(h, 16));
+    const printable = bytes.filter((b) => b >= 0x20 && b < 0x7f).length;
+    return printable / bytes.length < 0.5;
+  });
 }
 
 function isComment(line: string): boolean {
@@ -182,6 +203,7 @@ export function analyzeObfuscation(code: string): ObfuscationReport {
     for (const { pattern, label } of OBFUSCATION_PATTERNS) {
       if (pattern.test(line)) {
         if (label === 'Long base64-encoded string' && isBenignEncodedData(line)) break;
+        if (label === 'Hex escape sequence chain' && isBinaryHexEscapes(line)) break;
         const trimmed = line.trim();
         hits.push({
           line: i + 1,

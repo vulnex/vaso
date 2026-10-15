@@ -1,0 +1,10 @@
+{
+  "agent": "claude-code",
+  "source": "dt13 realworld2: eval() named in a string, an HTTP client built from config, an audit hook blocking socket/subprocess, and ordinary data (identifier, protein sequence, PNG bytes, commit SHA in a URL) are not findings",
+  "pass": [
+    "SKL-001",
+    "SKL-003",
+    "SKL-005",
+    "SKL-002"
+  ]
+}

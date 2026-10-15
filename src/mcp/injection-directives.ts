@@ -34,7 +34,8 @@ export const DIRECTIVE_PATTERNS: DirectivePattern[] = [
   { re: /\bnever\s+(?:mention|tell|inform|reveal|disclose|notify|show)\s+(?:this\s+|it\s+)?(?:to\s+)?(?:the\s+)?user\b/i, label: 'concealment directive ("never tell the user")' },
   { re: /\b(?:keep|hide)\s+(?:it|this|that|these)\s+(?:secret|hidden|private)\s+from\s+(?:the\s+)?user\b/i, label: 'concealment directive ("keep it secret from the user")' },
   // Followed by text: a bare "System:" label in a prompt builder is not a spoofed turn.
-  { re: /(?:^|[.!?]\s+|\n)\s*(?:system|assistant|developer)\s*:\s*\S/i, label: 'role-spoofing prefix ("system:" / "assistant:")' },
+  // A template placeholder after it (`System: {uname_sysname}`) is a label for a value.
+  { re: /(?:^|[.!?]\s+|\n)\s*(?:system|assistant|developer)\s*:\s*(?![{$%<])\S/i, label: 'role-spoofing prefix ("system:" / "assistant:")' },
   { re: /\[\s*(?:system|admin|important|developer)\s+(?:instruction|prompt|note|message)\b/i, label: 'injected-instruction marker ("[SYSTEM INSTRUCTION…]")' },
   // Role + instruction-noun lead-in ("Assistant instruction", "developer directive") — the
   // role-spoofing prefix above only fires when the role word is immediately followed by a

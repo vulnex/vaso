@@ -1,0 +1,8 @@
+{
+  "agent": "mcp",
+  "source": "dt13 realworld2: Python annotations, internal docstrings and an environment template are not hardcoded directives (semgrep-mcp, ida-pro-mcp, jupyter-mcp-server, wcgw shapes)",
+  "mcpConfig": "mcp.json",
+  "pass": [
+    "MCP-034"
+  ]
+}

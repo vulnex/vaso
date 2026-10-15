@@ -79,3 +79,58 @@ export function stringLines(code: string): StringLine[] | undefined {
   }
   return parsedAny ? out : undefined;
 }
+
+/**
+ * String-literal contents of Python source, one entry per physical line, the
+ * way `stringLines` reads JavaScript: an annotation (`instructions:
+ * Annotated[str, …]`) or a name (`assistant: Assistant | None`) is code, not
+ * text the server returns. A triple-quoted string in statement position — a
+ * docstring — is marked `description`: it documents code (a tool's docstring
+ * is its description, MCP-024's). Prefixes (r/b/f/u) are understood;
+ * f-string `{…}` stays in the text. A single non-recursive pass.
+ */
+export function pythonStringLines(code: string): StringLine[] {
+  const out: StringLine[] = [];
+  let line = 1;
+  let i = 0;
+  let lineStart = true; // only whitespace so far on this logical line
+  while (i < code.length) {
+    const c = code[i];
+    if (c === '\n') { line++; lineStart = true; i++; continue; }
+    if (c === '#') { while (i < code.length && code[i] !== '\n') i++; continue; }
+    const prefix = /^[rRbBuUfF]{0,2}(?=["'])/.exec(code.slice(i, i + 3));
+    if (prefix && (i === 0 || !/[\w]/.test(code[i - 1]))) {
+      const q0 = i + prefix[0].length;
+      const triple = code.startsWith(code[q0].repeat(3), q0);
+      const quote = triple ? code[q0].repeat(3) : code[q0];
+      const raw = /[rR]/.test(prefix[0]);
+      // A docstring, or a parameter/tool description (`Field(description='…')`)
+      const docstring = (triple && lineStart) || /\bdescription\s*[=:]\s*$/.test(code.slice(Math.max(0, i - 40), i));
+      let j = q0 + quote.length;
+      let text = '';
+      let textLine = line;
+      while (j < code.length && !code.startsWith(quote, j)) {
+        const ch = code[j];
+        if (ch === '\n') {
+          if (!triple) break; // unterminated single-quoted string
+          out.push({ line: textLine, text, description: docstring });
+          text = '';
+          line++;
+          textLine = line;
+          j++;
+          continue;
+        }
+        if (ch === '\\' && !raw && j + 1 < code.length) { text += ch + code[j + 1]; if (code[j + 1] === '\n') { line++; } j += 2; continue; }
+        text += ch;
+        j++;
+      }
+      out.push({ line: textLine, text, description: docstring });
+      i = Math.min(code.length, j + quote.length);
+      lineStart = false;
+      continue;
+    }
+    if (c !== ' ' && c !== '\t' && c !== '\r') lineStart = false;
+    i++;
+  }
+  return out.filter(u => u.text.trim().length > 0);
+}

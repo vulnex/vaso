@@ -2,7 +2,7 @@ import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { extractToolDefinitions } from '../../mcp/tool-baseline.js';
 import { analyzeText, decodeUnicodeEscapes, hiddenCharacters, isInvisibleConstant, isWeakDirective } from '../../mcp/injection-directives.js';
-import { stringLines } from '../../analyzers/string-literals.js';
+import { pythonStringLines, stringLines } from '../../analyzers/string-literals.js';
 import type { StringLine } from '../../analyzers/string-literals.js';
 
 /**
@@ -49,9 +49,10 @@ export const mcp034 = defineCheck({
       const descriptions = tools.map((t) => t.description).filter((d): d is string => !!d);
 
       // Judge string contents, not code: `system: prompt.system` is an object
-      // key. Python (or unparseable source) falls back to non-comment lines.
+      // key, `assistant: Assistant | None` a Python annotation. Unparseable
+      // JavaScript falls back to non-comment lines.
       const units: StringLine[] =
-        (source.language === 'python' ? undefined : stringLines(source.sourceCode)) ??
+        (source.language === 'python' ? pythonStringLines(source.sourceCode) : stringLines(source.sourceCode)) ??
         commentFreeLines(source.sourceCode);
 
       const reported = new Set<number>();

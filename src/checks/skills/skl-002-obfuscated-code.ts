@@ -1,7 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { findHighEntropyBlocks } from '../../analyzers/entropy.js';
-import { OBFUSCATION_PATTERNS, analyzeObfuscation, isBenignEncodedData } from '../../analyzers/obfuscation.js';
+import { OBFUSCATION_PATTERNS, analyzeObfuscation, isBenignEncodedData, isBinaryHexEscapes } from '../../analyzers/obfuscation.js';
 import { ScanLimitError } from '../../core/file-limits.js';
 import { readSkillText, skillFilesOf, skillsDirsOf } from './skill-files.js';
 import { unlistableSkillDirs } from '../../core/utils.js';
@@ -52,6 +52,7 @@ export const skl002 = defineCheck({
           for (const { pattern, label } of OBFUSCATION_PATTERNS) {
             if (pattern.test(line)) {
               if (label === 'Long base64-encoded string' && isBenignEncodedData(line)) continue;
+              if (label === 'Hex escape sequence chain' && isBinaryHexEscapes(line)) continue;
               if (label === 'atob() decoding' && !hasEncodedLiterals) continue;
               // Avoid duplicate evidence on the same line
               if (!reportedLines.has(i + 1)) {
