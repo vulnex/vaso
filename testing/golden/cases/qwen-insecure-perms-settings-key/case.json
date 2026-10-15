@@ -1,0 +1,12 @@
+{
+  "agent": "qwen-code",
+  "source": "QC-002 true positive: settings.json holding an API key, group/world-readable",
+  "reachable": true,
+  "modes": {
+    ".qwen": "755",
+    ".qwen/settings.json": "644"
+  },
+  "fail": {
+    "QC-002": "critical"
+  }
+}

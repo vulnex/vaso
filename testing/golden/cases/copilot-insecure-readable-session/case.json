@@ -1,0 +1,14 @@
+{
+  "agent": "copilot-cli",
+  "source": "GHC-001 true positive: a session transcript readable by group/other",
+  "reachable": true,
+  "modes": {
+    ".copilot": "755",
+    ".copilot/config.json": "600",
+    ".copilot/session-state": "755",
+    ".copilot/session-state/s1.jsonl": "644"
+  },
+  "fail": {
+    "GHC-001": "critical"
+  }
+}

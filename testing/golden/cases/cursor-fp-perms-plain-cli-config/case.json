@@ -1,0 +1,12 @@
+{
+  "agent": "cursor-cli",
+  "source": "dt13 realworld2: cli-config.json with only permissions (no authInfo, no secret) at 0644",
+  "reachable": true,
+  "modes": {
+    ".cursor": "755",
+    ".cursor/cli-config.json": "644"
+  },
+  "pass": [
+    "CUR-004"
+  ]
+}

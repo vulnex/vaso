@@ -112,6 +112,18 @@ describe('CUR-004: Config Permissions', () => {
     expect(result.passed).toBe(false);
   });
 
+  it('judges a loaded cli-config.json by content: authInfo or a secret fires, permissions-only config does not', async () => {
+    const fs = makeFs({
+      access: vi.fn(async (p: string) => p.endsWith('cli-config.json')),
+      stat: vi.fn(async () => ({ mode: 0o644, isFile: () => true, isDirectory: () => false })),
+    });
+    const path = "/home/test/.cursor/cli-config.json";
+    const plain = makeConfig(path, { version: 1, permissions: { allow: [], deny: [] } });
+    expect((await check.run(makeCtx([plain], fs))).passed).toBe(true);
+    const signedIn = makeConfig(path, { version: 1, authInfo: { email: 'dev@example.com', userId: 42 } });
+    expect((await check.run(makeCtx([signedIn], fs))).passed).toBe(false);
+  });
+
   it('passes when 0600', async () => {
     const fs = makeFs({
       access: vi.fn(async (p: string) => p.endsWith('cli-config.json')),

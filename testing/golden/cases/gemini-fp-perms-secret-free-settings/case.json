@@ -1,0 +1,13 @@
+{
+  "agent": "gemini-cli",
+  "source": "dt13 realworld2: secret-free settings written with the default umask (Qwen/Gemini/Claude Code write 0644) in a home other users can reach",
+  "reachable": true,
+  "modes": {
+    ".gemini": "755",
+    ".gemini/settings.json": "644"
+  },
+  "pass": [
+    "GEM-002",
+    "CFG-003"
+  ]
+}

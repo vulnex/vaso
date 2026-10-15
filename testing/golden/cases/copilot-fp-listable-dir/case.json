@@ -1,0 +1,13 @@
+{
+  "agent": "copilot-cli",
+  "source": "dt13 realworld2: ~/.copilot at 0755 with every file 0600 \u2014 a listable directory leaks names only",
+  "reachable": true,
+  "modes": {
+    ".copilot": "755",
+    ".copilot/config.json": "600",
+    ".copilot/settings.json": "600"
+  },
+  "pass": [
+    "GHC-001"
+  ]
+}

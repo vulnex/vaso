@@ -1,0 +1,12 @@
+{
+  "agent": "claude-code",
+  "source": "dt13 realworld2: secret-free settings written with the default umask (Qwen/Gemini/Claude Code write 0644) in a home other users can reach",
+  "reachable": true,
+  "modes": {
+    ".claude": "755",
+    ".claude/settings.json": "644"
+  },
+  "pass": [
+    "CFG-003"
+  ]
+}

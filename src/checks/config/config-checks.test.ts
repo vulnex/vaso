@@ -238,6 +238,16 @@ describe('CFG-003: Credential Config Permissions', () => {
     expect(result.passed).toBe(true);
   });
 
+  it('flags a declared settings file only when it holds a secret (Claude Code settings.json)', async () => {
+    const settings = join(tempDir, 'settings.json');
+    await writeFile(settings, '{"permissions":{"allow":["Bash(npm test)"]}}');
+    await chmod(settings, 0o644);
+    const plain: ParsedConfig = { raw: '', format: 'json', filePath: settings, data: { permissions: { allow: ['Bash(npm test)'] } } };
+    expect((await cfg003.run(makeCtxWithCreds([plain], [settings]))).passed).toBe(true);
+    const withKey: ParsedConfig = { ...plain, data: { env: { ANTHROPIC_API_KEY: 'sk-ant-api03-Ab3dEf6hIj9kLm2nOp5qRs8tUv' } } };
+    expect((await cfg003.run(makeCtxWithCreds([withKey], [settings]))).passed).toBe(false);
+  });
+
   it('flags a credential-declared config file with permissive permissions', async () => {
     const credPath = join(tempDir, 'auth.json');
     await writeFile(credPath, '{"token":"abc"}');

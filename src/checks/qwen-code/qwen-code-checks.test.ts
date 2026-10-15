@@ -79,13 +79,30 @@ describe('QC-001: Plaintext API Key', () => {
 describe('QC-002: Credential Permissions', () => {
   const check = qwenCodeChecks.find(c => c.id === 'QC-002')!;
 
-  it('fails when settings.json is world-readable (the real config we saw)', async () => {
+  it('fails when a settings.json holding an API key is world-readable', async () => {
     const fs = makeFs({
       access: vi.fn(async (p: string) => p.endsWith('settings.json')),
       stat: vi.fn(async () => ({ mode: 0o664, isFile: () => true, isDirectory: () => false })),
     });
-    const result = await check.run(makeCtx([], fs));
-    expect(result.passed).toBe(false);
+    const settings = makeConfig("/home/test/.qwen/settings.json", { env: { OPENAI_API_KEY: 'sk-proj-Ab3dEf6hIj9kLm2nOp5qRs8tUv1wXy4z' } });
+    expect((await check.run(makeCtx([settings], fs))).passed).toBe(false);
+  });
+
+  it('passes a secret-free settings.json at 0644/0664 (Qwen writes it with the default umask)', async () => {
+    const fs = makeFs({
+      access: vi.fn(async (p: string) => p.endsWith('settings.json')),
+      stat: vi.fn(async () => ({ mode: 0o664, isFile: () => true, isDirectory: () => false })),
+    });
+    const settings = makeConfig("/home/test/.qwen/settings.json", { ui: { theme: 'Default' }, tools: { approvalMode: 'default' } });
+    expect((await check.run(makeCtx([settings], fs))).passed).toBe(true);
+  });
+
+  it('still fails for a world-readable oauth_creds.json', async () => {
+    const fs = makeFs({
+      access: vi.fn(async (p: string) => p.endsWith('oauth_creds.json')),
+      stat: vi.fn(async () => ({ mode: 0o644, isFile: () => true, isDirectory: () => false })),
+    });
+    expect((await check.run(makeCtx([], fs))).passed).toBe(false);
   });
 
   it('passes when files are 0600', async () => {

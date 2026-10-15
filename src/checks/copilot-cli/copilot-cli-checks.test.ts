@@ -47,13 +47,49 @@ describe('Copilot CLI checks', () => {
 describe('GHC-001: Directory Permissions', () => {
   const check = copilotCliChecks.find(c => c.id === 'GHC-001')!;
 
-  it('fails when ~/.copilot is world-readable', async () => {
+  it('fails when ~/.copilot is writable by others (its files can be replaced)', async () => {
     const fs = makeFs({
       access: vi.fn(async (p: string) => p === '/home/test/.copilot'),
-      stat: vi.fn(async () => ({ mode: 0o755, isFile: () => false, isDirectory: () => true })),
+      stat: vi.fn(async () => ({ mode: 0o777, isFile: () => false, isDirectory: () => true })),
+      readdirEntries: vi.fn(async () => []),
     });
-    const result = await check.run(makeCtx([], fs));
-    expect(result.passed).toBe(false);
+    expect((await check.run(makeCtx([], fs))).passed).toBe(false);
+  });
+
+  it('passes a 0755 ~/.copilot whose files are all 0600 (a listable dir leaks names only)', async () => {
+    const fs = makeFs({
+      access: vi.fn(async () => true),
+      stat: vi.fn(async (p: string) => {
+        const dir = p.endsWith('.copilot') || p.endsWith('session-state');
+        return { mode: dir ? 0o755 : 0o600, isFile: () => !dir, isDirectory: () => dir };
+      }),
+      readdirEntries: vi.fn(async () => [{ name: 's1.jsonl', isFile: true, isDirectory: false }]),
+    });
+    expect((await check.run(makeCtx([], fs))).passed).toBe(true);
+  });
+
+  it('flags a readable session transcript and a readable config holding a token, not a secret-free one', async () => {
+    const readable = (paths: string[]) => makeFs({
+      access: vi.fn(async (p: string) => p === '/home/test/.copilot' || paths.some(x => p.endsWith(x))),
+      stat: vi.fn(async (p: string) => {
+        const dir = p.endsWith('.copilot') || p.endsWith('session-state');
+        return { mode: dir ? 0o755 : 0o644, isFile: () => !dir, isDirectory: () => dir };
+      }),
+      readdirEntries: vi.fn(async (d: string) => (d.endsWith('session-state') ? [{ name: 's1.jsonl', isFile: true, isDirectory: false }] : [])),
+    });
+    expect((await check.run(makeCtx([], readable(['session-state'])))).passed).toBe(false);
+    const clean = makeConfig('/home/test/.copilot/settings.json', { storeTokenPlaintext: true });
+    expect((await check.run(makeCtx([clean], makeFs({
+      access: vi.fn(async (p: string) => p.endsWith('settings.json')),
+      stat: vi.fn(async () => ({ mode: 0o644, isFile: () => true, isDirectory: () => false })),
+      readdirEntries: vi.fn(async () => { throw new Error('ENOENT'); }),
+    })))).passed).toBe(true);
+    const withToken = makeConfig('/home/test/.copilot/config.json', { copilot_tokens: { 'https://github.com:me': 'gho_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789ab' } });
+    expect((await check.run(makeCtx([withToken], makeFs({
+      access: vi.fn(async (p: string) => p.endsWith('config.json')),
+      stat: vi.fn(async () => ({ mode: 0o644, isFile: () => true, isDirectory: () => false })),
+      readdirEntries: vi.fn(async () => { throw new Error('ENOENT'); }),
+    })))).passed).toBe(false);
   });
 
   it('passes when 0700 dir and 0600 files (the real config we saw)', async () => {

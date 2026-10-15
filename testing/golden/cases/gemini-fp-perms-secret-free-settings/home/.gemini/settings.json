@@ -1,0 +1,8 @@
+{
+  "general": {
+    "preferredEditor": "vim"
+  },
+  "ui": {
+    "theme": "GitHub"
+  }
+}

@@ -2,6 +2,7 @@ import { basename, join } from 'node:path';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { accessibleByOthers, markUnreachable, queryPermissions } from '../../core/permissions.js';
+import { configHoldsSecret } from '../../core/secret-values.js';
 
 const PROTECTED_FILES = ['cli-config.json', 'mcp.json'];
 
@@ -24,6 +25,11 @@ export const cur004 = defineCheck({
     for (const filePath of paths) {
       const filename = basename(filePath);
       if (!(await ctx.fs.access(filePath))) continue;
+      // Sensitive only with content to leak: cli-config.json's authInfo
+      // (account email / user and auth IDs) or a secret in either file
+      const config = ctx.configs.find(c => c.filePath === filePath);
+      const data = config?.data as Record<string, unknown> | undefined;
+      if (config && !(filename === 'cli-config.json' && data?.authInfo) && !configHoldsSecret(data)) continue;
       try {
         const perms = await queryPermissions(ctx.fs, filePath);
         // 'unsupported' (no evaluable permission model) → nothing to flag
