@@ -22,6 +22,10 @@ export async function runRulesList(options: RulesListOptions): Promise<void> {
   }
 
   if (result.allRules.length === 0) {
+    if (options.format === 'json') {
+      console.log('[]');
+      return;
+    }
     console.log(chalk.dim('  No declarative rules found.'));
     console.log(chalk.dim(`  Create rules in ~/.vaso/rules/ or .vaso/rules/`));
     console.log(chalk.dim(`  Run "vaso rules init" to generate a starter template.\n`));
@@ -74,7 +78,7 @@ export async function runRulesValidate(filePath: string, options: RulesValidateO
   } catch (err) {
     console.error(chalk.red(`  Error: Cannot read file: ${filePath}`));
     console.error(chalk.red(`  ${err instanceof Error ? err.message : String(err)}\n`));
-    process.exitCode = 1;
+    process.exitCode = 2;
     return;
   }
 
@@ -169,6 +173,7 @@ rules:
 
 export interface RulesInitOptions {
   dir?: string;
+  force?: boolean;
 }
 
 export async function runRulesInit(options: RulesInitOptions): Promise<void> {
@@ -177,12 +182,16 @@ export async function runRulesInit(options: RulesInitOptions): Promise<void> {
 
   try {
     await mkdir(targetDir, { recursive: true });
-    await writeFile(targetFile, STARTER_TEMPLATE, 'utf-8');
+    // 'wx' fails on an existing file: never overwrite the user's rules unasked
+    await writeFile(targetFile, STARTER_TEMPLATE, { encoding: 'utf-8', flag: options.force ? 'w' : 'wx' });
     console.log(chalk.green(`  Created starter rule file: ${targetFile}\n`));
     console.log(chalk.dim('  Edit the file and run "vaso rules validate" to check it.'));
     console.log(chalk.dim('  Rules are loaded automatically on "vaso scan".\n'));
   } catch (err) {
-    console.error(chalk.red(`  Error creating rule file: ${err instanceof Error ? err.message : String(err)}\n`));
-    process.exitCode = 1;
+    const exists = (err as NodeJS.ErrnoException).code === 'EEXIST';
+    console.error(chalk.red(exists
+      ? `  ${targetFile} already exists — use --force to overwrite it\n`
+      : `  Error creating rule file: ${err instanceof Error ? err.message : String(err)}\n`));
+    process.exitCode = 2;
   }
 }

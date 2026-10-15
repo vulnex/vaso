@@ -6,10 +6,20 @@ import { fetchAndUpdateAdvisoryFeed } from '../advisory/updater.js';
 
 export interface UpdateOptions {
   url?: string;
+  advisoryUrl?: string;
   force?: boolean;
 }
 
 export async function runUpdate(options: UpdateOptions = {}): Promise<void> {
+  // The two feeds are independent: a failed IOC update must not skip the
+  // advisory one. Either failing exits 2 (the update could not run), so a
+  // cron job or CI step notices a bad signature or an unreachable feed.
+  const iocOk = await updateIocFeed(options);
+  const advisoryOk = await updateAdvisoryFeed(options);
+  if (!iocOk || !advisoryOk) process.exitCode = 2;
+}
+
+async function updateIocFeed(options: UpdateOptions): Promise<boolean> {
   console.log(chalk.cyan('Updating IOC database from remote feed...'));
 
   const result = await fetchAndUpdateFeed({
@@ -20,7 +30,7 @@ export async function runUpdate(options: UpdateOptions = {}): Promise<void> {
   if (!result.success) {
     console.log(chalk.red(`Update failed: ${result.message}`));
     console.log(chalk.yellow('Falling back to bundled IOC data.'));
-    return;
+    return false;
   }
 
   console.log(chalk.green(result.message));
@@ -51,11 +61,14 @@ export async function runUpdate(options: UpdateOptions = {}): Promise<void> {
   console.log(`  Trusted skill names: ${db.trustedSkillNames.length}`);
   console.log(`  Trusted MCP packages: ${db.trustedMCPPackages.length}`);
   console.log(`  Binary patterns: ${db.binaryPatterns.length}`);
+  return true;
+}
 
-  // Update advisory feed
+async function updateAdvisoryFeed(options: UpdateOptions): Promise<boolean> {
   console.log(chalk.cyan('\nUpdating advisory database from remote feed...'));
 
   const advResult = await fetchAndUpdateAdvisoryFeed({
+    feedUrl: options.advisoryUrl,
     force: options.force ?? true,
   });
 
@@ -75,4 +88,5 @@ export async function runUpdate(options: UpdateOptions = {}): Promise<void> {
   const advDb = getAdvisoryDatabase();
 
   console.log(chalk.green(`\nMerged advisory database: ${advDb.advisories.length} advisories`));
+  return advResult.success;
 }

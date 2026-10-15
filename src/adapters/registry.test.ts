@@ -15,6 +15,12 @@ function adapter(name: AgentAdapter['agent'], detect: AgentAdapter['detect']): A
 }
 
 describe('AdapterRegistry', () => {
+  it('refuses a second adapter for the same agent', () => {
+    const registry = new AdapterRegistry();
+    registry.register(adapter('openclaw', async () => []));
+    expect(() => registry.register(adapter('openclaw', async () => []))).toThrow('already registered');
+  });
+
   it('returns installations and detection errors separately', async () => {
     const registry = new AdapterRegistry();
     registry.register(adapter('openclaw', async () => [{

@@ -5,6 +5,7 @@ import type { ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { loadConfig } from '../core/config-loader.js';
+import { loadConfigIfPresent } from './load-if-present.js';
 import { stripJsonc } from '../core/jsonc.js';
 import { nvmBinaryGlob, npmPackageJsonGlobs } from './nvm-binary.js';
 import { discoverCliInstalls } from './cli-installs.js';
@@ -141,10 +142,8 @@ export const copilotCliAdapter: AgentAdapter = {
     const projectConfigs: ParsedConfig[] = [];
     for (const name of PROJECT_CONFIG_FILES) {
       const filePath = join(cwd, name);
-      if (!(await fs.access(filePath))) continue;
-      try {
-        projectConfigs.push(await loadConfig(filePath, fs));
-      } catch {}
+      const loaded = await loadConfigIfPresent(filePath, fs);
+      if (loaded) projectConfigs.push(loaded);
     }
     const githubLspPath = join(cwd, '.github', 'lsp.json');
     if (await fs.access(githubLspPath)) {

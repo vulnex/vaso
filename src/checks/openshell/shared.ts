@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import YAML from 'yaml';
+import { parseYamlSafe } from '../../core/yaml-safe.js';
 import type { Evidence, ParsedConfig, ScanContext } from '../../core/types.js';
 import type { PermissionFacts } from '../../core/fs-provider.js';
 import { queryPermissions } from '../../core/permissions.js';
@@ -197,7 +197,7 @@ async function filePolicies(ctx: ScanContext): Promise<PolicyRef[]> {
   if (!path) return [];
   try {
     const raw = await ctx.fs.readFile(path);
-    const policy = record(path.endsWith('.json') ? JSON.parse(raw) : YAML.parse(raw));
+    const policy = record(path.endsWith('.json') ? JSON.parse(raw) : parseYamlSafe(raw));
     return policy ? [{ source: path, file: path, policy }] : [];
   } catch {
     return [];

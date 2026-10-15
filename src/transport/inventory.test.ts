@@ -166,4 +166,10 @@ hosts:
     expect(targets[0].sudo).toBe(true);
     expect(targets[1].sudo).toBeUndefined();
   });
+
+  it('rejects ports outside 1–65535 and an empty user', async () => {
+    await expect(parseInventory(await writeTempYAML('hosts:\n  - host: 192.0.2.1\n    port: 99999\n'))).rejects.toThrow(/port must be/);
+    await expect(parseInventory(await writeTempYAML('hosts:\n  - host: 192.0.2.1\n    port: abc\n'))).rejects.toThrow(/port must be/);
+    await expect(parseInventory(await writeTempYAML('hosts:\n  - host: "@192.0.2.1"\n'))).rejects.toThrow(/missing user/);
+  });
 });

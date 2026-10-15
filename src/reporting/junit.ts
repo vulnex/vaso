@@ -1,8 +1,9 @@
 import type { ScanResult, AgentScanResult, CheckResult } from '../core/types.js';
 import type { Reporter } from './reporter.js';
+import { stripXmlInvalid } from './text-safety.js';
 
 function xmlEscape(s: string): string {
-  return s
+  return stripXmlInvalid(s)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
@@ -11,7 +12,8 @@ function xmlEscape(s: string): string {
 }
 
 function attr(name: string, value: string | number): string {
-  return `${name}="${xmlEscape(String(value))}"`;
+  // Attribute values normalize raw line breaks to spaces; keep them as references
+  return `${name}="${xmlEscape(String(value)).replace(/\r/g, '&#13;').replace(/\n/g, '&#10;').replace(/\t/g, '&#9;')}"`;
 }
 
 function evidenceText(r: CheckResult): string {

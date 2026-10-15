@@ -1,7 +1,7 @@
-import { readFile } from 'node:fs/promises';
 import type { AdapterRegistry } from '../adapters/registry.js';
 import { buildProbeManifest } from '../core/manifest-builder.js';
 import type { ProbeSnapshot } from '../core/snapshot-types.js';
+import { loadSnapshotFile, SnapshotLoadError, snapshotErrorLines } from '../core/snapshot-load.js';
 
 export async function probeManifest(adapters: AdapterRegistry): Promise<void> {
   const allAdapters = adapters.getAdapters();
@@ -10,39 +10,14 @@ export async function probeManifest(adapters: AdapterRegistry): Promise<void> {
 }
 
 export async function probeValidate(snapshotPath: string): Promise<void> {
-  let raw: string;
-  try {
-    raw = await readFile(snapshotPath, 'utf-8');
-  } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code;
-    console.error(code === 'ENOENT'
-      ? `Snapshot file not found: ${snapshotPath}`
-      : `Failed to read snapshot file: ${(err as Error).message}`);
-    process.exitCode = 2;
-    return;
-  }
-
   let snapshot: ProbeSnapshot;
   try {
-    snapshot = JSON.parse(raw) as ProbeSnapshot;
+    snapshot = await loadSnapshotFile(snapshotPath);
   } catch (err) {
-    console.error(`Snapshot file is not valid JSON: ${(err as Error).message}`);
+    if (!(err instanceof SnapshotLoadError)) throw err;
+    for (const line of snapshotErrorLines(err)) console.error(line);
+    // An unusable snapshot means VASO could not run: exit 2, like scan/detect
     process.exitCode = 2;
-    return;
-  }
-
-  const errors: string[] = [];
-  if (snapshot.version !== 1) errors.push(`Unsupported snapshot version: ${snapshot.version}`);
-  if (!snapshot.platform) errors.push('Missing platform field');
-  if (!snapshot.hostname) errors.push('Missing hostname field');
-  if (!snapshot.files || typeof snapshot.files !== 'object') errors.push('Missing or invalid files field');
-  if (!snapshot.directories || typeof snapshot.directories !== 'object') errors.push('Missing or invalid directories field');
-  if (!snapshot.commandOutputs || typeof snapshot.commandOutputs !== 'object') errors.push('Missing or invalid commandOutputs field');
-
-  if (errors.length > 0) {
-    console.error('Snapshot validation failed:');
-    for (const e of errors) console.error(`  - ${e}`);
-    process.exitCode = 1;
     return;
   }
 

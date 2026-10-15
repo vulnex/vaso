@@ -4,7 +4,7 @@ import type { AgentInstallation, GatewayInfo, ModelRef, ParsedConfig, ZoneGraph 
 import type { ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
-import { loadConfig } from '../core/config-loader.js';
+import { loadConfigIfPresent } from './load-if-present.js';
 import { nvmBinaryGlob, npmPackageJsonGlobs } from './nvm-binary.js';
 import { discoverCliInstalls } from './cli-installs.js';
 import { getUserHomeDirs } from './openclaw.js';
@@ -118,10 +118,8 @@ export const codexAdapter: AgentAdapter = {
       if (hasCodexDir) {
         for (const filename of CONFIG_FILES) {
           const filePath = join(codexDir, filename);
-          if (!(await fs.access(filePath))) continue;
-          try {
-            configFiles.push(await loadConfig(filePath, fs));
-          } catch {}
+          const loaded = await loadConfigIfPresent(filePath, fs);
+          if (loaded) configFiles.push(loaded);
         }
       }
 

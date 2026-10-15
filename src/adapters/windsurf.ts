@@ -4,7 +4,7 @@ import type { AgentInstallation, GatewayInfo, ParsedConfig, ZoneGraph } from '..
 import type { ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
-import { loadConfig } from '../core/config-loader.js';
+import { loadConfigIfPresent } from './load-if-present.js';
 import { stripJsonc } from '../core/jsonc.js';
 import { getUserHomeDirs } from './openclaw.js';
 import { queryCliVersion } from './version-query.js';
@@ -208,10 +208,8 @@ export const windsurfAdapter: AgentAdapter = {
         join(devinConfigDir(home, fs), MCP_CONFIG_FILE),
       ];
       for (const filePath of mcpConfigPaths) {
-        if (!(await fs.access(filePath))) continue;
-        try {
-          configFiles.push(await loadConfig(filePath, fs));
-        } catch {}
+        const loaded = await loadConfigIfPresent(filePath, fs);
+        if (loaded) configFiles.push(loaded);
       }
 
       // 3.x execution-gate settings, projected onto windsurf.* keys.

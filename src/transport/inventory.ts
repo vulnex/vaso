@@ -14,7 +14,7 @@
 
 import { readFile } from 'node:fs/promises';
 import { parse as parseYAML } from 'yaml';
-import { parseSSHTarget } from './ssh.js';
+import { parseSSHTarget, assertSSHTargetParts } from './ssh.js';
 import type { SSHTarget } from './ssh.js';
 
 interface InventoryFile {
@@ -76,6 +76,7 @@ export async function parseInventory(path: string): Promise<SSHTarget[]> {
     }
     user = user ?? 'root';
     port = port ?? 22;
+    assertSSHTargetParts(`inventory entry #${idx + 1}`, String(user), host, port);
     const defaultLabel = port === 22 ? `${user}@${host}` : `${user}@${host}:${port}`;
     return {
       user,

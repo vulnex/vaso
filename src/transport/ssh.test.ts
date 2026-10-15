@@ -1,7 +1,20 @@
 import { describe, it, expect, vi } from 'vitest';
-import { describeConnectFailure, parseSSHTarget, withRetry } from './ssh.js';
+import { describeConnectFailure, parseSSHTarget, uniqueTargets, withRetry } from './ssh.js';
 
 describe('parseSSHTarget', () => {
+  it('rejects an empty user, option-like parts and control characters', () => {
+    expect(() => parseSSHTarget('@192.0.2.1')).toThrow(/missing user/);
+    expect(() => parseSSHTarget('-oProxyCommand=x@192.0.2.1')).toThrow(/may not start with "-"/);
+    expect(() => parseSSHTarget('u@-oProxyCommand=x')).toThrow(/may not start with "-"/);
+    expect(() => parseSSHTarget('u ser@host')).toThrow(/whitespace/);
+  });
+
+  it('dedupes repeated targets', () => {
+    const { targets, duplicates } = uniqueTargets([parseSSHTarget('u@h'), parseSSHTarget('u@h:22'), parseSSHTarget('u@h:2222')]);
+    expect(targets.map(t => t.port)).toEqual([22, 2222]);
+    expect(duplicates).toEqual(['u@h']);
+  });
+
   it('parses user@host with default port 22', () => {
     expect(parseSSHTarget('user@host')).toEqual({
       user: 'user',

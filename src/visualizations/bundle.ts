@@ -112,11 +112,14 @@ function resolveZoneGraph(
 }
 
 function agentSlug(agent: AgentScanResult, counts: Map<string, number>): string {
+  // Every part comes from the input scan JSON, which may be hand-edited:
+  // slugify all of them so no file name can climb out of the output dir.
+  const type = slugify(agent.agent);
   const base = agent.installation.agentName
-    ? `${agent.agent}-${slugify(agent.installation.agentName)}`
+    ? `${type}-${slugify(agent.installation.agentName)}`
     : agent.installation.user
-      ? `${agent.agent}-${slugify(agent.installation.user)}`
-      : agent.agent;
+      ? `${type}-${slugify(agent.installation.user)}`
+      : type;
   const seen = counts.get(base) ?? 0;
   counts.set(base, seen + 1);
   return seen === 0 ? base : `${base}-${seen + 1}`;

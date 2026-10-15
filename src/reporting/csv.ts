@@ -1,5 +1,6 @@
 import type { ScanResult } from '../core/types.js';
 import type { Reporter } from './reporter.js';
+import { escapeControlChars } from './text-safety.js';
 
 const COLUMNS = [
   'timestamp',
@@ -35,7 +36,8 @@ function row(values: readonly (string | number | boolean | undefined)[]): string
       // Snippets and messages quote scanned files, which the file's author
       // controls — `=HYPERLINK(…)` in a skill must not run in Excel.
       const text = typeof v === 'string' && FORMULA_START.test(v) ? `'${v}` : String(v);
-      return csvEscape(text);
+      // ESC/BEL and friends would reach whoever `cat`s the file
+      return csvEscape(escapeControlChars(text));
     })
     .join(',');
 }

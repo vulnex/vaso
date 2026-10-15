@@ -7,12 +7,13 @@ import { saveBaseline, loadBaseline, diffResults } from '../core/baseline.js';
 import { SnapshotFSProvider } from '../core/snapshot-fs-provider.js';
 import { allUsersCoverageWarning } from '../adapters/openclaw.js';
 import type { ProbeSnapshot } from '../core/snapshot-types.js';
+import { loadSnapshotFile, SnapshotLoadError, snapshotErrorLines } from '../core/snapshot-load.js';
 import type { ScanOptions } from '../core/types.js';
 import { shouldFailScan, isValidFailOn, EXIT_FINDINGS, EXIT_INCOMPLETE, EXIT_USAGE, type FailOnLevel } from '../core/exit-criteria.js';
 import { logError } from '../core/debug.js';
 import { writeFileEnsureDir, writeFileOwnerOnly } from '../core/utils.js';
 import { HostFileNames, safeHostname } from '../transport/host-files.js';
-import { readFile, writeFile } from 'node:fs/promises';
+import { writeFile } from 'node:fs/promises';
 import { toReportJson } from '../reporting/serialize.js';
 
 export interface ScanCommandOptions {
@@ -87,39 +88,12 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
   let snapshotFs: SnapshotFSProvider | undefined;
 
   if (options.snapshot) {
-    let raw: string;
-    try {
-      raw = await readFile(options.snapshot, 'utf-8');
-    } catch (err) {
-      const code = (err as NodeJS.ErrnoException).code;
-      console.error(chalk.red(code === 'ENOENT'
-        ? `Snapshot file not found: ${options.snapshot}`
-        : `Failed to read snapshot file: ${(err as Error).message}`));
-      process.exitCode = EXIT_USAGE;
-      return;
-    }
-
     let snapshot: ProbeSnapshot;
     try {
-      snapshot = JSON.parse(raw) as ProbeSnapshot;
+      snapshot = await loadSnapshotFile(options.snapshot);
     } catch (err) {
-      console.error(chalk.red(`Snapshot file is not valid JSON: ${(err as Error).message}`));
-      process.exitCode = EXIT_USAGE;
-      return;
-    }
-
-    // Validate required fields
-    const errors: string[] = [];
-    if (snapshot.version !== 1) errors.push(`Unsupported snapshot version: ${snapshot.version}`);
-    if (!snapshot.platform) errors.push('Missing platform field');
-    if (!snapshot.hostname) errors.push('Missing hostname field');
-    if (!snapshot.files || typeof snapshot.files !== 'object') errors.push('Missing or invalid files field');
-    if (!snapshot.directories || typeof snapshot.directories !== 'object') errors.push('Missing or invalid directories field');
-    if (!snapshot.commandOutputs || typeof snapshot.commandOutputs !== 'object') errors.push('Missing or invalid commandOutputs field');
-
-    if (errors.length > 0) {
-      console.error(chalk.red('Invalid snapshot file:'));
-      for (const e of errors) console.error(chalk.red(`  - ${e}`));
+      if (!(err instanceof SnapshotLoadError)) throw err;
+      for (const line of snapshotErrorLines(err)) console.error(chalk.red(line));
       process.exitCode = EXIT_USAGE;
       return;
     }
@@ -136,7 +110,7 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
 
   // SSH remote scanning
   if (options.host || options.inventory) {
-    const { parseSSHTarget } = await import('../transport/ssh.js');
+    const { parseSSHTarget, uniqueTargets } = await import('../transport/ssh.js');
     const { parseInventory } = await import('../transport/inventory.js');
     const { scanMultipleHosts } = await import('../transport/multi-host.js');
     const { buildProbeManifest } = await import('../core/manifest-builder.js');
@@ -182,6 +156,10 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
       }
       targets.push(...inventoryTargets);
     }
+
+    const deduped = uniqueTargets(targets);
+    targets = deduped.targets;
+    for (const label of deduped.duplicates) log(chalk.yellow(`  ! ${label} is listed more than once — scanning it once`));
 
     if (targets.length === 0) {
       console.error(chalk.red('No scan targets specified'));
@@ -399,17 +377,18 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
       result.host = snapshotFs.hostname();
     }
 
-    // Save baseline if requested
-    if (options.saveBaseline) {
-      const path = await saveBaseline(result);
-      localLog(chalk.green(`Baseline saved to ${path}`));
-    }
-
-    // Diff against baseline if requested
+    // Diff against the previous baseline — loaded before --save-baseline
+    // replaces it, or a combined run would compare the scan with itself
     if (options.diff) {
       const baseline = await loadBaseline();
       if (baseline) {
         const diff = diffResults(result, baseline);
+        result.baselineDiff = {
+          baselineTimestamp: baseline.timestamp,
+          newFindings: diff.newFindings.map(f => f.id),
+          resolvedFindings: diff.resolvedFindings.map(f => f.id),
+          unchanged: diff.unchangedFindings.length,
+        };
         localLog(chalk.bold('\nDifferential Scan Results:'));
         localLog(`  New findings: ${chalk.red(String(diff.newFindings.length))}`);
         localLog(`  Resolved: ${chalk.green(String(diff.resolvedFindings.length))}`);
@@ -433,6 +412,11 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
       }
     }
 
+    if (options.saveBaseline) {
+      const path = await saveBaseline({ ...result, baselineDiff: undefined });
+      localLog(chalk.green(`Baseline saved to ${path}`));
+    }
+
     const reporter = getReporter(scanOptions.format ?? 'terminal');
     const output = reporter.render(result);
 
@@ -444,7 +428,8 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
       const { join: joinPath } = await import('node:path');
       const { hostname } = await import('node:os');
       const ext = FORMAT_EXT[scanOptions.format ?? 'terminal'] ?? 'txt';
-      const outPath = joinPath(options.outputDir, `${safeHostname(hostname())}.${ext}`);
+      // A snapshot scan reports on the snapshot's host, not this machine
+      const outPath = joinPath(options.outputDir, `${safeHostname(result.host ?? hostname())}.${ext}`);
       await writeFileEnsureDir(outPath, output);
       localLog(chalk.green(`Report written to ${outPath}`));
     } else {

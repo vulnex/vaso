@@ -100,20 +100,14 @@ export async function runDetect(options: DetectCommandOptions): Promise<void> {
 }
 
 async function detectFromSnapshot(options: DetectCommandOptions): Promise<AgentInstallation[]> {
-  const { readFile } = await import('node:fs/promises');
   const { SnapshotFSProvider } = await import('../core/snapshot-fs-provider.js');
-  const raw = await readFile(options.snapshot!, 'utf-8');
-  const snapshot = JSON.parse(raw);
-
-  const errors: string[] = [];
-  if (snapshot.version !== 1) errors.push(`Unsupported snapshot version: ${snapshot.version}`);
-  if (!snapshot.platform) errors.push('Missing platform field');
-  if (!snapshot.hostname) errors.push('Missing hostname field');
-  if (!snapshot.files || typeof snapshot.files !== 'object') errors.push('Missing or invalid files field');
-
-  if (errors.length > 0) {
-    console.error(chalk.red('Invalid snapshot file:'));
-    for (const e of errors) console.error(chalk.red(`  - ${e}`));
+  const { loadSnapshotFile, SnapshotLoadError, snapshotErrorLines } = await import('../core/snapshot-load.js');
+  let snapshot;
+  try {
+    snapshot = await loadSnapshotFile(options.snapshot!);
+  } catch (err) {
+    if (!(err instanceof SnapshotLoadError)) throw err;
+    for (const line of snapshotErrorLines(err)) console.error(chalk.red(line));
     process.exitCode = EXIT_USAGE;
     return [];
   }
@@ -146,7 +140,7 @@ interface HostDetectResult {
 }
 
 async function detectRemoteHosts(options: DetectCommandOptions): Promise<void> {
-  const { parseSSHTarget, executeRemoteProbeWithRetry } = await import('../transport/ssh.js');
+  const { parseSSHTarget, executeRemoteProbeWithRetry, uniqueTargets } = await import('../transport/ssh.js');
   const { parseInventory } = await import('../transport/inventory.js');
   const { buildProbeManifest } = await import('../core/manifest-builder.js');
   const { SnapshotFSProvider } = await import('../core/snapshot-fs-provider.js');
@@ -191,6 +185,10 @@ async function detectRemoteHosts(options: DetectCommandOptions): Promise<void> {
     }
     targets.push(...inventoryTargets);
   }
+
+  const deduped = uniqueTargets(targets);
+  targets = deduped.targets;
+  for (const label of deduped.duplicates) console.error(chalk.yellow(`  ! ${label} is listed more than once — detecting it once`));
 
   if (targets.length === 0) {
     console.error(chalk.red('No detection targets specified'));

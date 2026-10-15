@@ -4,6 +4,7 @@ vi.mock('node:fs/promises', () => ({
   readdir: vi.fn(),
   copyFile: vi.fn(),
   stat: vi.fn(async () => ({ mode: 0o100644 })),
+  lstat: vi.fn(),
   chmod: vi.fn(),
   rename: vi.fn(),
 }));
@@ -16,7 +17,7 @@ vi.mock('../core/utils.js', () => ({
   pathExists: vi.fn(),
 }));
 
-import { readdir, copyFile, stat, chmod } from 'node:fs/promises';
+import { readdir, copyFile, stat, lstat, chmod } from 'node:fs/promises';
 import { pathExists } from '../core/utils.js';
 import { rollback } from './rollback.js';
 
@@ -24,6 +25,7 @@ const mockReaddir = vi.mocked(readdir);
 const mockCopyFile = vi.mocked(copyFile);
 const mockStat = vi.mocked(stat);
 const mockChmod = vi.mocked(chmod);
+const mockLstat = vi.mocked(lstat);
 const mockPathExists = vi.mocked(pathExists);
 
 describe('rollback', () => {
@@ -32,6 +34,7 @@ describe('rollback', () => {
   beforeEach(() => {
     vi.resetAllMocks();
     mockStat.mockResolvedValue({ mode: 0o100644 } as Awaited<ReturnType<typeof stat>>);
+    mockLstat.mockResolvedValue({ isFile: () => true, isSymbolicLink: () => false } as Awaited<ReturnType<typeof lstat>>);
     consoleLogs = [];
     vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
       consoleLogs.push(args.map(String).join(' '));
@@ -126,6 +129,24 @@ describe('rollback', () => {
 
     await rollback();
     expect(consoleLogs.some(l => l.includes('Failed to restore'))).toBe(true);
+    expect(consoleLogs.some(l => l.includes('0 file(s) restored'))).toBe(true);
+  });
+
+  it('refuses to restore through a symlink that replaced the original', async () => {
+    mockPathExists.mockResolvedValue(true);
+    mockReaddir
+      .mockResolvedValueOnce([
+        { name: '2026-02-01T00-00-00', isDirectory: () => true, isFile: () => false },
+      ] as any)
+      .mockResolvedValueOnce([
+        { name: 'settings.json', isFile: () => true, isDirectory: () => false, parentPath: '/home/testuser/.vaso/backups/2026-02-01T00-00-00/etc' },
+      ] as any);
+    mockLstat.mockResolvedValue({ isFile: () => false, isSymbolicLink: () => true } as Awaited<ReturnType<typeof lstat>>);
+
+    await rollback();
+    expect(mockCopyFile).not.toHaveBeenCalled();
+    expect(mockChmod).not.toHaveBeenCalled();
+    expect(consoleLogs.some(l => l.includes('now a symlink'))).toBe(true);
     expect(consoleLogs.some(l => l.includes('0 file(s) restored'))).toBe(true);
   });
 });

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { SarifReporter } from './sarif.js';
+import { SarifReporter, toSarifUri } from './sarif.js';
 import { checkRegistry } from '../core/check-registry.js';
 import { registerAllChecks } from '../checks/index.js';
 import type { ScanResult, AgentScanResult } from '../core/types.js';
@@ -190,3 +190,13 @@ describe('SarifReporter', () => {
     }
   });
 });
+
+describe('toSarifUri', () => {
+  it('turns paths into URI references', () => {
+    expect(toSarifUri('/home/u/my dir/a#b.json')).toBe('file:///home/u/my%20dir/a%23b.json');
+    expect(toSarifUri('C:\\Users\\u\\x y.json')).toBe('file:///C:/Users/u/x%20y.json');
+    expect(toSarifUri('rel/a<b>.md')).toBe('rel/a%3Cb%3E.md');
+    expect(toSarifUri(undefined)).toBeUndefined();
+  });
+});
+

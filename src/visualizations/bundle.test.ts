@@ -77,6 +77,21 @@ describe('emitBundle', () => {
     ]);
   });
 
+  it('keeps every file inside the output dir for a hostile agent type', async () => {
+    const out = join(dir, 'sub', 'out');
+    const result = scanResult([agentScan({ agent: '../../../trav_agent' as AgentScanResult['agent'] })]);
+    await emitBundle(result, {
+      outputDir: out,
+      format: 'toml',
+      diagrams: ['attack-tree', 'privilege-gradient'],
+      adapters: noopAdapters,
+    });
+    expect((await readdir(dir)).sort()).toEqual(['sub']);
+    expect((await readdir(out)).sort()).toEqual([
+      'README.md', 'trav-agent-attack-tree.toml', 'trav-agent-privilege-gradient.toml',
+    ]);
+  });
+
   it('respects --diagrams filter', async () => {
     const result = scanResult([agentScan({ results: [check({})] })]);
     await emitBundle(result, {

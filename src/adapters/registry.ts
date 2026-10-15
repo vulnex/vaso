@@ -46,6 +46,11 @@ export class AdapterRegistry {
   private adapters: AgentAdapter[] = [];
 
   register(adapter: AgentAdapter): void {
+    // A second copy would detect every installation twice (as the check
+    // registry does, refuse rather than silently double the results)
+    if (this.adapters.some(a => a === adapter || a.agent === adapter.agent)) {
+      throw new Error(`Adapter "${adapter.agent}" is already registered`);
+    }
     this.adapters.push(adapter);
   }
 

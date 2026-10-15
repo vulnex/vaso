@@ -1,4 +1,4 @@
-import { readdir, copyFile, stat, chmod, rename } from 'node:fs/promises';
+import { readdir, copyFile, stat, lstat, chmod, rename } from 'node:fs/promises';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import chalk from 'chalk';
@@ -59,6 +59,14 @@ export async function rollback(timestamp?: string): Promise<void> {
     // Strip the backup dir prefix to recover the original absolute path
     const originalPath = backupFilePath.slice(backupDir.length);
     try {
+      // Never write through a link or onto a non-file: whatever replaced the
+      // original since the fix (a symlink to another file, a directory) is
+      // not ours to overwrite — and copyFile/chmod would follow a symlink.
+      const current = await lstat(originalPath).catch(() => undefined);
+      if (current && !current.isFile()) {
+        console.log(`  ${chalk.red('x')} Skipped ${originalPath}: it is now ${current.isSymbolicLink() ? 'a symlink' : 'not a regular file'}; restore it by hand from ${backupFilePath}`);
+        continue;
+      }
       await copyFile(backupFilePath, originalPath);
       // The backup copy kept the original permissions; restore them too
       // (permission fixes such as chmod 600 are part of the rollback).

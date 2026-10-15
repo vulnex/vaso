@@ -198,6 +198,16 @@ export interface ScanResult {
     passed: number;
     total: number;
   };
+  /** Set by `scan --diff`: findings compared with the saved baseline. */
+  baselineDiff?: BaselineDiffSummary;
+}
+
+/** `scan --diff` outcome, as carried in reports. Findings are check ids. */
+export interface BaselineDiffSummary {
+  baselineTimestamp: string;
+  newFindings: string[];
+  resolvedFindings: string[];
+  unchanged: number;
 }
 
 export interface ScanOptions {

@@ -338,7 +338,7 @@ describe('fetchAndUpdateFeed', () => {
 
     vi.stubGlobal('fetch', vi.fn().mockImplementation((url: string) => {
       if (url.endsWith('.sig')) {
-        return Promise.resolve({ ok: true, text: () => Promise.resolve(sig), arrayBuffer: () => Promise.resolve(Buffer.from(sig).buffer) });
+        return Promise.resolve({ ok: true, text: () => Promise.resolve(sig), arrayBuffer: () => Promise.resolve(new TextEncoder().encode(sig).buffer) });
       }
       return Promise.resolve({ ok: true, text: () => Promise.resolve(feedBytes.toString()), arrayBuffer: () => Promise.resolve(feedBytes.buffer.slice(feedBytes.byteOffset, feedBytes.byteOffset + feedBytes.byteLength)) });
     }));
@@ -381,7 +381,7 @@ describe('fetchAndUpdateFeed', () => {
 
     vi.stubGlobal('fetch', vi.fn().mockImplementation((url: string) => {
       if (url.endsWith('.sig')) {
-        return Promise.resolve({ ok: true, text: () => Promise.resolve(badSig), arrayBuffer: () => Promise.resolve(Buffer.from(badSig).buffer) });
+        return Promise.resolve({ ok: true, text: () => Promise.resolve(badSig), arrayBuffer: () => Promise.resolve(new TextEncoder().encode(badSig).buffer) });
       }
       return Promise.resolve({ ok: true, text: () => Promise.resolve(feedBytes.toString()), arrayBuffer: () => Promise.resolve(feedBytes.buffer.slice(feedBytes.byteOffset, feedBytes.byteOffset + feedBytes.byteLength)) });
     }));
@@ -414,7 +414,7 @@ describe('fetchAndUpdateFeed', () => {
 
     vi.stubGlobal('fetch', vi.fn().mockImplementation((url: string) => {
       if (url.endsWith('.sig')) {
-        return Promise.resolve({ ok: true, text: () => Promise.resolve(sig), arrayBuffer: () => Promise.resolve(Buffer.from(sig).buffer) });
+        return Promise.resolve({ ok: true, text: () => Promise.resolve(sig), arrayBuffer: () => Promise.resolve(new TextEncoder().encode(sig).buffer) });
       }
       return Promise.resolve({ ok: true, text: () => Promise.resolve(feedBytes.toString()), arrayBuffer: () => Promise.resolve(feedBytes.buffer.slice(feedBytes.byteOffset, feedBytes.byteOffset + feedBytes.byteLength)) });
     }));
@@ -439,7 +439,7 @@ describe('fetchAndUpdateFeed', () => {
 
     vi.stubGlobal('fetch', vi.fn().mockImplementation((url: string) => {
       if (url.endsWith('.sig')) {
-        return Promise.resolve({ ok: true, text: () => Promise.resolve(sig), arrayBuffer: () => Promise.resolve(Buffer.from(sig).buffer) });
+        return Promise.resolve({ ok: true, text: () => Promise.resolve(sig), arrayBuffer: () => Promise.resolve(new TextEncoder().encode(sig).buffer) });
       }
       return Promise.resolve({ ok: true, text: () => Promise.resolve(feedBytes.toString()), arrayBuffer: () => Promise.resolve(feedBytes.buffer.slice(feedBytes.byteOffset, feedBytes.byteOffset + feedBytes.byteLength)) });
     }));
@@ -494,7 +494,7 @@ describe('fetchAndUpdateFeed', () => {
 
     vi.stubGlobal('fetch', vi.fn().mockImplementation((url: string) => {
       if (url.endsWith('.sig')) {
-        return Promise.resolve({ ok: true, text: () => Promise.resolve(sig), arrayBuffer: () => Promise.resolve(Buffer.from(sig).buffer) });
+        return Promise.resolve({ ok: true, text: () => Promise.resolve(sig), arrayBuffer: () => Promise.resolve(new TextEncoder().encode(sig).buffer) });
       }
       return Promise.resolve({ ok: true, text: () => Promise.resolve(feedBytes.toString()), arrayBuffer: () => Promise.resolve(feedBytes.buffer.slice(feedBytes.byteOffset, feedBytes.byteOffset + feedBytes.byteLength)) });
     }));

@@ -15,7 +15,14 @@ export interface FixCommandOptions {
 }
 
 export async function runFix(options: FixCommandOptions): Promise<void> {
-  if (options.rollback) {
+  // `--rollback ""` is falsy but still a rollback request: it must never fall
+  // through to applying fixes.
+  if (options.rollback !== undefined && options.rollback !== false) {
+    if (options.rollback === '') {
+      console.error(chalk.red('--rollback needs a backup name, or no value for the latest one'));
+      process.exitCode = 2;
+      return;
+    }
     await rollback(typeof options.rollback === 'string' ? options.rollback : undefined);
     return;
   }

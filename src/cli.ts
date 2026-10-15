@@ -241,8 +241,9 @@ program
 
 program
   .command('update')
-  .description('Update IOC database from remote threat feed')
-  .option('--url <url>', 'custom feed URL')
+  .description('Update the IOC and advisory databases from the signed remote feeds')
+  .option('--url <url>', 'custom IOC feed URL')
+  .option('--advisory-url <url>', 'custom advisory feed URL')
   .option('--force', 'force update even if feed is not stale')
   .action(async (options) => {
     const { runUpdate } = await import('./commands/update.js');
@@ -308,6 +309,7 @@ extCommand
   .description('List loaded user plugins')
   .option('-f, --format <format>', 'output format (terminal, json)', 'terminal')
   .action(async (options) => {
+    if (!validateFormatOption(options as { format?: string }, ['terminal', 'json'])) return;
     const { runExtList } = await import('./commands/user-plugin.js');
     await runExtList(options);
   });
@@ -318,6 +320,7 @@ extCommand
   .argument('<name>', 'plugin name')
   .option('-f, --format <format>', 'output format (terminal, json)', 'terminal')
   .action(async (name: string, options: Record<string, unknown>) => {
+    if (!validateFormatOption(options as { format?: string }, ['terminal', 'json'])) return;
     const { runExtInfo } = await import('./commands/user-plugin.js');
     await runExtInfo(name, options as { format?: string });
   });
@@ -331,6 +334,7 @@ rulesCommand
   .description('List loaded declarative rules')
   .option('-f, --format <format>', 'output format (terminal, json)', 'terminal')
   .action(async (options) => {
+    if (!validateFormatOption(options as { format?: string }, ['terminal', 'json'])) return;
     const { runRulesList } = await import('./commands/rules.js');
     await runRulesList(options);
   });
@@ -341,6 +345,7 @@ rulesCommand
   .argument('<file>', 'path to YAML rule file')
   .option('-f, --format <format>', 'output format (terminal, json)', 'terminal')
   .action(async (file: string, options: Record<string, unknown>) => {
+    if (!validateFormatOption(options as { format?: string }, ['terminal', 'json'])) return;
     const { runRulesValidate } = await import('./commands/rules.js');
     await runRulesValidate(file, options as { format?: string });
   });
@@ -349,6 +354,7 @@ rulesCommand
   .command('init')
   .description('Generate a starter rule template')
   .option('--dir <path>', 'target directory (default: ~/.vaso/rules/)')
+  .option('--force', 'overwrite an existing example.yaml')
   .action(async (options) => {
     const { runRulesInit } = await import('./commands/rules.js');
     await runRulesInit(options);

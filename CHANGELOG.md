@@ -6,6 +6,25 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Security
+
+- **`vaso fix --rollback` no longer writes through symlinks.** A restored file that has been replaced by a symlink (or by anything but a regular file) since the fix run is skipped with a message instead of having the backup copied and chmod-ed onto the link target. The backup stays pending.
+- **`vaso visualize` keeps every file inside `-o`.** The agent type from the input scan JSON went into file names unsanitized, so a crafted scan file could write outside the output directory.
+- **Terminal output neutralizes control characters from scanned files.** Config values, file and server names, and the cwd project name could carry escape sequences (screen clear, OSC 8 hyperlinks, window title) to the terminal; they are now shown as `\xNN` in the terminal report and `vaso mcp list`. CSV cells get the same treatment, JUnit drops characters XML can't carry (and keeps line breaks in attributes as references), Markdown keeps agent names and messages on one line without raw HTML, and SARIF `artifactLocation.uri` is a percent-encoded URI.
+- **`--snapshot` files are held to what the probe can produce**: at most the remote-output cap overall, 32 MiB per file (base64 allowance) and the 256 MiB content budget. A hand-made snapshot with a huge file exhausted memory. `scan`, `detect` and `probe validate` share one loader, which also requires an absolute `homedir` and a well-formed `privilege` block.
+- **Feed and probe downloads are size-capped before verification** (16 MiB per feed, 4 KiB per signature, 64 MiB per probe binary).
+
+### Fixed
+
+- **`scan --save-baseline --diff` compared the scan with itself** — the new baseline was saved before the old one was loaded, so no regression was ever reported. The diff is now taken first, and reports carry it as `baselineDiff` (new / resolved finding ids), not only stderr.
+- **`vaso update` reports failure.** It exited 0 on a bad signature or an unreachable feed, and a failed IOC update skipped the advisory update. Both feeds now update independently and either failing exits 2. `--advisory-url` sets the advisory feed (`--url` stays the IOC feed).
+- **An unreadable config directory is a finding, not a clean scan.** A chmod-000 `~/.claude` (or Codex, Copilot, Cursor, Windsurf, Claude Desktop, Lyrie config) dropped its files silently and scored 100; it now yields CONFIG-LOAD.
+- **YAML with a self-referencing alias** is a CONFIG-LOAD error instead of crashing HM-001/006/007 with a stack overflow, and YAML warnings no longer bypass `--silent`.
+- **SSH targets are validated**: an empty user, a user or host starting with `-`, whitespace, or a port outside 1–65535 (in `--host` or an inventory) exits 2 instead of failing later as an unreachable host; a host listed twice is scanned once.
+- **Exit codes**: `probe validate` exits 2 for an unusable snapshot (was 1, or a TypeError), `rules validate` on an unreadable file and `rules init` failures exit 2; `fix --rollback ""` no longer falls through to applying fixes.
+- `rules init` no longer overwrites an existing `example.yaml` (use `--force`); `rules list -f json` prints `[]` when empty; `ext list/info` and `rules list/validate` reject unknown `-f` values; `scan --snapshot --output-dir` names the report after the snapshot's host.
+- Registering an adapter twice (`registerAllAdapters()` called again) throws, as for checks, instead of doubling every installation.
+
 ## [1.2.1] - 2026-10-13
 
 ### Added

@@ -5,6 +5,7 @@ import type { ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { loadConfig } from '../core/config-loader.js';
+import { loadConfigIfPresent } from './load-if-present.js';
 import { nvmBinaryGlob, npmPackageJsonGlobs } from './nvm-binary.js';
 import { discoverCliInstalls, retainedVersionGlobs, type RetainedVersionsDir } from './cli-installs.js';
 import { getUserHomeDirs } from './openclaw.js';
@@ -37,10 +38,8 @@ async function loadSettingsFiles(dir: string, fs: FSProvider) {
   const configFiles = [];
   for (const filename of SETTINGS_FILES) {
     const filePath = join(dir, filename);
-    if (!(await fs.access(filePath))) continue;
-    try {
-      configFiles.push(await loadConfig(filePath, fs));
-    } catch {}
+    const loaded = await loadConfigIfPresent(filePath, fs);
+    if (loaded) configFiles.push(loaded);
   }
   return configFiles;
 }

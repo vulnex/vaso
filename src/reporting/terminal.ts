@@ -1,6 +1,7 @@
 import chalk from 'chalk';
 import type { ScanResult, CheckResult, Severity } from '../core/types.js';
 import type { Reporter } from './reporter.js';
+import { escapeControlCharsDeep } from './text-safety.js';
 
 /** Evidence items listed per finding in terminal output. */
 const MAX_TERMINAL_EVIDENCE = 20;
@@ -22,7 +23,18 @@ const SEVERITY_ICONS: Record<Severity, string> = {
 export class TerminalReporter implements Reporter {
   readonly format = 'terminal';
 
-  render(result: ScanResult): string {
+  render(scan: ScanResult): string {
+    // Everything printed comes from scanned files; neutralize terminal
+    // control sequences before any of it reaches the screen. Config contents
+    // are never printed, so they are not copied.
+    const result: ScanResult = {
+      ...scan,
+      agents: scan.agents.map(a => ({
+        ...a,
+        installation: { ...escapeControlCharsDeep({ ...a.installation, configFiles: [] }), configFiles: a.installation.configFiles },
+        results: escapeControlCharsDeep(a.results),
+      })),
+    };
     const lines: string[] = [];
 
     lines.push('');

@@ -18,6 +18,7 @@
  */
 
 import { createHash } from 'node:crypto';
+import { readBodyCapped } from '../core/http-body.js';
 import { readFile, writeFile, mkdir, access, chmod } from 'node:fs/promises';
 import { constants as FS } from 'node:fs';
 import { homedir } from 'node:os';
@@ -126,7 +127,8 @@ export async function resolveProbeBinary(
     );
   }
 
-  const buf = Buffer.from(await res.arrayBuffer());
+  // Probe binaries are ~3 MiB; the checksum is verified only after the read
+  const buf = await readBodyCapped(res, 64 * 1024 * 1024);
   const got = sha256(buf);
   if (got !== expected) {
     throw new Error(

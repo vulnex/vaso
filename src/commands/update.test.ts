@@ -91,9 +91,27 @@ describe('runUpdate', () => {
       message: 'Network error',
     });
 
+    mockFetchAdvisory.mockResolvedValue({ success: true, message: 'ok' });
+    mockGetAdvisory.mockReturnValue({ advisories: [] } as any);
+
     await runUpdate();
     expect(consoleLogs.some(l => l.includes('Network error'))).toBe(true);
     expect(consoleLogs.some(l => l.includes('Falling back to bundled IOC data'))).toBe(true);
+    // The advisory feed is still updated, and the failure shows in the exit code
+    expect(mockFetchAdvisory).toHaveBeenCalled();
+    expect(process.exitCode).toBe(2);
+    process.exitCode = undefined;
+  });
+
+  it('exits 2 when only the advisory update fails', async () => {
+    mockFetchIOC.mockResolvedValue({ success: true, message: 'ok' });
+    mockGetIOC.mockReturnValue(makeIOCDb() as any);
+    mockFetchAdvisory.mockResolvedValue({ success: false, message: 'Advisory feed signature verification failed.' });
+    mockGetAdvisory.mockReturnValue({ advisories: [] } as any);
+
+    await runUpdate();
+    expect(process.exitCode).toBe(2);
+    process.exitCode = undefined;
   });
 
   it('reloads IOC database after successful update', async () => {

@@ -59,9 +59,36 @@ export function parseSSHTarget(target: string): SSHTarget {
   if (!host) {
     throw new Error(`Invalid SSH target "${target}": missing hostname`);
   }
+  assertSSHTargetParts(target, user, host, port);
 
   const label = port === 22 ? `${user}@${host}` : `${user}@${host}:${port}`;
   return { user, host, port, label };
+}
+
+/**
+ * User, host and port as ssh will receive them. The user@host word is passed
+ * as one argv entry, so a leading `-` would be read as an ssh option, and an
+ * empty user or a port outside 1–65535 only fails later, as an unreachable host.
+ */
+export function assertSSHTargetParts(target: string, user: string, host: string, port: number): void {
+  const bad = (why: string) => new Error(`Invalid SSH target "${target}": ${why}`);
+  if (!user) throw bad('missing user (expected user@host[:port])');
+  if (user.startsWith('-') || host.startsWith('-')) throw bad('user and host may not start with "-"');
+  if (/[\s\u0000-\u001f\u007f]/.test(user + host)) throw bad('whitespace or control characters');
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw bad(`port must be 1–65535 (got ${String(port)})`);
+}
+
+/** Targets without repeats (same user, host and port); returns the dropped labels. */
+export function uniqueTargets(targets: SSHTarget[]): { targets: SSHTarget[]; duplicates: string[] } {
+  const seen = new Set<string>();
+  const out: SSHTarget[] = [];
+  const duplicates: string[] = [];
+  for (const t of targets) {
+    const key = `${t.user}@${t.host}:${t.port}`;
+    if (seen.has(key)) duplicates.push(t.label ?? key);
+    else { seen.add(key); out.push(t); }
+  }
+  return { targets: out, duplicates };
 }
 
 /**

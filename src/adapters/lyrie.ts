@@ -4,7 +4,7 @@ import type { AgentInstallation, CliInstall, GatewayInfo, ModelRef, ParsedConfig
 import type { ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
-import { loadConfig } from '../core/config-loader.js';
+import { loadConfigIfPresent } from './load-if-present.js';
 
 /**
  * Lyrie (OTT-Cybersecurity-LLC/lyrie-ai, 3.x) is a Bun turborepo that runs
@@ -136,12 +136,7 @@ export async function findLyrieCheckouts(fs: FSProvider): Promise<LyrieCheckout[
 }
 
 async function tryLoad(path: string, fs: FSProvider): Promise<ParsedConfig | undefined> {
-  try {
-    if (!(await fs.access(path))) return undefined;
-    return await loadConfig(path, fs);
-  } catch {
-    return undefined;
-  }
+  return loadConfigIfPresent(path, fs);
 }
 
 const STATE_MARKERS = [

@@ -2,6 +2,19 @@ import type { ScanResult, Severity } from '../core/types.js';
 import type { Reporter } from './reporter.js';
 import { renderOwaspAgenticCoverageMarkdown } from './owasp-agentic.js';
 import { renderOwaspMcpCoverageMarkdown } from './owasp-mcp.js';
+import { escapeControlChars } from './text-safety.js';
+
+/**
+ * Text from scanned hosts on one Markdown line: no line breaks (a newline in a
+ * cwd folder name would start a new heading), no raw HTML, no table breaks.
+ */
+function mdInline(s: string): string {
+  return escapeControlChars(s.replace(/[\r\n\u2028\u2029]+/g, ' '))
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/\|/g, '\\|');
+}
 
 const SEVERITY_EMOJI: Record<Severity, string> = {
   critical: 'x',
@@ -39,8 +52,8 @@ export class MarkdownReporter implements Reporter {
 
     for (const agent of result.agents) {
       const agentLabel = agent.installation.agentName
-        ? `${agent.agent} (agent: ${agent.installation.agentName})`
-        : agent.agent;
+        ? `${mdInline(agent.agent)} (agent: ${mdInline(agent.installation.agentName)})`
+        : mdInline(agent.agent);
       lines.push(`## ${agentLabel} (Score: ${agent.score}, Grade: ${agent.grade})`);
       lines.push('');
 
@@ -53,7 +66,7 @@ export class MarkdownReporter implements Reporter {
         lines.push('| ID | Name | Severity | Message |');
         lines.push('|----|------|----------|---------|');
         for (const r of failed) {
-          lines.push(`| ${r.id} | ${r.name} | ${r.severity} | ${r.message} |`);
+          lines.push(`| ${r.id} | ${r.name} | ${r.severity} | ${mdInline(r.message)} |`);
         }
         lines.push('');
       }

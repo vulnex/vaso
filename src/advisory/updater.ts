@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs';
+import { readBodyCapped } from '../core/http-body.js';
 import { mkdir, readFile, writeFile, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
@@ -18,6 +19,10 @@ const FEED_FILE = 'advisory-feed.json';
 const SIG_FILE = 'advisory-feed.json.sig';
 const METADATA_FILE = 'metadata.json';
 const FETCH_TIMEOUT_MS = 15_000;
+/** Published feeds are well under 1 MiB; anything far larger is not a feed. */
+const MAX_FEED_BYTES = 16 * 1024 * 1024;
+/** A base64 Ed25519 signature is 88 bytes. */
+const MAX_SIGNATURE_BYTES = 4096;
 
 export const DEFAULT_ADVISORY_FEED_URL =
   'https://raw.githubusercontent.com/vulnex/vaso/main/feeds/advisory-feed.json';
@@ -159,8 +164,14 @@ export async function fetchAndUpdateAdvisoryFeed(
     return { success: false, message: `Advisory signature fetch failed: HTTP ${sigResponse.status}` };
   }
 
-  const feedBytes = Buffer.from(await feedResponse.arrayBuffer());
-  const sigBase64 = (await sigResponse.text()).trim();
+  let feedBytes: Buffer;
+  let sigBase64: string;
+  try {
+    feedBytes = await readBodyCapped(feedResponse, MAX_FEED_BYTES);
+    sigBase64 = (await readBodyCapped(sigResponse, MAX_SIGNATURE_BYTES)).toString('utf-8').trim();
+  } catch (err) {
+    return { success: false, message: `Failed to read advisory feed: ${(err as Error).message}` };
+  }
 
   let feed: AdvisoryFeed;
   try {

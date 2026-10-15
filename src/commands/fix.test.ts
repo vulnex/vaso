@@ -49,6 +49,14 @@ describe('runFix', () => {
     expect(mockRollback).toHaveBeenCalled();
   });
 
+  it('never runs fixes for an empty --rollback value', async () => {
+    await runFix({ rollback: '' });
+    expect(mockRollback).not.toHaveBeenCalled();
+    expect(mockScanEngine).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(2);
+    process.exitCode = undefined;
+  });
+
   it('shows message when no agents detected', async () => {
     const mockScan = vi.fn().mockResolvedValue({ agents: [] });
     mockScanEngine.mockImplementation(function () { return { scan: mockScan } as any; });

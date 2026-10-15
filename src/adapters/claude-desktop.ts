@@ -4,7 +4,7 @@ import type { AgentInstallation, GatewayInfo, ModelRef, ParsedConfig, ZoneGraph 
 import type { ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
-import { loadConfig } from '../core/config-loader.js';
+import { loadConfigIfPresent } from './load-if-present.js';
 import { getUserHomeDirs } from './openclaw.js';
 
 const CONFIG_FILE = 'claude_desktop_config.json';
@@ -103,10 +103,8 @@ async function readLocalStorageModel(installDir: string, fs: FSProvider): Promis
 async function loadDesktopConfig(dir: string, fs: FSProvider): Promise<ParsedConfig[]> {
   const configFiles: ParsedConfig[] = [];
   const filePath = join(dir, CONFIG_FILE);
-  if (!(await fs.access(filePath))) return configFiles;
-  try {
-    configFiles.push(await loadConfig(filePath, fs));
-  } catch {}
+  const loaded = await loadConfigIfPresent(filePath, fs);
+  if (loaded) configFiles.push(loaded);
   return configFiles;
 }
 

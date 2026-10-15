@@ -1,4 +1,5 @@
 import { verify as cryptoVerify, createPublicKey } from 'node:crypto';
+import { readBodyCapped } from '../core/http-body.js';
 import { existsSync, readFileSync } from 'node:fs';
 import { mkdir, readFile, writeFile, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -19,6 +20,10 @@ const FEED_FILE = 'feed.json';
 const SIG_FILE = 'feed.json.sig';
 const METADATA_FILE = 'metadata.json';
 const FETCH_TIMEOUT_MS = 15_000;
+/** Published feeds are well under 1 MiB; anything far larger is not a feed. */
+const MAX_FEED_BYTES = 16 * 1024 * 1024;
+/** A base64 Ed25519 signature is 88 bytes. */
+const MAX_SIGNATURE_BYTES = 4096;
 
 // ── Signature verification ──────────────────────────────────────────
 
@@ -221,8 +226,14 @@ export async function fetchAndUpdateFeed(options: FetchOptions = {}): Promise<Up
     return { success: false, message: `Signature fetch failed: HTTP ${sigResponse.status}` };
   }
 
-  const feedBytes = Buffer.from(await feedResponse.arrayBuffer());
-  const sigBase64 = (await sigResponse.text()).trim();
+  let feedBytes: Buffer;
+  let sigBase64: string;
+  try {
+    feedBytes = await readBodyCapped(feedResponse, MAX_FEED_BYTES);
+    sigBase64 = (await readBodyCapped(sigResponse, MAX_SIGNATURE_BYTES)).toString('utf-8').trim();
+  } catch (err) {
+    return { success: false, message: `Failed to read feed: ${(err as Error).message}` };
+  }
 
   // Parse and validate structure
   let feed: IOCFeed;

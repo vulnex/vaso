@@ -1,3 +1,4 @@
+import { pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
 import type { ScanResult, AgentScanResult, CheckResult, Severity } from '../core/types.js';
 import type { Reporter } from './reporter.js';
@@ -5,6 +6,23 @@ import { VERSION } from '../version.js';
 import { checkRegistry } from '../core/check-registry.js';
 import { owaspAgenticForCheckId, OWASP_AGENTIC_TITLES } from './owasp-agentic.js';
 import { owaspMcpForCheckId, OWASP_MCP_TITLES } from './owasp-mcp.js';
+
+/**
+ * SARIF `artifactLocation.uri` must be a URI reference: absolute paths become
+ * file: URIs, other references are percent-encoded per segment (scanned file
+ * names may hold spaces, `#`, `?` or `<`).
+ */
+export function toSarifUri(file: string | undefined): string | undefined {
+  if (!file) return file;
+  if (file.startsWith('/')) return pathToFileURL(file).href;
+  const win = /^([A-Za-z]):[\\/](.*)$/.exec(file);
+  if (win) return `file:///${win[1]}:/${encodeSegments(win[2].replace(/\\/g, '/'))}`;
+  return encodeSegments(file);
+}
+
+function encodeSegments(path: string): string {
+  return path.split('/').map(seg => encodeURIComponent(seg)).join('/');
+}
 
 const SARIF_SEVERITY_MAP: Record<Severity, string> = {
   critical: 'error',
@@ -131,7 +149,7 @@ export class SarifReporter implements Reporter {
         if (check.evidence) {
           (sarifResult.locations as object[]) = check.evidence.map(e => ({
             physicalLocation: {
-              artifactLocation: { uri: e.file },
+              artifactLocation: { uri: toSarifUri(e.file) },
               ...(e.line ? {
                 region: {
                   startLine: e.line,

@@ -1,4 +1,5 @@
 import chalk from 'chalk';
+import { escapeControlCharsDeep } from '../reporting/text-safety.js';
 import { writeFile } from 'node:fs/promises';
 import { ScanEngine } from '../core/engine.js';
 import { adapterRegistry } from '../adapters/registry.js';
@@ -147,7 +148,8 @@ export async function runMCPList(options: { format: string; path?: string[] }): 
 
     console.log(chalk.bold(`\nMCP Servers (${result.totalServers} total)\n`));
 
-    for (const config of result.configs) {
+    // Server names, commands and URLs come from scanned config files
+    for (const config of escapeControlCharsDeep(result.configs)) {
       console.log(chalk.cyan(`  ${config.source}`));
       console.log(chalk.dim(`  ${config.filePath}`));
 
