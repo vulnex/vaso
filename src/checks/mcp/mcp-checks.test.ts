@@ -263,6 +263,20 @@ describe('MCP-001: Config Discovery', () => {
 
 // ==================== MCP-002: Transport Security ====================
 describe('MCP-002: Transport Security', () => {
+  it('rates a bind to 0.0.0.0 made only inside a container a warning (code-index-mcp), an unconditional one critical', async () => {
+    const docker = [
+      'mcp.settings.port = args.port',
+      '# Auto-detect Docker and bind to 0.0.0.0 so port forwarding works',
+      'if _is_docker():',
+      '    mcp.settings.host = "0.0.0.0"',
+    ].join('\n');
+    const d = await mcp002.run(makeContext({ mcpServerSources: [{ serverName: 'code-index', language: 'python', sourceCode: docker }] }));
+    expect(d.passed).toBe(false);
+    expect(d.severity).toBe('warning');
+    const always = await mcp002.run(makeContext({ mcpServerSources: [{ serverName: 'srv', language: 'python', sourceCode: 'uvicorn.run(app, host="0.0.0.0", port=8000)' }] }));
+    expect(always.severity).toBe('critical');
+  });
+
   it('fails for HTTP on 0.0.0.0', async () => {
     const ctx = makeContext({ mcpConfigs: insecureConfigs });
     const result = await mcp002.run(ctx);

@@ -10,6 +10,9 @@ const ALL_INTERFACES_BIND = [
   /["'`]--host["'`]\s*,\s*["'`]0\.0\.0\.0["'`]/,
 ];
 
+/** A condition that the code is running in a container. */
+const CONTAINER_CONDITION = /docker|container|kubernetes|\bk8s\b|\bpodman\b/i;
+
 /** Any sign the server authenticates callers. */
 const AUTH_IN_SOURCE =
   /requireBearerAuth|bearerAuth|verify(?:Access)?Token|TokenVerifier|AuthSettings|BearerAuthBackend|authenticate|passport|jsonwebtoken|jwt\.verify|oauth|basicAuth|x-api-key|api[_-]?key|authorization/i;
@@ -81,19 +84,32 @@ export const mcp002 = defineCheck({
 
     // Server source (local, --resolve-packages, --source): an HTTP listener on
     // every interface with no authentication anywhere in the code.
+    let containerOnly = 0;
     for (const source of ctx.mcpServerSources ?? []) {
       if (!source.sourceCode || AUTH_IN_SOURCE.test(source.sourceCode)) continue;
-      const bind = sourceSegments(source.sourceCode).find((seg) => ALL_INTERFACES_BIND.some((re) => re.test(seg.text)));
-      if (!bind) continue;
+      const segments = sourceSegments(source.sourceCode);
+      const at = segments.findIndex((seg) => ALL_INTERFACES_BIND.some((re) => re.test(seg.text)));
+      if (at < 0) continue;
+      const bind = segments[at];
+      // Only inside a container (`if _is_docker(): host = "0.0.0.0"`): binding
+      // every interface is what makes the container's port forwardable; the
+      // host-side exposure is the published port's
+      const inContainerOnly = CONTAINER_CONDITION.test(bind.text)
+        || segments.slice(Math.max(0, at - 3), at).some((seg) => /\bif\b|\?/.test(seg.text) && CONTAINER_CONDITION.test(seg.text));
+      if (inContainerOnly) containerOnly++;
       evidence.push({
         file: source.localPath ?? source.packageName ?? source.serverName,
         line: bind.line,
         snippet: segmentSnippet(bind),
-        detail: `Server "${source.serverName}" listens on every network interface (0.0.0.0) and its code has no authentication — anyone who can reach the host can call its tools`,
+        detail: inContainerOnly
+          ? `Server "${source.serverName}" listens on every interface (0.0.0.0) when it detects a container, and its code has no authentication — anyone who can reach the published port can call its tools; publish it on 127.0.0.1 only`
+          : `Server "${source.serverName}" listens on every network interface (0.0.0.0) and its code has no authentication — anyone who can reach the host can call its tools`,
       });
     }
 
     return h.fromEvidence(evidence, {
+      // Everything found binds every interface only inside a container
+      ...(evidence.length > 0 && containerOnly === evidence.length ? { severity: 'warning' as const } : {}),
       passed: 'All MCP transports use secure configurations',
       failed: (n) => `Found ${n} insecure transport configuration(s)`,
     });
