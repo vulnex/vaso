@@ -75,3 +75,24 @@ describe('scripts/prepare.mjs in an installed tarball', () => {
     }
   });
 });
+
+describe('scripts/pack-release.mjs', () => {
+  it('packs the release tarball without the prepare hook, leaving the working tree alone', async () => {
+    const { mkdtempSync, rmSync, readdirSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const dest = mkdtempSync(join(tmpdir(), 'vaso-release-'));
+    const before = readFileSync(join(root, 'package.json'), 'utf-8');
+    try {
+      execFileSync(process.execPath, [join(root, 'scripts', 'pack-release.mjs'), dest], { cwd: root, stdio: 'ignore' });
+      const [tgz] = readdirSync(dest).filter(f => f.endsWith('.tgz'));
+      const files = execFileSync('tar', ['-tzf', join(dest, tgz)], { encoding: 'utf-8' }).split('\n').filter(Boolean);
+      expect(files).toEqual(expect.arrayContaining(['package/dist/cli.js', 'package/bin/vaso', 'package/probe/checksums.json']));
+      expect(files).not.toContain('package/scripts/prepare.mjs');
+      const pkg = JSON.parse(execFileSync('tar', ['-xzOf', join(dest, tgz), 'package/package.json'], { encoding: 'utf-8' }));
+      expect(pkg.scripts.prepare).toBeUndefined();
+      expect(readFileSync(join(root, 'package.json'), 'utf-8')).toBe(before);
+    } finally {
+      rmSync(dest, { recursive: true, force: true });
+    }
+  }, 120_000);
+});
