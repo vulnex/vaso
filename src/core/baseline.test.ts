@@ -94,3 +94,52 @@ describe('diffResults', () => {
     expect(diff.newFindings[0].id).toBe('CFG-001');
   });
 });
+
+describe('diffResults keys', () => {
+  it('treats a finding whose wording or line moved as unchanged', () => {
+    const before = makeCheckResult('CFG-001', false);
+    before.evidence = [{ file: '/a/config.json', line: 3, detail: 'old wording' }];
+    const after = makeCheckResult('CFG-001', false);
+    after.evidence = [{ file: '/a/config.json', line: 9, detail: 'new wording' }];
+    const diff = diffResults(makeScanResult([after]), makeScanResult([before]));
+    expect(diff.unchangedFindings).toHaveLength(1);
+    expect(diff.newFindings).toHaveLength(0);
+    expect(diff.resolvedFindings).toHaveLength(0);
+  });
+
+  it('still reports a finding in a new file as new', () => {
+    const before = makeCheckResult('CFG-001', false);
+    before.evidence = [{ file: '/a/config.json' }];
+    const after = makeCheckResult('CFG-001', false);
+    after.evidence = [{ file: '/a/other.json' }];
+    const diff = diffResults(makeScanResult([after]), makeScanResult([before]));
+    expect(diff.newFindings).toHaveLength(1);
+    expect(diff.resolvedFindings).toHaveLength(1);
+  });
+});
+
+describe('baseline scopes', () => {
+  it('keeps a separate latest baseline per agent filter and host', async () => {
+    const { mkdtemp, rm, readdir } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const home = await mkdtemp(join(tmpdir(), 'vaso-bl-'));
+    const { vi } = await import('vitest');
+    vi.resetModules();
+    vi.doMock('node:os', async (orig) => ({ ...(await orig<typeof import('node:os')>()), homedir: () => home }));
+    try {
+      const { saveBaseline, loadBaseline } = await import('./baseline.js');
+      const hermes = makeScanResult([makeCheckResult('HM-001', false)]);
+      await saveBaseline(hermes, { agent: 'hermes' });
+      await saveBaseline(makeScanResult([]), {});
+      expect((await loadBaseline({ agent: 'hermes' }))?.agents[0].results[0].id).toBe('HM-001');
+      expect(await loadBaseline({ agent: 'abacus' })).toBeNull();
+      expect((await readdir(join(home, '.vaso', 'baselines'))).filter(f => f.startsWith('latest')).sort())
+        .toEqual(['latest-hermes.json', 'latest.json']);
+    } finally {
+      vi.doUnmock('node:os');
+      vi.resetModules();
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+});

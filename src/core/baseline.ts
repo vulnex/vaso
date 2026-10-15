@@ -13,7 +13,25 @@ export interface DiffResult {
   unchangedFindings: CheckResult[];
 }
 
-export async function saveBaseline(result: ScanResult): Promise<string> {
+/**
+ * What a baseline was taken of: every agent on this machine (`all`), or one
+ * agent (`-a`) and/or another host (snapshot / remote). Each scope keeps its
+ * own "latest", so `--save-baseline -a hermes` followed by `--diff -a abacus`
+ * no longer compares two different scans. The default scope keeps the
+ * historic `latest.json` name.
+ */
+export interface BaselineScope {
+  agent?: string;
+  host?: string;
+}
+
+function latestName(scope: BaselineScope = {}): string {
+  const parts = [scope.agent, scope.host].filter((p): p is string => Boolean(p))
+    .map(p => p.replace(/[^A-Za-z0-9._-]/g, '_'));
+  return parts.length === 0 ? 'latest.json' : `latest-${parts.join('--')}.json`;
+}
+
+export async function saveBaseline(result: ScanResult, scope: BaselineScope = {}): Promise<string> {
   // Scan history is private: owner-only dir and files, config contents stripped
   await mkdir(BASELINES_DIR, { recursive: true, mode: 0o700 });
   await chmod(BASELINES_DIR, 0o700);
@@ -22,15 +40,15 @@ export async function saveBaseline(result: ScanResult): Promise<string> {
   const json = toReportJson(result);
   await writeFileOwnerOnly(filePath, json);
 
-  // Also save as "latest"
-  const latestPath = join(BASELINES_DIR, 'latest.json');
+  // Also save as this scope's "latest"
+  const latestPath = join(BASELINES_DIR, latestName(scope));
   await writeFileOwnerOnly(latestPath, json);
 
   return filePath;
 }
 
-export async function loadBaseline(): Promise<ScanResult | null> {
-  const latestPath = join(BASELINES_DIR, 'latest.json');
+export async function loadBaseline(scope: BaselineScope = {}): Promise<ScanResult | null> {
+  const latestPath = join(BASELINES_DIR, latestName(scope));
   try {
     const content = await readFile(latestPath, 'utf-8');
     return JSON.parse(content) as ScanResult;
@@ -50,10 +68,15 @@ function installationKey(agent: ScanResult['agents'][number]): string {
   ].join(':');
 }
 
+/**
+ * Where a finding is, not how it is worded: the files its evidence names.
+ * Detail text, snippets and line numbers change with VASO's wording and with
+ * unrelated edits to the file, and made the same finding show as both new
+ * and resolved.
+ */
 function evidenceKey(finding: CheckResult): string {
   if (!finding.evidence || finding.evidence.length === 0) return '';
-  return finding.evidence
-    .map(e => `${e.file}:${e.line ?? ''}:${e.detail ?? e.snippet ?? ''}`)
+  return [...new Set(finding.evidence.filter(e => !e.mitigated).map(e => e.file ?? ''))]
     .sort()
     .join('|');
 }

@@ -369,10 +369,13 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
       result.host = snapshotFs.hostname();
     }
 
+    // One baseline per scan scope (agent filter, scanned host)
+    const baselineScope = { agent: options.agent, host: snapshotFs ? result.host : undefined };
+
     // Diff against the previous baseline — loaded before --save-baseline
     // replaces it, or a combined run would compare the scan with itself
     if (options.diff) {
-      const baseline = await loadBaseline();
+      const baseline = await loadBaseline(baselineScope);
       if (baseline) {
         const diff = diffResults(result, baseline);
         result.baselineDiff = {
@@ -382,6 +385,9 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
           unchanged: diff.unchangedFindings.length,
         };
         localLog(chalk.bold('\nDifferential Scan Results:'));
+        if (baseline.vasoVersion !== result.vasoVersion) {
+          localLog(chalk.dim(`  Baseline taken with VASO ${baseline.vasoVersion ?? '< 1.3.1'}; checks added or changed since may show as new or resolved.`));
+        }
         localLog(`  New findings: ${chalk.red(String(diff.newFindings.length))}`);
         localLog(`  Resolved: ${chalk.green(String(diff.resolvedFindings.length))}`);
         localLog(`  Unchanged: ${chalk.dim(String(diff.unchangedFindings.length))}`);
@@ -405,7 +411,7 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
     }
 
     if (options.saveBaseline) {
-      const path = await saveBaseline({ ...result, baselineDiff: undefined });
+      const path = await saveBaseline({ ...result, baselineDiff: undefined }, baselineScope);
       localLog(chalk.green(`Baseline saved to ${path}`));
     }
 

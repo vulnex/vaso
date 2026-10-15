@@ -186,6 +186,9 @@ export interface AgentScanResult {
 
 export interface ScanResult {
   timestamp: string;
+  /** VASO version that produced the result (1.3.1+), so a saved report or
+   *  baseline says which checks and wording it reflects. */
+  vasoVersion?: string;
   host?: string;
   label?: string;
   agents: AgentScanResult[];

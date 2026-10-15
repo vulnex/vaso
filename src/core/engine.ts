@@ -1,3 +1,4 @@
+import { VERSION } from '../version.js';
 import { dirname } from 'node:path';
 import type { ScanOptions, ScanResult, ScanContext, AgentScanResult, AgentInstallation, CheckResult } from './types.js';
 import type { CheckRegistry } from './check-registry.js';
@@ -71,6 +72,7 @@ export class ScanEngine {
 
     return {
       timestamp: new Date().toISOString(),
+      vasoVersion: VERSION,
       agents,
       totalScore,
       totalGrade: scoreToGrade(totalScore),
@@ -262,6 +264,7 @@ export class ScanEngine {
 
     return {
       timestamp: new Date().toISOString(),
+      vasoVersion: VERSION,
       agents: [agentResult],
       totalScore: score,
       totalGrade: scoreToGrade(score),
@@ -326,6 +329,7 @@ export class ScanEngine {
 
     return {
       timestamp: new Date().toISOString(),
+      vasoVersion: VERSION,
       agents: [agentResult],
       totalScore: score,
       totalGrade: scoreToGrade(score),
@@ -337,6 +341,7 @@ export class ScanEngine {
   private emptyResult(agentFilter?: string): ScanResult {
     return {
       timestamp: new Date().toISOString(),
+      vasoVersion: VERSION,
       agents: [],
       totalScore: 100,
       totalGrade: 'A',
