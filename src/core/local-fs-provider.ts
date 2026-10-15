@@ -1,33 +1,16 @@
 import { access as fsAccess, readdir, readFile, stat, realpath, readlink } from 'node:fs/promises';
 import { execFileSync, execFile } from 'node:child_process';
-import { constants as fsConstants, mkdtempSync, rmSync, type Dirent } from 'node:fs';
+import { constants as fsConstants, type Dirent } from 'node:fs';
 import { join } from 'node:path';
-import { homedir as osHomedir, hostname as osHostname, tmpdir } from 'node:os';
+import { homedir as osHomedir, hostname as osHostname } from 'node:os';
 import { promisify } from 'node:util';
 import type { FSProvider, DirentInfo, ExecResult, ExecOptions, PermissionQuery } from './fs-provider.js';
 import type { Platform } from './types.js';
 import { posixPermissionFacts } from './permissions.js';
 import { parsePrivateGroups } from './private-groups.js';
+import { planExec } from './exec-safety.js';
 
 const execFileAsync = promisify(execFile);
-
-/** Throwaway HOME for `isolateHome` execs; `cleanup` removes it. */
-function isolatedEnv(options?: ExecOptions): { env?: NodeJS.ProcessEnv; cwd?: string; cleanup: () => void } {
-  if (!options?.isolateHome) return { cwd: options?.cwd, cleanup: () => {} };
-  const home = mkdtempSync(join(tmpdir(), 'vaso-exec-'));
-  const env: NodeJS.ProcessEnv = {
-    ...process.env,
-    HOME: home,
-    USERPROFILE: home,
-    APPDATA: join(home, 'AppData', 'Roaming'),
-    LOCALAPPDATA: join(home, 'AppData', 'Local'),
-    XDG_CONFIG_HOME: join(home, '.config'),
-    XDG_DATA_HOME: join(home, '.local', 'share'),
-    XDG_CACHE_HOME: join(home, '.cache'),
-    XDG_STATE_HOME: join(home, '.local', 'state'),
-  };
-  return { env, cwd: options.cwd ?? home, cleanup: () => rmSync(home, { recursive: true, force: true }) };
-}
 
 /**
  * Reads a regular file only. A FIFO where a config is expected would block
@@ -160,13 +143,15 @@ export class LocalFSProvider implements FSProvider {
   }
 
   async exec(cmd: string, args: string[], options?: ExecOptions): Promise<ExecResult> {
-    const iso = isolatedEnv(options);
+    const plan = planExec(cmd, options);
+    if (plan.refuse) return { stdout: '', stderr: plan.refuse, exitCode: 126 };
     try {
       const result = await execFileAsync(cmd, args, {
         encoding: 'utf-8',
         timeout: options?.timeout ?? 10000,
-        cwd: iso.cwd,
-        ...(iso.env ? { env: iso.env } : {}),
+        cwd: plan.cwd,
+        ...(plan.env ? { env: plan.env } : {}),
+        ...(plan.uid !== undefined ? { uid: plan.uid, gid: plan.gid } : {}),
       });
       return {
         stdout: result.stdout,
@@ -181,22 +166,24 @@ export class LocalFSProvider implements FSProvider {
         exitCode: e.status ?? e.code ?? 1,
       };
     } finally {
-      iso.cleanup();
+      plan.cleanup();
     }
   }
 
   execSync(cmd: string, args: string[], options?: ExecOptions): string {
-    const iso = isolatedEnv(options);
+    const plan = planExec(cmd, options);
+    if (plan.refuse) throw new Error(plan.refuse);
     try {
       return execFileSync(cmd, args, {
         encoding: 'utf-8',
         timeout: options?.timeout ?? 10000,
         stdio: ['pipe', 'pipe', 'pipe'],
-        cwd: iso.cwd,
-        ...(iso.env ? { env: iso.env } : {}),
+        cwd: plan.cwd,
+        ...(plan.env ? { env: plan.env } : {}),
+        ...(plan.uid !== undefined ? { uid: plan.uid, gid: plan.gid } : {}),
       }).toString();
     } finally {
-      iso.cleanup();
+      plan.cleanup();
     }
   }
 

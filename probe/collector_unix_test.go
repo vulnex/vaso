@@ -74,3 +74,41 @@ func TestGlobFollowsSkillLinksOutsideTheTree(t *testing.T) {
 		t.Fatalf("link target not recorded: %v", snap.Symlinks)
 	}
 }
+
+func TestRootResolvesSystemBinariesBeforeUserDirs(t *testing.T) {
+	home := t.TempDir()
+	bin := filepath.Join(home, ".local", "bin")
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A planted `which` in a user's bin dir
+	if err := os.WriteFile(filepath.Join(bin, "which"), []byte("#!/bin/sh\necho pwned\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	homes := []UserHome{{Username: "eve", Path: home}}
+
+	orig := runningAsRoot
+	defer func() { runningAsRoot = orig }()
+
+	runningAsRoot = func() bool { return false }
+	if got := resolveBinary("which", buildAugmentedPath(homes, "/usr/bin:/bin")); got != filepath.Join(bin, "which") {
+		t.Fatalf("non-root: user dir first, got %s", got)
+	}
+	runningAsRoot = func() bool { return true }
+	path := buildAugmentedPath(homes, "/usr/bin:/bin")
+	if got := resolveBinary("which", path); got != "/usr/bin/which" {
+		t.Fatalf("root: system which must win, got %s", got)
+	}
+	// Commands run as root get a PATH without user-writable dirs
+	for _, d := range filepath.SplitList(rootChildPath(path)) {
+		if strings.HasPrefix(d, home) {
+			t.Fatalf("root child PATH contains a user dir: %s", d)
+		}
+	}
+	if rootSafe(filepath.Join(bin, "which")) {
+		t.Fatal("a user-owned binary is not root-safe")
+	}
+	if !rootSafe("/bin/sh") {
+		t.Fatal("/bin/sh should be root-safe")
+	}
+}

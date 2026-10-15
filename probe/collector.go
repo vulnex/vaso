@@ -141,14 +141,21 @@ var systemBinDirs = []string{"/opt/homebrew/bin", "/usr/local/bin", "/snap/bin"}
 // buildAugmentedPath prepends each home's user bin dirs to PATH (current-user
 // home first), so commands like `claude --version` resolve under non-interactive
 // SSH where rc-file PATH additions don't apply.
+//
+// As root the user dirs go last: a bare name (`which`, `ps`, an agent CLI)
+// must resolve to a system binary before any copy a local user planted in
+// their own ~/.local/bin. runCommand then decides who a resolved binary runs as.
 func buildAugmentedPath(homes []UserHome, basePath string) string {
-	var prefix []string
+	var userDirs []string
 	for _, h := range homes {
 		for _, d := range userBinDirs {
-			prefix = append(prefix, filepath.Join(h.Path, d))
+			userDirs = append(userDirs, filepath.Join(h.Path, d))
 		}
 	}
-	parts := prefix
+	var parts []string
+	if !runningAsRoot() {
+		parts = append(parts, userDirs...)
+	}
 	if basePath != "" {
 		parts = append(parts, basePath)
 	}
@@ -164,7 +171,23 @@ func buildAugmentedPath(homes []UserHome, basePath string) string {
 			parts = append(parts, d)
 		}
 	}
+	if runningAsRoot() {
+		parts = append(parts, userDirs...)
+	}
 	return strings.Join(parts, string(os.PathListSeparator))
+}
+
+// rootChildPath is the PATH a command run as root gets: only directories no
+// other user can write, so a root-owned script's `#!/usr/bin/env node` can't
+// pick up a node binary a local user dropped into their own bin dir.
+func rootChildPath(augmentedPath string) string {
+	var safe []string
+	for _, d := range filepath.SplitList(augmentedPath) {
+		if d != "" && rootSafe(d) {
+			safe = append(safe, d)
+		}
+	}
+	return strings.Join(safe, string(os.PathListSeparator))
 }
 
 // Collect executes the probe manifest and returns a snapshot.
@@ -711,14 +734,41 @@ func runCommand(req CommandRequest, augmentedPath string) CommandOutput {
 	}
 	cmd := exec.CommandContext(ctx, resolved, req.Args...)
 
+	// As root, nothing another user controls runs with root's privileges: a
+	// binary owned by a user runs as that user (privileges dropped), and a
+	// root-owned one only when no one else could have replaced it.
+	childPath := augmentedPath
+	dropUID, dropGID := -1, -1
+	if runningAsRoot() {
+		real, err := filepath.EvalSymlinks(resolved)
+		info, statErr := os.Stat(real)
+		if err != nil || statErr != nil {
+			return CommandOutput{Stderr: fmt.Sprintf("%s not found", req.Cmd), ExitCode: -1}
+		}
+		if uid, gid, ok := fileOwner(info); ok && uid != 0 {
+			dropUID, dropGID = uid, gid
+			dropTo(cmd, uid, gid)
+		} else if !rootSafe(real) {
+			return CommandOutput{
+				Stderr:   fmt.Sprintf("%s is writable by a non-root user; not run as root", real),
+				ExitCode: -1,
+			}
+		} else {
+			childPath = rootChildPath(augmentedPath)
+		}
+	}
+
 	env := os.Environ()
-	if augmentedPath != "" {
-		env = setEnv(env, "PATH", augmentedPath)
+	if childPath != "" {
+		env = setEnv(env, "PATH", childPath)
 	}
 	if req.IsolateHome {
 		home, err := os.MkdirTemp("", "vaso-exec-")
 		if err == nil {
 			defer os.RemoveAll(home)
+			if dropUID >= 0 {
+				_ = os.Chown(home, dropUID, dropGID) // the dropped user must be able to use it
+			}
 			for k, v := range map[string]string{
 				"HOME":            home,
 				"XDG_CONFIG_HOME": filepath.Join(home, ".config"),
