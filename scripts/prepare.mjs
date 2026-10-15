@@ -17,6 +17,8 @@ import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
 const distEntry = fileURLToPath(new URL('../dist/cli.js', import.meta.url));
+// An installed tarball ships dist/ and this script, not the sources
+const sourceEntry = fileURLToPath(new URL('../src/cli.ts', import.meta.url));
 
 function toolchainAvailable() {
   try {
@@ -27,7 +29,7 @@ function toolchainAvailable() {
   }
 }
 
-if (toolchainAvailable()) {
+if (existsSync(sourceEntry) && toolchainAvailable()) {
   const res = spawnSync('npm', ['run', 'build'], { stdio: 'inherit', shell: true });
   process.exit(res.status ?? 0);
 } else if (existsSync(distEntry)) {

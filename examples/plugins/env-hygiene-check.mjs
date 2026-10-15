@@ -17,13 +17,15 @@ import { readFileSync } from 'node:fs';
 
 // Patterns that suggest development/debug settings in production configs.
 // Each entry has a regex for line-by-line matching and a human-readable label.
+// The optional quote after the key matches JSON (`"NODE_ENV": "development"`)
+// as well as .env and YAML.
 const INSECURE_ENV_PATTERNS = [
-  { pattern: /\bNODE_ENV\s*[=:]\s*['"]?development/i, label: 'NODE_ENV set to development' },
-  { pattern: /\bDEBUG\s*[=:]\s*['"]?true/i, label: 'DEBUG mode enabled' },
-  { pattern: /\bLOG_LEVEL\s*[=:]\s*['"]?debug/i, label: 'LOG_LEVEL set to debug' },
-  { pattern: /\bSHOW_ERRORS\s*[=:]\s*['"]?true/i, label: 'SHOW_ERRORS enabled' },
-  { pattern: /\bDEV_MODE\s*[=:]\s*['"]?true/i, label: 'DEV_MODE enabled' },
-  { pattern: /\bVERBOSE\s*[=:]\s*['"]?true/i, label: 'VERBOSE mode enabled' },
+  { pattern: /\bNODE_ENV['"]?\s*[=:]\s*['"]?development/i, label: 'NODE_ENV set to development' },
+  { pattern: /\bDEBUG['"]?\s*[=:]\s*['"]?true/i, label: 'DEBUG mode enabled' },
+  { pattern: /\bLOG_LEVEL['"]?\s*[=:]\s*['"]?debug/i, label: 'LOG_LEVEL set to debug' },
+  { pattern: /\bSHOW_ERRORS['"]?\s*[=:]\s*['"]?true/i, label: 'SHOW_ERRORS enabled' },
+  { pattern: /\bDEV_MODE['"]?\s*[=:]\s*['"]?true/i, label: 'DEV_MODE enabled' },
+  { pattern: /\bVERBOSE['"]?\s*[=:]\s*['"]?true/i, label: 'VERBOSE mode enabled' },
 ];
 
 // Hostnames/IPs that should not appear in production config values.
@@ -94,7 +96,7 @@ export default {
             const line = lines[i];
 
             // Skip comment lines
-            if (/^\s*[#;\/\/]/.test(line)) continue;
+            if (/^\s*(#|;|\/\/)/.test(line)) continue;
 
             for (const { pattern, label } of INSECURE_ENV_PATTERNS) {
               if (pattern.test(line)) {

@@ -63,6 +63,7 @@
     "dist",
     "bin/vaso",
     "bin/vaso-quick.sh",
+    "scripts/prepare.mjs",
     "probe/checksums.json",
     "LICENSE",
     "README.md"

@@ -18,6 +18,8 @@ const ALLOWED = [
   /^dist\/(cli|index)\.js(\.map)?$/,
   /^dist\/index\.d\.ts$/,
   /^probe\/checksums\.json$/,
+  // package.json's `prepare` hook; without it npm warns about a missing script
+  /^scripts\/prepare\.mjs$/,
 ];
 
 const root = join(__dirname, '..');
@@ -41,7 +43,7 @@ describe('npm package contents', () => {
   it('packs only allowlisted files (no local snapshots, inventories or scan output)', () => {
     const files = packedFiles();
     expect(files.filter(f => !ALLOWED.some(rx => rx.test(f)))).toEqual([]);
-    expect(files).toEqual(expect.arrayContaining(['bin/vaso', 'dist/cli.js', 'probe/checksums.json']));
+    expect(files).toEqual(expect.arrayContaining(['bin/vaso', 'dist/cli.js', 'probe/checksums.json', 'scripts/prepare.mjs']));
   }, 60_000);
 
   it('lists no bare directories in package.json files except dist', () => {
@@ -51,5 +53,25 @@ describe('npm package contents', () => {
     });
     // A listed directory ships everything in it, gitignored or not
     expect(dirs).toEqual(['dist']);
+  });
+});
+
+describe('scripts/prepare.mjs in an installed tarball', () => {
+  it('uses the shipped dist/ and never tries to build without sources', async () => {
+    const { mkdtempSync, mkdirSync, copyFileSync, writeFileSync, rmSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { spawnSync } = await import('node:child_process');
+    const pkg = mkdtempSync(join(tmpdir(), 'vaso-prep-'));
+    try {
+      mkdirSync(join(pkg, 'scripts'));
+      mkdirSync(join(pkg, 'dist'));
+      copyFileSync(join(root, 'scripts', 'prepare.mjs'), join(pkg, 'scripts', 'prepare.mjs'));
+      writeFileSync(join(pkg, 'dist', 'cli.js'), '');
+      const r = spawnSync(process.execPath, [join(pkg, 'scripts', 'prepare.mjs')], { encoding: 'utf-8' });
+      expect(r.status).toBe(0);
+      expect(r.stdout).toContain('prebuilt dist/');
+    } finally {
+      rmSync(pkg, { recursive: true, force: true });
+    }
   });
 });
