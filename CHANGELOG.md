@@ -53,6 +53,8 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - `vaso-quick.sh` reads OpenClaw 2026 configs and exits 1 on findings; the npm tarball ships `scripts/prepare.mjs`.
 - **Variable references are no longer reported as plaintext secrets.** `Bearer ${VAR}`, `${VAR:-default}`, `{env:VAR}`, `%VAR%` and bare variable names are recognised by every config-secret check (AT-004, CC-004, CD-001, GEM-001, QC-001, HM-001, MCP-003, MCP-012, WS-003, ZeroClaw, Abacus). A credential written as a `${VAR:-…}` fallback is still reported.
 - DEV-003 reports `${VAR}`/`$VAR` in a Devin MCP config as info: Devin expands only `${env:VAR}` and `${file:/path}`, so the server receives the text literally.
+- **Rollback restores everything a fix changed.** Each path is backed up just before a fix writes or chmods it, including directories the finding didn't name (NC-002 left `~/.config/nanoclaw` at 700 after rollback) and files the owner can't read (mode only).
+- **`vaso fix` offers a fix only for live exposure.** A finding whose every piece of evidence is mitigated (behind a private directory, test code, an untrusted project) is info and not fixable, in every check; CDX-003, OPC-001, CD-002, CFG-003 and POL-003 used to offer a chmod for files nobody else could reach.
 
 ## [1.3.0] - 2026-10-15
 
