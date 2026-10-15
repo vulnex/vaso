@@ -128,6 +128,7 @@ async function restoreFile(backupPath: string, originalPath: string, entry: Mani
   if (moved) return moved;
   const original = await readFile(backupPath);
   const mode = entry?.mode ?? ((await stat(backupPath)).mode & 0o7777);
+  let rewrote = false;
   if (current && entry?.after !== undefined && entry.after === entry.before) {
     // The fix run never changed this file's content (it was backed up as a
     // precaution, or only chmod-ed): there is no content to restore, and an
@@ -140,11 +141,17 @@ async function restoreFile(backupPath: string, originalPath: string, entry: Mani
     if (now === undefined || now !== (entry?.before ?? sha256(original))) {
       await chmodNoFollow(originalPath, 0o600);
       await writeRegularFile(originalPath, original);
+      rewrote = true;
     }
   } else {
     await writeFile(originalPath, original, { flag: 'wx', mode: 0o600 });
+    rewrote = true;
   }
-  if (process.platform !== 'win32') await chmodNoFollow(originalPath, mode);
+  // Already at its recorded mode and untouched: nothing to do. (A file the
+  // fix refused — a hard link — is in the backup but must not be chmod-ed,
+  // or the rollback stays pending forever.)
+  const unchanged = !rewrote && current !== undefined && (current.mode & 0o7777) === mode;
+  if (process.platform !== 'win32' && !unchanged) await chmodNoFollow(originalPath, mode);
   return undefined;
 }
 

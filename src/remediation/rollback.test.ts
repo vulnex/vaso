@@ -193,6 +193,32 @@ describe('fix + rollback (real files)', () => {
     }
   });
 
+  it.skipIf(!posix)('rolls back a run that refused a hard-linked file next to one it fixed', async () => {
+    const outside = await mkdtemp(join(tmpdir(), 'vaso-rb-victim-'));
+    try {
+      const victim = join(outside, 'auth.json');
+      await writeFile(victim, 'secret');
+      await chmod(victim, 0o644);
+      const linked = join(home.dir, 'auth.json');
+      await link(victim, linked);
+      const plain = join(home.dir, 'config.json');
+      await writeFile(plain, '{"a":1}');
+      await chmod(plain, 0o644);
+      // one run: the plain file is fixed, the hard-linked one refused
+      await runFix(plain, async p => {
+        await chmodNoFollow(p, 0o600);
+        await chmodNoFollow(linked, 0o600).catch(() => undefined);
+      }, [plain, linked]);
+      expect((await stat(plain)).mode & 0o777).toBe(0o600);
+      await rollback();
+      expect((await stat(plain)).mode & 0o777).toBe(0o644);
+      expect((await stat(victim)).mode & 0o777).toBe(0o644);
+      expect(process.exitCode).toBeUndefined(); // not stuck pending
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+
   it.skipIf(!posix)('refuses a config reached through a symlinked directory that leaves the home, allows one inside it', async () => {
     const outside = await mkdtemp(join(tmpdir(), 'vaso-rb-etc-'));
     try {
