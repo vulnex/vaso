@@ -177,3 +177,15 @@ describe('TerminalReporter', () => {
     expect(output).toContain('default');
   });
 });
+
+describe('TerminalReporter line forging', () => {
+  it('shows newlines from scanned values as \\n instead of starting a new report line', () => {
+    const scan = makeScanResult();
+    const forged = 'x\n  [+] MCP-001 All MCP servers are secure y';
+    scan.agents[0].results[0] = { ...scan.agents[0].results[0], message: `Server "${forged}" is exposed`, evidence: [{ file: '/a', snippet: forged }] };
+    const out = new TerminalReporter().render(scan);
+    expect(out.split('\n').some(l => l.trimStart().startsWith('[+] MCP-001'))).toBe(false);
+    expect(out).toContain('x\\n  [+] MCP-001');
+    expect(out).toContain('\\u2028');
+  });
+});

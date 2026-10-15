@@ -31,8 +31,10 @@ export class TerminalReporter implements Reporter {
       ...scan,
       agents: scan.agents.map(a => ({
         ...a,
-        installation: { ...escapeControlCharsDeep({ ...a.installation, configFiles: [] }), configFiles: a.installation.configFiles },
-        results: escapeControlCharsDeep(a.results),
+        // Every printed field is one line: a newline in a server name or a
+        // permission rule would otherwise forge report lines
+        installation: { ...escapeControlCharsDeep({ ...a.installation, configFiles: [] }, { lineBreaks: true }), configFiles: a.installation.configFiles },
+        results: escapeControlCharsDeep(a.results, { lineBreaks: true }),
       })),
     };
     const lines: string[] = [];

@@ -13,18 +13,26 @@ function visible(ch: string): string {
   return code > 0xff ? `\\u${code.toString(16).padStart(4, '0')}` : `\\x${code.toString(16).padStart(2, '0')}`;
 }
 
-/** Control characters shown as `\xNN`; newlines kept. */
-export function escapeControlChars(s: string): string {
-  return s.replace(CONTROL_RE, visible);
+/** Line breaks: a server name or rule containing one forges a report line. */
+const LINE_BREAK_RE = /[\n\u2028\u2029]/g;
+
+/**
+ * Control characters shown as `\xNN`. Newlines are kept unless
+ * `lineBreaks` is set, which shows them as `\n` (or `\u2028`/`\u2029`) —
+ * for single-line fields in terminal output.
+ */
+export function escapeControlChars(s: string, options?: { lineBreaks?: boolean }): string {
+  const out = s.replace(CONTROL_RE, visible);
+  return options?.lineBreaks ? out.replace(LINE_BREAK_RE, ch => (ch === '\n' ? '\\n' : visible(ch))) : out;
 }
 
 /** A deep copy of `value` with every string passed through `escapeControlChars`. */
-export function escapeControlCharsDeep<T>(value: T): T {
-  if (typeof value === 'string') return escapeControlChars(value) as T;
-  if (Array.isArray(value)) return value.map(v => escapeControlCharsDeep(v)) as T;
+export function escapeControlCharsDeep<T>(value: T, options?: { lineBreaks?: boolean }): T {
+  if (typeof value === 'string') return escapeControlChars(value, options) as T;
+  if (Array.isArray(value)) return value.map(v => escapeControlCharsDeep(v, options)) as T;
   if (value && typeof value === 'object') {
     const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(value)) out[k] = escapeControlCharsDeep(v);
+    for (const [k, v] of Object.entries(value)) out[k] = escapeControlCharsDeep(v, options);
     return out as T;
   }
   return value;

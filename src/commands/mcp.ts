@@ -156,7 +156,7 @@ export async function runMCPList(options: { format: string; path?: string[] }): 
     console.log(chalk.bold(`\nMCP Servers (${result.totalServers} total)\n`));
 
     // Server names, commands and URLs come from scanned config files
-    for (const config of escapeControlCharsDeep(result.configs)) {
+    for (const config of escapeControlCharsDeep(result.configs, { lineBreaks: true })) {
       console.log(chalk.cyan(`  ${config.source}`));
       console.log(chalk.dim(`  ${config.filePath}`));
 

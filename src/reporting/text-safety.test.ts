@@ -58,3 +58,11 @@ describe('text safety', () => {
     expect(new CsvReporter().render(result())).not.toMatch(/[\u0007\u001b]/);
   });
 });
+
+describe('escapeControlChars lineBreaks', () => {
+  it('keeps newlines by default and escapes them on request', async () => {
+    const { escapeControlChars } = await import('./text-safety.js');
+    expect(escapeControlChars('a\nb')).toBe('a\nb');
+    expect(escapeControlChars('a\nb c\u001b', { lineBreaks: true })).toBe('a\\nb\\u2029c\\x1b');
+  });
+});
