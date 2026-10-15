@@ -26,8 +26,17 @@ export const cfg012 = defineCheck({
     const evidence: Evidence[] = [];
     let bypassFlag = false;
 
+    // An OpenClaw sub-agent's own file can't change the host-wide gateway
+    // (2026.9.4 reads gateway settings from openclaw.json only); a weaker
+    // gateway section there is OC-001's sub-agent downgrade finding
+    const subAgentFile = (file: string) => ctx.installation.agent === 'openclaw' && Boolean(ctx.installation.agentName)
+      && file.startsWith(ctx.installation.installDir + '/');
+    const gatewayKey = (key: string) => key.startsWith('gateway.');
+
     for (const config of ctx.configs) {
-      const authBypass = bypassKey(config.data) !== undefined ? getNestedValue(config.data, bypassKey(config.data)!) : undefined;
+      const ownFile = subAgentFile(config.filePath);
+      const key = bypassKey(config.data);
+      const authBypass = key !== undefined && !(ownFile && gatewayKey(key)) ? getNestedValue(config.data, key) : undefined;
 
       if (isTrue(authBypass)) {
         bypassFlag = true;
@@ -37,7 +46,7 @@ export const cfg012 = defineCheck({
         });
       }
 
-      const authMode = getNestedValue(config.data, 'gateway.auth.mode') ??
+      const authMode = (ownFile ? undefined : getNestedValue(config.data, 'gateway.auth.mode')) ??
                        getNestedValue(config.data, 'auth.mode');
 
       if (authMode === 'none' || authMode === 'disabled') {
@@ -50,7 +59,7 @@ export const cfg012 = defineCheck({
       // OpenClaw 2026.x: skips the Control UI's device pairing/identity check
       // (2026.9.4 schema gateway.controlUi.dangerouslyDisableDeviceAuth), so
       // the gateway credential alone admits a browser.
-      if (getNestedValue(config.data, 'gateway.controlUi.dangerouslyDisableDeviceAuth') === true
+      if (!ownFile && getNestedValue(config.data, 'gateway.controlUi.dangerouslyDisableDeviceAuth') === true
           && getNestedValue(config.data, 'gateway.controlUi.enabled') !== false) {
         evidence.push({
           file: config.filePath,
@@ -81,7 +90,9 @@ export const cfg012 = defineCheck({
     // Flip the flag that is set, in the file it is in — never add a new key
     for (const config of ctx.configs) {
       const key = bypassKey(config.data);
-      if (key && isTrue(getNestedValue(config.data, key))) {
+      if (key && isTrue(getNestedValue(config.data, key))
+          && !(ctx.installation.agent === 'openclaw' && ctx.installation.agentName
+            && config.filePath.startsWith(ctx.installation.installDir + '/') && key.startsWith('gateway.'))) {
         return fixFirstConfig([config], { checkId: 'CFG-012', path: key, value: false, message: `Set ${key} to false` });
       }
     }

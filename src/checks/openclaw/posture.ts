@@ -93,9 +93,10 @@ export function extractPosture(merged: Record<string, unknown>, agentId?: string
 
   return {
     tls: tlsSection ? asBool(tlsSection.enabled) : gw ? asBool(gw.tls) : undefined,
-    authMode: auth?.mode as string | undefined,
-    gatewayHost: (gw?.host as string | undefined) ?? bindHost(gw?.bind, gw?.customBindHost),
-    gatewayPort: gw?.port as number | undefined,
+    // Typed reads: a hand-edited config can hold any JSON value here
+    authMode: typeof auth?.mode === 'string' ? auth.mode : undefined,
+    gatewayHost: (typeof gw?.host === 'string' ? gw.host : undefined) ?? bindHost(gw?.bind, gw?.customBindHost),
+    gatewayPort: typeof gw?.port === 'number' ? gw.port : undefined,
     sandboxEnabled,
     approvalRequired,
   };

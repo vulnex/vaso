@@ -33,6 +33,26 @@ function tlsEnabled(data: unknown, depth = 0): boolean {
   return false;
 }
 
+/**
+ * OpenClaw `gateway.mode: "remote"` (a client of another host's gateway):
+ * undefined when not in remote mode, null when the link is encrypted
+ * (wss://, an SSH tunnel, or a loopback URL), else the plaintext ws:// URL.
+ */
+function openclawRemotePlaintext(configs: { data: Record<string, unknown> }[]): string | null | undefined {
+  const config = configs.find(c => getNestedValue(c.data, 'gateway.mode') === 'remote');
+  if (!config) return undefined;
+  if (getNestedValue(config.data, 'gateway.remote.transport') === 'ssh') return null;
+  const url = getNestedValue(config.data, 'gateway.remote.url');
+  if (typeof url !== 'string' || !/^ws:\/\//i.test(url.trim())) return null;
+  let host: string;
+  try {
+    host = new URL(url.trim()).hostname;
+  } catch {
+    return null;
+  }
+  return loopbackOnly(host) ? null : url.trim();
+}
+
 export const cfg004 = defineCheck({
   id: 'CFG-004',
   name: 'TLS Not Configured',
@@ -43,6 +63,19 @@ export const cfg004 = defineCheck({
   excludedAgents: [...CODING_AGENTS, 'openshell'],
 
   async run(ctx, h) {
+    if (ctx.installation.agent === 'openclaw') {
+      const remote = openclawRemotePlaintext(ctx.configs);
+      if (remote !== undefined) {
+        const file = ctx.configs.find(c => getNestedValue(c.data, 'gateway.mode') === 'remote')?.filePath;
+        return h.result({
+          passed: remote === null,
+          message: remote === null
+            ? 'Remote gateway mode — no local listener; the link to the remote gateway is encrypted (wss:// or SSH)'
+            : `Remote gateway mode connects over plaintext ${remote} — the gateway token and traffic travel unencrypted`,
+          evidence: remote === null || !file ? [] : [{ file, detail: `gateway.remote.url = ${remote}` }],
+        });
+      }
+    }
     if (!ctx.installation.gateway) {
       return h.passed('No gateway configured — TLS check not applicable');
     }

@@ -36,12 +36,16 @@ export const zc014 = defineCheck({
         detail: `${profileLabel(p)}: ${backendNone(p) ? 'sandbox_backend = "none"' : 'sandbox_enabled = false'} with the native runtime — no OS-level isolation`,
       });
     }
+    // "auto" (the default) picks the first backend that works on the host and
+    // falls back to none — ZeroClaw 0.8.5 on Ubuntu 24.04 with bwrap and
+    // Landlock present still reported active_backend "none". The config can't
+    // tell; `zeroclaw security status` can.
     return h.fromEvidence(evidence, {
-      passed: 'No agent risk profile disables the sandbox',
+      passed: 'No agent risk profile disables the sandbox (with backend "auto", confirm the active backend: `zeroclaw security status --agent <alias>`)',
       failed: (n) => `${n} risk profile(s) run tools without an OS sandbox`,
       fixable: true,
       fixDescription:
-        'Set sandbox_enabled = true (and sandbox_backend = "auto" or a specific backend) on the risk profile, or run with [runtime] kind = "docker"',
+        'Set sandbox_enabled = true (and sandbox_backend = "auto" or a specific backend) on the risk profile, or run with [runtime] kind = "docker"; then check `zeroclaw security status --agent <alias>` — "auto" falls back to no sandbox when no backend works on the host',
     });
   },
 
@@ -55,6 +59,7 @@ export const zc014 = defineCheck({
         if (backendNone(p)) updates.push([`${p.path}.sandbox_backend`, 'auto']);
       }
     }
-    return writeMainConfig(ctx, 'ZC-014', updates, 'Enabled the sandbox on risk profiles (sandbox_enabled=true)');
+    return writeMainConfig(ctx, 'ZC-014', updates,
+      'Enabled the sandbox on risk profiles (sandbox_enabled=true) — verify the active backend with `zeroclaw security status --agent <alias>`: "auto" runs unsandboxed when no backend works on this host');
   },
 });

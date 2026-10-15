@@ -148,6 +148,10 @@ export async function findNanoclawCheckouts(home: string, fs: FSProvider): Promi
   const add = async (dir: string, authoritative: boolean): Promise<void> => {
     let key = dir;
     try { key = await fs.realpath(dir); } catch {}
+    // macOS/Windows file systems are case-insensitive by default: ~/projects
+    // and ~/Projects (both common clone parents) are one directory. A local
+    // realpath returns the on-disk case; a snapshot can't, so fold case.
+    if (fs.platform === 'darwin' || fs.platform === 'win32') key = key.toLowerCase();
     if (seen.has(key)) return;
     const version = await readCheckoutVersion(dir, fs);
     if (version === null) return;

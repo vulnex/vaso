@@ -2,6 +2,7 @@ import { join } from 'node:path';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { accessibleByOthers, markUnreachable, queryPermissions } from '../../core/permissions.js';
+import { restrictFilesToOwner } from '../../remediation/config-writer.js';
 
 // Upstream writes both with mode 0600, so a wider mode means the file was
 // created or copied by hand (a common first step: `cp .env.example .env`).
@@ -40,7 +41,12 @@ export const at005 = defineCheck({
     return h.fromEvidence(evidence, {
       passed: 'Atomic Agent credential files are owner-only',
       failed: (n) => `${n} Atomic Agent credential file(s) readable beyond the owner — restrict to 0600`,
-      fixDescription: 'Run `chmod 600 ~/.atomic-agent/.env ~/.atomic-agent/atomic-mail/session.json`',
+      fixable: evidence.some(e => !e.mitigated),
+      fixDescription: 'Remove group/other access from ~/.atomic-agent/.env and ~/.atomic-agent/atomic-mail/session.json',
     });
+  },
+
+  async fix(ctx) {
+    return restrictFilesToOwner('AT-005', CREDENTIAL_FILES.map(([rel]) => join(ctx.installation.installDir, rel)));
   },
 });

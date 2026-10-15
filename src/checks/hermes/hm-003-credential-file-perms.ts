@@ -2,6 +2,8 @@ import { join } from 'node:path';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { accessibleByOthers, markUnreachable, queryPermissions } from '../../core/permissions.js';
+import type { ScanContext } from '../../core/types.js';
+import { restrictFilesToOwner } from '../../remediation/config-writer.js';
 
 const SENSITIVE_FILES = [
   'credentials.json',
@@ -11,6 +13,23 @@ const SENSITIVE_FILES = [
 const SENSITIVE_DIR_GLOBS = [
   'mcp-tokens',
 ];
+
+/** The credential files HM-003 inspects: fixed names plus mcp-tokens/*.json. */
+async function credentialFiles(ctx: ScanContext): Promise<string[]> {
+  const installDir = ctx.installation.installDir;
+  const files = SENSITIVE_FILES.map(name => join(installDir, name));
+  for (const dirName of SENSITIVE_DIR_GLOBS) {
+    const dirPath = join(installDir, dirName);
+    try {
+      for (const entry of await ctx.fs.readdirEntries(dirPath)) {
+        if (entry.isFile && entry.name.endsWith('.json')) files.push(join(dirPath, entry.name));
+      }
+    } catch {
+      // Dir doesn't exist — skip
+    }
+  }
+  return files;
+}
 
 export const hm003 = defineCheck({
   id: 'HM-003',
@@ -23,8 +42,6 @@ export const hm003 = defineCheck({
 
   async run(ctx, h) {
     const evidence: Evidence[] = [];
-    const installDir = ctx.installation.installDir;
-
     const checkPerms = async (filePath: string): Promise<void> => {
       try {
         const stat = await ctx.fs.stat(filePath);
@@ -42,29 +59,18 @@ export const hm003 = defineCheck({
       }
     };
 
-    for (const name of SENSITIVE_FILES) {
-      await checkPerms(join(installDir, name));
-    }
-
-    for (const dirName of SENSITIVE_DIR_GLOBS) {
-      const dirPath = join(installDir, dirName);
-      try {
-        const entries = await ctx.fs.readdirEntries(dirPath);
-        for (const entry of entries) {
-          if (!entry.isFile) continue;
-          if (!entry.name.endsWith('.json')) continue;
-          await checkPerms(join(dirPath, entry.name));
-        }
-      } catch {
-        // Dir doesn't exist — skip
-      }
-    }
+    for (const file of await credentialFiles(ctx)) await checkPerms(file);
 
     await markUnreachable(ctx.fs, evidence);
     return h.fromEvidence(evidence, {
       passed: 'Hermes credential files have restricted permissions',
       failed: (n) => `Found ${n} Hermes credential file(s) with over-permissive mode`,
-      fixDescription: 'Run `chmod 600 ~/.hermes/credentials.json ~/.hermes/auth.json ~/.hermes/mcp-tokens/*.json` (whichever exist)',
+      fixable: evidence.some(e => !e.mitigated),
+      fixDescription: 'Remove group/other access from ~/.hermes/credentials.json, auth.json and mcp-tokens/*.json (whichever exist)',
     });
+  },
+
+  async fix(ctx) {
+    return restrictFilesToOwner('HM-003', await credentialFiles(ctx));
   },
 });

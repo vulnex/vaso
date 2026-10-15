@@ -3,6 +3,7 @@ import { hermesApiServer } from '../../adapters/hermes-api-server.js';
 import { CODING_AGENTS, type Evidence, type FixResult } from '../../core/types.js';
 import { fixFirstConfig } from '../../remediation/config-writer.js';
 import { getNestedValue } from '../../core/utils.js';
+import { envOverridesOf } from '../../adapters/env-overrides.js';
 
 const LISTENER_KEY = /host|bind|listen/i;
 
@@ -73,6 +74,9 @@ export const cfg001 = defineCheck({
     let gatewayKey = false;
 
     for (const config of ctx.configs) {
+      // OpenClaw in remote mode connects to a gateway elsewhere; its local
+      // bind settings configure no listener
+      if (ctx.installation.agent === 'openclaw' && getNestedValue(config.data, 'gateway.mode') === 'remote') continue;
       // The first host key present is the gateway's; the walk below skips
       // only that one (and a flagged bind), so a second wildcard listener
       // such as server.host is still reported.
@@ -86,10 +90,15 @@ export const cfg001 = defineCheck({
       // (PicoClaw's gateway.host accepts both).
       const hostParts = typeof host === 'string' ? host.split(',').map(p => p.trim()) : [];
       if (hostParts.some(p => p === '*' || WILDCARD_BINDS.includes(p))) {
-        gatewayKey = true;
+        // Set by an env override (ZeroClaw's ZEROCLAW_GATEWAY_HOST…): the
+        // file doesn't hold it, so there is nothing for a fix to rewrite
+        const env = envOverridesOf(config.data).find(o => o.path === hostPath)?.env;
+        if (!env) gatewayKey = true;
         evidence.push({
           file: config.filePath,
-          detail: `Gateway bound to ${host} — accessible from all network interfaces`,
+          detail: env
+            ? `Gateway bound to ${host} by the ${env} environment variable — accessible from all network interfaces`
+            : `Gateway bound to ${host} — accessible from all network interfaces`,
         });
       }
 
@@ -182,7 +191,8 @@ export const cfg001 = defineCheck({
       } else {
         const hostPath = HOST_PATHS.find(p => getNestedValue(config.data, p) != null);
         const host = hostPath ? getNestedValue(config.data, hostPath) : undefined;
-        if (typeof host === 'string' && host.split(',').some(p => p.trim() === '*' || WILDCARD_ADDRS.includes(p.trim()))) {
+        const fromEnv = envOverridesOf(config.data).some(o => o.path === hostPath);
+        if (!fromEnv && typeof host === 'string' && host.split(',').some(p => p.trim() === '*' || WILDCARD_ADDRS.includes(p.trim()))) {
           result = await fixFirstConfig([config], {
             checkId: 'CFG-001',
             env: hostPath === 'GATEWAY_HOST' ? 'GATEWAY_HOST' : undefined,

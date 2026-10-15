@@ -344,19 +344,28 @@ export const openclawAdapter: AgentAdapter = {
   },
 
   getGatewayInfo(config: Record<string, unknown>): GatewayInfo | undefined {
-    const gw = config.gateway as Record<string, unknown> | undefined;
-    if (!gw) return undefined;
+    const gw = config.gateway;
+    if (!gw || typeof gw !== 'object' || Array.isArray(gw)) return undefined;
+    const g = gw as Record<string, unknown>;
+    // gateway.mode "remote": this instance is a client of a gateway on another
+    // host and runs no listener here (OpenClaw 2026.9.4 skips the local gateway)
+    if (g.mode === 'remote') return undefined;
     // 2026.x schema: gateway.bind = auto | lan | loopback | custom | tailnet
     // (+ gateway.customBindHost) and gateway.tls = { enabled, … }; older
-    // configs used gateway.host and a boolean tls.
-    const tls = gw.tls && typeof gw.tls === 'object'
-      ? (gw.tls as Record<string, unknown>).enabled === true
-      : gw.tls as boolean | undefined;
+    // configs used gateway.host and a boolean tls. An unset bind is loopback
+    // (`gateway.bind ?? "loopback"` throughout 2026.9.4).
+    const tls = g.tls && typeof g.tls === 'object'
+      ? (g.tls as Record<string, unknown>).enabled === true
+      : typeof g.tls === 'boolean' ? g.tls : undefined;
+    const auth = g.auth && typeof g.auth === 'object' ? (g.auth as Record<string, unknown>) : undefined;
+    const host = typeof g.host === 'string' ? g.host
+      : g.bind === undefined && g.host === undefined ? '127.0.0.1'
+      : openclawBindHost(g.bind, g.customBindHost);
 
     return {
-      host: (gw.host as string | undefined) ?? openclawBindHost(gw.bind, gw.customBindHost),
-      port: gw.port as number | undefined,
-      authMode: (gw.auth as Record<string, unknown>)?.mode as string | undefined,
+      host,
+      port: typeof g.port === 'number' ? g.port : undefined,
+      authMode: typeof auth?.mode === 'string' ? auth.mode : undefined,
       tls,
     };
   },

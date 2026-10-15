@@ -12,8 +12,9 @@ import {
  * ask_always / ask_writes / ask_destructive / org_policy / minimal. `minimal`
  * is the weakest posture. The [policy] section is only accepted with the
  * production / migration-dry-run boot profiles, and 1.4 parses but does not
- * yet enforce it — so it is reported as a warning (declared intent), while
- * the 0.x flag is live and critical.
+ * yet enforce it ("parsed but not wired in this runtime slice", verified live
+ * on 1.4.0) — so it is informational, with no fix to offer (changing it
+ * changes nothing today), while the 0.x flag is live and critical.
  */
 
 const WEAK_POLICIES = new Set(['minimal']);
@@ -28,19 +29,19 @@ export const ic007 = defineCheck({
 
   async run(ctx, h) {
     const evidence: Evidence[] = [];
-    let severity: 'critical' | 'warning' = 'critical';
+    let severity: 'critical' | 'info' = 'critical';
 
     if (!isLegacy(ctx)) {
       const config = rebornConfig(ctx);
       const policy = str(rebornSection(ctx, 'policy')?.default_approval_policy);
       if (config && policy && WEAK_POLICIES.has(policy.toLowerCase())) {
-        severity = 'warning';
+        severity = 'info';
         const line = lineOf(config, 'default_approval_policy');
         evidence.push({
           file: config.filePath,
           ...(line ? { line } : {}),
           snippet: `default_approval_policy = "${policy}"`,
-          detail: '[policy].default_approval_policy = "minimal" — the weakest approval posture (declared for production profiles; enforced once the policy substrate lands)',
+          detail: '[policy].default_approval_policy = "minimal" — the weakest approval posture once enforced; IronClaw 1.4 parses [policy] but does not apply it yet',
         });
       }
     } else if (!isLegacyUnused(ctx)) {
@@ -59,9 +60,9 @@ export const ic007 = defineCheck({
       passed: 'Tool approval is not bypassed',
       failed: () => isLegacy(ctx)
         ? 'Tool auto-approval is enabled — tool calls bypass user confirmation'
-        : 'Approval policy is set to "minimal"',
+        : 'Approval policy is set to "minimal" (not enforced by IronClaw 1.4 yet)',
       severity,
-      fixable: true,
+      fixable: isLegacy(ctx),
       fixDescription: isLegacy(ctx)
         ? 'Set AGENT_AUTO_APPROVE_TOOLS=false in ~/.ironclaw/.env (or [agent] auto_approve_tools = false)'
         : 'Set [policy].default_approval_policy = "ask_destructive" (or stricter)',

@@ -414,10 +414,12 @@ describe('IC-007: Tool Approval Bypass', () => {
     expect((await check('IC-007').run(legacyCtx([env(`${LEGACY}/.env`, { AGENT_AUTO_APPROVE_TOOLS: 'false' })]))).passed).toBe(true);
   });
 
-  it('1.x: default_approval_policy = "minimal" is a warning; ask_destructive passes', async () => {
+  it('1.x: default_approval_policy = "minimal" is info with no fix (1.4 does not enforce [policy]); ask_destructive passes', async () => {
     const r = await check('IC-007').run(rebornCtx([withConfig('[policy]\ndefault_approval_policy = "minimal"')]));
     expect(r.passed).toBe(false);
-    expect(r.severity).toBe('warning');
+    expect(r.severity).toBe('info');
+    expect(r.fixable).toBe(false);
+    expect((await check('IC-007').run(legacyCtx([env(`${LEGACY}/.env`, { AGENT_AUTO_APPROVE_TOOLS: 'true' })]))).fixable).toBe(true);
     expect((await check('IC-007').run(rebornCtx([withConfig('[policy]\ndefault_approval_policy = "ask_destructive"')]))).passed).toBe(true);
   });
 });

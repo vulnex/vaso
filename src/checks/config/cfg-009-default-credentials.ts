@@ -4,7 +4,17 @@ import { defineCheck } from '../../core/check-builder.js';
 const WEAK_PATTERNS = [
   /\bpassword\b/i,
   /\b(admin|root|test|demo|default|changeme|password123|12345|qwerty)\b/i,
+  // Values copied from documentation and never replaced:
+  // "replace-with-long-random-token", "your_token_here", "<token>", "xxxx…",
+  // and the sequential "abcd1234efgh5678" style of example secrets
+  /(?:^|[-_ .])(?:replace|change|your|insert|enter|example|placeholder|sample|dummy)(?:[-_ .]|$)/i,
+  /^<[^>]+>$/,
+  /^x{4,}$/i,
+  /abcd1234|12345678|0123456789/i,
 ];
+
+/** `${OPENCLAW_GATEWAY_TOKEN}`-style references are resolved at runtime, not credentials. */
+const ENV_REFERENCE = /^\$\{?[A-Za-z_][A-Za-z0-9_]*\}?$/;
 
 const CREDENTIAL_KEYS = ['password', 'secret', 'token', 'api_key', 'apiKey', 'auth_token'];
 
@@ -26,7 +36,7 @@ export const cfg009 = defineCheck({
         const paths = [key, `auth.${key}`, `gateway.auth.${key}`, `security.${key}`];
         for (const path of paths) {
           const value = getNestedValue(config.data, path);
-          if (typeof value === 'string') {
+          if (typeof value === 'string' && !ENV_REFERENCE.test(value.trim())) {
             for (const pattern of WEAK_PATTERNS) {
               if (pattern.test(value)) {
                 evidence.push({
