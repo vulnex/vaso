@@ -5,7 +5,8 @@ import { allUsersCoverageWarning } from '../adapters/openclaw.js';
 import type { AgentInstallation, AgentType } from '../core/types.js';
 import { logError } from '../core/debug.js';
 import { writeFileEnsureDir, writeFileOwnerOnly } from '../core/utils.js';
-import { HostFileNames } from '../transport/host-files.js';
+import { HostFileNames, safeHostname } from '../transport/host-files.js';
+import { join as joinPath } from 'node:path';
 import { toReportJson } from '../reporting/serialize.js';
 
 export interface DetectCommandOptions {
@@ -66,8 +67,8 @@ export async function runDetect(options: DetectCommandOptions): Promise<void> {
   try {
     // Snapshot-based detection
     if (options.snapshot) {
-      const results = await detectFromSnapshot(options);
-      await renderResults(results, options);
+      const detected = await detectFromSnapshot(options);
+      if (detected) await renderResults(detected.installations, options, detected.host);
       return;
     }
 
@@ -92,14 +93,15 @@ export async function runDetect(options: DetectCommandOptions): Promise<void> {
       installations = installations.filter(i => i.agent === agentType);
     }
 
-    await renderResults(installations, options);
+    const { hostname } = await import('node:os');
+    await renderResults(installations, options, hostname());
   } catch (err) {
     logError(chalk.red('Detection failed:'), err);
     process.exitCode = EXIT_USAGE;
   }
 }
 
-async function detectFromSnapshot(options: DetectCommandOptions): Promise<AgentInstallation[]> {
+async function detectFromSnapshot(options: DetectCommandOptions): Promise<{ installations: AgentInstallation[]; host: string } | undefined> {
   const { SnapshotFSProvider } = await import('../core/snapshot-fs-provider.js');
   const { loadSnapshotFile, SnapshotLoadError, snapshotErrorLines, SNAPSHOT_TRUNCATED_WARNING } = await import('../core/snapshot-load.js');
   let snapshot;
@@ -109,7 +111,7 @@ async function detectFromSnapshot(options: DetectCommandOptions): Promise<AgentI
     if (!(err instanceof SnapshotLoadError)) throw err;
     for (const line of snapshotErrorLines(err)) console.error(chalk.red(line));
     process.exitCode = EXIT_USAGE;
-    return [];
+    return undefined;
   }
 
   const snapshotFs = new SnapshotFSProvider(snapshot);
@@ -130,7 +132,7 @@ async function detectFromSnapshot(options: DetectCommandOptions): Promise<AgentI
     installations = installations.filter(i => i.agent === (options.agent as AgentType));
   }
 
-  return installations;
+  return { installations, host: snapshot.hostname };
 }
 
 interface HostDetectResult {
@@ -343,11 +345,15 @@ async function detectRemoteHosts(options: DetectCommandOptions): Promise<void> {
   }
 }
 
-async function renderResults(installations: AgentInstallation[], options: DetectCommandOptions): Promise<void> {
+async function renderResults(installations: AgentInstallation[], options: DetectCommandOptions, host: string): Promise<void> {
   const text = options.format === 'json'
     ? renderJson(installations)
     : renderTerminal(installations, options.verbose);
-  await emit(text, options.output, options.silent);
+  // --output-dir: the <dir>/<host>.<ext> layout multi-host detect uses
+  const output = options.outputDir
+    ? joinPath(options.outputDir, `${safeHostname(host)}.${options.format === 'json' ? 'json' : 'txt'}`)
+    : options.output;
+  await emit(text, output, options.silent);
 }
 
 function renderJson(installations: AgentInstallation[]): string {

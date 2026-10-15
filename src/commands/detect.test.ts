@@ -131,6 +131,21 @@ describe('runDetect', () => {
     }
   });
 
+  it('writes <dir>/<hostname>.json for a local detect with --output-dir (and --silent)', async () => {
+    vi.spyOn(adapterRegistry, 'detectAll').mockResolvedValue(mockInstallations);
+    const { hostname } = await import('node:os');
+    const { safeHostname } = await import('../transport/host-files.js');
+    const dir = await mkdtemp(join(tmpdir(), 'vaso-detect-dir-'));
+    try {
+      await runDetect({ format: 'json', outputDir: dir, silent: true });
+      const parsed = JSON.parse(await readFile(join(dir, `${safeHostname(hostname())}.json`), 'utf-8'));
+      expect(parsed).toHaveLength(2);
+      expect(consoleLogs.join('\n')).not.toContain('"agent":');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it('writes terminal output to file when -o is set', async () => {
     vi.spyOn(adapterRegistry, 'detectAll').mockResolvedValue(mockInstallations);
 

@@ -109,14 +109,18 @@ runs:
         # shellcheck disable=SC2206 # word-splitting is intentional for extra-args
         EXTRA=( $VASO_EXTRA_ARGS )
 
-        echo "::group::vaso ${ARGS[*]} ${EXTRA[*]}"
-        vaso "${ARGS[@]}" "${EXTRA[@]}"
+        echo "::group::vaso ${ARGS[*]} ${EXTRA[*]:-}"
+        # Findings exit 1: record the report path before failing the step, or
+        # the SARIF upload is skipped exactly when there is something to show
+        STATUS=0
+        vaso "${ARGS[@]}" ${EXTRA[@]+"${EXTRA[@]}"} || STATUS=$?
         echo "::endgroup::"
 
-        if [[ -n "$VASO_OUTPUT" ]]; then
+        if [[ -n "$VASO_OUTPUT" && -f "$VASO_OUTPUT" ]]; then
           REPORT_ABS="$(realpath "$VASO_OUTPUT")"
           echo "report-path=$REPORT_ABS" >> "$GITHUB_OUTPUT"
         fi
+        exit "$STATUS"
 
     - name: Upload SARIF to Code Scanning
       if: ${{ inputs.format == 'sarif' && inputs.upload-sarif == 'true' && steps.run.outputs.report-path != '' && always() }}

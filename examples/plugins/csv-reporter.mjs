@@ -3,7 +3,8 @@
  *
  * Demonstrates: api.registerReporter() — adding a custom output format.
  *
- * Registers a "csv" format usable via `vaso scan --format csv`.
+ * Registers a "csv-evidence" format usable via `vaso scan --format csv-evidence`
+ * (built-in format names such as "csv" can't be replaced by a plugin).
  * Produces RFC 4180-compliant CSV output:
  *   - One row per evidence item (denormalized), or one row per check if no evidence
  *   - Summary row at the bottom with totals and score/grade
@@ -11,7 +12,7 @@
  *
  * Install: cp csv-reporter.mjs ~/.vaso/plugins/
  * Verify:  vaso ext list
- * Usage:   vaso scan --format csv > report.csv
+ * Usage:   vaso scan --format csv-evidence > report.csv
  */
 
 const HEADERS = [
@@ -34,7 +35,10 @@ const HEADERS = [
  * with any internal double-quotes doubled.
  */
 function escapeField(value) {
-  const str = value === null || value === undefined ? '' : String(value);
+  let str = value === null || value === undefined ? '' : String(value);
+  // Scanned files supply these values: a cell starting with = + - @ (or a
+  // tab/CR) runs as a formula in a spreadsheet, so prefix it with a quote
+  if (/^[=+\-@\t\r]/.test(str)) str = `'${str}`;
   if (str.includes('"') || str.includes(',') || str.includes('\n') || str.includes('\r')) {
     return `"${str.replace(/"/g, '""')}"`;
   }
@@ -58,8 +62,8 @@ export default {
   register(api) {
     // registerReporter takes a format name and a factory function that returns
     // a Reporter object with { format: string, render(result: ScanResult): string }.
-    api.registerReporter('csv', () => ({
-      format: 'csv',
+    api.registerReporter('csv-evidence', () => ({
+      format: 'csv-evidence',
 
       render(result) {
         const rows = [];

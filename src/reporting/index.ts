@@ -35,6 +35,18 @@ export function reportFormats(): string[] {
   return Object.keys(reporters);
 }
 
+/**
+ * Add a report format. Names already taken — the built-in formats above or
+ * another plugin's — are refused, like duplicate checks and adapters: a
+ * plugin silently replacing `csv` or `sarif` would change what CI ingests
+ * (and drop protections such as CSV formula neutralization).
+ */
 export function registerReporter(format: string, factory: () => Reporter): void {
+  if (!/^[a-z0-9][a-z0-9_-]*$/i.test(format)) {
+    throw new Error(`Invalid report format name "${format}" (letters, digits, - and _ only)`);
+  }
+  if (isReportFormat(format)) {
+    throw new Error(`Report format "${format}" is already registered`);
+  }
   reporters[format] = factory;
 }

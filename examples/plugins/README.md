@@ -28,7 +28,7 @@ Registers **USR-001** (warning) — detects development/debug environment patter
 
 ### csv-reporter.mjs
 
-Registers a **csv** output format for `vaso scan --format csv`. Produces RFC 4180-compliant CSV with one row per evidence item, a header row, and a summary row at the bottom.
+Registers a **csv-evidence** output format for `vaso scan --format csv-evidence` (plugins can't replace built-in formats such as `csv`). Produces RFC 4180-compliant CSV with one row per evidence item, a header row, and a summary row at the bottom.
 
 ### compliance-audit-checks.mjs
 
