@@ -62,6 +62,8 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - **Local scans pick the same primary CLI copy as remote ones.** The local `which` used the PATH vaso was started with; from cron, CI or a non-interactive shell that lacks `~/.local/bin` it named a different copy (and version) than the probe, which resolves with a login shell's user bin dirs first. Both now use the same PATH (guard test against `probe/collector.go`); `ExecOptions.path` is new.
 - NET-001 and CFG-004 no longer report the gateway of a leftover IronClaw 0.x `.env` that the installed 1.x binary never reads (`legacy-unused`).
 - GEM-002 treats `~/.gemini/settings.json` as a credential file only when it holds a secret (by GEM-001's rules): Gemini CLI writes it group-readable, and a secret-free settings file was a critical finding on most installs. OAuth/token files and `.env` are still checked unconditionally.
+- A value starting with `$` counts as a variable reference only when its name looks like a variable (`$GITHUB_TOKEN`, `${apiKey}`); a password such as `$Zx8f3kq…` in a Claude Desktop or other agent config is reported as a plaintext secret again.
+- CFG-009 rates a default or placeholder gateway token critical only when the gateway is reachable beyond this host (OpenClaw bind mode and Tailscale serve/funnel, or the detected host); on a loopback-only gateway it is a warning.
 
 ## [1.3.0] - 2026-10-15
 
