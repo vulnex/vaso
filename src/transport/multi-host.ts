@@ -8,7 +8,8 @@
 import type { SSHTarget } from './ssh.js';
 import type { ProbeManifest, ProbeSnapshot } from '../core/snapshot-types.js';
 import type { ScanResult } from '../core/types.js';
-import { SNAPSHOT_TRUNCATED_WARNING } from '../core/snapshot-load.js';
+import { SNAPSHOT_TRUNCATED_WARNING, probeVersionWarning } from '../core/snapshot-load.js';
+import { VERSION } from '../version.js';
 
 export interface TransportOptions {
   probeBinDir: string;
@@ -130,6 +131,8 @@ export async function scanMultipleHosts(
       if (snapshot.truncated) {
         warnings.push(SNAPSHOT_TRUNCATED_WARNING);
       }
+      const probeWarning = probeVersionWarning(snapshot, VERSION);
+      if (probeWarning) warnings.push(probeWarning);
       if (scanOptions.allUsers) {
         const { allUsersCoverageWarning } = await import('../adapters/openclaw.js');
         const coverage = allUsersCoverageWarning(snapshotFs);

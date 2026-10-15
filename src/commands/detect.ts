@@ -5,6 +5,7 @@ import { allUsersCoverageWarning } from '../adapters/openclaw.js';
 import type { AgentInstallation, AgentType } from '../core/types.js';
 import { logError } from '../core/debug.js';
 import { writeFileEnsureDir, writeFileOwnerOnly } from '../core/utils.js';
+import { VERSION } from '../version.js';
 import { parseRemoteOptions, type RemoteOptionValues } from './remote-options.js';
 import { HostFileNames, safeHostname } from '../transport/host-files.js';
 import { join as joinPath } from 'node:path';
@@ -104,7 +105,7 @@ export async function runDetect(options: DetectCommandOptions): Promise<void> {
 
 async function detectFromSnapshot(options: DetectCommandOptions): Promise<{ installations: AgentInstallation[]; host: string } | undefined> {
   const { SnapshotFSProvider } = await import('../core/snapshot-fs-provider.js');
-  const { loadSnapshotFile, SnapshotLoadError, snapshotErrorLines, SNAPSHOT_TRUNCATED_WARNING } = await import('../core/snapshot-load.js');
+  const { loadSnapshotFile, SnapshotLoadError, snapshotErrorLines, SNAPSHOT_TRUNCATED_WARNING, probeVersionWarning } = await import('../core/snapshot-load.js');
   let snapshot;
   try {
     snapshot = await loadSnapshotFile(options.snapshot!);
@@ -119,6 +120,8 @@ async function detectFromSnapshot(options: DetectCommandOptions): Promise<{ inst
 
   console.error(chalk.dim(`  Detecting agents from snapshot "${snapshot.hostname}" (${snapshot.platform})\n`));
   if (snapshot.truncated) console.error(chalk.yellow(`  ! ${SNAPSHOT_TRUNCATED_WARNING}`));
+  const probeWarning = probeVersionWarning(snapshot, VERSION);
+  if (probeWarning) console.error(chalk.yellow(`  ! ${probeWarning}`));
   if (options.allUsers) {
     const coverage = allUsersCoverageWarning(snapshotFs);
     if (coverage) console.error(chalk.yellow(`  ! ${coverage}`));

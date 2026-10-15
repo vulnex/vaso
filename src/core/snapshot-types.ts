@@ -39,6 +39,8 @@ export interface CommandForEach {
 
 export interface ProbeSnapshot {
   version: 1;
+  /** Build of the probe that collected it (probe ≥ 1.3.1; absent from older probes). */
+  probeVersion?: string;
   hostname: string;
   platform: Platform;
   homedir: string;

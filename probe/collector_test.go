@@ -480,3 +480,10 @@ func TestOmittedReasonAndJSONBudget(t *testing.T) {
 		t.Fatalf("budget exhausted: %+v truncated=%v", e, c.truncated)
 	}
 }
+
+func TestSnapshotRecordsProbeVersion(t *testing.T) {
+	snap := Collect(ProbeManifest{}, false)
+	if snap.ProbeVersion != version {
+		t.Fatalf("probeVersion = %q, want %q", snap.ProbeVersion, version)
+	}
+}

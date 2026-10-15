@@ -45,7 +45,10 @@ type CommandForEach struct {
 
 // ProbeSnapshot is the complete output of a probe run.
 type ProbeSnapshot struct {
-	Version        int                      `json:"version"`
+	Version int `json:"version"`
+	// The probe build that collected this snapshot (probe ≥ 1.3.1), so the
+	// CLI can say when an older probe collected less than it knows to ask for.
+	ProbeVersion   string                   `json:"probeVersion,omitempty"`
 	Hostname       string                   `json:"hostname"`
 	Platform       string                   `json:"platform"`
 	Homedir        string                   `json:"homedir"`

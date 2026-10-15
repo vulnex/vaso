@@ -30,6 +30,11 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
 
+/** Permission bits as the probe records them (setuid/setgid/sticky included). */
+function isMode(v: unknown): boolean {
+  return Number.isInteger(v) && (v as number) >= 0 && (v as number) <= 0o7777;
+}
+
 /** Every problem that makes `value` unusable as a snapshot; empty when valid. */
 export function validateSnapshot(value: unknown): string[] {
   if (!isRecord(value)) return ['Snapshot is not a JSON object'];
@@ -47,7 +52,10 @@ export function validateSnapshot(value: unknown): string[] {
     let total = 0;
     let badEntries = 0;
     for (const [path, entry] of Object.entries(s.files)) {
-      if (!isRecord(entry) || (entry.content !== undefined && typeof entry.content !== 'string')) {
+      // A mode that isn't a permission number would read as 0 (owner-only)
+      // and suppress every permission finding for the file
+      if (!isRecord(entry) || (entry.content !== undefined && typeof entry.content !== 'string')
+        || !isMode(entry.mode) || typeof entry.exists !== 'boolean') {
         badEntries++;
         continue;
       }
@@ -63,6 +71,14 @@ export function validateSnapshot(value: unknown): string[] {
     }
   }
   if (!isRecord(s.directories)) errors.push('Missing or invalid directories field');
+  if (s.directoryModes !== undefined
+    && (!isRecord(s.directoryModes) || !Object.values(s.directoryModes).every(isMode))) {
+    errors.push('Invalid directoryModes field (permission numbers expected)');
+  }
+  if (s.owners !== undefined && (!isRecord(s.owners) || !Object.values(s.owners).every(o =>
+    Array.isArray(o) && o.length === 2 && o.every(id => Number.isInteger(id) && id >= 0)))) {
+    errors.push('Invalid owners field ([uid, gid] pairs expected)');
+  }
   if (!isRecord(s.commandOutputs)) errors.push('Missing or invalid commandOutputs field');
   if (s.env !== undefined && !isRecord(s.env)) errors.push('Invalid env field');
   if (s.privilege !== undefined) {
@@ -112,3 +128,28 @@ export function snapshotErrorLines(err: SnapshotLoadError): string[] {
 /** Warning for a snapshot whose probe ran out of content budget (`truncated`). */
 export const SNAPSHOT_TRUNCATED_WARNING =
   'vaso-probe content budget reached — some large agent/skill files were recorded as metadata only and not analysed';
+
+/**
+ * A warning when the snapshot came from a probe older than this CLI (or one
+ * too old to record its version, < 1.3.1). New probe releases collect more —
+ * denied entries, omit reasons, followed skill links — and a scan of an old
+ * snapshot silently reports less. Dev builds and newer probes are fine.
+ */
+export function probeVersionWarning(snapshot: Pick<ProbeSnapshot, 'probeVersion'>, cliVersion: string): string | undefined {
+  const cli = majorMinor(cliVersion);
+  if (!cli) return undefined;
+  if (!snapshot.probeVersion) {
+    return `snapshot collected by a vaso-probe older than 1.3.1 — re-collect with the probe from VASO ${cliVersion} for full coverage`;
+  }
+  const probe = majorMinor(snapshot.probeVersion);
+  if (!probe) return undefined; // dev / custom build
+  if (probe[0] < cli[0] || (probe[0] === cli[0] && probe[1] < cli[1])) {
+    return `snapshot collected by vaso-probe ${snapshot.probeVersion}, older than VASO ${cliVersion} — re-collect for full coverage`;
+  }
+  return undefined;
+}
+
+function majorMinor(v: string): [number, number] | undefined {
+  const m = /^v?(\d+)\.(\d+)\./.exec(v.trim());
+  return m ? [Number(m[1]), Number(m[2])] : undefined;
+}

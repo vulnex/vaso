@@ -202,6 +202,7 @@ func Collect(manifest ProbeManifest, escalate bool) ProbeSnapshot {
 
 	snapshot := ProbeSnapshot{
 		Version:        1,
+		ProbeVersion:   version,
 		Hostname:       hostname,
 		Platform:       runtime.GOOS,
 		Homedir:        homedir,

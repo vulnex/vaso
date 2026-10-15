@@ -61,3 +61,30 @@ describe('loadSnapshotFile', () => {
     await expect(loadSnapshotFile(join(dir, 'missing.json'))).rejects.toThrow(/not found/);
   });
 });
+
+describe('probeVersionWarning', () => {
+  it('warns for snapshots from an older or unversioned probe only', async () => {
+    const { probeVersionWarning } = await import('./snapshot-load.js');
+    expect(probeVersionWarning({}, '1.3.1')).toMatch(/older than 1\.3\.1/);
+    expect(probeVersionWarning({ probeVersion: '1.2.1' }, '1.3.1')).toMatch(/1\.2\.1, older/);
+    expect(probeVersionWarning({ probeVersion: '1.3.0' }, '1.3.1')).toBeUndefined();
+    expect(probeVersionWarning({ probeVersion: '1.4.0' }, '1.3.1')).toBeUndefined();
+    expect(probeVersionWarning({ probeVersion: 'dev' }, '1.3.1')).toBeUndefined();
+  });
+});
+
+describe('validateSnapshot field types', () => {
+  it('rejects a string or out-of-range mode instead of reading it as 0 (owner-only)', async () => {
+    const { validateSnapshot } = await import('./snapshot-load.js');
+    const base = {
+      version: 1, platform: 'linux', hostname: 'h', homedir: '/home/u', timestamp: 't',
+      directories: {}, commandOutputs: {}, env: {},
+    };
+    const ok = { ...base, files: { '/home/u/.env': { content: 'A=1', mode: 0o644, exists: true } } };
+    expect(validateSnapshot(ok)).toEqual([]);
+    expect(validateSnapshot({ ...base, files: { '/home/u/.env': { content: '', mode: '0644', exists: true } } }).join()).toMatch(/not \{content, mode, exists\}/);
+    expect(validateSnapshot({ ...base, files: { '/x': { content: '', mode: 0o644, exists: 'yes' } } }).length).toBe(1);
+    expect(validateSnapshot({ ...ok, directoryModes: { '/home/u': '755' } }).join()).toMatch(/directoryModes/);
+    expect(validateSnapshot({ ...ok, owners: { '/home/u': [1000] } }).join()).toMatch(/owners/);
+  });
+});
