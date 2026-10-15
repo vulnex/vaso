@@ -81,6 +81,7 @@ export function validateSnapshot(value: unknown): string[] {
   }
   if (!isRecord(s.commandOutputs)) errors.push('Missing or invalid commandOutputs field');
   if (s.env !== undefined && !isRecord(s.env)) errors.push('Invalid env field');
+  if (s.probeVersion !== undefined && typeof s.probeVersion !== 'string') errors.push('Invalid probeVersion field (a version string expected)');
   if (s.privilege !== undefined) {
     const p = s.privilege;
     if (!isRecord(p) || typeof p.username !== 'string' || !Array.isArray(p.scannedUsers)

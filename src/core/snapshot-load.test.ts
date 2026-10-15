@@ -28,6 +28,11 @@ describe('validateSnapshot', () => {
     expect(validateSnapshot(snap({ homedir: 'rel/home' }))).toContain('Missing or relative homedir field');
   });
 
+  it('rejects a non-string probeVersion instead of crashing on it', () => {
+    expect(validateSnapshot(snap({ probeVersion: 131 }))).toContain('Invalid probeVersion field (a version string expected)');
+    expect(validateSnapshot(snap({ probeVersion: '1.3.1' }))).toEqual([]);
+  });
+
   it('rejects privilege without scannedUsers', () => {
     const errors = validateSnapshot(snap({ privilege: { username: 'u' } }));
     expect(errors.some(e => e.startsWith('Invalid privilege field'))).toBe(true);
