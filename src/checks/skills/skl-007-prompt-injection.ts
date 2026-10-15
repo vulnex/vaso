@@ -3,7 +3,7 @@ import type { Evidence, ScanContext } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { scanWithPatterns, SECURITY_PATTERNS } from '../../analyzers/pattern-engine.js';
 import { markTestCode } from '../../analyzers/test-paths.js';
-import { getAllSkillsDirs, isExcludedPath } from '../../core/utils.js';
+import { getAllSkillsDirs, isExcludedPath, unlistableSkillDirs } from '../../core/utils.js';
 import { readCappedFile } from '../../core/file-limits.js';
 import { walkSkillTree } from '../../core/skill-walk.js';
 
@@ -26,6 +26,12 @@ async function getDocFiles(dir: string, fs: ScanContext['fs']): Promise<string[]
       }
     }
   } catch {}
+  // A skill dir the scan can enter but not list still has its SKILL.md
+  // loaded by name (as getSkillFiles does for the code checks)
+  for (const skillDir of await unlistableSkillDirs(dir, fs)) {
+    const skillMd = join(skillDir, 'SKILL.md');
+    if (!files.includes(skillMd) && await fs.access(skillMd)) files.push(skillMd);
+  }
   return files;
 }
 

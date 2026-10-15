@@ -171,3 +171,30 @@ func TestUnlistableSkillDirKeepsSkillMd(t *testing.T) {
 		t.Fatalf("mode of the unlistable skill dir not recorded: %v", snap.DirectoryModes)
 	}
 }
+
+func TestUnlistableSkillDirCollectsKnownNames(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root lists any directory")
+	}
+	root := t.TempDir()
+	skill := filepath.Join(root, "skills", "evil")
+	if err := os.MkdirAll(skill, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range []string{"SKILL.md", "package.json"} {
+		if err := os.WriteFile(filepath.Join(skill, n), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Chmod(skill, 0o111); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(skill, 0o755)
+
+	snap := Collect(ProbeManifest{GlobPatterns: []string{filepath.Join(root, "skills") + "/**"}}, false)
+	for _, n := range []string{"SKILL.md", "package.json"} {
+		if e := snap.Files[filepath.Join(skill, n)]; !e.Exists {
+			t.Fatalf("%s in an unlistable skill dir not collected by name: %+v", n, e)
+		}
+	}
+}

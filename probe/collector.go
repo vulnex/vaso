@@ -1084,7 +1084,7 @@ func expandForEach(req CommandRequest, outputs map[string]CommandOutput) [][]str
 
 // collectUnlistableSkills handles a skill directory that can be entered but
 // not listed (mode 111): a glob sees nothing in it, yet the agent still loads
-// SKILL.md by name. Its mode is recorded and SKILL.md collected, as a local
+// SKILL.md by name. Its mode is recorded and SKILL.md and package.json collected, as a local
 // scan reads it. The root is the pattern's literal prefix before "/**".
 func (c *collector) collectUnlistableSkills(snapshot *ProbeSnapshot, pattern string) {
 	i := strings.Index(pattern, "/**")
@@ -1105,9 +1105,13 @@ func (c *collector) collectUnlistableSkills(snapshot *ProbeSnapshot, pattern str
 			continue
 		}
 		recordDirMode(snapshot, dir)
-		skill := filepath.Join(dir, "SKILL.md")
-		if _, exists := snapshot.Files[skill]; !exists {
-			c.collectPath(snapshot, skill, false, false)
+		// The files a local scan reads by name in such a dir: SKILL.md (the
+		// agent loads it) and package.json (IOC-004 publisher, SKL-011 deps)
+		for _, name := range []string{"SKILL.md", "package.json"} {
+			p := filepath.Join(dir, name)
+			if _, exists := snapshot.Files[p]; !exists {
+				c.collectPath(snapshot, p, false, false)
+			}
 		}
 	}
 }
