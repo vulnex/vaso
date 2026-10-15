@@ -64,7 +64,7 @@ src/
     policy/                 5 policy checks (POL-*)
     mcp/                    35 MCP server security checks (MCP-*)
     advisory/               5 advisory/CVE checks (ADV-*)
-    openclaw/               6 OpenClaw-specific (OC-*)
+    openclaw/               7 OpenClaw-specific (OC-*)
     nanoclaw/               5 NanoClaw-specific (NC-*)
     picoclaw/               7 PicoClaw-specific (PCL-*)
     ironclaw/               14 IronClaw-specific (IC-*)
@@ -231,7 +231,7 @@ interface CheckModule {
 }
 ```
 
-`CheckCategory` is the union: `'config' | 'skills' | 'ioc' | 'network' | 'runtime' | 'policy' | 'mcp' | 'openclaw' | 'nanoclaw' | 'picoclaw' | 'ironclaw' | 'nanobot' | 'zeroclaw' | 'lyrie' | 'hermes' | 'atomic-agent' | 'advisory' | 'coding-agent'`. `AgentType` is similarly defined in `src/core/types.ts` — re-check the source rather than relying on a frozen list here.
+`CheckCategory` is the union: `'config' | 'skills' | 'ioc' | 'network' | 'runtime' | 'policy' | 'mcp' | 'openclaw' | 'nanoclaw' | 'picoclaw' | 'ironclaw' | 'nanobot' | 'zeroclaw' | 'lyrie' | 'hermes' | 'atomic-agent' | 'openshell' | 'advisory' | 'coding-agent'`. `AgentType` is similarly defined in `src/core/types.ts` — re-check the source rather than relying on a frozen list here.
 
 ### ScanContext
 
@@ -824,7 +824,7 @@ export const <category>Checks: CheckModule[] = [example001];
 
 ### 3. Register in the Master Index
 
-Edit `src/checks/index.ts` and append the new category to the imports and the `registerAllChecks()` body. The full body currently registers 30 arrays — one per `src/checks/*/` directory:
+Edit `src/checks/index.ts` and append the new category to the imports and the `registerAllChecks()` body. The full body currently registers 32 arrays — one per `src/checks/*/` directory:
 
 ```typescript
 import { <category>Checks } from './<category>/index.js';

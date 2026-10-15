@@ -516,6 +516,7 @@ VASO auto-discovers MCP server configurations from multiple sources:
 - `~/.nanobot/config.json` (Nanobot)
 - `$PICOCLAW_CONFIG` or `$PICOCLAW_HOME/config.json` (PicoClaw; default `~/.picoclaw/config.json`)
 - `~/.lyrie/mcp.json` (Lyrie)
+- VS Code user `settings.json` (`mcp.servers`; per-OS user-data dir)
 
 **Project-level configs:**
 - `.mcp.json` (Claude Code project)
@@ -523,7 +524,8 @@ VASO auto-discovers MCP server configurations from multiple sources:
 - `.windsurf/mcp.json` (Windsurf project)
 - `.devin/mcp_config.json`, `.devin/mcp_config.local.json` (Devin CLI project)
 - `.abacusai/mcp.json`, `.abacusai/config.json` (Abacus.AI project)
-- `.vscode/mcp.json` (VS Code)
+- `.vscode/mcp.json` and `.vscode/settings.json` `mcp.servers` (VS Code)
+- `.codex/config.toml` (Codex project `[mcp_servers.<name>]`)
 - `mcp.json` (Generic MCP)
 
 JSON files may be JSONC (comments, trailing commas) and may start with a UTF-8 byte-order mark. You can also point VASO at specific config files with `vaso mcp scan --path <file>`; a `.toml` path is read as a Codex config.
@@ -569,7 +571,7 @@ vaso scan --format html -o report.html
 
 ### CSV
 
-One row per check result and evidence item — a passed check is one row with `passed=true`, a failed one a row per piece of evidence — designed for SIEM / data-warehouse ingestion (filter on `passed` for findings only). Cells that would start a spreadsheet formula are prefixed with `'`. Columns: `timestamp`, `agent`, `agent_name`, `check_id`, `check_name`, `category`, `severity`, `passed`, `message`, `file`, `line`, `snippet`, `detail`.
+One row per check result and evidence item — a check with no evidence is one row, one with evidence (failed, or passed with informational evidence) a row per piece of evidence — designed for SIEM / data-warehouse ingestion (filter on `passed` for findings only). Cells that would start a spreadsheet formula are prefixed with `'`. Columns: `timestamp`, `agent`, `agent_name`, `check_id`, `check_name`, `category`, `severity`, `passed`, `message`, `file`, `line`, `snippet`, `detail`.
 
 ```bash
 vaso scan --format csv -o findings.csv
@@ -600,7 +602,7 @@ The diff output shows:
 - **Resolved**: issues that were fixed since the baseline
 - **Unchanged**: issues that persist
 
-Baselines are stored at `~/.vaso/baselines/latest.json`.
+Baselines are stored per scope in `~/.vaso/baselines/`: `latest.json` for an unfiltered local scan, `latest-<agent>.json` with `-a`, `latest-<host>.json` / `latest-<agent>--<host>.json` for a snapshot or remote host (each `--host` target keeps its own). A `latest.json` written by VASO ≤ 1.3.0 with `-a` is still found by a matching `--diff -a`.
 
 ## CI/CD Integration
 
@@ -691,6 +693,9 @@ VASO keeps all local state under `~/.vaso/`:
 | `~/.vaso/ioc/` | IOC feed cache + metadata fetched by `vaso update` |
 | `~/.vaso/advisory/` | Advisory/CVE feed cache + metadata fetched by `vaso update` |
 | `~/.vaso/probe/` | Downloaded `vaso-probe` binaries for remote scanning |
+| `~/.vaso/mcp-state/` | Per-server MCP state: version history for MCP-027 rollback detection, config fingerprints for MCP-028 drift |
+| `~/.vaso/mcp-pkg-cache/` | npm package tarballs downloaded by `vaso mcp scan --resolve-packages` |
+| `~/.vaso/rules/` | Custom YAML rules (`vaso rules init`) |
 
 Nothing under `~/.vaso/` leaves the machine. VASO makes outbound network calls only in these cases:
 
