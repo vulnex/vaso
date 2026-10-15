@@ -195,12 +195,14 @@ describe('IronClaw adapter — 0.x legacy', () => {
   });
 
   it('reports leftover 0.x state next to a 1.x install as legacy-unused, without the 1.x version', async () => {
-    const layout = rebornLayout({ files: { [`${LEGACY}/.env`]: 'SECRETS_MASTER_KEY=00112233445566778899aabbccddeeff\n' } });
+    const layout = rebornLayout({ files: { [`${LEGACY}/.env`]: 'SECRETS_MASTER_KEY=00112233445566778899aabbccddeeff\nHTTP_HOST=0.0.0.0\n' } });
     const insts = await ironclawAdapter.detect({ fs: makeFs(layout) });
     expect(insts.map(i => [i.installDir, i.profile, i.version])).toEqual([
       [REBORN, undefined, '1.4.0'],
       [LEGACY, 'legacy-unused', undefined],
     ]);
+    // The 1.x binary never reads that .env: its HTTP_HOST binds nothing (NET-001/CFG-004)
+    expect(insts[1].gateway).toBeUndefined();
   });
 
   it('honours IRONCLAW_BASE_DIR', async () => {

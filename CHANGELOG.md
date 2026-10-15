@@ -59,6 +59,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - **Skill checks report with evidence.** SKL-003 treats a program named by a string constant as a direct run; SKL-002 no longer flags 0x hex digests or `atob()` with nothing encoded to decode; SKL-009 reports wallet addresses only beside clipboard swapping, wallet-file or seed-phrase access, or transfers to a hardcoded address (token lists are one info entry); SKL-006 ignores placeholder keys in `authorized_keys` setup docs.
 - **SKL-004 tiers pipe-to-shell lines in skill documentation**: critical for plain http, IP, URL-shortener and paste-site sources; warning for an https installer from a named host; info for well-known installers and prose. Executable scripts stay critical.
 - **Local scans pick the same primary CLI copy as remote ones.** The local `which` used the PATH vaso was started with; from cron, CI or a non-interactive shell that lacks `~/.local/bin` it named a different copy (and version) than the probe, which resolves with a login shell's user bin dirs first. Both now use the same PATH (guard test against `probe/collector.go`); `ExecOptions.path` is new.
+- NET-001 and CFG-004 no longer report the gateway of a leftover IronClaw 0.x `.env` that the installed 1.x binary never reads (`legacy-unused`).
 
 ## [1.3.0] - 2026-10-15
 

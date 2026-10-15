@@ -547,7 +547,8 @@ async function legacyInstallation(
     profile: o.unused ? IRONCLAW_LEGACY_UNUSED_PROFILE : IRONCLAW_LEGACY_PROFILE,
     skillsDir: join(dir, 'skills'),
     skillsDirs: skillsDirs.length > 0 ? skillsDirs : undefined,
-    gateway: legacyGatewayInfo(merged),
+    // A 1.x binary never reads the 0.x .env: its HTTP_HOST binds nothing
+    gateway: o.unused ? undefined : legacyGatewayInfo(merged),
     models: await ironclawAdapter.getModels!(configs, fs),
     user: o.user,
     cliBinary: o.cliBinary,
