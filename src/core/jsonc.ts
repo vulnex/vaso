@@ -36,7 +36,8 @@ export function stripJsonc(raw: string): string {
       continue;
     }
     if (c === '/' && next === '/') {
-      while (i < raw.length && raw[i] !== '\n') i++;
+      // A line comment ends at LF or CR (a CR-only file is one line otherwise)
+      while (i < raw.length && raw[i] !== '\n' && raw[i] !== '\r') i++;
       continue;
     }
     if (c === '/' && next === '*') {

@@ -31,3 +31,11 @@ b", neg: -.5, plus: +1, big: 1e3, inf: -Infinity, list: [1, 2,],
     expect(() => parseJsonLenient('{a: ')).toThrow(/JSON/);
   });
 });
+
+describe('line comments in CR-only files', () => {
+  it('end a // comment at CR (and U+2028) instead of swallowing the rest of the file', () => {
+    expect(parseJson5('{ // note\r  gateway: { bind: "lan" },\r}')).toEqual({ gateway: { bind: 'lan' } });
+    expect(parseJson5('{ // note  a: 1 }')).toEqual({ a: 1 });
+    expect(parseJsonLenient('{ // note\r  "a": 1\r}')).toEqual({ a: 1 });
+  });
+});

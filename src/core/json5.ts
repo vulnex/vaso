@@ -33,7 +33,8 @@ class Json5Parser {
       if (c === undefined) return;
       if (/[\s\u00a0\ufeff\u2028\u2029]/.test(c)) { this.i++; continue; }
       if (c === '/' && this.s[this.i + 1] === '/') {
-        while (this.i < this.s.length && this.s[this.i] !== '\n') this.i++;
+        // Line terminators per JSON5: LF, CR (old Mac files), U+2028, U+2029
+        while (this.i < this.s.length && !'\n\r\u2028\u2029'.includes(this.s[this.i])) this.i++;
         continue;
       }
       if (c === '/' && this.s[this.i + 1] === '*') {
