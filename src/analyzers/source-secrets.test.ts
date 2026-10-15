@@ -49,3 +49,24 @@ describe('findSourceSecrets', () => {
     expect(findSourceSecrets('API_KEY = "sk-a8f3K29dLw0qZx7Rt5Yu1Mn4Bv6"')).toHaveLength(1);
   });
 });
+
+describe('findSourceSecrets — documented public values (dt13 realworld2)', () => {
+  it("drops Upstash's documented QStash local-dev token", () => {
+    const code = 'var LOCAL_QSTASH_TOKEN = "eyJVc2VySUQiOiJkZWZhdWx0VXNlciIsIlBhc3N3b3JkIjoiZGVmYXVsdFBhc3N3b3JkIn0=";';
+    expect(findSourceSecrets(code)).toEqual([]);
+  });
+
+  it('marks a key the code documents as public by design, and keeps an undocumented one plain', () => {
+    const lara = [
+      '/**',
+      ' * The key is public by design — it ships in the npm package —',
+      ' * and only buys short-lived ingest tokens for the `mcp` channel.',
+      ' */',
+      'const DEFAULT_METRICS_URL = "https://integration-metrics.laratranslate.com";',
+      'const DEFAULT_METRICS_API_KEY = "fef79db0da00dd07752b3cbffa89f5e911617aa943a338c7";',
+    ].join('\n');
+    expect(findSourceSecrets(lara)).toMatchObject([{ line: 6, declaredPublic: true }]);
+    const real = 'const DEFAULT_METRICS_API_KEY = "fef79db0da00dd07752b3cbffa89f5e911617aa943a338c7";';
+    expect(findSourceSecrets(real)[0].declaredPublic).toBeUndefined();
+  });
+});

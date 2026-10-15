@@ -77,7 +77,10 @@ export const mcp003 = defineCheck({
           file,
           line: secret.line,
           snippet: `${secret.key ? `${secret.key}: ` : ''}${secret.masked}`,
-          detail: `Hardcoded ${secret.kind === 'secret-named value' ? 'credential' : secret.kind} in server "${source.serverName}" source — anyone with the package or checkout can use it; load it from the environment instead`,
+          detail: secret.declaredPublic
+            ? `Hardcoded ${secret.kind === 'secret-named value' ? 'key' : secret.kind} in server "${source.serverName}" source that the code documents as public by design — confirm it grants nothing beyond what the author says`
+            : `Hardcoded ${secret.kind === 'secret-named value' ? 'credential' : secret.kind} in server "${source.serverName}" source — anyone with the package or checkout can use it; load it from the environment instead`,
+          ...(secret.declaredPublic ? { mitigated: true } : {}),
         });
       }
     }

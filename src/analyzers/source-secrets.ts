@@ -22,7 +22,25 @@ export interface SourceSecret {
   key?: string;
   /** First characters and length only. */
   masked: string;
+  /** The code next to it says the value is public by design (author's claim). */
+  declaredPublic?: boolean;
 }
+
+/**
+ * Values vendors publish for everyone to use, so shipping them leaks
+ * nothing. Exact values only, each with its source.
+ */
+const DOCUMENTED_PUBLIC_VALUES = new Set([
+  // QStash local development server, test user 1 — base64 of
+  // {"UserID":"defaultUser","Password":"defaultPassword"}
+  // https://upstash.com/docs/qstash/howto/local-development
+  'eyJVc2VySUQiOiJkZWZhdWx0VXNlciIsIlBhc3N3b3JkIjoiZGVmYXVsdFBhc3N3b3JkIn0=',
+]);
+
+/** An author's note that a key is meant to be public (a telemetry/ingest or publishable key). */
+const DECLARED_PUBLIC = /\b(?:public by design|(?:is|are) (?:intentionally |meant to be )?public|publishable key|not a secret)\b/i;
+/** Comment lines looked at above a value. */
+const COMMENT_WINDOW = 6;
 
 /** `"X-Api-Key": "…"`, `apiKey = '…'`, `CLIENT_SECRET: "…"` — key, then a quoted value. */
 const KEYED_LITERAL =
@@ -51,10 +69,14 @@ function mask(value: string): string {
 export function findSourceSecrets(code: string): SourceSecret[] {
   const found: SourceSecret[] = [];
   const seen = new Set<string>();
+  const lines = code.split('\n');
+  const commentAbove = (line: number): string =>
+    lines.slice(Math.max(0, line - 1 - COMMENT_WINDOW), line).filter(l => /^\s*(?:\/\/|\/?\*|#)/.test(l)).join(' ');
   const add = (secret: SourceSecret, value: string): void => {
     const id = `${secret.line}\0${value}`;
-    if (seen.has(id)) return;
+    if (seen.has(id) || DOCUMENTED_PUBLIC_VALUES.has(value)) return;
     seen.add(id);
+    if (DECLARED_PUBLIC.test(commentAbove(secret.line))) secret.declaredPublic = true;
     found.push(secret);
   };
 
