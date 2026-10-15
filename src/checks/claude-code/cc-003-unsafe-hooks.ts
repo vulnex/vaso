@@ -11,7 +11,32 @@ const UNQUOTED_VAR_PATTERN = new RegExp(
   `(?<!["'])\\$(?:(?!${PATH_PLACEHOLDERS})CLAUDE_[A-Z_]+|TOOL_INPUT|USER_PROMPT|FILE_PATH|\\{(?!${PATH_PLACEHOLDERS})[A-Z_]+\\})(?!["'])`,
 );
 const COMMAND_SUBSTITUTION_PATTERN = /\$\([^)]*\$[A-Z]/;
-const RAW_EVAL_PATTERN = /\b(?:eval|bash\s+-c|sh\s+-c|exec)\b/;
+/** A `$` expansion or backtick substitution, other than Claude's path placeholders and plain $HOME. */
+const DYNAMIC_EXPANSION = new RegExp(`\`|\\$(?!\\{?(?:${PATH_PLACEHOLDERS}|HOME\\b))[({A-Za-z_@*0-9]`);
+
+/**
+ * Shell text that is evaluated a second time with expanded data in it: `eval`
+ * or `exec` as a command word with an expansion in its arguments, or a shell
+ * `-c` script that the outer shell expands (unquoted or double-quoted). A
+ * single-quoted `bash -c '…'` script is constant — its own contents are
+ * judged by the other patterns — and `docker compose exec` / `npm exec` are
+ * not the shell builtin.
+ */
+function evaluatesDynamicText(cmd: string): boolean {
+  for (const raw of cmd.split(/;|&&|\|\||\||\n/)) {
+    // drop sudo / env / VAR=value prefixes to reach the command word
+    const seg = raw.trim().replace(/^(?:(?:sudo|env|command|nohup)(?:\s+-\S+)*\s+|[A-Za-z_][A-Za-z0-9_]*=\S*\s+)+/, '');
+    const word = /^(\S+)\s*(.*)$/s.exec(seg);
+    if (!word) continue;
+    const [, head, rest] = word;
+    if ((head === 'eval' || head === 'exec') && DYNAMIC_EXPANSION.test(rest)) return true;
+    if (/^(?:\S*\/)?(?:ba|z|da|k|mk)?sh$/.test(head)) {
+      const c = /(?:^|\s)-[a-zA-Z]*c[a-zA-Z]*\s+(.*)$/s.exec(rest);
+      if (c && !c[1].startsWith("'") && DYNAMIC_EXPANSION.test(c[1])) return true;
+    }
+  }
+  return false;
+}
 // `curl … | bash`, `jq -r .tool_input.command | sh`: whatever arrives on the
 // pipe (a download, or the hook's JSON input) runs as a script
 const PIPE_TO_SHELL_PATTERN = /\|\s*(?:sudo\s+(?:-\S+\s+)*)?(?:\S*\/)?(?:env\s+)?(?:ba|z|da|k|mk|fi)?sh\b(?!\s+[^\s|;&-]\S*)/;
@@ -73,8 +98,8 @@ export const cc003 = defineCheck({
             if (COMMAND_SUBSTITUTION_PATTERN.test(cmd)) {
               reasons.push('embeds variables inside command substitution');
             }
-            if (RAW_EVAL_PATTERN.test(cmd)) {
-              reasons.push('invokes eval/sh -c/bash -c on dynamic input');
+            if (evaluatesDynamicText(cmd)) {
+              reasons.push('re-evaluates expanded text (eval/exec or an outer-quoted sh -c script) — data becomes code');
             }
             if (PIPE_TO_SHELL_PATTERN.test(cmd)) {
               reasons.push('pipes data into a shell — downloaded or hook-input text runs as a script');

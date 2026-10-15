@@ -1,6 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { shannonEntropy } from '../../analyzers/entropy.js';
+import { isPlaceholderSecret } from '../../core/patterns.js';
 
 const SECRET_KEY_NAMES = /(?:key|token|secret|pass|api|auth|credential)/i;
 const KNOWN_KEY_PREFIXES = [
@@ -27,6 +28,7 @@ function literalPart(value: string): string {
 }
 
 function isPlaceholder(value: string): boolean {
+  if (isPlaceholderSecret(value)) return true;
   if (/^(?:true|false|null)$/i.test(value)) return true;
   if (/^\d+(?:\.\d+)?$/.test(value)) return true;
   if (/^<[^>]*>$/.test(value)) return true;

@@ -115,9 +115,15 @@ describe('CFG-002: API Key Exposure', () => {
     expect(result.passed).toBe(false);
   });
 
+  it('passes on documentation placeholders (sk-ant-your-actual-…-here, AWS EXAMPLE keys)', async () => {
+    const raw = '{\n  "ANTHROPIC_API_KEY": "sk-ant-your-actual-anthropic-key-here",\n  "aws": "AKIAIOSFODNN7EXAMPLE"\n}';
+    const config = makeConfig({ ANTHROPIC_API_KEY: 'sk-ant-your-actual-anthropic-key-here', aws: 'AKIAIOSFODNN7EXAMPLE' }, raw);
+    expect((await cfg002.run(makeContext([config]))).passed).toBe(true);
+  });
+
   it('fails when AWS key found', async () => {
-    const raw = '{\n  "aws": "AKIAIOSFODNN7EXAMPLE"\n}';
-    const config = makeConfig({ aws: 'AKIAIOSFODNN7EXAMPLE' }, raw);
+    const raw = '{\n  "aws": "AKIAZ7QX4M2PLR5TNW3B"\n}';
+    const config = makeConfig({ aws: 'AKIAZ7QX4M2PLR5TNW3B' }, raw);
     const result = await cfg002.run(makeContext([config]));
     console.log(`[CFG-002] AWS key in config → passed: ${result.passed}, message: ${result.message}`);
     expect(result.passed).toBe(false);

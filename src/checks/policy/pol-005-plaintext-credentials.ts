@@ -2,7 +2,7 @@ import { join } from 'node:path';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { isExcludedPath } from '../../core/utils.js';
-import { API_KEY_PATTERNS } from '../../core/patterns.js';
+import { API_KEY_PATTERNS, isPlaceholderSecret } from '../../core/patterns.js';
 
 const CREDENTIAL_FILES = new Set([
   '.npmrc',
@@ -49,7 +49,8 @@ export const pol005 = defineCheck({
         for (let i = 0; i < lines.length; i++) {
           const line = lines[i];
           for (const { pattern, name } of API_KEY_PATTERNS) {
-            if (pattern.test(line)) {
+            const m = pattern.exec(line);
+            if (m && !isPlaceholderSecret(m[0])) {
               evidence.push({
                 file: fullPath,
                 line: i + 1,

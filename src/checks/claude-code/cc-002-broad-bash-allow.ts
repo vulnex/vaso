@@ -1,20 +1,36 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { getNestedValue } from '../../core/utils.js';
+import { DANGEROUS_COMMANDS } from '../devin/dev-001-broad-permissions.js';
 
-const DANGEROUS_BASH_PATTERNS = [
-  { pattern: /^Bash$/, reason: 'bare "Bash" allows any shell command' },
-  { pattern: /^Bash\(\*\)$/, reason: 'Bash(*) allows any shell command' },
-  { pattern: /^Bash\(rm:/, reason: 'rm with broad arguments can destroy files' },
-  { pattern: /^Bash\(sudo:/, reason: 'sudo grants privileged execution' },
-  { pattern: /^Bash\(curl:/, reason: 'curl can fetch and execute remote payloads' },
-  { pattern: /^Bash\(wget:/, reason: 'wget can fetch arbitrary remote content' },
-  { pattern: /^Bash\(eval:/, reason: 'eval executes arbitrary strings as commands' },
-  { pattern: /^Bash\(sh:/, reason: 'sh can run any command in a sub-shell' },
-  { pattern: /^Bash\(bash:/, reason: 'bash can run any command in a sub-shell' },
-  { pattern: /^Bash\(chmod:/, reason: 'chmod can change file permissions across the system' },
-  { pattern: /^Bash\(.*\*\)$/, reason: 'wildcard arguments expand the attack surface' },
-];
+/** Why allowing a command family without a prompt is risky. */
+const FAMILY_REASONS: Record<string, string> = {
+  rm: 'rm with broad arguments can destroy files',
+  sudo: 'sudo grants privileged execution',
+  su: 'su grants privileged execution',
+  doas: 'doas grants privileged execution',
+  curl: 'curl can fetch and execute remote payloads or send data out',
+  wget: 'wget can fetch arbitrary remote content',
+  eval: 'eval executes arbitrary strings as commands',
+  chmod: 'chmod can change file permissions across the system',
+};
+
+/**
+ * The command a Bash rule allows: `Bash(npm run test *)`, `Bash(rm:*)`
+ * (the `:*` suffix is the same trailing wildcard), `Bash(python3 -c *)`.
+ * Prefix rules are matched per subcommand of a compound command
+ * (code.claude.com/docs/en/permissions), so a trailing wildcard on a harmless
+ * command is the documented way to allow it — the command is what matters.
+ */
+function bashRule(entry: string): { family: string; anything: boolean } | undefined {
+  if (entry === 'Bash') return { family: '', anything: true };
+  const m = /^Bash\((.*)\)$/s.exec(entry);
+  if (!m) return undefined;
+  const body = m[1].trim().replace(/:\*$/, ' *');
+  if (body === '' || body.startsWith('*')) return { family: '', anything: true };
+  const first = (body.split(/\s+/)[0] ?? '').split('/').pop() ?? '';
+  return { family: first.replace(/^(python|ruby|perl|php|node)\d+(?:\.\d+)*$/, '$1'), anything: false };
+}
 
 export const cc002 = defineCheck({
   id: 'CC-002',
@@ -33,15 +49,17 @@ export const cc002 = defineCheck({
 
       for (const entry of allow) {
         if (typeof entry !== 'string') continue;
-        for (const { pattern, reason } of DANGEROUS_BASH_PATTERNS) {
-          if (pattern.test(entry)) {
-            evidence.push({
-              file: config.filePath,
-              snippet: entry,
-              detail: reason,
-            });
-            break;
-          }
+        const rule = bashRule(entry.trim());
+        if (!rule) continue;
+        if (rule.anything) {
+          evidence.push({ file: config.filePath, snippet: entry, detail: `${entry} allows any shell command` });
+        } else if (DANGEROUS_COMMANDS.has(rule.family) || FAMILY_REASONS[rule.family]) {
+          evidence.push({
+            file: config.filePath,
+            snippet: entry,
+            detail: FAMILY_REASONS[rule.family]
+              ?? `"${rule.family}" runs arbitrary code, opens a shell or reaches the network — allowing it skips the prompt for all of that`,
+          });
         }
       }
     }
@@ -49,7 +67,7 @@ export const cc002 = defineCheck({
     return h.fromEvidence(evidence, {
       passed: 'No overly broad Bash permissions detected',
       failed: (n) => `Found ${n} risky Bash allow pattern(s) — narrow them to specific commands`,
-      fixDescription: 'Replace broad Bash patterns with specific subcommands (e.g. Bash(git:status))',
+      fixDescription: 'Allow specific commands instead (e.g. "Bash(npm run test *)", "Bash(git status)"), and leave shells, interpreters, network and privilege tools to the prompt',
     });
   },
 });

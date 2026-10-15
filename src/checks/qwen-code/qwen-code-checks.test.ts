@@ -61,6 +61,13 @@ describe('QC-001: Plaintext API Key', () => {
     expect(result.passed).toBe(false);
   });
 
+  it('passes on documentation placeholders copied from the docs', async () => {
+    const result = await check.run(makeCtx([makeConfig('settings.json', {
+      env: { ANTHROPIC_API_KEY: 'sk-ant-your-actual-anthropic-key-here', OPENAI_API_KEY: 'sk-...' },
+    })]));
+    expect(result.passed).toBe(true);
+  });
+
   it('passes when env values are $-references', async () => {
     const result = await check.run(makeCtx([makeConfig('settings.json', {
       env: { OPENROUTER_API_KEY: '$OPENROUTER_API_KEY' },

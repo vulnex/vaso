@@ -307,7 +307,7 @@ describe('ABA-011 API endpoints', () => {
 
 describe('ABA-012 AGENTS.md secrets', () => {
   it('scans the workspace AGENTS.md for project installs', async () => {
-    const fs = makeFs({ files: { '/work/app/AGENTS.md': 'deploy with AKIAIOSFODNN7EXAMPLE\n' } });
+    const fs = makeFs({ files: { '/work/app/AGENTS.md': 'deploy with AKIAZ7QX4M2PLR5TNW3B\n' } });
     const r = await check('ABA-012').run(projectCtx([], fs));
     expect(r.passed).toBe(false);
   });

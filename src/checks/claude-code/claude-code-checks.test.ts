@@ -111,10 +111,25 @@ describe('CC-002: Broad Bash Allowlist', () => {
 
   it('passes when only narrow Bash patterns are allowed', async () => {
     const config = makeConfig('settings.json', {
-      permissions: { allow: ['Bash(git:status)', 'Bash(npm:test)', 'Read', 'Edit'] },
+      permissions: { allow: ['Bash(git status)', 'Bash(npm test)', 'Read', 'Edit'] },
     });
     const result = await check.run(makeCtx([config]));
     expect(result.passed).toBe(true);
+  });
+
+  // code.claude.com/docs/en/permissions: prefix rules are matched per subcommand
+  it('passes documented prefix rules on harmless commands, in either wildcard syntax', async () => {
+    const config = makeConfig('settings.json', {
+      permissions: { allow: ['Bash(npm run test *)', 'Bash(npm run *)', 'Bash(git diff *)', 'Bash(ls *)', 'Bash(git commit:*)'] },
+    });
+    expect((await check.run(makeCtx([config]))).passed).toBe(true);
+  });
+
+  it('flags dangerous command families in either syntax, and leading wildcards', async () => {
+    for (const rule of ['Bash(rm *)', 'Bash(python3 -c:*)', 'Bash(node -e *)', 'Bash(/usr/bin/curl *)', 'Bash(* --help)', 'Bash']) {
+      const result = await check.run(makeCtx([makeConfig('settings.json', { permissions: { allow: [rule] } })]));
+      expect(result.passed, rule).toBe(false);
+    }
   });
 });
 
@@ -550,6 +565,20 @@ describe('deep-test 2026-10-15 regressions (Claude Code)', () => {
     expect((await check.run(makeCtx([hook('PreToolUse', { type: 'command', command: "jq -r '.tool_input.command' | sh" })]))).passed).toBe(false);
     expect((await check.run(makeCtx([hook('PreToolUse', { type: 'command', command: 'bash', args: ['-c', 'eval "$X"'] })]))).passed).toBe(false);
     expect((await check.run(makeCtx([hook('PreToolUse', { type: 'command', command: 'git diff | shasum' })]))).passed).toBe(true);
+  });
+
+  it('CC-003: `exec` as a subcommand and constant single-quoted sh -c scripts pass; outer-expanded ones fail', async () => {
+    const check = byId('CC-003');
+    const run = (command: string) => check.run(makeCtx([hook('PostToolUse', { type: 'command', command })]));
+    // docs-style hooks (code.claude.com/docs/en/hooks): not the shell builtin, or a constant script
+    expect((await run('docker compose exec app npm run lint')).passed).toBe(true);
+    expect((await run('npm exec -- prettier --check .')).passed).toBe(true);
+    expect((await run("bash -c 'NAME=$(jq -r .name); DIR=\"$HOME/.claude/worktrees/$NAME\"; mkdir -p \"$DIR\"'")).passed).toBe(true);
+    expect((await run('bash -c "cd ${CLAUDE_PROJECT_DIR} && npm test"')).passed).toBe(true);
+    // data re-evaluated as code
+    expect((await run('eval "$(jq -r .tool_input.command)"')).passed).toBe(false);
+    expect((await run('sh -c "echo $(jq -r .prompt)"')).passed).toBe(false);
+    expect((await run('exec $CMD')).passed).toBe(false);
   });
 
   it('CC-004: literal bearer token in an http hook header, and a key inlined in apiKeyHelper', async () => {

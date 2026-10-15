@@ -79,7 +79,9 @@ export const cdx002 = defineCheck({
 
     return h.fromEvidence(evidence, {
       passed: 'Codex sandbox is restricting command execution',
-      failed: () => 'Codex sandbox is disabled — commands have full host access',
+      failed: () => critical
+        ? 'Codex sandbox is disabled or can write outside the workspace'
+        : 'Codex sandboxed commands have outbound network access',
       // network_access alone weakens the sandbox but does not remove it
       severity: critical ? undefined : 'warning',
       fixDescription: 'Set sandbox_mode to "read-only" or "workspace-write", keep writable_roots to project paths, and leave network_access off',

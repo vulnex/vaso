@@ -1,6 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { API_KEY_PATTERNS } from '../../core/patterns.js';
+import { API_KEY_PATTERNS, isPlaceholderSecret } from '../../core/patterns.js';
 import { accessibleByOthers, queryPermissions } from '../../core/permissions.js';
 import { asRecord, atomicConfigs, llmProviders, mask, mcpServers, serverName } from './shared.js';
 
@@ -22,6 +22,7 @@ function secretEntries(map: unknown): Array<[string, string, string | undefined]
   for (const [key, value] of Object.entries(asRecord(map) ?? {})) {
     if (typeof value !== 'string') continue;
     const literal = value.replace(AUTH_SCHEME, '').trim();
+    if (isPlaceholderSecret(literal)) continue;
     const tokenName = knownTokenName(literal);
     if (!tokenName && !SECRET_KEY_HINT.test(key)) continue;
     if (literal.length < MIN_SECRET_LENGTH) continue;

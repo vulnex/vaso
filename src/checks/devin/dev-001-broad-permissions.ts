@@ -192,8 +192,9 @@ export const dev001 = defineCheck({
     return h.fromEvidence(evidence, {
       passed: 'No over-broad Devin permission rules detected',
       failed: (n) => `Found ${n} over-broad Devin permission finding(s)`,
-      // Deny-gap alone is a hygiene warning, not a critical exposure
-      severity: criticalEvidence.length === 0 ? 'warning' : undefined,
+      // Deny-gap alone is hygiene, not an exposure — info, as CC-008 rates
+      // the same gap in Claude Code
+      severity: criticalEvidence.length === 0 ? 'info' : undefined,
       fixDescription: 'Scope Exec()/Write() allow rules to specific commands and paths, and add deny rules for shells, network tools, and credential paths',
     });
   },

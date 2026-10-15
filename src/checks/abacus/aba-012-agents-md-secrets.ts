@@ -1,7 +1,7 @@
 import { dirname, join } from 'node:path';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { API_KEY_PATTERNS } from '../../core/patterns.js';
+import { API_KEY_PATTERNS, isPlaceholderSecret } from '../../core/patterns.js';
 import { findHighEntropyBlocks } from '../../analyzers/entropy.js';
 import { isProjectInstall } from './shared.js';
 
@@ -37,6 +37,7 @@ export const aba012 = defineCheck({
       lines.forEach((line, i) => {
         for (const { pattern, name } of API_KEY_PATTERNS) {
           const m = pattern.exec(line);
+          if (m && isPlaceholderSecret(m[0])) continue;
           if (m) evidence.push({ file, line: i + 1, snippet: `${m[0].slice(0, 12)}…`, detail: `Plaintext ${name} in AGENTS.md` });
         }
       });

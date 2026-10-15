@@ -1,6 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { API_KEY_PATTERNS } from '../../core/patterns.js';
+import { API_KEY_PATTERNS, isPlaceholderSecret } from '../../core/patterns.js';
 
 // Devin supports secret interpolation: ${env:VAR} and ${file:/path}, also
 // embedded in a larger value (`Bearer ${env:TOKEN}`). Whatever remains after
@@ -22,7 +22,8 @@ function literalPart(value: unknown): string {
 }
 
 function isLiteralSecret(value: unknown): value is string {
-  return literalPart(value).length > 0;
+  const literal = literalPart(value);
+  return literal.length > 0 && !isPlaceholderSecret(literal);
 }
 
 function knownTokenName(value: string): string | undefined {
@@ -65,6 +66,7 @@ export const dev003 = defineCheck({
           for (const [key, value] of Object.entries(map as Record<string, unknown>)) {
             if (typeof value !== 'string') continue;
             const literal = literalPart(value);
+            if (isPlaceholderSecret(literal)) continue; // a docs example (ghp_your_token)
             // A recognizable token format is a finding under any key name
             const tokenName = knownTokenName(literal);
             if (!tokenName && !SECRET_KEY_HINT.test(key)) continue;

@@ -70,6 +70,12 @@ describe('CDX-001: Codex Approval Policy Disabled', () => {
     const result = await check.run(makeCtx([makeConfig('config.toml', { approval_policy: 'on-request' })]));
     expect(result.passed).toBe(true);
   });
+  it('is info for the documented read-only non-interactive preset (never + read-only)', async () => {
+    const result = await check.run(makeCtx([makeConfig('config.toml', { approval_policy: 'never', sandbox_mode: 'read-only' })]));
+    expect(result.severity).toBe('info');
+    const ws = await check.run(makeCtx([makeConfig('config.toml', { approval_policy: 'never', sandbox_mode: 'workspace-write' })]));
+    expect(ws.severity).toBe('critical');
+  });
 });
 
 describe('CDX-002: Codex Sandbox Disabled', () => {
@@ -83,6 +89,12 @@ describe('CDX-002: Codex Sandbox Disabled', () => {
   it('passes when sandbox_mode = "workspace-write"', async () => {
     const result = await check.run(makeCtx([makeConfig('config.toml', { sandbox_mode: 'workspace-write' })]));
     expect(result.passed).toBe(true);
+  });
+  it('names network access, not a disabled sandbox, when only network_access is on', async () => {
+    const result = await check.run(makeCtx([makeConfig('config.toml', { sandbox_workspace_write: { network_access: true } })]));
+    expect(result.severity).toBe('warning');
+    expect(result.message).toMatch(/network access/);
+    expect(result.message).not.toMatch(/disabled/);
   });
 });
 
@@ -162,6 +174,17 @@ describe('CDX-005: Codex Shell Env Inherits All', () => {
     const result = await check.run(makeCtx([makeConfig('config.toml', { model: 'o4-mini' })]));
     expect(result.passed).toBe(true);
   });
+  it('is info when inherit = "all" filters secrets (official config sample)', async () => {
+    for (const policy of [
+      { inherit: 'all', ignore_default_excludes: false },
+      { inherit: 'all', include_only: ['PATH', 'HOME'] },
+    ]) {
+      const result = await check.run(makeCtx([makeConfig('config.toml', { shell_environment_policy: policy })]));
+      expect(result.severity).toBe('info');
+    }
+    const wild = await check.run(makeCtx([makeConfig('config.toml', { shell_environment_policy: { inherit: 'all', include_only: ['*'] } })]));
+    expect(wild.severity).toBe('critical');
+  });
 });
 
 describe('CDX-006: Codex Trusted Projects Too Broad', () => {
@@ -228,7 +251,7 @@ describe('CDX-007: Codex Memory File Secret Leak', () => {
   it('fails when instructions.md contains an AWS key', async () => {
     const fs = makeFs({
       access: vi.fn(async (p: string) => p.endsWith('instructions.md')),
-      readFile: vi.fn(async () => 'AKIAIOSFODNN7EXAMPLE\n'),
+      readFile: vi.fn(async () => 'AKIAZ7QX4M2PLR5TNW3B\n'),
     });
     const result = await check.run(makeCtx([], fs));
     expect(result.passed).toBe(false);

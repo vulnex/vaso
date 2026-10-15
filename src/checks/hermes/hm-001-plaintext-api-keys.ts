@@ -1,6 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { shannonEntropy } from '../../analyzers/entropy.js';
+import { isPlaceholderSecret } from '../../core/patterns.js';
 
 const KEY_NAME_PATTERN = /(?:api[_-]?key|token|secret|password|credential|auth|bot[_-]?token)/i;
 const KNOWN_PREFIXES = [
@@ -22,6 +23,7 @@ const MIN_LEN = 20;
 
 function isSecret(value: string): boolean {
   if (value.length < MIN_LEN) return false;
+  if (isPlaceholderSecret(value)) return false;
   if (ENV_REF.test(value)) return false;
   if (KNOWN_PREFIXES.some(p => p.test(value))) return true;
   // Secrets are single tokens; prose (personality prompts, descriptions —

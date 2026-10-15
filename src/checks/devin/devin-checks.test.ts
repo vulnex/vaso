@@ -100,13 +100,14 @@ describe('DEV-001: Devin Over-Broad Permission Rules', () => {
     expect(result.severity).toBe('critical');
   });
 
-  it('emits warning-level evidence when allow is non-empty and deny is absent', async () => {
+  // Same gap CC-008 reports for Claude Code at info
+  it('emits info-level evidence when allow is non-empty and deny is absent', async () => {
     const config = makeConfig('config.json', {
       permissions: { allow: ['Exec(git)', 'Read(**)'] },
     });
     const result = await check.run(makeCtx([config]));
     expect(result.passed).toBe(false);
-    expect(result.severity).toBe('warning');
+    expect(result.severity).toBe('info');
     expect(result.evidence).toHaveLength(1);
     expect(result.evidence?.[0].detail).toContain('no deny rules');
   });
@@ -222,6 +223,13 @@ describe('DEV-003: Devin Plaintext Secrets in MCP Config', () => {
     const result = await check.run(makeCtx([config]));
     expect(result.passed).toBe(false);
     expect(result.severity).toBe('critical');
+  });
+
+  it('passes on the docs placeholder ghp_your_token', async () => {
+    const config = makeConfig('mcp_config.json', {
+      mcpServers: { github: { command: 'npx', env: { GITHUB_TOKEN: 'ghp_your_token' } } },
+    });
+    expect((await check.run(makeCtx([config]))).passed).toBe(true);
   });
 
   it('flags literal secret-suggesting env values >= 8 chars', async () => {

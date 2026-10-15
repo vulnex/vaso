@@ -1,6 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { shannonEntropy } from '../../analyzers/entropy.js';
+import { isPlaceholderSecret } from '../../core/patterns.js';
 
 const SECRET_KEY_NAMES = /(?:api[_-]?key|token|secret|password|credential|auth)/i;
 const KNOWN_KEY_PREFIXES = [
@@ -15,6 +16,7 @@ const ENV_REF_PATTERN = /^\$\{?[A-Z_][A-Z0-9_]*\}?$/;
 
 function isSecretValue(value: string): boolean {
   if (value.length < MIN_LENGTH) return false;
+  if (isPlaceholderSecret(value)) return false;
   if (ENV_REF_PATTERN.test(value)) return false;
   if (KNOWN_KEY_PREFIXES.some(p => p.test(value))) return true;
   return shannonEntropy(value) > HIGH_ENTROPY_THRESHOLD;

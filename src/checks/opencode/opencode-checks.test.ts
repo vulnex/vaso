@@ -108,22 +108,31 @@ describe('OPC-002: Permissive permissions', () => {
     expect(result.severity).toBe('critical');
   });
 
-  it('fails when permission.bash = "allow"', async () => {
-    const config = makeConfig('opencode.json', { permission: { bash: 'allow' } });
-    const result = await check.run(makeCtx([config]));
-    expect(result.passed).toBe(false);
+  // OpenCode defaults bash/edit/task/webfetch to "allow" (opencode.ai/docs/permissions):
+  // set explicitly or left at the default, the effective state is the same — info
+  it('reports allow-by-default tools as info, whether set explicitly or not', async () => {
+    for (const permission of [{ bash: 'allow' }, { edit: { '*': 'allow' } }, undefined]) {
+      const result = await check.run(makeCtx([makeConfig('opencode.json', permission ? { permission } : {})]));
+      expect(result.passed).toBe(false);
+      expect(result.severity).toBe('info');
+    }
   });
 
-  it('fails when permission.edit = { "*": "allow" }', async () => {
-    const config = makeConfig('opencode.json', { permission: { edit: { '*': 'allow' } } });
-    const result = await check.run(makeCtx([config]));
-    expect(result.passed).toBe(false);
+  it('passes when every allow-by-default tool asks', async () => {
+    const config = makeConfig('opencode.json', { permission: { bash: 'ask', edit: 'ask', task: 'ask', webfetch: 'deny' } });
+    expect((await check.run(makeCtx([config]))).passed).toBe(true);
+    expect((await check.run(makeCtx([makeConfig('opencode.json', { permission: 'ask' })]))).passed).toBe(true);
   });
 
-  it('passes when permission.bash = "ask"', async () => {
-    const config = makeConfig('opencode.json', { permission: { bash: 'ask', edit: 'ask' } });
-    const result = await check.run(makeCtx([config]));
-    expect(result.passed).toBe(true);
+  it('is critical for loosening what OpenCode asks about by default, and for dangerous scoped bash allows', async () => {
+    const ask = { bash: 'ask', edit: 'ask', task: 'ask', webfetch: 'ask' };
+    const run = (permission: Record<string, unknown>) => check.run(makeCtx([makeConfig('opencode.json', { permission: { ...ask, ...permission } })]));
+    expect((await run({ external_directory: 'allow' })).severity).toBe('critical');
+    expect((await run({ external_directory: { '~/**': 'allow' } })).severity).toBe('critical');
+    expect((await run({ bash: { '*': 'ask', 'curl *': 'allow' } })).severity).toBe('critical');
+    // scoped as documented: a project path, a harmless command
+    expect((await run({ external_directory: { '~/projects/shared/*': 'allow' } })).passed).toBe(true);
+    expect((await run({ bash: { '*': 'ask', 'git status*': 'allow' } })).passed).toBe(true);
   });
 });
 

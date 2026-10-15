@@ -1,7 +1,7 @@
 import { basename } from 'node:path';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { API_KEY_PATTERNS, redactSecretsInLine } from '../../core/patterns.js';
+import { API_KEY_PATTERNS, redactSecretsInLine, isPlaceholderSecret } from '../../core/patterns.js';
 
 /** Framework-designated secret files (PicoClaw keeps model/channel keys in
  *  `.security.yml`, written 0600, instead of config.json). */
@@ -25,7 +25,8 @@ export const cfg002 = defineCheck({
       const lines = config.raw.split('\n');
       for (let i = 0; i < lines.length; i++) {
         for (const { pattern, name } of API_KEY_PATTERNS) {
-          if (pattern.test(lines[i])) {
+          const m = pattern.exec(lines[i]);
+          if (m && !isPlaceholderSecret(m[0])) {
             evidence.push({
               file: config.filePath,
               line: i + 1,

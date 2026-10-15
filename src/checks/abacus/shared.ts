@@ -1,6 +1,6 @@
 import { basename, dirname, join } from 'node:path';
 import type { Evidence, ParsedConfig, ScanContext } from '../../core/types.js';
-import { API_KEY_PATTERNS } from '../../core/patterns.js';
+import { API_KEY_PATTERNS, isPlaceholderSecret } from '../../core/patterns.js';
 import { shannonEntropy } from '../../analyzers/entropy.js';
 
 /**
@@ -169,7 +169,7 @@ function credentialShaped(value: string): boolean {
 export function literalSecret(key: string, value: string): string | undefined {
   // `Bearer ${MCP_TOKEN}` is a reference too — judge what follows the scheme
   const literal = value.replace(AUTH_SCHEME, '').trim();
-  if (!literal || isEnvReference(literal)) return undefined;
+  if (!literal || isEnvReference(literal) || isPlaceholderSecret(literal)) return undefined;
   const token = API_KEY_PATTERNS.find(p => p.pattern.test(literal))?.name;
   if (token) return token;
   if (literal.length < MIN_SECRET_LENGTH || notSecret(literal)) return undefined;

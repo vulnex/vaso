@@ -24,6 +24,29 @@ export const API_KEY_PATTERNS = [
   { pattern: /VELLUM_API_KEY\s*[=:]\s*['"]?[a-zA-Z0-9._-]{20,}/, name: 'Vellum API key assignment' },
 ];
 
+/** A placeholder word set off by delimiters, as documentation writes them:
+ *  `sk-ant-your-actual-key-here`, `ghp_your_token`, `<your-api-key>`. A
+ *  random key doesn't contain a hyphen- or underscore-delimited word. */
+const PLACEHOLDER_WORD =
+  /(?:^|[-_.\s<{:/])(?:your|example|sample|dummy|placeholder|changeme|change[-_]me|replace|insert|redacted|fake)(?=$|[-_.\s>}])/i;
+
+/**
+ * Whether a value that looks like a credential is a documentation
+ * placeholder instead: placeholder words (above), an ellipsis (`sk-ant-...`,
+ * `sk-…here`), `<…>` / `{{…}}`, or runs of x/* masking. Shared by every
+ * plaintext-secret check, so docs examples copied into configs and memory
+ * files aren't reported as leaked keys.
+ */
+export function isPlaceholderSecret(value: string): boolean {
+  const v = value.trim();
+  if (v === '') return true;
+  if (/\.{3}|\u2026/.test(v)) return true;
+  if (/^<[^>]*>$|^\{\{[^}]*\}\}$/.test(v)) return true;
+  if (/x{4,}|X{4,}|\*{3,}/.test(v)) return true;
+  if (/EXAMPLE(?:KEY)?$/.test(v)) return true; // AWS docs: AKIAIOSFODNN7EXAMPLE
+  return PLACEHOLDER_WORD.test(v);
+}
+
 export const OAUTH_SECRET_PATTERNS = [
   { pattern: /^client_secret$/i, name: 'OAuth client secret (key name)' },
   { pattern: /^oauth[_-]?(?:client[_-]?)?secret$/i, name: 'OAuth secret (key name)' },

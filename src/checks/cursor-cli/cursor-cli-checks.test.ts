@@ -253,6 +253,18 @@ describe('CUR-011: Hooks Fail-Open', () => {
     }), makeConfig('/home/test/.cursor/cli-config.json', {})]));
     expect(result.passed).toBe(true);
   });
+
+  it('ignores observational hooks, which gate nothing (cursor.com/docs/agent/hooks)', async () => {
+    const result = await check.run(makeCtx([makeConfig('/home/test/.cursor/hooks.json', {
+      version: 1,
+      hooks: {
+        afterFileEdit: [{ command: './hooks/format.sh' }],
+        sessionStart: [{ command: './hooks/session-init.sh' }],
+        stop: [{ command: 'bun run .cursor/hooks/track-stop.ts --stop' }],
+      },
+    })]));
+    expect(result.passed).toBe(true);
+  });
 });
 
 describe('CUR-012: Workspace Trust Disabled', () => {

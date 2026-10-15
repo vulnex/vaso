@@ -19,6 +19,25 @@ export const cdx005 = defineCheck({
         getNestedValue(config.data, 'shellEnvironmentPolicy.inherit');
 
       if (typeof inherit === 'string' && inherit.toLowerCase() === 'all') {
+        const policy = (getNestedValue(config.data, 'shell_environment_policy')
+          ?? getNestedValue(config.data, 'shellEnvironmentPolicy')) as Record<string, unknown> | undefined;
+        // ignore_default_excludes = false drops every name containing KEY,
+        // SECRET or TOKEN before the filters apply; include_only keeps just
+        // the listed names (learn.chatgpt.com/docs/config-file/config-advanced)
+        const defaultExcludes = policy?.ignore_default_excludes === false;
+        const includeOnly = Array.isArray(policy?.include_only)
+          && policy.include_only.length > 0
+          && policy.include_only.every(p => typeof p === 'string' && p !== '*');
+        if (defaultExcludes || includeOnly) {
+          evidence.push({
+            file: config.filePath,
+            mitigated: true,
+            detail: defaultExcludes
+              ? 'shell_environment_policy.inherit = "all", but ignore_default_excludes = false removes every variable named *KEY*, *SECRET* or *TOKEN* first'
+              : 'shell_environment_policy.inherit = "all", narrowed by an include_only allowlist',
+          });
+          continue;
+        }
         evidence.push({
           file: config.filePath,
           detail: 'shell_environment_policy.inherit = "all" — every parent env var (incl. AWS_*, GITHUB_TOKEN, ANTHROPIC_API_KEY) is exposed to tool subprocesses and MCP servers',

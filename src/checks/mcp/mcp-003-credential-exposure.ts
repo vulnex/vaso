@@ -1,6 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { API_KEY_PATTERNS } from '../../core/patterns.js';
+import { API_KEY_PATTERNS, isPlaceholderSecret } from '../../core/patterns.js';
 import { shannonEntropy } from '../../analyzers/entropy.js';
 import { findSourceSecrets } from '../../analyzers/source-secrets.js';
 
@@ -30,6 +30,7 @@ export const mcp003 = defineCheck({
 
         for (const [location, values] of sources) {
         for (const [key, value] of Object.entries(values)) {
+          if (isPlaceholderSecret(value)) continue; // a docs example, not a key
           // Check against known API key patterns
           for (const { pattern, name } of API_KEY_PATTERNS) {
             if (pattern.test(value)) {

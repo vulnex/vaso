@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { redactSecret, redactSecretsInLine } from './patterns.js';
+import { isPlaceholderSecret, redactSecret, redactSecretsInLine } from './patterns.js';
 
 describe('redactSecret', () => {
   it('reveals first 4 + last 4 characters of long tokens', () => {
@@ -103,5 +103,21 @@ describe('redactSecretsInLine', () => {
     expect(out).not.toContain(tok);
     expect(out).not.toContain('BWXYZ');
     expect(out).toMatch(/AKIA\.\.\.WXYZ/);
+  });
+});
+
+describe('isPlaceholderSecret', () => {
+  it('recognizes documentation placeholders', () => {
+    for (const v of [
+      'sk-ant-your-actual-anthropic-key-here', 'ghp_your_token', 'sk-ant-...', 'sk-…here',
+      '<your-api-key>', '{{API_KEY}}', 'sk-xxxxxxxxxxxxxxxxxxxx', 'AKIAIOSFODNN7EXAMPLE', 'changeme', 'your-key-here',
+    ]) expect(isPlaceholderSecret(v), v).toBe(true);
+  });
+
+  it('leaves realistic keys alone', () => {
+    for (const v of [
+      'sk-ant-api03-Zx9Qw3Er7Ty1Ui5Op2As6Df4Gh8Jk0LzXc-Vb7NmQwErTy', 'ghp_Zx9Qw3Er7Ty1Ui5Op2As6Df4Gh8Jk0LzXcVb',
+      'AKIAZ7QX4M2PLR5TNW3B', 'sk-or-v1-0123456789abcdef0123456789abcdef', 'xoxb-1234567890-abcdefghijkl',
+    ]) expect(isPlaceholderSecret(v), v).toBe(false);
   });
 });

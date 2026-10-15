@@ -226,6 +226,11 @@ api_keys = ["sk-ant-fallback-0000000000000000"]
     expect(r.fixable).toBe(false); // encrypt is on (default) — nothing to toggle
   });
 
+  it('passes on a documentation placeholder key', async () => {
+    const r = await run('ZC-001', '[providers.models.anthropic.cloud]\napi_key = "sk-ant-..."\n');
+    expect(r.passed).toBe(true);
+  });
+
   it('passes with encrypted secrets', async () => {
     const r = await run('ZC-001', '[providers.models.openai.main]\napi_key = "enc2:00ab"\n');
     expect(r.passed).toBe(true);

@@ -20,6 +20,18 @@ export const cdx001 = defineCheck({
       if (codexProfileName(config.filePath)) continue;
       const policy = config.data.approval_policy ?? config.data.approvalPolicy;
       if (typeof policy === 'string' && DANGEROUS_POLICIES.has(policy.toLowerCase())) {
+        // The documented "read-only non-interactive (CI)" preset: never asks,
+        // but commands stay inside the read-only sandbox (no writes, no
+        // network) — learn.chatgpt.com/docs/agent-approvals-security
+        const mode = config.data.sandbox_mode ?? config.data.sandboxMode;
+        if (typeof mode === 'string' && mode.toLowerCase() === 'read-only') {
+          evidence.push({
+            file: config.filePath,
+            mitigated: true,
+            detail: `approval_policy = "${policy}" with sandbox_mode = "read-only" — commands run unapproved but can't write or reach the network`,
+          });
+          continue;
+        }
         evidence.push({
           file: config.filePath,
           detail: `approval_policy = "${policy}" — Codex will execute commands without user approval`,

@@ -2,6 +2,7 @@ import { join } from 'node:path';
 import type { Evidence, ScanContext } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { findHighEntropyBlocks } from '../../analyzers/entropy.js';
+import { isPlaceholderSecret } from '../../core/patterns.js';
 
 const KNOWN_KEY_PREFIXES: { pattern: RegExp; name: string }[] = [
   { pattern: /\bgho_[A-Za-z0-9]{20,}/, name: 'GitHub OAuth token' },
@@ -30,6 +31,7 @@ async function scanFile(file: string, ctx: ScanContext, evidence: Evidence[]): P
   for (let i = 0; i < lines.length; i++) {
     for (const { pattern, name } of KNOWN_KEY_PREFIXES) {
       const m = pattern.exec(lines[i]);
+      if (m && isPlaceholderSecret(m[0])) continue;
       if (m) {
         evidence.push({
           file,

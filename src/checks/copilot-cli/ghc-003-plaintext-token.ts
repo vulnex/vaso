@@ -1,5 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { isPlaceholderSecret } from '../../core/patterns.js';
 
 const GITHUB_TOKEN_PATTERNS = [
   { pattern: /\bgho_[A-Za-z0-9]{20,}/, name: 'GitHub OAuth token' },
@@ -25,6 +26,7 @@ export const ghc003 = defineCheck({
       if (!config.raw) continue;
       for (const { pattern, name } of GITHUB_TOKEN_PATTERNS) {
         const m = pattern.exec(config.raw);
+        if (m && isPlaceholderSecret(m[0])) continue;
         if (m) {
           evidence.push({
             file: config.filePath,
