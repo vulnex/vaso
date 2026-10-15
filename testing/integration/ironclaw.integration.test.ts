@@ -40,8 +40,8 @@ describe('IronClaw 1.x (Reborn) Insecure', () => {
     expect(expectCheckFailed(result, 'IC-006').severity).toBe('critical');
   });
 
-  it('should detect the minimal approval policy (IC-007)', () => {
-    expect(expectCheckFailed(result, 'IC-007').severity).toBe('warning');
+  it('should report the minimal approval policy (IC-007) as info — 1.4 parses [policy] but does not enforce it', () => {
+    expect(expectCheckFailed(result, 'IC-007').severity).toBe('info');
   });
 
   it('should detect the world-readable master key (IC-009)', () => {
