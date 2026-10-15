@@ -7,6 +7,7 @@
     ".cursor/cli-config.json": "644"
   },
   "pass": [
-    "CUR-004"
+    "CUR-004",
+    "POL-003"
   ]
 }

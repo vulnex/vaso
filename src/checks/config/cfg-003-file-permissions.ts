@@ -2,21 +2,8 @@ import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { accessibleByOthers, markUnreachable, queryPermissions } from '../../core/permissions.js';
 import { restrictFilesToOwner } from '../../remediation/config-writer.js';
-import { configHoldsSecret } from '../../core/secret-values.js';
-import { basename } from 'node:path';
+import { exposesCredentials } from '../../core/secret-values.js';
 
-/** Files that are credentials by what they are, whatever they hold right now. */
-// PicoClaw's .security.yml is its secret store (the place api keys move to)
-const CREDENTIAL_FILE_NAME = /(?:^\.env(?:\.|$)|^\.security\.ya?ml$|credential|auth|token|secret|keystore|\.key$|\.pem$)/i;
-
-/**
- * A declared credential path that is ordinary settings (an agent's
- * settings.json, written with the default umask) exposes something only when
- * it holds a secret; a group-readable settings file with none is not a leak.
- */
-function exposesCredentials(config: { filePath: string; data: unknown }): boolean {
-  return CREDENTIAL_FILE_NAME.test(basename(config.filePath)) || configHoldsSecret(config.data);
-}
 
 export const cfg003 = defineCheck({
   id: 'CFG-003',

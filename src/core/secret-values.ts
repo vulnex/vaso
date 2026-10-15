@@ -1,3 +1,4 @@
+import { basename } from 'node:path';
 import { shannonEntropy } from '../analyzers/entropy.js';
 import { API_KEY_PATTERNS, isEnvReference, isPlaceholderSecret } from './patterns.js';
 
@@ -37,4 +38,17 @@ export function configHoldsSecret(data: unknown): boolean {
     return false;
   };
   return walk(data, '');
+}
+
+/** Files that are credentials by what they are, whatever they hold right now. */
+// PicoClaw's .security.yml is its secret store (the place api keys move to)
+export const CREDENTIAL_FILE_NAME = /(?:^\.env(?:\.|$)|^\.security\.ya?ml$|credential|auth|token|secret|keystore|\.key$|\.pem$)/i;
+
+/**
+ * A declared credential path that is ordinary settings (an agent's
+ * settings.json, written with the default umask) exposes something only when
+ * it holds a secret; a group-readable settings file with none is not a leak.
+ */
+export function exposesCredentials(config: { filePath: string; data: unknown }): boolean {
+  return CREDENTIAL_FILE_NAME.test(basename(config.filePath)) || configHoldsSecret(config.data);
 }

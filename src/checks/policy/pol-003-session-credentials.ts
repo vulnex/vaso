@@ -2,6 +2,22 @@ import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { accessibleByOthers, markUnreachable, queryPermissions } from '../../core/permissions.js';
 import { restrictFilesToOwner } from '../../remediation/config-writer.js';
+import type { ScanContext } from '../../core/types.js';
+import { exposesCredentials } from '../../core/secret-values.js';
+
+/**
+ * The declared credential paths that can expose something: a loaded settings
+ * file only when it holds a secret (as CFG-003 judges it) — Claude Code,
+ * Cursor and Copilot write theirs with the default umask; every other
+ * declared path (token stores, auth files) always.
+ */
+function exposingPaths(ctx: ScanContext): string[] {
+  const byPath = new Map(ctx.configs.map(c => [c.filePath, c]));
+  return (ctx.credentialPaths ?? []).filter(p => {
+    const config = byPath.get(p);
+    return !config || exposesCredentials(config);
+  });
+}
 
 export const pol003 = defineCheck({
   id: 'POL-003',
@@ -12,13 +28,12 @@ export const pol003 = defineCheck({
   supportedPlatforms: ['darwin', 'linux'],
 
   async run(ctx, h) {
-    const paths = ctx.credentialPaths ?? [];
-    if (paths.length === 0) {
+    if ((ctx.credentialPaths ?? []).length === 0) {
       return h.passed('Adapter does not declare credential paths; skipping');
     }
 
     const evidence: Evidence[] = [];
-    for (const fullPath of paths) {
+    for (const fullPath of exposingPaths(ctx)) {
       try {
         const stats = await ctx.fs.stat(fullPath);
         if (!stats.isFile()) continue;
@@ -46,6 +61,6 @@ export const pol003 = defineCheck({
   // Credential files that aren't loaded configs (credentials.json, auth.json,
   // token stores) are only reported here; CFG-003's fix never reached them.
   async fix(ctx) {
-    return restrictFilesToOwner('POL-003', ctx.credentialPaths ?? []);
+    return restrictFilesToOwner('POL-003', exposingPaths(ctx));
   },
 });

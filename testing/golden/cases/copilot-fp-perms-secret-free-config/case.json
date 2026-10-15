@@ -1,0 +1,7 @@
+{
+  "agent": "copilot-cli",
+  "source": "dt14: secret-free ~/.copilot/config.json at 0644 (Copilot writes it with the default umask) is not a credential leak",
+  "reachable": true,
+  "modes": { ".copilot": "700", ".copilot/config.json": "644" },
+  "pass": ["GHC-001", "CFG-003", "POL-003"]
+}
