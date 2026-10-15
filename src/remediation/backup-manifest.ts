@@ -13,7 +13,9 @@ import { join } from 'node:path';
 export const MANIFEST_NAME = '.vaso-manifest.json';
 
 export interface ManifestEntry {
-  kind: 'file' | 'dir';
+  /** `mode`: a file the owner can't read (mode 000) — only its mode is
+   *  recorded; a fix can only have chmod-ed it. */
+  kind: 'file' | 'dir' | 'mode';
   mode: number;
   /** sha256 of the content before the fix (files). */
   before?: string;

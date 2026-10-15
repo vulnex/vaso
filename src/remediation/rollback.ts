@@ -55,7 +55,7 @@ export async function rollback(timestamp?: string): Promise<void> {
   // Collect all files recursively from the backup directory
   const manifest = await readManifest(backupDir);
   const files = (await collectFiles(backupDir)).filter(f => f !== join(backupDir, MANIFEST_NAME));
-  const dirModes = Object.entries(manifest?.entries ?? {}).filter(([, e]) => e.kind === 'dir');
+  const dirModes = Object.entries(manifest?.entries ?? {}).filter(([, e]) => e.kind === 'dir' || e.kind === 'mode');
   const total = files.length + dirModes.length;
   let restored = 0;
 
@@ -76,12 +76,13 @@ export async function rollback(timestamp?: string): Promise<void> {
     }
   }
 
-  // Directory modes a fix changed (NC-002 makes the allowlist dir owner-only)
+  // Directory modes a fix changed (NC-002 makes the allowlist dir owner-only),
+  // and the modes of files the owner couldn't read (no content copy)
   for (const [dir, entry] of dirModes) {
     try {
       const st = await lstat(dir);
-      if (!st.isDirectory()) {
-        console.log(`  ${chalk.yellow('!')} Skipped ${dir}: it is no longer a directory`);
+      if (entry.kind === 'dir' ? !st.isDirectory() : !st.isFile()) {
+        console.log(`  ${chalk.yellow('!')} Skipped ${dir}: it is no longer a ${entry.kind === 'dir' ? 'directory' : 'regular file'}`);
         continue;
       }
       await chmodNoFollow(dir, entry.mode);

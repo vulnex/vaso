@@ -8,7 +8,7 @@ import type { CheckRegistry } from '../core/check-registry.js';
 import type { AdapterRegistry } from '../adapters/registry.js';
 import { getAllSkillsDirs, getSkillFiles } from '../core/utils.js';
 import { promptForFix } from './prompt.js';
-import { readRegularFile, regularMode } from './safe-file.js';
+import { readRegularFile, regularMode, withChangeRecorder } from './safe-file.js';
 import { sha256, writeManifest, type BackupManifest } from './backup-manifest.js';
 
 /**
@@ -111,14 +111,15 @@ export class RemediationEngine {
             await this.backupFile(file).catch(() => undefined);
           }
 
-          const fixResult = await check.fix({
+          // Anything else the fix changes is backed up just before it changes
+          const fixResult = await withChangeRecorder(path => this.backupFile(path), () => check.fix!({
             installation: agent.installation,
             configs: agent.installation.configFiles,
             platform: process.platform,
             fs,
             credentialPaths,
             skillFiles,
-          });
+          }));
 
           await this.recordAfterState();
           results.push(fixResult);
@@ -156,7 +157,15 @@ export class RemediationEngine {
     if (dir) {
       this.manifest.entries[filePath] = { kind: 'dir', mode };
     } else {
-      const content = await readRegularFile(filePath);
+      const content = await readRegularFile(filePath).catch((err: NodeJS.ErrnoException) => {
+        if (err.code === 'EACCES' || err.code === 'EPERM') return undefined;
+        throw err;
+      });
+      if (content === undefined) {
+        this.manifest.entries[filePath] = { kind: 'mode', mode };
+        await writeManifest(this.backupDir, this.manifest);
+        return;
+      }
       const destDir = join(this.backupDir, dirname(filePath));
       await mkdir(destDir, { recursive: true, mode: 0o700 });
       // Owner-only copy: the original's mode lives in the manifest

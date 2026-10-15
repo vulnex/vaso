@@ -1,5 +1,6 @@
 import { open, lstat, chmod } from 'node:fs/promises';
 import { constants } from 'node:fs';
+import { AsyncLocalStorage } from 'node:async_hooks';
 
 /**
  * File I/O for `vaso fix` and `--rollback`. Fixes write into paths taken from
@@ -14,6 +15,23 @@ import { constants } from 'node:fs';
  */
 
 const NOFOLLOW = constants.O_NOFOLLOW ?? 0;
+
+/**
+ * Called with a path just before it is written or chmod-ed — the fix engine
+ * backs it up there, so every file and directory a fix changes is in the
+ * backup, not only the ones the finding names (NC-002 chmods its config
+ * directory; a list made up front missed it and rollback left it 700).
+ */
+const changeRecorder = new AsyncLocalStorage<(path: string) => Promise<void>>();
+
+/** Run `fn` with `record` called before each change this module makes. */
+export function withChangeRecorder<T>(record: (path: string) => Promise<void>, fn: () => Promise<T>): Promise<T> {
+  return changeRecorder.run(record, fn);
+}
+
+async function beforeChange(path: string): Promise<void> {
+  await changeRecorder.getStore()?.(path);
+}
 const NONBLOCK = constants.O_NONBLOCK ?? 0;
 
 export class UnsafeTargetError extends Error {
@@ -41,6 +59,7 @@ export async function readRegularFile(path: string): Promise<Buffer> {
 
 /** Replace the content of an existing regular file in place (mode and owner kept). */
 export async function writeRegularFile(path: string, data: string | Buffer): Promise<void> {
+  await beforeChange(path);
   const handle = await open(path, constants.O_WRONLY | NOFOLLOW | NONBLOCK).catch(err => refuse(path, err));
   try {
     const st = await handle.stat();
@@ -60,11 +79,12 @@ export async function writeRegularFile(path: string, data: string | Buffer): Pro
 export async function chmodNoFollow(path: string, mode: number): Promise<void> {
   const st = await lstat(path);
   if (st.isSymbolicLink()) throw new UnsafeTargetError(path, 'is a symlink');
+  if (!st.isFile() && !st.isDirectory()) throw new UnsafeTargetError(path, 'is not a regular file');
+  await beforeChange(path);
   if (st.isDirectory()) {
     await chmod(path, mode);
     return;
   }
-  if (!st.isFile()) throw new UnsafeTargetError(path, 'is not a regular file');
   const handle = await open(path, constants.O_RDONLY | NOFOLLOW | NONBLOCK).catch(() => undefined);
   if (!handle) {
     await chmod(path, mode);

@@ -93,6 +93,31 @@ describe('fix + rollback (real files)', () => {
     expect((await stat(d)).mode & 0o777).toBe(0o777);
   });
 
+  it.skipIf(!posix)('restores a directory the fix chmod-ed without the finding naming it', async () => {
+    const f = join(home.dir, 'allowlist.json');
+    const d = join(home.dir, 'conf');
+    await writeFile(f, '{}');
+    await mkdir(d);
+    await chmod(d, 0o755);
+    await runFix(f, async () => { await chmodNoFollow(d, 0o700); });
+    expect((await stat(d)).mode & 0o777).toBe(0o700);
+    await rollback();
+    expect((await stat(d)).mode & 0o777).toBe(0o755);
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it.skipIf(!posix || process.getuid?.() === 0)('restores the mode of a file the owner could not read', async () => {
+    const f = join(home.dir, 'token.json');
+    await writeFile(f, 'secret');
+    await chmod(f, 0o044);
+    await runFix(f, p => chmodNoFollow(p, 0o000));
+    expect((await stat(f)).mode & 0o777).toBe(0);
+    await rollback();
+    expect((await stat(f)).mode & 0o777).toBe(0o044);
+    await chmod(f, 0o600);
+    expect(await readFile(f, 'utf-8')).toBe('secret');
+  });
+
   it('keeps an edit made after the fix instead of discarding it', async () => {
     const f = join(home.dir, 'config.toml');
     await writeFile(f, 'a = 1\n');
