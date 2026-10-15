@@ -419,6 +419,8 @@ export const ironclawAdapter: AgentAdapter = {
         ...storageGlobs(REBORN_MASTER_KEY_FILE),
         ...storageGlobs(`${REBORN_DB_FILE}*`),
         '~/.ironclaw/ironclaw.db*',
+        // By name too: a glob can't list a dir its owner can traverse but not read
+        ...['', '-wal', '-shm'].flatMap(s => [...storageGlobs(`${REBORN_DB_FILE}${s}`), `~/.ironclaw/ironclaw.db${s}`]),
         '~/.ironclaw/channels/*',
       ],
       commands: [

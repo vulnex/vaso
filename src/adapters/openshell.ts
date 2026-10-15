@@ -256,6 +256,9 @@ export const openshellAdapter: AgentAdapter = {
         '~/.config/openshell/gateways/*/mtls/*',
         '~/.config/openshell/gateways/*/oidc_token.json',
         '~/.local/state/openshell/gateway/openshell.db*',
+        // By name too: a glob can't list a dir its owner can traverse but not read
+        ...['', '-wal', '-shm'].map(s => `~/.local/state/openshell/gateway/openshell.db${s}`),
+        '~/.local/state/openshell/gateway/credentials/key-encryption-key.bin',
         '~/.local/state/openshell/gateway/credentials/*',
         '~/.local/state/openshell/docker-sandbox-tokens/**',
         ...tlsKeys('~/.local/state/openshell/tls'),
