@@ -30,6 +30,15 @@ const INSECURE_TOKEN_PATTERNS: TokenPattern[] = [
   { pattern: /searchParams\.(?:set|append)\s*\(\s*["'`](?:access_token|refresh_token|id_token|token)["'`]/, detail: 'OAuth token in URL query parameter' },
 ];
 
+/**
+ * APIs whose documented (and only) way to authenticate is a token in the
+ * query string — a server using them has no header alternative to choose.
+ */
+const QUERY_AUTH_APIS: Array<{ host: RegExp; vendor: string; source: string }> = [
+  // "You must supply a valid access token by using the access_token query parameter in every request."
+  { host: /\bapi\.mapbox\.com\b/, vendor: 'Mapbox', source: 'https://docs.mapbox.com/api/overview/' },
+];
+
 /** A token reference reduced to a yes/no or a size. */
 const PRESENCE_ONLY = new RegExp(
   String.raw`(?:!!?\s*|\btypeof\s+|\bBoolean\(\s*)[\w$.?\[\]'"]+|[\w$.?]+(?:\.length\b|\s*(?:!==?|===?)\s*(?:null|undefined)\b)`,
@@ -55,6 +64,7 @@ export const mcp014 = defineCheck({
     for (const source of mcpServerSources) {
       if (!source.sourceCode) continue;
       const segments = sourceSegments(source.sourceCode);
+      const queryAuthApi = QUERY_AUTH_APIS.find(a => a.host.test(source.sourceCode!));
       const filePath = source.localPath ?? source.serverName;
 
       for (let i = 0; i < segments.length; i++) {
@@ -69,11 +79,15 @@ export const mcp014 = defineCheck({
         for (const { pattern, detail, codeOnly, fileWrite } of INSECURE_TOKEN_PATTERNS) {
           if (pattern.test(codeOnly ? code : line)) {
             if (fileWrite && OWNER_ONLY_MODE.test(nearbyText(segments, i, 2))) break;
+            const queryAuth = detail === 'OAuth token in URL query parameter' && /access_token/.test(line) ? queryAuthApi : undefined;
             evidence.push({
               file: filePath,
               line: segments[i].line,
               snippet: line.trim().slice(0, 120),
-              detail,
+              detail: queryAuth
+                ? `Token in URL query parameter — required by the ${queryAuth.vendor} API, which documents no header alternative (${queryAuth.source}); keep these URLs out of logs`
+                : detail,
+              ...(queryAuth ? { mitigated: true } : {}),
             });
             break; // One finding per line
           }

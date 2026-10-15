@@ -926,6 +926,17 @@ describe('MCP-013: Missing PKCE', () => {
 
 // ==================== MCP-014: Insecure Token Storage ====================
 describe('MCP-014: Insecure Token Storage', () => {
+  it('reports a Mapbox access_token in the query string as mitigated info (the API requires it), but not another API', async () => {
+    const mapbox = 'const BASE = "https://api.mapbox.com/";\nconst url = `${BASE}geocoding/v5/x.json?access_token=${this.accessToken}`;';
+    const r = await mcp014.run(makeContext({ mcpServerSources: [{ serverName: 'mapbox', sourceCode: mapbox }] }));
+    expect(r.severity).toBe('info');
+    expect(r.evidence?.every(e => e.mitigated)).toBe(true);
+    const other = 'const url = `https://api.example-saas.com/v1/items?access_token=${token}`;';
+    const o = await mcp014.run(makeContext({ mcpServerSources: [{ serverName: 'saas', sourceCode: other }] }));
+    expect(o.passed).toBe(false);
+    expect(o.severity).toBe('critical');
+  });
+
   it('detects token logging and insecure storage', async () => {
     const ctx = makeContext({ mcpServerSources: vulnerableOAuthSources });
     const result = await mcp014.run(ctx);
