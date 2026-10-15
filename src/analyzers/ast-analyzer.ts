@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import _traverse from '@babel/traverse';
 import type { Node } from '@babel/types';
-import { mayBeJavaScript, parseLenient, parseLenientReport, recordedEvasion, sourceChunks, type JsAst } from './js-parse.js';
+import { mayBeJavaScript, parseLenientReport, recordedEvasion, sourceChunks, type JsAst } from './js-parse.js';
 import { sinkCallee } from './tool-input-taint.js';
 
 // Handle ESM/CJS interop
@@ -108,14 +108,48 @@ export function analyzeCode(code: string, filename = 'unknown.js'): DataFlowResu
  * statement nested or chained deeply enough to overflow it, which the AST
  * checks skip — or undefined. Shares the parse with analyzeCode.
  */
-export function analysisEvasion(code: string, filename = 'unknown.js'): number | undefined {
+export function analysisEvasion(code: string, filename = 'unknown.js'): { line: number; whole: boolean } | undefined {
   if (!mayBeJavaScript(filename)) return undefined;
   analyzeCode(code, filename);
   for (const chunk of sourceChunks(code)) {
-    const lines = recordedEvasion(chunk.code) ?? parseLenientReport(chunk.code).evaded;
-    if (lines.length > 0) return lines[0] + chunk.startLine - 1;
+    const rec = recordedEvasion(chunk.code) ?? (() => {
+      const r = parseLenientReport(chunk.code);
+      return { lines: r.evaded, whole: r.overflow && !r.ast };
+    })();
+    if (rec.whole) return { line: chunk.startLine, whole: true };
+    if (rec.lines.length > 0) return { line: rec.lines[0] + chunk.startLine - 1, whole: false };
   }
   return undefined;
+}
+
+/**
+ * Last resort when an overflow left no AST at all: a line-by-line look for
+ * what the AST checks would have reported — exec/eval calls, and a request
+ * or send carrying file contents or the environment — so a file built to
+ * crash the parser doesn't come out clean.
+ */
+export function lineFallback(code: string): DataFlowResult[] {
+  const out: DataFlowResult[] = [];
+  const execCall = /(?<![\w$.])(?:eval|exec|execSync|spawn|spawnSync|execFile|execFileSync)\s*\(|\.(?:exec|execSync|spawn|spawnSync|execFile|execFileSync)\s*\(|\bnew\s+Function\s*\(/;
+  const send = /(?<![\w$])fetch\s*\(|\.(?:post|put|patch|request|send|write)\s*\(/;
+  const source = /\breadFile(?:Sync)?\s*\(|(?<![\w$])process\.env\b/;
+  const sourceVars = new Set<string>();
+  code.split('\n').forEach((text, i) => {
+    if (text.length > 4000) return; // the over-deep line itself
+    const decl = /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*([^;]*)/.exec(text);
+    if (decl && source.test(decl[2])) sourceVars.add(decl[1]);
+    const snippet = text.trim().slice(0, 120);
+    if (execCall.test(text)) {
+      out.push({ type: 'eval-exec', line: i + 1, snippet, description: 'Command or code execution (line scan — the file overflows the parser)', dynamic: true });
+    }
+    if (send.test(text)) {
+      const carried = source.test(text) ? 'inline source' : [...sourceVars].find(v => new RegExp(`(?<![\\w$.])${v}(?![\\w$])`).test(text));
+      if (carried) {
+        out.push({ type: 'source-to-sink', source: carried, sourceKind: 'file', line: i + 1, snippet, description: `Data flows from "${carried}" to a network call (line scan — the file overflows the parser)` });
+      }
+    }
+  });
+  return out;
 }
 
 function analyzeUncached(code: string): DataFlowResult[] {
@@ -126,9 +160,9 @@ function analyzeUncached(code: string): DataFlowResult[] {
   let lines: string[] | undefined;
   const lineText = (line: number): string => (lines ??= code.split('\n'))[line - 1]?.trim() ?? '';
 
-  const parsed = parseLenient(code);
-  if (!parsed) return results;
-  ast = parsed;
+  const report = parseLenientReport(code);
+  if (!report.ast) return report.overflow ? lineFallback(code) : results;
+  ast = report.ast;
   // Module-level `const NAME = 'literal'`: a program named through a constant
   // (`spawnSync(FFMPEG, args)`) is as known as one written inline
   const constStrings = new Map<string, string>();

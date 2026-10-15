@@ -82,35 +82,45 @@ export function parseLenient(code: string): JsAst | undefined {
 }
 
 const MAX_EVASION_RECORDS = 4096;
-/** content hash → first lines of statements blanked to parse it ([] = parsed whole) */
-const evasionRecords = new Map<string, number[]>();
+
+export interface EvasionRecord {
+  /** First lines of the statements blanked to parse the file. */
+  lines: number[];
+  /** The parser overflowed and no AST could be built at all. */
+  whole: boolean;
+}
+/** content hash → what had to be blanked to parse it (`{ lines: [], whole: false }` = parsed whole) */
+const evasionRecords = new Map<string, EvasionRecord>();
 
 function contentKey(code: string): string {
   return createHash('sha1').update(code).digest('base64');
 }
 
-function record(code: string, lines: number[]): void {
+function record(code: string, rec: EvasionRecord): void {
   if (evasionRecords.size >= MAX_EVASION_RECORDS) evasionRecords.delete(evasionRecords.keys().next().value!);
-  evasionRecords.set(contentKey(code), lines);
+  evasionRecords.set(contentKey(code), rec);
 }
 
-export function parseLenientReport(code: string): { ast?: JsAst; evaded: number[] } {
+export function parseLenientReport(code: string): { ast?: JsAst; evaded: number[]; overflow: boolean } {
   let text = code;
   let evaded: number[] = [];
   let ast: JsAst | undefined;
+  let overflow = false;
   try {
     ast = babelParse(code);
   } catch (err) {
     if (!(err instanceof RangeError)) {
-      record(code, []);
-      return { evaded: [] };
+      record(code, { lines: [], whole: false });
+      return { evaded: [], overflow: false };
     }
+    overflow = true;
+    // A statement that overflows on its own, or parses (with less stack in
+    // use) into a tree deeper than the walk survives
     const bombs = topLevelSegments(code).filter(seg => {
       const segText = code.slice(seg.start, seg.end);
       if (!/\S/.test(segText)) return false;
       try {
-        babelParse(segText);
-        return false;
+        return babelParse(segText).program.body.some(stmt => astDeeperThan(stmt, AST_DEPTH_LIMIT));
       } catch (e) {
         return e instanceof RangeError;
       }
@@ -136,8 +146,8 @@ export function parseLenientReport(code: string): { ast?: JsAst; evaded: number[
       ast = undefined;
     }
   }
-  record(code, evaded);
-  return { ast, evaded };
+  record(code, { lines: evaded, whole: overflow && !ast });
+  return { ast, evaded, overflow: overflow || deep.length > 0 };
 }
 
 /** AST depth past which a recursive walk risks overflowing the stack. */
@@ -178,7 +188,7 @@ function blankRanges(code: string, ranges: Array<{ start: number; end: number }>
  * parse, when it has been parsed (by `parseLenient`); undefined when it
  * hasn't been seen.
  */
-export function recordedEvasion(code: string): number[] | undefined {
+export function recordedEvasion(code: string): EvasionRecord | undefined {
   return evasionRecords.get(contentKey(code));
 }
 

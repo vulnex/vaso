@@ -1,0 +1,10 @@
+{
+  "agent": "mcp",
+  "source": "dt13 perf2: an operator chain deep enough to overflow the AST walk must not hide command execution from tool input",
+  "mcpConfig": "mcp.json",
+  "fail": {
+    "MCP-004": "critical",
+    "MCP-005": "critical",
+    "MCP-035": "warning"
+  }
+}

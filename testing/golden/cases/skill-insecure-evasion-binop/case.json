@@ -1,0 +1,9 @@
+{
+  "agent": "claude-code",
+  "source": "dt13 perf2: a 4000-term operator chain overflows the AST walk; exfiltration and exec must still be found, and the chain reported",
+  "fail": {
+    "SKL-001": "critical",
+    "SKL-003": "critical",
+    "SKL-002": "warning"
+  }
+}

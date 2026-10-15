@@ -53,15 +53,18 @@ export const mcp035 = defineCheck({
       const file = source.localPath ?? source.packageName ?? source.serverName;
 
       // Code built to overflow the parser hides itself from MCP-004/005/006
-      const deep = source.language === 'python' ? undefined : analysisEvasion(source.sourceCode, file);
-      if (deep !== undefined) {
+      const evasion = source.language === 'python' ? undefined : analysisEvasion(source.sourceCode, file);
+      const deep = evasion?.line;
+      if (evasion !== undefined && deep !== undefined) {
         sawDeepNesting = true;
         const text = source.sourceCode.split('\n')[deep - 1]?.trim() ?? '';
         evidence.push({
           file,
           line: deep,
           snippet: text.slice(0, 80) + (text.length > 80 ? '...' : ''),
-          detail: 'Code nested or chained deeply enough to crash the JavaScript parser (brackets, templates, `?:`/`!` chains) — the statement is skipped by the other MCP source checks',
+          detail: evasion.whole
+            ? 'The file is nested or chained deeply enough to overflow the JavaScript parser and could not be analysed — only a line-by-line scan for exec and exfiltration calls ran'
+            : 'Code nested or chained deeply enough to crash the JavaScript parser (brackets, templates, `?:`/`!` chains) — the statement is skipped by the other MCP source checks',
         });
       }
 
