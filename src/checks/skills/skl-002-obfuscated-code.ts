@@ -1,7 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { findHighEntropyBlocks } from '../../analyzers/entropy.js';
-import { OBFUSCATION_PATTERNS, isBenignEncodedData } from '../../analyzers/obfuscation.js';
+import { OBFUSCATION_PATTERNS, analyzeObfuscation, isBenignEncodedData } from '../../analyzers/obfuscation.js';
 import { ScanLimitError } from '../../core/file-limits.js';
 import { readSkillText, skillFilesOf, skillsDirsOf } from './skill-files.js';
 import { unlistableSkillDirs } from '../../core/utils.js';
@@ -41,12 +41,16 @@ export const skl002 = defineCheck({
         }
 
         // Pattern-based detection for obfuscation that entropy may miss
+        // atob() decodes runtime data too (JWTs, data URLs); it only suggests
+        // hidden strings when the file holds base64-shaped literals to decode
+        const hasEncodedLiterals = analyzeObfuscation(code).encodedLiteralCount > 0;
         for (let i = 0; i < lines.length; i++) {
           const line = lines[i];
           if (line.trimStart().startsWith('//') || line.trimStart().startsWith('#')) continue;
           for (const { pattern, label } of OBFUSCATION_PATTERNS) {
             if (pattern.test(line)) {
               if (label === 'Long base64-encoded string' && isBenignEncodedData(line)) continue;
+              if (label === 'atob() decoding' && !hasEncodedLiterals) continue;
               // Avoid duplicate evidence on the same line
               const alreadyReported = evidence.some(e => e.file === file && e.line === i + 1);
               if (!alreadyReported) {

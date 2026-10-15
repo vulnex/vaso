@@ -9,6 +9,20 @@ import { markTestCode } from '../../analyzers/test-paths.js';
 
 const CRED_HARVEST_RULES = SECURITY_PATTERNS.filter(r => r.category === 'credential-harvest');
 
+/**
+ * `echo 'ssh-rsa AAAA...' >> ~/.ssh/authorized_keys` in setup docs: the key is
+ * a placeholder, so nothing is planted. A real key body (hundreds of base64
+ * characters) appended there is persistence and stays critical.
+ */
+function placeholderKeyLine(line: string): boolean {
+  if (!/authorized_keys/.test(line)) return false;
+  const key = /\b(?:ssh-(?:rsa|ed25519|dss)|ecdsa-sha2-[\w-]+|sk-ssh-[\w@.-]+)\s+(\S+)/.exec(line);
+  if (!key) return /<[^>]*key[^>]*>|your[_-]?(?:public[_-]?)?key/i.test(line);
+  const body = key[1].replace(/["'`]+$/, '');
+  // A variable or anything else unknown stays critical: it may be the attacker's key
+  return body.includes('...') || body.includes('…') || /^<.*>$/.test(body) || /^AAAA[A-Za-z0-9+/]{0,59}$/.test(body);
+}
+
 export const skl006 = defineCheck({
   id: 'SKL-006',
   name: 'Credential Harvesting',
@@ -29,12 +43,15 @@ export const skl006 = defineCheck({
 
         // Pattern-based detection
         const matches = scanWithPatterns(code, CRED_HARVEST_RULES);
+        const lines = code.split('\n');
         for (const match of matches) {
+          const placeholder = placeholderKeyLine(lines[match.line - 1] ?? '');
           evidence.push({
             file,
             line: match.line,
             snippet: match.snippet,
-            detail: match.description,
+            detail: placeholder ? `${match.description} — placeholder key written to authorized_keys (setup instructions)` : match.description,
+            ...(placeholder ? { mitigated: true } : {}),
           });
         }
 

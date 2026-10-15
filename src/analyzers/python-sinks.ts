@@ -497,6 +497,21 @@ function splitArgs(args: string): { positional: string[]; keywords: Map<string, 
   return { positional, keywords };
 }
 
+/**
+ * Sources written inline in a call's arguments (`json=dict(os.environ)`,
+ * `data=os.environ["KEY"]`, `open(p).read()`): the same kinds an assignment
+ * tracks, reported under the expression itself.
+ */
+function inlineSources(text: string): Array<[string, SourceKind]> {
+  const out: Array<[string, SourceKind]> = [];
+  const whole = /\b(?:dict\s*\(\s*)?os\.environ\b(?!\s*(?:\[|\.get\b|\.setdefault\b|\.pop\b))\s*\)?/.exec(text);
+  if (whole) out.push([whole[0].trim(), 'envall']);
+  for (const m of text.matchAll(/\bos\.(?:environ\s*\[[^\]]+\]|environ\.get\s*\([^)]*\)|getenv\s*\([^)]*\))/g)) out.push([m[0], 'env']);
+  const read = FILE_READS.exec(text);
+  if (read) out.push([read[0], 'file']);
+  return out;
+}
+
 /** Programs whose arguments leave the machine: an env secret in their argv is sent somewhere. */
 const NETWORK_PROGRAM = /^(?:curl|wget|nc|ncat|netcat|socat|scp|sftp|ftp|rsync|ssh|telnet)$/;
 
@@ -568,8 +583,8 @@ export function analyzePythonDataFlow(code: string): DataFlowResult[] {
       if (sink !== 'eval' && sink !== 'exec') {
         // What the process gets: its argv and stdin, not env=/cwd=/timeout=
         const sent = [...positional, keywords.get('args') ?? '', keywords.get('input') ?? ''].join(',');
-        for (const [v, kind] of visible) {
-          if (!mentions(sent, v)) continue;
+        const flows = [...[...visible].filter(([v]) => mentions(sent, v)), ...inlineSources(sent)];
+        for (const [v, kind] of flows) {
           if (kind === 'env' && !(program && NETWORK_PROGRAM.test(program))) continue;
           out.push({ type: 'source-to-sink', source: v, sourceKind: report(kind), sink, line: stmt.line, snippet, description: `Data flows from "${v}" into process execution "${sink}"` });
         }
@@ -593,8 +608,11 @@ export function analyzePythonDataFlow(code: string): DataFlowResult[] {
       // A request body, or the payload of a raw socket send
       const rawSend = /^(?:send|sendall|sendto|sendmail|write)$/.test(net[1] ?? '');
       const body = [...(rawSend ? positional : positional.slice(1)), ...['data', 'json', 'files', 'content', 'body', 'msg'].map((k) => keywords.get(k) ?? '')].join(',');
-      for (const [v, kind] of visible) {
-        if (!mentions(kind === 'env' ? body : all, v)) continue;
+      const inline = [
+        ...inlineSources(all).filter(([, kind]) => kind !== 'env'),
+        ...inlineSources(body).filter(([, kind]) => kind === 'env'),
+      ];
+      for (const [v, kind] of [...[...visible].filter(([v, k]) => mentions(k === 'env' ? body : all, v)), ...inline]) {
         out.push({ type: 'source-to-sink', source: v, sourceKind: report(kind), sink: net[1] ?? 'urlopen', line: stmt.line, snippet, description: `Data flows from "${v}" to network sink "${net[0].replace(/\s*\($/, '')}"` });
       }
     }

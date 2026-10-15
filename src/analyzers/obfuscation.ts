@@ -149,7 +149,8 @@ export function isBenignEncodedData(line: string): boolean {
   // every `/`-separated piece an ordinary word.
   const isPath = (run: string) => run.split('/').filter(Boolean).length >= 3 &&
     run.split('/').filter(Boolean).every((part) => /^[A-Za-z][a-z0-9]*(?:[A-Z][a-z0-9]*)*$/.test(part));
-  const isHexDigest = (run: string) => /^[0-9a-f]+$/i.test(run) && /\d/.test(run) && /[a-f]/i.test(run);
+  // `0x`-prefixed too: hashes, Ethereum addresses, transaction ids
+  const isHexDigest = (run: string) => /^(?:0x)?[0-9a-f]+$/i.test(run) && /\d/.test(run) && /[a-f]/i.test(run);
   return runs.length > 0 && runs.every((run) => isHexDigest(run) || isPath(run));
 }
 

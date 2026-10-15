@@ -107,6 +107,18 @@ function analyzeUncached(code: string): DataFlowResult[] {
   const parsed = parseLenient(code);
   if (!parsed) return results;
   ast = parsed;
+  // Module-level `const NAME = 'literal'`: a program named through a constant
+  // (`spawnSync(FFMPEG, args)`) is as known as one written inline
+  const constStrings = new Map<string, string>();
+  for (const stmt of ast.program.body) {
+    const decl = stmt.type === 'ExportNamedDeclaration' ? stmt.declaration : stmt;
+    if (decl?.type !== 'VariableDeclaration' || decl.kind !== 'const') continue;
+    for (const d of decl.declarations) {
+      if (d.id.type !== 'Identifier' || !d.init) continue;
+      if (d.init.type === 'StringLiteral') constStrings.set(d.id.name, d.init.value);
+      else if (d.init.type === 'TemplateLiteral' && d.init.expressions.length === 0) constStrings.set(d.id.name, d.init.quasis[0]?.value.cooked ?? '');
+    }
+  }
 
   // Variable → what it holds. Matched in sink arguments as a whole identifier:
   // a substring test made a minified `o` match every `output`.
@@ -114,6 +126,33 @@ function analyzeUncached(code: string): DataFlowResult[] {
   const mentions = (argStr: string, name: string): boolean =>
     new RegExp(`(?<![\\w$.])${name.replace(/[.$]/g, '\\$&')}(?![\\w$])`).test(argStr);
   const networkImports = new Set<string>();
+  // Environment values written inline in a request (`body: JSON.stringify(process.env)`,
+  // `axios.post(url, process.env.KEY)`), by the rules of the Python analyzer:
+  // the whole environment anywhere in the call, a single value only in the
+  // request body (an API key in the headers of its own API is not a leak).
+  const inlineEnv = (args: Node[], sinkName: string): string[] => {
+    if (args.length === 0) return [];
+    const all = code.slice(args[0].start ?? 0, args[args.length - 1].end ?? 0);
+    const out: string[] = [];
+    if (/(?<![\w$.])process\.env(?![\w$]|\s*(?:\.|\[|\?\.))/.test(all)) out.push('process.env');
+    for (const m of requestBody(args, sinkName).matchAll(/(?<![\w$.])process\.env(?:\.[A-Za-z_$][\w$]*|\[[^\]]+\])/g)) out.push(m[0]);
+    return out;
+  };
+  const requestBody = (args: Node[], sinkName: string): string => {
+    const text = (n: Node | undefined) => (n ? code.slice(n.start ?? 0, n.end ?? 0) : '');
+    const parts: string[] = [];
+    if (/^(?:send|write|emit)$/.test(sinkName)) parts.push(...args.map(text));
+    if (/^(?:post|put|patch)$/.test(sinkName)) parts.push(text(args[1]));
+    for (const a of args) {
+      if (a.type !== 'ObjectExpression') continue;
+      for (const p of a.properties) {
+        if (p.type !== 'ObjectProperty') continue;
+        const key = p.key.type === 'Identifier' ? p.key.name : p.key.type === 'StringLiteral' ? p.key.value : '';
+        if (/^(?:body|data|json|form|payload)$/.test(key)) parts.push(text(p.value as Node));
+      }
+    }
+    return parts.join(',');
+  };
   // Subset of sinks that spawn processes (child_process) rather than open connections
   const processImports = new Set<string>();
 
@@ -154,7 +193,7 @@ function analyzeUncached(code: string): DataFlowResult[] {
               ? `${name}() — command execution`
               : `${name}() call detected`,
             ...commandText(node.arguments),
-            ...(runsDirectly(name, node.arguments) ? { noShell: true } : {}),
+            ...(runsDirectly(name, node.arguments, constStrings) ? { noShell: true } : {}),
           });
         }
 
@@ -231,8 +270,10 @@ function analyzeUncached(code: string): DataFlowResult[] {
             const sinkObject = receiver.type === 'Identifier'
               ? receiver.name
               : receiver.type === 'MemberExpression' && receiver.property.type === 'Identifier' ? receiver.property.name : undefined;
-            for (const [sourceVar, sourceKind] of sourceVars) {
-              if (mentions(argStr, sourceVar)) {
+            const processSink = processImports.has(propName) || EXEC_FUNCTIONS.has(propName);
+            const inline = processSink ? [] : inlineEnv(node.arguments as Node[], propName);
+            for (const [sourceVar, sourceKind] of new Map<string, 'file' | 'env'>([...sourceVars, ...inline.map(v => [v, 'env'] as const)])) {
+              if (inline.includes(sourceVar) || mentions(argStr, sourceVar)) {
                 results.push({
                   type: 'source-to-sink',
                   source: sourceVar,
@@ -268,7 +309,7 @@ function analyzeUncached(code: string): DataFlowResult[] {
                 snippet: snippet.slice(0, 120),
                 description: `${obj.name}.${propName}() — command execution`,
                 ...commandText(node.arguments),
-                ...(runsDirectly(propName, node.arguments) ? { noShell: true } : {}),
+                ...(runsDirectly(propName, node.arguments, constStrings) ? { noShell: true } : {}),
               });
             }
           }
@@ -298,12 +339,13 @@ function analyzeUncached(code: string): DataFlowResult[] {
             }
 
             // Check data-flow into fetch
-            for (const [sourceVar, sourceKind] of sourceVars) {
+            const inline = inlineEnv(node.arguments as Node[], 'fetch');
+            for (const [sourceVar, sourceKind] of new Map<string, 'file' | 'env'>([...sourceVars, ...inline.map(v => [v, 'env'] as const)])) {
               const argStr = code.slice(
                 node.arguments[0]?.start ?? 0,
                 node.arguments[node.arguments.length - 1]?.end ?? 0,
               );
-              if (mentions(argStr, sourceVar)) {
+              if (inline.includes(sourceVar) || mentions(argStr, sourceVar)) {
                 results.push({
                   type: 'source-to-sink',
                   source: sourceVar,
@@ -386,15 +428,17 @@ const SHELL_OR_INTERPRETER = /^(?:.*\/)?(?:sh|bash|zsh|dash|ksh|fish|cmd(?:\.exe
 
 /**
  * A program started directly — `execFileSync('git', [...])`, `spawn('ffmpeg', args)`:
- * the program is a literal that is neither a shell nor an interpreter (which
+ * the program is a literal (or a module-level string constant) that is neither a shell nor an interpreter (which
  * would run code given as an argument), and no `shell: true` option. What it
  * runs is a known program with runtime arguments, not code built at runtime
  * (same rule as the Python analyzer's subprocess without shell=True).
  */
-function runsDirectly(name: string, args: ArgNode[]): boolean {
+function runsDirectly(name: string, args: ArgNode[], constStrings: ReadonlyMap<string, string>): boolean {
   if (!DIRECT_EXEC_FUNCTIONS.has(name.slice(name.lastIndexOf('.') + 1))) return false;
   const program = args[0] as Node | undefined;
-  if (program?.type !== 'StringLiteral' || SHELL_OR_INTERPRETER.test(program.value.trim())) return false;
+  const value = program?.type === 'StringLiteral' ? program.value
+    : program?.type === 'Identifier' ? constStrings.get(program.name) : undefined;
+  if (value === undefined || !value.trim() || SHELL_OR_INTERPRETER.test(value.trim())) return false;
   return !args.some(a => {
     const n = a as Node;
     return n.type === 'ObjectExpression' && n.properties.some(p =>
