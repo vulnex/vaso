@@ -250,6 +250,10 @@ export const abacusAdapter: AgentAdapter = {
       // existence and permissions only, never content
       metadataGlobPatterns: [
         `~/${ABACUS_DIR}/keystore.enc*`,
+        // By name too: a glob can't list a directory that is traversable
+        // but not readable (mode 100), where a local scan still stats these
+        `~/${ABACUS_DIR}/keystore.enc`,
+        `~/${ABACUS_DIR}/keystore.enc.unreadable`,
         // Every prompt typed, in plaintext — never shipped off the host
         `~/${ABACUS_DIR}/history.jsonl`,
         `~/${ABACUS_DIR}/projects/**`,

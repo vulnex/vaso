@@ -307,6 +307,8 @@ export const nanoclawAdapter: AgentAdapter = {
           `${c}/.claude/skills`,
         ]),
         '~/.config/nanoclaw/*',
+        // By name too: a glob can't list a traversable-but-unreadable dir
+        ...NANOCLAW_HOST_SECRET_FILES.map(f => `~/.config/nanoclaw/${f}`),
         '~/.local/bin/ncl',
       ],
       commands: [],

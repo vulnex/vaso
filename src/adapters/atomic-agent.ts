@@ -244,6 +244,9 @@ export const atomicAgentAdapter: AgentAdapter = {
         '~/.atomic-agent/atomic-mail/session.json',
         '~/.atomic-agent/*-session.json',
         '~/.atomic-agent/*-sessions.json',
+        // By name too: a glob can't list a traversable-but-unreadable state dir
+        ...['memory', 'sessions', 'tasks'].map(n => `~/.atomic-agent/${n}.sqlite`),
+        ...['webhook-sessions', 'telegram-session', 'discord-session'].map(n => `~/.atomic-agent/${n}.json`),
       ],
       commands: [
         { id: 'atomic-agent-which', cmd: 'which', args: ['atomic-agent'], timeout: 3000 },
