@@ -1,0 +1,6 @@
+{
+  "agent": "claude-code",
+  "source": "dt13 realworld2: github/awesome-copilot create-github-action-workflow-specification SKILL.md — a [System] placeholder column in a markdown table",
+  "pass": ["SKL-007"],
+  "modes": { ".claude": "700", ".claude/settings.json": "600" }
+}

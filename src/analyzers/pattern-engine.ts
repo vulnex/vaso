@@ -66,7 +66,9 @@ export const SECURITY_PATTERNS: PatternRule[] = [
   { id: 'PI-001', pattern: /ignore\s+(?:all\s+)?(?:previous|above|prior)\s+instructions/i, category: 'prompt-injection', severity: 'warning', description: 'Prompt injection — instruction override' },
   { id: 'PI-002', pattern: /you\s+are\s+now\s+(?:(?:a|an)\s+|in\s+(?:[\w-]+\s+){0,2}(?:mode|persona)\b)/i, category: 'prompt-injection', severity: 'warning', description: 'Prompt injection — role reassignment' },
   { id: 'PI-003', pattern: /system\s*:\s*you\s+(?:must|should|are)/i, category: 'prompt-injection', severity: 'warning', description: 'Prompt injection — fake system prompt' },
-  { id: 'PI-004', pattern: /\[SYSTEM\]|\[ADMIN\]|<\|system\|>/i, category: 'prompt-injection', severity: 'warning', description: 'Prompt injection — delimiter escape' },
+  // Not a markdown table cell holding only the tag (`| [System] | [Type] |` is a
+  // placeholder column); text after it in the cell still counts
+  { id: 'PI-004', pattern: /(?<!\|[ \t]*)\[(?:SYSTEM|ADMIN)\]|\[(?:SYSTEM|ADMIN)\](?![ \t]*\|)|<\|system\|>/i, category: 'prompt-injection', severity: 'warning', description: 'Prompt injection — delimiter escape' },
 
   // Crypto wallet targeting (from openclaw-security-monitor)
   { id: 'CW-001', pattern: /\b[13][a-km-zA-HJ-NP-Z1-9]{25,34}\b/, category: 'crypto-wallet', severity: 'warning', description: 'Bitcoin address pattern' },
