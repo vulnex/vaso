@@ -2698,6 +2698,14 @@ describe('MCP-005 sink-anchored tracing', () => {
     expect(result.passed).toBe(false);
   });
 
+  it('leaves an identifier checked by a validator alone (mysql-mcp-server), flags the unchecked one', async () => {
+    const src = (assign: string) => `@mcp.tool()\ndef read_table(uri: str):\n    parts = uri.split('/')\n    ${assign}\n    cursor.execute(f"SELECT * FROM \`{table}\` LIMIT 100")`;
+    const checked = await mcp005.run(makeContext({ mcpServerSources: [{ serverName: 'db', language: 'python', sourceCode: src('table = validate_identifier(parts[0])') }] }));
+    expect(checked.passed).toBe(true);
+    const raw = await mcp005.run(makeContext({ mcpServerSources: [{ serverName: 'db', language: 'python', sourceCode: src('table = parts[0]') }] }));
+    expect(raw.passed).toBe(false);
+  });
+
   it('leaves a parameterized Python query alone', async () => {
     const result = await mcp005.run(makeContext({
       mcpServerSources: [{ serverName: 'db', language: 'python', sourceCode: '@mcp.tool()\ndef find(name: str):\n    cur.execute("SELECT * FROM t WHERE n = ?", (name,))' }],

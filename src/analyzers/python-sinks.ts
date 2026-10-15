@@ -367,7 +367,14 @@ export function analyzePythonSinks(code: string): PythonSinkFinding[] {
     if (!confined && touchesFiles) {
       const m = PATH_JOIN_INPUT.exec(text);
       const joined = m?.[1].split('.').pop() ?? '';
-      if (m && INPUT_PATH_NAME.test(joined)) {
+      // The name suggests input; whether it is: a parameter (a helper's
+      // caller may pass tool input) or a tainted name is; a local built from
+      // a hash or a constant table joins nothing the caller chose
+      const si = stmts.findIndex((s) => s.line <= line && line <= s.last);
+      const fnHere = si >= 0 ? fnAt(si) : undefined;
+      const root = m?.[1].split('.')[0] ?? '';
+      const fromInput = m && (!fnHere || fnHere.params.includes(root) || root === 'self' || tainted.get(fnHere)?.has(root) === true);
+      if (m && INPUT_PATH_NAME.test(joined) && fromInput) {
         findings.push({
           kind: 'injection',
           line,

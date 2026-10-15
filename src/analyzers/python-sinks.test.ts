@@ -171,3 +171,30 @@ describe('analyzePythonSinks', () => {
     });
   });
 });
+
+describe('analyzePythonSinks — path joins judged by where the name comes from (dt13 realworld2)', () => {
+  it('ignores a hash-derived file name and a constant config table, keeps a parameter', () => {
+    const alchemy = [
+      'import os, json, hashlib',
+      '@mcp.tool()',
+      'def execute_query(query: str):',
+      '    data = run(query)',
+      '    file_hash = hashlib.sha256(json.dumps(data).encode()).hexdigest()',
+      '    file_name = f"{file_hash}.json"',
+      "    with open(os.path.join(CLAUDE_LOCAL_FILES_PATH, file_name), 'w') as f:",
+      '        json.dump(data, f)',
+    ].join('\n');
+    expect(analyzePythonSinks(alchemy).filter(f => f.kind === 'injection')).toEqual([]);
+    const ida = [
+      'import os',
+      'def install():',
+      '    configs = {"Cursor": (os.path.expanduser("~/.cursor"), "mcp.json")}',
+      '    for name, (config_dir, config_file) in configs.items():',
+      '        config_path = os.path.join(config_dir, config_file)',
+      '        open(config_path)',
+    ].join('\n');
+    expect(analyzePythonSinks(ida).filter(f => f.kind === 'injection')).toEqual([]);
+    const param = ['import os', 'def read(base, file_name):', '    return open(os.path.join(base, file_name)).read()'].join('\n');
+    expect(analyzePythonSinks(param).filter(f => f.kind === 'injection').map(f => f.line)).toEqual([3]);
+  });
+});

@@ -21,6 +21,25 @@ import { parseJs, sourceChunks } from './js-parse.js';
 
 const traverse = typeof _traverse === 'function' ? _traverse : (_traverse as { default: typeof _traverse }).default;
 
+const NUMERIC_PROPERTIES = new Set(['length', 'size', 'byteLength']);
+const NUMERIC_CALLS = /^(?:Number|parseInt|parseFloat|Math\.\w+|Date\.now)$/;
+
+/** An expression whose value is a number, whatever its operands held. */
+function yieldsNumber(path: NodePath): boolean {
+  const n = path.node as Node;
+  if (n.type === 'MemberExpression' && !n.computed && n.property.type === 'Identifier') {
+    return NUMERIC_PROPERTIES.has(n.property.name);
+  }
+  if (n.type === 'CallExpression') {
+    const c = n.callee;
+    const name = c.type === 'Identifier' ? c.name
+      : c.type === 'MemberExpression' && !c.computed && c.object.type === 'Identifier' && c.property.type === 'Identifier'
+        ? `${c.object.name}.${c.property.name}` : '';
+    return NUMERIC_CALLS.test(name);
+  }
+  return false;
+}
+
 export interface TaintedSink {
   line: number;
   snippet: string;
@@ -304,6 +323,11 @@ function analyze(code: string): TaintedSink[] {
 
     // First tool-input-derived identifier referenced anywhere in `path`.
     const expressionOrigin = (path: NodePath, depth: number): string | undefined => {
+      // A number derived from input (`actions.length`, `Number(x)`) can't
+      // carry a path, a query or a command
+      if (yieldsNumber(path)) return undefined;
+      const local = localFunctionCall(path);
+      if (local) return returnOrigin(local, depth);
       const visit = (id: NodePath): string | undefined => {
         if (!id.isIdentifier() || !id.isReferencedIdentifier()) return undefined;
         const binding = id.scope.getBinding(id.node.name);
@@ -319,8 +343,55 @@ function analyze(code: string): TaintedSink[] {
         },
         // A nested function's body doesn't flow into this value.
         Function(fn) { fn.skip(); },
+        MemberExpression(m) { if (yieldsNumber(m)) m.skip(); },
+        CallExpression(c) {
+          if (found) return c.stop();
+          if (yieldsNumber(c)) return c.skip();
+          // A call to a function of this file carries input only through what
+          // it returns, not because input was passed in
+          const fn = localFunctionCall(c);
+          if (fn) {
+            found = returnOrigin(fn, depth);
+            c.skip();
+          }
+        },
       });
       return found;
+    };
+
+    /** The function a call invokes, when it is declared in this file. */
+    const localFunctionCall = (path: NodePath): NodePath | undefined => {
+      if (!path.isCallExpression()) return undefined;
+      const callee = path.get('callee');
+      if (!callee.isIdentifier()) return undefined;
+      const binding = path.scope.getBinding(callee.node.name);
+      if (!binding) return undefined;
+      if (binding.path.isFunctionDeclaration()) return binding.path;
+      if (binding.path.isVariableDeclarator()) {
+        const init = binding.path.get('init');
+        if (init.isFunctionExpression() || init.isArrowFunctionExpression()) return init;
+      }
+      return undefined;
+    };
+
+    /** First tool-input origin among a local function's return values. */
+    const returnOrigin = (fn: NodePath, depth: number): string | undefined => {
+      if (depth >= MAX_DEPTH) return undefined;
+      const name = (fn.node as { id?: { name?: string } }).id?.name ?? 'function';
+      if (fn.isArrowFunctionExpression() && !fn.get('body').isBlockStatement()) {
+        const from = expressionOrigin(fn.get('body') as NodePath, depth + 1);
+        return from ? `${name}() ← ${from}` : undefined;
+      }
+      let found: string | undefined;
+      fn.traverse({
+        Function(inner) { inner.skip(); },
+        ReturnStatement(r) {
+          if (found) return r.stop();
+          const arg = r.get('argument');
+          if (arg.node) found = expressionOrigin(arg as NodePath, depth + 1);
+        },
+      });
+      return found ? `${name}() ← ${found}` : undefined;
     };
 
     const report = (path: NodePath<Node>, sink: string, candidates: NodePath[], kind: SinkKind): void => {

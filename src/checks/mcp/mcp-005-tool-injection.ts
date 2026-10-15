@@ -26,6 +26,17 @@ const INJECTION_PATTERNS = [
   { pattern: new RegExp(String.raw`(?<![\w$])writeFile(?:Sync)?\s*\(\s*` + INPUT), name: 'File write with user-controlled path' },
 ];
 
+/**
+ * An f-string query whose every interpolated name was assigned from a
+ * validator (`table = validate_identifier(parts[0])`, `sanitize_*`, `quote_*`,
+ * an allowlist lookup) builds SQL from checked identifiers, not from raw input.
+ */
+function interpolatesOnlyValidated(statement: string, source: string): boolean {
+  const names = [...statement.matchAll(/\{([A-Za-z_]\w*)\}/g)].map(m => m[1]);
+  if (names.length === 0) return false;
+  return names.every(n => new RegExp(String.raw`\b${n}\s*=\s*[\w.]*(?:valid|saniti[sz]|escape|quote|allow(?:ed|list)|whitelist)\w*\s*\(`, 'i').test(source));
+}
+
 export const mcp005 = defineCheck({
   id: 'MCP-005',
   name: 'Tool Input Injection',
@@ -74,6 +85,7 @@ export const mcp005 = defineCheck({
         if (reported.has(segment.line)) continue;
         for (const { pattern, name } of INJECTION_PATTERNS) {
           if (pattern.test(segment.text)) {
+            if (name === 'SQL injection via string formatting' && interpolatesOnlyValidated(segment.text, source.sourceCode)) continue;
             reported.add(segment.line);
             evidence.push({ file, line: segment.line, snippet: segmentSnippet(segment), detail: name });
             break;

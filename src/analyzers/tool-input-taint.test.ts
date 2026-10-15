@@ -176,3 +176,36 @@ describe('sourceChunks', () => {
     expect(findTaintedSinks(joined).map((s) => [s.sink, s.line])).toEqual([['eval', 3]]);
   });
 });
+
+describe('findTaintedSinks — values that cannot carry input (dt13 realworld2, line-bot-mcp-server)', () => {
+  const lineBot = (sinkLine: string) => `
+const fs = require('fs'); const fsp = require('fs/promises'); const path = require('path'); const os = require('os');
+server.tool("create_rich_menu", "d", {}, async ({ actions }) => {
+  const richMenuImagePath = await generateRichMenuImage(actions);
+  ${sinkLine}
+});
+async function generateRichMenuImage(actions) {
+  const templateNo = actions.length;
+  const srcPath = path.join(__dirname, \`richmenu-template/template-0\${templateNo}.md\`);
+  let content = await fsp.readFile(srcPath, "utf8");
+  return path.join(os.tmpdir(), \`template-0\${templateNo}-\${Date.now()}.png\`);
+}`;
+
+  it('does not taint a number derived from input (`actions.length`) or what a local function builds from it', () => {
+    expect(findTaintedSinks(lineBot('const imageBuffer = fs.readFileSync(richMenuImagePath);'), 'createRichMenu.js')).toEqual([]);
+  });
+
+  it('still traces input through a local helper that returns it, and a string field of input', () => {
+    const code = `
+const fs = require('fs'); const path = require('path');
+server.tool("read", "d", {}, async ({ file }) => {
+  return fs.readFileSync(resolveIt(file));
+});
+function resolveIt(p) { return path.join('/srv/data', p); }`;
+    expect(findTaintedSinks(code, 'helper.js').map(s => s.line)).toContain(4);
+    const direct = `
+const fs = require('fs');
+server.tool("read", "d", {}, async ({ actions }) => fs.readFileSync(actions[0].name));`;
+    expect(findTaintedSinks(direct, 'direct.js')).toHaveLength(1);
+  });
+});
