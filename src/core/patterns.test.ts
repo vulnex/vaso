@@ -146,3 +146,18 @@ describe('envReference', () => {
   });
 });
 
+
+describe('envReference: a $-value is a reference only when its name is variable-shaped', () => {
+  it('keeps variable references', async () => {
+    const { isEnvReference } = await import('./patterns.js');
+    for (const v of ['$GITHUB_TOKEN', '${API_KEY}', '$api_key', '${apiKey}', '$HOME', 'Bearer ${MCP_TOKEN}', '$env:OPENAI_API_KEY', '%APPDATA%', '${env:TOKEN}', '{env:KEY}', 'GITHUB_TOKEN']) {
+      expect(isEnvReference(v), v).toBe(true);
+    }
+  });
+  it('treats a password that starts with $ as a value, not a reference', async () => {
+    const { isEnvReference } = await import('./patterns.js');
+    for (const v of ['$Zx8f3kq9Lm2Pq7Rt', '${Zx8f3kq9Lm2Pq7Rt}', 'Bearer $Zx8f3kq9Lm2Pq7Rt']) {
+      expect(isEnvReference(v), v).toBe(false);
+    }
+  });
+});

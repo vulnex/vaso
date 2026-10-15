@@ -61,6 +61,8 @@ export function isPlaceholderSecret(value: string): boolean {
 export type EnvReferenceForm = 'env-colon' | 'brace-env' | 'dollar-brace' | 'dollar' | 'powershell' | 'percent' | 'name';
 
 const AUTH_SCHEME_PREFIX = /^\s*(?:Bearer|Basic|Token)\s+/i;
+/** UPPER_SNAKE, lower_snake, or camel/Pascal words with trailing digits — how variables are named. */
+const VARIABLE_NAME = /^(?:[A-Z_][A-Z0-9_]*|[a-z_][a-z0-9_]*|[A-Za-z]?[a-z]+(?:[A-Z][a-z]+)*\d*)$/;
 const ENV_REFERENCE_FORMS: Array<[EnvReferenceForm, RegExp]> = [
   ['env-colon', /^\$\{(?:env|file):[^}]+\}$/],
   ['brace-env', /^\{(?:env|file):[^}]+\}$/],
@@ -84,6 +86,13 @@ export function envReference(value: string): EnvReferenceForm | undefined {
   if (v === '' || v.length > 256) return undefined;
   const form = ENV_REFERENCE_FORMS.find(([, re]) => re.test(v))?.[0];
   if (form === 'name' && (v.length > 64 || API_KEY_PATTERNS.some(p => p.pattern.test(v)))) return undefined;
+  // `$Zx8f3kq…` is a password that starts with `$`, not a variable: whether
+  // or not the agent expands `$` forms (Claude Desktop expands none), only a
+  // name shaped like a variable makes the value a reference
+  const name = form && form !== 'name' && form !== 'env-colon' && form !== 'brace-env'
+    ? /[A-Za-z_][A-Za-z0-9_]*/.exec(v.replace(/^\$env:/i, ''))?.[0]
+    : undefined;
+  if (name !== undefined && !VARIABLE_NAME.test(name)) return undefined;
   // `${VAR:-default}`: a credential written as the default is stored all the same
   const fallback = form === 'dollar-brace' ? /^\$\{[A-Za-z_][A-Za-z0-9_]*:?[-=?+](.*)\}$/.exec(v)?.[1] : undefined;
   if (fallback && !isPlaceholderSecret(fallback)

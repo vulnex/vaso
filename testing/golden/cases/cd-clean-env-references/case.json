@@ -1,0 +1,6 @@
+{
+  "agent": "claude-desktop",
+  "source": "variable-shaped references (${GITHUB_TOKEN}, %OPENAI_API_KEY%, $apiKey) store no credential, expanded or not",
+  "pass": ["CD-001"],
+  "skipOn": ["linux", "win32"]
+}

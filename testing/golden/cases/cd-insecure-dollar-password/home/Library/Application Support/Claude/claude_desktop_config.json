@@ -1,0 +1,1 @@
+{"mcpServers":{"db":{"command":"npx","args":["-y","@acme/db-mcp@1.2.0"],"env":{"DB_PASSWORD":"$Rq7vT2mW9xK4pL8sN3cB6dF1gH5jZ0aQ"}}}}

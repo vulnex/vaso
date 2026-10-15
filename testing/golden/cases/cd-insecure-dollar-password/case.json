@@ -1,0 +1,6 @@
+{
+  "agent": "claude-desktop",
+  "source": "dt13 regress fx/vref server c: Claude Desktop expands no variables in claude_desktop_config.json (no documented syntax; only MCPB manifests expand ${user_config.*}/${__dirname}) — a $-prefixed random value is a literal password",
+  "fail": { "CD-001": "critical" },
+  "skipOn": ["linux", "win32"]
+}
