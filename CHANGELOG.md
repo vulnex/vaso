@@ -60,6 +60,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - **SKL-004 tiers pipe-to-shell lines in skill documentation**: critical for plain http, IP, URL-shortener and paste-site sources; warning for an https installer from a named host; info for well-known installers and prose. Executable scripts stay critical.
 - **Local scans pick the same primary CLI copy as remote ones.** The local `which` used the PATH vaso was started with; from cron, CI or a non-interactive shell that lacks `~/.local/bin` it named a different copy (and version) than the probe, which resolves with a login shell's user bin dirs first. Both now use the same PATH (guard test against `probe/collector.go`); `ExecOptions.path` is new.
 - NET-001 and CFG-004 no longer report the gateway of a leftover IronClaw 0.x `.env` that the installed 1.x binary never reads (`legacy-unused`).
+- GEM-002 treats `~/.gemini/settings.json` as a credential file only when it holds a secret (by GEM-001's rules): Gemini CLI writes it group-readable, and a secret-free settings file was a critical finding on most installs. OAuth/token files and `.env` are still checked unconditionally.
 
 ## [1.3.0] - 2026-10-15
 

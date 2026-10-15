@@ -91,6 +91,17 @@ describe('GEM-002: Credential Permissions', () => {
     expect(result.passed).toBe(false);
   });
 
+  it('ignores a secret-free settings.json at 0644 (Gemini writes it group-readable) but not one holding a key', async () => {
+    const settings = '/home/test/.gemini/settings.json';
+    const fs = makeFs({
+      access: vi.fn(async (p: string) => p === settings),
+      stat: vi.fn(async () => ({ mode: 0o644, isFile: () => true, isDirectory: () => false })),
+    });
+    expect((await check.run(makeCtx([makeConfig(settings, { ui: { theme: 'GitHub' } })], fs))).passed).toBe(true);
+    const withKey = makeConfig(settings, { env: { GEMINI_API_KEY: 'AIzaSyD1x2Y3z4W5v6U7t8S9r0QpOnMlKjIhGfE' } });
+    expect((await check.run(makeCtx([withKey], fs))).passed).toBe(false);
+  });
+
   it('passes when files are 0600', async () => {
     const fs = makeFs({
       access: vi.fn(async (p: string) => p.endsWith('settings.json')),

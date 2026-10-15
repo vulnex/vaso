@@ -2,6 +2,7 @@ import { join } from 'node:path';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { accessibleByOthers, markUnreachable, queryPermissions } from '../../core/permissions.js';
+import { gem001 } from './gem-001-plaintext-api-key.js';
 
 const CREDENTIAL_FILES = [
   'settings.json',
@@ -27,6 +28,12 @@ export const gem002 = defineCheck({
     for (const filename of CREDENTIAL_FILES) {
       const filePath = join(ctx.installation.installDir, filename);
       if (!(await ctx.fs.access(filePath))) continue;
+      // settings.json is ordinary configuration (Gemini itself writes it 664);
+      // it is a credential file only when it holds a secret, by GEM-001's rules
+      if (filename === 'settings.json') {
+        const settings = ctx.configs.find(c => c.filePath === filePath);
+        if (!settings || (await gem001.run({ ...ctx, configs: [settings] })).passed) continue;
+      }
       try {
         const perms = await queryPermissions(ctx.fs, filePath);
         // 'unsupported' (no evaluable permission model) → nothing to flag
