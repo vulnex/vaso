@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdtemp, mkdir, writeFile, readFile, rm, chmod, stat, symlink, readdir, lstat } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, rm, chmod, stat, symlink, readdir, lstat, link, rename } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -14,6 +14,7 @@ import { CheckRegistry } from '../core/check-registry.js';
 import { defineCheck } from '../core/check-builder.js';
 import type { ScanResult, CheckResult } from '../core/types.js';
 import { chmodNoFollow, writeRegularFile } from './safe-file.js';
+import { restrictFilesToOwner } from './config-writer.js';
 
 const posix = process.platform !== 'win32';
 let logs: string[] = [];
@@ -164,18 +165,111 @@ describe('fix + rollback (real files)', () => {
     const link = join(home.dir, 'config.json');
     await writeFile(target, '{}');
     await symlink(target, link);
-    let edited = false;
-    await runFix(link, async () => { edited = true; });
-    expect(edited).toBe(false);
+    await runFix(link, p => writeRegularFile(p, '{"fixed":true}'));
+    expect(await readFile(target, 'utf-8')).toBe('{}');
     expect(logs.some(l => l.includes('is a symlink'))).toBe(true);
 
     const fifo = join(home.dir, 'launcher-config.json');
     execFileSync('mkfifo', [fifo]);
-    edited = false;
-    await runFix(fifo, async () => { edited = true; }); // must return, not hang
-    expect(edited).toBe(false);
+    await runFix(fifo, p => writeRegularFile(p, 'x')); // must return, not hang
     expect((await lstat(fifo)).isFIFO()).toBe(true);
   });
+
+  it.skipIf(!posix)('refuses a hard-linked file: the change would reach the other name', async () => {
+    const outside = await mkdtemp(join(tmpdir(), 'vaso-rb-victim-'));
+    try {
+      const victim = join(outside, 'victim.json');
+      await writeFile(victim, '{"v":1}');
+      await chmod(victim, 0o644);
+      const cfg = join(home.dir, 'config.json');
+      await link(victim, cfg);
+      await runFix(cfg, async p => { await writeRegularFile(p, '{"v":2}'); });
+      await runFix(cfg, p => chmodNoFollow(p, 0o600));
+      expect(await readFile(victim, 'utf-8')).toBe('{"v":1}');
+      expect((await stat(victim)).mode & 0o777).toBe(0o644);
+      expect(logs.some(l => l.includes('hard links'))).toBe(true);
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  it.skipIf(!posix)('refuses a config reached through a symlinked directory that leaves the home, allows one inside it', async () => {
+    const outside = await mkdtemp(join(tmpdir(), 'vaso-rb-etc-'));
+    try {
+      await writeFile(join(outside, 'passwd'), 'root:x:0:0\n');
+      await chmod(join(outside, 'passwd'), 0o644);
+      await symlink(outside, join(home.dir, '.picoclaw'));
+      await runFix(join(home.dir, '.picoclaw', 'passwd'), p => chmodNoFollow(p, 0o600));
+      expect((await stat(join(outside, 'passwd'))).mode & 0o777).toBe(0o644);
+      expect(logs.some(l => l.includes('outside'))).toBe(true);
+
+      // a dotfiles repo inside the home is fine
+      await mkdir(join(home.dir, 'dotfiles', 'nb'), { recursive: true });
+      await writeFile(join(home.dir, 'dotfiles', 'nb', 'config.json'), '{}');
+      await chmod(join(home.dir, 'dotfiles', 'nb', 'config.json'), 0o644);
+      await symlink(join(home.dir, 'dotfiles', 'nb'), join(home.dir, '.nanobot'));
+      await runFix(join(home.dir, '.nanobot', 'config.json'), p => chmodNoFollow(p, 0o600));
+      expect((await stat(join(home.dir, 'dotfiles', 'nb', 'config.json'))).mode & 0o777).toBe(0o600);
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  it.skipIf(!posix)('a permission fix still fixes the other files when one is a symlink, and names it', async () => {
+    const real = join(home.dir, 'real.json');
+    const target = join(home.dir, 'elsewhere.json');
+    const linked = join(home.dir, 'linked.json');
+    await writeFile(real, '{}');
+    await writeFile(target, '{}');
+    await chmod(real, 0o644);
+    await chmod(target, 0o644);
+    await symlink(target, linked);
+    const result = await restrictFilesToOwner('CFG-003', [real, linked]);
+    expect((await stat(real)).mode & 0o777).toBe(0o600);
+    expect((await stat(target)).mode & 0o777).toBe(0o644);
+    expect(result.applied).toBe(true);
+    expect(result.message).toMatch(/linked\.json is a symlink/);
+  });
+
+  it.skipIf(!posix)('rollback refuses a path whose directory was re-pointed after the fix', async () => {
+    const dir = join(home.dir, '.agent');
+    await mkdir(dir);
+    const f = join(dir, 'config.json');
+    await writeFile(f, 'orig');
+    await runFix(f, p => writeRegularFile(p, 'fixed'));
+    const decoy = await mkdtemp(join(tmpdir(), 'vaso-rb-decoy-'));
+    try {
+      await writeFile(join(decoy, 'config.json'), 'decoy');
+      await rename(dir, join(home.dir, '.agent-moved'));
+      await symlink(decoy, dir);
+      await rollback();
+      expect(await readFile(join(decoy, 'config.json'), 'utf-8')).toBe('decoy');
+      expect(logs.some(l => l.includes('resolves somewhere else'))).toBe(true);
+      expect(process.exitCode).toBe(2);
+    } finally {
+      await rm(decoy, { recursive: true, force: true });
+    }
+  });
+
+  it.skipIf(!posix)('backs up thousands of files a fix chmods in linear time, and rolls them all back', async () => {
+    const dir = join(home.dir, 'mcp-tokens');
+    await mkdir(dir);
+    const files: string[] = [];
+    for (let i = 0; i < 6000; i++) {
+      const f = join(dir, `t${i}.json`);
+      await writeFile(f, `{"i":${i}}`);
+      await chmod(f, 0o644);
+      files.push(f);
+    }
+    const start = Date.now();
+    await runFix(files[0], async () => { await restrictFilesToOwner('HM-003', files); }, [files[0]]);
+    // was quadratic: the whole manifest rewritten per file (5000 files ≈ 9 s, 20000 ≈ 121 s)
+    expect(Date.now() - start).toBeLessThan(15_000);
+    expect((await stat(files[5999])).mode & 0o777).toBe(0o600);
+    await rollback();
+    expect((await stat(files[5999])).mode & 0o777).toBe(0o644);
+    expect((await stat(files[0])).mode & 0o777).toBe(0o644);
+  }, 120_000);
 
   it('restores backups made before the manifest existed', async () => {
     const f = join(home.dir, 'legacy.env');

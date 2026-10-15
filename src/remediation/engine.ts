@@ -1,4 +1,4 @@
-import { mkdir, writeFile, chmod } from 'node:fs/promises';
+import { mkdir, writeFile, chmod, lstat } from 'node:fs/promises';
 import { join, dirname, isAbsolute } from 'node:path';
 import { homedir } from 'node:os';
 import chalk from 'chalk';
@@ -8,8 +8,9 @@ import type { CheckRegistry } from '../core/check-registry.js';
 import type { AdapterRegistry } from '../adapters/registry.js';
 import { getAllSkillsDirs, getSkillFiles } from '../core/utils.js';
 import { promptForFix } from './prompt.js';
-import { readRegularFile, regularMode, withChangeRecorder } from './safe-file.js';
-import { sha256, writeManifest, type BackupManifest } from './backup-manifest.js';
+import { readRegularFile, regularMode, resolvedDir, withChangeRecorder, withFixBoundary, UnsafeTargetError } from './safe-file.js';
+import { getUserHomeDirs } from '../adapters/openclaw.js';
+import { sha256, appendManifestEntry, type BackupManifest } from './backup-manifest.js';
 
 /**
  * Whether `vaso fix` should act on a result: a failing fixable finding, or a
@@ -105,21 +106,32 @@ export class RemediationEngine {
           for (const e of finding.evidence ?? []) if (e.file) toBackUp.add(e.file);
           for (const c of agent.installation.configFiles ?? []) toBackUp.add(c.filePath);
           for (const file of toBackUp) {
-            await this.backupFile(file);
+            // A precautionary backup of a file vaso won't write (a symlink, a
+            // hard link…) is skipped: the fix refuses that file itself, and
+            // must still fix the others (CFG-003 chmods several files)
+            await this.backupFile(file).catch((err: unknown) => {
+              if (!(err instanceof UnsafeTargetError)) throw err;
+            });
           }
           for (const file of credentialPaths ?? []) {
             await this.backupFile(file).catch(() => undefined);
           }
 
           // Anything else the fix changes is backed up just before it changes
-          const fixResult = await withChangeRecorder(path => this.backupFile(path), () => check.fix!({
+          // Writes stay inside the owning user's home and the install dir
+          const home = await homeOf(agent.installation.installDir, fs);
+          const roots = [home, agent.installation.installDir].filter((r): r is string => Boolean(r));
+          // The home's owner, by lstat: a home or install dir a user made a
+          // symlink must not lend its target's owner (root's, for /etc)
+          const ownerUid = await lstat(home ?? agent.installation.installDir).then(s => s.uid, () => undefined);
+          const fixResult = await withFixBoundary({ roots, ownerUid }, () => withChangeRecorder(path => { this.changed.add(path); return this.backupFile(path); }, () => check.fix!({
             installation: agent.installation,
             configs: agent.installation.configFiles,
             platform: process.platform,
             fs,
             credentialPaths,
             skillFiles,
-          }));
+          })));
 
           await this.recordAfterState();
           results.push(fixResult);
@@ -152,41 +164,60 @@ export class RemediationEngine {
    */
   private async backupFile(filePath: string): Promise<void> {
     if (!isAbsolute(filePath) || this.manifest.entries[filePath]) return;
-    const { mode, dir } = await regularMode(filePath);
+    const { mode, dir, uid } = await regularMode(filePath);
+    const where = { realDir: await resolvedDir(filePath, dir), uid };
     await this.ensureBackupDir();
     if (dir) {
-      this.manifest.entries[filePath] = { kind: 'dir', mode };
+      this.manifest.entries[filePath] = { kind: 'dir', mode, ...where };
     } else {
       const content = await readRegularFile(filePath).catch((err: NodeJS.ErrnoException) => {
         if (err.code === 'EACCES' || err.code === 'EPERM') return undefined;
         throw err;
       });
       if (content === undefined) {
-        this.manifest.entries[filePath] = { kind: 'mode', mode };
-        await writeManifest(this.backupDir, this.manifest);
+        this.manifest.entries[filePath] = { kind: 'mode', mode, ...where };
+        await appendManifestEntry(this.backupDir, filePath, this.manifest.entries[filePath]);
         return;
       }
       const destDir = join(this.backupDir, dirname(filePath));
       await mkdir(destDir, { recursive: true, mode: 0o700 });
       // Owner-only copy: the original's mode lives in the manifest
       await writeFile(join(this.backupDir, filePath), content, { mode: 0o600, flag: 'wx' });
-      this.manifest.entries[filePath] = { kind: 'file', mode, before: sha256(content) };
+      this.manifest.entries[filePath] = { kind: 'file', mode, before: sha256(content), ...where };
     }
-    await writeManifest(this.backupDir, this.manifest);
+    await appendManifestEntry(this.backupDir, filePath, this.manifest.entries[filePath]);
+    this.backedUp.add(filePath);
   }
 
-  /** Hash every backed-up file as the fixes left it, so rollback can tell a later edit from the fix. */
+  /** Paths changed by the fix that is running: only these can have a new after-state. */
+  private changed = new Set<string>();
+
+  /** Paths backed up during the fix that is running (precautionary or not). */
+  private backedUp = new Set<string>();
+
+  /**
+   * After-state of what the fix backed up: a file it changed is hashed as the
+   * fixes left it; one it never changed is recorded as unchanged (after =
+   * before), so rollback keeps a later edit to it rather than discarding it.
+   */
   private async recordAfterState(): Promise<void> {
-    let changed = false;
-    for (const [path, entry] of Object.entries(this.manifest.entries)) {
-      if (entry.kind !== 'file') continue;
+    for (const path of this.backedUp) {
+      const entry = this.manifest.entries[path];
+      if (entry?.kind !== 'file' || this.changed.has(path) || entry.after !== undefined) continue;
+      entry.after = entry.before;
+      await appendManifestEntry(this.backupDir, path, { after: entry.after });
+    }
+    this.backedUp.clear();
+    for (const path of this.changed) {
+      const entry = this.manifest.entries[path];
+      if (entry?.kind !== 'file') continue;
       const after = await readRegularFile(path).then(sha256, () => undefined);
       if (after !== entry.after) {
         entry.after = after;
-        changed = true;
+        await appendManifestEntry(this.backupDir, path, { after });
       }
     }
-    if (changed) await writeManifest(this.backupDir, this.manifest);
+    this.changed.clear();
   }
 
   private async ensureBackupDir(): Promise<void> {
@@ -197,4 +228,22 @@ export class RemediationEngine {
     if (process.platform !== 'win32') await chmod(backupsRoot, 0o700);
     await mkdir(this.backupDir, { recursive: true, mode: 0o700 });
   }
+}
+
+/**
+ * The home an installation lives in: the longest user home that contains its
+ * directory (every user's home when running as root — `--all-users`), or
+ * none for a system-wide install (/etc, /opt), which then is its own boundary.
+ */
+async function homeOf(installDir: string, fs: LocalFSProvider): Promise<string | undefined> {
+  const homes = new Set<string>([homedir()]);
+  if (process.getuid?.() === 0) {
+    for (const { home } of await getUserHomeDirs(true, fs).catch(() => [])) homes.add(home);
+  }
+  let best: string | undefined;
+  for (const home of homes) {
+    const prefix = home.endsWith('/') ? home : `${home}/`;
+    if ((installDir === home || installDir.startsWith(prefix)) && (!best || home.length > best.length)) best = home;
+  }
+  return best;
 }

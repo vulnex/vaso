@@ -1,4 +1,4 @@
-import { readRegularFile, writeRegularFile, chmodNoFollow, regularMode } from './safe-file.js';
+import { readRegularFile, writeRegularFile, chmodNoFollow, regularMode, UnsafeTargetError } from './safe-file.js';
 import YAML from 'yaml';
 import { parse as parseTOML, stringify as stringifyTOML } from 'smol-toml';
 import type { FixResult, ParsedConfig } from '../core/types.js';
@@ -297,18 +297,25 @@ export async function restrictToOwner(filePath: string): Promise<boolean> {
 /** restrictToOwner over a list of files (missing ones skipped); the result of a fix(). */
 export async function restrictFilesToOwner(checkId: string, paths: Iterable<string>): Promise<FixResult> {
   let fixed = 0;
+  // One unsafe file (a symlink, a hard link, a path leaving the home) is
+  // refused and named; the others are still fixed
+  const refused: string[] = [];
   for (const path of paths) {
     try {
       if (await restrictToOwner(path)) fixed++;
-    } catch {
-      // File may not exist
+    } catch (err) {
+      if (err instanceof UnsafeTargetError) refused.push(`${err.path} ${err.reason}`);
+      // otherwise the file doesn't exist
     }
   }
+  const parts: string[] = [];
+  if (fixed > 0) parts.push(`Removed group/other access from ${fixed} file(s)`);
+  if (refused.length > 0) parts.push(`not changed: ${refused.join('; ')}`);
   return {
     checkId,
     applied: fixed > 0,
-    message: fixed > 0 ? `Removed group/other access from ${fixed} file(s)` : 'Files are already owner-only',
-    ...(fixed === 0 ? { alreadyDone: true } : {}),
+    message: parts.length > 0 ? parts.join(' — ') : 'Files are already owner-only',
+    ...(fixed === 0 && refused.length === 0 ? { alreadyDone: true } : {}),
   };
 }
 

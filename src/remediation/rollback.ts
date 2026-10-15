@@ -1,5 +1,5 @@
 import { readdir, readFile, writeFile, stat, lstat, rename } from 'node:fs/promises';
-import { readRegularFile, writeRegularFile, chmodNoFollow } from './safe-file.js';
+import { readRegularFile, writeRegularFile, chmodNoFollow, movedSinceBackup } from './safe-file.js';
 import { MANIFEST_NAME, readManifest, sha256, type ManifestEntry } from './backup-manifest.js';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
@@ -85,6 +85,11 @@ export async function rollback(timestamp?: string): Promise<void> {
         console.log(`  ${chalk.yellow('!')} Skipped ${dir}: it is no longer a ${entry.kind === 'dir' ? 'directory' : 'regular file'}`);
         continue;
       }
+      const moved = await movedSinceBackup(dir, entry, entry.kind === 'dir');
+      if (moved) {
+        console.log(`  ${chalk.yellow('!')} Skipped ${dir}: ${moved}`);
+        continue;
+      }
       await chmodNoFollow(dir, entry.mode);
       restored++;
     } catch (err) {
@@ -119,6 +124,8 @@ async function restoreFile(backupPath: string, originalPath: string, entry: Mani
   if (current && !current.isFile()) {
     return `it is now ${current.isSymbolicLink() ? 'a symlink' : 'not a regular file'}`;
   }
+  const moved = entry ? await movedSinceBackup(originalPath, entry, false) : undefined;
+  if (moved) return moved;
   const original = await readFile(backupPath);
   const mode = entry?.mode ?? ((await stat(backupPath)).mode & 0o7777);
   if (current && entry?.after !== undefined && entry.after === entry.before) {

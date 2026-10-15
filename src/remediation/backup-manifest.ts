@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { readFile, writeFile } from 'node:fs/promises';
+import { appendFile, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 /**
@@ -21,6 +21,12 @@ export interface ManifestEntry {
   before?: string;
   /** sha256 after the run's fixes (files); absent while a fix is running. */
   after?: string;
+  /** Where the path resolved when backed up (its directory's real path, or
+   *  the directory's own) and who owned it: rollback refuses a path that has
+   *  since been re-pointed through a symlinked directory or handed to another
+   *  owner (1.3.1+; older manifests lack them). */
+  realDir?: string;
+  uid?: number;
 }
 
 export interface BackupManifest {
@@ -33,12 +39,38 @@ export function sha256(data: Buffer): string {
 }
 
 export async function readManifest(backupDir: string): Promise<BackupManifest | undefined> {
+  let text: string;
   try {
-    const m = JSON.parse(await readFile(join(backupDir, MANIFEST_NAME), 'utf-8')) as BackupManifest;
-    return m && m.version === 1 && m.entries && typeof m.entries === 'object' ? m : undefined;
+    text = await readFile(join(backupDir, MANIFEST_NAME), 'utf-8');
   } catch {
     return undefined;
   }
+  // 1.3.0: one JSON document, rewritten after every backup
+  try {
+    const m = JSON.parse(text) as BackupManifest;
+    if (m && m.version === 1 && m.entries && typeof m.entries === 'object') return m;
+  } catch {
+    // a journal
+  }
+  // 1.3.1+: a journal of `{ path, ...fields }` lines, appended as the run goes
+  // (O(1) per backed-up file); later lines update earlier ones
+  const entries: Record<string, ManifestEntry> = {};
+  for (const line of text.split('\n')) {
+    if (!line.trim()) continue;
+    try {
+      const { path, ...fields } = JSON.parse(line) as Partial<ManifestEntry> & { path?: string };
+      if (typeof path !== 'string') continue;
+      entries[path] = { ...entries[path], ...fields } as ManifestEntry;
+    } catch {
+      // a line cut short by a crash: the entries before it still count
+    }
+  }
+  return Object.keys(entries).length > 0 ? { version: 1, entries } : undefined;
+}
+
+/** Record one manifest entry (or an update to it) — before the change it covers happens. */
+export async function appendManifestEntry(backupDir: string, path: string, fields: Partial<ManifestEntry>): Promise<void> {
+  await appendFile(join(backupDir, MANIFEST_NAME), `${JSON.stringify({ path, ...fields })}\n`, { mode: 0o600 });
 }
 
 export async function writeManifest(backupDir: string, manifest: BackupManifest): Promise<void> {
