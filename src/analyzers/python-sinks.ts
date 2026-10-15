@@ -159,7 +159,7 @@ function statements(lines: CodeLine[]): Array<CodeLine & { last: number }> {
       out.push(current);
       depth = 0;
     }
-    for (const c of l.text.replace(/(["'])(?:\\.|(?!\1).)*\1/g, '')) {
+    for (const c of l.text.replace(/(["'])(?:\\.|(?!\1|\\).)*\1/g, '')) {
       if (c === '(' || c === '[' || c === '{') depth++;
       else if (c === ')' || c === ']' || c === '}') depth = Math.max(0, depth - 1);
     }
@@ -189,7 +189,7 @@ function commandOf(args: string): { command?: string; dynamic: boolean } {
   const head = args.replace(/\b\w+\s*=[\s\S]*$/, ''); // keyword arguments (shell=, cwd=) aren't the command
   const parts: string[] = [];
   let dynamic = false;
-  for (const m of head.matchAll(/(?:[rRbBuU]?(["'])((?:\\.|(?!\1).)*)\1)|(f["'](?:\\.|[^"'])*["'])|([A-Za-z_][\w.]*(?:\([^()]*\))?)/g)) {
+  for (const m of head.matchAll(/(?:[rRbBuU]?(["'])((?:\\.|(?!\1|\\).)*)\1)|(f["'](?:\\.|[^"'])*["'])|([A-Za-z_][\w.]*(?:\([^()]*\))?)/g)) {
     if (m[2] !== undefined) parts.push(m[2]);
     else if (m[3]) { dynamic = true; parts.push(m[3].slice(2, -1)); }
     else if (m[4]) { dynamic = true; parts.push('{…}'); }
@@ -245,7 +245,7 @@ function topLevelParts(text: string): string[] {
   const parts: string[] = [];
   let depth = 0;
   let start = 0;
-  const clean = text.replace(/(["'])(?:\\.|(?!\1).)*\1/g, (m) => '_'.repeat(m.length));
+  const clean = text.replace(/(["'])(?:\\.|(?!\1|\\).)*\1/g, (m) => '_'.repeat(m.length));
   for (let i = 0; i < clean.length; i++) {
     const c = clean[i];
     if (c === '(' || c === '[' || c === '{') depth++;

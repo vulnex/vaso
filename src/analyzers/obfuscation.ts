@@ -57,7 +57,7 @@ export function looksBase64Encoded(literal: string): boolean {
   if (!/[a-z]/.test(literal) || !/[A-Z]/.test(literal)) return false;
   // camelCase / PascalCase identifiers (`UntitledSingleSelectEnumSchema`)
   // switch case at every word boundary; base64 has runs of capitals.
-  if (/^(?:[A-Z]?[a-z]+\d*)+$/.test(literal)) return false;
+  if (/^[A-Z]?[a-z]+(?:\d+[A-Z]?[a-z]+|[A-Z][a-z]+)*\d*$/.test(literal)) return false;
   let signal = 0;
   for (let i = 0; i < literal.length; i++) {
     const c = literal[i];
