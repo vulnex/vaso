@@ -142,4 +142,31 @@ describe('baseline scopes', () => {
       await rm(home, { recursive: true, force: true });
     }
   });
+
+  it('falls back to a pre-1.3.1 latest.json that covers exactly the scope', async () => {
+    const { mkdtemp, rm, mkdir, writeFile } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const home = await mkdtemp(join(tmpdir(), 'vaso-bl-'));
+    const { vi } = await import('vitest');
+    vi.resetModules();
+    vi.doMock('node:os', async (orig) => ({ ...(await orig<typeof import('node:os')>()), homedir: () => home }));
+    try {
+      const { loadBaseline } = await import('./baseline.js');
+      const dir = join(home, '.vaso', 'baselines');
+      await mkdir(dir, { recursive: true });
+      // 1.3.0: `-a openclaw --save-baseline` wrote latest.json, no vasoVersion
+      await writeFile(join(dir, 'latest.json'), JSON.stringify(makeScanResult([makeCheckResult('CFG-001', false)])));
+      expect((await loadBaseline({ agent: 'openclaw' }))?.agents[0].results[0].id).toBe('CFG-001');
+      expect(await loadBaseline({ agent: 'hermes' })).toBeNull();
+      expect(await loadBaseline({ agent: 'openclaw', host: 'box' })).toBeNull();
+      // a 1.3.1 baseline in latest.json is the unscoped one, never reused for a scope
+      await writeFile(join(dir, 'latest.json'), JSON.stringify({ ...makeScanResult([]), vasoVersion: '1.3.1' }));
+      expect(await loadBaseline({ agent: 'openclaw' })).toBeNull();
+    } finally {
+      vi.doUnmock('node:os');
+      vi.resetModules();
+      await rm(home, { recursive: true, force: true });
+    }
+  });
 });

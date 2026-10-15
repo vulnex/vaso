@@ -47,14 +47,25 @@ export async function saveBaseline(result: ScanResult, scope: BaselineScope = {}
   return filePath;
 }
 
-export async function loadBaseline(scope: BaselineScope = {}): Promise<ScanResult | null> {
-  const latestPath = join(BASELINES_DIR, latestName(scope));
+async function readBaseline(name: string): Promise<ScanResult | null> {
   try {
-    const content = await readFile(latestPath, 'utf-8');
-    return JSON.parse(content) as ScanResult;
+    return JSON.parse(await readFile(join(BASELINES_DIR, name), 'utf-8')) as ScanResult;
   } catch {
     return null;
   }
+}
+
+export async function loadBaseline(scope: BaselineScope = {}): Promise<ScanResult | null> {
+  const scoped = await readBaseline(latestName(scope));
+  if (scoped || latestName(scope) === 'latest.json') return scoped;
+  // Before 1.3.1 every baseline was saved as latest.json, whatever its
+  // scope. Use one that covers exactly this scope — same scanned host, only
+  // the filtered agent — so an upgrade doesn't lose `--diff` history.
+  const legacy = await readBaseline('latest.json');
+  if (!legacy || legacy.vasoVersion !== undefined) return null;
+  if ((legacy.host ?? undefined) !== (scope.host ?? undefined)) return null;
+  if (scope.agent && !(legacy.agents.length > 0 && legacy.agents.every(a => a.agent === scope.agent))) return null;
+  return legacy;
 }
 
 function installationKey(agent: ScanResult['agents'][number]): string {

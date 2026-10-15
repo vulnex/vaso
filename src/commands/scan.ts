@@ -10,7 +10,7 @@ import type { ProbeSnapshot } from '../core/snapshot-types.js';
 import { VERSION } from '../version.js';
 import { parseRemoteOptions, type RemoteOptionValues } from './remote-options.js';
 import { loadSnapshotFile, SnapshotLoadError, snapshotErrorLines, SNAPSHOT_TRUNCATED_WARNING, probeVersionWarning } from '../core/snapshot-load.js';
-import type { ScanOptions } from '../core/types.js';
+import type { ScanOptions, ScanResult } from '../core/types.js';
 import { shouldFailScan, isValidFailOn, EXIT_FINDINGS, EXIT_INCOMPLETE, EXIT_USAGE, type FailOnLevel } from '../core/exit-criteria.js';
 import { logError } from '../core/debug.js';
 import { writeFileEnsureDir, writeFileOwnerOnly } from '../core/utils.js';
@@ -233,6 +233,8 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
         if (entry.error) {
           log(chalk.red(`  ✗ ${label} (${dur}): ${entry.error.split('\n')[0]}`));
         } else if (entry.result) {
+          // A baseline per scanned host, as for a local or snapshot scan
+          await applyBaseline(entry.result, { agent: options.agent, host: entry.result.host ?? entry.target.host }, options, log);
           const findings = entry.result.summary;
           const summary = `${findings.critical}C / ${findings.warning}W / ${findings.info}I`;
           log(chalk.green(`  ✓ ${label} (${dur}) — score ${entry.result.totalScore}/100, ${summary}`));
@@ -372,48 +374,7 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
     // One baseline per scan scope (agent filter, scanned host)
     const baselineScope = { agent: options.agent, host: snapshotFs ? result.host : undefined };
 
-    // Diff against the previous baseline — loaded before --save-baseline
-    // replaces it, or a combined run would compare the scan with itself
-    if (options.diff) {
-      const baseline = await loadBaseline(baselineScope);
-      if (baseline) {
-        const diff = diffResults(result, baseline);
-        result.baselineDiff = {
-          baselineTimestamp: baseline.timestamp,
-          newFindings: diff.newFindings.map(f => f.id),
-          resolvedFindings: diff.resolvedFindings.map(f => f.id),
-          unchanged: diff.unchangedFindings.length,
-        };
-        localLog(chalk.bold('\nDifferential Scan Results:'));
-        if (baseline.vasoVersion !== result.vasoVersion) {
-          localLog(chalk.dim(`  Baseline taken with VASO ${baseline.vasoVersion ?? '< 1.3.1'}; checks added or changed since may show as new or resolved.`));
-        }
-        localLog(`  New findings: ${chalk.red(String(diff.newFindings.length))}`);
-        localLog(`  Resolved: ${chalk.green(String(diff.resolvedFindings.length))}`);
-        localLog(`  Unchanged: ${chalk.dim(String(diff.unchangedFindings.length))}`);
-
-        if (diff.newFindings.length > 0) {
-          localLog(chalk.bold('\n  New findings:'));
-          for (const f of diff.newFindings) {
-            localLog(`    ${chalk.red('[NEW]')} ${f.id}: ${f.name} — ${f.message}`);
-          }
-        }
-        if (diff.resolvedFindings.length > 0) {
-          localLog(chalk.bold('\n  Resolved:'));
-          for (const f of diff.resolvedFindings) {
-            localLog(`    ${chalk.green('[RESOLVED]')} ${f.id}: ${f.name}`);
-          }
-        }
-        localLog('');
-      } else {
-        localLog(chalk.yellow('No baseline found. Run with --save-baseline first.'));
-      }
-    }
-
-    if (options.saveBaseline) {
-      const path = await saveBaseline({ ...result, baselineDiff: undefined }, baselineScope);
-      localLog(chalk.green(`Baseline saved to ${path}`));
-    }
+    await applyBaseline(result, baselineScope, options, localLog);
 
     const reporter = getReporter(scanOptions.format ?? 'terminal');
     const output = reporter.render(result);
@@ -442,5 +403,59 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
   } catch (err) {
     logError(chalk.red('Scan failed:'), err);
     process.exitCode = EXIT_USAGE;
+  }
+}
+
+/**
+ * `--diff` against the scope's previous baseline (loaded before
+ * `--save-baseline` replaces it, or a combined run would compare the scan
+ * with itself), then `--save-baseline`. One baseline per agent filter and
+ * scanned host; remote hosts each get their own.
+ */
+async function applyBaseline(
+  result: ScanResult,
+  baselineScope: { agent?: string; host?: string },
+  options: Pick<ScanCommandOptions, 'diff' | 'saveBaseline'>,
+  localLog: (msg: string) => void,
+): Promise<void> {
+  if (options.diff) {
+    const baseline = await loadBaseline(baselineScope);
+    if (baseline) {
+      const diff = diffResults(result, baseline);
+      result.baselineDiff = {
+        baselineTimestamp: baseline.timestamp,
+        newFindings: diff.newFindings.map(f => f.id),
+        resolvedFindings: diff.resolvedFindings.map(f => f.id),
+        unchanged: diff.unchangedFindings.length,
+      };
+      localLog(chalk.bold('\nDifferential Scan Results:'));
+      if (baseline.vasoVersion !== result.vasoVersion) {
+        localLog(chalk.dim(`  Baseline taken with VASO ${baseline.vasoVersion ?? '< 1.3.1'}; checks added or changed since may show as new or resolved.`));
+      }
+      localLog(`  New findings: ${chalk.red(String(diff.newFindings.length))}`);
+      localLog(`  Resolved: ${chalk.green(String(diff.resolvedFindings.length))}`);
+      localLog(`  Unchanged: ${chalk.dim(String(diff.unchangedFindings.length))}`);
+
+      if (diff.newFindings.length > 0) {
+        localLog(chalk.bold('\n  New findings:'));
+        for (const f of diff.newFindings) {
+          localLog(`    ${chalk.red('[NEW]')} ${f.id}: ${f.name} — ${f.message}`);
+        }
+      }
+      if (diff.resolvedFindings.length > 0) {
+        localLog(chalk.bold('\n  Resolved:'));
+        for (const f of diff.resolvedFindings) {
+          localLog(`    ${chalk.green('[RESOLVED]')} ${f.id}: ${f.name}`);
+        }
+      }
+      localLog('');
+    } else {
+      localLog(chalk.yellow('No baseline found. Run with --save-baseline first.'));
+    }
+  }
+
+  if (options.saveBaseline) {
+    const path = await saveBaseline({ ...result, baselineDiff: undefined }, baselineScope);
+    localLog(chalk.green(`Baseline saved to ${path}`));
   }
 }
