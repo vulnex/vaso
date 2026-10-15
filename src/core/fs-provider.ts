@@ -66,6 +66,10 @@ export interface ExecOptions {
    *  ~/.hermes, Cursor ~/.cursor/cli-config.json, …), and a scan must not
    *  modify what it scans. */
   isolateHome?: boolean;
+  /** PATH to resolve the command with and to give it (local providers; a
+   *  snapshot answers by command name). Under root, still filtered to
+   *  directories no other user can write. */
+  path?: string;
 }
 
 export interface FSProvider {

@@ -168,9 +168,34 @@ export async function nvmDefaultBinDir(home: string, fs: FSProvider): Promise<st
   return join(root, newest, 'bin');
 }
 
-function whichPath(name: string, fs: FSProvider): string | undefined {
+/**
+ * The PATH the remote probe resolves agent CLIs with (probe/collector.go
+ * userBinDirs / systemBinDirs / buildAugmentedPath, kept equal by a guard
+ * test): a login shell's user bin dirs ahead of the session PATH, then the
+ * package-manager dirs a non-interactive session lacks. Local scans resolve
+ * through the same PATH, so a scan from cron, CI or a non-interactive shell
+ * names the same primary copy as a remote scan of that host.
+ */
+export const PROBE_USER_BIN_DIRS = [
+  '.local/bin', '.bun/bin', '.cargo/bin', '.npm-global/bin', '.volta/bin',
+  '.abacusai/bin', '.nvm/current/bin', '.claude/local', '.opencode/bin', 'bin',
+];
+export const PROBE_SYSTEM_BIN_DIRS = ['/opt/homebrew/bin', '/usr/local/bin', '/snap/bin'];
+
+function augmentedPathDirs(home: string, fs: FSProvider): string[] {
+  const userDirs = PROBE_USER_BIN_DIRS.map(d => join(home, d));
+  const session = (fs.getEnv('PATH') ?? '').split(':').filter(Boolean);
+  const missing = PROBE_SYSTEM_BIN_DIRS.filter(d => !session.includes(d));
+  // As root, a bare name resolves to a system binary before any copy a user
+  // planted in their own bin dir (same order as the probe)
+  return (fs.isPrivileged?.() ?? false) ? [...session, ...missing, ...userDirs] : [...userDirs, ...session, ...missing];
+}
+
+function whichPath(name: string, home: string, fs: FSProvider): string | undefined {
   try {
-    const out = fs.execSync('which', [name], { timeout: 3000 }).trim().split('\n')[0]?.trim();
+    // A snapshot answers by name: the probe already ran `which` with this PATH
+    const out = fs.execSync('which', [name], { timeout: 3000, path: augmentedPathDirs(home, fs).join(':') })
+      .trim().split('\n')[0]?.trim();
     return out && out.startsWith('/') ? out : undefined;
   } catch {
     return undefined;
@@ -179,7 +204,7 @@ function whichPath(name: string, fs: FSProvider): string | undefined {
 
 /** Candidate paths in discovery order, PATH-resolved first. */
 async function candidatePaths(home: string, fs: FSProvider, spec: CliInstallSpec): Promise<{ resolved?: string; onPath?: string; paths: string[] }> {
-  const onPath = spec.names.map(n => whichPath(n, fs)).find(Boolean);
+  const onPath = spec.names.map(n => whichPath(n, home, fs)).find(Boolean);
   let resolved = onPath;
   // A non-interactive PATH (cron, CI, the remote probe) lacks nvm, so `which`
   // can land on a system copy that interactive shells shadow: nvm.sh puts the

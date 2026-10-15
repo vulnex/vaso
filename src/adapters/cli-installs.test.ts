@@ -287,3 +287,39 @@ describe('cliInstallGlobs', () => {
     expect(cliInstallGlobs(['copilot'])).toContain('~/.volta/tools/image/packages/@*/*/bin/copilot');
   });
 });
+
+describe('local CLI resolution PATH matches the probe', () => {
+  it('uses the same user and system bin dirs as probe/collector.go', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { PROBE_USER_BIN_DIRS, PROBE_SYSTEM_BIN_DIRS } = await import('./cli-installs.js');
+    const go = readFileSync(new URL('../../probe/collector.go', import.meta.url), 'utf-8');
+    const list = (name: string) => [...(go.match(new RegExp(`var ${name} = \\[\\]string\\{([\\s\\S]*?)\\n\\}`))?.[1] ?? '')
+      .matchAll(/"([^"]+)"/g)].map(m => m[1]);
+    expect(PROBE_USER_BIN_DIRS).toEqual(list('userBinDirs'));
+    const sys = go.match(/var systemBinDirs = \[\]string\{([^}]*)\}/)?.[1] ?? '';
+    expect(PROBE_SYSTEM_BIN_DIRS).toEqual([...sys.matchAll(/"([^"]+)"/g)].map(m => m[1]));
+  });
+});
+
+describe('discoverCliInstalls resolves `which` like the probe', () => {
+  it('gives which the user bin dirs first (non-root) and last (root)', async () => {
+    const { discoverCliInstalls } = await import('./cli-installs.js');
+    const seen: string[] = [];
+    const fake = (root: boolean) => ({
+      kind: 'local', platform: 'linux', homedir: () => '/home/u',
+      getEnv: (k: string) => (k === 'PATH' ? '/usr/bin:/bin' : undefined),
+      isPrivileged: () => root,
+      execSync: (_c: string, _a: string[], o?: { path?: string }) => { seen.push(o?.path ?? ''); throw new Error('nf'); },
+      access: async () => false, stat: async () => { throw new Error('ENOENT'); },
+      readdir: async () => [], readdirEntries: async () => [], realpath: async (p: string) => p,
+      exec: async () => ({ exitCode: 1, stdout: '', stderr: '' }),
+    }) as unknown as import('../core/fs-provider.js').FSProvider;
+    await discoverCliInstalls('/home/u', fake(false), { names: ['tool'], nvm: false, version: async () => undefined });
+    expect(seen[0].split(':').slice(0, 2)).toEqual(['/home/u/.local/bin', '/home/u/.bun/bin']);
+    expect(seen[0]).toContain('/usr/bin:/bin:/opt/homebrew/bin');
+    seen.length = 0;
+    await discoverCliInstalls('/home/u', fake(true), { names: ['tool'], nvm: false, version: async () => undefined });
+    expect(seen[0].startsWith('/usr/bin:/bin:')).toBe(true);
+    expect(seen[0].endsWith('/home/u/bin')).toBe(true);
+  });
+});

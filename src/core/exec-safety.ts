@@ -66,15 +66,18 @@ function resolveOnPath(cmd: string, pathVar: string | undefined): string | undef
   return undefined;
 }
 
-export function planExec(cmd: string, options: { isolateHome?: boolean; cwd?: string } | undefined): ExecPlan {
+export function planExec(cmd: string, options: { isolateHome?: boolean; cwd?: string; path?: string } | undefined): ExecPlan {
   let env: NodeJS.ProcessEnv | undefined;
   let cwd = options?.cwd;
   let cleanup = () => {};
   let uid: number | undefined;
   let gid: number | undefined;
 
+  const pathVar = options?.path ?? process.env.PATH;
+  if (options?.path !== undefined) env = { ...process.env, PATH: options.path };
+
   if (isRoot()) {
-    const resolved = resolveOnPath(cmd, process.env.PATH);
+    const resolved = resolveOnPath(cmd, pathVar);
     if (!resolved) return { refuse: `${cmd} not found`, cleanup };
     let st: Stats;
     try {
@@ -88,8 +91,8 @@ export function planExec(cmd: string, options: { isolateHome?: boolean; cwd?: st
     } else if (!rootSafePath(resolved)) {
       return { refuse: `${resolved} is writable by a non-root user; not run as root`, cleanup };
     }
-    const safePath = (process.env.PATH ?? '').split(delimiter).filter(d => d && rootSafePath(d)).join(delimiter);
-    env = { ...process.env, PATH: uid === undefined ? safePath : process.env.PATH };
+    const safePath = (pathVar ?? '').split(delimiter).filter(d => d && rootSafePath(d)).join(delimiter);
+    env = { ...process.env, PATH: uid === undefined ? safePath : pathVar };
   }
 
   if (options?.isolateHome) {
