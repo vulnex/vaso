@@ -81,6 +81,9 @@ export interface FileEntry {
   contentOmitted?: boolean;
   /** Why the content was omitted (probe ≥ 1.3.1). */
   omitted?: 'size' | 'budget' | 'asset' | 'metadata' | 'special';
+  /** First bytes (base64) of a skill-tree file omitted for size or budget
+   *  (probe ≥ 1.3.1) — where an executable header sits. */
+  head?: string;
   /** `'base64'` when the file is not valid UTF-8 and `content` holds its bytes
    *  base64-encoded (probe ≥ 1.1.0); absent means UTF-8 text. */
   encoding?: 'base64';

@@ -34,9 +34,17 @@ export const ioc007 = defineCheck({
       try {
         bytes = await readCappedBytes(ctx.fs, file);
       } catch (err) {
-        // A large native helper is exactly what this check is for: say it
-        // wasn't read rather than dropping it silently
-        if (err instanceof ScanLimitError) evidence.push({ file, detail: err.detail, mitigated: true });
+        if (!(err instanceof ScanLimitError)) continue;
+        // A large native helper is exactly what this check is for. Its
+        // header is in the first bytes, whatever the size: judge that, and
+        // only say "not scanned" when even the header can't be read.
+        const head = await ctx.fs.readHead?.(file, 64).catch(() => undefined);
+        const format = head && bufferPatterns.find(bp => bytesStartWith(head, bp.pattern as Uint8Array));
+        if (format) {
+          evidence.push({ file, detail: `Compiled executable (${format.name}) — its code can't be reviewed or analysed (too large to scan beyond its header)` });
+        } else if (!head) {
+          evidence.push({ file, detail: err.detail, mitigated: true });
+        }
         continue;
       }
 

@@ -1,4 +1,4 @@
-import { access as fsAccess, readdir, readFile, stat, realpath, readlink } from 'node:fs/promises';
+import { access as fsAccess, open, readdir, readFile, stat, realpath, readlink } from 'node:fs/promises';
 import { execFileSync, execFile } from 'node:child_process';
 import { constants as fsConstants, type Dirent } from 'node:fs';
 import { join } from 'node:path';
@@ -54,6 +54,20 @@ export class LocalFSProvider implements FSProvider {
 
   async readBytes(path: string): Promise<Uint8Array> {
     return readRegularFile(path);
+  }
+
+  async readHead(path: string, n: number): Promise<Uint8Array> {
+    const handle = await open(path, fsConstants.O_RDONLY | (fsConstants.O_NONBLOCK ?? 0));
+    try {
+      if (!(await handle.stat()).isFile()) {
+        throw Object.assign(new Error(`EINVAL: not a regular file, refusing to read: ${path}`), { code: 'EINVAL' });
+      }
+      const buf = Buffer.alloc(n);
+      const { bytesRead } = await handle.read(buf, 0, n, 0);
+      return buf.subarray(0, bytesRead);
+    } finally {
+      await handle.close();
+    }
   }
 
   async readdir(path: string): Promise<string[]> {

@@ -49,6 +49,14 @@ export class SnapshotFSProvider implements FSProvider {
     return entry.encoding === 'base64' ? Buffer.from(entry.content, 'base64') : Buffer.from(entry.content, 'utf-8');
   }
 
+  async readHead(path: string, n: number): Promise<Uint8Array> {
+    const entry = this.snapshot.files[path];
+    if (entry?.exists && entry.contentOmitted && typeof entry.head === 'string') {
+      return Buffer.from(entry.head, 'base64').subarray(0, n);
+    }
+    return (await this.readBytes(path)).slice(0, n);
+  }
+
   async readdir(path: string): Promise<string[]> {
     const listing = this.snapshot.directories[path];
     if (listing) {

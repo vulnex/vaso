@@ -460,11 +460,11 @@ func (c *collector) collectFileLimit(path string, metadataOnly bool, limit int64
 	case assetOnly:
 		return omitted("asset")
 	case info.Size() > limit:
-		return omitted("size")
+		return c.withHead(omitted("size"), path, info)
 	}
 	if info.Size() > c.budget {
 		c.truncated = true
-		return omitted("budget")
+		return c.withHead(omitted("budget"), path, info)
 	}
 
 	// Only regular files have content. A FIFO blocks forever and a device
@@ -1114,4 +1114,32 @@ func (c *collector) collectUnlistableSkills(snapshot *ProbeSnapshot, pattern str
 			}
 		}
 	}
+}
+
+// headBytes is how much of an omitted skill-tree file is shipped: enough for
+// every executable magic IOC-007 knows (ELF, Mach-O, PE, shebang-less blobs).
+const headBytes = 64
+
+// withHead adds the first headBytes of a regular skill-tree file to an
+// omitted entry. Read on the opened file, non-blocking, so a FIFO swapped in
+// after Stat can't block the probe.
+func (c *collector) withHead(e FileEntry, path string, info os.FileInfo) FileEntry {
+	if !c.inSkillTree || !info.Mode().IsRegular() {
+		return e
+	}
+	f, err := openForRead(path)
+	if err != nil {
+		return e
+	}
+	defer f.Close()
+	if st, err := f.Stat(); err != nil || !st.Mode().IsRegular() {
+		return e
+	}
+	buf := make([]byte, headBytes)
+	n, _ := io.ReadFull(f, buf)
+	if n > 0 {
+		e.Head = base64.StdEncoding.EncodeToString(buf[:n])
+		c.budget -= int64(len(e.Head))
+	}
+	return e
 }

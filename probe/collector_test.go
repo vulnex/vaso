@@ -487,3 +487,26 @@ func TestSnapshotRecordsProbeVersion(t *testing.T) {
 		t.Fatalf("probeVersion = %q, want %q", snap.ProbeVersion, version)
 	}
 }
+
+func TestOmittedSkillFileShipsItsHead(t *testing.T) {
+	root := t.TempDir()
+	bin := filepath.Join(root, "helper.node")
+	content := append([]byte{0x7f, 'E', 'L', 'F', 2, 1, 1}, make([]byte, 4096)...)
+	if err := os.WriteFile(bin, content, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	c := &collector{budget: 1 << 20, inSkillTree: true}
+	e := c.collectFileLimit(bin, false, 1024)
+	if e.Omitted != "size" || e.Head == "" {
+		t.Fatalf("omitted skill file without head: %+v", e)
+	}
+	head, _ := base64.StdEncoding.DecodeString(e.Head)
+	if len(head) != headBytes || head[1] != 'E' {
+		t.Fatalf("head = %v", head)
+	}
+	// outside a skill tree nothing is shipped
+	c.inSkillTree = false
+	if e := c.collectFileLimit(bin, false, 1024); e.Head != "" {
+		t.Fatalf("head shipped outside a skill tree: %+v", e)
+	}
+}

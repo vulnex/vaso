@@ -99,6 +99,10 @@ type FileEntry struct {
 	// asset recorded as metadata), "metadata" (a metadata-only request), or
 	// "special" (not a regular file).
 	Omitted string `json:"omitted,omitempty"`
+	// First bytes of a skill-tree file whose content was omitted for size or
+	// budget, base64 (probe ≥ 1.3.1): an executable header sits at offset 0,
+	// so IOC-007 can still tell a compiled binary from data.
+	Head string `json:"head,omitempty"`
 	// "base64" when the file is not valid UTF-8 (binary: protobuf settings,
 	// keystores…) and Content holds its bytes base64-encoded; a JSON string
 	// would replace invalid sequences and lose them. Empty means UTF-8 text.

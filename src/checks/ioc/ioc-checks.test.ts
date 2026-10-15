@@ -241,6 +241,33 @@ function reduce(arr) {
     const result = await ioc007.run(makeContext(tempDir));
     expect(result.passed).toBe(true);
   });
+
+  it('judges the header of a binary over the scan limit, locally and from a snapshot head (dt13 RG10)', async () => {
+    const elf = Buffer.concat([Buffer.from([0x7f, 0x45, 0x4c, 0x46, 2, 1, 1]), Buffer.alloc(5 * 1024 * 1024 + 16)]);
+    const bin = join(tempDir, 'helper.node');
+    await writeFile(bin, elf);
+    await writeFile(join(tempDir, 'big.dat'), Buffer.alloc(5 * 1024 * 1024 + 16, 0x61)); // data, not an executable
+    const local = await ioc007.run(makeContext(tempDir));
+    expect(local.passed).toBe(false);
+    expect(local.severity).toBe('warning');
+    expect(local.evidence?.map(e => e.file)).toEqual([bin]);
+
+    const { SnapshotFSProvider } = await import('../../core/snapshot-fs-provider.js');
+    const snap = (head?: string) => new SnapshotFSProvider({
+      version: 1, hostname: 'h', platform: 'linux', homedir: '/h', timestamp: 't',
+      privilege: { uid: 1, username: 'u', isRoot: false, sudoAvailable: false, escalated: false, scannedUsers: ['u'], skippedPaths: [] },
+      files: { '/h/skills/s/helper.node': { content: '', mode: 0o755, exists: true, contentOmitted: true, omitted: 'size', ...(head ? { head } : {}) } },
+      directories: { '/h/skills': ['s/'], '/h/skills/s': ['helper.node'] }, commandOutputs: {}, env: {},
+      directoryModes: { '/h/skills': 0o755, '/h/skills/s': 0o755 },
+    });
+    const ctx = (fs: InstanceType<typeof SnapshotFSProvider>) => ({ ...makeContext('/h/skills'), fs, skillFiles: ['/h/skills/s/helper.node'] });
+    const remote = await ioc007.run(ctx(snap(elf.subarray(0, 64).toString('base64'))));
+    expect(remote.passed).toBe(false);
+    expect(remote.severity).toBe('warning');
+    // an older probe ships no head: listed as not scanned
+    const old = await ioc007.run(ctx(snap()));
+    expect(old.evidence?.[0]).toMatchObject({ mitigated: true });
+  });
 });
 
 describe('IOC-008: VirusTotal Cross-Reference', () => {

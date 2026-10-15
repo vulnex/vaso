@@ -55,6 +55,7 @@ export function validateSnapshot(value: unknown): string[] {
       // A mode that isn't a permission number would read as 0 (owner-only)
       // and suppress every permission finding for the file
       if (!isRecord(entry) || (entry.content !== undefined && typeof entry.content !== 'string')
+        || (entry.head !== undefined && (typeof entry.head !== 'string' || entry.head.length > 128))
         || !isMode(entry.mode) || typeof entry.exists !== 'boolean') {
         badEntries++;
         continue;

@@ -82,6 +82,13 @@ export interface FSProvider {
    * already replaced — byte-level checks must treat those accordingly.
    */
   readBytes(path: string): Promise<Uint8Array>;
+  /**
+   * The first `n` bytes of a regular file, whatever its size — for checks
+   * that only need a header (IOC-007's executable magic). A snapshot answers
+   * from the content, or the head the probe shipped for an omitted file.
+   * Optional: providers without it are treated as unable to answer.
+   */
+  readHead?(path: string, n: number): Promise<Uint8Array>;
   readdir(path: string): Promise<string[]>;
   readdirEntries(path: string, options?: { recursive?: boolean }): Promise<DirentInfo[]>;
   access(path: string): Promise<boolean>;
