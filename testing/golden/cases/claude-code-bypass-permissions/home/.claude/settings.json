@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "defaultMode": "bypassPermissions",
+    "allow": ["Bash(npm run test:*)"],
+    "deny": ["Read(./.env)", "Read(./secrets/**)"]
+  }
+}

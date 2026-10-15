@@ -1,0 +1,11 @@
+{
+ "permissions": {
+  "allow": [
+   "Bash(python3 -c:*)",
+   "Bash(node -e *)",
+   "Bash(rm -rf /tmp/x)",
+   "Bash(git push --force)"
+  ],
+  "defaultMode": "bypassPermissions"
+ }
+}

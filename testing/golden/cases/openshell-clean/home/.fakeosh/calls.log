@@ -1,0 +1,12 @@
+sandbox list --all-workspaces -o json
+policy get sb1 --workspace default --full -o json
+policy get --global --full -o json
+sandbox list --all-workspaces -o json
+policy get sb1 --workspace default --full -o json
+policy get --global --full -o json
+sandbox list --all-workspaces -o json
+policy get sb1 --workspace default --full -o json
+policy get --global --full -o json
+sandbox list --all-workspaces -o json
+policy get sb1 --workspace default --full -o json
+policy get --global --full -o json

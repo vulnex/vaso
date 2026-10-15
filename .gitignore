@@ -28,3 +28,7 @@ vaso_full_scanning_testing/
 /bin/hosts.yaml
 /bin/snapshots/
 .gstack/
+# Golden-corpus fixtures are fake home directories: .env, .claude/,
+# node_modules/ and dist/ inside them are test data and must be tracked
+!testing/golden/**
+testing/golden/**/.DS_Store
