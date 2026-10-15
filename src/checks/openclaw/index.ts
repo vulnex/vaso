@@ -5,6 +5,7 @@ import { oc004 } from './oc-004-openclaw-home-redirect.js';
 import { oc005 } from './oc-005-profile-weaker-than-default.js';
 import { oc006 } from './oc-006-memory-file-permissions.js';
 import { oc007 } from './oc-007-etc-openclaw-writable.js';
+import { oc008 } from './oc-008-dangerous-gateway-overrides.js';
 
 export const openclawChecks: CheckModule[] = [
   oc001,
@@ -13,4 +14,5 @@ export const openclawChecks: CheckModule[] = [
   oc005,
   oc006,
   oc007,
+  oc008,
 ];

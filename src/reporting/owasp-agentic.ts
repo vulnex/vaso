@@ -159,6 +159,7 @@ export const CHECK_AGENTIC_MAP: Record<string, OwaspAgenticId[]> = {
   'OC-005': ['AAI001'],
   'OC-006': ['AAI006'],
   'OC-007': ['AAI001', 'AAI002'],
+  'OC-008': ['AAI001', 'AAI002', 'AAI005'],
   // NanoClaw (NC)
   'NC-001': ['AAI002', 'AAI005'],
   'NC-002': ['AAI001', 'AAI002'],

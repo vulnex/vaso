@@ -1,0 +1,65 @@
+{
+ "gateway": {
+  "mode": "local",
+  "bind": "loopback",
+  "auth": {
+   "mode": "token",
+   "token": "Zx8f3kq9Lm2Rt7Vb4Nc6Hd1Jw5Ys0Pa"
+  },
+  "nodes": {
+   "commands": {
+    "allow": [
+     "location.get"
+    ]
+   }
+  }
+ },
+ "session": {
+  "dmScope": "per-channel-peer"
+ },
+ "tools": {
+  "profile": "messaging",
+  "deny": [
+   "group:automation",
+   "group:runtime",
+   "group:fs",
+   "sessions_spawn",
+   "sessions_send"
+  ],
+  "fs": {
+   "workspaceOnly": true
+  },
+  "exec": {
+   "security": "deny",
+   "ask": "always"
+  },
+  "elevated": {
+   "enabled": true,
+   "allowFrom": {
+    "whatsapp": [
+     "+15550100200"
+    ]
+   }
+  }
+ },
+ "channels": {
+  "whatsapp": {
+   "dmPolicy": "pairing",
+   "groups": {
+    "*": {
+     "requireMention": true
+    }
+   }
+  }
+ },
+ "hooks": {
+  "enabled": true,
+  "path": "/hooks",
+  "token": "Hk7qV2mN9xR4tB8wL3pZ6cJ1fD5gS0aY",
+  "allowRequestSessionKey": false,
+  "defaultSessionKey": "hook:ingress",
+  "allowedAgentIds": [
+   "main"
+  ]
+ }
+}

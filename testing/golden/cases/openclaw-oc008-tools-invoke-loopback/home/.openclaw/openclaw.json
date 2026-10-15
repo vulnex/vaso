@@ -1,0 +1,48 @@
+{
+ "gateway": {
+  "mode": "local",
+  "bind": "loopback",
+  "auth": {
+   "mode": "token",
+   "token": "Zx8f3kq9Lm2Rt7Vb4Nc6Hd1Jw5Ys0Pa"
+  },
+  "tools": {
+   "allow": [
+    "gateway"
+   ]
+  }
+ },
+ "session": {
+  "dmScope": "per-channel-peer"
+ },
+ "tools": {
+  "profile": "messaging",
+  "deny": [
+   "group:automation",
+   "group:runtime",
+   "group:fs",
+   "sessions_spawn",
+   "sessions_send"
+  ],
+  "fs": {
+   "workspaceOnly": true
+  },
+  "exec": {
+   "security": "deny",
+   "ask": "always"
+  },
+  "elevated": {
+   "enabled": false
+  }
+ },
+ "channels": {
+  "whatsapp": {
+   "dmPolicy": "pairing",
+   "groups": {
+    "*": {
+     "requireMention": true
+    }
+   }
+  }
+ }
+}

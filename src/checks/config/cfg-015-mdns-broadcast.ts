@@ -1,6 +1,7 @@
 import { defineCheck } from '../../core/check-builder.js';
 import { CODING_AGENTS } from '../../core/types.js';
 import { getNestedValue } from '../../core/utils.js';
+import { openclawGatewayExposed } from '../openclaw/oc-008-dangerous-gateway-overrides.js';
 
 export const cfg015 = defineCheck({
   id: 'CFG-015',
@@ -28,10 +29,16 @@ export const cfg015 = defineCheck({
           ? mode.toLowerCase() === 'full'
           : mdnsObj.broadcast ?? mdnsObj.enabled ?? true;
         if (broadcast === true || broadcast === 'full') {
+          // OpenClaw "full" adds cliPath/sshPort to the TXT records; with the
+          // gateway reachable beyond loopback that maps a target for the LAN
+          const exposedOpenclaw = mdns === openclawMdns && ctx.installation.agent === 'openclaw' && openclawGatewayExposed(config.data);
           return h.result({
             passed: false,
-            message: 'mDNS is broadcasting agent information on the local network',
-            evidence: [{ file: config.filePath, detail: 'mDNS/Bonjour broadcasting is enabled' }],
+            ...(exposedOpenclaw ? { severity: 'warning' as const } : {}),
+            message: exposedOpenclaw
+              ? 'mDNS full mode publishes the CLI path and SSH port while the gateway is reachable beyond loopback'
+              : 'mDNS is broadcasting agent information on the local network',
+            evidence: [{ file: config.filePath, detail: mdns === openclawMdns ? 'discovery.mdns.mode = "full" (cliPath, sshPort in TXT records)' : 'mDNS/Bonjour broadcasting is enabled' }],
           });
         }
       }

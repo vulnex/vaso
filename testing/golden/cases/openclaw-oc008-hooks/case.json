@@ -1,0 +1,11 @@
+{
+  "agent": "openclaw",
+  "source": "OpenClaw 2026.9.4 `openclaw security audit` rule hooks.path_root + hooks.request_session_key_enabled (audit source on the test box; config validated with `openclaw config validate`); realworld fixture openclaw-hooks_path_root / hooks_session_key",
+  "fail": {
+    "OC-008": "warning"
+  },
+  "modes": {
+    ".openclaw/openclaw.json": "600",
+    ".openclaw": "700"
+  }
+}

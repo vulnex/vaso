@@ -421,7 +421,7 @@ Penalties:
 
 ## Security Checks
 
-VASO runs **347 checks across 19 categories**.
+VASO runs **348 checks across 19 categories**.
 
 | Category | IDs | Count | Scope |
 |----------|-----|-------|-------|
@@ -433,7 +433,7 @@ VASO runs **347 checks across 19 categories**.
 | Policy | POL-001–005 | 5 | DM policy, tool policy, sandbox compliance |
 | MCP Server | MCP-001–035 | 35 | Transport security, credentials, tool injection, toxic flows, rug pull, OAuth 2.1, stdio shell-c, world-writable command paths, streamable-HTTP origin pinning, tool-description poisoning, cross-server tool-name collision, slash-command overlap, remote-server-without-auth, filesystem sensitive-path scope, vulnerable/rolled-back version, config drift, untrusted installer source, env-dump tool, long-lived token, prompt-injection directives in tool output, obfuscated/encoded server source (with what it hides), lookalike/typosquatted server names, credentials hardcoded in server source, servers listening on all interfaces without authentication, disabled Host/Origin (DNS-rebinding) protection; known-vulnerable MCP SDK and library versions a server ships with (from its lockfile, installed copy or manifest), deprecated packages, opt-in OSV.dev lookup (`--audit-deps`); tools that read, write or list any path the caller names; fetched pages and files returned unfiltered as tool results (higher when the caller picks the URL or anyone can publish on the host); JavaScript and Python server source; remotes behind `mcp-remote`/`supergateway`; opt-in npm package source resolution (`--resolve-packages`); direct source audit (`--source`); OWASP MCP Top 10 mapping |
 | Advisory | ADV-001–005 | 5 | Vulnerability/CVE detection with version awareness |
-| OpenClaw | OC-* | 6 | Sub-agent config downgrade, legacy bot dirs, `OPENCLAW_HOME`/`OPENCLAW_STATE_DIR`/`OPENCLAW_CONFIG_PATH` redirect, profile downgrade, memory file perms, `/etc/openclaw` writable |
+| OpenClaw | OC-* | 7 | Sub-agent config downgrade, legacy bot dirs, `OPENCLAW_HOME`/`OPENCLAW_STATE_DIR`/`OPENCLAW_CONFIG_PATH` redirect, profile downgrade, memory file perms, `/etc/openclaw` writable, dangerous gateway/tool/hook/browser overrides (OC-008) |
 | NanoClaw | NC-001–005 | 5 | Overbroad mount allowlist (`allowedRoots`), host config/credential exposure, checkout/state exposure, webhook listener on all interfaces, skills dirs writable |
 | PicoClaw | PCL-001–007 | 7 | Workspace restriction off, exec deny list disabled or bypassed, channels open to any sender (empty `allow_from` allows everyone), exec reachable from chat channels, weakly guarded `pico` WebSocket, public web launcher without a dashboard password, tool path allowances reaching credentials |
 | IronClaw | IC-001–014 | 14 | 1.x (Reborn) and 0.x: WebUI/listener bind, cleartext LLM endpoints, WebUI token and master-key exposure, `local-dev-yolo` host access, approval policy, sandbox (0.x), permissive WebUI CORS, world-readable state DB |

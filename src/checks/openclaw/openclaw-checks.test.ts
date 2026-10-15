@@ -67,8 +67,8 @@ function makeCtx(opts: {
 }
 
 describe('OpenClaw checks', () => {
-  it('exports 6 checks', () => {
-    expect(openclawChecks).toHaveLength(6);
+  it('exports 7 checks', () => {
+    expect(openclawChecks).toHaveLength(7);
   });
 
   it('all checks have openclaw category and supportedAgents=["openclaw"]', () => {

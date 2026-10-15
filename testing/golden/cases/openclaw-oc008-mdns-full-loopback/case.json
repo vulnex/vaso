@@ -1,0 +1,14 @@
+{
+  "agent": "openclaw",
+  "source": "OpenClaw 2026.9.4 `openclaw security audit` rule discovery.mdns_full_mode (warn on loopback) (audit source on the test box; config validated with `openclaw config validate`); realworld fixture openclaw-mdns_full",
+  "fail": {
+    "CFG-015": "info"
+  },
+  "pass": [
+    "OC-008"
+  ],
+  "modes": {
+    ".openclaw/openclaw.json": "600",
+    ".openclaw": "700"
+  }
+}

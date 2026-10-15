@@ -1,0 +1,11 @@
+{
+  "agent": "openclaw",
+  "source": "OpenClaw 2026.9.4 `openclaw security audit` rule config.insecure_or_dangerous_flags browser.ssrfPolicy.dangerouslyAllowPrivateNetwork (audit source on the test box; config validated with `openclaw config validate`); realworld fixture openclaw-private_network_browser",
+  "fail": {
+    "OC-008": "warning"
+  },
+  "modes": {
+    ".openclaw/openclaw.json": "600",
+    ".openclaw": "700"
+  }
+}

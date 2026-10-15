@@ -1,0 +1,11 @@
+{
+  "agent": "openclaw",
+  "source": "OpenClaw 2026.9.4 `openclaw security audit` rule gateway.nodes.allow_commands_dangerous (warn on loopback) (audit source on the test box; config validated with `openclaw config validate`); realworld fixture openclaw-nodes_dangerous",
+  "fail": {
+    "OC-008": "info"
+  },
+  "modes": {
+    ".openclaw/openclaw.json": "600",
+    ".openclaw": "700"
+  }
+}

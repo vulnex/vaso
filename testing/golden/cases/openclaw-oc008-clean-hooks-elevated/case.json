@@ -1,0 +1,12 @@
+{
+  "agent": "openclaw",
+  "source": "OpenClaw 2026.9.4 `openclaw security audit` rule hardened hooks + narrow elevated allowlist per docs.openclaw.ai security guidance (audit source on the test box; config validated with `openclaw config validate`); realworld fixture openclaw-00base",
+  "clean": true,
+  "pass": [
+    "OC-008"
+  ],
+  "modes": {
+    ".openclaw/openclaw.json": "600",
+    ".openclaw": "700"
+  }
+}

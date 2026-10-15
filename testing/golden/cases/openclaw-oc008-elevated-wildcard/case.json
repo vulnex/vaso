@@ -1,0 +1,11 @@
+{
+  "agent": "openclaw",
+  "source": "OpenClaw 2026.9.4 `openclaw security audit` rule tools.elevated.allowFrom.<provider>.wildcard (audit source on the test box; config validated with `openclaw config validate`); realworld fixture openclaw-elevated_wildcard",
+  "fail": {
+    "OC-008": "critical"
+  },
+  "modes": {
+    ".openclaw/openclaw.json": "600",
+    ".openclaw": "700"
+  }
+}
