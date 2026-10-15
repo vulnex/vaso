@@ -45,18 +45,23 @@ export const skl011 = defineCheck({
     for (const { dir: skillDir } of skills) {
       const pkgPath = join(skillDir, 'package.json');
 
-      let pkgData: Record<string, unknown>;
+      let pkgData: unknown;
       try {
         const raw = await readCappedFile(ctx.fs, pkgPath);
-        pkgData = JSON.parse(raw) as Record<string, unknown>;
+        pkgData = JSON.parse(raw);
       } catch {
         continue; // No package.json in this skill
       }
+      // `null`, an array or a string parses but declares nothing; reading
+      // fields off it threw and ended the check for every skill after it
+      if (!isPlainObject(pkgData)) continue;
 
-      const allDeps: Record<string, string> = {
-        ...(pkgData.dependencies as Record<string, string> ?? {}),
-        ...(pkgData.devDependencies as Record<string, string> ?? {}),
-      };
+      const allDeps: Record<string, string> = {};
+      for (const field of ['dependencies', 'devDependencies']) {
+        const deps = pkgData[field];
+        if (!isPlainObject(deps)) continue;
+        for (const [name, range] of Object.entries(deps)) allDeps[name] = typeof range === 'string' ? range : '';
+      }
 
       const depNames = Object.keys(allDeps);
       if (depNames.length === 0) continue;
@@ -111,3 +116,7 @@ export const skl011 = defineCheck({
     });
   },
 });
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}

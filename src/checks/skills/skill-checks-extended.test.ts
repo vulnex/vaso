@@ -748,6 +748,16 @@ describe('Skill coverage (deep test 2026-10-15)', () => {
     expect((await skl007.run(ctx)).passed).toBe(false);
   });
 
+  it('SKL-011 skips a package.json that is null or malformed and still audits the other skills', async () => {
+    await put('skills/a-null/package.json', 'null');
+    await put('skills/b-array/package.json', '[]');
+    await put('skills/c-bad-deps/package.json', JSON.stringify({ dependencies: 'flatmap-stream' }));
+    await put('skills/d-real/package.json', JSON.stringify({ name: 'd', dependencies: { 'flatmap-stream': '0.1.1' } }));
+    const result = await skl011.run(makeContext(join(tempDir, 'skills')));
+    expect(result.errored).toBeFalsy();
+    expect(result.evidence?.some(e => e.detail?.includes('flatmap-stream'))).toBe(true);
+  });
+
   it('SKL-011 audits symlinked skills, extra dirs and a single-skill audit root', async () => {
     const pkg = JSON.stringify({ name: 'ext', dependencies: { 'flatmap-stream': '0.1.1' } });
     await put('dev/ext-skill/package.json', pkg);
