@@ -28,9 +28,14 @@ import { openclawGatewayExposed } from '../openclaw/oc-008-dangerous-gateway-ove
  * host. Unknown exposure counts as reachable.
  */
 function loopbackOnly(ctx: ScanContext): boolean {
-  if (ctx.installation.agent === 'openclaw') return !ctx.configs.some(c => openclawGatewayExposed(c.data));
   const host = ctx.installation.gateway?.host;
-  return typeof host === 'string' && /^(?:127(?:\.\d{1,3}){3}|::1|\[::1\]|localhost)$/i.test(host.trim());
+  const loopbackHost = typeof host === 'string' && /^(?:127(?:\.\d{1,3}){3}|::1|\[::1\]|localhost)$/i.test(host.trim());
+  if (ctx.installation.agent === 'openclaw') {
+    // Both must say local: OpenClaw's bind rule, and any host the adapter
+    // detected (an older config's `gateway.host: 0.0.0.0` is not loopback)
+    return !ctx.configs.some(c => openclawGatewayExposed(c.data)) && (host === undefined || loopbackHost);
+  }
+  return loopbackHost;
 }
 
 export const cfg009 = defineCheck({

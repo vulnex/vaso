@@ -110,6 +110,12 @@ describe('CFG-009 severity follows how far the gateway can be reached', () => {
     expect((await oc({ bind: 'lan' })).severity).toBe('critical');
     expect((await oc({ bind: 'loopback', tailscale: { mode: 'funnel' } })).severity).toBe('critical');
   });
+  it('stays critical when the detected gateway host is not loopback (older `gateway.host` configs)', async () => {
+    const r = await cfg009.run(ctx('openclaw',
+      [json('/h/.openclaw/openclaw.json', { gateway: { host: '0.0.0.0', auth: { mode: 'token', token: 'changeme' } } })],
+      { gateway: { host: '0.0.0.0', port: 8080 } }));
+    expect(r.severity).toBe('critical');
+  });
   it('uses the detected gateway host for other agents; unknown exposure stays critical', async () => {
     const cfg = json('/h/.x/config.json', { auth: { token: 'changeme' } });
     expect((await cfg009.run(ctx('hermes', [cfg], { gateway: { host: '127.0.0.1', port: 8642 } }))).severity).toBe('warning');
