@@ -72,16 +72,6 @@ export class RemediationEngine {
         }
 
         try {
-          // Back up the evidence files and every config file of the
-          // installation: config fixes write to the first config, which is
-          // not necessarily one the evidence names.
-          const toBackUp = new Set<string>();
-          for (const e of finding.evidence ?? []) if (e.file) toBackUp.add(e.file);
-          for (const c of agent.installation.configFiles ?? []) toBackUp.add(c.filePath);
-          for (const file of toBackUp) {
-            await this.backupFile(file);
-          }
-
           // Rebuild the full ScanContext the engine produced at scan time —
           // credentialPaths and skillFiles are adapter-derived and aren't
           // persisted on AgentScanResult, so without re-deriving them here
@@ -94,6 +84,21 @@ export class RemediationEngine {
           const skillFiles = skillsDirs.length > 0
             ? (await Promise.all(skillsDirs.map(d => getSkillFiles(d, fs)))).flat()
             : undefined;
+
+          // Back up the evidence files, every config file of the installation
+          // (config fixes write to the first config, not necessarily one the
+          // evidence names) and the credential paths (permission fixes chmod
+          // all of them, including files another check reported) — whatever
+          // a fix may touch, so the rollback is exact. Missing paths are skipped.
+          const toBackUp = new Set<string>();
+          for (const e of finding.evidence ?? []) if (e.file) toBackUp.add(e.file);
+          for (const c of agent.installation.configFiles ?? []) toBackUp.add(c.filePath);
+          for (const file of toBackUp) {
+            await this.backupFile(file);
+          }
+          for (const file of credentialPaths ?? []) {
+            await this.backupFile(file).catch(() => undefined);
+          }
 
           const fixResult = await check.fix({
             installation: agent.installation,

@@ -1,6 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { envNote } from '../../adapters/env-overrides.js';
+import { envNote, envOverrideFor } from '../../adapters/env-overrides.js';
 import { fixFirstConfig } from '../../remediation/config-writer.js';
 import { enabledChannels, execConfig, isChatChannel, picoMainConfigs } from './shared.js';
 
@@ -14,11 +14,14 @@ export const pcl004 = defineCheck({
 
   async run(ctx, h) {
     const evidence: Evidence[] = [];
+    // A value set by an env var survives any config edit: no fix to offer then
+    let envSet = false;
     for (const config of picoMainConfigs(ctx.configs)) {
       const { enabled, cfg } = execConfig(config.data);
       if (!enabled || cfg.allow_remote === false) continue;
       const chats = enabledChannels(config.data).filter(isChatChannel);
       if (chats.length === 0) continue;
+      envSet ||= envOverrideFor(config.data, 'tools.exec.allow_remote') !== undefined;
       evidence.push({
         file: config.filePath,
         snippet: `tools.exec.allow_remote: ${cfg.allow_remote === true ? 'true' : '(default true)'}${envNote(config.data, 'tools.exec.allow_remote')}`,
@@ -28,8 +31,10 @@ export const pcl004 = defineCheck({
     return h.fromEvidence(evidence, {
       passed: 'PicoClaw exec is limited to internal channels',
       failed: () => 'PicoClaw chat channels can run shell commands',
-      fixable: true,
-      fixDescription: 'Set tools.exec.allow_remote to false (exec stays available to the local CLI and launcher)',
+      fixable: !envSet,
+      fixDescription: envSet
+        ? 'Unset PICOCLAW_TOOLS_EXEC_ALLOW_REMOTE (it overrides the config file), then set tools.exec.allow_remote to false'
+        : 'Set tools.exec.allow_remote to false (exec stays available to the local CLI and launcher)',
     });
   },
 

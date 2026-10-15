@@ -1,6 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { envNote } from '../../adapters/env-overrides.js';
+import { envNote, envOverrideFor } from '../../adapters/env-overrides.js';
 import { fixFirstConfig } from '../../remediation/config-writer.js';
 import { asRecord, picoMainConfigs } from './shared.js';
 
@@ -15,11 +15,14 @@ export const pcl001 = defineCheck({
   async run(ctx, h) {
     const evidence: Evidence[] = [];
     let restrictOff = false;
+    // A value set by an env var survives any config edit: no fix to offer then
+    let envSet = false;
     for (const config of picoMainConfigs(ctx.configs)) {
       const defaults = asRecord(asRecord(config.data.agents)?.defaults);
       if (!defaults) continue;
       if (defaults.restrict_to_workspace === false) {
         restrictOff = true;
+        envSet ||= envOverrideFor(config.data, 'agents.defaults.restrict_to_workspace') !== undefined;
         evidence.push({
           file: config.filePath,
           snippet: `agents.defaults.restrict_to_workspace: false${envNote(config.data, 'agents.defaults.restrict_to_workspace')}`,
@@ -38,8 +41,10 @@ export const pcl001 = defineCheck({
       failed: () => restrictOff
         ? 'PicoClaw tools can reach files outside the agent workspace'
         : 'PicoClaw file reads can leave the agent workspace',
-      fixable: restrictOff,
-      fixDescription: 'Set agents.defaults.restrict_to_workspace to true',
+      fixable: restrictOff && !envSet,
+      fixDescription: envSet
+        ? 'Unset PICOCLAW_AGENTS_DEFAULTS_RESTRICT_TO_WORKSPACE (it overrides the config file), then set agents.defaults.restrict_to_workspace to true'
+        : 'Set agents.defaults.restrict_to_workspace to true',
     });
   },
 

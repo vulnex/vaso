@@ -51,6 +51,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **`vaso fix` backs up every credential path before a fix runs**, so `--rollback` restores modes exactly when a permission fix tightened files another check reported. PicoClaw checks offer no config fix when the insecure value comes from a `PICOCLAW_*` env var (the variable would override it).
 - **Config fixes no longer report "applied" for a value already set** — a file shared by several installs (OpenClaw's openclaw.json and its sub-agents) is checked on disk before writing, so one fix isn't counted twice.
 - IOC-001/002 read Markdown only inside skill trees — elsewhere in an install dir it is the agent's own data (Claude Code project memory), which quoted whatever the user discussed.
 - Remote scans report an unreadable config directory like local ones (probe records permission-denied files; probe ≥ 1.2.2).

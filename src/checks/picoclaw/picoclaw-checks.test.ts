@@ -214,6 +214,9 @@ describe('env overrides in evidence', () => {
     const r = await byId('PCL-002').run(ctx([cfg(data)]));
     expect(r.passed).toBe(false);
     expect(r.evidence![0].snippet).toContain('$PICOCLAW_TOOLS_EXEC_ENABLE_DENY_PATTERNS');
+    // a config edit can't override the env var: no fix offered
+    expect(r.fixable).toBe(false);
+    expect(r.fixDescription).toContain('Unset PICOCLAW_TOOLS_EXEC_ENABLE_DENY_PATTERNS');
   });
 });
 

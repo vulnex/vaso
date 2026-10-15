@@ -1,6 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { envNote } from '../../adapters/env-overrides.js';
+import { envNote, envOverrideFor } from '../../adapters/env-overrides.js';
 import { fixFirstConfig } from '../../remediation/config-writer.js';
 import { compileGoRegex, execConfig, picoMainConfigs, stringList } from './shared.js';
 
@@ -23,11 +23,14 @@ export const pcl002 = defineCheck({
   async run(ctx, h) {
     const evidence: Evidence[] = [];
     let denyOff = false;
+    // A value set by an env var survives any config edit: no fix to offer then
+    let envSet = false;
     for (const config of picoMainConfigs(ctx.configs)) {
       const { enabled, cfg } = execConfig(config.data);
       if (!enabled) continue;
       if (cfg.enable_deny_patterns === false) {
         denyOff = true;
+        envSet ||= envOverrideFor(config.data, 'tools.exec.enable_deny_patterns') !== undefined;
         evidence.push({
           file: config.filePath,
           snippet: `tools.exec.enable_deny_patterns: false${envNote(config.data, 'tools.exec.enable_deny_patterns')}`,
@@ -47,8 +50,10 @@ export const pcl002 = defineCheck({
     return h.fromEvidence(evidence, {
       passed: 'PicoClaw exec safety guard is active',
       failed: () => 'PicoClaw exec tool runs commands without its dangerous-command guard',
-      fixable: denyOff,
-      fixDescription: 'Set tools.exec.enable_deny_patterns to true',
+      fixable: denyOff && !envSet,
+      fixDescription: envSet
+        ? 'Unset PICOCLAW_TOOLS_EXEC_ENABLE_DENY_PATTERNS (it overrides the config file), then set tools.exec.enable_deny_patterns to true'
+        : 'Set tools.exec.enable_deny_patterns to true',
     });
   },
 

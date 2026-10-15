@@ -307,7 +307,7 @@ export async function restrictFilesToOwner(checkId: string, paths: Iterable<stri
   return {
     checkId,
     applied: fixed > 0,
-    message: fixed > 0 ? `Removed group/other access from ${fixed} file(s)` : 'No files to fix',
+    message: fixed > 0 ? `Removed group/other access from ${fixed} file(s)` : 'Files are already owner-only',
   };
 }
 
