@@ -55,6 +55,9 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - DEV-003 reports `${VAR}`/`$VAR` in a Devin MCP config as info: Devin expands only `${env:VAR}` and `${file:/path}`, so the server receives the text literally.
 - **Rollback restores everything a fix changed.** Each path is backed up just before a fix writes or chmods it, including directories the finding didn't name (NC-002 left `~/.config/nanoclaw` at 700 after rollback) and files the owner can't read (mode only).
 - **`vaso fix` offers a fix only for live exposure.** A finding whose every piece of evidence is mitigated (behind a private directory, test code, an untrusted project) is info and not fixable, in every check; CDX-003, OPC-001, CD-002, CFG-003 and POL-003 used to offer a chmod for files nobody else could reach.
+- **Skill exfiltration analysis sees inline environment values**: `json=dict(os.environ)`, `data=os.environ["KEY"]`, `body: JSON.stringify(process.env)` and `axios.post(url, process.env)` are reported like tracked variables. The whole environment counts anywhere in a request, a single value only in its body.
+- **Skill checks report with evidence.** SKL-003 treats a program named by a string constant as a direct run; SKL-002 no longer flags 0x hex digests or `atob()` with nothing encoded to decode; SKL-009 reports wallet addresses only beside clipboard swapping, wallet-file or seed-phrase access, or transfers to a hardcoded address (token lists are one info entry); SKL-006 ignores placeholder keys in `authorized_keys` setup docs.
+- **SKL-004 tiers pipe-to-shell lines in skill documentation**: critical for plain http, IP, URL-shortener and paste-site sources; warning for an https installer from a named host; info for well-known installers and prose. Executable scripts stay critical.
 
 ## [1.3.0] - 2026-10-15
 
