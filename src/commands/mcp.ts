@@ -10,7 +10,7 @@ import { resolveServerSources, resolveSourcePaths } from '../mcp/source-resolver
 import { auditDependencies } from '../mcp/osv-audit.js';
 import type { ScanOptions } from '../core/types.js';
 import { logError } from '../core/debug.js';
-import { toReportJson } from '../reporting/serialize.js';
+import { maskCredentialsDeep, toReportJson } from '../reporting/serialize.js';
 import { EXIT_FINDINGS, EXIT_INCOMPLETE, EXIT_USAGE, parseFailOn, shouldFailScan } from '../core/exit-criteria.js';
 import type { MCPDiscoveryResult } from '../mcp/types.js';
 
@@ -156,7 +156,7 @@ export async function runMCPList(options: { format: string; path?: string[] }): 
     console.log(chalk.bold(`\nMCP Servers (${result.totalServers} total)\n`));
 
     // Server names, commands and URLs come from scanned config files
-    for (const config of escapeControlCharsDeep(result.configs, { lineBreaks: true })) {
+    for (const config of maskCredentialsDeep(escapeControlCharsDeep(result.configs, { lineBreaks: true }))) {
       console.log(chalk.cyan(`  ${config.source}`));
       console.log(chalk.dim(`  ${config.filePath}`));
 

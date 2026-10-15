@@ -27,3 +27,29 @@ describe('toReportJson', () => {
     expect(JSON.parse(toReportJson(value))).toEqual(value);
   });
 });
+
+describe('maskCredentialsInText', () => {
+  it('masks URL passwords, token userinfo, secret query values and --token args, keeping the rest', async () => {
+    const { maskCredentialsInText } = await import('./serialize.js');
+    expect(maskCredentialsInText('URL: https://alice:HUNTER2PASSWORD@evil.example.com/sse?access_token=SECRETQ&apikey=QWERTY&page=2'))
+      .toBe('URL: https://alice:***@evil.example.com/sse?access_token=***&apikey=***&page=2');
+    expect(maskCredentialsInText('https://ghp_abcdefghijklmnopqrstuvwx@github.com/o/r')).toBe('https://***@github.com/o/r');
+    expect(maskCredentialsInText('Args: -y some-pkg --token=ARGTOKEN --api-key KEY2 --port 80'))
+      .toBe('Args: -y some-pkg --token=*** --api-key *** --port 80');
+    expect(maskCredentialsInText('git@github.com:o/r.git and http://127.0.0.1:8080/mcp')).toBe('git@github.com:o/r.git and http://127.0.0.1:8080/mcp');
+  });
+
+  it('is applied by every reporter', async () => {
+    const { getReporter } = await import('./index.js');
+    const scan = {
+      timestamp: 't', agents: [{ agent: 'mcp', installation: { agent: 'mcp', installDir: '/x', configFiles: [] }, score: 0, grade: 'F',
+        results: [{ id: 'MCP-002', name: 'n', category: 'mcp', severity: 'warning', passed: false, message: 'm',
+          evidence: [{ file: '/x/mcp.json', detail: 'URL: http://bob:PROJPASS999@10.0.0.5/mcp?key=PROJQUERYKEY000' }] }] }],
+      totalScore: 0, totalGrade: 'F', fleetAverage: 0, summary: { critical: 0, warning: 1, info: 0, passed: 0, total: 1 },
+    } as never;
+    for (const f of ['terminal', 'json', 'csv', 'junit', 'markdown', 'html', 'sarif']) {
+      const out = getReporter(f).render(scan);
+      expect(out, f).not.toMatch(/PROJPASS999|PROJQUERYKEY000/);
+    }
+  });
+});

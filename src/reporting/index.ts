@@ -1,4 +1,5 @@
 import type { Reporter } from './reporter.js';
+import { maskCredentialsDeep } from './serialize.js';
 import { TerminalReporter } from './terminal.js';
 import { JsonReporter } from './json.js';
 import { SarifReporter } from './sarif.js';
@@ -22,7 +23,10 @@ export function getReporter(format: string): Reporter {
   if (!factory) {
     throw new Error(`Unknown report format: "${format}". Available: ${Object.keys(reporters).join(', ')}`);
   }
-  return factory();
+  const reporter = factory();
+  // Every format, plugin reporters included, renders with credentials in
+  // quoted URLs and arguments masked
+  return { ...reporter, format: reporter.format, render: (result) => reporter.render.call(reporter, maskCredentialsDeep(result)) };
 }
 
 /** Whether a report format is available (built-in or registered by a user plugin). */
