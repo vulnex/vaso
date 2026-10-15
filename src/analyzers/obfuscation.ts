@@ -128,16 +128,19 @@ function reveal(literals: string[]): RevealedStrings {
 /**
  * Long base64-alphabet runs that are ordinary data, not hidden strings: data
  * URIs and embedded images (PNG/GIF/JPEG/WebP/SVG base64 headers), character
- * alphabets for ID generators, and hex digests / client IDs.
+ * alphabets for ID generators, integrity digests, and hex digests / client IDs.
  */
 const BENIGN_LONG_RUN = [
   /data:[\w.+/-]+;base64,/,
+  // Subresource-integrity / npm lockfile `integrity` digests
+  /\bsha(?:256|384|512)-[A-Za-z0-9+/]{40,}={0,2}/,
   /["'`](?:iVBORw0KGgo|R0lGOD|\/9j\/|UklGR|PHN2Zy|PD94bWwg)/,
   /ABCDEFGHIJKLMNOP|abcdefghijklmnop|0123456789/,
 ];
 const LONG_RUN = /[A-Za-z0-9+/]{60,}={0,2}/g;
 
-function isBenignEncodedData(line: string): boolean {
+/** A line whose long base64-alphabet runs are all ordinary data (see BENIGN_LONG_RUN). */
+export function isBenignEncodedData(line: string): boolean {
   if (BENIGN_LONG_RUN.some((re) => re.test(line))) return true;
   const runs = line.match(LONG_RUN) ?? [];
   // Hex digests / client IDs, and file paths (`node_modules/ajv/dist/…`):

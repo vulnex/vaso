@@ -1,16 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-
-const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1']);
-
-function isLoopbackHttp(url: string): boolean {
-  try {
-    return LOOPBACK_HOSTS.has(new URL(url).hostname);
-  } catch {
-    // Unparseable — fall back to a strict prefix check.
-    return /^http:\/\/(?:localhost|127\.0\.0\.1)(?:[:/]|$)/.test(url);
-  }
-}
+import { isPlaintextRemoteUrl } from './plaintext-url.js';
 
 export const ws005 = defineCheck({
   id: 'WS-005',
@@ -35,8 +25,7 @@ export const ws005 = defineCheck({
         const key = typeof entry.serverUrl === 'string' ? 'serverUrl' : 'url';
         const serverUrl = entry[key];
         if (typeof serverUrl !== 'string') continue;
-        if (!serverUrl.startsWith('http://')) continue;
-        if (isLoopbackHttp(serverUrl)) continue;
+        if (!isPlaintextRemoteUrl(serverUrl)) continue;
 
         evidence.push({
           file: config.filePath,
@@ -49,7 +38,7 @@ export const ws005 = defineCheck({
     return h.fromEvidence(evidence, {
       passed: 'All Windsurf remote MCP server URLs use HTTPS or loopback',
       failed: (n) => `Found ${n} Windsurf MCP server(s) using plaintext http:// URLs`,
-      fixDescription: 'Switch serverUrl to https:// (plain http is acceptable only for localhost/127.0.0.1)',
+      fixDescription: 'Switch serverUrl to https:// (plain http is acceptable only for localhost, 127.0.0.0/8 or [::1])',
     });
   },
 });

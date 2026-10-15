@@ -3,6 +3,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import type { MCPServerSource } from './types.js';
+import { structuredToolDefinitions } from './tool-definitions.js';
 
 export interface MCPToolDefinition {
   name: string;
@@ -156,8 +157,9 @@ export async function diffToolBaseline(
 }
 
 /**
- * Extract MCP tool definitions from server source code.
- * Scans for common MCP SDK registration patterns.
+ * Extract MCP tool definitions from server source code (JavaScript/TypeScript
+ * or Python): structured extraction (see tool-definitions.ts), then regex
+ * patterns for common MCP SDK registration shapes in source that doesn't parse.
  */
 export function extractToolDefinitions(sourceCode: string): MCPToolDefinition[] {
   const byName = new Map<string, MCPToolDefinition>();
@@ -174,6 +176,11 @@ export function extractToolDefinitions(sourceCode: string): MCPToolDefinition[] 
     if (description && !existing.description) existing.description = description;
     if (schema && !existing.schema) existing.schema = schema;
   };
+
+  // Structured extraction first (AST for JS, decorators/docstrings for
+  // Python): its descriptions are complete and cooked, so they win over the
+  // raw quoted-string captures of the patterns below.
+  for (const tool of structuredToolDefinitions(sourceCode)) record(tool.name, tool.description);
 
   const runPattern = (re: RegExp, hasSchema = false): void => {
     let match: RegExpExecArray | null;

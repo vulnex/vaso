@@ -70,7 +70,8 @@ export const aba001 = defineCheck({
       passed: 'Abacus.AI sessions start in a supervised permission mode',
       failed: (n) => `Found ${n} unsafe Abacus.AI permission mode setting(s)`,
       severity: live.length > 0 ? undefined : (warning.some(e => !e.mitigated) ? 'warning' : undefined),
-      fixable: unsafeModeConfigs(ctx.configs).length > 0,
+      // Untrusted project files are inactive — nothing to fix until trusted
+      fixable: [...critical, ...warning].some(e => !e.mitigated && e.file !== '<process env>'),
       fixDescription: 'Set permissionMode to "supervise" (or "accept-edits") and unset ABACUS_PERMISSION_MODE; pass --permission-mode per session when needed',
     });
   },

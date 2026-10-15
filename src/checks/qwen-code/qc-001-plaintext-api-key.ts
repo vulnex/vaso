@@ -13,6 +13,8 @@ const KNOWN_KEY_PREFIXES = [
 const HIGH_ENTROPY_THRESHOLD = 4.5;
 const MIN_LENGTH = 20;
 const ENV_REF_PATTERN = /^\$\{?[A-Z_][A-Z0-9_]*\}?$/;
+// Authorization-style header values carry the secret after the scheme
+const AUTH_SCHEME = /^(?:bearer|basic|token)\s+/i;
 
 function isSecretValue(value: string): boolean {
   if (value.length < MIN_LENGTH) return false;
@@ -22,8 +24,9 @@ function isSecretValue(value: string): boolean {
 }
 
 function walkEnv(env: Record<string, unknown>, file: string, prefix: string, evidence: Evidence[]): void {
-  for (const [key, value] of Object.entries(env)) {
-    if (typeof value !== 'string') continue;
+  for (const [key, raw] of Object.entries(env)) {
+    if (typeof raw !== 'string') continue;
+    const value = raw.replace(AUTH_SCHEME, '');
     if (!isSecretValue(value)) continue;
     evidence.push({
       file,
@@ -38,7 +41,7 @@ export const qc001 = defineCheck({
   name: 'Plaintext API Key in Qwen Settings',
   category: 'coding-agent',
   severity: 'critical',
-  description: 'Detect API keys stored in plaintext in ~/.qwen/settings.json under env or modelProviders',
+  description: 'Detect API keys stored in plaintext in ~/.qwen/settings.json under env, modelProviders, security.auth.apiKey or MCP server env/headers',
   supportedAgents: ['qwen-code'],
 
   async run(ctx, h) {
@@ -46,6 +49,17 @@ export const qc001 = defineCheck({
     for (const config of ctx.configs) {
       const env = config.data.env as Record<string, unknown> | undefined;
       if (env && typeof env === 'object') walkEnv(env, config.filePath, 'env.', evidence);
+
+      // Deprecated but still honoured (settings.md: "Migrate to modelProviders
+      // with envKey instead")
+      const auth = (config.data.security as Record<string, unknown> | undefined)?.auth as Record<string, unknown> | undefined;
+      if (auth && typeof auth === 'object' && typeof auth.apiKey === 'string' && isSecretValue(auth.apiKey)) {
+        evidence.push({
+          file: config.filePath,
+          snippet: `security.auth.apiKey=${auth.apiKey.slice(0, 8)}…`,
+          detail: 'Inline API key in the deprecated security.auth.apiKey setting — use a modelProviders entry with envKey instead',
+        });
+      }
 
       const providers = config.data.modelProviders as Record<string, unknown> | undefined;
       if (providers && typeof providers === 'object') {
@@ -71,9 +85,13 @@ export const qc001 = defineCheck({
       if (mcpServers && typeof mcpServers === 'object') {
         for (const [name, server] of Object.entries(mcpServers)) {
           if (!server || typeof server !== 'object') continue;
-          const serverEnv = (server as Record<string, unknown>).env as Record<string, unknown> | undefined;
-          if (serverEnv && typeof serverEnv === 'object') {
-            walkEnv(serverEnv, config.filePath, `mcpServers.${name}.env.`, evidence);
+          // env and headers (settings.md: "A map of HTTP headers to send with
+          // requests to url or httpUrl") both hold literal values
+          for (const field of ['env', 'headers'] as const) {
+            const values = (server as Record<string, unknown>)[field] as Record<string, unknown> | undefined;
+            if (values && typeof values === 'object') {
+              walkEnv(values, config.filePath, `mcpServers.${name}.${field}.`, evidence);
+            }
           }
         }
       }

@@ -18,6 +18,25 @@ const CURSOR_DIR_NAME = '.cursor';
 const USER_CONFIG_FILES = ['cli-config.json', 'mcp.json', 'permissions.json', 'sandbox.json', 'hooks.json'];
 
 const IDE_APP_BUNDLE = '/Applications/Cursor.app';
+const CLI_CONFIG_FILE = 'cli-config.json';
+// User skills: ~/.cursor/skills (and skills-cursor/, where the CLI syncs
+// installed skills) plus the cross-agent ~/.agents/skills (cursor.com/docs/context/skills)
+const USER_SKILL_DIRS = [join(CURSOR_DIR_NAME, 'skills-cursor'), join(CURSOR_DIR_NAME, 'skills'), join('.agents', 'skills')];
+
+/**
+ * Directory holding cli-config.json for the scanning user. Cursor CLI
+ * configuration reference: "CURSOR_CONFIG_DIR: custom directory path";
+ * "XDG_CONFIG_HOME (Linux/BSD): uses $XDG_CONFIG_HOME/cursor/cli-config.json".
+ * Only cli-config.json is documented as relocated; the other ~/.cursor files
+ * stay put. Another user's environment isn't observable.
+ */
+export function cursorCliConfigDir(home: string, fs: FSProvider): string | undefined {
+  if (home !== fs.homedir()) return undefined;
+  const custom = fs.getEnv?.('CURSOR_CONFIG_DIR')?.trim();
+  if (custom) return custom === '~' || custom.startsWith('~/') ? join(home, custom.slice(1)) : custom;
+  const xdg = fs.platform !== 'darwin' && fs.platform !== 'win32' ? fs.getEnv?.('XDG_CONFIG_HOME')?.trim() : undefined;
+  return xdg ? join(xdg, 'cursor') : undefined;
+}
 
 // The Cursor IDE (VS Code fork) keeps User/settings.json + globalStorage
 // under the per-OS user-data dir. settings.json carries workspace-trust
@@ -132,6 +151,14 @@ export const cursorCliAdapter: AgentAdapter = {
       // user-data settings) is still a Cursor install — decided below.
 
       const configFiles = hasCursorDir ? await loadFiles(cursorDir, USER_CONFIG_FILES, fs) : [];
+      // A relocated cli-config.json replaces the one in ~/.cursor
+      const relocatedDir = cursorCliConfigDir(home, fs);
+      const relocated = relocatedDir ? await loadFiles(relocatedDir, [CLI_CONFIG_FILE], fs) : [];
+      if (relocated.length > 0) {
+        const i = configFiles.findIndex(c => c.filePath === join(cursorDir, CLI_CONFIG_FILE));
+        if (i >= 0) configFiles.splice(i, 1);
+        configFiles.unshift(...relocated);
+      }
 
       // IDE surface: the VS Code-fork user-data dir carries settings.json
       // (workspace trust) and globalStorage/state.vscdb (plaintext session
@@ -150,8 +177,19 @@ export const cursorCliAdapter: AgentAdapter = {
       // IDE app bundle or its settings are an IDE install worth scanning.
       if (configFiles.length === 0 && !cliBinary && !ideAppExists) continue;
 
-      const version = installs.primary?.version
-        ?? (ideAppExists ? await readIdeVersion(fs) : undefined);
+      // The IDE app versions independently of the CLI (CLI date versions vs
+      // IDE semver): with both present the IDE is listed as another install
+      // so advisory checks judge each against its own ranges.
+      const ideVersion = ideAppExists ? await readIdeVersion(fs) : undefined;
+      const version = installs.primary?.version ?? ideVersion;
+      const otherInstalls = [...installs.others];
+      if (installs.primary?.version && ideVersion && ideVersion !== installs.primary.version) {
+        otherInstalls.push({ path: IDE_APP_BUNDLE, version: ideVersion });
+      }
+      const skillsDirs: string[] = [];
+      for (const rel of USER_SKILL_DIRS) {
+        if (await fs.access(join(home, rel))) skillsDirs.push(join(home, rel));
+      }
 
       installations.push({
         agent: 'cursor-cli',
@@ -159,11 +197,12 @@ export const cursorCliAdapter: AgentAdapter = {
         version,
         installDir: cursorDir,
         configFiles,
-        skillsDir: this.getSkillsDir(cursorDir),
+        skillsDir: skillsDirs[0] ?? this.getSkillsDir(cursorDir),
+        skillsDirs: skillsDirs.length > 0 ? skillsDirs : undefined,
         models: extractModels(configFiles),
         user: options?.allUsers ? user : undefined,
         cliBinary,
-        otherInstalls: installs.others.length > 0 ? installs.others : undefined,
+        otherInstalls: otherInstalls.length > 0 ? otherInstalls : undefined,
         appBundle: ideAppExists ? IDE_APP_BUNDLE : undefined,
       });
     }
@@ -188,9 +227,14 @@ export const cursorCliAdapter: AgentAdapter = {
   },
 
   getConfigPaths(): string[] {
-    const home = new LocalFSProvider().homedir();
+    const fs = new LocalFSProvider();
+    const home = fs.homedir();
     const cursorDir = join(home, CURSOR_DIR_NAME);
-    return USER_CONFIG_FILES.map(f => join(cursorDir, f));
+    const relocatedDir = cursorCliConfigDir(home, fs);
+    return [
+      ...(relocatedDir ? [join(relocatedDir, CLI_CONFIG_FILE)] : []),
+      ...USER_CONFIG_FILES.map(f => join(cursorDir, f)),
+    ];
   },
 
   getSkillsDir(installDir: string): string | undefined {
@@ -228,6 +272,8 @@ export const cursorCliAdapter: AgentAdapter = {
     return {
       filePaths: [
         ...USER_CONFIG_FILES.map(f => `~/.cursor/${f}`),
+        // relocated cli-config.json ($CURSOR_CONFIG_DIR twin via RELOCATABLE_TREES)
+        '~/.config/cursor/cli-config.json',
         // IDE user-data settings (workspace trust) — macOS and Linux
         '~/Library/Application Support/Cursor/User/settings.json',
         '~/.config/Cursor/User/settings.json',
@@ -244,6 +290,8 @@ export const cursorCliAdapter: AgentAdapter = {
         '~/.cursor/extensions/**',
         // Installed skills (getSkillsDir) — SKL/IOC checks read them
         '~/.cursor/skills-cursor/**',
+        '~/.cursor/skills/**',
+        '~/.agents/skills/**',
         nvmBinaryGlob('cursor-agent'),
       ],
       // IDE state DBs hold session JWTs: CUR-013 / POL-003 need permissions only
@@ -261,6 +309,9 @@ export const cursorCliAdapter: AgentAdapter = {
         '~/.cursor',
         '~/.cursor/rules',
         '~/.cursor/extensions',
+        '~/.cursor/skills-cursor',
+        '~/.cursor/skills',
+        '~/.agents/skills',
       ],
       envPrefixes: ['CURSOR_'],
       // IDE-only installs are detected by the app bundle (macOS)

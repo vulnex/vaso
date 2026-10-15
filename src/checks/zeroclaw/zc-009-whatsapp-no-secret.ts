@@ -28,6 +28,7 @@ export const zc009 = defineCheck({
 
     const home = ctx.fs.homedir();
     const evidence: Evidence[] = [];
+    const unverified: string[] = [];
     for (const [alias, raw] of Object.entries(whatsapp)) {
       const inst = asRecord(raw);
       if (!inst || !isTrue(inst.enabled)) continue;
@@ -44,13 +45,18 @@ export const zc009 = defineCheck({
           });
         }
       } catch {
-        // Session not created yet, or not visible to this scan.
+        // Session not created yet, or not visible to this scan. A remote
+        // probe only collects fixed manifest paths, so a session_path outside
+        // them is invisible, not absent.
+        if (ctx.fs.kind === 'snapshot') unverified.push(p);
       }
     }
 
     await markUnreachable(ctx.fs, evidence);
     return h.fromEvidence(evidence, {
-      passed: 'No exposed WhatsApp Web session store',
+      passed: unverified.length > 0
+        ? `WhatsApp Web session store not collected by the remote probe (${unverified.join(', ')}) — permissions unverified; scan locally to check`
+        : 'No exposed WhatsApp Web session store',
       failed: (n) => `${n} WhatsApp Web session store(s) accessible to other users`,
       fixDescription: 'chmod 600 the session database (700 for a directory) and keep it under a private directory',
     });

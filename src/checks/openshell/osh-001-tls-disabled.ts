@@ -14,7 +14,8 @@ export const osh001 = defineCheck({
     const evidence: Evidence[] = [];
     const env = gatewayEnv(ctx);
     if (envTruthy(ctx.configs, 'OPENSHELL_DISABLE_TLS')) {
-      evidence.push(settingEvidence(env, 'OPENSHELL_DISABLE_TLS=true', 'TLS disabled by the gateway environment file'));
+      const value = String(env?.data.OPENSHELL_DISABLE_TLS ?? 'true').trim();
+      evidence.push(settingEvidence(env, `OPENSHELL_DISABLE_TLS=${value}`, 'TLS disabled by the gateway environment file'));
     } else if (gateway(ctx).disable_tls === true) {
       evidence.push(settingEvidence(gatewayToml(ctx), 'disable_tls = true', 'TLS disabled in [openshell.gateway]'));
     }

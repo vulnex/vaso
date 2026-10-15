@@ -11,11 +11,12 @@ import { auditDependencies } from '../mcp/osv-audit.js';
 import type { ScanOptions } from '../core/types.js';
 import { logError } from '../core/debug.js';
 import { toReportJson } from '../reporting/serialize.js';
-import { EXIT_FINDINGS, EXIT_USAGE, parseFailOn, shouldFailScan } from '../core/exit-criteria.js';
+import { EXIT_FINDINGS, EXIT_INCOMPLETE, EXIT_USAGE, parseFailOn, shouldFailScan } from '../core/exit-criteria.js';
 import type { MCPDiscoveryResult } from '../mcp/types.js';
 
 /** Paths named with -p must exist and parse; otherwise nothing would be scanned silently. */
 function reportUnreadable(result: MCPDiscoveryResult): boolean {
+  for (const p of result.empty ?? []) console.error(chalk.yellow(`No MCP servers found in ${p} (no known config dialect matched)`));
   if (!result.unreadable?.length) return false;
   for (const p of result.unreadable) console.error(chalk.red(`Cannot read MCP config (missing or not valid JSON): ${p}`));
   process.exitCode = EXIT_USAGE;
@@ -54,8 +55,10 @@ export async function runMCPScan(options: MCPScanCommandOptions): Promise<void> 
     if (reportUnreadable(discoveryResult)) return;
 
     const direct = options.source?.length ? await resolveSourcePaths(options.source) : { sources: [], unreadable: [] };
-    if (direct.unreadable.length > 0) {
-      for (const p of direct.unreadable) console.error(chalk.red(`No MCP server source at: ${p}`));
+    // One bad --source path doesn't cost the others their scan: report it,
+    // scan the rest, and exit 3 (incomplete) unless nothing was scannable.
+    for (const p of direct.unreadable) console.error(chalk.red(`No MCP server source at: ${p}`));
+    if (direct.unreadable.length > 0 && direct.sources.length === 0 && discoveryResult.totalServers === 0) {
       process.exitCode = EXIT_USAGE;
       return;
     }
@@ -118,7 +121,9 @@ export async function runMCPScan(options: MCPScanCommandOptions): Promise<void> 
       console.log(output);
     }
 
-    if (shouldFailScan(result.agents.flatMap(a => a.results), failOn)) {
+    if (direct.unreadable.length > 0) {
+      process.exitCode = EXIT_INCOMPLETE;
+    } else if (shouldFailScan(result.agents.flatMap(a => a.results), failOn)) {
       process.exitCode = EXIT_FINDINGS;
     }
   } catch (err) {

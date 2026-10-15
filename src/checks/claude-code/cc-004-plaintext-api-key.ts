@@ -50,6 +50,27 @@ function walkServers(servers: unknown, file: string, prefix: string, evidence: E
   }
 }
 
+const HELPER_KEY_PATTERN = /\b(?:sk-ant-[A-Za-z0-9_-]{20,}|sk-[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9]{20,}|xoxb-[A-Za-z0-9-]{20,})/;
+
+/** HTTP hook headers (`type: "http"`). The hooks docs reference secrets as
+ *  `$VAR`/`${VAR}` listed in allowedEnvVars; a literal token sits in the file. */
+function walkHttpHooks(hooks: unknown, file: string, evidence: Evidence[]): void {
+  if (!hooks || typeof hooks !== 'object') return;
+  for (const [event, entries] of Object.entries(hooks as Record<string, unknown>)) {
+    if (!Array.isArray(entries)) continue;
+    for (const entry of entries) {
+      const list = (entry as Record<string, unknown> | null)?.hooks;
+      if (!Array.isArray(list)) continue;
+      for (const hook of list as Array<Record<string, unknown> | null>) {
+        if (hook?.type !== 'http' || !hook.headers || typeof hook.headers !== 'object') continue;
+        const literal = Object.fromEntries(Object.entries(hook.headers as Record<string, unknown>)
+          .map(([k, v]) => [k, typeof v === 'string' ? v.replace(AUTH_SCHEME, '').trim() : v]));
+        walkEnv(literal, file, `hooks.${event}[http].headers.`, evidence);
+      }
+    }
+  }
+}
+
 export const cc004 = defineCheck({
   id: 'CC-004',
   name: 'Plaintext API Key in Config',
@@ -68,6 +89,18 @@ export const cc004 = defineCheck({
       }
 
       walkServers(config.data.mcpServers, config.filePath, 'mcpServers.', evidence);
+      walkHttpHooks(config.data.hooks, config.filePath, evidence);
+
+      // apiKeyHelper is a shell command; `echo sk-ant-…` just inlines the key
+      const helper = config.data.apiKeyHelper;
+      const inline = typeof helper === 'string' ? HELPER_KEY_PATTERN.exec(helper) : null;
+      if (inline) {
+        evidence.push({
+          file: config.filePath,
+          snippet: `apiKeyHelper=${inline[0].slice(0, 6)}…`,
+          detail: 'apiKeyHelper prints a key written into the command itself — it is plaintext in settings',
+        });
+      }
       // `claude mcp add` (default local scope) writes per-project servers to
       // ~/.claude.json under projects[path].mcpServers
       const projects = config.data.projects;

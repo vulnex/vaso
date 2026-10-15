@@ -1,7 +1,21 @@
-import { join } from 'node:path';
-import type { Evidence } from '../../core/types.js';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
+import type { Evidence, ScanContext } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { queryPermissions } from '../../core/permissions.js';
+
+/**
+ * Absolute path of the helper script, or undefined for a PATH command or a
+ * relative path that can't be anchored. Relative paths run from the project
+ * root, so they resolve against the repo that holds `.claude/settings*.json`
+ * (never the scanner's cwd); user-scope settings have no fixed root.
+ */
+function helperScriptPath(first: string, settingsFile: string, ctx: ScanContext): string | undefined {
+  if (first === '~' || first.startsWith('~/')) return join(ctx.fs.homedir(), first.slice(1));
+  if (isAbsolute(first)) return first;
+  if (!first.includes('/')) return undefined;
+  if (ctx.installation.profile !== 'project') return undefined;
+  return resolve(dirname(dirname(settingsFile)), first);
+}
 
 export const cc007 = defineCheck({
   id: 'CC-007',
@@ -18,9 +32,11 @@ export const cc007 = defineCheck({
       const helper = config.data.apiKeyHelper;
       if (typeof helper !== 'string' || helper.length === 0) continue;
 
-      // Strip any inline arguments — we only care about the executable path
-      const first = helper.split(/\s+/)[0];
-      const path = first === '~' || first.startsWith('~/') ? join(ctx.fs.homedir(), first.slice(1)) : first;
+      // apiKeyHelper is a shell command. Only a path-like first word names a
+      // script whose mode matters; `op read op://…` or `security
+      // find-generic-password …` run a PATH tool and there is nothing to stat.
+      const path = helperScriptPath(helper.trim().split(/\s+/)[0], config.filePath, ctx);
+      if (!path) continue;
 
       try {
         if (!(await ctx.fs.access(path))) {

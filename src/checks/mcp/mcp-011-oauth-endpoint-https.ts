@@ -1,22 +1,24 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { sourceSegments } from '../../mcp/source-segments.js';
+import { isRemotePlaintextUrl } from '../../mcp/remote-endpoint.js';
 
 const OAUTH_URL_ENV_PATTERNS = /(?:oauth|auth|token|authorize)[_-]?(?:url|endpoint|uri|server)/i;
 
-const LOCALHOST_EXCEPTIONS = ['localhost', '127.0.0.1', '[::1]'];
-
-function isLocalhostUrl(url: string): boolean {
-  return LOCALHOST_EXCEPTIONS.some(host => url.includes(host));
-}
+/**
+ * `http://` followed by a host that is not loopback. The exemption is anchored
+ * to the whole host (`http://localhost.attacker.example` is remote) and the
+ * scheme matched in any case (`HTTP://`).
+ */
+const REMOTE_HTTP = String.raw`[hH][tT][tT][pP]:\/\/(?!(?:localhost|127(?:\.\d{1,3}){3}|\[::1\])(?:[:/'"\x60\s]|$))`;
 
 const SOURCE_HTTP_OAUTH_PATTERNS = [
-  { pattern: /authorization_endpoint['":\s]*['"]?http:\/\/(?!localhost|127\.0\.0\.1|\[::1\])/, detail: 'HTTP authorization_endpoint URL' },
-  { pattern: /token_endpoint['":\s]*['"]?http:\/\/(?!localhost|127\.0\.0\.1|\[::1\])/, detail: 'HTTP token_endpoint URL' },
-  { pattern: /\.well-known\/oauth-authorization-server.*http:\/\/(?!localhost|127\.0\.0\.1|\[::1\])/, detail: 'HTTP OAuth discovery endpoint' },
-  { pattern: /http:\/\/(?!localhost|127\.0\.0\.1|\[::1\])[^'"\s]*\/authorize/, detail: 'HTTP authorization URL' },
-  { pattern: /http:\/\/(?!localhost|127\.0\.0\.1|\[::1\])[^'"\s]*\/oauth\/token/, detail: 'HTTP OAuth token URL' },
-  { pattern: /http:\/\/(?!localhost|127\.0\.0\.1|\[::1\])[^'"\s]*\/oauth2\//, detail: 'HTTP OAuth2 endpoint URL' },
+  { pattern: new RegExp(String.raw`authorization_endpoint['":\s]*['"]?` + REMOTE_HTTP), detail: 'HTTP authorization_endpoint URL' },
+  { pattern: new RegExp(String.raw`token_endpoint['":\s]*['"]?` + REMOTE_HTTP), detail: 'HTTP token_endpoint URL' },
+  { pattern: new RegExp(String.raw`\.well-known\/oauth-authorization-server.*` + REMOTE_HTTP), detail: 'HTTP OAuth discovery endpoint' },
+  { pattern: new RegExp(REMOTE_HTTP + String.raw`[^'"\s]*\/authorize`), detail: 'HTTP authorization URL' },
+  { pattern: new RegExp(REMOTE_HTTP + String.raw`[^'"\s]*\/oauth\/token`), detail: 'HTTP OAuth token URL' },
+  { pattern: new RegExp(REMOTE_HTTP + String.raw`[^'"\s]*\/oauth2\/`), detail: 'HTTP OAuth2 endpoint URL' },
 ];
 
 export const mcp011 = defineCheck({
@@ -38,7 +40,7 @@ export const mcp011 = defineCheck({
         if (!server.env) continue;
 
         for (const [key, value] of Object.entries(server.env)) {
-          if (OAUTH_URL_ENV_PATTERNS.test(key) && value.startsWith('http://') && !isLocalhostUrl(value)) {
+          if (OAUTH_URL_ENV_PATTERNS.test(key) && isRemotePlaintextUrl(value)) {
             evidence.push({
               file: config.filePath,
               snippet: `Server "${server.name}": ${key}=${value}`,
@@ -64,6 +66,7 @@ export const mcp011 = defineCheck({
               snippet: line.trim().slice(0, 120),
               detail,
             });
+            break; // one finding per line: the patterns overlap on one URL
           }
         }
       }

@@ -1,5 +1,6 @@
 import { defineCheck } from '../../core/check-builder.js';
 import type { Evidence } from '../../core/types.js';
+import { envNote } from '../../adapters/env-overrides.js';
 import { gatewayPosture, mainConfig, tomlLine, writeMainConfig } from './zc-config.js';
 
 export const zc004 = defineCheck({
@@ -30,7 +31,7 @@ export const zc004 = defineCheck({
         file: config.filePath,
         ...tomlLine(config.raw, 'gateway', 'require_pairing'),
         detail:
-          `gateway.require_pairing = false — API, dashboard and /webhook accept unauthenticated requests; gateway ${where}` +
+          `gateway.require_pairing = false${envNote(config.data, 'gateway.require_pairing')} — API, dashboard and /webhook accept unauthenticated requests; gateway ${where}` +
           (gw.webhookSecret ? '' : '; no gateway.webhook_secret either'),
       });
     }

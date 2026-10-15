@@ -1,6 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { sourceSegments } from '../../mcp/source-segments.js';
+import { nearbyText, sourceSegments } from '../../mcp/source-segments.js';
 
 /** Value tests applied to an OAuth scope string (not to the whole line). */
 const DANGEROUS_SCOPE_VALUES = [
@@ -18,9 +18,35 @@ const DANGEROUS_SCOPE_VALUES = [
  */
 const SCOPE_VALUE = /\bscopes?["']?\s*[:=]\s*(?:["'`]([^"'`]*)["'`]|\[([^\]]*)\])|[?&]scope=([^&"'`\s]*)/gi;
 
+/**
+ * The match starts inside a string literal that is prose rather than a key:
+ * `description: "use scope='all' for all"` documents an API parameter, while
+ * `"scope": "all"` is a JSON-style key.
+ */
+function insideProse(text: string, index: number): boolean {
+  let quote: string | undefined;
+  let start = 0;
+  for (let i = 0; i < index; i++) {
+    const c = text[i];
+    if (quote) {
+      if (c === '\\') i++;
+      else if (c === quote) quote = undefined;
+    } else if (c === '"' || c === "'" || c === '`') {
+      quote = c;
+      start = i + 1;
+    }
+  }
+  if (!quote) return false;
+  const end = text.indexOf(quote, index);
+  const content = text.slice(start, end === -1 ? undefined : end);
+  return !/^\s*scopes?\s*$/i.test(content);
+}
+
 function scopeValues(text: string): string[] {
   const out: string[] = [];
   for (const m of text.matchAll(SCOPE_VALUE)) {
+    // `?scope=` inside a URL string is a real value; `scope=` in prose is not.
+    if (!m[0].startsWith('?') && !m[0].startsWith('&') && insideProse(text, m.index)) continue;
     const raw = m[1] ?? m[2] ?? m[3] ?? '';
     let value = raw.replace(/\+/g, ' ');
     try {
@@ -35,6 +61,9 @@ function scopeValues(text: string): string[] {
 
 
 const MAX_SCOPE_COUNT = 10;
+
+/** Signs that a scope value belongs to an OAuth authorization/token request. */
+const OAUTH_CONTEXT = /\b(?:client_id|response_type|redirect_uri|code_challenge|grant_type|oauth\w*|authorize\w*|access_type)\b|\/authoriz/i;
 
 export const mcp017 = defineCheck({
   id: 'MCP-017',
@@ -91,8 +120,11 @@ export const mcp017 = defineCheck({
         // Skip comment lines
         if (line.trim().startsWith('//') || line.trim().startsWith('*')) continue;
 
+        // `all` is also a common API filter (GitLab `scope=all` lists every
+        // issue); it is an OAuth scope only next to an OAuth request.
+        const oauth = OAUTH_CONTEXT.test(nearbyText(segments, i, 5));
         const broad = scopeValues(line)
-          .flatMap((value) => DANGEROUS_SCOPE_VALUES.filter(({ pattern }) => pattern.test(value)))
+          .flatMap((value) => DANGEROUS_SCOPE_VALUES.filter(({ pattern, detail }) => pattern.test(value) && (oauth || !detail.includes('"all"'))))
           .at(0);
         if (broad) {
           evidence.push({

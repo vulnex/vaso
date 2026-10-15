@@ -1,6 +1,8 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import type { ParsedConfig } from '../../core/types.js';
 import { markUnreachable, queryPermissions, readableByOthers } from '../../core/permissions.js';
+import { restrictFilesToOwner } from '../../remediation/config-writer.js';
 
 export const cd002 = defineCheck({
   id: 'CD-002',
@@ -15,20 +17,7 @@ export const cd002 = defineCheck({
     const evidence: Evidence[] = [];
 
     for (const config of ctx.configs) {
-      // Only flag perms when the file actually contains potentially-sensitive
-      // MCP env material. A bare config with just globalShortcut/extensions
-      // is uninteresting permission-wise.
-      const mcpServers = config.data.mcpServers as Record<string, unknown> | undefined;
-      let hasEnv = false;
-      if (mcpServers && typeof mcpServers === 'object') {
-        for (const server of Object.values(mcpServers)) {
-          if (server && typeof server === 'object' && (server as Record<string, unknown>).env) {
-            hasEnv = true;
-            break;
-          }
-        }
-      }
-      if (!hasEnv) continue;
+      if (!hasEnvMaterial(config)) continue;
 
       try {
         const perms = await queryPermissions(ctx.fs, config.filePath);
@@ -48,7 +37,24 @@ export const cd002 = defineCheck({
     return h.fromEvidence(evidence, {
       passed: 'claude_desktop_config.json is not group/world-readable (or holds no env material)',
       failed: (n) => `Found ${n} config file(s) with permissive read perms`,
-      fixDescription: 'chmod 600 ~/Library/Application\\ Support/Claude/claude_desktop_config.json',
+      fixable: true,
+      fixDescription: 'Remove group/other access from claude_desktop_config.json (chmod go-rwx)',
     });
   },
+
+  async fix(ctx) {
+    return restrictFilesToOwner('CD-002', ctx.configs.filter(hasEnvMaterial).map(c => c.filePath));
+  },
 });
+
+/**
+ * Only flag perms when the file actually contains potentially-sensitive MCP
+ * env material. A bare config with just globalShortcut/extensions is
+ * uninteresting permission-wise.
+ */
+function hasEnvMaterial(config: ParsedConfig): boolean {
+  const mcpServers = config.data.mcpServers as Record<string, unknown> | undefined;
+  if (!mcpServers || typeof mcpServers !== 'object') return false;
+  return Object.values(mcpServers).some(server =>
+    !!server && typeof server === 'object' && !!(server as Record<string, unknown>).env);
+}

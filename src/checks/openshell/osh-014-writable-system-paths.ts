@@ -4,7 +4,15 @@ import { record, sandboxPolicies } from './shared.js';
 
 // Writable paths that let the agent replace binaries, trust stores or other
 // users' data. `/` itself is rejected by the gateway; these are accepted.
-const SENSITIVE = /^\/(?:etc|usr|bin|sbin|lib|lib32|lib64|boot|opt|var|root|home|srv|sys|proc|dev|usr\/local(?:\/bin)?|usr\/bin|var\/lib)\/?$/;
+// System trees count with any subdirectory (/usr/lib, /etc/ssl); the others
+// only as a whole (/dev/null, /var/tmp and /home/<user>/work are normal grants).
+const SYSTEM_TREE = /^\/(?:etc|usr|bin|sbin|lib|lib32|lib64|libx32|boot)(?:\/|$)/;
+const WHOLE_DIR = /^\/(?:opt|var|root|home|srv|sys|proc|dev|var\/lib)\/?$/;
+
+function sensitive(path: string): boolean {
+  const p = path.trim().replace(/\/+$/, '') || '/';
+  return SYSTEM_TREE.test(p) || WHOLE_DIR.test(p);
+}
 
 export const osh014 = defineCheck({
   id: 'OSH-014',
@@ -18,7 +26,7 @@ export const osh014 = defineCheck({
     const evidence: Evidence[] = [];
     for (const ref of await sandboxPolicies(ctx)) {
       const rw = record(ref.policy.filesystem_policy)?.read_write;
-      const hits = (Array.isArray(rw) ? rw : []).filter((p): p is string => typeof p === 'string' && SENSITIVE.test(p.trim()));
+      const hits = (Array.isArray(rw) ? rw : []).filter((p): p is string => typeof p === 'string' && sensitive(p));
       if (hits.length === 0) continue;
       evidence.push({ file: ref.file, snippet: `filesystem_policy.read_write: ${hits.join(', ')}`, detail: `${ref.source}: system/user directories are writable by the agent` });
     }

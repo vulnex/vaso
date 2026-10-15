@@ -16,32 +16,51 @@ export function getNestedValue(obj: Record<string, unknown>, path: string): unkn
   }, obj);
 }
 
-const CODE_EXTENSIONS = new Set(['.js', '.ts', '.mjs', '.cjs', '.jsx', '.tsx', '.py', '.sh', '.bash']);
+const CODE_EXTENSIONS = new Set([
+  '.js', '.ts', '.mjs', '.cjs', '.jsx', '.tsx', '.mts', '.cts', '.py',
+  '.sh', '.bash', '.zsh', '.ksh', '.fish', '.ps1', '.psm1',
+]);
+/**
+ * Compiled code a skill can ship and run (`./helper`, a native addon). Read as
+ * bytes by IOC-003/IOC-007 (hash, executable headers); the text checks skip
+ * them (see checks/skills/skill-files.ts).
+ */
+export const BINARY_EXTENSIONS = new Set(['.bin', '.node', '.exe', '.so', '.dylib', '.dll']);
 
-// Vendor / build-output / VCS directories that AST analysis must skip. The
-// gstack skill ecosystem ships per-skill node_modules trees (hundreds of MB,
-// including minified ML bundles) directly under ~/.claude/skills/<skill>/ —
-// parsing those hangs @babel/parser for minutes and they aren't skill code
-// anyway.
-const EXCLUDED_DIRS = new Set([
+// Vendor / VCS / cache directories every walk skips. The gstack skill
+// ecosystem ships per-skill node_modules trees (hundreds of MB, including
+// minified ML bundles) directly under ~/.claude/skills/<skill>/ — parsing
+// those hangs @babel/parser for minutes and they aren't skill code anyway.
+const VENDOR_DIRS = new Set([
   'node_modules',
   '.git',
-  'dist',
-  'build',
   '.next',
   '.cache',
   '.venv',
   'venv',
   '__pycache__',
 ]);
+// Build output. Skipped when walking an install dir (an agent's own checkout),
+// but read inside skill trees: a skill's `dist/index.js` or `build/run.py` is
+// usually the code SKILL.md tells the agent to run.
+const BUILD_OUTPUT_DIRS = new Set(['dist', 'build']);
 
-/** True when parentPath lies under a vendor/build/VCS dir (EXCLUDED_DIRS) below root. */
-export function isExcludedPath(root: string, parentPath: string | undefined): boolean {
+/**
+ * True when parentPath lies under a vendor/VCS dir below root — or a build
+ * output dir, unless `keepBuildOutput` (skill trees).
+ */
+export function isExcludedPath(
+  root: string,
+  parentPath: string | undefined,
+  opts: { keepBuildOutput?: boolean } = {},
+): boolean {
   if (!parentPath) return false;
   const rel = relative(root, parentPath);
   if (!rel || rel.startsWith('..')) return false;
   for (const segment of rel.split(sep)) {
-    if (segment && EXCLUDED_DIRS.has(segment)) return true;
+    if (!segment) continue;
+    if (VENDOR_DIRS.has(segment)) return true;
+    if (!opts.keepBuildOutput && BUILD_OUTPUT_DIRS.has(segment)) return true;
   }
   return false;
 }
@@ -61,9 +80,11 @@ export function getAllSkillsDirs(installation: AgentInstallation): string[] {
 }
 
 /**
- * Recursively find all code files (JS/TS/Python/Shell) under a directory.
- * Vendor and build-output directories (node_modules, dist, .git, etc.) are
- * skipped — see EXCLUDED_DIRS.
+ * Every file under a skills directory that skill/IOC checks read: code and
+ * scripts by extension, SKILL.md (the agent runs its code blocks), compiled
+ * binaries, and extensionless executables (`scripts/setup` with a shebang, a
+ * native `helper`). Vendor dirs are skipped, build output is not — see
+ * VENDOR_DIRS / BUILD_OUTPUT_DIRS.
  */
 export async function getSkillFiles(dir: string, fs?: FSProvider): Promise<string[]> {
   const provider = fs ?? new LocalFSProvider();
@@ -73,15 +94,28 @@ export async function getSkillFiles(dir: string, fs?: FSProvider): Promise<strin
     const entries = await walkSkillTree(provider, dir);
     for (const entry of entries) {
       if (!entry.isFile) continue;
-      if (!CODE_EXTENSIONS.has(extname(entry.name))) continue;
-      if (isExcludedPath(dir, entry.parentPath)) continue;
+      if (isExcludedPath(dir, entry.parentPath, { keepBuildOutput: true })) continue;
       const fullPath = entry.parentPath ? join(entry.parentPath, entry.name) : join(dir, entry.name);
-      files.push(fullPath);
+      const ext = extname(entry.name).toLowerCase();
+      if (CODE_EXTENSIONS.has(ext) || BINARY_EXTENSIONS.has(ext) || entry.name.toUpperCase() === 'SKILL.MD') {
+        files.push(fullPath);
+      } else if (ext === '' && !entry.name.startsWith('.') && await isExecutable(provider, fullPath)) {
+        files.push(fullPath);
+      }
     }
   } catch {
     // Directory may not exist
   }
   return files;
+}
+
+/** Any execute bit set — what makes an extensionless file a script or program. */
+async function isExecutable(fs: FSProvider, path: string): Promise<boolean> {
+  try {
+    return ((await fs.stat(path)).mode & 0o111) !== 0;
+  } catch {
+    return false;
+  }
 }
 
 /**

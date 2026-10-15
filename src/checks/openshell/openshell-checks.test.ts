@@ -99,6 +99,8 @@ describe('gateway settings', () => {
     expect(remote.severity).toBe('critical');
     const viaEnv = await check('OSH-001').run(ctx([{ raw: '', format: 'env', filePath: `${CFG}/gateway.env`, data: { OPENSHELL_DISABLE_TLS: 'true' } }]));
     expect(viaEnv.evidence?.[0].snippet).toBe('OPENSHELL_DISABLE_TLS=true');
+    const upper = await check('OSH-001').run(ctx([{ raw: '', format: 'env', filePath: `${CFG}/gateway.env`, data: { OPENSHELL_DISABLE_TLS: 'TRUE' } }]));
+    expect(upper.evidence?.[0].snippet).toBe('OPENSHELL_DISABLE_TLS=TRUE');
   });
 
   it('OSH-002 flags unauthenticated users and offers a fix', async () => {
@@ -149,6 +151,13 @@ describe('gateway settings', () => {
     ]);
   });
 
+  it('OSH-006 flags allow_insecure_transport on an interceptor', async () => {
+    const r = await check('OSH-006').run(ctx([gatewayToml({
+      interceptors: [{ name: 'gov', grpc_endpoint: 'http://127.0.0.1:18081', failure_policy: 'fail_closed', binding_policy: 'allowlist', allow_insecure_transport: true }],
+    })]));
+    expect(r.evidence?.map(e => e.snippet)).toEqual(['interceptor "gov": http://127.0.0.1:18081 (allow_insecure_transport)']);
+  });
+
   it('OSH-007 flags disabled admission, critical with caller driver config', async () => {
     const warn = await check('OSH-007').run(ctx([gatewayToml({}, { drivers: { docker: { resource_admission: { enabled: false } } } })]));
     expect(warn.severity).toBe('warning');
@@ -194,6 +203,19 @@ describe('files', () => {
     expect(r.evidence!.map(e => e.file).sort()).toEqual(['/srv/os/openshell.db', '/srv/os/tls/ca.key']);
   });
 
+  it('OSH-008 checks the server key named by OPENSHELL_TLS_KEY in gateway.env', async () => {
+    const env: ParsedConfig = { raw: '', format: 'env', filePath: `${CFG}/gateway.env`, data: { OPENSHELL_TLS_KEY: '~/certs/gw.key' } };
+    const r = await check('OSH-008').run(ctx([env], makeFs({ modes: { [`${HOME}/certs/gw.key`]: 0o100644 } })));
+    expect(r.evidence?.map(e => e.file)).toEqual([`${HOME}/certs/gw.key`]);
+  });
+
+  it('OSH-008 checks the snap gateway state under ~/snap/openshell/common', async () => {
+    const snapState = `${HOME}/snap/openshell/common/.local/state/openshell`;
+    const fs = makeFs({ modes: { [`${snapState}/tls/ca.key`]: 0o100644, [`${snapState}/gateway/openshell.db`]: 0o100644 } });
+    const r = await check('OSH-008').run(ctx([], fs));
+    expect(r.evidence?.map(e => e.file).sort()).toEqual([`${snapState}/gateway/openshell.db`, `${snapState}/tls/ca.key`]);
+  });
+
   it('OSH-009 flags writable config and gateway metadata', async () => {
     const fs = makeFs({
       modes: { [TOML]: 0o100666, [`${CFG}/gateways/work/metadata.json`]: 0o100620, [CFG]: 0o40700 },
@@ -236,6 +258,37 @@ describe('sandbox policies', () => {
     // option-like names never reach the CLI
     const calls = (fs.exec as ReturnType<typeof vi.fn>).mock.calls.map(([, args]) => args.join(' '));
     expect(calls.some(a => a.includes('--evil'))).toBe(false);
+  });
+
+  it('queries a sandbox listed without a workspace in the default workspace', async () => {
+    const fs = cliFs({ sandboxes: [{ name: 'box' }, { name: 'box2', workspace: '' }] }, { 'default/box': risky, 'default/box2': risky });
+    const r = await check('OSH-014').run(ctx([], fs, { cli: '/usr/bin/openshell' }));
+    expect(r.evidence?.map(e => e.file)).toEqual(['openshell sandbox default/box', 'openshell sandbox default/box2']);
+  });
+
+  it('OSH-011 flags match-everything and whole-bin-directory globs, not narrow ones', async () => {
+    const policy = (paths: string[]) => ({ network_policies: { r: { endpoints: [{ host: 'a.example.com', port: 443 }], binaries: paths.map(path => ({ path })) } } });
+    const broad = ['/**/*', '/*/**', '/usr/bin/*', '/bin/**', '/usr/local/sbin/*', '/home/*/**'];
+    const narrow = ['/usr/bin/curl', '/usr/lib/jvm/*/bin/java', '/sandbox/.venv/bin/*'];
+    const fs = cliFs({ sandboxes: [{ name: 'b', workspace: 'default' }, { name: 'n', workspace: 'default' }] }, { 'default/b': policy(broad), 'default/n': policy(narrow) });
+    const r = await check('OSH-011').run(ctx([], fs, { cli: 'openshell' }));
+    expect(r.evidence?.map(e => e.snippet)).toEqual([`network_policies.r.binaries: ${broad.join(', ')}`]);
+  });
+
+  it('OSH-014 flags system subtrees but not ordinary writable dirs', async () => {
+    const policy = { filesystem_policy: { read_write: ['/usr/lib', '/usr/sbin', '/usr/share', '/etc/ssl', '/tmp', '/dev/null', '/var/tmp', '/home/u/work', '/sandbox'] } };
+    const fs = cliFs({ sandboxes: [{ name: 'b', workspace: 'default' }] }, { 'default/b': policy });
+    const r = await check('OSH-014').run(ctx([], fs, { cli: 'openshell' }));
+    expect(r.evidence?.[0].snippet).toBe('filesystem_policy.read_write: /usr/lib, /usr/sbin, /usr/share, /etc/ssl');
+  });
+
+  it('OSH-012 reports raw TCP passthrough endpoints', async () => {
+    const policy = { network_policies: { db: { endpoints: [{ host: 'db.example.com', port: 5432, protocol: 'tcp' }], binaries: [{ path: '/usr/bin/psql' }] } } };
+    const fs = cliFs({ sandboxes: [{ name: 'b', workspace: 'default' }] }, { 'default/b': policy });
+    const r = await check('OSH-012').run(ctx([], fs, { cli: 'openshell' }));
+    expect(r.passed).toBe(false);
+    expect(r.severity).toBe('info');
+    expect(r.evidence?.[0].snippet).toContain('protocol: tcp');
   });
 
   it('reads the 0.0.x bare-array list shape', async () => {

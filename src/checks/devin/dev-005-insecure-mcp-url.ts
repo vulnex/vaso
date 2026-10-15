@@ -1,8 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { isPlaintextRemoteUrl } from '../windsurf-app/plaintext-url.js';
 
-const HTTP_URL = /^http:\/\//i;
-const LOOPBACK_HOST = /^http:\/\/(?:localhost|127\.0\.0\.1)(?:[:/]|$)/i;
 
 export const dev005 = defineCheck({
   id: 'DEV-005',
@@ -24,8 +23,7 @@ export const dev005 = defineCheck({
         const server = serverRaw as Record<string, unknown>;
         const url = server.url;
         if (typeof url !== 'string') continue;
-        if (!HTTP_URL.test(url)) continue;
-        if (LOOPBACK_HOST.test(url)) continue;
+        if (!isPlaintextRemoteUrl(url)) continue;
 
         const transport = typeof server.transport === 'string' ? server.transport : undefined;
         evidence.push({

@@ -1,5 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { isPlaintextRemoteUrl } from '../windsurf-app/plaintext-url.js';
 
 const URL_FIELDS = ['url', 'httpUrl', 'sseUrl'];
 
@@ -8,7 +9,7 @@ export const ghc004 = defineCheck({
   name: 'Copilot CLI MCP Server Over Plaintext HTTP',
   category: 'coding-agent',
   severity: 'warning',
-  description: 'Detect MCP servers in workspace .mcp.json that use http:// rather than https://',
+  description: 'Detect MCP servers in workspace .mcp.json/.github/mcp.json or user mcp-config.json that use http:// rather than https://',
   supportedAgents: ['copilot-cli'],
 
   async run(ctx, h) {
@@ -20,8 +21,8 @@ export const ghc004 = defineCheck({
     // Use already-parsed .mcp.json from ctx.configs (the adapter appends
     // project-level .mcp.json to the config list).
     for (const c of ctx.configs) {
-      // project .mcp.json, user <config dir>/mcp-config.json
-      if (c.filePath.endsWith('.mcp.json') || c.filePath.endsWith('/mcp-config.json')) {
+      // project .mcp.json / .github/mcp.json, user <config dir>/mcp-config.json
+      if (c.filePath.endsWith('.mcp.json') || c.filePath.endsWith('/.github/mcp.json') || c.filePath.endsWith('/mcp-config.json')) {
         sources.push({ path: c.filePath, data: c.data });
       }
     }
@@ -37,8 +38,8 @@ export const ghc004 = defineCheck({
         for (const field of URL_FIELDS) {
           const value = obj[field];
           if (typeof value !== 'string') continue;
-          if (!value.startsWith('http://')) continue;
-          if (/^http:\/\/(localhost|127\.0\.0\.1|\[::1\])/i.test(value)) continue;
+          // localhost MCP is a common dev pattern with no exposure
+          if (!isPlaintextRemoteUrl(value)) continue;
           evidence.push({
             file: path,
             snippet: `mcpServers.${name}.${field} = ${value}`,

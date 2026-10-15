@@ -13,9 +13,10 @@ function walk(obj: unknown, path: string, found: Found[]): void {
   for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
     const here = path ? `${path}.${key}` : key;
     if (typeof value === 'string') {
-      // Match base_url (any depth) and mcp_servers.<n>.url
+      // Match base_url (any depth) and mcp_servers.<n>.url. URL schemes are
+      // case-insensitive (HTTP:// is plaintext too).
       if ((key === 'base_url' || key === 'url' || key === 'http_url' || key === 'sse_url')
-          && value.startsWith('http://') && !LOOPBACK_HTTP.test(value)) {
+          && /^http:\/\//i.test(value.trim()) && !LOOPBACK_HTTP.test(value.trim())) {
         found.push({ path: here, url: value });
       }
     } else if (value && typeof value === 'object') {

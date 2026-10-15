@@ -8,6 +8,7 @@ import { loadConfig } from '../core/config-loader.js';
 import { getUserHomeDirs } from './openclaw.js';
 import { discoverCliInstalls } from './cli-installs.js';
 import { queryCliVersion } from './version-query.js';
+import { applyEnvOverrides, type EnvOverrideSpec } from './env-overrides.js';
 
 /**
  * PicoClaw (sipeed/picoclaw, Go) layout — verified against v0.3.x source:
@@ -69,6 +70,21 @@ export function picoclawPaths(userHome: string, fs: FSProvider): PicoclawPaths {
   const configPath = configEnv ? expandHome(configEnv, userHome) : join(home, 'config.json');
   return { home, configPath, configDir: dirname(configPath) };
 }
+
+/**
+ * Security-relevant fields PicoClaw's `env.Parse(cfg)` overrides from the
+ * environment after loading config.json (caarlos0/env `env:"…"` struct tags in
+ * pkg/config; booleans via strconv.ParseBool). PICOCLAW_GATEWAY_HOST is handled
+ * by getGatewayInfo. Each name is also listed in the probe's envPrefixes.
+ */
+const ENV_OVERRIDES: EnvOverrideSpec[] = [
+  { env: 'PICOCLAW_AGENTS_DEFAULTS_RESTRICT_TO_WORKSPACE', path: ['agents', 'defaults', 'restrict_to_workspace'], type: 'bool' },
+  { env: 'PICOCLAW_AGENTS_DEFAULTS_ALLOW_READ_OUTSIDE_WORKSPACE', path: ['agents', 'defaults', 'allow_read_outside_workspace'], type: 'bool' },
+  { env: 'PICOCLAW_TOOLS_EXEC_ENABLED', path: ['tools', 'exec', 'enabled'], type: 'bool' },
+  { env: 'PICOCLAW_TOOLS_EXEC_ALLOW_REMOTE', path: ['tools', 'exec', 'allow_remote'], type: 'bool' },
+  { env: 'PICOCLAW_TOOLS_EXEC_ENABLE_DENY_PATTERNS', path: ['tools', 'exec', 'enable_deny_patterns'], type: 'bool' },
+  { env: 'PICOCLAW_GATEWAY_PORT', path: ['gateway', 'port'], type: 'int' },
+];
 
 function expandHome(p: string, userHome: string): string {
   if (p === '~') return userHome;
@@ -167,6 +183,8 @@ export const picoclawAdapter: AgentAdapter = {
       if (configFiles.length === 0) continue;
 
       const main = configFiles.find(c => c.filePath === paths.configPath && isMainConfig(c));
+      // Env overrides describe the scanning user's process only (as above).
+      if (main && userHome === fs.homedir()) main.data = applyEnvOverrides(main.data, ENV_OVERRIDES, fs);
       const launcher = configFiles.find(c => c.filePath.endsWith('launcher-config.json'));
 
       const workspaces = picoclawWorkspaces(main?.data, paths.home, userHome);
@@ -410,6 +428,7 @@ export const picoclawAdapter: AgentAdapter = {
         'PICOCLAW_BUILTIN_SKILLS',
         'PICOCLAW_GATEWAY_HOST',
         'PICOCLAW_SSH_KEY_PATH',
+        ...ENV_OVERRIDES.map(o => o.env),
       ],
       systemPaths: [],
       systemDirListings: [],

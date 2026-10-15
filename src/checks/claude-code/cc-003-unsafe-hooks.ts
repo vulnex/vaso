@@ -1,13 +1,45 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { shellCommandWrapper } from '../../mcp/shell-wrapper.js';
 
-const UNQUOTED_VAR_PATTERN = /(?<!["'])\$(?:CLAUDE_[A-Z_]+|TOOL_INPUT|USER_PROMPT|FILE_PATH|\{[A-Z_]+\})(?!["'])/;
+// ${CLAUDE_PROJECT_DIR} / ${CLAUDE_PLUGIN_ROOT} / ${CLAUDE_PLUGIN_DATA} are
+// path placeholders the hooks docs use unquoted in their own examples
+// (code.claude.com/docs/en/hooks "Path placeholders"); CLAUDE_ENV_FILE is a
+// path Claude Code sets. None carries tool or prompt input.
+const PATH_PLACEHOLDERS = '(?:CLAUDE_PROJECT_DIR|CLAUDE_PLUGIN_ROOT|CLAUDE_PLUGIN_DATA|CLAUDE_ENV_FILE)\\b';
+const UNQUOTED_VAR_PATTERN = new RegExp(
+  `(?<!["'])\\$(?:(?!${PATH_PLACEHOLDERS})CLAUDE_[A-Z_]+|TOOL_INPUT|USER_PROMPT|FILE_PATH|\\{(?!${PATH_PLACEHOLDERS})[A-Z_]+\\})(?!["'])`,
+);
 const COMMAND_SUBSTITUTION_PATTERN = /\$\([^)]*\$[A-Z]/;
 const RAW_EVAL_PATTERN = /\b(?:eval|bash\s+-c|sh\s+-c|exec)\b/;
+// `curl … | bash`, `jq -r .tool_input.command | sh`: whatever arrives on the
+// pipe (a download, or the hook's JSON input) runs as a script
+const PIPE_TO_SHELL_PATTERN = /\|\s*(?:sudo\s+(?:-\S+\s+)*)?(?:\S*\/)?(?:env\s+)?(?:ba|z|da|k|mk|fi)?sh\b(?!\s+[^\s|;&-]\S*)/;
+
+interface HookSpec {
+  type?: string;
+  command?: string;
+  args?: unknown;
+}
 
 interface HookEntry {
   matcher?: string;
-  hooks?: Array<{ type?: string; command?: string }>;
+  hooks?: HookSpec[];
+}
+
+/**
+ * The shell script a hook runs, or undefined when there is none. Exec form
+ * (`args` present) spawns `command` directly with no shell, so `$VAR` and
+ * pipes are literal text — unless the executable is itself a shell given
+ * `-c <script>`.
+ */
+function shellScript(hook: HookSpec): string | undefined {
+  if (typeof hook.command !== 'string') return undefined;
+  if (!Array.isArray(hook.args)) return hook.command;
+  const args = hook.args.filter((a): a is string => typeof a === 'string');
+  if (!shellCommandWrapper(hook.command, args)) return undefined;
+  const at = args.findIndex(a => /^-[a-zA-Z]*c[a-zA-Z]*$/.test(a));
+  return at >= 0 ? args[at + 1] : undefined;
 }
 
 export const cc003 = defineCheck({
@@ -30,7 +62,8 @@ export const cc003 = defineCheck({
         for (const entry of entries as HookEntry[]) {
           const hookList = Array.isArray(entry?.hooks) ? entry.hooks : [];
           for (const hook of hookList) {
-            const cmd = hook?.command;
+            if (!hook || typeof hook !== 'object') continue;
+            const cmd = shellScript(hook);
             if (typeof cmd !== 'string') continue;
 
             const reasons: string[] = [];
@@ -42,6 +75,9 @@ export const cc003 = defineCheck({
             }
             if (RAW_EVAL_PATTERN.test(cmd)) {
               reasons.push('invokes eval/sh -c/bash -c on dynamic input');
+            }
+            if (PIPE_TO_SHELL_PATTERN.test(cmd)) {
+              reasons.push('pipes data into a shell — downloaded or hook-input text runs as a script');
             }
 
             if (reasons.length > 0) {
@@ -59,7 +95,7 @@ export const cc003 = defineCheck({
     return h.fromEvidence(evidence, {
       passed: 'No unsafe hook commands detected',
       failed: (n) => `Found ${n} hook command(s) that may execute untrusted input`,
-      fixDescription: 'Quote $-variables ("$VAR") and avoid eval/sh -c with dynamic input',
+      fixDescription: 'Quote $-variables ("$VAR"), avoid eval/sh -c and piping into a shell, or use exec form (`args`) so no shell runs',
     });
   },
 });

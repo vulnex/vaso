@@ -8,6 +8,7 @@ import { loadConfig } from '../core/config-loader.js';
 import { getUserHomeDirs } from './openclaw.js';
 import { discoverCliInstalls } from './cli-installs.js';
 import { queryCliVersion } from './version-query.js';
+import { applyEnvOverrides, type EnvOverrideSpec, type EnvValueType } from './env-overrides.js';
 
 /**
  * ZeroClaw (zeroclaw-labs/zeroclaw, Rust) — V3 config schema (zeroclaw ≥ 0.8).
@@ -74,6 +75,65 @@ export async function zeroclawDirs(home: string, fs: FSProvider): Promise<{ conf
 
 function asRecord(v: unknown): Record<string, unknown> | undefined {
   return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : undefined;
+}
+
+const ENV_SCALARS: Array<[path: string, type: EnvValueType]> = [
+  ['gateway.host', 'string'],
+  ['gateway.port', 'int'],
+  ['gateway.require_pairing', 'bool'],
+  ['gateway.allow_public_bind', 'bool'],
+  ['gateway.webhook_secret', 'string'],
+  ['gateway.tls.enabled', 'bool'],
+  ['tunnel.tunnel_provider', 'string'],
+  ['secrets.encrypt', 'bool'],
+  ['skills.open_skills_enabled', 'bool'],
+  ['skills.allow_scripts', 'bool'],
+  ['skills.registry_url', 'string'],
+  ['browser.enabled', 'bool'],
+  ['composio.enabled', 'bool'],
+  ['http_request.allow_private_hosts', 'bool'],
+];
+const ENV_PROFILE_FIELDS: Array<[field: string, type: EnvValueType]> = [
+  ['level', 'string'],
+  ['workspace_only', 'bool'],
+  ['sandbox_enabled', 'bool'],
+  ['sandbox_backend', 'string'],
+  ['block_high_risk_commands', 'bool'],
+];
+const ENV_AGENT_FIELDS: Array<[field: string, type: EnvValueType]> = [
+  ['enabled', 'bool'],
+  ['risk_profile', 'string'],
+  ['workspace.unrestricted_filesystem', 'bool'],
+];
+
+/**
+ * Upstream env_overrides: `ZEROCLAW_<path>` overrides config.toml, with `__`
+ * separating path segments (`ZEROCLAW_gateway__require_pairing=false`,
+ * `ZEROCLAW_risk_profiles__default__level=full`). Variables can't be
+ * enumerated through FSProvider, so the security-relevant scalar paths the
+ * ZC checks read are probed by name — for every profile and agent alias the
+ * file declares (plus `default`). The older flat gateway variables come first
+ * so the path form wins.
+ */
+export function zeroclawEnvSpecs(data: Record<string, unknown>): EnvOverrideSpec[] {
+  const spec = (path: string, type: EnvValueType): EnvOverrideSpec => {
+    const segments = path.split('.');
+    return { env: `ZEROCLAW_${segments.join('__')}`, path: segments, type };
+  };
+  const out: EnvOverrideSpec[] = [
+    { env: 'ZEROCLAW_GATEWAY_HOST', path: ['gateway', 'host'], type: 'string' },
+    { env: 'ZEROCLAW_GATEWAY_PORT', path: ['gateway', 'port'], type: 'int' },
+    { env: 'ZEROCLAW_ALLOW_PUBLIC_BIND', path: ['gateway', 'allow_public_bind'], type: 'bool' },
+    ...ENV_SCALARS.map(([p, t]) => spec(p, t)),
+  ];
+  const profiles = new Set(['default', ...Object.keys(asRecord(data.risk_profiles) ?? {})]);
+  for (const name of profiles) {
+    for (const [f, t] of ENV_PROFILE_FIELDS) out.push(spec(`risk_profiles.${name}.${f}`, t));
+  }
+  for (const alias of Object.keys(asRecord(data.agents) ?? {})) {
+    for (const [f, t] of ENV_AGENT_FIELDS) out.push(spec(`agents.${alias}.${f}`, t));
+  }
+  return out;
 }
 
 async function listDirs(dir: string, fs: FSProvider): Promise<string[]> {
@@ -156,6 +216,8 @@ export const zeroclawAdapter: AgentAdapter = {
       if (configFiles.length === 0 && !cliBinary) continue;
 
       const main = configFiles.find(c => c.filePath.endsWith('config.toml'));
+      // The env describes the scanning user's daemon only (see zeroclawDirs).
+      if (main && home === fs.homedir()) main.data = applyEnvOverrides(main.data, zeroclawEnvSpecs(main.data), fs);
       const data = main?.data ?? {};
       const skillsDirs = await skillRoots(configDir, data, home, fs);
 
@@ -314,6 +376,8 @@ export const zeroclawAdapter: AgentAdapter = {
         '~/.zeroclaw/data/*',
         '~/.zeroclaw/data/*/*',
         '~/.zeroclaw/state/*',
+        // Nested state stores (e.g. a WhatsApp Web session dir, ZC-009)
+        '~/.zeroclaw/state/*/*',
         '~/.zeroclaw/agents/*/workspace/*.md',
         // Homebrew service installs (macOS) keep the config under var/
         ...HOMEBREW_CONFIG_DIRS.map(d => `${d}/.secret_key`),

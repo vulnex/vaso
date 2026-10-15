@@ -1,4 +1,4 @@
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import type { AgentAdapter, DetectOptions } from './adapter.js';
 import type { AgentInstallation, GatewayInfo, ModelRef, ParsedConfig, ZoneGraph } from '../core/types.js';
 import type { ProbeManifest } from '../core/snapshot-types.js';
@@ -9,6 +9,7 @@ import { nvmBinaryGlob, npmPackageJsonGlobs } from './nvm-binary.js';
 import { discoverCliInstalls } from './cli-installs.js';
 import { getUserHomeDirs } from './openclaw.js';
 import { queryCliVersion, readPackageVersion } from './version-query.js';
+import { withoutLoadedConfigs } from './project-configs.js';
 
 const SYSTEM_CLI_PATHS = [
   '/usr/local/bin/opencode',
@@ -51,6 +52,45 @@ async function loadOpenCodeConfig(filePath: string, fs: FSProvider): Promise<Par
   }
 }
 
+async function loadConfigsIn(dir: string, fs: FSProvider): Promise<ParsedConfig[]> {
+  const out: ParsedConfig[] = [];
+  for (const name of CONFIG_FILENAMES) {
+    const filePath = join(dir, name);
+    if (!(await fs.access(filePath))) continue;
+    const parsed = await loadOpenCodeConfig(filePath, fs);
+    if (parsed) out.push(parsed);
+  }
+  return out;
+}
+
+/** JSON held in an environment variable, as a config layer named after it. */
+function envConfig(name: string, fs: FSProvider, wrap?: (v: unknown) => Record<string, unknown>): ParsedConfig | undefined {
+  const raw = fs.getEnv(name)?.trim();
+  if (!raw) return undefined;
+  try {
+    const value = JSON.parse(stripJsonc(raw)) as unknown;
+    const data = wrap ? wrap(value) : value;
+    if (!data || typeof data !== 'object' || Array.isArray(data)) return undefined;
+    return { raw, format: 'json', filePath: `$${name}`, data: data as Record<string, unknown> };
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Project root and config dirs: OpenCode "looks for a config file in the
+ * current directory, then traverses up to the nearest Git directory"
+ * (opencode.ai/docs/config). Outside a git repo only the cwd counts.
+ */
+async function projectDirs(cwd: string, fs: FSProvider): Promise<{ root: string; dirs: string[] }> {
+  const dirs: string[] = [];
+  for (let dir = cwd; ; dir = dirname(dir)) {
+    dirs.push(dir);
+    if (await fs.access(join(dir, '.git'))) return { root: dir, dirs };
+    if (dirname(dir) === dir) return { root: cwd, dirs: [cwd] };
+  }
+}
+
 function splitProviderModel(spec: string): { id: string; provider?: string } {
   const idx = spec.indexOf('/');
   if (idx === -1) return { id: spec };
@@ -78,19 +118,26 @@ export const opencodeAdapter: AgentAdapter = {
       });
       const cliBinary = installs.primary?.path;
 
-      const configFiles: ParsedConfig[] = [];
-      for (const name of CONFIG_FILENAMES) {
-        const filePath = join(configDir, name);
-        if (!(await fs.access(filePath))) continue;
-        const parsed = await loadOpenCodeConfig(filePath, fs);
-        if (parsed) configFiles.push(parsed);
-      }
-      // $OPENCODE_CONFIG: an extra config file merged over the global one
-      // (the scanning user's environment only)
-      const extra = home === fs.homedir() ? fs.getEnv('OPENCODE_CONFIG')?.trim() : undefined;
+      const configFiles: ParsedConfig[] = await loadConfigsIn(configDir, fs);
+      // Environment layers (the scanning user's environment only), in
+      // OpenCode's merge order: $OPENCODE_CONFIG (an extra file),
+      // $OPENCODE_CONFIG_DIR (an extra config dir: opencode.json, agents,
+      // plugins), $OPENCODE_CONFIG_CONTENT (inline JSON) and
+      // $OPENCODE_PERMISSION (inline permission JSON)
+      const self = home === fs.homedir();
+      const extra = self ? fs.getEnv('OPENCODE_CONFIG')?.trim() : undefined;
       if (extra && !configFiles.some(c => c.filePath === extra) && await fs.access(extra)) {
         const parsed = await loadOpenCodeConfig(extra, fs);
         if (parsed) configFiles.push(parsed);
+      }
+      const extraDir = self ? fs.getEnv('OPENCODE_CONFIG_DIR')?.trim() : undefined;
+      if (extraDir && extraDir !== configDir) {
+        configFiles.push(...await loadConfigsIn(extraDir, fs));
+      }
+      if (self) {
+        const content = envConfig('OPENCODE_CONFIG_CONTENT', fs);
+        const permission = envConfig('OPENCODE_PERMISSION', fs, v => ({ permission: v }));
+        configFiles.push(...[content, permission].filter((c): c is ParsedConfig => c !== undefined));
       }
 
       const authPath = join(dataDir, 'auth.json');
@@ -113,6 +160,28 @@ export const opencodeAdapter: AgentAdapter = {
         user: options?.allUsers ? user : undefined,
         cliBinary,
         otherInstalls: installs.others.length > 0 ? installs.others : undefined,
+      });
+    }
+
+    // Project config: opencode.json[c] from the cwd up to the git root, plus
+    // the project's .opencode/ dir (agents, plugins). installDir is that
+    // .opencode/ dir so per-agent markdown under it is found (OPC-006).
+    const { root, dirs } = await projectDirs(process.cwd(), fs);
+    const projectConfigs: ParsedConfig[] = [];
+    // Outermost first — the config nearest the cwd wins the merge
+    for (const dir of [...dirs].reverse()) projectConfigs.push(...await loadConfigsIn(dir, fs));
+    const projectDir = join(root, '.opencode');
+    const fresh = withoutLoadedConfigs(projectConfigs, installations);
+    const isUserDir = installations.some(i => i.installDir === projectDir);
+    if (!isUserDir && (fresh.length > 0 || await fs.access(projectDir))) {
+      installations.push({
+        agent: 'opencode',
+        agentName: `project:${basename(root)}`,
+        version: installations[0]?.version,
+        installDir: projectDir,
+        configFiles: fresh,
+        models: await this.getModels?.(fresh),
+        profile: 'project',
       });
     }
 
@@ -196,6 +265,12 @@ export const opencodeAdapter: AgentAdapter = {
         // package.json of every npm-global copy — versions non-primary copies on remote scans
         ...npmPackageJsonGlobs('opencode-ai'),
         '~/.config/opencode/agent/*.md',
+        '~/.config/opencode/agents/*.md',
+        // $OPENCODE_CONFIG_DIR config + agents (expanded by the probe)
+        '${OPENCODE_CONFIG_DIR}/opencode.json',
+        '${OPENCODE_CONFIG_DIR}/opencode.jsonc',
+        '${OPENCODE_CONFIG_DIR}/agent/*.md',
+        '${OPENCODE_CONFIG_DIR}/agents/*.md',
         '~/.config/opencode/plugin/*.{ts,js}',
         '~/.config/opencode/plugins/*.{ts,js}',
         nvmBinaryGlob('opencode'),

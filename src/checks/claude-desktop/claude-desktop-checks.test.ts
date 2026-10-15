@@ -389,3 +389,24 @@ describe('CD-010: Credentials Embedded in MCP URL/Headers', () => {
     expect(result.passed).toBe(true);
   });
 });
+
+describe('CD-002 fix', () => {
+  it('removes group/other access from a config holding MCP env values, and leaves others alone', async () => {
+    const { mkdtempSync, writeFileSync, statSync, chmodSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const dir = mkdtempSync(join(tmpdir(), 'vaso-cd002-'));
+    const withEnv = join(dir, 'claude_desktop_config.json');
+    const bare = join(dir, 'other.json');
+    for (const f of [withEnv, bare]) { writeFileSync(f, '{}'); chmodSync(f, 0o644); }
+    const configs = [
+      makeConfig(withEnv, { mcpServers: { a: { command: 'x', env: { K: 'v' } } } }),
+      makeConfig(bare, { globalShortcut: 'x' }),
+    ];
+    const check = claudeDesktopChecks.find(c => c.id === 'CD-002')!;
+    const r = await check.fix!(makeCtx(configs));
+    expect(r.applied).toBe(true);
+    expect(statSync(withEnv).mode & 0o777).toBe(0o600);
+    expect(statSync(bare).mode & 0o777).toBe(0o644);
+  });
+});

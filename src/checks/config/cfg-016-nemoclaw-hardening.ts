@@ -16,11 +16,10 @@ export const cfg016 = defineCheck({
     const configFile = join(nemoDir, 'config.json');
 
     const dirExists = await ctx.fs.access(nemoDir);
+    // A recommendation, not a misconfiguration: OpenClaw without NemoClaw is
+    // a supported deployment, so it must not cost every OpenClaw a finding.
     if (!dirExists) {
-      return h.result({
-        passed: false,
-        message: 'NemoClaw sandbox hardening is not installed — consider deploying NemoClaw for Landlock + seccomp + network isolation',
-      });
+      return h.passed('NemoClaw sandbox hardening is not installed — consider deploying NemoClaw for Landlock + seccomp + network isolation');
     }
 
     const evidence: Evidence[] = [];

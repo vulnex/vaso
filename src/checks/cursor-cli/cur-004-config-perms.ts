@@ -1,4 +1,4 @@
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { accessibleByOthers, markUnreachable, queryPermissions } from '../../core/permissions.js';
@@ -17,8 +17,12 @@ export const cur004 = defineCheck({
   async run(ctx, h) {
     const evidence: Evidence[] = [];
 
-    for (const filename of PROTECTED_FILES) {
-      const filePath = join(ctx.installation.installDir, filename);
+    // plus a cli-config.json relocated by CURSOR_CONFIG_DIR / XDG_CONFIG_HOME
+    const paths = new Set(PROTECTED_FILES.map(f => join(ctx.installation.installDir, f)));
+    for (const c of ctx.configs) if (basename(c.filePath) === 'cli-config.json') paths.add(c.filePath);
+
+    for (const filePath of paths) {
+      const filename = basename(filePath);
       if (!(await ctx.fs.access(filePath))) continue;
       try {
         const perms = await queryPermissions(ctx.fs, filePath);

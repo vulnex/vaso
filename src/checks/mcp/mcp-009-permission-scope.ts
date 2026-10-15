@@ -14,7 +14,8 @@ const SOURCE_PERMISSION_PATTERNS = [
   // fs.chmod(Sync)(path, 0o777), os.chmod(path, 0o666), chmod('777'), `chmod -R 777 …`, `chmod o+w …`
   { pattern: /\bchmod(?:Sync)?\s*\((?:[^()]*?,\s*)?['"]?(?:0o?|0)?(?:777|666)\b|\bchmod(?:Sync)?\s*\([^()]*?,\s*(?:511|438)\s*\)|\bchmod\s+(?:-R\s+)?(?:0?777|0?666|[ao]\+w)\b/i, name: 'World-writable permissions' },
   { pattern: /--privileged/i, name: 'Docker privileged mode' },
-  { pattern: /listen\s*\(\s*(?:0|80|443|8080|3000)\s*[,)]/i, name: 'Binding to well-known port' },
+  // Port 0 asks the OS for a free ephemeral port — the opposite of a fixed well-known one.
+  { pattern: /listen\s*\(\s*(?:80|443|8080|3000)\s*[,)]/i, name: 'Binding to well-known port' },
   { pattern: /glob\s*\(\s*['"](?:\/|\*\*)/i, name: 'Recursive filesystem globbing from root' },
   { pattern: /readdir(?:Sync)?\s*\(\s*['"](?:\/|~)/i, name: 'Reading root or home directory' },
 ];

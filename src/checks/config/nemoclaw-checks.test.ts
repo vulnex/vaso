@@ -54,9 +54,9 @@ beforeEach(() => {
 // --- CFG-016: NemoClaw Hardening ---
 
 describe('CFG-016: NemoClaw Hardening', () => {
-  it('fails when ~/.nemoclaw does not exist', async () => {
+  it('passes with a recommendation when ~/.nemoclaw does not exist (not a misconfiguration)', async () => {
     const result = await cfg016.run(makeContext());
-    expect(result.passed).toBe(false);
+    expect(result.passed).toBe(true);
     expect(result.id).toBe('CFG-016');
     expect(result.message).toContain('not installed');
   });

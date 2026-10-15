@@ -261,6 +261,12 @@ export const openclawAdapter: AgentAdapter = {
                 }
               }
 
+              // 2026.x keeps per-agent runtime state in agents/<id>/ too
+              // (agents/main/agent/auth-profiles.json, sessions/) — only a
+              // directory with its own config file is a sub-agent install;
+              // the rest are state dirs of agents configured in openclaw.json.
+              if (agentConfigFiles.length === 0) continue;
+
               // Merge global config data with agent-specific data
               let agentMerged = { ...merged };
               for (const c of agentConfigFiles) {

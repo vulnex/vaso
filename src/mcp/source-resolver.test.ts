@@ -261,6 +261,17 @@ describe('data files and --source paths', () => {
     expect(sources[0]).toMatchObject({ localPath: join(dir, 'wikipedia-mcp.py'), language: 'python' });
   });
 
+  it('reads a namespace package (no __init__.py) in a pyproject checkout', async () => {
+    writeFileSync(join(dir, 'pyproject.toml'), '[project]\nname = "x"\n[project.scripts]\nx = "awslabs.x_mcp_server.server:main"\n');
+    mkdirSync(join(dir, 'awslabs', 'x_mcp_server'), { recursive: true });
+    writeFileSync(join(dir, 'awslabs', 'x_mcp_server', '__init__.py'), '');
+    writeFileSync(join(dir, 'awslabs', 'x_mcp_server', 'server.py'), 'from mcp.server.fastmcp import FastMCP\nmcp = FastMCP("x")');
+    const { sources, unreadable } = await resolveSourcePaths([dir]);
+    expect(unreadable).toEqual([]);
+    expect(sources[0]).toMatchObject({ language: 'python' });
+    expect(sources[0].sourceCode).toContain('FastMCP("x")');
+  });
+
   it('reports paths with no server source', async () => {
     const { sources, unreadable } = await resolveSourcePaths([join(dir, 'missing'), dir]);
     expect(sources).toEqual([]);

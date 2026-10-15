@@ -1,6 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { asRecord, asStringArray, channelSections, isChannelEnabled, nanobotConfigs, pick } from './shared.js';
+import { asRecord, asStringArray, channelSections, isChannelEnabled, nanobotConfigs, pick, pyBool } from './shared.js';
 
 // Channels whose DM gate is `dm.policy` ("open" | "allowlist") instead of the
 // base allowFrom list (nanobot/channels/{slack,mattermost,signal}/runtime.py).
@@ -47,7 +47,7 @@ export const nb001 = defineCheck({
 
         if (name in DM_POLICY_DEFAULT) {
           const dm = asRecord(section.dm);
-          if (dm?.enabled === false) continue;
+          if (pyBool(dm?.enabled) === false) continue;
           const policy = typeof dm?.policy === 'string' ? dm.policy : DM_POLICY_DEFAULT[name];
           if (policy === 'open') {
             if (!WORKSPACE_SCOPED.has(name)) critical = true;

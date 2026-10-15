@@ -523,6 +523,25 @@ describe('LY-018: NODE_ENV=development disables Shield SSRF guard', () => {
   });
 });
 
+describe('layered .env files (Bun precedence)', () => {
+  it('judges a key in the file that wins: .env.local overrides .env', async () => {
+    const base = makeEnv({ ...ENV_EXAMPLE, NODE_ENV: 'development' });
+    const local = makeEnv({ NODE_ENV: 'production', LYRIE_DISCORD_TOKEN: 'tok', LYRIE_DISCORD_DM_POLICY: 'open' }, `${CHECKOUT}/.env.local`);
+    expect((await check('LY-018').run(makeCtx([base, local]))).passed).toBe(true);
+    const ly003 = await check('LY-003').run(makeCtx([base, local]));
+    expect(ly003.passed).toBe(false);
+    expect(ly003.evidence![0].file).toBe(`${CHECKOUT}/.env.local`);
+  });
+
+  it('a development value only in .env.development.local still fires, attributed to that file', async () => {
+    const base = makeEnv({ NODE_ENV: 'production' });
+    const devLocal = makeEnv({ NODE_ENV: 'development' }, `${CHECKOUT}/.env.development.local`);
+    const r = await check('LY-018').run(makeCtx([base, devLocal]));
+    expect(r.passed).toBe(false);
+    expect(r.evidence![0].file).toBe(`${CHECKOUT}/.env.development.local`);
+  });
+});
+
 describe('LY-019: skill sandbox root over-broad', () => {
   it('fails for /, ~, $HOME and /home', async () => {
     for (const root of ['/', '~', HOME, `${HOME}/`, '/home', '$HOME', '${HOME}']) {

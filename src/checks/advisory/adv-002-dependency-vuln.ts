@@ -26,6 +26,7 @@ export const adv002 = defineCheck({
     // a range counts only when every version it admits is affected (as MCP-027).
     const npmDeps = await collectServerDependencies(join(installDir, 'package.json'), 'javascript', ctx.fs, { searchParents: false });
     const cargoDeps = await loadCargoTomlDeps(ctx, installDir);
+    const undeclared = transitiveLookup(ctx, installDir);
 
     for (const adv of depAdvisories) {
       const dep = adv.affectedDependency!;
@@ -42,6 +43,19 @@ export const adv002 = defineCheck({
         }
         continue;
       }
+      const shipped = dep.ecosystem === 'npm' || dep.ecosystem === undefined ? await undeclared(dep.name) : [];
+      for (const t of shipped) {
+        if (!satisfies(fullVersion(t.version), dep.versionConstraint)) continue;
+        // An advisory that needs a particular use of the library (appliesWhen)
+        // can't be judged for code the agent doesn't own: report it, informationally.
+        evidence.push({
+          file: t.source,
+          detail: `${adv.id}: ${dep.name}@${t.version} (installed as a dependency of a dependency) — ${adv.title}`
+            + (adv.appliesWhen ? ` — applies only when ${adv.appliesWhen.usage}` : ''),
+          ...(adv.appliesWhen ? { mitigated: true } : {}),
+        });
+      }
+      if (shipped.length > 0) continue;
       const cargoVersion = cargoDeps[dep.name];
       if (cargoVersion && satisfies(cargoVersion, dep.versionConstraint)) {
         evidence.push({
@@ -57,6 +71,43 @@ export const adv002 = defineCheck({
     });
   },
 });
+
+/**
+ * Exact versions of a package the project doesn't declare but ships anyway
+ * (a dependency of a dependency): the hoisted installed copy, else every
+ * lockfile entry for it (package-lock v2/v3 `packages`, nested copies too).
+ * Looked up by advisory name only — no full tree walk.
+ */
+function transitiveLookup(ctx: ScanContext, dir: string): (name: string) => Promise<Array<{ version: string; source: string }>> {
+  let lock: Promise<Record<string, { version?: unknown }>> | undefined;
+  const readLock = async () => {
+    try {
+      const data = JSON.parse(await ctx.fs.readFile(join(dir, 'package-lock.json'))) as { packages?: Record<string, { version?: unknown }> };
+      return data.packages ?? {};
+    } catch {
+      return {};
+    }
+  };
+  return async (name) => {
+    const installed = join(dir, 'node_modules', name, 'package.json');
+    try {
+      const version = (JSON.parse(await ctx.fs.readFile(installed)) as { version?: unknown }).version;
+      if (typeof version === 'string') return [{ version, source: installed }];
+    } catch {
+      // not installed — try the lockfile
+    }
+    const packages = await (lock ??= readLock());
+    const out: Array<{ version: string; source: string }> = [];
+    const seen = new Set<string>();
+    for (const [key, entry] of Object.entries(packages)) {
+      if (key !== `node_modules/${name}` && !key.endsWith(`/node_modules/${name}`)) continue;
+      if (typeof entry?.version !== 'string' || seen.has(entry.version)) continue;
+      seen.add(entry.version);
+      out.push({ version: entry.version, source: join(dir, 'package-lock.json') });
+    }
+    return out;
+  };
+}
 
 async function loadCargoTomlDeps(ctx: ScanContext, dir: string): Promise<Record<string, string>> {
   try {

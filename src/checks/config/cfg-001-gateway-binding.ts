@@ -1,4 +1,5 @@
 import { defineCheck } from '../../core/check-builder.js';
+import { hermesApiServer } from '../../adapters/hermes-api-server.js';
 import { CODING_AGENTS, type Evidence, type FixResult } from '../../core/types.js';
 import { fixFirstConfig } from '../../remediation/config-writer.js';
 import { getNestedValue } from '../../core/utils.js';
@@ -27,7 +28,27 @@ function wildcardListeners(data: unknown, wildcards: string[], path = '', depth 
 const HOST_PATHS = ['gateway.host', 'server.host', 'host', 'GATEWAY_HOST'];
 const WILDCARD_ADDRS = ['0.0.0.0', '[::]', '::'];
 /** Bind values that expose the listener beyond loopback (symbolic modes and wildcard addresses). */
-const SYMBOLIC_EXPOSED = ['all', 'lan', ...WILDCARD_ADDRS];
+const SYMBOLIC_EXPOSED = ['all', 'lan', 'auto', ...WILDCARD_ADDRS];
+
+/**
+ * Why an exposed symbolic bind is reported. OpenClaw 2026.9.4 `gateway.bind`:
+ * "lan" listens on 0.0.0.0; "auto" prefers the tailnet address, then LAN
+ * (0.0.0.0, also the container default) — its schema: '"auto" can expose all
+ * interfaces' (docs.openclaw.ai/gateway/config-gateway).
+ */
+function bindDetail(bind: string): string {
+  switch (bind.toLowerCase()) {
+    case 'lan': return 'Gateway bind mode "lan" — listens on 0.0.0.0, accessible from all network interfaces';
+    case 'auto': return 'Gateway bind mode "auto" — picks the tailnet address, else LAN (0.0.0.0, every interface); "loopback" keeps it local';
+    default: return `Gateway bind mode "${bind}" — accessible from all network interfaces`;
+  }
+}
+
+/** OpenClaw: Tailscale serve/funnel forces the gateway onto loopback, whatever gateway.bind says. */
+function tailscaleForcesLoopback(data: Record<string, unknown>): boolean {
+  const mode = getNestedValue(data, 'gateway.tailscale.mode');
+  return mode === 'serve' || mode === 'funnel';
+}
 
 export const cfg001 = defineCheck({
   id: 'CFG-001',
@@ -41,6 +62,11 @@ export const cfg001 = defineCheck({
   excludedAgents: [...CODING_AGENTS, 'lyrie', 'ironclaw'],
 
   async run(ctx, h) {
+    // Hermes' API server is bearer-authenticated once a key is set; exposure
+    // without one is HM-004's critical finding, not a second one here.
+    if (ctx.installation.agent === 'hermes' && hermesApiServer(ctx.configs).key) {
+      return h.passed(`Hermes API server listens on ${ctx.installation.gateway?.host ?? 'its configured host'} with an API key (HM-004 covers unauthenticated exposure)`);
+    }
     const evidence: Evidence[] = [];
     // The fix rewrites gateway.host / GATEWAY_HOST; only offer it when that
     // key is what is exposed (a channel webhook needs its own setting).
@@ -71,14 +97,10 @@ export const cfg001 = defineCheck({
       const bind = getNestedValue(config.data, 'gateway.bind') ?? getNestedValue(config.data, 'bind');
       if (getNestedValue(config.data, 'gateway.bind') !== undefined) reported.add('gateway.bind');
       else if (getNestedValue(config.data, 'bind') !== undefined) reported.add('bind');
-      if (typeof bind === 'string' && SYMBOLIC_EXPOSED.includes(bind.toLowerCase())) {
+      if (typeof bind === 'string' && SYMBOLIC_EXPOSED.includes(bind.toLowerCase())
+          && !tailscaleForcesLoopback(config.data)) {
         gatewayKey = true;
-        evidence.push({
-          file: config.filePath,
-          detail: bind.toLowerCase() === 'lan'
-            ? 'Gateway bind mode "lan" — accessible from the local network'
-            : `Gateway bind mode "${bind}" — accessible from all network interfaces`,
-        });
+        evidence.push({ file: config.filePath, detail: bindDetail(bind) });
       }
 
       // Any other listener bound to a wildcard address (channel webhooks,
@@ -112,6 +134,17 @@ export const cfg001 = defineCheck({
       }
     }
 
+    // The listener the adapter resolved (NET-001's view) can come from keys
+    // this walk can't read as a bind: PicoClaw's launcher `public: true`,
+    // OpenShell's `bind_address = "0.0.0.0:8080"`, an env override.
+    const gw = ctx.installation.gateway;
+    if (evidence.length === 0 && gw?.host && WILDCARD_ADDRS.includes(gw.host.trim())) {
+      evidence.push({
+        file: ctx.installation.configFiles[0]?.filePath ?? ctx.installation.installDir,
+        detail: `Gateway listener resolves to ${gw.host}${gw.port ? `:${gw.port}` : ''} — accessible from all network interfaces`,
+      });
+    }
+
     // Deduplicate by file
     const uniqueEvidence = evidence.filter((e, i, arr) =>
       arr.findIndex(x => x.file === e.file && (e.line !== undefined ? x.line === e.line : x.detail === e.detail)) === i
@@ -139,7 +172,8 @@ export const cfg001 = defineCheck({
       let result: FixResult | undefined;
       const symbolic = ['gateway.bind', 'bind'].find(path => {
         const bind = getNestedValue(config.data, path);
-        return typeof bind === 'string' && SYMBOLIC_EXPOSED.includes(bind.toLowerCase());
+        return typeof bind === 'string' && SYMBOLIC_EXPOSED.includes(bind.toLowerCase())
+          && !tailscaleForcesLoopback(config.data);
       });
       if (symbolic) {
         result = await fixFirstConfig([config], {

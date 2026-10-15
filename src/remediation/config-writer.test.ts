@@ -159,6 +159,63 @@ describe('updateTomlFile', () => {
     expect(content).toContain('firejail');
     expect(content).toContain('port = 3000');
   });
+
+  it('edits the one key line in place, keeping comments and float formatting', async () => {
+    const filePath = join(TEST_DIR, 'config.toml');
+    const before = [
+      '# ZeroClaw config',
+      'schema_version = 3',
+      'temperature = 1.0',
+      '',
+      '[gateway]',
+      '# bind address',
+      'host = "127.0.0.1"',
+      'require_pairing = false # TODO re-enable',
+      'paths = [',
+      '  "a", # first',
+      '  "b",',
+      ']',
+      '',
+      '# risk profiles',
+      '[risk_profiles.default]',
+      'level = "full"',
+      '',
+    ].join('\n');
+    await writeFile(filePath, before);
+
+    await updateTomlFile(filePath, 'gateway.require_pairing', true);
+    let content = await readFile(filePath, 'utf-8');
+    expect(content).toBe(before.replace('require_pairing = false # TODO re-enable', 'require_pairing = true # TODO re-enable'));
+
+    // A key absent from an existing table goes under that table's header
+    await updateTomlFile(filePath, 'gateway.allow_public_bind', false);
+    content = await readFile(filePath, 'utf-8');
+    expect(content).toContain(']\nallow_public_bind = false\n\n# risk profiles');
+    expect(content).toContain('temperature = 1.0');
+
+    // A missing table is appended; everything else stays byte-identical
+    await updateTomlFile(filePath, 'secrets.encrypt', true);
+    content = await readFile(filePath, 'utf-8');
+    expect(content.endsWith('level = "full"\n\n[secrets]\nencrypt = true\n')).toBe(true);
+    expect(content).toContain('# bind address');
+
+    // Dotted key inside a table
+    await writeFile(filePath, '[agents.bot]\nworkspace.unrestricted_filesystem = true # yolo\n');
+    await updateTomlFile(filePath, 'agents.bot.workspace.unrestricted_filesystem', false);
+    expect(await readFile(filePath, 'utf-8')).toBe('[agents.bot]\nworkspace.unrestricted_filesystem = false # yolo\n');
+  });
+
+  it('replaces a multi-line array value and falls back to a full rewrite for inline tables', async () => {
+    const filePath = join(TEST_DIR, 'config.toml');
+    await writeFile(filePath, '[p]\nroots = [\n  "/",\n]\nlevel = "x"\n');
+    await updateTomlFile(filePath, 'p.roots', ['/srv']);
+    expect(await readFile(filePath, 'utf-8')).toBe('[p]\nroots = [ "/srv" ]\nlevel = "x"\n');
+
+    await writeFile(filePath, '# c\n[gateway]\ntls = { enabled = false }\n');
+    await updateTomlFile(filePath, 'gateway.tls.enabled', true);
+    const { parse } = await import('smol-toml');
+    expect(parse(await readFile(filePath, 'utf-8'))).toEqual({ gateway: { tls: { enabled: true } } });
+  });
 });
 
 describe('chmodFile', () => {

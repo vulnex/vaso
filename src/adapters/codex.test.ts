@@ -112,6 +112,31 @@ describe('Codex adapter', () => {
     expect(codexAdapter.getGatewayInfo({})).toBeUndefined();
   });
 
+  it('loads $CODEX_HOME/<name>.config.toml profile files and trusted projects\' .codex layer', async () => {
+    const configPath = join(codexDir, 'config.toml');
+    const profilePath = join(codexDir, 'yolo.config.toml');
+    const project = '/work/proj';
+    const projectConfig = join(project, '.codex', 'config.toml');
+    setExistingPaths([codexDir, configPath, profilePath, join(project, '.codex'), projectConfig]);
+    const { readdir } = await import('node:fs/promises');
+    vi.mocked(readdir).mockImplementation((async (p: string) =>
+      (p === codexDir ? ['config.toml', 'yolo.config.toml', 'auth.json'] : [])) as any);
+    mockLoadConfig.mockImplementation(async (path) => {
+      if (path === configPath) return mockConfig(configPath, { projects: { [project]: { trust_level: 'trusted' }, '/work/other': { trust_level: 'untrusted' } } });
+      if (path === profilePath) return mockConfig(profilePath, { approval_policy: 'never' });
+      if (path === projectConfig) return mockConfig(projectConfig, { approval_policy: 'never' });
+      throw new Error('ENOENT');
+    });
+
+    const result = await codexAdapter.detect();
+    const user = result.find(r => !r.profile);
+    expect(user!.configFiles.map(c => c.filePath)).toEqual([configPath, profilePath]);
+    const proj = result.find(r => r.profile === 'project');
+    expect(proj?.installDir).toBe(join(project, '.codex'));
+    expect(proj?.configFiles.map(c => c.filePath)).toEqual([projectConfig]);
+    expect(result).toHaveLength(2);
+  });
+
   it('returns CLI command', () => {
     expect(codexAdapter.getCLICommand!()).toBe('codex');
   });

@@ -1,5 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { envNote } from '../../adapters/env-overrides.js';
 import { fixFirstConfig } from '../../remediation/config-writer.js';
 import { enabledChannels, execConfig, isChatChannel, picoMainConfigs } from './shared.js';
 
@@ -20,7 +21,7 @@ export const pcl004 = defineCheck({
       if (chats.length === 0) continue;
       evidence.push({
         file: config.filePath,
-        snippet: `tools.exec.allow_remote: ${cfg.allow_remote === true ? 'true' : '(default true)'}`,
+        snippet: `tools.exec.allow_remote: ${cfg.allow_remote === true ? 'true' : '(default true)'}${envNote(config.data, 'tools.exec.allow_remote')}`,
         detail: `Exec is reachable from ${chats.map(c => c.name).join(', ')}`,
       });
     }

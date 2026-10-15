@@ -332,3 +332,76 @@ describe('GEM-011: Trusted Folder Too Broad', () => {
     expect(result.passed).toBe(true);
   });
 });
+
+describe('deep-test 2026-10-15 regressions', () => {
+  const byId = (id: string) => geminiCliChecks.find(c => c.id === id)!;
+
+  it('GEM-001 flags a literal bearer token in mcpServers.*.headers', async () => {
+    const result = await byId('GEM-001').run(makeCtx([makeConfig('settings.json', {
+      mcpServers: { remote: { httpUrl: 'https://mcp.example.com', headers: { Authorization: 'Bearer ghp_abcdefghijklmnopqrstuvwxyz0123456789' } } },
+    })]));
+    expect(result.passed).toBe(false);
+    expect(result.evidence?.[0].snippet).toContain('mcpServers.remote.headers.Authorization');
+  });
+
+  it('GEM-001 passes a $-referenced header value', async () => {
+    const result = await byId('GEM-001').run(makeCtx([makeConfig('settings.json', {
+      mcpServers: { remote: { headers: { Authorization: 'Bearer $MCP_TOKEN' } } },
+    })]));
+    expect(result.passed).toBe(true);
+  });
+
+  it('GEM-003 flags an MCP server with trust: true (skips tool-call confirmation)', async () => {
+    const result = await byId('GEM-003').run(makeCtx([makeConfig('settings.json', {
+      mcpServers: { fs: { command: 'node', args: ['server.js'], trust: true }, other: { command: 'x' } },
+    })]));
+    expect(result.passed).toBe(false);
+    expect(result.evidence).toHaveLength(1);
+    expect(result.evidence?.[0].snippet).toBe('mcpServers.fs.trust = true');
+  });
+
+  it('GEM-008 compares the parsed host — loopback-looking remote hosts are flagged', async () => {
+    for (const url of ['http://localhost.evil.com/mcp', 'http://127.0.0.1.nip.io/mcp']) {
+      const result = await byId('GEM-008').run(makeCtx([makeConfig('settings.json', { mcpServers: { s: { httpUrl: url } } })]));
+      expect(result.passed, url).toBe(false);
+    }
+    for (const url of ['http://localhost:3000/mcp', 'http://127.0.0.2/mcp', 'http://[::1]:8080/mcp']) {
+      const result = await byId('GEM-008').run(makeCtx([makeConfig('settings.json', { mcpServers: { s: { url } } })]));
+      expect(result.passed, url).toBe(true);
+    }
+  });
+
+  it('GEM-009 flags legacy tools.approvalMode: auto_edit (migrated at load)', async () => {
+    const result = await byId('GEM-009').run(makeCtx([makeConfig('settings.json', { tools: { approvalMode: 'auto_edit' } })]));
+    expect(result.passed).toBe(false);
+    expect(result.evidence?.[0].snippet).toBe('tools.approvalMode = "auto_edit"');
+  });
+
+  it('GEM-009 lets general.defaultApprovalMode win over the legacy key', async () => {
+    const result = await byId('GEM-009').run(makeCtx([makeConfig('settings.json', {
+      general: { defaultApprovalMode: 'default' }, tools: { approvalMode: 'auto_edit' },
+    })]));
+    expect(result.passed).toBe(true);
+  });
+
+  it('GEM-011 resolves TRUST_PARENT to the parent folder ("~/code" trusts $HOME)', async () => {
+    const result = await byId('GEM-011').run(makeCtx([makeConfig('/home/test/.gemini/trustedFolders.json', {
+      '~/code': 'TRUST_PARENT',
+      '/home/test/code/app': 'TRUST_PARENT',
+    })]));
+    expect(result.passed).toBe(false);
+    expect(result.evidence).toHaveLength(1);
+    expect(result.evidence?.[0].detail).toContain('home directory');
+  });
+
+  it('GEM-011 reads the file named by GEMINI_CLI_TRUSTED_FOLDERS_PATH', async () => {
+    const fs = makeFs({
+      access: vi.fn(async (p: string) => p === '/etc/trust.json'),
+      readFile: vi.fn(async () => JSON.stringify({ '/': 'TRUST_FOLDER' })),
+      getEnv: (k: string) => (k === 'GEMINI_CLI_TRUSTED_FOLDERS_PATH' ? '/etc/trust.json' : undefined),
+    } as Partial<FSProvider>);
+    const result = await byId('GEM-011').run(makeCtx([], fs));
+    expect(result.passed).toBe(false);
+    expect(result.evidence?.[0].file).toBe('/etc/trust.json');
+  });
+});

@@ -35,9 +35,19 @@ describe('iocScanFiles', () => {
       '/h/.claude/plugins/p/dist': ['bundle.js'],
       '/h/.claude/plugins/p/.git/hooks': ['pre-commit.sh'],
       '/h/.claude/plugins/p/src': ['main.ts'],
+      '/h/.claude/skills/tool/dist': ['index.js'],
+      '/h/.claude/skills/tool/scripts': ['run.py', 'conf.toml'],
     });
     const files = await iocScanFiles(ctx);
-    expect(files.sort()).toEqual(['/h/.claude/plugins/p/src/main.ts', '/h/.claude/skills/tool/index.js']);
+    // Build output and .py/.md/.toml count inside a skill tree; dist/ elsewhere doesn't
+    expect(files.sort()).toEqual([
+      '/h/.claude/plugins/p/src/main.ts',
+      '/h/.claude/skills/tool/SKILL.md',
+      '/h/.claude/skills/tool/dist/index.js',
+      '/h/.claude/skills/tool/index.js',
+      '/h/.claude/skills/tool/scripts/conf.toml',
+      '/h/.claude/skills/tool/scripts/run.py',
+    ]);
     // skills dir sits inside the install dir — walked once, not twice
     expect(walks).toEqual(['/h/.claude']);
   });

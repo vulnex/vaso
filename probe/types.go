@@ -34,10 +34,13 @@ type CommandRequest struct {
 // CommandForEach names the earlier command (by ID) whose stdout is JSON, the
 // top-level key of the array to iterate (a bare top-level array is accepted
 // too), and the string fields of each item substituted for {field} in Args.
+// Defaults supplies a value for a field an item omits (an OpenShell sandbox
+// listed without a workspace lives in "default").
 type CommandForEach struct {
-	From   string   `json:"from"`
-	Array  string   `json:"array"`
-	Fields []string `json:"fields"`
+	From     string            `json:"from"`
+	Array    string            `json:"array"`
+	Fields   []string          `json:"fields"`
+	Defaults map[string]string `json:"defaults,omitempty"`
 }
 
 // ProbeSnapshot is the complete output of a probe run.

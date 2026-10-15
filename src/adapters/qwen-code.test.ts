@@ -106,3 +106,51 @@ describe('Qwen Code adapter', () => {
     expect(paths).toContain(join(qwenDir, 'mcp-oauth-tokens.json'));
   });
 });
+
+describe('Qwen Code adapter — QWEN_HOME and modelProviders', () => {
+  const HOME = '/home/tester';
+  function fakeFs(files: Record<string, string>, env: Record<string, string> = {}): import('../core/fs-provider.js').FSProvider {
+    const paths = new Set<string>();
+    for (const key of Object.keys(files)) {
+      let p = key;
+      paths.add(p);
+      while ((p = p.slice(0, p.lastIndexOf('/'))) && p.length > 0) paths.add(p);
+    }
+    return {
+      platform: 'linux',
+      homedir: () => HOME,
+      getEnv: (k: string) => env[k],
+      access: async (p: string) => paths.has(p),
+      readFile: async (p: string) => {
+        if (!(p in files)) throw new Error(`ENOENT ${p}`);
+        return files[p];
+      },
+      readdirEntries: async () => { throw new Error('ENOENT'); },
+      execSync: () => { throw new Error('not found'); },
+    } as unknown as import('../core/fs-provider.js').FSProvider;
+  }
+
+  it('reads the config dir from QWEN_HOME (absolute and ~-relative)', async () => {
+    const files = { '/srv/qwen/settings.json': '{}', [`${HOME}/cfg/qwen/settings.json`]: '{}' };
+    const abs = await qwenCodeAdapter.detect({ fs: fakeFs(files, { QWEN_HOME: '/srv/qwen' }) });
+    expect(abs[0].installDir).toBe('/srv/qwen');
+    const tilde = await qwenCodeAdapter.detect({ fs: fakeFs(files, { QWEN_HOME: '~/cfg/qwen' }) });
+    expect(tilde[0].installDir).toBe(`${HOME}/cfg/qwen`);
+  });
+
+  it('reads models from modelProviders keyed by auth type', async () => {
+    const settings = JSON.stringify({
+      security: { auth: { selectedType: 'anthropic' } },
+      modelProviders: {
+        openai: [{ id: 'qwen3-coder-plus', envKey: 'OPENAI_API_KEY' }],
+        anthropic: [{ id: 'claude-sonnet', envKey: 'ANTHROPIC_API_KEY' }],
+      },
+    });
+    const [inst] = await qwenCodeAdapter.detect({ fs: fakeFs({ [`${HOME}/.qwen/settings.json`]: settings }) });
+    expect(inst.models).toEqual([{ id: 'claude-sonnet', provider: 'anthropic' }]);
+  });
+
+  it('lists QWEN.md as a memory file', () => {
+    expect(qwenCodeAdapter.getMemoryFiles!('/x/.qwen')).toContain('/x/.qwen/QWEN.md');
+  });
+});

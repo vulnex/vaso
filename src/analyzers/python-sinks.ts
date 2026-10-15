@@ -6,18 +6,31 @@
  *  - exec / fs-access: can the server run commands or code, or read secrets?
  *  - injection: does caller-controlled data reach one of those sinks?
  *
- * Lexical, not a parser: comments and docstrings are skipped, and the
- * injection rules only fire on shapes where the sink's argument is visibly
- * non-literal on the same line.
+ * Lexical, not a parser: comments and docstrings are skipped, import aliases
+ * are resolved first (`import subprocess as sp`, `from os import system`,
+ * `__import__("os")`), and a call spread over several lines is read as one
+ * statement. Tool input is followed from the parameters of `@mcp.tool()`
+ * functions through assignments in their body, and into local helpers they
+ * call — so a fixed command (`subprocess.run(["git", "status"])`) is told
+ * apart from one the caller supplies.
  */
 
 import { classifySensitivePath } from './sensitive-paths.js';
+import type { DataFlowResult } from './ast-analyzer.js';
 
 export interface PythonSinkFinding {
   kind: 'exec' | 'fs-access' | 'injection';
   line: number;
   snippet: string;
   description: string;
+  /** exec: the static text of the command/code argument(s), `{…}` for values. */
+  command?: string;
+  /** exec: the command/code is computed at runtime. */
+  dynamic?: boolean;
+  /** exec: the command/code is decoded at runtime (base64, hex, rot13). */
+  decoded?: boolean;
+  /** exec: tool input reaches the call — how, e.g. `cmd ← query`. */
+  toolInput?: string;
 }
 
 const EXEC_SINKS: Array<{ re: RegExp; name: (m: RegExpMatchArray) => string }> = [
@@ -26,6 +39,7 @@ const EXEC_SINKS: Array<{ re: RegExp; name: (m: RegExpMatchArray) => string }> =
   { re: /\bos\.(system|popen|exec[lv]p?e?|spawn[lv]p?e?|posix_spawnp?)\s*\(/, name: (m) => `os.${m[1]}` },
   { re: /\basyncio\.create_subprocess_(exec|shell)\s*\(/, name: (m) => `asyncio.create_subprocess_${m[1]}` },
   { re: /\bpty\.spawn\s*\(/, name: () => 'pty.spawn' },
+  { re: /\bcommands\.getoutput\s*\(/, name: () => 'commands.getoutput' },
 ];
 
 const INJECTION_RULES: Array<{ re: RegExp; description: string }> = [
@@ -60,10 +74,20 @@ const CONFINES = /\b(?:startswith|commonpath|is_relative_to|relative_to)\s*\(/;
 const FILE_OPS = /\bopen\s*\(|\blistdir\s*\(|\bscandir\s*\(|\bmakedirs\s*\(|\bos\.remove\s*\(|\bshutil\.|\.(?:read|write)_(?:text|bytes)\s*\(/;
 
 const STRING_LITERAL = /["']([^"']{2,})["']/g;
+/** Runtime decoding feeding a command: base64/hex/rot13 back into text. */
+const DECODES = /\b(?:b64decode|urlsafe_b64decode|b32decode|b16decode|b85decode|a85decode|unhexlify|a2b_base64|fromhex)\s*\(|\bcodecs\.decode\s*\(/;
+
+/** Modules whose functions are sinks, by the name this file binds them to. */
+const SINK_MODULES = new Set(['os', 'subprocess', 'asyncio', 'pty', 'commands']);
+
+interface CodeLine {
+  line: number;
+  text: string;
+}
 
 /** Code lines with their 1-based numbers; comments and docstring bodies dropped. */
-function codeLines(code: string): Array<{ line: number; text: string }> {
-  const out: Array<{ line: number; text: string }> = [];
+function codeLines(code: string): CodeLine[] {
+  const out: CodeLine[] = [];
   let inDocstring: string | undefined;
   const lines = code.split('\n');
   for (let i = 0; i < lines.length; i++) {
@@ -85,22 +109,241 @@ function codeLines(code: string): Array<{ line: number; text: string }> {
   return out;
 }
 
-export function analyzePythonSinks(code: string): PythonSinkFinding[] {
-  const findings: PythonSinkFinding[] = [];
-  const lines = codeLines(code);
-  const confined = RESOLVES.test(code) && CONFINES.test(code);
-  const touchesFiles = FILE_OPS.test(code);
-
-  for (const { line, text } of lines) {
-    const snippet = text.trim().slice(0, 120);
-
-    for (const { re, name } of EXEC_SINKS) {
-      const m = text.match(re);
-      if (m) {
-        findings.push({ kind: 'exec', line, snippet, description: `${name(m)}() call detected` });
-        break;
+/**
+ * Import aliases rewritten to the canonical dotted names the sink patterns
+ * know: `sp.run(` → `subprocess.run(`, `check_output(` (from-imported) →
+ * `subprocess.check_output(`, `__import__("os").system(` → `os.system(`.
+ */
+function aliasRewriter(code: string): (text: string) => string {
+  const rewrites: Array<[RegExp, string]> = [];
+  for (const m of code.matchAll(/^[ \t]*import[ \t]+([^\n#]+)/gm)) {
+    for (const part of m[1].split(',')) {
+      const am = /^\s*([\w.]+)\s+as\s+(\w+)\s*$/.exec(part);
+      if (am && SINK_MODULES.has(am[1]) && am[2] !== am[1]) {
+        rewrites.push([new RegExp(String.raw`(?<![\w.])${am[2]}\.`, 'g'), `${am[1]}.`]);
       }
     }
+  }
+  for (const m of code.matchAll(/^[ \t]*from[ \t]+(os|subprocess|asyncio|pty)[ \t]+import[ \t]+\(?([^\n#)]+)/gm)) {
+    for (const part of m[2].split(',')) {
+      const im = /^\s*(\w+)(?:\s+as\s+(\w+))?\s*$/.exec(part);
+      if (!im) continue;
+      const local = im[2] ?? im[1];
+      rewrites.push([new RegExp(String.raw`(?<![\w.])${local}\s*\(`, 'g'), `${m[1]}.${im[1]}(`]);
+    }
+  }
+  return (text: string): string => {
+    let out = text.replace(/\b__import__\(\s*["'](\w+)["']\s*\)\s*\./g, '$1.');
+    // getattr(os, "sys" + "tem")(cmd): a sink name assembled to dodge a grep.
+    out = out.replace(/\bgetattr\(\s*(os|subprocess)\s*,\s*([^)]*)\)\s*\(/g, (m, mod: string, name: string) => {
+      const literal = name.replace(/["'\s+]/g, '');
+      return /^\w+$/.test(literal) ? `${mod}.${literal}(` : m;
+    });
+    for (const [re, to] of rewrites) out = out.replace(re, to);
+    return out;
+  };
+}
+
+/** Physical lines merged while a bracket is open, so a multi-line call is one statement. */
+function statements(lines: CodeLine[]): Array<CodeLine & { last: number }> {
+  const out: Array<CodeLine & { last: number }> = [];
+  let current: (CodeLine & { last: number }) | undefined;
+  let depth = 0;
+  for (const l of lines) {
+    if (current && depth > 0) {
+      current.text += ' ' + l.text.trim();
+      current.last = l.line;
+    } else {
+      current = { line: l.line, text: l.text, last: l.line };
+      out.push(current);
+      depth = 0;
+    }
+    for (const c of l.text.replace(/(["'])(?:\\.|(?!\1).)*\1/g, '')) {
+      if (c === '(' || c === '[' || c === '{') depth++;
+      else if (c === ')' || c === ']' || c === '}') depth = Math.max(0, depth - 1);
+    }
+  }
+  return out;
+}
+
+/** Argument text of the call whose `(` is at `open`. */
+function callArgs(text: string, open: number): string {
+  let depth = 0;
+  for (let j = open; j < text.length; j++) {
+    const c = text[j];
+    if (c === '"' || c === "'") {
+      const close = text.indexOf(c, j + 1);
+      if (close === -1) break;
+      j = close;
+      continue;
+    }
+    if (c === '(') depth++;
+    else if (c === ')' && --depth === 0) return text.slice(open + 1, j);
+  }
+  return text.slice(open + 1);
+}
+
+/** Static text of a call's command argument(s): literals kept, values as `{…}`. */
+function commandOf(args: string): { command?: string; dynamic: boolean } {
+  const head = args.replace(/\b\w+\s*=[\s\S]*$/, ''); // keyword arguments (shell=, cwd=) aren't the command
+  const parts: string[] = [];
+  let dynamic = false;
+  for (const m of head.matchAll(/(?:[rRbBuU]?(["'])((?:\\.|(?!\1).)*)\1)|(f["'](?:\\.|[^"'])*["'])|([A-Za-z_][\w.]*(?:\([^()]*\))?)/g)) {
+    if (m[2] !== undefined) parts.push(m[2]);
+    else if (m[3]) { dynamic = true; parts.push(m[3].slice(2, -1)); }
+    else if (m[4]) { dynamic = true; parts.push('{…}'); }
+  }
+  const command = parts.join(' ').trim();
+  return { ...(command && command !== '{…}' ? { command } : {}), dynamic };
+}
+
+// ── Tool input ──────────────────────────────────────────────────────────
+
+interface PyFunction {
+  name: string;
+  params: string[];
+  start: number; // index into statements
+  end: number;
+  tool: boolean;
+}
+
+const TOOL_DECORATOR = /^\s*@\s*[\w.]*\b(?:tool|call_tool)\b/;
+
+function functionsOf(stmts: Array<CodeLine & { last: number }>): PyFunction[] {
+  const fns: PyFunction[] = [];
+  for (let i = 0; i < stmts.length; i++) {
+    const def = /^(\s*)(?:async\s+)?def\s+(\w+)\s*\(/.exec(stmts[i].text);
+    if (!def) continue;
+    const paramText = callArgs(stmts[i].text, def[0].length - 1);
+    const indent = def[1].length;
+    let end = i + 1;
+    while (end < stmts.length && stmts[end].text.search(/\S/) > indent) end++;
+    let tool = false;
+    for (let d = i - 1; d >= 0 && /^\s*@/.test(stmts[d].text); d--) if (TOOL_DECORATOR.test(stmts[d].text)) tool = true;
+    // A bool/int/float parameter can't carry a command or code.
+    const params = topLevelParts(paramText)
+      .filter((p) => !/:\s*(?:bool|int|float)\b/.test(p) && !/=\s*(?:True|False|-?\d+(?:\.\d+)?)\s*$/.test(p))
+      .map((p) => /^\s*\**([A-Za-z_]\w*)/.exec(p)?.[1])
+      .filter((p): p is string => !!p && p !== 'self' && p !== 'cls' && p !== 'ctx');
+    fns.push({ name: def[2], params, start: i, end, tool });
+  }
+  return fns;
+}
+
+/**
+ * Variables (per function) holding an argv list that tool input is only an
+ * argument of: `cmd = linter.command + [str(output_dir)]`. Passed to a
+ * non-shell call, the input can't choose the program.
+ */
+const argvNames = new Map<PyFunction, Set<string>>();
+const LIST_BUILDING = /^\s*\[|\]\s*\+|\+\s*\[|\bfor\b[\s\S]*\bin\b/;
+const SHELL_PROGRAM = /^\s*[rRbBuU]?["'](?:\/(?:usr\/)?bin\/)?(?:sh|bash|zsh|dash|cmd(?:\.exe)?|powershell(?:\.exe)?|pwsh|python[\d.]*)["']/;
+
+/** Comma-separated parts at bracket depth 0 (a parameter list with annotations). */
+function topLevelParts(text: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let start = 0;
+  const clean = text.replace(/(["'])(?:\\.|(?!\1).)*\1/g, (m) => '_'.repeat(m.length));
+  for (let i = 0; i < clean.length; i++) {
+    const c = clean[i];
+    if (c === '(' || c === '[' || c === '{') depth++;
+    else if (c === ')' || c === ']' || c === '}') depth--;
+    else if (c === ',' && depth === 0) { parts.push(text.slice(start, i)); start = i + 1; }
+  }
+  parts.push(text.slice(start));
+  return parts;
+}
+
+/** Calls whose result still carries their argument's text. */
+const PASSTHROUGH_CALLS = /^(?:str|f|format|join|replace|strip|lstrip|rstrip|lower|upper|split|splitlines|shlex\.split|shlex\.join|os\.path\.join|os\.path\.expanduser|Path|list|tuple|dict|get|pop|encode|decode|append|extend|copy)$/;
+
+/**
+ * The parts of an assigned expression whose value flows into the variable:
+ * a condition (`a if flag else b`, `not x`) only picks between values, and an
+ * arbitrary call (`LanguageConfigLoader.load(language)`) returns its own
+ * value — string building and container calls pass their arguments through.
+ */
+function dataPart(expr: string): string {
+  let out = expr.replace(/\bif\b[\s\S]*?\belse\b/g, ' else ').replace(/\bnot\s+[\w.]+/g, '');
+  for (let guard = 0; guard < 20; guard++) {
+    const m = /([A-Za-z_][\w.]*)\s*\(/.exec(out);
+    if (!m) break;
+    const open = m.index + m[0].length - 1;
+    const args = callArgs(out, open);
+    // `value.strip()` keeps its receiver; `Loader.load(name)` keeps neither
+    // the class nor (being opaque) the argument.
+    const dot = m[1].lastIndexOf('.');
+    const method = dot === -1 ? m[1] : m[1].slice(dot + 1);
+    const receiver = dot === -1 ? '' : m[1].slice(0, dot);
+    const keep = PASSTHROUGH_CALLS.test(m[1]) || PASSTHROUGH_CALLS.test(method);
+    out = out.slice(0, m.index) + ` ${receiver} ${keep ? args : ''} ` + out.slice(open + args.length + 2);
+  }
+  return out;
+}
+
+const mentions = (text: string, name: string): boolean => new RegExp(String.raw`(?<![\w.])${name}\b`).test(text);
+
+/**
+ * Names in each function that carry tool input: a tool function's
+ * parameters, helper parameters passed tainted values at a call site, and
+ * variables assigned from them. Two rounds cover tool → helper → helper.
+ */
+function taintedNames(stmts: Array<CodeLine & { last: number }>, fns: PyFunction[], rewrite: (t: string) => string): Map<PyFunction, Map<string, string>> {
+  const tainted = new Map<PyFunction, Map<string, string>>();
+  for (const fn of fns) {
+    tainted.set(fn, new Map(fn.tool ? fn.params.map((p) => [p, p]) : []));
+    argvNames.set(fn, new Set());
+  }
+  const byName = new Map(fns.map((f) => [f.name, f]));
+  for (let round = 0; round < 3; round++) {
+    for (const fn of fns) {
+      const names = tainted.get(fn)!;
+      for (let i = fn.start + 1; i < fn.end; i++) {
+        const text = rewrite(stmts[i].text);
+        const assign = /^\s*([A-Za-z_]\w*)\s*(?::[^=]+)?=(?!=)\s*([\s\S]+)$/.exec(text);
+        if (assign && !names.has(assign[1])) {
+          const rhs = dataPart(assign[2]);
+          const from = [...names.keys()].find((n) => mentions(rhs, n));
+          if (from) {
+            names.set(assign[1], `${assign[1]} ← ${names.get(from)}`);
+            // An argv list with the input as one of its arguments.
+            if (LIST_BUILDING.test(assign[2]) || argvNames.get(fn)!.has(from)) argvNames.get(fn)!.add(assign[1]);
+          }
+        }
+        for (const call of text.matchAll(/(?<![\w.])(?:self\.)?(\w+)\s*\(/g)) {
+          const callee = byName.get(call[1]);
+          if (!callee || callee === fn) continue;
+          const args = callArgs(text, call.index + call[0].length - 1).split(',');
+          args.forEach((arg, idx) => {
+            const from = [...names.keys()].find((n) => mentions(arg, n));
+            const param = callee.params[idx];
+            const calleeNames = tainted.get(callee)!;
+            if (from && param && !calleeNames.has(param)) calleeNames.set(param, `${param} ← ${names.get(from)}`);
+          });
+        }
+      }
+    }
+  }
+  return tainted;
+}
+
+export function analyzePythonSinks(code: string): PythonSinkFinding[] {
+  const findings: PythonSinkFinding[] = [];
+  const rewrite = aliasRewriter(code);
+  const lines = codeLines(code);
+  const stmts = statements(lines);
+  const fns = functionsOf(stmts);
+  const tainted = taintedNames(stmts, fns, rewrite);
+  const fnAt = (i: number): PyFunction | undefined => fns.filter((f) => i > f.start && i < f.end).at(-1);
+  const confined = RESOLVES.test(code) && CONFINES.test(code);
+  const touchesFiles = FILE_OPS.test(code);
+  const injectedLines = new Set<number>();
+
+  // Physical-line rules: injection shapes visible on one line.
+  for (const { line, text: raw } of lines) {
+    const text = rewrite(raw);
+    const snippet = raw.trim().slice(0, 120);
 
     if (/\bopen\s*\(|\bPath\s*\(|expanduser\s*\(/.test(text)) {
       for (const m of text.matchAll(STRING_LITERAL)) {
@@ -115,6 +358,7 @@ export function analyzePythonSinks(code: string): PythonSinkFinding[] {
     for (const { re, description } of INJECTION_RULES) {
       if (re.test(text)) {
         findings.push({ kind: 'injection', line, snippet, description });
+        injectedLines.add(line);
         break;
       }
     }
@@ -133,5 +377,173 @@ export function analyzePythonSinks(code: string): PythonSinkFinding[] {
     }
   }
 
-  return findings;
+  // Statement-level: exec sinks (a call may span lines), with tool-input tracing.
+  stmts.forEach((stmt, i) => {
+    const text = rewrite(stmt.text);
+    for (const { re, name } of EXEC_SINKS) {
+      const m = re.exec(text);
+      if (!m) continue;
+      const sink = name(m);
+      const args = callArgs(text, (m.index ?? 0) + m[0].length - 1);
+      const { command, dynamic } = commandOf(args);
+      const fn = fnAt(i);
+      const names = fn ? tainted.get(fn)! : new Map<string, string>();
+      // Keyword arguments other than the command (cwd=, env=) don't carry it.
+      const commandArgs = args.replace(/\b(?!shell\b)\w+\s*=[^,]*/g, '');
+      const shellCall = /\bshell\s*=\s*True\b/.test(args) || /^(?:eval|exec|os\.(?:system|popen)|asyncio\.create_subprocess_shell|subprocess\.(?:getoutput|getstatusoutput)|commands\.getoutput)$/.test(sink);
+      // Without a shell, input in an argument position can't pick the
+      // program: count the program itself (a bare tainted command, or the
+      // first element of a literal argv — any element after a shell/-c).
+      const first = topLevelParts(commandArgs)[0]?.trim() ?? '';
+      const argv = fn ? argvNames.get(fn)! : new Set<string>();
+      const from = [...names.keys()].find((n) => {
+        if (!mentions(commandArgs, n)) return false;
+        if (shellCall || sink.startsWith('os.exec') || sink.startsWith('os.spawn')) return true;
+        if (first.startsWith('[')) {
+          const elems = topLevelParts(first.slice(1, -1));
+          return mentions(elems[0] ?? '', n) || (SHELL_PROGRAM.test(elems[0] ?? '') && mentions(first, n));
+        }
+        if (!mentions(first, n)) return false;
+        return /^[A-Za-z_][\w.]*$/.test(first) ? !argv.has(first) : !LIST_BUILDING.test(first);
+      });
+      const finding: PythonSinkFinding = {
+        kind: 'exec',
+        line: stmt.line,
+        snippet: lines.find((l) => l.line === stmt.line)!.text.trim().slice(0, 120),
+        description: `${sink}() call detected`,
+        ...(command ? { command } : {}),
+        ...(dynamic ? { dynamic } : {}),
+        ...(DECODES.test(args) ? { decoded: true } : {}),
+        ...(from ? { toolInput: names.get(from) } : {}),
+      };
+      findings.push(finding);
+
+      const covered = [...injectedLines].some((l) => l >= stmt.line && l <= stmt.last);
+      if (!covered) {
+        const shell = /\bshell\s*=\s*True\b/.test(args) || /^(?:os\.(?:system|popen)|asyncio\.create_subprocess_shell|subprocess\.(?:getoutput|getstatusoutput)|commands\.getoutput)$/.test(sink);
+        if (from) {
+          findings.push({
+            kind: 'injection',
+            line: stmt.line,
+            snippet: finding.snippet,
+            description: `${sink}() runs a command built from tool input (${names.get(from)})${shell ? ' through a shell' : ''} — command injection`,
+          });
+        } else if (shell && stmt.last > stmt.line && /^\s*(?:f["']|(?![rRbBuU]?["'])[A-Za-z_])/.test(args)) {
+          findings.push({ kind: 'injection', line: stmt.line, snippet: finding.snippet, description: 'Dynamic command run with shell=True — command injection' });
+        }
+      }
+      break;
+    }
+  });
+
+  return findings.sort((a, b) => a.line - b.line);
+}
+
+// ── Capabilities for skill code (SKL-001/003) ───────────────────────────
+
+export interface PythonCapability {
+  kind: 'exec' | 'eval' | 'network' | 'file-read';
+  line: number;
+  snippet: string;
+  description: string;
+  /** exec/eval: what is run is computed at runtime, not a literal. */
+  dynamic?: boolean;
+}
+
+const NETWORK_CALLS = /\b(?:requests|httpx|aiohttp|urllib\.request|urllib3|http\.client|socket|ftplib|smtplib|paramiko)\s*\.\s*(\w+)\s*\(|\burlopen\s*\(|\bClientSession\s*\(|\bcreate_connection\s*\(/;
+const FILE_READS = /\bopen\s*\([^)]*\)|\.read_(?:text|bytes)\s*\(|\bshutil\.copy\w*\s*\(/;
+
+/**
+ * What a Python file can do, for skill audits: run commands or code, talk
+ * to the network, read files. Same lexer as the MCP analysis (aliases,
+ * multi-line calls, docstrings skipped), without the MCP tool-input model.
+ */
+export function analyzePythonCapabilities(code: string): PythonCapability[] {
+  const out: PythonCapability[] = [];
+  const rewrite = aliasRewriter(code);
+  const lines = codeLines(code);
+  for (const stmt of statements(lines)) {
+    const text = rewrite(stmt.text);
+    const snippet = lines.find((l) => l.line === stmt.line)!.text.trim().slice(0, 120);
+    for (const { re, name } of EXEC_SINKS) {
+      const m = re.exec(text);
+      if (!m) continue;
+      const sink = name(m);
+      const { dynamic } = commandOf(callArgs(text, (m.index ?? 0) + m[0].length - 1));
+      out.push({ kind: sink === 'eval' || sink === 'exec' ? 'eval' : 'exec', line: stmt.line, snippet, description: `${sink}() call`, ...(dynamic ? { dynamic } : {}) });
+      break;
+    }
+    const net = NETWORK_CALLS.exec(text);
+    if (net) out.push({ kind: 'network', line: stmt.line, snippet, description: `network call (${net[0].replace(/\s*\($/, '')})` });
+    const read = FILE_READS.exec(text);
+    if (read && !/["'][wax]b?\+?["']/.test(read[0])) out.push({ kind: 'file-read', line: stmt.line, snippet, description: `file read (${read[0].slice(0, 40)})` });
+  }
+  return out;
+}
+
+/**
+ * Python skill code in the shape the skill checks read from `analyzeCode`
+ * (SKL-001/003/006/010): eval-exec calls, reads of credential paths, and
+ * file/environment values flowing into a network or process call.
+ */
+export function analyzePythonDataFlow(code: string): DataFlowResult[] {
+  const out: DataFlowResult[] = [];
+  const rewrite = aliasRewriter(code);
+  const lines = codeLines(code);
+  const sourceVars = new Map<string, 'file' | 'env'>();
+  for (const stmt of statements(lines)) {
+    const text = rewrite(stmt.text);
+    const snippet = lines.find((l) => l.line === stmt.line)!.text.trim().slice(0, 120);
+
+    for (const { re, name } of EXEC_SINKS) {
+      const m = re.exec(text);
+      if (!m) continue;
+      const args = callArgs(text, (m.index ?? 0) + m[0].length - 1);
+      const sink = name(m);
+      const { command, dynamic } = commandOf(args);
+      out.push({ type: 'eval-exec', line: stmt.line, snippet, description: `${sink}() call detected`, ...(command ? { command } : {}), ...(dynamic ? { dynamic } : {}), ...(DECODES.test(args) ? { decoded: true } : {}) });
+      for (const [v, kind] of sourceVars) {
+        if (mentions(args, v)) {
+          out.push({ type: 'source-to-sink', source: v, sourceKind: kind, sink, line: stmt.line, snippet, description: `Data flows from "${v}" into process execution "${sink}"` });
+        }
+      }
+      break;
+    }
+
+    if (/\bopen\s*\(|\bPath\s*\(|expanduser\s*\(/.test(text)) {
+      for (const m of text.matchAll(STRING_LITERAL)) {
+        if (classifySensitivePath(m[1]).length > 0) {
+          out.push({ type: 'fs-access', source: m[1], line: stmt.line, snippet, description: `Reading sensitive path: ${m[1]}` });
+          break;
+        }
+      }
+    }
+
+    const net = NETWORK_CALLS.exec(text);
+    if (net) {
+      const args = callArgs(text, text.indexOf('(', net.index));
+      for (const [v, kind] of sourceVars) {
+        if (mentions(args, v)) {
+          out.push({ type: 'source-to-sink', source: v, sourceKind: kind, sink: net[1] ?? 'urlopen', line: stmt.line, snippet, description: `Data flows from "${v}" to network sink "${net[0].replace(/\s*\($/, '')}"` });
+        }
+      }
+    }
+
+    // Track what assignments hold: file contents, environment values, or
+    // values derived from either.
+    const assign = /^\s*([A-Za-z_]\w*)\s*(?::[^=]+)?=(?!=)\s*([\s\S]+)$/.exec(text);
+    if (assign) {
+      const rhs = assign[2];
+      if (FILE_READS.test(rhs)) sourceVars.set(assign[1], 'file');
+      else if (/\bos\.(?:environ|getenv)\b/.test(rhs)) sourceVars.set(assign[1], 'env');
+      else {
+        const from = [...sourceVars].find(([v]) => mentions(rhs, v));
+        if (from) sourceVars.set(assign[1], from[1]);
+      }
+    }
+    // `with open(p) as f:` binds a file handle
+    const withOpen = /\bwith\s+open\s*\([^)]*\)\s+as\s+(\w+)/.exec(text);
+    if (withOpen) sourceVars.set(withOpen[1], 'file');
+  }
+  return out;
 }

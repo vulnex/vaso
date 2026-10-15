@@ -1,4 +1,4 @@
-import { join, basename } from 'node:path';
+import { join, basename, isAbsolute, resolve } from 'node:path';
 import type { AgentAdapter, DetectOptions } from './adapter.js';
 import type { AgentInstallation, GatewayInfo, ModelRef, ParsedConfig, ZoneGraph } from '../core/types.js';
 import type { ProbeManifest } from '../core/snapshot-types.js';
@@ -52,8 +52,11 @@ async function loadSettings(dir: string, fs: FSProvider): Promise<ParsedConfig[]
 /**
  * Qwen Code is multi-provider (OpenAI-compatible / Dashscope / Anthropic /
  * Gemini), so the model id alone doesn't tell us the provider — we look at
- * `security.auth.selectedType` first, then fall back to walking
- * `modelProviders` for the matching id.
+ * `security.auth.selectedType` first, then fall back to `modelProviders`.
+ * `modelProviders` is an object keyed by auth type, each holding an array of
+ * model entries (`{ "openai": [{ "id": "qwen3-coder-plus", … }] }`, Qwen
+ * settings.md "Model Providers"); the bare-array shape is kept for older
+ * configs.
  */
 function extractModels(configs: ParsedConfig[]): ModelRef[] {
   for (const c of configs) {
@@ -70,17 +73,38 @@ function extractModels(configs: ParsedConfig[]): ModelRef[] {
 
     if (id) return [{ id, provider }];
 
-    // Walk modelProviders if no explicit model.name
-    const providers = c.data.modelProviders as Array<Record<string, unknown>> | undefined;
+    const providers = c.data.modelProviders;
     if (Array.isArray(providers)) {
-      const match = providers.find(p => typeof p.id === 'string' && (!provider || (p.id as string).toLowerCase().includes(provider)));
-      const fallback = match ?? providers[0];
+      const list = providers as Array<Record<string, unknown>>;
+      const match = list.find(p => typeof p.id === 'string' && (!provider || (p.id as string).toLowerCase().includes(provider)));
+      const fallback = match ?? list[0];
       if (fallback && typeof fallback.id === 'string') {
         return [{ id: fallback.id as string, provider }];
       }
+    } else if (providers && typeof providers === 'object') {
+      const byType = Object.entries(providers as Record<string, unknown>)
+        .filter((e): e is [string, unknown[]] => Array.isArray(e[1]));
+      const selected = byType.find(([type]) => type.toLowerCase() === provider) ?? byType[0];
+      const first = selected?.[1].find(
+        (m): m is Record<string, unknown> => !!m && typeof m === 'object' && typeof (m as Record<string, unknown>).id === 'string',
+      );
+      if (selected && first) return [{ id: first.id as string, provider: selected[0].toLowerCase() }];
     }
   }
   return [];
+}
+
+/**
+ * ~/.qwen, or $QWEN_HOME for the scanning user. Qwen settings.md: QWEN_HOME
+ * "customizes the global configuration directory (default: ~/.qwen)",
+ * absolute or relative to the working directory, leading `~` expanded.
+ * Another user's environment isn't observable.
+ */
+export function qwenHome(home: string, fs: FSProvider): string {
+  const env = home === fs.homedir() ? fs.getEnv?.('QWEN_HOME')?.trim() : undefined;
+  if (!env) return join(home, QWEN_DIR_NAME);
+  if (env === '~' || env.startsWith('~/')) return join(home, env.slice(1));
+  return isAbsolute(env) ? env : resolve(process.cwd(), env);
 }
 
 export const qwenCodeAdapter: AgentAdapter = {
@@ -93,7 +117,7 @@ export const qwenCodeAdapter: AgentAdapter = {
     const installations: AgentInstallation[] = [];
 
     for (const { home, user } of userDirs) {
-      const qwenDir = join(home, QWEN_DIR_NAME);
+      const qwenDir = qwenHome(home, fs);
       const installs = await discoverCliInstalls(home, fs, {
         names: ['qwen'],
         systemPaths: SYSTEM_CLI_PATHS,
@@ -147,9 +171,8 @@ export const qwenCodeAdapter: AgentAdapter = {
   },
 
   getConfigPaths(): string[] {
-    const home = new LocalFSProvider().homedir();
-    const qwenDir = join(home, QWEN_DIR_NAME);
-    return [join(qwenDir, SETTINGS_FILE)];
+    const fs = new LocalFSProvider();
+    return [join(qwenHome(fs.homedir(), fs), SETTINGS_FILE)];
   },
 
   getSkillsDir(_installDir: string): string | undefined {
@@ -167,6 +190,8 @@ export const qwenCodeAdapter: AgentAdapter = {
   getMemoryFiles(installDir: string): string[] {
     return [
       join(installDir, 'memory.md'),
+      // default context file (`context.fileName`, Qwen settings.md)
+      join(installDir, 'QWEN.md'),
       join(installDir, 'AGENTS.md'),
     ];
   },
@@ -186,6 +211,7 @@ export const qwenCodeAdapter: AgentAdapter = {
       filePaths: [
         '~/.qwen/settings.json',
         '~/.qwen/memory.md',
+        '~/.qwen/QWEN.md',
         '~/.qwen/AGENTS.md',
         '~/.qwen/installation_id',
         // User-relative CLI install locations — kept in sync with USER_CLI_RELATIVE_PATHS

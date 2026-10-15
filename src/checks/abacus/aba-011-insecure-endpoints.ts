@@ -1,6 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { isInsecureUrl, isProjectInstall, markUntrustedProject, settingsConfigs } from './shared.js';
+import { isInsecureUrl, isLoopbackUrl, isProjectInstall, markUntrustedProject, settingsConfigs } from './shared.js';
 
 const ABACUS_HOST = /^https:\/\/(?:[a-z0-9-]+\.)*abacus\.ai(?::\d+)?(?:\/|$)/i;
 
@@ -19,7 +19,7 @@ export const aba011 = defineCheck({
     const checkBase = (file: string, snippet: string, url: string) => {
       if (isInsecureUrl(url)) {
         critical.push({ file, snippet, detail: 'Plaintext http:// API endpoint — the Abacus.AI credential, prompts and code travel unencrypted' });
-      } else if (/^https?:\/\//i.test(url) && !ABACUS_HOST.test(url) && !/^https?:\/\/(?:localhost|127\.)/i.test(url)) {
+      } else if (/^https?:\/\//i.test(url) && !ABACUS_HOST.test(url) && !isLoopbackUrl(url)) {
         warning.push({ file, snippet, detail: 'API base URL is not an abacus.ai host — the stored credential and all session content are sent there' });
       }
     };

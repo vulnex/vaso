@@ -7,7 +7,7 @@ export const oc001 = defineCheck({
   name: 'Sub-Agent Config Security Downgrade',
   category: 'openclaw',
   severity: 'critical',
-  description: 'Detect when an OpenClaw sub-agent (agents/<name>/agent.{yaml,json,env}) overrides the global config to weaken security: disable TLS or sandbox, re-bind the gateway publicly, drop tool approval, or downgrade auth.',
+  description: 'Detect when an OpenClaw sub-agent (agents/<name>/agent.{yaml,json,env}, or its agents.entries.<name> entry) overrides the global config to weaken security: disable TLS or sandbox, re-bind the gateway publicly, drop tool approval, or downgrade auth.',
   supportedAgents: ['openclaw'],
 
   async run(ctx, h) {
@@ -31,8 +31,10 @@ export const oc001 = defineCheck({
       return h.passed('No sub-agent override configs to compare against global');
     }
 
+    // The override side also applies the agent's own agents.entries.<name>
+    // entry (2026.x per-agent sandbox / tools.exec overrides)
     const basePosture = extractPosture(mergeConfigData(globalConfigs));
-    const overridePosture = extractPosture(mergeConfigData([...globalConfigs, ...subAgentConfigs]));
+    const overridePosture = extractPosture(mergeConfigData([...globalConfigs, ...subAgentConfigs]), installation.agentName);
     const issues = findDowngrades(basePosture, overridePosture);
 
     const evidence: Evidence[] = issues.map(detail => ({

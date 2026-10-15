@@ -1,7 +1,10 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 
-const UNSAFE_MODES = new Set(['yolo', 'auto', 'run-everything', 'force', 'auto-everything']);
+// `unrestricted` is the documented run-everything mode (CLI configuration
+// reference: "Approval mode: allowlist, auto-review, or unrestricted"); the
+// rest are older/alias spellings
+const UNSAFE_MODES = new Set(['unrestricted', 'yolo', 'auto', 'run-everything', 'force', 'auto-everything']);
 
 export const cur002 = defineCheck({
   id: 'CUR-002',
@@ -28,7 +31,7 @@ export const cur002 = defineCheck({
     return h.fromEvidence(evidence, {
       passed: 'Cursor approval mode requires explicit allow rules or per-call confirmation',
       failed: () => 'Cursor approvalMode auto-approves every tool call',
-      fixDescription: 'Set approvalMode to "default" or "allowlist" in ~/.cursor/cli-config.json',
+      fixDescription: 'Set approvalMode to "allowlist" (or "auto-review") in ~/.cursor/cli-config.json',
     });
   },
 });

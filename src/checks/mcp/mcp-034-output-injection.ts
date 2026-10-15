@@ -1,7 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { extractToolDefinitions } from '../../mcp/tool-baseline.js';
-import { analyzeText, isInvisibleCodePoint, describeChar, isWeakDirective } from '../../mcp/injection-directives.js';
+import { analyzeText, decodeUnicodeEscapes, hiddenCharacters, isInvisibleConstant, isWeakDirective } from '../../mcp/injection-directives.js';
 import { stringLines } from '../../analyzers/string-literals.js';
 import type { StringLine } from '../../analyzers/string-literals.js';
 
@@ -55,6 +55,10 @@ export const mcp034 = defineCheck({
         commentFreeLines(source.sourceCode);
 
       const reported = new Set<number>();
+      // Lines of description strings: MCP-024 judges their hidden characters too.
+      const descriptionLines = new Set(units.filter((u) => u.description).map((u) => u.line));
+      const ownedByDescription = (trimmed: string): boolean =>
+        trimmed.length >= 8 && descriptions.some((d) => trimmed.includes(d) || d.includes(trimmed));
       for (const unit of units) {
         if (unit.description || reported.has(unit.line)) continue;
         const trimmed = unit.text.trim();
@@ -62,7 +66,7 @@ export const mcp034 = defineCheck({
         if (reasons.length === 0) continue;
         // Owned by MCP-024 if this text carries (or is a fragment of) an
         // extracted tool description.
-        if (descriptions.some((d) => trimmed.includes(d) || d.includes(trimmed))) continue;
+        if (ownedByDescription(trimmed)) continue;
 
         reported.add(unit.line);
         const strong = reasons.some((r) => !isWeakDirective(r));
@@ -98,21 +102,36 @@ export const mcp034 = defineCheck({
       }
 
       // Invisible / bidi characters can hide in code as well as strings.
+      // Python escapes (`\u200b`, `\U000e0041`) are decoded first; in
+      // JavaScript the string values themselves are read below, because
+      // bundles are full of escaped character tables (acorn's identifier
+      // chars, whitespace lists, emoji regexes) that are not text.
+      const python = source.language === 'python';
       const lines = source.sourceCode.split('\n');
+      const hiddenAt = new Map<number, string[]>();
       for (let i = 0; i < lines.length; i++) {
-        if (reported.has(i + 1)) continue;
-        const invisible = new Set<string>();
-        for (const ch of lines[i]) {
-          const cp = ch.codePointAt(0) ?? 0;
-          if (isInvisibleCodePoint(cp)) invisible.add(describeChar(cp));
+        const decoded = python ? decodeUnicodeEscapes(lines[i]) : lines[i];
+        // A quoted constant naming one invisible character (`split('\u200b')`).
+        const text = decoded.replace(/(["'`])([^"'`]{1,3})\1/gu, (m, _q: string, body: string) => (isInvisibleConstant(body) ? '' : m));
+        const invisible = hiddenCharacters(text);
+        if (invisible.length === 0 || ownedByDescription(decoded.trim()) || ownedByDescription(foldWhitespace(decoded))) continue;
+        hiddenAt.set(i + 1, invisible);
+      }
+      if (!python) {
+        for (const unit of units) {
+          if (unit.description || hiddenAt.has(unit.line) || !isProse(unit.text)) continue;
+          const invisible = hiddenCharacters(unit.text);
+          if (invisible.length > 0 && !isInvisibleConstant(unit.text)) hiddenAt.set(unit.line, invisible);
         }
-        if (invisible.size === 0) continue;
+      }
+      for (const [line, invisible] of [...hiddenAt].sort((a, b) => a[0] - b[0])) {
+        if (reported.has(line) || descriptionLines.has(line)) continue;
         sawStrong = true;
         evidence.push({
           file,
-          line: i + 1,
-          snippet: lines[i].trim().slice(0, 120),
-          detail: `Hardcoded invisible/bidi characters (${[...invisible].join(', ')}) in server "${source.serverName}" — hidden text the client LLM reads but a reviewer cannot see`,
+          line,
+          snippet: (lines[line - 1] ?? '').trim().slice(0, 120),
+          detail: `Hardcoded invisible/bidi characters (${invisible.join(', ')}) in server "${source.serverName}" — hidden text the client LLM reads but a reviewer cannot see`,
         });
       }
     }
@@ -126,6 +145,21 @@ export const mcp034 = defineCheck({
     });
   },
 });
+
+/**
+ * A string value that reads as text — two or more words, few distinct
+ * non-ASCII letters — rather than a character table (`"\u200c\u200d·̀-ͯ…"`).
+ */
+function isProse(text: string): boolean {
+  if ((text.match(/[A-Za-z]{3,}/g) ?? []).length < 2) return false;
+  const nonAscii = new Set([...text].filter((c) => (c.codePointAt(0) ?? 0) > 0x7f && /[\p{L}\p{M}\p{N}\p{P}\p{S}]/u.test(c)));
+  return nonAscii.size <= 8;
+}
+
+/** A line's text as it appears inside a description: trimmed, quotes and commas dropped. */
+function foldWhitespace(line: string): string {
+  return line.trim().replace(/^[^"'`]*["'`]|["'`][^"'`]*$/g, '').trim();
+}
 
 /** Fallback units: every non-comment line, as text. */
 function commentFreeLines(code: string): StringLine[] {

@@ -73,3 +73,28 @@ describe('Devin adapter — project discovery, hooks file, skills', () => {
   });
 });
 
+
+describe('Devin adapter — ~/.config/devin shared with Devin Desktop', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it('does not report a CLI-less config dir next to Windsurf / Devin Desktop as a Devin CLI install', async () => {
+    vi.spyOn(process, 'cwd').mockReturnValue('/nowhere');
+    const fs = makeFs({
+      [`${HOME}/.config/devin/mcp_config.json`]: '{}',
+      [`${HOME}/.codeium/windsurf/`]: '',
+    });
+    expect(await devinAdapter.detect({ fs })).toEqual([]);
+  });
+
+  it('still reports it with Devin CLI credentials present', async () => {
+    vi.spyOn(process, 'cwd').mockReturnValue('/nowhere');
+    const fs = makeFs({
+      [`${HOME}/.config/devin/mcp_config.json`]: '{}',
+      [`${HOME}/.local/share/devin/credentials.toml`]: '',
+      [`${HOME}/.codeium/windsurf/`]: '',
+    });
+    const installs = await devinAdapter.detect({ fs });
+    expect(installs).toHaveLength(1);
+    expect(installs[0].configFiles.map(c => c.filePath)).toEqual([`${HOME}/.config/devin/mcp_config.json`]);
+  });
+});

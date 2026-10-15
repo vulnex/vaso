@@ -6,7 +6,7 @@ export const gem009 = defineCheck({
   name: 'Gemini Auto-Approve Edit Mode',
   category: 'coding-agent',
   severity: 'warning',
-  description: 'Detect when general.defaultApprovalMode is set to "auto_edit" — file edits run without prompting',
+  description: 'Detect when general.defaultApprovalMode is (or legacy tools.approvalMode) is set to "auto_edit" — file edits run without prompting',
   supportedAgents: ['gemini-cli'],
 
   async run(ctx, h) {
@@ -14,11 +14,17 @@ export const gem009 = defineCheck({
 
     for (const config of ctx.configs) {
       const general = config.data.general as Record<string, unknown> | undefined;
-      const mode = general?.defaultApprovalMode;
+      const tools = config.data.tools as Record<string, unknown> | undefined;
+      // Legacy `tools.approvalMode` is migrated to general.defaultApprovalMode
+      // at load time when the latter is unset (settings.ts
+      // migrateDeprecatedSettings), so it still takes effect.
+      const [key, mode] = general?.defaultApprovalMode !== undefined
+        ? ['general.defaultApprovalMode', general.defaultApprovalMode]
+        : ['tools.approvalMode', tools?.approvalMode];
       if (typeof mode === 'string' && mode.toLowerCase() === 'auto_edit') {
         evidence.push({
           file: config.filePath,
-          snippet: `general.defaultApprovalMode = "${mode}"`,
+          snippet: `${key} = "${mode}"`,
           detail: 'Edit tools (file write, patch) auto-approve without per-call prompt',
         });
       }

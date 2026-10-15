@@ -68,6 +68,26 @@ const HTTP_FUNCTIONS = new Set(['fetch', 'got', 'ky', 'request', 'superagent', '
 const HTTP_CLIENTS = new Set(['axios', 'got', 'ky', 'undici', 'superagent', 'needle', 'request', 'client', 'http', 'httpClient']);
 const HTTP_METHODS = new Set(['get', 'post', 'put', 'patch', 'request', 'fetch', 'head']);
 
+/** Receiver names that are not necessarily HTTP clients. */
+const GENERIC_CLIENTS = new Set(['client', 'request']);
+const URL_NAME = /url|uri|endpoint|href|link|path|route/i;
+
+/** An argument that looks like a URL: a literal/template starting with a scheme or `/`, or a URL-named value. */
+function urlish(node: Node | undefined): boolean {
+  if (!node) return false;
+  if (node.type === 'StringLiteral') return /^(?:https?:\/\/|\/)/i.test(node.value);
+  if (node.type === 'TemplateLiteral') {
+    const first = node.quasis[0]?.value.cooked ?? '';
+    return first ? /^(?:https?:\/\/|\/)/i.test(first) : urlish(node.expressions[0] as Node | undefined);
+  }
+  if (node.type === 'BinaryExpression') return urlish(node.left as Node);
+  if (node.type === 'NewExpression') return node.callee.type === 'Identifier' && node.callee.name === 'URL';
+  if (node.type === 'ObjectExpression') return node.properties.some((p) => p.type === 'ObjectProperty' && p.key.type === 'Identifier' && p.key.name === 'url');
+  if (node.type === 'Identifier') return URL_NAME.test(node.name);
+  if (node.type === 'MemberExpression') return node.property.type === 'Identifier' && URL_NAME.test(node.property.name);
+  return false;
+}
+
 /** Filters a server runs content through before returning it. */
 const SANITIZER = /sanitiz|escape|strip|purify|redact|clean|neutrali[sz]e|filter(?:Injection|Instructions|Prompt)/i;
 
@@ -128,6 +148,9 @@ function analyzeJs(code: string): ExternalContentFlow[] {
           return { call: path, via: 'file', source: prop };
         }
         if (callee.object.type === 'Identifier' && HTTP_CLIENTS.has(callee.object.name) && HTTP_METHODS.has(prop)) {
+          // `client.get(key)` is as often a cache/DB client (memcached, redis);
+          // a generic receiver counts only when it is handed a URL.
+          if (GENERIC_CLIENTS.has(callee.object.name) && !urlish(path.node.arguments[0] as Node | undefined)) return undefined;
           return { call: path, via: 'http', source: `${callee.object.name}.${prop}` };
         }
       }
@@ -362,6 +385,10 @@ function analyzePython(code: string): ExternalContentFlow[] {
     const after = call.text.slice(call.text.search(PY_HTTP_CALL)).replace(/^[^(]*\(/, '') + ' ' + (lines[call.line] ?? '');
     const literal = /^\s*f?["']([^"']*)["']/.exec(after)?.[1];
     const firstName = /^\s*([A-Za-z_]\w*)\b/.exec(after)?.[1];
+    const lastName = /^\s*([A-Za-z_][\w.]*)/.exec(after)?.[1]?.split('.').pop();
+    // `client.get(key)` on a memcached/redis client is a cache read; a generic
+    // receiver counts only when it is handed a URL.
+    if (/\b(?:client|session)\s*\.\s*get\s*\(/.test(call.text) && !(literal ? /^(?:https?:\/\/|\/)/i.test(literal) : lastName && URL_NAME.test(lastName))) continue;
     const host = literal ? hostOf(literal) : undefined;
     results.push({
       line: call.line,

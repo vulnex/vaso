@@ -2,6 +2,7 @@ import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { analyzeObfuscation } from '../../analyzers/obfuscation.js';
 import type { RevealedStrings } from '../../analyzers/obfuscation.js';
+import { analyzeStringTable } from '../../mcp/string-table.js';
 
 /**
  * MCP-035 — Obfuscated / Encoded Server Source.
@@ -42,28 +43,35 @@ export const mcp035 = defineCheck({
       if (!source.sourceCode) continue;
 
       const report = analyzeObfuscation(source.sourceCode);
-      if (report.tier === 'none') continue;
+      // Confirmation comes from what the literals decode to (see
+      // string-table.ts): unpadded/url-safe base64, hex, rot13, char codes and
+      // Python decoders included, and `atob` beside a few base64-shaped
+      // identifiers no longer counts.
+      const table = analyzeStringTable(source.sourceCode);
+      if (!table.confirmed && report.tier === 'none') continue;
 
       const file = source.localPath ?? source.packageName ?? source.serverName;
 
-      if (report.tier === 'string-table') {
+      if (table.confirmed) {
         sawStringTable = true;
         evidence.push({
           file,
           snippet: `Server "${source.serverName}"`,
           detail:
-            `Encoded string-table obfuscation: ${report.decoderLabels.join(', ')} decodes ` +
-            `${report.encodedLiteralCount} encoded literal(s) at runtime — hides the strings the ` +
+            `Encoded string-table obfuscation: ${table.decoderLabels.join(', ')} decodes ` +
+            `${table.decodedCount} encoded literal(s) at runtime — hides the strings the ` +
             `server actually uses (URLs, secrets, commands) from static review` +
-            describeRevealed(report.revealed),
+            describeRevealed(table.revealed),
         });
-        for (const hit of report.hits.slice(0, 5)) {
-          evidence.push({ file, line: hit.line, snippet: hit.snippet, detail: hit.label });
+        const lines = source.sourceCode.split('\n');
+        for (const line of table.lines) {
+          const text = lines[line - 1]?.trim() ?? '';
+          evidence.push({ file, line, snippet: text.slice(0, 80) + (text.length > 80 ? '...' : ''), detail: 'Encoded literal decoded at runtime' });
         }
       } else {
-        // tier === 'encoded' — decoder-less: informational only. A bare atob()
-        // decodes runtime data (JWTs, data URLs); with no encoded literals for
-        // it to unpack it is not evidence of hidden strings.
+        // Decoder-less (or literals that don't decode to text): informational
+        // only. A bare atob() decodes runtime data (JWTs, data URLs); with no
+        // encoded literals for it to unpack it is not evidence of hidden strings.
         const encodedHits = report.hits.filter((hit) => hit.label !== 'atob() decoding');
         for (const hit of encodedHits.slice(0, 5)) {
           evidence.push({

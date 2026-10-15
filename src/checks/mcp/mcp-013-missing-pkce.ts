@@ -1,13 +1,11 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { AUTHORIZE_ROUTE } from '../../mcp/oauth-context.js';
+import { AUTH_CODE_GRANT, isAuthorizeRequest } from '../../mcp/oauth-context.js';
 import { sourceSegments, nearbyText } from '../../mcp/source-segments.js';
 
-const AUTHORIZE_URL_PATTERN = /\/authorize|\/authorization/;
 const CODE_CHALLENGE_PATTERN = /code_challenge/;
 const CODE_VERIFIER_PATTERN = /code_verifier/;
 const PLAIN_CHALLENGE_PATTERN = /code_challenge_method['":\s]*['"]?plain/i;
-const TOKEN_EXCHANGE_PATTERN = /\/token|grant_type|authorization_code/;
 
 const SEARCH_RADIUS = 15;
 
@@ -36,7 +34,7 @@ export const mcp013 = defineCheck({
 
         // Detect OAuth authorize URL construction without PKCE
         // A route the server handles forwards the client's PKCE parameters.
-        if (AUTHORIZE_URL_PATTERN.test(line) && !AUTHORIZE_ROUTE.test(line)) {
+        if (isAuthorizeRequest(line)) {
           const nearbyCode = nearbyText(segments, i, SEARCH_RADIUS);
 
           if (!CODE_CHALLENGE_PATTERN.test(nearbyCode)) {
@@ -60,7 +58,7 @@ export const mcp013 = defineCheck({
         }
 
         // Detect token exchange without code_verifier
-        if (TOKEN_EXCHANGE_PATTERN.test(line) && /grant_type.*authorization_code|authorization_code.*grant_type/.test(line)) {
+        if (AUTH_CODE_GRANT.test(line)) {
           const nearbyCode = nearbyText(segments, i, SEARCH_RADIUS);
 
           if (!CODE_VERIFIER_PATTERN.test(nearbyCode)) {

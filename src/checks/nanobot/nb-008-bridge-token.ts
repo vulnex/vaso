@@ -1,6 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { asRecord, getPath, isLoopbackHost, nanobotConfigs, nonEmptyString, pick } from './shared.js';
+import { asRecord, getPath, isLoopbackHost, nanobotConfigs, nonEmptyString, pick, pyBool } from './shared.js';
 
 /*
  * The websocket channel is nanobot's WebUI/client bridge and is always on
@@ -28,7 +28,7 @@ export const nb008 = defineCheck({
 
     for (const config of nanobotConfigs(ctx.configs)) {
       const ws = asRecord(getPath(config.data, 'channels.websocket')) ?? {};
-      if (ws.enabled !== false) {
+      if (pyBool(ws.enabled) !== false) {
         const unixSocket = nonEmptyString(pick(ws, 'unixSocketPath'));
         const hostRaw = pick(ws, 'host');
         const host = nonEmptyString(hostRaw) ? hostRaw.trim() : '127.0.0.1';
@@ -37,7 +37,7 @@ export const nb008 = defineCheck({
         const issueSecret = nonEmptyString(pick(ws, 'tokenIssueSecret'));
         const issuePath = nonEmptyString(pick(ws, 'tokenIssuePath'));
         const proxyAuth = asRecord(pick(ws, 'trustedProxyAuth')) !== undefined;
-        const requiresToken = pick(ws, 'websocketRequiresToken') !== false;
+        const requiresToken = pyBool(pick(ws, 'websocketRequiresToken')) !== false;
         const where = unixSocket ? 'a unix socket' : `${host}:${typeof ws.port === 'number' ? ws.port : 8765}`;
 
         let hole: string | undefined;
@@ -65,7 +65,7 @@ export const nb008 = defineCheck({
         }
       }
 
-      if (getPath(config.data, 'tools.webuiAllowRemotePackageInstall') === true) {
+      if (pyBool(getPath(config.data, 'tools.webuiAllowRemotePackageInstall')) === true) {
         evidence.push({
           file: config.filePath,
           snippet: 'tools.webuiAllowRemotePackageInstall: true',

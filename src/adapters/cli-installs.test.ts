@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { FSProvider, DirentInfo } from '../core/fs-provider.js';
-import { discoverCliInstalls, type CliInstallSpec } from './cli-installs.js';
+import { cliInstallGlobs, discoverCliInstalls, type CliInstallSpec } from './cli-installs.js';
 
 interface FakeHost {
   /** Existing binaries → version they report. */
@@ -45,6 +45,16 @@ function spec(h: FakeHost, extra: Partial<CliInstallSpec> = {}): CliInstallSpec 
 }
 
 describe('discoverCliInstalls', () => {
+  it('finds scoped Volta package images (tools/image/packages/@scope/name/bin)', async () => {
+    const volta = '/home/t/.volta/tools/image/packages';
+    const host: FakeHost = {
+      bins: { [`${volta}/@github/copilot/bin/copilot`]: '1.0.10' },
+      dirs: { [volta]: ['@github', 'typescript'], [`${volta}/@github`]: ['copilot'] },
+    };
+    const r = await discoverCliInstalls('/home/t', makeFs(host), spec(host, { names: ['copilot'] }));
+    expect(r.primary).toEqual({ path: `${volta}/@github/copilot/bin/copilot`, version: '1.0.10' });
+  });
+
   it('prefers the PATH-resolved copy and reports every other version', async () => {
     const host: FakeHost = {
       which: '/opt/homebrew/bin/codex',
@@ -269,5 +279,11 @@ describe('discoverCliInstalls', () => {
   it('returns nothing when no copy exists', async () => {
     const host: FakeHost = { bins: {} };
     expect(await discoverCliInstalls('/home/t', makeFs(host), spec(host))).toEqual({ others: [] });
+  });
+});
+
+describe('cliInstallGlobs', () => {
+  it('surfaces scoped Volta package images to the probe', () => {
+    expect(cliInstallGlobs(['copilot'])).toContain('~/.volta/tools/image/packages/@*/*/bin/copilot');
   });
 });

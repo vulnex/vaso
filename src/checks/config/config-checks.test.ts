@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtemp, writeFile, rm, chmod } from 'node:fs/promises';
+import { mkdtemp, writeFile, rm, chmod, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { ScanContext, ParsedConfig, AgentInstallation } from '../../core/types.js';
@@ -557,5 +557,124 @@ describe('CFG-011: Node.js CVE-2026-21636', () => {
     if (!knownPatched) return; // skip silently on older test environments
     const result = await cfg011.run(makeContext([makeConfig({})]));
     expect(result.passed).toBe(true);
+  });
+});
+
+describe('deep-test 2026-10-15: OpenClaw 2026.9.4 schema', () => {
+  const oc = (data: Record<string, unknown>, raw?: string) => makeContext([makeConfig(data, raw)]);
+
+  it('CFG-001 explains "lan" as 0.0.0.0 and flags "auto" (tailnet, else LAN)', async () => {
+    const lan = await cfg001.run(oc({ gateway: { bind: 'lan' } }));
+    expect(lan.evidence?.[0].detail).toContain('0.0.0.0');
+    const auto = await cfg001.run(oc({ gateway: { bind: 'auto' } }));
+    expect(auto.passed).toBe(false);
+    expect(auto.fixable).toBe(true);
+    // Tailscale serve/funnel forces the gateway onto loopback
+    expect((await cfg001.run(oc({ gateway: { bind: 'auto', tailscale: { mode: 'serve' } } }))).passed).toBe(true);
+  });
+
+  it('CFG-001 agrees with the resolved gateway listener (PicoClaw launcher public, OpenShell bind_address)', async () => {
+    const ctx = makeContext([makeConfig({ public: true })], 'picoclaw');
+    ctx.installation.gateway = { host: '0.0.0.0', port: 18790 };
+    const r = await cfg001.run(ctx);
+    expect(r.passed).toBe(false);
+    expect(r.evidence?.[0].detail).toContain('0.0.0.0:18790');
+    expect(r.fixable).toBeFalsy();
+  });
+
+  it('CFG-001 fix rewrites gateway.bind in a JSONC openclaw.json', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'vaso-cfg001-'));
+    try {
+      const file = join(dir, 'openclaw.json');
+      const raw = '// comment\n{\n  "gateway": { "bind": "lan", "auth": { "mode": "none" }, },\n  /* x */ "tools": { "exec": { "mode": "full" } },\n}\n';
+      await writeFile(file, raw);
+      const config: ParsedConfig = { raw, format: 'json', filePath: file, data: { gateway: { bind: 'lan', auth: { mode: 'none' } }, tools: { exec: { mode: 'full' } } } };
+      const result = await cfg001.fix!(makeContext([config]));
+      expect(result.applied).toBe(true);
+      expect(await readFile(file, 'utf8')).toContain('"loopback"');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('CFG-004 passes a tailnet bind and Tailscale serve, and a comma list of loopback hosts', async () => {
+    for (const data of [{ gateway: { bind: 'tailnet' } }, { gateway: { bind: 'lan', tailscale: { mode: 'serve' } } }]) {
+      const ctx = oc(data);
+      ctx.installation.gateway = {};
+      expect((await cfg004.run(ctx)).passed, JSON.stringify(data)).toBe(true);
+    }
+    const ctx = makeContext([makeConfig({ gateway: { host: '127.0.0.1,::1' } })], 'picoclaw');
+    ctx.installation.gateway = { host: '127.0.0.1,::1' };
+    expect((await cfg004.run(ctx)).passed).toBe(true);
+  });
+
+  it('CFG-004 reads the parsed TLS value, not the raw line (single-line enabled:false + autoGenerate:true)', async () => {
+    const data = { gateway: { bind: 'lan', tls: { enabled: false, autoGenerate: true } } };
+    const ctx = oc(data, JSON.stringify(data));
+    ctx.installation.gateway = { host: '0.0.0.0', tls: false };
+    expect((await cfg004.run(ctx)).passed).toBe(false);
+    const on = { gateway: { bind: 'lan', tls: { enabled: true } } };
+    const ctxOn = oc(on, JSON.stringify(on));
+    ctxOn.installation.gateway = { host: '0.0.0.0' };
+    expect((await cfg004.run(ctxOn)).passed).toBe(true);
+  });
+
+  it('CFG-015 treats discovery.mdns {} as the default "minimal" mode', async () => {
+    expect((await cfg015.run(oc({ discovery: { mdns: {} } }))).passed).toBe(true);
+    expect((await cfg015.run(oc({ discovery: { mdns: { mode: 'full' } } }))).passed).toBe(false);
+  });
+
+  const evade = {
+    tools: { exec: { mode: 'ask' }, fs: { workspaceOnly: true } },
+    agents: {
+      defaults: { sandbox: { mode: 'non-main' } },
+      entries: { main: { default: true }, worker: { sandbox: { mode: 'off' }, tools: { exec: { mode: 'full' }, fs: { workspaceOnly: false } } } },
+    },
+  };
+
+  it('CFG-005/006/008 read agents.entries.<id> overrides', async () => {
+    const r5 = await cfg005.run(oc(evade));
+    expect(r5.passed).toBe(false);
+    expect(r5.evidence?.[0].detail).toContain('agents.entries.worker.tools.exec.mode');
+    const r6 = await cfg006.run(oc(evade));
+    expect(r6.passed).toBe(false);
+    expect(r6.evidence?.[0].detail).toContain('agents.entries.worker');
+    const r8 = await cfg008.run(oc(evade));
+    expect(r8.passed).toBe(false);
+    expect(r8.message).toContain('"worker"');
+  });
+
+  it('CFG-005 reads every config, so a sub-agent file set to "full" is not hidden by a strict openclaw.json', async () => {
+    const global = { ...makeConfig({ tools: { exec: { mode: 'ask' } } }), filePath: '/h/.openclaw/openclaw.json' };
+    const sub = { ...makeConfig({ tools: { exec: { mode: 'full' } } }), filePath: '/h/.openclaw/agents/x/agent.json' };
+    const r = await cfg005.run(makeContext([global, sub]));
+    expect(r.passed).toBe(false);
+    expect(r.evidence?.[0].file).toBe('/h/.openclaw/agents/x/agent.json');
+  });
+
+  it('CFG-013 flags a per-account dmPolicy "open"', async () => {
+    const r = await cfg013.run(oc({ channels: { telegram: { enabled: true, dmPolicy: 'pairing', accounts: { ops: { dmPolicy: 'open' } } } } }));
+    expect(r.passed).toBe(false);
+    expect(r.evidence?.[0].detail).toBe('channels.telegram.accounts.ops.dmPolicy: open');
+  });
+
+  it('CFG-012 flags gateway.controlUi.dangerouslyDisableDeviceAuth', async () => {
+    const r = await cfg012.run(oc({ gateway: { auth: { mode: 'token' }, controlUi: { dangerouslyDisableDeviceAuth: true } } }));
+    expect(r.passed).toBe(false);
+    expect(r.message).toContain('device authentication');
+    expect(r.fixable).toBeFalsy();
+  });
+});
+
+describe('CFG-001 on Hermes', () => {
+  it('defers to HM-004 when the API server has a key', async () => {
+    const env = { raw: '', format: 'env' as const, filePath: '/h/.hermes/.env', data: { API_SERVER_HOST: '0.0.0.0', API_SERVER_KEY: 'k' } };
+    const ctx = makeContext([env]);
+    ctx.installation = { ...ctx.installation, agent: 'hermes', gateway: { host: '0.0.0.0', port: 8642 } };
+    expect((await cfg001.run(ctx)).passed).toBe(true);
+    const open = { ...env, data: { API_SERVER_HOST: '0.0.0.0' } };
+    const ctx2 = makeContext([open]);
+    ctx2.installation = { ...ctx2.installation, agent: 'hermes', gateway: { host: '0.0.0.0', port: 8642 } };
+    expect((await cfg001.run(ctx2)).passed).toBe(false);
   });
 });

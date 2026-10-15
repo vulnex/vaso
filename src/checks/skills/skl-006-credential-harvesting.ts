@@ -1,10 +1,11 @@
+import { extname } from 'node:path';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { analyzeCode } from '../../analyzers/ast-analyzer.js';
+import { analyzePythonDataFlow } from '../../analyzers/python-sinks.js';
 import { scanWithPatterns, SECURITY_PATTERNS } from '../../analyzers/pattern-engine.js';
-import { getSkillFiles } from '../../core/utils.js';
+import { isSourceFile, readSkillText, skillFilesOf, skillsDirsOf } from './skill-files.js';
 import { markTestCode } from '../../analyzers/test-paths.js';
-import { readCappedFile } from '../../core/file-limits.js';
 
 const CRED_HARVEST_RULES = SECURITY_PATTERNS.filter(r => r.category === 'credential-harvest');
 
@@ -16,15 +17,15 @@ export const skl006 = defineCheck({
   description: 'Detect access to .ssh, .aws, .env, and other credential stores',
 
   async run(ctx, h) {
-    const skillsDir = ctx.installation.skillsDir;
-    if (!skillsDir) return h.passed('No skills directory found');
+    if (skillsDirsOf(ctx).length === 0) return h.passed('No skills directory found');
 
     const evidence: Evidence[] = [];
-    const files = ctx.skillFiles ?? await getSkillFiles(skillsDir, ctx.fs);
+    const files = await skillFilesOf(ctx);
 
     for (const file of files) {
       try {
-        const code = await readCappedFile(ctx.fs, file);
+        const code = await readSkillText(ctx.fs, file, 'patterns');
+        if (code === undefined) continue;
 
         // Pattern-based detection
         const matches = scanWithPatterns(code, CRED_HARVEST_RULES);
@@ -37,8 +38,10 @@ export const skl006 = defineCheck({
           });
         }
 
-        // AST-based detection
-        const flows = analyzeCode(code, file);
+        // AST-based detection (source files only — not SKILL.md code blocks)
+        if (!isSourceFile(file)) continue;
+        // Python skill scripts go through the Python analyzer; Babel can't read them.
+        const flows = extname(file).toLowerCase() === '.py' ? analyzePythonDataFlow(code) : analyzeCode(code, file);
         const fsAccess = flows.filter(f => f.type === 'fs-access');
         for (const flow of fsAccess) {
           evidence.push({

@@ -22,6 +22,8 @@ export interface MCPDiscoveryResult {
   totalServers: number;
   /** Explicitly given paths (discoverFromPaths) that are missing or not valid JSON/JSONC. */
   unreadable?: string[];
+  /** Explicitly given paths that parsed but hold no MCP servers in any known dialect. */
+  empty?: string[];
 }
 
 export interface MCPServerSource {

@@ -122,6 +122,40 @@ describe('OpenCode adapter', () => {
     expect(result[0].installDir).toBe('/tmp/custom-xdg/opencode');
   });
 
+  it('loads $OPENCODE_CONFIG_DIR, $OPENCODE_CONFIG_CONTENT and $OPENCODE_PERMISSION layers', async () => {
+    const configPath = join(configDir, 'opencode.json');
+    process.env.OPENCODE_CONFIG_DIR = '/srv/oc';
+    process.env.OPENCODE_CONFIG_CONTENT = '{"permission":"allow"}';
+    process.env.OPENCODE_PERMISSION = '{"bash":"allow"}';
+    try {
+      setExistingPaths([configPath, '/srv/oc/opencode.jsonc']);
+      mockReadFile.mockImplementation(async (path) => (path === '/srv/oc/opencode.jsonc' ? '{"share":"auto"}' : '{}'));
+      const [user] = await opencodeAdapter.detect();
+      expect(user.configFiles.map(c => c.filePath)).toEqual([configPath, '/srv/oc/opencode.jsonc', '$OPENCODE_CONFIG_CONTENT', '$OPENCODE_PERMISSION']);
+      expect(user.configFiles[2].data).toEqual({ permission: 'allow' });
+      expect(user.configFiles[3].data).toEqual({ permission: { bash: 'allow' } });
+    } finally {
+      delete process.env.OPENCODE_CONFIG_DIR;
+      delete process.env.OPENCODE_CONFIG_CONTENT;
+      delete process.env.OPENCODE_PERMISSION;
+    }
+  });
+
+  it('loads project opencode.json from the cwd up to the git root', async () => {
+    const cwd = vi.spyOn(process, 'cwd').mockReturnValue('/work/repo/pkg');
+    try {
+      setExistingPaths(['/work/repo/.git', '/work/repo/opencode.json', '/work/repo/pkg/opencode.jsonc', '/work/opencode.json']);
+      mockReadFile.mockImplementation(async (path) => (String(path).startsWith('/work/repo') ? '{"permission":"allow"}' : '{}'));
+      const result = await opencodeAdapter.detect();
+      const project = result.find(r => r.profile === 'project');
+      expect(project?.installDir).toBe('/work/repo/.opencode');
+      expect(project?.agentName).toBe('project:repo');
+      expect(project?.configFiles.map(c => c.filePath)).toEqual(['/work/repo/opencode.json', '/work/repo/pkg/opencode.jsonc']);
+    } finally {
+      cwd.mockRestore();
+    }
+  });
+
   it('returns config paths under XDG config dir', () => {
     const paths = opencodeAdapter.getConfigPaths();
     expect(paths.some(p => p.endsWith('opencode.json'))).toBe(true);

@@ -1,10 +1,10 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { findHighEntropyBlocks } from '../../analyzers/entropy.js';
-import { OBFUSCATION_PATTERNS } from '../../analyzers/obfuscation.js';
-import { getSkillFiles } from '../../core/utils.js';
+import { OBFUSCATION_PATTERNS, isBenignEncodedData } from '../../analyzers/obfuscation.js';
+import { OVER_LIMIT_DETAIL, ScanLimitError } from '../../core/file-limits.js';
+import { readSkillText, skillFilesOf, skillsDirsOf } from './skill-files.js';
 import { markTestCode } from '../../analyzers/test-paths.js';
-import { readCappedFile } from '../../core/file-limits.js';
 
 export const skl002 = defineCheck({
   id: 'SKL-002',
@@ -14,18 +14,21 @@ export const skl002 = defineCheck({
   description: 'Detect obfuscated code using Shannon entropy analysis and pattern matching',
 
   async run(ctx, h) {
-    const skillsDir = ctx.installation.skillsDir;
-    if (!skillsDir) return h.passed('No skills directory found');
+    if (skillsDirsOf(ctx).length === 0) return h.passed('No skills directory found');
 
     const evidence: Evidence[] = [];
-    const files = ctx.skillFiles ?? await getSkillFiles(skillsDir, ctx.fs);
+    const files = await skillFilesOf(ctx);
 
     for (const file of files) {
       try {
-        const code = await readCappedFile(ctx.fs, file);
+        const code = await readSkillText(ctx.fs, file, 'patterns');
+        if (code === undefined) continue;
 
-        // Entropy-based detection
-        const blocks = findHighEntropyBlocks(code);
+        const lines = code.split('\n');
+
+        // Entropy-based detection. Data URIs and integrity digests are
+        // high-entropy by nature, not hidden code.
+        const blocks = findHighEntropyBlocks(code).filter(b => !isBenignEncodedData(lines[b.line - 1]));
         for (const block of blocks) {
           evidence.push({
             file,
@@ -36,12 +39,12 @@ export const skl002 = defineCheck({
         }
 
         // Pattern-based detection for obfuscation that entropy may miss
-        const lines = code.split('\n');
         for (let i = 0; i < lines.length; i++) {
           const line = lines[i];
           if (line.trimStart().startsWith('//') || line.trimStart().startsWith('#')) continue;
           for (const { pattern, label } of OBFUSCATION_PATTERNS) {
             if (pattern.test(line)) {
+              if (label === 'Long base64-encoded string' && isBenignEncodedData(line)) continue;
               // Avoid duplicate evidence on the same line
               const alreadyReported = evidence.some(e => e.file === file && e.line === i + 1);
               if (!alreadyReported) {
@@ -55,7 +58,11 @@ export const skl002 = defineCheck({
             }
           }
         }
-      } catch {}
+      } catch (err) {
+        // Padding a file past the size limit hides it from every content
+        // check — reported here once (informational) so it stays visible.
+        if (err instanceof ScanLimitError) evidence.push({ file, detail: OVER_LIMIT_DETAIL, mitigated: true });
+      }
     }
 
     await markTestCode(evidence, ctx.installation, ctx.fs);

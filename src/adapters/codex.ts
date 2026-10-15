@@ -1,4 +1,4 @@
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import type { AgentAdapter, DetectOptions } from './adapter.js';
 import type { AgentInstallation, GatewayInfo, ModelRef, ParsedConfig, ZoneGraph } from '../core/types.js';
 import type { ProbeManifest } from '../core/snapshot-types.js';
@@ -80,6 +80,44 @@ async function findLatestSessionModel(fs: FSProvider, sessionsDir: string): Prom
   return last;
 }
 
+// Codex 0.134+: `codex -p <name>` layers $CODEX_HOME/<name>.config.toml over
+// config.toml; the old [profiles.<name>] tables are no longer read
+// (learn.chatgpt.com/docs/config-file — "Profiles").
+const PROFILE_FILE = /^(.+)\.config\.toml$/;
+
+/** The profile name of a `$CODEX_HOME/<name>.config.toml` file, else undefined. */
+export function codexProfileName(filePath: string): string | undefined {
+  return PROFILE_FILE.exec(basename(filePath))?.[1];
+}
+
+async function loadProfileFiles(codexDir: string, fs: FSProvider): Promise<ParsedConfig[]> {
+  let names: string[];
+  try {
+    names = (await fs.readdir(codexDir)).filter(n => PROFILE_FILE.test(n)).sort();
+  } catch {
+    return [];
+  }
+  const out: ParsedConfig[] = [];
+  for (const name of names) {
+    const loaded = await loadConfigIfPresent(join(codexDir, name), fs);
+    if (loaded) out.push(loaded);
+  }
+  return out;
+}
+
+/**
+ * Projects the user config marks `trust_level = "trusted"`. Codex loads a
+ * project's `.codex/` layer (config.toml, rules/) only for trusted projects
+ * (learn.chatgpt.com/docs/config-file — project-scoped config).
+ */
+function trustedProjects(configs: ParsedConfig[]): string[] {
+  const projects = configs.find(c => basename(c.filePath) === 'config.toml')?.data?.projects;
+  if (!projects || typeof projects !== 'object') return [];
+  return Object.entries(projects as Record<string, unknown>)
+    .filter(([, p]) => (p as Record<string, unknown> | null)?.trust_level === 'trusted')
+    .map(([path]) => path);
+}
+
 /**
  * ~/.codex, or $CODEX_HOME for the scanning user (Codex keeps config, auth,
  * rules, AGENTS.md and sessions there). Another user's environment isn't
@@ -121,6 +159,7 @@ export const codexAdapter: AgentAdapter = {
           const loaded = await loadConfigIfPresent(filePath, fs);
           if (loaded) configFiles.push(loaded);
         }
+        configFiles.push(...await loadProfileFiles(codexDir, fs));
       }
 
       // A bare ~/.codex/ with no config, no sign-in and no `codex` binary is
@@ -141,6 +180,26 @@ export const codexAdapter: AgentAdapter = {
         cliBinary,
         otherInstalls: installs.others.length > 0 ? installs.others : undefined,
       });
+
+      // Trusted projects' `.codex/` layers: the project config and its rules
+      for (const project of trustedProjects(configFiles)) {
+        if (!project.startsWith('/')) continue;
+        const projectDir = join(project, CODEX_DIR_NAME);
+        if (projectDir === codexDir || installations.some(i => i.installDir === projectDir)) continue;
+        if (!(await fs.access(projectDir))) continue;
+        const projectConfig = await loadConfigIfPresent(join(projectDir, 'config.toml'), fs);
+        const hasRules = await fs.access(join(projectDir, 'rules'));
+        if (!projectConfig && !hasRules) continue;
+        installations.push({
+          agent: 'codex',
+          agentName: `project:${basename(project)}`,
+          version,
+          installDir: projectDir,
+          configFiles: projectConfig ? [projectConfig] : [],
+          user: options?.allUsers ? user : undefined,
+          profile: 'project',
+        });
+      }
     }
 
     return installations;
@@ -162,7 +221,7 @@ export const codexAdapter: AgentAdapter = {
   },
 
   async getModels(configs: ParsedConfig[], fs?: FSProvider): Promise<ModelRef[]> {
-    const main = configs.find(c => c.filePath.endsWith('config.toml'));
+    const main = configs.find(c => basename(c.filePath) === 'config.toml');
     const id = main?.data?.model as string | undefined;
     if (id) {
       const provider = main?.data?.model_provider as string | undefined;
@@ -182,6 +241,7 @@ export const codexAdapter: AgentAdapter = {
     return [
       join(installDir, 'instructions.md'),
       join(installDir, 'AGENTS.md'),
+      join(installDir, 'AGENTS.override.md'),
       join(installDir, 'history.jsonl'),
     ];
   },
@@ -202,6 +262,8 @@ export const codexAdapter: AgentAdapter = {
         '~/.codex/config.toml',
         '~/.codex/instructions.md',
         '~/.codex/AGENTS.md',
+        // Replaces AGENTS.md at the global scope when present (CDX-007)
+        '~/.codex/AGENTS.override.md',
         // User-relative CLI install locations — kept in sync with USER_CLI_RELATIVE_PATHS
         '~/.local/bin/codex',
         '~/.npm-global/bin/codex',
@@ -212,6 +274,8 @@ export const codexAdapter: AgentAdapter = {
       globPatterns: [
         // Prefix allow rules (CDX-010)
         '~/.codex/rules/*.rules',
+        // Profile files, `codex -p <name>` (CDX-008/009)
+        '~/.codex/*.config.toml',
         // User skills (SKL/IOC checks; skill links are followed by the probe)
         '~/.codex/skills/**',
         nvmBinaryGlob('codex'),

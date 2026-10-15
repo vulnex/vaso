@@ -16,6 +16,18 @@ const CLAUDE_DIR_NAME = '.claude';
 const SETTINGS_FILES = ['settings.json', 'settings.local.json'];
 const ROOT_STATE_FILE = '.claude.json';
 const NPM_PACKAGE_NAME = '@anthropic-ai/claude-code';
+// Project-scoped MCP servers, shared through the repo
+const PROJECT_MCP_FILE = '.mcp.json';
+
+/** Project memory Claude Code loads from a repo (code.claude.com/docs/en/memory). */
+function projectMemoryPaths(repo: string): string[] {
+  return [
+    join(repo, 'CLAUDE.md'),
+    join(repo, 'CLAUDE.local.md'),
+    join(repo, CLAUDE_DIR_NAME, 'CLAUDE.md'),
+    join(repo, CLAUDE_DIR_NAME, 'rules'),
+  ];
+}
 
 const SYSTEM_CLI_PATHS = [
   '/usr/local/bin/claude',
@@ -144,15 +156,27 @@ export const claudeCodeAdapter: AgentAdapter = {
       });
     }
 
-    // Project-level config in current working directory
+    // Project-level config in the current working directory. Claude Code
+    // reads <repo>/CLAUDE.md, CLAUDE.local.md, .claude/rules/ and the shared
+    // <repo>/.mcp.json whether or not the repo has .claude/settings*.json, so
+    // any of them makes the project scannable. Running from $HOME makes
+    // <cwd>/.claude the user dir itself — already covered above.
     const cwd = process.cwd();
     const projectClaudeDir = join(cwd, CLAUDE_DIR_NAME);
-    if (await fs.access(projectClaudeDir)) {
-      const projectConfigs = withoutLoadedConfigs(await loadSettingsFiles(projectClaudeDir, fs), installations);
-      if (projectConfigs.length > 0) {
+    if (!installations.some(i => i.installDir === projectClaudeDir)) {
+      const projectConfigs = withoutLoadedConfigs([
+        ...(await fs.access(projectClaudeDir) ? await loadSettingsFiles(projectClaudeDir, fs) : []),
+        ...[await loadConfigIfPresent(join(cwd, PROJECT_MCP_FILE), fs)].filter(c => c !== undefined),
+      ], installations);
+      const hasMemory = (await Promise.all(projectMemoryPaths(cwd).map(p => fs.access(p)))).some(Boolean);
+      if (projectConfigs.length > 0 || hasMemory) {
+        // The project runs under the scanning user's claude — its version
+        // decides how project settings are honored (CC-001)
+        const self = installations.find(i => i.installDir === claudeConfigPaths(fs.homedir(), fs).claudeDir);
         installations.push({
           agent: 'claude-code',
           agentName: `project:${basename(cwd)}`,
+          version: self?.version,
           installDir: projectClaudeDir,
           configFiles: projectConfigs,
           skillsDir: this.getSkillsDir(projectClaudeDir),
@@ -259,6 +283,8 @@ export const claudeCodeAdapter: AgentAdapter = {
         '~/.claude/skills/**',
         '~/.claude/plugins/**',
         '~/.claude/agents/**',
+        // User-level memory rules (CC-012)
+        '~/.claude/rules/**',
         nvmBinaryGlob('claude'),
         ...npmPackageJsonGlobs(NPM_PACKAGE_NAME),
       ],
@@ -271,6 +297,7 @@ export const claudeCodeAdapter: AgentAdapter = {
         '~/.claude/skills',
         '~/.claude/plugins',
         '~/.claude/agents',
+        '~/.claude/rules',
       ],
       envPrefixes: ['CLAUDE_', 'ANTHROPIC_'],
       systemPaths: SYSTEM_CLI_PATHS,

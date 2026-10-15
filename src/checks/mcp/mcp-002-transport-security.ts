@@ -1,6 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { remoteEndpoint } from '../../mcp/remote-endpoint.js';
+import { isRemotePlaintextUrl, remoteEndpoint } from '../../mcp/remote-endpoint.js';
 import { sourceSegments, segmentSnippet } from '../../mcp/source-segments.js';
 
 /** Server code binding a listener to every interface. */
@@ -37,7 +37,7 @@ export const mcp002 = defineCheck({
           // mcp-remote itself refuses plaintext to a non-localhost host unless
           // --allow-http is given, so only that opt-out is a live exposure.
           const plaintextAllowed = via !== 'mcp-remote' || endpoint.allowHttp;
-          if (url.startsWith('http://') && !url.includes('localhost') && !url.includes('127.0.0.1') && plaintextAllowed) {
+          if (isRemotePlaintextUrl(url) && plaintextAllowed) {
             evidence.push({
               file: config.filePath,
               snippet: `Server "${server.name}"${through}: ${url}`,

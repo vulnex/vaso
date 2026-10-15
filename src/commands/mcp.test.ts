@@ -304,4 +304,27 @@ describe('runMCPScan --source', () => {
     expect(consoleErrorLogs.join('\n')).toContain('No MCP server source at: /src/typo');
     expect(mockScanMCP).not.toHaveBeenCalled();
   });
+
+  it('scans the readable sources when one --source path is bad, and exits 3 (incomplete)', async () => {
+    mockResolveSourcePaths.mockResolvedValue({ sources: [direct], unreadable: ['/src/typo'] });
+    mockResolveServerSources.mockResolvedValue([]);
+    mockScanMCP.mockResolvedValue(sampleScanResult);
+
+    await runMCPScan({ format: 'json', source: ['/src/my-server', '/src/typo'] });
+
+    expect(mockScanMCP).toHaveBeenCalledWith([], [direct], expect.anything());
+    expect(consoleErrorLogs.join('\n')).toContain('No MCP server source at: /src/typo');
+    expect(process.exitCode).toBe(3);
+  });
+
+  it('warns about a -p file that holds no MCP servers', async () => {
+    mockDiscoverFromPaths.mockResolvedValue({ ...sampleDiscoveryResult, empty: ['/home/user/other.json'] });
+    mockResolveServerSources.mockResolvedValue([]);
+    mockScanMCP.mockResolvedValue(sampleScanResult);
+
+    await runMCPScan({ format: 'json', path: ['/home/user/config.json', '/home/user/other.json'] });
+
+    expect(consoleErrorLogs.join('\n')).toContain('No MCP servers found in /home/user/other.json');
+    expect(mockScanMCP).toHaveBeenCalled();
+  });
 });

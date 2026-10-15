@@ -228,6 +228,55 @@ describe('OC-004: OPENCLAW_HOME Redirect', () => {
   });
 });
 
+describe('OC-001/OC-005 posture: OpenClaw 2026.x keys', () => {
+  const check = openclawChecks.find(c => c.id === 'OC-001')!;
+
+  it('reads gateway.bind, gateway.tls.enabled, gateway.auth.mode, agents.defaults.sandbox.mode and tools.exec', async () => {
+    const installDir = '/home/test/.openclaw/agents/ops';
+    const configs = [
+      makeConfig('/home/test/.openclaw/openclaw.json', {
+        gateway: { bind: 'loopback', tls: { enabled: true }, auth: { mode: 'token' } },
+        agents: { defaults: { sandbox: { mode: 'all' } } },
+        tools: { exec: { mode: 'ask' } },
+      }),
+      makeConfig(join(installDir, 'agent.json'), {
+        gateway: { bind: 'lan', tls: { enabled: false }, auth: { mode: 'none' } },
+        agents: { defaults: { sandbox: { mode: 'off' } } },
+        tools: { exec: { mode: 'full' } },
+      }),
+    ];
+    const result = await check.run(makeCtx({ configs, installDir, agentName: 'ops' }));
+    const details = (result.evidence ?? []).map(e => e.detail).join('\n');
+    expect(details).toMatch(/TLS disabled/);
+    expect(details).toMatch(/re-bound from 127\.0\.0\.1 to 0\.0\.0\.0/);
+    expect(details).toMatch(/Sandbox disabled/);
+    expect(details).toMatch(/approval no longer required/);
+    expect(details).toMatch(/Auth mode downgraded from token to none/);
+  });
+
+  it("applies the sub-agent's own agents.entries.<name> override", async () => {
+    const installDir = '/home/test/.openclaw/agents/worker';
+    const configs = [
+      makeConfig('/home/test/.openclaw/openclaw.json', {
+        agents: { defaults: { sandbox: { mode: 'all' } }, entries: { worker: { sandbox: { mode: 'off' } } } },
+      }),
+      makeConfig(join(installDir, 'agent.json'), { name: 'worker' }),
+    ];
+    const result = await check.run(makeCtx({ configs, installDir, agentName: 'worker' }));
+    expect(result.passed).toBe(false);
+    expect(result.evidence?.[0].detail).toMatch(/Sandbox disabled/);
+  });
+
+  it('does not treat token -> password as an auth downgrade', async () => {
+    const installDir = '/home/test/.openclaw/agents/pw';
+    const configs = [
+      makeConfig('/home/test/.openclaw/openclaw.json', { gateway: { auth: { mode: 'token' } } }),
+      makeConfig(join(installDir, 'agent.json'), { gateway: { auth: { mode: 'password' } } }),
+    ];
+    expect((await check.run(makeCtx({ configs, installDir, agentName: 'pw' }))).passed).toBe(true);
+  });
+});
+
 describe('OC-005: Profile Config Weaker Than Default', () => {
   const check = openclawChecks.find(c => c.id === 'OC-005')!;
   let tmpRoot: string;

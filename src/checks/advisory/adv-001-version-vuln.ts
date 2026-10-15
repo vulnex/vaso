@@ -54,7 +54,7 @@ export const adv001 = defineCheck({
     return h.result({
       passed: false,
       severity,
-      message: `${n} known vulnerabilit${n === 1 ? 'y' : 'ies'} affect ${describeAffected(agent, affected)}`,
+      message: `${n} known vulnerabilit${n === 1 ? 'y affects' : 'ies affect'} ${describeAffected(agent, affected)}`,
       evidence,
     });
   },

@@ -17,13 +17,29 @@ export const gem003 = defineCheck({
   name: 'Gemini Overbroad Tools Allow',
   category: 'coding-agent',
   severity: 'critical',
-  description: 'Detect tools.allowed entries that grant unbounded shell access',
+  description: 'Detect tools.allowed entries that grant unbounded shell access, and MCP servers marked trust:true (no tool-call confirmation)',
   supportedAgents: ['gemini-cli'],
 
   async run(ctx, h) {
     const evidence: Evidence[] = [];
 
     for (const config of ctx.configs) {
+      // mcpServers.<name>.trust: true "bypasses all tool call confirmations
+      // for this server" (Gemini CLI MCP server docs) — an allow-everything
+      // rule scoped to one server's tools
+      const servers = config.data.mcpServers as Record<string, unknown> | undefined;
+      if (servers && typeof servers === 'object') {
+        for (const [name, server] of Object.entries(servers)) {
+          if (server && typeof server === 'object' && (server as Record<string, unknown>).trust === true) {
+            evidence.push({
+              file: config.filePath,
+              snippet: `mcpServers.${name}.trust = true`,
+              detail: 'Every tool this MCP server exposes runs without confirmation — a prompt-injected call reaches it unchecked',
+            });
+          }
+        }
+      }
+
       const tools = config.data.tools as Record<string, unknown> | undefined;
       const allowed = tools?.allowed;
       if (!Array.isArray(allowed)) continue;
@@ -44,9 +60,9 @@ export const gem003 = defineCheck({
     }
 
     return h.fromEvidence(evidence, {
-      passed: 'Gemini tools.allowed has no overbroad shell entries',
-      failed: (n) => `Found ${n} overbroad shell allow rule(s) in Gemini config`,
-      fixDescription: 'Replace catch-alls with specific commands (e.g. `run_shell_command(git status)`, `run_shell_command(npm test)`)',
+      passed: 'Gemini tools.allowed has no overbroad shell entries and no MCP server is trusted',
+      failed: (n) => `Found ${n} overbroad allow rule(s) (shell catch-alls or trusted MCP servers) in Gemini config`,
+      fixDescription: 'Replace catch-alls with specific commands (e.g. `run_shell_command(git status)`, `run_shell_command(npm test)`) and drop trust:true from MCP servers',
     });
   },
 });

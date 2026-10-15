@@ -427,3 +427,79 @@ describe('CDX-010 rule parsing', () => {
     ]);
   });
 });
+
+describe('deep-test 2026-10-15 regressions (Codex)', () => {
+  const byId = (id: string) => codexChecks.find(c => c.id === id)!;
+  const root = (data: Record<string, unknown>) => makeConfig('/home/test/.codex/config.toml', data);
+  const profileFile = (name: string, data: Record<string, unknown>) => makeConfig(`/home/test/.codex/${name}.config.toml`, data);
+
+  it('CDX-008 reads 0.134+ profile files ($CODEX_HOME/<name>.config.toml); CDX-001/002 leave them to it', async () => {
+    const configs = [root({ approval_policy: 'on-request' }), profileFile('yolo', { approval_policy: 'never', sandbox_mode: 'danger-full-access' })];
+    const r8 = await byId('CDX-008').run(makeCtx(configs));
+    expect(r8.passed).toBe(false);
+    expect(r8.evidence).toHaveLength(2);
+    expect(r8.evidence?.[0].file).toBe('/home/test/.codex/yolo.config.toml');
+    expect((await byId('CDX-001').run(makeCtx(configs))).passed).toBe(true);
+    expect((await byId('CDX-002').run(makeCtx(configs))).passed).toBe(true);
+  });
+
+  it('CDX-009 inspects notify in profile files but not in project config (ignored there)', async () => {
+    const configs = [root({}), profileFile('ci', { notify: ['sh', '-c', 'echo $X'] })];
+    expect((await byId('CDX-009').run(makeCtx(configs))).passed).toBe(false);
+    const ctx = makeCtx([makeConfig('/repo/.codex/config.toml', { notify: ['sh', '-c', 'x'] })]);
+    ctx.installation = { ...ctx.installation, installDir: '/repo/.codex', profile: 'project' };
+    expect((await byId('CDX-009').run(ctx)).passed).toBe(true);
+  });
+
+  it('CDX-002 flags workspace-write with writable_roots "/" (critical) and network_access (warning)', async () => {
+    const wide = await byId('CDX-002').run(makeCtx([root({ sandbox_mode: 'workspace-write', sandbox_workspace_write: { writable_roots: ['/'] } })]));
+    expect(wide.passed).toBe(false);
+    expect(wide.severity).toBe('critical');
+    const net = await byId('CDX-002').run(makeCtx([root({ sandbox_mode: 'workspace-write', sandbox_workspace_write: { network_access: true, writable_roots: ['/home/test/src/app', '/tmp/build'] } })]));
+    expect(net.passed).toBe(false);
+    expect(net.severity).toBe('warning');
+    expect(net.evidence).toHaveLength(1);
+    const ok = await byId('CDX-002').run(makeCtx([root({ sandbox_mode: 'read-only', sandbox_workspace_write: { writable_roots: ['~'] } })]));
+    expect(ok.passed).toBe(true);
+  });
+
+  it('CDX-001 fix text no longer recommends deprecated policies', async () => {
+    const r = await byId('CDX-001').run(makeCtx([root({ approval_policy: 'never' })]));
+    expect(r.fixDescription).toContain('on-request');
+    expect(r.fixDescription).not.toMatch(/untrusted|on-failure/);
+  });
+
+  it('CDX-007 scans AGENTS.override.md, and a trusted project root\'s AGENTS.md', async () => {
+    const seen: string[] = [];
+    const fs = makeFs({
+      access: vi.fn(async (p: string) => { seen.push(p); return p.endsWith('AGENTS.override.md'); }),
+      readFile: vi.fn(async () => `token ghp_${'a1B2'.repeat(9)}\n`),
+    });
+    const r = await byId('CDX-007').run(makeCtx([], fs));
+    expect(r.passed).toBe(false);
+    expect(r.evidence?.[0].file).toBe('/home/test/.codex/AGENTS.override.md');
+
+    const ctx = makeCtx([], makeFs({ access: vi.fn(async (p: string) => { seen.push(p); return false; }) }));
+    ctx.installation = { ...ctx.installation, installDir: '/repo/.codex', profile: 'project' };
+    await byId('CDX-007').run(ctx);
+    expect(seen).toContain('/repo/AGENTS.md');
+  });
+});
+
+describe('CDX-003 fix', () => {
+  it('removes group/other access from auth.json', async () => {
+    const { mkdtempSync, writeFileSync, statSync, chmodSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const dir = mkdtempSync(join(tmpdir(), 'vaso-cdx003-'));
+    writeFileSync(join(dir, 'auth.json'), '{}');
+    chmodSync(join(dir, 'auth.json'), 0o644);
+    const check = codexChecks.find(c => c.id === 'CDX-003')!;
+    const ctx = makeCtx([]);
+    ctx.installation = { ...ctx.installation, installDir: dir };
+    expect((await check.run({ ...ctx, fs: makeFs({ stat: vi.fn(async () => ({ mode: 0o100644, isFile: () => true, isDirectory: () => false })) }) })).fixable).toBe(true);
+    const r = await check.fix!(ctx);
+    expect(r.applied).toBe(true);
+    expect(statSync(join(dir, 'auth.json')).mode & 0o777).toBe(0o600);
+  });
+});

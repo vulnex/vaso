@@ -501,3 +501,36 @@ describe('WS-001/WS-002 on Devin Desktop 3.x (user_settings.pb)', () => {
     expect(result.message).toContain('No Cascade command allowlist configured');
   });
 });
+
+describe('deep-test 2026-10-15 regressions', () => {
+  const byId = (id: string) => windsurfChecks.find(c => c.id === id)!;
+
+  it('WS-005 treats [::1] and 127.0.0.0/8 as loopback, look-alike hosts as remote', async () => {
+    const cfg = (serverUrl: string) => makeConfig('/home/test/.codeium/windsurf/mcp_config.json', { mcpServers: { s: { serverUrl } } });
+    for (const url of ['http://[::1]:3000/mcp', 'http://127.0.0.5/mcp', 'http://localhost/mcp']) {
+      expect((await byId('WS-005').run(makeCtx([cfg(url)]))).passed, url).toBe(true);
+    }
+    for (const url of ['http://localhost.evil.com/mcp', 'http://127.0.0.1.nip.io/mcp']) {
+      expect((await byId('WS-005').run(makeCtx([cfg(url)]))).passed, url).toBe(false);
+    }
+  });
+
+  it('WS-006 scans workspace .devin/workflows and .windsurf/workflows up to the git root', async () => {
+    const cwd = process.cwd();
+    const root = cwd.slice(0, cwd.lastIndexOf('/')) || '/';
+    const files: Record<string, string[]> = {
+      [`${root}/.devin/workflows`]: ['ship.md'],
+      [`${cwd}/.windsurf/workflows`]: ['legacy.md'],
+    };
+    const fs = makeFs({
+      access: vi.fn(async (p: string) => p in files || p === `${root}/.git`),
+      readdir: vi.fn(async (p: string) => files[p] ?? []),
+      readFile: vi.fn(async () => '// turbo\nnpm publish\n'),
+    });
+    const result = await byId('WS-006').run(makeCtx([], fs));
+    expect(result.evidence?.map(e => e.file).sort()).toEqual([
+      `${cwd}/.windsurf/workflows/legacy.md`,
+      `${root}/.devin/workflows/ship.md`,
+    ].sort());
+  });
+});

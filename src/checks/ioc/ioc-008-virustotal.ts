@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { getSkillFiles } from '../../core/utils.js';
+import { skillFilesOf, skillsDirsOf } from '../skills/skill-files.js';
+import { readCappedBytes } from '../../core/file-limits.js';
 
 export const ioc008 = defineCheck({
   id: 'IOC-008',
@@ -14,15 +15,14 @@ export const ioc008 = defineCheck({
     const apiKey = process.env['VIRUSTOTAL_API_KEY'];
     if (!apiKey) return h.passed('VirusTotal check skipped — no VIRUSTOTAL_API_KEY set');
 
-    const skillsDir = ctx.installation.skillsDir;
-    if (!skillsDir) return h.passed('No skills directory found');
+    if (skillsDirsOf(ctx).length === 0) return h.passed('No skills directory found');
 
     const evidence: Evidence[] = [];
-    const files = ctx.skillFiles ?? await getSkillFiles(skillsDir, ctx.fs);
+    const files = await skillFilesOf(ctx);
 
     for (const file of files) {
       try {
-        const content = await ctx.fs.readFile(file);
+        const content = await readCappedBytes(ctx.fs, file);
         const hash = createHash('sha256').update(content).digest('hex');
 
         const response = await fetch(`https://www.virustotal.com/api/v3/files/${hash}`, {

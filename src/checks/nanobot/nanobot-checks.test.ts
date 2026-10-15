@@ -6,6 +6,7 @@ import type { ScanContext, ParsedConfig, AgentInstallation, CheckModule } from '
 import { LocalFSProvider } from '../../core/local-fs-provider.js';
 import { nanobotChecks } from './index.js';
 import { riskyWhitelistEntry } from './nb-005-ssrf-webfetch.js';
+import { isCatchAllPattern } from './nb-004-exec-tool-filter.js';
 
 /**
  * A trimmed but shape-faithful `nanobot onboard` config.json (nanobot-ai
@@ -241,6 +242,13 @@ describe('NB-002: plaintext secrets in config.json', () => {
   });
 });
 
+describe('NB-002: non-secret keys', () => {
+  it('does not treat a string-valued websocketRequiresToken as a secret', async () => {
+    const ctx = await makeCtx(merge(onboardConfig(), { channels: { websocket: { websocketRequiresToken: 'true' } } }));
+    expect((await check('NB-002').run(ctx)).passed).toBe(true);
+  });
+});
+
 describe('NB-002: parent traversal', () => {
   it('stays a warning when a 0750 home blocks world access to a 0664 config', async () => {
     const ctx = await makeCtx(merge(onboardConfig(), {
@@ -275,6 +283,11 @@ describe('NB-003: tools.restrictToWorkspace', () => {
     expect((await check('NB-003').run(ctx)).passed).toBe(true);
   });
 
+  it('accepts pydantic string booleans ("true") as enabled', async () => {
+    const ctx = await makeCtx(merge(onboardConfig(), { tools: { restrictToWorkspace: 'true' } }));
+    expect((await check('NB-003').run(ctx)).passed).toBe(true);
+  });
+
   it('honors the legacy tools.exec.restrictToWorkspace when the new key is absent', async () => {
     const data = onboardConfig();
     delete (data.tools as Json).restrictToWorkspace;
@@ -306,6 +319,24 @@ describe('NB-004: shell exec confinement', () => {
     expect((await check('NB-004').run(sandboxed)).passed).toBe(true);
     const disabled = await makeCtx(merge(onboardConfig(), { tools: { exec: { enable: false } } }));
     expect((await check('NB-004').run(disabled)).passed).toBe(true);
+  });
+
+  it('judges allow patterns by what they match, not their spelling', async () => {
+    for (const p of ['.*', '(?i).*', '.{0,}', '(.|\n)*', '[^\x00]*', '(?s).+', '\\S.*']) {
+      expect(isCatchAllPattern(p), p).toBe(true);
+    }
+    for (const p of ['git (status|log|diff).*', 'ls( -la)?', '^npm test$', '(?i)echo .*', '[unclosed']) {
+      expect(isCatchAllPattern(p), p).toBe(false);
+    }
+    const ctx = await makeCtx(merge(onboardConfig(), { tools: { exec: { sandbox: 'bwrap', allowPatterns: ['(?i).*', '.{0,}'] } } }));
+    const r = await check('NB-004').run(ctx);
+    expect(r.severity).toBe('critical');
+    expect(r.evidence).toHaveLength(2);
+  });
+
+  it('treats a pydantic string "false" as disabling exec', async () => {
+    const ctx = await makeCtx(merge(onboardConfig(), { tools: { exec: { enable: 'false', allowPatterns: ['.*'] } } }));
+    expect((await check('NB-004').run(ctx)).passed).toBe(true);
   });
 
   it('flags a sandbox bind of the home directory', async () => {

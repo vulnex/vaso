@@ -6,13 +6,16 @@ import { queryPermissions } from '../../core/permissions.js';
 import {
   BREW_VAR_DIRS,
   GLOBAL_POLICY_ARGS,
+  DEFAULT_WORKSPACE,
   SANDBOX_LIST_ARGS,
   SNAP_COMMON_DIR,
+  SNAP_USER_REL,
   envTruthy,
   expandHome,
   gatewayTable,
   openShellPaths,
   sandboxPolicyArgs,
+  snapUserDir,
   type OpenShellPaths,
 } from '../../adapters/openshell.js';
 
@@ -31,7 +34,7 @@ export function record(v: unknown): Record<string, unknown> | undefined {
 /** Home of the user this installation belongs to (`--all-users` scans other homes). */
 export function installHome(ctx: ScanContext): string {
   const dir = ctx.installation.installDir;
-  for (const suffix of ['/.config/openshell', '/.local/state/openshell']) {
+  for (const suffix of ['/.config/openshell', '/.local/state/openshell', `/${SNAP_USER_REL}`]) {
     if (dir.endsWith(suffix)) return dir.slice(0, -suffix.length);
   }
   // $XDG_* overrides and package-managed gateways only apply to the scanning user
@@ -110,6 +113,7 @@ export function tlsDirs(ctx: ScanContext): string[] {
     join(p.stateDir, 'homebrew', 'tls'),
     ...(ctx.fs.platform === 'darwin' ? BREW_VAR_DIRS.map(d => join(d, 'tls')) : []),
     join(SNAP_COMMON_DIR, 'tls'),
+    join(snapUserDir(p.home), '.local', 'state', 'openshell', 'tls'),
   ];
   return [...new Set(dirs)];
 }
@@ -118,7 +122,10 @@ export function tlsDirs(ctx: ScanContext): string[] {
 export function databasePaths(ctx: ScanContext): string[] {
   const p = paths(ctx);
   const url = gatewayEnv(ctx)?.data.OPENSHELL_DB_URL;
-  const out = [join(p.stateDir, 'gateway', 'openshell.db')];
+  const out = [
+    join(p.stateDir, 'gateway', 'openshell.db'),
+    join(snapUserDir(p.home), '.local', 'state', 'openshell', 'gateway', 'openshell.db'),
+  ];
   if (typeof url === 'string') {
     const m = /^sqlite:(?:\/\/)?(.+?)(?:\?.*)?$/.exec(url.trim());
     if (m) out.unshift(expandHome(m[1], p.home));
@@ -176,7 +183,11 @@ async function livePolicies(ctx: ScanContext): Promise<PolicyRef[]> {
     for (const item of sandboxes.slice(0, MAX_SANDBOXES)) {
       const sb = record(item);
       const name = sb?.name;
-      const workspace = typeof sb?.workspace === 'string' && sb.workspace ? sb.workspace : 'default';
+      // A sandbox listed without a workspace lives in "default" (the probe's
+      // forEach applies the same default — keep the two in step)
+      const ws = sb?.workspace;
+      const workspace = ws === undefined || ws === null || ws === '' ? DEFAULT_WORKSPACE : ws;
+      if (typeof workspace !== 'string') continue;
       if (typeof name !== 'string' || !NAME.test(name) || !NAME.test(workspace)) continue;
       const res = await run(sandboxPolicyArgs(name, workspace));
       const policy = res.exitCode === 0 ? record(parseJson(res.stdout)?.policy) : undefined;

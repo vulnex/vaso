@@ -1,9 +1,8 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { scanWithPatterns, SECURITY_PATTERNS } from '../../analyzers/pattern-engine.js';
-import { getSkillFiles } from '../../core/utils.js';
+import { readSkillText, skillFilesOf, skillsDirsOf } from './skill-files.js';
 import { markTestCode } from '../../analyzers/test-paths.js';
-import { readCappedFile } from '../../core/file-limits.js';
 
 const CRYPTO_RULES = SECURITY_PATTERNS.filter(r => r.category === 'crypto-wallet');
 
@@ -15,15 +14,15 @@ export const skl009 = defineCheck({
   description: 'Detect crypto wallet address patterns and API targeting',
 
   async run(ctx, h) {
-    const skillsDir = ctx.installation.skillsDir;
-    if (!skillsDir) return h.passed('No skills directory found');
+    if (skillsDirsOf(ctx).length === 0) return h.passed('No skills directory found');
 
     const evidence: Evidence[] = [];
-    const files = ctx.skillFiles ?? await getSkillFiles(skillsDir, ctx.fs);
+    const files = await skillFilesOf(ctx);
 
     for (const file of files) {
       try {
-        const code = await readCappedFile(ctx.fs, file);
+        const code = await readSkillText(ctx.fs, file, 'patterns');
+        if (code === undefined) continue;
         const matches = scanWithPatterns(code, CRYPTO_RULES);
 
         for (const match of matches) {

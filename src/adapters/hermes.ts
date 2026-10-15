@@ -11,6 +11,25 @@ import { queryCliVersion } from './version-query.js';
 
 const CONFIG_FILENAMES = ['cli-config.yaml', 'config.yaml', '.env'];
 
+const SEMVER = /^\d+\.\d+\.\d+(?:[-+][\w.-]+)?$/;
+
+/**
+ * The installer's record of the checkout version
+ * (`$HERMES_HOME/hermes-agent/install-stamp.json`, `baseVersion`). Read from
+ * a file, so it works on snapshots and needs no exec — `hermes --version`
+ * from a fresh data root installs Python deps, and a source checkout can
+ * report the placeholder 0.0.0.
+ */
+async function installStampVersion(hermesHome: string, fs: FSProvider): Promise<string | undefined> {
+  try {
+    const stamp = JSON.parse(await fs.readFile(join(hermesHome, 'hermes-agent', 'install-stamp.json'))) as Record<string, unknown>;
+    const v = typeof stamp.baseVersion === 'string' ? stamp.baseVersion.trim().replace(/^v/, '') : '';
+    return SEMVER.test(v) && v !== '0.0.0' ? v : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 const SYSTEM_CLI_PATHS = [
   '/usr/local/bin/hermes',
   '/opt/homebrew/bin/hermes',
@@ -47,6 +66,8 @@ export const hermesAdapter: AgentAdapter = {
 
     if (configFiles.length === 0) return [];
 
+    const stampVersion = await installStampVersion(hermesHome, fs);
+
     const installs = await discoverCliInstalls(home, fs, {
       names: ['hermes'],
       systemPaths: SYSTEM_CLI_PATHS,
@@ -56,10 +77,16 @@ export const hermesAdapter: AgentAdapter = {
       // its Python dependencies before parsing arguments — hundreds of MB per
       // scan. `--version` exits without writing; a git checkout then reports
       // no version (its version comes from `git describe`).
-      version: (bin, canExec) => (canExec ? queryCliVersion(bin, fs) : undefined),
+      // The install stamp wins when present (no exec at all); 0.0.0 is a
+      // placeholder, never a real release.
+      version: async (bin, canExec) => {
+        if (stampVersion || !canExec) return undefined;
+        const v = await queryCliVersion(bin, fs);
+        return v === '0.0.0' ? undefined : v;
+      },
     });
     const cliBinary = installs.primary?.path;
-    const version = installs.primary?.version;
+    const version = stampVersion ?? installs.primary?.version;
 
     // Merge all config data to extract gateway info
     const merged: Record<string, unknown> = {};
@@ -253,9 +280,13 @@ export const hermesAdapter: AgentAdapter = {
         '~/.hermes/cli-config.yaml',
         '~/.hermes/config.yaml',
         '~/.hermes/.env',
+        // Installer version record ({"baseVersion": …})
+        '~/.hermes/hermes-agent/install-stamp.json',
       ],
       // Credential stores — permissions only (HM-003), never content
       metadataGlobPatterns: [
+        // Auto-installed tirith binary (HM-009) — presence only
+        '~/.hermes/bin/tirith',
         '~/.hermes/credentials.json',
         '~/.hermes/auth.json',
         '~/.hermes/mcp-tokens/*.json',
@@ -273,7 +304,8 @@ export const hermesAdapter: AgentAdapter = {
         '~/.hermes/skills',
         '~/.hermes/optional-skills',
       ],
-      envPrefixes: ['HERMES_'],
+      // TIRITH_ENABLED / TIRITH_FAIL_OPEN override security.tirith_* (HM-009)
+      envPrefixes: ['HERMES_', 'TIRITH_ENABLED', 'TIRITH_FAIL_OPEN'],
       systemPaths: [
         '/usr/local/bin/hermes',
         '/opt/homebrew/bin/hermes',

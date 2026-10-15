@@ -444,7 +444,8 @@ async function pythonPackageFiles(dir: string, fs: FSProvider): Promise<string[]
   for (const name of candidates) {
     for (const root of roots) {
       const pkg = join(root, name);
-      if (!(await fs.access(join(pkg, '__init__.py'))) && !(await fs.access(join(pkg, '__main__.py')))) continue;
+      // No __init__.py is fine: a PEP 420 namespace package (awslabs/*) still
+      // imports. The SDK check below keeps unrelated directories out.
       const modules = await pythonModules(pkg, fs);
       if (modules.length === 0) continue;
       // The console script's package is the server; any other must use the SDK

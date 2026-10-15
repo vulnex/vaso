@@ -168,7 +168,7 @@ export const cdx010 = defineCheck({
 
     return h.fromEvidence(evidence, {
       passed: 'Codex command allow rules are scoped to specific commands',
-      failed: (n) => `Found ${n} over-broad allow rule(s) in ~/.codex/rules/`,
+      failed: (n) => `Found ${n} over-broad allow rule(s) in ${rulesDir}`,
       fixDescription: 'Narrow allow rules to full command prefixes (e.g. ["npm","run","build"]); remove bare network/shell/interpreter approvals',
     });
   },

@@ -252,3 +252,52 @@ describe('GHC-009: Trusted Folder Too Broad', () => {
     expect(result.passed).toBe(true);
   });
 });
+
+describe('deep-test 2026-10-15 regressions', () => {
+  const byId = (id: string) => copilotCliChecks.find(c => c.id === id)!;
+  const settings = (data: Record<string, unknown>) => makeConfig('/home/test/.copilot/settings.json', data);
+
+  it('GHC-005 reads the documented autoUpdatesChannel (updateChannel kept as fallback)', async () => {
+    const current = await byId('GHC-005').run(makeCtx([settings({ autoUpdatesChannel: 'prerelease' })]));
+    expect(current.passed).toBe(false);
+    expect(current.evidence?.[0].snippet).toBe('autoUpdatesChannel = "prerelease"');
+    expect((await byId('GHC-005').run(makeCtx([settings({ updateChannel: 'prerelease' })]))).passed).toBe(false);
+    expect((await byId('GHC-005').run(makeCtx([settings({ autoUpdatesChannel: 'stable' })]))).passed).toBe(true);
+  });
+
+  it('GHC-006 reads the documented experimental key (experimentalMode kept as fallback)', async () => {
+    expect((await byId('GHC-006').run(makeCtx([settings({ experimental: true })]))).passed).toBe(false);
+    expect((await byId('GHC-006').run(makeCtx([settings({ experimentalMode: true })]))).passed).toBe(false);
+    expect((await byId('GHC-006').run(makeCtx([settings({ experimental: false })]))).passed).toBe(true);
+  });
+
+  it('GHC-002 flags saved any-command approvals and broad allowed_directories in permissions-config.json', async () => {
+    const result = await byId('GHC-002').run(makeCtx([makeConfig('/home/test/.copilot/permissions-config.json', {
+      locations: {
+        '/home/test/repo': {
+          tool_approvals: [
+            { kind: 'commands', commandIdentifiers: ['git:*', 'bash:*', 'python3:*', 'npm test'] },
+            { kind: 'write' },
+          ],
+          allowed_directories: ['/home/test', '/home/test/repo/docs'],
+        },
+      },
+    })]));
+    expect(result.passed).toBe(false);
+    expect(result.evidence?.map(e => e.snippet)).toEqual([
+      'locations["/home/test/repo"].tool_approvals: commands "bash:*"',
+      'locations["/home/test/repo"].tool_approvals: commands "python3:*"',
+      'locations["/home/test/repo"].allowed_directories: "/home/test"',
+    ]);
+  });
+
+  it('GHC-002 keeps the legacy allowAllPermissions key', async () => {
+    expect((await byId('GHC-002').run(makeCtx([settings({ allowAllPermissions: true })]))).passed).toBe(false);
+  });
+
+  it('GHC-004 covers project .github/mcp.json and compares the parsed host', async () => {
+    const cfg = (url: string) => makeConfig('/home/test/repo/.github/mcp.json', { mcpServers: { s: { url } } });
+    expect((await byId('GHC-004').run(makeCtx([cfg('http://127.0.0.1.nip.io/mcp')], undefined, true))).passed).toBe(false);
+    expect((await byId('GHC-004').run(makeCtx([cfg('http://127.0.0.1:9000/mcp')], undefined, true))).passed).toBe(true);
+  });
+});

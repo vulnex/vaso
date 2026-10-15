@@ -1,6 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { shellCommandWrapper } from '../../mcp/shell-wrapper.js';
+import { codexProfileName } from '../../adapters/codex.js';
 
 const INTERPRETERS = /^(?:python[\d.]*|node|bun|deno|ruby|perl|bash|sh|zsh|osascript)$/;
 const EVAL_LIKE = new Set(['eval', 'exec']);
@@ -68,13 +69,17 @@ export const cdx009 = defineCheck({
 
   async run(ctx, h) {
     const evidence: Evidence[] = [];
+    // Codex ignores `notify` in a project's .codex/config.toml
+    if (ctx.installation.profile === 'project') return h.passed('Project config cannot set a Codex notify command');
 
     for (const config of ctx.configs) {
       const rootNotify = config.data.notify;
+      // Profile files (`<name>.config.toml`) override notify under `codex -p <name>`
+      const profile = codexProfileName(config.filePath);
       for (const f of inspectNotify(rootNotify)) {
         evidence.push({
           file: config.filePath,
-          snippet: `notify = ${JSON.stringify(rootNotify)}`,
+          snippet: `${profile ? `${profile}.config.toml: ` : ''}notify = ${JSON.stringify(rootNotify)}`,
           detail: f.reason,
         });
       }

@@ -16,13 +16,24 @@ export const cfg013 = defineCheck({
                        getNestedValue(config.data, 'messaging.dm') ??
                        getNestedValue(config.data, 'directMessage.policy');
 
-      // OpenClaw 2026.x: per channel, channels.<ch>.dmPolicy = pairing | allowlist | open | disabled
+      // OpenClaw 2026.x: per channel, channels.<ch>.dmPolicy = pairing | allowlist | open | disabled,
+      // and each channels.<ch>.accounts.<id> may override it (2026.9.4 schema)
       const channels = config.data.channels;
-      const openChannels = channels && typeof channels === 'object'
-        ? Object.entries(channels as Record<string, unknown>)
-            .filter(([, ch]) => (ch as Record<string, unknown> | null)?.dmPolicy === 'open')
-            .map(([name]) => name)
-        : [];
+      const openChannels: string[] = [];
+      if (channels && typeof channels === 'object') {
+        for (const [name, ch] of Object.entries(channels as Record<string, unknown>)) {
+          const chRec = ch && typeof ch === 'object' ? ch as Record<string, unknown> : undefined;
+          if (!chRec || chRec.enabled === false) continue;
+          if (chRec.dmPolicy === 'open') openChannels.push(name);
+          const accounts = chRec.accounts;
+          if (accounts && typeof accounts === 'object' && !Array.isArray(accounts)) {
+            for (const [id, acc] of Object.entries(accounts as Record<string, unknown>)) {
+              const accRec = acc && typeof acc === 'object' ? acc as Record<string, unknown> : undefined;
+              if (accRec?.enabled !== false && accRec?.dmPolicy === 'open') openChannels.push(`${name}.accounts.${id}`);
+            }
+          }
+        }
+      }
       if (openChannels.length > 0) {
         return h.result({
           passed: false,

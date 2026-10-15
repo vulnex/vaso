@@ -133,6 +133,23 @@ describe('AT-003 HTTP tool without approval', () => {
     }
   });
 
+  it('flags approvalMode "writes" when approvalLevel ≥ 3 auto-approves HTTP, and the fix declines', async () => {
+    const cfg = makeJson({ agent: { approvalLevel: 3 }, http: { approvalMode: 'writes' } });
+    const r = await check('AT-003').run(makeCtx([cfg]));
+    expect(r.passed).toBe(false);
+    expect(r.fixable).toBeFalsy();
+    expect(r.evidence![0].detail).toContain('never prompts');
+    const fix = await check('AT-003').fix!(makeCtx([cfg]));
+    expect(fix.applied).toBe(false);
+    expect(fix.message).toContain('approvalLevel 3');
+    // Legacy approvalRequired: false loads as level 5
+    const legacy = makeJson({ agent: { approvalRequired: false }, http: { approvalMode: 'always' } });
+    expect((await check('AT-003').run(makeCtx([legacy]))).passed).toBe(false);
+    // Level 2 keeps the approvalMode prompts
+    const gated = makeJson({ agent: { approvalLevel: 2 }, http: { approvalMode: 'writes' } });
+    expect((await check('AT-003').run(makeCtx([gated]))).passed).toBe(true);
+  });
+
   it('still flags an empty allowlist', async () => {
     const r = await check('AT-003').run(makeCtx([makeJson({ http: { approvalMode: 'never', hostAllowlist: [] } })]));
     expect(r.passed).toBe(false);

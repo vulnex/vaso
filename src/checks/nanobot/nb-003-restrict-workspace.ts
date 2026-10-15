@@ -1,7 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { fixFirstConfig } from '../../remediation/config-writer.js';
-import { asRecord, getPath, nanobotConfigs } from './shared.js';
+import { asRecord, getPath, nanobotConfigs, pyBool } from './shared.js';
 
 export const nb003 = defineCheck({
   id: 'NB-003',
@@ -19,7 +19,7 @@ export const nb003 = defineCheck({
       // loader migrates when the current key is absent.
       const current = getPath(config.data, 'tools.restrictToWorkspace');
       const restrict = current ?? getPath(tools, 'exec.restrictToWorkspace');
-      if (restrict === true) continue;
+      if (pyBool(restrict) === true) continue;
       evidence.push({
         file: config.filePath,
         snippet: `tools.restrictToWorkspace: ${restrict === undefined ? '(unset, defaults to false)' : JSON.stringify(restrict)}`,

@@ -3,6 +3,7 @@ import { parse } from '@babel/parser';
 import _traverse from '@babel/traverse';
 import type { Node } from '@babel/types';
 import { sourceChunks } from './js-parse.js';
+import { sinkCallee } from './tool-input-taint.js';
 
 // Handle ESM/CJS interop
 const traverse = typeof _traverse === 'function' ? _traverse : (_traverse as { default: typeof _traverse }).default;
@@ -139,13 +140,19 @@ function analyzeUncached(code: string): DataFlowResult[] {
         const line = node.loc?.start.line ?? 0;
         const snippet = lineText(line);
 
-        // Detect eval/exec
-        if (node.callee.type === 'Identifier' && EXEC_FUNCTIONS.has(node.callee.name)) {
+        // Detect eval/exec — aliased, destructured, required inline or
+        // dynamically imported child_process, execa/shelljs, indirect eval —
+        // and any bare call named like one.
+        const sink = sinkCallee(path);
+        if (sink || (node.callee.type === 'Identifier' && EXEC_FUNCTIONS.has(node.callee.name))) {
+          const name = sink?.display ?? (node.callee as { name: string }).name;
           results.push({
             type: 'eval-exec',
             line,
             snippet: snippet.slice(0, 120),
-            description: `${node.callee.name}() call detected`,
+            description: sink && node.callee.type === 'MemberExpression' && sink.kind === 'process'
+              ? `${name}() — command execution`
+              : `${name}() call detected`,
             ...commandText(node.arguments),
           });
         }
@@ -250,8 +257,8 @@ function analyzeUncached(code: string): DataFlowResult[] {
             sourceVars.set('process.env', 'env');
           }
 
-          // Detect child_process methods
-          if (EXEC_FUNCTIONS.has(propName)) {
+          // Detect child_process methods (sinkCallee above covers resolvable ones)
+          if (EXEC_FUNCTIONS.has(propName) && !sink) {
             const obj = node.callee.object;
             if (obj.type === 'Identifier' && (networkImports.has(obj.name) || obj.name === 'child_process')) {
               results.push({
@@ -271,7 +278,11 @@ function analyzeUncached(code: string): DataFlowResult[] {
             const firstArg = node.arguments[0];
             if (firstArg?.type === 'StringLiteral') {
               const url = firstArg.value;
-              if (!url.startsWith('http://localhost') &&
+              // A relative URL (`/api/items`, `./data.json`) stays on the
+              // page's own origin; `//host/…` is protocol-relative and leaves it.
+              const relative = /^(?:\/(?!\/)|\.\.?\/)/.test(url);
+              if (!relative &&
+                  !url.startsWith('http://localhost') &&
                   !url.startsWith('http://127.0.0.1') &&
                   !url.startsWith('https://')) {
                 results.push({

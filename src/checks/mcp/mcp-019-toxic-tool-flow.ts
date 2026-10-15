@@ -8,7 +8,8 @@ const SOURCE_PATTERNS = [
   /execSync|exec\s*\(/,
   /spawn\s*\(/,
   /\bquery\s*\(/,
-  /\bSELECT\b/i,
+  // SQL, not the word: `SELECT … FROM`, or lower-case `select *` / `select a, b`.
+  /\bSELECT\b[^;]{0,200}?\bFROM\b|\bselect\s+(?:\*|\w+\s*,)[^;]{0,200}?\bfrom\b/,
   /db\.(get|all|run)\s*\(/,
   /process\.env/,
   /homedir\(\)/,

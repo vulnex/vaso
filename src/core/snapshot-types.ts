@@ -32,6 +32,9 @@ export interface CommandForEach {
   array: string;
   /** String fields of each item, substituted for `{field}` in args. */
   fields: string[];
+  /** Value for a field an item lacks (null/empty) — e.g. an OpenShell sandbox
+   *  listed without a workspace lives in `default` (probe ≥ 1.2.2; older probes skip the item). */
+  defaults?: Record<string, string>;
 }
 
 export interface ProbeSnapshot {

@@ -94,3 +94,23 @@ export function remoteEndpoint(server: MCPServerEntry): RemoteEndpoint | undefin
   if (http && HTTP_URL.test(http)) return { url: http, transport: 'streamable-http', via: 'supergateway' };
   return undefined;
 }
+
+/**
+ * The URL's host is the local machine (localhost, a *.localhost name,
+ * 127.0.0.0/8, ::1). Judged on the parsed host, not by substring:
+ * `http://localhost.attacker.example` and `http://x/localhost/` are remote.
+ */
+export function isLoopbackUrl(url: string): boolean {
+  let host: string;
+  try {
+    host = new URL(url.trim()).hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  } catch {
+    return false;
+  }
+  return host === 'localhost' || host.endsWith('.localhost') || host === '::1' || /^127(?:\.\d{1,3}){3}$/.test(host);
+}
+
+/** Plaintext `http://` (any case) to a host other than the local machine. */
+export function isRemotePlaintextUrl(url: string): boolean {
+  return /^http:\/\//i.test(url.trim()) && !isLoopbackUrl(url);
+}

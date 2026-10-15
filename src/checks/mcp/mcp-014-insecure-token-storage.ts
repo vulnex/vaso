@@ -30,6 +30,12 @@ const INSECURE_TOKEN_PATTERNS: TokenPattern[] = [
   { pattern: /searchParams\.(?:set|append)\s*\(\s*["'`](?:access_token|refresh_token|id_token|token)["'`]/, detail: 'OAuth token in URL query parameter' },
 ];
 
+/** A token reference reduced to a yes/no or a size. */
+const PRESENCE_ONLY = new RegExp(
+  String.raw`(?:!!?\s*|\btypeof\s+|\bBoolean\(\s*)[\w$.?\[\]'"]+|[\w$.?]+(?:\.length\b|\s*(?:!==?|===?)\s*(?:null|undefined)\b)`,
+  'g',
+);
+
 /** Owner-only file mode (0o600 / 0600 / 384) set on the write — a protected credential cache. */
 const OWNER_ONLY_MODE = /\bmode\s*:\s*(?:0o?600|384)\b|chmod(?:Sync)?\s*\([^)]*,\s*(?:0o?600|384)\s*\)/;
 
@@ -57,7 +63,9 @@ export const mcp014 = defineCheck({
         // Skip comment lines
         if (line.trim().startsWith('//') || line.trim().startsWith('*')) continue;
 
-        const code = withoutStringText(line);
+        // `!!session.refresh_token`, `typeof token`, `token.length`, `token
+        // != null` log whether a token exists, not the token.
+        const code = withoutStringText(line).replace(PRESENCE_ONLY, '');
         for (const { pattern, detail, codeOnly, fileWrite } of INSECURE_TOKEN_PATTERNS) {
           if (pattern.test(codeOnly ? code : line)) {
             if (fileWrite && OWNER_ONLY_MODE.test(nearbyText(segments, i, 2))) break;

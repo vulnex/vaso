@@ -1,3 +1,4 @@
+import { envNote } from '../../adapters/env-overrides.js';
 import { defineCheck } from '../../core/check-builder.js';
 import type { Evidence } from '../../core/types.js';
 import { effectiveProfiles, hasWildcard, mainConfig, profileLabel, writeMainConfig } from './zc-config.js';
@@ -24,7 +25,7 @@ export const zc005 = defineCheck({
       if (hasWildcard(p.profile.always_ask)) continue; // always_ask "*" still prompts for everything
       evidence.push({
         file: config.filePath,
-        detail: `${profileLabel(p)}: level = "full" — tool calls bypass the approval gate`,
+        detail: `${profileLabel(p)}: level = "full"${envNote(config.data, `${p.path}.level`)} — tool calls bypass the approval gate`,
       });
     }
     return h.fromEvidence(evidence, {

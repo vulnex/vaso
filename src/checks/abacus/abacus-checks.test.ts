@@ -103,6 +103,12 @@ describe('ABA-001 permission mode', () => {
     const envTrust = makeFs({ env: { ABACUS_TRUST_WORKSPACE: 'true' } });
     expect((await check('ABA-001').run(projectCtx([project], envTrust))).severity).toBe('critical');
   });
+
+  it('does not offer a fix when the only evidence is an inactive untrusted-project setting', async () => {
+    const r = await check('ABA-001').run(projectCtx([cfg('/work/app/.abacusai/config.json', { permissionMode: 'unsupervised' })]));
+    expect(r.passed).toBe(false);
+    expect(r.fixable).toBe(false);
+  });
 });
 
 describe('ABA-002 broad permission rules', () => {
@@ -119,6 +125,13 @@ describe('ABA-002 broad permission rules', () => {
     const r = await check('ABA-002').run(userCtx([cfg(USER_CFG, { permissions: { allow: ['Bash(curl *)', 'Bash(npm test)'] } })]));
     expect(r.severity).toBe('warning');
     expect(r.evidence).toHaveLength(1);
+  });
+
+  it('treats an all-wildcard Bash pattern as any command and /private/etc as /etc', async () => {
+    const r0 = await check('ABA-002').run(userCtx([cfg(USER_CFG, { permissions: { allow: ['Bash(* *)'] } })]));
+    expect(r0.severity).toBe('critical');
+    const etc = await check('ABA-002').run(userCtx([cfg(USER_CFG, { permissions: { allow: ['Write(/private/etc/**)'] } })]));
+    expect(etc.severity).toBe('critical');
   });
 
   it('passes scoped rules', async () => {
@@ -187,6 +200,21 @@ describe('MCP checks (ABA-004/006/007/008) over both config shapes', () => {
     expect(r.passed).toBe(true);
   });
 
+  it('ABA-004 does not report URLs, paths or mode words under auth-ish names', async () => {
+    const r = await check('ABA-004').run(userCtx([cfg(USER_MCP, { mcpServers: {
+      a: { command: 'x', env: {
+        AUTH_MODE: 'oauth-device', GITHUB_API_URL: 'https://api.github.com', SESSION_DIR: '/var/tmp/sessions',
+        API_KEY_FILE: '~/.config/key', TOKEN_ENV: 'GITHUB_TOKEN', API_VERSION: '2024-10-01',
+        SESSION_SECRET_SEED: 'q8Zr2LmW7xVb4NcT', API_ACCESS: 'Xk29fLq8Zr2mW7vB',
+      } },
+    } })]));
+    // Only the secret-named key and the credential-shaped API_ACCESS value count
+    expect(r.evidence?.map(e => e.snippet?.split(':')[0])).toEqual([
+      'mcpServers.a.env.SESSION_SECRET_SEED',
+      'mcpServers.a.env.API_ACCESS',
+    ]);
+  });
+
   it('ABA-006 flags unpinned runners in both shapes', async () => {
     const r = await check('ABA-006').run(userCtx([mapShape, arrayShape]));
     expect(r.evidence).toHaveLength(2);
@@ -216,6 +244,16 @@ describe('ABA-005 provider API keys', () => {
   });
 });
 
+describe('ABA-005 provider request headers', () => {
+  it('flags a literal Authorization header and ignores env references', async () => {
+    const r = await check('ABA-005').run(userCtx([cfg(USER_CFG, { providers: {
+      gw: { options: { baseURL: 'https://gw.example.com/v1', headers: { Authorization: 'Bearer q8Zr2LmW7xVb4NcTk3Yd', 'X-Title': 'my-app' } } },
+      ok: { options: { headers: { Authorization: 'Bearer ${GW_TOKEN}' } } },
+    } })]));
+    expect(r.evidence?.map(e => e.snippet?.split(':')[0])).toEqual(['providers.gw.options.headers.Authorization']);
+  });
+});
+
 describe('ABA-009 workspace trust', () => {
   it('flags ABACUS_TRUST_WORKSPACE and a home-wide trusted workspace', async () => {
     const trustFile = `${HOME}/.abacusai/trusted-workspaces.json`;
@@ -240,6 +278,12 @@ describe('ABA-010 external MCP configs', () => {
     expect(r.fixable).toBe(true);
     expect((await check('ABA-010').run(userCtx([cfg(USER_CFG, { loadExternalMcpConfigs: false })]))).passed).toBe(true);
   });
+
+  it('does not offer a fix for an untrusted project setting', async () => {
+    const r = await check('ABA-010').run(projectCtx([cfg('/work/app/.abacusai/config.json', { loadExternalMcpConfigs: true })]));
+    expect(r.passed).toBe(false);
+    expect(r.fixable).toBe(false);
+  });
 });
 
 describe('ABA-011 API endpoints', () => {
@@ -249,6 +293,10 @@ describe('ABA-011 API endpoints', () => {
     const other = await check('ABA-011').run(userCtx([cfg(USER_CFG, { baseUrl: 'https://llm-gw.example.com' })]));
     expect(other.severity).toBe('warning');
     expect((await check('ABA-011').run(userCtx([cfg(USER_CFG, { baseUrl: 'https://apps.abacus.ai' })]))).passed).toBe(true);
+    expect((await check('ABA-011').run(userCtx([cfg(USER_CFG, { baseUrl: 'https://localhost:8443/v1' })]))).passed).toBe(true);
+    // Host anchored: a domain that merely starts with "localhost" is remote
+    const lookalike = await check('ABA-011').run(userCtx([cfg(USER_CFG, { baseUrl: 'https://localhost.evil.example' })]));
+    expect(lookalike.severity).toBe('warning');
   });
 
   it('flags a plaintext non-loopback provider endpoint', async () => {
@@ -274,6 +322,16 @@ describe('ABA-013 additional directories', () => {
     const r = await check('ABA-013').run(userCtx([cfg(USER_CFG, { additionalDirectories: ['~', '~/.aws', '/tmp', '/work/other'] })]));
     expect(r.severity).toBe('critical');
     expect(r.evidence).toHaveLength(3);
+  });
+});
+
+describe('ABA-013 macOS /private paths', () => {
+  it('judges /private/etc like /etc', async () => {
+    const etc = await check('ABA-013').run(userCtx([cfg(USER_CFG, { additionalDirectories: ['/etc'] })]));
+    const priv = await check('ABA-013').run(userCtx([cfg(USER_CFG, { additionalDirectories: ['/private/etc'] })]));
+    expect(etc.passed).toBe(false);
+    expect(priv.passed).toBe(false);
+    expect(priv.severity).toBe(etc.severity);
   });
 });
 

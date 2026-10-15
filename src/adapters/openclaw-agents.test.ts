@@ -222,8 +222,10 @@ describe('OpenClaw per-agent discovery', () => {
     // Keyed by path: other lookups (e.g. nvm version dirs) list nothing
     mockReaddir.mockImplementation((async (dir: unknown) => (dir === agentsDir ? [mockDirent('test-agent', true)] : [])) as any);
 
+    const agentConfigPath = join(agentDir, 'agent.json');
     mockLoadConfig.mockImplementation(async (path) => {
       if (path === configPath) return mockConfig(configPath, {});
+      if (path === agentConfigPath) return mockConfig(agentConfigPath, { name: 'test-agent' });
       throw new Error('ENOENT');
     });
 
@@ -231,6 +233,25 @@ describe('OpenClaw per-agent discovery', () => {
     const subAgent = result.find(i => i.agentName === 'test-agent');
     expect(subAgent).toBeDefined();
     expect(subAgent!.cliBinary).toBe(cliBinPath);
+  });
+
+  it('does not report a 2026.x per-agent state dir (agents/main/agent/) as a sub-agent', async () => {
+    const home = process.env.HOME || '/home/testuser';
+    const openclawDir = join(home, '.openclaw');
+    const agentsDir = join(openclawDir, 'agents');
+    const configPath = join(openclawDir, 'openclaw.json');
+
+    setExistingPaths([openclawDir, configPath, agentsDir, join(agentsDir, 'main')]);
+    mockReaddir.mockImplementation((async (dir: unknown) => (dir === agentsDir ? [mockDirent('main', true)] : [])) as any);
+    // agents/main/agent is a directory (auth-profiles.json, …), not a config file
+    mockLoadConfig.mockImplementation(async (path) => {
+      if (path === configPath) return mockConfig(configPath, { gateway: { bind: 'loopback' } });
+      throw Object.assign(new Error('EISDIR'), { code: 'EISDIR' });
+    });
+
+    const result = await openclawAdapter.detect();
+    expect(result).toHaveLength(1);
+    expect(result[0].agentName).toBeUndefined();
   });
 
   it('skips non-directory entries in agents/', async () => {

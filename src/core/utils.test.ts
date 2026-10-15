@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { mkdtemp, rm, readFile, stat, mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { getNestedValue, setNestedValue, deepMerge, writeFileEnsureDir, getSkillFiles } from './utils.js';
+import { getNestedValue, setNestedValue, deepMerge, writeFileEnsureDir, getSkillFiles, isExcludedPath } from './utils.js';
 
 describe('getNestedValue', () => {
   it('retrieves a nested value by dot path', () => {
@@ -161,17 +161,48 @@ describe('getSkillFiles', () => {
     expect(files[0]).toBe(join(root, 'skill.js'));
   });
 
-  it('excludes .git, dist, build, .venv, __pycache__, .cache, .next, venv', async () => {
+  it('excludes .git, .venv, __pycache__, .cache, .next, venv', async () => {
     const root = await mkdtemp(join(tmpdir(), 'vaso-sf-'));
     roots.push(root);
     await writeFile(join(root, 'keep.ts'), 'k');
-    for (const excluded of ['.git', 'dist', 'build', '.venv', 'venv', '__pycache__', '.cache', '.next']) {
+    for (const excluded of ['.git', '.venv', 'venv', '__pycache__', '.cache', '.next']) {
       await mkdir(join(root, excluded), { recursive: true });
       await writeFile(join(root, excluded, 'noisy.js'), 'x');
     }
     const files = await getSkillFiles(root);
     expect(files).toHaveLength(1);
     expect(files[0]).toBe(join(root, 'keep.ts'));
+  });
+
+  it('reads dist/ and build/ inside a skill — the code SKILL.md runs', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'vaso-sf-'));
+    roots.push(root);
+    await mkdir(join(root, 'ev-dist', 'dist'), { recursive: true });
+    await mkdir(join(root, 'ev-build', 'build'), { recursive: true });
+    await writeFile(join(root, 'ev-dist', 'dist', 'index.js'), 'x');
+    await writeFile(join(root, 'ev-build', 'build', 'run.py'), 'x');
+    expect((await getSkillFiles(root)).sort()).toEqual([
+      join(root, 'ev-build', 'build', 'run.py'),
+      join(root, 'ev-dist', 'dist', 'index.js'),
+    ]);
+  });
+
+  it('keeps excluding dist/ and build/ outside skill trees (isExcludedPath default)', () => {
+    expect(isExcludedPath('/opt/agent', '/opt/agent/dist')).toBe(true);
+    expect(isExcludedPath('/opt/agent', '/opt/agent/dist', { keepBuildOutput: true })).toBe(false);
+    expect(isExcludedPath('/opt/agent', '/opt/agent/x/node_modules/y', { keepBuildOutput: true })).toBe(true);
+  });
+
+  it('collects .mts/.cts/.zsh/.ps1, SKILL.md, binaries and extensionless executables', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'vaso-sf-'));
+    roots.push(root);
+    await mkdir(join(root, 's', 'scripts'), { recursive: true });
+    for (const f of ['a.mts', 'b.cts', 'c.zsh', 'd.ps1', 'SKILL.md', 'tool.node', 'x.exe', 'README.md', 'LICENSE']) {
+      await writeFile(join(root, 's', f), 'x');
+    }
+    await writeFile(join(root, 's', 'scripts', 'setup'), '#!/bin/sh\nid\n', { mode: 0o755 });
+    const names = (await getSkillFiles(root)).map(f => f.slice(root.length + 3)).sort();
+    expect(names).toEqual(['SKILL.md', 'a.mts', 'b.cts', 'c.zsh', 'd.ps1', 'scripts/setup', 'tool.node', 'x.exe']);
   });
 
   it('does not exclude directories whose names merely contain an excluded segment', async () => {

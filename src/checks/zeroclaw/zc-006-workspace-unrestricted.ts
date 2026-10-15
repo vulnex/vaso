@@ -1,9 +1,17 @@
 import { defineCheck } from '../../core/check-builder.js';
 import type { Evidence } from '../../core/types.js';
-import { buildBroadPaths, isBroadPath } from '../../analyzers/broad-paths.js';
+import { normalize } from 'node:path';
+import { envNote } from '../../adapters/env-overrides.js';
+import { buildBroadPaths, expandHome, isBroadPath } from '../../analyzers/broad-paths.js';
 import {
   asRecord, asStringArray, enabledAgents, effectiveProfiles, isFalse, isTrue, mainConfig, profileLabel, writeMainConfig,
 } from './zc-config.js';
+
+/** A root that is an ancestor of $HOME (e.g. /Users, /home) exposes it too. */
+function containsHome(root: string, home: string): boolean {
+  const r = normalize(expandHome(root.trim(), home)).replace(/\/+$/, '');
+  return r !== '' && home.startsWith(`${r}/`);
+}
 
 export const zc006 = defineCheck({
   id: 'ZC-006',
@@ -27,15 +35,15 @@ export const zc006 = defineCheck({
         writable = true;
         evidence.push({
           file: config.filePath,
-          detail: `${profileLabel(p)}: workspace_only = false — file tools may reach paths outside the agent workspace`,
+          detail: `${profileLabel(p)}: workspace_only = false${envNote(config.data, `${p.path}.workspace_only`)} — file tools may reach paths outside the agent workspace`,
         });
       }
       for (const root of asStringArray(p.profile.allowed_roots)) {
-        const hit = isBroadPath(root, broad, home);
-        if (hit) {
+        const reason = isBroadPath(root, broad, home)?.reason ?? (containsHome(root, home) ? 'contains the home directory' : undefined);
+        if (reason) {
           evidence.push({
             file: config.filePath,
-            detail: `${profileLabel(p)}: allowed_roots contains "${root}" — ${hit.reason}`,
+            detail: `${profileLabel(p)}: allowed_roots contains "${root}" — ${reason}`,
           });
         }
       }

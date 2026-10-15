@@ -1,5 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { codexProfileName } from '../../adapters/codex.js';
 
 const DANGEROUS_POLICIES = new Set(['never', 'none', 'auto']);
 
@@ -15,6 +16,8 @@ export const cdx001 = defineCheck({
     const evidence: Evidence[] = [];
 
     for (const config of ctx.configs) {
+      // Profile files only apply under `codex -p <name>` — CDX-008's finding
+      if (codexProfileName(config.filePath)) continue;
       const policy = config.data.approval_policy ?? config.data.approvalPolicy;
       if (typeof policy === 'string' && DANGEROUS_POLICIES.has(policy.toLowerCase())) {
         evidence.push({
@@ -27,7 +30,9 @@ export const cdx001 = defineCheck({
     return h.fromEvidence(evidence, {
       passed: 'Codex approval policy requires user confirmation',
       failed: () => 'Codex approval policy bypasses user confirmation',
-      fixDescription: 'Set approval_policy to "untrusted", "on-failure", or "on-request" in ~/.codex/config.toml',
+      // "untrusted" and "on-failure" are deprecated upstream; "on-request" (or a
+      // granular policy) is the supported prompting mode
+      fixDescription: 'Set approval_policy to "on-request" (or a { granular = { … } } policy) in ~/.codex/config.toml',
     });
   },
 });

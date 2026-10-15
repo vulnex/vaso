@@ -1,5 +1,7 @@
 import { basename, dirname, join } from 'node:path';
 import type { Evidence, ParsedConfig, ScanContext } from '../../core/types.js';
+import { API_KEY_PATTERNS } from '../../core/patterns.js';
+import { shannonEntropy } from '../../analyzers/entropy.js';
 
 /**
  * Shared helpers for the Abacus.AI checks. Layout and semantics come from the
@@ -110,16 +112,70 @@ export async function markUntrustedProject(ctx: ScanContext, evidence: Evidence[
   }
 }
 
-const LOOPBACK = /^https?:\/\/(?:localhost|127(?:\.\d+){3}|\[::1\])(?:[:/]|$)/i;
+// Host anchored: `https://localhost.evil.example` is not loopback
+const LOOPBACK = /^https?:\/\/(?:localhost|127(?:\.\d+){3}|\[::1\])(?:[:/?#]|$)/i;
+
+export function isLoopbackUrl(url: string): boolean {
+  return LOOPBACK.test(url.trim());
+}
 
 /** Plaintext http:// to a non-loopback host. */
 export function isInsecureUrl(url: unknown): url is string {
-  return typeof url === 'string' && /^http:\/\//i.test(url.trim()) && !LOOPBACK.test(url.trim());
+  return typeof url === 'string' && /^http:\/\//i.test(url.trim()) && !isLoopbackUrl(url);
+}
+
+/**
+ * macOS: /etc, /var and /tmp are symlinks into /private, so `/private/etc`
+ * names the same directory and must be judged like `/etc`.
+ */
+export function canonicalSystemPath(path: string): string {
+  return path.replace(/^\/private(?=\/(?:etc|var|tmp)(?:\/|$))/, '');
 }
 
 /** A value that references the environment instead of holding a literal secret. */
 export function isEnvReference(value: string): boolean {
   return /^\s*\$\{?[A-Za-z_][A-Za-z0-9_]*\}?\s*$/.test(value) || /^\s*\$\{(?:env|file):[^}]+\}\s*$/.test(value);
+}
+
+// Key names that hold a credential by definition, vs. names that merely
+// mention auth (AUTH_MODE, GITHUB_API_URL, SESSION_DIR) and need a
+// credential-shaped value before they count.
+const SECRET_KEY = /KEY|TOKEN|SECRET|PASSWORD|PASSWD|PASSPHRASE|CREDENTIAL|COOKIE|^(?:PROXY[_-])?AUTHORIZATION$/i;
+const AUTH_KEY = /AUTH|API|SESSION|PASS/i;
+const AUTH_SCHEME = /^\s*(?:Bearer|Basic|Token)\b\s*/i;
+const PLACEHOLDER = /^(?:your|example|sample|dummy|placeholder|changeme|replace|redacted|xxx)|<[^>]*>|\{\{|\*{3}/i;
+const MIN_SECRET_LENGTH = 8;
+
+/** URLs, paths, env-var names, booleans and numbers are configuration, not secrets. */
+function notSecret(value: string): boolean {
+  return /^[a-z][a-z0-9+.-]*:\/\//i.test(value)
+    || /^(?:[./~]|[A-Za-z]:\\)/.test(value)
+    || /^[A-Z][A-Z0-9_]+$/.test(value)
+    || /^(?:true|false|yes|no|on|off|null|none)$/i.test(value)
+    || /^\d+(?:\.\d+)?$/.test(value)
+    || PLACEHOLDER.test(value);
+}
+
+/** Random-looking: letters and digits mixed with enough entropy (`oauth-device` is not). */
+function credentialShaped(value: string): boolean {
+  return value.length >= 16 && /[A-Za-z]/.test(value) && /\d/.test(value) && !/\s/.test(value) && shannonEntropy(value) >= 3.5;
+}
+
+/**
+ * Whether `value`, stored under `key` (an env var or header name), is a
+ * literal credential. Returns the token format name, `'secret'` for a
+ * secret-named key holding a literal, or undefined.
+ */
+export function literalSecret(key: string, value: string): string | undefined {
+  // `Bearer ${MCP_TOKEN}` is a reference too — judge what follows the scheme
+  const literal = value.replace(AUTH_SCHEME, '').trim();
+  if (!literal || isEnvReference(literal)) return undefined;
+  const token = API_KEY_PATTERNS.find(p => p.pattern.test(literal))?.name;
+  if (token) return token;
+  if (literal.length < MIN_SECRET_LENGTH || notSecret(literal)) return undefined;
+  if (SECRET_KEY.test(key)) return 'secret';
+  if (AUTH_KEY.test(key) && credentialShaped(literal)) return 'secret';
+  return undefined;
 }
 
 export function mask(value: string): string {

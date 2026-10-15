@@ -158,6 +158,27 @@ describe('PicoClaw adapter', () => {
     expect(inst.models).toEqual([{ id: 'glm-4.7', provider: 'zhipu' }]);
   });
 
+  it('overlays PicoClaw env overrides (env.Parse) onto config.json and ships their names to the probe', async () => {
+    const fs = makeFs({
+      files: onboardFiles(),
+      env: {
+        PICOCLAW_TOOLS_EXEC_ENABLE_DENY_PATTERNS: 'false',
+        PICOCLAW_AGENTS_DEFAULTS_RESTRICT_TO_WORKSPACE: 'F',
+        PICOCLAW_TOOLS_EXEC_ALLOW_REMOTE: 'maybe',
+      },
+    });
+    const [inst] = await picoclawAdapter.detect({ fs });
+    const data = inst.configFiles[0].data as Record<string, any>;
+    expect(data.tools.exec.enable_deny_patterns).toBe(false);
+    expect(data.agents.defaults.restrict_to_workspace).toBe(false);
+    // Unparseable bools are ignored, like strconv.ParseBool errors
+    expect(data.tools.exec.allow_remote).not.toBe('maybe');
+    const prefixes = picoclawAdapter.getProbeManifest!().envPrefixes;
+    expect(prefixes).toContain('PICOCLAW_TOOLS_EXEC_ENABLE_DENY_PATTERNS');
+    expect(prefixes).not.toContain('PICOCLAW_');
+    expect(prefixes.some(p => 'PICOCLAW_KEY_PASSPHRASE'.startsWith(p))).toBe(false);
+  });
+
   it('never reports the config schema version ("version": 3) as the app version', async () => {
     const fs = makeFs({ files: onboardFiles() });
     const [inst] = await picoclawAdapter.detect({ fs });

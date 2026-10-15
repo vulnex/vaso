@@ -8,6 +8,7 @@ import { stripJsonc } from '../core/jsonc.js';
 import { getUserHomeDirs } from './openclaw.js';
 import { discoverCliInstalls, retainedVersionGlobs, type RetainedVersionsDir } from './cli-installs.js';
 import { queryCliVersion } from './version-query.js';
+import { windsurfPresent } from './windsurf.js';
 
 const SYSTEM_CLI_PATHS = [
   '/usr/local/bin/devin',
@@ -99,6 +100,24 @@ export function devinDataDir(home: string, fs: FSProvider): string {
     : join(home, '.local', 'share', 'devin');
 }
 
+/**
+ * Cheap Devin CLI signal shared with the windsurf adapter, which reads the
+ * same ~/.config/devin/{config,mcp_config}.json (Devin Desktop 3.x): the
+ * persistent credentials file or the CLI at its installer locations. A subset
+ * of what detect() accepts, so a file is never dropped by both adapters.
+ */
+export async function devinCliPresent(home: string, fs: FSProvider): Promise<boolean> {
+  const candidates = [
+    join(devinDataDir(home, fs), 'credentials.toml'),
+    ...USER_CLI_RELATIVE_PATHS.map(rel => join(home, rel)),
+    ...SYSTEM_CLI_PATHS,
+  ];
+  for (const p of candidates) {
+    if (await fs.access(p)) return true;
+  }
+  return false;
+}
+
 async function loadDevinConfig(filePath: string, fs: FSProvider): Promise<ParsedConfig | undefined> {
   try {
     const raw = await fs.readFile(filePath);
@@ -136,6 +155,10 @@ export const devinAdapter: AgentAdapter = {
 
       // Positive signal required: config dir, credentials file, or CLI binary.
       if (!hasConfigDir && !hasCredentials && !cliBinary) continue;
+      // A config dir alone next to Windsurf / Devin Desktop is the desktop
+      // app's (3.x writes mcp_config.json/config.json there) — the windsurf
+      // install reports it, so it isn't a second, CLI-less Devin install.
+      if (!hasCredentials && !cliBinary && await windsurfPresent(home, fs)) continue;
 
       const configFiles: ParsedConfig[] = [];
       if (hasConfigDir) {

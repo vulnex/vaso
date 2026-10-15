@@ -1,4 +1,4 @@
-import { join } from 'node:path';
+import { extname, join } from 'node:path';
 import type { MCPConfig, MCPServerEntry, MCPDiscoveryResult } from './types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
@@ -8,13 +8,17 @@ import { claudeConfigPaths } from '../adapters/claude-code.js';
 import { codexHome } from '../adapters/codex.js';
 import { copilotHome } from '../adapters/copilot-cli.js';
 import { geminiHome } from '../adapters/gemini.js';
+import { xdgConfigDir as opencodeConfigDir } from '../adapters/opencode.js';
+import { parseYamlSafe } from '../core/yaml-safe.js';
 import type { Platform } from '../core/types.js';
 
 interface ConfigLocation {
   source: string;
   path: string;
   /** Config dialect; defaults to the common `mcpServers` map. */
-  shape?: 'atomic-agent' | 'nanobot' | 'picoclaw' | 'abacus' | 'abacus-config' | 'claude-json' | 'codex';
+  shape?: 'atomic-agent' | 'nanobot' | 'picoclaw' | 'abacus' | 'abacus-config' | 'claude-json' | 'codex' | 'opencode' | 'hermes';
+  /** Value substituted for `${extensionPath}` (Gemini CLI extensions). */
+  extensionPath?: string;
 }
 
 function getGlobalConfigLocations(platform: Platform, home: string, fs: FSProvider): ConfigLocation[] {
@@ -94,6 +98,24 @@ function getGlobalConfigLocations(platform: Platform, home: string, fs: FSProvid
     source: 'Devin CLI',
     path: join(devinConfigDir, 'mcp_config.json'),
   });
+  // Devin before 3000.3 kept servers under `mcpServers` in config.json (newer
+  // versions migrate them out on startup — docs.devin.ai/cli/extensibility/mcp).
+  locations.push({ source: 'Devin CLI (config.json)', path: join(devinConfigDir, 'config.json') });
+
+  // OpenCode: `mcp` in opencode.json[c] (opencode.ai/docs/mcp-servers), plus
+  // the file $OPENCODE_CONFIG names.
+  const opencodeDir = opencodeConfigDir(home, fs);
+  locations.push(
+    { source: 'OpenCode', path: join(opencodeDir, 'opencode.json'), shape: 'opencode' },
+    { source: 'OpenCode', path: join(opencodeDir, 'opencode.jsonc'), shape: 'opencode' },
+  );
+  const opencodeExtra = home === fs.homedir() ? fs.getEnv('OPENCODE_CONFIG')?.trim() : undefined;
+  if (opencodeExtra) locations.push({ source: 'OpenCode ($OPENCODE_CONFIG)', path: opencodeExtra, shape: 'opencode' });
+
+  // Hermes: `mcp_servers` in $HERMES_HOME/config.yaml
+  // (hermes-agent.nousresearch.com/docs/user-guide/features/mcp)
+  const hermesHome = fs.getEnv('HERMES_HOME')?.trim() || join(home, '.hermes');
+  locations.push({ source: 'Hermes', path: join(hermesHome, 'config.yaml'), shape: 'hermes' });
 
   return locations;
 }
@@ -129,6 +151,12 @@ function getProjectConfigLocations(projectDir: string): ConfigLocation[] {
     { source: 'Windsurf (project)', path: join(projectDir, '.windsurf', 'mcp.json') },
     { source: 'Devin CLI (project)', path: join(projectDir, '.devin', 'mcp_config.json') },
     { source: 'Devin CLI (local)', path: join(projectDir, '.devin', 'mcp_config.local.json') },
+    { source: 'Devin CLI (project config.json)', path: join(projectDir, '.devin', 'config.json') },
+    { source: 'Devin CLI (project config.local.json)', path: join(projectDir, '.devin', 'config.local.json') },
+    { source: 'Gemini CLI (project)', path: join(projectDir, '.gemini', 'settings.json') },
+    { source: 'Qwen Code (project)', path: join(projectDir, '.qwen', 'settings.json') },
+    { source: 'OpenCode (project)', path: join(projectDir, 'opencode.json'), shape: 'opencode' },
+    { source: 'OpenCode (project)', path: join(projectDir, 'opencode.jsonc'), shape: 'opencode' },
     { source: 'Abacus.AI (project)', path: join(projectDir, '.abacusai', 'mcp.json'), shape: 'abacus' },
     { source: 'Abacus.AI (project)', path: join(projectDir, '.abacusai', 'config.json'), shape: 'abacus-config' },
     { source: 'VS Code', path: join(projectDir, '.vscode', 'mcp.json') },
@@ -208,6 +236,10 @@ function parseShape(shape: ConfigLocation['shape'], data: Record<string, unknown
     case 'abacus-config':
       return parseServerMap(abacusArrayToMap(data.mcpServers));
     case 'codex':
+      return parseServerMap(codexServers(data.mcp_servers));
+    case 'opencode':
+      return parseServerMap(opencodeServers(data.mcp));
+    case 'hermes':
       return parseServerMap(data.mcp_servers);
     case 'picoclaw': {
       // tools.mcp.enabled: false switches off the whole MCP integration
@@ -217,6 +249,55 @@ function parseShape(shape: ConfigLocation['shape'], data: Record<string, unknown
     default:
       return parseServerEntries(data);
   }
+}
+
+/**
+ * Codex `[mcp_servers.<name>]` for streamable-HTTP servers carries its
+ * credentials in `bearer_token_env_var` (the env var holding a bearer token),
+ * `http_headers` (static) and `env_http_headers` (header → env var name)
+ * (developers.openai.com/codex/mcp). Folded into `headers` so the auth checks
+ * see them; env-sourced values are written as `${VAR}` references, which the
+ * plaintext-secret checks skip.
+ */
+function codexServers(map: unknown): unknown {
+  if (!map || typeof map !== 'object' || Array.isArray(map)) return map;
+  return Object.fromEntries(Object.entries(map as Record<string, unknown>).map(([name, raw]) => {
+    if (!raw || typeof raw !== 'object') return [name, raw];
+    const cfg = raw as Record<string, unknown>;
+    const headers: Record<string, string> = {};
+    if (cfg.http_headers && typeof cfg.http_headers === 'object') {
+      for (const [k, v] of Object.entries(cfg.http_headers as Record<string, unknown>)) headers[k] = String(v);
+    }
+    if (cfg.env_http_headers && typeof cfg.env_http_headers === 'object') {
+      for (const [k, v] of Object.entries(cfg.env_http_headers as Record<string, unknown>)) headers[k] = `\${${String(v)}}`;
+    }
+    if (typeof cfg.bearer_token_env_var === 'string' && cfg.bearer_token_env_var.trim()) {
+      headers.Authorization = `Bearer \${${cfg.bearer_token_env_var.trim()}}`;
+    }
+    return [name, Object.keys(headers).length > 0 ? { ...cfg, headers: { ...headers, ...(cfg.headers as object | undefined) } } : cfg];
+  }));
+}
+
+/**
+ * OpenCode `mcp.<name>`: `{ type: "local", command: [cmd, ...args],
+ * environment }` or `{ type: "remote", url, headers }`, `enabled: false` to
+ * switch one off (opencode.ai/docs/mcp-servers).
+ */
+function opencodeServers(map: unknown): unknown {
+  if (!map || typeof map !== 'object' || Array.isArray(map)) return {};
+  return Object.fromEntries(Object.entries(map as Record<string, unknown>).flatMap(([name, raw]) => {
+    if (!raw || typeof raw !== 'object') return [];
+    const cfg = raw as Record<string, unknown>;
+    const command = Array.isArray(cfg.command) ? cfg.command.map(String) : typeof cfg.command === 'string' ? [cfg.command] : [];
+    return [[name, {
+      ...(command.length > 0 ? { command: command[0], args: command.slice(1) } : {}),
+      env: cfg.environment,
+      url: cfg.url,
+      headers: cfg.headers,
+      enabled: cfg.enabled,
+      type: cfg.type === 'remote' ? 'http' : cfg.type === 'local' ? 'stdio' : undefined,
+    }]];
+  }));
 }
 
 /** Abacus.AI marks switched-off servers `disabled: true`; they are never launched. */
@@ -307,18 +388,23 @@ export class MCPDiscovery {
       getCodexLocation(home, this.fs),
       getAtomicAgentLocation(home, this.fs),
       ...getFrameworkLocations(home, this.fs),
+      ...await geminiExtensionLocations(home, this.fs),
       ...(projectDir ? getProjectConfigLocations(projectDir) : []),
     ];
 
+    // One file, one config: run from $HOME, the project's `.cursor/mcp.json`
+    // is the global `~/.cursor/mcp.json` (likewise `.gemini/settings.json`).
+    const seen = new Set<string>();
     for (const location of locations) {
       if (!await this.fs.access(location.path)) continue;
+      const real = await Promise.resolve(this.fs.realpath?.(location.path)).catch(() => undefined) ?? location.path;
+      if (seen.has(real)) continue;
+      seen.add(real);
 
       try {
         const raw = await this.fs.readFile(location.path);
-        const data = (location.shape === 'codex'
-          ? parseTOML(raw.replace(/^\uFEFF/, ''))
-          : JSON.parse(stripJsonc(raw))) as Record<string, unknown>;
-        const servers = parseShape(location.shape, data);
+        const data = parseConfigText(raw, location.shape === 'codex' ? 'toml' : location.shape === 'hermes' ? 'yaml' : 'json');
+        const servers = withExtensionPath(parseShape(location.shape, data), location.extensionPath);
 
         if (servers.length > 0) {
           configs.push({
@@ -340,21 +426,19 @@ export class MCPDiscovery {
   async discoverFromPaths(paths: string[]): Promise<MCPDiscoveryResult> {
     const configs: MCPConfig[] = [];
     const unreadable: string[] = [];
+    const empty: string[] = [];
 
     for (const filePath of paths) {
       if (!await this.fs.access(filePath)) { unreadable.push(filePath); continue; }
 
       try {
         const raw = await this.fs.readFile(filePath);
-        const isToml = filePath.toLowerCase().endsWith('.toml');
-        const data = (isToml ? parseTOML(raw.replace(/^\uFEFF/, '')) : JSON.parse(stripJsonc(raw))) as Record<string, unknown>;
-        const tools = data.tools as Record<string, unknown> | undefined;
-        const shape: ConfigLocation['shape'] = isToml ? 'codex'
-          : data.mcpServers || data.servers ? undefined
-          : tools?.mcpServers || tools?.mcp_servers ? 'nanobot'
-          : (tools?.mcp as Record<string, unknown> | undefined)?.servers ? 'picoclaw'
-          : 'atomic-agent';
+        const ext = extname(filePath).toLowerCase();
+        const format = ext === '.toml' ? 'toml' : ext === '.yaml' || ext === '.yml' ? 'yaml' : 'json';
+        const data = parseConfigText(raw, format);
+        const shape = shapeOf(format, data);
         const servers = parseShape(shape, data);
+        const projects = claudeProjectConfigs(filePath, data);
 
         if (servers.length > 0) {
           configs.push({
@@ -364,7 +448,8 @@ export class MCPDiscovery {
           });
         }
         // ~/.claude.json: local-scope servers per project
-        configs.push(...claudeProjectConfigs(filePath, data));
+        configs.push(...projects);
+        if (servers.length === 0 && projects.length === 0) empty.push(filePath);
       } catch {
         // The caller named this file — report it rather than scan nothing
         unreadable.push(filePath);
@@ -372,6 +457,65 @@ export class MCPDiscovery {
     }
 
     const totalServers = configs.reduce((sum, c) => sum + c.servers.length, 0);
-    return { configs, totalServers, ...(unreadable.length > 0 ? { unreadable } : {}) };
+    return {
+      configs,
+      totalServers,
+      ...(unreadable.length > 0 ? { unreadable } : {}),
+      ...(empty.length > 0 ? { empty } : {}),
+    };
   }
+}
+
+/** Parse a config file's text: TOML (Codex), YAML (Hermes) or JSON/JSONC. */
+function parseConfigText(raw: string, format: 'json' | 'toml' | 'yaml'): Record<string, unknown> {
+  const text = raw.replace(/^\uFEFF/, '');
+  const data = format === 'toml' ? parseTOML(text) : format === 'yaml' ? parseYamlSafe(text) : JSON.parse(stripJsonc(text));
+  if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('not a config object');
+  return data as Record<string, unknown>;
+}
+
+/** The dialect of a config file given with -p, from its format and keys. */
+function shapeOf(format: 'json' | 'toml' | 'yaml', data: Record<string, unknown>): ConfigLocation['shape'] {
+  if (format === 'toml') return 'codex';
+  const tools = data.tools as Record<string, unknown> | undefined;
+  if (Array.isArray(data.mcpServers)) return 'abacus-config';
+  if (data.mcpServers || data.servers) return undefined;
+  if (data.mcp_servers) return 'hermes';
+  if (tools?.mcpServers || tools?.mcp_servers) return 'nanobot';
+  if ((tools?.mcp as Record<string, unknown> | undefined)?.servers) return 'picoclaw';
+  const mcp = data.mcp as Record<string, unknown> | undefined;
+  if (mcp && typeof mcp === 'object' && Array.isArray(mcp.servers)) return 'atomic-agent';
+  if (mcp && typeof mcp === 'object') return 'opencode';
+  return 'atomic-agent';
+}
+
+/**
+ * Gemini CLI extensions: each `<gemini home>/extensions/<name>/` carries a
+ * `gemini-extension.json` whose `mcpServers` load like settings.json's, with
+ * `${extensionPath}` naming the extension's directory
+ * (geminicli.com/docs/extensions/reference).
+ */
+async function geminiExtensionLocations(home: string, fs: FSProvider): Promise<ConfigLocation[]> {
+  const dir = join(geminiHome(home, fs), 'extensions');
+  let names: string[];
+  try {
+    names = await fs.readdir(dir);
+  } catch {
+    return [];
+  }
+  return names.sort().map((name) => ({
+    source: `Gemini CLI (extension ${name})`,
+    path: join(dir, name, 'gemini-extension.json'),
+    extensionPath: join(dir, name),
+  }));
+}
+
+function withExtensionPath(servers: MCPServerEntry[], extensionPath: string | undefined): MCPServerEntry[] {
+  if (!extensionPath) return servers;
+  const sub = (v: string) => v.split('${extensionPath}').join(extensionPath);
+  return servers.map((s) => ({
+    ...s,
+    ...(s.command ? { command: sub(s.command) } : {}),
+    ...(s.args ? { args: s.args.map(sub) } : {}),
+  }));
 }

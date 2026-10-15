@@ -72,6 +72,25 @@ describe('OpenShell adapter', () => {
     expect(inst.installDir).toBe('/xdg/openshell');
   });
 
+  it('loads the snap gateway TOML from ~/snap/openshell/common, ahead of $SNAP_COMMON', async () => {
+    const snap = `${HOME}/snap/openshell/common/.config/openshell/gateway.toml`;
+    const fs = makeFs({
+      [snap]: '[openshell]\nversion = 2\n\n[openshell.gateway]\nbind_address = "0.0.0.0:17670"\n',
+      '/var/snap/openshell/common/gateway.toml': '[openshell]\nversion = 2\n\n[openshell.gateway]\n',
+    });
+    const [inst] = await openshellAdapter.detect({ fs });
+    expect(inst.configFiles.map(c => c.filePath)).toEqual([snap]);
+    expect(inst.gateway).toMatchObject({ host: '0.0.0.0' });
+    // the older $SNAP_COMMON location is still the fallback
+    const fallback = await openshellAdapter.detect({ fs: makeFs({ '/var/snap/openshell/common/gateway.toml': '[openshell]\nversion = 2\n\n[openshell.gateway]\n' }) });
+    expect(fallback[0].configFiles.map(c => c.filePath)).toEqual(['/var/snap/openshell/common/gateway.toml']);
+  });
+
+  it('gives the probe a default workspace for sandboxes listed without one', () => {
+    const cmd = openshellAdapter.getProbeManifest!().commands!.find(c => c.id === 'openshell-sandbox-policy');
+    expect(cmd?.forEach).toMatchObject({ fields: ['name', 'workspace'], defaults: { workspace: 'default' } });
+  });
+
   it('reports nothing without OpenShell state or CLI', async () => {
     expect(await openshellAdapter.detect({ fs: makeFs({ [`${HOME}/.bashrc`]: '' }) })).toEqual([]);
   });

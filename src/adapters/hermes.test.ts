@@ -131,6 +131,39 @@ describe('Hermes adapter', () => {
     expect(result[0].version).toBe('0.6.0');
   });
 
+  it('reads the version from install-stamp.json without exec, and rejects 0.0.0 from --version', async () => {
+    const hh = '/home/u/.hermes';
+    const files: Record<string, string> = {
+      [`${hh}/hermes-agent/install-stamp.json`]: '{"baseVersion":"0.22.0"}',
+      '/home/u/.local/bin/hermes': '',
+    };
+    const execSync = vi.fn((cmd: string) => (cmd === 'which' ? '/home/u/.local/bin/hermes\n' : 'Hermes Agent v0.0.0\n'));
+    const fs = {
+      kind: 'local',
+      platform: 'linux',
+      homedir: () => '/home/u',
+      getEnv: () => undefined,
+      access: vi.fn(async (p: string) => p === hh || p === `${hh}/config.yaml` || p in files),
+      readFile: vi.fn(async (p: string) => {
+        if (p in files) return files[p];
+        throw new Error('ENOENT');
+      }),
+      stat: vi.fn(async () => ({ mode: 0o100755, isFile: () => true, isDirectory: () => false })),
+      readdirEntries: vi.fn(async () => []),
+      realpath: vi.fn(async (p: string) => p),
+      execSync,
+    } as any;
+    mockLoadConfig.mockImplementation(async (path) => mockConfig(path as string, {}));
+
+    let [inst] = await hermesAdapter.detect({ fs });
+    expect(inst.version).toBe('0.22.0');
+    expect(execSync.mock.calls.some(c => c[0] !== 'which')).toBe(false);
+
+    delete files[`${hh}/hermes-agent/install-stamp.json`];
+    [inst] = await hermesAdapter.detect({ fs });
+    expect(inst.version).toBeUndefined();
+  });
+
   it('respects HERMES_HOME env var', async () => {
     const customHome = '/opt/hermes';
     process.env.HERMES_HOME = customHome;

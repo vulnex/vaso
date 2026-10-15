@@ -32,6 +32,8 @@ const COMMON_USER_BIN_DIRS = [
   '.local/share/pnpm', 'Library/pnpm',
 ];
 
+const VOLTA_PACKAGES = '.volta/tools/image/packages';
+
 /**
  * Per-version install roots of Node version managers: `<root>/<version>/<binSubdir>`
  * holds that version's npm globals. Roots starting with '/' are system-wide,
@@ -45,7 +47,7 @@ const NODE_MANAGER_ROOTS: ReadonlyArray<{ root: string; binSubdir: string }> = [
   { root: '.asdf/installs/nodejs', binSubdir: 'bin' },
   { root: '.local/share/mise/installs/node', binSubdir: 'bin' },
   // Volta keeps each global package in its own image dir
-  { root: '.volta/tools/image/packages', binSubdir: 'bin' },
+  { root: VOLTA_PACKAGES, binSubdir: 'bin' },
   // tj/n (N_PREFIX defaults to /usr/local)
   { root: '/usr/local/n/versions/node', binSubdir: 'bin' },
 ];
@@ -108,8 +110,18 @@ async function nodeManagerBinDirs(home: string, fs: FSProvider): Promise<string[
   const dirs: string[] = [];
   for (const { root, binSubdir } of NODE_MANAGER_ROOTS) {
     const base = root.startsWith('/') ? root : join(home, root);
-    const names = (await listNames(base, fs))
-      .sort((a, b) => compareVersions(b.replace(/^v/, ''), a.replace(/^v/, '')));
+    let names = await listNames(base, fs);
+    if (root === VOLTA_PACKAGES) {
+      // Volta names each package image after the package, so a scoped one
+      // nests: tools/image/packages/@github/copilot/bin (volta-layout v4
+      // package_image_dir joins the full `@scope/name`).
+      const scoped: string[] = [];
+      for (const scope of names.filter(n => n.startsWith('@'))) {
+        scoped.push(...(await listNames(join(base, scope), fs)).map(n => `${scope}/${n}`));
+      }
+      names = [...names.filter(n => !n.startsWith('@')), ...scoped];
+    }
+    names.sort((a, b) => compareVersions(b.replace(/^v/, ''), a.replace(/^v/, '')));
     dirs.push(...names.map(v => join(base, v, binSubdir)));
   }
   return dirs;
@@ -262,6 +274,8 @@ export function cliInstallGlobs(names: readonly string[]): string[] {
   return names.flatMap(name => [
     ...NODE_MANAGER_ROOTS.map(({ root, binSubdir }) =>
       `${root.startsWith('/') ? root : `~/${root}`}/*/${binSubdir}/${name}`),
+    // Scoped Volta package images (`@scope/name`)
+    `~/${VOLTA_PACKAGES}/@*/*/bin/${name}`,
     ...COMMON_USER_BIN_DIRS.map(d => `~/${d}/${name}`),
   ]);
 }
@@ -275,7 +289,7 @@ export function retainedVersionGlobs(dirs: readonly RetainedVersionsDir[]): stri
  *  remote scans can version copies they cannot run. */
 export function nodeManagerPackageJsonGlobs(packageName: string): string[] {
   return NODE_MANAGER_ROOTS
-    .filter(r => r.binSubdir.endsWith('bin') && !r.root.includes('volta/tools/image/packages'))
+    .filter(r => r.binSubdir.endsWith('bin') && r.root !== VOLTA_PACKAGES)
     .map(({ root, binSubdir }) => {
       const prefix = binSubdir === 'bin' ? '' : `/${binSubdir.slice(0, -'/bin'.length)}`;
       return `${root.startsWith('/') ? root : `~/${root}`}/*${prefix}/lib/node_modules/${packageName}/package.json`;

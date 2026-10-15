@@ -9,8 +9,9 @@ import { asRecord, nanobotConfigs, worldTraversalBarrier } from './shared.js';
 // websocket.tokenIssueSecret, …) and MCP server env / headers.
 const SECRET_KEY = /(?:api[_-]?key|token|secret|password|passwd|encrypt[_-]?key|credential)$/i;
 const AUTH_HEADER = /^(?:authorization|proxy-authorization|x-api-key|api-key)$/i;
-// Keys that end like a secret but hold none.
-const NOT_SECRET = /^(?:max_?tokens|token_?ttl_?s|token_?issue_?path|webhook_?secret_?token_?path)$/i;
+// Keys that end like a secret but hold none (websocketRequiresToken is a
+// bool, which pydantic also accepts as the string "true"/"false").
+const NOT_SECRET = /^(?:max_?tokens|token_?ttl_?s|token_?issue_?path|webhook_?secret_?token_?path|websocket_?requires_?token)$/i;
 // nanobot resolves ${VAR} references at load time — the recommended form.
 const ENV_REF = /\$\{[A-Za-z_][A-Za-z0-9_]*\}/;
 const PLACEHOLDER = /^(?:your[-_ ]|xxx|changeme|placeholder|<|replace|todo|example)/i;

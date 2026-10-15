@@ -107,3 +107,26 @@ describe('Windsurf / Devin Desktop adapter — install root + version', () => {
     expect(devinConfig.data.permissions).toEqual({ allow: ['exec'] });
   });
 });
+
+describe('Windsurf / Devin Desktop adapter — files shared with Devin CLI', () => {
+  const shared = {
+    [`${HOME}/.codeium/windsurf/mcp_config.json`]: '{ "mcpServers": {} }',
+    [`${HOME}/.config/devin/mcp_config.json`]: '{ "mcpServers": {} }',
+    [`${HOME}/.config/devin/config.json`]: '{ "permissions": { "allow": ["exec"] } }',
+  };
+
+  it('loads ~/.config/devin/{mcp_config,config}.json when Devin CLI is absent', async () => {
+    const [inst] = await windsurfAdapter.detect({ fs: makeFs(shared) });
+    expect(inst.configFiles.map(c => c.filePath)).toEqual([
+      `${HOME}/.codeium/windsurf/mcp_config.json`,
+      `${HOME}/.config/devin/mcp_config.json`,
+      `${HOME}/.config/devin/config.json`,
+    ]);
+  });
+
+  it('leaves them to the Devin CLI install when the CLI is installed (no double counting)', async () => {
+    const fs = makeFs({ ...shared, [`${HOME}/.local/bin/devin`]: '' });
+    const [inst] = await windsurfAdapter.detect({ fs });
+    expect(inst.configFiles.map(c => c.filePath)).toEqual([`${HOME}/.codeium/windsurf/mcp_config.json`]);
+  });
+});

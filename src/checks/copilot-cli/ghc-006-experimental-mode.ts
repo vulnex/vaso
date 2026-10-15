@@ -6,7 +6,7 @@ export const ghc006 = defineCheck({
   name: 'Copilot CLI Experimental Mode Enabled',
   category: 'coding-agent',
   severity: 'warning',
-  description: 'Surface when experimentalMode is enabled in settings.json',
+  description: 'Surface when experimental (or legacy experimentalMode) is enabled in settings.json',
   supportedAgents: ['copilot-cli'],
 
   async run(ctx, h) {
@@ -14,10 +14,14 @@ export const ghc006 = defineCheck({
 
     for (const config of ctx.configs) {
       if (!config.filePath.endsWith('settings.json')) continue;
-      if (config.data.experimentalMode === true) {
+      // `experimental` is the documented key (CLI config-dir reference);
+      // `experimentalMode` is kept for older configs
+      const key = config.data.experimental === true ? 'experimental'
+        : config.data.experimentalMode === true ? 'experimentalMode' : undefined;
+      if (key) {
         evidence.push({
           file: config.filePath,
-          snippet: 'experimentalMode = true',
+          snippet: `${key} = true`,
           detail: 'Unstable features may be active — behaviors and APIs not yet stable',
         });
       }
@@ -25,8 +29,8 @@ export const ghc006 = defineCheck({
 
     return h.fromEvidence(evidence, {
       passed: 'Copilot CLI experimental mode is off',
-      failed: () => 'Copilot CLI experimentalMode is enabled',
-      fixDescription: 'Set experimentalMode: false in ~/.copilot/settings.json for production use',
+      failed: () => 'Copilot CLI experimental mode is enabled',
+      fixDescription: 'Set experimental: false in ~/.copilot/settings.json for production use',
     });
   },
 });

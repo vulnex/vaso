@@ -1,5 +1,6 @@
 import type { FixResult, ParsedConfig, ScanContext } from '../../core/types.js';
 import { updateConfigValue } from '../../remediation/config-writer.js';
+import { envOverrideFor } from '../../adapters/env-overrides.js';
 
 /**
  * Shared readers for ZeroClaw's V3 config schema (`schema_version = 3`,
@@ -182,8 +183,23 @@ export async function writeMainConfig(
   const config = mainConfig(ctx.configs);
   if (!config) return { checkId, applied: false, message: 'No ZeroClaw config.toml found' };
   if (updates.length === 0) return { checkId, applied: false, message: 'Nothing to change' };
+  // A ZEROCLAW_<path> env override beats config.toml, so writing the file
+  // alone doesn't change what the daemon runs with — say so instead of
+  // implying the fix took effect. The file did change (backup/rollback must
+  // still cover it), so the result stays applied.
+  const overridden: string[] = [];
   for (const [path, value] of updates) {
     await updateConfigValue(config, path, value);
+    const env = envOverrideFor(config.data, path);
+    if (env) overridden.push(env);
+  }
+  if (overridden.length > 0) {
+    const vars = overridden.map(e => `$${e}`).join(', ');
+    return {
+      checkId,
+      applied: true,
+      message: `${message} in config.toml, but ${vars} still override${overridden.length === 1 ? 's' : ''} it — unset ${overridden.length === 1 ? 'it' : 'them'} in the daemon's environment`,
+    };
   }
   return { checkId, applied: true, message };
 }

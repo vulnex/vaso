@@ -1,12 +1,35 @@
+import { basename, dirname } from 'node:path';
 import type { ParsedConfig } from '../../core/types.js';
 
+/** Bun's precedence among a checkout's env files (higher wins). */
+function layerRank(filePath: string): number {
+  const name = basename(filePath);
+  if (name === '.env') return 0;
+  if (name === '.env.local') return 2;
+  if (name.endsWith('.local')) return 3; // .env.<mode>.local
+  return 1; // .env.<mode>
+}
+
 /**
- * Lyrie reads its settings from `<checkout>/.env` (Bun auto-loads it); the
- * adapter also loads ~/.lyrie/config.json (Python CLI key store, JSON), so
+ * Lyrie reads its settings from `<checkout>/.env` and the layered files Bun
+ * auto-loads over it (`.env.<NODE_ENV>`, `.env.local`, `.env.<NODE_ENV>.local`);
+ * the adapter also loads ~/.lyrie/config.json (Python CLI key store, JSON), so
  * env-variable checks must look at env-format configs only.
+ *
+ * Each file keeps only the keys it actually decides: a key a
+ * higher-precedence file in the same checkout also sets is dropped from the
+ * lower one, so a value is judged — and fixed — in the file that wins.
  */
 export function lyrieEnvConfigs(configs: ParsedConfig[]): ParsedConfig[] {
-  return configs.filter(c => c.format === 'env' && c.data && typeof c.data === 'object');
+  const envs = configs.filter(c => c.format === 'env' && c.data && typeof c.data === 'object');
+  return envs.map(c => {
+    const shadowing = envs.filter(o => o !== c && dirname(o.filePath) === dirname(c.filePath)
+      && layerRank(o.filePath) > layerRank(c.filePath));
+    if (shadowing.length === 0) return c;
+    const data = Object.fromEntries(Object.entries(c.data as Record<string, unknown>)
+      .filter(([k]) => !shadowing.some(o => k in (o.data as Record<string, unknown>))));
+    return { ...c, data };
+  });
 }
 
 /** String value of an env key (undefined for absent / non-string). */

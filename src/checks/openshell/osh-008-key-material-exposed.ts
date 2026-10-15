@@ -3,7 +3,7 @@ import type { Evidence, ScanContext } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { markUnreachable, readableByOthers } from '../../core/permissions.js';
 import { expandHome } from '../../adapters/openshell.js';
-import { databasePaths, facts, gateway, listDir, paths, record, tlsDirs } from './shared.js';
+import { databasePaths, facts, gateway, gatewayEnv, listDir, paths, record, tlsDirs } from './shared.js';
 
 interface Target { path: string; critical: boolean; detail: string }
 
@@ -39,6 +39,8 @@ async function targets(ctx: ScanContext): Promise<Target[]> {
     [jwt?.signing_key_path, true, 'Gateway JWT signing key'],
     [gw.guest_tls_key, true, 'Sandbox client TLS key'],
     [cs?.key_encryption_key_path, true, 'Key-encryption key for stored provider credentials'],
+    // Gateway config docs: OPENSHELL_TLS_KEY = server private key path (env beats the TOML)
+    [gatewayEnv(ctx)?.data.OPENSHELL_TLS_KEY, false, 'Gateway server TLS key'],
   ] as const) {
     if (typeof v === 'string' && v.trim()) t.push({ path: expandHome(v.trim(), p.home), critical, detail });
   }

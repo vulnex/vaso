@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import type { AgentAdapter, DetectOptions } from './adapter.js';
 import type { AgentInstallation, GatewayInfo, ParsedConfig } from '../core/types.js';
-import type { ProbeManifest } from '../core/snapshot-types.js';
+import type { CommandForEach, ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { loadConfig } from '../core/config-loader.js';
@@ -21,7 +21,9 @@ import { queryCliVersion } from './version-query.js';
  *   $XDG_STATE_HOME/openshell/         gateway/openshell.db (+ -wal/-shm), gateway/credentials/key-encryption-key.bin,
  *                                      tls/ (deb), homebrew/tls/ (Homebrew mirror), docker-sandbox-tokens/
  *   <brew prefix>/var/openshell/       Homebrew gateway.toml + tls/ (incl. the CA private key)
- *   /var/snap/openshell/common/        snap gateway.toml + tls/
+ *   ~/snap/openshell/common/           snap (per user, installation docs): .config/openshell/gateway.toml,
+ *                                      .local/state/openshell/{gateway/openshell.db, tls/}
+ *   /var/snap/openshell/common/        snap $SNAP_COMMON: optional gateway.toml + tls/
  *
  * gateway.env overrides the TOML (flag > env > TOML > default) and can move
  * the TOML, database and TLS directory elsewhere — NemoClaw points them at
@@ -32,6 +34,12 @@ const CLI_SYSTEM_PATHS = ['/usr/bin/openshell', '/usr/local/bin/openshell', '/op
 const CLI_USER_PATHS = [join('.local', 'bin', 'openshell'), join('.cargo', 'bin', 'openshell')];
 export const BREW_VAR_DIRS = ['/opt/homebrew/var/openshell', '/usr/local/var/openshell'];
 export const SNAP_COMMON_DIR = '/var/snap/openshell/common';
+/** The snap's per-user data dir ($SNAP_USER_COMMON) — its gateway runs with HOME there. */
+export const SNAP_USER_REL = join('snap', 'openshell', 'common');
+
+export function snapUserDir(home: string): string {
+  return join(home, SNAP_USER_REL);
+}
 export const DEFAULT_GATEWAY_PORT = 17670;
 
 export interface OpenShellPaths {
@@ -92,6 +100,9 @@ async function gatewayConfigs(paths: OpenShellPaths, fs: FSProvider): Promise<Pa
     : await firstExisting([
       join(paths.configDir, 'gateway.toml'),
       ...brewVar.map(d => join(d, 'gateway.toml')),
+      // Installation docs: the snap gateway reads ~/snap/openshell/common/.config/openshell/gateway.toml
+      // when it exists, else the optional $SNAP_COMMON/gateway.toml
+      join(snapUserDir(paths.home), '.config', 'openshell', 'gateway.toml'),
       ...(paths.home === fs.homedir() ? [join(SNAP_COMMON_DIR, 'gateway.toml')] : []),
     ], fs);
   const parsed = toml ? await tryLoad(toml, fs) : undefined;
@@ -178,9 +189,9 @@ export const openshellAdapter: AgentAdapter = {
       const hasConfig = await fs.access(paths.configDir);
       const hasState = await fs.access(paths.stateDir);
       const own = home === fs.homedir();
-      const packageGateway = own
+      const packageGateway = (own
         ? await firstExisting([...(fs.platform === 'darwin' ? BREW_VAR_DIRS : []), SNAP_COMMON_DIR], fs)
-        : undefined;
+        : undefined) ?? await firstExisting([snapUserDir(home)], fs);
 
       // Positive signal required: CLI/gateway state, a package-managed gateway, or the CLI itself.
       if (!hasConfig && !hasState && !packageGateway && !cliBinary) continue;
@@ -230,6 +241,7 @@ export const openshellAdapter: AgentAdapter = {
         '~/.config/openshell/active_gateway',
         ...BREW_VAR_DIRS.flatMap(d => [`${d}/gateway.toml`, `${d}/gateway.env`]),
         `${SNAP_COMMON_DIR}/gateway.toml`,
+        `~/${SNAP_USER_REL}/.config/openshell/gateway.toml`,
         ...CLI_USER_PATHS.map(p => `~/${p}`),
       ],
       globPatterns: [
@@ -248,6 +260,8 @@ export const openshellAdapter: AgentAdapter = {
         ...tlsKeys('~/.local/state/openshell/homebrew/tls'),
         ...BREW_VAR_DIRS.flatMap(d => tlsKeys(`${d}/tls`)),
         ...tlsKeys(`${SNAP_COMMON_DIR}/tls`),
+        `~/${SNAP_USER_REL}/.local/state/openshell/gateway/openshell.db*`,
+        ...tlsKeys(`~/${SNAP_USER_REL}/.local/state/openshell/tls`),
         '~/.local/state/nemoclaw/openshell-docker-gateway/openshell.db*',
         ...tlsKeys('~/.local/state/nemoclaw/openshell-docker-gateway/tls'),
         '~/.local/state/nemoclaw/openshell-docker-gateway/jwt/signing.pem',
@@ -266,7 +280,7 @@ export const openshellAdapter: AgentAdapter = {
           args: sandboxPolicyArgs('{name}', '{workspace}'),
           timeout: 15000,
           isolateHome: false,
-          forEach: { from: 'openshell-sandbox-list', array: 'sandboxes', fields: ['name', 'workspace'] },
+          forEach: SANDBOX_POLICY_FOR_EACH,
         },
         { id: 'openshell-global-policy', cmd: 'openshell', args: [...GLOBAL_POLICY_ARGS], timeout: 15000, isolateHome: false },
       ],
@@ -276,12 +290,25 @@ export const openshellAdapter: AgentAdapter = {
         '~/.local/state/openshell',
         '~/.local/state/openshell/gateway',
         '~/.local/state/openshell/docker-sandbox-tokens',
+        `~/${SNAP_USER_REL}`,
       ],
       envPrefixes: ['OPENSHELL_', 'XDG_'],
       systemPaths: [...CLI_SYSTEM_PATHS, ...BREW_VAR_DIRS, SNAP_COMMON_DIR],
       systemDirListings: [...BREW_VAR_DIRS.map(d => `${d}/tls`), `${SNAP_COMMON_DIR}/tls`],
     };
   },
+};
+
+/** Workspace of a sandbox `sandbox list` reports without one. */
+export const DEFAULT_WORKSPACE = 'default';
+
+// `defaults` (probes newer than 1.2.1) fills a field an item omits, matching the local
+// scan; older probes ignore it and skip such items.
+const SANDBOX_POLICY_FOR_EACH: CommandForEach = {
+  from: 'openshell-sandbox-list',
+  array: 'sandboxes',
+  fields: ['name', 'workspace'],
+  defaults: { workspace: DEFAULT_WORKSPACE },
 };
 
 /** Gateway queries shared by the checks (local exec) and the probe manifest (remote). */

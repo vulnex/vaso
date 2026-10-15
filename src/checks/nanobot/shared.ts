@@ -18,6 +18,23 @@ export function asStringArray(v: unknown): string[] {
   return Array.isArray(v) ? v.filter((s): s is string => typeof s === 'string') : [];
 }
 
+// Pydantic v2 lax-mode bool coercion: nanobot's config models accept these
+// strings (case-insensitive) and 0/1 wherever a bool is declared.
+const PY_TRUE = new Set(['true', '1', 'yes', 'on', 't', 'y']);
+const PY_FALSE = new Set(['false', '0', 'no', 'off', 'f', 'n']);
+
+/** The boolean pydantic would load `v` as, or undefined when it isn't one. */
+export function pyBool(v: unknown): boolean | undefined {
+  if (typeof v === 'boolean') return v;
+  if (v === 0 || v === 1) return v === 1;
+  if (typeof v === 'string') {
+    const s = v.trim().toLowerCase();
+    if (PY_TRUE.has(s)) return true;
+    if (PY_FALSE.has(s)) return false;
+  }
+  return undefined;
+}
+
 /** Read a key that nanobot accepts in camelCase or snake_case. */
 export function pick(obj: Record<string, unknown> | undefined, camel: string): unknown {
   if (!obj) return undefined;
@@ -57,7 +74,7 @@ export function channelSections(data: Record<string, unknown>): Array<[string, R
 /** Channels default to disabled; only an explicit `enabled: true` starts one
  *  (the always-on websocket channel is handled separately by NB-008). */
 export function isChannelEnabled(section: Record<string, unknown>): boolean {
-  return section.enabled === true;
+  return pyBool(section.enabled) === true;
 }
 
 const LOOPBACK_HOST = /^(?:localhost|127(?:\.\d{1,3}){3}|\[?::1\]?)$/i;

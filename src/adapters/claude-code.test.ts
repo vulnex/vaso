@@ -134,6 +134,40 @@ describe('Claude Code adapter', () => {
     expect(userInstall!.cliBinary).toBe('/usr/local/bin/claude');
   });
 
+  it('detects a project with only CLAUDE.md or .mcp.json (no .claude/settings*.json) and gives it the user version', async () => {
+    const repo = '/work/proj';
+    const cwd = vi.spyOn(process, 'cwd').mockReturnValue(repo);
+    try {
+      const settingsPath = join(claudeDir, 'settings.json');
+      const mcpPath = join(repo, '.mcp.json');
+      setExistingPaths([claudeDir, settingsPath, join(repo, 'CLAUDE.md'), mcpPath]);
+      mockLoadConfig.mockImplementation(async (path) => {
+        if (path === settingsPath) return mockConfig(settingsPath, {});
+        if (path === mcpPath) return mockConfig(mcpPath, { mcpServers: { gh: { command: 'npx', args: ['-y', 'x'] } } });
+        throw new Error('ENOENT');
+      });
+      mockExecFileSync.mockImplementation(((cmd: string) =>
+        cmd === 'which' ? '/usr/local/bin/claude\n' : '2.1.270 (Claude Code)\n') as any);
+
+      const project = (await claudeCodeAdapter.detect()).find(r => r.profile === 'project');
+      expect(project?.installDir).toBe(join(repo, '.claude'));
+      expect(project?.configFiles.map(c => c.filePath)).toEqual([mcpPath]);
+      expect(project?.version).toBe('2.1.270');
+
+      // CLAUDE.md alone is enough
+      setExistingPaths([join(repo, 'CLAUDE.md')]);
+      mockLoadConfig.mockRejectedValue(new Error('ENOENT'));
+      const mdOnly = (await claudeCodeAdapter.detect()).find(r => r.profile === 'project');
+      expect(mdOnly?.configFiles).toEqual([]);
+    } finally {
+      cwd.mockRestore();
+    }
+  });
+
+  it('collects ~/.claude/rules for remote scans', () => {
+    expect(claudeCodeAdapter.getProbeManifest!().globPatterns).toContain('~/.claude/rules/**');
+  });
+
   it('returns config paths under ~/.claude', () => {
     const paths = claudeCodeAdapter.getConfigPaths();
     expect(paths).toContain(join(claudeDir, 'settings.json'));

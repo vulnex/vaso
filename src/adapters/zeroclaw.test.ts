@@ -92,6 +92,30 @@ describe('ZeroClaw adapter', () => {
     expect(inst.models).toEqual([{ id: 'llama3.2', provider: 'ollama' }]);
   });
 
+  it('overlays ZEROCLAW_<path> env overrides (double underscore = nesting) onto config.toml', async () => {
+    const fs = makeFs({
+      dirs: [DIR],
+      files: { [`${DIR}/config.toml`]: V3 },
+      env: {
+        ZEROCLAW_gateway__require_pairing: 'false',
+        ZEROCLAW_gateway__host: '0.0.0.0',
+        ZEROCLAW_risk_profiles__balanced__level: 'full',
+        ZEROCLAW_risk_profiles__default__workspace_only: 'false',
+        ZEROCLAW_agents__assistant__workspace__unrestricted_filesystem: 'true',
+        ZEROCLAW_gateway__port: 'not-a-number',
+      },
+    });
+    const [inst] = await zeroclawAdapter.detect({ fs });
+    const data = inst.configFiles[0].data as Record<string, any>;
+    expect(data.gateway).toEqual({ require_pairing: false, host: '0.0.0.0' });
+    expect(data.risk_profiles.balanced).toEqual({ level: 'full', workspace_only: true });
+    expect(data.risk_profiles.default).toEqual({ workspace_only: false });
+    expect(data.agents.assistant.workspace.unrestricted_filesystem).toBe(true);
+    expect(inst.gateway).toMatchObject({ host: '0.0.0.0', port: 42617, authMode: 'none' });
+    // The file text is untouched — fixes re-read it from disk.
+    expect(inst.configFiles[0].raw).toBe(V3);
+  });
+
   it('honours ZEROCLAW_CONFIG_DIR from the scanned host', async () => {
     const fs = makeFs({
       dirs: ['/etc/zeroclaw'],

@@ -1,5 +1,8 @@
+import { join, normalize } from 'node:path';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { codexProfileName } from '../../adapters/codex.js';
+import { expandHome } from '../../analyzers/broad-paths.js';
 
 const DANGEROUS_SANDBOX_MODES = new Set([
   'danger-full-access',
@@ -8,6 +11,18 @@ const DANGEROUS_SANDBOX_MODES = new Set([
   'none',
   'disabled',
 ]);
+
+const CREDENTIAL_DIRS = ['.ssh', '.aws', '.gnupg', '.kube', '.docker', '.codex'];
+
+/** Why a writable root is too broad: `/`, the home directory or a parent of
+ *  it, a system config dir, or a credential directory. */
+function broadRoot(root: string, home: string): string | undefined {
+  const p = normalize(expandHome(root, home)).replace(/(.)\/+$/, '$1');
+  if (p === '/' || p === home || home.startsWith(p + '/')) return `"${p}" covers the home directory`;
+  if (p === '/etc' || p.startsWith('/etc/')) return `"${p}" is system configuration`;
+  const cred = CREDENTIAL_DIRS.find(d => p === join(home, d) || p.startsWith(join(home, d) + '/'));
+  return cred ? `"${p}" holds credentials (~/${cred})` : undefined;
+}
 
 export const cdx002 = defineCheck({
   id: 'CDX-002',
@@ -20,12 +35,44 @@ export const cdx002 = defineCheck({
   async run(ctx, h) {
     const evidence: Evidence[] = [];
 
+    const home = ctx.fs.homedir();
+    let critical = false;
     for (const config of ctx.configs) {
+      // Profile files only apply under `codex -p <name>` — CDX-008's finding
+      if (codexProfileName(config.filePath)) continue;
       const mode = config.data.sandbox_mode ?? config.data.sandboxMode;
       if (typeof mode === 'string' && DANGEROUS_SANDBOX_MODES.has(mode.toLowerCase())) {
+        critical = true;
         evidence.push({
           file: config.filePath,
           detail: `sandbox_mode = "${mode}" — Codex commands run with full host access`,
+        });
+        continue;
+      }
+
+      // [sandbox_workspace_write] tunes workspace-write (the default mode for
+      // trusted projects): `writable_roots` adds write access beyond the
+      // workspace, `network_access` lets sandboxed commands reach the network
+      if (typeof mode === 'string' && mode.toLowerCase() !== 'workspace-write') continue;
+      const ws = config.data.sandbox_workspace_write as Record<string, unknown> | undefined;
+      if (!ws || typeof ws !== 'object') continue;
+      for (const root of Array.isArray(ws.writable_roots) ? ws.writable_roots : []) {
+        if (typeof root !== 'string') continue;
+        const broad = broadRoot(root, home);
+        if (broad) {
+          critical = true;
+          evidence.push({
+            file: config.filePath,
+            snippet: `[sandbox_workspace_write] writable_roots = "${root}"`,
+            detail: `writable root ${broad} — the workspace-write sandbox can modify it (shell rc files, credentials)`,
+          });
+        }
+      }
+      if (ws.network_access === true) {
+        evidence.push({
+          file: config.filePath,
+          snippet: '[sandbox_workspace_write] network_access = true',
+          detail: 'Sandboxed commands have outbound network access — a prompt-injected command can exfiltrate workspace data',
         });
       }
     }
@@ -33,7 +80,9 @@ export const cdx002 = defineCheck({
     return h.fromEvidence(evidence, {
       passed: 'Codex sandbox is restricting command execution',
       failed: () => 'Codex sandbox is disabled — commands have full host access',
-      fixDescription: 'Set sandbox_mode to "read-only" or "workspace-write" in ~/.codex/config.toml',
+      // network_access alone weakens the sandbox but does not remove it
+      severity: critical ? undefined : 'warning',
+      fixDescription: 'Set sandbox_mode to "read-only" or "workspace-write", keep writable_roots to project paths, and leave network_access off',
     });
   },
 });

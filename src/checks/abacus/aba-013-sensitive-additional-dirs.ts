@@ -2,7 +2,7 @@ import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { buildBroadPaths, expandHome, isBroadPath } from '../../analyzers/broad-paths.js';
 import { classifySensitivePath } from '../../analyzers/sensitive-paths.js';
-import { markUntrustedProject, settingsConfigs } from './shared.js';
+import { canonicalSystemPath, markUntrustedProject, settingsConfigs } from './shared.js';
 
 export const aba013 = defineCheck({
   id: 'ABA-013',
@@ -24,8 +24,9 @@ export const aba013 = defineCheck({
       for (const dir of dirs) {
         if (typeof dir !== 'string' || !dir.trim()) continue;
         const snippet = `additionalDirectories: "${dir}"`;
-        const broad = isBroadPath(dir, broadPaths, home);
-        const sinks = classifySensitivePath(expandHome(dir, home));
+        const path = canonicalSystemPath(dir.trim());
+        const broad = isBroadPath(path, broadPaths, home);
+        const sinks = classifySensitivePath(expandHome(path, home));
         if (broad && broad.path.endsWith('tmp')) {
           warning.push({ file: config.filePath, snippet, detail: `Agent may read and edit a directory ${broad.reason}` });
         } else if (broad) {

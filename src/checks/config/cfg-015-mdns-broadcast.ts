@@ -12,15 +12,20 @@ export const cfg015 = defineCheck({
 
   async run(ctx, h) {
     for (const config of ctx.configs) {
+      const openclawMdns = getNestedValue(config.data, 'discovery.mdns');
       const mdns = getNestedValue(config.data, 'mdns') ??
-                   getNestedValue(config.data, 'discovery.mdns') ??
+                   openclawMdns ??
                    getNestedValue(config.data, 'bonjour');
 
       if (mdns === true || (typeof mdns === 'object' && mdns !== null)) {
         const mdnsObj = typeof mdns === 'object' ? mdns as Record<string, unknown> : {};
-        // OpenClaw 2026.x: discovery.mdns.mode = off | minimal | full
-        const broadcast = typeof mdnsObj.mode === 'string'
-          ? mdnsObj.mode.toLowerCase() === 'full'
+        // OpenClaw 2026.x: discovery.mdns.mode = off | minimal | full, and an
+        // unset mode is "minimal" (2026.9.4 schema) — only "full" adds cliPath/sshPort.
+        const mode = typeof mdnsObj.mode === 'string'
+          ? mdnsObj.mode
+          : mdns === openclawMdns ? 'minimal' : undefined;
+        const broadcast = mode !== undefined
+          ? mode.toLowerCase() === 'full'
           : mdnsObj.broadcast ?? mdnsObj.enabled ?? true;
         if (broadcast === true || broadcast === 'full') {
           return h.result({

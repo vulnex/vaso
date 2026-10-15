@@ -48,6 +48,23 @@ async function loadSettings(dir: string, fs: FSProvider): Promise<ParsedConfig[]
   return out;
 }
 
+const SYSTEM_SETTINGS_DARWIN = '/Library/Application Support/GeminiCli/settings.json';
+const SYSTEM_SETTINGS_LINUX = '/etc/gemini-cli/settings.json';
+const SYSTEM_SETTINGS_WIN32 = 'C:\\ProgramData\\gemini-cli\\settings.json';
+
+/**
+ * System-wide settings file, which overrides user and workspace settings
+ * (gemini-cli settings.ts getSystemSettingsPath: $GEMINI_CLI_SYSTEM_SETTINGS_PATH,
+ * else a per-OS location).
+ */
+export function geminiSystemSettingsPath(fs: FSProvider): string {
+  const env = fs.getEnv?.('GEMINI_CLI_SYSTEM_SETTINGS_PATH')?.trim();
+  if (env) return env;
+  if (fs.platform === 'darwin') return SYSTEM_SETTINGS_DARWIN;
+  if (fs.platform === 'win32') return SYSTEM_SETTINGS_WIN32;
+  return SYSTEM_SETTINGS_LINUX;
+}
+
 /**
  * Walk ~/.gemini/tmp/<project-id>/chats/session-*.jsonl, collect every
  * candidate, pick the lex-greatest filename (timestamp prefix sorts
@@ -149,6 +166,11 @@ export const geminiAdapter: AgentAdapter = {
     const fs = options?.fs ?? new LocalFSProvider();
     const userDirs = await getUserHomeDirs(options?.allUsers, fs);
     const installations: AgentInstallation[] = [];
+    // Machine-wide, so attributed to the first user install only
+    const systemPath = geminiSystemSettingsPath(fs);
+    let systemSettings: ParsedConfig | undefined = (await fs.access(systemPath))
+      ? await loadJsoncConfig(systemPath, fs)
+      : undefined;
 
     for (const { home, user } of userDirs) {
       const geminiDir = geminiHome(home, fs);
@@ -165,6 +187,10 @@ export const geminiAdapter: AgentAdapter = {
       if (!hasGeminiDir && !cliBinary) continue;
 
       const configFiles = hasGeminiDir ? await loadSettings(geminiDir, fs) : [];
+      if (systemSettings && (configFiles.length > 0 || cliBinary)) {
+        configFiles.push(systemSettings);
+        systemSettings = undefined;
+      }
 
       // A bare ~/.gemini/ with no recognized config files and no `gemini`
       // binary is leftover state from another tool (Google's IDE extensions
@@ -209,7 +235,7 @@ export const geminiAdapter: AgentAdapter = {
 
   getConfigPaths(): string[] {
     const fs = new LocalFSProvider();
-    return [join(geminiHome(fs.homedir(), fs), SETTINGS_FILE)];
+    return [join(geminiHome(fs.homedir(), fs), SETTINGS_FILE), geminiSystemSettingsPath(fs)];
   },
 
   getSkillsDir(installDir: string): string | undefined {
@@ -261,6 +287,9 @@ export const geminiAdapter: AgentAdapter = {
         '~/.gemini/GEMINI.md',
         '~/.gemini/installation_id',
         '~/.gemini/trustedFolders.json',
+        // relocated trust file / system settings (absolute file paths)
+        '${GEMINI_CLI_TRUSTED_FOLDERS_PATH}',
+        '${GEMINI_CLI_SYSTEM_SETTINGS_PATH}',
         '~/.gemini/policy_integrity.json',
         // User-relative CLI install locations — kept in sync with USER_CLI_RELATIVE_PATHS
         '~/.local/bin/gemini',
@@ -289,7 +318,7 @@ export const geminiAdapter: AgentAdapter = {
         '~/.gemini/tmp',
       ],
       envPrefixes: ['GEMINI_', 'GOOGLE_'],
-      systemPaths: SYSTEM_CLI_PATHS,
+      systemPaths: [...SYSTEM_CLI_PATHS, SYSTEM_SETTINGS_DARWIN, SYSTEM_SETTINGS_LINUX],
       systemDirListings: [],
     };
   },

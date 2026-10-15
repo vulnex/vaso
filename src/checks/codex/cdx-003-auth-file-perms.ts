@@ -2,6 +2,7 @@ import { join } from 'node:path';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { accessibleByOthers, markUnreachable, queryPermissions } from '../../core/permissions.js';
+import { restrictFilesToOwner } from '../../remediation/config-writer.js';
 
 export const cdx003 = defineCheck({
   id: 'CDX-003',
@@ -34,7 +35,12 @@ export const cdx003 = defineCheck({
     return h.fromEvidence(evidence, {
       passed: 'Codex auth.json has restricted permissions',
       failed: () => 'Codex auth.json is over-permissive — restrict it to 0600',
-      fixDescription: 'Run `chmod 600 ~/.codex/auth.json` to restrict access to the owner',
+      fixable: true,
+      fixDescription: 'Remove group/other access from auth.json (chmod go-rwx ~/.codex/auth.json)',
     });
+  },
+
+  async fix(ctx) {
+    return restrictFilesToOwner('CDX-003', [join(ctx.installation.installDir, 'auth.json')]);
   },
 });

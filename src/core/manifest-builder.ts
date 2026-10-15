@@ -31,6 +31,9 @@ export const RELOCATABLE_TREES: ReadonlyArray<readonly [prefix: string, relocate
   ['~/.copilot/', ['${COPILOT_HOME}/']],
   // GEMINI_CLI_HOME replaces the home directory the .gemini folder lives in
   ['~/.gemini/', ['${GEMINI_CLI_HOME}/.gemini/']],
+  ['~/.qwen/', ['${QWEN_HOME}/']],
+  // CURSOR_CONFIG_DIR relocates cli-config.json (Cursor CLI configuration reference)
+  ['~/.cursor/', ['${CURSOR_CONFIG_DIR}/']],
 ];
 
 function withRelocatedTwins(paths: string[]): string[] {

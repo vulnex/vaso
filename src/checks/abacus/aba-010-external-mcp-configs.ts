@@ -26,7 +26,8 @@ export const aba010 = defineCheck({
     return h.fromEvidence(evidence, {
       passed: 'Abacus.AI loads only its own MCP configs',
       failed: () => 'Abacus.AI also loads MCP servers from other tools\' configs',
-      fixable: evidence.length > 0,
+      // Untrusted project files are inactive — nothing to fix until trusted
+      fixable: evidence.some(e => !e.mitigated),
       fixDescription: 'Set loadExternalMcpConfigs to false and add the servers you need to ~/.abacusai/mcp.json',
     });
   },

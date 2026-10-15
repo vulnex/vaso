@@ -1,7 +1,8 @@
 import { join } from 'node:path';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { listSkillDirs } from '../../core/skill-walk.js';
+import { listSkills } from '../../core/skill-walk.js';
+import { getAllSkillsDirs } from '../../core/utils.js';
 import { getIOCDatabase } from '../../ioc/database.js';
 
 export const ioc004 = defineCheck({
@@ -15,33 +16,26 @@ export const ioc004 = defineCheck({
     const evidence: Evidence[] = [];
     const db = getIOCDatabase();
     const publisherSet = new Set(db.maliciousPublishers.map(p => p.toLowerCase()));
-    const skillsDir = ctx.installation.skillsDir;
+    const skillsDirs = getAllSkillsDirs(ctx.installation);
+    if (skillsDirs.length === 0) return h.passed('No skills directory found');
 
-    if (!skillsDir) return h.passed('No skills directory found');
+    const skills = await listSkills(ctx.fs, skillsDirs, { rootIsSkill: ctx.installation.agent === 'skill-audit' });
+    for (const skill of skills) {
+      for (const metaFile of ['package.json', 'skill.json', 'metadata.json']) {
+        const metaPath = join(skill.dir, metaFile);
+        try {
+          const data = JSON.parse(await ctx.fs.readFile(metaPath));
+          const author = String(data.author?.name ?? data.author ?? data.publisher ?? '').toLowerCase();
 
-    try {
-      const entries = await listSkillDirs(ctx.fs, skillsDir);
-      for (const entry of entries) {
-        if (!entry.isDirectory) continue;
-
-        const metadataFiles = ['package.json', 'skill.json', 'metadata.json'];
-        for (const metaFile of metadataFiles) {
-          const metaPath = join(skillsDir, entry.name, metaFile);
-          try {
-            const content = await ctx.fs.readFile(metaPath);
-            const data = JSON.parse(content);
-            const author = (data.author?.name ?? data.author ?? data.publisher ?? '').toLowerCase();
-
-            if (publisherSet.has(author)) {
-              evidence.push({
-                file: metaPath,
-                detail: `Skill "${entry.name}" by known malicious publisher: ${author}`,
-              });
-            }
-          } catch {}
-        }
+          if (publisherSet.has(author)) {
+            evidence.push({
+              file: metaPath,
+              detail: `Skill "${skill.name}" by known malicious publisher: ${author}`,
+            });
+          }
+        } catch {}
       }
-    } catch {}
+    }
 
     return h.fromEvidence(evidence, {
       passed: 'No known malicious publishers found',

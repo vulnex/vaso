@@ -2,7 +2,8 @@ import { createHash } from 'node:crypto';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { getIOCDatabase } from '../../ioc/database.js';
-import { getSkillFiles } from '../../core/utils.js';
+import { skillFilesOf, skillsDirsOf } from '../skills/skill-files.js';
+import { readCappedBytes } from '../../core/file-limits.js';
 
 export const ioc003 = defineCheck({
   id: 'IOC-003',
@@ -15,17 +16,17 @@ export const ioc003 = defineCheck({
     const evidence: Evidence[] = [];
     const db = getIOCDatabase();
     const hashSet = new Set(db.fileHashes);
-    const skillsDir = ctx.installation.skillsDir;
+    if (skillsDirsOf(ctx).length === 0) return h.passed('No skills directory found');
 
-    if (!skillsDir) return h.passed('No skills directory found');
-
-    const files = ctx.skillFiles ?? await getSkillFiles(skillsDir, ctx.fs);
+    const files = await skillFilesOf(ctx);
 
     for (const file of files) {
       try {
-        const content = await ctx.fs.readFile(file);
+        // Raw bytes: a UTF-8 decode would replace the invalid sequences of a
+        // compiled binary and hash something else.
+        const content = await readCappedBytes(ctx.fs, file);
         // Empty files carry no payload and share one universal hash
-        if (content.length === 0) continue;
+        if (content.byteLength === 0) continue;
         const hash = createHash('sha256').update(content).digest('hex');
 
         if (hashSet.has(hash)) {

@@ -11,8 +11,9 @@ import { loadConfigIfPresent } from './load-if-present.js';
  * from its git checkout (`bun start` → scripts/start-all.ts); there is no
  * installed `bin`. Two locations matter:
  *
- *  - The checkout: `<checkout>/.env` is the only config file (Bun auto-loads
- *    `.env` from the cwd; docs say `cp .env.example .env` at the repo root),
+ *  - The checkout: `<checkout>/.env` is the config file (docs say
+ *    `cp .env.example .env` at the repo root) — plus the layered
+ *    `.env.local` / `.env.<NODE_ENV>[.local]` Bun also auto-loads from the cwd,
  *    `<checkout>/package.json` (name `lyrie-agent`) carries the version, and
  *    the Rust Shield binary is looked up only at
  *    `<checkout>/packages/shield/target/{release,debug}/lyrie-shield`.
@@ -139,6 +140,27 @@ async function tryLoad(path: string, fs: FSProvider): Promise<ParsedConfig | und
   return loadConfigIfPresent(path, fs);
 }
 
+/**
+ * Bun auto-loads, in increasing precedence: `.env`, `.env.<NODE_ENV>`,
+ * `.env.local` (skipped when NODE_ENV=test), `.env.<NODE_ENV>.local`
+ * (bun.sh/docs/runtime/env); NODE_ENV defaults to development. The daemon's
+ * launch environment isn't observable, so the mode is the NODE_ENV the base
+ * `.env` sets, else Bun's default.
+ */
+export function lyrieEnvLayers(nodeEnv: string | undefined): string[] {
+  const mode = nodeEnv?.trim().toLowerCase() || 'development';
+  return [
+    `.env.${mode}`,
+    ...(mode === 'test' ? [] : ['.env.local']),
+    `.env.${mode}.local`,
+  ];
+}
+
+/** Every layered file name a probe should collect next to a checkout `.env`. */
+const ENV_LAYER_FILES = [
+  '.env.development', '.env.production', '.env.local', '.env.development.local', '.env.production.local',
+];
+
 const STATE_MARKERS = [
   'memory',
   'pairing.json',
@@ -180,6 +202,11 @@ export const lyrieAdapter: AgentAdapter = {
     for (const c of ordered) {
       const env = await tryLoad(join(c.dir, '.env'), fs);
       if (env) configFiles.push(env);
+      const nodeEnv = typeof env?.data.NODE_ENV === 'string' ? env.data.NODE_ENV : undefined;
+      for (const name of lyrieEnvLayers(nodeEnv)) {
+        const layer = await tryLoad(join(c.dir, name), fs);
+        if (layer) configFiles.push(layer);
+      }
     }
     // Python CLI key store (`lyrie auth set`) — plaintext provider/GitHub keys.
     const pyConfig = await tryLoad(join(stateDir, 'config.json'), fs);
@@ -272,14 +299,18 @@ export const lyrieAdapter: AgentAdapter = {
     // installDir is the checkout (its .env) — or the state dir itself when
     // only state exists / the installer cloned into ~/.lyrie.
     const stateDir = lyrieStateDir(fs ?? new LocalFSProvider());
-    return [join(installDir, '.env'), join(stateDir, 'config.json')];
+    return [
+      join(installDir, '.env'),
+      ...ENV_LAYER_FILES.map(f => join(installDir, f)),
+      join(stateDir, 'config.json'),
+    ];
   },
 
   getProbeManifest(): ProbeManifest {
     const homeCheckouts = HOME_CHECKOUT_CANDIDATES.map(rel => `~/${rel}`);
     return {
       filePaths: [
-        ...homeCheckouts.flatMap(dir => [`${dir}/package.json`, `${dir}/.env`]),
+        ...homeCheckouts.flatMap(dir => [`${dir}/package.json`, `${dir}/.env`, ...ENV_LAYER_FILES.map(f => `${dir}/${f}`)]),
         '~/.lyrie/config.json',
         '~/.lyrie/pairing.json',
         '~/.lyrie/edits.json',
@@ -309,7 +340,7 @@ export const lyrieAdapter: AgentAdapter = {
         'DAYTONA_',
         'MODAL_',
       ],
-      systemPaths: SYSTEM_CHECKOUT_CANDIDATES.flatMap(dir => [`${dir}/package.json`, `${dir}/.env`]),
+      systemPaths: SYSTEM_CHECKOUT_CANDIDATES.flatMap(dir => [`${dir}/package.json`, `${dir}/.env`, ...ENV_LAYER_FILES.map(f => `${dir}/${f}`)]),
       systemDirListings: [],
       // Conversation memory and the built Shield binary: existence + mode only.
       metadataGlobPatterns: [

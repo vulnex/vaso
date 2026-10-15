@@ -5,6 +5,8 @@ import type { AgentInstallation, ParsedConfig, ScanContext } from '../../core/ty
 import { zeroclawChecks } from './index.js';
 import { effectiveProfiles, gatewayPosture } from './zc-config.js';
 import { findPlaintextSecrets } from './zc-secrets.js';
+import { applyEnvOverrides } from '../../adapters/env-overrides.js';
+import { zeroclawEnvSpecs } from '../../adapters/zeroclaw.js';
 
 vi.mock('../../remediation/config-writer.js', async (orig) => ({
   ...(await orig<typeof import('../../remediation/config-writer.js')>()),
@@ -332,6 +334,25 @@ describe('risk-profile checks (ZC-005/006/014/015)', () => {
     ]);
   });
 
+  it('ZC-006 flags allowed_roots that contain $HOME (/home, /Users)', async () => {
+    const r = await run('ZC-006', '[risk_profiles.p]\nallowed_roots = ["/home", "/opt/projects"]\n');
+    expect(r.passed).toBe(false);
+    expect(r.evidence).toHaveLength(1);
+    expect(r.evidence![0].detail).toContain('contains the home directory');
+  });
+
+  it('notes an env override in evidence and in the fix message', async () => {
+    const data = applyEnvOverrides({ risk_profiles: { p: { level: 'supervised' } } },
+      zeroclawEnvSpecs({ risk_profiles: { p: {} } }),
+      { getEnv: (k: string) => (k === 'ZEROCLAW_risk_profiles__p__level' ? 'full' : undefined) } as unknown as FSProvider);
+    const config: ParsedConfig = { raw: '[risk_profiles.p]\nlevel = "supervised"\n', format: 'toml', filePath: `${DIR}/config.toml`, data };
+    const r = await check('ZC-005').run(ctx([config]));
+    expect(r.passed).toBe(false);
+    expect(r.evidence![0].detail).toContain('$ZEROCLAW_risk_profiles__p__level');
+    const fix = await check('ZC-005').fix!(ctx([config]));
+    expect(fix.message).toContain('still overrides');
+  });
+
   it('ZC-014 flags sandbox_enabled=false / backend none on the native runtime only', async () => {
     expect((await run('ZC-014', YOLO)).passed).toBe(false);
     expect((await run('ZC-014', `${YOLO}[runtime]\nkind = "docker"\n`)).passed).toBe(true);
@@ -409,6 +430,13 @@ describe('ZC-009: WhatsApp Web Session Store Exposed', () => {
   it('flags a session store readable by others', async () => {
     const fs = makeFs({ modes: { [`${DIR}/data`]: 0o755, [session]: 0o644 } });
     expect(await run('ZC-009', raw, { fs })).toMatchObject({ passed: false, severity: 'critical' });
+  });
+
+  it('says a remote scan could not see a session store outside the probe manifest', async () => {
+    const fs = { ...makeFs(), kind: 'snapshot' } as FSProvider;
+    const r = await run('ZC-009', raw, { fs });
+    expect(r.passed).toBe(true);
+    expect(r.message).toContain('not collected by the remote probe');
   });
 
   it('passes for 600 sessions, missing sessions, and Cloud API mode', async () => {

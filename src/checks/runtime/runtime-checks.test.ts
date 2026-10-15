@@ -88,6 +88,21 @@ describe('RUN-001: Unauthorized LaunchAgents', () => {
     expect(result.passed).toBe(true);
   });
 
+  it('recognizes an interpreter running the install\'s own script (bun run / npx tsx)', async () => {
+    for (const exec of [
+      '/home/test/.bun/bin/bun run /home/test/agent-checkout/scripts/daemon.ts',
+      '/usr/bin/npx tsx /home/test/agent-checkout/scripts/daemon.ts',
+      '/usr/bin/node --enable-source-maps /home/test/agent-checkout/dist/daemon.js',
+    ]) {
+      const fs = makeMockedFs({ '/home/test/.config/systemd/user': ['lyrie-agent.service'] }, 'linux');
+      (fs.readFile as ReturnType<typeof vi.fn>).mockResolvedValue(`[Service]\nExecStart=${exec}\n`);
+      const ctx = makeRunCtx(fs, 'linux');
+      ctx.installation = { agent: 'lyrie', installDir: '/home/test/agent-checkout', configFiles: [] };
+      const result = await run001.run(ctx);
+      expect(result.evidence?.[0].mitigated, exec).toBe(true);
+    }
+  });
+
   it('still reports a suspicious unit named after another framework', async () => {
     const fs = makeMockedFs({ '/home/test/.config/systemd/user': ['nanobot-gateway.service'] }, 'linux');
     (fs.readFile as ReturnType<typeof vi.fn>).mockResolvedValue(

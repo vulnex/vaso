@@ -2,7 +2,7 @@ import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { buildBroadPaths, isBroadPath } from '../../analyzers/broad-paths.js';
 import { classifySensitivePath } from '../../analyzers/sensitive-paths.js';
-import { markUntrustedProject, settingsConfigs } from './shared.js';
+import { canonicalSystemPath, markUntrustedProject, settingsConfigs } from './shared.js';
 
 // Rules are `Tool` or `Tool(pattern)` — e.g. `Bash(git log *)`, `Read`, `Edit(src/**)`.
 const RULE = /^([A-Za-z_]+)\s*(?:\((.*)\))?$/;
@@ -43,7 +43,8 @@ export const aba002 = defineCheck({
         const snippet = `permissions.allow: "${entry}"`;
 
         if (tool === 'Bash') {
-          if (ANY.has(pattern)) {
+          // `*`, `* *`, `**` … — every token a wildcard still matches any command
+          if (ANY.has(pattern) || /^[\s*]+$/.test(pattern)) {
             critical.push({ file: config.filePath, snippet, detail: 'Allows any shell command without approval' });
           } else if (RISKY_COMMANDS.has(firstToken(pattern)) && /\*/.test(pattern)) {
             warning.push({ file: config.filePath, snippet, detail: `Wildcard allowance for "${firstToken(pattern)}" — runs arbitrary code or reaches the network without approval` });
@@ -55,7 +56,7 @@ export const aba002 = defineCheck({
           // Bare Edit/Write is bounded by the workspace; an absolute or home
           // glob is not.
           if (!pattern || ANY.has(pattern)) continue;
-          const base = pattern.replace(/(?:[\\/]\*{1,2})+$/, '') || '/';
+          const base = canonicalSystemPath(pattern.replace(/(?:[\\/]\*{1,2})+$/, '') || '/');
           const broad = isBroadPath(base, broadPaths, home);
           const sinks = classifySensitivePath(base.replace(/^~/, home));
           if (broad) {

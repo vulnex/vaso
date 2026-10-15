@@ -1,4 +1,6 @@
 import { join } from 'node:path';
+import { getAllSkillsDirs } from '../../core/utils.js';
+import { listSkills } from '../../core/skill-walk.js';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { getIOCDatabase } from '../../ioc/database.js';
@@ -33,23 +35,14 @@ export const skl011 = defineCheck({
   description: 'Check skill package.json dependencies against known malicious packages and verify lockfile presence',
 
   async run(ctx, h) {
-    const skillsDir = ctx.installation.skillsDir;
-    if (!skillsDir) return h.passed('No skills directory found');
+    const skillsDirs = getAllSkillsDirs(ctx.installation);
+    if (skillsDirs.length === 0) return h.passed('No skills directory found');
 
     const db = getIOCDatabase();
-
-    let entries: { name: string; isFile: boolean; isDirectory: boolean; parentPath?: string }[];
-    try {
-      entries = await ctx.fs.readdirEntries(skillsDir);
-    } catch {
-      return h.passed('Skills directory not accessible');
-    }
-
+    const skills = await listSkills(ctx.fs, skillsDirs, { rootIsSkill: ctx.installation.agent === 'skill-audit' });
     const evidence: Evidence[] = [];
 
-    for (const entry of entries) {
-      if (!entry.isDirectory) continue;
-      const skillDir = entry.parentPath ? join(entry.parentPath, entry.name) : join(skillsDir, entry.name);
+    for (const { dir: skillDir } of skills) {
       const pkgPath = join(skillDir, 'package.json');
 
       let pkgData: Record<string, unknown>;

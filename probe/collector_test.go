@@ -285,6 +285,19 @@ func TestExpandForEach(t *testing.T) {
 		t.Fatalf("object form: got %v", got)
 	}
 
+	// A missing or empty field takes its default (sandboxes in the default workspace)
+	req.ForEach.Defaults = map[string]string{"workspace": "default"}
+	got = expandForEach(req, map[string]CommandOutput{"list": {Stdout: `{"sandboxes":[{"name":"box-1"},{"name":"box-1","workspace":""},{"name":"box-1","workspace":null},{"workspace":"default"},{"name":"box-2","workspace":"--x"}]}`}})
+	if len(got) != 3 {
+		t.Fatalf("defaults: expected 3 runs, got %v", got)
+	}
+	for _, args := range got {
+		if strings.Join(args, " ") != strings.Join(want, " ") {
+			t.Fatalf("defaults: got %v", args)
+		}
+	}
+	req.ForEach.Defaults = nil
+
 	// 0.0.x shape: a bare array
 	got = expandForEach(req, map[string]CommandOutput{"list": {Stdout: `[{"name":"box-1","workspace":"default"}]`}})
 	if len(got) != 1 || strings.Join(got[0], " ") != strings.Join(want, " ") {
@@ -383,5 +396,31 @@ func TestExpandPathsResolvesEnvRootedPaths(t *testing.T) {
 		if got[i] != want[i] {
 			t.Fatalf("got %v, want %v", got, want)
 		}
+	}
+}
+
+func TestSkillTreesKeepBuildOutputAndBinaries(t *testing.T) {
+	if !inExcludedDir("/h/.claude/skills/**", "/h/.claude/skills/s/node_modules/x.js") {
+		t.Fatal("node_modules must stay excluded in skill trees")
+	}
+	if inExcludedDir("/h/.claude/skills/**", "/h/.claude/skills/s/dist/index.js") {
+		t.Fatal("dist/ inside a skill must be collected")
+	}
+	if !inExcludedDir("/h/.openclaw/**", "/h/.openclaw/x/dist/index.js") {
+		t.Fatal("dist/ outside skill trees stays excluded")
+	}
+
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "helper.node")
+	if err := os.WriteFile(bin, []byte{0x7f, 'E', 'L', 'F', 0, 1}, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	c := &collector{budget: 1 << 20}
+	if e := c.collectFile(bin, false); !e.ContentOmitted {
+		t.Fatalf("outside a skill tree a .node file is metadata-only, got %+v", e)
+	}
+	c.inSkillTree = true
+	if e := c.collectFile(bin, false); e.ContentOmitted || e.Content == "" {
+		t.Fatalf("inside a skill tree a .node file ships its content, got %+v", e)
 	}
 }

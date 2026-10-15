@@ -68,10 +68,27 @@ var metadataOnlyExtensions = map[string]bool{
 	".pyc": true, ".db": true, ".sqlite": true, ".sqlite3": true,
 }
 
+// Compiled artefacts read inside skill trees: IOC-003/007 hash a skill's
+// bundled helpers (droppers ship as .node/.so/.exe), within the 5 MiB cap.
+var skillBinaryExtensions = map[string]bool{
+	".node": true, ".so": true, ".dylib": true, ".dll": true, ".exe": true, ".bin": true,
+}
+
+// Build output kept inside skill trees, where `dist/index.js` is usually the
+// code SKILL.md runs — mirrors BUILD_OUTPUT_DIRS / keepBuildOutput in src/core/utils.ts.
+var skillTreeBuildDirs = map[string]bool{"dist": true, "build": true}
+
+// isSkillPattern reports whether a glob walks a skills tree (`…/skills/**`).
+func isSkillPattern(pattern string) bool {
+	return strings.Contains(filepath.ToSlash(pattern), "/skills/")
+}
+
 // collector carries per-snapshot state (the remaining content budget).
 type collector struct {
 	budget    int64
 	truncated bool
+	// inSkillTree is set while collecting a skills glob's matches.
+	inSkillTree bool
 }
 
 // inExcludedDir reports whether match lies under an excluded directory that
@@ -91,8 +108,9 @@ func inExcludedDir(pattern, match string) bool {
 		literal[seg] = true
 	}
 	parts := strings.Split(filepath.ToSlash(rel), "/")
+	skills := isSkillPattern(pattern)
 	for _, seg := range parts[:len(parts)-1] {
-		if excludedGlobDirs[seg] && !literal[seg] {
+		if excludedGlobDirs[seg] && !literal[seg] && !(skills && skillTreeBuildDirs[seg]) {
 			return true
 		}
 	}
@@ -197,6 +215,7 @@ func Collect(manifest ProbeManifest, escalate bool) ProbeSnapshot {
 	// Expand and collect glob patterns
 	expandedGlobs := expandPaths(manifest.GlobPatterns, homes)
 	for _, pattern := range expandedGlobs {
+		c.inSkillTree = isSkillPattern(pattern)
 		// Never descend into symlinked directories: a local readdir lists the
 		// link without following it, so following here duplicated every file
 		// a skill symlinks in from elsewhere. The link itself still matches.
@@ -215,6 +234,7 @@ func Collect(manifest ProbeManifest, escalate bool) ProbeSnapshot {
 		}
 		c.followLinkedTrees(&snapshot, pattern, matches, false)
 	}
+	c.inSkillTree = false
 
 	// Metadata-only globs: existence + mode, never content
 	for _, pattern := range expandPaths(manifest.MetadataGlobPatterns, homes) {
@@ -401,7 +421,9 @@ func (c *collector) collectFileLimit(path string, metadataOnly bool, limit int64
 	mode := int(info.Mode().Perm())
 	omitted := FileEntry{Exists: true, Mode: mode, ContentOmitted: true}
 
-	if metadataOnly || info.Size() > limit || metadataOnlyExtensions[strings.ToLower(filepath.Ext(path))] {
+	ext := strings.ToLower(filepath.Ext(path))
+	assetOnly := metadataOnlyExtensions[ext] && !(c.inSkillTree && skillBinaryExtensions[ext])
+	if metadataOnly || info.Size() > limit || assetOnly {
 		return omitted
 	}
 	if info.Size() > c.budget {
@@ -912,8 +934,11 @@ const maxForEachItems = 100
 
 // expandForEach builds one argument list per item of the JSON array produced
 // by an earlier command (req.ForEach.From), replacing each {field} placeholder
-// in req.Args with the item's value. Items with a missing or malformed field
-// are skipped; a failed or non-JSON source yields no runs.
+// in req.Args with the item's value. A field the item omits (or leaves empty)
+// takes its value from spec.Defaults when there is one — the same fallback the
+// local scan applies, so remote and local runs query the same items. Items
+// with a malformed or undefaulted missing field are skipped; a failed or
+// non-JSON source yields no runs.
 func expandForEach(req CommandRequest, outputs map[string]CommandOutput) [][]string {
 	spec := req.ForEach
 	src, ok := outputs[spec.From]
@@ -947,6 +972,9 @@ func expandForEach(req CommandRequest, outputs map[string]CommandOutput) [][]str
 		valid := true
 		for _, f := range spec.Fields {
 			v, isStr := fields[f].(string)
+			if raw, present := fields[f]; !present || raw == nil || (isStr && v == "") {
+				v, isStr = spec.Defaults[f]
+			}
 			if !isStr || !forEachValue.MatchString(v) {
 				valid = false
 				break

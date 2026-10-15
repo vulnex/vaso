@@ -59,7 +59,7 @@ export async function runSkillAudit(skillPath: string, options: SkillAuditComman
   console.error(
     chalk.dim(
       skillFiles.length > 0
-        ? `Auditing ${skillFiles.length} code file(s) in ${resolved}\n`
+        ? `Auditing ${skillFiles.length} file(s) in ${resolved}\n`
         : `Auditing ${resolved} (no code files)\n`,
     ),
   );

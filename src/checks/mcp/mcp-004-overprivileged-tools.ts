@@ -1,7 +1,7 @@
 import type { Evidence, Severity } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { analyzeCode, type DataFlowResult } from '../../analyzers/ast-analyzer.js';
-import { analyzePythonSinks } from '../../analyzers/python-sinks.js';
+import { analyzePythonSinks, type PythonSinkFinding } from '../../analyzers/python-sinks.js';
 import { findTaintedSinks } from '../../analyzers/tool-input-taint.js';
 
 /**
@@ -38,6 +38,18 @@ function execLevel(finding: DataFlowResult, taintedLines: Set<number>): { severi
   };
 }
 
+function pythonExecLevel(finding: PythonSinkFinding, injectedLines: Set<number>): { severity: Severity; why: string } {
+  if (finding.toolInput) return { severity: 'critical', why: `tool input reaches it (${finding.toolInput})` };
+  if (injectedLines.has(finding.line)) return { severity: 'critical', why: 'caller-controlled input reaches it' };
+  if (finding.decoded) return { severity: 'critical', why: 'it runs code decoded at runtime' };
+  if (finding.command && DANGEROUS_COMMAND.test(finding.command)) return { severity: 'critical', why: `the command is an attack on its own (${finding.command.slice(0, 60)})` };
+  const what = /^(?:eval|exec)\(/.test(finding.description) ? 'code' : 'command';
+  return {
+    severity: 'info',
+    why: finding.dynamic ? `the ${what} is built at runtime; no tool input was traced into it` : `the ${what} is fixed`,
+  };
+}
+
 export const mcp004 = defineCheck({
   id: 'MCP-004',
   name: 'Overprivileged Tools',
@@ -48,7 +60,7 @@ export const mcp004 = defineCheck({
 
   async run(ctx, h) {
     const evidence: Evidence[] = [];
-    // Python findings and sensitive-path reads stay critical; JS exec calls are tiered.
+    // Sensitive-path reads stay critical; exec calls are tiered.
     let severity: Severity = 'info';
     const sources = ctx.mcpServerSources ?? [];
 
@@ -56,16 +68,30 @@ export const mcp004 = defineCheck({
       if (!source.sourceCode) continue;
 
       if (source.language === 'python') {
-        for (const finding of analyzePythonSinks(source.sourceCode)) {
+        // Same tiers as JavaScript: AWS's official servers run fixed or
+        // configured commands (`subprocess.run(cmd, shell=False)`, linters,
+        // `docker build`) — capability, not a vulnerability.
+        const findings = analyzePythonSinks(source.sourceCode);
+        const injected = new Set(findings.filter((f) => f.kind === 'injection').map((f) => f.line));
+        for (const finding of findings) {
           if (finding.kind === 'injection') continue;
-          severity = 'critical';
+          if (finding.kind === 'fs-access') {
+            severity = 'critical';
+            evidence.push({
+              file: source.localPath ?? source.serverName,
+              line: finding.line,
+              snippet: finding.snippet,
+              detail: `Sensitive file access: ${finding.description}`,
+            });
+            continue;
+          }
+          const { severity: level, why } = pythonExecLevel(finding, injected);
+          if (level === 'critical') severity = 'critical';
           evidence.push({
             file: source.localPath ?? source.serverName,
             line: finding.line,
             snippet: finding.snippet,
-            detail: finding.kind === 'exec'
-              ? `Command execution: ${finding.description}`
-              : `Sensitive file access: ${finding.description}`,
+            detail: `Command execution: ${finding.description} — ${why}`,
           });
         }
         continue;

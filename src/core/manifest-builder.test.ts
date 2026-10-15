@@ -40,7 +40,7 @@ describe('buildProbeManifest', () => {
     for (const id of ['openshell-sandbox-list', 'openshell-sandbox-policy', 'openshell-global-policy']) {
       expect(byId.get(id)?.isolateHome, id).toBe(false);
     }
-    expect(byId.get('openshell-sandbox-policy')?.forEach).toEqual({ from: 'openshell-sandbox-list', array: 'sandboxes', fields: ['name', 'workspace'] });
+    expect(byId.get('openshell-sandbox-policy')?.forEach).toEqual({ from: 'openshell-sandbox-list', array: 'sandboxes', fields: ['name', 'workspace'], defaults: { workspace: 'default' } });
     // The only real-HOME agent commands: read-only queries verified side-effect free
     const realHomeAgentCmds = manifest.commands.filter(c => c.isolateHome === false).map(c => c.id);
     expect(realHomeAgentCmds.sort()).toEqual(['openshell-global-policy', 'openshell-sandbox-list', 'openshell-sandbox-policy']);

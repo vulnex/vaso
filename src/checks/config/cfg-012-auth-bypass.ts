@@ -46,13 +46,26 @@ export const cfg012 = defineCheck({
           detail: `Auth mode set to "${authMode}"`,
         });
       }
+
+      // OpenClaw 2026.x: skips the Control UI's device pairing/identity check
+      // (2026.9.4 schema gateway.controlUi.dangerouslyDisableDeviceAuth), so
+      // the gateway credential alone admits a browser.
+      if (getNestedValue(config.data, 'gateway.controlUi.dangerouslyDisableDeviceAuth') === true
+          && getNestedValue(config.data, 'gateway.controlUi.enabled') !== false) {
+        evidence.push({
+          file: config.filePath,
+          detail: 'gateway.controlUi.dangerouslyDisableDeviceAuth: true — Control UI device authentication is off',
+        });
+      }
     }
 
     return h.result({
       passed: evidence.length === 0,
       message: evidence.length === 0
         ? 'Authentication bypass is not enabled'
-        : 'Authentication bypass is enabled — anyone can access the agent',
+        : evidence.every(e => e.detail?.startsWith('gateway.controlUi.dangerouslyDisableDeviceAuth'))
+          ? 'Control UI device authentication is disabled — the gateway credential alone admits any browser'
+          : 'Authentication bypass is enabled — anyone can access the agent',
       evidence,
       // Only an explicit bypass flag can be switched off safely; an auth mode
       // of "none" needs a real token or password (OpenClaw: gateway.auth.mode

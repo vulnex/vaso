@@ -342,3 +342,32 @@ describe('CUR-014: Auto-Run Instructions Too Broad', () => {
     expect(result.passed).toBe(true);
   });
 });
+
+describe('deep-test 2026-10-15 regressions', () => {
+  const byId = (id: string) => cursorCliChecks.find(c => c.id === id)!;
+
+  it('CUR-002 flags the documented approvalMode "unrestricted"', async () => {
+    const result = await byId('CUR-002').run(makeCtx([makeConfig('/home/test/.cursor/cli-config.json', { approvalMode: 'unrestricted' })]));
+    expect(result.passed).toBe(false);
+    const safe = await byId('CUR-002').run(makeCtx([makeConfig('/home/test/.cursor/cli-config.json', { approvalMode: 'allowlist' })]));
+    expect(safe.passed).toBe(true);
+  });
+
+  it('CUR-006 compares the parsed host (localhost.evil.com is remote)', async () => {
+    const fs = makeFs({
+      access: vi.fn(async () => true),
+      readFile: vi.fn(async () => JSON.stringify({ mcpServers: { a: { url: 'http://localhost.evil.com/mcp' }, b: { url: 'http://[::1]:3000/mcp' } } })),
+    });
+    const result = await byId('CUR-006').run(makeCtx([], fs));
+    expect(result.evidence?.map(e => e.snippet)).toEqual(['mcpServers.a.url = http://localhost.evil.com/mcp']);
+  });
+
+  it('CUR-013 leaves the user-level state.vscdb to the user install', async () => {
+    const fs = makeFs({ stat: vi.fn(async () => ({ mode: 0o100644, isFile: () => true, isDirectory: () => false })) });
+    const ctx = makeCtx([], fs);
+    const project = { ...ctx, installation: { ...ctx.installation, installDir: '/work/app/.cursor', profile: 'project' } };
+    const result = await byId('CUR-013').run(project);
+    expect(result.passed).toBe(true);
+    expect(result.evidence ?? []).toHaveLength(0);
+  });
+});

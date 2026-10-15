@@ -2,10 +2,15 @@ import { defineCheck } from '../../core/check-builder.js';
 import { CODING_AGENTS } from '../../core/types.js';
 import { fixFirstConfig } from '../../remediation/config-writer.js';
 import { getNestedValue } from '../../core/utils.js';
+import { openclawAgentEntries } from './openclaw-agents.js';
 
 function sandboxKey(data: Record<string, unknown>): string | undefined {
   // agents.defaults.sandbox.mode: OpenClaw 2026.x (off | non-main | all)
   return ['sandbox', 'security.sandbox', 'isolation', 'agents.defaults.sandbox.mode'].find(k => getNestedValue(data, k) !== undefined);
+}
+
+function isOff(v: unknown): boolean {
+  return v === false || v === 'disabled' || v === 'off' || v === 'none';
 }
 
 export const cfg008 = defineCheck({
@@ -21,7 +26,7 @@ export const cfg008 = defineCheck({
       const key = sandboxKey(config.data);
       const sandbox = key ? getNestedValue(config.data, key) : undefined;
 
-      if (sandbox === false || sandbox === 'disabled' || sandbox === 'off' || sandbox === 'none') {
+      if (isOff(sandbox)) {
         return h.result({
           passed: false,
           message: 'Code sandbox is explicitly disabled — skills run without isolation',
@@ -32,6 +37,19 @@ export const cfg008 = defineCheck({
           fixDescription: `Enable sandbox mode (${key})`,
         });
       }
+    }
+
+    // OpenClaw: agents.entries.<id>.sandbox.mode overrides agents.defaults for that agent
+    const entries = openclawAgentEntries(ctx.configs)
+      .filter(e => isOff(getNestedValue(e.data, 'sandbox.mode')));
+    if (entries.length > 0) {
+      return h.result({
+        passed: false,
+        message: `Code sandbox is disabled for agent ${entries.map(e => `"${e.id}"`).join(', ')} — its tools run without isolation`,
+        evidence: entries.map(e => ({ file: e.config.filePath, detail: `agents.entries.${e.id}.sandbox.mode: off` })),
+        fixable: false,
+        fixDescription: 'Set agents.entries.<id>.sandbox.mode to "non-main" or "all" (`openclaw config set`)',
+      });
     }
 
     return h.passed('Sandbox is not explicitly disabled');

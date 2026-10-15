@@ -1,10 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { API_KEY_PATTERNS } from '../../core/patterns.js';
-import { isEnvReference, mask, mcpServers } from './shared.js';
+import { isEnvReference, literalSecret, mask, mcpServers } from './shared.js';
 
-const SECRET_KEY_HINT = /(KEY|TOKEN|SECRET|PASS|API|AUTH|COOKIE|SESSION)/i;
-const AUTH_SCHEME = /^\s*(?:Bearer|Basic|Token)\b\s*/i;
 const MIN_SECRET_LENGTH = 8;
 
 export const aba004 = defineCheck({
@@ -33,11 +30,9 @@ export const aba004 = defineCheck({
         if (!map || typeof map !== 'object' || Array.isArray(map)) continue;
         for (const [key, value] of Object.entries(map as Record<string, unknown>)) {
           if (typeof value !== 'string') continue;
-          // `Bearer ${MCP_TOKEN}` is a reference too — judge what follows the scheme
-          const literal = value.replace(AUTH_SCHEME, '').trim();
-          if (isEnvReference(literal)) continue;
-          const token = API_KEY_PATTERNS.find(p => p.pattern.test(literal))?.name;
-          if (!token && (!SECRET_KEY_HINT.test(key) || literal.length < MIN_SECRET_LENGTH)) continue;
+          const kind = literalSecret(key, value);
+          if (!kind) continue;
+          const token = kind === 'secret' ? undefined : kind;
           evidence.push({
             file: config.filePath,
             snippet: `${path}.${field}.${key}: ${mask(value)}`,

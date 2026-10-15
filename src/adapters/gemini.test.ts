@@ -133,3 +133,50 @@ describe('geminiHome', () => {
     expect(geminiHome('/home/x', fsWith({ GEMINI_CLI_HOME: '/srv/job' }))).toBe('/home/x/.gemini');
   });
 });
+
+describe('Gemini CLI adapter — system settings', () => {
+  const HOME = '/home/tester';
+  function fakeFs(files: Record<string, string>, env: Record<string, string> = {}, platform = 'linux'): import('../core/fs-provider.js').FSProvider {
+    const paths = new Set<string>();
+    for (const key of Object.keys(files)) {
+      let p = key;
+      paths.add(p);
+      while ((p = p.slice(0, p.lastIndexOf('/'))) && p.length > 0) paths.add(p);
+    }
+    return {
+      platform,
+      homedir: () => HOME,
+      getEnv: (k: string) => env[k],
+      access: async (p: string) => paths.has(p),
+      readFile: async (p: string) => {
+        if (!(p in files)) throw new Error(`ENOENT ${p}`);
+        return files[p];
+      },
+      readdirEntries: async () => { throw new Error('ENOENT'); },
+      execSync: () => { throw new Error('not found'); },
+    } as unknown as import('../core/fs-provider.js').FSProvider;
+  }
+
+  it('loads /etc/gemini-cli/settings.json (Linux) into the user install', async () => {
+    const fs = fakeFs({
+      [`${HOME}/.gemini/settings.json`]: '{}',
+      '/etc/gemini-cli/settings.json': '{ "tools": { "approvalMode": "auto_edit" } }',
+    });
+    const [inst] = await geminiAdapter.detect({ fs });
+    expect(inst.configFiles.map(c => c.filePath)).toEqual([`${HOME}/.gemini/settings.json`, '/etc/gemini-cli/settings.json']);
+  });
+
+  it('honours GEMINI_CLI_SYSTEM_SETTINGS_PATH and the macOS location', async () => {
+    const custom = fakeFs({ [`${HOME}/.gemini/settings.json`]: '{}', '/opt/policy/gemini.json': '{}' },
+      { GEMINI_CLI_SYSTEM_SETTINGS_PATH: '/opt/policy/gemini.json' });
+    expect((await geminiAdapter.detect({ fs: custom }))[0].configFiles.map(c => c.filePath)).toContain('/opt/policy/gemini.json');
+    const mac = fakeFs({ [`${HOME}/.gemini/settings.json`]: '{}', '/Library/Application Support/GeminiCli/settings.json': '{}' }, {}, 'darwin');
+    expect((await geminiAdapter.detect({ fs: mac }))[0].configFiles.map(c => c.filePath))
+      .toContain('/Library/Application Support/GeminiCli/settings.json');
+  });
+
+  it('does not create an install from system settings alone', async () => {
+    const fs = fakeFs({ '/etc/gemini-cli/settings.json': '{}' });
+    expect(await geminiAdapter.detect({ fs })).toEqual([]);
+  });
+});

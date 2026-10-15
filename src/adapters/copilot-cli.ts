@@ -18,8 +18,12 @@ const COPILOT_DIR_NAME = '.copilot';
 // `lsp-config.json`; we still probe for them so the adapter survives a
 // future schema change without code edits.
 // mcp-config.json: user-level MCP servers (GHC-003/004)
-const USER_CONFIG_FILES = ['config.json', 'settings.json', 'lsp-config.json', 'mcp-config.json'];
-const PROJECT_CONFIG_FILES = ['.mcp.json'];
+// permissions-config.json: saved per-location tool/directory approvals (GHC-002)
+const USER_CONFIG_FILES = ['config.json', 'settings.json', 'lsp-config.json', 'mcp-config.json', 'permissions-config.json'];
+// Project MCP servers live in `.mcp.json` or `.github/mcp.json` (CLI config-dir reference)
+const PROJECT_CONFIG_FILES = ['.mcp.json', join('.github', 'mcp.json')];
+// Personal skills: <config dir>/skills or ~/.agents/skills (GitHub Docs "Adding agent skills")
+const SHARED_SKILLS_DIR = join('.agents', 'skills');
 
 const SYSTEM_CLI_PATHS = [
   '/usr/local/bin/copilot',
@@ -87,6 +91,14 @@ export function copilotHome(home: string, fs: FSProvider): string {
   return env === '~' || env.startsWith('~/') ? join(home, env.slice(1)) : env;
 }
 
+async function userSkillDirs(home: string, copilotDir: string, fs: FSProvider): Promise<Pick<AgentInstallation, 'skillsDir' | 'skillsDirs'>> {
+  const dirs: string[] = [];
+  for (const dir of [join(copilotDir, 'skills'), join(home, SHARED_SKILLS_DIR)]) {
+    if (await fs.access(dir)) dirs.push(dir);
+  }
+  return dirs.length > 0 ? { skillsDir: dirs[0], skillsDirs: dirs } : {};
+}
+
 export const copilotCliAdapter: AgentAdapter = {
   agent: 'copilot-cli',
   displayName: 'GitHub Copilot CLI',
@@ -128,8 +140,7 @@ export const copilotCliAdapter: AgentAdapter = {
         user: options?.allUsers ? user : undefined,
         cliBinary,
         otherInstalls: installs.others.length > 0 ? installs.others : undefined,
-        // User skills (documented in the config-dir reference)
-        skillsDir: await fs.access(join(copilotDir, 'skills')) ? join(copilotDir, 'skills') : undefined,
+        ...(await userSkillDirs(home, copilotDir, fs)),
       });
     }
 
@@ -220,6 +231,7 @@ export const copilotCliAdapter: AgentAdapter = {
         '~/.copilot/settings.json',
         '~/.copilot/lsp-config.json',
         '~/.copilot/mcp-config.json',
+        '~/.copilot/permissions-config.json',
         '~/.copilot/copilot-instructions.md',
         '~/.config/gh/hosts.yml',
         // User-relative CLI install locations
@@ -233,6 +245,7 @@ export const copilotCliAdapter: AgentAdapter = {
         ...npmPackageJsonGlobs('@github/copilot'),
         '~/.copilot/instructions/*.instructions.md',
         '~/.copilot/skills/**',
+        '~/.agents/skills/**',
         nvmBinaryGlob('copilot'),
       ],
       commands: [
@@ -243,6 +256,7 @@ export const copilotCliAdapter: AgentAdapter = {
         '~/.copilot',
         '~/.copilot/instructions',
         '~/.copilot/skills',
+        '~/.agents/skills',
         '~/.copilot/session-state',
         '~/.copilot/logs',
       ],

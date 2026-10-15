@@ -1,6 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { isEnvReference, mask, settingsConfigs } from './shared.js';
+import { isEnvReference, literalSecret, mask, settingsConfigs } from './shared.js';
 
 const KEY_FIELDS = ['apiKey', 'api_key', 'token', 'accessToken'];
 
@@ -9,7 +9,7 @@ export const aba005 = defineCheck({
   name: 'Abacus.AI Plaintext Provider API Key',
   category: 'coding-agent',
   severity: 'critical',
-  description: 'Detect literal model-provider API keys in Abacus.AI `providers.<id>.options` (local provider loop) instead of `apiKeyEnvVar`',
+  description: 'Detect literal model-provider API keys in Abacus.AI `providers.<id>.options` (local provider loop) or request `headers` instead of `apiKeyEnvVar`',
   supportedAgents: ['abacus'],
 
   async run(ctx, h) {
@@ -29,6 +29,19 @@ export const aba005 = defineCheck({
             snippet: `providers.${id}.options.${field}: ${mask(value)}`,
             detail: `Plaintext API key for local provider "${id}" — readable by anything that can read the config`,
           });
+        }
+        // Providers doc: `options.headers` are sent with every request — an
+        // `Authorization: Bearer <key>` there is the same key in another place
+        const headers = options.headers;
+        if (headers && typeof headers === 'object' && !Array.isArray(headers)) {
+          for (const [name, value] of Object.entries(headers as Record<string, unknown>)) {
+            if (typeof value !== 'string' || !literalSecret(name, value)) continue;
+            evidence.push({
+              file: config.filePath,
+              snippet: `providers.${id}.options.headers.${name}: ${mask(value)}`,
+              detail: `Plaintext credential in a request header for local provider "${id}" — readable by anything that can read the config`,
+            });
+          }
         }
       }
     }

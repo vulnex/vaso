@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import { defineCheck } from '../../core/check-builder.js';
-import { getPath, nanobotConfigs, workspaceDir, worldWritable } from './shared.js';
+import { getPath, nanobotConfigs, pyBool, workspaceDir, worldWritable } from './shared.js';
 
 export const nb006 = defineCheck({
   id: 'NB-006',
@@ -13,7 +13,7 @@ export const nb006 = defineCheck({
 
   async run(ctx, h) {
     const data = nanobotConfigs(ctx.configs)[0]?.data;
-    if (getPath(data, 'gateway.heartbeat.enabled') === false) {
+    if (pyBool(getPath(data, 'gateway.heartbeat.enabled')) === false) {
       return h.passed('Gateway heartbeat is disabled (gateway.heartbeat.enabled: false)');
     }
     const ws = workspaceDir(ctx);

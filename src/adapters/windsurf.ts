@@ -9,6 +9,7 @@ import { stripJsonc } from '../core/jsonc.js';
 import { getUserHomeDirs } from './openclaw.js';
 import { queryCliVersion } from './version-query.js';
 import { decodeWindsurfUserSettings, toWindsurfSettingsData } from './windsurf-user-settings.js';
+import { devinCliPresent } from './devin.js';
 
 // Windsurf IDE was rebranded Devin Desktop on 2026-06-02. One adapter covers
 // both generations: legacy installs keep the Windsurf app bundle / user-data
@@ -146,6 +147,19 @@ async function findCLIBinary(fs: FSProvider): Promise<string | undefined> {
   return undefined;
 }
 
+/**
+ * Windsurf / Devin Desktop footprint for a user: the Cascade agent dir, an
+ * editor user-data dir, or the macOS app bundle. The devin adapter uses it to
+ * leave a CLI-less ~/.config/devin to this adapter.
+ */
+export async function windsurfPresent(home: string, fs: FSProvider): Promise<boolean> {
+  if (await fs.access(codeiumAgentDir(home))) return true;
+  for (const dir of editorUserDataDirs(home, fs)) {
+    if (await fs.access(dir)) return true;
+  }
+  return (await findAppBundle(fs)) !== undefined;
+}
+
 /** Editor settings.json is VS Code-flavored JSON (comments/trailing commas tolerated). */
 async function loadJsoncConfig(filePath: string, fs: FSProvider): Promise<ParsedConfig | undefined> {
   try {
@@ -201,11 +215,14 @@ export const windsurfAdapter: AgentAdapter = {
       if (!hasAgentDir && existingUserDataDirs.length === 0 && !appBundle && !installRoot && !cliBinary) continue;
 
       const configFiles: ParsedConfig[] = [];
+      // ~/.config/devin/{mcp_config,config}.json are shared with Devin CLI;
+      // when the CLI is installed its install reports them, not this one.
+      const sharedWithDevin = await devinCliPresent(home, fs);
 
       // MCP configs (both generations).
       const mcpConfigPaths = [
         join(agentDir, MCP_CONFIG_FILE),
-        join(devinConfigDir(home, fs), MCP_CONFIG_FILE),
+        ...(sharedWithDevin ? [] : [join(devinConfigDir(home, fs), MCP_CONFIG_FILE)]),
       ];
       for (const filePath of mcpConfigPaths) {
         const loaded = await loadConfigIfPresent(filePath, fs);
@@ -230,7 +247,7 @@ export const windsurfAdapter: AgentAdapter = {
 
       // 3.x Devin agent config (permission rules), shared with Devin CLI.
       const devinConfigPath = join(devinConfigDir(home, fs), DEVIN_CONFIG_FILE);
-      if (await fs.access(devinConfigPath)) {
+      if (!sharedWithDevin && await fs.access(devinConfigPath)) {
         const parsed = await loadJsoncConfig(devinConfigPath, fs);
         if (parsed) configFiles.push(parsed);
       }

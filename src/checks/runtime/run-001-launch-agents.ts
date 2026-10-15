@@ -12,7 +12,10 @@ const SUSPICIOUS_KEYWORDS = [
   'lyrie',
 ];
 
-const INTERPRETERS = new Set(['node', 'nodejs', 'bun', 'deno', 'python', 'python3', 'uv', 'uvx']);
+const INTERPRETERS = new Set(['node', 'nodejs', 'bun', 'deno', 'python', 'python3', 'uv', 'uvx', 'npx', 'bunx', 'tsx', 'ts-node']);
+/** Subcommands / runner packages between an interpreter and its script:
+ *  `bun run x.ts`, `deno run x.ts`, `uv run x.py`, `npx tsx x.ts`. */
+const RUNNER_WORDS = new Set(['run', 'exec', 'dlx', 'tsx', 'ts-node']);
 
 /** Standard per-user and system install roots for agent CLIs/packages. */
 function installRoots(home: string): string[] {
@@ -52,10 +55,17 @@ function agentExecutable(parts: string[], keyword: string, ctx: ScanContext): st
   const roots = [...installRoots(home), ctx.installation.installDir];
   const underRoot = (p: string) => roots.some(r => normalize(p).startsWith(`${normalize(r)}/`));
   const exe = parts[0];
-  const script = INTERPRETERS.has(basename(exe)) ? parts.slice(1).find(a => !a.startsWith('-')) : undefined;
+  const script = INTERPRETERS.has(basename(exe))
+    ? parts.slice(1).find(a => !a.startsWith('-') && !RUNNER_WORDS.has(a))
+    : undefined;
   const target = script ?? exe;
   if (!target.startsWith('/')) return undefined;
   if (ctx.installation.cliBinary && normalize(target) === normalize(ctx.installation.cliBinary)) return target;
+  // A script inside the scanned installation (Lyrie's `bun run
+  // <checkout>/scripts/daemon.ts`) is the agent itself, whatever the
+  // checkout directory is called.
+  const installDir = normalize(ctx.installation.installDir);
+  if (script && installDir !== '/' && normalize(script).startsWith(`${installDir}/`)) return target;
   const named = target.toLowerCase().split('/').some(seg => seg.includes(keyword));
   return named && underRoot(target) ? target : undefined;
 }

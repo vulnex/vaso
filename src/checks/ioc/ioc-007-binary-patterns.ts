@@ -1,7 +1,8 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { getIOCDatabase } from '../../ioc/database.js';
-import { getSkillFiles } from '../../core/utils.js';
+import { skillFilesOf, skillsDirsOf } from '../skills/skill-files.js';
+import { readCappedBytes } from '../../core/file-limits.js';
 
 function bytesStartWith(haystack: Uint8Array, needle: Uint8Array): boolean {
   if (haystack.length < needle.length) return false;
@@ -20,11 +21,10 @@ export const ioc007 = defineCheck({
 
   async run(ctx, h) {
     const evidence: Evidence[] = [];
-    const skillsDir = ctx.installation.skillsDir;
-    if (!skillsDir) return h.passed('No skills directory found');
+    if (skillsDirsOf(ctx).length === 0) return h.passed('No skills directory found');
 
     const db = getIOCDatabase();
-    const files = ctx.skillFiles ?? await getSkillFiles(skillsDir, ctx.fs);
+    const files = await skillFilesOf(ctx);
 
     for (const file of files) {
       let matched: { name: string } | undefined;
@@ -36,7 +36,7 @@ export const ioc007 = defineCheck({
       const bufferPatterns = db.binaryPatterns.filter(bp => bp.type === 'buffer');
       if (bufferPatterns.length > 0) {
         try {
-          const bytes = await ctx.fs.readBytes(file);
+          const bytes = await readCappedBytes(ctx.fs, file);
           for (const bp of bufferPatterns) {
             if (bytesStartWith(bytes, bp.pattern as Uint8Array)) {
               matched = { name: bp.name };
@@ -51,7 +51,7 @@ export const ioc007 = defineCheck({
         const regexPatterns = db.binaryPatterns.filter(bp => bp.type === 'regex');
         if (regexPatterns.length > 0) {
           try {
-            const content = await ctx.fs.readFile(file);
+            const content = Buffer.from(await readCappedBytes(ctx.fs, file)).toString('utf-8');
             for (const bp of regexPatterns) {
               if ((bp.pattern as RegExp).test(content)) {
                 matched = { name: bp.name };

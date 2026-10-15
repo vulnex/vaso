@@ -40,8 +40,22 @@ export const opc002 = defineCheck({
         continue;
       }
       if (perm && typeof perm === 'object') {
+        const rules = perm as Record<string, unknown>;
+        // `"*"` is the default for every permission not named
+        // (opencode.ai/docs/permissions), so `{"*": "allow"}` allows them all
+        const star = rules['*'];
+        if (typeof star === 'string' && star.toLowerCase() === 'allow') {
+          const covered = [...HIGH_RISK_KEYS].filter(k => rules[k] === undefined);
+          if (covered.length > 0) {
+            evidence.push({
+              file: config.filePath,
+              snippet: 'permission["*"] = "allow"',
+              detail: `default "allow" covers ${covered.join(', ')} — they run without user confirmation`,
+            });
+          }
+        }
         for (const key of HIGH_RISK_KEYS) {
-          const action = actionFor((perm as Record<string, unknown>)[key]);
+          const action = actionFor(rules[key]);
           if (action && action.toLowerCase() === 'allow') {
             evidence.push({
               file: config.filePath,

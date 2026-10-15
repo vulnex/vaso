@@ -1,4 +1,4 @@
-import { join, relative, isAbsolute } from 'node:path';
+import { basename, join, relative, isAbsolute } from 'node:path';
 import type { DirentInfo, FSProvider } from './fs-provider.js';
 
 /**
@@ -67,6 +67,18 @@ async function walk(
     if (isRoot) throw err;
     return [];
   }
+  if (!isRoot) {
+    // Parts of this target already walked through a more specific link
+    // (`ext-skill` → ~/dev/ext-skill before `chain/devlink` → ~/dev)
+    const real = roots[roots.length - 1];
+    const taken = [...visited].filter(v => v !== real && isWithin(v, real));
+    if (taken.length > 0) {
+      entries = entries.filter(e => {
+        const entryReal = join(real, relative(dir, e.parentPath ?? dir), e.name);
+        return !taken.some(v => isWithin(entryReal, v));
+      });
+    }
+  }
   return follow(fs, dir, entries, roots, visited, depth);
 }
 
@@ -80,6 +92,7 @@ async function follow(
   depth: number,
 ): Promise<DirentInfo[]> {
   const out: DirentInfo[] = [];
+  const dirLinks: Array<{ entry: DirentInfo; parent: string; link: string; real: string }> = [];
   for (const entry of entries) {
     if (!entry.isSymbolicLink) {
       out.push(entry);
@@ -112,14 +125,27 @@ async function follow(
       continue;
     }
     if (st.isFile()) {
+      visited.add(real);
       out.push({ name: entry.name, isFile: true, isDirectory: false, parentPath: parent });
     } else if (st.isDirectory()) {
-      visited.add(real);
-      out.push({ name: entry.name, isFile: false, isDirectory: true, parentPath: parent });
-      out.push(...await walk(fs, link, [...roots, real], visited, depth + 1, false));
+      dirLinks.push({ entry, parent, link, real });
     } else {
       out.push(entry);
     }
+  }
+  // Deepest target first, so a link to a parent dir (`devlink` → ~/dev) does
+  // not report again — under another path — a skill linked in on its own
+  // (`ext-skill` → ~/dev/ext-skill): each file is reported once, under the
+  // most specific link.
+  dirLinks.sort((a, b) => b.real.length - a.real.length);
+  for (const { entry, parent, link, real } of dirLinks) {
+    if ([...visited].some(v => isWithin(real, v))) {
+      out.push(entry);
+      continue;
+    }
+    visited.add(real);
+    out.push({ name: entry.name, isFile: false, isDirectory: true, parentPath: parent });
+    out.push(...await walk(fs, link, [...roots, real], visited, depth + 1, false));
   }
   return out;
 }
@@ -145,4 +171,60 @@ export async function listSkillDirs(fs: FSProvider, skillsDir: string): Promise<
     }
   }
   return out;
+}
+
+export interface SkillDir {
+  /** Path the agent loads the skill from (a symlinked skill keeps its link path). */
+  dir: string;
+  /** Directory name. */
+  name: string;
+}
+
+/**
+ * Every skill under `skillsDirs` (symlinked ones included, see listSkillDirs).
+ * A skills dir that is itself one skill — it holds a SKILL.md, or it is the
+ * target of `vaso skill audit <dir>` (`rootIsSkill`) — counts as a skill too,
+ * so its own package.json and metadata are read.
+ */
+export async function listSkills(
+  fs: FSProvider,
+  skillsDirs: readonly string[],
+  opts: { rootIsSkill?: boolean } = {},
+): Promise<SkillDir[]> {
+  const out: SkillDir[] = [];
+  const seen = new Set<string>();
+  const add = (dir: string, name: string) => {
+    if (seen.has(dir)) return;
+    seen.add(dir);
+    out.push({ dir, name });
+  };
+  for (const root of skillsDirs) {
+    if (opts.rootIsSkill || await fs.access(join(root, 'SKILL.md'))) add(root, basename(root));
+    let entries: DirentInfo[];
+    try {
+      entries = await listSkillDirs(fs, root);
+    } catch {
+      continue;
+    }
+    for (const entry of entries) add(join(root, entry.name), entry.name);
+  }
+  return out;
+}
+
+/**
+ * The `name:` in SKILL.md's YAML frontmatter — the name agents show and
+ * invoke the skill by, which need not match its directory name.
+ */
+export async function skillFrontmatterName(fs: FSProvider, skillDir: string): Promise<string | undefined> {
+  let text: string;
+  try {
+    text = await fs.readFile(join(skillDir, 'SKILL.md'));
+  } catch {
+    return undefined;
+  }
+  const fm = /^﻿?---\r?\n([\s\S]*?)\r?\n---/.exec(text);
+  if (!fm) return undefined;
+  const m = /^name:\s*(?:"([^"\n]*)"|'([^'\n]*)'|([^\n#]*?))\s*(?:#.*)?$/m.exec(fm[1]);
+  const name = (m?.[1] ?? m?.[2] ?? m?.[3])?.trim();
+  return name || undefined;
 }

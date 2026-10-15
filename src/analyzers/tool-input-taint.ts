@@ -46,7 +46,7 @@ export type SinkKind = 'code' | 'process' | 'file-read' | 'file-write' | 'file-m
 const INPUT_NAMES = new Set(['req', 'request', 'tool_input', 'toolInput', 'tool_args', 'toolArgs']);
 
 /** Methods whose function argument is an MCP tool/request handler. */
-const HANDLER_REGISTRARS = new Set(['tool', 'registerTool', 'setRequestHandler']);
+const HANDLER_REGISTRARS = new Set(['tool', 'registerTool', 'setRequestHandler', 'addTool']);
 
 const CODE_SINKS = new Set(['eval', 'Function']);
 const PROCESS_SINKS = new Set(['exec', 'execSync', 'spawn', 'spawnSync', 'execFile', 'execFileSync']);
@@ -86,25 +86,117 @@ export function findTaintedSinks(code: string, filename = 'unknown.js'): Tainted
   return results.map((s) => ({ ...s }));
 }
 
+/** `require('m')` / `await import('m')` / `import('m')` → `m`. */
+function moduleOfInit(init: Node | null | undefined): string | undefined {
+  if (!init) return undefined;
+  if (init.type === 'AwaitExpression') return moduleOfInit(init.argument);
+  if (init.type === 'CallExpression') {
+    const { callee, arguments: args } = init;
+    const isRequire = callee.type === 'Identifier' && callee.name === 'require';
+    if ((isRequire || callee.type === 'Import') && args[0]?.type === 'StringLiteral') return args[0].value;
+  }
+  if (init.type === 'ImportExpression' && init.source.type === 'StringLiteral') return init.source.value;
+  return undefined;
+}
+
 /** Module specifier a binding was imported/required from, if any. */
 export function bindingModule(binding: Binding | undefined): string | undefined {
   if (!binding) return undefined;
   const parent = binding.path.parentPath?.node;
   if (parent?.type === 'ImportDeclaration') return parent.source.value;
   const node = binding.path.node;
-  if (node.type === 'VariableDeclarator' && node.init?.type === 'CallExpression') {
-    const { callee, arguments: args } = node.init;
-    if (callee.type === 'Identifier' && callee.name === 'require' && args[0]?.type === 'StringLiteral') {
-      return args[0].value;
-    }
-  }
+  if (node.type === 'VariableDeclarator') return moduleOfInit(node.init);
   return undefined;
 }
 
-function isChildProcess(path: NodePath, name: string): boolean {
-  const mod = bindingModule(path.scope.getBinding(name));
-  if (mod) return mod === 'child_process' || mod === 'node:child_process';
-  return CHILD_PROCESS_NAMES.has(name);
+/**
+ * The module export a local binding stands for: `exec` for `import { exec as
+ * run }` or `const { exec: run } = require(…)`; `*` for a default/namespace
+ * import or a whole-module `require`.
+ */
+function importedName(binding: Binding): string {
+  const node = binding.path.node;
+  if (node.type === 'ImportSpecifier') return node.imported.type === 'Identifier' ? node.imported.name : node.imported.value;
+  if (node.type === 'VariableDeclarator' && node.id.type === 'ObjectPattern') {
+    for (const prop of node.id.properties) {
+      if (prop.type === 'ObjectProperty' && prop.value.type === 'Identifier' && prop.value.name === binding.identifier.name) {
+        return prop.key.type === 'Identifier' ? prop.key.name : prop.key.type === 'StringLiteral' ? prop.key.value : '*';
+      }
+    }
+  }
+  return '*';
+}
+
+const CHILD_PROCESS_MODULE = /^(?:node:)?child_process$/;
+/** execa's functions: `execa(file, args)`, `execaCommand("cmd line")`. */
+const EXECA_FUNCTIONS: Record<string, 'program' | 'command'> = {
+  execa: 'program', execaSync: 'program', execaNode: 'program', execaCommand: 'command', execaCommandSync: 'command',
+};
+const GLOBAL_OBJECTS = new Set(['globalThis', 'window', 'global', 'self']);
+
+export interface SinkCallee {
+  /** As written, e.g. `run (child_process.exec)`, `globalThis.eval`. */
+  display: string;
+  kind: 'code' | 'process';
+  /** The underlying function, for argument selection: `exec`, `spawn`, `eval`, `execaCommand`. */
+  fn: string;
+}
+
+/**
+ * The command/code sink a call invokes, resolving how the server reached it:
+ * aliased or destructured imports (`import { exec as run }`, `const {
+ * execSync: sh } = require(…)`), a whole module under any name (`const proc
+ * = require("child_process")`, `await import("child_process")`,
+ * `require("child_process").execSync(…)`), execa and shelljs, and indirect
+ * eval (`(0, eval)(code)`, `globalThis.eval(code)`).
+ */
+export function sinkCallee(path: NodePath): SinkCallee | undefined {
+  if (!path.isCallExpression() && !path.isNewExpression()) return undefined;
+  let callee = path.node.callee as Node;
+  // (0, eval)(code): the last expression of a sequence is the callee.
+  if (callee.type === 'SequenceExpression') callee = callee.expressions[callee.expressions.length - 1];
+
+  if (callee.type === 'Identifier') {
+    const name = callee.name;
+    const binding = path.scope.getBinding(name);
+    const mod = bindingModule(binding);
+    if (mod && binding) {
+      const imported = importedName(binding);
+      if (CHILD_PROCESS_MODULE.test(mod) && PROCESS_SINKS.has(imported)) {
+        return { display: imported === name ? name : `${name} (child_process.${imported})`, kind: 'process', fn: imported };
+      }
+      if (mod === 'execa' && EXECA_FUNCTIONS[imported]) return { display: name, kind: 'process', fn: imported };
+      return undefined;
+    }
+    if (CODE_SINKS.has(name) && !binding) return { display: name, kind: 'code', fn: name };
+    if (PROCESS_SINKS.has(name) && path.isCallExpression()) return { display: name, kind: 'process', fn: name };
+    return undefined;
+  }
+
+  if (callee.type !== 'MemberExpression' || callee.property.type !== 'Identifier') return undefined;
+  const prop = callee.property.name;
+  const object = callee.object;
+  if (prop === 'eval' && object.type === 'Identifier' && GLOBAL_OBJECTS.has(object.name)) {
+    return { display: `${object.name}.eval`, kind: 'code', fn: 'eval' };
+  }
+  // require("child_process").execSync(…) / (await import("child_process")).exec(…)
+  const inline = moduleOfInit(object);
+  if (inline) {
+    return CHILD_PROCESS_MODULE.test(inline) && PROCESS_SINKS.has(prop)
+      ? { display: `require("${inline}").${prop}`, kind: 'process', fn: prop }
+      : undefined;
+  }
+  if (object.type !== 'Identifier') return undefined;
+  const mod = bindingModule(path.scope.getBinding(object.name));
+  if (PROCESS_SINKS.has(prop) && (mod ? CHILD_PROCESS_MODULE.test(mod) : CHILD_PROCESS_NAMES.has(object.name))) {
+    return { display: `${object.name}.${prop}`, kind: 'process', fn: prop };
+  }
+  if (mod === 'shelljs' && prop === 'exec') return { display: `${object.name}.exec`, kind: 'process', fn: 'exec' };
+  if (mod === 'execa' && EXECA_FUNCTIONS[prop]) return { display: `${object.name}.${prop}`, kind: 'process', fn: prop };
+  if ((VM_SINKS.has(prop) || prop === 'Script') && (object.name === 'vm' || mod?.endsWith('vm'))) {
+    return { display: `${object.name}.${prop}`, kind: 'code', fn: prop };
+  }
+  return undefined;
 }
 
 /** `fs`, `fsp`, `import { promises as fs } from 'fs'`, `fs.promises`. */
@@ -151,8 +243,23 @@ function analyze(code: string): TaintedSink[] {
         const { callee, arguments: args } = path.node;
         if (callee.type !== 'MemberExpression' || callee.property.type !== 'Identifier') return;
         if (!HANDLER_REGISTRARS.has(callee.property.name)) return;
+        // Inline, by reference (`server.tool("t", "d", {}, handleIt)`), or
+        // FastMCP-TS's `addTool({ name, execute })`.
+        const addHandler = (node: Node | undefined): void => {
+          const fn = functionNode(path, node);
+          if (fn) handlers.add(fn);
+        };
         for (const arg of args) {
-          if (arg.type === 'ArrowFunctionExpression' || arg.type === 'FunctionExpression') handlers.add(arg);
+          if (arg.type === 'ObjectExpression') {
+            for (const prop of arg.properties) {
+              const key = prop.type === 'ObjectProperty' || prop.type === 'ObjectMethod' ? prop.key : undefined;
+              const name = key?.type === 'Identifier' ? key.name : key?.type === 'StringLiteral' ? key.value : '';
+              if (name !== 'execute' && name !== 'handler') continue;
+              addHandler(prop.type === 'ObjectMethod' ? prop : prop.type === 'ObjectProperty' ? prop.value : undefined);
+            }
+          } else {
+            addHandler(arg);
+          }
         }
       },
     });
@@ -263,11 +370,12 @@ function analyze(code: string): TaintedSink[] {
         const callee = path.node.callee;
         const args = path.get('arguments') as NodePath[];
 
+        const exec = sinkCallee(path);
+        if (exec) {
+          return report(path, exec.display, exec.kind === 'code' ? args : processArgs(exec.fn, args), exec.kind);
+        }
+
         if (callee.type === 'Identifier') {
-          if (CODE_SINKS.has(callee.name)) return report(path, callee.name, args, 'code');
-          if (PROCESS_SINKS.has(callee.name) && path.isCallExpression()) {
-            return report(path, callee.name, processArgs(callee.name, args), 'process');
-          }
           // `import { readFile } from 'fs/promises'`, `const { stat } = require('fs')`
           const fsCall = FS_CALLS[callee.name];
           if (fsCall && FS_MODULE.test(bindingModule(path.scope.getBinding(callee.name)) ?? '')) {
@@ -282,14 +390,6 @@ function analyze(code: string): TaintedSink[] {
           if (fsCall && isFsObject(path, callee.object)) {
             const shown = callee.object.type === 'Identifier' ? callee.object.name : 'fs.promises';
             return report(path, `${shown}.${prop}`, args.slice(0, fsCall.paths), fsCall.kind);
-          }
-          if (callee.object.type !== 'Identifier') return;
-          const obj = callee.object.name;
-          if (PROCESS_SINKS.has(prop) && isChildProcess(path, obj)) {
-            return report(path, `${obj}.${prop}`, processArgs(prop, args), 'process');
-          }
-          if ((VM_SINKS.has(prop) || prop === 'Script') && (obj === 'vm' || bindingModule(path.scope.getBinding(obj))?.endsWith('vm'))) {
-            return report(path, `${obj}.${prop}`, args, 'code');
           }
         }
       },
@@ -307,7 +407,7 @@ function analyze(code: string): TaintedSink[] {
  * is a shell or `shell: true` is set (`spawn('sh', ['-c', input])`).
  */
 function processArgs(sink: string, args: NodePath[]): NodePath[] {
-  if (sink === 'exec' || sink === 'execSync') return args.slice(0, 1);
+  if (sink === 'exec' || sink === 'execSync' || EXECA_FUNCTIONS[sink] === 'command') return args.slice(0, 1);
   const program = args[0]?.node;
   const viaShell =
     (program?.type === 'StringLiteral' && SHELLS.test(program.value)) ||
@@ -315,6 +415,19 @@ function processArgs(sink: string, args: NodePath[]): NodePath[] {
       p.type === 'ObjectProperty' && p.key.type === 'Identifier' && p.key.name === 'shell' &&
       p.value.type === 'BooleanLiteral' && p.value.value));
   return viaShell ? args.slice(0, 2) : args.slice(0, 1);
+}
+
+/** The function a handler argument is: inline, or a local function named by reference. */
+function functionNode(path: NodePath, node: Node | undefined): Node | undefined {
+  if (!node) return undefined;
+  if (node.type === 'ArrowFunctionExpression' || node.type === 'FunctionExpression' || node.type === 'ObjectMethod') return node;
+  if (node.type !== 'Identifier') return undefined;
+  const target = path.scope.getBinding(node.name)?.path.node;
+  if (target?.type === 'FunctionDeclaration') return target;
+  if (target?.type === 'VariableDeclarator' && (target.init?.type === 'ArrowFunctionExpression' || target.init?.type === 'FunctionExpression')) {
+    return target.init;
+  }
+  return undefined;
 }
 
 /**

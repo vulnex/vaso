@@ -180,7 +180,9 @@ export const mcp027 = defineCheck({
       message:
         evidence.length === 0
           ? 'No MCP server packages are on a known-vulnerable or rolled-back version'
-          : `Found ${evidence.length} MCP server version issue(s) — known-vulnerable or rolled-back package(s)`,
+          : evidence.every((e) => e.mitigated)
+            ? `Found ${evidence.length} advisory match(es) in MCP server dependencies, none applicable — each needs a feature the server's code doesn't use`
+            : `Found ${evidence.length} MCP server version issue(s) — known-vulnerable or rolled-back package(s)`,
       evidence,
       fixDescription:
         'Pin MCP servers to a current, non-vulnerable release; never roll a server back below a version that carried a security fix',

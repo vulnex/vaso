@@ -23,6 +23,27 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - **Shell-wrapper detection** (MCP-021, CD-008, CDX-009, HM-010, AT-007) catches `bash -lc`, `sh -ec`, `/usr/bin/env bash -c`, `cmd /c` and PowerShell `-Command`, not only a bare `-c`.
 - CDX-009 and OPC-003 no longer flag a standard interpreter running an absolute script (`["python3", "/abs/notify.py"]`, `node /abs/server.js`) as a PATH-hijack risk.
 - **CFG-010 on OpenClaw flags gateway auth throttling tuned too weak** (`gateway.auth.rateLimit` with more than 100 attempts per window, no lockout, or a sub-second window); OpenClaw's default throttle still passes.
+- **OpenShell snap layout.** The gateway TOML, database and TLS keys are read from `~/snap/openshell/common/…` (the documented path), with `/var/snap/openshell/common/gateway.toml` as fallback.
+- **Probe `forEach` defaults.** A missing field can take a default, so a sandbox listed without a workspace is queried in `default` on remote scans as it is locally (probe ≥ 1.2.2).
+- **CFG-016 is a recommendation, not a finding.** OpenClaw without NemoClaw passes with advice instead of costing every OpenClaw install an info finding.
+- **Host-wide findings are reported once.** NET-005, RUN-001/002/003/005 and CFG-016 no longer repeat for each sibling install (`.clawdbot`, profiles); NemoClaw hardening checks (CFG-016–024) are reported only under NemoClaw when it is scanned.
+- **Claude Code project-scope `bypassPermissions` is no longer critical.** Claude Code 2.1.257+ ignores it in `.claude/settings*.json`; it is reported as info (warning when the version is unknown). User scope stays critical.
+- CDX-001's fix text recommends `on-request` or a granular policy (`untrusted`/`on-failure` are deprecated upstream).
+- **CDX-003, OPC-001 and CD-002 are fixable** — `vaso fix` removes group/other access.
+- **Skill scans read build output and every skill file type.** `dist/`/`build/` inside a skill, `.mts/.cts/.zsh/.ps1`, extensionless scripts, SKILL.md code blocks and compiled binaries are checked; vendor directories stay skipped.
+- **Files over the 5 MiB limit are reported** — SKL-002 lists them as "not scanned" (info) instead of skipping silently.
+- **ADV-002 checks packages you don't declare** (installed copy or package-lock entry); an advisory that only applies to a particular use of the library is reported as mitigated (info) for such packages.
+- **Remote scans see the same skill code as local ones**: the probe keeps `dist/`/`build/` and ships compiled helpers (`.node`, `.so`, `.exe`, … within 5 MiB) inside skill trees (probe ≥ 1.2.2).
+- **Copilot CLI saved approvals are checked.** GHC-002 reads `permissions-config.json` (any-command `X:*` approvals for shells/interpreters, broad `allowed_directories`).
+- **Shared skill roots are scanned** — Copilot CLI `~/.agents/skills`, Cursor `~/.cursor/skills` and `~/.agents/skills`.
+- **Gemini MCP `trust: true` is reported** (GEM-003): it skips every tool-call confirmation for that server.
+- **Env-var config overrides are evaluated.** ZeroClaw `ZEROCLAW_<path>` (`__` = nesting) and PicoClaw `PICOCLAW_*` overrides are applied over the config file, so checks see the effective settings; evidence names the variable.
+- **TOML fixes are surgical.** `vaso fix` edits only the target key line in ZeroClaw/IronClaw TOML, keeping comments and number formatting, and validates the result before writing.
+- **PCL-007 covers `tools.web.private_host_whitelist`** — wildcard, loopback, metadata or very wide entries re-open web_fetch SSRF.
+- **MCP tool descriptions are read structurally.** Template-literal, concatenated and const descriptions, FastMCP-TS `addTool`, and Python `@mcp.tool` docstrings reach MCP-024; weak-only phrasing is info. (MCP-020 may report each server's tools as changed once after upgrading, since descriptions are now complete.)
+- **Python exec findings are tiered like JavaScript** — MCP-004 is critical only when tool input, a decoded command or a dangerous command reaches the call.
+- **`vaso mcp` discovers more configs** — OpenCode `mcp`, Hermes `mcp_servers`, legacy Devin `config.json`, Gemini/Qwen/OpenCode project settings, Gemini extensions; `-p` accepts YAML and the Abacus array form and warns about files with no servers; configs are deduped by realpath.
+- **`mcp scan --source` continues past a bad path**, reports it, and exits 3 (incomplete).
 
 ### Fixed
 
@@ -40,6 +61,44 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - **Exit codes**: `probe validate` exits 2 for an unusable snapshot (was 1, or a TypeError), `rules validate` on an unreadable file and `rules init` failures exit 2; `fix --rollback ""` no longer falls through to applying fixes.
 - `rules init` no longer overwrites an existing `example.yaml` (use `--force`); `rules list -f json` prints `[]` when empty; `ext list/info` and `rules list/validate` reject unknown `-f` values; `scan --snapshot --output-dir` names the report after the snapshot's host.
 - Registering an adapter twice (`registerAllAdapters()` called again) throws, as for checks, instead of doubling every installation.
+- **ABA-004 no longer reports URLs, paths or mode words as secrets.** Names like `AUTH_MODE`, `GITHUB_API_URL`, `SESSION_DIR` need a credential-shaped value.
+- ABA-005 provider `options.headers` credentials; ABA-002 `Bash(* *)`; ABA-013/ABA-002 `/private/etc`; ABA-011 `localhost.<domain>` is not loopback.
+- ABA-001/ABA-010 offer no fix when all evidence is inactive untrusted-project settings.
+- OpenShell: OSH-006 interceptor `allow_insecure_transport`, OSH-008 key named by `OPENSHELL_TLS_KEY`, OSH-011 `/**/*`, `/*/**`, `/usr/bin/*`-style globs, OSH-012 `protocol: tcp` (info), OSH-014 `/usr/lib`, `/usr/sbin`, `/usr/share`, `/etc/ssl`; OSH-001 shows the real env value.
+- **OpenClaw 2026.x per-agent overrides are read.** CFG-005/006/008 and OC-001 see `agents.entries.<id>` sandbox, exec and fs overrides; CFG-005 no longer lets a strict main config hide a sub-agent set to "full".
+- **OpenClaw Control UI hardening.** NET-002 flags `controlUi.allowedOrigins: ["*"]` and the Host-header origin fallback; CFG-012 flags `dangerouslyDisableDeviceAuth`; CFG-013 flags per-account `dmPolicy: "open"`.
+- **Gateway exposure and TLS accuracy.** CFG-001 flags `gateway.bind: "auto"`, explains `lan` as 0.0.0.0, and agrees with NET-001 (PicoClaw public launcher, OpenShell). CFG-004 reads the parsed TLS value (a single-line `"tls":{"enabled":false,…}` no longer passes) and accepts tailnet/Tailscale serve and loopback host lists. CFG-015 no longer flags the default mDNS mode (`discovery.mdns: {}`).
+- **No phantom OpenClaw sub-agents.** Per-agent state folders such as `agents/main/agent/` are no longer reported as installs.
+- **OC-001/OC-005 read the 2026.x keys** (`gateway.bind`, `gateway.tls.enabled`, `agents.defaults.sandbox.mode`, `tools.exec`).
+- **RUN-001 recognizes `bun run`/`npx tsx` agent services** (Lyrie's daemon).
+- **CC-003**: the documented `${CLAUDE_PROJECT_DIR}` hook paths and exec-form hooks are no longer flagged; hooks piping into a shell (`curl … | bash`) are.
+- **CC-004** catches literal bearer tokens in HTTP hooks and keys written into `apiKeyHelper`; **CC-007** no longer reports `op read …`-style helpers as missing scripts; **CC-009** flags `/`, `~` and other parents of credential directories.
+- **Claude Code projects with only `CLAUDE.md`, `.claude/rules` or `.mcp.json` are scanned**, and `~/.claude/rules/*.md` is checked for secrets.
+- **Codex profile files (`$CODEX_HOME/<name>.config.toml`, 0.134+), trusted-project `.codex/` layers, `AGENTS.override.md`, and broad `writable_roots`/`network_access`** are covered.
+- **OpenCode** covers `"*": "allow"`, project configs up to the git root, `OPENCODE_CONFIG_DIR`/`OPENCODE_CONFIG_CONTENT`/`OPENCODE_PERMISSION`, and permissions in markdown agent frontmatter.
+- **Skill checks read every skills directory and follow symlinked skills** (SKL-007, SKL-011, IOC-004/005/006 looked only at the primary dir); `vaso skill audit <skill>` reads the skill's own package.json.
+- **IOC-003/007 see binaries** — hashes cover the raw bytes; ELF/Mach-O/PE helpers are detected. IOC-001/002 read `.py/.md/.toml/.ini/.conf`.
+- **More download-and-execute and reverse-shell forms** (`bash <(curl …)`, `sh -c "$(curl …)"`, `| sudo bash`, PowerShell `iwr|iex`, mkfifo/nc, `exec N<>/dev/tcp`). Fewer name FPs (`pdf-render`, `backdoor-detector`); SKL-002 ignores data URIs, SRI hashes and paths; IOC-005/006 also read SKILL.md `name:`.
+- A skill reached through a link to its parent directory is reported once. Scoped Volta packages are found. ADV-001/004 grammar.
+- **Qwen approval mode was never read.** QC-003/QC-008 read `tools.approvalMode` (current schema). QC-005 no longer flags narrow rules like `Bash(git *)`; bare `Bash` counts as broad. `QWEN_HOME`, `QWEN.md`, `security.auth.apiKey`, MCP `headers` and `modelProviders` models are handled.
+- **Copilot keys renamed upstream** — GHC-005 reads `autoUpdatesChannel`, GHC-006 `experimental`; project `.github/mcp.json` is loaded.
+- **Cursor** — CUR-002 catches `approvalMode: "unrestricted"`; `CURSOR_CONFIG_DIR` honoured; CUR-013 no longer duplicates on the project install; the IDE app version is evaluated when the CLI is installed.
+- **Gemini** — GEM-011 resolves `TRUST_PARENT` and reads `GEMINI_CLI_TRUSTED_FOLDERS_PATH`; GEM-009 catches legacy `tools.approvalMode`; GEM-001 checks MCP headers; system settings are loaded.
+- **Localhost look-alikes passed the http:// checks** — GEM-008, QC-007, GHC-004, CUR-006, WS-005, DEV-005 parse the host (`[::1]` no longer critical; `localhost.evil.com` flagged).
+- **Windsurf/Devin** — shared `~/.config/devin` files reported once; WS-006 scans workspace workflows; DEV-001 catches `Exec(python3)` and `Fetch(*)` and honours user-level denies on project installs.
+- **NB-004 missed catch-all allow patterns** such as `(?i).*` and `.{0,}` — patterns are tested against sample dangerous commands.
+- **AT-003 passed at approval level ≥ 3**, where HTTP is auto-approved; its fix no longer claims success there.
+- **Hermes**: tirith in `$HERMES_HOME/bin` and `TIRITH_ENABLED=false`, `approvals.mode: false/no`, `cron_mode`/`unattended_mode: approve`, uppercase `HTTP://`, remote MCP URLs no longer judged as inference providers, version from `install-stamp.json` instead of `0.0.0`. CFG-001 defers to HM-004 when the API server has a key.
+- **Lyrie `.env.local` / `.env.<NODE_ENV>` are read** (Bun precedence).
+- **ZC-006 missed `allowed_roots` such as `/Users` or `/home`**; ZC-009 no longer silently passes remote scans that couldn't see the session store.
+- **Nanobot string booleans** (`"true"`) are honoured; `websocketRequiresToken` is not a secret.
+- **Locale and emoji joiners are no longer "hidden text"**, and `<secret>` CLI placeholders are not hidden-instruction tags (MCP-034).
+- **Codex `bearer_token_env_var` / `http_headers` / `env_http_headers` are recognised** — such servers were flagged critical by MCP-029.
+- **OAuth/scope/env false positives** removed across MCP-013/018/017/014/032/009/008/005/019/007/035.
+- **Hidden-text and exec evasions closed** — variation selectors, Hangul fillers, homoglyphs, escaped characters, aliased/destructured `child_process`, `await import()`, execa/shelljs, indirect eval, Python import aliases, multi-line `shell=True`; MCP-035 decodes base64url/hex/rot13/char codes.
+- **Localhost exemption anchored to the host** in MCP-002/011; MCP-011 reports a URL once.
+- **Python skill scripts are analysed** (SKL-001/003/006/010) and SKL-008 skips relative fetch URLs.
+- MCP-028 evidence names the config file; MCP-027 all-mitigated wording; a GitHub PAT is reported once (MCP-003).
 
 ## [1.2.1] - 2026-10-13
 

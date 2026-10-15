@@ -407,3 +407,53 @@ describe('OPC-012: Auto-update disabled', () => {
     expect(result.passed).toBe(true);
   });
 });
+
+describe('deep-test 2026-10-15 regressions (OpenCode)', () => {
+  const byId = (id: string) => opencodeChecks.find(c => c.id === id)!;
+
+  it('OPC-002 flags the documented global form {"*": "allow"} unless every high-risk key is overridden', async () => {
+    const check = byId('OPC-002');
+    expect((await check.run(makeCtx([makeConfig('opencode.json', { permission: { '*': 'allow' } })]))).passed).toBe(false);
+    expect((await check.run(makeCtx([makeConfig('opencode.json', { permission: { '*': 'allow', webfetch: 'ask' } })]))).passed).toBe(false);
+    const covered = { '*': 'allow', bash: 'ask', edit: 'ask', task: 'ask', webfetch: 'ask', external_directory: 'ask' };
+    expect((await check.run(makeCtx([makeConfig('opencode.json', { permission: covered })]))).passed).toBe(true);
+    expect((await check.run(makeCtx([makeConfig('opencode.json', { permission: { '*': 'ask', bash: { 'git *': 'allow', '*': 'deny' } } })]))).passed).toBe(true);
+  });
+
+  it('OPC-006 reads permission from markdown agent frontmatter (agent/ and agents/, $OPENCODE_CONFIG_DIR)', async () => {
+    const fs = makeFs({
+      readdir: vi.fn(async (p: string) => {
+        if (p === '/home/test/.config/opencode/agent') return ['yolo.md', 'notes.txt'];
+        if (p === '/srv/oc/agents') return ['review.md'];
+        throw new Error('ENOENT');
+      }),
+      readFile: vi.fn(async (p: string) => p.endsWith('yolo.md')
+        ? '---\ndescription: yolo\nmode: subagent\npermission:\n  bash: allow\n  edit: allow\n---\nDo things.\n'
+        : '---\npermission:\n  edit: deny\n---\nReview.\n'),
+      getEnv: vi.fn((k: string) => (k === 'OPENCODE_CONFIG_DIR' ? '/srv/oc' : undefined)),
+    });
+    const configs = [makeConfig('opencode.json', { permission: { bash: 'ask', edit: 'ask' } })];
+    const result = await byId('OPC-006').run(makeCtx(configs, fs));
+    expect(result.passed).toBe(false);
+    expect(result.evidence).toHaveLength(2);
+    expect(result.evidence?.every(e => e.file === '/home/test/.config/opencode/agent/yolo.md')).toBe(true);
+  });
+});
+
+describe('OPC-001 fix', () => {
+  it('removes group/other access from auth.json in the XDG data dir', async () => {
+    const { mkdtempSync, mkdirSync, writeFileSync, statSync, chmodSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const home = mkdtempSync(join(tmpdir(), 'vaso-opc001-'));
+    const data = join(home, '.local', 'share', 'opencode');
+    mkdirSync(data, { recursive: true });
+    writeFileSync(join(data, 'auth.json'), '{}');
+    chmodSync(join(data, 'auth.json'), 0o640);
+    const ctx = makeCtx([], makeFs({ homedir: () => home }));
+    ctx.installation = { ...ctx.installation, installDir: join(home, '.config', 'opencode') };
+    const r = await opencodeChecks.find(c => c.id === 'OPC-001')!.fix!(ctx);
+    expect(r.applied).toBe(true);
+    expect(statSync(join(data, 'auth.json')).mode & 0o777).toBe(0o600);
+  });
+});

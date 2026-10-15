@@ -1,4 +1,4 @@
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { Evidence, ScanContext } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { findHighEntropyBlocks } from '../../analyzers/entropy.js';
@@ -15,7 +15,9 @@ const KNOWN_KEY_PREFIXES: { pattern: RegExp; name: string }[] = [
 const ENTROPY_THRESHOLD = 5.5;
 const MIN_BLOCK_LEN = 40;
 
-const MEMORY_FILES = ['AGENTS.md', 'instructions.md'];
+// AGENTS.override.md replaces AGENTS.md at its level when present, so either
+// can be the live instructions file (learn.chatgpt.com — AGENTS.md discovery)
+const MEMORY_FILES = ['AGENTS.override.md', 'AGENTS.md', 'instructions.md'];
 
 async function scanFile(file: string, ctx: ScanContext, evidence: Evidence[]): Promise<void> {
   if (!(await ctx.fs.access(file))) return;
@@ -59,13 +61,15 @@ export const cdx007 = defineCheck({
   name: 'Codex Memory File Secret Leak',
   category: 'coding-agent',
   severity: 'critical',
-  description: 'Scan ~/.codex/AGENTS.md and ~/.codex/instructions.md for plaintext secrets and high-entropy strings',
+  description: 'Scan ~/.codex/AGENTS.md, AGENTS.override.md and instructions.md for plaintext secrets and high-entropy strings',
   supportedAgents: ['codex'],
 
   async run(ctx, h) {
     const evidence: Evidence[] = [];
+    // A trusted project's instructions live at its root, beside `.codex/`
+    const dir = ctx.installation.profile === 'project' ? dirname(ctx.installation.installDir) : ctx.installation.installDir;
     for (const filename of MEMORY_FILES) {
-      await scanFile(join(ctx.installation.installDir, filename), ctx, evidence);
+      await scanFile(join(dir, filename), ctx, evidence);
     }
 
     return h.fromEvidence(evidence, {

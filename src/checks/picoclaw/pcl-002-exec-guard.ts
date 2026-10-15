@@ -1,5 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { envNote } from '../../adapters/env-overrides.js';
 import { fixFirstConfig } from '../../remediation/config-writer.js';
 import { compileGoRegex, execConfig, picoMainConfigs, stringList } from './shared.js';
 
@@ -29,7 +30,7 @@ export const pcl002 = defineCheck({
         denyOff = true;
         evidence.push({
           file: config.filePath,
-          snippet: 'tools.exec.enable_deny_patterns: false',
+          snippet: `tools.exec.enable_deny_patterns: false${envNote(config.data, 'tools.exec.enable_deny_patterns')}`,
           detail: 'The built-in dangerous-command deny list (and custom_deny_patterns) is disabled',
         });
       }

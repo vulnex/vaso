@@ -12,7 +12,9 @@ import { bareName, serviceCore } from '../../mcp/package-name.js';
  * (`stack` is a word, not a `slack` squat).
  */
 function imitatedService(name: string): string | undefined {
-  const core = serviceCore(name);
+  // A numeric suffix tells instances apart (`github2`, `postgres-1`); it is
+  // not a typo of the service name.
+  const core = serviceCore(name).replace(/\d+$/, '');
   if (core.length < 5 || (WELL_KNOWN_MCP_SERVICES as readonly string[]).includes(core)) return undefined;
   for (const service of WELL_KNOWN_MCP_SERVICES) {
     if (core[0] !== service[0]) continue;

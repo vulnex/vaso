@@ -44,6 +44,7 @@ describe('ADV-001: Known Framework Vulnerability', () => {
     const ctx = makeContext({ agent: 'openclaw', version: '2026.3.20' });
     const result = await adv001.run(ctx);
     expect(result.passed).toBe(false);
+    expect(result.message).toMatch(/^(?:1 known vulnerability affects|\d+ known vulnerabilities affect) /);
     expect(result.evidence?.length).toBeGreaterThan(0);
     expect(result.evidence?.some(e => e.detail?.includes('CVE-2026-35641'))).toBe(true);
   });
@@ -157,6 +158,28 @@ describe('ADV-002: Dependency Vulnerability', () => {
     }
   });
 
+  it('finds an undeclared (transitive) vulnerable package installed or locked', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'vaso-adv002-'));
+    try {
+      writeFileSync(join(dir, 'package.json'), JSON.stringify({ dependencies: { express: '^4.18.0' } }));
+      expect((await adv002.run(makeContext({ installDir: dir }))).passed).toBe(true);
+      // MCP Inspector < 0.14.1 (CVE-2025-49596) pulled in by another package
+      mkdirSync(join(dir, 'node_modules', '@modelcontextprotocol', 'inspector'), { recursive: true });
+      writeFileSync(join(dir, 'node_modules', '@modelcontextprotocol', 'inspector', 'package.json'), JSON.stringify({ version: '0.10.0' }));
+      const installed = await adv002.run(makeContext({ installDir: dir }));
+      expect(installed.evidence?.some(e => e.detail?.includes('@modelcontextprotocol/inspector@0.10.0'))).toBe(true);
+      // Only in the lockfile (nested copy)
+      rmSync(join(dir, 'node_modules'), { recursive: true, force: true });
+      writeFileSync(join(dir, 'package-lock.json'), JSON.stringify({ lockfileVersion: 3, packages: {
+        '': { name: 'x' }, 'node_modules/some-dep/node_modules/mcp-remote': { version: '0.1.10' },
+      } }));
+      const locked = await adv002.run(makeContext({ installDir: dir }));
+      expect(locked.evidence?.some(e => e.detail?.includes('mcp-remote@0.1.10'))).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('has correct metadata', () => {
     expect(adv002.id).toBe('ADV-002');
     expect(adv002.category).toBe('advisory');
@@ -222,6 +245,7 @@ describe('ADV-004: Known Exploit Available', () => {
     const ctx = makeContext({ agent: 'gemini-cli', version: '0.39.0' });
     const result = await adv004.run(ctx);
     expect(result.passed).toBe(false);
+    expect(result.message).toMatch(/^(?:1 vulnerability with a known exploit affects|\d+ vulnerabilities with known exploits affect) /);
   });
 });
 

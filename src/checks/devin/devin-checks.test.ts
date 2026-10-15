@@ -655,3 +655,43 @@ describe('DEV-010: Devin Over-Broad Sandbox Exclusions', () => {
   });
 });
 
+
+describe('deep-test 2026-10-15 regressions', () => {
+  const check = devinChecks.find(c => c.id === 'DEV-001')!;
+  const run = (allow: string[], deny: string[] = ['Exec(rm)']) =>
+    check.run(makeCtx([makeConfig('config.json', { permissions: { allow, deny } })]));
+
+  it('DEV-001 flags versioned interpreters (Exec(python3)) like their family', async () => {
+    const result = await run(['Exec(python3)', 'Exec(python3.12 -c)', 'Exec(git)']);
+    expect(result.severity).toBe('critical');
+    expect(result.evidence).toHaveLength(2);
+  });
+
+  it('DEV-001 flags unrestricted Fetch but not a scoped one', async () => {
+    const result = await run(['Fetch(*)', 'Fetch', 'Fetch(https://*)', 'Fetch(https://internal.api/*)']);
+    expect(result.evidence?.map(e => e.snippet)).toEqual([
+      'permissions.allow: "Fetch(*)"', 'permissions.allow: "Fetch"', 'permissions.allow: "Fetch(https://*)"',
+    ]);
+  });
+
+  it('DEV-001 counts a user-level deny for a project install (deny wins at any level)', async () => {
+    const userConfig = '/home/test/.config/devin/config.json';
+    const fs = makeFs({
+      access: vi.fn(async (p: string) => p === userConfig),
+      readFile: vi.fn(async () => JSON.stringify({ permissions: { deny: ['Exec(sudo)'] } })),
+    });
+    const configs = [makeConfig('/work/app/.devin/config.json', { permissions: { allow: ['Exec(git)'] } })];
+    const installation: AgentInstallation = { agent: 'devin', installDir: '/work/app/.devin', configFiles: configs, profile: 'project' };
+    const result = await check.run({ installation, configs, platform: 'linux', fs });
+    expect(result.passed).toBe(true);
+
+    const noUserDeny = await check.run({ installation, configs, platform: 'linux', fs: makeFs({ access: vi.fn(async () => false) }) });
+    expect(noUserDeny.passed).toBe(false);
+  });
+
+  it('DEV-005 treats [::1] as loopback', async () => {
+    const dev005 = devinChecks.find(c => c.id === 'DEV-005')!;
+    const result = await dev005.run(makeCtx([makeConfig('mcp_config.json', { mcpServers: { s: { url: 'http://[::1]:3000/mcp' } } })]));
+    expect(result.passed).toBe(true);
+  });
+});

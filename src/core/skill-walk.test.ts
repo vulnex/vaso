@@ -61,6 +61,18 @@ describe.skipIf(process.platform === 'win32')('walkSkillTree', () => {
     expect(files(await walkSkillTree(fs, skills))).toContain(join(skills, 'single.js'));
   });
 
+  it('reports a skill once when a link to its parent dir also exists', async () => {
+    // chain/devlink → checkout/ (the parent), linked → checkout/linked
+    await mkdir(join(skills, 'chain'), { recursive: true });
+    await symlink(outside, join(skills, 'chain', 'devlink'));
+    await symlink(join(outside, 'linked'), join(skills, 'linked'));
+    await writeFile(join(outside, 'lone.js'), 'z');
+    await symlink(join(outside, 'lone.js'), join(skills, 'lone.js'));
+    const found = files(await walkSkillTree(fs, skills));
+    expect(found.filter(f => f.endsWith('util.js'))).toEqual([join(skills, 'linked', 'lib', 'util.js')]);
+    expect(found.filter(f => f.endsWith('lone.js'))).toEqual([join(skills, 'lone.js')]);
+  });
+
   it('lists symlinked skill directories by name', async () => {
     await symlink(join(outside, 'linked'), join(skills, 'linked'));
     await symlink(join(outside, 'linked', 'index.js'), join(skills, 'file-link'));

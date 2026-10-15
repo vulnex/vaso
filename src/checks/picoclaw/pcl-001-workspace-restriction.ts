@@ -1,5 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { envNote } from '../../adapters/env-overrides.js';
 import { fixFirstConfig } from '../../remediation/config-writer.js';
 import { asRecord, picoMainConfigs } from './shared.js';
 
@@ -21,13 +22,13 @@ export const pcl001 = defineCheck({
         restrictOff = true;
         evidence.push({
           file: config.filePath,
-          snippet: 'agents.defaults.restrict_to_workspace: false',
+          snippet: `agents.defaults.restrict_to_workspace: false${envNote(config.data, 'agents.defaults.restrict_to_workspace')}`,
           detail: 'File and exec tools are not confined to the workspace — a prompt-injected turn can read or write ~/.ssh, cloud credentials and shell profiles',
         });
       } else if (defaults.allow_read_outside_workspace === true) {
         evidence.push({
           file: config.filePath,
-          snippet: 'agents.defaults.allow_read_outside_workspace: true',
+          snippet: `agents.defaults.allow_read_outside_workspace: true${envNote(config.data, 'agents.defaults.allow_read_outside_workspace')}`,
           detail: 'File reads may leave the workspace (writes stay confined)',
         });
       }

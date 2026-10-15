@@ -226,3 +226,71 @@ describe('QC-010: Memory Secrets', () => {
     expect(result.passed).toBe(true);
   });
 });
+
+describe('deep-test 2026-10-15 regressions', () => {
+  const byId = (id: string) => qwenCodeChecks.find(c => c.id === id)!;
+
+  it('QC-003 reads tools.approvalMode (current schema) and keeps the top-level fallback', async () => {
+    const current = await byId('QC-003').run(makeCtx([makeConfig('settings.json', { tools: { approvalMode: 'yolo' } })]));
+    expect(current.passed).toBe(false);
+    expect(current.evidence?.[0].snippet).toBe('tools.approvalMode = "yolo"');
+    const legacy = await byId('QC-003').run(makeCtx([makeConfig('settings.json', { approvalMode: 'yolo' })]));
+    expect(legacy.passed).toBe(false);
+  });
+
+  it('QC-008 reads tools.approvalMode: auto-edit', async () => {
+    const result = await byId('QC-008').run(makeCtx([makeConfig('settings.json', { tools: { approvalMode: 'auto-edit' } })]));
+    expect(result.passed).toBe(false);
+  });
+
+  it('QC-001 flags the deprecated security.auth.apiKey and MCP headers', async () => {
+    const result = await byId('QC-001').run(makeCtx([makeConfig('settings.json', {
+      security: { auth: { apiKey: 'sk-abcdefghijklmnopqrstuvwxyz0123456789' } },
+      mcpServers: { r: { httpUrl: 'https://mcp.example.com', headers: { Authorization: 'Bearer sk-ZYXWVUTSRQPONMLKJIHGFEDCBA9876543210' } } },
+    })]));
+    expect(result.evidence?.map(e => e.snippet.split('=')[0])).toEqual([
+      'security.auth.apiKey', 'mcpServers.r.headers.Authorization',
+    ]);
+  });
+
+  it('QC-005 flags only truly broad rules — bare Bash, *, Bash(*), Bash(* *) — including legacy tools.allowed', async () => {
+    for (const allow of [['Bash'], ['*'], ['Bash(*)'], ['Shell(* *)'], ['run_shell_command']]) {
+      const result = await byId('QC-005').run(makeCtx([makeConfig('settings.json', { permissions: { allow } })]));
+      expect(result.passed, allow[0]).toBe(false);
+    }
+    const legacy = await byId('QC-005').run(makeCtx([makeConfig('settings.json', { tools: { allowed: ['Bash'] } })]));
+    expect(legacy.passed).toBe(false);
+    const narrow = await byId('QC-005').run(makeCtx([makeConfig('settings.json', {
+      permissions: { allow: ['Shell(git status)', 'Bash(git *)', 'Bash(npm run *)', 'Read', 'Read(**)'] },
+    })]));
+    expect(narrow.passed).toBe(true);
+  });
+
+  it('QC-005 counts legacy tools.exclude as a deny net', async () => {
+    const result = await byId('QC-005').run(makeCtx([makeConfig('settings.json', {
+      permissions: { allow: ['Bash'] }, tools: { exclude: ['write_file'] },
+    })]));
+    expect(result.passed).toBe(true);
+  });
+
+  it('QC-007 compares the parsed host (localhost.evil.com is remote)', async () => {
+    const evil = await byId('QC-007').run(makeCtx([makeConfig('settings.json', { mcpServers: { s: { url: 'http://localhost.evil.com/mcp' } } })]));
+    expect(evil.passed).toBe(false);
+    const local = await byId('QC-007').run(makeCtx([makeConfig('settings.json', { mcpServers: { s: { url: 'http://localhost:8080/mcp' } } })]));
+    expect(local.passed).toBe(true);
+  });
+
+  it('QC-010 scans QWEN.md and a configured context.fileName', async () => {
+    const read: string[] = [];
+    const fs = makeFs({
+      access: vi.fn(async (p: string) => p.endsWith('/QWEN.md') || p.endsWith('/CONTEXT.md')),
+      readFile: vi.fn(async (p: string) => {
+        read.push(p);
+        return 'key sk-or-v1-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+      }),
+    });
+    const result = await byId('QC-010').run(makeCtx([makeConfig('settings.json', { context: { fileName: ['CONTEXT.md', '../escape.md'] } })], fs));
+    expect(result.passed).toBe(false);
+    expect(read).toEqual(['/home/test/.qwen/QWEN.md', '/home/test/.qwen/CONTEXT.md']);
+  });
+});

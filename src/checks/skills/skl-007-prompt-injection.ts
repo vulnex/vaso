@@ -3,7 +3,7 @@ import type { Evidence, ScanContext } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { scanWithPatterns, SECURITY_PATTERNS } from '../../analyzers/pattern-engine.js';
 import { markTestCode } from '../../analyzers/test-paths.js';
-import { isExcludedPath } from '../../core/utils.js';
+import { getAllSkillsDirs, isExcludedPath } from '../../core/utils.js';
 import { readCappedFile } from '../../core/file-limits.js';
 import { walkSkillTree } from '../../core/skill-walk.js';
 
@@ -15,8 +15,8 @@ async function getDocFiles(dir: string, fs: ScanContext['fs']): Promise<string[]
   try {
     const entries = await walkSkillTree(fs, dir);
     for (const entry of entries) {
-      // Same vendor/build/VCS exclusions as the code walk (node_modules READMEs aren't skill docs)
-      if (entry.isFile && !isExcludedPath(dir, entry.parentPath)) {
+      // Same vendor/VCS exclusions as the code walk (node_modules READMEs aren't skill docs)
+      if (entry.isFile && !isExcludedPath(dir, entry.parentPath, { keepBuildOutput: true })) {
         const ext = extname(entry.name);
         const name = entry.name.toUpperCase();
         if (DOC_EXTENSIONS.has(ext) || name === 'SKILL.MD' || name === 'README.MD') {
@@ -37,11 +37,11 @@ export const skl007 = defineCheck({
   description: 'Detect prompt injection patterns in skill documentation files',
 
   async run(ctx, h) {
-    const skillsDir = ctx.installation.skillsDir;
-    if (!skillsDir) return h.passed('No skills directory found');
+    const dirs = getAllSkillsDirs(ctx.installation);
+    if (dirs.length === 0) return h.passed('No skills directory found');
 
     const evidence: Evidence[] = [];
-    const files = await getDocFiles(skillsDir, ctx.fs);
+    const files = [...new Set((await Promise.all(dirs.map(d => getDocFiles(d, ctx.fs)))).flat())];
 
     for (const file of files) {
       try {

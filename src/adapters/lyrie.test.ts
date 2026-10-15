@@ -159,8 +159,29 @@ describe('Lyrie adapter', () => {
     const fs = memFs({});
     expect(lyrieAdapter.getCredentialPaths!(`${HOME}/lyrie-ai`, fs)).toEqual([
       `${HOME}/lyrie-ai/.env`,
+      `${HOME}/lyrie-ai/.env.development`,
+      `${HOME}/lyrie-ai/.env.production`,
+      `${HOME}/lyrie-ai/.env.local`,
+      `${HOME}/lyrie-ai/.env.development.local`,
+      `${HOME}/lyrie-ai/.env.production.local`,
       `${STATE}/config.json`,
     ]);
+  });
+
+  it('loads the env layers Bun auto-loads over .env (.env.<NODE_ENV>, .env.local, .env.<NODE_ENV>.local)', async () => {
+    const files = liveLayout({
+      [`${HOME}/lyrie-ai/.env.local`]: 'LYRIE_DISCORD_DM_POLICY=open\n',
+      [`${HOME}/lyrie-ai/.env.development`]: 'LYRIE_LOCAL_DRY_RUN=true\n',
+      [`${HOME}/lyrie-ai/.env.production`]: 'NODE_ENV=production\n',
+    });
+    const [inst] = await lyrieAdapter.detect({ fs: memFs(files) });
+    expect(inst.configFiles.map(c => c.filePath)).toEqual([
+      `${HOME}/lyrie-ai/.env`,
+      `${HOME}/lyrie-ai/.env.development`,
+      `${HOME}/lyrie-ai/.env.local`,
+      `${STATE}/config.json`,
+    ]);
+    expect(lyrieAdapter.getProbeManifest!().filePaths).toContain('~/lyrie-ai/.env.local');
   });
 
   it('Shield binary paths match AgenticThreatBridge.findDefaultBinary', () => {

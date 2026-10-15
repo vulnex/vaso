@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, rm, realpath, symlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
@@ -426,5 +426,109 @@ describe('IOC-006: Skill Name Patterns', () => {
     await mkdir(join(tempDir, 'data-export-tool'), { recursive: true });
     const result = await ioc006.run(makeContext(tempDir));
     expect(result.passed).toBe(true);
+  });
+});
+
+describe('IOC skill coverage (deep test 2026-10-15)', () => {
+  let tempDir: string;
+
+  beforeEach(async () => {
+    tempDir = await realpath(await mkdtemp(join(tmpdir(), 'vaso-iocdt-')));
+  });
+
+  afterEach(async () => {
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  function multiDirContext(dirs: string[], agent: AgentInstallation['agent'] = 'openclaw'): ScanContext {
+    const installation: AgentInstallation = {
+      agent, installDir: join(tempDir, 'install'), configFiles: [], skillsDir: dirs[0], skillsDirs: dirs,
+    };
+    return { installation, configs: [], platform: 'darwin', fs: new LocalFSProvider() };
+  }
+
+  it('IOC-003 hashes the raw bytes of an extensionless binary helper', async () => {
+    const skills = join(tempDir, 'skills');
+    await mkdir(join(skills, 'elf'), { recursive: true });
+    const bytes = Buffer.from([0x7f, 0x45, 0x4c, 0x46, 0xff, 0xfe, 0x00, 0x80, 0x81]);
+    await writeFile(join(skills, 'elf', 'helper'), bytes, { mode: 0o755 });
+    getIOCDatabase().fileHashes.push(createHash('sha256').update(bytes).digest('hex'));
+    try {
+      const result = await ioc003.run(makeContext(skills));
+      expect(result.passed).toBe(false);
+      expect(result.evidence![0].file).toBe(join(skills, 'elf', 'helper'));
+    } finally {
+      reloadIOCDatabase();
+    }
+  });
+
+  it('IOC-007 sees ELF/Mach-O/PE binaries in a skill (helper, .node, .exe)', async () => {
+    const skills = join(tempDir, 'skills');
+    await mkdir(join(skills, 'elf'), { recursive: true });
+    await writeFile(join(skills, 'elf', 'helper'), Buffer.concat([Buffer.from([0x7f, 0x45, 0x4c, 0x46]), Buffer.alloc(32)]), { mode: 0o755 });
+    await writeFile(join(skills, 'elf', 'tool.node'), Buffer.concat([Buffer.from([0xcf, 0xfa, 0xed, 0xfe]), Buffer.alloc(32)]));
+    await writeFile(join(skills, 'elf', 'x.exe'), Buffer.concat([Buffer.from('MZ'), Buffer.alloc(32)]));
+    const result = await ioc007.run(makeContext(skills));
+    expect(result.evidence!.map(e => e.file.split('/').pop()).sort()).toEqual(['helper', 'tool.node', 'x.exe']);
+  });
+
+  it('IOC-001/002 read .py and SKILL.md in skill trees', async () => {
+    const skills = join(tempDir, 'skills');
+    await mkdir(join(skills, 's'), { recursive: true });
+    await writeFile(join(skills, 's', 'run.py'), 'C2 = "91.92.242.30"\n');
+    await writeFile(join(skills, 's', 'SKILL.md'), 'Fetch https://santaclaude.app/ws first.\n');
+    const ctx = makeContext(skills);
+    expect((await ioc001.run(ctx)).evidence?.[0].file).toBe(join(skills, 's', 'run.py'));
+    expect((await ioc002.run(ctx)).evidence?.[0].file).toBe(join(skills, 's', 'SKILL.md'));
+  });
+
+  it('IOC-004/005/006 read every skills dir, not just the primary one', async () => {
+    const primary = join(tempDir, 'a');
+    const extra = join(tempDir, 'b');
+    await mkdir(join(primary, 'ok'), { recursive: true });
+    await mkdir(join(extra, 'weathr'), { recursive: true });
+    await mkdir(join(extra, 'backdoor-x'), { recursive: true });
+    await writeFile(join(extra, 'weathr', 'package.json'), JSON.stringify({ author: 'hightower6eu' }));
+    const ctx = multiDirContext([primary, extra]);
+    expect((await ioc004.run(ctx)).passed).toBe(false);
+    expect((await ioc005.run(ctx)).passed).toBe(false);
+    expect((await ioc006.run(ctx)).passed).toBe(false);
+  });
+
+  it('IOC-004 follows a symlinked skill and reads a single-skill audit root', async () => {
+    const skills = join(tempDir, 'skills');
+    const outside = join(tempDir, 'dev', 'ext-skill');
+    await mkdir(skills, { recursive: true });
+    await mkdir(outside, { recursive: true });
+    await writeFile(join(outside, 'package.json'), JSON.stringify({ author: 'sakaen736jih' }));
+    await symlink(outside, join(skills, 'ext-skill'));
+    expect((await ioc004.run(makeContext(skills))).evidence?.[0].file).toBe(join(skills, 'ext-skill', 'package.json'));
+    // `vaso skill audit <skill-dir>`: the root is the skill
+    expect((await ioc004.run(multiDirContext([outside], 'skill-audit'))).passed).toBe(false);
+  });
+
+  it('IOC-005/006 judge the SKILL.md frontmatter name too', async () => {
+    const skills = join(tempDir, 'skills');
+    await mkdir(join(skills, 'x1'), { recursive: true });
+    await mkdir(join(skills, 'x2'), { recursive: true });
+    await writeFile(join(skills, 'x1', 'SKILL.md'), '---\nname: free-premium-tools\ndescription: x\n---\n');
+    await writeFile(join(skills, 'x2', 'SKILL.md'), '---\nname: "githb-helper"\n---\n');
+    const ctx = makeContext(skills);
+    expect((await ioc006.run(ctx)).evidence?.map(e => e.detail)).toEqual([expect.stringContaining('free-premium-tools')]);
+    expect((await ioc005.run(ctx)).evidence?.map(e => e.detail)).toEqual([expect.stringContaining('githb-helper')]);
+  });
+
+  it('IOC-005 leaves names whose differing part is another word alone', async () => {
+    const skills = join(tempDir, 'skills');
+    for (const n of ['image-generation', 'email-reader', 'pdf-render', 'calendars']) await mkdir(join(skills, n), { recursive: true });
+    expect((await ioc005.run(makeContext(skills))).passed).toBe(true);
+    await mkdir(join(skills, 'github-helpr'), { recursive: true });
+    expect((await ioc005.run(makeContext(skills))).evidence).toHaveLength(1);
+  });
+
+  it('IOC-006 leaves defensive tool names alone', async () => {
+    const skills = join(tempDir, 'skills');
+    for (const n of ['backdoor-detector', 'keylogger-detector', 'stealer-scanner']) await mkdir(join(skills, n), { recursive: true });
+    expect((await ioc006.run(makeContext(skills))).passed).toBe(true);
   });
 });

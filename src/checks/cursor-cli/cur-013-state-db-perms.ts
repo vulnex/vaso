@@ -23,6 +23,10 @@ export const cur013 = defineCheck({
   supportedAgents: ['cursor-cli'],
 
   async run(ctx, h) {
+    // The IDE state DB is per-user; a project install would re-report it
+    if (ctx.installation.profile === 'project') {
+      return h.passed('state.vscdb is user-level — evaluated on the user installation');
+    }
     const home = ctx.fs.homedir();
     const dirs = userDataDirs(home, ctx.platform, ctx.fs.getEnv?.('APPDATA'));
     const evidence: Evidence[] = [];

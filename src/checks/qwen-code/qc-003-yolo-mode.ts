@@ -1,5 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { approvalMode } from './approval-mode.js';
 
 const DANGEROUS_MODES = new Set(['yolo']);
 
@@ -8,18 +9,18 @@ export const qc003 = defineCheck({
   name: 'Qwen YOLO Approval Mode',
   category: 'coding-agent',
   severity: 'critical',
-  description: 'Detect approvalMode set to "yolo" — auto-approves every tool call',
+  description: 'Detect tools.approvalMode (or legacy top-level approvalMode) set to "yolo" — auto-approves every tool call',
   supportedAgents: ['qwen-code'],
 
   async run(ctx, h) {
     const evidence: Evidence[] = [];
 
     for (const config of ctx.configs) {
-      const mode = config.data.approvalMode;
-      if (typeof mode === 'string' && DANGEROUS_MODES.has(mode.toLowerCase())) {
+      const found = approvalMode(config);
+      if (found && DANGEROUS_MODES.has(found.mode.toLowerCase())) {
         evidence.push({
           file: config.filePath,
-          snippet: `approvalMode = "${mode}"`,
+          snippet: `${found.key} = "${found.mode}"`,
           detail: 'Qwen will execute every tool — including shell commands — without prompting',
         });
       }
@@ -28,7 +29,7 @@ export const qc003 = defineCheck({
     return h.fromEvidence(evidence, {
       passed: 'Qwen approval mode is not yolo',
       failed: () => 'Qwen approvalMode is set to yolo — every tool auto-approves',
-      fixDescription: 'Set approvalMode to "default" (or "plan" for read-only) in ~/.qwen/settings.json',
+      fixDescription: 'Set tools.approvalMode to "default" (or "plan" for read-only) in ~/.qwen/settings.json',
     });
   },
 });

@@ -358,4 +358,67 @@ describe('MCPDiscovery — Abacus.AI', () => {
       expect(result.unreadable).toBeUndefined();
     });
   });
+
+  describe('more agent configs (deep test 2026-10-15)', () => {
+    let home: string;
+    class HomeFS extends LocalFSProvider { homedir() { return home; } getEnv() { return undefined; } }
+    const w = async (rel: string, body: string) => {
+      await mkdir(join(home, rel, '..'), { recursive: true });
+      await writeFile(join(home, rel), body);
+    };
+
+    beforeAll(async () => {
+      home = await mkdtemp(join(tmpdir(), 'vaso-mcp-home2-'));
+      await w('.config/opencode/opencode.json', JSON.stringify({ mcp: {
+        loc: { type: 'local', command: ['npx', '-y', 'oc-mcp'], environment: { K: 'v' } },
+        rem: { type: 'remote', url: 'https://oc.example/mcp', headers: { Authorization: 'Bearer x' } },
+        off: { type: 'local', command: ['x'], enabled: false },
+      } }));
+      await w('.hermes/config.yaml', 'mcp_servers:\n  github:\n    command: npx\n    args: ["-y", "@modelcontextprotocol/server-github"]\n  stripe:\n    url: https://mcp.stripe.com\n');
+      await w('.config/devin/config.json', '{ // legacy\n "mcpServers": { "old": { "command": "node", "args": ["o.js"] } } }');
+      await w('.gemini/extensions/ext1/gemini-extension.json', JSON.stringify({ name: 'ext1', version: '1', mcpServers: { e: { command: 'node', args: ['${extensionPath}/srv.js'] } } }));
+      await w('.codex/config.toml', '[mcp_servers.figma]\nurl = "http://mcp.corp.example.com/mcp"\nbearer_token_env_var = "FIGMA_TOKEN"\n[mcp_servers.hdr]\nurl = "https://mcp2.example.com/mcp"\nenv_http_headers = { "X-Api-Key" = "MY_KEY" }\n');
+      await w('.cursor/mcp.json', JSON.stringify({ mcpServers: { cur: { command: 'node' } } }));
+      await w('proj/.gemini/settings.json', JSON.stringify({ mcpServers: { pg: { command: 'node' } } }));
+      await w('proj/.qwen/settings.json', JSON.stringify({ mcpServers: { pq: { command: 'node' } } }));
+      await w('proj/opencode.jsonc', '{ "mcp": { "po": { "type": "local", "command": ["node", "p.js"] } } }');
+    });
+    afterAll(() => rm(home, { recursive: true, force: true }));
+
+    it('discovers OpenCode mcp, Hermes mcp_servers, legacy Devin config.json and Gemini extensions', async () => {
+      const result = await new MCPDiscovery(new HomeFS()).discover('linux');
+      const bySource = Object.fromEntries(result.configs.map(c => [c.source, c.servers]));
+      expect(bySource.OpenCode.map(s => `${s.name}:${s.transport}`)).toEqual(['loc:stdio', 'rem:streamable-http']);
+      expect(bySource.OpenCode[0]).toMatchObject({ command: 'npx', args: ['-y', 'oc-mcp'], env: { K: 'v' } });
+      expect(bySource.Hermes.map(s => s.name)).toEqual(['github', 'stripe']);
+      expect(bySource['Devin CLI (config.json)'].map(s => s.name)).toEqual(['old']);
+      expect(bySource['Gemini CLI (extension ext1)'][0].args).toEqual([join(home, '.gemini/extensions/ext1') + '/srv.js']);
+    });
+
+    it('folds Codex bearer_token_env_var / env_http_headers into headers', async () => {
+      const result = await new MCPDiscovery(new HomeFS()).discover('linux');
+      const codex = result.configs.find(c => c.source === 'Codex')!;
+      expect(codex.servers[0].headers).toEqual({ Authorization: 'Bearer ${FIGMA_TOKEN}' });
+      expect(codex.servers[1].headers).toEqual({ 'X-Api-Key': '${MY_KEY}' });
+    });
+
+    it('reads Gemini/Qwen/OpenCode project configs and reports a file once when cwd is HOME', async () => {
+      const proj = await new MCPDiscovery(new HomeFS()).discover('linux', join(home, 'proj'));
+      const sources = proj.configs.map(c => c.source);
+      expect(sources).toEqual(expect.arrayContaining(['Gemini CLI (project)', 'Qwen Code (project)', 'OpenCode (project)']));
+      const atHome = await new MCPDiscovery(new HomeFS()).discover('linux', home);
+      expect(atHome.configs.filter(c => c.filePath.endsWith(join('.cursor', 'mcp.json')))).toHaveLength(1);
+    });
+
+    it('-p: reads the Abacus config.json array, YAML, and names files with no servers', async () => {
+      await w('abacus.json', JSON.stringify({ mcpServers: [{ name: 'ab', command: 'node' }] }));
+      await w('none.json', JSON.stringify({ theme: 'dark' }));
+      const result = await new MCPDiscovery(new HomeFS()).discoverFromPaths([
+        join(home, 'abacus.json'), join(home, '.hermes/config.yaml'), join(home, 'none.json'),
+      ]);
+      expect(result.configs.map(c => c.servers.map(s => s.name))).toEqual([['ab'], ['github', 'stripe']]);
+      expect(result.empty).toEqual([join(home, 'none.json')]);
+      expect(result.unreadable).toBeUndefined();
+    });
+  });
 });

@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import type { AgentInstallation, ParsedConfig, ScanContext } from '../../core/types.js';
 import { LocalFSProvider } from '../../core/local-fs-provider.js';
 import { picoclawChecks } from './index.js';
+import { applyEnvOverrides } from '../../adapters/env-overrides.js';
 
 const HOME = new LocalFSProvider().homedir();
 const CONFIG = '/home/test/.picoclaw/config.json';
@@ -179,6 +180,40 @@ describe('PCL-007 broad tool paths', () => {
     expect(writes.severity).toBe('critical');
     const narrow = await byId('PCL-007').run(ctx([cfg(onboard({ tools: { allow_read_paths: ['^/srv/projects/app/'] } }))]));
     expect(narrow.passed).toBe(true);
+  });
+});
+
+describe('PCL-007 private host whitelist and relocated config', () => {
+  it('flags SSRF allowances that re-open loopback, metadata or every host', async () => {
+    const r = await byId('PCL-007').run(ctx([cfg(onboard({
+      tools: { web: { private_host_whitelist: ['*', '127.0.0.1', '169.254.169.254', '10.0.0.0/8', 'nas.lan', '192.168.1.20'] } },
+    }))]));
+    expect(r.passed).toBe(false);
+    expect(r.severity).toBe('warning');
+    expect(r.evidence!.map(e => e.snippet)).toEqual([
+      'tools.web.private_host_whitelist: "*"',
+      'tools.web.private_host_whitelist: "127.0.0.1"',
+      'tools.web.private_host_whitelist: "169.254.169.254"',
+      'tools.web.private_host_whitelist: "10.0.0.0/8"',
+    ]);
+  });
+
+  it('looks for .security.yml next to a relocated config.json (PICOCLAW_CONFIG)', async () => {
+    const relocated = cfg(onboard({ tools: { allow_read_paths: ['^/etc/picoclaw/\\.security\\.yml$'] } }), '/etc/picoclaw/config.json');
+    const r = await byId('PCL-007').run(ctx([relocated]));
+    expect(r.passed).toBe(false);
+    expect(r.evidence![0].detail).toContain('/etc/picoclaw/.security.yml');
+  });
+});
+
+describe('env overrides in evidence', () => {
+  it('names the env var that disabled the deny list', async () => {
+    const data = applyEnvOverrides(onboard(), [
+      { env: 'PICOCLAW_TOOLS_EXEC_ENABLE_DENY_PATTERNS', path: ['tools', 'exec', 'enable_deny_patterns'], type: 'bool' },
+    ], { getEnv: () => 'false' } as unknown as LocalFSProvider);
+    const r = await byId('PCL-002').run(ctx([cfg(data)]));
+    expect(r.passed).toBe(false);
+    expect(r.evidence![0].snippet).toContain('$PICOCLAW_TOOLS_EXEC_ENABLE_DENY_PATTERNS');
   });
 });
 

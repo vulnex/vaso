@@ -208,6 +208,13 @@ describe('HM-006 plaintext http endpoint', () => {
     const result = await check.run(makeCtx([cfg]));
     expect(result.passed).toBe(false);
   });
+  it('flags an uppercase HTTP:// scheme', async () => {
+    const cfg = makeYaml('/h/.hermes/cli-config.yaml', {
+      mcp_servers: { remote: { url: 'HTTP://mcp.example.org/sse' } },
+    });
+    const result = await check.run(makeCtx([cfg]));
+    expect(result.passed).toBe(false);
+  });
   it('passes for loopback http', async () => {
     const cfg = makeYaml('/h/.hermes/cli-config.yaml', {
       model: { base_url: 'http://127.0.0.1:11434/v1' },
@@ -240,6 +247,21 @@ describe('HM-007 untrusted custom endpoint', () => {
     const result = await check.run(makeCtx([cfg]));
     expect(result.passed).toBe(true);
   });
+  it('judges only inference base_urls, not remote MCP server URLs', async () => {
+    const cfg = makeYaml('/h/.hermes/cli-config.yaml', {
+      mcp_servers: { linear: { url: 'https://mcp.linear.app/sse' } },
+      model: { base_url: 'https://api.z.ai/api/paas/v4' },
+      auxiliary: { vision: { base_url: 'https://api.moonshot.ai/v1' } },
+      delegation: { base_url: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1' },
+      fallback: { base_url: 'https://api.minimax.io/v1' },
+    });
+    const result = await check.run(makeCtx([cfg]));
+    expect(result.passed).toBe(true);
+  });
+  it('does not accept a lookalike of a known provider', async () => {
+    const cfg = makeYaml('/h/.hermes/cli-config.yaml', { model: { base_url: 'https://evil-openrouter.ai/v1' } });
+    expect((await check.run(makeCtx([cfg]))).passed).toBe(false);
+  });
   it('passes for loopback (HM-006 territory, not HM-007)', async () => {
     const cfg = makeYaml('/h/.hermes/cli-config.yaml', {
       model: { base_url: 'http://localhost:11434' },
@@ -261,6 +283,20 @@ describe('HM-008 approvals disabled', () => {
     const result = await check.run(makeCtx([cfg]));
     expect(result.passed).toBe(false);
   });
+  it('flags YAML booleans that PyYAML loads as False (mode: false / no)', async () => {
+    for (const mode of [false, 'no', 'Off']) {
+      const cfg = makeYaml('/h/.hermes/config.yaml', { approvals: { mode } });
+      expect((await check.run(makeCtx([cfg]))).passed, String(mode)).toBe(false);
+    }
+  });
+  it('flags cron_mode / unattended_mode: approve', async () => {
+    const cfg = makeYaml('/h/.hermes/config.yaml', { approvals: { mode: 'smart', cron_mode: 'approve', unattended_mode: 'approve' } });
+    const result = await check.run(makeCtx([cfg]));
+    expect(result.passed).toBe(false);
+    expect(result.evidence).toHaveLength(2);
+    const deny = makeYaml('/h/.hermes/config.yaml', { approvals: { mode: 'smart', cron_mode: 'deny' } });
+    expect((await check.run(makeCtx([deny]))).passed).toBe(true);
+  });
   it('passes for approvals.mode: manual', async () => {
     const cfg = makeYaml('/h/.hermes/cli-config.yaml', { approvals: { mode: 'manual' } });
     const result = await check.run(makeCtx([cfg]));
@@ -281,6 +317,21 @@ describe('HM-009 Tirith disabled', () => {
     });
     const result = await check.run(makeCtx([cfg], { fs: makeFs({}) }));
     expect(result.passed).toBe(false);
+  });
+  it('finds the auto-installed binary at $HERMES_HOME/bin/tirith (not on PATH)', async () => {
+    const cfg = makeYaml('/home/test/.hermes/config.yaml', { security: { tirith_enabled: true } });
+    const fs = makeFs({ modes: { '/home/test/.hermes/bin/tirith': 0o100755 } });
+    expect((await check.run(makeCtx([cfg], { fs }))).passed).toBe(true);
+  });
+  it('honours TIRITH_ENABLED=false in .env over config.yaml', async () => {
+    const cfg = makeYaml('/home/test/.hermes/config.yaml', { security: { tirith_enabled: true, tirith_fail_open: false } });
+    const env = makeEnv('/home/test/.hermes/.env', { TIRITH_ENABLED: 'false' });
+    const result = await check.run(makeCtx([cfg, env]));
+    expect(result.passed).toBe(false);
+    expect(result.evidence![0].snippet).toBe('TIRITH_ENABLED=false');
+    // Blank falls back to config.yaml
+    const blank = makeEnv('/home/test/.hermes/.env', { TIRITH_ENABLED: '' });
+    expect((await check.run(makeCtx([cfg, blank]))).passed).toBe(true);
   });
   it('passes when fail-open and binary present', async () => {
     const cfg = makeYaml('/h/.hermes/cli-config.yaml', {

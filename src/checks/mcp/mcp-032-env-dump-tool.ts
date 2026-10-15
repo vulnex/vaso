@@ -31,11 +31,42 @@ const BENIGN_PROCESS_ENV_PREFIX = new RegExp(
     String.raw`\benv\s*:[^;{}()]*(?:\{\s*(?:[^{}()]*,\s*)?\.\.\.\s*)?$`,
     // An env-named variable taking the environment (or a fallback/spread of it).
     String.raw`\b\w*[eE]nv\w*\s*=\s*(?:[^;=(){}]*(?:\?\?|\|\||\?|:)\s*)?(?:\{\s*(?:[^{}()]*,\s*)?\.\.\.\s*)?$`,
+    // An env-named option (`dotenv.config({ processEnv: process.env })`).
+    String.raw`\b\w*[eE]nv\w*["']?\s*:\s*$`,
+    // A fallback for a caller-supplied environment (`o.env ?? process.env`).
+    String.raw`\.\w*[eE]nv\w*\s*(?:\?\?|\|\|)\s*$`,
+    // Destructuring picks named keys: `const { API_BASE, API_KEY } = process.env`.
+    String.raw`\}\s*=\s*$`,
+    // `typeof process.env`
+    String.raw`\btypeof\s+$`,
   ].join('|'),
 );
 
-/** `fn(` immediately before the reference — process.env is a call argument. */
-const CALL_ARGUMENT = /([A-Za-z_$][\w$.]*)\s*\(\s*$/;
+/**
+ * A truthiness/presence test right after the reference: `process.env &&
+ * process.env.NODE_ENV`, `process.env ? … : …`, `process.env !== undefined`.
+ */
+const PRESENCE_TEST = /^\s*(?:&&|\|\||\?(?![.?])|[!=]==?)/;
+
+/**
+ * The function whose argument list the end of `before` is inside, at any
+ * argument position (`loadConfig(argv, process.env)`), or undefined.
+ */
+function enclosingCallee(before: string): string | undefined {
+  let depth = 0;
+  for (let i = before.length - 1; i >= 0; i--) {
+    const c = before[i];
+    if (c === ')' || c === ']' || c === '}') depth++;
+    else if (c === '[' || c === '{') {
+      if (depth === 0) return undefined; // inside an array/object literal first
+      depth--;
+    } else if (c === '(') {
+      if (depth > 0) { depth--; continue; }
+      return /([A-Za-z_$][\w$.]*)\s*$/.exec(before.slice(0, i))?.[1];
+    } else if (c === ';') return undefined;
+  }
+  return undefined;
+}
 /** Calls that serialize or enumerate the whole environment. */
 const DUMPING_CALLEES = /(?:^|\.)(?:stringify|inspect|String|entries|keys|values)$/;
 /** A default parameter: `function f(environment = process.env)`. */
@@ -80,7 +111,9 @@ function dumpReasons(code: string): Set<string> {
     if (isCommentLine(code.slice(lineStart, m.index))) continue;
     const before = code.slice(Math.max(0, m.index - 160), m.index).replace(/\s+/g, ' ');
     if (BENIGN_PROCESS_ENV_PREFIX.test(before) || DEFAULT_PARAMETER.test(before)) continue;
-    const callee = CALL_ARGUMENT.exec(before)?.[1];
+    const following = code.slice(m.index + m[0].length, m.index + m[0].length + 8);
+    if (PRESENCE_TEST.test(following)) continue;
+    const callee = enclosingCallee(before);
     if (callee) {
       // Handed to a config reader / loader: it reads keys, it doesn't dump.
       if (!DUMPING_CALLEES.test(callee)) continue;

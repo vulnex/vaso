@@ -1,13 +1,26 @@
-import type { Evidence } from '../../core/types.js';
+import { join } from 'node:path';
+import type { Evidence, ParsedConfig, ScanContext } from '../../core/types.js';
+import { stripJsonc } from '../../core/jsonc.js';
+import { devinConfigDir } from '../../adapters/devin.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { buildBroadPaths, isBroadPath } from '../../analyzers/broad-paths.js';
 
 // Commands whose unrestricted Exec() allowance hands the agent arbitrary
 // code execution or network egress.
 export const DANGEROUS_COMMANDS = new Set([
-  'curl', 'wget', 'bash', 'sh', 'zsh', 'perl', 'python', 'node',
-  'npx', 'ssh', 'sudo', 'chmod', 'rm',
+  'curl', 'wget', 'bash', 'sh', 'zsh', 'fish', 'dash', 'ksh', 'pwsh',
+  'perl', 'python', 'ruby', 'php', 'node', 'deno', 'bun',
+  'npx', 'ssh', 'nc', 'ncat', 'sudo', 'su', 'doas', 'chmod', 'rm',
 ]);
+
+/** Versioned interpreter names map to their family: python3, python3.12 → python. */
+function commandFamily(cmd: string): string {
+  return cmd.replace(/^(python|ruby|perl|php|node)\d+(?:\.\d+)*$/, '$1');
+}
+
+// `Fetch(url)` scopes HTTP requests (Devin CLI permissions reference,
+// e.g. `Fetch(https://internal.api/*)`); a wildcard host is any egress.
+const ANY_URL = /^(?:\*{1,2}|(?:\*|https?):\/\/\*{1,2}(?:\/\*{0,2})?)$/i;
 
 // Bare `**` is cwd-relative (workspace-wide); broad absolute/home globs such as
 // `/**` or `~/**` are resolved via the shared broad-path catalogue.
@@ -40,12 +53,30 @@ export function execCommandName(resource: string): string {
   return first.split('/').pop() ?? first;
 }
 
+/** The user-level Devin configs a project install inherits (none for a user install). */
+async function userConfigsForProject(ctx: ScanContext): Promise<ParsedConfig[]> {
+  if (ctx.installation.profile !== 'project') return [];
+  const dir = devinConfigDir(ctx.fs.homedir(), ctx.fs);
+  const out: ParsedConfig[] = [];
+  for (const name of ['config.json', 'mcp_config.json']) {
+    const filePath = join(dir, name);
+    try {
+      if (!(await ctx.fs.access(filePath))) continue;
+      const raw = await ctx.fs.readFile(filePath);
+      out.push({ raw, format: 'json', filePath, data: JSON.parse(stripJsonc(raw)) as Record<string, unknown> });
+    } catch {
+      // unreadable or not JSON — contributes no deny rules
+    }
+  }
+  return out;
+}
+
 export const dev001 = defineCheck({
   id: 'DEV-001',
   name: 'Devin Over-Broad Permission Rules',
   category: 'coding-agent',
   severity: 'critical',
-  description: 'Detect Devin permission allow rules granting unrestricted execution (exec, Exec(*), edit, Write(**), Write(/**), mcp__*, shell/network commands) or an allow list with no deny guardrails',
+  description: 'Detect Devin permission allow rules granting unrestricted execution (exec, Exec(*), edit, Write(**), Write(/**), Fetch(*), mcp__*, shell/network/interpreter commands) or an allow list with no deny guardrails',
   // Devin Desktop 3.x (windsurf adapter) reads the same ~/.config/devin/config.json permissions
   supportedAgents: ['devin', 'windsurf'],
 
@@ -57,9 +88,10 @@ export const dev001 = defineCheck({
     // whole-home, and /etc write grants are critical here.
     const broadPaths = buildBroadPaths(home).filter(b => !b.path.endsWith('tmp'));
 
-    // Devin merges permission lists across config levels, so a deny rule in
-    // any of this installation's files guards the allow rules in the others.
-    const hasAnyDeny = ctx.configs.some(c => {
+    // Devin merges permission lists across config levels and deny wins at
+    // any level, so a deny rule in any of this installation's files — or, for
+    // a project install, in the user config — guards the allow rules.
+    const hasAnyDeny = [...ctx.configs, ...await userConfigsForProject(ctx)].some(c => {
       const p = c.data.permissions as Record<string, unknown> | undefined;
       return Array.isArray(p?.deny) && p.deny.some(e => typeof e === 'string');
     });
@@ -126,9 +158,18 @@ export const dev001 = defineCheck({
           }
         }
 
+        if (action === 'fetch' && (unscoped || ANY_URL.test(rule.resource!))) {
+          criticalEvidence.push({
+            file: config.filePath,
+            snippet: `permissions.allow: "${entry}"`,
+            detail: 'Unrestricted Fetch allow — the agent may send HTTP requests to any host (data exfiltration) without approval',
+          });
+          continue;
+        }
+
         if (action === 'exec' && rule.resource) {
           const cmd = execCommandName(rule.resource);
-          if (DANGEROUS_COMMANDS.has(cmd)) {
+          if (DANGEROUS_COMMANDS.has(commandFamily(cmd))) {
             criticalEvidence.push({
               file: config.filePath,
               snippet: `permissions.allow: "${entry}"`,

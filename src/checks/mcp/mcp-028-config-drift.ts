@@ -54,6 +54,9 @@ function hasAuth(server: MCPServerEntry): boolean {
   for (const [key, value] of Object.entries(server.env ?? {})) {
     if (AUTH_ENV_RE.test(key) && String(value).trim().length > 0) return true;
   }
+  for (const [key, value] of Object.entries(server.headers ?? {})) {
+    if ((AUTH_ENV_RE.test(key) || /bearer\s+\S/i.test(String(value))) && String(value).trim().length > 0) return true;
+  }
   if (server.url && /\/\/[^/@]+:[^/@]+@/.test(server.url)) return true; // user:pass@
   if (server.url && /[?&](access_token|token|api_key|apikey|auth)=/i.test(server.url)) return true;
   return false;
@@ -107,21 +110,31 @@ export const mcp028 = defineCheck({
       });
     }
 
+    // Evidence names the config file and server; the baseline key
+    // (`<source>::<server>`) is internal.
+    const where = new Map<string, { file: string; snippet: string }>();
+    for (const config of configs) {
+      for (const server of config.servers) {
+        where.set(`${config.source}::${server.name}`, { file: config.filePath, snippet: `Server "${server.name}" (${config.source})` });
+      }
+    }
     const evidence: Evidence[] = [];
     for (const [key, now] of Object.entries(current)) {
       const before = baseline[key];
+      const at = where.get(key) ?? { file: key, snippet: key };
+      const name = at.snippet;
       if (!before) {
-        evidence.push({ file: key, detail: `New MCP server "${key}" appeared since the last scan` });
+        evidence.push({ ...at, detail: `New MCP server ${name} appeared since the last scan` });
         continue;
       }
       if (before.pinned && !now.pinned) {
-        evidence.push({ file: key, detail: `MCP server "${key}" lost its version pin since the last scan` });
+        evidence.push({ ...at, detail: `MCP server ${name} lost its version pin since the last scan` });
       }
       if (before.scheme === 'https' && now.scheme === 'http') {
-        evidence.push({ file: key, detail: `MCP server "${key}" was downgraded from https to http since the last scan` });
+        evidence.push({ ...at, detail: `MCP server ${name} was downgraded from https to http since the last scan` });
       }
       if (before.hasAuth && !now.hasAuth) {
-        evidence.push({ file: key, detail: `MCP server "${key}" had its authentication removed since the last scan` });
+        evidence.push({ ...at, detail: `MCP server ${name} had its authentication removed since the last scan` });
       }
     }
 

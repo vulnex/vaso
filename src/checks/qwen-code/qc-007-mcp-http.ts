@@ -1,5 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { isPlaintextRemoteUrl } from '../windsurf-app/plaintext-url.js';
 
 const URL_FIELDS = ['url', 'httpUrl', 'sseUrl'];
 
@@ -23,8 +24,8 @@ export const qc007 = defineCheck({
         for (const field of URL_FIELDS) {
           const value = obj[field];
           if (typeof value !== 'string') continue;
-          if (!value.startsWith('http://')) continue;
-          if (/^http:\/\/(localhost|127\.0\.0\.1|\[::1\])/i.test(value)) continue;
+          // localhost MCP is a common dev pattern with no exposure
+          if (!isPlaintextRemoteUrl(value)) continue;
           evidence.push({
             file: config.filePath,
             snippet: `mcpServers.${name}.${field} = ${value}`,

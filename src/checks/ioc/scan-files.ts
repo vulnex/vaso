@@ -3,10 +3,22 @@ import type { ScanContext } from '../../core/types.js';
 import { getAllSkillsDirs, isExcludedPath } from '../../core/utils.js';
 import { followSkillLinks } from '../../core/skill-walk.js';
 
-const SCAN_EXTENSIONS = new Set(['.js', '.ts', '.mjs', '.cjs', '.json', '.yaml', '.yml', '.env', '.sh']);
+// Text an indicator can hide in: code and scripts, config, and skill docs
+// (SKILL.md tells the agent what to fetch and run).
+const SCAN_EXTENSIONS = new Set([
+  '.js', '.ts', '.mjs', '.cjs', '.jsx', '.tsx', '.mts', '.cts', '.py',
+  '.sh', '.bash', '.zsh', '.ps1',
+  '.json', '.jsonc', '.json5', '.yaml', '.yml', '.toml', '.env', '.ini', '.cfg', '.conf',
+  '.md',
+]);
 
 export { MAX_SCAN_FILE_BYTES } from '../../core/file-limits.js';
-import { MAX_SCAN_FILE_BYTES } from '../../core/file-limits.js';
+import { readCappedFile } from '../../core/file-limits.js';
+
+function within(path: string, dir: string): boolean {
+  const rel = relative(dir, path);
+  return !rel.startsWith('..') && !isAbsolute(rel);
+}
 
 /** Drop dirs nested inside another listed dir (skills under the install dir) — walk each tree once. */
 function outermost(dirs: string[]): string[] {
@@ -20,8 +32,8 @@ function outermost(dirs: string[]): string[] {
 
 /**
  * Code and config files an IOC check should read for an installation: the
- * install dir and skills dirs, minus vendor/build/VCS dirs (the same set the
- * skill walk and the remote probe skip), files already covered by
+ * install dir and skills dirs, minus vendor/VCS dirs and — outside skill
+ * trees — build output (see isExcludedPath), files already covered by
  * `ctx.configs`, and oversized files.
  */
 export async function iocScanFiles(ctx: ScanContext): Promise<string[]> {
@@ -43,8 +55,11 @@ export async function iocScanFiles(ctx: ScanContext): Promise<string[]> {
       entries = entries.concat(await followSkillLinks(ctx.fs, skills, entries));
     }
     for (const entry of entries) {
-      if (!entry.isFile || !SCAN_EXTENSIONS.has(extname(entry.name))) continue;
-      if (isExcludedPath(dir, entry.parentPath)) continue;
+      if (!entry.isFile || !SCAN_EXTENSIONS.has(extname(entry.name).toLowerCase())) continue;
+      // Build output is skill code inside a skill tree, a build artefact elsewhere
+      const skillsRoot = entry.parentPath ? skillsDirs.find(s => within(entry.parentPath!, s)) : undefined;
+      if (skillsRoot ? isExcludedPath(skillsRoot, entry.parentPath, { keepBuildOutput: true }) || isExcludedPath(dir, skillsRoot)
+        : isExcludedPath(dir, entry.parentPath)) continue;
       const fullPath = entry.parentPath ? join(entry.parentPath, entry.name) : join(dir, entry.name);
       if (skip.has(fullPath)) continue;
       skip.add(fullPath);
@@ -57,8 +72,7 @@ export async function iocScanFiles(ctx: ScanContext): Promise<string[]> {
 /** File content, or undefined when unreadable or larger than MAX_SCAN_FILE_BYTES. */
 export async function readScanFile(ctx: ScanContext, file: string): Promise<string | undefined> {
   try {
-    const content = await ctx.fs.readFile(file);
-    return Buffer.byteLength(content, 'utf-8') > MAX_SCAN_FILE_BYTES ? undefined : content;
+    return await readCappedFile(ctx.fs, file);
   } catch {
     return undefined;
   }

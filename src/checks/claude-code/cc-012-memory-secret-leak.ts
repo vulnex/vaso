@@ -1,5 +1,5 @@
-import { dirname, join } from 'node:path';
-import type { Evidence } from '../../core/types.js';
+import { dirname, extname, join } from 'node:path';
+import type { Evidence, ScanContext } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { findHighEntropyBlocks } from '../../analyzers/entropy.js';
 
@@ -12,6 +12,17 @@ const KNOWN_KEY_PREFIXES: { pattern: RegExp; name: string }[] = [
   { pattern: /\bAKIA[0-9A-Z]{16}\b/, name: 'AWS access key ID' },
 ];
 
+async function ruleFiles(dir: string, fs: ScanContext['fs']): Promise<string[]> {
+  try {
+    const entries = await fs.readdirEntries(dir, { recursive: true });
+    return entries
+      .filter(e => e.isFile && extname(e.name).toLowerCase() === '.md')
+      .map(e => (e.parentPath ? join(e.parentPath, e.name) : join(dir, e.name)));
+  } catch {
+    return [];
+  }
+}
+
 const ENTROPY_THRESHOLD = 5.5;
 const MIN_BLOCK_LEN = 40;
 
@@ -20,18 +31,20 @@ export const cc012 = defineCheck({
   name: 'Memory File Secret Leak',
   category: 'coding-agent',
   severity: 'critical',
-  description: 'Scan ~/.claude/CLAUDE.md and project CLAUDE.md for plaintext secrets and high-entropy strings',
+  description: 'Scan ~/.claude/CLAUDE.md, rules/*.md and project CLAUDE.md for plaintext secrets and high-entropy strings',
   supportedAgents: ['claude-code'],
 
   async run(ctx, h) {
     // User install: ~/.claude/CLAUDE.md. Project install (installDir =
     // <repo>/.claude): Claude Code also loads <repo>/CLAUDE.md and the
-    // uncommitted <repo>/CLAUDE.local.md.
+    // uncommitted <repo>/CLAUDE.local.md. Both scopes load every
+    // <installDir>/rules/**/*.md as memory too.
     const memoryFiles = [join(ctx.installation.installDir, 'CLAUDE.md')];
     if (ctx.installation.profile === 'project') {
       const repo = dirname(ctx.installation.installDir);
       memoryFiles.push(join(repo, 'CLAUDE.md'), join(repo, 'CLAUDE.local.md'));
     }
+    memoryFiles.push(...await ruleFiles(join(ctx.installation.installDir, 'rules'), ctx.fs));
 
     const evidence: Evidence[] = [];
     let found = 0;

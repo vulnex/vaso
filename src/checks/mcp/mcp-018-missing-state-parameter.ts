@@ -1,9 +1,8 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { AUTHORIZE_ROUTE, OAUTH_REQUEST_CONTEXT } from '../../mcp/oauth-context.js';
+import { OAUTH_REQUEST_CONTEXT, isAuthorizeRequest } from '../../mcp/oauth-context.js';
 import { sourceSegments, nearbyText } from '../../mcp/source-segments.js';
 
-const AUTHORIZE_URL_PATTERN = /\/authorize|\/authorization/;
 const STATE_PARAM_PATTERN = /state/;
 const STATIC_STATE_PATTERN = /state\s*[:=]\s*['"][^'"]*['"]/;
 const DYNAMIC_STATE_PATTERNS = [
@@ -52,7 +51,7 @@ export const mcp018 = defineCheck({
         if (line.trim().startsWith('//') || line.trim().startsWith('*')) continue;
 
         // Detect OAuth authorize URL construction without state
-        if (AUTHORIZE_URL_PATTERN.test(line) && !AUTHORIZE_ROUTE.test(line)) {
+        if (isAuthorizeRequest(line)) {
           // Only flag lines that show active URL construction, not config constants
           const isUrlConstruction = URL_CONSTRUCTION_PATTERN.test(line);
           const isConfigConstant = /^\s*\w+\s*[:=]\s*['"]https?:\/\//.test(line) && !isUrlConstruction;

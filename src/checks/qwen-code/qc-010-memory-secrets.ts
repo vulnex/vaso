@@ -15,7 +15,21 @@ const KNOWN_KEY_PREFIXES: { pattern: RegExp; name: string }[] = [
 
 const ENTROPY_THRESHOLD = 5.5;
 const MIN_BLOCK_LEN = 40;
-const MEMORY_FILES = ['memory.md', 'AGENTS.md'];
+// QWEN.md is the default context ("memory") file; `context.fileName` (string
+// or array) renames it (Qwen settings.md "Context Files")
+const MEMORY_FILES = ['memory.md', 'QWEN.md', 'AGENTS.md'];
+
+function contextFileNames(ctx: ScanContext): string[] {
+  const names = new Set(MEMORY_FILES);
+  for (const config of ctx.configs) {
+    const fileName = (config.data.context as Record<string, unknown> | undefined)?.fileName;
+    for (const n of Array.isArray(fileName) ? fileName : [fileName]) {
+      // a bare file name only — never follow a configured path out of the dir
+      if (typeof n === 'string' && n && !n.includes('/') && !n.includes('\\') && n !== '..') names.add(n);
+    }
+  }
+  return [...names];
+}
 
 async function scanFile(file: string, ctx: ScanContext, evidence: Evidence[]): Promise<void> {
   if (!(await ctx.fs.access(file))) return;
@@ -58,12 +72,12 @@ export const qc010 = defineCheck({
   name: 'Qwen Memory File Secret Leak',
   category: 'coding-agent',
   severity: 'info',
-  description: 'Scan ~/.qwen/memory.md and AGENTS.md for plaintext secrets and high-entropy strings',
+  description: 'Scan ~/.qwen/QWEN.md (or the configured context.fileName), memory.md and AGENTS.md for plaintext secrets and high-entropy strings',
   supportedAgents: ['qwen-code'],
 
   async run(ctx, h) {
     const evidence: Evidence[] = [];
-    for (const filename of MEMORY_FILES) {
+    for (const filename of contextFileNames(ctx)) {
       await scanFile(join(ctx.installation.installDir, filename), ctx, evidence);
     }
     return h.fromEvidence(evidence, {

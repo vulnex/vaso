@@ -6,10 +6,14 @@ import { getNestedValue } from '../../core/utils.js';
 interface SensitiveTarget {
   path: string;
   reason: string;
+  /** Sensitive only as a whole: a folder inside it (`~/src/app`) is fine. */
+  broad?: boolean;
 }
 
 function buildSensitiveTargets(home: string): SensitiveTarget[] {
   return [
+    { path: '/', reason: 'root of the filesystem — covers every credential directory', broad: true },
+    { path: home, reason: 'entire user home directory — covers ~/.ssh, ~/.aws and every other credential store', broad: true },
     { path: join(home, '.ssh'), reason: 'contains SSH private keys' },
     { path: join(home, '.aws'), reason: 'contains AWS credentials' },
     { path: join(home, '.gnupg'), reason: 'contains GPG private keys' },
@@ -28,9 +32,16 @@ function expandHome(p: string, home: string): string {
   return p;
 }
 
+function isWithin(path: string, dir: string): boolean {
+  return path === dir || path.startsWith(dir.endsWith('/') ? dir : dir + '/');
+}
+
+/** A grant covers a sensitive path when it is that path, one of its parents
+ *  (`/`, `~`, `/Users` all expose `~/.ssh`), or — except for broad ones —
+ *  inside it. Same rule as CD-007. */
 function matchesSensitive(dir: string, targets: SensitiveTarget[], home: string): SensitiveTarget | undefined {
-  const normalized = normalize(expandHome(dir, home));
-  return targets.find(t => normalized === t.path || normalized.startsWith(t.path + '/'));
+  const normalized = normalize(expandHome(dir, home)).replace(/(.)\/+$/, '$1');
+  return targets.find(t => isWithin(t.path, normalized) || (!t.broad && isWithin(normalized, t.path)));
 }
 
 export const cc009 = defineCheck({

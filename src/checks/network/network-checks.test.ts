@@ -117,3 +117,20 @@ describe('NET-004: Agent Service Port Scan', () => {
     expect(result.passed).toBe(true); // info-only: always passes
   });
 });
+
+describe('NET-002: OpenClaw Control UI origin policy', () => {
+  it('flags allowedOrigins ["*"] and the Host-header origin fallback', async () => {
+    const r = await net002.run(makeContext(undefined, [makeConfig({
+      gateway: { controlUi: { enabled: true, allowedOrigins: ['*'], dangerouslyAllowHostHeaderOriginFallback: true } },
+    })]));
+    expect(r.passed).toBe(false);
+    expect(r.evidence).toHaveLength(2);
+  });
+
+  it('passes explicit origins and a disabled Control UI', async () => {
+    for (const controlUi of [{ allowedOrigins: ['https://control.example.com'] }, { enabled: false, allowedOrigins: ['*'] }]) {
+      const r = await net002.run(makeContext(undefined, [makeConfig({ gateway: { controlUi } })]));
+      expect(r.passed, JSON.stringify(controlUi)).toBe(true);
+    }
+  });
+});

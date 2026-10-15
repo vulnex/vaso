@@ -1,9 +1,10 @@
+import { extname } from 'node:path';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { analyzeCode } from '../../analyzers/ast-analyzer.js';
-import { getSkillFiles } from '../../core/utils.js';
+import { analyzePythonDataFlow } from '../../analyzers/python-sinks.js';
+import { readSkillText, skillFilesOf, skillsDirsOf } from './skill-files.js';
 import { markTestCode } from '../../analyzers/test-paths.js';
-import { readCappedFile } from '../../core/file-limits.js';
 
 export const skl001 = defineCheck({
   id: 'SKL-001',
@@ -13,16 +14,17 @@ export const skl001 = defineCheck({
   description: 'Detect data flows from file/env sources to network or process-execution sinks (AST-based)',
 
   async run(ctx, h) {
-    const skillsDir = ctx.installation.skillsDir;
-    if (!skillsDir) return h.passed('No skills directory found');
+    if (skillsDirsOf(ctx).length === 0) return h.passed('No skills directory found');
 
     const evidence: Evidence[] = [];
-    const files = ctx.skillFiles ?? await getSkillFiles(skillsDir, ctx.fs);
+    const files = await skillFilesOf(ctx);
 
     for (const file of files) {
       try {
-        const code = await readCappedFile(ctx.fs, file);
-        const flows = analyzeCode(code, file);
+        const code = await readSkillText(ctx.fs, file, 'code');
+        if (code === undefined) continue;
+        // Python skill scripts go through the Python analyzer; Babel can't read them.
+        const flows = extname(file).toLowerCase() === '.py' ? analyzePythonDataFlow(code) : analyzeCode(code, file);
         const exfil = flows.filter(f => f.type === 'source-to-sink');
 
         for (const flow of exfil) {
