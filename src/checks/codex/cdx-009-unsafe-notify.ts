@@ -28,7 +28,7 @@ function inspectNotify(notify: unknown): NotifyFinding[] {
   const shell = shellCommandWrapper(cmd, argv.slice(1));
   if (shell) {
     findings.push({
-      reason: `invokes ${shellInvocation(shell)}, so any variable Codex injects is parsed as shell — same risk class as Claude Code unsafe hooks`,
+      reason: `invokes ${shellInvocation(shell, argv.slice(1))}, so any variable Codex injects is parsed as shell — same risk class as Claude Code unsafe hooks`,
     });
   }
 

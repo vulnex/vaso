@@ -36,7 +36,7 @@ export const hm010 = defineCheck({
           evidence.push({
             file: config.filePath,
             snippet: `mcp_servers.${name}: ${command} ${argList.join(' ')}`,
-            detail: `MCP server invoked via "${shellInvocation(shellCommandWrapper(command, argList)!)} …" — argv injection becomes shell injection`,
+            detail: `MCP server invoked via "${shellInvocation(shellCommandWrapper(command, argList)!, argList)} …" — argv injection becomes shell injection`,
           });
         }
 

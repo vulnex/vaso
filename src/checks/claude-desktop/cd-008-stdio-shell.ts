@@ -32,7 +32,7 @@ export const cd008 = defineCheck({
         evidence.push({
           file: config.filePath,
           snippet: `mcpServers.${name}: ${command} ${args.join(' ')}`,
-          detail: `MCP server launched via ${shellInvocation(base)} — env vars and args are reparsed as shell, opening the door to injection`,
+          detail: `MCP server launched via ${shellInvocation(base, args)} — env vars and args are reparsed as shell, opening the door to injection`,
         });
       }
     }

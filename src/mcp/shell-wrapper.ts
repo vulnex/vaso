@@ -39,9 +39,9 @@ export function shellCommandWrapper(command: unknown, rawArgs: unknown): string 
   return undefined;
 }
 
-/** How the wrapper is written for `shell`, for messages: `bash -c`, `cmd /c`, `powershell -Command`. */
-export function shellInvocation(shell: string): string {
-  if (shell === 'cmd') return 'cmd /c';
+/** How the wrapper is written for `shell`, for messages: `bash -c`, `cmd /c` (or `/k`), `powershell -Command`. */
+export function shellInvocation(shell: string, args: readonly string[] = []): string {
+  if (shell === 'cmd') return args.some(a => /^\/k$/i.test(a)) ? 'cmd /k' : 'cmd /c';
   if (shell === 'powershell' || shell === 'pwsh') return `${shell} -Command`;
   return `${shell} -c`;
 }

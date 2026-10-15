@@ -456,7 +456,7 @@ const OMITTED_WHY: Record<NonNullable<FileEntry['omitted']>, string> = {
 /** A file present on the host whose content the probe did not ship. */
 function omittedError(path: string, reason: FileEntry['omitted']): Error {
   const why = reason ? ` (${OMITTED_WHY[reason] ?? reason})` : '';
-  return new Error(`EACCES: content not collected in snapshot${why}: ${path}`);
+  return new Error(`content not collected in snapshot${why}: ${path}`);
 }
 
 /** The error a local read of a path behind an unreadable directory raises. */

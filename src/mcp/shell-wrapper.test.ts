@@ -31,3 +31,12 @@ describe('shellCommandWrapper', () => {
     expect(shellInvocation('bash')).toBe('bash -c');
   });
 });
+
+describe('shellInvocation labels', () => {
+  it('names the cmd switch actually used', async () => {
+    const { shellInvocation } = await import('./shell-wrapper.js');
+    expect(shellInvocation('cmd', ['/k', 'npx', 'x'])).toBe('cmd /k');
+    expect(shellInvocation('cmd', ['/c', 'npx', 'x'])).toBe('cmd /c');
+    expect(shellInvocation('bash', ['-c', 'x'])).toBe('bash -c');
+  });
+});
