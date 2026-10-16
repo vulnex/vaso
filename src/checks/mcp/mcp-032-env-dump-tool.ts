@@ -74,7 +74,8 @@ function enclosingCallee(before: string): string | undefined {
   return undefined;
 }
 /** Calls that serialize or enumerate the whole environment. */
-const DUMPING_CALLEES = /(?:^|\.)(?:stringify|inspect|String|entries|keys|values)$/;
+// `keys` is not here: names alone expose no value (@salesforce/mcp reads them to detect CI)
+const DUMPING_CALLEES = /(?:^|\.)(?:stringify|inspect|String|entries|values)$/;
 /** A default parameter: `function f(environment = process.env)`. */
 const DEFAULT_PARAMETER = /[(,]\s*[A-Za-z_$][\w$]*\s*=\s*$/;
 
