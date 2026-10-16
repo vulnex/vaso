@@ -73,3 +73,18 @@ describe('CP-003 recognizes every way Python runs a piped download (dt14)', () =
     expect(timed(() => cp003(`curl x | python3 -c "${'exec('.repeat(5000)}`))).toBeLessThan(500);
   });
 });
+
+describe('Python string-literal scanning is linear (dt14 N2)', () => {
+  it('an unterminated run of escaped quotes', async () => {
+    const { mapStringLiterals } = await import('./python-sinks.js');
+    const line = `x = "${'\\"'.repeat(50_000)}\\\n`;
+    expect(timed(() => mapStringLiterals(line, m => '_'.repeat(m.length)))).toBeLessThan(500);
+  });
+  it('keeps literal semantics', async () => {
+    const { mapStringLiterals } = await import('./python-sinks.js');
+    const blank = (t: string) => mapStringLiterals(t, m => '_'.repeat(m.length));
+    expect(blank('a("x\\"y", \'z\') + b')).toBe('a(______, ___) + b');
+    expect(blank('s = "open\nnext()')).toBe('s = _____\nnext()'); // unterminated: to end of line only
+    expect(blank('s = "a\\\nb" + c')).toBe('s = ______ + c'); // backslash-newline continues the literal
+  });
+});

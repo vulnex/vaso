@@ -18,6 +18,40 @@
 import { classifySensitivePath } from './sensitive-paths.js';
 import type { DataFlowResult } from './ast-analyzer.js';
 
+/**
+ * Each string literal in `text` replaced by `fill(literal)`: one pass, quotes
+ * matched with backslash escapes, a literal never crossing a line. An
+ * unterminated one runs to the end of its line (one broken token, as Python
+ * reads it). A regex for this retried from every quote of an unterminated
+ * `"\\"\\"…` run — quadratic, minutes on a 100 KB line.
+ */
+export function mapStringLiterals(text: string, fill: (literal: string) => string): string {
+  let out = '';
+  let i = 0;
+  while (i < text.length) {
+    const c = text[i];
+    if (c !== '"' && c !== "'") {
+      const next = nextQuote(text, i);
+      out += text.slice(i, next);
+      i = next;
+      continue;
+    }
+    let j = i + 1;
+    while (j < text.length && text[j] !== c && text[j] !== '\n') j += text[j] === '\\' ? 2 : 1;
+    const end = j < text.length && text[j] === c ? j + 1 : Math.min(j, text.length);
+    out += fill(text.slice(i, end));
+    i = end;
+  }
+  return out;
+}
+
+function nextQuote(text: string, from: number): number {
+  const d = text.indexOf('"', from);
+  const s = text.indexOf("'", from);
+  const n = d < 0 ? s : s < 0 ? d : Math.min(d, s);
+  return n < 0 ? text.length : n;
+}
+
 export interface PythonSinkFinding {
   kind: 'exec' | 'fs-access' | 'injection';
   line: number;
@@ -35,7 +69,7 @@ export interface PythonSinkFinding {
 
 /** `text` with string-literal contents replaced by spaces (same length, quotes kept). */
 function blankStrings(text: string): string {
-  return text.replace(/(["'])(?:\\.|(?!\1|\\).)*\1/g, (m) => m[0] + ' '.repeat(m.length - 2) + m[m.length - 1]);
+  return mapStringLiterals(text, (m) => m.length < 2 ? m : m[0] + ' '.repeat(m.length - 2) + m[m.length - 1]);
 }
 
 const EXEC_SINKS: Array<{ re: RegExp; name: (m: RegExpMatchArray) => string }> = [
@@ -164,7 +198,7 @@ function statements(lines: CodeLine[]): Array<CodeLine & { last: number }> {
       out.push(current);
       depth = 0;
     }
-    for (const c of l.text.replace(/(["'])(?:\\.|(?!\1|\\).)*\1/g, '')) {
+    for (const c of mapStringLiterals(l.text, () => '')) {
       if (c === '(' || c === '[' || c === '{') depth++;
       else if (c === ')' || c === ']' || c === '}') depth = Math.max(0, depth - 1);
     }
@@ -191,7 +225,9 @@ function callArgs(text: string, open: number): string {
 
 /** Static text of a call's command argument(s): literals kept, values as `{…}`. */
 function commandOf(args: string): { command?: string; dynamic: boolean } {
-  const head = args.replace(/\b\w+\s*=[\s\S]*$/, ''); // keyword arguments (shell=, cwd=) aren't the command
+  // keyword arguments (shell=, cwd=) aren't the command; the text is for
+  // messages, so a bounded head keeps the literal tokenizer below linear
+  const head = args.slice(0, 2000).replace(/\b\w+\s*=[\s\S]*$/, '');
   const parts: string[] = [];
   let dynamic = false;
   for (const m of head.matchAll(/(?:[rRbBuU]?(["'])((?:\\.|(?!\1|\\).)*)\1)|(f["'](?:\\.|[^"'])*["'])|([A-Za-z_][\w.]*(?:\([^()]*\))?)/g)) {
@@ -250,7 +286,7 @@ function topLevelParts(text: string): string[] {
   const parts: string[] = [];
   let depth = 0;
   let start = 0;
-  const clean = text.replace(/(["'])(?:\\.|(?!\1|\\).)*\1/g, (m) => '_'.repeat(m.length));
+  const clean = mapStringLiterals(text, (m) => '_'.repeat(m.length));
   for (let i = 0; i < clean.length; i++) {
     const c = clean[i];
     if (c === '(' || c === '[' || c === '{') depth++;
