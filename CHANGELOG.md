@@ -6,6 +6,8 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-10-16
+
 ### Security
 
 - **`vaso fix` never writes through hard links, re-pointed directories or another user's files.** Fixes are confined to the installation owner's home and install dir: a hard-linked file, a path whose directory resolves elsewhere, a relative path and (as root) a file another user owns are refused, and rollback refuses a path re-pointed since the backup. Rollback is confined the same way: it writes only inside the user's home (every local home when run as root), restores only paths its backup manifest recorded, and never creates a file through a symlinked directory — a tampered `~/.vaso/backups` tree can't make it write elsewhere. One refused file no longer stops the other fixes (CFG-003/POL-003 name it), and a fix over thousands of files runs in linear time (append-only backup journal; 1.3.0 manifests still read).
