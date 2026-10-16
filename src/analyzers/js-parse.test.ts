@@ -143,3 +143,14 @@ describe('parseJs cache', () => {
     expect(cachedLargeAsts()).toBe(1);
   });
 });
+
+describe('SKL-002 identifiers with acronyms (dt14)', () => {
+  it('a CamelCase identifier with acronym runs is not base64; real base64 still is', async () => {
+    const { looksBase64Encoded, analyzeObfuscation } = await import('./obfuscation.js');
+    expect(looksBase64Encoded('ReferencedGeneralPurposeScheduledProcedureStepTransactionUID')).toBe(false);
+    expect(looksBase64Encoded('ReferencedGeneralPurposeScheduledProcedureStepXTransactionUID')).toBe(false);
+    expect(analyzeObfuscation('X = "ReferencedGeneralPurposeScheduledProcedureStepTransactionUID"').hits).toEqual([]);
+    // base64 of text, padded, mixed case and digits: still encoded
+    expect(looksBase64Encoded('aHR0cHM6Ly9ldmlsLmV4YW1wbGUuY29tL2NvbGxlY3Q=')).toBe(true);
+  });
+});

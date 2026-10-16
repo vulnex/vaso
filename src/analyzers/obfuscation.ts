@@ -52,6 +52,26 @@ const ENCODED_LITERAL = /['"`]([A-Za-z0-9+/]{16,}={0,2})['"`]/g;
  * and digits, and not a run of camelCase/PascalCase words. camelCase words sit
  * near 0.2 on that density; base64 of text sits around 0.45.
  */
+/**
+ * A CamelCase identifier with acronym runs (`ReferencedGeneralPurposeScheduledProcedureStepXTransactionUID`,
+ * `parseHTTPResponse`): it splits exactly into words of three or more letters and
+ * acronyms of up to five capitals, with no digits, and words make up most of it.
+ * Base64 text breaks into short mixed fragments and digits instead. Linear: one
+ * token scan, no nested quantifiers.
+ */
+function isAcronymWords(run: string): boolean {
+  if (/\d/.test(run)) return false;
+  let covered = 0;
+  let wordChars = 0;
+  let words = 0;
+  for (const m of run.matchAll(/[A-Z][a-z]{2,}|[a-z]{3,}|[A-Z]{1,5}(?=[A-Z][a-z]|$)/g)) {
+    if (m.index !== covered) return false; // a gap: something that is neither word nor acronym
+    covered += m[0].length;
+    if (/[a-z]/.test(m[0])) { words++; wordChars += m[0].length; }
+  }
+  return covered === run.length && words >= 2 && wordChars >= run.length * 0.7;
+}
+
 export function looksBase64Encoded(literal: string): boolean {
   if (!(literal.endsWith('=') || literal.length % 4 === 0)) return false;
   if (!/[a-z]/.test(literal) || !/[A-Z]/.test(literal)) return false;
@@ -155,7 +175,7 @@ export function isBenignEncodedData(line: string): boolean {
   // Encoded data mixes cases; one case throughout is a constant, a protein or DNA sequence
   const isSingleCase = (run: string) => !/[a-z]/.test(run) || !/[A-Z]/.test(run);
   // An identifier made of words (`SageMakerInferenceComponentConcurrentRequests…`)
-  const isWords = (run: string) => /^[A-Z]?[a-z]+(?:\d+[A-Z]?[a-z]+|[A-Z][a-z]+)*\d*$/.test(run);
+  const isWords = (run: string) => /^[A-Z]?[a-z]+(?:\d+[A-Z]?[a-z]+|[A-Z][a-z]+)*\d*$/.test(run) || isAcronymWords(run);
   return runs.length > 0 && runs.every((run) => isHexDigest(run) || isPath(run) || isSingleCase(run) || isWords(run));
 }
 
