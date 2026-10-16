@@ -53,6 +53,9 @@ async function tirithPresent(ctx: ScanContext, config: ParsedConfig): Promise<bo
   }
 }
 
+/** Config version whose migration removed tirith (hermes-agent commit 911da42). */
+const TIRITH_REMOVED_CONFIG_VERSION = 50;
+
 export const hm009 = defineCheck({
   id: 'HM-009',
   name: 'Hermes Tirith Pre-Exec Scanner Disabled or Fail-Open',
@@ -67,6 +70,11 @@ export const hm009 = defineCheck({
     const failOpenEnv = envOverride(ctx, 'TIRITH_FAIL_OPEN');
     for (const config of ctx.configs) {
       if (!config.filePath.endsWith('cli-config.yaml') && !config.filePath.endsWith('config.yaml')) continue;
+      // Hermes removed the bundled tirith scanner (hermes-agent 911da42,
+      // 2026-10-06): config migration 50 drops security.tirith_*. A config at
+      // v50+ has no scanner to disable or fail open.
+      const version = Number(getNestedValue(config.data, '_config_version'));
+      if (Number.isFinite(version) && version >= TIRITH_REMOVED_CONFIG_VERSION) continue;
 
       const enabled = getNestedValue(config.data, 'security.tirith_enabled');
       if (enabledEnv ? !enabledEnv.value : enabled === false) {

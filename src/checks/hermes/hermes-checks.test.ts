@@ -311,6 +311,12 @@ describe('HM-009 Tirith disabled', () => {
     const result = await check.run(makeCtx([cfg]));
     expect(result.passed).toBe(false);
   });
+  it('no finding for a config at v50+, where Hermes removed tirith (911da42); v49 still flagged', async () => {
+    const v51 = makeYaml('/h/.hermes/config.yaml', { _config_version: 51, security: { tirith_enabled: true, tirith_fail_open: true } });
+    expect((await check.run(makeCtx([v51], { fs: makeFs({}) }))).passed).toBe(true);
+    const v49 = makeYaml('/h/.hermes/config.yaml', { _config_version: 49, security: { tirith_enabled: false } });
+    expect((await check.run(makeCtx([v49]))).passed).toBe(false);
+  });
   it('flags fail-open without binary', async () => {
     const cfg = makeYaml('/h/.hermes/cli-config.yaml', {
       security: { tirith_enabled: true, tirith_fail_open: true },
