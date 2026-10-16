@@ -111,7 +111,7 @@ function normalizePyName(name: string): string {
 function parseRequirement(line: string): { name: string; spec: string } | undefined {
   const req = line.split(/\s+#/)[0].split(';')[0].trim();
   if (req.length > 500) return undefined; // not a requirement line (and keeps the match below linear)
-  const m = /^([A-Za-z0-9][\w.-]*)\s*(?:\[[^\]]*\])?\s*(.*)$/.exec(req);
+  const m = /^([A-Za-z0-9][\w.-]*)(?:\s*\[[^\]]*\])?\s*(.*)$/.exec(req);
   if (!m || req.startsWith('-')) return undefined;
   return { name: normalizePyName(m[1]), spec: m[2].trim() };
 }
