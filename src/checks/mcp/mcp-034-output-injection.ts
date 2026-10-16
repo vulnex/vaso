@@ -70,6 +70,18 @@ export const mcp034 = defineCheck({
         if (ownedByDescription(trimmed)) continue;
 
         reported.add(unit.line);
+        if (unit.prompt) {
+          // Few-shot dialogue in prompt text the user picks (`add_prompt`):
+          // not tool output reaching the model behind the user's back
+          evidence.push({
+            file,
+            line: unit.line,
+            snippet: trimmed.slice(0, 120),
+            detail: `${reasons.join('; ')} inside prompt text in server "${source.serverName}" — content of an MCP prompt the user selects, not tool output; review only if a tool returns it`,
+            mitigated: true,
+          });
+          continue;
+        }
         const strong = reasons.some((r) => !isWeakDirective(r));
         if (strong) sawStrong = true;
         evidence.push({

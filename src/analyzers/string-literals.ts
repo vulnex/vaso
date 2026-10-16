@@ -20,6 +20,9 @@ export interface StringLine {
    * — read by the model when choosing tools, which is MCP-024's surface.
    */
   description: boolean;
+  /** Prompt content (Python: assigned to a `*prompt*` name) — served by an MCP
+   *  prompt the user selects, not returned by a tool call. */
+  prompt?: boolean;
 }
 
 const TOOL_REGISTRARS = new Set(['tool', 'registerTool', 'prompt', 'registerPrompt']);
@@ -106,6 +109,9 @@ export function pythonStringLines(code: string): StringLine[] {
       const raw = /[rR]/.test(prefix[0]);
       // A docstring, or a parameter/tool description (`Field(description='…')`)
       const docstring = (triple && lineStart) || /\bdescription\s*[=:]\s*$/.test(code.slice(Math.max(0, i - 40), i));
+      // Prompt content: a string assigned to a name with "prompt" in it
+      // (`CHDB_PROMPT = """…`), served by an MCP prompt the user picks
+      const prompt = /\b\w*prompt\w*\s*[:=]\s*$/i.test(code.slice(Math.max(0, i - 60), i));
       let j = q0 + quote.length;
       let text = '';
       let textLine = line;
@@ -113,7 +119,7 @@ export function pythonStringLines(code: string): StringLine[] {
         const ch = code[j];
         if (ch === '\n') {
           if (!triple) break; // unterminated single-quoted string
-          out.push({ line: textLine, text, description: docstring });
+          out.push({ line: textLine, text, description: docstring, ...(prompt ? { prompt } : {}) });
           text = '';
           line++;
           textLine = line;
@@ -124,7 +130,7 @@ export function pythonStringLines(code: string): StringLine[] {
         text += ch;
         j++;
       }
-      out.push({ line: textLine, text, description: docstring });
+      out.push({ line: textLine, text, description: docstring, ...(prompt ? { prompt } : {}) });
       i = Math.min(code.length, j + quote.length);
       lineStart = false;
       continue;
