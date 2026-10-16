@@ -73,7 +73,11 @@ export const SECURITY_PATTERNS: PatternRule[] = [
   { id: 'PI-003', pattern: /system\s*:\s*you\s+(?:must|should|are)/i, category: 'prompt-injection', severity: 'warning', description: 'Prompt injection — fake system prompt' },
   // Not a markdown table cell holding only the tag (`| [System] | [Type] |` is a
   // placeholder column); text after it in the cell still counts
-  { id: 'PI-004', pattern: /(?<!\|[ \t]*)\[(?:SYSTEM|ADMIN)\]|\[(?:SYSTEM|ADMIN)\](?![ \t]*\|)|<\|system\|>/i, category: 'prompt-injection', severity: 'warning', description: 'Prompt injection — delimiter escape' },
+  // A role tag that opens injected text: followed (after an optional ':') by a
+  // word, or alone on its line. Not a subscript (`data['x'][system]`), a CLI
+  // option value (`--assign-identity [system]`), a sentence noun (`in [system].`)
+  // or a table-cell placeholder (`| [System] |`).
+  { id: 'PI-004', pattern: /(?<![\w'"\][-])(?<!--[\w-]+[ \t]+)\[(?:SYSTEM|ADMIN)\](?:[ \t]*:?[ \t]*(?=[A-Za-z])|[ \t]*:?[ \t]*$)|<\|system\|>/im, category: 'prompt-injection', severity: 'warning', description: 'Prompt injection — delimiter escape' },
 
   // Crypto wallet targeting (from openclaw-security-monitor)
   { id: 'CW-001', pattern: /\b[13][a-km-zA-HJ-NP-Z1-9]{25,34}\b/, category: 'crypto-wallet', severity: 'warning', description: 'Bitcoin address pattern' },
