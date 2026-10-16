@@ -1,0 +1,5 @@
+_config_version: 51
+model:
+  default: "anthropic/claude-sonnet-4"
+terminal:
+  backend: "local"

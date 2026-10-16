@@ -1,0 +1,6 @@
+{
+  "agent": "hermes",
+  "source": "Hermes cli-config.yaml.example (_config_version 51); tirith removed in hermes-agent 911da42, config migration 50",
+  "modes": { ".hermes": "700", ".hermes/config.yaml": "600" },
+  "pass": ["HM-009"]
+}

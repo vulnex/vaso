@@ -1,0 +1,5 @@
+{
+  "agent": "claude-code",
+  "source": "dt14: awesome-copilot build-and-tasks.md (az --assign-identity [system]), K-Dense template prose, pydicom tag identifiers",
+  "pass": ["SKL-007", "SKL-002"]
+}

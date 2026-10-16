@@ -1,0 +1,6 @@
+{
+  "agent": "mcp",
+  "source": "dt14: @zereight/mcp-gitlab oauth-proxy authorize (PKCE/state further down the method), @salesforce/mcp guessCI, @growthbook/mcp maskBearer",
+  "mcp": { "source": ["srv/index.js"] },
+  "pass": ["MCP-013", "MCP-018", "MCP-032", "MCP-014"]
+}
