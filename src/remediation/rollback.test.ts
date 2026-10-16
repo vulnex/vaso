@@ -317,3 +317,38 @@ describe('fix + rollback (real files)', () => {
     expect(logs.some(l => l.includes('2026-02-15T12-30-00'))).toBe(true);
   });
 });
+
+describe('rollback confinement (dt14)', () => {
+  beforeEach(async () => {
+    home.dir = await mkdtemp(join(tmpdir(), 'vaso-rb-'));
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    process.exitCode = undefined;
+  });
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    process.exitCode = undefined;
+    await rm(home.dir, { recursive: true, force: true });
+  });
+
+  it.skipIf(!posix)('a tampered backup tree cannot make rollback write outside the home or through a symlinked dir', async () => {
+    const outside = await mkdtemp(join(tmpdir(), 'vaso-rb-out-'));
+    try {
+      const target = join(outside, 'target.txt');
+      await writeFile(target, 'original');
+      await mkdir(join(outside, 'real'));
+      await symlink(join(outside, 'real'), join(home.dir, 'link'));
+      const stamp = join(home.dir, '.vaso', 'backups', '2026-10-16T00-00-00-000Z');
+      // no manifest (legacy shape): an outside path, and a new file via a symlinked dir
+      await mkdir(join(stamp, outside), { recursive: true });
+      await writeFile(join(stamp, target), 'PWNED');
+      await mkdir(join(stamp, home.dir, 'link'), { recursive: true });
+      await writeFile(join(stamp, home.dir, 'link', 'new.txt'), 'PWNED');
+      await rollback();
+      expect(await readFile(target, 'utf-8')).toBe('original');
+      expect(await readdir(join(outside, 'real'))).toEqual([]);
+      expect(process.exitCode).toBe(2);
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+});

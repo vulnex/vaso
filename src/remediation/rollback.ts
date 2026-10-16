@@ -1,10 +1,32 @@
 import { readdir, readFile, writeFile, stat, lstat, rename } from 'node:fs/promises';
-import { readRegularFile, writeRegularFile, chmodNoFollow, movedSinceBackup } from './safe-file.js';
+import { readRegularFile, writeRegularFile, chmodNoFollow, movedSinceBackup, withFixBoundary, assertCreatable } from './safe-file.js';
 import { MANIFEST_NAME, readManifest, sha256, type ManifestEntry } from './backup-manifest.js';
 import { join } from 'node:path';
+import { readFileSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import chalk from 'chalk';
 import { pathExists } from '../core/utils.js';
+
+/**
+ * Where a rollback may write: the scanning user's home, and as root every
+ * local user's home (`sudo vaso fix --all-users` fixes their files). A backup
+ * tree is just files under ~/.vaso/backups — a tampered one must not make
+ * rollback write elsewhere, or through a symlinked directory out of a home.
+ */
+function rollbackRoots(): string[] {
+  const roots = [homedir()];
+  if (process.getuid?.() !== 0) return roots;
+  try {
+    for (const line of readFileSync('/etc/passwd', 'utf-8').split('\n')) {
+      const f = line.split(':');
+      if (f.length >= 6 && f[5].startsWith('/') && f[5] !== '/' && !/nologin|false$/.test(f[6] ?? '')) roots.push(f[5]);
+    }
+  } catch {}
+  try {
+    for (const u of readdirSync('/Users')) if (!u.startsWith('.') && u !== 'Shared') roots.push(join('/Users', u));
+  } catch {}
+  return [...new Set(roots)];
+}
 
 /** A backup already restored: kept, but no longer "the last fix run". */
 const RESTORED_PREFIX = 'restored-';
@@ -59,12 +81,18 @@ export async function rollback(timestamp?: string): Promise<void> {
   const total = files.length + dirModes.length;
   let restored = 0;
 
+  const roots = rollbackRoots();
   for (const backupFilePath of files) {
     // The backup preserves absolute paths: backup/<timestamp>/absolute/path/to/file
     // Strip the backup dir prefix to recover the original absolute path
     const originalPath = backupFilePath.slice(backupDir.length);
     try {
-      const note = await restoreFile(backupFilePath, originalPath, manifest?.entries[originalPath]);
+      // With a manifest, only what the fix run recorded is restored
+      if (manifest && !manifest.entries[originalPath]) {
+        console.log(`  ${chalk.yellow('!')} Skipped ${originalPath}: not recorded in this backup's manifest`);
+        continue;
+      }
+      const note = await withFixBoundary({ roots }, () => restoreFile(backupFilePath, originalPath, manifest?.entries[originalPath]));
       if (note) {
         console.log(`  ${chalk.yellow('!')} Skipped ${originalPath}: ${note}; the original is in ${backupFilePath}`);
         continue;
@@ -90,7 +118,7 @@ export async function rollback(timestamp?: string): Promise<void> {
         console.log(`  ${chalk.yellow('!')} Skipped ${dir}: ${moved}`);
         continue;
       }
-      await chmodNoFollow(dir, entry.mode);
+      await withFixBoundary({ roots }, () => chmodNoFollow(dir, entry.mode));
       restored++;
     } catch (err) {
       console.log(`  ${chalk.red('x')} Failed to restore the mode of ${dir}: ${(err as Error).message}`);
@@ -144,6 +172,7 @@ async function restoreFile(backupPath: string, originalPath: string, entry: Mani
       rewrote = true;
     }
   } else {
+    await assertCreatable(originalPath);
     await writeFile(originalPath, original, { flag: 'wx', mode: 0o600 });
     rewrote = true;
   }

@@ -87,6 +87,12 @@ async function guard(path: string, st: { isFile(): boolean; nlink: number; uid: 
   throw new UnsafeTargetError(path, `resolves into ${real}, outside ${b.roots.join(' and ')}`);
 }
 
+/** The boundary check for a path about to be created (no handle to stat yet). */
+export async function assertCreatable(path: string): Promise<void> {
+  requireAbsolute(path);
+  await guard(path, { isFile: () => false, nlink: 1, uid: process.getuid?.() ?? -1 });
+}
+
 export class UnsafeTargetError extends Error {
   constructor(readonly path: string, readonly reason: string) {
     super(`${path} ${reason} — vaso fix won't write it`);

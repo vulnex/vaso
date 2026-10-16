@@ -361,7 +361,7 @@ describe('rollback', () => {
   }
 
   it('restores files from a backup directory', async () => {
-    const originalFile = join(TEST_DIR, 'original.env');
+    const originalFile = join(home, 'original.env');
     await writeFile(originalFile, 'KEY=modified\n');
     await makeBackup('test-rollback', originalFile, 'KEY=original\n');
 
@@ -371,7 +371,7 @@ describe('rollback', () => {
   });
 
   it('undoes fix runs one at a time, newest first', async () => {
-    const file = join(TEST_DIR, 'config.json');
+    const file = join(home, 'config.json');
     // run 1 changed v0 → v1, run 2 changed v1 → v2
     await makeBackup('2026-10-13T08-00-00-000Z', file, 'v0');
     await makeBackup('2026-10-13T09-00-00-000Z', file, 'v1');
@@ -392,7 +392,7 @@ describe('rollback', () => {
   });
 
   it('refuses an ambiguous backup name', async () => {
-    const file = join(TEST_DIR, 'config.json');
+    const file = join(home, 'config.json');
     await makeBackup('2026-10-13T08-00-00-000Z', file, 'v0');
     await makeBackup('2026-10-13T09-00-00-000Z', file, 'v1');
     await writeFile(file, 'v2');
