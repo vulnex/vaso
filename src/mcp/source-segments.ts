@@ -97,3 +97,41 @@ export function withoutStringText(text: string): string {
   }
   return out;
 }
+
+/** A string constant declared, not a request made: `const AUTHORIZE_PATH = "/oauth/authorize";` */
+const STRING_CONSTANT = /^\s*(?:export\s+)?(?:const|let|var)?\s*[\w$.]+\s*[:=]\s*(['"`])[^'"`$]*\1\s*[;,]?\s*$/;
+export function isStringConstant(text: string): boolean {
+  return STRING_CONSTANT.test(text);
+}
+
+/**
+ * Text from segment `i` to the end of the block it sits in: braces for
+ * JS/TS (until the enclosing `}`), indentation for Python (until a line
+ * indented less than this one). A flow's parameters (PKCE, state) are often
+ * set further down the same function than a fixed window reaches. Capped.
+ */
+export function blockText(segments: SourceSegment[], i: number, python = false, cap = 400): string {
+  const out: string[] = [];
+  const indentOf = (t: string) => t.length - t.trimStart().length;
+  const base = indentOf(segments[i]?.text ?? '');
+  let depth = 0;
+  let opened = false; // the start line opens its own block (a function header)
+  for (let k = i; k < segments.length && k < i + cap; k++) {
+    const text = segments[k].text;
+    if (python) {
+      // a `def …:` header's body is indented deeper: stop at the next line
+      // back at (or left of) its own indentation
+      if (k > i && text.trim() !== '' && (indentOf(text) < base || (opened && indentOf(text) === base))) break;
+      if (k === i && /:\s*$/.test(text)) opened = true;
+    } else {
+      for (const c of withoutStringText(text)) {
+        if (c === '{') depth++;
+        else if (c === '}') depth--;
+      }
+      if (k === i && depth > 0) opened = true;
+    }
+    out.push(text);
+    if (!python && (depth < 0 || (opened && depth === 0))) break;
+  }
+  return out.join('\n');
+}

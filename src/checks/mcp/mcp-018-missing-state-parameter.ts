@@ -1,7 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { OAUTH_REQUEST_CONTEXT, isAuthorizeRequest } from '../../mcp/oauth-context.js';
-import { sourceSegments, nearbyText } from '../../mcp/source-segments.js';
+import { sourceSegments, nearbyText, blockText, isStringConstant } from '../../mcp/source-segments.js';
 
 const STATE_PARAM_PATTERN = /state/;
 const STATIC_STATE_PATTERN = /state\s*[:=]\s*['"][^'"]*['"]/;
@@ -20,7 +20,7 @@ const CALLBACK_HANDLER_PATTERN = /(?:function\s+\w*[Cc]allback|handle.*[Cc]allba
 // pending`, `self.handle_simple_callback(user, pw, state)`.
 const STATE_VERIFY_PATTERN = /state.*(?:===|!==|==|!=|verify|check|match|compare|valid)|(?:verify|check|match|compare|valid).*state|\.(?:get|pop)\(\s*["']?\w*state\b|\[\s*\w*state\s*\]|\bstate\w*\s+(?:not\s+)?in\b|\bnot\s+\w*state\b|\w*(?:callback|verify|validate)\w*\([^)]*\bstate\b/i;
 /** A thin route that hands the whole request to a handler that does the checking. */
-const DELEGATES_REQUEST = /\breturn\s+(?:await\s+)?[\w.]*(?:callback|verify|validate)\w*\(\s*req(?:uest)?\s*\)/i;
+const DELEGATES_REQUEST = /\breturn\s+(?:await\s+)?[\w.]*(?:callback|verify|validate)\w*\(\s*req(?:uest)?\s*\)|\w*(?:callback|verify|validate)\w*\s*\([\s\S]{0,400}?(?:authorization_response\s*=|\b(?:req|request)\.url\b)/i;
 
 // Pattern to detect active URL construction vs config constants
 const URL_CONSTRUCTION_PATTERN = /[?&]|URLSearchParams|\.search|\.href|redirect\s*\(|fetch\s*\(|window\.location|\+\s*['"`]|`[^`]*\$\{/;
@@ -43,6 +43,7 @@ export const mcp018 = defineCheck({
       if (!source.sourceCode) continue;
       const segments = sourceSegments(source.sourceCode);
       const filePath = source.localPath ?? source.serverName;
+      const python = source.language === 'python';
 
       for (let i = 0; i < segments.length; i++) {
         const line = segments[i].text;
@@ -54,10 +55,12 @@ export const mcp018 = defineCheck({
         if (isAuthorizeRequest(line)) {
           // Only flag lines that show active URL construction, not config constants
           const isUrlConstruction = URL_CONSTRUCTION_PATTERN.test(line);
-          const isConfigConstant = /^\s*\w+\s*[:=]\s*['"]https?:\/\//.test(line) && !isUrlConstruction;
+          const isConfigConstant = (/^\s*\w+\s*[:=]\s*['"]https?:\/\//.test(line) && !isUrlConstruction) || isStringConstant(line);
 
           if (!isConfigConstant) {
-            const nearbyCode = nearbyText(segments, i, SEARCH_RADIUS);
+            // The request's own block: state is often set further down the
+            // same function than a fixed window reaches
+            const nearbyCode = `${nearbyText(segments, i, SEARCH_RADIUS)}\n${blockText(segments, i, python)}`;
 
             if (!STATE_PARAM_PATTERN.test(nearbyCode)) {
               evidence.push({
@@ -88,14 +91,18 @@ export const mcp018 = defineCheck({
         }
 
         // Detect callback handlers that don't verify state
-        if (CALLBACK_HANDLER_PATTERN.test(line)) {
-          const nearbyCode = segments.slice(i, i + SEARCH_RADIUS + 1).map((s) => s.text).join('\n');
+        // (an export list naming the handler isn't the handler)
+        if (CALLBACK_HANDLER_PATTERN.test(line) && !/^\s*(?:module\.exports|exports\.\w+|export\s*\{|from\s+\S+\s+import\b|import\b)/.test(line)) {
+          // The handler's body, wherever in it the check sits
+          const nearbyCode = blockText(segments, i, python);
 
           if (DELEGATES_REQUEST.test(nearbyCode)) continue;
           if (STATE_PARAM_PATTERN.test(nearbyCode) === false ||
               (STATE_PARAM_PATTERN.test(nearbyCode) && !STATE_VERIFY_PATTERN.test(nearbyCode))) {
             // Only flag if this looks like it's handling an OAuth callback
-            if (/code|authorization_code|grant/.test(nearbyCode)) {
+            // An OAuth callback reads the authorization code or exchanges it;
+            // any function named *callback mentioning "code" is not one
+            if (/authorization_code|grant_type|access_token|['"]code['"]|\bcode\s*[,}=]|\.code\b/.test(nearbyCode)) {
               evidence.push({
                 file: filePath,
                 line: segments[i].line,

@@ -1,7 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { AUTH_CODE_GRANT, isAuthorizeRequest } from '../../mcp/oauth-context.js';
-import { sourceSegments, nearbyText } from '../../mcp/source-segments.js';
+import { sourceSegments, nearbyText, blockText, isStringConstant } from '../../mcp/source-segments.js';
 
 const CODE_CHALLENGE_PATTERN = /code_challenge/;
 const CODE_VERIFIER_PATTERN = /code_verifier/;
@@ -25,6 +25,10 @@ export const mcp013 = defineCheck({
       if (!source.sourceCode) continue;
       const segments = sourceSegments(source.sourceCode);
       const filePath = source.localPath ?? source.serverName;
+      const python = source.language === 'python';
+      // The flow's own block, not a fixed window: PKCE is often set further
+      // down the same function (GitLab's proxy, ~60 lines)
+      const around = (i: number) => `${nearbyText(segments, i, SEARCH_RADIUS)}\n${blockText(segments, i, python)}`;
 
       for (let i = 0; i < segments.length; i++) {
         const line = segments[i].text;
@@ -34,8 +38,9 @@ export const mcp013 = defineCheck({
 
         // Detect OAuth authorize URL construction without PKCE
         // A route the server handles forwards the client's PKCE parameters.
-        if (isAuthorizeRequest(line)) {
-          const nearbyCode = nearbyText(segments, i, SEARCH_RADIUS);
+        // A string constant naming the endpoint is not a request
+        if (isAuthorizeRequest(line) && !isStringConstant(line)) {
+          const nearbyCode = around(i);
 
           if (!CODE_CHALLENGE_PATTERN.test(nearbyCode)) {
             evidence.push({
@@ -59,7 +64,7 @@ export const mcp013 = defineCheck({
 
         // Detect token exchange without code_verifier
         if (AUTH_CODE_GRANT.test(line)) {
-          const nearbyCode = nearbyText(segments, i, SEARCH_RADIUS);
+          const nearbyCode = around(i);
 
           if (!CODE_VERIFIER_PATTERN.test(nearbyCode)) {
             evidence.push({
