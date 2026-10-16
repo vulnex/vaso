@@ -16,6 +16,9 @@ interface TokenPattern {
   fileWrite?: boolean;
 }
 
+/** A call to a masking/redaction helper, with simple arguments. */
+const MASKED_CALL = /\b\w*(?:mask|redact|sanitiz|obfuscat|scrub)\w*\s*\([^()]{0,200}\)/gi;
+
 const INSECURE_TOKEN_PATTERNS: TokenPattern[] = [
   // `console.log("refreshed access token")` logs a message, not a token.
   { pattern: new RegExp(String.raw`console\.(?:log|info|warn|error|debug)\s*\([^;]*` + TOKEN_REF, 'i'), detail: 'OAuth token logged to console', codeOnly: true },
@@ -75,7 +78,9 @@ export const mcp014 = defineCheck({
 
         // `!!session.refresh_token`, `typeof token`, `token.length`, `token
         // != null` log whether a token exists, not the token.
-        const code = withoutStringText(line).replace(PRESENCE_ONLY, '');
+        // A token passed through a masking helper (`maskBearer(token)`,
+        // `redact(token)`) is logged masked, not in the clear
+        const code = withoutStringText(line).replace(PRESENCE_ONLY, '').replace(MASKED_CALL, '_');
         for (const { pattern, detail, codeOnly, fileWrite } of INSECURE_TOKEN_PATTERNS) {
           if (pattern.test(codeOnly ? code : line)) {
             if (fileWrite && OWNER_ONLY_MODE.test(nearbyText(segments, i, 2))) break;
