@@ -136,3 +136,14 @@ describe('credential masking: every payload, every output path', () => {
       .toEqual(['run', '-p', '3000:3000', '--token', '${TOKEN}']);
   });
 });
+
+describe('masking: dt14 forms', () => {
+  it('masks --header=Authorization and PowerShell $env: assignments', async () => {
+    const { maskCredentialsInText } = await import('./serialize.js');
+    const out = maskCredentialsInText(`mcp-remote https://x --header=Authorization: Bearer sk-live-abc123def456 ; $env:API_KEY='sk-live-zyx987wvu654' ; $env:GITHUB_TOKEN = "ghp_aaaaaaaaaaaaaaaaaaaa"`);
+    expect(out).not.toContain('sk-live-abc123def456');
+    expect(out).not.toContain('sk-live-zyx987wvu654');
+    expect(out).not.toContain('ghp_aaaaaaaaaaaaaaaaaaaa');
+    expect(out).toContain('API_KEY');
+  });
+});

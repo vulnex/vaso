@@ -108,9 +108,9 @@ function trimUrlTail(url: string): string {
 // long `a-a-a…` token from every word boundary (quadratic)
 const URL_IN_TEXT = /\b[a-z][a-z0-9+.-]{0,31}:\/\/[^\s"<>]+/gi;
 /** `Authorization: Bearer x`, `X-Api-Key: x`, `Cookie: x` header lines. */
-const SECRET_HEADER = /(^|[\s"'])((?:proxy-)?authorization|cookie|x-[\w-]*(?:key|token|secret|auth|session)[\w-]*|api[_-]?key)(\s*:\s*)((?:bearer|basic|token|bot|digest)\s+)?([^\s"',;]+)/gi;
+const SECRET_HEADER = /(^|[\s"'=])((?:proxy-)?authorization|cookie|x-[\w-]*(?:key|token|secret|auth|session)[\w-]*|api[_-]?key)(\s*:\s*)((?:bearer|basic|token|bot|digest)\s+)?([^\s"',;]+)/gi;
 /** `NAME=value` where NAME looks like a credential (env lines, `docker -e`, `env K=V cmd`, inline `sh -c`). */
-const SECRET_ASSIGN = /(^|[\s"'`(;&|])([A-Za-z_][A-Za-z0-9_]*)=("[^"]*"|'[^']*'|[^\s"'`;&|)]+)/g;
+const SECRET_ASSIGN = /(^|[\s"'`(;&|:$])([A-Za-z_][A-Za-z0-9_]*)\s*=\s*("[^"]*"|'[^']*'|[^\s"'`;&|)]+)/g;
 /** `--token=x`, `--token x`, `--api-key x`, `--key=x`, `--pat=x`, `--password x`. */
 const SECRET_FLAG = /(^|[\s"'[,])(--?(?:[a-z][\w-]*?[-_])?(?:access[_-]?token|auth[_-]?token|token|api[_-]?key|apikey|key|pat|secret|client[_-]?secret|password|passwd|pass|pwd|credentials?)|-p)(=|\s+|["']\s*,\s*["'])([^\s"'<>,]+)/gi;
 /** `-u user:pass` / `--user user:pass` (curl, wget). */

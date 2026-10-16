@@ -7,9 +7,9 @@ const TOKEN_PASSTHROUGH_PATTERNS = [
   { pattern: /(?:fetch|http\.request|axios|got|request)\s*\(.*req(?:uest)?\.headers\.authorization/i, detail: 'Inbound authorization header passed to outbound request' },
   { pattern: /(?:fetch|http\.request|axios|got)\s*\([^;]*\b(?:context|ctx)\.token\b/i, detail: 'Context token passed to downstream API' },
   { pattern: /headers\s*:\s*\{[^}]*authorization\s*:\s*req(?:uest)?\.headers/i, detail: 'Authorization header copied from inbound to outbound request' },
-  { pattern: /headers\s*:\s*\{[^}]*[Bb]earer\s*.*req(?:uest)?\.headers/i, detail: 'Bearer token extracted from request and forwarded downstream' },
+  { pattern: /headers\s*:\s*\{[^}]{0,500}?[Bb]earer[^\n]{0,500}?req(?:uest)?\.headers/i, detail: 'Bearer token extracted from request and forwarded downstream' },
   // The interpolated expression itself must be the inbound request's token.
-  { pattern: /authorization\s*:\s*`\s*Bearer\s*\$\{\s*(?:req|request|ctx|context)\b[^}]*token[^}]*\}/i, detail: 'Token from request context interpolated into outbound Authorization header' },
+  { pattern: /authorization\s*:\s*`\s*Bearer\s*\$\{\s*(?:req|request|ctx|context)\b[^}]{0,200}?token[^}]{0,200}\}/i, detail: 'Token from request context interpolated into outbound Authorization header' },
 ];
 
 export const mcp015 = defineCheck({

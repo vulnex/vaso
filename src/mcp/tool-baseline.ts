@@ -217,7 +217,7 @@ export function extractToolDefinitions(sourceCode: string): MCPToolDefinition[] 
   runPattern(/(?:const|let|var)\s+(?:tool)?[Nn]ame\s*=\s*['"]([^'"]+)['"][\s\S]{0,400}?\bdescription\s*:\s*['"]((?:[^'"\\]|\\.)*?)['"]/g);
 
   // Pattern 6: inline registerTool/tool with a config object carrying description.
-  runPattern(/(?:register[_]?[Tt]ool|\.tool)\(\s*['"]([^'"]+)['"]\s*,\s*\{[\s\S]{0,400}?\bdescription\s*:\s*['"]((?:[^'"\\]|\\.)*?)['"]/g);
+  runPattern(/(?:register[_]?[Tt]ool|\.tool)\(\s*['"]([^'"\n]{1,200})['"]\s*,\s*\{[\s\S]{0,400}?\bdescription\s*:\s*['"]((?:[^'"\\]|\\.)*?)['"]/g);
 
   // Pattern 7: an object literal with both `name:` and `description:` fields.
   runPattern(/\bname\s*:\s*['"]([^'"]+)['"][\s\S]{0,200}?\bdescription\s*:\s*['"]((?:[^'"\\]|\\.)*?)['"]/g);
@@ -243,7 +243,7 @@ export function extractPromptNames(sourceCode: string): string[] {
 
   // Separated: const name = "name"; ... registerPrompt(name, config, handler)
   const sepRe =
-    /(?:const|let|var)\s+(?:prompt)?[Nn]ame\s*=\s*['"]([^'"]+)['"][\s\S]{0,400}?registerPrompt\(/g;
+    /(?:const|let|var)\s+(?:prompt)?[Nn]ame\s*=\s*['"]([^'"\n]{1,200})['"][\s\S]{0,400}?registerPrompt\(/g;
   while ((match = sepRe.exec(sourceCode)) !== null) add(match[1]);
 
   return [...names];

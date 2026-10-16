@@ -21,7 +21,7 @@ const INJECTION_PATTERNS = [
   { pattern: new RegExp(String.raw`\.(?:query|execute|raw)\s*\(\s*["'\`][^"'\`]*["'\`]\s*\+\s*` + INPUT), name: 'SQL injection via concatenation' },
   // Python DB-API: f-string, %-format or concatenation into execute().
   // The string runs to its own closing quote: f"… WHERE name = '{name}'" quotes the value inside.
-  { pattern: /\.execute(?:many)?\s*\(\s*(?:f(["'])(?:(?!\1).)*?\b(?:SELECT|INSERT|UPDATE|DELETE)\b(?:(?!\1).)*?\{|(["'])(?:(?!\2).)*?\b(?:SELECT|INSERT|UPDATE|DELETE)\b(?:(?!\2).)*?\2\s*(?:%|\+|\.format\())/i, name: 'SQL injection via string formatting' },
+  { pattern: /\.execute(?:many)?\s*\(\s*(?:f(["'])(?:(?!\1).){0,500}?\b(?:SELECT|INSERT|UPDATE|DELETE)\b(?:(?!\1).){0,500}?\{|(["'])(?:(?!\2).){0,500}?\b(?:SELECT|INSERT|UPDATE|DELETE)\b(?:(?!\2).){0,500}?\2\s*(?:%|\+|\.format\())/i, name: 'SQL injection via string formatting' },
   // The fs call itself (`fs.writeFile(args…`), not a function named for it (`handleWriteFile(args)`).
   { pattern: new RegExp(String.raw`(?<![\w$])writeFile(?:Sync)?\s*\(\s*` + INPUT), name: 'File write with user-controlled path' },
 ];

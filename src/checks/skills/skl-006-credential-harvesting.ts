@@ -17,7 +17,7 @@ const CRED_HARVEST_RULES = SECURITY_PATTERNS.filter(r => r.category === 'credent
 function placeholderKeyLine(line: string): boolean {
   if (!/authorized_keys/.test(line)) return false;
   const key = /\b(?:ssh-(?:rsa|ed25519|dss)|ecdsa-sha2-[\w-]+|sk-ssh-[\w@.-]+)\s+(\S+)/.exec(line);
-  if (!key) return /<[^>]*key[^>]*>|your[_-]?(?:public[_-]?)?key/i.test(line);
+  if (!key) return /<[^<>\n]{0,100}key[^<>\n]{0,100}>|your[_-]?(?:public[_-]?)?key/i.test(line);
   const body = key[1].replace(/["'`]+$/, '');
   // A variable or anything else unknown stays critical: it may be the attacker's key
   return body.includes('...') || body.includes('…') || /^<.*>$/.test(body) || /^AAAA[A-Za-z0-9+/]{0,59}$/.test(body);

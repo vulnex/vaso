@@ -24,7 +24,7 @@ export const SECURITY_PATTERNS: PatternRule[] = [
   { id: 'RS-003', pattern: /\bnet\.connect\s*\(.*\bchild_process\b/i, category: 'reverse-shell', severity: 'critical', description: 'Node.js net.connect reverse shell' },
   { id: 'RS-004', pattern: /\bnew\s+WebSocket\b.*\bchild_process\b/is, category: 'reverse-shell', severity: 'critical', description: 'WebSocket reverse shell' },
   // A socket wired to a shell — not any line naming both (an audit hook that blocks `socket.` and `subprocess.`)
-  { id: 'RS-005', pattern: /\bsocket\.socket\s*\(.*(?:\bos\.dup2\s*\(|\bpty\.spawn\s*\(|\bsubprocess\.\w+\s*\(.*\b(?:ba|z|k)?sh\b)|\bsocket\b.*\.on\s*\(\s*['"]data['"].*\b(?:exec|execSync|spawn|spawnSync)\s*\(/i, category: 'reverse-shell', severity: 'critical', description: 'Socket-based reverse shell' },
+  { id: 'RS-005', pattern: /\bsocket\.socket\s*\([^\n]{0,1000}?(?:\bos\.dup2\s*\(|\bpty\.spawn\s*\(|\bsubprocess\.\w+\s*\([^\n]{0,300}?\b(?:ba|z|k)?sh\b)|\bsocket\b[^\n]{0,1000}?\.on\s*\(\s*['"]data['"][^\n]{0,1000}?\b(?:exec|execSync|spawn|spawnSync)\s*\(/i, category: 'reverse-shell', severity: 'critical', description: 'Socket-based reverse shell' },
   { id: 'RS-006', pattern: /python\S*\s+-c\s+['"]import\s+socket/i, category: 'reverse-shell', severity: 'critical', description: 'Python reverse shell' },
   { id: 'RS-007', pattern: /\bsocat\b.*\bexec:/i, category: 'reverse-shell', severity: 'critical', description: 'Socat reverse shell' },
   // `mkfifo f; cat f | sh -i 2>&1 | nc host port > f` — netcat without -e
@@ -65,7 +65,7 @@ export const SECURITY_PATTERNS: PatternRule[] = [
   // Exfiltration (from openclaw-security-monitor + B@dskills)
   { id: 'EX-001', pattern: /\.postMessage\s*\(.*\btransfer\b/i, category: 'exfiltration', severity: 'warning', description: 'postMessage with transfer' },
   { id: 'EX-002', pattern: /\bwebhook\b.*\b(?:send|post)\b/i, category: 'exfiltration', severity: 'warning', description: 'Webhook exfiltration pattern' },
-  { id: 'EX-003', pattern: /dns.*(?:lookup|resolve).*(?:encode|btoa|Buffer)/i, category: 'exfiltration', severity: 'critical', description: 'DNS exfiltration' },
+  { id: 'EX-003', pattern: /dns[^\n]{0,500}?(?:lookup|resolve)[^\n]{0,500}?(?:encode|btoa|Buffer)/i, category: 'exfiltration', severity: 'critical', description: 'DNS exfiltration' },
 
   // Prompt injection indicators
   { id: 'PI-001', pattern: /ignore\s+(?:all\s+)?(?:previous|above|prior)\s+instructions/i, category: 'prompt-injection', severity: 'warning', description: 'Prompt injection — instruction override' },
