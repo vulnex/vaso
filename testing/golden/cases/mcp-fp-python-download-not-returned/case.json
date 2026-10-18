@@ -1,0 +1,6 @@
+{
+  "agent": "mcp",
+  "source": "dt16: Python tools whose downloads are uploaded, saved or played and whose result is a status message (minimax-mcp shapes)",
+  "mcp": { "source": ["srv/server.py"] },
+  "pass": ["MCP-007"]
+}

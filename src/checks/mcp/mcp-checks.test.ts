@@ -3167,6 +3167,210 @@ describe('MCP-007 tool-result passthrough', () => {
     expect(result.evidence).toHaveLength(1);
     expect(result.evidence![0].line).toBe(4);
   });
+
+  const py = (sourceCode: string) => mcp007.run(makeContext({ mcpServerSources: [{ serverName: 'p', language: 'python', sourceCode }] }));
+
+  it('follows a Python tool into a module-level helper that fetches the URL (dt16)', async () => {
+    const helper = [
+      'import httpx',
+      'async def fetch_page(url: str, timeout: float = 10) -> str:',
+      '    async with httpx.AsyncClient() as client:',
+      '        response = await client.get(url, timeout=timeout)',
+      '        return response.text',
+      '',
+    ];
+    const chosen = await py([...helper,
+      '@mcp.tool()',
+      'async def fetch(target: str) -> str:',
+      '    page = await fetch_page(target)',
+      '    return page',
+    ].join('\n'));
+    expect(chosen.severity).toBe('warning');
+    expect(chosen.evidence).toHaveLength(1);
+    expect(chosen.evidence![0].line).toBe(9);
+    expect(chosen.evidence![0].detail).toMatch(/URL the caller chooses \(client via fetch_page\(\)\)/);
+    // the helper fetching a fixed API for the tool is info, not a caller-chosen URL
+    const fixed = await py([...helper,
+      'STATUS = "https://status.example.com/api/v2/summary.json"',
+      '@mcp.tool()',
+      'async def status(verbose: bool = False) -> str:',
+      '    return await fetch_page(STATUS)',
+    ].join('\n'));
+    expect(fixed.severity).toBe('info');
+    expect(fixed.evidence![0].detail).toContain('status.example.com');
+    // a tool argument that isn't the URL doesn't make the helper's fixed URL the caller's
+    const keyed = await py([...helper,
+      '@mcp.tool()',
+      'async def wiki(title: str) -> str:',
+      '    return await fetch_page(f"https://en.wikipedia.org/wiki/{title}")',
+    ].join('\n'));
+    expect(keyed.severity).toBe('warning');
+    expect(keyed.evidence![0].detail).toContain('en.wikipedia.org');
+  });
+
+  it('follows module-level instances and self methods (duckduckgo-mcp-server 0.7 shape)', async () => {
+    const result = await py([
+      'import httpx',
+      '@dataclass',
+      'class SearchResult:',
+      '    title: str',
+      'class Searcher:',
+      '    BASE_URL = "https://html.duckduckgo.com/html"',
+      '    async def search(self, query, ctx):',
+      '        html = await self._request({"q": query})',
+      '        soup = BeautifulSoup(html, "html.parser")',
+      '        results = []',
+      '        for result in soup.select(".result"):',
+      '            results.append(SearchResult(title=result.get_text()))',
+      '        return results',
+      '    async def _request(self, data):',
+      '        async with httpx.AsyncClient() as client:',
+      '            response = await client.post(',
+      '                self.BASE_URL, data=data, timeout=30.0',
+      '            )',
+      '            return response.text',
+      'class Fetcher:',
+      '    async def _fetch_httpx(self, url: str) -> str:',
+      '        current = url',
+      '        async with httpx.AsyncClient(follow_redirects=False) as client:',
+      '            response = await client.get(',
+      '                current, timeout=30.0',
+      '            )',
+      '            return response.text',
+      '    async def fetch_and_parse(self, url, ctx, max_length=8000):',
+      '        html = await self._fetch_httpx(url)',
+      '        return html[:max_length]',
+      'searcher = Searcher()',
+      'fetcher = Fetcher(',
+      '    timeout=30,',
+      ')',
+      '@mcp.tool()',
+      'async def search(query: str, ctx: Context) -> str:',
+      '    results = await searcher.search(query, ctx)',
+      '    return format(results)',
+      '@mcp.tool()',
+      'async def fetch_content(url: str, ctx: Context) -> str:',
+      '    return await fetcher.fetch_and_parse(url, ctx)',
+    ].join('\n'));
+    expect(result.severity).toBe('warning');
+    const byLine = new Map(result.evidence!.map((e) => [e.line, e.detail]));
+    expect(byLine.get(37)).toMatch(/html\.duckduckgo\.com/); // fixed search endpoint: info
+    expect(byLine.get(41)).toMatch(/URL the caller chooses \(client via fetch_and_parse\(\)\)/);
+  });
+
+  it('follows helpers that read a file whose text is returned, at info', async () => {
+    const result = await py([
+      'def load_doc(path):',
+      '    with open(path, encoding="utf-8") as f:',
+      '        data = f.read()',
+      '    return data',
+      '@mcp.tool()',
+      'def read_doc(name: str) -> str:',
+      '    return load_doc(name)',
+    ].join('\n'));
+    expect(result.passed).toBe(false);
+    expect(result.severity).toBe('info');
+    expect(result.evidence![0].detail).toMatch(/File content \(open via load_doc\(\)\)/);
+  });
+
+  it('stays quiet when the helper only writes, or the tool returns no helper value', async () => {
+    expect((await py([
+      'def save(path, text):',
+      '    with open(path, "w") as f:',
+      '        f.write(text)',
+      '    return path',
+      '@mcp.tool()',
+      'def store(name: str, text: str) -> str:',
+      '    return save(name, text)',
+    ].join('\n'))).passed).toBe(true);
+    expect((await py([
+      'def ping_url(url):',
+      '    requests.get(url)',
+      '    return "ok"',
+      '@mcp.tool()',
+      'def ping(url: str) -> str:',
+      '    ping_url(url)',
+      '    return "done"',
+    ].join('\n'))).passed).toBe(true);
+    // fetched bytes that are uploaded, saved or played aren't returned (minimax-mcp shape)
+    expect((await py([
+      '@mcp.tool(',
+      '    description="""Clone a voice.',
+      '    Returns: text with the voice id."""',
+      ')',
+      'def voice_clone(',
+      '    voice_id: str,',
+      '    file: str,',
+      ') -> TextContent:',
+      '    response = requests.get(file, stream=True)',
+      '    files = {"file": ("a.mp3", response.raw, "audio/mpeg")}',
+      '    response_data = api_client.post("/v1/files/upload", files=files)',
+      '    file_id = response_data.get("file", {}).get("file_id")',
+      '    video = requests.get(download_url)',
+      '    with open(out, "wb") as f:',
+      '        f.write(video.content)',
+      '    return TextContent(type="text", text=f"Voice cloned: {voice_id}, saved {out}")',
+    ].join('\n'))).passed).toBe(true);
+    // a method of the same name in another module isn't this call's helper
+    expect((await py([
+      '// === pkg/client.py ===',
+      'class ApiClient:',
+      '    def post(self, path, files=None):',
+      '        return self.session.post(self.base + path, files=files).json()',
+      '// === pkg/server.py ===',
+      '@mcp.tool()',
+      'def upload(file: str) -> str:',
+      '    response = requests.get(file, stream=True)',
+      '    files = {"file": response.raw}',
+      '    data = api_client.post("/v1/files/upload", files=files)',
+      '    return f"Uploaded: {data}"',
+    ].join('\n'))).passed).toBe(true);
+    // the wikipedia lab shape: the page picked out of the response is returned
+    expect((await py([
+      '@mcp.tool()',
+      'async def get_article(title: str) -> str:',
+      '    async with httpx.AsyncClient() as client:',
+      '        response = await client.get("https://en.wikipedia.org/w/api.php", params={"titles": title})',
+      '        data = response.json()',
+      '        pages = data["query"]["pages"]',
+      '        page = next(iter(pages.values()))',
+      '        if "missing" in page:',
+      '            return f"Article \'{title}\' not found."',
+      '        return f"**{page[\'title\']}**\\n\\n{page.get(\'extract\', \'No content.\')}"',
+    ].join('\n'))).severity).toBe('warning');
+    // but the fetched text in the result is reported, through f-strings and wrappers
+    expect((await py([
+      '@mcp.tool()',
+      'def get(url: str) -> TextContent:',
+      '    r = requests.get(url)',
+      '    return TextContent(type="text", text=f"Page:\\n{r.text}")',
+    ].join('\n'))).severity).toBe('warning');
+    // recursion and helper cycles terminate
+    expect((await py([
+      'def a(u):',
+      '    return b(u)',
+      'def b(u):',
+      '    return a(u)',
+      '@mcp.tool()',
+      'def t(u: str) -> str:',
+      '    return a(u)',
+    ].join('\n'))).passed).toBe(true);
+  });
+
+  it('resolves helpers within their own module of a multi-file source', async () => {
+    const result = await py([
+      '// === pkg/util.py ===',
+      'def fetch_page(url):',
+      '    return requests.get(url).text',
+      '// === pkg/server.py ===',
+      'def fetch_page(url):',
+      '    return "cached"',
+      '@mcp.tool()',
+      'def get(url: str) -> str:',
+      '    return fetch_page(url)',
+    ].join('\n'));
+    expect(result.passed).toBe(true);
+  });
 });
 
 describe('MCP-009 source scope', () => {

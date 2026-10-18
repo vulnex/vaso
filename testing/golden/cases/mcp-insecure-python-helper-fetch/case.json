@@ -1,0 +1,6 @@
+{
+  "agent": "mcp",
+  "source": "dt16: Python tool returning a caller-chosen page through a module-level instance's helper methods (duckduckgo-mcp-server 0.7 shape)",
+  "mcp": { "source": ["srv/server.py"] },
+  "fail": { "MCP-007": "warning" }
+}

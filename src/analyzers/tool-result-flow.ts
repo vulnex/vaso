@@ -10,7 +10,8 @@
  * `{ type: 'text', text: … }` content block.
  *
  * Python: a tool function (`@mcp.tool()`, `@server.call_tool()`, …) that makes
- * an HTTP request (requests, httpx, aiohttp, urllib) and returns a value.
+ * an HTTP request (requests, httpx, aiohttp, urllib) or reads a file and
+ * returns a value — itself or through a helper in the same module.
  *
  * How much the content can be trusted depends on where it comes from, so each
  * flow says: a URL the caller chooses (any page, attacker-written included), a
@@ -23,6 +24,7 @@ import type { Binding, NodePath } from '@babel/traverse';
 import type { Node } from '@babel/types';
 import { parseJs, sourceChunks } from './js-parse.js';
 import { FS_CALLS, FS_MODULE, bindingModule, isFsObject, localCallees } from './tool-input-taint.js';
+import { blankStrings, callArgs, codeLines, mapStringLiterals, splitArgs, statements, topLevelParts } from './python-sinks.js';
 
 const traverse = typeof _traverse === 'function' ? _traverse : (_traverse as { default: typeof _traverse }).default;
 
@@ -389,44 +391,376 @@ function fromCallSites(binding: Binding, depth: number): { literal?: string; par
 
 const PY_TOOL_DECORATOR = /^\s*@\s*[\w.]+\.(?:tool|call_tool)\s*\(/;
 const PY_HTTP_CALL = /\b(?:requests|httpx|client|session|http|aiohttp|urllib\.request)\s*\.\s*(?:get|post|request|stream|urlopen)\s*\(|\burlopen\s*\(/;
+/** An HTTP client or session object created here: `httpx.AsyncClient(`, `requests.Session(`, curl_cffi `AsyncSession(`. */
+const PY_CLIENT_CTOR = /\b(?:AsyncClient|Client|Session|AsyncSession|ClientSession)\s*\(/;
+/** `return` of a value, not just a literal message (`return "Not found."`). */
+const PY_RETURNS_VALUE = (text: string): boolean =>
+  /^\s*return\s+\S/.test(text) && !/^\s*return\s+(?:f?["'][^"'{]*["']|None|True|False|\d+)\s*$/.test(text);
+const PY_MAX_DEPTH = 4;
+/** Calls whose result carries their arguments' text (string building, parsing, result wrappers). */
+const PY_PASSTHROUGH = /^(?:str|repr|format|join|replace|strip|lstrip|rstrip|lower|upper|split|splitlines|list|tuple|dict|sorted|reversed|next|iter|values|items|get|pop|encode|decode|copy|loads|dumps|json\.loads|json\.dumps|BeautifulSoup|markdownify|html2text|handle|unescape|dedent|TextContent|truncate|cast)$/;
 
+/** Where a URL expression starts: a literal prefix, or a parameter (by position) of the function it is in. */
+interface PyStart {
+  literal?: string;
+  param?: number;
+}
+
+interface PyFn {
+  name: string;
+  /** Parameters by position, `self`/`cls` dropped. */
+  params: string[];
+  /** Statement range: the `def` statement and its body. */
+  def: number;
+  end: number;
+  module: number;
+  cls?: string;
+  tool: boolean;
+}
+
+interface PyFlow {
+  line: number;
+  snippet: string;
+  via: 'http' | 'file';
+  /** The HTTP library or file call (`httpx`, `open`). */
+  base: string;
+  /** Helpers the content came through, outermost first. */
+  through: string[];
+  start: PyStart;
+}
+
+/**
+ * Python tool functions (`@mcp.tool()`, `@server.call_tool()`) that return a
+ * value after fetching a URL or reading a file — directly, or through a helper
+ * in the same module: a function (`fetch_page(url)`), a method of a class
+ * instantiated at module level (`fetcher.fetch_and_parse(url)`), or a method
+ * on `self`. Line-based, like the rest of the Python analysis: statements are
+ * merged across brackets, assignments followed in order, and a helper's URL
+ * parameter is mapped to what each call site passes, so a tool's URL counts
+ * as caller-chosen only when the tool's own input reaches the request.
+ */
 function analyzePython(code: string): ExternalContentFlow[] {
-  const lines = code.split('\n');
-  const results: ExternalContentFlow[] = [];
-  for (let i = 0; i < lines.length; i++) {
-    if (!PY_TOOL_DECORATOR.test(lines[i])) continue;
-    // The decorated def, then its indented body.
-    let def = i + 1;
-    while (def < lines.length && /^\s*@/.test(lines[def])) def++;
-    const header = /^(\s*)(?:async\s+)?def\s+\w+\s*\(([^)]*)\)/.exec(lines[def] ?? '');
-    if (!header) continue;
-    const indent = header[1].length;
-    const params = header[2].split(',').map((p) => p.split(/[:=]/)[0].trim()).filter((p) => p && p !== 'self');
-    let returns = false;
-    let call: { line: number; text: string } | undefined;
-    for (let j = def + 1; j < lines.length; j++) {
-      const text = lines[j];
-      if (text.trim() !== '' && text.search(/\S/) <= indent && !/^\s*#/.test(text)) break;
-      if (!call && PY_HTTP_CALL.test(text)) call = { line: j + 1, text };
-      // A value, not just a literal message (`return "Not found."`).
-      if (/^\s*return\s+\S/.test(text) && !/^\s*return\s+(?:f?["'][^"'{]*["']|None|True|False|\d+)\s*$/.test(text)) returns = true;
+  const rawLines = code.split('\n');
+  const stmts = statements(codeLines(code));
+  const blanked = stmts.map((s) => blankStrings(s.text));
+  const indentOf = (i: number): number => stmts[i].text.search(/\S/);
+
+  // Modules of a joined multi-file source (`// === pkg/server.py ===`)
+  const moduleOf: number[] = [];
+  let module = 0;
+  for (let i = 0; i < stmts.length; i++) {
+    if (/^\s*\/\/ === .* ===\s*$/.test(stmts[i].text)) module++;
+    moduleOf.push(module);
+  }
+  const bodyEnd = (i: number): number => {
+    const indent = indentOf(i);
+    let end = i + 1;
+    while (end < stmts.length && moduleOf[end] === moduleOf[i] && indentOf(end) > indent) end++;
+    return end;
+  };
+
+  // Classes, their string attributes; module string constants; module-level instances
+  const classes = new Map<string, { attrs: Map<string, string> }>(); // `${module}:${name}`
+  const constants = new Map<string, string>(); // `${module}:${name}` → literal
+  const instances = new Map<string, string>(); // `${module}:${name}` → class name
+  const stringValue = (expr: string): string | undefined => /^\s*[rRbBuU]{0,2}(["'])([^"']*)\1\s*$/.exec(expr)?.[2];
+  for (let i = 0; i < stmts.length; i++) {
+    const cls = /^(\s*)class\s+(\w+)/.exec(stmts[i].text);
+    if (!cls) continue;
+    const attrs = new Map<string, string>();
+    const end = bodyEnd(i);
+    const inner = i + 1 < end ? indentOf(i + 1) : -1;
+    for (let j = i + 1; j < end; j++) {
+      if (indentOf(j) !== inner) continue;
+      const a = /^\s*([A-Za-z_]\w*)\s*(?::[^=]+)?=(?!=)\s*(.*)$/.exec(stmts[j].text);
+      const v = a ? stringValue(a[2]) : undefined;
+      if (a && v !== undefined) attrs.set(a[1], v);
     }
-    if (!call || !returns) continue;
-    // The URL: the call's first argument, possibly on the next line.
-    const after = call.text.slice(call.text.search(PY_HTTP_CALL)).replace(/^[^(]*\(/, '') + ' ' + (lines[call.line] ?? '');
-    const literal = /^\s*f?["']([^"']*)["']/.exec(after)?.[1];
-    const firstName = /^\s*([A-Za-z_]\w*)\b/.exec(after)?.[1];
-    const lastName = /^\s*([A-Za-z_][\w.]*)/.exec(after)?.[1]?.split('.').pop();
-    // `client.get(key)` on a memcached/redis client is a cache read; a generic
-    // receiver counts only when it is handed a URL.
-    if (/\b(?:client|session)\s*\.\s*get\s*\(/.test(call.text) && !(literal ? /^(?:https?:\/\/|\/)/i.test(literal) : lastName && URL_NAME.test(lastName))) continue;
-    const host = literal ? hostOf(literal) : undefined;
+    classes.set(`${moduleOf[i]}:${cls[2]}`, { attrs });
+  }
+  for (let i = 0; i < stmts.length; i++) {
+    if (indentOf(i) !== 0) continue;
+    const a = /^([A-Za-z_]\w*)\s*(?::[^=]+)?=(?!=)\s*(.*)$/.exec(stmts[i].text);
+    if (!a) continue;
+    const v = stringValue(a[2]);
+    if (v !== undefined) constants.set(`${moduleOf[i]}:${a[1]}`, v);
+    const ctor = /^([A-Za-z_]\w*)\s*\(/.exec(a[2].trim())?.[1];
+    if (ctor && classes.has(`${moduleOf[i]}:${ctor}`)) instances.set(`${moduleOf[i]}:${a[1]}`, ctor);
+  }
+
+  // Functions and methods
+  const fns: PyFn[] = [];
+  for (let i = 0; i < stmts.length; i++) {
+    const def = /^(\s*)(?:async\s+)?def\s+(\w+)\s*\(/.exec(stmts[i].text);
+    if (!def) continue;
+    const indent = def[1].length;
+    let params = topLevelParts(callArgs(stmts[i].text, def[0].length - 1))
+      .map((p) => /^\s*\**([A-Za-z_]\w*)/.exec(p)?.[1])
+      .filter((p): p is string => !!p);
+    let cls: string | undefined;
+    for (let j = i - 1; j >= 0 && moduleOf[j] === moduleOf[i]; j--) {
+      if (stmts[j].text.trim() === '' || indentOf(j) >= indent) continue;
+      cls = /^\s*class\s+(\w+)/.exec(stmts[j].text)?.[1];
+      break;
+    }
+    if (cls && (params[0] === 'self' || params[0] === 'cls')) params = params.slice(1);
+    let tool = false;
+    for (let d = i - 1; d >= 0 && /^\s*@/.test(stmts[d].text); d--) if (PY_TOOL_DECORATOR.test(stmts[d].text)) tool = true;
+    fns.push({ name: def[2], params, def: i, end: bodyEnd(i), module: moduleOf[i], ...(cls ? { cls } : {}), tool });
+  }
+  const functionNamed = (module: number, name: string, cls?: string): PyFn | undefined =>
+    fns.find((f) => f.module === module && f.name === name && f.cls === cls);
+
+  /** Where an expression in `fn` starts, given the aliases assigned so far. */
+  const startOf = (raw: string, fn: PyFn, aliases: Map<string, PyStart>, depth = 0): PyStart | undefined => {
+    if (depth > 6) return undefined;
+    let e = raw.trim().replace(/^await\s+/, '');
+    if (!e) return undefined;
+    const quoted = /^([rRbBuUfF]{0,2})(["'])/.exec(e);
+    if (quoted) {
+      const body = e.slice(quoted[0].length);
+      const close = body.indexOf(quoted[2]);
+      const text = close < 0 ? body : body.slice(0, close);
+      if (/f/i.test(quoted[1])) {
+        const brace = text.indexOf('{');
+        if (brace === 0) return startOf(/^\{([^}]*)\}/.exec(text)?.[1] ?? '', fn, aliases, depth + 1);
+        return { literal: brace < 0 ? text : text.slice(0, brace) };
+      }
+      return { literal: text };
+    }
+    // `a + b`, `a % b`: the left operand starts it
+    const clean = mapStringLiterals(e, (m) => '_'.repeat(m.length));
+    let level = 0;
+    for (let i = 0; i < clean.length; i++) {
+      const c = clean[i];
+      if (c === '(' || c === '[' || c === '{') level++;
+      else if (c === ')' || c === ']' || c === '}') level--;
+      else if (level === 0 && (c === '+' || c === '%') && i > 0) return startOf(e.slice(0, i), fn, aliases, depth + 1);
+    }
+    if (e.startsWith('(') && e.endsWith(')')) return startOf(e.slice(1, -1), fn, aliases, depth + 1);
+    const wrapped = /^(?:str|httpx\.URL|URL|urllib\.parse\.quote|quote)\s*\(/.exec(e);
+    if (wrapped) return startOf(topLevelParts(callArgs(e, wrapped[0].length - 1))[0] ?? '', fn, aliases, depth + 1);
+    const ref = /^([A-Za-z_]\w*)(?:\s*\.\s*([A-Za-z_]\w*))?/.exec(e);
+    if (!ref) return undefined;
+    const [, base, attr] = ref;
+    if ((base === 'self' || base === 'cls') && attr && fn.cls) {
+      const v = classes.get(`${fn.module}:${fn.cls}`)?.attrs.get(attr);
+      return v !== undefined ? { literal: v } : undefined;
+    }
+    if (aliases.has(base)) return aliases.get(base);
+    const index = fn.params.indexOf(base);
+    if (index >= 0) return { param: index };
+    const constant = constants.get(`${fn.module}:${base}`);
+    if (constant !== undefined && !attr) return { literal: constant };
+    if (attr) {
+      const v = classes.get(`${fn.module}:${base}`)?.attrs.get(attr);
+      if (v !== undefined) return { literal: v };
+    }
+    return undefined;
+  };
+
+  /** The argument a call passes for a callee's parameter `index`. */
+  const argumentFor = (args: string, callee: PyFn, index: number): string | undefined => {
+    const { positional, keywords } = splitArgs(args);
+    return keywords.get(callee.params[index]) ?? positional[index];
+  };
+
+  /** Rank of a flow's URL: a parameter (may be the caller's) > an open-content host > anything else. */
+  const rank = (f: PyFlow): number => {
+    if (f.start.param !== undefined) return 3;
+    const host = f.start.literal ? hostOf(f.start.literal) : undefined;
+    return host && isOpenContentHost(host) ? 2 : 1;
+  };
+
+  /** The helper in `fn`'s module a call `owner.name(…)` / `name(…)` reaches: a function, a `self` method, a module-level instance's method. */
+  const calleeOf = (fn: PyFn, owner: string | undefined, name: string): PyFn | undefined => {
+    if (!owner) return functionNamed(fn.module, name);
+    if ((owner === 'self' || owner === 'cls') && fn.cls) return functionNamed(fn.module, name, fn.cls);
+    const cls = instances.get(`${fn.module}:${owner}`) ?? (classes.has(`${fn.module}:${owner}`) ? owner : undefined);
+    return cls ? functionNamed(fn.module, name, cls) : undefined;
+  };
+
+  /**
+   * `text` as data: f-string interpolations kept as `(a, b)`, other string
+   * contents blanked, and each call reduced to what flows out of it — the
+   * receiver of a method (`resp.json()`, `soup.select(…)`), plus the arguments
+   * of calls that pass them through (`json.dumps(x)`, `str(x)`, `TextContent(…)`,
+   * a helper in this module). Any other call returns its own value
+   * (`api.post(url, files=data)` uploads `data`, it doesn't return it).
+   */
+  const dataView = (text: string, fn: PyFn): string => {
+    let out = text.replace(/\b[rR]?[fF][rR]?("""|'''|"|')((?:\\.|(?!\1)[\s\S])*?)\1/g, (_m, _q: string, body: string) =>
+      ` (${[...body.matchAll(/\{([^{}]*)\}/g)].map((m) => m[1].replace(/![rsa]$|:[^:]*$/, '')).join(', ')}) `);
+    out = blankStrings(out);
+    for (let guard = 0; guard < 64; guard++) {
+      const m = /([A-Za-z_][\w.]*)\s*\(/.exec(out);
+      if (!m) break;
+      const open = m.index + m[0].length - 1;
+      const args = callArgs(out, open);
+      const dot = m[1].lastIndexOf('.');
+      const name = dot === -1 ? m[1] : m[1].slice(dot + 1);
+      const receiver = dot === -1 ? '' : m[1].slice(0, dot);
+      // Helpers and classes of this module build their result from their arguments
+      const local = (receiver === '' || /^[A-Za-z_]\w*$/.test(receiver)) &&
+        (calleeOf(fn, receiver || undefined, name) !== undefined || (receiver === '' && classes.has(`${fn.module}:${name}`)));
+      const keep = PY_PASSTHROUGH.test(m[1]) || PY_PASSTHROUGH.test(name) || local;
+      out = out.slice(0, m.index) + ` ${receiver} ${keep ? args : ''} ` + out.slice(open + args.length + 2);
+    }
+    return out;
+  };
+  const mentionsAny = (text: string, names: Set<string>, fn: PyFn): boolean =>
+    [...dataView(text, fn).matchAll(/(?<![\w.])[A-Za-z_]\w*/g)].some((m) => names.has(m[0]));
+
+  /**
+   * Whether the value of statement `i` — with the source call written as
+   * `__src__` in `marked` — reaches a `return` of `fn`: through assignments,
+   * `for x in …`, `with … as x`, `x.append(…)`, in two passes for loops.
+   */
+  const SRC = '__src__';
+  const reachesReturn = (fn: PyFn, i: number, marked: string): boolean => {
+    const tainted = new Set<string>([SRC]);
+    const step = (text: string): boolean => {
+      const ret = /^\s*return\s+([\s\S]+)$/.exec(text);
+      if (ret) return PY_RETURNS_VALUE(text) && mentionsAny(ret[1], tainted, fn);
+      const loop = /^\s*(?:async\s+)?for\s+([\w\s,()]+?)\s+in\s+([\s\S]+?):?\s*$/.exec(text);
+      if (loop) {
+        if (mentionsAny(loop[2], tainted, fn)) for (const n of loop[1].match(/[A-Za-z_]\w*/g) ?? []) tainted.add(n);
+        return false;
+      }
+      const withAs = /^\s*(?:async\s+)?with\s+([\s\S]+):\s*$/.exec(text);
+      if (withAs) {
+        for (const part of topLevelParts(withAs[1])) {
+          const as = /^([\s\S]+?)\s+as\s+([A-Za-z_]\w*)\s*$/.exec(part.trim());
+          if (as && mentionsAny(as[1], tainted, fn)) tainted.add(as[2]);
+        }
+        return false;
+      }
+      const assign = /^\s*([A-Za-z_][\w\s,()]*?)(?:\[[^\]]*\])?\s*(?::[^=]+)?(?:[+|]?=)(?!=)\s*([\s\S]*)$/.exec(text);
+      if (assign) {
+        if (mentionsAny(assign[2], tainted, fn)) for (const n of assign[1].match(/[A-Za-z_]\w*/g) ?? []) tainted.add(n);
+        return false;
+      }
+      const grow = /^\s*([A-Za-z_]\w*)\s*\.\s*(?:append|extend|add|update|insert|write)\s*\(([\s\S]*)\)\s*$/.exec(text);
+      if (grow && mentionsAny(grow[2], tainted, fn)) tainted.add(grow[1]);
+      return false;
+    };
+    if (step(marked)) return true;
+    for (let pass = 0; pass < 2; pass++) {
+      for (let j = pass === 0 ? i + 1 : fn.def + 1; j < fn.end; j++) {
+        if (j === i) continue;
+        if (step(stmts[j].text)) return true;
+      }
+    }
+    return false;
+  };
+  /** Statement `i` with the call spanning [from, open…close paren] replaced by the source marker. */
+  const markCall = (i: number, from: number, open: number): string => {
+    const text = stmts[i].text;
+    const args = callArgs(text, open);
+    return `${text.slice(0, from)} ${SRC} ${text.slice(Math.min(text.length, open + args.length + 2))}`;
+  };
+
+  const memo = new Map<PyFn, PyFlow | null>();
+  const flowOf = (fn: PyFn, depth: number): PyFlow | undefined => {
+    if (memo.has(fn)) return memo.get(fn) ?? undefined;
+    if (depth > PY_MAX_DEPTH) return undefined;
+    memo.set(fn, null); // in progress: recursion finds nothing
+    let best: PyFlow | undefined;
+    const aliases = new Map<string, PyStart>();
+    const fileHandles = new Set<string>();
+    const consider = (flow: PyFlow, i: number, from: number, open: number) => {
+      if (best && rank(flow) <= rank(best)) return;
+      if (reachesReturn(fn, i, markCall(i, from, open))) best = flow;
+    };
+    const firstLine = (i: number): string => rawLines[stmts[i].line - 1]?.trim() ?? '';
+
+    for (let i = fn.def + 1; i < fn.end; i++) {
+      const text = stmts[i].text;
+      const code = blanked[i];
+
+      // The request, and the URL it is handed
+      const http = PY_HTTP_CALL.exec(code);
+      if (http) {
+        const open = http.index + http[0].length - 1;
+        const { positional, keywords } = splitArgs(callArgs(text, open));
+        const method = /(\w+)\s*\($/.exec(http[0])?.[1];
+        const urlExpr = keywords.get('url') ?? ((method === 'request' || method === 'stream') && positional.length > 1 ? positional[1] : positional[0]);
+        const start = urlExpr ? startOf(urlExpr, fn, aliases) : undefined;
+        const lastName = /^\s*(?:await\s+)?([A-Za-z_][\w.]*)/.exec(urlExpr ?? '')?.[1]?.split('.').pop();
+        // `client.get(key)` on a memcached/redis client is a cache read; a
+        // generic receiver counts when it is handed a URL, or was made as an
+        // HTTP client in this function or at module level
+        const receiver = /\b(client|session)\s*\.\s*get\s*\($/.exec(http[0])?.[1];
+        const urlLike = start?.literal !== undefined ? /^(?:https?:\/\/|\/)/i.test(start.literal)
+          : Boolean((lastName && URL_NAME.test(lastName)) || (start?.param !== undefined && URL_NAME.test(fn.params[start.param])));
+        const made = receiver ? new RegExp(String.raw`${PY_CLIENT_CTOR.source}.*\bas\s+${receiver}\b|\b${receiver}\s*=\s*(?:await\s+)?[\w.]*?${PY_CLIENT_CTOR.source}`) : undefined;
+        const madeHere = made !== undefined && blanked.some((b, j) =>
+          ((j > fn.def && j < fn.end) || (indentOf(j) === 0 && moduleOf[j] === fn.module)) && made.test(b));
+        if (!receiver || urlLike || madeHere) {
+          consider({
+            line: stmts[i].line, snippet: firstLine(i), via: 'http', through: [],
+            base: /\b(requests|httpx|aiohttp|urllib|client|session)\b/.exec(http[0])?.[1] ?? 'http',
+            start: start ?? {},
+          }, i, http.index, open);
+        }
+      }
+
+      // A file read: `open(p).read()`, `path.read_text()`, `with open(p) as f:` … `f.read()`
+      const handle = /^\s*(?:async\s+)?with\s+open\s*\([^\n]*?\bas\s+([A-Za-z_]\w*)\s*:/.exec(code);
+      if (handle && !/["'][wax]b?\+?["']/.test(text)) fileHandles.add(handle[1]);
+      const reads = [
+        /(?<![\w.])open\s*\([^()]*\)\s*\.\s*read(?:lines)?\s*\(/,
+        /\.\s*read_(?:text|bytes)\s*\(/,
+        ...[...fileHandles].map((h) => new RegExp(String.raw`(?<![\w.])${h}\s*\.\s*read(?:lines)?\s*\(`)),
+      ];
+      for (const re of reads) {
+        const m = re.exec(code);
+        if (!m || /["'][wax]b?\+?["']/.test(text.slice(m.index, m.index + m[0].length))) continue;
+        const open = m.index + m[0].length - 1;
+        consider({ line: stmts[i].line, snippet: firstLine(i), via: 'file', through: [], base: /read_(?:text|bytes)/.exec(m[0])?.[0] ?? 'open', start: {} }, i, m.index, open);
+        break;
+      }
+
+      // Helpers in this module: `fetch(url)`, `self._fetch(url)`, `fetcher.fetch_and_parse(url)`
+      for (const call of code.matchAll(/(?<![\w.])(?:([A-Za-z_]\w*)\s*\.\s*)?([A-Za-z_]\w*)\s*\(/g)) {
+        const callee = calleeOf(fn, call[1], call[2]);
+        if (!callee || callee === fn) continue;
+        const inner = flowOf(callee, depth + 1);
+        if (!inner) continue;
+        const open = (call.index ?? 0) + call[0].length - 1;
+        let start: PyStart = inner.start.literal !== undefined ? { literal: inner.start.literal } : {};
+        if (inner.start.param !== undefined) {
+          const arg = argumentFor(callArgs(text, open), callee, inner.start.param);
+          start = (arg ? startOf(arg, fn, aliases) : undefined) ?? {};
+        }
+        consider({ line: stmts[i].line, snippet: firstLine(i), via: inner.via, base: inner.base, through: [callee.name, ...inner.through], start }, i, call.index ?? 0, open);
+      }
+
+      // Assignments, in order: `current = url`, `endpoint = f"{BASE}/x"`
+      const assign = /^\s*([A-Za-z_]\w*)\s*(?::[^=]+)?=(?!=)\s*([\s\S]*)$/.exec(text);
+      if (assign && fn.params.indexOf(assign[1]) < 0) {
+        const s = startOf(assign[2], fn, aliases);
+        if (s) aliases.set(assign[1], s);
+        else aliases.delete(assign[1]);
+      }
+    }
+    memo.set(fn, best ?? null);
+    return best;
+  };
+
+  const results: ExternalContentFlow[] = [];
+  for (const fn of fns) {
+    if (!fn.tool) continue;
+    const flow = flowOf(fn, 0);
+    if (!flow) continue;
+    const host = flow.via === 'http' && flow.start.literal ? hostOf(flow.start.literal) : undefined;
+    const source = flow.through.length > 0 ? `${flow.base} via ${flow.through[0]}()` : flow.base;
     results.push({
-      line: call.line,
-      snippet: call.text.trim().slice(0, 120),
-      via: 'http',
-      source: /\b(requests|httpx|aiohttp|urllib|client|session)\b/.exec(call.text)?.[1] ?? 'http',
-      callerChosenUrl: !literal && firstName !== undefined && params.includes(firstName),
+      line: flow.line,
+      snippet: flow.snippet.slice(0, 120),
+      via: flow.via,
+      source,
+      callerChosenUrl: flow.via === 'http' && flow.start.param !== undefined,
       openContentHost: host ? isOpenContentHost(host) : false,
       ...(host ? { host } : {}),
     });

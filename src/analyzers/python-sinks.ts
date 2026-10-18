@@ -68,7 +68,7 @@ export interface PythonSinkFinding {
 }
 
 /** `text` with string-literal contents replaced by spaces (same length, quotes kept). */
-function blankStrings(text: string): string {
+export function blankStrings(text: string): string {
   return mapStringLiterals(text, (m) => m.length < 2 ? m : m[0] + ' '.repeat(m.length - 2) + m[m.length - 1]);
 }
 
@@ -121,7 +121,7 @@ const DECODES = /\b(?:b64decode|urlsafe_b64decode|b32decode|b16decode|b85decode|
 /** Modules whose functions are sinks, by the name this file binds them to. */
 const SINK_MODULES = new Set(['os', 'subprocess', 'asyncio', 'pty', 'commands']);
 
-interface CodeLine {
+export interface CodeLine {
   line: number;
   text: string;
 }
@@ -164,7 +164,7 @@ export function pythonStringLines(lines: string[]): Array<'doc' | 'data' | undef
 }
 
 /** Code lines with their 1-based numbers; comments, docstrings and multi-line string bodies dropped. */
-function codeLines(code: string): CodeLine[] {
+export function codeLines(code: string): CodeLine[] {
   const out: CodeLine[] = [];
   const lines = code.split('\n');
   const strings = pythonStringLines(lines);
@@ -249,7 +249,7 @@ function aliasRewriter(code: string): (text: string) => string {
 }
 
 /** Physical lines merged while a bracket is open, so a multi-line call is one statement. */
-function statements(lines: CodeLine[]): Array<CodeLine & { last: number }> {
+export function statements(lines: CodeLine[]): Array<CodeLine & { last: number }> {
   const out: Array<CodeLine & { last: number }> = [];
   let current: (CodeLine & { last: number }) | undefined;
   let depth = 0;
@@ -271,7 +271,7 @@ function statements(lines: CodeLine[]): Array<CodeLine & { last: number }> {
 }
 
 /** Argument text of the call whose `(` is at `open`. */
-function callArgs(text: string, open: number): string {
+export function callArgs(text: string, open: number): string {
   let depth = 0;
   for (let j = open; j < text.length; j++) {
     const c = text[j];
@@ -346,7 +346,7 @@ const LIST_BUILDING = /^\s*\[|\]\s*\+|\+\s*\[|\bfor\b[\s\S]*\bin\b/;
 const SHELL_PROGRAM = /^\s*[rRbBuU]?["'](?:\/(?:usr\/)?bin\/)?(?:sh|bash|zsh|dash|cmd(?:\.exe)?|powershell(?:\.exe)?|pwsh|python[\d.]*)["']/;
 
 /** Comma-separated parts at bracket depth 0 (a parameter list with annotations). */
-function topLevelParts(text: string): string[] {
+export function topLevelParts(text: string): string[] {
   const parts: string[] = [];
   let depth = 0;
   let start = 0;
@@ -616,7 +616,7 @@ export function analyzePythonCapabilities(code: string): PythonCapability[] {
 type SourceKind = 'file' | 'env' | 'envall';
 
 /** A call's top-level arguments: positional values, and keyword name → value. */
-function splitArgs(args: string): { positional: string[]; keywords: Map<string, string> } {
+export function splitArgs(args: string): { positional: string[]; keywords: Map<string, string> } {
   const positional: string[] = [];
   const keywords = new Map<string, string>();
   for (const part of topLevelParts(args)) {
