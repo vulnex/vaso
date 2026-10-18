@@ -178,7 +178,7 @@ describe('buildProbeManifest', () => {
       abacus: ['~/.abacusai/skills/**', '~/.agents/skills/**'],
       devin: ['~/.config/devin/skills/**', '~/.config/cognition/skills/**', '~/.agents/skills/**'],
       windsurf: ['~/.codeium/windsurf/skills/**', '~/.config/devin/skills/**', '~/.agents/skills/**'],
-      openclaw: ['~/.openclaw/skills/**', '~/.clawdbot/skills/**', '~/.moltbot/skills/**', '/etc/openclaw/skills/**'],
+      openclaw: ['~/.openclaw/skills/**', '~/.clawdbot/skills/**', '~/.moltbot/skills/**'],
       zeroclaw: ['~/.zeroclaw/shared/skills/**', '~/open-skills/**', '/opt/homebrew/var/zeroclaw/shared/skills/**'],
     };
     for (const [agent, globs] of Object.entries(expected)) {

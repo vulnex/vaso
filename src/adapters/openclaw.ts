@@ -153,8 +153,10 @@ async function existingMainConfig(dir: string, fs: FSProvider): Promise<string |
  *                            replaces the config file
  *   every ~/.openclaw-<name> a `--profile <name>` gateway, discovered without
  *                            the variable (a service unit sets it, the scan's shell doesn't)
- * plus /etc/openclaw for the scanning user. Pre-rename dirs that aren't the
- * live one are leftovers (OC-003), not installations.
+ * Pre-rename dirs that aren't the live one are leftovers (OC-003), not
+ * installations. No OpenClaw release (clawdbot 2026.1.4 – openclaw 2026.9.4)
+ * reads /etc/openclaw: it appears only as an example location for files a
+ * config names (secrets provider, TLS paths), so it is not an install.
  */
 async function openclawLocations(home: string, fs: FSProvider): Promise<OpenclawLocation[]> {
   const env = openclawEnvPaths(home, fs);
@@ -192,8 +194,6 @@ async function openclawLocations(home: string, fs: FSProvider): Promise<Openclaw
     // home not listable
   }
 
-  // System-wide config (only once, not per-user)
-  if (home === fs.homedir()) locations.push({ dir: '/etc/openclaw', mainConfig: join('/etc/openclaw', MAIN_CONFIG_NAMES[0]) });
   return locations;
 }
 
@@ -404,7 +404,7 @@ export const openclawAdapter: AgentAdapter = {
   getConfigPaths(): string[] {
     const _fs = new LocalFSProvider();
     const env = openclawEnvPaths(_fs.homedir(), _fs);
-    const dirs = [env.stateDir, join(env.home, '.openclaw'), join(env.home, LEGACY_STATE_DIRS[0]), '/etc/openclaw']
+    const dirs = [env.stateDir, join(env.home, '.openclaw'), join(env.home, LEGACY_STATE_DIRS[0])]
       .filter((d): d is string => Boolean(d));
     return [
       ...(env.configPath ? [env.configPath] : []),
@@ -560,8 +560,8 @@ export const openclawAdapter: AgentAdapter = {
         '~/.openclaw/agents/*/config.json',
         '~/.openclaw/agents/*/.env',
         '~/.openclaw/agents/*/skills/**',
-        // Legacy dirs and the system-wide config load skills the same way
-        ...['~/.clawdbot', '~/.moltbot', '/etc/openclaw'].flatMap(d => [`${d}/skills/**`, `${d}/agents/*/skills/**`]),
+        // Legacy dirs load skills the same way
+        ...['~/.clawdbot', '~/.moltbot'].flatMap(d => [`${d}/skills/**`, `${d}/agents/*/skills/**`]),
       ],
       commands: [
         { id: 'openclaw-which', cmd: 'which', args: ['openclaw'], timeout: 3000 },
@@ -579,12 +579,9 @@ export const openclawAdapter: AgentAdapter = {
         '/usr/local/bin/openclaw',
         '/opt/homebrew/bin/openclaw',
         '/usr/bin/openclaw',
-        '/etc/openclaw',
         '/Applications/OpenClaw.app',
       ],
-      systemDirListings: [
-        '/etc/openclaw',
-      ],
+      systemDirListings: [],
     };
   },
 };

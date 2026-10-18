@@ -97,7 +97,7 @@ See [doc/user-guide.md](doc/user-guide.md) for full option reference.
 
 **Autonomous frameworks**
 
-- **OpenClaw** — `~/.openclaw`, `~/.clawdbot`, `~/.moltbot`, `/etc/openclaw`
+- **OpenClaw** — `~/.openclaw`, `~/.clawdbot`, `~/.moltbot`
 - **NanoClaw** — v2 git checkout (`<checkout>/.env`, `data/`, `groups/`) + `~/.config/nanoclaw/` (mount allowlist)
 - **PicoClaw** — `~/.picoclaw/`
 - **IronClaw** — `~/.ironclaw/` (TOML, gRPC gateway)

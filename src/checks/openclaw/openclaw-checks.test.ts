@@ -435,7 +435,7 @@ describe('OC-006: Memory File Permissions', () => {
   });
 });
 
-describe('OC-007: /etc/openclaw Writable by Non-Root', () => {
+describe('OC-007: /etc/openclaw Writable by Non-Root (retired)', () => {
   const check = openclawChecks.find(c => c.id === 'OC-007')!;
 
   it('passes when /etc/openclaw does not exist', async () => {
@@ -444,35 +444,15 @@ describe('OC-007: /etc/openclaw Writable by Non-Root', () => {
     expect(result.passed).toBe(true);
   });
 
-  it('flags world-writable /etc/openclaw directory', async () => {
+  // No OpenClaw release reads /etc/openclaw, so a writable one hijacks nothing
+  it('passes for a world-writable /etc/openclaw and config file, saying OpenClaw never reads it', async () => {
     const fs = makeMemFs({
-      exists: new Set(['/etc/openclaw']),
-      modes: { '/etc/openclaw': 0o777 },
-    });
-    const result = await check.run(makeCtx({ fs }));
-    expect(result.passed).toBe(false);
-    expect(result.severity).toBe('critical');
-  });
-
-  it('passes when /etc/openclaw is 0755', async () => {
-    const fs = makeMemFs({
-      exists: new Set(['/etc/openclaw']),
-      modes: { '/etc/openclaw': 0o755 },
+      exists: new Set(['/etc/openclaw', '/etc/openclaw/openclaw.json']),
+      modes: { '/etc/openclaw': 0o777, '/etc/openclaw/openclaw.json': 0o666 },
     });
     const result = await check.run(makeCtx({ fs }));
     expect(result.passed).toBe(true);
-  });
-
-  it('flags world-writable config file under /etc/openclaw', async () => {
-    const fs = makeMemFs({
-      exists: new Set(['/etc/openclaw', '/etc/openclaw/openclaw.json']),
-      modes: {
-        '/etc/openclaw': 0o755,
-        '/etc/openclaw/openclaw.json': 0o666,
-      },
-    });
-    const result = await check.run(makeCtx({ fs }));
-    expect(result.passed).toBe(false);
-    expect(result.evidence?.[0].file).toContain('openclaw.json');
+    expect(result.evidence).toBeUndefined();
+    expect(result.message).toMatch(/does not read \/etc\/openclaw/);
   });
 });

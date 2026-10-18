@@ -108,3 +108,23 @@ describe('OpenClaw state directories', () => {
     expect(openclawEnvPaths('/home/other', fsFor({ OPENCLAW_HOME: '/srv/oc' })).home).toBe('/home/other');
   });
 });
+
+describe('/etc/openclaw', () => {
+  // No OpenClaw release (clawdbot 2026.1.4 – openclaw 2026.9.4) reads it
+  it('is not scanned as an installation, even with an openclaw.json in it', async () => {
+    await put('.openclaw/openclaw.json');
+    await put('etc-openclaw/openclaw.json', '{ gateway: { bind: "lan", auth: { mode: "none" } } }');
+    const base = fsFor();
+    const map = (p: string) => (p === '/etc/openclaw' || p.startsWith('/etc/openclaw/') ? join(home, 'etc-openclaw', p.slice('/etc/openclaw'.length)) : p);
+    const fs = Object.assign(Object.create(base) as FSProvider, {
+      access: (p: string) => base.access(map(p)),
+      stat: (p: string) => base.stat(map(p)),
+      readFile: (p: string) => base.readFile(map(p)),
+      readdirEntries: (p: string, o?: { recursive?: boolean }) => base.readdirEntries(map(p), o),
+    });
+    const found = await openclawAdapter.detect({ fs });
+    expect(found.map(i => i.installDir)).toEqual([join(home, '.openclaw')]);
+    expect(found.flatMap(i => i.configFiles.map(c => c.filePath)).some(f => f.startsWith('/etc/openclaw'))).toBe(false);
+    expect(openclawAdapter.getConfigPaths().some(p => p.startsWith('/etc/openclaw'))).toBe(false);
+  });
+});
