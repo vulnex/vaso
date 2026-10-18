@@ -873,8 +873,14 @@ var secretEnvParts = map[string]bool{
 	"KEY": true, "KEYS": true, "APIKEY": true, "TOKEN": true, "TOKENS": true,
 	"SECRET": true, "SECRETS": true, "PASS": true, "PASSWD": true, "PASSWORD": true,
 	"PASSPHRASE": true, "CREDENTIAL": true, "CREDENTIALS": true, "AUTH": true,
-	"COOKIE": true, "SESSION": true,
+	"COOKIE": true, "SESSION": true, "JWT": true, "DSN": true, "BEARER": true,
+	"HEADER": true, "HEADERS": true, "AUTHORIZATION": true, "SIGNATURE": true,
 }
+
+// Segments that end in a credential word without a separator
+// (GITHUB_ACCESSTOKEN, SLACK_BOTTOKEN, AGENT_PRIVATEKEY, OPENAI_APIKEY).
+var secretEnvSuffixes = []string{"TOKEN", "TOKENS", "KEY", "KEYS", "SECRET", "PASSWORD", "PASSWD", "JWT", "DSN"}
+
 var locationEnvSuffix = map[string]bool{"PATH": true, "DIR": true, "FILE": true, "HOME": true, "URL": true}
 
 func isSecretEnvName(name string) bool {
@@ -886,8 +892,77 @@ func isSecretEnvName(name string) bool {
 		if secretEnvParts[p] {
 			return true
 		}
+		for _, s := range secretEnvSuffixes {
+			if strings.HasSuffix(p, s) {
+				return true
+			}
+		}
 	}
 	return false
+}
+
+// camelBoundary splits JSON keys such as apiKey or authToken into words.
+var camelBoundary = regexp.MustCompile(`([a-z0-9])([A-Z])`)
+
+// isSecretJSONKey applies the env-name rule to a JSON key (apiKey,
+// Authorization, x-api-key, headers).
+func isSecretJSONKey(key string) bool {
+	k := camelBoundary.ReplaceAllString(key, "${1}_${2}")
+	return isSecretEnvName(strings.NewReplacer("-", "_", ".", "_", " ", "_").Replace(k))
+}
+
+// urlUserinfo matches the user:password@ part of a URL.
+var urlUserinfo = regexp.MustCompile(`([A-Za-z][A-Za-z0-9+.-]*://)[^/?#@\s]+@`)
+
+// redactURLUserinfo keeps a URL's scheme and host (checks judge http:// and
+// the endpoint) but never its credentials: proxy://user:pass@host.
+func redactURLUserinfo(s string) string {
+	return urlUserinfo.ReplaceAllString(s, "${1}"+redactedEnvValue+"@")
+}
+
+// redactJSONValue redacts, inside an inline JSON config
+// (OPENCODE_CONFIG_CONTENT), every string under a credential-named key
+// (apiKey, headers, env…) and URL credentials anywhere, keeping the structure
+// checks read (permissions, MCP commands).
+func redactJSONValue(v interface{}, secret bool) interface{} {
+	switch t := v.(type) {
+	case map[string]interface{}:
+		for k, val := range t {
+			t[k] = redactJSONValue(val, secret || isSecretJSONKey(k))
+		}
+		return t
+	case []interface{}:
+		for i, val := range t {
+			t[i] = redactJSONValue(val, secret)
+		}
+		return t
+	case string:
+		if secret {
+			return redactedEnvValue
+		}
+		return redactURLUserinfo(t)
+	}
+	return v
+}
+
+// redactEnvValue is what the snapshot keeps of a collected variable.
+func redactEnvValue(key, val string) string {
+	if isSecretEnvName(key) {
+		return redactedEnvValue
+	}
+	trimmed := strings.TrimSpace(val)
+	if strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[") {
+		var parsed interface{}
+		if err := json.Unmarshal([]byte(trimmed), &parsed); err != nil {
+			// JSONC or broken JSON: can't redact inside it, so not at all
+			return redactedEnvValue
+		}
+		if out, err := json.Marshal(redactJSONValue(parsed, false)); err == nil {
+			return string(out)
+		}
+		return redactedEnvValue
+	}
+	return redactURLUserinfo(val)
 }
 
 // redactedEnvValue replaces the value of a credential-bearing variable.
@@ -906,10 +981,7 @@ func collectEnv(prefixes []string) map[string]string {
 		val := parts[1]
 		for _, prefix := range prefixes {
 			if strings.HasPrefix(key, prefix) {
-				if isSecretEnvName(key) {
-					val = redactedEnvValue
-				}
-				result[key] = val
+				result[key] = redactEnvValue(key, val)
 				break
 			}
 		}

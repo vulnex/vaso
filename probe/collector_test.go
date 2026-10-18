@@ -139,6 +139,43 @@ func TestCollectEnvRedactsCredentials(t *testing.T) {
 	}
 }
 
+func TestCollectEnvRedactsHeadersJoinedNamesURLsAndInlineJSON(t *testing.T) {
+	t.Setenv("VASOTEST_CUSTOM_HEADERS", "X-Api-Key: sk-secret")
+	t.Setenv("VASOTEST_GITHUB_ACCESSTOKEN", "gho_x")
+	t.Setenv("VASOTEST_SLACK_BOTTOKEN", "xoxb-1")
+	t.Setenv("VASOTEST_AGENT_PRIVATEKEY", "-----BEGIN")
+	t.Setenv("VASOTEST_SIGNING_JWT", "eyJ")
+	t.Setenv("VASOTEST_SENTRY_DSN", "https://k@o1.ingest.sentry.io/1")
+	t.Setenv("VASOTEST_DATABASE_URL", "postgres://admin:hunter2@db.internal:5432/app")
+	t.Setenv("VASOTEST_PROXY", "http://u:p@proxy:3128")
+	t.Setenv("VASOTEST_CONFIG_CONTENT", `{"provider":{"x":{"options":{"apiKey":"sk-live","baseURL":"https://u:p@api.example.com"}}},"mcp":{"s":{"command":["npx","srv"],"headers":{"Authorization":"Bearer t"}}},"permission":{"bash":"allow"}}`)
+	t.Setenv("VASOTEST_PERMISSION_CONTENT", `{"bash": "allow", // comment
+}`)
+
+	env := collectEnv([]string{"VASOTEST_"})
+	for _, k := range []string{"VASOTEST_CUSTOM_HEADERS", "VASOTEST_GITHUB_ACCESSTOKEN", "VASOTEST_SLACK_BOTTOKEN",
+		"VASOTEST_AGENT_PRIVATEKEY", "VASOTEST_SIGNING_JWT", "VASOTEST_SENTRY_DSN", "VASOTEST_PERMISSION_CONTENT"} {
+		if env[k] != redactedEnvValue {
+			t.Errorf("%s = %q, want redacted", k, env[k])
+		}
+	}
+	// URLs keep scheme and host (checks judge http:// and the endpoint), not credentials
+	if env["VASOTEST_DATABASE_URL"] != "postgres://[redacted]@db.internal:5432/app" || env["VASOTEST_PROXY"] != "http://[redacted]@proxy:3128" {
+		t.Errorf("URL userinfo not redacted: %q %q", env["VASOTEST_DATABASE_URL"], env["VASOTEST_PROXY"])
+	}
+	content := env["VASOTEST_CONFIG_CONTENT"]
+	for _, leak := range []string{"sk-live", "Bearer t", "u:p@"} {
+		if strings.Contains(content, leak) {
+			t.Errorf("inline JSON config leaks %q: %s", leak, content)
+		}
+	}
+	for _, kept := range []string{`"permission":{"bash":"allow"}`, `"command":["npx","srv"]`, `https://[redacted]@api.example.com`} {
+		if !strings.Contains(content, kept) {
+			t.Errorf("inline JSON config lost %q: %s", kept, content)
+		}
+	}
+}
+
 func TestRunCommandIsolateHome(t *testing.T) {
 	commandAllowlist["sh"] = true
 	defer delete(commandAllowlist, "sh")
