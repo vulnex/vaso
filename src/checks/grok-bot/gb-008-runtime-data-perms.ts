@@ -13,8 +13,8 @@ interface Target {
   dir?: boolean;
 }
 
-function targets(ctx: ScanContext): Target[] {
-  const userData = userDataDir(ctx);
+async function targets(ctx: ScanContext): Promise<Target[]> {
+  const userData = await userDataDir(ctx);
   return [
     // Data root and user-data dir themselves: the app creates them 0700
     { path: ctx.installation.installDir, level: 'warning', holds: 'Grok Bot settings, approvals and local-exec state', dir: true },
@@ -41,7 +41,7 @@ export const gb008 = defineCheck({
   async run(ctx, h) {
     const warning: Evidence[] = [];
     const info: Evidence[] = [];
-    const all = targets(ctx);
+    const all = await targets(ctx);
     const files = new Set(all.filter(t => !t.dir).map(t => t.path));
     for (const t of all) {
       try {
@@ -65,6 +65,6 @@ export const gb008 = defineCheck({
   },
 
   async fix(ctx) {
-    return restrictFilesToOwner('GB-008', targets(ctx).filter(t => !t.dir).map(t => t.path));
+    return restrictFilesToOwner('GB-008', (await targets(ctx)).filter(t => !t.dir).map(t => t.path));
   },
 });

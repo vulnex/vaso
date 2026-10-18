@@ -454,7 +454,7 @@ Penalties:
 
 ## Security Checks
 
-VASO runs **359 checks across 19 categories**.
+VASO runs **361 checks across 19 categories**.
 
 | Category | IDs | Count | Scope |
 |----------|-----|-------|-------|
@@ -476,7 +476,7 @@ VASO runs **359 checks across 19 categories**.
 | Hermes | HM-001–010 | 10 | Plaintext API keys, env/credentials perms, API-server bind without auth, permissive CORS, plaintext inference endpoints, approvals-off, Tirith pre-exec scanner state, MCP stdio shell-c / unpinned packages |
 | OpenShell | OSH-001–014 | 14 | Gateway TLS disabled, unauthenticated users, OIDC over plaintext HTTP, non-expiring SSH/sandbox credentials, `retain_last_valid` policy validation, fail-open or plaintext interceptors/middleware, resource admission off (critical with caller driver config), readable CA/JWT/TLS keys, key-encryption key, credential database and sandbox tokens, writable gateway config or CLI gateway metadata, CLI without TLS verification; live sandbox policies: network rules open to any program (`/**`), `tls: skip` / uninspected credentials / allow-all MCP / no protocol / `access: full` / audit-only rules, `allowed_ips` of /8 or wider and `host.openshell.internal`, writable system paths |
 | Atomic Agent | AT-001–011 | 11 | Raised approval ladder (level 4/5), unrestricted read scope, unapproved HTTP egress, plaintext secrets in config.json, `.env`/mail-session perms, `pure_read` MCP trust, MCP stdio/transport hygiene, secretless webhooks, subscription-CLI lockdown overrides, plaintext inference endpoints, world/group-readable memory, sessions and traces |
-| Coding Agent | CC, CD, CG, CDX, OPC, GEM, QC, CUR, GHC, WS, DEV, ABA, MM, PC, GB | 143 | Claude Code (12), Claude Desktop (10), ChatGPT Desktop (6), Codex (10), OpenCode (12), Gemini CLI (11), Qwen Code (10), Cursor (14), GitHub Copilot CLI (9), Windsurf/Devin Desktop (8), Devin CLI (10), Abacus.AI CLI/Desktop (15), Meta Muse (3), Perplexity Comet (2), Grok Bot (11): sandbox/approval policy, plaintext credentials, MCP pinning, broad allow rules, memory-file secrets, transport security |
+| Coding Agent | CC, CD, CG, CDX, OPC, GEM, QC, CUR, GHC, WS, DEV, ABA, MM, PC, GB | 145 | Claude Code (12), Claude Desktop (10), ChatGPT Desktop (6), Codex (10), OpenCode (12), Gemini CLI (11), Qwen Code (10), Cursor (14), GitHub Copilot CLI (9), Windsurf/Devin Desktop (8), Devin CLI (10), Abacus.AI CLI/Desktop (15), Meta Muse (3), Perplexity Comet (2), Grok Bot (13): sandbox/approval policy, plaintext credentials, MCP pinning, broad allow rules, memory-file secrets, transport security |
 
 Server-only checks (gateway/network/runtime concepts, mostly in CFG, NET, RUN, and POL) are automatically excluded for coding agents and desktop apps to avoid false positives — interactive coding CLIs have a different threat model than autonomous server agents.
 
@@ -528,7 +528,7 @@ VASO ships twenty-six adapters. Each implements `detect()`, `getConfigPaths()`, 
 | ChatGPT Desktop | `/Applications/ChatGPT.app` (current app, `com.openai.codex`) and `/Applications/ChatGPT (Classic).app` (`com.openai.chat`) + `~/Library/Application Support/com.openai.chat/`; preferences in `~/Library/Preferences/com.openai.chat*.plist` (macOS only) | plist |
 | Meta Muse | `/Applications/Muse.app`, `~/Library/Preferences/com.meta.endo.plist`, `~/Library/Application Support/com.meta.endo/` (macOS only; initial coverage) | plist |
 | Perplexity Comet | `/Applications/Comet.app` + Chromium profile `~/Library/Application Support/Comet/` (macOS) or `%LOCALAPPDATA%\Perplexity\Comet\User Data` (Windows): session-data permissions, extension inventory | — |
-| Grok Bot | Data root `~/.grokbot/` (`settings.json`, `local-exec-daemon-credential.json`, `local-tool-standing-grants.v1.json`, `local-computer-use-gate.json`, daemon log; relocated by `$SAND_DATA_ROOT` / `$SAND_USER_DATA_DIR`; pre-rename `~/.cursor/sand/`); Electron user data `~/.config/Grok Bot/` (Linux), `~/Library/Application Support/Grok Bot/` (macOS), `%APPDATA%\Grok Bot\` (Windows) with `sand-secrets.json`, `user-secrets.json`, `Cookies`; app `/opt/Grok Bot` (.deb/.rpm) or `/Applications/Grok Bot.app`; version from `desktop-status.json` or the macOS Info.plist. Secret stores and standing approvals are collected metadata-only by remote scans | JSON |
+| Grok Bot | Data root `~/.grokbot/` (`settings.json`, `local-exec-daemon-credential.json`, `local-tool-standing-grants.v1.json`, `local-computer-use-gate.json`, daemon log; relocated by `$SAND_DATA_ROOT` / `$SAND_USER_DATA_DIR`; pre-rename `~/.cursor/sand/`); Electron user data `~/.config/Grok Bot/` (Linux), `~/Library/Application Support/Grok Bot/` (macOS), `%APPDATA%\Grok Bot\` (Windows; the pre-rename `%APPDATA%\Sand\` while the app still uses it) with `sand-secrets.json`, `user-secrets.json`, `Cookies`; app `/opt/Grok Bot` (.deb/.rpm) or `/Applications/Grok Bot.app`; version from `desktop-status.json`, the macOS Info.plist or, for a .deb that has never run, its package metadata (local scans only). Secret stores and standing approvals are collected metadata-only by remote scans | JSON |
 
 ### MCP Servers
 

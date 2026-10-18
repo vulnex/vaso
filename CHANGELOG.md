@@ -8,7 +8,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
-- **Grok Bot support** (`-a grok-bot`, 11 checks GB-001–011). Grok Bot is a desktop app whose cloud agents can run commands on your computer through a local exec daemon. VASO detects the app (`/opt/Grok Bot`, `/Applications/Grok Bot.app`), its data root (`~/.grokbot`, `$SAND_DATA_ROOT`, `$SAND_USER_DATA_DIR`, pre-rename `~/.cursor/sand`) and its Electron user data, and reads the version from `desktop-status.json`. The checks follow the 0.71.2 settings schema and the app's permission engine:
+- **Grok Bot support** (`-a grok-bot`, 13 checks GB-001–013). Grok Bot is a desktop app whose cloud agents can run commands on your computer through a local exec daemon. VASO detects the app (`/opt/Grok Bot`, `/Applications/Grok Bot.app`), its data root (`~/.grokbot`, `$SAND_DATA_ROOT`, `$SAND_USER_DATA_DIR`, pre-rename `~/.cursor/sand`) and its Electron user data (on Windows the pre-rename `%APPDATA%\Sand` while the app still runs from it), and reads the version from `desktop-status.json` — or, for a .deb that has never been launched, from its package metadata (local scans only). The checks follow the 0.71.2 settings schema and the app's permission engine:
   - **GB-001:** "Execution on Local Computer" is Always allow (`localToolPermission: "always"` with no stricter admin ceiling), for the active account and every other signed-in account. The cloud agent then runs shell commands, reads and writes files under `$HOME` and reads other AI tools' MCP setup and prompt history without asking, unsandboxed. `vaso fix` sets it back to "ask".
   - **GB-002:** connector tools set to `always_allow`.
   - **GB-003:** auto-review turned off or widened by custom allow rules.
@@ -19,7 +19,9 @@ This project adheres to [Semantic Versioning](https://semver.org/).
   - **GB-008:** runtime data readable by others, such as the umask-created daemon log and cached transcripts.
   - **GB-009:** Messages access enabled.
   - **GB-010:** local computer use available.
-  - **GB-011:** updates disabled (`SAND_DISABLE_UPDATES`, or the apt source set to `Enabled: no`) or the dogfood track.
+  - **GB-011:** updates disabled (`SAND_DISABLE_UPDATES`, or the apt source set to `Enabled: no`) or the dogfood track (ignored for .deb/.rpm installs, which update through the package manager). The `nightly` track isn't flagged: 0.71.2 runs it as stable.
+  - **GB-012:** endpoints redirected from the environment. Critical when `SAND_BACKEND_URL` or `CURSOR_API_BASE_URL` points away from Cursor's hosts: that server receives the account's access token and issues the local-exec channel, and a channel it marks server-authoritative lets it approve commands on this computer itself. A warning for `SAND_HOST_GATEWAY_URL` (a substitute cloud computer) and `SAND_CURSOR_WEBSITE_URL` / `CURSOR_WEBSITE_URL` (the sign-in page), info for `SAND_HTTPS_PROXY` and for the record the app keeps after it has connected through a gateway override. Only scheme, host and port are reported. `SAND_UPDATE_FEED_BASE_URL` isn't flagged: released builds ignore it.
+  - **GB-013:** the passkey proxy (`webauthnProxyEnabled`, on by default on macOS and Windows) lets the cloud computer ask to sign in with this computer's passkeys and security keys, with a consent prompt each time (info).
 - Remote scans collect Grok Bot's secret stores, approvals and standing grants as metadata only, and collect only named, non-secret `SAND_*` variables. No probe rebuild is needed.
 
 ### Security

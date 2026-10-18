@@ -6,8 +6,8 @@ import { restrictFilesToOwner } from '../../remediation/config-writer.js';
 import { DATA_FILES, USER_DATA_FILES } from '../../adapters/grok-bot.js';
 import { dataFile, userDataDir } from './shared.js';
 
-function targets(ctx: ScanContext): { path: string; level: 'critical' | 'warning'; holds: string }[] {
-  const userData = userDataDir(ctx);
+async function targets(ctx: ScanContext): Promise<{ path: string; level: 'critical' | 'warning'; holds: string }[]> {
+  const userData = await userDataDir(ctx);
   return [
     { path: dataFile(ctx, DATA_FILES.credential), level: 'critical', holds: 'the local-exec credential (the channel the cloud agent runs commands through)' },
     { path: dataFile(ctx, DATA_FILES.connection), level: 'critical', holds: 'the local-exec backend connection token' },
@@ -30,7 +30,7 @@ export const gb007 = defineCheck({
   async run(ctx, h) {
     const critical: Evidence[] = [];
     const warning: Evidence[] = [];
-    for (const t of targets(ctx)) {
+    for (const t of await targets(ctx)) {
       try {
         if (!(await ctx.fs.access(t.path))) continue;
         const perms = await queryPermissions(ctx.fs, t.path);
@@ -52,6 +52,6 @@ export const gb007 = defineCheck({
   },
 
   async fix(ctx) {
-    return restrictFilesToOwner('GB-007', targets(ctx).map(t => t.path));
+    return restrictFilesToOwner('GB-007', (await targets(ctx)).map(t => t.path));
   },
 });

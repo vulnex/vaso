@@ -111,7 +111,7 @@ export const gb006 = defineCheck({
       }
     };
 
-    const userData = userDataDir(ctx);
+    const userData = await userDataDir(ctx);
     const secretsFile = join(userData, USER_DATA_FILES.secrets);
     const secrets = await readJson(ctx, secretsFile);
     if (secrets.unread) unread.push(secretsFile);

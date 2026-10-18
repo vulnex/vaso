@@ -1,4 +1,5 @@
 import { basename, dirname, isAbsolute, join } from 'node:path';
+import { gunzipSync } from 'node:zlib';
 import type { AgentAdapter, DetectOptions } from './adapter.js';
 import type { AgentInstallation, GatewayInfo, ParsedConfig } from '../core/types.js';
 import type { ProbeManifest } from '../core/snapshot-types.js';
@@ -18,18 +19,27 @@ import { loadConfigIfPresent } from './load-if-present.js';
  *   the sealed local-exec credential, approvals, standing grants, the
  *   computer-use gate and the daemon log.
  * - Electron user data (`~/.config/Grok Bot`, `~/Library/Application
- *   Support/Grok Bot`, `%APPDATA%\Grok Bot`): sand-secrets.json and
+ *   Support/Grok Bot`, `%APPDATA%\Grok Bot` — or the pre-rename
+ *   `%APPDATA%\Sand` until an update migrates it): sand-secrets.json and
  *   user-secrets.json (Electron safeStorage), cookies and client state.
  */
 export const GROK_BOT_DATA_DIR = '.grokbot';
 const LEGACY_DATA_DIR = join('.cursor', 'sand');
 const USER_DATA_NAME = 'Grok Bot';
+// Windows only: the pre-rename user-data dir and the marker the app writes
+// into %APPDATA%\Grok Bot once it owns it
+const LEGACY_USER_DATA_NAME = 'Sand';
+const USER_DATA_MARKER = '.grokbot-user-data-v1';
 
 // The .deb/.rpm install to /opt; the macOS .dmg to /Applications. Windows
 // installs per user under %LOCALAPPDATA%\Programs (path name not verified).
 const APP_LINUX = '/opt/Grok Bot';
 const APP_MAC = '/Applications/Grok Bot.app';
 const APT_SOURCE = '/etc/apt/sources.list.d/grok-bot.sources';
+// Package metadata of a .deb install: FPM's changelog (first line
+// "grok-bot (<version>) ; …", replaced on every upgrade) and dpkg's database
+const DEB_CHANGELOG = '/usr/share/doc/grok-bot/changelog.gz';
+const DPKG_STATUS = '/var/lib/dpkg/status';
 
 /** Files in the data root that the checks read or stat. */
 export const DATA_FILES = {
@@ -52,14 +62,21 @@ export const USER_DATA_FILES = {
   statsig: 'sand-statsig-bootstrap.json',
   clientPersistence: 'sand-client-persistence',
   reliability: 'dune-reliability',
+  // Written the first time the app connects through SAND_HOST_GATEWAY_URL
+  gatewayBindings: '.env-descriptor-account-bindings.json',
 } as const;
 
 /** Environment variables the adapter and checks read (none holds a secret). */
 export const GROK_BOT_ENV = [
   'SAND_DATA_ROOT', 'SAND_USER_DATA_DIR', 'SAND_LOCAL_EXEC_ROOT',
   'SAND_DISABLE_UPDATES', 'SAND_EGRESS_TUNNEL_ALLOW_PRIVATE',
-  // Location only — the tunnel's bearer is never collected
+  // Locations only — the tunnel's bearer and the gateway tokens are never
+  // collected (the probe also strips user:password@ from URLs)
   'SAND_EGRESS_TUNNEL_URL',
+  // Endpoint overrides honoured by packaged builds (GB-012)
+  'SAND_BACKEND_URL', 'CURSOR_API_BASE_URL', 'SAND_HOST_GATEWAY_URL',
+  'SAND_CURSOR_WEBSITE_URL', 'CURSOR_WEBSITE_URL',
+  'SAND_HTTPS_PROXY', 'SAND_SYSTEM_PROXY', 'NODE_USE_ENV_PROXY',
 ];
 
 function envDir(fs: FSProvider, name: string): string | undefined {
@@ -72,17 +89,75 @@ function ownSession(home: string, fs: FSProvider): boolean {
   return home === fs.homedir();
 }
 
-/** Electron user-data dir (`app.getPath('userData')`). */
+function userDataOverride(home: string, fs: FSProvider): string | undefined {
+  return ownSession(home, fs) ? envDir(fs, 'SAND_USER_DATA_DIR') : undefined;
+}
+
+function windowsAppData(home: string, fs: FSProvider): string {
+  const appData = ownSession(home, fs) ? fs.getEnv('APPDATA')?.trim() : undefined;
+  return appData || join(home, 'AppData', 'Roaming');
+}
+
+/**
+ * Electron user-data dir (`app.getPath('userData')`) under its current name.
+ * On Windows the app may still run from the pre-rename %APPDATA%\Sand —
+ * `resolveGrokBotUserDataDir` decides that; this is the canonical path.
+ */
 export function grokBotUserDataDir(home: string, fs: FSProvider): string {
-  const override = ownSession(home, fs) ? envDir(fs, 'SAND_USER_DATA_DIR') : undefined;
+  const override = userDataOverride(home, fs);
   if (override) return override;
   if (fs.platform === 'darwin') return join(home, 'Library', 'Application Support', USER_DATA_NAME);
-  if (fs.platform === 'win32') {
-    const appData = fs.getEnv('APPDATA')?.trim();
-    return join(appData || join(home, 'AppData', 'Roaming'), USER_DATA_NAME);
-  }
+  if (fs.platform === 'win32') return join(windowsAppData(home, fs), USER_DATA_NAME);
   const xdg = ownSession(home, fs) ? envDir(fs, 'XDG_CONFIG_HOME') : undefined;
   return join(xdg || join(home, '.config'), USER_DATA_NAME);
+}
+
+/** Every user-data dir the app may be using (both names on Windows). */
+export function grokBotUserDataDirs(home: string, fs: FSProvider): string[] {
+  const canonical = grokBotUserDataDir(home, fs);
+  if (fs.platform !== 'win32' || userDataOverride(home, fs)) return [canonical];
+  return [canonical, join(windowsAppData(home, fs), LEGACY_USER_DATA_NAME)];
+}
+
+type DirState = 'absent' | 'directory' | 'unsafe';
+
+/** lstat-style state of `<parent>\<name>` (a link or a file is "unsafe"). */
+async function dirState(parent: string, name: string, fs: FSProvider): Promise<DirState> {
+  try {
+    const entry = (await fs.readdirEntries(parent))
+      .find(e => e.name.toLowerCase() === name.toLowerCase());
+    if (!entry) return 'absent';
+    return entry.isDirectory && !entry.isSymbolicLink ? 'directory' : 'unsafe';
+  } catch {
+    return (await fs.access(join(parent, name))) ? 'unsafe' : 'absent';
+  }
+}
+
+/**
+ * The user-data dir the app runs from. On Windows, packaged builds keep the
+ * pre-rename %APPDATA%\Sand until an update relaunch moves it to
+ * %APPDATA%\Grok Bot: Sand stays in use while it exists, unless Grok Bot
+ * carries the app's marker or already holds data — and when Sand is a link or
+ * a file, or Grok Bot is (the app won't migrate through one), as the 0.71.2
+ * settlement does.
+ */
+export async function resolveGrokBotUserDataDir(home: string, fs: FSProvider): Promise<string> {
+  const canonical = grokBotUserDataDir(home, fs);
+  if (fs.platform !== 'win32' || userDataOverride(home, fs)) return canonical;
+  const appData = windowsAppData(home, fs);
+  const legacy = join(appData, LEGACY_USER_DATA_NAME);
+  const legacyState = await dirState(appData, LEGACY_USER_DATA_NAME, fs);
+  if (legacyState === 'absent') return canonical;
+  if (legacyState === 'unsafe') return legacy;
+  const canonicalState = await dirState(appData, USER_DATA_NAME, fs);
+  if (canonicalState !== 'directory') return legacy;
+  if (await fs.access(join(canonical, USER_DATA_MARKER))) return canonical;
+  try {
+    // An empty Grok Bot dir waits for the migration; one with data is kept
+    return (await fs.readdir(canonical)).length > 0 ? canonical : legacy;
+  } catch {
+    return legacy;
+  }
 }
 
 /** The scanning user's env-relocated data root, if any. */
@@ -129,9 +204,43 @@ function appPath(fs: FSProvider): string | undefined {
   return local ? join(local, 'Programs', USER_DATA_NAME) : undefined;
 }
 
+const VERSION = /^\d+\.\d+(?:\.\d+)?(?:[-+~][0-9A-Za-z.+~-]*)?$/;
+
+/** `Version:` of the installed grok-bot stanza in dpkg's status file. */
+export function dpkgVersion(status: string): string | undefined {
+  for (const stanza of status.split(/\n[ \t]*\n/)) {
+    if (!/^Package: grok-bot[ \t]*$/m.test(stanza)) continue;
+    // A removed package keeps its stanza ("deinstall ok config-files")
+    if (!/^Status: [a-z]+ ok installed[ \t]*$/m.test(stanza)) return undefined;
+    const v = /^Version: (\S+)[ \t]*$/m.exec(stanza)?.[1];
+    return v && VERSION.test(v) ? v : undefined;
+  }
+  return undefined;
+}
+
+/**
+ * A .deb install's version, for an app that has never run (no
+ * desktop-status.json yet): FPM's changelog.gz, else dpkg's status file
+ * (images that drop /usr/share/doc). Remote scans get neither — the probe
+ * ships no .gz content, and the status file is the host's whole package
+ * inventory — so a never-launched .deb has no version there.
+ */
+async function debVersion(fs: FSProvider): Promise<string | undefined> {
+  try {
+    const head = gunzipSync(await fs.readBytes(DEB_CHANGELOG), { maxOutputLength: 1 << 20 }).toString('utf8');
+    const v = /^grok-bot \(([^)\s]+)\)/.exec(head)?.[1];
+    if (v && VERSION.test(v)) return v;
+  } catch {}
+  try {
+    return dpkgVersion(await fs.readFile(DPKG_STATUS));
+  } catch {}
+  return undefined;
+}
+
 /**
  * Version: desktop-status.json (`appVersion`, written by the running app) or,
- * on macOS, the bundle's Info.plist. The .deb keeps it only inside app.asar.
+ * on macOS, the bundle's Info.plist; a .deb that never ran, from its package
+ * metadata (local scans only).
  */
 async function readVersion(userData: string, app: string | undefined, fs: FSProvider): Promise<string | undefined> {
   try {
@@ -145,6 +254,7 @@ async function readVersion(userData: string, app: string | undefined, fs: FSProv
       if (r.exitCode === 0 && v) return v;
     } catch {}
   }
+  if (fs.platform === 'linux' && app === APP_LINUX) return debVersion(fs);
   return undefined;
 }
 
@@ -161,7 +271,7 @@ export const grokBotAdapter: AgentAdapter = {
 
     for (const { home, user } of userDirs) {
       const dataRoot = await grokBotDataRoot(home, fs);
-      const userData = grokBotUserDataDir(home, fs);
+      const userData = await resolveGrokBotUserDataDir(home, fs);
       const hasDataRoot = await fs.access(dataRoot);
       const hasUserData = await fs.access(userData);
       // The app alone counts only for the scanning user: a system install
@@ -206,13 +316,16 @@ export const grokBotAdapter: AgentAdapter = {
 
   getCredentialPaths(installDir: string, fs?: FSProvider): string[] {
     const provider = fs ?? new LocalFSProvider();
-    const userData = grokBotUserDataDir(grokBotHome(installDir, provider), provider);
+    // Both user-data names on Windows: which one is live needs I/O
+    const userDataDirs = grokBotUserDataDirs(grokBotHome(installDir, provider), provider);
     return [
       join(installDir, DATA_FILES.credential),
       join(installDir, DATA_FILES.connection),
-      join(userData, USER_DATA_FILES.secrets),
-      join(userData, USER_DATA_FILES.userSecrets),
-      join(userData, USER_DATA_FILES.cookies),
+      ...userDataDirs.flatMap(d => [
+        join(d, USER_DATA_FILES.secrets),
+        join(d, USER_DATA_FILES.userSecrets),
+        join(d, USER_DATA_FILES.cookies),
+      ]),
     ];
   },
 
@@ -239,6 +352,7 @@ export const grokBotAdapter: AgentAdapter = {
         ...userDataDirs.flatMap(d => [
           USER_DATA_FILES.secrets, USER_DATA_FILES.userSecrets, USER_DATA_FILES.cookies,
           USER_DATA_FILES.statsig, `${USER_DATA_FILES.reliability}/*`,
+          USER_DATA_FILES.gatewayBindings,
           // The directories themselves (mode only, never listed): the
           // sand-client-persistence blob names encode the account id
           USER_DATA_FILES.clientPersistence, USER_DATA_FILES.reliability,
@@ -257,4 +371,4 @@ export const grokBotAdapter: AgentAdapter = {
   },
 };
 
-export { APT_SOURCE as GROK_BOT_APT_SOURCE };
+export { APT_SOURCE as GROK_BOT_APT_SOURCE, APP_LINUX as GROK_BOT_APP_LINUX };

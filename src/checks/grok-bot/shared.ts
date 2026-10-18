@@ -1,6 +1,6 @@
 import { basename, join } from 'node:path';
 import type { ParsedConfig, ScanContext } from '../../core/types.js';
-import { DATA_FILES, grokBotHome, grokBotUserDataDir } from '../../adapters/grok-bot.js';
+import { DATA_FILES, grokBotHome, resolveGrokBotUserDataDir } from '../../adapters/grok-bot.js';
 
 /**
  * Shared helpers for the Grok Bot checks. Semantics come from the 0.71.2
@@ -49,9 +49,14 @@ function validBlock(data: Record<string, unknown>): boolean {
   return true;
 }
 
+/** settings.json `updateTrackOverride` values the schema accepts. */
+const UPDATE_TRACKS = ['stable', 'nightly', 'dogfood'];
+
 function acceptedByApp(data: Record<string, unknown>): boolean {
   // The app always writes version 1; a missing one is treated as current
   if ((data.version !== undefined && data.version !== 1) || !validBlock(data)) return false;
+  // An app-wide setting, so only at the top level
+  if (data.updateTrackOverride !== undefined && !UPDATE_TRACKS.includes(data.updateTrackOverride as string)) return false;
   const scopes = data.accountScopes;
   if (scopes === undefined) return true;
   if (!isRecord(scopes)) return false;
@@ -90,8 +95,9 @@ export function dataRoot(ctx: ScanContext): string {
   return ctx.installation.installDir;
 }
 
-export function userDataDir(ctx: ScanContext): string {
-  return grokBotUserDataDir(grokBotHome(ctx.installation.installDir, ctx.fs), ctx.fs);
+/** The Electron user-data dir the app runs from (see resolveGrokBotUserDataDir). */
+export function userDataDir(ctx: ScanContext): Promise<string> {
+  return resolveGrokBotUserDataDir(grokBotHome(ctx.installation.installDir, ctx.fs), ctx.fs);
 }
 
 /** Parse a JSON state file; undefined when absent, unreadable or not JSON. */

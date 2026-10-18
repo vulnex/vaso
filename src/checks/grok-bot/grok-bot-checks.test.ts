@@ -51,10 +51,10 @@ const check = (id: string) => grokBotChecks.find(c => c.id === id)!;
 const OPEN_PARENTS = { [HOME]: 0o755, [`${HOME}/.config`]: 0o755, '/home': 0o755, '/': 0o755 };
 
 describe('Grok Bot checks', () => {
-  it('exports 11 coding-agent checks scoped to grok-bot', () => {
-    expect(grokBotChecks).toHaveLength(11);
+  it('exports 13 coding-agent checks scoped to grok-bot', () => {
+    expect(grokBotChecks).toHaveLength(13);
     for (const c of grokBotChecks) {
-      expect(c.id).toMatch(/^GB-0(0[1-9]|1[01])$/);
+      expect(c.id).toMatch(/^GB-0(0[1-9]|1[0-3])$/);
       expect(c.category).toBe('coding-agent');
       expect(c.supportedAgents).toEqual(['grok-bot']);
     }
@@ -326,5 +326,84 @@ describe('GB-009 / GB-010 / GB-011', () => {
     expect(await check('GB-011').run(ctx([], makeFs({ env: { SAND_DISABLE_UPDATES: '1' } })))).toMatchObject({ passed: false, severity: 'warning' });
     expect((await check('GB-011').run(ctx([], makeFs({ env: { SAND_DISABLE_UPDATES: 'true' } }))))).toMatchObject({ passed: true });
     expect(await check('GB-011').run(ctx([cfg({ updateTrackOverride: 'dogfood' })]))).toMatchObject({ passed: false, severity: 'info' });
+  });
+});
+
+describe('GB-011 update tracks (dt16)', () => {
+  it('passes on "nightly" — 0.71.2 coerces it to stable', async () => {
+    expect((await check('GB-011').run(ctx([cfg({ updateTrackOverride: 'nightly' })]))).passed).toBe(true);
+    expect((await check('GB-011').run(ctx([cfg({ updateTrackOverride: 'stable' })]))).passed).toBe(true);
+  });
+
+  it('marks "dogfood" ignored on a package-managed /opt install', async () => {
+    const c = ctx([cfg({ updateTrackOverride: 'dogfood' })]);
+    c.installation.appBundle = '/opt/Grok Bot';
+    const r = await check('GB-011').run(c);
+    expect(r).toMatchObject({ passed: false, severity: 'info' });
+    expect(r.evidence![0]).toMatchObject({ mitigated: true });
+    // An unknown track makes the app reject the whole file → defaults
+    const bogus = cfg({ updateTrackOverride: 'beta', localToolPermission: 'always' });
+    expect((await check('GB-001').run(ctx([bogus]))).passed).toBe(true);
+  });
+});
+
+describe('GB-012 endpoint redirects (dt16)', () => {
+  const run = (env: Record<string, string>, files: Record<string, string> = {}) =>
+    check('GB-012').run(ctx([], makeFs({ env, files })));
+
+  it('passes with no overrides and with vendor hosts', async () => {
+    expect((await run({})).passed).toBe(true);
+    expect((await run({ SAND_BACKEND_URL: 'https://api2.cursor.sh', SAND_CURSOR_WEBSITE_URL: 'https://cursor.com' })).passed).toBe(true);
+    expect((await run({ CURSOR_API_BASE_URL: 'https://dev-staging.cursor.sh/' })).passed).toBe(true);
+  });
+
+  it('is critical for a redirected backend and never prints credentials or paths', async () => {
+    const r = await run({ SAND_BACKEND_URL: 'https://user:hunter2@evil.example:8443/api?token=abc' });
+    expect(r).toMatchObject({ passed: false, severity: 'critical' });
+    expect(r.evidence![0].snippet).toBe('SAND_BACKEND_URL=https://evil.example:8443');
+    expect(JSON.stringify(r)).not.toMatch(/hunter2|token=abc|\/api/);
+    expect(await run({ CURSOR_API_BASE_URL: 'http://10.0.0.5:8000' })).toMatchObject({ passed: false, severity: 'critical' });
+  });
+
+  it('follows the app: SAND_BACKEND_URL wins over CURSOR_API_BASE_URL, even when unusable', async () => {
+    expect((await run({ SAND_BACKEND_URL: 'https://api2.cursor.sh', CURSOR_API_BASE_URL: 'https://evil.example' })).passed).toBe(true);
+    // "" makes the app fail on new URL(""), it does not fall through
+    expect((await run({ SAND_BACKEND_URL: '', CURSOR_API_BASE_URL: 'https://evil.example' })).passed).toBe(true);
+  });
+
+  it('warns on a substitute cloud computer and sign-in page', async () => {
+    const gw = await run({ SAND_HOST_GATEWAY_URL: 'https://box.evil.example', SAND_HOST_GATEWAY_TOKEN: 'secret-token' });
+    expect(gw).toMatchObject({ passed: false, severity: 'warning' });
+    expect(JSON.stringify(gw)).not.toContain('secret-token');
+    expect(await run({ CURSOR_WEBSITE_URL: 'https://login.evil.example' })).toMatchObject({ passed: false, severity: 'warning' });
+    expect((await run({ SAND_CURSOR_WEBSITE_URL: '', CURSOR_WEBSITE_URL: 'https://login.evil.example' })).passed).toBe(true);
+  });
+
+  it('is info for an explicit proxy the app accepts, and skips ones it ignores', async () => {
+    expect(await run({ SAND_HTTPS_PROXY: 'http://proxy.corp:3128' })).toMatchObject({ passed: false, severity: 'info' });
+    expect((await run({ SAND_HTTPS_PROXY: 'http://proxy.corp:3128/path' })).passed).toBe(true);
+    expect((await run({ SAND_HTTPS_PROXY: 'socks5://proxy.corp:1080' })).passed).toBe(true);
+    expect((await run({ SAND_HTTPS_PROXY: 'http://proxy.corp:3128', SAND_SYSTEM_PROXY: '0' })).passed).toBe(true);
+    expect((await run({ SAND_HTTPS_PROXY: 'http://proxy.corp:3128', NODE_USE_ENV_PROXY: '1' })).passed).toBe(true);
+  });
+
+  it('reports a recorded host-gateway binding (info), and ignores env for other users', async () => {
+    const r = await run({}, { [`${UD}/.env-descriptor-account-bindings.json`]: '{"version":1,"bindings":{}}' });
+    expect(r).toMatchObject({ passed: false, severity: 'info' });
+    const other = ctx([], makeFs({ env: { SAND_BACKEND_URL: 'https://evil.example' } }));
+    other.installation.installDir = '/home/other/.grokbot';
+    expect((await check('GB-012').run(other)).passed).toBe(true);
+  });
+});
+
+describe('GB-013 passkey proxy (dt16)', () => {
+  it('is info by default on macOS and Windows, passes when off or on Linux', async () => {
+    expect(await check('GB-013').run(ctx([], makeFs({ platform: 'darwin' })))).toMatchObject({ passed: false, severity: 'info' });
+    expect(await check('GB-013').run(ctx([cfg({ webauthnProxyEnabled: true })], makeFs({ platform: 'win32' })))).toMatchObject({ passed: false, severity: 'info' });
+    expect((await check('GB-013').run(ctx([cfg({ webauthnProxyEnabled: false })], makeFs({ platform: 'darwin' })))).passed).toBe(true);
+    expect((await check('GB-013').run(ctx([]))).passed).toBe(true);
+    // A file the app rejects means the default (on)
+    const rejected = cfg({ webauthnProxyEnabled: false, version: 2 });
+    expect((await check('GB-013').run(ctx([rejected], makeFs({ platform: 'darwin' })))).passed).toBe(false);
   });
 });

@@ -1,6 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { GROK_BOT_APT_SOURCE } from '../../adapters/grok-bot.js';
+import { GROK_BOT_APP_LINUX, GROK_BOT_APT_SOURCE } from '../../adapters/grok-bot.js';
 import { envFlag, isOwnSession, settingsConfig } from './shared.js';
 
 // deb822 field; the postinst rewrites the file on every upgrade but keeps it
@@ -31,9 +31,21 @@ export const gb011 = defineCheck({
         // AppImage/.rpm installs, or not collected
       }
     }
+    // "nightly" is coerced to stable by 0.71.2, so only "dogfood" leaves
+    // stable — and only while Grok Bot's server unlocks internal tracks for
+    // the account (otherwise the app resets it to stable). A .deb/.rpm under
+    // /opt is updated by the package manager, which ignores the track.
     const config = settingsConfig(ctx);
     if (config?.data.updateTrackOverride === 'dogfood') {
-      info.push({ file: config.filePath, snippet: 'updateTrackOverride: "dogfood"', detail: 'Follows the internal pre-release track' });
+      const packageManaged = ctx.fs.platform === 'linux' && ctx.installation.appBundle === GROK_BOT_APP_LINUX;
+      info.push({
+        file: config.filePath,
+        snippet: 'updateTrackOverride: "dogfood"',
+        detail: packageManaged
+          ? 'Ignored: this install is updated by the package manager, which has no update tracks'
+          : 'Follows the internal pre-release track while Grok Bot\'s server unlocks it for the account',
+        mitigated: packageManaged || undefined,
+      });
     }
 
     return h.fromEvidence([...warning, ...info], {

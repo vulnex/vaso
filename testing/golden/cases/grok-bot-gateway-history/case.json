@@ -1,0 +1,25 @@
+{
+  "agent": "grok-bot",
+  "source": "Grok Bot 0.71.2 defaults plus the record the app writes after connecting through SAND_HOST_GATEWAY_URL (.env-descriptor-account-bindings.json, version 1, sha256 hex bindings) and updateTrackOverride \"nightly\", which 0.71.2 coerces to stable — shapes from the 0.71.2 app.asar",
+  "clean": true,
+  "fail": {
+    "GB-012": "info"
+  },
+  "pass": [
+    "GB-011"
+  ],
+  "info": [
+    "GB-013"
+  ],
+  "modes": {
+    ".grokbot": "700",
+    ".grokbot/settings.json": "600",
+    ".grokbot/local-exec-daemon-credential.json": "600",
+    ".grokbot/local-computer-use-gate.json": "600",
+    "Library/Application Support/Grok Bot": "700",
+    "Library/Application Support/Grok Bot/sand-secrets.json": "600",
+    "Library/Application Support/Grok Bot/desktop-status.json": "600",
+    "Library/Application Support/Grok Bot/.env-descriptor-account-bindings.json": "600",
+    ".grokbot/.grokbot-data-root-v1": "600"
+  }
+}
