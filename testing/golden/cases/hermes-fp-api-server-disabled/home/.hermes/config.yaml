@@ -1,0 +1,8 @@
+_config_version: 52
+approvals:
+  mode: manual
+gateway:
+  api_server:
+    enabled: false
+    host: 0.0.0.0
+    cors_origins: "*"

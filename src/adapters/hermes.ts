@@ -6,7 +6,7 @@ import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { loadConfig } from '../core/config-loader.js';
 import { loadConfigIfPresent } from './load-if-present.js';
-import { hermesApiServer, hermesApiServerState, isTruthy, HERMES_API_DEFAULT_HOST, HERMES_API_DEFAULT_PORT } from './hermes-api-server.js';
+import { hermesApiServer, hermesApiServerState, HERMES_API_DEFAULT_HOST, HERMES_API_DEFAULT_PORT } from './hermes-api-server.js';
 import { discoverCliInstalls } from './cli-installs.js';
 import { queryCliVersion } from './version-query.js';
 import { envPath } from './env-path.js';
@@ -98,7 +98,7 @@ export const hermesAdapter: AgentAdapter = {
     const cliBinary = installs.primary?.path;
     const version = stampVersion ?? installs.primary?.version;
 
-    // The API server is the gateway — unless this release refuses to start it
+    // The API server is the gateway — when enabled and this release doesn't refuse to start it
     const gateway = hermesApiServerState(hermesApiServer(configFiles, version), version) === 'refused'
       ? undefined
       : hermesGateway(configFiles, version);
@@ -344,8 +344,8 @@ function applyHermesDotenv(configs: ParsedConfig[], fs: FSProvider): void {
 
 function hermesGateway(configs: Array<Pick<ParsedConfig, 'format' | 'data'>>, version?: string): GatewayInfo | undefined {
   const api = hermesApiServer(configs, version);
-  // Only a listening API server is a gateway: enabled, or bound somewhere explicitly
-  if (!isTruthy(api.enabled?.value) && !api.host) return undefined;
+  // Only an enabled API server listens; a host or key alone starts nothing
+  if (!api.active) return undefined;
   const port = Number(api.port?.value);
   return {
     host: api.host?.value ?? HERMES_API_DEFAULT_HOST,

@@ -158,13 +158,13 @@ describe('HM-004 API server bind without auth', () => {
     return ctx;
   };
   it('fails critical when host=0.0.0.0 and key empty before the start-up guard (< 0.9.0)', async () => {
-    const cfg = makeEnv('/h/.hermes/.env', { API_SERVER_HOST: '0.0.0.0' });
+    const cfg = makeEnv('/h/.hermes/.env', { API_SERVER_ENABLED: 'true', API_SERVER_HOST: '0.0.0.0' });
     const result = await check.run(at([cfg], '0.8.0'));
     expect(result.passed).toBe(false);
     expect(result.severity).toBe('critical');
   });
   it('downgrades to info when the Hermes version is unknown', async () => {
-    const cfg = makeEnv('/h/.hermes/.env', { API_SERVER_HOST: '0.0.0.0' });
+    const cfg = makeYaml('/h/.hermes/config.yaml', { gateway: { api_server: { enabled: true, host: '0.0.0.0' } } });
     const result = await check.run(makeCtx([cfg]));
     expect(result.passed).toBe(false);
     expect(result.severity).toBe('info');
@@ -176,7 +176,7 @@ describe('HM-004 API server bind without auth', () => {
       expect(r.passed, v).toBe(true);
     }
     // 0.18.0+: a placeholder / short key is refused too
-    const weak = makeYaml('/h/.hermes/config.yaml', { gateway: { api_server: { host: '0.0.0.0', key: 'changeme' } } });
+    const weak = makeYaml('/h/.hermes/config.yaml', { gateway: { api_server: { enabled: true, host: '0.0.0.0', key: 'changeme' } } });
     expect((await check.run(at([weak], '0.21.6'))).message).toContain('refuses to start');
   });
   it('honours config.yaml over API_SERVER_HOST when the env block carries no usable key', async () => {
@@ -200,7 +200,7 @@ describe('HM-004 API server bind without auth', () => {
     expect(result.passed).toBe(true);
   });
   it('reads host and key from config.yaml gateway.api_server', async () => {
-    const open = makeYaml('/h/.hermes/config.yaml', { gateway: { api_server: { host: '0.0.0.0' } } });
+    const open = makeYaml('/h/.hermes/config.yaml', { gateway: { api_server: { enabled: true, host: '0.0.0.0' } } });
     expect((await check.run(makeCtx([open]))).passed).toBe(false);
     expect((await check.run(at([open], '0.8.0'))).severity).toBe('critical');
     const keyed = makeYaml('/h/.hermes/config.yaml', { gateway: { api_server: { host: '0.0.0.0', key: 'secret-token' } } });
@@ -218,7 +218,7 @@ describe('HM-005 permissive CORS', () => {
     expect(result.passed).toBe(true);
   });
   it('flags wildcard CORS', async () => {
-    const cfg = makeEnv('/h/.hermes/.env', { API_SERVER_HOST: '0.0.0.0', API_SERVER_CORS_ORIGINS: '*' });
+    const cfg = makeEnv('/h/.hermes/.env', { API_SERVER_KEY: 'a3f9c27e5b1d4086f2e7', API_SERVER_HOST: '0.0.0.0', API_SERVER_CORS_ORIGINS: '*' });
     const result = await check.run(makeCtx([cfg]));
     expect(result.passed).toBe(false);
   });

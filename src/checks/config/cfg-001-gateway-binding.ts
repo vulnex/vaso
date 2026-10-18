@@ -1,5 +1,5 @@
 import { defineCheck } from '../../core/check-builder.js';
-import { hermesApiServer, hermesApiServerState } from '../../adapters/hermes-api-server.js';
+import { hermesApiServer, hermesApiServerState, HERMES_API_DISABLED } from '../../adapters/hermes-api-server.js';
 import { CODING_AGENTS, type Evidence, type FixResult } from '../../core/types.js';
 import { fixFirstConfig } from '../../remediation/config-writer.js';
 import { getNestedValue } from '../../core/utils.js';
@@ -70,6 +70,7 @@ export const cfg001 = defineCheck({
     // reports the release-dependent case).
     if (ctx.installation.agent === 'hermes') {
       const state = hermesApiServerState(hermesApiServer(ctx.configs, ctx.installation.version), ctx.installation.version);
+      if (state === 'disabled') return h.passed(HERMES_API_DISABLED);
       if (state !== 'unauthenticated') {
         return h.passed(state === 'refused'
           ? `Hermes ${ctx.installation.version} refuses to start the API server without a usable API_SERVER_KEY`

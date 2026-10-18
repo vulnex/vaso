@@ -42,7 +42,7 @@ describe('NET-001: Gateway Internet Exposure', () => {
     const keyed = makeContext({ host: '0.0.0.0', port: 8642 }, [env({ API_SERVER_HOST: '0.0.0.0', API_SERVER_KEY: 'k' })]);
     keyed.installation.agent = 'hermes';
     expect((await net001.run(keyed)).passed).toBe(true);
-    const open = makeContext({ host: '0.0.0.0', port: 8642 }, [env({ API_SERVER_HOST: '0.0.0.0' })]);
+    const open = makeContext({ host: '0.0.0.0', port: 8642 }, [env({ API_SERVER_ENABLED: 'true', API_SERVER_HOST: '0.0.0.0' })]);
     open.installation.agent = 'hermes';
     open.installation.version = '0.8.0';
     expect((await net001.run(open)).passed).toBe(false);

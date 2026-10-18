@@ -71,7 +71,8 @@ describe('OpenClaw gateway (2026.9.4 runtime semantics)', () => {
 describe('NET-001', () => {
   it('flags [::] and * like 0.0.0.0', async () => {
     for (const host of ['[::]', '::', '*', '0.0.0.0']) {
-      const c = ctx('hermes', [], { gateway: { host }, version: '0.8.0' });
+      const enabled: ParsedConfig = { raw: '', format: 'env', filePath: '/h/.hermes/.env', data: { API_SERVER_ENABLED: 'true' } };
+      const c = ctx('hermes', [enabled], { gateway: { host }, version: '0.8.0' });
       expect((await net001.run(c)).passed, host).toBe(false);
     }
     expect((await net001.run(ctx('hermes', [], { gateway: { host: '127.0.0.1' } }))).passed).toBe(true);

@@ -1,6 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { hermesApiServer, hermesApiServerState, isLoopbackHost, HERMES_API_GUARDS } from '../../adapters/hermes-api-server.js';
+import { hermesApiServer, hermesApiServerState, isLoopbackHost, HERMES_API_DISABLED, HERMES_API_GUARDS } from '../../adapters/hermes-api-server.js';
 
 export const hm004 = defineCheck({
   id: 'HM-004',
@@ -15,6 +15,7 @@ export const hm004 = defineCheck({
     const version = ctx.installation.version;
     const api = hermesApiServer(ctx.configs, version);
     const state = hermesApiServerState(api, version);
+    if (state === 'disabled') return h.passed(HERMES_API_DISABLED);
     if (state === 'refused') {
       return h.passed(`Hermes ${version} refuses to start the API server without a usable API_SERVER_KEY`);
     }

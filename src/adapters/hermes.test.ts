@@ -213,7 +213,7 @@ describe('Hermes adapter', () => {
   it('extracts gateway info from platforms.api_server config', () => {
     const info = hermesAdapter.getGatewayInfo({
       platforms: {
-        api_server: { host: '0.0.0.0', port: 9000 },
+        api_server: { enabled: true, host: '0.0.0.0', port: 9000 },
       },
     });
     expect(info).toEqual({
@@ -233,13 +233,13 @@ describe('Hermes adapter', () => {
     expect(hermesAdapter.getGatewayInfo({ API_SERVER_ENABLED: 'true' })).toBeUndefined();
     expect(hermesAdapter.getGatewayInfo({ gateway: { api_server: { enabled: true, host: '0.0.0.0', port: 9000 } } }))
       .toEqual({ host: '0.0.0.0', port: 9000 });
-    expect(hermesAdapter.getGatewayInfo({ platforms: { api_server: { extra: { host: '0.0.0.0' } } } }))
+    expect(hermesAdapter.getGatewayInfo({ platforms: { api_server: { enabled: true, extra: { host: '0.0.0.0' } } } }))
       .toEqual({ host: '0.0.0.0', port: 8642 });
     // Environment variables take precedence over config.yaml alongside a usable env key…
     expect(hermesAdapter.getGatewayInfo({ API_SERVER_HOST: '127.0.0.1', API_SERVER_KEY: key, gateway: { api_server: { host: '0.0.0.0' } } }))
       .toEqual({ host: '127.0.0.1', port: 8642 });
     // …otherwise config.yaml wins and the env host is only a fallback
-    expect(hermesAdapter.getGatewayInfo({ API_SERVER_HOST: '0.0.0.0', gateway: { api_server: { host: '127.0.0.1', key } } }))
+    expect(hermesAdapter.getGatewayInfo({ API_SERVER_HOST: '0.0.0.0', gateway: { api_server: { enabled: true, host: '127.0.0.1', key } } }))
       .toEqual({ host: '127.0.0.1', port: 8642 });
     expect(hermesAdapter.getGatewayInfo({ API_SERVER_HOST: '0.0.0.0', gateway: { api_server: { enabled: true } } }))
       .toEqual({ host: '0.0.0.0', port: 8642 });

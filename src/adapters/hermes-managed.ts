@@ -86,7 +86,10 @@ export function markManagedOverride(evidence: Evidence, managed: ParsedConfig | 
  * The value Hermes uses for a config.yaml key: the managed layer's when it
  * sets the key, else the user's. `file` names where it comes from.
  */
-export function hermesYamlSetting(configs: ParsedConfig[], key: string): { value: unknown; file: string; config: ParsedConfig } | undefined {
+export function hermesYamlSetting<T extends Pick<ParsedConfig, 'format' | 'data' | 'managed'> & { filePath?: string }>(
+  configs: T[],
+  key: string,
+): { value: unknown; file: T['filePath']; config: T } | undefined {
   const yamls = configs.filter(c => c.format !== 'env');
   const user = yamls.filter(c => !c.managed);
   for (const m of yamls.filter(c => c.managed)) {

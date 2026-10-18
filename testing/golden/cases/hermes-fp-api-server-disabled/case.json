@@ -1,0 +1,6 @@
+{
+  "agent": "hermes",
+  "source": "Hermes 0.8.0 (v2026.4.8): API server with a public host and CORS * but gateway.api_server.enabled: false, and an API_SERVER_HOST without API_SERVER_ENABLED or a key — the gateway starts a platform only when enabled (gateway/config.py PlatformConfig.from_dict, _apply_env_overrides), so nothing listens; Hermes 0.21.6's loader reports the same (deep test 2026-10-18 fixture)",
+  "modes": { ".hermes": "700", ".hermes/.env": "600", ".hermes/config.yaml": "600" },
+  "pass": ["HM-004", "HM-005", "CFG-001", "NET-001", "CFG-004"]
+}
