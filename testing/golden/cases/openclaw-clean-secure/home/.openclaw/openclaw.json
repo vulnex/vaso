@@ -40,8 +40,5 @@
         "mode": "all"
       }
     }
-  },
-  "logging": {
-    "redactSensitive": "tools"
   }
 }

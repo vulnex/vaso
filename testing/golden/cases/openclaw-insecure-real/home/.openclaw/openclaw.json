@@ -12,6 +12,5 @@
   "channels": { "telegram": { "enabled": true, "dmPolicy": "open", "allowFrom": ["*"] } },
   "tools": { "exec": { "mode": "full" } },
   "agents": { "defaults": { "sandbox": { "mode": "off" } } },
-  "logging": { "redactSensitive": "off" },
-  "models": { "providers": { "openai": { "apiKey": "sk-proj-AbCdEfGhIjKlMnOpQrStUvWxYz0123456789abcdEF", "models": [ { "id": "gpt-5" } ] } } }
+  "models": { "providers": { "openai": { "apiKey": "sk-proj-AbCdEfGhIjKlMnOpQrStUvWxYz0123456789abcdEF", "models": [ { "id": "gpt-5", "name": "GPT-5" } ] } } }
 }

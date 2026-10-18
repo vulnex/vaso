@@ -1,7 +1,12 @@
 [
   {
     "id": "lan-llm",
+    "aliases": [],
+    "protocol": "open_ai_completions",
+    "api_key_required": false,
     "default_base_url": "http://10.0.0.5:8000/v1",
-    "default_model": "m"
+    "default_model": "m",
+    "model_env": "LAN_LLM_MODEL",
+    "description": "LAN inference server over plain HTTP"
   }
 ]
