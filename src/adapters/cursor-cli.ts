@@ -17,6 +17,9 @@ const CURSOR_DIR_NAME = '.cursor';
 // sandbox / hooks configuration (also honored by the CLI since Cursor 3.x).
 const USER_CONFIG_FILES = ['cli-config.json', 'mcp.json', 'permissions.json', 'sandbox.json', 'hooks.json'];
 
+// Project-level files under <cwd>/.cursor/
+const PROJECT_CONFIG_FILES = ['mcp.json', 'cli.json', 'hooks.json'];
+
 const IDE_APP_BUNDLE = '/Applications/Cursor.app';
 const CLI_CONFIG_FILE = 'cli-config.json';
 // User skills: ~/.cursor/skills (and skills-cursor/, where the CLI syncs
@@ -207,12 +210,13 @@ export const cursorCliAdapter: AgentAdapter = {
       });
     }
 
-    // Project-level: .cursor/mcp.json under cwd
+    // Project-level: .cursor/{mcp,cli,hooks}.json under cwd (project hooks
+    // run from the repo in any trusted workspace — cursor.com/docs/agent/hooks)
     const cwd = scanCwd(fs);
     if (!cwd) return installations;
     const projectCursorDir = join(cwd, CURSOR_DIR_NAME);
     if (await fs.access(projectCursorDir)) {
-      const projectConfigs = await withoutLoadedConfigs(await loadFiles(projectCursorDir, ['mcp.json', 'cli.json'], fs), installations, fs);
+      const projectConfigs = await withoutLoadedConfigs(await loadFiles(projectCursorDir, PROJECT_CONFIG_FILES, fs), installations, fs);
       if (projectConfigs.length > 0) {
         installations.push({
           agent: 'cursor-cli',

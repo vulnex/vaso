@@ -155,3 +155,38 @@ describe('Cursor CLI adapter', () => {
     expect(paths).toContain(join(cursorDir, 'cli-config.json'));
   });
 });
+
+describe('Cursor adapter — project hooks (dt15)', () => {
+  const HOME = '/home/tester';
+  const fsWith = (paths: string[]) => ({
+    platform: 'linux',
+    kind: 'local',
+    homedir: () => HOME,
+    getEnv: () => undefined,
+    access: async (p: string) => paths.some(f => f === p || f.startsWith(`${p}/`)),
+    stat: async () => { throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' }); },
+    realpath: async (p: string) => p,
+    readdir: async () => [],
+    execSync: () => { throw new Error('not found'); },
+    exec: async () => ({ exitCode: 1, stdout: '', stderr: '' }),
+  }) as unknown as import('../core/fs-provider.js').FSProvider;
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    mockLoadConfig.mockImplementation(async (p) => mockConfig(p as string, { hooks: {} }));
+  });
+
+  it('loads <repo>/.cursor/hooks.json into the project installation so CUR-011 sees repo hooks', async () => {
+    vi.spyOn(process, 'cwd').mockReturnValue('/work/repo');
+    const result = await cursorCliAdapter.detect({ fs: fsWith(['/work/repo/.cursor/hooks.json', '/work/repo/.cursor/cli.json']) });
+    const project = result.find(i => i.profile === 'project')!;
+    expect(project.configFiles.map(c => c.filePath)).toEqual(['/work/repo/.cursor/cli.json', '/work/repo/.cursor/hooks.json']);
+  });
+
+  it('does not load the user hooks.json twice when scanning from $HOME', async () => {
+    vi.spyOn(process, 'cwd').mockReturnValue(HOME);
+    const result = await cursorCliAdapter.detect({ fs: fsWith([`${HOME}/.cursor/hooks.json`]) });
+    expect(result.filter(i => i.profile === 'project')).toEqual([]);
+    expect(result[0].configFiles.map(c => c.filePath)).toEqual([`${HOME}/.cursor/hooks.json`]);
+  });
+});
