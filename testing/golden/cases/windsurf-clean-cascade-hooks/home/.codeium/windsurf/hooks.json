@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "pre_read_code": [
+      {
+        "command": "python3 /Users/yourname/hooks/log_input.py",
+        "show_output": true
+      }
+    ],
+    "post_write_code": [
+      {
+        "command": "python3 /Users/yourname/hooks/log_input.py",
+        "powershell": "python C:\\hooks\\log_input.py",
+        "show_output": true
+      }
+    ]
+  }
+}

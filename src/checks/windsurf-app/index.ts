@@ -7,6 +7,7 @@ import { ws005 } from './ws-005-insecure-mcp-url.js';
 import { ws006 } from './ws-006-workflow-turbo-directive.js';
 import { ws007 } from './ws-007-legacy-api-key-file.js';
 import { ws008 } from './ws-008-state-db-readable.js';
+import { ws009 } from './ws-009-cascade-hooks.js';
 
 export const windsurfChecks: CheckModule[] = [
   ws001,
@@ -17,4 +18,5 @@ export const windsurfChecks: CheckModule[] = [
   ws006,
   ws007,
   ws008,
+  ws009,
 ];

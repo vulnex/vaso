@@ -1,6 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { shellCommandWrapper } from '../../mcp/shell-wrapper.js';
+import { evaluatesDynamicText, PIPE_TO_SHELL_PATTERN } from '../../analyzers/hook-commands.js';
 
 // ${CLAUDE_PROJECT_DIR} / ${CLAUDE_PLUGIN_ROOT} / ${CLAUDE_PLUGIN_DATA} are
 // path placeholders the hooks docs use unquoted in their own examples
@@ -13,33 +14,6 @@ const UNQUOTED_VAR_PATTERN = new RegExp(
 const COMMAND_SUBSTITUTION_PATTERN = /\$\([^)]*\$[A-Z]/;
 /** A `$` expansion or backtick substitution, other than Claude's path placeholders and plain $HOME. */
 const DYNAMIC_EXPANSION = new RegExp(`\`|\\$(?!\\{?(?:${PATH_PLACEHOLDERS}|HOME\\b))[({A-Za-z_@*0-9]`);
-
-/**
- * Shell text that is evaluated a second time with expanded data in it: `eval`
- * or `exec` as a command word with an expansion in its arguments, or a shell
- * `-c` script that the outer shell expands (unquoted or double-quoted). A
- * single-quoted `bash -c '…'` script is constant — its own contents are
- * judged by the other patterns — and `docker compose exec` / `npm exec` are
- * not the shell builtin.
- */
-function evaluatesDynamicText(cmd: string): boolean {
-  for (const raw of cmd.split(/;|&&|\|\||\||\n/)) {
-    // drop sudo / env / VAR=value prefixes to reach the command word
-    const seg = raw.trim().replace(/^(?:(?:sudo|env|command|nohup)(?:\s+-\S+)*\s+|[A-Za-z_][A-Za-z0-9_]*=\S*\s+)+/, '');
-    const word = /^(\S+)\s*(.*)$/s.exec(seg);
-    if (!word) continue;
-    const [, head, rest] = word;
-    if ((head === 'eval' || head === 'exec') && DYNAMIC_EXPANSION.test(rest)) return true;
-    if (/^(?:\S*\/)?(?:ba|z|da|k|mk)?sh$/.test(head)) {
-      const c = /(?:^|\s)-[a-zA-Z]*c[a-zA-Z]*\s+(.*)$/s.exec(rest);
-      if (c && !c[1].startsWith("'") && DYNAMIC_EXPANSION.test(c[1])) return true;
-    }
-  }
-  return false;
-}
-// `curl … | bash`, `jq -r .tool_input.command | sh`: whatever arrives on the
-// pipe (a download, or the hook's JSON input) runs as a script
-const PIPE_TO_SHELL_PATTERN = /\|\s*(?:sudo\s+(?:-\S+\s+)*)?(?:\S*\/)?(?:env\s+)?(?:ba|z|da|k|mk|fi)?sh\b(?!\s+[^\s|;&-]\S*)/;
 
 interface HookSpec {
   type?: string;
@@ -98,7 +72,7 @@ export const cc003 = defineCheck({
             if (COMMAND_SUBSTITUTION_PATTERN.test(cmd)) {
               reasons.push('embeds variables inside command substitution');
             }
-            if (evaluatesDynamicText(cmd)) {
+            if (evaluatesDynamicText(cmd, DYNAMIC_EXPANSION)) {
               reasons.push('re-evaluates expanded text (eval/exec or an outer-quoted sh -c script) — data becomes code');
             }
             if (PIPE_TO_SHELL_PATTERN.test(cmd)) {

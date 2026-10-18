@@ -10,7 +10,7 @@ import { getUserHomeDirs } from './openclaw.js';
 import { queryCliVersion } from './version-query.js';
 import { decodeWindsurfUserSettings, toWindsurfSettingsData } from './windsurf-user-settings.js';
 import { devinCliPresent, projectDirs } from './devin.js';
-import { scanCwd } from './project-configs.js';
+import { scanCwd, withoutLoadedConfigs } from './project-configs.js';
 import { linuxConfigHome } from './env-path.js';
 
 // Windsurf IDE was rebranded Devin Desktop on 2026-06-02. One adapter covers
@@ -34,6 +34,14 @@ const DEVIN_CONFIG_FILE = 'config.json';
 const OWN_USER_SKILL_DIRS = [join('.codeium', 'windsurf', 'skills')];
 const SHARED_USER_SKILL_DIRS = [join('.agents', 'skills')];
 const LEGACY_PROJECT_SKILL_DIR = join('.windsurf', 'skills');
+const HOOKS_FILE = 'hooks.json';
+/** Workspace Cascade hooks; the legacy file counts only when the first is absent or defines none. */
+const PROJECT_HOOKS_FILES = [join('.devin', HOOKS_FILE), join('.windsurf', HOOKS_FILE)];
+/** System-level Cascade hooks per OS — Devin path first, legacy Windsurf path as its fallback. */
+const SYSTEM_HOOKS_FILES: Record<'darwin' | 'linux', string[]> = {
+  darwin: ['/Library/Application Support/Devin/hooks.json', '/Library/Application Support/Windsurf/hooks.json'],
+  linux: ['/etc/devin/hooks.json', '/etc/windsurf/hooks.json'],
+};
 
 const SYSTEM_CLI_PATHS = CLI_NAMES.flatMap(name => [
   `/usr/local/bin/${name}`,
@@ -110,6 +118,37 @@ async function rootsFromCliBinary(cliBinary: string | undefined, fs: FSProvider)
   } catch {
     return [];
   }
+}
+
+function systemHooksFiles(fs: FSProvider): string[] {
+  if (fs.platform === 'win32') {
+    const programData = fs.getEnv('PROGRAMDATA') ?? 'C:\\ProgramData';
+    return ['Devin', 'Windsurf'].map(n => join(programData, n, HOOKS_FILE));
+  }
+  return fs.platform === 'darwin' ? SYSTEM_HOOKS_FILES.darwin : SYSTEM_HOOKS_FILES.linux;
+}
+
+function definesHooks(config: ParsedConfig): boolean {
+  const hooks = config.data.hooks;
+  return !!hooks && typeof hooks === 'object' && Object.values(hooks as Record<string, unknown>)
+    .some(v => Array.isArray(v) ? v.length > 0 : !!v);
+}
+
+/**
+ * The first hooks file of `paths` that exists and defines hooks — Cascade's
+ * fallback rule for the system and workspace levels (docs.devin.ai Cascade
+ * hooks). A present-but-empty primary still loads (and a broken one still
+ * reports CONFIG-LOAD) without hiding the fallback.
+ */
+async function loadHooksWithFallback(paths: string[], fs: FSProvider): Promise<ParsedConfig[]> {
+  const out: ParsedConfig[] = [];
+  for (const p of paths) {
+    const parsed = await loadConfigIfPresent(p, fs);
+    if (!parsed) continue;
+    out.push(parsed);
+    if (definesHooks(parsed)) break;
+  }
+  return out;
 }
 
 async function findAppBundle(fs: FSProvider): Promise<string | undefined> {
@@ -251,6 +290,9 @@ export const windsurfAdapter: AgentAdapter = {
       }
 
       // 3.x execution-gate settings, projected onto windsurf.* keys.
+      const userHooks = await loadConfigIfPresent(join(agentDir, HOOKS_FILE), fs);
+      if (userHooks) configFiles.push(userHooks);
+
       const userSettings = await loadUserSettings(join(agentDir, USER_SETTINGS_FILE), fs);
       if (userSettings) configFiles.push(userSettings);
 
@@ -304,10 +346,19 @@ export const windsurfAdapter: AgentAdapter = {
 
     // Workspace .windsurf/skills (repo root down to cwd, as Devin finds .devin/)
     // belong to the scanning user's install
+    // System hooks are host-wide: reported once, on the first installation
+    if (installations.length > 0) {
+      installations[0].configFiles.push(...await loadHooksWithFallback(systemHooksFiles(fs), fs));
+    }
+
     const cwd = scanCwd(fs);
     const own = installations.find(i => i.installDir.startsWith(join(fs.homedir(), '/')));
     if (cwd && own) {
-      const { dirs } = await projectDirs(cwd, fs);
+      const { root, dirs } = await projectDirs(cwd, fs);
+      for (const dir of new Set([root, cwd])) {
+        const hooks = await loadHooksWithFallback(PROJECT_HOOKS_FILES.map(rel => join(dir, rel)), fs);
+        own.configFiles.push(...await withoutLoadedConfigs(hooks, installations, fs));
+      }
       for (const dir of dirs) {
         const skills = join(dir, LEGACY_PROJECT_SKILL_DIR);
         if (!(await fs.access(skills)) || own.skillsDirs?.includes(skills)) continue;
@@ -326,6 +377,7 @@ export const windsurfAdapter: AgentAdapter = {
       join(codeiumAgentDir(home), MCP_CONFIG_FILE),
       join(devinConfigDir(home, fs), MCP_CONFIG_FILE),
       join(codeiumAgentDir(home), USER_SETTINGS_FILE),
+      join(codeiumAgentDir(home), HOOKS_FILE),
       join(devinConfigDir(home, fs), DEVIN_CONFIG_FILE),
       ...editorUserDataDirs(home, fs).map(dir => join(dir, 'User', 'settings.json')),
     ];
@@ -371,6 +423,7 @@ export const windsurfAdapter: AgentAdapter = {
     return {
       filePaths: [
         '~/.codeium/windsurf/mcp_config.json',
+        '~/.codeium/windsurf/hooks.json',
         '~/.codeium/config.json',
         '~/.codeium/windsurf/memories/global_rules.md',
         '~/.config/devin/mcp_config.json',
@@ -418,6 +471,8 @@ export const windsurfAdapter: AgentAdapter = {
         ...APP_BUNDLES.map(b => join(b, 'Contents', 'Resources', 'app', 'product.json')),
         ...LINUX_SYSTEM_ROOTS.map(r => join(r, 'resources', 'app', 'product.json')),
         ...SYSTEM_CLI_PATHS,
+        ...SYSTEM_HOOKS_FILES.darwin,
+        ...SYSTEM_HOOKS_FILES.linux,
       ],
       systemDirListings: [],
     };

@@ -34,7 +34,7 @@ function makeCtx(configs: ParsedConfig[], fs?: FSProvider): ScanContext {
 
 describe('Cursor CLI checks', () => {
   it('exports 10 checks with correct shape', () => {
-    expect(cursorCliChecks).toHaveLength(14);
+    expect(cursorCliChecks).toHaveLength(15);
     for (const check of cursorCliChecks) {
       expect(check.category).toBe('coding-agent');
       expect(check.supportedAgents).toContain('cursor-cli');

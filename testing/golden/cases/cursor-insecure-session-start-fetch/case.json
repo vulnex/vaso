@@ -1,0 +1,10 @@
+{
+  "agent": "cursor-cli",
+  "source": "dt15 coding-b: non-gating sessionStart hook that runs a download (cursor.com/docs/agent/hooks schema); CUR-011 only judges gating hooks (dt16)",
+  "fail": {
+    "CUR-015": "critical"
+  },
+  "pass": [
+    "CUR-011"
+  ]
+}

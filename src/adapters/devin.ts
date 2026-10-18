@@ -100,22 +100,25 @@ export function devinDataDir(home: string, fs: FSProvider): string {
   return xdg ? join(xdg, 'devin') : join(home, '.local', 'share', 'devin');
 }
 
+/** Where detect() looks for the Devin CLI — PATH, installer locations, Node managers, the updater's versions. */
+const CLI_SPEC = {
+  names: ['devin'],
+  systemPaths: SYSTEM_CLI_PATHS,
+  userRelPaths: USER_CLI_RELATIVE_PATHS,
+  retainedVersions: RETAINED_VERSIONS,
+} as const;
+
 /**
- * Cheap Devin CLI signal shared with the windsurf adapter, which reads the
- * same ~/.config/devin/{config,mcp_config}.json (Devin Desktop 3.x): the
- * persistent credentials file or the CLI at its installer locations. A subset
- * of what detect() accepts, so a file is never dropped by both adapters.
+ * Devin CLI signal shared with the windsurf adapter, which reads the same
+ * ~/.config/devin/{config,mcp_config}.json (Devin Desktop 3.x): the persistent
+ * credentials file or any CLI copy detect() would find (same discovery, incl.
+ * a copy only `which devin` knows about), so a file is never dropped by both
+ * adapters nor read by both.
  */
 export async function devinCliPresent(home: string, fs: FSProvider): Promise<boolean> {
-  const candidates = [
-    join(devinDataDir(home, fs), 'credentials.toml'),
-    ...USER_CLI_RELATIVE_PATHS.map(rel => join(home, rel)),
-    ...SYSTEM_CLI_PATHS,
-  ];
-  for (const p of candidates) {
-    if (await fs.access(p)) return true;
-  }
-  return false;
+  if (await fs.access(join(devinDataDir(home, fs), 'credentials.toml'))) return true;
+  const installs = await discoverCliInstalls(home, fs, { ...CLI_SPEC, version: () => undefined });
+  return installs.primary !== undefined;
 }
 
 async function loadDevinConfig(filePath: string, fs: FSProvider): Promise<ParsedConfig | undefined> {

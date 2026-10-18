@@ -39,8 +39,8 @@ function makeCtx(configs: ParsedConfig[], fs?: FSProvider, platform: NodeJS.Plat
 }
 
 describe('Windsurf checks', () => {
-  it('exports 8 checks', () => {
-    expect(windsurfChecks).toHaveLength(8);
+  it('exports 9 checks', () => {
+    expect(windsurfChecks).toHaveLength(9);
   });
 
   it('all checks have coding-agent category and supportedAgents', () => {

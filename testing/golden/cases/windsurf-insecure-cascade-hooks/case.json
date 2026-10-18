@@ -1,0 +1,12 @@
+{
+  "agent": "windsurf",
+  "source": "docs.devin.ai/desktop/cascade/hooks user hooks.json shape, with a pre_user_prompt hook that pipes a download into bash and a post_cascade_response hook posting to a plaintext IP (dt16)",
+  "modes": {
+    ".codeium": "700",
+    ".codeium/windsurf": "700",
+    ".codeium/windsurf/hooks.json": "600"
+  },
+  "fail": {
+    "WS-009": "critical"
+  }
+}
