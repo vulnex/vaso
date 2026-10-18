@@ -41,26 +41,37 @@ export function settingsConfig(ctx: ScanContext): ParsedConfig | undefined {
 }
 
 const PERMISSION_KEYS = ['localToolPermission', 'localToolPermissionCeiling'];
-const BOOLEAN_KEYS = ['egressTunnelEnabled', 'localEgressAllowed', 'messagesEnabled', 'webauthnProxyEnabled', 'autoUpdateWhenIdle'];
+const BOOLEAN_KEYS = ['egressTunnelEnabled', 'egressTunnelPreference', 'localEgressAllowed', 'messagesEnabled', 'webauthnProxyEnabled', 'autoUpdateWhenIdle'];
+// The keys an account-scope block carries (the app strips any other key there
+// instead of rejecting the file)
+const SCOPED_BOOLEAN_KEYS = ['localEgressAllowed'];
 
-function validBlock(data: Record<string, unknown>): boolean {
+/** autoReviewInstructions as the schema types it: isEnabled a boolean when present. */
+function validReview(v: unknown): boolean {
+  if (v === undefined) return true;
+  return isRecord(v) && (v.isEnabled === undefined || typeof v.isEnabled === 'boolean');
+}
+
+function validBlock(data: Record<string, unknown>, booleans: string[]): boolean {
   if (PERMISSION_KEYS.some(k => data[k] !== undefined && asPermission(data[k]) === undefined)) return false;
-  if (BOOLEAN_KEYS.some(k => data[k] !== undefined && typeof data[k] !== 'boolean')) return false;
-  return true;
+  if (booleans.some(k => data[k] !== undefined && typeof data[k] !== 'boolean')) return false;
+  return validReview(data.autoReviewInstructions);
 }
 
 /** settings.json `updateTrackOverride` values the schema accepts. */
 const UPDATE_TRACKS = ['stable', 'nightly', 'dogfood'];
 
 function acceptedByApp(data: Record<string, unknown>): boolean {
-  // The app always writes version 1; a missing one is treated as current
-  if ((data.version !== undefined && data.version !== 1) || !validBlock(data)) return false;
-  // An app-wide setting, so only at the top level
+  // `version: literal(1)` is required by the schema (main-core and the daemon)
+  if (data.version !== 1 || !validBlock(data, BOOLEAN_KEYS)) return false;
+  // App-wide settings, so only at the top level
   if (data.updateTrackOverride !== undefined && !UPDATE_TRACKS.includes(data.updateTrackOverride as string)) return false;
+  const machines = data.localToolPermissionByMachineId;
+  if (machines !== undefined && !(isRecord(machines) && Object.values(machines).every(v => asPermission(v) !== undefined))) return false;
   const scopes = data.accountScopes;
   if (scopes === undefined) return true;
   if (!isRecord(scopes)) return false;
-  return Object.values(scopes).every(b => isRecord(b) && validBlock(b));
+  return Object.values(scopes).every(b => isRecord(b) && validBlock(b, SCOPED_BOOLEAN_KEYS));
 }
 
 export interface AccountBlock {

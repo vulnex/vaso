@@ -70,9 +70,10 @@ export const USER_DATA_FILES = {
 export const GROK_BOT_ENV = [
   'SAND_DATA_ROOT', 'SAND_USER_DATA_DIR', 'SAND_LOCAL_EXEC_ROOT',
   'SAND_DISABLE_UPDATES', 'SAND_EGRESS_TUNNEL_ALLOW_PRIVATE',
-  // Locations only — the tunnel's bearer and the gateway tokens are never
-  // collected (the probe also strips user:password@ from URLs)
-  'SAND_EGRESS_TUNNEL_URL',
+  // Locations only — gateway tokens are never collected (the probe also strips
+  // user:password@ from URLs). The tunnel bearer is collected for presence
+  // only: the probe redacts every *_BEARER value (probe ≥ 1.4.0)
+  'SAND_EGRESS_TUNNEL_URL', 'SAND_EGRESS_TUNNEL_BEARER',
   // Endpoint overrides honoured by packaged builds (GB-012)
   'SAND_BACKEND_URL', 'CURSOR_API_BASE_URL', 'SAND_HOST_GATEWAY_URL',
   'SAND_CURSOR_WEBSITE_URL', 'CURSOR_WEBSITE_URL',

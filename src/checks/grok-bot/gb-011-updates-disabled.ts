@@ -19,7 +19,15 @@ export const gb011 = defineCheck({
     const info: Evidence[] = [];
 
     if (isOwnSession(ctx) && envFlag(ctx, 'SAND_DISABLE_UPDATES')) {
-      warning.push({ file: '<process env>', snippet: 'SAND_DISABLE_UPDATES=1', detail: 'The app never checks for updates — security fixes stop arriving' });
+      // A .deb/.rpm install updates through the package manager, not the app
+      const packageManaged = ctx.fs.platform === 'linux' && ctx.installation.appBundle === GROK_BOT_APP_LINUX;
+      (packageManaged ? info : warning).push({
+        file: '<process env>',
+        snippet: 'SAND_DISABLE_UPDATES=1',
+        detail: packageManaged
+          ? 'The app\'s own updater is off — this .deb install still updates through apt'
+          : 'The app never checks for updates — security fixes stop arriving',
+      });
     }
     if (ctx.fs.platform === 'linux') {
       try {

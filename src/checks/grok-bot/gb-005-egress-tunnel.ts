@@ -12,39 +12,40 @@ export const gb005 = defineCheck({
 
   async run(ctx, h) {
     const config = settingsConfig(ctx);
+    const data = config?.data ?? {};
+    // The app's switch: egressTunnelPreference, else egressTunnelEnabled — off
+    // means no tunnel at all, from settings or the environment
+    const pref = typeof data.egressTunnelPreference === 'boolean' ? data.egressTunnelPreference : data.egressTunnelEnabled;
+    if (pref !== true) return h.passed('Grok Bot cloud traffic does not use this computer\'s network');
+
     const own = isOwnSession(ctx);
-    // A tunnel configured from the environment (SAND_EGRESS_TUNNEL_URL + its
-    // bearer) is the only one that honours SAND_EGRESS_TUNNEL_ALLOW_PRIVATE;
-    // the settings-driven tunnel always keeps private targets off
-    const envTunnel = own ? ctx.fs.getEnv('SAND_EGRESS_TUNNEL_URL')?.trim() : undefined;
-    const allowPrivate = !!envTunnel && envFlag(ctx, 'SAND_EGRESS_TUNNEL_ALLOW_PRIVATE');
-    const settingsTunnel = config?.data.egressTunnelEnabled === true;
-    if (!settingsTunnel && !envTunnel) {
-      return h.passed('Grok Bot cloud traffic does not use this computer\'s network');
+    // An environment tunnel replaces the box tunnel only with both its URL
+    // and its bearer set; only it honours SAND_EGRESS_TUNNEL_ALLOW_PRIVATE
+    const envUrl = own ? ctx.fs.getEnv('SAND_EGRESS_TUNNEL_URL')?.trim() : undefined;
+    const envTunnel = !!envUrl && !!(own && ctx.fs.getEnv('SAND_EGRESS_TUNNEL_BEARER')?.trim());
+    const allowPrivate = envTunnel && envFlag(ctx, 'SAND_EGRESS_TUNNEL_ALLOW_PRIVATE');
+    const file = config?.filePath ?? '<process env>';
+    const switchSnippet = typeof data.egressTunnelPreference === 'boolean' ? 'egressTunnelPreference: true' : 'egressTunnelEnabled: true';
+
+    // Team policy mirrored into settings: false blocks the tunnel for the account
+    if (data.localEgressAllowed === false) {
+      return h.fromEvidence([{
+        file, snippet: `${switchSnippet}, localEgressAllowed: false`,
+        detail: 'Inactive while the admin keeps Allow Local Egress Routing off', mitigated: true,
+      }], { passed: '', failed: () => 'Grok Bot egress routing is on but blocked by team policy' });
     }
 
-    const evidence: Evidence[] = [];
-    if (settingsTunnel && config) {
-      // Team policy mirrored into settings: false blocks the tunnel for the account
-      const blocked = config.data.localEgressAllowed === false;
-      evidence.push({
-        file: config.filePath,
-        snippet: blocked ? 'egressTunnelEnabled: true, localEgressAllowed: false' : 'egressTunnelEnabled: true',
-        detail: blocked
-          ? 'Inactive while the admin keeps Allow Local Egress Routing off'
+    const evidence: Evidence[] = [{
+      file,
+      snippet: envTunnel
+        ? `${switchSnippet}; SAND_EGRESS_TUNNEL_URL + SAND_EGRESS_TUNNEL_BEARER set${allowPrivate ? ', SAND_EGRESS_TUNNEL_ALLOW_PRIVATE=1' : ''}`
+        : switchSnippet,
+      detail: allowPrivate
+        ? 'An environment-configured tunnel with private targets allowed: the cloud agent can reach LAN hosts, localhost services and cloud metadata endpoints through this computer'
+        : envTunnel
+          ? 'An environment-configured tunnel routes the cloud computer\'s traffic through this machine (public targets only)'
           : 'The cloud agent browses and connects out with this machine\'s IP (public targets only) — prompt-injected content can reach services that trust this IP',
-        mitigated: blocked || undefined,
-      });
-    }
-    if (envTunnel) {
-      evidence.push({
-        file: '<process env>',
-        snippet: allowPrivate ? 'SAND_EGRESS_TUNNEL_URL set, SAND_EGRESS_TUNNEL_ALLOW_PRIVATE=1' : 'SAND_EGRESS_TUNNEL_URL set',
-        detail: allowPrivate
-          ? 'Private targets allowed: the cloud agent can reach LAN hosts, localhost services and cloud metadata endpoints through this computer'
-          : 'An environment-configured egress tunnel routes the cloud computer\'s traffic through this machine',
-      });
-    }
+    }];
     return h.fromEvidence(evidence, {
       passed: '',
       failed: () => allowPrivate

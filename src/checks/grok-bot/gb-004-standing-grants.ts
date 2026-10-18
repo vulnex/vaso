@@ -8,18 +8,24 @@ interface Grant {
   action?: unknown;
   accountScope?: unknown;
   grantedAtMs?: unknown;
+  recipient?: unknown;
 }
 
-// Global actions (commands, files, input, AI-tool setup) follow
-// localToolPermission alone — the daemon never consults a grant for them
-const GLOBAL_ACTIONS = new Set(['run-command', 'send-input', 'read-file', 'list-directory', 'write-file', 'read-ai-tool-setup']);
+// The daemon's grant parser (kxt in local-exec-daemon, 0.71.2) keeps a grant
+// only for an action whose own scope is "subject" — texting someone, using an
+// app; commands, files and Messages reads are never decided by a grant
+const SUBJECT_ACTIONS = new Set(['send-imessage', 'use-app']);
 const MESSAGES_ACTIONS = new Set(['read-messages', 'send-imessage']);
 
-/** A grant the daemon would honour: well-formed, not a global action, Messages ones only with Messages on. */
+const nonBlank = (v: unknown): v is string => typeof v === 'string' && v.trim() !== '';
+
+/** A grant the daemon would load and consult, as its parser and gate decide. */
 function honoured(g: Grant, messagesEnabled: boolean): boolean {
-  if (typeof g.action !== 'string' || typeof g.accountScope !== 'string' || typeof g.grantedAtMs !== 'number') return false;
   if (g.scope !== 'action' && g.scope !== 'subject') return false;
-  if (GLOBAL_ACTIONS.has(g.action)) return false;
+  if (typeof g.action !== 'string' || !SUBJECT_ACTIONS.has(g.action)) return false;
+  if (!nonBlank(g.accountScope)) return false;
+  if (typeof g.grantedAtMs !== 'number' || !Number.isFinite(g.grantedAtMs) || g.grantedAtMs < 0) return false;
+  if (g.scope === 'subject' && !nonBlank(g.recipient)) return false;
   return messagesEnabled || !MESSAGES_ACTIONS.has(g.action);
 }
 

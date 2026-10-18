@@ -53,6 +53,9 @@ function proxyEndpoint(raw: string): Endpoint | undefined {
   try {
     const url = new URL(raw);
     if ((url.protocol !== 'http:' && url.protocol !== 'https:') || !url.hostname || url.pathname !== '/' || url.search) return undefined;
+    // The app decodes the userinfo and ignores the proxy when that fails (Dw in main-core)
+    decodeURIComponent(url.username);
+    decodeURIComponent(url.password);
   } catch {
     return undefined;
   }

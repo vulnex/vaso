@@ -108,7 +108,8 @@ describe('Grok Bot adapter', () => {
       expect(m.metadataGlobPatterns?.some(p => p.endsWith(secret)), secret).toBe(true);
     }
     expect(m.envPrefixes).not.toContain('SAND_');
-    expect(m.envPrefixes.some(p => /BEARER|TOKEN|PASSWORD|KEY/.test(p))).toBe(false);
+    // Only the tunnel bearer, for presence — the probe redacts every *_BEARER value
+    expect(m.envPrefixes.filter(p => /BEARER|TOKEN|PASSWORD|KEY/.test(p))).toEqual(['SAND_EGRESS_TUNNEL_BEARER']);
     // GB-012's endpoint overrides are collected; the gateway binding record is metadata-only
     expect(m.envPrefixes).toEqual(expect.arrayContaining(['SAND_BACKEND_URL', 'CURSOR_API_BASE_URL', 'SAND_HOST_GATEWAY_URL', 'SAND_HTTPS_PROXY']));
     expect(m.metadataGlobPatterns).toContain('~/.config/Grok Bot/.env-descriptor-account-bindings.json');

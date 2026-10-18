@@ -12,8 +12,10 @@ const ROOT = `${HOME}/.grokbot`;
 const UD = `${HOME}/.config/Grok Bot`;
 const SETTINGS = `${ROOT}/settings.json`;
 
+/** settings.json as the app writes it: version 1 unless the test says otherwise. */
 function cfg(data: Record<string, unknown>, filePath = SETTINGS): ParsedConfig {
-  return { raw: JSON.stringify(data), format: 'json', filePath, data };
+  const full = { version: 1, ...data };
+  return { raw: JSON.stringify(full), format: 'json', filePath, data: full };
 }
 
 interface FsOpts {
@@ -97,6 +99,14 @@ describe('GB-001 local execution always allowed', () => {
   it('evaluates the defaults when the app would reject settings.json (dt15 Grok Bot B8)', async () => {
     expect((await check('GB-001').run(ctx([cfg({ version: 2, localToolPermission: 'always' })]))).passed).toBe(true);
     expect((await check('GB-001').run(ctx([cfg({ localToolPermission: 'always', egressTunnelEnabled: 'yes' })]))).passed).toBe(true);
+    // version is required; isEnabled and the per-machine values are typed (dt17)
+    const raw = (data: Record<string, unknown>): ParsedConfig => ({ raw: JSON.stringify(data), format: 'json', filePath: SETTINGS, data });
+    expect((await check('GB-001').run(ctx([raw({ localToolPermission: 'always' })]))).passed).toBe(true);
+    expect((await check('GB-001').run(ctx([cfg({ localToolPermission: 'always', autoReviewInstructions: { isEnabled: 'no' } })]))).passed).toBe(true);
+    expect((await check('GB-001').run(ctx([cfg({ localToolPermission: 'always', localToolPermissionByMachineId: { m: 'sometimes' } })]))).passed).toBe(true);
+    // an unknown key inside an account scope is stripped, not a rejection
+    const scoped = await check('GB-001').run(ctx([cfg({ localToolPermission: 'always', accountScopes: { ['b'.repeat(64)]: { messagesEnabled: 'yes' } } })]));
+    expect(scoped).toMatchObject({ passed: false, severity: 'critical' });
   });
 
   it('is info when an admin ceiling caps it, and for other machines set to always', async () => {
@@ -211,21 +221,31 @@ describe('GB-004 standing approvals', () => {
 });
 
 describe('GB-005 egress tunnel', () => {
-  it('passes by default, warns when on, critical with private targets', async () => {
+  const tunnelEnv = { SAND_EGRESS_TUNNEL_URL: 'https://tunnel.example', SAND_EGRESS_TUNNEL_BEARER: 'x' };
+
+  it('passes when the tunnel switch is off — settings or environment alike', async () => {
     expect((await check('GB-005').run(ctx([cfg({ egressTunnelEnabled: false })]))).passed).toBe(true);
-    expect(await check('GB-005').run(ctx([cfg({ egressTunnelEnabled: true })]))).toMatchObject({ passed: false, severity: 'warning' });
-    // The settings tunnel never reaches private targets — the flag alone changes nothing (dt15 Grok Bot B2)
-    const flagOnly = await check('GB-005').run(ctx([cfg({ egressTunnelEnabled: true })], makeFs({ env: { SAND_EGRESS_TUNNEL_ALLOW_PRIVATE: '1' } })));
-    expect(flagOnly.severity).toBe('warning');
-    const envTunnel = { SAND_EGRESS_TUNNEL_URL: 'https://tunnel.example', SAND_EGRESS_TUNNEL_ALLOW_PRIVATE: '1' };
-    expect((await check('GB-005').run(ctx([], makeFs({ env: envTunnel })))).severity).toBe('critical');
-    // Only exactly "1" turns it on (dt15 Grok Bot B3)
-    const yes = await check('GB-005').run(ctx([], makeFs({ env: { ...envTunnel, SAND_EGRESS_TUNNEL_ALLOW_PRIVATE: 'yes' } })));
-    expect(yes).toMatchObject({ passed: false, severity: 'warning' });
+    // env tunnel configured but the switch off: the app runs no tunnel (dt17)
+    expect((await check('GB-005').run(ctx([cfg({ egressTunnelEnabled: false })], makeFs({ env: { ...tunnelEnv, SAND_EGRESS_TUNNEL_ALLOW_PRIVATE: '1' } }))))).toMatchObject({ passed: true });
+    // egressTunnelPreference wins over egressTunnelEnabled
+    expect((await check('GB-005').run(ctx([cfg({ egressTunnelEnabled: true, egressTunnelPreference: false })])))).toMatchObject({ passed: true });
   });
 
-  it('is info when team policy blocks local egress', async () => {
-    const r = await check('GB-005').run(ctx([cfg({ egressTunnelEnabled: true, localEgressAllowed: false })]));
+  it('warns for the box tunnel; critical only for an env tunnel (URL + bearer) with private targets', async () => {
+    expect(await check('GB-005').run(ctx([cfg({ egressTunnelEnabled: true })]))).toMatchObject({ passed: false, severity: 'warning' });
+    // ALLOW_PRIVATE without a bearer: the box tunnel runs, private targets off (dt17)
+    const noBearer = await check('GB-005').run(ctx([cfg({ egressTunnelEnabled: true })], makeFs({ env: { SAND_EGRESS_TUNNEL_URL: 'https://t', SAND_EGRESS_TUNNEL_ALLOW_PRIVATE: '1' } })));
+    expect(noBearer.severity).toBe('warning');
+    const priv = await check('GB-005').run(ctx([cfg({ egressTunnelEnabled: true })], makeFs({ env: { ...tunnelEnv, SAND_EGRESS_TUNNEL_ALLOW_PRIVATE: '1' } })));
+    expect(priv.severity).toBe('critical');
+    expect(JSON.stringify(priv.evidence)).not.toContain('"x"');
+    // only exactly "1" turns private targets on
+    const yes = await check('GB-005').run(ctx([cfg({ egressTunnelEnabled: true })], makeFs({ env: { ...tunnelEnv, SAND_EGRESS_TUNNEL_ALLOW_PRIVATE: 'yes' } })));
+    expect(yes.severity).toBe('warning');
+  });
+
+  it('is info when team policy blocks local egress, env tunnel included', async () => {
+    const r = await check('GB-005').run(ctx([cfg({ egressTunnelEnabled: true, localEgressAllowed: false })], makeFs({ env: { ...tunnelEnv, SAND_EGRESS_TUNNEL_ALLOW_PRIVATE: '1' } })));
     expect(r).toMatchObject({ passed: false, severity: 'info' });
   });
 });
@@ -405,5 +425,22 @@ describe('GB-013 passkey proxy (dt16)', () => {
     // A file the app rejects means the default (on)
     const rejected = cfg({ webauthnProxyEnabled: false, version: 2 });
     expect((await check('GB-013').run(ctx([rejected], makeFs({ platform: 'darwin' })))).passed).toBe(false);
+  });
+});
+
+describe('GB-011 / GB-012 precision (dt17)', () => {
+  it('SAND_DISABLE_UPDATES is info for an apt-managed .deb install', async () => {
+    const fs = makeFs({ env: { SAND_DISABLE_UPDATES: '1' } });
+    const inst: AgentInstallation = { agent: 'grok-bot', installDir: ROOT, configFiles: [], appBundle: '/opt/Grok Bot' };
+    const r = await check('GB-011').run({ installation: inst, configs: [], platform: 'linux', fs });
+    expect(r).toMatchObject({ passed: false, severity: 'info' });
+    expect(await check('GB-011').run(ctx([], fs))).toMatchObject({ passed: false, severity: 'warning' });
+  });
+
+  it('a proxy whose userinfo the app cannot decode is ignored, as the app ignores it', async () => {
+    const bad = await check('GB-012').run(ctx([], makeFs({ env: { SAND_HTTPS_PROXY: 'http://u:%E0%A4%A@proxy.example:8080' } })));
+    expect(bad.passed).toBe(true);
+    const ok = await check('GB-012').run(ctx([], makeFs({ env: { SAND_HTTPS_PROXY: 'http://proxy.example:8080' } })));
+    expect(ok.passed).toBe(false);
   });
 });
