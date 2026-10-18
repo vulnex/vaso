@@ -243,6 +243,20 @@ describe('PicoClaw adapter', () => {
     expect(c.gateway?.host).toBe('0.0.0.0');
   });
 
+  it('takes PICOCLAW_HOME / PICOCLAW_CONFIG literally — 0.3.1 does not expand ~ (picoclaw status: "Config: ~/ph/config.json ✗")', async () => {
+    const fs = makeFs({
+      env: { PICOCLAW_HOME: '~/ph' },
+      files: { [`${HOME}/ph/config.json`]: JSON.stringify(onboardConfig()) },
+    });
+    const paths = picoclawPaths(HOME, fs);
+    expect(paths.home).not.toBe(`${HOME}/ph`);
+    expect(paths.configPath.endsWith('/~/ph/config.json')).toBe(true);
+    // …but the default workspace derived from it is ~-expanded like every workspace path
+    expect(paths.workspaceRoot).toBe(`${HOME}/ph`);
+    expect(await picoclawAdapter.detect({ fs })).toEqual([]);
+    expect(picoclawPaths(HOME, makeFs({ env: { PICOCLAW_CONFIG: '~/ph/config.json' } })).configPath).not.toBe(`${HOME}/ph/config.json`);
+  });
+
   it('honours PICOCLAW_HOME and PICOCLAW_CONFIG (secrets/launcher files live next to the config)', async () => {
     const fs = makeFs({
       env: { PICOCLAW_HOME: '/srv/pico', PICOCLAW_CONFIG: '/etc/pico/agent.json' },
@@ -252,7 +266,7 @@ describe('PicoClaw adapter', () => {
         '/srv/pico/auth.json': JSON.stringify({ credentials: {} }),
       },
     });
-    expect(picoclawPaths(HOME, fs)).toEqual({ home: '/srv/pico', configPath: '/etc/pico/agent.json', configDir: '/etc/pico' });
+    expect(picoclawPaths(HOME, fs)).toEqual({ home: '/srv/pico', configPath: '/etc/pico/agent.json', configDir: '/etc/pico', workspaceRoot: '/srv/pico' });
     const [inst] = await picoclawAdapter.detect({ fs });
     expect(inst.installDir).toBe('/srv/pico');
     expect(inst.configFiles.map(c => c.filePath)).toEqual(['/etc/pico/agent.json', '/etc/pico/.security.yml', '/srv/pico/auth.json']);

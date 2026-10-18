@@ -51,6 +51,9 @@ export interface PicoclawPaths {
   configPath: string;
   /** Directory holding config.json, .security.yml and launcher-config.json. */
   configDir: string;
+  /** Where the default workspace lives: `home`, except that workspace paths
+   *  get `~` expanded and PICOCLAW_HOME itself doesn't. */
+  workspaceRoot: string;
 }
 
 function envOverride(fs: FSProvider, key: string): string | undefined {
@@ -66,10 +69,15 @@ function envOverride(fs: FSProvider, key: string): string | undefined {
 export function picoclawPaths(userHome: string, fs: FSProvider): PicoclawPaths {
   const ownHome = userHome === fs.homedir();
   const homeEnv = ownHome ? envOverride(fs, 'PICOCLAW_HOME') : undefined;
-  const home = homeEnv ? expandHome(homeEnv, userHome) : join(userHome, '.picoclaw');
+  // PicoClaw 0.3.1 takes PICOCLAW_HOME / PICOCLAW_CONFIG literally: `~/x` is
+  // a directory named `~` under its working directory (`picoclaw status`:
+  // "Config: ~/ph/config.json ✗"), while the default workspace derived from
+  // the home is `~`-expanded like every workspace path.
+  const home = homeEnv ? literalPath(homeEnv) : join(userHome, '.picoclaw');
   const configEnv = ownHome ? envOverride(fs, 'PICOCLAW_CONFIG') : undefined;
-  const configPath = configEnv ? expandHome(configEnv, userHome) : join(home, 'config.json');
-  return { home, configPath, configDir: dirname(configPath) };
+  const configPath = configEnv ? literalPath(configEnv) : join(home, 'config.json');
+  const workspaceRoot = homeEnv ? expandHome(homeEnv, userHome) : home;
+  return { home, configPath, configDir: dirname(configPath), workspaceRoot };
 }
 
 /**
@@ -86,6 +94,10 @@ const ENV_OVERRIDES: EnvOverrideSpec[] = [
   { env: 'PICOCLAW_TOOLS_EXEC_ENABLE_DENY_PATTERNS', path: ['tools', 'exec', 'enable_deny_patterns'], type: 'bool' },
   { env: 'PICOCLAW_GATEWAY_PORT', path: ['gateway', 'port'], type: 'int' },
 ];
+
+function literalPath(p: string): string {
+  return isAbsolute(p) ? p : resolve(p);
+}
 
 function expandHome(p: string, userHome: string): string {
   if (p === '~') return userHome;
@@ -188,7 +200,7 @@ export const picoclawAdapter: AgentAdapter = {
       if (main && userHome === fs.homedir()) main.data = applyEnvOverrides(main.data, ENV_OVERRIDES, fs);
       const launcher = configFiles.find(c => c.filePath.endsWith('launcher-config.json'));
 
-      const workspaces = picoclawWorkspaces(main?.data, paths.home, userHome);
+      const workspaces = picoclawWorkspaces(main?.data, paths.workspaceRoot, userHome);
       const builtinSkills = userHome === fs.homedir() ? envOverride(fs, 'PICOCLAW_BUILTIN_SKILLS') : undefined;
       const skillsDirs = [
         ...workspaces.map(w => join(w, 'skills')),
