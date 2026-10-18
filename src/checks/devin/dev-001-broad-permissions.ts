@@ -4,6 +4,7 @@ import { stripJsonc } from '../../core/jsonc.js';
 import { devinConfigDir } from '../../adapters/devin.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { buildBroadPaths, isBroadPath } from '../../analyzers/broad-paths.js';
+import { commandFamily } from '../../analyzers/command-families.js';
 
 // Commands whose unrestricted Exec() allowance hands the agent arbitrary
 // code execution or network egress.
@@ -13,10 +14,6 @@ export const DANGEROUS_COMMANDS = new Set([
   'npx', 'ssh', 'nc', 'ncat', 'sudo', 'su', 'doas', 'chmod', 'rm',
 ]);
 
-/** Versioned interpreter names map to their family: python3, python3.12 → python. */
-function commandFamily(cmd: string): string {
-  return cmd.replace(/^(python|ruby|perl|php|node)\d+(?:\.\d+)*$/, '$1');
-}
 
 // `Fetch(url)` scopes HTTP requests (Devin CLI permissions reference,
 // e.g. `Fetch(https://internal.api/*)`); a wildcard host is any egress.

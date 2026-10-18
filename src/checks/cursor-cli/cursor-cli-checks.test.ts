@@ -266,6 +266,23 @@ describe('dt15: Cursor command:args and absolute-glob rule forms', () => {
     expect(result.evidence?.[1].detail).toContain('home directory');
   });
 
+  it('CUR-003 flags interpreters and wrappers however the base is spelled', async () => {
+    const result = await cur003.run(ctx(['Shell(python3:*)', 'Shell(node)', 'Shell(/usr/bin/curl:*)', 'Shell(osascript)', 'Shell(npx:*)', 'Shell(xargs:*)', 'Shell(/bin/bash)']));
+    expect(result.evidence).toHaveLength(7);
+    expect(result.evidence?.[0].detail).toContain('python3 interpreter');
+    // scoped rules and lookalike names stay clean
+    expect((await cur003.run(ctx(['Shell(nodemon)', 'Shell(python-lint)', 'Shell(/usr/bin/git:*)', 'Shell(make:test)']))).passed).toBe(true);
+  });
+
+  it('CUR-009 flags credential stores, shell startup files, the parent directory and every home', async () => {
+    const result = await cur009.run(ctx(['Read(~/.ssh/**)', 'Write(~/.zshrc)', 'Write(../**)', 'Read(/home/**)', 'Read(~/.aws/credentials)', 'Write(/etc/hosts)']));
+    expect(result.evidence).toHaveLength(6);
+    expect(result.evidence?.[0].detail).toContain('SSH keys');
+    expect(result.evidence?.[1].detail).toContain('shell startup file');
+    expect(result.evidence?.[2].detail).toContain('outside the workspace');
+    expect(result.evidence?.[3].detail).toContain("every other user's");
+  });
+
   it('CUR-009 keeps scoped absolute and relative globs passing', async () => {
     const result = await cur009.run(ctx([
       'Write(~/projects/app/**)', 'Read(/etc/hosts)', 'Write(src/**)', 'Read(/home/test/.config/app/*.json)', 'Mcp(datadog:*)',

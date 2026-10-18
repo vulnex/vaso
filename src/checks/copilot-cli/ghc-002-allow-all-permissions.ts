@@ -1,6 +1,7 @@
 import type { Evidence, ParsedConfig } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { buildBroadPaths, isBroadPath } from '../../analyzers/broad-paths.js';
+import { commandFamily, INTERPRETER_COMMANDS, SHELL_COMMANDS, WRAPPER_COMMANDS } from '../../analyzers/command-families.js';
 
 // Saved approvals live in ~/.copilot/permissions-config.json under
 // locations[<repo root or dir>].tool_approvals. A `commands` approval lists
@@ -14,18 +15,9 @@ import { buildBroadPaths, isBroadPath } from '../../analyzers/broad-paths.js';
 // no path: every file write in that location stops prompting. (Rule matcher
 // read from the 1.0.39 bundle; 1.0.85 keeps the same keys in its native
 // runtime.)
-const ANY_COMMAND_PREFIXES = new Set([
-  'bash', 'sh', 'zsh', 'fish', 'dash', 'ksh', 'pwsh', 'powershell', 'cmd',
-  'sudo', 'su', 'doas', 'env', 'xargs', 'eval', 'exec', 'nohup', 'timeout', 'command',
-  'python', 'node', 'deno', 'bun', 'perl', 'ruby', 'php', 'osascript', 'npx', 'bunx', 'uvx',
-]);
+const ANY_COMMAND_PREFIXES = new Set([...SHELL_COMMANDS, ...WRAPPER_COMMANDS, ...INTERPRETER_COMMANDS]);
 /** Approved for good, these fetch from or upload to any host unreviewed. */
 const NETWORK_COMMANDS = new Set(['curl', 'wget', 'nc', 'ncat', 'netcat', 'telnet', 'ssh', 'scp', 'aria2c']);
-
-/** Versioned interpreter names map to their family: python3, python3.12 → python. */
-function commandFamily(cmd: string): string {
-  return cmd.replace(/^(python|ruby|perl|php|node)\d+(?:\.\d+)*$/, '$1');
-}
 
 interface Found {
   evidence: Evidence[];

@@ -1,4 +1,6 @@
-import { buildBroadPaths, isBroadPath } from '../../analyzers/broad-paths.js';
+import { buildBroadPaths, expandHome, isBroadPath } from '../../analyzers/broad-paths.js';
+import { commandStem, INTERPRETER_COMMANDS, SHELL_COMMANDS, WRAPPER_COMMANDS } from '../../analyzers/command-families.js';
+import { classifySensitivePath } from '../../analyzers/sensitive-paths.js';
 
 /**
  * Cursor permission rules (cursor.com/docs/cli/reference/permissions):
@@ -19,8 +21,7 @@ export function parseCursorRule(rule: string): CursorRule | undefined {
 }
 
 const WILDCARD = /^\*+$/;
-const SHELLS = new Set(['bash', 'sh', 'zsh', 'fish', 'dash', 'ksh', 'cmd', 'powershell', 'pwsh']);
-const RISKY_COMMANDS = new Set(['rm', 'sudo', 'curl', 'wget', 'nc', 'ncat', 'eval', 'exec']);
+const RISKY_COMMANDS = new Set(['rm', 'curl', 'wget', 'nc', 'ncat', 'netcat', 'telnet', 'ssh', 'scp']);
 
 /** The command base of a Shell rule argument — `curl` for `curl:*` and `curl`. */
 function shellBase(arg: string): string {
@@ -28,13 +29,23 @@ function shellBase(arg: string): string {
   return (colon === -1 ? arg : arg.slice(0, colon)).trim().toLowerCase();
 }
 
-/** A Shell rule that allows any command, a shell, or a risky command (with any arguments). */
-export function isOverbroadShell(rule: string): boolean {
+/**
+ * Why a Shell rule allows far more than one command, or undefined: any
+ * command, a shell / interpreter / wrapper (which runs whatever it is
+ * given), or a risky command — with any arguments, and however the base is
+ * spelled (`python3`, `/usr/bin/curl`).
+ */
+export function overbroadShellReason(rule: string): string | undefined {
   const parsed = parseCursorRule(rule);
-  if (!parsed || parsed.tool !== 'shell') return false;
-  if (parsed.arg === undefined || parsed.arg === '') return true;
+  if (!parsed || parsed.tool !== 'shell') return undefined;
+  if (parsed.arg === undefined || parsed.arg === '') return 'allows every shell command';
   const base = shellBase(parsed.arg);
-  return WILDCARD.test(base) || SHELLS.has(base) || RISKY_COMMANDS.has(base);
+  if (WILDCARD.test(base)) return 'allows every shell command';
+  const stem = commandStem(base);
+  if (SHELL_COMMANDS.has(stem) || WRAPPER_COMMANDS.has(stem)) return `allows ${base}, which runs any command it is given`;
+  if (INTERPRETER_COMMANDS.has(stem)) return `allows the ${base} interpreter, which runs any code it is given`;
+  if (RISKY_COMMANDS.has(stem)) return `allows any ${base} command (network transfer or deletion)`;
+  return undefined;
 }
 
 /**
@@ -74,13 +85,28 @@ function globRoot(path: string): string {
 }
 
 /**
- * A Read/Write rule over the whole workspace (`*`, `**`), or rooted at `/`,
- * the home directory, /tmp or /etc (`/`, `/**`, `~/**`, `/etc/**`).
+ * A Read/Write rule over the whole workspace (`*`, `**`), outside it
+ * (`../**`), rooted at `/`, the home directory or a directory above it
+ * (`/Users/**`), /tmp or /etc, or reaching a credential store or shell
+ * startup file (`Read(~/.ssh/**)`, `Write(~/.zshrc)` — the shared
+ * sensitive-path catalogue).
  */
 export function overbroadPathRule(rule: string, home: string): string | undefined {
   const parsed = parseCursorRule(rule);
   if (!parsed || (parsed.tool !== 'read' && parsed.tool !== 'write') || !parsed.arg) return undefined;
   const root = globRoot(parsed.arg);
-  if (root === '' || root === '.') return 'covers every file in the workspace';
-  return isBroadPath(root, buildBroadPaths(home), home)?.reason;
+  if (root === '' || root === '.' || root === './') return 'covers every file in the workspace';
+  if (root === '..' || root.startsWith('../')) return 'reaches outside the workspace (parent directory)';
+  const broad = isBroadPath(root, buildBroadPaths(home), home)?.reason;
+  if (broad) return broad;
+  const abs = expandHome(root, home);
+  if (abs.startsWith('/') && abs !== '/' && home.startsWith(`${abs.replace(/\/+$/, '')}/`)) {
+    return 'covers the home directory and every other user\'s';
+  }
+  // reading one /etc file (`/etc/hosts`) exposes nothing; writing one does
+  const sinks = classifySensitivePath(abs).filter(label => parsed.tool === 'write' || !label.includes('(/etc)'));
+  if (sinks.length > 0) {
+    return `${parsed.tool === 'write' ? 'lets the agent write' : 'lets the agent read'} ${sinks.join(', ')}`;
+  }
+  return undefined;
 }

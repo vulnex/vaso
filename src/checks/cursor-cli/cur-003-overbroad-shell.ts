@@ -1,6 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { isOverbroadShell, shellDenied } from './permission-rules.js';
+import { overbroadShellReason, shellDenied } from './permission-rules.js';
 
 export const cur003 = defineCheck({
   id: 'CUR-003',
@@ -21,11 +21,12 @@ export const cur003 = defineCheck({
 
       for (const rule of allow) {
         if (shellDenied(rule, deny)) continue; // deny wins
-        if (!isOverbroadShell(rule)) continue;
+        const reason = overbroadShellReason(rule);
+        if (!reason) continue;
         evidence.push({
           file: config.filePath,
           snippet: `permissions.allow: "${rule}"`,
-          detail: 'Auto-approves arbitrary shell commands — covers far more than intended',
+          detail: `Auto-approves arbitrary shell commands: the rule ${reason}`,
         });
       }
     }
