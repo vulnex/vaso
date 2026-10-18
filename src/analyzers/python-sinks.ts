@@ -179,24 +179,73 @@ export function codeLines(code: string): CodeLine[] {
 }
 
 /**
- * Names bound only to string literals (`_CHILD_SCRIPT = "import sys; …"`,
- * `SCRIPT = textwrap.dedent("""…""")`) and never a parameter: what they hold
- * is fixed text, whatever runs it.
+ * Names bound only to fixed values and never a parameter: string literals
+ * (`_CHILD_SCRIPT = "import sys; …"`, `SCRIPT = textwrap.dedent("""…""")`),
+ * a parenthesised run of them over several lines (`S = (\n "a\n"\n f"b{_N}"\n)`),
+ * and numbers. An f-string is fixed when every name it interpolates is
+ * (to a fixpoint, so `f"exit({_EXIT})"` with `_EXIT = 3` is). Whatever runs
+ * such a value runs fixed text.
  */
-function stringConstantNames(lines: CodeLine[], fns: PyFunction[]): Set<string> {
-  const literal = new Set<string>();
+function stringConstantNames(stmts: CodeLine[], fns: PyFunction[]): Set<string> {
+  const bound = new Map<string, string[]>();
   const other = new Set<string>(fns.flatMap((f) => f.params));
-  for (const { text } of lines) {
-    const m = /^\s*([A-Za-z_]\w*)\s*(?::[^=]+)?=(?!=)\s*(.*)$/.exec(text);
-    if (m) (FIXED_TEXT.test(m[2]) ? literal : other).add(m[1]);
+  for (const { text } of stmts) {
+    const m = /^\s*([A-Za-z_]\w*)\s*(?::[^=]+)?=(?!=)\s*([\s\S]*)$/.exec(text);
+    if (m) bound.set(m[1], [...(bound.get(m[1]) ?? []), m[2]]);
     for (const b of text.matchAll(/\b(?:for|as)\s+([A-Za-z_]\w*)/g)) other.add(b[1]);
   }
-  return new Set([...literal].filter((n) => !other.has(n)));
+  const constants = new Set<string>();
+  // Each round can only add names: an f-string's names may be bound later in the file
+  for (let changed = true, guard = 0; changed && guard < 10; guard++) {
+    changed = false;
+    for (const [name, values] of bound) {
+      if (constants.has(name) || other.has(name)) continue;
+      if (values.every((v) => fixedValue(v, constants))) { constants.add(name); changed = true; }
+    }
+  }
+  return constants;
 }
 
 /** A string literal (not an f-string), possibly dedented. */
 const FIXED_TEXT = /^(?:textwrap\.)?(?:dedent\s*\(\s*)?[rRbBuU]{0,2}(?:"|')/;
 
+/**
+ * `expr` is fixed text or a number: literals (implicitly or `+`-concatenated,
+ * optionally parenthesised or dedented) and f-strings interpolating only
+ * `constants`. A triple-quoted body is dropped from the statement text by
+ * `codeLines`, so an unclosed plain one counts as fixed (as FIXED_TEXT read it).
+ */
+function fixedValue(expr: string, constants: Set<string>): boolean {
+  let e = expr.trim().replace(/^(?:textwrap\.)?dedent\s*\(/, '(');
+  if (/^-?\d[\d_]*(?:\.\d+)?$/.test(e) || /^(?:True|False|None)$/.test(e)) return true;
+  let sawLiteral = false;
+  let i = 0;
+  while (i < e.length) {
+    const c = e[i];
+    if (/[\s()+]/.test(c)) { i++; continue; }
+    const prefix = /^[rRbBuUfF]{0,2}(?="|')/.exec(e.slice(i, i + 3));
+    if (!prefix) return false;
+    const fString = /[fF]/.test(prefix[0]);
+    let j = i + prefix[0].length;
+    const triple = e.startsWith(e[j].repeat(3), j);
+    const delim = triple ? e[j].repeat(3) : e[j];
+    j += delim.length;
+    const start = j;
+    while (j < e.length && !e.startsWith(delim, j)) j += e[j] === '\\' ? 2 : 1;
+    if (j >= e.length) return triple && !fString;
+    if (fString) {
+      // `{{` is a literal brace; `{name!r:>10}` interpolates `name`
+      const body = e.slice(start, j).replace(/\{\{|\}\}/g, '');
+      for (const field of body.matchAll(/\{([^{}]*)\}/g)) {
+        const ids = field[1].replace(/![rsa]\s*$|![rsa]?:[^{}]*$|:[^{}]*$/, '').match(/[A-Za-z_]\w*/g) ?? [];
+        if (ids.some((id) => !constants.has(id))) return false;
+      }
+    }
+    sawLiteral = true;
+    i = j + delim.length;
+  }
+  return sawLiteral;
+}
 /** `-c` and combined short flags ending in it (`-lc`, `-ec`): the next argument is code. */
 const DASH_C = /^[rRbBuU]?(["'])-[A-Za-z]*c\1$/;
 
@@ -207,7 +256,7 @@ function codeAfterDashC(argv: string[]): string | undefined {
 }
 
 function isFixedCode(expr: string, constants: Set<string>): boolean {
-  return FIXED_TEXT.test(expr) || constants.has(expr);
+  return FIXED_TEXT.test(expr) || constants.has(expr) || fixedValue(expr, constants);
 }
 
 /**
@@ -441,7 +490,7 @@ export function analyzePythonSinks(code: string): PythonSinkFinding[] {
   const stmts = statements(lines);
   const fns = functionsOf(stmts);
   const tainted = taintedNames(stmts, fns, rewrite);
-  const constants = stringConstantNames(lines, fns);
+  const constants = stringConstantNames(stmts, fns);
   const fnAt = (i: number): PyFunction | undefined => fns.filter((f) => i > f.start && i < f.end).at(-1);
   const confined = RESOLVES.test(code) && CONFINES.test(code);
   const touchesFiles = FILE_OPS.test(code);
@@ -675,7 +724,7 @@ export function analyzePythonDataFlow(code: string): DataFlowResult[] {
   const lines = codeLines(code);
   const stmts = statements(lines);
   const fns = functionsOf(stmts);
-  const constants = stringConstantNames(lines, fns);
+  const constants = stringConstantNames(stmts, fns);
   const scopes = new Map<PyFunction | undefined, Map<string, SourceKind>>([[undefined, new Map()]]);
   const scopeOf = (fn: PyFunction | undefined): Map<string, SourceKind> => {
     let m = scopes.get(fn);

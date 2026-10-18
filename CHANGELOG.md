@@ -173,6 +173,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - **CD-005 counts a Desktop Extension as signed only when its bundle carries a real signature block.** The two MCPB markers alone were enough, so `MCPB_SIG_V1` + a zero length + `MCPB_SIG_END` passed as signed. The block is now read as `mcpb verify` reads it: a non-zero length that fills the space up to the end marker, holding DER (PKCS#7) data.
 - **CD-006 reads every auto-approve key on a server.** Only the first spelling found was judged, so a server with both `autoApprove` (ignored by Claude Desktop) and `autoapprove` (applied by claude-autoapprove-mcp) was reported as informational. Each key is now judged; an injector `autoapprove` of `true` or `["*"]` is informational, since the injector approves only tools it names.
 - **GHC-008 reads instruction files in subdirectories and the repository's `.github/instructions/`.** Copilot CLI loads `*.instructions.md` at any depth under `~/.copilot/instructions/` and `.github/instructions/`; only the top level of the first was scanned for secrets. Remote scans collect the nested files too.
+- **MCP-004/MCP-005 no longer report a Python server that runs a fixed `python -c` script built over several lines.** A script written as a parenthesised run of string literals, including f-strings that interpolate only other constants (`f"sys.exit({_EXIT})"`), was read as caller-chosen code and reported critical; such a script is now fixed text, and one that interpolates any other name is still reported.
 
 ## [1.3.1] - 2026-10-16
 

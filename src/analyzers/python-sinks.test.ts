@@ -47,6 +47,36 @@ describe('analyzePythonSinks', () => {
     expect(findings.find((f) => f.kind === 'exec')?.toolInput).toBeUndefined();
   });
 
+  it('a `-c` script written as a parenthesised run of literals and constant f-strings is fixed (zotero-mcp-server 0.15.1 write.py, MIT)', () => {
+    // Excerpt of zotero_mcp/tools/write.py: _TOC_CHILD_SCRIPT and the Popen that runs it
+    const script = (exitName: string) => [
+      'import subprocess, sys',
+      '_TOC_EXIT_NO_PYMUPDF = 3',
+      '_TOC_SENTINEL = "__ZOTERO_MCP_TOC__"',
+      '_TOC_CHILD_SCRIPT = (',
+      '    "import json, sys\\n"',
+      '    "try:\\n"',
+      '    "    import pymupdf as fitz\\n"',
+      '    "except ImportError:\\n"',
+      `    f"        sys.exit({${exitName}})\\n"`,
+      '    "doc = fitz.open(sys.argv[1])\\n"',
+      '    f"sys.stdout.write({_TOC_SENTINEL!r} + json.dumps(toc))\\n"',
+      ')',
+      '@mcp.tool()',
+      'def toc(pdf_path: str, code: str):',
+      '    proc = subprocess.Popen(',
+      '        [sys.executable, "-c", _TOC_CHILD_SCRIPT, str(pdf_path)],',
+      '        stdin=subprocess.DEVNULL,',
+      '    )',
+    ].join('\n');
+    const real = analyzePythonSinks(script('_TOC_EXIT_NO_PYMUPDF'));
+    expect(real.filter((f) => f.kind === 'injection')).toEqual([]);
+    expect(real.find((f) => f.kind === 'exec')?.toolInput).toBeUndefined();
+    // true positive: the same script interpolating a tool parameter is caller-built code
+    const twin = analyzePythonSinks(script('code'));
+    expect(twin.filter((f) => f.kind === 'injection').map((f) => f.line)).toEqual([16]);
+  });
+
   it('still flags tool input as the `-c` code, in a list or spread over lines', () => {
     const tool = (body: string[]) => ['import subprocess, sys', '@mcp.tool()', 'def run(code: str, arg: str):', ...body].join('\n');
     const list = analyzePythonSinks(tool(['    subprocess.run([sys.executable, "-c", code, arg])']));
