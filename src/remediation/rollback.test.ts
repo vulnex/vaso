@@ -316,6 +316,51 @@ describe('fix + rollback (real files)', () => {
     await rollback('2026-02-15');
     expect(logs.some(l => l.includes('2026-02-15T12-30-00'))).toBe(true);
   });
+
+  it('a fix run that applies nothing leaves no backup; rollback still undoes the run before it', async () => {
+    const f = join(home.dir, 'settings.json');
+    await writeFile(f, '{"p":"always"}\n');
+    const first = await runFix(f, p => writeRegularFile(p, '{"p":"ask"}\n'));
+    expect(first).toHaveLength(1);
+
+    // second run: the fix finds nothing to change
+    const registry = new CheckRegistry();
+    registry.register(defineCheck({
+      id: 'TST-002', name: 't', category: 'config', severity: 'warning', description: 't',
+      async run(_ctx, h) { return h.passed('x'); },
+      async fix() { return { checkId: 'TST-002', applied: false, alreadyDone: true, message: 'already "ask"' }; },
+    }));
+    const finding: CheckResult = { id: 'TST-002', name: 't', category: 'config', severity: 'warning', passed: false, message: 'bad', fixable: true, evidence: [{ file: f }] };
+    await new RemediationEngine(registry).fix({
+      timestamp: 't', totalScore: 0, totalGrade: 'F', fleetAverage: 0,
+      summary: { critical: 0, warning: 1, info: 0, passed: 0, total: 1 },
+      agents: [{ agent: 'openclaw', installation: { agent: 'openclaw', installDir: home.dir, configFiles: [] }, results: [finding], score: 0, grade: 'F' }],
+    }, { yes: true });
+    expect(await readdir(join(home.dir, '.vaso', 'backups'))).toEqual(first);
+
+    await rollback();
+    expect(await readFile(f, 'utf-8')).toBe('{"p":"always"}\n');
+  });
+
+  it('rollback skips an empty backup an older version left after a no-op run', async () => {
+    const f = join(home.dir, 'settings.json');
+    await writeFile(f, '{"p":"always"}\n');
+    if (posix) await chmod(f, 0o600);
+    const [real] = await runFix(f, p => writeRegularFile(p, '{"p":"ask"}\n'));
+    // what 1.3.1 wrote for a run that changed nothing: a copy and after = before
+    const { sha256 } = await import('./backup-manifest.js');
+    const empty = join(home.dir, '.vaso', 'backups', '2099-01-01T00-00-00-000Z');
+    await mkdir(join(empty, home.dir), { recursive: true });
+    const now = await readFile(f);
+    await writeFile(join(empty, f), now);
+    const mode = (await stat(f)).mode & 0o7777;
+    await writeFile(join(empty, '.vaso-manifest.json'), `${JSON.stringify({ path: f, kind: 'file', mode, before: sha256(now) })}\n${JSON.stringify({ path: f, after: sha256(now) })}\n`);
+
+    await rollback();
+    expect(logs.some(l => l.includes('Skipping backup 2099-01-01T00-00-00-000Z'))).toBe(true);
+    expect(logs.some(l => l.includes(`Restoring from backup: ${real}`))).toBe(true);
+    expect(await readFile(f, 'utf-8')).toBe('{"p":"always"}\n');
+  });
 });
 
 describe('rollback confinement (dt14)', () => {

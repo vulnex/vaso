@@ -56,8 +56,22 @@ export async function rollback(timestamp?: string): Promise<void> {
     return;
   }
 
+  // The last fix run is the newest pending backup that holds a change: a
+  // no-op run's backup from an older version (nothing applied) is skipped
+  let latest: string | undefined;
+  if (!timestamp) {
+    for (let i = pending.length - 1; i >= 0 && !latest; i--) {
+      if (!(await isEmptyBackup(join(backupsDir, pending[i])))) latest = pending[i];
+      else console.log(chalk.dim(`Skipping backup ${pending[i]}: its fix run changed nothing`));
+    }
+    if (!latest) {
+      console.log(chalk.yellow('No pending backup records a change — nothing to roll back.'));
+      return;
+    }
+  }
+
   const exact = timestamp ? dirs.filter(d => d === timestamp || d === `${RESTORED_PREFIX}${timestamp}`) : [];
-  const matches = !timestamp ? [pending[pending.length - 1]]
+  const matches = !timestamp ? [latest]
     : exact.length > 0 ? exact
     : dirs.filter(d => d.includes(timestamp));
   const target = matches.length === 1 ? matches[0] : undefined;
@@ -138,6 +152,23 @@ export async function rollback(timestamp?: string): Promise<void> {
     console.log(chalk.yellow(`  ${total - restored} item(s) not restored — the backup stays pending`));
     process.exitCode = 2;
   }
+}
+
+/**
+ * Whether a backup records no change: every file it holds was left with its
+ * content (after = before) and every recorded path still has its recorded
+ * mode — restoring it would change nothing. Backups without a manifest (from
+ * before 1.3.1) can't tell, so they count as changes.
+ */
+async function isEmptyBackup(backupDir: string): Promise<boolean> {
+  const manifest = await readManifest(backupDir);
+  if (!manifest) return (await collectFiles(backupDir).catch(() => [])).length === 0;
+  for (const [path, entry] of Object.entries(manifest.entries)) {
+    if (entry.kind === 'file' && (entry.after === undefined || entry.after !== entry.before)) return false;
+    const st = await lstat(path).catch(() => undefined);
+    if (!st || (st.mode & 0o7777) !== entry.mode) return false;
+  }
+  return true;
 }
 
 /**

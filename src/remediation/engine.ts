@@ -1,4 +1,4 @@
-import { mkdir, writeFile, chmod, lstat } from 'node:fs/promises';
+import { mkdir, writeFile, chmod, lstat, rm } from 'node:fs/promises';
 import { join, dirname, isAbsolute } from 'node:path';
 import { homedir } from 'node:os';
 import chalk from 'chalk';
@@ -36,6 +36,25 @@ export class RemediationEngine {
   }
 
   async fix(scanResult: ScanResult, options: FixOptions): Promise<FixResult[]> {
+    const results = await this.runFixes(scanResult, options);
+    await this.discardUnusedBackup(results);
+    return results;
+  }
+
+  /**
+   * A run that changed nothing (every fix already in place, skipped or
+   * refused) leaves no backup: `--rollback` would otherwise "restore" that
+   * no-op backup and report success while the previous run's fix stays.
+   */
+  private async discardUnusedBackup(results: FixResult[]): Promise<void> {
+    if (results.some(r => r.applied) || this.everChanged) return;
+    await rm(this.backupDir, { recursive: true, force: true }).catch(() => undefined);
+  }
+
+  /** Whether any fix of this run reached the point of changing a path. */
+  private everChanged = false;
+
+  private async runFixes(scanResult: ScanResult, options: FixOptions): Promise<FixResult[]> {
     const results: FixResult[] = [];
     let applyAll = options.yes ?? false;
 
@@ -125,7 +144,7 @@ export class RemediationEngine {
           // The home's owner, by lstat: a home or install dir a user made a
           // symlink must not lend its target's owner (root's, for /etc)
           const ownerUid = await lstat(home ?? agent.installation.installDir).then(s => s.uid, () => undefined);
-          const fixResult = await withFixBoundary({ roots, ownerUid }, () => withChangeRecorder(path => { this.changed.add(path); return this.backupFile(path); }, () => check.fix!({
+          const fixResult = await withFixBoundary({ roots, ownerUid }, () => withChangeRecorder(path => { this.changed.add(path); this.everChanged = true; return this.backupFile(path); }, () => check.fix!({
             installation: agent.installation,
             configs: agent.installation.configFiles,
             platform: process.platform,
