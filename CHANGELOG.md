@@ -106,6 +106,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - **Five more line patterns are linear on long runs.** PI-004 on a `[SYSTEM]` tag followed by a long space run (80 KB: 18 s), RS-008 on a long `mkfifo|…|…` pipeline (100 KB: 15 s), the Python `getattr(os, …)` rewrite (17 s), MCP-035's `TextDecoder(…)` decoder test (11 s) and MCP-002's `.listen(…, "0.0.0.0")` (5 s) now finish in well under a second (`skill audit`, `mcp scan --source`, `scan`). They match the same text as before.
 - **A SKILL.md whose `name:` holds a long space run no longer stalls a scan** (80 KB: 22 s → 0.5 s). The name read is unchanged.
 - **YAML configs with many keys parse in linear time, and a duplicate key resolves to its last value.** The YAML library's duplicate-key check compared every key with every other (80,000 keys: 2 minutes → under a second), and a config that sets a key twice was a CONFIG-LOAD error although Hermes, which reads it with PyYAML, uses the last value; VASO now judges that value (HM-008 on a second `approvals:` block that turns approvals off). Self-referencing aliases are still rejected.
+- **MCP-003's hardcoded-secret scan is linear on long `a-b-c…` names** (100 KB: about 2 s → milliseconds). The same key names and values are found.
 
 ## [1.3.1] - 2026-10-16
 

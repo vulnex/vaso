@@ -42,9 +42,14 @@ const DECLARED_PUBLIC = /\b(?:public by design|(?:is|are) (?:intentionally |mean
 /** Comment lines looked at above a value. */
 const COMMENT_WINDOW = 6;
 
-/** `"X-Api-Key": "…"`, `apiKey = '…'`, `CLIENT_SECRET: "…"` — key, then a quoted value. */
+/**
+ * `"X-Api-Key": "…"`, `apiKey = '…'`, `CLIENT_SECRET: "…"` — key, then a
+ * quoted value. A name starts at the first letter of its `a-b-c` run that
+ * begins a word: a later one (the lookbehind) can only match what that one
+ * already tried, and retrying the run from each `-` was quadratic.
+ */
 const KEYED_LITERAL =
-  /["']?\b((?:[A-Za-z_][\w-]*?)?(?:api[_-]?key|apikey|secret|token|password|passwd|access[_-]?key|private[_-]?key|credential)s?)["']?\s*[:=]\s*["'`]([^"'`\s]{16,})["'`]/gi;
+  /["']?\b(?=[A-Za-z_])(?<!(?:^|[^\w])[A-Za-z_][\w-]*?)((?:[A-Za-z_][\w-]*?)?(?:api[_-]?key|apikey|secret|token|password|passwd|access[_-]?key|private[_-]?key|credential)s?)["']?\s*[:=]\s*["'`]([^"'`\s]{16,})["'`]/gi;
 const BEARER_LITERAL = /["'`]Bearer\s+([A-Za-z0-9._~+/=-]{20,})["'`]/g;
 /** PEM header followed by key material, not a format constant in a crypto library. */
 const PRIVATE_KEY_BLOCK = /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----(?:\\n|\s)+[A-Za-z0-9+/=]{64}/;

@@ -69,4 +69,12 @@ describe('findSourceSecrets — documented public values (dt13 realworld2)', () 
     const real = 'const DEFAULT_METRICS_API_KEY = "fef79db0da00dd07752b3cbffa89f5e911617aa943a338c7";';
     expect(findSourceSecrets(real)[0].declaredPublic).toBeUndefined();
   });
+
+  it('stays linear on a long a-b-c name run and keeps whole and flag-style key names (dt15 P10)', () => {
+    const start = Date.now();
+    findSourceSecrets(`${'a-'.repeat(50_000)}\n${'token-'.repeat(17_000)}\n`);
+    expect(Date.now() - start).toBeLessThan(1000);
+    expect(findSourceSecrets(`const x = { "my-service-api-key": "${KEY}" };`)[0]?.key).toBe('my-service-api-key');
+    expect(findSourceSecrets(`args.push("--api-key=" , "x"); opts = { "9-token": "${KEY}" };`)[0]?.key).toBe('token');
+  });
 });
