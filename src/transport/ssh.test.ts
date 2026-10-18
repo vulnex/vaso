@@ -81,6 +81,16 @@ describe('parseSSHTarget', () => {
     expect(result.port).toBe(22);
   });
 
+  it('reads IPv6 hosts: bare (no port) and bracketed with a port', () => {
+    expect(parseSSHTarget('u@::1')).toMatchObject({ host: '::1', port: 22, label: 'u@::1' });
+    expect(parseSSHTarget('u@fe80::1')).toMatchObject({ host: 'fe80::1', port: 22 });
+    expect(parseSSHTarget('u@[::1]:1')).toMatchObject({ host: '::1', port: 1, label: 'u@[::1]:1' });
+    expect(parseSSHTarget('u@[2001:db8::5]')).toMatchObject({ host: '2001:db8::5', port: 22 });
+    expect(() => parseSSHTarget('u@[::1')).toThrow(/ipv6/);
+    expect(() => parseSSHTarget('u@[::1]x')).toThrow(/ipv6/);
+    expect(() => parseSSHTarget('u@[::1]:0')).toThrow(/port must be/);
+  });
+
   it('rejects port 0 instead of reading "host:0" as a host name', () => {
     expect(() => parseSSHTarget('user@host:0')).toThrow(/port must be/);
   });

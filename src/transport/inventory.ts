@@ -14,7 +14,7 @@
 
 import { readFile } from 'node:fs/promises';
 import { parse as parseYAML } from 'yaml';
-import { parseSSHTarget, assertSSHTargetParts } from './ssh.js';
+import { parseSSHTarget, assertSSHTargetParts, targetLabel, unbracketHost } from './ssh.js';
 import type { SSHTarget } from './ssh.js';
 import { escapeControlChars } from '../reporting/text-safety.js';
 
@@ -70,7 +70,7 @@ export async function parseInventory(path: string): Promise<SSHTarget[]> {
     }
     // `host: user@host[:port]` is read like `--host`; it used to become
     // `root@user@host`, which ssh can only reject.
-    let host = String(entry.host);
+    let host = unbracketHost(String(entry.host));
     let user = entry.user;
     let port = entry.port;
     if (host.includes('@')) {
@@ -88,7 +88,7 @@ export async function parseInventory(path: string): Promise<SSHTarget[]> {
     user = user ?? 'root';
     port = port ?? 22;
     assertSSHTargetParts(`inventory entry #${idx + 1}`, String(user), host, port);
-    const defaultLabel = port === 22 ? `${user}@${host}` : `${user}@${host}:${port}`;
+    const defaultLabel = targetLabel(String(user), host, port);
     return {
       user,
       host,

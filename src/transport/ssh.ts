@@ -44,7 +44,17 @@ export function parseSSHTarget(target: string): SSHTarget {
   let port = 22;
 
   const colonIdx = rest.lastIndexOf(':');
-  if (colonIdx !== -1) {
+  if (rest.startsWith('[')) {
+    // IPv6 with a port: user@[::1]:2222 (ssh's own bracket syntax)
+    const m = /^\[([^\]]*)\](?::(\d+))?$/.exec(rest);
+    if (!m) throw new Error(`Invalid SSH target "${target}": expected user@[ipv6-address][:port]`);
+    host = m[1];
+    if (m[2] !== undefined) port = Number(m[2]);
+  } else if (rest.indexOf(':') !== colonIdx) {
+    // A bare IPv6 address (user@::1, user@fe80::1) has no port; `::1` is not
+    // host `:` on port 1
+    host = rest;
+  } else if (colonIdx !== -1) {
     const maybePart = rest.slice(colonIdx + 1);
     if (/^\d+$/.test(maybePart)) {
       // `host:99999` names a port, just not a valid one — not a host called that
@@ -62,8 +72,19 @@ export function parseSSHTarget(target: string): SSHTarget {
   }
   assertSSHTargetParts(target, user, host, port);
 
-  const label = port === 22 ? `${user}@${host}` : `${user}@${host}:${port}`;
-  return { user, host, port, label };
+  return { user, host, port, label: targetLabel(user, host, port) };
+}
+
+/** `user@host[:port]`, an IPv6 host bracketed when a port follows. */
+export function targetLabel(user: string, host: string, port: number): string {
+  if (port === 22) return `${user}@${host}`;
+  return `${user}@${host.includes(':') ? `[${host}]` : host}:${port}`;
+}
+
+/** An inventory host written `[::1]` is the address inside the brackets. */
+export function unbracketHost(host: string): string {
+  const m = /^\[([^\]]*)\]$/.exec(host);
+  return m ? m[1] : host;
 }
 
 /**
@@ -76,6 +97,8 @@ export function assertSSHTargetParts(target: string, user: string, host: string,
   if (!user) throw bad('missing user (expected user@host[:port])');
   if (user.startsWith('-') || host.startsWith('-')) throw bad('user and host may not start with "-"');
   if (/[\s\u0000-\u001f\u007f]/.test(user + host)) throw bad('whitespace or control characters');
+  // What's left of a malformed [ipv6]:port, or a second user@
+  if (/[[\]@/]/.test(host)) throw bad(`invalid host "${host}"`);
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw bad(`port must be 1–65535 (got ${String(port)})`);
 }
 
@@ -239,7 +262,9 @@ function controlSCPArgs(target: SSHTarget, controlPath: string, localPath: strin
     '-P', String(target.port),
   ];
   if (target.identity) args.push('-i', target.identity);
-  args.push(localPath, `${target.user}@${target.host}:${remotePath}`);
+  // scp splits host:path at the first colon, so an IPv6 host needs brackets
+  const host = target.host.includes(':') ? `[${target.host}]` : target.host;
+  args.push(localPath, `${target.user}@${host}:${remotePath}`);
   return args;
 }
 

@@ -9,4 +9,10 @@ describe('parseRemoteOptions', () => {
     expect(() => parseRemoteOptions({ sshTimeout: 'abc' })).toThrow(/--ssh-timeout/);
     expect(() => parseRemoteOptions({ sshRetries: '1.5' })).toThrow(/--ssh-retries/);
   });
+
+  it('rejects an --ssh-timeout that would overflow Node timers (and fire after 1 ms)', () => {
+    expect(parseRemoteOptions({ sshTimeout: '86400' }).sshTimeoutSec).toBe(86400);
+    expect(() => parseRemoteOptions({ sshTimeout: '86401' })).toThrow(/at most 86400/);
+    expect(() => parseRemoteOptions({ sshTimeout: '9999999999' })).toThrow(/at most/);
+  });
 });

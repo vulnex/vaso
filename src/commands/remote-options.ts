@@ -4,6 +4,9 @@ export interface RemoteOptionValues {
   sshTimeoutSec: number;
 }
 
+/** Longest --ssh-timeout accepted, in seconds. */
+export const MAX_SSH_TIMEOUT_SEC = 86400;
+
 function parseNonNegativeInt(raw: string | undefined, fallback: number, label: string): number {
   if (raw === undefined) return fallback;
   const n = Number(raw);
@@ -24,5 +27,7 @@ export function parseRemoteOptions(options: { parallel?: string; sshRetries?: st
   const retries = parseNonNegativeInt(options.sshRetries, 0, '--ssh-retries');
   const sshTimeoutSec = parseNonNegativeInt(options.sshTimeout, 60, '--ssh-timeout');
   if (sshTimeoutSec === 0) throw new Error('--ssh-timeout must be at least 1');
+  // Node timers overflow past 2^31-1 ms (~24.8 days) and fire after 1 ms instead
+  if (sshTimeoutSec > MAX_SSH_TIMEOUT_SEC) throw new Error(`--ssh-timeout must be at most ${MAX_SSH_TIMEOUT_SEC} (24 hours)`);
   return { concurrency, retries, sshTimeoutSec };
 }
