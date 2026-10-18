@@ -1,0 +1,13 @@
+{
+  "agent": "hermes",
+  "source": "Hermes config.yaml that sets approvals twice; Hermes reads it with PyYAML safe_load, where the last key wins (checked against a live install, dt15)",
+  "modes": {
+    ".hermes": "700",
+    ".hermes/config.yaml": "600",
+    ".hermes/.env": "600",
+    ".hermes/bin/tirith": "755"
+  },
+  "fail": {
+    "HM-008": "critical"
+  }
+}

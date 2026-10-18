@@ -9,12 +9,16 @@ import YAML from 'yaml';
  * yaml.v3 do; a `<<` whose value isn't a map stays a plain key, as before.
  */
 export function parseYamlSafe(raw: string): unknown {
+  // A duplicate key resolves to its last value, as the agents' loaders read
+  // it (Hermes: PyYAML's safe_load); the library's uniqueness check also compared
+  // every key with every other (80,000 keys: 2 minutes)
+  const options = { logLevel: 'error', uniqueKeys: false } as const;
   let value: unknown;
   try {
-    value = YAML.parse(raw, { logLevel: 'error', merge: true });
+    value = YAML.parse(raw, { ...options, merge: true });
   } catch (err) {
     if (!/Merge sources must be/.test((err as Error).message)) throw err;
-    value = YAML.parse(raw, { logLevel: 'error' });
+    value = YAML.parse(raw, options);
   }
   if (isCyclic(value)) throw new Error('YAML contains a self-referencing alias');
   return value;

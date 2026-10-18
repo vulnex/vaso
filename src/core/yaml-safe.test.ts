@@ -22,4 +22,23 @@ describe('parseYamlSafe', () => {
     expect(() => parseYamlSafe('a: &x\n  <<: *x\n')).toThrow();
     expect(() => parseYamlSafe('a: &x\n  b: {<<: *x}\n')).toThrow();
   });
+
+  it('resolves a duplicate key to its last value, as PyYAML does (dt15 P6)', () => {
+    expect(parseYamlSafe('approvals:\n  mode: manual\nterminal: {x: 1}\napprovals:\n  mode: off\n'))
+      .toEqual({ approvals: { mode: 'off' }, terminal: { x: 1 } });
+    expect(parseYamlSafe('a: {k: 1, k: 2}\n')).toEqual({ a: { k: 2 } });
+  });
+
+  it('parses many keys in linear time', () => {
+    const many = Array.from({ length: 40_000 }, (_, i) => `k${i}: v`).join('\n');
+    const start = Date.now();
+    const value = parseYamlSafe(many) as Record<string, string>;
+    expect(Date.now() - start).toBeLessThan(2000);
+    expect(Object.keys(value)).toHaveLength(40_000);
+    expect(value.k39999).toBe('v');
+  });
+
+  it('still rejects malformed YAML', () => {
+    expect(() => parseYamlSafe('a: [1, 2\nb: c')).toThrow();
+  });
 });
