@@ -47,6 +47,25 @@ export function parseJs(code: string): JsAst | undefined {
   return ast ?? undefined;
 }
 
+/**
+ * Recoverable syntax errors one parse may collect: 1000, or one per 64 bytes
+ * of a large source. Some inputs make Babel's error recovery quadratic — 3 KB
+ * of `a:a:a:…` labels report every label against every enclosing one, a
+ * million error objects (~2 KB each) and gigabytes of heap. Real code with
+ * recoverable errors has a handful, and prose or other non-JavaScript stops
+ * at its first unrecoverable error.
+ */
+const MIN_ERROR_BUDGET = 1000;
+const errorBudget = (code: string): number => Math.max(MIN_ERROR_BUDGET, code.length >> 6);
+
+/** Thrown when a parse collects more errors than its budget. */
+export class ParseBudgetError extends Error {}
+
+const PARSE_OPTIONS = {
+  sourceType: 'unambiguous',
+  plugins: ['typescript', 'jsx', 'decorators'],
+} as const;
+
 function babelParse(code: string): JsAst {
   // With errorRecovery Babel builds an error object for every recoverable
   // syntax error, and capturing each one's stack dominated the parse of
@@ -55,14 +74,49 @@ function babelParse(code: string): JsAst {
   const limit = Error.stackTraceLimit;
   Error.stackTraceLimit = 0;
   try {
-    return parse(code, {
-      sourceType: 'unambiguous',
-      plugins: ['typescript', 'jsx', 'decorators'],
-      errorRecovery: true,
-    });
+    // Valid code parses the same without recovery; only code with an error
+    // pays for (and is bounded in) the recovering parse
+    try {
+      return parse(code, PARSE_OPTIONS);
+    } catch (err) {
+      if (!(err instanceof SyntaxError)) throw err;
+    }
+    return parseRecovering(code);
   } finally {
     Error.stackTraceLimit = limit;
   }
+}
+
+/**
+ * Parse with error recovery, giving up (ParseBudgetError) past the error
+ * budget. Babel has no such option; it builds each error with
+ * the global `SyntaxError`, so for this synchronous call that global is a
+ * subclass that counts. Babel catches only `instanceof SyntaxError` (its
+ * lookahead) — the budget error isn't one, so it ends the parse, and every
+ * error built after the budget throws again.
+ */
+function parseRecovering(code: string): JsAst {
+  const Native = globalThis.SyntaxError;
+  const max = errorBudget(code);
+  let made = 0;
+  const budget = new ParseBudgetError(`more than ${max} syntax errors`);
+  class CountedSyntaxError extends Native {
+    constructor(message?: string) {
+      super(message);
+      if (++made > max) throw budget;
+    }
+  }
+  globalThis.SyntaxError = CountedSyntaxError as SyntaxErrorConstructor;
+  try {
+    return parse(code, { ...PARSE_OPTIONS, errorRecovery: true });
+  } finally {
+    globalThis.SyntaxError = Native;
+  }
+}
+
+/** The parser was defeated: it overflowed the stack, or drowned in errors. */
+function parserDefeated(err: unknown): boolean {
+  return err instanceof RangeError || err instanceof ParseBudgetError;
 }
 
 /**
@@ -94,7 +148,8 @@ export function mayBeJavaScript(filename: string): boolean {
  * so every AST check saw nothing in it. When that happens the file is split
  * into top-level statements; each one Babel can't parse on its own is
  * blanked (newlines kept, so line numbers hold) and the rest parsed again.
- * The blanked lines are recorded (`evadedLines`) for SKL-002/MCP-035.
+ * The blanked lines are recorded (`evadedLines`) for SKL-002/MCP-035. A
+ * statement that exhausts the error-recovery budget is treated the same way.
  */
 export function parseLenient(code: string): JsAst | undefined {
   return parseLenientReport(code).ast;
@@ -128,20 +183,20 @@ export function parseLenientReport(code: string): { ast?: JsAst; evaded: number[
   try {
     ast = babelParse(code);
   } catch (err) {
-    if (!(err instanceof RangeError)) {
+    if (!parserDefeated(err)) {
       record(code, { lines: [], whole: false });
       return { evaded: [], overflow: false };
     }
     overflow = true;
-    // A statement that overflows on its own, or parses (with less stack in
-    // use) into a tree deeper than the walk survives
+    // A statement that overflows or drowns the parser on its own, or parses
+    // (with less stack in use) into a tree deeper than the walk survives
     const bombs = topLevelSegments(code).filter(seg => {
       const segText = code.slice(seg.start, seg.end);
       if (!/\S/.test(segText)) return false;
       try {
         return babelParse(segText).program.body.some(stmt => astDeeperThan(stmt, AST_DEPTH_LIMIT));
       } catch (e) {
-        return e instanceof RangeError;
+        return parserDefeated(e);
       }
     });
     evaded = bombs.map(b => b.line);

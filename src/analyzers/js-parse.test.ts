@@ -93,6 +93,36 @@ describe('parser-overflow evasion shapes (dt13 RG1)', () => {
     });
   }
 
+  it('bounds error recovery that goes quadratic (a:a:a:… labels) and still reports the file (dt15 P1)', async () => {
+    const { analysisEvasion } = await import('./ast-analyzer.js');
+    const labels = 'a:'.repeat(3000);
+    const code = `${head}${tail}${labels} x;\n`;
+    const start = Date.now();
+    const flows = analyzeCode(code, 'labels.js');
+    expect(Date.now() - start).toBeLessThan(2000);
+    expect(flows.some(f => f.type === 'eval-exec'), 'exec found').toBe(true);
+    expect(flows.some(f => f.type === 'source-to-sink'), 'exfiltration found').toBe(true);
+    expect(analysisEvasion(code, 'labels.js')).toEqual({ line: 6, whole: false });
+    expect(Error.stackTraceLimit).toBeGreaterThan(0);
+    expect(globalThis.SyntaxError.name).toBe('SyntaxError'); // restored
+    // everything on one line: the label statement is set aside, the rest kept
+    const one = `${head.replace(/\n/g, '')}${tail.replace(/\n/g, '')}${labels} x;`;
+    const oneFlows = analyzeCode(one, 'labels-one.js');
+    expect(oneFlows.some(f => f.type === 'eval-exec')).toBe(true);
+    expect(oneFlows.some(f => f.type === 'source-to-sink')).toBe(true);
+    expect(analysisEvasion(one, 'labels-one.js')).toEqual({ line: 1, whole: false });
+  });
+
+  it('still recovers ordinary recoverable errors', async () => {
+    const { analysisEvasion } = await import('./ast-analyzer.js');
+    const code = `if (process.argv.length < 3) return;\n${head}${tail}`; // top-level return
+    expect(parseLenient(code)?.errors?.length).toBe(1);
+    const flows = analyzeCode(code, 'recover.js');
+    expect(flows.some(f => f.type === 'eval-exec')).toBe(true);
+    expect(flows.some(f => f.type === 'source-to-sink')).toBe(true);
+    expect(analysisEvasion(code, 'recover.js')).toBeUndefined();
+  });
+
   it('reports nothing for ordinary code', async () => {
     const { analysisEvasion } = await import('./ast-analyzer.js');
     expect(analysisEvasion(`${head}${tail}`, 'ok.js')).toBeUndefined();

@@ -79,7 +79,7 @@ export const skl002 = defineCheck({
             snippet: text.slice(0, 80) + (text.length > 80 ? '...' : ''),
             detail: evasion.whole
             ? 'The file is nested or chained deeply enough to overflow the JavaScript parser and could not be analysed — only a line-by-line scan for exec and exfiltration calls ran'
-            : 'Code nested or chained deeply enough to crash the JavaScript parser (brackets, templates, `?:`/`!` chains) — the statement is skipped by the other skill checks',
+            : 'Code nested or chained deeply enough to crash the JavaScript parser (brackets, templates, `?:`/`!` chains) or flood it with syntax errors — the statement is skipped by the other skill checks',
           });
         }
       } catch (err) {
