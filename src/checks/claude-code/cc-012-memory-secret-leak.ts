@@ -2,6 +2,7 @@ import { dirname, extname, join } from 'node:path';
 import type { Evidence, ScanContext } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { memorySecretSeverity, scanMemorySecrets } from '../../analyzers/memory-secrets.js';
+import { claudeProjectScope } from '../../adapters/claude-code.js';
 
 async function ruleFiles(dir: string, fs: ScanContext['fs']): Promise<string[]> {
   try {
@@ -29,8 +30,10 @@ export const cc012 = defineCheck({
     // <installDir>/rules/**/*.md as memory too.
     const memoryFiles = [join(ctx.installation.installDir, 'CLAUDE.md')];
     if (ctx.installation.profile === 'project') {
-      const repo = dirname(ctx.installation.installDir);
-      memoryFiles.push(join(repo, 'CLAUDE.md'), join(repo, 'CLAUDE.local.md'));
+      // Every CLAUDE.md / CLAUDE.local.md from the working directory up to
+      // the repository root loads at launch
+      const scope = await claudeProjectScope(dirname(ctx.installation.installDir), ctx.fs);
+      memoryFiles.push(...scope.memoryPaths.filter(p => p.endsWith('.md') && !memoryFiles.includes(p)));
     }
     memoryFiles.push(...await ruleFiles(join(ctx.installation.installDir, 'rules'), ctx.fs));
 

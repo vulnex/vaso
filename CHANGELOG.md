@@ -42,6 +42,9 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - **GEM-004 no longer reports `security.disableYoloMode: false` as critical** — it is the default. It stays critical when a workspace's settings turn off a guard the user set to `true`, and is info otherwise.
 - Qwen Code's system settings files are no longer taken for the `qwen` binary (and run with `--version`).
 - **`vaso mcp` follows `QWEN_HOME`** and reads Copilot CLI's project `.github/mcp.json`.
+- **Claude Code managed settings are scanned.** `managed-settings.json` and the `managed-settings.d/*.json` drop-ins in the system directory (`/Library/Application Support/ClaudeCode`, `/etc/claude-code`, `C:\Program Files\ClaudeCode`) load with the user install, locally and remotely. CC-001 honours `permissions.disableBypassPermissionsMode` from any of them, or from user or project settings: a bypass request it blocks is reported as inactive (info).
+- **Claude Code project scans started in a subdirectory read what Claude Code reads**: `CLAUDE.md` and `CLAUDE.local.md` from every directory up to the repository root, and `.claude/settings.local.json` at the repository root (Claude Code ≥ 2.1.211 keeps it there).
+- Scanning from a `$HOME` reached through a symlink no longer reports the Claude Code user directory a second time as a project when it has a `CLAUDE.md` (Codex and OpenCode compare their project directories the same way).
 
 ## [1.3.1] - 2026-10-16
 

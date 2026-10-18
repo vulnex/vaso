@@ -10,7 +10,7 @@ import { discoverCliInstalls } from './cli-installs.js';
 import { getUserHomeDirs } from './openclaw.js';
 import { queryCliVersion, readPackageVersion } from './version-query.js';
 import { loadConfigIfPresent } from './load-if-present.js';
-import { withoutLoadedConfigs, scanCwd } from './project-configs.js';
+import { withoutLoadedConfigs, scanCwd, isLoadedInstallDir } from './project-configs.js';
 import { xdgPath } from './env-path.js';
 
 const SYSTEM_CLI_PATHS = [
@@ -178,7 +178,7 @@ export const opencodeAdapter: AgentAdapter = {
     for (const dir of [...dirs].reverse()) projectConfigs.push(...await loadConfigsIn(dir, fs));
     const projectDir = join(root, '.opencode');
     const fresh = await withoutLoadedConfigs(projectConfigs, installations, fs);
-    const isUserDir = installations.some(i => i.installDir === projectDir);
+    const isUserDir = await isLoadedInstallDir(projectDir, installations, fs);
     // A .opencode/ dir is a project only with configs or project content
     // (agents, commands, plugins, modes): ~/.opencode is also the official
     // installer's dir (bin/, node_modules), which scanning from $HOME reached

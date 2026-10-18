@@ -30,3 +30,14 @@ export async function withoutLoadedConfigs(
   const keep = await Promise.all(projectConfigs.map(async c => !loaded.has(await real(c.filePath))));
   return projectConfigs.filter((_, i) => keep[i]);
 }
+
+/**
+ * Whether `dir` is the install dir of an installation already detected,
+ * compared resolved like withoutLoadedConfigs: from a symlinked $HOME the
+ * working directory's `.claude` (etc.) is the user dir under another name.
+ */
+export async function isLoadedInstallDir(dir: string, installations: AgentInstallation[], fs: FSProvider): Promise<boolean> {
+  const real = (p: string) => fs.realpath(p).catch(() => p);
+  const target = await real(dir);
+  return (await Promise.all(installations.map(i => real(i.installDir)))).includes(target);
+}

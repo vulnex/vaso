@@ -3,6 +3,7 @@ import type { AgentAdapter, DetectOptions } from './adapter.js';
 import type { AgentInstallation, GatewayInfo, ModelRef, ParsedConfig, ZoneGraph } from '../core/types.js';
 import type { ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
+import { isLoadedInstallDir } from './project-configs.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { loadConfigIfPresent } from './load-if-present.js';
 import { nvmBinaryGlob, npmPackageJsonGlobs } from './nvm-binary.js';
@@ -197,7 +198,7 @@ export const codexAdapter: AgentAdapter = {
       for (const project of trustedProjects(configFiles)) {
         if (!project.startsWith('/')) continue;
         const projectDir = join(project, CODEX_DIR_NAME);
-        if (projectDir === codexDir || installations.some(i => i.installDir === projectDir)) continue;
+        if (projectDir === codexDir || await isLoadedInstallDir(projectDir, installations, fs)) continue;
         if (!(await fs.access(projectDir))) continue;
         const projectConfig = await loadConfigIfPresent(join(projectDir, 'config.toml'), fs);
         const hasRules = await fs.access(join(projectDir, 'rules'));

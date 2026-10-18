@@ -1,4 +1,4 @@
-import { join, basename } from 'node:path';
+import { join, basename, dirname } from 'node:path';
 import type { AgentAdapter, DetectOptions } from './adapter.js';
 import type { AgentInstallation, GatewayInfo, ModelRef, ParsedConfig, ZoneGraph } from '../core/types.js';
 import type { ProbeManifest } from '../core/snapshot-types.js';
@@ -10,7 +10,7 @@ import { nvmBinaryGlob, npmPackageJsonGlobs } from './nvm-binary.js';
 import { discoverCliInstalls, retainedVersionGlobs, type RetainedVersionsDir } from './cli-installs.js';
 import { getUserHomeDirs } from './openclaw.js';
 import { queryCliVersion, readPackageVersion } from './version-query.js';
-import { withoutLoadedConfigs, scanCwd } from './project-configs.js';
+import { withoutLoadedConfigs, scanCwd, isLoadedInstallDir } from './project-configs.js';
 import { envPath } from './env-path.js';
 
 const CLAUDE_DIR_NAME = '.claude';
@@ -20,14 +20,49 @@ const NPM_PACKAGE_NAME = '@anthropic-ai/claude-code';
 // Project-scoped MCP servers, shared through the repo
 const PROJECT_MCP_FILE = '.mcp.json';
 
-/** Project memory Claude Code loads from a repo (code.claude.com/docs/en/memory). */
-function projectMemoryPaths(repo: string): string[] {
-  return [
-    join(repo, 'CLAUDE.md'),
-    join(repo, 'CLAUDE.local.md'),
-    join(repo, CLAUDE_DIR_NAME, 'CLAUDE.md'),
-    join(repo, CLAUDE_DIR_NAME, 'rules'),
-  ];
+export interface ClaudeProjectScope {
+  /** The git repository root, or the working directory outside a repo. */
+  root: string;
+  /** Where `.claude/settings.local.json` lives besides the working directory
+   *  (the repo root), when that differs. */
+  localSettingsDir?: string;
+  /** Memory files and rules dirs Claude Code loads at launch. */
+  memoryPaths: string[];
+}
+
+/**
+ * What a session started in `cwd` reads beyond `<cwd>/.claude/settings.json`
+ * (code.claude.com/docs/en/settings, /memory):
+ * - CLAUDE.md and CLAUDE.local.md from the working directory and every
+ *   directory above it — read here up to the repository root;
+ * - since 2.1.211, `.claude/settings.local.json` at the repository root when
+ *   started in a subdirectory (not when the root is $HOME, or on Windows);
+ *   one an earlier version left in the working directory is still read.
+ */
+export async function claudeProjectScope(cwd: string, fs: FSProvider): Promise<ClaudeProjectScope> {
+  const dirs: string[] = [];
+  let root = cwd;
+  for (let dir = cwd; ; dir = dirname(dir)) {
+    dirs.push(dir);
+    if (await fs.access(join(dir, '.git'))) {
+      root = dir;
+      break;
+    }
+    if (dirname(dir) === dir) {
+      dirs.splice(1); // outside a repo: the working directory only
+      break;
+    }
+  }
+  const localRoot = root !== cwd && root !== fs.homedir() && fs.platform !== 'win32';
+  return {
+    root,
+    localSettingsDir: localRoot ? join(root, CLAUDE_DIR_NAME) : undefined,
+    memoryPaths: [
+      ...dirs.flatMap(d => [join(d, 'CLAUDE.md'), join(d, 'CLAUDE.local.md')]),
+      join(cwd, CLAUDE_DIR_NAME, 'CLAUDE.md'),
+      join(cwd, CLAUDE_DIR_NAME, 'rules'),
+    ],
+  };
 }
 
 const SYSTEM_CLI_PATHS = [
@@ -100,6 +135,35 @@ export function claudeConfigPaths(home: string, fs: FSProvider): { claudeDir: st
   return { claudeDir: dir, rootStateFile: join(dir, ROOT_STATE_FILE) };
 }
 
+const MANAGED_DIR_DARWIN = '/Library/Application Support/ClaudeCode';
+const MANAGED_DIR_LINUX = '/etc/claude-code';
+const MANAGED_DIR_WIN32 = 'C:\\Program Files\\ClaudeCode';
+
+/** System directory holding managed-settings.json and managed-settings.d/ (code.claude.com/docs/en/managed-settings). */
+export function claudeManagedDir(fs: FSProvider): string {
+  return fs.platform === 'darwin' ? MANAGED_DIR_DARWIN : fs.platform === 'win32' ? MANAGED_DIR_WIN32 : MANAGED_DIR_LINUX;
+}
+
+/**
+ * Managed settings files in merge order: managed-settings.json, then every
+ * non-hidden `*.json` in managed-settings.d/ alphabetically. They apply above
+ * every other scope on the machine.
+ */
+export async function claudeManagedSettingsPaths(fs: FSProvider): Promise<string[]> {
+  const dir = claudeManagedDir(fs);
+  const dropInDir = join(dir, 'managed-settings.d');
+  let dropIns: string[] = [];
+  try {
+    dropIns = (await fs.readdir(dropInDir))
+      .filter(n => n.endsWith('.json') && !n.startsWith('.'))
+      .sort()
+      .map(n => join(dropInDir, n));
+  } catch {
+    // no drop-in directory
+  }
+  return [join(dir, 'managed-settings.json'), ...dropIns];
+}
+
 export const claudeCodeAdapter: AgentAdapter = {
   agent: 'claude-code',
   displayName: 'Claude Code',
@@ -108,6 +172,12 @@ export const claudeCodeAdapter: AgentAdapter = {
     const fs = options?.fs ?? new LocalFSProvider();
     const userDirs = await getUserHomeDirs(options?.allUsers, fs);
     const installations: AgentInstallation[] = [];
+    // Machine-wide, so attributed to the first user install only
+    const managed: ParsedConfig[] = [];
+    for (const path of await claudeManagedSettingsPaths(fs)) {
+      const loaded = await loadConfigIfPresent(path, fs);
+      if (loaded) managed.push(loaded);
+    }
 
     for (const { home, user } of userDirs) {
       const { claudeDir, rootStateFile } = claudeConfigPaths(home, fs);
@@ -139,6 +209,7 @@ export const claudeCodeAdapter: AgentAdapter = {
       // install. (`hasRootState` alone counted earlier, but if loadConfig
       // threw, configFiles is still empty and there's nothing to scan.)
       if (configFiles.length === 0 && !cliBinary) continue;
+      configFiles.push(...managed.splice(0));
 
       const version = installs.primary?.version;
       const skillsDir = this.getSkillsDir(claudeDir);
@@ -157,19 +228,25 @@ export const claudeCodeAdapter: AgentAdapter = {
     }
 
     // Project-level config in the current working directory. Claude Code
-    // reads <repo>/CLAUDE.md, CLAUDE.local.md, .claude/rules/ and the shared
-    // <repo>/.mcp.json whether or not the repo has .claude/settings*.json, so
-    // any of them makes the project scannable. Running from $HOME makes
-    // <cwd>/.claude the user dir itself — already covered above.
+    // reads CLAUDE.md / CLAUDE.local.md (here and up to the repo root),
+    // .claude/rules/ and the shared .mcp.json whether or not there is a
+    // .claude/settings*.json, so any of them makes the project scannable
+    // (claudeProjectScope). Running from $HOME makes <cwd>/.claude the user
+    // dir itself — already covered above.
     const cwd = scanCwd(fs);
     if (!cwd) return installations;
     const projectClaudeDir = join(cwd, CLAUDE_DIR_NAME);
-    if (!installations.some(i => i.installDir === projectClaudeDir)) {
+    if (!(await isLoadedInstallDir(projectClaudeDir, installations, fs))) {
+      const project = await claudeProjectScope(cwd, fs);
+      const settings = await fs.access(projectClaudeDir) ? await loadSettingsFiles(projectClaudeDir, fs) : [];
+      const rootLocal = project.localSettingsDir
+        ? await loadConfigIfPresent(join(project.localSettingsDir, 'settings.local.json'), fs)
+        : undefined;
       const projectConfigs = await withoutLoadedConfigs([
-        ...(await fs.access(projectClaudeDir) ? await loadSettingsFiles(projectClaudeDir, fs) : []),
-        ...[await loadConfigIfPresent(join(cwd, PROJECT_MCP_FILE), fs)].filter(c => c !== undefined),
+        ...settings,
+        ...[rootLocal, await loadConfigIfPresent(join(cwd, PROJECT_MCP_FILE), fs)].filter(c => c !== undefined),
       ], installations, fs);
-      const hasMemory = (await Promise.all(projectMemoryPaths(cwd).map(p => fs.access(p)))).some(Boolean);
+      const hasMemory = (await Promise.all(project.memoryPaths.map(p => fs.access(p)))).some(Boolean);
       if (projectConfigs.length > 0 || hasMemory) {
         // The project runs under the scanning user's claude — its version
         // decides how project settings are honored (CC-001)
@@ -288,6 +365,8 @@ export const claudeCodeAdapter: AgentAdapter = {
         '~/.claude/rules/**',
         nvmBinaryGlob('claude'),
         ...npmPackageJsonGlobs(NPM_PACKAGE_NAME),
+        `${MANAGED_DIR_DARWIN}/managed-settings.d/*.json`,
+        `${MANAGED_DIR_LINUX}/managed-settings.d/*.json`,
       ],
       commands: [
         { id: 'claude-which', cmd: 'which', args: ['claude'], timeout: 3000 },
@@ -301,8 +380,9 @@ export const claudeCodeAdapter: AgentAdapter = {
         '~/.claude/rules',
       ],
       envPrefixes: ['CLAUDE_', 'ANTHROPIC_'],
-      systemPaths: SYSTEM_CLI_PATHS,
-      systemDirListings: [],
+      // Managed settings (machine-wide policy) and their drop-in directory
+      systemPaths: [...SYSTEM_CLI_PATHS, `${MANAGED_DIR_DARWIN}/managed-settings.json`, `${MANAGED_DIR_LINUX}/managed-settings.json`],
+      systemDirListings: [`${MANAGED_DIR_DARWIN}/managed-settings.d`, `${MANAGED_DIR_LINUX}/managed-settings.d`],
     };
   },
 
