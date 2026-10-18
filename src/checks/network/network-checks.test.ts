@@ -44,7 +44,13 @@ describe('NET-001: Gateway Internet Exposure', () => {
     expect((await net001.run(keyed)).passed).toBe(true);
     const open = makeContext({ host: '0.0.0.0', port: 8642 }, [env({ API_SERVER_HOST: '0.0.0.0' })]);
     open.installation.agent = 'hermes';
+    open.installation.version = '0.8.0';
     expect((await net001.run(open)).passed).toBe(false);
+    // Hermes 0.9.0+ refuses a non-loopback bind without a key; unknown releases are HM-004's call
+    for (const version of ['0.9.0', '0.21.6', undefined]) {
+      open.installation.version = version;
+      expect((await net001.run(open)).passed, version).toBe(true);
+    }
   });
 
   it('fails when gateway is bound to 0.0.0.0', async () => {

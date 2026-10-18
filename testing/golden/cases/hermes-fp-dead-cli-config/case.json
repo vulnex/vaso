@@ -1,0 +1,6 @@
+{
+  "agent": "hermes",
+  "source": "Hermes reads $HERMES_HOME/config.yaml only (hermes_cli/cli_config_load.py; the CLI's cli-config.yaml fallback is the checkout's own, and only without config.yaml); a ~/.hermes/cli-config.yaml with an exposed API server, approvals off and a plaintext endpoint is dead config (deep test 2026-10-17 fixture)",
+  "modes": { ".hermes": "700", ".hermes/config.yaml": "600", ".hermes/cli-config.yaml": "600" },
+  "pass": ["HM-004", "HM-006", "HM-007", "HM-008", "HM-010", "CFG-001", "NET-001"]
+}

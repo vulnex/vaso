@@ -1,0 +1,6 @@
+{
+  "agent": "hermes",
+  "source": "Hermes 0.21.6: API_SERVER_ENABLED + API_SERVER_HOST=0.0.0.0 without API_SERVER_KEY — gateway/platforms/api_server.py _api_key_passes_startup_guard refuses to start the server (0.15.0+), and the env block is ignored without a usable key (gateway/config_env.py _api_server, 0.19.1+) (deep test 2026-10-17 fixture)",
+  "modes": { ".hermes": "700", ".hermes/.env": "600", ".hermes/config.yaml": "600" },
+  "pass": ["HM-004", "CFG-001", "NET-001", "CFG-004"]
+}

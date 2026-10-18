@@ -690,7 +690,13 @@ describe('CFG-001 on Hermes', () => {
     expect((await cfg001.run(ctx)).passed).toBe(true);
     const open = { ...env, data: { API_SERVER_HOST: '0.0.0.0' } };
     const ctx2 = makeContext([open]);
-    ctx2.installation = { ...ctx2.installation, agent: 'hermes', gateway: { host: '0.0.0.0', port: 8642 } };
+    // Before the start-up key guard (0.9.0) the server runs unauthenticated
+    ctx2.installation = { ...ctx2.installation, agent: 'hermes', version: '0.8.0', gateway: { host: '0.0.0.0', port: 8642 } };
     expect((await cfg001.run(ctx2)).passed).toBe(false);
+    // 0.15.0+ refuses to start it without a key, and an unknown release is HM-004's call
+    for (const version of ['0.21.6', undefined]) {
+      ctx2.installation = { ...ctx2.installation, version };
+      expect((await cfg001.run(ctx2)).passed, version).toBe(true);
+    }
   });
 });

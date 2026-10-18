@@ -1,5 +1,5 @@
 import { defineCheck } from '../../core/check-builder.js';
-import { hermesApiServer } from '../../adapters/hermes-api-server.js';
+import { hermesApiServer, hermesApiServerState } from '../../adapters/hermes-api-server.js';
 import { CODING_AGENTS } from '../../core/types.js';
 import { getNestedValue } from '../../core/utils.js';
 
@@ -17,10 +17,12 @@ export const net001 = defineCheck({
   async run(ctx, h) {
     const gw = ctx.installation.gateway;
     if (!gw?.host) return h.passed('No gateway configured');
-    // Hermes' API server takes a bearer key; unauthenticated exposure is
-    // HM-004's critical finding (CFG-001 defers the same way)
-    if (ctx.installation.agent === 'hermes' && hermesApiServer(ctx.configs).key) {
-      return h.passed(`Hermes API server on ${gw.host}:${gw.port ?? '?'} requires an API key (HM-004 covers unauthenticated exposure)`);
+    // Hermes' API server takes a bearer key, and releases with the start-up
+    // guard refuse to run it without one; HM-004 reports the
+    // release-dependent case (CFG-001 defers the same way)
+    if (ctx.installation.agent === 'hermes'
+        && hermesApiServerState(hermesApiServer(ctx.configs, ctx.installation.version), ctx.installation.version) !== 'unauthenticated') {
+      return h.passed(`Hermes API server on ${gw.host}:${gw.port ?? '?'} requires an API key or is refused without one (HM-004 covers unauthenticated exposure)`);
     }
 
     // OpenClaw Tailscale Funnel publishes the (loopback-bound) gateway on the

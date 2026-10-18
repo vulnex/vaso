@@ -1,0 +1,6 @@
+_config_version: 52
+model:
+  default: anthropic/claude-sonnet-4
+  provider: openrouter
+approvals:
+  mode: manual

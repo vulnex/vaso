@@ -18,7 +18,7 @@ export const hm008 = defineCheck({
   name: 'Hermes Tool-Call Approvals Disabled',
   category: 'hermes',
   severity: 'critical',
-  description: 'approvals.mode set to "off" (or a YAML false/no) in cli-config.yaml, approvals.cron_mode / unattended_mode / single_query_mode set to "approve", or HERMES_YOLO_MODE truthy in .env — tool calls (including terminal commands) execute without operator confirmation.',
+  description: 'approvals.mode set to "off" (or a YAML false/no) in config.yaml, approvals.cron_mode / unattended_mode / single_query_mode set to "approve", or HERMES_YOLO_MODE truthy in .env — tool calls (including terminal commands) execute without operator confirmation.',
   supportedAgents: ['hermes'],
 
   async run(ctx, h) {
@@ -58,7 +58,7 @@ export const hm008 = defineCheck({
     return h.fromEvidence(evidence, {
       passed: 'Hermes tool-call approvals are enabled',
       failed: (n) => `Found ${n} approval-bypass setting(s) — every tool call runs without confirmation`,
-      fixDescription: 'Set approvals.mode: manual (or smart) and cron_mode / unattended_mode / single_query_mode: deny in cli-config.yaml; remove HERMES_YOLO_MODE from .env',
+      fixDescription: 'Set approvals.mode: manual (or smart) and cron_mode / unattended_mode / single_query_mode: deny in config.yaml; remove HERMES_YOLO_MODE from .env',
     });
   },
 });

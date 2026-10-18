@@ -164,6 +164,37 @@ describe('Hermes adapter', () => {
     expect(inst.version).toBeUndefined();
   });
 
+  it('reports no gateway when the installed release refuses to start the API server, and never loads cli-config.yaml', async () => {
+    const hh = '/home/u/.hermes';
+    const files: Record<string, string> = { [`${hh}/hermes-agent/install-stamp.json`]: '{"baseVersion":"0.21.6"}' };
+    const present = new Set([hh, `${hh}/config.yaml`, `${hh}/cli-config.yaml`]);
+    const fs = {
+      kind: 'local',
+      platform: 'linux',
+      homedir: () => '/home/u',
+      getEnv: () => undefined,
+      access: vi.fn(async (p: string) => present.has(p) || p in files),
+      readFile: vi.fn(async (p: string) => {
+        if (p in files) return files[p];
+        throw new Error('ENOENT');
+      }),
+      stat: vi.fn(async () => ({ mode: 0o100644, isFile: () => true, isDirectory: () => false })),
+      readdirEntries: vi.fn(async () => []),
+      realpath: vi.fn(async (p: string) => p),
+      execSync: vi.fn(() => { throw new Error('not found'); }),
+    } as any;
+    let api: Record<string, unknown> = { enabled: true, host: '0.0.0.0' };
+    mockLoadConfig.mockImplementation(async (path) => mockConfig(path as string, { gateway: { api_server: api } }));
+
+    let [inst] = await hermesAdapter.detect({ fs });
+    expect(inst.gateway).toBeUndefined();
+    expect(inst.configFiles.map(c => c.filePath)).toEqual([`${hh}/config.yaml`]);
+
+    api = { enabled: true, host: '0.0.0.0', key: 'a3f9c27e5b1d4086f2e7' };
+    [inst] = await hermesAdapter.detect({ fs });
+    expect(inst.gateway).toEqual({ host: '0.0.0.0', port: 8642 });
+  });
+
   it('respects HERMES_HOME env var', async () => {
     const customHome = '/opt/hermes';
     process.env.HERMES_HOME = customHome;
@@ -196,14 +227,22 @@ describe('Hermes adapter', () => {
   });
 
   it('reads the API server from .env, gateway.api_server and platforms.api_server.extra', () => {
-    expect(hermesAdapter.getGatewayInfo({ API_SERVER_ENABLED: 'true' })).toEqual({ host: '127.0.0.1', port: 8642 });
+    const key = 'a3f9c27e5b1d4086f2e7';
+    expect(hermesAdapter.getGatewayInfo({ API_SERVER_ENABLED: 'true', API_SERVER_KEY: key })).toEqual({ host: '127.0.0.1', port: 8642 });
+    // The gateway ignores the API_SERVER_* block without a usable key
+    expect(hermesAdapter.getGatewayInfo({ API_SERVER_ENABLED: 'true' })).toBeUndefined();
     expect(hermesAdapter.getGatewayInfo({ gateway: { api_server: { enabled: true, host: '0.0.0.0', port: 9000 } } }))
       .toEqual({ host: '0.0.0.0', port: 9000 });
     expect(hermesAdapter.getGatewayInfo({ platforms: { api_server: { extra: { host: '0.0.0.0' } } } }))
       .toEqual({ host: '0.0.0.0', port: 8642 });
-    // Environment variables take precedence over config.yaml
-    expect(hermesAdapter.getGatewayInfo({ API_SERVER_HOST: '127.0.0.1', gateway: { api_server: { host: '0.0.0.0' } } }))
+    // Environment variables take precedence over config.yaml alongside a usable env key…
+    expect(hermesAdapter.getGatewayInfo({ API_SERVER_HOST: '127.0.0.1', API_SERVER_KEY: key, gateway: { api_server: { host: '0.0.0.0' } } }))
       .toEqual({ host: '127.0.0.1', port: 8642 });
+    // …otherwise config.yaml wins and the env host is only a fallback
+    expect(hermesAdapter.getGatewayInfo({ API_SERVER_HOST: '0.0.0.0', gateway: { api_server: { host: '127.0.0.1', key } } }))
+      .toEqual({ host: '127.0.0.1', port: 8642 });
+    expect(hermesAdapter.getGatewayInfo({ API_SERVER_HOST: '0.0.0.0', gateway: { api_server: { enabled: true } } }))
+      .toEqual({ host: '0.0.0.0', port: 8642 });
   });
 
   it('returns undefined gateway info when no platforms config', () => {
@@ -218,8 +257,9 @@ describe('Hermes adapter', () => {
 
   it('returns correct config paths', () => {
     const paths = hermesAdapter.getConfigPaths();
-    expect(paths).toHaveLength(3);
-    expect(paths).toContain(join(hermesHome, 'cli-config.yaml'));
+    // A cli-config.yaml in HERMES_HOME is never read by Hermes
+    expect(paths).toHaveLength(2);
+    expect(paths).not.toContain(join(hermesHome, 'cli-config.yaml'));
     expect(paths).toContain(join(hermesHome, 'config.yaml'));
     expect(paths).toContain(join(hermesHome, '.env'));
   });

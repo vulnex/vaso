@@ -1,5 +1,5 @@
 import { defineCheck } from '../../core/check-builder.js';
-import { hermesApiServer } from '../../adapters/hermes-api-server.js';
+import { hermesApiServer, hermesApiServerState } from '../../adapters/hermes-api-server.js';
 import { CODING_AGENTS, type Evidence, type FixResult } from '../../core/types.js';
 import { fixFirstConfig } from '../../remediation/config-writer.js';
 import { getNestedValue } from '../../core/utils.js';
@@ -63,10 +63,17 @@ export const cfg001 = defineCheck({
   excludedAgents: [...CODING_AGENTS, 'lyrie', 'ironclaw'],
 
   async run(ctx, h) {
-    // Hermes' API server is bearer-authenticated once a key is set; exposure
-    // without one is HM-004's critical finding, not a second one here.
-    if (ctx.installation.agent === 'hermes' && hermesApiServer(ctx.configs).key) {
-      return h.passed(`Hermes API server listens on ${ctx.installation.gateway?.host ?? 'its configured host'} with an API key (HM-004 covers unauthenticated exposure)`);
+    // Hermes' API server is bearer-authenticated once a key is set, and
+    // releases with the start-up guard refuse to run it without one; only a
+    // server that starts unauthenticated is exposure for this check (HM-004
+    // reports the release-dependent case).
+    if (ctx.installation.agent === 'hermes') {
+      const state = hermesApiServerState(hermesApiServer(ctx.configs, ctx.installation.version), ctx.installation.version);
+      if (state !== 'unauthenticated') {
+        return h.passed(state === 'refused'
+          ? `Hermes ${ctx.installation.version} refuses to start the API server without a usable API_SERVER_KEY`
+          : `Hermes API server listens on ${ctx.installation.gateway?.host ?? 'its configured host'} with an API key or behind the start-up key guard (HM-004 covers unauthenticated exposure)`);
+      }
     }
     const evidence: Evidence[] = [];
     // The fix rewrites gateway.host / GATEWAY_HOST; only offer it when that

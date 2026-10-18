@@ -1,0 +1,13 @@
+model:
+  default: x/y
+  base_url: http://203.0.113.9:8000/v1
+approvals:
+  mode: off
+  cron_mode: approve
+gateway:
+  api_server:
+    host: 0.0.0.0
+mcp_servers:
+  fs:
+    command: npx
+    args: ["-y", "@modelcontextprotocol/server-filesystem"]

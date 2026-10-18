@@ -55,7 +55,7 @@ export const hm001 = defineCheck({
   name: 'Plaintext API Keys in Hermes Config',
   category: 'hermes',
   severity: 'critical',
-  description: 'Detect API keys, OAuth tokens, channel bot tokens, or other secrets stored in plaintext in ~/.hermes/cli-config.yaml (model.api_key, auxiliary.*.api_key, delegation.api_key, mcp_servers.<n>.env.*).',
+  description: 'Detect API keys, OAuth tokens, channel bot tokens, or other secrets stored in plaintext in ~/.hermes/config.yaml (model.api_key, auxiliary.*.api_key, delegation.api_key, mcp_servers.<n>.env.*).',
   supportedAgents: ['hermes'],
 
   async run(ctx, h) {
@@ -65,9 +65,9 @@ export const hm001 = defineCheck({
       walk(config.data, config.filePath, '', evidence);
     }
     return h.fromEvidence(evidence, {
-      passed: 'No plaintext credentials in Hermes cli-config.yaml',
+      passed: 'No plaintext credentials in Hermes config.yaml',
       failed: (n) => `Found ${n} plaintext credential(s) in Hermes config`,
-      fixDescription: 'Move secrets to ~/.hermes/.env (with mode 0600) and reference them via ${ENV_VAR} in cli-config.yaml',
+      fixDescription: 'Move secrets to ~/.hermes/.env (with mode 0600) and reference them via ${ENV_VAR} in config.yaml',
     });
   },
 });

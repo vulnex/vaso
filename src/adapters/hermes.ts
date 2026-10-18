@@ -6,12 +6,15 @@ import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { loadConfig } from '../core/config-loader.js';
 import { loadConfigIfPresent } from './load-if-present.js';
-import { hermesApiServer, isTruthy, HERMES_API_DEFAULT_HOST, HERMES_API_DEFAULT_PORT } from './hermes-api-server.js';
+import { hermesApiServer, hermesApiServerState, isTruthy, HERMES_API_DEFAULT_HOST, HERMES_API_DEFAULT_PORT } from './hermes-api-server.js';
 import { discoverCliInstalls } from './cli-installs.js';
 import { queryCliVersion } from './version-query.js';
 import { envPath } from './env-path.js';
 
-const CONFIG_FILENAMES = ['cli-config.yaml', 'config.yaml', '.env'];
+// $HERMES_HOME/config.yaml and .env. A cli-config.yaml there is never read:
+// the CLI's fallback (only without config.yaml) is the checkout's own
+// cli-config.yaml, and the gateway reads config.yaml alone.
+const CONFIG_FILENAMES = ['config.yaml', '.env'];
 
 const SEMVER = /^\d+\.\d+\.\d+(?:[-+][\w.-]+)?$/;
 
@@ -91,11 +94,10 @@ export const hermesAdapter: AgentAdapter = {
     const cliBinary = installs.primary?.path;
     const version = stampVersion ?? installs.primary?.version;
 
-    // Merge all config data to extract gateway info
-    const merged: Record<string, unknown> = {};
-    for (const c of configFiles) {
-      Object.assign(merged, c.data);
-    }
+    // The API server is the gateway — unless this release refuses to start it
+    const gateway = hermesApiServerState(hermesApiServer(configFiles, version), version) === 'refused'
+      ? undefined
+      : hermesGateway(configFiles, version);
 
     return [{
       agent: 'hermes',
@@ -103,7 +105,7 @@ export const hermesAdapter: AgentAdapter = {
       configFiles,
       skillsDir: this.getSkillsDir(hermesHome),
       version,
-      gateway: this.getGatewayInfo(merged),
+      gateway,
       models: await this.getModels?.(configFiles, fs),
       cliBinary,
       otherInstalls: installs.others.length > 0 ? installs.others : undefined,
@@ -122,17 +124,10 @@ export const hermesAdapter: AgentAdapter = {
 
   getGatewayInfo(config: Record<string, unknown>): GatewayInfo | undefined {
     // `config` is config.yaml merged with .env (env keys at the top level)
-    const api = hermesApiServer([
+    return hermesGateway([
       { format: 'env', data: config },
       { format: 'yaml', data: config },
     ]);
-    // Only a listening API server is a gateway: enabled, or bound somewhere explicitly
-    if (!isTruthy(api.enabled?.value) && !api.host) return undefined;
-    const port = Number(api.port?.value);
-    return {
-      host: api.host?.value ?? HERMES_API_DEFAULT_HOST,
-      port: Number.isInteger(port) && port > 0 ? port : HERMES_API_DEFAULT_PORT,
-    };
   },
 
   getModels(configs: ParsedConfig[], fs?: FSProvider): ModelRef[] {
@@ -158,11 +153,11 @@ export const hermesAdapter: AgentAdapter = {
       out.push({ id, ...(provider ? { provider } : {}), ...(via ? { via } : {}) });
     };
 
-    // cli-config.yaml (or legacy config.yaml): `model.default` (or `model.model`
+    // config.yaml: `model.default` (or `model.model`
     // — upstream accepts both) is the active model; `model.provider` and
     // `model.base_url` are sibling metadata for that model, not separate slots.
     const yaml = configs.find(
-      c => c.filePath.endsWith('cli-config.yaml') || c.filePath.endsWith('config.yaml'),
+      c => c.filePath.endsWith('config.yaml'),
     );
     const block = yaml?.data?.model;
     if (typeof block === 'string') {
@@ -280,7 +275,6 @@ export const hermesAdapter: AgentAdapter = {
   getProbeManifest(): ProbeManifest {
     return {
       filePaths: [
-        '~/.hermes/cli-config.yaml',
         '~/.hermes/config.yaml',
         '~/.hermes/.env',
         // Installer version record ({"baseVersion": …})
@@ -319,3 +313,14 @@ export const hermesAdapter: AgentAdapter = {
   },
 };
 
+
+function hermesGateway(configs: Array<Pick<ParsedConfig, 'format' | 'data'>>, version?: string): GatewayInfo | undefined {
+  const api = hermesApiServer(configs, version);
+  // Only a listening API server is a gateway: enabled, or bound somewhere explicitly
+  if (!isTruthy(api.enabled?.value) && !api.host) return undefined;
+  const port = Number(api.port?.value);
+  return {
+    host: api.host?.value ?? HERMES_API_DEFAULT_HOST,
+    port: Number.isInteger(port) && port > 0 ? port : HERMES_API_DEFAULT_PORT,
+  };
+}

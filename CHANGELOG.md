@@ -49,6 +49,8 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - **Settings files that hold secrets get a `vaso fix`.** `~/.claude.json`, `~/.codex/config.toml`, Gemini CLI's and Qwen Code's `settings.json` and their `.env` are now credential paths, so GEM-002/QC-002 findings on them can be fixed (chmod go-rwx); as for every settings file, CFG-003/POL-003 count one only while it holds a key.
 - POL-003 no longer reports an unparseable settings file as a credential leak (with a fix) unless its text contains a key.
 - Scanning from a `$HOME` reached through a symlink no longer reports the Claude Code user directory a second time as a project when it has a `CLAUDE.md` (Codex and OpenCode compare their project directories the same way).
+- **Hermes API server findings follow the installed release's start-up guard.** Hermes 0.9.0+ refuses a non-loopback API server without `API_SERVER_KEY`, 0.15.0+ refuses any API server without one, and 0.18.0+ also refuses a placeholder key or one shorter than 16 characters. HM-004, CFG-001, NET-001 and HM-005 no longer report a server that can't start (critical findings on default installs), and the gateway is not reported at all. When the version is unknown, HM-004 reports the missing key at info severity. The `API_SERVER_*` variables in `.env` override `config.yaml` only alongside a usable env key (alongside `API_SERVER_ENABLED` or any key before 0.19.1), as the gateway applies them. `gateway.platforms.api_server` is read too.
+- **Hermes: `~/.hermes/cli-config.yaml` is no longer scanned.** Hermes never reads it (only `$HERMES_HOME/config.yaml`), so its settings produced findings for dead config.
 
 ## [1.3.1] - 2026-10-16
 

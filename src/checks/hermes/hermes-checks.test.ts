@@ -152,10 +152,42 @@ describe('HM-003 credential file permissions', () => {
 
 describe('HM-004 API server bind without auth', () => {
   const check = hermesChecks.find(c => c.id === 'HM-004')!;
-  it('fails when host=0.0.0.0 and key empty', async () => {
+  const at = (configs: ParsedConfig[], version?: string): ScanContext => {
+    const ctx = makeCtx(configs);
+    ctx.installation.version = version;
+    return ctx;
+  };
+  it('fails critical when host=0.0.0.0 and key empty before the start-up guard (< 0.9.0)', async () => {
+    const cfg = makeEnv('/h/.hermes/.env', { API_SERVER_HOST: '0.0.0.0' });
+    const result = await check.run(at([cfg], '0.8.0'));
+    expect(result.passed).toBe(false);
+    expect(result.severity).toBe('critical');
+  });
+  it('downgrades to info when the Hermes version is unknown', async () => {
     const cfg = makeEnv('/h/.hermes/.env', { API_SERVER_HOST: '0.0.0.0' });
     const result = await check.run(makeCtx([cfg]));
     expect(result.passed).toBe(false);
+    expect(result.severity).toBe('info');
+  });
+  it('passes when the release refuses to start the server without a usable key', async () => {
+    const env = makeEnv('/h/.hermes/.env', { API_SERVER_ENABLED: 'true', API_SERVER_HOST: '0.0.0.0' });
+    for (const v of ['0.9.0', '0.15.0', '0.21.6']) {
+      const r = await check.run(at([env], v));
+      expect(r.passed, v).toBe(true);
+    }
+    // 0.18.0+: a placeholder / short key is refused too
+    const weak = makeYaml('/h/.hermes/config.yaml', { gateway: { api_server: { host: '0.0.0.0', key: 'changeme' } } });
+    expect((await check.run(at([weak], '0.21.6'))).message).toContain('refuses to start');
+  });
+  it('honours config.yaml over API_SERVER_HOST when the env block carries no usable key', async () => {
+    const yaml = makeYaml('/h/.hermes/config.yaml', { gateway: { api_server: { host: '127.0.0.1' } } });
+    // Before 0.19.1 the env block applies alongside API_SERVER_ENABLED (or any key)…
+    const env = makeEnv('/h/.hermes/.env', { API_SERVER_HOST: '0.0.0.0' });
+    expect((await check.run(at([yaml, env], '0.8.0'))).passed).toBe(true);
+    const enabled = makeEnv('/h/.hermes/.env', { API_SERVER_ENABLED: 'true', API_SERVER_HOST: '0.0.0.0' });
+    expect((await check.run(at([yaml, enabled], '0.8.0'))).passed).toBe(false);
+    // …and with no version known, only alongside a usable env key (current releases)
+    expect((await check.run(at([yaml, enabled]))).passed).toBe(true);
   });
   it('passes when host=0.0.0.0 with key set', async () => {
     const cfg = makeEnv('/h/.hermes/.env', { API_SERVER_HOST: '0.0.0.0', API_SERVER_KEY: 'secret-token' });
@@ -170,6 +202,7 @@ describe('HM-004 API server bind without auth', () => {
   it('reads host and key from config.yaml gateway.api_server', async () => {
     const open = makeYaml('/h/.hermes/config.yaml', { gateway: { api_server: { host: '0.0.0.0' } } });
     expect((await check.run(makeCtx([open]))).passed).toBe(false);
+    expect((await check.run(at([open], '0.8.0'))).severity).toBe('critical');
     const keyed = makeYaml('/h/.hermes/config.yaml', { gateway: { api_server: { host: '0.0.0.0', key: 'secret-token' } } });
     expect((await check.run(makeCtx([keyed]))).passed).toBe(true);
     const extra = makeYaml('/h/.hermes/config.yaml', { platforms: { api_server: { extra: { host: '0.0.0.0', key: 'k' } } } });
