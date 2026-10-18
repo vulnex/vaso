@@ -103,6 +103,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - **A few kilobytes of JavaScript can no longer exhaust memory in the parser.** Some inputs (3 KB of `a:a:a:…` labels) made the parser's error recovery build a million error objects — gigabytes of heap and an out-of-memory crash in `skill audit`, `mcp scan --source` and `scan`. Recovery now stops after a bounded number of errors; a statement that reaches it is set aside like one that overflows the parser, reported by SKL-002/MCP-035 as a warning, and the rest of the file is analysed (3 KB: 6 s and 2.9 GB → 0.4 s and 107 MB).
 - **Masking credentials in reports is linear again.** An MCP server URL ending in thousands of `)` and an argument with a long `x-keykey…` header-like name made `mcp scan` and `mcp list` quadratic (50 KB: 27 s; 200 KB: 15 s → 0.2 s). What is masked is unchanged.
 - **MCP-014 is linear on long identifier or number runs.** Its presence-check filter (`token.length`, `token != null`) was tried from every position of a run, so 100 KB of `000…` in a server source took 20 s (now 0.4 s).
+- **Five more line patterns are linear on long runs.** PI-004 on a `[SYSTEM]` tag followed by a long space run (80 KB: 18 s), RS-008 on a long `mkfifo|…|…` pipeline (100 KB: 15 s), the Python `getattr(os, …)` rewrite (17 s), MCP-035's `TextDecoder(…)` decoder test (11 s) and MCP-002's `.listen(…, "0.0.0.0")` (5 s) now finish in well under a second (`skill audit`, `mcp scan --source`, `scan`). They match the same text as before.
 
 ## [1.3.1] - 2026-10-16
 

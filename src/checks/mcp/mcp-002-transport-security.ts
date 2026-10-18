@@ -5,7 +5,8 @@ import { sourceSegments, segmentSnippet } from '../../mcp/source-segments.js';
 
 /** Server code binding a listener to every interface. */
 const ALL_INTERFACES_BIND = [
-  /\.listen\(\s*[^,()]+,\s*["'`]0\.0\.0\.0["'`]/, // app.listen(PORT, "0.0.0.0")
+  // `[^,()]+` holds the leading space (`\(\s*[^,()]+` was quadratic on a space run)
+  /\.listen\([^,()]+,\s*["'`]0\.0\.0\.0["'`]/, // app.listen(PORT, "0.0.0.0")
   /\bhost\s*[:=]\s*["'`]0\.0\.0\.0["'`]/, // { host: '0.0.0.0' }, uvicorn.run(app, host="0.0.0.0")
   /["'`]--host["'`]\s*,\s*["'`]0\.0\.0\.0["'`]/,
 ];

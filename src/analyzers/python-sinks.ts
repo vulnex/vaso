@@ -236,7 +236,10 @@ function aliasRewriter(code: string): (text: string) => string {
   return (text: string): string => {
     let out = text.replace(/\b__import__\(\s*["'](\w+)["']\s*\)\s*\./g, '$1.');
     // getattr(os, "sys" + "tem")(cmd): a sink name assembled to dodge a grep.
-    out = out.replace(/\bgetattr\(\s*(os|subprocess)\s*,\s*([^)]*)\)\s*\(/g, (m, mod: string, name: string) => {
+    // The name stops at `(` too (a name holding one is never rewritten), and
+    // its leading space is the name's: `,\s*[^)]*` split a long space run
+    // every way, and each `getattr(` scanned the rest of the text (quadratic)
+    out = out.replace(/\bgetattr\(\s*(os|subprocess)\s*,([^()]*)\)\s*\(/g, (m, mod: string, name: string) => {
       const literal = name.replace(/["'\s+]/g, '');
       return /^\w+$/.test(literal) ? `${mod}.${literal}(` : m;
     });

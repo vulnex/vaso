@@ -29,7 +29,9 @@ const DECODERS: Decoder[] = [
   // Encoding named by a variable (`const ENC = "base" + "64"`) — any of them.
   { re: /Buffer\.from\s*\([^,)]*,\s*[A-Za-z_$][\w$.]*\s*\)\s*\.toString\s*\(/, label: 'Buffer.from(…, <encoding>)', encodings: ['base64', 'hex'] },
   { re: /\batob\s*\(/, label: 'atob()', encodings: ['base64'] },
-  { re: /\bTextDecoder\s*\(\s*[^)]*\)\s*\.decode\s*\(|\bparseInt\s*\(\s*\w+\s*,\s*16\s*\)/, label: 'TextDecoder/parseInt hex decoding', encodings: ['hex'] },
+  // Arguments bounded, without a separate leading-space run (`\(\s*[^)]*`
+  // split a long space run every way: 100 KB, 11 s)
+  { re: /\bTextDecoder\s*\([^)]{0,1000}\)\s*\.decode\s*\(|\bparseInt\s*\(\s*\w+\s*,\s*16\s*\)/, label: 'TextDecoder/parseInt hex decoding', encodings: ['hex'] },
   { re: /String\.fromCharCode\s*\(\s*\.\.\.|String\.fromCharCode\.apply\s*\(|\.map\s*\(\s*\(?\w+\)?\s*=>\s*String\.fromCharCode\s*\(/, label: 'String.fromCharCode() over an array', encodings: ['charcodes'] },
   { re: /charCodeAt\s*\(\s*\d*\s*\)\s*\+\s*13\b|\brot13\b|['"`]rot_?13['"`]/i, label: 'rot13', encodings: ['rot13'] },
   // Python
