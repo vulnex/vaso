@@ -102,6 +102,11 @@ export function detectTyposquatting(
   for (let i = 0; i < trustedNames.length; i++) {
     const trusted = trustedNames[i];
     if (isInflection(normalized, normalizedTrusted[i])) continue;
+    // Against a short single word ("irish", "github"), only a same-length typo
+    // (swap or substitution: "githbu") is a lookalike — adding or dropping a
+    // letter makes another word ("iris")
+    const shortWord = !/[-_]/.test(trusted) && normalizedTrusted[i].length <= 6;
+    if (maxDistance === undefined && shortWord && normalized.length !== normalizedTrusted[i].length) continue;
     const limit = maxDistance ?? allowedTypoEdits(normalizedTrusted[i].length);
     const distance = typoDistance(normalized, normalizedTrusted[i]);
     if (distance > 0 && distance <= limit) {

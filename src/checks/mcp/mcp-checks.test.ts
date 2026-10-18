@@ -604,6 +604,19 @@ describe('MCP-007: Prompt Injection via Tool Results', () => {
 
 // ==================== MCP-008: Server Provenance ====================
 describe('MCP-008: Server Provenance', () => {
+  it('matches a malicious domain label only as a whole, distinctive name segment (dt16)', async () => {
+    const run = (packageName: string) => mcp008.run(makeContext({ mcpConfigs: secureConfigs, mcpServerSources: [{ serverName: 's', packageName }] }));
+    const domainHit = async (pkg: string) => ((await run(pkg)).evidence ?? []).some(e => e.detail?.includes('malicious domain'));
+    // giftshop.club (postmark-mcp exfiltration) — a package named after it is flagged
+    expect(await domainHit('giftshop-mcp')).toBe(true);
+    expect(await domainHit('@evil/giftshop')).toBe(true);
+    // the label inside another word is a different name
+    expect(await domainHit('mygiftshopper-mcp')).toBe(false);
+    // npm-cache.com / js-mirror.com: labels made of generic words name no publisher
+    expect(await domainHit('@acme/npm-cache-tools')).toBe(false);
+    expect(await domainHit('js-mirror')).toBe(false);
+  });
+
   it('detects typosquatting package names', async () => {
     const sources: MCPServerSource[] = [
       {

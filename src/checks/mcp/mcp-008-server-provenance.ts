@@ -48,6 +48,27 @@ function confirmedTyposquat(packageName: string, trusted: string[]): ReturnType<
   return match;
 }
 
+// Words a C2 domain label is often built from (npm-cache, js-mirror) — a label
+// made only of them names no publisher and matches ordinary packages
+const GENERIC_WORDS = new Set(['npm', 'js', 'node', 'cache', 'mirror', 'cdn', 'api', 'registry', 'proxy', 'update', 'updates',
+  'cloud', 'static', 'assets', 'pkg', 'package', 'packages', 'mcp', 'server', 'servers', 'web', 'app', 'apps', 'dev', 'docs', 'files']);
+
+function genericLabel(label: string): boolean {
+  return label.split('-').every(part => GENERIC_WORDS.has(part));
+}
+
+/** `label` as a whole name segment (between /, @, ., _, - or the ends), not inside a word. */
+function hasSegment(name: string, label: string): boolean {
+  let from = 0;
+  for (let i = name.indexOf(label, from); i >= 0; i = name.indexOf(label, from)) {
+    const before = i === 0 ? '' : name[i - 1];
+    const after = name[i + label.length] ?? '';
+    if (/^[/@._-]?$/.test(before) && /^[/@._-]?$/.test(after)) return true;
+    from = i + 1;
+  }
+  return false;
+}
+
 export const mcp008 = defineCheck({
   id: 'MCP-008',
   name: 'Server Provenance',
@@ -91,7 +112,7 @@ export const mcp008 = defineCheck({
         // campaign) substring-match unrelated legitimate packages like
         // @modelcontextprotocol/server-github.
         const domainBase = domain.split('.')[0];
-        if (domainBase.length >= 8 && normalizedPkg.includes(domainBase)) {
+        if (domainBase.length >= 8 && !genericLabel(domainBase) && hasSegment(normalizedPkg, domainBase)) {
           evidence.push({
             file: findConfigFile(mcpConfigs, source.serverName),
             snippet: `Server "${source.serverName}": package ${packageName}`,

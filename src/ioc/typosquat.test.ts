@@ -95,6 +95,16 @@ describe('detectTyposquatting — length-scaled tolerance (fewer dictionary-word
     expect(detectTyposquatting('githbu', ['github'])?.trustedName).toBe('github');
   });
 
+  it('against a short single word only a same-length typo is a lookalike (dt16)', () => {
+    // ATR whitelist carries language names: "iris" is a word, not a typo of "irish"
+    expect(detectTyposquatting('iris', ['irish'])).toBeNull();
+    expect(detectTyposquatting('dutc', ['dutch'])).toBeNull();
+    expect(detectTyposquatting('irisj', ['irish'])?.trustedName).toBe('irish');
+    expect(detectTyposquatting('githbu', ['github'])?.distance).toBe(1);
+    // separated / longer names keep the insertion/deletion tolerance
+    expect(detectTyposquatting('web-serch', ['web-search'])?.trustedName).toBe('web-search');
+  });
+
   it('requires an exact match for short names and allows 2 edits for long ones', () => {
     expect(detectTyposquatting('fsx', ['fs'])).toBeNull();
     expect(detectTyposquatting('mcp-server-gitub', ['mcp-server-github'])?.distance).toBe(1);
