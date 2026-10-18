@@ -126,12 +126,12 @@ describe('CFG-009 severity follows how far the gateway can be reached', () => {
 
 describe('CFG-001 with a host set only by an env override', () => {
   it('reports the variable and offers no file fix', async () => {
-    const fakeFs = { getEnv: (n: string) => (n === 'ZEROCLAW_GATEWAY_HOST' ? '0.0.0.0' : undefined) } as unknown as FSProvider;
-    const data = applyEnvOverrides({ gateway: { port: 42617 } }, [{ env: 'ZEROCLAW_GATEWAY_HOST', path: ['gateway', 'host'], type: 'string' }], fakeFs);
+    const fakeFs = { getEnv: (n: string) => (n === 'ZEROCLAW_gateway__host' ? '0.0.0.0' : undefined) } as unknown as FSProvider;
+    const data = applyEnvOverrides({ gateway: { port: 42617 } }, [{ env: 'ZEROCLAW_gateway__host', path: ['gateway', 'host'], type: 'string' }], fakeFs);
     const r = await cfg001.run(ctx('zeroclaw', [{ filePath: '/h/.zeroclaw/config.toml', format: 'toml', raw: '[gateway]\nport = 42617\n', data }]));
     expect(r.passed).toBe(false);
     expect(r.fixable).toBe(false);
-    expect(r.evidence?.[0].detail).toContain('ZEROCLAW_GATEWAY_HOST');
+    expect(r.evidence?.[0].detail).toContain('ZEROCLAW_gateway__host');
   });
 });
 

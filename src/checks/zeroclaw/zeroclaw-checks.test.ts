@@ -346,6 +346,16 @@ describe('risk-profile checks (ZC-005/006/014/015)', () => {
     expect(r.evidence![0].detail).toContain('contains the home directory');
   });
 
+  it('reads the flat ZEROCLAW_GATEWAY_* names only for releases before 0.8.0', () => {
+    const flat = (v?: string) => zeroclawEnvSpecs({}, v).map(sp => sp.env).filter(e => /^ZEROCLAW_(GATEWAY_|ALLOW_)/.test(e));
+    // 0.8.0 made ZEROCLAW_<path> the only override form; 0.8.5 ignores the flat names
+    expect(flat('0.8.5')).toEqual([]);
+    expect(flat(undefined)).toEqual([]);
+    expect(flat('0.7.2')).toEqual(['ZEROCLAW_GATEWAY_HOST', 'ZEROCLAW_GATEWAY_PORT', 'ZEROCLAW_ALLOW_PUBLIC_BIND']);
+    // The path form is always read
+    expect(zeroclawEnvSpecs({}, '0.8.5').map(sp => sp.env)).toContain('ZEROCLAW_gateway__host');
+  });
+
   it('notes an env override in evidence and in the fix message', async () => {
     const data = applyEnvOverrides({ risk_profiles: { p: { level: 'supervised' } } },
       zeroclawEnvSpecs({ risk_profiles: { p: {} } }),

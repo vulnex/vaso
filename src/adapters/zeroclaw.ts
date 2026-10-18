@@ -11,6 +11,7 @@ import { discoverCliInstalls } from './cli-installs.js';
 import { queryCliVersion } from './version-query.js';
 import { applyEnvOverrides, type EnvOverrideSpec, type EnvValueType } from './env-overrides.js';
 import { envPath } from './env-path.js';
+import { compareVersions } from '../core/semver.js';
 
 /**
  * ZeroClaw (zeroclaw-labs/zeroclaw, Rust) — V3 config schema (zeroclaw ≥ 0.8).
@@ -109,24 +110,32 @@ const ENV_AGENT_FIELDS: Array<[field: string, type: EnvValueType]> = [
   ['workspace.unrestricted_filesystem', 'bool'],
 ];
 
+/** The release that made `ZEROCLAW_<path>` the only env override form. */
+const ZEROCLAW_PATH_ENV_ONLY = '0.8.0';
+
 /**
  * Upstream env_overrides: `ZEROCLAW_<path>` overrides config.toml, with `__`
  * separating path segments (`ZEROCLAW_gateway__require_pairing=false`,
  * `ZEROCLAW_risk_profiles__default__level=full`). Variables can't be
  * enumerated through FSProvider, so the security-relevant scalar paths the
  * ZC checks read are probed by name — for every profile and agent alias the
- * file declares (plus `default`). The older flat gateway variables come first
- * so the path form wins.
+ * file declares (plus `default`). The older flat gateway variables
+ * (`ZEROCLAW_GATEWAY_HOST`, …) are read only for releases before 0.8.0,
+ * which made the path form the single override surface (0.8.5 ignores the
+ * flat names); they come first so the path form wins.
  */
-export function zeroclawEnvSpecs(data: Record<string, unknown>): EnvOverrideSpec[] {
+export function zeroclawEnvSpecs(data: Record<string, unknown>, version?: string): EnvOverrideSpec[] {
   const spec = (path: string, type: EnvValueType): EnvOverrideSpec => {
     const segments = path.split('.');
     return { env: `ZEROCLAW_${segments.join('__')}`, path: segments, type };
   };
+  const legacy = !!version && /^\d+\.\d+\.\d+/.test(version) && compareVersions(version, ZEROCLAW_PATH_ENV_ONLY) < 0;
   const out: EnvOverrideSpec[] = [
-    { env: 'ZEROCLAW_GATEWAY_HOST', path: ['gateway', 'host'], type: 'string' },
-    { env: 'ZEROCLAW_GATEWAY_PORT', path: ['gateway', 'port'], type: 'int' },
-    { env: 'ZEROCLAW_ALLOW_PUBLIC_BIND', path: ['gateway', 'allow_public_bind'], type: 'bool' },
+    ...(legacy ? [
+      { env: 'ZEROCLAW_GATEWAY_HOST', path: ['gateway', 'host'], type: 'string' as const },
+      { env: 'ZEROCLAW_GATEWAY_PORT', path: ['gateway', 'port'], type: 'int' as const },
+      { env: 'ZEROCLAW_ALLOW_PUBLIC_BIND', path: ['gateway', 'allow_public_bind'], type: 'bool' as const },
+    ] : []),
     ...ENV_SCALARS.map(([p, t]) => spec(p, t)),
   ];
   const profiles = new Set(['default', ...Object.keys(asRecord(data.risk_profiles) ?? {})]);
@@ -220,7 +229,7 @@ export const zeroclawAdapter: AgentAdapter = {
 
       const main = configFiles.find(c => c.filePath.endsWith('config.toml'));
       // The env describes the scanning user's daemon only (see zeroclawDirs).
-      if (main && home === fs.homedir()) main.data = applyEnvOverrides(main.data, zeroclawEnvSpecs(main.data), fs);
+      if (main && home === fs.homedir()) main.data = applyEnvOverrides(main.data, zeroclawEnvSpecs(main.data, installs.primary?.version), fs);
       const data = main?.data ?? {};
       const skillsDirs = await skillRoots(configDir, data, home, fs);
 
