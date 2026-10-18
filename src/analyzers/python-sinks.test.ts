@@ -77,6 +77,41 @@ describe('analyzePythonSinks', () => {
     expect(twin.filter((f) => f.kind === 'injection').map((f) => f.line)).toEqual([16]);
   });
 
+  it('a triple-quoted SQL string closed and reopened on one line ends its statement (zotero-mcp-server local_db.py before write.py, dt17)', () => {
+    // A package joined file by file: local_db.py's query (`IN (""" + p + """)`,
+    // closed by `""", (pattern, *ids))`) used to leave a bracket open, merging
+    // every later statement into it, so write.py's constants went unseen
+    const localDb = [
+      '// === zotero_mcp/local_db.py ===',
+      'def search(cursor, lib_placeholders, pattern, lib_ids):',
+      '    cursor.execute("""',
+      '        SELECT i.key FROM itemNotes n',
+      '        """',
+      '        + _join("ptitle", "title")',
+      '        + """',
+      '        WHERE n.note LIKE ?',
+      '        AND i.libraryID IN (""" + lib_placeholders + """)',
+      '        AND i.itemID NOT IN (SELECT itemID FROM deletedItems)',
+      '    """, (pattern, *lib_ids))',
+      '    return cursor',
+    ];
+    const write = [
+      '// === zotero_mcp/tools/write.py ===',
+      'import subprocess, sys',
+      '_SCRIPT = (',
+      '    "import sys\\n"',
+      '    "print(open(sys.argv[1]).read(4))\\n"',
+      ')',
+      '@mcp.tool()',
+      'def toc(pdf_path: str):',
+      '    return subprocess.run([sys.executable, "-c", _SCRIPT, str(pdf_path)])',
+    ];
+    expect(analyzePythonSinks([...localDb, ...write].join('\n')).filter((f) => f.kind === 'injection')).toEqual([]);
+    // true positive after the same file: tool input as the code
+    const tp = [...localDb, ...write.slice(0, -1), '    return subprocess.run([sys.executable, "-c", pdf_path])'];
+    expect(analyzePythonSinks(tp.join('\n')).filter((f) => f.kind === 'injection').map((f) => f.line)).toEqual([21]);
+  });
+
   it('still flags tool input as the `-c` code, in a list or spread over lines', () => {
     const tool = (body: string[]) => ['import subprocess, sys', '@mcp.tool()', 'def run(code: str, arg: str):', ...body].join('\n');
     const list = analyzePythonSinks(tool(['    subprocess.run([sys.executable, "-c", code, arg])']));

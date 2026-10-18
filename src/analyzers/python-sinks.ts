@@ -139,13 +139,19 @@ export function pythonStringLines(lines: string[]): Array<'doc' | 'data' | undef
   let inData: string | undefined;
   for (const text of lines) {
     const trimmed = text.trim();
+    // A joined package's next file (`// === pkg/x.py ===`) starts outside any string
+    if (FILE_MARKER.test(trimmed)) { inDoc = inData = undefined; out.push(undefined); continue; }
     if (inDoc) {
       out.push('doc');
       if (trimmed.includes(inDoc)) inDoc = undefined;
       continue;
     }
     if (inData) {
-      if (trimmed.includes(inData)) { inData = undefined; out.push(undefined); } else out.push('data');
+      // `""" + x + """` closes the string and opens the next one: a code
+      // line, still inside data after it
+      const delimiters = trimmed.split(inData).length - 1;
+      if (delimiters === 0) out.push('data');
+      else { out.push(undefined); if (delimiters % 2 === 1) inData = undefined; }
       continue;
     }
     const opener = /^[rRbBuUfF]*("""|''')/.exec(trimmed);
@@ -297,13 +303,26 @@ function aliasRewriter(code: string): (text: string) => string {
   };
 }
 
-/** Physical lines merged while a bracket is open, so a multi-line call is one statement. */
+/** The marker between files of a joined multi-file source. */
+const FILE_MARKER = /^\/\/ === .+ ===$/;
+
+/**
+ * Physical lines merged while a bracket is open, so a multi-line call is one
+ * statement. Brackets are counted outside strings, a triple-quoted string
+ * followed from its opening line to its closing one (`execute("""` …
+ * `""", (a, b))`: the body lines are dropped by `codeLines`, the closing line
+ * starts inside the string) — miscounting one let a single statement swallow
+ * the rest of a package. A file marker always starts a statement.
+ */
 export function statements(lines: CodeLine[]): Array<CodeLine & { last: number }> {
   const out: Array<CodeLine & { last: number }> = [];
   let current: (CodeLine & { last: number }) | undefined;
   let depth = 0;
+  let triple: string | undefined; // the open triple-quoted string's delimiter
   for (const l of lines) {
-    if (current && depth > 0) {
+    const marker = FILE_MARKER.test(l.text.trim());
+    if (marker) { depth = 0; triple = undefined; }
+    if (current && depth > 0 && !marker) {
       current.text += ' ' + l.text.trim();
       current.last = l.line;
     } else {
@@ -311,9 +330,28 @@ export function statements(lines: CodeLine[]): Array<CodeLine & { last: number }
       out.push(current);
       depth = 0;
     }
-    for (const c of mapStringLiterals(l.text, () => '')) {
+    const t = l.text;
+    let i = 0;
+    while (i < t.length) {
+      if (triple) {
+        const close = t.indexOf(triple, i);
+        if (close < 0) break;
+        i = close + 3;
+        triple = undefined;
+        continue;
+      }
+      const c = t[i];
+      if (c === '#') break;
+      if (c === '"' || c === "'") {
+        if (t.startsWith(c.repeat(3), i)) { triple = c.repeat(3); i += 3; continue; }
+        let j = i + 1;
+        while (j < t.length && t[j] !== c) j += t[j] === '\\' ? 2 : 1;
+        i = j + 1;
+        continue;
+      }
       if (c === '(' || c === '[' || c === '{') depth++;
       else if (c === ')' || c === ']' || c === '}') depth = Math.max(0, depth - 1);
+      i++;
     }
   }
   return out;
