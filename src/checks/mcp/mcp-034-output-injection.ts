@@ -2,7 +2,7 @@ import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { extractToolDefinitions } from '../../mcp/tool-baseline.js';
 import { analyzeText, decodeUnicodeEscapes, hiddenCharacters, isInvisibleConstant, isWeakDirective } from '../../mcp/injection-directives.js';
-import { pythonStringLines, stringLines } from '../../analyzers/string-literals.js';
+import { maskJsLiterals, pythonStringLines, stringLines } from '../../analyzers/string-literals.js';
 import type { StringLine } from '../../analyzers/string-literals.js';
 
 /**
@@ -121,21 +121,22 @@ export const mcp034 = defineCheck({
       // chars, whitespace lists, emoji regexes) that are not text.
       const python = source.language === 'python';
       const lines = source.sourceCode.split('\n');
+      // Minified bundles inline whole codepage tables (iconv-lite's
+      // windows-1255 has U+200E/U+200F, cp864 is a template literal running
+      // over a line break) on lines full of other code, so a line as a whole
+      // doesn't look like a table: each literal is judged, found by the
+      // parser (or a lexer for source it can't parse), never by pairing
+      // quotes on a line.
+      const masked = python ? undefined : maskJsLiterals(source.sourceCode, isCharacterTable).split('\n');
       const hiddenAt = new Map<number, string[]>();
       for (let i = 0; i < lines.length; i++) {
         // A line holding a tool description is judged string by string below:
         // the description belongs to MCP-024, a result string beside it doesn't
         if (!python && descriptionLines.has(i + 1)) continue;
-        const decoded = python ? decodeUnicodeEscapes(lines[i]) : lines[i];
+        const decoded = python ? decodeUnicodeEscapes(lines[i]) : (masked?.[i] ?? lines[i]);
         // A quoted constant naming one invisible character (`split('\u200b')`).
-        let text = decoded.replace(/(["'`])([^"'`]{1,8})\1/gu, (m, _q: string, body: string) => (isInvisibleConstant(body) ? '' : m));
+        const text = decoded.replace(/(["'`])([^"'`]{1,8})\1/gu, (m, _q: string, body: string) => (isInvisibleConstant(body) ? '' : m));
         if (isCharacterTable(text)) continue;
-        // Minified bundles inline whole codepage tables (iconv-lite's
-        // windows-1255 has U+200E/U+200F) on a line full of other code, so
-        // the line as a whole doesn't look like a table — judge each literal
-        if (!python) {
-          text = replaceQuoted(text, (m, body) => (isCharacterTable(body) ? '' : m));
-        }
         const invisible = hiddenCharacters(text);
         if (invisible.length === 0 || ownedByDescription(decoded.trim()) || ownedByDescription(foldWhitespace(decoded))) continue;
         hiddenAt.set(i + 1, invisible);
@@ -201,42 +202,6 @@ function isCharacterTable(line: string): boolean {
   // Tag characters and variation selectors spell text by themselves
   if (chars.some((c) => { const cp = c.codePointAt(0) ?? 0; return (cp >= 0xe0000 && cp <= 0xe01ef) || (cp >= 0xfe00 && cp <= 0xfe0f); })) return false;
   return new Set(chars).size / chars.length >= 0.6;
-}
-
-const LINE_TERMINATORS = new Set(['\n', '\r', '\u2028', '\u2029']);
-
-/**
- * `text.replace(/(["'`])((?:\\.|(?!\1)[^\\\n])*)\1/gu, fn)`, in one pass.
- * The regex retried an unterminated literal from every later quote of the
- * same kind (`"\"\"\"…`, 50 KB: 3 s); such a quote was inside the failed
- * literal as an escaped character, so from it the scan fails the same way.
- */
-function replaceQuoted(text: string, fn: (literal: string, body: string) => string): string {
-  let out = '';
-  let last = 0;
-  // per quote: starts before this index can't close
-  const dead: Record<string, number> = { '"': -1, "'": -1, '`': -1 };
-  for (let i = 0; i < text.length; i++) {
-    const q = text[i];
-    if ((q !== '"' && q !== "'" && q !== '`') || i < dead[q]) continue;
-    let j = i + 1;
-    let closed = false;
-    while (j < text.length) {
-      const c = text[j];
-      if (c === '\\') {
-        if (j + 1 < text.length && !LINE_TERMINATORS.has(text[j + 1])) { j += 2; continue; }
-        break;
-      }
-      if (c === q) { closed = true; break; }
-      if (c === '\n') break;
-      j++;
-    }
-    if (!closed) { dead[q] = j; continue; }
-    out += text.slice(last, i) + fn(text.slice(i, j + 1), text.slice(i + 1, j));
-    last = j + 1;
-    i = j;
-  }
-  return out + text.slice(last);
 }
 
 /** A line's text as it appears inside a description: trimmed, quotes and commas dropped. */
