@@ -2,7 +2,7 @@ import { basename, dirname, extname, join, relative, resolve } from 'node:path';
 import type { MCPDataFile, MCPServerEntry, MCPServerSource } from './types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
-import { packageExtractDir, resolveNpmPackageSource } from './package-fetcher.js';
+import { fetchNpmPackageSource, packageExtractDir, type PackageFetchResult } from './package-fetcher.js';
 import { collectServerDependencies } from './server-dependencies.js';
 import { parse as parseTOML } from 'smol-toml';
 
@@ -235,7 +235,7 @@ export interface ResolveSourcesOptions {
   resolvePackages?: boolean;
   cacheDir?: string;
   /** Injectable npm-spec → source resolver, for hermetic unit tests. */
-  npmFetcher?: (spec: string) => Promise<string | undefined>;
+  npmFetcher?: (spec: string) => Promise<string | undefined | PackageFetchResult>;
 }
 
 function isNpmCommand(cmd?: string): boolean {
@@ -274,12 +274,16 @@ export async function resolveServerSources(
     // Opt-in: resolve npm-packaged servers so their source feeds the AST/tool
     // checks. Download-only, never executed (see package-fetcher).
     let packageDir: string | undefined;
+    let resolveFailure: MCPServerSource['resolveFailure'];
     if (!sourceCode && packageName && options.resolvePackages && isNpmCommand(server.command)) {
       const fetcher =
         options.npmFetcher ??
-        ((spec: string) => resolveNpmPackageSource(spec, { cacheDir: options.cacheDir }));
-      sourceCode = await fetcher(packageName);
+        ((spec: string) => fetchNpmPackageSource(spec, { cacheDir: options.cacheDir }));
+      const fetched = await fetcher(packageName);
+      const result: PackageFetchResult = typeof fetched === 'object' ? fetched : { source: fetched };
+      sourceCode = result.source;
       if (sourceCode) packageDir = packageExtractDir(packageName, options.cacheDir);
+      else resolveFailure = result.failure ?? { reason: 'npm-failed' };
     }
 
     const source: MCPServerSource = {
@@ -287,6 +291,7 @@ export async function resolveServerSources(
       packageName,
       localPath,
       sourceCode,
+      ...(resolveFailure ? { resolveFailure } : {}),
     };
     if (sourceCode && sourceLanguage(server, localPath, sourceCode) === 'python') {
       source.language = 'python';

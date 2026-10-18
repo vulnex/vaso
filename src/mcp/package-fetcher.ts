@@ -75,11 +75,56 @@ export function packageExtractDir(spec: string, cacheDir: string = defaultPackag
   return join(cacheDir, sanitizeSpec(spec), 'package');
 }
 
+/**
+ * Why a package's source could not be resolved: `npm` (or `tar`) isn't on
+ * PATH, `npm pack` failed (unknown package, registry or network error — `code`
+ * is npm's error code when it printed one), timed out, or the package holds no
+ * JavaScript source to analyze.
+ */
+export type PackageFetchFailure =
+  | { reason: 'npm-not-found' | 'tar-not-found' | 'timeout' | 'no-source' | 'invalid-spec' }
+  | { reason: 'npm-failed'; code?: string };
+
+export interface PackageFetchResult {
+  source?: string;
+  failure?: PackageFetchFailure;
+}
+
+/** A failed command as a failure reason — never npm's own text, which can quote a registry URL with credentials. */
+function commandFailure(cmd: 'npm' | 'tar', err: unknown): PackageFetchFailure {
+  const e = err as { code?: unknown; killed?: boolean; signal?: unknown; stderr?: unknown } | undefined;
+  if (e?.code === 'ENOENT') return { reason: cmd === 'npm' ? 'npm-not-found' : 'tar-not-found' };
+  if (e?.killed || e?.signal === 'SIGTERM') return { reason: 'timeout' };
+  const code = /\bnpm (?:error|ERR!) code (E[A-Z0-9_]+)/.exec(String(e?.stderr ?? ''))?.[1];
+  return { reason: 'npm-failed', ...(code ? { code } : {}) };
+}
+
+/** A failure as a short phrase for messages: `npm not found on PATH`. */
+export function describeFetchFailure(failure: PackageFetchFailure): string {
+  switch (failure.reason) {
+    case 'npm-not-found': return 'npm not found on PATH';
+    case 'tar-not-found': return 'tar not found on PATH';
+    case 'timeout': return 'npm pack timed out';
+    case 'no-source': return 'the package has no JavaScript source';
+    case 'invalid-spec': return 'not a registry package name';
+    case 'npm-failed': return `npm pack failed${failure.code ? ` (${failure.code})` : ''}`;
+  }
+}
+
+/** The package's source, or undefined on any failure (see fetchNpmPackageSource for why). */
 export async function resolveNpmPackageSource(
   spec: string,
   options: PackageFetchOptions = {},
 ): Promise<string | undefined> {
-  if (!isRegistrySpec(spec)) return undefined;
+  return (await fetchNpmPackageSource(spec, options)).source;
+}
+
+/** resolveNpmPackageSource, saying why when there is no source. */
+export async function fetchNpmPackageSource(
+  spec: string,
+  options: PackageFetchOptions = {},
+): Promise<PackageFetchResult> {
+  if (!isRegistrySpec(spec)) return { failure: { reason: 'invalid-spec' } };
 
   const cacheDir = options.cacheDir ?? defaultPackageCacheDir();
   const runner = options.runner ?? defaultRunner;
@@ -90,27 +135,37 @@ export async function resolveNpmPackageSource(
 
   // Cache hit: a previous run already extracted this exact spec.
   const cached = await collectPackageSource(extractedDir);
-  if (cached) return cached;
+  if (cached) return { source: cached };
 
   try {
     await mkdir(pkgDir, { recursive: true });
 
     // 1) Download the tarball — no scripts, no deps, no execution.
-    const { stdout } = await runner(
-      'npm',
-      ['pack', spec, '--json', '--ignore-scripts', '--pack-destination', pkgDir],
-      { timeout },
-    );
+    let stdout: string;
+    try {
+      ({ stdout } = await runner(
+        'npm',
+        ['pack', spec, '--json', '--ignore-scripts', '--pack-destination', pkgDir],
+        { timeout },
+      ));
+    } catch (err) {
+      return { failure: commandFailure('npm', err) };
+    }
     const tarball = parsePackFilename(stdout);
-    if (!tarball) return undefined;
+    if (!tarball) return { failure: { reason: 'npm-failed' } };
 
     // 2) Extract locally with the system tar — still no execution.
-    await runner('tar', ['-xzf', join(pkgDir, tarball), '-C', pkgDir], { timeout });
+    try {
+      await runner('tar', ['-xzf', join(pkgDir, tarball), '-C', pkgDir], { timeout });
+    } catch (err) {
+      return { failure: commandFailure('tar', err) };
+    }
 
     // 3) Collect the package's JS source.
-    return collectPackageSource(extractedDir);
+    const source = await collectPackageSource(extractedDir);
+    return source ? { source } : { failure: { reason: 'no-source' } };
   } catch {
-    return undefined;
+    return { failure: { reason: 'npm-failed' } };
   }
 }
 

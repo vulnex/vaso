@@ -11,7 +11,8 @@ import { auditDependencies } from '../mcp/osv-audit.js';
 import type { ScanOptions } from '../core/types.js';
 import { logError } from '../core/debug.js';
 import { maskCredentialsDeep, toReportJson } from '../reporting/serialize.js';
-import { EXIT_FINDINGS, EXIT_INCOMPLETE, EXIT_USAGE, parseFailOn, shouldFailScan } from '../core/exit-criteria.js';
+import { EXIT_FINDINGS, EXIT_INCOMPLETE, EXIT_USAGE, incompleteResults, parseFailOn, shouldFailScan } from '../core/exit-criteria.js';
+import { describeFetchFailure } from '../mcp/package-fetcher.js';
 import type { MCPDiscoveryResult } from '../mcp/types.js';
 
 /** Paths named with -p must exist and parse; otherwise nothing would be scanned silently. */
@@ -91,6 +92,20 @@ export async function runMCPScan(options: MCPScanCommandOptions): Promise<void> 
       const resolved = serverSources.filter(s => s.packageName && s.sourceCode).length;
       const packaged = serverSources.filter(s => s.packageName && !s.localPath).length;
       console.error(chalk.dim(`Resolved source for ${resolved}/${packaged} packaged server(s) (npm only; uvx/PyPI not analyzed).`));
+      // Say why the rest weren't: no npm on PATH reads like "nothing to fetch" otherwise
+      const why = new Map<string, number>();
+      for (const s of serverSources) {
+        if (!s.resolveFailure || s.sourceCode) continue;
+        const reason = describeFetchFailure(s.resolveFailure);
+        why.set(reason, (why.get(reason) ?? 0) + 1);
+      }
+      if (why.size > 0) {
+        const list = [...why].map(([reason, n]) => `${reason} (${n})`).join(', ');
+        const hint = serverSources.some(s => s.resolveFailure?.reason === 'npm-not-found')
+          ? ' — install Node.js/npm or put npm on PATH to analyze them'
+          : '';
+        console.error(chalk.yellow(`Could not download packaged server source: ${list}${hint}. Their code was not analyzed.`));
+      }
     }
 
     const allSources = [...serverSources, ...direct.sources];
@@ -123,7 +138,7 @@ export async function runMCPScan(options: MCPScanCommandOptions): Promise<void> 
       console.log(output);
     }
 
-    if (direct.unreadable.length > 0) {
+    if (direct.unreadable.length > 0 || incompleteResults(result.agents.flatMap(a => a.results)).length > 0) {
       process.exitCode = EXIT_INCOMPLETE;
     } else if (shouldFailScan(result.agents.flatMap(a => a.results), failOn)) {
       process.exitCode = EXIT_FINDINGS;

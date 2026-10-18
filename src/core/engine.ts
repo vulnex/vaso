@@ -11,6 +11,7 @@ import { dedupeInheritedFindings } from './inherited-findings.js';
 import { dedupePermissionFindings } from './duplicate-findings.js';
 import { getAllSkillsDirs, getSkillFiles } from './utils.js';
 import { mapSourceEvidence } from '../mcp/source-locations.js';
+import { describeFetchFailure } from '../mcp/package-fetcher.js';
 import { extractToolDefinitions } from '../mcp/tool-baseline.js';
 import { credentialPathsFor } from '../adapters/adapter.js';
 
@@ -57,6 +58,31 @@ function erroredResult(check: Pick<CheckModule, 'id' | 'name' | 'category'>, rea
     passed: false,
     errored: true,
     message: `Check errored and was not completed: ${reason instanceof Error ? reason.message : String(reason)}`,
+  };
+}
+
+/**
+ * `--resolve-packages` servers whose source could not be downloaded, as one
+ * errored result: the source checks never saw them, so the scan is
+ * incomplete — and why (`npm not found on PATH`) is in the report, not only
+ * on stderr. Info severity: the host is not worse for it.
+ */
+export function packageResolveResult(sources: readonly MCPServerSource[]): CheckResult | undefined {
+  const failed = sources.filter((s) => s.resolveFailure && !s.sourceCode);
+  if (failed.length === 0) return undefined;
+  const reasons = [...new Set(failed.map((s) => describeFetchFailure(s.resolveFailure!)))];
+  return {
+    id: 'PACKAGE-RESOLVE',
+    name: 'Package Source Resolution',
+    category: 'mcp',
+    severity: 'info',
+    passed: false,
+    errored: true,
+    message: `Source of ${failed.length} packaged server(s) could not be downloaded (${reasons.join('; ')}) — their code was not analyzed; findings may be missing`,
+    evidence: failed.map((s) => ({
+      file: s.packageName ?? s.serverName,
+      detail: `Server "${s.serverName}": ${describeFetchFailure(s.resolveFailure!)}`,
+    })),
   };
 }
 
@@ -291,6 +317,9 @@ export class ScanEngine {
 
     // Evidence lines in a multi-file server's joined source → file + line
     mapSourceEvidence(results, sourcesWithTools);
+
+    const unresolved = packageResolveResult(serverSources);
+    if (unresolved) results.push(unresolved);
 
     const score = computeScore(results);
 

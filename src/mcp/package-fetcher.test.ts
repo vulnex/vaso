@@ -3,6 +3,8 @@ import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
+  describeFetchFailure,
+  fetchNpmPackageSource,
   resolveNpmPackageSource,
   parsePackFilename,
   isRegistrySpec,
@@ -150,5 +152,27 @@ describe('resolveNpmPackageSource', () => {
     };
     const result = await resolveNpmPackageSource('mypkg', { cacheDir, runner });
     expect(result).toBeUndefined();
+  });
+
+  it('says why: npm or tar missing, npm error code, timeout, nothing to analyze', async () => {
+    const failing = (cmd: string, err: object): CommandRunner => async (c) => {
+      if (c === cmd) throw Object.assign(new Error('x'), err);
+      return { stdout: JSON.stringify([{ filename: 'mypkg-1.0.0.tgz' }]), stderr: '' };
+    };
+    const npmMissing = await fetchNpmPackageSource('mypkg', { cacheDir, runner: failing('npm', { code: 'ENOENT', syscall: 'spawn npm' }) });
+    expect(npmMissing).toEqual({ failure: { reason: 'npm-not-found' } });
+    expect(describeFetchFailure(npmMissing.failure!)).toBe('npm not found on PATH');
+    expect((await fetchNpmPackageSource('mypkg', { cacheDir, runner: failing('tar', { code: 'ENOENT' }) })).failure)
+      .toEqual({ reason: 'tar-not-found' });
+    // npm's error code, never its message (it can quote a registry URL with credentials)
+    const e404 = await fetchNpmPackageSource('mypkg', { cacheDir, runner: failing('npm', { code: 1, stderr: 'npm error code E404\nnpm error 404 Not Found - GET https://u:p@registry.example/mypkg' }) });
+    expect(e404.failure).toEqual({ reason: 'npm-failed', code: 'E404' });
+    expect(describeFetchFailure(e404.failure!)).toBe('npm pack failed (E404)');
+    expect((await fetchNpmPackageSource('mypkg', { cacheDir, runner: failing('npm', { killed: true, signal: 'SIGTERM' }) })).failure)
+      .toEqual({ reason: 'timeout' });
+    // extracted, but no JavaScript entry
+    const empty: CommandRunner = async () => ({ stdout: JSON.stringify([{ filename: 'mypkg-1.0.0.tgz' }]), stderr: '' });
+    expect((await fetchNpmPackageSource('mypkg', { cacheDir, runner: empty })).failure).toEqual({ reason: 'no-source' });
+    expect((await fetchNpmPackageSource('git+https://evil/x.git', { cacheDir, runner: empty })).failure).toEqual({ reason: 'invalid-spec' });
   });
 });

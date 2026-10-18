@@ -1,4 +1,5 @@
 import type { ServerDependency } from './server-dependencies.js';
+import type { PackageFetchFailure } from './package-fetcher.js';
 
 export interface MCPServerEntry {
   name: string;
@@ -43,6 +44,8 @@ export interface MCPServerSource {
    * files). Returned to the model as tool output, so MCP-034 reads them too.
    */
   dataFiles?: MCPDataFile[];
+  /** `--resolve-packages`: why the package's source could not be downloaded (no source then). */
+  resolveFailure?: PackageFetchFailure;
   /** Packages the server ships with (its manifest/lockfile/installed copies), for MCP-027. */
   dependencies?: ServerDependency[];
   /**

@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { inferPackageName, resolveLocalPath, resolveServerSources, resolveSourcePaths, runnerName } from './source-resolver.js';
 import type { MCPServerEntry } from './types.js';
+import { packageResolveResult } from '../core/engine.js';
 
 function makeServer(overrides?: Partial<MCPServerEntry>): MCPServerEntry {
   return {
@@ -138,6 +139,21 @@ describe('resolveServerSources', () => {
       const sources = await resolveServerSources(servers, { resolvePackages: true, npmFetcher });
       expect(npmFetcher).toHaveBeenCalledWith('@mcp/server-fs');
       expect(sources[0].sourceCode).toBe('RESOLVED SOURCE');
+    });
+
+    it('records why a package could not be resolved, and the engine reports it', async () => {
+      const npmFetcher = vi.fn(async () => ({ failure: { reason: 'npm-not-found' as const } }));
+      const servers = [makeServer({ name: 'gh', command: 'npx', args: ['-y', '@mcp/server-github'] })];
+      const sources = await resolveServerSources(servers, { resolvePackages: true, npmFetcher });
+      expect(sources[0].sourceCode).toBeUndefined();
+      expect(sources[0].resolveFailure).toEqual({ reason: 'npm-not-found' });
+      const result = packageResolveResult(sources);
+      expect(result).toMatchObject({ id: 'PACKAGE-RESOLVE', errored: true, passed: false, severity: 'info' });
+      expect(result!.message).toContain('npm not found on PATH');
+      expect(result!.evidence![0].detail).toBe('Server "gh": npm not found on PATH');
+      // nothing to report when every package resolved, or none was asked for
+      expect(packageResolveResult(await resolveServerSources(servers, { resolvePackages: true, npmFetcher: async () => 'SRC' }))).toBeUndefined();
+      expect(packageResolveResult(await resolveServerSources(servers, { npmFetcher }))).toBeUndefined();
     });
 
     it('does not resolve uvx/PyPI packages (analyzers are JS-only)', async () => {
