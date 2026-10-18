@@ -449,7 +449,7 @@ Server-only checks (gateway/network/runtime concepts, mostly in CFG, NET, RUN, a
 
 ## Supported Agents
 
-VASO ships twenty-five adapters. Each implements `detect()`, `getConfigPaths()`, `getSkillsDir()`, and `getGatewayInfo()` against its framework's on-disk layout.
+VASO ships twenty-six adapters. Each implements `detect()`, `getConfigPaths()`, `getSkillsDir()`, and `getGatewayInfo()` against its framework's on-disk layout.
 
 ### Autonomous frameworks
 

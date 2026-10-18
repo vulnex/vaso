@@ -150,7 +150,7 @@ src/
     probe.ts                vaso probe manifest/validate handler
   visualizations/           USecVisLib config emitters (attack-tree, privilege-gradient, component)
   user-plugins/             Drop-in loader for ~/.vaso/plugins/*.{js,mjs}
-  rules/                    Declarative YAML rules engine scaffolding (WIP — design only, not yet implemented)
+  rules/                    Declarative YAML rules engine (vaso rules; --rules, ~/.vaso/rules, .vaso/rules)
   transport/                SSH multi-host orchestrator (worker pool + retries)
 ```
 

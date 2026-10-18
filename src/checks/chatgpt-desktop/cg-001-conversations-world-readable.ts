@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { queryPermissions } from '../../core/permissions.js';
+import { markUnreachable, queryPermissions } from '../../core/permissions.js';
 import { CHATGPT_WORKSPACE_DIR_PREFIXES } from '../../adapters/chatgpt-desktop.js';
 
 const SCAN_DIR_PREFIXES = CHATGPT_WORKSPACE_DIR_PREFIXES;
@@ -49,8 +49,9 @@ export const cg001 = defineCheck({
           // Other-readable bit set => any local user (or backup target) can list/read
           if (perms !== 'unsupported' && perms.worldRead) {
             evidence.push({
-              file: subDir,
-              snippet: `${f.name} (mode ${perms.octal})`,
+              // The sampled file: its mode and its parents decide who can read it
+              file: fullPath,
+              snippet: `${entry.name}/${f.name} (mode ${perms.octal})`,
               detail: 'Workspace artifact is other-readable — even when encrypted, filenames/sizes/count leak to local processes and backups',
             });
             break;
@@ -60,6 +61,8 @@ export const cg001 = defineCheck({
       }
     }
 
+    // ~/Library is 0700 by default on macOS: then nobody else reaches the files
+    await markUnreachable(ctx.fs, evidence);
     return h.fromEvidence(evidence, {
       passed: 'ChatGPT workspace data files are not other-readable',
       failed: (n) => `Found ${n} workspace director(ies) with other-readable artifacts`,

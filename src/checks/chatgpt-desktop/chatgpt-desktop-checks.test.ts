@@ -76,6 +76,20 @@ describe('CG-001: Workspace Data Files World-Readable', () => {
     expect(result.passed).toBe(false);
   });
 
+  it('is info when ~/Library (0700) keeps other users out, warning when every parent is open (dt15 CB6)', async () => {
+    const entries = vi.fn(async (path: string) => (path.endsWith('com.openai.chat')
+      ? [{ name: 'conversations-v3-abc', isDirectory: true, isFile: false }]
+      : [{ name: 'conv1.data', isFile: true, isDirectory: false }])) as FSProvider['readdirEntries'];
+    const modes = (library: number) => vi.fn(async (p: string) => ({
+      mode: p.endsWith('.data') ? 0o644 : p.endsWith('/Library') ? library : 0o755,
+      isFile: () => p.endsWith('.data'), isDirectory: () => !p.endsWith('.data'),
+    }));
+    const blocked = await check.run(makeCtx([], makeFs({ readdirEntries: entries, stat: modes(0o700) })));
+    expect(blocked).toMatchObject({ passed: false, severity: 'info' });
+    const open = await check.run(makeCtx([], makeFs({ readdirEntries: entries, stat: modes(0o755) })));
+    expect(open).toMatchObject({ passed: false, severity: 'warning' });
+  });
+
   it('passes when conversation .data files are mode 600', async () => {
     const fs = makeFs({
       readdirEntries: vi.fn(async (path: string) => {
