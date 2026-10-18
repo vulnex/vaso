@@ -41,6 +41,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - **Gemini CLI and Qwen Code project settings in an untrusted folder are reported as inactive.** With folder trust on (Gemini's default; Qwen's when `security.folderTrust.enabled` is set), the CLI ignores a workspace's `.gemini/` / `.qwen/` settings until the folder is trusted in `trustedFolders.json`, so GEM-003–009 and QC-003–009 findings from an untrusted folder drop to info, saying the folder isn't trusted. `GEMINI_CLI_TRUST_WORKSPACE`, `GEMINI_RESTRICTED_MODE`, a `security.folderTrust.enabled: false` in user or system settings and `QWEN_CODE_TRUSTED_FOLDERS_PATH` are honoured. A plaintext key in those files is still reported at full severity.
 - **GEM-004 no longer reports `security.disableYoloMode: false` as critical** — it is the default. It stays critical when a workspace's settings turn off a guard the user set to `true`, and is info otherwise.
 - Qwen Code's system settings files are no longer taken for the `qwen` binary (and run with `--version`).
+- **`vaso mcp` follows `QWEN_HOME`** and reads Copilot CLI's project `.github/mcp.json`.
 
 ## [1.3.1] - 2026-10-16
 

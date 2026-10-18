@@ -410,6 +410,16 @@ describe('MCPDiscovery — Abacus.AI', () => {
       expect(atHome.configs.filter(c => c.filePath.endsWith(join('.cursor', 'mcp.json')))).toHaveLength(1);
     });
 
+    it('follows QWEN_HOME and reads Copilot\'s .github/mcp.json', async () => {
+      await w('qh/settings.json', JSON.stringify({ mcpServers: { relocated: { command: 'node' } } }));
+      await w('proj/.github/mcp.json', JSON.stringify({ mcpServers: { gh: { command: 'npx', args: ['-y', 'gh-mcp'] } } }));
+      class QwenHomeFS extends HomeFS { getEnv(k: string) { return k === 'QWEN_HOME' ? join(home, 'qh') : undefined; } }
+      const result = await new MCPDiscovery(new QwenHomeFS()).discover('linux', join(home, 'proj'));
+      const bySource = Object.fromEntries(result.configs.map(c => [c.source, c.servers.map(s => s.name)]));
+      expect(bySource['Qwen Code']).toEqual(['relocated']);
+      expect(bySource['Copilot CLI (project)']).toEqual(['gh']);
+    });
+
     it('-p: reads the Abacus config.json array, YAML, and names files with no servers', async () => {
       await w('abacus.json', JSON.stringify({ mcpServers: [{ name: 'ab', command: 'node' }] }));
       await w('none.json', JSON.stringify({ theme: 'dark' }));

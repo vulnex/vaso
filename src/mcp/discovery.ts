@@ -8,6 +8,7 @@ import { claudeConfigPaths } from '../adapters/claude-code.js';
 import { codexHome } from '../adapters/codex.js';
 import { copilotHome } from '../adapters/copilot-cli.js';
 import { geminiHome } from '../adapters/gemini.js';
+import { qwenHome } from '../adapters/qwen-code.js';
 import { xdgConfigDir as opencodeConfigDir } from '../adapters/opencode.js';
 import { parseYamlSafe } from '../core/yaml-safe.js';
 import type { Platform } from '../core/types.js';
@@ -58,7 +59,7 @@ function getGlobalConfigLocations(platform: Platform, home: string, fs: FSProvid
   // Gemini CLI / Qwen Code: `mcpServers` in settings.json (JSONC)
   locations.push(
     { source: 'Gemini CLI', path: join(geminiHome(home, fs), 'settings.json') },
-    { source: 'Qwen Code', path: join(home, '.qwen', 'settings.json') },
+    { source: 'Qwen Code', path: join(qwenHome(home, fs), 'settings.json') },
   );
 
   // Cursor
@@ -159,6 +160,8 @@ function getProjectConfigLocations(projectDir: string): ConfigLocation[] {
     { source: 'Devin CLI (project config.local.json)', path: join(projectDir, '.devin', 'config.local.json') },
     { source: 'Gemini CLI (project)', path: join(projectDir, '.gemini', 'settings.json') },
     { source: 'Qwen Code (project)', path: join(projectDir, '.qwen', 'settings.json') },
+    // Copilot CLI reads a repo's .mcp.json (above) and .github/mcp.json
+    { source: 'Copilot CLI (project)', path: join(projectDir, '.github', 'mcp.json') },
     { source: 'OpenCode (project)', path: join(projectDir, 'opencode.json'), shape: 'opencode' },
     { source: 'OpenCode (project)', path: join(projectDir, 'opencode.jsonc'), shape: 'opencode' },
     { source: 'Abacus.AI (project)', path: join(projectDir, '.abacusai', 'mcp.json'), shape: 'abacus' },
