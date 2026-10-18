@@ -62,6 +62,18 @@ describe('hookCommandRisks', () => {
     const start = Date.now();
     expect(tier(huge)).toBe('critical');
     expect(Date.now() - start).toBeLessThan(1_000);
+    // unterminated quoted -c scripts, one per statement
+    const quoted = 'sh -c "a;'.repeat(120_000);
+    const t2 = Date.now();
+    tier(quoted);
+    expect(Date.now() - t2).toBeLessThan(1_000);
+  });
+
+  it('reads a double-quoted sh -c / eval argument past the separators inside it', () => {
+    expect(tier('bash -c "cd /tmp && $(jq -r .command)"')).toBe('warning');
+    expect(tier('eval "cd /tmp; $CMD"')).toBe('warning');
+    expect(tier('bash -c "cd /tmp && make check"')).toBeUndefined();
+    expect(tier('bash -c "cd /tmp" && echo "$X"')).toBeUndefined();
   });
 
   it('stays linear on long repository-supplied text', () => {

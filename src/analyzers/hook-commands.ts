@@ -34,22 +34,50 @@ const DYNAMIC_EXPANSION = hookExpansion();
  * single-quoted `bash -c '…'` script is constant — its own contents are
  * judged by the other patterns — and `docker compose exec` / `npm exec` are
  * not the shell builtin. `expansion` says which expansions count (Claude Code
- * passes one that skips its path placeholders).
+ * passes one that skips its path placeholders). A double-quoted argument is
+ * read to its closing quote, past the separators inside it
+ * (`bash -c "cd $DIR && $(jq -r .cmd)"`).
  */
 export function evaluatesDynamicText(cmd: string, expansion: RegExp = DYNAMIC_EXPANSION): boolean {
-  for (const raw of cmd.split(/;|&&|\|\||\||\n/)) {
+  const separator = /;|&&|\|\||\||\n/g;
+  let start = 0;
+  // quoted spans read past their segment, at most 1 MiB in all (stays linear)
+  let budget = 1 << 20;
+  for (;;) {
+    const sep = separator.exec(cmd);
+    const end = sep ? sep.index : cmd.length;
+    const raw = cmd.slice(start, end);
     // drop sudo / env / VAR=value prefixes to reach the command word
     const seg = raw.trim().replace(/^(?:(?:sudo|env|command|nohup)(?:\s+-\S+)*\s+|[A-Za-z_][A-Za-z0-9_]*=\S*\s+)+/, '');
     const word = /^(\S+)\s*(.*)$/s.exec(seg);
-    if (!word) continue;
-    const [, head, rest] = word;
-    if ((head === 'eval' || head === 'exec') && expansion.test(rest)) return true;
-    if (/^(?:\S*\/)?(?:ba|z|da|k|mk)?sh$/.test(head)) {
-      const c = /(?:^|\s)-[a-zA-Z]*c[a-zA-Z]*\s+(.*)$/s.exec(rest);
-      if (c && !c[1].startsWith("'") && expansion.test(c[1])) return true;
+    if (word) {
+      const [, head, rest] = word;
+      // the argument text, a double-quoted one through its closing quote
+      const argument = (text: string): string => {
+        if (!text.startsWith('"') || budget <= 0) return text;
+        const span = quotedSpan(cmd, start + raw.lastIndexOf(text));
+        budget -= span.length;
+        return span;
+      };
+      if ((head === 'eval' || head === 'exec') && expansion.test(argument(rest))) return true;
+      if (/^(?:\S*\/)?(?:ba|z|da|k|mk)?sh$/.test(head)) {
+        const c = /(?:^|\s)-[a-zA-Z]*c[a-zA-Z]*\s+(.*)$/s.exec(rest);
+        if (c && !c[1].startsWith("'") && expansion.test(argument(c[1]))) return true;
+      }
     }
+    if (!sep) return false;
+    start = end + sep[0].length;
   }
-  return false;
+}
+
+/** The double-quoted string starting at `at` (the opening quote), through its closing quote; at most 16 KiB. */
+function quotedSpan(text: string, at: number): string {
+  const limit = Math.min(text.length, at + 16_384);
+  for (let i = at + 1; i < limit; i++) {
+    if (text[i] === '\\') i++;
+    else if (text[i] === '"') return text.slice(at, i + 1);
+  }
+  return text.slice(at, limit);
 }
 
 // `curl … | bash`, `jq -r .tool_input.command | sh`: whatever arrives on the
@@ -164,7 +192,8 @@ export function hookCommandRisks(script: string, opts: { expansion?: RegExp } = 
     break;
   }
 
-  if (statements.some(stmt => evaluatesDynamicText(stmt, opts.expansion))) {
+  // read on the whole script: a quoted `sh -c "…"` argument spans separators
+  if (evaluatesDynamicText(script, opts.expansion)) {
     risks.push({ tier: 'warning', reason: 're-evaluates expanded text (eval/exec or an outer-quoted sh -c script) — hook input becomes code' });
   } else if (fetchExec.length === 0 && statements.some(stmt => PIPE_TO_SHELL_PATTERN.test(stmt))) {
     risks.push({ tier: 'warning', reason: 'pipes data into a shell — hook input or command output runs as a script' });

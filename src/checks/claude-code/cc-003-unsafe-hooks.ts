@@ -1,7 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { shellCommandWrapper } from '../../mcp/shell-wrapper.js';
-import { evaluatesDynamicText, PIPE_TO_SHELL_PATTERN } from '../../analyzers/hook-commands.js';
+import { hookCommandRisks, hookExpansion, topTier } from '../../analyzers/hook-commands.js';
 
 // ${CLAUDE_PROJECT_DIR} / ${CLAUDE_PLUGIN_ROOT} / ${CLAUDE_PLUGIN_DATA} are
 // path placeholders the hooks docs use unquoted in their own examples
@@ -13,7 +13,7 @@ const UNQUOTED_VAR_PATTERN = new RegExp(
 );
 const COMMAND_SUBSTITUTION_PATTERN = /\$\([^)]*\$[A-Z]/;
 /** A `$` expansion or backtick substitution, other than Claude's path placeholders and plain $HOME. */
-const DYNAMIC_EXPANSION = new RegExp(`\`|\\$(?!\\{?(?:${PATH_PLACEHOLDERS}|HOME\\b))[({A-Za-z_@*0-9]`);
+const DYNAMIC_EXPANSION = hookExpansion(['CLAUDE_PROJECT_DIR', 'CLAUDE_PLUGIN_ROOT', 'CLAUDE_PLUGIN_DATA', 'CLAUDE_ENV_FILE']);
 
 interface HookSpec {
   type?: string;
@@ -46,11 +46,12 @@ export const cc003 = defineCheck({
   name: 'Unsafe Hook Commands',
   category: 'coding-agent',
   severity: 'warning',
-  description: 'Detect Claude Code hooks that exec untrusted shell input without quoting',
+  description: 'Detect Claude Code hooks that download and execute code, send credentials or hook input over the network, re-evaluate input as code, or exec untrusted shell input without quoting',
   supportedAgents: ['claude-code'],
 
   async run(ctx, h) {
     const evidence: Evidence[] = [];
+    let critical = false;
 
     for (const config of ctx.configs) {
       const hooks = config.data.hooks as Record<string, unknown> | undefined;
@@ -65,27 +66,29 @@ export const cc003 = defineCheck({
             const cmd = shellScript(hook);
             if (typeof cmd !== 'string') continue;
 
-            const reasons: string[] = [];
+            // The download/exfiltration/eval tiers are shared with CUR-015
+            // and WS-009 (same model: a shell runs `command` with the event
+            // JSON on stdin), so one command gets one tier on every agent;
+            // the quoting reasons below are Claude Code's own (warning).
+            const risks = hookCommandRisks(cmd, { expansion: DYNAMIC_EXPANSION });
+            const reasons = risks.map(r => r.reason);
+            let tier = topTier(risks);
             if (UNQUOTED_VAR_PATTERN.test(cmd)) {
               reasons.push('uses unquoted $-variables that could expand into a shell injection');
+              if (tier !== 'critical') tier = 'warning';
             }
             if (COMMAND_SUBSTITUTION_PATTERN.test(cmd)) {
               reasons.push('embeds variables inside command substitution');
+              if (tier !== 'critical') tier = 'warning';
             }
-            if (evaluatesDynamicText(cmd, DYNAMIC_EXPANSION)) {
-              reasons.push('re-evaluates expanded text (eval/exec or an outer-quoted sh -c script) — data becomes code');
-            }
-            if (PIPE_TO_SHELL_PATTERN.test(cmd)) {
-              reasons.push('pipes data into a shell — downloaded or hook-input text runs as a script');
-            }
-
-            if (reasons.length > 0) {
-              evidence.push({
-                file: config.filePath,
-                snippet: `${event}${entry.matcher ? `(${entry.matcher})` : ''}: ${cmd.slice(0, 120)}`,
-                detail: reasons.join('; '),
-              });
-            }
+            if (!tier) continue;
+            if (tier === 'critical') critical = true;
+            evidence.push({
+              file: config.filePath,
+              snippet: `${event}${entry.matcher ? `(${entry.matcher})` : ''}: ${cmd.slice(0, 120)}`,
+              detail: `Hook command ${reasons.join('; ')}`,
+              ...(tier === 'info' ? { mitigated: true } : {}),
+            });
           }
         }
       }
@@ -93,8 +96,9 @@ export const cc003 = defineCheck({
 
     return h.fromEvidence(evidence, {
       passed: 'No unsafe hook commands detected',
-      failed: (n) => `Found ${n} hook command(s) that may execute untrusted input`,
-      fixDescription: 'Quote $-variables ("$VAR"), avoid eval/sh -c and piping into a shell, or use exec form (`args`) so no shell runs',
+      failed: (n) => `Found ${n} hook command(s) that download code, send data out or may execute untrusted input`,
+      severity: critical ? 'critical' : 'warning',
+      fixDescription: 'Remove hooks you did not add yourself (a project .claude/settings.json arrives with the repo); run vendored, reviewed scripts instead of downloads, send audit data only to endpoints you control over https, quote $-variables ("$VAR"), and avoid eval/sh -c and piping into a shell — or use exec form (`args`) so no shell runs',
     });
   },
 });
