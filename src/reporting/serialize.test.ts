@@ -206,3 +206,16 @@ describe('masking cost (dt15 P2/P8)', () => {
     expect(maskCredentialsInText('x-request-id: 1234abcd')).toContain('1234abcd');
   });
 });
+
+describe('masking: no token tail stays readable (dt16)', () => {
+  it('masks every segment of a Slack token and the tail of a longer token', async () => {
+    const { maskCredentialsInText } = await import('./serialize.js');
+    const slack = 'xoxb-1234567890-0987654321-Q7rT2mZ9kLp4SLK8tail';
+    const out = maskCredentialsInText(`node srv.js ${slack} --verbose`);
+    expect(out).not.toContain('Q7rT2mZ9kLp4SLK8tail');
+    expect(out).not.toContain('0987654321');
+    expect(out).toBe('node srv.js *** --verbose');
+    const long = `ghp_${'A1b2C3d4E5'.repeat(4)}`;
+    expect(maskCredentialsInText(`token ${long}.`)).toBe('token ***.');
+  });
+});

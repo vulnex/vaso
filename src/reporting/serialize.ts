@@ -51,8 +51,11 @@ export function isSecretName(name: string): boolean {
  * they stand — a bare argv element or value has no name to go by. Patterns
  * that only match a `NAME=value` assignment are left to SECRET_ASSIGN.
  */
+// Each match runs on over the token's remaining characters: a pattern that
+// stops early (a fixed-length or first-segments match) must not leave the
+// secret's tail readable
 const BARE_TOKEN = new RegExp(
-  API_KEY_PATTERNS.filter(p => !/assignment/i.test(p.name)).map(p => `(?:${p.pattern.source})`).join('|'),
+  `(?:${API_KEY_PATTERNS.filter(p => !/assignment/i.test(p.name)).map(p => `(?:${p.pattern.source})`).join('|')})[A-Za-z0-9_-]*`,
   'g',
 );
 /** Cheap pre-check: text with none of these can't hold a bare token. */
