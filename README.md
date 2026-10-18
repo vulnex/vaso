@@ -21,7 +21,7 @@ VASO is distributed from GitHub. The npm name `vaso` is held by an unrelated pac
 curl -fsSL https://raw.githubusercontent.com/vulnex/vaso/main/install.sh | bash
 
 # Or install the prebuilt release tarball directly with npm
-npm install -g https://github.com/vulnex/vaso/releases/download/v1.3.1/vaso-1.3.1.tgz
+curl -fsSLo /tmp/vaso.tgz https://github.com/vulnex/vaso/releases/download/v1.3.1/vaso-1.3.1.tgz && npm install -g /tmp/vaso.tgz
 
 # npm 12 refuses tarball URLs by default (allow-remote=none): download it first
 curl -fLO https://github.com/vulnex/vaso/releases/download/v1.3.1/vaso-1.3.1.tgz && npm install -g ./vaso-1.3.1.tgz
@@ -97,7 +97,7 @@ See [doc/user-guide.md](doc/user-guide.md) for full option reference.
 
 **Autonomous frameworks**
 
-- **OpenClaw** — `~/.openclaw`, `~/.clawdbot`, `~/.moltbot`
+- **OpenClaw** — `~/.openclaw` (also `~/.openclaw-<profile>`, `$OPENCLAW_HOME`, `$OPENCLAW_STATE_DIR`), and `~/.clawdbot` while no `~/.openclaw` config exists; `$include` files are followed
 - **NanoClaw** — v2 git checkout (`<checkout>/.env`, `data/`, `groups/`) + `~/.config/nanoclaw/` (mount allowlist)
 - **PicoClaw** — `~/.picoclaw/`
 - **IronClaw** — `~/.ironclaw/` (TOML, gRPC gateway)
@@ -197,7 +197,7 @@ The action installs the requested VASO version, runs the scan, and (when `format
 
 ```yaml
 - name: Install VASO
-  run: npm install -g https://github.com/vulnex/vaso/releases/download/v1.3.1/vaso-1.3.1.tgz
+  run: curl -fsSLo /tmp/vaso.tgz https://github.com/vulnex/vaso/releases/download/v1.3.1/vaso-1.3.1.tgz && npm install -g /tmp/vaso.tgz
 
 - name: Run VASO scan
   run: vaso scan --format sarif -o results.sarif --fail-on critical

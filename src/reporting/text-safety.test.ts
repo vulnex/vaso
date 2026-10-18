@@ -4,6 +4,7 @@ import { TerminalReporter } from './terminal.js';
 import { JunitReporter } from './junit.js';
 import { MarkdownReporter } from './markdown.js';
 import { CsvReporter } from './csv.js';
+import { HtmlReporter } from './html.js';
 import type { ScanResult } from '../core/types.js';
 
 const HOSTILE = 'evil\u001b[2J\u001b]8;;https://x\u0007link\u001b]8;;\u0007\u009b31m';
@@ -85,5 +86,17 @@ describe('escapeControlChars lineBreaks', () => {
     const { escapeControlChars } = await import('./text-safety.js');
     expect(escapeControlChars('a\nb')).toBe('a\nb');
     expect(escapeControlChars('a\nb c\u001b', { lineBreaks: true })).toBe('a\\nb\\u2029c\\x1b');
+  });
+});
+
+describe('HTML reports neutralise bidi and control characters (dt17)', () => {
+  it('shows U+202E and ESC sequences visibly instead of letting the browser apply them', () => {
+    const r = result();
+    r.agents[0].results[0].evidence = [{ file: '/skills/invoice\u202Efdp.exe', snippet: HOSTILE }];
+    const html = new HtmlReporter().render(r);
+    expect(html).not.toContain('\u202E');
+    expect(html).not.toContain('\u001b');
+    expect(html).toContain('invoice\\u202efdp.exe');
+    expect(html).not.toContain('<img onerror');
   });
 });

@@ -11,7 +11,7 @@ VASO is distributed from GitHub. The npm name `vaso` is held by an unrelated pac
 curl -fsSL https://raw.githubusercontent.com/vulnex/vaso/main/install.sh | bash
 
 # Or install the prebuilt release tarball directly with npm
-npm install -g https://github.com/vulnex/vaso/releases/download/v1.3.1/vaso-1.3.1.tgz
+curl -fsSLo /tmp/vaso.tgz https://github.com/vulnex/vaso/releases/download/v1.3.1/vaso-1.3.1.tgz && npm install -g /tmp/vaso.tgz
 
 # npm 12 refuses tarball URLs by default (allow-remote=none): download it first
 curl -fLO https://github.com/vulnex/vaso/releases/download/v1.3.1/vaso-1.3.1.tgz && npm install -g ./vaso-1.3.1.tgz
@@ -425,14 +425,14 @@ See [`network-scanning-guide.md`](network-scanning-guide.md) for the full SSH wo
 
 **`CONFIG-LOAD` never sets exit code 3.** A config file VASO can't read or parse (permission denied, malformed JSON/YAML/TOML, an unreadable config directory) is reported as a `CONFIG-LOAD` *finding* about the host — severity `warning`, listed with the file and the reason — not as an incomplete scan: VASO ran every check, and the unreadable file is the result. Like any finding it counts toward `--fail-on`, so it exits `1` with `--fail-on warning` or `info` and `0` with the default `critical`. Use `--fail-on warning` in CI if an unreadable agent config should fail the build.
 
-The other commands use the same codes: `skill audit` and `mcp scan` exit `1` on critical findings, and every command exits `2` when it cannot run — a command-line error (unknown option or command, a missing or extra argument), a missing or unreadable input (`skill audit <path>`, `mcp scan/list --path`, `visualize -i`, `probe validate`), an unknown name (`ext info`), or an invalid option value such as `--ssh-timeout abc`. `probe validate` exits `2` for any snapshot it can't use — unreadable, not JSON, or failing validation (over the probe's size limits, a relative `homedir`, a malformed `privilege` block).
+The other commands use the same codes: `skill audit` and `mcp scan` exit `1` on critical findings, `mcp scan` exits `3` when a result errored (for example a package `--resolve-packages` couldn't download — the `PACKAGE-RESOLVE` result says why), and every command exits `2` when it cannot run — a command-line error (unknown option or command, a missing or extra argument), a missing or unreadable input (`skill audit <path>`, `mcp scan/list --path`, `visualize -i`, `probe validate`), an unknown name (`ext info`), or an invalid option value such as `--ssh-timeout abc`. `probe validate` exits `2` for any snapshot it can't use — unreadable, not JSON, or failing validation (over the probe's size limits, a relative `homedir`, a malformed `privilege` block).
 
 `--fail-on` accepts `critical` (default), `warning`, `info`, or `none`. Use `--fail-on none` to never fail on findings — useful for scans that only produce reports.
 
 ```bash
 vaso scan --fail-on critical    # Default — only critical findings fail CI
 vaso scan --fail-on warning     # Warning or critical fails CI
-vaso scan --fail-on none        # Exit 0 unless VASO errors (2) or a host is unreachable (3)
+vaso scan --fail-on none        # Exit 0 unless VASO errors (2) or the scan is incomplete (3: a host unscanned, a check errored)
 ```
 
 ## Scoring
@@ -488,7 +488,7 @@ VASO ships twenty-six adapters. Each implements `detect()`, `getConfigPaths()`, 
 
 | Adapter | Config locations | Formats |
 |---------|------------------|---------|
-| OpenClaw | `$OPENCLAW_STATE_DIR` (the state directory), `$OPENCLAW_HOME/.openclaw` (`OPENCLAW_HOME` replaces the home directory), `~/.openclaw`, `~/.clawdbot`, `~/.moltbot`; `$OPENCLAW_CONFIG_PATH` names the config file | JSON5/JSON, YAML, ENV |
+| OpenClaw | `$OPENCLAW_STATE_DIR` (the state directory), `$OPENCLAW_HOME/.openclaw` (`OPENCLAW_HOME` replaces the home directory), `~/.openclaw`, `~/.openclaw-<profile>`, `~/.clawdbot` (only while no `~/.openclaw` config exists — `~/.moltbot` is never loaded and only reported by OC-003 as a leftover); `$include` files are followed (confined to the config dir or `$OPENCLAW_INCLUDE_ROOTS`); `$OPENCLAW_CONFIG_PATH` names the config file | JSON5/JSON, YAML, ENV |
 | NanoClaw | v2 git checkout (`package.json`, `.env`; found via its service unit or common locations), `~/.config/nanoclaw/mount-allowlist.json` | JSON, ENV |
 | PicoClaw | `$PICOCLAW_HOME` (default `~/.picoclaw`): `config.json`, `.security.yml`, `auth.json`, `launcher-config.json`; skills in `workspace/skills` | JSON, YAML |
 | IronClaw | 1.x: `$IRONCLAW_REBORN_HOME` (default `~/.ironclaw/reborn/`); 0.x: `~/.ironclaw/` | TOML, JSON, ENV |
@@ -512,8 +512,8 @@ VASO ships twenty-six adapters. Each implements `detect()`, `getConfigPaths()`, 
 | Claude Code | `~/.claude/`, `~/.claude.json`, project `.claude/` | JSON |
 | Codex | `~/.codex/config.toml`, `~/.codex/auth.json` | TOML, JSON |
 | OpenCode | `$XDG_CONFIG_HOME/opencode/opencode.json[c]`, `$XDG_DATA_HOME/opencode/auth.json` | JSON, JSONC |
-| Gemini CLI | `~/.gemini/settings.json`, OAuth credential files (`oauth_creds.json`, `google_accounts.json`, `mcp-oauth-tokens.json`); project `.gemini/` | JSONC |
-| Qwen Code | `~/.qwen/settings.json` (multi-provider auth: OpenAI/Anthropic/Gemini/Dashscope/Bailian); project `.qwen/` | JSONC |
+| Gemini CLI | `~/.gemini/settings.json`, OAuth credential files (`oauth_creds.json`, `google_accounts.json`, `mcp-oauth-tokens.json`); project `.gemini/`; workspace settings apply only in a trusted folder (`trustedFolders.json`, `$GEMINI_CLI_TRUSTED_FOLDERS_PATH`, `$GEMINI_CLI_TRUST_WORKSPACE`, `$GEMINI_RESTRICTED_MODE`, `folderTrust.enabled`) | JSONC |
+| Qwen Code | `~/.qwen/settings.json` (multi-provider auth: OpenAI/Anthropic/Gemini/Dashscope/Bailian); project `.qwen/`; with `folderTrust` on, workspace settings apply only in a trusted folder (`$QWEN_CODE_TRUSTED_FOLDERS_PATH`) | JSONC |
 | GitHub Copilot CLI | `~/.copilot/config.json`, `settings.json`, `command-history-state.json`, `session-state/`; workspace `.mcp.json` + `.github/lsp.json` | JSONC |
 | Cursor CLI/IDE | `~/.cursor/` (`cli-config.json`, `mcp.json`, `permissions.json`, `sandbox.json`, `hooks.json`); project `.cursor/`; IDE user-data dir (`~/Library/Application Support/Cursor/`, `~/.config/Cursor/`, `%APPDATA%\Cursor\`: `User/settings.json`, `User/globalStorage/state.vscdb`); IDE-only installs via `/Applications/Cursor.app` | JSON |
 | Windsurf / Devin Desktop | `~/.codeium/windsurf/` (`mcp_config.json`, `hooks.json`, memories, workflows, `user_settings.pb`), `~/.config/devin/mcp_config.json`; Cascade hooks also from `/etc/devin/hooks.json` / `/Library/Application Support/Devin/hooks.json` (legacy Windsurf paths as fallback) and the workspace `.devin/hooks.json` (else `.windsurf/hooks.json`); editor user-data `{Windsurf,Devin}` dirs (`~/Library/Application Support/`, `~/.config/`, `%APPDATA%`); version from the app's `product.json` | JSON |
@@ -528,7 +528,7 @@ VASO ships twenty-six adapters. Each implements `detect()`, `getConfigPaths()`, 
 | ChatGPT Desktop | `/Applications/ChatGPT.app` (current app, `com.openai.codex`) and `/Applications/ChatGPT (Classic).app` (`com.openai.chat`) + `~/Library/Application Support/com.openai.chat/`; preferences in `~/Library/Preferences/com.openai.chat*.plist` (macOS only) | plist |
 | Meta Muse | `/Applications/Muse.app`, `~/Library/Preferences/com.meta.endo.plist`, `~/Library/Application Support/com.meta.endo/` (macOS only; initial coverage) | plist |
 | Perplexity Comet | `/Applications/Comet.app` + Chromium profile `~/Library/Application Support/Comet/` (macOS) or `%LOCALAPPDATA%\Perplexity\Comet\User Data` (Windows): session-data permissions, extension inventory | — |
-| Grok Bot | Data root `~/.grokbot/` (`settings.json`, `local-exec-daemon-credential.json`, `local-tool-standing-grants.v1.json`, `local-computer-use-gate.json`, daemon log; relocated by `$SAND_DATA_ROOT` / `$SAND_USER_DATA_DIR`; pre-rename `~/.cursor/sand/`); Electron user data `~/.config/Grok Bot/` (Linux), `~/Library/Application Support/Grok Bot/` (macOS), `%APPDATA%\Grok Bot\` (Windows; the pre-rename `%APPDATA%\Sand\` while the app still uses it) with `sand-secrets.json`, `user-secrets.json`, `Cookies`; app `/opt/Grok Bot` (.deb/.rpm) or `/Applications/Grok Bot.app`; version from `desktop-status.json`, the macOS Info.plist or, for a .deb that has never run, its package metadata (local scans only). Secret stores and standing approvals are collected metadata-only by remote scans | JSON |
+| Grok Bot | Data root `~/.grokbot/` (`settings.json`, `local-exec-daemon-credential.json`, `local-tool-standing-grants.v1.json`, `local-computer-use-gate.json`, daemon log; relocated by `$SAND_DATA_ROOT` / `$SAND_USER_DATA_DIR`; pre-rename `~/.cursor/sand/`); Electron user data `~/.config/Grok Bot/` (Linux), `~/Library/Application Support/Grok Bot/` (macOS), `%APPDATA%\Grok Bot\` (Windows; the pre-rename `%APPDATA%\Sand\` while the app still uses it) with `sand-secrets.json`, `user-secrets.json`, `Cookies`; app `/opt/Grok Bot` (.deb/.rpm) or `/Applications/Grok Bot.app`; version from `desktop-status.json`, the macOS Info.plist or, for a .deb that has never run, its package metadata (local scans only). Secret stores and standing approvals are collected metadata-only by remote scans; endpoint overrides read from the environment (GB-012): `$SAND_BACKEND_URL` / `$CURSOR_API_BASE_URL`, `$SAND_HOST_GATEWAY_URL`, `$SAND_CURSOR_WEBSITE_URL` / `$CURSOR_WEBSITE_URL`, `$SAND_HTTPS_PROXY`, `$SAND_EGRESS_TUNNEL_URL` | JSON |
 
 ### MCP Servers
 
@@ -664,7 +664,7 @@ jobs:
           node-version: '20'
 
       - name: Install VASO
-        run: npm install -g https://github.com/vulnex/vaso/releases/download/v1.3.1/vaso-1.3.1.tgz
+        run: curl -fsSLo /tmp/vaso.tgz https://github.com/vulnex/vaso/releases/download/v1.3.1/vaso-1.3.1.tgz && npm install -g /tmp/vaso.tgz
 
       - name: Run VASO scan
         run: vaso scan --format sarif -o results.sarif

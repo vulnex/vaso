@@ -11,9 +11,12 @@ import {
   type OwaspMcpCoverageRow,
 } from './owasp-mcp.js';
 import type { Reporter } from './reporter.js';
+import { escapeControlChars } from './text-safety.js';
 
 function escapeHtml(str: string): string {
-  return str
+  // Bidi overrides and C0/C1 controls first: a browser renders U+202E and
+  // shows a spoofed file name, like a terminal would
+  return escapeControlChars(str)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')

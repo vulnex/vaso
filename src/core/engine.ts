@@ -18,10 +18,34 @@ import { credentialPathsFor } from '../adapters/adapter.js';
 /** How long one check may run before it is reported as errored (default 5 min). */
 export const DEFAULT_CHECK_TIMEOUT_MS = 300_000;
 
-/** `$VASO_CHECK_TIMEOUT` (seconds) when set to a positive number, else the default. */
-export function checkTimeoutFromEnv(env: NodeJS.ProcessEnv = process.env): number {
-  const s = Number(env.VASO_CHECK_TIMEOUT);
-  return Number.isFinite(s) && s > 0 ? s * 1000 : DEFAULT_CHECK_TIMEOUT_MS;
+/** Longest accepted `$VASO_CHECK_TIMEOUT`: 24 h (Node timers overflow past ~24.8 days and fire at once). */
+export const MAX_CHECK_TIMEOUT_SEC = 86_400;
+
+/**
+ * `$VASO_CHECK_TIMEOUT` (seconds, 1–86400), else the default. An unusable
+ * value is named on stderr rather than silently replaced — a huge one used to
+ * overflow the timer and error every check.
+ */
+let timeoutWarned = false;
+const warnOnce = (m: string) => {
+  if (timeoutWarned) return;
+  timeoutWarned = true;
+  process.stderr.write(`${m}\n`);
+};
+
+export function checkTimeoutFromEnv(env: NodeJS.ProcessEnv = process.env, warn: (m: string) => void = warnOnce): number {
+  const raw = env.VASO_CHECK_TIMEOUT;
+  if (raw === undefined || raw.trim() === '') return DEFAULT_CHECK_TIMEOUT_MS;
+  const s = Number(raw);
+  if (!Number.isFinite(s) || s <= 0) {
+    warn(`Warning: VASO_CHECK_TIMEOUT=${JSON.stringify(raw).slice(0, 40)} is not a positive number of seconds — using ${DEFAULT_CHECK_TIMEOUT_MS / 1000}`);
+    return DEFAULT_CHECK_TIMEOUT_MS;
+  }
+  if (s > MAX_CHECK_TIMEOUT_SEC) {
+    warn(`Warning: VASO_CHECK_TIMEOUT=${raw} exceeds ${MAX_CHECK_TIMEOUT_SEC} (24 hours) — using ${MAX_CHECK_TIMEOUT_SEC}`);
+    return MAX_CHECK_TIMEOUT_SEC * 1000;
+  }
+  return s * 1000;
 }
 
 /**

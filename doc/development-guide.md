@@ -89,7 +89,7 @@ src/
     abacus/                 15 Abacus.AI CLI/Desktop-specific (ABA-*)
     meta-muse/              3 Meta Muse-specific (MM-*)
     comet/                  2 Perplexity Comet-specific (PC-*)
-    grok-bot/               11 Grok Bot-specific (GB-*)
+    grok-bot/               13 Grok Bot-specific (GB-*)
   analyzers/
     ast-analyzer.ts         Babel-based AST analysis with data flow tracing
     pattern-engine.ts       Regex pattern matching engine (SECURITY_PATTERNS)

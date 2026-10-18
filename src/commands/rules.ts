@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 import chalk from 'chalk';
 import { loadRules, validateRuleFile } from '../rules/index.js';
+import { checkRegistry } from '../core/check-registry.js';
 import { readFile } from 'node:fs/promises';
 import YAML from 'yaml';
 
@@ -95,7 +96,23 @@ export async function runRulesValidate(filePath: string, options: RulesValidateO
     return;
   }
 
-  const { rules, errors } = validateRuleFile(data);
+  const validated = validateRuleFile(data);
+  const errors = [...validated.errors];
+  // The IDs scan would skip: a built-in check's ID, or one used twice in the file
+  const builtIn = new Set(checkRegistry.getAll().map(c => c.id));
+  const seen = new Set<string>();
+  const rules = validated.rules.filter(rule => {
+    if (builtIn.has(rule.id)) {
+      errors.push({ rule: rule.id, field: 'id', message: `"${rule.id}" is a built-in check ID — vaso scan skips this rule` });
+      return false;
+    }
+    if (seen.has(rule.id)) {
+      errors.push({ rule: rule.id, field: 'id', message: `"${rule.id}" is defined more than once — vaso scan keeps only the first` });
+      return false;
+    }
+    seen.add(rule.id);
+    return true;
+  });
 
   if (options.format === 'json') {
     console.log(JSON.stringify({ valid: errors.length === 0, rules: rules.length, errors }, null, 2));
