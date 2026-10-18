@@ -32,6 +32,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - **POL-003's fix changes only the files it reports.** It also tightened a declared directory (Copilot's `session-state/`) that the check never flagged, and reported it as a file. Permission fixes now name directories they change as directories.
 - **Cursor and Windsurf / Devin Desktop on Linux honour `$XDG_CONFIG_HOME`** for the editor's user data (`settings.json`, `state.vscdb`), as Electron does; CUR-012, CUR-013, WS-001 and WS-008 read `~/.config` even when it was set.
 - **MCP-013/MCP-018 no longer report `/authorize` in Python docstrings or route tables.** The OAuth and transport source checks (MCP-002, 011, 013–018, 023) skip Python docstrings as they skip comments, and a string-to-string map entry (`"/authorize": "/oauth/authorize"`) is a constant, not an authorization request. An authorize URL the server builds is still reported.
+- **A fixed `python -c` script is no longer code injection.** MCP-004/MCP-005 reported `subprocess.run([sys.executable, "-c", SCRIPT, path])` as critical when `SCRIPT` is a string constant and only the script's argument comes from the tool; SKL-003 reported `[python, "-c", "import sys; …"]` with literal code as critical dynamic execution (now info). Tool input or a computed value as the `-c` code is still critical. The Python analyzer also no longer skips the code after a multi-line string's closing quotes.
 
 ## [1.3.1] - 2026-10-16
 

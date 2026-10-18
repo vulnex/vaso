@@ -31,6 +31,39 @@ describe('analyzePythonSinks', () => {
     expect(findings.some((f) => f.kind === 'exec' && f.line === 13)).toBe(true);
   });
 
+  it('a constant `python -c` script is not injection; tool input after it is the script argv (zotero-mcp shape, dt15)', () => {
+    const code = [
+      'import subprocess, sys',
+      'from mcp.server.fastmcp import FastMCP',
+      'mcp = FastMCP("pdf")',
+      '_CHILD_SCRIPT = "import sys; print(open(sys.argv[1], \'rb\').read(4))"',
+      '@mcp.tool()',
+      'def pdf_magic(pdf_path: str) -> str:',
+      '    proc = subprocess.run([sys.executable, "-c", _CHILD_SCRIPT, pdf_path], capture_output=True)',
+      '    return proc.stdout',
+    ].join('\n');
+    const findings = analyzePythonSinks(code);
+    expect(findings.filter((f) => f.kind === 'injection')).toEqual([]);
+    expect(findings.find((f) => f.kind === 'exec')?.toolInput).toBeUndefined();
+  });
+
+  it('still flags tool input as the `-c` code, in a list or spread over lines', () => {
+    const tool = (body: string[]) => ['import subprocess, sys', '@mcp.tool()', 'def run(code: str, arg: str):', ...body].join('\n');
+    const list = analyzePythonSinks(tool(['    subprocess.run([sys.executable, "-c", code, arg])']));
+    expect(list.filter((f) => f.kind === 'injection').map((f) => f.line)).toEqual([4]);
+    const multi = analyzePythonSinks(tool(['    subprocess.run([', '        sys.executable,', '        "-c",', '        code,', '    ])']));
+    expect(multi.some((f) => f.kind === 'injection')).toBe(true);
+    expect(multi.find((f) => f.kind === 'exec')?.toolInput).toBe('code');
+    // a name bound to a literal but also reassigned from input is not a constant
+    const rebound = analyzePythonSinks(['import subprocess, sys', 'S = "print(1)"', 'def f(x):', '    S = x', '    subprocess.run([sys.executable, "-c", S])'].join('\n'));
+    expect(rebound.some((f) => f.kind === 'injection')).toBe(true);
+  });
+
+  it('reads the code after a multi-line data string (its closing quotes open no docstring)', () => {
+    const code = ['import os', 'HELP = """', 'usage', '"""', 'def f(cmd):', '    os.system(cmd)'].join('\n');
+    expect(analyzePythonSinks(code).filter((f) => f.kind === 'injection').map((f) => f.line)).toEqual([6]);
+  });
+
   it('does not report path joins when the file confines paths to the base', () => {
     const code = [
       'import os',

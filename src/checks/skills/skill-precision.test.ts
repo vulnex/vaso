@@ -63,6 +63,27 @@ describe('inline environment exfiltration', () => {
   });
 });
 
+describe('SKL-003 interpreter given literal -c code (dt15)', () => {
+  it('is fixed code (info), on one line or spread over several (huggingface/skills shape)', async () => {
+    const r = await run(skl003, {
+      'one.py': 'import subprocess\ndef v(python_path):\n    return subprocess.run([str(python_path), "-c", "import sys; print(sys.version_info[:2])"], capture_output=True)\n',
+      'multi.py': 'import subprocess\ndef v(python_path):\n    return subprocess.run(\n        [str(python_path), "-c",\n         "import sys; print(sys.version_info[:2])"],\n        capture_output=True,\n    )\n',
+      'const.py': 'import subprocess, sys\nSCRIPT = "print(1)"\ndef v(path):\n    return subprocess.run([sys.executable, "-c", SCRIPT, path])\n',
+    });
+    expect(r.evidence?.length).toBe(3);
+    expect(live(r)).toEqual([]);
+  });
+
+  it('stays critical when the -c code is computed or the call goes through a shell', async () => {
+    const r = await run(skl003, {
+      'a.py': 'import subprocess, sys\ndef v(code):\n    return subprocess.run([sys.executable, "-c", code])\n',
+      'b.py': 'import subprocess\ndef v(py):\n    return subprocess.run(f"{py} -c \'print(1)\'", shell=True)\n',
+    });
+    expect(live(r).length).toBe(2);
+    expect(r.severity).toBe('critical');
+  });
+});
+
 describe('SKL-003 program named by a module-level constant', () => {
   it('is a direct run (info) like a literal', async () => {
     const r = await run(skl003, { 'media.js': "const { spawnSync } = require('child_process');\nconst FFMPEG = 'ffmpeg';\nspawnSync(FFMPEG, ['-i', process.argv[2], 'out.mp4']);\n" });

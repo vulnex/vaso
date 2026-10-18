@@ -35,14 +35,18 @@ export const skl003 = defineCheck({
           // A program started directly (no shell, no interpreter given code)
           // runs with runtime arguments; it isn't code built at runtime
           const direct = !constant && flow.noShell === true && !flow.decoded;
+          // An interpreter given literal code (`python -c "import sys; …"`)
+          // runs fixed code, whichever interpreter path it is
+          const fixedCode = !constant && !direct && flow.fixedCode === true && !flow.decoded;
           evidence.push({
             file,
             line: flow.line,
             snippet: flow.snippet,
             detail: constant
               ? `${flow.description} — constant command "${flow.command}"`
-              : direct ? `${flow.description} — runs a program directly (no shell)` : flow.description,
-            ...(constant || direct ? { mitigated: true } : {}),
+              : direct ? `${flow.description} — runs a program directly (no shell)`
+                : fixedCode ? `${flow.description} — runs fixed code through -c` : flow.description,
+            ...(constant || direct || fixedCode ? { mitigated: true } : {}),
           });
         }
       } catch {}

@@ -35,6 +35,12 @@ export interface DataFlowResult {
    * runtime.
    */
   noShell?: boolean;
+  /**
+   * eval-exec: an interpreter or shell started directly with literal code
+   * (`python -c "import sys; …"`, or a constant holding the script) — the
+   * code is fixed; what follows it is the code's argv.
+   */
+  fixedCode?: boolean;
   line: number;
   snippet: string;
   description: string;

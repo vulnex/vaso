@@ -82,7 +82,7 @@ const EXEC_SINKS: Array<{ re: RegExp; name: (m: RegExpMatchArray) => string }> =
   { re: /\bcommands\.getoutput\s*\(/, name: () => 'commands.getoutput' },
 ];
 
-const INJECTION_RULES: Array<{ re: RegExp; description: string }> = [
+const INJECTION_RULES: Array<{ re: RegExp; description: string; dashC?: boolean }> = [
   {
     re: /(?<![\w.])(?<!\bdef\s+)(?:eval|exec)\s*\(\s*(?!["')]|r["']|b["'])/,
     description: 'eval()/exec() of a non-literal expression — caller-controlled code runs in the server',
@@ -90,6 +90,7 @@ const INJECTION_RULES: Array<{ re: RegExp; description: string }> = [
   {
     re: /(?:\bsys\.executable|["']python[\d.]*["'])\s*,\s*["']-c["']\s*,\s*(?!["'])/,
     description: 'Runs caller-supplied code through `python -c` — arbitrary code execution, no sandbox',
+    dashC: true,
   },
   {
     re: /\bos\.(?:system|popen)\s*\(\s*(?:f["']|[A-Za-z_][\w.]*\s*[,)+%]|["'][^"']*["']\s*(?:\+|%|\.format\b))/,
@@ -125,28 +126,88 @@ interface CodeLine {
   text: string;
 }
 
-/** Code lines with their 1-based numbers; comments and docstring bodies dropped. */
-function codeLines(code: string): CodeLine[] {
-  const out: CodeLine[] = [];
-  let inDocstring: string | undefined;
-  const lines = code.split('\n');
-  for (let i = 0; i < lines.length; i++) {
-    const text = lines[i];
+/**
+ * Triple-quoted strings, per line: `doc` for the lines of a docstring (a
+ * string statement on its own, `"""Doc…`), `data` for the body of one that is
+ * assigned or passed (`X = """`, `dedent("""`) — its opening and closing
+ * lines excluded, they hold code. A data string's closing `"""` is not read
+ * as a docstring opener (that dropped the code after it).
+ */
+export function pythonStringLines(lines: string[]): Array<'doc' | 'data' | undefined> {
+  const out: Array<'doc' | 'data' | undefined> = [];
+  let inDoc: string | undefined; // closing delimiter
+  let inData: string | undefined;
+  for (const text of lines) {
     const trimmed = text.trim();
-    if (inDocstring) {
-      if (trimmed.includes(inDocstring)) inDocstring = undefined;
+    if (inDoc) {
+      out.push('doc');
+      if (trimmed.includes(inDoc)) inDoc = undefined;
+      continue;
+    }
+    if (inData) {
+      if (trimmed.includes(inData)) { inData = undefined; out.push(undefined); } else out.push('data');
       continue;
     }
     const opener = /^[rRbBuUfF]*("""|''')/.exec(trimmed);
     if (opener) {
-      // A docstring line; it continues unless it also closes here.
-      if (trimmed.indexOf(opener[1], opener[0].length) === -1) inDocstring = opener[1];
+      // it continues unless it also closes here
+      if (trimmed.indexOf(opener[1], opener[0].length) === -1) inDoc = opener[1];
+      out.push('doc');
       continue;
     }
+    for (const delim of ['"""', "'''"]) {
+      if (trimmed.split(delim).length % 2 === 0) { inData = delim; break; }
+    }
+    out.push(undefined);
+  }
+  return out;
+}
+
+/** Code lines with their 1-based numbers; comments, docstrings and multi-line string bodies dropped. */
+function codeLines(code: string): CodeLine[] {
+  const out: CodeLine[] = [];
+  const lines = code.split('\n');
+  const strings = pythonStringLines(lines);
+  for (let i = 0; i < lines.length; i++) {
+    const text = lines[i];
+    const trimmed = text.trim();
+    if (strings[i] !== undefined) continue;
     if (trimmed === '' || trimmed.startsWith('#')) continue;
     out.push({ line: i + 1, text });
   }
   return out;
+}
+
+/**
+ * Names bound only to string literals (`_CHILD_SCRIPT = "import sys; …"`,
+ * `SCRIPT = textwrap.dedent("""…""")`) and never a parameter: what they hold
+ * is fixed text, whatever runs it.
+ */
+function stringConstantNames(lines: CodeLine[], fns: PyFunction[]): Set<string> {
+  const literal = new Set<string>();
+  const other = new Set<string>(fns.flatMap((f) => f.params));
+  for (const { text } of lines) {
+    const m = /^\s*([A-Za-z_]\w*)\s*(?::[^=]+)?=(?!=)\s*(.*)$/.exec(text);
+    if (m) (FIXED_TEXT.test(m[2]) ? literal : other).add(m[1]);
+    for (const b of text.matchAll(/\b(?:for|as)\s+([A-Za-z_]\w*)/g)) other.add(b[1]);
+  }
+  return new Set([...literal].filter((n) => !other.has(n)));
+}
+
+/** A string literal (not an f-string), possibly dedented. */
+const FIXED_TEXT = /^(?:textwrap\.)?(?:dedent\s*\(\s*)?[rRbBuU]{0,2}(?:"|')/;
+
+/** `-c` and combined short flags ending in it (`-lc`, `-ec`): the next argument is code. */
+const DASH_C = /^[rRbBuU]?(["'])-[A-Za-z]*c\1$/;
+
+/** The code argument after `-c` in an argv, or undefined when there is none. */
+function codeAfterDashC(argv: string[]): string | undefined {
+  const c = argv.findIndex((e) => DASH_C.test(e.trim()));
+  return c > 0 ? (argv[c + 1] ?? '').trim() : undefined;
+}
+
+function isFixedCode(expr: string, constants: Set<string>): boolean {
+  return FIXED_TEXT.test(expr) || constants.has(expr);
 }
 
 /**
@@ -377,6 +438,7 @@ export function analyzePythonSinks(code: string): PythonSinkFinding[] {
   const stmts = statements(lines);
   const fns = functionsOf(stmts);
   const tainted = taintedNames(stmts, fns, rewrite);
+  const constants = stringConstantNames(lines, fns);
   const fnAt = (i: number): PyFunction | undefined => fns.filter((f) => i > f.start && i < f.end).at(-1);
   const confined = RESOLVES.test(code) && CONFINES.test(code);
   const touchesFiles = FILE_OPS.test(code);
@@ -397,8 +459,12 @@ export function analyzePythonSinks(code: string): PythonSinkFinding[] {
       }
     }
 
-    for (const { re, description } of INJECTION_RULES) {
+    for (const { re, description, dashC } of INJECTION_RULES) {
       if (re.test(text)) {
+        // `python -c` running a constant script: the code is fixed, what
+        // follows it is the script's argv (`[sys.executable, "-c", SCRIPT, path]`)
+        const code = dashC ? /["']-c["']\s*,\s*([^,)\]]+)/.exec(text)?.[1]?.trim() : undefined;
+        if (code !== undefined && isFixedCode(code, constants)) continue;
         findings.push({ kind: 'injection', line, snippet, description });
         injectedLines.add(line);
         break;
@@ -446,11 +512,20 @@ export function analyzePythonSinks(code: string): PythonSinkFinding[] {
       // first element of a literal argv — any element after a shell/-c).
       const first = topLevelParts(commandArgs)[0]?.trim() ?? '';
       const argv = fn ? argvNames.get(fn)! : new Set<string>();
+      // The argv when it is written out: a list, or create_subprocess_exec's
+      // positional arguments
+      const argvParts = first.startsWith('[') ? topLevelParts(first.slice(1, -1))
+        : sink === 'asyncio.create_subprocess_exec' ? topLevelParts(commandArgs) : undefined;
+      // A shell or interpreter given `-c CODE`: the code is what runs; what
+      // follows it is the code's argv (`$1`, `sys.argv[1]`), not code
+      const dashCode = argvParts && (SHELL_PROGRAM.test(argvParts[0] ?? '') || /^\s*sys\.executable\s*$/.test(argvParts[0] ?? ''))
+        ? codeAfterDashC(argvParts) : undefined;
       const from = [...names.keys()].find((n) => {
         if (!mentions(commandArgs, n)) return false;
+        if (dashCode !== undefined) return mentions(argvParts![0], n) || mentions(dashCode, n);
         if (shellCall || sink.startsWith('os.exec') || sink.startsWith('os.spawn')) return true;
         if (first.startsWith('[')) {
-          const elems = topLevelParts(first.slice(1, -1));
+          const elems = argvParts!;
           return mentions(elems[0] ?? '', n) || (SHELL_PROGRAM.test(elems[0] ?? '') && mentions(first, n));
         }
         if (!mentions(first, n)) return false;
@@ -597,6 +672,7 @@ export function analyzePythonDataFlow(code: string): DataFlowResult[] {
   const lines = codeLines(code);
   const stmts = statements(lines);
   const fns = functionsOf(stmts);
+  const constants = stringConstantNames(lines, fns);
   const scopes = new Map<PyFunction | undefined, Map<string, SourceKind>>([[undefined, new Map()]]);
   const scopeOf = (fn: PyFunction | undefined): Map<string, SourceKind> => {
     let m = scopes.get(fn);
@@ -644,10 +720,18 @@ export function analyzePythonDataFlow(code: string): DataFlowResult[] {
       const noShell = DIRECT_EXEC.test(sink) && !shell
         && !SHELL_PROGRAM.test(positional[0]?.replace(/^\[\s*/, '') ?? '')
         && !/["']-c["']/.test(positional.join(','));
+      // An interpreter or shell run directly with literal `-c` code
+      // (`[python, "-c", "import sys; print(sys.version)"]`): fixed code,
+      // only the interpreter's path is chosen at runtime
+      const list = positional[0]?.trim() ?? '';
+      const argv = list.startsWith('[') ? topLevelParts(list.slice(1, list.lastIndexOf(']')))
+        : sink === 'asyncio.create_subprocess_exec' ? positional : [];
+      const dashCode = DIRECT_EXEC.test(sink) && !shell ? codeAfterDashC(argv) : undefined;
+      const fixedCode = dashCode !== undefined && isFixedCode(dashCode, constants);
       out.push({
         type: 'eval-exec', line: stmt.line, snippet, description: `${sink}() call detected`,
         ...(command ? { command } : {}), ...(dynamic ? { dynamic } : {}), ...(DECODES.test(args) ? { decoded: true } : {}),
-        ...(noShell ? { noShell } : {}),
+        ...(noShell ? { noShell } : {}), ...(fixedCode ? { fixedCode } : {}),
       });
       if (sink !== 'eval' && sink !== 'exec') {
         // What the process gets: its argv and stdin, not env=/cwd=/timeout=
