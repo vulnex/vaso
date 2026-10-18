@@ -1,0 +1,16 @@
+{
+  "agent": "grok-bot",
+  "source": "Grok Bot 0.71.2 without OS secure storage: the app writes the local-exec credential unsealed and secrets as plaintext:v1: (sealLocalExecFile / safeStorage fallback in the 0.71.2 app.asar). Remote scans never read secret stores",
+  "fail": {
+    "GB-006": "critical"
+  },
+  "parity": false,
+  "modes": {
+    ".grokbot": "700",
+    ".grokbot/settings.json": "600",
+    ".grokbot/local-exec-daemon-credential.json": "600",
+    "Library/Application Support/Grok Bot": "700",
+    "Library/Application Support/Grok Bot/sand-secrets.json": "600",
+    "Library/Application Support/Grok Bot/desktop-status.json": "600"
+  }
+}

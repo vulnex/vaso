@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "accountScopes": {},
+  "activeAccountScope": "1111111111111111111111111111111111111111111111111111111111111111",
+  "autoUpdateWhenIdle": true,
+  "botColorInChatEnabled": false,
+  "egressTunnelEnabled": false,
+  "hasSeenOnboarding": true,
+  "localEgressAllowed": true,
+  "localToolPermission": "ask",
+  "mcpBoxServers": [],
+  "mcpCustomInstructions": {},
+  "mcpCustomInstructionsByServerId": {},
+  "mcpDisabledToolsByServerId": {},
+  "messagesEnabled": false,
+  "webauthnProxyEnabled": true
+}

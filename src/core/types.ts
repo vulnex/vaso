@@ -1,6 +1,6 @@
 export type Severity = 'critical' | 'warning' | 'info';
 export type Grade = 'A' | 'B' | 'C' | 'D' | 'F';
-export type AgentType = 'openclaw' | 'nanoclaw' | 'picoclaw' | 'mcp' | 'ironclaw' | 'nanobot' | 'zeroclaw' | 'nemoclaw' | 'openshell' | 'hermes' | 'lyrie' | 'atomic-agent' | 'claude-code' | 'claude-desktop' | 'chatgpt-desktop' | 'codex' | 'opencode' | 'gemini-cli' | 'qwen-code' | 'copilot-cli' | 'cursor-cli' | 'windsurf' | 'devin' | 'meta-muse' | 'comet' | 'abacus' | 'skill-audit';
+export type AgentType = 'openclaw' | 'nanoclaw' | 'picoclaw' | 'mcp' | 'ironclaw' | 'nanobot' | 'zeroclaw' | 'nemoclaw' | 'openshell' | 'hermes' | 'lyrie' | 'atomic-agent' | 'claude-code' | 'claude-desktop' | 'chatgpt-desktop' | 'codex' | 'opencode' | 'gemini-cli' | 'qwen-code' | 'copilot-cli' | 'cursor-cli' | 'windsurf' | 'devin' | 'meta-muse' | 'comet' | 'abacus' | 'grok-bot' | 'skill-audit';
 export type CheckCategory = 'config' | 'skills' | 'ioc' | 'network' | 'runtime' | 'policy' | 'mcp' | 'openclaw' | 'nanoclaw' | 'picoclaw' | 'ironclaw' | 'nanobot' | 'zeroclaw' | 'lyrie' | 'hermes' | 'atomic-agent' | 'openshell' | 'advisory' | 'coding-agent';
 
 export const AGENT_TYPES: readonly AgentType[] = [
@@ -8,7 +8,7 @@ export const AGENT_TYPES: readonly AgentType[] = [
   'zeroclaw', 'nemoclaw', 'openshell', 'hermes', 'lyrie', 'atomic-agent', 'claude-code',
   'claude-desktop', 'chatgpt-desktop', 'codex', 'opencode',
   'gemini-cli', 'qwen-code', 'copilot-cli', 'cursor-cli',
-  'windsurf', 'devin', 'meta-muse', 'comet', 'abacus', 'skill-audit',
+  'windsurf', 'devin', 'meta-muse', 'comet', 'abacus', 'grok-bot', 'skill-audit',
 ];
 
 export function isScannableAgentType(v: string): v is AgentType {
@@ -26,7 +26,7 @@ export const CHECK_CATEGORIES: readonly CheckCategory[] = [
  * autonomous server frameworks. Used by checks via `excludedAgents` to skip
  * server-only concepts like gateway binding, rate limiting, LaunchAgents, etc.
  */
-export const CODING_AGENTS: AgentType[] = ['claude-code', 'claude-desktop', 'chatgpt-desktop', 'codex', 'opencode', 'gemini-cli', 'qwen-code', 'copilot-cli', 'cursor-cli', 'windsurf', 'devin', 'meta-muse', 'comet', 'abacus'];
+export const CODING_AGENTS: AgentType[] = ['claude-code', 'claude-desktop', 'chatgpt-desktop', 'codex', 'opencode', 'gemini-cli', 'qwen-code', 'copilot-cli', 'cursor-cli', 'windsurf', 'devin', 'meta-muse', 'comet', 'abacus', 'grok-bot'];
 /**
  * Host OS, as `process.platform` reports it. Spelled out (same values as
  * Node's `Platform`) so the published typings don't need @types/node.

@@ -6,6 +6,22 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **Grok Bot support** (`-a grok-bot`, 11 checks GB-001–011). Grok Bot is a desktop app whose cloud agents can run commands on your computer through a local exec daemon. VASO detects the app (`/opt/Grok Bot`, `/Applications/Grok Bot.app`), its data root (`~/.grokbot`, `$SAND_DATA_ROOT`, `$SAND_USER_DATA_DIR`, pre-rename `~/.cursor/sand`) and its Electron user data, and reads the version from `desktop-status.json`. The checks follow the 0.71.2 settings schema and the app's permission engine:
+  - **GB-001:** "Execution on Local Computer" is Always allow (`localToolPermission: "always"` with no stricter admin ceiling), for the active account and every other signed-in account. The cloud agent then runs shell commands, reads and writes files under `$HOME` and reads other AI tools' MCP setup and prompt history without asking, unsandboxed. `vaso fix` sets it back to "ask".
+  - **GB-002:** connector tools set to `always_allow`.
+  - **GB-003:** auto-review turned off or widened by custom allow rules.
+  - **GB-004:** standing "Always allow" grants. Recipients are never quoted.
+  - **GB-005:** cloud traffic routed through this computer. Critical with `SAND_EGRESS_TUNNEL_ALLOW_PRIVATE=1`.
+  - **GB-006:** local-exec credentials stored unsealed, or secrets stored as `plaintext:v1:` or under Chromium's fixed Linux key. Values never appear in reports.
+  - **GB-007:** credential-store permissions (fixable).
+  - **GB-008:** runtime data readable by others, such as the umask-created daemon log and cached transcripts.
+  - **GB-009:** Messages access enabled.
+  - **GB-010:** local computer use available.
+  - **GB-011:** updates disabled (`SAND_DISABLE_UPDATES`, or the apt source set to `Enabled: no`) or the dogfood track.
+- Remote scans collect Grok Bot's secret stores, approvals and standing grants as metadata only, and collect only named, non-secret `SAND_*` variables. No probe rebuild is needed.
+
 ## [1.3.1] - 2026-10-16
 
 ### Security

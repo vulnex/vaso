@@ -11,7 +11,7 @@ inputs:
     required: false
     default: 'v1.3.1'
   agent:
-    description: 'Scan a single agent only (openclaw, nanoclaw, picoclaw, ironclaw, nanobot, zeroclaw, nemoclaw, openshell, hermes, lyrie, atomic-agent, claude-code, claude-desktop, chatgpt-desktop, codex, opencode, gemini-cli, qwen-code, copilot-cli, cursor-cli, windsurf, devin, abacus, meta-muse, comet). Omit to scan all detected agents.'
+    description: 'Scan a single agent only (openclaw, nanoclaw, picoclaw, ironclaw, nanobot, zeroclaw, nemoclaw, openshell, hermes, lyrie, atomic-agent, claude-code, claude-desktop, chatgpt-desktop, codex, opencode, gemini-cli, qwen-code, copilot-cli, cursor-cli, windsurf, devin, abacus, meta-muse, comet, grok-bot). Omit to scan all detected agents.'
     required: false
     default: ''
   format:

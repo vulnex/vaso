@@ -25,6 +25,7 @@ import { devinAdapter } from './devin.js';
 import { metaMuseAdapter } from './meta-muse.js';
 import { cometAdapter } from './comet.js';
 import { abacusAdapter } from './abacus.js';
+import { grokBotAdapter } from './grok-bot.js';
 
 /** Every built-in adapter, in registration order. */
 export const allAdapters: AgentAdapter[] = [
@@ -53,6 +54,7 @@ export const allAdapters: AgentAdapter[] = [
   metaMuseAdapter,
   cometAdapter,
   abacusAdapter,
+  grokBotAdapter,
 ];
 
 /** Register every built-in adapter into the shared adapterRegistry —

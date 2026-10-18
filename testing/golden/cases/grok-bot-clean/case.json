@@ -1,0 +1,15 @@
+{
+  "agent": "grok-bot",
+  "source": "Grok Bot 0.71.2 defaults after onboarding (\"Ask every time\", egress off, auto-review on) \u2014 schema from the 0.71.2 app.asar, mirrors a live Linux install (2026-10-18)",
+  "clean": true,
+  "modes": {
+    ".grokbot": "700",
+    ".grokbot/settings.json": "600",
+    ".grokbot/local-exec-daemon-credential.json": "600",
+    ".grokbot/local-computer-use-gate.json": "600",
+    "Library/Application Support/Grok Bot": "700",
+    "Library/Application Support/Grok Bot/sand-secrets.json": "600",
+    "Library/Application Support/Grok Bot/desktop-status.json": "600",
+    ".grokbot/.grokbot-data-root-v1": "600"
+  }
+}

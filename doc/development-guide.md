@@ -54,6 +54,7 @@ src/
     abacus.ts               Abacus.AI CLI / AbacusAI Desktop adapter
     meta-muse.ts            Meta Muse adapter
     comet.ts                Perplexity Comet adapter
+    grok-bot.ts             Grok Bot desktop agent adapter
   checks/
     index.ts                registerAllChecks() — wires all categories
     config/                 24 configuration checks (CFG-*)
@@ -88,6 +89,7 @@ src/
     abacus/                 15 Abacus.AI CLI/Desktop-specific (ABA-*)
     meta-muse/              3 Meta Muse-specific (MM-*)
     comet/                  2 Perplexity Comet-specific (PC-*)
+    grok-bot/               11 Grok Bot-specific (GB-*)
   analyzers/
     ast-analyzer.ts         Babel-based AST analysis with data flow tracing
     pattern-engine.ts       Regex pattern matching engine (SECURITY_PATTERNS)
@@ -378,8 +380,9 @@ Current prefix landscape (one prefix per directory under `src/checks/`):
 | `abacus/` | ABA | Abacus.AI CLI / AbacusAI Desktop-specific |
 | `meta-muse/` | MM | Meta Muse-specific |
 | `comet/` | PC | Perplexity Comet-specific |
+| `grok-bot/` | GB | Grok Bot-specific |
 
-The per-product coding-agent and desktop-app directories (`claude-code/` through `comet/`) all use the single `coding-agent` category.
+The per-product coding-agent and desktop-app directories (`claude-code/` through `grok-bot/`) all use the single `coding-agent` category.
 
 ### 2. Create the Check File
 

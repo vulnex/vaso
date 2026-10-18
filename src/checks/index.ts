@@ -30,6 +30,7 @@ import { copilotCliChecks } from './copilot-cli/index.js';
 import { windsurfChecks } from './windsurf-app/index.js';
 import { devinChecks } from './devin/index.js';
 import { abacusChecks } from './abacus/index.js';
+import { grokBotChecks } from './grok-bot/index.js';
 import { metaMuseChecks } from './meta-muse/index.js';
 import { cometChecks } from './comet/index.js';
 
@@ -64,6 +65,7 @@ export function registerAllChecks(): void {
   checkRegistry.registerAll(windsurfChecks);
   checkRegistry.registerAll(devinChecks);
   checkRegistry.registerAll(abacusChecks);
+  checkRegistry.registerAll(grokBotChecks);
   checkRegistry.registerAll(metaMuseChecks);
   checkRegistry.registerAll(cometChecks);
 

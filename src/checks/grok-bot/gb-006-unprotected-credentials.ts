@@ -1,0 +1,113 @@
+import { join } from 'node:path';
+import type { Evidence, ScanContext } from '../../core/types.js';
+import { defineCheck } from '../../core/check-builder.js';
+import { DATA_FILES, USER_DATA_FILES } from '../../adapters/grok-bot.js';
+import { dataFile, userDataDir } from './shared.js';
+
+/**
+ * How Grok Bot protects what it stores (0.71.2):
+ * - The local-exec credential and connection files are sealed with AES-256-GCM
+ *   under a key kept in sand-secrets.json: { "sandSealedFile": 1, "data": … }.
+ *   Without OS secure storage the app writes them as plain JSON — a bearer
+ *   credential for the channel the cloud agent uses to run commands here.
+ * - sand-secrets.json (Cursor access/refresh tokens, the seal key) and
+ *   user-secrets.json hold base64(safeStorage.encryptString(v)), optionally
+ *   prefixed `scoped:v1:<64 hex>:`. `plaintext:v1:` marks an unencrypted value;
+ *   on Linux a `v10` blob (base64 `djEw`) comes from the basic_text backend,
+ *   encrypted under Chromium's fixed, public key.
+ * Only prefixes are inspected — values never reach evidence. Remote scans
+ * don't collect these files, so the check runs on local scans only.
+ */
+const SCOPED = /^scoped:v1:[0-9a-f]{64}:/;
+const PLAINTEXT = 'plaintext:v1:';
+const V10 = 'djEw';
+
+type Protection = 'plaintext' | 'v10' | 'ok';
+
+function protection(value: unknown): Protection | undefined {
+  if (typeof value !== 'string' || value === '') return undefined;
+  const v = value.replace(SCOPED, '');
+  if (v.startsWith(PLAINTEXT)) return 'plaintext';
+  if (v.startsWith(V10)) return 'v10';
+  return 'ok';
+}
+
+async function readJson(ctx: ScanContext, path: string): Promise<{ data?: unknown; unread?: boolean }> {
+  if (!(await ctx.fs.access(path))) return {};
+  try {
+    return { data: JSON.parse(await ctx.fs.readFile(path)) };
+  } catch (err) {
+    // Not shipped by the probe, or unreadable — say so rather than pass silently
+    return { unread: !(err instanceof SyntaxError) };
+  }
+}
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return !!v && typeof v === 'object' && !Array.isArray(v);
+}
+
+export const gb006 = defineCheck({
+  id: 'GB-006',
+  name: 'Grok Bot Credentials Without OS Keyring Protection',
+  category: 'coding-agent',
+  severity: 'critical',
+  description: 'Detect Grok Bot credentials stored in plaintext or under Chromium\'s fixed Linux key: an unsealed local-exec credential/connection file (bearer access to the channel the cloud agent runs commands through), or sand-secrets.json / user-secrets.json values marked plaintext:v1: or encrypted with the basic_text (v10) backend',
+  supportedAgents: ['grok-bot'],
+
+  async run(ctx, h) {
+    const critical: Evidence[] = [];
+    const warning: Evidence[] = [];
+    const unread: string[] = [];
+
+    for (const name of [DATA_FILES.credential, DATA_FILES.connection]) {
+      const file = dataFile(ctx, name);
+      const { data, unread: u } = await readJson(ctx, file);
+      if (u) unread.push(file);
+      if (!isRecord(data) || data.sandSealedFile === 1) continue;
+      critical.push({ file, snippet: 'no "sandSealedFile" envelope', detail: 'Stored as plain JSON — anyone who reads it can impersonate this computer to the Grok Bot backend' });
+    }
+
+    const tally = (file: string, values: unknown[], holds: string) => {
+      const counts = { plaintext: 0, v10: 0 };
+      for (const v of values) {
+        const p = protection(v);
+        if (p === 'plaintext' || p === 'v10') counts[p]++;
+      }
+      if (counts.plaintext > 0) {
+        critical.push({ file, snippet: `${counts.plaintext} value(s) "plaintext:v1:"`, detail: `${holds} stored unencrypted (no OS secure storage when written)` });
+      }
+      if (counts.v10 > 0 && ctx.fs.platform === 'linux') {
+        warning.push({ file, snippet: `${counts.v10} value(s) safeStorage v10`, detail: `${holds} encrypted with Chromium's fixed basic_text key — no keyring was available; any reader can decrypt them` });
+      }
+    };
+
+    const userData = userDataDir(ctx);
+    const secretsFile = join(userData, USER_DATA_FILES.secrets);
+    const secrets = await readJson(ctx, secretsFile);
+    if (secrets.unread) unread.push(secretsFile);
+    if (isRecord(secrets.data)) {
+      tally(secretsFile, Object.entries(secrets.data).filter(([k]) => k !== 'version').map(([, v]) => v), 'Cursor account tokens / the local-exec seal key');
+    }
+
+    const userSecretsFile = join(userData, USER_DATA_FILES.userSecrets);
+    const userSecrets = await readJson(ctx, userSecretsFile);
+    if (userSecrets.unread) unread.push(userSecretsFile);
+    if (isRecord(userSecrets.data)) {
+      const values: unknown[] = [];
+      const d = userSecrets.data;
+      if (isRecord(d.secrets)) values.push(...Object.values(d.secrets));
+      if (isRecord(d.accounts)) for (const a of Object.values(d.accounts)) if (isRecord(a)) values.push(...Object.values(a));
+      tally(userSecretsFile, values, 'User-defined secrets (shared with the cloud computer)');
+    }
+
+    if (critical.length === 0 && warning.length === 0 && unread.length > 0) {
+      return h.passed(`Grok Bot credential stores not inspected (${unread.length} file(s) not readable here — remote scans collect metadata only)`);
+    }
+    return h.fromEvidence([...critical, ...warning], {
+      passed: 'Grok Bot credentials are sealed and keyring-encrypted',
+      failed: (n) => `Found ${n} Grok Bot credential store(s) without OS keyring protection`,
+      severity: critical.length > 0 || warning.length === 0 ? undefined : 'warning',
+      fixDescription: 'Run Grok Bot with a working OS keyring (gnome-keyring / KWallet on Linux), then sign out and back in so tokens and the local-exec credential are re-written sealed',
+    });
+  },
+});

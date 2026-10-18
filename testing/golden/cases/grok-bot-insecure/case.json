@@ -1,0 +1,25 @@
+{
+  "agent": "grok-bot",
+  "source": "Grok Bot 0.71.2: Execution on Local Computer = Always allow, egress routed through the desktop, auto-review off, Gmail writes always allowed, Messages on \u2014 settings keys from the 0.71.2 app.asar and docs.x.ai/grok-bot (approvals, private networks)",
+  "fail": {
+    "GB-001": "critical",
+    "GB-002": "warning",
+    "GB-003": "warning",
+    "GB-005": "warning",
+    "GB-009": "warning"
+  },
+  "fix": {
+    "resolves": [
+      "GB-001"
+    ]
+  },
+  "modes": {
+    ".grokbot": "700",
+    ".grokbot/settings.json": "600",
+    ".grokbot/local-exec-daemon-credential.json": "600",
+    ".grokbot/local-computer-use-gate.json": "600",
+    "Library/Application Support/Grok Bot": "700",
+    "Library/Application Support/Grok Bot/sand-secrets.json": "600",
+    "Library/Application Support/Grok Bot/desktop-status.json": "600"
+  }
+}
