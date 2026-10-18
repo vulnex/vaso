@@ -547,3 +547,33 @@ func TestOmittedSkillFileShipsItsHead(t *testing.T) {
 		t.Fatalf("head shipped outside a skill tree: %+v", e)
 	}
 }
+
+// dt17: redaction by value, not only by name — a credential in a variable
+// whose name looks harmless must not reach the snapshot.
+func TestRedactEnvValueByShape(t *testing.T) {
+	leaks := map[string]string{
+		"GITHUB_PAT":             "ghp_" + strings.Repeat("A1b2C3d4E5", 4),
+		"OPENAI_ORG":             "sk-proj-" + strings.Repeat("Q7rT2mZ9kL", 3),
+		"ANTHROPIC_MODEL":        "sk-ant-api03-" + strings.Repeat("abcDEF1234", 3),
+		"LYRIE_TELEGRAM_BOT":     "123456789:" + strings.Repeat("AAH-xyz_9876", 3),
+		"OPENAI_BASE_URL":        "https://api.example.com/v1?api_key=s3cr3tvalue99&region=eu",
+		"SAND_EGRESS_TUNNEL_URL": "https://tun.example.invalid/x?token=abcdef123456#frag",
+	}
+	for k, v := range leaks {
+		got := redactEnvValue(k, v)
+		for _, secret := range []string{"A1b2C3d4E5A1b2", "Q7rT2mZ9kLQ7rT", "abcDEF1234abc", "AAH-xyz_9876AAH", "s3cr3tvalue99", "abcdef123456"} {
+			if strings.Contains(got, secret) {
+				t.Errorf("%s: %q still contains %q", k, got, secret)
+			}
+		}
+	}
+	// Structure and ordinary values stay readable for the checks
+	if got := redactEnvValue("OPENAI_BASE_URL", "https://api.example.com/v1?api_key=s3cr3tvalue99&region=eu"); got != "https://api.example.com/v1?api_key=[redacted]&region=eu" {
+		t.Errorf("query redaction = %q", got)
+	}
+	for k, v := range map[string]string{"ANTHROPIC_MODEL": "claude-sonnet-5", "SAND_BACKEND_URL": "https://api2.cursor.sh", "PORT": "8080", "OPENAI_BASE_URL": "http://10.0.0.5:8000/v1"} {
+		if got := redactEnvValue(k, v); got != v {
+			t.Errorf("%s=%q changed to %q", k, v, got)
+		}
+	}
+}

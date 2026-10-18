@@ -29,6 +29,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Security
 
+- **Remote scans redact credentials by their shape, not only by the variable's name** (probe ≥ 1.4.0). A token in a variable whose name looks harmless (`OPENAI_ORG=sk-proj-…`, `LYRIE_TELEGRAM_BOT=123456:…`, a `ghp_…` in `GITHUB_PAT`) and credential-named URL parameters (`?api_key=`, `&token=`) shipped verbatim in the snapshot's environment; they are now replaced in place, keeping the scheme, host and parameter names the checks read.
 - **`vaso fix` writes only where `vaso fix --rollback` can restore.** An install relocated outside the home (`SAND_DATA_ROOT`, `CODEX_HOME=/data/…`, an install dir under `/opt`) used to be changed although rollback — confined to the home so a tampered backup tree can't write elsewhere — could never undo it. Such files are now refused with the reason named.
 - **`vaso fix` no longer changes ordinary files in a repository.** A project installation (a repo's `.copilot`-style or `.cursor/` scope) declared the adapter's credential file names inside the repo, so POL-003 reported the repo's own `config.json`, `settings.json` or `.cursor/hooks.json` and `vaso fix` chmodded them. Credential stores are user-level for every adapter; project installations now declare none.
 - **HTML reports neutralise bidi and control characters**, as the terminal, CSV, Markdown, JUnit and SARIF reports already did: a file name with U+202E no longer renders reversed in a browser.

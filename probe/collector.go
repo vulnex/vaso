@@ -935,6 +935,30 @@ func redactURLUserinfo(s string) string {
 	return urlUserinfo.ReplaceAllString(s, "${1}"+redactedEnvValue+"@")
 }
 
+// tokenShaped matches the credential formats VASO's checks recognise, wherever
+// they stand in a value: a token in a variable whose name looks harmless
+// (OPENAI_ORG=sk-proj-…, LYRIE_TELEGRAM_BOT=123456:…) must not ship either.
+// RE2 is linear, so no input can make this slow.
+var tokenShaped = regexp.MustCompile(`(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-(?:proj-|ant-|svcacct-|admin-|or-v1-)?[A-Za-z0-9_-]{20,}|xox[abprs]-[A-Za-z0-9-]{10,}|A(?:KIA|SIA)[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{30,}|glpat-[A-Za-z0-9_-]{20,}|\b[0-9]{6,12}:[A-Za-z0-9_-]{30,}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]*)`)
+
+// urlParam matches one name=value pair in a URL's query or fragment.
+var urlParam = regexp.MustCompile(`([?&#;])([^=&#;\s]+)=([^&#;\s]*)`)
+
+// redactSecretValues keeps a value's structure (scheme, host, parameter names)
+// but none of its credentials: user:password@, credential-named URL parameters
+// (?api_key=, &token=) and token-shaped text anywhere.
+func redactSecretValues(s string) string {
+	s = redactURLUserinfo(s)
+	s = urlParam.ReplaceAllStringFunc(s, func(m string) string {
+		g := urlParam.FindStringSubmatch(m)
+		if isSecretJSONKey(g[2]) && g[3] != "" {
+			return g[1] + g[2] + "=" + redactedEnvValue
+		}
+		return m
+	})
+	return tokenShaped.ReplaceAllString(s, redactedEnvValue)
+}
+
 // redactJSONValue redacts, inside an inline JSON config
 // (OPENCODE_CONFIG_CONTENT), every string under a credential-named key
 // (apiKey, headers, env…) and URL credentials anywhere, keeping the structure
@@ -955,7 +979,7 @@ func redactJSONValue(v interface{}, secret bool) interface{} {
 		if secret {
 			return redactedEnvValue
 		}
-		return redactURLUserinfo(t)
+		return redactSecretValues(t)
 	}
 	return v
 }
@@ -977,7 +1001,7 @@ func redactEnvValue(key, val string) string {
 		}
 		return redactedEnvValue
 	}
-	return redactURLUserinfo(val)
+	return redactSecretValues(val)
 }
 
 // redactedEnvValue replaces the value of a credential-bearing variable.
