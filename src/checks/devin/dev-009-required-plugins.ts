@@ -15,6 +15,14 @@ function describeSource(entry: unknown): { label: string; insecure: boolean } | 
 }
 
 /**
+ * The configuration reference lists only permissions, hooks, mcpServers and
+ * read_config_from as project *settings*, but plugin governance reads the
+ * checkout's .devin/config.json on its own: the plugins reference names "the
+ * requiredPlugins / optionalPlugins / forbiddenPlugins in a checkout's
+ * .devin/config.json" as the repo scope (found walking up from cwd), and the
+ * 3000.11.3 binary has a `RequirementOrigin::Repo` / `repo:` governance scope.
+ * config.local.json is not a governance source.
+ *
  * A repo's committed .devin/config.json can declare `requiredPlugins`, which
  * Devin auto-installs (recursively) from git sources for everyone who opens
  * the checkout. Plugins ship skills, hooks, MCP servers and rules, and plugin

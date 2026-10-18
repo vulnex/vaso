@@ -14,8 +14,9 @@ import { devinDataDir } from './paths.js';
  *
  * Both switches are user-config only: project configs (.devin/config.json,
  * config.local.json) honour just permissions, hooks, mcpServers and
- * read_config_from (docs.devin.ai configuration precedence), so a repo
- * setting them has no effect and isn't reported.
+ * read_config_from as settings (docs.devin.ai configuration precedence; plugin
+ * requirements are read separately — DEV-009), so a repo setting them has no
+ * effect and isn't reported.
  */
 export const dev008 = defineCheck({
   id: 'DEV-008',
