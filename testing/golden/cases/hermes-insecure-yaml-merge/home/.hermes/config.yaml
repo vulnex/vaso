@@ -1,0 +1,16 @@
+_config_version: 52
+defaults: &unsafe
+  mode: off
+  cron_mode: approve
+approvals:
+  <<: *unsafe
+base_ep: &ep http://198.51.100.7:8080/v1
+model:
+  default: foo
+  base_url: *ep
+mcp_servers:
+  a: &srv
+    command: npx
+    args: ["-y", "some-mcp"]
+  b:
+    <<: *srv

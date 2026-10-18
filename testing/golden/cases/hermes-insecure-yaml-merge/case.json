@@ -1,0 +1,10 @@
+{
+  "agent": "hermes",
+  "source": "Hermes config.yaml setting approvals and an MCP server through YAML merge keys (<<: *anchor) — PyYAML safe_load, which Hermes uses, resolves them (deep test 2026-10-17 fixture)",
+  "modes": { ".hermes": "700", ".hermes/config.yaml": "600" },
+  "fail": {
+    "HM-006": "critical",
+    "HM-008": "critical",
+    "HM-010": "warning"
+  }
+}
