@@ -1,6 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { hookCommandRisks, topTier } from '../../analyzers/hook-commands.js';
+import { hookCommandRisks, hookExpansion, topTier } from '../../analyzers/hook-commands.js';
 
 // Every hooks.json event runs its command on its own — sessionStart and
 // workspaceOpen before the user has typed anything — so what the command does
@@ -8,6 +8,13 @@ import { hookCommandRisks, topTier } from '../../analyzers/hook-commands.js';
 // fail-open gating hooks). Command hooks get the event as JSON on stdin; a
 // project .cursor/hooks.json arrives with the repository
 // (cursor.com/docs/agent/hooks). `type: "prompt"` hooks run no command.
+//
+// Cursor sets these for every hook (same page, "Environment variables"):
+// paths and values Cursor itself chooses, never tool or prompt input, so a
+// `bash -c "$CURSOR_PROJECT_DIR/…"` is not input re-evaluated as code.
+// CURSOR_USER_EMAIL is left out: it is account data, not Cursor's own path.
+const CURSOR_HOOK_VARIABLES = ['CURSOR_PROJECT_DIR', 'CLAUDE_PROJECT_DIR', 'CURSOR_VERSION', 'CURSOR_TRANSCRIPT_PATH', 'CURSOR_CODE_REMOTE'];
+const EXPANSION = hookExpansion(CURSOR_HOOK_VARIABLES);
 
 export const cur015 = defineCheck({
   id: 'CUR-015',
@@ -31,7 +38,7 @@ export const cur015 = defineCheck({
           if (!entry || typeof entry !== 'object') continue;
           const e = entry as Record<string, unknown>;
           if (e.type === 'prompt' || typeof e.command !== 'string') continue;
-          const risks = hookCommandRisks(e.command);
+          const risks = hookCommandRisks(e.command, { expansion: EXPANSION });
           const tier = topTier(risks);
           if (!tier) continue;
           if (tier === 'critical') critical = true;
@@ -46,10 +53,10 @@ export const cur015 = defineCheck({
     }
 
     return h.fromEvidence(evidence, {
-      passed: 'No Cursor hook command downloads code or sends data out',
-      failed: (n) => `Found ${n} Cursor hook command(s) that fetch code or send data over the network`,
+      passed: 'No Cursor hook command downloads code, sends data out or runs input as code',
+      failed: (n) => `Found ${n} Cursor hook command(s) that download code, send data over the network or run hook input as code`,
       severity: critical ? 'critical' : 'warning',
-      fixDescription: 'Remove hooks you did not add yourself (project .cursor/hooks.json arrives with the repo); run vendored, reviewed scripts instead of downloads, and send audit data only to endpoints you control over https',
+      fixDescription: 'Remove hooks you did not add yourself (project .cursor/hooks.json arrives with the repo); run vendored, reviewed scripts instead of downloads, send audit data only to endpoints you control over https, and never eval or pipe hook input into a shell',
     });
   },
 });
