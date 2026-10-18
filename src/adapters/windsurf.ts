@@ -9,7 +9,8 @@ import { recordConfigLoadFailure } from '../core/config-loader.js';
 import { getUserHomeDirs } from './openclaw.js';
 import { queryCliVersion } from './version-query.js';
 import { decodeWindsurfUserSettings, toWindsurfSettingsData } from './windsurf-user-settings.js';
-import { devinCliPresent } from './devin.js';
+import { devinCliPresent, projectDirs } from './devin.js';
+import { scanCwd } from './project-configs.js';
 
 // Windsurf IDE was rebranded Devin Desktop on 2026-06-02. One adapter covers
 // both generations: legacy installs keep the Windsurf app bundle / user-data
@@ -24,6 +25,14 @@ const MCP_CONFIG_FILE = 'mcp_config.json';
 const USER_SETTINGS_FILE = 'user_settings.pb';
 // 3.x: Devin agent config shared with Devin CLI (`permissions` allow/deny/ask)
 const DEVIN_CONFIG_FILE = 'config.json';
+// Cascade skills (<name>/SKILL.md beneath each root; docs.devin.ai/desktop/cascade/skills).
+// User: ~/.codeium/windsurf/skills, plus ~/.config/devin/skills and
+// ~/.agents/skills, which Devin CLI reads too. Workspace: .devin/skills and
+// .agents/skills (the devin adapter's project install scans those) and the
+// legacy .windsurf/skills, which only Devin Desktop reads.
+const OWN_USER_SKILL_DIRS = [join('.codeium', 'windsurf', 'skills')];
+const SHARED_USER_SKILL_DIRS = [join('.agents', 'skills')];
+const LEGACY_PROJECT_SKILL_DIR = join('.windsurf', 'skills');
 
 const SYSTEM_CLI_PATHS = CLI_NAMES.flatMap(name => [
   `/usr/local/bin/${name}`,
@@ -260,6 +269,19 @@ export const windsurfAdapter: AgentAdapter = {
       const version = product.version
         ?? queryCliVersion(cliBinary, fs, { timeoutMs: 3000 });
 
+      // Skill roots shared with Devin CLI are its install's when the CLI is there
+      const skillRoots = [
+        ...OWN_USER_SKILL_DIRS.map(rel => join(home, rel)),
+        ...(sharedWithDevin ? [] : [
+          join(devinConfigDir(home, fs), 'skills'),
+          ...SHARED_USER_SKILL_DIRS.map(rel => join(home, rel)),
+        ]),
+      ];
+      const skillsDirs: string[] = [];
+      for (const dir of skillRoots) {
+        if (await fs.access(dir)) skillsDirs.push(dir);
+      }
+
       const isDevinGeneration = product.applicationName === 'devin-desktop'
         || appBundle === '/Applications/Devin.app';
       // Only the resolved app location is reported; cliBinary stays separate.
@@ -271,10 +293,26 @@ export const windsurfAdapter: AgentAdapter = {
         version,
         installDir: hasAgentDir ? agentDir : (existingUserDataDirs[0] ?? agentDir),
         configFiles,
+        skillsDir: skillsDirs[0],
+        skillsDirs: skillsDirs.length > 0 ? skillsDirs : undefined,
         user: options?.allUsers ? user : undefined,
         appBundle: resolvedAppBundle,
         cliBinary,
       });
+    }
+
+    // Workspace .windsurf/skills (repo root down to cwd, as Devin finds .devin/)
+    // belong to the scanning user's install
+    const cwd = scanCwd(fs);
+    const own = installations.find(i => i.installDir.startsWith(join(fs.homedir(), '/')));
+    if (cwd && own) {
+      const { dirs } = await projectDirs(cwd, fs);
+      for (const dir of dirs) {
+        const skills = join(dir, LEGACY_PROJECT_SKILL_DIR);
+        if (!(await fs.access(skills)) || own.skillsDirs?.includes(skills)) continue;
+        own.skillsDirs = [...(own.skillsDirs ?? []), skills];
+        own.skillsDir ??= skills;
+      }
     }
 
     return installations;
@@ -293,10 +331,10 @@ export const windsurfAdapter: AgentAdapter = {
   },
 
   getSkillsDir(_installDir: string): string | undefined {
-    // Windsurf's execution-granting surface is workflows (markdown with
-    // `// turbo` directives), scanned directly by WS-006 — not a code skills
-    // directory, so generic SKL-* scans don't apply.
-    return undefined;
+    // Primary Cascade skill root; detect() records the shared and workspace
+    // roots in skillsDirs. Workflows (`// turbo` markdown) are WS-006's.
+    const fs = new LocalFSProvider();
+    return join(codeiumAgentDir(fs.homedir()), 'skills');
   },
 
   getGatewayInfo(_config: Record<string, unknown>): GatewayInfo | undefined {
@@ -350,6 +388,8 @@ export const windsurfAdapter: AgentAdapter = {
       globPatterns: [
         '~/.codeium/windsurf/global_workflows/*.md',
         '~/.codeium/windsurf/memories/*.md',
+        // Cascade skill roots — SKL/IOC checks read them
+        ...[...OWN_USER_SKILL_DIRS, join('.config', 'devin', 'skills'), ...SHARED_USER_SKILL_DIRS].map(d => `~/${d}/**`),
       ],
       // Editor state DBs hold the auth token: WS-008 / POL-003 need their
       // permissions only — never ship the content.

@@ -1,0 +1,13 @@
+{
+  "agent": "windsurf",
+  "source": "Cascade skills in ~/.codeium/windsurf/skills and ~/.config/devin/skills with no Devin CLI (docs.devin.ai/desktop/cascade/skills; deep-test fixture)",
+  "skipOn": [
+    "linux",
+    "win32"
+  ],
+  "fail": {
+    "SKL-001": "critical",
+    "SKL-004": "critical",
+    "IOC-001": "critical"
+  }
+}

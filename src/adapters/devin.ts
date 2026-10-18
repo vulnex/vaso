@@ -51,7 +51,7 @@ const PROJECT_SKILL_DIRS = [join('.devin', 'skills'), join('.cognition', 'skills
  * between root and cwd also apply (closer wins). Returns the dirs to load,
  * root first. Without a repo marker only cwd itself is considered.
  */
-async function projectDirs(cwd: string, fs: FSProvider): Promise<{ root: string; dirs: string[] }> {
+export async function projectDirs(cwd: string, fs: FSProvider): Promise<{ root: string; dirs: string[] }> {
   const chain: string[] = [];
   for (let dir = cwd; ; dir = dirname(dir)) {
     chain.push(dir);

@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import type { FSProvider } from '../core/fs-provider.js';
 import { windsurfAdapter } from './windsurf.js';
 import { captureConfigLoadErrors } from '../core/config-loader.js';
@@ -129,6 +129,48 @@ describe('Windsurf / Devin Desktop adapter — files shared with Devin CLI', () 
     const fs = makeFs({ ...shared, [`${HOME}/.local/bin/devin`]: '' });
     const [inst] = await windsurfAdapter.detect({ fs });
     expect(inst.configFiles.map(c => c.filePath)).toEqual([`${HOME}/.codeium/windsurf/mcp_config.json`]);
+  });
+});
+
+describe('Windsurf / Devin Desktop adapter — Cascade skill roots (dt15)', () => {
+  const skills = {
+    [`${HOME}/.codeium/windsurf/skills/evil/SKILL.md`]: '# evil',
+    [`${HOME}/.config/devin/skills/evil/SKILL.md`]: '# evil',
+    [`${HOME}/.agents/skills/evil/SKILL.md`]: '# evil',
+  };
+  afterEach(() => vi.restoreAllMocks());
+
+  it('records the global skill roots when Devin CLI is absent', async () => {
+    vi.spyOn(process, 'cwd').mockReturnValue('/nowhere');
+    const [inst] = await windsurfAdapter.detect({ fs: makeFs(skills) });
+    expect(inst.skillsDirs).toEqual([
+      `${HOME}/.codeium/windsurf/skills`, `${HOME}/.config/devin/skills`, `${HOME}/.agents/skills`,
+    ]);
+  });
+
+  it('leaves the roots shared with Devin CLI to its install (findings not doubled)', async () => {
+    vi.spyOn(process, 'cwd').mockReturnValue('/nowhere');
+    const [inst] = await windsurfAdapter.detect({ fs: makeFs({ ...skills, [`${HOME}/.local/bin/devin`]: '' }) });
+    expect(inst.skillsDirs).toEqual([`${HOME}/.codeium/windsurf/skills`]);
+  });
+
+  it('adds legacy workspace .windsurf/skills from the repo root down to cwd', async () => {
+    vi.spyOn(process, 'cwd').mockReturnValue('/work/app/pkg');
+    const fs = makeFs({
+      [`${HOME}/.codeium/windsurf/mcp_config.json`]: '{}',
+      '/work/app/.git/HEAD': '',
+      '/work/app/.windsurf/skills/a/SKILL.md': '# a',
+      '/work/app/pkg/.windsurf/skills/b/SKILL.md': '# b',
+    });
+    const [inst] = await windsurfAdapter.detect({ fs });
+    expect(inst.skillsDirs).toEqual(['/work/app/.windsurf/skills', '/work/app/pkg/.windsurf/skills']);
+    expect(inst.skillsDir).toBe('/work/app/.windsurf/skills');
+  });
+
+  it('records no skill roots when none exist', async () => {
+    vi.spyOn(process, 'cwd').mockReturnValue('/nowhere');
+    const [inst] = await windsurfAdapter.detect({ fs: makeFs({ [`${HOME}/.codeium/windsurf/mcp_config.json`]: '{}' }) });
+    expect(inst.skillsDirs).toBeUndefined();
   });
 });
 
