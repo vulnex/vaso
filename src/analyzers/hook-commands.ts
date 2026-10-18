@@ -14,8 +14,18 @@ const CREDENTIAL_RULES = SECURITY_PATTERNS.filter(r => r.category === 'credentia
 /** Hosts that hide where a script or upload really goes (SKL-004's list plus request-capture services). */
 const OPAQUE_HOSTS = /^(?:bit\.ly|tinyurl\.com|t\.co|is\.gd|goo\.gl|cutt\.ly|rb\.gy|pastebin\.com|paste\.ee|hastebin\.com|termbin\.com|transfer\.sh|0x0\.st|webhook\.site|requestbin\.(?:com|net)|pipedream\.net|[\w-]+\.m\.pipedream\.net|ngrok(?:-free)?\.(?:io|app|dev)|[\w-]+\.ngrok(?:-free)?\.(?:io|app|dev)|[\w-]+\.trycloudflare\.com|[\w-]+\.oast\.(?:fun|live|me|online|pro|site)|[\w-]+\.burpcollaborator\.net|[\w-]+\.interact\.sh)$/i;
 
-/** A `$` expansion or backtick substitution, other than plain $HOME. */
-const DYNAMIC_EXPANSION = /`|\$(?!\{?HOME\b)[({A-Za-z_@*0-9]/;
+/**
+ * A `$` expansion or backtick substitution, other than plain $HOME and the
+ * `trusted` variables — paths the agent itself sets for hooks (Claude Code's
+ * ${CLAUDE_PROJECT_DIR}, Cursor's $CURSOR_PROJECT_DIR, …), which carry no
+ * tool or prompt input.
+ */
+export function hookExpansion(trusted: readonly string[] = []): RegExp {
+  const names = ['HOME', ...trusted].join('|');
+  return new RegExp(`\`|\\$(?!\\{?(?:${names})\\b)[({A-Za-z_@*0-9]`);
+}
+
+const DYNAMIC_EXPANSION = hookExpansion();
 
 /**
  * Shell text that is evaluated a second time with expanded data in it: `eval`
@@ -57,7 +67,7 @@ const CURL_SEND = /\bcurl\b[^|;&\n]{0,2000}?\s(?:-[a-zA-Z]*[dFT]|--(?:data(?:-bi
 const WGET_SEND = /\bwget\b[^|;&\n]{0,2000}?\s--(?:post|body)-(?:data|file)\b/;
 const RAW_SOCKET_SEND = /\|\s*(?:nc|ncat|netcat|telnet)\s|\b(?:nc|ncat|netcat|telnet)\s[^|;&\n]{0,500}?<\s*\S/;
 /** Material worth stealing in the same script: environment dumps, secret-named variables. */
-const SECRET_MATERIAL = /\b(?:env|printenv|set)\s*(?:\||>)|\$\{?[A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|API_?KEY|ACCESS_KEY|PRIVATE_KEY|CREDENTIALS?)\b/;
+const SECRET_MATERIAL = /\b(?:env|printenv|set)\s*(?:\||>)|\$\{?[A-Z0-9_]{0,64}(?:TOKEN|SECRET|PASSWORD|PASSWD|API_?KEY|ACCESS_KEY|PRIVATE_KEY|CREDENTIALS?)\b/;
 
 export type HookRiskTier = 'critical' | 'warning' | 'info';
 
@@ -81,6 +91,38 @@ function destinationTier(line: string): { tier: 'warning' | 'info'; dest: string
   return { tier: opaque ? 'warning' : 'info', dest: `${url.protocol}//${host}` };
 }
 
+const STATEMENT_WINDOW = 16_384;
+const STATEMENT_OVERLAP = 4_096;
+/** Words every download-and-execute pattern contains (a cheap prefilter). */
+const FETCH_WORD = /\b(?:curl|wget|iwr|irm|invoke-webrequest|invoke-restmethod|iex|invoke-expression)\b/i;
+
+/**
+ * The statements of a hook script, each analysed on its own: split at `;`,
+ * `&&`, `||` and newlines (a pipeline stays whole; a newline after `|`, `&&`,
+ * `||` or a backslash continues the statement), whitespace runs collapsed and
+ * duplicates dropped, so padding a command — thousands of `true;` or of
+ * spaces — cannot push a dangerous statement out of view. A statement longer
+ * than 16 KiB is read in 16 KiB windows overlapping by 4 KiB. Linear in the
+ * script's length; the patterns only ever see bounded text.
+ */
+export function hookStatements(script: string): string[] {
+  const joined = script.replace(/\\\r?\n|(\|\|?|&&)[ \t]*\r?\n/g, (_m, op: string | undefined) => (op ? `${op} ` : ' '));
+  const out = new Set<string>();
+  for (const raw of joined.split(/;|&&|\|\||\r?\n/)) {
+    const stmt = raw.replace(/\s+/g, ' ').trim();
+    if (!stmt) continue;
+    if (stmt.length <= STATEMENT_WINDOW) {
+      out.add(stmt);
+      continue;
+    }
+    for (let i = 0; ; i += STATEMENT_WINDOW - STATEMENT_OVERLAP) {
+      out.add(stmt.slice(i, i + STATEMENT_WINDOW));
+      if (i + STATEMENT_WINDOW >= stmt.length) break;
+    }
+  }
+  return [...out];
+}
+
 /**
  * Risks in one hook's shell text (`command`, or a PowerShell variant).
  * critical: downloads and runs code, or sends credential files / secret
@@ -88,20 +130,30 @@ function destinationTier(line: string): { tier: 'warning' | 'info'; dest: string
  * plaintext, IP, paste/tunnel or computed destination, or re-evaluates
  * expanded text as code. info: sends hook input to a named https host (the
  * documented audit-logging shape — still everything the agent handles).
+ * The whole script is read, statement by statement (hookStatements).
+ * `expansion` says which `$` expansions count as data — each agent passes
+ * hookExpansion() with the path variables it sets for hooks.
  */
 export function hookCommandRisks(script: string, opts: { expansion?: RegExp } = {}): HookRisk[] {
-  const text = script.length > 16_384 ? script.slice(0, 16_384) : script;
+  const statements = hookStatements(script);
   const risks: HookRisk[] = [];
 
-  const fetchExec = scanWithPatterns(text, FETCH_EXEC_RULES);
+  let fetchExec: ReturnType<typeof scanWithPatterns> = [];
+  for (const stmt of statements) {
+    if (!FETCH_WORD.test(stmt)) continue;
+    fetchExec = scanWithPatterns(stmt, FETCH_EXEC_RULES);
+    if (fetchExec.length > 0) break;
+  }
   if (fetchExec.length > 0) {
     risks.push({ tier: 'critical', reason: `downloads and executes code (${fetchExec[0].description.toLowerCase()}) every time the hook fires` });
   }
 
-  const credentials = scanWithPatterns(text, CREDENTIAL_RULES).length > 0 || SECRET_MATERIAL.test(text);
-  for (const line of text.split('\n')) {
-    if (!CURL_SEND.test(line) && !WGET_SEND.test(line) && !RAW_SOCKET_SEND.test(line)) continue;
-    const { tier, dest } = destinationTier(line);
+  // Credential material anywhere in the script taints a send anywhere in it
+  // (`cp ~/.ssh/id_rsa /tmp/k; curl -T /tmp/k …`).
+  const credentials = statements.some(stmt => SECRET_MATERIAL.test(stmt) || scanWithPatterns(stmt, CREDENTIAL_RULES).length > 0);
+  for (const stmt of statements) {
+    if (!CURL_SEND.test(stmt) && !WGET_SEND.test(stmt) && !RAW_SOCKET_SEND.test(stmt)) continue;
+    const { tier, dest } = destinationTier(stmt);
     if (credentials) {
       risks.push({ tier: 'critical', reason: `sends credential files, secret variables or the environment over the network (${dest})` });
     } else if (tier === 'warning') {
@@ -112,9 +164,9 @@ export function hookCommandRisks(script: string, opts: { expansion?: RegExp } = 
     break;
   }
 
-  if (evaluatesDynamicText(text, opts.expansion)) {
+  if (statements.some(stmt => evaluatesDynamicText(stmt, opts.expansion))) {
     risks.push({ tier: 'warning', reason: 're-evaluates expanded text (eval/exec or an outer-quoted sh -c script) — hook input becomes code' });
-  } else if (fetchExec.length === 0 && PIPE_TO_SHELL_PATTERN.test(text)) {
+  } else if (fetchExec.length === 0 && statements.some(stmt => PIPE_TO_SHELL_PATTERN.test(stmt))) {
     risks.push({ tier: 'warning', reason: 'pipes data into a shell — hook input or command output runs as a script' });
   }
   return risks;
