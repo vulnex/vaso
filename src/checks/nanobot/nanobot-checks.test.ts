@@ -541,6 +541,25 @@ describe('NB-012: unpinned MCP server packages', () => {
     expect(r.evidence!.map(e => e.snippet).join('\n')).toContain('tools.mcpServers.fs');
   });
 
+  it('reads every runner the shared parser knows (uv tool run, npm exec, yarn dlx, env npx)', async () => {
+    const ctx = await makeCtx(merge(onboardConfig(), {
+      tools: {
+        mcpServers: {
+          uvtool: { command: 'uv', args: ['tool', 'run', 'mcp-server-git'] },
+          npmexec: { command: 'npm', args: ['exec', '--yes', 'some-mcp'] },
+          yarndlx: { command: 'yarn', args: ['dlx', 'some-mcp@^1'] },
+          envnpx: { command: '/usr/bin/env', args: ['npx', '-y', 'some-mcp'] },
+          uvxfrom: { command: 'uvx', args: ['--from', 'mcp-server-time==2025.9.25', 'mcp-server-time'] },
+          npmpinned: { command: 'npm', args: ['exec', '--yes', '--package=some-mcp@1.0.0', '--', 'some-mcp'] },
+        },
+      },
+    }));
+    const r = await check('NB-012').run(ctx);
+    expect(r.evidence!.map(e => e.snippet!.split(':')[0]).sort()).toEqual([
+      'tools.mcpServers.envnpx', 'tools.mcpServers.npmexec', 'tools.mcpServers.uvtool', 'tools.mcpServers.yarndlx',
+    ]);
+  });
+
   it('does not grep free text (skills mentioning npx are not MCP servers)', async () => {
     const ctx = await makeCtx(merge(onboardConfig(), { agents: { defaults: { botName: 'run npx something' } } }));
     expect((await check('NB-012').run(ctx)).passed).toBe(true);

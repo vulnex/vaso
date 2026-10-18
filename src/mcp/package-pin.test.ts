@@ -30,6 +30,15 @@ describe('runnerPackage', () => {
     expect(pkg('cmd', '/c', 'node', 'server.js')).toBeUndefined();
   });
 
+  it('reads packages behind an `env` launcher', () => {
+    expect(pkg('/usr/bin/env', 'npx', '-y', 'some-mcp')).toMatchObject({ runner: 'npx', name: 'some-mcp', pin: 'none' });
+    expect(pkg('env', 'NODE_OPTIONS=--no-warnings', '-u', 'DEBUG', 'npx', '-y', 'pkg@1.2.3')).toMatchObject({ pin: 'exact' });
+    expect(pkg('env', '-S', 'uvx mcp-server-fetch')).toMatchObject({ runner: 'uvx', pin: 'none' });
+    expect(pkg('env', '-i', 'PATH=/usr/bin', 'cmd', '/c', 'npx', 'pkg')).toMatchObject({ pin: 'none' });
+    expect(pkg('/usr/bin/env', 'node', 'server.js')).toBeUndefined();
+    expect(pkg('env', 'A=1')).toBeUndefined();
+  });
+
   it('describes the problem as a clause of its own', () => {
     expect(pinProblem(pkg('npx', '-y', 'pkg')!)).toBe('"pkg" via npx has no version pin');
   });

@@ -9,7 +9,8 @@ import { basename } from 'node:path';
  * `uvx --from pkg==1.2.3 cmd` (uv's documented exact pin) as unpinned.
  *
  * Runners: npx, bunx, `bun x`, pnpx, `pnpm dlx`, `yarn dlx`, `npm exec`/`npm x`,
- * uvx, `uv tool run`, `pipx run` — also behind Windows' `cmd /c` wrapper.
+ * uvx, `uv tool run`, `pipx run` — also behind Windows' `cmd /c` wrapper and
+ * `env` (`/usr/bin/env npx …`, `env NODE_OPTIONS=… npx …`).
  */
 
 export type PinKind =
@@ -60,6 +61,36 @@ export function windowsCmdTarget(command: unknown, rawArgs: unknown): { command:
   return { command: rest[0], args: rest.slice(1), plain };
 }
 
+/**
+ * The program an `env` launcher runs (`/usr/bin/env npx -y pkg`,
+ * `env -u VAR NAME=value npx …`, `env -S "npx -y pkg"`): its options and
+ * variable assignments skipped. undefined when the command isn't `env` or
+ * runs nothing.
+ */
+export function envTarget(command: unknown, rawArgs: unknown): { command: string; args: string[] } | undefined {
+  if (typeof command !== 'string' || commandName(command) !== 'env') return undefined;
+  let args = Array.isArray(rawArgs) ? rawArgs.filter((a): a is string => typeof a === 'string') : [];
+  let i = 0;
+  while (i < args.length) {
+    const a = args[i];
+    if (a === '-S' || a === '--split-string') {
+      // The next argument holds the rest of the command line
+      args = [...args.slice(0, i), ...(args[i + 1] ?? '').trim().split(/\s+/).filter(Boolean), ...args.slice(i + 2)];
+      continue;
+    }
+    const split = /^(?:-S|--split-string=)(.+)$/.exec(a);
+    if (split) {
+      args = [...args.slice(0, i), ...split[1].trim().split(/\s+/).filter(Boolean), ...args.slice(i + 1)];
+      continue;
+    }
+    if (a === '-u' || a === '--unset' || a === '-C' || a === '--chdir') { i += 2; continue; }
+    if (a === '--') { i++; break; }
+    if (a.startsWith('-') || /^[A-Za-z_][A-Za-z0-9_]*=/.test(a)) { i++; continue; }
+    break;
+  }
+  return i < args.length ? { command: args[i], args: args.slice(i + 1) } : undefined;
+}
+
 const NPX_VALUE_FLAGS = new Set(['--registry', '--cache', '--userconfig', '--prefix', '-c', '--call', '--node-options', '--workspace', '-w', '--shell', '--script-shell']);
 const UV_VALUE_FLAGS = new Set([
   '--directory', '--project', '--python', '-p', '--with', '--with-editable',
@@ -101,7 +132,7 @@ function afterSubcommand(args: string[], words: string[][]): string[] | undefine
 /** What `command args…` installs, if it is a package runner. */
 export function runnerPackage(command: unknown, rawArgs: unknown): RunnerPackage | undefined {
   if (typeof command !== 'string' || !command) return undefined;
-  const wrapped = windowsCmdTarget(command, rawArgs);
+  const wrapped = windowsCmdTarget(command, rawArgs) ?? envTarget(command, rawArgs);
   if (wrapped) return runnerPackage(wrapped.command, wrapped.args);
   const args = Array.isArray(rawArgs) ? rawArgs.filter((a): a is string => typeof a === 'string') : [];
   const cmd = commandName(command);
