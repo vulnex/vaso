@@ -70,26 +70,38 @@ export function segmentSnippet(segment: SourceSegment, max = 120): string {
  * whether *code* mentions a token rather than a log message saying "token".
  */
 export function withoutStringText(text: string): string {
+  return splitStrings(text).code;
+}
+
+/**
+ * `withoutStringText`, plus the string contents it blanked: one entry per
+ * literal, and per text part of a template literal (escapes kept as written).
+ */
+export function splitStrings(text: string): { code: string; strings: string[] } {
   let out = '';
+  const strings: string[] = [];
+  let current = '';
   let quote: string | undefined; // current string delimiter
   const templateDepth: number[] = []; // brace depth at each open `${`
   let braces = 0;
   for (let i = 0; i < text.length; i++) {
     const c = text[i];
     if (quote) {
-      if (c === '\\') { i++; continue; }
+      if (c === '\\') { current += text.slice(i, i + 2); i++; continue; }
       if (quote === '`' && c === '$' && text[i + 1] === '{') {
         out += '${';
         i++;
         templateDepth.push(braces);
         braces++;
         quote = undefined;
+        strings.push(current);
         continue;
       }
-      if (c === quote) { out += c; quote = undefined; }
+      if (c === quote) { out += c; quote = undefined; strings.push(current); continue; }
+      current += c;
       continue;
     }
-    if (c === '"' || c === "'" || c === '`') { out += c; quote = c; continue; }
+    if (c === '"' || c === "'" || c === '`') { out += c; quote = c; current = ''; continue; }
     if (c === '{') braces++;
     if (c === '}') {
       braces--;
@@ -97,12 +109,14 @@ export function withoutStringText(text: string): string {
         templateDepth.pop();
         out += c;
         quote = '`'; // back inside the template text
+        current = '';
         continue;
       }
     }
     out += c;
   }
-  return out;
+  if (quote) strings.push(current);
+  return { code: out, strings };
 }
 
 /**

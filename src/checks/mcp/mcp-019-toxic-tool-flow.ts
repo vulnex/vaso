@@ -1,5 +1,9 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { splitStrings } from '../../mcp/source-segments.js';
+
+// SQL, not the word: `SELECT … FROM`, or lower-case `select *` / `select a, b`.
+const SQL_TEXT = /\bSELECT\b[^;]{0,200}?\bFROM\b|\bselect\s+(?:\*|\w+\s*,)[^;]{0,200}?\bfrom\b/;
 
 const SOURCE_PATTERNS = [
   /readFile(?:Sync)?/,
@@ -8,8 +12,7 @@ const SOURCE_PATTERNS = [
   /execSync|exec\s*\(/,
   /spawn\s*\(/,
   /\bquery\s*\(/,
-  // SQL, not the word: `SELECT … FROM`, or lower-case `select *` / `select a, b`.
-  /\bSELECT\b[^;]{0,200}?\bFROM\b|\bselect\s+(?:\*|\w+\s*,)[^;]{0,200}?\bfrom\b/,
+  SQL_TEXT,
   /db\.(get|all|run)\s*\(/,
   /process\.env/,
   /homedir\(\)/,
@@ -46,9 +49,22 @@ interface ToolClassification {
   sinkCapabilities: string[];
 }
 
-function classifyToolHandler(handlerCode: string): { isSource: boolean; isSink: boolean; sourceCapabilities: string[]; sinkCapabilities: string[] } {
+/**
+ * What a handler does, without what it says: code with comments dropped, and
+ * the strings it uses as data — URLs, paths, file names (no whitespace) and
+ * SQL. A tool description warning "never paste your credentials" or naming
+ * Slack is prose, not a source or a sink.
+ */
+function handlerText(body: string): string {
+  const { code, strings } = splitStrings(body);
+  const data = strings.filter((s) => !/\s/.test(s) || SQL_TEXT.test(s));
+  return [code.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, ' '), ...data].join('\n');
+}
+
+function classifyToolHandler(body: string): { isSource: boolean; isSink: boolean; sourceCapabilities: string[]; sinkCapabilities: string[] } {
   const sourceCapabilities: string[] = [];
   const sinkCapabilities: string[] = [];
+  const handlerCode = handlerText(body);
 
   for (const pattern of SOURCE_PATTERNS) {
     const match = pattern.exec(handlerCode);

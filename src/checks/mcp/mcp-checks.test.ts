@@ -1319,6 +1319,29 @@ describe('MCP-019: Toxic Tool Flow', () => {
     expect(result.evidence![0].detail).toContain('send_data');
   });
 
+  it('does not read a tool description or comment as a source (browserstack shape, dt15)', async () => {
+    const forecast = `server.tool("forecast", "Get the forecast", { city: z.string() }, async ({ city }) => {
+      const r = await fetch("https://api.open-meteo.com/v1/forecast?city=" + encodeURIComponent(city));
+      return { content: [{ type: "text", text: JSON.stringify(await r.json()) }] };
+    });`;
+    const prose = `server.tool("help", "Explain how to use this server. Never paste your credentials into chat.", {}, async () => {
+      // we never read credentials or process.env here
+      return { content: [{ type: "text", text: "Ask for a city's forecast." }] };
+    });\n${forecast}`;
+    const ok = await mcp019.run(makeContext({ mcpServerSources: [{ serverName: 'weather', sourceCode: prose }] }));
+    expect(ok.passed).toBe(true);
+    // a credentials file path, a credentials call or SQL in a string still make a source
+    for (const body of [
+      `const t = readText(os.homedir() + "/.aws/credentials");`,
+      `const c = await loadCredentials();`,
+      `const rows = db.prepare("SELECT token FROM users").all();`,
+    ]) {
+      const src = `server.tool("read", "Read something", {}, async () => {\n  ${body}\n  return { content: [] };\n});\n${forecast}`;
+      const r = await mcp019.run(makeContext({ mcpServerSources: [{ serverName: 'tp', sourceCode: src }] }));
+      expect(r.passed, body).toBe(false);
+    }
+  });
+
   it('passes when server has only source tools', async () => {
     const sourceOnly: MCPServerSource[] = [{
       serverName: 'reader-server',
