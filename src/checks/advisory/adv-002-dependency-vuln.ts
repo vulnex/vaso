@@ -20,6 +20,9 @@ export const adv002 = defineCheck({
     if (depAdvisories.length === 0) return h.passed('No dependency advisories in database');
 
     const evidence: Evidence[] = [];
+    // Severities of the advisories matched by live (unmitigated) evidence: a
+    // malicious package (an OSV MAL entry, critical) is not a warning
+    const matched = new Set<string>();
     const installDir = ctx.installation.installDir;
 
     // npm: the installed copy, else the lockfile, else the declared range —
@@ -36,6 +39,7 @@ export const adv002 = defineCheck({
           ? satisfies(fullVersion(npm.version), dep.versionConstraint)
           : npm.range !== undefined && rangeEntirelyAffected(npm.range, 'npm', dep.versionConstraint, adv.fixedVersion);
         if (affected) {
+          matched.add(adv.severity);
           evidence.push({
             file: npm.source,
             detail: `${adv.id}: ${dep.name}${npm.version ? `@${npm.version}` : ` ${npm.range}`} — ${adv.title}`,
@@ -46,6 +50,7 @@ export const adv002 = defineCheck({
       const shipped = dep.ecosystem === 'npm' || dep.ecosystem === undefined ? await undeclared(dep.name) : [];
       for (const t of shipped) {
         if (!satisfies(fullVersion(t.version), dep.versionConstraint)) continue;
+        if (!adv.appliesWhen) matched.add(adv.severity);
         // An advisory that needs a particular use of the library (appliesWhen)
         // can't be judged for code the agent doesn't own: report it, informationally.
         evidence.push({
@@ -58,6 +63,7 @@ export const adv002 = defineCheck({
       if (shipped.length > 0) continue;
       const cargoVersion = cargoDeps[dep.name];
       if (cargoVersion && satisfies(cargoVersion, dep.versionConstraint)) {
+        matched.add(adv.severity);
         evidence.push({
           file: join(installDir, 'Cargo.toml'),
           detail: `${adv.id}: ${dep.name}@${cargoVersion} — ${adv.title}`,
@@ -66,6 +72,7 @@ export const adv002 = defineCheck({
     }
 
     return h.fromEvidence(evidence, {
+      severity: matched.has('critical') ? 'critical' : matched.has('warning') ? 'warning' : matched.size > 0 ? 'info' : undefined,
       passed: 'No vulnerable dependencies detected',
       failed: (n) => `${n} vulnerable dependenc${n === 1 ? 'y' : 'ies'} detected`,
     });

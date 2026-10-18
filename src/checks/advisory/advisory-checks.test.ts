@@ -191,6 +191,24 @@ describe('ADV-002: Dependency Vulnerability', () => {
     }
   });
 
+  it('reports at the matched advisory\'s severity: a malicious package is critical (dt17)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'vaso-adv002-'));
+    try {
+      writeFileSync(join(dir, 'package.json'), JSON.stringify({ dependencies: { 'agenthub-multiagent-mcp': '1.64.0' } }));
+      const mal = await adv002.run(makeContext({ installDir: dir }));
+      expect(mal.passed).toBe(false);
+      expect(mal.severity).toBe('critical');
+      expect(mal.evidence?.some(e => e.detail?.includes('MAL-2026-13399'))).toBe(true);
+      // a warning-level CVE stays a warning
+      writeFileSync(join(dir, 'package.json'), JSON.stringify({ dependencies: { 'mcp-memory-keeper': '0.12.0' } }));
+      const cve = await adv002.run(makeContext({ installDir: dir }));
+      expect(cve.passed).toBe(false);
+      expect(cve.severity).toBe('warning');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('finds an undeclared (transitive) vulnerable package installed or locked', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'vaso-adv002-'));
     try {
