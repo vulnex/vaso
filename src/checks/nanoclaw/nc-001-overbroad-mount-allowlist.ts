@@ -1,6 +1,6 @@
 import { posix } from 'node:path';
 import { defineCheck } from '../../core/check-builder.js';
-import type { Severity } from '../../core/types.js';
+import type { ScanContext, Severity } from '../../core/types.js';
 import { allowlistConfig, checkoutDir, Findings } from './shared.js';
 
 /**
@@ -16,6 +16,13 @@ import { allowlistConfig, checkoutDir, Findings } from './shared.js';
  * `~` (or `/`) makes every credential beneath it mountable. `allowReadWrite`
  * is per root; a legacy `readOnly` key is translated (`allowReadWrite =
  * !readOnly`), and neither key means read-only. `nonMainReadOnly` is ignored.
+ *
+ * loadMountAllowlist() refuses the whole file — and so blocks every additional
+ * mount — unless it is strict JSON with both `allowedRoots` and
+ * `blockedPatterns` arrays (a null root entry makes it throw too). Roots are
+ * compared after realpath(), so a symlinked root is judged by its target; an
+ * entry without a string `path` becomes "" — the host process's cwd, the
+ * checkout.
  */
 
 /** Credential stores whose mounts upstream's built-in blocked patterns already refuse. */
@@ -31,15 +38,28 @@ const KERNEL_DIRS = ['/proc', '/sys', '/dev'];
 
 interface Root { path: string; readWrite: boolean }
 
-function normalizeRoot(entry: unknown): Root | undefined {
-  if (typeof entry === 'string') return { path: entry, readWrite: false };
-  if (!entry || typeof entry !== 'object') return undefined;
-  const r = entry as Record<string, unknown>;
-  if (typeof r.path !== 'string' || !r.path.trim()) return undefined;
+/** Upstream normalizeRoot(): a non-object entry or a missing path is "". */
+function normalizeRoot(entry: unknown): Root {
+  const r = (entry && typeof entry === 'object' ? entry : {}) as Record<string, unknown>;
   const readWrite = typeof r.allowReadWrite === 'boolean'
     ? r.allowReadWrite
     : typeof r.readOnly === 'boolean' ? !r.readOnly : false;
-  return { path: r.path.trim(), readWrite };
+  return { path: typeof r.path === 'string' ? r.path : '', readWrite };
+}
+
+/** Why NanoClaw refuses the file (and blocks all additional mounts), if it does. */
+function rejectedBy(raw: string): string | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return 'is not strict JSON';
+  }
+  const data = (parsed && typeof parsed === 'object' ? parsed : {}) as Record<string, unknown>;
+  if (!Array.isArray(data.allowedRoots)) return 'has no allowedRoots array';
+  if (!Array.isArray(data.blockedPatterns)) return 'has no blockedPatterns array';
+  if (data.allowedRoots.some(e => e === null)) return 'has a null allowedRoots entry';
+  return undefined;
 }
 
 function expand(p: string, home: string, base: string): string {
@@ -55,10 +75,17 @@ function contains(a: string, b: string): boolean {
   return b === a || b.startsWith(a + '/');
 }
 
-function classify(root: Root, home: string, checkout: string | undefined): { detail: string; severity: Severity } | undefined {
-  const abs = expand(root.path, home, checkout ?? home);
+async function real(fs: ScanContext['fs'], p: string): Promise<string> {
+  try {
+    return await fs.realpath(p);
+  } catch {
+    return p; // not there (or not collected): judged as written
+  }
+}
+
+function classify(root: Root, abs: string, home: string, checkout: string | undefined): { detail: string; severity: Severity } | undefined {
   const mode = root.readWrite ? 'read-write' : 'read-only';
-  const label = `allowedRoots "${root.path}" (${mode})`;
+  const label = `allowedRoots "${root.path}"${abs !== expand(root.path, home, checkout ?? home) ? ` (→ ${abs})` : ''} (${mode})`;
 
   if (abs === '/') {
     return { severity: 'critical', detail: `${label} grants the entire host filesystem to agent containers` };
@@ -117,18 +144,22 @@ export const nc001 = defineCheck({
     const config = allowlistConfig(ctx);
     if (!config) return h.passed('No mount allowlist (additional mounts are blocked)');
 
-    const roots = config.data?.allowedRoots;
-    if (!Array.isArray(roots)) {
-      return h.passed('Mount allowlist has no allowedRoots array (NanoClaw rejects it and blocks additional mounts)');
+    const rejected = rejectedBy(config.raw);
+    if (rejected) {
+      return h.passed(`Mount allowlist ${rejected} — NanoClaw rejects it and blocks additional mounts`);
     }
+    const roots = config.data.allowedRoots as unknown[];
 
-    const home = ctx.fs.homedir();
-    const checkout = checkoutDir(ctx);
+    // Upstream compares realpaths: a symlinked root, home or checkout is judged by its target
+    const lexicalHome = ctx.fs.homedir();
+    const home = await real(ctx.fs, lexicalHome);
+    const lexicalCheckout = checkoutDir(ctx);
+    const checkout = lexicalCheckout ? await real(ctx.fs, lexicalCheckout) : undefined;
     const findings = new Findings();
     for (const entry of roots) {
       const root = normalizeRoot(entry);
-      if (!root) continue;
-      const hit = classify(root, home, checkout);
+      const abs = await real(ctx.fs, expand(root.path, lexicalHome, lexicalCheckout ?? lexicalHome));
+      const hit = classify(root, abs, home, checkout);
       if (hit) findings.add({ file: config.filePath, detail: hit.detail }, hit.severity);
     }
 

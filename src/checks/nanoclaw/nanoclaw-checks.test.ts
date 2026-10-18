@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { join } from 'node:path';
-import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, rmSync, statSync, realpathSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, rmSync, statSync, realpathSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import type { ScanContext, ParsedConfig, AgentInstallation } from '../../core/types.js';
 import type { FSProvider } from '../../core/fs-provider.js';
@@ -123,7 +123,7 @@ describe('NC-001: Overbroad Mount Allowlist (allowedRoots)', () => {
       privilege: { uid: 0, username: 'root', isRoot: true, sudoAvailable: false, escalated: false, scannedUsers: ['root'], skippedPaths: [] },
       files: {}, directories: {}, directoryModes: { '/': 0o755, '/root': 0o700 }, commandOutputs: {}, env: {},
     });
-    const config = allowlist({ allowedRoots: [{ path: '~/projects', allowReadWrite: true }, { path: '~/Documents/work', allowReadWrite: false }] },
+    const config = allowlist({ allowedRoots: [{ path: '~/projects', allowReadWrite: true }, { path: '~/Documents/work', allowReadWrite: false }], blockedPatterns: [] },
       '/root/.config/nanoclaw/mount-allowlist.json');
     const r = await check.run({
       installation: { agent: 'nanoclaw', installDir: '/root/nanoclaw', configFiles: [config] },
@@ -164,6 +164,52 @@ describe('NC-001: Overbroad Mount Allowlist (allowedRoots)', () => {
       { path: '/var/lib/data-share', allowReadWrite: false },
     ]);
     expect(r.passed).toBe(true);
+  });
+
+  it('passes an allowlist NanoClaw refuses (it then blocks every additional mount)', async () => {
+    const home = [{ path: '~', allowReadWrite: true }];
+    // no blockedPatterns array (upstream: "blockedPatterns must be an array")
+    const noPatterns = await check.run(ctx({ configs: [allowlist({ allowedRoots: home })] }));
+    expect(noPatterns.passed).toBe(true);
+    expect(noPatterns.message).toMatch(/no blockedPatterns array.*blocks additional mounts/);
+    // JSON.parse, not JSONC
+    const jsonc = { ...allowlist({ allowedRoots: home, blockedPatterns: [] }), raw: '// mounts\n{"allowedRoots":[{"path":"~","allowReadWrite":true}],"blockedPatterns":[]}' };
+    expect((await check.run(ctx({ configs: [jsonc] }))).message).toMatch(/not strict JSON/);
+    // a null entry makes normalizeRoot throw
+    expect((await check.run(ctx({ configs: [allowlist({ allowedRoots: [...home, null], blockedPatterns: [] })] }))).passed).toBe(true);
+    // the same roots in an accepted file are the critical finding
+    expect((await check.run(ctx({ configs: [allowlist({ allowedRoots: home, blockedPatterns: [] })] }))).severity).toBe('critical');
+  });
+
+  it('an entry without a string path is the host cwd (the checkout)', async () => {
+    const r = await run(['~']);
+    expect(r.severity).toBe('critical');
+    expect(r.evidence?.[0].detail).toMatch(/NanoClaw checkout/);
+  });
+
+  describe('roots compared after realpath', () => {
+    let home: string;
+    beforeEach(() => { home = realpathSync(mkdtempSync(join(tmpdir(), 'vaso-nc001-'))); });
+    afterEach(() => rmSync(home, { recursive: true, force: true }));
+
+    const scan = (roots: unknown[]) => {
+      const local = new LocalFSProvider();
+      const fs = Object.assign(Object.create(local) as FSProvider, { homedir: () => home });
+      const config = allowlist({ allowedRoots: roots, blockedPatterns: [] }, join(home, '.config/nanoclaw/mount-allowlist.json'));
+      return check.run({ installation: { agent: 'nanoclaw', installDir: join(home, '.config/nanoclaw'), configFiles: [config] }, configs: [config], platform: 'linux', fs });
+    };
+
+    it('flags a project root that is a symlink to the home directory', async () => {
+      symlinkSync('.', join(home, 'projects'));
+      const r = await scan([{ path: '~/projects', allowReadWrite: true }]);
+      expect(r.severity).toBe('critical');
+      expect(r.evidence?.[0].detail).toMatch(/→ .*whole home directory/);
+    });
+
+    it('passes a real project directory', async () => {
+      mkdirSync(join(home, 'projects'));
+      expect((await scan([{ path: '~/projects', allowReadWrite: true }])).passed).toBe(true);
+    });
   });
 
   it('passes without an allowlist or with the --empty template', async () => {

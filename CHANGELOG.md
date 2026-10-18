@@ -74,6 +74,11 @@ This project adheres to [Semantic Versioning](https://semver.org/).
   - `secrets.providers.*` file providers named in the config
 
   The fix removes group and other access. Remote scans collect these stores as metadata only, in every state directory. A secrets file at a configured path is checked on local scans only.
+- **NC-001 judges the mount allowlist the way NanoClaw loads it** (`src/modules/mount-security`).
+  - NanoClaw refuses an allowlist without a `blockedPatterns` array, one that isn't strict JSON, or one with a `null` root, and then blocks every additional mount. Such a file is no longer reported as a critical home-directory grant.
+  - Roots are compared after resolving symlinks: `~/projects` pointing at `~` is now the critical whole-home grant it is.
+  - An entry without a string `path` is judged as NanoClaw's working directory, the checkout.
+  - Remote scans judge symlinked roots as written.
  One gap remains: a `~` in `OPENCLAW_STATE_DIR` combined with `OPENCLAW_HOME` is expanded against the OS home there.
 
 ## [1.3.1] - 2026-10-16
