@@ -244,6 +244,12 @@ export async function fetchAndUpdateFeed(options: FetchOptions = {}): Promise<Up
     return { success: false, message: `Failed to fetch feed: ${msg}` };
   }
 
+  // Signature first: nothing in an unsigned response is trusted — not even
+  // its version number, which would otherwise decide what is reported
+  if (!verifyFeedSignature(feedBytes, sigBase64, publicKeyPem)) {
+    return { success: false, message: 'Feed signature verification failed.' };
+  }
+
   let feed: IOCFeed;
   try {
     feed = JSON.parse(feedBytes.toString('utf-8'));
@@ -260,11 +266,6 @@ export async function fetchAndUpdateFeed(options: FetchOptions = {}): Promise<Up
       success: true,
       message: `Feed version ${feed.meta.version} is not newer than cached version ${currentVersion}.`,
     };
-  }
-
-  // Verify signature
-  if (!verifyFeedSignature(feedBytes, sigBase64, publicKeyPem)) {
-    return { success: false, message: 'Feed signature verification failed.' };
   }
 
   // Persist feed, signature, and metadata

@@ -182,6 +182,11 @@ export async function fetchAndUpdateAdvisoryFeed(
     return { success: false, message: `Failed to fetch advisory feed: ${msg}` };
   }
 
+  // Signature first: an unsigned response's version number is not trusted either
+  if (!verifyFeedSignature(feedBytes, sigBase64, publicKeyPem)) {
+    return { success: false, message: 'Advisory feed signature verification failed.' };
+  }
+
   let feed: AdvisoryFeed;
   try {
     feed = JSON.parse(feedBytes.toString('utf-8'));
@@ -197,10 +202,6 @@ export async function fetchAndUpdateAdvisoryFeed(
       success: true,
       message: `Advisory feed version ${feed.meta.version} is not newer than cached version ${currentVersion}.`,
     };
-  }
-
-  if (!verifyFeedSignature(feedBytes, sigBase64, publicKeyPem)) {
-    return { success: false, message: 'Advisory feed signature verification failed.' };
   }
 
   await writeFile(join(feedDir, FEED_FILE), feedBytes);

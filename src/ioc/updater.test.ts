@@ -436,6 +436,22 @@ describe('fetchAndUpdateFeed', () => {
     expect(JSON.parse(await readFile(join(tmpDir, 'metadata.json'), 'utf-8')).feedVersion).toBe(5);
   });
 
+  it('an unsigned response is a signature failure even when its version is not newer', async () => {
+    const meta: IOCFeedMetadata = {
+      lastUpdated: new Date().toISOString(), feedVersion: 5, feedUrl: 'https://example.com/feed.json', lastCheckAt: new Date(0).toISOString(),
+    };
+    await writeFile(join(tmpDir, 'metadata.json'), JSON.stringify(meta));
+    const feedBytes = Buffer.from(JSON.stringify(makeFeed({ meta: { version: 1, timestamp: new Date().toISOString(), description: 'unsigned' }, data: {} })));
+    const badSig = Buffer.alloc(64).toString('base64');
+    vi.stubGlobal('fetch', vi.fn().mockImplementation((url: string) => {
+      const body = url.endsWith('.sig') ? Buffer.from(badSig) : feedBytes;
+      return Promise.resolve({ ok: true, text: () => Promise.resolve(body.toString()), arrayBuffer: () => Promise.resolve(body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength)) });
+    }));
+    const result = await fetchAndUpdateFeed({ feedUrl: 'https://example.com/feed.json', feedDir: tmpDir, publicKeyPem: testPublicKeyPem });
+    expect(result.success).toBe(false);
+    expect(result.message).toContain('signature verification failed');
+  });
+
   it('re-installs the same version when the cached feed is missing, without --force', async () => {
     const meta: IOCFeedMetadata = {
       lastUpdated: new Date().toISOString(), feedVersion: 4,
