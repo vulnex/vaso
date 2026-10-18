@@ -124,7 +124,9 @@ export class SnapshotFSProvider implements FSProvider {
       if (fullPath in symlinks) {
         return { name, isFile: false, isDirectory: false, isSymbolicLink: true, parentPath: path };
       }
-      const isFile = fullPath in this.snapshot.files && this.snapshot.files[fullPath].exists;
+      // A FIFO or device is neither a file nor a directory to a local readdir
+      const entry = this.snapshot.files[fullPath];
+      const isFile = entry?.exists === true && entry.omitted !== 'special';
       const isDir = rawDirs.has(name) || this.directoryExists(fullPath) || this.hasChildPaths(fullPath);
       return {
         name,
@@ -351,13 +353,14 @@ export class SnapshotFSProvider implements FSProvider {
     const prefix = basePath.endsWith('/') ? basePath : basePath + '/';
 
     const symlinks = this.snapshot.symlinks ?? {};
-    const entry = (filePath: string, isLink: boolean): DirentInfo => {
+    const entry = (filePath: string, isLink: boolean, special = false): DirentInfo => {
       const relative = filePath.slice(prefix.length);
       const name = relative.split('/').pop() || relative;
       const parentPath = filePath.slice(0, filePath.length - name.length - 1) || basePath;
       return isLink
         ? { name, isFile: false, isDirectory: false, isSymbolicLink: true, parentPath }
-        : { name, isFile: true, isDirectory: false, parentPath };
+        // A FIFO or device (probe ≥ 1.3.1 says so) is no file to a local walk
+        : { name, isFile: !special, isDirectory: false, parentPath };
     };
 
     // Like a local walk, never descend through a symlinked directory: the
@@ -375,7 +378,7 @@ export class SnapshotFSProvider implements FSProvider {
 
     for (const [filePath, file] of Object.entries(this.snapshot.files)) {
       if (!filePath.startsWith(prefix) || !file.exists || behindLink(filePath)) continue;
-      results.push(entry(filePath, filePath in symlinks));
+      results.push(entry(filePath, filePath in symlinks, file.omitted === 'special'));
     }
     // Links to directories have no file entry, and dangling or looping links
     // a non-existent one; a local listing shows them all as links

@@ -749,5 +749,12 @@ describe('SnapshotFSProvider special files', () => {
     });
     expect((await fs.stat('/h/.gemini/oauth_creds.json')).isFile()).toBe(false);
     expect((await fs.stat('/h/.gemini/settings.json')).isFile()).toBe(true);
+    // Nor lists it as one, as a local readdir doesn't (a FIFO in a skill dir
+    // added remote-only "not scanned" evidence)
+    for (const recursive of [false, true]) {
+      const entries = await fs.readdirEntries('/h/.gemini', { recursive });
+      expect(entries.filter(e => e.isFile).map(e => e.name)).toEqual(['settings.json']);
+      expect(entries.map(e => e.name).sort()).toEqual(['oauth_creds.json', 'settings.json']);
+    }
   });
 });

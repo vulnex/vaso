@@ -93,9 +93,14 @@ export const skl002 = defineCheck({
     // every check while the agent still loads its SKILL.md by name
     for (const skillsDir of skillsDirsOf(ctx)) {
       for (const dir of await unlistableSkillDirs(skillsDir, ctx.fs)) {
+        // Mode 000 (no search bit either) can't be entered: not even the
+        // agent, running as this user, reads its SKILL.md
+        const enterable = await ctx.fs.stat(dir).then(st => (st.mode & 0o111) !== 0, () => true);
         evidence.push({
           file: dir,
-          detail: 'Skill directory can be entered but not listed — its files are hidden from review and from these checks (the agent still loads SKILL.md by name)',
+          detail: enterable
+            ? 'Skill directory can be entered but not listed — its files are hidden from review and from these checks (the agent still loads SKILL.md by name)'
+            : 'Skill directory can\'t be read or entered — its files are hidden from review and from these checks (an agent running with more privileges than this scan still loads them)',
         });
       }
     }
