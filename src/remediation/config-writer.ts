@@ -2,7 +2,7 @@ import { readRegularFile, writeRegularFile, chmodNoFollow, regularMode, UnsafeTa
 import YAML from 'yaml';
 import { parse as parseTOML, stringify as stringifyTOML } from 'smol-toml';
 import type { FixResult, ParsedConfig } from '../core/types.js';
-import { getNestedValue, setNestedValue } from '../core/utils.js';
+import { getNestedValue, keySegments, setNestedValue, type KeyPath } from '../core/utils.js';
 import { loadConfig } from '../core/config-loader.js';
 import { parseJsonLenient } from '../core/jsonc.js';
 
@@ -46,7 +46,7 @@ export async function updateEnvFile(filePath: string, key: string, value: string
 /**
  * Update a nested value in a JSON file, detecting and preserving indentation.
  */
-export async function updateJsonFile(filePath: string, keyPath: string, value: unknown): Promise<void> {
+export async function updateJsonFile(filePath: string, keyPath: KeyPath, value: unknown): Promise<void> {
   const content = (await readRegularFile(filePath)).toString('utf-8');
   // JSONC/JSON5 configs load (see config-loader) — the fix must read them too.
   // They are written back as plain JSON, which both formats accept.
@@ -63,10 +63,10 @@ export async function updateJsonFile(filePath: string, keyPath: string, value: u
 /**
  * Update a nested value in a YAML file using Document API to preserve comments and structure.
  */
-export async function updateYamlFile(filePath: string, keyPath: string, value: unknown): Promise<void> {
+export async function updateYamlFile(filePath: string, keyPath: KeyPath, value: unknown): Promise<void> {
   const content = (await readRegularFile(filePath)).toString('utf-8');
   const doc = YAML.parseDocument(content);
-  const keys = keyPath.split('.');
+  const keys = keySegments(keyPath);
   doc.setIn(keys, value);
   await writeRegularFile(filePath, doc.toString());
 }
@@ -257,12 +257,12 @@ function editTomlText(content: string, path: string[], value: unknown): string |
  * before it is written. Layouts the line editor can't follow (inline tables,
  * arrays of tables) fall back to a full smol-toml re-serialization.
  */
-export async function updateTomlFile(filePath: string, keyPath: string, value: unknown): Promise<void> {
+export async function updateTomlFile(filePath: string, keyPath: KeyPath, value: unknown): Promise<void> {
   const content = (await readRegularFile(filePath)).toString('utf-8');
   const obj = parseTOML(content) as Record<string, unknown>;
   setNestedValue(obj, keyPath, value);
 
-  const edited = editTomlText(content, keyPath.split('.'), value);
+  const edited = editTomlText(content, keySegments(keyPath), value);
   if (edited !== undefined) {
     try {
       if (tomlEqual(parseTOML(edited), obj)) {
@@ -337,13 +337,18 @@ export async function restrictFilesToOwner(checkId: string, paths: Iterable<stri
 /**
  * Dispatcher: route to the correct writer based on config format.
  * For env files, keyPath should be the flat env var name (e.g., 'HTTP_HOST').
- * For json/yaml/toml files, keyPath is dot-separated (e.g., 'gateway.host').
+ * For json/yaml/toml files, keyPath is dot-separated (e.g., 'gateway.host'),
+ * or its segments when a key contains a dot (['risk_profiles', 'prod.v2']).
  */
-export async function updateConfigValue(config: ParsedConfig, keyPath: string, value: unknown): Promise<void> {
+export async function updateConfigValue(config: ParsedConfig, keyPath: KeyPath, value: unknown): Promise<void> {
   switch (config.format) {
-    case 'env':
-      await updateEnvFile(config.filePath, keyPath, String(value));
+    case 'env': {
+      const segs = keySegments(keyPath);
+      // a .env file is flat: a nested path has no variable to write
+      if (typeof keyPath !== 'string' && segs.length !== 1) throw new Error(`Cannot write a nested key to an env file: ${keyPath.join('.')}`);
+      await updateEnvFile(config.filePath, segs.join('.'), String(value));
       break;
+    }
     case 'json':
       await updateJsonFile(config.filePath, keyPath, value);
       break;
@@ -368,8 +373,8 @@ export interface FixUpdateSpec {
   checkId: string;
   /** Flat variable name for env-format configs. Omit → env files are skipped. */
   env?: string;
-  /** Dot-separated key path for json/yaml/toml configs. Omit → structured files are skipped. */
-  path?: string;
+  /** Key path for json/yaml/toml configs (segments when a key has a dot). Omit → structured files are skipped. */
+  path?: KeyPath;
   /** Value to write (structured formats; env too unless envValue is given). */
   value: unknown;
   /** Env-file value override for values whose String() form is wrong (e.g. arrays as CSV). */

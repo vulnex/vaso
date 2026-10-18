@@ -72,7 +72,6 @@ This project adheres to [Semantic Versioning](https://semver.org/).
   - everything under `credentials/`, such as `oauth.json` and WhatsApp `creds.json`
   - `identity/device.json`
   - `secrets.providers.*` file providers named in the config
-
   The fix removes group and other access. Remote scans collect these stores as metadata only, in every state directory. A secrets file at a configured path is checked on local scans only.
 - **NC-001 judges the mount allowlist the way NanoClaw loads it** (`src/modules/mount-security`).
   - NanoClaw refuses an allowlist without a `blockedPatterns` array, one that isn't strict JSON, or one with a `null` root, and then blocks every additional mount. Such a file is no longer reported as a critical home-directory grant.
@@ -83,6 +82,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - **A remote OpenShell scan says when it couldn't check the gateway TOML.** `gateway.env` can point `OPENSHELL_GATEWAY_CONFIG` at any file. Outside the default and NemoClaw locations, the probe can't know that path before the scan. The snapshot scan used to judge the gateway by a default `gateway.toml` it doesn't load, or by none, and pass silently. It now reports CONFIG-LOAD ("not collected by the remote probe — scan the host locally") and judges by `gateway.env` alone.
 - **CFG-020 is critical only when other users can read the NemoClaw key.** A plaintext key in `~/.nemoclaw/credentials.json` that is owner-only (NemoClaw writes it 0600 in a 0700 directory), or that sits behind a private directory, is now a warning to migrate it rather than a critical.
  One gap remains: a `~` in `OPENCLAW_STATE_DIR` combined with `OPENCLAW_HOME` is expanded against the OS home there.
+- **Fixes write keys whose names contain a dot.** A ZeroClaw risk profile named `prod.v2` (`[risk_profiles."prod.v2"]`) or a Grok Bot account scope with a dot in its key was split at the dot: ZC-005/006/011/014 added a new `[risk_profiles.prod.v2]` table and reported the fix applied on every run while the real profile kept `level = "full"`, and GB-001 wrote a nested `"dot": {"ted": …}` object. The config writers take the key path as segments; TOML keys are written quoted, and the edited file loads in `zeroclaw config list`.
 
 ## [1.3.1] - 2026-10-16
 

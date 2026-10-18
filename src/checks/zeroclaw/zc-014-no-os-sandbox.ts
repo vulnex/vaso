@@ -1,6 +1,7 @@
 import { defineCheck } from '../../core/check-builder.js';
 import type { Evidence } from '../../core/types.js';
 import { asRecord, effectiveProfiles, isFalse, mainConfig, profileLabel, writeMainConfig, type EffectiveProfile } from './zc-config.js';
+import type { KeyPath } from '../../core/utils.js';
 
 function backendNone(p: EffectiveProfile): boolean {
   return typeof p.profile.sandbox_backend === 'string' && p.profile.sandbox_backend.trim().toLowerCase() === 'none';
@@ -51,12 +52,12 @@ export const zc014 = defineCheck({
 
   async fix(ctx) {
     const config = mainConfig(ctx.configs);
-    const updates: Array<[string, unknown]> = [];
+    const updates: Array<[KeyPath, unknown]> = [];
     if (config && nativeRuntime(config.data)) {
       for (const p of effectiveProfiles(config.data)) {
         if (!sandboxOff(p)) continue;
-        updates.push([`${p.path}.sandbox_enabled`, true]);
-        if (backendNone(p)) updates.push([`${p.path}.sandbox_backend`, 'auto']);
+        updates.push([[...p.path, 'sandbox_enabled'], true]);
+        if (backendNone(p)) updates.push([[...p.path, 'sandbox_backend'], 'auto']);
       }
     }
     return writeMainConfig(ctx, 'ZC-014', updates,

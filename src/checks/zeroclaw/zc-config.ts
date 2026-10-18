@@ -1,5 +1,6 @@
 import type { FixResult, ParsedConfig, ScanContext } from '../../core/types.js';
 import { updateConfigValue } from '../../remediation/config-writer.js';
+import type { KeyPath } from '../../core/utils.js';
 import { envOverrideFor } from '../../adapters/env-overrides.js';
 
 /**
@@ -99,8 +100,8 @@ export function enabledAgents(data: Rec): AgentEntry[] {
 
 export interface EffectiveProfile {
   name: string;
-  /** Dotted config path of the profile table (fix target). */
-  path: string;
+  /** Key segments of the profile table (fix target) — a profile name may contain a dot. */
+  path: string[];
   profile: Rec;
   /** Enabled agents bound to this profile (empty when no agents are declared). */
   agents: string[];
@@ -132,14 +133,14 @@ export function effectiveProfiles(data: Rec): EffectiveProfile[] {
       if (!profile) continue;
       const users = bound.get(name) ?? [];
       if (declaredAgents && users.length === 0) continue;
-      out.push({ name, path: `risk_profiles.${name}`, profile, agents: users, legacy: false });
+      out.push({ name, path: ['risk_profiles', name], profile, agents: users, legacy: false });
     }
   }
 
   if (out.length === 0 && !profiles) {
     const autonomy = asRecord(data.autonomy);
     if (autonomy) {
-      out.push({ name: '[autonomy]', path: 'autonomy', profile: autonomy, agents: [], legacy: true });
+      out.push({ name: '[autonomy]', path: ['autonomy'], profile: autonomy, agents: [], legacy: true });
     }
   }
   return out;
@@ -148,7 +149,7 @@ export function effectiveProfiles(data: Rec): EffectiveProfile[] {
 export function profileLabel(p: EffectiveProfile): string {
   if (p.legacy) return 'legacy [autonomy]';
   const who = p.agents.length > 0 ? ` (agent${p.agents.length > 1 ? 's' : ''}: ${p.agents.join(', ')})` : '';
-  return `risk_profiles.${p.name}${who}`;
+  return `risk_profiles.${/^[A-Za-z0-9_-]+$/.test(p.name) ? p.name : JSON.stringify(p.name)}${who}`;
 }
 
 /** 1-based line of the first `key =` inside the TOML table `[table]`, when present. */
@@ -177,7 +178,7 @@ export function tomlLine(raw: string, table: string, key: string): { line: numbe
 export async function writeMainConfig(
   ctx: ScanContext,
   checkId: string,
-  updates: Array<[path: string, value: unknown]>,
+  updates: Array<[path: KeyPath, value: unknown]>,
   message: string,
 ): Promise<FixResult> {
   const config = mainConfig(ctx.configs);

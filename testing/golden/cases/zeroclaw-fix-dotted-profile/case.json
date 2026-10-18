@@ -1,0 +1,18 @@
+{
+  "agent": "zeroclaw",
+  "source": "ZeroClaw 0.8.5 risk profile whose name contains a dot ([risk_profiles.\"prod.v2\"]); the fixed file was checked with `zeroclaw config list` (deep test 2026-10-18 fixture) — the fix must edit the quoted table, not add a split [risk_profiles.prod.v2] table",
+  "modes": {
+    ".zeroclaw": "700",
+    ".zeroclaw/config.toml": "600"
+  },
+  "fail": {
+    "ZC-005": "critical",
+    "ZC-006": "any"
+  },
+  "fix": {
+    "resolves": [
+      "ZC-005",
+      "ZC-006"
+    ]
+  }
+}

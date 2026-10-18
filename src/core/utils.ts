@@ -6,11 +6,29 @@ import { walkSkillTree } from './skill-walk.js';
 import { LocalFSProvider } from './local-fs-provider.js';
 
 /**
- * Navigate a nested object by dot-separated path.
+ * A config key path: dot-separated text (`gateway.host`), or its segments
+ * when a key itself contains a dot — `['risk_profiles', 'prod.v2', 'level']`
+ * — which a dotted string cannot express.
+ */
+export type KeyPath = string | readonly string[];
+
+/** The segments of a key path (a string splits on every dot). */
+export function keySegments(path: KeyPath): string[] {
+  return typeof path === 'string' ? path.split('.') : [...path];
+}
+
+/** A key path for messages: segments containing a dot (or empty) are quoted. */
+export function formatKeyPath(path: KeyPath): string {
+  if (typeof path === 'string') return path;
+  return path.map(s => (/^[^.\s"]+$/.test(s) ? s : JSON.stringify(s))).join('.');
+}
+
+/**
+ * Navigate a nested object by key path.
  * e.g. getNestedValue({ a: { b: 1 } }, 'a.b') → 1
  */
-export function getNestedValue(obj: Record<string, unknown>, path: string): unknown {
-  return path.split('.').reduce<unknown>((curr, key) => {
+export function getNestedValue(obj: Record<string, unknown>, path: KeyPath): unknown {
+  return keySegments(path).reduce<unknown>((curr, key) => {
     if (curr && typeof curr === 'object') return (curr as Record<string, unknown>)[key];
     return undefined;
   }, obj);
@@ -152,12 +170,12 @@ async function isExecutable(fs: FSProvider, path: string): Promise<boolean> {
 }
 
 /**
- * Set a value at a dot-separated path in a nested object.
+ * Set a value at a key path in a nested object.
  * Creates intermediate objects as needed.
  * e.g. setNestedValue({}, 'a.b.c', 1) → { a: { b: { c: 1 } } }
  */
-export function setNestedValue(obj: Record<string, unknown>, path: string, value: unknown): void {
-  const keys = path.split('.');
+export function setNestedValue(obj: Record<string, unknown>, path: KeyPath, value: unknown): void {
+  const keys = keySegments(path);
   let current: Record<string, unknown> = obj;
   for (let i = 0; i < keys.length - 1; i++) {
     if (!(keys[i] in current) || typeof current[keys[i]] !== 'object' || current[keys[i]] === null) {

@@ -1,0 +1,12 @@
+schema_version = 3
+
+[gateway]
+host = "127.0.0.1"
+
+[agents.main]
+model_provider = "openai.main"
+risk_profile = "prod.v2"
+
+[risk_profiles."prod.v2"]
+level = "full"
+workspace_only = false

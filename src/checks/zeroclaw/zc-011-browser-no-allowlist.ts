@@ -5,6 +5,7 @@ import {
   asRecord, asStringArray, effectiveProfiles, hasWildcard, isFalse, isTrue, mainConfig, profileLabel, writeMainConfig,
   type EffectiveProfile, type Rec,
 } from './zc-config.js';
+import type { KeyPath } from '../../core/utils.js';
 
 /** Last release where `[browser] enabled` (default true) also registers the
  *  full `browser` automation tool and `browser` is in the default
@@ -99,13 +100,13 @@ export const zc011 = defineCheck({
 
   async fix(ctx) {
     const config = mainConfig(ctx.configs);
-    const updates: Array<[string, unknown]> = [];
+    const updates: Array<[KeyPath, unknown]> = [];
     if (config && browserAutomationActive(config.data, ctx.installation.version)) {
       const implicit = !('automation_enabled' in (asRecord(config.data.browser) ?? {}));
       for (const p of effectiveProfiles(config.data)) {
         const auto = autoApproveList(p, implicit);
         if (!auto.includes('browser')) continue;
-        updates.push([`${p.path}.auto_approve`, auto.filter(s => s !== 'browser')]);
+        updates.push([[...p.path, 'auto_approve'], auto.filter(s => s !== 'browser')]);
       }
     }
     return writeMainConfig(ctx, 'ZC-011', updates, 'Removed "browser" from risk-profile auto_approve lists');

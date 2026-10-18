@@ -6,6 +6,7 @@ import { buildBroadPaths, expandHome, isBroadPath } from '../../analyzers/broad-
 import {
   asRecord, asStringArray, enabledAgents, effectiveProfiles, isFalse, isTrue, mainConfig, profileLabel, writeMainConfig,
 } from './zc-config.js';
+import type { KeyPath } from '../../core/utils.js';
 
 /** A root that is an ancestor of $HOME (e.g. /Users, /home) exposes it too. */
 function containsHome(root: string, home: string): boolean {
@@ -35,7 +36,7 @@ export const zc006 = defineCheck({
         writable = true;
         evidence.push({
           file: config.filePath,
-          detail: `${profileLabel(p)}: workspace_only = false${envNote(config.data, `${p.path}.workspace_only`)} — file tools may reach paths outside the agent workspace`,
+          detail: `${profileLabel(p)}: workspace_only = false${envNote(config.data, [...p.path, 'workspace_only'])} — file tools may reach paths outside the agent workspace`,
         });
       }
       for (const root of asStringArray(p.profile.allowed_roots)) {
@@ -70,10 +71,10 @@ export const zc006 = defineCheck({
 
   async fix(ctx) {
     const config = mainConfig(ctx.configs);
-    const updates: Array<[string, unknown]> = [];
+    const updates: Array<[KeyPath, unknown]> = [];
     if (config) {
       for (const p of effectiveProfiles(config.data)) {
-        if (isFalse(p.profile.workspace_only)) updates.push([`${p.path}.workspace_only`, true]);
+        if (isFalse(p.profile.workspace_only)) updates.push([[...p.path, 'workspace_only'], true]);
       }
       for (const a of enabledAgents(config.data)) {
         if (isTrue(asRecord(a.data.workspace)?.unrestricted_filesystem)) {

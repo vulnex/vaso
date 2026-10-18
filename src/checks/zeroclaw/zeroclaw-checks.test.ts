@@ -15,6 +15,9 @@ vi.mock('../../remediation/config-writer.js', async (orig) => ({
 }));
 import { updateConfigValue } from '../../remediation/config-writer.js';
 
+/** A written key path as dotted text (profile fixes pass segments). */
+const pathText = (p: unknown): unknown => (Array.isArray(p) ? p.join('.') : p);
+
 const DIR = '/home/test/.zeroclaw';
 const CONFIG = `${DIR}/config.toml`;
 
@@ -162,7 +165,7 @@ level = "full"
 
   it('evaluates every profile when no agents are declared, and V2 [autonomy] as legacy', () => {
     expect(effectiveProfiles({ risk_profiles: { a: {}, b: {} } }).map(p => p.name)).toEqual(['a', 'b']);
-    expect(effectiveProfiles({ autonomy: { level: 'full' } })).toMatchObject([{ path: 'autonomy', legacy: true }]);
+    expect(effectiveProfiles({ autonomy: { level: 'full' } })).toMatchObject([{ path: ['autonomy'], legacy: true }]);
   });
 
   it('applies gateway defaults', () => {
@@ -240,7 +243,7 @@ api_keys = ["sk-ant-fallback-0000000000000000"]
     vi.mocked(updateConfigValue).mockClear();
     const res = await check('ZC-001').fix!(ctx([json({}), toml(insecure)]));
     expect(res.applied).toBe(true);
-    expect(vi.mocked(updateConfigValue).mock.calls.map(c => [c[0].filePath, c[1], c[2]])).toEqual([
+    expect(vi.mocked(updateConfigValue).mock.calls.map(c => [c[0].filePath, pathText(c[1]), c[2]])).toEqual([
       [CONFIG, 'secrets.encrypt', true],
     ]);
   });
@@ -289,7 +292,7 @@ describe('ZC-003 / ZC-004: gateway exposure and pairing', () => {
     vi.mocked(updateConfigValue).mockClear();
     await check('ZC-003').fix!(ctx([toml('[gateway]\nhost = "0.0.0.0"\n')]));
     await check('ZC-004').fix!(ctx([toml('[gateway]\nrequire_pairing = false\n')]));
-    expect(vi.mocked(updateConfigValue).mock.calls.map(c => [c[1], c[2]])).toEqual([
+    expect(vi.mocked(updateConfigValue).mock.calls.map(c => [pathText(c[1]), c[2]])).toEqual([
       ['gateway.host', '127.0.0.1'],
       ['gateway.allow_public_bind', false],
       ['gateway.require_pairing', true],
@@ -315,7 +318,18 @@ describe('risk-profile checks (ZC-005/006/014/015)', () => {
     expect(r.evidence![0].detail).toContain('agent: bot');
     vi.mocked(updateConfigValue).mockClear();
     await check('ZC-005').fix!(ctx([toml(YOLO)]));
-    expect(vi.mocked(updateConfigValue).mock.calls.map(c => [c[1], c[2]])).toEqual([['risk_profiles.yolo.level', 'supervised']]);
+    expect(vi.mocked(updateConfigValue).mock.calls.map(c => [pathText(c[1]), c[2]])).toEqual([['risk_profiles.yolo.level', 'supervised']]);
+  });
+
+  it('ZC-005 fixes a profile whose name contains a dot as one quoted key', async () => {
+    const raw = '[agents.main]\nrisk_profile = "prod.v2"\n[risk_profiles."prod.v2"]\nlevel = "full"\n';
+    const r = await run('ZC-005', raw);
+    expect(r.passed).toBe(false);
+    expect(r.evidence![0].detail).toContain('risk_profiles."prod.v2"');
+    vi.mocked(updateConfigValue).mockClear();
+    await check('ZC-005').fix!(ctx([toml(raw)]));
+    // segments, not 'risk_profiles.prod.v2.level' — that splits into a new [risk_profiles.prod.v2] table
+    expect(vi.mocked(updateConfigValue).mock.calls.map(c => [c[1], c[2]])).toEqual([[['risk_profiles', 'prod.v2', 'level'], 'supervised']]);
   });
 
   it('ZC-005 ignores profiles no enabled agent uses', async () => {
@@ -333,7 +347,7 @@ describe('risk-profile checks (ZC-005/006/014/015)', () => {
     expect(r.evidence).toHaveLength(3);
     vi.mocked(updateConfigValue).mockClear();
     await check('ZC-006').fix!(ctx([toml(`${YOLO}[agents.bot.workspace]\nunrestricted_filesystem = true\n`)]));
-    expect(vi.mocked(updateConfigValue).mock.calls.map(c => [c[1], c[2]])).toEqual([
+    expect(vi.mocked(updateConfigValue).mock.calls.map(c => [pathText(c[1]), c[2]])).toEqual([
       ['risk_profiles.yolo.workspace_only', true],
       ['agents.bot.workspace.unrestricted_filesystem', false],
     ]);
@@ -427,7 +441,7 @@ url = "git://example.com/skills.git"
     expect(r.evidence).toHaveLength(4);
     vi.mocked(updateConfigValue).mockClear();
     await check('ZC-008').fix!(ctx([toml(raw)]));
-    expect(vi.mocked(updateConfigValue).mock.calls.map(c => [c[1], c[2]])).toEqual([
+    expect(vi.mocked(updateConfigValue).mock.calls.map(c => [pathText(c[1]), c[2]])).toEqual([
       ['skills.open_skills_enabled', false],
       ['skills.allow_scripts', false],
     ]);
@@ -475,7 +489,7 @@ describe('ZC-011: Browser Automation Without Approval', () => {
     vi.mocked(updateConfigValue).mockClear();
     await check('ZC-011').fix!(ctx([toml(DEFAULT_V3)], { version: '0.8.5' }));
     const [[, path, value]] = vi.mocked(updateConfigValue).mock.calls;
-    expect(path).toBe('risk_profiles.balanced.auto_approve');
+    expect(path).toEqual(['risk_profiles', 'balanced', 'auto_approve']);
     expect(value).toContain('browser_open');
     expect(value).not.toContain('browser');
   });
@@ -540,7 +554,7 @@ webhook_rate_limit_per_minute = 0
     expect(r.evidence).toHaveLength(5);
     vi.mocked(updateConfigValue).mockClear();
     await check('ZC-016').fix!(ctx([toml(raw)]));
-    expect(vi.mocked(updateConfigValue).mock.calls.map(c => [c[1], c[2]])).toEqual([
+    expect(vi.mocked(updateConfigValue).mock.calls.map(c => [pathText(c[1]), c[2]])).toEqual([
       ['gateway.allow_self_upgrade', false],
       ['gateway.trust_forwarded_headers', false],
       ['gateway.allow_remote_admin', false],

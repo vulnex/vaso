@@ -375,3 +375,60 @@ describe('fixFirstConfig idempotence', () => {
   });
 });
 
+describe('key paths with a dot inside a key name', () => {
+  it('TOML: edits the quoted table in place, never adds a [a.b.c] split table', async () => {
+    const filePath = join(TEST_DIR, 'config.toml');
+    await writeFile(filePath, '[risk_profiles."prod.v2"]\nlevel = "full"\nworkspace_only = false\n');
+    await updateTomlFile(filePath, ['risk_profiles', 'prod.v2', 'level'], 'supervised');
+    const content = await readFile(filePath, 'utf-8');
+    expect(content).toBe('[risk_profiles."prod.v2"]\nlevel = "supervised"\nworkspace_only = false\n');
+  });
+
+  it('TOML: a new table for a dotted key is written with a quoted key', async () => {
+    const filePath = join(TEST_DIR, 'config.toml');
+    await writeFile(filePath, 'schema_version = 3\n');
+    await updateTomlFile(filePath, ['risk_profiles', 'prod.v2', 'level'], 'supervised');
+    const content = await readFile(filePath, 'utf-8');
+    expect(content).toContain('[risk_profiles."prod.v2"]\nlevel = "supervised"');
+    const { parse } = await import('smol-toml');
+    expect(parse(content)).toEqual({ schema_version: 3, risk_profiles: { 'prod.v2': { level: 'supervised' } } });
+  });
+
+  it('TOML: a dotted string path still splits on dots', async () => {
+    const filePath = join(TEST_DIR, 'config.toml');
+    await writeFile(filePath, '[risk_profiles.default]\nlevel = "full"\n');
+    await updateTomlFile(filePath, 'risk_profiles.default.level', 'supervised');
+    expect(await readFile(filePath, 'utf-8')).toBe('[risk_profiles.default]\nlevel = "supervised"\n');
+  });
+
+  it('JSON and YAML: segments address a key containing a dot', async () => {
+    const jsonPath = join(TEST_DIR, 'settings.json');
+    await writeFile(jsonPath, JSON.stringify({ accountScopes: { 'dot.ted': { localToolPermission: 'always' } } }, null, 2));
+    await updateJsonFile(jsonPath, ['accountScopes', 'dot.ted', 'localToolPermission'], 'ask');
+    expect(JSON.parse(await readFile(jsonPath, 'utf-8'))).toEqual({ accountScopes: { 'dot.ted': { localToolPermission: 'ask' } } });
+
+    const yamlPath = join(TEST_DIR, 'config.yaml');
+    await writeFile(yamlPath, 'profiles:\n  a.b:\n    mode: off\n');
+    await updateYamlFile(yamlPath, ['profiles', 'a.b', 'mode'], 'manual');
+    const YAML = (await import('yaml')).default;
+    expect(YAML.parse(await readFile(yamlPath, 'utf-8'))).toEqual({ profiles: { 'a.b': { mode: 'manual' } } });
+  });
+
+  it('fixFirstConfig sees a segment path already set', async () => {
+    const filePath = join(TEST_DIR, 'settings.json');
+    await writeFile(filePath, JSON.stringify({ accountScopes: { 'dot.ted': { localToolPermission: 'ask' } } }));
+    const stale = { filePath, format: 'json' as const, raw: '', data: {} };
+    const r = await fixFirstConfig([stale], { checkId: 'GB-001', path: ['accountScopes', 'dot.ted', 'localToolPermission'], value: 'ask', message: 'Set' });
+    expect(r.applied).toBe(false);
+    expect(r.alreadyDone).toBe(true);
+  });
+
+  it('env files refuse a nested segment path', async () => {
+    const filePath = join(TEST_DIR, '.env');
+    await writeFile(filePath, 'A=1\n');
+    const cfg: ParsedConfig = { filePath, format: 'env', raw: '', data: {} };
+    await expect(updateConfigValue(cfg, ['approvals', 'mode'], 'manual')).rejects.toThrow(/nested key/);
+    expect(await readFile(filePath, 'utf-8')).toBe('A=1\n');
+  });
+});
+

@@ -34,8 +34,10 @@ export function settingsConfig(ctx: ScanContext): ParsedConfig | undefined {
 }
 
 export interface AccountBlock {
-  /** Dot path prefix inside settings.json ('' for the active account). */
+  /** Dot path prefix inside settings.json for evidence ('' for the active account). */
   path: string;
+  /** Key segments of the block (fix target; [] for the active account) — a scope hash may contain a dot. */
+  segments: string[];
   /** Human label for evidence. */
   label: string;
   data: Record<string, unknown>;
@@ -47,12 +49,13 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 
 /** The active account's block plus every parked account's. */
 export function accountBlocks(config: ParsedConfig): AccountBlock[] {
-  const blocks: AccountBlock[] = [{ path: '', label: 'active account', data: config.data }];
+  const blocks: AccountBlock[] = [{ path: '', segments: [], label: 'active account', data: config.data }];
   const scopes = config.data.accountScopes;
   if (isRecord(scopes)) {
     for (const [hash, block] of Object.entries(scopes)) {
       if (!isRecord(block) || hash === config.data.activeAccountScope) continue;
-      blocks.push({ path: `accountScopes.${hash}.`, label: `account ${hash.slice(0, 8)}…`, data: block });
+      const key = /^[A-Za-z0-9_-]+$/.test(hash) ? hash : JSON.stringify(hash);
+      blocks.push({ path: `accountScopes.${key}.`, segments: ['accountScopes', hash], label: `account ${hash.slice(0, 8)}…`, data: block });
     }
   }
   return blocks;

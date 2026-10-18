@@ -1,4 +1,5 @@
 import type { FSProvider } from '../core/fs-provider.js';
+import { keySegments, type KeyPath } from '../core/utils.js';
 
 /**
  * Overlay of an agent's documented env-var config overrides onto its parsed
@@ -21,6 +22,8 @@ export interface EnvOverrideSpec {
 export interface AppliedEnvOverride {
   env: string;
   path: string;
+  /** `path` as segments (a key may contain a dot). */
+  segments: string[];
   value: unknown;
 }
 
@@ -69,7 +72,7 @@ export function applyEnvOverrides(
     const value = parseValue(raw, spec.type);
     if (value === undefined) continue;
     out = setPath(out, spec.path, value);
-    applied.push({ env: spec.env, path: spec.path.join('.'), value });
+    applied.push({ env: spec.env, path: spec.path.join('.'), segments: [...spec.path], value });
   }
   if (applied.length > 0) overlays.set(out, applied);
   return out;
@@ -80,13 +83,14 @@ export function envOverridesOf(data: unknown): AppliedEnvOverride[] {
   return (data && typeof data === 'object' ? overlays.get(data) : undefined) ?? [];
 }
 
-/** The env var that set `path` (dotted) in this config, if one did. */
-export function envOverrideFor(data: unknown, path: string): string | undefined {
-  return envOverridesOf(data).find(o => o.path === path)?.env;
+/** The env var that set `path` in this config, if one did. */
+export function envOverrideFor(data: unknown, path: KeyPath): string | undefined {
+  const want = keySegments(path).join('\u0000');
+  return envOverridesOf(data).find(o => o.segments.join('\u0000') === want)?.env;
 }
 
 /** " (set by $VAR)" suffix for evidence when an env var set `path`. */
-export function envNote(data: unknown, path: string): string {
+export function envNote(data: unknown, path: KeyPath): string {
   const env = envOverrideFor(data, path);
   return env ? ` (set by $${env}, overriding the config file)` : '';
 }

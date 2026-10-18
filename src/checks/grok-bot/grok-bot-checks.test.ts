@@ -121,6 +121,21 @@ describe('GB-001 local execution always allowed', () => {
       expect(after.egressTunnelEnabled).toBe(false);
       expect(after.version).toBe(1);
     });
+
+    it('fixes an account scope whose key contains a dot in place (no split "dot" → "ted" object)', async () => {
+      const file = join(dir, 'settings.json');
+      const data = { version: 1, activeAccountScope: 'act', localToolPermission: 'ask', accountScopes: { 'dot.ted': { localToolPermission: 'always' } } };
+      writeFileSync(file, JSON.stringify(data, null, 2), { mode: 0o600 });
+      const fs = new LocalFSProvider();
+      const installation: AgentInstallation = { agent: 'grok-bot', installDir: dir, configFiles: [] };
+      const r = await check('GB-001').run(ctx([cfg(data, file)]));
+      expect(r.passed).toBe(false);
+      expect(r.evidence![0].snippet).toContain('accountScopes."dot.ted".localToolPermission');
+      const res = await check('GB-001').fix!({ installation, configs: [cfg(data, file)], platform: fs.platform, fs });
+      expect(res.applied).toBe(true);
+      const after = JSON.parse(readFileSync(file, 'utf-8'));
+      expect(after.accountScopes).toEqual({ 'dot.ted': { localToolPermission: 'ask' } });
+    });
   });
 });
 

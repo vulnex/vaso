@@ -72,7 +72,7 @@ export const gb001 = defineCheck({
     for (const block of targets) {
       const r = await fixFirstConfig([config], {
         checkId: 'GB-001',
-        path: `${block.path}localToolPermission`,
+        path: [...block.segments, 'localToolPermission'],
         value: 'ask',
         message: 'Set localToolPermission to "ask"',
       });
