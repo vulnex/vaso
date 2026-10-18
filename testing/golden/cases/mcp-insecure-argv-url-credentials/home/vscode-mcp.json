@@ -1,0 +1,12 @@
+{
+  "servers": {
+    "api": {
+      "type": "http",
+      "url": "https://mcp.example.com/mcp?api_key=a8Kq2Lm7Vb3Xc9Zr4Tw"
+    },
+    "basic": {
+      "type": "http",
+      "url": "https://admin:S3cr3t-Pa55w0rd@mcp.example.com/mcp"
+    }
+  }
+}

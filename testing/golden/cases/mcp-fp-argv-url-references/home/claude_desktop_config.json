@@ -1,0 +1,49 @@
+{
+  "mcpServers": {
+    "github": {
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "GITHUB_PERSONAL_ACCESS_TOKEN",
+        "ghcr.io/github/github-mcp-server"
+      ],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_PAT}"
+      }
+    },
+    "remote": {
+      "command": "npx",
+      "args": [
+        "mcp-remote",
+        "https://mcp.example.com/sse",
+        "--header",
+        "Authorization:${AUTH_HEADER}"
+      ],
+      "env": {
+        "AUTH_HEADER": "Bearer ${MCP_TOKEN}"
+      }
+    },
+    "slack": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "slack-mcp",
+        "--token",
+        "$SLACK_BOT_TOKEN",
+        "--workspace",
+        "T0123ABCD"
+      ]
+    },
+    "fs": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "/Users/me/Projects/task-runnerserverabcdefghijk"
+      ]
+    }
+  }
+}

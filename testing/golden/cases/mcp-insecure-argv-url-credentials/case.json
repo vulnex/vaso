@@ -1,0 +1,14 @@
+{
+  "agent": "mcp",
+  "source": "dt16: tokens written into argv / URLs instead of env (GitHub MCP docker -e, Slack --token, mcp-remote --header, VS Code http url, Codex TOML args)",
+  "mcp": {
+    "paths": [
+      "claude_desktop_config.json",
+      "vscode-mcp.json",
+      "config.toml"
+    ]
+  },
+  "fail": {
+    "MCP-003": "critical"
+  }
+}

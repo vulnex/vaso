@@ -1,0 +1,13 @@
+{
+  "mcp": {
+    "x": {
+      "type": "local",
+      "command": [
+        "npx",
+        "-y",
+        "some-mcp",
+        "--api-key={env:SOME_KEY}"
+      ]
+    }
+  }
+}

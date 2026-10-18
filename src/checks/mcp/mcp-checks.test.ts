@@ -359,6 +359,63 @@ describe('MCP-003: Credential Exposure', () => {
     const result = await mcp003.run(ctx);
     expect(result.passed).toBe(true);
   });
+
+  const ghp = 'ghp_' + 'A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8';
+  const stdio = (args: string[], env?: Record<string, string>) => makeContext({
+    mcpConfigs: [{ source: 'Claude Desktop', filePath: '/tmp/claude_desktop_config.json',
+      servers: [{ name: 'github', command: 'npx', args, env, transport: 'stdio' }] }],
+  });
+
+  it('detects tokens passed as server arguments, masked', async () => {
+    for (const args of [
+      ['-y', '@modelcontextprotocol/server-github', ghp],
+      ['-y', 'some-mcp', '--token', ghp],
+      ['-y', 'some-mcp', `--github-token=${ghp}`],
+      ['run', '-i', '--rm', '-e', `GITHUB_PERSONAL_ACCESS_TOKEN=${ghp}`, 'ghcr.io/github/github-mcp-server'],
+    ]) {
+      const result = await mcp003.run(stdio(args));
+      expect(result.passed, args.join(' ')).toBe(false);
+      expect(result.severity).toBe('critical');
+      expect(result.evidence).toHaveLength(1);
+      expect(JSON.stringify(result.evidence)).not.toContain(ghp.slice(4));
+      expect(result.evidence![0].detail).toMatch(/server arguments/);
+    }
+  });
+
+  it('detects credentials in the server URL', async () => {
+    const remote = (url: string) => makeContext({
+      mcpConfigs: [{ source: 'Cursor', filePath: '/tmp/mcp.json', servers: [{ name: 'r', url, transport: 'streamable-http' }] }],
+    });
+    for (const url of [
+      'https://admin:S3cr3t-Pa55w0rd@mcp.example.com/mcp',
+      'https://mcp.example.com/mcp?api_key=a8Kq2Lm7Vb3Xc9Zr',
+      `https://api.telegram.org/bot1234567890:AAFq3xV9mK2pL8nR4tW7yB1cD6fG0hJ5sAQ/`,
+    ]) {
+      const result = await mcp003.run(remote(url));
+      expect(result.passed, url).toBe(false);
+      expect(result.evidence![0].snippet).toContain('***');
+    }
+    expect((await mcp003.run(remote('https://mcp.example.com/mcp?api_key=${API_KEY}'))).passed).toBe(true);
+  });
+
+  it('keeps references and placeholders in arguments quiet', async () => {
+    for (const args of [
+      ['-y', 'some-mcp', '--token', '${GITHUB_TOKEN}'],
+      ['-y', 'some-mcp', '--token', '$GITHUB_TOKEN'],
+      ['-y', 'some-mcp', '--token', '%GITHUB_TOKEN%'],
+      ['run', '-i', '-e', 'GITHUB_PERSONAL_ACCESS_TOKEN', 'ghcr.io/github/github-mcp-server'],
+      ['mcp-remote', 'https://mcp.example.com/sse', '--header', 'Authorization:${AUTH_HEADER}'],
+      ['-y', '@modelcontextprotocol/server-filesystem', '/Users/me/Projects'],
+    ]) {
+      expect((await mcp003.run(stdio(args))).passed, args.join(' ')).toBe(true);
+    }
+  });
+
+  it('reports a token once when env and args repeat it', async () => {
+    const result = await mcp003.run(stdio(['-y', 'some-mcp', '--token', ghp], { GITHUB_TOKEN: ghp }));
+    expect(result.evidence).toHaveLength(1);
+    expect(result.evidence![0].detail).toMatch(/env block/);
+  });
 });
 
 // ==================== MCP-004: Overprivileged Tools ====================

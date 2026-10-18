@@ -1,0 +1,3 @@
+[mcp_servers.tg]
+command = "npx"
+args = ["-y", "telegram-mcp@1.0.0", "--bot-url", "https://api.telegram.org/bot1234567890:AAFq3xV9mK2pL8nR4tW7yB1cD6fG0hJ5sAQ/"]

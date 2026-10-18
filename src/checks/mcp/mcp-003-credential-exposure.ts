@@ -3,6 +3,7 @@ import { defineCheck } from '../../core/check-builder.js';
 import { API_KEY_PATTERNS, isEnvReference, isPlaceholderSecret } from '../../core/patterns.js';
 import { shannonEntropy } from '../../analyzers/entropy.js';
 import { findSourceSecrets } from '../../analyzers/source-secrets.js';
+import { findArgSecrets, findUrlSecrets } from '../../mcp/config-secrets.js';
 
 const HIGH_ENTROPY_THRESHOLD = 4.5;
 const MIN_SECRET_LENGTH = 16;
@@ -26,11 +27,12 @@ export const mcp003 = defineCheck({
         const sources: Array<[string, Record<string, string>]> = [];
         if (server.env) sources.push(['env block', server.env]);
         if (server.headers) sources.push(['header', server.headers]);
-        if (sources.length === 0) continue;
+        const seen = new Set<string>();
 
         for (const [location, values] of sources) {
         for (const [key, value] of Object.entries(values)) {
           if (isPlaceholderSecret(value) || isEnvReference(value)) continue; // a docs example or a reference, not a key
+          seen.add(value.replace(/^\s*(?:Bearer|Basic|Token)\s+/i, '').trim());
           // Check against known API key patterns
           for (const { pattern, name } of API_KEY_PATTERNS) {
             if (pattern.test(value)) {
@@ -61,6 +63,26 @@ export const mcp003 = defineCheck({
             }
           }
         }
+        }
+
+        // The same credentials written into argv or the server URL instead
+        // (`--token ghp_…`, `-e KEY=…`, `?api_key=…`, `https://user:pass@…`,
+        // `/bot<token>/`) — just as plaintext, and also visible in `ps`
+        const placed = [
+          ...findArgSecrets(server.args ?? []),
+          ...(server.url ? findUrlSecrets(server.url) : []),
+        ];
+        for (const secret of placed) {
+          // One credential is one finding, wherever else the server repeats it
+          if ([...seen].some(v => v === secret.value || (v.length >= 12 && (v.includes(secret.value) || secret.value.includes(v))))) continue;
+          seen.add(secret.value);
+          evidence.push({
+            file: config.filePath,
+            snippet: `Server "${server.name}": ${secret.location} ${secret.masked}`,
+            detail: secret.location.startsWith('args')
+              ? `Plaintext ${secret.kind} in server arguments — readable in the config and by any local user via the process list; pass it through the env block from a variable instead`
+              : `Plaintext ${secret.kind} — the URL is stored, logged and sent as written; use a header sourced from a variable instead`,
+          });
         }
       }
     }

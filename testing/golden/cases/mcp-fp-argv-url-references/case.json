@@ -1,0 +1,14 @@
+{
+  "agent": "mcp",
+  "source": "dt16: references in argv / URLs (GitHub MCP docs docker -e NAME, mcp-remote --header Authorization:${AUTH_HEADER}, VS Code ${input:...}, OpenCode {env:...})",
+  "mcp": {
+    "paths": [
+      "claude_desktop_config.json",
+      "vscode-mcp.json",
+      "opencode.json"
+    ]
+  },
+  "pass": [
+    "MCP-003"
+  ]
+}
