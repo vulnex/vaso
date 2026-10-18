@@ -698,6 +698,18 @@ describe('MCP-008: Server Provenance', () => {
     expect(await domainHit('js-mirror')).toBe(false);
   });
 
+  it('matches the registered domain\'s label, not a subdomain word (dt17)', async () => {
+    const run = (packageName: string) => mcp008.run(makeContext({ mcpConfigs: secureConfigs, mcpServerSources: [{ serverName: 's', packageName }] }));
+    const domainHit = async (pkg: string) => ((await run(pkg)).evidence ?? []).some(e => e.detail?.includes('malicious domain'));
+    // agenthub.contetial.com (MAL-2026-13399) and newsradar.dreamdt.cn: real packages named after the subdomain word
+    expect(await domainHit('@alicloud/agenthub')).toBe(false);
+    expect(await domainHit('@prismshadow/agenthub')).toBe(false);
+    expect(await domainHit('newsradar-mcp')).toBe(false);
+    // true positives: the registered name, and a hosting-platform tenant (the registration on vercel.app)
+    expect(await domainHit('contetial-relay')).toBe(true);
+    expect(await domainHit('carbonato-proxy-drab')).toBe(true);
+  });
+
   it('detects typosquatting package names', async () => {
     const sources: MCPServerSource[] = [
       {
@@ -2566,6 +2578,11 @@ describe('MCP-027 Vulnerable / Rolled-Back MCP Version', () => {
     const mal = await run('mcp-server-notion@1.0.0');
     expect(mal.passed).toBe(false);
     expect(mal.evidence?.some(e => e.detail?.includes('MAL-2026-5480'))).toBe(true);
+    // agenthub-multiagent-mcp is flagged by its own advisory, not by MCP-008's domain match (dt17)
+    const agenthub = await run('agenthub-multiagent-mcp@1.64.0');
+    expect(agenthub.passed).toBe(false);
+    expect(agenthub.severity).toBe('critical');
+    expect(agenthub.evidence?.some(e => e.detail?.includes('MAL-2026-13399'))).toBe(true);
   });
 });
 

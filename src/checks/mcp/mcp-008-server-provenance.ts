@@ -1,6 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { allowedTypoEdits, detectTyposquatting, typoDistance } from '../../ioc/typosquat.js';
+import { registrableLabel } from '../../ioc/registrable-domain.js';
 import { WELL_KNOWN_MCP_SERVICES } from '../../ioc/mcp-services.js';
 import { bareName, serviceCore } from '../../mcp/package-name.js';
 
@@ -51,7 +52,8 @@ function confirmedTyposquat(packageName: string, trusted: string[]): ReturnType<
 // Words a C2 domain label is often built from (npm-cache, js-mirror) — a label
 // made only of them names no publisher and matches ordinary packages
 const GENERIC_WORDS = new Set(['npm', 'js', 'node', 'cache', 'mirror', 'cdn', 'api', 'registry', 'proxy', 'update', 'updates',
-  'cloud', 'static', 'assets', 'pkg', 'package', 'packages', 'mcp', 'server', 'servers', 'web', 'app', 'apps', 'dev', 'docs', 'files']);
+  'cloud', 'static', 'assets', 'pkg', 'package', 'packages', 'mcp', 'server', 'servers', 'web', 'app', 'apps', 'dev', 'docs', 'files',
+  'client', 'llm', 'distribution']);
 
 function genericLabel(label: string): boolean {
   return label.split('-').every(part => GENERIC_WORDS.has(part));
@@ -106,12 +108,14 @@ export const mcp008 = defineCheck({
       }
 
       for (const domain of ioc.maliciousDomains) {
-        // Only use the domain's first label when it is distinctive enough to
-        // imply provenance (≥8 chars). Short/generic labels ("hub", "relay",
-        // "claude", "canvas" — C2 hosts of the 2026 agent-remote-control
-        // campaign) substring-match unrelated legitimate packages like
-        // @modelcontextprotocol/server-github.
-        const domainBase = domain.split('.')[0];
+        // The registered name's label, not the first one: `agenthub` in
+        // agenthub.contetial.com is a subdomain word anyone uses
+        // (@alicloud/agenthub); `contetial` is what the attacker registered
+        // (on a hosting platform, the tenant: openclawcli.vercel.app). Only
+        // when distinctive enough to imply provenance (≥8 chars, not made of
+        // generic words). The package the domain belongs to is flagged by its
+        // own advisory (MCP-027), not by its name.
+        const domainBase = registrableLabel(domain) ?? '';
         if (domainBase.length >= 8 && !genericLabel(domainBase) && hasSegment(normalizedPkg, domainBase)) {
           evidence.push({
             file: findConfigFile(mcpConfigs, source.serverName),
