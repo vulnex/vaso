@@ -117,6 +117,13 @@ hosts:
 
 Any other key is an error (exit 2) — a misspelt `identity` would otherwise be ignored and the scan would use a different key.
 
+**What a remote scan can't see.** The probe collects the files and command output VASO's adapters name in advance, so a remote (or `--snapshot`) scan reaches the same verdicts as a local one except where a config points somewhere only known at scan time. Those cases are reported, never judged silently — scan the host locally to check them:
+
+- **OpenClaw `$include` files** outside what the probe collects: it collects the `*.json5` files under the config directory (`~/.openclaw`, `~/.clawdbot`, `~/.openclaw-<profile>`). An include with another extension (`./gateway.json`), or one under an `OPENCLAW_INCLUDE_ROOTS` root outside the config directory, is reported as `CONFIG-LOAD` "not collected by the remote probe".
+- **An OpenShell gateway TOML redirected** by `OPENSHELL_GATEWAY_CONFIG` in `gateway.env` to a location other than the defaults and NemoClaw's layout (`CONFIG-LOAD`).
+- **Environment variables**: the probe ships only the variables adapters read (for example `HERMES_*`, `TIRITH_ENABLED`), with credential values redacted. A Hermes `config.yaml` `${VAR}` reference resolves from `~/.hermes/.env` on both, but one only the shell environment defines resolves only on a local scan.
+- Conversation and history stores (Codex sessions, ChatGPT conversations, Gemini chats, Copilot history, editor `state.vscdb`) and token stores are collected for their permissions only, never their content; a Grok Bot `.deb` that has never run is versioned from its package metadata on local scans only.
+
 ### `vaso detect`
 
 Lists installed AI agents without running any security checks. Useful for verifying which agents VASO can see before running a full scan.
