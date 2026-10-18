@@ -9,20 +9,26 @@ const APPROVAL_KEYS = ['alwaysApprove', 'autoApprove', 'autoApproveTools', 'auto
 
 // claude-autoapprove-mcp restarts Claude Desktop with its remote debugging
 // port open and injects auto-approval that reads each server's `autoapprove`
-// list (github.com/wallneradam/claude_autoapprove_mcp)
+// list (github.com/wallneradam/claude_autoapprove_mcp). Its
+// get_trusted_tools reads exactly `autoapprove` — lowercase, a list — from
+// every server, and inject.js approves a call whose tool name is in it
+// (`includes`, no wildcard; github.com/PyneSys/claude_autoapprove).
 const INJECTOR = /claude[-_]autoapprove[-_]mcp/i;
 const INJECTOR_KEY = 'autoapprove';
 
-function approvals(obj: Record<string, unknown>): { key: string; tools: string[] } | undefined {
+/** Every approval key set on `obj` — a server may carry several spellings. */
+function approvals(obj: Record<string, unknown>): { key: string; tools: string[] }[] {
+  const out: { key: string; tools: string[] }[] = [];
   for (const key of APPROVAL_KEYS) {
     const v = obj[key];
     if (Array.isArray(v)) {
       const tools = v.filter((s): s is string => typeof s === 'string');
-      if (tools.length > 0) return { key, tools };
+      if (tools.length > 0) out.push({ key, tools });
+    } else if (v === true) {
+      out.push({ key, tools: ['*'] });
     }
-    if (v === true) return { key, tools: ['*'] };
   }
-  return undefined;
+  return out;
 }
 
 function runsInjector(srv: Record<string, unknown>): boolean {
@@ -48,8 +54,7 @@ export const cd006 = defineCheck({
         : [];
       const injector = servers.find(([, srv]) => runsInjector(srv))?.[0];
 
-      const top = approvals(config.data);
-      if (top) {
+      for (const top of approvals(config.data)) {
         evidence.push({
           file: config.filePath,
           snippet: `top-level ${top.key} = ${JSON.stringify(top.tools)}`,
@@ -59,25 +64,28 @@ export const cd006 = defineCheck({
       }
 
       for (const [name, srv] of servers) {
-        const found = approvals(srv);
-        if (!found) continue;
-        const snippet = `mcpServers.${name}.${found.key} = ${JSON.stringify(found.tools)}`;
-        if (injector && found.key === INJECTOR_KEY) {
-          const broad = found.tools.includes('*') || found.tools.length >= 5;
-          evidence.push({
-            file: config.filePath,
-            snippet,
-            detail: `${broad ? 'Broad auto-approve' : `Auto-approves ${found.tools.length} tool(s)`} applied by the "${injector}" server (claude-autoapprove-mcp), which also keeps Claude Desktop's remote debugging port open — prompt-injected calls to these tools run without confirmation`,
-          });
-        } else {
-          evidence.push({
-            file: config.filePath,
-            snippet,
-            detail: injector
-              ? `claude-autoapprove-mcp reads "${INJECTOR_KEY}", not "${found.key}" — this list has no effect`
-              : `Claude Desktop does not read "${found.key}" (another MCP client's key) — its tools still ask for confirmation`,
-            mitigated: true,
-          });
+        for (const found of approvals(srv)) {
+          const snippet = `mcpServers.${name}.${found.key} = ${JSON.stringify(found.tools)}`;
+          // the injector matches tool names exactly: `true` or "*" approve nothing
+          const named = Array.isArray(srv[found.key]) ? found.tools.filter(t => t !== '*') : [];
+          if (injector && found.key === INJECTOR_KEY && named.length > 0) {
+            evidence.push({
+              file: config.filePath,
+              snippet,
+              detail: `${named.length >= 5 ? 'Broad auto-approve' : `Auto-approves ${named.length} tool(s)`} applied by the "${injector}" server (claude-autoapprove-mcp), which also keeps Claude Desktop's remote debugging port open — prompt-injected calls to these tools run without confirmation`,
+            });
+          } else {
+            evidence.push({
+              file: config.filePath,
+              snippet,
+              detail: !injector
+                ? `Claude Desktop does not read "${found.key}" (another MCP client's key) — its tools still ask for confirmation`
+                : found.key === INJECTOR_KEY
+                  ? 'claude-autoapprove-mcp approves only tools named in the list (no `true`, no "*" wildcard) — this entry has no effect'
+                  : `claude-autoapprove-mcp reads "${INJECTOR_KEY}", not "${found.key}" — this list has no effect`,
+              mitigated: true,
+            });
+          }
         }
       }
     }

@@ -45,13 +45,30 @@ async function archivesFor(ctx: ScanContext, extDir: string, id: string): Promis
   return found;
 }
 
+/**
+ * Whether `tail` (the archive's last bytes) ends in a well-formed signature
+ * block, located as `mcpb verify` does (src/node/sign.ts
+ * extractSignatureBlock: the last footer, the header before it, then a
+ * 4-byte little-endian length): the length must be non-zero and fill the
+ * space up to the footer exactly, and the bytes must open a DER SEQUENCE
+ * (0x30) — bare markers, a zero-length or a truncated block sign nothing.
+ */
+export function hasSignatureBlock(tail: Buffer): boolean {
+  const end = tail.lastIndexOf(SIG_END, undefined, 'latin1');
+  if (end === -1) return false;
+  const start = tail.lastIndexOf(SIG_START, end, 'latin1');
+  if (start === -1) return false;
+  const lenAt = start + SIG_START.length;
+  if (lenAt + 4 > end) return false;
+  const length = tail.readUInt32LE(lenAt);
+  return length > 0 && lenAt + 4 + length === end && tail[lenAt + 4] === 0x30;
+}
+
 /** true/false from the archive's trailer; undefined when it can't be read. */
 async function archiveSigned(ctx: ScanContext, file: string): Promise<boolean | undefined> {
   try {
     const bytes = await ctx.fs.readBytes(file);
-    const tail = Buffer.from(bytes.subarray(Math.max(0, bytes.length - TRAILER_BYTES))).toString('latin1');
-    const start = tail.lastIndexOf(SIG_START);
-    return start !== -1 && tail.indexOf(SIG_END, start) !== -1;
+    return hasSignatureBlock(Buffer.from(bytes.subarray(Math.max(0, bytes.length - TRAILER_BYTES))));
   } catch {
     return undefined;
   }

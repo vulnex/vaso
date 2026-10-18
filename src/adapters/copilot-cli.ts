@@ -150,7 +150,8 @@ export const copilotCliAdapter: AgentAdapter = {
         projectConfigs.push(await loadConfig(githubLspPath, fs));
       } catch {}
     }
-    const hasInstructions = await fs.access(join(cwd, '.github', 'copilot-instructions.md'));
+    const hasInstructions = await fs.access(join(cwd, '.github', 'copilot-instructions.md'))
+      || await fs.access(join(cwd, '.github', 'instructions'));
     if (projectConfigs.length > 0 || hasInstructions) {
       installations.push({
         agent: 'copilot-cli',
@@ -231,7 +232,7 @@ export const copilotCliAdapter: AgentAdapter = {
       globPatterns: [
         // package.json of every npm-global copy — versions non-primary copies on remote scans
         ...npmPackageJsonGlobs('@github/copilot'),
-        '~/.copilot/instructions/*.instructions.md',
+        '~/.copilot/instructions/**/*.instructions.md',
         '~/.copilot/skills/**',
         '~/.agents/skills/**',
         nvmBinaryGlob('copilot'),

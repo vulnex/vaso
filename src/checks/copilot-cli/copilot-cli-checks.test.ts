@@ -255,6 +255,41 @@ describe('GHC-008: Instruction File Secrets', () => {
     const result = await check.run(makeCtx([], fs));
     expect(result.passed).toBe(true);
   });
+
+  const tree = (root: string, files: Record<string, string>): FSProvider => {
+    const entries = (dir: string) => {
+      const names = new Map<string, boolean>();
+      for (const p of Object.keys(files)) {
+        if (!p.startsWith(`${dir}/`)) continue;
+        const [first, ...rest] = p.slice(dir.length + 1).split('/');
+        names.set(first, rest.length > 0 || names.get(first) === true);
+      }
+      return [...names].map(([name, isDirectory]) => ({ name, isFile: !isDirectory, isDirectory }));
+    };
+    return makeFs({
+      access: vi.fn(async (p: string) => p in files || p === root || Object.keys(files).some(f => f.startsWith(`${p}/`))),
+      readdirEntries: vi.fn(async (d: string) => entries(d)),
+      readFile: vi.fn(async (p: string) => files[p]),
+    });
+  };
+  const TOKEN = 'token: ghp_abcdefghijklmnopqrstuvwxyz0123456789';
+
+  it('reads *.instructions.md in subdirectories of ~/.copilot/instructions', async () => {
+    const result = await check.run(makeCtx([], tree('/home/test/.copilot/instructions', {
+      '/home/test/.copilot/instructions/team/backend/api.instructions.md': TOKEN,
+      '/home/test/.copilot/instructions/notes.md': TOKEN,
+    })));
+    expect(result.passed).toBe(false);
+    expect(result.evidence?.map(e => e.file)).toEqual(['/home/test/.copilot/instructions/team/backend/api.instructions.md']);
+  });
+
+  it("reads the repository's .github/instructions/** and skips vendor dirs", async () => {
+    const result = await check.run(makeCtx([], tree('/home/test/repo/.github/instructions', {
+      '/home/test/repo/.github/instructions/frontend/react.instructions.md': TOKEN,
+      '/home/test/repo/.github/instructions/node_modules/x/y.instructions.md': TOKEN,
+    }), true));
+    expect(result.evidence?.map(e => e.file)).toEqual(['/home/test/repo/.github/instructions/frontend/react.instructions.md']);
+  });
 });
 
 describe('GHC-009: Trusted Folder Too Broad', () => {

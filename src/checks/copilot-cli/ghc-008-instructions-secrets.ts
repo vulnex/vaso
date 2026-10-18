@@ -2,6 +2,7 @@ import { join } from 'node:path';
 import type { Evidence, ScanContext } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { memorySecretSeverity, scanMemorySecrets } from '../../analyzers/memory-secrets.js';
+import { isExcludedPath } from '../../core/utils.js';
 
 async function scanFile(file: string, ctx: ScanContext, evidence: Evidence[]): Promise<void> {
   if (!(await ctx.fs.access(file))) return;
@@ -15,12 +16,43 @@ async function scanFile(file: string, ctx: ScanContext, evidence: Evidence[]): P
   evidence.push(...scanMemorySecrets(file, content, 'instructions file'));
 }
 
+const MAX_DEPTH = 8;
+const MAX_FILES = 500;
+
+/**
+ * `*.instructions.md` files anywhere under `dir` — Copilot CLI reads them
+ * from subdirectories too (docs.github.com, "Adding custom instructions for
+ * GitHub Copilot CLI": `*.instructions.md` at any depth under
+ * `$HOME/.copilot/instructions/` and `.github/instructions/`). Vendor/VCS
+ * dirs skipped, depth and count bounded.
+ */
+async function instructionFiles(ctx: ScanContext, dir: string): Promise<string[]> {
+  const out: string[] = [];
+  if (!(await ctx.fs.access(dir))) return out;
+  const walk = async (d: string, depth: number): Promise<void> => {
+    let entries;
+    try {
+      entries = await ctx.fs.readdirEntries(d);
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      if (out.length >= MAX_FILES) return;
+      const p = join(d, e.name);
+      if (e.isFile && e.name.endsWith('.instructions.md')) out.push(p);
+      else if (e.isDirectory && depth < MAX_DEPTH && !isExcludedPath(dir, p)) await walk(p, depth + 1);
+    }
+  };
+  await walk(dir, 0);
+  return out;
+}
+
 export const ghc008 = defineCheck({
   id: 'GHC-008',
   name: 'Copilot CLI Instruction File Secret Leak',
   category: 'coding-agent',
   severity: 'critical',
-  description: 'Scan ~/.copilot/instructions/*.instructions.md and .github/copilot-instructions.md for plaintext secrets',
+  description: 'Scan Copilot instruction files (~/.copilot/copilot-instructions.md, .github/copilot-instructions.md, and *.instructions.md at any depth under ~/.copilot/instructions/ and .github/instructions/) for plaintext secrets',
   supportedAgents: ['copilot-cli'],
 
   async run(ctx, h) {
@@ -33,18 +65,12 @@ export const ghc008 = defineCheck({
       await scanFile(join(ctx.installation.installDir, 'copilot-instructions.md'), ctx, evidence);
     }
 
-    // User-level instructions/*.instructions.md
-    const userInstrDir = join(ctx.installation.installDir, 'instructions');
-    if (await ctx.fs.access(userInstrDir)) {
-      try {
-        const entries = await ctx.fs.readdirEntries(userInstrDir);
-        for (const e of entries) {
-          if (!e.isFile) continue;
-          if (!e.name.endsWith('.instructions.md')) continue;
-          await scanFile(join(userInstrDir, e.name), ctx, evidence);
-        }
-      } catch {}
-    }
+    // Modular instructions: ~/.copilot/instructions/**/*.instructions.md, and
+    // the repository's .github/instructions/**/*.instructions.md
+    const instrDir = ctx.installation.profile === 'project'
+      ? join(ctx.installation.installDir, '.github', 'instructions')
+      : join(ctx.installation.installDir, 'instructions');
+    for (const file of await instructionFiles(ctx, instrDir)) await scanFile(file, ctx, evidence);
 
     return h.fromEvidence(evidence, {
       severity: memorySecretSeverity(evidence),

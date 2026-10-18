@@ -206,10 +206,25 @@ describe('CD-005: Unverified MCPB Desktop Extensions', () => {
     expect(result.message).toMatch(/unsigned/);
   });
 
+  const block = (sig: Buffer, length = sig.length) => {
+    const len = Buffer.alloc(4);
+    len.writeUInt32LE(length);
+    return Buffer.concat([zip, Buffer.from('MCPB_SIG_V1'), len, sig, Buffer.from('MCPB_SIG_END')]);
+  };
+
   it('passes a signed bundle', async () => {
-    const signed = Buffer.concat([zip, Buffer.from('MCPB_SIG_V1'), Buffer.from([4, 0, 0, 0]), Buffer.from('0\u0082sig'), Buffer.from('MCPB_SIG_END')]);
-    const result = await check.run(makeCtx([], extFs({ name: 'ext.mcpb', bytes: signed })));
+    const der = Buffer.from([0x30, 0x82, 0x01, 0x00, ...Buffer.from('pkcs7')]);
+    const result = await check.run(makeCtx([], extFs({ name: 'ext.mcpb', bytes: block(der) })));
     expect(result.passed).toBe(true);
+  });
+
+  it('a zero-length, mis-sized or non-DER signature block is unsigned', async () => {
+    const der = Buffer.from([0x30, 0x82, 0x01, 0x00, ...Buffer.from('pkcs7')]);
+    for (const bytes of [block(Buffer.alloc(0)), block(der, der.length + 10), block(Buffer.from('not-der'))]) {
+      const result = await check.run(makeCtx([], extFs({ name: 'ext.mcpb', bytes })));
+      expect(result.passed).toBe(false);
+      expect(result.message).toMatch(/unsigned/);
+    }
   });
 });
 
@@ -239,6 +254,32 @@ describe('CD-006: Always-Approve MCP Tools', () => {
     expect(result.passed).toBe(false);
     expect(result.severity).toBe('critical');
     expect(result.evidence?.filter(e => !e.mitigated).map(e => e.snippet)).toEqual(['mcpServers.shell.autoapprove = ["run_command"]']);
+  });
+
+  it('reads every approval spelling on a server: an injector list behind another client\'s key still counts', async () => {
+    const config = makeConfig('config.json', {
+      mcpServers: {
+        'claude-autoapprove-mcp': { command: 'uvx', args: ['claude-autoapprove-mcp'] },
+        shell: { command: 'shell-mcp', autoApprove: ['x'], autoapprove: ['run_command'] },
+      },
+    });
+    const result = await check.run(makeCtx([config]));
+    expect(result.severity).toBe('critical');
+    expect(result.evidence?.filter(e => !e.mitigated).map(e => e.snippet)).toEqual(['mcpServers.shell.autoapprove = ["run_command"]']);
+    expect(result.evidence?.filter(e => e.mitigated).map(e => e.snippet)).toEqual(['mcpServers.shell.autoApprove = ["x"]']);
+  });
+
+  it('an injector autoapprove of true or "*" approves nothing (exact tool names only)', async () => {
+    const config = makeConfig('config.json', {
+      mcpServers: {
+        'claude-autoapprove-mcp': { command: 'uvx', args: ['claude-autoapprove-mcp'] },
+        a: { command: 'a', autoapprove: true },
+        b: { command: 'b', autoapprove: ['*'] },
+      },
+    });
+    const result = await check.run(makeCtx([config]));
+    expect(result.severity).toBe('info');
+    expect(result.evidence).toHaveLength(2);
   });
 
   it('passes when no auto-approve fields set', async () => {
