@@ -60,6 +60,12 @@ export const SECURITY_PATTERNS: PatternRule[] = [
   // PowerShell: `iwr … | iex`, `iex (irm …)`. As in CP-001, only the first
   // download word before a `|` is tried; `\s*\(?\s*(?:\(\s*)?` split a space
   // run after `iex` every way (100 KB: 6 s) and is now `\s*(?:\(\s*){0,2}`.
+  // Download to a file, then run it: `curl -o /tmp/x URL && chmod +x /tmp/x && /tmp/x`,
+  // `wget -O i.sh URL; sh i.sh`. The saved file is matched by name (`\1`)
+  // where a command starts — made executable, run, or sourced — not when a
+  // later command reads it (`&& tar xzf f.tgz`, `&& jq . out.json`). Bounded
+  // runs: one download word per line is tried (as CP-001).
+  { id: 'CP-007', pattern: /\b(?:curl|wget)\s(?<!\b(?:curl|wget)\s[^\n]{0,400}?\b(?:curl|wget)\s)[^\n|;&]{0,300}?(?<=\s)(?:-o|-O|--output(?:-document)?)[=\s]\s*['"]?([\w./~$-]{1,200})['"]?[^\n]{0,300}?(?:\bchmod\s+(?:[ugoa]*\+[rwX]*x[rwX]*|0?[1357][0-7]{2})\s+['"]?\1(?![\w./-])|(?:&&|;|\|\||\$\(|`)\s*(?:sudo\s+)?(?:(?:ba|z|da|k)?sh\s+|source\s+|\.\s+|python[\d.]*\s+|node\s+|perl\s+)?['"]?\1(?![\w./-]))/i, category: 'curl-pipe', severity: 'critical', description: 'Download saved to a file and executed' },
   { id: 'CP-006', pattern: /\b(?:iwr|irm|invoke-webrequest|invoke-restmethod)\b(?<!\b(?:iwr|irm|invoke-webrequest|invoke-restmethod)\b[^|]*?\b(?:iwr|irm|invoke-webrequest|invoke-restmethod)\b)[^|]*\|\s*(?:iex|invoke-expression)\b|\b(?:iex|invoke-expression)\s*(?:\(\s*){0,2}(?:iwr|irm|invoke-webrequest|invoke-restmethod|new-object\s+net\.webclient)\b/i, category: 'curl-pipe', severity: 'critical', description: 'PowerShell download-and-execute' },
 
   // Credential harvesting (from B@dskills)
