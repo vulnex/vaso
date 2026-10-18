@@ -99,6 +99,16 @@ hosts:
     expect(targets[1].label).toBe('staging-web');
   });
 
+  it('neutralizes terminal escapes in labels', async () => {
+    const path = await writeTempYAML(`
+hosts:
+  - host: 10.0.0.5
+    label: "db\\e[2J\\nforged line"
+`);
+    const targets = await parseInventory(path);
+    expect(targets[0].label).toBe('db\\x1b[2J\\nforged line');
+  });
+
   it('defaults label to user@host when omitted', async () => {
     const path = await writeTempYAML(`
 hosts:

@@ -65,6 +65,21 @@ describe('loadSnapshotFile', () => {
     await expect(loadSnapshotFile(join(dir, 'nojson.json'))).rejects.toThrow(/not valid JSON/);
     await expect(loadSnapshotFile(join(dir, 'missing.json'))).rejects.toThrow(/not found/);
   });
+
+  it('neutralizes terminal escapes in the host and user names it prints', async () => {
+    const path = join(dir, 'esc.json');
+    await writeFile(path, JSON.stringify(snap({
+      hostname: 'box\u001b]8;;https://evil.example\u0007click\u001b]8;;\u0007',
+      privilege: { uid: 1000, username: 'u\u001b[2J', isRoot: false, sudoAvailable: false, escalated: false, scannedUsers: ['a\nb'], skippedPaths: [] },
+    })));
+    const s = await loadSnapshotFile(path);
+    expect(s.hostname).toBe('box\\x1b]8;;https://evil.example\\x07click\\x1b]8;;\\x07');
+    expect(s.privilege.username).toBe('u\\x1b[2J');
+    expect(s.privilege.scannedUsers).toEqual(['a\\nb']);
+    // Ordinary names are untouched
+    await writeFile(path, JSON.stringify(snap({ hostname: 'web-01.example.com' })));
+    expect((await loadSnapshotFile(path)).hostname).toBe('web-01.example.com');
+  });
 });
 
 describe('probeVersionWarning', () => {

@@ -16,6 +16,7 @@ import { readFile } from 'node:fs/promises';
 import { parse as parseYAML } from 'yaml';
 import { parseSSHTarget, assertSSHTargetParts } from './ssh.js';
 import type { SSHTarget } from './ssh.js';
+import { escapeControlChars } from '../reporting/text-safety.js';
 
 interface InventoryFile {
   hosts: Array<{
@@ -92,7 +93,8 @@ export async function parseInventory(path: string): Promise<SSHTarget[]> {
       user,
       host,
       port,
-      label: entry.label ?? defaultLabel,
+      // Printed in progress lines and reports, and named in host files
+      label: entry.label !== undefined ? escapeControlChars(entry.label, { lineBreaks: true }) : defaultLabel,
       identity: entry.identity,
       sudo: entry.sudo,
     };

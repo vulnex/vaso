@@ -1,6 +1,7 @@
 import { readFile, stat } from 'node:fs/promises';
 import { isAbsolute } from 'node:path';
 import type { ProbeSnapshot } from './snapshot-types.js';
+import { neutralizeSnapshotIdentity } from './snapshot-identity.js';
 import { MAX_REMOTE_OUTPUT_BYTES } from '../transport/ssh.js';
 
 /**
@@ -119,7 +120,7 @@ export async function loadSnapshotFile(path: string): Promise<ProbeSnapshot> {
 
   const problems = validateSnapshot(parsed);
   if (problems.length > 0) throw new SnapshotLoadError('Invalid snapshot file:', problems);
-  return parsed as ProbeSnapshot;
+  return neutralizeSnapshotIdentity(parsed as ProbeSnapshot);
 }
 
 /** Lines to print for a SnapshotLoadError. */

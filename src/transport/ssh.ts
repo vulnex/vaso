@@ -11,6 +11,7 @@ import { randomUUID } from 'node:crypto';
 import { writeFile, unlink } from 'node:fs/promises';
 import type { ProbeSnapshot, ProbeManifest } from '../core/snapshot-types.js';
 import { resolveProbeBinary } from './probe-fetch.js';
+import { neutralizeSnapshotIdentity } from '../core/snapshot-identity.js';
 
 export interface SSHTarget {
   user: string;
@@ -396,7 +397,7 @@ export async function executeRemoteProbe(
     const { stdout } = await runOverControl('ssh', controlSSHArgs(target, controlPath, [probeCmd]), { timeout: runTimeout });
 
     // 8. Parse snapshot
-    return JSON.parse(stdout) as ProbeSnapshot;
+    return neutralizeSnapshotIdentity(JSON.parse(stdout) as ProbeSnapshot);
   } finally {
     // Clean up local temp file
     await unlink(localManifestPath).catch(() => {});
