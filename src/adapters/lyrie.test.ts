@@ -196,6 +196,18 @@ describe('Lyrie adapter', () => {
     expect(paths).not.toContain(`${HOME}/lyrie-ai/.env.production`);
   });
 
+  it('reads env values the way Bun 1.3.11 does: `#` starts a comment, $VAR expands across layers', async () => {
+    const files = liveLayout({
+      [`${HOME}/lyrie-ai/.env.local`]: 'SHIELD=passive\n',
+    });
+    files[`${HOME}/lyrie-ai/.env`] += '\nLYRIE_DISCORD_DM_POLICY=open#was pairing\nLYRIE_SHIELD_MODE=${SHIELD}\nSHIELD=active';
+    const [inst] = await lyrieAdapter.detect({ fs: memFs(files) });
+    const env = inst.configFiles.find(c => c.filePath === `${HOME}/lyrie-ai/.env`)!;
+    expect(env.data.LYRIE_DISCORD_DM_POLICY).toBe('open');
+    // .env.local's SHIELD wins, and Bun expands against the final value
+    expect(env.data.LYRIE_SHIELD_MODE).toBe('passive');
+  });
+
   it('Shield binary paths match AgenticThreatBridge.findDefaultBinary', () => {
     expect(lyrieShieldBinaryPaths('/srv/lyrie')).toEqual([
       '/srv/lyrie/packages/shield/target/release/lyrie-shield',

@@ -1,0 +1,8 @@
+model:
+  default: anthropic/claude-opus-4.6
+  provider: custom
+  base_url: http://10.20.0.5:8000/v1
+approvals:
+  mode: "off"
+security:
+  tirith_enabled: true

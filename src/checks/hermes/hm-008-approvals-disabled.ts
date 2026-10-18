@@ -1,5 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { managedOverride, markManagedOverride } from '../../adapters/hermes-managed.js';
 import { getNestedValue } from '../../core/utils.js';
 
 const TRUTHY = /^(?:1|true|yes|on)$/i;
@@ -27,31 +28,31 @@ export const hm008 = defineCheck({
       if (config.filePath.endsWith('cli-config.yaml') || config.filePath.endsWith('config.yaml')) {
         const mode = getNestedValue(config.data, 'approvals.mode');
         if (mode === false || (typeof mode === 'string' && OFF.test(mode.trim()))) {
-          evidence.push({
+          evidence.push(markManagedOverride({
             file: config.filePath,
             snippet: `approvals.mode: ${String(mode)}`,
             detail: 'Tool-call approval prompts disabled — every action runs without confirmation',
-          });
+          }, managedOverride(ctx.configs, config, 'approvals.mode')));
         }
         for (const key of UNATTENDED_KEYS) {
           const v = getNestedValue(config.data, `approvals.${key}`);
           if (typeof v === 'string' && v.trim().toLowerCase() === 'approve') {
-            evidence.push({
+            evidence.push(markManagedOverride({
               file: config.filePath,
               snippet: `approvals.${key}: ${v}`,
               detail: `Dangerous commands are auto-approved in ${key === 'cron_mode' ? 'cron jobs' : key === 'unattended_mode' ? 'webhook/API sessions' : 'one-shot `hermes chat -q` runs'} — no operator ever confirms them`,
-            });
+            }, managedOverride(ctx.configs, config, `approvals.${key}`)));
           }
         }
       }
       if (config.format === 'env') {
         const yolo = config.data.HERMES_YOLO_MODE;
         if (typeof yolo === 'string' && TRUTHY.test(yolo.trim())) {
-          evidence.push({
+          evidence.push(markManagedOverride({
             file: config.filePath,
             snippet: `HERMES_YOLO_MODE=${yolo}`,
             detail: 'Persistent YOLO mode bypasses dangerous-command prompts for every Hermes session',
-          });
+          }, managedOverride(ctx.configs, config, 'HERMES_YOLO_MODE')));
         }
       }
     }

@@ -1,5 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { managedOverride, markManagedOverride } from '../../adapters/hermes-managed.js';
 
 // Known/legitimate inference endpoints. Hosts not in this list — when paired
 // with provider:custom (or used as base_url for the active model) — could be
@@ -87,11 +88,11 @@ export const hm007 = defineCheck({
       const found: Found[] = [];
       walk(config.data, '', found);
       for (const f of found) {
-        evidence.push({
+        evidence.push(markManagedOverride({
           file: config.filePath,
           snippet: `${f.path} = ${f.url}`,
           detail: `Endpoint host "${f.host}" is not a known inference provider — verify it isn't an exfil destination`,
-        });
+        }, managedOverride(ctx.configs, config, f.path)));
       }
     }
     return h.fromEvidence(evidence, {

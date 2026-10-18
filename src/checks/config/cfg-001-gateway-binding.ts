@@ -4,6 +4,7 @@ import { CODING_AGENTS, type Evidence, type FixResult } from '../../core/types.j
 import { fixFirstConfig } from '../../remediation/config-writer.js';
 import { getNestedValue } from '../../core/utils.js';
 import { envOverridesOf } from '../../adapters/env-overrides.js';
+import { managedOverride } from '../../adapters/hermes-managed.js';
 
 const LISTENER_KEY = /host|bind|listen/i;
 
@@ -127,6 +128,8 @@ export const cfg001 = defineCheck({
         const lines = config.raw.split('\n');
         for (const hit of wildcardListeners(config.data, WILDCARD_BINDS)) {
           if (reported.has(hit.path)) continue;
+          // Hermes: a value its administrator-managed layer replaces binds nothing
+          if (managedOverride(ctx.configs, config, hit.path)) continue;
           const line = lines.findIndex(l => l.includes(hit.key) && l.includes(hit.value));
           evidence.push({
             file: config.filePath,

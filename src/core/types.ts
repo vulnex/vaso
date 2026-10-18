@@ -108,6 +108,9 @@ export interface ParsedConfig {
   format: 'json' | 'yaml' | 'env' | 'toml' | 'unknown';
   filePath: string;
   data: Record<string, unknown>;
+  /** An administrator-managed layer the agent applies over the user's own
+   *  files (Hermes `/etc/hermes`): its values win where it sets them. */
+  managed?: boolean;
 }
 
 export interface GatewayInfo {

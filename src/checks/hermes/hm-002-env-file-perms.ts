@@ -9,7 +9,7 @@ export const hm002 = defineCheck({
   name: 'Hermes .env Over-Permissive Permissions',
   category: 'hermes',
   severity: 'critical',
-  description: 'Detect ~/.hermes/.env containing provider API keys / channel bot tokens with mode wider than 0600 — credentials readable by other local users.',
+  description: 'Detect ~/.hermes/.env containing provider API keys / channel bot tokens with mode wider than 0600 — credentials readable by other local users. The administrator-managed .env (/etc/hermes or $HERMES_MANAGED_DIR) is flagged when world-readable.',
   supportedAgents: ['hermes'],
   supportedPlatforms: ['darwin', 'linux'],
 
@@ -20,7 +20,18 @@ export const hm002 = defineCheck({
       if (!SECRET_KEY_PATTERN.test(config.raw)) continue;
       try {
         const perms = await queryPermissions(ctx.fs, config.filePath);
-        if (perms !== 'unsupported' && accessibleByOthers(perms)) {
+        if (perms === 'unsupported') continue;
+        if (config.managed) {
+          // Every account that runs Hermes must read the administrator-managed
+          // .env, so group access is by design; any local user is not
+          if (perms.worldRead) {
+            evidence.push({
+              file: config.filePath,
+              snippet: `mode 0${perms.octal}`,
+              detail: 'Administrator-managed .env contains provider/channel secrets and is world-readable — every local account can read them (restrict it to a group of Hermes users, e.g. 0640)',
+            });
+          }
+        } else if (accessibleByOthers(perms)) {
           evidence.push({
             file: config.filePath,
             snippet: `mode 0${perms.octal}`,

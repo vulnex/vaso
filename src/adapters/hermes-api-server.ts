@@ -1,5 +1,6 @@
 import type { ParsedConfig } from '../core/types.js';
 import { compareVersions } from '../core/semver.js';
+import { byHermesPrecedence } from './hermes-managed.js';
 
 /**
  * Hermes API server settings, resolved the way Hermes does. Documented
@@ -94,11 +95,13 @@ export function isUsableHermesKey(key: string | undefined): boolean {
  *   current release when it is unknown.
  */
 export function hermesApiServer(
-  configs: Array<Pick<ParsedConfig, 'format' | 'data'> & { filePath?: string }>,
+  configs: Array<Pick<ParsedConfig, 'format' | 'data' | 'managed'> & { filePath?: string }>,
   version?: string,
 ): HermesApiServer {
-  const env = configs.filter(c => c.format === 'env');
-  const yaml = configs.filter(c => c.format !== 'env');
+  // The administrator-managed layer (/etc/hermes) wins over the user's files
+  const ordered = byHermesPrecedence(configs);
+  const env = ordered.filter(c => c.format === 'env');
+  const yaml = ordered.filter(c => c.format !== 'env');
 
   const fromEnv = (field: keyof HermesApiServer, envKey: string): HermesSetting | undefined => {
     for (const c of env) {

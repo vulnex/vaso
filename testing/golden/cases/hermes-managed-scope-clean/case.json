@@ -1,0 +1,19 @@
+{
+  "agent": "hermes",
+  "source": "Hermes administrator-managed scope (hermes_cli/managed_scope.py, hermes-agent c152ba5a82): root-style 755 dir, 644 config.yaml pinning manual approvals, 640 .env with the shared key; user config as hermes-clean",
+  "env": {
+    "HERMES_MANAGED_DIR": "{{HOME}}/managed"
+  },
+  "modes": {
+    ".hermes": "700",
+    ".hermes/config.yaml": "600",
+    ".hermes/.env": "600",
+    ".hermes/bin/tirith": "755",
+    "managed": "755",
+    "managed/config.yaml": "644",
+    "managed/.env": "640"
+  },
+  "reachable": true,
+  "pass": ["HM-002", "HM-008", "HM-011"],
+  "clean": true
+}

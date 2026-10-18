@@ -1,0 +1,20 @@
+{
+  "agent": "hermes",
+  "source": "Hermes administrator-managed scope (hermes_cli/managed_scope.py, hermes-agent c152ba5a82) left world-writable; its pinned manual approvals, HTTPS endpoint and HERMES_YOLO_MODE=false override the user's approvals off, http:// base_url and YOLO mode (set through a python-dotenv ${VAR} reference with an inline comment)",
+  "env": {
+    "HERMES_MANAGED_DIR": "{{HOME}}/managed"
+  },
+  "modes": {
+    ".hermes": "700",
+    ".hermes/config.yaml": "600",
+    ".hermes/.env": "600",
+    "managed": "777",
+    "managed/config.yaml": "644",
+    "managed/.env": "644"
+  },
+  "reachable": true,
+  "fail": {
+    "HM-011": "critical"
+  },
+  "info": ["HM-006", "HM-008"]
+}

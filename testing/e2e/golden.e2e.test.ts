@@ -35,6 +35,9 @@ import type { AgentScanResult, ScanResult, Severity } from '../../src/core/types
  *            mitigated and has nothing to fix
  *   modes    { "<path under home>": "600" } — git keeps only 644/755 file
  *            modes and none for directories, so permissions are set here
+ *   env      { "<NAME>": "<value>" } — extra environment for the scan, the
+ *            probe and the fix ({{HOME}} substituted), e.g. a relocated
+ *            system directory such as HERMES_MANAGED_DIR
  *
  * Scans run with a minimal environment (no real HOME, PATH without agent
  * CLIs) from inside the fixture, so results depend on the fixture only.
@@ -59,6 +62,7 @@ interface GoldenCase {
   mcpConfig?: string;
   cleanIgnore?: string[];
   modes?: Record<string, string>;
+  env?: Record<string, string>;
   reachable?: boolean;
   /** Skip on these platforms (fixtures relying on POSIX modes). */
   skipOn?: NodeJS.Platform[];
@@ -73,11 +77,14 @@ const caseNames = existsSync(CASES)
   ? readdirSync(CASES).filter(n => existsSync(join(CASES, n, 'case.json'))).sort()
   : [];
 
+/** Each case's extra environment, by fixture HOME. */
+const caseEnv = new Map<string, Record<string, string>>();
+
 function run(args: string[], home: string, cmd = process.execPath): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((done, fail) => {
     const child = spawn(cmd, cmd === process.execPath ? [CLI, ...args] : args, {
       cwd: home,
-      env: { HOME: home, PATH: '/usr/bin:/bin', NO_COLOR: '1', VASO_SKIP_IOC_UPDATE: '1', TMPDIR: tmpdir() },
+      env: { HOME: home, PATH: '/usr/bin:/bin', NO_COLOR: '1', VASO_SKIP_IOC_UPDATE: '1', TMPDIR: tmpdir(), ...caseEnv.get(home) },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let stdout = '';
@@ -162,6 +169,7 @@ describe.each(caseNames)('golden: %s', (name) => {
     home = join(work, 'home');
     await materialize(join(CASES, name, 'home'), home);
     for (const [path, mode] of Object.entries(spec.modes ?? {})) await chmod(join(home, path), parseInt(mode, 8));
+    if (spec.env) caseEnv.set(home, Object.fromEntries(Object.entries(spec.env).map(([k, v]) => [k, v.split('{{HOME}}').join(home)])));
     local = (await scan(home, spec.agent, [], mcpOf(spec))).agents.filter(a => a.agent === spec.agent);
   }, 120_000);
 

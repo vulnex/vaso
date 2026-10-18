@@ -1,0 +1,5 @@
+approvals:
+  mode: manual
+  cron_mode: deny
+security:
+  tirith_enabled: true

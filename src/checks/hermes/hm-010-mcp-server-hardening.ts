@@ -3,6 +3,7 @@ import { defineCheck } from '../../core/check-builder.js';
 import { runnerPackage, isPinnedOrLocal, pinProblem } from '../../mcp/package-pin.js';
 import { shellCommandWrapper, shellInvocation } from '../../mcp/shell-wrapper.js';
 import { queryPermissions } from '../../core/permissions.js';
+import { managedOverride, markManagedOverride } from '../../adapters/hermes-managed.js';
 
 
 export const hm010 = defineCheck({
@@ -27,13 +28,18 @@ export const hm010 = defineCheck({
         const args = server.args;
         if (typeof command !== 'string') continue;
 
+        // The administrator-managed layer replacing this server's command or args launches something else
+        const managed = managedOverride(ctx.configs, config, ['mcp_servers', name, 'command'])
+          ?? managedOverride(ctx.configs, config, ['mcp_servers', name, 'args']);
+        const push = (e: Evidence) => evidence.push(markManagedOverride(e, managed));
+
         const argList = Array.isArray(args)
           ? (args as unknown[]).filter((a): a is string => typeof a === 'string')
           : [];
 
         // Shell-c invocation: `bash -c "..."` lets injected args run anything
         if (shellCommandWrapper(command, argList)) {
-          evidence.push({
+          push({
             file: config.filePath,
             snippet: `mcp_servers.${name}: ${command} ${argList.join(' ')}`,
             detail: `MCP server invoked via "${shellInvocation(shellCommandWrapper(command, argList)!, argList)} …" — argv injection becomes shell injection`,
@@ -45,7 +51,7 @@ export const hm010 = defineCheck({
           try {
             const perms = await queryPermissions(ctx.fs, command);
             if (perms !== 'unsupported' && perms.worldWrite) {
-              evidence.push({
+              push({
                 file: config.filePath,
                 snippet: `${command} (mode 0${perms.octal})`,
                 detail: `MCP server command is world-writable — any local user can replace it before launch`,
@@ -59,7 +65,7 @@ export const hm010 = defineCheck({
         // Unpinned package runner
         const pkg = runnerPackage(command, argList);
         if (pkg && !isPinnedOrLocal(pkg)) {
-          evidence.push({
+          push({
             file: config.filePath,
             snippet: `mcp_servers.${name}: ${command} ${argList.join(' ')}`,
             detail: `${pinProblem(pkg)} — supply-chain risk`,

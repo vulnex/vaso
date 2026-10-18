@@ -257,8 +257,11 @@ describe('Hermes adapter', () => {
 
   it('returns correct config paths', () => {
     const paths = hermesAdapter.getConfigPaths();
-    // A cli-config.yaml in HERMES_HOME is never read by Hermes
-    expect(paths).toHaveLength(2);
+    // A cli-config.yaml in HERMES_HOME is never read by Hermes; the
+    // administrator-managed scope is
+    expect(paths).toHaveLength(4);
+    expect(paths).toContain('/etc/hermes/config.yaml');
+    expect(paths).toContain('/etc/hermes/.env');
     expect(paths).not.toContain(join(hermesHome, 'cli-config.yaml'));
     expect(paths).toContain(join(hermesHome, 'config.yaml'));
     expect(paths).toContain(join(hermesHome, '.env'));

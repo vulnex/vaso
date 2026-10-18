@@ -62,8 +62,8 @@ function makeCtx(configs: ParsedConfig[], opts: { fs?: FSProvider; installDir?: 
 }
 
 describe('Hermes checks', () => {
-  it('exports 10 checks', () => {
-    expect(hermesChecks).toHaveLength(10);
+  it('exports 11 checks', () => {
+    expect(hermesChecks).toHaveLength(11);
   });
   it('all in hermes category targeting hermes agent', () => {
     for (const c of hermesChecks) {

@@ -1,0 +1,12 @@
+{
+  "agent": "lyrie",
+  "source": "lyrie-clean with `KEY=value#note` comments on the DM policies: Bun 1.3.11 (the release Lyrie pins) ends an unquoted value at the first #, so the policies are pairing/closed, not invalid",
+  "clean": true,
+  "pass": ["LY-003"],
+  "modes": {
+    ".lyrie/memory/lyrie-memory.db": "600",
+    "lyrie-ai/.env": "600",
+    ".lyrie": "700",
+    ".lyrie/memory": "700"
+  }
+}

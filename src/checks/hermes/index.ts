@@ -9,8 +9,10 @@ import { hm007 } from './hm-007-untrusted-custom-endpoint.js';
 import { hm008 } from './hm-008-approvals-disabled.js';
 import { hm009 } from './hm-009-tirith-disabled.js';
 import { hm010 } from './hm-010-mcp-server-hardening.js';
+import { hm011 } from './hm-011-managed-scope-writable.js';
 
 export const hermesChecks: CheckModule[] = [
   hm001, hm002, hm003, hm004, hm005,
   hm006, hm007, hm008, hm009, hm010,
+  hm011,
 ];

@@ -250,6 +250,7 @@ export const CHECK_AGENTIC_MAP: Record<string, OwaspAgenticId[]> = {
   'HM-008': ['AAI012', 'AAI001'],
   'HM-009': ['AAI012', 'AAI002'],
   'HM-010': ['AAI009', 'AAI002'],
+  'HM-011': ['AAI001', 'AAI002'],
   // Atomic Agent (AT)
   'AT-001': ['AAI012', 'AAI001'],
   'AT-002': ['AAI001', 'AAI005'],

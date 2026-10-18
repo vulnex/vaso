@@ -454,7 +454,7 @@ Penalties:
 
 ## Security Checks
 
-VASO runs **361 checks across 19 categories**.
+VASO runs **362 checks across 19 categories**.
 
 | Category | IDs | Count | Scope |
 |----------|-----|-------|-------|
@@ -473,7 +473,7 @@ VASO runs **361 checks across 19 categories**.
 | Nanobot | NB-001–012 | 12 | Open channels (`allowFrom: ["*"]`, open DM policy), plaintext secrets, workspace restriction, exec sandbox/allow patterns, SSRF whitelist, writable prompt/memory/cron files, unauthenticated WebUI, readable chat history, API server exposure, unpinned MCP packages |
 | ZeroClaw | ZC-001–016 | 16 | V3 schema: plaintext/XOR secrets, gateway bind and pairing, `full` risk level, filesystem scope, open peer groups, open skills/scripts, WhatsApp session perms, browser/HTTP private-host access, sandbox, unrestricted commands/auto-approve, relaxed gateway safeguards |
 | Lyrie | LY-001–020 | 20 | Checkout `.env` + `~/.lyrie` state: Shield mode/binary, channel DM policy, secrets-file perms, WebChat exposure/origins, pairing and edit ledgers, local-mode leaks, `NODE_ENV=development` SSRF gap, broad `LYRIE_FS_ROOT`, readable memory DB |
-| Hermes | HM-001–010 | 10 | Plaintext API keys, env/credentials perms, API-server bind without auth, permissive CORS, plaintext inference endpoints, approvals-off, Tirith pre-exec scanner state, MCP stdio shell-c / unpinned packages |
+| Hermes | HM-001–011 | 11 | Plaintext API keys, env/credentials perms, API-server bind without auth, permissive CORS, plaintext inference endpoints, approvals-off, Tirith pre-exec scanner state, MCP stdio shell-c / unpinned packages, administrator-managed scope writable by others; settings judged after the managed `/etc/hermes` layer is applied |
 | OpenShell | OSH-001–014 | 14 | Gateway TLS disabled, unauthenticated users, OIDC over plaintext HTTP, non-expiring SSH/sandbox credentials, `retain_last_valid` policy validation, fail-open or plaintext interceptors/middleware, resource admission off (critical with caller driver config), readable CA/JWT/TLS keys, key-encryption key, credential database and sandbox tokens, writable gateway config or CLI gateway metadata, CLI without TLS verification; live sandbox policies: network rules open to any program (`/**`), `tls: skip` / uninspected credentials / allow-all MCP / no protocol / `access: full` / audit-only rules, `allowed_ips` of /8 or wider and `host.openshell.internal`, writable system paths |
 | Atomic Agent | AT-001–011 | 11 | Raised approval ladder (level 4/5), unrestricted read scope, unapproved HTTP egress, plaintext secrets in config.json, `.env`/mail-session perms, `pure_read` MCP trust, MCP stdio/transport hygiene, secretless webhooks, subscription-CLI lockdown overrides, plaintext inference endpoints, world/group-readable memory, sessions and traces |
 | Coding Agent | CC, CD, CG, CDX, OPC, GEM, QC, CUR, GHC, WS, DEV, ABA, MM, PC, GB | 145 | Claude Code (12), Claude Desktop (10), ChatGPT Desktop (6), Codex (10), OpenCode (12), Gemini CLI (11), Qwen Code (10), Cursor (14), GitHub Copilot CLI (9), Windsurf/Devin Desktop (8), Devin CLI (10), Abacus.AI CLI/Desktop (15), Meta Muse (3), Perplexity Comet (2), Grok Bot (13): sandbox/approval policy, plaintext credentials, MCP pinning, broad allow rules, memory-file secrets, transport security |
@@ -495,7 +495,7 @@ VASO ships twenty-six adapters. Each implements `detect()`, `getConfigPaths()`, 
 | Nanobot | `~/.nanobot/config.json` + workspace (`agents.defaults.workspace`) | JSON |
 | ZeroClaw | `$ZEROCLAW_CONFIG_DIR` (default `~/.zeroclaw/`): `config.toml` (V3), `auth-profiles.json` | TOML, JSON |
 | NemoClaw | `~/.nemoclaw/`, `/etc/nemoclaw/` | JSON, YAML |
-| Hermes | `~/.hermes/`, `/etc/hermes/` | YAML, ENV |
+| Hermes | `$HERMES_HOME` (default `~/.hermes/`): `config.yaml`, `.env`; administrator-managed `config.yaml` / `.env` in `$HERMES_MANAGED_DIR` or `/etc/hermes/`, applied over the user's files (`.env` read with python-dotenv's rules, `${VAR}` expanded) | YAML, ENV |
 | Lyrie | git checkout `.env` (found via its service unit or common locations, `package.json` name `lyrie-agent`) + `~/.lyrie/` state (`config.json`, `mcp.json`, pairing/edit ledgers, memory) | ENV, JSON |
 | Atomic Agent | `~/.atomic-agent/` or `$ATOMIC_AGENT_STATE_DIR` (config.json, .env, skills/; MCP servers also discovered by `vaso mcp`) | JSON, ENV |
 

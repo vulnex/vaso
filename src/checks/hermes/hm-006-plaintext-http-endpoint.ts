@@ -1,5 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { managedOverride, markManagedOverride } from '../../adapters/hermes-managed.js';
 
 const LOOPBACK_HTTP = /^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?\b/i;
 
@@ -40,11 +41,11 @@ export const hm006 = defineCheck({
       const found: Found[] = [];
       walk(config.data, '', found);
       for (const f of found) {
-        evidence.push({
+        evidence.push(markManagedOverride({
           file: config.filePath,
           snippet: `${f.path} = ${f.url}`,
           detail: 'Inference traffic over plaintext HTTP — credentials, tool args, and prompts traverse unencrypted',
-        });
+        }, managedOverride(ctx.configs, config, f.path)));
       }
     }
     return h.fromEvidence(evidence, {

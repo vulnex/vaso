@@ -1,0 +1,13 @@
+{
+  "agent": "hermes",
+  "source": "hermes-clean with HERMES_YOLO_MODE=${DEMO_YOLO} in .env: Hermes loads .env with python-dotenv, which expands ${VAR} from earlier lines (python-dotenv 1.2.2 as vendored by hermes-agent c152ba5a82), so YOLO mode is on",
+  "modes": {
+    ".hermes": "700",
+    ".hermes/config.yaml": "600",
+    ".hermes/.env": "600",
+    ".hermes/bin/tirith": "755"
+  },
+  "fail": {
+    "HM-008": "critical"
+  }
+}

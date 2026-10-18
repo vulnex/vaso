@@ -5,6 +5,7 @@ import type { ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { loadConfigIfPresent } from './load-if-present.js';
+import { expandBunDotenvLayers, parseBunDotenvRaw } from './dotenv-bun.js';
 
 /**
  * Lyrie (OTT-Cybersecurity-LLC/lyrie-ai, 3.x) is a Bun turborepo that runs
@@ -158,6 +159,17 @@ export function lyrieEnvLayers(nodeEnv: string | undefined): string[] {
   ];
 }
 
+/**
+ * A checkout's env layers (lowest precedence first) with the values Bun
+ * gives them: its own comment/quote rules and `$VAR` expansion across the
+ * layers. An unreadable layer (CONFIG-LOAD) keeps what loadConfig made of it.
+ */
+function withBunDotenvValues(layers: ParsedConfig[], fs: FSProvider): ParsedConfig[] {
+  const parsed = layers.map(l => (l.format === 'env' && l.raw ? parseBunDotenvRaw(l.raw) : undefined));
+  const expanded = expandBunDotenvLayers(parsed.map(p => p ?? {}), name => fs.getEnv(name));
+  return layers.map((l, i) => (parsed[i] ? { ...l, data: expanded[i] } : l));
+}
+
 /** Every layered file name a probe should collect next to a checkout `.env`. */
 const ENV_LAYER_FILES = [
   '.env.development', '.env.production', '.env.local', '.env.development.local', '.env.production.local',
@@ -202,12 +214,12 @@ export const lyrieAdapter: AgentAdapter = {
     const configFiles: ParsedConfig[] = [];
     const ordered = primary ? [primary, ...checkouts.filter(c => c !== primary)] : [];
     for (const c of ordered) {
-      const env = await tryLoad(join(c.dir, '.env'), fs);
-      if (env) configFiles.push(env);
-      for (const name of lyrieEnvLayers(undefined)) {
+      const layers: ParsedConfig[] = [];
+      for (const name of ['.env', ...lyrieEnvLayers(undefined)]) {
         const layer = await tryLoad(join(c.dir, name), fs);
-        if (layer) configFiles.push(layer);
+        if (layer) layers.push(layer);
       }
+      configFiles.push(...withBunDotenvValues(layers, fs));
     }
     // Python CLI key store (`lyrie auth set`) — plaintext provider/GitHub keys.
     const pyConfig = await tryLoad(join(stateDir, 'config.json'), fs);

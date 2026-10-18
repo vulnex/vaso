@@ -10,6 +10,8 @@ import { hermesApiServer, hermesApiServerState, isTruthy, HERMES_API_DEFAULT_HOS
 import { discoverCliInstalls } from './cli-installs.js';
 import { queryCliVersion } from './version-query.js';
 import { envPath } from './env-path.js';
+import { byHermesPrecedence, hermesManagedDir, managedFilePaths, HERMES_MANAGED_DEFAULT_DIR } from './hermes-managed.js';
+import { parsePythonDotenv } from './dotenv-python.js';
 
 // $HERMES_HOME/config.yaml and .env. A cli-config.yaml there is never read:
 // the CLI's fallback (only without config.yaml) is the checkout's own
@@ -58,19 +60,21 @@ export const hermesAdapter: AgentAdapter = {
 
     if (!(await fs.access(hermesHome))) return [];
 
-    const configFiles = [];
+    const configFiles: ParsedConfig[] = [];
 
     for (const filename of CONFIG_FILENAMES) {
-      const filePath = join(hermesHome, filename);
-      try {
-        {
-          const loaded = await loadConfigIfPresent(filePath, fs);
-          if (loaded) configFiles.push(loaded);
-        }
-      } catch {}
+      const loaded = await loadConfigIfPresent(join(hermesHome, filename), fs);
+      if (loaded) configFiles.push(loaded);
+    }
+    // The administrator-managed layer every Hermes process applies on top
+    const managedDir = await hermesManagedDir(fs);
+    for (const filePath of managedDir ? managedFilePaths(managedDir) : []) {
+      const loaded = await loadConfigIfPresent(filePath, fs);
+      if (loaded) configFiles.push({ ...loaded, managed: true });
     }
 
     if (configFiles.length === 0) return [];
+    applyHermesDotenv(configFiles, fs);
 
     const stampVersion = await installStampVersion(hermesHome, fs);
 
@@ -115,7 +119,8 @@ export const hermesAdapter: AgentAdapter = {
   getConfigPaths(): string[] {
     const fs = new LocalFSProvider();
     const hermesHome = envPath(fs.getEnv('HERMES_HOME'), fs.homedir()) ?? join(fs.homedir(), '.hermes');
-    return CONFIG_FILENAMES.map(f => join(hermesHome, f));
+    const managedDir = fs.getEnv('HERMES_MANAGED_DIR')?.trim() || HERMES_MANAGED_DEFAULT_DIR;
+    return [...CONFIG_FILENAMES.map(f => join(hermesHome, f)), ...managedFilePaths(managedDir)];
   },
 
   getSkillsDir(installDir: string): string | undefined {
@@ -156,9 +161,10 @@ export const hermesAdapter: AgentAdapter = {
     // config.yaml: `model.default` (or `model.model`
     // — upstream accepts both) is the active model; `model.provider` and
     // `model.base_url` are sibling metadata for that model, not separate slots.
-    const yaml = configs.find(
-      c => c.filePath.endsWith('config.yaml'),
-    );
+    // The managed layer's model wins where it sets one
+    const ordered = byHermesPrecedence(configs);
+    const yaml = ordered.find(c => c.filePath.endsWith('config.yaml') && c.data?.model !== undefined)
+      ?? ordered.find(c => c.filePath.endsWith('config.yaml'));
     const block = yaml?.data?.model;
     if (typeof block === 'string') {
       push(block);
@@ -169,12 +175,13 @@ export const hermesAdapter: AgentAdapter = {
     }
 
     // .env overrides (no slot expansion — env keys are flat by nature)
-    const env = configs.find(c => c.filePath.endsWith('.env'));
-    if (env) {
-      const envProvider = env.data.HERMES_PROVIDER;
-      push(env.data.HERMES_MODEL, envProvider, out.length ? 'HERMES_MODEL' : undefined);
-      push(env.data.HERMES_DEFAULT_MODEL, envProvider);
-      push(env.data.OPENROUTER_MODEL, 'openrouter', 'OPENROUTER_MODEL');
+    const envs = ordered.filter(c => c.filePath.endsWith('.env'));
+    if (envs.length > 0) {
+      const envValue = (name: string) => envs.find(c => c.data[name] !== undefined)?.data[name];
+      const envProvider = envValue('HERMES_PROVIDER');
+      push(envValue('HERMES_MODEL'), envProvider, out.length ? 'HERMES_MODEL' : undefined);
+      push(envValue('HERMES_DEFAULT_MODEL'), envProvider);
+      push(envValue('OPENROUTER_MODEL'), 'openrouter', 'OPENROUTER_MODEL');
     }
 
     // Process env fallback (only when nothing was found in files)
@@ -279,6 +286,10 @@ export const hermesAdapter: AgentAdapter = {
         '~/.hermes/.env',
         // Installer version record ({"baseVersion": …})
         '~/.hermes/hermes-agent/install-stamp.json',
+        // Administrator-managed scope, applied over the user's files (the
+        // managed .env is read like the user's: checks need its values)
+        ...managedFilePaths(HERMES_MANAGED_DEFAULT_DIR),
+        ...managedFilePaths('${HERMES_MANAGED_DIR}'),
       ],
       // Credential stores — permissions only (HM-003), never content
       metadataGlobPatterns: [
@@ -300,6 +311,8 @@ export const hermesAdapter: AgentAdapter = {
         '~/.hermes',
         '~/.hermes/skills',
         '~/.hermes/optional-skills',
+        // Managed-scope dir mode (HM-011)
+        '${HERMES_MANAGED_DIR}',
       ],
       // TIRITH_ENABLED / TIRITH_FAIL_OPEN override security.tirith_* (HM-009)
       envPrefixes: ['HERMES_', 'TIRITH_ENABLED', 'TIRITH_FAIL_OPEN'],
@@ -308,11 +321,26 @@ export const hermesAdapter: AgentAdapter = {
         '/opt/homebrew/bin/hermes',
         '/usr/bin/hermes',
       ],
-      systemDirListings: [],
+      systemDirListings: [HERMES_MANAGED_DEFAULT_DIR],
     };
   },
 };
 
+
+/**
+ * Re-read the `.env` files with python-dotenv's rules, as Hermes loads them
+ * into its environment: the user's `.env` (its own earlier lines, then the
+ * process environment, for `${VAR}`), then the managed `.env`, which also
+ * sees what the user's file set.
+ */
+function applyHermesDotenv(configs: ParsedConfig[], fs: FSProvider): void {
+  const user = configs.find(c => c.format === 'env' && !c.managed);
+  const userValues = user ? parsePythonDotenv(user.raw, name => fs.getEnv(name)) : {};
+  if (user) user.data = userValues;
+  for (const managed of configs.filter(c => c.format === 'env' && c.managed)) {
+    managed.data = parsePythonDotenv(managed.raw, name => userValues[name] ?? fs.getEnv(name));
+  }
+}
 
 function hermesGateway(configs: Array<Pick<ParsedConfig, 'format' | 'data'>>, version?: string): GatewayInfo | undefined {
   const api = hermesApiServer(configs, version);
