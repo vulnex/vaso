@@ -1,5 +1,7 @@
-import { join, extname, dirname, relative, sep } from 'node:path';
-import { chmod, mkdir, writeFile } from 'node:fs/promises';
+import { join, extname, dirname, relative, sep, basename } from 'node:path';
+import { mkdir, open, rename, unlink, writeFile } from 'node:fs/promises';
+import { constants as fsConstants } from 'node:fs';
+import { randomBytes } from 'node:crypto';
 import type { DirentInfo, FSProvider } from './fs-provider.js';
 import type { AgentInstallation } from './types.js';
 import { walkSkillTree } from './skill-walk.js';
@@ -231,12 +233,30 @@ export async function pathExists(path: string, fs?: FSProvider): Promise<boolean
  */
 /**
  * Write a file readable by its owner only — for output that holds collected
- * file contents (probe snapshots) or scan history (baselines). `mode` alone
- * only applies when the file is created, so an existing file is chmod-ed too.
+ * file contents (probe snapshots) or scan history (baselines). The content
+ * goes to a new file created 0600 (O_EXCL, never through a symlink) next to
+ * the target, which is then renamed over it: a symlink planted at the target
+ * is replaced rather than followed, and the data is never in a file someone
+ * else can read, not even between create and chmod.
  */
 export async function writeFileOwnerOnly(path: string, content: string): Promise<void> {
-  await writeFile(path, content, { encoding: 'utf-8', mode: 0o600 });
-  await chmod(path, 0o600);
+  const tmp = join(dirname(path), `.${basename(path)}.${randomBytes(6).toString('hex')}.tmp`);
+  const flags = fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | (fsConstants.O_NOFOLLOW ?? 0);
+  const handle = await open(tmp, flags, 0o600);
+  try {
+    await handle.writeFile(content, 'utf-8');
+  } catch (err) {
+    await handle.close();
+    await unlink(tmp).catch(() => {});
+    throw err;
+  }
+  await handle.close();
+  try {
+    await rename(tmp, path);
+  } catch (err) {
+    await unlink(tmp).catch(() => {});
+    throw err;
+  }
 }
 
 export async function writeFileEnsureDir(path: string, content: string): Promise<void> {

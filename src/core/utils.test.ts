@@ -2,7 +2,30 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { mkdtemp, rm, readFile, stat, mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { getNestedValue, setNestedValue, deepMerge, writeFileEnsureDir, getSkillFiles, isExcludedPath } from './utils.js';
+import { getNestedValue, setNestedValue, deepMerge, writeFileEnsureDir, getSkillFiles, isExcludedPath, writeFileOwnerOnly } from './utils.js';
+import { lstat, readdir, symlink } from 'node:fs/promises';
+
+describe.skipIf(process.platform === 'win32')('writeFileOwnerOnly', () => {
+  let dir: string;
+  afterEach(async () => { await rm(dir, { recursive: true, force: true }); });
+
+  it('replaces a symlink at the target instead of writing through it, 0600 from the start', async () => {
+    dir = await mkdtemp(join(tmpdir(), 'vaso-owneronly-'));
+    const victim = join(dir, 'victim');
+    await writeFile(victim, 'keep', { mode: 0o644 });
+    const out = join(dir, 'host.json');
+    await symlink(victim, out);
+    await writeFileOwnerOnly(out, '{"snap":1}');
+    expect(await readFile(victim, 'utf-8')).toBe('keep');
+    expect((await lstat(out)).isSymbolicLink()).toBe(false);
+    expect(await readFile(out, 'utf-8')).toBe('{"snap":1}');
+    expect((await stat(out)).mode & 0o777).toBe(0o600);
+    // Overwrites an existing file, and leaves no temp file behind
+    await writeFileOwnerOnly(out, 'v2');
+    expect(await readFile(out, 'utf-8')).toBe('v2');
+    expect((await readdir(dir)).sort()).toEqual(['host.json', 'victim']);
+  });
+});
 
 describe('getNestedValue', () => {
   it('retrieves a nested value by dot path', () => {
