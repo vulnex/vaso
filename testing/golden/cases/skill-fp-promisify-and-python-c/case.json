@@ -1,0 +1,5 @@
+{
+  "agent": "claude-code",
+  "source": "dt15 mcp-skills: const exec = promisify(execFile) running vercel (vercel-labs/agent-skills), [python, \"-c\", \"<literal>\"] version probes on one and several lines (huggingface/skills)",
+  "info": ["SKL-003"]
+}

@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "proxy": { "command": "python3", "args": ["{{HOME}}/srv/proxy.py"] },
+    "pdf": { "command": "python3", "args": ["{{HOME}}/srv/pdf.py"] },
+    "stats": { "command": "node", "args": ["{{HOME}}/srv/stats.js"] },
+    "weather": { "command": "node", "args": ["{{HOME}}/srv/weather.js"] },
+    "status": { "command": "node", "args": ["{{HOME}}/srv/status.js"] }
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "agent": "mcp",
+  "source": "dt15 mcp-skills: /authorize in a Python docstring and a route map (opik-mcp), a constant python -c script given a tool argument (zotero-mcp-server), SQL from a constant named query (@bytebase/dbhub), credentials in a tool description (@browserstack/mcp-server), a fetchWithTimeout(url) wrapper called with a fixed API (@perplexity-ai/mcp-server)",
+  "mcpConfig": "mcp.json",
+  "pass": ["MCP-005", "MCP-013", "MCP-018", "MCP-019"],
+  "info": ["MCP-004", "MCP-007"]
+}
