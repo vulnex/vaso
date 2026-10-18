@@ -39,6 +39,23 @@ describe('maskCredentialsInText', () => {
     expect(maskCredentialsInText('git@github.com:o/r.git and http://127.0.0.1:8080/mcp')).toBe('git@github.com:o/r.git and http://127.0.0.1:8080/mcp');
   });
 
+  it('leaves source assignments of code alone, masks secret-shaped values (dt17)', async () => {
+    const { maskCredentialsInText, maskCredentialsInLine } = await import('./serialize.js');
+    for (const line of ['code = notify(message)', 'token = headers["x-token"]', 'password = args.password', 'session = requests.Session()',
+      'api_key = None', 'CODE=200', 'if code == 200:']) {
+      expect(maskCredentialsInText(line), line).toBe(line);
+    }
+    expect(maskCredentialsInLine('    api_key = os.environ.get("KEY")')).toBe('    api_key = os.environ.get("KEY")');
+    // true positives: literals, env lines, bare words in INI, a JWT
+    expect(maskCredentialsInText('token = "q7Zp2Lk9Vx4Rt8Mw3Nc6"')).toBe('token=***');
+    expect(maskCredentialsInText('API_TOKEN=q7Zp2Lk9Vx4Rt8Mw3Nc6')).toBe('API_TOKEN=***');
+    expect(maskCredentialsInText('password = hunter2')).toBe('password=***');
+    expect(maskCredentialsInText('PASSWORD=ab(cd12!')).toBe('PASSWORD=***');
+    expect(maskCredentialsInText('session = eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U'))
+      .not.toContain('dozjgNryP4J3jVmNHl0w5N');
+    expect(maskCredentialsInLine('password = get_secret')).toBe('password = ***');
+  });
+
   it('is applied by every reporter', async () => {
     const { getReporter } = await import('./index.js');
     const scan = {

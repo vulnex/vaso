@@ -38,7 +38,8 @@ const mask = (value: string): string => (keepValue(value) ? value : MASK);
 const SECRET_NAME = /(?:token|secret|passw|pwd|signature|credential|api[_-]?key|apikey|private[_-]?key|session|jwt|bearer|cookie)|^(?:key|sig|code|auth|pass|pat|x-amz-credential)$/i;
 /** Env-style names: `GITHUB_PERSONAL_ACCESS_TOKEN`, `OPENAI_API_KEY`, `DB_PASSWORD`. */
 const SECRET_VAR = /^[A-Za-z_][A-Za-z0-9_]*$/;
-const secretVar = (name: string): boolean => SECRET_VAR.test(name) && (SECRET_NAME.test(name) || /(?:^|_)(?:KEY|PAT|AUTH|PASS)(?:_|$)/i.test(name));
+// `code` is an OAuth parameter (`?code=`, masked in URLs), not a variable name that holds a secret (`code = notify(msg)`, `CODE=200`)
+const secretVar = (name: string): boolean => SECRET_VAR.test(name) && !/^code$/i.test(name) && (SECRET_NAME.test(name) || /(?:^|_)(?:KEY|PAT|AUTH|PASS)(?:_|$)/i.test(name));
 
 /** Whether a config key or variable name holds a credential (`api_key`, `GITHUB_TOKEN`, `model.password`). */
 export function isSecretName(name: string): boolean {
@@ -141,7 +142,24 @@ const URL_IN_TEXT = /\b[a-z][a-z0-9+.-]{0,31}:\/\/[^\s"<>]+/gi;
 // backtracked over every split of a long `x-keykey…` run (quadratic)
 const SECRET_HEADER = /(^|[\s"'=])((?:proxy-)?authorization|cookie|x-(?=[\w-]*?(?:key|token|secret|auth|session))[\w-]*|api[_-]?key)(\s*:\s*)((?:bearer|basic|token|bot|digest)\s+)?([^\s"',;]+)/gi;
 /** `NAME=value` where NAME looks like a credential (env lines, `docker -e`, `env K=V cmd`, inline `sh -c`). */
-const SECRET_ASSIGN = /(^|[\s"'`(;&|:$])([A-Za-z_][A-Za-z0-9_]*)\s*=\s*("[^"]*"|'[^']*'|[^\s"'`;&|)]+)/g;
+const SECRET_ASSIGN = /(^|[\s"'`(;&|:$])([A-Za-z_][A-Za-z0-9_]*)(\s*=(?!=)\s*)("[^"]*"|'[^']*'|[^\s"'`;&|)]+)/g;
+
+/**
+ * An assignment's unquoted value that is code, not a secret, in source
+ * written `name = value` (an env line, `TOKEN=x`, has no spaces): a call or
+ * an index (`code = notify(msg)`, `token = headers["x"]`), a member reference
+ * (`password = args.password`) or a literal keyword. A bare word is kept
+ * masked (`password = hunter2` in an INI file), and so is a dotted value
+ * with digits inside its segments (a JWT is `eyJ….eyJ….sig`).
+ */
+function codeValue(value: string, sep: string): boolean {
+  if (!/\s/.test(sep) || /^["']/.test(value)) return false;
+  if (/^[A-Za-z_$][\w$.]*\s*[([]/.test(value)) return true;
+  if (/^(?:None|null|undefined|true|false|True|False|nil)$/.test(value)) return true;
+  const parts = value.split('.');
+  return parts.length > 1 && parts.every((p) => /^[A-Za-z_$][A-Za-z_$]{0,23}\d{0,2}$/.test(p));
+}
+
 /** `--token=x`, `--token x`, `--api-key x`, `--key=x`, `--pat=x`, `--password x`. */
 const SECRET_FLAG = /(^|[\s"'[,])(--?(?:[a-z][\w-]*?[-_])?(?:access[_-]?token|auth[_-]?token|token|api[_-]?key|apikey|key|pat|secret|client[_-]?secret|password|passwd|pass|pwd|credentials?|auth|bearer)|-p)(=|\s+|["']\s*,\s*["'])([^\s"'<>,]+)/gi;
 /** `-u user:pass` / `--user user:pass` (curl, wget). */
@@ -168,8 +186,8 @@ export function maskCredentialsInText(text: string): string {
     })
     .replace(SECRET_HEADER, (m, pre: string, name: string, sep: string, scheme: string | undefined, value: string) =>
       (keepValue(value) ? m : `${pre}${name}${sep}${scheme ?? ''}${MASK}`))
-    .replace(SECRET_ASSIGN, (m, pre: string, name: string, value: string) =>
-      (secretVar(name) && !keepValue(value) ? `${pre}${name}=${MASK}` : m))
+    .replace(SECRET_ASSIGN, (m, pre: string, name: string, sep: string, value: string) =>
+      (secretVar(name) && !keepValue(value) && !codeValue(value, sep) ? `${pre}${name}=${MASK}` : m))
     .replace(USER_PASS_FLAG, (m, pre: string, flag: string, sep: string, user: string, pw: string) =>
       (keepValue(pw) ? m : `${pre}${flag}${sep}${user}:${MASK}`))
     .replace(SECRET_FLAG, (m, pre: string, flag: string, sep: string, value: string) => {
@@ -190,7 +208,8 @@ const SECRET_KEY_VALUE = /(^|[\s"'{,])(["']?)([A-Za-z_][\w.-]{0,127})\2(\s*[:=]\
  */
 export function maskCredentialsInLine(line: string): string {
   const masked = line.replace(SECRET_KEY_VALUE, (m, pre: string, q: string, name: string, sep: string, value: string) => {
-    if (!isSecretName(name) || keepValue(value)) return m;
+    // `name = call(…)` in a source line is code (YAML `name: …` is always a value)
+    if (!isSecretName(name) || keepValue(value) || (sep.includes('=') && codeValue(value, sep))) return m;
     const quote = /^["']/.test(value) ? value[0] : '';
     return `${pre}${q}${name}${q}${sep}${quote}${MASK}${quote}`;
   });
