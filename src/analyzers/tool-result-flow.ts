@@ -338,7 +338,7 @@ function fromIdentifier(path: NodePath, depth: number): { literal?: string; para
   if (!path.isIdentifier()) return undefined;
   const binding = path.scope.getBinding(path.node.name);
   if (!binding) return undefined;
-  if (binding.kind === 'param') return { param: path.node.name };
+  if (binding.kind === 'param') return fromCallSites(binding, depth) ?? { param: path.node.name };
   const declarator = binding.path;
   if (declarator.isVariableDeclarator()) {
     // `const { url } = args` — destructured from a parameter.
@@ -352,6 +352,37 @@ function fromIdentifier(path: NodePath, depth: number): { literal?: string; para
     }
   }
   return undefined;
+}
+
+/**
+ * A parameter of a local helper (`fetchWithTimeout(url, opts)`) is only as
+ * caller-chosen as what its call sites pass: `fetchWithTimeout(`${BASE}/status`)`
+ * fetches a fixed API. Undefined — the parameter counts as the caller's —
+ * when the function is a handler or passed around as a value (a tool or
+ * request handler: `server.tool(…, async ({ url }) => …)`), or has no calls.
+ */
+function fromCallSites(binding: Binding, depth: number): { literal?: string; param?: string } | undefined {
+  if (depth > 4) return undefined;
+  const fn = binding.scope.path;
+  if (!fn.isFunction()) return undefined;
+  const index = fn.node.params.findIndex((p) => p === binding.path.node || (p.type === 'AssignmentPattern' && p.left === binding.path.node));
+  if (index < 0) return undefined;
+  // The function's own name: a declaration, or `const f = (…) => …`
+  const id = fn.isFunctionDeclaration() ? fn.node.id
+    : fn.parentPath?.isVariableDeclarator() && fn.parentPath.node.id.type === 'Identifier' ? fn.parentPath.node.id : undefined;
+  const named = id ? (fn.isFunctionDeclaration() ? fn.parentPath?.scope : fn.scope.parent)?.getBinding(id.name) : undefined;
+  if (!named || named.referencePaths.length === 0) return undefined;
+  let literal: string | undefined;
+  for (const ref of named.referencePaths) {
+    const call = ref.parentPath;
+    if (!call?.isCallExpression() || call.node.callee !== ref.node) return undefined; // used as a value
+    const arg = (call.get('arguments') as NodePath[])[index];
+    const start = arg?.node ? leftmost(arg, depth + 1) : undefined;
+    if (start?.param) return { param: start.param };
+    const host = start?.literal ? hostOf(start.literal) : undefined;
+    if (start?.literal && (literal === undefined || (host && isOpenContentHost(host)))) literal = start.literal;
+  }
+  return literal !== undefined ? { literal } : {};
 }
 
 // ── Python ─────────────────────────────────────────────────────────────

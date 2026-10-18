@@ -3006,6 +3006,43 @@ describe('MCP-007 tool-result passthrough', () => {
     expect(wiki.evidence?.[0].detail).toContain('en.wikipedia.org');
   });
 
+  it('judges a fetch wrapper by what its call sites pass (perplexity-mcp shape, dt15)', async () => {
+    const wrapper = [
+      'const BASE = "https://api.vendor-status.example.com/v1";',
+      'async function fetchWithTimeout(url, opts = {}) {',
+      '  const ac = new AbortController();',
+      '  return fetch(url, { ...opts, signal: ac.signal });',
+      '}',
+    ];
+    const fixed = await run([...wrapper,
+      'server.setRequestHandler(CallToolRequestSchema, async (request) => {',
+      '  const res = await fetchWithTimeout(`${BASE}/status`);',
+      '  return { content: [{ type: "text", text: await res.text() }] };',
+      '});',
+    ].join('\n'));
+    expect(fixed.passed).toBe(false);
+    expect(fixed.severity).toBe('info');
+    expect(fixed.evidence?.[0].detail).toContain('api.vendor-status.example.com');
+    // a call site passing the caller's URL, or an open-content host, is still a warning
+    const chosen = await run([...wrapper,
+      'server.setRequestHandler(CallToolRequestSchema, async (request) => {',
+      '  const res = await fetchWithTimeout(request.params.arguments.url);',
+      '  return { content: [{ type: "text", text: await res.text() }] };',
+      '});',
+    ].join('\n'));
+    expect(chosen.severity).toBe('warning');
+    expect(chosen.evidence?.[0].detail).toContain('URL the caller chooses');
+    const helper = await run([...wrapper,
+      'const page = async (u) => (await fetchWithTimeout(u)).text();',
+      'server.tool("read", {}, async ({ link }) => ({ content: [{ type: "text", text: await page(link) }] }));',
+    ].join('\n'));
+    expect(helper.severity).toBe('warning');
+    const reddit = await run([...wrapper,
+      'server.tool("r", {}, async () => ({ content: [{ type: "text", text: await (await fetchWithTimeout("https://www.reddit.com/r/x.json")).text() }] }));',
+    ].join('\n'));
+    expect(reddit.severity).toBe('warning');
+  });
+
   it('does not count a sanitized result, a key list or an unrelated text block', async () => {
     expect((await run([
       'async function t(u) { const raw = await (await fetch(u)).text();',
