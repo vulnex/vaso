@@ -849,8 +849,11 @@ function objectValues(path: NodePath, depth: number): Array<NodePath<import('@ba
   if (path.isObjectExpression()) return [path];
   if (path.isAwaitExpression()) return objectValues(path.get('argument'), depth + 1);
   if (path.isConditionalExpression()) {
-    const a = objectValues(path.get('consequent'), depth + 1);
-    const b = objectValues(path.get('alternate'), depth + 1);
+    const [c, alt] = [path.get('consequent'), path.get('alternate')];
+    if (isNothing(c)) return objectValues(alt, depth + 1);
+    if (isNothing(alt)) return objectValues(c, depth + 1);
+    const a = objectValues(c, depth + 1);
+    const b = objectValues(alt, depth + 1);
     return a && b ? [...a, ...b] : undefined;
   }
   if (path.isIdentifier()) {
@@ -873,17 +876,24 @@ function objectValues(path: NodePath, depth: number): Array<NodePath<import('@ba
       Function(inner) { inner.skip(); },
       ReturnStatement(ret) { returns.push(ret.get('argument') as NodePath); },
     });
-    if (returns.length === 0) return undefined;
     const out: Array<NodePath<import('@babel/types').ObjectExpression>> = [];
     for (const r of returns) {
-      if (!r.node) return undefined;
+      // `return null` / `return;`: no object, so no program is read from it
+      // (the caller checks — `if (!launcher) return`); every other return counts
+      if (!r.node || isNothing(r)) continue;
       const objs = objectValues(r, depth + 1);
       if (!objs) return undefined;
       out.push(...objs);
     }
-    return out;
+    return out.length > 0 ? out : undefined;
   }
   return undefined;
+}
+
+/** `null`, `undefined` or `void 0`: a value with no properties. */
+function isNothing(path: NodePath): boolean {
+  return path.isNullLiteral() || (path.isIdentifier() && path.node.name === 'undefined')
+    || (path.isUnaryExpression() && path.node.operator === 'void');
 }
 
 function commandText(args: ArgNode[]): Pick<DataFlowResult, 'command' | 'dynamic' | 'decoded'> {

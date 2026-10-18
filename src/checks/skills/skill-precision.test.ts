@@ -101,6 +101,22 @@ describe('SKL-003 program chosen from fixed values (dt17)', () => {
     expect(live(r)).toEqual([]);
   });
 
+  it('a resolver that returns a launcher per platform or null (obra/superpowers brainstorming server.cjs, MIT)', async () => {
+    const launcher = (windows: string) => "const cp = require('child_process');\n"
+      + 'function browserLauncherForPlatform(url, { platform = process.platform, env = process.env } = {}) {\n'
+      + "  if (platform === 'darwin') return { bin: 'open', args: [url] };\n"
+      + `  if (platform === 'win32') return { bin: '${windows}', args: ['url.dll,FileProtocolHandler', url] };\n`
+      + "  if (env.DISPLAY || env.WAYLAND_DISPLAY) return { bin: 'xdg-open', args: [url] };\n"
+      + '  return null;\n}\n'
+      + 'function openBrowser(url) {\n  const launcher = browserLauncherForPlatform(url);\n  if (!launcher) return;\n'
+      + '  try { cp.execFile(launcher.bin, launcher.args, () => {}); } catch (e) {}\n}\nmodule.exports = { openBrowser };\n';
+    const r = await run(skl003, { 'server.cjs': launcher('rundll32.exe') });
+    expect(r.evidence?.length).toBe(1);
+    expect(live(r)).toEqual([]);
+    // true positive: one platform's launcher is a shell
+    expect(live(await run(skl003, { 'server.cjs': launcher('cmd.exe') })).length).toBe(1);
+  });
+
   it('true positives: a list holding a shell, a parameter, a reassigned name, or the Node binary with runtime argv', async () => {
     const r = await run(skl003, {
       'shell.mjs': head + "export const go = async (args) => { for (const p of ['curl', 'sh']) await execFileAsync(p, args); };\n",
