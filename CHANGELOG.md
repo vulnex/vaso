@@ -56,6 +56,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - **`.env` fixes rewrite the assignment that takes effect**: the last one for the key, `export KEY=…` included. A fix used to rewrite the first match and skip `export` lines, so with a duplicate key (LY-009's `LYRIE_LOCAL_DRY_RUN`) it reported applied and changed nothing.
 - **Unpinned MCP packages launched through `env` are reported** (`/usr/bin/env npx -y pkg`, `env NAME=value npx …`, `env -S "uvx pkg"`) by every unpinned-MCP check (CC-005, CD-003, WS-004, DEV-004, ABA-006, HM-010, AT-007, MCP-010, …). NB-012 now uses the shared runner parser too, so Nanobot servers started with `uv tool run`, `npm exec`, `yarn dlx` or `bun x` are no longer missed, and `npx --package=pkg` is read as the package.
 - **ZeroClaw: the flat `ZEROCLAW_GATEWAY_HOST`, `ZEROCLAW_GATEWAY_PORT` and `ZEROCLAW_ALLOW_PUBLIC_BIND` variables are read only for releases before 0.8.0.** 0.8.0 made `ZEROCLAW_<path>` (`ZEROCLAW_gateway__host`) the only override form, so on current releases those names produced CFG-001/NET-001 criticals for a gateway that stays on loopback.
+- **The CFG-001 fix names the wildcard listeners it leaves alone.** It rebinds the gateway only; another listener on all interfaces (Nanobot's `channels.websocket.host`) kept CFG-001 failing after a fix reported as applied. The result now lists them so they can be rebound in their own settings.
 
 ## [1.3.1] - 2026-10-16
 

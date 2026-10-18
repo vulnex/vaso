@@ -613,6 +613,29 @@ describe('deep-test 2026-10-15: OpenClaw 2026.9.4 schema', () => {
     }
   });
 
+  it('CFG-001 fix names the wildcard listeners it leaves alone (Nanobot channels.websocket.host)', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'vaso-cfg001-'));
+    try {
+      const file = join(dir, 'config.json');
+      const data = { gateway: { host: '0.0.0.0', port: 18790 }, channels: { websocket: { enabled: true, host: '0.0.0.0', port: 8765 } } };
+      await writeFile(file, JSON.stringify(data, null, 2));
+      const config: ParsedConfig = { raw: JSON.stringify(data, null, 2), format: 'json', filePath: file, data };
+      const result = await cfg001.fix!(makeContext([config], 'nanobot'));
+      expect(result.applied).toBe(true);
+      expect(result.message).toContain('still on all interfaces: channels.websocket.host');
+      const written = JSON.parse(await readFile(file, 'utf8'));
+      expect(written.gateway.host).toBe('127.0.0.1');
+      expect(written.channels.websocket.host).toBe('0.0.0.0');
+      // Only the gateway exposed: nothing is left to name
+      const only = { gateway: { host: '0.0.0.0' } };
+      await writeFile(file, JSON.stringify(only));
+      const r2 = await cfg001.fix!(makeContext([{ raw: JSON.stringify(only), format: 'json', filePath: file, data: only }], 'nanobot'));
+      expect(r2.message).not.toContain('still on all interfaces');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it('CFG-004 passes a tailnet bind and Tailscale serve, and a comma list of loopback hosts', async () => {
     for (const data of [{ gateway: { bind: 'tailnet' } }, { gateway: { bind: 'lan', tailscale: { mode: 'serve' } } }]) {
       const ctx = oc(data);

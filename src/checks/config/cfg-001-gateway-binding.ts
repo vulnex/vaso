@@ -181,17 +181,22 @@ export const cfg001 = defineCheck({
   // has no gateway.host (its schema rejects unknown keys): its listener is
   // the symbolic gateway.bind, whose local-only value is "loopback".
   // Every exposed file is rewritten (openclaw.json and a sub-agent's file,
-  // a JSON config and its .env), so one run leaves no listener behind.
+  // a JSON config and its .env), so one run leaves no gateway listener
+  // behind. Other wildcard listeners (a channel's own server) are named in
+  // the result, not rewritten: they need their own setting.
   async fix(ctx) {
     const done: string[] = [];
+    const remaining: string[] = [];
     for (const config of ctx.configs) {
       let result: FixResult | undefined;
+      const rewritten = new Set<string>();
       const symbolic = ['gateway.bind', 'bind'].find(path => {
         const bind = getNestedValue(config.data, path);
         return typeof bind === 'string' && SYMBOLIC_EXPOSED.includes(bind.toLowerCase())
           && !tailscaleForcesLoopback(config.data);
       });
       if (symbolic) {
+        rewritten.add(symbolic);
         result = await fixFirstConfig([config], {
           checkId: 'CFG-001', path: symbolic, value: 'loopback', message: `Set ${symbolic} to "loopback"`,
         });
@@ -200,6 +205,7 @@ export const cfg001 = defineCheck({
         const host = hostPath ? getNestedValue(config.data, hostPath) : undefined;
         const fromEnv = envOverridesOf(config.data).some(o => o.path === hostPath);
         if (!fromEnv && typeof host === 'string' && host.split(',').some(p => p.trim() === '*' || WILDCARD_ADDRS.includes(p.trim()))) {
+          rewritten.add(hostPath!);
           result = await fixFirstConfig([config], {
             checkId: 'CFG-001',
             env: hostPath === 'GATEWAY_HOST' ? 'GATEWAY_HOST' : undefined,
@@ -210,9 +216,17 @@ export const cfg001 = defineCheck({
         }
       }
       if (result?.applied) done.push(`${result.message} in ${config.filePath}`);
+      if (config.format !== 'env') {
+        for (const hit of wildcardListeners(config.data, WILDCARD_ADDRS)) {
+          if (!rewritten.has(hit.path)) remaining.push(hit.path);
+        }
+      }
     }
+    const left = remaining.length > 0
+      ? `; still on all interfaces: ${remaining.join(', ')} — rebind ${remaining.length > 1 ? 'them in their' : 'it in its'} own settings`
+      : '';
     return done.length > 0
-      ? { checkId: 'CFG-001', applied: true, message: done.join('; ') }
-      : { checkId: 'CFG-001', applied: false, message: 'No wildcard gateway listener found to rebind' };
+      ? { checkId: 'CFG-001', applied: true, message: done.join('; ') + left }
+      : { checkId: 'CFG-001', applied: false, message: `No wildcard gateway listener found to rebind${left}` };
   },
 });
