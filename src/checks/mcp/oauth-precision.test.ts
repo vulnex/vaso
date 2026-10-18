@@ -119,6 +119,19 @@ describe('MCP-014 (dt14)', () => {
     const raw = 'function rej(token) {\n  console.error(`[oauth] rejecting bearer ${token} on path`);\n}\n';
     expect((await mcp014.run(ctx(raw))).passed).toBe(false);
   });
+
+  it('presence checks stay linear on a long name run and still clear a logged size or null test (dt15 P3)', async () => {
+    const { mcp014 } = await import('./mcp-014-insecure-token-storage.js');
+    const start = Date.now();
+    await mcp014.run(ctx(`const x = 1;\n${'0'.repeat(100_000)}\n${'x'.repeat(100_000)};\n`));
+    expect(Date.now() - start).toBeLessThan(1000);
+    for (const presence of [
+      "console.log('token length', session.access_token.length);",
+      "console.log('has token', tokens?.access_token != null);",
+      "console.log('token', typeof token);",
+    ]) expect((await mcp014.run(ctx(presence))).passed, presence).toBe(true);
+    expect((await mcp014.run(ctx("console.log('token', session.access_token);"))).passed).toBe(false);
+  });
 });
 
 describe('MCP-034 (dt14)', () => {

@@ -42,9 +42,13 @@ const QUERY_AUTH_APIS: Array<{ host: RegExp; vendor: string; source: string }> =
   { host: /\bapi\.mapbox\.com\b/, vendor: 'Mapbox', source: 'https://docs.mapbox.com/api/overview/' },
 ];
 
-/** A token reference reduced to a yes/no or a size. */
+/**
+ * A token reference reduced to a yes/no or a size. The reference starts at
+ * the beginning of its name run: tried from every position inside a long
+ * `000…` run it was quadratic (100 KB: 20 s).
+ */
 const PRESENCE_ONLY = new RegExp(
-  String.raw`(?:!!?\s*|\btypeof\s+|\bBoolean\(\s*)[\w$.?\[\]'"]+|[\w$.?]+(?:\.length\b|\s*(?:!==?|===?)\s*(?:null|undefined)\b)`,
+  String.raw`(?:!!?\s*|\btypeof\s+|\bBoolean\(\s*)[\w$.?\[\]'"]+|(?<![\w$.?])[\w$.?]+(?:\.length\b|\s*(?:!==?|===?)\s*(?:null|undefined)\b)`,
   'g',
 );
 
