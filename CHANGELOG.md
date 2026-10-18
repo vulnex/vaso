@@ -22,6 +22,10 @@ This project adheres to [Semantic Versioning](https://semver.org/).
   - **GB-011:** updates disabled (`SAND_DISABLE_UPDATES`, or the apt source set to `Enabled: no`) or the dogfood track.
 - Remote scans collect Grok Bot's secret stores, approvals and standing grants as metadata only, and collect only named, non-secret `SAND_*` variables. No probe rebuild is needed.
 
+### Fixed
+
+- **DEV-008 and DEV-010 no longer report a repository's `.devin/config.json`.** Devin reads `sandbox`, `skip_workspace_trust` and `respect_workspace_trust` from the user config only (project configs honour just `permissions`, `hooks`, `mcpServers` and `read_config_from`), so a repo setting them changes nothing. The same keys in `~/.config/devin/config.json` are still reported.
+
 ## [1.3.1] - 2026-10-16
 
 ### Security

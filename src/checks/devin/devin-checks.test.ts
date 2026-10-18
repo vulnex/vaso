@@ -632,6 +632,35 @@ describe('DEV-008: Devin Workspace Trust Bypassed or Over-Broad', () => {
   });
 });
 
+describe('dt15: user-config-only keys in project configs', () => {
+  const projectCtx = (data: Record<string, unknown>): ScanContext => {
+    const configs = [makeConfig('/work/app/.devin/config.json', data)];
+    return {
+      installation: { agent: 'devin', installDir: '/work/app/.devin', configFiles: configs, profile: 'project' },
+      configs, platform: 'linux', fs: makeFs({ access: vi.fn(async () => false) }),
+    };
+  };
+  const dev008 = devinChecks.find(c => c.id === 'DEV-008')!;
+  const dev010 = devinChecks.find(c => c.id === 'DEV-010')!;
+
+  it('DEV-008 ignores trust switches in a project config (Devin reads them from the user config only)', async () => {
+    const result = await dev008.run(projectCtx({ skip_workspace_trust: true, respect_workspace_trust: false }));
+    expect(result.passed).toBe(true);
+  });
+
+  it('DEV-008 still flags the same switches in the user config', async () => {
+    const configs = [makeConfig('/home/test/.config/devin/config.json', { skip_workspace_trust: true })];
+    const result = await dev008.run(makeCtx(configs, makeFs({ access: vi.fn(async () => false) })));
+    expect(result.passed).toBe(false);
+    expect(result.severity).toBe('critical');
+  });
+
+  it('DEV-010 ignores sandbox exclusions in a project config (sandbox is user-config only)', async () => {
+    const result = await dev010.run(projectCtx({ sandbox: { excluded: { allow: ['Exec(**)'] } } }));
+    expect(result.passed).toBe(true);
+  });
+});
+
 describe('DEV-009: Devin Repository Config Auto-Installs Plugins', () => {
   const check = devinChecks.find(c => c.id === 'DEV-009')!;
   const projectCtx = (configs: ParsedConfig[]): ScanContext => ({

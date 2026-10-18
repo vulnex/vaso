@@ -11,6 +11,11 @@ import { devinDataDir } from './paths.js';
  * `skip_workspace_trust` in the config key set, `respect_workspace_trust`
  * named by its own trust prompt), and records approvals in
  * <data>/cli/trusted_workspaces.json → { "trusted_paths": [...] }.
+ *
+ * Both switches are user-config only: project configs (.devin/config.json,
+ * config.local.json) honour just permissions, hooks, mcpServers and
+ * read_config_from (docs.devin.ai configuration precedence), so a repo
+ * setting them has no effect and isn't reported.
  */
 export const dev008 = defineCheck({
   id: 'DEV-008',
@@ -22,8 +27,9 @@ export const dev008 = defineCheck({
 
   async run(ctx, h) {
     const evidence: Evidence[] = [];
+    const userConfigs = ctx.installation.profile === 'project' ? [] : ctx.configs;
 
-    for (const config of ctx.configs) {
+    for (const config of userConfigs) {
       if (config.data.skip_workspace_trust === true) {
         evidence.push({
           file: config.filePath,

@@ -8,7 +8,8 @@ const WILDCARD = new Set(['', '*', '**']);
  * `sandbox.excluded.allow` runs matching commands *outside* the OS sandbox
  * with no prompt (Devin sandbox docs). A wildcard defeats the sandbox
  * entirely; excluding a shell, interpreter or downloader lets it run any
- * payload unsandboxed.
+ * payload unsandboxed. `sandbox` is user-config only — Devin ignores it in
+ * a project's .devin/config[.local].json — so project installs are skipped.
  */
 export const dev010 = defineCheck({
   id: 'DEV-010',
@@ -21,8 +22,9 @@ export const dev010 = defineCheck({
   async run(ctx, h) {
     const critical: Evidence[] = [];
     const warning: Evidence[] = [];
+    const userConfigs = ctx.installation.profile === 'project' ? [] : ctx.configs;
 
-    for (const config of ctx.configs) {
+    for (const config of userConfigs) {
       const sandbox = config.data.sandbox as Record<string, unknown> | undefined;
       const excluded = sandbox?.excluded as Record<string, unknown> | undefined;
       const allow = Array.isArray(excluded?.allow) ? excluded!.allow as unknown[] : [];
