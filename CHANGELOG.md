@@ -109,6 +109,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - **MCP-003's hardcoded-secret scan is linear on long `a-b-c…` names** (100 KB: about 2 s → milliseconds). The same key names and values are found.
 - **MCP source checks read a long statement in bounded pieces.** A minified line was split into statements at `;`, but a statement without one (a data URI, a large object literal, a line built to stall a check) still reached every line pattern whole. Statements longer than 2,000 characters are now cut after a `,`, brace or space outside strings, and a longer string is closed and reopened across the cut so it is still read as a string.
 - **MCP-034 reads the string literals on a line in one pass.** A line with an unterminated run of escaped quotes (`"\"\"…`) was retried from every quote (50 KB: 3 s → 0.3 s); the literals judged are unchanged.
+- **`mcp scan --source` on a Python file with long blank runs, and MCP-032 on a long whitespace run after `run(`, are linear** (100 KB: 6 s → 0.3 s each). The relative-import test that reads a Python server as a package matched `^\s*` across every following blank line; MCP-032's `exec([ "env" ])` pattern split the whitespace around an optional `[` every way.
 
 ## [1.3.1] - 2026-10-16
 

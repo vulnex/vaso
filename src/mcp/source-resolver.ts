@@ -469,7 +469,9 @@ async function withPythonPackage(entry: string, fs: FSProvider): Promise<string[
   if (!entry.endsWith('.py')) return [entry];
   const dir = dirname(entry);
   const code = (await readSourceFile(entry, fs)) ?? '';
-  const isPackage = (await fs.access(join(dir, '__init__.py'))) || /^\s*from\s+\.+\w*(?:\.\w+)*\s+import\b/m.test(code);
+  // Leading space within the line: `^\s*` crossed every blank line after
+  // each line start (100 KB of newlines: 6 s)
+  const isPackage = (await fs.access(join(dir, '__init__.py'))) || /^[^\S\n\r\u2028\u2029]*from\s+\.+\w*(?:\.\w+)*\s+import\b/m.test(code);
   if (!isPackage) return [entry];
   const modules = await pythonModules(dir, fs);
   return [entry, ...modules.filter((m) => m !== entry)];

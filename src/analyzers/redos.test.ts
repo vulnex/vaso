@@ -118,6 +118,21 @@ describe('dt15 perf: line regexes stay linear on 100 KB runs', () => {
     expect(Date.now() - start).toBeLessThan(1000);
     expect((await mcp002.run(ctx('app.listen( PORT, "0.0.0.0");'))).passed).toBe(false);
   });
+
+  it('MCP-032 env-dump exec on a long whitespace run', async () => {
+    const { mcp032 } = await import('../checks/mcp/mcp-032-env-dump-tool.js');
+    const { LocalFSProvider } = await import('../core/local-fs-provider.js');
+    const ctx = (sourceCode: string) => ({
+      installation: { agent: 'mcp' as const, installDir: '/x', configFiles: [] },
+      configs: [], platform: 'darwin' as const, fs: new LocalFSProvider(),
+      mcpServerSources: [{ serverName: 's', localPath: '/x/s.js', sourceCode }],
+    });
+    const start = Date.now();
+    await mcp032.run(ctx(`const x = 1;\nrun(${'\t'.repeat(100_000)}\n`));
+    expect(Date.now() - start).toBeLessThan(1000);
+    const dump = "server.tool('env', {}, async () => ({ content: [{ type: 'text', text: execSync( [ 'env' ]).toString() }] }));";
+    expect((await mcp032.run(ctx(dump))).passed).toBe(false);
+  });
 });
 
 describe('Python string-literal scanning is linear (dt14 N2)', () => {

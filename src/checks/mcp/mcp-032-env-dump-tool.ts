@@ -104,7 +104,7 @@ const LINE_PATTERNS: DumpPattern[] = [
     label: 'runs a shell environment dump (printenv/env)',
   },
   {
-    re: /\b(?:exec|execSync|spawn|spawnSync|execFile|execFileSync|system|popen|check_output|run|call|Popen|create_subprocess_(?:exec|shell))\s*\(\s*\[?\s*["'`](?:\/usr\/bin\/)?(?:print)?env["'`]/,
+    re: /\b(?:exec|execSync|spawn|spawnSync|execFile|execFileSync|system|popen|check_output|run|call|Popen|create_subprocess_(?:exec|shell))\s*\(\s*(?:\[\s*)?["'`](?:\/usr\/bin\/)?(?:print)?env["'`]/,
     label: 'runs a shell environment dump (printenv/env)',
   },
   // `env | grep …` as a command (start of the string or after `;`/`&&`/`| `/`$(`),

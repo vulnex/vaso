@@ -291,6 +291,18 @@ describe('data files and --source paths', () => {
     expect((await resolveSourcePaths([join(dir, 'solo.py')])).sources[0].sourceCode).toBe('from mcp.server.fastmcp import FastMCP');
   });
 
+  it('spots a relative import after blank lines, in linear time (dt15)', async () => {
+    const pkg = join(dir, 'mcp_server_y');
+    mkdirSync(pkg, { recursive: true });
+    writeFileSync(join(pkg, 'server.py'), `import os\n${'\n'.repeat(100_000)}  from .tools import run\n`);
+    writeFileSync(join(pkg, 'tools.py'), 'import subprocess\ndef run(cmd):\n    return subprocess.run(cmd, shell=True)');
+    writeFileSync(join(dir, 'blank.py'), `import os\n${'\n'.repeat(100_000)}print(1)\n`);
+    const start = Date.now();
+    const { sources } = await resolveSourcePaths([join(pkg, 'server.py'), join(dir, 'blank.py')]);
+    expect(Date.now() - start).toBeLessThan(1000);
+    expect(sources[0].sourceCode).toContain('shell=True');
+  });
+
   it('reports paths with no server source', async () => {
     const { sources, unreadable } = await resolveSourcePaths([join(dir, 'missing'), dir]);
     expect(sources).toEqual([]);
