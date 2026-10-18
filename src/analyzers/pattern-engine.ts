@@ -39,16 +39,18 @@ export const SECURITY_PATTERNS: PatternRule[] = [
 
   // Curl-pipe execution
   // The shell may be run through sudo/env and named by path (`| sudo bash`,
-  // `| /bin/zsh`); `\b` keeps `| shasum` out.
-  { id: 'CP-001', pattern: /curl\s+[^|]*\|\s*(?:sudo\s+(?:-\S+\s+)*)?(?:env\s+(?:[^\s=]+=\S*\s+)*)?(?:\S*\/)?(?:ba|z|k|da|fi)?sh\b/i, category: 'curl-pipe', severity: 'critical', description: 'Curl-pipe-shell execution' },
-  { id: 'CP-002', pattern: /wget\s+[^|]*\|\s*(?:sudo\s+(?:-\S+\s+)*)?(?:env\s+(?:[^\s=]+=\S*\s+)*)?(?:\S*\/)?(?:ba|z|k|da|fi)?sh\b/i, category: 'curl-pipe', severity: 'critical', description: 'Wget-pipe-shell execution' },
+  // `| /bin/zsh`); `\b` keeps `| shasum` out. Only the first download word
+  // before a `|` is tried (the lookbehind): later ones reach the same pipe,
+  // and `\s+[^|]*` overlapped on a space run (each quadratic on 100 KB).
+  { id: 'CP-001', pattern: /curl\s(?<!curl\s[^|]*?curl\s)[^|]*\|\s*(?:sudo\s+(?:-\S+\s+)*)?(?:env\s+(?:[^\s=]+=\S*\s+)*)?(?:\S*\/)?(?:ba|z|k|da|fi)?sh\b/i, category: 'curl-pipe', severity: 'critical', description: 'Curl-pipe-shell execution' },
+  { id: 'CP-002', pattern: /wget\s(?<!wget\s[^|]*?wget\s)[^|]*\|\s*(?:sudo\s+(?:-\S+\s+)*)?(?:env\s+(?:[^\s=]+=\S*\s+)*)?(?:\S*\/)?(?:ba|z|k|da|fi)?sh\b/i, category: 'curl-pipe', severity: 'critical', description: 'Wget-pipe-shell execution' },
   // Only when Python runs the download: its program from stdin (`| python`,
   // `| python3 - --args`, `| python3 /dev/stdin`) or `-c` code that executes
   // stdin however it is spelled (`exec(sys.stdin.read())`, `import sys as s;
   // exec(s.stdin.read())`, `exec(compile(sys.stdin.read(), …))`, `from sys
   // import stdin; exec(stdin.read())`). `| python -m json.tool` and
   // `| python -c "print(…)"` read the download as data.
-  { id: 'CP-003', pattern: /(?:curl|wget)\s+[^|]*\|\s*(?:sudo\s+(?:-\S+\s+)*)?(?:env\s+(?:[^\s=]+=\S*\s+)*)?(?:\S*\/)?python[\d.]*\b(?:\s+-(?![cm]\b)[A-Za-z]+)*(?:\s*(?=$|[;&|)'"`#\n])|\s+-(?=\s|$)|\s+\/dev\/stdin\b|\s+-c\s+["'](?=[^"'\n]{0,300}\b(?:exec|eval)\s*\()(?=[^"'\n]{0,300}(?:\bstdin\b|\bopen\(\s*(?:0|["']\/dev\/stdin["']))))/i, category: 'curl-pipe', severity: 'critical', description: 'Curl-pipe-python execution' },
+  { id: 'CP-003', pattern: /(?:curl|wget)\s(?<!(?:curl|wget)\s[^|]*?(?:curl|wget)\s)[^|]*\|\s*(?:sudo\s+(?:-\S+\s+)*)?(?:env\s+(?:[^\s=]+=\S*\s+)*)?(?:\S*\/)?python[\d.]*\b(?:\s+-(?![cm]\b)[A-Za-z]+)*(?:\s*(?=$|[;&|)'"`#\n])|\s+-(?=\s|$)|\s+\/dev\/stdin\b|\s+-c\s+["'](?=[^"'\n]{0,300}\b(?:exec|eval)\s*\()(?=[^"'\n]{0,300}(?:\bstdin\b|\bopen\(\s*(?:0|["']\/dev\/stdin["']))))/i, category: 'curl-pipe', severity: 'critical', description: 'Curl-pipe-python execution' },
   // Download executed without a pipe: `bash <(curl …)`, `sh -c "$(curl …)"`,
   // `eval "$(wget -qO- …)"`, `source <(curl …)`
   { id: 'CP-004', pattern: /(?:\b(?:ba|z|k|da)?sh|\bsource|(?:^|[\s;&|])\.)\s+<\(\s*(?:curl|wget)\b/i, category: 'curl-pipe', severity: 'critical', description: 'Shell process substitution of a download' },

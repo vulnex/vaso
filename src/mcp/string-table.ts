@@ -33,7 +33,7 @@ const DECODERS: Decoder[] = [
   // split a long space run every way: 100 KB, 11 s)
   { re: /\bTextDecoder\s*\([^)]{0,1000}\)\s*\.decode\s*\(|\bparseInt\s*\(\s*\w+\s*,\s*16\s*\)/, label: 'TextDecoder/parseInt hex decoding', encodings: ['hex'] },
   { re: /String\.fromCharCode\s*\(\s*\.\.\.|String\.fromCharCode\.apply\s*\(|\.map\s*\(\s*\(?\w+\)?\s*=>\s*String\.fromCharCode\s*\(/, label: 'String.fromCharCode() over an array', encodings: ['charcodes'] },
-  { re: /charCodeAt\s*\(\s*\d*\s*\)\s*\+\s*13\b|\brot13\b|['"`]rot_?13['"`]/i, label: 'rot13', encodings: ['rot13'] },
+  { re: /charCodeAt\s*\(\s*(?:\d+\s*)?\)\s*\+\s*13\b|\brot13\b|['"`]rot_?13['"`]/i, label: 'rot13', encodings: ['rot13'] },
   // Python
   { re: /\b(?:b64decode|urlsafe_b64decode|standard_b64decode|a2b_base64)\s*\(/, label: 'base64.b64decode()', encodings: ['base64'] },
   { re: /\bbytes\.fromhex\s*\(|\bunhexlify\s*\(|\bb16decode\s*\(|\bcodecs\.decode\s*\([^)]*['"]hex['"]/, label: 'bytes.fromhex()', encodings: ['hex'] },

