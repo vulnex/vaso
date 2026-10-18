@@ -1,13 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-
-const BROAD_PATTERNS = [
-  /Shell\s*\(\s*\*\s*\)/i,
-  /Write\s*\(\s*\*\s*\)/i,
-  /Read\s*\(\s*\*\s*\)/i,
-  /WebFetch\s*\(\s*\*\s*\)/i,
-  /Mcp\s*\(\s*\*\s*\)/i,
-];
+import { isCatchAll } from './permission-rules.js';
 
 export const cur005 = defineCheck({
   id: 'CUR-005',
@@ -27,7 +20,7 @@ export const cur005 = defineCheck({
       const deny = Array.isArray(perms.deny) ? (perms.deny as unknown[]).filter((a): a is string => typeof a === 'string') : [];
 
       if (deny.length > 0) continue;
-      const broad = allow.filter(rule => BROAD_PATTERNS.some(p => p.test(rule)));
+      const broad = allow.filter(isCatchAll);
       if (broad.length === 0) continue;
 
       evidence.push({

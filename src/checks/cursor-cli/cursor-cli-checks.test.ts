@@ -229,6 +229,46 @@ describe('CUR-009: Overbroad Paths', () => {
   });
 });
 
+describe('dt15: Cursor command:args and absolute-glob rule forms', () => {
+  const cur003 = cursorCliChecks.find(c => c.id === 'CUR-003')!;
+  const cur005 = cursorCliChecks.find(c => c.id === 'CUR-005')!;
+  const cur009 = cursorCliChecks.find(c => c.id === 'CUR-009')!;
+  const ctx = (allow: string[], deny: string[] = []) =>
+    makeCtx([makeConfig('cli-config.json', { permissions: { allow, deny } })]);
+
+  it('CUR-003 flags the documented command:args form for any/shell/risky commands', async () => {
+    const result = await cur003.run(ctx(['Shell(curl:*)', 'Shell(*:*)', 'Shell(bash:-c *)', 'Shell(sudo:apt *)']));
+    expect(result.evidence).toHaveLength(4);
+  });
+
+  it('CUR-003 keeps scoped command:args rules passing', async () => {
+    const result = await cur003.run(ctx(['Shell(git:*)', 'Shell(npm:test)', 'Shell(curlie)']));
+    expect(result.passed).toBe(true);
+  });
+
+  it('CUR-005 counts Shell(*:*) and Mcp(*:*) as catch-alls with an empty deny list', async () => {
+    const result = await cur005.run(ctx(['Shell(*:*)', 'Mcp(*:*)', 'Mcp(datadog:*)']));
+    expect(result.passed).toBe(false);
+    expect(result.evidence?.[0].snippet).toContain('2 wildcard rule(s)');
+    expect(result.evidence?.[0].detail).not.toContain('datadog');
+  });
+
+  it('CUR-009 flags absolute globs rooted at /, home, /etc and /tmp', async () => {
+    const result = await cur009.run(ctx([
+      'Write(/**)', 'Write(~/**)', 'Read(~/*)', 'Read(/home/test/**)', 'Write(/etc/**)', 'Write(/tmp/**)', 'Read(/)',
+    ]));
+    expect(result.evidence).toHaveLength(7);
+    expect(result.evidence?.[1].detail).toContain('home directory');
+  });
+
+  it('CUR-009 keeps scoped absolute and relative globs passing', async () => {
+    const result = await cur009.run(ctx([
+      'Write(~/projects/app/**)', 'Read(/etc/hosts)', 'Write(src/**)', 'Read(/home/test/.config/app/*.json)', 'Mcp(datadog:*)',
+    ]));
+    expect(result.passed).toBe(true);
+  });
+});
+
 describe('CUR-010: Attribution', () => {
   const check = cursorCliChecks.find(c => c.id === 'CUR-010')!;
 

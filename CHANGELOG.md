@@ -25,6 +25,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 ### Fixed
 
 - **DEV-008 and DEV-010 no longer report a repository's `.devin/config.json`.** Devin reads `sandbox`, `skip_workspace_trust` and `respect_workspace_trust` from the user config only (project configs honour just `permissions`, `hooks`, `mcpServers` and `read_config_from`), so a repo setting them changes nothing. The same keys in `~/.config/devin/config.json` are still reported.
+- **CUR-003, CUR-005 and CUR-009 read Cursor's documented rule forms.** `Shell(curl:*)` (a command with any arguments) and `Shell(*:*)` are judged like `Shell(curl)` and `Shell(*)`, and `Write(/**)`, `Write(~/**)`, `Read(~/*)` and globs over `/etc` or `/tmp` are reported like `Write(/)`. Scoped rules such as `Shell(npm:test)` and `Write(~/projects/app/**)` still pass.
 
 ## [1.3.1] - 2026-10-16
 

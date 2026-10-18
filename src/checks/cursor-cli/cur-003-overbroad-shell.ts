@@ -1,12 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-
-const OVERBROAD_SHELL = [
-  /^Shell$/i,
-  /^Shell\s*\(\s*\*\s*\)$/i,
-  /^Shell\s*\(\s*(bash|sh|zsh|fish|cmd|powershell|pwsh)\s*\)$/i,
-  /^Shell\s*\(\s*(rm|sudo|curl|wget|nc|ncat|eval|exec)\s*\)$/i,
-];
+import { isOverbroadShell } from './permission-rules.js';
 
 export const cur003 = defineCheck({
   id: 'CUR-003',
@@ -28,7 +22,7 @@ export const cur003 = defineCheck({
 
       for (const rule of allow) {
         if (denySet.has(rule.toLowerCase())) continue; // deny wins
-        if (!OVERBROAD_SHELL.some(p => p.test(rule))) continue;
+        if (!isOverbroadShell(rule)) continue;
         evidence.push({
           file: config.filePath,
           snippet: `permissions.allow: "${rule}"`,
