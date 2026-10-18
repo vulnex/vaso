@@ -1,6 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { accountBlocks, settingsConfig } from './shared.js';
+import { accountBlocks, settingsConfig, noSettingsReason } from './shared.js';
 
 // toolPermissions.scopes["mcp:<serverId>"] = { tools?: { <tool>: P }, reads?: P, writes?: P }
 // with P ∈ always_allow | needs_approval | blocked; a tool resolves as
@@ -21,7 +21,7 @@ export const gb002 = defineCheck({
 
   async run(ctx, h) {
     const config = settingsConfig(ctx);
-    if (!config) return h.passed('No Grok Bot settings.json');
+    if (!config) return h.passed(noSettingsReason(ctx));
 
     const warning: Evidence[] = [];
     const info: Evidence[] = [];

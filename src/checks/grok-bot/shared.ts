@@ -40,6 +40,13 @@ export function settingsConfig(ctx: ScanContext): ParsedConfig | undefined {
   return config && acceptedByApp(config.data) ? config : undefined;
 }
 
+/** Why no settings apply: the file is absent, or present but rejected by the app. */
+export function noSettingsReason(ctx: ScanContext): string {
+  return ctx.configs.some(c => basename(c.filePath) === DATA_FILES.settings)
+    ? 'Grok Bot rejects this settings.json (version or value types) and runs on its defaults'
+    : 'No Grok Bot settings.json';
+}
+
 const PERMISSION_KEYS = ['localToolPermission', 'localToolPermissionCeiling'];
 const BOOLEAN_KEYS = ['egressTunnelEnabled', 'egressTunnelPreference', 'localEgressAllowed', 'messagesEnabled', 'webauthnProxyEnabled', 'autoUpdateWhenIdle'];
 // The keys an account-scope block carries (the app strips any other key there

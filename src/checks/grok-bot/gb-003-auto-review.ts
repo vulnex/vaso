@@ -1,6 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { accountBlocks, settingsConfig } from './shared.js';
+import { accountBlocks, settingsConfig, noSettingsReason } from './shared.js';
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return !!v && typeof v === 'object' && !Array.isArray(v);
@@ -21,7 +21,7 @@ export const gb003 = defineCheck({
 
   async run(ctx, h) {
     const config = settingsConfig(ctx);
-    if (!config) return h.passed('No Grok Bot settings.json — auto-review defaults to on');
+    if (!config) return h.passed(`${noSettingsReason(ctx)} — auto-review defaults to on`);
 
     const warning: Evidence[] = [];
     const info: Evidence[] = [];

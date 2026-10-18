@@ -1,7 +1,7 @@
 import type { Evidence, FixResult } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { fixFirstConfig } from '../../remediation/config-writer.js';
-import { accountBlocks, asPermission, effectivePermission, settingsConfig } from './shared.js';
+import { accountBlocks, asPermission, effectivePermission, settingsConfig, noSettingsReason } from './shared.js';
 
 export const gb001 = defineCheck({
   id: 'GB-001',
@@ -13,7 +13,7 @@ export const gb001 = defineCheck({
 
   async run(ctx, h) {
     const config = settingsConfig(ctx);
-    if (!config) return h.passed('No Grok Bot settings.json — local execution defaults to "ask"');
+    if (!config) return h.passed(`${noSettingsReason(ctx)} — local execution defaults to "ask"`);
 
     const critical: Evidence[] = [];
     const warning: Evidence[] = [];
