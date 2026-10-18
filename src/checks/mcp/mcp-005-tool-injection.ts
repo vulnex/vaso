@@ -1,10 +1,11 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { confinesPaths, findTaintedSinks } from '../../analyzers/tool-input-taint.js';
+import { confinesPaths, findTaintedSinks, literalOnlyNames } from '../../analyzers/tool-input-taint.js';
 import { analyzePythonSinks } from '../../analyzers/python-sinks.js';
 import { sourceSegments, segmentSnippet } from '../../mcp/source-segments.js';
 
-const INPUT = String.raw`(?:req|input|args|params|query|body|tool_input|message)\b`;
+const INPUT_NAMES = 'req|input|args|params|query|body|tool_input|message';
+const INPUT = String.raw`(?:${INPUT_NAMES})\b`;
 
 /**
  * Query and file-write sinks that take tool input, matched per statement.
@@ -25,6 +26,16 @@ const INJECTION_PATTERNS = [
   // The fs call itself (`fs.writeFile(args…`), not a function named for it (`handleWriteFile(args)`).
   { pattern: new RegExp(String.raw`(?<![\w$])writeFile(?:Sync)?\s*\(\s*` + INPUT), name: 'File write with user-controlled path' },
 ];
+
+/**
+ * The SQL patterns go by what a value is called (`${query}`, `+ body.id`);
+ * a name the file only ever binds to a literal (`const query = "orders"`)
+ * holds no input, whatever it is called.
+ */
+function interpolatesOnlyConstants(statement: string, constants: () => Set<string>): boolean {
+  const roots = [...statement.matchAll(new RegExp(String.raw`(?:\$\{\s*|\+\s*)(${INPUT_NAMES})(?![\w$])`, 'g'))].map(m => m[1]);
+  return roots.length > 0 && roots.every(r => constants().has(r));
+}
 
 /**
  * An f-string query whose every interpolated name was assigned from a
@@ -81,11 +92,14 @@ export const mcp005 = defineCheck({
         }
       }
 
+      let constants: Set<string> | undefined;
+      const constantNames = () => (constants ??= source.language === 'python' ? new Set() : literalOnlyNames(source.sourceCode!));
       for (const segment of sourceSegments(source.sourceCode)) {
         if (reported.has(segment.line)) continue;
         for (const { pattern, name } of INJECTION_PATTERNS) {
           if (pattern.test(segment.text)) {
             if (name === 'SQL injection via string formatting' && interpolatesOnlyValidated(segment.text, source.sourceCode)) continue;
+            if (name.startsWith('SQL injection via') && interpolatesOnlyConstants(segment.text, constantNames)) continue;
             reported.add(segment.line);
             evidence.push({ file, line: segment.line, snippet: segmentSnippet(segment), detail: name });
             break;

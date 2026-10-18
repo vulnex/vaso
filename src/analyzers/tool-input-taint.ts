@@ -250,6 +250,35 @@ function promisifiedSink(path: NodePath, binding: Binding | undefined): string |
   return undefined;
 }
 
+/**
+ * Names whose every binding in the file is a never-reassigned literal
+ * (`const query = "orders"`): whatever such a name is called, it holds no
+ * caller input. A name bound anywhere else (a parameter, a destructured
+ * argument, an assignment from a call) is left out.
+ */
+export function literalOnlyNames(code: string): Set<string> {
+  const literal = new Set<string>();
+  const other = new Set<string>();
+  for (const chunk of sourceChunks(code)) {
+    const ast = parseJs(chunk.code);
+    if (!ast) continue;
+    try {
+      traverse(ast, {
+        Scopable(path) {
+          for (const [name, b] of Object.entries(path.scope.bindings)) {
+            const node = b.path.node;
+            const init = node.type === 'VariableDeclarator' && node.id.type === 'Identifier' ? node.init : undefined;
+            const isLiteral = b.constant && !!init && (init.type === 'StringLiteral' || init.type === 'NumericLiteral'
+              || init.type === 'BooleanLiteral' || (init.type === 'TemplateLiteral' && init.expressions.length === 0));
+            (isLiteral ? literal : other).add(name);
+          }
+        },
+      });
+    } catch { /* deep AST: names stay unknown */ }
+  }
+  return new Set([...literal].filter((n) => !other.has(n)));
+}
+
 /** `fs`, `fsp`, `import { promises as fs } from 'fs'`, `fs.promises`. */
 export function isFsObject(path: NodePath, object: Node): boolean {
   if (object.type === 'MemberExpression') {

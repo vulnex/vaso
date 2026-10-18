@@ -414,6 +414,26 @@ describe('MCP-005: Tool Input Injection', () => {
 
   // ----- Negative false-positive fixtures -----
 
+  it('a SQL template interpolating a constant named `query` is not injection (dbhub shape, dt15)', async () => {
+    const code = (decl: string, handler: string) => [
+      'import Database from "better-sqlite3";',
+      'const db = new Database("app.db");',
+      decl,
+      handler,
+    ].join('\n');
+    const constant = code('const query = "orders";', 'server.setRequestHandler(S, async () => db.prepare(`SELECT COUNT(*) AS n FROM ${query}`).all());');
+    expect((await mcp005.run(makeContext({ mcpServerSources: [{ serverName: 'c', sourceCode: constant }] }))).passed).toBe(true);
+    // the same template with the name bound to tool input (also beside a constant of that name) still is
+    const input = code('', 'server.tool("t", {}, async ({ query }) => db.prepare(`SELECT * FROM t WHERE name = ${query}`).all());');
+    const shadow = code('const query = "orders";', 'function run(query) { return db.prepare(`SELECT * FROM t WHERE name = ${query}`).all(); }');
+    const concat = code('', 'async function h(req) { return db.query("SELECT * FROM t WHERE id = " + req.params.id); }');
+    for (const src of [input, shadow, concat]) {
+      const r = await mcp005.run(makeContext({ mcpServerSources: [{ serverName: 'i', sourceCode: src }] }));
+      expect(r.passed).toBe(false);
+      expect(r.severity).toBe('critical');
+    }
+  });
+
   it('ignores injection patterns inside line comments', async () => {
     const commentOnly: MCPServerSource[] = [{
       serverName: 'doc-only',
