@@ -10,7 +10,8 @@ import { hermesApiServer, hermesApiServerState, HERMES_API_DEFAULT_HOST, HERMES_
 import { discoverCliInstalls } from './cli-installs.js';
 import { queryCliVersion } from './version-query.js';
 import { envPath } from './env-path.js';
-import { byHermesPrecedence, hermesManagedDir, managedFilePaths, HERMES_MANAGED_DEFAULT_DIR } from './hermes-managed.js';
+import { byHermesPrecedence, hermesDeepMerge, hermesManagedDir, managedFilePaths, HERMES_MANAGED_DEFAULT_DIR } from './hermes-managed.js';
+import { prepareHermesYaml } from './hermes-config.js';
 import { parsePythonDotenv } from './dotenv-python.js';
 
 // $HERMES_HOME/config.yaml and .env. A cli-config.yaml there is never read:
@@ -97,6 +98,8 @@ export const hermesAdapter: AgentAdapter = {
     });
     const cliBinary = installs.primary?.path;
     const version = stampVersion ?? installs.primary?.version;
+    // config.yaml as this release loads it: duplicate keys, ${VAR} refs, managed model keys
+    prepareHermesYaml(configFiles, fs, version);
 
     // The API server is the gateway — when enabled and this release doesn't refuse to start it
     const gateway = hermesApiServerState(hermesApiServer(configFiles, version), version) === 'refused'
@@ -161,11 +164,14 @@ export const hermesAdapter: AgentAdapter = {
     // config.yaml: `model.default` (or `model.model`
     // — upstream accepts both) is the active model; `model.provider` and
     // `model.base_url` are sibling metadata for that model, not separate slots.
-    // The managed layer's model wins where it sets one
+    // The managed layer is merged over the user's config as Hermes does
     const ordered = byHermesPrecedence(configs);
-    const yaml = ordered.find(c => c.filePath.endsWith('config.yaml') && c.data?.model !== undefined)
-      ?? ordered.find(c => c.filePath.endsWith('config.yaml'));
-    const block = yaml?.data?.model;
+    const yamls = configs.filter(c => c.filePath.endsWith('config.yaml'));
+    const effective = yamls.filter(c => c.managed).reduce(
+      (merged, m) => hermesDeepMerge(merged, m.data),
+      yamls.find(c => !c.managed)?.data ?? {},
+    );
+    const block = effective.model;
     if (typeof block === 'string') {
       push(block);
     } else if (block && typeof block === 'object') {

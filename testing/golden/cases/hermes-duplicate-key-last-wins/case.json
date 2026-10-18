@@ -1,6 +1,6 @@
 {
   "agent": "hermes",
-  "source": "Hermes config.yaml that sets approvals twice; Hermes reads it with PyYAML safe_load, where the last key wins (checked against a live install, dt15)",
+  "source": "Hermes 0.21.5 config.yaml that sets approvals twice; releases before 0.21.6 read it with PyYAML safe_load, where the last key wins (checked against a live install, dt15)",
   "modes": {
     ".hermes": "700",
     ".hermes/config.yaml": "600",

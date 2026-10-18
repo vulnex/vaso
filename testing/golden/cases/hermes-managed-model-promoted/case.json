@@ -1,0 +1,20 @@
+{
+  "agent": "hermes",
+  "source": "Hermes administrator-managed config.yaml with a bare model id (hermes_cli/managed_scope.py apply_managed_overlay promotes it to model.default, hermes-agent c152ba5a82): the user's plaintext model.base_url and provider stay in effect, as load_user_config_effective shows on a live install (deep test 2026-10-18 fixture)",
+  "env": {
+    "HERMES_MANAGED_DIR": "{{HOME}}/managed"
+  },
+  "modes": {
+    ".hermes": "700",
+    ".hermes/config.yaml": "600",
+    "managed": "755",
+    "managed/config.yaml": "644"
+  },
+  "reachable": true,
+  "fail": {
+    "HM-006": "critical"
+  },
+  "pass": [
+    "HM-011"
+  ]
+}

@@ -1,5 +1,14 @@
 import YAML from 'yaml';
 
+export interface YamlSafeOptions {
+  /**
+   * A key repeated in one mapping: `last` (default) resolves it to its last
+   * value, as PyYAML's safe_load does; `reject` throws, as ruamel.yaml does
+   * (Hermes 0.21.6+).
+   */
+  duplicateKeys?: 'last' | 'reject';
+}
+
 /**
  * Parse YAML from a scanned file. Two hazards of plain `YAML.parse`:
  * an alias that references its own anchor (`a: &x [*x]`) yields a circular
@@ -8,11 +17,11 @@ import YAML from 'yaml';
  * Merge keys (`<<: *defaults`) are resolved, as PyYAML (Hermes) and Go's
  * yaml.v3 do; a `<<` whose value isn't a map stays a plain key, as before.
  */
-export function parseYamlSafe(raw: string): unknown {
-  // A duplicate key resolves to its last value, as the agents' loaders read
-  // it (Hermes: PyYAML's safe_load); the library's uniqueness check also compared
-  // every key with every other (80,000 keys: 2 minutes)
+export function parseYamlSafe(raw: string, opts: YamlSafeOptions = {}): unknown {
+  // The library's own uniqueness check compares every key with every other
+  // (80,000 keys: 2 minutes); duplicates are found in one pass instead
   const options = { logLevel: 'error', uniqueKeys: false } as const;
+  if (opts.duplicateKeys === 'reject') assertUniqueKeys(raw);
   let value: unknown;
   try {
     value = YAML.parse(raw, { ...options, merge: true });
@@ -22,6 +31,28 @@ export function parseYamlSafe(raw: string): unknown {
   }
   if (isCyclic(value)) throw new Error('YAML contains a self-referencing alias');
   return value;
+}
+
+/** Throw on the first key a mapping repeats (scalar keys; merge keys `<<` excepted). */
+function assertUniqueKeys(raw: string): void {
+  const lineCounter = new YAML.LineCounter();
+  const docs = YAML.parseAllDocuments(raw, { logLevel: 'error', uniqueKeys: false, lineCounter });
+  for (const doc of Array.isArray(docs) ? docs : [docs]) {
+    YAML.visit(doc, {
+      Map(_, map) {
+        const seen = new Set<string>();
+        for (const pair of map.items) {
+          if (!YAML.isScalar(pair.key) || pair.key.value === '<<') continue;
+          const id = `${typeof pair.key.value}:${String(pair.key.value)}`;
+          if (seen.has(id)) {
+            const line = pair.key.range ? lineCounter.linePos(pair.key.range[0]).line : undefined;
+            throw new Error(`found duplicate key "${String(pair.key.value)}"${line ? ` at line ${line}` : ''}`);
+          }
+          seen.add(id);
+        }
+      },
+    });
+  }
 }
 
 function isCyclic(value: unknown, ancestors = new Set<object>()): boolean {

@@ -2,6 +2,7 @@ import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { shannonEntropy } from '../../analyzers/entropy.js';
 import { isEnvReference, isPlaceholderSecret } from '../../core/patterns.js';
+import { hermesConfigAsWritten } from '../../adapters/hermes-config.js';
 
 const KEY_NAME_PATTERN = /(?:api[_-]?key|token|secret|password|credential|auth|bot[_-]?token)/i;
 const KNOWN_PREFIXES = [
@@ -62,7 +63,8 @@ export const hm001 = defineCheck({
     const evidence: Evidence[] = [];
     for (const config of ctx.configs) {
       if (!config.filePath.endsWith('cli-config.yaml') && !config.filePath.endsWith('config.yaml')) continue;
-      walk(config.data, config.filePath, '', evidence);
+      // As written: a ${VAR} reference expands to a secret the file doesn't hold
+      walk(hermesConfigAsWritten(config), config.filePath, '', evidence);
     }
     return h.fromEvidence(evidence, {
       passed: 'No plaintext credentials in Hermes config.yaml',

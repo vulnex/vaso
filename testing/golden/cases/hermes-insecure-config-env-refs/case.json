@@ -1,0 +1,16 @@
+{
+  "agent": "hermes",
+  "source": "Hermes config.yaml values set through ${VAR} references to ~/.hermes/.env (hermes_cli/config.py _expand_env_vars; Hermes loads .env into its environment first): approvals.mode ${MODE} = off and model.base_url ${EP} = a plaintext LAN endpoint, as load_user_config_effective shows on a live install (deep test 2026-10-18 fixture)",
+  "modes": {
+    ".hermes": "700",
+    ".hermes/config.yaml": "600",
+    ".hermes/.env": "600"
+  },
+  "fail": {
+    "HM-008": "critical",
+    "HM-006": "critical"
+  },
+  "pass": [
+    "HM-001"
+  ]
+}

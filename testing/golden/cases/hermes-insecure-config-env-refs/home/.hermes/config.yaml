@@ -1,0 +1,7 @@
+_config_version: 52
+approvals:
+  mode: ${MODE}
+model:
+  default: x
+  base_url: ${EP}
+  api_key: ${OPENROUTER_API_KEY}

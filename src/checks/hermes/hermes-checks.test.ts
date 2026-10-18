@@ -350,6 +350,12 @@ describe('HM-009 Tirith disabled', () => {
     const v49 = makeYaml('/h/.hermes/config.yaml', { _config_version: 49, security: { tirith_enabled: false } });
     expect((await check.run(makeCtx([v49]))).passed).toBe(false);
   });
+  it('no finding on Hermes 0.21.6+, the first release without tirith', async () => {
+    const off = makeYaml('/h/.hermes/config.yaml', { security: { tirith_enabled: false } });
+    const at = (version: string) => { const c = makeCtx([off]); c.installation.version = version; return c; };
+    expect((await check.run(at('0.21.6'))).passed).toBe(true);
+    expect((await check.run(at('0.21.5'))).passed).toBe(false);
+  });
   it('flags fail-open without binary', async () => {
     const cfg = makeYaml('/h/.hermes/cli-config.yaml', {
       security: { tirith_enabled: true, tirith_fail_open: true },

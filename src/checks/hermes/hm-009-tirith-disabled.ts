@@ -3,6 +3,8 @@ import type { Evidence, ScanContext } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { isTruthy } from '../../adapters/hermes-api-server.js';
 import { byHermesPrecedence, hermesYamlSetting } from '../../adapters/hermes-managed.js';
+import { hermesConfigAsWritten } from '../../adapters/hermes-config.js';
+import { compareVersions } from '../../core/semver.js';
 
 /**
  * TIRITH_ENABLED / TIRITH_FAIL_OPEN override security.tirith_enabled /
@@ -55,6 +57,12 @@ async function tirithPresent(ctx: ScanContext, configured: unknown): Promise<boo
 
 /** Config version whose migration removed tirith (hermes-agent commit 911da42). */
 const TIRITH_REMOVED_CONFIG_VERSION = 50;
+/** The first release without it. */
+const TIRITH_REMOVED_RELEASE = '0.21.6';
+
+function isAtLeast(version: string | undefined, release: string): boolean {
+  return !!version && /^v?\d+\.\d+\.\d+/.test(version) && compareVersions(version.replace(/^v/, ''), release) >= 0;
+}
 
 export const hm009 = defineCheck({
   id: 'HM-009',
@@ -73,10 +81,16 @@ export const hm009 = defineCheck({
     const yamls = ctx.configs.filter(c => c.filePath.endsWith('cli-config.yaml') || c.filePath.endsWith('config.yaml'));
     const primary = yamls.find(c => !c.managed) ?? yamls[0];
     // Hermes removed the bundled tirith scanner (hermes-agent 911da42,
-    // 2026-10-06): config migration 50 drops security.tirith_*. A config at
-    // v50+ has no scanner to disable or fail open.
-    const version = Number(primary ? hermesYamlSetting(yamls, '_config_version')?.value : undefined);
-    if (primary && !(Number.isFinite(version) && version >= TIRITH_REMOVED_CONFIG_VERSION)) {
+    // 2026-10-06, first released in 0.21.6): config migration 50 drops
+    // security.tirith_*. A config at v50+ — written by such a release, also
+    // when that release now rejects the file and runs on defaults — or the
+    // release itself has no scanner to disable or fail open.
+    const version = Number(primary
+      ? hermesYamlSetting(yamls, '_config_version')?.value ?? hermesConfigAsWritten(primary)._config_version
+      : undefined);
+    const removed = (Number.isFinite(version) && version >= TIRITH_REMOVED_CONFIG_VERSION)
+      || isAtLeast(ctx.installation.version, TIRITH_REMOVED_RELEASE);
+    if (primary && !removed) {
       const enabled = hermesYamlSetting(yamls, 'security.tirith_enabled');
       const failOpen = hermesYamlSetting(yamls, 'security.tirith_fail_open');
       if (enabledEnv ? !enabledEnv.value : enabled?.value === false) {

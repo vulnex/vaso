@@ -13,7 +13,8 @@ import { getNestedValue } from '../core/utils.js';
  *  - `config.yaml` is deep-merged on top of the user's config per leaf
  *    (`_deep_merge`): a managed mapping recurses, a managed scalar replaces
  *    the whole user subtree there, and a managed `null` over a user mapping
- *    is ignored.
+ *    is ignored. Before that its `${VAR}` refs are expanded and its model
+ *    keys canonicalized (`hermesManagedOverlay`, in the adapter).
  *  - `.env` is loaded last, with override (`_apply_managed_env`), so its
  *    variables beat the user's `.env` and the shell.
  * Enforcement is filesystem permissions only, so the directory and its files
@@ -43,18 +44,36 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return !!v && typeof v === 'object' && !Array.isArray(v);
 }
 
-/** Whether deep-merging `managed` over a user config replaces the user's value at `path`. */
-function replacesLeaf(managed: unknown, path: string[]): boolean {
+/**
+ * Whether `_deep_merge(user, managed)` takes the value at `path` from the
+ * managed layer: a mapping over a mapping recurses, `null` over a mapping is
+ * ignored, and anything else replaces the user's value (a scalar the user's
+ * whole subtree, a mapping the user's scalar).
+ */
+function replacesLeaf(managed: unknown, user: unknown, path: string[]): boolean {
   let node = managed;
+  let userNode = user;
   for (let i = 0; i < path.length; i++) {
     if (!isRecord(node) || !Object.hasOwn(node, path[i])) return false;
     const v = node[path[i]];
-    if (i === path.length - 1) return true;
-    // A managed scalar replaces the user's whole mapping; a null over a mapping is ignored
-    if (!isRecord(v)) return v !== null;
+    const u = isRecord(userNode) ? userNode[path[i]] : undefined;
+    if (v === null && isRecord(u)) return false;
+    if (i === path.length - 1 || !isRecord(v) || !isRecord(u)) return true;
     node = v;
+    userNode = u;
   }
   return false;
+}
+
+/** `_deep_merge(user, managed)`: the config.yaml Hermes runs with. */
+export function hermesDeepMerge(user: Record<string, unknown>, managed: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...user };
+  for (const [key, value] of Object.entries(managed)) {
+    const overDict = isRecord(out[key]);
+    if (overDict && isRecord(value)) out[key] = hermesDeepMerge(out[key] as Record<string, unknown>, value);
+    else if (!(overDict && value === null)) out[key] = value;
+  }
+  return out;
 }
 
 /**
@@ -67,7 +86,7 @@ export function managedOverride(configs: ParsedConfig[], config: ParsedConfig, k
   const env = config.format === 'env';
   for (const m of configs) {
     if (!m.managed || (m.format === 'env') !== env) continue;
-    if (env ? Object.hasOwn(m.data, key as string) : replacesLeaf(m.data, Array.isArray(key) ? key : key.split('.'))) return m;
+    if (env ? Object.hasOwn(m.data, key as string) : replacesLeaf(m.data, config.data, Array.isArray(key) ? key : key.split('.'))) return m;
   }
   return undefined;
 }
@@ -93,7 +112,7 @@ export function hermesYamlSetting<T extends Pick<ParsedConfig, 'format' | 'data'
   const yamls = configs.filter(c => c.format !== 'env');
   const user = yamls.filter(c => !c.managed);
   for (const m of yamls.filter(c => c.managed)) {
-    if (replacesLeaf(m.data, key.split('.'))) return { value: getNestedValue(m.data, key), file: m.filePath, config: m };
+    if (replacesLeaf(m.data, user[0]?.data, key.split('.'))) return { value: getNestedValue(m.data, key), file: m.filePath, config: m };
   }
   for (const c of user) {
     const value = getNestedValue(c.data, key);

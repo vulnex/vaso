@@ -1,0 +1,7 @@
+_config_version: 52
+approvals:
+  mode: manual
+model:
+  default: x/y
+  provider: custom
+  base_url: http://10.0.0.5:8000/v1

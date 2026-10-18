@@ -1,0 +1,15 @@
+{
+  "agent": "hermes",
+  "source": "Hermes 0.21.6 (hermes-agent 284dbaf moved YAML to ruamel): a config.yaml that sets approvals twice is rejected (\"found duplicate key\"), and Hermes runs on its default settings \u2014 checked with load_user_config_effective on a live 0.21.6 install (deep test 2026-10-18 fixture)",
+  "modes": {
+    ".hermes": "700",
+    ".hermes/config.yaml": "600"
+  },
+  "fail": {
+    "CONFIG-LOAD": "warning"
+  },
+  "pass": [
+    "HM-008",
+    "HM-009"
+  ]
+}
