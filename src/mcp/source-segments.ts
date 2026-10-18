@@ -25,13 +25,39 @@ export function isCommentLine(text: string): boolean {
 
 /**
  * Source split into segments, comment lines dropped. Ordinary lines are one
- * segment each; minified lines become one segment per statement.
+ * segment each; minified lines become one segment per statement. For Python
+ * (`{ python: true }`) docstring bodies are dropped too: a docstring that
+ * says the host "probes ``/authorize``" documents the code, it is not code.
  */
-export function sourceSegments(code: string): SourceSegment[] {
+export function sourceSegments(code: string, opts: { python?: boolean } = {}): SourceSegment[] {
   const out: SourceSegment[] = [];
   const lines = code.split('\n');
+  let inDocstring: string | undefined; // the closing delimiter
+  let inData: string | undefined; // inside an assigned `x = """…` string
   for (let i = 0; i < lines.length; i++) {
     const text = lines[i];
+    if (opts.python) {
+      const trimmed = text.trim();
+      if (inDocstring) {
+        if (trimmed.includes(inDocstring)) inDocstring = undefined;
+        continue;
+      }
+      if (inData) {
+        // its closing line is not a docstring opener
+        if (trimmed.includes(inData)) inData = undefined;
+      } else {
+        // A line that starts a string statement: a docstring (one that is
+        // assigned, `x = """…`, is data and kept)
+        const opener = /^[rRbBuU]*("""|''')/.exec(trimmed);
+        if (opener) {
+          if (trimmed.indexOf(opener[1], opener[0].length) === -1) inDocstring = opener[1];
+          continue;
+        }
+        for (const delim of ['"""', "'''"]) {
+          if (trimmed.split(delim).length % 2 === 0) { inData = delim; break; }
+        }
+      }
+    }
     if (isCommentLine(text)) continue;
     if (text.length <= MINIFIED_LINE) {
       out.push({ line: i + 1, text });
@@ -98,10 +124,15 @@ export function withoutStringText(text: string): string {
   return out;
 }
 
-/** A string constant declared, not a request made: `const AUTHORIZE_PATH = "/oauth/authorize";` */
+/**
+ * A string constant declared, not a request made: `const AUTHORIZE_PATH =
+ * "/oauth/authorize";`, or a string-to-string map entry (`"/authorize":
+ * "/oauth/authorize",` in a route table).
+ */
 const STRING_CONSTANT = /^\s*(?:export\s+)?(?:const|let|var)?\s*[\w$.]+\s*[:=]\s*(['"`])[^'"`$]*\1\s*[;,]?\s*$/;
+const STRING_MAP_ENTRY = /^\s*(['"])[^'"]*\1\s*:\s*(['"`])[^'"`$?]*\2\s*,?\s*$/;
 export function isStringConstant(text: string): boolean {
-  return STRING_CONSTANT.test(text);
+  return STRING_CONSTANT.test(text) || STRING_MAP_ENTRY.test(text);
 }
 
 /**

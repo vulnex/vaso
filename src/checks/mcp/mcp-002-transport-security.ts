@@ -87,7 +87,7 @@ export const mcp002 = defineCheck({
     let containerOnly = 0;
     for (const source of ctx.mcpServerSources ?? []) {
       if (!source.sourceCode || AUTH_IN_SOURCE.test(source.sourceCode)) continue;
-      const segments = sourceSegments(source.sourceCode);
+      const segments = sourceSegments(source.sourceCode, { python: source.language === 'python' });
       const at = segments.findIndex((seg) => ALL_INTERFACES_BIND.some((re) => re.test(seg.text)));
       if (at < 0) continue;
       const bind = segments[at];

@@ -23,7 +23,7 @@ export const mcp013 = defineCheck({
 
     for (const source of mcpServerSources) {
       if (!source.sourceCode) continue;
-      const segments = sourceSegments(source.sourceCode);
+      const segments = sourceSegments(source.sourceCode, { python: source.language === 'python' });
       const filePath = source.localPath ?? source.serverName;
       const python = source.language === 'python';
       // The flow's own block, not a fixed window: PKCE is often set further

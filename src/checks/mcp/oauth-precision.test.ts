@@ -59,6 +59,46 @@ describe('MCP-013 / MCP-018 judge the flow, not a 15-line window (dt14)', () => 
   });
 });
 
+describe('MCP-013 / MCP-018 read Python code, not docstrings or route tables (dt15)', () => {
+  const proxy = [
+    'from mcp.server.fastmcp import FastMCP',
+    'PROXIED = {',
+    '    "/authorize": "/oauth/authorize",',
+    '    "/token": "/oauth/token",',
+    '}',
+    'async def proxy(request):',
+    '    """Proxy discovery requests.',
+    '',
+    '    MCP host SDKs probe ``/register``, ``/authorize`` and ``/token`` at the',
+    '    resource server host before they have a token; we forward them.',
+    '    """',
+    '    return PROXIED.get(request.url.path)',
+  ].join('\n');
+
+  it('ignores `/authorize` in a docstring and in a string-to-string route map (opik-mcp shape)', async () => {
+    expect((await mcp013.run(ctx(proxy, 'python'))).passed).toBe(true);
+    expect((await mcp018.run(ctx(proxy, 'python'))).passed).toBe(true);
+  });
+
+  it('still flags a Python authorize URL built after a docstring or a data string, with neither PKCE nor state', async () => {
+    const code = [
+      'def login():',
+      '    """Start the OAuth flow."""',
+      '    url = f"{ISSUER}/authorize?client_id={CLIENT_ID}&response_type=code"',
+      '    return RedirectResponse(url)',
+      'TEMPLATE = """',
+      'text',
+      '"""',
+      'def other():',
+      '    return RedirectResponse(f"{ISSUER}/authorize?client_id={CLIENT_ID}")',
+    ].join('\n');
+    const r13 = await mcp013.run(ctx(code, 'python'));
+    expect(r13.passed).toBe(false);
+    expect(r13.evidence?.map((e) => e.line)).toEqual([3, 9]);
+    expect((await mcp018.run(ctx(code, 'python'))).passed).toBe(false);
+  });
+});
+
 describe('MCP-032 (dt14)', () => {
   it('Object.keys(process.env) for CI detection is not an env dump; returning the values still is', async () => {
     const { mcp032 } = await import('./mcp-032-env-dump-tool.js');

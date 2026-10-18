@@ -54,7 +54,7 @@ export const mcp011 = defineCheck({
     // Source scan: check for HTTP OAuth URLs in code
     for (const source of mcpServerSources) {
       if (!source.sourceCode) continue;
-      const segments = sourceSegments(source.sourceCode);
+      const segments = sourceSegments(source.sourceCode, { python: source.language === 'python' });
 
       for (let i = 0; i < segments.length; i++) {
         const line = segments[i].text;

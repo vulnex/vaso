@@ -90,7 +90,7 @@ export const mcp023 = defineCheck({
     // rebinding, or call a remote one from the browser.
     for (const source of ctx.mcpServerSources ?? []) {
       if (!source.sourceCode) continue;
-      for (const seg of sourceSegments(source.sourceCode)) {
+      for (const seg of sourceSegments(source.sourceCode, { python: source.language === 'python' })) {
         const hit = PROTECTION_DISABLED.find(({ re }) => re.test(seg.text));
         if (!hit) continue;
         evidence.push({

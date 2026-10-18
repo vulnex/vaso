@@ -15,6 +15,13 @@ describe('sourceSegments', () => {
     expect(segs.map((s) => s.text.trim())).toContain('let token=t;');
   });
 
+  it('drops Python docstring bodies but keeps assigned multi-line strings and the code after them', () => {
+    const code = ['def f():', '    """Doc', '    /authorize', '    """', '    x = 1', 'T = """', 'data', '"""', 'y = 2'].join('\n');
+    expect(sourceSegments(code, { python: true }).map((s) => s.line)).toEqual([1, 5, 6, 7, 8, 9]);
+    // JavaScript sources are unchanged
+    expect(sourceSegments(code).map((s) => s.line)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+  });
+
   it('gives nearby text across neighbouring segments', () => {
     const segs = sourceSegments('a\nb\nc\nd');
     expect(nearbyText(segs, 1, 1)).toBe('a\nb\nc');

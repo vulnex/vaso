@@ -66,7 +66,7 @@ export const mcp014 = defineCheck({
 
     for (const source of mcpServerSources) {
       if (!source.sourceCode) continue;
-      const segments = sourceSegments(source.sourceCode);
+      const segments = sourceSegments(source.sourceCode, { python: source.language === 'python' });
       const queryAuthApi = QUERY_AUTH_APIS.find(a => a.host.test(source.sourceCode!));
       const filePath = source.localPath ?? source.serverName;
 
