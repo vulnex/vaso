@@ -147,3 +147,33 @@ describe('masking: dt14 forms', () => {
     expect(out).toContain('API_KEY');
   });
 });
+
+describe('masking: bare well-known tokens and --auth/--bearer values', () => {
+  const GHP = 'ghp_Q7rT2mZ9kLp4Wn8Vx3Bc6Hd1Fj5Gs0Ae2Ry7';
+  const PROJ = 'sk-proj-Q7rT2mZ9kLp4Wn8Vx3Bc6Hd1Fj5Gs0Ae';
+  const XOXB = 'xoxb-1234567890-Q7rT2mZ9kLp4SLK8';
+  const AKIA = 'AKIAQ7RT2MZ9KLP4WN12';
+
+  it('masks bare tokens in argv and text, keeping the rest readable', async () => {
+    const { toReportJson, maskCredentialsInText } = await import('./serialize.js');
+    const json = toReportJson({ servers: [
+      { command: 'npx', args: ['-y', 'pkg@1.0.0', GHP] },
+      { command: 'npx', args: ['-y', 'pkg@1.0.0', PROJ] },
+      { command: 'node', args: ['srv.js', XOXB] },
+      { command: 'uvx', args: ['pkg==1.0', AKIA] },
+      { command: 'npx', args: ['-y', 'pkg@1.0.0', '--auth', 'Q7rT2mZ9kLp4AUTH17'] },
+      { command: 'npx', args: ['-y', 'pkg@1.0.0', '--bearer', 'Q7rT2mZ9kLp4BEAR18'] },
+    ] });
+    for (const secret of [GHP, PROJ, XOXB, AKIA, 'Q7rT2mZ9kLp4AUTH17', 'Q7rT2mZ9kLp4BEAR18']) expect(json).not.toContain(secret);
+    expect(json).toContain('pkg@1.0.0');
+    expect(json).toContain('"--auth"');
+    expect(maskCredentialsInText(`npx pkg ${GHP} --bearer=Q7rT2mZ9kLp4BEAR18`)).toBe('npx pkg *** --bearer=***');
+  });
+
+  it('keeps placeholders, references and redacted forms', async () => {
+    const { maskCredentialsInText } = await import('./serialize.js');
+    for (const keep of ['ghp_your_token_here', 'AKIAIOSFODNN7EXAMPLE', 'sk-ant-...', 'sk-a...wxyz', '--auth ${API_TOKEN}', '--bearer $TOKEN']) {
+      expect(maskCredentialsInText(keep)).toBe(keep);
+    }
+  });
+});

@@ -9,7 +9,7 @@
  * the scanning machine).
  */
 
-import { isPlaceholderSecret } from '../core/patterns.js';
+import { API_KEY_PATTERNS, isPlaceholderSecret } from '../core/patterns.js';
 
 const MASKED_MAPS = new Set(['env', 'headers']);
 
@@ -46,6 +46,17 @@ export function isSecretName(name: string): boolean {
   return SECRET_NAME.test(leaf) || secretVar(leaf);
 }
 
+/**
+ * Well-known token formats (`ghp_…`, `sk-proj-…`, `xoxb-…`, `AKIA…`) wherever
+ * they stand — a bare argv element or value has no name to go by. Patterns
+ * that only match a `NAME=value` assignment are left to SECRET_ASSIGN.
+ */
+const BARE_TOKEN = new RegExp(
+  API_KEY_PATTERNS.filter(p => !/assignment/i.test(p.name)).map(p => `(?:${p.pattern.source})`).join('|'),
+  'g',
+);
+/** Cheap pre-check: text with none of these can't hold a bare token. */
+const BARE_TOKEN_HINT = /sk-|AKIA|gh[po]_|glpat-|xox[bp]-|-----BEGIN|\d{10}:|devin-|cog_|apk_/;
 
 /** Hosts whose URL path itself is the credential. */
 function maskSecretPath(host: string, path: string): string {
@@ -119,7 +130,7 @@ const SECRET_HEADER = /(^|[\s"'=])((?:proxy-)?authorization|cookie|x-[\w-]*(?:ke
 /** `NAME=value` where NAME looks like a credential (env lines, `docker -e`, `env K=V cmd`, inline `sh -c`). */
 const SECRET_ASSIGN = /(^|[\s"'`(;&|:$])([A-Za-z_][A-Za-z0-9_]*)\s*=\s*("[^"]*"|'[^']*'|[^\s"'`;&|)]+)/g;
 /** `--token=x`, `--token x`, `--api-key x`, `--key=x`, `--pat=x`, `--password x`. */
-const SECRET_FLAG = /(^|[\s"'[,])(--?(?:[a-z][\w-]*?[-_])?(?:access[_-]?token|auth[_-]?token|token|api[_-]?key|apikey|key|pat|secret|client[_-]?secret|password|passwd|pass|pwd|credentials?)|-p)(=|\s+|["']\s*,\s*["'])([^\s"'<>,]+)/gi;
+const SECRET_FLAG = /(^|[\s"'[,])(--?(?:[a-z][\w-]*?[-_])?(?:access[_-]?token|auth[_-]?token|token|api[_-]?key|apikey|key|pat|secret|client[_-]?secret|password|passwd|pass|pwd|credentials?|auth|bearer)|-p)(=|\s+|["']\s*,\s*["'])([^\s"'<>,]+)/gi;
 /** `-u user:pass` / `--user user:pass` (curl, wget). */
 const USER_PASS_FLAG = /(^|[\s"'[,])(-u|--user|--proxy-user)(=|\s+|["']\s*,\s*["'])([^\s:"',]+):([^\s"',]+)/g;
 
@@ -135,8 +146,9 @@ const PORT_LIKE = /^\d+(?::\d+)*(?:\/(?:tcp|udp))?$|^[\d.]+:\d+(?::\d+)?$/;
  * variable names stay readable, as do references (`${VAR}`) and placeholders.
  */
 export function maskCredentialsInText(text: string): string {
-  if (!/[:=@-]/.test(text)) return text;
-  return text
+  if (!/[:=@-]/.test(text) && !BARE_TOKEN_HINT.test(text)) return text;
+  const bare = BARE_TOKEN_HINT.test(text) ? text.replace(BARE_TOKEN, (m) => (keepValue(m) ? m : MASK)) : text;
+  return bare
     .replace(URL_IN_TEXT, (url) => {
       const body = trimUrlTail(url);
       return maskUrl(body) + url.slice(body.length);
@@ -187,7 +199,7 @@ export function maskConfigValue(name: string, value: unknown): unknown {
 }
 
 /** Flags whose value is the next argv element. */
-const VALUE_FLAG = /^--?(?:[a-z][\w-]*?[-_])?(?:access[_-]?token|auth[_-]?token|token|api[_-]?key|apikey|key|pat|secret|client[_-]?secret|password|passwd|pass|pwd|credentials?)$|^-p$/i;
+const VALUE_FLAG = /^--?(?:[a-z][\w-]*?[-_])?(?:access[_-]?token|auth[_-]?token|token|api[_-]?key|apikey|key|pat|secret|client[_-]?secret|password|passwd|pass|pwd|credentials?|auth|bearer)$|^-p$/i;
 
 /**
  * An argv array: each element masked as text, and the element after a
