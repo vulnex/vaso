@@ -1,6 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { isOverbroadShell } from './permission-rules.js';
+import { isOverbroadShell, shellDenied } from './permission-rules.js';
 
 export const cur003 = defineCheck({
   id: 'CUR-003',
@@ -18,10 +18,9 @@ export const cur003 = defineCheck({
       if (!perms || typeof perms !== 'object') continue;
       const allow = Array.isArray(perms.allow) ? (perms.allow as unknown[]).filter((a): a is string => typeof a === 'string') : [];
       const deny = Array.isArray(perms.deny) ? (perms.deny as unknown[]).filter((a): a is string => typeof a === 'string') : [];
-      const denySet = new Set(deny.map(d => d.toLowerCase()));
 
       for (const rule of allow) {
-        if (denySet.has(rule.toLowerCase())) continue; // deny wins
+        if (shellDenied(rule, deny)) continue; // deny wins
         if (!isOverbroadShell(rule)) continue;
         evidence.push({
           file: config.filePath,

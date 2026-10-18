@@ -37,6 +37,24 @@ export function isOverbroadShell(rule: string): boolean {
   return WILDCARD.test(base) || SHELLS.has(base) || RISKY_COMMANDS.has(base);
 }
 
+/**
+ * Whether a deny rule cancels a Shell allow rule (deny wins): the same rule,
+ * or a deny on the whole command (`Shell(curl)` / `Shell(curl:*)`).
+ */
+export function shellDenied(rule: string, deny: readonly string[]): boolean {
+  const allow = parseCursorRule(rule);
+  if (!allow?.arg) return deny.some(d => d.trim().toLowerCase() === rule.trim().toLowerCase());
+  const base = shellBase(allow.arg);
+  return deny.some(d => {
+    const parsed = parseCursorRule(d);
+    if (!parsed?.arg || parsed.tool !== 'shell') return false;
+    if (parsed.arg.toLowerCase() === allow.arg!.toLowerCase()) return true;
+    const colon = parsed.arg.indexOf(':');
+    const args = colon === -1 ? '' : parsed.arg.slice(colon + 1).trim();
+    return shellBase(parsed.arg) === base && (args === '' || WILDCARD.test(args));
+  });
+}
+
 /** A rule whose whole argument is a wildcard: `X(*)`, `X(**)`, `Shell(*:*)`, `Mcp(*:*)`. */
 export function isCatchAll(rule: string): boolean {
   const parsed = parseCursorRule(rule);

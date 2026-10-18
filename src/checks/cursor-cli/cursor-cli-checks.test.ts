@@ -241,6 +241,11 @@ describe('dt15: Cursor command:args and absolute-glob rule forms', () => {
     expect(result.evidence).toHaveLength(4);
   });
 
+  it('CUR-003 lets a deny on the whole command cancel a command:args allow', async () => {
+    const result = await cur003.run(ctx(['Shell(curl:*)', 'Shell(sudo:*)', 'Shell(bash:*)'], ['Shell(curl)', 'Shell(sudo:*)', 'Shell(bash:-c)']));
+    expect(result.evidence?.map(e => e.snippet)).toEqual(['permissions.allow: "Shell(bash:*)"']);
+  });
+
   it('CUR-003 keeps scoped command:args rules passing', async () => {
     const result = await cur003.run(ctx(['Shell(git:*)', 'Shell(npm:test)', 'Shell(curlie)']));
     expect(result.passed).toBe(true);
