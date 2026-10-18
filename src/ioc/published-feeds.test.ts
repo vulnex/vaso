@@ -8,6 +8,7 @@ import type { IOCFeed, IOCFeedData } from './feed-types.js';
 import type { AdvisoryFeed } from '../advisory/advisory-types.js';
 import { LIBRARY_ADVISORIES } from '../advisory/library-advisories.js';
 import { buildBundledAdvisoryDatabase } from '../advisory/database.js';
+import { buildBundledDatabase } from './database.js';
 
 /**
  * Guards on the *published* feed artifacts in feeds/ — the hand-edited JSON
@@ -156,5 +157,46 @@ describe('bundled advisories carry every published feed advisory', () => {
 
   it.each(feed.data.advisories.map((a) => [a.id, a] as const))('%s: bundled copy matches the feed', (id, adv) => {
     expect(bundled.get(id)).toEqual(adv);
+  });
+});
+
+describe('bundled IOC data carries every published feed indicator', () => {
+  // Same contract as the advisories: offline installs see only the bundle, so
+  // every indicator the signed IOC feed publishes must ship in it too.
+  const feed = readFeed<IOCFeed>('feed.json');
+  const db = buildBundledDatabase();
+  const stringKeys = [
+    'c2Ips',
+    'maliciousDomains',
+    'fileHashes',
+    'maliciousPublishers',
+    'trustedSkillNames',
+    'trustedMCPPackages',
+  ] as const;
+
+  it.each(stringKeys)('no feed %s entry is missing from the bundle', (key) => {
+    const bundled = new Set(db[key]);
+    expect((feed.data[key] ?? []).filter((v) => !bundled.has(v))).toEqual([]);
+  });
+
+  it('no feed maliciousSkillPatterns entry is missing from the bundle', () => {
+    const bundled = new Set(db.maliciousSkillPatterns.map((re) => `${re.source}/${re.flags}`));
+    const missing = (feed.data.maliciousSkillPatterns ?? []).filter(
+      (p) => !bundled.has(`${new RegExp(p.source, p.flags).source}/${p.flags ?? ''}`)
+    );
+    expect(missing).toEqual([]);
+  });
+
+  it('no feed binaryPatterns entry is missing from the bundle', () => {
+    const key = (type: string, pattern: string) => `${type}:${pattern}`;
+    const bundled = new Set(
+      db.binaryPatterns.map((b) =>
+        key(b.type, Buffer.isBuffer(b.pattern) ? b.pattern.toString('hex') : (b.pattern as RegExp).source)
+      )
+    );
+    const missing = (feed.data.binaryPatterns ?? []).filter(
+      (b) => !bundled.has(key(b.type, b.type === 'buffer' ? b.pattern.toLowerCase() : b.pattern))
+    );
+    expect(missing).toEqual([]);
   });
 });
