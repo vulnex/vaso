@@ -10,8 +10,8 @@ import type { ProbeSnapshot } from '../core/snapshot-types.js';
 import { VERSION } from '../version.js';
 import { parseRemoteOptions, type RemoteOptionValues } from './remote-options.js';
 import { loadSnapshotFile, SnapshotLoadError, snapshotErrorLines, SNAPSHOT_TRUNCATED_WARNING, probeVersionWarning } from '../core/snapshot-load.js';
-import type { ScanOptions, ScanResult } from '../core/types.js';
-import { shouldFailScan, isValidFailOn, EXIT_FINDINGS, EXIT_INCOMPLETE, EXIT_USAGE, type FailOnLevel } from '../core/exit-criteria.js';
+import type { CheckResult, ScanOptions, ScanResult } from '../core/types.js';
+import { shouldFailScan, isValidFailOn, incompleteResults, EXIT_FINDINGS, EXIT_INCOMPLETE, EXIT_USAGE, type FailOnLevel } from '../core/exit-criteria.js';
 import { logError } from '../core/debug.js';
 import { writeFileEnsureDir, writeFileOwnerOnly } from '../core/utils.js';
 import { HostFileNames, safeHostname } from '../transport/host-files.js';
@@ -335,12 +335,14 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
       log(chalk.bold(`\n  Summary: ${successResults.length} scanned, ${failedResults.length} failed\n`));
     }
 
-    // 3 if any host could not be scanned (takes precedence), else 1 when
-    // findings meet the --fail-on threshold
+    // 3 if any host could not be scanned or a check errored (takes
+    // precedence), else 1 when findings meet the --fail-on threshold
     const allResults = successResults.flatMap(hr =>
       hr.result?.agents.flatMap(a => a.results) ?? []
     );
-    if (failedResults.length > 0) {
+    const erroredChecks = incompleteResults(allResults);
+    if (erroredChecks.length > 0) log(chalk.yellow(incompleteNote(erroredChecks)));
+    if (failedResults.length > 0 || erroredChecks.length > 0) {
       process.exitCode = EXIT_INCOMPLETE;
     } else if (shouldFailScan(allResults, failOn)) {
       process.exitCode = EXIT_FINDINGS;
@@ -399,15 +401,26 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
       console.log(output);
     }
 
-    // Exit non-zero if findings meet the --fail-on threshold (default: critical only)
+    // 3 when a check or adapter errored (findings may be missing), else 1
+    // when findings meet the --fail-on threshold (default: critical only)
     const allResults = result.agents.flatMap(a => a.results);
-    if (shouldFailScan(allResults, failOn)) {
+    const erroredChecks = incompleteResults(allResults);
+    if (erroredChecks.length > 0) {
+      localLog(chalk.yellow(incompleteNote(erroredChecks)));
+      process.exitCode = EXIT_INCOMPLETE;
+    } else if (shouldFailScan(allResults, failOn)) {
       process.exitCode = EXIT_FINDINGS;
     }
   } catch (err) {
     logError(chalk.red('Scan failed:'), err);
     process.exitCode = EXIT_USAGE;
   }
+}
+
+/** Stderr note for a scan whose checks did not all complete (exit 3). */
+function incompleteNote(errored: readonly CheckResult[]): string {
+  const ids = [...new Set(errored.map(r => r.id))];
+  return `  Scan incomplete: ${errored.length} check result(s) errored (${ids.slice(0, 5).join(', ')}${ids.length > 5 ? ', …' : ''}) — findings may be missing`;
 }
 
 /**

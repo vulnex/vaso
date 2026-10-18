@@ -206,6 +206,53 @@ describe('ScanEngine', () => {
     expect(result.summary.warning).toBe(1);
   });
 
+  it('keeps the agent when a check returns no result, reporting it errored', async () => {
+    const adapters = new AdapterRegistry();
+    adapters.register(mockAdapter);
+    const checks = new CheckRegistry();
+    for (const [id, value] of [['PLG-001', undefined], ['PLG-002', null], ['PLG-003', 'ok'], ['PLG-004', { id: 'PLG-004' }]] as const) {
+      checks.register({ id, name: id, category: 'config', severity: 'warning', description: 'd', async run() { return value as unknown as CheckResult; } });
+    }
+    checks.register(mockCheck('CFG-002', false, 'critical'));
+
+    const result = await new ScanEngine(adapters, checks).scan({});
+    expect(result.agents).toHaveLength(1);
+    const byId = new Map(result.agents[0].results.map(r => [r.id, r]));
+    for (const id of ['PLG-001', 'PLG-002', 'PLG-003', 'PLG-004']) {
+      expect(byId.get(id)).toMatchObject({ errored: true, passed: false });
+    }
+    expect(byId.get('PLG-001')!.message).toContain('returned undefined');
+    // the real finding next to it still counts
+    expect(byId.get('CFG-002')).toMatchObject({ passed: false, severity: 'critical' });
+  });
+
+  it('times out a check that never settles and reports it errored', async () => {
+    const adapters = new AdapterRegistry();
+    adapters.register(mockAdapter);
+    const checks = new CheckRegistry();
+    checks.register({ id: 'PLG-006', name: 'h', category: 'config', severity: 'warning', description: 'd', run: () => new Promise<CheckResult>(() => {}) });
+    checks.register(mockCheck('CFG-001', true));
+
+    const result = await new ScanEngine(adapters, checks, undefined, { checkTimeoutMs: 50 }).scan({});
+    const hung = result.agents[0].results.find(r => r.id === 'PLG-006');
+    expect(hung).toMatchObject({ errored: true });
+    expect(hung!.message).toContain('did not finish');
+    expect(result.agents[0].results.find(r => r.id === 'CFG-001')?.passed).toBe(true);
+  });
+
+  it('reports an agent whose scan fails outside its checks instead of dropping it', async () => {
+    const adapters = new AdapterRegistry();
+    // the adapter throws while the engine builds the scan context, before any check runs
+    adapters.register({ ...mockAdapter, getCredentialPaths() { throw new Error('walk failed'); } });
+    const checks = new CheckRegistry();
+    checks.register(mockCheck('CFG-001', true));
+
+    const result = await new ScanEngine(adapters, checks).scan({});
+    expect(result.agents).toHaveLength(1);
+    expect(result.agents[0].results[0]).toMatchObject({ id: 'AGENT-SCAN', errored: true });
+    expect(result.agents[0].results[0].message).toContain('walk failed');
+  });
+
   it('uses the scanned filesystem platform for applicable checks', async () => {
     const adapters = new AdapterRegistry();
     adapters.register(mockAdapter);

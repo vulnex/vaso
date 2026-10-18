@@ -418,7 +418,7 @@ See [`network-scanning-guide.md`](network-scanning-guide.md) for the full SSH wo
 | `0` | Scan completed; no findings at or above the `--fail-on` threshold |
 | `1` | Findings at or above the threshold |
 | `2` | VASO could not run: invalid CLI arguments (e.g. `--silent` without an output destination, `--parallel 0`), an unreadable snapshot or inventory file, or an internal error |
-| `3` | Scan incomplete: one or more remote hosts could not be scanned (unreachable, authentication failed, probe error). Takes precedence over `1`, so CI can tell "not scanned" apart from "findings" |
+| `3` | Scan incomplete: one or more remote hosts could not be scanned (unreachable, authentication failed, probe error), or a check or adapter errored — threw, returned no result, or ran longer than the per-check timeout (5 minutes; `VASO_CHECK_TIMEOUT=<seconds>` changes it) — so findings may be missing. The errored checks are listed in the report. A config file VASO can't read is a `CONFIG-LOAD` finding, not an incomplete scan. Takes precedence over `1`, so CI can tell "not scanned" apart from "findings" |
 
 The other commands use the same codes: `skill audit` and `mcp scan` exit `1` on critical findings, and every command exits `2` when it cannot run — a command-line error (unknown option or command, a missing or extra argument), a missing or unreadable input (`skill audit <path>`, `mcp scan/list --path`, `visualize -i`, `probe validate`), an unknown name (`ext info`), or an invalid option value such as `--ssh-timeout abc`. `probe validate` exits `2` for any snapshot it can't use — unreadable, not JSON, or failing validation (over the probe's size limits, a relative `homedir`, a malformed `privilege` block).
 

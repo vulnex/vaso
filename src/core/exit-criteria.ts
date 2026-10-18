@@ -1,8 +1,10 @@
 import type { CheckResult, Severity } from './types.js';
 
 /** Exit codes: 0 clean · 1 findings at/above --fail-on · 2 invalid usage or
- *  VASO error · 3 scan incomplete (one or more hosts could not be scanned —
- *  takes precedence over 1, so CI can tell "unscanned" from "findings"). */
+ *  VASO error · 3 scan incomplete (one or more hosts could not be scanned, or
+ *  a check or adapter errored — failed, timed out or returned no result — so
+ *  some findings may be missing; takes precedence over 1, so CI can tell
+ *  "unscanned" from "findings"). */
 export const EXIT_FINDINGS = 1;
 export const EXIT_USAGE = 2;
 export const EXIT_INCOMPLETE = 3;
@@ -41,4 +43,13 @@ export function shouldFailScan(results: readonly CheckResult[], failOn: FailOnLe
     if (SEVERITY_RANK[r.severity] >= threshold) return true;
   }
   return false;
+}
+
+/**
+ * Results that mean the scan did not complete: a check or adapter that
+ * errored. A config file VASO could not read (CONFIG-LOAD) is a finding about
+ * the host — an unreadable file — not an incomplete scan.
+ */
+export function incompleteResults(results: readonly CheckResult[]): CheckResult[] {
+  return results.filter(r => r.errored && r.id !== 'CONFIG-LOAD');
 }
