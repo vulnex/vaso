@@ -177,27 +177,38 @@ describe('CD-005: Unverified MCPB Desktop Extensions', () => {
     expect(result.passed).toBe(true);
   });
 
-  it('fails on extension manifest with no signature', async () => {
-    const fs = makeFs({
+  function extFs(archive?: { name: string; bytes: Uint8Array }) {
+    return makeFs({
       access: vi.fn(async () => true),
-      readdirEntries: vi.fn(async () => [
-        { name: 'evil-ext', isFile: false, isDirectory: true },
-      ]),
-      readFile: vi.fn(async () => JSON.stringify({ name: 'evil-ext', version: '1.0.0' })),
+      readdirEntries: vi.fn(async (dir: string) => dir.endsWith('Claude Extensions')
+        ? [{ name: 'ext', isFile: false, isDirectory: true }]
+        : archive ? [{ name: archive.name, isFile: true, isDirectory: false }] : []),
+      readFile: vi.fn(async () => JSON.stringify({ name: 'ext', version: '1.0.0', author: { name: 'Anthropic' } })),
+      readBytes: vi.fn(async () => { if (!archive) throw new Error('ENOENT'); return archive.bytes; }),
     });
+  }
+  const zip = Buffer.from('PK\u0003\u0004 zip body');
+
+  it('an installed extension without its bundle is inventory only — never "unsigned"', async () => {
+    const fs = extFs();
+    (fs.access as ReturnType<typeof vi.fn>).mockImplementation(async (p: string) => !p.endsWith('.mcpb'));
     const result = await check.run(makeCtx([], fs));
     expect(result.passed).toBe(false);
+    expect(result.severity).toBe('info');
+    expect(result.evidence?.[0].snippet).toBe('extension: ext (author: Anthropic)');
+    expect(result.message).toMatch(/signature status unknown/);
   });
 
-  it('passes when manifest has a signature', async () => {
-    const fs = makeFs({
-      access: vi.fn(async () => true),
-      readdirEntries: vi.fn(async () => [
-        { name: 'good-ext', isFile: false, isDirectory: true },
-      ]),
-      readFile: vi.fn(async () => JSON.stringify({ name: 'good-ext', signature: 'abc' })),
-    });
-    const result = await check.run(makeCtx([], fs));
+  it('flags a .mcpb bundle with no MCPB_SIG_V1 trailer', async () => {
+    const result = await check.run(makeCtx([], extFs({ name: 'ext.mcpb', bytes: zip })));
+    expect(result.passed).toBe(false);
+    expect(result.severity).toBe('warning');
+    expect(result.message).toMatch(/unsigned/);
+  });
+
+  it('passes a signed bundle', async () => {
+    const signed = Buffer.concat([zip, Buffer.from('MCPB_SIG_V1'), Buffer.from([4, 0, 0, 0]), Buffer.from('0\u0082sig'), Buffer.from('MCPB_SIG_END')]);
+    const result = await check.run(makeCtx([], extFs({ name: 'ext.mcpb', bytes: signed })));
     expect(result.passed).toBe(true);
   });
 });
@@ -205,21 +216,29 @@ describe('CD-005: Unverified MCPB Desktop Extensions', () => {
 describe('CD-006: Always-Approve MCP Tools', () => {
   const check = claudeDesktopChecks.find(c => c.id === 'CD-006')!;
 
-  it('fails on top-level alwaysApprove array', async () => {
+  it('reports keys Claude Desktop does not read as info', async () => {
     const config = makeConfig('config.json', {
       alwaysApprove: ['shell', 'fs.write', 'http.fetch'],
-    });
-    const result = await check.run(makeCtx([config]));
-    expect(result.passed).toBe(false);
-    expect(result.severity).toBe('critical');
-  });
-
-  it('fails on per-server autoApprove=true', async () => {
-    const config = makeConfig('config.json', {
       mcpServers: { fs: { command: 'fs', autoApprove: true } },
     });
     const result = await check.run(makeCtx([config]));
     expect(result.passed).toBe(false);
+    expect(result.severity).toBe('info');
+    expect(result.evidence?.every(e => e.mitigated)).toBe(true);
+  });
+
+  it('is critical when claude-autoapprove-mcp applies an autoapprove list', async () => {
+    const config = makeConfig('config.json', {
+      mcpServers: {
+        'claude-autoapprove-mcp': { command: 'uvx', args: ['claude-autoapprove-mcp'] },
+        shell: { command: 'shell-mcp', autoapprove: ['run_command'] },
+        other: { command: 'x', autoApprove: ['a'] },
+      },
+    });
+    const result = await check.run(makeCtx([config]));
+    expect(result.passed).toBe(false);
+    expect(result.severity).toBe('critical');
+    expect(result.evidence?.filter(e => !e.mitigated).map(e => e.snippet)).toEqual(['mcpServers.shell.autoapprove = ["run_command"]']);
   });
 
   it('passes when no auto-approve fields set', async () => {
