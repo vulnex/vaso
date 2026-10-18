@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtemp, writeFile, mkdir, rm, chmod } from 'node:fs/promises';
+import { mkdtemp, writeFile, mkdir, rm, chmod, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { ScanContext, ParsedConfig, AgentInstallation } from '../../core/types.js';
@@ -138,6 +138,22 @@ describe('POL-003: Session Credential Permissions', () => {
     const result = await pol003.run(makeContext([], tempDir, [credPath]));
     expect(result.passed).toBe(false);
     expect(result.evidence).toBeDefined();
+  });
+
+  it('fixes only the files it reports, not a declared directory (dt15)', async () => {
+    const credPath = join(tempDir, 'session.json');
+    const sessionDir = join(tempDir, 'session-state');
+    await writeFile(credPath, '{"token": "abc"}');
+    await chmod(credPath, 0o644);
+    await mkdir(sessionDir);
+    await chmod(sessionDir, 0o755);
+
+    const ctx = makeContext([], tempDir, [credPath, sessionDir]);
+    expect((await pol003.run(ctx)).evidence?.map(e => e.file)).toEqual([credPath]);
+    const fixed = await pol003.fix!(ctx);
+    expect(fixed.message).toBe('Removed group/other access from 1 file(s)');
+    expect((await stat(credPath)).mode & 0o777).toBe(0o600);
+    expect((await stat(sessionDir)).mode & 0o777).toBe(0o755);
   });
 
   it('passes when adapter-declared credential file has 0600', async () => {

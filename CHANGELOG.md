@@ -29,6 +29,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - **CUR-003, CUR-005 and CUR-009 read Cursor's documented rule forms.** `Shell(curl:*)` (a command with any arguments) and `Shell(*:*)` are judged like `Shell(curl)` and `Shell(*)`, and `Write(/**)`, `Write(~/**)`, `Read(~/*)` and globs over `/etc` or `/tmp` are reported like `Write(/)`. Scoped rules such as `Shell(npm:test)` and `Write(~/projects/app/**)` still pass.
 - **Windsurf / Devin Desktop reports unreadable or broken configs as CONFIG-LOAD.** An unreadable `~/.config/devin/config.json`, an unparseable editor `settings.json` and a `user_settings.pb` that isn't a valid settings message were dropped silently and the execution gate scored clean.
 - **CUR-011 checks a repository's `.cursor/hooks.json`.** Cursor runs project hooks in any trusted workspace, but only the user-level hooks file was read.
+- **POL-003's fix changes only the files it reports.** It also tightened a declared directory (Copilot's `session-state/`) that the check never flagged, and reported it as a file. Permission fixes now name directories they change as directories.
 
 ## [1.3.1] - 2026-10-16
 

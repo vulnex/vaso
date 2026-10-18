@@ -60,7 +60,13 @@ export const pol003 = defineCheck({
 
   // Credential files that aren't loaded configs (credentials.json, auth.json,
   // token stores) are only reported here; CFG-003's fix never reached them.
+  // A declared directory (Copilot's session-state/) is not reported by run(),
+  // so the fix leaves it alone too — the agent's own check judges it.
   async fix(ctx) {
-    return restrictFilesToOwner('POL-003', exposingPaths(ctx));
+    const files: string[] = [];
+    for (const path of exposingPaths(ctx)) {
+      if (await Promise.resolve().then(() => ctx.fs.stat(path)).then(s => s.isFile(), () => false)) files.push(path);
+    }
+    return restrictFilesToOwner('POL-003', files);
   },
 });

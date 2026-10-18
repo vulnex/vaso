@@ -10,6 +10,7 @@ import {
   chmodFile,
   updateConfigValue,
   fixFirstConfig,
+  restrictFilesToOwner,
 } from './config-writer.js';
 import type { ParsedConfig } from '../core/types.js';
 
@@ -229,6 +230,29 @@ describe('chmodFile', () => {
 
     const stats = await stat(filePath);
     expect(stats.mode & 0o777).toBe(0o600);
+  });
+});
+
+describe('restrictFilesToOwner', () => {
+  it('names files and directories separately in its message', async () => {
+    const file = join(TEST_DIR, 'token.json');
+    const dir = join(TEST_DIR, 'session-state');
+    await writeFile(file, '{}');
+    await chmod(file, 0o644);
+    await mkdir(dir);
+    await chmod(dir, 0o755);
+
+    const result = await restrictFilesToOwner('POL-003', [file, dir]);
+    expect(result.message).toBe('Removed group/other access from 1 file(s) and 1 directory');
+    expect((await stat(dir)).mode & 0o777).toBe(0o700);
+  });
+
+  it('says file(s) only when only files changed', async () => {
+    const file = join(TEST_DIR, 'auth.json');
+    await writeFile(file, '{}');
+    await chmod(file, 0o640);
+    const result = await restrictFilesToOwner('POL-003', [file, join(TEST_DIR, 'missing.json')]);
+    expect(result.message).toBe('Removed group/other access from 1 file(s)');
   });
 });
 

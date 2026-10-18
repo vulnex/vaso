@@ -288,34 +288,46 @@ export async function chmodFile(filePath: string, mode: number): Promise<void> {
  * left alone. Returns whether the mode changed.
  */
 export async function restrictToOwner(filePath: string): Promise<boolean> {
-  const { mode } = await regularMode(filePath);
-  if ((mode & 0o077) === 0) return false;
+  return (await restrictModeToOwner(filePath)) !== undefined;
+}
+
+/** restrictToOwner, saying what it changed: 'dir' / 'file', or undefined when already owner-only. */
+async function restrictModeToOwner(filePath: string): Promise<'file' | 'dir' | undefined> {
+  const { mode, dir } = await regularMode(filePath);
+  if ((mode & 0o077) === 0) return undefined;
   await chmodNoFollow(filePath, mode & 0o7700);
-  return true;
+  return dir ? 'dir' : 'file';
 }
 
 /** restrictToOwner over a list of files (missing ones skipped); the result of a fix(). */
 export async function restrictFilesToOwner(checkId: string, paths: Iterable<string>): Promise<FixResult> {
-  let fixed = 0;
+  let files = 0;
+  let dirs = 0;
   // One unsafe file (a symlink, a hard link, a path leaving the home) is
   // refused and named; the others are still fixed
   const refused: string[] = [];
   for (const path of paths) {
     try {
-      if (await restrictToOwner(path)) fixed++;
+      const changed = await restrictModeToOwner(path);
+      if (changed === 'file') files++;
+      else if (changed === 'dir') dirs++;
     } catch (err) {
       if (err instanceof UnsafeTargetError) refused.push(`${err.path} ${err.reason}`);
       // otherwise the file doesn't exist
     }
   }
+  const changed = [
+    ...(files > 0 ? [`${files} file(s)`] : []),
+    ...(dirs > 0 ? [`${dirs} director${dirs === 1 ? 'y' : 'ies'}`] : []),
+  ];
   const parts: string[] = [];
-  if (fixed > 0) parts.push(`Removed group/other access from ${fixed} file(s)`);
+  if (changed.length > 0) parts.push(`Removed group/other access from ${changed.join(' and ')}`);
   if (refused.length > 0) parts.push(`not changed: ${refused.join('; ')}`);
   return {
     checkId,
-    applied: fixed > 0,
+    applied: files + dirs > 0,
     message: parts.length > 0 ? parts.join(' — ') : 'Files are already owner-only',
-    ...(fixed === 0 && refused.length === 0 ? { alreadyDone: true } : {}),
+    ...(files + dirs === 0 && refused.length === 0 ? { alreadyDone: true } : {}),
   };
 }
 
