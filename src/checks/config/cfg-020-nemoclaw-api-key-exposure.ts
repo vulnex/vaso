@@ -80,8 +80,13 @@ export const cfg020 = defineCheck({
             hasLoosePerms && 'overly permissive file permissions',
           ].filter(Boolean).join(', ')}`,
       evidence,
-      // Loose perms alone, unreachable through parent dirs → informational
-      severity: !hasPlaintextKey && permEvidence?.mitigated ? 'info' : undefined,
+      // Critical only when other users can read the keys. A plaintext key in
+      // an owner-only file (NemoClaw's legacy store, written 0600 in a 0700
+      // dir) is at-rest exposure: migrate it. Loose perms alone, unreachable
+      // through parent dirs → informational.
+      severity: hasLoosePerms && !permEvidence?.mitigated
+        ? undefined
+        : hasPlaintextKey ? 'warning' : 'info',
       fixable: hasLoosePerms,
       fixDescription: hasLoosePerms ? 'Set credentials.json permissions to 600 (owner read/write only)' : undefined,
     });

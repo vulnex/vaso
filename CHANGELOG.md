@@ -79,6 +79,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
   - Roots are compared after resolving symlinks: `~/projects` pointing at `~` is now the critical whole-home grant it is.
   - An entry without a string `path` is judged as NanoClaw's working directory, the checkout.
   - Remote scans judge symlinked roots as written.
+- **CFG-020 is critical only when other users can read the NemoClaw key.** A plaintext key in `~/.nemoclaw/credentials.json` that is owner-only (NemoClaw writes it 0600 in a 0700 directory), or that sits behind a private directory, is now a warning to migrate it rather than a critical.
  One gap remains: a `~` in `OPENCLAW_STATE_DIR` combined with `OPENCLAW_HOME` is expanded against the OS home there.
 
 ## [1.3.1] - 2026-10-16

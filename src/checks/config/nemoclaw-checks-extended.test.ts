@@ -68,17 +68,36 @@ describe('CFG-020: NemoClaw API Key Exposure', () => {
     expect(result.message).toContain('No NemoClaw credentials file found');
   });
 
-  it('detects plaintext API key', async () => {
+  it('detects a plaintext API key — a warning in an owner-only file (NemoClaw writes it 0600 in a 0700 dir)', async () => {
     allowPath('/mock-home/.nemoclaw');
     mockReadFile.mockResolvedValue(JSON.stringify({
       NVIDIA_API_KEY: 'nvapi-FAKETESTKEYDONOTUSE00000000000000000000000000000000000000000',
     }));
+    mockStat.mockImplementation((async (p: string) => ({ mode: p.endsWith('.json') ? 0o100600 : 0o40700 })) as never);
     const result = await cfg020.run(makeContext());
     expect(result.passed).toBe(false);
-    expect(result.severity).toBe('critical');
+    expect(result.severity).toBe('warning');
     expect(result.message).toContain('plaintext API keys');
     expect(result.evidence).toBeDefined();
     expect(result.evidence!.some(e => e.detail!.includes('nvapi-FA'))).toBe(true);
+  });
+
+  it('is critical when other users can read the plaintext key', async () => {
+    allowPath('/mock-home/.nemoclaw');
+    mockReadFile.mockResolvedValue(JSON.stringify({
+      NVIDIA_API_KEY: 'nvapi-FAKETESTKEYDONOTUSE00000000000000000000000000000000000000000',
+    }));
+    mockStat.mockImplementation((async (p: string) => ({ mode: p.endsWith('.json') ? 0o100644 : 0o40755 })) as never);
+    const result = await cfg020.run(makeContext());
+    expect(result.severity).toBe('critical');
+    expect(result.message).toContain('overly permissive');
+  });
+
+  it('is a warning when the readable file sits in a private directory', async () => {
+    allowPath('/mock-home/.nemoclaw');
+    mockReadFile.mockResolvedValue(JSON.stringify({ NVIDIA_API_KEY: 'nvapi-FAKETESTKEYDONOTUSE000000000000000000000000' }));
+    mockStat.mockImplementation((async (p: string) => ({ mode: p.endsWith('.json') ? 0o100644 : p.endsWith('.nemoclaw') ? 0o40700 : 0o40755 })) as never);
+    expect((await cfg020.run(makeContext())).severity).toBe('warning');
   });
 
   it('detects overly permissive file permissions', async () => {
