@@ -87,6 +87,19 @@ describe('buildProbeManifest', () => {
     expect([...manifest.filePaths, ...manifest.globPatterns]).not.toContain('${OPENCLAW_STATE_DIR}/memory.json');
   });
 
+  it('collects a Grok Bot install moved with SAND_DATA_ROOT / SAND_USER_DATA_DIR (dt15 B1)', () => {
+    expect(manifest.filePaths).toEqual(expect.arrayContaining([
+      '${SAND_DATA_ROOT}/settings.json', '${SAND_USER_DATA_DIR}/sand-data/settings.json',
+      '${SAND_USER_DATA_DIR}/desktop-status.json',
+    ]));
+    expect(manifest.directoryListings).toEqual(expect.arrayContaining(['${SAND_DATA_ROOT}', '${SAND_USER_DATA_DIR}']));
+    // Secret stores and contact lists stay metadata-only under the relocation too
+    const secrets = ['${SAND_DATA_ROOT}/local-exec-daemon-credential.json', '${SAND_DATA_ROOT}/local-tool-standing-grants.v1.json',
+      '${SAND_USER_DATA_DIR}/sand-secrets.json', '${SAND_USER_DATA_DIR}/user-secrets.json'];
+    expect(manifest.metadataGlobPatterns).toEqual(expect.arrayContaining(secrets));
+    for (const p of secrets) expect([...manifest.filePaths, ...manifest.globPatterns]).not.toContain(p);
+  });
+
   it('keeps private session/conversation stores metadata-only', () => {
     expect(manifest.metadataGlobPatterns).toEqual(expect.arrayContaining([
       '~/.codex/sessions/*/*/*/rollout-*.jsonl',

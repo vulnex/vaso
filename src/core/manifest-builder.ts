@@ -18,6 +18,11 @@ export const RELOCATABLE_TREES: ReadonlyArray<readonly [prefix: string, relocate
   ['~/.ironclaw/reborn/', ['${IRONCLAW_REBORN_HOME}/']],
   // 0.x state root
   ['~/.ironclaw/', ['${IRONCLAW_BASE_DIR}/']],
+  // Grok Bot: SAND_DATA_ROOT (or SAND_USER_DATA_DIR/sand-data) moves the data
+  // root; SAND_USER_DATA_DIR replaces the Electron user-data dir
+  ['~/.grokbot/', ['${SAND_DATA_ROOT}/', '${SAND_USER_DATA_DIR}/sand-data/']],
+  ['~/.config/Grok Bot/', ['${SAND_USER_DATA_DIR}/', '${XDG_CONFIG_HOME}/Grok Bot/']],
+  ['~/Library/Application Support/Grok Bot/', ['${SAND_USER_DATA_DIR}/']],
   ['~/.local/share/', ['${XDG_DATA_HOME}/']],
   ['~/.local/state/', ['${XDG_STATE_HOME}/']],
   ['~/.config/', ['${XDG_CONFIG_HOME}/']],
@@ -41,9 +46,12 @@ export const RELOCATABLE_TREES: ReadonlyArray<readonly [prefix: string, relocate
 function withRelocatedTwins(paths: string[]): string[] {
   const out = [...paths];
   for (const p of paths) {
-    const tree = RELOCATABLE_TREES.find(([prefix]) => p.startsWith(prefix));
+    // The tree root itself too (a listing of `~/.grokbot` has no trailing slash)
+    const tree = RELOCATABLE_TREES.find(([prefix]) => p.startsWith(prefix) || `${p}/` === prefix);
     if (!tree) continue;
-    for (const relocated of tree[1]) out.push(relocated + p.slice(tree[0].length));
+    for (const relocated of tree[1]) {
+      out.push(p.startsWith(tree[0]) ? relocated + p.slice(tree[0].length) : relocated.replace(/\/$/, ''));
+    }
   }
   return out;
 }
