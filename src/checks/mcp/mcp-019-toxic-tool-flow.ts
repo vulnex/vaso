@@ -20,8 +20,17 @@ const SOURCE_PATTERNS = [
   /\/etc\/passwd/,
   /\.ssh\//,
   /\.env\b/,
-  /credentials/i,
+  // Reading stored credentials, not the word: a loader call
+  // (`loadCredentials()`, `fromIni()`, keytar's `getPassword()`). Tool
+  // input named `credentials` or asking the user for them
+  // (`elicitCredentialsIfSupported`) reads nothing stored.
+  /\b(?:(?:load|read|get|fetch|retrieve|resolve|find|lookup)\w*Credentials?\w*|getPassword|fromIni|fromSharedIniFile\w*)\s*\(/,
 ];
+
+/** A data string naming a credentials file (`~/.aws/credentials`, `credentials.json`, `.git-credentials`). */
+function credentialFile(s: string): boolean {
+  return /credentials/i.test(s) && (/[\\/]/.test(s) || /^\.|\.(?:json|ya?ml|toml|ini|db|txt|xml)$/i.test(s));
+}
 
 const SINK_PATTERNS = [
   /\bfetch\s*\(/,
@@ -55,16 +64,16 @@ interface ToolClassification {
  * SQL. A tool description warning "never paste your credentials" or naming
  * Slack is prose, not a source or a sink.
  */
-function handlerText(body: string): string {
+function handlerText(body: string): { text: string; data: string[] } {
   const { code, strings } = splitStrings(body);
   const data = strings.filter((s) => !/\s/.test(s) || SQL_TEXT.test(s));
-  return [code.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, ' '), ...data].join('\n');
+  return { text: [code.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, ' '), ...data].join('\n'), data };
 }
 
 function classifyToolHandler(body: string): { isSource: boolean; isSink: boolean; sourceCapabilities: string[]; sinkCapabilities: string[] } {
   const sourceCapabilities: string[] = [];
   const sinkCapabilities: string[] = [];
-  const handlerCode = handlerText(body);
+  const { text: handlerCode, data } = handlerText(body);
 
   for (const pattern of SOURCE_PATTERNS) {
     const match = pattern.exec(handlerCode);
@@ -72,6 +81,8 @@ function classifyToolHandler(body: string): { isSource: boolean; isSink: boolean
       sourceCapabilities.push(match[0]);
     }
   }
+  const file = data.find(credentialFile);
+  if (file) sourceCapabilities.push(file);
 
   for (const pattern of SINK_PATTERNS) {
     const match = pattern.exec(handlerCode);

@@ -1412,6 +1412,32 @@ describe('MCP-019: Toxic Tool Flow', () => {
     }
   });
 
+  it('credentials taken as tool input or asked from the user are not a source (@browserstack/mcp-server 2.2.3 createLCASteps shape, dt17)', async () => {
+    // Reconstruction (the package is AGPL) of dist/tools/testmanagement.js: the
+    // handler checks args.credentials and elicits missing ones from the user
+    const forecast = `server.tool("listBuilds", "List recent builds", { project: z.string() }, async (args) => {
+      const r = await fetch("https://api.example-ci.com/builds?project=" + encodeURIComponent(args.project));
+      return { content: [{ type: "text", text: String((await r.json()).length) }] };
+    });`;
+    const handler = (extra: string) => `server.tool("createLCASteps", "Create login steps for a test case", { credentials: z.object({}) }, async (args) => {
+      let effectiveArgs = args;
+      if (args.requires_authentication && (!args.credentials?.username || !args.credentials?.password)) {
+        const creds = await elicitCredentialsIfSupported(server, { username: args.credentials?.username, password: args.credentials?.password },
+          [{ key: "username", title: "Login username" }], \`Enter the login credentials for test case \${args.test_case_identifier}.\`);
+        if (creds.username && creds.password) effectiveArgs = { ...args, credentials: { username: creds.username, password: creds.password } };
+      }
+      ${extra}
+      return await createLCASteps(effectiveArgs);
+    });\n${forecast}`;
+    const ok = await mcp019.run(makeContext({ mcpServerSources: [{ serverName: 'bs', sourceCode: handler('') }] }));
+    expect(ok.passed).toBe(true);
+    // true positive: the same handler reading a stored credentials file or store
+    for (const extra of ['const saved = readText(".git-credentials");', 'const saved = await getCredentials(args.profile);']) {
+      const r = await mcp019.run(makeContext({ mcpServerSources: [{ serverName: 'bs', sourceCode: handler(extra) }] }));
+      expect(r.passed, extra).toBe(false);
+    }
+  });
+
   it('passes when server has only source tools', async () => {
     const sourceOnly: MCPServerSource[] = [{
       serverName: 'reader-server',
