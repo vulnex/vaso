@@ -1,6 +1,6 @@
 {
   "agent": "grok-bot",
-  "source": "Grok Bot 0.71.2 without OS secure storage: the app writes the local-exec credential unsealed and secrets as plaintext:v1: (sealLocalExecFile / safeStorage fallback in the 0.71.2 app.asar). Remote scans never read secret stores",
+  "source": "Grok Bot 0.71.2 without OS secure storage: the app writes the local-exec credential unsealed (sealLocalExecFile fallback in the 0.71.2 app.asar); plaintext:v1: is the legacy secret format it still reads. Remote scans never read secret stores",
   "fail": {
     "GB-006": "critical"
   },

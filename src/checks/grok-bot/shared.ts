@@ -29,8 +29,33 @@ export function effectivePermission(choice: unknown, ceiling: unknown): LocalPer
   return cap && RANK[cap] < RANK[c] ? cap : c;
 }
 
+/**
+ * settings.json as the app sees it. The app validates the whole file against
+ * its schema and falls back to defaults ("ask", egress off, Messages off) when
+ * any field fails — so a file it rejects configures nothing. Checked here for
+ * the version and every key these checks read.
+ */
 export function settingsConfig(ctx: ScanContext): ParsedConfig | undefined {
-  return ctx.configs.find(c => basename(c.filePath) === DATA_FILES.settings);
+  const config = ctx.configs.find(c => basename(c.filePath) === DATA_FILES.settings);
+  return config && acceptedByApp(config.data) ? config : undefined;
+}
+
+const PERMISSION_KEYS = ['localToolPermission', 'localToolPermissionCeiling'];
+const BOOLEAN_KEYS = ['egressTunnelEnabled', 'localEgressAllowed', 'messagesEnabled', 'webauthnProxyEnabled', 'autoUpdateWhenIdle'];
+
+function validBlock(data: Record<string, unknown>): boolean {
+  if (PERMISSION_KEYS.some(k => data[k] !== undefined && asPermission(data[k]) === undefined)) return false;
+  if (BOOLEAN_KEYS.some(k => data[k] !== undefined && typeof data[k] !== 'boolean')) return false;
+  return true;
+}
+
+function acceptedByApp(data: Record<string, unknown>): boolean {
+  // The app always writes version 1; a missing one is treated as current
+  if ((data.version !== undefined && data.version !== 1) || !validBlock(data)) return false;
+  const scopes = data.accountScopes;
+  if (scopes === undefined) return true;
+  if (!isRecord(scopes)) return false;
+  return Object.values(scopes).every(b => isRecord(b) && validBlock(b));
 }
 
 export interface AccountBlock {
@@ -82,10 +107,9 @@ export function dataFile(ctx: ScanContext, name: string): string {
   return join(dataRoot(ctx), name);
 }
 
-const TRUTHY = new Set(['1', 'true', 'yes', 'on']);
-
+/** The app turns these switches on with exactly "1" (not true/yes/on). */
 export function envFlag(ctx: ScanContext, name: string): boolean {
-  return TRUTHY.has((ctx.fs.getEnv(name) ?? '').trim().toLowerCase());
+  return ctx.fs.getEnv(name) === '1';
 }
 
 /** Environment overrides only describe the scanning user's own session. */

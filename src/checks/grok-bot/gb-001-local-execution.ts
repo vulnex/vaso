@@ -16,16 +16,22 @@ export const gb001 = defineCheck({
     if (!config) return h.passed('No Grok Bot settings.json — local execution defaults to "ask"');
 
     const critical: Evidence[] = [];
+    const warning: Evidence[] = [];
     const info: Evidence[] = [];
     for (const block of accountBlocks(config)) {
       const choice = block.data.localToolPermission;
       const ceiling = block.data.localToolPermissionCeiling;
       if (asPermission(choice) !== 'always') continue;
       if (effectivePermission(choice, ceiling) === 'always') {
-        critical.push({
+        // The exec daemon applies the active account's setting to every
+        // connected account; a parked account's takes over once switched to
+        const active = block.segments.length === 0;
+        (active ? critical : warning).push({
           file: config.filePath,
           snippet: `${block.path}localToolPermission: "always"${ceiling === undefined ? '' : `, localToolPermissionCeiling: "${String(ceiling)}"`}`,
-          detail: `${block.label}: the cloud agent runs commands and reads/writes files on this computer without approval — unsandboxed, rooted at $HOME`,
+          detail: active
+            ? `${block.label}: the cloud agent runs commands and reads/writes files on this computer without approval — unsandboxed, rooted at $HOME`
+            : `${block.label}: takes effect when you switch to this account — then the cloud agent runs commands here without approval`,
         });
       } else {
         info.push({
@@ -51,11 +57,11 @@ export const gb001 = defineCheck({
       }
     }
 
-    return h.fromEvidence([...critical, ...info], {
+    return h.fromEvidence([...critical, ...warning, ...info], {
       passed: 'Grok Bot asks before running anything on this computer',
       failed: (n) => `Found ${n} Grok Bot local-execution setting(s) that skip approval`,
-      severity: critical.length > 0 || info.length === 0 ? undefined : 'info',
-      fixable: critical.length > 0,
+      severity: critical.length > 0 ? undefined : warning.length > 0 ? 'warning' : 'info',
+      fixable: critical.length + warning.length > 0,
       fixDescription: 'In Grok Bot set Settings → General → Bot → Execution on Local Computer to "Ask every time" (or "Never allow"); vaso fix writes localToolPermission: "ask" — quit Grok Bot first, since the running app rewrites settings.json',
     });
   },

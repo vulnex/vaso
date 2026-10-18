@@ -7,6 +7,20 @@ interface Grant {
   scope?: unknown;
   action?: unknown;
   accountScope?: unknown;
+  grantedAtMs?: unknown;
+}
+
+// Global actions (commands, files, input, AI-tool setup) follow
+// localToolPermission alone — the daemon never consults a grant for them
+const GLOBAL_ACTIONS = new Set(['run-command', 'send-input', 'read-file', 'list-directory', 'write-file', 'read-ai-tool-setup']);
+const MESSAGES_ACTIONS = new Set(['read-messages', 'send-imessage']);
+
+/** A grant the daemon would honour: well-formed, not a global action, Messages ones only with Messages on. */
+function honoured(g: Grant, messagesEnabled: boolean): boolean {
+  if (typeof g.action !== 'string' || typeof g.accountScope !== 'string' || typeof g.grantedAtMs !== 'number') return false;
+  if (g.scope !== 'action' && g.scope !== 'subject') return false;
+  if (GLOBAL_ACTIONS.has(g.action)) return false;
+  return messagesEnabled || !MESSAGES_ACTIONS.has(g.action);
 }
 
 /**
@@ -28,18 +42,21 @@ export const gb004 = defineCheck({
   async run(ctx, h) {
     const file = dataFile(ctx, DATA_FILES.standingGrants);
     if (!(await ctx.fs.access(file))) return h.passed('No Grok Bot standing approvals');
-    let grants: Grant[];
+    let data: { version?: unknown; grants?: unknown };
     try {
-      const data = JSON.parse(await ctx.fs.readFile(file)) as { grants?: unknown };
-      grants = Array.isArray(data.grants) ? data.grants.filter((g): g is Grant => !!g && typeof g === 'object') : [];
+      data = JSON.parse(await ctx.fs.readFile(file)) as { version?: unknown; grants?: unknown };
     } catch {
       // Remote scans never collect it (recipients are contacts)
       return h.passed('Grok Bot standing approvals present but not readable — content not inspected');
     }
-    if (grants.length === 0) return h.passed('No Grok Bot standing approvals');
+    // The daemon ignores a file of another version entirely
+    if (data?.version !== 1) return h.passed('Grok Bot standing approvals file is not version 1 — the app ignores it');
+    const settings = settingsConfig(ctx)?.data ?? {};
+    const all = Array.isArray(data.grants) ? data.grants.filter((g): g is Grant => !!g && typeof g === 'object') : [];
+    const grants = all.filter(g => honoured(g, settings.messagesEnabled === true));
+    if (grants.length === 0) return h.passed('No Grok Bot standing approvals the app honours');
 
     // Grants are honoured only when local execution isn't capped or refused
-    const settings = settingsConfig(ctx)?.data ?? {};
     const ceiling = asPermission(settings.localToolPermissionCeiling);
     const inactive = settings.localToolPermission === 'never' || (ceiling !== undefined && ceiling !== 'always');
 

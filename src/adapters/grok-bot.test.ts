@@ -71,6 +71,19 @@ describe('Grok Bot adapter', () => {
     expect(grokBotHome(`${HOME}/.cursor/sand`, fs)).toBe(HOME);
   });
 
+  it('keeps the legacy root while a stray ~/.grokbot has no migration marker (dt15 Grok Bot B7)', async () => {
+    const stray = makeFs({ [`${HOME}/.grokbot/notes.txt`]: 'x', [`${HOME}/.cursor/sand/settings.json`]: '{}' });
+    expect(await grokBotDataRoot(HOME, stray)).toBe(`${HOME}/.cursor/sand`);
+    const migrated = makeFs({ [`${HOME}/.grokbot/.grokbot-data-root-v1`]: '{"version":1}', [`${HOME}/.cursor/sand/settings.json`]: '{}' });
+    expect(await grokBotDataRoot(HOME, migrated)).toBe(`${HOME}/.grokbot`);
+  });
+
+  it('a relocated root named .grokbot outside $HOME still belongs to the scanning user (dt15 Grok Bot B1)', () => {
+    const fs = makeFs({}, { env: { SAND_DATA_ROOT: '/data/.grokbot' } });
+    expect(grokBotHome('/data/.grokbot', fs)).toBe(HOME);
+    expect(grokBotHome('/home/other/.grokbot', fs)).toBe('/home/other');
+  });
+
   it('uses per-OS user-data dirs', () => {
     expect(grokBotUserDataDir(HOME, makeFs({}, { platform: 'darwin' }))).toBe(`${HOME}/Library/Application Support/Grok Bot`);
     expect(grokBotUserDataDir(HOME, makeFs({}))).toBe(`${HOME}/.config/Grok Bot`);

@@ -89,6 +89,16 @@ describe('GB-001 local execution always allowed', () => {
     expect(r.evidence![1].snippet).toContain(`accountScopes.${'b'.repeat(64)}.localToolPermission`);
   });
 
+  it('is a warning for a parked account only — it takes effect after switching (dt15 Grok Bot B4)', async () => {
+    const r = await check('GB-001').run(ctx([cfg({ localToolPermission: 'ask', accountScopes: { ['b'.repeat(64)]: { localToolPermission: 'always' } } })]));
+    expect(r).toMatchObject({ passed: false, severity: 'warning', fixable: true });
+  });
+
+  it('evaluates the defaults when the app would reject settings.json (dt15 Grok Bot B8)', async () => {
+    expect((await check('GB-001').run(ctx([cfg({ version: 2, localToolPermission: 'always' })]))).passed).toBe(true);
+    expect((await check('GB-001').run(ctx([cfg({ localToolPermission: 'always', egressTunnelEnabled: 'yes' })]))).passed).toBe(true);
+  });
+
   it('is info when an admin ceiling caps it, and for other machines set to always', async () => {
     const r = await check('GB-001').run(ctx([cfg({
       localToolPermission: 'always', localToolPermissionCeiling: 'ask',
@@ -169,14 +179,27 @@ describe('GB-004 standing approvals', () => {
   ] });
 
   it('warns on an action-wide grant and never quotes recipients', async () => {
-    const r = await check('GB-004').run(ctx([], makeFs({ files: { [GRANTS]: grants } })));
+    const r = await check('GB-004').run(ctx([cfg({ messagesEnabled: true })], makeFs({ files: { [GRANTS]: grants } })));
     expect(r).toMatchObject({ passed: false, severity: 'warning' });
     expect(JSON.stringify(r.evidence)).not.toMatch(/Alice|15550100/);
   });
 
   it('downgrades when local execution is capped or refused', async () => {
-    const r = await check('GB-004').run(ctx([cfg({ localToolPermissionCeiling: 'ask' })], makeFs({ files: { [GRANTS]: grants } })));
+    const r = await check('GB-004').run(ctx([cfg({ messagesEnabled: true, localToolPermissionCeiling: 'ask' })], makeFs({ files: { [GRANTS]: grants } })));
     expect(r.severity).toBe('info');
+  });
+
+  it('ignores grants the daemon never honours (dt15 Grok Bot B5)', async () => {
+    const ignored = JSON.stringify({ version: 1, grants: [
+      { scope: 'action', action: 'send-imessage', accountScope: 'x', grantedAtMs: 1 }, // Messages off
+      { scope: 'action', action: 'run-command', accountScope: 'x', grantedAtMs: 1 }, // global action
+      { scope: 'action', action: 'use-app' }, // malformed: no accountScope/grantedAtMs
+    ] });
+    expect((await check('GB-004').run(ctx([cfg({ messagesEnabled: false })], makeFs({ files: { [GRANTS]: ignored } })))).passed).toBe(true);
+    const v2 = JSON.stringify({ version: 2, grants: [{ scope: 'action', action: 'use-app', accountScope: 'x', grantedAtMs: 1 }] });
+    expect((await check('GB-004').run(ctx([], makeFs({ files: { [GRANTS]: v2 } })))).passed).toBe(true);
+    const app = JSON.stringify({ version: 1, grants: [{ scope: 'action', action: 'use-app', accountScope: 'x', grantedAtMs: 1 }] });
+    expect(await check('GB-004').run(ctx([], makeFs({ files: { [GRANTS]: app } })))).toMatchObject({ passed: false, severity: 'warning' });
   });
 
   it('passes when the file is absent, and says so when content was not collected', async () => {
@@ -191,8 +214,14 @@ describe('GB-005 egress tunnel', () => {
   it('passes by default, warns when on, critical with private targets', async () => {
     expect((await check('GB-005').run(ctx([cfg({ egressTunnelEnabled: false })]))).passed).toBe(true);
     expect(await check('GB-005').run(ctx([cfg({ egressTunnelEnabled: true })]))).toMatchObject({ passed: false, severity: 'warning' });
-    const priv = await check('GB-005').run(ctx([cfg({ egressTunnelEnabled: true })], makeFs({ env: { SAND_EGRESS_TUNNEL_ALLOW_PRIVATE: '1' } })));
-    expect(priv.severity).toBe('critical');
+    // The settings tunnel never reaches private targets — the flag alone changes nothing (dt15 Grok Bot B2)
+    const flagOnly = await check('GB-005').run(ctx([cfg({ egressTunnelEnabled: true })], makeFs({ env: { SAND_EGRESS_TUNNEL_ALLOW_PRIVATE: '1' } })));
+    expect(flagOnly.severity).toBe('warning');
+    const envTunnel = { SAND_EGRESS_TUNNEL_URL: 'https://tunnel.example', SAND_EGRESS_TUNNEL_ALLOW_PRIVATE: '1' };
+    expect((await check('GB-005').run(ctx([], makeFs({ env: envTunnel })))).severity).toBe('critical');
+    // Only exactly "1" turns it on (dt15 Grok Bot B3)
+    const yes = await check('GB-005').run(ctx([], makeFs({ env: { ...envTunnel, SAND_EGRESS_TUNNEL_ALLOW_PRIVATE: 'yes' } })));
+    expect(yes).toMatchObject({ passed: false, severity: 'warning' });
   });
 
   it('is info when team policy blocks local egress', async () => {
@@ -230,6 +259,15 @@ describe('GB-006 credentials without keyring protection', () => {
     expect(await check('GB-006').run(ctx([], fs))).toMatchObject({ passed: false, severity: 'warning' });
     const mac = makeFs({ platform: 'darwin', files: { [`${HOME}/Library/Application Support/Grok Bot/user-secrets.json`]: JSON.stringify({ version: 1, secrets: { A: 'djEwAAAA' } }) } });
     expect((await check('GB-006').run(ctx([], mac))).passed).toBe(true);
+  });
+
+  it('finds raw tokens inside a cursor-accounts JSON document (dt15 Grok Bot B6)', async () => {
+    const accounts = JSON.stringify({ active: 'a', accounts: { a: { 'cursor-access-token': 'eyFAKEACCESS', 'cursor-refresh-token': 'djExZW5j', 'cursor-account-profile': '{}' } } });
+    const fs = makeFs({ files: { [SECRETS]: JSON.stringify({ version: 1, 'cursor-machine-id': 'djExAAAA', 'cursor-accounts': accounts }) } });
+    const r = await check('GB-006').run(ctx([], fs));
+    expect(r).toMatchObject({ passed: false, severity: 'critical' });
+    expect(r.evidence![0].snippet).toContain('1 value(s)');
+    expect(JSON.stringify(r.evidence)).not.toContain('eyFAKEACCESS');
   });
 
   it('notes stores it could not read (remote scans)', async () => {
@@ -286,6 +324,7 @@ describe('GB-009 / GB-010 / GB-011', () => {
     const off = await check('GB-011').run(ctx([], makeFs({ files: { [apt]: `${enabled}Enabled: no\n` } })));
     expect(off).toMatchObject({ passed: false, severity: 'warning' });
     expect(await check('GB-011').run(ctx([], makeFs({ env: { SAND_DISABLE_UPDATES: '1' } })))).toMatchObject({ passed: false, severity: 'warning' });
+    expect((await check('GB-011').run(ctx([], makeFs({ env: { SAND_DISABLE_UPDATES: 'true' } }))))).toMatchObject({ passed: true });
     expect(await check('GB-011').run(ctx([cfg({ updateTrackOverride: 'dogfood' })]))).toMatchObject({ passed: false, severity: 'info' });
   });
 });

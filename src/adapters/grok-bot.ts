@@ -58,6 +58,8 @@ export const USER_DATA_FILES = {
 export const GROK_BOT_ENV = [
   'SAND_DATA_ROOT', 'SAND_USER_DATA_DIR', 'SAND_LOCAL_EXEC_ROOT',
   'SAND_DISABLE_UPDATES', 'SAND_EGRESS_TUNNEL_ALLOW_PRIVATE',
+  // Location only — the tunnel's bearer is never collected
+  'SAND_EGRESS_TUNNEL_URL',
 ];
 
 function envDir(fs: FSProvider, name: string): string | undefined {
@@ -83,20 +85,28 @@ export function grokBotUserDataDir(home: string, fs: FSProvider): string {
   return join(xdg || join(home, '.config'), USER_DATA_NAME);
 }
 
+/** The scanning user's env-relocated data root, if any. */
+function relocatedDataRoot(fs: FSProvider): string | undefined {
+  const root = envDir(fs, 'SAND_DATA_ROOT');
+  if (root) return root;
+  const userData = envDir(fs, 'SAND_USER_DATA_DIR');
+  return userData ? join(userData, 'sand-data') : undefined;
+}
+
+// Written once the app has settled on ~/.grokbot (after migrating ~/.cursor/sand)
+const DATA_ROOT_MARKER = '.grokbot-data-root-v1';
+
 /**
  * The data root as the app resolves it: SAND_DATA_ROOT (absolute), then
  * <SAND_USER_DATA_DIR>/sand-data, then ~/.grokbot — or the pre-rename
- * ~/.cursor/sand when only that exists.
+ * ~/.cursor/sand while that holds settings and ~/.grokbot carries no
+ * migration marker (a stray ~/.grokbot doesn't move the app).
  */
 export async function grokBotDataRoot(home: string, fs: FSProvider): Promise<string> {
-  if (ownSession(home, fs)) {
-    const root = envDir(fs, 'SAND_DATA_ROOT');
-    if (root) return root;
-    const userData = envDir(fs, 'SAND_USER_DATA_DIR');
-    if (userData) return join(userData, 'sand-data');
-  }
+  const relocated = ownSession(home, fs) ? relocatedDataRoot(fs) : undefined;
+  if (relocated) return relocated;
   const current = join(home, GROK_BOT_DATA_DIR);
-  if (await fs.access(current)) return current;
+  if (await fs.access(join(current, DATA_ROOT_MARKER))) return current;
   const legacy = join(home, LEGACY_DATA_DIR);
   if (await fs.access(join(legacy, DATA_FILES.settings))) return legacy;
   return current;
@@ -104,6 +114,9 @@ export async function grokBotDataRoot(home: string, fs: FSProvider): Promise<str
 
 /** Home directory an installation belongs to, from its data root. */
 export function grokBotHome(installDir: string, fs: FSProvider): string {
+  // A relocated root may itself be named .grokbot (/data/.grokbot) — it is
+  // still the scanning user's
+  if (relocatedDataRoot(fs) === installDir) return fs.homedir();
   if (basename(installDir) === GROK_BOT_DATA_DIR) return dirname(installDir);
   if (installDir.endsWith(`${'/'}${LEGACY_DATA_DIR.replace(/\\/g, '/')}`)) return dirname(dirname(installDir));
   return fs.homedir();

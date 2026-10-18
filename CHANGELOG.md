@@ -13,8 +13,8 @@ This project adheres to [Semantic Versioning](https://semver.org/).
   - **GB-002:** connector tools set to `always_allow`.
   - **GB-003:** auto-review turned off or widened by custom allow rules.
   - **GB-004:** standing "Always allow" grants. Recipients are never quoted.
-  - **GB-005:** cloud traffic routed through this computer. Critical with `SAND_EGRESS_TUNNEL_ALLOW_PRIVATE=1`.
-  - **GB-006:** local-exec credentials stored unsealed, or secrets stored as `plaintext:v1:` or under Chromium's fixed Linux key. Values never appear in reports.
+  - **GB-005:** cloud traffic routed through this computer (settings or an environment-configured tunnel). Critical when an environment-configured tunnel also sets `SAND_EGRESS_TUNNEL_ALLOW_PRIVATE=1`.
+  - **GB-006:** local-exec credentials stored unsealed (the app writes them that way without OS secure storage), legacy `plaintext:v1:` values, account tokens kept as raw JSON, or secrets under Chromium's fixed Linux key. Values never appear in reports.
   - **GB-007:** credential-store permissions (fixable).
   - **GB-008:** runtime data readable by others, such as the umask-created daemon log and cached transcripts.
   - **GB-009:** Messages access enabled.
