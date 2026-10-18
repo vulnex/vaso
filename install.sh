@@ -148,14 +148,32 @@ resolve_version() {
   warn "No releases or tags found; falling back to ${VERSION} (untagged build)"
 }
 
+# Download the release tarball into $TARBALL. Returns 0 when downloaded,
+# 2 when the release has no tarball asset (HTTP 404), 1 on any other failure
+# (network, proxy, server error) — only "no tarball" may fall back to git.
+download_tarball() {
+  local url="$1"
+  TARBALL_DIR=$(mktemp -d "${TMPDIR:-/tmp}/vaso-install.XXXXXX")
+  TARBALL="$TARBALL_DIR/$(basename "$url")"
+  TARBALL_HTTP=$(curl -sSL --retry 2 -o "$TARBALL" -w '%{http_code}' "$url" 2>/dev/null) || true
+  case "${TARBALL_HTTP:-000}" in
+    200) return 0 ;;
+    404) return 2 ;;
+    *) return 1 ;;
+  esac
+}
+
 install_vaso() {
   local ver_no_v="${VERSION#v}"
   local tarball_url="https://github.com/${REPO}/releases/download/${VERSION}/vaso-${ver_no_v}.tgz"
   local git_spec="github:${REPO}#${VERSION}"
 
   # Detect if we need sudo for global npm install
+  # `npm prefix -g`, not `npm config get prefix`: npm 12 refuses to print a
+  # prefix set through NPM_CONFIG_PREFIX ("protected"), which ended the script
+  # here with no message
   local npm_prefix
-  npm_prefix=$(npm config get prefix 2>/dev/null)
+  npm_prefix=$(npm prefix -g 2>/dev/null || true)
   local NPM=(npm)
   # npm creates <prefix>/lib on first install, so a missing lib dir in a
   # writable prefix doesn't need sudo.
@@ -170,15 +188,47 @@ install_vaso() {
   # is broken on npm 11+ for VASO: the global git-dependency install path
   # mishandles the package (ignores files[], leaves an unusable install), and
   # a source build at install time needs a toolchain the checkout lacks. The
-  # prebuilt tarball asset installs cleanly with no build step. Fall back to the
-  # git ref only when there's no release tarball (e.g. the `main` fallback).
+  # prebuilt tarball installs cleanly with no build step. It is downloaded
+  # first and installed as a local file: npm 12 refuses remote tarball URLs by
+  # default (allow-remote=none) but not files. Fall back to the git ref only
+  # when the release has no tarball (e.g. the `main` fallback) — a tarball
+  # that exists but fails to download or install is an error, not a reason to
+  # try a worse install path.
   if [ "$VERSION" != "$FALLBACK_REF" ]; then
-    info "Installing VASO from release tarball: ${tarball_url}"
-    echo ""
-    if "${NPM[@]}" install -g "$tarball_url"; then
+    info "Downloading VASO release tarball: ${tarball_url}"
+    local rc=0
+    download_tarball "$tarball_url" || rc=$?
+    if [ "$rc" -eq 0 ]; then
+      echo ""
+      if ! "${NPM[@]}" install -g "$TARBALL"; then
+        rm -rf "$TARBALL_DIR"
+        fail "npm could not install the release tarball (see npm's error above)."
+      fi
+      rm -rf "$TARBALL_DIR"
       return
     fi
-    warn "Tarball install failed; falling back to git install (${git_spec})."
+    rm -rf "$TARBALL_DIR"
+    if [ "$rc" -ne 2 ]; then
+      fail "Could not download ${tarball_url} (HTTP ${TARBALL_HTTP:-000}). Check your network or proxy and re-run."
+    fi
+    warn "Release ${VERSION} has no tarball asset; falling back to git install (${git_spec})."
+  fi
+
+  # npm 12 refuses git installs unless allowed (allow-git defaults to none)
+  local npm_major allow_git
+  npm_major=$(npm --version 2>/dev/null | cut -d. -f1)
+  allow_git=$(npm config get allow-git 2>/dev/null || true)
+  if [ "${npm_major:-0}" -ge 12 ] 2>/dev/null && [ "$allow_git" = "none" ]; then
+    echo ""
+    warn "npm ${npm_major} does not install packages from git by default (allow-git=none),"
+    warn "and ${VERSION} has no release tarball to install instead."
+    echo ""
+    info "Install a published release instead:"
+    echo "    curl -fsSL https://raw.githubusercontent.com/${REPO}/main/install.sh | VASO_VERSION=<release tag> bash"
+    info "Or allow git for this one install:"
+    echo "    npm install -g --allow-git=all ${git_spec}"
+    echo ""
+    fail "Not installed."
   fi
 
   info "Installing VASO from ${git_spec}..."
@@ -191,7 +241,7 @@ verify_install() {
   if ! command -v vaso &>/dev/null; then
     # npm bin might not be in PATH
     local npm_bin
-    npm_bin=$(npm config get prefix 2>/dev/null)/bin
+    npm_bin=$(npm prefix -g 2>/dev/null || true)/bin
     if [ -x "$npm_bin/vaso" ]; then
       warn "vaso installed to ${npm_bin}/vaso but it's not in your PATH."
       echo ""

@@ -63,11 +63,15 @@ runs:
         REF="${{ inputs.version }}"
         # Release tags install the prebuilt tarball asset; `npm install -g
         # github:...#<tag>` is broken on npm 11+ (global git-dependency install
-        # mishandles the package). Non-tag refs (branch/SHA) fall back to git.
+        # mishandles the package). It is downloaded first and installed as a
+        # file: npm 12 refuses tarball URLs by default (allow-remote=none).
+        # Non-tag refs (branch/SHA) fall back to git.
         if [[ "$REF" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
           URL="https://github.com/vulnex/vaso/releases/download/${REF}/vaso-${REF#v}.tgz"
           echo "Installing VASO release tarball: $URL"
-          npm install -g "$URL"
+          TGZ="${RUNNER_TEMP:-/tmp}/vaso-${REF#v}.tgz"
+          curl -fsSL --retry 2 -o "$TGZ" "$URL"
+          npm install -g "$TGZ"
         else
           echo "Installing VASO from git ref: $REF"
           npm install -g "github:vulnex/vaso#${REF}"

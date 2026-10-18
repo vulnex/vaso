@@ -22,6 +22,9 @@ curl -fsSL https://raw.githubusercontent.com/vulnex/vaso/main/install.sh | bash
 
 # Or install the prebuilt release tarball directly with npm
 npm install -g https://github.com/vulnex/vaso/releases/download/v1.3.1/vaso-1.3.1.tgz
+
+# npm 12 refuses tarball URLs by default (allow-remote=none): download it first
+curl -fLO https://github.com/vulnex/vaso/releases/download/v1.3.1/vaso-1.3.1.tgz && npm install -g ./vaso-1.3.1.tgz
 ```
 
 Requires Node.js 20+.
