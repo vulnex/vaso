@@ -4,7 +4,7 @@ import type { AgentInstallation, GatewayInfo, ParsedConfig } from '../core/types
 import type { CommandForEach, ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
-import { loadConfig } from '../core/config-loader.js';
+import { loadConfig, recordLoadError } from '../core/config-loader.js';
 import { pathPresent } from './load-if-present.js';
 import { getUserHomeDirs } from './openclaw.js';
 import { discoverCliInstalls } from './cli-installs.js';
@@ -97,6 +97,17 @@ async function gatewayConfigs(paths: OpenShellPaths, fs: FSProvider): Promise<Pa
   const redirected = typeof env?.data.OPENSHELL_GATEWAY_CONFIG === 'string' && env.data.OPENSHELL_GATEWAY_CONFIG.trim()
     ? expandHome(env.data.OPENSHELL_GATEWAY_CONFIG.trim(), paths.home)
     : undefined;
+  // The probe collects the TOML only at locations it knows (the defaults and
+  // NemoClaw's layout); a redirect elsewhere can't be known before the scan.
+  // Say so instead of judging the gateway by a TOML it doesn't load.
+  if (redirected && fs.kind === 'snapshot' && !(await fs.access(redirected))) {
+    recordLoadError({
+      filePath: redirected,
+      stage: 'read',
+      message: `gateway.env sets OPENSHELL_GATEWAY_CONFIG to this file, which the remote probe does not collect — the gateway TOML was not checked; scan the host locally`,
+    });
+    return configs;
+  }
   const toml = redirected && (await fs.access(redirected))
     ? redirected
     : await firstExisting([

@@ -80,6 +80,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
   - An entry without a string `path` is judged as NanoClaw's working directory, the checkout.
   - Remote scans judge symlinked roots as written.
 - **`PICOCLAW_HOME` / `PICOCLAW_CONFIG` are taken literally, as PicoClaw 0.3.1 takes them.** PicoClaw doesn't expand `~` there (`PICOCLAW_HOME=~/ph` makes `picoclaw status` look for `./~/ph/config.json`), so VASO no longer scans `$HOME/ph` as the live config. The default workspace derived from the home is still `~`-expanded, as PicoClaw expands every workspace path.
+- **A remote OpenShell scan says when it couldn't check the gateway TOML.** `gateway.env` can point `OPENSHELL_GATEWAY_CONFIG` at any file. Outside the default and NemoClaw locations, the probe can't know that path before the scan. The snapshot scan used to judge the gateway by a default `gateway.toml` it doesn't load, or by none, and pass silently. It now reports CONFIG-LOAD ("not collected by the remote probe — scan the host locally") and judges by `gateway.env` alone.
 - **CFG-020 is critical only when other users can read the NemoClaw key.** A plaintext key in `~/.nemoclaw/credentials.json` that is owner-only (NemoClaw writes it 0600 in a 0700 directory), or that sits behind a private directory, is now a warning to migrate it rather than a critical.
  One gap remains: a `~` in `OPENCLAW_STATE_DIR` combined with `OPENCLAW_HOME` is expanded against the OS home there.
 

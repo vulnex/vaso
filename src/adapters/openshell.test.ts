@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import type { FSProvider } from '../core/fs-provider.js';
 import type { ParsedConfig } from '../core/types.js';
 import { openshellAdapter, resolveGateway } from './openshell.js';
+import { captureConfigLoadErrors } from '../core/config-loader.js';
 
 const HOME = '/home/tester';
 
@@ -54,6 +55,23 @@ describe('OpenShell adapter', () => {
     const [inst] = await openshellAdapter.detect({ fs });
     expect(inst.configFiles.map(c => c.filePath)).toEqual([`${HOME}/.config/openshell/gateway.env`, `${nc}/openshell-gateway.toml`]);
     expect(inst.gateway).toMatchObject({ host: '127.0.0.1', port: 8080 });
+  });
+
+  it('on a snapshot, says a redirected TOML outside the collected layout was not checked (no silent fallback)', async () => {
+    const files = {
+      [`${HOME}/.config/openshell/gateway.env`]: `OPENSHELL_GATEWAY_CONFIG=~/gw/custom.toml\n`,
+      // a default TOML the gateway does not load must not stand in for it
+      [`${HOME}/.config/openshell/gateway.toml`]: '[openshell]\nversion = 2\n\n[openshell.gateway]\nbind_address = "127.0.0.1:9000"\n',
+    };
+    const snap = Object.assign(makeFs(files), { kind: 'snapshot' as const });
+    const { result, loadErrors } = await captureConfigLoadErrors(() => openshellAdapter.detect({ fs: snap }));
+    expect(result[0].configFiles.map(c => c.filePath)).toEqual([`${HOME}/.config/openshell/gateway.env`]);
+    expect(loadErrors).toEqual([expect.objectContaining({ filePath: `${HOME}/gw/custom.toml`, stage: 'read', message: expect.stringMatching(/remote probe does not collect/) })]);
+
+    // collected (or a local scan): read as before
+    const local = makeFs({ ...files, [`${HOME}/gw/custom.toml`]: '[openshell]\nversion = 2\n\n[openshell.gateway]\nbind_address = "0.0.0.0:9000"\n' });
+    const [inst] = await openshellAdapter.detect({ fs: local });
+    expect(inst.gateway).toMatchObject({ host: '0.0.0.0' });
   });
 
   it('uses the Homebrew prefix config on macOS when there is no user TOML', async () => {
