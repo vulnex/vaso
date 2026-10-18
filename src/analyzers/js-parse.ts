@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { parse } from '@babel/parser';
+import { parse, type ParserOptions } from '@babel/parser';
 import { VISITOR_KEYS } from '@babel/types';
 
 export type JsAst = ReturnType<typeof parse>;
@@ -61,10 +61,10 @@ const errorBudget = (code: string): number => Math.max(MIN_ERROR_BUDGET, code.le
 /** Thrown when a parse collects more errors than its budget. */
 export class ParseBudgetError extends Error {}
 
-const PARSE_OPTIONS = {
+const PARSE_OPTIONS: ParserOptions = {
   sourceType: 'unambiguous',
   plugins: ['typescript', 'jsx', 'decorators'],
-} as const;
+};
 
 function babelParse(code: string): JsAst {
   // With errorRecovery Babel builds an error object for every recoverable
