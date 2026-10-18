@@ -9,6 +9,7 @@ import { deepMerge, getNestedValue } from '../core/utils.js';
 import { discoverCliInstalls } from './cli-installs.js';
 import { npmPackageJsonGlobs } from './nvm-binary.js';
 import { queryCliVersion, readPackageVersion } from './version-query.js';
+import { includeRootsFromEnv, loadOpenclawConfig } from './openclaw-includes.js';
 
 const CONFIG_FILENAMES = [
   'openclaw.json',
@@ -174,6 +175,10 @@ export const openclawAdapter: AgentAdapter = {
       let foundForUser = false;
 
       const configPathOverride = openclawConfigPathOverride(home, fs);
+      // OPENCLAW_INCLUDE_ROOTS: directories `$include` may reach besides the config's own
+      const includeRoots = home === fs.homedir()
+        ? includeRootsFromEnv(fs.getEnv('OPENCLAW_INCLUDE_ROOTS'), fs.getEnv('OPENCLAW_HOME')?.trim() || home)
+        : [];
       for (const [dirIndex, dir] of searchDirs.entries()) {
         // OPENCLAW_CONFIG_PATH replaces the primary (first) dir's openclaw.json
         const overrideHere = dirIndex === 0 ? configPathOverride : undefined;
@@ -183,7 +188,9 @@ export const openclawAdapter: AgentAdapter = {
         for (const filename of CONFIG_FILENAMES) {
           const filePath = overrideHere && filename === 'openclaw.json' ? overrideHere : join(dir, filename);
           try {
-            const config = await loadConfig(filePath, fs);
+            const config = filename === 'openclaw.json'
+              ? await loadOpenclawConfig(filePath, fs, includeRoots)
+              : await loadConfig(filePath, fs);
             configFiles.push(config);
           } catch {
             // File doesn't exist or can't be parsed
@@ -451,6 +458,10 @@ export const openclawAdapter: AgentAdapter = {
         '~/.openclaw/custom_skills/**',
         // default workspace's skills/ (a custom agents.defaults.workspace is local-only)
         '~/.openclaw/workspace/skills/**',
+        // `$include` targets — any name inside the config directory; the
+        // documented *.json5 ones are collected (others are reported as not
+        // collected, never read from elsewhere)
+        '~/.openclaw/**/*.json5',
         // profile installs (OPENCLAW_PROFILE=<p> → ~/.openclaw-<p>)
         '~/.openclaw-*/openclaw.json',
         '~/.openclaw-*/config.json',

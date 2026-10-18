@@ -1,0 +1,19 @@
+{
+  "agent": "openclaw",
+  "source": "gateway section split into an $include file (docs.openclaw.ai configuration: config includes); openclaw config validate 2026.9.4 accepts it and resolves gateway.bind to lan (deep test 2026-10-18 fixture)",
+  "fail": {
+    "CFG-001": "critical",
+    "CFG-012": "critical",
+    "NET-001": "critical"
+  },
+  "fix": {
+    "resolves": [
+      "CFG-001"
+    ]
+  },
+  "modes": {
+    ".openclaw/openclaw.json": "600",
+    ".openclaw/gateway.json5": "600",
+    ".openclaw": "700"
+  }
+}

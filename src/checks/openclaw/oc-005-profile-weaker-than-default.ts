@@ -2,6 +2,7 @@ import type { Evidence, ParsedConfig } from '../../core/types.js';
 import { basename, dirname, join } from 'node:path';
 import { defineCheck } from '../../core/check-builder.js';
 import { loadConfig } from '../../core/config-loader.js';
+import { loadOpenclawConfig } from '../../adapters/openclaw-includes.js';
 import { extractPosture, findDowngrades, mergeConfigData } from './posture.js';
 
 const CONFIG_FILENAMES = [
@@ -45,7 +46,7 @@ export const oc005 = defineCheck({
     for (const filename of CONFIG_FILENAMES) {
       const filePath = join(defaultDir, filename);
       try {
-        defaultConfigs.push(await loadConfig(filePath, ctx.fs));
+        defaultConfigs.push(filename === 'openclaw.json' ? await loadOpenclawConfig(filePath, ctx.fs) : await loadConfig(filePath, ctx.fs));
       } catch {
         // File missing or unparseable — skip.
       }

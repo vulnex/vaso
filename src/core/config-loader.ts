@@ -36,7 +36,9 @@ export async function captureConfigLoadErrors<T>(
   return { result, loadErrors };
 }
 
-function recordLoadError(error: ConfigLoadError): void {
+/** Record a load failure on the active capture — also one found after the
+ *  file itself parsed (an OpenClaw `$include` the agent would reject). */
+export function recordLoadError(error: ConfigLoadError): void {
   const store = loadErrorStore.getStore();
   if (!store || store.some(e => e.filePath === error.filePath && e.stage === error.stage)) return;
   store.push(error);

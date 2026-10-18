@@ -1,0 +1,5 @@
+// gateway settings live in an included file (config includes, $include)
+{
+  gateway: { $include: "./gateway.json5" },
+  session: { dmScope: "per-channel-peer" },
+}

@@ -1,0 +1,1 @@
+{ mode: "local", port: 18789, bind: "lan", auth: { mode: "none" } }
