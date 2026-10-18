@@ -1,0 +1,7 @@
+{
+  "agent": "codex",
+  "source": "OpenAI project key (sk-proj-, current format) pasted into ~/.codex/AGENTS.md; deep-test fixture shape",
+  "fail": {
+    "CDX-007": "critical"
+  }
+}

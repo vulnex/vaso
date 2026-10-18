@@ -1,0 +1,11 @@
+{
+  "agent": "claude-desktop",
+  "source": "Cline/Windsurf-style autoApprove copied into claude_desktop_config.json (Claude Desktop reads no such key); deep-test fixture shape",
+  "info": [
+    "CD-006"
+  ],
+  "skipOn": [
+    "linux",
+    "win32"
+  ]
+}
