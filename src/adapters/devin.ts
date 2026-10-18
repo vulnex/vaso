@@ -10,6 +10,7 @@ import { queryCliVersion } from './version-query.js';
 import { loadConfigIfPresent } from './load-if-present.js';
 import { windsurfPresent } from './windsurf.js';
 import { xdgPath } from './env-path.js';
+import { scanCwd } from './project-configs.js';
 
 const SYSTEM_CLI_PATHS = [
   '/usr/local/bin/devin',
@@ -182,7 +183,8 @@ export const devinAdapter: AgentAdapter = {
     }
 
     // Project-level: <cwd>/.devin/{config,mcp_config}[.local].json
-    const cwd = process.cwd();
+    const cwd = scanCwd(fs);
+    if (!cwd) return installations;
     const { root, dirs } = await projectDirs(cwd, fs);
     // Running from $HOME makes project paths coincide with user ones — skip those
     const alreadyLoaded = new Set(installations.flatMap(i => i.configFiles.map(c => c.filePath)));

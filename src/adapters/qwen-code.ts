@@ -9,7 +9,7 @@ import { discoverCliInstalls } from './cli-installs.js';
 import { getUserHomeDirs } from './openclaw.js';
 import { queryCliVersion, readPackageVersion } from './version-query.js';
 import { loadConfigIfPresent } from './load-if-present.js';
-import { withoutLoadedConfigs } from './project-configs.js';
+import { withoutLoadedConfigs, scanCwd } from './project-configs.js';
 
 const QWEN_DIR_NAME = '.qwen';
 const SETTINGS_FILE = 'settings.json';
@@ -116,7 +116,10 @@ export function qwenHome(home: string, fs: FSProvider): string {
   const env = home === fs.homedir() ? fs.getEnv?.('QWEN_HOME')?.trim() : undefined;
   if (!env) return join(home, QWEN_DIR_NAME);
   if (env === '~' || env.startsWith('~/')) return join(home, env.slice(1));
-  return isAbsolute(env) ? env : resolve(process.cwd(), env);
+  if (isAbsolute(env)) return env;
+  // Relative to the working directory — which a remote/snapshot scan doesn't have
+  const cwd = scanCwd(fs);
+  return cwd ? resolve(cwd, env) : join(home, QWEN_DIR_NAME);
 }
 
 export const qwenCodeAdapter: AgentAdapter = {
@@ -172,7 +175,8 @@ export const qwenCodeAdapter: AgentAdapter = {
     }
 
     // Project-level config (.qwen/settings.json under cwd)
-    const cwd = process.cwd();
+    const cwd = scanCwd(fs);
+    if (!cwd) return installations;
     const projectQwenDir = join(cwd, QWEN_DIR_NAME);
     if (await fs.access(projectQwenDir)) {
       const projectConfigs = await withoutLoadedConfigs(await loadSettings(projectQwenDir, fs), installations, fs);

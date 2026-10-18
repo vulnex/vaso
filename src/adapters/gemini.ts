@@ -9,7 +9,7 @@ import { discoverCliInstalls } from './cli-installs.js';
 import { getUserHomeDirs } from './openclaw.js';
 import { queryCliVersion, readPackageVersion } from './version-query.js';
 import { loadConfigIfPresent } from './load-if-present.js';
-import { withoutLoadedConfigs } from './project-configs.js';
+import { withoutLoadedConfigs, scanCwd } from './project-configs.js';
 
 const GEMINI_DIR_NAME = '.gemini';
 const SETTINGS_FILE = 'settings.json';
@@ -207,7 +207,8 @@ export const geminiAdapter: AgentAdapter = {
 
     // Project-level config in current working directory (Gemini reads
     // ./.gemini/settings.json when the workspace is trusted).
-    const cwd = process.cwd();
+    const cwd = scanCwd(fs);
+    if (!cwd) return installations;
     const projectGeminiDir = join(cwd, GEMINI_DIR_NAME);
     if (await fs.access(projectGeminiDir)) {
       const projectConfigs = await withoutLoadedConfigs(await loadSettings(projectGeminiDir, fs), installations, fs);

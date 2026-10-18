@@ -8,7 +8,7 @@ import { getUserHomeDirs } from './openclaw.js';
 import { discoverCliInstalls, nodeManagerPackageJsonGlobs, retainedVersionGlobs, type RetainedVersionsDir } from './cli-installs.js';
 import { queryCliVersion, readPackageVersion } from './version-query.js';
 import { loadConfigIfPresent } from './load-if-present.js';
-import { withoutLoadedConfigs } from './project-configs.js';
+import { withoutLoadedConfigs, scanCwd } from './project-configs.js';
 
 /**
  * Abacus.AI CLI (`abacusai`, alias `abacus`) and AbacusAI Desktop. Both share
@@ -155,7 +155,8 @@ export const abacusAdapter: AgentAdapter = {
     }
 
     // Project scope: the workspace is the directory the CLI runs in.
-    const cwd = process.cwd();
+    const cwd = scanCwd(fs);
+    if (!cwd) return installations;
     const projectConfigs: ParsedConfig[] = [];
     for (const rel of PROJECT_CONFIG_FILES) {
       const filePath = join(cwd, rel);

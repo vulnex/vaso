@@ -156,6 +156,31 @@ describe('OpenCode adapter', () => {
     }
   });
 
+  it('does not treat the installer\'s ~/.opencode (bin/, node_modules) as a project when run from $HOME', async () => {
+    const cwd = vi.spyOn(process, 'cwd').mockReturnValue(home);
+    try {
+      const configPath = join(configDir, 'opencode.json');
+      setExistingPaths([configPath, join(home, '.opencode'), join(home, '.opencode', 'bin'), join(home, '.opencode', 'node_modules')]);
+      mockReadFile.mockImplementation(async (path) => (path === configPath ? '{}' : Promise.reject(new Error('ENOENT'))));
+      const result = await opencodeAdapter.detect();
+      expect(result.filter(r => r.profile === 'project')).toEqual([]);
+    } finally {
+      cwd.mockRestore();
+    }
+  });
+
+  it('keeps a .opencode/ dir with project content (agents) and no config file', async () => {
+    const cwd = vi.spyOn(process, 'cwd').mockReturnValue('/work/repo');
+    try {
+      setExistingPaths(['/work/repo/.git', '/work/repo/.opencode', '/work/repo/.opencode/agent']);
+      mockReadFile.mockImplementation(async () => { throw new Error('ENOENT'); });
+      const result = await opencodeAdapter.detect();
+      expect(result.find(r => r.profile === 'project')?.installDir).toBe('/work/repo/.opencode');
+    } finally {
+      cwd.mockRestore();
+    }
+  });
+
   it('returns config paths under XDG config dir', () => {
     const paths = opencodeAdapter.getConfigPaths();
     expect(paths.some(p => p.endsWith('opencode.json'))).toBe(true);

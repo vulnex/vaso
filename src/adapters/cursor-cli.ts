@@ -9,7 +9,7 @@ import { nvmBinaryGlob } from './nvm-binary.js';
 import { discoverCliInstalls, retainedVersionGlobs, type RetainedVersionsDir } from './cli-installs.js';
 import { getUserHomeDirs } from './openclaw.js';
 import { queryCliVersion, readPackageVersion } from './version-query.js';
-import { withoutLoadedConfigs } from './project-configs.js';
+import { withoutLoadedConfigs, scanCwd } from './project-configs.js';
 
 const CURSOR_DIR_NAME = '.cursor';
 // cli-config.json / mcp.json are CLI+IDE shared; permissions.json,
@@ -208,7 +208,8 @@ export const cursorCliAdapter: AgentAdapter = {
     }
 
     // Project-level: .cursor/mcp.json under cwd
-    const cwd = process.cwd();
+    const cwd = scanCwd(fs);
+    if (!cwd) return installations;
     const projectCursorDir = join(cwd, CURSOR_DIR_NAME);
     if (await fs.access(projectCursorDir)) {
       const projectConfigs = await withoutLoadedConfigs(await loadFiles(projectCursorDir, ['mcp.json', 'cli.json'], fs), installations, fs);

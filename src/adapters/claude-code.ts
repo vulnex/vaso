@@ -10,7 +10,7 @@ import { nvmBinaryGlob, npmPackageJsonGlobs } from './nvm-binary.js';
 import { discoverCliInstalls, retainedVersionGlobs, type RetainedVersionsDir } from './cli-installs.js';
 import { getUserHomeDirs } from './openclaw.js';
 import { queryCliVersion, readPackageVersion } from './version-query.js';
-import { withoutLoadedConfigs } from './project-configs.js';
+import { withoutLoadedConfigs, scanCwd } from './project-configs.js';
 import { envPath } from './env-path.js';
 
 const CLAUDE_DIR_NAME = '.claude';
@@ -161,7 +161,8 @@ export const claudeCodeAdapter: AgentAdapter = {
     // <repo>/.mcp.json whether or not the repo has .claude/settings*.json, so
     // any of them makes the project scannable. Running from $HOME makes
     // <cwd>/.claude the user dir itself — already covered above.
-    const cwd = process.cwd();
+    const cwd = scanCwd(fs);
+    if (!cwd) return installations;
     const projectClaudeDir = join(cwd, CLAUDE_DIR_NAME);
     if (!installations.some(i => i.installDir === projectClaudeDir)) {
       const projectConfigs = await withoutLoadedConfigs([

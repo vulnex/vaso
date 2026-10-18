@@ -10,7 +10,7 @@ import { discoverCliInstalls } from './cli-installs.js';
 import { getUserHomeDirs } from './openclaw.js';
 import { queryCliVersion, readPackageVersion } from './version-query.js';
 import { loadConfigIfPresent } from './load-if-present.js';
-import { withoutLoadedConfigs } from './project-configs.js';
+import { withoutLoadedConfigs, scanCwd } from './project-configs.js';
 import { xdgPath } from './env-path.js';
 
 const SYSTEM_CLI_PATHS = [
@@ -92,6 +92,15 @@ function splitProviderModel(spec: string): { id: string; provider?: string } {
   return { provider: spec.slice(0, idx), id: spec.slice(idx + 1) };
 }
 
+const PROJECT_CONTENT_DIRS = ['agent', 'agents', 'command', 'commands', 'plugin', 'plugins', 'mode', 'modes', 'tool', 'tools'];
+
+async function hasProjectContent(dir: string, fs: FSProvider): Promise<boolean> {
+  for (const sub of PROJECT_CONTENT_DIRS) {
+    if (await fs.access(join(dir, sub))) return true;
+  }
+  return false;
+}
+
 export const opencodeAdapter: AgentAdapter = {
   agent: 'opencode',
   displayName: 'OpenCode',
@@ -161,14 +170,19 @@ export const opencodeAdapter: AgentAdapter = {
     // Project config: opencode.json[c] from the cwd up to the git root, plus
     // the project's .opencode/ dir (agents, plugins). installDir is that
     // .opencode/ dir so per-agent markdown under it is found (OPC-006).
-    const { root, dirs } = await projectDirs(process.cwd(), fs);
+    const cwd = scanCwd(fs);
+    if (!cwd) return installations;
+    const { root, dirs } = await projectDirs(cwd, fs);
     const projectConfigs: ParsedConfig[] = [];
     // Outermost first — the config nearest the cwd wins the merge
     for (const dir of [...dirs].reverse()) projectConfigs.push(...await loadConfigsIn(dir, fs));
     const projectDir = join(root, '.opencode');
     const fresh = await withoutLoadedConfigs(projectConfigs, installations, fs);
     const isUserDir = installations.some(i => i.installDir === projectDir);
-    if (!isUserDir && (fresh.length > 0 || await fs.access(projectDir))) {
+    // A .opencode/ dir is a project only with configs or project content
+    // (agents, commands, plugins, modes): ~/.opencode is also the official
+    // installer's dir (bin/, node_modules), which scanning from $HOME reached
+    if (!isUserDir && (fresh.length > 0 || await hasProjectContent(projectDir, fs))) {
       installations.push({
         agent: 'opencode',
         agentName: `project:${basename(root)}`,

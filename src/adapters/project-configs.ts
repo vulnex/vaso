@@ -2,6 +2,17 @@ import type { FSProvider } from '../core/fs-provider.js';
 import type { AgentInstallation, ParsedConfig } from '../core/types.js';
 
 /**
+ * Working directory whose project configs a scan reads, or undefined when
+ * there is none: a remote or snapshot scan reads another host, where this
+ * process's cwd means nothing (the probe collects no project files). Using it
+ * anyway made results depend on where vaso ran — a scan of a host from its
+ * own home found a "project" that the same scan from elsewhere did not.
+ */
+export function scanCwd(fs: FSProvider): string | undefined {
+  return fs.kind === 'snapshot' ? undefined : process.cwd();
+}
+
+/**
  * Drop project-level config files that a user-level installation already
  * loaded. Running from $HOME makes `<cwd>/.claude` (etc.) the user dir
  * itself; without this the same files scan twice and every finding doubles.

@@ -11,6 +11,7 @@ import { discoverCliInstalls } from './cli-installs.js';
 import { getUserHomeDirs } from './openclaw.js';
 import { queryCliVersion, readPackageVersion } from './version-query.js';
 import { envPath } from './env-path.js';
+import { scanCwd } from './project-configs.js';
 
 const COPILOT_DIR_NAME = '.copilot';
 // Empirically (Copilot CLI 1.0.39 post-login), only `config.json` is
@@ -135,7 +136,8 @@ export const copilotCliAdapter: AgentAdapter = {
     // .mcp.json is also Claude Code's project file, and a repo is not a
     // Copilot install by itself.
     if (installations.length === 0) return installations;
-    const cwd = process.cwd();
+    const cwd = scanCwd(fs);
+    if (!cwd) return installations;
     const projectConfigs: ParsedConfig[] = [];
     for (const name of PROJECT_CONFIG_FILES) {
       const filePath = join(cwd, name);
