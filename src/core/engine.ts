@@ -12,6 +12,7 @@ import { dedupePermissionFindings } from './duplicate-findings.js';
 import { getAllSkillsDirs, getSkillFiles } from './utils.js';
 import { mapSourceEvidence } from '../mcp/source-locations.js';
 import { extractToolDefinitions } from '../mcp/tool-baseline.js';
+import { credentialPathsFor } from '../adapters/adapter.js';
 
 export class ScanEngine {
   private fs: FSProvider;
@@ -88,7 +89,7 @@ export class ScanEngine {
       : undefined;
 
     const adapter = this.adapters.getAdapter(installation.agent);
-    const credentialPaths = adapter?.getCredentialPaths?.(installation.installDir, this.fs);
+    const credentialPaths = credentialPathsFor(adapter, installation, this.fs);
 
     const context: ScanContext = {
       installation,

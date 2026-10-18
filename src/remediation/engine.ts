@@ -6,6 +6,7 @@ import type { ScanResult, FixResult, AgentScanResult, CheckResult } from '../cor
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import type { CheckRegistry } from '../core/check-registry.js';
 import type { AdapterRegistry } from '../adapters/registry.js';
+import { credentialPathsFor } from '../adapters/adapter.js';
 import { getAllSkillsDirs, getSkillFiles } from '../core/utils.js';
 import { promptForFix } from './prompt.js';
 import { readRegularFile, regularMode, resolvedDir, withChangeRecorder, withFixBoundary, UnsafeTargetError } from './safe-file.js';
@@ -91,7 +92,7 @@ export class RemediationEngine {
           // because their ctx.credentialPaths is empty.
           const fs = new LocalFSProvider();
           const adapter = this.adapters?.getAdapter(agent.installation.agent);
-          const credentialPaths = adapter?.getCredentialPaths?.(agent.installation.installDir, fs);
+          const credentialPaths = credentialPathsFor(adapter, agent.installation, fs);
           const skillsDirs = getAllSkillsDirs(agent.installation);
           const skillFiles = skillsDirs.length > 0
             ? (await Promise.all(skillsDirs.map(d => getSkillFiles(d, fs)))).flat()

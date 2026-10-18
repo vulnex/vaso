@@ -28,3 +28,19 @@ export interface AgentAdapter {
   getProbeManifest?(): import('../core/snapshot-types.js').ProbeManifest;
   getZoneGraph?(): ZoneGraph;
 }
+
+/**
+ * Credential stores an installation declares. A project installation has
+ * none: its installDir is a repository (or the repo's .cursor/ etc.), where
+ * the adapter's file names — config.json, settings.json, hooks.json — are
+ * ordinary project files that POL-003/CFG-003 would flag and `vaso fix`
+ * would chmod. Every adapter keeps its credentials at user level.
+ */
+export function credentialPathsFor(
+  adapter: AgentAdapter | undefined,
+  installation: AgentInstallation,
+  fs: FSProvider,
+): string[] | undefined {
+  if (installation.profile === 'project') return undefined;
+  return adapter?.getCredentialPaths?.(installation.installDir, fs);
+}

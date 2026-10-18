@@ -165,7 +165,8 @@ export interface ScanContext {
   skillFiles?: string[];
   /** Files the adapter has declared as security-sensitive (credentials, auth
    *  state, etc.). Used by permission checks to avoid flagging benign config
-   *  files. Pre-computed by the engine from `adapter.getCredentialPaths()`. */
+   *  files. Pre-computed by the engine from `adapter.getCredentialPaths()` —
+   *  never for a project installation (credential stores are user-level). */
   credentialPaths?: string[];
   mcpConfigs?: import('../mcp/types.js').MCPConfig[];
   mcpServerSources?: import('../mcp/types.js').MCPServerSource[];
