@@ -10,6 +10,7 @@ import { getUserHomeDirs } from './openclaw.js';
 import { queryCliVersion, readPackageVersion } from './version-query.js';
 import { loadConfigIfPresent } from './load-if-present.js';
 import { withoutLoadedConfigs, scanCwd } from './project-configs.js';
+import { workspaceTrusted } from './folder-trust.js';
 
 const GEMINI_DIR_NAME = '.gemini';
 const SETTINGS_FILE = 'settings.json';
@@ -153,6 +154,36 @@ export function geminiHome(home: string, fs: FSProvider): string {
   return join(env === '~' || env.startsWith('~/') ? join(home, env.slice(1)) : env, GEMINI_DIR_NAME);
 }
 
+/**
+ * The scanning user's trust file: $GEMINI_CLI_TRUSTED_FOLDERS_PATH (an
+ * absolute file path, Gemini CLI trusted-folders docs), else
+ * trustedFolders.json in ~/.gemini.
+ */
+export function geminiTrustedFoldersPath(fs: FSProvider): string {
+  return fs.getEnv?.('GEMINI_CLI_TRUSTED_FOLDERS_PATH')?.trim() || join(geminiHome(fs.homedir(), fs), 'trustedFolders.json');
+}
+
+/**
+ * Whether Gemini CLI applies `<workspace>/.gemini/settings.json` (core
+ * utils/trust.ts checkPathTrust): GEMINI_RESTRICTED_MODE=true or
+ * GEMINI_CLI_TRUST_WORKSPACE=false distrust, GEMINI_CLI_TRUST_WORKSPACE=true
+ * trusts; otherwise folder trust (on by default) decides from the trust file.
+ * An IDE's trust signal isn't observable from disk.
+ */
+export async function geminiWorkspaceTrusted(fs: FSProvider, workspace: string): Promise<boolean> {
+  const env = (name: string) => fs.getEnv?.(name);
+  const envDecision = env('GEMINI_RESTRICTED_MODE') === 'true' || env('GEMINI_CLI_TRUST_WORKSPACE') === 'false'
+    ? false
+    : env('GEMINI_CLI_TRUST_WORKSPACE') === 'true' ? true : undefined;
+  return workspaceTrusted(fs, {
+    workspace,
+    settingsFiles: [join(geminiHome(fs.homedir(), fs), SETTINGS_FILE), geminiSystemSettingsPath(fs)],
+    enabledByDefault: true,
+    trustFile: geminiTrustedFoldersPath(fs),
+    envDecision,
+  });
+}
+
 export const geminiAdapter: AgentAdapter = {
   agent: 'gemini-cli',
   displayName: 'Gemini CLI',
@@ -205,8 +236,9 @@ export const geminiAdapter: AgentAdapter = {
       });
     }
 
-    // Project-level config in current working directory (Gemini reads
-    // ./.gemini/settings.json when the workspace is trusted).
+    // Project-level config in current working directory. Gemini applies
+    // ./.gemini/settings.json only in a trusted workspace; checks downgrade
+    // findings from an untrusted one (geminiWorkspaceTrusted).
     const cwd = scanCwd(fs);
     if (!cwd) return installations;
     const projectGeminiDir = join(cwd, GEMINI_DIR_NAME);

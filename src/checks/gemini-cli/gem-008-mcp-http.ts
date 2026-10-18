@@ -1,5 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { markUntrustedWorkspace } from '../../adapters/folder-trust.js';
+import { geminiWorkspaceTrusted } from '../../adapters/gemini.js';
 import { isPlaintextRemoteUrl } from '../windsurf-app/plaintext-url.js';
 
 const URL_FIELDS = ['url', 'httpUrl', 'sseUrl'];
@@ -35,6 +37,8 @@ export const gem008 = defineCheck({
         }
       }
     }
+
+    await markUntrustedWorkspace(ctx, evidence, geminiWorkspaceTrusted);
 
     return h.fromEvidence(evidence, {
       passed: 'All Gemini MCP servers use HTTPS or localhost transports',

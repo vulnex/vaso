@@ -1,5 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { markUntrustedWorkspace } from '../../adapters/folder-trust.js';
+import { geminiWorkspaceTrusted } from '../../adapters/gemini.js';
 
 export const gem009 = defineCheck({
   id: 'GEM-009',
@@ -29,6 +31,8 @@ export const gem009 = defineCheck({
         });
       }
     }
+
+    await markUntrustedWorkspace(ctx, evidence, geminiWorkspaceTrusted);
 
     return h.fromEvidence(evidence, {
       passed: 'Gemini default approval mode requires confirmation',

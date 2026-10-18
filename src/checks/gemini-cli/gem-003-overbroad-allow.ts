@@ -1,5 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { markUntrustedWorkspace } from '../../adapters/folder-trust.js';
+import { geminiWorkspaceTrusted } from '../../adapters/gemini.js';
 
 // Patterns under tools.allowed that effectively grant unbounded shell access.
 // `run_shell_command` without parens (catch-all for any shell command) and
@@ -58,6 +60,8 @@ export const gem003 = defineCheck({
         });
       }
     }
+
+    await markUntrustedWorkspace(ctx, evidence, geminiWorkspaceTrusted);
 
     return h.fromEvidence(evidence, {
       passed: 'Gemini tools.allowed has no overbroad shell entries and no MCP server is trusted',

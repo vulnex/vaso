@@ -1,5 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { markUntrustedWorkspace } from '../../adapters/folder-trust.js';
+import { qwenWorkspaceTrusted } from '../../adapters/qwen-code.js';
 import { approvalMode } from './approval-mode.js';
 
 const DANGEROUS_MODES = new Set(['yolo']);
@@ -25,6 +27,8 @@ export const qc003 = defineCheck({
         });
       }
     }
+
+    await markUntrustedWorkspace(ctx, evidence, qwenWorkspaceTrusted);
 
     return h.fromEvidence(evidence, {
       passed: 'Qwen approval mode is not yolo',

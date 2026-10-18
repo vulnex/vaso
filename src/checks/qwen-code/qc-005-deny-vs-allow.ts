@@ -1,5 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { markUntrustedWorkspace } from '../../adapters/folder-trust.js';
+import { qwenWorkspaceTrusted } from '../../adapters/qwen-code.js';
 
 // Tools whose blanket auto-approval runs commands or changes files. Aliases
 // from Qwen settings.md ("Tool name aliases"); Read/Grep/Glob are read-only.
@@ -65,6 +67,8 @@ export const qc005 = defineCheck({
         detail: `Broad allow rules without a deny net: ${broad.slice(0, 3).join(', ')}${broad.length > 3 ? ', …' : ''}`,
       });
     }
+
+    await markUntrustedWorkspace(ctx, evidence, qwenWorkspaceTrusted);
 
     return h.fromEvidence(evidence, {
       passed: 'Qwen permissions either lack broad allow rules or have a deny net',

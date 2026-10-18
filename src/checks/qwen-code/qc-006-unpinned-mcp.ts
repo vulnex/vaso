@@ -1,5 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { markUntrustedWorkspace } from '../../adapters/folder-trust.js';
+import { qwenWorkspaceTrusted } from '../../adapters/qwen-code.js';
 import { runnerPackage, isPinnedOrLocal, pinProblem } from '../../mcp/package-pin.js';
 
 
@@ -37,6 +39,8 @@ export const qc006 = defineCheck({
         });
       }
     }
+
+    await markUntrustedWorkspace(ctx, evidence, qwenWorkspaceTrusted);
 
     return h.fromEvidence(evidence, {
       passed: 'All Qwen MCP server packages are version-pinned',

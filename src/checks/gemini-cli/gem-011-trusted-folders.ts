@@ -4,17 +4,15 @@ import type { FSProvider } from '../../core/fs-provider.js';
 import { stripJsonc } from '../../core/jsonc.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { buildBroadPaths, isBroadPath } from '../../analyzers/broad-paths.js';
-import { geminiHome } from '../../adapters/gemini.js';
+import { geminiHome, geminiTrustedFoldersPath } from '../../adapters/gemini.js';
 
 /**
- * The trust file for this install: $GEMINI_CLI_TRUSTED_FOLDERS_PATH (an
- * absolute file path, Gemini CLI trusted-folders docs) when the install is
- * the scanning user's, else trustedFolders.json in the install dir.
+ * The trust file for this install: the scanning user's (which
+ * $GEMINI_CLI_TRUSTED_FOLDERS_PATH may relocate), else trustedFolders.json in
+ * the install dir.
  */
 function trustFilePath(installDir: string, fs: FSProvider): string {
-  const env = fs.getEnv?.('GEMINI_CLI_TRUSTED_FOLDERS_PATH')?.trim();
-  if (env && installDir === geminiHome(fs.homedir(), fs)) return env;
-  return join(installDir, 'trustedFolders.json');
+  return installDir === geminiHome(fs.homedir(), fs) ? geminiTrustedFoldersPath(fs) : join(installDir, 'trustedFolders.json');
 }
 
 export const gem011 = defineCheck({

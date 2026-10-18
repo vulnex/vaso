@@ -88,6 +88,18 @@ describe('Qwen Code adapter', () => {
     expect(result[0].cliBinary).toBe('/usr/local/bin/qwen');
   });
 
+  it('a system settings file is never taken for the CLI binary', async () => {
+    const settingsPath = join(qwenDir, 'settings.json');
+    const systemSettings = process.platform === 'darwin' ? '/Library/Application Support/QwenCode/settings.json' : '/etc/qwen-code/settings.json';
+    setExistingPaths([qwenDir, settingsPath, systemSettings]);
+    mockReadFile.mockImplementation(async () => '{}');
+    const [inst] = await qwenCodeAdapter.detect();
+    expect(inst.cliBinary).toBeUndefined();
+    expect(inst.configFiles.map(c => c.filePath)).toContain(systemSettings);
+    // ...but remote scans still collect it
+    expect(qwenCodeAdapter.getProbeManifest!().systemPaths).toContain('/etc/qwen-code/settings.json');
+  });
+
   it('does not detect a bare ~/.qwen/ with no recognized configs and no CLI binary', async () => {
     setExistingPaths([qwenDir]);
     const result = await qwenCodeAdapter.detect();

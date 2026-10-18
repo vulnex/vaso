@@ -1,5 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { markUntrustedWorkspace } from '../../adapters/folder-trust.js';
+import { qwenWorkspaceTrusted } from '../../adapters/qwen-code.js';
 import { isPlaintextRemoteUrl } from '../windsurf-app/plaintext-url.js';
 
 const URL_FIELDS = ['url', 'httpUrl', 'sseUrl'];
@@ -34,6 +36,8 @@ export const qc007 = defineCheck({
         }
       }
     }
+
+    await markUntrustedWorkspace(ctx, evidence, qwenWorkspaceTrusted);
 
     return h.fromEvidence(evidence, {
       passed: 'All Qwen MCP servers use HTTPS or localhost transports',

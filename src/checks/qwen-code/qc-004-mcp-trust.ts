@@ -1,5 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { markUntrustedWorkspace } from '../../adapters/folder-trust.js';
+import { qwenWorkspaceTrusted } from '../../adapters/qwen-code.js';
 
 export const qc004 = defineCheck({
   id: 'QC-004',
@@ -26,6 +28,8 @@ export const qc004 = defineCheck({
         }
       }
     }
+
+    await markUntrustedWorkspace(ctx, evidence, qwenWorkspaceTrusted);
 
     return h.fromEvidence(evidence, {
       passed: 'No Qwen MCP server is marked as trusted',

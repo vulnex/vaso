@@ -1,5 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { markUntrustedWorkspace } from '../../adapters/folder-trust.js';
+import { geminiWorkspaceTrusted } from '../../adapters/gemini.js';
 import { runnerPackage, isPinnedOrLocal, pinProblem } from '../../mcp/package-pin.js';
 
 
@@ -37,6 +39,8 @@ export const gem007 = defineCheck({
         });
       }
     }
+
+    await markUntrustedWorkspace(ctx, evidence, geminiWorkspaceTrusted);
 
     return h.fromEvidence(evidence, {
       passed: 'All Gemini MCP server packages are version-pinned',

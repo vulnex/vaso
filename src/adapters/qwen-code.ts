@@ -10,6 +10,7 @@ import { getUserHomeDirs } from './openclaw.js';
 import { queryCliVersion, readPackageVersion } from './version-query.js';
 import { loadConfigIfPresent } from './load-if-present.js';
 import { withoutLoadedConfigs, scanCwd } from './project-configs.js';
+import { workspaceTrusted } from './folder-trust.js';
 
 const QWEN_DIR_NAME = '.qwen';
 const SETTINGS_FILE = 'settings.json';
@@ -122,6 +123,27 @@ export function qwenHome(home: string, fs: FSProvider): string {
   return cwd ? resolve(cwd, env) : join(home, QWEN_DIR_NAME);
 }
 
+/** $QWEN_CODE_TRUSTED_FOLDERS_PATH, else trustedFolders.json in the user's Qwen dir. */
+export function qwenTrustedFoldersPath(fs: FSProvider): string {
+  return fs.getEnv?.('QWEN_CODE_TRUSTED_FOLDERS_PATH')?.trim() || join(qwenHome(fs.homedir(), fs), 'trustedFolders.json');
+}
+
+/**
+ * Whether Qwen Code applies `<workspace>/.qwen/settings.json`. Folder trust
+ * is off by default (Qwen trusted-folders docs), and then every workspace's
+ * settings apply; once enabled, an unmatched folder is untrusted.
+ */
+export async function qwenWorkspaceTrusted(fs: FSProvider, workspace: string): Promise<boolean> {
+  const [system, defaults] = qwenSystemSettingsPaths(fs);
+  return workspaceTrusted(fs, {
+    workspace,
+    // system defaults < user < system (settings.md "Configuration layers")
+    settingsFiles: [...(defaults ? [defaults] : []), join(qwenHome(fs.homedir(), fs), SETTINGS_FILE), system],
+    enabledByDefault: false,
+    trustFile: qwenTrustedFoldersPath(fs),
+  });
+}
+
 export const qwenCodeAdapter: AgentAdapter = {
   agent: 'qwen-code',
   displayName: 'Qwen Code',
@@ -141,7 +163,7 @@ export const qwenCodeAdapter: AgentAdapter = {
       const qwenDir = qwenHome(home, fs);
       const installs = await discoverCliInstalls(home, fs, {
         names: ['qwen'],
-        systemPaths: [...SYSTEM_CLI_PATHS, SYSTEM_SETTINGS_DARWIN, SYSTEM_SETTINGS_LINUX],
+        systemPaths: SYSTEM_CLI_PATHS,
         userRelPaths: USER_CLI_RELATIVE_PATHS,
         version: async (bin, canExec) => (canExec ? queryCliVersion(bin, fs) : undefined)
           ?? (await readPackageVersion(bin, fs, NPM_PACKAGE_NAME)),
@@ -174,7 +196,9 @@ export const qwenCodeAdapter: AgentAdapter = {
       });
     }
 
-    // Project-level config (.qwen/settings.json under cwd)
+    // Project-level config (.qwen/settings.json under cwd). With folder trust
+    // on, Qwen ignores it in an untrusted workspace; checks downgrade those
+    // findings (qwenWorkspaceTrusted).
     const cwd = scanCwd(fs);
     if (!cwd) return installations;
     const projectQwenDir = join(cwd, QWEN_DIR_NAME);
@@ -241,6 +265,8 @@ export const qwenCodeAdapter: AgentAdapter = {
         '~/.qwen/QWEN.md',
         '~/.qwen/AGENTS.md',
         '~/.qwen/installation_id',
+        '~/.qwen/trustedFolders.json',
+        '${QWEN_CODE_TRUSTED_FOLDERS_PATH}',
         // User-relative CLI install locations — kept in sync with USER_CLI_RELATIVE_PATHS
         '~/.local/bin/qwen',
         '~/.npm-global/bin/qwen',
@@ -267,7 +293,8 @@ export const qwenCodeAdapter: AgentAdapter = {
         '~/.qwen/skills',
       ],
       envPrefixes: ['QWEN_', 'DASHSCOPE_', 'BAILIAN_'],
-      systemPaths: SYSTEM_CLI_PATHS,
+      // system settings files ride along so remote scans see them
+      systemPaths: [...SYSTEM_CLI_PATHS, SYSTEM_SETTINGS_DARWIN, SYSTEM_SETTINGS_LINUX],
       systemDirListings: [],
     };
   },

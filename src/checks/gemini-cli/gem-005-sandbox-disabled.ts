@@ -1,5 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { markUntrustedWorkspace } from '../../adapters/folder-trust.js';
+import { geminiWorkspaceTrusted } from '../../adapters/gemini.js';
 
 export const gem005 = defineCheck({
   id: 'GEM-005',
@@ -23,6 +25,8 @@ export const gem005 = defineCheck({
         });
       }
     }
+
+    await markUntrustedWorkspace(ctx, evidence, geminiWorkspaceTrusted);
 
     return h.fromEvidence(evidence, {
       passed: 'Gemini sandbox is not explicitly disabled',
