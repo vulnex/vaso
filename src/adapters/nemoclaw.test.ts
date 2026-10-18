@@ -1,6 +1,9 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { FSProvider } from '../core/fs-provider.js';
 import { nemoclawAdapter } from './nemoclaw.js';
+import { join } from 'node:path';
+import { BLUEPRINT_DIRS, BLUEPRINT_FILES, nemoclawLegacyRoots, PLUGIN_MANIFEST } from './nemoclaw-paths.js';
+import { blueprintDirCandidates } from '../checks/config/nemoclaw-state.js';
 
 function makeFs(files: Record<string, string>, dirs: string[] = []): FSProvider {
   const dirSet = new Set(dirs);
@@ -61,5 +64,20 @@ describe('NemoClaw adapter — install generations', () => {
     const [inst] = await nemoclawAdapter.detect({ fs });
     expect(inst.version).toBe('0.1.0');
     expect(inst.cliBinary).toBe('/usr/bin/nemoclaw');
+  });
+});
+
+describe('NemoClaw probe manifest', () => {
+  it('collects every blueprint and plugin manifest path CFG-018/019 read', () => {
+    const m = nemoclawAdapter.getProbeManifest!();
+    const files = new Set([...m.filePaths, ...(m.systemPaths ?? [])]);
+    const dirs = new Set([...m.directoryListings, ...(m.systemDirListings ?? [])]);
+    // The manifest's `~` is the scanned home the checks join paths onto
+    for (const dir of blueprintDirCandidates({ homedir: () => '~' } as FSProvider)) {
+      for (const f of BLUEPRINT_FILES) expect(files).toContain(join(dir, f));
+      for (const d of BLUEPRINT_DIRS) expect(dirs).toContain(join(dir, d));
+    }
+    for (const root of nemoclawLegacyRoots('~')) expect(files).toContain(join(root, PLUGIN_MANIFEST));
+    expect(files).toContain('~/.npm-global/lib/node_modules/nemoclaw/nemoclaw-blueprint/blueprint.yaml');
   });
 });

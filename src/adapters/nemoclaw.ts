@@ -8,6 +8,7 @@ import { loadConfig } from '../core/config-loader.js';
 import { loadConfigIfPresent } from './load-if-present.js';
 import { discoverCliInstalls } from './cli-installs.js';
 import { queryCliVersion, readPackageVersion } from './version-query.js';
+import { BLUEPRINT_DIRS, BLUEPRINT_FILES, nemoclawLegacyRoots, PLUGIN_MANIFEST } from './nemoclaw-paths.js';
 
 // Two install generations:
 //  - Current (install.sh, v0.0.x tags): the repo is checked out to
@@ -347,6 +348,11 @@ export const nemoclawAdapter: AgentAdapter = {
         '~/.npm-global/lib/node_modules/nemoclaw/package.json',
         '~/.bun/install/global/node_modules/nemoclaw/package.json',
         '~/.volta/tools/image/packages/nemoclaw/package.json',
+        // and their bundled blueprint + plugin manifest (CFG-018/019 read them there)
+        ...nemoclawLegacyRoots('~').flatMap(root => [
+          ...BLUEPRINT_FILES.map(f => join(root, 'nemoclaw-blueprint', f)),
+          join(root, PLUGIN_MANIFEST),
+        ]),
       ],
       globPatterns: [
         // npm-linked copies under each nvm Node (remote: the link isn't followable)
@@ -396,6 +402,7 @@ export const nemoclawAdapter: AgentAdapter = {
         '~/.nemoclaw/state',
         '~/.nemoclaw/blueprints',
         '~/.nemoclaw/policies',
+        ...nemoclawLegacyRoots('~').flatMap(root => BLUEPRINT_DIRS.map(d => join(root, 'nemoclaw-blueprint', d))),
       ],
       envPrefixes: ['NEMOCLAW_'],
       systemPaths: [

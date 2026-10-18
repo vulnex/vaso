@@ -2,6 +2,7 @@ import { join } from 'node:path';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { findBlueprintDir } from './nemoclaw-state.js';
+import { nemoclawLegacyRoots, PLUGIN_MANIFEST } from '../../adapters/nemoclaw-paths.js';
 
 export const cfg019 = defineCheck({
   id: 'CFG-019',
@@ -21,10 +22,7 @@ export const cfg019 = defineCheck({
     const evidence: Evidence[] = [];
 
     // Check plugin manifest for version pinning
-    const pluginPaths = [
-      '/usr/local/lib/node_modules/nemoclaw/nemoclaw/openclaw.plugin.json',
-      join(ctx.fs.homedir(), '.npm-global', 'lib', 'node_modules', 'nemoclaw', 'nemoclaw', 'openclaw.plugin.json'),
-    ];
+    const pluginPaths = nemoclawLegacyRoots(ctx.fs.homedir()).map(root => join(root, PLUGIN_MANIFEST));
 
     let usesLatest = false;
     for (const pluginPath of pluginPaths) {

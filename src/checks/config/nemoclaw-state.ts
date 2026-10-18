@@ -1,5 +1,6 @@
 import { join } from 'node:path';
 import type { FSProvider } from '../../core/fs-provider.js';
+import { nemoclawLegacyRoots } from '../../adapters/nemoclaw-paths.js';
 
 // Shared NemoClaw on-disk state for CFG-016–024. Two install generations:
 //  - Current (install.sh, v0.0.x): repo checked out to ~/.nemoclaw/source; the
@@ -18,9 +19,7 @@ export function blueprintDirCandidates(fs: FSProvider): string[] {
   const home = fs.homedir();
   return [
     join(home, '.nemoclaw', 'source', 'nemoclaw-blueprint'),
-    '/usr/local/lib/node_modules/nemoclaw/nemoclaw-blueprint',
-    '/usr/lib/node_modules/nemoclaw/nemoclaw-blueprint',
-    join(home, '.npm-global', 'lib', 'node_modules', 'nemoclaw', 'nemoclaw-blueprint'),
+    ...nemoclawLegacyRoots(home).map(root => join(root, 'nemoclaw-blueprint')),
   ];
 }
 
