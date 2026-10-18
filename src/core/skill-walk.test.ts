@@ -115,3 +115,26 @@ describe('walkSkillTree on a probe snapshot', () => {
     expect(plain.filter(e => e.isSymbolicLink).map(e => e.name).sort()).toEqual(['alias', 'linked']);
   });
 });
+
+describe('skillFrontmatterName (dt15 P5)', () => {
+  const nameOf = async (md: string) => {
+    const { skillFrontmatterName } = await import('./skill-walk.js');
+    const dir = join(base, 'fm');
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, 'SKILL.md'), md);
+    return skillFrontmatterName(fs, dir);
+  };
+
+  it('reads bare, quoted and commented names', async () => {
+    expect(await nameOf('---\nname: notes  # the notes skill\ndescription: d\n---\n')).toBe('notes');
+    expect(await nameOf('---\r\nname: "my notes"\r\ndescription: d\r\n---\r\n')).toBe('my notes');
+    expect(await nameOf('---\r\nname: notes \r\ndescription: d\r\n---\r\n')).toBe('notes');
+    expect(await nameOf("---\nname: 'x#y'\n---\n")).toBe('x#y');
+  });
+
+  it('is linear on a long space run inside the name', async () => {
+    const start = Date.now();
+    expect(await nameOf(`---\nname: notes${' '.repeat(100_000)}x#\ndescription: d\n---\n`)).toBe(`notes${' '.repeat(100_000)}x`);
+    expect(Date.now() - start).toBeLessThan(1000);
+  });
+});

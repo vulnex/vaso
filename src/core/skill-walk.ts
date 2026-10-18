@@ -272,7 +272,10 @@ export async function skillFrontmatterName(fs: FSProvider, skillDir: string): Pr
   }
   const fm = /^﻿?---\r?\n([\s\S]*?)\r?\n---/.exec(text);
   if (!fm) return undefined;
-  const m = /^name:\s*(?:"([^"\n]*)"|'([^'\n]*)'|([^\n#]*?))\s*(?:#.*)?$/m.exec(fm[1]);
+  // The bare value is taken greedily to the line end and trimmed: a lazy
+  // `[^\n#]*?` before `\s*` retried a long space run from every position
+  // (80 KB: 22 s)
+  const m = /^name:\s*(?:"([^"\n]*)"|'([^'\n]*)'|([^\n\r\u2028\u2029#]*))\s*(?:#.*)?$/m.exec(fm[1]);
   const name = (m?.[1] ?? m?.[2] ?? m?.[3])?.trim();
   return name || undefined;
 }

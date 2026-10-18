@@ -104,6 +104,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - **Masking credentials in reports is linear again.** An MCP server URL ending in thousands of `)` and an argument with a long `x-keykey…` header-like name made `mcp scan` and `mcp list` quadratic (50 KB: 27 s; 200 KB: 15 s → 0.2 s). What is masked is unchanged.
 - **MCP-014 is linear on long identifier or number runs.** Its presence-check filter (`token.length`, `token != null`) was tried from every position of a run, so 100 KB of `000…` in a server source took 20 s (now 0.4 s).
 - **Five more line patterns are linear on long runs.** PI-004 on a `[SYSTEM]` tag followed by a long space run (80 KB: 18 s), RS-008 on a long `mkfifo|…|…` pipeline (100 KB: 15 s), the Python `getattr(os, …)` rewrite (17 s), MCP-035's `TextDecoder(…)` decoder test (11 s) and MCP-002's `.listen(…, "0.0.0.0")` (5 s) now finish in well under a second (`skill audit`, `mcp scan --source`, `scan`). They match the same text as before.
+- **A SKILL.md whose `name:` holds a long space run no longer stalls a scan** (80 KB: 22 s → 0.5 s). The name read is unchanged.
 
 ## [1.3.1] - 2026-10-16
 
