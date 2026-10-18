@@ -38,26 +38,102 @@ fi
 
 echo -e "Agent: ${BOLD}OpenClaw${NC} ($INSTALL_DIR)\n"
 
-# Top-level config files, each flattened to one line so a nested key
-# (`sandbox: { mode: "off" }`, JSON5 or YAML, over several lines) still matches
+# Top-level config files, each turned into `dotted.path=value` lines with
+# comments dropped (JSON5 `//` and `/* */`, YAML `#`), so a check matches a
+# setting where it really is — not a commented-out line, not an address in an
+# unrelated list, and not past a nested `{ … }` before the key it wants
 CONFIGS=()
 for f in "$INSTALL_DIR"/*.json "$INSTALL_DIR"/*.json5 "$INSTALL_DIR"/*.yaml "$INSTALL_DIR"/*.yml; do
   [ -f "$f" ] && CONFIGS+=("$f")
 done
+
+# JSON / JSON5: a character-level walk keeping a stack of open objects and
+# arrays (array elements get `[]` in the path). POSIX awk, no gawk extensions.
+FLATTEN_JSON='
+function flush() { if (bare != "") { last = bare; have = 1; bare = "" } }
+function path(   p, j) { p = ""; for (j = 1; j <= n; j++) if (st[j] != "") p = (p == "" ? st[j] : p "." st[j]); return p }
+function emit(k,   p) { p = path(); if (k != "") p = (p == "" ? k : p "." k); print p "=" last }
+function value() { flush(); if (have) { emit(pending); have = 0; pending = "" } }
+{ s = s $0 "\n" }
+END {
+  n = 0; instr = ""; blk = 0; bare = ""; have = 0; pending = ""; q = "\047"
+  L = length(s)
+  for (i = 1; i <= L; i++) {
+    c = substr(s, i, 1)
+    if (blk) { if (c == "*" && substr(s, i + 1, 1) == "/") { blk = 0; i++ } continue }
+    if (instr != "") {
+      if (c == "\\") { buf = buf substr(s, i + 1, 1); i++ }
+      else if (c == instr) { instr = ""; last = buf; have = 1 }
+      else buf = buf c
+      continue
+    }
+    if (c == "/" && substr(s, i + 1, 1) == "/") { flush(); while (i <= L && substr(s, i, 1) != "\n") i++; continue }
+    if (c == "/" && substr(s, i + 1, 1) == "*") { flush(); blk = 1; i++; continue }
+    if (c == "\"" || c == q) { flush(); instr = c; buf = ""; continue }
+    if (c == ":") { flush(); if (have) { pending = last; have = 0 } continue }
+    if (c == "{" || c == "[") {
+      flush(); have = 0
+      name = pending; if (name == "" && n > 0 && arr[n]) name = "[]"
+      n++; st[n] = name; arr[n] = (c == "["); pending = ""
+      continue
+    }
+    if (c == "}" || c == "]") { value(); if (n > 0) n--; pending = ""; continue }
+    if (c == ",") { value(); continue }
+    if (c == " " || c == "\t" || c == "\n" || c == "\r") { flush(); continue }
+    bare = bare c
+  }
+}'
+
+# YAML: block mappings by indentation; `- ` list items are entered as their
+# keys. Flow-style values are kept as written.
+FLATTEN_YAML='
+function unq(v,   a) { a = substr(v, 1, 1); if (length(v) > 1 && (a == "\"" || a == q) && substr(v, length(v), 1) == a) return substr(v, 2, length(v) - 2); return v }
+BEGIN { q = "\047"; keyre = "^(\"[^\"]*\"|" q "[^" q "]*" q "|[^:\"" q "]+)[ \t]*:([ \t]|$)" }
+{
+  line = $0; out = ""; instr = ""
+  for (i = 1; i <= length(line); i++) {
+    c = substr(line, i, 1)
+    if (instr != "") { if (c == instr) instr = ""; out = out c; continue }
+    if (c == "\"" || c == q) { instr = c; out = out c; continue }
+    if (c == "#" && (i == 1 || substr(line, i - 1, 1) ~ /[ \t]/)) break
+    out = out c
+  }
+  sub(/[ \t\r]+$/, "", out)
+  if (out ~ /^[ \t]*$/ || out ~ /^---/) next
+  match(out, /^[ \t]*/); ind = RLENGTH; body = substr(out, ind + 1)
+  while (body ~ /^- /) { body = substr(body, 3); ind += 2; sub(/^[ \t]*/, "", body) }
+  if (!match(body, keyre)) next
+  key = substr(body, 1, RLENGTH); sub(/[ \t]*:[ \t]*$/, "", key); key = unq(key)
+  val = substr(body, RLENGTH + 1); sub(/^[ \t]+/, "", val)
+  while (n > 0 && ind <= sind[n]) n--
+  if (val == "") { n++; st[n] = key; sind[n] = ind; next }
+  p = ""; for (j = 1; j <= n; j++) p = (p == "" ? st[j] : p "." st[j])
+  print (p == "" ? key : p "." key) "=" unq(val)
+}'
+
+flatten() {
+  case "$1" in
+    *.yaml|*.yml) awk "$FLATTEN_YAML" "$1" ;;
+    *) awk "$FLATTEN_JSON" "$1" ;;
+  esac
+}
+
+# Whether any config has a `path=value` line matching an extended regex
 config_matches() {
-  local f
+  local f lines
   for f in ${CONFIGS[@]+"${CONFIGS[@]}"}; do
-    tr '\n\r\t' '   ' < "$f" 2>/dev/null | grep -qE "$1" && return 0
+    # captured first: with pipefail, `grep -q` closing a pipe early could
+    # fail the pipeline on SIGPIPE and hide a match
+    lines=$(flatten "$f" 2>/dev/null) || true
+    grep -qE "$1" <<<"$lines" && return 0
   done
   return 1
 }
-# A key, quoted or not (JSON, JSON5, YAML)
-K() { printf '["\x27]?%s["\x27]?[[:space:]]*:[[:space:]]*' "$1"; }
 
 # Check 1: Gateway binding (0.0.0.0)
 echo -e "${BOLD}Checking gateway binding...${NC}"
 # 2026.x: gateway.bind = "loopback" | "lan" | "all" | "auto"; older: an address
-if config_matches "0\.0\.0\.0|$(K bind)[\"']?(lan|all|auto|::)[\"']?([[:space:],}]|$)"; then
+if config_matches '^gateway\.(bind|host)=(0\.0\.0\.0|lan|all|auto|::|\[::\])(:[0-9]+)?$'; then
   fail "Gateway bound to all interfaces (0.0.0.0 / bind lan|all|auto)" 12
 else
   pass "Gateway not bound to 0.0.0.0"
@@ -91,7 +167,7 @@ fi
 # Check 4: Sandbox disabled
 echo -e "${BOLD}Checking sandbox status...${NC}"
 # `sandbox: false|"off"`, or 2026.x `agents.defaults.sandbox.mode: "off"`
-if config_matches "$(K sandbox)(false|[\"'](disabled|off|none)[\"'])|$(K sandbox)(\{[^}]*)?$(K mode)[\"']?(off|disabled|none)"; then
+if config_matches '(^|\.)sandbox=(false|disabled|off|none)$|(^|\.)sandbox\.mode=(off|disabled|none)$'; then
   fail "Sandbox is disabled — skills run without isolation" 12
 else
   pass "Sandbox is not explicitly disabled"
@@ -99,7 +175,7 @@ fi
 
 # Check 5: Auth bypass
 echo -e "${BOLD}Checking auth configuration...${NC}"
-if config_matches "$(K bypass)true|$(K auth)(\{[^}]*)?$(K mode)[\"']?none"; then
+if config_matches '(^|\.)bypass=true$|(^|\.)auth\.mode=none$'; then
   fail "Authentication bypass is enabled" 12
 else
   pass "Auth bypass is not enabled"
