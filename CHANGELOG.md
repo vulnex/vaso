@@ -37,6 +37,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - **MCP-005 no longer reports SQL built from a constant that happens to be named like input.** ``db.prepare(`SELECT … FROM ${query}`)`` with `const query = "orders"` was critical because of the name `query`. A name the file binds only to a literal is skipped; a parameter or argument of that name still is reported.
 - **MCP-019 no longer treats a tool description as a capability.** A help tool whose description says "never paste your credentials" made every server with a `fetch` tool a critical toxic flow. Handlers are now classified on their code and the strings they use as data (URLs, paths, file names, SQL); prose and comments are ignored.
 - **MCP-007 follows fetch wrappers to their call sites.** A helper such as `fetchWithTimeout(url, opts)` made every response it returned a "URL the caller chooses" warning because `url` is a parameter. The URL is now taken from what the helper's callers pass: a fixed API is info; the caller's URL, or a host where anyone can publish, is still a warning.
+- **Memory-file secret checks recognise current OpenAI keys.** CC-012, CDX-007, OPC-007, GEM-010, QC-010, GHC-008 and DEV-007 missed `sk-proj-`, `sk-svcacct-` and `sk-admin-` keys; they now share one scanner and the key formats the rest of VASO uses. They also share one severity rule: a recognised credential is critical, a high-entropy string alone is a warning (Gemini, Qwen and Copilot reported a plaintext key as info, Devin as a warning).
 
 ## [1.3.1] - 2026-10-16
 

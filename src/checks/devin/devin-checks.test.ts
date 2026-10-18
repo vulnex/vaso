@@ -444,7 +444,7 @@ describe('DEV-007: Devin Global AGENTS.md Secret Leak', () => {
     });
     const result = await check.run(makeCtx([], fs));
     expect(result.passed).toBe(false);
-    expect(result.severity).toBe('warning');
+    expect(result.severity).toBe('critical');
   });
 
   it('fails when AGENTS.md contains a Devin cog_ token', async () => {

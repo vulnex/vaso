@@ -1,20 +1,7 @@
 import { dirname, join } from 'node:path';
 import type { Evidence, ScanContext } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { findHighEntropyBlocks } from '../../analyzers/entropy.js';
-import { isPlaceholderSecret } from '../../core/patterns.js';
-
-const KNOWN_KEY_PREFIXES: { pattern: RegExp; name: string }[] = [
-  { pattern: /\bsk-ant-[A-Za-z0-9_-]{20,}/, name: 'Anthropic API key' },
-  { pattern: /\bsk-[A-Za-z0-9]{32,}/, name: 'OpenAI-style API key' },
-  { pattern: /\bghp_[A-Za-z0-9]{20,}/, name: 'GitHub personal access token' },
-  { pattern: /\bgithub_pat_[A-Za-z0-9_]{20,}/, name: 'GitHub fine-grained PAT' },
-  { pattern: /\bxox[baprs]-[A-Za-z0-9-]{10,}/, name: 'Slack token' },
-  { pattern: /\bAKIA[0-9A-Z]{16}\b/, name: 'AWS access key ID' },
-];
-
-const ENTROPY_THRESHOLD = 5.5;
-const MIN_BLOCK_LEN = 40;
+import { memorySecretSeverity, scanMemorySecrets } from '../../analyzers/memory-secrets.js';
 
 // AGENTS.override.md replaces AGENTS.md at its level when present, so either
 // can be the live instructions file (learn.chatgpt.com — AGENTS.md discovery)
@@ -30,32 +17,7 @@ async function scanFile(file: string, ctx: ScanContext, evidence: Evidence[]): P
     return;
   }
 
-  const lines = content.split('\n');
-  for (let i = 0; i < lines.length; i++) {
-    for (const { pattern, name } of KNOWN_KEY_PREFIXES) {
-      const m = pattern.exec(lines[i]);
-      if (m && isPlaceholderSecret(m[0])) continue;
-      if (m) {
-        evidence.push({
-          file,
-          line: i + 1,
-          snippet: `${m[0].slice(0, 12)}…`,
-          detail: `Plaintext ${name} in memory file`,
-        });
-      }
-    }
-  }
-
-  const blocks = findHighEntropyBlocks(content, ENTROPY_THRESHOLD, MIN_BLOCK_LEN);
-  for (const b of blocks) {
-    if (evidence.some(e => e.file === file && e.line === b.line)) continue;
-    evidence.push({
-      file,
-      line: b.line,
-      snippet: b.snippet,
-      detail: `High-entropy string (${b.entropy} bits) — possible embedded secret`,
-    });
-  }
+  evidence.push(...scanMemorySecrets(file, content));
 }
 
 export const cdx007 = defineCheck({
@@ -75,6 +37,7 @@ export const cdx007 = defineCheck({
     }
 
     return h.fromEvidence(evidence, {
+      severity: memorySecretSeverity(evidence),
       passed: 'No secrets detected in Codex memory files',
       failed: (n) => `Found ${n} potential secret(s) in Codex memory files`,
       fixDescription: 'Remove the secret from the memory file and rotate the credential — these files are often committed to git',
