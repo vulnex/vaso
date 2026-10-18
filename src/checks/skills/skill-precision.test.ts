@@ -83,6 +83,39 @@ describe('SKL-003 promisified child_process functions (dt15)', () => {
   });
 });
 
+describe('SKL-003 program chosen from fixed values (dt17)', () => {
+  const head = "import { execFile } from 'node:child_process';\nimport { promisify } from 'node:util';\nconst execFileAsync = promisify(execFile);\n";
+
+  it('a program drawn from a constant list or returned by a local resolver runs directly (openai/skills fetch-codex-manual.mjs, Apache-2.0; vercel-labs/agent-skills shape)', async () => {
+    const r = await run(skl003, {
+      // openai-docs/scripts/fetch-codex-manual.mjs:115-138
+      'fetch.mjs': head + 'export const requestManualWithCurl = async (url, args) => {\n'
+        + '  const curlNames =\n    process.platform === "win32" ? ["curl.exe", "curl"] : ["curl"];\n'
+        + '  for (const curlName of curlNames) {\n    try {\n      await execFileAsync(curlName, args, { windowsHide: true });\n    } catch (error) {}\n  }\n};\n',
+      // the program as a property of every object a local function returns
+      'deploy.mjs': head + "function resolveVercelCommand() {\n  if (process.platform !== 'win32') return { file: 'vercel', prefix: [] };\n  return { file: 'vercel.exe', prefix: [] };\n}\n"
+        + 'export async function runVercel(args) {\n  const command = resolveVercelCommand();\n  return await execFileAsync(command.file, [...command.prefix, ...args], { windowsHide: true });\n}\n',
+      'map.mjs': head + "const TOOLS = { git: 'git', rg: 'rg' };\nconst PICK = ['git', 'hg'];\nexport const a = (x) => execFileAsync(TOOLS.git, [x]);\nexport const b = (i, x) => execFileAsync(PICK[i], [x]);\n",
+    });
+    expect(r.evidence?.length).toBe(4);
+    expect(live(r)).toEqual([]);
+  });
+
+  it('true positives: a list holding a shell, a parameter, a reassigned name, or the Node binary with runtime argv', async () => {
+    const r = await run(skl003, {
+      'shell.mjs': head + "export const go = async (args) => { for (const p of ['curl', 'sh']) await execFileAsync(p, args); };\n",
+      'param.mjs': head + 'export const go = (program, args) => execFileAsync(program, args);\n',
+      'let.mjs': head + "export const go = (cmd, args) => { let p = 'git'; p = cmd; return execFileAsync(p, args); };\n",
+      // vercel-labs/agent-skills vercel-optimize/lib/vercel.mjs on Windows: the Node binary given a script found at runtime
+      'node.mjs': head + "function resolve({ execPath = process.execPath } = {}) {\n  if (process.platform !== 'win32') return { file: 'vercel', prefix: [] };\n  return { file: execPath, prefix: [] };\n}\n"
+        + 'export const go = (args) => { const c = resolve(); return execFileAsync(c.file, [...c.prefix, ...args]); };\n',
+      'exec-path.mjs': head + 'export const go = (args) => execFileAsync(process.execPath, args);\n',
+    });
+    expect(live(r).length).toBe(5);
+    expect(r.severity).toBe('critical');
+  });
+});
+
 describe('SKL-003 interpreter given literal -c code (dt15)', () => {
   it('is fixed code (info), on one line or spread over several (huggingface/skills shape)', async () => {
     const r = await run(skl003, {

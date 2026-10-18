@@ -306,7 +306,7 @@ function analyzeUncached(code: string): DataFlowResult[] {
               ? `${name}() — command execution`
               : `${name}() call detected`,
             ...commandText(node.arguments),
-            ...(runsDirectly(sink?.fn ?? name, node.arguments, constStrings) ? { noShell: true } : {}),
+            ...(runsDirectly(sink?.fn ?? name, path, constStrings) ? { noShell: true } : {}),
           });
           if (sink?.kind === 'process' || !sink) {
             // What the process gets: file contents or the whole environment in
@@ -466,7 +466,7 @@ function analyzeUncached(code: string): DataFlowResult[] {
                 snippet: snippet.slice(0, 120),
                 description: `${obj.name}.${propName}() — command execution`,
                 ...commandText(node.arguments),
-                ...(runsDirectly(propName, node.arguments, constStrings) ? { noShell: true } : {}),
+                ...(runsDirectly(propName, path, constStrings) ? { noShell: true } : {}),
               });
             }
           }
@@ -720,24 +720,170 @@ const SHELL_OR_INTERPRETER = /^(?:.*\/)?(?:sh|bash|zsh|dash|ksh|fish|cmd(?:\.exe
 
 /**
  * A program started directly — `execFileSync('git', [...])`, `spawn('ffmpeg', args)`:
- * the program is a literal (or a module-level string constant) that is neither a shell nor an interpreter (which
- * would run code given as an argument), and no `shell: true` option. What it
- * runs is a known program with runtime arguments, not code built at runtime
- * (same rule as the Python analyzer's subprocess without shell=True).
+ * every value the program can take is fixed (`programValues`) and none is a
+ * shell or an interpreter (which would run code given as an argument), and no
+ * `shell: true` option. What it runs is a known program with runtime
+ * arguments, not code built at runtime (same rule as the Python analyzer's
+ * subprocess without shell=True).
  */
-function runsDirectly(name: string, args: ArgNode[], constStrings: ReadonlyMap<string, string>): boolean {
+function runsDirectly(name: string, call: NodePath, constStrings: ReadonlyMap<string, string>): boolean {
   if (!DIRECT_EXEC_FUNCTIONS.has(name.slice(name.lastIndexOf('.') + 1))) return false;
-  const program = args[0] as Node | undefined;
-  const value = program?.type === 'StringLiteral' ? program.value
-    : program?.type === 'Identifier' ? constStrings.get(program.name) : undefined;
-  if (value === undefined || !value.trim() || SHELL_OR_INTERPRETER.test(value.trim())) return false;
+  const args = call.get('arguments') as NodePath[];
+  const program = args[0];
+  if (!program) return false;
+  const values = programValues(program, constStrings);
+  if (!values || values.length === 0 || values.some((v) => !v.trim() || SHELL_OR_INTERPRETER.test(v.trim()))) return false;
   return !args.some(a => {
-    const n = a as Node;
+    const n = a.node;
     return n.type === 'ObjectExpression' && n.properties.some(p =>
       p.type === 'ObjectProperty'
       && ((p.key.type === 'Identifier' && p.key.name === 'shell') || (p.key.type === 'StringLiteral' && p.key.value === 'shell'))
       && !(p.value.type === 'BooleanLiteral' && !p.value.value));
   });
+}
+
+/** How far `programValues` follows bindings, returns and properties. */
+const MAX_RESOLVE_DEPTH = 8;
+
+/**
+ * Every value an expression naming a program can take, when each is fixed:
+ * a literal or string constant, both sides of `cond ? 'a' : 'b'` and
+ * `a || 'b'`, each element of a constant list it is drawn from
+ * (`for (const curl of win ? ['curl.exe', 'curl'] : ['curl'])`, `LIST[i]`),
+ * and a property of a constant object or of every object a local function
+ * returns (`resolveCommand().file`, `const c = resolve(); c.file`).
+ * `process.execPath` is the Node binary. Undefined when any value is
+ * computed at runtime or comes from a parameter.
+ */
+function programValues(path: NodePath, constStrings: ReadonlyMap<string, string>, depth = 0): string[] | undefined {
+  if (depth > MAX_RESOLVE_DEPTH) return undefined;
+  const n = path.node;
+  const next = (p: NodePath): string[] | undefined => programValues(p, constStrings, depth + 1);
+  switch (n.type) {
+    case 'StringLiteral':
+      return [n.value];
+    case 'TemplateLiteral':
+      return n.expressions.length === 0 ? [n.quasis[0]?.value.cooked ?? ''] : undefined;
+    case 'ConditionalExpression':
+      return union(next(path.get('consequent') as NodePath), next(path.get('alternate') as NodePath));
+    case 'LogicalExpression':
+      return n.operator === '&&' ? undefined : union(next(path.get('left') as NodePath), next(path.get('right') as NodePath));
+    case 'AwaitExpression':
+    case 'TSAsExpression':
+    case 'TSNonNullExpression':
+    case 'ParenthesizedExpression':
+      return next(path.get('expression' in n ? 'expression' : 'argument') as NodePath);
+    case 'Identifier': {
+      const binding = path.scope.getBinding(n.name);
+      if (!binding) return constStrings.has(n.name) ? [constStrings.get(n.name)!] : undefined;
+      if (!binding.constant || !binding.path.isVariableDeclarator()) return undefined;
+      const decl = binding.path;
+      // `for (const x of LIST)`: x is one of LIST's elements
+      const loop = decl.parentPath?.parentPath;
+      if (loop?.isForOfStatement() && decl.parentPath?.key === 'left') return listValues(loop.get('right'), constStrings, depth + 1);
+      if (decl.node.id.type !== 'Identifier' || !decl.node.init) return undefined;
+      return next(decl.get('init') as NodePath);
+    }
+    case 'MemberExpression': {
+      const object = path.get('object') as NodePath;
+      if (!n.computed && n.object.type === 'Identifier' && n.object.name === 'process'
+        && n.property.type === 'Identifier' && n.property.name === 'execPath' && !path.scope.getBinding('process')) return ['node'];
+      // LIST[i]: one of the list's elements
+      if (n.computed && n.property.type !== 'StringLiteral') return listValues(object, constStrings, depth + 1);
+      const key = n.property.type === 'Identifier' && !n.computed ? n.property.name
+        : n.property.type === 'StringLiteral' ? n.property.value : undefined;
+      if (key === undefined) return undefined;
+      const objects = objectValues(object, depth + 1);
+      if (!objects || objects.length === 0) return undefined;
+      let out: string[] | undefined = [];
+      for (const o of objects) {
+        const prop = (o.get('properties') as NodePath[]).find((p) => {
+          if (!p.isObjectProperty() || p.node.computed) return false;
+          const k = p.node.key;
+          return (k.type === 'Identifier' && k.name === key) || (k.type === 'StringLiteral' && k.value === key);
+        });
+        if (!prop) return undefined; // spread or missing: not every value is known
+        out = union(out, next(prop.get('value') as NodePath));
+      }
+      return out;
+    }
+    default:
+      return undefined;
+  }
+}
+
+function union(a: string[] | undefined, b: string[] | undefined): string[] | undefined {
+  return a && b ? [...a, ...b] : undefined;
+}
+
+/** Every element of a constant list (spreads of constant lists included). */
+function listValues(path: NodePath, constStrings: ReadonlyMap<string, string>, depth: number): string[] | undefined {
+  if (depth > MAX_RESOLVE_DEPTH) return undefined;
+  const n = path.node;
+  if (n.type === 'ArrayExpression') {
+    let out: string[] | undefined = [];
+    for (const el of path.get('elements') as NodePath[]) {
+      if (!el.node) return undefined;
+      out = union(out, el.isSpreadElement() ? listValues(el.get('argument'), constStrings, depth + 1) : programValues(el, constStrings, depth + 1));
+    }
+    return out;
+  }
+  if (n.type === 'ConditionalExpression') {
+    return union(listValues(path.get('consequent') as NodePath, constStrings, depth + 1), listValues(path.get('alternate') as NodePath, constStrings, depth + 1));
+  }
+  if (n.type === 'Identifier') {
+    const binding = path.scope.getBinding(n.name);
+    if (!binding?.constant || !binding.path.isVariableDeclarator() || !binding.path.node.init) return undefined;
+    return listValues(binding.path.get('init') as NodePath, constStrings, depth + 1);
+  }
+  return undefined;
+}
+
+/**
+ * The object literals an expression can be: a constant bound to one, or
+ * what a local function returns on every path (`function f() { return {…} }`,
+ * `const f = () => ({…})`, awaited or not).
+ */
+function objectValues(path: NodePath, depth: number): Array<NodePath<import('@babel/types').ObjectExpression>> | undefined {
+  if (depth > MAX_RESOLVE_DEPTH) return undefined;
+  if (path.isObjectExpression()) return [path];
+  if (path.isAwaitExpression()) return objectValues(path.get('argument'), depth + 1);
+  if (path.isConditionalExpression()) {
+    const a = objectValues(path.get('consequent'), depth + 1);
+    const b = objectValues(path.get('alternate'), depth + 1);
+    return a && b ? [...a, ...b] : undefined;
+  }
+  if (path.isIdentifier()) {
+    const binding = path.scope.getBinding(path.node.name);
+    if (!binding?.constant || !binding.path.isVariableDeclarator() || !binding.path.node.init) return undefined;
+    return objectValues(binding.path.get('init') as NodePath, depth + 1);
+  }
+  if (path.isCallExpression()) {
+    const callee = path.get('callee');
+    if (!callee.isIdentifier()) return undefined;
+    const binding = callee.scope.getBinding(callee.node.name);
+    if (!binding?.constant) return undefined;
+    let fn: NodePath | undefined = binding.path;
+    if (fn.isVariableDeclarator()) fn = fn.node.init ? (fn.get('init') as NodePath) : undefined;
+    if (!fn || !(fn.isFunctionDeclaration() || fn.isFunctionExpression() || fn.isArrowFunctionExpression())) return undefined;
+    const body = fn.get('body') as NodePath;
+    if (!body.isBlockStatement()) return objectValues(body, depth + 1);
+    const returns: NodePath[] = [];
+    body.traverse({
+      Function(inner) { inner.skip(); },
+      ReturnStatement(ret) { returns.push(ret.get('argument') as NodePath); },
+    });
+    if (returns.length === 0) return undefined;
+    const out: Array<NodePath<import('@babel/types').ObjectExpression>> = [];
+    for (const r of returns) {
+      if (!r.node) return undefined;
+      const objs = objectValues(r, depth + 1);
+      if (!objs) return undefined;
+      out.push(...objs);
+    }
+    return out;
+  }
+  return undefined;
 }
 
 function commandText(args: ArgNode[]): Pick<DataFlowResult, 'command' | 'dynamic' | 'decoded'> {
