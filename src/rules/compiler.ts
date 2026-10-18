@@ -1,13 +1,25 @@
 import { join, resolve } from 'node:path';
-import type { CheckModule, CheckResult, ScanContext, Evidence, FixResult } from '../core/types.js';
+import type { CheckModule, CheckResult, ScanContext, Evidence, FixResult, ParsedConfig } from '../core/types.js';
 import { getNestedValue } from '../core/utils.js';
 import { pathExists } from '../core/utils.js';
 import { evaluateOperator } from './operators.js';
 import { updateConfigValue } from '../remediation/config-writer.js';
-import type { DeclarativeRule } from './schema.js';
+import { maskConfigValue, maskCredentialsInLine } from '../reporting/serialize.js';
+import { ruleInput } from './regex-safety.js';
+import type { DeclarativeRule, RawConfigRule } from './schema.js';
 
 function interpolateMessage(template: string, vars: Record<string, string>): string {
   return template.replace(/\{\{(\w+)\}\}/g, (_, key) => vars[key] ?? '');
+}
+
+/** Whether a config rule fails on one config file. */
+function configFails(config: RawConfigRule, cfg: ParsedConfig): { failed: boolean; actual: unknown } {
+  const actual = getNestedValue(cfg.data, config.path);
+  const conditionMatches = evaluateOperator(actual, config.operator, config.value);
+  // Default: condition match = fail (detecting the bad thing)
+  // pass_when: "match" = condition match means pass
+  const passWhen = config.pass_when ?? 'no-match';
+  return { failed: passWhen === 'match' ? !conditionMatches : conditionMatches, actual };
 }
 
 function compileConfigRule(rule: DeclarativeRule): CheckModule['run'] {
@@ -18,18 +30,12 @@ function compileConfigRule(rule: DeclarativeRule): CheckModule['run'] {
     const evidence: Evidence[] = [];
 
     for (const cfg of ctx.configs) {
-      const actual = getNestedValue(cfg.data, config.path);
-      const conditionMatches = evaluateOperator(actual, config.operator, config.value);
-
-      // Default: condition match = fail (detecting the bad thing)
-      // pass_when: "match" = condition match means pass
-      const passWhen = config.pass_when ?? 'no-match';
-      const passed = passWhen === 'match' ? conditionMatches : !conditionMatches;
-
-      if (!passed) {
+      const { failed, actual } = configFails(config, cfg);
+      if (failed) {
         evidence.push({
           file: cfg.filePath,
-          detail: `${config.path} = ${JSON.stringify(actual)}`,
+          // The value is quoted from the user's config: a credential is masked
+          detail: `${config.path} = ${JSON.stringify(maskConfigValue(config.path, actual))}`,
         });
       }
     }
@@ -91,9 +97,13 @@ function compilePatternRule(rule: DeclarativeRule): CheckModule['run'] {
 
       const lines = content.split('\n');
       for (let i = 0; i < lines.length; i++) {
-        const match = re.exec(lines[i]);
+        // Input is capped so even a slow pattern stays bounded (regex-safety.ts)
+        const match = re.exec(ruleInput(lines[i]));
         if (match) {
-          const snippet = lines[i].trim().slice(0, 120);
+          // The line is quoted from the user's file: credentials on it are masked
+          const snippet = maskCredentialsInLine(lines[i].trim().slice(0, 120));
+          // a match the masking removed from the line is (part of) a credential
+          const matched = snippet.includes(match[0]) ? match[0] : '***';
           evidence.push({
             file: filePath,
             line: i + 1,
@@ -102,7 +112,7 @@ function compilePatternRule(rule: DeclarativeRule): CheckModule['run'] {
               file: filePath,
               line: String(i + 1),
               snippet,
-              match: match[0],
+              match: matched,
             }),
           });
         }
@@ -166,6 +176,12 @@ function compileFix(rule: DeclarativeRule): CheckModule['fix'] | undefined {
   return async (ctx: ScanContext): Promise<FixResult> => {
     let applied = false;
     for (const cfg of ctx.configs) {
+      // Only the configs the rule failed on — a config rule's check, re-run
+      // here; never a file the finding didn't name (a Hermes .env gaining
+      // `approvals.mode=manual`). A .env file is flat: a dotted key has no
+      // variable to set.
+      if (rule.config && !configFails(rule.config, cfg).failed) continue;
+      if (cfg.format === 'env' && keyPath.includes('.')) continue;
       try {
         await updateConfigValue(cfg, keyPath, value);
         applied = true;

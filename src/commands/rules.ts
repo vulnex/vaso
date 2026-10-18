@@ -13,10 +13,13 @@ export interface RulesListOptions {
 export async function runRulesList(options: RulesListOptions): Promise<void> {
   const result = await loadRules();
 
-  if (result.allErrors.length > 0) {
+  if (result.allErrors.length > 0 || result.warnings.length > 0) {
     for (const err of result.allErrors) {
       const loc = err.rule ? ` (rule ${err.rule})` : '';
       console.error(chalk.yellow(`  Warning: ${err.file}${loc}: ${err.message}`));
+    }
+    for (const w of result.warnings) {
+      console.error(chalk.yellow(`  Warning: ${w.file} (rule ${w.rule}): ${w.message}`));
     }
     console.error();
   }
@@ -125,7 +128,8 @@ export async function runRulesValidate(filePath: string, options: RulesValidateO
 
 const STARTER_TEMPLATE = `# VASO Declarative Rules
 # Place this file in ~/.vaso/rules/ (global) or .vaso/rules/ (project-level).
-# All rules are loaded automatically on scan.
+# All rules are loaded automatically on scan. Project-level rules are
+# untrusted: their fix.set is ignored and they can't replace a global rule ID.
 #
 # Each rule must have exactly one type: config, pattern, or file_exists.
 # See: https://github.com/vulnex/vaso#declarative-rules

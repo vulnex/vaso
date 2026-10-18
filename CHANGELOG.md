@@ -22,6 +22,10 @@ This project adheres to [Semantic Versioning](https://semver.org/).
   - **GB-011:** updates disabled (`SAND_DISABLE_UPDATES`, or the apt source set to `Enabled: no`) or the dogfood track.
 - Remote scans collect Grok Bot's secret stores, approvals and standing grants as metadata only, and collect only named, non-secret `SAND_*` variables. No probe rebuild is needed.
 
+### Security
+
+- **Project rules (`.vaso/rules/` in the working directory) are untrusted input.** A cloned repository could ship a rule whose fix made `vaso fix -y` write into the user's own configs (setting Claude Code's `defaultMode` to `bypassPermissions`), silently replace an organisation rule from `~/.vaso/rules/` with the same ID, or hang the scan with a backtracking regex. Project rules may still add findings, but their `fix.set` is ignored and they never replace a rule ID defined in `~/.vaso/rules/` or by `--rules` (skipped with a warning naming both files); a duplicate ID within one source is skipped with a warning too. Rules in `~/.vaso/rules/` and passed with `--rules` keep their fixes. Rule regexes (`pattern.regex`, the `matches` operator) that can backtrack super-linearly — nested quantifiers, repeated overlapping alternatives, overlapping unbounded quantifiers in a row — fail validation and are skipped at load, and rule regexes run on at most 4,096 characters per line or value. The operator set is unchanged.
+
 ### Fixed
 
 - **Windsurf / Devin Desktop Cascade skills are scanned.** Skills in `~/.codeium/windsurf/skills`, and in `~/.config/devin/skills` and `~/.agents/skills` when Devin CLI is not installed (with the CLI they stay with its install, so findings aren't doubled), plus a workspace's legacy `.windsurf/skills`, were never analysed by the SKL and IOC checks, locally or remotely.
@@ -82,6 +86,9 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - **A remote OpenShell scan says when it couldn't check the gateway TOML.** `gateway.env` can point `OPENSHELL_GATEWAY_CONFIG` at any file. Outside the default and NemoClaw locations, the probe can't know that path before the scan. The snapshot scan used to judge the gateway by a default `gateway.toml` it doesn't load, or by none, and pass silently. It now reports CONFIG-LOAD ("not collected by the remote probe — scan the host locally") and judges by `gateway.env` alone.
 - **CFG-020 is critical only when other users can read the NemoClaw key.** A plaintext key in `~/.nemoclaw/credentials.json` that is owner-only (NemoClaw writes it 0600 in a 0700 directory), or that sits behind a private directory, is now a warning to migrate it rather than a critical.
  One gap remains: a `~` in `OPENCLAW_STATE_DIR` combined with `OPENCLAW_HOME` is expanded against the OS home there.
+- **Declarative rules no longer copy credentials into reports and baselines.** A config rule's evidence quoted the raw value (`model.api_key = "sk-…"`) and a pattern rule the raw line and `{{match}}`; both are now masked with the report credential masking (values under credential-like keys, `key: value` / `"key": "value"` / `NAME=value` lines).
+- **A rule's fix writes only the config files the rule failed on.** It wrote the key into every config of the installation — a Hermes `.env` gained `approvals.mode=manual` — and a dotted key is never written into a `.env` file.
+- **`--rules <file>` that can't be read exits 2** like other unreadable inputs; it only warned and scanned without the rules.
 - **Fixes write keys whose names contain a dot.** A ZeroClaw risk profile named `prod.v2` (`[risk_profiles."prod.v2"]`) or a Grok Bot account scope with a dot in its key was split at the dot: ZC-005/006/011/014 added a new `[risk_profiles.prod.v2]` table and reported the fix applied on every run while the real profile kept `level = "full"`, and GB-001 wrote a nested `"dot": {"ted": …}` object. The config writers take the key path as segments; TOML keys are written quoted, and the edited file loads in `zeroclaw config list`.
 
 ## [1.3.1] - 2026-10-16

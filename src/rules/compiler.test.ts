@@ -273,4 +273,75 @@ describe('compileRule', () => {
       expect(check.supportedPlatforms).toEqual(['darwin', 'linux']);
     });
   });
+
+  describe('credentials quoted in evidence are masked', () => {
+    const KEY = 'abcdefghijklmnopqrstuvwxyz0123';
+    const yamlConfig: ParsedConfig = {
+      raw: `model:\n  provider: openrouter\n  api_key: ${KEY}\n`,
+      format: 'yaml',
+      filePath: '/tmp/h/.hermes/config.yaml',
+      data: { model: { provider: 'openrouter', api_key: KEY } },
+    };
+    const envConfig: ParsedConfig = { raw: `OPENROUTER_API_KEY=${KEY}\n`, format: 'env', filePath: '/tmp/h/.hermes/.env', data: { OPENROUTER_API_KEY: KEY } };
+    const ctx = () => makeContext({ configs: [yamlConfig, envConfig] });
+
+    it('config rule: a value under a credential name is masked, other values stay readable', async () => {
+      const secret = await compileRule({ id: 'M-1', name: 'n', category: 'config', severity: 'warning', description: 'd', config: { path: 'model.api_key', operator: 'exists' } }).run(ctx());
+      expect(secret.passed).toBe(false);
+      expect(JSON.stringify(secret)).not.toContain(KEY);
+      expect(secret.evidence![0].detail).toBe('model.api_key = "***"');
+      const plain = await compileRule({ id: 'M-2', name: 'n', category: 'config', severity: 'warning', description: 'd', config: { path: 'model.provider', operator: 'eq', value: 'openrouter' } }).run(ctx());
+      expect(plain.evidence![0].detail).toBe('model.provider = "openrouter"');
+      const whole = await compileRule({ id: 'M-3', name: 'n', category: 'config', severity: 'warning', description: 'd', config: { path: 'model', operator: 'exists' } }).run(ctx());
+      expect(JSON.stringify(whole)).not.toContain(KEY);
+      expect(whole.evidence![0].detail).toContain('openrouter');
+    });
+
+    it('pattern rule: snippet and {{match}} never carry the credential', async () => {
+      const r = await compileRule({
+        id: 'M-4', name: 'n', category: 'config', severity: 'warning', description: 'd',
+        pattern: { regex: 'API_KEY|api_key', target: 'configs', message: 'found {{match}} in {{snippet}}' },
+      }).run(ctx());
+      expect(r.evidence).toHaveLength(2);
+      expect(JSON.stringify(r)).not.toContain(KEY);
+      expect(r.evidence![0].detail).toBe('found api_key in api_key: ***');
+      const val = await compileRule({
+        id: 'M-5', name: 'n', category: 'config', severity: 'warning', description: 'd',
+        pattern: { regex: '[a-z]{20,}\\d+', target: 'configs', message: '{{match}}' },
+      }).run(ctx());
+      expect(JSON.stringify(val)).not.toContain(KEY);
+      expect(val.evidence![0].detail).toBe('***');
+    });
+  });
+
+  describe('fixes write only the configs the rule failed on', () => {
+    it('a config rule fix skips passing configs and never writes a dotted key into a .env', async () => {
+      const { mkdtemp, writeFile, readFile, rm } = await import('node:fs/promises');
+      const { tmpdir } = await import('node:os');
+      const { join } = await import('node:path');
+      const dir = await mkdtemp(join(tmpdir(), 'vaso-rulefix-'));
+      const yamlPath = join(dir, 'config.yaml');
+      const okPath = join(dir, 'other.yaml');
+      const envPath = join(dir, '.env');
+      await writeFile(yamlPath, 'approvals:\n  mode: off\n');
+      await writeFile(okPath, 'approvals:\n  mode: manual\n');
+      await writeFile(envPath, 'OPENROUTER_API_KEY=x\n');
+      const configs: ParsedConfig[] = [
+        { raw: '', format: 'yaml', filePath: yamlPath, data: { approvals: { mode: 'off' } } },
+        { raw: '', format: 'yaml', filePath: okPath, data: { approvals: { mode: 'manual' } } },
+        { raw: '', format: 'env', filePath: envPath, data: { OPENROUTER_API_KEY: 'x' } },
+      ];
+      const check = compileRule({
+        id: 'ORG-100', name: 'n', category: 'config', severity: 'warning', description: 'd',
+        config: { path: 'approvals.mode', operator: 'eq', value: 'off' },
+        fix: { set: 'approvals.mode', value: 'manual' },
+      });
+      const res = await check.fix!(makeContext({ configs }));
+      expect(res.applied).toBe(true);
+      expect(await readFile(yamlPath, 'utf-8')).toBe('approvals:\n  mode: manual\n');
+      expect(await readFile(okPath, 'utf-8')).toBe('approvals:\n  mode: manual\n');
+      expect(await readFile(envPath, 'utf-8')).toBe('OPENROUTER_API_KEY=x\n');
+      await rm(dir, { recursive: true, force: true });
+    });
+  });
 });

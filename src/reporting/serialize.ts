@@ -40,6 +40,13 @@ const SECRET_NAME = /(?:token|secret|passw|pwd|signature|credential|api[_-]?key|
 const SECRET_VAR = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const secretVar = (name: string): boolean => SECRET_VAR.test(name) && (SECRET_NAME.test(name) || /(?:^|_)(?:KEY|PAT|AUTH|PASS)(?:_|$)/i.test(name));
 
+/** Whether a config key or variable name holds a credential (`api_key`, `GITHUB_TOKEN`, `model.password`). */
+export function isSecretName(name: string): boolean {
+  const leaf = name.split('.').pop() ?? name;
+  return SECRET_NAME.test(leaf) || secretVar(leaf);
+}
+
+
 /** Hosts whose URL path itself is the credential. */
 function maskSecretPath(host: string, path: string): string {
   const h = host.toLowerCase();
@@ -145,6 +152,38 @@ export function maskCredentialsInText(text: string): string {
       if (flag === '-p' && PORT_LIKE.test(value)) return m;
       return `${pre}${flag}${sep}${MASK}`;
     });
+}
+
+/** `name: value`, `"name": "value"`, `name = value` with a credential name (YAML, JSON, TOML lines). */
+const SECRET_KEY_VALUE = /(^|[\s"'{,])(["']?)([A-Za-z_][\w.-]{0,127})\2(\s*[:=]\s*)("[^"]*"|'[^']*'|[^\s,#}]+)/g;
+
+/**
+ * One line of a config or source file quoted in a finding (a declarative
+ * rule's match): credentials written as `key: value` / `"key": "value"` /
+ * `key = value` under a credential name are masked, then everything
+ * maskCredentialsInText masks.
+ */
+export function maskCredentialsInLine(line: string): string {
+  const masked = line.replace(SECRET_KEY_VALUE, (m, pre: string, q: string, name: string, sep: string, value: string) => {
+    if (!isSecretName(name) || keepValue(value)) return m;
+    const quote = /^["']/.test(value) ? value[0] : '';
+    return `${pre}${q}${name}${q}${sep}${quote}${MASK}${quote}`;
+  });
+  return maskCredentialsInText(masked);
+}
+
+/**
+ * A config value quoted in a finding: a string under a credential name is
+ * masked (references and placeholders stay), and every string inside it is
+ * masked as text.
+ */
+export function maskConfigValue(name: string, value: unknown): unknown {
+  if (typeof value === 'string') return isSecretName(name) ? mask(value) : maskCredentialsInText(value);
+  if (Array.isArray(value)) return value.map(v => maskConfigValue(name, v));
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, maskConfigValue(k, v)]));
+  }
+  return value;
 }
 
 /** Flags whose value is the next argv element. */

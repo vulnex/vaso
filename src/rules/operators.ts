@@ -1,3 +1,5 @@
+import { ruleInput } from './regex-safety.js';
+
 export type Operator =
   | 'eq'
   | 'neq'
@@ -60,7 +62,7 @@ export function evaluateOperator(actual: unknown, operator: Operator, expected?:
     case 'matches':
       if (typeof actual !== 'string' || typeof expected !== 'string') return false;
       try {
-        return new RegExp(expected).test(actual);
+        return new RegExp(expected).test(ruleInput(actual));
       } catch {
         return false;
       }

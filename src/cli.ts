@@ -118,10 +118,19 @@ program
       if (!skipRules) {
         const extraPaths = subOpts.rules as string[] | undefined;
         const rulesResult = await loadAndRegisterRules(checkRegistry, { extraPaths });
+        // A rule file named on the command line that can't be read is an
+        // unreadable input, like a missing --snapshot or --inventory (exit 2)
+        const unreadable = rulesResult.loadResult.files.find(f => f.source === 'explicit' && f.unreadable);
+        if (unreadable) {
+          throw new Error(`--rules ${unreadable.filePath}: ${unreadable.errors[0]?.message ?? 'cannot be read'}`);
+        }
         if (!silent) {
           for (const err of rulesResult.loadResult.allErrors) {
             const loc = err.rule ? ` (rule ${err.rule})` : '';
             console.error(chalk.yellow(`  Warning: rule file ${err.file}${loc}: ${err.message}\n`));
+          }
+          for (const w of rulesResult.loadResult.warnings) {
+            console.error(chalk.yellow(`  Warning: rule file ${w.file} (rule ${w.rule}): ${w.message}\n`));
           }
           for (const skip of rulesResult.skipped) {
             console.error(chalk.yellow(`  Warning: rule "${skip.id}" skipped: ${skip.reason}\n`));

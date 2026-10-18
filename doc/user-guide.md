@@ -50,6 +50,8 @@ vaso scan [options]
 | `--fail-on <severity>` | Exit non-zero on findings of this severity or higher: `critical` (default), `warning`, `info`, or `none` |
 | `--silent` | Suppress all stdout/stderr chatter; requires `-o` or `--output-dir` |
 | `--no-color` | Disable colored terminal output |
+| `--rules <paths...>` | Load additional declarative rule files (see [Custom rules](#custom-rules-vaso-rules)); a file that can't be read exits `2` |
+| `--no-custom-rules` | Skip declarative rules (`~/.vaso/rules/`, `.vaso/rules/` and `--rules`) |
 | `--host <target...>` | Scan one or more remote hosts via SSH (`user@host[:port]`). Variadic. |
 | `--inventory <path>` | YAML file listing hosts to scan |
 | `--ssh-key <path>` | SSH identity file for remote connections |
@@ -369,6 +371,32 @@ vaso ext info <name>
 ```
 
 User plugins are loaded automatically on every CLI invocation; errors are isolated so a broken plugin can't crash the scan.
+
+### Custom rules (`vaso rules`)
+
+Declarative YAML rules add your own checks to `vaso scan` and `vaso fix`: a config value (`config`), a regex over config or skill files (`pattern`) or a file that must or must not exist (`file_exists`), optionally with a `fix` that sets one config key. `vaso rules init` writes a commented starter file; `vaso rules list` shows what is loaded and `vaso rules validate <file>` checks one file.
+
+```bash
+vaso rules init [--dir <path>]    # Write an example rule file (default ~/.vaso/rules/)
+vaso rules list [-f json]         # Rules that scan/fix would load, and where from
+vaso rules validate <file>        # Validate one rule file
+```
+
+Rules load from three places:
+
+| Source | Trusted | Notes |
+|--------|---------|-------|
+| `~/.vaso/rules/*.yaml` | yes | Your own (or your organisation's) rules |
+| `--rules <file...>` | yes | Named on the command line; replaces a `~/.vaso/rules/` rule with the same ID (with a warning) |
+| `.vaso/rules/*.yaml` in the working directory | no | A cloned repository can ship these, so they are treated as untrusted input: they may add findings, but their `fix.set` is ignored (only `fix.guidance` text stays) and they never replace a rule ID already defined in `~/.vaso/rules/` or by `--rules` — that rule is skipped with a warning naming both files. Move a project rule to `~/.vaso/rules/` or pass it with `--rules` to keep its fix |
+
+Within one source, the first definition of an ID wins and a duplicate is skipped with a warning. A rule whose ID matches a built-in check is skipped.
+
+Rule regexes (`pattern.regex`, and the value of the `matches` operator) must not be able to backtrack super-linearly: patterns with nested quantifiers (`(a+)+`, `(\w+\s?)*`), repeated groups whose alternatives overlap (`(a|ab)*`) or overlapping unbounded quantifiers in a row (`\d+\d+`, `.*.*`) fail validation and are skipped at load with a warning. Rule regexes run on at most 4,096 characters of each line or value.
+
+Values a rule quotes in its findings (a config value, the matched line, `{{match}}`/`{{snippet}}` in its message) are masked like every other credential VASO reports: a value under a credential-like key (`api_key`, `token`, `password`, …) and well-known token formats show as `***`.
+
+A rule's fix writes only into the config files the rule failed on, and never writes a dotted key into a `.env` file.
 
 ### `vaso probe`
 

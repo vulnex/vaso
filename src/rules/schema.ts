@@ -2,6 +2,7 @@ import type { Operator } from './operators.js';
 import { VALID_OPERATORS } from './operators.js';
 import type { CheckCategory, AgentType, Severity, Platform } from '../core/types.js';
 import { AGENT_TYPES, CHECK_CATEGORIES } from '../core/types.js';
+import { unsafeRegexReason } from './regex-safety.js';
 
 const VALID_CATEGORIES: readonly string[] = CHECK_CATEGORIES;
 
@@ -58,6 +59,17 @@ export interface ValidationError {
   rule?: string;
   field?: string;
   message: string;
+}
+
+/** Why a rule regex can't be used (invalid, or able to backtrack super-linearly). */
+function regexError(source: string): string | undefined {
+  try {
+    new RegExp(source);
+  } catch {
+    return 'the regular expression is not valid';
+  }
+  const unsafe = unsafeRegexReason(source);
+  return unsafe ? `the regular expression can backtrack super-linearly: ${unsafe}` : undefined;
 }
 
 /**
@@ -144,6 +156,12 @@ export function validateRuleFile(data: unknown): { rules: DeclarativeRule[]; err
         if (!VALID_OPERATORS.includes(c.operator as Operator)) {
           ruleErrors.push({ rule: label, field: 'config.operator', message: `"config.operator" must be one of: ${VALID_OPERATORS.join(', ')}` });
         }
+        if (c.operator === 'matches') {
+          const reason = typeof c.value !== 'string' ? '"config.value" must be a regular expression string for "matches"'
+            : c.value.length > 500 ? '"config.value" must be 500 characters or less'
+            : regexError(c.value);
+          if (reason) ruleErrors.push({ rule: label, field: 'config.value', message: reason });
+        }
         if (c.pass_when !== undefined && c.pass_when !== 'match' && c.pass_when !== 'no-match') {
           ruleErrors.push({ rule: label, field: 'config.pass_when', message: '"config.pass_when" must be "match" or "no-match"' });
         }
@@ -161,11 +179,8 @@ export function validateRuleFile(data: unknown): { rules: DeclarativeRule[]; err
         } else if (p.regex.length > 500) {
           ruleErrors.push({ rule: label, field: 'pattern.regex', message: '"pattern.regex" must be 500 characters or less' });
         } else {
-          try {
-            new RegExp(p.regex as string);
-          } catch {
-            ruleErrors.push({ rule: label, field: 'pattern.regex', message: `"pattern.regex" is not a valid regular expression` });
-          }
+          const reason = regexError(p.regex);
+          if (reason) ruleErrors.push({ rule: label, field: 'pattern.regex', message: reason.replace('the regular expression', '"pattern.regex"') });
         }
         if (p.target !== undefined && !VALID_TARGETS.includes(p.target as string)) {
           ruleErrors.push({ rule: label, field: 'pattern.target', message: `"pattern.target" must be one of: ${VALID_TARGETS.join(', ')}` });
