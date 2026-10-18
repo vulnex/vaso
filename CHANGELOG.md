@@ -107,6 +107,8 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - **A SKILL.md whose `name:` holds a long space run no longer stalls a scan** (80 KB: 22 s → 0.5 s). The name read is unchanged.
 - **YAML configs with many keys parse in linear time, and a duplicate key resolves to its last value.** The YAML library's duplicate-key check compared every key with every other (80,000 keys: 2 minutes → under a second), and a config that sets a key twice was a CONFIG-LOAD error although Hermes, which reads it with PyYAML, uses the last value; VASO now judges that value (HM-008 on a second `approvals:` block that turns approvals off). Self-referencing aliases are still rejected.
 - **MCP-003's hardcoded-secret scan is linear on long `a-b-c…` names** (100 KB: about 2 s → milliseconds). The same key names and values are found.
+- **MCP source checks read a long statement in bounded pieces.** A minified line was split into statements at `;`, but a statement without one (a data URI, a large object literal, a line built to stall a check) still reached every line pattern whole. Statements longer than 2,000 characters are now cut after a `,`, brace or space outside strings, and a longer string is closed and reopened across the cut so it is still read as a string.
+- **MCP-034 reads the string literals on a line in one pass.** A line with an unterminated run of escaped quotes (`"\"\"…`) was retried from every quote (50 KB: 3 s → 0.3 s); the literals judged are unchanged.
 
 ## [1.3.1] - 2026-10-16
 

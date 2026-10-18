@@ -3932,6 +3932,16 @@ return { content: [{ type: "text", text: note }] };`;
     expect(result.passed).toBe(false);
   });
 
+  it('reads the literals of a line with an unterminated escaped-quote run in linear time (dt15)', async () => {
+    const start = Date.now();
+    await run(`const x = 1;\n"${'\\"'.repeat(50_000)}\n`);
+    expect(Date.now() - start).toBeLessThan(1000);
+    // a literal after a stray unterminated quote of another kind is still judged
+    const table = 'ÄÅÇÉÑÖÜáàâäãåçéèêëíìîïñóòôöõúùûü†°¢£§•¶ß®©™´¨≠ÆØ∞±≤≥¥µ∂∑∏π∫ªºΩæø\u200e\u200f';
+    const pad = 'function a(t){return t.split("").map(n=>n.charCodeAt(0)).reduce((r,n)=>r+n,0)}'.repeat(4);
+    expect((await run(`var x={};${pad}x.it's={chars:"${table}"};${pad}`)).passed).toBe(true);
+  });
+
   it('ignores a sanitizer set of distinct zero-width characters (mcp-atlassian)', async () => {
     const code = '_STRIP = dict.fromkeys(map(ord, "\\u200b\\u200c\\u200d\\u2060\\ufeff"))  # ZWSP, ZWNJ, ZWJ, word-joiner, BOM';
     expect((await run(code, 'python')).passed).toBe(true);
