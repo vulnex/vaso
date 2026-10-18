@@ -1,0 +1,9 @@
+{
+  "agent": "atomic-agent",
+  "source": "Atomic Agent config.json (schema 72) with string-typed \"approvalLevel\": \"5\" — Atomic's coerceIntLike loads it as level 5 (`atomic-agent config list` on a live install) (deep test 2026-10-17 fixture)",
+  "modes": { ".atomic-agent": "700", ".atomic-agent/config.json": "600" },
+  "fail": {
+    "AT-001": "critical",
+    "AT-003": "warning"
+  }
+}

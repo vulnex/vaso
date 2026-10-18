@@ -1,9 +1,8 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { fixFirstConfig } from '../../remediation/config-writer.js';
-import { getNestedValue } from '../../core/utils.js';
 import type { ParsedConfig } from '../../core/types.js';
-import { asRecord, atomicConfigs } from './shared.js';
+import { asRecord, atomicApprovalLevel, atomicConfigs, parseAtomicBool } from './shared.js';
 
 /**
  * Approval levels ≥ 3 ("home") auto-approve the `http` category: per the
@@ -12,9 +11,7 @@ import { asRecord, atomicConfigs } from './shared.js';
  * `approvalRequired: false` loads as level 5.
  */
 function approvalLevel(config: ParsedConfig): number | undefined {
-  const level = getNestedValue(config.data, 'agent.approvalLevel');
-  if (typeof level === 'number') return level;
-  return getNestedValue(config.data, 'agent.approvalRequired') === false ? 5 : undefined;
+  return atomicApprovalLevel(config)?.level;
 }
 
 const HTTP_QUIET_LEVEL = 3;
@@ -32,7 +29,7 @@ export const at003 = defineCheck({
     let fixable = false;
     for (const config of atomicConfigs(ctx.configs)) {
       const http = asRecord(config.data.http);
-      if (http?.enabled === false) continue;
+      if (http?.enabled != null && parseAtomicBool(http.enabled) === false) continue;
       // Absent block/field → the default, "never" (and pre-v25 "writes" files
       // are migrated to "never" on load).
       const mode = typeof http?.approvalMode === 'string' ? http.approvalMode : 'never';

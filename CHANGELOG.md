@@ -52,6 +52,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - **Hermes API server findings follow the installed release's start-up guard.** Hermes 0.9.0+ refuses a non-loopback API server without `API_SERVER_KEY`, 0.15.0+ refuses any API server without one, and 0.18.0+ also refuses a placeholder key or one shorter than 16 characters. HM-004, CFG-001, NET-001 and HM-005 no longer report a server that can't start (critical findings on default installs), and the gateway is not reported at all. When the version is unknown, HM-004 reports the missing key at info severity. The `API_SERVER_*` variables in `.env` override `config.yaml` only alongside a usable env key (alongside `API_SERVER_ENABLED` or any key before 0.19.1), as the gateway applies them. `gateway.platforms.api_server` is read too.
 - **Hermes: `~/.hermes/cli-config.yaml` is no longer scanned.** Hermes never reads it (only `$HERMES_HOME/config.yaml`), so its settings produced findings for dead config.
 - **YAML merge keys (`<<: *defaults`) are resolved in every YAML config**, as PyYAML and Go's yaml.v3 do. Settings inherited through a merge key (Hermes `approvals: {<<: *unsafe}`, a shared MCP server block) were invisible to every check. A merge key that merges its own anchor is still rejected.
+- **Atomic Agent: string values are read the way Atomic coerces them.** `"approvalLevel": "5"` and legacy `"approvalRequired": "false"` load as level 5 but passed AT-001 and AT-003; `http.enabled: "false"` disables the HTTP tool like `false`.
 
 ## [1.3.1] - 2026-10-16
 

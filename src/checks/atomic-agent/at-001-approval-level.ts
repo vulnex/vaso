@@ -1,12 +1,12 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { getNestedValue } from '../../core/utils.js';
-import { atomicConfigs } from './shared.js';
+import { atomicApprovalLevel, atomicConfigs } from './shared.js';
 
 // agent.approvalLevel 1–5 (paranoid / workspace / home / operator / full trust).
 // Level 4 stops asking for shell, skill scripts, process kill and network git;
 // level 5 also auto-approves MCP tools, reads outside the working dir, email,
-// and writes to config.json/.env. Legacy `approvalRequired: false` loads as 5.
+// and writes to config.json/.env. Legacy `approvalRequired: false` loads as 5;
+// Atomic coerces strings ("5", "false") the same way.
 const LEVEL_NAMES: Record<number, string> = { 4: 'operator', 5: 'full trust' };
 
 export const at001 = defineCheck({
@@ -21,14 +21,13 @@ export const at001 = defineCheck({
     const evidence: Evidence[] = [];
     let worst = 0;
     for (const config of atomicConfigs(ctx.configs)) {
-      const level = getNestedValue(config.data, 'agent.approvalLevel');
-      const legacyOff = getNestedValue(config.data, 'agent.approvalRequired') === false;
-      const effective = typeof level === 'number' ? level : legacyOff ? 5 : undefined;
-      if (effective === undefined || effective < 4) continue;
+      const resolved = atomicApprovalLevel(config);
+      if (!resolved || resolved.level < 4) continue;
+      const effective = resolved.level;
       worst = Math.max(worst, effective);
       evidence.push({
         file: config.filePath,
-        snippet: typeof level === 'number' ? `agent.approvalLevel: ${level}` : 'agent.approvalRequired: false',
+        snippet: resolved.snippet,
         detail: effective >= 5
           ? `Approval level ${effective} (${LEVEL_NAMES[5]}) — every tool call runs without confirmation, including MCP tools, reads outside the working directory and edits to the agent's own config and secrets`
           : `Approval level ${effective} (${LEVEL_NAMES[4]}) — shell commands, skill scripts and process termination run without confirmation`,

@@ -102,6 +102,19 @@ describe('AT-001 approval ladder', () => {
       expect(r.severity).toBe('critical');
     }
   });
+
+  it('reads string values the way Atomic coerces them (coerceIntLike / parseBool)', async () => {
+    for (const agent of [{ approvalLevel: '5' }, { approvalLevel: ' 5 ' }, { approvalRequired: 'false' }, { approvalRequired: 'OFF' }]) {
+      const r = await check('AT-001').run(makeCtx([makeJson({ agent })]));
+      expect(r.passed, JSON.stringify(agent)).toBe(false);
+      expect(r.severity).toBe('critical');
+    }
+    expect((await check('AT-001').run(makeCtx([makeJson({ agent: { approvalLevel: '4' } })]))).severity).toBe('warning');
+    // approvalLevel wins over the legacy flag; values Atomic rejects load nothing
+    for (const agent of [{ approvalLevel: '2', approvalRequired: false }, { approvalRequired: 'true' }, { approvalLevel: 'five' }, { approvalLevel: '9' }]) {
+      expect((await check('AT-001').run(makeCtx([makeJson({ agent })]))).passed, JSON.stringify(agent)).toBe(true);
+    }
+  });
 });
 
 describe('AT-002 read scope', () => {
@@ -145,6 +158,13 @@ describe('AT-003 HTTP tool without approval', () => {
     // Legacy approvalRequired: false loads as level 5
     const legacy = makeJson({ agent: { approvalRequired: false }, http: { approvalMode: 'always' } });
     expect((await check('AT-003').run(makeCtx([legacy]))).passed).toBe(false);
+    // String-typed values load the same (Atomic coerces them)
+    for (const agent of [{ approvalLevel: '3' }, { approvalRequired: 'false' }]) {
+      const str = makeJson({ agent, http: { approvalMode: 'always' } });
+      expect((await check('AT-003').run(makeCtx([str]))).passed, JSON.stringify(agent)).toBe(false);
+    }
+    // "false" disables the tool like false
+    expect((await check('AT-003').run(makeCtx([makeJson({ http: { enabled: 'false' } })]))).passed).toBe(true);
     // Level 2 keeps the approvalMode prompts
     const gated = makeJson({ agent: { approvalLevel: 2 }, http: { approvalMode: 'writes' } });
     expect((await check('AT-003').run(makeCtx([gated]))).passed).toBe(true);
