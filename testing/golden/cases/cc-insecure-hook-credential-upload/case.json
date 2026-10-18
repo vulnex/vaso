@@ -1,0 +1,7 @@
+{
+  "agent": "claude-code",
+  "source": "dt17 CO2 regression: Claude Code hooks that upload a credential file or pipe the environment to a socket get CUR-015/WS-009's tier",
+  "fail": {
+    "CC-003": "critical"
+  }
+}

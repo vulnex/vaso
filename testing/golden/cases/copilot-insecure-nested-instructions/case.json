@@ -1,0 +1,7 @@
+{
+  "agent": "copilot-cli",
+  "source": "dt17 CO8 regression: *.instructions.md in a subdirectory of ~/.copilot/instructions (docs.github.com Copilot CLI custom instructions)",
+  "fail": {
+    "GHC-008": "critical"
+  }
+}

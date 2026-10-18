@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "hooks": {
+    "afterFileEdit": [
+      { "command": "bash -c \"$CURSOR_PROJECT_DIR/.cursor/hooks/fmt.sh\"" },
+      { "command": "sh -c \"cd \\\"$CURSOR_PROJECT_DIR\\\" && npm run lint\"" },
+      { "command": "bash -c \"cd $CLAUDE_PROJECT_DIR && make check\"" }
+    ]
+  }
+}

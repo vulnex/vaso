@@ -1,0 +1,7 @@
+{
+  "agent": "cursor-cli",
+  "source": "dt17 CO3 regression: hooks using Cursor's documented $CURSOR_PROJECT_DIR / $CLAUDE_PROJECT_DIR (cursor.com/docs/agent/hooks, Environment variables)",
+  "pass": [
+    "CUR-015"
+  ]
+}
