@@ -56,7 +56,7 @@ function isSubpath(parent: string, child: string): boolean {
 export async function trustFileDecision(fs: FSProvider, trustFile: string, workspace: string): Promise<boolean | undefined> {
   const data = await readJson(fs, trustFile);
   if (!data || typeof data !== 'object' || Array.isArray(data)) return undefined;
-  const real = async (p: string) => fs.realpath(p).catch(() => p);
+  const real = async (p: string) => { try { return (await fs.realpath(p)) || p; } catch { return p; } };
   const location = await real(resolve(workspace));
   let best = -1;
   let decision: boolean | undefined;

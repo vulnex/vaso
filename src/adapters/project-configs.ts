@@ -12,6 +12,15 @@ export function scanCwd(fs: FSProvider): string | undefined {
   return fs.kind === 'snapshot' ? undefined : process.cwd();
 }
 
+/** The resolved path, or the path itself when it can't be resolved. */
+async function resolved(p: string, fs: FSProvider): Promise<string> {
+  try {
+    return (await fs.realpath(p)) || p;
+  } catch {
+    return p;
+  }
+}
+
 /**
  * Drop project-level config files that a user-level installation already
  * loaded. Running from $HOME makes `<cwd>/.claude` (etc.) the user dir
@@ -25,7 +34,7 @@ export async function withoutLoadedConfigs(
   installations: AgentInstallation[],
   fs: FSProvider,
 ): Promise<ParsedConfig[]> {
-  const real = (p: string) => fs.realpath(p).catch(() => p);
+  const real = (p: string) => resolved(p, fs);
   const loaded = new Set(await Promise.all(installations.flatMap(i => i.configFiles.map(c => real(c.filePath)))));
   const keep = await Promise.all(projectConfigs.map(async c => !loaded.has(await real(c.filePath))));
   return projectConfigs.filter((_, i) => keep[i]);
@@ -37,7 +46,7 @@ export async function withoutLoadedConfigs(
  * working directory's `.claude` (etc.) is the user dir under another name.
  */
 export async function isLoadedInstallDir(dir: string, installations: AgentInstallation[], fs: FSProvider): Promise<boolean> {
-  const real = (p: string) => fs.realpath(p).catch(() => p);
+  const real = (p: string) => resolved(p, fs);
   const target = await real(dir);
   return (await Promise.all(installations.map(i => real(i.installDir)))).includes(target);
 }
