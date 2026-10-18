@@ -4,12 +4,18 @@ import type { Node } from '@babel/types';
 import type { NodePath } from '@babel/traverse';
 import { mayBeJavaScript, parseLenientReport, recordedEvasion, sourceChunks, type JsAst } from './js-parse.js';
 import { bindingModule, memberName, sinkCallee } from './tool-input-taint.js';
+import { analyzeFlows, type SourcePath, type Taint } from './js-flow.js';
 
 // Handle ESM/CJS interop
 const traverse = typeof _traverse === 'function' ? _traverse : (_traverse as { default: typeof _traverse }).default;
 
 export interface DataFlowResult {
-  type: 'source-to-sink' | 'eval-exec' | 'suspicious-network' | 'fs-access';
+  /**
+   * module-call / param-sink: a value read from a file or the environment
+   * passed to a helper module of the skill, and a helper module's exported
+   * parameter that reaches a send — joined across the skill's files by SKL-001.
+   */
+  type: 'source-to-sink' | 'eval-exec' | 'suspicious-network' | 'fs-access' | 'module-call' | 'param-sink';
   source?: string;
   /** source-to-sink: what the source variable holds — file contents or environment values. */
   sourceKind?: 'file' | 'env';
@@ -20,6 +26,23 @@ export interface DataFlowResult {
   socketClient?: boolean;
   /** source-to-sink: the source is the whole environment (`process.env`, or a variable holding it). */
   wholeEnv?: boolean;
+  /**
+   * source-to-sink (file): where the file read lives, when its path could be
+   * worked out — a credential store, outside the skill and workspace, the
+   * skill's own file, a workspace file, or chosen at runtime. Absent: unknown
+   * (Python and line-scan flows), judged as before.
+   */
+  sourcePath?: SourcePath;
+  /** source-to-sink (file): the path as resolved (`~/.ssh/id_rsa`). */
+  resolvedPath?: string;
+  /** source-to-sink: found by following the value (await, callbacks, transforms, helpers), not by name. */
+  derived?: boolean;
+  /** source-to-sink: the data leaves in a DNS query name. */
+  dns?: boolean;
+  /** module-call / param-sink: the relative module (`./lib/upload`), export and argument position. */
+  module?: string;
+  exportName?: string;
+  argIndex?: number;
   /**
    * eval-exec: the call's static command/code text — string and template
    * parts, `${…}` for interpolations; absent when the argument is computed.
@@ -605,7 +628,83 @@ function analyzeUncached(code: string): DataFlowResult[] {
   for (const r of results) {
     if (r.type === 'source-to-sink' && r.sourceKind === 'env' && r.source === 'process.env') r.wholeEnv = true;
   }
+  mergeFlows(ast, results, lineText);
   return results;
+}
+
+const describePath = (t: Taint): string => (t.kind === 'file' && t.resolved && t.resolved !== '…' ? ` (${t.resolved})` : '');
+
+/**
+ * Add what value-following finds (js-flow.ts) to the name-matched results:
+ * where each file flow's path leads, flows the name match missed, credential
+ * reads through built paths, and calls into the skill's helper modules.
+ */
+function mergeFlows(ast: JsAst, results: DataFlowResult[], lineText: (line: number) => string): void {
+  let fa: ReturnType<typeof analyzeFlows>;
+  try {
+    fa = analyzeFlows(ast);
+  } catch {
+    return;
+  }
+  const byLine = new Map<number, typeof fa.flows>();
+  for (const f of fa.flows) byLine.set(f.line, [...(byLine.get(f.line) ?? []), f]);
+  const pathFields = (t: Taint | undefined): Pick<DataFlowResult, 'sourcePath' | 'resolvedPath'> =>
+    t?.kind === 'file' && t.path ? { sourcePath: t.path, ...(t.resolved ? { resolvedPath: t.resolved } : {}) } : {};
+
+  const covered = new Set<number>();
+  for (const r of results) {
+    if (r.type !== 'source-to-sink') continue;
+    covered.add(r.line);
+    if (r.sourceKind !== 'file') continue;
+    const same = byLine.get(r.line)?.find(f => f.taint.kind === 'file' && (f.source === r.source || !fa.namedReads.has(r.source ?? '')));
+    Object.assign(r, pathFields(same?.taint ?? fa.namedReads.get(r.source ?? '')));
+  }
+  for (const f of fa.flows) {
+    if (covered.has(f.line)) continue;
+    const t = f.taint;
+    const kind = t.kind === 'file' ? 'file' : 'env';
+    const what = t.kind === 'host' ? (f.source === t.origin ? '' : ` (${t.origin})`) : describePath(t);
+    results.push({
+      type: 'source-to-sink',
+      source: f.source,
+      sourceKind: kind,
+      ...(t.kind === 'env' && t.wholeEnv ? { wholeEnv: true } : {}),
+      ...pathFields(t),
+      sink: f.sink,
+      ...(f.sinkObject ? { sinkObject: f.sinkObject } : {}),
+      derived: true,
+      ...(f.dns ? { dns: true } : {}),
+      line: f.line,
+      snippet: lineText(f.line).slice(0, 120),
+      description: f.via
+        ? `Data flows from "${f.source}"${what} through ${f.via}() to ${f.sink}`
+        : f.dns
+          ? `Data flows from "${f.source}"${what} into a DNS query name (${f.sink})`
+          : `Data flows from "${f.source}"${what} to ${/(?:^|\.|\()fetch\)?$/.test(f.sink) ? `${f.sink}()` : `network sink "${f.sink}"`}`,
+    });
+  }
+  const reported = new Set(results.filter(r => r.type === 'fs-access').map(r => r.line));
+  for (const c of fa.credentialReads) {
+    if (reported.has(c.line)) continue;
+    results.push({ type: 'fs-access', source: c.resolved, line: c.line, snippet: lineText(c.line).slice(0, 120), description: `Reading sensitive path: ${c.resolved}` });
+  }
+  for (const m of fa.moduleCalls) {
+    const t = m.taint;
+    results.push({
+      type: 'module-call', source: m.source, sourceKind: t.kind === 'file' ? 'file' : 'env',
+      ...(t.kind === 'env' && t.wholeEnv ? { wholeEnv: true } : {}), ...pathFields(t),
+      module: m.module, exportName: m.exportName, argIndex: m.argIndex,
+      line: m.line, snippet: lineText(m.line).slice(0, 120),
+      description: `Data from "${m.source}"${describePath(t)} passed to ${m.module}`,
+    });
+  }
+  for (const p of fa.paramSinks) {
+    results.push({
+      type: 'param-sink', exportName: p.exportName, argIndex: p.paramIndex, sink: p.sink,
+      line: p.line, snippet: lineText(p.line).slice(0, 120),
+      description: `Parameter ${p.paramIndex + 1} of export "${p.exportName}" reaches ${p.sink}`,
+    });
+  }
 }
 
 type ArgNode = Node | { type: string };

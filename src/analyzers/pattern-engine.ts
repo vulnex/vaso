@@ -79,10 +79,13 @@ export const SECURITY_PATTERNS: PatternRule[] = [
   // Reading the keychain — not the word (`# don't use the OS keychain`)
   { id: 'CH-008', pattern: /\bsecurity\s+(?:find-(?:generic|internet)-password|dump-keychain|export\s+-k)\b|\bSec(?:ItemCopyMatching|KeychainFind(?:Generic|Internet)Password)\b|\/Library\/Keychains\/|\blogin\.keychain(?:-db)?\b|\bchainbreaker\b/i, category: 'credential-harvest', severity: 'critical', description: 'macOS Keychain access' },
 
-  // Exfiltration (from openclaw-security-monitor + B@dskills)
-  { id: 'EX-001', pattern: /\.postMessage\s*\(.*\btransfer\b/i, category: 'exfiltration', severity: 'warning', description: 'postMessage with transfer' },
-  { id: 'EX-002', pattern: /\bwebhook\b.*\b(?:send|post)\b/i, category: 'exfiltration', severity: 'warning', description: 'Webhook exfiltration pattern' },
-  { id: 'EX-003', pattern: /dns[^\n]{0,500}?(?:lookup|resolve)[^\n]{0,500}?(?:encode|btoa|Buffer)/i, category: 'exfiltration', severity: 'critical', description: 'DNS exfiltration' },
+  // Exfiltration (EX-001–003) and code execution (CE-001–004) were line
+  // regexes no check ran. The AST analyzer covers both and better: SKL-001
+  // follows data into DNS query names, webhooks and other sends (a regex on
+  // `dns … lookup … Buffer` fired on `Buffer.byteLength` in a lookup callback
+  // and missed an encoding on the line before); SKL-003 resolves exec/eval
+  // however it is reached (a `child_process … exec` regex can't see
+  // `require(m)[k]`). postMessage transfer is a browser API.
 
   // Prompt injection indicators
   { id: 'PI-001', pattern: /ignore\s+(?:all\s+)?(?:previous|above|prior)\s+instructions/i, category: 'prompt-injection', severity: 'warning', description: 'Prompt injection — instruction override' },
@@ -110,12 +113,6 @@ export const SECURITY_PATTERNS: PatternRule[] = [
   { id: 'OB-002', pattern: /\batob\s*\(/i, category: 'obfuscation', severity: 'warning', description: 'atob decode' },
   { id: 'OB-003', pattern: /\\x[0-9a-fA-F]{2}(?:\\x[0-9a-fA-F]{2}){5,}/i, category: 'obfuscation', severity: 'warning', description: 'Hex-encoded string (6+ bytes)' },
   { id: 'OB-004', pattern: /\\u[0-9a-fA-F]{4}(?:\\u[0-9a-fA-F]{4}){5,}/i, category: 'obfuscation', severity: 'warning', description: 'Unicode-encoded string (6+ chars)' },
-
-  // Code execution (from Sclawhub)
-  { id: 'CE-001', pattern: /\beval\s*\(/i, category: 'code-exec', severity: 'critical', description: 'eval() usage' },
-  { id: 'CE-002', pattern: /\bnew\s+Function\s*\(/i, category: 'code-exec', severity: 'critical', description: 'new Function() constructor' },
-  { id: 'CE-003', pattern: /child_process.*\b(?:exec|execSync|spawn|spawnSync)\b/i, category: 'code-exec', severity: 'critical', description: 'child_process execution' },
-  { id: 'CE-004', pattern: /\brequire\s*\(\s*['"]child_process['"]\s*\)/i, category: 'code-exec', severity: 'critical', description: 'child_process require' },
 ];
 
 export function scanWithPatterns(code: string, rules?: PatternRule[]): PatternMatch[] {

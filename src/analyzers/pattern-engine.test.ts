@@ -98,22 +98,6 @@ describe('Pattern Engine', () => {
     });
   });
 
-  describe('Code execution', () => {
-    it('detects eval', () => {
-      const code = 'eval(userInput)';
-      const matches = scanWithPatterns(code);
-      console.log(`[PatternEngine] eval → ${matches.length} match(es):`, matches.map(m => `${m.category}:${m.pattern}`));
-      expect(matches.some(m => m.category === 'code-exec')).toBe(true);
-    });
-
-    it('detects child_process require', () => {
-      const code = "const cp = require('child_process')";
-      const matches = scanWithPatterns(code);
-      console.log(`[PatternEngine] child_process → ${matches.length} match(es):`, matches.map(m => `${m.category}:${m.pattern}`));
-      expect(matches.some(m => m.category === 'code-exec')).toBe(true);
-    });
-  });
-
   describe('Obfuscation', () => {
     it('detects base64 decode', () => {
       const code = 'Buffer.from(payload, "base64")';
@@ -159,12 +143,6 @@ describe('Pattern Engine — alternation precedence', () => {
     expect(rule('CW-003').pattern.test('client_secret = load()')).toBe(false);
     expect(rule('CW-003').pattern.test('coinbase_client = Client(api_key, api_secret)')).toBe(false); // no \bcoinbase\b
     expect(rule('CW-003').pattern.test('const coinbase = new Coinbase({ apiKey: key })')).toBe(true);
-  });
-
-  it('EX-002 needs "webhook" before send/post', () => {
-    expect(rule('EX-002').pattern.test('res = requests.post(url, json=body)')).toBe(false);
-    expect(rule('EX-002').pattern.test('webhook.send(JSON.stringify(process.env))')).toBe(true);
-    expect(rule('EX-002').pattern.test('await fetch(webhookUrl); // webhook post')).toBe(true);
   });
 });
 

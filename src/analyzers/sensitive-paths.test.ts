@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { SENSITIVE_SINKS, classifySensitivePath } from './sensitive-paths.js';
+import { SENSITIVE_SINKS, classifySensitivePath, isCredentialPath } from './sensitive-paths.js';
 
 describe('SENSITIVE_SINKS', () => {
   it('is the list the probe enforces (probe/sensitive_sinks.go), pattern for pattern', () => {
@@ -21,5 +21,18 @@ describe('SENSITIVE_SINKS', () => {
     expect(classifySensitivePath('/home/u/.ssh/id_ed25519')).toHaveLength(1);
     expect(classifySensitivePath('/home/u/.aws/credentials')).toHaveLength(1);
     expect(classifySensitivePath('/home/u/.claude/skills/sshlink')).toEqual([]);
+  });
+});
+
+describe('isCredentialPath (skill read sources, dt17)', () => {
+  it('credential stores by directory or by file name, relative or absolute', () => {
+    for (const p of ['/home/user/.ssh/id_rsa', '~/.aws/credentials'.replace('~', '/home/u'), '.env', '/home/u/.npmrc', '/r/.git-credentials', '/x/.docker/config.json', '/k/.kube/config', 'id_ed25519']) {
+      expect(isCredentialPath(p), p).toBe(true);
+    }
+  });
+  it('ordinary files, shell startup files and the rest of /etc are not credential reads', () => {
+    for (const p of ['/home/u/.config/myskill/settings.json', 'template.txt', '/home/u/.bashrc', '/etc/os-release', 'docs/credentials-guide.md', '--env']) {
+      expect(isCredentialPath(p), p).toBe(false);
+    }
   });
 });

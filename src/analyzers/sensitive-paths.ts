@@ -31,3 +31,37 @@ export function classifySensitivePath(path: string): string[] {
   if (!path || path.startsWith('-')) return [];
   return SENSITIVE_SINKS.filter((s) => s.re.test(path)).map((s) => s.label);
 }
+
+/**
+ * Credential stores a program reads secrets from, by path: the credential
+ * entries of SENSITIVE_SINKS (not shell startup files or all of /etc, which
+ * matter as write targets) plus files that hold secrets by name. The skill
+ * analyzers use it to tell a credential read (SKL-006/010, SKL-001's source)
+ * from a skill reading its own data.
+ */
+const CREDENTIAL_SINK_LABELS = /SSH|AWS|GnuPG|Kubernetes|Docker/;
+const CREDENTIAL_FILES: RegExp[] = [
+  /\/\.ssh\//i,
+  /\/\.aws\//i,
+  /\/\.gnupg\//i,
+  /\/\.kube\//i,
+  /\/\.env/i,
+  /\/etc\/(?:passwd|shadow|hosts)/i,
+  /\/\.docker\/config/i,
+  // credential stores by file name — not any path containing the word
+  // (`docs/secretary-notes.md`, `credentials-guide.md`)
+  /(?:^|[\/])\.?credentials(?:\.(?:json|toml|ya?ml|csv|ini|db))?$/i,
+  /(?:^|[\/])\.?secrets?(?:\.(?:json|toml|ya?ml|env|txt))?$/i,
+  /client_secret[\w.-]*\.json$/i,
+  /(?:^|[\/])\.(?:git-credentials|netrc|pgpass|npmrc|pypirc)$/i,
+  /(?:^|[\/])id_(?:rsa|dsa|ecdsa|ed25519)$/i,
+];
+
+/** Whether a path names a credential store (see CREDENTIAL_FILES). */
+export function isCredentialPath(path: string): boolean {
+  if (!path || path.startsWith('-')) return false;
+  // `.env` relative to the working directory is the same secret file
+  const rooted = path.startsWith('/') ? path : `/${path}`;
+  return CREDENTIAL_FILES.some(re => re.test(rooted))
+    || SENSITIVE_SINKS.some(s => CREDENTIAL_SINK_LABELS.test(s.label) && s.re.test(rooted));
+}

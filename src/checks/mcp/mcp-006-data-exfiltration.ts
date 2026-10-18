@@ -16,6 +16,10 @@ const OUTBOUND_METHODS = new Set(['fetch', 'request', 'get', 'post', 'put', 'pat
 function isExfiltration(r: DataFlowResult): boolean {
   if (r.type !== 'source-to-sink') return false;
   if (r.sourceKind === 'env' && !r.wholeEnv) return false;
+  // Flows found by following the value (callbacks, transforms, helpers) count
+  // only for a credential store or the whole environment: a tool handler
+  // reading the file it was asked for and uploading it is the tool's job
+  if (r.derived && r.sourcePath !== 'credential' && !r.wholeEnv) return false;
   if (r.sink === 'fetch') return true;
   // Sent on a socket the server opened to a remote endpoint (`new WebSocket(url)`)
   if (r.sink === 'send' && r.socketClient) return true;

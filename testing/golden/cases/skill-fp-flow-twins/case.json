@@ -1,0 +1,11 @@
+{
+  "agent": "claude-code",
+  "source": "dt17 benign twins: an API key in its own API's header, the skill's own config under ~/.config, a DNS lookup of a fixed name, uploading the file the caller chose, POSTing the skill's own template \u2014 at most info",
+  "info": [
+    "SKL-001"
+  ],
+  "pass": [
+    "SKL-006",
+    "SKL-010"
+  ]
+}

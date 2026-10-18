@@ -1,0 +1,8 @@
+{
+  "agent": "claude-code",
+  "source": "dt17 detection robustness: a credential read reaches a send through await, .then, a node callback, base64/JSON wrapping, a globalThis.fetch alias, a same-file and a same-skill helper, a path.join(os.homedir()) path; destructured / filtered process.env; host identity encoded into a DNS name (inert fixtures, .example.invalid hosts)",
+  "fail": {
+    "SKL-001": "critical",
+    "SKL-006": "critical"
+  }
+}
