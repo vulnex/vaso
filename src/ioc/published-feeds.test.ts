@@ -7,6 +7,7 @@ import { satisfies, parseSemVer, constraintBranches } from '../core/semver.js';
 import type { IOCFeed, IOCFeedData } from './feed-types.js';
 import type { AdvisoryFeed } from '../advisory/advisory-types.js';
 import { LIBRARY_ADVISORIES } from '../advisory/library-advisories.js';
+import { buildBundledAdvisoryDatabase } from '../advisory/database.js';
 
 /**
  * Guards on the *published* feed artifacts in feeds/ — the hand-edited JSON
@@ -139,5 +140,21 @@ describe('advisory feed mirrors the bundled library advisories', () => {
   it.each(LIBRARY_ADVISORIES.map((a) => [a.id, a] as const))('%s is in the feed, identical to the bundle', (id, adv) => {
     // The feed overrides a bundled advisory with the same id; they must agree.
     expect(byId.get(id)).toEqual(adv);
+  });
+});
+
+describe('bundled advisories carry every published feed advisory', () => {
+  // Offline installs (no `vaso update`) see only the bundle, so every advisory
+  // the signed feed publishes must also ship in it — and agree with it, since
+  // the feed overrides a bundled advisory with the same id.
+  const feed = readFeed<AdvisoryFeed>('advisory-feed.json');
+  const bundled = new Map(buildBundledAdvisoryDatabase().advisories.map((a) => [a.id, a]));
+
+  it('no feed advisory is missing from the bundle', () => {
+    expect(feed.data.advisories.map((a) => a.id).filter((id) => !bundled.has(id))).toEqual([]);
+  });
+
+  it.each(feed.data.advisories.map((a) => [a.id, a] as const))('%s: bundled copy matches the feed', (id, adv) => {
+    expect(bundled.get(id)).toEqual(adv);
   });
 });

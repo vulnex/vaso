@@ -50,9 +50,10 @@ describe('ADV-001: Known Framework Vulnerability', () => {
   });
 
   it('passes for fixed version', async () => {
-    // 2026.4.20 is the fixed version of the newest bundled OpenClaw advisory
-    // (CVE-2026-44999) and clears every earlier calver range.
-    const ctx = makeContext({ agent: 'openclaw', version: '2026.4.20' });
+    // 2026.8.1 is the fixed version of the newest bundled OpenClaw advisories
+    // (CVE-2026-100552, GHSA-ghpx-6xwq-2w4w, GHSA-5mrc-77hj-xjxv) and clears
+    // every earlier calver range.
+    const ctx = makeContext({ agent: 'openclaw', version: '2026.8.1' });
     const result = await adv001.run(ctx);
     expect(result.passed).toBe(true);
   });
@@ -103,10 +104,28 @@ describe('ADV-001: Known Framework Vulnerability', () => {
     expect(result.evidence?.some(e => e.detail?.includes('CVE-2026-50549'))).toBe(true);
   });
 
-  it('passes a coding agent at the GhostApproval fix version', async () => {
+  it('clears the GhostApproval advisory at its fix version', async () => {
     const ctx = makeContext({ agent: 'cursor-cli', version: '3.0.0' });
     const result = await adv001.run(ctx);
-    expect(result.passed).toBe(true);
+    expect(result.evidence?.some(e => e.detail?.includes('CVE-2026-50549'))).toBe(false);
+    // 3.0.0 is still below CVE-2026-73217's 3.1.2 fix; 3.1.2 clears both.
+    expect(result.evidence?.some(e => e.detail?.includes('CVE-2026-73217'))).toBe(true);
+    expect((await adv001.run(makeContext({ agent: 'cursor-cli', version: '3.1.2' }))).passed).toBe(true);
+  });
+
+  // Feed v7 advisories ship in the bundle: an offline install flags them.
+  it.each([
+    ['codex', '0.20.0', 'CVE-2025-59532', '0.39.0'],
+    ['nemoclaw', '0.0.16', 'CVE-2026-65090', '0.0.25'],
+    ['claude-code', '2.1.70', 'CVE-2026-40068', '2.1.260'],
+    ['hermes', '0.10.0', 'CVE-2026-9368', '0.16.0'],
+    ['openclaw', '2026.4.20', 'CVE-2026-45004', '2026.8.1'],
+  ] as const)('flags %s %s offline (%s), clears %s', async (agent, version, id, fixed) => {
+    const result = await adv001.run(makeContext({ agent, version }));
+    expect(result.passed).toBe(false);
+    expect(result.evidence?.some(e => e.detail?.includes(id))).toBe(true);
+    const cleared = await adv001.run(makeContext({ agent, version: fixed }));
+    expect(cleared.evidence?.some(e => e.detail?.includes(id)) ?? false).toBe(false);
   });
 
   it('flags Claude Code below the symlink-warning hardening (v2.1.32)', async () => {
@@ -153,6 +172,20 @@ describe('ADV-002: Dependency Vulnerability', () => {
       const r = await adv002.run(makeContext({ installDir: dir }));
       expect(r.passed).toBe(false);
       expect(r.evidence?.[0].detail).toContain('mcp-remote@0.1.10');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('flags a feed-v7 package advisory offline (bundled) and clears its fix', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'vaso-adv002-'));
+    try {
+      writeFileSync(join(dir, 'package.json'), JSON.stringify({ dependencies: { '@bytebase/dbhub': '0.22.4' } }));
+      const r = await adv002.run(makeContext({ installDir: dir }));
+      expect(r.passed).toBe(false);
+      expect(r.evidence?.some(e => e.detail?.includes('CVE-2026-61742'))).toBe(true);
+      writeFileSync(join(dir, 'package.json'), JSON.stringify({ dependencies: { '@bytebase/dbhub': '0.22.6' } }));
+      expect((await adv002.run(makeContext({ installDir: dir }))).passed).toBe(true);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -304,7 +337,7 @@ describe('Advisory checks evaluate every installed CLI copy', () => {
     const ctx = makeContext({
       agent: 'openclaw',
       version: '2026.9.4',
-      otherInstalls: [{ path: '/usr/bin/openclaw', version: '2026.4.20' }, { path: '/opt/openclaw' }],
+      otherInstalls: [{ path: '/usr/bin/openclaw', version: '2026.8.1' }, { path: '/opt/openclaw' }],
     });
     expect((await adv001.run(ctx)).passed).toBe(true);
   });

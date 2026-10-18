@@ -21,11 +21,14 @@ describe('AdvisoryDatabase', () => {
     // Every CVE/GHSA entry cites its source. IDs in the CVE namespace must be
     // real records for the product described — early scaffolding shipped
     // invented CVE-2026-400xx entries whose IDs belong to unrelated products.
+    // The removed IDs are listed exactly: the range also holds real records
+    // (CVE-2026-40068 is a Claude Code trust-dialog bypass).
+    const invented = new Set(['40001', '40002', '40003', '40010', '40011', '40020', '40030', '40031', '40040', '40041', '40050', '40051', '40100'].map((n) => `CVE-2026-${n}`));
     const db = buildBundledAdvisoryDatabase();
     for (const adv of db.advisories) {
       if (/^(CVE|GHSA)-/.test(adv.id)) expect(adv.reference, adv.id).toMatch(/^https:\/\//);
       expect(adv.reference ?? '').not.toContain('vulnex/vaso-advisories');
-      expect(adv.id).not.toMatch(/^CVE-2026-40(0\d\d|100)$/);
+      expect(invented.has(adv.id), adv.id).toBe(false);
     }
   });
 

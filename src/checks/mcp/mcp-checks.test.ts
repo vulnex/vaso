@@ -2430,6 +2430,23 @@ describe('MCP-027 Vulnerable / Rolled-Back MCP Version', () => {
     }));
     expect(fixed.passed).toBe(true);
   });
+
+  it('flags feed-v7 package advisories offline (bundled) and clears their fixes', async () => {
+    const run = (spec: string) => mcp027.run(makeContext({
+      mcpConfigs: [cfg({ name: 's', command: 'npx', args: ['-y', spec], transport: 'stdio' })],
+      mcpStateStore: new InMemoryMcpStateStore(),
+    }));
+    const gitlab = await run('@zereight/mcp-gitlab@2.1.26');
+    expect(gitlab.passed).toBe(false);
+    expect(gitlab.severity).toBe('critical');
+    expect(gitlab.evidence?.some(e => e.detail?.includes('CVE-2026-61560'))).toBe(true);
+    expect(gitlab.evidence?.some(e => e.detail?.includes('GHSA-5648-rgj9-v224'))).toBe(true);
+    expect((await run('@zereight/mcp-gitlab@2.1.30')).passed).toBe(true);
+    // An OSV MAL entry: every published version is malicious.
+    const mal = await run('mcp-server-notion@1.0.0');
+    expect(mal.passed).toBe(false);
+    expect(mal.evidence?.some(e => e.detail?.includes('MAL-2026-5480'))).toBe(true);
+  });
 });
 
 describe('MCP-028 MCP Configuration Drift', () => {
