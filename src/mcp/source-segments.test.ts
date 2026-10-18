@@ -22,6 +22,31 @@ describe('sourceSegments', () => {
     expect(sourceSegments(code).map((s) => s.line)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
   });
 
+  it('bounds a long statement without `;`, cutting outside strings where it can (dt15)', async () => {
+    const { MAX_SEGMENT } = await import('./source-segments.js');
+    const obj = `x={${Array.from({ length: 2000 }, (_, i) => `k${i}:"v${i}"`).join(',')}}`;
+    const segs = sourceSegments(obj);
+    expect(segs.length).toBeGreaterThan(1);
+    expect(segs.every((s) => s.text.length <= MAX_SEGMENT && s.line === 1)).toBe(true);
+    expect(segs.map((s) => s.text).join('')).toBe(obj); // cut at commas: nothing added
+    expect(segs.every((s) => !withoutStringText(s.text).includes('v1'))).toBe(true);
+  });
+
+  it('closes and reopens a string longer than a segment, so it stays a string', async () => {
+    const { MAX_SEGMENT } = await import('./source-segments.js');
+    const blob = `const img="data:image/png,${'QUJD\\"'.repeat(1500)}";`;
+    const segs = sourceSegments(`a();${'b'.repeat(400)}\n${blob}`);
+    const pieces = segs.filter((s) => s.line === 2);
+    expect(pieces.length).toBeGreaterThan(2);
+    for (const s of pieces) {
+      expect(s.text.length).toBeLessThanOrEqual(MAX_SEGMENT);
+      expect(withoutStringText(s.text)).not.toMatch(/QUJD/);
+    }
+    const start = Date.now();
+    sourceSegments(`${'a '.repeat(500_000)}\n${'"'.repeat(1)}${'x'.repeat(1_000_000)}`);
+    expect(Date.now() - start).toBeLessThan(1000);
+  });
+
   it('gives nearby text across neighbouring segments', () => {
     const segs = sourceSegments('a\nb\nc\nd');
     expect(nearbyText(segs, 1, 1)).toBe('a\nb\nc');

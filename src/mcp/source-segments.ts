@@ -45,9 +45,63 @@ export function sourceSegments(code: string, opts: { python?: boolean } = {}): S
       continue;
     }
     for (const statement of text.split(/(?<=;)/)) {
-      if (statement.trim()) out.push({ line: i + 1, text: statement });
+      if (!statement.trim()) continue;
+      for (const piece of boundedPieces(statement)) out.push({ line: i + 1, text: piece });
     }
   }
+  return out;
+}
+
+/**
+ * Segments are at most this long. A statement without `;` (a megabyte data
+ * URI, an object literal, a line built to stall a check) otherwise reaches
+ * every line regex whole, and one with a quadratic worst case runs for
+ * minutes.
+ */
+export const MAX_SEGMENT = 2000;
+
+/**
+ * A long statement in pieces of at most MAX_SEGMENT, cut after the last `,`,
+ * `{`, `}` or space outside a string when there is one in the second half of
+ * the window. A string longer than that is cut inside, closed with its quote
+ * and reopened in the next piece, so each piece still blanks it as a string
+ * (`withoutStringText`).
+ */
+function boundedPieces(statement: string): string[] {
+  if (statement.length <= MAX_SEGMENT) return [statement];
+  const out: string[] = [];
+  let start = 0;
+  let reopen = ''; // quote the current piece starts inside
+  while (statement.length - start > MAX_SEGMENT - reopen.length) {
+    const limit = start + MAX_SEGMENT - reopen.length - 1;
+    let quote = reopen;
+    let lastCut = -1;
+    let i = start;
+    for (; i < limit; i++) {
+      const c = statement[i];
+      if (quote) {
+        if (c === '\\') {
+          if (i + 1 >= limit) break; // keep an escape with what it escapes
+          i++;
+        } else if (c === quote) {
+          quote = '';
+        }
+        continue;
+      }
+      if (c === '"' || c === "'" || c === '`') quote = c;
+      else if (c === ',' || c === '{' || c === '}' || c === ' ') lastCut = i + 1;
+    }
+    if (lastCut > start + (limit - start) / 2) {
+      out.push(reopen + statement.slice(start, lastCut));
+      reopen = '';
+      start = lastCut;
+    } else {
+      out.push(reopen + statement.slice(start, i) + quote);
+      reopen = quote;
+      start = i;
+    }
+  }
+  out.push(reopen + statement.slice(start));
   return out;
 }
 
