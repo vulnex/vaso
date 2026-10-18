@@ -348,11 +348,11 @@ export const openclawAdapter: AgentAdapter = {
                 agentMerged = deepMerge(agentMerged, c.data) as Record<string, unknown>;
               }
 
-              // Build skillsDirs: shared + per-agent
+              // Per-agent skills only: the shared dir is the parent
+              // installation's, scanned (and reported) there once — analysing
+              // it again per sub-agent only repeated the work, since
+              // inherited findings are dropped from sub-agents anyway
               const agentSkillsDirs: string[] = [];
-              if (skillsDir && await fs.access(skillsDir)) {
-                agentSkillsDirs.push(skillsDir);
-              }
               const agentSkillsDir = join(agentSubDir, 'skills');
               if (await fs.access(agentSkillsDir)) {
                 agentSkillsDirs.push(agentSkillsDir);

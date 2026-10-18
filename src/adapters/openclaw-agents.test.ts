@@ -150,9 +150,10 @@ describe('OpenClaw per-agent discovery', () => {
     // Should include both global and agent-specific configs
     expect(researcherConfigs.length).toBeGreaterThan(1);
 
-    // Verify skillsDirs includes both shared and per-agent
-    expect(researcher!.skillsDirs).toContain(sharedSkillsDir);
+    // Per-agent skills only — the shared dir is the parent's, scanned once there (dt15 P9)
+    expect(researcher!.skillsDirs).not.toContain(sharedSkillsDir);
     expect(researcher!.skillsDirs).toContain(researcherSkillsDir);
+    expect(result.find(r => !r.agentName)!.skillsDir).toBe(sharedSkillsDir);
     // skillsDir should be the per-agent one (last in list)
     expect(researcher!.skillsDir).toBe(researcherSkillsDir);
 
@@ -160,9 +161,9 @@ describe('OpenClaw per-agent discovery', () => {
     const coder = result.find(i => i.agentName === 'coder');
     expect(coder).toBeDefined();
     expect(coder!.installDir).toBe(coderDir);
-    // Coder has no skills/ dir so skillsDirs should only have shared
-    expect(coder!.skillsDirs).toContain(sharedSkillsDir);
-    expect(coder!.skillsDirs).not.toContain(join(coderDir, 'skills'));
+    // Coder has no skills/ dir of its own — nothing to analyse (shared is the parent's)
+    expect(coder!.skillsDirs).toBeUndefined();
+    expect(coder!.skillsDir).toBeUndefined();
   });
 
   it('emits only global installation when no agents/ dir exists', async () => {
