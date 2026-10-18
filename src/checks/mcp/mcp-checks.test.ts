@@ -3373,6 +3373,47 @@ describe('MCP-007 tool-result passthrough', () => {
     expect(byLine.get(41)).toMatch(/URL the caller chooses \(client via fetch_and_parse\(\)\)/);
   });
 
+  it('follows a session made in __init__, and a status code is not content (dt17 MD-D)', async () => {
+    const scraper = (init: string, body: string) => py([
+      'import requests, httpx',
+      'class Scraper:',
+      '    def __init__(self):',
+      `        ${init}`,
+      '    def get_text(self, target):',
+      `        r = ${body}`,
+      '        return r.text',
+      'scraper = Scraper()',
+      '@mcp.tool()',
+      'def scrape(target: str) -> str:',
+      '    text = scraper.get_text(target)',
+      '    return text',
+    ].join('\n'));
+    for (const [init, body] of [['self.session = requests.Session()', 'self.session.get(target, timeout=10)'], ['self.client = httpx.Client()', 'self.client.get(target)']]) {
+      const r = await scraper(init, body);
+      expect(r.severity, init).toBe('warning');
+      expect(r.evidence![0].detail).toMatch(/URL the caller chooses/);
+    }
+    // a `session` attribute that isn't an HTTP client (a cache) stays unflagged
+    expect((await scraper('self.session = redis.Redis()', 'self.session.get(target)')).passed).toBe(true);
+    // only the status code returned: no content reaches the model
+    const status = await py([
+      'import httpx',
+      '@mcp.tool()',
+      'def check_url(url: str) -> str:',
+      '    r = httpx.get(url)',
+      '    return f"Status: {r.status_code}"',
+    ].join('\n'));
+    expect(status.passed).toBe(true);
+    const body = await py([
+      'import httpx',
+      '@mcp.tool()',
+      'def check_url(url: str) -> str:',
+      '    r = httpx.get(url)',
+      '    return f"Status: {r.status_code}: {r.text}"',
+    ].join('\n'));
+    expect(body.severity).toBe('warning');
+  });
+
   it('follows helpers that read a file whose text is returned, at info', async () => {
     const result = await py([
       'def load_doc(path):',

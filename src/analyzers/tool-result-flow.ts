@@ -631,8 +631,11 @@ function analyzePython(code: string): ExternalContentFlow[] {
     }
     return out;
   };
+  // A response's status is not its content: `f"Status: {r.status_code}"`
+  // returns a number the server chose nothing about, not fetched text
+  const STATUS_ONLY = /(?<![\w.])[A-Za-z_]\w*\s*\.\s*(?:status_code|status|ok|is_success|is_error|is_redirect|elapsed|encoding)\b(?!\s*[.([])/g;
   const mentionsAny = (text: string, names: Set<string>, fn: PyFn): boolean =>
-    [...dataView(text, fn).matchAll(/(?<![\w.])[A-Za-z_]\w*/g)].some((m) => names.has(m[0]));
+    [...dataView(text, fn).replace(STATUS_ONLY, ' 0 ').matchAll(/(?<![\w.])[A-Za-z_]\w*/g)].some((m) => names.has(m[0]));
 
   /**
    * Whether the value of statement `i` — with the source call written as
@@ -717,8 +720,12 @@ function analyzePython(code: string): ExternalContentFlow[] {
         const urlLike = start?.literal !== undefined ? /^(?:https?:\/\/|\/)/i.test(start.literal)
           : Boolean((lastName && URL_NAME.test(lastName)) || (start?.param !== undefined && URL_NAME.test(fn.params[start.param])));
         const made = receiver ? new RegExp(String.raw`${PY_CLIENT_CTOR.source}.*\bas\s+${receiver}\b|\b${receiver}\s*=\s*(?:await\s+)?[\w.]*?${PY_CLIENT_CTOR.source}`) : undefined;
+        // `self.session.get(…)`: the session may be made in another method of
+        // the class (`__init__: self.session = requests.Session()`)
+        const onSelf = receiver !== undefined && fn.cls !== undefined && /\bself\s*\.\s*$/.test(code.slice(0, http.index));
+        const inClass = (j: number): boolean => onSelf && fns.some((f) => f.cls === fn.cls && f.module === fn.module && j > f.def && j < f.end);
         const madeHere = made !== undefined && blanked.some((b, j) =>
-          ((j > fn.def && j < fn.end) || (indentOf(j) === 0 && moduleOf[j] === fn.module)) && made.test(b));
+          ((j > fn.def && j < fn.end) || (indentOf(j) === 0 && moduleOf[j] === fn.module) || inClass(j)) && made.test(b));
         if (!receiver || urlLike || madeHere) {
           consider({
             line: stmts[i].line, snippet: firstLine(i), via: 'http', through: [],
