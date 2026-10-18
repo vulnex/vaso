@@ -441,14 +441,28 @@ async function applyBaseline(
     let mismatched = false;
     // A pre-1.3.1 latest.json may have been saved with -a for other agents:
     // comparing it with this scan would show everything as new or resolved
-    const types = (r: ScanResult) => [...new Set(r.agents.map(a => a.agent))].sort().join(',');
-    if (baseline && baseline.vasoVersion === undefined && types(baseline) !== types(result)) {
-      localLog(chalk.yellow(`The saved baseline covers other agents (${types(baseline) || 'none'}) — not compared. Run with --save-baseline to start a new one.`));
-      baseline = null;
-      mismatched = true;
+    const types = (r: ScanResult) => [...new Set(r.agents.map(a => a.agent))].sort();
+    // What this scan is compared as: all of it, or (an old baseline taken
+    // before an agent was added or installed) only the agents it covers
+    let compared = result;
+    if (baseline && baseline.vasoVersion === undefined && types(baseline).join(',') !== types(result).join(',')) {
+      const baseTypes = types(baseline);
+      const current = new Set(types(result));
+      if (baseTypes.length > 0 && baseTypes.every(t => current.has(t))) {
+        const added = [...current].filter(t => !baseTypes.includes(t));
+        compared = { ...result, agents: result.agents.filter(a => baseTypes.includes(a.agent)) };
+        localLog(chalk.yellow(`The saved baseline covers only ${baseTypes.join(', ')} — comparing those; not in the baseline: ${added.join(', ')}. Run with --save-baseline to include them.`));
+      } else {
+        const others = baseTypes.filter(t => !current.has(t));
+        localLog(chalk.yellow(baseTypes.length === 0
+          ? 'The saved baseline lists no agents — not compared. Run with --save-baseline to start a new one.'
+          : `The saved baseline covers agents this scan doesn't (${others.join(', ')}) — not compared. Run with --save-baseline to start a new one.`));
+        baseline = null;
+        mismatched = true;
+      }
     }
     if (baseline) {
-      const diff = diffResults(result, baseline);
+      const diff = diffResults(compared, baseline);
       result.baselineDiff = {
         baselineTimestamp: baseline.timestamp,
         newFindings: diff.newFindings.map(f => f.id),

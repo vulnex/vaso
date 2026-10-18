@@ -115,8 +115,23 @@ describe('runScan', () => {
     mockDiffResults.mockClear();
     await runScan({ format: 'terminal', diff: true });
     expect(mockDiffResults).not.toHaveBeenCalled();
-    expect(consoleErrors.some(l => l.includes('covers other agents'))).toBe(true);
+    expect(consoleErrors.some(l => l.includes("covers agents this scan doesn't (hermes)"))).toBe(true);
     expect(consoleErrors.some(l => l.includes('No baseline found'))).toBe(false);
+  });
+
+  it('compares the common agents with a pre-1.3.1 baseline that covers a subset of this scan', async () => {
+    const current = makeScanResult();
+    current.agents = [...current.agents, { ...current.agents[0], agent: 'grok-bot' as const, installation: { agent: 'grok-bot' as const, installDir: '/tmp/g', configFiles: [] } }];
+    mockScanEngine.mockImplementation(function () { return { scan: vi.fn().mockResolvedValue(current) } as any; });
+    const legacy = makeScanResult();
+    delete (legacy as { vasoVersion?: string }).vasoVersion;
+    mockLoadBaseline.mockResolvedValue(legacy);
+    mockDiffResults.mockReturnValue({ newFindings: [], resolvedFindings: [], unchangedFindings: [] });
+    await runScan({ format: 'terminal', diff: true });
+    expect(mockDiffResults).toHaveBeenCalledTimes(1);
+    expect(mockDiffResults.mock.calls[0][0].agents.map((a: { agent: string }) => a.agent)).toEqual(['openclaw']);
+    expect(consoleErrors.some(l => l.includes('covers only openclaw') && l.includes('not in the baseline: grok-bot'))).toBe(true);
+    expect(consoleErrors.some(l => l.includes('Differential'))).toBe(true);
   });
 
   it('shows no baseline message when none found', async () => {
