@@ -178,6 +178,9 @@ export function sinkCallee(path: NodePath): SinkCallee | undefined {
   if (callee.type === 'Identifier') {
     const name = callee.name;
     const binding = path.scope.getBinding(name);
+    // `const exec = promisify(execFile)`: the function it wraps, not its name
+    const wrapped = promisifiedSink(path, binding);
+    if (wrapped) return { display: `${name} (promisify(${wrapped}))`, kind: 'process', fn: wrapped };
     const mod = bindingModule(binding);
     if (mod && binding) {
       const imported = importedName(binding);
@@ -214,6 +217,35 @@ export function sinkCallee(path: NodePath): SinkCallee | undefined {
   if (mod === 'execa' && EXECA_FUNCTIONS[prop]) return { display: `${object.name}.${prop}`, kind: 'process', fn: prop };
   if ((VM_SINKS.has(prop) || prop === 'Script') && (object.name === 'vm' || mod?.endsWith('vm'))) {
     return { display: `${object.name}.${prop}`, kind: 'code', fn: prop };
+  }
+  return undefined;
+}
+
+/**
+ * The child_process function a `promisify` wrapper binds: `execFile` for
+ * `const exec = promisify(execFile)` or `util.promisify(cp.execFile)`. Its
+ * own name says nothing — a promisified execFile named `exec` still starts
+ * the program directly, without a shell.
+ */
+function promisifiedSink(path: NodePath, binding: Binding | undefined): string | undefined {
+  const node = binding?.path.node;
+  if (node?.type !== 'VariableDeclarator' || node.init?.type !== 'CallExpression') return undefined;
+  const { callee, arguments: args } = node.init;
+  const isPromisify = (callee.type === 'Identifier' && callee.name === 'promisify')
+    || (callee.type === 'MemberExpression' && callee.property.type === 'Identifier' && callee.property.name === 'promisify');
+  const target = args[0];
+  if (!isPromisify || !target) return undefined;
+  if (target.type === 'Identifier') {
+    const tb = path.scope.getBinding(target.name);
+    const mod = bindingModule(tb);
+    const fn = mod && tb ? (CHILD_PROCESS_MODULE.test(mod) ? importedName(tb) : undefined) : target.name;
+    return fn && PROCESS_SINKS.has(fn) ? fn : undefined;
+  }
+  if (target.type === 'MemberExpression' && target.property.type === 'Identifier' && PROCESS_SINKS.has(target.property.name)) {
+    const obj = target.object;
+    const mod = obj.type === 'Identifier' ? bindingModule(path.scope.getBinding(obj.name)) : moduleOfInit(obj);
+    const childProcess = mod ? CHILD_PROCESS_MODULE.test(mod) : obj.type === 'Identifier' && CHILD_PROCESS_NAMES.has(obj.name);
+    return childProcess ? target.property.name : undefined;
   }
   return undefined;
 }

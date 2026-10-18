@@ -83,6 +83,15 @@ export async function stdioToSse(args) {
     expect(findTaintedSinks(direct, 'b.js')).toEqual([]);
   });
 
+  it('resolves promisify wrappers to the function they wrap (dt15)', () => {
+    const head = "import { execFile, exec as cpExec } from 'node:child_process';\nimport { promisify } from 'node:util';\nconst exec = promisify(execFile);\nconst sh = promisify(cpExec);\n";
+    // a promisified execFile named exec: argv is not a shell command
+    expect(findTaintedSinks(head + "server.tool('d', {}, async (input) => { await exec('vercel', ['deploy', input.name]); });", 'a.js')).toEqual([]);
+    // the program itself, or a promisified exec, still is
+    expect(findTaintedSinks(head + "server.tool('d', {}, async (input) => { await exec(input.bin, []); });", 'b.js')).toHaveLength(1);
+    expect(findTaintedSinks(head + "server.tool('d', {}, async (input) => { await sh(input.cmd); });", 'c.js')).toHaveLength(1);
+  });
+
   it('does not treat RegExp.exec as a process sink', () => {
     const code = `function h(input) { const re = /a(b)/; return re.exec(input.text); }`;
     expect(findTaintedSinks(code, 're.js')).toEqual([]);

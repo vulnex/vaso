@@ -280,7 +280,7 @@ function analyzeUncached(code: string): DataFlowResult[] {
               ? `${name}() — command execution`
               : `${name}() call detected`,
             ...commandText(node.arguments),
-            ...(runsDirectly(name, node.arguments, constStrings) ? { noShell: true } : {}),
+            ...(runsDirectly(sink?.fn ?? name, node.arguments, constStrings) ? { noShell: true } : {}),
           });
           if (sink?.kind === 'process' || !sink) {
             // What the process gets: file contents or the whole environment in

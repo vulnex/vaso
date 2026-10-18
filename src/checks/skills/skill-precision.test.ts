@@ -63,6 +63,26 @@ describe('inline environment exfiltration', () => {
   });
 });
 
+describe('SKL-003 promisified child_process functions (dt15)', () => {
+  it('`const exec = promisify(execFile)` runs a program directly (vercel-labs/agent-skills shape)', async () => {
+    const r = await run(skl003, {
+      'deploy.mjs': "import { execFile } from 'node:child_process';\nimport { promisify } from 'node:util';\nconst exec = promisify(execFile);\nexport async function deploy(args) {\n  return await exec('vercel', ['deploy', ...args], { windowsHide: true });\n}\n",
+      'cp.cjs': "const cp = require('child_process');\nconst util = require('util');\nconst run = util.promisify(cp.execFile);\nmodule.exports = (a) => run('git', ['log', a]);\n",
+    });
+    expect(r.evidence?.length).toBe(2);
+    expect(live(r)).toEqual([]);
+  });
+
+  it('stays critical for a promisified exec (shell) and for a promisified execFile running a shell', async () => {
+    const r = await run(skl003, {
+      'a.mjs': "import { exec as cpExec } from 'node:child_process';\nimport { promisify } from 'node:util';\nconst execFile = promisify(cpExec);\nexport const go = (cmd) => execFile(cmd);\n",
+      'b.mjs': "import { execFile } from 'node:child_process';\nimport { promisify } from 'node:util';\nconst exec = promisify(execFile);\nexport const go = (cmd) => exec('bash', ['-c', cmd]);\n",
+    });
+    expect(live(r).length).toBe(2);
+    expect(r.severity).toBe('critical');
+  });
+});
+
 describe('SKL-003 interpreter given literal -c code (dt15)', () => {
   it('is fixed code (info), on one line or spread over several (huggingface/skills shape)', async () => {
     const r = await run(skl003, {
