@@ -20,6 +20,8 @@ export interface FolderTrustSpec {
   /** `security.folderTrust.enabled` when no settings file sets it. */
   enabledByDefault: boolean;
   trustFile: string;
+  /** How the CLI picks among matching trust rules. */
+  precedence: TrustPrecedence;
   /** A decision forced by the environment, if any. */
   envDecision?: boolean;
 }
@@ -38,35 +40,79 @@ function folderTrustSetting(data: unknown): boolean | undefined {
   return typeof enabled === 'boolean' ? enabled : undefined;
 }
 
-function expandHome(p: string, home: string): string {
-  return p === '~' || p.startsWith('~/') ? home + p.slice(1) : p;
-}
-
 function isSubpath(parent: string, child: string): boolean {
   const p = parent.endsWith(sep) ? parent : parent + sep;
   return child === parent || child.startsWith(p);
 }
 
+/** Number of segments below the root (`/a/b` → 2). */
+function pathDepth(p: string): number {
+  return p.split(sep).filter(Boolean).length;
+}
+
 /**
- * The trust file's decision for `workspace`: the longest matching rule wins,
- * `TRUST_PARENT` covers the rule path's parent, `DO_NOT_TRUST` distrusts.
- * Paths compare resolved. Undefined when no rule matches or the file is
+ * How the CLI picks among the matching rules:
+ * - `longest` (Gemini CLI, packages/core/src/utils/trust.ts `isPathTrusted`
+ *   @ google-gemini/gemini-cli 0bd1d439): the rule whose raw key string is
+ *   longest wins, the first one on a tie; paths compare by realpath, and
+ *   case-insensitively on macOS and Windows (utils/paths.ts `normalizePath`
+ *   / `isSubpath` @ 2fe7c2d3).
+ * - `deepest` (Qwen Code, packages/cli/src/config/trust-precedence.ts, added
+ *   in QwenLM/qwen-code 9e874534 "honor explicit distrust over inherited
+ *   trust (#8628)"): the rule whose effective path (TRUST_PARENT → its
+ *   parent) is deepest wins, DO_NOT_TRUST on a tie; a path compares by its
+ *   resolved and its real form (path-comparison.ts), case-sensitively.
+ * Neither expands `~` in a key: both `path.resolve` it against the CLI's
+ * working directory — the workspace — so `~/repo` names `<workspace>/~/repo`.
+ */
+export type TrustPrecedence = 'longest' | 'deepest';
+
+/**
+ * The trust file's decision for `workspace` (see TrustPrecedence for which
+ * matching rule wins): `TRUST_PARENT` covers the rule path's parent,
+ * `DO_NOT_TRUST` distrusts. Undefined when no rule matches or the file is
  * absent; a malformed file stops the CLI, so nothing is trusted either.
  */
-export async function trustFileDecision(fs: FSProvider, trustFile: string, workspace: string): Promise<boolean | undefined> {
+export async function trustFileDecision(
+  fs: FSProvider,
+  trustFile: string,
+  workspace: string,
+  precedence: TrustPrecedence = 'longest',
+): Promise<boolean | undefined> {
   const data = await readJson(fs, trustFile);
   if (!data || typeof data !== 'object' || Array.isArray(data)) return undefined;
-  const real = async (p: string) => { try { return (await fs.realpath(p)) || p; } catch { return p; } };
-  const location = await real(resolve(workspace));
-  let best = -1;
+  const foldCase = precedence === 'longest' && (fs.platform === 'darwin' || fs.platform === 'win32');
+  const fold = (p: string) => (foldCase ? p.toLowerCase() : p);
+  const realOf = async (p: string) => { try { return (await fs.realpath(p)) || undefined; } catch { return undefined; } };
+  /** Gemini compares the real path (else the resolved one); Qwen either form. */
+  const variants = async (p: string): Promise<string[]> => {
+    const resolved = resolve(workspace, p);
+    const real = await realOf(resolved);
+    if (precedence === 'longest') return [fold(real ?? resolved)];
+    return real && real !== resolved ? [resolved, real] : [resolved];
+  };
+  const locations = await variants(workspace);
+
+  let bestLength = -1;
+  let bestDepth = -1;
   let decision: boolean | undefined;
   for (const [rulePath, level] of Object.entries(data as Record<string, unknown>)) {
     if (level !== 'TRUST_FOLDER' && level !== 'TRUST_PARENT' && level !== 'DO_NOT_TRUST') continue;
-    const path = resolve(expandHome(rulePath, fs.homedir()));
-    const effective = await real(level === 'TRUST_PARENT' ? dirname(path) : path);
-    if (!isSubpath(effective, location) || rulePath.length <= best) continue;
-    best = rulePath.length;
-    decision = level !== 'DO_NOT_TRUST';
+    const trusted = level !== 'DO_NOT_TRUST';
+    const ruleVariants = await variants(level === 'TRUST_PARENT' ? dirname(rulePath) : rulePath);
+    let depth = -1;
+    for (const r of ruleVariants) {
+      if (locations.some(l => isSubpath(r, l))) depth = Math.max(depth, pathDepth(r));
+    }
+    if (depth < 0) continue;
+    if (precedence === 'longest') {
+      if (rulePath.length <= bestLength) continue;
+      bestLength = rulePath.length;
+      decision = trusted;
+    } else if (depth > bestDepth || (depth === bestDepth && !trusted && decision !== false)) {
+      bestDepth = depth;
+      decision = trusted;
+    }
   }
   return decision;
 }
@@ -80,7 +126,7 @@ export async function workspaceTrusted(fs: FSProvider, spec: FolderTrustSpec): P
     if (setting !== undefined) enabled = setting;
   }
   if (!enabled) return true;
-  return (await trustFileDecision(fs, spec.trustFile, spec.workspace)) === true;
+  return (await trustFileDecision(fs, spec.trustFile, spec.workspace, spec.precedence)) === true;
 }
 
 /**

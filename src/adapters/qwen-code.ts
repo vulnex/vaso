@@ -52,14 +52,16 @@ const SYSTEM_SETTINGS_WIN32 = 'C:\\ProgramData\\qwen-code\\settings.json';
 /**
  * Machine-wide settings, which override user and project settings (Qwen Code
  * settings.md "Configuration layers"): $QWEN_CODE_SYSTEM_SETTINGS_PATH, else a
- * per-OS location. $QWEN_CODE_SYSTEM_DEFAULTS_PATH holds defaults under them.
+ * per-OS location. System defaults sit under them: $QWEN_CODE_SYSTEM_DEFAULTS_PATH,
+ * else system-defaults.json next to the system settings file
+ * (packages/cli/src/config/storage-paths-lite.ts getSystemDefaultsPath).
  */
-export function qwenSystemSettingsPaths(fs: FSProvider): string[] {
+export function qwenSystemSettingsPaths(fs: FSProvider): [settings: string, defaults: string] {
   const env = (name: string) => fs.getEnv?.(name)?.trim() || undefined;
   const settings = env('QWEN_CODE_SYSTEM_SETTINGS_PATH')
     ?? (fs.platform === 'darwin' ? SYSTEM_SETTINGS_DARWIN : fs.platform === 'win32' ? SYSTEM_SETTINGS_WIN32 : SYSTEM_SETTINGS_LINUX);
-  const defaults = env('QWEN_CODE_SYSTEM_DEFAULTS_PATH');
-  return defaults ? [settings, defaults] : [settings];
+  const defaults = env('QWEN_CODE_SYSTEM_DEFAULTS_PATH') ?? settings.replace(/[^/\\]+$/, 'system-defaults.json');
+  return [settings, defaults];
 }
 
 /**
@@ -137,10 +139,11 @@ export async function qwenWorkspaceTrusted(fs: FSProvider, workspace: string): P
   const [system, defaults] = qwenSystemSettingsPaths(fs);
   return workspaceTrusted(fs, {
     workspace,
-    // system defaults < user < system (settings.md "Configuration layers")
-    settingsFiles: [...(defaults ? [defaults] : []), join(qwenHome(fs.homedir(), fs), SETTINGS_FILE), system],
+    // system defaults < user < system (settings.ts mergeTrustCheckSettings)
+    settingsFiles: [defaults, join(qwenHome(fs.homedir(), fs), SETTINGS_FILE), system],
     enabledByDefault: false,
     trustFile: qwenTrustedFoldersPath(fs),
+    precedence: 'deepest',
   });
 }
 
@@ -296,7 +299,7 @@ export const qwenCodeAdapter: AgentAdapter = {
       ],
       envPrefixes: ['QWEN_', 'DASHSCOPE_', 'BAILIAN_'],
       // system settings files ride along so remote scans see them
-      systemPaths: [...SYSTEM_CLI_PATHS, SYSTEM_SETTINGS_DARWIN, SYSTEM_SETTINGS_LINUX],
+      systemPaths: [...SYSTEM_CLI_PATHS, SYSTEM_SETTINGS_DARWIN, SYSTEM_SETTINGS_LINUX, ...[SYSTEM_SETTINGS_DARWIN, SYSTEM_SETTINGS_LINUX].map(p => p.replace(/[^/]+$/, 'system-defaults.json'))],
       systemDirListings: [],
     };
   },

@@ -47,6 +47,44 @@ describe('trustFileDecision', () => {
     expect(await trustFileDecision(fsFor(), file, join(home, 'other'))).toBeUndefined();
   });
 
+  it('Gemini: the longest key wins, the first on a tie; Qwen: the deepest rule wins, distrust on a tie', async () => {
+    const repo = join(home, 'repo');
+    // TRUST_PARENT of repo/x and DO_NOT_TRUST of repo: both name repo
+    const parent = write('p.json', { [join(repo, 'x')]: 'TRUST_PARENT', [repo]: 'DO_NOT_TRUST' });
+    expect(await trustFileDecision(fsFor(), parent, repo, 'longest')).toBe(true);
+    expect(await trustFileDecision(fsFor(), parent, repo, 'deepest')).toBe(false);
+    // a trailing slash makes a longer key for the same folder
+    const slash = write('s.json', { [`${repo}/`]: 'TRUST_FOLDER', [repo]: 'DO_NOT_TRUST' });
+    expect(await trustFileDecision(fsFor(), slash, repo, 'longest')).toBe(true);
+    expect(await trustFileDecision(fsFor(), slash, repo, 'deepest')).toBe(false);
+    // Qwen: a deeper trusted child beats a distrusted parent, a deeper distrust beats a trusted parent
+    const nested = write('n.json', { [home]: 'DO_NOT_TRUST', [repo]: 'TRUST_FOLDER', [join(repo, 'vendor')]: 'DO_NOT_TRUST' });
+    expect(await trustFileDecision(fsFor(), nested, repo, 'deepest')).toBe(true);
+    expect(await trustFileDecision(fsFor(), nested, join(repo, 'vendor', 'x'), 'deepest')).toBe(false);
+  });
+
+  it('neither CLI expands ~ in a key: it resolves against the workspace', async () => {
+    const repo = join(home, 'repo');
+    mkdirSync(repo, { recursive: true });
+    const tilde = write('t2.json', { '~/repo': 'TRUST_FOLDER' });
+    for (const p of ['longest', 'deepest'] as const) {
+      // `~/repo` names <workspace>/~/repo, never the workspace itself
+      expect(await trustFileDecision(fsFor(), tilde, repo, p)).toBeUndefined();
+    }
+    // the absolute spelling matches
+    const abs = write('t3.json', { [repo]: 'TRUST_FOLDER' });
+    expect(await trustFileDecision(fsFor(), abs, repo, 'longest')).toBe(true);
+  });
+
+  it('Gemini compares case-insensitively on macOS and Windows only', async () => {
+    const repo = join(home, 'Repo');
+    const file = write('c.json', { [join(home, 'repo')]: 'TRUST_FOLDER' });
+    const on = (platform: string) => Object.assign(Object.create(fsFor()) as FSProvider, { platform });
+    expect(await trustFileDecision(on('darwin'), file, repo, 'longest')).toBe(true);
+    expect(await trustFileDecision(on('linux'), file, repo, 'longest')).toBeUndefined();
+    expect(await trustFileDecision(on('darwin'), file, repo, 'deepest')).toBeUndefined();
+  });
+
   it('a missing or malformed file decides nothing', async () => {
     expect(await trustFileDecision(fsFor(), join(home, 'none.json'), home)).toBeUndefined();
     const bad = write('bad.json', '{ nope');
@@ -82,6 +120,19 @@ describe('geminiWorkspaceTrusted', () => {
     expect(await geminiWorkspaceTrusted(fsFor(), ws())).toBe(false);
   });
 
+  it('system defaults can turn folder trust off; user settings override them', async () => {
+    env.GEMINI_CLI_SYSTEM_DEFAULTS_PATH = write('sysdef.json', { security: { folderTrust: { enabled: false } } });
+    expect(await geminiWorkspaceTrusted(fsFor(), ws())).toBe(true);
+    write('.gemini/settings.json', { security: { folderTrust: { enabled: true } } });
+    expect(await geminiWorkspaceTrusted(fsFor(), ws())).toBe(false);
+  });
+
+  it('reads system-defaults.json next to a relocated system settings file', async () => {
+    env.GEMINI_CLI_SYSTEM_SETTINGS_PATH = join(home, 'etc', 'settings.json');
+    write('etc/system-defaults.json', { security: { folderTrust: { enabled: false } } });
+    expect(await geminiWorkspaceTrusted(fsFor(), ws())).toBe(true);
+  });
+
   it('honours GEMINI_CLI_TRUSTED_FOLDERS_PATH', async () => {
     env.GEMINI_CLI_TRUSTED_FOLDERS_PATH = write('elsewhere/trust.json', { [ws()]: 'TRUST_FOLDER' });
     expect(await geminiWorkspaceTrusted(fsFor(), ws())).toBe(true);
@@ -100,6 +151,18 @@ describe('qwenWorkspaceTrusted', () => {
     expect(await qwenWorkspaceTrusted(fsFor(), ws())).toBe(false);
     write('.qwen/trustedFolders.json', { [ws()]: 'TRUST_FOLDER' });
     expect(await qwenWorkspaceTrusted(fsFor(), ws())).toBe(true);
+  });
+
+  it('an explicit DO_NOT_TRUST on the workspace beats an equally deep trust rule', async () => {
+    write('.qwen/settings.json', { security: { folderTrust: { enabled: true } } });
+    write('.qwen/trustedFolders.json', { [join(ws(), 'x')]: 'TRUST_PARENT', [ws()]: 'DO_NOT_TRUST' });
+    expect(await qwenWorkspaceTrusted(fsFor(), ws())).toBe(false);
+  });
+
+  it('system-defaults.json next to the system settings file can enable folder trust', async () => {
+    env.QWEN_CODE_SYSTEM_SETTINGS_PATH = join(home, 'etc', 'settings.json');
+    write('etc/system-defaults.json', { security: { folderTrust: { enabled: true } } });
+    expect(await qwenWorkspaceTrusted(fsFor(), ws())).toBe(false);
   });
 
   it('follows QWEN_HOME for the user settings', async () => {

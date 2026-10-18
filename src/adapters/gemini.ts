@@ -62,6 +62,17 @@ export function geminiSystemSettingsPath(fs: FSProvider): string {
 }
 
 /**
+ * System defaults, the lowest settings layer (gemini-cli settings.ts
+ * getSystemDefaultsPath: $GEMINI_CLI_SYSTEM_DEFAULTS_PATH, else
+ * system-defaults.json next to the system settings file). Merged under user
+ * and system settings, it can turn folder trust off.
+ */
+export function geminiSystemDefaultsPath(fs: FSProvider): string {
+  const env = fs.getEnv?.('GEMINI_CLI_SYSTEM_DEFAULTS_PATH')?.trim();
+  return env || geminiSystemSettingsPath(fs).replace(/[^/\\]+$/, 'system-defaults.json');
+}
+
+/**
  * Walk ~/.gemini/tmp/<project-id>/chats/session-*.jsonl, collect every
  * candidate, pick the lex-greatest filename (timestamp prefix sorts
  * chronologically), and return the most recent `"model":"..."` from its
@@ -177,9 +188,11 @@ export async function geminiWorkspaceTrusted(fs: FSProvider, workspace: string):
     : env('GEMINI_CLI_TRUST_WORKSPACE') === 'true' ? true : undefined;
   return workspaceTrusted(fs, {
     workspace,
-    settingsFiles: [join(geminiHome(fs.homedir(), fs), SETTINGS_FILE), geminiSystemSettingsPath(fs)],
+    // settings.ts initialTrustCheckSettings: schema defaults < system defaults < user < system
+    settingsFiles: [geminiSystemDefaultsPath(fs), join(geminiHome(fs.homedir(), fs), SETTINGS_FILE), geminiSystemSettingsPath(fs)],
     enabledByDefault: true,
     trustFile: geminiTrustedFoldersPath(fs),
+    precedence: 'longest',
     envDecision,
   });
 }
@@ -193,8 +206,11 @@ export const geminiAdapter: AgentAdapter = {
     const userDirs = await getUserHomeDirs(options?.allUsers, fs);
     const installations: AgentInstallation[] = [];
     // Machine-wide, so attributed to the first user install only
-    const systemPath = geminiSystemSettingsPath(fs);
-    let systemSettings: ParsedConfig | undefined = await loadJsoncConfig(systemPath, fs);
+    const systemSettings: ParsedConfig[] = [];
+    for (const path of [geminiSystemSettingsPath(fs), geminiSystemDefaultsPath(fs)]) {
+      const parsed = await loadJsoncConfig(path, fs);
+      if (parsed) systemSettings.push(parsed);
+    }
 
     for (const { home, user } of userDirs) {
       const geminiDir = geminiHome(home, fs);
@@ -211,9 +227,8 @@ export const geminiAdapter: AgentAdapter = {
       if (!hasGeminiDir && !cliBinary) continue;
 
       const configFiles = hasGeminiDir ? await loadSettings(geminiDir, fs) : [];
-      if (systemSettings && (configFiles.length > 0 || cliBinary)) {
-        configFiles.push(systemSettings);
-        systemSettings = undefined;
+      if (systemSettings.length > 0 && (configFiles.length > 0 || cliBinary)) {
+        configFiles.push(...systemSettings.splice(0));
       }
 
       // A bare ~/.gemini/ with no recognized config files and no `gemini`
@@ -261,7 +276,7 @@ export const geminiAdapter: AgentAdapter = {
 
   getConfigPaths(): string[] {
     const fs = new LocalFSProvider();
-    return [join(geminiHome(fs.homedir(), fs), SETTINGS_FILE), geminiSystemSettingsPath(fs)];
+    return [join(geminiHome(fs.homedir(), fs), SETTINGS_FILE), geminiSystemSettingsPath(fs), geminiSystemDefaultsPath(fs)];
   },
 
   getSkillsDir(installDir: string): string | undefined {
@@ -318,6 +333,7 @@ export const geminiAdapter: AgentAdapter = {
         // relocated trust file / system settings (absolute file paths)
         '${GEMINI_CLI_TRUSTED_FOLDERS_PATH}',
         '${GEMINI_CLI_SYSTEM_SETTINGS_PATH}',
+        '${GEMINI_CLI_SYSTEM_DEFAULTS_PATH}',
         '~/.gemini/policy_integrity.json',
         // User-relative CLI install locations — kept in sync with USER_CLI_RELATIVE_PATHS
         '~/.local/bin/gemini',
@@ -346,7 +362,7 @@ export const geminiAdapter: AgentAdapter = {
         '~/.gemini/tmp',
       ],
       envPrefixes: ['GEMINI_', 'GOOGLE_'],
-      systemPaths: [...SYSTEM_CLI_PATHS, SYSTEM_SETTINGS_DARWIN, SYSTEM_SETTINGS_LINUX],
+      systemPaths: [...SYSTEM_CLI_PATHS, SYSTEM_SETTINGS_DARWIN, SYSTEM_SETTINGS_LINUX, ...[SYSTEM_SETTINGS_DARWIN, SYSTEM_SETTINGS_LINUX].map(p => p.replace(/[^/]+$/, 'system-defaults.json'))],
       systemDirListings: [],
     };
   },
