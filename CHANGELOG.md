@@ -53,6 +53,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - **Hermes: `~/.hermes/cli-config.yaml` is no longer scanned.** Hermes never reads it (only `$HERMES_HOME/config.yaml`), so its settings produced findings for dead config.
 - **YAML merge keys (`<<: *defaults`) are resolved in every YAML config**, as PyYAML and Go's yaml.v3 do. Settings inherited through a merge key (Hermes `approvals: {<<: *unsafe}`, a shared MCP server block) were invisible to every check. A merge key that merges its own anchor is still rejected.
 - **Atomic Agent: string values are read the way Atomic coerces them.** `"approvalLevel": "5"` and legacy `"approvalRequired": "false"` load as level 5 but passed AT-001 and AT-003; `http.enabled: "false"` disables the HTTP tool like `false`.
+- **`.env` fixes rewrite the assignment that takes effect**: the last one for the key, `export KEY=…` included. A fix used to rewrite the first match and skip `export` lines, so with a duplicate key (LY-009's `LYRIE_LOCAL_DRY_RUN`) it reported applied and changed nothing.
 
 ## [1.3.1] - 2026-10-16
 

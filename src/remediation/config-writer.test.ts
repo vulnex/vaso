@@ -13,6 +13,7 @@ import {
   restrictFilesToOwner,
 } from './config-writer.js';
 import type { ParsedConfig } from '../core/types.js';
+import { loadConfig } from '../core/config-loader.js';
 
 const TEST_DIR = join(tmpdir(), 'vaso-config-writer-test');
 
@@ -69,6 +70,26 @@ describe('updateEnvFile', () => {
     const newKeyIndex = lines.findIndex(l => l.startsWith('NEW_KEY'));
     expect(newKeyIndex).toBeGreaterThan(0);
     expect(lines[newKeyIndex]).toBe('NEW_KEY=new_val');
+  });
+
+  it('rewrites the assignment the loader reads: the last one, `export KEY=` included', async () => {
+    const filePath = join(TEST_DIR, '.env');
+    await writeFile(filePath, 'NODE_ENV=production\nexport NODE_ENV=development\nOTHER=1\n');
+
+    await updateEnvFile(filePath, 'NODE_ENV', 'production');
+
+    const content = await readFile(filePath, 'utf-8');
+    expect(content).toBe('NODE_ENV=production\nexport NODE_ENV=production\nOTHER=1\n');
+    // The loaded value is the fixed one
+    const loaded = await loadConfig(filePath);
+    expect(loaded.data.NODE_ENV).toBe('production');
+  });
+
+  it('a duplicate earlier assignment no longer hides the effective one', async () => {
+    const filePath = join(TEST_DIR, '.env');
+    await writeFile(filePath, 'HOST=127.0.0.1\nHOST=0.0.0.0\n');
+    await updateEnvFile(filePath, 'HOST', '127.0.0.1');
+    expect((await loadConfig(filePath)).data.HOST).toBe('127.0.0.1');
   });
 });
 

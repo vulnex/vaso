@@ -8,21 +8,24 @@ import { parseJsonLenient } from '../core/jsonc.js';
 
 /**
  * Update or insert a key=value pair in a .env file.
- * Preserves comments and line ordering.
+ * Preserves comments and line ordering. The line rewritten is the one the
+ * loader reads (parseEnv in config-loader, like dotenv): the last assignment
+ * of the key, `export KEY=…` included (the `export` is kept).
  */
 export async function updateEnvFile(filePath: string, key: string, value: string): Promise<void> {
   const content = (await readRegularFile(filePath)).toString('utf-8');
   const lines = content.split('\n');
   let found = false;
 
-  for (let i = 0; i < lines.length; i++) {
+  for (let i = lines.length - 1; i >= 0; i--) {
     const trimmed = lines[i].trim();
     if (!trimmed || trimmed.startsWith('#')) continue;
     const eqIndex = trimmed.indexOf('=');
     if (eqIndex === -1) continue;
-    const lineKey = trimmed.slice(0, eqIndex).trim();
-    if (lineKey === key) {
-      lines[i] = `${key}=${value}`;
+    const rawKey = trimmed.slice(0, eqIndex).trim();
+    const exported = /^export\s+/.test(rawKey);
+    if (rawKey.replace(/^export\s+/, '') === key) {
+      lines[i] = `${exported ? 'export ' : ''}${key}=${value}`;
       found = true;
       break;
     }
