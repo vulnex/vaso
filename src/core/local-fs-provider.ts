@@ -1,7 +1,8 @@
 import { access as fsAccess, open, readdir, readFile, stat, realpath, readlink } from 'node:fs/promises';
 import { execFileSync, execFile } from 'node:child_process';
 import { constants as fsConstants, type Dirent } from 'node:fs';
-import { join } from 'node:path';
+import { isUtf8 } from 'node:buffer';
+import { dirname, join } from 'node:path';
 import { homedir as osHomedir, hostname as osHostname } from 'node:os';
 import { promisify } from 'node:util';
 import type { FSProvider, DirentInfo, ExecResult, ExecOptions, PermissionQuery } from './fs-provider.js';
@@ -19,9 +20,9 @@ const execFileAsync = promisify(execFile);
  * device is caught too; O_NONBLOCK keeps a FIFO swapped in after the check
  * from blocking (the read then sees end-of-file).
  */
-async function readRegularFile(path: string): Promise<Buffer>;
-async function readRegularFile(path: string, encoding: 'utf-8'): Promise<string>;
-async function readRegularFile(path: string, encoding?: 'utf-8'): Promise<Buffer | string> {
+async function readRegularFile(path: FsPath): Promise<Buffer>;
+async function readRegularFile(path: FsPath, encoding: 'utf-8'): Promise<string>;
+async function readRegularFile(path: FsPath, encoding?: 'utf-8'): Promise<Buffer | string> {
   let info: Awaited<ReturnType<typeof stat>> | undefined;
   try { info = await stat(path); } catch { /* readFile reports a missing/unreadable path */ }
   if (info?.isDirectory?.()) {
@@ -34,13 +35,16 @@ async function readRegularFile(path: string, encoding?: 'utf-8'): Promise<Buffer
   return encoding ? readFile(path, { encoding, flag }) : readFile(path, { flag });
 }
 
-function toDirentInfo(e: Dirent): DirentInfo {
+/** A path as the OS takes it: a string, or raw bytes for a name that isn't UTF-8. */
+type FsPath = string | Buffer;
+
+function toDirentInfo(e: Dirent<Buffer>, name: string, parentPath: string): DirentInfo {
   return {
-    name: e.name,
+    name,
     isFile: e.isFile(),
     isDirectory: e.isDirectory(),
     isSymbolicLink: e.isSymbolicLink(),
-    parentPath: e.parentPath,
+    parentPath,
   };
 }
 
@@ -48,16 +52,50 @@ export class LocalFSProvider implements FSProvider {
   readonly kind = 'local' as const;
   readonly platform: Platform = process.platform;
 
+  /**
+   * Linux file names are bytes, not necessarily UTF-8 (`caf\xe9.js`). A
+   * listing decodes them as the probe's JSON does — invalid sequences become
+   * U+FFFD, so evidence paths match a remote scan — and remembers the raw
+   * bytes under that name, so a read of the listed path reaches the file
+   * instead of failing silently (a skill could hide code that way).
+   */
+  private readonly rawPaths = new Map<string, Buffer>();
+
+  /** The bytes to hand the OS for a path this provider listed. */
+  private fsPath(path: string): FsPath {
+    if (this.rawPaths.size === 0 || !path.includes('\uFFFD')) return path;
+    for (let p = path; ; p = dirname(p)) {
+      const raw = this.rawPaths.get(p);
+      if (raw) return Buffer.concat([raw, Buffer.from(path.slice(p.length), 'utf-8')]);
+      if (dirname(p) === p) return path;
+    }
+  }
+
+  /** List `dir`, decoding names and remembering raw paths that aren't UTF-8. */
+  private async list(dir: string): Promise<DirentInfo[]> {
+    const raw = this.fsPath(dir);
+    const rawDir = typeof raw === 'string' ? undefined : raw;
+    const entries = await readdir(raw, { withFileTypes: true, encoding: 'buffer' });
+    return entries.map(e => {
+      const name = e.name.toString('utf-8');
+      if (rawDir || !isUtf8(e.name)) {
+        const base = rawDir ?? Buffer.from(dir, 'utf-8');
+        this.rawPaths.set(join(dir, name), Buffer.concat([base, Buffer.from(base.at(-1) === 0x2f ? '' : '/'), e.name]));
+      }
+      return toDirentInfo(e, name, dir);
+    });
+  }
+
   async readFile(path: string): Promise<string> {
-    return readRegularFile(path, 'utf-8');
+    return readRegularFile(this.fsPath(path), 'utf-8');
   }
 
   async readBytes(path: string): Promise<Uint8Array> {
-    return readRegularFile(path);
+    return readRegularFile(this.fsPath(path));
   }
 
   async readHead(path: string, n: number): Promise<Uint8Array> {
-    const handle = await open(path, fsConstants.O_RDONLY | (fsConstants.O_NONBLOCK ?? 0));
+    const handle = await open(this.fsPath(path), fsConstants.O_RDONLY | (fsConstants.O_NONBLOCK ?? 0));
     try {
       if (!(await handle.stat()).isFile()) {
         throw Object.assign(new Error(`EINVAL: not a regular file, refusing to read: ${path}`), { code: 'EINVAL' });
@@ -71,11 +109,11 @@ export class LocalFSProvider implements FSProvider {
   }
 
   async readdir(path: string): Promise<string[]> {
-    return readdir(path);
+    return (await this.list(path)).map(e => e.name);
   }
 
   async readdirEntries(path: string, options?: { recursive?: boolean }): Promise<DirentInfo[]> {
-    if (!options?.recursive) return (await readdir(path, { withFileTypes: true })).map(toDirentInfo);
+    if (!options?.recursive) return this.list(path);
     // Node's recursive readdir rejects the whole walk on the first unreadable
     // subdirectory, so one chmod-000 folder inside a skill would hide every
     // file beside it. Walk by hand and skip what can't be listed, as the
@@ -86,14 +124,14 @@ export class LocalFSProvider implements FSProvider {
     for (let dir = pending.pop(); dir !== undefined; dir = pending.pop()) {
       let entries;
       try {
-        entries = await readdir(dir, { withFileTypes: true });
+        entries = await this.list(dir);
       } catch (err) {
         if (dir === path) throw err;
         continue;
       }
       for (const e of entries) {
-        results.push(toDirentInfo(e));
-        if (e.isDirectory()) pending.push(join(dir, e.name));
+        results.push(e);
+        if (e.isDirectory) pending.push(join(dir, e.name));
       }
     }
     return results;
@@ -101,7 +139,7 @@ export class LocalFSProvider implements FSProvider {
 
   async access(path: string): Promise<boolean> {
     try {
-      await fsAccess(path);
+      await fsAccess(this.fsPath(path));
       return true;
     } catch {
       return false;
@@ -109,7 +147,7 @@ export class LocalFSProvider implements FSProvider {
   }
 
   async stat(path: string): Promise<{ mode: number; isFile(): boolean; isDirectory(): boolean }> {
-    const s = await stat(path);
+    const s = await stat(this.fsPath(path));
     return {
       mode: s.mode,
       isFile: () => s.isFile(),
@@ -123,13 +161,13 @@ export class LocalFSProvider implements FSProvider {
     if (this.platform === 'win32') {
       return 'unsupported';
     }
-    const s = await stat(path);
+    const s = await stat(this.fsPath(path));
     return posixPermissionFacts(s.mode);
   }
 
   async ownership(path: string): Promise<{ uid: number; gid: number } | undefined> {
     if (this.platform === 'win32') return undefined;
-    const s = await stat(path);
+    const s = await stat(this.fsPath(path));
     return { uid: s.uid, gid: s.gid };
   }
 
@@ -149,11 +187,11 @@ export class LocalFSProvider implements FSProvider {
   }
 
   async realpath(path: string): Promise<string> {
-    return realpath(path);
+    return realpath(this.fsPath(path));
   }
 
   async readlink(path: string): Promise<string> {
-    return readlink(path);
+    return readlink(this.fsPath(path));
   }
 
   async exec(cmd: string, args: string[], options?: ExecOptions): Promise<ExecResult> {

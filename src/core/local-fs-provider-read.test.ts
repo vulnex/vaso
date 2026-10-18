@@ -72,3 +72,32 @@ describe.skipIf(process.platform === 'win32' || process.getuid?.() === 0)('Local
     await expect(fs.readdirEntries(join(dir, 'missing'), { recursive: true })).rejects.toThrow();
   });
 });
+
+// Linux file names are bytes: a skill file named `caf\xe9.js` was listed as
+// `caf�.js`, which then failed to open, so its code went unanalysed
+// locally while a remote scan read it. (macOS and Windows reject such names.)
+describe.skipIf(process.platform !== 'linux')('LocalFSProvider non-UTF-8 file names', () => {
+  const fs = new LocalFSProvider();
+  let dir: string;
+
+  beforeAll(() => {
+    dir = mkdtempSync(join(tmpdir(), 'vaso-names-'));
+    const raw = (name: string) => Buffer.concat([Buffer.from(dir + '/'), Buffer.from(name, 'latin1')]);
+    writeFileSync(raw('caf\xe9-\xff.js'), 'eval(process.argv[2])\n');
+    mkdirSync(raw('\xffdir'));
+    writeFileSync(Buffer.concat([raw('\xffdir'), Buffer.from('/inner.js')]), 'x');
+    writeFileSync(join(dir, 'plain.js'), 'y');
+  });
+  afterAll(() => rmSync(dir, { recursive: true, force: true }));
+
+  it('lists them as the probe does (U+FFFD) and reads the listed path', async () => {
+    const entries = await fs.readdirEntries(dir, { recursive: true });
+    const files = entries.filter(e => e.isFile).map(e => join(e.parentPath!, e.name)).sort();
+    expect(files).toEqual([join(dir, 'caf�-�.js'), join(dir, 'plain.js'), join(dir, '�dir', 'inner.js')].sort());
+    expect(await fs.readFile(join(dir, 'caf�-�.js'))).toContain('eval');
+    expect(await fs.readFile(join(dir, '�dir', 'inner.js'))).toBe('x');
+    expect((await fs.stat(join(dir, '�dir'))).isDirectory()).toBe(true);
+    // UTF-8 names are untouched
+    expect(await fs.readFile(join(dir, 'plain.js'))).toBe('y');
+  });
+});

@@ -257,6 +257,7 @@ func Collect(manifest ProbeManifest, escalate bool) ProbeSnapshot {
 			}
 		}
 		c.followLinkedTrees(&snapshot, pattern, matches, false)
+		c.collectNonUTF8Names(&snapshot, pattern)
 		if c.inSkillTree {
 			c.collectUnlistableSkills(&snapshot, pattern)
 		}
@@ -1137,6 +1138,40 @@ func (c *collector) collectUnlistableSkills(snapshot *ProbeSnapshot, pattern str
 			}
 		}
 	}
+}
+
+// collectNonUTF8Names collects what a `<root>/**` glob skips: the glob never
+// enters a directory whose name is not valid UTF-8 (Linux names are bytes),
+// so a skill dir named `\xfe` hid its SKILL.md from remote scans while a local
+// walk read it. Such paths are walked here, without following links, and keyed
+// as the JSON encoder writes them (invalid bytes become U+FFFD), which is how
+// the CLI lists them locally. macOS and Windows reject such names.
+func (c *collector) collectNonUTF8Names(snapshot *ProbeSnapshot, pattern string) {
+	if runtime.GOOS == "darwin" || runtime.GOOS == "windows" || !strings.HasSuffix(filepath.ToSlash(pattern), "/**") {
+		return
+	}
+	root := strings.TrimSuffix(filepath.ToSlash(pattern), "/**")
+	if strings.ContainsAny(root, "*?[{") {
+		return
+	}
+	root = filepath.FromSlash(root)
+	_ = filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
+		if err != nil || p == root {
+			return nil
+		}
+		if d.IsDir() && inExcludedDir(pattern, filepath.Join(p, "x")) {
+			return filepath.SkipDir
+		}
+		rel := strings.TrimPrefix(p, root)
+		if utf8.ValidString(rel) || inExcludedDir(pattern, p) {
+			return nil
+		}
+		recordSymlink(snapshot.Symlinks, p)
+		if _, exists := snapshot.Files[p]; !exists {
+			c.collectPath(snapshot, p, root, false, false)
+		}
+		return nil
+	})
 }
 
 // headBytes is how much of an omitted skill-tree file is shipped: enough for
