@@ -1,0 +1,12 @@
+{
+  "agent": "nanoclaw",
+  "source": "mount-allowlist.json granting ~ but without a blockedPatterns array: NanoClaw's loadMountAllowlist rejects it (\"blockedPatterns must be an array\") and blocks every additional mount — validateMount checked under a fixture HOME (deep test 2026-10-18 fixture)",
+  "modes": {
+    ".config/nanoclaw/mount-allowlist.json": "600",
+    "nanoclaw/.env": "600",
+    ".config/nanoclaw": "700"
+  },
+  "pass": [
+    "NC-001"
+  ]
+}

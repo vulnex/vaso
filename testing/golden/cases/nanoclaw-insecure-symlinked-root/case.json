@@ -1,0 +1,13 @@
+{
+  "agent": "nanoclaw",
+  "source": "mount allowlist root ~/projects that is a symlink to ~: NanoClaw compares realpaths, so validateMount allows ~/nanoclaw and ~/.config read-write (checked under a fixture HOME; deep test 2026-10-18 fixture). Remote scans judge roots as written",
+  "modes": {
+    ".config/nanoclaw/mount-allowlist.json": "600",
+    "nanoclaw/.env": "600",
+    ".config/nanoclaw": "700"
+  },
+  "fail": {
+    "NC-001": "critical"
+  },
+  "parity": false
+}
