@@ -16,6 +16,13 @@ describe('lexJsLiterals', () => {
     expect(bodies(`x.it's={chars:"table"};y="z"\nw='q'`)).toEqual(['table', 'z', 'q']);
   });
 
+  it('a fragment starting inside a template literal: its tail is a literal (a bundle line cut out, dt17)', () => {
+    // @googlemaps/code-assist-mcp 0.2.1 dist/index.js line 46 alone: cp864's template continues from line 45
+    expect(bodies('import x from "y";\n\\v\\f !"#$&\'()[\\\\]^_\\`abc`},ibm864:"cp864"')).toEqual(['y', '\\v\\f !"#$&\'()[\\\\]^_\\`abc', 'cp864']);
+    // an ordinary file is lexed from the start
+    expect(bodies('var a = `t`; var b = "c";')).toEqual(['t', 'c']);
+  });
+
   it('division is not a regex', () => {
     expect(bodies('var a=b/2,c="d"/e;')).toEqual(['d']);
   });

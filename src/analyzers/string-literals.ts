@@ -161,6 +161,29 @@ export function lexJsLiterals(code: string): Array<[number, number]> {
     }
     i = n; // unterminated: the rest is the template
   };
+  // A fragment that begins inside a template literal (a line cut out of a
+  // bundle's multi-line template): an escaped backtick before the first
+  // unescaped one. From the line holding it to that backtick is the
+  // template's tail; quotes in it are characters, not strings.
+  {
+    let j = 0;
+    let escaped = -1;
+    while (j < n && code[j] !== '`') {
+      if (code[j] === '\\') {
+        if (code[j + 1] === '`' && escaped < 0) escaped = j;
+        j += 2;
+        continue;
+      }
+      j++;
+    }
+    if (escaped >= 0 && j < n) {
+      // the lines before it hold no backtick: lexed on their own
+      const start = Math.max(0, code.lastIndexOf('\n', escaped));
+      out.push(...lexJsLiterals(code.slice(0, start)), [start, j + 1]);
+      i = j + 1;
+      prev = ')';
+    }
+  }
   while (i < n) {
     const c = code[i];
     if (c === '/' && code[i + 1] === '/') { const e = code.indexOf('\n', i); i = e === -1 ? n : e; continue; }
