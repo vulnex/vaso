@@ -15,7 +15,7 @@
 
 import { createHash } from 'node:crypto';
 import _traverse from '@babel/traverse';
-import type { Binding, NodePath } from '@babel/traverse';
+import type { Binding, NodePath, Scope } from '@babel/traverse';
 import type { Node } from '@babel/types';
 import { parseJs, sourceChunks } from './js-parse.js';
 
@@ -105,26 +105,91 @@ export function findTaintedSinks(code: string, filename = 'unknown.js'): Tainted
   return results.map((s) => ({ ...s }));
 }
 
-/** `require('m')` / `await import('m')` / `import('m')` → `m`. */
-function moduleOfInit(init: Node | null | undefined): string | undefined {
+/**
+ * A string known without running the code: a literal, a template without
+ * interpolations, `+` of such, or a never-reassigned constant holding one
+ * (`const m = 'child_' + 'process'`). Bounded: a chain of constants is
+ * followed a few steps.
+ */
+export function staticString(node: Node | null | undefined, scope?: Scope, depth = 0): string | undefined {
+  if (!node || depth > 6) return undefined;
+  switch (node.type) {
+    case 'StringLiteral': return node.value;
+    case 'TemplateLiteral':
+      if (node.expressions.length === 0) return node.quasis[0]?.value.cooked ?? '';
+      {
+        let out = node.quasis[0]?.value.cooked ?? '';
+        for (let i = 0; i < node.expressions.length; i++) {
+          const part = staticString(node.expressions[i] as Node, scope, depth + 1);
+          if (part === undefined) return undefined;
+          out += part + (node.quasis[i + 1]?.value.cooked ?? '');
+        }
+        return out;
+      }
+    case 'BinaryExpression': {
+      if (node.operator !== '+') return undefined;
+      const l = staticString(node.left as Node, scope, depth + 1);
+      const r = l === undefined ? undefined : staticString(node.right, scope, depth + 1);
+      return r === undefined ? undefined : l! + r;
+    }
+    case 'Identifier': {
+      const binding = scope?.getBinding(node.name);
+      const decl = binding?.path.node;
+      if (!binding?.constant || decl?.type !== 'VariableDeclarator' || decl.id.type !== 'Identifier') return undefined;
+      return staticString(decl.init, binding.scope, depth + 1);
+    }
+    default: return undefined;
+  }
+}
+
+/**
+ * A call that loads a module by name: `require`, and the other handles on
+ * the same loader (`module.require`, `process.mainModule.require`,
+ * `require.main.require`, `createRequire(…)(…)`, `Module._load`).
+ */
+function isRequireCallee(callee: Node): boolean {
+  if (callee.type === 'Identifier') return callee.name === 'require';
+  if (callee.type === 'MemberExpression' && !callee.computed && callee.property.type === 'Identifier') {
+    return callee.property.name === 'require' || callee.property.name === '_load';
+  }
+  return callee.type === 'CallExpression' && callee.callee.type === 'Identifier' && callee.callee.name === 'createRequire';
+}
+
+/** `require('m')` / `await import('m')` / `import('m')` → `m` (the name may be built from constants). */
+function moduleOfInit(init: Node | null | undefined, scope?: Scope): string | undefined {
   if (!init) return undefined;
-  if (init.type === 'AwaitExpression') return moduleOfInit(init.argument);
+  if (init.type === 'AwaitExpression') return moduleOfInit(init.argument, scope);
   if (init.type === 'CallExpression') {
     const { callee, arguments: args } = init;
-    const isRequire = callee.type === 'Identifier' && callee.name === 'require';
-    if ((isRequire || callee.type === 'Import') && args[0]?.type === 'StringLiteral') return args[0].value;
+    if (isRequireCallee(callee) || callee.type === 'Import') return staticString(args[0] as Node, scope);
   }
-  if (init.type === 'ImportExpression' && init.source.type === 'StringLiteral') return init.source.value;
+  if (init.type === 'ImportExpression') return staticString(init.source, scope);
+  return undefined;
+}
+
+/** A member's name when it is known: `o.name`, `o['name']`, `o[`name`]`. */
+export function memberName(m: Node): string | undefined {
+  if (m.type !== 'MemberExpression' && m.type !== 'OptionalMemberExpression') return undefined;
+  if (!m.computed) return m.property.type === 'Identifier' ? m.property.name : undefined;
+  const p = m.property;
+  if (p.type === 'StringLiteral') return p.value;
+  if (p.type === 'TemplateLiteral' && p.expressions.length === 0) return p.quasis[0]?.value.cooked ?? undefined;
   return undefined;
 }
 
 /** Module specifier a binding was imported/required from, if any. */
-export function bindingModule(binding: Binding | undefined): string | undefined {
+export function bindingModule(binding: Binding | undefined, depth = 0): string | undefined {
   if (!binding) return undefined;
   const parent = binding.path.parentPath?.node;
   if (parent?.type === 'ImportDeclaration') return parent.source.value;
   const node = binding.path.node;
-  if (node.type === 'VariableDeclarator') return moduleOfInit(node.init);
+  if (node.type !== 'VariableDeclarator') return undefined;
+  const direct = moduleOfInit(node.init, binding.scope);
+  if (direct !== undefined || depth > 3) return direct;
+  // `const { exec } = cp` / `const proc = cp` where `cp = require('child_process')`
+  if (node.init?.type === 'Identifier' && binding.constant) {
+    return bindingModule(binding.scope.getBinding(node.init.name), depth + 1);
+  }
   return undefined;
 }
 
@@ -147,6 +212,7 @@ function importedName(binding: Binding): string {
 }
 
 const CHILD_PROCESS_MODULE = /^(?:node:)?child_process$/;
+const VM_MODULE = /^(?:node:)?vm$/;
 /** execa's functions: `execa(file, args)`, `execaCommand("cmd line")`. */
 const EXECA_FUNCTIONS: Record<string, 'program' | 'command'> = {
   execa: 'program', execaSync: 'program', execaNode: 'program', execaCommand: 'command', execaCommandSync: 'command',
@@ -190,23 +256,56 @@ export function sinkCallee(path: NodePath): SinkCallee | undefined {
       if (mod === 'execa' && EXECA_FUNCTIONS[imported]) return { display: name, kind: 'process', fn: imported };
       return undefined;
     }
+    // `const run = cp.exec` / `const run = require('child_process').exec`:
+    // the function the alias was taken from
+    const decl = binding?.path.node;
+    if (binding?.constant && decl?.type === 'VariableDeclarator' && decl.init?.type === 'MemberExpression') {
+      const target = memberSink(binding.path as NodePath, decl.init);
+      return target ? { ...target, display: `${name} (${target.display})` } : undefined;
+    }
     if (CODE_SINKS.has(name) && !binding) return { display: name, kind: 'code', fn: name };
     if (PROCESS_SINKS.has(name) && path.isCallExpression()) return { display: name, kind: 'process', fn: name };
     return undefined;
   }
 
-  if (callee.type !== 'MemberExpression' || callee.property.type !== 'Identifier') return undefined;
-  const prop = callee.property.name;
+  if (callee.type !== 'MemberExpression') return undefined;
+  return memberSink(path, callee);
+}
+
+/**
+ * The sink a member expression names — `cp.exec`, `require('child_process')['exec']`,
+ * `process.mainModule.require('child_process').execSync`, `require('vm').runInThisContext`,
+ * `vm.Script`, a module's `_compile`, the Function constructor reached through
+ * any function's `constructor` (`[].constructor.constructor`).
+ */
+function memberSink(path: NodePath, callee: Node & { type: 'MemberExpression' }): SinkCallee | undefined {
+  const prop = memberName(callee);
+  if (prop === undefined) return undefined;
   const object = callee.object;
   if (prop === 'eval' && object.type === 'Identifier' && GLOBAL_OBJECTS.has(object.name)) {
     return { display: `${object.name}.eval`, kind: 'code', fn: 'eval' };
   }
+  // Module.prototype._compile(source, filename): compiles and runs source as a module
+  // (two arguments; a template engine's own `_compile()` takes none or one)
+  const argc = (path.node as { arguments?: unknown[] }).arguments?.length ?? 0;
+  if (prop === '_compile' && argc >= 2) return { display: '._compile', kind: 'code', fn: 'Function' };
+  // `x.constructor.constructor(code)`, `(() => {}).constructor(code)`,
+  // `Function.prototype.constructor(code)`: the Function constructor
+  if (prop === 'constructor' && (
+    memberName(object) === 'constructor'
+    || (memberName(object) === 'prototype' && (object as { object?: Node }).object?.type === 'Identifier'
+      && ((object as { object: Node & { name?: string } }).object.name === 'Function'))
+    || object.type === 'ArrowFunctionExpression' || object.type === 'FunctionExpression'
+    || (object.type === 'Identifier' && object.name === 'Function' && !path.scope.getBinding('Function'))
+  )) {
+    return { display: 'Function (via .constructor)', kind: 'code', fn: 'Function' };
+  }
   // require("child_process").execSync(…) / (await import("child_process")).exec(…)
-  const inline = moduleOfInit(object);
+  const inline = moduleOfInit(object, path.scope);
   if (inline) {
-    return CHILD_PROCESS_MODULE.test(inline) && PROCESS_SINKS.has(prop)
-      ? { display: `require("${inline}").${prop}`, kind: 'process', fn: prop }
-      : undefined;
+    if (CHILD_PROCESS_MODULE.test(inline) && PROCESS_SINKS.has(prop)) return { display: `require("${inline}").${prop}`, kind: 'process', fn: prop };
+    if (VM_MODULE.test(inline) && (VM_SINKS.has(prop) || prop === 'Script')) return { display: `require("${inline}").${prop}`, kind: 'code', fn: prop };
+    return undefined;
   }
   if (object.type !== 'Identifier') return undefined;
   const mod = bindingModule(path.scope.getBinding(object.name));
@@ -215,7 +314,7 @@ export function sinkCallee(path: NodePath): SinkCallee | undefined {
   }
   if (mod === 'shelljs' && prop === 'exec') return { display: `${object.name}.exec`, kind: 'process', fn: 'exec' };
   if (mod === 'execa' && EXECA_FUNCTIONS[prop]) return { display: `${object.name}.${prop}`, kind: 'process', fn: prop };
-  if ((VM_SINKS.has(prop) || prop === 'Script') && (object.name === 'vm' || mod?.endsWith('vm'))) {
+  if ((VM_SINKS.has(prop) || prop === 'Script') && (mod ? VM_MODULE.test(mod) : object.name === 'vm')) {
     return { display: `${object.name}.${prop}`, kind: 'code', fn: prop };
   }
   return undefined;

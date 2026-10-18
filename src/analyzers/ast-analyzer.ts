@@ -3,7 +3,7 @@ import _traverse from '@babel/traverse';
 import type { Node } from '@babel/types';
 import type { NodePath } from '@babel/traverse';
 import { mayBeJavaScript, parseLenientReport, recordedEvasion, sourceChunks, type JsAst } from './js-parse.js';
-import { sinkCallee } from './tool-input-taint.js';
+import { bindingModule, memberName, sinkCallee } from './tool-input-taint.js';
 
 // Handle ESM/CJS interop
 const traverse = typeof _traverse === 'function' ? _traverse : (_traverse as { default: typeof _traverse }).default;
@@ -242,6 +242,9 @@ function analyzeUncached(code: string): DataFlowResult[] {
   };
   // Subset of sinks that spawn processes (child_process) rather than open connections
   const processImports = new Set<string>();
+  // `import 'zx/globals'` (or a zx script) puts `$` on the global object
+  const zxGlobals = ast.program.body.some(st => st.type === 'ImportDeclaration' && /^zx(?:\/globals)?$/.test(st.source.value) && st.specifiers.length === 0)
+    || /^#!.*\bzx\b/.test(code);
 
   try {
     traverse(ast, {
@@ -530,9 +533,47 @@ function analyzeUncached(code: string): DataFlowResult[] {
         }
       },
 
+      // zx / execa `$\`cmd ${arg}\``: a command run through a shell, each
+      // interpolation quoted as one argument
+      TaggedTemplateExpression(path) {
+        const tag = path.node.tag;
+        const fn = tag.type === 'CallExpression' ? tag.callee : tag.type === 'MemberExpression' && memberIs(tag, 'sync') ? tag.object : tag;
+        if (fn.type !== 'Identifier' || fn.name !== '$') return;
+        const mod = bindingModule(path.scope.getBinding('$'));
+        if (mod ? !/^(?:zx(?:\/core)?|execa)$/.test(mod) : !zxGlobals) return;
+        const line = path.node.loc?.start.line ?? 0;
+        const quasi = path.node.quasi;
+        const parts = quasi.quasis.map((q, i) => (q.value.cooked ?? '') + (i < quasi.expressions.length ? '${…}' : '')).join('');
+        const program = (quasi.quasis[0]?.value.cooked ?? '').trim().split(/\s+/)[0] ?? '';
+        const dynamic = quasi.expressions.length > 0;
+        results.push({
+          type: 'eval-exec',
+          line,
+          snippet: lineText(line).slice(0, 120),
+          description: `${mod ?? 'zx'} $\`…\` — command execution`,
+          ...(parts.trim() ? { command: parts.trim() } : {}),
+          ...(dynamic ? { dynamic: true } : {}),
+          // The program is written out and interpolations are quoted: unless it
+          // is a shell or interpreter, what runs is that program with arguments
+          ...(dynamic && program && !program.includes('${') && !SHELL_OR_INTERPRETER.test(program) ? { noShell: true } : {}),
+        });
+      },
+
       // Detect new Function() and new WebSocket()
       NewExpression(path) {
         const node = path.node;
+        // new vm.Script(code) / new (require('vm').Script)(code)
+        const vmSink = node.callee.type !== 'Identifier' ? sinkCallee(path) : undefined;
+        if (vmSink?.kind === 'code') {
+          const line = node.loc?.start.line ?? 0;
+          results.push({
+            type: 'eval-exec',
+            line,
+            snippet: lineText(line).slice(0, 120),
+            description: `new ${vmSink.display}() — dynamic code execution`,
+            ...commandText(node.arguments),
+          });
+        }
         if (node.callee.type === 'Identifier' && node.callee.name === 'Function') {
           const line = node.loc?.start.line ?? 0;
           const snippet = lineText(line);
@@ -633,6 +674,10 @@ function commandText(args: ArgNode[]): Pick<DataFlowResult, 'command' | 'dynamic
   };
   const command = args.slice(0, 2).map((a) => text(a)).filter(Boolean).join(' ').trim();
   return { ...(command && command !== '${…}' ? { command } : {}), ...(dynamic ? { dynamic } : {}), ...(decoded ? { decoded } : {}) };
+}
+
+function memberIs(m: Node, name: string): boolean {
+  return memberName(m) === name;
 }
 
 function calleeText(callee: Node): string {

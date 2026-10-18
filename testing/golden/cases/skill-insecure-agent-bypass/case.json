@@ -1,0 +1,7 @@
+{
+  "agent": "claude-code",
+  "source": "dt17 DR1: a skill starting claude --dangerously-skip-permissions, gemini --yolo and q chat --trust-all-tools (flags per vendor CLI references)",
+  "fail": {
+    "SKL-003": "critical"
+  }
+}

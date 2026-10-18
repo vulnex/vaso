@@ -1,0 +1,7 @@
+{
+  "agent": "claude-code",
+  "source": "dt17 benign twins: git status, a computed-member execFileSync of git, a constant zx command, claude --version \u2014 info",
+  "info": [
+    "SKL-003"
+  ]
+}
