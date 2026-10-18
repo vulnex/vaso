@@ -43,6 +43,16 @@ function recordLoadError(error: ConfigLoadError): void {
 }
 
 /**
+ * Record a load failure for a config an adapter reads itself (binary formats
+ * loadConfig can't parse, e.g. Windsurf's user_settings.pb). A missing file
+ * is not a failure, as in loadConfig.
+ */
+export function recordConfigLoadFailure(filePath: string, stage: ConfigLoadError['stage'], error: unknown): void {
+  if (stage === 'read' && isFileNotFound(error)) return;
+  recordLoadError({ filePath, stage, message: errorMessage(error) });
+}
+
+/**
  * The directory that denied access to `filePath`, when the file itself can't
  * even be stat'ed (it sits under a directory without search permission). An
  * adapter tries several file names there; all of them fail the same way,

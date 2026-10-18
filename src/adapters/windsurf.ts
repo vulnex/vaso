@@ -4,8 +4,8 @@ import type { AgentInstallation, GatewayInfo, ParsedConfig, ZoneGraph } from '..
 import type { ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
-import { loadConfigIfPresent } from './load-if-present.js';
-import { stripJsonc } from '../core/jsonc.js';
+import { loadConfigIfPresent, pathPresent } from './load-if-present.js';
+import { recordConfigLoadFailure } from '../core/config-loader.js';
 import { getUserHomeDirs } from './openclaw.js';
 import { queryCliVersion } from './version-query.js';
 import { decodeWindsurfUserSettings, toWindsurfSettingsData } from './windsurf-user-settings.js';
@@ -160,15 +160,26 @@ export async function windsurfPresent(home: string, fs: FSProvider): Promise<boo
   return (await findAppBundle(fs)) !== undefined;
 }
 
-/** Editor settings.json is VS Code-flavored JSON (comments/trailing commas tolerated). */
-async function loadJsoncConfig(filePath: string, fs: FSProvider): Promise<ParsedConfig | undefined> {
+/**
+ * 3.x execution-gate settings (protobuf), projected onto windsurf.* keys. An
+ * unreadable file or bytes that aren't a protobuf message become CONFIG-LOAD
+ * (the execution gate couldn't be judged), as a broken JSON config does.
+ */
+async function loadUserSettings(filePath: string, fs: FSProvider): Promise<ParsedConfig | undefined> {
+  if (!(await pathPresent(filePath, fs))) return undefined;
+  let bytes: Uint8Array;
   try {
-    const raw = await fs.readFile(filePath);
-    const data = JSON.parse(stripJsonc(raw)) as Record<string, unknown>;
-    return { raw, format: 'json', filePath, data };
-  } catch {
+    bytes = await fs.readBytes(filePath);
+  } catch (err) {
+    recordConfigLoadFailure(filePath, 'read', err);
     return undefined;
   }
+  const decoded = decodeWindsurfUserSettings(bytes);
+  if (!decoded) {
+    recordConfigLoadFailure(filePath, 'parse', new Error('Content is not a well-formed protobuf message'));
+    return undefined;
+  }
+  return { raw: '', format: 'unknown', filePath, data: toWindsurfSettingsData(decoded) };
 }
 
 export const windsurfAdapter: AgentAdapter = {
@@ -230,33 +241,19 @@ export const windsurfAdapter: AgentAdapter = {
       }
 
       // 3.x execution-gate settings, projected onto windsurf.* keys.
-      const userSettingsPath = join(agentDir, USER_SETTINGS_FILE);
-      if (await fs.access(userSettingsPath)) {
-        try {
-          const decoded = decodeWindsurfUserSettings(await fs.readBytes(userSettingsPath));
-          if (decoded) {
-            configFiles.push({
-              raw: '',
-              format: 'unknown',
-              filePath: userSettingsPath,
-              data: toWindsurfSettingsData(decoded),
-            });
-          }
-        } catch {}
-      }
+      const userSettings = await loadUserSettings(join(agentDir, USER_SETTINGS_FILE), fs);
+      if (userSettings) configFiles.push(userSettings);
 
       // 3.x Devin agent config (permission rules), shared with Devin CLI.
-      const devinConfigPath = join(devinConfigDir(home, fs), DEVIN_CONFIG_FILE);
-      if (!sharedWithDevin && await fs.access(devinConfigPath)) {
-        const parsed = await loadJsoncConfig(devinConfigPath, fs);
+      if (!sharedWithDevin) {
+        const parsed = await loadConfigIfPresent(join(devinConfigDir(home, fs), DEVIN_CONFIG_FILE), fs);
         if (parsed) configFiles.push(parsed);
       }
 
-      // Editor settings (windsurf.* keys).
+      // Editor settings (windsurf.* keys; VS Code-flavored JSON, comments and
+      // trailing commas tolerated by the shared loader).
       for (const dir of existingUserDataDirs) {
-        const settingsPath = join(dir, 'User', 'settings.json');
-        if (!(await fs.access(settingsPath))) continue;
-        const parsed = await loadJsoncConfig(settingsPath, fs);
+        const parsed = await loadConfigIfPresent(join(dir, 'User', 'settings.json'), fs);
         if (parsed) configFiles.push(parsed);
       }
 

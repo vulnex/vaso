@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import type { FSProvider } from '../core/fs-provider.js';
 import { windsurfAdapter } from './windsurf.js';
+import { captureConfigLoadErrors } from '../core/config-loader.js';
 
 const HOME = '/home/tester';
 
@@ -128,5 +129,41 @@ describe('Windsurf / Devin Desktop adapter — files shared with Devin CLI', () 
     const fs = makeFs({ ...shared, [`${HOME}/.local/bin/devin`]: '' });
     const [inst] = await windsurfAdapter.detect({ fs });
     expect(inst.configFiles.map(c => c.filePath)).toEqual([`${HOME}/.codeium/windsurf/mcp_config.json`]);
+  });
+});
+
+describe('Windsurf / Devin Desktop adapter — unreadable and broken configs (dt15)', () => {
+  const denied = (p: string) => Object.assign(new Error(`EACCES: permission denied, open '${p}'`), { code: 'EACCES' });
+
+  it('reports an unparseable settings.json, an unreadable Devin config.json and a truncated user_settings.pb as CONFIG-LOAD', async () => {
+    const devinConfig = `${HOME}/.config/devin/config.json`;
+    const base = makeFs({
+      [`${HOME}/.codeium/windsurf/user_settings.pb`]: new Uint8Array([0x08, 0x03, 0xd8, 0x01, 0x03, 0xff, 0xff]),
+      [`${HOME}/.config/Windsurf/User/settings.json`]: '{ "windsurf.autoExecutionPolicy": ',
+      [devinConfig]: '',
+    });
+    const fs = {
+      ...base,
+      readFile: async (p: string) => {
+        if (p === devinConfig) throw denied(p);
+        return base.readFile(p);
+      },
+    } as FSProvider;
+    const { result: [inst], loadErrors } = await captureConfigLoadErrors(() => windsurfAdapter.detect({ fs }));
+    expect(loadErrors.map(e => [e.filePath.slice(HOME.length), e.stage])).toEqual([
+      ['/.codeium/windsurf/user_settings.pb', 'parse'],
+      ['/.config/devin/config.json', 'read'],
+      ['/.config/Windsurf/User/settings.json', 'parse'],
+    ]);
+    expect(inst.configFiles.map(c => c.filePath)).toEqual([]);
+  });
+
+  it('still loads a JSONC settings.json with comments and trailing commas', async () => {
+    const fs = makeFs({
+      [`${HOME}/.config/Windsurf/User/settings.json`]: '{\n // turbo\n "windsurf.autoExecutionPolicy": "turbo",\n}',
+    });
+    const { result: [inst], loadErrors } = await captureConfigLoadErrors(() => windsurfAdapter.detect({ fs }));
+    expect(loadErrors).toEqual([]);
+    expect(inst.configFiles[0].data['windsurf.autoExecutionPolicy']).toBe('turbo');
   });
 });
