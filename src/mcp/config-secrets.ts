@@ -1,4 +1,4 @@
-import { API_KEY_PATTERNS, isEnvReference, isPlaceholderSecret } from '../core/patterns.js';
+import { API_KEY_PATTERNS, isPlaceholderSecret, isSecretReference } from '../core/patterns.js';
 import { shannonEntropy } from '../analyzers/entropy.js';
 
 /**
@@ -86,15 +86,18 @@ const SECRET_PARAM = /^(?:access[_-]?token|auth[_-]?token|token|api[_-]?key|apik
 
 const KNOWN = API_KEY_PATTERNS.filter(p => !/assignment/i.test(p.name));
 
-/** A value that is a reference, a placeholder, or a file path — never a stored secret. */
+/**
+ * A value that is a reference, a placeholder, a secret manager reference, a
+ * file or a profile name — never a stored secret. The same predicate as the
+ * env-block path (`isSecretReference`), so `--token op://…` and
+ * `GITHUB_TOKEN: op://…` are judged alike.
+ */
 function notASecret(value: string): boolean {
   const v = value.trim().replace(/^['"]|['"]$/g, '');
   if (v === '') return true;
-  if (isEnvReference(v) || isPlaceholderSecret(v)) return true;
+  if (isPlaceholderSecret(v) || isSecretReference(v)) return true;
   // A reference inside the value (`Bearer ${TOKEN}`, `${HOME}/key`) holds nothing literal
   if (/\$\{[^}]+\}|\$env:|\{env:[^}]+\}|%[A-Za-z_][A-Za-z0-9_]*%/i.test(v)) return true;
-  // A file holding the credential (`--credentials ~/.config/x.json`), not the credential
-  if (/^(?:~|\.{1,2})?[/\\]|^[A-Za-z]:[/\\]/.test(v)) return true;
   return false;
 }
 
@@ -159,7 +162,9 @@ export function findUrlSecrets(url: string, location = 'url'): ConfigSecret[] {
     const known = knownToken(value);
     if (known) {
       add(rawParam(url, name) ?? value, `${known.name} in URL query parameter "${name}"`);
-    } else if (SECRET_PARAM.test(name) && value.length >= 8) {
+    } else if (SECRET_PARAM.test(name) && value.length >= 8
+      // a password may be any text; a key or token is random (`?key=documentation` is a word)
+      && (/^(?:password|pass|pwd)$/i.test(name) || looksLikeSecret(value))) {
       add(rawParam(url, name) ?? value, `credential in URL query parameter "${name}"`);
     }
   }

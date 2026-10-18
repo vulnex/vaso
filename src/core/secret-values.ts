@@ -1,7 +1,7 @@
 import { basename } from 'node:path';
 import type { FSProvider } from './fs-provider.js';
 import { shannonEntropy } from '../analyzers/entropy.js';
-import { API_KEY_PATTERNS, isEnvReference, isPlaceholderSecret } from './patterns.js';
+import { API_KEY_PATTERNS, isPlaceholderSecret, isSecretReference } from './patterns.js';
 
 /**
  * Whether a parsed config holds a credential — what makes a settings file a
@@ -12,7 +12,8 @@ import { API_KEY_PATTERNS, isEnvReference, isPlaceholderSecret } from './pattern
  *
  * A value counts when it matches a known key format, or sits under a
  * secret-sounding key and looks random (length ≥ 20, high entropy). Env
- * references (`${VAR}`, `{env:VAR}`) and documentation placeholders don't.
+ * references (`${VAR}`, `{env:VAR}`), secret manager references, file and
+ * profile names (`isSecretReference`) and documentation placeholders don't.
  */
 const SECRET_KEY_NAME = /(?:api[_-]?key|apikey|token|secret|password|passwd|credential|private[_-]?key|auth(?:orization)?$)/i;
 const AUTH_SCHEME = /^(?:bearer|basic|token)\s+/i;
@@ -22,7 +23,7 @@ const MAX_NODES = 5000;
 
 export function isSecretLikeValue(value: string, keyName = ''): boolean {
   const v = value.trim().replace(AUTH_SCHEME, '');
-  if (!v || isEnvReference(v) || isPlaceholderSecret(v)) return false;
+  if (!v || isSecretReference(v) || isPlaceholderSecret(v)) return false;
   if (API_KEY_PATTERNS.some(({ pattern }) => pattern.test(v))) return true;
   return SECRET_KEY_NAME.test(keyName) && v.length >= MIN_LENGTH && !/\s/.test(v) && shannonEntropy(v) > HIGH_ENTROPY;
 }

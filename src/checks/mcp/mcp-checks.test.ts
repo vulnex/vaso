@@ -325,6 +325,19 @@ describe('MCP-003: Credential Exposure', () => {
     expect(result.passed).toBe(true);
   });
 
+  it('judges a reference the same in the env block and in argv (dt17 MD-C)', async () => {
+    const run = (env: Record<string, string>, args: string[] = ['-y', 'srv@1.0.0']) => mcp003.run(makeContext({
+      mcpConfigs: [{ source: 'project', filePath: '/tmp/mcp.json', servers: [{ name: 's', command: 'npx', args, env, transport: 'stdio' }] }],
+    }));
+    const arn = 'arn:aws:secretsmanager:us-east-1:123456789012:secret:prod/mcp-AbC123';
+    expect((await run({ API_SECRET: arn })).passed).toBe(true);
+    expect((await run({}, ['-y', 'srv@1.0.0', '--secret', arn])).passed).toBe(true);
+    expect((await run({ GITHUB_TOKEN: 'op://Private/GitHub/credential' }, ['-y', 'srv@1.0.0', '--token', 'op://Private/GitHub/credential'])).passed).toBe(true);
+    // true positive: the literal secret in either place
+    expect((await run({ API_SECRET: 'q7Zp2Lk9Vx4Rt8Mw3Nc6Bh1Jd5Fg0SaQ7zP' })).passed).toBe(false);
+    expect((await run({}, ['-y', 'srv@1.0.0', '--secret', 'q7Zp2Lk9Vx4Rt8Mw3Nc6Bh1Jd5Fg0SaQ7zP'])).passed).toBe(false);
+  });
+
   it('detects a plaintext token in a remote-server Authorization header', async () => {
     const ctx = makeContext({
       mcpConfigs: [{

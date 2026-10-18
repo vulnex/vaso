@@ -44,6 +44,35 @@ describe('findArgSecrets', () => {
     expect(found[0].masked).toBe('https://mcp.example.com/sse?api_key=***');
   });
 
+  it('treats secret manager references, key file names and profile names as references (dt17 MD-C)', () => {
+    for (const ref of [
+      'op://Private/GitHub/credential',
+      'arn:aws:secretsmanager:us-east-1:123456789012:secret:prod/mcp-AbC123',
+      'arn:aws:ssm:eu-west-1:123456789012:parameter/mcp/token',
+      'vault:secret/data/mcp#token',
+      'ref+vault://secret/mcp#/token',
+      'projects/my-project-123/secrets/mcp-token/versions/latest',
+      'https://myvault.vault.azure.net/secrets/mcp-token/0123456789abcdef0123456789abcdef',
+      'keychain:github-mcp-token1',
+      'ENC[AES256_GCM,data:Tr7o=,iv:1=,tag:k=,type:str]',
+      'service-account-key.json',
+      'production-us-east-2',
+    ]) {
+      expect(findArgSecrets(['--token', ref]), ref).toEqual([]);
+      expect(findArgSecrets(['-e', `GITHUB_TOKEN=${ref}`]), ref).toEqual([]);
+      expect(findArgSecrets([`--api-key=${ref}`]), ref).toEqual([]);
+    }
+    expect(findUrlSecrets('https://mcp.example.com/sse?key=documentation')).toEqual([]);
+    // true positives beside them: literal secrets, a passphrase, a password parameter
+    expect(findArgSecrets(['--token', GHP])).toHaveLength(1);
+    expect(findArgSecrets(['--api-key', 'q7Zp2Lk9Vx4Rt8Mw3Nc6Bh1Jd5Fg0Sa'])).toHaveLength(1);
+    expect(findArgSecrets(['--password', 'correct-horse-battery-staple-9'])).toHaveLength(1);
+    expect(findArgSecrets(['--token', 'pass:q7Zp2Lk9Vx4Rt8Mw3Nc6Bh1Jd5Fg0Sa'])).toHaveLength(1);
+    expect(findArgSecrets(['--token', `op://${GHP}`])).toHaveLength(1);
+    expect(findUrlSecrets('https://mcp.example.com/sse?api_key=q7Zp2Lk9Vx4Rt8Mw3Nc6Bh1Jd5Fg0Sa')).toHaveLength(1);
+    expect(findUrlSecrets('https://mcp.example.com/sse?password=hunter22')).toHaveLength(1);
+  });
+
   it('stays quiet on references, placeholders, paths and ordinary flags', () => {
     expect(findArgSecrets(['--token', '${GITHUB_TOKEN}'])).toEqual([]);
     expect(findArgSecrets(['--token', '$GITHUB_TOKEN'])).toEqual([]);

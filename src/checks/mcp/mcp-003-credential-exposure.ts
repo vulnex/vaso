@@ -1,6 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { API_KEY_PATTERNS, isEnvReference, isPlaceholderSecret } from '../../core/patterns.js';
+import { API_KEY_PATTERNS, isPlaceholderSecret, isSecretReference } from '../../core/patterns.js';
 import { shannonEntropy } from '../../analyzers/entropy.js';
 import { findSourceSecrets } from '../../analyzers/source-secrets.js';
 import { findArgSecrets, findUrlSecrets } from '../../mcp/config-secrets.js';
@@ -31,7 +31,8 @@ export const mcp003 = defineCheck({
 
         for (const [location, values] of sources) {
         for (const [key, value] of Object.entries(values)) {
-          if (isPlaceholderSecret(value) || isEnvReference(value)) continue; // a docs example or a reference, not a key
+          // a docs example, or where the key is kept (a variable, a secret manager, a file, a profile)
+          if (isPlaceholderSecret(value) || isSecretReference(value)) continue;
           seen.add(value.replace(/^\s*(?:Bearer|Basic|Token)\s+/i, '').trim());
           // Check against known API key patterns
           for (const { pattern, name } of API_KEY_PATTERNS) {

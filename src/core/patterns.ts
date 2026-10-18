@@ -106,6 +106,69 @@ export function isEnvReference(value: string): boolean {
   return envReference(value) !== undefined;
 }
 
+/**
+ * Where a secret is kept, written in place of the secret: a secret manager's
+ * reference, which the server or a wrapper (`op run`, `vals`, the platform)
+ * resolves at start —
+ *  - 1Password `op://vault/item/field`; HashiCorp Vault `vault:secret/data/x#k`,
+ *    `vault://…`; vals `ref+vault://…`, `ref+awssecrets://…`, `ref+sops://…`
+ *  - AWS `arn:aws:secretsmanager:<region>:<acct>:secret:<name>`,
+ *    `arn:aws:ssm:<region>:<acct>:parameter/<name>`
+ *  - GCP Secret Manager `projects/<p>/secrets/<name>[/versions/<v>]`
+ *  - Azure Key Vault `https://<vault>.vault.azure.net/secrets/<name>`,
+ *    App Service `@Microsoft.KeyVault(SecretUri=…)`
+ *  - SOPS-encrypted values `ENC[AES256_GCM,data:…]`, keychain/keyring and
+ *    other secret-store schemes (`keychain:name`, `doppler://…`, `bws://…`)
+ * Not OpenSSL's `pass:<password>`: that is the password itself.
+ */
+const SECRET_MANAGER_REFERENCE = new RegExp([
+  String.raw`^(?:op|vault|keychain|keyring|secret|secrets|gopass|lpass|bw|bws|doppler|infisical|azkv|gcpsm|awssm|sm|ssm|kms|sops|age)(?::\/\/|:)[^\s]+$`,
+  String.raw`^ref\+[a-z0-9]+:\/\/\S+$`,
+  String.raw`^arn:aws[\w-]*:(?:secretsmanager|ssm|kms):[\w-]*:\d*:\S+$`,
+  String.raw`^projects\/[\w.-]+\/secrets\/[\w.-]+(?:\/versions\/[\w.-]+)?$`,
+  String.raw`^https:\/\/[\w-]+\.vault\.(?:azure\.net|azure\.cn|usgovcloudapi\.net)\/secrets\/[\w-]+(?:\/\w+)?\/?$`,
+  String.raw`^@Microsoft\.KeyVault\(.+\)$`,
+  String.raw`^ENC\[[A-Z0-9_]+,data:.*\]$`,
+].join('|'), 'i');
+
+/** A file holding the credential: a path, or a key/config file's name (`service-account-key.json`). */
+const FILE_REFERENCE = /^(?:~|\.{1,2})?[/\\]|^[A-Za-z]:[/\\]|^[\w.@-]+\.(?:json|pem|key|p8|p12|pfx|crt|cer|der|jks|keystore|txt|env|ya?ml|toml|ini|cfg|conf|gpg|asc|age|enc)$/i;
+
+/** Words a profile, environment or region name is built from (`production-us-east-2`). */
+const PROFILE_WORDS = new Set(['prod', 'production', 'staging', 'stage', 'stg', 'dev', 'development', 'test', 'testing', 'qa', 'uat',
+  'sandbox', 'default', 'local', 'main', 'primary', 'secondary', 'preview', 'demo', 'personal', 'work', 'team', 'org', 'admin',
+  'readonly', 'ro', 'rw', 'profile', 'region', 'global', 'us', 'eu', 'ap', 'sa', 'ca', 'me', 'af', 'il', 'cn', 'gov',
+  'east', 'west', 'north', 'south', 'central', 'northeast', 'southeast', 'northwest', 'southwest']);
+
+/**
+ * A profile, environment or region name (`production-us-east-2`,
+ * `default`, `my-team-1`) selecting stored credentials: lowercase words and
+ * short numbers, at least one of them a profile word. A
+ * passphrase of ordinary words (`correct-horse-battery-staple-9`) is not one.
+ */
+function isProfileName(v: string): boolean {
+  if (v.length > 64 || !/^[a-z][a-z0-9]*(?:[-_.][a-z0-9]+)*$/.test(v)) return false;
+  const parts = v.split(/[-_.]/);
+  if (!parts.every((p) => /^[a-z]{1,16}$/.test(p) || /^\d{1,4}$/.test(p))) return false;
+  return parts.some((p) => PROFILE_WORDS.has(p));
+}
+
+/**
+ * A value that names where a credential is kept instead of holding it: an
+ * environment/file reference (`isEnvReference`), a secret manager reference,
+ * a file path or key file name, or a profile name. Shared by every place
+ * VASO judges a configured value (MCP env blocks and headers, argv flags,
+ * URLs, agent settings), so the same text is judged the same wherever it is
+ * written. A value with a known token format is never a reference.
+ */
+export function isSecretReference(value: string): boolean {
+  const v = value.replace(AUTH_SCHEME_PREFIX, '').trim().replace(/^(['"])(.*)\1$/, '$2');
+  if (v === '') return false;
+  if (isEnvReference(v)) return true;
+  if (API_KEY_PATTERNS.some((p) => p.pattern.test(v))) return false;
+  return SECRET_MANAGER_REFERENCE.test(v) || FILE_REFERENCE.test(v) || isProfileName(v);
+}
+
 export const OAUTH_SECRET_PATTERNS = [
   { pattern: /^client_secret$/i, name: 'OAuth client secret (key name)' },
   { pattern: /^oauth[_-]?(?:client[_-]?)?secret$/i, name: 'OAuth secret (key name)' },

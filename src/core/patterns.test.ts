@@ -1,5 +1,23 @@
 import { describe, it, expect } from 'vitest';
-import { isPlaceholderSecret, redactSecret, redactSecretsInLine } from './patterns.js';
+import { isPlaceholderSecret, isSecretReference, redactSecret, redactSecretsInLine } from './patterns.js';
+
+describe('isSecretReference (dt17 MD-C)', () => {
+  it('knows secret manager references, key files, profile names and env references', () => {
+    for (const v of ['op://Private/GitHub/credential', 'arn:aws:secretsmanager:us-east-1:123456789012:secret:prod/x-AbC123',
+      'vault:secret/data/mcp#token', 'projects/p-1/secrets/tok', 'https://kv1.vault.azure.net/secrets/tok',
+      '@Microsoft.KeyVault(SecretUri=https://kv1.vault.azure.net/secrets/tok/)', 'ENC[AES256_GCM,data:abc=,type:str]',
+      'service-account-key.json', '~/.config/x.json', 'production-us-east-2', 'default', '${GITHUB_TOKEN}', 'Bearer {env:TOKEN}']) {
+      expect(isSecretReference(v), v).toBe(true);
+    }
+  });
+
+  it('is never a literal secret', () => {
+    for (const v of ['ghp_' + 'A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8', 'q7Zp2Lk9Vx4Rt8Mw3Nc6Bh1Jd5Fg0Sa', 'pass:hunter2hunter2',
+      'correct-horse-battery-staple', 'sk-proj-' + 'Zq3xV9mK2pL8nR4tW7yB1cD6fG0hJ5sA', '']) {
+      expect(isSecretReference(v), v).toBe(false);
+    }
+  });
+});
 
 describe('redactSecret', () => {
   it('reveals first 4 + last 4 characters of long tokens', () => {
