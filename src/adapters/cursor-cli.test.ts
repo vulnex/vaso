@@ -189,4 +189,17 @@ describe('Cursor adapter — project hooks (dt15)', () => {
     expect(result.filter(i => i.profile === 'project')).toEqual([]);
     expect(result[0].configFiles.map(c => c.filePath)).toEqual([`${HOME}/.cursor/hooks.json`]);
   });
+
+  it('loads the enterprise /etc/cursor/hooks.json once, on the first installation', async () => {
+    vi.spyOn(process, 'cwd').mockReturnValue(HOME);
+    const result = await cursorCliAdapter.detect({ fs: fsWith([`${HOME}/.cursor/hooks.json`, '/etc/cursor/hooks.json']) });
+    expect(result[0].configFiles.map(c => c.filePath)).toEqual([`${HOME}/.cursor/hooks.json`, '/etc/cursor/hooks.json']);
+    // no Cursor install: the enterprise file alone is not one
+    expect(await cursorCliAdapter.detect({ fs: fsWith(['/etc/cursor/hooks.json']) })).toEqual([]);
+  });
+
+  it('declares the enterprise hooks files to the probe', () => {
+    const { systemPaths } = cursorCliAdapter.getProbeManifest!();
+    expect(systemPaths).toEqual(expect.arrayContaining(['/Library/Application Support/Cursor/hooks.json', '/etc/cursor/hooks.json']));
+  });
 });

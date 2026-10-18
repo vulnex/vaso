@@ -22,6 +22,20 @@ const USER_CONFIG_FILES = ['cli-config.json', 'mcp.json', 'permissions.json', 's
 const PROJECT_CONFIG_FILES = ['mcp.json', 'cli.json', 'hooks.json'];
 
 const IDE_APP_BUNDLE = '/Applications/Cursor.app';
+
+/**
+ * Enterprise (system-wide) hooks, the highest of the four hook sources
+ * (Enterprise → Team → Project → User, cursor.com/docs/agent/hooks): every
+ * matching hook from every source runs, and a deny from any of them wins.
+ * Team hooks are distributed from the dashboard and have no documented file.
+ */
+const ENTERPRISE_HOOKS_DARWIN = '/Library/Application Support/Cursor/hooks.json';
+const ENTERPRISE_HOOKS_LINUX = '/etc/cursor/hooks.json';
+
+function enterpriseHooksFile(fs: FSProvider): string {
+  if (fs.platform === 'win32') return join(fs.getEnv('PROGRAMDATA') ?? 'C:\\ProgramData', 'Cursor', 'hooks.json');
+  return fs.platform === 'darwin' ? ENTERPRISE_HOOKS_DARWIN : ENTERPRISE_HOOKS_LINUX;
+}
 const CLI_CONFIG_FILE = 'cli-config.json';
 // User skills: ~/.cursor/skills (and skills-cursor/, where the CLI syncs
 // installed skills) plus the cross-agent ~/.agents/skills (cursor.com/docs/context/skills)
@@ -212,6 +226,12 @@ export const cursorCliAdapter: AgentAdapter = {
       });
     }
 
+    // Enterprise hooks are host-wide: reported once, on the first installation
+    if (installations.length > 0) {
+      const enterprise = await loadConfigIfPresent(enterpriseHooksFile(fs), fs);
+      if (enterprise) installations[0].configFiles.push(enterprise);
+    }
+
     // Project-level: .cursor/{mcp,cli,hooks}.json under cwd (project hooks
     // run from the repo in any trusted workspace — cursor.com/docs/agent/hooks)
     const cwd = scanCwd(fs);
@@ -321,8 +341,8 @@ export const cursorCliAdapter: AgentAdapter = {
         '~/.agents/skills',
       ],
       envPrefixes: ['CURSOR_'],
-      // IDE-only installs are detected by the app bundle (macOS)
-      systemPaths: [...SYSTEM_CLI_PATHS, IDE_APP_BUNDLE],
+      // IDE-only installs are detected by the app bundle (macOS); enterprise hooks
+      systemPaths: [...SYSTEM_CLI_PATHS, IDE_APP_BUNDLE, ENTERPRISE_HOOKS_DARWIN, ENTERPRISE_HOOKS_LINUX],
       systemDirListings: [],
     };
   },
