@@ -5,11 +5,54 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
 )
+
+// A command that exits but leaves a background child holding stdout must not
+// hold the probe until that child ends, and a timeout kills its whole group.
+func TestRunCommandBoundedByBackgroundChildrenAndTimeout(t *testing.T) {
+	commandAllowlist["sh"] = true
+	defer delete(commandAllowlist, "sh")
+	alive := func(pid string) bool {
+		n, err := strconv.Atoi(strings.TrimSpace(pid))
+		if err != nil {
+			t.Fatalf("no pid in %q", pid)
+		}
+		for i := 0; i < 20; i++ {
+			if syscall.Kill(n, 0) != nil {
+				return false
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+		return true
+	}
+
+	start := time.Now()
+	out := runCommand(CommandRequest{ID: "t", Cmd: "sh", Args: []string{"-c", "sleep 30 & echo $!; echo tool 1.2.3"}, Timeout: 5000}, "")
+	if time.Since(start) > 3*time.Second {
+		t.Fatalf("waited %v for a background child", time.Since(start))
+	}
+	lines := strings.Split(out.Stdout, "\n")
+	if out.ExitCode != 0 || len(lines) < 2 || lines[1] != "tool 1.2.3" {
+		t.Fatalf("output lost: %+v", out)
+	}
+	if alive(lines[0]) {
+		t.Fatal("background child left running")
+	}
+
+	start = time.Now()
+	out = runCommand(CommandRequest{ID: "t", Cmd: "sh", Args: []string{"-c", "sleep 30 & echo $!; wait"}, Timeout: 300}, "")
+	if time.Since(start) > 3*time.Second {
+		t.Fatalf("timeout not enforced: %v", time.Since(start))
+	}
+	if out.ExitCode == 0 || alive(strings.Split(out.Stdout, "\n")[0]) {
+		t.Fatalf("timed-out group not killed: %+v", out)
+	}
+}
 
 func TestCollectFileSkipsFIFOsAndDevices(t *testing.T) {
 	dir := t.TempDir()

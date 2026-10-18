@@ -10,8 +10,15 @@ import type { Platform } from './types.js';
 import { posixPermissionFacts } from './permissions.js';
 import { parsePrivateGroups } from './private-groups.js';
 import { planExec } from './exec-safety.js';
+import { runBounded, runBoundedSync, type BoundedRunResult } from './bounded-exec.js';
 
 const execFileAsync = promisify(execFile);
+
+/** exec()'s exit code: execFile's (127 for a missing command, 1 when killed). */
+function boundedExitCode(r: BoundedRunResult): number {
+  if (r.error) return r.error.code === 'ENOENT' ? 127 : 126;
+  return r.status ?? 1;
+}
 
 /**
  * Reads a regular file only. A FIFO where a config is expected would block
@@ -197,10 +204,23 @@ export class LocalFSProvider implements FSProvider {
   async exec(cmd: string, args: string[], options?: ExecOptions): Promise<ExecResult> {
     const plan = planExec(cmd, options);
     if (plan.refuse) return { stdout: '', stderr: plan.refuse, exitCode: 126 };
+    const timeout = options?.timeout ?? 10000;
+    if (this.platform !== 'win32') {
+      // Bounded by the timeout even when the command leaves a background
+      // process holding its output (bounded-exec.ts)
+      try {
+        const r = await runBounded(cmd, args, { timeout, cwd: plan.cwd, env: plan.env, uid: plan.uid, gid: plan.gid });
+        return { stdout: r.stdout, stderr: r.stderr, exitCode: boundedExitCode(r) };
+      } catch (err) {
+        return { stdout: '', stderr: (err as Error).message, exitCode: 1 };
+      } finally {
+        plan.cleanup();
+      }
+    }
     try {
       const result = await execFileAsync(cmd, args, {
         encoding: 'utf-8',
-        timeout: options?.timeout ?? 10000,
+        timeout,
         cwd: plan.cwd,
         ...(plan.env ? { env: plan.env } : {}),
         ...(plan.uid !== undefined ? { uid: plan.uid, gid: plan.gid } : {}),
@@ -225,10 +245,27 @@ export class LocalFSProvider implements FSProvider {
   execSync(cmd: string, args: string[], options?: ExecOptions): string {
     const plan = planExec(cmd, options);
     if (plan.refuse) throw new Error(plan.refuse);
+    const timeout = options?.timeout ?? 10000;
     try {
+      if (this.platform !== 'win32') {
+        const r = runBoundedSync(cmd, args, { timeout, cwd: plan.cwd, env: plan.env, uid: plan.uid, gid: plan.gid });
+        if (r.error) throw r.error;
+        if (r.timedOut || r.status !== 0) {
+          // Shaped like execFileSync's error: callers read status/stdout/stderr
+          const why = r.timedOut ? `timed out after ${timeout} ms` : r.signal ? `killed by ${r.signal}` : `exit ${r.status}`;
+          throw Object.assign(new Error(`Command failed (${why}): ${cmd} ${args.join(' ')}`), {
+            status: r.status ?? null,
+            signal: r.signal ?? null,
+            stdout: r.stdout,
+            stderr: r.stderr,
+            ...(r.timedOut ? { code: 'ETIMEDOUT' } : {}),
+          });
+        }
+        return r.stdout;
+      }
       return execFileSync(cmd, args, {
         encoding: 'utf-8',
-        timeout: options?.timeout ?? 10000,
+        timeout,
         stdio: ['pipe', 'pipe', 'pipe'],
         cwd: plan.cwd,
         ...(plan.env ? { env: plan.env } : {}),

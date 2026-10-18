@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -20,6 +21,10 @@ import (
 )
 
 const defaultCommandTimeout = 5000 // ms
+
+// waitDelay is how long a command's output pipes may stay open after it
+// exits (held by a background child) or after its timeout kill.
+const waitDelay = 500 * time.Millisecond
 
 // Files larger than this are stat'd but their content is not embedded in the
 // snapshot. This protects against filePath/glob entries that incidentally
@@ -791,6 +796,12 @@ func runCommand(req CommandRequest, augmentedPath string) CommandOutput {
 		}
 	}
 	cmd := exec.CommandContext(ctx, resolved, req.Args...)
+	// A command that exits but leaves a background child holding stdout (a
+	// shim's `( sleep 30 ) &`) made Wait block until that child ended, past
+	// the timeout. The command leads its own process group, a timeout kills
+	// the group, and the pipes are closed waitDelay after it exits.
+	ownProcessGroup(cmd)
+	cmd.WaitDelay = waitDelay
 
 	// As root, nothing another user controls runs with root's privileges: a
 	// binary owned by a user runs as that user (privileges dropped), and a
@@ -848,11 +859,15 @@ func runCommand(req CommandRequest, augmentedPath string) CommandOutput {
 	cmd.Stderr = &stderr
 
 	err := cmd.Run()
+	killProcessGroup(cmd) // what it left running
 
 	exitCode := 0
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			exitCode = exitErr.ExitCode()
+		} else if errors.Is(err, exec.ErrWaitDelay) && cmd.ProcessState != nil {
+			// Exited normally; only its leftover child held the pipes
+			exitCode = cmd.ProcessState.ExitCode()
 		} else {
 			exitCode = -1
 		}

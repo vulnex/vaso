@@ -7,5 +7,7 @@ import "os/exec"
 var runningAsRoot = func() bool { return false }
 
 func dropTo(cmd *exec.Cmd, uid, gid int) {}
+func ownProcessGroup(cmd *exec.Cmd)      {}
+func killProcessGroup(cmd *exec.Cmd)     {}
 func rootSafe(path string) bool          { return true }
 func primaryGid(uid int) (int, bool)     { return 0, false }

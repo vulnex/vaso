@@ -17,7 +17,30 @@ var runningAsRoot = func() bool { return os.Geteuid() == 0 }
 
 // dropTo makes cmd run as uid/gid instead of root.
 func dropTo(cmd *exec.Cmd, uid, gid int) {
-	cmd.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: uint32(uid), Gid: uint32(gid)}}
+	if cmd.SysProcAttr == nil {
+		cmd.SysProcAttr = &syscall.SysProcAttr{}
+	}
+	cmd.SysProcAttr.Credential = &syscall.Credential{Uid: uint32(uid), Gid: uint32(gid)}
+}
+
+// ownProcessGroup runs cmd as the leader of a new process group and makes a
+// timeout kill the whole group, so a background child it started can't
+// outlive the timeout (killProcessGroup cleans up after a normal exit).
+func ownProcessGroup(cmd *exec.Cmd) {
+	if cmd.SysProcAttr == nil {
+		cmd.SysProcAttr = &syscall.SysProcAttr{}
+	}
+	cmd.SysProcAttr.Setpgid = true
+	cmd.Cancel = func() error {
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
+}
+
+// killProcessGroup kills whatever is left in cmd's process group.
+func killProcessGroup(cmd *exec.Cmd) {
+	if cmd.Process != nil {
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
 }
 
 // writableByOthers: a non-root owner, or group/other write without the
