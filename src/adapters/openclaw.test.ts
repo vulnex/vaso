@@ -92,13 +92,16 @@ describe('OpenClaw adapter', () => {
     expect(result[0].configFiles).toHaveLength(1);
   });
 
-  it('includes profile-specific directory when OPENCLAW_PROFILE is set', async () => {
+  it('discovers --profile state dirs (~/.openclaw-<name>) without OPENCLAW_PROFILE', async () => {
     const home = process.env.HOME || '/home/testuser';
-    process.env.OPENCLAW_PROFILE = 'work';
     const profileDir = join(home, '.openclaw-work');
     const configPath = join(profileDir, 'openclaw.json');
 
     setExistingPaths([profileDir, configPath]);
+    const dirent = (name: string) => ({ name, isDirectory: () => true, isFile: () => false, isSymbolicLink: () => false, parentPath: home });
+    mockReaddir.mockImplementation((async (p: string) => (p === home
+      ? [dirent('.openclaw-work'), dirent('.openclaw-default'), dirent('.openclaw-bad name')]
+      : [])) as never);
     mockLoadConfig.mockImplementation(async (path) => {
       if (path === configPath) {
         return mockConfig(configPath, { version: '2.0.0' });

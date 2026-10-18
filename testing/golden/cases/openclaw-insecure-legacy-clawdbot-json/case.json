@@ -1,0 +1,19 @@
+{
+  "agent": "openclaw",
+  "source": "pre-rename install: ~/.clawdbot/clawdbot.json and no ~/.openclaw; openclaw config file 2026.9.4 loads it, and config validate accepts the CFG-001 fix (deep test 2026-10-18 fixture)",
+  "fail": {
+    "CFG-001": "critical",
+    "CFG-012": "critical",
+    "NET-001": "critical",
+    "OC-003": "warning"
+  },
+  "fix": {
+    "resolves": [
+      "CFG-001"
+    ]
+  },
+  "modes": {
+    ".clawdbot/clawdbot.json": "600",
+    ".clawdbot": "700"
+  }
+}

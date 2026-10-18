@@ -1,0 +1,18 @@
+{
+  "agent": "openclaw",
+  "source": "hardened ~/.openclaw plus insecure pre-rename ~/.clawdbot and ~/.moltbot leftovers; openclaw config file 2026.9.4 loads ~/.openclaw/openclaw.json only (deep test 2026-10-18 fixture)",
+  "pass": [
+    "CFG-001",
+    "CFG-012",
+    "NET-001"
+  ],
+  "info": [
+    "OC-003"
+  ],
+  "modes": {
+    ".openclaw/openclaw.json": "600",
+    ".openclaw": "700",
+    ".clawdbot": "700",
+    ".moltbot": "700"
+  }
+}

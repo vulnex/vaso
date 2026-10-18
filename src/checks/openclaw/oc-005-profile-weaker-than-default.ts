@@ -7,6 +7,7 @@ import { extractPosture, findDowngrades, mergeConfigData } from './posture.js';
 
 const CONFIG_FILENAMES = [
   'openclaw.json',
+  'clawdbot.json',
   'config.yaml',
   'config.json',
   'gateway.yaml',
@@ -44,9 +45,11 @@ export const oc005 = defineCheck({
 
     const defaultConfigs: ParsedConfig[] = [];
     for (const filename of CONFIG_FILENAMES) {
+      // clawdbot.json only stands in for a missing openclaw.json
+      if (filename === 'clawdbot.json' && defaultConfigs.some(c => c.filePath.endsWith('/openclaw.json'))) continue;
       const filePath = join(defaultDir, filename);
       try {
-        defaultConfigs.push(filename === 'openclaw.json' ? await loadOpenclawConfig(filePath, ctx.fs) : await loadConfig(filePath, ctx.fs));
+        defaultConfigs.push(filename.endsWith('.json') && filename !== 'config.json' ? await loadOpenclawConfig(filePath, ctx.fs) : await loadConfig(filePath, ctx.fs));
       } catch {
         // File missing or unparseable — skip.
       }

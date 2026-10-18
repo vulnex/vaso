@@ -1,5 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { openclawEnvPaths } from '../../adapters/openclaw.js';
 
 const WORLD_WRITABLE_PREFIXES = ['/tmp/', '/var/tmp/', '/private/tmp/', '/dev/shm/'];
 const REDIRECT_VARS = ['OPENCLAW_CONFIG_PATH', 'OPENCLAW_STATE_DIR', 'OPENCLAW_HOME'];
@@ -24,8 +25,15 @@ export const oc004 = defineCheck({
     const installDir = ctx.installation.installDir;
     const drives = (path: string) => installDir === path || installDir.startsWith(`${path}/`)
       || ctx.configs.some(c => c.filePath === path);
+    // Values as OpenClaw resolves them (`~` expanded)
+    const env = openclawEnvPaths(ctx.fs.homedir(), ctx.fs);
+    const resolved: Record<string, string | undefined> = {
+      OPENCLAW_CONFIG_PATH: env.configPath,
+      OPENCLAW_STATE_DIR: env.stateDir,
+      OPENCLAW_HOME: env.home === ctx.fs.homedir() ? undefined : env.home,
+    };
     const redirect = REDIRECT_VARS
-      .map(name => ({ name, value: ctx.fs.getEnv(name)?.trim() }))
+      .map(name => ({ name, value: resolved[name] }))
       .find((v): v is { name: string; value: string } => Boolean(v.value) && drives(v.value!));
     if (!redirect) {
       return h.passed('Config loading not redirected by OPENCLAW_HOME / OPENCLAW_STATE_DIR / OPENCLAW_CONFIG_PATH');

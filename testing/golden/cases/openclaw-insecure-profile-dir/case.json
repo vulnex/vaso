@@ -1,0 +1,21 @@
+{
+  "agent": "openclaw",
+  "source": "hardened default ~/.openclaw plus a `openclaw --profile ops` gateway in ~/.openclaw-ops bound to the LAN without auth; openclaw --profile ops config file 2026.9.4 loads it, found without OPENCLAW_PROFILE set (deep test 2026-10-18 fixture)",
+  "fail": {
+    "CFG-001": "critical",
+    "CFG-012": "critical",
+    "NET-001": "critical",
+    "OC-005": "warning"
+  },
+  "fix": {
+    "resolves": [
+      "CFG-001"
+    ]
+  },
+  "modes": {
+    ".openclaw/openclaw.json": "600",
+    ".openclaw": "700",
+    ".openclaw-ops/openclaw.json": "600",
+    ".openclaw-ops": "700"
+  }
+}

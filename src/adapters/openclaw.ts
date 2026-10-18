@@ -1,4 +1,4 @@
-import { join, basename } from 'node:path';
+import { join, basename, dirname } from 'node:path';
 import type { AgentAdapter, DetectOptions } from './adapter.js';
 import type { AgentInstallation, GatewayInfo, ModelRef, ParsedConfig } from '../core/types.js';
 import type { ProbeManifest } from '../core/snapshot-types.js';
@@ -10,6 +10,7 @@ import { discoverCliInstalls } from './cli-installs.js';
 import { npmPackageJsonGlobs } from './nvm-binary.js';
 import { queryCliVersion, readPackageVersion } from './version-query.js';
 import { includeRootsFromEnv, loadOpenclawConfig } from './openclaw-includes.js';
+import { pathPresent } from './load-if-present.js';
 
 const CONFIG_FILENAMES = [
   'openclaw.json',
@@ -87,44 +88,113 @@ export async function getUserHomeDirs(allUsers?: boolean, fs?: FSProvider): Prom
   return [{ home, user: basename(home) }];
 }
 
-/**
- * OpenClaw config directories for a home directory, as OpenClaw resolves them
- * (verified with `openclaw config file` 2026.9.4):
- *   OPENCLAW_HOME=X       replaces the home directory: X/.openclaw[-<profile>]
- *   OPENCLAW_STATE_DIR=X  is the state directory itself: X/openclaw.json
- *   OPENCLAW_CONFIG_PATH  names the config file (see openclawConfigPathOverride)
- * The variables are the scanning user's (a snapshot's on remote scans), so
- * they apply to that user's home only.
- */
-function getSearchDirs(home: string, profile?: string, fs?: FSProvider): string[] {
-  const provider = fs ?? new LocalFSProvider();
-  const ownHome = home === provider.homedir();
-  const env = (name: string) => (ownHome ? provider.getEnv(name)?.trim() || undefined : undefined);
-  const base = env('OPENCLAW_HOME') ?? home;
-  const dirs = [
-    join(base, '.openclaw'),
-    join(base, '.clawdbot'),
-    join(base, '.moltbot'),
-  ];
+/** `--profile <name>` state dirs: `<home>/.openclaw-<name>` (profile names as
+ *  OpenClaw validates them; `default` is `.openclaw` itself). */
+const PROFILE_DIR = /^\.openclaw-([a-z0-9][a-z0-9_-]{0,63})$/i;
+/** Config file names in a state dir, in OpenClaw's order (2026.9.4 still
+ *  reads the pre-rename clawdbot.json when there is no openclaw.json). */
+export const MAIN_CONFIG_NAMES = ['openclaw.json', 'clawdbot.json'];
+/** Pre-rename state dirs. OpenClaw reads ~/.clawdbot only while ~/.openclaw has
+ *  no config; ~/.moltbot never. */
+export const LEGACY_STATE_DIRS = ['.clawdbot', '.moltbot'];
 
-  if (profile) {
-    dirs.unshift(join(base, `.openclaw-${profile}`));
-  }
-
-  const stateDir = env('OPENCLAW_STATE_DIR');
-  if (stateDir) dirs.unshift(stateDir);
-
-  // System-wide config (only once, not per-user)
-  if (ownHome) {
-    dirs.push('/etc/openclaw');
-  }
-
-  return dirs;
+/** `~` / `~/…` against `home`, as OpenClaw's resolveHomeRelativePath does. */
+function expandTilde(value: string, home: string): string {
+  return value === '~' || value.startsWith('~/') ? join(home, value.slice(1)) : value;
 }
 
-/** OPENCLAW_CONFIG_PATH: the config file OpenClaw loads instead of <state dir>/openclaw.json. */
-function openclawConfigPathOverride(home: string, fs: FSProvider): string | undefined {
-  return home === fs.homedir() ? fs.getEnv('OPENCLAW_CONFIG_PATH')?.trim() || undefined : undefined;
+export interface OpenclawEnvPaths {
+  /** OPENCLAW_HOME (its `~` is the OS home) or the user's home. */
+  home: string;
+  /** OPENCLAW_STATE_DIR — `~` is the effective home (OPENCLAW_HOME). */
+  stateDir?: string;
+  /** OPENCLAW_CONFIG_PATH — `~` is the effective home. */
+  configPath?: string;
+}
+
+/**
+ * The relocation variables as OpenClaw resolves them (verified with
+ * `openclaw config file` 2026.9.4). They are the scanning user's (the
+ * snapshot's on remote scans), so they apply to that user's home only.
+ */
+export function openclawEnvPaths(home: string, fs: FSProvider): OpenclawEnvPaths {
+  const env = (name: string) => (home === fs.homedir() ? fs.getEnv(name)?.trim() || undefined : undefined);
+  const openclawHome = env('OPENCLAW_HOME');
+  const effective = openclawHome ? expandTilde(openclawHome, home) : home;
+  const stateDir = env('OPENCLAW_STATE_DIR');
+  const configPath = env('OPENCLAW_CONFIG_PATH');
+  return {
+    home: effective,
+    stateDir: stateDir ? expandTilde(stateDir, effective) : undefined,
+    configPath: configPath ? expandTilde(configPath, effective) : undefined,
+  };
+}
+
+/** A state directory OpenClaw runs from, and the config file it loads there. */
+interface OpenclawLocation {
+  dir: string;
+  /** The config file (openclaw.json, clawdbot.json, or OPENCLAW_CONFIG_PATH). */
+  mainConfig: string;
+  profile?: string;
+}
+
+async function existingMainConfig(dir: string, fs: FSProvider): Promise<string | undefined> {
+  for (const name of MAIN_CONFIG_NAMES) {
+    if (await pathPresent(join(dir, name), fs)) return join(dir, name);
+  }
+  return undefined;
+}
+
+/**
+ * Where OpenClaw runs from for a home directory:
+ *   OPENCLAW_STATE_DIR set   that directory only (no fallback to ~/.openclaw)
+ *   otherwise                the first existing of ~/.openclaw/{openclaw,clawdbot}.json,
+ *                            ~/.clawdbot/{openclaw,clawdbot}.json; OPENCLAW_CONFIG_PATH
+ *                            replaces the config file
+ *   every ~/.openclaw-<name> a `--profile <name>` gateway, discovered without
+ *                            the variable (a service unit sets it, the scan's shell doesn't)
+ * plus /etc/openclaw for the scanning user. Pre-rename dirs that aren't the
+ * live one are leftovers (OC-003), not installations.
+ */
+async function openclawLocations(home: string, fs: FSProvider): Promise<OpenclawLocation[]> {
+  const env = openclawEnvPaths(home, fs);
+  const locations: OpenclawLocation[] = [];
+  if (env.stateDir) {
+    locations.push({
+      dir: env.stateDir,
+      mainConfig: env.configPath ?? (await existingMainConfig(env.stateDir, fs)) ?? join(env.stateDir, MAIN_CONFIG_NAMES[0]),
+    });
+  } else {
+    const current = join(env.home, '.openclaw');
+    const legacy = join(env.home, LEGACY_STATE_DIRS[0]);
+    if (env.configPath) {
+      // The state dir: ~/.openclaw when present, else an existing ~/.clawdbot
+      const dir = !(await fs.access(current)) && await fs.access(legacy) ? legacy : current;
+      locations.push({ dir, mainConfig: env.configPath });
+    } else {
+      const found = (await existingMainConfig(current, fs)) ?? (await existingMainConfig(legacy, fs));
+      locations.push(found
+        ? { dir: dirname(found), mainConfig: found }
+        : { dir: current, mainConfig: join(current, MAIN_CONFIG_NAMES[0]) });
+    }
+  }
+
+  try {
+    const entries = await fs.readdirEntries(env.home);
+    for (const entry of [...entries].sort((a, b) => a.name.localeCompare(b.name))) {
+      const m = PROFILE_DIR.exec(entry.name);
+      if (!m || !entry.isDirectory || m[1].toLowerCase() === 'default') continue;
+      const dir = join(env.home, entry.name);
+      if (locations.some(l => l.dir === dir)) continue;
+      locations.push({ dir, profile: m[1], mainConfig: (await existingMainConfig(dir, fs)) ?? join(dir, MAIN_CONFIG_NAMES[0]) });
+    }
+  } catch {
+    // home not listable
+  }
+
+  // System-wide config (only once, not per-user)
+  if (home === fs.homedir()) locations.push({ dir: '/etc/openclaw', mainConfig: join('/etc/openclaw', MAIN_CONFIG_NAMES[0]) });
+  return locations;
 }
 
 /**
@@ -157,7 +227,6 @@ export const openclawAdapter: AgentAdapter = {
 
   async detect(options?: DetectOptions): Promise<AgentInstallation[]> {
     const fs = options?.fs ?? new LocalFSProvider();
-    const profile = fs.getEnv('OPENCLAW_PROFILE') || undefined;
     const userDirs = await getUserHomeDirs(options?.allUsers, fs);
     const appBundle = await findAppBundle(fs);
     const installations: AgentInstallation[] = [];
@@ -171,24 +240,23 @@ export const openclawAdapter: AgentAdapter = {
           ?? (await readPackageVersion(bin, fs, 'openclaw')),
       });
       const cliBinary = installs.primary?.path;
-      const searchDirs = getSearchDirs(home, profile, fs);
+      const locations = await openclawLocations(home, fs);
       let foundForUser = false;
 
-      const configPathOverride = openclawConfigPathOverride(home, fs);
       // OPENCLAW_INCLUDE_ROOTS: directories `$include` may reach besides the config's own
       const includeRoots = home === fs.homedir()
-        ? includeRootsFromEnv(fs.getEnv('OPENCLAW_INCLUDE_ROOTS'), fs.getEnv('OPENCLAW_HOME')?.trim() || home)
+        ? includeRootsFromEnv(fs.getEnv('OPENCLAW_INCLUDE_ROOTS'), openclawEnvPaths(home, fs).home)
         : [];
-      for (const [dirIndex, dir] of searchDirs.entries()) {
-        // OPENCLAW_CONFIG_PATH replaces the primary (first) dir's openclaw.json
-        const overrideHere = dirIndex === 0 ? configPathOverride : undefined;
-        if (!(await fs.access(dir)) && !(overrideHere && await fs.access(overrideHere))) continue;
+      for (const { dir, mainConfig: mainConfigPath, profile } of locations) {
+        if (!(await fs.access(dir)) && !(await fs.access(mainConfigPath))) continue;
 
         const configFiles = [];
-        for (const filename of CONFIG_FILENAMES) {
-          const filePath = overrideHere && filename === 'openclaw.json' ? overrideHere : join(dir, filename);
+        // The main config, then the other files OpenClaw-style installs keep
+        // (the other main config name is not read when one exists)
+        const otherFiles = CONFIG_FILENAMES.filter(f => !MAIN_CONFIG_NAMES.includes(f)).map(f => join(dir, f));
+        for (const filePath of [mainConfigPath, ...otherFiles]) {
           try {
-            const config = filename === 'openclaw.json'
+            const config = filePath === mainConfigPath
               ? await loadOpenclawConfig(filePath, fs, includeRoots)
               : await loadConfig(filePath, fs);
             configFiles.push(config);
@@ -202,7 +270,7 @@ export const openclawAdapter: AgentAdapter = {
         // The installed CLI is what runs, so its version wins; openclaw.json's
         // top-level `version` / `meta.lastTouchedVersion` (the build that last
         // wrote the config) is the fallback for config-only installs.
-        const mainConfig = configFiles.find(c => c.filePath.endsWith('openclaw.json'));
+        const mainConfig = configFiles.find(c => c.filePath === mainConfigPath);
         const meta = mainConfig?.data?.meta as Record<string, unknown> | undefined;
         const version = installs.primary?.version
           ?? (mainConfig?.data?.version as string)
@@ -319,13 +387,12 @@ export const openclawAdapter: AgentAdapter = {
       if (!foundForUser && (cliBinary || appBundle)) {
         installations.push({
           agent: 'openclaw',
-          installDir: join(home, '.openclaw'),
+          installDir: locations[0].dir,
           version: installs.primary?.version,
           configFiles: [],
           cliBinary,
           otherInstalls: installs.others.length > 0 ? installs.others : undefined,
           appBundle,
-          profile,
           user: options?.allUsers ? user : undefined,
         });
       }
@@ -336,10 +403,13 @@ export const openclawAdapter: AgentAdapter = {
 
   getConfigPaths(): string[] {
     const _fs = new LocalFSProvider();
-    const dirs = getSearchDirs(_fs.homedir(), _fs.getEnv('OPENCLAW_PROFILE') || undefined, _fs);
-    return dirs.flatMap(dir =>
-      CONFIG_FILENAMES.map(f => join(dir, f))
-    );
+    const env = openclawEnvPaths(_fs.homedir(), _fs);
+    const dirs = [env.stateDir, join(env.home, '.openclaw'), join(env.home, LEGACY_STATE_DIRS[0]), '/etc/openclaw']
+      .filter((d): d is string => Boolean(d));
+    return [
+      ...(env.configPath ? [env.configPath] : []),
+      ...dirs.flatMap(dir => [...MAIN_CONFIG_NAMES, ...CONFIG_FILENAMES.filter(f => !MAIN_CONFIG_NAMES.includes(f))].map(f => join(dir, f))),
+    ];
   },
 
   getSkillsDir(installDir: string): string | undefined {
@@ -378,7 +448,8 @@ export const openclawAdapter: AgentAdapter = {
   },
 
   getModels(configs: ParsedConfig[]): ModelRef[] {
-    const main = configs.find(c => c.filePath.endsWith('openclaw.json'));
+    const main = configs.find(c => MAIN_CONFIG_NAMES.includes(basename(c.filePath)))
+      ?? configs.find(c => c.format === 'json' && c.data?.models !== undefined);
     const providers = (main?.data?.models as Record<string, unknown> | undefined)
       ?.providers as Record<string, unknown> | undefined;
     if (!providers) return [];
@@ -420,6 +491,7 @@ export const openclawAdapter: AgentAdapter = {
         // OPENCLAW_HOME / OPENCLAW_STATE_DIR twins come from RELOCATABLE_TREES
         '${OPENCLAW_CONFIG_PATH}',
         '~/.openclaw/openclaw.json',
+        '~/.openclaw/clawdbot.json',
         '~/.openclaw/config.yaml',
         '~/.openclaw/config.json',
         '~/.openclaw/gateway.yaml',
@@ -427,6 +499,7 @@ export const openclawAdapter: AgentAdapter = {
         // ADV-002 reads the state dir's package.json (installed plugins)
         '~/.openclaw/package.json',
         '~/.clawdbot/openclaw.json',
+        '~/.clawdbot/clawdbot.json',
         '~/.clawdbot/config.yaml',
         '~/.clawdbot/config.json',
         '~/.clawdbot/gateway.yaml',
@@ -462,8 +535,12 @@ export const openclawAdapter: AgentAdapter = {
         // documented *.json5 ones are collected (others are reported as not
         // collected, never read from elsewhere)
         '~/.openclaw/**/*.json5',
+        '~/.clawdbot/**/*.json5',
         // profile installs (OPENCLAW_PROFILE=<p> → ~/.openclaw-<p>)
         '~/.openclaw-*/openclaw.json',
+        '~/.openclaw-*/clawdbot.json',
+        '~/.openclaw-*/.env',
+        '~/.openclaw-*/**/*.json5',
         '~/.openclaw-*/config.json',
         '~/.openclaw-*/config.yaml',
         '~/.openclaw-*/skills/**',

@@ -1,0 +1,1 @@
+{ gateway: { mode: "local", port: 19789, bind: "lan", auth: { mode: "none" } } }

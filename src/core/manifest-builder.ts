@@ -33,6 +33,10 @@ export const RELOCATABLE_TREES: ReadonlyArray<readonly [prefix: string, relocate
   ['~/.hermes/', ['${HERMES_HOME}/']],
   // OPENCLAW_HOME replaces the home directory; OPENCLAW_STATE_DIR is the state dir itself
   ['~/.openclaw/', ['${OPENCLAW_HOME}/.openclaw/', '${OPENCLAW_STATE_DIR}/']],
+  // …and so do its profile dirs (~/.openclaw-<name>) and the pre-rename dirs
+  ['~/.openclaw-', ['${OPENCLAW_HOME}/.openclaw-']],
+  ['~/.clawdbot/', ['${OPENCLAW_HOME}/.clawdbot/']],
+  ['~/.moltbot/', ['${OPENCLAW_HOME}/.moltbot/']],
   ['~/.codex/', ['${CODEX_HOME}/']],
   ['~/.claude/', ['${CLAUDE_CONFIG_DIR}/']],
   ['~/.copilot/', ['${COPILOT_HOME}/']],

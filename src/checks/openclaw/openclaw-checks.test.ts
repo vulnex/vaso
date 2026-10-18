@@ -146,18 +146,27 @@ describe('OC-003: Legacy Bot Config Directory', () => {
     expect(result.passed).toBe(true);
   });
 
-  it('flags .clawdbot installation', async () => {
+  it('flags OpenClaw running from ~/.clawdbot (no config in ~/.openclaw) as a warning', async () => {
     const fs = makeMemFs({ exists: new Set(['/home/test/.openclaw']) });
     const result = await check.run(makeCtx({ installDir: '/home/test/.clawdbot', fs }));
     expect(result.passed).toBe(false);
-    expect(result.evidence?.[0].detail).toMatch(/alongside \.openclaw/);
+    expect(result.severity).toBe('warning');
+    expect(result.evidence?.[0].detail).toMatch(/runs from the pre-rename \.clawdbot/);
   });
 
-  it('flags .moltbot installation even without .openclaw sibling', async () => {
-    const fs = makeMemFs({ exists: new Set() });
-    const result = await check.run(makeCtx({ installDir: '/home/test/.moltbot', fs }));
+  it('reports leftover .clawdbot / .moltbot next to a live .openclaw as info — OpenClaw does not read them', async () => {
+    const fs = makeMemFs({ exists: new Set(['/home/test/.clawdbot', '/home/test/.moltbot']) });
+    const result = await check.run(makeCtx({ installDir: '/home/test/.openclaw', fs }));
     expect(result.passed).toBe(false);
-    expect(result.evidence?.[0].detail).toMatch(/without a current \.openclaw/);
+    expect(result.severity).toBe('info');
+    expect(result.evidence?.map(e => e.file)).toEqual(['/home/test/.clawdbot', '/home/test/.moltbot']);
+    expect(result.evidence?.[1].detail).toMatch(/no longer reads it/);
+  });
+
+  it('looks for leftovers in OPENCLAW_HOME when OPENCLAW_STATE_DIR moved the state dir', async () => {
+    const fs = makeMemFs({ exists: new Set(['/srv/oc/.moltbot']), env: { OPENCLAW_HOME: '/srv/oc', OPENCLAW_STATE_DIR: '/var/lib/oc' } });
+    const result = await check.run(makeCtx({ installDir: '/var/lib/oc', fs }));
+    expect(result.evidence?.map(e => e.file)).toEqual(['/srv/oc/.moltbot']);
   });
 
   it('skips for sub-agent installations', async () => {
