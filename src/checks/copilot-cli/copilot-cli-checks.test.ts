@@ -320,11 +320,48 @@ describe('deep-test 2026-10-15 regressions', () => {
       },
     })]));
     expect(result.passed).toBe(false);
+    expect(result.severity).toBe('critical');
     expect(result.evidence?.map(e => e.snippet)).toEqual([
       'locations["/home/test/repo"].tool_approvals: commands "bash:*"',
       'locations["/home/test/repo"].tool_approvals: commands "python3:*"',
+      'locations["/home/test/repo"].tool_approvals: write',
       'locations["/home/test/repo"].allowed_directories: "/home/test"',
     ]);
+  });
+
+  it('GHC-002 flags bare command stems (Copilot ≥ 1.0.85 approvals) that grant a shell, interpreter or downloader', async () => {
+    const perms = (ids: string[], extra: unknown[] = []) => makeConfig('/home/test/.copilot/permissions-config.json', {
+      locations: { '/home/test/repo': { tool_approvals: [{ kind: 'commands', commandIdentifiers: ids }, ...extra] } },
+    });
+    const shell = await byId('GHC-002').run(makeCtx([perms(['npm test', 'bash', 'python3.12', '/usr/bin/sudo'])]));
+    expect(shell.severity).toBe('critical');
+    expect(shell.evidence?.map(e => e.snippet)).toEqual([
+      'locations["/home/test/repo"].tool_approvals: commands "bash"',
+      'locations["/home/test/repo"].tool_approvals: commands "python3.12"',
+      'locations["/home/test/repo"].tool_approvals: commands "/usr/bin/sudo"',
+    ]);
+    const net = await byId('GHC-002').run(makeCtx([perms(['curl', 'git push'])]));
+    expect(net.passed).toBe(false);
+    expect(net.severity).toBe('warning');
+    expect(net.evidence).toHaveLength(1);
+    const write = await byId('GHC-002').run(makeCtx([perms([], [{ kind: 'write' }])]));
+    expect(write.severity).toBe('warning');
+  });
+
+  it('GHC-002 leaves scoped approvals alone (command + subcommand, read, MCP tool)', async () => {
+    const result = await byId('GHC-002').run(makeCtx([makeConfig('/home/test/.copilot/permissions-config.json', {
+      locations: {
+        '/home/test/repo': {
+          tool_approvals: [
+            { kind: 'commands', commandIdentifiers: ['npm test', 'git push', 'cargo build', 'ls', 'git:*'] },
+            { kind: 'read' },
+            { kind: 'mcp', serverName: 'github', toolName: 'get_issue' },
+          ],
+          allowed_directories: ['/home/test/repo/docs'],
+        },
+      },
+    })]));
+    expect(result.passed).toBe(true);
   });
 
   it('GHC-002 keeps the legacy allowAllPermissions key', async () => {

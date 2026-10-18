@@ -1,0 +1,12 @@
+{
+  "locations": {
+    "{{HOME}}/src/webapp": {
+      "tool_approvals": [
+        { "kind": "commands", "commandIdentifiers": ["npm test"] },
+        { "kind": "commands", "commandIdentifiers": ["bash"] },
+        { "kind": "commands", "commandIdentifiers": ["python3", "curl"] },
+        { "kind": "write" }
+      ]
+    }
+  }
+}

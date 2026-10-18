@@ -1,0 +1,12 @@
+{
+  "agent": "copilot-cli",
+  "source": "Copilot CLI permissions-config.json with scoped saved approvals only: command + subcommand, an MCP tool and a project subdirectory (dt16)",
+  "modes": {
+    ".copilot": "700",
+    ".copilot/permissions-config.json": "600"
+  },
+  "clean": true,
+  "pass": [
+    "GHC-002"
+  ]
+}

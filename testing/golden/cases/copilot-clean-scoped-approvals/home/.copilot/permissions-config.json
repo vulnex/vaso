@@ -1,0 +1,12 @@
+{
+  "locations": {
+    "{{HOME}}/src/webapp": {
+      "tool_approvals": [
+        { "kind": "commands", "commandIdentifiers": ["npm test", "git push"] },
+        { "kind": "commands", "commandIdentifiers": ["cargo build"] },
+        { "kind": "mcp", "serverName": "github-mcp-server", "toolName": "get_issue" }
+      ],
+      "allowed_directories": ["{{HOME}}/src/webapp/docs"]
+    }
+  }
+}

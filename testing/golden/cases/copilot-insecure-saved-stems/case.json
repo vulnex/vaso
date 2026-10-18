@@ -1,0 +1,11 @@
+{
+  "agent": "copilot-cli",
+  "source": "Copilot CLI permissions-config.json as written by \"Yes, and don't ask again\": command stems matched exactly (rule matcher in the 1.0.39 bundle; same keys in 1.0.85) plus a location-wide write approval (dt16)",
+  "modes": {
+    ".copilot": "700",
+    ".copilot/permissions-config.json": "600"
+  },
+  "fail": {
+    "GHC-002": "critical"
+  }
+}
