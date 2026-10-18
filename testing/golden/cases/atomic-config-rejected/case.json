@@ -1,0 +1,12 @@
+{
+  "agent": "atomic-agent",
+  "source": "Atomic Agent default config.json (version 72) with agent.approvalLevel 4.5: parseApprovalLevel requires an integer 1-5 after coerceIntLike, so the live binary refuses the file (\"invalid config: agent.approvalLevel: expected an integer between 1 and 5, got 4.5\") and nothing in it applies (deep test 2026-10-18 fixture)",
+  "modes": {
+    ".atomic-agent": "700",
+    ".atomic-agent/config.json": "600"
+  },
+  "fail": {
+    "CONFIG-LOAD": "warning"
+  },
+  "pass": ["AT-001", "AT-003"]
+}

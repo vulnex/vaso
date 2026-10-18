@@ -1,0 +1,312 @@
+{
+ "version": 72,
+ "localModels": {
+  "url": "http://127.0.0.1:8080",
+  "mode": "external",
+  "completionMaxTokens": 16384,
+  "useServerTemplate": "auto",
+  "thinking": "auto",
+  "reasoningBudgetTokens": 1500,
+  "managed": {
+   "modelId": null,
+   "port": 19091,
+   "dataDirOverride": null,
+   "autoUpdate": true,
+   "stopOnExit": true,
+   "device": "auto",
+   "backendVariant": "auto",
+   "contextSize": 0,
+   "tensorSplit": [],
+   "parallel": "auto",
+   "swaFull": "auto"
+  },
+  "embeddings": {
+   "enabled": false,
+   "modelId": null,
+   "port": 19092,
+   "url": "http://127.0.0.1:19092"
+  },
+  "download": {
+   "connections": 16,
+   "hfEndpoint": "https://huggingface.co"
+  },
+  "customModels": []
+ },
+ "log": {
+  "level": "info"
+ },
+ "agent": {
+  "tokenBudget": 3000,
+  "maxSteps": 25,
+  "providerWait": {
+   "enabled": true,
+   "maxWaitMs": 300000
+  },
+  "task": {
+   "maxSteps": 1000,
+   "maxDurationMs": 7200000,
+   "autoContinue": true
+  },
+  "toolTimeoutMs": 60000,
+  "readScope": "working-dir",
+  "approvalLevel": 4.5,
+  "conversationMaxTokens": 0,
+  "conversationMaxPairs": 200,
+  "nameSessions": true,
+  "conversationLowWater": 0.65,
+  "worldSnapshotMaxTokens": 8000
+ },
+ "http": {
+  "enabled": true,
+  "approvalMode": "never",
+  "hostAllowlist": null,
+  "maxResponseBytes": 1048576,
+  "defaultTimeoutMs": 30000
+ },
+ "web": {
+  "search": {
+   "enabled": true,
+   "provider": "exa",
+   "maxResults": 8,
+   "timeoutMs": 15000,
+   "cacheTtlMinutes": 60,
+   "persistCache": true,
+   "fallback": [
+    "duckduckgo"
+   ],
+   "searxng": {
+    "instanceUrl": null
+   },
+   "exa": {
+    "endpoint": "https://mcp.exa.ai/mcp",
+    "apiEndpoint": "https://api.exa.ai/search",
+    "apiKeyEnv": "EXA_API_KEY"
+   },
+   "brave": {
+    "apiKeyEnv": "BRAVE_SEARCH_API_KEY"
+   }
+  },
+  "fetch": {
+   "timeoutMs": 30000,
+   "connectTimeoutMs": 10000,
+   "maxRetries": 2,
+   "retryBaseDelayMs": 500,
+   "retryMaxDelayMs": 5000
+  }
+ },
+ "projects": {
+  "roots": []
+ },
+ "tools": {
+  "shell": {
+   "defaultTimeoutMs": 600000,
+   "jobMaxMs": 3600000,
+   "maxJobs": 3
+  }
+ },
+ "tracing": {
+  "trace": {
+   "enabled": null,
+   "maxBytesPerSession": 10485760
+  }
+ },
+ "memory": {
+  "profile": {
+   "enabled": true,
+   "maxTokens": 512,
+   "contextualKeywordGate": true,
+   "maxEntries": 500
+  },
+  "reflection": {
+   "enabled": true,
+   "timeoutMs": 60000,
+   "maxFactsPerCall": 3,
+   "autoStoreNotes": true,
+   "maxNotesPerCall": 2,
+   "typedNotes": {
+    "enabled": false
+   },
+   "anySpeaker": false,
+   "segmentation": {
+    "enabled": false,
+    "triggerEveryTurns": 3,
+    "windowTurns": 5
+   }
+  },
+  "notes": {
+   "enabled": true,
+   "maxEntries": 1000,
+   "maxContentChars": 4000,
+   "recallDefaultK": 5
+  },
+  "recallInjection": {
+   "enabled": true,
+   "k": 3,
+   "previewChars": 160,
+   "maxTokens": 400
+  },
+  "index": {
+   "enabled": true,
+   "limit": 20,
+   "previewChars": 60,
+   "maxTokens": 300
+  },
+  "dedup": {
+   "enabled": true,
+   "fts5Threshold": 0.85
+  },
+  "eviction": {
+   "utilityWeighted": true,
+   "maxAgeMs": 2592000000
+  },
+  "embeddings": {
+   "enabled": false,
+   "fts5Weight": 0.5,
+   "vectorWeight": 0.5,
+   "bruteForceCeiling": 200
+  },
+  "links": {
+   "enabled": true,
+   "autoGenerate": true,
+   "expansionDepth": 1,
+   "maxExpanded": 12,
+   "maxLinksPerCall": 4,
+   "minCandidates": 2,
+   "generatorTimeoutMs": 60000
+  },
+  "evolution": {
+   "enabled": true,
+   "maxPerWrite": 2,
+   "leaseMs": 60000
+  },
+  "lessons": {
+   "enabled": true,
+   "recallK": 2,
+   "maxTokens": 300,
+   "indexLimit": 20,
+   "maxEntries": 500,
+   "deprecationAgeMs": 2592000000
+  },
+  "procedures": {
+   "enabled": true,
+   "recallK": 2,
+   "maxTokens": 400,
+   "indexLimit": 20,
+   "maxEntries": 500,
+   "deprecationAgeMs": 2592000000
+  },
+  "consolidation": {
+   "enabled": true,
+   "intervalMs": 21600000,
+   "cooldownMs": 86400000,
+   "minClusterSize": 3,
+   "maxClustersPerTick": 5,
+   "requireSharedTag": true,
+   "distillTimeoutMs": 45000
+  },
+  "voting": {
+   "enabled": true,
+   "maxVotePerItem": 50,
+   "signalDecay": 0.95,
+   "scoreBlend": 0.6,
+   "eventLogMaxRows": 50000,
+   "profileFilterThreshold": 3
+  },
+  "retrieve": {
+   "rewriter": {
+    "enabled": true,
+    "timeoutMs": 10000,
+    "historyTurns": 3,
+    "gateMode": "heuristic",
+    "embeddingGate": {
+     "threshold": 0.65,
+     "exemplars": null
+    }
+   }
+  }
+ },
+ "webhooks": {},
+ "vision": {
+  "enabled": true,
+  "autoDetect": true,
+  "maxImageBytes": 8388608,
+  "maxImagesPerCall": 4
+ },
+ "skills": {
+  "catalogTokenBudget": 512,
+  "disabled": [],
+  "taps": [
+   "anthropics/skills",
+   "openai/skills",
+   "vercel-labs/agent-skills"
+  ],
+  "clawhub": {
+   "enabled": true,
+   "apiBase": "https://clawhub.ai",
+   "browseLimit": 100,
+   "nonSuspiciousOnly": true
+  }
+ },
+ "tui": {
+  "theme": "auto",
+  "whileBusySubmit": "steer",
+  "mouse": true,
+  "notify": {
+   "enabled": true,
+   "minDurationMs": 30000
+  },
+  "sessionRail": {
+   "order": [],
+   "pinned": []
+  },
+  "onboarding": {
+   "completedAt": null,
+   "importOfferedAt": null,
+   "introSeenAt": null,
+   "localSetupSeenAt": null,
+   "proposedSecondBackendAt": null,
+   "skippedAt": null
+  }
+ },
+ "analytics": {
+  "enabled": true
+ },
+ "telegram": {
+  "enabled": false,
+  "ownerUserId": null,
+  "parseMode": "html",
+  "progressIndicator": true
+ },
+ "discord": {
+  "enabled": false,
+  "ownerUserIds": []
+ },
+ "swarm": {
+  "units": []
+ },
+ "notifications": {
+  "downloads": {
+   "channel": null
+  }
+ },
+ "atomicMail": {
+  "address": null,
+  "accountId": null,
+  "ownerEmail": null,
+  "ownerVerifiedAt": null,
+  "pendingVerification": null
+ },
+ "git": {
+  "remoteSync": false
+ },
+ "composio": {
+  "enabled": true,
+  "apiKeyEnv": "COMPOSIO_API_KEY",
+  "userId": null,
+  "sessionId": null,
+  "mcpUrl": null
+ },
+ "mcp": {
+  "servers": []
+ }
+}

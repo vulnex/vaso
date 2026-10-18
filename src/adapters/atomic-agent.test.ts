@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import type { FSProvider } from '../core/fs-provider.js';
 import type { ParsedConfig } from '../core/types.js';
 import { atomicAgentAdapter } from './atomic-agent.js';
+import { captureConfigLoadErrors } from '../core/config-loader.js';
 
 interface FakeFs {
   files?: Record<string, string>;
@@ -69,6 +70,25 @@ describe('Atomic Agent adapter', () => {
     expect(inst.configFiles.map(c => c.format)).toEqual(['json', 'env']);
     expect(inst.models).toEqual([{ id: 'gemma-4-12b', provider: 'llama-server' }]);
     expect(inst.gateway).toBeUndefined();
+  });
+
+  it('reports a config.json Atomic rejects (approvalLevel not an integer 1–5) as CONFIG-LOAD and judges nothing in it', async () => {
+    const withLevel = (agent: Record<string, unknown>) => makeFs({
+      dirs: ['/home/t/.atomic-agent'],
+      files: { '/home/t/.atomic-agent/config.json': JSON.stringify({ version: 72, agent }) },
+    });
+    for (const agent of [{ approvalLevel: 4.5 }, { approvalLevel: 6 }, { approvalLevel: '4.5' }, { approvalLevel: true }, { approvalRequired: 'maybe' }]) {
+      const { result: [inst], loadErrors } = await captureConfigLoadErrors(() => atomicAgentAdapter.detect({ fs: withLevel(agent) }));
+      expect(inst?.agent, JSON.stringify(agent)).toBe('atomic-agent');
+      expect(inst.configFiles, JSON.stringify(agent)).toEqual([]);
+      expect(loadErrors.map(e => e.message), JSON.stringify(agent)).toEqual([expect.stringMatching(/^invalid config: agent\.approval(Level: expected an integer between 1 and 5|Required: expected boolean)/)]);
+    }
+    // Values Atomic coerces to an integer 1–5 load
+    for (const agent of [{ approvalLevel: 4 }, { approvalLevel: '4.0' }, { approvalLevel: ' 5 ' }, { approvalLevel: null }, { approvalRequired: 'off' }]) {
+      const { result: [inst], loadErrors } = await captureConfigLoadErrors(() => atomicAgentAdapter.detect({ fs: withLevel(agent) }));
+      expect(loadErrors, JSON.stringify(agent)).toEqual([]);
+      expect(inst.configFiles.map(c => c.format), JSON.stringify(agent)).toEqual(['json']);
+    }
   });
 
   it('honours ATOMIC_AGENT_STATE_DIR from the scanned host', async () => {

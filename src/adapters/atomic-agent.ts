@@ -4,7 +4,8 @@ import type { AgentInstallation, GatewayInfo, ModelRef, ParsedConfig, ZoneGraph 
 import type { ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
-import { loadConfig } from '../core/config-loader.js';
+import { loadConfig, recordLoadError } from '../core/config-loader.js';
+import { atomicApproval } from './atomic-agent-config.js';
 import { loadConfigIfPresent } from './load-if-present.js';
 import { getUserHomeDirs } from './openclaw.js';
 import { discoverCliInstalls } from './cli-installs.js';
@@ -59,8 +60,17 @@ export const atomicAgentAdapter: AgentAdapter = {
           }
         } catch {}
       }
+      // A config.json Atomic rejects ("invalid config: …") keeps it from
+      // starting: report the file and judge nothing in it
+      const json = configFiles.find(c => c.filePath.endsWith('config.json'));
+      const approval = json ? atomicApproval(json.data) : undefined;
+      const rejected = !!json && !!approval && 'rejected' in approval;
+      if (rejected) {
+        recordLoadError({ filePath: json.filePath, stage: 'parse', message: `invalid config: ${(approval as { rejected: string }).rejected} — Atomic Agent refuses to start with this file` });
+        configFiles.splice(configFiles.indexOf(json), 1);
+      }
       // config.json is written on first run; a bare state dir is not an install.
-      if (configFiles.length === 0) continue;
+      if (configFiles.length === 0 && !rejected) continue;
 
       const installs = await discoverCliInstalls(home, fs, {
         names: ['atomic-agent'],
