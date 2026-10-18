@@ -26,8 +26,61 @@ const CREDENTIAL_FLAG = /^--?(?:[a-z][\w-]*?[-_])?(?:access[_-]?token|auth[_-]?t
 /** `NAME=value` assignment (docker `-e`, `env K=V cmd`). */
 const ASSIGNMENT = /^([A-Za-z_][A-Za-z0-9_]*)=(.+)$/s;
 const SECRET_VAR = /(?:token|secret|passw|pwd|credential|api[_-]?key|apikey|private[_-]?key|bearer)|(?:^|_)(?:KEY|PAT|AUTH|PASS)(?:_|$)/i;
-/** `Authorization: Bearer x`, `X-Api-Key: x` header values passed as one argv element. */
-const HEADER_ARG = /^\s*((?:proxy-)?authorization|x-[\w-]*(?:key|token|secret|auth)[\w-]*|api[_-]?key)\s*:\s*(?:(?:bearer|basic|token|bot)\s+)?(.+?)\s*$/i;
+/**
+ * The header name of an `Authorization: Bearer x` / `X-Api-Key: x` argv
+ * element, through its colon. The `x-` name's keyword is found by a
+ * lookahead: `[\w-]*` on both sides of it backtracked over every split of a
+ * long `x-keykey…` run (quadratic).
+ */
+const HEADER_NAME = /^\s*((?:proxy-)?authorization|x-(?=[\w-]*?(?:key|token|secret|auth))[\w-]*|api[_-]?key)\s*:/i;
+const HEADER_SCHEME = /^(?:bearer|basic|token|bot)/i;
+const LINE_TERMINATOR = /[\n\r\u2028\u2029]/;
+
+/**
+ * `[name, value]` of a header argument, exactly as
+ * `/^\s*(NAME)\s*:\s*(?:(?:bearer|basic|token|bot)\s+)?(.+?)\s*$/i` would
+ * capture them, in linear time: that regex's lazy value retried `\s*$` over
+ * the rest of the text at every character (`authorization: x` + 90 000
+ * spaces + `x`: seconds). Its backtracking order is followed: the longest
+ * leading whitespace first, a scheme word with its longest whitespace before
+ * none, then shorter leading whitespace; at each start the value is the
+ * shortest that leaves only whitespace after it.
+ */
+export function headerArg(arg: string): [string, string] | undefined {
+  const head = HEADER_NAME.exec(arg);
+  if (!head) return undefined;
+  const r = arg.slice(head[0].length);
+  const n = r.length;
+  const ws = (i: number): boolean => /\s/.test(r[i]);
+  let lastNonWs = n - 1;
+  while (lastNonWs >= 0 && ws(lastNonWs)) lastNonWs--;
+  // first line terminator at or after each index
+  const nextLT = new Int32Array(n + 1);
+  nextLT[n] = n;
+  for (let i = n - 1; i >= 0; i--) nextLT[i] = LINE_TERMINATOR.test(r[i]) ? i : nextLT[i + 1];
+  // a value can start at t: one character of the line, everything after it whitespace
+  const value = (t: number): string | undefined => {
+    if (t >= n || LINE_TERMINATOR.test(r[t]) || lastNonWs >= nextLT[t]) return undefined;
+    return r.slice(t, nextLT[t]).trimEnd() || r[t];
+  };
+  let lead = 0;
+  while (lead < n && ws(lead)) lead++;
+  const scheme = HEADER_SCHEME.exec(r.slice(lead, lead + 6));
+  if (scheme) {
+    const w = lead + scheme[0].length;
+    let end = w;
+    while (end < n && ws(end)) end++;
+    for (let t = end; t > w; t--) {
+      const v = value(t);
+      if (v !== undefined) return [head[1], v];
+    }
+  }
+  for (let t = lead; t >= 0; t--) {
+    const v = value(t);
+    if (v !== undefined) return [head[1], v];
+  }
+  return undefined;
+}
 /** Query parameters that carry a credential. */
 const SECRET_PARAM = /^(?:access[_-]?token|auth[_-]?token|token|api[_-]?key|apikey|key|secret|client[_-]?secret|password|pass|pwd|sig|signature|private[_-]?token|jwt|bearer)$/i;
 
@@ -166,11 +219,12 @@ export function findArgSecrets(args: readonly string[]): ConfigSecret[] {
     }
 
     // `--header "Authorization: Bearer <value>"` (mcp-remote, supergateway)
-    const header = HEADER_ARG.exec(arg);
+    const header = headerArg(arg);
     if (header) {
-      const known = knownToken(header[2]);
-      if (known) add(i, known.token, `${known.name} in ${header[1]} header argument`);
-      else if (looksLikeSecret(header[2])) add(i, header[2], `credential in ${header[1]} header argument`);
+      const [name, value] = header;
+      const known = knownToken(value);
+      if (known) add(i, known.token, `${known.name} in ${name} header argument`);
+      else if (looksLikeSecret(value)) add(i, value, `credential in ${name} header argument`);
       continue;
     }
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { findArgSecrets, findUrlSecrets } from './config-secrets.js';
+import { findArgSecrets, findUrlSecrets, headerArg } from './config-secrets.js';
 
 const GHP = 'ghp_' + 'A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8';
 const OPENAI = 'sk-proj-' + 'Zq3xV9mK2pL8nR4tW7yB1cD6fG0hJ5sA';
@@ -94,5 +94,53 @@ describe('token prefixes inside words', () => {
   it('ignores a prefix that continues a word', () => {
     expect(findArgSecrets(['/opt/servers/task-runnerserverabcdefghijklmnop/index.js'])).toEqual([]);
     expect(findArgSecrets(['@acme/desk-notificationsmcpserverabcdef'])).toEqual([]);
+  });
+});
+
+describe('headerArg (linear header-argument parsing, dt17)', () => {
+  // The regex it replaces, kept as the reference for what a header argument is
+  const OLD = /^\s*((?:proxy-)?authorization|x-[\w-]*(?:key|token|secret|auth)[\w-]*|api[_-]?key)\s*:\s*(?:(?:bearer|basic|token|bot)\s+)?(.+?)\s*$/i;
+  const reference = (s: string): [string, string] | undefined => {
+    const m = OLD.exec(s);
+    return m ? [m[1], m[2]] : undefined;
+  };
+
+  it('captures exactly what the old regex captured', () => {
+    const pieces = ['Authorization', 'x-api-key', 'X-Auth', 'api_key', 'proxy-authorization', 'x-', 'key', ':', ' ', '  ', '\t', '\n', '\r', '\u2028', 'Bearer', 'bearer ', 'bot', 'token', 'sk-abc123', 'v', '-', 'é'];
+    let seed = 7;
+    const rand = (n: number) => { seed = (seed * 1103515245 + 12345) % 2 ** 31; return (seed >>> 16) % n; };
+    let matched = 0;
+    for (let i = 0; i < 20_000; i++) {
+      // [whitespace] name [whitespace] ':' then a random tail
+      let s = (rand(4) === 0 ? pieces[8 + rand(5)] : '') + pieces[rand(5)] + (rand(4) === 0 ? ' ' : '') + (rand(5) === 0 ? '' : ':');
+      const len = rand(8);
+      // line breaks in half the tails only: most tails holding one fail both ways
+      const breaks = rand(2) === 0;
+      for (let j = 0; j < len; j++) {
+        const piece = pieces[rand(pieces.length)];
+        s += breaks || !/[\n\r\u2028]/.test(piece) ? piece : 'q';
+      }
+      const want = reference(s);
+      if (want) matched++;
+      expect(headerArg(s), JSON.stringify(s)).toEqual(want);
+    }
+    expect(matched).toBeGreaterThan(1000);
+    for (const s of ['Authorization: Bearer sk-1', 'authorization:   ', 'authorization: bearer   ', ' x-api-key :tok  \n ', 'authorization: a\nb', 'Authorization:\nabc', 'authorization: bot\t\tx  ', 'authorization: \n ']) {
+      expect(headerArg(s), JSON.stringify(s)).toEqual(reference(s));
+    }
+  });
+
+  it('is linear on long name runs and long whitespace inside the value', () => {
+    for (const arg of [` x-${'key'.repeat(70_000)}`, `authorization: x${' '.repeat(100_000)}x`, `authorization:${' '.repeat(100_000)}\na\nb`, `x-${'-'.repeat(100_000)}`]) {
+      const start = Date.now();
+      findArgSecrets(['--header', arg]);
+      expect(Date.now() - start, arg.slice(0, 20)).toBeLessThan(1000);
+    }
+  });
+
+  it('still masks a token in a header argument', () => {
+    const r = findArgSecrets(['--header', `X-Api-Key: ${OPENAI}`]);
+    expect(r).toHaveLength(1);
+    expect(noValue(r, OPENAI)).toBe(true);
   });
 });
