@@ -203,7 +203,7 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
 
     const hostResults = await scanMultipleHosts({
       targets,
-      transportOptions: { probeBinDir, manifest, timeout },
+      transportOptions: { probeBinDir, manifest, timeout, quiet: silent },
       scanOptions: {
         agentFilter: options.agent,
         format: options.format as any,

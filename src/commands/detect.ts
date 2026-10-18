@@ -218,7 +218,7 @@ async function detectRemoteHosts(options: DetectCommandOptions, remoteValues: Re
     try {
       const snapshot = await executeRemoteProbeWithRetry(
         target,
-        { probeBinDir, manifest, timeout },
+        { probeBinDir, manifest, timeout, quiet: silent },
         {
           retries,
           onRetry: (t, attempt, err) => {

@@ -2,7 +2,6 @@ import { readFile, stat } from 'node:fs/promises';
 import { isAbsolute } from 'node:path';
 import type { ProbeSnapshot } from './snapshot-types.js';
 import { neutralizeSnapshotIdentity } from './snapshot-identity.js';
-import { MAX_REMOTE_OUTPUT_BYTES } from '../transport/ssh.js';
 
 /**
  * Loading `--snapshot` files (scan, detect, probe validate). A snapshot is
@@ -13,6 +12,14 @@ import { MAX_REMOTE_OUTPUT_BYTES } from '../transport/ssh.js';
  * content), and all content within its 256 MiB budget. Past those limits a
  * scan would only exhaust memory.
  */
+
+/**
+ * Largest probe output accepted, from a remote run or as a snapshot file. V8
+ * strings cap near 512 MiB (0x1fffffe8 chars); decoding a larger buffer used
+ * to crash the CLI outright. The probe budgets its own content (256 MiB) so
+ * this is a backstop for older probes.
+ */
+export const MAX_REMOTE_OUTPUT_BYTES = 460 * 1024 * 1024;
 
 /** probe/collector.go maxConfigContentBytes (32 MiB), base64-encoded, rounded up. */
 export const MAX_SNAPSHOT_FILE_CONTENT_CHARS = 48 * 1024 * 1024;
@@ -111,15 +118,24 @@ export async function loadSnapshotFile(path: string): Promise<ProbeSnapshot> {
       : `Failed to read snapshot file: ${(err as Error).message}`);
   }
 
+  return parseSnapshot(raw, 'Snapshot file');
+}
+
+/**
+ * Parse and validate probe output — a snapshot file's text or what a remote
+ * probe printed (the host may be hostile or compromised, so its output gets
+ * the same checks as a file). `what` names the source in the error.
+ */
+export function parseSnapshot(raw: string, what: string): ProbeSnapshot {
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch (err) {
-    throw new SnapshotLoadError(`Snapshot file is not valid JSON: ${(err as Error).message}`);
+    throw new SnapshotLoadError(`${what} is not valid JSON: ${(err as Error).message}`);
   }
 
   const problems = validateSnapshot(parsed);
-  if (problems.length > 0) throw new SnapshotLoadError('Invalid snapshot file:', problems);
+  if (problems.length > 0) throw new SnapshotLoadError(`Invalid ${what.charAt(0).toLowerCase()}${what.slice(1)}:`, problems);
   return neutralizeSnapshotIdentity(parsed as ProbeSnapshot);
 }
 

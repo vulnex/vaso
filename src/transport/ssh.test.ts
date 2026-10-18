@@ -1,5 +1,27 @@
 import { describe, it, expect, vi } from 'vitest';
-import { describeConnectFailure, parseSSHTarget, uniqueTargets, withRetry } from './ssh.js';
+import { describeConnectFailure, parseProbeOutput, parseSSHTarget, uniqueTargets, withRetry } from './ssh.js';
+
+describe('parseProbeOutput', () => {
+  const target = { user: 'u', host: 'h.test' };
+  const valid = { version: 1, platform: 'linux', hostname: 'h', homedir: '/home/u', files: {}, directories: {}, commandOutputs: {} };
+
+  it('accepts what a probe prints', () => {
+    expect(parseProbeOutput(JSON.stringify(valid), target).hostname).toBe('h');
+  });
+
+  it('holds remote output to the snapshot-file checks, as one escaped line', () => {
+    expect(() => parseProbeOutput('null', target)).toThrow(/u@h\.test returned unusable probe output, host not scanned — Invalid probe output: Snapshot is not a JSON object/);
+    expect(() => parseProbeOutput('{"a":', target)).toThrow(/not valid JSON/);
+    const big = 'a'.repeat(48 * 1024 * 1024 + 1);
+    expect(() => parseProbeOutput(JSON.stringify({ ...valid, files: { '/x': { content: big, mode: 0o644, exists: true } } }), target)).toThrow(/per-file limit/);
+    let message = '';
+    try {
+      parseProbeOutput(JSON.stringify({ ...valid, files: { '/a\n\u001b]0;pwned\u0007': { content: big, mode: 0o644, exists: true } } }), target);
+    } catch (err) { message = (err as Error).message; }
+    expect(message).not.toMatch(/[\n\u001b\u0007]/);
+    expect(message).toContain('\\x1b');
+  });
+});
 
 describe('parseSSHTarget', () => {
   it('rejects an empty user, option-like parts and control characters', () => {

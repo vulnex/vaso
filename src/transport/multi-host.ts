@@ -15,6 +15,8 @@ export interface TransportOptions {
   probeBinDir: string;
   manifest: ProbeManifest;
   timeout: number;
+  /** --silent: keep ssh's own stderr off the terminal (see SSHTransportOptions). */
+  quiet?: boolean;
 }
 
 export interface MultiHostScanOptions {
@@ -109,6 +111,7 @@ export async function scanMultipleHosts(
           probeBinDir: transportOptions.probeBinDir,
           manifest: transportOptions.manifest,
           timeout: transportOptions.timeout,
+          quiet: transportOptions.quiet,
         },
         { retries, onRetry: options.onRetry },
       );

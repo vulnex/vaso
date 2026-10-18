@@ -9,9 +9,14 @@
 import { spawn, execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { writeFile, unlink } from 'node:fs/promises';
+import { openSync, readFileSync, closeSync, unlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { ProbeSnapshot, ProbeManifest } from '../core/snapshot-types.js';
 import { resolveProbeBinary } from './probe-fetch.js';
-import { neutralizeSnapshotIdentity } from '../core/snapshot-identity.js';
+import { escapeControlChars } from '../reporting/text-safety.js';
+import { isDebug } from '../core/debug.js';
+import { MAX_REMOTE_OUTPUT_BYTES, parseSnapshot, SnapshotLoadError } from '../core/snapshot-load.js';
 
 export interface SSHTarget {
   user: string;
@@ -26,6 +31,13 @@ export interface SSHTransportOptions {
   probeBinDir: string;
   manifest: ProbeManifest;
   timeout?: number;
+  /**
+   * --silent: ssh's own stderr (host-key notices, connection errors) is
+   * captured instead of reaching the terminal, and printed only with --debug.
+   * Password prompts still work — ssh writes and reads them on /dev/tty.
+   * VASO's own error for a failed host is unaffected.
+   */
+  quiet?: boolean;
 }
 
 /**
@@ -150,9 +162,10 @@ const CONNECT_TIMEOUT_SLACK_MS = 500;
  * may prompt for a password — all subsequent ssh/scp commands multiplex
  * over this connection and never prompt again.
  *
- * Uses stdio: 'inherit' so the SSH password prompt works interactively.
+ * Uses stdio: 'inherit' so the SSH password prompt works interactively;
+ * `quiet` captures stderr only (the prompt goes through /dev/tty).
  */
-function establishControlMaster(target: SSHTarget, controlPath: string, timeout: number): Promise<void> {
+function establishControlMaster(target: SSHTarget, controlPath: string, timeout: number, quiet = false): Promise<void> {
   return new Promise((resolve, reject) => {
     const args = [
       '-o', 'ControlMaster=yes',
@@ -166,28 +179,55 @@ function establishControlMaster(target: SSHTarget, controlPath: string, timeout:
     if (target.identity) args.push('-i', target.identity);
     args.push(`${target.user}@${target.host}`, '-N'); // -N: no remote command, just connect
 
+    // Quiet: stderr to a private temp file, not a pipe — the backgrounded
+    // master inherits it, and a pipe would hold 'close' open for
+    // ControlPersist's 120 s (or SIGPIPE the master once read and closed).
+    const log = quiet ? openQuietLog() : undefined;
     const started = Date.now();
     const child = spawn('ssh', args, {
-      stdio: 'inherit', // Full terminal access for password prompts
+      stdio: log ? ['inherit', 'inherit', log.fd] : 'inherit', // Full terminal access for password prompts
       timeout,
     });
 
     // ControlPersist keeps the connection alive in the background after
     // the master process exits, so we wait for it to fork and return.
     child.on('close', (code, signal) => {
+      log?.finish();
       if (code === 0) return resolve();
       reject(new Error(describeConnectFailure(target, code, signal, timeout, Date.now() - started)));
     });
-    child.on('error', reject);
+    child.on('error', (err) => { log?.finish(); reject(err); });
   });
 }
 
 /**
- * Largest probe output accepted. V8 strings cap near 512 MiB (0x1fffffe8
- * chars); decoding a larger buffer used to crash the CLI outright. The probe
- * budgets its own content (256 MiB) so this is a backstop for older probes.
+ * A 0600 temp file for ssh's stderr under --silent. `finish` prints what ssh
+ * wrote when --debug is on (escaped: it can quote the host's banner), then
+ * closes and removes the file; the background master keeps writing to the
+ * removed inode harmlessly.
  */
-export const MAX_REMOTE_OUTPUT_BYTES = 460 * 1024 * 1024;
+function openQuietLog(): { fd: number; finish: () => void } {
+  const path = join(tmpdir(), `vaso-ssh-${randomUUID()}.log`);
+  const fd = openSync(path, 'wx+', 0o600);
+  let done = false;
+  return {
+    fd,
+    finish: () => {
+      if (done) return;
+      done = true;
+      try {
+        if (isDebug()) {
+          const text = readFileSync(path, 'utf-8').slice(0, 64 * 1024);
+          if (text) process.stderr.write(escapeControlChars(text));
+        }
+      } catch { /* debug output only */ }
+      try { closeSync(fd); } catch { /* already closed */ }
+      try { unlinkSync(path); } catch { /* already gone */ }
+    },
+  };
+}
+
+export { MAX_REMOTE_OUTPUT_BYTES };
 
 /**
  * Run ssh/scp over an existing ControlMaster socket.
@@ -373,6 +413,27 @@ export async function executeRemoteProbeWithRetry(
   });
 }
 
+/**
+ * The probe's stdout as a snapshot, held to the shape and size checks a
+ * `--snapshot` file gets: the host may be hostile or compromised, and a
+ * malformed snapshot would otherwise crash or mislead the scan. Throws a
+ * one-line error, so the host is reported unscanned (exit 3).
+ */
+export function parseProbeOutput(stdout: string, target: Pick<SSHTarget, 'user' | 'host'>): ProbeSnapshot {
+  try {
+    return parseSnapshot(stdout, 'Probe output');
+  } catch (err) {
+    if (!(err instanceof SnapshotLoadError)) throw err;
+    const problems = err.problems.length > 3
+      ? [...err.problems.slice(0, 3), `${err.problems.length - 3} more`]
+      : err.problems;
+    const detail = problems.length > 0 ? `${err.message.replace(/:$/, '')}: ${problems.join('; ')}` : err.message;
+    // Paths and the JSON error's excerpt come from the host: one escaped, bounded line
+    const line = escapeControlChars(detail, { lineBreaks: true });
+    throw new Error(`${target.user}@${target.host} returned unusable probe output, host not scanned — ${line.length > 500 ? `${line.slice(0, 500)}…` : line}`);
+  }
+}
+
 /** Upper bound for uploading and running the probe (independent of --ssh-timeout). */
 export const PROBE_RUN_TIMEOUT_MS = 10 * 60 * 1000;
 
@@ -393,7 +454,7 @@ export async function executeRemoteProbe(
 
   try {
     // 1. Establish authenticated connection (may prompt for password once)
-    await establishControlMaster(target, controlPath, timeout);
+    await establishControlMaster(target, controlPath, timeout, options.quiet);
     connected = true;
 
     // All subsequent commands reuse the authenticated connection — no more prompts
@@ -422,7 +483,7 @@ export async function executeRemoteProbe(
     const { stdout } = await runOverControl('ssh', controlSSHArgs(target, controlPath, [probeCmd]), { timeout: runTimeout });
 
     // 8. Parse snapshot
-    return neutralizeSnapshotIdentity(JSON.parse(stdout) as ProbeSnapshot);
+    return parseProbeOutput(stdout, target);
   } finally {
     // Clean up local temp file
     await unlink(localManifestPath).catch(() => {});
