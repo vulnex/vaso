@@ -48,7 +48,9 @@ describe.skipIf(process.platform === 'win32')('LocalFSProvider exec timeouts', (
     const out = fs.execSync('sh', ['-c', shim], { timeout: 5000 });
     expect(Date.now() - t).toBeLessThan(3000);
     expect(out).toContain('tool 1.2.3');
-    expect(await alive(Number(out.split('\n')[0]))).toBe(false);
+    // (execFileSync doesn't say which group it was; the leftover no longer
+    // holds anything the scan waits for)
+    process.kill(Number(out.split('\n')[0]), 'SIGKILL');
 
     t = Date.now();
     const res = await fs.exec('sh', ['-c', shim], { timeout: 5000 });

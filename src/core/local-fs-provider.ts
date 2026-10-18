@@ -45,9 +45,9 @@ async function readRegularFile(path: FsPath, encoding?: 'utf-8'): Promise<Buffer
 /** A path as the OS takes it: a string, or raw bytes for a name that isn't UTF-8. */
 type FsPath = string | Buffer;
 
-function toDirentInfo(e: Dirent<Buffer>, name: string, parentPath: string): DirentInfo {
+function toDirentInfo(e: Dirent, parentPath: string): DirentInfo {
   return {
-    name,
+    name: e.name,
     isFile: e.isFile(),
     isDirectory: e.isDirectory(),
     isSymbolicLink: e.isSymbolicLink(),
@@ -81,16 +81,22 @@ export class LocalFSProvider implements FSProvider {
   /** List `dir`, decoding names and remembering raw paths that aren't UTF-8. */
   private async list(dir: string): Promise<DirentInfo[]> {
     const raw = this.fsPath(dir);
-    const rawDir = typeof raw === 'string' ? undefined : raw;
-    const entries = await readdir(raw, { withFileTypes: true, encoding: 'buffer' });
-    return entries.map(e => {
-      const name = e.name.toString('utf-8');
-      if (rawDir || !isUtf8(e.name)) {
-        const base = rawDir ?? Buffer.from(dir, 'utf-8');
-        this.rawPaths.set(join(dir, name), Buffer.concat([base, Buffer.from(base.at(-1) === 0x2f ? '' : '/'), e.name]));
-      }
-      return toDirentInfo(e, name, dir);
-    });
+    const entries = await readdir(raw as string, { withFileTypes: true });
+    await this.rememberRawNames(dir, raw, entries.map(e => e.name));
+    return entries.map(e => toDirentInfo(e, dir));
+  }
+
+  /**
+   * A replacement character in a listed name may stand for bytes that aren't
+   * UTF-8: list again as bytes (rare) and remember each such name's raw path.
+   */
+  private async rememberRawNames(dir: string, raw: FsPath, names: string[]): Promise<void> {
+    if (this.platform === 'win32' || !names.some(n => typeof n === 'string' && n.includes('�'))) return;
+    const base = typeof raw === 'string' ? Buffer.from(raw, 'utf-8') : raw;
+    const sep = Buffer.from(base.at(-1) === 0x2f ? '' : '/');
+    for (const name of await readdir(raw, { encoding: 'buffer' })) {
+      if (!isUtf8(name)) this.rawPaths.set(join(dir, name.toString('utf-8')), Buffer.concat([base, sep, name]));
+    }
   }
 
   async readFile(path: string): Promise<string> {
@@ -116,7 +122,10 @@ export class LocalFSProvider implements FSProvider {
   }
 
   async readdir(path: string): Promise<string[]> {
-    return (await this.list(path)).map(e => e.name);
+    const raw = this.fsPath(path);
+    const names = await readdir(raw as string);
+    await this.rememberRawNames(path, raw, names);
+    return names;
   }
 
   async readdirEntries(path: string, options?: { recursive?: boolean }): Promise<DirentInfo[]> {

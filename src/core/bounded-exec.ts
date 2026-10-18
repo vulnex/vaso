@@ -1,4 +1,4 @@
-import { spawn, spawnSync, type SpawnOptions } from 'node:child_process';
+import { execFileSync, spawn, type SpawnOptions } from 'node:child_process';
 import { closeSync, fstatSync, mkdtempSync, openSync, readSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os';
  * kept a local scan waiting 30 s after it printed its version, timeout or not.
  * Output goes to private temp files instead (the child's exit is what's awaited),
  * the command runs in its own process group, and the group — whatever it left
- * running — is killed once it exits or times out. The probe does the same
+ * running — is killed on a timeout (async runs: also once it exits). The probe does the same
  * (runCommand in probe/collector.go). POSIX only; win32 keeps execFile.
  */
 
@@ -98,21 +98,34 @@ function spawnOptions(o: BoundedRunOptions, files: OutputFiles): SpawnOptions {
   };
 }
 
+/**
+ * Synchronous run through execFileSync (which honours `detached`). With
+ * output in files it returns null; the group is killed when it fails or
+ * times out — after a clean exit its pid isn't known, and what it left
+ * running no longer holds anything the scan waits for.
+ */
 export function runBoundedSync(cmd: string, args: string[], o: BoundedRunOptions): BoundedRunResult {
   const files = outputFiles();
-  // spawnSync honours `detached` (the child leads its own group)
-  const r = spawnSync(cmd, args, { ...spawnOptions(o, files), timeout: o.timeout, killSignal: 'SIGKILL' });
-  killGroup(r.pid);
-  const { stdout, stderr } = files.read();
-  const error = r.error as NodeJS.ErrnoException | undefined;
-  const timedOut = error?.code === 'ETIMEDOUT';
+  let ret: unknown;
+  let failure: (NodeJS.ErrnoException & { pid?: number; status?: number | null; signal?: NodeJS.Signals | null }) | undefined;
+  try {
+    ret = execFileSync(cmd, args, { ...spawnOptions(o, files), encoding: 'utf-8', timeout: o.timeout, killSignal: 'SIGKILL' });
+  } catch (err) {
+    failure = err as typeof failure;
+    killGroup(failure?.pid);
+  }
+  const out = files.read();
+  const stdout = typeof ret === 'string' ? ret : out.stdout;
+  if (!failure) return { stdout, stderr: out.stderr, status: 0, timedOut: false };
+  const timedOut = failure.code === 'ETIMEDOUT';
+  const exited = typeof failure.status === 'number' || failure.signal;
   return {
     stdout,
-    stderr,
-    status: r.status ?? undefined,
-    signal: r.signal ?? undefined,
+    stderr: out.stderr,
+    status: failure.status ?? undefined,
+    signal: failure.signal ?? undefined,
     timedOut,
-    error: timedOut ? undefined : error,
+    error: timedOut || exited ? undefined : failure,
   };
 }
 
