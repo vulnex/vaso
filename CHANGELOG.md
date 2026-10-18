@@ -65,7 +65,16 @@ This project adheres to [Semantic Versioning](https://semver.org/).
   - With `OPENCLAW_STATE_DIR` set, a stale `~/.openclaw` is no longer scanned as a second live install.
   - The pre-rename `clawdbot.json` config name is read when a state directory has no `openclaw.json`.
   - `~` in `OPENCLAW_HOME`, `OPENCLAW_STATE_DIR` and `OPENCLAW_CONFIG_PATH` is expanded as OpenClaw does: against the OS home for `OPENCLAW_HOME`, and against `OPENCLAW_HOME` for the other two.
-  - Remote scans follow `OPENCLAW_HOME` for profile and pre-rename directories too. One gap remains: a `~` in `OPENCLAW_STATE_DIR` combined with `OPENCLAW_HOME` is expanded against the OS home there.
+  - Remote scans follow `OPENCLAW_HOME` for profile and pre-rename directories too.
+- **OC-006 checks OpenClaw 2026.x credential and state stores** (renamed "Credential and State Store Permissions"). Before, it only checked `memory.json` and `conversations.db`, which 2026.x no longer writes. It now covers:
+  - the state database `state/openclaw.sqlite` and each agent's `agents/<id>/agent/openclaw-agent.sqlite`, which holds the auth-profile store
+  - the pre-SQLite `auth-profiles.json` / `auth-state.json` / `auth.json`
+  - everything under `credentials/`, such as `oauth.json` and WhatsApp `creds.json`
+  - `identity/device.json`
+  - `secrets.providers.*` file providers named in the config
+
+  The fix removes group and other access. Remote scans collect these stores as metadata only, in every state directory. A secrets file at a configured path is checked on local scans only.
+ One gap remains: a `~` in `OPENCLAW_STATE_DIR` combined with `OPENCLAW_HOME` is expanded against the OS home there.
 
 ## [1.3.1] - 2026-10-16
 

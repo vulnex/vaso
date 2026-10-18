@@ -472,11 +472,15 @@ export const openclawAdapter: AgentAdapter = {
     ];
   },
 
+  /** Fixed-name credential files; OC-006 also walks credentials/, the
+   *  per-agent auth stores and the state databases. */
   getCredentialPaths(installDir: string): string[] {
     return [
       join(installDir, '.env'),
       join(installDir, 'credentials.json'),
       join(installDir, 'auth.json'),
+      join(installDir, 'credentials', 'oauth.json'),
+      join(installDir, 'identity', 'device.json'),
     ];
   },
 
@@ -516,14 +520,20 @@ export const openclawAdapter: AgentAdapter = {
         '~/.npm-global/bin/openclaw',
         '~/bin/openclaw',
       ],
-      // Credential stores and conversation memory — permissions only (OC-006),
-      // never content
-      metadataGlobPatterns: [
-        '~/.openclaw/credentials.json',
-        '~/.openclaw/auth.json',
-        '~/.openclaw/memory.json',
-        '~/.openclaw/conversations.db',
-      ],
+      // Credential stores, state databases and conversation memory —
+      // permissions only (OC-006, POL-003), never content. A secrets file
+      // provider at a configured path is local-only.
+      metadataGlobPatterns: ['~/.openclaw', '~/.openclaw-*', '~/.clawdbot'].flatMap(d => [
+        `${d}/credentials.json`,
+        `${d}/auth.json`,
+        `${d}/memory.json`,
+        `${d}/conversations.db`,
+        `${d}/identity/device.json`,
+        `${d}/state/openclaw.sqlite*`,
+        `${d}/credentials/**`,
+        `${d}/agents/*/agent/openclaw-agent.sqlite*`,
+        `${d}/agents/*/agent/{auth-profiles,auth-state,auth}.json`,
+      ]),
       globPatterns: [
         // package.json of every npm-global copy — versions non-primary copies on remote scans
         ...npmPackageJsonGlobs('openclaw'),

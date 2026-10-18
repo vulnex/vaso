@@ -126,6 +126,21 @@ describe('buildProbeManifest', () => {
     for (const g of manifest.metadataGlobPatterns ?? []) expect(manifest.globPatterns).not.toContain(g);
   });
 
+  it('keeps OpenClaw 2026.x credential and state stores metadata-only, in every state dir', () => {
+    for (const d of ['~/.openclaw', '~/.openclaw-*', '~/.clawdbot', '${OPENCLAW_HOME}/.openclaw', '${OPENCLAW_STATE_DIR}', '${OPENCLAW_HOME}/.openclaw-*']) {
+      expect(manifest.metadataGlobPatterns).toEqual(expect.arrayContaining([
+        `${d}/state/openclaw.sqlite*`,
+        `${d}/credentials/**`,
+        `${d}/agents/*/agent/openclaw-agent.sqlite*`,
+        `${d}/agents/*/agent/{auth-profiles,auth-state,auth}.json`,
+        `${d}/identity/device.json`,
+      ]));
+    }
+    // $include targets are the only OpenClaw state-dir content collected by glob
+    const content = [...manifest.globPatterns, ...manifest.filePaths].filter(p => /\.(openclaw|clawdbot)[^/]*\//.test(p) && !p.includes('/node_modules/'));
+    expect(content.filter(p => /\/(credentials|state|identity|sessions)\/|sqlite|auth[-.]|\/agents\/\*\/agent\//.test(p))).toEqual([]);
+  });
+
   it('collects what remote-only gaps needed (RUN-001 units, CDX-010 rules, Linux Windsurf roots, hermes --version)', () => {
     expect(manifest.directoryListings).toContain('~/.config/systemd/user');
     expect(manifest.systemDirListings).toContain('/etc/systemd/system');

@@ -1,0 +1,22 @@
+{
+  "agent": "openclaw",
+  "source": "OC-006 fix round-trip: OpenClaw 2026.9.4 state and auth databases (state/openclaw.sqlite, agents/main/agent/openclaw-agent.sqlite) and credentials/ (oauth.json, whatsapp creds.json) readable by others in a reachable home (deep test 2026-10-18 fixture)",
+  "reachable": true,
+  "modes": {
+    ".openclaw": "755",
+    ".openclaw/openclaw.json": "600",
+    ".openclaw/state": "755",
+    ".openclaw/state/openclaw.sqlite": "644",
+    ".openclaw/agents": "755",
+    ".openclaw/agents/main": "755",
+    ".openclaw/agents/main/agent": "755",
+    ".openclaw/agents/main/agent/openclaw-agent.sqlite": "644",
+    ".openclaw/credentials": "755",
+    ".openclaw/credentials/oauth.json": "644",
+    ".openclaw/credentials/whatsapp": "755",
+    ".openclaw/credentials/whatsapp/default": "755",
+    ".openclaw/credentials/whatsapp/default/creds.json": "644"
+  },
+  "fail": { "OC-006": "warning" },
+  "fix": { "resolves": ["OC-006"] }
+}

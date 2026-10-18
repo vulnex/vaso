@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { join } from 'node:path';
-import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import type { ScanContext, ParsedConfig, AgentInstallation } from '../../core/types.js';
 import type { FSProvider } from '../../core/fs-provider.js';
@@ -379,6 +379,59 @@ describe('OC-006: Memory File Permissions', () => {
   it('passes when memory files do not exist', async () => {
     const result = await check.run(makeCtx({ installDir: tmpRoot, fs: new LocalFSProvider() }));
     expect(result.passed).toBe(true);
+  });
+
+  /** 2026.x store layout under a state dir, every file at `mode`. */
+  function writeStores(mode: number): string[] {
+    const files = [
+      'state/openclaw.sqlite',
+      'state/openclaw.sqlite-wal',
+      'agents/main/agent/openclaw-agent.sqlite',
+      'agents/main/agent/auth-profiles.json',
+      'credentials/oauth.json',
+      'credentials/whatsapp/a1/creds.json',
+      'identity/device.json',
+    ];
+    for (const f of files) {
+      mkdirSync(join(tmpRoot, f, '..'), { recursive: true });
+      writeFileSync(join(tmpRoot, f), 'x');
+      chmodSync(join(tmpRoot, f), mode);
+    }
+    return files.map(f => join(tmpRoot, f));
+  }
+
+  it('flags the 2026.x credential and state stores readable by others', async () => {
+    const files = writeStores(0o644);
+    // agents/<id>/sessions is conversation data, not a store this check owns
+    mkdirSync(join(tmpRoot, 'agents/main/sessions'), { recursive: true });
+    writeFileSync(join(tmpRoot, 'agents/main/sessions/s.jsonl'), '');
+    const result = await check.run(makeCtx({ installDir: tmpRoot, fs: new LocalFSProvider() }));
+    expect(result.passed).toBe(false);
+    expect(result.evidence?.map(e => e.file).sort()).toEqual([...files].sort());
+  });
+
+  it('passes the same stores when they are owner-only', async () => {
+    writeStores(0o600);
+    const result = await check.run(makeCtx({ installDir: tmpRoot, fs: new LocalFSProvider() }));
+    expect(result.passed).toBe(true);
+  });
+
+  it('checks a file secrets provider named in the config', async () => {
+    const secrets = join(tmpRoot, 'vault.json');
+    writeFileSync(secrets, '{}');
+    chmodSync(secrets, 0o644);
+    const configs = [makeConfig(join(tmpRoot, 'openclaw.json'), { secrets: { providers: { filemain: { source: 'file', path: secrets }, env: { source: 'env' } } } })];
+    const result = await check.run(makeCtx({ installDir: tmpRoot, configs, fs: new LocalFSProvider() }));
+    expect(result.evidence?.map(e => e.file)).toEqual([secrets]);
+  });
+
+  it('fix removes group/other access from every exposed store', async () => {
+    const files = writeStores(0o644);
+    const ctx = makeCtx({ installDir: tmpRoot, fs: new LocalFSProvider() });
+    const fixed = await check.fix!(ctx);
+    expect(fixed.applied).toBe(true);
+    for (const f of files) expect(statSync(f).mode & 0o077).toBe(0);
+    expect((await check.run(ctx)).passed).toBe(true);
   });
 });
 
