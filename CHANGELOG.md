@@ -29,6 +29,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Security
 
+- **`vaso fix` writes only where `vaso fix --rollback` can restore.** An install relocated outside the home (`SAND_DATA_ROOT`, `CODEX_HOME=/data/…`, an install dir under `/opt`) used to be changed although rollback — confined to the home so a tampered backup tree can't write elsewhere — could never undo it. Such files are now refused with the reason named.
 - **`vaso fix` no longer changes ordinary files in a repository.** A project installation (a repo's `.copilot`-style or `.cursor/` scope) declared the adapter's credential file names inside the repo, so POL-003 reported the repo's own `config.json`, `settings.json` or `.cursor/hooks.json` and `vaso fix` chmodded them. Credential stores are user-level for every adapter; project installations now declare none.
 - **HTML reports neutralise bidi and control characters**, as the terminal, CSV, Markdown, JUnit and SARIF reports already did: a file name with U+202E no longer renders reversed in a browser.
 - **A Slack token's last segment no longer shows in reports.** Masking replaced only what a token pattern matched, so `xoxb-<team>-<bot>-<secret>` kept its secret part readable in every report format and in `vaso mcp list`; Slack patterns now cover every segment and every masked token runs to its end.

@@ -20,7 +20,7 @@ const posix = process.platform !== 'win32';
 let logs: string[] = [];
 
 /** A fix run through the real engine: `edit` changes the file the way a fix would. */
-async function runFix(file: string, edit: (path: string) => Promise<void>, evidence: string[] = [file]): Promise<string[]> {
+async function runFix(file: string, edit: (path: string) => Promise<void>, evidence: string[] = [file], installDir?: string): Promise<string[]> {
   const registry = new CheckRegistry();
   registry.register(defineCheck({
     id: 'TST-001', name: 't', category: 'config', severity: 'warning', description: 't',
@@ -37,7 +37,7 @@ async function runFix(file: string, edit: (path: string) => Promise<void>, evide
   const result: ScanResult = {
     timestamp: 't', totalScore: 0, totalGrade: 'F', fleetAverage: 0,
     summary: { critical: 0, warning: 1, info: 0, passed: 0, total: 1 },
-    agents: [{ agent: 'openclaw', installation: { agent: 'openclaw', installDir: home.dir, configFiles: [] }, results: [finding], score: 0, grade: 'F' }],
+    agents: [{ agent: 'openclaw', installation: { agent: 'openclaw', installDir: installDir ?? home.dir, configFiles: [] }, results: [finding], score: 0, grade: 'F' }],
   };
   await new RemediationEngine(registry).fix(result, { yes: true });
   return readdir(join(home.dir, '.vaso', 'backups')).catch(() => []);
@@ -173,6 +173,22 @@ describe('fix + rollback (real files)', () => {
     execFileSync('mkfifo', [fifo]);
     await runFix(fifo, p => writeRegularFile(p, 'x')); // must return, not hang
     expect((await lstat(fifo)).isFIFO()).toBe(true);
+  });
+
+  it.skipIf(!posix)('refuses an install dir relocated outside $HOME — rollback could not restore it (dt17)', async () => {
+    const outside = await mkdtemp(join(tmpdir(), 'vaso-rb-relocated-'));
+    try {
+      const cfg = join(outside, 'settings.json');
+      await writeFile(cfg, '{"v":1}');
+      await chmod(cfg, 0o644);
+      await runFix(cfg, async p => { await writeRegularFile(p, '{"v":2}'); }, [cfg], outside);
+      await runFix(cfg, p => chmodNoFollow(p, 0o600), [cfg], outside);
+      expect(await readFile(cfg, 'utf-8')).toBe('{"v":1}');
+      expect((await stat(cfg)).mode & 0o777).toBe(0o644);
+      expect(logs.some(l => l.includes('where rollback can restore it'))).toBe(true);
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
   });
 
   it.skipIf(!posix)('refuses a hard-linked file: the change would reach the other name', async () => {

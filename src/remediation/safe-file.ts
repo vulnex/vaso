@@ -84,7 +84,7 @@ async function guard(path: string, st: { isFile(): boolean; nlink: number; uid: 
     const realRoot = await realpath(root).catch(() => undefined);
     if (realRoot && within(real, realRoot)) return;
   }
-  throw new UnsafeTargetError(path, `resolves into ${real}, outside ${b.roots.join(' and ')}`);
+  throw new UnsafeTargetError(path, `resolves into ${real}, outside ${b.roots.join(' and ')} (where rollback can restore it)`);
 }
 
 /** The boundary check for a path about to be created (no handle to stat yet). */

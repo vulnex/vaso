@@ -138,12 +138,16 @@ export class RemediationEngine {
           }
 
           // Anything else the fix changes is backed up just before it changes
-          // Writes stay inside the owning user's home and the install dir
-          const home = await homeOf(agent.installation.installDir, fs);
-          const roots = [home, agent.installation.installDir].filter((r): r is string => Boolean(r));
-          // The home's owner, by lstat: a home or install dir a user made a
-          // symlink must not lend its target's owner (root's, for /etc)
-          const ownerUid = await lstat(home ?? agent.installation.installDir).then(s => s.uid, () => undefined);
+          // Writes stay inside the owning user's home — where rollback can
+          // restore them. An install dir relocated outside it (SAND_DATA_ROOT,
+          // CODEX_HOME=/data/…) is refused rather than changed beyond undo
+          // (an install outside every home falls back to the scanning user's,
+          // so nothing there is writable either — rollback's own boundary)
+          const home = (await homeOf(agent.installation.installDir, fs)) ?? homedir();
+          const roots = [home];
+          // The home's owner, by lstat: a home a user made a symlink must not
+          // lend its target's owner (root's, for /etc)
+          const ownerUid = await lstat(home).then(s => s.uid, () => undefined);
           const fixResult = await withFixBoundary({ roots, ownerUid }, () => withChangeRecorder(path => { this.changed.add(path); this.everChanged = true; return this.backupFile(path); }, () => check.fix!({
             installation: agent.installation,
             configs: agent.installation.configFiles,
