@@ -311,9 +311,16 @@ function classify(origin: Origin): Omit<ExternalContentFlow, 'line' | 'snippet'>
   };
 }
 
+/**
+ * How far a URL is followed back through variables, wrapper functions and
+ * their call sites: real servers wrap fetch twice or more
+ * (`makeApiRequest` → `proxyAwareFetch` → `fetch`), each hop a few steps.
+ */
+const URL_MAX_DEPTH = 16;
+
 /** The first piece of a URL expression: a literal prefix, or the parameter it starts with. */
 function leftmost(path: NodePath, depth: number): { literal?: string; param?: string } | undefined {
-  if (depth > 4 || !path.node) return undefined;
+  if (depth > URL_MAX_DEPTH || !path.node) return undefined;
   if (path.isStringLiteral()) return { literal: path.node.value };
   if (path.isTemplateLiteral()) {
     const first = path.node.quasis[0]?.value.cooked ?? '';
@@ -322,6 +329,19 @@ function leftmost(path: NodePath, depth: number): { literal?: string; param?: st
     return expr ? leftmost(expr, depth + 1) : undefined;
   }
   if (path.isBinaryExpression() && path.node.operator === '+') return leftmost(path.get('left') as NodePath, depth + 1);
+  if (path.isAwaitExpression()) return leftmost(path.get('argument') as NodePath, depth + 1);
+  // The same URL as text: `url.toString()`, `url.href`, `String(url)`
+  if (path.isCallExpression()) {
+    const callee = path.get('callee') as NodePath;
+    const args = path.get('arguments') as NodePath[];
+    if (callee.isMemberExpression() && !callee.node.computed && callee.node.property.type === 'Identifier'
+      && callee.node.property.name === 'toString' && args.length === 0) return leftmost(callee.get('object') as NodePath, depth + 1);
+    if (callee.isIdentifier() && callee.node.name === 'String' && args.length === 1) return leftmost(args[0], depth + 1);
+    return undefined;
+  }
+  if (path.isMemberExpression() && !path.node.computed && path.node.property.type === 'Identifier' && path.node.property.name === 'href') {
+    return leftmost(path.get('object') as NodePath, depth + 1);
+  }
   if (path.isNewExpression() && path.node.callee.type === 'Identifier' && path.node.callee.name === 'URL') {
     const [input, base] = path.get('arguments') as NodePath[];
     return base?.node ? leftmost(base, depth + 1) : input ? leftmost(input, depth + 1) : undefined;
@@ -364,7 +384,7 @@ function fromIdentifier(path: NodePath, depth: number): { literal?: string; para
  * request handler: `server.tool(…, async ({ url }) => …)`), or has no calls.
  */
 function fromCallSites(binding: Binding, depth: number): { literal?: string; param?: string } | undefined {
-  if (depth > 4) return undefined;
+  if (depth > URL_MAX_DEPTH) return undefined;
   const fn = binding.scope.path;
   if (!fn.isFunction()) return undefined;
   const index = fn.node.params.findIndex((p) => p === binding.path.node || (p.type === 'AssignmentPattern' && p.left === binding.path.node));
@@ -373,9 +393,12 @@ function fromCallSites(binding: Binding, depth: number): { literal?: string; par
   const id = fn.isFunctionDeclaration() ? fn.node.id
     : fn.parentPath?.isVariableDeclarator() && fn.parentPath.node.id.type === 'Identifier' ? fn.parentPath.node.id : undefined;
   const named = id ? (fn.isFunctionDeclaration() ? fn.parentPath?.scope : fn.scope.parent)?.getBinding(id.name) : undefined;
-  if (!named || named.referencePaths.length === 0) return undefined;
+  // `export function f`: other modules may call it too, but their calls
+  // don't feed this module's tool results — the calls here do
+  const refs = named?.referencePaths.filter((r) => !r.isExportDeclaration() && !r.parentPath?.isExportSpecifier()) ?? [];
+  if (refs.length === 0) return undefined;
   let literal: string | undefined;
-  for (const ref of named.referencePaths) {
+  for (const ref of refs) {
     const call = ref.parentPath;
     if (!call?.isCallExpression() || call.node.callee !== ref.node) return undefined; // used as a value
     const arg = (call.get('arguments') as NodePath[])[index];

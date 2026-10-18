@@ -3156,6 +3156,41 @@ describe('MCP-007 tool-result passthrough', () => {
     expect(reddit.severity).toBe('warning');
   });
 
+  it('follows an exported wrapper two hops back to a fixed API (@perplexity-ai/mcp-server 1.3.0 dist/server.js, MIT, dt17)', async () => {
+    // Excerpt: proxyAwareFetch is exported, makeApiRequest calls it with
+    // url.toString() of a URL built from the base and a fixed endpoint
+    const chain = (endpoint: string) => [
+      'const PERPLEXITY_BASE_URL = process.env.PERPLEXITY_BASE_URL || "https://api.perplexity.ai";',
+      'export async function proxyAwareFetch(url, options = {}) {',
+      '  const proxyUrl = getProxyUrl();',
+      '  if (proxyUrl) { return await undiciFetch(url, { ...options, dispatcher: new ProxyAgent(proxyUrl) }); }',
+      '  return fetch(url, options);',
+      '}',
+      'async function makeApiRequest(endpoint, body) {',
+      '  const url = new URL(`${PERPLEXITY_BASE_URL}/${endpoint}`);',
+      '  let response;',
+      '  response = await proxyAwareFetch(url.toString(), { method: "POST", body: JSON.stringify(body) });',
+      '  return response;',
+      '}',
+      'export async function performSearch(query) {',
+      `  const response = await makeApiRequest(${endpoint}, { query });`,
+      '  const json = await response.json();',
+      '  return formatSearchResults(json);',
+      '}',
+      'server.registerTool("perplexity_search", { title: "Search" }, async (args) => {',
+      '  const result = await performSearch(args.query);',
+      '  return { content: [{ type: "text", text: result }] };',
+      '});',
+    ].join('\n');
+    const fixed = await run(chain('"search"'));
+    expect(fixed.passed).toBe(false);
+    expect(fixed.severity).toBe('info');
+    // true positive: the same chain when the tool picks the base (the URL itself)
+    const chosen = await run(chain('"search"').replace('new URL(`${PERPLEXITY_BASE_URL}/${endpoint}`)', 'new URL(endpoint)').replace('makeApiRequest("search"', 'makeApiRequest(query'));
+    expect(chosen.severity).toBe('warning');
+    expect(chosen.evidence?.[0].detail).toContain('URL the caller chooses');
+  });
+
   it('does not count a sanitized result, a key list or an unrelated text block', async () => {
     expect((await run([
       'async function t(u) { const raw = await (await fetch(u)).text();',
