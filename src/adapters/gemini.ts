@@ -289,7 +289,9 @@ export const geminiAdapter: AgentAdapter = {
   },
 
   getCredentialPaths(installDir: string): string[] {
-    return AUTH_FILES.map(f => join(installDir, f));
+    // settings.json counts only while it holds a key (exposesCredentials);
+    // .env is where GEMINI_API_KEY and friends are usually kept
+    return [...AUTH_FILES, SETTINGS_FILE, '.env'].map(f => join(installDir, f));
   },
 
   getCLICommand(): string {

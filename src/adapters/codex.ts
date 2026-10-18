@@ -262,6 +262,8 @@ export const codexAdapter: AgentAdapter = {
   getCredentialPaths(installDir: string): string[] {
     return [
       join(installDir, 'auth.json'),
+      // MCP server env/headers may carry tokens; counts only while it does
+      join(installDir, 'config.toml'),
     ];
   },
 

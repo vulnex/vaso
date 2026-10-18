@@ -323,11 +323,17 @@ export const claudeCodeAdapter: AgentAdapter = {
     ];
   },
 
-  getCredentialPaths(installDir: string): string[] {
+  getCredentialPaths(installDir: string, fs?: FSProvider): string[] {
+    // ~/.claude.json (inside $CLAUDE_CONFIG_DIR when set) can hold
+    // primaryApiKey and MCP server secrets; like settings.json it counts only
+    // while it does (exposesCredentials)
+    const own = fs && claudeConfigPaths(fs.homedir(), fs);
+    const rootState = own && own.claudeDir === installDir ? own.rootStateFile : join(dirname(installDir), ROOT_STATE_FILE);
     return [
       join(installDir, '.credentials.json'),
       join(installDir, 'settings.json'),
       join(installDir, 'settings.local.json'),
+      rootState,
     ];
   },
 

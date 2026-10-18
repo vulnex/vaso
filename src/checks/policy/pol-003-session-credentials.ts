@@ -3,7 +3,7 @@ import { defineCheck } from '../../core/check-builder.js';
 import { accessibleByOthers, markUnreachable, queryPermissions } from '../../core/permissions.js';
 import { restrictFilesToOwner } from '../../remediation/config-writer.js';
 import type { ScanContext } from '../../core/types.js';
-import { exposesCredentials } from '../../core/secret-values.js';
+import { exposesCredentials, unloadedFileExposes } from '../../core/secret-values.js';
 
 /**
  * The declared credential paths that can expose something: a loaded settings
@@ -11,12 +11,14 @@ import { exposesCredentials } from '../../core/secret-values.js';
  * Cursor and Copilot write theirs with the default umask; every other
  * declared path (token stores, auth files) always.
  */
-function exposingPaths(ctx: ScanContext): string[] {
+async function exposingPaths(ctx: ScanContext): Promise<string[]> {
   const byPath = new Map(ctx.configs.map(c => [c.filePath, c]));
-  return (ctx.credentialPaths ?? []).filter(p => {
+  const out: string[] = [];
+  for (const p of ctx.credentialPaths ?? []) {
     const config = byPath.get(p);
-    return !config || exposesCredentials(config);
-  });
+    if (config ? exposesCredentials(config) : await unloadedFileExposes(ctx.fs, p)) out.push(p);
+  }
+  return out;
 }
 
 export const pol003 = defineCheck({
@@ -33,7 +35,7 @@ export const pol003 = defineCheck({
     }
 
     const evidence: Evidence[] = [];
-    for (const fullPath of exposingPaths(ctx)) {
+    for (const fullPath of await exposingPaths(ctx)) {
       try {
         const stats = await ctx.fs.stat(fullPath);
         if (!stats.isFile()) continue;
@@ -64,7 +66,7 @@ export const pol003 = defineCheck({
   // so the fix leaves it alone too — the agent's own check judges it.
   async fix(ctx) {
     const files: string[] = [];
-    for (const path of exposingPaths(ctx)) {
+    for (const path of await exposingPaths(ctx)) {
       if (await Promise.resolve().then(() => ctx.fs.stat(path)).then(s => s.isFile(), () => false)) files.push(path);
     }
     return restrictFilesToOwner('POL-003', files);

@@ -1,4 +1,5 @@
 import { basename } from 'node:path';
+import type { FSProvider } from './fs-provider.js';
 import { shannonEntropy } from '../analyzers/entropy.js';
 import { API_KEY_PATTERNS, isEnvReference, isPlaceholderSecret } from './patterns.js';
 
@@ -51,4 +52,29 @@ export const CREDENTIAL_FILE_NAME = /(?:^\.env(?:\.|$)|^\.security\.ya?ml$|crede
  */
 export function exposesCredentials(config: { filePath: string; data: unknown }): boolean {
   return CREDENTIAL_FILE_NAME.test(basename(config.filePath)) || configHoldsSecret(config.data);
+}
+
+/** An agent's ordinary settings file (as opposed to a token store). */
+const SETTINGS_FILE_NAME = /^(?:\.claude|settings(?:\.local)?|config|cli-config)\.(?:json[c5]?|toml|ya?ml)$/i;
+
+/**
+ * A declared credential path that isn't a loaded config: token stores and
+ * auth files always count. A settings file that is there but didn't load
+ * (unparseable — reported as CONFIG-LOAD) counts only when its text contains
+ * a known key format, so a broken, secret-free settings.json is no leak. When
+ * the text can't be read either, it counts (nothing shows it is harmless).
+ */
+export async function unloadedFileExposes(fs: FSProvider, path: string): Promise<boolean> {
+  const name = basename(path);
+  if (CREDENTIAL_FILE_NAME.test(name) || !SETTINGS_FILE_NAME.test(name)) return true;
+  let text: string;
+  try {
+    text = await fs.readFile(path);
+  } catch {
+    return true;
+  }
+  return API_KEY_PATTERNS.some(({ pattern }) => {
+    const m = pattern.exec(text);
+    return !!m && !isPlaceholderSecret(m[0]);
+  });
 }
