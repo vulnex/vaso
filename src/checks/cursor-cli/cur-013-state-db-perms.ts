@@ -2,17 +2,12 @@ import { join } from 'node:path';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { markUnreachable, queryPermissions, readableByOthers } from '../../core/permissions.js';
+import { ideUserDataDir } from '../../adapters/cursor-cli.js';
 
 // The Cursor IDE stores its session credentials in plaintext SQLite:
 // state.vscdb ItemTable keys cursorAuth/accessToken (JWT) and
 // cursorAuth/refreshToken. Chat history lives in the same DB. A single
 // sqlite3 query away for anything that can read the file.
-function userDataDirs(home: string, platform: string, appData?: string): string[] {
-  if (platform === 'darwin') return [join(home, 'Library', 'Application Support', 'Cursor')];
-  if (platform === 'linux') return [join(home, '.config', 'Cursor')];
-  if (platform === 'win32' && appData) return [join(appData, 'Cursor')];
-  return [];
-}
 
 export const cur013 = defineCheck({
   id: 'CUR-013',
@@ -28,7 +23,8 @@ export const cur013 = defineCheck({
       return h.passed('state.vscdb is user-level — evaluated on the user installation');
     }
     const home = ctx.fs.homedir();
-    const dirs = userDataDirs(home, ctx.platform, ctx.fs.getEnv?.('APPDATA'));
+    const userData = ideUserDataDir(home, ctx.fs);
+    const dirs = userData ? [userData] : [];
     const evidence: Evidence[] = [];
 
     for (const dir of dirs) {

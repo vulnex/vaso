@@ -174,6 +174,23 @@ describe('Windsurf / Devin Desktop adapter — Cascade skill roots (dt15)', () =
   });
 });
 
+describe('Windsurf / Devin Desktop adapter — Linux $XDG_CONFIG_HOME (dt15)', () => {
+  it('reads editor settings and declares state.vscdb under $XDG_CONFIG_HOME', async () => {
+    const base = makeFs({ '/xdg/Windsurf/User/settings.json': '{ "windsurf.autoExecutionPolicy": "turbo" }' });
+    const fs = { ...base, getEnv: (k: string) => (k === 'XDG_CONFIG_HOME' ? '/xdg' : undefined) } as FSProvider;
+    const [inst] = await windsurfAdapter.detect({ fs });
+    expect(inst.configFiles.map(c => c.filePath)).toEqual(['/xdg/Windsurf/User/settings.json']);
+    expect(windsurfAdapter.getCredentialPaths!(inst.installDir, fs)).toContain('/xdg/Windsurf/User/globalStorage/state.vscdb');
+  });
+
+  it('keeps ~/.config without XDG_CONFIG_HOME (or with a relative one, which XDG ignores)', async () => {
+    const base = makeFs({ [`${HOME}/.config/Devin/User/settings.json`]: '{}' });
+    const fs = { ...base, getEnv: (k: string) => (k === 'XDG_CONFIG_HOME' ? 'rel/dir' : undefined) } as FSProvider;
+    const [inst] = await windsurfAdapter.detect({ fs });
+    expect(inst.configFiles.map(c => c.filePath)).toEqual([`${HOME}/.config/Devin/User/settings.json`]);
+  });
+});
+
 describe('Windsurf / Devin Desktop adapter — unreadable and broken configs (dt15)', () => {
   const denied = (p: string) => Object.assign(new Error(`EACCES: permission denied, open '${p}'`), { code: 'EACCES' });
 

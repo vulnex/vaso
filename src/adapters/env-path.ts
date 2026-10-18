@@ -1,4 +1,5 @@
 import { isAbsolute, join, resolve } from 'node:path';
+import type { FSProvider } from '../core/fs-provider.js';
 
 /**
  * A directory or file named by a relocation variable (CODEX_HOME,
@@ -20,4 +21,14 @@ export function envPath(value: string | undefined, userHome: string): string | u
 export function xdgPath(value: string | undefined): string | undefined {
   const v = value?.trim();
   return v && isAbsolute(v) ? v : undefined;
+}
+
+/**
+ * Where an Electron app keeps its user data on Linux (app.getPath('appData')):
+ * $XDG_CONFIG_HOME, else ~/.config. Only the scanning user's environment is
+ * observable — another user's home falls back to ~/.config.
+ */
+export function linuxConfigHome(home: string, fs: FSProvider): string {
+  const xdg = home === fs.homedir() ? xdgPath(fs.getEnv?.('XDG_CONFIG_HOME')) : undefined;
+  return xdg ?? join(home, '.config');
 }

@@ -381,6 +381,15 @@ describe('CUR-013: Session Database Permissions', () => {
     const result = await check.run(makeCtx([], fs));
     expect(result.passed).toBe(true);
   });
+
+  it('looks under $XDG_CONFIG_HOME/Cursor on Linux (dt15)', async () => {
+    const fs = makeFs({
+      getEnv: vi.fn((k: string) => (k === 'XDG_CONFIG_HOME' ? '/xdg' : undefined)),
+      stat: vi.fn(async () => ({ mode: 0o644, isFile: () => true, isDirectory: () => false })),
+    });
+    const result = await check.run(makeCtx([], fs));
+    expect(result.evidence?.[0]?.file).toBe('/xdg/Cursor/User/globalStorage/state.vscdb');
+  });
 });
 
 describe('CUR-014: Auto-Run Instructions Too Broad', () => {

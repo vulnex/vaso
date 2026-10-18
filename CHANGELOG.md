@@ -30,6 +30,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - **Windsurf / Devin Desktop reports unreadable or broken configs as CONFIG-LOAD.** An unreadable `~/.config/devin/config.json`, an unparseable editor `settings.json` and a `user_settings.pb` that isn't a valid settings message were dropped silently and the execution gate scored clean.
 - **CUR-011 checks a repository's `.cursor/hooks.json`.** Cursor runs project hooks in any trusted workspace, but only the user-level hooks file was read.
 - **POL-003's fix changes only the files it reports.** It also tightened a declared directory (Copilot's `session-state/`) that the check never flagged, and reported it as a file. Permission fixes now name directories they change as directories.
+- **Cursor and Windsurf / Devin Desktop on Linux honour `$XDG_CONFIG_HOME`** for the editor's user data (`settings.json`, `state.vscdb`), as Electron does; CUR-012, CUR-013, WS-001 and WS-008 read `~/.config` regardless.
 
 ## [1.3.1] - 2026-10-16
 

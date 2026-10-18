@@ -2,21 +2,16 @@ import { join } from 'node:path';
 import type { Evidence, Platform } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { markUnreachable, queryPermissions, readableByOthers } from '../../core/permissions.js';
-
-const EDITOR_DIR_NAMES = ['Windsurf', 'Devin'];
+import type { FSProvider } from '../../core/fs-provider.js';
+import { editorUserDataDirs } from '../../adapters/windsurf.js';
 
 /**
- * Per-OS editor user-data dirs. Only darwin/linux are probed — on other
- * platforms the POSIX permission model doesn't apply and the check skips.
+ * Per-OS editor user-data dirs (the adapter's, XDG-aware on Linux). Only
+ * darwin/linux are probed — on other platforms the POSIX permission model
+ * doesn't apply and the check skips.
  */
-function userDataDirs(home: string, platform: Platform): string[] | undefined {
-  if (platform === 'darwin') {
-    return EDITOR_DIR_NAMES.map(n => join(home, 'Library', 'Application Support', n));
-  }
-  if (platform === 'linux') {
-    return EDITOR_DIR_NAMES.map(n => join(home, '.config', n));
-  }
-  return undefined;
+function userDataDirs(home: string, ctx: { platform: Platform; fs: FSProvider }): string[] | undefined {
+  return ctx.platform === 'darwin' || ctx.platform === 'linux' ? editorUserDataDirs(home, ctx.fs) : undefined;
 }
 
 export const ws008 = defineCheck({
@@ -28,7 +23,7 @@ export const ws008 = defineCheck({
   supportedAgents: ['windsurf'],
 
   async run(ctx, h) {
-    const dirs = userDataDirs(ctx.fs.homedir(), ctx.platform);
+    const dirs = userDataDirs(ctx.fs.homedir(), ctx);
     if (!dirs) {
       return h.passed('Editor state DB permission check not applicable on this platform');
     }

@@ -10,6 +10,7 @@ import { discoverCliInstalls, retainedVersionGlobs, type RetainedVersionsDir } f
 import { getUserHomeDirs } from './openclaw.js';
 import { queryCliVersion, readPackageVersion } from './version-query.js';
 import { withoutLoadedConfigs, scanCwd } from './project-configs.js';
+import { linuxConfigHome } from './env-path.js';
 
 const CURSOR_DIR_NAME = '.cursor';
 // cli-config.json / mcp.json are CLI+IDE shared; permissions.json,
@@ -44,9 +45,10 @@ export function cursorCliConfigDir(home: string, fs: FSProvider): string | undef
 // The Cursor IDE (VS Code fork) keeps User/settings.json + globalStorage
 // under the per-OS user-data dir. settings.json carries workspace-trust
 // config; globalStorage/state.vscdb carries session JWTs in plaintext.
-function ideUserDataDir(home: string, fs: FSProvider): string | undefined {
+// Linux: Electron's appData, $XDG_CONFIG_HOME (scanning user only) or ~/.config.
+export function ideUserDataDir(home: string, fs: FSProvider): string | undefined {
   if (fs.platform === 'darwin') return join(home, 'Library', 'Application Support', 'Cursor');
-  if (fs.platform === 'linux') return join(home, '.config', 'Cursor');
+  if (fs.platform === 'linux') return join(linuxConfigHome(home, fs), 'Cursor');
   if (fs.platform === 'win32') {
     const appData = fs.getEnv('APPDATA');
     if (appData) return join(appData, 'Cursor');

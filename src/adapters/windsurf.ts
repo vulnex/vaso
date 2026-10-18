@@ -11,6 +11,7 @@ import { queryCliVersion } from './version-query.js';
 import { decodeWindsurfUserSettings, toWindsurfSettingsData } from './windsurf-user-settings.js';
 import { devinCliPresent, projectDirs } from './devin.js';
 import { scanCwd } from './project-configs.js';
+import { linuxConfigHome } from './env-path.js';
 
 // Windsurf IDE was rebranded Devin Desktop on 2026-06-02. One adapter covers
 // both generations: legacy installs keep the Windsurf app bundle / user-data
@@ -59,9 +60,9 @@ function devinConfigDir(home: string, fs: FSProvider): string {
  * Per-user editor user-data dirs (VS Code-style), both generations.
  * macOS: ~/Library/Application Support/{Windsurf,Devin}
  * Windows: %APPDATA%\{Windsurf,Devin}
- * Linux: ~/.config/{Windsurf,Devin}
+ * Linux: $XDG_CONFIG_HOME/{Windsurf,Devin} (default ~/.config)
  */
-function editorUserDataDirs(home: string, fs: FSProvider): string[] {
+export function editorUserDataDirs(home: string, fs: FSProvider): string[] {
   if (fs.platform === 'darwin') {
     return EDITOR_DIR_NAMES.map(n => join(home, 'Library', 'Application Support', n));
   }
@@ -69,7 +70,7 @@ function editorUserDataDirs(home: string, fs: FSProvider): string[] {
     const appData = fs.getEnv('APPDATA') ?? join(home, 'AppData', 'Roaming');
     return EDITOR_DIR_NAMES.map(n => join(appData, n));
   }
-  return EDITOR_DIR_NAMES.map(n => join(home, '.config', n));
+  return EDITOR_DIR_NAMES.map(n => join(linuxConfigHome(home, fs), n));
 }
 
 /**
