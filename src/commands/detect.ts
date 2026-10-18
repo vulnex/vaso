@@ -1,4 +1,5 @@
 import chalk from 'chalk';
+import { stripColor } from '../reporting/text-safety.js';
 import { EXIT_INCOMPLETE, EXIT_USAGE } from '../core/exit-criteria.js';
 import { adapterRegistry } from '../adapters/registry.js';
 import { allUsersCoverageWarning } from '../adapters/openclaw.js';
@@ -32,7 +33,7 @@ export interface DetectCommandOptions {
 
 async function emit(text: string, output?: string, silent?: boolean): Promise<void> {
   if (output) {
-    await writeFileEnsureDir(output, text);
+    await writeFileEnsureDir(output, stripColor(text));
     if (!silent) console.error(chalk.green(`Report written to ${output}`));
   } else {
     console.log(text);

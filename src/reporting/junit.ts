@@ -1,9 +1,11 @@
 import type { ScanResult, AgentScanResult, CheckResult } from '../core/types.js';
 import type { Reporter } from './reporter.js';
-import { stripXmlInvalid } from './text-safety.js';
+import { escapeControlChars, stripXmlInvalid } from './text-safety.js';
 
 function xmlEscape(s: string): string {
-  return stripXmlInvalid(s)
+  // C0/C1 controls (raw CR included), DEL and bidi controls as `\xNN`: valid
+  // XML for the C1 range, but CI viewers render them
+  return stripXmlInvalid(escapeControlChars(s))
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')

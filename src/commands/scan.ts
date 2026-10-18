@@ -1,4 +1,5 @@
 import chalk from 'chalk';
+import { stripColor } from '../reporting/text-safety.js';
 import { ScanEngine } from '../core/engine.js';
 import { adapterRegistry } from '../adapters/registry.js';
 import { checkRegistry } from '../core/check-registry.js';
@@ -249,7 +250,7 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
               const { join: joinPath } = await import('node:path');
               const safeHost = hostFiles.claim(entry.result.host ?? entry.target.host, targetLabel(entry.target));
               const outPath = joinPath(options.outputDir, `${safeHost}.${ext}`);
-              await writeFile(outPath, reporter.render(entry.result), 'utf-8');
+              await writeFile(outPath, stripColor(reporter.render(entry.result)), 'utf-8');
               log(chalk.dim(`    → ${outPath}`));
             } catch (err) {
               log(chalk.yellow(`  Warning: failed to write output for ${entry.target.host}: ${(err as Error).message}`));
@@ -303,7 +304,7 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
         sections.push(`Summary: ${successResults.length} scanned, ${failedResults.length} failed`);
         combined = sections.join('\n\n');
       }
-      await writeFileEnsureDir(options.output, combined);
+      await writeFileEnsureDir(options.output, stripColor(combined));
       log(chalk.green(`Report written to ${options.output}`));
     } else if (options.format === 'json') {
       // Same per-host array as --output, so stdout pipes into jq
@@ -386,7 +387,7 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
     const output = reporter.render(result);
 
     if (options.output) {
-      await writeFileEnsureDir(options.output, output);
+      await writeFileEnsureDir(options.output, stripColor(output));
       localLog(chalk.green(`Report written to ${options.output}`));
     } else if (options.outputDir) {
       // Same <dir>/<hostname>.<ext> layout as multi-host scans, for the local host
@@ -395,7 +396,7 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
       const ext = FORMAT_EXT[scanOptions.format ?? 'terminal'] ?? 'txt';
       // A snapshot scan reports on the snapshot's host, not this machine
       const outPath = joinPath(options.outputDir, `${safeHostname(result.host ?? hostname())}.${ext}`);
-      await writeFileEnsureDir(outPath, output);
+      await writeFileEnsureDir(outPath, stripColor(output));
       localLog(chalk.green(`Report written to ${outPath}`));
     } else {
       console.log(output);

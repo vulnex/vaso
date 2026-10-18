@@ -1,5 +1,5 @@
 import chalk from 'chalk';
-import { escapeControlCharsDeep } from '../reporting/text-safety.js';
+import { escapeControlCharsDeep, stripColor } from '../reporting/text-safety.js';
 import { writeFile } from 'node:fs/promises';
 import { ScanEngine } from '../core/engine.js';
 import { adapterRegistry } from '../adapters/registry.js';
@@ -117,7 +117,7 @@ export async function runMCPScan(options: MCPScanCommandOptions): Promise<void> 
     const output = reporter.render(result);
 
     if (options.output) {
-      await writeFile(options.output, output, 'utf-8');
+      await writeFile(options.output, stripColor(output), 'utf-8');
       console.error(chalk.green(`Report written to ${options.output}`));
     } else {
       console.log(output);

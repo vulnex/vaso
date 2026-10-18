@@ -57,6 +57,27 @@ describe('text safety', () => {
   it('csv cells carry no raw ESC/BEL', () => {
     expect(new CsvReporter().render(result())).not.toMatch(/[\u0007\u001b]/);
   });
+
+  it('neutralises bidi embedding/override/isolate controls, keeps other Unicode', () => {
+    expect(escapeControlChars('a‮b⁦c⁩d‪e')).toBe('a\\u202eb\\u2066c\\u2069d\\u202ae');
+    expect(escapeControlChars('café 中 ‍')).toBe('café 中 ‍');
+    const r = result();
+    r.agents[0].results[0].message = 'file ‮txt.exe';
+    expect(new TerminalReporter().render(r)).not.toContain('‮');
+  });
+
+  it('junit text carries no raw CR or C1 control', () => {
+    const r = result();
+    r.agents[0].results[0].message = 'a\rb\u009bc\u0085d';
+    const out = new JunitReporter().render(r);
+    expect(out).not.toMatch(/[\r\u0080-\u009f]/);
+    expect(out).toContain('a\\x0db\\x9bc\\x85d');
+  });
+
+  it('stripColor removes SGR colour escapes only', async () => {
+    const { stripColor } = await import('./text-safety.js');
+    expect(stripColor('\u001b[31mred\u001b[39m \u001b[1;4mbold\u001b[0m \\x1b[2J')).toBe('red bold \\x1b[2J');
+  });
 });
 
 describe('escapeControlChars lineBreaks', () => {

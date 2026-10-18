@@ -1,4 +1,5 @@
 import chalk from 'chalk';
+import { stripColor } from '../reporting/text-safety.js';
 import { stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { writeFile } from 'node:fs/promises';
@@ -74,7 +75,7 @@ export async function runSkillAudit(skillPath: string, options: SkillAuditComman
     const output = reporter.render(result);
 
     if (options.output) {
-      await writeFile(options.output, output, 'utf-8');
+      await writeFile(options.output, stripColor(output), 'utf-8');
       console.error(chalk.green(`Report written to ${options.output}`));
     } else {
       console.log(output);

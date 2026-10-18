@@ -5,8 +5,10 @@
  * the window; in XML some of them make the document invalid.
  */
 
-// C0 controls except tab and newline, DEL, and C1 controls (0x80–0x9f; 0x9b is CSI)
-const CONTROL_RE = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g;
+// C0 controls except tab and newline, DEL, C1 controls (0x80–0x9f; 0x9b is
+// CSI) and the bidi embedding/override/isolate controls, which reorder how a
+// line displays (a file name or rule that reads differently than it is)
+const CONTROL_RE = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g;
 
 function visible(ch: string): string {
   const code = ch.charCodeAt(0);
@@ -36,6 +38,19 @@ export function escapeControlCharsDeep<T>(value: T, options?: { lineBreaks?: boo
     return out as T;
   }
   return value;
+}
+
+// SGR colour sequences — the only escapes VASO's own output contains
+// (scanned text is escaped above)
+const SGR_RE = /\u001b\[[0-9;]*m/g;
+
+/**
+ * A report as written to a file: no colour escapes. Terminal-format text is
+ * rendered with chalk, which colours whenever stdout is a terminal — even
+ * when the report goes to `-o report.txt`.
+ */
+export function stripColor(s: string): string {
+  return s.replace(SGR_RE, '');
 }
 
 // XML 1.0 Char production: everything below 0x20 except tab, LF, CR is invalid,
