@@ -48,6 +48,31 @@ function interpolatesOnlyValidated(statement: string, source: string): boolean {
   return names.every(n => new RegExp(String.raw`\b${n}\s*=\s*[\w.]*(?:valid|saniti[sz]|escape|quote|allow(?:ed|list)|whitelist)\w*\s*\(`, 'i').test(source));
 }
 
+/**
+ * Every input-named interpolation in the statement stands for a whole
+ * statement, not a value: a derived table (`SELECT TOP ${n} * FROM (${body}) AS subq`,
+ * `JOIN (${q})`), a CTE body (`WITH t AS (${sql})`) or an `EXPLAIN ${query}`.
+ * That is the server wrapping a query to cap or inspect it.
+ */
+function wrapsWholeStatement(statement: string): boolean {
+  const uses = [...statement.matchAll(new RegExp(String.raw`\$\{\s*(?:${INPUT_NAMES})(?![\w$])[^}]*\}`, 'g'))];
+  return uses.length > 0 && uses.every((m) => {
+    const before = statement.slice(Math.max(0, m.index - 60), m.index);
+    const after = statement.slice(m.index + m[0].length, m.index + m[0].length + 20);
+    // the closing paren may be on the next line (a segment is one line)
+    return (/\b(?:FROM|JOIN|AS)\s*\(\s*$/i.test(before) && /^\s*(?:\)|$)/.test(after)) || /\bEXPLAIN(?:\s+[A-Z]+)*\s+$/i.test(before);
+  });
+}
+
+/**
+ * The server has a tool whose job is running the caller's SQL (dbhub's
+ * `execute_sql`, `run_query`, an input field named `sql`): wrapping that query
+ * gives the caller nothing they don't already have.
+ */
+function runsCallerSql(source: string): boolean {
+  return /["'`](?:execute|run|exec)[_-]?(?:sql|query)\w*["'`]|\bsql\s*:\s*z\s*\.\s*string\s*\(|["']sql["']\s*:\s*\{\s*["']?type["']?\s*:\s*["']string["']/i.test(source);
+}
+
 export const mcp005 = defineCheck({
   id: 'MCP-005',
   name: 'Tool Input Injection',
@@ -93,6 +118,7 @@ export const mcp005 = defineCheck({
       }
 
       let constants: Set<string> | undefined;
+      let sqlTool: boolean | undefined;
       const constantNames = () => (constants ??= source.language === 'python' ? new Set() : literalOnlyNames(source.sourceCode!));
       for (const segment of sourceSegments(source.sourceCode)) {
         if (reported.has(segment.line)) continue;
@@ -101,6 +127,13 @@ export const mcp005 = defineCheck({
             if (name === 'SQL injection via string formatting' && interpolatesOnlyValidated(segment.text, source.sourceCode)) continue;
             if (name.startsWith('SQL injection via') && interpolatesOnlyConstants(segment.text, constantNames)) continue;
             reported.add(segment.line);
+            if (name === 'SQL injection via template literal' && wrapsWholeStatement(segment.text) && (sqlTool ??= runsCallerSql(source.sourceCode))) {
+              evidence.push({
+                file, line: segment.line, snippet: segmentSnippet(segment), mitigated: true,
+                detail: `${name}: the template wraps a whole query (derived table, CTE or EXPLAIN) in a server with a tool that runs the caller's SQL — the caller already chooses the statement`,
+              });
+              break;
+            }
             evidence.push({ file, line: segment.line, snippet: segmentSnippet(segment), detail: name });
             break;
           }

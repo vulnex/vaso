@@ -491,6 +491,30 @@ describe('MCP-005: Tool Input Injection', () => {
     }
   });
 
+  it('wrapping the caller\'s whole query to cap rows, in a server whose tool runs SQL, is info (@bytebase/dbhub 1.5.0, MIT, dt17)', async () => {
+    // Excerpt of dist/chunk-X5OCFRNL.js SQLServerConnector.wrapWithTop plus the execute_sql tool
+    const wrap = [
+      'static wrapWithTop(sql, maxRows, hoistOrderBy) {',
+      '  const cteIndex = this.findTopLevelSelect(sql)?.index ?? 0;',
+      '  const ctePrefix = sql.slice(0, cteIndex);',
+      '  let body = sql.slice(cteIndex);',
+      '  return `${ctePrefix}SELECT TOP ${maxRows} * FROM (${body}',
+      ') AS subq${optionClause}${semicolon}`;',
+      '}',
+    ];
+    const tool = 'server.registerTool("execute_sql", { inputSchema: { sql: z.string() } }, async (args) => runSql(args.sql));';
+    const run = (src: string[]) => mcp005.run(makeContext({ mcpServerSources: [{ serverName: 'db', sourceCode: src.join('\n') }] }));
+    const real = await run([...wrap, tool]);
+    expect(real.passed).toBe(false);
+    expect(real.severity).toBe('info');
+    expect(real.evidence?.[0].detail).toMatch(/wraps a whole query/);
+    // true positives: the same wrap with no SQL-running tool, and a value spliced into a WHERE clause beside it
+    const noTool = await run(wrap);
+    expect(noTool.severity).toBe('critical');
+    const value = await run([...wrap, tool, 'server.tool("find", {}, async ({ query }) => db.prepare(`SELECT * FROM t WHERE name = ${query}`).all());']);
+    expect(value.severity).toBe('critical');
+  });
+
   it('ignores injection patterns inside line comments', async () => {
     const commentOnly: MCPServerSource[] = [{
       serverName: 'doc-only',
