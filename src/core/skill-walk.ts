@@ -1,5 +1,6 @@
-import { basename, dirname, join, relative, isAbsolute } from 'node:path';
+import { basename, dirname, join, normalize, relative, isAbsolute } from 'node:path';
 import type { DirentInfo, FSProvider } from './fs-provider.js';
+import { classifySensitivePath } from '../analyzers/sensitive-paths.js';
 
 /**
  * Skills are often installed as symlinks — `~/.codex/skills/<name>` pointing
@@ -12,6 +13,11 @@ import type { DirentInfo, FSProvider } from './fs-provider.js';
  * Bounded: each real directory is walked once (cycles, two links to one
  * target) and at most MAX_LINK_DEPTH links deep. The remote probe follows
  * the same links (≥ 1.2.1), so snapshot scans see the same files.
+ *
+ * A link into a credential store or shell startup file (`skills/keys` →
+ * ~/.ssh, `creds.txt` → ~/.aws/credentials) is never followed: SKL-013
+ * reports it from its target, and the probe never ships what is behind it
+ * (≥ 1.4.0, escapesToSink in probe/sensitive_sinks.go).
  */
 const MAX_LINK_DEPTH = 8;
 
@@ -80,6 +86,24 @@ async function realOrSelf(fs: FSProvider, path: string): Promise<string> {
 }
 
 /**
+ * The link's target — resolved, or as written (macOS resolves /etc to
+ * /private/etc) — is a sensitive location (SENSITIVE_SINKS) that the walked
+ * root itself does not name.
+ */
+async function sinkLink(fs: FSProvider, link: string, real: string, named: ReadonlySet<string>): Promise<boolean> {
+  const targets = [real];
+  if (typeof fs.readlink === 'function') {
+    try {
+      const raw = await fs.readlink(link);
+      targets.push(isAbsolute(raw) ? normalize(raw) : join(dirname(link), raw));
+    } catch {
+      // target as resolved is enough
+    }
+  }
+  return targets.some(t => classifySensitivePath(t).some(label => !named.has(label)));
+}
+
+/**
  * Every entry under `root`, recursively, plus the contents of symlinked files
  * and directories that point outside it. A followed directory link appears as
  * a directory entry; a followed file link as a file entry. Throws like
@@ -87,7 +111,7 @@ async function realOrSelf(fs: FSProvider, path: string): Promise<string> {
  */
 export async function walkSkillTree(fs: FSProvider, root: string): Promise<DirentInfo[]> {
   const real = await realOrSelf(fs, root);
-  return walk(fs, root, [real], new Visited(real), 0, true);
+  return walk(fs, root, [real], new Visited(real), 0, true, new Set(classifySensitivePath(root)));
 }
 
 /**
@@ -100,7 +124,7 @@ export async function followSkillLinks(fs: FSProvider, root: string, entries: Di
   const visited = new Visited(rootReal);
   const prefix = root.endsWith('/') ? root : root + '/';
   const links = entries.filter(e => e.isSymbolicLink && (e.parentPath === root || (e.parentPath ?? '').startsWith(prefix)));
-  return (await follow(fs, root, links, [rootReal], visited, 0)).filter(e => !e.isSymbolicLink || !links.includes(e));
+  return (await follow(fs, root, links, [rootReal], visited, 0, new Set(classifySensitivePath(root)))).filter(e => !e.isSymbolicLink || !links.includes(e));
 }
 
 async function walk(
@@ -110,6 +134,7 @@ async function walk(
   visited: Visited,
   depth: number,
   isRoot: boolean,
+  named: ReadonlySet<string>,
 ): Promise<DirentInfo[]> {
   let entries: DirentInfo[];
   try {
@@ -127,7 +152,7 @@ async function walk(
       entries = entries.filter(e => !underAny(join(real, relative(dir, e.parentPath ?? dir), e.name), real, taken));
     }
   }
-  return follow(fs, dir, entries, roots, visited, depth);
+  return follow(fs, dir, entries, roots, visited, depth, named);
 }
 
 /** `entries` with every followable symlink among them expanded in place. */
@@ -138,6 +163,7 @@ async function follow(
   roots: string[],
   visited: Visited,
   depth: number,
+  named: ReadonlySet<string>,
 ): Promise<DirentInfo[]> {
   const out: DirentInfo[] = [];
   const dirLinks: Array<{ entry: DirentInfo; parent: string; link: string; real: string }> = [];
@@ -161,7 +187,7 @@ async function follow(
     }
     // Inside a tree already being walked, or a parent of one (a link back up
     // would re-walk it), or seen through another link
-    if (roots.some(r => isWithin(real, r) || isWithin(r, real)) || visited.has(real)) {
+    if (roots.some(r => isWithin(real, r) || isWithin(r, real)) || visited.has(real) || await sinkLink(fs, link, real, named)) {
       out.push(entry);
       continue;
     }
@@ -193,7 +219,7 @@ async function follow(
     }
     visited.add(real);
     out.push({ name: entry.name, isFile: false, isDirectory: true, parentPath: parent });
-    out.push(...await walk(fs, link, [...roots, real], visited, depth + 1, false));
+    out.push(...await walk(fs, link, [...roots, real], visited, depth + 1, false, named));
   }
   return out;
 }

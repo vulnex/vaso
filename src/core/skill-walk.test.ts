@@ -73,6 +73,27 @@ describe.skipIf(process.platform === 'win32')('walkSkillTree', () => {
     expect(found.filter(f => f.endsWith('lone.js'))).toEqual([join(skills, 'lone.js')]);
   });
 
+  it('never follows a link into a credential store, but still follows ordinary linked skills', async () => {
+    await mkdir(join(base, '.ssh'), { recursive: true });
+    await writeFile(join(base, '.ssh', 'id_ed25519'), 'KEY');
+    await mkdir(join(base, '.aws'), { recursive: true });
+    await writeFile(join(base, '.aws', 'credentials'), 'AWS');
+    await symlink('../.ssh', join(skills, 'sshlink'));
+    await symlink(join(base, '.ssh'), join(skills, '.ssh')); // named like the sink
+    await symlink(join(base, '.aws', 'credentials'), join(skills, 'local', 'creds.txt'));
+    await symlink(join(outside, 'linked'), join(skills, 'linked'));
+    // A real directory named .ssh inside a skill is the skill's own content
+    await mkdir(join(skills, 'local', '.ssh'), { recursive: true });
+    await writeFile(join(skills, 'local', '.ssh', 'setup.js'), 'z');
+    const entries = await walkSkillTree(fs, skills);
+    const found = files(entries);
+    expect(found.some(f => f.includes('id_ed25519') || f.endsWith('creds.txt'))).toBe(false);
+    expect(found).toContain(join(skills, 'linked', 'index.js'));
+    expect(found).toContain(join(skills, 'local', '.ssh', 'setup.js'));
+    // The links themselves are still listed (SKL-013 reads their targets)
+    expect(entries.filter(e => e.isSymbolicLink).map(e => e.name).sort()).toEqual(['.ssh', 'creds.txt', 'sshlink']);
+  });
+
   it('lists symlinked skill directories by name', async () => {
     await symlink(join(outside, 'linked'), join(skills, 'linked'));
     await symlink(join(outside, 'linked', 'index.js'), join(skills, 'file-link'));
@@ -107,6 +128,27 @@ describe('walkSkillTree on a probe snapshot', () => {
       '/home/u/skills/linked/lib/util.js',
       '/home/u/skills/local/index.js',
     ]);
+  });
+
+  it('does not follow links into credential stores the probe left out (≥ 1.4.0)', async () => {
+    const s = new SnapshotFSProvider({
+      version: 1, hostname: 'h', platform: 'linux', homedir: '/home/u', timestamp: '2026-10-18T00:00:00Z',
+      privilege: { uid: 1000, username: 'u', isRoot: false, sudoAvailable: false, escalated: false, scannedUsers: ['u'], skippedPaths: [] },
+      files: {
+        '/home/u/skills/fmt/SKILL.md': f('---\nname: fmt\n---\n'),
+        '/home/u/skills/fmt/creds.txt': { exists: true, mode: 0o600, content: '', contentOmitted: true, omitted: 'sensitive' },
+      },
+      directories: {},
+      commandOutputs: {},
+      env: {},
+      directoryModes: { '/home/u/.ssh': 0o700 },
+      symlinks: {
+        '/home/u/skills/fmt/creds.txt': '/home/u/.aws/credentials',
+        '/home/u/skills/sshlink': '../.ssh',
+      },
+    });
+    expect(files(await walkSkillTree(s, '/home/u/skills'))).toEqual(['/home/u/skills/fmt/SKILL.md']);
+    expect(await getSkillFiles('/home/u/skills', s)).toEqual(['/home/u/skills/fmt/SKILL.md']);
   });
 
   it('keeps a plain recursive listing from descending through the link', async () => {

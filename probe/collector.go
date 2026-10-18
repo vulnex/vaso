@@ -228,12 +228,12 @@ func Collect(manifest ProbeManifest, escalate bool) ProbeSnapshot {
 	// Expand and collect file paths
 	expandedPaths := expandPaths(manifest.FilePaths, homes)
 	for _, p := range expandedPaths {
-		c.collectPath(&snapshot, p, false, true)
+		c.collectPath(&snapshot, p, p, false, true)
 	}
 
 	// Expand and collect system paths (not expanded per-user)
 	for _, p := range manifest.SystemPaths {
-		c.collectPath(&snapshot, p, false, true)
+		c.collectPath(&snapshot, p, p, false, true)
 	}
 
 	// Expand and collect glob patterns
@@ -253,7 +253,7 @@ func Collect(manifest ProbeManifest, escalate bool) ProbeSnapshot {
 			}
 			recordSymlink(snapshot.Symlinks, match)
 			if _, exists := snapshot.Files[match]; !exists {
-				c.collectPath(&snapshot, match, false, false)
+				c.collectPath(&snapshot, match, globBase(pattern), false, false)
 			}
 		}
 		c.followLinkedTrees(&snapshot, pattern, matches, false)
@@ -275,7 +275,7 @@ func Collect(manifest ProbeManifest, escalate bool) ProbeSnapshot {
 			}
 			recordSymlink(snapshot.Symlinks, match)
 			if _, exists := snapshot.Files[match]; !exists {
-				c.collectPath(&snapshot, match, true, false)
+				c.collectPath(&snapshot, match, globBase(pattern), true, false)
 			}
 		}
 		c.followLinkedTrees(&snapshot, pattern, matches, true)
@@ -438,10 +438,18 @@ func expandPaths(paths []string, homes []UserHome) []string {
 // files over maxFileContentBytes, and once the snapshot's total content budget
 // is spent — enough for adapters that only need presence or permissions.
 func (c *collector) collectFile(path string, metadataOnly bool) FileEntry {
-	return c.collectFileLimit(path, metadataOnly, maxFileContentBytes)
+	return c.collectFileLimit(path, path, metadataOnly, maxFileContentBytes)
 }
 
-func (c *collector) collectFileLimit(path string, metadataOnly bool, limit int64) FileEntry {
+// globBase is the static part of a glob, before its first wildcard: the
+// directory VASO asked for, below which a skill tree's own names begin.
+func globBase(pattern string) string {
+	base, _ := doublestar.SplitPattern(filepath.ToSlash(pattern))
+	return filepath.FromSlash(base)
+}
+
+// base is the part of path VASO named (see escapesToSink).
+func (c *collector) collectFileLimit(path, base string, metadataOnly bool, limit int64) FileEntry {
 	info, err := os.Stat(path)
 	if err != nil {
 		return FileEntry{Exists: false, Denied: os.IsPermission(err)}
@@ -462,6 +470,9 @@ func (c *collector) collectFileLimit(path string, metadataOnly bool, limit int64
 		return omitted("special")
 	case metadataOnly:
 		return omitted("metadata")
+	// Before size: not even the head of a file behind such a link is shipped
+	case escapesToSink(path, base):
+		return omitted("sensitive")
 	case assetOnly:
 		return omitted("asset")
 	case info.Size() > limit:
@@ -534,14 +545,14 @@ func jsonSize(s string) int64 {
 // collectPath records p as a directory (mode, plus its listing when listDir)
 // or as a file. Directories used to be stored as file entries (os.ReadFile
 // fails, Exists+Mode kept), which made them look like files remotely.
-func (c *collector) collectPath(snapshot *ProbeSnapshot, p string, metadataOnly, listDir bool) {
+func (c *collector) collectPath(snapshot *ProbeSnapshot, p, base string, metadataOnly, listDir bool) {
 	info, err := os.Stat(p)
 	if err == nil {
 		recordOwner(snapshot, p, info)
 	}
 	if err == nil && info.IsDir() {
 		snapshot.DirectoryModes[p] = int(info.Mode().Perm())
-		if listDir {
+		if listDir && !escapesToSink(p, base) {
 			if listing := collectDirectory(p, snapshot.Symlinks); listing != nil {
 				snapshot.Directories[p] = listing
 			}
@@ -552,7 +563,7 @@ func (c *collector) collectPath(snapshot *ProbeSnapshot, p string, metadataOnly,
 	if listDir && configExtensions[strings.ToLower(filepath.Ext(p))] {
 		limit = maxConfigContentBytes // a config named explicitly, not a glob match
 	}
-	snapshot.Files[p] = c.collectFileLimit(p, metadataOnly, limit)
+	snapshot.Files[p] = c.collectFileLimit(p, base, metadataOnly, limit)
 }
 
 // recordAncestorModes stats each parent directory of every collected file and
@@ -663,6 +674,11 @@ func (c *collector) followFrom(snapshot *ProbeSnapshot, pattern string, matches 
 		if err != nil || visited[real] || relatedToAny(real, roots) {
 			continue
 		}
+		// A link into ~/.ssh, ~/.aws… is reported by SKL-013 from its target;
+		// what it points to is never walked or shipped (nor locally: skill-walk.ts)
+		if escapesToSink(m, globBase(pattern)) {
+			continue
+		}
 		if st, err := os.Stat(m); err != nil || !st.IsDir() {
 			continue // a file link was collected (followed) by the glob itself
 		}
@@ -677,7 +693,7 @@ func (c *collector) followFrom(snapshot *ProbeSnapshot, pattern string, matches 
 			}
 			recordSymlink(snapshot.Symlinks, sm)
 			if _, exists := snapshot.Files[sm]; !exists {
-				c.collectPath(snapshot, sm, metadataOnly, false)
+				c.collectPath(snapshot, sm, globBase(pattern), metadataOnly, false)
 			}
 		}
 		c.followFrom(snapshot, pattern, sub, append(append([]string{}, roots...), real), visited, depth+1, metadataOnly)
@@ -1117,7 +1133,7 @@ func (c *collector) collectUnlistableSkills(snapshot *ProbeSnapshot, pattern str
 		for _, name := range []string{"SKILL.md", "package.json"} {
 			p := filepath.Join(dir, name)
 			if _, exists := snapshot.Files[p]; !exists {
-				c.collectPath(snapshot, p, false, false)
+				c.collectPath(snapshot, p, root, false, false)
 			}
 		}
 	}

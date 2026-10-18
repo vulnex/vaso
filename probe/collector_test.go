@@ -72,8 +72,8 @@ func TestCollectPathAllowsLargeExplicitConfigs(t *testing.T) {
 	}
 	snap := ProbeSnapshot{Files: map[string]FileEntry{}, Directories: map[string][]string{}, DirectoryModes: map[string]int{}}
 	c := &collector{budget: 64 << 20}
-	c.collectPath(&snap, cfg, false, true) // explicit filePath
-	c.collectPath(&snap, bin, false, true) // explicit, but not a config
+	c.collectPath(&snap, cfg, cfg, false, true) // explicit filePath
+	c.collectPath(&snap, bin, bin, false, true) // explicit, but not a config
 	if e := snap.Files[cfg]; e.ContentOmitted || len(e.Content) != len(big) {
 		t.Fatalf("explicit config over 5 MiB not collected: omitted=%v len=%d", e.ContentOmitted, len(e.Content))
 	}
@@ -81,7 +81,7 @@ func TestCollectPathAllowsLargeExplicitConfigs(t *testing.T) {
 		t.Fatalf("explicit non-config over 5 MiB should stay omitted")
 	}
 	glob := ProbeSnapshot{Files: map[string]FileEntry{}, Directories: map[string][]string{}, DirectoryModes: map[string]int{}}
-	c.collectPath(&glob, cfg, false, false) // glob match
+	c.collectPath(&glob, cfg, cfg, false, false) // glob match
 	if !glob.Files[cfg].ContentOmitted {
 		t.Fatalf("glob match over 5 MiB should stay omitted")
 	}
@@ -103,8 +103,8 @@ func TestCollectPathRecordsDirectoriesAndAncestors(t *testing.T) {
 	}
 	snap := ProbeSnapshot{Files: map[string]FileEntry{}, Directories: map[string][]string{}, DirectoryModes: map[string]int{}}
 	c := &collector{budget: 1 << 20}
-	c.collectPath(&snap, dataDir, false, true) // a directory requested as a "file path"
-	c.collectPath(&snap, file, false, false)
+	c.collectPath(&snap, dataDir, dataDir, false, true) // a directory requested as a "file path"
+	c.collectPath(&snap, file, file, false, false)
 	recordAncestorModes(&snap)
 
 	if _, isFile := snap.Files[dataDir]; isFile {
@@ -458,10 +458,10 @@ func TestOmittedReasonAndJSONBudget(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := &collector{budget: 1 << 20}
-	if e := c.collectFileLimit(big, false, 1024); e.Omitted != "size" || !e.ContentOmitted {
+	if e := c.collectFileLimit(big, big, false, 1024); e.Omitted != "size" || !e.ContentOmitted {
 		t.Fatalf("over the per-file cap: %+v", e)
 	}
-	if e := c.collectFileLimit(big, true, 1<<20); e.Omitted != "metadata" {
+	if e := c.collectFileLimit(big, big, true, 1<<20); e.Omitted != "metadata" {
 		t.Fatalf("metadata-only: %+v", e)
 	}
 
@@ -471,12 +471,12 @@ func TestOmittedReasonAndJSONBudget(t *testing.T) {
 		t.Fatal(err)
 	}
 	c = &collector{budget: 1000}
-	c.collectFileLimit(esc, false, 1<<20)
+	c.collectFileLimit(esc, esc, false, 1<<20)
 	if c.budget != 1000-600 {
 		t.Fatalf("budget charged %d, want 600", 1000-c.budget)
 	}
 	c.budget = 50
-	if e := c.collectFileLimit(esc, false, 1<<20); e.Omitted != "budget" || !c.truncated {
+	if e := c.collectFileLimit(esc, esc, false, 1<<20); e.Omitted != "budget" || !c.truncated {
 		t.Fatalf("budget exhausted: %+v truncated=%v", e, c.truncated)
 	}
 }
@@ -496,7 +496,7 @@ func TestOmittedSkillFileShipsItsHead(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := &collector{budget: 1 << 20, inSkillTree: true}
-	e := c.collectFileLimit(bin, false, 1024)
+	e := c.collectFileLimit(bin, bin, false, 1024)
 	if e.Omitted != "size" || e.Head == "" {
 		t.Fatalf("omitted skill file without head: %+v", e)
 	}
@@ -506,7 +506,7 @@ func TestOmittedSkillFileShipsItsHead(t *testing.T) {
 	}
 	// outside a skill tree nothing is shipped
 	c.inSkillTree = false
-	if e := c.collectFileLimit(bin, false, 1024); e.Head != "" {
+	if e := c.collectFileLimit(bin, bin, false, 1024); e.Head != "" {
 		t.Fatalf("head shipped outside a skill tree: %+v", e)
 	}
 }

@@ -240,7 +240,7 @@ func TestMetadataOnlyFifoIsSpecial(t *testing.T) {
 		t.Skip(err)
 	}
 	c := &collector{budget: 1 << 20}
-	if e := c.collectFileLimit(fifo, true, 1<<20); e.Omitted != "special" {
+	if e := c.collectFileLimit(fifo, fifo, true, 1<<20); e.Omitted != "special" {
 		t.Fatalf("metadata-only FIFO recorded as %+v", e)
 	}
 }

@@ -56,7 +56,7 @@ async function knownOverLimit(fs: FSProvider, path: string): Promise<boolean> {
 function omittedFromSnapshot(fs: FSProvider, err: unknown): ScanLimitError['reason'] | undefined {
   if (fs.kind !== 'snapshot' || !(err instanceof Error) || !err.message.includes('content not collected')) return undefined;
   if (err.message.includes('content budget')) return 'budget';
-  if (err.message.includes('asset') || err.message.includes('metadata') || err.message.includes('regular file')) return 'omitted';
+  if (err.message.includes('asset') || err.message.includes('metadata') || err.message.includes('regular file') || err.message.includes('never shipped')) return 'omitted';
   return 'size'; // the per-file cap — or a probe < 1.3.1, which doesn't say
 }
 

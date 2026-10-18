@@ -79,8 +79,9 @@ export interface FileEntry {
   /** Exists, but content was deliberately not collected (size cap, content
    *  budget, binary asset, or a metadata-only glob). */
   contentOmitted?: boolean;
-  /** Why the content was omitted (probe ≥ 1.3.1). */
-  omitted?: 'size' | 'budget' | 'asset' | 'metadata' | 'special';
+  /** Why the content was omitted (probe ≥ 1.3.1; `sensitive` ≥ 1.4.0: reached
+   *  through a symlink into a credential store or shell startup file). */
+  omitted?: 'size' | 'budget' | 'asset' | 'metadata' | 'special' | 'sensitive';
   /** First bytes (base64) of a skill-tree file omitted for size or budget
    *  (probe ≥ 1.3.1) — where an executable header sits. */
   head?: string;
