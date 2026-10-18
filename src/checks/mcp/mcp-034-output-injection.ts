@@ -128,8 +128,14 @@ export const mcp034 = defineCheck({
         if (!python && descriptionLines.has(i + 1)) continue;
         const decoded = python ? decodeUnicodeEscapes(lines[i]) : lines[i];
         // A quoted constant naming one invisible character (`split('\u200b')`).
-        const text = decoded.replace(/(["'`])([^"'`]{1,8})\1/gu, (m, _q: string, body: string) => (isInvisibleConstant(body) ? '' : m));
+        let text = decoded.replace(/(["'`])([^"'`]{1,8})\1/gu, (m, _q: string, body: string) => (isInvisibleConstant(body) ? '' : m));
         if (isCharacterTable(text)) continue;
+        // Minified bundles inline whole codepage tables (iconv-lite's
+        // windows-1255 has U+200E/U+200F) on a line full of other code, so
+        // the line as a whole doesn't look like a table — judge each literal
+        if (!python) {
+          text = text.replace(/(["'`])((?:\\.|(?!\1)[^\\\n])*)\1/gu, (m, _q: string, body: string) => (isCharacterTable(body) ? '' : m));
+        }
         const invisible = hiddenCharacters(text);
         if (invisible.length === 0 || ownedByDescription(decoded.trim()) || ownedByDescription(foldWhitespace(decoded))) continue;
         hiddenAt.set(i + 1, invisible);
