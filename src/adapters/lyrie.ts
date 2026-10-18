@@ -143,9 +143,11 @@ async function tryLoad(path: string, fs: FSProvider): Promise<ParsedConfig | und
 /**
  * Bun auto-loads, in increasing precedence: `.env`, `.env.<NODE_ENV>`,
  * `.env.local` (skipped when NODE_ENV=test), `.env.<NODE_ENV>.local`
- * (bun.sh/docs/runtime/env); NODE_ENV defaults to development. The daemon's
- * launch environment isn't observable, so the mode is the NODE_ENV the base
- * `.env` sets, else Bun's default.
+ * (bun.sh/docs/runtime/env); NODE_ENV defaults to development. Bun picks
+ * the mode from the process environment before reading any file — a
+ * NODE_ENV set inside `.env` doesn't change it (verified with Bun 1.3.11,
+ * the version Lyrie pins). The daemon's launch environment isn't
+ * observable and Lyrie's launchers set none, so the mode is Bun's default.
  */
 export function lyrieEnvLayers(nodeEnv: string | undefined): string[] {
   const mode = nodeEnv?.trim().toLowerCase() || 'development';
@@ -202,8 +204,7 @@ export const lyrieAdapter: AgentAdapter = {
     for (const c of ordered) {
       const env = await tryLoad(join(c.dir, '.env'), fs);
       if (env) configFiles.push(env);
-      const nodeEnv = typeof env?.data.NODE_ENV === 'string' ? env.data.NODE_ENV : undefined;
-      for (const name of lyrieEnvLayers(nodeEnv)) {
+      for (const name of lyrieEnvLayers(undefined)) {
         const layer = await tryLoad(join(c.dir, name), fs);
         if (layer) configFiles.push(layer);
       }
