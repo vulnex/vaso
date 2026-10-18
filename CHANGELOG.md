@@ -121,6 +121,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - **MCP-034 reads the string literals on a line in one pass.** A line with an unterminated run of escaped quotes (`"\"\"…`) was retried from every quote (50 KB: 3 s → 0.3 s); the literals judged are unchanged.
 - **`mcp scan --source` on a Python file with long blank runs, and MCP-032 on a long whitespace run after `run(`, are linear** (100 KB: 6 s → 0.3 s each). The relative-import test that reads a Python server as a package matched `^\s*` across every following blank line; MCP-032's `exec([ "env" ])` pattern split the whitespace around an optional `[` every way.
 - **SKL-004's curl/wget-pipe patterns and MCP-035's rot13 decoder test are linear.** `curl` followed by a long space run, or a line of thousands of `curl`/`wget` words, took seconds per pattern at 100 KB; each now finishes in milliseconds and matches the same lines.
+- **The remaining slow line patterns are linear: the `Buffer.from(…)` decoder tests (MCP-035, SKL-002, OB-001), the socat reverse-shell pattern, the PowerShell download-and-execute pattern and the hidden-instruction tag test (MCP-024/034).** A line of thousands of `Buffer.from(`, `socat` or `iwr` words, a long space run after `iex`, or a run of `<system` tags inside unquoted attribute values took 0.4–6 s at 100 KB; each now finishes in milliseconds and matches the same text (checked against the previous patterns on random input).
 
 ## [1.3.1] - 2026-10-16
 

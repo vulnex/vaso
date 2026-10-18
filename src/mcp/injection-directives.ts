@@ -47,8 +47,12 @@ export const DIRECTIVE_PATTERNS: DirectivePattern[] = [
   // this off JS/JSON property keys (`instruction: "value"` → colon is followed by a quote,
   // not a capitalised word), so it only matches an imperative directive sentence.
   { re: /\b[Ii]nstructions?\s*:\s+[A-Z][a-z]/, label: 'directive prefix ("Instruction: …")' },
-  // A tag, optionally with attributes — not prose in angle brackets (`<system tmp>/cache`)
-  { re: /<\/?(?:important|system|instructions?)(?:\s+[\w:-]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>"']+))*\s*\/?>/i, label: 'hidden-instruction tag (<important>/<system>)' },
+  // A tag, optionally with attributes — not prose in angle brackets (`<system tmp>/cache`).
+  // A tag name inside an earlier tag's unquoted attribute value
+  // (`<system a=x<system b=…`) is skipped (the lookbehind): the earlier tag
+  // reaches the same place, so it matches whenever the later one would, and
+  // re-reading the attribute run from each was quadratic (100 KB: 2 s).
+  { re: /<\/?(?:important|system|instructions?)(?:(?!\s)|(?<!<\/?(?:important|system|instructions?)(?:\s+[\w:-]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>"']+))*?\s+[\w:-]+\s*=\s*[^\s>"']*<\/?(?:important|system|instructions?)))(?:\s+[\w:-]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>"']+))*\s*\/?>/i, label: 'hidden-instruction tag (<important>/<system>)' },
   // <secret>/<hidden> are also CLI usage placeholders (`--client-secret <secret>`);
   // as a hiding tag they open a block (end of line) or wrap text up to a close tag.
   { re: /<(secret|hidden)>(?:\s*$|[^<]*<\/\1>)|<\/(?:secret|hidden)>\s*$/im, label: 'hidden-instruction tag (<secret>/<hidden>)' },

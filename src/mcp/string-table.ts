@@ -23,11 +23,15 @@ interface Decoder {
 
 type Encoding = 'base64' | 'hex' | 'rot13' | 'charcodes';
 
+// `Buffer.from(` is tried only when no earlier one in the same argument run
+// (no `,`/`)` between) precedes it (the lookbehind): `[^,)]*` from either
+// stops at the same `,`, so later ones decide nothing new and retrying each
+// was quadratic on a line of thousands of `Buffer.from(` (100 KB: 0.4 s).
 const DECODERS: Decoder[] = [
-  { re: /Buffer\.from\s*\([^,)]*,\s*['"`](?:base64|base64url)['"`]\s*\)/, label: "Buffer.from(…, 'base64')", encodings: ['base64'] },
-  { re: /Buffer\.from\s*\([^,)]*,\s*['"`]hex['"`]\s*\)/, label: "Buffer.from(…, 'hex')", encodings: ['hex'] },
+  { re: /Buffer\.from\s*\((?<!Buffer\.from\s*\([^,)]*?Buffer\.from\s*\()[^,)]*,\s*['"`](?:base64|base64url)['"`]\s*\)/, label: "Buffer.from(…, 'base64')", encodings: ['base64'] },
+  { re: /Buffer\.from\s*\((?<!Buffer\.from\s*\([^,)]*?Buffer\.from\s*\()[^,)]*,\s*['"`]hex['"`]\s*\)/, label: "Buffer.from(…, 'hex')", encodings: ['hex'] },
   // Encoding named by a variable (`const ENC = "base" + "64"`) — any of them.
-  { re: /Buffer\.from\s*\([^,)]*,\s*[A-Za-z_$][\w$.]*\s*\)\s*\.toString\s*\(/, label: 'Buffer.from(…, <encoding>)', encodings: ['base64', 'hex'] },
+  { re: /Buffer\.from\s*\((?<!Buffer\.from\s*\([^,)]*?Buffer\.from\s*\()[^,)]*,\s*[A-Za-z_$][\w$.]*\s*\)\s*\.toString\s*\(/, label: 'Buffer.from(…, <encoding>)', encodings: ['base64', 'hex'] },
   { re: /\batob\s*\(/, label: 'atob()', encodings: ['base64'] },
   // Arguments bounded, without a separate leading-space run (`\(\s*[^)]*`
   // split a long space run every way: 100 KB, 11 s)

