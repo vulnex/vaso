@@ -109,13 +109,21 @@ function maskUrl(url: string): string {
  */
 function trimUrlTail(url: string): string {
   const pairs: Record<string, string> = { ')': '(', ']': '[', '}': '{' };
+  // Bracket and quote counts of url[0, end), kept as the tail is trimmed:
+  // recounting the rest of the URL per trimmed character was quadratic
+  // (50 KB of `)`: 27 s)
+  const count: Record<string, number> = { '(': 0, ')': 0, '[': 0, ']': 0, '{': 0, '}': 0, "'": 0 };
+  for (const ch of url) if (ch in count) count[ch]++;
   let end = url.length;
   while (end > 0) {
     const c = url[end - 1];
-    const body = url.slice(0, end - 1);
     if (c === '.' || c === ',') { end--; continue; }
-    if (c === "'" && !body.includes("'")) { end--; continue; }
-    if (c in pairs && body.split(pairs[c]).length - 1 < body.split(c).length) { end--; continue; }
+    // c itself is in the count; the text before it isn't
+    if ((c === "'" && count["'"] === 1) || (c in pairs && count[pairs[c]] < count[c])) {
+      count[c]--;
+      end--;
+      continue;
+    }
     break;
   }
   return url.slice(0, end);
@@ -126,7 +134,9 @@ function trimUrlTail(url: string): string {
 // long `a-a-a…` token from every word boundary (quadratic)
 const URL_IN_TEXT = /\b[a-z][a-z0-9+.-]{0,31}:\/\/[^\s"<>]+/gi;
 /** `Authorization: Bearer x`, `X-Api-Key: x`, `Cookie: x` header lines. */
-const SECRET_HEADER = /(^|[\s"'=])((?:proxy-)?authorization|cookie|x-[\w-]*(?:key|token|secret|auth|session)[\w-]*|api[_-]?key)(\s*:\s*)((?:bearer|basic|token|bot|digest)\s+)?([^\s"',;]+)/gi;
+// The keyword is found by a lookahead: `[\w-]*` on both sides of it
+// backtracked over every split of a long `x-keykey…` run (quadratic)
+const SECRET_HEADER = /(^|[\s"'=])((?:proxy-)?authorization|cookie|x-(?=[\w-]*?(?:key|token|secret|auth|session))[\w-]*|api[_-]?key)(\s*:\s*)((?:bearer|basic|token|bot|digest)\s+)?([^\s"',;]+)/gi;
 /** `NAME=value` where NAME looks like a credential (env lines, `docker -e`, `env K=V cmd`, inline `sh -c`). */
 const SECRET_ASSIGN = /(^|[\s"'`(;&|:$])([A-Za-z_][A-Za-z0-9_]*)\s*=\s*("[^"]*"|'[^']*'|[^\s"'`;&|)]+)/g;
 /** `--token=x`, `--token x`, `--api-key x`, `--key=x`, `--pat=x`, `--password x`. */

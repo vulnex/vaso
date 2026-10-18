@@ -101,6 +101,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - **`--rules <file>` that can't be read exits 2** like other unreadable inputs; it only warned and scanned without the rules.
 - **Fixes write keys whose names contain a dot.** A ZeroClaw risk profile named `prod.v2` (`[risk_profiles."prod.v2"]`) or a Grok Bot account scope with a dot in its key was split at the dot: ZC-005/006/011/014 added a new `[risk_profiles.prod.v2]` table and reported the fix applied on every run while the real profile kept `level = "full"`, and GB-001 wrote a nested `"dot": {"ted": …}` object. The config writers take the key path as segments; TOML keys are written quoted, and the edited file loads in `zeroclaw config list`.
 - **A few kilobytes of JavaScript can no longer exhaust memory in the parser.** Some inputs (3 KB of `a:a:a:…` labels) made the parser's error recovery build a million error objects — gigabytes of heap and an out-of-memory crash in `skill audit`, `mcp scan --source` and `scan`. Recovery now stops after a bounded number of errors; a statement that reaches it is set aside like one that overflows the parser, reported by SKL-002/MCP-035 as a warning, and the rest of the file is analysed (3 KB: 6 s and 2.9 GB → 0.4 s and 107 MB).
+- **Masking credentials in reports is linear again.** An MCP server URL ending in thousands of `)` and an argument with a long `x-keykey…` header-like name made `mcp scan` and `mcp list` quadratic (50 KB: 27 s; 200 KB: 15 s → 0.2 s). What is masked is unchanged.
 
 ## [1.3.1] - 2026-10-16
 

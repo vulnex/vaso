@@ -177,3 +177,32 @@ describe('masking: bare well-known tokens and --auth/--bearer values', () => {
     }
   });
 });
+
+describe('masking cost (dt15 P2/P8)', () => {
+  it('trims a URL tail of thousands of brackets in linear time, with the same result', async () => {
+    const { maskCredentialsInText } = await import('./serialize.js');
+    const start = Date.now();
+    const out = maskCredentialsInText(`see https://example.com/a${')'.repeat(100_000)}`);
+    expect(Date.now() - start).toBeLessThan(1000);
+    expect(out).toBe(`see https://example.com/a${')'.repeat(100_000)}`);
+    // trailing punctuation is still trimmed before masking; paired brackets are kept
+    const paired = maskCredentialsInText('https://example.com/wiki/A_(b)?token=abc123def456),');
+    expect(paired).toContain('A_(b)');
+    expect(paired).not.toContain('abc123def456');
+    expect(paired.endsWith('),')).toBe(true);
+    const quoted = maskCredentialsInText("'https://u:hunter2pass@example.com/'");
+    expect(quoted).not.toContain('hunter2pass');
+    expect(quoted.endsWith("/'")).toBe(true);
+  });
+
+  it('matches x-…key… header names in linear time and still masks them', async () => {
+    const { maskCredentialsInText } = await import('./serialize.js');
+    const start = Date.now();
+    maskCredentialsInText(` x-${'key'.repeat(70_000)}`);
+    maskCredentialsInText(` x-${'a'.repeat(200_000)}: v`);
+    expect(Date.now() - start).toBeLessThan(1000);
+    expect(maskCredentialsInText('X-Goog-Api-Key: AIzaFAKEFAKE123')).not.toContain('AIzaFAKEFAKE123');
+    expect(maskCredentialsInText('x-session-id: s3cr3tvalue99')).not.toContain('s3cr3tvalue99');
+    expect(maskCredentialsInText('x-request-id: 1234abcd')).toContain('1234abcd');
+  });
+});
