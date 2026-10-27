@@ -122,6 +122,7 @@ Any other key is an error (exit 2) — a misspelt `identity` would otherwise be 
 - **OpenClaw `$include` files** outside what the probe collects: it collects the `*.json5` files under the config directory (`~/.openclaw`, `~/.clawdbot`, `~/.openclaw-<profile>`). An include with another extension (`./gateway.json`), or one under an `OPENCLAW_INCLUDE_ROOTS` root outside the config directory, is reported as `CONFIG-LOAD` "not collected by the remote probe".
 - **An OpenShell gateway TOML redirected** by `OPENSHELL_GATEWAY_CONFIG` in `gateway.env` to a location other than the defaults and NemoClaw's layout (`CONFIG-LOAD`).
 - **Environment variables**: the probe ships only the variables adapters read (for example `HERMES_*`, `TIRITH_ENABLED`), with credential values redacted. A Hermes `config.yaml` `${VAR}` reference resolves from `~/.hermes/.env` on both, but one only the shell environment defines resolves only on a local scan.
+- **Secrets in collected config files** never leave the host (probe ≥ 1.4.0). In `.env` files, settings JSON/YAML/TOML, instruction files and MCP configs, the probe replaces every API key, token or password it finds (known key formats, values under credential-named keys and `--token`-style arguments, URL passwords and `?api_key=` parameters, private-key bodies) with a stand-in of the same length and shape: the first 8 and last 4 characters stay, the rest is random. Checks reach the same verdict on it, and reports show the same masked value as a local scan. Placeholders (`sk-...`, `your-api-key`), references (`${OPENAI_API_KEY}`, `op://…`) and weak defaults (`changeme`) are kept as they are — they are what the checks report. Skill trees are collected unchanged (IOC checks hash them).
 - Conversation and history stores (Codex sessions, ChatGPT conversations, Gemini chats, Copilot history, editor `state.vscdb`) and token stores are collected for their permissions only, never their content; a Grok Bot `.deb` that has never run is versioned from its package metadata on local scans only.
 
 ### `vaso detect`
@@ -215,6 +216,7 @@ vaso fix [options]
 | `--dry-run` | Preview fixes without applying them |
 | `-y, --yes` | Apply all fixes without prompting |
 | `--rollback [backup]` | Undo the last fix run; run it again to undo the one before. Name a backup (from `~/.vaso/backups/`, owner-only) to restore that one |
+| `--no-color` | Disable colored output |
 
 When neither `--yes` nor `--dry-run` is set, VASO enters **interactive mode** and prompts for each fixable finding:
 

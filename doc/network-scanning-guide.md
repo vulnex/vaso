@@ -90,7 +90,7 @@ vaso scan --host deploy@host --sudo
 |------|-------------|---------|
 | `--host <user@host[:port]>` | Remote target (repeatable) | — |
 | `--inventory <path>` | YAML file listing hosts to scan | — |
-| `--ssh-key <path>` | SSH identity file (for inventory hosts, used only where the entry sets no `identity`) | System default |
+| `--ssh-key <path>` | SSH identity file (for inventory hosts, used only where the entry sets no `identity`). A key file that doesn't exist or can't be read stops the scan (exit 2) instead of falling back to other keys | System default |
 | `--ssh-timeout <seconds>` | Per-attempt connection timeout | 60 |
 | `--ssh-retries <n>` | Additional SSH attempts after the first failure | 0 |
 | `--parallel <n>` | Max hosts to scan concurrently | 5 |
