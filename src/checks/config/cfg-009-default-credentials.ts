@@ -1,7 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 
-const WEAK_PATTERNS = [
+export const WEAK_PATTERNS = [
   /\bpassword\b/i,
   /\b(admin|root|test|demo|default|changeme|password123|12345|qwerty)\b/i,
   // Values copied from documentation and never replaced:
