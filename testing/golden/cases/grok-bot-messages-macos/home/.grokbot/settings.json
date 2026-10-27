@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "accountScopes": {},
+  "activeAccountScope": "1111111111111111111111111111111111111111111111111111111111111111",
+  "autoUpdateWhenIdle": true,
+  "botColorInChatEnabled": false,
+  "egressTunnelEnabled": true,
+  "hasSeenOnboarding": true,
+  "localEgressAllowed": true,
+  "localToolPermission": "always",
+  "mcpBoxServers": [],
+  "mcpCustomInstructions": {},
+  "mcpCustomInstructionsByServerId": {},
+  "mcpDisabledToolsByServerId": {},
+  "messagesEnabled": true,
+  "webauthnProxyEnabled": true,
+  "autoReviewInstructions": {
+    "isEnabled": false,
+    "allowInstructions": [],
+    "blockInstructions": []
+  },
+  "toolPermissions": {
+    "scopes": {
+      "mcp:gmail": {
+        "writes": "always_allow"
+      }
+    }
+  }
+}

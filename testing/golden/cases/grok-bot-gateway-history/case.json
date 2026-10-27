@@ -1,6 +1,6 @@
 {
   "agent": "grok-bot",
-  "source": "Grok Bot 0.71.2 defaults plus the record the app writes after connecting through SAND_HOST_GATEWAY_URL (.env-descriptor-account-bindings.json, version 1, sha256 hex bindings) and updateTrackOverride \"nightly\", which 0.71.2 coerces to stable — shapes from the 0.71.2 app.asar",
+  "source": "Grok Bot 0.71.2 defaults plus the record the app writes after connecting through SAND_HOST_GATEWAY_URL (.env-descriptor-account-bindings.json, version 1, sha256 hex bindings) and updateTrackOverride \"nightly\", which 0.71.2 coerces to stable — shapes from the 0.71.2 app.asar (user data under both the macOS and the Linux location)",
   "clean": true,
   "fail": {
     "GB-012": "info"
@@ -20,6 +20,10 @@
     "Library/Application Support/Grok Bot/sand-secrets.json": "600",
     "Library/Application Support/Grok Bot/desktop-status.json": "600",
     "Library/Application Support/Grok Bot/.env-descriptor-account-bindings.json": "600",
-    ".grokbot/.grokbot-data-root-v1": "600"
+    ".grokbot/.grokbot-data-root-v1": "600",
+    ".config/Grok Bot/.env-descriptor-account-bindings.json": "600",
+    ".config/Grok Bot/desktop-status.json": "600",
+    ".config/Grok Bot/sand-secrets.json": "600",
+    ".config/Grok Bot": "700"
   }
 }

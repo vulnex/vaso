@@ -1,0 +1,20 @@
+{
+  "agent": "grok-bot",
+  "source": "grok-bot-insecure home: Messages access is a warning on macOS, where it works (info elsewhere — covered by grok-bot-insecure)",
+  "fail": {
+    "GB-009": "warning"
+  },
+  "skipOn": [
+    "linux",
+    "win32"
+  ],
+  "modes": {
+    ".grokbot": "700",
+    ".grokbot/settings.json": "600",
+    ".grokbot/local-exec-daemon-credential.json": "600",
+    ".grokbot/local-computer-use-gate.json": "600",
+    "Library/Application Support/Grok Bot": "700",
+    "Library/Application Support/Grok Bot/sand-secrets.json": "600",
+    "Library/Application Support/Grok Bot/desktop-status.json": "600"
+  }
+}
