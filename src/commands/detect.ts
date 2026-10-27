@@ -148,7 +148,7 @@ interface HostDetectResult {
 }
 
 async function detectRemoteHosts(options: DetectCommandOptions, remoteValues: RemoteOptionValues): Promise<void> {
-  const { parseSSHTarget, executeRemoteProbeWithRetry, uniqueTargets } = await import('../transport/ssh.js');
+  const { parseSSHTarget, executeRemoteProbeWithRetry, uniqueTargets, assertIdentityFiles } = await import('../transport/ssh.js');
   const { parseInventory } = await import('../transport/inventory.js');
   const { buildProbeManifest } = await import('../core/manifest-builder.js');
   const { SnapshotFSProvider } = await import('../core/snapshot-fs-provider.js');
@@ -183,6 +183,7 @@ async function detectRemoteHosts(options: DetectCommandOptions, remoteValues: Re
 
   const deduped = uniqueTargets(targets);
   targets = deduped.targets;
+  await assertIdentityFiles(targets);
   for (const label of deduped.duplicates) console.error(chalk.yellow(`  ! ${label} is listed more than once — detecting it once`));
 
   if (targets.length === 0) {

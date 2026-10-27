@@ -116,7 +116,7 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
 
   // SSH remote scanning
   if (options.host || options.inventory) {
-    const { parseSSHTarget, uniqueTargets } = await import('../transport/ssh.js');
+    const { parseSSHTarget, uniqueTargets, assertIdentityFiles } = await import('../transport/ssh.js');
     const { parseInventory } = await import('../transport/inventory.js');
     const { scanMultipleHosts } = await import('../transport/multi-host.js');
     const { buildProbeManifest } = await import('../core/manifest-builder.js');
@@ -152,6 +152,7 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
 
     const deduped = uniqueTargets(targets);
     targets = deduped.targets;
+    await assertIdentityFiles(targets);
     for (const label of deduped.duplicates) log(chalk.yellow(`  ! ${label} is listed more than once — scanning it once`));
 
     if (targets.length === 0) {

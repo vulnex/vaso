@@ -8,9 +8,9 @@
 
 import { spawn, execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { writeFile, unlink } from 'node:fs/promises';
-import { openSync, readFileSync, closeSync, unlinkSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { writeFile, unlink, access } from 'node:fs/promises';
+import { openSync, readFileSync, closeSync, unlinkSync, constants } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ProbeSnapshot, ProbeManifest } from '../core/snapshot-types.js';
 import { resolveProbeBinary } from './probe-fetch.js';
@@ -111,7 +111,26 @@ export function assertSSHTargetParts(target: string, user: string, host: string,
   if (/[\s\u0000-\u001f\u007f]/.test(user + host)) throw bad('whitespace or control characters');
   // What's left of a malformed [ipv6]:port, or a second user@
   if (/[[\]@/]/.test(host)) throw bad(`invalid host "${host}"`);
+  // A host name, an IPv4 or IPv6 address (with a %zone): nothing else reaches ssh
+  if (!/^[A-Za-z0-9._:%-]+$/.test(host)) throw bad(`invalid host "${host}"`);
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw bad(`port must be 1–65535 (got ${String(port)})`);
+}
+
+/**
+ * Every --ssh-key / inventory `identity` is a readable file. ssh only warns
+ * about a missing one and goes on with the agent's or default keys, so a
+ * mistyped path would scan with credentials nobody chose.
+ */
+export async function assertIdentityFiles(targets: SSHTarget[]): Promise<void> {
+  for (const identity of new Set(targets.map(t => t.identity).filter((i): i is string => !!i))) {
+    const path = identity === '~' || identity.startsWith('~/') ? join(homedir(), identity.slice(1)) : identity;
+    try {
+      await access(path, constants.R_OK);
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code ?? 'unreadable';
+      throw new Error(`SSH key "${identity}" is not readable (${code})`);
+    }
+  }
 }
 
 /** Targets without repeats (same user, host and port); returns the dropped labels. */

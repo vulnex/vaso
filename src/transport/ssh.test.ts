@@ -1,5 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
-import { describeConnectFailure, parseProbeOutput, parseSSHTarget, uniqueTargets, withRetry } from './ssh.js';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { assertIdentityFiles, describeConnectFailure, parseProbeOutput, parseSSHTarget, uniqueTargets, withRetry } from './ssh.js';
 
 describe('parseProbeOutput', () => {
   const target = { user: 'u', host: 'h.test' };
@@ -31,6 +34,15 @@ describe('parseSSHTarget', () => {
     expect(() => parseSSHTarget('u ser@host')).toThrow(/whitespace/);
     expect(() => parseSSHTarget('u@192.0.2.1:99999')).toThrow(/port must be/);
     expect(() => parseSSHTarget('u@192.0.2.1:0')).toThrow(/port must be/);
+  });
+
+  it('rejects a host that is no host name or address, before ssh runs', () => {
+    for (const t of ['u@host;id', 'u@host$(id)', 'u@ho`st', "u@h'x", 'u@host|x']) {
+      expect(() => parseSSHTarget(t), t).toThrow(/invalid host/);
+    }
+    for (const t of ['u@agent-01.example.com', 'u@192.0.2.1', 'u@fe80::1%en0', 'u@[2001:db8::1]:2222', 'u@my_host']) {
+      expect(() => parseSSHTarget(t), t).not.toThrow();
+    }
   });
 
   it('dedupes repeated targets', () => {
@@ -202,5 +214,15 @@ describe('describeConnectFailure', () => {
   it('names other signals and exit codes', () => {
     expect(describeConnectFailure(t, null, 'SIGKILL', 60000)).toMatch(/terminated by SIGKILL/);
     expect(describeConnectFailure(t, 1, null, 60000)).toMatch(/failed \(ssh exit 1\)/);
+  });
+});
+
+describe('assertIdentityFiles', () => {
+  it('accepts readable keys and stops on a missing one instead of falling back to other keys', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'vaso-key-'));
+    const key = join(dir, 'id_test');
+    writeFileSync(key, 'not a real key', { mode: 0o600 });
+    await expect(assertIdentityFiles([{ user: 'u', host: 'h', port: 22, identity: key }, { user: 'u', host: 'g', port: 22 }])).resolves.toBeUndefined();
+    await expect(assertIdentityFiles([{ user: 'u', host: 'h', port: 22, identity: join(dir, 'nope') }])).rejects.toThrow(/SSH key ".*nope" is not readable \(ENOENT\)/);
   });
 });

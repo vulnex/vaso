@@ -230,6 +230,7 @@ program
   .option('--dry-run', 'show what would be fixed without making changes')
   .option('-y, --yes', 'apply all fixes without confirmation')
   .option('--rollback [backup]', 'undo the last fix run (again for the one before); or restore a named backup from ~/.vaso/backups')
+  .option('--no-color', 'disable colored output')
   .action(async (options) => {
     if (!validateAgentOption(options)) return;
     const { runFix } = await import('./commands/fix.js');
