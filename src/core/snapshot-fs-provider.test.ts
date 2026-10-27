@@ -128,6 +128,19 @@ describe('SnapshotFSProvider', () => {
   // ---------------------------------------------------------------------------
   // readdirEntries
   // ---------------------------------------------------------------------------
+  describe('prefix lookups', () => {
+    it('list in collection order and never match a sibling sharing the prefix', async () => {
+      const files: ProbeSnapshot['files'] = {};
+      for (const n of ['zeta', 'alpha', 'mid']) files[`/home/testuser/.agent/${n}.json`] = { exists: true, mode: 0o600, content: '{}' };
+      files['/home/testuser/.agent-other/x.json'] = { exists: true, mode: 0o600, content: '{}' };
+      files['/home/testuser/.agent/gone.json'] = { exists: false, mode: 0 };
+      const fs = new SnapshotFSProvider(makeSnapshot({ files, symlinks: { '/home/testuser/.agent/link': '/elsewhere' } }));
+      expect(await fs.readdir('/home/testuser/.agent')).toEqual(['zeta.json', 'alpha.json', 'mid.json', 'link']);
+      expect((await fs.readdirEntries('/home/testuser/.agent', { recursive: true })).map(e => e.name)).toEqual(['zeta.json', 'alpha.json', 'mid.json', 'link']);
+      await expect(fs.readdir('/home/testuser/.agen')).rejects.toThrow(/ENOENT/);
+    });
+  });
+
   describe('readdirEntries', () => {
     it('returns DirentInfo with correct isFile/isDirectory', async () => {
       const provider = new SnapshotFSProvider(

@@ -8,10 +8,19 @@ function stripTrailingSlash(name: string): string {
   return name.endsWith('/') ? name.slice(0, -1) : name;
 }
 
+/** A snapshot map's keys, sorted, with each key's position in the map. */
+interface KeyIndex {
+  keys: string[];
+  order: number[];
+}
+
+type IndexedMap = 'files' | 'directories' | 'directoryModes' | 'symlinks';
+
 export class SnapshotFSProvider implements FSProvider {
   readonly kind = 'snapshot' as const;
   readonly platform: Platform;
   private snapshot: ProbeSnapshot;
+  private indexes = new Map<IndexedMap, KeyIndex>();
 
   constructor(snapshot: ProbeSnapshot) {
     this.snapshot = snapshot;
@@ -75,20 +84,20 @@ export class SnapshotFSProvider implements FSProvider {
     const prefix = path.endsWith('/') ? path : path + '/';
     // Files the probe looked for but did not find are recorded with
     // exists: false — they must not appear in a synthesized listing.
-    for (const [filePath, entry] of Object.entries(this.snapshot.files)) {
-      if (entry.exists && filePath.startsWith(prefix)) {
+    for (const filePath of this.keysUnder('files', prefix)) {
+      if (this.snapshot.files[filePath].exists) {
         const relative = filePath.slice(prefix.length);
         const firstSegment = relative.split('/')[0];
         if (firstSegment) entries.add(firstSegment);
       }
     }
     const dirPaths = [
-      ...Object.keys(this.snapshot.directories),
-      ...Object.keys(this.snapshot.directoryModes ?? {}),
-      ...Object.keys(this.snapshot.symlinks ?? {}),
+      ...this.keysUnder('directories', prefix),
+      ...this.keysUnder('directoryModes', prefix),
+      ...this.keysUnder('symlinks', prefix),
     ];
     for (const dirPath of dirPaths) {
-      if (dirPath.startsWith(prefix) && dirPath !== path) {
+      if (dirPath !== path) {
         const relative = dirPath.slice(prefix.length);
         const firstSegment = relative.split('/')[0];
         if (firstSegment) entries.add(firstSegment);
@@ -335,17 +344,38 @@ export class SnapshotFSProvider implements FSProvider {
     return Array.isArray(listing);
   }
 
+  /**
+   * The keys of one snapshot map that start with prefix, in the map's own
+   * order. A sorted index (built once) makes this a binary search: walking
+   * every collected file per lookup cost seconds on a 10k-file snapshot.
+   */
+  private keysUnder(map: IndexedMap, prefix: string): string[] {
+    let index = this.indexes.get(map);
+    if (!index) {
+      const all = Object.keys(this.snapshot[map] ?? {});
+      const order = all.map((_, i) => i).sort((a, b) => (all[a] < all[b] ? -1 : all[a] > all[b] ? 1 : 0));
+      index = { keys: order.map(i => all[i]), order };
+      this.indexes.set(map, index);
+    }
+    const { keys, order } = index;
+    let lo = 0;
+    let hi = keys.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if (keys[mid] < prefix) lo = mid + 1;
+      else hi = mid;
+    }
+    const hits: number[] = [];
+    for (let i = lo; i < keys.length && keys[i].startsWith(prefix); i++) hits.push(i);
+    return hits.sort((a, b) => order[a] - order[b]).map(i => keys[i]);
+  }
+
   private hasChildPaths(path: string): boolean {
     const prefix = path.endsWith('/') ? path : path + '/';
-    for (const [key, entry] of Object.entries(this.snapshot.files)) {
-      // A file the probe was denied under this path proves the directory
-      // exists — it is there, just unreadable (chmod 000), as a local scan sees it
-      if (key.startsWith(prefix) && (entry.exists || entry.denied)) return true;
-    }
-    for (const [key, listing] of Object.entries(this.snapshot.directories)) {
-      if (key.startsWith(prefix) && Array.isArray(listing)) return true;
-    }
-    return false;
+    // A file the probe was denied under this path proves the directory
+    // exists — it is there, just unreadable (chmod 000), as a local scan sees it
+    if (this.keysUnder('files', prefix).some(k => this.snapshot.files[k].exists || this.snapshot.files[k].denied)) return true;
+    return this.keysUnder('directories', prefix).some(k => Array.isArray(this.snapshot.directories[k]));
   }
 
   private readdirRecursive(basePath: string): DirentInfo[] {
@@ -376,14 +406,15 @@ export class SnapshotFSProvider implements FSProvider {
       return false;
     };
 
-    for (const [filePath, file] of Object.entries(this.snapshot.files)) {
-      if (!filePath.startsWith(prefix) || !file.exists || behindLink(filePath)) continue;
+    for (const filePath of this.keysUnder('files', prefix)) {
+      const file = this.snapshot.files[filePath];
+      if (!file.exists || behindLink(filePath)) continue;
       results.push(entry(filePath, filePath in symlinks, file.omitted === 'special'));
     }
     // Links to directories have no file entry, and dangling or looping links
     // a non-existent one; a local listing shows them all as links
-    for (const linkPath of Object.keys(symlinks)) {
-      if (linkPath.startsWith(prefix) && !this.snapshot.files[linkPath]?.exists && !behindLink(linkPath)) {
+    for (const linkPath of this.keysUnder('symlinks', prefix)) {
+      if (!this.snapshot.files[linkPath]?.exists && !behindLink(linkPath)) {
         results.push(entry(linkPath, true));
       }
     }
