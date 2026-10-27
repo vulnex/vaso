@@ -6,6 +6,8 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-10-27
+
 ### Added
 
 - **Grok Bot support** (`-a grok-bot`, 13 checks GB-001–013). Grok Bot is a desktop app whose cloud agents can run commands on your computer through a local exec daemon. VASO detects the app (`/opt/Grok Bot`, `/Applications/Grok Bot.app`), its data root (`~/.grokbot`, `$SAND_DATA_ROOT`, `$SAND_USER_DATA_DIR`, pre-rename `~/.cursor/sand`) and its Electron user data (on Windows the pre-rename `%APPDATA%\Sand` while the app still runs from it), and reads the version from `desktop-status.json` — or, for a .deb that has never been launched, from its package metadata (local scans only). The checks follow the 0.71.2 settings schema and the app's permission engine:

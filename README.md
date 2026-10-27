@@ -21,10 +21,10 @@ VASO is distributed from GitHub. The npm name `vaso` is held by an unrelated pac
 curl -fsSL https://raw.githubusercontent.com/vulnex/vaso/main/install.sh | bash
 
 # Or install the prebuilt release tarball directly with npm
-curl -fsSLo /tmp/vaso.tgz https://github.com/vulnex/vaso/releases/download/v1.3.1/vaso-1.3.1.tgz && npm install -g /tmp/vaso.tgz
+curl -fsSLo /tmp/vaso.tgz https://github.com/vulnex/vaso/releases/download/v1.4.0/vaso-1.4.0.tgz && npm install -g /tmp/vaso.tgz
 
 # npm 12 refuses tarball URLs by default (allow-remote=none): download it first
-curl -fLO https://github.com/vulnex/vaso/releases/download/v1.3.1/vaso-1.3.1.tgz && npm install -g ./vaso-1.3.1.tgz
+curl -fLO https://github.com/vulnex/vaso/releases/download/v1.4.0/vaso-1.4.0.tgz && npm install -g ./vaso-1.4.0.tgz
 ```
 
 Requires Node.js 20+.
@@ -181,13 +181,13 @@ When multiple agents are detected, the **headline score is worst-case** — the 
 The simplest path — drop one step into any workflow:
 
 ```yaml
-- uses: vulnex/vaso@v1.3.1
+- uses: vulnex/vaso@v1.4.0
   with:
     fail-on: critical          # or warning, info, none
     format: sarif              # sarif, json, markdown, html, csv, junit, terminal
     # output: vaso-results.sarif  (default: vaso-results.<ext>)
     # agent: claude-code           (default: scan all detected agents)
-    # version: v1.3.1              (release tag)
+    # version: v1.4.0              (release tag)
     # upload-sarif: 'true'          (auto-uploads to Code Scanning)
 ```
 
@@ -197,7 +197,7 @@ The action installs the requested VASO version, runs the scan, and (when `format
 
 ```yaml
 - name: Install VASO
-  run: curl -fsSLo /tmp/vaso.tgz https://github.com/vulnex/vaso/releases/download/v1.3.1/vaso-1.3.1.tgz && npm install -g /tmp/vaso.tgz
+  run: curl -fsSLo /tmp/vaso.tgz https://github.com/vulnex/vaso/releases/download/v1.4.0/vaso-1.4.0.tgz && npm install -g /tmp/vaso.tgz
 
 - name: Run VASO scan
   run: vaso scan --format sarif -o results.sarif --fail-on critical

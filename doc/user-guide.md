@@ -11,10 +11,10 @@ VASO is distributed from GitHub. The npm name `vaso` is held by an unrelated pac
 curl -fsSL https://raw.githubusercontent.com/vulnex/vaso/main/install.sh | bash
 
 # Or install the prebuilt release tarball directly with npm
-curl -fsSLo /tmp/vaso.tgz https://github.com/vulnex/vaso/releases/download/v1.3.1/vaso-1.3.1.tgz && npm install -g /tmp/vaso.tgz
+curl -fsSLo /tmp/vaso.tgz https://github.com/vulnex/vaso/releases/download/v1.4.0/vaso-1.4.0.tgz && npm install -g /tmp/vaso.tgz
 
 # npm 12 refuses tarball URLs by default (allow-remote=none): download it first
-curl -fLO https://github.com/vulnex/vaso/releases/download/v1.3.1/vaso-1.3.1.tgz && npm install -g ./vaso-1.3.1.tgz
+curl -fLO https://github.com/vulnex/vaso/releases/download/v1.4.0/vaso-1.4.0.tgz && npm install -g ./vaso-1.4.0.tgz
 ```
 
 Requirements: Node.js 20 or later.
@@ -673,7 +673,7 @@ jobs:
           node-version: '20'
 
       - name: Install VASO
-        run: curl -fsSLo /tmp/vaso.tgz https://github.com/vulnex/vaso/releases/download/v1.3.1/vaso-1.3.1.tgz && npm install -g /tmp/vaso.tgz
+        run: curl -fsSLo /tmp/vaso.tgz https://github.com/vulnex/vaso/releases/download/v1.4.0/vaso-1.4.0.tgz && npm install -g /tmp/vaso.tgz
 
       - name: Run VASO scan
         run: vaso scan --format sarif -o results.sarif
