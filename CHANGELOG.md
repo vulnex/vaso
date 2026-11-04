@@ -6,6 +6,14 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **GB-014: Grok Bot Mac device tools** (info). Grok Bot 0.78 on macOS offers the cloud agent Reminders, Calendar, Contacts, Notes and Mail on this computer when its server enables them (mirrored into `~/.grokbot/mac-device-tools-gate.json`), and can send email from your Mail accounts once `macMailSendEnabled` is on. Each device-tool call asks first — "Always allow" covers only command and file actions — and each email needs its own approval, so this is reported as information; Mail sending without the device tools, or with local execution set to "never", is reported as inactive. Remote scans collect the gate file.
+
+### Changed
+
+- **GB-009 follows Grok Bot 0.78's Messages read and send switches.** 0.78 split Messages access into reading (`messagesReadEnabled`) and sending (`messagesSendEnabled`), both on by default. Reading needs no per-use prompt once Messages is on, so it stays a warning; send-only access asks for each recipient and is now info; both off passes. A non-boolean value in either switch, or in `macMailSendEnabled`, makes the app reject `settings.json`, and the Grok Bot checks now treat it the same way. Verified against Grok Bot 0.78.4 on macOS.
+
 ## [1.4.0] - 2026-10-27
 
 ### Added

@@ -13,7 +13,7 @@ import { loadConfigIfPresent } from './load-if-present.js';
  * agents run on a cloud computer and reach this machine through a local exec
  * daemon (shell commands, file reads/writes, MCP and AI-tool inventory) when
  * "Execution on Local Computer" allows it. Layout taken from the 0.71.2 Linux
- * .deb (app.asar):
+ * .deb and the 0.78.4 macOS .app (app.asar):
  * - data root (`~/.grokbot`, relocatable with SAND_DATA_ROOT or
  *   SAND_USER_DATA_DIR/sand-data; legacy `~/.cursor/sand`): settings.json,
  *   the sealed local-exec credential, approvals, standing grants, the
@@ -51,6 +51,9 @@ export const DATA_FILES = {
   standingGrants: 'local-tool-standing-grants.v1.json',
   approvals: 'local-tool-approvals.json',
   computerUseGate: 'local-computer-use-gate.json',
+  // macOS (0.78+): mirrors the server flag that offers Reminders, Calendar,
+  // Contacts, Notes and Mail to the cloud agent
+  macDeviceToolsGate: 'mac-device-tools-gate.json',
 } as const;
 
 /** Files in the Electron user-data dir that the checks read or stat. */
@@ -334,7 +337,7 @@ export const grokBotAdapter: AgentAdapter = {
     const root = `~/${GROK_BOT_DATA_DIR}`;
     const legacy = `~/${LEGACY_DATA_DIR.replace(/\\/g, '/')}`;
     const userDataDirs = [`~/.config/${USER_DATA_NAME}`, `~/Library/Application Support/${USER_DATA_NAME}`];
-    const settingsFiles = [DATA_FILES.settings, DATA_FILES.computerUseGate];
+    const settingsFiles = [DATA_FILES.settings, DATA_FILES.computerUseGate, DATA_FILES.macDeviceToolsGate];
     return {
       filePaths: [
         ...[root, legacy].flatMap(d => settingsFiles.map(f => `${d}/${f}`)),

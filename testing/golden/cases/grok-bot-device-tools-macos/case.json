@@ -1,0 +1,27 @@
+{
+  "agent": "grok-bot",
+  "source": "Grok Bot 0.78.4 macOS layout: Mac device tools gate on (mac-device-tools-gate.json), Mail sending on, Messages send-only (messagesReadEnabled false) \u2014 shapes from the 0.78.4 app.asar",
+  "fail": {
+    "GB-009": "info",
+    "GB-014": "info"
+  },
+  "skipOn": [
+    "linux",
+    "win32"
+  ],
+  "modes": {
+    ".grokbot": "700",
+    ".grokbot/settings.json": "600",
+    ".grokbot/local-exec-daemon-credential.json": "600",
+    ".grokbot/local-computer-use-gate.json": "600",
+    "Library/Application Support/Grok Bot": "700",
+    "Library/Application Support/Grok Bot/sand-secrets.json": "600",
+    "Library/Application Support/Grok Bot/desktop-status.json": "600",
+    ".grokbot/mac-device-tools-gate.json": "600",
+    ".grokbot/.grokbot-data-root-v1": "600"
+  },
+  "pass": [
+    "GB-001",
+    "GB-010"
+  ]
+}

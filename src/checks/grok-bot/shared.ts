@@ -3,8 +3,8 @@ import type { ParsedConfig, ScanContext } from '../../core/types.js';
 import { DATA_FILES, grokBotHome, resolveGrokBotUserDataDir } from '../../adapters/grok-bot.js';
 
 /**
- * Shared helpers for the Grok Bot checks. Semantics come from the 0.71.2
- * app.asar (settings schema in main-core, permission engine in the local exec
+ * Shared helpers for the Grok Bot checks. Semantics come from the 0.71.2 and
+ * 0.78.4 app.asar (settings schema in main-core, permission engine in the local exec
  * daemon):
  * - settings.json holds the active account's settings at top level and every
  *   other signed-in account's under `accountScopes.<scopeHash>`.
@@ -48,7 +48,11 @@ export function noSettingsReason(ctx: ScanContext): string {
 }
 
 const PERMISSION_KEYS = ['localToolPermission', 'localToolPermissionCeiling'];
-const BOOLEAN_KEYS = ['egressTunnelEnabled', 'egressTunnelPreference', 'localEgressAllowed', 'messagesEnabled', 'webauthnProxyEnabled', 'autoUpdateWhenIdle'];
+const BOOLEAN_KEYS = [
+  'egressTunnelEnabled', 'egressTunnelPreference', 'localEgressAllowed', 'messagesEnabled', 'webauthnProxyEnabled', 'autoUpdateWhenIdle',
+  // 0.78: Messages read/send capabilities and Mail sending
+  'messagesReadEnabled', 'messagesSendEnabled', 'macMailSendEnabled',
+];
 // The keys an account-scope block carries (the app strips any other key there
 // instead of rejecting the file)
 const SCOPED_BOOLEAN_KEYS = ['localEgressAllowed'];

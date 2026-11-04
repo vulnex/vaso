@@ -376,6 +376,7 @@ export const CHECK_AGENTIC_MAP: Record<string, OwaspAgenticId[]> = {
   'GB-011': ['AAI009'],
   'GB-012': ['AAI001', 'AAI002'],
   'GB-013': ['AAI002', 'AAI012'],
+  'GB-014': ['AAI002', 'AAI006'],
   'MM-001': ['AAI009'],
   'MM-002': ['AAI011'],
   'MM-003': ['AAI001'],

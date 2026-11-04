@@ -53,10 +53,10 @@ const check = (id: string) => grokBotChecks.find(c => c.id === id)!;
 const OPEN_PARENTS = { [HOME]: 0o755, [`${HOME}/.config`]: 0o755, '/home': 0o755, '/': 0o755 };
 
 describe('Grok Bot checks', () => {
-  it('exports 13 coding-agent checks scoped to grok-bot', () => {
-    expect(grokBotChecks).toHaveLength(13);
+  it('exports 14 coding-agent checks scoped to grok-bot', () => {
+    expect(grokBotChecks).toHaveLength(14);
     for (const c of grokBotChecks) {
-      expect(c.id).toMatch(/^GB-0(0[1-9]|1[0-3])$/);
+      expect(c.id).toMatch(/^GB-0(0[1-9]|1[0-4])$/);
       expect(c.category).toBe('coding-agent');
       expect(c.supportedAgents).toEqual(['grok-bot']);
     }
@@ -331,6 +331,21 @@ describe('GB-009 / GB-010 / GB-011', () => {
     expect((await check('GB-009').run(ctx([cfg({ messagesEnabled: false })]))).passed).toBe(true);
   });
 
+  it('GB-009 follows the 0.78 read/send capabilities', async () => {
+    const mac = makeFs({ platform: 'darwin' });
+    // Reading needs no prompt once Messages is on: warning
+    expect(await check('GB-009').run(ctx([cfg({ messagesEnabled: true, messagesSendEnabled: false })], mac)))
+      .toMatchObject({ passed: false, severity: 'warning', message: 'Grok Bot can read Messages from this computer' });
+    // Send-only asks per recipient: info
+    expect(await check('GB-009').run(ctx([cfg({ messagesEnabled: true, messagesReadEnabled: false })], mac)))
+      .toMatchObject({ passed: false, severity: 'info', message: 'Grok Bot can send Messages from this computer' });
+    expect((await check('GB-009').run(ctx([cfg({ messagesEnabled: true, messagesReadEnabled: false, messagesSendEnabled: false })], mac))).passed).toBe(true);
+    // The live 0.78.4 defaults: master switch off, capabilities on
+    expect((await check('GB-009').run(ctx([cfg({ messagesEnabled: false, messagesReadEnabled: true, messagesSendEnabled: true })], mac))).passed).toBe(true);
+    // A non-boolean capability makes the app reject the whole file
+    expect((await check('GB-009').run(ctx([cfg({ messagesEnabled: true, messagesReadEnabled: 'no' })], mac))).passed).toBe(true);
+  });
+
   it('GB-010 reports an open computer-use gate', async () => {
     const gate = `${ROOT}/local-computer-use-gate.json`;
     expect((await check('GB-010').run(ctx([], makeFs({ files: { [gate]: '{"isOn":false}' } })))).passed).toBe(true);
@@ -442,5 +457,32 @@ describe('GB-011 / GB-012 precision (dt17)', () => {
     expect(bad.passed).toBe(true);
     const ok = await check('GB-012').run(ctx([], makeFs({ env: { SAND_HTTPS_PROXY: 'http://proxy.example:8080' } })));
     expect(ok.passed).toBe(false);
+  });
+});
+
+describe('GB-014 Mac device tools (0.78)', () => {
+  const gate = `${ROOT}/mac-device-tools-gate.json`;
+  const on = { [gate]: '{"isOn":true}' };
+
+  it('passes when the gate is off and Mail sending is off, or off macOS', async () => {
+    expect((await check('GB-014').run(ctx([], makeFs({ platform: 'darwin' })))).passed).toBe(true);
+    expect((await check('GB-014').run(ctx([cfg({ macMailSendEnabled: false })], makeFs({ platform: 'darwin', files: { [gate]: '{"isOn":false}' } }))))).toMatchObject({ passed: true });
+    expect((await check('GB-014').run(ctx([cfg({ macMailSendEnabled: true })], makeFs({ files: on }))))).toMatchObject({ passed: true });
+  });
+
+  it('reports the open gate and Mail sending as info', async () => {
+    const r = await check('GB-014').run(ctx([cfg({ macMailSendEnabled: true })], makeFs({ platform: 'darwin', files: on })));
+    expect(r).toMatchObject({ passed: false, severity: 'info' });
+    expect(r.evidence?.map(e => e.snippet)).toEqual(['isOn: true', 'macMailSendEnabled: true']);
+    expect(r.evidence?.every(e => !e.mitigated)).toBe(true);
+    expect(r.message).toContain('send email');
+  });
+
+  it('Mail sending without the gate, or local execution "never", is inactive', async () => {
+    const noGate = await check('GB-014').run(ctx([cfg({ macMailSendEnabled: true })], makeFs({ platform: 'darwin' })));
+    expect(noGate).toMatchObject({ passed: false, severity: 'info' });
+    expect(noGate.evidence?.[0]).toMatchObject({ mitigated: true });
+    const never = await check('GB-014').run(ctx([cfg({ localToolPermission: 'never' })], makeFs({ platform: 'darwin', files: on })));
+    expect(never.evidence?.[0]).toMatchObject({ mitigated: true, detail: expect.stringContaining('"never"') });
   });
 });
