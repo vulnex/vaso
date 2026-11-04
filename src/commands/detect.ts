@@ -71,7 +71,7 @@ export async function runDetect(options: DetectCommandOptions): Promise<void> {
     // Snapshot-based detection
     if (options.snapshot) {
       const detected = await detectFromSnapshot(options);
-      if (detected) await renderResults(detected.installations, options, detected.host);
+      if (detected) await renderResults(detected.installations, options, detected.host, false);
       return;
     }
 
@@ -97,7 +97,7 @@ export async function runDetect(options: DetectCommandOptions): Promise<void> {
     }
 
     const { hostname } = await import('node:os');
-    await renderResults(installations, options, hostname());
+    await renderResults(installations, options, hostname(), true);
   } catch (err) {
     logError(chalk.red('Detection failed:'), err);
     process.exitCode = EXIT_USAGE;
@@ -271,7 +271,7 @@ async function detectRemoteHosts(options: DetectCommandOptions, remoteValues: Re
         const outPath = joinPath(options.outputDir, `${safeHost}.${ext}`);
         const text = options.format === 'json'
           ? toReportJson(outcome.installations)
-          : renderTerminal(outcome.installations, options.verbose);
+          : renderTerminal(outcome.installations, options.verbose, false);
         await writeFile(outPath, text, 'utf-8');
       } catch (err) {
         log(chalk.yellow(`  Warning: failed to write output for ${target.host}: ${(err as Error).message}`));
@@ -321,7 +321,7 @@ async function detectRemoteHosts(options: DetectCommandOptions, remoteValues: Re
         continue;
       }
 
-      sections.push(renderTerminal(hr.installations, options.verbose));
+      sections.push(renderTerminal(hr.installations, options.verbose, false));
     }
 
     const successCount = results.filter(r => !r.error).length;
@@ -338,10 +338,10 @@ async function detectRemoteHosts(options: DetectCommandOptions, remoteValues: Re
   }
 }
 
-async function renderResults(installations: AgentInstallation[], options: DetectCommandOptions, host: string): Promise<void> {
+async function renderResults(installations: AgentInstallation[], options: DetectCommandOptions, host: string, local: boolean): Promise<void> {
   const text = options.format === 'json'
     ? renderJson(installations)
-    : renderTerminal(installations, options.verbose);
+    : renderTerminal(installations, options.verbose, local);
   // --output-dir: the <dir>/<host>.<ext> layout multi-host detect uses
   const output = options.outputDir
     ? joinPath(options.outputDir, `${safeHostname(host)}.${options.format === 'json' ? 'json' : 'txt'}`)
@@ -353,18 +353,23 @@ function renderJson(installations: AgentInstallation[]): string {
   return toReportJson(installations);
 }
 
-function renderTerminal(installations: AgentInstallation[], verbose?: boolean): string {
+/**
+ * `local` is false for remote hosts and snapshots: getConfigPaths() resolves
+ * against the scanning machine's home and platform, so its paths would name
+ * this machine's files, not the target's.
+ */
+function renderTerminal(installations: AgentInstallation[], verbose: boolean | undefined, local: boolean): string {
   const lines: string[] = [];
 
   if (verbose) {
     const adapters = adapterRegistry.getAdapters();
-    lines.push(chalk.dim('Adapters checked:'));
+    lines.push(chalk.dim(local ? 'Adapters checked:' : 'Adapters checked (search paths are listed for local detection only):'));
     for (const adapter of adapters) {
       const found = installations.some(i => i.agent === adapter.agent);
-      const paths = adapter.getConfigPaths();
       const status = found ? chalk.green('found') : chalk.dim('not found');
       lines.push(chalk.dim(`  ${adapter.displayName}: ${status}`));
-      for (const p of paths) {
+      if (!local) continue;
+      for (const p of adapter.getConfigPaths()) {
         lines.push(chalk.dim(`    ${p}`));
       }
     }

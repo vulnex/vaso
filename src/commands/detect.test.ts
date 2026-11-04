@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runDetect } from './detect.js';
@@ -261,5 +261,37 @@ describe('runDetect', () => {
     expect(output).toContain('OpenClaw');
     expect(output).toContain('/home/user/.openclaw/openclaw.json');
     expect(output).toContain('found');
+  });
+
+  it('verbose mode on a snapshot lists adapters without the scanning machine\'s paths', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'vaso-detect-snap-'));
+    try {
+      const file = join(dir, 'host.json');
+      await writeFile(file, JSON.stringify({
+        version: 1, hostname: 'box', platform: 'linux', homedir: '/home/u', timestamp: 't',
+        privilege: { uid: 1000, username: 'u', isRoot: false, sudoAvailable: false, escalated: false, scannedUsers: ['u'], skippedPaths: [] },
+        files: {}, directories: {}, commandOutputs: {}, env: {},
+      }));
+      vi.spyOn(adapterRegistry, 'detectAll').mockResolvedValue([]);
+      vi.spyOn(adapterRegistry, 'getAdapters').mockReturnValue([
+        {
+          agent: 'openclaw',
+          displayName: 'OpenClaw',
+          async detect() { return []; },
+          getConfigPaths() { return ['/Users/scanner/.openclaw/openclaw.json']; },
+          getSkillsDir() { return undefined; },
+          getGatewayInfo() { return undefined; },
+        },
+      ]);
+
+      await runDetect({ format: 'terminal', verbose: true, snapshot: file });
+
+      const output = consoleLogs.join('\n');
+      expect(output).toContain('search paths are listed for local detection only');
+      expect(output).toContain('OpenClaw');
+      expect(output).not.toContain('/Users/scanner/.openclaw/openclaw.json');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });

@@ -14,6 +14,10 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 - **GB-009 follows Grok Bot 0.78's Messages read and send switches.** 0.78 split Messages access into reading (`messagesReadEnabled`) and sending (`messagesSendEnabled`), both on by default. Reading needs no per-use prompt once Messages is on, so it stays a warning; send-only access asks for each recipient and is now info; both off passes. A non-boolean value in either switch, or in `macMailSendEnabled`, makes the app reject `settings.json`, and the Grok Bot checks now treat it the same way. Verified against Grok Bot 0.78.4 on macOS.
 
+### Fixed
+
+- **`vaso detect --verbose` on a remote host or snapshot no longer lists the scanning machine's paths.** "Adapters checked" printed every adapter's config search paths resolved against the machine running VASO (`/Users/…` while detecting a Linux host). Remote and snapshot detection now list each adapter's found / not found status only; local detection still shows the search paths.
+
 ## [1.4.0] - 2026-10-27
 
 ### Added
