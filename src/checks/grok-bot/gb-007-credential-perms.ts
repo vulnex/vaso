@@ -11,6 +11,7 @@ async function targets(ctx: ScanContext): Promise<{ path: string; level: 'critic
   return [
     { path: dataFile(ctx, DATA_FILES.credential), level: 'critical', holds: 'the local-exec credential (the channel the cloud agent runs commands through)' },
     { path: dataFile(ctx, DATA_FILES.connection), level: 'critical', holds: 'the local-exec backend connection token' },
+    { path: dataFile(ctx, DATA_FILES.hostToken), level: 'critical', holds: 'a plaintext Cursor access token (development builds)' },
     { path: join(userData, USER_DATA_FILES.secrets), level: 'critical', holds: 'Cursor access/refresh tokens and the local-exec seal key' },
     { path: join(userData, USER_DATA_FILES.userSecrets), level: 'critical', holds: 'user-defined secrets shared with the cloud computer' },
     { path: dataFile(ctx, DATA_FILES.approvals), level: 'warning', holds: 'pending local-tool approvals' },
@@ -23,7 +24,7 @@ export const gb007 = defineCheck({
   name: 'Grok Bot Credential File Permissions',
   category: 'coding-agent',
   severity: 'critical',
-  description: 'Verify Grok Bot\'s local-exec credential and connection files, sand-secrets.json, user-secrets.json, approvals and session cookies are not accessible to other local users (the app writes them 0600)',
+  description: 'Verify Grok Bot\'s local-exec credential and connection files, host-token.json, sand-secrets.json, user-secrets.json, approvals and session cookies are not accessible to other local users (the app writes them 0600)',
   supportedAgents: ['grok-bot'],
   supportedPlatforms: ['darwin', 'linux'],
 

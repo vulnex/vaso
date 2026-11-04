@@ -53,10 +53,10 @@ const check = (id: string) => grokBotChecks.find(c => c.id === id)!;
 const OPEN_PARENTS = { [HOME]: 0o755, [`${HOME}/.config`]: 0o755, '/home': 0o755, '/': 0o755 };
 
 describe('Grok Bot checks', () => {
-  it('exports 14 coding-agent checks scoped to grok-bot', () => {
-    expect(grokBotChecks).toHaveLength(14);
+  it('exports 16 coding-agent checks scoped to grok-bot', () => {
+    expect(grokBotChecks).toHaveLength(16);
     for (const c of grokBotChecks) {
-      expect(c.id).toMatch(/^GB-0(0[1-9]|1[0-4])$/);
+      expect(c.id).toMatch(/^GB-0(0[1-9]|1[0-6])$/);
       expect(c.category).toBe('coding-agent');
       expect(c.supportedAgents).toEqual(['grok-bot']);
     }
@@ -484,5 +484,126 @@ describe('GB-014 Mac device tools (0.78)', () => {
     expect(noGate.evidence?.[0]).toMatchObject({ mitigated: true });
     const never = await check('GB-014').run(ctx([cfg({ localToolPermission: 'never' })], makeFs({ platform: 'darwin', files: on })));
     expect(never.evidence?.[0]).toMatchObject({ mitigated: true, detail: expect.stringContaining('"never"') });
+  });
+});
+
+describe('host-token.json (0.78 development builds)', () => {
+  const token = `${ROOT}/host-token.json`;
+
+  it('GB-006 reports a plaintext access token, never its value', async () => {
+    const r = await check('GB-006').run(ctx([], makeFs({ files: { [token]: '{"accessToken":"eyJhbGciOiJSUzI1NiJ9.secret"}' } })));
+    expect(r).toMatchObject({ passed: false, severity: 'critical' });
+    expect(JSON.stringify(r)).not.toContain('eyJhbGci');
+    // An empty or tokenless file is not a credential
+    expect((await check('GB-006').run(ctx([], makeFs({ files: { [token]: '{"accessToken":""}' } })))).passed).toBe(true);
+  });
+
+  it('GB-006 reports the file on remote scans, where content is not collected', async () => {
+    const fs = makeFs({ modes: { [token]: 0o600 } });
+    (fs.readFile as ReturnType<typeof vi.fn>).mockRejectedValue(Object.assign(new Error('omitted'), { code: 'EACCES' }));
+    expect(await check('GB-006').run(ctx([], fs))).toMatchObject({ passed: false, severity: 'critical' });
+  });
+
+  it('GB-007 covers its permissions', async () => {
+    const fs = makeFs({ modes: { [token]: 0o644, [ROOT]: 0o755, ...OPEN_PARENTS } });
+    expect(await check('GB-007').run(ctx([], fs))).toMatchObject({ passed: false, severity: 'critical' });
+  });
+});
+
+describe('GB-015 approval state writable by others', () => {
+  it('is critical for a writable settings.json, approvals or grants file', async () => {
+    const fs = makeFs({ modes: { [SETTINGS]: 0o666, [ROOT]: 0o755, ...OPEN_PARENTS } });
+    const r = await check('GB-015').run(ctx([], fs));
+    expect(r).toMatchObject({ passed: false, severity: 'critical', fixable: true });
+    expect(r.evidence?.[0]).toMatchObject({ file: SETTINGS, snippet: 'mode 0666' });
+  });
+
+  it('is a warning when only the spent-send record or a gate is writable', async () => {
+    const fs = makeFs({ modes: { [`${ROOT}/local-tool-spent-sends.json`]: 0o662, [`${ROOT}/mac-device-tools-gate.json`]: 0o646, [ROOT]: 0o755, ...OPEN_PARENTS } });
+    expect(await check('GB-015').run(ctx([], fs))).toMatchObject({ passed: false, severity: 'warning' });
+  });
+
+  it('passes on the app\'s modes; a 0700 data root mitigates a loose file', async () => {
+    const ok = makeFs({ modes: { [ROOT]: 0o700, [SETTINGS]: 0o600, [`${ROOT}/local-tool-approvals.json`]: 0o600, ...OPEN_PARENTS } });
+    expect((await check('GB-015').run(ctx([], ok))).passed).toBe(true);
+    // Readable-only files (the daemon log's 0664) are GB-008's, not this check's
+    const readable = makeFs({ modes: { [ROOT]: 0o755, [SETTINGS]: 0o644, ...OPEN_PARENTS } });
+    expect((await check('GB-015').run(ctx([], readable))).passed).toBe(true);
+    const behind = makeFs({ modes: { [ROOT]: 0o700, [SETTINGS]: 0o666, ...OPEN_PARENTS } });
+    expect(await check('GB-015').run(ctx([], behind))).toMatchObject({ passed: false, severity: 'info' });
+  });
+});
+
+describe('GB-016 app and Computer Use helper integrity (macOS)', () => {
+  const MAC_HOME = '/Users/test';
+  const MAC_ROOT = `${MAC_HOME}/.grokbot`;
+  const APP = '/Applications/Grok Bot.app';
+  const BUNDLED = `${APP}/Contents/Helpers/Grok Bot Computer Use.app`;
+  const COPY = `${MAC_ROOT}/computer-use/Grok Bot Computer Use.app`;
+  const SUPPORT = `${MAC_HOME}/Library/Application Support/grok-bot-computer-use`;
+  const MAC_PARENTS = { [MAC_HOME]: 0o755, '/Users': 0o755, '/': 0o755, [`${MAC_HOME}/Library`]: 0o755, [`${MAC_HOME}/Library/Application Support`]: 0o755 };
+
+  const signed = (team: string, id: string) => ({ stdout: '', stderr: `Executable=/x\nIdentifier=${id}\nFormat=app bundle\nTeamIdentifier=${team}\n`, exitCode: 0 });
+
+  function macCtx(opts: { modes?: Record<string, number>; env?: Record<string, string>; sign?: (path: string, verify: boolean) => { stdout: string; stderr: string; exitCode: number }; kind?: 'snapshot' } = {}): ScanContext {
+    const modes = { [APP]: 0o755, [BUNDLED]: 0o755, [COPY]: 0o755, ...opts.modes };
+    const exists = (p: string) => p in modes || (opts.env ? Object.values(opts.env).includes(p) : false);
+    const sign = opts.sign ?? ((path: string) => signed('DCNK4UB866', path === APP ? 'com.anysphere.sand' : 'co.anysphere.grok-bot-computer-use'));
+    const fs = {
+      platform: 'darwin',
+      kind: opts.kind,
+      homedir: () => MAC_HOME,
+      getEnv: (k: string) => opts.env?.[k],
+      access: vi.fn(async (p: string) => exists(p)),
+      readFile: vi.fn(async (p: string) => { throw new Error(`ENOENT ${p}`); }),
+      stat: vi.fn(async (p: string) => {
+        if (!(p in modes)) throw new Error(`ENOENT ${p}`);
+        return { mode: modes[p], isFile: () => true, isDirectory: () => false };
+      }),
+      exec: vi.fn(async (_cmd: string, args: string[]) => sign(args[args.length - 1], args.includes('--verify'))),
+    } as unknown as FSProvider;
+    const installation: AgentInstallation = { agent: 'grok-bot', installDir: MAC_ROOT, configFiles: [], appBundle: APP };
+    return { installation, configs: [], platform: 'darwin', fs };
+  }
+
+  it('passes on the vendor-signed app, bundled helper and copy', async () => {
+    const c = macCtx();
+    expect((await check('GB-016').run(c)).passed).toBe(true);
+    // codesign -dv and --verify for each of the three bundles
+    expect(c.fs.exec).toHaveBeenCalledTimes(6);
+  });
+
+  it('is critical when the helper copy is signed by someone else or modified', async () => {
+    const foreign = await check('GB-016').run(macCtx({ sign: (p) => p === COPY ? signed('ABCDE12345', 'co.anysphere.grok-bot-computer-use') : signed('DCNK4UB866', p === APP ? 'com.anysphere.sand' : 'co.anysphere.grok-bot-computer-use') }));
+    expect(foreign).toMatchObject({ passed: false, severity: 'critical' });
+    expect(foreign.evidence?.[0]).toMatchObject({ file: COPY, snippet: 'TeamIdentifier=ABCDE12345 (expected DCNK4UB866)' });
+    const modified = await check('GB-016').run(macCtx({ sign: (p, verify) => verify && p === COPY ? { stdout: '', stderr: 'a sealed resource is missing or invalid', exitCode: 1 } : signed('DCNK4UB866', p === APP ? 'com.anysphere.sand' : 'co.anysphere.grok-bot-computer-use') }));
+    expect(modified).toMatchObject({ passed: false, severity: 'critical' });
+    expect(modified.evidence?.[0]).toMatchObject({ file: COPY, snippet: 'codesign --verify --strict failed' });
+    const unsigned = await check('GB-016').run(macCtx({ sign: (p) => p === APP ? { stdout: '', stderr: 'code object is not signed at all', exitCode: 1 } : signed('DCNK4UB866', 'co.anysphere.grok-bot-computer-use') }));
+    expect(unsigned.evidence?.[0]).toMatchObject({ file: APP, detail: expect.stringContaining('unsigned') });
+  });
+
+  it('warns when others can write the helper copy or service.json', async () => {
+    const r = await check('GB-016').run(macCtx({ modes: { [`${MAC_ROOT}/computer-use`]: 0o777, [MAC_ROOT]: 0o755, [SUPPORT]: 0o700, [`${SUPPORT}/service.json`]: 0o666, ...MAC_PARENTS } }));
+    expect(r).toMatchObject({ passed: false, severity: 'warning' });
+    expect(r.evidence?.find(e => e.file === `${MAC_ROOT}/computer-use`)?.mitigated).toBeFalsy();
+    // service.json sits behind a 0700 dir
+    expect(r.evidence?.find(e => e.file === `${SUPPORT}/service.json`)).toMatchObject({ mitigated: true });
+  });
+
+  it('reports GROK_BOT_SIDECAR_APP: warning when the app exists, info when it does not', async () => {
+    const live = await check('GB-016').run(macCtx({ env: { GROK_BOT_SIDECAR_APP: '/tmp/Other.app' } }));
+    expect(live).toMatchObject({ passed: false, severity: 'warning' });
+    expect(live.evidence?.[0]).toMatchObject({ snippet: 'GROK_BOT_SIDECAR_APP=/tmp/Other.app' });
+    const missing = macCtx();
+    (missing.fs.getEnv as unknown) = (k: string) => (k === 'GROK_BOT_SIDECAR_APP' ? '/nope/Gone.app' : undefined);
+    expect(await check('GB-016').run(missing)).toMatchObject({ passed: false, severity: 'info' });
+  });
+
+  it('never runs codesign on a snapshot', async () => {
+    const c = macCtx({ kind: 'snapshot' });
+    expect(await check('GB-016').run(c)).toMatchObject({ passed: true, message: expect.stringContaining('local scans') });
+    expect(c.fs.exec).not.toHaveBeenCalled();
   });
 });

@@ -16,6 +16,9 @@ import { dataFile, userDataDir } from './shared.js';
  *   (a legacy format 0.71.2 still reads and re-encrypts, but no longer writes);
  *   on Linux a `v10` blob (base64 `djEw`) comes from the basic_text backend,
  *   encrypted under Chromium's fixed, public key.
+ * - host-token.json ({ accessToken }, 0.78) holds the account's access token in
+ *   plaintext. Only unpackaged (development) builds write it, refreshing it
+ *   every minute; a released install never has one.
  * Only prefixes are inspected — values never reach evidence. Remote scans
  * don't collect these files, so the check runs on local scans only.
  */
@@ -95,6 +98,14 @@ export const gb006 = defineCheck({
       if (u) unread.push(file);
       if (!isRecord(data) || data.sandSealedFile === 1) continue;
       critical.push({ file, snippet: 'no "sandSealedFile" envelope', detail: 'Stored as plain JSON — anyone who reads it can impersonate this computer to the Grok Bot backend' });
+    }
+
+    // Present at all means a development build ran here; remote scans see it
+    // exists without its content, which is enough
+    const hostToken = dataFile(ctx, DATA_FILES.hostToken);
+    const token = await readJson(ctx, hostToken);
+    if (token.unread || (isRecord(token.data) && typeof token.data.accessToken === 'string' && token.data.accessToken !== '')) {
+      critical.push({ file: hostToken, snippet: 'accessToken (plaintext)', detail: 'The Cursor account access token in plain JSON, written by an unpackaged (development) Grok Bot build — delete it and run a released build' });
     }
 
     const tally = (file: string, values: unknown[], holds: string) => {

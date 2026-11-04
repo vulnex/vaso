@@ -13,7 +13,9 @@ import { gb011 } from './gb-011-updates-disabled.js';
 import { gb012 } from './gb-012-endpoint-redirect.js';
 import { gb013 } from './gb-013-webauthn-proxy.js';
 import { gb014 } from './gb-014-mac-device-tools.js';
+import { gb015 } from './gb-015-approval-state-writable.js';
+import { gb016 } from './gb-016-helper-integrity.js';
 
 export const grokBotChecks: CheckModule[] = [
-  gb001, gb002, gb003, gb004, gb005, gb006, gb007, gb008, gb009, gb010, gb011, gb012, gb013, gb014,
+  gb001, gb002, gb003, gb004, gb005, gb006, gb007, gb008, gb009, gb010, gb011, gb012, gb013, gb014, gb015, gb016,
 ];

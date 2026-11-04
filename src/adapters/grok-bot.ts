@@ -54,7 +54,31 @@ export const DATA_FILES = {
   // macOS (0.78+): mirrors the server flag that offers Reminders, Calendar,
   // Contacts, Notes and Mail to the cloud agent
   macDeviceToolsGate: 'mac-device-tools-gate.json',
+  // Single-use send approvals already spent, and approvals withdrawn: the
+  // daemon consults both before honouring an approval (0.78)
+  spentSends: 'local-tool-spent-sends.json',
+  retirements: 'local-tool-retirements.json',
+  // A plaintext Cursor access token that only unpackaged (development) builds
+  // write, refreshed every minute while signed in (0.78)
+  hostToken: 'host-token.json',
+  // macOS: the daemon copies the signed Computer Use helper out of the app
+  // bundle into this dir and launches the copy
+  computerUseDir: 'computer-use',
 } as const;
+
+/** macOS Computer Use helper (0.78.4 "prod" sidecar profile). */
+export const GROK_BOT_HELPER = {
+  app: 'Grok Bot Computer Use.app',
+  bundleId: 'co.anysphere.grok-bot-computer-use',
+  executable: 'CUGrokBotService',
+  // ~/Library/Application Support/<dir>/service.json names the helper's RPC socket
+  supportDir: 'grok-bot-computer-use',
+  serviceFile: 'service.json',
+} as const;
+
+/** Signing identity of the macOS app and its helper (verified on 0.78.4). */
+export const GROK_BOT_TEAM_ID = 'DCNK4UB866';
+export const GROK_BOT_BUNDLE_ID = 'com.anysphere.sand';
 
 /** Files in the Electron user-data dir that the checks read or stat. */
 export const USER_DATA_FILES = {
@@ -81,6 +105,8 @@ export const GROK_BOT_ENV = [
   'SAND_BACKEND_URL', 'CURSOR_API_BASE_URL', 'SAND_HOST_GATEWAY_URL',
   'SAND_CURSOR_WEBSITE_URL', 'CURSOR_WEBSITE_URL',
   'SAND_HTTPS_PROXY', 'SAND_SYSTEM_PROXY', 'NODE_USE_ENV_PROXY',
+  // macOS: replaces the Computer Use helper app (a path, GB-016)
+  'GROK_BOT_SIDECAR_APP',
 ];
 
 function envDir(fs: FSProvider, name: string): string | undefined {
@@ -352,7 +378,16 @@ export const grokBotAdapter: AgentAdapter = {
           DATA_FILES.daemonLog, DATA_FILES.approvals,
           // Recipients are contacts — GB-004 reads it only locally
           DATA_FILES.standingGrants,
+          DATA_FILES.spentSends, DATA_FILES.retirements,
+          // A plaintext access token (development builds): never content
+          DATA_FILES.hostToken,
+          // The helper copy: modes only (GB-016)
+          DATA_FILES.computerUseDir,
+          `${DATA_FILES.computerUseDir}/${GROK_BOT_HELPER.app}`,
+          `${DATA_FILES.computerUseDir}/${GROK_BOT_HELPER.app}/Contents/MacOS/${GROK_BOT_HELPER.executable}`,
         ].map(f => `${d}/${f}`)),
+        `~/Library/Application Support/${GROK_BOT_HELPER.supportDir}`,
+        `~/Library/Application Support/${GROK_BOT_HELPER.supportDir}/${GROK_BOT_HELPER.serviceFile}`,
         ...userDataDirs.flatMap(d => [
           USER_DATA_FILES.secrets, USER_DATA_FILES.userSecrets, USER_DATA_FILES.cookies,
           USER_DATA_FILES.statsig, `${USER_DATA_FILES.reliability}/*`,
