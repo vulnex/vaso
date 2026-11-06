@@ -1,8 +1,8 @@
 {
   "meta": {
-    "version": 6,
-    "timestamp": "2026-10-05T00:00:00.000Z",
-    "description": "VASO IOC threat feed v6 (cumulative over v5) — October 2026 refresh: MemTensor/sckit worm (trojanized OpenClaw memory plugin @memtensor/memos-cloud-openclaw-plugin + PyPI MemoryOS; C2 skyleen.fr, 12 sckit binaries; StepSecurity/SafeDep/Aikido), Carbonato Hermes-Agent botnet C2s (ThreatDown), Deadbugz malicious MCP server (Pillar), ChainDrop/keyv npm worm planting .claude/settings.json hooks (Datadog/Aikido/Socket), @7nohe codegen compromise AI-tool config tamperer (Socket), Unit 42 malicious ClawHub skills, and fake Claude/Codex installer ClickFix domains (Intellibron). Adds 7 C2 IPs, 21 domains, 26 SHA-256 hashes. Retains all v5 entries."
+    "version": 7,
+    "timestamp": "2026-11-06T00:00:00.000Z",
+    "description": "VASO IOC threat feed v7 (cumulative over v6) — November 2026 refresh: trojanized Claude Code extension on the Cursor marketplace (StepSecurity/OX), testmetest npm worm planting AI-tool hooks (SafeDep/JFrog/OSV), @ifasn malicious MCP cloud-credential stealers (OSV), MALFEX npm RAT/stealer used in a Codex AGENTS.md lure (Checkmarx), Aokigahara AI-credential infostealer (Check Point) and the tensorlake Shai-Hulud compromise (Aikido/Endor Labs). Adds 7 C2 IPs, 9 domains, 53 SHA-256 hashes and 10 publishers. Retains all v6 entries."
   },
   "data": {
     "c2Ips": [
@@ -13,7 +13,14 @@
       "213.136.79.115",
       "213.136.83.197",
       "190.211.124.187",
-      "2.26.75.16"
+      "2.26.75.16",
+      "134.209.82.225",
+      "43.228.157.68",
+      "121.199.24.94",
+      "104.234.65.75",
+      "45.89.30.194",
+      "191.96.81.101",
+      "2.26.252.48"
     ],
     "maliciousDomains": [
       "giftshop.club",
@@ -48,12 +55,31 @@
       "codex-promo.com",
       "cladehub.com",
       "cladesktop-apps.com",
-      "too.clawddddd.com"
+      "too.clawddddd.com",
+      "aiarmor.website",
+      "dfwioeiofwr.info",
+      "gate.dfwioeiofwr.info",
+      "dobeqnesmot.cc",
+      "hjazfioe.surf",
+      "kkeyyou.cc",
+      "neihite.cc",
+      "somelitersofblood.pw",
+      "iseekaigogo.com"
     ],
     "maliciousPublishers": [
       "hightower6eu",
       "sakaen736jih",
-      "52yuanchangxing"
+      "52yuanchangxing",
+      "iobandamwer",
+      "testsecuiitytestme",
+      "alexjoipamiba",
+      "testnewtestme",
+      "ifasn",
+      "malfexkkj",
+      "malfex_user",
+      "malfexteste2",
+      "malfexteste3",
+      "malfexteste4"
     ],
     "trustedSkillNames": [
       "ai-code-assistant",
@@ -126,7 +152,60 @@
       "b30eaed1f7478c28f4ec50d07ed5ef014ffbc4b2bc5a38d689ba9f7abb5e19c2",
       "b6c7e0bf573b1c7d9d3a05eb08d26579199515b847df984862805f44a7af8007",
       "ebb73dbb5aac1f6fe1a88e8f26126a1e1aa34c9f3345ad4345189b40d9bf1d1d",
-      "f4e41aa269c88bf11a2022701a9cf41e9a186aa1b224d837c31bf34e0b875d0e"
+      "f4e41aa269c88bf11a2022701a9cf41e9a186aa1b224d837c31bf34e0b875d0e",
+      "ecb58cb29078d9646ad1dcdbe51526f2d9cfea06be5fb2ab183e8ecc3ab6bf15",
+      "fcbb327e38e61c4fec795e0d0591f52cd1014b813d20a5912104953c3a17c364",
+      "80402fdcad8799285fd93044976973ca000da7995fb93363f819bb8e4f84ee6c",
+      "3de1722901165769893bef57c72594e9a54459faa23f3091b136b79966edd081",
+      "6786ec90cbd45949695bd7805c9fbb26cfc91bc5fc897de0183d9bcb9cb21731",
+      "22f682d9ff55264e934d0f43fcfbb46d58be5cfb8fe1b3a7cbb38fe089c818b0",
+      "7e0a52885fadee05544a9e99eb18c792bec05900a5e1a66d68f8383decb0e278",
+      "9d83919bfdb0e14018f1a6f2b8b6586de59b60dfdcfbdb5ae1a1556c23cc4793",
+      "3dc40fc55302664c07c9d9182ffd95910aeb366fcd417fbdad0a90cdeb8ea69e",
+      "8506042b383ab46545c27a402eb2dc973696a93af71181b175b1d87972843a43",
+      "783a4ac906cc9b2eaf5cd13408ea95db6ce52a46d9af11aad1a5b167af69589f",
+      "a516dd7867af83f8be0cc3e926fdfd964097f0e7665596b05fe5234be7e2b5e9",
+      "ccfd769acc024edc409ef879198d2a2398beee60930f2b3f2771ded1e14e0c57",
+      "7ad216b3afd2f40a147c80733c7309fb3d3a7f52ee78149c8e51672cfb617d07",
+      "e3cb383615fc70bce9b5bcd1c7a394132b50483daaf231a04ee90d4690962c73",
+      "17614e98b613b17d0e1bb7125ab203715dd397661b897d8d18dbb77864c1839f",
+      "837904152e824645cb7d2d58a4a5e0aaa22d5e82a5d6eafe08b9c2b8b1bf4de6",
+      "0b0e02b03ea3a2f8e8657143706e327a0b3608acbc1c43ec02ebc072dbe76944",
+      "fc8e014b1c6940435880346fe3e84b20f2cbd9e65ed662283347a306929b8381",
+      "c7ef186aa59b67d9b198a14f6dc8aaee6dd86510ac7c37d28f65d310cd846411",
+      "7625f77a61433b3a8e9b41952b7dca102d1d08eab30266fd6c6aa0b0c2ea15b1",
+      "1685824218a45e9308e3ced9f4a1cee3fe51e516dab2bd058fc1f9de31f559c9",
+      "b3f74e4b03b58eeb31ff9ecc663a118ca37695f078eb4d3cae311ddc56a55d28",
+      "67967033b1dd1e5b845c0959291df533d1102d0191885e7cb9b18d46f7744bbd",
+      "1fdd50b1bf66c4fd0e94f2be3db1f2f0fd77921136867022ad7e65e21220ad03",
+      "5b7a0f53f2eca2dd4bf21e6df7d34e751b6cdf70b2f0a6f1f13edfb5caa9570b",
+      "c14dae9325f451c524cf858ecdae5fa68d2c645ee0981c6f42ef913c7ef34a57",
+      "2547686f86fe6994bcf79558fcce441edc67aa734e255acf79870d5f47de7bbf",
+      "620d2489e18b5a5f8840e96b90673d72db4c4c54d555ad66d179b3a5833e7763",
+      "463dda65ebceeca6f5590dcdeae6c1d06ffadb2380a85b613deb2923af5557e7",
+      "4869759830e75e74e34570be0d67e61fd990432a38352e461164f6671e0eb43f",
+      "85ba3587a0cb0a9f61a1142725856f5da909829a67ca888cb69aa3e0627e0b36",
+      "7514c7b8a0a6e50a74b01c9b0c0bc8fbeccce4278c8cb64562b35ce310dc9e1f",
+      "cc0a87e44fbc376f30a8eedfba61b1e7e1d5a5b09831e84af0facaeade19982f",
+      "9aba4685af072231aee049e1a5e294965580001b364d7d00152d84fcec1ce793",
+      "fd199d3977e1a2945b6031fc8696660a980e4f4617899baa045efe7ccbc8de67",
+      "2989244eac2a4bc7a13a09dec003e5c05ef7c80b2afe0958ce25042d5b804210",
+      "4f4f7d64139bde6d458a061c7fb7dd247f70f60a1ab47d87fd3634656586c106",
+      "889e13e227bc2b762178b88c35c691db3256e72be64d92ff1f381d29a2789849",
+      "e7f86f6cc4380db66d333eaf6f7dfc2c12d232c2bcd526434681245dea25efa4",
+      "ff826d2778ea1d40ce8ebfd9d66ecc86d4c811f5654b8a466a7e220ebbbc6807",
+      "2f268ca76ab27971d8b16bd4ded26e1f9cd3d4460b894af2d4bdf89f0ab7ec4b",
+      "7acf331117900179b483142f216fdcb22c671eb0b1971abd57f01bc036248a6e",
+      "c9c374afba4658dff15f71801e88c4d199c91dd2622d72c7b0c55577c8f73437",
+      "c7cf2323e4923428984297db7715d75fec5b964fe65c325b53e3fa360f3b8d86",
+      "430300450f5acbd69c29f02d8c2e243f7d1d6202d1826f6e4d7715f95c47299b",
+      "4cba0c785e66d517eabd0164f34a9c2d04549da93b5ee3eebdce5558daa2f47c",
+      "5c933aa533721fa293b284170dd4611a4d88f88cc89f2d9c28ea4e22305b1f75",
+      "8f7ed69fb5505b57f06e673826779d459f7735739756de73a6d3347a9c8ea0cc",
+      "d54853d6be467567d9f22d7f22ac48214df52c1f9c7a503930e901286423044a",
+      "886b84f83a0f760e664046ba40d8c800b7d0cf72190e13ca031ee5cf50f45bee",
+      "25a0735d0db7dc40e5d45ce42d9c106067e6a66e184d967cfecfab17c3bcb5ef",
+      "b50a00900399ba99fb6ce1fc151519cb99d44320ef2a631f2237e1aea0ad6fec"
     ]
   }
 }

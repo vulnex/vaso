@@ -3778,7 +3778,7 @@ describe('MCP-027 shipped dependencies', () => {
     expect(result.passed).toBe(false);
     expect(result.severity).toBe('warning');
     const live = result.evidence!.filter((e) => !e.mitigated).map((e) => e.detail!.split(':')[0]);
-    expect(live.sort()).toEqual(['CVE-2025-66414', 'CVE-2026-25536']);
+    expect(live.sort()).toEqual(['CVE-2025-66414', 'CVE-2026-111768', 'CVE-2026-25536', 'GHSA-f897-62hf-6gxq']);
   });
 
   it('reports advisories for features the code does not use as mitigated (stdio server)', async () => {
@@ -3796,7 +3796,7 @@ describe('MCP-027 shipped dependencies', () => {
 
   it('judges a declared range only when no fixed release fits it', async () => {
     const old = await run({ serverName: 'old', dependencies: [sdk({ range: '^0.5.0', source: '/srv/package.json' })] });
-    expect(old.evidence!.map((e) => e.detail!.split(':')[0])).toEqual(['CVE-2025-66414']);
+    expect(old.evidence!.map((e) => e.detail!.split(':')[0]).sort()).toEqual(['CVE-2025-66414', 'CVE-2026-111769']);
     const open = await run({ serverName: 'open', dependencies: [sdk({ range: '^1.0.4', source: '/srv/package.json' })] });
     expect(open.passed).toBe(true);
   });
@@ -3809,13 +3809,13 @@ describe('MCP-027 shipped dependencies', () => {
       dependencies: [{ name: 'mcp', ecosystem: 'pypi', version: '1.9.1', source: '/srv/uv.lock' }],
     });
     const ids = py.evidence!.filter((e) => !e.mitigated).map((e) => e.detail!.split(':')[0]).sort();
-    expect(ids).toEqual(['CVE-2025-53365', 'CVE-2025-53366', 'CVE-2025-66416', 'CVE-2026-52869']);
+    expect(ids).toEqual(['CVE-2025-53365', 'CVE-2025-53366', 'CVE-2025-66416', 'CVE-2026-109527', 'CVE-2026-52869', 'CVE-2026-59951']);
     const npmNamedMcp = await run({ serverName: 'n', dependencies: [{ name: 'mcp', ecosystem: 'npm', version: '1.0.0', source: '/srv/package.json' }] });
     expect(npmNamedMcp.passed).toBe(true);
   });
 
   it('does not flag a current SDK', async () => {
-    expect((await run({ serverName: 'new', dependencies: [sdk({ version: '1.31.0' })] })).passed).toBe(true);
+    expect((await run({ serverName: 'new', dependencies: [sdk({ version: '1.32.0' })] })).passed).toBe(true);
   });
 });
 

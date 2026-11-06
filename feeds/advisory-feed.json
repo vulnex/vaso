@@ -1,8 +1,8 @@
 {
   "meta": {
-    "version": 9,
-    "timestamp": "2026-10-12T00:00:00.000Z",
-    "description": "VASO advisory feed v9 (cumulative over v8) — adds 35 library advisories from the GitHub Advisory Database for packages MCP servers commonly ship (26 npm: lodash, axios, minimist, handlebars, jsonwebtoken, ws, moment, request, express, body-parser, socket.io, xml2js, validator, multer, async; 9 PyPI: requests, jinja2, urllib3, pyyaml, starlette, h11, aiohttp), matched by MCP-027 against a server's dependencies. Advisories spanning several release lines use || constraints, which clients before the release that understands them treat as no match. Retains all v8 advisories."
+    "version": 10,
+    "timestamp": "2026-11-06T00:00:00.000Z",
+    "description": "VASO advisory feed v10 (cumulative over v9) — November 2026 refresh: NVIDIA OpenShell bulletin 5872 (6), NanoClaw repo advisories (9), Hermes webhook route privilege escalation, 2 OpenClaw, 3 Claude Code, Claude Desktop Windows git.exe planting, OpenCode MCP OAuth command injection, 5 MCP TypeScript SDK and 5 MCP Python SDK advisories, MCP Inspector OAuth RCE, 2 FastMCP, 15 third-party MCP servers, and 12 malicious MCP packages (@ifasn doc-mcp cloud-credential stealers, @apexacc/audit, @atlisp/mcp 1.12.14, gemini-computer-use, mcp-server-github and others). Retains all v9 advisories."
   },
   "data": {
     "advisories": [
@@ -3017,6 +3017,1198 @@
           "name": "aiohttp",
           "versionConstraint": ">=1.0.5 <3.9.2",
           "ecosystem": "pypi"
+        }
+      },
+      {
+        "id": "CVE-2026-65093",
+        "title": "OpenShell: sandbox escape leads to code execution and privilege escalation",
+        "agent": "openshell",
+        "affectedVersions": "<0.0.34",
+        "fixedVersion": "0.0.34",
+        "severity": "critical",
+        "description": "An attacker could escape the OpenShell sandbox on Linux through an uncontrolled search path element (CWE-427), leading to code execution and privilege escalation on the host. CVSS 9.9. Update to 0.0.34+.",
+        "reference": "https://github.com/NVIDIA/product-security/tree/main/2026/5872",
+        "published": "2026-08-25",
+        "tags": [
+          "framework",
+          "cve"
+        ]
+      },
+      {
+        "id": "CVE-2026-65083",
+        "title": "OpenShell: sandbox provisioning API accepts disallowed inputs",
+        "agent": "openshell",
+        "affectedVersions": "<0.0.34",
+        "fixedVersion": "0.0.34",
+        "severity": "critical",
+        "description": "The sandbox provisioning API checked requests against an incomplete list of disallowed inputs (CWE-184), letting an attacker obtain code execution or escalate privileges. CVSS 9.9. Update to 0.0.34+.",
+        "reference": "https://github.com/NVIDIA/product-security/tree/main/2026/5872",
+        "published": "2026-08-25",
+        "tags": [
+          "framework",
+          "cve"
+        ]
+      },
+      {
+        "id": "CVE-2026-65091",
+        "title": "OpenShell CLI: malicious gateway can inject OS commands",
+        "agent": "openshell",
+        "affectedVersions": "<0.0.34",
+        "fixedVersion": "0.0.34",
+        "severity": "warning",
+        "description": "A malicious gateway could inject OS commands that the OpenShell CLI runs on the client machine (CWE-78), on all platforms. CVSS 8.8. Update to 0.0.34+ and connect only to gateways you operate.",
+        "reference": "https://github.com/NVIDIA/product-security/tree/main/2026/5872",
+        "published": "2026-08-25",
+        "tags": [
+          "framework",
+          "cve"
+        ]
+      },
+      {
+        "id": "CVE-2026-65092",
+        "title": "OpenShell: path traversal bypasses the L7 REST network policy",
+        "agent": "openshell",
+        "affectedVersions": "<0.0.34",
+        "fixedVersion": "0.0.34",
+        "severity": "warning",
+        "description": "A crafted request path let sandboxed code bypass the L7 REST network policy (CWE-22) and reach endpoints the policy should block. CVSS 8.5. Update to 0.0.34+.",
+        "reference": "https://github.com/NVIDIA/product-security/tree/main/2026/5872",
+        "published": "2026-08-25",
+        "tags": [
+          "framework",
+          "cve"
+        ]
+      },
+      {
+        "id": "CVE-2026-65086",
+        "title": "OpenShell: OS command injection in the sandbox exec handler",
+        "agent": "openshell",
+        "affectedVersions": "<0.0.34",
+        "fixedVersion": "0.0.34",
+        "severity": "warning",
+        "description": "The sandbox exec handler on Linux was open to OS command injection (CWE-78). CVSS 6.8. Update to 0.0.34+.",
+        "reference": "https://github.com/NVIDIA/product-security/tree/main/2026/5872",
+        "published": "2026-08-25",
+        "tags": [
+          "framework",
+          "cve"
+        ]
+      },
+      {
+        "id": "CVE-2026-65085",
+        "title": "OpenShell: improper output encoding in the inference proxy",
+        "agent": "openshell",
+        "affectedVersions": "<0.0.34",
+        "fixedVersion": "0.0.34",
+        "severity": "warning",
+        "description": "The inference proxy did not encode output correctly (CWE-116), letting an attacker tamper with data passed through it. CVSS 5.2. Update to 0.0.34+.",
+        "reference": "https://github.com/NVIDIA/product-security/tree/main/2026/5872",
+        "published": "2026-08-25",
+        "tags": [
+          "framework",
+          "cve"
+        ]
+      },
+      {
+        "id": "GHSA-frvf-5rf5-89fq",
+        "title": "NanoClaw: host follows symlinks in agent-writable session and skill directories",
+        "agent": "nanoclaw",
+        "affectedVersions": ">=2.0.33 <2026.10.0",
+        "fixedVersion": "2026.10.0",
+        "severity": "warning",
+        "description": "The host followed symlinks that an agent could plant in its session and skill directories, so a prompt-injected agent could have the host read files outside its folders (and send them to a chat) or delete directories outside them. CVSS 8.8. Upgrade to 2026.10.0+.",
+        "reference": "https://github.com/nanocoai/nanoclaw/security/advisories/GHSA-frvf-5rf5-89fq",
+        "published": "2026-10-13",
+        "tags": [
+          "framework",
+          "cve"
+        ]
+      },
+      {
+        "id": "GHSA-hcfx-vmj7-xcx8",
+        "title": "NanoClaw: ncl groups create mounts a folder outside the groups directory",
+        "agent": "nanoclaw",
+        "affectedVersions": "<2.3.0",
+        "fixedVersion": "2.3.0",
+        "severity": "warning",
+        "description": "`ncl groups create` accepted a folder outside the groups directory, which was then mounted read-write into the agent container (for example the NanoClaw checkout with its .env). CVSS 8.2. Upgrade to 2.3.0+.",
+        "reference": "https://github.com/nanocoai/nanoclaw/security/advisories/GHSA-hcfx-vmj7-xcx8",
+        "published": "2026-10-13",
+        "tags": [
+          "framework",
+          "cve"
+        ]
+      },
+      {
+        "id": "GHSA-vwj5-j44r-v364",
+        "title": "NanoClaw: attachment symlink swap in the session inbox writes outside agent folders",
+        "agent": "nanoclaw",
+        "affectedVersions": ">=2.0.33 <2026.10.0",
+        "fixedVersion": "2026.10.0",
+        "severity": "warning",
+        "description": "The session inbox directory was checked once per message rather than per attachment, so an agent could swap in a symlink between writes and make the host write outside its folders. CVSS 7.8. Upgrade to 2026.10.0+.",
+        "reference": "https://github.com/nanocoai/nanoclaw/security/advisories/GHSA-vwj5-j44r-v364",
+        "published": "2026-10-13",
+        "tags": [
+          "framework",
+          "cve"
+        ]
+      },
+      {
+        "id": "GHSA-7wx5-9p7v-wvhp",
+        "title": "NanoClaw: check-then-write race when saving inbound attachments",
+        "agent": "nanoclaw",
+        "affectedVersions": ">=2.0.33 <2026.10.0",
+        "fixedVersion": "2026.10.0",
+        "severity": "warning",
+        "description": "A race between the path check and the write when saving inbound attachments let an agent swap in a symlink so the host wrote files outside its folders. CVSS 7.8. Upgrade to 2026.10.0+.",
+        "reference": "https://github.com/nanocoai/nanoclaw/security/advisories/GHSA-7wx5-9p7v-wvhp",
+        "published": "2026-10-13",
+        "tags": [
+          "framework",
+          "cve"
+        ]
+      },
+      {
+        "id": "GHSA-8w49-2gv4-3x6w",
+        "title": "NanoClaw: Mattermost setup command injection from a server-supplied user ID",
+        "agent": "nanoclaw",
+        "affectedVersions": ">=2.4.0 <2026.10.0",
+        "fixedVersion": "2026.10.0",
+        "severity": "warning",
+        "description": "Mattermost setup placed a user ID returned by the server into a shell command without validation, so a malicious or man-in-the-middle server could run commands on the host. CVSS 7.5. Upgrade to 2026.10.0+.",
+        "reference": "https://github.com/nanocoai/nanoclaw/security/advisories/GHSA-8w49-2gv4-3x6w",
+        "published": "2026-10-13",
+        "tags": [
+          "framework",
+          "cve"
+        ]
+      },
+      {
+        "id": "GHSA-628g-jj3x-6mp9",
+        "title": "NanoClaw: OneCLI installer downloaded over plain HTTP and run in a shell",
+        "agent": "nanoclaw",
+        "affectedVersions": ">=2.0.33 <2026.10.0",
+        "fixedVersion": "2026.10.0",
+        "severity": "warning",
+        "description": "OneCLI setup fetched its installer over plain HTTP and piped it to a shell, so a network attacker could run code on the host. CVSS 7.1. Upgrade to 2026.10.0+.",
+        "reference": "https://github.com/nanocoai/nanoclaw/security/advisories/GHSA-628g-jj3x-6mp9",
+        "published": "2026-10-13",
+        "tags": [
+          "framework",
+          "cve"
+        ]
+      },
+      {
+        "id": "GHSA-g3gp-6777-8p9g",
+        "title": "NanoClaw: non-admin group members can run /clear and /upload-trace",
+        "agent": "nanoclaw",
+        "affectedVersions": ">=2.0.33 <2026.10.0",
+        "fixedVersion": "2026.10.0",
+        "severity": "warning",
+        "description": "Admin-only commands could be run by any group member by adding a suffix such as @botname. CVSS 6.3. Upgrade to 2026.10.0+.",
+        "reference": "https://github.com/nanocoai/nanoclaw/security/advisories/GHSA-g3gp-6777-8p9g",
+        "published": "2026-10-13",
+        "tags": [
+          "framework",
+          "cve"
+        ]
+      },
+      {
+        "id": "GHSA-r7fr-2v6h-rhqf",
+        "title": "NanoClaw: group-scoped agents can read other agent groups through ncl",
+        "agent": "nanoclaw",
+        "affectedVersions": ">=2.1.54 <2026.10.0",
+        "fixedVersion": "2026.10.0",
+        "severity": "warning",
+        "description": "Alternate ncl argument spellings or an empty group value let a group-scoped agent read other agent groups. CVSS 5.5. Upgrade to 2026.10.0+.",
+        "reference": "https://github.com/nanocoai/nanoclaw/security/advisories/GHSA-r7fr-2v6h-rhqf",
+        "published": "2026-10-13",
+        "tags": [
+          "framework",
+          "cve"
+        ]
+      },
+      {
+        "id": "GHSA-9j3v-9hwg-v896",
+        "title": "NanoClaw: task run-log read escapes the group tasks folder",
+        "agent": "nanoclaw",
+        "affectedVersions": ">=2.1.54 <2026.10.0",
+        "fixedVersion": "2026.10.0",
+        "severity": "warning",
+        "description": "The task run-log reader built a host path from an unchecked series id, letting an agent read .md files outside its group's tasks folder. CVSS 5.5. Upgrade to 2026.10.0+.",
+        "reference": "https://github.com/nanocoai/nanoclaw/security/advisories/GHSA-9j3v-9hwg-v896",
+        "published": "2026-10-13",
+        "tags": [
+          "framework",
+          "cve"
+        ]
+      },
+      {
+        "id": "CVE-2026-114463",
+        "title": "Hermes Agent: webhook route toolset privilege escalation",
+        "agent": "hermes",
+        "affectedVersions": "<=0.20.5",
+        "severity": "critical",
+        "description": "The gateway re-derived the authorizing webhook route by splitting the session key on \":\", so a caller authenticated to a route such as build:external received the toolsets (terminal, file access) of the more privileged build route (CWE-863). The CVE record lists versions through 2026.8.19 (v0.20.5); upgrade to the latest release.",
+        "reference": "https://www.cve.org/CVERecord?id=CVE-2026-114463",
+        "published": "2026-10-21",
+        "exploitAvailable": true,
+        "tags": [
+          "framework",
+          "cve"
+        ]
+      },
+      {
+        "id": "CVE-2026-62197",
+        "title": "OpenClaw: browser CDP discovery accepts blocked WebSocket URLs",
+        "agent": "openclaw",
+        "affectedVersions": "<2026.6.6",
+        "fixedVersion": "2026.6.6",
+        "severity": "warning",
+        "description": "Browser CDP discovery could accept WebSocket URLs that the network policy blocks, letting lower-trust users reach destinations they should not. Upgrade to 2026.6.6+.",
+        "reference": "https://github.com/openclaw/openclaw/security/advisories/GHSA-3x84-qq85-fj65",
+        "published": "2026-07-13",
+        "tags": [
+          "framework",
+          "cve"
+        ]
+      },
+      {
+        "id": "CVE-2026-32846",
+        "title": "OpenClaw: media path traversal allows arbitrary file read",
+        "agent": "openclaw",
+        "affectedVersions": "<2026.3.28",
+        "fixedVersion": "2026.3.28",
+        "severity": "warning",
+        "description": "isLikelyLocalPath / isValidMedia accepted bare filenames and traversal sequences, so a crafted media reference could read arbitrary files on the host. CVSS 4.0 8.7. Upgrade to 2026.3.28+.",
+        "reference": "https://github.com/openclaw/openclaw/security/advisories/GHSA-f6pf-4gjx-c94r",
+        "published": "2026-03-26",
+        "tags": [
+          "framework",
+          "cve"
+        ]
+      },
+      {
+        "id": "CVE-2026-103435",
+        "title": "Claude Code arbitrary file write via write-time symlink following (TOCTOU)",
+        "agent": "claude-code",
+        "affectedVersions": "<2.1.129",
+        "fixedVersion": "2.1.129",
+        "severity": "warning",
+        "description": "The project-boundary check ran when permission was requested, but the path was resolved again at write time, so anyone able to write in the workspace could swap a file for a symlink and redirect the write outside the project. Upgrade to 2.1.129+.",
+        "reference": "https://github.com/anthropics/claude-code/security/advisories/GHSA-5j29-h97v-84ch",
+        "published": "2026-10-05",
+        "tags": [
+          "coding-agent",
+          "cve",
+          "symlink"
+        ]
+      },
+      {
+        "id": "CVE-2026-86063",
+        "title": "Claude Code plugin commit-SHA pin bypass installs attacker-controlled code",
+        "agent": "claude-code",
+        "affectedVersions": "<2.1.179",
+        "fixedVersion": "2.1.179",
+        "severity": "warning",
+        "description": "Plugin installation ran git checkout on the pinned commit without verifying the result, so whoever controls the plugin repository could create a branch named after the pinned SHA and have their code installed instead. Upgrade to 2.1.179+.",
+        "reference": "https://github.com/anthropics/claude-code/security/advisories/GHSA-pq7j-f95f-qfcv",
+        "published": "2026-10-09",
+        "tags": [
+          "coding-agent",
+          "cve",
+          "supply-chain"
+        ]
+      },
+      {
+        "id": "CVE-2026-88968",
+        "title": "Claude Code Edit tool TOCTOU race writes outside the workspace",
+        "agent": "claude-code",
+        "affectedVersions": "<2.1.251",
+        "fixedVersion": "2.1.251",
+        "severity": "warning",
+        "description": "Code running in the Bash sandbox could replace a workspace parent directory with a symlink after the Edit tool validated the path, so the unsandboxed Edit tool overwrote user-writable files outside the workspace (macOS). Upgrade to 2.1.251+.",
+        "reference": "https://github.com/anthropics/claude-code/security/advisories/GHSA-5xjx-9qx6-jcrv",
+        "published": "2026-10-26",
+        "tags": [
+          "coding-agent",
+          "cve",
+          "sandbox-escape"
+        ]
+      },
+      {
+        "id": "CVE-2026-88066",
+        "title": "Claude Desktop for Windows runs git.exe from the opened project folder",
+        "agent": "claude-desktop",
+        "affectedVersions": "<1.8089.0",
+        "fixedVersion": "1.8089.0",
+        "severity": "critical",
+        "description": "Claude Desktop started git.exe without an absolute path, so Windows ran a git.exe placed in the opened project folder first; opening a malicious shared repository ran attacker code. Windows only. Upgrade to 1.8089.0+.",
+        "reference": "https://github.com/anthropics/claude-code/security/advisories/GHSA-4p2j-qj3c-6x84",
+        "published": "2026-10-13",
+        "tags": [
+          "coding-agent",
+          "cve",
+          "rce"
+        ]
+      },
+      {
+        "id": "CVE-2026-119025",
+        "title": "OpenCode MCP OAuth authorization URL PowerShell command injection",
+        "agent": "opencode",
+        "affectedVersions": ">=1.0.137 <1.18.33",
+        "fixedVersion": "1.18.33",
+        "severity": "critical",
+        "description": "A malicious remote MCP server could put a PowerShell subexpression in its OAuth authorization_endpoint, which OpenCode passed to the open package unescaped on Windows/WSL, running commands on the client. Upgrade to 1.18.33+.",
+        "reference": "https://www.cve.org/CVERecord?id=CVE-2026-119025",
+        "published": "2026-10-29",
+        "exploitAvailable": true,
+        "tags": [
+          "coding-agent",
+          "cve",
+          "rce"
+        ]
+      },
+      {
+        "id": "CVE-2026-111768",
+        "title": "MCP TypeScript SDK request validation can exhaust server memory",
+        "agent": "mcp",
+        "affectedVersions": ">=1.3.0 <1.32.0",
+        "fixedVersion": "1.32.0",
+        "severity": "warning",
+        "description": "A single HTTP request within the default body size limit could exhaust server memory during validation, taking the server down. Affects HTTP server transports.",
+        "reference": "https://github.com/advisories/GHSA-46jr-4wx8-v453",
+        "published": "2026-10-20",
+        "tags": [
+          "mcp",
+          "cve",
+          "sdk",
+          "dos"
+        ],
+        "affectedDependency": {
+          "name": "@modelcontextprotocol/sdk",
+          "versionConstraint": ">=1.3.0 <1.32.0"
+        },
+        "appliesWhen": {
+          "sourcePattern": "StreamableHTTPServerTransport|SSEServerTransport",
+          "usage": "HTTP server transports"
+        }
+      },
+      {
+        "id": "CVE-2026-111767",
+        "title": "MCP TypeScript SDK experimental tasks not bound to the creating session",
+        "agent": "mcp",
+        "affectedVersions": ">=1.24.0 <1.32.0",
+        "fixedVersion": "1.32.0",
+        "severity": "warning",
+        "description": "Experimental tasks were not tied to the session that created them, so another client of the same server could read or cancel them.",
+        "reference": "https://github.com/advisories/GHSA-22jm-h49p-29qw",
+        "published": "2026-10-20",
+        "tags": [
+          "mcp",
+          "cve",
+          "sdk"
+        ],
+        "affectedDependency": {
+          "name": "@modelcontextprotocol/sdk",
+          "versionConstraint": ">=1.24.0 <1.32.0"
+        },
+        "appliesWhen": {
+          "sourcePattern": "taskStore|TaskStore|experimental\\.tasks",
+          "usage": "experimental tasks"
+        }
+      },
+      {
+        "id": "CVE-2026-111771",
+        "title": "MCP TypeScript SDK bearer auth accepts tokens issued for another service",
+        "agent": "mcp",
+        "affectedVersions": ">=1.6.0 <1.32.0",
+        "fixedVersion": "1.32.0",
+        "severity": "warning",
+        "description": "The server bearer-auth middleware did not check the token audience, so a token issued for a different resource server was accepted.",
+        "reference": "https://github.com/advisories/GHSA-rvq5-wwqv-78pq",
+        "published": "2026-10-20",
+        "tags": [
+          "mcp",
+          "cve",
+          "sdk",
+          "oauth"
+        ],
+        "affectedDependency": {
+          "name": "@modelcontextprotocol/sdk",
+          "versionConstraint": ">=1.6.0 <1.32.0"
+        },
+        "appliesWhen": {
+          "sourcePattern": "requireBearerAuth",
+          "usage": "the SDK bearer-auth middleware"
+        }
+      },
+      {
+        "id": "CVE-2026-111769",
+        "title": "MCP TypeScript SDK client re-sends credentials on cross-origin redirects",
+        "agent": "mcp",
+        "affectedVersions": "<1.32.0",
+        "fixedVersion": "1.32.0",
+        "severity": "warning",
+        "description": "HTTP client transports and OAuth requests followed cross-origin redirects and sent the credentials to the new origin.",
+        "reference": "https://github.com/advisories/GHSA-6prh-2h8m-c8cw",
+        "published": "2026-10-20",
+        "tags": [
+          "mcp",
+          "cve",
+          "sdk",
+          "credential-theft"
+        ],
+        "affectedDependency": {
+          "name": "@modelcontextprotocol/sdk",
+          "versionConstraint": "<1.32.0"
+        },
+        "appliesWhen": {
+          "sourcePattern": "StreamableHTTPClientTransport|SSEClientTransport|authProvider",
+          "usage": "HTTP client transports"
+        }
+      },
+      {
+        "id": "GHSA-f897-62hf-6gxq",
+        "title": "MCP TypeScript SDK HTTP transports do not limit body size or batch length",
+        "agent": "mcp",
+        "affectedVersions": ">=1.10.0 <1.30.1",
+        "fixedVersion": "1.30.1",
+        "severity": "warning",
+        "description": "HTTP server transports read request bodies and JSON-RPC batches with no size or length limit, so a client could exhaust server memory.",
+        "reference": "https://github.com/advisories/GHSA-f897-62hf-6gxq",
+        "published": "2026-10-27",
+        "tags": [
+          "mcp",
+          "sdk",
+          "dos"
+        ],
+        "affectedDependency": {
+          "name": "@modelcontextprotocol/sdk",
+          "versionConstraint": ">=1.10.0 <1.30.1"
+        },
+        "appliesWhen": {
+          "sourcePattern": "StreamableHTTPServerTransport|SSEServerTransport",
+          "usage": "HTTP server transports"
+        }
+      },
+      {
+        "id": "CVE-2026-109527",
+        "title": "MCP Python SDK HTTP transports and OAuth endpoints read unbounded request bodies",
+        "agent": "mcp",
+        "affectedVersions": "<1.29.1 || >=2.0.0 <2.1.0",
+        "fixedVersion": "1.29.1, 2.1.0",
+        "severity": "warning",
+        "description": "HTTP server transports and OAuth endpoints read request bodies with no size limit, so a client could exhaust server memory. CVSS 7.5.",
+        "reference": "https://github.com/modelcontextprotocol/python-sdk/security/advisories/GHSA-fmmv-w9g8-j3gc",
+        "published": "2026-10-14",
+        "tags": [
+          "mcp",
+          "cve",
+          "sdk",
+          "dos"
+        ],
+        "affectedDependency": {
+          "name": "mcp",
+          "versionConstraint": "<1.29.1 || >=2.0.0 <2.1.0",
+          "ecosystem": "pypi"
+        },
+        "appliesWhen": {
+          "sourcePattern": "streamable_http_app|sse_app|SseServerTransport|StreamableHTTPSessionManager|transport\\s*=\\s*[\"'](?:sse|streamable-http|http)[\"']",
+          "usage": "HTTP server transports"
+        }
+      },
+      {
+        "id": "CVE-2026-59951",
+        "title": "MCP Python SDK Streamable HTTP transport accumulates sessions without bound",
+        "agent": "mcp",
+        "affectedVersions": ">=1.8.0 <1.30.0 || >=2.0.0 <2.2.0",
+        "fixedVersion": "1.30.0, 2.2.0",
+        "severity": "warning",
+        "description": "The Streamable HTTP transport kept every session it created, so a client opening sessions in a loop exhausted server resources.",
+        "reference": "https://github.com/advisories/GHSA-84m7-p3x7-pcfv",
+        "published": "2026-10-15",
+        "tags": [
+          "mcp",
+          "cve",
+          "sdk",
+          "dos"
+        ],
+        "affectedDependency": {
+          "name": "mcp",
+          "versionConstraint": ">=1.8.0 <1.30.0 || >=2.0.0 <2.2.0",
+          "ecosystem": "pypi"
+        },
+        "appliesWhen": {
+          "sourcePattern": "streamable_http_app|StreamableHTTPSessionManager|transport\\s*=\\s*[\"'](?:streamable-http|http)[\"']",
+          "usage": "the Streamable HTTP transport"
+        }
+      },
+      {
+        "id": "CVE-2026-116684",
+        "title": "MCP Python SDK bearer auth accepts tokens issued for a different resource",
+        "agent": "mcp",
+        "affectedVersions": ">=1.10.0 <1.30.0 || >=2.0.0 <2.2.0",
+        "fixedVersion": "1.30.0, 2.2.0",
+        "severity": "warning",
+        "description": "Server bearer-token authentication did not check the token's resource, so a token issued for another resource server was accepted.",
+        "reference": "https://github.com/advisories/GHSA-w4fh-qvv9-3v23",
+        "published": "2026-10-27",
+        "tags": [
+          "mcp",
+          "cve",
+          "sdk",
+          "oauth"
+        ],
+        "affectedDependency": {
+          "name": "mcp",
+          "versionConstraint": ">=1.10.0 <1.30.0 || >=2.0.0 <2.2.0",
+          "ecosystem": "pypi"
+        },
+        "appliesWhen": {
+          "sourcePattern": "AuthSettings|token_verifier|TokenVerifier",
+          "usage": "server bearer-token auth"
+        }
+      },
+      {
+        "id": "CVE-2026-116685",
+        "title": "MCP Python SDK HTTP client sends custom headers across origins on redirect",
+        "agent": "mcp",
+        "affectedVersions": ">=1.8.0 <1.30.0 || >=2.0.0 <2.2.0",
+        "fixedVersion": "1.30.0, 2.2.0",
+        "severity": "warning",
+        "description": "The HTTP client followed cross-origin redirects and kept custom headers, which can carry credentials, on the redirected request.",
+        "reference": "https://github.com/advisories/GHSA-5h93-6whr-6q8j",
+        "published": "2026-10-27",
+        "tags": [
+          "mcp",
+          "cve",
+          "sdk",
+          "credential-theft"
+        ],
+        "affectedDependency": {
+          "name": "mcp",
+          "versionConstraint": ">=1.8.0 <1.30.0 || >=2.0.0 <2.2.0",
+          "ecosystem": "pypi"
+        },
+        "appliesWhen": {
+          "sourcePattern": "streamablehttp_client|streamable_http_client|sse_client",
+          "usage": "HTTP client transports"
+        }
+      },
+      {
+        "id": "CVE-2026-116686",
+        "title": "MCP Python SDK client fetches server-chosen $ref URLs (SSRF)",
+        "agent": "mcp",
+        "affectedVersions": ">=1.10.0 <1.30.0 || >=2.0.0 <2.2.0",
+        "fixedVersion": "1.30.0, 2.2.0",
+        "severity": "warning",
+        "description": "When validating tool results the client resolved $ref URLs chosen by the server, letting a malicious server make the client fetch internal URLs.",
+        "reference": "https://github.com/advisories/GHSA-rwrf-2pqf-9j8j",
+        "published": "2026-10-27",
+        "tags": [
+          "mcp",
+          "cve",
+          "sdk",
+          "ssrf"
+        ],
+        "affectedDependency": {
+          "name": "mcp",
+          "versionConstraint": ">=1.10.0 <1.30.0 || >=2.0.0 <2.2.0",
+          "ecosystem": "pypi"
+        },
+        "appliesWhen": {
+          "sourcePattern": "ClientSession",
+          "usage": "the MCP client"
+        }
+      },
+      {
+        "id": "GHSA-q978-78c7-phqw",
+        "title": "MCP Inspector OAuth authorization URL PowerShell command injection (RCE)",
+        "agent": "mcp",
+        "affectedVersions": ">=2.0.0 <2.12.0",
+        "fixedVersion": "2.12.0",
+        "severity": "critical",
+        "description": "A malicious remote MCP server could put a PowerShell subexpression in its OAuth authorization URL, which the Inspector passed to the open package, running code on Windows/WSL (CVE-2026-119025 in open). Same class as CVE-2025-6514.",
+        "reference": "https://github.com/modelcontextprotocol/inspector/security/advisories/GHSA-q978-78c7-phqw",
+        "published": "2026-10-21",
+        "tags": [
+          "mcp",
+          "cve",
+          "rce"
+        ],
+        "affectedDependency": {
+          "name": "@modelcontextprotocol/inspector",
+          "versionConstraint": ">=2.0.0 <2.12.0"
+        }
+      },
+      {
+        "id": "GHSA-7xgj-8392-5q4r",
+        "title": "FastMCP skips authorization on transformed components called directly",
+        "agent": "mcp",
+        "affectedVersions": ">=3.0.0 <3.4.10 || >=4.0.0 <4.1.2",
+        "fixedVersion": "3.4.10, 4.1.2",
+        "severity": "warning",
+        "description": "Authorization checks attached to transformed tools, resources or prompts were skipped when the component was called directly. Also affects fastmcp-slim.",
+        "reference": "https://github.com/advisories/GHSA-7xgj-8392-5q4r",
+        "published": "2026-10-23",
+        "tags": [
+          "mcp",
+          "auth-bypass"
+        ],
+        "affectedDependency": {
+          "name": "fastmcp",
+          "versionConstraint": ">=3.0.0 <3.4.10 || >=4.0.0 <4.1.2",
+          "ecosystem": "pypi"
+        }
+      },
+      {
+        "id": "GHSA-vqqp-x5qm-5qp4",
+        "title": "FastMCP client M2M OAuth providers not bound to an issuer",
+        "agent": "mcp",
+        "affectedVersions": ">=4.0.0 <4.1.2",
+        "fixedVersion": "4.1.2",
+        "severity": "warning",
+        "description": "Client wrappers built machine-to-machine OAuth providers without issuer binding, so the client secret could be sent to an attacker-chosen token endpoint. Also affects fastmcp-slim (4.0.0 pre-releases included).",
+        "reference": "https://github.com/advisories/GHSA-vqqp-x5qm-5qp4",
+        "published": "2026-10-23",
+        "tags": [
+          "mcp",
+          "oauth",
+          "credential-theft"
+        ],
+        "affectedDependency": {
+          "name": "fastmcp",
+          "versionConstraint": ">=4.0.0 <4.1.2",
+          "ecosystem": "pypi"
+        }
+      },
+      {
+        "id": "CVE-2026-77363",
+        "title": "obsidian-tc Streamable HTTP transport lacks Origin / DNS-rebinding protection",
+        "agent": "mcp",
+        "affectedVersions": "<1.3.1",
+        "fixedVersion": "1.3.1",
+        "severity": "critical",
+        "description": "The loopback Streamable HTTP transport did not check Origin or Host, so any website could drive the server and read or change vaults. The same release fixes CVE-2026-77361/77362/77364/77366.",
+        "reference": "https://github.com/advisories/GHSA-pqh8-4pj7-32xx",
+        "published": "2026-10-23",
+        "tags": [
+          "mcp",
+          "cve",
+          "dns-rebinding"
+        ],
+        "affectedDependency": {
+          "name": "obsidian-tc",
+          "versionConstraint": "<1.3.1"
+        }
+      },
+      {
+        "id": "CVE-2026-115477",
+        "title": "obsidian-tc destructive calls proceed after a declined confirmation",
+        "agent": "mcp",
+        "affectedVersions": ">=1.13.0 <1.31.4",
+        "fixedVersion": "1.31.4",
+        "severity": "warning",
+        "description": "Over HTTP, a declined human-in-the-loop confirmation could still let a destructive tool call run.",
+        "reference": "https://github.com/advisories/GHSA-737x-cwfr-5vvc",
+        "published": "2026-10-23",
+        "tags": [
+          "mcp",
+          "cve"
+        ],
+        "affectedDependency": {
+          "name": "obsidian-tc",
+          "versionConstraint": ">=1.13.0 <1.31.4"
+        }
+      },
+      {
+        "id": "CVE-2026-62264",
+        "title": "pdf-reader-mcp HTTP transport ignores MCP_API_KEY",
+        "agent": "mcp",
+        "affectedVersions": ">=2.2.0 <3.0.1",
+        "fixedVersion": "3.0.1",
+        "severity": "warning",
+        "description": "The HTTP transport accepted unauthenticated requests even when MCP_API_KEY was set.",
+        "reference": "https://github.com/advisories/GHSA-q344-5v34-gm84",
+        "published": "2026-10-29",
+        "tags": [
+          "mcp",
+          "cve",
+          "auth-bypass"
+        ],
+        "affectedDependency": {
+          "name": "@sylphx/pdf-reader-mcp",
+          "versionConstraint": ">=2.2.0 <3.0.1"
+        }
+      },
+      {
+        "id": "CVE-2026-106765",
+        "title": "mcp-docker-tools code execution through handleImageList",
+        "agent": "mcp",
+        "affectedVersions": "<=1.0.1",
+        "severity": "warning",
+        "description": "Tool arguments reached a shell command in handleImageList, allowing arbitrary code execution. No fixed release; remove the server.",
+        "reference": "https://github.com/advisories/GHSA-fq6x-j3g6-xx83",
+        "published": "2026-10-23",
+        "tags": [
+          "mcp",
+          "cve",
+          "rce"
+        ],
+        "affectedDependency": {
+          "name": "@rog0x/mcp-docker-tools",
+          "versionConstraint": "<=1.0.1"
+        }
+      },
+      {
+        "id": "CVE-2026-106764",
+        "title": "mcp-git-tools code execution through resolveBaseBranch",
+        "agent": "mcp",
+        "affectedVersions": "<=1.0.1",
+        "severity": "warning",
+        "description": "Tool arguments reached a shell command in resolveBaseBranch, allowing arbitrary code execution. No fixed release; remove the server.",
+        "reference": "https://github.com/advisories/GHSA-jwc4-922r-f2rw",
+        "published": "2026-10-23",
+        "tags": [
+          "mcp",
+          "cve",
+          "rce"
+        ],
+        "affectedDependency": {
+          "name": "@rog0x/mcp-git-tools",
+          "versionConstraint": "<=1.0.1"
+        }
+      },
+      {
+        "id": "CVE-2026-106763",
+        "title": "sagemath-mcp-server sanitizer bypass allows code execution",
+        "agent": "mcp",
+        "affectedVersions": "<=1.0.1",
+        "severity": "warning",
+        "description": "escapeShellString / sanitizeCode could be bypassed, letting tool input run arbitrary code. No fixed release; remove the server.",
+        "reference": "https://github.com/advisories/GHSA-2vq3-mpmf-9xgr",
+        "published": "2026-10-23",
+        "tags": [
+          "mcp",
+          "cve",
+          "rce"
+        ],
+        "affectedDependency": {
+          "name": "@justice8096/sagemath-mcp-server",
+          "versionConstraint": "<=1.0.1"
+        }
+      },
+      {
+        "id": "CVE-2026-61789",
+        "title": "DBHub MySQL/MariaDB comments bypass read-only SQL validation",
+        "agent": "mcp",
+        "affectedVersions": "<0.22.6",
+        "fixedVersion": "0.22.6",
+        "severity": "warning",
+        "description": "MySQL/MariaDB comment syntax slipped write statements past the read-only validator.",
+        "reference": "https://github.com/advisories/GHSA-j656-3hf2-fvjc",
+        "published": "2026-11-02",
+        "tags": [
+          "mcp",
+          "cve"
+        ],
+        "affectedDependency": {
+          "name": "@bytebase/dbhub",
+          "versionConstraint": "<0.22.6"
+        }
+      },
+      {
+        "id": "CVE-2026-115413",
+        "title": "AWS API MCP Server OAuth mode accepts tokens for other applications",
+        "agent": "mcp",
+        "affectedVersions": ">=1.3.0 <1.6.0",
+        "fixedVersion": "1.6.0",
+        "severity": "warning",
+        "description": "In OAuth mode the server did not validate the token audience, so tokens issued to other applications in the same tenant were accepted. CVSS 7.3.",
+        "reference": "https://github.com/awslabs/mcp/security/advisories/GHSA-4prq-p2x5-w9fh",
+        "published": "2026-10-27",
+        "tags": [
+          "mcp",
+          "cve",
+          "oauth"
+        ],
+        "affectedDependency": {
+          "name": "awslabs.aws-api-mcp-server",
+          "versionConstraint": ">=1.3.0 <1.6.0",
+          "ecosystem": "pypi"
+        }
+      },
+      {
+        "id": "CVE-2026-116635",
+        "title": "AWS Serverless MCP Server directory traversal through project names",
+        "agent": "mcp",
+        "affectedVersions": "<0.2.1",
+        "fixedVersion": "0.2.1",
+        "severity": "warning",
+        "description": "A crafted project name let tool calls read or modify JSON files outside the deployment directory. CVSS 6.1.",
+        "reference": "https://github.com/awslabs/mcp/security/advisories/GHSA-r6mm-377j-qg8m",
+        "published": "2026-11-02",
+        "tags": [
+          "mcp",
+          "cve",
+          "path-traversal"
+        ],
+        "affectedDependency": {
+          "name": "awslabs.aws-serverless-mcp-server",
+          "versionConstraint": "<0.2.1",
+          "ecosystem": "pypi"
+        }
+      },
+      {
+        "id": "CVE-2026-53709",
+        "title": "MCP ContextForge gateway ships a hardcoded default JWT secret",
+        "agent": "mcp",
+        "affectedVersions": "<=1.0.1",
+        "fixedVersion": "1.0.2",
+        "severity": "critical",
+        "description": "The default JWT_SECRET_KEY in the source and .env.example let anyone forge admin tokens for deployments that kept it. CVSS 9.8. Upgrade to 1.0.2+ and set a unique secret.",
+        "reference": "https://github.com/IBM/mcp-context-forge/security/advisories/GHSA-m8rv-5m6m-32ff",
+        "published": "2026-10-13",
+        "tags": [
+          "mcp",
+          "cve",
+          "auth-bypass"
+        ],
+        "affectedDependency": {
+          "name": "mcp-contextforge-gateway",
+          "versionConstraint": "<=1.0.1",
+          "ecosystem": "pypi"
+        }
+      },
+      {
+        "id": "CVE-2026-108586",
+        "title": "1MCP agent negated tag filter bypasses OAuth tag scope",
+        "agent": "mcp",
+        "affectedVersions": ">=0.20.0 <=0.39.0",
+        "severity": "warning",
+        "description": "A negated tag-filter expression let an OAuth client reach servers outside its granted tag scope. CVSS 5.4. The record names no fixed release; upgrade past 0.39.0.",
+        "reference": "https://www.cve.org/CVERecord?id=CVE-2026-108586",
+        "published": "2026-10-10",
+        "exploitAvailable": true,
+        "tags": [
+          "mcp",
+          "cve",
+          "auth-bypass"
+        ],
+        "affectedDependency": {
+          "name": "@1mcp/agent",
+          "versionConstraint": ">=0.20.0 <=0.39.0"
+        }
+      },
+      {
+        "id": "CVE-2026-108585",
+        "title": "argocd-mcp path traversal in delete_application",
+        "agent": "mcp",
+        "affectedVersions": "<=0.9.0",
+        "severity": "warning",
+        "description": "Dot-segment application names in delete_application reached other Argo CD API paths. CVSS 5.4. No fixed release.",
+        "reference": "https://www.cve.org/CVERecord?id=CVE-2026-108585",
+        "published": "2026-10-10",
+        "exploitAvailable": true,
+        "tags": [
+          "mcp",
+          "cve",
+          "path-traversal"
+        ],
+        "affectedDependency": {
+          "name": "argocd-mcp",
+          "versionConstraint": "<=0.9.0"
+        }
+      },
+      {
+        "id": "CVE-2026-117561",
+        "title": "sf-mcp OS command injection through Salesforce CLI flag values",
+        "agent": "mcp",
+        "affectedVersions": "<=1.3.2",
+        "severity": "warning",
+        "description": "escapeValue did not handle $() or backticks, so tool arguments ran shell commands through the Salesforce CLI invocation. CVSS 4.0 8.5. No fixed release; remove the server.",
+        "reference": "https://www.cve.org/CVERecord?id=CVE-2026-117561",
+        "published": "2026-10-27",
+        "exploitAvailable": true,
+        "tags": [
+          "mcp",
+          "cve",
+          "rce"
+        ],
+        "affectedDependency": {
+          "name": "sf-mcp",
+          "versionConstraint": "<=1.3.2"
+        }
+      },
+      {
+        "id": "CVE-2026-113378",
+        "title": "mcp-ripgrep OS command injection through the fileType argument",
+        "agent": "mcp",
+        "affectedVersions": "<=0.4.0",
+        "severity": "warning",
+        "description": "The fileType argument of the advanced search tool reached a shell command. CVSS 5.3; a public exploit is reported. No fixed release.",
+        "reference": "https://www.cve.org/CVERecord?id=CVE-2026-113378",
+        "published": "2026-10-20",
+        "exploitAvailable": true,
+        "tags": [
+          "mcp",
+          "cve",
+          "rce"
+        ],
+        "affectedDependency": {
+          "name": "mcp-ripgrep",
+          "versionConstraint": "<=0.4.0"
+        }
+      },
+      {
+        "id": "CVE-2026-76894",
+        "title": "ckan-mcp-server DataStore UI does not validate postMessage origin",
+        "agent": "mcp",
+        "affectedVersions": "<0.4.112",
+        "fixedVersion": "0.4.112",
+        "severity": "info",
+        "description": "The DataStore UI resource accepted postMessage events from any origin.",
+        "reference": "https://github.com/advisories/GHSA-vqff-r82h-9crc",
+        "published": "2026-10-16",
+        "tags": [
+          "mcp",
+          "cve"
+        ],
+        "affectedDependency": {
+          "name": "@aborruso/ckan-mcp-server",
+          "versionConstraint": "<0.4.112"
+        }
+      },
+      {
+        "id": "MAL-2026-18603",
+        "title": "Malicious @ifasn/ms-doc-mcp steals cloud metadata credentials",
+        "agent": "mcp",
+        "affectedVersions": ">=0.0.0",
+        "severity": "critical",
+        "description": "Poses as a Markdown-toolkit MCP server; on load it queries the Alibaba Cloud metadata service for RAM credentials and sends them to the attacker. Every @ifasn/*-doc-mcp package is part of the campaign. Remove it and rotate cloud credentials.",
+        "reference": "https://github.com/advisories/GHSA-556m-xfwj-7wff",
+        "published": "2026-11-04",
+        "tags": [
+          "mcp",
+          "malicious-package",
+          "supply-chain"
+        ],
+        "affectedDependency": {
+          "name": "@ifasn/ms-doc-mcp",
+          "versionConstraint": ">=0.0.0"
+        }
+      },
+      {
+        "id": "MAL-2026-18489",
+        "title": "Malicious @ifasn/mmdd-doc-mcp steals cloud metadata credentials",
+        "agent": "mcp",
+        "affectedVersions": ">=0.0.0",
+        "severity": "critical",
+        "description": "Same @ifasn campaign: an MCP server that performs the Alibaba Cloud metadata token handshake to steal RAM credentials. Remove it and rotate cloud credentials.",
+        "reference": "https://github.com/advisories/GHSA-4h5p-w547-9qmv",
+        "published": "2026-11-02",
+        "tags": [
+          "mcp",
+          "malicious-package",
+          "supply-chain"
+        ],
+        "affectedDependency": {
+          "name": "@ifasn/mmdd-doc-mcp",
+          "versionConstraint": ">=0.0.0"
+        }
+      },
+      {
+        "id": "MAL-2026-18488",
+        "title": "Malicious @ifasn/mmd-doc-mcp probes cloud metadata endpoints",
+        "agent": "mcp",
+        "affectedVersions": ">=0.0.0",
+        "severity": "critical",
+        "description": "Same @ifasn campaign: probes AWS, GCP, Azure and Alibaba metadata endpoints and sends the results to the attacker.",
+        "reference": "https://github.com/advisories/GHSA-f826-46h5-5rcq",
+        "published": "2026-11-02",
+        "tags": [
+          "mcp",
+          "malicious-package",
+          "supply-chain"
+        ],
+        "affectedDependency": {
+          "name": "@ifasn/mmd-doc-mcp",
+          "versionConstraint": ">=0.0.0"
+        }
+      },
+      {
+        "id": "MAL-2026-18487",
+        "title": "Malicious @ifasn/mdd-doc-mcp probes cloud metadata endpoints",
+        "agent": "mcp",
+        "affectedVersions": ">=0.0.0",
+        "severity": "critical",
+        "description": "Same @ifasn campaign: steals cloud metadata credentials from the host running the MCP server.",
+        "reference": "https://github.com/advisories/GHSA-4q9j-4rv8-jp32",
+        "published": "2026-11-02",
+        "tags": [
+          "mcp",
+          "malicious-package",
+          "supply-chain"
+        ],
+        "affectedDependency": {
+          "name": "@ifasn/mdd-doc-mcp",
+          "versionConstraint": ">=0.0.0"
+        }
+      },
+      {
+        "id": "MAL-2026-18486",
+        "title": "Malicious @ifasn/md-doc-mcp probes cloud metadata endpoints",
+        "agent": "mcp",
+        "affectedVersions": ">=0.0.0",
+        "severity": "critical",
+        "description": "Same @ifasn campaign: steals cloud metadata credentials from the host running the MCP server.",
+        "reference": "https://github.com/advisories/GHSA-rvw8-22w3-342v",
+        "published": "2026-11-02",
+        "tags": [
+          "mcp",
+          "malicious-package",
+          "supply-chain"
+        ],
+        "affectedDependency": {
+          "name": "@ifasn/md-doc-mcp",
+          "versionConstraint": ">=0.0.0"
+        }
+      },
+      {
+        "id": "GHSA-65cr-mcfq-59hh",
+        "title": "Malicious @atlisp/mcp release loads remote code into the CAD process",
+        "agent": "mcp",
+        "affectedVersions": "=1.12.14",
+        "severity": "critical",
+        "description": "This release injects a LISP bootstrap that evals code fetched over plain HTTP from atlisp.cn into the running CAD process. Pin a release outside the advisory or remove the server.",
+        "reference": "https://github.com/advisories/GHSA-65cr-mcfq-59hh",
+        "published": "2026-10-28",
+        "tags": [
+          "mcp",
+          "malicious-package",
+          "supply-chain"
+        ],
+        "affectedDependency": {
+          "name": "@atlisp/mcp",
+          "versionConstraint": "=1.12.14"
+        }
+      },
+      {
+        "id": "MAL-2026-17923",
+        "title": "Malicious @apexacc/audit fake security MCP server drops an infostealer",
+        "agent": "mcp",
+        "affectedVersions": ">=0.0.0",
+        "severity": "critical",
+        "description": "\"Apex Accelerator\" campaign: a fake security MCP server that registers itself in Claude Desktop, Cursor and Windsurf and drops an infostealer (CloudSyncD on macOS). Remove it, treat the host as compromised and rotate credentials.",
+        "reference": "https://osv.dev/vulnerability/MAL-2026-17923",
+        "published": "2026-10-16",
+        "tags": [
+          "mcp",
+          "malicious-package",
+          "supply-chain"
+        ],
+        "affectedDependency": {
+          "name": "@apexacc/audit",
+          "versionConstraint": ">=0.0.0"
+        }
+      },
+      {
+        "id": "MAL-2026-17825",
+        "title": "Malicious @revizahoshii/hoshino-mcp-server",
+        "agent": "mcp",
+        "affectedVersions": ">=0.0.0",
+        "severity": "critical",
+        "description": "GitHub malware advisory: any computer that installed or ran this package should be treated as fully compromised.",
+        "reference": "https://github.com/advisories/GHSA-xjwm-grrq-qm27",
+        "published": "2026-10-12",
+        "tags": [
+          "mcp",
+          "malicious-package",
+          "supply-chain"
+        ],
+        "affectedDependency": {
+          "name": "@revizahoshii/hoshino-mcp-server",
+          "versionConstraint": ">=0.0.0"
+        }
+      },
+      {
+        "id": "MAL-2026-16355",
+        "title": "Malicious gemini-computer-use MCP server runs a remote install script",
+        "agent": "mcp",
+        "affectedVersions": "=0.1.2 || =0.4.3 || =0.4.5",
+        "severity": "critical",
+        "description": "These releases run `curl … | bash` (PowerShell iex on Windows) from a remote host when the CLI/main entry starts. Remove the server.",
+        "reference": "https://osv.dev/vulnerability/MAL-2026-16355",
+        "published": "2026-09-21",
+        "tags": [
+          "mcp",
+          "malicious-package",
+          "supply-chain"
+        ],
+        "affectedDependency": {
+          "name": "gemini-computer-use",
+          "versionConstraint": "=0.1.2 || =0.4.3 || =0.4.5"
+        }
+      },
+      {
+        "id": "MAL-2026-18706",
+        "title": "Malicious mcp-teamviewer (PyPI)",
+        "agent": "mcp",
+        "affectedVersions": "=0.0.1",
+        "severity": "critical",
+        "description": "Its setup.py install hook sends the host's IP address and username to a domain associated with malicious activity (OpenSSF Package Analysis; classed as a pentest-style kit). Remove it.",
+        "reference": "https://github.com/advisories/GHSA-w2mh-fxh2-j425",
+        "published": "2026-11-05",
+        "tags": [
+          "mcp",
+          "malicious-package",
+          "supply-chain"
+        ],
+        "affectedDependency": {
+          "name": "mcp-teamviewer",
+          "versionConstraint": "=0.0.1",
+          "ecosystem": "pypi"
+        }
+      },
+      {
+        "id": "MAL-2026-18705",
+        "title": "Malicious teamviewer-mcp-server (PyPI)",
+        "agent": "mcp",
+        "affectedVersions": "=0.0.1",
+        "severity": "critical",
+        "description": "Its setup.py install hook sends the host's IP address and username to a domain associated with malicious activity (OpenSSF Package Analysis; classed as a pentest-style kit). Remove it.",
+        "reference": "https://github.com/advisories/GHSA-v98v-h2h9-7j3h",
+        "published": "2026-11-05",
+        "tags": [
+          "mcp",
+          "malicious-package",
+          "supply-chain"
+        ],
+        "affectedDependency": {
+          "name": "teamviewer-mcp-server",
+          "versionConstraint": "=0.0.1",
+          "ecosystem": "pypi"
+        }
+      },
+      {
+        "id": "MAL-2026-5479",
+        "title": "Malicious typosquat mcp-server-github (unscoped impersonation of the GitHub MCP server)",
+        "agent": "mcp",
+        "affectedVersions": ">=0.0.0",
+        "severity": "critical",
+        "description": "Takes the unscoped name to catch misrouted installs of the GitHub MCP server, like its siblings mcp-server-notion and mcp-server-sequential-thinking. Use the official GitHub MCP server instead.",
+        "reference": "https://osv.dev/vulnerability/MAL-2026-5479",
+        "published": "2026-06-09",
+        "tags": [
+          "mcp",
+          "malicious-package",
+          "supply-chain"
+        ],
+        "affectedDependency": {
+          "name": "mcp-server-github",
+          "versionConstraint": ">=0.0.0"
         }
       }
     ]

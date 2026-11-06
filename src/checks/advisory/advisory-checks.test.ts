@@ -91,8 +91,8 @@ describe('ADV-001: Known Framework Vulnerability', () => {
   });
 
   it('passes for unaffected agent', async () => {
-    // NanoClaw 3.0.0 should not be affected
-    const ctx = makeContext({ agent: 'nanoclaw', version: '3.0.0' });
+    // NanoClaw 2026.10.0 (calver after 2.x) carries every fix so far
+    const ctx = makeContext({ agent: 'nanoclaw', version: '2026.10.0' });
     const result = await adv001.run(ctx);
     expect(result.passed).toBe(true);
   });
