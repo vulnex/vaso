@@ -84,7 +84,8 @@ export const mcp035 = defineCheck({
         const lines = source.sourceCode.split('\n');
         for (const line of table.lines) {
           const text = lines[line - 1]?.trim() ?? '';
-          evidence.push({ file, line, snippet: text.slice(0, 80) + (text.length > 80 ? '...' : ''), detail: 'Encoded literal decoded at runtime' });
+          const shown = hideEncodedLiterals(text);
+          evidence.push({ file, line, snippet: shown.slice(0, 80) + (shown.length > 80 ? '...' : ''), detail: 'Encoded literal decoded at runtime' });
         }
       } else {
         // Decoder-less (or literals that don't decode to text): informational
@@ -95,7 +96,7 @@ export const mcp035 = defineCheck({
           evidence.push({
             file,
             line: hit.line,
-            snippet: hit.snippet,
+            snippet: hideEncodedLiterals(hit.snippet),
             detail: `${hit.label} (no runtime decoder found — unconfirmed obfuscation)`,
           });
         }
@@ -113,10 +114,19 @@ export const mcp035 = defineCheck({
 });
 
 /** "; decoded, they include …" — kinds and hosts only, never the hidden values. */
+/**
+ * The encoded literals on a quoted line, replaced by their length: decoded,
+ * they are the hidden values (keys, URLs) this check must never print.
+ */
+const ENCODED_LITERAL = /(["'`])[A-Za-z0-9+/_=-]{16,}\1/g;
+function hideEncodedLiterals(text: string): string {
+  return text.replace(ENCODED_LITERAL, (m, q: string) => `${q}<encoded, ${m.length - 2} chars>${q}`);
+}
+
 function describeRevealed(revealed: RevealedStrings | undefined): string {
   if (!revealed) return '';
   const parts: string[] = [];
-  for (const kind of revealed.secretKinds) parts.push(`a ${kind}`);
+  for (const kind of revealed.secretKinds) parts.push(`${/^[aeiou]/i.test(kind) ? 'an' : 'a'} ${kind}`);
   if (revealed.emailDomains.length > 0) {
     parts.push(`${revealed.emailDomains.length === 1 ? 'an email address' : 'email addresses'} at ${revealed.emailDomains.join(', ')} (personal data)`);
   }

@@ -36,7 +36,8 @@ const RESTORED_PREFIX = 'restored-';
  * If no timestamp is given, uses the most recent backup not yet restored —
  * so repeated rollbacks undo fix runs one at a time, newest first.
  */
-export async function rollback(timestamp?: string): Promise<void> {
+export async function rollback(timestamp?: string, options: { dryRun?: boolean } = {}): Promise<void> {
+  const dryRun = options.dryRun === true;
   const backupsDir = join(homedir(), '.vaso', 'backups');
 
   if (!await pathExists(backupsDir)) {
@@ -86,7 +87,8 @@ export async function rollback(timestamp?: string): Promise<void> {
   }
 
   const backupDir = join(backupsDir, target);
-  console.log(chalk.cyan(`Restoring from backup: ${target}`));
+  console.log(chalk.cyan(`${dryRun ? 'Would restore' : 'Restoring'} from backup: ${target}`));
+  if (dryRun) console.log(chalk.dim('(dry run — no changes will be made)'));
 
   // Collect all files recursively from the backup directory
   const manifest = await readManifest(backupDir);
@@ -104,6 +106,11 @@ export async function rollback(timestamp?: string): Promise<void> {
       // With a manifest, only what the fix run recorded is restored
       if (manifest && !manifest.entries[originalPath]) {
         console.log(`  ${chalk.yellow('!')} Skipped ${originalPath}: not recorded in this backup's manifest`);
+        continue;
+      }
+      if (dryRun) {
+        console.log(`  ${chalk.cyan('[dry-run]')} Would restore ${originalPath}`);
+        restored++;
         continue;
       }
       const note = await withFixBoundary({ roots }, () => restoreFile(backupFilePath, originalPath, manifest?.entries[originalPath]));
@@ -132,6 +139,11 @@ export async function rollback(timestamp?: string): Promise<void> {
         console.log(`  ${chalk.yellow('!')} Skipped ${dir}: ${moved}`);
         continue;
       }
+      if (dryRun) {
+        console.log(`  ${chalk.cyan('[dry-run]')} Would restore the mode of ${dir}`);
+        restored++;
+        continue;
+      }
       await withFixBoundary({ roots }, () => chmodNoFollow(dir, entry.mode));
       restored++;
     } catch (err) {
@@ -141,6 +153,10 @@ export async function rollback(timestamp?: string): Promise<void> {
 
   // Retire the backup so the next rollback undoes the fix run before it.
   // A partial restore stays pending, to be retried.
+  if (dryRun) {
+    console.log(`\n${chalk.bold('Dry run:')} ${restored} item(s) would be restored`);
+    return;
+  }
   if (restored === total && !target.startsWith(RESTORED_PREFIX)) {
     await rename(backupDir, join(backupsDir, `${RESTORED_PREFIX}${target}`));
   }

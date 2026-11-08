@@ -194,6 +194,36 @@ func TestRunCommandIsolateHome(t *testing.T) {
 	}
 }
 
+// A CLI that quotes a credential file in an error (openshell echoes
+// active_gateway in "Unknown gateway '…'") must not ship the credential.
+func TestRunCommandRedactsCredentialsInOutput(t *testing.T) {
+	commandAllowlist["sh"] = true
+	defer delete(commandAllowlist, "sh")
+	key := "sk-ant-api03-" + strings.Repeat("Qx7", 14)
+	out := runCommand(CommandRequest{ID: "t", Cmd: "sh", Args: []string{"-c",
+		"echo 'openshell 0.0.116'; echo \"Unknown gateway '" + key + "' https://u:hunter2pass@h.example/x?token=abc123def\" >&2"}}, "")
+	if !strings.Contains(out.Stdout, "openshell 0.0.116") {
+		t.Fatalf("version output changed: %q", out.Stdout)
+	}
+	for _, s := range []string{key, "hunter2pass", "abc123def"} {
+		if strings.Contains(out.Stderr, s) {
+			t.Fatalf("stderr ships %q: %q", s, out.Stderr)
+		}
+	}
+	if !strings.Contains(out.Stderr, "Unknown gateway") || !strings.Contains(out.Stderr, "h.example") {
+		t.Fatalf("stderr structure lost: %q", out.Stderr)
+	}
+	// the report wrapped the key mid-token behind a "│" gutter
+	wrapped := runCommand(CommandRequest{ID: "t", Cmd: "sh", Args: []string{"-c",
+		"printf 'Error:   × Unknown gateway \\x27anthropic: sk-\\n  │ ant-api03-" + strings.Repeat("Qx7", 7) + "\\n  │ " + strings.Repeat("Zr4", 7) + "\\x27.\\n' >&2"}}, "")
+	if strings.Contains(wrapped.Stderr, strings.Repeat("Qx7", 7)) || strings.Contains(wrapped.Stderr, strings.Repeat("Zr4", 7)) {
+		t.Fatalf("wrapped key shipped: %q", wrapped.Stderr)
+	}
+	if !strings.Contains(wrapped.Stderr, "Unknown gateway") || !strings.Contains(wrapped.Stderr, redactedEnvValue) {
+		t.Fatalf("wrapped report not redacted in place: %q", wrapped.Stderr)
+	}
+}
+
 // A link into a checkout outside the skills tree is followed (the agent loads
 // it); links back into the tree are not (TestGlobFollowsSkillLinksOutsideTheTree).
 func TestCollectFollowsOutsideSkillLinksAndRecordsLinks(t *testing.T) {

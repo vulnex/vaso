@@ -254,6 +254,16 @@ function maskArgv(args: string[]): string[] {
   return out;
 }
 
+/**
+ * An evidence snippet quotes a line of a config or source file, where a
+ * credential is written `"key": "value"` / `key: value` as often as
+ * `KEY=value` — a one-line JSON file puts every key a check didn't match on
+ * the same line as the one it did.
+ */
+function maskString(value: string, key: string): string {
+  return key === 'snippet' ? maskCredentialsInLine(value) : maskCredentialsInText(value);
+}
+
 const isStringArray = (v: unknown): v is string[] => Array.isArray(v) && v.length > 0 && v.every(x => typeof x === 'string');
 
 /**
@@ -262,7 +272,7 @@ const isStringArray = (v: unknown): v is string[] => Array.isArray(v) && v.lengt
  * never print them); env/header maps have their values masked.
  */
 export function maskCredentialsDeep<T>(value: T, key = ''): T {
-  if (typeof value === 'string') return maskCredentialsInText(value) as T;
+  if (typeof value === 'string') return maskString(value, key) as T;
   if (isStringArray(value)) return maskArgv(value) as T;
   if (Array.isArray(value)) return value.map(v => maskCredentialsDeep(v)) as T;
   if (value && typeof value === 'object') {
@@ -279,7 +289,7 @@ function maskMap(map: Record<string, unknown>): Record<string, unknown> {
 }
 
 export function reportReplacer(this: unknown, key: string, value: unknown): unknown {
-  if (typeof value === 'string') return maskCredentialsInText(value);
+  if (typeof value === 'string') return maskString(value, key);
   if (isStringArray(value)) return maskArgv(value);
   if (key === 'configFiles' && Array.isArray(value)) {
     return value.map(c => (c && typeof c === 'object'

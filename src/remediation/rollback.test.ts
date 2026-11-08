@@ -73,6 +73,20 @@ describe('fix + rollback (real files)', () => {
     expect(process.exitCode).toBeUndefined();
   });
 
+  it('a dry run lists what it would restore and changes nothing', async () => {
+    const f = join(home.dir, 'config.json');
+    await writeFile(f, '{"a":1}\n');
+    const [backup] = await runFix(f, p => writeRegularFile(p, '{"a":2}\n'));
+    logs = [];
+    await rollback(undefined, { dryRun: true });
+    expect(await readFile(f, 'utf-8')).toBe('{"a":2}\n');
+    expect(await readdir(join(home.dir, '.vaso', 'backups'))).toEqual([backup]);
+    expect(logs.join('\n')).toMatch(/Would restore .*config\.json/);
+    // the backup is still pending: a real rollback restores it
+    await rollback();
+    expect(await readFile(f, 'utf-8')).toBe('{"a":1}\n');
+  });
+
   it.skipIf(!posix)('restores a read-only file', async () => {
     const f = join(home.dir, 'auth.json');
     await writeFile(f, 'secret');

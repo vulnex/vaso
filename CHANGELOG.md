@@ -17,10 +17,20 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **Probe builds are reproducible.** `make` in `probe/` passes `-buildvcs=false`. Go no longer stamps the commit, its time and a dirty flag into the binary, so a probe rebuilt from a release tag matches the published checksums.
+
 - **GB-009 follows Grok Bot 0.78's Messages read and send switches.** 0.78 split Messages access into reading (`messagesReadEnabled`) and sending (`messagesSendEnabled`), both on by default. Reading needs no per-use prompt once Messages is on, so it stays a warning; send-only access asks for each recipient and is now info; both off passes. A non-boolean value in either switch, or in `macMailSendEnabled`, makes the app reject `settings.json`, and the Grok Bot checks now treat it the same way. Verified against Grok Bot 0.78.4 on macOS.
 
 ### Fixed
 
+- **Reports no longer quote secrets in finding snippets.**
+  - The memory-file checks (CC-012, CDX-007, OPC-007, GEM-010, QC-010, GHC-008, DEV-007, ABA-012) and SKL-002 printed up to 80 characters of a high-entropy string they flagged. They now show its first and last 4 characters and its length.
+  - A quoted config line is now masked for `"key": "value"` and `key: value` credentials as well as `KEY=value`, so CFG-002 on a one-line JSON file (NemoClaw `credentials.json`, a minified config) no longer prints the other keys on that line. This covers every report format and saved baselines.
+  - MCP-035 no longer quotes the encoded literals it reports, since decoded they are the hidden values; they show as `<encoded, N chars>`.
+- **Remote scans no longer copy credentials that a command prints.** The probe now redacts token-shaped values and URL credentials in the output of the commands it runs. For example, `openshell` quotes the contents of `~/.config/openshell/active_gateway` in its "Unknown gateway" error, wrapped across lines.
+- **A declarative rule with a bounded nested quantifier can no longer hang a scan.** Patterns such as `(a{1,25}){1,25}$` or `(a?){25}` now fail `vaso rules validate` and are skipped at load. Bounded patterns like `(\d{1,3}\.){3}` are still accepted. Rule regexes run synchronously, so `VASO_CHECK_TIMEOUT` could not stop them.
+- **A NUL byte no longer hides a skill or MCP server source from analysis.** A file was skipped as binary if it contained any NUL byte, although Node and Python run such a file. Now only executables and NUL-dense data are skipped; stray NULs are read as spaces.
+- **`vaso fix --dry-run --rollback` previews the rollback instead of performing it.** It lists what would be restored and leaves the backup pending.
 - **`vaso detect --verbose` on a remote host or snapshot no longer lists the scanning machine's paths.** "Adapters checked" printed every adapter's config search paths resolved against the machine running VASO (`/Users/…` while detecting a Linux host). Remote and snapshot detection now list each adapter's found / not found status only; local detection still shows the search paths.
 
 ## [1.4.0] - 2026-10-27

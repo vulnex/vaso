@@ -58,3 +58,14 @@ describe('findHighEntropyBlocks', () => {
     expect(blocks).toHaveLength(0);
   });
 });
+
+describe('findHighEntropyBlocks snippets', () => {
+  it('never quotes the high-entropy string itself', () => {
+    const secret = 'Zq8Lr2Vx9Kp4Ty7Wm1Nc6Hb3Jd5Gf0SaXe8Ru2Io4Pl7Mk9Qw1Ev3Bn6Cz0YtAhUgDfSj';
+    const [block] = findHighEntropyBlocks(`TOKEN = "${secret}"`, 4.5, 40);
+    expect(block).toBeDefined();
+    expect(block.snippet).toBe(`${secret.slice(0, 4)}…${secret.slice(-4)} (${secret.length} chars)`);
+    expect(block.snippet).not.toContain(secret.slice(0, 16));
+    expect(block.snippet).not.toContain(secret.slice(-12));
+  });
+});

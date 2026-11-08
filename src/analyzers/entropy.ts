@@ -51,7 +51,8 @@ export function findHighEntropyBlocks(
         results.push({
           line: i + 1,
           entropy: Math.round(entropy * 100) / 100,
-          snippet: str.slice(0, 80) + (str.length > 80 ? '...' : ''),
+          // The block is the suspected secret itself: never quote it
+          snippet: `${str.slice(0, 4)}…${str.slice(-4)} (${str.length} chars)`,
         });
       }
     }

@@ -191,6 +191,38 @@ function hasVariableRepeat(terms: Term[], unboundedOnly: boolean): boolean {
     || (t.alts?.some(seq => hasVariableRepeat(seq, unboundedOnly)) ?? false));
 }
 
+/**
+ * A bounded repeat of a group with variable-length parts can still try
+ * every way of splitting the input between its iterations: `(a{1,25}){1,25}`
+ * is 25^25 ways, `(a?){25}` 2^25, while `(\d{1,3}\.){3}` is 27. Above this
+ * many ways (log10) the group is rejected like an unbounded one.
+ */
+const MAX_SPLITS_LOG10 = 5;
+
+/** log10 of the ways one match of `terms` can vary in length (an over-estimate). */
+function sequenceWaysLog10(terms: Term[]): number {
+  return terms.reduce((sum, t) => sum + termWaysLog10(t), 0);
+}
+
+function termWaysLog10(t: Term): number {
+  if (t.zeroWidth) return 0;
+  if (t.max === Infinity) return 9;
+  const range = Math.log10(t.max - t.min + 1);
+  if (!t.alts) return range;
+  return range + groupSplitsLog10(t);
+}
+
+/** log10 of the ways a group's `max` iterations can split the input. */
+function groupSplitsLog10(t: Term): number {
+  const alts = t.alts ?? [];
+  // log10(sum of 10^x) over the alternatives, without overflowing
+  const logs = alts.map(sequenceWaysLog10);
+  const top = Math.max(0, ...logs);
+  const perIteration = top + Math.log10(logs.reduce((sum, x) => sum + 10 ** (x - top), 0) || 1);
+  if (perIteration === 0) return 0;
+  return perIteration * (t.max === Infinity ? 9 : t.max);
+}
+
 function checkSequence(terms: Term[]): string | undefined {
   for (let n = 0; n < terms.length; n++) {
     const t = terms[n];
@@ -199,7 +231,7 @@ function checkSequence(terms: Term[]): string | undefined {
         // a repeated group that repeats a variable-length part
         const inner = t.max === Infinity
           ? t.alts.some(seq => hasVariableRepeat(seq, false)) || canBeEmpty({ ...t, min: 1 })
-          : t.alts.some(seq => hasVariableRepeat(seq, true));
+          : t.alts.some(seq => hasVariableRepeat(seq, true)) || groupSplitsLog10(t) > MAX_SPLITS_LOG10;
         if (inner) return 'a quantified group repeats a variable-length quantifier inside it (nested quantifiers)';
         if (t.max === Infinity && t.alts.length > 1) {
           const starts = t.alts.map(firstChars);

@@ -22,6 +22,15 @@ describe('toReportJson', () => {
     expect(server.headers.Authorization).toBe(`Bear…(${SECRET.length + 7} chars)`);
   });
 
+  it('masks every credential on a quoted one-line JSON snippet', () => {
+    const nv = 'nvapi-PLANTEDNMKEY0123456789abcdefghijklmnop';
+    const custom = 'CUSTOMsecretVALUE0123456789xyzABC';
+    const out = toReportJson({ evidence: [{ file: '/h/.nemoclaw/credentials.json', snippet: `{"NVIDIA_API_KEY":"${nv}","apiKey":"${custom}","model":"llama"}` }] });
+    expect(out).not.toContain(nv.slice(0, 16));
+    expect(out).not.toContain(custom.slice(0, 16));
+    expect(out).toContain('"model\\":\\"llama');
+  });
+
   it('leaves everything else untouched', () => {
     const value = { timestamp: 't', agents: [{ results: [{ id: 'CFG-001', evidence: [{ file: '/a', snippet: 'x' }] }] }] };
     expect(JSON.parse(toReportJson(value))).toEqual(value);

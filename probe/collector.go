@@ -879,9 +879,12 @@ func runCommand(req CommandRequest, augmentedPath string) CommandOutput {
 		}
 	}
 
+	// A CLI can quote the files it read in its output, an error message
+	// above all ("Unknown gateway '<file contents>'"): no check reads a
+	// credential from a command, so none leaves the host in one
 	return CommandOutput{
-		Stdout:   stdout.String(),
-		Stderr:   stderr.String(),
+		Stdout:   redactSecretValues(stdout.String()),
+		Stderr:   redactSecretValues(unwrapGutter(stderr.String())),
 		ExitCode: exitCode,
 	}
 }
@@ -946,6 +949,17 @@ func redactURLUserinfo(s string) string {
 // (OPENAI_ORG=sk-proj-…, LYRIE_TELEGRAM_BOT=123456:…) must not ship either.
 // RE2 is linear, so no input can make this slow.
 var tokenShaped = regexp.MustCompile(`(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-(?:proj-|ant-|svcacct-|admin-|or-v1-)?[A-Za-z0-9_-]{20,}|xox[abprs]-[A-Za-z0-9-]{10,}|A(?:KIA|SIA)[0-9A-Z]{16,}|\bdevin-[A-Za-z0-9$._-]{60,}|\bcog_[A-Za-z0-9]{16,}|\bapk_(?:user_)?[A-Za-z0-9]{16,}|\bnvapi-[A-Za-z0-9_-]{20,}|AIza[0-9A-Za-z_-]{30,}|glpat-[A-Za-z0-9_-]{20,}|\b[0-9]{6,12}:[A-Za-z0-9_-]{30,}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]*)`)
+
+// gutterWrap is a continuation line of a Rust CLI error report (miette, as
+// openshell prints it): the report is wrapped to the terminal width anywhere,
+// even inside a token, and each continuation starts with a "│" gutter.
+var gutterWrap = regexp.MustCompile(`\n[ \t]*│ ?`)
+
+// unwrapGutter joins such continuations, so a token the report broke across
+// lines is one token again for redactSecretValues.
+func unwrapGutter(s string) string {
+	return gutterWrap.ReplaceAllString(s, "")
+}
 
 // urlParam matches one name=value pair in a URL's query or fragment.
 var urlParam = regexp.MustCompile(`([?&#;])([^=&#;\s]+)=([^&#;\s]*)`)

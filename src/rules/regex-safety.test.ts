@@ -18,6 +18,10 @@ describe('unsafeRegexReason', () => {
     '^(([a-z])+.)+[A-Z]([a-z])+$',
     '(?=(a+)+b)',
     'x(?:(?:a+)+)y',
+    // bounded repeats of a variable-length group: 25^25 / 2^25 ways to split the input
+    '(a{1,25}){1,25}$',
+    '(a{1,30}){1,30}$',
+    '(a?){25}a{25}',
   ])('rejects %s', (re) => {
     expect(unsafeRegexReason(re)).toBeDefined();
   });
@@ -38,6 +42,10 @@ describe('unsafeRegexReason', () => {
     '(?:https?|ftp)://[^\\s/]+',
     '\\{\\{\\w+\\}\\}',
     'a{2}b{3,}',
+    '(\\d{1,3}\\.){3}\\d{1,3}',
+    '([a-z]{1,8}\\.){1,4}[a-z]{2,6}',
+    '(\\w{2,4}-){10}',
+    '^(foo|bar){2}$',
   ])('accepts %s', (re) => {
     expect(unsafeRegexReason(re)).toBeUndefined();
   });

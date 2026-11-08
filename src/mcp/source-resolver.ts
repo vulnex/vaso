@@ -5,6 +5,7 @@ import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { fetchNpmPackageSource, packageExtractDir, type PackageFetchResult } from './package-fetcher.js';
 import { collectServerDependencies } from './server-dependencies.js';
 import { parse as parseTOML } from 'smol-toml';
+import { sourceText } from '../analyzers/binary-text.js';
 
 /**
  * A command's executable name, also when the config gives it as a path —
@@ -185,9 +186,8 @@ async function readSourceFile(filePath: string, fs: FSProvider): Promise<string 
     const content = await fs.readFile(filePath);
     // A native executable (a Mach-O / ELF server binary launched by path) is
     // not source: read as text, its bytes match "invisible character" and
-    // "encoded string" patterns everywhere.
-    if (content.slice(0, 8192).includes('\u0000')) return undefined;
-    return content;
+    // "encoded string" patterns everywhere. A stray NUL in a script is not one.
+    return sourceText(content);
   } catch {
     return undefined;
   }

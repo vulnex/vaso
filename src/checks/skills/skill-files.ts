@@ -3,6 +3,7 @@ import type { ScanContext } from '../../core/types.js';
 import type { FSProvider } from '../../core/fs-provider.js';
 import { BINARY_EXTENSIONS, getAllSkillsDirs, getSkillFiles } from '../../core/utils.js';
 import { readCappedFile } from '../../core/file-limits.js';
+import { sourceText } from '../../analyzers/binary-text.js';
 
 /** Every skills directory of the installation (not just the primary one). */
 export function skillsDirsOf(ctx: ScanContext): string[] {
@@ -57,7 +58,7 @@ export function markdownCodeBlocks(md: string): string {
 export async function readSkillText(fs: FSProvider, file: string, mode: 'code' | 'patterns'): Promise<string | undefined> {
   if (BINARY_EXTENSIONS.has(extname(file).toLowerCase())) return undefined;
   if (mode === 'code' && !isSourceFile(file)) return undefined;
-  const text = await readCappedFile(fs, file);
-  if (text.includes('\0')) return undefined;
+  const text = sourceText(await readCappedFile(fs, file));
+  if (text === undefined) return undefined;
   return isMarkdown(file) ? markdownCodeBlocks(text) : text;
 }

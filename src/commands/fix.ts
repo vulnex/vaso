@@ -23,7 +23,7 @@ export async function runFix(options: FixCommandOptions): Promise<void> {
       process.exitCode = 2;
       return;
     }
-    await rollback(typeof options.rollback === 'string' ? options.rollback : undefined);
+    await rollback(typeof options.rollback === 'string' ? options.rollback : undefined, { dryRun: options.dryRun });
     return;
   }
 

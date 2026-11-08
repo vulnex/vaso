@@ -5,6 +5,10 @@ BINARY := vaso-probe
 # the release sequence, `make checksums` runs.
 VERSION := $(shell node -p "require('../package.json').version" 2>/dev/null || git describe --tags --always 2>/dev/null || echo "dev")
 LDFLAGS := -s -w -X main.version=$(VERSION)
+# -buildvcs=false: Go would otherwise stamp the commit, its time and a dirty
+# flag into the binary, so a probe rebuilt from the release tag would not match
+# the published checksums
+GOFLAGS_BUILD := -trimpath -buildvcs=false
 
 .PHONY: all clean test checksums
 
@@ -20,19 +24,19 @@ checksums: all
 
 dist/$(BINARY)-linux-amd64:
 	@mkdir -p dist
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "$(LDFLAGS)" -o $@ .
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build $(GOFLAGS_BUILD) -ldflags "$(LDFLAGS)" -o $@ .
 
 dist/$(BINARY)-linux-arm64:
 	@mkdir -p dist
-	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "$(LDFLAGS)" -o $@ .
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build $(GOFLAGS_BUILD) -ldflags "$(LDFLAGS)" -o $@ .
 
 dist/$(BINARY)-darwin-amd64:
 	@mkdir -p dist
-	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -trimpath -ldflags "$(LDFLAGS)" -o $@ .
+	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build $(GOFLAGS_BUILD) -ldflags "$(LDFLAGS)" -o $@ .
 
 dist/$(BINARY)-darwin-arm64:
 	@mkdir -p dist
-	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags "$(LDFLAGS)" -o $@ .
+	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build $(GOFLAGS_BUILD) -ldflags "$(LDFLAGS)" -o $@ .
 
 test:
 	go test ./...
