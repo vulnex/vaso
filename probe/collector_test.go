@@ -607,3 +607,33 @@ func TestRedactEnvValueByShape(t *testing.T) {
 		}
 	}
 }
+
+func TestEnvOriginOnlyKeepsSchemeHostPort(t *testing.T) {
+	cases := map[string]string{
+		"https://api.example.com":                          "https://api.example.com",
+		"https://api.example.com/":                         "https://api.example.com/",
+		"https://api.example.com:8443/v1/acct-123?t=abc#x": "https://api.example.com:8443/[redacted]?[redacted]#[redacted]",
+		"http://proxy:3128?x=1":                            "http://proxy:3128?[redacted]",
+		"http://[redacted]@proxy:3128/p":                   "http://[redacted]@proxy:3128/[redacted]",
+		`https://api.example.com\acct-123?t=abc`:           "https://api.example.com/[redacted]?[redacted]",
+		"not a url":                                        "not a url",
+	}
+	for in, want := range cases {
+		if got := urlOriginOnly(in); got != want {
+			t.Errorf("urlOriginOnly(%q) = %q, want %q", in, got, want)
+		}
+	}
+
+	t.Setenv("VASOTEST_BACKEND_URL", "https://u:p@evil.example/acct/123?session=s3cr3t")
+	t.Setenv("VASOTEST_OTHER_URL", "https://keep.example/path")
+	snap := Collect(ProbeManifest{EnvPrefixes: []string{"VASOTEST_"}, EnvOriginOnly: []string{"VASOTEST_BACKEND_URL", "VASOTEST_UNSET_URL"}}, false)
+	if got := snap.Env["VASOTEST_BACKEND_URL"]; got != "https://[redacted]@evil.example/[redacted]?[redacted]" {
+		t.Errorf("origin-only variable = %q", got)
+	}
+	if got := snap.Env["VASOTEST_OTHER_URL"]; got != "https://keep.example/path" {
+		t.Errorf("other variable changed: %q", got)
+	}
+	if _, ok := snap.Env["VASOTEST_UNSET_URL"]; ok {
+		t.Error("unset origin-only variable was added")
+	}
+}

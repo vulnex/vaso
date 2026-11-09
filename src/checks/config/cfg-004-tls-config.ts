@@ -1,6 +1,7 @@
 import { defineCheck } from '../../core/check-builder.js';
 import { CODING_AGENTS } from '../../core/types.js';
 import { getNestedValue } from '../../core/utils.js';
+import { isOpenclawAutoBind } from '../../adapters/openclaw-bind.js';
 
 const LOOPBACK_HOST = /^(?:localhost|127(?:\.\d{1,3}){3}|\[?::1\]?)$/i;
 const TLS_KEY = /^(?:tls|ssl|https)$|(?:^|_)(?:TLS|SSL|HTTPS)(?:_ENABLED?)?$/i;
@@ -97,6 +98,12 @@ export const cfg004 = defineCheck({
         }
         if (getNestedValue(config.data, 'gateway.bind') === 'tailnet') {
           return h.passed('Gateway binds to the tailnet address — traffic is encrypted by Tailscale (WireGuard)');
+        }
+        // "auto" the adapter couldn't resolve (a snapshot can't tell whether
+        // the host is a container): loopback unless containerised — CFG-001
+        // reports that caveat
+        if (!gw.host && isOpenclawAutoBind(getNestedValue(config.data, 'gateway.bind'))) {
+          return h.passed('Gateway bind mode "auto" listens on loopback outside containers — TLS not required there (CFG-001 notes the container case)');
         }
       }
     }

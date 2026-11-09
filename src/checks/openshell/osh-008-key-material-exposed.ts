@@ -5,7 +5,13 @@ import { markUnreachable, readableByOthers } from '../../core/permissions.js';
 import { expandHome } from '../../adapters/openshell.js';
 import { databasePaths, facts, gateway, gatewayEnv, listDir, paths, record, tlsDirs } from './shared.js';
 
-interface Target { path: string; critical: boolean; detail: string }
+interface Target {
+  path: string;
+  critical: boolean;
+  detail: string;
+  /** Named in the gateway config — the probe collects only fixed locations */
+  named?: boolean;
+}
 
 /** Every file under `dir` (two levels: <workspace>/<sandbox-id>/<file>). */
 async function tokenFiles(ctx: ScanContext, dir: string, depth = 3): Promise<string[]> {
@@ -42,7 +48,7 @@ async function targets(ctx: ScanContext): Promise<Target[]> {
     // Gateway config docs: OPENSHELL_TLS_KEY = server private key path (env beats the TOML)
     [gatewayEnv(ctx)?.data.OPENSHELL_TLS_KEY, false, 'Gateway server TLS key'],
   ] as const) {
-    if (typeof v === 'string' && v.trim()) t.push({ path: expandHome(v.trim(), p.home), critical, detail });
+    if (typeof v === 'string' && v.trim()) t.push({ path: expandHome(v.trim(), p.home), critical, detail, named: true });
   }
   t.push({ path: join(p.stateDir, 'gateway', 'credentials', 'key-encryption-key.bin'), critical: true, detail: 'Key-encryption key — with the database, decrypts every stored provider credential' });
   for (const db of databasePaths(ctx)) {
@@ -74,16 +80,23 @@ export const osh008 = defineCheck({
   async run(ctx, h) {
     const critical: Evidence[] = [];
     const warning: Evidence[] = [];
+    const unverified: string[] = [];
     for (const t of await targets(ctx)) {
       const f = await facts(ctx, t.path);
+      // A key path the config names elsewhere isn't in a remote snapshot:
+      // invisible there, not absent
+      if (!f && t.named && ctx.fs.kind === 'snapshot' && !(await ctx.fs.access(t.path))) unverified.push(t.path);
       if (!f || !readableByOthers(f)) continue;
       (t.critical ? critical : warning).push({ file: t.path, snippet: `mode 0${f.octal ?? '?'}`, detail: `${t.detail} — readable by ${f.worldRead ? 'all users' : 'group'}` });
     }
     await markUnreachable(ctx.fs, critical);
     await markUnreachable(ctx.fs, warning);
+    const note = unverified.length > 0
+      ? ` (not collected by the remote probe, permissions unverified — scan locally: ${unverified.join(', ')})`
+      : '';
     return h.fromEvidence([...critical, ...warning], {
-      passed: 'OpenShell key material is owner-only',
-      failed: (n) => `Found ${n} OpenShell secret file(s) readable by other users`,
+      passed: `OpenShell key material is owner-only${note}`,
+      failed: (n) => `Found ${n} OpenShell secret file(s) readable by other users${note}`,
       severity: critical.some(e => !e.mitigated) ? undefined : 'warning',
       fixDescription: 'chmod 600 the listed files (and 700 their directories); rotate any key another user could have read (openshell-gateway generate-certs, re-register the CLI)',
     });

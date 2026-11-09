@@ -1,6 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import type { MCPServerEntry } from '../../mcp/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { isPlaceholderSecret, isSecretReference } from '../../core/patterns.js';
 
 /**
  * MCP-033 — Long-Lived / Non-Expiring Token.
@@ -15,7 +16,13 @@ import { defineCheck } from '../../core/check-builder.js';
 
 const TOKEN_ENV_RE = /(access[_-]?token|bearer[_-]?token|^token$|_token$|^bearer$|api[_-]?token)/i;
 const REFRESH_OR_EXPIRY_RE = /(refresh[_-]?token|expires|expiry|_exp$|_ttl$|token[_-]?lifetime)/i;
-const PLACEHOLDER_RE = /^\$\{?[A-Z0-9_]+\}?$/; // ${VAR} / $VAR — not a literal secret
+/** VS Code `${input:id}`: prompted for when the server starts, never stored. */
+const PROMPTED_INPUT = /^\$\{input:[^}]+\}$/;
+
+/** No literal token: a docs placeholder, or a reference to where it is kept (env, file, secret manager). */
+function notALiteral(value: string): boolean {
+  return isPlaceholderSecret(value) || isSecretReference(value) || PROMPTED_INPUT.test(value);
+}
 const ONE_YEAR_SECONDS = 365 * 24 * 60 * 60;
 
 function decodeJwtExp(token: string): { isJwt: boolean; exp?: number } {
@@ -39,7 +46,7 @@ function analyzeServer(server: MCPServerEntry, nowSeconds: number): Evidence[] {
   for (const [key, rawValue] of Object.entries(env)) {
     if (!TOKEN_ENV_RE.test(key)) continue;
     const value = String(rawValue).trim();
-    if (value.length === 0 || PLACEHOLDER_RE.test(value)) continue; // env-ref, not a literal
+    if (value.length === 0 || notALiteral(value)) continue;
 
     const { isJwt, exp } = decodeJwtExp(value);
     if (isJwt) {

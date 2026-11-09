@@ -118,7 +118,7 @@ describe('OpenClaw adapter', () => {
   it('detects CLI binary at system paths', async () => {
     const home = process.env.HOME || '/home/testuser';
     const openclawDir = join(home, '.openclaw');
-    const configPath = join(openclawDir, 'config.json');
+    const configPath = join(openclawDir, 'openclaw.json');
     const cliBinPath = '/usr/local/bin/openclaw';
 
     setExistingPaths([openclawDir, configPath, cliBinPath]);

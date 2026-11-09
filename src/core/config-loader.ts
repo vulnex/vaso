@@ -83,11 +83,62 @@ async function deniedAncestor(filePath: string, fs: FSProvider): Promise<string 
  *  node fs errors (`code === 'ENOENT'`) and SnapshotFSProvider's plain Errors
  *  whose message leads with "ENOENT". */
 function isFileNotFound(error: unknown): boolean {
-  // A directory where a config file is expected configures nothing — the
-  // agent can't read it either (and a snapshot has no file entry for it)
+  // A directory where a config file is expected is not "missing": the agent
+  // can't load it either, so recordReadFailure reports it (EISDIR)
   const code = (error as NodeJS.ErrnoException | null)?.code;
-  if (code === 'ENOENT' || code === 'EISDIR') return true;
+  if (code === 'ENOENT') return true;
   return error instanceof Error && error.message.startsWith('ENOENT');
+}
+
+/**
+ * Record why reading `filePath` failed, as loadConfig does: nothing for a
+ * missing file; the directory when the file sits behind an unreadable one;
+ * EISDIR for a directory where the file is expected — a snapshot has no file
+ * entry for it, only the directory's mode, so it is told apart by stat and
+ * reads the same as locally; else the read error itself. For files adapters
+ * and checks read without loadConfig.
+ */
+export async function recordReadFailure(filePath: string, fs: FSProvider, error: unknown): Promise<void> {
+  if (isFileNotFound(error)) {
+    if (await isDirectoryPath(filePath, fs)) recordLoadError({ filePath, stage: 'read', message: eisdirMessage(filePath) });
+    return;
+  }
+  if ((error as NodeJS.ErrnoException | null)?.code === 'EISDIR') {
+    recordLoadError({ filePath, stage: 'read', message: eisdirMessage(filePath) });
+    return;
+  }
+  const dir = await deniedAncestor(filePath, fs).catch(() => undefined);
+  recordLoadError(dir
+    ? { filePath: dir, stage: 'read', message: `EACCES: permission denied, scandir '${dir}'`, directory: true }
+    : { filePath, stage: 'read', message: errorMessage(error) });
+}
+
+/**
+ * Record why listing directory `dir` failed; true when that is a failure.
+ * A directory that isn't there — or that a snapshot knows only from its
+ * parent's listing (no files of interest were collected in it) — holds
+ * nothing to check, as a local listing of it would show: not a failure.
+ */
+export async function recordListFailure(dir: string, fs: FSProvider, error: unknown): Promise<boolean> {
+  if (isFileNotFound(error)) return false;
+  const denied = await deniedAncestor(dir, fs).catch(() => undefined);
+  recordLoadError(denied
+    ? { filePath: denied, stage: 'read', message: `EACCES: permission denied, scandir '${denied}'`, directory: true }
+    : { filePath: dir, stage: 'read', message: errorMessage(error), directory: true });
+  return true;
+}
+
+/** LocalFSProvider's own wording, so local and remote reports match. */
+function eisdirMessage(filePath: string): string {
+  return `EISDIR: illegal operation on a directory, read '${filePath}'`;
+}
+
+async function isDirectoryPath(filePath: string, fs: FSProvider): Promise<boolean> {
+  try {
+    return (await fs.stat(filePath)).isDirectory();
+  } catch {
+    return false;
+  }
 }
 
 function errorMessage(error: unknown): string {
@@ -102,12 +153,7 @@ export async function loadConfig(filePath: string, fs?: FSProvider): Promise<Par
     // Editors on Windows save JSON with a UTF-8 BOM; JSON.parse rejects it
     raw = (await provider.readFile(filePath)).replace(/^\uFEFF/, '');
   } catch (error) {
-    if (!isFileNotFound(error)) {
-      const dir = await deniedAncestor(filePath, provider).catch(() => undefined);
-      recordLoadError(dir
-        ? { filePath: dir, stage: 'read', message: `EACCES: permission denied, scandir '${dir}'`, directory: true }
-        : { filePath, stage: 'read', message: errorMessage(error) });
-    }
+    await recordReadFailure(filePath, provider, error);
     throw error;
   }
 

@@ -25,6 +25,16 @@ export interface MCPDiscoveryResult {
   unreadable?: string[];
   /** Explicitly given paths that parsed but hold no MCP servers in any known dialect. */
   empty?: string[];
+  /** Discovered config files (discover) that exist but could not be read or parsed. */
+  loadErrors?: MCPConfigLoadError[];
+}
+
+export interface MCPConfigLoadError {
+  /** The client the file belongs to ("Cursor", "Claude Code", …). */
+  source: string;
+  filePath: string;
+  stage: 'read' | 'parse';
+  message: string;
 }
 
 export interface MCPServerSource {
@@ -46,6 +56,8 @@ export interface MCPServerSource {
   dataFiles?: MCPDataFile[];
   /** `--resolve-packages`: why the package's source could not be downloaded (no source then). */
   resolveFailure?: PackageFetchFailure;
+  /** A local server whose source is there but could not be read (EACCES): why. No source then. */
+  readFailure?: string;
   /** Packages the server ships with (its manifest/lockfile/installed copies), for MCP-027. */
   dependencies?: ServerDependency[];
   /**

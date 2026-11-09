@@ -354,6 +354,11 @@ func Collect(manifest ProbeManifest, escalate bool) ProbeSnapshot {
 
 	// Collect filtered environment variables
 	snapshot.Env = collectEnv(manifest.EnvPrefixes)
+	for _, name := range manifest.EnvOriginOnly {
+		if v, ok := snapshot.Env[name]; ok {
+			snapshot.Env[name] = urlOriginOnly(v)
+		}
+	}
 	snapshot.Truncated = c.truncated
 
 	return snapshot
@@ -1022,6 +1027,40 @@ func redactEnvValue(key, val string) string {
 		return redactedEnvValue
 	}
 	return redactSecretValues(val)
+}
+
+// urlParts splits a scheme://authority URL into authority-and-before, path,
+// query and fragment (WHATWG-style: the authority ends at /, ? or #, and at
+// \ too — for http(s) URLs a backslash is a path separator).
+var urlParts = regexp.MustCompile(`^([A-Za-z][A-Za-z0-9+.-]*://[^/\\?#]*)([^?#]*)(\?[^#]*)?(#.*)?$`)
+
+// urlOriginOnly keeps a URL's scheme, host and port, and replaces a path
+// other than "/", a query and a fragment with placeholders — so a check still
+// sees that they were there (an app may reject a proxy URL with a path) but
+// never what they held. A value that isn't a scheme://host URL is kept as is.
+func urlOriginOnly(v string) string {
+	trimmed := strings.TrimSpace(v)
+	m := urlParts.FindStringSubmatch(trimmed)
+	if m == nil {
+		return v
+	}
+	out := m[1]
+	if m[2] != "" && m[2] != "/" {
+		out += "/" + redactedEnvValue
+	} else {
+		out += m[2]
+	}
+	if len(m[3]) > 1 {
+		out += "?" + redactedEnvValue
+	} else {
+		out += m[3]
+	}
+	if len(m[4]) > 1 {
+		out += "#" + redactedEnvValue
+	} else {
+		out += m[4]
+	}
+	return out
 }
 
 // redactedEnvValue replaces the value of a credential-bearing variable.

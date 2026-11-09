@@ -96,6 +96,19 @@ describe('discoverCliInstalls', () => {
     expect(r.others.map(o => o.version)).toEqual(['0.111.0']);
   });
 
+  it('orders OpenClaw correction releases after their base release', async () => {
+    const host: FakeHost = {
+      bins: {
+        '/usr/local/bin/codex': '2026.7.1-1',
+        '/home/t/.local/bin/codex': '2026.7.1',
+      },
+    };
+    const r = await discoverCliInstalls('/home/t', makeFs(host), { ...spec(host), versionOptions: { correctionSuffix: true } });
+    expect(r.primary?.version).toBe('2026.7.1-1');
+    const plain = await discoverCliInstalls('/home/t', makeFs(host), spec(host));
+    expect(plain.primary?.version).toBe('2026.7.1');
+  });
+
   it('collapses symlinked duplicates and same-version copies', async () => {
     const host: FakeHost = {
       which: '/usr/bin/codex',

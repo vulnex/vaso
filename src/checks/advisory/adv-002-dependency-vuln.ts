@@ -3,6 +3,7 @@ import type { Evidence, ScanContext } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { getAdvisoryDatabase } from '../../advisory/database.js';
 import { satisfies } from '../../core/semver.js';
+import { advisoryAppliesToPlatform } from '../../advisory/applicability.js';
 import { fullVersion, rangeEntirelyAffected } from '../../core/version-range.js';
 import { collectServerDependencies } from '../../mcp/server-dependencies.js';
 
@@ -16,7 +17,9 @@ export const adv002 = defineCheck({
   async run(ctx, h) {
     const db = getAdvisoryDatabase();
     // package.json / Cargo.toml names; a PyPI advisory's `mcp` is another package.
-    const depAdvisories = db.advisories.filter(a => a.affectedDependency && a.affectedDependency.ecosystem !== 'pypi');
+    const depAdvisories = db.advisories.filter(
+      a => a.affectedDependency && a.affectedDependency.ecosystem !== 'pypi' && advisoryAppliesToPlatform(a, ctx.platform)
+    );
     if (depAdvisories.length === 0) return h.passed('No dependency advisories in database');
 
     const evidence: Evidence[] = [];

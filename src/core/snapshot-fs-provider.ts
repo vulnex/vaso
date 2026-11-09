@@ -488,10 +488,10 @@ const OMITTED_WHY: Record<NonNullable<FileEntry['omitted']>, string> = {
   sensitive: 'reached through a symlink into a credential store, never shipped',
 };
 
-/** A file present on the host whose content the probe did not ship. */
-function omittedError(path: string, reason: FileEntry['omitted']): Error {
+/** A file present on the host whose content the probe did not ship (`omitted` says why). */
+function omittedError(path: string, reason: FileEntry['omitted']): Error & { omitted?: FileEntry['omitted'] } {
   const why = reason ? ` (${OMITTED_WHY[reason] ?? reason})` : '';
-  return new Error(`content not collected in snapshot${why}: ${path}`);
+  return Object.assign(new Error(`content not collected in snapshot${why}: ${path}`), { omitted: reason });
 }
 
 /** The error a local read of a path behind an unreadable directory raises. */

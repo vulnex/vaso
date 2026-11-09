@@ -3,16 +3,12 @@ import { basename, dirname, join } from 'node:path';
 import { defineCheck } from '../../core/check-builder.js';
 import { loadConfig } from '../../core/config-loader.js';
 import { loadOpenclawConfig } from '../../adapters/openclaw-includes.js';
+import { MAIN_CONFIG_NAMES } from '../../adapters/openclaw.js';
+import { containerEnvironment } from '../../adapters/openclaw-bind.js';
 import { extractPosture, findDowngrades, mergeConfigData } from './posture.js';
 
-const CONFIG_FILENAMES = [
-  'openclaw.json',
-  'clawdbot.json',
-  'config.yaml',
-  'config.json',
-  'gateway.yaml',
-  '.env',
-];
+/** What OpenClaw reads from a state dir: its config file and the .env beside it. */
+const CONFIG_FILENAMES = [...MAIN_CONFIG_NAMES, '.env'];
 
 export const oc005 = defineCheck({
   id: 'OC-005',
@@ -49,7 +45,7 @@ export const oc005 = defineCheck({
       if (filename === 'clawdbot.json' && defaultConfigs.some(c => c.filePath.endsWith('/openclaw.json'))) continue;
       const filePath = join(defaultDir, filename);
       try {
-        defaultConfigs.push(filename.endsWith('.json') && filename !== 'config.json' ? await loadOpenclawConfig(filePath, ctx.fs) : await loadConfig(filePath, ctx.fs));
+        defaultConfigs.push(filename.endsWith('.json') ? await loadOpenclawConfig(filePath, ctx.fs) : await loadConfig(filePath, ctx.fs));
       } catch {
         // File missing or unparseable — skip.
       }
@@ -59,8 +55,9 @@ export const oc005 = defineCheck({
       return h.passed('Default .openclaw directory has no readable configs');
     }
 
-    const basePosture = extractPosture(mergeConfigData(defaultConfigs));
-    const overridePosture = extractPosture(mergeConfigData(ctx.configs));
+    const inContainer = await containerEnvironment(ctx.fs);
+    const basePosture = extractPosture(mergeConfigData(defaultConfigs), undefined, inContainer);
+    const overridePosture = extractPosture(mergeConfigData(ctx.configs), undefined, inContainer);
     const issues = findDowngrades(basePosture, overridePosture);
 
     const evidence: Evidence[] = issues.map(detail => ({

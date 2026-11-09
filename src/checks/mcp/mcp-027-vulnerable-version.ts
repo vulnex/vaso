@@ -8,6 +8,8 @@ import { defaultMcpStateStore } from '../../mcp/mcp-state-store.js';
 import { fullVersion, rangeEntirelyAffected } from '../../core/version-range.js';
 import type { Advisory } from '../../advisory/advisory-types.js';
 import { DEPRECATED_NPM_PACKAGES } from '../../advisory/library-advisories.js';
+import { advisoryAppliesToPlatform } from '../../advisory/applicability.js';
+import { runnerPackage } from '../../mcp/package-pin.js';
 
 /**
  * MCP-027 — Vulnerable / Rolled-Back MCP Version.
@@ -27,27 +29,39 @@ import { DEPRECATED_NPM_PACKAGES } from '../../advisory/library-advisories.js';
  * MCP-010 covers *unpinned* packages; this covers *pinned-but-bad* versions.
  */
 
-const NPM_RUNNERS = new Set(['npx', 'npx.cmd']);
-const SKIP_ARGS = new Set(['-y', '--yes']);
-
 interface VersionState {
   highest: string;
 }
 
-function parsePackageSpec(spec: string): { name: string; version?: string } {
-  const at = spec.lastIndexOf('@');
-  if (at > 0) return { name: spec.slice(0, at), version: spec.slice(at + 1) };
-  return { name: spec };
+/** PEP 503 name normalization (`MCP_Server` → `mcp-server`); npm names are exact. */
+function packageKey(name: string, ecosystem: 'npm' | 'pypi'): string {
+  return ecosystem === 'pypi' ? name.toLowerCase().replace(/[-_.]+/g, '-') : name;
 }
 
-function npmInstallSpec(server: MCPServerEntry): string | undefined {
-  const cmd = server.command ? basename(server.command) : undefined;
-  if (!cmd || !NPM_RUNNERS.has(cmd)) return undefined;
-  for (const arg of server.args ?? []) {
-    if (arg.startsWith('-') || SKIP_ARGS.has(arg)) continue;
-    return arg;
+/** Version-history name: npm names unchanged (existing history keeps working), PyPI ones prefixed so `mcp` (PyPI) isn't `mcp` (npm). */
+function stateName(name: string, ecosystem: 'npm' | 'pypi'): string {
+  return ecosystem === 'pypi' ? `pypi:${packageKey(name, ecosystem)}` : name;
+}
+
+/**
+ * The package a server's runner installs (npx, bunx, `pnpm dlx`, `npm exec`,
+ * uvx, `pipx run`, … — via runnerPackage()), with its version when the spec
+ * pins one exactly (`pkg@1.2.3`, `pkg==1.2.3`, `--from pkg==1.2.3`).
+ */
+export function pinnedRunnerPackage(server: MCPServerEntry): { name: string; ecosystem: 'npm' | 'pypi'; version?: string } | undefined {
+  const pkg = runnerPackage(server.command, server.args);
+  if (!pkg || pkg.pin === 'local') return undefined;
+  const base = { name: pkg.name, ecosystem: pkg.ecosystem };
+  if (pkg.pin !== 'exact') return base;
+  let version: string | undefined;
+  if (pkg.ecosystem === 'npm') {
+    // Exact git/sha pins carry no release number
+    if (pkg.spec.startsWith(`${pkg.name}@`)) version = pkg.spec.slice(pkg.name.length + 1).replace(/^v/, '');
+  } else {
+    const m = /^[A-Za-z0-9][\w.-]*(?:\[[^\]]*\])?\s*(?:===?|@)\s*v?(\S+)$/.exec(pkg.spec.trim());
+    if (m) version = fullVersion(m[1]);
   }
-  return undefined;
+  return version && parseSemVer(version) ? { ...base, version } : base;
 }
 
 export const mcp027 = defineCheck({
@@ -64,7 +78,7 @@ export const mcp027 = defineCheck({
     let maxSeverity: Severity = 'warning';
 
     const db = getAdvisoryDatabase();
-    const depAdvisories = db.advisories.filter((a) => a.affectedDependency);
+    const depAdvisories = db.advisories.filter((a) => a.affectedDependency && advisoryAppliesToPlatform(a, ctx.platform));
     const store = ctx.mcpStateStore ?? defaultMcpStateStore();
     // Servers per package: a pre-1.3.0 history (keyed by package alone)
     // belongs to a server only when it is the one using that package.
@@ -72,28 +86,27 @@ export const mcp027 = defineCheck({
     const serversPerPackage = new Map<string, number>();
     for (const config of ctx.mcpConfigs ?? []) {
       for (const server of config.servers) {
-        const spec = npmInstallSpec(server);
-        if (!spec) continue;
-        const { name, version } = parsePackageSpec(spec);
-        if (!version || !parseSemVer(version)) continue;
+        const pkg = pinnedRunnerPackage(server);
+        if (!pkg?.version) continue;
+        const name = stateName(pkg.name, pkg.ecosystem);
         serversPerPackage.set(name, (serversPerPackage.get(name) ?? 0) + 1);
       }
     }
 
     for (const config of ctx.mcpConfigs ?? []) {
       for (const server of config.servers) {
-        const spec = npmInstallSpec(server);
-        if (!spec) continue;
+        const pkg = pinnedRunnerPackage(server);
+        if (!pkg?.version) continue; // unpinned — MCP-010's job
 
-        const { name, version } = parsePackageSpec(spec);
-        if (!version) continue; // unpinned — MCP-010's job
-
+        const { ecosystem, version } = pkg;
+        const name = packageKey(pkg.name, ecosystem);
         const parsed = parseSemVer(version);
 
         // 1) Known-vulnerable version (advisory database).
         for (const adv of depAdvisories) {
           const dep = adv.affectedDependency!;
-          if (dep.name !== name || (dep.ecosystem ?? 'npm') !== 'npm') continue;
+          const depEcosystem = dep.ecosystem ?? 'npm';
+          if (depEcosystem !== ecosystem || packageKey(dep.name, depEcosystem) !== name) continue;
           if (!satisfies(version, dep.versionConstraint)) continue;
           if (adv.severity === 'critical') maxSeverity = 'critical';
           evidence.push({
@@ -108,9 +121,10 @@ export const mcp027 = defineCheck({
           // Per server, not per package: two servers pinning different
           // versions of one package would otherwise "roll back" every scan.
           const serverId = createHash('sha256').update(`${config.filePath}\0${server.name}`).digest('hex').slice(0, 12);
-          const key = `version-${name}-${serverId}`;
+          const state = stateName(name, ecosystem);
+          const key = `version-${state}-${serverId}`;
           let prev = await store.load<VersionState>(key);
-          if (!prev && serversPerPackage.get(name) === 1) prev = await store.load<VersionState>(`version-${name}`);
+          if (!prev && ecosystem === 'npm' && serversPerPackage.get(state) === 1) prev = await store.load<VersionState>(`version-${name}`);
           const prevParsed = prev?.highest ? parseSemVer(prev.highest) : null;
 
           if (prevParsed && compareSemVer(parsed, prevParsed) < 0) {
@@ -203,11 +217,6 @@ export const mcp027 = defineCheck({
     });
   },
 });
-
-function basename(p: string): string {
-  const idx = Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'));
-  return idx >= 0 ? p.slice(idx + 1) : p;
-}
 
 /**
  * The advisory needs a feature (an HTTP transport, the OAuth client) that the

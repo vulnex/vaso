@@ -1,6 +1,7 @@
 import type { Evidence, ParsedConfig } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { extractPosture, findDowngrades, mergeConfigData } from './posture.js';
+import { containerEnvironment } from '../../adapters/openclaw-bind.js';
 
 export const oc001 = defineCheck({
   id: 'OC-001',
@@ -33,8 +34,9 @@ export const oc001 = defineCheck({
 
     // The override side also applies the agent's own agents.entries.<name>
     // entry (2026.x per-agent sandbox / tools.exec overrides)
-    const basePosture = extractPosture(mergeConfigData(globalConfigs));
-    const overridePosture = extractPosture(mergeConfigData([...globalConfigs, ...subAgentConfigs]), installation.agentName);
+    const inContainer = await containerEnvironment(ctx.fs);
+    const basePosture = extractPosture(mergeConfigData(globalConfigs), undefined, inContainer);
+    const overridePosture = extractPosture(mergeConfigData([...globalConfigs, ...subAgentConfigs]), installation.agentName, inContainer);
     const issues = findDowngrades(basePosture, overridePosture);
 
     const evidence: Evidence[] = issues.map(detail => ({

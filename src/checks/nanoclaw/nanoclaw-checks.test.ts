@@ -373,6 +373,45 @@ describe('NC-004: Webhook Listener Bound to All Interfaces', () => {
     const r = await check.run(ctx({ fs }));
     expect(r.evidence?.[0].detail).toMatch(/0\.0\.0\.0:3000/);
   });
+
+  // g4-F36: upstream 8a91aadb (2026.10.1-rc.2) binds WEBHOOK_HOST, default 127.0.0.1
+  describe('WEBHOOK_HOST (2026.10.1-rc.2+)', () => {
+    const github = `${BARREL_HEAD}\nimport './github.js';`;
+    const versioned = (version: string | undefined, configs: ParsedConfig[], fs: FSProvider) => {
+      const c = ctx({ configs, fs });
+      c.installation.version = version;
+      return c;
+    };
+
+    it('passes on a loopback WEBHOOK_HOST', async () => {
+      const r = await check.run(ctx({ configs: [env({ WEBHOOK_HOST: '127.0.0.1' })], fs: snapFs({ [barrel]: github }) }));
+      expect(r.passed).toBe(true);
+    });
+
+    it('passes when the source reads WEBHOOK_HOST (loopback default)', async () => {
+      const fs = snapFs({ [barrel]: github, [`${CHECKOUT}/src/config.ts`]: "const host = process.env.WEBHOOK_HOST || envConfig.WEBHOOK_HOST || '127.0.0.1';" });
+      expect((await check.run(ctx({ fs }))).passed).toBe(true);
+    });
+
+    it('decides by version when the source is not collected', async () => {
+      const fs = snapFs({ [barrel]: github });
+      expect((await check.run(versioned('2026.10.1-rc.2', [], fs))).passed).toBe(true);
+      expect((await check.run(versioned('2026.10.2', [], fs))).passed).toBe(true);
+      const old = await check.run(versioned('2026.10.0', [], fs));
+      expect(old.passed).toBe(false);
+      expect(old.evidence?.[0].detail).toContain('hardcoded');
+    });
+
+    it('flags a non-loopback WEBHOOK_HOST on a new release', async () => {
+      const fs = snapFs({ [barrel]: github });
+      const lan = await check.run(versioned('2026.10.2', [env({ WEBHOOK_HOST: '192.168.1.5' })], fs));
+      expect(lan.passed).toBe(false);
+      expect(lan.message).toContain('192.168.1.5');
+      expect(lan.evidence?.[0].file).toBe(`${CHECKOUT}/.env`);
+      const all = await check.run(versioned('2026.10.2', [env({ WEBHOOK_HOST: '0.0.0.0' })], fs));
+      expect(all.message).toContain('all interfaces');
+    });
+  });
 });
 
 describe('NC-005: Skills Directory Writable by Others', () => {

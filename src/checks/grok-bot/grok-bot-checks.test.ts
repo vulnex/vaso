@@ -601,6 +601,17 @@ describe('GB-016 app and Computer Use helper integrity (macOS)', () => {
     expect(await check('GB-016').run(missing)).toMatchObject({ passed: false, severity: 'info' });
   });
 
+  it('says a GROK_BOT_SIDECAR_APP target missing from a snapshot is not verified, not absent', async () => {
+    const snap = macCtx({ kind: 'snapshot' });
+    (snap.fs.getEnv as unknown) = (k: string) => (k === 'GROK_BOT_SIDECAR_APP' ? '/nope/Gone.app' : undefined);
+    const r = await check('GB-016').run(snap);
+    expect(r).toMatchObject({ passed: false, severity: 'info' });
+    expect(r.evidence?.[0].detail).toMatch(/^Not verified/);
+    // present in the snapshot (the manifest stats it): the same warning as locally
+    const seen = await check('GB-016').run(macCtx({ kind: 'snapshot', env: { GROK_BOT_SIDECAR_APP: '/tmp/Other.app' } }));
+    expect(seen).toMatchObject({ passed: false, severity: 'warning' });
+  });
+
   it('never runs codesign on a snapshot', async () => {
     const c = macCtx({ kind: 'snapshot' });
     expect(await check('GB-016').run(c)).toMatchObject({ passed: true, message: expect.stringContaining('local scans') });

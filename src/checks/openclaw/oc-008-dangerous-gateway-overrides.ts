@@ -1,6 +1,7 @@
 import type { Evidence, ParsedConfig, Severity } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { getNestedValue } from '../../core/utils.js';
+import { containerEnvironment } from '../../adapters/openclaw-bind.js';
 
 /**
  * Overrides OpenClaw's own `openclaw security audit` flags (2026.9.4,
@@ -40,10 +41,15 @@ const DANGEROUS_NODE_COMMANDS = new Set([
 
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', 'localhost']);
 
-/** Reachable beyond this host: a non-loopback bind (unset = loopback) or Tailscale serve/funnel. */
-export function openclawGatewayExposed(data: Record<string, unknown>): boolean {
+/**
+ * Reachable beyond this host: a non-loopback bind (unset = loopback) or
+ * Tailscale serve/funnel. "auto" is 0.0.0.0 only inside a container
+ * (`inContainer` from containerEnvironment(); unknown counts as loopback).
+ */
+export function openclawGatewayExposed(data: Record<string, unknown>, inContainer?: boolean): boolean {
   const bind = getNestedValue(data, 'gateway.bind');
-  const mode = typeof bind === 'string' ? bind.toLowerCase() : 'loopback';
+  const mode = typeof bind === 'string' ? bind.trim().toLowerCase() : 'loopback';
+  if (mode === 'auto' && !inContainer) return tailscaleExposed(data);
   if (mode === 'custom') {
     const host = getNestedValue(data, 'gateway.customBindHost');
     if (typeof host === 'string' && LOOPBACK_HOSTS.has(host.trim())) return tailscaleExposed(data);
@@ -84,11 +90,12 @@ export const oc008 = defineCheck({
       if (RANK[severity] > RANK[worst]) worst = severity;
     };
 
+    const inContainer = await containerEnvironment(ctx.fs);
     for (const config of ctx.configs) {
       const data = config.data;
       // Remote mode: this host runs no gateway; these keys belong to the remote one
       if (getNestedValue(data, 'gateway.mode') === 'remote') continue;
-      const exposed = openclawGatewayExposed(data);
+      const exposed = openclawGatewayExposed(data, inContainer);
       const where = exposed ? 'on a gateway reachable beyond this host' : 'on a loopback-only gateway';
 
       if (getNestedValue(data, 'tools.elevated.enabled') !== false) {

@@ -3,6 +3,7 @@ import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { buildBroadPaths, isBroadPath } from '../../analyzers/broad-paths.js';
 import { devinDataDir } from './paths.js';
+import { parseIfPresent } from '../../adapters/load-if-present.js';
 
 /**
  * Workspace trust gates whether a cloned repo's .devin/ hooks, MCP servers,
@@ -50,23 +51,26 @@ export const dev008 = defineCheck({
     // Trust approvals are per-user state; the project installation would repeat them
     if (ctx.installation.profile !== 'project') {
       const trustFile = join(devinDataDir(ctx), 'cli', 'trusted_workspaces.json');
-      if (await ctx.fs.access(trustFile)) {
-        try {
-          const data = JSON.parse(await ctx.fs.readFile(trustFile)) as { trusted_paths?: unknown };
-          const home = ctx.fs.homedir();
-          const broadPaths = buildBroadPaths(home);
-          for (const entry of Array.isArray(data.trusted_paths) ? data.trusted_paths : []) {
-            if (typeof entry !== 'string') continue;
-            const broad = isBroadPath(entry, broadPaths, home);
-            if (broad) {
-              evidence.push({
-                file: trustFile,
-                snippet: `trusted_paths: "${entry}"`,
-                detail: `Trusted workspace ${broad.reason} — every repo beneath it is implicitly trusted`,
-              });
-            }
+      // Present but unreadable or not a JSON object: reported as CONFIG-LOAD
+      const data = await parseIfPresent(trustFile, ctx.fs, raw => {
+        const parsed = JSON.parse(raw) as unknown;
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Top-level value is not a JSON object');
+        return parsed as { trusted_paths?: unknown };
+      });
+      if (data) {
+        const home = ctx.fs.homedir();
+        const broadPaths = buildBroadPaths(home);
+        for (const entry of Array.isArray(data.trusted_paths) ? data.trusted_paths : []) {
+          if (typeof entry !== 'string') continue;
+          const broad = isBroadPath(entry, broadPaths, home);
+          if (broad) {
+            evidence.push({
+              file: trustFile,
+              snippet: `trusted_paths: "${entry}"`,
+              detail: `Trusted workspace ${broad.reason} — every repo beneath it is implicitly trusted`,
+            });
           }
-        } catch {}
+        }
       }
     }
 

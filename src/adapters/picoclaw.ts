@@ -403,6 +403,10 @@ export const picoclawAdapter: AgentAdapter = {
       filePaths: [
         // $PICOCLAW_CONFIG names the config file itself (expanded by the probe)
         '${PICOCLAW_CONFIG}',
+        // …and the files PicoClaw keeps next to it (launcherconfig.PathForAppConfig,
+        // securityPath) — the same files, and treatment, as under ~/.picoclaw
+        '${PICOCLAW_CONFIG}/../.security.yml',
+        '${PICOCLAW_CONFIG}/../launcher-config.json',
         '~/.picoclaw/config.json',
         '~/.picoclaw/.security.yml',
         '~/.picoclaw/auth.json',

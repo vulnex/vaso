@@ -1,6 +1,7 @@
 import { defineCheck } from '../../core/check-builder.js';
 import { getAdvisoryDatabase } from '../../advisory/database.js';
 import { satisfies } from '../../core/semver.js';
+import { advisoryAppliesToPlatform, advisoryVersionOptions } from '../../advisory/applicability.js';
 import { describeAffected, describeVersion, installedVersions, type InstalledVersion } from './installed-versions.js';
 
 export const adv003 = defineCheck({
@@ -16,12 +17,15 @@ export const adv003 = defineCheck({
 
     const db = getAdvisoryDatabase();
     const agent = ctx.installation.agent;
-    const eolNotices = db.advisories.filter(adv => adv.eolNotice && (adv.agent === agent || adv.agent === '*'));
+    const eolNotices = db.advisories.filter(
+      adv => adv.eolNotice && (adv.agent === agent || adv.agent === '*') && advisoryAppliesToPlatform(adv, ctx.platform)
+    );
+    const versionOpts = advisoryVersionOptions(agent);
 
     const evidence = [];
     const affected: InstalledVersion[] = [];
     for (const v of versions) {
-      const matching = eolNotices.filter(adv => satisfies(v.version, adv.affectedVersions));
+      const matching = eolNotices.filter(adv => satisfies(v.version, adv.affectedVersions, versionOpts));
       if (matching.length === 0) continue;
       affected.push(v);
       for (const adv of matching) {

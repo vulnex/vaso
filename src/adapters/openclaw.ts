@@ -11,12 +11,16 @@ import { npmPackageJsonGlobs } from './nvm-binary.js';
 import { queryCliVersion, readPackageVersion } from './version-query.js';
 import { includeRootsFromEnv, loadOpenclawConfig } from './openclaw-includes.js';
 import { pathPresent } from './load-if-present.js';
+import { containerEnvironment, isOpenclawAutoBind, openclawAutoBindHost } from './openclaw-bind.js';
 
+/**
+ * Files OpenClaw reads from its state dir besides the main config
+ * (MAIN_CONFIG_NAMES / OPENCLAW_CONFIG_PATH): only the `.env` it loads into
+ * its environment. config.yaml, config.json and gateway.yaml are no OpenClaw
+ * config (src/config/paths.ts CONFIG_FILENAME = "openclaw.json", 2026.9.4 –
+ * 2026.11.2); a leftover one there configures nothing, so it isn't scanned.
+ */
 const CONFIG_FILENAMES = [
-  'openclaw.json',
-  'config.yaml',
-  'config.json',
-  'gateway.yaml',
   '.env',
 ];
 
@@ -131,7 +135,7 @@ export function openclawEnvPaths(home: string, fs: FSProvider): OpenclawEnvPaths
 }
 
 /** A state directory OpenClaw runs from, and the config file it loads there. */
-interface OpenclawLocation {
+export interface OpenclawLocation {
   dir: string;
   /** The config file (openclaw.json, clawdbot.json, or OPENCLAW_CONFIG_PATH). */
   mainConfig: string;
@@ -158,7 +162,7 @@ async function existingMainConfig(dir: string, fs: FSProvider): Promise<string |
  * reads /etc/openclaw: it appears only as an example location for files a
  * config names (secrets provider, TLS paths), so it is not an install.
  */
-async function openclawLocations(home: string, fs: FSProvider): Promise<OpenclawLocation[]> {
+export async function openclawLocations(home: string, fs: FSProvider): Promise<OpenclawLocation[]> {
   const env = openclawEnvPaths(home, fs);
   const locations: OpenclawLocation[] = [];
   if (env.stateDir) {
@@ -209,9 +213,11 @@ async function findAppBundle(fs: FSProvider): Promise<string | undefined> {
   return undefined;
 }
 
-/** The listen address an OpenClaw `gateway.bind` mode resolves to. `auto`
- *  and `tailnet` depend on the host's interfaces, so they stay unknown. */
-function openclawBindHost(bind: unknown, customBindHost: unknown): string | undefined {
+/** The listen address an OpenClaw `gateway.bind` mode resolves to.
+ *  `tailnet` depends on the host's interfaces, so it stays unknown; `auto`
+ *  is 0.0.0.0 in a container, loopback outside (openclaw-bind.ts). */
+function openclawBindHost(bind: unknown, customBindHost: unknown, inContainer: boolean | undefined): string | undefined {
+  if (isOpenclawAutoBind(bind)) return openclawAutoBindHost(inContainer);
   switch (typeof bind === 'string' ? bind.toLowerCase() : undefined) {
     case 'loopback': return '127.0.0.1';
     case 'lan':
@@ -219,6 +225,65 @@ function openclawBindHost(bind: unknown, customBindHost: unknown): string | unde
     case 'custom': return typeof customBindHost === 'string' ? customBindHost : undefined;
     default: return undefined;
   }
+}
+
+/**
+ * `mcp.servers` of every OpenClaw config the gateway loads for this home
+ * (2026.9.4+ root schema: name → { command, args, env, cwd, url, transport,
+ * headers, enabled, … }), read the way OpenClaw reads it (JSON5, `$include`).
+ * `transport` is returned as `type`, the key the common server-map parser
+ * reads; `vaso mcp` discovery parses the maps.
+ */
+export async function openclawMcpServerMaps(home: string, fs: FSProvider): Promise<Array<{ source: string; filePath: string; servers: Record<string, unknown> }>> {
+  const out: Array<{ source: string; filePath: string; servers: Record<string, unknown> }> = [];
+  const includeRoots = home === fs.homedir()
+    ? includeRootsFromEnv(fs.getEnv('OPENCLAW_INCLUDE_ROOTS'), openclawEnvPaths(home, fs).home)
+    : [];
+  for (const { mainConfig, profile } of await openclawLocations(home, fs)) {
+    let data: Record<string, unknown>;
+    try {
+      data = (await loadOpenclawConfig(mainConfig, fs, includeRoots)).data;
+    } catch {
+      continue;
+    }
+    const map = getNestedValue(data, 'mcp.servers');
+    if (!map || typeof map !== 'object' || Array.isArray(map)) continue;
+    const servers = Object.fromEntries(Object.entries(map as Record<string, unknown>).map(([name, raw]) => {
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return [name, raw];
+      const cfg = raw as Record<string, unknown>;
+      return [name, typeof cfg.transport === 'string' && cfg.type === undefined ? { ...cfg, type: cfg.transport } : cfg];
+    }));
+    out.push({ source: profile ? `OpenClaw (profile ${profile})` : 'OpenClaw', filePath: mainConfig, servers });
+  }
+  return out;
+}
+
+/** The gateway listener a merged OpenClaw config describes on this host. */
+function openclawGatewayInfo(config: Record<string, unknown>, inContainer: boolean | undefined): GatewayInfo | undefined {
+  const gw = config.gateway;
+  if (!gw || typeof gw !== 'object' || Array.isArray(gw)) return undefined;
+  const g = gw as Record<string, unknown>;
+  // gateway.mode "remote": this instance is a client of a gateway on another
+  // host and runs no listener here (OpenClaw 2026.9.4 skips the local gateway)
+  if (g.mode === 'remote') return undefined;
+  // 2026.x schema: gateway.bind = auto | lan | loopback | custom | tailnet
+  // (+ gateway.customBindHost) and gateway.tls = { enabled, … }; older
+  // configs used gateway.host and a boolean tls. An unset bind is loopback
+  // (`gateway.bind ?? "loopback"` throughout 2026.9.4).
+  const tls = g.tls && typeof g.tls === 'object'
+    ? (g.tls as Record<string, unknown>).enabled === true
+    : typeof g.tls === 'boolean' ? g.tls : undefined;
+  const auth = g.auth && typeof g.auth === 'object' ? (g.auth as Record<string, unknown>) : undefined;
+  const host = typeof g.host === 'string' ? g.host
+    : g.bind === undefined && g.host === undefined ? '127.0.0.1'
+    : openclawBindHost(g.bind, g.customBindHost, inContainer);
+
+  return {
+    host,
+    port: typeof g.port === 'number' ? g.port : undefined,
+    authMode: typeof auth?.mode === 'string' ? auth.mode : undefined,
+    tls,
+  };
 }
 
 export const openclawAdapter: AgentAdapter = {
@@ -229,11 +294,13 @@ export const openclawAdapter: AgentAdapter = {
     const fs = options?.fs ?? new LocalFSProvider();
     const userDirs = await getUserHomeDirs(options?.allUsers, fs);
     const appBundle = await findAppBundle(fs);
+    const inContainer = await containerEnvironment(fs);
     const installations: AgentInstallation[] = [];
 
     for (const { home, user } of userDirs) {
       const installs = await discoverCliInstalls(home, fs, {
         names: ['openclaw'],
+        versionOptions: { correctionSuffix: true },
         systemPaths: SYSTEM_CLI_PATHS,
         userRelPaths: USER_CLI_RELATIVE_PATHS,
         version: async (bin, canExec) => (canExec ? queryCliVersion(bin, fs, { argSets: [['--version'], ['version']] }) : undefined)
@@ -251,9 +318,9 @@ export const openclawAdapter: AgentAdapter = {
         if (!(await fs.access(dir)) && !(await fs.access(mainConfigPath))) continue;
 
         const configFiles = [];
-        // The main config, then the other files OpenClaw-style installs keep
-        // (the other main config name is not read when one exists)
-        const otherFiles = CONFIG_FILENAMES.filter(f => !MAIN_CONFIG_NAMES.includes(f)).map(f => join(dir, f));
+        // The main config, then the .env beside it (the other main config
+        // name is not read when one exists)
+        const otherFiles = CONFIG_FILENAMES.map(f => join(dir, f));
         for (const filePath of [mainConfigPath, ...otherFiles]) {
           try {
             const config = filePath === mainConfigPath
@@ -278,11 +345,9 @@ export const openclawAdapter: AgentAdapter = {
           ?? (meta?.lastRunVersion as string);
         const skillsDir = this.getSkillsDir(dir);
 
-        // Merge all config data to extract gateway info
-        const merged: Record<string, unknown> = {};
-        for (const c of configFiles) {
-          Object.assign(merged, c.data);
-        }
+        // The gateway, workspace and skill settings are the main config's;
+        // the .env holds variables, not config keys
+        const merged: Record<string, unknown> = { ...(mainConfig?.data ?? {}) };
 
         // Skill roots OpenClaw loads besides <dir>/skills: the workspace's
         // skills/ (agents.defaults.workspace, default <dir>/workspace) and
@@ -305,7 +370,7 @@ export const openclawAdapter: AgentAdapter = {
           configFiles,
           skillsDir,
           skillsDirs: skillsDirs.length > 1 ? skillsDirs : undefined,
-          gateway: this.getGatewayInfo(merged),
+          gateway: openclawGatewayInfo(merged, inContainer),
           models: await this.getModels?.(configFiles),
           profile,
           user: options?.allUsers ? user : undefined,
@@ -366,7 +431,7 @@ export const openclawAdapter: AgentAdapter = {
                 configFiles: [...configFiles, ...agentConfigFiles],
                 skillsDir: agentSkillsDirs.length > 0 ? agentSkillsDirs[agentSkillsDirs.length - 1] : undefined,
                 skillsDirs: agentSkillsDirs.length > 0 ? agentSkillsDirs : undefined,
-                gateway: this.getGatewayInfo(agentMerged),
+                gateway: openclawGatewayInfo(agentMerged, inContainer),
                 models: await this.getModels?.([...configFiles, ...agentConfigFiles]),
                 profile,
                 user: options?.allUsers ? user : undefined,
@@ -408,7 +473,7 @@ export const openclawAdapter: AgentAdapter = {
       .filter((d): d is string => Boolean(d));
     return [
       ...(env.configPath ? [env.configPath] : []),
-      ...dirs.flatMap(dir => [...MAIN_CONFIG_NAMES, ...CONFIG_FILENAMES.filter(f => !MAIN_CONFIG_NAMES.includes(f))].map(f => join(dir, f))),
+      ...dirs.flatMap(dir => [...MAIN_CONFIG_NAMES, ...CONFIG_FILENAMES].map(f => join(dir, f))),
     ];
   },
 
@@ -420,31 +485,10 @@ export const openclawAdapter: AgentAdapter = {
     return candidates[0];
   },
 
+  /** The gateway a config describes; an `auto` bind stays unknown here
+   *  (detect() resolves it against the scanned host). */
   getGatewayInfo(config: Record<string, unknown>): GatewayInfo | undefined {
-    const gw = config.gateway;
-    if (!gw || typeof gw !== 'object' || Array.isArray(gw)) return undefined;
-    const g = gw as Record<string, unknown>;
-    // gateway.mode "remote": this instance is a client of a gateway on another
-    // host and runs no listener here (OpenClaw 2026.9.4 skips the local gateway)
-    if (g.mode === 'remote') return undefined;
-    // 2026.x schema: gateway.bind = auto | lan | loopback | custom | tailnet
-    // (+ gateway.customBindHost) and gateway.tls = { enabled, … }; older
-    // configs used gateway.host and a boolean tls. An unset bind is loopback
-    // (`gateway.bind ?? "loopback"` throughout 2026.9.4).
-    const tls = g.tls && typeof g.tls === 'object'
-      ? (g.tls as Record<string, unknown>).enabled === true
-      : typeof g.tls === 'boolean' ? g.tls : undefined;
-    const auth = g.auth && typeof g.auth === 'object' ? (g.auth as Record<string, unknown>) : undefined;
-    const host = typeof g.host === 'string' ? g.host
-      : g.bind === undefined && g.host === undefined ? '127.0.0.1'
-      : openclawBindHost(g.bind, g.customBindHost);
-
-    return {
-      host,
-      port: typeof g.port === 'number' ? g.port : undefined,
-      authMode: typeof auth?.mode === 'string' ? auth.mode : undefined,
-      tls,
-    };
+    return openclawGatewayInfo(config, undefined);
   },
 
   getModels(configs: ParsedConfig[]): ModelRef[] {
@@ -496,22 +540,13 @@ export const openclawAdapter: AgentAdapter = {
         '${OPENCLAW_CONFIG_PATH}',
         '~/.openclaw/openclaw.json',
         '~/.openclaw/clawdbot.json',
-        '~/.openclaw/config.yaml',
-        '~/.openclaw/config.json',
-        '~/.openclaw/gateway.yaml',
         '~/.openclaw/.env',
         // ADV-002 reads the state dir's package.json (installed plugins)
         '~/.openclaw/package.json',
         '~/.clawdbot/openclaw.json',
         '~/.clawdbot/clawdbot.json',
-        '~/.clawdbot/config.yaml',
-        '~/.clawdbot/config.json',
-        '~/.clawdbot/gateway.yaml',
         '~/.clawdbot/.env',
         '~/.moltbot/openclaw.json',
-        '~/.moltbot/config.yaml',
-        '~/.moltbot/config.json',
-        '~/.moltbot/gateway.yaml',
         '~/.moltbot/.env',
         // User-relative CLI install locations — kept in sync with USER_CLI_RELATIVE_PATHS
         '~/.volta/bin/openclaw',
@@ -551,8 +586,6 @@ export const openclawAdapter: AgentAdapter = {
         '~/.openclaw-*/clawdbot.json',
         '~/.openclaw-*/.env',
         '~/.openclaw-*/**/*.json5',
-        '~/.openclaw-*/config.json',
-        '~/.openclaw-*/config.yaml',
         '~/.openclaw-*/skills/**',
         '~/.openclaw/agents/*/agent.yaml',
         '~/.openclaw/agents/*/agent.json',

@@ -1,4 +1,4 @@
-import type { AgentType, Severity } from '../core/types.js';
+import type { AgentType, Platform, Severity } from '../core/types.js';
 
 export interface Advisory {
   id: string;
@@ -28,6 +28,11 @@ export interface Advisory {
    * `sourcePattern`, a match is reported as not applying to that code.
    */
   appliesWhen?: { sourcePattern: string; usage: string };
+  /**
+   * Host platforms the vulnerability exists on (`['win32']` for a Windows-only
+   * path-handling bug). Absent means every platform.
+   */
+  platforms?: Platform[];
 }
 
 export interface AdvisoryFeedMetadata {

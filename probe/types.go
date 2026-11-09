@@ -13,6 +13,11 @@ type ProbeManifest struct {
 	// content) — for private data where checks only need permissions, such
 	// as conversation stores and session transcripts.
 	MetadataGlobPatterns []string `json:"metadataGlobPatterns,omitempty"`
+	// Collected variables (by exact name) whose URL value is kept only up to
+	// its origin: scheme, host and port, with any path, query or fragment
+	// replaced by a placeholder — for endpoint overrides where checks judge
+	// the host, and the rest may carry tokens or account ids.
+	EnvOriginOnly []string `json:"envOriginOnly,omitempty"`
 }
 
 // CommandRequest describes a command to execute during probing.

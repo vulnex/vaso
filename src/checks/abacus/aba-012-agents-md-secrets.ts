@@ -4,6 +4,7 @@ import { defineCheck } from '../../core/check-builder.js';
 import { API_KEY_PATTERNS, isPlaceholderSecret } from '../../core/patterns.js';
 import { findHighEntropyBlocks } from '../../analyzers/entropy.js';
 import { isProjectInstall } from './shared.js';
+import { readTextIfPresent } from '../../adapters/load-if-present.js';
 
 const ENTROPY_THRESHOLD = 5.5;
 const MIN_BLOCK_LEN = 40;
@@ -25,13 +26,9 @@ export const aba012 = defineCheck({
     const evidence: Evidence[] = [];
     let scanned = 0;
     for (const file of files) {
-      if (!(await ctx.fs.access(file))) continue;
-      let content: string;
-      try {
-        content = await ctx.fs.readFile(file);
-      } catch {
-        continue;
-      }
+      // Present but unreadable: reported as CONFIG-LOAD
+      const content = await readTextIfPresent(file, ctx.fs);
+      if (content === undefined) continue;
       scanned++;
       const lines = content.split('\n');
       lines.forEach((line, i) => {

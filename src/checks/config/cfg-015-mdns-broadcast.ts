@@ -2,6 +2,7 @@ import { defineCheck } from '../../core/check-builder.js';
 import { CODING_AGENTS } from '../../core/types.js';
 import { getNestedValue } from '../../core/utils.js';
 import { openclawGatewayExposed } from '../openclaw/oc-008-dangerous-gateway-overrides.js';
+import { containerEnvironment } from '../../adapters/openclaw-bind.js';
 
 export const cfg015 = defineCheck({
   id: 'CFG-015',
@@ -31,7 +32,7 @@ export const cfg015 = defineCheck({
         if (broadcast === true || broadcast === 'full') {
           // OpenClaw "full" adds cliPath/sshPort to the TXT records; with the
           // gateway reachable beyond loopback that maps a target for the LAN
-          const exposedOpenclaw = mdns === openclawMdns && ctx.installation.agent === 'openclaw' && openclawGatewayExposed(config.data);
+          const exposedOpenclaw = mdns === openclawMdns && ctx.installation.agent === 'openclaw' && openclawGatewayExposed(config.data, await containerEnvironment(ctx.fs));
           return h.result({
             passed: false,
             ...(exposedOpenclaw ? { severity: 'warning' as const } : {}),

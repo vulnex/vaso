@@ -10,6 +10,10 @@ export interface ProbeManifest {
   /** Globs recorded as metadata only (exists + mode, no content) — private
    *  data where checks need permissions, e.g. conversation stores. */
   metadataGlobPatterns?: string[];
+  /** Collected variables (exact names) whose URL value the probe (newer than 1.4.0)
+   *  keeps only up to its origin — path, query and fragment become
+   *  placeholders. For endpoint overrides where checks judge the host. */
+  envOriginOnly?: string[];
 }
 
 export interface CommandRequest {

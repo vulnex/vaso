@@ -181,16 +181,22 @@ function sourceLanguage(server: MCPServerEntry, path: string | undefined, code: 
   return 'javascript';
 }
 
-async function readSourceFile(filePath: string, fs: FSProvider): Promise<string | undefined> {
+async function readSourceFile(filePath: string, fs: FSProvider, onDenied?: (message: string) => void): Promise<string | undefined> {
   try {
     const content = await fs.readFile(filePath);
     // A native executable (a Mach-O / ELF server binary launched by path) is
     // not source: read as text, its bytes match "invisible character" and
     // "encoded string" patterns everywhere. A stray NUL in a script is not one.
     return sourceText(content);
-  } catch {
+  } catch (err) {
+    if (isDenied(err)) onDenied?.(err instanceof Error ? err.message : String(err));
     return undefined;
   }
+}
+
+function isDenied(err: unknown): boolean {
+  const code = (err as NodeJS.ErrnoException | null)?.code;
+  return code === 'EACCES' || code === 'EPERM';
 }
 
 async function findMainEntry(dir: string, fs: FSProvider): Promise<string | undefined> {
@@ -256,17 +262,26 @@ export async function resolveServerSources(
 
     let sourceCode: string | undefined;
     let entryFile: string | undefined;
+    // The server's code is there but this scan can't read it (EACCES): every
+    // source check would pass it unseen, so it is reported (SOURCE-READ)
+    let readFailure: string | undefined;
+    const denied = (message: string) => { readFailure ??= message; };
 
     if (localPath) {
-      sourceCode = await readSourceFile(localPath, provider);
+      sourceCode = await readSourceFile(localPath, provider, denied);
       if (sourceCode) entryFile = localPath;
 
       // If it's a directory, find the main entry
       if (!sourceCode) {
         const entry = await findMainEntry(localPath, provider);
         if (entry) {
-          sourceCode = await readSourceFile(entry, provider);
+          sourceCode = await readSourceFile(entry, provider, denied);
           if (sourceCode) entryFile = entry;
+        } else {
+          // A server directory that can't be listed hides its entry file
+          await provider.readdir(localPath).catch((err: unknown) => {
+            if (isDenied(err)) denied(err instanceof Error ? err.message : String(err));
+          });
         }
       }
     }
@@ -292,6 +307,7 @@ export async function resolveServerSources(
       localPath,
       sourceCode,
       ...(resolveFailure ? { resolveFailure } : {}),
+      ...(readFailure && !sourceCode ? { readFailure } : {}),
     };
     if (sourceCode && sourceLanguage(server, localPath, sourceCode) === 'python') {
       source.language = 'python';

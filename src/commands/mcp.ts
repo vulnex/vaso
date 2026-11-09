@@ -13,7 +13,7 @@ import { logError } from '../core/debug.js';
 import { maskCredentialsDeep, toReportJson } from '../reporting/serialize.js';
 import { EXIT_FINDINGS, EXIT_INCOMPLETE, EXIT_USAGE, incompleteResults, parseFailOn, shouldFailScan } from '../core/exit-criteria.js';
 import { describeFetchFailure } from '../mcp/package-fetcher.js';
-import type { MCPDiscoveryResult } from '../mcp/types.js';
+import type { MCPConfigLoadError, MCPDiscoveryResult } from '../mcp/types.js';
 
 /** Paths named with -p must exist and parse; otherwise nothing would be scanned silently. */
 function reportUnreadable(result: MCPDiscoveryResult): boolean {
@@ -22,6 +22,13 @@ function reportUnreadable(result: MCPDiscoveryResult): boolean {
   for (const p of result.unreadable) console.error(chalk.red(`Cannot read MCP config (missing or not valid JSON): ${p}`));
   process.exitCode = EXIT_USAGE;
   return true;
+}
+
+/** Discovered configs that exist but could not be read or parsed — their servers are not listed or scanned. */
+function reportLoadErrors(errors: readonly MCPConfigLoadError[]): void {
+  for (const e of errors) {
+    console.error(chalk.yellow(`Could not ${e.stage === 'read' ? 'read' : 'parse'} ${e.source} MCP config ${e.filePath}: ${e.message} — its servers were not scanned`));
+  }
 }
 
 export interface MCPScanCommandOptions {
@@ -64,11 +71,14 @@ export async function runMCPScan(options: MCPScanCommandOptions): Promise<void> 
       return;
     }
 
+    const loadErrors = discoveryResult.loadErrors ?? [];
+    reportLoadErrors(loadErrors);
     if (discoveryResult.totalServers === 0 && direct.sources.length === 0) {
       console.error(chalk.yellow('No MCP servers found. Nothing to scan.'));
       // A machine-readable report is still written (an empty, clean one): CI
       // that uploads -o report.sarif / parses JSON otherwise finds no file.
-      if ((options.format ?? 'terminal') === 'terminal' && !options.output) return;
+      // An unreadable config is a finding, reported even with nothing else to scan
+      if ((options.format ?? 'terminal') === 'terminal' && !options.output && loadErrors.length === 0) return;
     }
 
     if (discoveryResult.totalServers > 0) {
@@ -126,7 +136,7 @@ export async function runMCPScan(options: MCPScanCommandOptions): Promise<void> 
       format: options.format as 'terminal' | 'json' | 'sarif' | 'markdown',
     };
 
-    const result = await engine.scanMCP(discoveryResult.configs, allSources, scanOptions);
+    const result = await engine.scanMCP(discoveryResult.configs, allSources, scanOptions, loadErrors);
 
     const reporter = getReporter(scanOptions.format ?? 'terminal');
     const output = reporter.render(result);
@@ -138,7 +148,8 @@ export async function runMCPScan(options: MCPScanCommandOptions): Promise<void> 
       console.log(output);
     }
 
-    if (direct.unreadable.length > 0 || incompleteResults(result.agents.flatMap(a => a.results)).length > 0) {
+    // A config that could not be read hid its servers: the scan is incomplete
+    if (direct.unreadable.length > 0 || loadErrors.length > 0 || incompleteResults(result.agents.flatMap(a => a.results)).length > 0) {
       process.exitCode = EXIT_INCOMPLETE;
     } else if (shouldFailScan(result.agents.flatMap(a => a.results), failOn)) {
       process.exitCode = EXIT_FINDINGS;
@@ -157,6 +168,7 @@ export async function runMCPList(options: { format: string; path?: string[] }): 
       ? await discovery.discoverFromPaths(options.path)
       : await discovery.discover(process.platform, process.cwd());
     if (reportUnreadable(result)) return;
+    reportLoadErrors(result.loadErrors ?? []);
 
     if (options.format === 'json') {
       console.log(toReportJson(result));

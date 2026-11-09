@@ -3,7 +3,7 @@ import { readBodyCapped } from '../core/http-body.js';
 import { mkdir, readFile, writeFile, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
-import { verifyFeedSignature } from '../ioc/updater.js';
+import { isIOCFeedData, touchFeedCheck, verifyFeedSignature } from '../ioc/updater.js';
 import { IOC_FEED_PUBLIC_KEY, DEFAULT_STALENESS_DAYS } from '../ioc/public-key.js';
 import type {
   Advisory,
@@ -26,6 +26,23 @@ const MAX_SIGNATURE_BYTES = 4096;
 
 export const DEFAULT_ADVISORY_FEED_URL =
   'https://raw.githubusercontent.com/vulnex/vaso/main/feeds/advisory-feed.json';
+
+// ── Feed shape ──────────────────────────────────────────────────────
+
+/**
+ * Whether signed feed data is an advisory feed: an `advisories` array whose
+ * entries carry the fields every check reads. The IOC feed is signed with the
+ * same key, so `vaso update --advisory-url <IOC feed>` must be told apart.
+ */
+export function isAdvisoryFeedData(data: unknown): data is AdvisoryFeedData {
+  if (!data || typeof data !== 'object' || Array.isArray(data) || isIOCFeedData(data)) return false;
+  const advisories = (data as Record<string, unknown>).advisories;
+  return Array.isArray(advisories) && advisories.every((a) => {
+    if (!a || typeof a !== 'object') return false;
+    const adv = a as Record<string, unknown>;
+    return ['id', 'title', 'agent', 'affectedVersions', 'severity'].every((k) => typeof adv[k] === 'string');
+  });
+}
 
 // ── Merge logic ─────────────────────────────────────────────────────
 
@@ -75,6 +92,16 @@ export function isAdvisoryFeedStale(
 
 // ── Cached feed loader ──────────────────────────────────────────────
 
+/** Version of the cached advisory feed (from the feed itself), 0 when none. */
+export async function cachedAdvisoryFeedVersion(feedDir: string = ADVISORY_DIR): Promise<number> {
+  try {
+    const feed = JSON.parse(await readFile(join(feedDir, FEED_FILE), 'utf-8')) as AdvisoryFeed;
+    return typeof feed.meta?.version === 'number' ? feed.meta.version : 0;
+  } catch {
+    return 0;
+  }
+}
+
 export async function loadCachedAdvisoryFeed(
   feedDir: string = ADVISORY_DIR,
   publicKeyPem: string = IOC_FEED_PUBLIC_KEY,
@@ -101,6 +128,13 @@ export async function loadCachedAdvisoryFeed(
     }
 
     const feed: AdvisoryFeed = JSON.parse(feedBytes.toString('utf-8'));
+    // An IOC feed cached here by an older `vaso update --advisory-url` is no
+    // advisory data. Remove it with its metadata, whose version is the IOC
+    // feed's and would otherwise refuse every real advisory feed as "not newer".
+    if (!isAdvisoryFeedData(feed.data)) {
+      await Promise.all([FEED_FILE, SIG_FILE, METADATA_FILE].map((f) => unlink(join(feedDir, f)).catch(() => {})));
+      return null;
+    }
     return feed.data;
   } catch {
     return null;
@@ -193,11 +227,17 @@ export async function fetchAndUpdateAdvisoryFeed(
     if (!feed.meta || typeof feed.meta.version !== 'number' || !feed.data) {
       return { success: false, message: 'Invalid advisory feed format.' };
     }
+    if (!isAdvisoryFeedData(feed.data)) {
+      return { success: false, message: 'Not an advisory feed (is this the IOC feed? use --url).' };
+    }
   } catch {
     return { success: false, message: 'Invalid advisory feed JSON.' };
   }
 
   if (feed.meta.version < currentVersion || (feed.meta.version === currentVersion && !options.reinstall && cacheUsable)) {
+    // The server is current only when it serves the cached version; an older
+    // mirror must not silence the staleness warning
+    if (cacheUsable && feed.meta.version === currentVersion) await touchFeedCheck(join(feedDir, METADATA_FILE));
     return {
       success: true,
       message: `Advisory feed version ${feed.meta.version} is not newer than cached version ${currentVersion}.`,

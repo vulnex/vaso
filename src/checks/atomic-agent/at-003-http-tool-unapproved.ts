@@ -2,7 +2,8 @@ import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { fixFirstConfig } from '../../remediation/config-writer.js';
 import type { ParsedConfig } from '../../core/types.js';
-import { asRecord, atomicApprovalLevel, atomicConfigs, parseAtomicBool } from './shared.js';
+import { asRecord, atomicApprovalLevel, atomicConfigs, coerceIntLike, parseAtomicBool } from './shared.js';
+import { compareVersions } from '../../core/semver.js';
 
 /**
  * Approval levels ≥ 3 ("home") auto-approve the `http` category: per the
@@ -16,12 +17,41 @@ function approvalLevel(config: ParsedConfig): number | undefined {
 
 const HTTP_QUIET_LEVEL = 3;
 
+/**
+ * v0.6.13 (config v79, upstream 9ed4bff6) made "writes" the default again
+ * and loads a stored "never" from a file older than v79 as "writes"
+ * (http-config.ts resolveHttpApprovalMode); a file without `version` is
+ * read as the current one. Earlier releases default to "never".
+ */
+const WRITES_DEFAULT_SINCE = '0.6.13';
+const WRITES_MIGRATION_CONFIG_VERSION = 79;
+
+/** http.approvalMode as the installed release runs it. */
+function effectiveApprovalMode(config: ParsedConfig, http: Record<string, unknown> | undefined, installed: string | undefined): string {
+  const raw = typeof http?.approvalMode === 'string' ? http.approvalMode : undefined;
+  // Unknown release: the older, unprompted default is the safe reading
+  const current = installed !== undefined && compareVersions(installed, WRITES_DEFAULT_SINCE) >= 0;
+  if (!current) return raw ?? 'never';
+  if (raw === undefined) return 'writes';
+  const fileVersion = coerceIntLike(config.data.version);
+  if (raw === 'never' && fileVersion !== undefined && fileVersion < WRITES_MIGRATION_CONFIG_VERSION) return 'writes';
+  return raw;
+}
+
+/**
+ * http.hostAllowlist as hostAllowed() (tools/os/web/http-request.ts) reads
+ * it: null/absent = any host, [] = no host at all, entries = those hosts.
+ */
+function allowlistRestricts(allowlist: unknown): boolean {
+  return Array.isArray(allowlist);
+}
+
 export const at003 = defineCheck({
   id: 'AT-003',
   name: 'Atomic Agent HTTP Tool Runs Without Approval',
   category: 'atomic-agent',
   severity: 'warning',
-  description: 'http.approvalMode "never" (the shipped default) — or any mode under agent.approvalLevel ≥ 3, which auto-approves HTTP — with no http.hostAllowlist: the os.http.request tool sends any method, including POST/PUT with arbitrary bodies, to any public host without confirmation. A prompt-injected turn can exfiltrate data it has read in a single call.',
+  description: 'http.approvalMode "never" (the default before v0.6.13; from v0.6.13 the default is "writes" and a "never" stored by an older release loads as "writes") — or any mode under agent.approvalLevel ≥ 3, which auto-approves HTTP — with no http.hostAllowlist: the os.http.request tool sends any method, including POST/PUT with arbitrary bodies, to any public host without confirmation. A prompt-injected turn can exfiltrate data it has read in a single call.',
   supportedAgents: ['atomic-agent'],
 
   async run(ctx, h) {
@@ -30,14 +60,13 @@ export const at003 = defineCheck({
     for (const config of atomicConfigs(ctx.configs)) {
       const http = asRecord(config.data.http);
       if (http?.enabled != null && parseAtomicBool(http.enabled) === false) continue;
-      // Absent block/field → the default, "never" (and pre-v25 "writes" files
-      // are migrated to "never" on load).
-      const mode = typeof http?.approvalMode === 'string' ? http.approvalMode : 'never';
+      // Absent block/field → the installed release's default
+      const mode = effectiveApprovalMode(config, http, ctx.installation.version);
       const level = approvalLevel(config);
       const levelOverrides = level !== undefined && level >= HTTP_QUIET_LEVEL;
       if (mode !== 'never' && !levelOverrides) continue;
       const allowlist = http?.hostAllowlist;
-      if (Array.isArray(allowlist) && allowlist.length > 0) continue;
+      if (allowlistRestricts(allowlist)) continue;
       if (!levelOverrides) fixable = true;
       evidence.push({
         file: config.filePath,

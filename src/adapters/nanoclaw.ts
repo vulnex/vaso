@@ -5,6 +5,7 @@ import type { ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { loadConfigIfPresent } from './load-if-present.js';
+import { recordLoadError } from '../core/config-loader.js';
 import { getUserHomeDirs } from './openclaw.js';
 
 /**
@@ -109,10 +110,16 @@ async function serviceCheckouts(home: string, fs: FSProvider): Promise<string[]>
 /** Checkout candidates found by name: ~/<*nanoclaw*> and ~/<parent>/<*nanoclaw*>. */
 async function namedCheckoutCandidates(home: string, fs: FSProvider): Promise<string[]> {
   const out: string[] = [];
-  for (const name of await safeReaddir(fs, home)) {
+  const homeNames = await safeReaddir(fs, home);
+  for (const name of homeNames) {
     if (CHECKOUT_NAME_RE.test(name)) out.push(join(home, name));
   }
-  for (const parent of CHECKOUT_PARENTS) {
+  // Only parents spelled as on disk: on a case-insensitive file system
+  // ~/projects opens ~/Projects too, and the checkout path would keep the
+  // wrong case (a remote snapshot, keyed by the real case, can't match it).
+  // An unlistable home falls back to trying every spelling.
+  const parents = homeNames.length > 0 ? CHECKOUT_PARENTS.filter(p => homeNames.includes(p)) : CHECKOUT_PARENTS;
+  for (const parent of parents) {
     for (const name of await safeReaddir(fs, join(home, parent))) {
       if (CHECKOUT_NAME_RE.test(name)) out.push(join(home, parent, name));
     }
@@ -145,7 +152,7 @@ export interface NanoclawCheckout {
 export async function findNanoclawCheckouts(home: string, fs: FSProvider): Promise<NanoclawCheckout[]> {
   const found: NanoclawCheckout[] = [];
   const seen = new Set<string>();
-  const add = async (dir: string, authoritative: boolean): Promise<void> => {
+  const add = async (dir: string, authoritative: boolean, source?: string): Promise<void> => {
     let key = dir;
     try { key = await fs.realpath(dir); } catch {}
     // macOS/Windows file systems are case-insensitive by default: ~/projects
@@ -158,13 +165,26 @@ export async function findNanoclawCheckouts(home: string, fs: FSProvider): Promi
     // Every NanoClaw package.json carries a version; without one only a
     // service definition vouches for the directory.
     if (version === undefined && !(authoritative && (fs.kind === 'snapshot' || await fs.access(dir)))) return;
+    // The probe collects checkouts only where the name globs reach; one a
+    // service definition or the ncl link points elsewhere is reported, but
+    // its files are not in the snapshot — say so instead of judging it blind
+    if (version === undefined && fs.kind === 'snapshot' && source && !(await fs.access(dir))) {
+      recordLoadError({
+        filePath: dir,
+        stage: 'read',
+        message: `NanoClaw checkout named by ${source}, outside the paths the remote probe collects (~/*nanoclaw*, ~/<src|code|projects|…>/*nanoclaw*) — its .env, package.json and skills were not checked; scan the host locally`,
+      });
+    }
     seen.add(key);
     found.push({ dir, version: version ?? undefined });
   };
 
-  for (const dir of await serviceCheckouts(home, fs)) await add(dir, true);
+  for (const dir of await serviceCheckouts(home, fs)) await add(dir, true, 'a service definition');
   const ncl = await nclCheckout(home, fs);
-  if (ncl) await add(ncl, false);
+  // On a snapshot the link vouches for a checkout the probe didn't collect —
+  // only one named like NanoClaw: the snapshot can't show that the target
+  // exists, and other tools ship a bin/ncl too (NCAR NCL)
+  if (ncl) await add(ncl, fs.kind === 'snapshot' && /nanoclaw/i.test(basename(ncl)), '~/.local/bin/ncl');
   for (const dir of await namedCheckoutCandidates(home, fs)) await add(dir, false);
   return found;
 }
@@ -278,9 +298,13 @@ export const nanoclawAdapter: AgentAdapter = {
 
   getProbeManifest(): ProbeManifest {
     // Same candidates detect() walks: ~/<*nanoclaw*> and ~/<parent>/<*nanoclaw*>.
+    // Each parent is a one-letter class (`[P]rojects`) so the probe matches it
+    // against the directory listing: a literal is stat'ed, and on a
+    // case-insensitive file system `projects` would then also collect
+    // ~/Projects under the wrong case.
     const checkoutGlobs = [
       `~/${CHECKOUT_NAME_GLOB}`,
-      `~/{${CHECKOUT_PARENTS.join(',')}}/${CHECKOUT_NAME_GLOB}`,
+      `~/{${CHECKOUT_PARENTS.map(p => `[${p[0]}]${p.slice(1)}`).join(',')}}/${CHECKOUT_NAME_GLOB}`,
     ];
     return {
       filePaths: [

@@ -3,7 +3,7 @@ import { dirname } from 'node:path';
 import type { ScanOptions, ScanResult, ScanContext, AgentScanResult, AgentInstallation, CheckResult, CheckModule } from './types.js';
 import type { CheckRegistry } from './check-registry.js';
 import type { AdapterConfigLoadError, AdapterDetectionError, AdapterRegistry } from '../adapters/registry.js';
-import type { MCPConfig, MCPServerSource } from '../mcp/types.js';
+import type { MCPConfig, MCPConfigLoadError, MCPServerSource } from '../mcp/types.js';
 import type { FSProvider } from './fs-provider.js';
 import { LocalFSProvider } from './local-fs-provider.js';
 import { computeScore, scoreToGrade, summarizeResults, aggregateScore, meanScore } from './scoring.js';
@@ -14,6 +14,7 @@ import { mapSourceEvidence } from '../mcp/source-locations.js';
 import { describeFetchFailure } from '../mcp/package-fetcher.js';
 import { extractToolDefinitions } from '../mcp/tool-baseline.js';
 import { credentialPathsFor } from '../adapters/adapter.js';
+import { captureConfigLoadErrors } from './config-loader.js';
 
 /** How long one check may run before it is reported as errored (default 5 min). */
 export const DEFAULT_CHECK_TIMEOUT_MS = 300_000;
@@ -85,6 +86,22 @@ function erroredResult(check: Pick<CheckModule, 'id' | 'name' | 'category'>, rea
   };
 }
 
+/** The CONFIG-LOAD result for a config file that exists but could not be read or parsed. */
+function configLoadResult(error: AdapterConfigLoadError): CheckResult {
+  return {
+    id: 'CONFIG-LOAD',
+    name: `${error.displayName} Config Load Error`,
+    category: 'config',
+    severity: 'warning',
+    passed: false,
+    errored: true,
+    message: error.directory
+      ? `Config directory could not be read: ${error.filePath} — ${error.message}. Its config files were not checked; findings for this agent may be incomplete.`
+      : `Config file could not be ${error.stage === 'read' ? 'read' : 'parsed'}: ${error.filePath} — ${error.message}. Findings for this agent may be incomplete.`,
+    evidence: [{ file: error.filePath, detail: error.message }],
+  };
+}
+
 /**
  * `--resolve-packages` servers whose source could not be downloaded, as one
  * errored result: the source checks never saw them, so the scan is
@@ -106,6 +123,53 @@ export function packageResolveResult(sources: readonly MCPServerSource[]): Check
     evidence: failed.map((s) => ({
       file: s.packageName ?? s.serverName,
       detail: `Server "${s.serverName}": ${describeFetchFailure(s.resolveFailure!)}`,
+    })),
+  };
+}
+
+/**
+ * One CONFIG-LOAD per file and agent: installations of one agent read shared
+ * files (an OpenClaw profile's OC-005 reads the default config, Abacus
+ * projects the user trust file), and each used to report the same unreadable
+ * file again. The first installation keeps it.
+ */
+function dedupeConfigLoadFindings(agents: AgentScanResult[]): void {
+  const seen = new Set<string>();
+  for (const a of agents) {
+    const before = a.results.length;
+    a.results = a.results.filter(r => {
+      if (r.id !== 'CONFIG-LOAD') return true;
+      const key = `${a.agent}\u0000${a.installation.user ?? ''}\u0000${r.evidence?.[0]?.file ?? r.message}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    if (a.results.length !== before) {
+      a.score = computeScore(a.results);
+      a.grade = scoreToGrade(a.score);
+    }
+  }
+}
+
+/**
+ * Local servers whose source is there but could not be read (EACCES), as one
+ * errored result — the counterpart of PACKAGE-RESOLVE: the source checks
+ * passed them without seeing their code, so the scan is incomplete.
+ */
+export function sourceReadResult(sources: readonly MCPServerSource[]): CheckResult | undefined {
+  const failed = sources.filter((s) => s.readFailure && !s.sourceCode);
+  if (failed.length === 0) return undefined;
+  return {
+    id: 'SOURCE-READ',
+    name: 'Server Source Read',
+    category: 'mcp',
+    severity: 'info',
+    passed: false,
+    errored: true,
+    message: `Source of ${failed.length} local server(s) could not be read — their code was not analyzed; findings may be missing`,
+    evidence: failed.map((s) => ({
+      file: s.localPath ?? s.serverName,
+      detail: `Server "${s.serverName}": ${s.readFailure}`,
     })),
   };
 }
@@ -159,6 +223,7 @@ export class ScanEngine {
     });
     agents.push(...detectionErrors.map(e => this.adapterErrorResult(e)));
     this.foldConfigLoadErrors(agents, configLoadErrors);
+    dedupeConfigLoadFindings(agents);
     dedupeInheritedFindings(agents);
 
     // 3. Compute overall results
@@ -201,13 +266,20 @@ export class ScanEngine {
     // Get applicable checks for the scanned filesystem, not the scanner host.
     const applicable = this.checks.getApplicable(installation.agent, this.fs.platform);
 
-    // Run all checks concurrently
-    const settled = await Promise.allSettled(
+    // Run all checks concurrently. Files a check reads itself (memory, rules
+    // and trust files) that exist but can't be read are captured as they are
+    // during detection, and reported as CONFIG-LOAD like unreadable configs.
+    const { result: settled, loadErrors } = await captureConfigLoadErrors(() => Promise.allSettled(
       applicable.map(check => runCheck(check, context, this.checkTimeoutMs))
-    );
+    ));
 
     const results = dedupePermissionFindings(settled.map((r, index) =>
       r.status === 'fulfilled' ? r.value : erroredResult(applicable[index], r.reason)));
+    const displayName = adapter?.displayName ?? installation.agent;
+    for (const error of loadErrors) {
+      if (results.some(r => r.id === 'CONFIG-LOAD' && r.evidence?.[0]?.file === error.filePath)) continue;
+      results.push(configLoadResult({ ...error, agent: installation.agent, displayName }));
+    }
 
     const score = computeScore(results);
 
@@ -230,21 +302,12 @@ export class ScanEngine {
    *  agent from being detected at all. */
   private foldConfigLoadErrors(agents: AgentScanResult[], loadErrors: AdapterConfigLoadError[]): void {
     for (const error of loadErrors) {
-      const result: CheckResult = {
-        id: 'CONFIG-LOAD',
-        name: `${error.displayName} Config Load Error`,
-        category: 'config',
-        severity: 'warning',
-        passed: false,
-        errored: true,
-        message: error.directory
-          ? `Config directory could not be read: ${error.filePath} — ${error.message}. Its config files were not checked; findings for this agent may be incomplete.`
-          : `Config file could not be ${error.stage === 'read' ? 'read' : 'parsed'}: ${error.filePath} — ${error.message}. Findings for this agent may be incomplete.`,
-        evidence: [{ file: error.filePath, detail: error.message }],
-      };
+      const result = configLoadResult(error);
 
       const agent = agents.find(a => a.agent === error.agent);
       if (agent) {
+        // Already reported by a check that read the same file
+        if (agent.results.some(r => r.id === 'CONFIG-LOAD' && r.evidence?.[0]?.file === error.filePath)) continue;
         agent.results.push(result);
         agent.score = computeScore(agent.results);
         agent.grade = scoreToGrade(agent.score);
@@ -306,6 +369,8 @@ export class ScanEngine {
     mcpConfigs: MCPConfig[],
     serverSources: MCPServerSource[],
     options: ScanOptions,
+    /** Discovered MCP config files that could not be read or parsed. */
+    loadErrors: readonly MCPConfigLoadError[] = [],
   ): Promise<ScanResult> {
     // Extract tool definitions once so the tool-layer checks (MCP-020/024/025)
     // share a single parse of each server's source instead of re-extracting.
@@ -344,6 +409,11 @@ export class ScanEngine {
 
     const unresolved = packageResolveResult(serverSources);
     if (unresolved) results.push(unresolved);
+    const unread = sourceReadResult(serverSources);
+    if (unread) results.push(unread);
+    // One CONFIG-LOAD per such file, as for an agent's config: the servers
+    // it declares were not scanned
+    results.push(...loadErrors.map((e) => configLoadResult({ ...e, agent: 'mcp', displayName: `${e.source} MCP` })));
 
     const score = computeScore(results);
 

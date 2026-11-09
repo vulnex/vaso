@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import type { FSProvider } from '../core/fs-provider.js';
 import type { CliInstall } from '../core/types.js';
-import { compareVersions } from '../core/semver.js';
+import { compareVersions, type VersionParseOptions } from '../core/semver.js';
 
 /**
  * Every copy of an agent CLI on a host, not just the first one found.
@@ -82,6 +82,9 @@ export interface CliInstallSpec {
   /** Also look in the common system/user bin dirs (default true). Off for
    *  names too generic to attribute (e.g. Cursor's `agent` shim). */
   commonDirs?: boolean;
+  /** How this CLI's versions order (OpenClaw's `-N` correction releases
+   *  follow their base release). */
+  versionOptions?: VersionParseOptions;
   /**
    * Version of one copy. `canExec` is false when running that exact binary is
    * impossible (a remote snapshot only holds `<name> --version` for the
@@ -271,7 +274,7 @@ export async function discoverCliInstalls(home: string, fs: FSProvider, spec: Cl
 
   const primary = (spec.preferPath ? installs.find(i => i.path === spec.preferPath) : undefined)
     ?? (resolved ? installs.find(i => i.path === resolved) : undefined)
-    ?? newest(installs)
+    ?? newest(installs, spec.versionOptions)
     ?? installs[0];
   // A snapshot can't version a non-PATH native binary (no exec, no symlink
   // targets to dedupe by), so an unversioned copy there is usually a second
@@ -288,10 +291,10 @@ export async function discoverCliInstalls(home: string, fs: FSProvider, spec: Cl
   return { primary, others: distinct };
 }
 
-function newest(installs: CliInstall[]): CliInstall | undefined {
+function newest(installs: CliInstall[], opts?: VersionParseOptions): CliInstall | undefined {
   const versioned = installs.filter(i => i.version);
   if (versioned.length === 0) return undefined;
-  return versioned.reduce((a, b) => (compareVersions(b.version!, a.version!) > 0 ? b : a));
+  return versioned.reduce((a, b) => (compareVersions(b.version!, a.version!, opts) > 0 ? b : a));
 }
 
 /** Probe-manifest globs that surface every copy of `name` on a remote host. */

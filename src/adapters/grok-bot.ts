@@ -93,6 +93,13 @@ export const USER_DATA_FILES = {
   gatewayBindings: '.env-descriptor-account-bindings.json',
 } as const;
 
+/** Endpoint overrides GB-012 judges by origin only: the probe keeps scheme,
+ *  host and port, never the path or query (account ids, tokens). */
+const GROK_BOT_URL_ENV = [
+  'SAND_EGRESS_TUNNEL_URL', 'SAND_BACKEND_URL', 'CURSOR_API_BASE_URL', 'SAND_HOST_GATEWAY_URL',
+  'SAND_CURSOR_WEBSITE_URL', 'CURSOR_WEBSITE_URL', 'SAND_HTTPS_PROXY',
+];
+
 /** Environment variables the adapter and checks read (none holds a secret). */
 export const GROK_BOT_ENV = [
   'SAND_DATA_ROOT', 'SAND_USER_DATA_DIR', 'SAND_LOCAL_EXEC_ROOT',
@@ -388,6 +395,9 @@ export const grokBotAdapter: AgentAdapter = {
         ].map(f => `${d}/${f}`)),
         `~/Library/Application Support/${GROK_BOT_HELPER.supportDir}`,
         `~/Library/Application Support/${GROK_BOT_HELPER.supportDir}/${GROK_BOT_HELPER.serviceFile}`,
+        // The app GROK_BOT_SIDECAR_APP names in place of the helper: whether
+        // it exists decides GB-016's severity — existence and mode only
+        '${GROK_BOT_SIDECAR_APP}',
         ...userDataDirs.flatMap(d => [
           USER_DATA_FILES.secrets, USER_DATA_FILES.userSecrets, USER_DATA_FILES.cookies,
           USER_DATA_FILES.statsig, `${USER_DATA_FILES.reliability}/*`,
@@ -404,6 +414,7 @@ export const grokBotAdapter: AgentAdapter = {
       // Named variables only: a bare SAND_ prefix would ship values such as
       // SAND_EGRESS_TUNNEL_BEARER, which the probe's name-based redaction misses
       envPrefixes: GROK_BOT_ENV,
+      envOriginOnly: GROK_BOT_URL_ENV,
       systemPaths: [APP_LINUX, APP_MAC, APT_SOURCE],
       systemDirListings: [],
     };

@@ -269,14 +269,19 @@ export const devinAdapter: AgentAdapter = {
       filePaths: [
         '~/.config/devin/config.json',
         '~/.config/devin/mcp_config.json',
+        // Always-on rules files DEV-007 reads (global config dir + ~/.devin)
         '~/.config/devin/AGENTS.md',
+        '~/.config/devin/AGENTS.local.md',
+        '~/.config/devin/AGENT.md',
+        '~/.config/devin/.windsurfrules',
+        '~/.devin/global_rules.md',
         // Workspace trust list (DEV-008) — paths only
         '~/.local/share/devin/cli/trusted_workspaces.json',
         // User-relative CLI install location — kept in sync with USER_CLI_RELATIVE_PATHS
         '~/.local/bin/devin',
       ],
       // User skill roots — SKL/IOC checks read them
-      globPatterns: USER_SKILL_DIRS.map(d => `~/${d}/**`),
+      globPatterns: [...USER_SKILL_DIRS.map(d => `~/${d}/**`), '~/.devin/rules/*.md'],
       commands: [
         { id: 'devin-which', cmd: 'which', args: ['devin'], timeout: 3000 },
         { id: 'devin-version', cmd: 'devin', args: ['--version'], timeout: 3000 },

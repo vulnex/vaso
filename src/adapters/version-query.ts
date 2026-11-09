@@ -110,13 +110,42 @@ async function readNpmGlobalDirect(
   packageName: string,
 ): Promise<string | undefined> {
   const binDir = dirname(binary);
-  if (basename(binDir) !== 'bin') return undefined;
+  if (basename(binDir) !== 'bin') return readPnpmGlobalDirect(binDir, fs, packageName);
   const prefix = dirname(binDir);
   const pkgPath = join(prefix, 'lib', 'node_modules', packageName, 'package.json');
+  return readVersionFile(pkgPath, fs);
+}
+
+async function readVersionFile(pkgPath: string, fs: FSProvider): Promise<string | undefined> {
   try {
     const pkg = JSON.parse(await fs.readFile(pkgPath));
     if (pkg.version && SEMVER_RE.test(pkg.version)) return pkg.version;
   } catch {}
+  return undefined;
+}
+
+/**
+ * pnpm's global bin dir (PNPM_HOME) holds cmd-shim scripts directly — no
+ * `bin/` — and the packages live in `<PNPM_HOME>/global/<layout>/node_modules`
+ * (layout `5` since pnpm 7). A shim can't be resolved to its package by
+ * realpath, so read the package's manifest there (the probe collects it via
+ * `npmPackageJsonGlobs`).
+ */
+async function readPnpmGlobalDirect(
+  binDir: string,
+  fs: FSProvider,
+  packageName: string,
+): Promise<string | undefined> {
+  let layouts: string[];
+  try {
+    layouts = await fs.readdir(join(binDir, 'global'));
+  } catch {
+    return undefined;
+  }
+  for (const layout of layouts.sort().reverse()) {
+    const version = await readVersionFile(join(binDir, 'global', layout, 'node_modules', packageName, 'package.json'), fs);
+    if (version) return version;
+  }
   return undefined;
 }
 

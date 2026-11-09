@@ -2,6 +2,7 @@ import { basename, dirname, join } from 'node:path';
 import type { Evidence, ParsedConfig, ScanContext } from '../../core/types.js';
 import { API_KEY_PATTERNS, isPlaceholderSecret, isEnvReference } from '../../core/patterns.js';
 import { shannonEntropy } from '../../analyzers/entropy.js';
+import { parseIfPresent } from '../../adapters/load-if-present.js';
 
 /**
  * Shared helpers for the Abacus.AI checks. Layout and semantics come from the
@@ -72,16 +73,31 @@ export function envFlag(ctx: ScanContext, name: string): boolean {
   return TRUTHY.has((ctx.fs.getEnv(name) ?? '').trim().toLowerCase());
 }
 
-/** Workspaces recorded in ~/.abacusai/trusted-workspaces.json ({ workspaces: { <path>: { trustedAt } } }). */
-export async function trustedWorkspaces(ctx: ScanContext): Promise<{ file: string; paths: string[] }> {
+/**
+ * Workspaces recorded in ~/.abacusai/trusted-workspaces.json ({ workspaces: { <path>: { trustedAt } } }).
+ * With `report`, a file that is there but can't be read or parsed is reported
+ * as CONFIG-LOAD — once, by the user installation (ABA-009); project
+ * installations read the same file.
+ */
+export async function trustedWorkspaces(ctx: ScanContext, options: { report?: boolean } = {}): Promise<{ file: string; paths: string[] }> {
   const file = join(abacusDir(ctx), 'trusted-workspaces.json');
-  try {
-    const data = JSON.parse(await ctx.fs.readFile(file)) as { workspaces?: unknown };
-    const ws = data.workspaces;
-    return { file, paths: ws && typeof ws === 'object' && !Array.isArray(ws) ? Object.keys(ws) : [] };
-  } catch {
-    return { file, paths: [] };
+  const parse = (raw: string) => {
+    const data = JSON.parse(raw) as unknown;
+    if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('Top-level value is not a JSON object');
+    return data as { workspaces?: unknown };
+  };
+  let data: { workspaces?: unknown } | undefined;
+  if (options.report) {
+    data = await parseIfPresent(file, ctx.fs, parse);
+  } else {
+    try {
+      data = parse(await ctx.fs.readFile(file));
+    } catch {
+      data = undefined;
+    }
   }
+  const ws = data?.workspaces;
+  return { file, paths: ws && typeof ws === 'object' && !Array.isArray(ws) ? Object.keys(ws) : [] };
 }
 
 /** Whether the CLI honours this project installation's escalating settings. */

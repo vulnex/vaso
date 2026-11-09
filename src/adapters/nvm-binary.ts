@@ -56,5 +56,10 @@ export function npmPackageJsonGlobs(packageName: string): string[] {
     `/usr/lib/node_modules/${packageName}/package.json`,
     `/opt/homebrew/lib/node_modules/${packageName}/package.json`,
     `~/.volta/tools/image/packages/${packageName}/lib/node_modules/${packageName}/package.json`,
+    // pnpm global store under PNPM_HOME (default on Linux / macOS), layout 5
+    // since pnpm 7. Spelled out, no wildcard: the package dir is a symlink into
+    // the store, and the probe follows links only before a glob's first wildcard
+    `~/.local/share/pnpm/global/5/node_modules/${packageName}/package.json`,
+    `~/Library/pnpm/global/5/node_modules/${packageName}/package.json`,
   ])];
 }

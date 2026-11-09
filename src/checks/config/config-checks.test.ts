@@ -579,14 +579,26 @@ describe('CFG-011: Node.js CVE-2026-21636', () => {
 describe('deep-test 2026-10-15: OpenClaw 2026.9.4 schema', () => {
   const oc = (data: Record<string, unknown>, raw?: string) => makeContext([makeConfig(data, raw)]);
 
-  it('CFG-001 explains "lan" as 0.0.0.0 and flags "auto" (tailnet, else LAN)', async () => {
+  it('CFG-001 explains "lan" as 0.0.0.0; "auto" (loopback outside containers) is informational here', async () => {
     const lan = await cfg001.run(oc({ gateway: { bind: 'lan' } }));
     expect(lan.evidence?.[0].detail).toContain('0.0.0.0');
+    // g4-F1: resolveGatewayBindHost binds "auto" to 0.0.0.0 only in a container
     const auto = await cfg001.run(oc({ gateway: { bind: 'auto' } }));
     expect(auto.passed).toBe(false);
-    expect(auto.fixable).toBe(true);
+    expect(auto.severity).toBe('info');
+    expect(auto.fixable).toBeFalsy();
     // Tailscale serve/funnel forces the gateway onto loopback
     expect((await cfg001.run(oc({ gateway: { bind: 'auto', tailscale: { mode: 'serve' } } }))).passed).toBe(true);
+  });
+
+  it('CFG-001: nanobot gateway.host (GET /health only) is info; its websocket channel on 0.0.0.0 is critical (g5-F2)', async () => {
+    const health = await cfg001.run(makeContext([makeConfig({ gateway: { host: '0.0.0.0', port: 18790 } })], 'nanobot'));
+    expect(health.passed).toBe(false);
+    expect(health.severity).toBe('info');
+    expect(health.fixable).toBeFalsy();
+    const ws = await cfg001.run(makeContext([makeConfig({ gateway: { host: '0.0.0.0' }, channels: { websocket: { host: '0.0.0.0', token: 't' } } })], 'nanobot'));
+    expect(ws.severity).toBe('critical');
+    expect(ws.evidence?.some(e => e.detail?.includes('channels.websocket.host'))).toBe(true);
   });
 
   it('CFG-001 agrees with the resolved gateway listener (PicoClaw launcher public, OpenShell bind_address)', async () => {

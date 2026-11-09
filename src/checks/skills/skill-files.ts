@@ -1,5 +1,5 @@
 import { extname } from 'node:path';
-import type { ScanContext } from '../../core/types.js';
+import type { Evidence, ScanContext } from '../../core/types.js';
 import type { FSProvider } from '../../core/fs-provider.js';
 import { BINARY_EXTENSIONS, getAllSkillsDirs, getSkillFiles } from '../../core/utils.js';
 import { readCappedFile } from '../../core/file-limits.js';
@@ -61,4 +61,19 @@ export async function readSkillText(fs: FSProvider, file: string, mode: 'code' |
   const text = sourceText(await readCappedFile(fs, file));
   if (text === undefined) return undefined;
   return isMarkdown(file) ? markdownCodeBlocks(text) : text;
+}
+
+/**
+ * Evidence for a skill file the scan can't read (EACCES/EPERM — locally, or
+ * a file the remote probe was denied), undefined for any other error. Every
+ * content check skips such a file; SKL-002 reports it so it isn't passed as
+ * reviewed.
+ */
+export function unreadableSkillFile(file: string, err: unknown): Evidence | undefined {
+  const code = (err as NodeJS.ErrnoException | null)?.code;
+  if (code !== 'EACCES' && code !== 'EPERM') return undefined;
+  return {
+    file,
+    detail: 'Skill file can\'t be read — hidden from review and from these checks (an agent running with more privileges than this scan still loads it)',
+  };
 }

@@ -1,5 +1,5 @@
 import { extname, join } from 'node:path';
-import type { MCPConfig, MCPServerEntry, MCPDiscoveryResult } from './types.js';
+import type { MCPConfig, MCPConfigLoadError, MCPServerEntry, MCPDiscoveryResult } from './types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { stripJsonc } from '../core/jsonc.js';
@@ -10,7 +10,9 @@ import { copilotHome } from '../adapters/copilot-cli.js';
 import { geminiHome } from '../adapters/gemini.js';
 import { qwenHome } from '../adapters/qwen-code.js';
 import { xdgConfigDir as opencodeConfigDir } from '../adapters/opencode.js';
+import { openclawMcpServerMaps } from '../adapters/openclaw.js';
 import { parseYamlSafe } from '../core/yaml-safe.js';
+import { pathPresent } from '../adapters/load-if-present.js';
 import type { Platform } from '../core/types.js';
 
 interface ConfigLocation {
@@ -149,6 +151,8 @@ function getFrameworkLocations(home: string, fs: FSProvider): ConfigLocation[] {
   ];
 }
 
+const GENERIC_MCP_SOURCE = 'Generic MCP';
+
 function getProjectConfigLocations(projectDir: string): ConfigLocation[] {
   return [
     { source: 'Claude Code (project)', path: join(projectDir, '.mcp.json') },
@@ -170,7 +174,7 @@ function getProjectConfigLocations(projectDir: string): ConfigLocation[] {
     { source: 'VS Code (settings.json)', path: join(projectDir, '.vscode', 'settings.json'), shape: 'vscode-settings' },
     // Codex loads a trusted project's `.codex/config.toml` over the user config
     { source: 'Codex (project)', path: join(projectDir, '.codex', 'config.toml'), shape: 'codex' },
-    { source: 'Generic MCP', path: join(projectDir, 'mcp.json') },
+    { source: GENERIC_MCP_SOURCE, path: join(projectDir, 'mcp.json') },
   ];
 }
 
@@ -409,14 +413,23 @@ export class MCPDiscovery {
     // One file, one config: run from $HOME, the project's `.cursor/mcp.json`
     // is the global `~/.cursor/mcp.json` (likewise `.gemini/settings.json`).
     const seen = new Set<string>();
+    // Found but unreadable or unparseable: their servers go unscanned, so
+    // the scan reports them (CONFIG-LOAD) instead of skipping them silently
+    const loadErrors: MCPConfigLoadError[] = [];
     for (const location of locations) {
-      if (!await this.fs.access(location.path)) continue;
+      if (!await pathPresent(location.path, this.fs)) continue;
       const real = await Promise.resolve(this.fs.realpath?.(location.path)).catch(() => undefined) ?? location.path;
       if (seen.has(real)) continue;
       seen.add(real);
 
+      let raw: string;
       try {
-        const raw = await this.fs.readFile(location.path);
+        raw = await this.fs.readFile(location.path);
+      } catch (err) {
+        loadErrors.push({ source: location.source, filePath: location.path, stage: 'read', message: errorMessage(err) });
+        continue;
+      }
+      try {
         const data = parseConfigText(raw, location.shape === 'codex' ? 'toml' : location.shape === 'hermes' ? 'yaml' : 'json');
         const servers = withExtensionPath(parseShape(location.shape, data), location.extensionPath);
 
@@ -428,13 +441,22 @@ export class MCPDiscovery {
           });
         }
         if (location.shape === 'claude-json') configs.push(...claudeProjectConfigs(location.path, data));
-      } catch {
-        // Skip unparseable configs
+      } catch (err) {
+        // An empty file declares no servers: nothing goes unscanned. A bare
+        // project mcp.json that doesn't parse may be some other tool's file.
+        if (raw.trim() !== '' && location.source !== GENERIC_MCP_SOURCE) loadErrors.push({ source: location.source, filePath: location.path, stage: 'parse', message: errorMessage(err) });
       }
     }
 
+    // OpenClaw: `mcp.servers` in the config its gateway loads (JSON5 with
+    // `$include`, located like the adapter does)
+    for (const oc of await openclawMcpServerMaps(home, this.fs).catch(() => [])) {
+      const servers = parseServerMap(oc.servers);
+      if (servers.length > 0) configs.push({ source: oc.source, filePath: oc.filePath, servers });
+    }
+
     const totalServers = configs.reduce((sum, c) => sum + c.servers.length, 0);
-    return { configs, totalServers };
+    return { configs, totalServers, ...(loadErrors.length > 0 ? { loadErrors } : {}) };
   }
 
   async discoverFromPaths(paths: string[]): Promise<MCPDiscoveryResult> {
@@ -533,4 +555,8 @@ function withExtensionPath(servers: MCPServerEntry[], extensionPath: string | un
     ...(s.command ? { command: sub(s.command) } : {}),
     ...(s.args ? { args: s.args.map(sub) } : {}),
   }));
+}
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
 }

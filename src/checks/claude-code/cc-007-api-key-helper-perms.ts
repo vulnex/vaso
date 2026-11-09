@@ -1,7 +1,7 @@
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import type { Evidence, ScanContext } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { queryPermissions } from '../../core/permissions.js';
+import { markUnreachable, queryPermissions } from '../../core/permissions.js';
 
 /**
  * Absolute path of the helper script, or undefined for a PATH command or a
@@ -27,6 +27,8 @@ export const cc007 = defineCheck({
 
   async run(ctx, h) {
     const evidence: Evidence[] = [];
+    const writable: Evidence[] = [];
+    const unverified: string[] = [];
 
     for (const config of ctx.configs) {
       const helper = config.data.apiKeyHelper;
@@ -42,7 +44,10 @@ export const cc007 = defineCheck({
         if (!(await ctx.fs.access(path))) {
           // A snapshot holds only what the probe collected — the script's
           // path comes from settings, so absence there says nothing.
-          if (ctx.fs.kind === 'snapshot') continue;
+          if (ctx.fs.kind === 'snapshot') {
+            unverified.push(path);
+            continue;
+          }
           evidence.push({
             file: config.filePath,
             snippet: `apiKeyHelper = ${helper}`,
@@ -54,7 +59,7 @@ export const cc007 = defineCheck({
         if (perms !== 'unsupported' && perms.worldWrite) {
           // Evidence on the script itself — the settings file's own mode is
           // CFG-003/POL-003's finding, which a shared file would hide
-          evidence.push({
+          writable.push({
             file: path,
             snippet: `apiKeyHelper = ${helper} (mode ${perms.octal})`,
             detail: `apiKeyHelper (set in ${config.filePath}) is world-writable — any local user can replace it and exfiltrate the key`,
@@ -65,8 +70,15 @@ export const cc007 = defineCheck({
       }
     }
 
+    // A world-writable script nobody else can reach (behind a 0700 dir) is
+    // downgraded, like every other permission finding
+    await markUnreachable(ctx.fs, writable);
+    evidence.push(...writable);
+
     return h.fromEvidence(evidence, {
-      passed: 'apiKeyHelper script (if configured) has safe permissions',
+      passed: unverified.length > 0 && evidence.length === 0
+        ? `apiKeyHelper script ${unverified.join(', ')} not verified — the probe doesn't collect it (checked on local scans)`
+        : 'apiKeyHelper script (if configured) has safe permissions',
       failed: (n) => `Found ${n} apiKeyHelper issue(s)`,
       fixDescription: 'Run `chmod 700` on the apiKeyHelper script and ensure its parent directory is not world-writable',
     });

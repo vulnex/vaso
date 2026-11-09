@@ -2,6 +2,7 @@ import { join } from 'node:path';
 import type { Evidence, ScanContext } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { memorySecretSeverity, scanMemorySecrets } from '../../analyzers/memory-secrets.js';
+import { readTextIfPresent } from '../../adapters/load-if-present.js';
 
 // QWEN.md is the default context ("memory") file; `context.fileName` (string
 // or array) renames it (Qwen settings.md "Context Files")
@@ -20,13 +21,9 @@ function contextFileNames(ctx: ScanContext): string[] {
 }
 
 async function scanFile(file: string, ctx: ScanContext, evidence: Evidence[]): Promise<void> {
-  if (!(await ctx.fs.access(file))) return;
-  let content: string;
-  try {
-    content = await ctx.fs.readFile(file);
-  } catch {
-    return;
-  }
+  // Present but unreadable: reported as CONFIG-LOAD
+  const content = await readTextIfPresent(file, ctx.fs);
+  if (content === undefined) return;
 
   evidence.push(...scanMemorySecrets(file, content));
 }

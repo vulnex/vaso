@@ -5,6 +5,7 @@ import { fixFirstConfig } from '../../remediation/config-writer.js';
 import { getNestedValue } from '../../core/utils.js';
 import { envOverridesOf } from '../../adapters/env-overrides.js';
 import { managedOverride } from '../../adapters/hermes-managed.js';
+import { containerEnvironment, isOpenclawAutoBind, openclawAutoBindDetail } from '../../adapters/openclaw-bind.js';
 
 const LISTENER_KEY = /host|bind|listen/i;
 
@@ -33,15 +34,13 @@ const WILDCARD_ADDRS = ['0.0.0.0', '[::]', '::'];
 const SYMBOLIC_EXPOSED = ['all', 'lan', 'auto', ...WILDCARD_ADDRS];
 
 /**
- * Why an exposed symbolic bind is reported. OpenClaw 2026.9.4 `gateway.bind`:
- * "lan" listens on 0.0.0.0; "auto" prefers the tailnet address, then LAN
- * (0.0.0.0, also the container default) — its schema: '"auto" can expose all
- * interfaces' (docs.openclaw.ai/gateway/config-gateway).
+ * Why an exposed symbolic bind is reported. OpenClaw `gateway.bind` "lan"
+ * listens on 0.0.0.0; its "auto" depends on whether the gateway runs in a
+ * container (src/adapters/openclaw-bind.ts).
  */
 function bindDetail(bind: string): string {
   switch (bind.toLowerCase()) {
     case 'lan': return 'Gateway bind mode "lan" — listens on 0.0.0.0, accessible from all network interfaces';
-    case 'auto': return 'Gateway bind mode "auto" — picks the tailnet address, else LAN (0.0.0.0, every interface); "loopback" keeps it local';
     default: return `Gateway bind mode "${bind}" — accessible from all network interfaces`;
   }
 }
@@ -81,6 +80,8 @@ export const cfg001 = defineCheck({
     // The fix rewrites gateway.host / GATEWAY_HOST; only offer it when that
     // key is what is exposed (a channel webhook needs its own setting).
     let gatewayKey = false;
+    // OpenClaw "auto" is 0.0.0.0 only inside a container
+    const inContainer = ctx.installation.agent === 'openclaw' ? await containerEnvironment(ctx.fs) : undefined;
 
     for (const config of ctx.configs) {
       // OpenClaw in remote mode connects to a gateway elsewhere; its local
@@ -102,13 +103,24 @@ export const cfg001 = defineCheck({
         // Set by an env override (ZeroClaw's ZEROCLAW_GATEWAY_HOST…): the
         // file doesn't hold it, so there is nothing for a fix to rewrite
         const env = envOverridesOf(config.data).find(o => o.path === hostPath)?.env;
-        if (!env) gatewayKey = true;
-        evidence.push({
-          file: config.filePath,
-          detail: env
-            ? `Gateway bound to ${host} by the ${env} environment variable — accessible from all network interfaces`
-            : `Gateway bound to ${host} — accessible from all network interfaces`,
-        });
+        if (ctx.installation.agent === 'nanobot' && hostPath === 'gateway.host') {
+          // Nanobot's gateway.host serves only GET /health (readiness and
+          // runtime identity); the agent is reached over the websocket
+          // channel, whose own host the walk below reports
+          evidence.push({
+            file: config.filePath,
+            detail: `gateway.host = ${host} — nanobot's health endpoint (GET /health only) on every interface; the agent itself is reached through channels.websocket`,
+            mitigated: true,
+          });
+        } else {
+          if (!env) gatewayKey = true;
+          evidence.push({
+            file: config.filePath,
+            detail: env
+              ? `Gateway bound to ${host} by the ${env} environment variable — accessible from all network interfaces`
+              : `Gateway bound to ${host} — accessible from all network interfaces`,
+          });
+        }
       }
 
       // Symbolic bind modes (OpenClaw 2026.x schema: gateway.bind = "loopback" | "lan" | "all")
@@ -117,8 +129,15 @@ export const cfg001 = defineCheck({
       else if (getNestedValue(config.data, 'bind') !== undefined) reported.add('bind');
       if (typeof bind === 'string' && SYMBOLIC_EXPOSED.includes(bind.toLowerCase())
           && !tailscaleForcesLoopback(config.data)) {
-        gatewayKey = true;
-        evidence.push({ file: config.filePath, detail: bindDetail(bind) });
+        if (ctx.installation.agent === 'openclaw' && isOpenclawAutoBind(bind)) {
+          // Outside a container (or unknowable, on a snapshot) it is a
+          // caveat, not an exposure: reported as information
+          if (inContainer) gatewayKey = true;
+          evidence.push({ file: config.filePath, detail: openclawAutoBindDetail(inContainer), ...(inContainer ? {} : { mitigated: true }) });
+        } else {
+          gatewayKey = true;
+          evidence.push({ file: config.filePath, detail: bindDetail(bind) });
+        }
       }
 
       // Any other listener bound to a wildcard address (channel webhooks,
@@ -170,11 +189,19 @@ export const cfg001 = defineCheck({
       arr.findIndex(x => x.file === e.file && (e.line !== undefined ? x.line === e.line : x.detail === e.detail)) === i
     );
 
+    // Only OpenClaw "auto" outside a known container, or nanobot's health
+    // endpoint: informational
+    const allMitigated = uniqueEvidence.length > 0 && uniqueEvidence.every(e => e.mitigated);
     return h.result({
       passed: uniqueEvidence.length === 0,
+      ...(allMitigated ? { severity: 'info' as const } : {}),
       message: uniqueEvidence.length === 0
         ? 'Gateway is not bound to 0.0.0.0'
-        : 'Gateway is bound to 0.0.0.0 — accessible from all network interfaces',
+        : allMitigated
+          ? ctx.installation.agent === 'nanobot'
+            ? 'Nanobot health endpoint listens on all interfaces (GET /health only; no agent access)'
+            : 'Gateway bind mode "auto" listens on 0.0.0.0 (all interfaces) when the gateway runs in a container'
+          : 'Gateway is bound to 0.0.0.0 — accessible from all network interfaces',
       evidence: uniqueEvidence,
       fixable: gatewayKey,
       fixDescription: 'Rebind the gateway to loopback (127.0.0.1, or gateway.bind "loopback")',
@@ -191,13 +218,16 @@ export const cfg001 = defineCheck({
   async fix(ctx) {
     const done: string[] = [];
     const remaining: string[] = [];
+    const inContainer = ctx.installation.agent === 'openclaw' ? await containerEnvironment(ctx.fs) : undefined;
     for (const config of ctx.configs) {
       let result: FixResult | undefined;
       const rewritten = new Set<string>();
       const symbolic = ['gateway.bind', 'bind'].find(path => {
         const bind = getNestedValue(config.data, path);
         return typeof bind === 'string' && SYMBOLIC_EXPOSED.includes(bind.toLowerCase())
-          && !tailscaleForcesLoopback(config.data);
+          && !tailscaleForcesLoopback(config.data)
+          // OpenClaw "auto" exposes nothing outside a container
+          && !(ctx.installation.agent === 'openclaw' && isOpenclawAutoBind(bind) && !inContainer);
       });
       if (symbolic) {
         rewritten.add(symbolic);

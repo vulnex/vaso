@@ -1,6 +1,8 @@
 import { join } from 'node:path';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { recordListFailure } from '../../core/config-loader.js';
+import { pathPresent, readTextIfPresent } from '../../adapters/load-if-present.js';
 
 // Commands whose bare approval grants network access or arbitrary execution.
 const DANGEROUS_BARE = new Set([
@@ -132,25 +134,25 @@ export const cdx010 = defineCheck({
 
   async run(ctx, h) {
     const rulesDir = join(ctx.installation.installDir, 'rules');
-    if (!(await ctx.fs.access(rulesDir))) return h.passed('No Codex rules directory present');
+    if (!(await pathPresent(rulesDir, ctx.fs))) return h.passed('No Codex rules directory present');
 
     const evidence: Evidence[] = [];
 
     let names: string[] = [];
     try {
       names = (await ctx.fs.readdir(rulesDir)).filter(n => n.endsWith('.rules'));
-    } catch {
-      return h.passed('No Codex rules directory present');
+    } catch (err) {
+      // Present but unlistable: reported as CONFIG-LOAD
+      if (await recordListFailure(rulesDir, ctx.fs, err)) {
+        return h.passed(`Codex rules directory ${rulesDir} could not be listed — not inspected (see CONFIG-LOAD)`);
+      }
     }
 
     for (const name of names) {
       const file = join(rulesDir, name);
-      let content: string;
-      try {
-        content = await ctx.fs.readFile(file);
-      } catch {
-        continue;
-      }
+      // Unreadable: reported as CONFIG-LOAD
+      const content = await readTextIfPresent(file, ctx.fs);
+      if (content === undefined) continue;
 
       for (const rule of parsePrefixRules(content)) {
         if (rule.decision !== 'allow') continue;

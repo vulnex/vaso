@@ -284,6 +284,10 @@ export const qwenCodeAdapter: AgentAdapter = {
         '~/.qwen/extensions/**',
         '~/.qwen/skills/**',
         '~/.qwen/rules/*',
+        // A context file renamed with `context.fileName` (QC-010) — the
+        // manifest can't read settings, so every top-level markdown file
+        // (nothing else in ~/.qwen is markdown; non-.md names stay local-only)
+        '~/.qwen/*.md',
         nvmBinaryGlob('qwen'),
         ...npmPackageJsonGlobs(NPM_PACKAGE_NAME),
       ],

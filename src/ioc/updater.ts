@@ -42,6 +42,39 @@ export function verifyFeedSignature(
   }
 }
 
+// ── Feed shape ──────────────────────────────────────────────────────
+
+const IOC_FEED_KEYS = [
+  'c2Ips', 'maliciousDomains', 'fileHashes', 'maliciousPublishers',
+  'maliciousSkillPatterns', 'trustedSkillNames', 'trustedMCPPackages', 'binaryPatterns',
+] as const;
+
+/**
+ * Whether signed feed data is an IOC feed. The advisory feed is signed with
+ * the same key, so a signature alone doesn't say which feed a URL served:
+ * `vaso update --url <advisory feed>` must not land in the IOC cache.
+ */
+export function isIOCFeedData(data: unknown): data is IOCFeedData {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return false;
+  const record = data as Record<string, unknown>;
+  if ('advisories' in record) return false;
+  return IOC_FEED_KEYS.every((k) => record[k] === undefined || Array.isArray(record[k]));
+}
+
+/**
+ * Record a successful check against the feed server that found nothing newer:
+ * the cache is current, so the staleness warning must not keep firing.
+ */
+export async function touchFeedCheck(metadataPath: string): Promise<void> {
+  try {
+    const meta = JSON.parse(await readFile(metadataPath, 'utf-8')) as Record<string, unknown>;
+    if (!meta || typeof meta !== 'object' || Array.isArray(meta)) return;
+    await writeFile(metadataPath, JSON.stringify({ ...meta, lastCheckAt: new Date().toISOString() }, null, 2));
+  } catch {
+    // No metadata yet (nothing cached): nothing to refresh
+  }
+}
+
 // ── Deserialization helpers ─────────────────────────────────────────
 
 export function deserializePatterns(serialized: SerializedRegExp[]): RegExp[] {
@@ -134,6 +167,11 @@ export function isFeedStale(thresholdDays: number = DEFAULT_STALENESS_DAYS, meta
 
 // ── Cached feed loader ──────────────────────────────────────────────
 
+/** Remove a cached feed, its signature and its metadata. */
+async function removeCachedFeed(feedDir: string): Promise<void> {
+  await Promise.all([FEED_FILE, SIG_FILE, METADATA_FILE].map((f) => unlink(join(feedDir, f)).catch(() => {})));
+}
+
 export async function loadCachedFeed(
   feedDir: string = IOC_DIR,
   publicKeyPem: string = IOC_FEED_PUBLIC_KEY,
@@ -162,6 +200,13 @@ export async function loadCachedFeed(
     }
 
     const feed: IOCFeed = JSON.parse(feedBytes.toString('utf-8'));
+    // An advisory feed cached here by an older `vaso update --url` is no IOC
+    // data. Remove it with its metadata, whose version is the advisory feed's
+    // and would otherwise refuse every real IOC feed as "not newer".
+    if (!isIOCFeedData(feed.data)) {
+      await removeCachedFeed(feedDir);
+      return null;
+    }
     return feed.data;
   } catch {
     return null;
@@ -256,12 +301,18 @@ export async function fetchAndUpdateFeed(options: FetchOptions = {}): Promise<Up
     if (!feed.meta || typeof feed.meta.version !== 'number' || !feed.data) {
       return { success: false, message: 'Invalid feed format: missing meta or data fields.' };
     }
+    if (!isIOCFeedData(feed.data)) {
+      return { success: false, message: 'Not an IOC feed (is this the advisory feed? use --advisory-url).' };
+    }
   } catch {
     return { success: false, message: 'Invalid feed JSON.' };
   }
 
   // Reject downgrades
   if (feed.meta.version < currentVersion || (feed.meta.version === currentVersion && !options.reinstall && cacheUsable)) {
+    // The server is current only when it serves the cached version; an older
+    // mirror must not silence the staleness warning
+    if (cacheUsable && feed.meta.version === currentVersion) await touchFeedCheck(join(feedDir, METADATA_FILE));
     return {
       success: true,
       message: `Feed version ${feed.meta.version} is not newer than cached version ${currentVersion}.`,

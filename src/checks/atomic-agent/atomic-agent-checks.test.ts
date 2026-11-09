@@ -131,6 +131,30 @@ describe('AT-002 read scope', () => {
 });
 
 describe('AT-003 HTTP tool without approval', () => {
+  // g4-F28: v0.6.13 (config v79) defaults to "writes" and migrates a stored
+  // pre-v79 "never"; g4-F33: hostAllowlist [] blocks every host
+  const on = (version: string | undefined, cfg: ParsedConfig) => {
+    const c = makeCtx([cfg]);
+    c.installation.version = version;
+    return c;
+  };
+
+  it('v0.6.13+: an absent approvalMode is "writes"; a pre-v79 "never" loads as "writes"', async () => {
+    expect((await check('AT-003').run(on('0.6.13', makeJson({})))).passed).toBe(true);
+    expect((await check('AT-003').run(on('0.6.14', makeJson({ version: 72, http: { approvalMode: 'never' } })))).passed).toBe(true);
+    // From v79 (or a file without version, read as current) "never" is kept
+    expect((await check('AT-003').run(on('0.6.13', makeJson({ version: 79, http: { approvalMode: 'never' } })))).passed).toBe(false);
+    expect((await check('AT-003').run(on('0.6.13', makeJson({ http: { approvalMode: 'never' } })))).passed).toBe(false);
+    // Older or unknown releases default to "never"
+    expect((await check('AT-003').run(on('0.6.12', makeJson({})))).passed).toBe(false);
+    expect((await check('AT-003').run(on(undefined, makeJson({})))).passed).toBe(false);
+  });
+
+  it('an empty hostAllowlist blocks every host', async () => {
+    expect((await check('AT-003').run(makeCtx([makeJson({ http: { approvalMode: 'never', hostAllowlist: [] } })]))).passed).toBe(true);
+    expect((await check('AT-003').run(makeCtx([makeJson({ http: { approvalMode: 'never', hostAllowlist: null } })]))).passed).toBe(false);
+  });
+
   it('flags the default (absent http block)', async () => {
     expect((await check('AT-003').run(makeCtx([makeJson({})]))).passed).toBe(false);
   });
@@ -168,11 +192,6 @@ describe('AT-003 HTTP tool without approval', () => {
     // Level 2 keeps the approvalMode prompts
     const gated = makeJson({ agent: { approvalLevel: 2 }, http: { approvalMode: 'writes' } });
     expect((await check('AT-003').run(makeCtx([gated]))).passed).toBe(true);
-  });
-
-  it('still flags an empty allowlist', async () => {
-    const r = await check('AT-003').run(makeCtx([makeJson({ http: { approvalMode: 'never', hostAllowlist: [] } })]));
-    expect(r.passed).toBe(false);
   });
 });
 

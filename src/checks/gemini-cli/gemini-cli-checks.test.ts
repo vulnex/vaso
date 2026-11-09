@@ -54,6 +54,34 @@ describe('Gemini CLI checks', () => {
 describe('GEM-001: Plaintext API Key', () => {
   const check = geminiCliChecks.find(c => c.id === 'GEM-001')!;
 
+  // g6-F2: entropy alone is not a secret — a secret-like name, or a known key format
+  it('ignores high-entropy values under non-secret names, but not a known key format', async () => {
+    const benign = await check.run(makeCtx([makeConfig('settings.json', {
+      env: {
+        USER_AGENT: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/131.0.6778.85',
+        WORKDIR: '/home/dev/projects/x9Qz-Lm2v/build/out-7f3a91c2b8e4d6f0',
+      },
+      mcpServers: { s: { env: { SESSION_ID: 'q8Z2x7Lk3Vm9Np4Rt6Wy1Bc5Df0Gh' } } },
+    })]));
+    expect(benign.passed).toBe(true);
+    const known = await check.run(makeCtx([makeConfig('settings.json', {
+      env: { UPSTREAM: 'sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789' },
+    })]));
+    expect(known.passed).toBe(false);
+    const named = await check.run(makeCtx([makeConfig('settings.json', {
+      env: { SERVICE_TOKEN: 'q8Z2x7Lk3Vm9Np4Rt6Wy1Bc5Df0Gh' },
+    })]));
+    expect(named.passed).toBe(false);
+    for (const env of [
+      { MISTRAL_KEY: 'q8Z2x7Lk3Vm9Np4Rt6Wy1Bc5Df0Gh' },
+      { GITLAB_PAT: 'glpat-q8Z2x7Lk3Vm9Np4Rt6Wy1B' },
+      { UPSTREAM_A: 'gsk_q8Z2x7Lk3Vm9Np4Rt6Wy1Bc5Df0Gh' },
+      { UPSTREAM_B: 'hf_q8Z2x7Lk3Vm9Np4Rt6Wy1Bc5Df0Gh' },
+    ]) {
+      expect((await check.run(makeCtx([makeConfig('settings.json', { env })]))).passed, Object.keys(env)[0]).toBe(false);
+    }
+  });
+
   it('flags high-entropy value under env.API_KEY', async () => {
     const result = await check.run(makeCtx([makeConfig('settings.json', {
       env: { GEMINI_API_KEY: 'AIzaSyD1234567890abcdefghijklmnopqrstuvwxyz' },

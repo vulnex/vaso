@@ -124,7 +124,7 @@ describe('runMCPScan', () => {
     mockAuditDependencies.mockResolvedValue({ queried: 1, vulnerable: 0, rangeOnly: 0, error: 'OSV returned HTTP 503' });
     await runMCPScan({ format: 'json', path: ['/home/user/config.json'], auditDeps: true });
     expect(mockAuditDependencies).toHaveBeenCalledWith(sources);
-    expect(mockScanMCP).toHaveBeenLastCalledWith(sampleDiscoveryResult.configs, sources, expect.anything());
+    expect(mockScanMCP).toHaveBeenLastCalledWith(sampleDiscoveryResult.configs, sources, expect.anything(), []);
   });
 
   it('scans servers discovered from explicit path', async () => {
@@ -291,7 +291,7 @@ describe('runMCPScan --source', () => {
     expect(mockDiscover).not.toHaveBeenCalled();
     expect(mockDiscoverFromPaths).not.toHaveBeenCalled();
     expect(mockResolveSourcePaths).toHaveBeenCalledWith(['/src/my-server']);
-    expect(mockScanMCP).toHaveBeenCalledWith([], [direct], expect.anything());
+    expect(mockScanMCP).toHaveBeenCalledWith([], [direct], expect.anything(), []);
   });
 
   it('adds the source to the servers of the configs given with -p', async () => {
@@ -302,7 +302,7 @@ describe('runMCPScan --source', () => {
 
     await runMCPScan({ format: 'json', path: ['/home/user/config.json'], source: ['/src/my-server'] });
 
-    expect(mockScanMCP).toHaveBeenCalledWith(sampleDiscoveryResult.configs, [{ serverName: 'filesystem' }, direct], expect.anything());
+    expect(mockScanMCP).toHaveBeenCalledWith(sampleDiscoveryResult.configs, [{ serverName: 'filesystem' }, direct], expect.anything(), []);
   });
 
   it('exits 2 when a source path holds no server source', async () => {
@@ -322,7 +322,7 @@ describe('runMCPScan --source', () => {
 
     await runMCPScan({ format: 'json', source: ['/src/my-server', '/src/typo'] });
 
-    expect(mockScanMCP).toHaveBeenCalledWith([], [direct], expect.anything());
+    expect(mockScanMCP).toHaveBeenCalledWith([], [direct], expect.anything(), []);
     expect(consoleErrorLogs.join('\n')).toContain('No MCP server source at: /src/typo');
     expect(process.exitCode).toBe(3);
   });

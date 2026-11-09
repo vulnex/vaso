@@ -117,6 +117,51 @@ const SENSITIVE_PATHS = [
 const MAX_CACHED_ANALYSES = 10_000;
 const analysisCache = new Map<string, DataFlowResult[]>();
 
+/**
+ * The API domains a vendor's credential is used against, by the env-name
+ * prefix that names the vendor. Only these are exempt: a host merely
+ * containing the vendor's name (api.openai.cc, openai.vercel.app) is not.
+ */
+const VENDOR_API_DOMAINS: Record<string, readonly string[]> = {
+  openai: ['openai.com'],
+  anthropic: ['anthropic.com'],
+  claude: ['anthropic.com'],
+  github: ['github.com'],
+  gh: ['github.com'],
+  gitlab: ['gitlab.com'],
+  slack: ['slack.com'],
+  stripe: ['stripe.com'],
+  groq: ['groq.com'],
+  mistral: ['mistral.ai'],
+  huggingface: ['huggingface.co'],
+  hf: ['huggingface.co'],
+  gemini: ['googleapis.com'],
+  google: ['googleapis.com'],
+  cohere: ['cohere.ai', 'cohere.com'],
+  deepseek: ['deepseek.com'],
+  perplexity: ['perplexity.ai'],
+  pplx: ['perplexity.ai'],
+  xai: ['x.ai'],
+  openrouter: ['openrouter.ai'],
+  together: ['together.xyz', 'together.ai'],
+  fireworks: ['fireworks.ai'],
+  replicate: ['replicate.com'],
+  notion: ['notion.com'],
+  linear: ['linear.app'],
+  discord: ['discord.com'],
+  telegram: ['telegram.org'],
+  brave: ['brave.com'],
+  tavily: ['tavily.com'],
+  exa: ['exa.ai'],
+  firecrawl: ['firecrawl.dev'],
+  serpapi: ['serpapi.com'],
+  elevenlabs: ['elevenlabs.io'],
+  sentry: ['sentry.io'],
+  vercel: ['vercel.com'],
+  cloudflare: ['cloudflare.com'],
+  supabase: ['supabase.com'],
+};
+
 export function analyzeCode(code: string, filename = 'unknown.js'): DataFlowResult[] {
   if (!mayBeJavaScript(filename)) return [];
   const key = `${filename}\0${createHash('sha1').update(code).digest('base64')}`;
@@ -262,6 +307,55 @@ function analyzeUncached(code: string): DataFlowResult[] {
       }
     }
     return parts.join(',');
+  };
+  // `const key = process.env.OPENAI_API_KEY` → OPENAI_API_KEY
+  const envNames = new Map<string, string>();
+  /**
+   * A single credential sent to the API it belongs to: an environment value
+   * (`OPENAI_API_KEY`, inline or through a variable) that appears only in the
+   * request's `headers` object, on a request to a literal https:// URL whose
+   * host names the credential's vendor (OPENAI_… → api.openai.com,
+   * GITHUB_… → api.github.com). That is how a key is used, not a leak; the
+   * same key in a body, the URL, or headers to any other host still is.
+   */
+  const credentialToOwnApi = (args: Node[], sourceVar: string, sourceKind: 'file' | 'env', p: NodePath): boolean => {
+    if (sourceKind !== 'env' || wholeEnvAt(p, sourceVar)) return false;
+    const envName = /^process\.env\.([A-Za-z_][\w]*)$/.exec(sourceVar)?.[1] ?? envNames.get(sourceVar);
+    const vendor = envName?.split('_')[0]?.toLowerCase() ?? '';
+    const domains = Object.hasOwn(VENDOR_API_DOMAINS, vendor) ? VENDOR_API_DOMAINS[vendor] : undefined;
+    if (!domains) return false;
+    const first = args[0];
+    const url = first?.type === 'StringLiteral' ? first.value
+      : first?.type === 'TemplateLiteral' && first.expressions.length === 0 ? first.quasis[0]?.value.cooked ?? ''
+      : undefined;
+    let host: string;
+    try {
+      const parsed = new URL(url ?? '');
+      if (parsed.protocol !== 'https:') return false;
+      host = parsed.hostname.toLowerCase();
+    } catch {
+      return false;
+    }
+    if (!domains.some((d) => host === d || host.endsWith(`.${d}`))) return false;
+    // Where the value is written: only inside a `headers: { … }` object
+    const headerRanges: Array<[number, number]> = [];
+    for (const a of args) {
+      if (a.type !== 'ObjectExpression') continue;
+      for (const prop of a.properties) {
+        if (prop.type !== 'ObjectProperty') continue;
+        const key = prop.key.type === 'Identifier' ? prop.key.name : prop.key.type === 'StringLiteral' ? prop.key.value : '';
+        if (key === 'headers' && prop.value.type === 'ObjectExpression') headerRanges.push([prop.value.start ?? 0, prop.value.end ?? 0]);
+      }
+    }
+    if (headerRanges.length === 0) return false;
+    const start = args[0].start ?? 0;
+    let outside = code.slice(start, args[args.length - 1].end ?? 0);
+    for (const [from, to] of headerRanges) {
+      outside = outside.slice(0, from - start) + ' '.repeat(to - from) + outside.slice(to - start);
+    }
+    const name = sourceVar.replace(/[.$]/g, '\\$&');
+    const used = (text: string) => new RegExp(`(?<![\\w$])${name}(?![\\w$])`).test(text);
+    return !used(outside) && headerRanges.some(([from, to]) => used(code.slice(from, to)));
   };
   // Subset of sinks that spawn processes (child_process) rather than open connections
   const processImports = new Set<string>();
@@ -429,6 +523,7 @@ function analyzeUncached(code: string): DataFlowResult[] {
             const socketClient = propName === 'send' && sinkObject !== undefined && clientSockets.has(sinkObject);
             for (const [sourceVar, sourceKind] of new Map<string, 'file' | 'env'>([...sourceVars, ...inlinePairs])) {
               if (inline.includes(sourceVar) || mentions(argStr, sourceVar)) {
+                if (!processSink && credentialToOwnApi(node.arguments as Node[], sourceVar, sourceKind, path)) continue;
                 results.push({
                   type: 'source-to-sink',
                   source: sourceVar,
@@ -504,6 +599,7 @@ function analyzeUncached(code: string): DataFlowResult[] {
                 node.arguments[node.arguments.length - 1]?.end ?? 0,
               );
               if (inline.includes(sourceVar) || mentions(argStr, sourceVar)) {
+                if (credentialToOwnApi(node.arguments as Node[], sourceVar, sourceKind, path)) continue;
                 results.push({
                   type: 'source-to-sink',
                   source: sourceVar,
@@ -553,6 +649,8 @@ function analyzeUncached(code: string): DataFlowResult[] {
           init.object.property.name === 'env'
         ) {
           sourceVars.set(id.name, 'env');
+          if (init.property.type === 'Identifier') envNames.set(id.name, init.property.name);
+          else if (init.property.type === 'StringLiteral') envNames.set(id.name, init.property.value);
         }
       },
 

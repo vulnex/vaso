@@ -1975,9 +1975,10 @@ const BUNDLED_ADVISORIES: Advisory[] = [
     id: 'CVE-2026-114463',
     title: 'Hermes Agent: webhook route toolset privilege escalation',
     agent: 'hermes',
-    affectedVersions: '<=0.20.5',
+    affectedVersions: '<0.21.4',
+    fixedVersion: '0.21.4',
     severity: 'critical',
-    description: 'The gateway re-derived the authorizing webhook route by splitting the session key on ":", so a caller authenticated to a route such as build:external received the toolsets (terminal, file access) of the more privileged build route (CWE-863). The CVE record lists versions through 2026.8.19 (v0.20.5); upgrade to the latest release.',
+    description: 'The gateway re-derived the authorizing webhook route by splitting the session key on ":", so a caller authenticated to a route such as build:external received the toolsets (terminal, file access) of the more privileged build route (CWE-863). Fixed in 0.21.4 (v2026.9.21).',
     reference: 'https://www.cve.org/CVERecord?id=CVE-2026-114463',
     published: '2026-10-21',
     exploitAvailable: true,
@@ -2049,6 +2050,7 @@ const BUNDLED_ADVISORIES: Advisory[] = [
     agent: 'claude-desktop',
     affectedVersions: '<1.8089.0',
     fixedVersion: '1.8089.0',
+    platforms: ['win32'],
     severity: 'critical',
     description: 'Claude Desktop started git.exe without an absolute path, so Windows ran a git.exe placed in the opened project folder first; opening a malicious shared repository ran attacker code. Windows only. Upgrade to 1.8089.0+.',
     reference: 'https://github.com/anthropics/claude-code/security/advisories/GHSA-4p2j-qj3c-6x84',
@@ -2588,6 +2590,13 @@ const BUNDLED_ADVISORIES: Advisory[] = [
 let _db: AdvisoryDatabase | null = null;
 let _initialized = false;
 
+/**
+ * The signed advisory feed version the bundled data equals (guarded by
+ * src/ioc/published-feeds.test.ts). A cached feed replaces bundled entries
+ * by ID, so one that isn't newer would undo the bundle's corrections.
+ */
+export const BUNDLED_ADVISORY_FEED_VERSION = 11;
+
 export function buildBundledAdvisoryDatabase(): AdvisoryDatabase {
   return {
     advisories: [...BUNDLED_ADVISORIES, ...LIBRARY_ADVISORIES],
@@ -2600,9 +2609,9 @@ export async function initAdvisoryDatabase(): Promise<void> {
   const bundled = buildBundledAdvisoryDatabase();
 
   try {
-    const { loadCachedAdvisoryFeed, mergeAdvisoryFeed } = await import('./updater.js');
+    const { cachedAdvisoryFeedVersion, loadCachedAdvisoryFeed, mergeAdvisoryFeed } = await import('./updater.js');
     const feedData = await loadCachedAdvisoryFeed();
-    if (feedData) {
+    if (feedData && (await cachedAdvisoryFeedVersion()) > BUNDLED_ADVISORY_FEED_VERSION) {
       _db = mergeAdvisoryFeed(bundled, feedData);
     } else {
       _db = bundled;

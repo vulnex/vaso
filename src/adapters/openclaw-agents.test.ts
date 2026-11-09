@@ -87,7 +87,7 @@ describe('OpenClaw per-agent discovery', () => {
     const sharedSkillsDir = join(openclawDir, 'skills');
     const researcherSkillsDir = join(researcherDir, 'skills');
 
-    const globalConfigPath = join(openclawDir, 'config.yaml');
+    const globalConfigPath = join(openclawDir, 'openclaw.json');
     const researcherConfigPath = join(researcherDir, 'agent.yaml');
     const coderConfigPath = join(coderDir, 'agent.yaml');
 
@@ -191,7 +191,7 @@ describe('OpenClaw per-agent discovery', () => {
     const openclawDir = join(home, '.openclaw');
     const agentsDir = join(openclawDir, 'agents');
     const assistantDir = join(agentsDir, 'assistant');
-    const configPath = join(openclawDir, 'config.yaml');
+    const configPath = join(openclawDir, 'openclaw.json');
     const agentConfigPath = join(assistantDir, 'agent.yaml');
 
     setExistingPaths([openclawDir, configPath, agentsDir, assistantDir]);
@@ -215,7 +215,7 @@ describe('OpenClaw per-agent discovery', () => {
     const openclawDir = join(home, '.openclaw');
     const agentsDir = join(openclawDir, 'agents');
     const agentDir = join(agentsDir, 'test-agent');
-    const configPath = join(openclawDir, 'config.yaml');
+    const configPath = join(openclawDir, 'openclaw.json');
     const cliBinPath = '/usr/local/bin/openclaw';
 
     setExistingPaths([openclawDir, configPath, agentsDir, agentDir, cliBinPath]);
@@ -259,7 +259,7 @@ describe('OpenClaw per-agent discovery', () => {
     const home = process.env.HOME || '/home/testuser';
     const openclawDir = join(home, '.openclaw');
     const agentsDir = join(openclawDir, 'agents');
-    const configPath = join(openclawDir, 'config.yaml');
+    const configPath = join(openclawDir, 'openclaw.json');
 
     setExistingPaths([openclawDir, configPath, agentsDir]);
 

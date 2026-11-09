@@ -123,6 +123,7 @@ export function buildProbeManifest(adapters: AgentAdapter[]): ProbeManifest {
     systemPaths: [],
     systemDirListings: [],
     metadataGlobPatterns: [],
+    envOriginOnly: [],
   };
 
   for (const adapter of adapters) {
@@ -136,6 +137,7 @@ export function buildProbeManifest(adapters: AgentAdapter[]): ProbeManifest {
       if (m.systemPaths) merged.systemPaths!.push(...m.systemPaths);
       if (m.systemDirListings) merged.systemDirListings!.push(...m.systemDirListings);
       if (m.metadataGlobPatterns) merged.metadataGlobPatterns!.push(...m.metadataGlobPatterns);
+      if (m.envOriginOnly) merged.envOriginOnly!.push(...m.envOriginOnly);
     }
     // Every copy of the agent's CLI (system prefixes, user bin dirs, each nvm
     // Node version) so remote scans inventory old copies too. Existence is all
@@ -199,6 +201,7 @@ export function buildProbeManifest(adapters: AgentAdapter[]): ProbeManifest {
   merged.directoryListings = [...new Set(withRelocatedTwins(merged.directoryListings))];
   merged.metadataGlobPatterns = withRelocatedTwins(merged.metadataGlobPatterns!);
   merged.envPrefixes = [...new Set(merged.envPrefixes)];
+  merged.envOriginOnly = [...new Set(merged.envOriginOnly!)];
   merged.systemPaths = [...new Set(merged.systemPaths!)];
   merged.systemDirListings = [...new Set(merged.systemDirListings!)];
   // Paths already collected with content need no metadata-only duplicate

@@ -1,5 +1,6 @@
 import type { ParsedConfig } from '../../core/types.js';
 import { deepMerge } from '../../core/utils.js';
+import { openclawAutoBindHost } from '../../adapters/openclaw-bind.js';
 
 export interface Posture {
   tls?: boolean;
@@ -33,12 +34,12 @@ function asBool(v: unknown): boolean | undefined {
 }
 
 /** OpenClaw 2026.x `gateway.bind` mode → the address it listens on, as far as config tells. */
-function bindHost(bind: unknown, customBindHost: unknown): string | undefined {
+function bindHost(bind: unknown, customBindHost: unknown, inContainer: boolean | undefined): string | undefined {
   switch (typeof bind === 'string' ? bind.toLowerCase() : undefined) {
     case 'loopback': return '127.0.0.1';
     case 'lan': return '0.0.0.0';
-    // Prefers the tailnet address, else LAN (0.0.0.0) — can expose all interfaces
-    case 'auto': return 'auto';
+    // 0.0.0.0 inside a container, loopback outside, unknown on a snapshot
+    case 'auto': return openclawAutoBindHost(inContainer);
     case 'tailnet': return 'tailnet';
     case 'custom': return typeof customBindHost === 'string' ? customBindHost : undefined;
     default: return undefined;
@@ -71,7 +72,7 @@ function execApproval(exec: Record<string, unknown> | undefined): boolean | unde
  * pre-2026 keys (gateway.host, boolean gateway.tls, sandbox.enabled,
  * policy.require_approval) are the fallback.
  */
-export function extractPosture(merged: Record<string, unknown>, agentId?: string): Posture {
+export function extractPosture(merged: Record<string, unknown>, agentId?: string, inContainer?: boolean): Posture {
   const gw = asRecord(merged.gateway);
   const auth = gw ? asRecord(gw.auth) : undefined;
   const sandbox = asRecord(merged.sandbox);
@@ -95,14 +96,14 @@ export function extractPosture(merged: Record<string, unknown>, agentId?: string
     tls: tlsSection ? asBool(tlsSection.enabled) : gw ? asBool(gw.tls) : undefined,
     // Typed reads: a hand-edited config can hold any JSON value here
     authMode: typeof auth?.mode === 'string' ? auth.mode : undefined,
-    gatewayHost: (typeof gw?.host === 'string' ? gw.host : undefined) ?? bindHost(gw?.bind, gw?.customBindHost),
+    gatewayHost: (typeof gw?.host === 'string' ? gw.host : undefined) ?? bindHost(gw?.bind, gw?.customBindHost, inContainer),
     gatewayPort: typeof gw?.port === 'number' ? gw.port : undefined,
     sandboxEnabled,
     approvalRequired,
   };
 }
 
-const PUBLIC_HOSTS = new Set(['0.0.0.0', '::', '*', 'auto']);
+const PUBLIC_HOSTS = new Set(['0.0.0.0', '::', '*']);
 
 function isPublic(host: string | undefined): boolean {
   return host !== undefined && PUBLIC_HOSTS.has(host);

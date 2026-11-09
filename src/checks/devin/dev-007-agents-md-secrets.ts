@@ -2,6 +2,8 @@ import { dirname, join } from 'node:path';
 import type { Evidence, ScanContext } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { memorySecretSeverity, scanMemorySecrets } from '../../analyzers/memory-secrets.js';
+import { readTextIfPresent } from '../../adapters/load-if-present.js';
+import { recordListFailure } from '../../core/config-loader.js';
 
 // Always-on rules files Devin loads from a workspace root or the global
 // config dir (CLAUDE.md is covered by the Claude Code checks).
@@ -11,7 +13,9 @@ async function listMarkdown(ctx: ScanContext, dir: string): Promise<string[]> {
   try {
     const names = await ctx.fs.readdir(dir);
     return Array.isArray(names) ? names.filter(n => n.endsWith('.md')).map(n => join(dir, n)) : [];
-  } catch {
+  } catch (err) {
+    // A rules folder that can't be listed hides its files
+    await recordListFailure(dir, ctx.fs, err);
     return [];
   }
 }
@@ -55,13 +59,8 @@ export const dev007 = defineCheck({
     let scanned = 0;
 
     for (const file of await ruleFileCandidates(ctx)) {
-      if (!(await ctx.fs.access(file))) continue;
-      let content: string;
-      try {
-        content = await ctx.fs.readFile(file);
-      } catch {
-        continue;
-      }
+      // Present but unreadable: reported as CONFIG-LOAD
+      const content = await readTextIfPresent(file, ctx.fs);
       if (typeof content !== 'string') continue;
       scanned++;
       scanContent(file, content, evidence);

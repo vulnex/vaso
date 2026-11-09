@@ -1,11 +1,12 @@
 {
   "agent": "nanobot",
-  "source": "RW12: NET-001 must catch a gateway bound to [::] (all IPv6 interfaces)",
+  "source": "RW12: NET-001 must catch the agent's listener (the websocket channel) bound to [::] (all IPv6 interfaces); gateway.host [::] is nanobot's health-only endpoint (g5-F2: info, not the gateway)",
   "modes": {
     ".nanobot": "700",
     ".nanobot/config.json": "600"
   },
   "fail": {
-    "NET-001": "critical"
+    "NET-001": "critical",
+    "CFG-001": "critical"
   }
 }

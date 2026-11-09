@@ -1,8 +1,8 @@
 {
   "meta": {
-    "version": 10,
-    "timestamp": "2026-11-06T00:00:00.000Z",
-    "description": "VASO advisory feed v10 (cumulative over v9) — November 2026 refresh: NVIDIA OpenShell bulletin 5872 (6), NanoClaw repo advisories (9), Hermes webhook route privilege escalation, 2 OpenClaw, 3 Claude Code, Claude Desktop Windows git.exe planting, OpenCode MCP OAuth command injection, 5 MCP TypeScript SDK and 5 MCP Python SDK advisories, MCP Inspector OAuth RCE, 2 FastMCP, 15 third-party MCP servers, and 12 malicious MCP packages (@ifasn doc-mcp cloud-credential stealers, @apexacc/audit, @atlisp/mcp 1.12.14, gemini-computer-use, mcp-server-github and others). Retains all v9 advisories."
+    "version": 11,
+    "timestamp": "2026-11-08T00:00:00.000Z",
+    "description": "VASO advisory feed v11 (cumulative over v10) — corrections: Hermes CVE-2026-114463 is fixed in 0.21.4 (range <0.21.4); Claude Desktop CVE-2026-88066 applies to Windows only (platforms). Retains all v10 advisories."
   },
   "data": {
     "advisories": [
@@ -3248,9 +3248,10 @@
         "id": "CVE-2026-114463",
         "title": "Hermes Agent: webhook route toolset privilege escalation",
         "agent": "hermes",
-        "affectedVersions": "<=0.20.5",
+        "affectedVersions": "<0.21.4",
+        "fixedVersion": "0.21.4",
         "severity": "critical",
-        "description": "The gateway re-derived the authorizing webhook route by splitting the session key on \":\", so a caller authenticated to a route such as build:external received the toolsets (terminal, file access) of the more privileged build route (CWE-863). The CVE record lists versions through 2026.8.19 (v0.20.5); upgrade to the latest release.",
+        "description": "The gateway re-derived the authorizing webhook route by splitting the session key on \":\", so a caller authenticated to a route such as build:external received the toolsets (terminal, file access) of the more privileged build route (CWE-863). Fixed in 0.21.4 (v2026.9.21).",
         "reference": "https://www.cve.org/CVERecord?id=CVE-2026-114463",
         "published": "2026-10-21",
         "exploitAvailable": true,
@@ -3343,6 +3344,9 @@
         "agent": "claude-desktop",
         "affectedVersions": "<1.8089.0",
         "fixedVersion": "1.8089.0",
+        "platforms": [
+          "win32"
+        ],
         "severity": "critical",
         "description": "Claude Desktop started git.exe without an absolute path, so Windows ran a git.exe placed in the opened project folder first; opening a malicious shared repository ran attacker code. Windows only. Upgrade to 1.8089.0+.",
         "reference": "https://github.com/anthropics/claude-code/security/advisories/GHSA-4p2j-qj3c-6x84",

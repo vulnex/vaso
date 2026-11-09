@@ -1,11 +1,11 @@
 import { join } from 'node:path';
-import * as plist from 'plist';
 import type { AgentAdapter, DetectOptions } from './adapter.js';
 import type { AgentInstallation, GatewayInfo, ModelRef, ParsedConfig, ZoneGraph } from '../core/types.js';
 import type { ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { getUserHomeDirs } from './openclaw.js';
+import { readPlist } from './plist-config.js';
 
 const APP_BUNDLE_PATH = '/Applications/ChatGPT.app';
 // OpenAI's current ChatGPT.app (bundle com.openai.codex, Codex-based) replaced
@@ -50,20 +50,9 @@ export const CHATGPT_WORKSPACE_DIR_PREFIXES = [
  * through XML as strings/base64 and are normalized for JSON consumers.
  */
 async function loadPlistAsObject(filePath: string, fs: FSProvider): Promise<Record<string, unknown> | undefined> {
-  if (!(await fs.access(filePath))) return undefined;
-  try {
-    const result = await fs.exec(
-      'plutil',
-      ['-convert', 'xml1', '-o', '-', filePath],
-      { timeout: 3000 },
-    );
-    if (result.exitCode !== 0 || !result.stdout) return undefined;
-    const parsed = plist.parse(result.stdout) as unknown;
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
-    return normalizeForJson(parsed as Record<string, unknown>);
-  } catch {
-    return undefined;
-  }
+  // A plist that is there but can't be opened or parsed is recorded as CONFIG-LOAD
+  const parsed = await readPlist(filePath, fs);
+  return parsed ? normalizeForJson(parsed) : undefined;
 }
 
 /**

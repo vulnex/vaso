@@ -111,7 +111,11 @@ export const gb016 = defineCheck({
         snippet: `GROK_BOT_SIDECAR_APP=${override}`,
         detail: exists
           ? 'Grok Bot launches this app as its Computer Use helper instead of the signed one in its bundle, without copying or checking it'
-          : 'Names no existing app, so Grok Bot ignores it — remove it before it points somewhere',
+          // A snapshot holds only what the probe was asked to stat (a
+          // snapshot taken with an older manifest never looked)
+          : ctx.fs.kind === 'snapshot'
+            ? 'Not verified: the snapshot does not show this app — run a local scan to confirm, and remove the variable unless it is meant to replace the helper'
+            : 'Names no existing app, so Grok Bot ignores it — remove it before it points somewhere',
       });
     }
 

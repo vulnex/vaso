@@ -3,6 +3,13 @@
     "host": "[::]",
     "port": 18790
   },
+  "channels": {
+    "websocket": {
+      "host": "[::]",
+      "port": 8765,
+      "token": "golden-static-ws-token-0001"
+    }
+  },
   "tools": {
     "restrictToWorkspace": true,
     "exec": {

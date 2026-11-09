@@ -3,7 +3,7 @@ import { defineCheck } from '../../core/check-builder.js';
 import { findHighEntropyBlocks } from '../../analyzers/entropy.js';
 import { OBFUSCATION_PATTERNS, analyzeObfuscation, isBenignEncodedData, isBinaryHexEscapes } from '../../analyzers/obfuscation.js';
 import { ScanLimitError } from '../../core/file-limits.js';
-import { readSkillText, skillFilesOf, skillsDirsOf } from './skill-files.js';
+import { readSkillText, skillFilesOf, skillsDirsOf, unreadableSkillFile } from './skill-files.js';
 import { unlistableSkillDirs } from '../../core/utils.js';
 import { markTestCode } from '../../analyzers/test-paths.js';
 import { analysisEvasion } from '../../analyzers/ast-analyzer.js';
@@ -86,6 +86,9 @@ export const skl002 = defineCheck({
         // Padding a file past the size limit hides it from every content
         // check — reported here once (informational) so it stays visible.
         if (err instanceof ScanLimitError) evidence.push({ file, detail: err.detail, mitigated: true });
+        // So does a file the scan can't read
+        const unreadable = unreadableSkillFile(file, err);
+        if (unreadable) evidence.push(unreadable);
       }
     }
 

@@ -1,8 +1,10 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { shannonEntropy } from '../../analyzers/entropy.js';
-import { isEnvReference, isPlaceholderSecret } from '../../core/patterns.js';
+import { API_KEY_PATTERNS, isEnvReference, isPlaceholderSecret } from '../../core/patterns.js';
 
+// …or a name ending in KEY / PAT (MISTRAL_KEY, GITLAB_PAT)
+const SECRET_KEY_NAMES = /(?:api[_-]?key|token|secret|password|passwd|credential|auth|private[_-]?key|(?:^|[_-])(?:key|pat)$)/i;
 const KNOWN_KEY_PREFIXES = [
   /^sk-or-v1-[A-Za-z0-9]{32,}/,
   /^sk-ant-[A-Za-z0-9_-]{20,}/,
@@ -10,11 +12,18 @@ const KNOWN_KEY_PREFIXES = [
   /^ghp_[A-Za-z0-9]{20,}/,
   /^xox[baprs]-[A-Za-z0-9-]{10,}/,
   /^AIza[0-9A-Za-z_-]{30,}/,
+  /^gsk_[A-Za-z0-9]{20,}/,
+  /^hf_[A-Za-z0-9]{20,}/,
 ];
 const HIGH_ENTROPY_THRESHOLD = 4.5;
 const MIN_LENGTH = 20;
 // Authorization-style header values carry the secret after the scheme
 const AUTH_SCHEME = /^(?:bearer|basic|token)\s+/i;
+
+function isKnownKey(value: string): boolean {
+  return !isPlaceholderSecret(value) && !isEnvReference(value)
+    && (KNOWN_KEY_PREFIXES.some(p => p.test(value)) || API_KEY_PATTERNS.some(({ pattern }) => pattern.test(value)));
+}
 
 function isSecretValue(value: string): boolean {
   if (value.length < MIN_LENGTH) return false;
@@ -28,7 +37,10 @@ function walkEnv(env: Record<string, unknown>, file: string, prefix: string, evi
   for (const [key, raw] of Object.entries(env)) {
     if (typeof raw !== 'string') continue;
     const value = raw.replace(AUTH_SCHEME, '');
-    if (!isSecretValue(value)) continue;
+    // A secret-like name with a secret-like value, or a recognised key format
+    // under any name — entropy alone also matches user agents, long paths
+    // and IDs (as CC-004 does)
+    if (!(SECRET_KEY_NAMES.test(key) ? isSecretValue(value) : isKnownKey(value))) continue;
     evidence.push({
       file,
       snippet: `${prefix}${key}=${value.slice(0, 8)}…`,

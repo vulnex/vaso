@@ -55,6 +55,8 @@ const USER_VENV_RELATIVE_PATHS = [
 const DIST_INFO_RE = /^nanobot_ai-(\d+\.\d+\.\d+[0-9A-Za-z.+-]*)\.dist-info$/;
 
 export const NANOBOT_DEFAULT_GATEWAY_PORT = 18790;
+/** WebSocketConfig.port: the websocket channel (WebUI / client bridge). */
+export const NANOBOT_DEFAULT_WEBSOCKET_PORT = 8765;
 
 function asRecord(v: unknown): Record<string, unknown> | undefined {
   return v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : undefined;
@@ -219,12 +221,26 @@ export const nanobotAdapter: AgentAdapter = {
   },
 
   getGatewayInfo(config: Record<string, unknown>): GatewayInfo | undefined {
-    // `nanobot gateway` listens on gateway.host:gateway.port (a health
-    // endpoint); both default to 127.0.0.1:18790 (GatewayConfig).
-    const gateway = asRecord(config.gateway);
-    const host = typeof gateway?.host === 'string' && gateway.host.trim() ? gateway.host.trim() : '127.0.0.1';
-    const port = typeof gateway?.port === 'number' ? gateway.port : NANOBOT_DEFAULT_GATEWAY_PORT;
-    return { host, port };
+    // The agent's network surface is the websocket channel (WebUI and client
+    // bridge, always on: channels/websocket/manifest.py), default
+    // 127.0.0.1:8765 (WebSocketConfig). `nanobot gateway`'s own
+    // gateway.host:gateway.port (default 127.0.0.1:18790) serves only
+    // GET /health (cli/gateway_runtime.py _health_server) — no agent access,
+    // so it is not the gateway here (CFG-001 notes a wildcard one as info).
+    const channels = asRecord(config.channels);
+    const ws = asRecord(channels?.websocket) ?? {};
+    const field = (camel: string): unknown => camel in ws ? ws[camel] : ws[camel.replace(/[A-Z]/g, c => `_${c.toLowerCase()}`)];
+    const enabled = field('enabled');
+    if (enabled === false || (typeof enabled === 'string' && /^(?:false|0|no|off)$/i.test(enabled.trim()))) return undefined;
+    // A Unix socket replaces the TCP listener
+    const unixSocket = field('unixSocketPath');
+    if (typeof unixSocket === 'string' && unixSocket.trim()) return undefined;
+    const host = field('host');
+    const port = field('port');
+    return {
+      host: typeof host === 'string' && host.trim() ? host.trim() : '127.0.0.1',
+      port: typeof port === 'number' ? port : NANOBOT_DEFAULT_WEBSOCKET_PORT,
+    };
   },
 
   getModels(configs: ParsedConfig[]): ModelRef[] {

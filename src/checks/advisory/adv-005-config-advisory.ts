@@ -2,6 +2,7 @@ import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { getAdvisoryDatabase } from '../../advisory/database.js';
 import { getNestedValue } from '../../core/utils.js';
+import { advisoryAppliesToPlatform } from '../../advisory/applicability.js';
 
 export const adv005 = defineCheck({
   id: 'ADV-005',
@@ -14,7 +15,7 @@ export const adv005 = defineCheck({
     const db = getAdvisoryDatabase();
     const agent = ctx.installation.agent;
     const configAdvisories = db.advisories.filter(adv => {
-      if (!adv.configPattern) return false;
+      if (!adv.configPattern || !advisoryAppliesToPlatform(adv, ctx.platform)) return false;
       return adv.agent === agent || adv.agent === '*';
     });
 

@@ -21,19 +21,20 @@ const CREDENTIAL_KEYS = ['password', 'secret', 'token', 'api_key', 'apiKey', 'au
 import { getNestedValue } from '../../core/utils.js';
 import type { ScanContext } from '../../core/types.js';
 import { openclawGatewayExposed } from '../openclaw/oc-008-dangerous-gateway-overrides.js';
+import { containerEnvironment } from '../../adapters/openclaw-bind.js';
 
 /**
  * Provably reachable only from this host: OpenClaw's own exposure rule (bind
  * mode, custom host, Tailscale serve/funnel), else the detected gateway's
  * host. Unknown exposure counts as reachable.
  */
-function loopbackOnly(ctx: ScanContext): boolean {
+function loopbackOnly(ctx: ScanContext, inContainer: boolean | undefined): boolean {
   const host = ctx.installation.gateway?.host;
   const loopbackHost = typeof host === 'string' && /^(?:127(?:\.\d{1,3}){3}|::1|\[::1\]|localhost)$/i.test(host.trim());
   if (ctx.installation.agent === 'openclaw') {
     // Both must say local: OpenClaw's bind rule, and any host the adapter
     // detected (an older config's `gateway.host: 0.0.0.0` is not loopback)
-    return !ctx.configs.some(c => openclawGatewayExposed(c.data)) && (host === undefined || loopbackHost);
+    return !ctx.configs.some(c => openclawGatewayExposed(c.data, inContainer)) && (host === undefined || loopbackHost);
   }
   return loopbackHost;
 }
@@ -70,7 +71,7 @@ export const cfg009 = defineCheck({
     }
 
     // A guessable token matters as far as the gateway it guards can be reached
-    const local = evidence.length > 0 && loopbackOnly(ctx);
+    const local = evidence.length > 0 && loopbackOnly(ctx, ctx.installation.agent === 'openclaw' ? await containerEnvironment(ctx.fs) : undefined);
     return h.fromEvidence(evidence, {
       passed: 'No default or weak credentials found',
       failed: (n) => `Found ${n} default/weak credential(s)${local ? ' (gateway reachable from this host only)' : ''}`,

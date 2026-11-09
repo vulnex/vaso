@@ -5,6 +5,7 @@ import { stripJsonc } from '../../core/jsonc.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { buildBroadPaths, isBroadPath } from '../../analyzers/broad-paths.js';
 import { geminiHome, geminiTrustedFoldersPath } from '../../adapters/gemini.js';
+import { parseIfPresent } from '../../adapters/load-if-present.js';
 
 /**
  * The trust file for this install: the scanning user's (which
@@ -32,14 +33,14 @@ export const gem011 = defineCheck({
     // from the user install (Gemini CLI keeps folder trust user-level only).
     const files: ParsedConfig[] = ctx.configs.filter(c => c.filePath.endsWith('trustedFolders.json'));
     const userFile = trustFilePath(ctx.installation.installDir, ctx.fs);
-    if (ctx.installation.profile !== 'project' && !files.some(f => f.filePath === userFile) && await ctx.fs.access(userFile)) {
-      try {
-        const raw = await ctx.fs.readFile(userFile);
-        const data = JSON.parse(stripJsonc(raw));
-        if (data && typeof data === 'object' && !Array.isArray(data)) files.push({ raw, format: 'json', filePath: userFile, data });
-      } catch {
-        // unreadable or not JSON — nothing to judge
-      }
+    if (ctx.installation.profile !== 'project' && !files.some(f => f.filePath === userFile)) {
+      // Present but unreadable or not a JSON object: reported as CONFIG-LOAD
+      const parsed = await parseIfPresent(userFile, ctx.fs, raw => {
+        const data = JSON.parse(stripJsonc(raw)) as unknown;
+        if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('Top-level value is not a JSON object');
+        return { raw, data: data as Record<string, unknown> };
+      });
+      if (parsed) files.push({ raw: parsed.raw, format: 'json', filePath: userFile, data: parsed.data });
     }
 
     for (const config of files) {

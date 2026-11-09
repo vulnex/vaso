@@ -1,6 +1,7 @@
 import { defineCheck } from '../../core/check-builder.js';
 import { getAdvisoryDatabase } from '../../advisory/database.js';
 import { satisfies } from '../../core/semver.js';
+import { advisoryAppliesToPlatform, advisoryVersionOptions } from '../../advisory/applicability.js';
 import { describeAffected, describeVersion, installedVersions, type InstalledVersion } from './installed-versions.js';
 
 export const adv001 = defineCheck({
@@ -22,8 +23,10 @@ export const adv001 = defineCheck({
       // job and carry no such tag, so they're excluded here.
       if (!adv.tags?.includes('framework') && !adv.tags?.includes('coding-agent')) return false;
       if (adv.agent !== agent && adv.agent !== '*') return false;
+      if (!advisoryAppliesToPlatform(adv, ctx.platform)) return false;
       return !adv.eolNotice; // EOL notices are ADV-003's
     });
+    const versionOpts = advisoryVersionOptions(agent);
 
     // Every installed copy is evaluated: an older copy left on disk stays runnable.
     const evidence = [];
@@ -31,7 +34,7 @@ export const adv001 = defineCheck({
     const advisoryIds = new Set<string>();
     const matchedSeverities = new Set<string>();
     for (const v of versions) {
-      const matching = candidates.filter(adv => satisfies(v.version, adv.affectedVersions));
+      const matching = candidates.filter(adv => satisfies(v.version, adv.affectedVersions, versionOpts));
       if (matching.length === 0) continue;
       affected.push(v);
       for (const adv of matching) {

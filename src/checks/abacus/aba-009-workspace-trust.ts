@@ -32,7 +32,7 @@ export const aba009 = defineCheck({
       });
     }
 
-    const { file, paths } = await trustedWorkspaces(ctx);
+    const { file, paths } = await trustedWorkspaces(ctx, { report: true });
     const home = ctx.fs.homedir();
     const broadPaths = buildBroadPaths(home);
     for (const p of paths) {
