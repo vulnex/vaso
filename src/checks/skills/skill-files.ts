@@ -3,7 +3,7 @@ import type { Evidence, ScanContext } from '../../core/types.js';
 import type { FSProvider } from '../../core/fs-provider.js';
 import { BINARY_EXTENSIONS, getAllSkillsDirs, getSkillFiles } from '../../core/utils.js';
 import { readCappedFile } from '../../core/file-limits.js';
-import { sourceText } from '../../analyzers/binary-text.js';
+import { binaryFileFormat, sourceText } from '../../analyzers/binary-text.js';
 
 /** Every skills directory of the installation (not just the primary one). */
 export function skillsDirsOf(ctx: ScanContext): string[] {
@@ -52,24 +52,40 @@ export function markdownCodeBlocks(md: string): string {
  *  - 'code' (AST analysis): scripts and source only — not SKILL.md, not
  *    compiled binaries;
  *  - 'patterns' (regex rules): also SKILL.md, reduced to its code blocks.
- * Binary content (a NUL byte — an extensionless native `helper`) is skipped by
- * both. Throws ScanLimitError for a file over the size limit.
+ * Binary content (an extensionless native `helper`, an archive — told by its
+ * format signature; a script never is) is skipped by both: BinarySkillFile
+ * is thrown, which every check skips and SKL-002 reports (unreadableSkillFile). Throws
+ * ScanLimitError for a file over the size limit.
  */
 export async function readSkillText(fs: FSProvider, file: string, mode: 'code' | 'patterns'): Promise<string | undefined> {
   if (BINARY_EXTENSIONS.has(extname(file).toLowerCase())) return undefined;
   if (mode === 'code' && !isSourceFile(file)) return undefined;
-  const text = sourceText(await readCappedFile(fs, file));
-  if (text === undefined) return undefined;
+  const raw = await readCappedFile(fs, file);
+  const format = await binaryFileFormat(fs, file, raw);
+  if (format) throw new BinarySkillFile(file, format);
+  const text = sourceText(raw);
   return isMarkdown(file) ? markdownCodeBlocks(text) : text;
+}
+
+/** A skill file whose content is a compiled executable or an archive, not source. */
+export class BinarySkillFile extends Error {
+  constructor(readonly path: string, readonly format: string) {
+    super(`${path}: ${format}, not source`);
+    this.name = 'BinarySkillFile';
+  }
 }
 
 /**
  * Evidence for a skill file the scan can't read (EACCES/EPERM — locally, or
- * a file the remote probe was denied), undefined for any other error. Every
- * content check skips such a file; SKL-002 reports it so it isn't passed as
- * reviewed.
+ * a file the remote probe was denied), or that is binary, undefined for any
+ * other error. Every content check skips such a file;
+ * SKL-002 reports it so it isn't passed as reviewed.
  */
 export function unreadableSkillFile(file: string, err: unknown): Evidence | undefined {
+  if (err instanceof BinarySkillFile) {
+    // not mitigated: unreviewed code the agent may run
+    return { file, detail: `not scanned: ${err.format} (compiled or packed content can't be analysed)` };
+  }
   const code = (err as NodeJS.ErrnoException | null)?.code;
   if (code !== 'EACCES' && code !== 'EPERM') return undefined;
   return {

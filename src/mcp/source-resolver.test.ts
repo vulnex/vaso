@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { inferPackageName, resolveLocalPath, resolveServerSources, resolveSourcePaths, runnerName } from './source-resolver.js';
 import type { MCPServerEntry } from './types.js';
-import { packageResolveResult } from '../core/engine.js';
+import { packageResolveResult, sourceReadResult } from '../core/engine.js';
 
 function makeServer(overrides?: Partial<MCPServerEntry>): MCPServerEntry {
   return {
@@ -361,6 +361,42 @@ describe('package runners given by path, and their options', () => {
       writeFileSync(bin, Buffer.from([0xcf, 0xfa, 0xed, 0xfe, 0x0c, 0x00, 0x00, 0x01, 0xad, 0x41, 0x42]));
       const [source] = await resolveServerSources([makeServer({ command: bin, args: [] })]);
       expect(source.sourceCode).toBeUndefined();
+      expect(source.readFailure).toBeUndefined();
+    });
+
+    it('reads a script that hides behind a NUL and a non-UTF-8 byte (dt20 g3-F8)', async () => {
+      const file = join(dir, 'latin1nul.js');
+      writeFileSync(file, Buffer.concat([Buffer.from('// caf\xe9 ', 'latin1'), Buffer.from([0]), Buffer.from('\nrequire("child_process").exec(process.argv[2]);\n')]));
+      const [source] = await resolveServerSources([makeServer({ command: 'node', args: [file] })]);
+      expect(source.sourceCode).toContain('child_process');
+    });
+  });
+
+  describe('size limit (dt20 g3-F1)', () => {
+    let dir: string;
+    beforeEach(() => {
+      dir = mkdtempSync(join(tmpdir(), 'vaso-big-'));
+      return () => rmSync(dir, { recursive: true, force: true });
+    });
+
+    it('skips a local source over the content-scan limit and reports it (SOURCE-READ)', async () => {
+      const file = join(dir, 'b10.js');
+      writeFileSync(file, `var a = [${'1,'.repeat(3 * 1024 * 1024)}1];\n`);
+      const sources = await resolveServerSources([makeServer({ name: 'big', command: 'node', args: [file] })]);
+      expect(sources[0].sourceCode).toBeUndefined();
+      expect(sources[0].readFailure).toMatch(/content-scan limit/);
+      expect(sourceReadResult(sources)?.errored).toBe(true);
+    });
+
+    it('lists an oversized file of a --source checkout as unreadable', async () => {
+      writeFileSync(join(dir, 'index.js'), 'import { Server } from "@modelcontextprotocol/sdk/server/index.js";');
+      writeFileSync(join(dir, 'big.js'), `import { Server } from "@modelcontextprotocol/sdk/server/index.js";\n//${'x'.repeat(6 * 1024 * 1024)}\n`);
+      const single = await resolveSourcePaths([join(dir, 'big.js')]);
+      // listed on stderr, and reported in the report as SOURCE-READ (dt20 g3 re-verify)
+      expect(single.unreadable).toEqual([join(dir, 'big.js')]);
+      expect(single.sources).toHaveLength(1);
+      expect(single.sources[0].sourceCode).toBeUndefined();
+      expect(single.sources[0].readFailure).toMatch(/content-scan limit/);
     });
   });
 });

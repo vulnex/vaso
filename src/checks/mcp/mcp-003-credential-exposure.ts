@@ -4,6 +4,7 @@ import { API_KEY_PATTERNS, isPlaceholderSecret, isSecretReference } from '../../
 import { shannonEntropy } from '../../analyzers/entropy.js';
 import { findSourceSecrets } from '../../analyzers/source-secrets.js';
 import { findArgSecrets, findUrlSecrets } from '../../mcp/config-secrets.js';
+import { isHashedValue } from '../../analyzers/secret-values.js';
 
 const HIGH_ENTROPY_THRESHOLD = 4.5;
 const MIN_SECRET_LENGTH = 16;
@@ -47,7 +48,9 @@ export const mcp003 = defineCheck({
 
           // Check for high-entropy values that look like secrets
           const secretKeyPattern = /(?:key|token|secret|password|credential|auth|api_key|apikey|pass)/i;
-          if (secretKeyPattern.test(key) && value.length >= MIN_SECRET_LENGTH) {
+          // a password hash or digest (`ADMIN_PASSWORD_HASH=$2b$…`) is not the credential
+          const hashed = isHashedValue(value) || /[_-]?(?:hash(?:ed)?|digest|fingerprint|checksum)$/i.test(key);
+          if (secretKeyPattern.test(key) && value.length >= MIN_SECRET_LENGTH && !hashed) {
             const entropy = shannonEntropy(value);
             if (entropy > HIGH_ENTROPY_THRESHOLD) {
               // Avoid duplicate if already caught by pattern above

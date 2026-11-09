@@ -313,6 +313,8 @@ export const codexAdapter: AgentAdapter = {
       directoryListings: [
         '~/.codex',
         '~/.codex/sessions',
+        // CDX-010 lists it: an unreadable rules dir is reported, not empty
+        '~/.codex/rules',
         '~/.codex/skills',
         '~/.agents/skills',
         '/etc/codex/skills',

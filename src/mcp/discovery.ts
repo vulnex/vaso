@@ -12,6 +12,7 @@ import { qwenHome } from '../adapters/qwen-code.js';
 import { xdgConfigDir as opencodeConfigDir } from '../adapters/opencode.js';
 import { openclawMcpServerMaps } from '../adapters/openclaw.js';
 import { parseYamlSafe } from '../core/yaml-safe.js';
+import { captureConfigLoadErrors } from '../core/config-loader.js';
 import { pathPresent } from '../adapters/load-if-present.js';
 import type { Platform } from '../core/types.js';
 
@@ -431,6 +432,7 @@ export class MCPDiscovery {
       }
       try {
         const data = parseConfigText(raw, location.shape === 'codex' ? 'toml' : location.shape === 'hermes' ? 'yaml' : 'json');
+        if (!data) continue;
         const servers = withExtensionPath(parseShape(location.shape, data), location.extensionPath);
 
         if (servers.length > 0) {
@@ -449,8 +451,11 @@ export class MCPDiscovery {
     }
 
     // OpenClaw: `mcp.servers` in the config its gateway loads (JSON5 with
-    // `$include`, located like the adapter does)
-    for (const oc of await openclawMcpServerMaps(home, this.fs).catch(() => [])) {
+    // `$include`, located like the adapter does). A config or include that
+    // exists but can't be read or parsed is reported like the others.
+    const openclaw = await captureConfigLoadErrors(() => openclawMcpServerMaps(home, this.fs).catch(() => []));
+    for (const e of openclaw.loadErrors) loadErrors.push({ source: 'OpenClaw', filePath: e.filePath, stage: e.stage, message: e.message });
+    for (const oc of openclaw.result) {
       const servers = parseServerMap(oc.servers);
       if (servers.length > 0) configs.push({ source: oc.source, filePath: oc.filePath, servers });
     }
@@ -472,6 +477,7 @@ export class MCPDiscovery {
         const ext = extname(filePath).toLowerCase();
         const format = ext === '.toml' ? 'toml' : ext === '.yaml' || ext === '.yml' ? 'yaml' : 'json';
         const data = parseConfigText(raw, format);
+        if (!data) { empty.push(filePath); continue; }
         const shape = shapeOf(format, data);
         const servers = parseShape(shape, data);
         const projects = claudeProjectConfigs(filePath, data);
@@ -502,10 +508,25 @@ export class MCPDiscovery {
   }
 }
 
-/** Parse a config file's text: TOML (Codex), YAML (Hermes) or JSON/JSONC. */
-function parseConfigText(raw: string, format: 'json' | 'toml' | 'yaml'): Record<string, unknown> {
+/**
+ * Parse a config file's text: TOML (Codex), YAML (Hermes) or JSON/JSONC.
+ * Text that holds nothing once comments are gone (VS Code's default
+ * `// Place your settings in this file…`, a YAML file of `# …` or `---`)
+ * is an empty config — undefined, not an error.
+ */
+function parseConfigText(raw: string, format: 'json' | 'toml' | 'yaml'): Record<string, unknown> | undefined {
   const text = raw.replace(/^\uFEFF/, '');
-  const data = format === 'toml' ? parseTOML(text) : format === 'yaml' ? parseYamlSafe(text) : JSON.parse(stripJsonc(text));
+  let data: unknown;
+  if (format === 'toml') {
+    data = parseTOML(text);
+  } else if (format === 'yaml') {
+    data = parseYamlSafe(text);
+    if (data === null || data === undefined) return undefined;
+  } else {
+    const json = stripJsonc(text);
+    if (json.trim() === '') return undefined;
+    data = JSON.parse(json);
+  }
   if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('not a config object');
   return data as Record<string, unknown>;
 }

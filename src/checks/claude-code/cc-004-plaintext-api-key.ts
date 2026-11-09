@@ -1,31 +1,23 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { shannonEntropy } from '../../analyzers/entropy.js';
-import { isEnvReference, isPlaceholderSecret } from '../../core/patterns.js';
+import { isKnownSecretValue, isSecretNamedValue } from '../../analyzers/secret-values.js';
 
 const SECRET_KEY_NAMES = /(?:api[_-]?key|token|secret|password|credential|auth)/i;
-const KNOWN_KEY_PREFIXES = [
-  /^sk-ant-[A-Za-z0-9_-]{20,}/,
-  /^sk-[A-Za-z0-9]{20,}/,
-  /^ghp_[A-Za-z0-9]{20,}/,
-  /^xoxb-[A-Za-z0-9-]{20,}/,
-];
-const HIGH_ENTROPY_THRESHOLD = 4.5;
-const MIN_LENGTH = 20;
 
-function isSecretValue(value: string): boolean {
-  if (value.length < MIN_LENGTH) return false;
-  if (isPlaceholderSecret(value)) return false;
-  if (isEnvReference(value)) return false;
-  if (KNOWN_KEY_PREFIXES.some(p => p.test(value))) return true;
-  return shannonEntropy(value) > HIGH_ENTROPY_THRESHOLD;
+/**
+ * A secret-like name with a known key format or a random-looking value
+ * (hex and UUID keys included — a fixed entropy bar never passes them), or a
+ * recognised key format under any name. References, placeholders, public
+ * keys and client IDs are never secrets.
+ */
+function isSecretValue(key: string, value: string): boolean {
+  return SECRET_KEY_NAMES.test(key) ? isSecretNamedValue(key, value) : isKnownSecretValue(value);
 }
 
 function walkEnv(env: Record<string, unknown>, file: string, prefix: string, evidence: Evidence[]): void {
   for (const [key, value] of Object.entries(env)) {
     if (typeof value !== 'string') continue;
-    if (!SECRET_KEY_NAMES.test(key)) continue;
-    if (!isSecretValue(value)) continue;
+    if (!isSecretValue(key, value)) continue;
     evidence.push({
       file,
       snippet: `${prefix}${key}=${value.slice(0, 6)}…`,

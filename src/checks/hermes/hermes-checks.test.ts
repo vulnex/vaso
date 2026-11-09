@@ -83,6 +83,13 @@ describe('HM-001 plaintext API keys', () => {
     const result = await check.run(makeCtx([cfg]));
     expect(result.passed).toBe(false);
   });
+  it('flags an api_key written as a YAML `|` block scalar (trailing newline)', async () => {
+    const cfg = makeYaml('/h/.hermes/cli-config.yaml', {
+      model: { default: 'gpt-5.5', api_key: 'Zq8wK3mP7vR2xL9nT4bY6cH1dF5gJ0sA\n' },
+    });
+    const result = await check.run(makeCtx([cfg]));
+    expect(result.passed).toBe(false);
+  });
   it('passes when api_key is an env reference', async () => {
     const cfg = makeYaml('/h/.hermes/cli-config.yaml', {
       model: { default: 'gpt-5.5', api_key: '${HERMES_API_KEY}' },

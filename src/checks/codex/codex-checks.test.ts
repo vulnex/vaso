@@ -248,13 +248,27 @@ describe('CDX-007: Codex Memory File Secret Leak', () => {
     expect(result.severity).toBe('critical');
   });
 
-  it('fails when instructions.md contains an AWS key', async () => {
+  // ~/.codex/instructions.md: legacy TypeScript CLI (< 0.20.0) only
+  it('fails when instructions.md contains an AWS key for the legacy TypeScript CLI', async () => {
     const fs = makeFs({
       access: vi.fn(async (p: string) => p.endsWith('instructions.md')),
       readFile: vi.fn(async () => 'AKIAZ7QX4M2PLR5TNW3B\n'),
     });
-    const result = await check.run(makeCtx([], fs));
+    const ctx = makeCtx([], fs);
+    ctx.installation.version = '0.1.2505172129';
+    const result = await check.run(ctx);
     expect(result.passed).toBe(false);
+  });
+
+  it('ignores instructions.md for the Rust CLI and an unknown version', async () => {
+    for (const version of ['0.20.0', '0.167.0', undefined]) {
+      const readFile = vi.fn(async () => 'AKIAZ7QX4M2PLR5TNW3B\n');
+      const ctx = makeCtx([], makeFs({ access: vi.fn(async (p: string) => p.endsWith('instructions.md')), readFile }));
+      ctx.installation.version = version;
+      const result = await check.run(ctx);
+      expect(result.passed).toBe(true);
+      expect(readFile).not.toHaveBeenCalled();
+    }
   });
 
   it('passes for ordinary memory content', async () => {

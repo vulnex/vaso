@@ -2,13 +2,13 @@ import { join } from 'node:path';
 import type { Evidence, ScanContext } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { memorySecretSeverity, scanMemorySecrets } from '../../analyzers/memory-secrets.js';
-import { readTextIfPresent } from '../../adapters/load-if-present.js';
+import { MemoryReader } from '../../analyzers/memory-read.js';
 import { recordListFailure } from '../../core/config-loader.js';
 import { isExcludedPath } from '../../core/utils.js';
 
-async function scanFile(file: string, ctx: ScanContext, evidence: Evidence[]): Promise<void> {
+async function scanFile(file: string, reader: MemoryReader, evidence: Evidence[]): Promise<void> {
   // Present but unreadable: reported as CONFIG-LOAD
-  const content = await readTextIfPresent(file, ctx.fs);
+  const content = await reader.read(file);
   if (content === undefined) return;
 
   evidence.push(...scanMemorySecrets(file, content, 'instructions file'));
@@ -57,12 +57,13 @@ export const ghc008 = defineCheck({
 
   async run(ctx, h) {
     const evidence: Evidence[] = [];
+    const reader = new MemoryReader(ctx.fs);
 
     // Project-level instructions, on the project install (installDir = the repo)
     if (ctx.installation.profile === 'project') {
-      await scanFile(join(ctx.installation.installDir, '.github', 'copilot-instructions.md'), ctx, evidence);
+      await scanFile(join(ctx.installation.installDir, '.github', 'copilot-instructions.md'), reader, evidence);
     } else {
-      await scanFile(join(ctx.installation.installDir, 'copilot-instructions.md'), ctx, evidence);
+      await scanFile(join(ctx.installation.installDir, 'copilot-instructions.md'), reader, evidence);
     }
 
     // Modular instructions: ~/.copilot/instructions/**/*.instructions.md, and
@@ -70,11 +71,11 @@ export const ghc008 = defineCheck({
     const instrDir = ctx.installation.profile === 'project'
       ? join(ctx.installation.installDir, '.github', 'instructions')
       : join(ctx.installation.installDir, 'instructions');
-    for (const file of await instructionFiles(ctx, instrDir)) await scanFile(file, ctx, evidence);
+    for (const file of await instructionFiles(ctx, instrDir)) await scanFile(file, reader, evidence);
 
     return h.fromEvidence(evidence, {
       severity: memorySecretSeverity(evidence),
-      passed: 'No secrets detected in Copilot instruction files',
+      passed: `No secrets detected in Copilot instruction files${reader.note()}`,
       failed: (n) => `Found ${n} potential secret(s) in Copilot instruction files`,
       fixDescription: 'Remove the secret and rotate the credential — instruction files often end up in git',
     });

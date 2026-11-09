@@ -20,32 +20,83 @@ info() { echo -e "  ${CYAN}[i]${NC} $1"; }
 echo -e "\n${BOLD}VASO Quick Scan${NC}"
 echo -e "${CYAN}Zero-dependency critical security check${NC}\n"
 
-# Detect OpenClaw installation
-# OpenClaw's relocation variables: OPENCLAW_STATE_DIR is the state directory
-# itself, OPENCLAW_HOME replaces the home directory
-DIRS=()
-[ -n "${OPENCLAW_STATE_DIR:-}" ] && DIRS+=("$OPENCLAW_STATE_DIR")
-DIRS+=("${OPENCLAW_HOME:-$HOME}/.openclaw" "$HOME/.clawdbot" "$HOME/.moltbot" "/etc/openclaw")
-INSTALL_DIR=""
-for d in "${DIRS[@]}"; do
-  if [ -d "$d" ]; then INSTALL_DIR="$d"; break; fi
-done
+# Detect OpenClaw installation, resolved as OpenClaw (and `vaso scan`) do:
+# OPENCLAW_HOME replaces the home directory, OPENCLAW_STATE_DIR is the state
+# directory (no fallback), OPENCLAW_CONFIG_PATH the config file — `~` in the
+# last two is the effective home. Otherwise the first existing of
+# ~/.openclaw/{openclaw,clawdbot}.json and ~/.clawdbot/{openclaw,clawdbot}.json.
+trim() {
+  local v="$1"
+  v="${v#"${v%%[![:space:]]*}"}"
+  printf '%s' "${v%"${v##*[![:space:]]}"}"
+}
+expand_tilde() {
+  case "$1" in
+    "~") printf '%s' "$2" ;;
+    "~/"*) printf '%s/%s' "$2" "${1#"~/"}" ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+first_config() {
+  local n
+  for n in openclaw.json clawdbot.json; do
+    if [ -e "$1/$n" ]; then printf '%s' "$1/$n"; return 0; fi
+  done
+  return 1
+}
 
-if [ -z "$INSTALL_DIR" ]; then
+EFFECTIVE_HOME="$HOME"
+OC_HOME=$(trim "${OPENCLAW_HOME:-}")
+[ -n "$OC_HOME" ] && EFFECTIVE_HOME=$(expand_tilde "$OC_HOME" "$HOME")
+OC_STATE=$(trim "${OPENCLAW_STATE_DIR:-}")
+OC_CONFIG=$(trim "${OPENCLAW_CONFIG_PATH:-}")
+[ -n "$OC_CONFIG" ] && OC_CONFIG=$(expand_tilde "$OC_CONFIG" "$EFFECTIVE_HOME")
+
+if [ -n "$OC_STATE" ]; then
+  INSTALL_DIR=$(expand_tilde "$OC_STATE" "$EFFECTIVE_HOME")
+  MAIN_CONFIG="$OC_CONFIG"
+  [ -n "$MAIN_CONFIG" ] || MAIN_CONFIG=$(first_config "$INSTALL_DIR") || MAIN_CONFIG="$INSTALL_DIR/openclaw.json"
+elif [ -n "$OC_CONFIG" ]; then
+  INSTALL_DIR="$EFFECTIVE_HOME/.openclaw"
+  if [ ! -e "$INSTALL_DIR" ] && [ -e "$EFFECTIVE_HOME/.clawdbot" ]; then INSTALL_DIR="$EFFECTIVE_HOME/.clawdbot"; fi
+  MAIN_CONFIG="$OC_CONFIG"
+elif MAIN_CONFIG=$(first_config "$EFFECTIVE_HOME/.openclaw" || first_config "$EFFECTIVE_HOME/.clawdbot"); then
+  INSTALL_DIR="${MAIN_CONFIG%/*}"
+else
+  INSTALL_DIR="$EFFECTIVE_HOME/.openclaw"
+  MAIN_CONFIG="$INSTALL_DIR/openclaw.json"
+fi
+
+if [ ! -e "$INSTALL_DIR" ] && [ ! -e "$MAIN_CONFIG" ]; then
   echo -e "${YELLOW}No OpenClaw installation found.${NC}"
   exit 0
 fi
 
 echo -e "Agent: ${BOLD}OpenClaw${NC} ($INSTALL_DIR)\n"
 
-# Top-level config files, each turned into `dotted.path=value` lines with
-# comments dropped (JSON5 `//` and `/* */`, YAML `#`), so a check matches a
-# setting where it really is — not a commented-out line, not an address in an
-# unrelated list, and not past a nested `{ … }` before the key it wants
+# OpenClaw reads one config file (JSON5) and the .env beside it — other files
+# in the state dir configure nothing. The config is turned into
+# `dotted.path=value` lines with comments dropped (`//` and `/* */`), so a
+# check matches a setting where it really is — not a commented-out line, not
+# an address in an unrelated list, and not past a nested `{ … }` before the
+# key it wants. (`$include` files are left to `vaso scan`.)
 CONFIGS=()
-for f in "$INSTALL_DIR"/*.json "$INSTALL_DIR"/*.json5 "$INSTALL_DIR"/*.yaml "$INSTALL_DIR"/*.yml; do
-  [ -f "$f" ] && CONFIGS+=("$f")
-done
+[ -f "$MAIN_CONFIG" ] && CONFIGS+=("$MAIN_CONFIG")
+ENV_FILE="$INSTALL_DIR/.env"
+
+# OpenClaw's own container test (isContainerEnvironment): bind "auto" — and
+# an unset bind — listen on 0.0.0.0 inside a container, loopback elsewhere
+in_container() {
+  local f
+  if [ -n "$(trim "${FLY_MACHINE_ID:-}")" ] && [ -n "$(trim "${FLY_APP_NAME:-}")" ]; then return 0; fi
+  for f in /.dockerenv /run/.containerenv /var/run/.containerenv; do
+    [ -e "$f" ] && return 0
+  done
+  if [ -r /proc/1/cgroup ] && grep -qE '/docker/|cri-containerd-[0-9a-f]|containerd/[0-9a-f]{64}|/kubepods[/.]|(^|[^[:alnum:]_])lxc([^[:alnum:]_]|$)' /proc/1/cgroup 2>/dev/null; then
+    return 0
+  fi
+  return 1
+}
 
 # JSON / JSON5: a character-level walk keeping a stack of open objects and
 # arrays (array elements get `[]` in the path). POSIX awk, no gawk extensions.
@@ -84,39 +135,7 @@ END {
   }
 }'
 
-# YAML: block mappings by indentation; `- ` list items are entered as their
-# keys. Flow-style values are kept as written.
-FLATTEN_YAML='
-function unq(v,   a) { a = substr(v, 1, 1); if (length(v) > 1 && (a == "\"" || a == q) && substr(v, length(v), 1) == a) return substr(v, 2, length(v) - 2); return v }
-BEGIN { q = "\047"; keyre = "^(\"[^\"]*\"|" q "[^" q "]*" q "|[^:\"" q "]+)[ \t]*:([ \t]|$)" }
-{
-  line = $0; out = ""; instr = ""
-  for (i = 1; i <= length(line); i++) {
-    c = substr(line, i, 1)
-    if (instr != "") { if (c == instr) instr = ""; out = out c; continue }
-    if (c == "\"" || c == q) { instr = c; out = out c; continue }
-    if (c == "#" && (i == 1 || substr(line, i - 1, 1) ~ /[ \t]/)) break
-    out = out c
-  }
-  sub(/[ \t\r]+$/, "", out)
-  if (out ~ /^[ \t]*$/ || out ~ /^---/) next
-  match(out, /^[ \t]*/); ind = RLENGTH; body = substr(out, ind + 1)
-  while (body ~ /^- /) { body = substr(body, 3); ind += 2; sub(/^[ \t]*/, "", body) }
-  if (!match(body, keyre)) next
-  key = substr(body, 1, RLENGTH); sub(/[ \t]*:[ \t]*$/, "", key); key = unq(key)
-  val = substr(body, RLENGTH + 1); sub(/^[ \t]+/, "", val)
-  while (n > 0 && ind <= sind[n]) n--
-  if (val == "") { n++; st[n] = key; sind[n] = ind; next }
-  p = ""; for (j = 1; j <= n; j++) p = (p == "" ? st[j] : p "." st[j])
-  print (p == "" ? key : p "." key) "=" unq(val)
-}'
-
-flatten() {
-  case "$1" in
-    *.yaml|*.yml) awk "$FLATTEN_YAML" "$1" ;;
-    *) awk "$FLATTEN_JSON" "$1" ;;
-  esac
-}
+flatten() { awk "$FLATTEN_JSON" "$1"; }
 
 # Whether any config has a `path=value` line matching an extended regex
 config_matches() {
@@ -130,18 +149,74 @@ config_matches() {
   return 1
 }
 
+# The last value a config sets for a dotted path (JSON5: a repeated key
+# wins); fails when the path isn't set
+config_value() {
+  local f lines v found=1
+  for f in ${CONFIGS[@]+"${CONFIGS[@]}"}; do
+    lines=$(flatten "$f" 2>/dev/null) || true
+    v=$(awk -v k="$1" 'index($0, k "=") == 1 { v = substr($0, length(k) + 2); f = 1 } END { if (f) print v; exit !f }' <<<"$lines") && { printf '%s' "$v"; found=0; }
+  done
+  return $found
+}
+lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+# Whether a config sets anything under a dotted prefix (a gateway section)
+config_has() {
+  local f lines
+  for f in ${CONFIGS[@]+"${CONFIGS[@]}"}; do
+    lines=$(flatten "$f" 2>/dev/null) || true
+    awk -v k="$1" 'index($0, k ".") == 1 { f = 1 } END { exit !f }' <<<"$lines" && return 0
+  done
+  return 1
+}
+
 # Check 1: Gateway binding (0.0.0.0)
 echo -e "${BOLD}Checking gateway binding...${NC}"
-# 2026.x: gateway.bind = "loopback" | "lan" | "all" | "auto"; older: an address
-if config_matches '^gateway\.(bind|host)=(0\.0\.0\.0|lan|all|auto|::|\[::\])(:[0-9]+)?$'; then
-  fail "Gateway bound to all interfaces (0.0.0.0 / bind lan|all|auto)" 12
+# 2026.x: gateway.bind = "loopback" | "lan" | "tailnet" | "custom" | "auto"
+# (unset: "auto" inside a container, else loopback); older: gateway.host
+GW_MODE=$(config_value gateway.mode) || true
+GW_HOST=$(config_value gateway.host) || true
+GW_TS=$(config_value gateway.tailscale.mode) || true
+BIND_SET=0
+GW_BIND=$(config_value gateway.bind) && BIND_SET=1
+GW_BIND=$(lower "$(trim "$GW_BIND")")
+EXPOSED=""
+if [ "$GW_MODE" = "remote" ]; then
+  : # a client of a gateway on another host: no listener here
+elif grep -qE '^(0\.0\.0\.0|::|\[::\]|\*)(:[0-9]+)?$' <<<"$(trim "$GW_HOST")"; then
+  EXPOSED="gateway.host $GW_HOST"
+elif [ "$GW_TS" = "serve" ] || [ "$GW_TS" = "funnel" ]; then
+  : # Tailscale serve/funnel keeps the gateway itself on loopback
+elif [ "$BIND_SET" -eq 1 ]; then
+  case "$GW_BIND" in
+    lan|all|0.0.0.0|::|"[::]") EXPOSED="bind $GW_BIND" ;;
+    auto)
+      if in_container; then EXPOSED="bind auto, in a container"
+      else info "Gateway bind \"auto\" listens on loopback here (0.0.0.0 inside a container)"; fi ;;
+  esac
+elif config_has gateway && { [ -z "$GW_TS" ] || [ "$GW_TS" = "off" ]; } && in_container; then
+  EXPOSED="bind unset = auto, in a container"
+fi
+if [ -n "$EXPOSED" ]; then
+  fail "Gateway bound to all interfaces (0.0.0.0 — $EXPOSED)" 12
 else
   pass "Gateway not bound to 0.0.0.0"
 fi
 
 # Check 2: API key exposure
 echo -e "${BOLD}Checking for exposed API keys...${NC}"
-if grep -rqE --exclude-dir=node_modules --exclude-dir=.git '(sk-(ant-|proj-)?[A-Za-z0-9_-]{20,}|AKIA[0-9A-Z]{16}|ghp_[a-zA-Z0-9]{36}|github_pat_[A-Za-z0-9_]{22,})' "$INSTALL_DIR" 2>/dev/null; then
+# In the files OpenClaw reads; documentation placeholders (sk-your-key-here,
+# AKIA…EXAMPLE, xxxx masks) are not keys
+KEY_FILES=()
+for f in ${CONFIGS[@]+"${CONFIGS[@]}"} "$ENV_FILE"; do
+  [ -f "$f" ] && KEY_FILES+=("$f")
+done
+KEYS=""
+if [ ${#KEY_FILES[@]} -gt 0 ]; then
+  KEYS=$(grep -ohE '(sk-(ant-|proj-)?[A-Za-z0-9_-]{20,}|AKIA[0-9A-Z]{16}|ghp_[a-zA-Z0-9]{36}|github_pat_[A-Za-z0-9_]{22,})' "${KEY_FILES[@]}" 2>/dev/null) || true
+fi
+KEYS=$(grep -vE 'x{4,}|X{4,}|\*{3,}|EXAMPLE(KEY)?$' <<<"$KEYS" | grep -viE '(^|[-_.<{:/])(your|example|sample|dummy|placeholder|changeme|change[-_]me|replace|insert|redacted|fake)($|[-_.>}])') || true
+if [ -n "$KEYS" ]; then
   fail "API keys found in config files" 12
 else
   pass "No exposed API keys found"
@@ -150,7 +225,7 @@ fi
 # Check 3: File permissions
 echo -e "${BOLD}Checking file permissions...${NC}"
 PERM_ISSUES=0
-for f in ${CONFIGS[@]+"${CONFIGS[@]}"} "$INSTALL_DIR"/.env; do
+for f in ${CONFIGS[@]+"${CONFIGS[@]}"} "$ENV_FILE"; do
   [ -f "$f" ] || continue
   # GNU stat first: on Linux `stat -f` is filesystem status and "succeeds"
   PERMS=$(stat -c '%a' "$f" 2>/dev/null || stat -f '%Lp' "$f" 2>/dev/null)

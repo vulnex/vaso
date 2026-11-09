@@ -352,6 +352,8 @@ const BINARY_PATTERNS: BinaryPattern[] = [
   { name: 'ELF binary', pattern: Buffer.from([0x7f, 0x45, 0x4c, 0x46]), type: 'buffer' },
   { name: 'Mach-O 64-bit binary', pattern: Buffer.from([0xcf, 0xfa, 0xed, 0xfe]), type: 'buffer' },
   { name: 'Mach-O 32-bit binary', pattern: Buffer.from([0xce, 0xfa, 0xed, 0xfe]), type: 'buffer' },
+  { name: 'Mach-O universal binary', pattern: Buffer.from([0xca, 0xfe, 0xba, 0xbe]), type: 'buffer' },
+  { name: 'Mach-O universal binary', pattern: Buffer.from([0xca, 0xfe, 0xba, 0xbf]), type: 'buffer' },
   { name: 'PE/DOS executable', pattern: Buffer.from([0x4d, 0x5a]), type: 'buffer' },
   { name: 'NUL-padding shellcode', pattern: /\x00{16,}/, type: 'regex' },
   { name: 'Packed JS eval wrapper', pattern: /eval\(function\(p,a,c,k,e/, type: 'regex' },

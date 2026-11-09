@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { isPlaceholderSecret, isSecretReference } from './patterns.js';
 import { WEAK_PATTERNS } from '../checks/config/cfg-009-default-credentials.js';
+import { isKnownSecretValue } from '../analyzers/secret-values.js';
 
 /**
  * The probe disguises secrets in collected config files (probe/secret_scrub.go)
@@ -12,7 +13,7 @@ import { WEAK_PATTERNS } from '../checks/config/cfg-009-default-credentials.js';
  */
 describe('probe secret-verdict corpus', () => {
   const cases = JSON.parse(readFileSync(join(__dirname, '..', '..', 'probe', 'testdata', 'secret-verdicts.json'), 'utf-8')) as
-    Array<{ value: string; placeholder: boolean; weak: boolean; reference: boolean }>;
+    Array<{ value: string; placeholder: boolean; weak: boolean; reference: boolean; token?: boolean }>;
 
   it.each(cases)('$value', (c) => {
     expect({
@@ -20,5 +21,7 @@ describe('probe secret-verdict corpus', () => {
       weak: WEAK_PATTERNS.some(p => p.test(c.value)),
       reference: isSecretReference(c.value),
     }).toEqual({ placeholder: c.placeholder, weak: c.weak, reference: c.reference });
+    // a known token format (the probe keeps every format a value matches)
+    if (c.token !== undefined) expect(isKnownSecretValue(c.value)).toBe(c.token);
   });
 });

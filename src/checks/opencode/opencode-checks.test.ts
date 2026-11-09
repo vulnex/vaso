@@ -305,6 +305,15 @@ describe('OPC-007: Memory file secret leak', () => {
     expect(result.severity).toBe('critical');
   });
 
+  // OpenCode's CLAUDE.md fallback is ~/.claude/CLAUDE.md, never one in its
+  // config dir (deep test 2026-11-09)
+  it('does not read ~/.config/opencode/CLAUDE.md', async () => {
+    const access = vi.fn(async () => true);
+    const readFile = vi.fn(async () => '# notes\n');
+    await check.run(makeCtx([], makeFs({ access, readFile })));
+    expect(readFile.mock.calls.map(c => String(c[0]))).not.toContainEqual(expect.stringMatching(/CLAUDE\.md$/));
+  });
+
   it('passes for ordinary memory content', async () => {
     const fs = makeFs({
       access: vi.fn(async () => true),

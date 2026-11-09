@@ -118,14 +118,21 @@ export async function recordReadFailure(filePath: string, fs: FSProvider, error:
  * A directory that isn't there — or that a snapshot knows only from its
  * parent's listing (no files of interest were collected in it) — holds
  * nothing to check, as a local listing of it would show: not a failure.
+ * Nor is a regular file where the directory is expected (ENOTDIR): the agent
+ * finds no rules there either, and a snapshot can't list it.
  */
 export async function recordListFailure(dir: string, fs: FSProvider, error: unknown): Promise<boolean> {
-  if (isFileNotFound(error)) return false;
+  if (isFileNotFound(error) || isNotDirectory(error)) return false;
   const denied = await deniedAncestor(dir, fs).catch(() => undefined);
   recordLoadError(denied
     ? { filePath: denied, stage: 'read', message: `EACCES: permission denied, scandir '${denied}'`, directory: true }
     : { filePath: dir, stage: 'read', message: errorMessage(error), directory: true });
   return true;
+}
+
+function isNotDirectory(error: unknown): boolean {
+  if ((error as NodeJS.ErrnoException | null)?.code === 'ENOTDIR') return true;
+  return error instanceof Error && error.message.startsWith('ENOTDIR');
 }
 
 /** LocalFSProvider's own wording, so local and remote reports match. */
@@ -149,9 +156,12 @@ export async function loadConfig(filePath: string, fs?: FSProvider): Promise<Par
   const provider = fs ?? new LocalFSProvider();
 
   let raw: string;
+  let bom = false;
   try {
     // Editors on Windows save JSON with a UTF-8 BOM; JSON.parse rejects it
-    raw = (await provider.readFile(filePath)).replace(/^\uFEFF/, '');
+    raw = await provider.readFile(filePath);
+    bom = raw.startsWith('\uFEFF');
+    if (bom) raw = raw.slice(1);
   } catch (error) {
     await recordReadFailure(filePath, provider, error);
     throw error;
@@ -191,7 +201,7 @@ export async function loadConfig(filePath: string, fs?: FSProvider): Promise<Par
     data = {};
   }
 
-  return { raw, format, filePath, data: data === UNPARSEABLE ? {} : data };
+  return { raw, format, filePath, data: data === UNPARSEABLE ? {} : data, ...(bom ? { bom } : {}) };
 }
 
 function detectFormat(ext: string, filePath: string): ParsedConfig['format'] {

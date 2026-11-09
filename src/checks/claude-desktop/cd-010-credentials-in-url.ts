@@ -1,16 +1,13 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-
-const CRED_QUERY = /[?&](?:api[_-]?key|token|secret|password|access_token)=([^&]+)/i;
-const BASIC_AUTH = /^https?:\/\/[^/@]+:[^/@]+@/i;
-const BEARER_HEADER_VALUE = /^Bearer\s+[A-Za-z0-9._\-~+/=]{12,}$/i;
+import { findUrlSecrets, headerSecret } from '../../mcp/config-secrets.js';
 
 export const cd010 = defineCheck({
   id: 'CD-010',
   name: 'Credentials Embedded in MCP URL/Headers',
   category: 'coding-agent',
   severity: 'warning',
-  description: 'Detect MCP server URLs with embedded basic-auth or query-string credentials, or static Bearer tokens in headers',
+  description: 'Detect MCP server URLs with embedded credentials (basic-auth, query/fragment parameters, secret paths), or static tokens in headers',
   supportedAgents: ['claude-desktop'],
 
   async run(ctx, h) {
@@ -24,32 +21,41 @@ export const cd010 = defineCheck({
         if (!srv || typeof srv !== 'object') continue;
         const server = srv as Record<string, unknown>;
 
+        // userinfo, credential query/fragment parameters, and paths that are
+        // the credential (Zapier MCP, Slack/Discord webhooks, random tokens)
         const url = typeof server.url === 'string' ? server.url : undefined;
         if (url) {
-          if (BASIC_AUTH.test(url)) {
+          for (const secret of findUrlSecrets(url)) {
             evidence.push({
               file: config.filePath,
-              snippet: `mcpServers.${name}.url contains user:pass@host`,
-              detail: 'HTTP basic-auth credentials embedded in URL — visible to anyone who can read this config',
-            });
-          } else if (CRED_QUERY.test(url)) {
-            evidence.push({
-              file: config.filePath,
-              snippet: `mcpServers.${name}.url contains credential query parameter`,
-              detail: 'API token in query string — gets logged by upstream proxies and may leak via Referer',
+              snippet: `mcpServers.${name}.url = ${secret.masked}`,
+              detail: `${capitalize(secret.kind)} — the URL is stored, logged and synced as written; anyone who reads this config can use it`,
             });
           }
         }
+        // `npx mcp-remote https://…/<secret>`: the same URL passed as an argument
+        const args = Array.isArray(server.args) ? server.args : [];
+        args.forEach((arg, i) => {
+          if (typeof arg !== 'string' || !/^[a-z][a-z0-9+.-]*:\/\//i.test(arg)) return;
+          for (const secret of findUrlSecrets(arg, `args[${i}]`)) {
+            evidence.push({
+              file: config.filePath,
+              snippet: `mcpServers.${name}.args[${i}] = ${secret.masked}`,
+              detail: `${capitalize(secret.kind)} in a URL argument — readable in this config and by any local user via the process list`,
+            });
+          }
+        });
 
         const headers = server.headers as Record<string, unknown> | undefined;
         if (headers && typeof headers === 'object') {
           for (const [hk, hv] of Object.entries(headers)) {
             if (typeof hv !== 'string') continue;
-            if (BEARER_HEADER_VALUE.test(hv)) {
+            const kind = headerSecret(hk, hv);
+            if (kind) {
               evidence.push({
                 file: config.filePath,
-                snippet: `mcpServers.${name}.headers.${hk} = "Bearer …"`,
-                detail: 'Static Bearer token stored in plaintext header — rotate and source from a secret manager instead',
+                snippet: `mcpServers.${name}.headers.${hk} = ${/^\s*bearer\s/i.test(hv) ? '"Bearer …"' : '"…"'}`,
+                detail: `Static ${kind}, stored in plaintext — rotate it and source it from a secret manager instead`,
               });
             }
           }
@@ -64,3 +70,7 @@ export const cd010 = defineCheck({
     });
   },
 });
+
+function capitalize(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}

@@ -448,6 +448,23 @@ describe('CD-010: Credentials Embedded in MCP URL/Headers', () => {
     const result = await check.run(makeCtx([config]));
     expect(result.passed).toBe(true);
   });
+
+  // dt20 g3-F6: path/fragment credentials, URL arguments and X-Api-Key headers were missed
+  it('flags secret paths, fragments, URL arguments and static key headers, masked', async () => {
+    const config = makeConfig('config.json', { mcpServers: {
+      zapier: { url: 'https://actions.zapier.com/mcp/sk-ak-Zq7XyR9kLmN3pQ8sT2vW5bC6dF1gH4jK/sse' },
+      zapier2: { url: 'https://mcp.zapier.com/api/mcp/s/NjQ4ZTk2YmUtZmY3Ny00ZDQ5LWE1ZjMtYjc2ZTkzN2E2NTRhOjE2MzQ1Njc4OQ==/mcp' },
+      slack: { command: 'npx', args: ['-y', 'slack-hook-mcp@1.0.0', 'https://hooks.slack.com/services/T00000000/B0123456789ABCDEFGHIJKLMNOP'] },
+      frag: { url: 'https://mcp.example.com/mcp#access_token=7a9f3c1e5b2d4f6a8c0e1b3d5f7a9c2e' },
+      hdr: { url: 'https://mcp2.example.com/mcp', headers: { 'X-Api-Key': 'wJalrXUtnFEMI-K7MDENG-bPxRfiCYzz9a8b7c6d' } },
+      ref: { url: 'https://mcp3.example.com/mcp', headers: { 'X-Api-Key': '${MCP_KEY}', Authorization: 'Bearer ${TOKEN}' } },
+    } });
+    const result = await check.run(makeCtx([config]));
+    expect(result.evidence?.map(e => e.snippet.split(' ')[0])).toEqual([
+      'mcpServers.zapier.url', 'mcpServers.zapier2.url', 'mcpServers.slack.args[2]', 'mcpServers.frag.url', 'mcpServers.hdr.headers.X-Api-Key',
+    ]);
+    expect(JSON.stringify(result.evidence)).not.toMatch(/Zq7XyR9k|NjQ4ZTk2|B0123456789A|7a9f3c1e|wJalrXUt/);
+  });
 });
 
 describe('CD-002 fix', () => {

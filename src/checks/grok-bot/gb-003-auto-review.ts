@@ -1,5 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { truncateSnippet } from '../../core/patterns.js';
 import { accountBlocks, settingsConfig, noSettingsReason } from './shared.js';
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -7,8 +8,9 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 }
 
 function preview(s: string): string {
-  const one = s.replace(/\s+/g, ' ').trim();
-  return one.length > 80 ? `${one.slice(0, 80)}…` : one;
+  // truncateSnippet keeps at most 8 characters of a token the cut splits: a cut
+  // token no longer matches its pattern, so the report masker couldn't hide it
+  return truncateSnippet(s.replace(/\s+/g, ' ').trim());
 }
 
 export const gb003 = defineCheck({

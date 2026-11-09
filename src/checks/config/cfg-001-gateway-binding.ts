@@ -28,6 +28,21 @@ function wildcardListeners(data: unknown, wildcards: string[], path = '', depth 
   return hits;
 }
 
+/** Nanobot's websocket channel served on a unix socket instead of TCP (runtime.py runner). */
+function nanobotUnixSocket(data: Record<string, unknown>): boolean {
+  const ws = getNestedValue(data, 'channels.websocket');
+  if (!ws || typeof ws !== 'object') return false;
+  const path = (ws as Record<string, unknown>).unixSocketPath ?? (ws as Record<string, unknown>).unix_socket_path;
+  return typeof path === 'string' && path.trim().length > 0;
+}
+
+/** The wildcard address the evidence names (`::` binds IPv6 too), for the headline. */
+function wildcardLabel(evidence: Evidence[]): string {
+  const text = evidence.map(e => e.detail ?? '').join(' ');
+  if (/(?:^|[\s=])(?:\[::\]|::)(?=[\s:—]|$)/.test(text) && !text.includes('0.0.0.0')) return '::';
+  return '0.0.0.0';
+}
+
 const HOST_PATHS = ['gateway.host', 'server.host', 'host', 'GATEWAY_HOST'];
 const WILDCARD_ADDRS = ['0.0.0.0', '[::]', '::'];
 /** Bind values that expose the listener beyond loopback (symbolic modes and wildcard addresses). */
@@ -150,6 +165,9 @@ export const cfg001 = defineCheck({
           if (reported.has(hit.path)) continue;
           // Hermes: a value its administrator-managed layer replaces binds nothing
           if (managedOverride(ctx.configs, config, hit.path)) continue;
+          // Nanobot: channels.websocket.unixSocketPath replaces the TCP listener
+          if (ctx.installation.agent === 'nanobot' && /^channels\.websocket\.host$/i.test(hit.path)
+              && nanobotUnixSocket(config.data)) continue;
           const line = lines.findIndex(l => l.includes(hit.key) && l.includes(hit.value));
           evidence.push({
             file: config.filePath,
@@ -201,7 +219,7 @@ export const cfg001 = defineCheck({
           ? ctx.installation.agent === 'nanobot'
             ? 'Nanobot health endpoint listens on all interfaces (GET /health only; no agent access)'
             : 'Gateway bind mode "auto" listens on 0.0.0.0 (all interfaces) when the gateway runs in a container'
-          : 'Gateway is bound to 0.0.0.0 — accessible from all network interfaces',
+          : `Gateway is bound to ${wildcardLabel(uniqueEvidence)} — accessible from all network interfaces`,
       evidence: uniqueEvidence,
       fixable: gatewayKey,
       fixDescription: 'Rebind the gateway to loopback (127.0.0.1, or gateway.bind "loopback")',

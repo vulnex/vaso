@@ -266,6 +266,7 @@ func Collect(manifest ProbeManifest, escalate bool) ProbeSnapshot {
 		}
 		c.followLinkedTrees(&snapshot, pattern, matches, false)
 		c.collectNonUTF8Names(&snapshot, pattern)
+		recordDeniedDirs(&snapshot, pattern)
 		if c.inSkillTree {
 			c.collectUnlistableSkills(&snapshot, pattern)
 		}
@@ -357,6 +358,12 @@ func Collect(manifest ProbeManifest, escalate bool) ProbeSnapshot {
 	for _, name := range manifest.EnvOriginOnly {
 		if v, ok := snapshot.Env[name]; ok {
 			snapshot.Env[name] = urlOriginOnly(v)
+		}
+	}
+	for _, name := range manifest.EnvPresence {
+		delete(snapshot.Env, name) // a prefix may have collected it
+		if strings.TrimSpace(os.Getenv(name)) != "" {
+			snapshot.Env[name] = envPresentValue
 		}
 	}
 	snapshot.Truncated = c.truncated
@@ -904,6 +911,7 @@ var secretEnvParts = map[string]bool{
 	"PASSPHRASE": true, "CREDENTIAL": true, "CREDENTIALS": true, "AUTH": true,
 	"COOKIE": true, "SESSION": true, "JWT": true, "DSN": true, "BEARER": true,
 	"HEADER": true, "HEADERS": true, "AUTHORIZATION": true, "SIGNATURE": true,
+	"PAT": true, // GH_PAT, a personal access token
 }
 
 // Segments that end in a credential word without a separator
@@ -940,8 +948,10 @@ func isSecretJSONKey(key string) bool {
 	return isSecretEnvName(strings.NewReplacer("-", "_", ".", "_", " ", "_").Replace(k))
 }
 
-// urlUserinfo matches the user:password@ part of a URL.
-var urlUserinfo = regexp.MustCompile(`([A-Za-z][A-Za-z0-9+.-]*://)[^/?#@\s]+@`)
+// urlUserinfo matches the user:password@ part of a URL: up to the last @
+// before the host (WHATWG; a password may hold an @). It never runs past
+// what ends a URL in JSON or XML text (`"https://x" … "a@b"` is no userinfo).
+var urlUserinfo = regexp.MustCompile(`([A-Za-z][A-Za-z0-9+.-]*://)[^/?#\s"'<>,{}]+@`)
 
 // redactURLUserinfo keeps a URL's scheme and host (checks judge http:// and
 // the endpoint) but never its credentials: proxy://user:pass@host.
@@ -949,11 +959,12 @@ func redactURLUserinfo(s string) string {
 	return urlUserinfo.ReplaceAllString(s, "${1}"+redactedEnvValue+"@")
 }
 
-// tokenShaped matches the credential formats VASO's checks recognise, wherever
+// tokenShaped matches the credential formats VASO's checks recognise (API_KEY_PATTERNS
+// and EXTRA_TOKEN_PATTERNS, TestTokenShapedCoversEveryFormat), wherever
 // they stand in a value: a token in a variable whose name looks harmless
 // (OPENAI_ORG=sk-proj-…, LYRIE_TELEGRAM_BOT=123456:…) must not ship either.
 // RE2 is linear, so no input can make this slow.
-var tokenShaped = regexp.MustCompile(`(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-(?:proj-|ant-|svcacct-|admin-|or-v1-)?[A-Za-z0-9_-]{20,}|xox[abprs]-[A-Za-z0-9-]{10,}|A(?:KIA|SIA)[0-9A-Z]{16,}|\bdevin-[A-Za-z0-9$._-]{60,}|\bcog_[A-Za-z0-9]{16,}|\bapk_(?:user_)?[A-Za-z0-9]{16,}|\bnvapi-[A-Za-z0-9_-]{20,}|AIza[0-9A-Za-z_-]{30,}|glpat-[A-Za-z0-9_-]{20,}|\b[0-9]{6,12}:[A-Za-z0-9_-]{30,}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]*)`)
+var tokenShaped = regexp.MustCompile(`(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-(?:proj-|ant-|svcacct-|admin-|or-v1-)?[A-Za-z0-9_-]{20,}|xox[abeprs]-[A-Za-z0-9-]{10,}|\bgsk_[A-Za-z0-9]{20,}|\bpat[A-Za-z0-9]{14}\.[0-9a-f]{64}|\bhf_[A-Za-z0-9]{20,}|\bxai-[A-Za-z0-9]{32,}|A(?:KIA|SIA)[0-9A-Z]{16,}|\bdevin-[A-Za-z0-9$._-]{60,}|\bcog_[A-Za-z0-9]{16,}|\bapk_(?:user_)?[A-Za-z0-9]{16,}|\bnvapi-[A-Za-z0-9_-]{20,}|AIza[0-9A-Za-z_-]{30,}|glpat-[A-Za-z0-9_-]{20,}|\b[0-9]{6,12}:[A-Za-z0-9_-]{30,}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]*)`)
 
 // gutterWrap is a continuation line of a Rust CLI error report (miette, as
 // openshell prints it): the report is wrapped to the terminal width anywhere,
@@ -966,20 +977,33 @@ func unwrapGutter(s string) string {
 	return gutterWrap.ReplaceAllString(s, "")
 }
 
-// urlParam matches one name=value pair in a URL's query or fragment.
-var urlParam = regexp.MustCompile(`([?&#;])([^=&#;\s]+)=([^&#;\s]*)`)
+// urlParam matches one name=value pair in a URL's query or fragment. The
+// value stops where the URL does inside JSON or XML (`…token=x</string>`).
+var urlParam = regexp.MustCompile(`([?&#;])([^=&#;\s"'<>]+)=([^&#;\s"'<>]*)`)
 
 // redactSecretValues keeps a value's structure (scheme, host, parameter names)
 // but none of its credentials: user:password@, credential-named URL parameters
-// (?api_key=, &token=) and token-shaped text anywhere.
+// (?api_key=, &token=), secret URL path segments and token-shaped text anywhere.
 func redactSecretValues(s string) string {
 	s = redactURLUserinfo(s)
+	// a URL whose path is the credential (Zapier MCP, webhooks, random tokens)
+	s = replaceURLPathSecrets(s, func(string) string { return redactedEnvValue })
 	s = urlParam.ReplaceAllStringFunc(s, func(m string) string {
 		g := urlParam.FindStringSubmatch(m)
-		if isSecretJSONKey(g[2]) && g[3] != "" {
+		if urlSecretParam(g[2]) && g[3] != "" {
 			return g[1] + g[2] + "=" + redactedEnvValue
 		}
 		return m
+	})
+	// Authorization: Bearer <opaque>, TOKEN=…, "apiKey": "…"
+	s = onSecretLines(s, secretHints, func(line string) string {
+		return inlineSecrets(line, false, func(key, value string) (string, bool) {
+			scheme := authSchemePrefix.FindString(value)
+			if !worthDisguising(value[len(scheme):]) && !(strongCredentialKey(key) && passphraseLike(value[len(scheme):])) {
+				return "", false
+			}
+			return scheme + redactedEnvValue, true
+		})
 	})
 	return tokenShaped.ReplaceAllString(s, redactedEnvValue)
 }
@@ -1065,6 +1089,10 @@ func urlOriginOnly(v string) string {
 
 // redactedEnvValue replaces the value of a credential-bearing variable.
 const redactedEnvValue = "[redacted]"
+
+// envPresentValue stands for a set envPresence variable (ENV_PRESENT_VALUE in
+// src/core/snapshot-types.ts).
+const envPresentValue = "set"
 
 // collectEnv returns environment variables that match any of the given
 // prefixes, with credential-bearing values redacted.
@@ -1342,6 +1370,84 @@ func (c *collector) collectNonUTF8Names(snapshot *ProbeSnapshot, pattern string)
 		}
 		return nil
 	})
+}
+
+// maxDeniedWalkDirs bounds how many directories recordDeniedDirs lists per glob.
+const maxDeniedWalkDirs = 10000
+
+// recordDeniedDirs records the directories a glob could not read. The glob
+// ignores EACCES, so an unreadable `~/.codex/rules` (`*.rules`) or
+// `~/.copilot/instructions/a` (`**/*.instructions.md`) looked empty remotely
+// while a local scan reported it. Each directory the pattern would list is
+// visited the way the glob visits it (symlinks under a wildcard not followed,
+// wildcard-reached vendor dirs skipped); a denied one gets its mode, which the
+// snapshot answers with EACCES as a local readdir does. A `<root>/**` pattern
+// needs none of this: `**` matches directories, so they are collected as such.
+func recordDeniedDirs(snapshot *ProbeSnapshot, pattern string) {
+	slash := filepath.ToSlash(pattern)
+	if strings.HasSuffix(slash, "/**") {
+		return
+	}
+	base, rest := doublestar.SplitPattern(slash)
+	if base == "" || rest == "" {
+		return
+	}
+	segs := strings.Split(rest, "/")
+	visited := 0
+	var walk func(dir string, i int)
+	walk = func(dir string, i int) {
+		if visited++; visited > maxDeniedWalkDirs {
+			return
+		}
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			if os.IsPermission(err) {
+				recordDeniedDir(snapshot, dir)
+			}
+			return
+		}
+		if i >= len(segs)-1 {
+			return // the last segment names files
+		}
+		seg := segs[i]
+		if !strings.ContainsAny(seg, "*?[{") {
+			walk(filepath.Join(dir, seg), i+1)
+			return
+		}
+		for _, e := range entries {
+			if !e.IsDir() {
+				continue
+			}
+			sub := filepath.Join(dir, e.Name())
+			if inExcludedDir(pattern, filepath.Join(sub, "x")) {
+				continue
+			}
+			if seg == "**" {
+				walk(sub, i) // any depth; what follows `**` lies in the same subtree
+			} else if ok, _ := doublestar.Match(seg, e.Name()); ok {
+				walk(sub, i+1)
+			}
+		}
+	}
+	walk(filepath.FromSlash(base), 0)
+}
+
+// recordDeniedDir records the mode of a directory that could not be listed —
+// or, when it can't even be stat'd (its parent has no search permission), of
+// the nearest ancestor that can: the one that denies everything beneath it.
+func recordDeniedDir(snapshot *ProbeSnapshot, dir string) {
+	for d := dir; ; d = filepath.Dir(d) {
+		if info, err := os.Stat(d); err == nil {
+			if info.IsDir() {
+				snapshot.DirectoryModes[d] = int(info.Mode().Perm())
+				recordOwner(snapshot, d, info)
+			}
+			return
+		}
+		if filepath.Dir(d) == d {
+			return
+		}
+	}
 }
 
 // headBytes is how much of an omitted skill-tree file is shipped: enough for

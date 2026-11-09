@@ -2,11 +2,13 @@ import { join } from 'node:path';
 import type { Evidence, ScanContext } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { memorySecretSeverity, scanMemorySecrets } from '../../analyzers/memory-secrets.js';
-import { readTextIfPresent } from '../../adapters/load-if-present.js';
+import { MemoryReader } from '../../analyzers/memory-read.js';
 
-// QWEN.md is the default context ("memory") file; `context.fileName` (string
-// or array) renames it (Qwen settings.md "Context Files")
-const MEMORY_FILES = ['memory.md', 'QWEN.md', 'AGENTS.md'];
+// QWEN.md is the default context ("memory") file, AGENTS.md the other one
+// Qwen loads (memory-constants.ts); `context.fileName` (string or array)
+// renames it (Qwen settings.md "Context Files"). Qwen never reads a
+// ~/.qwen/memory.md — its auto-memory indexes live in subdirectories.
+const MEMORY_FILES = ['QWEN.md', 'AGENTS.md'];
 
 function contextFileNames(ctx: ScanContext): string[] {
   const names = new Set(MEMORY_FILES);
@@ -20,9 +22,9 @@ function contextFileNames(ctx: ScanContext): string[] {
   return [...names];
 }
 
-async function scanFile(file: string, ctx: ScanContext, evidence: Evidence[]): Promise<void> {
+async function scanFile(file: string, reader: MemoryReader, evidence: Evidence[]): Promise<void> {
   // Present but unreadable: reported as CONFIG-LOAD
-  const content = await readTextIfPresent(file, ctx.fs);
+  const content = await reader.read(file);
   if (content === undefined) return;
 
   evidence.push(...scanMemorySecrets(file, content));
@@ -33,17 +35,18 @@ export const qc010 = defineCheck({
   name: 'Qwen Memory File Secret Leak',
   category: 'coding-agent',
   severity: 'critical',
-  description: 'Scan ~/.qwen/QWEN.md (or the configured context.fileName), memory.md and AGENTS.md for plaintext secrets and high-entropy strings',
+  description: 'Scan ~/.qwen/QWEN.md (or the configured context.fileName) and AGENTS.md for plaintext secrets and high-entropy strings',
   supportedAgents: ['qwen-code'],
 
   async run(ctx, h) {
     const evidence: Evidence[] = [];
+    const reader = new MemoryReader(ctx.fs);
     for (const filename of contextFileNames(ctx)) {
-      await scanFile(join(ctx.installation.installDir, filename), ctx, evidence);
+      await scanFile(join(ctx.installation.installDir, filename), reader, evidence);
     }
     return h.fromEvidence(evidence, {
       severity: memorySecretSeverity(evidence),
-      passed: 'No secrets detected in Qwen memory files',
+      passed: `No secrets detected in Qwen memory files${reader.note()}`,
       failed: (n) => `Found ${n} potential secret(s) in Qwen memory files`,
       fixDescription: 'Remove the secret from the memory file and rotate the credential — these files often end up in git',
     });

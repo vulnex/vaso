@@ -610,6 +610,18 @@ describe('deep-test 2026-10-15 regressions (Claude Code)', () => {
     expect((await check.run(makeCtx([helper]))).passed).toBe(false);
   });
 
+  // dt20 g6-F1: hex and UUID keys never passed the fixed 4.5-bit entropy bar
+  it('CC-004: hex / UUID keys under secret names, known formats under any name; public values pass', async () => {
+    const result = await byId('CC-004').run(makeCtx([makeConfig('settings.json', { env: {
+      WEATHER_API_KEY: '3f9a1c7e2b8d4f6a0c5e9b1d7f3a8c2e',
+      HEROKU_API_KEY: '1c2d3e4f-5a6b-7c8d-9e0f-a1b2c3d4e5f6',
+      GITLAB: 'glpat-Ab3De5Fg7Hj9Kl1Mn3Pq',
+      SSH_AUTH_PUBLIC: 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGq8vJ3kLm9Pq2Rs5Tv8Wy1Ab4Cd6Ef0GhJkLmNoPqRs',
+      OAUTH_CLIENT_ID: '123456789012-a1b2c3d4e5f6g7h8i9j0klmnopqrstuv.apps.googleusercontent.com',
+    } })]));
+    expect(result.evidence?.map(e => e.snippet.split('=')[0])).toEqual(['env.WEATHER_API_KEY', 'env.HEROKU_API_KEY', 'env.GITLAB']);
+  });
+
   it('CC-007: a PATH command helper (op read …) is not reported missing; relative paths resolve against the project', async () => {
     const check = byId('CC-007');
     const access = vi.fn(async () => false);

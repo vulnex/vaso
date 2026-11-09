@@ -12,8 +12,8 @@ import { defineCheck } from '../../core/check-builder.js';
  * (`process.env.API_BASE`) is fine and not flagged.
  */
 
-/** Whole `process.env` (not `.KEY`, `[KEY]` or `?.KEY`). */
-const WHOLE_PROCESS_ENV = /process\.env(?!\s*(?:\.|\[|\?\.))/g;
+/** Whole `process.env` / `process["env"]` (not `.KEY`, `[KEY]` or `?.KEY`, nor `process.environment_variable`). */
+const WHOLE_PROCESS_ENV = /\bprocess(?:\.env\b|\[\s*(["'`])env\1\s*\])(?!\s*(?:\.|\[|\?\.))/g;
 
 /**
  * Text right before a whole-`process.env` reference that makes it benign: a
@@ -34,8 +34,9 @@ const BENIGN_PROCESS_ENV_PREFIX = new RegExp(
     // An env-named option (`dotenv.config({ processEnv: process.env })`).
     String.raw`\b\w*[eE]nv\w*["']?\s*:\s*$`,
     // A fallback for a caller-supplied environment (`o.env ?? process.env`,
-    // compiled optional chaining `(o == null ? void 0 : o.env) ?? process.env`).
-    String.raw`\.\w*[eE]nv\w*\)?\s*(?:\?\?|\|\|)\s*$`,
+    // compiled optional chaining `(o == null ? void 0 : o.env) ?? process.env`),
+    // also as a getter (`e.env ?? (() => process.env)`).
+    String.raw`\.\w*[eE]nv\w*\)?\s*(?:\?\?|\|\|)\s*(?:\(\s*\(\s*\)\s*=>\s*)?$`,
     // `env: (…) ?? process.env` — an env option falling back to the environment
     String.raw`\benv\s*:\s*\([^;]*\)\s*(?:\?\?|\|\|)\s*$`,
     // Destructuring picks named keys: `const { API_BASE, API_KEY } = process.env`.
@@ -79,6 +80,21 @@ const DUMPING_CALLEES = /(?:^|\.)(?:stringify|inspect|String|entries|values)$/;
 /** A default parameter: `function f(environment = process.env)`. */
 const DEFAULT_PARAMETER = /[(,]\s*[A-Za-z_$][\w$]*\s*=\s*$/;
 
+/**
+ * A child-process environment built by overriding variables of this one:
+ * `{ ...process.env, PATH: x }` (minified, assigned to any name, then passed
+ * as `env`). Not when the object is returned or handed to a serializer —
+ * `JSON.stringify({ ...process.env, X: 1 })` still dumps it.
+ */
+function overridesVariables(before: string, following: string): boolean {
+  if (!/\{\s*(?:[^{}()]*,\s*)?\.\.\.\s*$/.test(before)) return false;
+  if (!/^\s*,\s*["']?[A-Z_][A-Z0-9_]*["']?\s*:/.test(following)) return false;
+  const outside = before.slice(0, before.lastIndexOf('{'));
+  if (/\breturn\s*\(?\s*$/.test(outside)) return false;
+  const callee = enclosingCallee(outside);
+  return !(callee && DUMPING_CALLEES.test(callee));
+}
+
 interface DumpPattern {
   re: RegExp;
   label: string;
@@ -117,9 +133,9 @@ function isCommentLine(line: string): boolean {
   return t.startsWith('//') || t.startsWith('*') || t.startsWith('#');
 }
 
-/** Reasons the source exposes the whole environment, deduplicated. */
-function dumpReasons(code: string): Set<string> {
-  const reasons = new Set<string>();
+/** Reasons the source exposes the whole environment, deduplicated, each with the (1-based) line it was first seen on. */
+function dumpReasons(code: string): Map<string, number> {
+  const reasons = new Map<string, number>();
 
   for (const m of code.matchAll(WHOLE_PROCESS_ENV)) {
     const lineStart = code.lastIndexOf('\n', m.index) + 1;
@@ -128,6 +144,7 @@ function dumpReasons(code: string): Set<string> {
     if (BENIGN_PROCESS_ENV_PREFIX.test(before) || DEFAULT_PARAMETER.test(before)) continue;
     const following = code.slice(m.index + m[0].length, m.index + m[0].length + 8);
     if (PRESENCE_TEST.test(following)) continue;
+    if (overridesVariables(before, code.slice(m.index + m[0].length, m.index + m[0].length + 80))) continue;
     const callee = enclosingCallee(before);
     if (callee) {
       // Handed to a config reader / loader: it reads keys, it doesn't dump.
@@ -138,17 +155,24 @@ function dumpReasons(code: string): Set<string> {
       const after = code.slice(m.index + m[0].length, m.index + m[0].length + 120).split(';')[0];
       if (/(?:entries|keys)$/.test(callee) && /\.\s*filter\s*\(|startsWith\s*\(|\.test\s*\(|\.match\s*\(/.test(after)) continue;
     }
-    reasons.add('returns/serializes the whole process.env');
+    reasons.set('returns/serializes the whole process.env', lineNumberAt(code, m.index));
     break;
   }
 
-  for (const line of code.split('\n')) {
-    if (isCommentLine(line)) continue;
+  const lines = code.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    if (isCommentLine(lines[i])) continue;
     for (const { re, label } of LINE_PATTERNS) {
-      if (re.test(line)) reasons.add(label);
+      if (!reasons.has(label) && re.test(lines[i])) reasons.set(label, i + 1);
     }
   }
   return reasons;
+}
+
+function lineNumberAt(code: string, index: number): number {
+  let line = 1;
+  for (let i = code.indexOf('\n'); i !== -1 && i < index; i = code.indexOf('\n', i + 1)) line++;
+  return line;
 }
 
 export const mcp032 = defineCheck({
@@ -162,23 +186,30 @@ export const mcp032 = defineCheck({
 
   async run(ctx, h) {
     const evidence: Evidence[] = [];
+    let servers = 0;
 
     for (const source of ctx.mcpServerSources ?? []) {
       if (!source.sourceCode) continue;
 
       const reasons = dumpReasons(source.sourceCode);
       if (reasons.size === 0) continue;
+      servers++;
 
-      evidence.push({
-        file: source.localPath ?? source.packageName ?? source.serverName,
-        snippet: `Server "${source.serverName}"`,
-        detail: `MCP server source ${[...reasons].join('; ')} — exposing the full environment leaks every secret the agent holds to the model and tool-result consumers`,
-      });
+      // One item per reason, at its line: a multi-file source's lines are
+      // mapped to the file they are in (mapSourceEvidence)
+      for (const [reason, line] of reasons) {
+        evidence.push({
+          file: source.localPath ?? source.packageName ?? source.serverName,
+          line,
+          snippet: `Server "${source.serverName}"`,
+          detail: `MCP server source ${reason} — exposing the full environment leaks every secret the agent holds to the model and tool-result consumers`,
+        });
+      }
     }
 
     return h.fromEvidence(evidence, {
       passed: 'No MCP server tools dump the full process environment',
-      failed: (n) => `Found ${n} MCP server(s) exposing the full process environment`,
+      failed: () => `Found ${servers} MCP server(s) exposing the full process environment`,
       fixDescription:
         'Return only the specific environment values a tool needs (e.g. process.env.API_BASE), never the whole environment object',
     });

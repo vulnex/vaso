@@ -10,6 +10,7 @@
  */
 
 import { API_KEY_PATTERNS, isPlaceholderSecret } from '../core/patterns.js';
+import { maskUrlSecrets } from '../mcp/config-secrets.js';
 
 const MASKED_MAPS = new Set(['env', 'headers']);
 
@@ -26,6 +27,8 @@ const MASK = '***';
 function keepValue(value: string): boolean {
   const v = value.trim().replace(/^['"]|['"]$/g, '');
   if (v === '' || v === MASK) return true;
+  // a switch (`websocketRequiresToken: true`), not a credential
+  if (/^(?:true|false|null)$/.test(v)) return true;
   // a file holding the credential (`--ssh-key ~/.ssh/id_rsa`), not the credential
   if (/^(?:~|\.{1,2})?\//.test(v)) return true;
   if (/^\$\{[^}]+\}$|^\$[A-Za-z_][A-Za-z0-9_]*$|^\$?\{(?:env|file):[^}]+\}$|^%[A-Za-z_][A-Za-z0-9_]*%$/.test(v)) return true;
@@ -35,7 +38,13 @@ function keepValue(value: string): boolean {
 const mask = (value: string): string => (keepValue(value) ? value : MASK);
 
 /** Parameter / variable / flag names whose value is a credential. */
-const SECRET_NAME = /(?:token|secret|passw|pwd|signature|credential|api[_-]?key|apikey|private[_-]?key|session|jwt|bearer|cookie)|^(?:key|sig|code|auth|pass|pat|x-amz-credential)$/i;
+const SECRET_NAME = /(?:token|secret|passw|passphrase|pwd|signature|credential|api[_-]?key|apikey|(?:private|client|access|encryption|signing|master)[_-]?key|session|jwt|bearer|cookie)|^(?:key|sig|code|auth|pass|pat|x-amz-credential)$/i;
+/**
+ * Names that contain a credential word but hold a setting about it: a token
+ * budget (`max_tokens`, `tokens_per_minute`, `tokenizer`), a password or
+ * session policy, a timeout or limit.
+ */
+const SETTING_NAME = /^(?:max|min)[_-]?(?:output[_-]?|input[_-]?)?tokens|tokens?[_-]?(?:per|limit|count|budget)|tokeniz|window[_-]?tokens|ttl|(?:policy|timeout|lifetime|limit|count|length|expiry|expiration)$/i;
 /** Env-style names: `GITHUB_PERSONAL_ACCESS_TOKEN`, `OPENAI_API_KEY`, `DB_PASSWORD`. */
 const SECRET_VAR = /^[A-Za-z_][A-Za-z0-9_]*$/;
 // `code` is an OAuth parameter (`?code=`, masked in URLs), not a variable name that holds a secret (`code = notify(msg)`, `CODE=200`)
@@ -44,6 +53,7 @@ const secretVar = (name: string): boolean => SECRET_VAR.test(name) && !/^code$/i
 /** Whether a config key or variable name holds a credential (`api_key`, `GITHUB_TOKEN`, `model.password`). */
 export function isSecretName(name: string): boolean {
   const leaf = name.split('.').pop() ?? name;
+  if (SETTING_NAME.test(leaf)) return false;
   return SECRET_NAME.test(leaf) || secretVar(leaf);
 }
 
@@ -55,12 +65,25 @@ export function isSecretName(name: string): boolean {
 // Each match runs on over the token's remaining characters: a pattern that
 // stops early (a fixed-length or first-segments match) must not leave the
 // secret's tail readable
+// Token formats reports mask but checks don't detect (no Go mirror): GitHub
+// fine-grained PATs and app/user/refresh tokens, NVIDIA, Google and AWS STS keys
+const MASK_ONLY_TOKENS = [
+  /github_pat_[A-Za-z0-9_]{20,}/,
+  /gh[usr]_[A-Za-z0-9]{36,}/,
+  /\bnvapi-[A-Za-z0-9_-]{20,}/,
+  /AIza[0-9A-Za-z_-]{30,}/,
+  /ASIA[0-9A-Z]{16,}/,
+];
 const BARE_TOKEN = new RegExp(
-  `(?:${API_KEY_PATTERNS.filter(p => !/assignment/i.test(p.name)).map(p => `(?:${p.pattern.source})`).join('|')})[A-Za-z0-9_-]*`,
+  `(?:${[...API_KEY_PATTERNS.filter(p => !/assignment/i.test(p.name)).map(p => p.pattern), ...MASK_ONLY_TOKENS].map(p => `(?:${p.source})`).join('|')})[A-Za-z0-9_-]*`,
   'g',
 );
+/** A JWT (`eyJ….eyJ….sig`) under any name: its header and payload are base64 JSON. */
+const JWT = /\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]*/g;
+/** A private key's body written into a string (`\n` escapes) or onto the same line. */
+const PEM_BODY = /-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----(?:\\[nrt]|[A-Za-z0-9+/=\s])+/g;
 /** Cheap pre-check: text with none of these can't hold a bare token. */
-const BARE_TOKEN_HINT = /sk-|AKIA|gh[po]_|glpat-|xox[bp]-|-----BEGIN|\d{10}:|devin-|cog_|apk_/;
+const BARE_TOKEN_HINT = /sk-|AKIA|ASIA|gh[pousr]_|github_pat_|glpat-|xox[bp]-|-----BEGIN|\d{10}:|devin-|cog_|apk_|nvapi-|AIza/;
 
 /** Hosts whose URL path itself is the credential. */
 function maskSecretPath(host: string, path: string): string {
@@ -140,7 +163,9 @@ const URL_IN_TEXT = /\b[a-z][a-z0-9+.-]{0,31}:\/\/[^\s"<>]+/gi;
 /** `Authorization: Bearer x`, `X-Api-Key: x`, `Cookie: x` header lines. */
 // The keyword is found by a lookahead: `[\w-]*` on both sides of it
 // backtracked over every split of a long `x-keykey…` run (quadratic)
-const SECRET_HEADER = /(^|[\s"'=])((?:proxy-)?authorization|cookie|x-(?=[\w-]*?(?:key|token|secret|auth|session))[\w-]*|api[_-]?key)(\s*:\s*)((?:bearer|basic|token|bot|digest)\s+)?([^\s"',;]+)/gi;
+// The name may be quoted and followed by `=`: JSON `"Authorization": "Bearer x"`,
+// TOML `"Authorization" = "Bearer x"`
+const SECRET_HEADER = /(^|[\s"'=])((?:proxy-)?authorization|cookie|x-(?=[\w-]*?(?:key|token|secret|auth|session))[\w-]*|api[_-]?key)((?:["']\s*[:=]|\s*:)\s*["']?)((?:bearer|basic|token|bot|digest)\s+)?([^\s"',;]+)/gi;
 /** `NAME=value` where NAME looks like a credential (env lines, `docker -e`, `env K=V cmd`, inline `sh -c`). */
 const SECRET_ASSIGN = /(^|[\s"'`(;&|:$])([A-Za-z_][A-Za-z0-9_]*)(\s*=(?!=)\s*)("[^"]*"|'[^']*'|[^\s"'`;&|)]+)/g;
 
@@ -178,11 +203,14 @@ const PORT_LIKE = /^\d+(?::\d+)*(?:\/(?:tcp|udp))?$|^[\d.]+:\d+(?::\d+)?$/;
  */
 export function maskCredentialsInText(text: string): string {
   if (!/[:=@-]/.test(text) && !BARE_TOKEN_HINT.test(text)) return text;
-  const bare = BARE_TOKEN_HINT.test(text) ? text.replace(BARE_TOKEN, (m) => (keepValue(m) ? m : MASK)) : text;
+  const pem = text.includes('-----BEGIN') ? text.replace(PEM_BODY, MASK) : text;
+  const jwt = pem.includes('eyJ') ? pem.replace(JWT, MASK) : pem;
+  const bare = BARE_TOKEN_HINT.test(jwt) ? jwt.replace(BARE_TOKEN, (m) => (keepValue(m) ? m : MASK)) : jwt;
   return bare
     .replace(URL_IN_TEXT, (url) => {
       const body = trimUrlTail(url);
-      return maskUrl(body) + url.slice(body.length);
+      // plus what MCP-003 reads as a credential: secret paths (Zapier MCP), random path tokens
+      return maskUrl(maskUrlSecrets(body)) + url.slice(body.length);
     })
     .replace(SECRET_HEADER, (m, pre: string, name: string, sep: string, scheme: string | undefined, value: string) =>
       (keepValue(value) ? m : `${pre}${name}${sep}${scheme ?? ''}${MASK}`))
@@ -197,8 +225,30 @@ export function maskCredentialsInText(text: string): string {
     });
 }
 
-/** `name: value`, `"name": "value"`, `name = value` with a credential name (YAML, JSON, TOML lines). */
-const SECRET_KEY_VALUE = /(^|[\s"'{,])(["']?)([A-Za-z_][\w.-]{0,127})\2(\s*[:=]\s*)("[^"]*"|'[^']*'|[^\s,#}]+)/g;
+/**
+ * `name: value`, `"name": "value"`, `name = value` with a credential name
+ * (YAML, JSON, TOML lines). A value that opens an object or array is not the
+ * name's value: the scan moves on to the pairs inside it
+ * (`{"providers":{"custom":{"apiKey":"x"}}}`). YAML anchors and tags before
+ * the value (`token: &tok x`, `token: !!str x`) are part of the separator;
+ * quoted strings honour escaped quotes; TOML `"""…"""` / `'''…'''` are one string.
+ */
+/** `\"name\":\"value\"` at any escaping depth: groups 1, 3 and 5 are the quote runs. */
+const ESCAPED_JSON_PAIR = /(\\+["'])([A-Za-z_][\w.-]{0,63})(\\+["']\s*:\s*\\+["'])([^"'\\\s]{4,})(\\+["'])/g;
+const SECRET_KEY_VALUE = /(^|[\s"'{,])(["']?)([A-Za-z_][\w.-]{0,127})\2(\s*[:=]\s*(?:[&!][^\s,{}[\]]*\s+)*)("{3}[\s\S]*?"{3}|'{3}[\s\S]*?'{3}|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|\$\{[^}\s]*\}|(?![{[])[^\s,#}\]]+)/g;
+/**
+ * A line that is nothing but a base64 run the length of a PEM body line (a
+ * YAML block scalar holding a private key puts each on its own line).
+ */
+const BASE64_LINE = /^(\s*)([A-Za-z0-9+/]{40,76}={0,2})(\s*)$/;
+/** `tokens: [a, b]`, `"keys": ["a", "b"]`: a flow list of scalars under a credential name. */
+const SECRET_KEY_LIST = /(^|[\s"'{,])(["']?)([A-Za-z_][\w.-]{0,127})\2(\s*[:=]\s*)\[((?:[^[\]{}\n$]|\$\{[^}\n]*\}|\$)*)\]/g;
+/**
+ * A whole YAML / INI line `name: value` or `name = value` whose unquoted value
+ * runs to the end of the line or a ` #` comment: `password: correct horse
+ * battery`, `token: abc#def` (no space before `#`: not a comment).
+ */
+const SECRET_LINE_VALUE = /^(\s*(?:-\s+)?)([A-Za-z_][\w.-]{0,127})(\s*[:=]\s*(?:[&!][^\s,{}[\]]*\s+)*)([^\s"'{[&!#|>][^\n]*)$/;
 
 /**
  * One line of a config or source file quoted in a finding (a declarative
@@ -206,15 +256,39 @@ const SECRET_KEY_VALUE = /(^|[\s"'{,])(["']?)([A-Za-z_][\w.-]{0,127})\2(\s*[:=]\
  * `key = value` under a credential name are masked, then everything
  * maskCredentialsInText masks.
  */
-export function maskCredentialsInLine(line: string): string {
-  const masked = line.replace(SECRET_KEY_VALUE, (m, pre: string, q: string, name: string, sep: string, value: string) => {
+export function maskCredentialsInLine(raw: string): string {
+  // JSON escaped inside a string or a shell argument (`{\"apiKey\":\"…\"}`)
+  const line = raw.includes('\\') ? raw.replace(ESCAPED_JSON_PAIR, (m, q1: string, name: string, q2: string, value: string, q3: string) =>
+    (isSecretName(name) && !keepValue(value) ? `${q1}${name}${q2}${MASK}${q3}` : m)) : raw;
+  const b64 = BASE64_LINE.exec(line);
+  if (b64 && /[A-Z]/.test(b64[2]) && /[a-z]/.test(b64[2]) && /\d/.test(b64[2])) return `${b64[1]}${MASK}${b64[3]}`;
+  const whole = line.replace(SECRET_LINE_VALUE, (m, pre: string, name: string, sep: string, rest: string) => {
+    // a ` #` comment ends the value (found by search: a lazy value before an
+    // optional comment group rescans the line per character)
+    const hash = rest.search(/\s#/);
+    const value = (hash < 0 ? rest : rest.slice(0, hash)).trimEnd();
+    if (!isSecretName(name) || keepValue(value) || (sep.includes('=') && codeValue(value, sep))) return m;
+    return `${pre}${name}${sep}${MASK}${rest.slice(value.length)}`;
+  });
+  const listed = whole.replace(SECRET_KEY_LIST, (m, pre: string, q: string, name: string, sep: string, items: string) =>
+    (isSecretName(name)
+      ? `${pre}${q}${name}${q}${sep}[${items.replace(/[^,\s"']+(?:\s+[^,\s"']+)*/g, (v) => (keepValue(v) ? v : MASK))}]`
+      : m));
+  const masked = listed.replace(SECRET_KEY_VALUE, (m, pre: string, q: string, name: string, sep: string, value: string) => {
     // `name = call(…)` in a source line is code (YAML `name: …` is always a value)
     if (!isSecretName(name) || keepValue(value) || (sep.includes('=') && codeValue(value, sep))) return m;
     const quote = /^["']/.test(value) ? value[0] : '';
     return `${pre}${q}${name}${q}${sep}${quote}${MASK}${quote}`;
   });
-  return maskCredentialsInText(masked);
+  return maskCredentialsInText(masked).replace(CUT_TOKEN_TAIL, (m, prefix: string, cut: string) => `${prefix}${MASK}${cut}`);
 }
+
+/**
+ * A token a check's snippet cut off (`…slice(0, 120)`, ` ...`, `…`): too short
+ * to match its pattern any more, so BARE_TOKEN leaves it — its prefix ends the
+ * snippet's last word.
+ */
+const CUT_TOKEN_TAIL = /\b(sk-|AKIA|ASIA|gh[pousr]_|github_pat_|glpat-|xox[abprs]-|devin-|cog_|apk_|nvapi-|AIza)[A-Za-z0-9_.$-]{4,}((?: ?\.\.\.|…)?)$/;
 
 /**
  * A config value quoted in a finding: a string under a credential name is

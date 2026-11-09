@@ -291,6 +291,11 @@ export class SnapshotFSProvider implements FSProvider {
     return this.snapshot.env?.[key];
   }
 
+  /** The probe was asked for this file: it has an entry, even when the file was absent. */
+  collected(path: string): boolean {
+    return Object.hasOwn(this.snapshot.files, path);
+  }
+
   get privilege() {
     return this.snapshot.privilege;
   }

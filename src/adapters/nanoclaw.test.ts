@@ -95,6 +95,23 @@ describe('NanoClaw adapter — detection', () => {
     expect(insts.map(i => i.installDir)).toEqual([`${HOME}/src/nanoclaw-v2`]);
   });
 
+  it('matches clone parents in any case, keeping the on-disk spelling', async () => {
+    const fs = snapshot({
+      [`${HOME}/GitHub/nanoclaw/package.json`]: PKG,
+      [`${HOME}/github/nanoclaw-2/package.json`]: PKG,
+      [`${HOME}/SRC/nanoclaw/package.json`]: PKG,
+      [`${HOME}/Workspace/nanoclaw/package.json`]: PKG,
+      [`${HOME}/Downloads/nanoclaw/package.json`]: PKG,
+    });
+    const insts = await nanoclawAdapter.detect({ fs });
+    expect(insts.map(i => i.installDir).sort()).toEqual([
+      `${HOME}/GitHub/nanoclaw`,
+      `${HOME}/SRC/nanoclaw`,
+      `${HOME}/Workspace/nanoclaw`,
+      `${HOME}/github/nanoclaw-2`,
+    ]);
+  });
+
   it('ignores name matches that are not the NanoClaw package', async () => {
     const fs = snapshot({
       [`${HOME}/nanoclaw-notes/package.json`]: JSON.stringify({ name: 'my-notes', version: '1.0.0' }),
@@ -172,6 +189,15 @@ describe('NanoClaw adapter — local filesystem', () => {
     const insts = await nanoclawAdapter.detect({ fs: new HomeFs(home) });
     expect(insts.map(i => [i.installDir, i.version])).toEqual([[checkout, '2.4.0']]);
   });
+
+  it('finds a checkout under a capitalised parent (~/Dev) with its real case', async () => {
+    root = realpathSync(mkdtempSync(join(tmpdir(), 'vaso-nc-adapter-')));
+    const checkout = join(root, 'Dev', 'nanoclaw');
+    mkdirSync(checkout, { recursive: true });
+    writeFileSync(join(checkout, 'package.json'), PKG);
+    const insts = await nanoclawAdapter.detect({ fs: new HomeFs(root) });
+    expect(insts.map(i => i.installDir)).toEqual([checkout]);
+  });
 });
 
 describe('NanoClaw adapter — metadata', () => {
@@ -206,6 +232,11 @@ describe('NanoClaw adapter — metadata', () => {
     expect(content).toContain('~/*[nN][aA][nN][oO][cC][lL][aA][wW]*/src/channels/index.ts');
     expect(meta).toContain('~/*[nN][aA][nN][oO][cC][lL][aA][wW]*/data/*');
     expect(meta).toContain('~/.config/nanoclaw/*');
+    // clone parents: every case spelling detect() accepts (~/GitHub, ~/SRC)
+    const parents = content.find(p => p.startsWith('~/{') && p.endsWith('/package.json'))!;
+    expect(parents).toContain('[gG][iI][tT][hH][uU][bB]');
+    expect(parents).toContain('[sS][rR][cC]');
+    expect(parents).toContain('[dD][eE][vV][eE][lL][oO][pP][eE][rR]');
     for (const p of content) {
       expect(p).not.toMatch(/\/data\/|v2\.db|device-key|account\.json|registry-auth|\.claude\/skills/);
     }

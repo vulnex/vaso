@@ -17,6 +17,7 @@
 
 import { classifySensitivePath } from './sensitive-paths.js';
 import type { DataFlowResult } from './ast-analyzer.js';
+import { onVendorHost, ownedCredential, staticOrigin, vendorApiDomains, vendorUrlSlot } from './vendor-domains.js';
 
 /**
  * Each string literal in `text` replaced by `fill(literal)`: one pass, quotes
@@ -729,6 +730,144 @@ function inlineSources(text: string): Array<[string, SourceKind]> {
   return out;
 }
 
+/** `os.environ["KEY"]`, `os.environ.get("KEY")`, `os.getenv("KEY", …)` → KEY. */
+function inlineEnvName(text: string): string | undefined {
+  const m = /\bos\.(?:environ\s*\[\s*[rRuU]?(["'])([^"']+)\1\s*\]|environ\.get\s*\(\s*[rRuU]?(["'])([^"']+)\3|getenv\s*\(\s*[rRuU]?(["'])([^"']+)\5)/.exec(text);
+  return m ? m[2] ?? m[4] ?? m[6] : undefined;
+}
+
+/**
+ * `text` with string literals emptied except for the `{…}` parts an f-string
+ * (or `.format` template) fills in: `"k"` in `params={"k": key}` is a dict
+ * key, not the variable `k`; `f"…?k={key}"` sends `key`.
+ */
+function codeOnly(text: string): string {
+  return mapStringLiterals(text, (lit) => {
+    if (lit.length < 2) return lit;
+    const holes = lit.slice(1, -1).match(/\{[^{}]*\}/g) ?? [];
+    return lit[0] + holes.join(' ') + ' ' + lit[lit.length - 1];
+  });
+}
+
+/**
+ * Module-level names bound once, to a plain string literal
+ * (`API_URL = "https://api.openai.com/v1"`): a request to one goes to that
+ * literal. Function parameters and loop/`as` names are not constants.
+ */
+function literalConstants(stmts: CodeLine[], fns: PyFunction[]): Map<string, string> {
+  const bound = new Map<string, string[]>();
+  const params = new Set(fns.flatMap((f) => f.params));
+  for (const { text } of stmts) {
+    const m = /^(\s*)([A-Za-z_]\w*)\s*(?::[^=]+)?=(?!=)\s*([\s\S]*)$/.exec(text);
+    if (m) bound.set(m[2], [...(bound.get(m[2]) ?? []), m[1] === '' ? m[3].trim() : '']);
+    for (const b of text.matchAll(/\b(?:for|as|global|nonlocal)\s+([A-Za-z_]\w*)/g)) params.add(b[1]);
+  }
+  const out = new Map<string, string>();
+  for (const [name, values] of bound) {
+    const lit = values.length === 1 && !params.has(name) ? /^[rRuU]?(["'])([^"'{}]*)\1$/.exec(values[0]) : null;
+    if (lit) out.set(name, lit[2]);
+  }
+  return out;
+}
+
+/** Options that send a request elsewhere or through someone else, or hide what is passed (`**kwargs`). */
+const PY_REDIRECT_KEYWORDS = /^(?:proxies|proxy|verify|transport|mounts|base_url|hooks|cert|unix_socket|connector)$/;
+
+/**
+ * A credential sent to the API it belongs to: an environment value named
+ * for a vendor (`OPENAI_API_KEY`) that appears only in `headers=` or `auth=`
+ * of a request to a literal https URL on that vendor's domain, with nothing
+ * redirecting it. The same key in the URL, params, cookies or body, or sent
+ * to any other host, is a leak.
+ */
+function ownVendorApi(positional: string[], keywords: Map<string, string>, source: string, envName: string | undefined,
+  urlConstants: ReadonlyMap<string, string>): boolean {
+  const domains = vendorApiDomains(envName);
+  if (!domains) return false;
+  const urlKey = positional.length > 0 ? undefined : 'url';
+  const parts = pyUrlParts((positional[0] ?? keywords.get('url') ?? '').trim(), urlConstants);
+  const computed = parts.filter((x): x is { code: string; before: string } => typeof x !== 'string');
+  if (computed.length > 0) {
+    const origin = staticOrigin(typeof parts[0] === 'string' ? parts[0] : '');
+    if (!origin || !onVendorHost(origin, domains)) return false;
+  } else if (!onVendorHost(parts.join(''), domains)) return false;
+  if (positional.some((p) => p.startsWith('*')) || [...keywords.keys()].some((k) => PY_REDIRECT_KEYWORDS.test(k))) return false;
+  const seen = (t: string) => (/^[A-Za-z_]\w*$/.test(source) ? mentions(codeOnly(t), source) : t.includes(source));
+  // The value itself, maybe URL-quoted (`quote(key)`)
+  const isSource = (t: string) => t.trim().replace(/^(?:urllib\.parse\.)?quote(?:_plus)?\s*\(([\s\S]*)\)$/, '$1').trim() === source;
+  // Where the vendor takes its key: headers, auth, and the URL/query slots it documents
+  const carrying = ['headers', 'auth'].map((k) => keywords.get(k) ?? '');
+  const rest = [...positional.slice(1), ...[...keywords].filter(([k]) => !['headers', 'auth', 'params', urlKey].includes(k)).map(([, v]) => v)];
+  for (const c of computed) (isSource(c.code) && vendorUrlSlot(envName, c.before) ? carrying : rest).push(c.code);
+  const params = keywords.get('params')?.trim() ?? '';
+  const dict = params.startsWith('{') && params.endsWith('}') ? topLevelParts(params.slice(1, -1)) : undefined;
+  if (dict === undefined) rest.push(params);
+  for (const entry of dict ?? []) {
+    const kv = /^\s*[rRuU]?(["'])([^"']+)\1\s*:([\s\S]*)$/.exec(entry);
+    // with the request's own origin, so a storage host's query (access logs) isn't a slot
+    const origin = staticOrigin(typeof parts[0] === 'string' ? parts[0] : '') ?? parts.join('');
+    (kv && isSource(kv[3]) && vendorUrlSlot(envName, `${/^https:\/\/[^/?#@]+/i.exec(origin)?.[0] ?? ''}/?${kv[2]}=`) ? carrying : rest).push(kv ? kv[3] : entry);
+  }
+  return carrying.some(seen) && !rest.some(seen);
+}
+
+/**
+ * A request URL as static text and computed parts (with the static text
+ * before each): a string literal, an f-string's literal text and `{…}`
+ * fields, a module-level string constant, or a `+` chain of them.
+ */
+function pyUrlParts(expr: string, urlConstants: ReadonlyMap<string, string>): Array<string | { code: string; before: string }> {
+  const out: Array<string | { code: string; before: string }> = [];
+  let before = '';
+  const add = (part: string | { code: string }) => {
+    if (typeof part === 'string') {
+      before += part;
+      out.push(part);
+    } else out.push({ code: part.code, before });
+  };
+  // Split on top-level `+` (outside strings and brackets)
+  const blank = blankStrings(expr);
+  const pieces: string[] = [];
+  let depth = 0;
+  let from = 0;
+  for (let i = 0; i < blank.length; i++) {
+    const c = blank[i];
+    if ('([{'.includes(c)) depth++;
+    else if (')]}'.includes(c)) depth--;
+    else if (c === '+' && depth === 0) {
+      pieces.push(expr.slice(from, i));
+      from = i + 1;
+    }
+  }
+  pieces.push(expr.slice(from));
+  for (const raw of pieces) {
+    const piece = raw.trim();
+    const lit = /^([rRuUfF]{0,2})(["'])([\s\S]*)\2$/.exec(piece);
+    if (lit && !/[\n]/.test(lit[3]) && !lit[3].includes(lit[2])) {
+      if (!/f/i.test(lit[1])) {
+        add(lit[3]);
+        continue;
+      }
+      // f-string: literal text and `{expr[!conv][:spec]}` fields
+      let text = '';
+      for (const m of lit[3].matchAll(/\{\{|\}\}|\{([^{}]*)\}|[^{}]+|[{}]/g)) {
+        if (m[0] === '{{' || m[0] === '}}') text += m[0][0];
+        else if (m[1] !== undefined) {
+          if (text) add(text);
+          text = '';
+          add({ code: m[1].replace(/(?:![rsa])?(?::[^:]*)?$/, '') });
+        } else text += m[0];
+      }
+      if (text) add(text);
+      continue;
+    }
+    const constant = urlConstants.get(piece);
+    if (constant !== undefined) add(constant);
+    else add({ code: piece });
+  }
+  return out;
+}
+
 /** Programs whose arguments leave the machine: an env secret in their argv is sent somewhere. */
 const NETWORK_PROGRAM = /^(?:curl|wget|nc|ncat|netcat|socat|scp|sftp|ftp|rsync|ssh|telnet)$/;
 
@@ -753,8 +892,10 @@ const DIRECT_EXEC = /^(?:subprocess\.(?:run|call|check_call|check_output|Popen)|
  * argument values count, never keyword names (`text=True`, `data=body`);
  * `env=`/`cwd=` and other process options aren't data the process sends; and
  * a single environment value (a user agent, an API key in the headers of the
- * API it belongs to) is exfiltration only in a request body or in the argv of
- * a network program — file contents and the whole environment, anywhere.
+ * API it belongs to) is exfiltration only in a request body, in the argv of
+ * a network program, or — when it is a vendor's key or a signing secret
+ * (ownedCredential) — anywhere in a request but the vendor's own API headers;
+ * file contents and the whole environment, anywhere.
  */
 export function analyzePythonDataFlow(code: string): DataFlowResult[] {
   const out: DataFlowResult[] = [];
@@ -763,6 +904,7 @@ export function analyzePythonDataFlow(code: string): DataFlowResult[] {
   const stmts = statements(lines);
   const fns = functionsOf(stmts);
   const constants = stringConstantNames(stmts, fns);
+  const urlConstants = literalConstants(stmts, fns);
   const scopes = new Map<PyFunction | undefined, Map<string, SourceKind>>([[undefined, new Map()]]);
   const scopeOf = (fn: PyFunction | undefined): Map<string, SourceKind> => {
     let m = scopes.get(fn);
@@ -770,6 +912,13 @@ export function analyzePythonDataFlow(code: string): DataFlowResult[] {
     return m;
   };
   const report = (kind: SourceKind): 'file' | 'env' => (kind === 'file' ? 'file' : 'env');
+  // The environment variable a tracked name was read from (`key = os.environ["OPENAI_API_KEY"]`), per scope
+  const envNameScopes = new Map<PyFunction | undefined, Map<string, string>>([[undefined, new Map()]]);
+  const envNameScope = (fn: PyFunction | undefined): Map<string, string> => {
+    let m = envNameScopes.get(fn);
+    if (!m) envNameScopes.set(fn, (m = new Map()));
+    return m;
+  };
   // Everything per statement is proportional to that statement: scanning all
   // lines, all functions or every tracked name each time made a file of
   // 40 000 statements take minutes.
@@ -789,12 +938,22 @@ export function analyzePythonDataFlow(code: string): DataFlowResult[] {
     // Tracked names this statement mentions — module level, then enclosing
     // functions, the innermost binding winning
     const visible = new Map<string, SourceKind>();
+    const visibleEnvName = new Map<string, string>();
     for (const id of new Set(text.match(/[A-Za-z_]\w*/g) ?? [])) {
       let kind = scopes.get(undefined)?.get(id);
-      for (const f of enclosing) kind = scopes.get(f)?.get(id) ?? kind;
+      let envName = kind === undefined ? undefined : envNameScopes.get(undefined)?.get(id);
+      for (const f of enclosing) {
+        const k = scopes.get(f)?.get(id);
+        if (k !== undefined) {
+          kind = k;
+          envName = envNameScopes.get(f)?.get(id);
+        }
+      }
       if (kind !== undefined) visible.set(id, kind);
+      if (envName !== undefined) visibleEnvName.set(id, envName);
     }
     const local = scopeOf(enclosing.at(-1));
+    const localEnvNames = envNameScope(enclosing.at(-1));
 
     for (const { re, name } of EXEC_SINKS) {
       // Matched on code only: `"eval": "eval() has…"` is a string, not a call
@@ -848,16 +1007,30 @@ export function analyzePythonDataFlow(code: string): DataFlowResult[] {
     // Building a client or connection (`httpx.Client(base_url=url)`) sends nothing
     const constructs = net !== null && CLIENT_CONSTRUCTORS.test(net[1] ?? (/\w+/.exec(net[0])?.[0] ?? ''));
     if (net && !constructs) {
-      const { positional, keywords } = splitArgs(callArgs(text, text.indexOf('(', net.index)));
+      let { positional, keywords } = splitArgs(callArgs(text, text.indexOf('(', net.index)));
       const all = [...positional, ...keywords.values()].join(',');
       // A request body, or the payload of a raw socket send
       const rawSend = /^(?:send|sendall|sendto|sendmail|write)$/.test(net[1] ?? '');
+      // `urlopen(Request(url, data, headers=…))`: the request is the inner call
+      const inner = rawSend ? null : /^(?:urllib\.request\.)?Request\s*\(/.exec(positional[0] ?? '');
+      if (inner) ({ positional, keywords } = splitArgs(callArgs(positional[0], inner[0].length - 1)));
       const body = [...(rawSend ? positional : positional.slice(1)), ...['data', 'json', 'files', 'content', 'body', 'msg'].map((k) => keywords.get(k) ?? '')].join(',');
-      const inline = [
+      // Elsewhere in a request — its URL, headers, params, auth, cookies — a
+      // single environment value counts when it is a credential whose home is
+      // known (a vendor's key, a signing secret), unless it is the vendor's
+      // key in the headers of that vendor's own API (ownVendorApi)
+      const request = !rawSend && !/^(?:connect|login|starttls|ehlo|helo|quit|close)$/.test(net[1] ?? '');
+      const outside = codeOnly(all);
+      const flows: Array<[string, SourceKind]> = [
+        ...[...visible].filter(([v, k]) => (k !== 'env' ? mentions(all, v)
+          : mentions(body, v) || (request && ownedCredential(visibleEnvName.get(v)) && mentions(outside, v)
+            && !ownVendorApi(positional, keywords, v, visibleEnvName.get(v), urlConstants)))),
         ...inlineSources(all).filter(([, kind]) => kind !== 'env'),
         ...inlineSources(body).filter(([, kind]) => kind === 'env'),
+        ...(request ? inlineSources(all).filter(([v, kind]) => kind === 'env' && !body.includes(v)
+          && ownedCredential(inlineEnvName(v)) && !ownVendorApi(positional, keywords, v, inlineEnvName(v), urlConstants)) : []),
       ];
-      for (const [v, kind] of [...[...visible].filter(([v, k]) => mentions(k === 'env' ? body : all, v)), ...inline]) {
+      for (const [v, kind] of flows) {
         out.push({ type: 'source-to-sink', source: v, sourceKind: report(kind), sink: net[1] ?? 'urlopen', line: stmt.line, snippet, description: `Data flows from "${v}" to network sink "${net[0].replace(/\s*\($/, '')}"` });
       }
     }
@@ -868,13 +1041,20 @@ export function analyzePythonDataFlow(code: string): DataFlowResult[] {
     if (assign) {
       const [, target, rhs] = assign;
       const values = rhs.replace(/\b[A-Za-z_]\w*\s*=(?!=)/g, ' ');
+      localEnvNames.delete(target);
       if (FILE_READS.test(rhs)) local.set(target, 'file');
       else if (/\bos\.environ\b(?!\s*(?:\[|\.get\b|\.setdefault\b|\.pop\b))/.test(rhs)) local.set(target, 'envall');
-      else if (/\bos\.(?:environ|getenv)\b/.test(rhs)) local.set(target, 'env');
-      else {
+      else if (/\bos\.(?:environ|getenv)\b/.test(rhs)) {
+        local.set(target, 'env');
+        const name = inlineEnvName(rhs);
+        if (name !== undefined) localEnvNames.set(target, name);
+      } else {
         const from = [...visible].find(([v]) => mentions(values, v));
-        if (from) local.set(target, from[1]);
-        else local.delete(target);
+        if (from) {
+          local.set(target, from[1]);
+          const name = visibleEnvName.get(from[0]);
+          if (name !== undefined) localEnvNames.set(target, name);
+        } else local.delete(target);
       }
     }
     // `with open(p) as f:` binds a file handle

@@ -1,5 +1,6 @@
 import { join } from 'node:path';
 import { parseYamlSafe } from '../../core/yaml-safe.js';
+import { parseIfPresent, pathPresent } from '../../adapters/load-if-present.js';
 import type { Evidence, ParsedConfig, ScanContext } from '../../core/types.js';
 import type { PermissionFacts } from '../../core/fs-provider.js';
 import { queryPermissions } from '../../core/permissions.js';
@@ -103,12 +104,33 @@ export async function listDir(ctx: ScanContext, dir: string): Promise<{ name: st
   }
 }
 
+/**
+ * The TLS directory gateway.env redirects to (OPENSHELL_LOCAL_TLS_DIR). The
+ * probe manifest lists fixed locations only, so a remote snapshot never holds it.
+ */
+export function redirectedTlsDir(ctx: ScanContext): string | undefined {
+  const env = gatewayEnv(ctx)?.data.OPENSHELL_LOCAL_TLS_DIR;
+  return typeof env === 'string' && env.trim() ? expandHome(env.trim(), paths(ctx).home) : undefined;
+}
+
+/** The sqlite database gateway.env redirects to (`OPENSHELL_DB_URL=sqlite:<path>`); not in a remote snapshot either. */
+export function redirectedDatabase(ctx: ScanContext): string | undefined {
+  const url = gatewayEnv(ctx)?.data.OPENSHELL_DB_URL;
+  if (typeof url !== 'string') return undefined;
+  const m = /^sqlite:(?:\/\/)?(.+?)(?:\?.*)?$/.exec(url.trim());
+  return m ? expandHome(m[1], paths(ctx).home) : undefined;
+}
+
 /** TLS directories the gateway may use: env override, deb/systemd, Homebrew (prefix + mirror), snap. */
 export function tlsDirs(ctx: ScanContext): string[] {
+  const env = redirectedTlsDir(ctx);
+  return [...new Set([...(env ? [env] : []), ...fixedTlsDirs(ctx)])];
+}
+
+/** The TLS directories at fixed locations (the ones the probe manifest collects). */
+export function fixedTlsDirs(ctx: ScanContext): string[] {
   const p = paths(ctx);
-  const env = gatewayEnv(ctx)?.data.OPENSHELL_LOCAL_TLS_DIR;
   const dirs = [
-    ...(typeof env === 'string' && env.trim() ? [expandHome(env.trim(), p.home)] : []),
     join(p.stateDir, 'tls'),
     join(p.stateDir, 'homebrew', 'tls'),
     ...(ctx.fs.platform === 'darwin' ? BREW_VAR_DIRS.map(d => join(d, 'tls')) : []),
@@ -120,17 +142,17 @@ export function tlsDirs(ctx: ScanContext): string[] {
 
 /** sqlite path of the gateway database (env `OPENSHELL_DB_URL=sqlite:<path>` or the default). */
 export function databasePaths(ctx: ScanContext): string[] {
+  const redirected = redirectedDatabase(ctx);
+  return [...new Set([...(redirected ? [redirected] : []), ...fixedDatabasePaths(ctx)])];
+}
+
+/** The database at its fixed locations (the ones the probe manifest collects). */
+export function fixedDatabasePaths(ctx: ScanContext): string[] {
   const p = paths(ctx);
-  const url = gatewayEnv(ctx)?.data.OPENSHELL_DB_URL;
-  const out = [
+  return [
     join(p.stateDir, 'gateway', 'openshell.db'),
     join(snapUserDir(p.home), '.local', 'state', 'openshell', 'gateway', 'openshell.db'),
   ];
-  if (typeof url === 'string') {
-    const m = /^sqlite:(?:\/\/)?(.+?)(?:\?.*)?$/.exec(url.trim());
-    if (m) out.unshift(expandHome(m[1], p.home));
-  }
-  return [...new Set(out)];
 }
 
 // ── Sandbox policies ─────────────────────────────────────────────────────────
@@ -145,7 +167,15 @@ export interface PolicyRef {
 
 const NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const MAX_SANDBOXES = 100;
-const cache = new WeakMap<object, Promise<PolicyRef[]>>();
+
+/** The policies OSH-011–014 judge, and the sources that could not be read. */
+export interface PolicyScan {
+  refs: PolicyRef[];
+  /** Why a source was skipped (`sandbox list` failed, an unreadable policy file…) */
+  unread: string[];
+}
+
+const cache = new WeakMap<object, Promise<PolicyScan>>();
 
 function parseJson(stdout: string): Record<string, unknown> | undefined {
   try {
@@ -167,62 +197,100 @@ function sandboxItems(stdout: string): unknown[] | undefined {
   }
 }
 
-async function livePolicies(ctx: ScanContext): Promise<PolicyRef[]> {
+async function livePolicies(ctx: ScanContext, unread: string[]): Promise<PolicyRef[]> {
   const cli = ctx.installation.cliBinary;
-  // The CLI answers for the user running it — never attribute that to another user's install
-  if (!cli || !ownInstall(ctx)) return [];
-  // Read-only queries against the user's active gateway, as the user (real
-  // HOME: the CLI needs its registered gateway and mTLS bundle). Verified to
-  // leave the CLI's config and state untouched.
+  if (!ownInstall(ctx)) return [];
+  if (!cli) {
+    // nothing was queried: say so rather than "no sandbox policies found"
+    unread.push('live sandbox policies (no `openshell` CLI found to query them)');
+    return [];
+  }
   const run = (args: readonly string[]) => ctx.fs.exec(cli, [...args], { timeout: 15000 });
   const out: PolicyRef[] = [];
 
   const list = await run(SANDBOX_LIST_ARGS);
   const sandboxes = list.exitCode === 0 ? sandboxItems(list.stdout) : undefined;
-  if (sandboxes) {
+  if (!sandboxes) {
+    unread.push(list.exitCode === 0 ? '`openshell sandbox list` output was not understood' : `\`openshell sandbox list\` failed (exit ${list.exitCode})`);
+  } else {
+    if (sandboxes.length > MAX_SANDBOXES) unread.push(`${sandboxes.length - MAX_SANDBOXES} sandbox(es) beyond the first ${MAX_SANDBOXES}`);
     for (const item of sandboxes.slice(0, MAX_SANDBOXES)) {
       const sb = record(item);
       const name = sb?.name;
-      // A sandbox listed without a workspace lives in "default" (the probe's
-      // forEach applies the same default — keep the two in step)
       const ws = sb?.workspace;
       const workspace = ws === undefined || ws === null || ws === '' ? DEFAULT_WORKSPACE : ws;
       if (typeof workspace !== 'string') continue;
       if (typeof name !== 'string' || !NAME.test(name) || !NAME.test(workspace)) continue;
       const res = await run(sandboxPolicyArgs(name, workspace));
       const policy = res.exitCode === 0 ? record(parseJson(res.stdout)?.policy) : undefined;
+      // A sandbox without an active policy answers non-zero ("no active
+      // policy configured for sandbox"): nothing to judge, not a failure
       if (policy) out.push({ source: `sandbox ${workspace}/${name}`, file: `openshell sandbox ${workspace}/${name}`, policy });
     }
   }
 
-  // Exits non-zero when no global policy is set
+  // No global policy is the normal case: a failed query is not reported
   const global = await run(GLOBAL_POLICY_ARGS);
   const gp = global.exitCode === 0 ? record(parseJson(global.stdout)?.policy) : undefined;
   if (gp) out.push({ source: 'global policy', file: 'openshell global policy', policy: gp });
   return out;
 }
 
-/** The policy file `openshell sandbox create` uses by default ($OPENSHELL_SANDBOX_POLICY). */
-async function filePolicies(ctx: ScanContext): Promise<PolicyRef[]> {
+/**
+ * The policy file `openshell sandbox create` uses by default
+ * ($OPENSHELL_SANDBOX_POLICY). One that is there but can't be read or parsed
+ * is a CONFIG-LOAD finding (parseIfPresent), not an empty policy set.
+ */
+async function filePolicies(ctx: ScanContext, unread: string[]): Promise<PolicyRef[]> {
   const path = ownInstall(ctx) ? ctx.fs.getEnv('OPENSHELL_SANDBOX_POLICY')?.trim() : undefined;
   if (!path) return [];
-  try {
-    const raw = await ctx.fs.readFile(path);
-    const policy = record(path.endsWith('.json') ? JSON.parse(raw) : parseYamlSafe(raw));
-    return policy ? [{ source: path, file: path, policy }] : [];
-  } catch {
+  if (!(await pathPresent(path, ctx.fs))) {
+    unread.push(`$OPENSHELL_SANDBOX_POLICY file ${path} not found`);
     return [];
   }
+  const policy = await parseIfPresent(path, ctx.fs, raw => {
+    const parsed = record(path.endsWith('.json') ? JSON.parse(raw) : parseYamlSafe(raw));
+    if (!parsed) throw new Error('not a sandbox policy (expected a mapping)');
+    return parsed;
+  });
+  if (!policy) {
+    unread.push(`$OPENSHELL_SANDBOX_POLICY file ${path} could not be read`);
+    return [];
+  }
+  return [{ source: path, file: path, policy }];
 }
 
-/** Every sandbox policy in reach: each sandbox's effective policy, the global policy, and $OPENSHELL_SANDBOX_POLICY. */
-export function sandboxPolicies(ctx: ScanContext): Promise<PolicyRef[]> {
+/** Every sandbox policy in reach and the sources that could not be read. */
+export function policyScan(ctx: ScanContext): Promise<PolicyScan> {
   let p = cache.get(ctx.installation);
   if (!p) {
-    p = (async () => [...await filePolicies(ctx), ...await livePolicies(ctx).catch(() => [])])();
+    p = (async () => {
+      const unread: string[] = [];
+      const refs = [
+        ...await filePolicies(ctx, unread),
+        ...await livePolicies(ctx, unread).catch(() => { unread.push('live sandbox policies (query failed)'); return []; }),
+      ];
+      return { refs, unread };
+    })();
     cache.set(ctx.installation, p);
   }
   return p;
+}
+
+/** Every sandbox policy in reach: each sandbox's effective policy, the global policy, and $OPENSHELL_SANDBOX_POLICY. */
+export async function sandboxPolicies(ctx: ScanContext): Promise<PolicyRef[]> {
+  return (await policyScan(ctx)).refs;
+}
+
+/**
+ * Pass message for OSH-011–014: the affirmative `verdict` only when it covers
+ * every policy; never when none was read.
+ */
+export async function policyPassMessage(ctx: ScanContext, verdict: string): Promise<string> {
+  const { refs, unread } = await policyScan(ctx);
+  const skipped = unread.length > 0 ? `not checked: ${unread.join('; ')}` : '';
+  if (refs.length === 0) return skipped ? `No sandbox policy could be checked — ${skipped}` : 'No sandbox policies found — nothing to check';
+  return skipped ? `${verdict} (${refs.length} polic${refs.length === 1 ? 'y' : 'ies'} read; ${skipped})` : verdict;
 }
 
 export interface EndpointRef {

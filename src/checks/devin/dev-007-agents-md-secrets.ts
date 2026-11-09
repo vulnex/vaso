@@ -2,7 +2,7 @@ import { dirname, join } from 'node:path';
 import type { Evidence, ScanContext } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { memorySecretSeverity, scanMemorySecrets } from '../../analyzers/memory-secrets.js';
-import { readTextIfPresent } from '../../adapters/load-if-present.js';
+import { MemoryReader } from '../../analyzers/memory-read.js';
 import { recordListFailure } from '../../core/config-loader.js';
 
 // Always-on rules files Devin loads from a workspace root or the global
@@ -11,8 +11,11 @@ const RULE_FILES = ['AGENTS.md', 'AGENTS.local.md', 'AGENT.md', '.windsurfrules'
 
 async function listMarkdown(ctx: ScanContext, dir: string): Promise<string[]> {
   try {
-    const names = await ctx.fs.readdir(dir);
-    return Array.isArray(names) ? names.filter(n => n.endsWith('.md')).map(n => join(dir, n)) : [];
+    // Regular files (or links to them) only: a directory named `x.md` is not
+    // a rules file
+    const entries = await ctx.fs.readdirEntries(dir);
+    if (!Array.isArray(entries)) return [];
+    return entries.filter(e => e.name.endsWith('.md') && !e.isDirectory).map(e => join(dir, e.name));
   } catch (err) {
     // A rules folder that can't be listed hides its files
     await recordListFailure(dir, ctx.fs, err);
@@ -57,22 +60,23 @@ export const dev007 = defineCheck({
   async run(ctx, h) {
     const evidence: Evidence[] = [];
     let scanned = 0;
+    const reader = new MemoryReader(ctx.fs);
 
     for (const file of await ruleFileCandidates(ctx)) {
       // Present but unreadable: reported as CONFIG-LOAD
-      const content = await readTextIfPresent(file, ctx.fs);
+      const content = await reader.read(file);
       if (typeof content !== 'string') continue;
       scanned++;
       scanContent(file, content, evidence);
     }
 
     if (scanned === 0) {
-      return h.passed('No Devin rules files present');
+      return h.passed(reader.unverified.length > 0 ? reader.notVerified() : 'No Devin rules files present');
     }
 
     return h.fromEvidence(evidence, {
       severity: memorySecretSeverity(evidence),
-      passed: `No secrets detected in ${scanned} Devin rules file(s)`,
+      passed: `No secrets detected in ${scanned} Devin rules file(s)${reader.note()}`,
       failed: (n) => `Found ${n} potential secret(s) in Devin rules files`,
       fixDescription: 'Remove the secret from the rules file and rotate the credential — rules files are injected into every session prompt',
     });

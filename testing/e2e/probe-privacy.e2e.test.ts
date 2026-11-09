@@ -19,7 +19,8 @@ import { tmpdir } from 'node:os';
  */
 
 const ROOT = resolve(import.meta.dirname, '../..');
-const CLI = join(ROOT, 'dist/cli.js');
+// VASO_E2E_CLI: a bundle built elsewhere (fix rounds share dist/)
+const CLI = process.env.VASO_E2E_CLI ?? join(ROOT, 'dist/cli.js');
 
 const goAvailable = (() => {
   try {
@@ -74,7 +75,11 @@ const FORMATS: Array<[string, () => string]> = [
   ['gitlab', () => `glpat-${body(24)}`],
   ['google', () => `AIza${body(35)}`],
   ['devin', () => `devin-${body(80)}`],
+  ['airtable', () => `pat${body(14)}.${body(64, 'abcdef0123456789')}`],
 ];
+
+/** A diceware-style passphrase: lowercase words, no digit or capital. */
+const passphrase = () => Array.from({ length: 4 }, () => body(7, 'abcdefghijklmnopqrstuvwyz')).join('-');
 
 /** A random credential under a credential-named key: no known prefix. */
 const generic = () => `${body(12)}!${body(14)}#${body(10)}`;
@@ -88,6 +93,7 @@ function envFile(label: string): string {
     `ANTHROPIC_API_KEY=${canary(`${label} env anthropic`, FORMATS[0][1])}`,
     `export TELEGRAM_BOT_TOKEN="${canary(`${label} env telegram`, FORMATS[6][1])}" # bot`,
     `API_SERVER_KEY=${canary(`${label} env generic`, generic)}`,
+    `DB_PASSWORD=${canary(`${label} env passphrase`, passphrase)}`,
     `#OPENAI_API_KEY=${canary(`${label} env commented`, FORMATS[1][1])}`,
     `DATABASE_URL=postgres://app:${canary(`${label} env url password`, () => body(28))}@db.internal:5432/app`,
   ].join('\n') + '\n';
@@ -97,6 +103,7 @@ function jsonFile(label: string): string {
   const c = (shape: string, make: () => string) => canary(`${label} json ${shape}`, make);
   return JSON.stringify({
     apiKey: c('apiKey', generic),
+    FN_ANTHROPIC_PASSWORD: c('passphrase', passphrase),
     NVIDIA_API_KEY: c('nvidia', FORMATS[7][1]),
     providers: [{ name: 'x', api_key: c('nested api_key', generic) }],
     mcpServers: {
@@ -107,9 +114,40 @@ function jsonFile(label: string): string {
         headers: { Authorization: `Bearer ${c('bearer', generic)}` },
         url: `https://user:${c('url password', () => body(30))}@mcp.example.com/sse?api_key=${c('url param', () => body(30))}`,
       },
+      // capability URLs: the path is the credential (findUrlSecrets)
+      zapier: { url: `https://mcp.zapier.com/api/mcp/s/${c('zapier secret path', () => `${body(46)}==`)}/mcp` },
+      zapierKey: { url: `https://actions.zapier.com/mcp/${c('zapier sk-ak key', () => `sk-ak-${body(32)}`)}/sse` },
+      discord: { url: `https://discord.com/api/webhooks/123456789012345678/${c('discord webhook token', () => body(68))}` },
+      capability: { url: `https://mcp.example.com/u/${c('random path token', () => body(48))}/sse` },
+      fragment: { url: `https://mcp.example.com/mcp#access_token=${c('fragment token', () => body(32))}` },
+      telegram: { url: `https://api.telegram.org/bot${c('telegram bot token in path', FORMATS[6][1])}/sendMessage` },
+      signed: { url: `https://x.example.com/api?sig=${c('sig param', () => body(32))}&X-Amz-Signature=${c('amz signature', () => body(64, 'abcdef0123456789'))}` },
+      session: { url: `https://x.example.com/p;jsessionid=${c('jsessionid', () => body(32))}` },
+      catchHook: { url: `https://hooks.zapier.com/hooks/catch/123456/${c('zapier catch key', () => body(16, 'abcdefghijklmnopqrstuvwyz0123456789'))}/` },
     },
     notes: `token ${c('token in prose', FORMATS[0][1])}`,
+    // key=\"value\" inside a JSON string (custom instructions)
+    instructions: `password="${c('escaped-quoted pair', generic)}" and api_key: "${c('escaped-quoted colon pair', generic)}"`,
+    // a pasted curl command: JSON inside the string, its quotes escaped twice
+    curl: `Run: curl -d "{\\"api_key\\":\\"${c('embedded JSON in a JSON string', generic)}\\"}" https://api.x.com`,
   }, null, 2) + '\n';
+}
+
+/** JSON5 as OpenClaw writes it: unquoted keys, single quotes, comments, trailing commas. */
+function json5File(label: string): string {
+  const c = (shape: string, make: () => string) => canary(`${label} json5 ${shape}`, make);
+  return [
+    '// gateway',
+    '{',
+    '  gateway: {',
+    `    auth: { mode: 'token', token: '${c('token', generic)}', password: "${c('password', generic)}" },`,
+    '  },',
+    `  'channels': { discord: { token: '${c('quoted key', generic)}' }, telegram: { botToken: "${c('telegram', FORMATS[6][1])}" } },`,
+    '  mcp: { servers: {',
+    `    a: { command: 'npx', args: ['-y', 'x-mcp@1.0.0', '--api-key', '${c('argv flag', generic)}'], env: { MY_SERVICE_TOKEN: '${c('env', generic)}' } },`,
+    '  } },',
+    '}',
+  ].join('\n') + '\n';
 }
 
 function yamlFile(label: string): string {
@@ -118,6 +156,11 @@ function yamlFile(label: string): string {
     `  - api_key: "${canary(`${label} yaml api_key`, generic)}"  # key`,
     `    password: ${canary(`${label} yaml password`, generic)}`,
     `    token: ${canary(`${label} yaml token`, FORMATS[4][1])}`,
+    `vision: {provider: custom, base_url: "https://vision.example.com/v1", api_key: "${canary(`${label} yaml flow`, generic)}"}`,
+    `svc: {command: npx, args: [-y, "svc-mcp@1.2.3", --token, ${canary(`${label} yaml flow argv`, generic)}], env: {SVC_API_TOKEN: ${canary(`${label} yaml flow plain`, generic)}}}`,
+    `anchored_token: &tok ${canary(`${label} yaml anchor`, generic)}`,
+    `tagged_secret: !!str ${canary(`${label} yaml tag`, generic)}`,
+    `list_tokens: [${canary(`${label} yaml flow sequence`, generic)}]`,
   ].join('\n') + '\n';
 }
 
@@ -125,8 +168,32 @@ function tomlFile(label: string): string {
   return [
     '[provider]',
     `api_key = "${canary(`${label} toml api_key`, generic)}"`,
+    `bearer_token = """${canary(`${label} toml multi-line string`, generic)}"""`,
     `env = { OPENAI_API_KEY = "${canary(`${label} toml inline`, FORMATS[1][1])}" }`,
   ].join('\n') + '\n';
+}
+
+/** Instruction and memory files: keyed secrets in prose, plus every key format. */
+function markdownFile(label: string): string {
+  const c = (shape: string, make: () => string) => canary(`${label} md ${shape}`, make);
+  return [
+    '# Project notes',
+    `DB_PASSWORD=${c('dotenv line', generic)}`,
+    `- api_key: ${c('list item', generic)}`,
+    `Use \`"client_secret": "${c('quoted pair', generic)}"\` for the staging app.`,
+    `curl -H "Authorization: Bearer ${c('bearer', generic)}" -u bob:${c('curl -u', generic)} https://api.example.com`,
+    `Run \`OPENAI_API_KEY=${c('env prefix', generic)} node x.js --api-key ${c('flag', generic)}\`.`,
+    // values holding the punctuation that ends a word: disguised whole
+    `signing_secret: "${c('quoted &', () => `${generic()}&${generic()}`)}"`,
+    `signing_secret: "${c('quoted ;', () => `${generic()};${generic()}`)}"`,
+    `signing_secret: "${c('quoted space', () => `${generic()} ${generic()}`)}"`,
+    `* token = "${c("quoted '", () => `${generic()}'${generic()}`)}"`,
+    `SECRET_KEY=${c('unquoted |', () => `${generic()}|${generic()}`)}`,
+    `password: ${c('unquoted ,', () => `${generic()},${generic()}`)}`,
+    `| API_KEY | ${c('table cell', () => body(40))} |`,
+    `**API key**: ${c('bold label', () => body(40))}`,
+    `Zapier: (https://mcp.zapier.com/api/mcp/s/${c('zapier url in prose', () => body(48))}/mcp).`,
+  ].join('\n') + '\n' + textFile(label);
 }
 
 function pemFile(label: string): string {
@@ -137,10 +204,12 @@ function contentFor(path: string): string {
   const name = basename(path).toLowerCase();
   const ext = extname(name);
   if (name.startsWith('.env') || ext === '.env') return envFile(path);
-  if (ext === '.json' || ext === '.jsonc' || ext === '.json5') return jsonFile(path);
+  if (ext === '.json5' || name === 'openclaw.json') return json5File(path);
+  if (ext === '.json' || ext === '.jsonc') return jsonFile(path);
   if (ext === '.yaml' || ext === '.yml') return yamlFile(path);
   if (ext === '.toml' || ext === '.ini' || ext === '.cfg' || ext === '.conf') return tomlFile(path);
   if (ext === '.pem' || ext === '.key') return pemFile(path);
+  if (ext === '.md' || ext === '.mdc' || ext === '.txt') return markdownFile(path);
   return textFile(path);
 }
 
@@ -163,6 +232,7 @@ describe.skipIf(!goAvailable)('probe privacy canary', () => {
   let home: string;
   let snapshot: string;
   let planted = 0;
+  let geminiIndex = '';
 
   beforeAll(async () => {
     const work = await mkdtemp(join(tmpdir(), 'vaso-canary-'));
@@ -174,7 +244,7 @@ describe.skipIf(!goAvailable)('probe privacy canary', () => {
     const baseEnv = { HOME: home, PATH: '/usr/bin:/bin', NO_COLOR: '1', VASO_SKIP_IOC_UPDATE: '1', TMPDIR: tmpdir() };
     const m = await run(process.execPath, [CLI, 'probe', 'manifest'], baseEnv, home);
     expect(m.code).toBe(0);
-    const manifest = JSON.parse(m.stdout) as { filePaths: string[]; globPatterns: string[]; metadataGlobPatterns?: string[]; envPrefixes: string[] };
+    const manifest = JSON.parse(m.stdout) as { filePaths: string[]; globPatterns: string[]; metadataGlobPatterns?: string[]; envPrefixes: string[]; envPresence?: string[] };
 
     const paths = new Set<string>();
     for (const e of [...manifest.filePaths, ...manifest.globPatterns, ...(manifest.metadataGlobPatterns ?? [])]) {
@@ -191,6 +261,15 @@ describe.skipIf(!goAvailable)('probe privacy canary', () => {
         // a path that another entry made a directory (or a file) — skip it
       }
     }
+    // Gemini's tmp dir: only the project memory index ships (disguised);
+    // chats, logs and other memory files never do (decision 2, 2026-11-09)
+    for (const rel of ['chats/session-2026-11-09T10-00-abc.json', 'chats/session-1.jsonl', 'logs.json', 'shell_history', 'memory/notes.md', 'checkpoint-x.json']) {
+      const full = join(home, '.gemini/tmp/proj-1', rel);
+      await mkdir(dirname(full), { recursive: true });
+      await writeFile(full, contentFor(`.gemini/tmp/proj-1/${rel}`));
+    }
+    geminiIndex = join(home, '.gemini/tmp/proj-1/memory/MEMORY.md');
+    await writeFile(geminiIndex, contentFor('.gemini/tmp/proj-1/memory/MEMORY.md'));
     await writeFile(join(work, 'manifest.json'), m.stdout);
 
     // Credential variables under every collected prefix (the probe redacts them)
@@ -201,6 +280,13 @@ describe.skipIf(!goAvailable)('probe privacy canary', () => {
       env[`${base}ORG`] = canary(`env ${base}ORG (token by shape)`, FORMATS[1][1]);
       env[`${base}PROXY_URL`] = `https://u:${canary(`env ${base}PROXY_URL password`, () => body(28))}@proxy.example.com:3128`;
     }
+    // Presence-only variables (FLY_MACHINE_ID…): set or not, never the value —
+    // nor a longer name the old prefix rule matched
+    expect(manifest.envPresence?.length).toBeGreaterThan(0);
+    for (const name of manifest.envPresence ?? []) {
+      env[name] = canary(`env ${name} (presence only)`, () => body(24));
+      env[`${name}_X`] = canary(`env ${name}_X (presence-only prefix)`, generic);
+    }
     const r = await run(probe, ['--manifest', join(work, 'manifest.json')], env, home);
     expect(r.code, r.stderr).toBe(0);
     snapshot = r.stdout;
@@ -209,6 +295,17 @@ describe.skipIf(!goAvailable)('probe privacy canary', () => {
   it('plants canaries across the manifest', () => {
     expect(planted).toBeGreaterThan(300);
     expect(canaries.size).toBeGreaterThan(2000);
+  });
+
+  it('ships the Gemini memory index with content, nothing else from its tmp dir', () => {
+    const files = (JSON.parse(snapshot) as { files: Record<string, { exists: boolean; content: string; contentOmitted?: boolean }> }).files;
+    expect(files[geminiIndex]?.exists).toBe(true);
+    expect(files[geminiIndex]?.contentOmitted).toBeFalsy();
+    expect(files[geminiIndex]?.content).toContain('# Project notes');
+    const tmpContent = Object.entries(files)
+      .filter(([p, e]) => p.includes('/.gemini/tmp/') && e.exists && !e.contentOmitted)
+      .map(([p]) => p);
+    expect(tmpContent.every(p => p.endsWith('/memory/MEMORY.md')), tmpContent.join('\n')).toBe(true);
   });
 
   it('ships no canary', () => {

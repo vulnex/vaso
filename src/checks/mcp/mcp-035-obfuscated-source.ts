@@ -1,9 +1,10 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { truncateSnippet } from '../../core/patterns.js';
 import { analyzeObfuscation } from '../../analyzers/obfuscation.js';
 import { analysisEvasion } from '../../analyzers/ast-analyzer.js';
 import type { RevealedStrings } from '../../analyzers/obfuscation.js';
-import { analyzeStringTable } from '../../mcp/string-table.js';
+import { analyzeStringTable, maskEncodedLiterals } from '../../mcp/string-table.js';
 
 /**
  * MCP-035 — Obfuscated / Encoded Server Source.
@@ -61,43 +62,57 @@ export const mcp035 = defineCheck({
         evidence.push({
           file,
           line: deep,
-          snippet: text.slice(0, 80) + (text.length > 80 ? '...' : ''),
+          snippet: truncateSnippet(text),
           detail: evasion.whole
             ? 'The file is nested or chained deeply enough to overflow the JavaScript parser and could not be analysed — only a line-by-line scan for exec and exfiltration calls ran'
             : 'Code nested or chained deeply enough to crash the JavaScript parser (brackets, templates, `?:`/`!` chains) or flood it with syntax errors — the statement is skipped by the other MCP source checks',
         });
       }
 
-      if (!table.confirmed && report.tier === 'none') continue;
+      if (!table.confirmed && report.tier === 'none' && table.inertLines.length === 0) continue;
 
+      const lines = source.sourceCode.split('\n');
+      // Masked before truncation: a cut must not leave an encoded value's start behind
+      const shown = (line: number) => truncateSnippet(maskEncodedLiterals(lines[line - 1]?.trim() ?? ''));
       if (table.confirmed) {
         sawStringTable = true;
+        const what = table.decodedCount >= 3 ? 'Encoded string-table obfuscation' : 'Runtime-decoded hidden string';
         evidence.push({
           file,
           snippet: `Server "${source.serverName}"`,
           detail:
-            `Encoded string-table obfuscation: ${table.decoderLabels.join(', ')} decodes ` +
+            `${what}: ${table.decoderLabels.join(', ')} decodes ` +
             `${table.decodedCount} encoded literal(s) at runtime — hides the strings the ` +
             `server actually uses (URLs, secrets, commands) from static review` +
             describeRevealed(table.revealed),
         });
-        const lines = source.sourceCode.split('\n');
         for (const line of table.lines) {
-          const text = lines[line - 1]?.trim() ?? '';
-          const shown = hideEncodedLiterals(text);
-          evidence.push({ file, line, snippet: shown.slice(0, 80) + (shown.length > 80 ? '...' : ''), detail: 'Encoded literal decoded at runtime' });
+          evidence.push({ file, line, snippet: shown(line), detail: 'Encoded literal decoded at runtime' });
         }
       } else {
         // Decoder-less (or literals that don't decode to text): informational
         // only. A bare atob() decodes runtime data (JWTs, data URLs); with no
         // encoded literals for it to unpack it is not evidence of hidden strings.
         const encodedHits = report.hits.filter((hit) => hit.label !== 'atob() decoding');
+        const seen = new Set<number>();
         for (const hit of encodedHits.slice(0, 5)) {
+          seen.add(hit.line);
           evidence.push({
             file,
             line: hit.line,
-            snippet: hideEncodedLiterals(hit.snippet),
+            snippet: shown(hit.line),
             detail: `${hit.label} (no runtime decoder found — unconfirmed obfuscation)`,
+          });
+        }
+        // One literal decoded in place to ordinary text: encoded for no
+        // evident reason, but nothing it hides is an endpoint, key or code
+        for (const line of table.inertLines) {
+          if (seen.has(line)) continue;
+          evidence.push({
+            file,
+            line,
+            snippet: shown(line),
+            detail: 'Encoded literal decoded at runtime to ordinary text (unconfirmed obfuscation)',
           });
         }
       }
@@ -114,15 +129,6 @@ export const mcp035 = defineCheck({
 });
 
 /** "; decoded, they include …" — kinds and hosts only, never the hidden values. */
-/**
- * The encoded literals on a quoted line, replaced by their length: decoded,
- * they are the hidden values (keys, URLs) this check must never print.
- */
-const ENCODED_LITERAL = /(["'`])[A-Za-z0-9+/_=-]{16,}\1/g;
-function hideEncodedLiterals(text: string): string {
-  return text.replace(ENCODED_LITERAL, (m, q: string) => `${q}<encoded, ${m.length - 2} chars>${q}`);
-}
-
 function describeRevealed(revealed: RevealedStrings | undefined): string {
   if (!revealed) return '';
   const parts: string[] = [];

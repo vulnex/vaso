@@ -5,6 +5,7 @@ import type { NodePath } from '@babel/traverse';
 import { mayBeJavaScript, parseLenientReport, recordedEvasion, sourceChunks, type JsAst } from './js-parse.js';
 import { bindingModule, memberName, sinkCallee } from './tool-input-taint.js';
 import { analyzeFlows, type SourcePath, type Taint } from './js-flow.js';
+import { credentialEnvName, onVendorHost, ownedCredential, staticOrigin, vendorApiDomains, vendorUrlSlot } from './vendor-domains.js';
 
 // Handle ESM/CJS interop
 const traverse = typeof _traverse === 'function' ? _traverse : (_traverse as { default: typeof _traverse }).default;
@@ -117,50 +118,101 @@ const SENSITIVE_PATHS = [
 const MAX_CACHED_ANALYSES = 10_000;
 const analysisCache = new Map<string, DataFlowResult[]>();
 
+/** HTTP clients whose request functions take the destination URL first (`axios.post(url, body, config)`, `https.request(url, opts)`). */
+const HTTP_CLIENT_MODULE = /^(?:node:)?(?:https?|axios|got|node-fetch|undici|request|superagent|ky|cross-fetch|isomorphic-fetch)$/;
+const HTTP_REQUEST_METHODS = new Set(['fetch', 'request', 'get', 'post', 'put', 'patch', 'delete', 'head']);
+const FETCH_MODULE = /^(?:node-fetch|undici|cross-fetch|isomorphic-fetch)$/;
+const GLOBAL_SCOPES = new Set(['globalThis', 'window', 'global', 'self']);
+
+const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 /**
- * The API domains a vendor's credential is used against, by the env-name
- * prefix that names the vendor. Only these are exempt: a host merely
- * containing the vendor's name (api.openai.cc, openai.vercel.app) is not.
+ * A real HTTP request whose first argument is where it goes: the global
+ * `fetch` (not a local function of that name), or a request method of an
+ * imported HTTP client. A socket's `emit`/`send`/`write` is not — its first
+ * argument is an event name or payload, and the peer is whoever it connected to.
  */
-const VENDOR_API_DOMAINS: Record<string, readonly string[]> = {
-  openai: ['openai.com'],
-  anthropic: ['anthropic.com'],
-  claude: ['anthropic.com'],
-  github: ['github.com'],
-  gh: ['github.com'],
-  gitlab: ['gitlab.com'],
-  slack: ['slack.com'],
-  stripe: ['stripe.com'],
-  groq: ['groq.com'],
-  mistral: ['mistral.ai'],
-  huggingface: ['huggingface.co'],
-  hf: ['huggingface.co'],
-  gemini: ['googleapis.com'],
-  google: ['googleapis.com'],
-  cohere: ['cohere.ai', 'cohere.com'],
-  deepseek: ['deepseek.com'],
-  perplexity: ['perplexity.ai'],
-  pplx: ['perplexity.ai'],
-  xai: ['x.ai'],
-  openrouter: ['openrouter.ai'],
-  together: ['together.xyz', 'together.ai'],
-  fireworks: ['fireworks.ai'],
-  replicate: ['replicate.com'],
-  notion: ['notion.com'],
-  linear: ['linear.app'],
-  discord: ['discord.com'],
-  telegram: ['telegram.org'],
-  brave: ['brave.com'],
-  tavily: ['tavily.com'],
-  exa: ['exa.ai'],
-  firecrawl: ['firecrawl.dev'],
-  serpapi: ['serpapi.com'],
-  elevenlabs: ['elevenlabs.io'],
-  sentry: ['sentry.io'],
-  vercel: ['vercel.com'],
-  cloudflare: ['cloudflare.com'],
-  supabase: ['supabase.com'],
-};
+function httpRequestCall(p: NodePath): boolean {
+  const call = p.node;
+  if (call.type !== 'CallExpression') return false;
+  const callee = call.callee;
+  if (callee.type === 'Identifier') {
+    if (callee.name !== 'fetch') return false;
+    const binding = p.scope.getBinding('fetch');
+    return !binding || FETCH_MODULE.test(bindingModule(binding) ?? '');
+  }
+  if (callee.type !== 'MemberExpression' || callee.computed || callee.property.type !== 'Identifier') return false;
+  const method = callee.property.name;
+  if (!HTTP_REQUEST_METHODS.has(method) || callee.object.type !== 'Identifier') return false;
+  const binding = p.scope.getBinding(callee.object.name);
+  if (!binding) return method === 'fetch' && GLOBAL_SCOPES.has(callee.object.name);
+  return HTTP_CLIENT_MODULE.test(bindingModule(binding) ?? '');
+}
+
+/**
+ * Request options that send a request somewhere other than its URL's host
+ * (`hostname`, `host`, `socketPath`), through another resolver, agent or proxy
+ * (`lookup`, `agent`, `proxy`, `dispatcher`), or without verifying the
+ * server (`rejectUnauthorized`). `baseURL` is fine only on the vendor's host.
+ */
+const REDIRECT_OPTIONS = new Set([
+  'host', 'hostname', 'socketPath', 'lookup', 'agent', 'httpAgent', 'httpsAgent', 'proxy', 'dispatcher', 'rejectUnauthorized',
+  'createConnection', 'servername',
+]);
+/** `fetch = …`, `globalThis.fetch = …`, `window['fetch'] = …`, `Object.defineProperty(globalThis, 'fetch', …)`. */
+const FETCH_ASSIGNMENT = /(?:^|[^\w$.])(?:(?:globalThis|window|self|global)\s*(?:\.\s*fetch|\[\s*['"`]fetch['"`]\s*\])|fetch)\s*(?:=(?!=)|\|\|=|\?\?=)|defineProperty\s*\(\s*(?:globalThis|window|self|global)\s*,\s*['"`]fetch['"`]/;
+
+function isFetchCallee(callee: Node): boolean {
+  if (callee.type === 'Identifier') return callee.name === 'fetch';
+  return callee.type === 'MemberExpression' && !callee.computed && callee.property.type === 'Identifier' && callee.property.name === 'fetch';
+}
+
+/**
+ * Whether any options argument redirects the request (REDIRECT_OPTIONS), or
+ * can't be seen: a spread, a computed key, or a variable that isn't a constant
+ * object literal. The body argument of `post/put/patch(url, body, config)` is
+ * data, not options.
+ */
+function redirectedRequest(args: Node[], p: NodePath, domains: readonly string[]): boolean {
+  const call = p.node;
+  const method = call.type === 'CallExpression' && call.callee.type === 'MemberExpression' && call.callee.property.type === 'Identifier'
+    ? call.callee.property.name : '';
+  const bodyIndex = /^(?:post|put|patch)$/.test(method) ? 1 : -1;
+  for (let i = 1; i < args.length; i++) {
+    let arg = args[i];
+    if (arg.type === 'Identifier') {
+      const binding = p.scope.getBinding(arg.name);
+      const init = binding?.constant && binding.path.node.type === 'VariableDeclarator' ? binding.path.node.init : undefined;
+      if (init?.type === 'ObjectExpression') arg = init;
+      else if (i === bodyIndex) continue;
+      else return true;
+    }
+    if (arg.type !== 'ObjectExpression') {
+      if (i === bodyIndex) continue;
+      // A callback (`https.get(url, opts, res => …)`) carries no options
+      if (arg.type === 'ArrowFunctionExpression' || arg.type === 'FunctionExpression') continue;
+      return true;
+    }
+    if (i === bodyIndex) continue;
+    for (const prop of arg.properties) {
+      if (prop.type !== 'ObjectProperty' && prop.type !== 'ObjectMethod') return true;
+      if (prop.computed) return true;
+      const key = prop.key.type === 'Identifier' ? prop.key.name : prop.key.type === 'StringLiteral' ? prop.key.value : '';
+      if (REDIRECT_OPTIONS.has(key)) return true;
+      if (key === 'baseURL' || key === 'prefixUrl') {
+        const value = prop.type === 'ObjectProperty' && prop.value.type === 'StringLiteral' ? prop.value.value : '';
+        try {
+          const u = new URL(value);
+          const h = u.hostname.toLowerCase();
+          if (u.protocol !== 'https:' || !domains.some((d) => h === d || h.endsWith(`.${d}`))) return true;
+        } catch {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
 
 export function analyzeCode(code: string, filename = 'unknown.js'): DataFlowResult[] {
   if (!mayBeJavaScript(filename)) return [];
@@ -255,29 +307,67 @@ function analyzeUncached(code: string): DataFlowResult[] {
   // a substring test made a minified `o` match every `output`.
   const sourceVars = new Map<string, 'file' | 'env'>();
   const mentions = (argStr: string, name: string): boolean =>
-    new RegExp(`(?<![\\w$.])${name.replace(/[.$]/g, '\\$&')}(?![\\w$])`).test(argStr);
+    new RegExp(`(?<![\\w$.])${escapeRegExp(name)}(?![\\w$])`).test(argStr);
   const networkImports = new Set<string>();
   // Environment values written inline in a request (`body: JSON.stringify(process.env)`,
   // `axios.post(url, process.env.KEY)`), by the rules of the Python analyzer:
-  // the whole environment anywhere in the call, a single value only in the
-  // request body (an API key in the headers of its own API is not a leak).
+  // the whole environment anywhere in the call, a single value in the
+  // request body — or anywhere in a request when it is a vendor's key or a
+  // signing secret (ownedCredential: `?k=${process.env.AWS_SECRET_ACCESS_KEY}`,
+  // a header to another host).
   const inlineEnv = (args: Node[], sinkName: string): string[] => inlineSources(args, sinkName, false)
     .filter(([, kind]) => kind === 'env').map(([name]) => name);
   /**
    * Sources written inline in a sink call: file contents (`readFileSync(…)`)
    * and the whole environment anywhere in it; a single environment value in
-   * a request body — or, for a network program's argv (`allEnv`), anywhere.
+   * a request body, or anywhere in a `request` when it is a credential whose
+   * home is known (ownedCredential) — or, for a network program's argv
+   * (`allEnv`), any value anywhere.
    */
-  const inlineSources = (args: Node[], sinkName: string, allEnv: boolean): Array<[string, 'file' | 'env']> => {
+  const inlineSources = (args: Node[], sinkName: string, allEnv: boolean, request = false): Array<[string, 'file' | 'env']> => {
     if (args.length === 0) return [];
     const all = code.slice(args[0].start ?? 0, args[args.length - 1].end ?? 0);
     const out: Array<[string, 'file' | 'env']> = [];
     const file = all.match(/(?<![\w$])(?:fs\.)?(?:promises\.)?readFile(?:Sync)?\s*\(/);
     if (file) out.push([`${file[0].replace(/\s*\($/, '')}()`, 'file']);
     if (/(?<![\w$])(?<!(?:^|[^.])\.)process\.env(?![\w$]|\s*(?:\.|\[|\?\.))/.test(all)) out.push(['process.env', 'env']);
-    const single = allEnv ? all : requestBody(args, sinkName);
-    for (const m of single.matchAll(/(?<![\w$.])process\.env(?:\.[A-Za-z_$][\w$]*|\[[^\]]+\])/g)) out.push([m[0], 'env']);
+    const body = allEnv ? all : requestBody(args, sinkName);
+    const seen = new Set<string>();
+    for (const m of all.matchAll(/(?<![\w$.])process\.env(?:\.[A-Za-z_$][\w$]*|\[[^\]]+\])/g)) {
+      if (seen.has(m[0])) continue;
+      const name = envNameOf(m[0]);
+      if (!mentions(body, m[0]) && !(request && ownedCredential(name))) continue;
+      seen.add(m[0]);
+      out.push([m[0], 'env']);
+    }
     return out;
+  };
+  /** Request options that say a call is an HTTP request even when its client can't be resolved. */
+  const REQUEST_OPTION = /^(?:headers|params|searchParams|query|qs|auth|cookies?|method)$/;
+  /**
+   * Whether a member-call sink is an HTTP request — an imported client's
+   * request method, a literal URL first, or request options — rather than a
+   * `get`/`send` of something else (`cache.get(…)`, `map.post…`).
+   */
+  const requestLike = (args: Node[], p: NodePath): boolean => httpRequestCall(p)
+    || (args[0] !== undefined && /^[`'"](?:https?|wss?):\/\//i.test(code.slice(args[0].start ?? 0, args[0].end ?? 0)))
+    || args.some((a) => a.type === 'ObjectExpression' && a.properties.some((pr) => pr.type === 'ObjectProperty'
+      && REQUEST_OPTION.test(pr.key.type === 'Identifier' ? pr.key.name : pr.key.type === 'StringLiteral' ? pr.key.value : '')));
+  /**
+   * An environment value named for a setting (`PORT`, `API_BASE_URL`, `HOME`)
+   * that appears only in a call's first argument — the URL it goes to — picks
+   * the address; it isn't data sent. Credentials by name, values in the body
+   * or options, and values of unknown name still count. A destructured value
+   * follows the inline rules instead: outside the body, only an ownedCredential.
+   */
+  const onlyAddressing = (args: Node[], sinkName: string, sourceVar: string, p: NodePath): boolean => {
+    if (wholeEnvAt(p, sourceVar) || mentions(requestBody(args, sinkName), sourceVar)) return false;
+    const name = envNameOf(sourceVar);
+    // Destructured values follow the inline rules: outside the body, only a credential whose home is known
+    if (destructuredEnv.has(sourceVar)) return !ownedCredential(name);
+    if (name === undefined || credentialEnvName(name)) return false;
+    const rest = args.slice(1).map((a) => code.slice(a.start ?? 0, a.end ?? 0)).join(',');
+    return !mentions(rest, sourceVar);
   };
   // Client sockets the code opens (`const ws = new WebSocket(url)`): `ws.send(…)`
   // goes to that remote endpoint, unlike a server socket answering its client
@@ -310,52 +400,100 @@ function analyzeUncached(code: string): DataFlowResult[] {
   };
   // `const key = process.env.OPENAI_API_KEY` → OPENAI_API_KEY
   const envNames = new Map<string, string>();
+  // Names bound by destructuring the environment (`const { API_KEY } = process.env`)
+  const destructuredEnv = new Set<string>();
+  // `process.env.KEY` / `process.env['KEY']` → KEY; a variable → the name it was read from
+  const envNameOf = (sourceVar: string): string | undefined => {
+    const m = /^process\.env(?:\.([A-Za-z_$][\w$]*)|\[\s*(['"`])([^'"`\]]+)\2\s*\])$/.exec(sourceVar);
+    return m ? m[1] ?? m[3] : envNames.get(sourceVar);
+  };
   /**
    * A single credential sent to the API it belongs to: an environment value
    * (`OPENAI_API_KEY`, inline or through a variable) that appears only in the
    * request's `headers` object, on a request to a literal https:// URL whose
    * host names the credential's vendor (OPENAI_… → api.openai.com,
    * GITHUB_… → api.github.com). That is how a key is used, not a leak; the
-   * same key in a body, the URL, or headers to any other host still is.
+   * same key in a body, the URL, or headers to any other host still is. Only
+   * for real HTTP requests (httpRequestCall) — a socket `emit('https://…')` or
+   * a local `function fetch` sends it somewhere else.
    */
   const credentialToOwnApi = (args: Node[], sourceVar: string, sourceKind: 'file' | 'env', p: NodePath): boolean => {
-    if (sourceKind !== 'env' || wholeEnvAt(p, sourceVar)) return false;
-    const envName = /^process\.env\.([A-Za-z_][\w]*)$/.exec(sourceVar)?.[1] ?? envNames.get(sourceVar);
-    const vendor = envName?.split('_')[0]?.toLowerCase() ?? '';
-    const domains = Object.hasOwn(VENDOR_API_DOMAINS, vendor) ? VENDOR_API_DOMAINS[vendor] : undefined;
+    if (sourceKind !== 'env' || wholeEnvAt(p, sourceVar) || !httpRequestCall(p)) return false;
+    const domains = vendorApiDomains(envNameOf(sourceVar));
     if (!domains) return false;
-    const first = args[0];
-    const url = first?.type === 'StringLiteral' ? first.value
-      : first?.type === 'TemplateLiteral' && first.expressions.length === 0 ? first.quasis[0]?.value.cooked ?? ''
-      : undefined;
-    let host: string;
-    try {
-      const parsed = new URL(url ?? '');
-      if (parsed.protocol !== 'https:') return false;
-      host = parsed.hostname.toLowerCase();
-    } catch {
-      return false;
+    const envName = envNameOf(sourceVar);
+    const name = escapeRegExp(sourceVar);
+    const used = (text: string) => new RegExp(`(?<![\\w$])${name}(?![\\w$])`).test(text);
+    // The URL as static text and computed parts: a literal, a module-level
+    // constant (`const API = 'https://api.openai.com/v1'`), a template or a `+` chain
+    const parts = urlParts(args[0], p);
+    let url = '';
+    const computed: Array<{ node: Node; before: string }> = [];
+    for (const part of parts) {
+      if (typeof part === 'string') url += part;
+      else {
+        computed.push({ node: part, before: url });
+        url += '\0';
+      }
     }
-    if (!domains.some((d) => host === d || host.endsWith(`.${d}`))) return false;
-    // Where the value is written: only inside a `headers: { … }` object
-    const headerRanges: Array<[number, number]> = [];
+    if (computed.length > 0 && parts.length > 0) {
+      const origin = staticOrigin(typeof parts[0] === 'string' ? parts[0] : '');
+      if (!origin || !onVendorHost(origin, domains)) return false;
+    } else if (!onVendorHost(url, domains)) return false;
+    if (redirectedRequest(args, p, domains)) return false;
+    // A global fetch the file replaces (`globalThis.fetch = …`) goes wherever the replacement sends it
+    const call = p.node;
+    if (call.type === 'CallExpression' && isFetchCallee(call.callee) && FETCH_ASSIGNMENT.test(code)) return false;
+    // Where the value is written: inside a `headers: { … }` object, or in the
+    // URL where the vendor documents it (vendorUrlSlot: Google `?key=`, Telegram `/bot<token>/`)
+    const allowed: Array<[number, number]> = [];
     for (const a of args) {
       if (a.type !== 'ObjectExpression') continue;
       for (const prop of a.properties) {
         if (prop.type !== 'ObjectProperty') continue;
         const key = prop.key.type === 'Identifier' ? prop.key.name : prop.key.type === 'StringLiteral' ? prop.key.value : '';
-        if (key === 'headers' && prop.value.type === 'ObjectExpression') headerRanges.push([prop.value.start ?? 0, prop.value.end ?? 0]);
+        if (key === 'headers' && prop.value.type === 'ObjectExpression') allowed.push([prop.value.start ?? 0, prop.value.end ?? 0]);
       }
     }
-    if (headerRanges.length === 0) return false;
+    for (const { node, before } of computed) {
+      const value = node.type === 'CallExpression' && node.callee.type === 'Identifier' && /^encodeURI(?:Component)?$/.test(node.callee.name)
+        && node.arguments.length === 1 ? node.arguments[0] as Node : node;
+      // (the host is static — staticOrigin — so a computed path part before the slot can't move it)
+      if (code.slice(value.start ?? 0, value.end ?? 0) === sourceVar && vendorUrlSlot(envName, before.replace(/\0/g, '')))
+        allowed.push([node.start ?? 0, node.end ?? 0]);
+    }
+    if (allowed.length === 0) return false;
     const start = args[0].start ?? 0;
     let outside = code.slice(start, args[args.length - 1].end ?? 0);
-    for (const [from, to] of headerRanges) {
+    // Text, not code: `?key=` in the URL is not the variable `key`
+    const text: Array<[number, number]> = [];
+    p.traverse({
+      // (a computed key is code: `process.env['KEY']`)
+      StringLiteral(q) { if (!(q.parentPath.isMemberExpression() && q.key === 'property')) text.push([q.node.start ?? 0, q.node.end ?? 0]); },
+      TemplateElement(q) { text.push([q.node.start ?? 0, q.node.end ?? 0]); },
+    });
+    for (const [from, to] of [...allowed, ...text]) {
+      if (from < start || to > start + outside.length) continue;
       outside = outside.slice(0, from - start) + ' '.repeat(to - from) + outside.slice(to - start);
     }
-    const name = sourceVar.replace(/[.$]/g, '\\$&');
-    const used = (text: string) => new RegExp(`(?<![\\w$])${name}(?![\\w$])`).test(text);
-    return !used(outside) && headerRanges.some(([from, to]) => used(code.slice(from, to)));
+    return !used(outside) && allowed.some(([from, to]) => used(code.slice(from, to)));
+  };
+  /**
+   * A request URL as static text and computed parts, in order: a string or
+   * template literal, a module-level string constant, or a `+` chain of them.
+   * Anything else is one computed part.
+   */
+  const urlParts = (n: Node | undefined, p: NodePath, depth = 0): Array<string | Node> => {
+    if (!n) return [];
+    if (n.type === 'StringLiteral') return [n.value];
+    if (n.type === 'TemplateLiteral') {
+      return n.quasis.flatMap((q, i) => (i < n.expressions.length ? [q.value.cooked ?? '', n.expressions[i] as Node] : [q.value.cooked ?? '']));
+    }
+    if (n.type === 'Identifier' && constStrings.has(n.name) && p.scope.getBinding(n.name)?.scope.path.isProgram()) return [constStrings.get(n.name)!];
+    if (n.type === 'BinaryExpression' && n.operator === '+' && depth < 50) {
+      return [...urlParts(n.left as Node, p, depth + 1), ...urlParts(n.right, p, depth + 1)];
+    }
+    return [n];
   };
   // Subset of sinks that spawn processes (child_process) rather than open connections
   const processImports = new Set<string>();
@@ -518,12 +656,15 @@ function analyzeUncached(code: string): DataFlowResult[] {
               ? receiver.name
               : receiver.type === 'MemberExpression' && receiver.property.type === 'Identifier' ? receiver.property.name : undefined;
             const processSink = processImports.has(propName) || EXEC_FUNCTIONS.has(propName);
-            const inlinePairs = processSink ? [] : inlineSources(node.arguments as Node[], propName, false);
+            const callArgs = node.arguments as Node[];
+            const request = !processSink && requestLike(callArgs, path);
+            const inlinePairs = processSink ? [] : inlineSources(callArgs, propName, false, request);
             const inline = inlinePairs.map(([name]) => name);
             const socketClient = propName === 'send' && sinkObject !== undefined && clientSockets.has(sinkObject);
             for (const [sourceVar, sourceKind] of new Map<string, 'file' | 'env'>([...sourceVars, ...inlinePairs])) {
               if (inline.includes(sourceVar) || mentions(argStr, sourceVar)) {
-                if (!processSink && credentialToOwnApi(node.arguments as Node[], sourceVar, sourceKind, path)) continue;
+                if (!processSink && credentialToOwnApi(callArgs, sourceVar, sourceKind, path)) continue;
+                if (!processSink && sourceKind === 'env' && onlyAddressing(callArgs, propName, sourceVar, path)) continue;
                 results.push({
                   type: 'source-to-sink',
                   source: sourceVar,
@@ -591,7 +732,7 @@ function analyzeUncached(code: string): DataFlowResult[] {
             }
 
             // Check data-flow into fetch
-            const inlinePairs = inlineSources(node.arguments as Node[], 'fetch', false);
+            const inlinePairs = inlineSources(node.arguments as Node[], 'fetch', false, true);
             const inline = inlinePairs.map(([name]) => name);
             for (const [sourceVar, sourceKind] of new Map<string, 'file' | 'env'>([...sourceVars, ...inlinePairs])) {
               const argStr = code.slice(
@@ -600,6 +741,7 @@ function analyzeUncached(code: string): DataFlowResult[] {
               );
               if (inline.includes(sourceVar) || mentions(argStr, sourceVar)) {
                 if (credentialToOwnApi(node.arguments as Node[], sourceVar, sourceKind, path)) continue;
+                if (sourceKind === 'env' && onlyAddressing(node.arguments as Node[], 'fetch', sourceVar, path)) continue;
                 results.push({
                   type: 'source-to-sink',
                   source: sourceVar,
@@ -621,6 +763,29 @@ function analyzeUncached(code: string): DataFlowResult[] {
         const init = path.node.init;
         if (!init) return;
         const id = path.node.id;
+        // `const { AWS_SECRET_ACCESS_KEY, OPENAI_API_KEY: key = '', ...rest } = process.env`
+        if (id.type === 'ObjectPattern') {
+          if (init.type !== 'MemberExpression' || init.computed || init.object.type !== 'Identifier' || init.object.name !== 'process'
+            || init.property.type !== 'Identifier' || init.property.name !== 'env') return;
+          for (const prop of id.properties) {
+            if (prop.type === 'RestElement') {
+              if (prop.argument.type !== 'Identifier') continue;
+              sourceVars.set(prop.argument.name, 'env');
+              const binding = path.scope.getBinding(prop.argument.name);
+              if (binding) wholeEnvBindings.add(binding);
+              else wholeEnvVars.add(prop.argument.name);
+              continue;
+            }
+            if (prop.computed) continue;
+            const envName = prop.key.type === 'Identifier' ? prop.key.name : prop.key.type === 'StringLiteral' ? prop.key.value : undefined;
+            const local = prop.value.type === 'AssignmentPattern' ? prop.value.left : prop.value;
+            if (envName === undefined || local.type !== 'Identifier') continue;
+            sourceVars.set(local.name, 'env');
+            envNames.set(local.name, envName);
+            destructuredEnv.add(local.name);
+          }
+          return;
+        }
         if (id.type !== 'Identifier') return;
 
         if (init.type === 'NewExpression' && (

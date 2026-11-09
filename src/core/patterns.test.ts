@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isPlaceholderSecret, isSecretReference, redactSecret, redactSecretsInLine } from './patterns.js';
+import { isPlaceholderSecret, isSecretReference, redactSecret, redactSecretsInLine, truncateSnippet } from './patterns.js';
 
 describe('isSecretReference (dt17 MD-C)', () => {
   it('knows secret manager references, key files, profile names and env references', () => {
@@ -62,11 +62,23 @@ describe('redactSecretsInLine', () => {
     expect(out).not.toContain('bbbbbbbbbbbbbbbbbbbbbbbb');
   });
 
-  it('truncates long lines after redaction with a trailing ellipsis', () => {
-    const filler = 'x'.repeat(150);
+  it('truncates long lines after redaction with a spaced trailing ellipsis', () => {
+    const filler = 'host: 127.0.0.1, '.repeat(10);
     const out = redactSecretsInLine(filler, 80);
-    expect(out.length).toBe(83);
-    expect(out.endsWith('...')).toBe(true);
+    expect(out).toBe(`${filler.slice(0, 80)} ...`);
+    expect(out.endsWith(' ...')).toBe(true);
+  });
+
+  // dt20 g8-F2: the cut value ended in `...` and the report masker took it
+  // for a placeholder, printing 42 characters of the password
+  it('keeps at most 8 characters of a value the cut falls inside', () => {
+    const pw = 'Zp9Yx8Wv7Ut6Sr5Qp4On3Ml2Kj1Ih0Gf9Ed8Cb7Aa6Ee5';
+    const line = `{"note":"sk-proj-${'A'.repeat(30)}","db_password":"${pw}"}`;
+    const out = redactSecretsInLine(line);
+    expect(out).not.toContain(pw.slice(0, 9));
+    expect(out).toContain('"db_password":"Zp9Yx8Wv ...');
+    expect(truncateSnippet('x'.repeat(150), 80)).toBe('xxxxxxxx ...');
+    expect(truncateSnippet('short', 80)).toBe('short');
   });
 
   it('passes through lines with no secrets unchanged (modulo trim)', () => {

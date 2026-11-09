@@ -1,4 +1,9 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { LocalFSProvider } from '../../core/local-fs-provider.js';
+import { captureConfigLoadErrors } from '../../core/config-loader.js';
 import type { ScanContext, ParsedConfig, AgentInstallation } from '../../core/types.js';
 import type { FSProvider } from '../../core/fs-provider.js';
 import { devinChecks } from './index.js';
@@ -577,7 +582,9 @@ describe('Devin live-validation fixes', () => {
       const fs = makeFs({
         access,
         readFile: vi.fn(async (p: string) => files[p]),
-        readdir: vi.fn(async (p: string) => (p === '/work/app/.devin/rules' ? ['deploy.md', 'notes.txt'] : [])),
+        readdirEntries: vi.fn(async (p: string) => (p === '/work/app/.devin/rules'
+          ? ['deploy.md', 'notes.txt'].map(name => ({ name, isFile: true, isDirectory: false }))
+          : [])),
       });
       const result = await check.run(makeProjectCtx([], fs));
       expect(result.passed).toBe(false);
@@ -594,13 +601,68 @@ describe('Devin live-validation fixes', () => {
       const fs = makeFs({
         access: vi.fn(async (p: string) => p in files),
         readFile: vi.fn(async (p: string) => files[p]),
-        readdir: vi.fn(async () => []),
+        readdirEntries: vi.fn(async () => []),
       });
       const result = await check.run(makeCtx([], fs));
       expect(result.passed).toBe(false);
       expect(result.evidence?.[0].file).toBe('/home/test/.devin/global_rules.md');
       expect(result.evidence?.[0].detail).toContain('Devin API token');
     });
+  });
+});
+
+// Deep test 2026-11-09: a file where the rules dir is expected, or a
+// directory named like a rules file, is no rules file — not a load failure
+describe('DEV-007: odd rules-dir shapes on disk', () => {
+  const check = devinChecks.find(c => c.id === 'DEV-007')!;
+  let home: string;
+  class HomeFs extends LocalFSProvider { homedir() { return home; } }
+  beforeEach(() => { home = realpathSync(mkdtempSync(join(tmpdir(), 'vaso-dev007-'))); });
+  afterEach(() => rmSync(home, { recursive: true, force: true }));
+
+  const run = async () => {
+    const fs = new HomeFs();
+    const ctx: ScanContext = {
+      installation: { agent: 'devin', installDir: join(home, '.config', 'devin'), configFiles: [] },
+      configs: [], platform: fs.platform, fs,
+    };
+    return captureConfigLoadErrors(() => check.run(ctx));
+  };
+
+  it('treats ~/.devin as a regular file as no rules', async () => {
+    writeFileSync(join(home, '.devin'), 'not a dir\n');
+    const { result, loadErrors } = await run();
+    expect(result.passed).toBe(true);
+    expect(loadErrors).toEqual([]);
+  });
+
+  it('treats ~/.devin/rules as a regular file as no rules', async () => {
+    mkdirSync(join(home, '.devin'));
+    writeFileSync(join(home, '.devin', 'rules'), 'not a dir\n');
+    const { result, loadErrors } = await run();
+    expect(result.passed).toBe(true);
+    expect(loadErrors).toEqual([]);
+  });
+
+  it('skips a directory named sub.md inside ~/.devin/rules, still reading the real rules', async () => {
+    mkdirSync(join(home, '.devin', 'rules', 'sub.md'), { recursive: true });
+    writeFileSync(join(home, '.devin', 'rules', 'deploy.md'), 'Use sk-ant-' + 'A'.repeat(40) + ' for deploys\n');
+    const { result, loadErrors } = await run();
+    expect(loadErrors).toEqual([]);
+    expect(result.passed).toBe(false);
+    expect(result.evidence?.map(e => e.file)).toEqual([join(home, '.devin', 'rules', 'deploy.md')]);
+  });
+
+  it('still reports an unreadable rules directory', async () => {
+    if (process.getuid?.() === 0) return;
+    mkdirSync(join(home, '.devin', 'rules'), { recursive: true });
+    chmodSync(join(home, '.devin', 'rules'), 0o000);
+    try {
+      const { loadErrors } = await run();
+      expect(loadErrors.map(e => e.filePath)).toEqual([join(home, '.devin', 'rules')]);
+    } finally {
+      chmodSync(join(home, '.devin', 'rules'), 0o700);
+    }
   });
 });
 

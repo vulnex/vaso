@@ -1,6 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { describeEndpoint, endpoints, record, sandboxPolicies } from './shared.js';
+import { describeEndpoint, endpoints, record, policyPassMessage, sandboxPolicies } from './shared.js';
 
 const INSPECTED = new Set(['rest', 'websocket', 'graphql', 'mcp', 'json-rpc']);
 
@@ -35,7 +35,7 @@ export const osh012 = defineCheck({
       }
     }
     return h.fromEvidence([...warning, ...info], {
-      passed: 'Sandbox egress is inspected and enforced',
+      passed: await policyPassMessage(ctx, 'Sandbox egress is inspected and enforced'),
       failed: (n) => `Found ${n} OpenShell endpoint setting(s) that weaken egress inspection`,
       severity: warning.length > 0 ? undefined : 'info',
       fixDescription: 'Use protocol: rest/websocket/graphql/mcp with explicit rules or access: read-only, switch to enforcement: enforce once audited, keep TLS termination on (drop tls: skip) and avoid allow_uninspected_credentials',

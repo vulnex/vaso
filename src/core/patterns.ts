@@ -194,11 +194,32 @@ function withGlobalFlag(pattern: RegExp): RegExp {
     : new RegExp(pattern.source, pattern.flags + 'g');
 }
 
+/** Characters that end a value in a config or source line. */
+const VALUE_BOUNDARY = /[\s"'`,;:=(){}[\]<>]/;
+/** The most of a value cut by truncation a snippet keeps. */
+const CUT_VALUE_KEEP = 8;
+
+/**
+ * A snippet cut to `maxLen` characters. A value the cut falls inside keeps at
+ * most its first 8 characters, and the marker is set off by a space: an
+ * ellipsis glued to the value made `"db_password":"Zp9Yx8…` read as a
+ * placeholder (`sk-ant-...`) to the report masker, which then printed it.
+ */
+export function truncateSnippet(text: string, maxLen = 80): string {
+  if (text.length <= maxLen) return text;
+  let cut = text.slice(0, maxLen);
+  if (!VALUE_BOUNDARY.test(text[maxLen])) {
+    let start = cut.length;
+    while (start > 0 && !VALUE_BOUNDARY.test(cut[start - 1])) start--;
+    cut = cut.slice(0, Math.min(cut.length, start + CUT_VALUE_KEEP));
+  }
+  return `${cut} ...`;
+}
+
 export function redactSecretsInLine(line: string, maxLen = 80): string {
   let redacted = line;
   for (const { pattern } of API_KEY_PATTERNS) {
     redacted = redacted.replace(withGlobalFlag(pattern), (m) => redactSecret(m));
   }
-  const trimmed = redacted.trim();
-  return trimmed.length > maxLen ? trimmed.slice(0, maxLen) + '...' : trimmed;
+  return truncateSnippet(redacted.trim(), maxLen);
 }

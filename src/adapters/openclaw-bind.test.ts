@@ -7,7 +7,9 @@ import { containerEnvironment } from './openclaw-bind.js';
 import { openclawAdapter } from './openclaw.js';
 import { cfg001 } from '../checks/config/cfg-001-gateway-binding.js';
 import { cfg004 } from '../checks/config/cfg-004-tls-config.js';
-import { oc008 } from '../checks/openclaw/oc-008-dangerous-gateway-overrides.js';
+import { net001 } from '../checks/network/net-001-gateway-exposure.js';
+import { buildProbeManifest } from '../core/manifest-builder.js';
+import { oc008, openclawGatewayExposed } from '../checks/openclaw/oc-008-dangerous-gateway-overrides.js';
 import { extractPosture, findDowngrades } from '../checks/openclaw/posture.js';
 
 /** A local-scan FSProvider whose container markers are under test control. */
@@ -155,5 +157,110 @@ describe('g4-F3: OpenClaw mcp.servers in vaso mcp discovery', () => {
     expect(oc?.filePath).toBe('/home/u/.openclaw/openclaw.json');
     expect(oc?.servers.map(s => s.name).sort()).toEqual(['fs', 'web']);
     expect(oc?.servers.find(s => s.name === 'web')?.transport).toBe('sse');
+  });
+});
+
+/** A snapshot from a probe run with the current manifest: the container
+ *  markers are collected, absent ones recorded as `exists: false`. */
+function markerSnapshot(opts: { config?: Record<string, unknown>; sentinel?: string; cgroup?: string; env?: Record<string, string> } = {}): SnapshotFSProvider {
+  const files: Record<string, { content: string; mode: number; exists: boolean; contentOmitted?: boolean; omitted?: string }> = {
+    '/proc/1/cgroup': opts.cgroup === undefined ? { content: '', mode: 0, exists: false } : { content: opts.cgroup, mode: 0o444, exists: true },
+  };
+  if (opts.sentinel) files[opts.sentinel] = { content: '', mode: 0o755, exists: true, contentOmitted: true, omitted: 'metadata' };
+  if (opts.config) files['/home/u/.openclaw/openclaw.json'] = { content: JSON.stringify(opts.config), mode: 0o600, exists: true };
+  return new SnapshotFSProvider({
+    version: 1, hostname: 'h', platform: 'linux', homedir: '/home/u', timestamp: '2026-11-09T00:00:00Z',
+    privilege: { uid: 1000, username: 'u', isRoot: false, sudoAvailable: false, escalated: false, scannedUsers: [], skippedPaths: [] },
+    files, directories: { '/home/u': ['.openclaw/'], '/home/u/.openclaw': ['openclaw.json'] }, directoryModes: {}, commandOutputs: {}, env: opts.env ?? {},
+  } as unknown as ConstructorParameters<typeof SnapshotFSProvider>[0]);
+}
+
+describe('dt20 g4-F3: remote scans decide "auto" from the collected container markers', () => {
+  const auto = { gateway: { mode: 'local', bind: 'auto', auth: { mode: 'token', token: '${OPENCLAW_GATEWAY_TOKEN}' } } };
+
+  it('reads the same markers from a snapshot as from the local host', async () => {
+    expect(await containerEnvironment(markerSnapshot({ env: { FLY_MACHINE_ID: 'set', FLY_APP_NAME: 'set' } }))).toBe(true);
+    expect(await containerEnvironment(markerSnapshot({ sentinel: '/.dockerenv' }))).toBe(true);
+    expect(await containerEnvironment(markerSnapshot({ sentinel: '/run/.containerenv' }))).toBe(true);
+    expect(await containerEnvironment(markerSnapshot({ cgroup: '12:pids:/docker/0123abcd\n' }))).toBe(true);
+    // both Fly variables are required, as upstream
+    expect(await containerEnvironment(markerSnapshot({ env: { FLY_MACHINE_ID: 'set' } }))).toBe(false);
+    expect(await containerEnvironment(markerSnapshot({ cgroup: '0::/init.scope\n' }))).toBe(false);
+    expect(await containerEnvironment(markerSnapshot())).toBe(false);
+  });
+
+  it('stays undecided for a snapshot whose manifest did not ask for the markers', async () => {
+    expect(await containerEnvironment(snapshotFs({ '/.dockerenv': '' }))).toBeUndefined();
+  });
+
+  it('CFG-001 / NET-001 / CFG-004 judge a containerised remote host like the local scan', async () => {
+    const fs = markerSnapshot({ config: auto, env: { FLY_MACHINE_ID: 'set', FLY_APP_NAME: 'set' } });
+    const [inst] = await openclawAdapter.detect({ fs });
+    expect(inst.gateway?.host).toBe('0.0.0.0');
+    const c = { installation: inst, configs: inst.configFiles, platform: 'linux' as const, fs };
+    expect(await cfg001.run(c)).toMatchObject({ passed: false, severity: 'critical', fixable: true });
+    expect(await net001.run(c)).toMatchObject({ passed: false, severity: 'critical' });
+    expect((await cfg004.run(c)).passed).toBe(false);
+  });
+
+  it('a remote host that is not a container keeps "auto" informational', async () => {
+    const fs = markerSnapshot({ config: auto, cgroup: '0::/init.scope\n' });
+    const [inst] = await openclawAdapter.detect({ fs });
+    expect(inst.gateway?.host).toBe('127.0.0.1');
+    const r = await cfg001.run({ installation: inst, configs: inst.configFiles, platform: 'linux', fs });
+    expect(r).toMatchObject({ passed: false, severity: 'info' });
+    expect(r.evidence?.[0].detail).toContain('no container detected');
+  });
+
+  it('NET-001 does not call a configured "auto" gateway unconfigured when the host is unknown', async () => {
+    const r = await net001.run(ctxFor(auto, snapshotFs()));
+    expect(r.passed).toBe(true);
+    expect(r.message).not.toContain('No gateway configured');
+    expect(r.message).toContain('CFG-001');
+  });
+
+  it('the manifest collects exactly the markers, sentinels as existence only', () => {
+    const own = openclawAdapter.getProbeManifest!();
+    expect(own.envPresence).toEqual(['FLY_MACHINE_ID', 'FLY_APP_NAME']);
+    expect(own.systemPaths).toContain('/proc/1/cgroup');
+    const m = buildProbeManifest([openclawAdapter]);
+    for (const sentinel of ['/.dockerenv', '/run/.containerenv', '/var/run/.containerenv']) {
+      expect(m.metadataGlobPatterns).toContain(sentinel);
+      expect([...m.filePaths, ...m.globPatterns, ...m.systemPaths!]).not.toContain(sentinel);
+    }
+    // presence only, no FLY_ prefix at all (FLY_API_TOKEN is a credential, and
+    // a prefix ships FLY_MACHINE_ID_* values)
+    expect(m.envPrefixes.filter(p => p.startsWith('FLY'))).toEqual([]);
+    expect(m.envPresence).toEqual(['FLY_MACHINE_ID', 'FLY_APP_NAME']);
+  });
+});
+
+describe('dt20 g4-F4: an unset gateway.bind is "auto" inside a container', () => {
+  const unset = { gateway: { mode: 'local', auth: { mode: 'token', token: '${OPENCLAW_GATEWAY_TOKEN}' } } };
+
+  it('resolves to 0.0.0.0 in a container, loopback outside or when unknown', async () => {
+    const inside = markerSnapshot({ config: unset, sentinel: '/.dockerenv' });
+    const [a] = await openclawAdapter.detect({ fs: inside });
+    expect(a.gateway?.host).toBe('0.0.0.0');
+    const r = await cfg001.run({ installation: a, configs: a.configFiles, platform: 'linux', fs: inside });
+    expect(r).toMatchObject({ passed: false, severity: 'critical' });
+    const [b] = await openclawAdapter.detect({ fs: markerSnapshot({ config: unset }) });
+    expect(b.gateway?.host).toBe('127.0.0.1');
+    expect(openclawAdapter.getGatewayInfo(unset)?.host).toBe('127.0.0.1');
+  });
+
+  it('Tailscale serve/funnel keeps an unset bind on loopback (upstream resolves it before the container default)', async () => {
+    const ts = { gateway: { ...unset.gateway, tailscale: { mode: 'serve' } } };
+    const [inst] = await openclawAdapter.detect({ fs: markerSnapshot({ config: ts, sentinel: '/.dockerenv' }) });
+    expect(inst.gateway?.host).toBe('127.0.0.1');
+    const off = { gateway: { ...unset.gateway, tailscale: { mode: 'off' } } };
+    const [inst2] = await openclawAdapter.detect({ fs: markerSnapshot({ config: off, sentinel: '/.dockerenv' }) });
+    expect(inst2.gateway?.host).toBe('0.0.0.0');
+  });
+
+  it('OC-008 counts it as reachable beyond the host in a container only', () => {
+    expect(openclawGatewayExposed(unset, true)).toBe(true);
+    expect(openclawGatewayExposed(unset, false)).toBe(false);
+    expect(openclawGatewayExposed(unset, undefined)).toBe(false);
   });
 });

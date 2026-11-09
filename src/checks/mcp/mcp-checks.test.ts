@@ -238,6 +238,18 @@ const safeOAuthSources: MCPServerSource[] = [
 
 // ==================== MCP-001: Config Discovery ====================
 describe('MCP-001: Config Discovery', () => {
+  // dt20 g3-F6: the inventory printed path credentials in full
+  it('masks credentials in server URLs and arguments', async () => {
+    const secret = 'NjQ4ZTk2YmUtZmY3Ny00ZDQ5LWE1ZjMtYjc2ZTkzN2E2NTRhOjE2MzQ1Njc4OQ==';
+    const result = await mcp001.run(makeContext({ mcpConfigs: [{ source: 'Cursor', filePath: '/h/.cursor/mcp.json', servers: [
+      { name: 'zapier', url: `https://mcp.zapier.com/api/mcp/s/${secret}/mcp`, transport: 'streamable-http' },
+      { name: 'tg', command: 'npx', args: ['-y', 'tg-mcp@1.0.0', '--bot-token=1234567890:AAH9xQz7Kp3LmN8vR2tW6yB4cD1fG5hJ0kE'], transport: 'stdio' },
+    ] }] }));
+    expect(result.evidence?.[0].detail).toContain('URL: https://mcp.zapier.com/api/mcp/s/***/mcp');
+    expect(result.evidence?.[1].detail).toContain('Args: -y tg-mcp@1.0.0 --bot-token=***');
+    expect(JSON.stringify(result.evidence)).not.toMatch(/NjQ4ZTk2|AAH9xQz7/);
+  });
+
   it('reports info for found servers', async () => {
     const ctx = makeContext({ mcpConfigs: insecureConfigs });
     const result = await mcp001.run(ctx);
@@ -2373,6 +2385,21 @@ describe('MCP-029 Remote Server Without Authentication', () => {
   function cfg(server: MCPConfig['servers'][number]): MCPConfig {
     return { source: 'project', filePath: '/tmp/mcp.json', servers: [server] };
   }
+
+  // dt20 g3-F6: a secret URL carries its credential in the path
+  it('passes a server whose URL path is the credential (MCP-003 reports it)', async () => {
+    for (const url of [
+      'https://mcp.zapier.com/api/mcp/s/NjQ4ZTk2YmUtZmY3Ny00ZDQ5LWE1ZjMtYjc2ZTkzN2E2NTRhOjE2MzQ1Njc4OQ==/mcp',
+      'https://actions.zapier.com/mcp/sk-ak-Zq7XyR9kLmN3pQ8sT2vW5bC6dF1gH4jK/sse',
+      'https://mcp.example.com/mcp#access_token=7a9f3c1e5b2d4f6a8c0e1b3d5f7a9c2e',
+    ]) {
+      const result = await mcp029.run(makeContext({ mcpConfigs: [cfg({ name: 'z', url, transport: 'sse' })] }));
+      expect(result.passed).toBe(true);
+      const exposed = await mcp003.run(makeContext({ mcpConfigs: [cfg({ name: 'z', url, transport: 'sse' })] }));
+      expect(exposed.passed).toBe(false);
+      expect(JSON.stringify(exposed.evidence)).not.toMatch(/NjQ4ZTk2|Zq7XyR9k|7a9f3c1e/);
+    }
+  });
 
   it('reports a remote https server with no static credential as info (client may use OAuth)', async () => {
     const result = await mcp029.run(makeContext({

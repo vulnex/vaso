@@ -315,13 +315,21 @@ describe('GEM-009: Auto-Edit Mode', () => {
 describe('GEM-010: Memory File Secrets', () => {
   const check = geminiCliChecks.find(c => c.id === 'GEM-010')!;
 
-  it('flags OpenRouter key in memory.md', async () => {
+  it('flags OpenRouter key in GEMINI.md', async () => {
     const fs = makeFs({
-      access: vi.fn(async (p: string) => p.endsWith('memory.md')),
+      access: vi.fn(async (p: string) => p.endsWith('GEMINI.md')),
       readFile: vi.fn(async () => 'My key: sk-or-v1-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'),
     });
     const result = await check.run(makeCtx([], fs));
     expect(result.passed).toBe(false);
+  });
+
+  // Gemini CLI never reads ~/.gemini/memory.md (deep test 2026-11-09)
+  it('does not read memory.md', async () => {
+    const access = vi.fn(async () => true);
+    const readFile = vi.fn(async () => '# notes\n');
+    await check.run(makeCtx([], makeFs({ access, readFile })));
+    expect(readFile.mock.calls.map(c => String(c[0]))).not.toContainEqual(expect.stringMatching(/memory\.md$/));
   });
 
   it('passes on clean memory files', async () => {
@@ -388,6 +396,22 @@ describe('deep-test 2026-10-15 regressions', () => {
       mcpServers: { remote: { headers: { Authorization: 'Bearer $MCP_TOKEN' } } },
     })]));
     expect(result.passed).toBe(true);
+  });
+
+  // dt20 g6-F1/F2: secret names with known/hex/UUID values were missed; public values were critical
+  it('GEM-001 judges secret-named keys by format and randomness, not a fixed entropy bar', async () => {
+    const result = await byId('GEM-001').run(makeCtx([makeConfig('settings.json', { env: {
+      GITLAB_TOKEN: 'glpat-Ab3De5Fg7Hj9Kl1Mn3Pq',
+      AWS_ACCESS_KEY: 'AKIAZ7Q3LMN4OPQ5RST6',
+      OPENWEATHER_API_KEY: '3f9a1c7e2b8d4f6a0c5e9b1d7f3a8c2e',
+      LANGFUSE_SECRET_KEY: 'sk-lf-1c2d3e4f-5a6b-7c8d-9e0f-a1b2c3d4e5f6',
+      SSH_PUBLIC_KEY: 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGq8vJ3kLm9Pq2Rs5Tv8Wy1Ab4Cd6Ef0GhJkLmNoPqRs alice@laptop',
+      OAUTH_CLIENT_ID: '123456789012-a1b2c3d4e5f6g7h8i9j0klmnopqrstuv.apps.googleusercontent.com',
+      TOKEN_SECRET_ARN: 'arn:aws:secretsmanager:us-east-1:123456789012:secret:prod/gemini-AbCdEf',
+    } })]));
+    expect(result.evidence?.map(e => e.snippet.split('=')[0])).toEqual([
+      'env.GITLAB_TOKEN', 'env.AWS_ACCESS_KEY', 'env.OPENWEATHER_API_KEY', 'env.LANGFUSE_SECRET_KEY',
+    ]);
   });
 
   it('GEM-003 flags an MCP server with trust: true (skips tool-call confirmation)', async () => {

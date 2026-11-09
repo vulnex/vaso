@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { findArgSecrets, findUrlSecrets, headerArg } from './config-secrets.js';
+import { findArgSecrets, findUrlSecrets, headerArg, headerSecret, maskArgSecrets, maskUrlSecrets } from './config-secrets.js';
 
 const GHP = 'ghp_' + 'A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8';
 const OPENAI = 'sk-proj-' + 'Zq3xV9mK2pL8nR4tW7yB1cD6fG0hJ5sA';
@@ -171,5 +171,120 @@ describe('headerArg (linear header-argument parsing, dt17)', () => {
     const r = findArgSecrets(['--header', `X-Api-Key: ${OPENAI}`]);
     expect(r).toHaveLength(1);
     expect(noValue(r, OPENAI)).toBe(true);
+  });
+});
+
+// dt20 g3-F6: credentials in the URL path or fragment were neither found nor masked
+describe('findUrlSecrets: secret paths and fragments', () => {
+  const ZAPIER_KEY = 'sk-ak-' + 'Zq7XyR9kLmN3pQ8sT2vW5bC6dF1gH4jK';
+  const ZAPIER_S = 'NjQ4ZTk2YmUtZmY3Ny00ZDQ5LWE1ZjMtYjc2ZTkzN2E2NTRhOjE2MzQ1Njc4OQ==';
+
+  it.each([
+    [`https://actions.zapier.com/mcp/${ZAPIER_KEY}/sse`, ZAPIER_KEY, /Zapier/],
+    [`https://mcp.zapier.com/api/mcp/s/${ZAPIER_S}/mcp`, ZAPIER_S, /Zapier MCP server secret in URL path/],
+    ['https://hooks.slack.com/services/T01ABCDEF/B02GHIJKL/Zq8xL2vN7pR4tW9yB3dF6hJ1', 'T01ABCDEF/B02GHIJKL/Zq8xL2vN7pR4tW9yB3dF6hJ1', /Slack webhook/],
+    ['https://discord.com/api/webhooks/123456789012345678/Ab3De5Fg7Hj9Kl1Mn3Pq5Rs7Tu9Vw1Xy', 'Ab3De5Fg7Hj9Kl1Mn3Pq5Rs7Tu9Vw1Xy', /Discord/],
+    ['https://mcp.example.com/mcp#access_token=7a9f3c1e5b2d4f6a8c0e1b3d5f7a9c2e', '7a9f3c1e5b2d4f6a8c0e1b3d5f7a9c2e', /fragment "access_token"/],
+    ['https://mcp.pipedream.example/v1/Qm8xR2vN7pL4tW9yB3dF6hJ1kZ5n/sse', 'Qm8xR2vN7pL4tW9yB3dF6hJ1kZ5n', /random token in URL path/],
+    // g8 re-verify shapes
+    ['https://mcp.example.com/k/29a95249f512c17b8ed411fa644d35db41d94e5e/sse', '29a95249f512c17b8ed411fa644d35db41d94e5e', /hex token in MCP\/webhook URL path/],
+    ['https://mcp.example.com/k/9FSUuErsEz5jhy0I9lO7.F3vlfFrGYJ3GxeYYXwSL/sse', '9FSUuErsEz5jhy0I9lO7.F3vlfFrGYJ3GxeYYXwSL', /random token/],
+    ['https://mcp.example.com/k/QcWtxJTQr1FqXSTs98vP~lL2aEJXquQrDs0GPRZww/sse', 'QcWtxJTQr1FqXSTs98vP~lL2aEJXquQrDs0GPRZww', /random token/],
+    ['https://mcp.example.com/k/rPwV81Aw71l33SCx9vHj%2FHkm1x72EsSfUQUAkNX7L/sse', 'rPwV81Aw71l33SCx9vHj%2FHkm1x72EsSfUQUAkNX7L', /random token/],
+    ['https://mcp.example.com/u/eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxN99mhWp708.DwGw5HqXDgLVXZx3scB8fnvGNx6jvr/sse', 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxN99mhWp708.DwGw5HqXDgLVXZx3scB8fnvGNx6jvr', /JWT/],
+    ['https://hooks.zapier.com/hooks/catch/1234567/70t9rbmk/', '70t9rbmk', /Zapier webhook key/],
+    ['https://api.telegram.org/bot123456789:LCNPloWRlOTcEokd5ihu9lEmJcADwyQNeLn/sendMessage', '123456789:LCNPloWRlOTcEokd5ihu9lEmJcADwyQNeLn', /Telegram/],
+    ['https://x.example.com/p;jsessionid=guK6NIjuO45KyBBoFsETyy926kMMqVtF', 'guK6NIjuO45KyBBoFsETyy926kMMqVtF', /jsessionid/],
+  ])('finds and masks the credential in %s', (url, value, kind) => {
+    const found = findUrlSecrets(url);
+    expect(found).toHaveLength(1);
+    expect(found[0].kind).toMatch(kind);
+    expect(found[0].value).toBe(value);
+    expect(found[0].masked).not.toContain(value);
+    expect(maskUrlSecrets(url)).toBe(url.replace(value, '***'));
+  });
+
+  it.each([
+    'https://mcp.example.com/v1/projects/3f9a1c7e-2b8d-4f6a-0c5e-9b1d7f3a8c2e/mcp',
+    'https://mcp.example.com/repos/9f86d081884c7d659a2feaa0c55ad015a3bf4f1b/sse',
+    'https://mcp.example.com/My-Project-2024-Server-Name/mcp',
+    'https://mcp.zapier.com/api/v1/connect',
+    'https://docs.example.com/guide#section-authentication',
+    'https://mcp.example.com/mcp#token=${MCP_TOKEN}',
+    // document IDs on content hosts, commit SHAs and digests, names
+    'https://docs.google.com/document/d/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms/edit',
+    'https://drive.google.com/file/d/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms/view',
+    'https://www.figma.com/design/Ab3De5Fg7Hj9Kl1Mn3Pq5Rs/Design',
+    'https://www.notion.so/My-Page-8a7c2b1e1234abc9def0123456789abX',
+    'https://github.com/vulnex/vaso/commit/8fa17d3e1b2c4d5e6f708192a3b4c5d6e7f80912',
+    'https://mcp.example.com/commit/8fa17d3e1b2c4d5e6f708192a3b4c5d6e7f80912',
+    'https://cdn.example.com/blobs/29a95249f512c17b8ed411fa644d35db41d94e5e',
+    'https://cdn.jsdelivr.net/npm/Package-Name_Version2Beta3Gamma4/dist/index.js',
+    'https://en.wikipedia.org/wiki/Model_Context_Protocol_Specification2025',
+  ])('leaves %s alone', (url) => {
+    expect(findUrlSecrets(url)).toEqual([]);
+    expect(maskUrlSecrets(url)).toBe(url);
+  });
+
+  it('masks URL arguments too', () => {
+    const args = ['-y', 'slack-hook-mcp@1.0.0', 'https://hooks.slack.com/services/T00000000/B0123456789ABCDEFGHIJKLMNOP'];
+    expect(maskArgSecrets(args)).toEqual(['-y', 'slack-hook-mcp@1.0.0', 'https://hooks.slack.com/services/***']);
+  });
+});
+
+describe('headerSecret', () => {
+  it.each([
+    ['X-Api-Key', 'wJalrXUtnFEMI-K7MDENG-bPxRfiCYzz9a8b7c6d'],
+    ['Authorization', 'Bearer abcdef0123456789xyz'],
+    ['Authorization', `Bearer ${OPENAI}`],
+    ['X-Auth-Token', 'q8Zr2Lm9Xc4Vb7Nt1Kp3'],
+  ])('flags %s: %s', (name, value) => {
+    expect(headerSecret(name, value)).toBeDefined();
+  });
+
+  it.each([
+    ['Authorization', 'Bearer ${API_TOKEN}'],
+    ['X-Api-Key', '$MY_KEY'],
+    ['X-Api-Key', '<your-api-key>'],
+    ['Accept', 'application/json'],
+    ['X-Request-Id', 'q8Zr2Lm9Xc4Vb7Nt1Kp3'],
+  ])('leaves %s: %s alone', (name, value) => {
+    expect(headerSecret(name, value)).toBeUndefined();
+  });
+});
+
+describe('dt20 re-verify 4: hex IDs in MCP URL paths', () => {
+  it('flags a hex key in the key position but not resource IDs or commit SHAs', () => {
+    const key = 'f3c9a1b7e5d2468a9b0c1d2e3f405162';
+    expect(findUrlSecrets(`https://mcp.example.com/${key}/sse`).length).toBeGreaterThan(0);
+    expect(findUrlSecrets(`https://hooks.example.com/hooks/${key}`).length).toBeGreaterThan(0);
+    expect(findUrlSecrets(`https://api.example.com/mcp/projects/5f2b8c1e9a4d4e6fb1c27d8e9f0a1b2c/sse`)).toEqual([]);
+    expect(findUrlSecrets(`https://mcp.example.com/raw/${'a1b2c3d4e5'.repeat(4)}/mcp`)).toEqual([]);
+  });
+});
+
+describe('dt20 re-verify 4: credentials in inline JSON arguments', () => {
+  it('finds and masks a credential-named pair inside a JSON argument', () => {
+    const args = ['srv.js', '--config', '{"token":"Wq2Er3Ty4Ui5Op6As7Df8Gh9","region":"eu-west-1"}'];
+    expect(findArgSecrets(args).map(s => s.value)).toEqual(['Wq2Er3Ty4Ui5Op6As7Df8Gh9']);
+    expect(maskArgSecrets(args)[2]).toBe('{"token":"***","region":"eu-west-1"}');
+    expect(findArgSecrets(['--config', '{"token_type":"bearer_token_value","password_hash":"$2b$12$abcdefghijkl"}'])).toEqual([]);
+  });
+});
+
+describe('dt20 re-verify 5: Teams incoming webhooks', () => {
+  it('finds and masks the IncomingWebhook key', () => {
+    const key = '6c90b94f1a2b3c4d5e6f7a8b9c0d5706';
+    const url = `https://acme.webhook.office.com/webhookb2/11111111-2222-3333-4444-555555555555@66666666-7777-8888-9999-000000000000/IncomingWebhook/${key}/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee`;
+    expect(findUrlSecrets(url).map(s => s.value)).toContain(key);
+    expect(maskUrlSecrets(url)).not.toContain(key);
+  });
+});
+
+describe('dt20 re-verify 5: escaped inline JSON in a shell argument', () => {
+  it('finds and masks a credential inside backslash-escaped JSON', () => {
+    const args = ['-c', 'run --cfg "{\\"apiKey\\":\\"Rt5Yu6Io7Pa8Sd9Fg0Hj1Kl2\\"}"'];
+    expect(findArgSecrets(args).map(s => s.value)).toEqual(['Rt5Yu6Io7Pa8Sd9Fg0Hj1Kl2']);
+    expect(maskArgSecrets(args)[1]).not.toContain('Rt5Yu6Io7Pa8');
   });
 });

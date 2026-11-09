@@ -245,3 +245,61 @@ describe('masking: no token tail stays readable (dt16)', () => {
     expect(maskCredentialsInText(`token ${long}.`)).toBe('token ***.');
   });
 });
+
+describe('masking: nested one-line JSON, quoted headers, truncated values (dt20)', () => {
+  const S = 'CUSTOMsecretVALUE123456789';
+
+  it('checks every key of a nested object, not just the outer one (g8-F1, g5-F1)', async () => {
+    const { maskCredentialsInLine } = await import('./serialize.js');
+    expect(maskCredentialsInLine(`{"providers":{"custom":{"apiKey":"${S}"}}}`)).toBe('{"providers":{"custom":{"apiKey":"***"}}}');
+    expect(maskCredentialsInLine(`{"env":{"ANTHROPIC_AUTH_TOKEN":"${S}","HTTPS_PROXY":"http://91.92.242.30:8080"}}`))
+      .toBe('{"env":{"ANTHROPIC_AUTH_TOKEN":"***","HTTPS_PROXY":"http://91.92.242.30:8080"}}');
+    expect(maskCredentialsInLine(`{"gateway":{"auth":{"token":"${S}"}}}`)).not.toContain(S);
+    expect(maskCredentialsInLine(`servers: [{"name":"a","env":{"GITHUB_TOKEN":"${S}"}}]`)).not.toContain(S);
+  });
+
+  it('masks JSON and TOML Authorization headers (g8-F1)', async () => {
+    const { maskCredentialsInLine, maskCredentialsInText } = await import('./serialize.js');
+    expect(maskCredentialsInLine(`fetch(u, {headers: {"Authorization": "Bearer ${S}"}})`)).toContain('"Authorization": "Bearer ***"');
+    expect(maskCredentialsInText(`"Authorization" = "Bearer ${S}"`)).toBe('"Authorization" = "Bearer ***"');
+    expect(maskCredentialsInText(`'x-api-key': '${S}'`)).not.toContain(S);
+  });
+
+  it('masks a value cut by snippet truncation (g8-F2)', async () => {
+    const { maskCredentialsInLine } = await import('./serialize.js');
+    const { redactSecretsInLine, truncateSnippet } = await import('../core/patterns.js');
+    const pw = 'Zp9Yx8Wv7Ut6Sr5Qp4On3Ml2Kj1Ih0Gf9Ed8Cb7Aa6Ee5';
+    const line = `{"note":"sk-proj-${'Q7rT2mZ9kLp4'.repeat(3)}","db_password":"${pw}"}`;
+    const out = maskCredentialsInLine(redactSecretsInLine(line));
+    expect(out).not.toContain(pw.slice(0, 6));
+    expect(out).toContain('"db_password":"***');
+    expect(maskCredentialsInLine(truncateSnippet(`const password = "${pw}${pw}${pw}"`))).not.toContain(pw.slice(0, 6));
+  });
+
+  it('masks YAML anchors/tags/flow maps, multi-word values, escaped quotes, TOML triple quotes and more names (g8-F4)', async () => {
+    const { maskCredentialsInLine } = await import('./serialize.js');
+    for (const line of [
+      `token: &tok ${S}`, `token: !!str ${S}`, `creds: {token: ${S}, user: bob}`, `password: correct horse ${S}`,
+      `password: abc#${S}`, `password: abc,${S}`, `"password":"ab\\"${S}"`, `password = """${S}"""`,
+      `clientKey: ${S}`, `accessKey: ${S}`, `encryptionKey: ${S}`, `passphrase: ${S}`,
+      '"id": "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV"',
+      `"cert": "-----BEGIN PRIVATE KEY-----\\nMIIEv${S}\\n-----END PRIVATE KEY-----"`,
+    ]) {
+      const out = maskCredentialsInLine(line);
+      expect(out, line).not.toContain(S);
+      expect(out, line).not.toContain('SflKxwRJSMeKKF2QT4fw');
+    }
+    expect(maskCredentialsInLine(`password: ${S} # rotated monthly`)).toBe('password: *** # rotated monthly');
+    expect(maskCredentialsInLine(`list_tokens: [${S}, \${X}]`)).toBe('list_tokens: [***, ${X}]');
+    expect(maskCredentialsInLine(`{"api_keys":["${S}"],"scopes":["read"]}`)).toBe('{"api_keys":["***"],"scopes":["read"]}');
+    expect(maskCredentialsInLine('  0OGr4hTxoF54Fzbka8FRCztUjAwyuh1vauWv1zh87mTa5Vsqxezy3Lex7BWr2drg')).toBe('  ***');
+  });
+
+  it('leaves settings named after credentials readable', async () => {
+    const { maskCredentialsInLine } = await import('./serialize.js');
+    for (const line of ['max_tokens: 4096', '"maxTokens": 10', 'tokens_per_minute: 100', 'tokenizer: cl100k_base',
+      'passwordPolicy: strict', 'sessionTimeout: 30', 'token: ${TOKEN}', 'password = getpass("x")']) {
+      expect(maskCredentialsInLine(line)).toBe(line);
+    }
+  });
+});

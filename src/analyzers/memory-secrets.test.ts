@@ -38,10 +38,67 @@ describe('scanMemorySecrets', () => {
   });
 
   it('a high-entropy string with no known prefix is a warning', () => {
-    const ev = scanMemorySecrets('/r/AGENTS.md', 'token: "MuK5z1eQATYLId92VoWwSfcrv7qmRBnh6yOHkxsjtP3abFCNg4lXGi0E"');
+    const ev = scanMemorySecrets('/r/AGENTS.md', 'seed "MuK5z1eQATYLId92VoWwSfcrv7qmRBnh6yOHkxsjtP3abFCNg4lXGi0E"');
     expect(ev).toHaveLength(1);
     expect(ev[0].detail).toMatch(/High-entropy/);
     expect(memorySecretSeverity(ev)).toBe('warning');
+  });
+
+  // dt20 g6-F4: keyed credentials in prose were missed (too short or unquoted
+  // for the entropy scan)
+  it.each([
+    ['DB_PASSWORD=Pq7Wz2Lk9Xv4Rt8Ns3Jm6Hb1', 'DB_PASSWORD', 'Pq7Wz2Lk9Xv4Rt8Ns3Jm6Hb1'],
+    ['- api_key: Mq3Zx8Lp2Vn7Rk4Tw9Yb6Hd1Fs5Gj0', 'api_key', 'Mq3Zx8Lp2Vn7Rk4Tw9Yb6Hd1Fs5Gj0'],
+    ['Use `"client_secret": "Kp4Ry7Ws2Zn9Lq3Vx8Mb5Td1"` for staging.', 'client_secret', 'Kp4Ry7Ws2Zn9Lq3Vx8Mb5Td1'],
+    ['curl -H "Authorization: Bearer Zr8Ty3Uw6Qa1Sx4Dc7Fv9Gb2Hn5Jm0Kl" https://api.example.com', 'Authorization', 'Zr8Ty3Uw6Qa1Sx4Dc7Fv9Gb2Hn5Jm0Kl'],
+    ['* token = "Mq7Wz2Lk9Xv4Rt8Ns3JmQ"', 'token', 'Mq7Wz2Lk9Xv4Rt8Ns3JmQ'],
+    ['| API_KEY | Oq7Wz2Lk9Xv4Rt8Ns3JmPa |', 'API_KEY', 'Oq7Wz2Lk9Xv4Rt8Ns3JmPa'],
+    ['export GITHUB_TOKEN="Qq7Wz2Lk9Xv4Rt8Ns3JmRb"', 'GITHUB_TOKEN', 'Qq7Wz2Lk9Xv4Rt8Ns3JmRb'],
+    ['**API key**: Uq7Wz2Lk9Xv4Rt8Ns3JmVc', 'API key', 'Uq7Wz2Lk9Xv4Rt8Ns3JmVc'],
+    ['WEBHOOK_SECRET: 3f9a1c7e2b8d4f6a0c5e9b1d7f3a8c2e', 'WEBHOOK_SECRET', '3f9a1c7e2b8d4f6a0c5e9b1d7f3a8c2e'],
+  ])('flags the keyed credential in %s (warning, value never quoted)', (line, name, value) => {
+    const ev = scanMemorySecrets('/r/CLAUDE.md', `# notes\n${line}\n`);
+    expect(ev).toHaveLength(1);
+    expect(ev[0].line).toBe(2);
+    expect(ev[0].snippet).toBe(`${name}: ${value.slice(0, 4)}…${value.slice(-4)} (${value.length} chars)`);
+    expect(memorySecretSeverity(ev)).toBe('warning');
+  });
+
+  it.each([
+    'password: see the vault entry',
+    'token: ${GITHUB_TOKEN}',
+    'api_key: $OPENAI_API_KEY',
+    'client_secret: op://Private/app/secret',
+    'API_KEY=your-api-key-here-1234',
+    'SECRET_ARN=arn:aws:secretsmanager:us-east-1:123456789012:secret:prod-AbCdEf',
+    'token_url: https://auth.example.com/oauth2/token',
+    'SSH_PUBLIC_KEY: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGq8vJ3kLm9Pq2Rs5Tv8Wy1Ab4Cd6Ef0GhJkLmNoPqRs',
+    'password: hunter2hunter2',
+    'The token cache key is gemini-session-cache-v2',
+    'Tokens: max_tokens=4096 per request',
+    'const token = getTokenFor2024Release(userId)',
+    'password = os.environ["DB_PASSWORD_2024"]',
+    // g6 re-verify: password hashes and digests are not the secret
+    'password_hash: bcrypt$2b$12$KIXQJ3wq0y8sYlE2zFh6Ue',
+    'password: $argon2id$v=19$m=65536,t=3,p=4$c2FsdHNhbHQ$Zq8xL2vN7pR4tW9yB3dF6hJ1',
+    'cache_key: sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+    'key_fingerprint: Zq8xL2vN7pR4tW9yB3dF6hJ1kM5n',
+  ])('does not flag %s', (line) => {
+    expect(scanMemorySecrets('/r/CLAUDE.md', line)).toEqual([]);
+  });
+
+  it('reads a quoted value to its closing quote (snippet length is the whole value)', () => {
+    for (const [line, len] of [['signing_secret: "L1mHoOsFaQfDPr;AJ71fTquWoGsbe"', 29], ['signing_secret: "KXgzg2sye9b2Ra nn76dEyTzAeKOm"', 29], ["token: 'Ab3De5Fg7Hj9Kl1Mn3Pq'", 20]] as const) {
+      const ev = scanMemorySecrets('/r/CLAUDE.md', line);
+      expect(ev).toHaveLength(1);
+      expect(ev[0].snippet).toMatch(new RegExp(`\\(${len} chars\\)$`));
+    }
+  });
+
+  it('reads `*` bullet lines with the entropy scan (they are prose, not comment continuations)', () => {
+    const ev = scanMemorySecrets('/r/CLAUDE.md', '* seed "MuK5z1eQATYLId92VoWwSfcrv7qmRBnh6yOHkxsjtP3abFCNg4lXGi0E"');
+    expect(ev).toHaveLength(1);
+    expect(ev[0].detail).toMatch(/High-entropy/);
   });
 
   it('a mitigated credential does not make the result critical', () => {
@@ -91,5 +148,16 @@ describe('memory-file secret checks', () => {
   it.each(CHECKS)('%s passes clean prose', async (_id, check, agent, dir) => {
     const r = await check.run(ctxWith(agent, dir, '# Notes\n\nRun the tests before committing.\n'));
     expect(r.passed).toBe(true);
+  });
+});
+
+describe('dt20 re-verify 5: Airtable personal access tokens', () => {
+  const pat = `patQ7wX2mZ9kL4vB8.${'3f9a1c7e5b2d4680'.repeat(4)}`;
+  it('is a known key format in prose and under a key name', () => {
+    const bare = scanMemorySecrets('/r/CLAUDE.md', `Use ${pat} for the base.\n`);
+    expect(bare.map(e => e.detail)).toEqual(['Plaintext Airtable personal access token in memory file']);
+    const keyed = scanMemorySecrets('/r/CLAUDE.md', `AIRTABLE_TOKEN=${pat}\n`);
+    expect(keyed[0].detail).toBe('Plaintext Airtable personal access token in memory file');
+    expect(JSON.stringify([bare, keyed])).not.toContain(pat.slice(0, 16));
   });
 });

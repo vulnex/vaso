@@ -71,11 +71,13 @@ describe('probe manifest coverage', () => {
   });
 
   it('NanoClaw: clone parents are matched against the listing, never stat\'ed by a case-folding literal', () => {
-    const globs = nanoclawAdapter.getProbeManifest!().globPatterns.filter(g => g.includes('rojects'));
+    // every-case classes: ~/Projects, ~/projects, ~/GitHub, ~/SRC all match
+    const globs = nanoclawAdapter.getProbeManifest!().globPatterns.filter(g => g.includes('[rR][oO][jJ]'));
     expect(globs.length).toBeGreaterThan(0);
     for (const g of globs) {
-      expect(g).toContain('[P]rojects');
-      expect(g).not.toMatch(/[{,]projects[,}]/i);
+      expect(g).toContain('[pP][rR][oO][jJ][eE][cC][tT][sS]');
+      expect(g).toContain('[gG][iI][tT][hH][uU][bB]');
+      expect(g).not.toMatch(/[{,](projects|github|src)[,}]/i);
     }
   });
 });

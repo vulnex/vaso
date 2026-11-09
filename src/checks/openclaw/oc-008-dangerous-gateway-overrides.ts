@@ -1,7 +1,7 @@
 import type { Evidence, ParsedConfig, Severity } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { getNestedValue } from '../../core/utils.js';
-import { containerEnvironment } from '../../adapters/openclaw-bind.js';
+import { containerEnvironment, openclawEffectiveBind } from '../../adapters/openclaw-bind.js';
 
 /**
  * Overrides OpenClaw's own `openclaw security audit` flags (2026.9.4,
@@ -42,12 +42,13 @@ const DANGEROUS_NODE_COMMANDS = new Set([
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', 'localhost']);
 
 /**
- * Reachable beyond this host: a non-loopback bind (unset = loopback) or
- * Tailscale serve/funnel. "auto" is 0.0.0.0 only inside a container
- * (`inContainer` from containerEnvironment(); unknown counts as loopback).
+ * Reachable beyond this host: a non-loopback bind (unset = loopback, "auto"
+ * in a container) or Tailscale serve/funnel. "auto" is 0.0.0.0 only inside a
+ * container (`inContainer` from containerEnvironment(); unknown counts as
+ * loopback).
  */
 export function openclawGatewayExposed(data: Record<string, unknown>, inContainer?: boolean): boolean {
-  const bind = getNestedValue(data, 'gateway.bind');
+  const bind = openclawEffectiveBind(data, inContainer);
   const mode = typeof bind === 'string' ? bind.trim().toLowerCase() : 'loopback';
   if (mode === 'auto' && !inContainer) return tailscaleExposed(data);
   if (mode === 'custom') {

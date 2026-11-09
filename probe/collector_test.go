@@ -637,3 +637,28 @@ func TestEnvOriginOnlyKeepsSchemeHostPort(t *testing.T) {
 		t.Error("unset origin-only variable was added")
 	}
 }
+
+// envPresence records that a variable is set, never its value; a prefix that
+// would also match it doesn't bring the value back (g4: FLY_* markers).
+func TestEnvPresenceRecordsOnlyThatAVariableIsSet(t *testing.T) {
+	t.Setenv("VASOTEST_FLY_MACHINE_ID", "m-PlainValueShouldNotShip123")
+	t.Setenv("VASOTEST_FLY_APP_NAME", "   ")
+	t.Setenv("VASOTEST_FLY_MACHINE_ID_X", "PlainValueShouldNotShip456")
+	snap := Collect(ProbeManifest{
+		EnvPrefixes: []string{"VASOTEST_FLY_APP"},
+		EnvPresence: []string{"VASOTEST_FLY_MACHINE_ID", "VASOTEST_FLY_APP_NAME", "VASOTEST_UNSET_X"},
+	}, false)
+	if got := snap.Env["VASOTEST_FLY_MACHINE_ID"]; got != envPresentValue {
+		t.Fatalf("set variable recorded as %q", got)
+	}
+	for _, name := range []string{"VASOTEST_FLY_APP_NAME", "VASOTEST_UNSET_X", "VASOTEST_FLY_MACHINE_ID_X"} {
+		if v, ok := snap.Env[name]; ok {
+			t.Fatalf("%s recorded (%q)", name, v)
+		}
+	}
+	for _, v := range snap.Env {
+		if strings.Contains(v, "PlainValueShouldNotShip") {
+			t.Fatalf("a value shipped: %v", snap.Env)
+		}
+	}
+}

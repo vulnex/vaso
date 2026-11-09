@@ -289,6 +289,8 @@ export const devinAdapter: AgentAdapter = {
       directoryListings: [
         '~/.config/devin',
         '~/.local/share/devin',
+        // DEV-007 lists it: an unreadable rules dir is reported, not empty
+        '~/.devin/rules',
       ],
       envPrefixes: ['DEVIN_', 'XDG_'],
       systemPaths: SYSTEM_CLI_PATHS,

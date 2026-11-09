@@ -56,8 +56,17 @@ export interface MCPServerSource {
   dataFiles?: MCPDataFile[];
   /** `--resolve-packages`: why the package's source could not be downloaded (no source then). */
   resolveFailure?: PackageFetchFailure;
-  /** A local server whose source is there but could not be read (EACCES): why. No source then. */
+  /**
+   * A local server whose source is there but could not be read (EACCES, the
+   * size limits): why. With `sourceCode`, part of it — helper modules — was
+   * not read.
+   */
   readFailure?: string;
+  /**
+   * The local server is a compiled binary (a Go/Rust executable): its format.
+   * No source then — reported as an inventory note, not a failed read.
+   */
+  compiledBinary?: string;
   /** Packages the server ships with (its manifest/lockfile/installed copies), for MCP-027. */
   dependencies?: ServerDependency[];
   /**

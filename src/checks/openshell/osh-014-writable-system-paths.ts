@@ -1,6 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { record, sandboxPolicies } from './shared.js';
+import { record, policyPassMessage, sandboxPolicies } from './shared.js';
 
 // Writable paths that let the agent replace binaries, trust stores or other
 // users' data. `/` itself is rejected by the gateway; these are accepted.
@@ -31,7 +31,7 @@ export const osh014 = defineCheck({
       evidence.push({ file: ref.file, snippet: `filesystem_policy.read_write: ${hits.join(', ')}`, detail: `${ref.source}: system/user directories are writable by the agent` });
     }
     return h.fromEvidence(evidence, {
-      passed: 'Sandbox filesystem policies keep system paths read-only',
+      passed: await policyPassMessage(ctx, 'Sandbox filesystem policies keep system paths read-only'),
       failed: (n) => `Found ${n} OpenShell sandbox polic(ies) with writable system paths`,
       fixDescription: 'Keep system paths in read_only and grant read_write only to the workdir, /tmp or a dedicated subdirectory; filesystem changes take effect when the sandbox is recreated',
     });

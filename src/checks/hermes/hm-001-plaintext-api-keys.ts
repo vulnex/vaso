@@ -21,7 +21,9 @@ const KNOWN_PREFIXES = [
 const HIGH_ENTROPY = 4.5;
 const MIN_LEN = 20;
 
-function isSecret(value: string): boolean {
+function isSecret(raw: string): boolean {
+  // a YAML `|` block scalar keeps its trailing newline
+  const value = raw.trim();
   if (value.length < MIN_LEN) return false;
   if (isPlaceholderSecret(value)) return false;
   if (isEnvReference(value)) return false;

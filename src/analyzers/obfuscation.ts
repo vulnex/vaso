@@ -15,7 +15,7 @@
  *    decoder is only suspicious, not confirmed.
  */
 
-import { API_KEY_PATTERNS } from '../core/patterns.js';
+import { API_KEY_PATTERNS, truncateSnippet } from '../core/patterns.js';
 
 export interface ObfuscationPattern {
   pattern: RegExp;
@@ -228,7 +228,7 @@ export function analyzeObfuscation(code: string): ObfuscationReport {
         const trimmed = line.trim();
         hits.push({
           line: i + 1,
-          snippet: trimmed.slice(0, 80) + (trimmed.length > 80 ? '...' : ''),
+          snippet: truncateSnippet(trimmed),
           label,
         });
         break;

@@ -260,13 +260,25 @@ describe('QC-009: Telemetry Prompts', () => {
 describe('QC-010: Memory Secrets', () => {
   const check = qwenCodeChecks.find(c => c.id === 'QC-010')!;
 
-  it('flags OpenRouter key in memory.md', async () => {
+  it('flags OpenRouter key in QWEN.md', async () => {
     const fs = makeFs({
-      access: vi.fn(async (p: string) => p.endsWith('memory.md')),
+      access: vi.fn(async (p: string) => p.endsWith('QWEN.md')),
       readFile: vi.fn(async () => 'creds: sk-or-v1-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'),
     });
     const result = await check.run(makeCtx([], fs));
     expect(result.passed).toBe(false);
+  });
+
+  // Qwen Code never reads ~/.qwen/memory.md (deep test 2026-11-09) — unless
+  // context.fileName names it
+  it('reads memory.md only when context.fileName names it', async () => {
+    const access = vi.fn(async () => true);
+    const readFile = vi.fn(async () => '# notes\n');
+    await check.run(makeCtx([], makeFs({ access, readFile })));
+    expect(readFile.mock.calls.map(c => String(c[0]))).not.toContainEqual(expect.stringMatching(/memory\.md$/));
+    readFile.mockClear();
+    await check.run(makeCtx([makeConfig('settings.json', { context: { fileName: 'memory.md' } })], makeFs({ access, readFile })));
+    expect(readFile.mock.calls.map(c => String(c[0]))).toContainEqual(expect.stringMatching(/memory\.md$/));
   });
 
   it('passes on clean files', async () => {
@@ -302,6 +314,22 @@ describe('deep-test 2026-10-15 regressions', () => {
     })]));
     expect(result.evidence?.map(e => e.snippet.split('=')[0])).toEqual([
       'security.auth.apiKey', 'mcpServers.r.headers.Authorization',
+    ]);
+  });
+
+  // dt20 g6-F1/F2
+  it('QC-001 judges secret-named keys by format and randomness; public values and ARNs pass', async () => {
+    const result = await byId('QC-001').run(makeCtx([makeConfig('settings.json', {
+      env: {
+        GITLAB_TOKEN: 'glpat-Ab3De5Fg7Hj9Kl1Mn3Pq',
+        SERVICE_TOKEN: '9f86d081884c7d659a2feaa0c55ad015a3bf4f1b',
+        SSH_PUBLIC_KEY: 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGq8vJ3kLm9Pq2Rs5Tv8Wy1Ab4Cd6Ef0GhJkLmNoPqRs alice@laptop',
+        DB_SECRET_ARN: 'arn:aws:secretsmanager:us-east-1:123456789012:secret:prod/db-AbCdEf',
+      },
+      modelProviders: { openai: [{ apiKey: '3f9a1c7e2b8d4f6a0c5e9b1d7f3a8c2e' }] },
+    })]));
+    expect(result.evidence?.map(e => e.snippet.split('=')[0])).toEqual([
+      'env.GITLAB_TOKEN', 'env.SERVICE_TOKEN', 'modelProviders.openai[0].apiKey',
     ]);
   });
 

@@ -458,9 +458,28 @@ describe('NB-008: websocket / WebUI authentication', () => {
 
   it('passes a remote bind with tokenIssueSecret and TLS', async () => {
     const ctx = await makeCtx(merge(onboardConfig(), {
-      channels: { websocket: { host: '10.0.0.5', tokenIssueSecret: '${WS_SECRET}', sslCertfile: '/etc/ssl/c.pem' } },
+      channels: { websocket: { host: '10.0.0.5', tokenIssueSecret: '${WS_SECRET}', sslCertfile: '/etc/ssl/c.pem', sslKeyfile: '/etc/ssl/k.pem' } },
     }));
     expect((await check('NB-008').run(ctx)).passed).toBe(true);
+  });
+
+  it('needs both sslCertfile and sslKeyfile for wss:// (dt20 g5-F2)', async () => {
+    const ctx = await makeCtx(merge(onboardConfig(), {
+      channels: { websocket: { host: '10.0.0.5', tokenIssueSecret: '${WS_SECRET}', ssl_certfile: '/etc/ssl/c.pem' } },
+    }));
+    const r = await check('NB-008').run(ctx);
+    expect(r.passed).toBe(false);
+    expect(r.evidence![0].detail).toMatch(/plaintext ws:\/\//);
+  });
+
+  it('reports an unauthenticated unix-socket channel as info, not a browser-reachable hole (dt20 g5-F5)', async () => {
+    const ctx = await makeCtx(merge(onboardConfig(), {
+      channels: { websocket: { unixSocketPath: '/run/nanobot.sock', host: '0.0.0.0', websocketRequiresToken: false } },
+    }));
+    const r = await check('NB-008').run(ctx);
+    expect(r.severity).toBe('info');
+    expect(r.evidence![0].detail).toMatch(/unix socket \/run\/nanobot\.sock/);
+    expect(r.evidence![0].detail).not.toMatch(/web page the user opens/);
   });
 });
 

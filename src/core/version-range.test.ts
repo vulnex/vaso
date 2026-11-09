@@ -71,3 +71,22 @@ describe('rangeEntirelyAffected with || branches', () => {
     expect(rangeEntirelyAffected('>=2.88.0 <=2.88.2', 'npm', '<=2.88.2 || >=3.0.0 <3.0.1', undefined)).toBe(true);
   });
 });
+
+describe('dt20 g3-N1: rangeEntirelyAffected without a fixed version', () => {
+  it('falls back to the affected range upper bound', () => {
+    expect(rangeEntirelyAffected('^0.30.0', 'npm', '>=0.20.0 <=0.39.0', undefined)).toBe(true);
+    expect(rangeEntirelyAffected('~1.2.0', 'npm', '>=1.0.0 <1.5.0', undefined)).toBe(true);
+    expect(rangeEntirelyAffected('^1.2.0', 'npm', '>=1.0.0 <1.5.0', undefined)).toBe(false);
+    expect(rangeEntirelyAffected('>=1.0,<1.4', 'pypi', '<=1.4.0', undefined)).toBe(true);
+    // open-ended with no fix: a bounded range never ends at a fix
+    expect(rangeEntirelyAffected('^1.0.0', 'npm', '>=0.0.0', undefined)).toBe(false);
+  });
+});
+
+describe('dt20 g3 re-verify: hyphen ranges', () => {
+  it('reads inclusive and partial tops', () => {
+    expect(rangeBounds('0.2.20 - 0.2.21')).toEqual({ min: '0.2.20', maxInclusive: '0.2.21' });
+    expect(rangeBounds('1.2 - 2.3')).toEqual({ min: '1.2.0', maxExclusive: '2.4.0' });
+    expect(rangeBounds('1 - 2')).toEqual({ min: '1.0.0', maxExclusive: '3.0.0' });
+  });
+});

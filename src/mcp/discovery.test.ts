@@ -1,8 +1,8 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { MCPDiscovery } from './discovery.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { join } from 'node:path';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 
@@ -464,5 +464,61 @@ describe('MCPDiscovery — VS Code settings.json and Codex project config', () =
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('MCPDiscovery — empty and unreadable configs (deep test 2026-11-09)', () => {
+  let home: string;
+  class HomeFS extends LocalFSProvider { homedir() { return home; } getEnv() { return undefined; } }
+  const w = async (rel: string, body: string) => {
+    await mkdir(join(home, rel, '..'), { recursive: true });
+    await writeFile(join(home, rel), body);
+  };
+  beforeEach(async () => { home = await mkdtemp(join(tmpdir(), 'vaso-mcp-empty-')); });
+  afterEach(async () => {
+    await chmod(join(home, '.openclaw', 'openclaw.json'), 0o600).catch(() => undefined);
+    await rm(home, { recursive: true, force: true });
+  });
+
+  it('treats comment-only JSONC and YAML configs as empty, not as load errors', async () => {
+    await w('Library/Application Support/Code/User/settings.json', '// Place your settings in this file to overwrite the default settings\n');
+    await w('Library/Application Support/Code/User/mcp.json', '/* nothing */\n');
+    await w('proj/.vscode/settings.json', '// nothing yet\n');
+    await w('.hermes/config.yaml', '# comment\n');
+    const result = await new MCPDiscovery(new HomeFS()).discover('darwin', join(home, 'proj'));
+    expect(result.loadErrors).toBeUndefined();
+    expect(result.totalServers).toBe(0);
+  });
+
+  it('treats a YAML file of only `---` as empty; -p names comment-only files as empty', async () => {
+    await w('.hermes/config.yaml', '---\n');
+    expect((await new MCPDiscovery(new HomeFS()).discover('linux')).loadErrors).toBeUndefined();
+    await w('c.json', '// nothing\n');
+    const byPath = await new MCPDiscovery(new HomeFS()).discoverFromPaths([join(home, 'c.json'), join(home, '.hermes/config.yaml')]);
+    expect(byPath.unreadable).toBeUndefined();
+    expect(byPath.empty).toEqual([join(home, 'c.json'), join(home, '.hermes/config.yaml')]);
+  });
+
+  it('still reports a config that holds malformed content', async () => {
+    await w('.hermes/config.yaml', 'mcp_servers: [unclosed\n');
+    const result = await new MCPDiscovery(new HomeFS()).discover('linux');
+    expect(result.loadErrors?.map(e => [e.source, e.stage])).toEqual([['Hermes', 'parse']]);
+  });
+
+  it('reports an unparsable or unreadable openclaw.json instead of finding no servers', async () => {
+    await w('.openclaw/openclaw.json', '{ mcp: { servers: ');
+    const bad = await new MCPDiscovery(new HomeFS()).discover('linux');
+    expect(bad.loadErrors).toEqual([expect.objectContaining({ source: 'OpenClaw', filePath: join(home, '.openclaw/openclaw.json'), stage: 'parse' })]);
+
+    await w('.openclaw/openclaw.json', '{ mcp: { servers: { a: { command: "npx", args: ["-y", "a-mcp"] } } } }');
+    await chmod(join(home, '.openclaw/openclaw.json'), 0o000);
+    const unreadable = await new MCPDiscovery(new HomeFS()).discover('linux');
+    if (process.getuid?.() !== 0) {
+      expect(unreadable.loadErrors).toEqual([expect.objectContaining({ source: 'OpenClaw', stage: 'read' })]);
+    }
+  });
+
+  it('reports nothing when there is no openclaw.json', async () => {
+    expect((await new MCPDiscovery(new HomeFS()).discover('linux')).loadErrors).toBeUndefined();
   });
 });

@@ -16,6 +16,11 @@ export const net001 = defineCheck({
 
   async run(ctx, h) {
     const gw = ctx.installation.gateway;
+    // An OpenClaw gateway whose address depends on the host ("auto" on a
+    // snapshot without the container markers, "tailnet") is configured
+    if (gw && !gw.host && ctx.installation.agent === 'openclaw') {
+      return h.passed('Gateway configured, but its listen address can\'t be determined here (CFG-001 reports the bind mode)');
+    }
     if (!gw?.host) return h.passed('No gateway configured');
     // Hermes' API server takes a bearer key, and releases with the start-up
     // guard refuse to run it without one; HM-004 reports the

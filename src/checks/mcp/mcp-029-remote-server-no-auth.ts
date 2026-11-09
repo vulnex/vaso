@@ -2,6 +2,7 @@ import type { Evidence } from '../../core/types.js';
 import type { MCPServerEntry } from '../../mcp/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { remoteEndpoint } from '../../mcp/remote-endpoint.js';
+import { findUrlSecrets } from '../../mcp/config-secrets.js';
 
 /**
  * MCP-029 — Remote Server Without Authentication.
@@ -65,6 +66,9 @@ function hasAuthSignal(server: MCPServerEntry, parsed: URL | null): boolean {
     for (const k of parsed.searchParams.keys()) {
       if (QUERY_TOKEN_KEYS.has(k.toLowerCase())) return true;
     }
+    // A secret URL: the credential is in the path or fragment
+    // (`mcp.zapier.com/api/mcp/s/<secret>/mcp`) — MCP-003 reports it as plaintext
+    if (findUrlSecrets(parsed.href).length > 0) return true;
   }
 
   // 3) An auth header / token flag passed on the command line.

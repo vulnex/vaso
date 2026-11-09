@@ -154,11 +154,13 @@ function dedupeConfigLoadFindings(agents: AgentScanResult[]): void {
 /**
  * Local servers whose source is there but could not be read (EACCES), as one
  * errored result — the counterpart of PACKAGE-RESOLVE: the source checks
- * passed them without seeing their code, so the scan is incomplete.
+ * passed them without seeing their code, so the scan is incomplete. Also a
+ * server read only in part (an unreadable helper module).
  */
 export function sourceReadResult(sources: readonly MCPServerSource[]): CheckResult | undefined {
-  const failed = sources.filter((s) => s.readFailure && !s.sourceCode);
+  const failed = sources.filter((s) => s.readFailure);
   if (failed.length === 0) return undefined;
+  const partial = failed.filter((s) => s.sourceCode).length;
   return {
     id: 'SOURCE-READ',
     name: 'Server Source Read',
@@ -166,7 +168,7 @@ export function sourceReadResult(sources: readonly MCPServerSource[]): CheckResu
     severity: 'info',
     passed: false,
     errored: true,
-    message: `Source of ${failed.length} local server(s) could not be read — their code was not analyzed; findings may be missing`,
+    message: `Source of ${failed.length} local server(s) could not be read${partial > 0 ? ` (${partial} only in part)` : ''} — their code was not analyzed; findings may be missing`,
     evidence: failed.map((s) => ({
       file: s.localPath ?? s.serverName,
       detail: `Server "${s.serverName}": ${s.readFailure}`,

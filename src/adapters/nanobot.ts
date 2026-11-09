@@ -237,9 +237,14 @@ export const nanobotAdapter: AgentAdapter = {
     if (typeof unixSocket === 'string' && unixSocket.trim()) return undefined;
     const host = field('host');
     const port = field('port');
+    // wss:// when sslCertfile and sslKeyfile are both set (runtime.py
+    // _build_ssl_context; one without the other fails the channel's start)
+    const set = (v: unknown): boolean => typeof v === 'string' && v.trim().length > 0;
     return {
       host: typeof host === 'string' && host.trim() ? host.trim() : '127.0.0.1',
-      port: typeof port === 'number' ? port : NANOBOT_DEFAULT_WEBSOCKET_PORT,
+      // pydantic coerces a numeric string ("9000") to the int port
+      port: typeof port === 'number' ? port : typeof port === 'string' && /^\s*\d{1,5}\s*$/.test(port) ? Number(port) : NANOBOT_DEFAULT_WEBSOCKET_PORT,
+      tls: set(field('sslCertfile')) && set(field('sslKeyfile')),
     };
   },
 

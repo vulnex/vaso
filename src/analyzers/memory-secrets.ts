@@ -1,6 +1,7 @@
 import type { Evidence, Severity } from '../core/types.js';
-import { API_KEY_PATTERNS, isPlaceholderSecret } from '../core/patterns.js';
+import { API_KEY_PATTERNS, isPlaceholderSecret, isSecretReference } from '../core/patterns.js';
 import { findHighEntropyBlocks } from './entropy.js';
+import { isCredentialValueName, isHashedValue, isKnownSecretValue, looksRandom } from './secret-values.js';
 
 /**
  * Plaintext-secret scan for the prose files coding agents load into every
@@ -12,8 +13,10 @@ import { findHighEntropyBlocks } from './entropy.js';
  *
  * Tiering (one rule for all memory checks): a recognised credential format
  * is critical — a live key sits in a file that is sent to the model and is
- * routinely committed; a high-entropy string with no known prefix is only a
- * possible secret, reported as a warning.
+ * routinely committed; a high-entropy string with no known prefix, or a
+ * random-looking value written under a credential name (`DB_PASSWORD=…`,
+ * `api_key: …`, `Authorization: Bearer …`), is only a possible secret,
+ * reported as a warning.
  */
 
 /** Formats `API_KEY_PATTERNS` doesn't cover. */
@@ -21,6 +24,7 @@ const EXTRA_KEY_PATTERNS: { pattern: RegExp; name: string }[] = [
   { pattern: /github_pat_[A-Za-z0-9_]{20,}/, name: 'GitHub fine-grained PAT' },
   { pattern: /AIza[0-9A-Za-z_-]{30,}/, name: 'Google API key' },
   { pattern: /xox[aprs]-[A-Za-z0-9-]{10,}/, name: 'Slack token' },
+  { pattern: /pat[A-Za-z0-9]{14}\.[0-9a-f]{64}/, name: 'Airtable personal access token' },
 ];
 
 // In prose a key starts at a word boundary: `disk-0123…` is not an `sk-` key.
@@ -29,6 +33,37 @@ const KNOWN_KEY_PATTERNS = [...API_KEY_PATTERNS, ...EXTRA_KEY_PATTERNS].map(({ p
   pattern: new RegExp(`(?<![A-Za-z0-9_])(?:${pattern.source})`, pattern.flags),
   name,
 }));
+
+/**
+ * `name: value` / `name = value` / `| name | value |` in prose, the name a
+ * credential word (up to three words: `**API key**: …`), the value one
+ * unbroken run that isn't a call (`token = getToken(…)`). Quotes, `**`
+ * emphasis and backticks around either are allowed;
+ * `Authorization: Bearer x` carries the value after the scheme.
+ */
+const KEYED_VALUE = /(?<![A-Za-z0-9_])([A-Za-z][\w.-]{0,63}(?: [A-Za-z][\w.-]{0,31}){0,2})["'`*]*[ \t]*(?:[:=]|\|)[ \t]*(?:"([^"\n]{12,256})"|'([^'\n]{12,256})'|`([^`\n]{12,256})`|["'`]?(?:(?:bearer|basic|token)[ \t]+)?([^\s"'`|,;(){}[\]<>]{12,}))/gi;
+const CREDENTIAL_NAME = /(?:password|passwd|passphrase|pwd|secret|token|api[ _-]?key|apikey|private[ _-]?key|access[ _-]?key|credential|bearer|authorization|(?:^|[ _-])(?:key|pat|auth)$)/i;
+
+/** The first keyed credential on a line: a credential name with a random-looking value. */
+function keyedSecret(line: string): { name: string; value: string } | undefined {
+  for (const m of line.matchAll(KEYED_VALUE)) {
+    // `export GITHUB_TOKEN=…`: the shell keyword isn't part of the name
+    const name = m[1].trim().replace(/^(?:export|set|setx|const|let|var|declare)\s+/, '');
+    // a quoted value runs to its closing quote (`"Ab3…;Xy9"`), an
+    // `Authorization: "Bearer x"` one after its scheme
+    const quoted = (m[2] ?? m[3] ?? m[4])?.replace(/^(?:bearer|basic|token)\s+/i, '');
+    const value = quoted ?? m[5];
+    // one space inside quotes doesn't make a random value prose
+    const judged = quoted !== undefined && (quoted.match(/ /g) ?? []).length === 1 ? quoted.replace(' ', '') : value;
+    // the whole run, not a prefix of `getToken(…)` the regex backed off to
+    if (/[(\[{]/.test(line[(m.index ?? 0) + m[0].length] ?? '')) continue;
+    // `See the token docs: https://…` names a document, `$TOKEN`/`op://…` where the secret is kept
+    if (!CREDENTIAL_NAME.test(name) || !isCredentialValueName(name.replace(/ /g, '_'))) continue;
+    if (/^[a-z][a-z0-9+.-]*:\/\//i.test(value) || isPlaceholderSecret(value) || isSecretReference(value) || isHashedValue(value)) continue;
+    if (isKnownSecretValue(value) || looksRandom(judged, 12)) return { name, value };
+  }
+  return undefined;
+}
 
 const ENTROPY_THRESHOLD = 5.5;
 const MIN_BLOCK_LEN = 40;
@@ -56,7 +91,24 @@ export function scanMemorySecrets(file: string, content: string, kind = 'memory 
     }
   }
 
-  for (const b of findHighEntropyBlocks(content, ENTROPY_THRESHOLD, MIN_BLOCK_LEN)) {
+  for (let i = 0; i < lines.length; i++) {
+    if (evidence.some(e => e.line === i + 1)) continue;
+    const keyed = keyedSecret(lines[i]);
+    if (!keyed) continue;
+    const v = keyed.value;
+    evidence.push({
+      file,
+      line: i + 1,
+      // the value itself is never quoted
+      snippet: `${keyed.name}: ${v.slice(0, 4)}…${v.slice(-4)} (${v.length} chars)`,
+      detail: `Plaintext value under "${keyed.name}" — looks like a credential (random, not a reference or placeholder)`,
+    });
+  }
+
+  // `* item` bullets are prose here, not the `*` of a block comment the
+  // entropy scan skips
+  const prose = content.replace(/^([ \t]*)\*(?=[ \t])/gm, '$1-');
+  for (const b of findHighEntropyBlocks(prose, ENTROPY_THRESHOLD, MIN_BLOCK_LEN)) {
     if (evidence.some(e => e.line === b.line)) continue;
     evidence.push({
       file,

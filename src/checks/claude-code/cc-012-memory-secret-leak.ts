@@ -3,7 +3,8 @@ import type { Evidence, ScanContext } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { memorySecretSeverity, scanMemorySecrets } from '../../analyzers/memory-secrets.js';
 import { claudeProjectScope } from '../../adapters/claude-code.js';
-import { pathPresent, readTextIfPresent } from '../../adapters/load-if-present.js';
+import { pathPresent } from '../../adapters/load-if-present.js';
+import { MemoryReader } from '../../analyzers/memory-read.js';
 import { recordListFailure } from '../../core/config-loader.js';
 
 async function ruleFiles(dir: string, fs: ScanContext['fs']): Promise<string[]> {
@@ -44,10 +45,11 @@ export const cc012 = defineCheck({
     const evidence: Evidence[] = [];
     let found = 0;
     let unread = 0;
+    const reader = new MemoryReader(ctx.fs);
     for (const memoryFile of memoryFiles) {
       if (!(await pathPresent(memoryFile, ctx.fs))) continue;
       // Unreadable: reported as CONFIG-LOAD, not as "no memory file"
-      const content = await readTextIfPresent(memoryFile, ctx.fs);
+      const content = await reader.read(memoryFile);
       if (content === undefined) {
         unread++;
         continue;
@@ -56,14 +58,16 @@ export const cc012 = defineCheck({
       evidence.push(...scanMemorySecrets(memoryFile, content));
     }
     if (found === 0) {
-      return h.passed(unread > 0
+      // Omitted by the probe (size): not verified, rather than unreadable
+      unread -= reader.unverified.length;
+      return h.passed(reader.unverified.length > 0 ? reader.notVerified() : unread > 0
         ? `${unread} CLAUDE.md memory file(s) could not be read here — not inspected`
         : 'No CLAUDE.md memory file present');
     }
 
     return h.fromEvidence(evidence, {
       severity: memorySecretSeverity(evidence),
-      passed: 'No secrets detected in CLAUDE.md memory file',
+      passed: `No secrets detected in CLAUDE.md memory file${reader.note()}`,
       failed: (n) => `Found ${n} potential secret(s) in CLAUDE.md`,
       fixDescription: 'Remove the secret from CLAUDE.md and rotate the credential — memory files are often committed to git',
     });

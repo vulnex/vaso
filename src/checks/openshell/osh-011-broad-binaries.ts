@@ -1,6 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { describeEndpoint, networkRules, sandboxPolicies } from './shared.js';
+import { describeEndpoint, networkRules, policyPassMessage, sandboxPolicies } from './shared.js';
 
 // Patterns that authorize (nearly) every executable. Policy schema: binary
 // globs use `*` for one path component and `**` recursively.
@@ -33,7 +33,7 @@ export const osh011 = defineCheck({
       });
     }
     return h.fromEvidence(evidence, {
-      passed: 'Sandbox network rules are scoped to specific programs',
+      passed: await policyPassMessage(ctx, 'Sandbox network rules are scoped to specific programs'),
       failed: (n) => `Found ${n} OpenShell network rule(s) open to any program`,
       fixDescription: 'List the exact executables (or a narrow directory glob such as /sandbox/.venv/bin/*) that need each endpoint, then openshell policy set <sandbox> --policy <file>',
     });

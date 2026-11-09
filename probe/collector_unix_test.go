@@ -287,3 +287,58 @@ func TestMetadataOnlyFifoIsSpecial(t *testing.T) {
 		t.Fatalf("metadata-only FIFO recorded as %+v", e)
 	}
 }
+
+// Directories a glob can't read are recorded (g6-F5, g7-F5): the glob itself
+// ignores EACCES, so an unreadable rules dir looked empty on remote scans.
+func TestGlobRecordsDeniedDirectories(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root lists any directory")
+	}
+	home := t.TempDir()
+	mk := func(rel string) string {
+		p := filepath.Join(home, rel)
+		if err := os.MkdirAll(p, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	lock := func(p string) {
+		if err := os.Chmod(p, 0); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { os.Chmod(p, 0o755) })
+	}
+	rules := mk(".codex/rules")                          // `*.rules` — the literal base
+	nested := mk(".copilot/instructions/a")              // under `**/*.instructions.md`
+	project := mk(".gemini/tmp/p1")                      // under a `*` segment
+	mk(".gemini/tmp/p2/memory")                          // readable sibling
+	vendor := mk(".copilot/instructions/node_modules/x") // vendor dir reached by `**`: skipped
+	mk(".devin")
+	devinRules := filepath.Join(home, ".devin", "rules")
+	lock(rules)
+	lock(nested)
+	lock(project)
+	lock(vendor)
+	lock(filepath.Join(home, ".devin")) // rules can't even be stat'd
+
+	snap := Collect(ProbeManifest{GlobPatterns: []string{
+		filepath.Join(home, ".codex/rules/*.rules"),
+		filepath.Join(home, ".copilot/instructions/**/*.instructions.md"),
+		filepath.Join(home, ".gemini/tmp/*/memory/MEMORY.md"),
+		filepath.Join(devinRules, "*.md"),
+	}}, false)
+	for _, d := range []string{rules, nested, project, filepath.Join(home, ".devin")} {
+		if mode, ok := snap.DirectoryModes[d]; !ok || mode != 0 {
+			t.Errorf("denied directory %s not recorded: %v", d, snap.DirectoryModes)
+		}
+	}
+	if _, ok := snap.DirectoryModes[vendor]; ok {
+		t.Error("a vendor dir the glob skips was walked")
+	}
+	if _, ok := snap.DirectoryModes[devinRules]; ok {
+		t.Error("a directory that can't be stat'd has no mode to record")
+	}
+	if _, ok := snap.DirectoryModes[filepath.Join(home, ".gemini/tmp/p2/memory")]; ok {
+		t.Error("a readable directory recorded as denied")
+	}
+}

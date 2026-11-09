@@ -1,6 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { describeEndpoint, endpoints, sandboxPolicies } from './shared.js';
+import { describeEndpoint, endpoints, policyPassMessage, sandboxPolicies } from './shared.js';
 
 function prefixLength(cidr: string): number | undefined {
   const m = /^\s*([0-9a-f.:]+)(?:\/(\d{1,3}))?\s*$/i.exec(cidr);
@@ -43,7 +43,7 @@ export const osh013 = defineCheck({
       }
     }
     return h.fromEvidence([...critical, ...warning], {
-      passed: 'Sandbox endpoints target specific hosts',
+      passed: await policyPassMessage(ctx, 'Sandbox endpoints target specific hosts'),
       failed: (n) => `Found ${n} OpenShell endpoint(s) opened to broad network ranges`,
       severity: critical.length > 0 ? 'critical' : undefined,
       fixDescription: 'Declare exact hostnames, or scope allowed_ips to the single hosts needed (e.g. 10.0.5.20/32); avoid host.openshell.internal unless the service on the gateway host is meant for the agent',

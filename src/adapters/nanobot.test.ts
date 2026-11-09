@@ -76,7 +76,7 @@ describe('Nanobot adapter', () => {
     expect(inst.configFiles.map(c => c.filePath)).toEqual(['/home/test/.nanobot/config.json']);
     expect(inst.version).toBe('0.3.5');
     expect(inst.cliBinary).toBe('/home/test/.local/bin/nanobot');
-    expect(inst.gateway).toEqual({ host: '127.0.0.1', port: 8765 });
+    expect(inst.gateway).toEqual({ host: '127.0.0.1', port: 8765, tls: false });
     expect(inst.skillsDir).toBe('/home/test/.nanobot/workspace/skills');
     expect(inst.models).toEqual([{ id: 'claude-opus-4-5', provider: 'anthropic' }]);
   });
@@ -135,16 +135,32 @@ describe('Nanobot adapter', () => {
   });
 
   it('reports the websocket channel as the gateway, not the health-only gateway.host (g5-F2)', () => {
-    expect(nanobotAdapter.getGatewayInfo({})).toEqual({ host: '127.0.0.1', port: 8765 });
+    expect(nanobotAdapter.getGatewayInfo({})).toEqual({ host: '127.0.0.1', port: 8765, tls: false });
     // gateway.host serves GET /health only
     expect(nanobotAdapter.getGatewayInfo({ gateway: { host: '0.0.0.0', port: 9000 } }))
-      .toEqual({ host: '127.0.0.1', port: 8765 });
+      .toEqual({ host: '127.0.0.1', port: 8765, tls: false });
     expect(nanobotAdapter.getGatewayInfo({ channels: { websocket: { host: '0.0.0.0', port: 9001, token: 't' } } }))
-      .toEqual({ host: '0.0.0.0', port: 9001 });
+      .toEqual({ host: '0.0.0.0', port: 9001, tls: false });
     expect(nanobotAdapter.getGatewayInfo({ channels: { websocket: { unix_socket_path: '/run/nb.sock' } } })).toBeUndefined();
     expect(nanobotAdapter.getGatewayInfo({ channels: { websocket: { enabled: false } } })).toBeUndefined();
     // Top-level host/port are not nanobot keys
-    expect(nanobotAdapter.getGatewayInfo({ host: '0.0.0.0', port: 1 })).toEqual({ host: '127.0.0.1', port: 8765 });
+    expect(nanobotAdapter.getGatewayInfo({ host: '0.0.0.0', port: 1 })).toEqual({ host: '127.0.0.1', port: 8765, tls: false });
+  });
+
+  it('reports wss:// only when sslCertfile and sslKeyfile are both set, in either casing (dt20 g5-F2)', () => {
+    const gw = (ws: Record<string, unknown>) => nanobotAdapter.getGatewayInfo({ channels: { websocket: { host: '0.0.0.0', ...ws } } });
+    expect(gw({ sslCertfile: '/etc/c.pem', sslKeyfile: '/etc/k.pem' })?.tls).toBe(true);
+    expect(gw({ ssl_certfile: '/etc/c.pem', ssl_keyfile: '/etc/k.pem' })?.tls).toBe(true);
+    // One without the other: the channel refuses to start over TLS
+    expect(gw({ sslCertfile: '/etc/c.pem' })?.tls).toBe(false);
+    expect(gw({ sslCertfile: '/etc/c.pem', sslKeyfile: '  ' })?.tls).toBe(false);
+  });
+
+  it('reads a numeric-string websocket port as pydantic does (dt20 re-verify)', () => {
+    const gw = (port: unknown) => nanobotAdapter.getGatewayInfo({ channels: { websocket: { host: '0.0.0.0', port } } });
+    expect(gw('9000')?.port).toBe(9000);
+    expect(gw(' 9001 ')?.port).toBe(9001);
+    expect(gw('auto')?.port).toBe(8765);
   });
 
   it('declares credential stores under the data dir', () => {

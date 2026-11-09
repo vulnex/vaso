@@ -30,21 +30,36 @@ export function effectivePermission(choice: unknown, ceiling: unknown): LocalPer
 }
 
 /**
- * settings.json as the app sees it. The app validates the whole file against
- * its schema and falls back to defaults ("ask", egress off, Messages off) when
- * any field fails — so a file it rejects configures nothing. Checked here for
- * the version and every key these checks read.
+ * settings.json as the app sees it. The app reads it with a plain JSON.parse
+ * (no comments, no JSON5, no byte-order mark — VASO's loader accepts all
+ * three) and validates the whole file against its schema, falling back to
+ * defaults ("ask", egress off, Messages off) when either fails — so a file it
+ * rejects configures nothing, and no fix may rewrite it into one it accepts.
+ * Checked here for the syntax, the version and every key these checks read.
  */
 export function settingsConfig(ctx: ScanContext): ParsedConfig | undefined {
   const config = ctx.configs.find(c => basename(c.filePath) === DATA_FILES.settings);
-  return config && acceptedByApp(config.data) ? config : undefined;
+  return config && strictJson(config) && acceptedByApp(config.data) ? config : undefined;
 }
 
 /** Why no settings apply: the file is absent, or present but rejected by the app. */
 export function noSettingsReason(ctx: ScanContext): string {
-  return ctx.configs.some(c => basename(c.filePath) === DATA_FILES.settings)
+  const config = ctx.configs.find(c => basename(c.filePath) === DATA_FILES.settings);
+  if (!config) return 'No Grok Bot settings.json';
+  return strictJson(config)
     ? 'Grok Bot rejects this settings.json (version or value types) and runs on its defaults'
-    : 'No Grok Bot settings.json';
+    : 'Grok Bot rejects this settings.json (not plain JSON: comments, JSON5 syntax or a byte-order mark) and runs on its defaults';
+}
+
+/** The app's own parse (Rh.load: readFileSync utf-8, then JSON.parse) succeeds. */
+function strictJson(config: ParsedConfig): boolean {
+  if (config.bom) return false;
+  try {
+    JSON.parse(config.raw);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 const PERMISSION_KEYS = ['localToolPermission', 'localToolPermissionCeiling'];

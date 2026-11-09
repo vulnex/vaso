@@ -52,6 +52,16 @@ function npmBounds(range: string): VersionBounds | undefined {
     return { min: `${major}.${xr[2]}.0`, maxExclusive: `${major}.${Number(xr[2]) + 1}.0` };
   }
 
+  // Hyphen range `1.2.3 - 2.3.4` (inclusive); a partial top (`- 2.3`) means <2.4.0
+  const hyphen = /^(\S+)\s+-\s+(\S+)$/.exec(r);
+  if (hyphen) {
+    const min = full(hyphen[1]);
+    const top = full(hyphen[2]);
+    if (!min || !top) return undefined;
+    const parts = hyphen[2].replace(/^v/, '').split('.').length;
+    if (parts >= 3) return { min, maxInclusive: top };
+    return { min, maxExclusive: parts === 1 ? bump(top, 'major') : bump(top, 'minor') };
+  }
   const caret = /^\^\s*(.+)$/.exec(r);
   if (caret) {
     const min = full(caret[1]);
@@ -144,7 +154,8 @@ export function rangeEntirelyAffected(
   if (branches.length > 1) {
     return branches.some((branch) => withinBranch(bounds, branch, branchUpperBound(branch)));
   }
-  return withinBranch(bounds, affected, fixedVersion);
+  // No fixed release named: the affected range's own upper bound (`<=1.0.1`) is where it ends
+  return withinBranch(bounds, affected, fixedVersion ?? branchUpperBound(affected));
 }
 
 function withinBranch(bounds: VersionBounds, affected: string, fixedVersion: string | undefined): boolean {

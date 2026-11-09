@@ -311,7 +311,7 @@ describe('runMCPScan --source', () => {
     await runMCPScan({ format: 'json', source: ['/src/typo'] });
 
     expect(process.exitCode).toBe(2);
-    expect(consoleErrorLogs.join('\n')).toContain('No MCP server source at: /src/typo');
+    expect(consoleErrorLogs.join('\n')).toContain('MCP server source not scanned (missing, unreadable or over the size limit): /src/typo');
     expect(mockScanMCP).not.toHaveBeenCalled();
   });
 
@@ -323,7 +323,7 @@ describe('runMCPScan --source', () => {
     await runMCPScan({ format: 'json', source: ['/src/my-server', '/src/typo'] });
 
     expect(mockScanMCP).toHaveBeenCalledWith([], [direct], expect.anything(), []);
-    expect(consoleErrorLogs.join('\n')).toContain('No MCP server source at: /src/typo');
+    expect(consoleErrorLogs.join('\n')).toContain('MCP server source not scanned (missing, unreadable or over the size limit): /src/typo');
     expect(process.exitCode).toBe(3);
   });
 

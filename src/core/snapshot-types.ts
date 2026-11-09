@@ -14,7 +14,14 @@ export interface ProbeManifest {
    *  keeps only up to its origin — path, query and fragment become
    *  placeholders. For endpoint overrides where checks judge the host. */
   envOriginOnly?: string[];
+  /** Variables (exact names) recorded only as set or not: the probe (newer than
+   *  1.4.0) stores ENV_PRESENT_VALUE when one is non-empty after trimming, and
+   *  nothing otherwise — never its value. */
+  envPresence?: string[];
 }
+
+/** What a snapshot holds for an envPresence variable that is set. */
+export const ENV_PRESENT_VALUE = 'set';
 
 export interface CommandRequest {
   id: string;

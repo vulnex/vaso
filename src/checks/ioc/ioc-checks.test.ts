@@ -29,6 +29,16 @@ function configWithRaw(raw: string): ParsedConfig {
   return { raw, format: 'unknown', filePath: '/tmp/fake.config', data: {} };
 }
 
+
+/** A minimal PE: the MZ stub's e_lfanew (0x3c) pointing at `PE\0\0`. */
+function fakePE(): Buffer {
+  const pe = Buffer.alloc(0x100);
+  pe.write('MZ', 0, 'latin1');
+  pe.writeUInt32LE(0x80, 0x3c);
+  pe.write('PE\0\0', 0x80, 'latin1');
+  return pe;
+}
+
 describe('IOC-001: C2 IP Detection', () => {
   // 91.92.242.30 (ClawHavoc AMOS C2) is in the bundled C2 IP list.
   const C2_IP = '91.92.242.30';
@@ -167,6 +177,21 @@ describe('IOC-007: Binary Pattern Match', () => {
     expect(result.severity).toBe('warning');
   });
 
+  it('reports a universal Mach-O but not a Java class file (both start cafebabe)', async () => {
+    const fat = Buffer.alloc(4096);
+    Buffer.from([0xca, 0xfe, 0xba, 0xbe, 0, 0, 0, 2]).copy(fat); // 2 architectures
+    await writeFile(join(tempDir, 'runner.js'), fat);
+    const result = await ioc007.run(makeContext(tempDir));
+    expect(result.passed).toBe(false);
+    expect(result.evidence![0].detail).toContain('Mach-O universal binary');
+
+    await rm(join(tempDir, 'runner.js'));
+    // class file: minor 0, major 61 (Java 17)
+    await writeFile(join(tempDir, 'Tool.js'), Buffer.from([0xca, 0xfe, 0xba, 0xbe, 0, 0, 0, 61, 0, 0x1c]));
+    const cls = await ioc007.run(makeContext(tempDir));
+    expect(cls.evidence?.some(e => e.detail?.includes('Mach-O'))).not.toBe(true);
+  });
+
   it('fails when file contains packed JS eval wrapper', async () => {
     await writeFile(join(tempDir, 'packed.js'), 'eval(function(p,a,c,k,e,d){return "malicious"}())');
 
@@ -220,15 +245,23 @@ function reduce(arr) {
     expect(result.passed).toBe(true);
   });
 
-  it('fails when PE/DOS "MZ" magic is at file offset 0', async () => {
-    const buf = Buffer.concat([
-      Buffer.from([0x4d, 0x5a]),
-      Buffer.from('// rest of fake js'),
-    ]);
-    await writeFile(join(tempDir, 'pe-magic.js'), buf);
+  it('fails when a PE header (MZ + e_lfanew → PE\0\0) is at file offset 0', async () => {
+    await writeFile(join(tempDir, 'pe-magic.exe'), fakePE());
     const result = await ioc007.run(makeContext(tempDir));
     expect(result.passed).toBe(false);
     expect(result.evidence![0].detail).toContain('PE/DOS executable');
+  });
+
+  it('does not call JavaScript starting with MZ a PE executable (dt20r-g2-N2)', async () => {
+    await writeFile(join(tempDir, 'run.js'), 'MZ=1//\0\nconsole.log(1);\n');
+    const result = await ioc007.run(makeContext(tempDir));
+    expect(result.passed).toBe(true);
+  });
+
+  it('does not take the NUL runs of a universal Mach-O for shellcode padding (dt20r-g2-N2)', async () => {
+    await writeFile(join(tempDir, 'tool.node'), Buffer.concat([Buffer.from([0xca, 0xfe, 0xba, 0xbe, 0, 0, 0, 2]), Buffer.alloc(64)]));
+    const result = await ioc007.run(makeContext(tempDir));
+    expect(JSON.stringify(result.evidence ?? [])).not.toContain('NUL-padding');
   });
 
   it('passes when ELF magic appears mid-file but not at offset 0', async () => {
@@ -497,7 +530,7 @@ describe('IOC skill coverage (deep test 2026-10-15)', () => {
     await mkdir(join(skills, 'elf'), { recursive: true });
     await writeFile(join(skills, 'elf', 'helper'), Buffer.concat([Buffer.from([0x7f, 0x45, 0x4c, 0x46]), Buffer.alloc(32)]), { mode: 0o755 });
     await writeFile(join(skills, 'elf', 'tool.node'), Buffer.concat([Buffer.from([0xcf, 0xfa, 0xed, 0xfe]), Buffer.alloc(32)]));
-    await writeFile(join(skills, 'elf', 'x.exe'), Buffer.concat([Buffer.from('MZ'), Buffer.alloc(32)]));
+    await writeFile(join(skills, 'elf', 'x.exe'), fakePE());
     const result = await ioc007.run(makeContext(skills));
     expect(result.evidence!.map(e => e.file.split('/').pop()).sort()).toEqual(['helper', 'tool.node', 'x.exe']);
   });

@@ -111,6 +111,9 @@ export interface ParsedConfig {
   /** An administrator-managed layer the agent applies over the user's own
    *  files (Hermes `/etc/hermes`): its values win where it sets them. */
   managed?: boolean;
+  /** The file began with a UTF-8 byte-order mark, stripped from `raw` (an
+   *  app that reads it with a plain JSON.parse rejects the file). */
+  bom?: boolean;
 }
 
 export interface GatewayInfo {

@@ -346,6 +346,11 @@ export const geminiAdapter: AgentAdapter = {
         '~/.gemini/commands/*',
         '~/.gemini/policies/*',
         '~/.gemini/extensions/**',
+        // Project memory indexes the memory tool writes (GEM-010) — the only
+        // tmp/ files with content; chats and the rest stay out. The second
+        // root is the runtime dir under the macOS seatbelt sandbox.
+        '~/.gemini/tmp/*/memory/MEMORY.md',
+        '~/.cache/.gemini/tmp/*/memory/MEMORY.md',
         nvmBinaryGlob('gemini'),
         ...npmPackageJsonGlobs(NPM_PACKAGE_NAME),
       ],
@@ -360,6 +365,7 @@ export const geminiAdapter: AgentAdapter = {
         '~/.gemini/extensions',
         '~/.gemini/policies',
         '~/.gemini/tmp',
+        '~/.cache/.gemini/tmp',
       ],
       envPrefixes: ['GEMINI_', 'GOOGLE_'],
       systemPaths: [...SYSTEM_CLI_PATHS, SYSTEM_SETTINGS_DARWIN, SYSTEM_SETTINGS_LINUX, ...[SYSTEM_SETTINGS_DARWIN, SYSTEM_SETTINGS_LINUX].map(p => p.replace(/[^/]+$/, 'system-defaults.json'))],

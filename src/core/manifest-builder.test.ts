@@ -126,6 +126,36 @@ describe('buildProbeManifest', () => {
     for (const g of manifest.metadataGlobPatterns ?? []) expect(manifest.globPatterns).not.toContain(g);
   });
 
+  // Decision 2 (deep test 2026-11-09): GEM-010 reads the project memory index;
+  // the rest of Gemini's tmp dir (chats, logs, checkpoints) is never shipped
+  it('collects only the memory index from ~/.gemini/tmp with content', () => {
+    const content = [...manifest.globPatterns, ...manifest.filePaths, ...manifest.systemPaths!];
+    const tmp = content.filter(p => /\.gemini\/tmp(\/|$)/.test(p));
+    expect(tmp.sort()).toEqual([
+      '${GEMINI_CLI_HOME}/.cache/.gemini/tmp/*/memory/MEMORY.md',
+      '${GEMINI_CLI_HOME}/.gemini/tmp/*/memory/MEMORY.md',
+      '~/.cache/.gemini/tmp/*/memory/MEMORY.md',
+      '~/.gemini/tmp/*/memory/MEMORY.md',
+    ]);
+    expect(manifest.metadataGlobPatterns).toEqual(expect.arrayContaining([
+      '~/.gemini/tmp/*/chats/session-*.jsonl', '${GEMINI_CLI_HOME}/.gemini/tmp/*/chats/session-*.jsonl',
+    ]));
+    expect(manifest.directoryListings).toEqual(expect.arrayContaining(['~/.gemini/tmp', '~/.cache/.gemini/tmp']));
+  });
+
+  // g4: OpenClaw's Fly markers are tested non-empty only — ship that, not the
+  // app name or machine id, and never as prefixes (FLY_MACHINE_ID_* values)
+  it('records the Fly container markers as presence only', () => {
+    expect(manifest.envPresence).toEqual(expect.arrayContaining(['FLY_MACHINE_ID', 'FLY_APP_NAME']));
+    expect(manifest.envPrefixes.filter(p => p.startsWith('FLY'))).toEqual([]);
+    expect(manifest.envOriginOnly!.filter(n => manifest.envPresence!.includes(n))).toEqual([]);
+  });
+
+  // g6-F5 / g7-F5: listed, so an unreadable rules dir is reported remotely too
+  it('lists the rules dirs CDX-010 and DEV-007 read', () => {
+    expect(manifest.directoryListings).toEqual(expect.arrayContaining(['~/.codex/rules', '${CODEX_HOME}/rules', '~/.devin/rules']));
+  });
+
   it('keeps OpenClaw 2026.x credential and state stores metadata-only, in every state dir', () => {
     for (const d of ['~/.openclaw', '~/.openclaw-*', '~/.clawdbot', '${OPENCLAW_HOME}/.openclaw', '${OPENCLAW_STATE_DIR}', '${OPENCLAW_HOME}/.openclaw-*']) {
       expect(manifest.metadataGlobPatterns).toEqual(expect.arrayContaining([

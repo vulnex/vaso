@@ -7,6 +7,7 @@ import { checkRegistry } from '../core/check-registry.js';
 import { getReporter } from '../reporting/index.js';
 import { MCPDiscovery } from '../mcp/discovery.js';
 import { resolveServerSources, resolveSourcePaths } from '../mcp/source-resolver.js';
+import { maskArgSecrets } from '../mcp/config-secrets.js';
 import { auditDependencies } from '../mcp/osv-audit.js';
 import type { ScanOptions } from '../core/types.js';
 import { logError } from '../core/debug.js';
@@ -65,7 +66,7 @@ export async function runMCPScan(options: MCPScanCommandOptions): Promise<void> 
     const direct = options.source?.length ? await resolveSourcePaths(options.source) : { sources: [], unreadable: [] };
     // One bad --source path doesn't cost the others their scan: report it,
     // scan the rest, and exit 3 (incomplete) unless nothing was scannable.
-    for (const p of direct.unreadable) console.error(chalk.red(`No MCP server source at: ${p}`));
+    for (const p of direct.unreadable) console.error(chalk.red(`MCP server source not scanned (missing, unreadable or over the size limit): ${p}`));
     if (direct.unreadable.length > 0 && direct.sources.length === 0 && discoveryResult.totalServers === 0) {
       process.exitCode = EXIT_USAGE;
       return;
@@ -171,7 +172,9 @@ export async function runMCPList(options: { format: string; path?: string[] }): 
     reportLoadErrors(result.loadErrors ?? []);
 
     if (options.format === 'json') {
-      console.log(toReportJson(result));
+      // argv credentials (`--config '{"token":…}'`) masked as MCP-003 finds them
+      const configs = result.configs.map(c => ({ ...c, servers: c.servers.map(sv => (sv.args ? { ...sv, args: maskArgSecrets(sv.args) } : sv)) }));
+      console.log(toReportJson({ ...result, configs }));
       return;
     }
 
@@ -191,7 +194,7 @@ export async function runMCPList(options: { format: string; path?: string[] }): 
         console.log(`    ${chalk.bold(server.name)}`);
         console.log(`      Transport: ${server.transport}`);
         if (server.command) {
-          const cmd = [server.command, ...(server.args ?? [])].join(' ');
+          const cmd = [server.command, ...maskArgSecrets(server.args ?? [])].join(' ');
           console.log(`      Command: ${cmd}`);
         }
         if (server.url) {

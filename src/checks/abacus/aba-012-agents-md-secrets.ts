@@ -1,13 +1,9 @@
 import { dirname, join } from 'node:path';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { API_KEY_PATTERNS, isPlaceholderSecret } from '../../core/patterns.js';
-import { findHighEntropyBlocks } from '../../analyzers/entropy.js';
+import { scanMemorySecrets } from '../../analyzers/memory-secrets.js';
 import { isProjectInstall } from './shared.js';
 import { readTextIfPresent } from '../../adapters/load-if-present.js';
-
-const ENTROPY_THRESHOLD = 5.5;
-const MIN_BLOCK_LEN = 40;
 
 export const aba012 = defineCheck({
   id: 'ABA-012',
@@ -30,18 +26,8 @@ export const aba012 = defineCheck({
       const content = await readTextIfPresent(file, ctx.fs);
       if (content === undefined) continue;
       scanned++;
-      const lines = content.split('\n');
-      lines.forEach((line, i) => {
-        for (const { pattern, name } of API_KEY_PATTERNS) {
-          const m = pattern.exec(line);
-          if (m && isPlaceholderSecret(m[0])) continue;
-          if (m) evidence.push({ file, line: i + 1, snippet: `${m[0].slice(0, 12)}…`, detail: `Plaintext ${name} in AGENTS.md` });
-        }
-      });
-      for (const b of findHighEntropyBlocks(content, ENTROPY_THRESHOLD, MIN_BLOCK_LEN)) {
-        if (evidence.some(e => e.file === file && e.line === b.line)) continue;
-        evidence.push({ file, line: b.line, snippet: b.snippet, detail: `High-entropy string (${b.entropy} bits) — possible embedded secret` });
-      }
+      // the same key formats, keyed values and entropy scan as every other memory file
+      evidence.push(...scanMemorySecrets(file, content, 'AGENTS.md'));
     }
 
     if (scanned === 0) return h.passed('No AGENTS.md files for this Abacus.AI installation');

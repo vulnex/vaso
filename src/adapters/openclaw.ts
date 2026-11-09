@@ -11,7 +11,7 @@ import { npmPackageJsonGlobs } from './nvm-binary.js';
 import { queryCliVersion, readPackageVersion } from './version-query.js';
 import { includeRootsFromEnv, loadOpenclawConfig } from './openclaw-includes.js';
 import { pathPresent } from './load-if-present.js';
-import { containerEnvironment, isOpenclawAutoBind, openclawAutoBindHost } from './openclaw-bind.js';
+import { containerEnvironment, isOpenclawAutoBind, openclawAutoBindHost, openclawEffectiveBind, OPENCLAW_CONTAINER_MARKERS } from './openclaw-bind.js';
 
 /**
  * Files OpenClaw reads from its state dir besides the main config
@@ -268,15 +268,14 @@ function openclawGatewayInfo(config: Record<string, unknown>, inContainer: boole
   if (g.mode === 'remote') return undefined;
   // 2026.x schema: gateway.bind = auto | lan | loopback | custom | tailnet
   // (+ gateway.customBindHost) and gateway.tls = { enabled, … }; older
-  // configs used gateway.host and a boolean tls. An unset bind is loopback
-  // (`gateway.bind ?? "loopback"` throughout 2026.9.4).
+  // configs used gateway.host and a boolean tls. An unset bind is loopback,
+  // or "auto" inside a container (openclawEffectiveBind).
   const tls = g.tls && typeof g.tls === 'object'
     ? (g.tls as Record<string, unknown>).enabled === true
     : typeof g.tls === 'boolean' ? g.tls : undefined;
   const auth = g.auth && typeof g.auth === 'object' ? (g.auth as Record<string, unknown>) : undefined;
   const host = typeof g.host === 'string' ? g.host
-    : g.bind === undefined && g.host === undefined ? '127.0.0.1'
-    : openclawBindHost(g.bind, g.customBindHost, inContainer);
+    : openclawBindHost(g.host === undefined ? openclawEffectiveBind(config, inContainer) : g.bind, g.customBindHost, inContainer);
 
   return {
     host,
@@ -568,7 +567,9 @@ export const openclawAdapter: AgentAdapter = {
         `${d}/credentials/**`,
         `${d}/agents/*/agent/openclaw-agent.sqlite*`,
         `${d}/agents/*/agent/{auth-profiles,auth-state,auth}.json`,
-      ]),
+      // Container sentinels (gateway.bind "auto"): existence is the marker,
+      // content never shipped
+      ]).concat(OPENCLAW_CONTAINER_MARKERS.existenceOnly),
       globPatterns: [
         // package.json of every npm-global copy — versions non-primary copies on remote scans
         ...npmPackageJsonGlobs('openclaw'),
@@ -608,11 +609,16 @@ export const openclawAdapter: AgentAdapter = {
         '~/.moltbot',
       ],
       envPrefixes: ['OPENCLAW_'],
+      // FLY_MACHINE_ID / FLY_APP_NAME: OpenClaw's container markers (gateway.bind
+      // "auto") — whether they are set, never their values
+      envPresence: [...OPENCLAW_CONTAINER_MARKERS.envNames],
       systemPaths: [
         '/usr/local/bin/openclaw',
         '/opt/homebrew/bin/openclaw',
         '/usr/bin/openclaw',
         '/Applications/OpenClaw.app',
+        // PID 1's cgroup list, recorded even when absent (openclaw-bind.ts)
+        ...OPENCLAW_CONTAINER_MARKERS.content,
       ],
       systemDirListings: [],
     };

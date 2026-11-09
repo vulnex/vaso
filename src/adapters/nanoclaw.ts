@@ -31,11 +31,19 @@ import { getUserHomeDirs } from './openclaw.js';
 const CHECKOUT_NAME_RE = /nanoclaw/i;
 /** Case-insensitive `*nanoclaw*` for the probe's doublestar globs. */
 const CHECKOUT_NAME_GLOB = '*[nN][aA][nN][oO][cC][lL][aA][wW]*';
-/** Common parent directories people clone into (one level below home). */
+/**
+ * Common parent directories people clone into (one level below home), in
+ * lower case: any spelling on disk matches (~/GitHub, ~/Projects, ~/SRC).
+ */
 const CHECKOUT_PARENTS = [
-  'src', 'code', 'Code', 'projects', 'Projects', 'dev', 'Developer', 'git',
-  'repos', 'workspace', 'work', 'github',
+  'src', 'code', 'projects', 'dev', 'developer', 'git', 'repos', 'workspace',
+  'work', 'github',
 ];
+
+/** Every-case glob for one name: `src` → `[sS][rR][cC]`. */
+function anyCaseGlob(name: string): string {
+  return [...name].map(c => (c.toLowerCase() === c.toUpperCase() ? c : `[${c.toLowerCase()}${c.toUpperCase()}]`)).join('');
+}
 
 /** Service definitions written by `setup --step service` (per-checkout slug). */
 const SYSTEMD_UNIT_RE = /^nanoclaw-v2-[a-z0-9_-]+\.service$/;
@@ -114,11 +122,15 @@ async function namedCheckoutCandidates(home: string, fs: FSProvider): Promise<st
   for (const name of homeNames) {
     if (CHECKOUT_NAME_RE.test(name)) out.push(join(home, name));
   }
-  // Only parents spelled as on disk: on a case-insensitive file system
-  // ~/projects opens ~/Projects too, and the checkout path would keep the
-  // wrong case (a remote snapshot, keyed by the real case, can't match it).
-  // An unlistable home falls back to trying every spelling.
-  const parents = homeNames.length > 0 ? CHECKOUT_PARENTS.filter(p => homeNames.includes(p)) : CHECKOUT_PARENTS;
+  // Parents matched case-insensitively against the home listing, keeping the
+  // on-disk spelling: on a case-insensitive file system ~/projects opens
+  // ~/Projects too, and the checkout path would keep the wrong case (a remote
+  // snapshot, keyed by the real case, can't match it). On a case-sensitive
+  // one ~/github and ~/GitHub are both found. An unlistable home falls back
+  // to the lower-case and capitalised spellings.
+  const parents = homeNames.length > 0
+    ? homeNames.filter(n => CHECKOUT_PARENTS.includes(n.toLowerCase()))
+    : CHECKOUT_PARENTS.flatMap(p => [p, p[0].toUpperCase() + p.slice(1)]);
   for (const parent of parents) {
     for (const name of await safeReaddir(fs, join(home, parent))) {
       if (CHECKOUT_NAME_RE.test(name)) out.push(join(home, parent, name));
@@ -298,13 +310,14 @@ export const nanoclawAdapter: AgentAdapter = {
 
   getProbeManifest(): ProbeManifest {
     // Same candidates detect() walks: ~/<*nanoclaw*> and ~/<parent>/<*nanoclaw*>.
-    // Each parent is a one-letter class (`[P]rojects`) so the probe matches it
-    // against the directory listing: a literal is stat'ed, and on a
-    // case-insensitive file system `projects` would then also collect
-    // ~/Projects under the wrong case.
+    // Each parent is an every-case class (`[pP][rR]…`): it matches any
+    // spelling detect() accepts, and the probe matches it against the
+    // directory listing — a literal is stat'ed, and on a case-insensitive
+    // file system `projects` would then also collect ~/Projects under the
+    // wrong case.
     const checkoutGlobs = [
       `~/${CHECKOUT_NAME_GLOB}`,
-      `~/{${CHECKOUT_PARENTS.map(p => `[${p[0]}]${p.slice(1)}`).join(',')}}/${CHECKOUT_NAME_GLOB}`,
+      `~/{${CHECKOUT_PARENTS.map(anyCaseGlob).join(',')}}/${CHECKOUT_NAME_GLOB}`,
     ];
     return {
       filePaths: [

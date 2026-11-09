@@ -7,6 +7,8 @@ import { readSkillText, skillFilesOf, skillsDirsOf, unreadableSkillFile } from '
 import { unlistableSkillDirs } from '../../core/utils.js';
 import { markTestCode } from '../../analyzers/test-paths.js';
 import { analysisEvasion } from '../../analyzers/ast-analyzer.js';
+import { truncateSnippet } from '../../core/patterns.js';
+import { maskEncodedLiterals } from '../../mcp/string-table.js';
 
 export const skl002 = defineCheck({
   id: 'SKL-002',
@@ -60,7 +62,8 @@ export const skl002 = defineCheck({
                 evidence.push({
                   file,
                   line: i + 1,
-                  snippet: line.trim().slice(0, 80) + (line.trim().length > 80 ? '...' : ''),
+                  // Decoded, an encoded literal is the value it hides
+                  snippet: truncateSnippet(maskEncodedLiterals(line.trim())),
                   detail: `Pattern match: ${label}`,
                 });
               }
@@ -76,7 +79,7 @@ export const skl002 = defineCheck({
           evidence.push({
             file,
             line: deep,
-            snippet: text.slice(0, 80) + (text.length > 80 ? '...' : ''),
+            snippet: truncateSnippet(text),
             detail: evasion.whole
             ? 'The file is nested or chained deeply enough to overflow the JavaScript parser and could not be analysed — only a line-by-line scan for exec and exfiltration calls ran'
             : 'Code nested or chained deeply enough to crash the JavaScript parser (brackets, templates, `?:`/`!` chains) or flood it with syntax errors — the statement is skipped by the other skill checks',

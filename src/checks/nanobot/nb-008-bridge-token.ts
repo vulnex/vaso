@@ -47,7 +47,17 @@ export const nb008 = defineCheck({
           hole = `tokenIssuePath ${JSON.stringify(pick(ws, 'tokenIssuePath'))} has no tokenIssueSecret — anyone can mint connection tokens`;
         }
 
-        if (hole) {
+        if (hole && unixSocket) {
+          // unixSocketPath replaces the TCP listener and the socket is
+          // chmod 0600 (runtime.py runner): browsers can't reach it and
+          // other users can't open it
+          evidence.push({
+            file: config.filePath,
+            snippet: `channels.websocket on ${where}`,
+            detail: `${hole}; served only on unix socket ${String(pick(ws, 'unixSocketPath')).trim()} (mode 0600), which web pages and other users cannot open`,
+            mitigated: true,
+          });
+        } else if (hole) {
           if (!local) critical = true;
           evidence.push({
             file: config.filePath,
@@ -56,11 +66,11 @@ export const nb008 = defineCheck({
               ? `${hole}; bound to loopback, but without an Origin check any web page the user opens can connect and drive the agent`
               : `${hole}; bound to ${host}, reachable from the network`,
           });
-        } else if (!local && !nonEmptyString(pick(ws, 'sslCertfile')) && !proxyAuth) {
+        } else if (!local && !(nonEmptyString(pick(ws, 'sslCertfile')) && nonEmptyString(pick(ws, 'sslKeyfile'))) && !proxyAuth) {
           evidence.push({
             file: config.filePath,
             snippet: `channels.websocket on ${where}`,
-            detail: `WebSocket channel bound to ${host} without sslCertfile — connection tokens travel over plaintext ws://`,
+            detail: `WebSocket channel bound to ${host} without sslCertfile + sslKeyfile — connection tokens travel over plaintext ws://`,
           });
         }
       }

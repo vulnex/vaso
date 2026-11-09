@@ -445,7 +445,10 @@ export function analyzeFlows(ast: JsAst): FlowAnalysis {
         else if (node.id.type === 'ObjectPattern' && node.init) {
           // `const { AWS_SECRET_ACCESS_KEY } = process.env`
           if (isProcessEnv(node.init)) {
-            const prop = node.id.properties.find(p => p.type === 'ObjectProperty' && p.value.type === 'Identifier' && p.value.name === b.identifier.name);
+            // `{ PORT = 3000 }`: a default doesn't make it the rest of the environment
+            const local = (v: Node): Node => (v.type === 'AssignmentPattern' ? v.left : v);
+            const prop = node.id.properties.find(p => p.type === 'ObjectProperty' && local(p.value as Node).type === 'Identifier'
+              && (local(p.value as Node) as { name: string }).name === b.identifier.name);
             const key = prop?.type === 'ObjectProperty' ? (prop.key.type === 'Identifier' ? prop.key.name : prop.key.type === 'StringLiteral' ? prop.key.value : undefined) : undefined;
             out = key ? [{ kind: 'env', origin: `process.env.${key}`, envName: key }]
               : [{ kind: 'env', origin: 'process.env', wholeEnv: true }]; // `...rest`

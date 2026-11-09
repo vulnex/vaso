@@ -1,6 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { shellCommandWrapper, shellInvocation } from '../../mcp/shell-wrapper.js';
+import { maskArgSecrets } from '../../mcp/config-secrets.js';
 
 export const mcp021 = defineCheck({
   id: 'MCP-021',
@@ -22,7 +23,7 @@ export const mcp021 = defineCheck({
 
         evidence.push({
           file: config.filePath,
-          snippet: `Server "${server.name}": ${server.command} ${server.args.join(' ')}`,
+          snippet: `Server "${server.name}": ${server.command} ${maskArgSecrets(server.args).join(' ')}`,
           detail: `MCP server launched via ${shellInvocation(base, server.args)} — any value in env or args is parsed as shell, opening the door to injection`,
         });
       }

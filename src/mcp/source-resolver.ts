@@ -5,7 +5,10 @@ import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { fetchNpmPackageSource, packageExtractDir, type PackageFetchResult } from './package-fetcher.js';
 import { collectServerDependencies } from './server-dependencies.js';
 import { parse as parseTOML } from 'smol-toml';
-import { sourceText } from '../analyzers/binary-text.js';
+import { binaryFileFormat, binaryFormat, isScriptFile, sourceText } from '../analyzers/binary-text.js';
+import { readCappedFile, ScanLimitError } from '../core/file-limits.js';
+import { isExcludedPath } from '../core/utils.js';
+import { isTestPath } from '../analyzers/test-paths.js';
 
 /**
  * A command's executable name, also when the config gives it as a path —
@@ -139,6 +142,20 @@ function interpreterOf(command: string): 'node' | 'python' | 'uv' | undefined {
   return undefined;
 }
 
+/**
+ * Programs a config names by path that run another program — shells,
+ * wrappers, interpreters, package managers, container engines. Their own
+ * binary is not the server's code.
+ */
+const LAUNCHERS = new Set([
+  'env', 'sh', 'bash', 'zsh', 'dash', 'ksh', 'fish', 'busybox', 'cmd', 'powershell', 'pwsh',
+  'nohup', 'caffeinate', 'sudo', 'doas', 'time', 'nice', 'ionice', 'timeout', 'stdbuf', 'setsid', 'exec', 'xargs', 'arch',
+  'docker', 'podman', 'nerdctl', 'kubectl', 'ssh', 'flatpak', 'snap',
+  'node', 'nodejs', 'deno', 'bun', 'bunx', 'tsx', 'ts-node', 'npx', 'pnpx', 'npm', 'pnpm', 'yarn', 'corepack',
+  'uv', 'uvx', 'pipx', 'pip', 'poetry', 'pdm', 'hatch', 'conda', 'mamba', 'fastmcp', 'mcp',
+  'ruby', 'perl', 'php', 'java', 'dotnet', 'go', 'cargo', 'lua', 'osascript', 'open',
+]);
+
 export function resolveLocalPath(server: MCPServerEntry): string | undefined {
   if (!server.command) return undefined;
 
@@ -164,8 +181,9 @@ export function resolveLocalPath(server: MCPServerEntry): string | undefined {
       return uvRunScript(args);
   }
 
-  // Direct path execution
-  if (cmd.startsWith('/') || cmd.startsWith('./') || cmd.startsWith('../')) {
+  // Direct path execution — of the server itself, not a launcher that runs
+  // something else (`/usr/bin/env npx …`, `/bin/bash -c`, `docker run`)
+  if ((cmd.startsWith('/') || cmd.startsWith('./') || cmd.startsWith('../')) && !LAUNCHERS.has(runnerName(cmd).toLowerCase())) {
     return resolve(cmd);
   }
 
@@ -181,17 +199,54 @@ function sourceLanguage(server: MCPServerEntry, path: string | undefined, code: 
   return 'javascript';
 }
 
-async function readSourceFile(filePath: string, fs: FSProvider, onDenied?: (message: string) => void): Promise<string | undefined> {
+/**
+ * A server source file's text, or undefined. `onFailure` hears why a source
+ * that is there wasn't read: EACCES/EPERM, or over the content-scan size
+ * limit (MAX_SCAN_FILE_BYTES, as for skill and IOC files — a 10 MB bundle
+ * parsed whole ran V8 out of heap). `onBinary` hears the format of a compiled
+ * binary (a Go/Rust server), which is not source. A snapshot that omits a
+ * binary asset without its head stays silent.
+ */
+async function readSourceFile(
+  filePath: string,
+  fs: FSProvider,
+  onFailure?: (message: string) => void,
+  onBinary?: (format: string) => void,
+): Promise<string | undefined> {
   try {
-    const content = await fs.readFile(filePath);
+    // Judged on its head before its size: a Go/Rust server binary is often
+    // over the content-scan limit, and is no unreadable source either way
+    const early = await headBinaryFormat(fs, filePath);
+    if (early) {
+      onBinary?.(early);
+      return undefined;
+    }
+    const content = await readCappedFile(fs, filePath);
     // A native executable (a Mach-O / ELF server binary launched by path) is
     // not source: read as text, its bytes match "invisible character" and
-    // "encoded string" patterns everywhere. A stray NUL in a script is not one.
+    // "encoded string" patterns everywhere. A script never is (binary-text.ts).
+    const format = await binaryFileFormat(fs, filePath, content);
+    if (format) {
+      onBinary?.(format);
+      return undefined;
+    }
     return sourceText(content);
   } catch (err) {
-    if (isDenied(err)) onDenied?.(err instanceof Error ? err.message : String(err));
+    if (err instanceof ScanLimitError) {
+      if (err.reason !== 'omitted') onFailure?.(`${filePath}: ${err.detail}`);
+    } else if (isDenied(err)) {
+      onFailure?.(err instanceof Error ? err.message : String(err));
+    }
     return undefined;
   }
+}
+
+/** The binary format of a file's raw head, when it is no script (extension or `#!`). */
+async function headBinaryFormat(fs: FSProvider, filePath: string): Promise<string | undefined> {
+  if (isScriptFile(filePath, '')) return undefined;
+  const head = await fs.readHead?.(filePath, 4096).catch(() => undefined);
+  if (!head || (head[0] === 0x23 && head[1] === 0x21)) return undefined;
+  return binaryFormat(head);
 }
 
 function isDenied(err: unknown): boolean {
@@ -262,20 +317,24 @@ export async function resolveServerSources(
 
     let sourceCode: string | undefined;
     let entryFile: string | undefined;
-    // The server's code is there but this scan can't read it (EACCES): every
-    // source check would pass it unseen, so it is reported (SOURCE-READ)
+    // The server's code is there but this scan can't read it (EACCES, or over
+    // the size limit): every source check would pass it unseen, so it is
+    // reported (SOURCE-READ)
     let readFailure: string | undefined;
     const denied = (message: string) => { readFailure ??= message; };
+    // A compiled server (Go/Rust): its format; nothing to analyze
+    let compiledBinary: string | undefined;
+    const binary = (format: string) => { compiledBinary ??= format; };
 
     if (localPath) {
-      sourceCode = await readSourceFile(localPath, provider, denied);
+      sourceCode = await readSourceFile(localPath, provider, denied, binary);
       if (sourceCode) entryFile = localPath;
 
       // If it's a directory, find the main entry
-      if (!sourceCode) {
+      if (!sourceCode && !compiledBinary) {
         const entry = await findMainEntry(localPath, provider);
         if (entry) {
-          sourceCode = await readSourceFile(entry, provider, denied);
+          sourceCode = await readSourceFile(entry, provider, denied, binary);
           if (sourceCode) entryFile = entry;
         } else {
           // A server directory that can't be listed hides its entry file
@@ -301,6 +360,24 @@ export async function resolveServerSources(
       else resolveFailure = result.failure ?? { reason: 'npm-failed' };
     }
 
+    const language = sourceCode ? sourceLanguage(server, localPath, sourceCode) : undefined;
+    // The modules the entry imports (a thin index.js whose tools live in
+    // ./tools/*.js), or the rest of its Python package
+    let sourceRoot: string | undefined;
+    let partialFailure: string | undefined;
+    if (sourceCode && entryFile) {
+      const hidden: SkippedFile[] = [];
+      const files = language === 'python' ? await withPythonPackage(entryFile, provider) : await withLocalImports(entryFile, sourceCode, provider, undefined, hidden);
+      if (files.length > 1) {
+        const root = language === 'python' ? dirname(entryFile) : await serverRoot(entryFile, provider);
+        const read = await readServerFiles(files, root, provider, new Map([[entryFile, sourceCode]]));
+        sourceCode = read.code;
+        if (read.marked) sourceRoot = root;
+        hidden.push(...read.skipped);
+      }
+      if (hidden.length > 0) partialFailure = describeSkipped(hidden);
+    }
+
     const source: MCPServerSource = {
       serverName: server.name,
       packageName,
@@ -308,8 +385,11 @@ export async function resolveServerSources(
       sourceCode,
       ...(resolveFailure ? { resolveFailure } : {}),
       ...(readFailure && !sourceCode ? { readFailure } : {}),
+      ...(partialFailure ? { readFailure: partialFailure } : {}),
+      ...(compiledBinary && !sourceCode ? { compiledBinary } : {}),
+      ...(sourceRoot ? { sourceRoot } : {}),
     };
-    if (sourceCode && sourceLanguage(server, localPath, sourceCode) === 'python') {
+    if (language === 'python') {
       source.language = 'python';
     }
     if (sourceCode && entryFile) {
@@ -387,24 +467,202 @@ async function referencedDataFiles(entryFile: string, code: string, fs: FSProvid
 /** Server code a source tree names explicitly: imports the MCP SDK or FastMCP. */
 const MCP_SDK_REFERENCE = /@modelcontextprotocol\/sdk|\bfrom\s+mcp\b|\bimport\s+mcp\b|\bFastMCP\b/;
 
+/** Directories in a server checkout that hold no server code. */
+const JS_SKIP_DIRS = new Set(['example', 'examples', 'coverage', 'scripts', 'docs']);
+/** Tooling config beside the code (`vitest.config.ts`, `eslint.config.mjs`). */
+const TOOL_CONFIG_FILE = /\.config\.[cm]?[jt]s$|^\.?eslintrc\.c?js$|^jest\.setup\.[jt]s$/;
+
 /**
- * The server code in a directory without a declared entry: its top-level
- * source files that use the MCP SDK (or all of them when none says so).
+ * The source files of a server checkout, subdirectories too: vendor, VCS,
+ * test, example and tooling files skipped, at most MAX_LOCAL_MODULES.
  */
-async function serverFilesIn(dir: string, fs: FSProvider): Promise<string[]> {
-  let names: string[];
-  try {
-    names = await fs.readdir(dir);
-  } catch {
-    return [];
+async function sourceFilesUnder(dir: string, fs: FSProvider, denied?: SkippedFile[]): Promise<string[]> {
+  const candidates: string[] = [];
+  const pending = [dir];
+  for (let d = pending.shift(); d !== undefined && candidates.length < MAX_LOCAL_MODULES; d = pending.shift()) {
+    let entries;
+    try {
+      entries = await fs.readdirEntries(d);
+    } catch (err) {
+      // A directory of the checkout that can't be listed hides its files
+      if (isDenied(err)) denied?.push({ path: d, reason: err instanceof Error ? err.message : String(err) });
+      continue;
+    }
+    for (const e of [...entries].sort((a, b) => a.name.localeCompare(b.name))) {
+      const path = join(d, e.name);
+      if (e.isDirectory) {
+        if (!e.name.startsWith('.') && !JS_SKIP_DIRS.has(e.name) && !isExcludedPath(dir, path, { keepBuildOutput: true })) pending.push(path);
+      } else if (
+        e.isFile &&
+        SOURCE_EXTENSIONS.has(extname(e.name).toLowerCase()) &&
+        !e.name.endsWith('.d.ts') &&
+        !TOOL_CONFIG_FILE.test(e.name) &&
+        !isTestPath(path, [dir], { rootIsUnit: true })
+      ) {
+        candidates.push(path);
+      }
+    }
   }
-  const candidates = names.filter((n) => SOURCE_EXTENSIONS.has(extname(n).toLowerCase())).sort().map((n) => join(dir, n));
+  return candidates.slice(0, MAX_LOCAL_MODULES);
+}
+
+/**
+ * The server code in a directory without a declared entry: its source files
+ * (sourceFilesUnder()) that use the MCP SDK, plus the modules they import —
+ * or all of them when none says so.
+ */
+async function serverFilesIn(dir: string, fs: FSProvider, denied?: SkippedFile[]): Promise<string[]> {
+  const candidates = await sourceFilesUnder(dir, fs, denied);
   const usingSdk: string[] = [];
-  for (const file of candidates) {
+  for (const file of candidates.slice(0, MAX_LOCAL_MODULES)) {
     const code = await readSourceFile(file, fs);
     if (code && MCP_SDK_REFERENCE.test(code)) usingSdk.push(file);
   }
-  return usingSdk.length > 0 ? usingSdk : candidates;
+  if (usingSdk.length === 0) return candidates;
+  const files = new Set<string>();
+  for (const file of usingSdk) {
+    const code = (await readSourceFile(file, fs)) ?? '';
+    for (const f of await withLocalImports(file, code, fs, dir, denied)) files.add(f);
+    if (files.size >= MAX_LOCAL_MODULES) break;
+  }
+  return [...files].slice(0, MAX_LOCAL_MODULES);
+}
+
+/** Modules followed from one server's entry. */
+const MAX_LOCAL_MODULES = 200;
+/**
+ * Source read for one server, all files together: a 4.5 MiB minified file
+ * takes ~45 s to analyze, and four of them took three minutes. The entry is
+ * always read (it has the 5 MiB per-file limit); a module past the total is
+ * skipped and reported.
+ */
+export const MAX_SERVER_SOURCE_BYTES = 6 * 1024 * 1024;
+
+/** Extensions a relative import may leave out, in Node / TypeScript resolution order. */
+const JS_EXTENSIONS = ['.js', '.mjs', '.cjs', '.ts', '.mts', '.cts', '.jsx', '.tsx'];
+/**
+ * `from './x'`, `import './x'`, `import('./x')`, `require('./x')`,
+ * `export … from './x'`: relative specifiers only — packages are not the
+ * server's own code. The specifier class excludes quotes and newlines, so the
+ * scan is linear on minified bundles.
+ */
+const RELATIVE_IMPORT = /(?:\bfrom|\bimport|\brequire)\s*(?:\(\s*)?(["'`])(\.{1,2}\/[^"'`\r\n]{0,512})\1/g;
+
+/**
+ * The directory a local server's modules are confined to: the nearest
+ * ancestor of its entry with a package.json (a `dist/index.js` imports
+ * `../lib/x.js`), at most four levels up, else the entry's directory.
+ */
+async function serverRoot(entry: string, fs: FSProvider): Promise<string> {
+  let dir = dirname(entry);
+  for (let i = 0; i < 4; i++) {
+    if (await fs.access(join(dir, 'package.json'))) return dir;
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return dirname(entry);
+}
+
+/**
+ * The file a relative specifier names: as written, with an extension, or a
+ * directory's index; `./x.js` may be `./x.ts` in TypeScript source. A module
+ * hidden by permissions (an untraversable directory) is `denied`.
+ */
+async function resolveImport(from: string, specifier: string, fs: FSProvider): Promise<{ path?: string; denied?: string }> {
+  const base = resolve(dirname(from), specifier.replace(/[?#].*$/, ''));
+  const ext = extname(base).toLowerCase();
+  const candidates = JS_EXTENSIONS.includes(ext)
+    ? [base, base.replace(/\.([mc]?)js$/i, '.$1ts'), base.replace(/\.js$/i, '.tsx')]
+    : [...JS_EXTENSIONS.map((e) => base + e), ...JS_EXTENSIONS.map((e) => join(base, `index${e}`))];
+  let denied: string | undefined;
+  for (const path of new Set(candidates)) {
+    try {
+      if ((await fs.stat(path)).isFile()) return { path };
+    } catch (err) {
+      // not this one — unless permissions hide it
+      if (isDenied(err)) denied ??= err instanceof Error ? err.message : String(err);
+    }
+  }
+  return denied ? { denied } : {};
+}
+
+/**
+ * A JavaScript/TypeScript entry plus the local modules it imports,
+ * transitively: a server whose entry only wires up `./tools/run.js` keeps its
+ * sinks there. Confined to the server's directory (`root`, else serverRoot()),
+ * vendor dirs skipped, at most MAX_LOCAL_MODULES files.
+ */
+async function withLocalImports(entry: string, entryCode: string, fs: FSProvider, root?: string, denied?: SkippedFile[]): Promise<string[]> {
+  if (!JS_EXTENSIONS.includes(extname(entry).toLowerCase()) && !/^#!.*\bnode\b/.test(entryCode)) return [entry];
+  const base = root ?? (await serverRoot(entry, fs));
+  const files = [entry];
+  const seen = new Set(files);
+  // Specifiers already resolved (or not) from a directory: each costs a stat per candidate
+  const tried = new Set<string>();
+  for (let i = 0; i < files.length && files.length < MAX_LOCAL_MODULES; i++) {
+    const code = i === 0 ? entryCode : await readSourceFile(files[i], fs);
+    if (!code) continue;
+    for (const m of code.matchAll(RELATIVE_IMPORT)) {
+      const key = `${dirname(files[i])}\0${m[2]}`;
+      if (tried.has(key)) continue;
+      tried.add(key);
+      const found = await resolveImport(files[i], m[2], fs);
+      if (found.denied) denied?.push({ path: resolve(dirname(files[i]), m[2]), reason: found.denied });
+      const path = found.path;
+      if (!path || seen.has(path)) continue;
+      seen.add(path);
+      const rel = relative(base, path);
+      if (rel.startsWith('..') || isExcludedPath(base, dirname(path), { keepBuildOutput: true })) continue;
+      files.push(path);
+      if (files.length >= MAX_LOCAL_MODULES) break;
+    }
+  }
+  return files;
+}
+
+/** A file of a server not analyzed, and why. */
+interface SkippedFile {
+  path: string;
+  reason: string;
+}
+
+/**
+ * The files of one server joined for analysis (`// === <file> ===` headers,
+ * relative to `root`), within MAX_SERVER_SOURCE_BYTES; files not read
+ * (permissions, size limits) are returned as skipped. `known` holds texts
+ * already read.
+ */
+async function readServerFiles(
+  files: string[],
+  root: string,
+  fs: FSProvider,
+  known = new Map<string, string>(),
+): Promise<{ code: string; parts: number; marked: boolean; skipped: SkippedFile[] }> {
+  const parts: string[] = [];
+  const skipped: SkippedFile[] = [];
+  let total = 0;
+  for (const file of files) {
+    let failure: string | undefined;
+    const code = known.get(file) ?? (await readSourceFile(file, fs, (message) => { failure = message; }));
+    if (code === undefined) {
+      if (failure) skipped.push({ path: file, reason: failure });
+      continue;
+    }
+    if (parts.length > 0 && total + code.length > MAX_SERVER_SOURCE_BYTES) {
+      skipped.push({ path: file, reason: `${file}: not analyzed — the server's source is over the ${MAX_SERVER_SOURCE_BYTES / (1024 * 1024)} MiB total analysis limit` });
+      continue;
+    }
+    total += code.length;
+    parts.push(files.length > 1 ? `// === ${relative(root, file) || basename(file)} ===\n${code}` : code);
+  }
+  return { code: parts.join('\n\n'), parts: parts.length, marked: files.length > 1, skipped };
+}
+
+/** One SOURCE-READ line for a server's skipped modules: the first reason, and how many more. */
+function describeSkipped(skipped: SkippedFile[]): string {
+  const more = skipped.length > 1 ? ` (and ${skipped.length - 1} more module(s) not analyzed)` : '';
+  return `${skipped[0].reason}${more}`;
 }
 
 /** Directories inside a Python package that are not server code. */
@@ -509,7 +767,10 @@ async function packageJsonName(dir: string, fs: FSProvider): Promise<string | un
 
 export interface SourcePathResolution {
   sources: MCPServerSource[];
-  /** Paths that don't exist or hold no readable server source. */
+  /**
+   * Paths that don't exist or hold no readable server source, and files of a
+   * given checkout that couldn't be read (permissions, size limit).
+   */
   unreadable: string[];
 }
 
@@ -528,14 +789,34 @@ export async function resolveSourcePaths(paths: string[], options: { fs?: FSProv
   for (const given of paths) {
     const path = resolve(given);
     let files: string[] = [];
+    // Modules and directories of the checkout permissions hide
+    const hidden: SkippedFile[] = [];
+    // A compiled server given directly: an inventory note, not unreadable source
+    let compiledBinary: string | undefined;
     try {
       const st = await fs.stat(path);
-      if (st.isFile()) files = await withPythonPackage(path, fs);
-      else if (st.isDirectory()) {
+      if (st.isFile()) {
+        const code = await readSourceFile(path, fs, undefined, (format) => { compiledBinary = format; });
+        files = code === undefined ? [path] : path.endsWith('.py') ? await withPythonPackage(path, fs) : await withLocalImports(path, code, fs, undefined, hidden);
+      } else if (st.isDirectory()) {
         const entry = await findMainEntry(path, fs);
-        files = entry ? await withPythonPackage(entry, fs) : await serverFilesIn(path, fs);
+        const entryCode = entry ? await readSourceFile(entry, fs, undefined, (format) => { compiledBinary = format; }) : undefined;
+        if (!entry) files = await serverFilesIn(path, fs, hidden);
+        else if (entry.endsWith('.py') || entryCode === undefined) files = await withPythonPackage(entry, fs);
+        else {
+          // The modules the entry imports first, then the checkout's other
+          // source files: tools loaded by a computed path (`require(join(dir,
+          // name))`) import nothing the graph can see
+          const graph = await withLocalImports(entry, entryCode, fs, path, hidden);
+          // Within the entry's top directory (`src/`): `dist/` beside it is
+          // the same code compiled, and would report every finding twice
+          const top = relative(path, entry).split(/[\\/]/);
+          const within = top.length > 1 ? join(path, top[0]) : path;
+          const rest = (await sourceFilesUnder(within, fs, hidden)).filter((f) => !graph.includes(f) && !f.endsWith('.py'));
+          files = [...graph, ...rest].slice(0, MAX_LOCAL_MODULES);
+        }
         // A Python package checkout (pyproject + src/<pkg>/): all its modules
-        if (!entry && (files.length === 0 || files.every((f) => f.endsWith('.py')))) {
+        if (!entry && (files.length === 0 || files.every((f) => f.endsWith('.py')) || (await fs.access(join(path, 'pyproject.toml'))))) {
           const pkgFiles = await pythonPackageFiles(path, fs);
           if (pkgFiles) files = pkgFiles;
         }
@@ -544,20 +825,28 @@ export async function resolveSourcePaths(paths: string[], options: { fs?: FSProv
       // reported below
     }
 
-    const parts: string[] = [];
-    for (const file of files) {
-      const code = await readSourceFile(file, fs);
-      if (code !== undefined) parts.push(files.length > 1 ? `// === ${relative(path, file) || basename(file)} ===\n${code}` : code);
-    }
-    if (parts.length === 0) {
-      unreadable.push(given);
+    if (compiledBinary && files.length <= 1) {
+      sources.push({ serverName: basename(path), localPath: files[0] ?? path, compiledBinary });
       continue;
     }
 
-    const sourceCode = parts.join('\n\n');
+    const root = (await fs.stat(path).then((st) => st.isDirectory()).catch(() => false)) ? path : dirname(path);
+    const read = await readServerFiles(files, root, fs);
+    // Files of the checkout not read (permissions, size limits): reported as
+    // SOURCE-READ in the report, like a configured server's
+    const skipped = [...read.skipped, ...hidden];
+    if (read.parts === 0) {
+      unreadable.push(given);
+      if (skipped.length > 0) sources.push({ serverName: basename(path), localPath: files[0] ?? path, readFailure: describeSkipped(skipped) });
+      continue;
+    }
+    unreadable.push(...skipped.map((f) => f.path));
+
+    const sourceCode = read.code;
     const entryFile = files[0];
     const source: MCPServerSource = { serverName: basename(path), localPath: entryFile, sourceCode };
-    if (parts.length > 1) source.sourceRoot = path;
+    if (skipped.length > 0) source.readFailure = describeSkipped(skipped);
+    if (read.marked) source.sourceRoot = root;
     // The name it is published under, for the provenance (typosquat) check.
     const packageName = await packageJsonName(dirname(entryFile), fs);
     if (packageName) source.packageName = packageName;

@@ -169,13 +169,177 @@ export function findUrlSecrets(url: string, location = 'url'): ConfigSecret[] {
     }
   }
 
-  for (const segment of parsed.pathname.split('/')) {
-    if (!segment) continue;
+  // `#access_token=…` (OAuth implicit-flow style): sent nowhere by HTTP, but
+  // stored and logged with the URL like any other part of it
+  for (const [name, value] of fragmentParams(url)) {
+    const known = knownToken(value);
+    if (known) add(value, `${known.name} in URL fragment "${name}"`);
+    else if (SECRET_PARAM.test(name) && value.length >= 8 && (/^(?:password|pass|pwd)$/i.test(name) || looksLikeSecret(value))) {
+      add(value, `credential in URL fragment "${name}"`);
+    }
+  }
+
+  const path = rawPath(url);
+  const host = parsed.hostname.toLowerCase();
+  const hostPath = credentialPath(host, path);
+  if (hostPath) add(hostPath.value, hostPath.kind);
+  // Document and file IDs on content hosts (a Google Doc's `/d/<id>`, a
+  // Notion page, a Figma file key) name a resource that still needs the
+  // viewer's own sign-in: not a credential. Known token formats still count.
+  const contentHost = CONTENT_ID_HOST.test(host);
+  const endpointPath = ENDPOINT_HOST.test(host) || ENDPOINT_SEGMENT.test(path);
+  let previous = '';
+  const segments = path.split('/');
+  for (const [index, rawSegment] of segments.entries()) {
+    const after = previous;
+    previous = rawSegment;
+    const next = segments[index + 1]?.split(';')[0] ?? '';
+    // `;jsessionid=…` matrix parameters ride on a segment
+    const [segment, ...matrix] = rawSegment.split(';');
+    for (const param of matrix) {
+      const eq = param.indexOf('=');
+      const value = eq > 0 ? param.slice(eq + 1) : '';
+      if (eq > 0 && /^(?:jsessionid|phpsessid|sid|session(?:[_-]?id)?|token|auth|key|api[_-]?key)$/i.test(param.slice(0, eq)) && value.length >= 8) {
+        add(value, `session or credential in URL path parameter "${param.slice(0, eq)}"`);
+      }
+    }
+    if (!segment || hostPath?.value.split('/').includes(segment)) continue;
     // Telegram Bot API: https://api.telegram.org/bot<id>:<secret>/method
     const bot = /^bot(\d{6,}:[A-Za-z0-9_-]{30,})$/.exec(segment);
     if (bot) { add(bot[1], 'Telegram Bot token in URL path'); continue; }
     const known = knownToken(segment);
-    if (known) add(known.token, `${known.name} in URL path`);
+    if (known) { add(known.token, `${known.name} in URL path`); continue; }
+    // Zapier's older MCP key (`actions.zapier.com/mcp/sk-ak-…/sse`), under any host
+    if (/^sk-ak-[A-Za-z0-9]{20,}$/.test(segment)) { add(segment, 'Zapier MCP API key in URL path'); continue; }
+    if (/^eyJ[\w-]{8,}\.eyJ[\w-]{8,}\.[\w-]*$/.test(segment)) { add(segment, 'JWT in URL path'); continue; }
+    if (contentHost) continue;
+    if (randomPathSegment(segment)) { add(segment, 'random token in URL path (a capability URL: whoever has it can use the server)'); continue; }
+    // A hex token is also a commit SHA or a content digest: only on an MCP
+    // endpoint or webhook is it the key to the server
+    // and only as the key position itself: the last segment, or the one just
+    // before the endpoint (`/<key>/sse`) — not a resource ID under a noun
+    // (`/projects/<id>/sse`, a commit under `/raw/<sha>/mcp`)
+    const keyPosition = !next || ENDPOINT_TAIL.test(next);
+    if (endpointPath && keyPosition && !DIGEST_PARENT.test(after) && !RESOURCE_PARENT.test(after)
+      && /^(?=.*[a-f])[0-9a-f]{32,}$/.test(segment)) add(segment, 'hex token in MCP/webhook URL path');
+  }
+  return out;
+}
+
+/** Content hosts whose path IDs are documents/files, not credentials. */
+const CONTENT_ID_HOST = /(?:^|\.)(?:docs\.google\.com|drive\.google\.com|notion\.so|notion\.site|figma\.com|airtable\.com|youtube\.com|youtu\.be|github\.com|gitlab\.com|wikipedia\.org)$/;
+/** An MCP server or webhook endpoint: where a path token is the access key. */
+const ENDPOINT_HOST = /(?:^|[.-])(?:mcp|hooks?|webhooks?)(?:[.-]|$)/;
+/** Segments a commit SHA or content digest follows (`/commit/<sha>`, `/blobs/<digest>`). */
+const DIGEST_PARENT = /^(?:commits?|repos?|blobs?|trees?|objects?|sha\d*|digests?|revisions?|refs|tags?|releases?|builds?|artifacts?)$/i;
+const ENDPOINT_SEGMENT = /\/(?:mcp|sse|hooks?|webhooks?|triggers?|catch)(?:\/|$)/i;
+/** The segment after a key in an endpoint URL (`/<key>/sse`). */
+const ENDPOINT_TAIL = /^(?:mcp|sse|messages?|stream|events?|rpc)$/i;
+/** Parents whose child segment is a resource ID, not a key (`/projects/<id>/sse`). */
+const RESOURCE_PARENT = /^(?:projects?|repos?|orgs?|organi[sz]ations?|teams?|workspaces?|users?|accounts?|items?|documents?|docs?|files?|spaces?|apps?|sites?|databases?|tables?|raw|ids?)$/i;
+
+/**
+ * Hosts whose URL path is itself the credential:
+ *  - Zapier MCP `https://mcp.zapier.com/api/mcp/s/<secret>/mcp` ("treat this
+ *    URL like a password", docs.zapier.com/mcp) and the older
+ *    `https://actions.zapier.com/mcp/<key>/sse`
+ *  - Slack incoming webhooks `https://hooks.slack.com/services/T…/B…/<secret>`
+ *  - Discord webhooks `https://discord.com/api/webhooks/<id>/<token>`
+ *  - Zapier catch hooks `https://hooks.zapier.com/hooks/catch/<id>/<key>/`
+ */
+function credentialPath(host: string, path: string): { value: string; kind: string } | undefined {
+  let m: RegExpExecArray | null;
+  if (/(^|\.)zapier\.com$/.test(host)
+    && (m = /^\/api\/mcp\/s\/([^/?#]{8,})/.exec(path) ?? /^\/mcp\/([^/?#]{8,})\/(?:sse|mcp)\b/.exec(path))) {
+    return { value: m[1], kind: 'Zapier MCP server secret in URL path' };
+  }
+  // Zapier catch hooks: https://hooks.zapier.com/hooks/catch/<account>/<key>/
+  if (/(^|\.)hooks\.zapier\.com$/.test(host) && (m = /^\/hooks\/catch\/\d+\/([^/?#]+)/.exec(path))) {
+    return { value: m[1], kind: 'Zapier webhook key in URL path' };
+  }
+  if (/(^|\.)hooks\.slack\.com$/.test(host) && (m = /^\/(?:services|workflows|triggers)\/([^?#]+)/.exec(path))) {
+    return { value: m[1].replace(/\/+$/, ''), kind: 'Slack webhook secret in URL path' };
+  }
+  if (/(^|\.)(?:discord|discordapp)\.com$/.test(host) && (m = /^\/api\/webhooks\/[^/]+\/([^/?#]+)/.exec(path))) {
+    return { value: m[1], kind: 'Discord webhook token in URL path' };
+  }
+  // Microsoft Teams / Office 365 incoming webhooks:
+  // https://<tenant>.webhook.office.com/webhookb2/<group>@<tenant>/IncomingWebhook/<key>/<owner>
+  if (/(^|\.)(?:webhook\.)?office(?:365)?\.com$/.test(host) && (m = /\/IncomingWebhook\/([^/?#]+)/i.exec(path))) {
+    return { value: m[1], kind: 'Microsoft Teams webhook key in URL path' };
+  }
+  return undefined;
+}
+
+/**
+ * A path segment that is a random token rather than a name: 24+ characters
+ * of base64/base62 (also `.`, `~` and `%XX` escapes) in both cases with
+ * digits and near-maximal entropy, that doesn't split into words
+ * (`Model_Context_Protocol_Specification2025`, `Package-Name_Version2Beta3`).
+ * UUIDs and hex IDs (resource IDs) are single-case.
+ */
+function randomPathSegment(segment: string): boolean {
+  if (segment.length < 24 || !/^(?:[A-Za-z0-9_+=.~-]|%[0-9A-Fa-f]{2})+$/.test(segment)) return false;
+  if (!/[A-Z]/.test(segment) || !/[a-z]/.test(segment) || !/[0-9]/.test(segment)) return false;
+  if (segment.split(/[-_.~]|%[0-9A-Fa-f]{2}/).every(p => /^(?:[A-Z]?[a-z]{2,}|[A-Z]{2,}(?![a-z])|\d+)*$/.test(p))) return false;
+  return shannonEntropy(segment) >= Math.min(4.5, Math.log2(segment.length) - 0.5);
+}
+
+/** The URL's path exactly as written (the parser percent-encodes some characters). */
+function rawPath(url: string): string {
+  const rest = url.replace(/^[a-z][a-z0-9+.-]*:\/\/[^/?#]*/i, '');
+  return rest.split(/[?#]/)[0];
+}
+
+/** `name=value` pairs of a URL fragment, raw. */
+function fragmentParams(url: string): Array<[string, string]> {
+  const hash = url.indexOf('#');
+  if (hash < 0) return [];
+  const out: Array<[string, string]> = [];
+  for (const pair of url.slice(hash + 1).split(/[&;]/)) {
+    const eq = pair.indexOf('=');
+    if (eq <= 0) continue;
+    let n = pair.slice(0, eq);
+    try { n = decodeURIComponent(n); } catch { /* keep raw */ }
+    out.push([n, pair.slice(eq + 1)]);
+  }
+  return out;
+}
+
+/** Header names whose value is a credential (`Authorization`, `X-Api-Key`, `Api-Key`, `X-Auth-Token`). */
+const SECRET_HEADER_NAME = /^(?:(?:proxy-)?authorization|x-(?=[\w-]*?(?:key|token|secret|auth))[\w-]*|api[_-]?key|[\w-]*[_-](?:token|secret))$/i;
+
+/**
+ * What a static header value is when it is a stored credential (`Bearer
+ * <token>`, `X-Api-Key: <key>`): a known token format or a random-looking
+ * value under a credential header name. Undefined for references
+ * (`Bearer ${TOKEN}`), placeholders and ordinary header values.
+ */
+export function headerSecret(name: string, value: string): string | undefined {
+  const scheme = /^\s*(bearer|basic|token|bot)\s+/i.exec(value);
+  const v = value.slice(scheme?.[0].length ?? 0).trim();
+  if (notASecret(v)) return undefined;
+  const known = knownToken(v);
+  if (known) return `${known.name} in ${name} header`;
+  if ((scheme || SECRET_HEADER_NAME.test(name.trim())) && looksLikeSecret(v)) {
+    return scheme ? `${scheme[1][0].toUpperCase()}${scheme[1].slice(1).toLowerCase()} credential in ${name} header` : `credential in ${name} header`;
+  }
+  return undefined;
+}
+
+/** `url` with every credential `findUrlSecrets` finds in it replaced by `***`. */
+export function maskUrlSecrets(url: string): string {
+  let masked = url;
+  for (const s of findUrlSecrets(url)) masked = masked.split(s.value).join(MASK);
+  return masked;
+}
+
+/** `args` with every credential `findArgSecrets` finds replaced by `***` in its element. */
+export function maskArgSecrets(args: readonly string[]): string[] {
+  const out = [...args];
+  for (const s of findArgSecrets(args)) {
+    const i = Number(/^args\[(\d+)\]$/.exec(s.location)?.[1]);
+    if (Number.isInteger(i) && out[i] !== undefined) out[i] = out[i].includes(s.value) ? out[i].split(s.value).join(MASK) : MASK;
   }
   return out;
 }
@@ -250,9 +414,26 @@ export function findArgSecrets(args: readonly string[]): ConfigSecret[] {
       continue;
     }
 
+    // Inline JSON (`--config '{"token":"<value>"}'`): a credential-named pair
+    if (/[{,]\s*\\*["']/.test(arg)) {
+      for (const m of arg.matchAll(INLINE_JSON_PAIR)) {
+        const [, name, value] = m;
+        if (!JSON_SECRET_NAME.test(name) || /(?:hash(?:ed)?|digest|ttl|expir|type|mode|url|uri|file|path|id)$/i.test(name)) continue;
+        const known = knownToken(value);
+        if (known) add(i, known.token, `${known.name} in inline JSON "${name}"`);
+        else if (looksLikeSecret(value)) add(i, value, `credential in inline JSON "${name}"`);
+      }
+      if (out.some(o => o.location === `args[${i}]`)) continue;
+    }
+
     // A bare token standing alone or inside a larger argument
     const known = knownToken(arg);
     if (known) add(i, known.token, known.name);
   }
   return out;
 }
+
+/** `"name": "value"` (or single quotes) inside an argument holding inline JSON. */
+// (quotes may be backslash-escaped: `{\"apiKey\":\"…\"}` inside a shell string)
+const INLINE_JSON_PAIR = /\\*["']([A-Za-z_][\w.-]{0,63})\\*["']\s*:\s*\\*["']([^"'\\\s]{8,})\\*["']/g;
+const JSON_SECRET_NAME = /(?:token|secret|passw|passphrase|api[_-]?key|apikey|credential|private[_-]?key|auth)/i;

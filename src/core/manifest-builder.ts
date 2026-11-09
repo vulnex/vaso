@@ -42,6 +42,8 @@ export const RELOCATABLE_TREES: ReadonlyArray<readonly [prefix: string, relocate
   ['~/.copilot/', ['${COPILOT_HOME}/']],
   // GEMINI_CLI_HOME replaces the home directory the .gemini folder lives in
   ['~/.gemini/', ['${GEMINI_CLI_HOME}/.gemini/']],
+  // …and its sandbox runtime dir (~/.cache/.gemini under sandbox-exec)
+  ['~/.cache/.gemini/', ['${GEMINI_CLI_HOME}/.cache/.gemini/']],
   ['~/.qwen/', ['${QWEN_HOME}/']],
   // CURSOR_CONFIG_DIR relocates cli-config.json (Cursor CLI configuration reference)
   ['~/.cursor/', ['${CURSOR_CONFIG_DIR}/']],
@@ -124,6 +126,7 @@ export function buildProbeManifest(adapters: AgentAdapter[]): ProbeManifest {
     systemDirListings: [],
     metadataGlobPatterns: [],
     envOriginOnly: [],
+    envPresence: [],
   };
 
   for (const adapter of adapters) {
@@ -138,6 +141,7 @@ export function buildProbeManifest(adapters: AgentAdapter[]): ProbeManifest {
       if (m.systemDirListings) merged.systemDirListings!.push(...m.systemDirListings);
       if (m.metadataGlobPatterns) merged.metadataGlobPatterns!.push(...m.metadataGlobPatterns);
       if (m.envOriginOnly) merged.envOriginOnly!.push(...m.envOriginOnly);
+      if (m.envPresence) merged.envPresence!.push(...m.envPresence);
     }
     // Every copy of the agent's CLI (system prefixes, user bin dirs, each nvm
     // Node version) so remote scans inventory old copies too. Existence is all
@@ -202,6 +206,7 @@ export function buildProbeManifest(adapters: AgentAdapter[]): ProbeManifest {
   merged.metadataGlobPatterns = withRelocatedTwins(merged.metadataGlobPatterns!);
   merged.envPrefixes = [...new Set(merged.envPrefixes)];
   merged.envOriginOnly = [...new Set(merged.envOriginOnly!)];
+  merged.envPresence = [...new Set(merged.envPresence!)];
   merged.systemPaths = [...new Set(merged.systemPaths!)];
   merged.systemDirListings = [...new Set(merged.systemDirListings!)];
   // Paths already collected with content need no metadata-only duplicate

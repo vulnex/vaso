@@ -18,6 +18,10 @@ type ProbeManifest struct {
 	// replaced by a placeholder — for endpoint overrides where checks judge
 	// the host, and the rest may carry tokens or account ids.
 	EnvOriginOnly []string `json:"envOriginOnly,omitempty"`
+	// Variables (by exact name) recorded only as set or not: envPresentValue
+	// when non-empty after trimming, nothing otherwise — never the value
+	// (OpenClaw's FLY_MACHINE_ID / FLY_APP_NAME container markers).
+	EnvPresence []string `json:"envPresence,omitempty"`
 }
 
 // CommandRequest describes a command to execute during probing.

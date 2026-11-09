@@ -44,30 +44,91 @@ const DECODERS: Decoder[] = [
 ];
 
 const QUOTED = /(['"`])([^'"`\n\\]{8,})\1/g;
+/**
+ * A quoted literal written mostly as `\xNN` / `\uNNNN` escapes — the JavaScript
+ * or Python parser is its decoder, so it needs no decode call. Escaped quotes
+ * and other escapes are consumed whole; the literal ends at its own quote.
+ */
+const ESCAPED_LITERAL = /(['"`])((?:\\[\s\S]|(?!\1)[^\\\n])*)\1/g;
+const ESCAPE_UNIT = /\\x[0-9a-fA-F]{2}|\\u[0-9a-fA-F]{4}|\\u\{[0-9a-fA-F]{1,6}\}/g;
+/** `String.fromCharCode(115, 107, …)` — decimal or `0x` codes as literal arguments. */
+const CHAR_CODE_CALL = /String\.fromCharCode\s*\(\s*((?:(?:0x[0-9a-fA-F]{1,4}|\d{1,5})\s*,\s*){5,}(?:0x[0-9a-fA-F]{1,4}|\d{1,5}))\s*(?:,\s*)?\)/g;
+/**
+ * Encoding-alphabet chunks glued back together before decoding, so no single
+ * literal is long enough to look encoded: `["c2st", "YW50"].join("")`,
+ * `"c2st" + "YW50"` and `"\x73\x6b" + "\x2d\x61"`. The chunk literal is
+ * quote-delimited and its alternatives disjoint, so the repetition can't
+ * backtrack into itself.
+ */
+const CHUNK_BODY = String.raw`(?:[A-Za-z0-9+/=_-]|\\x[0-9a-fA-F]{2}|\\u[0-9a-fA-F]{4})+`;
+const JOINED_ARRAY = new RegExp(String.raw`\[\s*((['"${'`'}])${CHUNK_BODY}\2(?:\s*,\s*(['"${'`'}])${CHUNK_BODY}\3)+)\s*(?:,\s*)?\]\s*\.join\s*\(\s*(['"${'`'}])\4\s*\)`, 'g');
+const CONCATENATED = new RegExp(String.raw`(['"${'`'}])${CHUNK_BODY}\1(?:\s*\+\s*(['"${'`'}])${CHUNK_BODY}\2)+`, 'g');
+const CHUNK_TEXT = new RegExp(String.raw`(['"${'`'}])(${CHUNK_BODY})\1`, 'g');
+/**
+ * The code with chunked encoded literals glued back into one literal, each
+ * replacement padded with the newlines it swallowed so line numbers hold.
+ */
+export function foldEncodedChunks(code: string): string {
+  if (!code.includes('join') && !code.includes('+')) return code;
+  const glue = (m: string, body: string) => {
+    const joined = [...body.matchAll(CHUNK_TEXT)].map((c) => c[2]).join('');
+    return `"${joined}"${'\n'.repeat(m.split('\n').length - 1)}`;
+  };
+  return code
+    .replace(JOINED_ARRAY, (m: string, body: string) => glue(m, body))
+    .replace(CONCATENATED, (m: string) => glue(m, m));
+}
+
+function decodeEscapes(body: string): string | undefined {
+  const units = body.match(ESCAPE_UNIT) ?? [];
+  if (units.length < 6) return undefined;
+  const text = body.replace(/\\(x[0-9a-fA-F]{2}|u[0-9a-fA-F]{4}|u\{[0-9a-fA-F]{1,6}\}|[\s\S])/g, (_m, e: string) => {
+    if (e[0] === 'x') return String.fromCharCode(parseInt(e.slice(1), 16));
+    if (e.length > 1 && e[0] === 'u') return String.fromCodePoint(parseInt(e.replace(/[u{}]/g, ''), 16));
+    return ({ n: '\n', t: '\t', r: '\r' } as Record<string, string>)[e] ?? e;
+  });
+  // Mostly escapes: `"\x1b[31merror"` styling a word is not a hidden string
+  return units.length * 2 >= text.length && readable(text) ? text : undefined;
+}
+
+function decodeCharCodes(list: string): string | undefined {
+  const codes = list.split(',').map((n) => Number(n.trim()));
+  if (!codes.every((n) => n >= 9 && n <= 126)) return undefined;
+  const text = String.fromCharCode(...codes);
+  return readable(text) ? text : undefined;
+}
+
+/** A decode call right before a literal: the literal is what it decodes. */
+const DECODE_CALL_BEFORE = /(?:Buffer\.from|atob|b64decode|urlsafe_b64decode|standard_b64decode|a2b_base64|bytes\.fromhex|unhexlify|b16decode)\s*\(\s*$/;
+/**
+ * A decoded value handed straight to code execution, a module load or the
+ * network: `eval(atob("…"))`, `require(Buffer.from("…", "hex").toString())`.
+ */
+const SINK_BEFORE = /\b(?:eval|Function|exec|execSync|execFile|execFileSync|spawn|spawnSync|require|import|fetch|system|popen|exec_module|__import__)\s*\(\s*(?:new\s+)?(?:(?:Buffer\.from|atob|String\.fromCharCode|unescape|decodeURIComponent|escape|b64decode|bytes\.fromhex)\s*\(\s*)*$/;
 const CHAR_CODE_ARRAY = /\[\s*((?:\d{2,3}\s*,\s*){7,}\d{2,3})\s*,?\s*\]/g;
 /** Decoded strings longer than this are embedded files/source maps, not hidden strings. */
 const MAX_DECODED = 300;
 
-function readable(text: string): boolean {
-  if (text.length < 4 || text.length > MAX_DECODED) return false;
+function readable(text: string, max = MAX_DECODED): boolean {
+  if (text.length < 4 || text.length > max) return false;
   let printable = 0;
   for (const c of text) if ((c >= ' ' && c <= '~') || c === '\n' || c === '\t') printable++;
   return printable / text.length >= 0.95 && /[A-Za-z]{2}/.test(text);
 }
 
-function decodeBase64(lit: string): string | undefined {
+function decodeBase64(lit: string, max = MAX_DECODED): string | undefined {
   if (!/^[A-Za-z0-9+/_-]{12,}={0,2}$/.test(lit) || /^[0-9a-f]+$/i.test(lit)) return undefined;
   // Words and identifiers are rarely a valid, readable decoding; mixed case
   // or digits are a cheap pre-filter.
   if (!/[A-Z]/.test(lit) || !/[a-z]/.test(lit)) return undefined;
   const text = Buffer.from(lit.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('latin1');
-  return readable(text) ? text : undefined;
+  return readable(text, max) ? text : undefined;
 }
 
-function decodeHex(lit: string): string | undefined {
+function decodeHex(lit: string, max = MAX_DECODED): string | undefined {
   if (!/^(?:[0-9a-fA-F]{2}){8,}$/.test(lit)) return undefined;
   const text = Buffer.from(lit, 'hex').toString('latin1');
-  return readable(text) ? text : undefined;
+  return readable(text, max) ? text : undefined;
 }
 
 function rot13(s: string): string {
@@ -79,6 +140,13 @@ function rot13(s: string): string {
 
 /** A decoded value that is evidently a hidden endpoint, secret or command. */
 const REVEALING = /https?:\/\/|\b(?:curl|wget|bash|powershell|nc|chmod)\b|\/bin\/|[\w.+-]+@[\w-]+\.[\w.]+/;
+/** Decoded code: a module load, process/shell access or dynamic evaluation. */
+const CODE_LIKE = /\brequire\s*\(|\bimport\s*\(|\bchild_process\b|\beval\s*\(|\bnew\s+Function\b|\bprocess\.(?:env|mainModule|binding)\b|\b(?:execSync|spawnSync|execFile)\b|\bsubprocess\b|\bos\.(?:system|popen)\b|__import__|\b(?:sh|python3?|node)\s+-[ce]\b/;
+
+/** A decoded value that is a hidden endpoint, command, credential or code. */
+function revealing(text: string): boolean {
+  return REVEALING.test(text) || CODE_LIKE.test(text) || API_KEY_PATTERNS.some(({ pattern }) => pattern.test(text));
+}
 
 export interface StringTableReport {
   confirmed: boolean;
@@ -88,45 +156,103 @@ export interface StringTableReport {
   revealed: RevealedStrings;
   /** Lines holding the decoded literals (first few). */
   lines: number[];
+  /**
+   * Lines holding a literal handed straight to a decode call (or written as
+   * escapes / char codes) that decodes to ordinary text — encoding with no
+   * confirmed purpose, informational (unconfirmed findings only).
+   */
+  inertLines: number[];
 }
 
+/** Longest decoded value read when it goes straight into eval/exec/require/fetch. */
+const MAX_DECODED_AT_SINK = 64 * 1024;
+
+interface Decoded { text: string; line: number; direct: boolean; sink: boolean }
+
 export function analyzeStringTable(code: string): StringTableReport {
+  // Chunks joined at runtime are judged as the string they make
+  code = foldEncodedChunks(code);
   const decoders = DECODERS.filter((d) => d.re.test(code));
   const encodings = new Set(decoders.flatMap((d) => d.encodings));
-  const decoded: Array<{ text: string; line: number }> = [];
-  if (encodings.size > 0) {
-    const lines = code.split('\n');
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      const t = line.trimStart();
-      if (t.startsWith('//') || t.startsWith('#') || t.startsWith('*')) continue;
+  const implicit = new Set<string>();
+  const decoded: Decoded[] = [];
+  const lines = code.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const t = line.trimStart();
+    if (t.startsWith('//') || t.startsWith('#') || t.startsWith('*')) continue;
+    const at = (index: number) => {
+      const before = line.slice(Math.max(0, index - 120), index);
+      return { direct: DECODE_CALL_BEFORE.test(before), sink: SINK_BEFORE.test(before) };
+    };
+    if (encodings.size > 0) {
       for (const m of line.matchAll(QUOTED)) {
         const lit = m[2];
-        const text = (encodings.has('hex') ? decodeHex(lit) : undefined)
-          ?? (encodings.has('base64') ? decodeBase64(lit) : undefined)
+        const { direct, sink } = at(m.index);
+        const max = sink ? MAX_DECODED_AT_SINK : MAX_DECODED;
+        const text = (encodings.has('hex') ? decodeHex(lit, max) : undefined)
+          ?? (encodings.has('base64') ? decodeBase64(lit, max) : undefined)
           ?? (encodings.has('rot13') && REVEALING.test(rot13(lit)) && !REVEALING.test(lit) ? rot13(lit) : undefined);
-        if (text) decoded.push({ text, line: i + 1 });
+        if (text) decoded.push({ text, line: i + 1, direct, sink });
       }
       if (encodings.has('charcodes')) {
         for (const m of line.matchAll(CHAR_CODE_ARRAY)) {
-          const codes = m[1].split(',').map((n) => Number(n.trim()));
-          if (codes.every((n) => n >= 9 && n <= 126)) {
-            const text = String.fromCharCode(...codes);
-            if (readable(text)) decoded.push({ text, line: i + 1 });
-          }
+          const text = decodeCharCodes(m[1]);
+          if (text) decoded.push({ text, line: i + 1, direct: false, sink: false });
         }
+      }
+    }
+    // Decoded by the parser or a char-code call — no separate decoder needed
+    if (/\\[xu]/.test(line)) {
+      for (const m of line.matchAll(ESCAPED_LITERAL)) {
+        const text = decodeEscapes(m[2]);
+        if (!text) continue;
+        implicit.add('hex/unicode-escaped string literal');
+        decoded.push({ text, line: i + 1, direct: true, sink: at(m.index).sink });
+      }
+    }
+    if (line.includes('fromCharCode')) {
+      for (const m of line.matchAll(CHAR_CODE_CALL)) {
+        const text = decodeCharCodes(m[1]);
+        if (!text) continue;
+        implicit.add('String.fromCharCode(<char codes>)');
+        decoded.push({ text, line: i + 1, direct: true, sink: at(m.index).sink });
       }
     }
   }
   const distinct = [...new Map(decoded.map((d) => [d.text, d])).values()];
-  const confirmed = decoders.length > 0 && (distinct.length >= 3 || distinct.some((d) => REVEALING.test(d.text)));
+  const decoderLabels = [...decoders.map((d) => d.label), ...implicit];
+  const confirmed = decoderLabels.length > 0
+    && (distinct.length >= 3 || distinct.some((d) => d.sink || revealing(d.text)));
   return {
     confirmed,
-    decoderLabels: decoders.map((d) => d.label),
+    decoderLabels,
     decodedCount: distinct.length,
     revealed: reveal(distinct.map((d) => d.text)),
     lines: distinct.slice(0, 5).map((d) => d.line),
+    inertLines: confirmed ? [] : [...new Set(distinct.filter((d) => d.direct).map((d) => d.line))].slice(0, 5),
   };
+}
+
+const MASK_BASE64 = /(["'`])[A-Za-z0-9+/_=-]{16,}\1/g;
+
+/**
+ * A source line with every encoded literal replaced by its length — decoded,
+ * they are the values (keys, URLs, commands) a report must never print:
+ * base64/hex literals (chunked ones glued first), `\x`/`\u` escaped strings
+ * and char-code lists. Applied before a snippet is truncated, so a cut can't
+ * leave the start of one behind.
+ */
+export function maskEncodedLiterals(line: string): string {
+  let out = foldEncodedChunks(line);
+  if (/\\[xu]/.test(out)) {
+    out = out.replace(ESCAPED_LITERAL, (m, q: string, body: string) =>
+      (body.match(ESCAPE_UNIT) ?? []).length >= 2 ? `${q}<encoded, ${body.length} chars>${q}` : m);
+  }
+  out = out
+    .replace(CHAR_CODE_CALL, (_m, list: string) => `String.fromCharCode(<${list.split(',').length} char codes>)`)
+    .replace(CHAR_CODE_ARRAY, (_m, list: string) => `[<${list.split(',').length} char codes>]`);
+  return out.replace(MASK_BASE64, (m, q: string) => `${q}<encoded, ${m.length - 2} chars>${q}`);
 }
 
 function reveal(texts: string[]): RevealedStrings {

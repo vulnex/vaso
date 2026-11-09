@@ -2038,6 +2038,7 @@ const BUNDLED_ADVISORIES: Advisory[] = [
     agent: 'claude-code',
     affectedVersions: '<2.1.251',
     fixedVersion: '2.1.251',
+    platforms: ['darwin'],
     severity: 'warning',
     description: 'Code running in the Bash sandbox could replace a workspace parent directory with a symlink after the Edit tool validated the path, so the unsandboxed Edit tool overwrote user-writable files outside the workspace (macOS). Upgrade to 2.1.251+.',
     reference: 'https://github.com/anthropics/claude-code/security/advisories/GHSA-5xjx-9qx6-jcrv',
@@ -2063,6 +2064,7 @@ const BUNDLED_ADVISORIES: Advisory[] = [
     agent: 'opencode',
     affectedVersions: '>=1.0.137 <1.18.33',
     fixedVersion: '1.18.33',
+    platforms: ['win32', 'linux'],
     severity: 'critical',
     description: 'A malicious remote MCP server could put a PowerShell subexpression in its OAuth authorization_endpoint, which OpenCode passed to the open package unescaped on Windows/WSL, running commands on the client. Upgrade to 1.18.33+.',
     reference: 'https://www.cve.org/CVERecord?id=CVE-2026-119025',
@@ -2216,6 +2218,7 @@ const BUNDLED_ADVISORIES: Advisory[] = [
     agent: 'mcp',
     affectedVersions: '>=2.0.0 <2.12.0',
     fixedVersion: '2.12.0',
+    platforms: ['win32', 'linux'],
     severity: 'critical',
     description: 'A malicious remote MCP server could put a PowerShell subexpression in its OAuth authorization URL, which the Inspector passed to the open package, running code on Windows/WSL (CVE-2026-119025 in open). Same class as CVE-2025-6514.',
     reference: 'https://github.com/modelcontextprotocol/inspector/security/advisories/GHSA-q978-78c7-phqw',
@@ -2595,7 +2598,7 @@ let _initialized = false;
  * src/ioc/published-feeds.test.ts). A cached feed replaces bundled entries
  * by ID, so one that isn't newer would undo the bundle's corrections.
  */
-export const BUNDLED_ADVISORY_FEED_VERSION = 11;
+export const BUNDLED_ADVISORY_FEED_VERSION = 12;
 
 export function buildBundledAdvisoryDatabase(): AdvisoryDatabase {
   return {
