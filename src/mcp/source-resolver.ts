@@ -9,6 +9,7 @@ import { binaryFileFormat, binaryFormat, isScriptFile, sourceText } from '../ana
 import { readCappedFile, ScanLimitError } from '../core/file-limits.js';
 import { isExcludedPath } from '../core/utils.js';
 import { isTestPath } from '../analyzers/test-paths.js';
+import { shellLaunchTarget } from './shell-launch.js';
 
 /**
  * A command's executable name, also when the config gives it as a path —
@@ -212,11 +213,13 @@ async function readSourceFile(
   fs: FSProvider,
   onFailure?: (message: string) => void,
   onBinary?: (format: string) => void,
+  /** The OS runs the file itself (the config's command): its magic bytes decide, not its extension. */
+  executed = false,
 ): Promise<string | undefined> {
   try {
     // Judged on its head before its size: a Go/Rust server binary is often
     // over the content-scan limit, and is no unreadable source either way
-    const early = await headBinaryFormat(fs, filePath);
+    const early = await headBinaryFormat(fs, filePath, executed);
     if (early) {
       onBinary?.(early);
       return undefined;
@@ -241,12 +244,21 @@ async function readSourceFile(
   }
 }
 
-/** The binary format of a file's raw head, when it is no script (extension or `#!`). */
-async function headBinaryFormat(fs: FSProvider, filePath: string): Promise<string | undefined> {
-  if (isScriptFile(filePath, '')) return undefined;
+/**
+ * The binary format of a file's raw head, when it is no script (extension or
+ * `#!`). A file the OS executes directly is a script only by its `#!`: the
+ * kernel never looks at the extension, so a Mach-O named `server.js` runs as
+ * a Mach-O.
+ */
+async function headBinaryFormat(fs: FSProvider, filePath: string, executed = false): Promise<string | undefined> {
+  if (!executed && isScriptFile(filePath, '')) return undefined;
   const head = await fs.readHead?.(filePath, 4096).catch(() => undefined);
   if (!head || (head[0] === 0x23 && head[1] === 0x21)) return undefined;
   return binaryFormat(head);
+}
+
+async function isFile(path: string, fs: FSProvider): Promise<boolean> {
+  return fs.stat(path).then((st) => st.isFile(), () => false);
 }
 
 function isDenied(err: unknown): boolean {
@@ -254,21 +266,52 @@ function isDenied(err: unknown): boolean {
   return code === 'EACCES' || code === 'EPERM';
 }
 
-async function findMainEntry(dir: string, fs: FSProvider): Promise<string | undefined> {
-  // Check package.json main field
+/**
+ * The TypeScript source a build output was compiled from, by the usual
+ * layout: `dist/index.js` → `src/index.ts`, `build/server.mjs` → `src/server.mts`.
+ */
+function sourceTwins(dir: string, built: string): string[] {
+  const rel = relative(dir, built).split(/[\\/]/);
+  if (rel.length < 2 || !BUILD_DIRS.has(rel[0])) return [];
+  const stem = join(dir, 'src', ...rel.slice(1)).replace(/\.([mc]?)js$/i, '');
+  const ext = /\.([mc]?)js$/i.exec(built)?.[1] ?? '';
+  return [`${stem}.${ext}ts`, `${stem}.tsx`];
+}
+
+/** Directories a build writes its output to. */
+const BUILD_DIRS = new Set(['dist', 'build', 'lib', 'out']);
+
+/**
+ * The entries package.json declares — `main` and every `bin` — each only when
+ * its file is there: an unbuilt checkout names `dist/index.js` before `tsc`
+ * has made it, and its code is the TypeScript source the build would compile.
+ * `main` is what `require` loads, `bin` what `npx` runs: they may differ.
+ */
+async function declaredEntries(dir: string, fs: FSProvider): Promise<string[]> {
   const pkgPath = join(dir, 'package.json');
-  if (await fs.access(pkgPath)) {
-    try {
-      const pkg = JSON.parse(await fs.readFile(pkgPath));
-      if (pkg.main) return join(dir, pkg.main);
-      if (pkg.bin) {
-        const binEntry = typeof pkg.bin === 'string' ? pkg.bin : Object.values(pkg.bin)[0];
-        if (binEntry) return join(dir, binEntry as string);
-      }
-    } catch {
-      // Fall through
-    }
+  if (!(await fs.access(pkgPath))) return [];
+  let pkg: { main?: unknown; bin?: unknown };
+  try {
+    pkg = JSON.parse(await fs.readFile(pkgPath));
+  } catch {
+    return [];
   }
+  const bins = typeof pkg.bin === 'string' ? [pkg.bin] : pkg.bin && typeof pkg.bin === 'object' ? Object.values(pkg.bin) : [];
+  const declared = [pkg.main, ...bins].filter((e): e is string => typeof e === 'string' && e !== '').map((e) => join(dir, e));
+  const out: string[] = [];
+  for (const entry of declared) {
+    // as Node resolves `main`: the file, with `.js`, or a directory's index.js; else its TypeScript source
+    let found: string | undefined;
+    for (const file of [entry, `${entry}.js`, join(entry, 'index.js')]) if (!found && (await isFile(file, fs))) found = file;
+    for (const twin of sourceTwins(dir, entry)) if (!found && (await isFile(twin, fs))) found = twin;
+    if (found && !out.includes(found)) out.push(found);
+  }
+  return out;
+}
+
+async function findMainEntry(dir: string, fs: FSProvider): Promise<string | undefined> {
+  const [declared] = await declaredEntries(dir, fs);
+  if (declared) return declared;
 
   // Common entry points (a Python package dir runs its __main__.py)
   const candidates = [
@@ -326,9 +369,26 @@ export async function resolveServerSources(
     let compiledBinary: string | undefined;
     const binary = (format: string) => { compiledBinary ??= format; };
 
+    // Files of the server not analyzed (permissions, limits, a launched
+    // script that isn't there): the source was read only in part
+    const hidden: SkippedFile[] = [];
+    let launchedEntry: string | undefined;
     if (localPath) {
-      sourceCode = await readSourceFile(localPath, provider, denied, binary);
+      // Run by the OS itself (no interpreter in the config): its magic bytes decide what it is
+      const executed = !interpreterOf(server.command ?? '');
+      sourceCode = await readSourceFile(localPath, provider, denied, binary, executed);
       if (sourceCode) entryFile = localPath;
+      // A shell launcher (`exec node "$(dirname "$0")/real.js"`): the server's code is the file it starts
+      const launched = sourceCode ? shellLaunchTarget(localPath, sourceCode) : undefined;
+      if (launched) {
+        const code = await readSourceFile(launched, provider, undefined, binary);
+        if (code) {
+          sourceCode = code;
+          entryFile = launchedEntry = launched;
+        } else if (!compiledBinary) {
+          hidden.push({ path: launched, reason: `${launched}: started by ${basename(localPath)}, but could not be read — only the launcher was analyzed` });
+        }
+      }
 
       // If it's a directory, find the main entry
       if (!sourceCode && !compiledBinary) {
@@ -360,14 +420,13 @@ export async function resolveServerSources(
       else resolveFailure = result.failure ?? { reason: 'npm-failed' };
     }
 
-    const language = sourceCode ? sourceLanguage(server, localPath, sourceCode) : undefined;
+    const language = sourceCode ? sourceLanguage(server, entryFile ?? localPath, sourceCode) : undefined;
     // The modules the entry imports (a thin index.js whose tools live in
     // ./tools/*.js), or the rest of its Python package
     let sourceRoot: string | undefined;
     let partialFailure: string | undefined;
     if (sourceCode && entryFile) {
-      const hidden: SkippedFile[] = [];
-      const files = language === 'python' ? await withPythonPackage(entryFile, provider) : await withLocalImports(entryFile, sourceCode, provider, undefined, hidden);
+      const files = language === 'python' ? await withPythonPackage(entryFile, provider, hidden) : await withLocalImports(entryFile, sourceCode, provider, undefined, hidden);
       if (files.length > 1) {
         const root = language === 'python' ? dirname(entryFile) : await serverRoot(entryFile, provider);
         const read = await readServerFiles(files, root, provider, new Map([[entryFile, sourceCode]]));
@@ -375,13 +434,14 @@ export async function resolveServerSources(
         if (read.marked) sourceRoot = root;
         hidden.push(...read.skipped);
       }
-      if (hidden.length > 0) partialFailure = describeSkipped(hidden);
     }
+    if (hidden.length > 0) partialFailure = describeSkipped(hidden);
 
     const source: MCPServerSource = {
       serverName: server.name,
       packageName,
-      localPath,
+      // a launcher's server code is the file it starts: findings point there
+      localPath: launchedEntry ?? localPath,
       sourceCode,
       ...(resolveFailure ? { resolveFailure } : {}),
       ...(readFailure && !sourceCode ? { readFailure } : {}),
@@ -409,7 +469,7 @@ export async function resolveServerSources(
 }
 
 const DATA_EXTENSIONS = new Set(['.txt', '.md', '.json', '.html', '.htm', '.csv', '.yaml', '.yml', '.xml']);
-const SOURCE_EXTENSIONS = new Set(['.js', '.mjs', '.cjs', '.ts', '.py']);
+const SOURCE_EXTENSIONS = new Set(['.js', '.mjs', '.cjs', '.ts', '.mts', '.cts', '.py']);
 /** Names that exist next to server code but are tooling, not runtime data. */
 const NOT_DATA = new Set(['node_modules', 'package.json', 'package-lock.json', 'tsconfig.json', 'pyproject.toml', 'README.md', 'CHANGELOG.md', 'LICENSE.md']);
 const MAX_PATH_CANDIDATES = 200;
@@ -479,7 +539,8 @@ const TOOL_CONFIG_FILE = /\.config\.[cm]?[jt]s$|^\.?eslintrc\.c?js$|^jest\.setup
 async function sourceFilesUnder(dir: string, fs: FSProvider, denied?: SkippedFile[]): Promise<string[]> {
   const candidates: string[] = [];
   const pending = [dir];
-  for (let d = pending.shift(); d !== undefined && candidates.length < MAX_LOCAL_MODULES; d = pending.shift()) {
+  // one past the limit, to know the checkout is larger
+  for (let d = pending.shift(); d !== undefined && candidates.length <= MAX_LOCAL_MODULES; d = pending.shift()) {
     let entries;
     try {
       entries = await fs.readdirEntries(d);
@@ -503,29 +564,34 @@ async function sourceFilesUnder(dir: string, fs: FSProvider, denied?: SkippedFil
       }
     }
   }
-  return candidates.slice(0, MAX_LOCAL_MODULES);
+  return capFiles(candidates, MAX_LOCAL_MODULES, denied);
 }
 
 /**
  * The server code in a directory without a declared entry: its source files
- * (sourceFilesUnder()) that use the MCP SDK, plus the modules they import —
- * or all of them when none says so.
+ * (sourceFilesUnder()) that use the MCP SDK and the modules they import
+ * first, then the directory's other source files — tools loaded by a
+ * computed path (`import(new URL("./tools/" + f, import.meta.url))`) import
+ * nothing the graph can see. Files of the other language than the server's
+ * stay out, and so does a second build of a module already in (src/ + dist/).
  */
-async function serverFilesIn(dir: string, fs: FSProvider, denied?: SkippedFile[]): Promise<string[]> {
-  const candidates = await sourceFilesUnder(dir, fs, denied);
+async function serverFilesIn(dir: string, fs: FSProvider, skipped?: SkippedFile[]): Promise<string[]> {
+  const candidates = await sourceFilesUnder(dir, fs, skipped);
   const usingSdk: string[] = [];
-  for (const file of candidates.slice(0, MAX_LOCAL_MODULES)) {
+  for (const file of candidates) {
     const code = await readSourceFile(file, fs);
     if (code && MCP_SDK_REFERENCE.test(code)) usingSdk.push(file);
   }
   if (usingSdk.length === 0) return candidates;
-  const files = new Set<string>();
+  const graph = new Set<string>();
   for (const file of usingSdk) {
     const code = (await readSourceFile(file, fs)) ?? '';
-    for (const f of await withLocalImports(file, code, fs, dir, denied)) files.add(f);
-    if (files.size >= MAX_LOCAL_MODULES) break;
+    const imported = file.endsWith('.py') ? await withPythonPackage(file, fs, skipped) : await withLocalImports(file, code, fs, dir, skipped);
+    for (const f of imported) graph.add(f);
   }
-  return [...files].slice(0, MAX_LOCAL_MODULES);
+  const python = [...graph].every((f) => f.endsWith('.py'));
+  const rest = withoutTwins(dir, [...graph], candidates.filter((f) => f.endsWith('.py') === python));
+  return capFiles([...graph, ...rest], MAX_LOCAL_MODULES, skipped);
 }
 
 /** Modules followed from one server's entry. */
@@ -600,7 +666,7 @@ async function withLocalImports(entry: string, entryCode: string, fs: FSProvider
   const seen = new Set(files);
   // Specifiers already resolved (or not) from a directory: each costs a stat per candidate
   const tried = new Set<string>();
-  for (let i = 0; i < files.length && files.length < MAX_LOCAL_MODULES; i++) {
+  for (let i = 0; i < files.length; i++) {
     const code = i === 0 ? entryCode : await readSourceFile(files[i], fs);
     if (!code) continue;
     for (const m of code.matchAll(RELATIVE_IMPORT)) {
@@ -614,8 +680,12 @@ async function withLocalImports(entry: string, entryCode: string, fs: FSProvider
       seen.add(path);
       const rel = relative(base, path);
       if (rel.startsWith('..') || isExcludedPath(base, dirname(path), { keepBuildOutput: true })) continue;
+      if (files.length >= MAX_LOCAL_MODULES) {
+        // one module more than the limit: the rest of the graph goes unread, and is reported
+        denied?.push(moduleLimit(path, MAX_LOCAL_MODULES));
+        return files;
+      }
       files.push(path);
-      if (files.length >= MAX_LOCAL_MODULES) break;
     }
   }
   return files;
@@ -625,6 +695,44 @@ async function withLocalImports(entry: string, entryCode: string, fs: FSProvider
 interface SkippedFile {
   path: string;
   reason: string;
+}
+
+/** The first file past a module limit, reported: the rest of the server's code was not analyzed. */
+function moduleLimit(first: string, limit: number): SkippedFile {
+  return { path: first, reason: `${first}: not analyzed — the server has more than ${limit} source modules, only the first ${limit} were read` };
+}
+
+/** At most `limit` files; the cut is reported in `skipped` (never dropped silently). */
+function capFiles(files: string[], limit: number, skipped?: SkippedFile[]): string[] {
+  if (files.length <= limit) return files;
+  skipped?.push(moduleLimit(files[limit], limit));
+  return files.slice(0, limit);
+}
+
+/**
+ * Where a file sits in a checkout once its build directory and extension are
+ * set aside: `src/tools/run.ts` and `dist/tools/run.js` are one module,
+ * compiled. Used to keep a checkout's sweep from reading both.
+ */
+function moduleKey(root: string, file: string): string {
+  const parts = relative(root, file).split(/[\\/]/);
+  if (parts.length > 1 && (parts[0] === 'src' || BUILD_DIRS.has(parts[0]))) parts.shift();
+  return parts.join('/').replace(/\.(?:[mc]?[jt]s|[jt]sx)$/i, '');
+}
+
+/** Files of `rest` that are neither in `taken` nor another build of one of them (moduleKey()). */
+function withoutTwins(root: string, taken: string[], rest: string[]): string[] {
+  const keys = new Set(taken.map((f) => moduleKey(root, f)));
+  const out: string[] = [];
+  // the source before its build output: findings point at the code as written
+  const built = (f: string) => Number(BUILD_DIRS.has(relative(root, f).split(/[\\/]/)[0]));
+  for (const f of [...rest].sort((a, b) => built(a) - built(b))) {
+    const key = moduleKey(root, f);
+    if (taken.includes(f) || keys.has(key)) continue;
+    keys.add(key);
+    out.push(f);
+  }
+  return out;
 }
 
 /**
@@ -670,10 +778,11 @@ const PY_SKIP_DIRS = new Set(['tests', 'test', '__pycache__', '.venv', 'venv', '
 const MAX_PY_PACKAGE_FILES = 200;
 
 /** Every module of a Python package directory, entry-relevant first, tests and caches skipped. */
-async function pythonModules(pkgDir: string, fs: FSProvider): Promise<string[]> {
+async function pythonModules(pkgDir: string, fs: FSProvider, skipped?: SkippedFile[]): Promise<string[]> {
   const files: string[] = [];
   const pending = [pkgDir];
-  for (let dir = pending.shift(); dir !== undefined && files.length < MAX_PY_PACKAGE_FILES; dir = pending.shift()) {
+  // one past the limit, to know the package is larger
+  for (let dir = pending.shift(); dir !== undefined && files.length <= MAX_PY_PACKAGE_FILES; dir = pending.shift()) {
     let entries;
     try {
       entries = await fs.readdirEntries(dir);
@@ -687,7 +796,7 @@ async function pythonModules(pkgDir: string, fs: FSProvider): Promise<string[]> 
   }
   // __main__ / server first: the entry the console script or `python -m` runs
   const rank = (f: string) => (/(?:^|\/)(?:__main__|server)\.py$/.test(f) ? 0 : 1);
-  return files.sort((a, b) => rank(a) - rank(b)).slice(0, MAX_PY_PACKAGE_FILES);
+  return capFiles(files.sort((a, b) => rank(a) - rank(b)), MAX_PY_PACKAGE_FILES, skipped);
 }
 
 /**
@@ -739,21 +848,67 @@ async function pythonPackageFiles(dir: string, fs: FSProvider): Promise<string[]
 }
 
 /**
- * A Python entry plus the package it belongs to: `server.py` beside an
- * `__init__.py`, or one importing relatively (`from .tools import run`), is
- * one module of a package whose other modules hold the tools. Reading the
- * entry alone missed every sink they contain.
+ * A Python entry plus the code it imports from beside it. One in a package
+ * (`server.py` beside an `__init__.py`, or importing relatively: `from .tools
+ * import run`) brings the package's other modules, which hold the tools. A
+ * script in a plain folder imports its siblings by name (`from tools import
+ * run_cmd` — Python puts the script's directory on sys.path): those modules,
+ * transitively. Reading the entry alone missed every sink they contain.
  */
-async function withPythonPackage(entry: string, fs: FSProvider): Promise<string[]> {
+async function withPythonPackage(entry: string, fs: FSProvider, skipped?: SkippedFile[]): Promise<string[]> {
   if (!entry.endsWith('.py')) return [entry];
   const dir = dirname(entry);
   const code = (await readSourceFile(entry, fs)) ?? '';
   // Leading space within the line: `^\s*` crossed every blank line after
   // each line start (100 KB of newlines: 6 s)
   const isPackage = (await fs.access(join(dir, '__init__.py'))) || /^[^\S\n\r\u2028\u2029]*from\s+\.+\w*(?:\.\w+)*\s+import\b/m.test(code);
-  if (!isPackage) return [entry];
-  const modules = await pythonModules(dir, fs);
-  return [entry, ...modules.filter((m) => m !== entry)];
+  if (isPackage) {
+    const modules = await pythonModules(dir, fs, skipped);
+    return [entry, ...modules.filter((m) => m !== entry)];
+  }
+  return pythonSiblingImports(entry, code, fs, skipped);
+}
+
+/** `import a, b.c as d` / `from a.b import c`: the top-level module names a line imports. */
+const PY_IMPORT = /^[^\S\n]*(?:from[^\S\n]+([A-Za-z_]\w*)(?:\.[\w.]*)?[^\S\n]+import\b|import[^\S\n]+([A-Za-z_][\w.]*(?:[^\S\n]+as[^\S\n]+\w+)?(?:[^\S\n]*,[^\S\n]*[A-Za-z_][\w.]*(?:[^\S\n]+as[^\S\n]+\w+)?)*))/gm;
+
+function pythonImportedNames(code: string): string[] {
+  const names = new Set<string>();
+  for (const m of code.matchAll(PY_IMPORT)) {
+    if (m[1]) names.add(m[1]);
+    else for (const part of m[2].split(',')) names.add(part.trim().split(/\s+/)[0].split('.')[0]);
+  }
+  return [...names];
+}
+
+/** A flat script's sibling modules (`tools.py`, a `tools/` package), followed transitively. */
+async function pythonSiblingImports(entry: string, code: string, fs: FSProvider, skipped?: SkippedFile[]): Promise<string[]> {
+  const dir = dirname(entry);
+  const files = [entry];
+  const seen = new Set(files);
+  const tried = new Set<string>();
+  for (let i = 0; i < files.length; i++) {
+    const text = i === 0 ? code : await readSourceFile(files[i], fs);
+    // only sibling scripts import siblings by bare name; a package's modules are all in already
+    if (!text || dirname(files[i]) !== dir) continue;
+    for (const name of pythonImportedNames(text)) {
+      if (tried.has(name)) continue;
+      tried.add(name);
+      const found = (await isFile(join(dir, `${name}.py`), fs))
+        ? [join(dir, `${name}.py`)]
+        : await fs.stat(join(dir, name)).then((st) => (st.isDirectory() && !PY_SKIP_DIRS.has(name) ? pythonModules(join(dir, name), fs, skipped) : []), () => []);
+      for (const f of found) {
+        if (seen.has(f)) continue;
+        if (files.length >= MAX_PY_PACKAGE_FILES) {
+          skipped?.push(moduleLimit(f, MAX_PY_PACKAGE_FILES));
+          return files;
+        }
+        seen.add(f);
+        files.push(f);
+      }
+    }
+  }
+  return files;
 }
 
 async function packageJsonName(dir: string, fs: FSProvider): Promise<string | undefined> {
@@ -797,23 +952,30 @@ export async function resolveSourcePaths(paths: string[], options: { fs?: FSProv
       const st = await fs.stat(path);
       if (st.isFile()) {
         const code = await readSourceFile(path, fs, undefined, (format) => { compiledBinary = format; });
-        files = code === undefined ? [path] : path.endsWith('.py') ? await withPythonPackage(path, fs) : await withLocalImports(path, code, fs, undefined, hidden);
+        files = code === undefined ? [path] : path.endsWith('.py') ? await withPythonPackage(path, fs, hidden) : await withLocalImports(path, code, fs, undefined, hidden);
       } else if (st.isDirectory()) {
         const entry = await findMainEntry(path, fs);
         const entryCode = entry ? await readSourceFile(entry, fs, undefined, (format) => { compiledBinary = format; }) : undefined;
         if (!entry) files = await serverFilesIn(path, fs, hidden);
-        else if (entry.endsWith('.py') || entryCode === undefined) files = await withPythonPackage(entry, fs);
+        else if (entry.endsWith('.py') || entryCode === undefined) files = await withPythonPackage(entry, fs, hidden);
         else {
           // The modules the entry imports first, then the checkout's other
           // source files: tools loaded by a computed path (`require(join(dir,
           // name))`) import nothing the graph can see
           const graph = await withLocalImports(entry, entryCode, fs, path, hidden);
+          // A `bin` other than `main` (what npx runs) is an entry too
+          for (const other of (await declaredEntries(path, fs)).filter((e) => e !== entry && !graph.includes(e))) {
+            const code = await readSourceFile(other, fs);
+            if (code === undefined || other.endsWith('.py')) continue;
+            for (const f of await withLocalImports(other, code, fs, path, hidden)) if (!graph.includes(f)) graph.push(f);
+          }
           // Within the entry's top directory (`src/`): `dist/` beside it is
           // the same code compiled, and would report every finding twice
           const top = relative(path, entry).split(/[\\/]/);
           const within = top.length > 1 ? join(path, top[0]) : path;
-          const rest = (await sourceFilesUnder(within, fs, hidden)).filter((f) => !graph.includes(f) && !f.endsWith('.py'));
-          files = [...graph, ...rest].slice(0, MAX_LOCAL_MODULES);
+          // …and, with the entry at the root, a module of src/ already read from dist/
+          const rest = withoutTwins(path, graph, (await sourceFilesUnder(within, fs, hidden)).filter((f) => !f.endsWith('.py')));
+          files = capFiles([...graph, ...rest], MAX_LOCAL_MODULES, hidden);
         }
         // A Python package checkout (pyproject + src/<pkg>/): all its modules
         if (!entry && (files.length === 0 || files.every((f) => f.endsWith('.py')) || (await fs.access(join(path, 'pyproject.toml'))))) {

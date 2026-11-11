@@ -10,6 +10,7 @@ import { getUserHomeDirs } from './openclaw.js';
 import { discoverCliInstalls } from './cli-installs.js';
 import { queryCliVersion } from './version-query.js';
 import { applyEnvOverrides, type EnvOverrideSpec } from './env-overrides.js';
+import { isWildcardAddress, wildcardFamilyLabel } from '../core/listen-address.js';
 
 /**
  * PicoClaw (sipeed/picoclaw, Go) layout — verified against v0.3.x source:
@@ -37,7 +38,6 @@ import { applyEnvOverrides, type EnvOverrideSpec } from './env-overrides.js';
 const CLI_NAME = 'picoclaw';
 const DEFAULT_GATEWAY_HOST = 'localhost';
 const DEFAULT_GATEWAY_PORT = 18790;
-const WILDCARD_HOSTS = new Set(['*', '0.0.0.0', '::', '[::]']);
 
 /** Merged-config key under which detect() records the launcher's `public`
  *  flag for getGatewayInfo (launcher-config.json has no `gateway` section). */
@@ -115,6 +115,15 @@ function nonEmptyString(v: unknown): string | undefined {
 
 const NON_MAIN_CONFIGS = new Set(['auth.json', 'launcher-config.json', '.security.yml']);
 
+/**
+ * launcher-config.json with `public: true`: the web launcher starts the
+ * gateway on every interface whatever config.json's gateway.host says, so
+ * rewriting gateway.host changes nothing while it is set.
+ */
+export function picoclawPublicLauncher(configs: ParsedConfig[]): ParsedConfig | undefined {
+  return configs.find(c => basename(c.filePath) === 'launcher-config.json' && asRecord(c.data)?.public === true);
+}
+
 /** The agent's config.json (possibly relocated/renamed via PICOCLAW_CONFIG). */
 function isMainConfig(c: ParsedConfig): boolean {
   return c.format === 'json' && !NON_MAIN_CONFIGS.has(basename(c.filePath));
@@ -164,8 +173,11 @@ export function picoclawWorkspaces(
 function normalizeGatewayHost(raw: string): string {
   const tokens = raw.split(',').map(t => t.trim()).filter(Boolean);
   if (tokens.length === 0) return DEFAULT_GATEWAY_HOST;
-  if (tokens.some(t => t === '*' || t === '0.0.0.0')) return '0.0.0.0';
-  if (tokens.some(t => WILDCARD_HOSTS.has(t))) return '::';
+  // The wildcard as configured (an IPv4 spelling first), so messages show
+  // what the file says; `*` reads as 0.0.0.0
+  const wild = tokens.filter(t => isWildcardAddress(t)).map(t => (t === '*' ? '0.0.0.0' : t));
+  const v4 = wild.find(t => wildcardFamilyLabel(t) === '0.0.0.0');
+  if (v4 !== undefined || wild.length > 0) return v4 ?? wild[0];
   return tokens.join(',');
 }
 

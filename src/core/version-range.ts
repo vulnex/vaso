@@ -128,10 +128,16 @@ export function rangeBounds(range: string, ecosystem: 'npm' | 'pypi' = 'npm'): V
   return ecosystem === 'pypi' ? pypiBounds(range) : npmBounds(range);
 }
 
-/** An exact version (`1.2.3`, `==1.2.3`), or undefined when the spec is a range. */
+/**
+ * An exact version (`1.2.3`, `=1.2.3`, `==1.2.3`), or undefined when the spec
+ * is a range. A partial version is exact only after PEP 440 `==` (`==5.3` is
+ * 5.3.0); in npm `0.1` and `=0.1` are x-ranges (any 0.1.x — npm installs the
+ * newest).
+ */
 export function exactVersion(spec: string): string | undefined {
-  const m = /^(?:===?|=)?\s*v?(\d+\.\d+(?:\.\d+)?(?:-[\w.]+)?)$/.exec(spec.trim());
-  return m ? full(m[1]) : undefined;
+  const m = /^(===?|=)?\s*v?(\d+\.\d+(\.\d+)?(?:-[\w.]+)?)$/.exec(spec.trim());
+  if (!m || (!m[3] && !m[1]?.startsWith('=='))) return undefined;
+  return full(m[2]);
 }
 
 /**

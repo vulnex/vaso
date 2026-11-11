@@ -2,14 +2,14 @@ import { defineCheck } from '../../core/check-builder.js';
 import { CODING_AGENTS } from '../../core/types.js';
 import { getNestedValue } from '../../core/utils.js';
 import { isOpenclawAutoBind } from '../../adapters/openclaw-bind.js';
+import { isLoopbackAddress } from '../../core/listen-address.js';
 
-const LOOPBACK_HOST = /^(?:localhost|127(?:\.\d{1,3}){3}|\[?::1\]?)$/i;
 const TLS_KEY = /^(?:tls|ssl|https)$|(?:^|_)(?:TLS|SSL|HTTPS)(?:_ENABLED?)?$/i;
 
 /** A host value (PicoClaw accepts a comma list) that only names loopback addresses. */
 function loopbackOnly(host: string): boolean {
   const parts = host.split(',').map(p => p.trim()).filter(Boolean);
-  return parts.length > 0 && parts.every(p => LOOPBACK_HOST.test(p));
+  return parts.length > 0 && parts.every(p => isLoopbackAddress(p));
 }
 
 function isOn(v: unknown): boolean {

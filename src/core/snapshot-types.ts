@@ -94,7 +94,8 @@ export interface FileEntry {
    *  through a symlink into a credential store or shell startup file). */
   omitted?: 'size' | 'budget' | 'asset' | 'metadata' | 'special' | 'sensitive';
   /** First bytes (base64) of a skill-tree file omitted for size or budget
-   *  (probe ≥ 1.3.1) — where an executable header sits. */
+   *  (probe ≥ 1.3.1) — where an executable header sits: 64 bytes up to 1.4.0,
+   *  then 4 KiB or up to a PE stub's header at e_lfanew (≤ 1 MiB). */
   head?: string;
   /** `'base64'` when the file is not valid UTF-8 and `content` holds its bytes
    *  base64-encoded (probe ≥ 1.1.0); absent means UTF-8 text. */

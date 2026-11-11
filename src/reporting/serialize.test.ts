@@ -56,9 +56,9 @@ describe('maskCredentialsInText', () => {
     }
     expect(maskCredentialsInLine('    api_key = os.environ.get("KEY")')).toBe('    api_key = os.environ.get("KEY")');
     // true positives: literals, env lines, bare words in INI, a JWT
-    expect(maskCredentialsInText('token = "q7Zp2Lk9Vx4Rt8Mw3Nc6"')).toBe('token=***');
+    expect(maskCredentialsInText('token = "q7Zp2Lk9Vx4Rt8Mw3Nc6"')).toBe('token = ***');
     expect(maskCredentialsInText('API_TOKEN=q7Zp2Lk9Vx4Rt8Mw3Nc6')).toBe('API_TOKEN=***');
-    expect(maskCredentialsInText('password = hunter2')).toBe('password=***');
+    expect(maskCredentialsInText('password = hunter2')).toBe('password = ***');
     expect(maskCredentialsInText('PASSWORD=ab(cd12!')).toBe('PASSWORD=***');
     expect(maskCredentialsInText('session = eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U'))
       .not.toContain('dozjgNryP4J3jVmNHl0w5N');
@@ -95,10 +95,10 @@ describe('credential masking: every payload, every output path', () => {
     ['http://api.telegram.org/bot123456:TG0010/mcp', 'TG0010'],
     ['npx mcp-remote https://r.example.com/sse --header Authorization: Bearer HDR0011', 'HDR0011'],
     ['docker run -e GITHUB_PERSONAL_ACCESS_TOKEN=ghp_DOCK0012 img', 'DOCK0012'],
-    ['npx pkg --token TOK0013 --key=KEY0014 --pat=PAT0015 -p PW0016', 'TOK0013'],
-    ['npx pkg --token TOK0013 --key=KEY0014 --pat=PAT0015 -p PW0016', 'KEY0014'],
-    ['npx pkg --token TOK0013 --key=KEY0014 --pat=PAT0015 -p PW0016', 'PAT0015'],
-    ['npx pkg --token TOK0013 --key=KEY0014 --pat=PAT0015 -p PW0016', 'PW0016'],
+    ['npx pkg --token TOK0013 --key=KEY0014 --pat=PAT0015 -p PW0016q9Zr7Lp2Wm4Kd', 'TOK0013'],
+    ['npx pkg --token TOK0013 --key=KEY0014 --pat=PAT0015 -p PW0016q9Zr7Lp2Wm4Kd', 'KEY0014'],
+    ['npx pkg --token TOK0013 --key=KEY0014 --pat=PAT0015 -p PW0016q9Zr7Lp2Wm4Kd', 'PAT0015'],
+    ['npx pkg --token TOK0013 --key=KEY0014 --pat=PAT0015 -p PW0016q9Zr7Lp2Wm4Kd', 'PW0016'],
     ['sh -c "API_KEY=SH0017 curl -u admin:CURL0018 http://x.example.com"', 'SH0017'],
     ['sh -c "API_KEY=SH0017 curl -u admin:CURL0018 http://x.example.com"', 'CURL0018'],
     ['env OPENAI_API_KEY=sk-proj-ENV0019 npx foo', 'ENV0019'],
@@ -110,7 +110,7 @@ describe('credential masking: every payload, every output path', () => {
     [['run', '-e', 'SLACK_BOT_TOKEN=xoxb-DOCK0102'], 'DOCK0102'],
     [['pkg', '--token', 'TOK0103'], 'TOK0103'],
     [['pkg', '--password', 'PW0104'], 'PW0104'],
-    [['pkg', '-p', 'PW0105'], 'PW0105'],
+    [['mysql', '-p', 'PW0105'], 'PW0105'],
     [['curl', '-u', 'admin:CURL0106'], 'CURL0106'],
   ];
 

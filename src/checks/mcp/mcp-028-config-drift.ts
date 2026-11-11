@@ -138,14 +138,18 @@ export const mcp028 = defineCheck({
     // Merge, don't replace: one baseline serves every scan, and a scan of a
     // single config (`mcp scan -p other.json`, `--source` only) must not
     // erase the entries of configs it didn't look at — the next full scan
-    // would report all of them as new.
-    await store.save(DRIFT_KEY, { ...(baseline ?? {}), ...next });
+    // would report all of them as new. A scan that looked at no config at all
+    // (`--source` only) starts no baseline: an empty one made every server of
+    // the next full scan "new".
+    if (baseline || legacy || configs.length > 0) await store.save(DRIFT_KEY, { ...(baseline ?? {}), ...next });
 
     if (!baseline && !legacy) {
       return h.result({
         passed: true,
         severity: 'info',
-        message: 'MCP configuration baseline established — drift will be detected on subsequent scans',
+        message: configs.length > 0
+          ? 'MCP configuration baseline established — drift will be detected on subsequent scans'
+          : 'No MCP config scanned — no drift baseline yet',
       });
     }
 

@@ -58,6 +58,19 @@ export const NANOBOT_DEFAULT_GATEWAY_PORT = 18790;
 /** WebSocketConfig.port: the websocket channel (WebUI / client bridge). */
 export const NANOBOT_DEFAULT_WEBSOCKET_PORT = 8765;
 
+/**
+ * The address the websocket channel listens on. Absent (or null) is the
+ * WebSocketConfig default 127.0.0.1; a present empty string is kept by
+ * pydantic and handed to asyncio's create_server, which binds every
+ * interface (IPv4 and IPv6) for it. A whitespace-only host fails to resolve,
+ * so the channel never listens: undefined.
+ */
+export function nanobotWebsocketHost(raw: unknown): string | undefined {
+  if (typeof raw !== 'string') return '127.0.0.1';
+  if (raw === '') return '0.0.0.0';
+  return raw.trim() === '' ? undefined : raw.trim();
+}
+
 function asRecord(v: unknown): Record<string, unknown> | undefined {
   return v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : undefined;
 }
@@ -240,8 +253,10 @@ export const nanobotAdapter: AgentAdapter = {
     // wss:// when sslCertfile and sslKeyfile are both set (runtime.py
     // _build_ssl_context; one without the other fails the channel's start)
     const set = (v: unknown): boolean => typeof v === 'string' && v.trim().length > 0;
+    const listenHost = nanobotWebsocketHost(host);
+    if (listenHost === undefined) return undefined;
     return {
-      host: typeof host === 'string' && host.trim() ? host.trim() : '127.0.0.1',
+      host: listenHost,
       // pydantic coerces a numeric string ("9000") to the int port
       port: typeof port === 'number' ? port : typeof port === 'string' && /^\s*\d{1,5}\s*$/.test(port) ? Number(port) : NANOBOT_DEFAULT_WEBSOCKET_PORT,
       tls: set(field('sslCertfile')) && set(field('sslKeyfile')),

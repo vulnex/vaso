@@ -194,27 +194,30 @@ func TestScrubSecretsWholeValues(t *testing.T) {
 
 // The stand-in keeps every entropy a check computes (whitespace in the
 // value or not, 4.5 for GEM-001, QC-001, CC-004 and the other thresholds)
-// and none of the value's hidden characters: a middle position keeps its
-// character only when the kept head/tail shows that character anyway.
+// and no more of the value than chance: its hidden characters are drawn at
+// random, not substituted symbol for symbol — a hex, UUID or digit key used
+// to keep two thirds of its characters in place and the rest was a
+// permutation of a few symbols away.
 func TestDisguiseKeepsEntropyNotCharacters(t *testing.T) {
-	token := func(alphabet string) string {
-		b := make([]byte, 40)
+	token := func(alphabet string, n int) string {
+		b := make([]byte, n)
 		for j := range b {
 			b[j] = alphabet[randIndex(len(alphabet))]
 		}
 		return string(b)
 	}
-	// at most half of each class in use: a substitution always exists
-	values := []string{"Wq7Wz2Lk9Xv4Rt8Ns3Jm&Xq7Wz2Lk9Xv4Rt8Ns3Jm", "Yq7Wz2Lk9Xv4Rt8Ns3Jm Zq7Wz2Lk9Xv4Rt8Ns3Jm"}
+	inputs := []string{"Wq7Wz2Lk9Xv4Rt8Ns3Jm&Xq7Wz2Lk9Xv4Rt8Ns3Jm", "Yq7Wz2Lk9Xv4Rt8Ns3Jm Zq7Wz2Lk9Xv4Rt8Ns3Jm"}
 	for i := 0; i < 200; i++ {
-		values = append(values, token("ghijklmnopGHIJKLMNOP01234-_"))
+		inputs = append(inputs,
+			token("ghijklmnopGHIJKLMNOP01234-_", 40),
+			token("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_", 40),
+			token("0123456789abcdef", 32), token("0123456789ABCDEF", 40), token("0123456789", 24))
+		u := token("0123456789abcdef", 32)
+		inputs = append(inputs, u[:8]+"-"+u[8:12]+"-"+u[12:16]+"-"+u[16:20]+"-"+u[20:])
 	}
-	// any token, near-complete classes included
-	var any []string
-	for i := 0; i < 200; i++ {
-		any = append(any, token("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"))
-	}
-	for _, v := range append(values, any...) {
+	kept, hidden := map[string]int{}, map[string]int{}
+	values, substitutions := map[string]int{}, map[string]int{}
+	for _, v := range inputs {
 		c := &collector{}
 		d := c.disguise(v)
 		if d == v || verdictsOf(d) != verdictsOf(v) {
@@ -223,28 +226,87 @@ func TestDisguiseKeepsEntropyNotCharacters(t *testing.T) {
 		if math.Abs(shannonEntropy(d)-shannonEntropy(v)) > 1e-9 {
 			t.Fatalf("disguise(%q) = %q: entropy %.3f → %.3f", v, d, shannonEntropy(v), shannonEntropy(d))
 		}
-		pre, suf := keepBounds(len(v))
-		shown := v[:pre] + v[len(v)-suf:]
-		weak := map[int]bool{} // CFG-009 matches stay as they are
-		for _, re := range weakRes {
-			for _, loc := range re.FindAllStringIndex(v, -1) {
-				for j := loc[0]; j < loc[1]; j++ {
-					weak[j] = true
-				}
-			}
+		kind := "base62"
+		switch {
+		case strings.Trim(v, "0123456789") == "":
+			kind = "digits"
+		case strings.Trim(v, "0123456789abcdefABCDEF-") == "":
+			kind = "hex"
 		}
+		pre, suf := keepBounds(len(v))
+		// a substitution maps each hidden character to one stand-in character
+		image := map[byte]byte{}
+		substitution := true
 		for j := pre; j < len(v)-suf; j++ {
-			if isASCIIAlnum(v[j]) && d[j] == v[j] && !weak[j] && strings.IndexByte(shown, v[j]) < 0 {
-				t.Fatalf("disguise(%q) = %q keeps %q at %d", v, d, v[j], j)
+			if !isASCIIAlnum(v[j]) {
+				continue
+			}
+			hidden[kind]++
+			if d[j] == v[j] {
+				kept[kind]++
+			}
+			if prev, ok := image[v[j]]; ok && prev != d[j] {
+				substitution = false
+			}
+			image[v[j]] = d[j]
+		}
+		if kind != "base62" {
+			values[kind]++
+			if substitution {
+				substitutions[kind]++
 			}
 		}
 	}
-	// A value using nearly a whole class can't be substituted: the random
-	// stand-in still keeps every verdict, entropy band included
+	for kind, n := range values {
+		if substitutions[kind]*10 > n {
+			t.Errorf("%s: %d of %d stand-ins are a substitution of the value", kind, substitutions[kind], n)
+		}
+	}
+	// chance: 1/6 for a-f, 1/10 for digits, about 1/20 for base62
+	for kind, n := range hidden {
+		if share := float64(kept[kind]) / float64(n); share > 0.2 {
+			t.Errorf("%s: %.0f%% of hidden characters stay in place", kind, 100*share)
+		}
+	}
+	// A value using nearly a whole class still gets a stand-in that keeps
+	// every verdict, entropy band included
 	for i := 0; i < 20; i++ {
 		c := &collector{}
 		if d := c.disguise(genericHigh); d == genericHigh || verdictsOf(d) != verdictsOf(genericHigh) {
 			t.Fatalf("disguise(%q) = %q", genericHigh, d)
+		}
+	}
+}
+
+// A CFG-009 run keeps the weak verdict, but no more of the value than the
+// 8 characters reports show stays at its start: the run is moved to a
+// random place clear of the head ("LimaMike" + "0123456789" showed 18 real
+// characters), and the character after the head is a random draw — its own
+// value included, so it matches now and then, never systematically.
+func TestDisguiseKeepsNoMoreThanTheHead(t *testing.T) {
+	realPrefix := func(a, b string) int {
+		n := 0
+		for n < len(a) && a[n] == b[n] {
+			n++
+		}
+		return n
+	}
+	for _, v := range []string{"LimaMike0123456789NovemberOscarPapa", "Hunter2HotelIndiaJuliet5566Kilo", "Abcdefgh12345678QwertyZxcvbnmPoiu"} {
+		ninth, long := 0, 0
+		for i := 0; i < 400; i++ {
+			d := (&collector{}).disguise(v)
+			if verdictsOf(d) != verdictsOf(v) {
+				t.Fatalf("disguise(%q) = %q: verdicts %+v → %+v", v, d, verdictsOf(v), verdictsOf(d))
+			}
+			switch n := realPrefix(d, v); {
+			case n >= 12:
+				long++
+			case n > 8:
+				ninth++
+			}
+		}
+		if long > 8 || ninth > 160 {
+			t.Errorf("disguise(%q): real prefix past the head %d times (12+: %d) in 400", v, ninth+long, long)
 		}
 	}
 }

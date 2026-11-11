@@ -1,4 +1,8 @@
-import { API_KEY_PATTERNS, isPlaceholderSecret, isSecretReference } from '../core/patterns.js';
+import { API_KEY_PATTERNS, isPlaceholderSecret } from '../core/patterns.js';
+import {
+  isFlagShaped, isKeyAfterK, isPasswordAfterA, isPasswordAfterP, isPasswordClient, isRedisCli,
+  isUnstoredValue as notASecret, looksLikeCredential as looksLikeSecret,
+} from './argv-rules.js';
 import { shannonEntropy } from '../analyzers/entropy.js';
 
 /**
@@ -17,14 +21,22 @@ export interface ConfigSecret {
   masked: string;
   /** The raw value, for deduplication by the caller only — never print it. */
   value: string;
+  /** How it is written: after a credential flag, in a header, a URL, a connection string, an assignment, inline JSON, or a bare token. */
+  via?: 'flag' | 'header' | 'url' | 'connection' | 'assignment' | 'json' | 'token';
 }
 
 const MASK = '***';
 
-/** Flags whose value is a credential (`--token x`, `--api-key=x`, `--password x`). */
-const CREDENTIAL_FLAG = /^--?(?:[a-z][\w-]*?[-_])?(?:access[_-]?token|auth[_-]?token|token|api[_-]?key|apikey|pat|secret|client[_-]?secret|password|passwd|pwd|credentials?|bearer)$/i;
-/** `NAME=value` assignment (docker `-e`, `env K=V cmd`). */
-const ASSIGNMENT = /^([A-Za-z_][A-Za-z0-9_]*)=(.+)$/s;
+/** Flags whose value is a credential (`--token x`, `--api-key=x`, `--password x`, `--aws-secret-access-key x`). */
+const CREDENTIAL_FLAG = /^--?(?:[a-z][\w-]*?[-_])?(?:access[_-]?token|auth[_-]?token|token|api[_-]?key|apikey|(?:secret|private|access|signing|encryption|master)[_-]?key|pat|secret|client[_-]?secret|password|passwd|pwd|credentials?|bearer)$/i;
+/** The same in camelCase (`--apiToken`, `--githubToken`, `--oauth2Bearer`, `--secretKey`): case-sensitive, so `--monkey` isn't one. */
+const CAMEL_CREDENTIAL_FLAG = /^--?[a-z][a-z0-9]*(?:[A-Z][a-z0-9]*)*?(?:AccessToken|AuthToken|Token|ApiKey|Apikey|(?:Secret|Private|Access|Signing|Encryption|Master)Key|Pat|Secret|ClientSecret|Password|Passwd|Pwd|Credentials?|Bearer)$/;
+/** A flag whose value is a credential, in any of the spellings above. */
+export function isCredentialFlag(flag: string): boolean {
+  return CREDENTIAL_FLAG.test(flag) || CAMEL_CREDENTIAL_FLAG.test(flag);
+}
+/** `NAME=value` assignment (docker `-e`, `env K=V cmd`, helm `--set auth.password=x`). */
+const ASSIGNMENT = /^([A-Za-z_][\w.-]*)=(.+)$/s;
 const SECRET_VAR = /(?:token|secret|passw|pwd|credential|api[_-]?key|apikey|private[_-]?key|bearer)|(?:^|_)(?:KEY|PAT|AUTH|PASS)(?:_|$)/i;
 /**
  * The header name of an `Authorization: Bearer x` / `X-Api-Key: x` argv
@@ -86,21 +98,6 @@ const SECRET_PARAM = /^(?:access[_-]?token|auth[_-]?token|token|api[_-]?key|apik
 
 const KNOWN = API_KEY_PATTERNS.filter(p => !/assignment/i.test(p.name));
 
-/**
- * A value that is a reference, a placeholder, a secret manager reference, a
- * file or a profile name — never a stored secret. The same predicate as the
- * env-block path (`isSecretReference`), so `--token op://…` and
- * `GITHUB_TOKEN: op://…` are judged alike.
- */
-function notASecret(value: string): boolean {
-  const v = value.trim().replace(/^['"]|['"]$/g, '');
-  if (v === '') return true;
-  if (isPlaceholderSecret(v) || isSecretReference(v)) return true;
-  // A reference inside the value (`Bearer ${TOKEN}`, `${HOME}/key`) holds nothing literal
-  if (/\$\{[^}]+\}|\$env:|\{env:[^}]+\}|%[A-Za-z_][A-Za-z0-9_]*%/i.test(v)) return true;
-  return false;
-}
-
 /** The known token format a value is (or contains), with the matched token. */
 function knownToken(text: string): { name: string; token: string } | undefined {
   for (const { pattern, name } of KNOWN) {
@@ -116,34 +113,30 @@ function knownToken(text: string): { name: string; token: string } | undefined {
   return undefined;
 }
 
-/**
- * A value that a credential flag or name labels a secret: long enough and
- * random-looking. `--api-key prod` or `--token=default` name a profile, not a key.
- */
-function looksLikeSecret(value: string): boolean {
-  if (value.length < 12 || /\s/.test(value)) return false;
-  if (!/[A-Za-z]/.test(value) || !/[0-9]/.test(value)) return value.length >= 20 && shannonEntropy(value) > 3.5;
-  return shannonEntropy(value) > 3;
-}
-
 /** `text` with every copy of `value` replaced; just the mask when the value isn't found verbatim. */
 function maskIn(text: string, value: string): string {
   return text.includes(value) ? text.split(value).join(MASK) : MASK;
 }
 
-/** Secrets in one URL: userinfo, credential query parameters, token path segments. */
+/**
+ * Secrets in one URL: userinfo, credential query parameters, token path
+ * segments. Any `scheme://` URL has userinfo and parameters — a database or
+ * broker connection URL (`postgresql://app:<pw>@db`, `redis://:<pw>@cache`,
+ * `mongodb+srv://`, `amqp://`) carries its password there; path tokens are
+ * judged on web URLs only.
+ */
 export function findUrlSecrets(url: string, location = 'url'): ConfigSecret[] {
   const out: ConfigSecret[] = [];
-  let parsed: URL;
+  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(url)) return out;
+  let parsed: URL | undefined;
   try {
     parsed = new URL(url);
   } catch {
-    return out;
+    parsed = undefined;
   }
-  if (!/^(?:https?|wss?):$/.test(parsed.protocol)) return out;
   const add = (value: string, kind: string) => {
     if (!value || notASecret(value) || out.some(s => s.value === value)) return;
-    out.push({ location, kind, masked: maskIn(url, value), value });
+    out.push({ location, kind, masked: maskIn(url, value), value, via: 'url' });
   };
 
   // Userinfo read from the raw text: the parser percent-encodes `${PASS}`
@@ -157,6 +150,7 @@ export function findUrlSecrets(url: string, location = 'url'): ConfigSecret[] {
     else if (known) add(user, `${known.name} as URL userinfo`);
     else if (user.length >= 20 && looksLikeSecret(user)) add(user, 'token as URL userinfo');
   }
+  if (!parsed) return out;
 
   for (const [name, value] of parsed.searchParams) {
     const known = knownToken(value);
@@ -179,6 +173,7 @@ export function findUrlSecrets(url: string, location = 'url'): ConfigSecret[] {
     }
   }
 
+  if (!/^(?:https?|wss?):$/.test(parsed.protocol)) return out;
   const path = rawPath(url);
   const host = parsed.hostname.toLowerCase();
   const hostPath = credentialPath(host, path);
@@ -316,6 +311,7 @@ const SECRET_HEADER_NAME = /^(?:(?:proxy-)?authorization|x-(?=[\w-]*?(?:key|toke
  * (`Bearer ${TOKEN}`), placeholders and ordinary header values.
  */
 export function headerSecret(name: string, value: string): string | undefined {
+  if (/^\s*cookie\s*$/i.test(name)) return cookieSecrets(value).length > 0 ? `session cookie in ${name} header` : undefined;
   const scheme = /^\s*(bearer|basic|token|bot)\s+/i.exec(value);
   const v = value.slice(scheme?.[0].length ?? 0).trim();
   if (notASecret(v)) return undefined;
@@ -335,9 +331,9 @@ export function maskUrlSecrets(url: string): string {
 }
 
 /** `args` with every credential `findArgSecrets` finds replaced by `***` in its element. */
-export function maskArgSecrets(args: readonly string[]): string[] {
+export function maskArgSecrets(args: readonly string[], command?: string): string[] {
   const out = [...args];
-  for (const s of findArgSecrets(args)) {
+  for (const s of findArgSecrets(args, command)) {
     const i = Number(/^args\[(\d+)\]$/.exec(s.location)?.[1]);
     if (Number.isInteger(i) && out[i] !== undefined) out[i] = out[i].includes(s.value) ? out[i].split(s.value).join(MASK) : MASK;
   }
@@ -358,12 +354,78 @@ function rawParam(url: string, name: string): string | undefined {
   return undefined;
 }
 
-/** Secrets in an argv array: credential flags (both `--f v` and `--f=v`), env assignments, header args, URLs, bare tokens. */
-export function findArgSecrets(args: readonly string[]): ConfigSecret[] {
+/**
+ * `password=` / `Pwd=` / `AccountKey=` pairs of a connection string or DSN —
+ * ADO.NET / ODBC `Server=db;User Id=sa;Password=<pw>;`, libpq
+ * `host=db user=app password=<pw>`, Azure `AccountKey=<key>`.
+ */
+// (no `\s*` after the boundary: from every space of a long blank run it rescanned the rest)
+const CONNECTION_PAIR = /(?:^|[;\s])(password|pwd|passwd|accountkey|sharedaccesskey|sharedsecretvalue)\s*=\s*('[^']*'|"[^"]*"|[^;\s'"]+)/gi;
+
+/** `[name, value]` of each credential in a connection string (two or more `k=v` pairs). */
+function connectionSecrets(text: string): Array<[string, string]> {
+  if (!text.includes('=') || (text.match(/(?:^|[;\s])[A-Za-z][\w ]{0,40}?=/g) ?? []).length < 2) return [];
+  const out: Array<[string, string]> = [];
+  for (const m of text.matchAll(CONNECTION_PAIR)) {
+    const value = m[2].replace(/^(['"])(.*)\1$/s, '$2');
+    if (value.length >= 4 && !notASecret(value)) out.push([m[1], value]);
+  }
+  return out;
+}
+
+/** The session values of a `Cookie:` header (`session=<v>; theme=dark`): long and random, or under a session/auth name. */
+function cookieSecrets(value: string): string[] {
+  const out: string[] = [];
+  for (const pair of value.split(';')) {
+    const eq = pair.indexOf('=');
+    if (eq <= 0) continue;
+    const name = pair.slice(0, eq).trim();
+    const v = pair.slice(eq + 1).trim();
+    if (notASecret(v)) continue;
+    if (looksLikeSecret(v) || (/sess|auth|token|sid|jwt|login/i.test(name) && v.length >= 8)) out.push(v);
+  }
+  return out;
+}
+
+/** `Cookie: <pairs>` as an argument. */
+const COOKIE_ARG = /^\s*cookie\s*:(.*)$/is;
+/** A vendor header argument named for a credential (`Ocp-Apim-Subscription-Key: x`, `Private-Token: x`). */
+const VENDOR_HEADER_ARG = /^\s*([A-Za-z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)*-(?:key|token|secret))\s*:\s*(\S+)\s*$/i;
+
+/**
+ * Secrets in one configured value — an env or header value rather than an
+ * argument: a connection URL with a password (`DATABASE_URL=postgres://…`)
+ * or a connection string's `Password=` pair.
+ */
+export function findValueSecrets(value: string, location: string): ConfigSecret[] {
+  const v = value.trim();
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(v)) return findUrlSecrets(v, location);
+  return connectionSecrets(v).map(([name, secret]) => ({
+    location, kind: `${name} in a connection string`, masked: maskIn(v, secret), value: secret, via: 'connection' as const,
+  }));
+}
+
+/**
+ * Secrets in an argv array: credential flags (both `--f v` and `--f=v`, also
+ * camelCase and `-p<pw>`), env assignments (also `--env=K=V`, dotted
+ * `--set a.password=v`), header and cookie args, URLs of any scheme,
+ * connection strings, inline JSON, bare tokens.
+ */
+export function findArgSecrets(args: readonly string[], command?: string): ConfigSecret[] {
   const out: ConfigSecret[] = [];
-  const add = (i: number, value: string, kind: string, text = args[i]) => {
+  // a MySQL/MariaDB client or `sshpass` as the command or an earlier element: its `-p` is the password
+  const clientAt = args.findIndex(isPasswordClient);
+  const afterClient = (i: number): boolean => (command !== undefined && isPasswordClient(command)) || (clientAt >= 0 && clientAt < i);
+  const redisAt = args.findIndex(isRedisCli);
+  const afterRedis = (i: number): boolean => (command !== undefined && isRedisCli(command)) || (redisAt >= 0 && redisAt < i);
+  const add = (i: number, value: string, kind: string, via: ConfigSecret['via'], text = args[i]) => {
     if (!value || notASecret(value) || out.some(s => s.value === value)) return;
-    out.push({ location: `args[${i}]`, kind, masked: maskIn(text, value), value });
+    out.push({ location: `args[${i}]`, kind, masked: maskIn(text, value), value, via });
+  };
+  const flagValue = (i: number, flag: string, value: string, text?: string) => {
+    const known = knownToken(value);
+    if (known) add(i, known.token, `${known.name} after ${flag}`, 'flag', text);
+    else if (looksLikeSecret(value)) add(i, value, `credential after ${flag}`, 'flag', text);
   };
 
   for (let i = 0; i < args.length; i++) {
@@ -371,46 +433,105 @@ export function findArgSecrets(args: readonly string[]): ConfigSecret[] {
     const prev = i > 0 ? args[i - 1] : undefined;
 
     // `--token <value>`: the value is the next element
-    if (prev && CREDENTIAL_FLAG.test(prev) && !arg.startsWith('-')) {
-      const known = knownToken(arg);
-      if (known) add(i, known.token, `${known.name} after ${prev}`, `${prev} ${arg}`);
-      else if (looksLikeSecret(arg)) add(i, arg, `credential after ${prev}`, `${prev} ${arg}`);
+    if (prev && isCredentialFlag(prev) && !isFlagShaped(arg)) {
+      flagValue(i, prev, arg, `${prev} ${arg}`);
+      continue;
+    }
+    // `--cookie "session=<value>"` (curl)
+    if (prev === '--cookie' && !isFlagShaped(arg)) {
+      for (const value of cookieSecrets(arg)) add(i, value, 'session cookie after --cookie', 'header', `${prev} ${arg}`);
+      continue;
+    }
+    // `-p <password>` (mysql, sshpass) — not a port mapping (`-p 8080:80`), a
+    // version, a package or a word elsewhere (shared argv rules 1 and 2)
+    if (prev === '-p' && !isFlagShaped(arg)) {
+      if (isPasswordAfterP(arg, afterClient(i - 1))) add(i, arg, 'password after -p', 'flag', `${prev} ${arg}`);
+      continue;
+    }
+    // `-p<password>` glued (`mysql -uroot -pX`)
+    const glued = /^-p(.+)$/s.exec(arg)?.[1];
+    if (glued && (afterClient(i) || !isFlagShaped(arg)) && isPasswordAfterP(glued, afterClient(i))) {
+      add(i, glued, 'password glued to -p', 'flag');
+      continue;
+    }
+    // `-k <key>` (rule 3) and `redis-cli -a <password>` (rule 4)
+    if (prev === '-k' && !isFlagShaped(arg)) {
+      if (isKeyAfterK(arg)) add(i, arg, 'key after -k', 'flag', `${prev} ${arg}`);
+      continue;
+    }
+    if (prev === '-a' && afterRedis(i - 1) && !isFlagShaped(arg)) {
+      if (isPasswordAfterA(arg)) add(i, arg, 'password after redis-cli -a', 'flag', `${prev} ${arg}`);
+      continue;
+    }
+    // `--api-key <value>` / `--token = <value>` written as one element
+    const spaced = /^(--?[A-Za-z][\w-]*)(?:\s*=\s+|\s+(?:=\s*)?)(\S+)$/.exec(arg);
+    if (spaced && isCredentialFlag(spaced[1])) {
+      flagValue(i, spaced[1], spaced[2]);
       continue;
     }
 
-    // `--token=<value>`
+    // `--token=<value>`; any other `--flag=<value>` is judged by its value
+    // (`--header=Authorization: Bearer x`, `--env=K=V`, `--connection-string=…`)
     const flagEq = /^(--?[A-Za-z][\w-]*)=(.+)$/s.exec(arg);
-    if (flagEq && CREDENTIAL_FLAG.test(flagEq[1])) {
+    if (flagEq && isCredentialFlag(flagEq[1])) {
       const known = knownToken(flagEq[2]);
-      if (known) add(i, known.token, `${known.name} in ${flagEq[1]}`);
-      else if (looksLikeSecret(flagEq[2])) add(i, flagEq[2], `credential in ${flagEq[1]}`);
+      if (known) add(i, known.token, `${known.name} in ${flagEq[1]}`, 'flag');
+      else if (looksLikeSecret(flagEq[2])) add(i, flagEq[2], `credential in ${flagEq[1]}`, 'flag');
+      continue;
+    }
+    const text = flagEq ? flagEq[2] : arg;
+
+    // `Server=db;User Id=sa;Password=<pw>`, `host=db password=<pw> dbname=x`
+    const conn = connectionSecrets(text);
+    if (conn.length > 0) {
+      for (const [name, value] of conn) add(i, value, `${name} in a connection string`, 'connection');
       continue;
     }
 
     // `--header "Authorization: Bearer <value>"` (mcp-remote, supergateway)
-    const header = headerArg(arg);
+    const header = headerArg(text);
     if (header) {
       const [name, value] = header;
       const known = knownToken(value);
-      if (known) add(i, known.token, `${known.name} in ${name} header argument`);
-      else if (looksLikeSecret(value)) add(i, value, `credential in ${name} header argument`);
+      if (known) add(i, known.token, `${known.name} in ${name} header argument`, 'header');
+      else if (looksLikeSecret(value)) add(i, value, `credential in ${name} header argument`, 'header');
+      continue;
+    }
+    const cookie = COOKIE_ARG.exec(text);
+    if (cookie) {
+      for (const value of cookieSecrets(cookie[1])) add(i, value, 'session cookie in Cookie header argument', 'header');
+      continue;
+    }
+    const vendor = VENDOR_HEADER_ARG.exec(text);
+    if (vendor) {
+      const known = knownToken(vendor[2]);
+      if (known) add(i, known.token, `${known.name} in ${vendor[1]} header argument`, 'header');
+      else if (looksLikeSecret(vendor[2])) add(i, vendor[2], `credential in ${vendor[1]} header argument`, 'header');
       continue;
     }
 
-    // `-e GITHUB_TOKEN=<value>` / `env OPENAI_API_KEY=<value> node server.js`
-    const assign = ASSIGNMENT.exec(arg);
-    if (assign && !/^[a-z]+:\/\//i.test(arg)) {
-      const known = knownToken(assign[2]);
-      if (known) add(i, known.token, `${known.name} in ${assign[1]}=`);
-      else if (SECRET_VAR.test(assign[1]) && looksLikeSecret(assign[2])) add(i, assign[2], `credential in ${assign[1]}=`);
-      continue;
-    }
-
-    // A URL argument (`mcp-remote https://…?key=…`)
-    if (/^[a-z][a-z0-9+.-]*:\/\//i.test(arg)) {
-      for (const s of findUrlSecrets(arg, `args[${i}]`)) {
-        if (!out.some(o => o.value === s.value)) out.push(s);
+    // A URL argument (`mcp-remote https://…?key=…`, `postgresql://u:<pw>@db`)
+    if (/^[a-z][a-z0-9+.-]*:\/\//i.test(text)) {
+      for (const s of findUrlSecrets(text, `args[${i}]`)) {
+        if (!out.some(o => o.value === s.value)) out.push({ ...s, masked: maskIn(arg, s.value) });
       }
+      continue;
+    }
+
+    // `-e GITHUB_TOKEN=<value>` / `env OPENAI_API_KEY=<value> node server.js` / `--set auth.password=<value>`
+    const assign = ASSIGNMENT.exec(text);
+    if (assign) {
+      // `DATABASE_URL=postgres://u:<pw>@db`: the URL's own secrets, whatever the name
+      if (/^[a-z][a-z0-9+.-]*:\/\//i.test(assign[2])) {
+        for (const s of findUrlSecrets(assign[2], `args[${i}]`)) {
+          if (!out.some(o => o.value === s.value)) out.push({ ...s, masked: maskIn(arg, s.value) });
+        }
+        continue;
+      }
+      const leaf = assign[1].split('.').pop() ?? assign[1];
+      const known = knownToken(assign[2]);
+      if (known) add(i, known.token, `${known.name} in ${assign[1]}=`, 'assignment');
+      else if (SECRET_VAR.test(leaf) && looksLikeSecret(assign[2])) add(i, assign[2], `credential in ${assign[1]}=`, 'assignment');
       continue;
     }
 
@@ -420,18 +541,20 @@ export function findArgSecrets(args: readonly string[]): ConfigSecret[] {
         const [, name, value] = m;
         if (!JSON_SECRET_NAME.test(name) || /(?:hash(?:ed)?|digest|ttl|expir|type|mode|url|uri|file|path|id)$/i.test(name)) continue;
         const known = knownToken(value);
-        if (known) add(i, known.token, `${known.name} in inline JSON "${name}"`);
-        else if (looksLikeSecret(value)) add(i, value, `credential in inline JSON "${name}"`);
+        if (known) add(i, known.token, `${known.name} in inline JSON "${name}"`, 'json');
+        else if (looksLikeSecret(value)) add(i, value, `credential in inline JSON "${name}"`, 'json');
       }
       if (out.some(o => o.location === `args[${i}]`)) continue;
     }
 
     // A bare token standing alone or inside a larger argument
     const known = knownToken(arg);
-    if (known) add(i, known.token, known.name);
+    if (known) add(i, known.token, known.name, 'token');
   }
   return out;
 }
+
+
 
 /** `"name": "value"` (or single quotes) inside an argument holding inline JSON. */
 // (quotes may be backslash-escaped: `{\"apiKey\":\"…\"}` inside a shell string)

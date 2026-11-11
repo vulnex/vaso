@@ -36,21 +36,73 @@ const DECODERS: Decoder[] = [
   // Arguments bounded, without a separate leading-space run (`\(\s*[^)]*`
   // split a long space run every way: 100 KB, 11 s)
   { re: /\bTextDecoder\s*\([^)]{0,1000}\)\s*\.decode\s*\(|\bparseInt\s*\(\s*\w+\s*,\s*16\s*\)/, label: 'TextDecoder/parseInt hex decoding', encodings: ['hex'] },
-  { re: /String\.fromCharCode\s*\(\s*\.\.\.|String\.fromCharCode\.apply\s*\(|\.map\s*\(\s*\(?\w+\)?\s*=>\s*String\.fromCharCode\s*\(/, label: 'String.fromCharCode() over an array', encodings: ['charcodes'] },
+  { re: /String\.fromCharCode\s*\(\s*\.\.\.|String\.fromCharCode\.apply\s*\(|\.map\s*\(\s*(?:\(?\w+\)?\s*=>\s*)?String\.fromCharCode\b/, label: 'String.fromCharCode() over an array', encodings: ['charcodes'] },
   { re: /charCodeAt\s*\(\s*(?:\d+\s*)?\)\s*\+\s*13\b|\brot13\b|['"`]rot_?13['"`]/i, label: 'rot13', encodings: ['rot13'] },
   // Python
   { re: /\b(?:b64decode|urlsafe_b64decode|standard_b64decode|a2b_base64)\s*\(/, label: 'base64.b64decode()', encodings: ['base64'] },
   { re: /\bbytes\.fromhex\s*\(|\bunhexlify\s*\(|\bb16decode\s*\(|\bcodecs\.decode\s*\([^)]*['"]hex['"]/, label: 'bytes.fromhex()', encodings: ['hex'] },
+  // `"".join(map(chr, [...]))`, `chr(c) for c in [...]`, `bytes([...]).decode()`, `bytearray([...])`
+  { re: /\bmap\s*\(\s*chr\s*,|\bchr\s*\(\s*\w+\s*\)\s*for\b|\b(?:bytes|bytearray)\s*\(\s*\[/, label: 'chr()/bytes() over a list', encodings: ['charcodes'] },
 ];
 
-const QUOTED = /(['"`])([^'"`\n\\]{8,})\1/g;
+/** A literal's body worth decoding: 8+ characters with no escapes. */
+const PLAIN_BODY = /^[^\\\n]{8,}$/;
+
 /**
- * A quoted literal written mostly as `\xNN` / `\uNNNN` escapes — the JavaScript
+ * The string literals on one source line, in order, as the language's own
+ * tokenizer sees them: a quote opens a literal only outside another one, and
+ * an escaped quote doesn't close it. A regex pairing quotes left to right
+ * read `"POST", k=Buffer.from("…")` as the literal `, k=Buffer.from(`. Line
+ * comments end the scan; a `/` where an operand is expected starts a regex
+ * literal, whose quotes are skipped too.
+ */
+export function lineStringLiterals(line: string): Array<{ quote: string; body: string; index: number }> {
+  const out: Array<{ quote: string; body: string; index: number }> = [];
+  let prev = ''; // last significant character outside literals
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (c === '"' || c === "'" || c === '`') {
+      let j = i + 1;
+      while (j < line.length && line[j] !== c) j += line[j] === '\\' ? 2 : 1;
+      if (j >= line.length) break; // unterminated (a multi-line template, or not code)
+      out.push({ quote: c, body: line.slice(i + 1, j), index: i });
+      i = j;
+      prev = c;
+      continue;
+    }
+    if (c === '/' && line[i + 1] === '/') break;
+    if (c === '/' && line[i + 1] === '*') {
+      const end = line.indexOf('*/', i + 2);
+      if (end < 0) break;
+      i = end + 1;
+      continue;
+    }
+    if (c === '/' && (prev === '' || /[(,=:[!&|?{};+\-*%<>~^]/.test(prev))) {
+      // a regex literal: to its closing `/`, past escapes and character classes
+      let j = i + 1;
+      let inClass = false;
+      while (j < line.length && (inClass || line[j] !== '/')) {
+        if (line[j] === '\\') j++;
+        else if (line[j] === '[') inClass = true;
+        else if (line[j] === ']') inClass = false;
+        j++;
+      }
+      i = j;
+      prev = '/';
+      continue;
+    }
+    if (!/\s/.test(c)) prev = c;
+  }
+  return out;
+}
+/**
+ * A quoted literal written mostly as `\xNN` / `\uNNNN` / octal escapes — the JavaScript
  * or Python parser is its decoder, so it needs no decode call. Escaped quotes
  * and other escapes are consumed whole; the literal ends at its own quote.
  */
 const ESCAPED_LITERAL = /(['"`])((?:\\[\s\S]|(?!\1)[^\\\n])*)\1/g;
-const ESCAPE_UNIT = /\\x[0-9a-fA-F]{2}|\\u[0-9a-fA-F]{4}|\\u\{[0-9a-fA-F]{1,6}\}/g;
+/** `\xNN`, `\uNNNN`, `\u{N…}` and three-digit octal `\NNN` (Python, legacy JavaScript). */
+const ESCAPE_UNIT = /\\x[0-9a-fA-F]{2}|\\u[0-9a-fA-F]{4}|\\u\{[0-9a-fA-F]{1,6}\}|\\[0-7]{3}/g;
 /** `String.fromCharCode(115, 107, …)` — decimal or `0x` codes as literal arguments. */
 const CHAR_CODE_CALL = /String\.fromCharCode\s*\(\s*((?:(?:0x[0-9a-fA-F]{1,4}|\d{1,5})\s*,\s*){5,}(?:0x[0-9a-fA-F]{1,4}|\d{1,5}))\s*(?:,\s*)?\)/g;
 /**
@@ -82,8 +134,9 @@ export function foldEncodedChunks(code: string): string {
 function decodeEscapes(body: string): string | undefined {
   const units = body.match(ESCAPE_UNIT) ?? [];
   if (units.length < 6) return undefined;
-  const text = body.replace(/\\(x[0-9a-fA-F]{2}|u[0-9a-fA-F]{4}|u\{[0-9a-fA-F]{1,6}\}|[\s\S])/g, (_m, e: string) => {
+  const text = body.replace(/\\(x[0-9a-fA-F]{2}|u[0-9a-fA-F]{4}|u\{[0-9a-fA-F]{1,6}\}|[0-7]{1,3}|[\s\S])/g, (_m, e: string) => {
     if (e[0] === 'x') return String.fromCharCode(parseInt(e.slice(1), 16));
+    if (/^[0-7]/.test(e)) return String.fromCharCode(parseInt(e, 8));
     if (e.length > 1 && e[0] === 'u') return String.fromCodePoint(parseInt(e.replace(/[u{}]/g, ''), 16));
     return ({ n: '\n', t: '\t', r: '\r' } as Record<string, string>)[e] ?? e;
   });
@@ -105,7 +158,8 @@ const DECODE_CALL_BEFORE = /(?:Buffer\.from|atob|b64decode|urlsafe_b64decode|sta
  * network: `eval(atob("…"))`, `require(Buffer.from("…", "hex").toString())`.
  */
 const SINK_BEFORE = /\b(?:eval|Function|exec|execSync|execFile|execFileSync|spawn|spawnSync|require|import|fetch|system|popen|exec_module|__import__)\s*\(\s*(?:new\s+)?(?:(?:Buffer\.from|atob|String\.fromCharCode|unescape|decodeURIComponent|escape|b64decode|bytes\.fromhex)\s*\(\s*)*$/;
-const CHAR_CODE_ARRAY = /\[\s*((?:\d{2,3}\s*,\s*){7,}\d{2,3})\s*,?\s*\]/g;
+/** A list of 8+ character codes, decimal or `0x` hex. */
+const CHAR_CODE_ARRAY = /\[\s*((?:(?:\d{2,3}|0x[0-9a-fA-F]{2})\s*,\s*){7,}(?:\d{2,3}|0x[0-9a-fA-F]{2}))\s*,?\s*\]/g;
 /** Decoded strings longer than this are embedded files/source maps, not hidden strings. */
 const MAX_DECODED = 300;
 
@@ -181,14 +235,17 @@ export function analyzeStringTable(code: string): StringTableReport {
     const line = lines[i];
     const t = line.trimStart();
     if (t.startsWith('//') || t.startsWith('#') || t.startsWith('*')) continue;
+    let tokens: ReturnType<typeof lineStringLiterals> | undefined;
+    const literals = () => (tokens ??= lineStringLiterals(line));
     const at = (index: number) => {
       const before = line.slice(Math.max(0, index - 120), index);
       return { direct: DECODE_CALL_BEFORE.test(before), sink: SINK_BEFORE.test(before) };
     };
     if (encodings.size > 0) {
-      for (const m of line.matchAll(QUOTED)) {
-        const lit = m[2];
-        const { direct, sink } = at(m.index);
+      for (const literal of literals()) {
+        if (!PLAIN_BODY.test(literal.body)) continue;
+        const lit = literal.body;
+        const { direct, sink } = at(literal.index);
         const max = sink ? MAX_DECODED_AT_SINK : MAX_DECODED;
         const text = (encodings.has('hex') ? decodeHex(lit, max) : undefined)
           ?? (encodings.has('base64') ? decodeBase64(lit, max) : undefined)
@@ -203,12 +260,12 @@ export function analyzeStringTable(code: string): StringTableReport {
       }
     }
     // Decoded by the parser or a char-code call — no separate decoder needed
-    if (/\\[xu]/.test(line)) {
-      for (const m of line.matchAll(ESCAPED_LITERAL)) {
-        const text = decodeEscapes(m[2]);
+    if (/\\(?:[xu]|[0-7]{3})/.test(line)) {
+      for (const literal of literals()) {
+        const text = decodeEscapes(literal.body);
         if (!text) continue;
-        implicit.add('hex/unicode-escaped string literal');
-        decoded.push({ text, line: i + 1, direct: true, sink: at(m.index).sink });
+        implicit.add('hex/unicode/octal-escaped string literal');
+        decoded.push({ text, line: i + 1, direct: true, sink: at(literal.index).sink });
       }
     }
     if (line.includes('fromCharCode')) {
@@ -245,7 +302,7 @@ const MASK_BASE64 = /(["'`])[A-Za-z0-9+/_=-]{16,}\1/g;
  */
 export function maskEncodedLiterals(line: string): string {
   let out = foldEncodedChunks(line);
-  if (/\\[xu]/.test(out)) {
+  if (/\\(?:[xu]|[0-7]{3})/.test(out)) {
     out = out.replace(ESCAPED_LITERAL, (m, q: string, body: string) =>
       (body.match(ESCAPE_UNIT) ?? []).length >= 2 ? `${q}<encoded, ${body.length} chars>${q}` : m);
   }

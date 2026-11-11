@@ -26,10 +26,15 @@ export const zc003 = defineCheck({
         });
       }
       if (gw.allowPublicBind) {
+        // With a loopback [gateway] host the switch only matters for a
+        // `--host` given on the command line: the configured listener stays local
         evidence.push({
           file: config.filePath,
           ...tomlLine(config.raw, 'gateway', 'allow_public_bind'),
-          detail: 'gateway.allow_public_bind = true — non-loopback binds (e.g. `zeroclaw gateway start --host 0.0.0.0`) are accepted without a tunnel or TLS',
+          detail: gw.hostExposed
+            ? 'gateway.allow_public_bind = true — non-loopback binds (e.g. `zeroclaw gateway start --host 0.0.0.0`) are accepted without a tunnel or TLS'
+            : `gateway.allow_public_bind = true — the configured host ${gw.host} is loopback; only a \`--host\` override on the command line would bind beyond it, without a tunnel or TLS`,
+          ...(gw.hostExposed ? {} : { mitigated: true }),
         });
       }
     }
@@ -37,7 +42,7 @@ export const zc003 = defineCheck({
     return h.fromEvidence(evidence, {
       passed: 'Gateway is loopback-only, tunnelled, or TLS-protected',
       failed: () => 'Gateway is exposed beyond loopback without TLS or a tunnel',
-      severity: evidence.length > 0 && !gw.requirePairing ? 'critical' : undefined,
+      severity: evidence.length > 0 && !gw.hostExposed ? 'info' : evidence.length > 0 && !gw.requirePairing ? 'critical' : undefined,
       fixable: true,
       fixDescription:
         'Set [gateway] host = "127.0.0.1" and allow_public_bind = false, or front the gateway with a tunnel ([tunnel] tunnel_provider) / enable [gateway.tls]',

@@ -1,9 +1,9 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { API_KEY_PATTERNS, isPlaceholderSecret, isSecretReference } from '../../core/patterns.js';
+import { API_KEY_PATTERNS, isCredentialReference, isPlaceholderSecret } from '../../core/patterns.js';
 import { shannonEntropy } from '../../analyzers/entropy.js';
 import { findSourceSecrets } from '../../analyzers/source-secrets.js';
-import { findArgSecrets, findUrlSecrets } from '../../mcp/config-secrets.js';
+import { findArgSecrets, findUrlSecrets, findValueSecrets, headerSecret, type ConfigSecret } from '../../mcp/config-secrets.js';
 import { isHashedValue } from '../../analyzers/secret-values.js';
 
 const HIGH_ENTROPY_THRESHOLD = 4.5;
@@ -29,12 +29,16 @@ export const mcp003 = defineCheck({
         if (server.env) sources.push(['env block', server.env]);
         if (server.headers) sources.push(['header', server.headers]);
         const seen = new Set<string>();
+        // credentials inside a value whose name says nothing: a connection URL
+        // (`DATABASE_URL=postgres://u:<pw>@db`), a connection string's
+        // `Password=`, a session cookie — reported with the argv/URL ones below
+        const inValues: ConfigSecret[] = [];
 
         for (const [location, values] of sources) {
         for (const [key, value] of Object.entries(values)) {
           // a docs example, or where the key is kept (a variable, a secret manager, a file, a profile)
-          if (isPlaceholderSecret(value) || isSecretReference(value)) continue;
-          seen.add(value.replace(/^\s*(?:Bearer|Basic|Token)\s+/i, '').trim());
+          if (isPlaceholderSecret(value) || isCredentialReference(value)) continue;
+          const before = evidence.length;
           // Check against known API key patterns
           for (const { pattern, name } of API_KEY_PATTERNS) {
             if (pattern.test(value)) {
@@ -66,6 +70,14 @@ export const mcp003 = defineCheck({
               }
             }
           }
+          if (evidence.length > before) {
+            seen.add(value.replace(/^\s*(?:Bearer|Basic|Token)\s+/i, '').trim());
+            continue;
+          }
+          const where = `${location === 'header' ? 'headers' : 'env'}.${key}`;
+          inValues.push(...findValueSecrets(value, where));
+          const cookie = location === 'header' && /^\s*cookie\s*$/i.test(key) ? headerSecret(key, value) : undefined;
+          if (cookie) inValues.push({ location: where, kind: cookie, masked: `${key}: ***`, value });
         }
         }
 
@@ -73,7 +85,8 @@ export const mcp003 = defineCheck({
         // (`--token ghp_…`, `-e KEY=…`, `?api_key=…`, `https://user:pass@…`,
         // `/bot<token>/`) — just as plaintext, and also visible in `ps`
         const placed = [
-          ...findArgSecrets(server.args ?? []),
+          ...inValues,
+          ...findArgSecrets(server.args ?? [], server.command),
           ...(server.url ? findUrlSecrets(server.url) : []),
         ];
         for (const secret of placed) {
@@ -85,7 +98,9 @@ export const mcp003 = defineCheck({
             snippet: `Server "${server.name}": ${secret.location} ${secret.masked}`,
             detail: secret.location.startsWith('args')
               ? `Plaintext ${secret.kind} in server arguments — readable in the config and by any local user via the process list; pass it through the env block from a variable instead`
-              : `Plaintext ${secret.kind} — the URL is stored, logged and sent as written; use a header sourced from a variable instead`,
+              : secret.location === 'url'
+                ? `Plaintext ${secret.kind} — the URL is stored, logged and sent as written; use a header sourced from a variable instead`
+                : `Plaintext ${secret.kind} in ${secret.location} — stored in the config as written; source it from a variable or a secret manager instead`,
           });
         }
       }

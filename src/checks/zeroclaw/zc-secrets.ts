@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import { parse as parseTOML } from 'smol-toml';
+import { parseTomlSafe } from '../../core/toml-safe.js';
 import type { ParsedConfig, ScanContext } from '../../core/types.js';
 import { asRecord } from './zc-config.js';
 import { isEnvReference, isPlaceholderSecret } from '../../core/patterns.js';
@@ -95,7 +95,7 @@ export async function secretSources(ctx: ScanContext): Promise<SecretSource[]> {
       const raw = await ctx.fs.readFile(backup);
       let data: Record<string, unknown> = {};
       try {
-        data = parseTOML(raw) as Record<string, unknown>;
+        data = parseTomlSafe(raw);
       } catch {}
       out.push({ filePath: backup, raw, data, main: false });
     }

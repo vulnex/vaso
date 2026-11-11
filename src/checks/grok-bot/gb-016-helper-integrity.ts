@@ -4,6 +4,7 @@ import { defineCheck } from '../../core/check-builder.js';
 import { markUnreachable, queryPermissions, writableByOthers } from '../../core/permissions.js';
 import { DATA_FILES, GROK_BOT_BUNDLE_ID, GROK_BOT_HELPER, GROK_BOT_TEAM_ID, grokBotHome } from '../../adapters/grok-bot.js';
 import { dataFile, isOwnSession } from './shared.js';
+import { pathPresent } from '../../adapters/load-if-present.js';
 
 /**
  * The macOS Computer Use helper (0.78.4): the exec daemon copies the signed
@@ -69,6 +70,9 @@ export const gb016 = defineCheck({
     const helperDir = dataFile(ctx, DATA_FILES.computerUseDir);
     const helper = join(helperDir, GROK_BOT_HELPER.app);
     const hasHelper = await ctx.fs.access(helper);
+    // A computer-use dir its owner can't search (chmod 000) hides the copy:
+    // say so instead of calling it intact
+    const hidden = !hasHelper && await pathPresent(helper, ctx.fs);
 
     // Signatures: codesign runs only where the files are (not on snapshots)
     if (ctx.fs.kind !== 'snapshot') {
@@ -121,9 +125,10 @@ export const gb016 = defineCheck({
 
     const severity: Severity | undefined = critical.length > 0 ? undefined : warning.some(e => !e.mitigated) ? 'warning' : info.length > 0 || warning.length > 0 ? 'info' : undefined;
     return h.fromEvidence([...critical, ...warning, ...info], {
-      passed: ctx.fs.kind === 'snapshot'
+      passed: (ctx.fs.kind === 'snapshot'
         ? 'Grok Bot Computer Use helper is writable only by its owner (signatures are checked on local scans)'
-        : 'Grok Bot app and Computer Use helper are vendor-signed and intact',
+        : 'Grok Bot app and Computer Use helper are vendor-signed and intact')
+        + (hidden ? `; the helper copy in ${helperDir} was not verified (directory not readable)` : ''),
       failed: () => critical.length > 0
         ? 'Grok Bot app or Computer Use helper signature does not match the vendor\'s'
         : 'Grok Bot Computer Use helper can be replaced',

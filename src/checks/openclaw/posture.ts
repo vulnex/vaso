@@ -1,6 +1,7 @@
 import type { ParsedConfig } from '../../core/types.js';
 import { deepMerge } from '../../core/utils.js';
 import { openclawAutoBindHost } from '../../adapters/openclaw-bind.js';
+import { isWildcardAddress } from '../../core/listen-address.js';
 
 export interface Posture {
   tls?: boolean;
@@ -103,10 +104,8 @@ export function extractPosture(merged: Record<string, unknown>, agentId?: string
   };
 }
 
-const PUBLIC_HOSTS = new Set(['0.0.0.0', '::', '*']);
-
 function isPublic(host: string | undefined): boolean {
-  return host !== undefined && PUBLIC_HOSTS.has(host);
+  return host !== undefined && host.trim() !== '' && isWildcardAddress(host);
 }
 
 function isLoopback(host: string | undefined): boolean {

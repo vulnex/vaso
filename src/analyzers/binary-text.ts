@@ -34,8 +34,15 @@ const ascii = (s: string) => [...s].map(c => c.charCodeAt(0));
 
 /** Signatures checked on raw bytes. */
 const SIGNATURES: Array<{ name: string; test: (b: Uint8Array) => boolean }> = [
-  // ELF: class (32/64-bit) and data (LE/BE) bytes valid, version 1
-  { name: 'ELF executable', test: b => startsWith(b, [0x7f, 0x45, 0x4c, 0x46]) && (b[4] === 1 || b[4] === 2) && (b[5] === 1 || b[5] === 2) && b[6] === 1 },
+  // ELF: class (32/64-bit) and data (LE/BE) bytes valid, version 1, and the
+  // identification padding (bytes 9–15) zero — a text line forging the first
+  // seven bytes runs as a script (the shell's no-binary fallback); one with
+  // NULs in its first line does not
+  {
+    name: 'ELF executable',
+    test: b => startsWith(b, [0x7f, 0x45, 0x4c, 0x46]) && (b[4] === 1 || b[4] === 2) && (b[5] === 1 || b[5] === 2) && b[6] === 1
+      && startsWith(b, [0, 0, 0, 0, 0, 0, 0], 9),
+  },
   // Mach-O thin (feedface / feedfacf, both byte orders) and fat (cafebabe / cafebabf / bebafeca)
   {
     name: 'Mach-O executable',
@@ -83,22 +90,64 @@ const TEXT_SIGNATURES = new Set(['ELF executable', 'WebAssembly module', 'zip ar
  * source: never for a script (extension or shebang); otherwise judged on its
  * raw head when the provider can read one.
  */
-export async function binaryFileFormat(fs: Pick<FSProvider, 'readHead'>, path: string, text: string): Promise<string | undefined> {
-  if (isScriptFile(path, text)) return pythonZipApp(path, text);
+export async function binaryFileFormat(fs: Pick<FSProvider, 'readHead'> & Partial<Pick<FSProvider, 'readBytes'>>, path: string,
+  text: string): Promise<string | undefined> {
+  // Markdown is read as text by the agent, never run: whatever its first bytes are
+  if (MARKDOWN_EXTENSIONS.has(extname(path).toLowerCase())) return undefined;
+  if (isScriptFile(path, text)) return pythonZipApp(fs, path, text);
   const head = await fs.readHead?.(path, HEAD_BYTES).catch(() => undefined);
   return head ? binaryFormat(head) : textBinaryFormat(text);
 }
 
+const MARKDOWN_EXTENSIONS = new Set(['.md', '.markdown', '.mdx']);
+
 /**
  * Python runs a file holding a zip archive as a zipapp (its `__main__.py`),
- * whatever its extension and whatever text comes first: it finds the archive
- * by the end-of-central-directory record, which survives UTF-8 decoding
- * (`PK\x05\x06`, all ASCII). Its code is compressed, so it can't be read.
+ * whatever its extension and whatever text comes first: zipimport finds the
+ * archive by the end-of-central-directory record in the file's last 64 KiB,
+ * and takes it only when the central directory it points at is there.
+ * Otherwise (the bytes `PK\x05\x06` in a comment) it runs the file as
+ * source. A real zipapp's code is compressed, so it can't be read.
  */
-function pythonZipApp(path: string, text: string): string | undefined {
+async function pythonZipApp(fs: Partial<Pick<FSProvider, 'readBytes'>>, path: string, text: string): Promise<string | undefined> {
   const ext = extname(path).toLowerCase();
   const python = ext === '.py' || ext === '.pyw' || /^#![^\n]*python/.test(text);
-  return python && text.includes('PK\x05\x06') ? 'zip archive (Python runs it as a zipapp)' : undefined;
+  if (!python || !text.includes('PK\x05\x06')) return undefined;
+  const bytes = await fs.readBytes?.(path).catch(() => undefined);
+  // without the raw bytes, the decoded text (offsets are only approximate)
+  return zipDirectory(bytes ?? Uint8Array.from(text, c => c.charCodeAt(0) & 0xff), bytes === undefined)
+    ? 'zip archive (Python runs it as a zipapp)' : undefined;
+}
+
+/** Longest archive comment: the EOCD record sits in the last 64 KiB + 22 bytes. */
+const MAX_ZIP_COMMENT = 0xffff;
+const EOCD_SIZE = 22;
+
+/**
+ * Whether `b` ends with a zip archive zipimport accepts: the last
+ * end-of-central-directory record in the file's tail, complete, with a
+ * central directory size and offset that fit before it and a central
+ * directory header (`PK\x01\x02`) where they point. `approximate`: offsets
+ * from decoded text, where multi-byte characters shrank the file — only the
+ * record and a header before it are required.
+ */
+function zipDirectory(b: Uint8Array, approximate: boolean): boolean {
+  const from = Math.max(0, b.length - MAX_ZIP_COMMENT - EOCD_SIZE);
+  let pos = -1;
+  for (let i = b.length - 4; i >= from; i--) {
+    if (b[i] === 0x50 && b[i + 1] === 0x4b && b[i + 2] === 5 && b[i + 3] === 6) { pos = i; break; }
+  }
+  if (pos < 0 || b.length - pos < EOCD_SIZE) return false;
+  const size = u32le(b, pos + 12);
+  const offset = u32le(b, pos + 16);
+  if (size > pos || offset > pos) return false;
+  const header = (at: number) => startsWith(b, [0x50, 0x4b, 1, 2], at);
+  if (approximate) {
+    for (let i = pos - 4; i >= 0; i--) if (header(i)) return true;
+    return false;
+  }
+  const entries = b[pos + 10] | (b[pos + 11] << 8);
+  return entries === 0 ? size === 0 : header(pos - size);
 }
 
 /** Source text ready to parse: stray NULs replaced by spaces, which keeps every offset and line number. */

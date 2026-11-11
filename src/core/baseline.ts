@@ -80,7 +80,7 @@ function installationKey(agent: ScanResult['agents'][number]): string {
 }
 
 /**
- * Where a finding is, not how it is worded: the files its evidence names.
+ * Where a repeated finding is, not how it is worded: the files its evidence names.
  * Detail text, snippets and line numbers change with VASO's wording and with
  * unrelated edits to the file, and made the same finding show as both new
  * and resolved.
@@ -92,23 +92,71 @@ function evidenceKey(finding: CheckResult): string {
     .join('|');
 }
 
-function findingKey(agent: ScanResult['agents'][number], finding: CheckResult): string {
-  return `${installationKey(agent)}:${finding.id}:${evidenceKey(finding)}`;
+/**
+ * A check reports one result per installation, so a failing check is the
+ * same finding in both scans while its evidence names only files it already
+ * named (losing one keeps it unchanged). Naming a file the baseline didn't
+ * — a secret leaked into a new file — makes it new; moving wholly to other
+ * files also resolves the old one. Ids that repeat within an installation
+ * (CONFIG-LOAD, one per unreadable file) are told apart by their exact file
+ * set.
+ */
+function findingKey(agent: ScanResult['agents'][number], finding: CheckResult, repeated: Set<string>): string {
+  const base = `${installationKey(agent)}:${finding.id}`;
+  return repeated.has(base) ? `${base}:${evidenceKey(finding)}` : base;
+}
+
+/** `installation:id` keys that occur more than once in an installation of either scan. */
+function repeatedIds(...scans: ScanResult[]): Set<string> {
+  const repeated = new Set<string>();
+  for (const scan of scans) {
+    for (const agent of scan.agents) {
+      const seen = new Set<string>();
+      for (const r of agent.results) {
+        const base = `${installationKey(agent)}:${r.id}`;
+        if (seen.has(base)) repeated.add(base);
+        seen.add(base);
+      }
+    }
+  }
+  return repeated;
+}
+
+function evidenceFiles(f: CheckResult): string[] {
+  return evidenceKey(f).split('|').filter(Boolean);
+}
+
+/** Still the baseline's finding: names no file the baseline's didn't (both naming none counts). */
+function sameFinding(now: CheckResult, before: CheckResult): boolean {
+  const old = new Set(evidenceFiles(before));
+  const files = evidenceFiles(now);
+  if (files.length === 0 || old.size === 0) return files.length === 0 && old.size === 0;
+  return files.every(f => old.has(f));
+}
+
+/** The baseline's finding is still reported: a current finding under its key names one of its files. */
+function stillReported(before: CheckResult, now: CheckResult | undefined): boolean {
+  if (!now) return false;
+  const files = new Set(evidenceFiles(now));
+  const old = evidenceFiles(before);
+  if (old.length === 0 || files.size === 0) return old.length === 0 && files.size === 0;
+  return old.some(f => files.has(f));
 }
 
 export function diffResults(current: ScanResult, baseline: ScanResult): DiffResult {
   const currentFindings = new Map<string, CheckResult>();
   const baselineFindings = new Map<string, CheckResult>();
+  const repeated = repeatedIds(current, baseline);
 
   for (const agent of current.agents) {
     for (const r of agent.results) {
-      if (!r.passed) currentFindings.set(findingKey(agent, r), r);
+      if (!r.passed) currentFindings.set(findingKey(agent, r, repeated), r);
     }
   }
 
   for (const agent of baseline.agents) {
     for (const r of agent.results) {
-      if (!r.passed) baselineFindings.set(findingKey(agent, r), r);
+      if (!r.passed) baselineFindings.set(findingKey(agent, r, repeated), r);
     }
   }
 
@@ -117,7 +165,8 @@ export function diffResults(current: ScanResult, baseline: ScanResult): DiffResu
   const unchangedFindings: CheckResult[] = [];
 
   for (const [key, finding] of currentFindings) {
-    if (baselineFindings.has(key)) {
+    const before = baselineFindings.get(key);
+    if (before && sameFinding(finding, before)) {
       unchangedFindings.push(finding);
     } else {
       newFindings.push(finding);
@@ -125,7 +174,7 @@ export function diffResults(current: ScanResult, baseline: ScanResult): DiffResu
   }
 
   for (const [key, finding] of baselineFindings) {
-    if (!currentFindings.has(key)) {
+    if (!stillReported(finding, currentFindings.get(key))) {
       resolvedFindings.push(finding);
     }
   }

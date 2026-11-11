@@ -11,7 +11,7 @@ async function scanFile(file: string, reader: MemoryReader, evidence: Evidence[]
   const content = await reader.read(file);
   if (content === undefined) return;
 
-  evidence.push(...scanMemorySecrets(file, content, 'instructions file'));
+  for (const e of scanMemorySecrets(file, content, 'instructions file')) evidence.push(e);
 }
 
 const MAX_DEPTH = 8;

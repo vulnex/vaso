@@ -1,3 +1,5 @@
+import { shannonEntropy } from '../analyzers/entropy.js';
+
 // Quantifiers use {N,} (open-ended) rather than {N} so longer-than-spec tokens
 // still match in full. With a fixed {N} bound, redaction silently leaks the
 // trailing bytes when a token is longer than expected; with a trailing \b, the
@@ -131,6 +133,39 @@ const SECRET_MANAGER_REFERENCE = new RegExp([
   String.raw`^ENC\[[A-Z0-9_]+,data:.*\]$`,
 ].join('|'), 'i');
 
+const PATH_PREFIX = /^(?:~|\.{1,2})?[/\\]|^[A-Za-z]:[/\\]/;
+
+/**
+ * A segment no one names a directory or file: 12+ characters of base64 /
+ * base62 in both cases with digits, near-maximal entropy, that doesn't split
+ * into words (`MyProject2024`, `Package-Name_Version2`).
+ */
+function randomSegment(segment: string): boolean {
+  const s = segment.replace(/\.[A-Za-z0-9]{1,8}$/, ''); // `<random>.pem` is still random
+  if (s.length < 12 || !/^[A-Za-z0-9+=_-]+$/.test(s)) return false;
+  if (!/[A-Z]/.test(s) || !/[a-z]/.test(s) || !/\d/.test(s)) return false;
+  if (s.split(/[-_]/).every(p => /^(?:[A-Z]?[a-z]{2,}|[A-Z]{2,}(?![a-z])|\d+)*$/.test(p))) return false;
+  return shannonEntropy(s) >= Math.min(4, Math.log2(s.length) - 0.8);
+}
+
+/** A segment that names something: a word, a dotfile, a word with an extension (`.ssh`, `Users`, `id_rsa`, `key.pem`). */
+const WORD_SEGMENT = /^\.?(?:[a-z]{2,}|[A-Z][a-z]+|[A-Z]{2,})(?:[._-][A-Za-z0-9]+)*$/;
+
+/**
+ * Whether a value that starts like a path (`/`, `./`, `../`, `~/`, `C:\`)
+ * is one, judged by its shape: a base64 secret starts with `/` one time in
+ * 64 (AWS secret keys, generated passwords), and a path is made of names. A
+ * value with a random segment is a path only when it also has named
+ * segments around it (`/Users/me/.keys/Xq7Lk2Pz9Rt4Vw8Y.pem`).
+ */
+export function isPathValue(value: string): boolean {
+  const v = value.trim();
+  if (!PATH_PREFIX.test(v)) return false;
+  const segments = v.replace(PATH_PREFIX, '').split(/[/\\]+/).filter(Boolean);
+  if (!segments.some(randomSegment)) return true;
+  return segments.length >= 3 && segments.some(s => WORD_SEGMENT.test(s));
+}
+
 /** A file holding the credential: a path, or a key/config file's name (`service-account-key.json`). */
 const FILE_REFERENCE = /^(?:~|\.{1,2})?[/\\]|^[A-Za-z]:[/\\]|^[\w.@-]+\.(?:json|pem|key|p8|p12|pfx|crt|cer|der|jks|keystore|txt|env|ya?ml|toml|ini|cfg|conf|gpg|asc|age|enc)$/i;
 
@@ -166,7 +201,20 @@ export function isSecretReference(value: string): boolean {
   if (v === '') return false;
   if (isEnvReference(v)) return true;
   if (API_KEY_PATTERNS.some((p) => p.pattern.test(v))) return false;
-  return SECRET_MANAGER_REFERENCE.test(v) || FILE_REFERENCE.test(v) || isProfileName(v);
+  // a value that only starts like a path (`/Xq7Lk2Pz9…`, a base64 secret) is
+  // judged by its shape; the probe's Go copy does the same
+  return SECRET_MANAGER_REFERENCE.test(v) || FILE_REFERENCE.test(v) && (!PATH_PREFIX.test(v) || isPathValue(v)) || isProfileName(v);
+}
+
+/**
+ * `isSecretReference`, with a value that only starts like a path judged by
+ * its shape (`isPathValue`): `/Xq7Lk2Pz9…` is a base64 secret, not a file.
+ * (`isSecretReference` itself has a Go copy in the probe and stays as is.)
+ */
+export function isCredentialReference(value: string): boolean {
+  if (!isSecretReference(value)) return false;
+  const v = value.replace(AUTH_SCHEME_PREFIX, '').trim().replace(/^(['"])(.*)\1$/, '$2');
+  return !PATH_PREFIX.test(v) || isEnvReference(v) || isPathValue(v);
 }
 
 export const OAUTH_SECRET_PATTERNS = [

@@ -46,6 +46,8 @@ export const gb008 = defineCheck({
     for (const t of all) {
       try {
         if (!(await ctx.fs.access(t.path))) continue;
+        // A regular file where the app expects a directory holds none of its data
+        if (t.dir && !(await ctx.fs.stat(t.path)).isDirectory()) continue;
         const perms = await queryPermissions(ctx.fs, t.path);
         if (perms === 'unsupported' || !readableByOthers(perms)) continue;
         (t.level === 'warning' ? warning : info).push({ file: t.path, snippet: `mode 0${perms.octal}`, detail: `${t.dir ? 'Directory with' : 'Holds'} ${t.holds} — readable by group or other users` });

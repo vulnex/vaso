@@ -1,11 +1,11 @@
 import { createHash } from 'node:crypto';
 import _traverse from '@babel/traverse';
 import type { Node } from '@babel/types';
-import type { NodePath } from '@babel/traverse';
+import type { Binding, NodePath } from '@babel/traverse';
 import { mayBeJavaScript, parseLenientReport, recordedEvasion, sourceChunks, type JsAst } from './js-parse.js';
 import { bindingModule, memberName, sinkCallee } from './tool-input-taint.js';
 import { analyzeFlows, type SourcePath, type Taint } from './js-flow.js';
-import { credentialEnvName, onVendorHost, ownedCredential, staticOrigin, vendorApiDomains, vendorUrlSlot } from './vendor-domains.js';
+import { credentialEnvName, onVendorHost, ownedCredential, signingSecret, staticOrigin, vendorApiDomains, vendorUrlSlot } from './vendor-domains.js';
 
 // Handle ESM/CJS interop
 const traverse = typeof _traverse === 'function' ? _traverse : (_traverse as { default: typeof _traverse }).default;
@@ -143,9 +143,16 @@ function httpRequestCall(p: NodePath): boolean {
   }
   if (callee.type !== 'MemberExpression' || callee.computed || callee.property.type !== 'Identifier') return false;
   const method = callee.property.name;
-  if (!HTTP_REQUEST_METHODS.has(method) || callee.object.type !== 'Identifier') return false;
-  const binding = p.scope.getBinding(callee.object.name);
-  if (!binding) return method === 'fetch' && GLOBAL_SCOPES.has(callee.object.name);
+  if (!HTTP_REQUEST_METHODS.has(method)) return false;
+  // `require('axios').get(…)`
+  const object = callee.object;
+  if (object.type === 'CallExpression' && object.callee.type === 'Identifier' && object.callee.name === 'require'
+    && !p.scope.getBinding('require') && object.arguments.length === 1 && object.arguments[0].type === 'StringLiteral') {
+    return HTTP_CLIENT_MODULE.test(object.arguments[0].value);
+  }
+  if (object.type !== 'Identifier') return false;
+  const binding = p.scope.getBinding(object.name);
+  if (!binding) return method === 'fetch' && GLOBAL_SCOPES.has(object.name);
   return HTTP_CLIENT_MODULE.test(bindingModule(binding) ?? '');
 }
 
@@ -161,6 +168,31 @@ const REDIRECT_OPTIONS = new Set([
 ]);
 /** `fetch = …`, `globalThis.fetch = …`, `window['fetch'] = …`, `Object.defineProperty(globalThis, 'fetch', …)`. */
 const FETCH_ASSIGNMENT = /(?:^|[^\w$.])(?:(?:globalThis|window|self|global)\s*(?:\.\s*fetch|\[\s*['"`]fetch['"`]\s*\])|fetch)\s*(?:=(?!=)|\|\|=|\?\?=)|defineProperty\s*\(\s*(?:globalThis|window|self|global)\s*,\s*['"`]fetch['"`]/;
+
+/**
+ * Code that sends every request of the file somewhere else, whatever URL a
+ * call names: fetch replaced through an alias (`const g = globalThis;
+ * g.fetch = …`, `Object.assign(globalThis, { fetch })`), client interceptors
+ * and defaults (axios `interceptors.request.use`, `defaults.proxy`), a global
+ * dispatcher or agent (undici `setGlobalDispatcher`, `https.globalAgent`),
+ * patched network modules (`https.request = …`), proxy/TLS environment
+ * settings, or another DNS resolver. A vendor key in its own API's headers
+ * then goes wherever that points.
+ */
+const GLOBAL_REDIRECT = new RegExp([
+  // (assignments and calls, not mentions: a bundled client library defines
+  // and reads its own `defaults`, `globalAgent` and `lookup`)
+  String.raw`(?:\.\s*fetch|\[\s*['"\x60]fetch['"\x60]\s*\])\s*(?:=(?!=)|\|\|=|\?\?=)`,
+  String.raw`\bObject\s*\.\s*(?:assign|defineProperty|defineProperties)\s*\(\s*(?:globalThis|window|self|global)\b[^;]{0,200}?\bfetch\b`,
+  String.raw`\.\s*interceptors\s*\.\s*request\s*\.\s*use\s*\(`,
+  String.raw`\.\s*defaults\s*\.\s*(?:proxy|httpAgent|httpsAgent|adapter|transport|socketPath|lookup|beforeRedirect|dispatcher|agent)\s*(?:=(?!=)|\|\|=|\?\?=)`,
+  String.raw`\bObject\s*\.\s*assign\s*\(\s*[\w$.]*\bdefaults\s*,[^;]{0,200}?\b(?:proxy|httpAgent|httpsAgent|adapter|lookup|dispatcher|agent)\b`,
+  String.raw`(?<!function\s{1,10})\bset(?:GlobalDispatcher|Servers)\s*\(`,
+  String.raw`\bglobalAgent\s*(?:\.\s*[\w$]+\s*)*(?:=(?!=)|\|\|=|\?\?=)`,
+  String.raw`(?:^|[^\w$.])(?:https?|http2|net|tls|dns)\s*\.\s*(?:request|get|connect|createConnection|lookup|Agent|checkServerIdentity)\s*=(?!=)`,
+  String.raw`\b(?:HTTPS?_PROXY|ALL_PROXY|NO_PROXY|NODE_TLS_REJECT_UNAUTHORIZED|NODE_EXTRA_CA_CERTS|GLOBAL_AGENT_[A-Z_]+|SSL_CERT_FILE)\b['"\x60]?\s*\]?\s*(?:=(?!=)|\|\|=|\?\?=)`,
+  String.raw`\bObject\s*\.\s*assign\s*\(\s*process\s*\.\s*env\b[^;]{0,200}?(?:PROXY|NODE_TLS_REJECT_UNAUTHORIZED|NODE_EXTRA_CA_CERTS)`,
+].join('|'), 'i');
 
 function isFetchCallee(callee: Node): boolean {
   if (callee.type === 'Identifier') return callee.name === 'fetch';
@@ -183,7 +215,8 @@ function redirectedRequest(args: Node[], p: NodePath, domains: readonly string[]
     if (arg.type === 'Identifier') {
       const binding = p.scope.getBinding(arg.name);
       const init = binding?.constant && binding.path.node.type === 'VariableDeclarator' ? binding.path.node.init : undefined;
-      if (init?.type === 'ObjectExpression') arg = init;
+      // an options object changed after it was built (`opts.hostname = …`, `Object.assign(opts, …)`) is not what its literal says
+      if (init?.type === 'ObjectExpression' && !changedElsewhere(binding!, p)) arg = init;
       else if (i === bodyIndex) continue;
       else return true;
     }
@@ -210,6 +243,35 @@ function redirectedRequest(args: Node[], p: NodePath, domains: readonly string[]
         }
       }
     }
+  }
+  return false;
+}
+
+/**
+ * Whether an object bound to `binding` may be changed outside the request
+ * call `call`: a property assigned, updated or deleted, a method called on
+ * it, or the object handed to anything but another request (a helper, an
+ * alias, `Object.assign(opts, …)`). Reading a property or spreading it
+ * changes nothing.
+ */
+function changedElsewhere(binding: Binding, call: NodePath): boolean {
+  for (const ref of binding.referencePaths) {
+    if (ref.findParent((q) => q.node === call.node)) continue;
+    let top: NodePath = ref;
+    while (top.parentPath?.isMemberExpression() && top.key === 'object') top = top.parentPath;
+    const parent = top.parentPath;
+    if (!parent) continue;
+    if (top !== ref) {
+      // `opts.x = …`, `opts.x++`, `delete opts.x`, `opts.headers.set(…)`
+      if ((parent.isAssignmentExpression() && top.key === 'left') || parent.isUpdateExpression()
+        || (parent.isUnaryExpression() && parent.node.operator === 'delete')
+        || (parent.isCallExpression() && top.key === 'callee')) return true;
+      continue;
+    }
+    if (parent.isSpreadElement() || parent.isMemberExpression()) continue;
+    if (parent.isCallExpression() && top.key !== 'callee' && httpRequestCall(parent)) continue;
+    if (parent.isIfStatement() || parent.isLogicalExpression() || parent.isUnaryExpression() || parent.isBinaryExpression()) continue;
+    return true;
   }
   return false;
 }
@@ -312,9 +374,9 @@ function analyzeUncached(code: string): DataFlowResult[] {
   // Environment values written inline in a request (`body: JSON.stringify(process.env)`,
   // `axios.post(url, process.env.KEY)`), by the rules of the Python analyzer:
   // the whole environment anywhere in the call, a single value in the
-  // request body — or anywhere in a request when it is a vendor's key or a
-  // signing secret (ownedCredential: `?k=${process.env.AWS_SECRET_ACCESS_KEY}`,
-  // a header to another host).
+  // request body — or anywhere in a request when it is a credential
+  // (ownedCredential: `?k=${process.env.AWS_SECRET_ACCESS_KEY}`, a header to
+  // another host; a vendorless one outside the headers: genericCredentialAuth).
   const inlineEnv = (args: Node[], sinkName: string): string[] => inlineSources(args, sinkName, false)
     .filter(([, kind]) => kind === 'env').map(([name]) => name);
   /**
@@ -336,7 +398,8 @@ function analyzeUncached(code: string): DataFlowResult[] {
     for (const m of all.matchAll(/(?<![\w$.])process\.env(?:\.[A-Za-z_$][\w$]*|\[[^\]]+\])/g)) {
       if (seen.has(m[0])) continue;
       const name = envNameOf(m[0]);
-      if (!mentions(body, m[0]) && !(request && ownedCredential(name))) continue;
+      // (a credential not tied to a vendor is let through here and judged by where it sits: genericCredentialAuth)
+      if (!mentions(body, m[0]) && !(request && name !== undefined && credentialEnvName(name))) continue;
       seen.add(m[0]);
       out.push([m[0], 'env']);
     }
@@ -363,8 +426,9 @@ function analyzeUncached(code: string): DataFlowResult[] {
   const onlyAddressing = (args: Node[], sinkName: string, sourceVar: string, p: NodePath): boolean => {
     if (wholeEnvAt(p, sourceVar) || mentions(requestBody(args, sinkName), sourceVar)) return false;
     const name = envNameOf(sourceVar);
-    // Destructured values follow the inline rules: outside the body, only a credential whose home is known
-    if (destructuredEnv.has(sourceVar)) return !ownedCredential(name);
+    // Destructured values follow the inline rules: outside the body, only a
+    // credential (a vendorless one only outside the headers: genericCredentialAuth)
+    if (destructuredEnv.has(sourceVar)) return name === undefined || !credentialEnvName(name);
     if (name === undefined || credentialEnvName(name)) return false;
     const rest = args.slice(1).map((a) => code.slice(a.start ?? 0, a.end ?? 0)).join(',');
     return !mentions(rest, sourceVar);
@@ -402,6 +466,83 @@ function analyzeUncached(code: string): DataFlowResult[] {
   const envNames = new Map<string, string>();
   // Names bound by destructuring the environment (`const { API_KEY } = process.env`)
   const destructuredEnv = new Set<string>();
+  // Options objects whose environment values all sit in their `headers` (`const opts = { headers: { Authorization: … } }`)
+  const headerOptionVars = new Set<string>();
+  // Variables holding environment values, by binding: minified code reuses
+  // one-letter names, and the `u` holding a key is not every other `u`
+  const carrierBindings = new Map<string, Set<object>>();
+  const addBinding = (v: string, binding: object): void => {
+    const set = carrierBindings.get(v);
+    if (set) set.add(binding);
+    else carrierBindings.set(v, new Set([binding]));
+  };
+  // Credentials an HTTP client carries into every request it makes, by the
+  // client's binding: an instance built with them (`axios.create({ headers })`,
+  // `got.extend(…)`, `ky.create(…)`) or defaults set on a client
+  // (`axios.defaults.headers.common.Authorization = …`), with its base URL
+  const clients = new Map<object, { creds: Array<{ source: string; envName?: string; slot: 'headers' | 'other' }>; base?: string }>();
+  /** Environment values an expression carries: `process.env.X` and variables read from the environment. */
+  const envRefs = (q: NodePath): Array<{ source: string; envName?: string }> => {
+    const out: Array<{ source: string; envName?: string }> = [];
+    const visit = (r: NodePath) => {
+      if (r.isMemberExpression()) {
+        const o = r.node.object;
+        if (o.type === 'MemberExpression' && !o.computed && o.object.type === 'Identifier' && o.object.name === 'process'
+          && o.property.type === 'Identifier' && o.property.name === 'env') {
+          out.push({ source: code.slice(r.node.start ?? 0, r.node.end ?? 0), envName: memberName(r.node) });
+        }
+      } else if (r.isIdentifier() && r.isReferencedIdentifier() && sourceVars.get(r.node.name) === 'env'
+        && !wholeEnvAt(r, r.node.name) && !otherBinding(r, r.node.name)) {
+        out.push({ source: r.node.name, envName: envNames.get(r.node.name) });
+      }
+    };
+    visit(q);
+    q.traverse({ Function(f) { f.skip(); }, MemberExpression: visit, Identifier: visit });
+    return out;
+  };
+  const clientOf = (b: object) => {
+    let c = clients.get(b);
+    if (!c) clients.set(b, (c = { creds: [] }));
+    return c;
+  };
+  /** A client config's credentials and base URL (`{ baseURL, headers, auth, params }`). */
+  const readClientConfig = (cfg: NodePath, b: object): void => {
+    if (!cfg.isObjectExpression()) return;
+    for (const prop of cfg.get('properties') as NodePath[]) {
+      if (!prop.isObjectProperty() || prop.node.computed) continue;
+      const k = prop.node.key;
+      const key = k.type === 'Identifier' ? k.name : k.type === 'StringLiteral' ? k.value : '';
+      const value = prop.get('value') as NodePath;
+      if ((key === 'baseURL' || key === 'prefixUrl' || key === 'prefixURL') && value.isStringLiteral()) clientOf(b).base = value.node.value;
+      const slot = key === 'headers' || key === 'auth' ? 'headers' : /^(?:params|searchParams|cookies?)$/.test(key) ? 'other' : undefined;
+      if (slot) for (const r of envRefs(value)) clientOf(b).creds.push({ ...r, slot });
+    }
+  };
+  /**
+   * The verdict on a credential a client carries, for one request
+   * `client.get(url, …)`: judged as if written in the request's headers
+   * (or params) — a vendor's key to its own API and a vendorless key in the
+   * headers are how the client authenticates; anything else is leaving.
+   */
+  const clientCredentialLeaves = (c: { envName?: string; slot: 'headers' | 'other' }, base: string | undefined, args: Node[], p: NodePath): boolean => {
+    const name = c.envName;
+    if (name === undefined || !credentialEnvName(name)) return false;
+    if (!ownedCredential(name)) return c.slot !== 'headers';
+    const domains = signingSecret(name) ? undefined : vendorApiDomains(name);
+    if (!domains || c.slot !== 'headers' || redirectsAll() || redirectedRequest(args, p, domains)) return true;
+    // where the request goes: an absolute URL wins over the client's base; a relative one is appended to it
+    const parts = urlParts(args[0], p);
+    if (parts.some((x) => typeof x !== 'string')) return true;
+    const path = (parts as string[]).join('');
+    const url = /^(?:[a-z][a-z\d+.-]*:)?\/\//i.test(path) ? path
+      : base !== undefined ? `${base.replace(/\/+$/, '')}${path ? `/${path.replace(/^\/+/, '')}` : ''}` : undefined;
+    return !onVendorHost(url, domains);
+  };
+  const otherBinding = (p: NodePath, v: string): boolean => {
+    const bindings = carrierBindings.get(v);
+    const binding = bindings && p.scope.getBinding(v);
+    return bindings !== undefined && (binding === undefined || !bindings.has(binding));
+  };
   // `process.env.KEY` / `process.env['KEY']` → KEY; a variable → the name it was read from
   const envNameOf = (sourceVar: string): string | undefined => {
     const m = /^process\.env(?:\.([A-Za-z_$][\w$]*)|\[\s*(['"`])([^'"`\]]+)\2\s*\])$/.exec(sourceVar);
@@ -419,6 +560,8 @@ function analyzeUncached(code: string): DataFlowResult[] {
    */
   const credentialToOwnApi = (args: Node[], sourceVar: string, sourceKind: 'file' | 'env', p: NodePath): boolean => {
     if (sourceKind !== 'env' || wholeEnvAt(p, sourceVar) || !httpRequestCall(p)) return false;
+    // a signing secret (`GITHUB_WEBHOOK_SECRET`) is never how a request authenticates
+    if (signingSecret(envNameOf(sourceVar))) return false;
     const domains = vendorApiDomains(envNameOf(sourceVar));
     if (!domains) return false;
     const envName = envNameOf(sourceVar);
@@ -437,24 +580,19 @@ function analyzeUncached(code: string): DataFlowResult[] {
       }
     }
     if (computed.length > 0 && parts.length > 0) {
-      const origin = staticOrigin(typeof parts[0] === 'string' ? parts[0] : '');
+      // (the static text before the first computed part: `${BASE}` splits it into several strings)
+      const origin = staticOrigin(url.split('\0')[0]);
       if (!origin || !onVendorHost(origin, domains)) return false;
     } else if (!onVendorHost(url, domains)) return false;
     if (redirectedRequest(args, p, domains)) return false;
     // A global fetch the file replaces (`globalThis.fetch = …`) goes wherever the replacement sends it
     const call = p.node;
     if (call.type === 'CallExpression' && isFetchCallee(call.callee) && FETCH_ASSIGNMENT.test(code)) return false;
-    // Where the value is written: inside a `headers: { … }` object, or in the
+    // …and so does every request when the file redirects them all (interceptors, proxies, dispatchers, TLS/DNS)
+    if (redirectsAll()) return false;
+    // Where the value is written: inside the request's headers, or in the
     // URL where the vendor documents it (vendorUrlSlot: Google `?key=`, Telegram `/bot<token>/`)
-    const allowed: Array<[number, number]> = [];
-    for (const a of args) {
-      if (a.type !== 'ObjectExpression') continue;
-      for (const prop of a.properties) {
-        if (prop.type !== 'ObjectProperty') continue;
-        const key = prop.key.type === 'Identifier' ? prop.key.name : prop.key.type === 'StringLiteral' ? prop.key.value : '';
-        if (key === 'headers' && prop.value.type === 'ObjectExpression') allowed.push([prop.value.start ?? 0, prop.value.end ?? 0]);
-      }
-    }
+    const allowed = headerSpans(args, false);
     for (const { node, before } of computed) {
       const value = node.type === 'CallExpression' && node.callee.type === 'Identifier' && /^encodeURI(?:Component)?$/.test(node.callee.name)
         && node.arguments.length === 1 ? node.arguments[0] as Node : node;
@@ -478,20 +616,100 @@ function analyzeUncached(code: string): DataFlowResult[] {
     }
     return !used(outside) && allowed.some(([from, to]) => used(code.slice(from, to)));
   };
+  let redirects: boolean | undefined;
+  const redirectsAll = (): boolean => (redirects ??= GLOBAL_REDIRECT.test(code));
+  /**
+   * Where a request carries credentials: its `headers` (an object, or a
+   * variable holding one — `{ headers }`, `headers: h`), an options variable
+   * whose headers hold the value (`const opts = { headers: {…} }`), and —
+   * with `auth` — the `auth` option (Basic credentials). Source spans.
+   */
+  const headerSpans = (args: Node[], auth: boolean): Array<[number, number]> => {
+    const out: Array<[number, number]> = [];
+    args.forEach((a, i) => {
+      if (i > 0 && a.type === 'Identifier' && headerOptionVars.has(a.name)) out.push([a.start ?? 0, a.end ?? 0]);
+      if (a.type !== 'ObjectExpression') return;
+      for (const prop of a.properties) {
+        if (prop.type !== 'ObjectProperty') continue;
+        const key = prop.key.type === 'Identifier' ? prop.key.name : prop.key.type === 'StringLiteral' ? prop.key.value : '';
+        if ((key === 'headers' || (auth && key === 'auth')) && (prop.value.type === 'ObjectExpression' || prop.value.type === 'Identifier')) {
+          out.push([prop.value.start ?? 0, prop.value.end ?? 0]);
+        }
+      }
+    });
+    return out;
+  };
+  /**
+   * A credential that isn't tied to one vendor (`API_KEY`, `MY_TOKEN`) sent
+   * only in a request's headers or `auth`: how the skill authenticates to
+   * whatever API it calls (vendorless, so there is no host to hold it to).
+   * The same value in the URL, query or another option is leaving.
+   */
+  const genericCredentialAuth = (args: Node[], sourceVar: string, p: NodePath): boolean => {
+    const name = envNameOf(sourceVar);
+    if (name === undefined || !credentialEnvName(name) || ownedCredential(name) || wholeEnvAt(p, sourceVar)) return false;
+    if (!requestLike(args, p)) return false;
+    const spans = headerSpans(args, true);
+    if (spans.length === 0 || args.length === 0) return false;
+    const start = args[0].start ?? 0;
+    let outside = code.slice(start, args[args.length - 1].end ?? 0);
+    // and text, not code: `?token=` in the URL is not the variable `token`
+    const text: Array<[number, number]> = [];
+    p.traverse({
+      StringLiteral(q) { if (!(q.parentPath.isMemberExpression() && q.key === 'property')) text.push([q.node.start ?? 0, q.node.end ?? 0]); },
+      TemplateElement(q) { text.push([q.node.start ?? 0, q.node.end ?? 0]); },
+    });
+    for (const [from, to] of [...spans, ...text]) {
+      if (from < start || to > start + outside.length) continue;
+      outside = outside.slice(0, from - start) + ' '.repeat(to - from) + outside.slice(to - start);
+    }
+    const used = (text: string) => new RegExp(`(?<![\\w$.])${escapeRegExp(sourceVar)}(?![\\w$])`).test(text);
+    return !used(outside) && spans.some(([from, to]) => used(code.slice(from, to)));
+  };
   /**
    * A request URL as static text and computed parts, in order: a string or
-   * template literal, a module-level string constant, or a `+` chain of them.
-   * Anything else is one computed part.
+   * template literal, a variable bound once to one (module-level or local:
+   * `const endpoint = 'https://api.openai.com/v1'` inside the function), a
+   * `+` chain of them, or `new URL(path, base)` with a static base and a path
+   * that can't leave its host. Anything else is one computed part.
    */
   const urlParts = (n: Node | undefined, p: NodePath, depth = 0): Array<string | Node> => {
     if (!n) return [];
     if (n.type === 'StringLiteral') return [n.value];
+    if (depth >= 20) return [n];
+    // `${BASE}/models`: each interpolation resolved like a `+` operand
     if (n.type === 'TemplateLiteral') {
-      return n.quasis.flatMap((q, i) => (i < n.expressions.length ? [q.value.cooked ?? '', n.expressions[i] as Node] : [q.value.cooked ?? '']));
+      return n.quasis.flatMap((q, i) => (i < n.expressions.length
+        ? [q.value.cooked ?? '', ...urlParts(n.expressions[i] as Node, p, depth + 1)] : [q.value.cooked ?? '']));
     }
-    if (n.type === 'Identifier' && constStrings.has(n.name) && p.scope.getBinding(n.name)?.scope.path.isProgram()) return [constStrings.get(n.name)!];
-    if (n.type === 'BinaryExpression' && n.operator === '+' && depth < 50) {
+    if (n.type === 'Identifier') {
+      const binding = p.scope.getBinding(n.name);
+      if (!binding) return [n];
+      if (constStrings.has(n.name) && binding.scope.path.isProgram()) return [constStrings.get(n.name)!];
+      // bound once (const, or let/var never reassigned), by a plain declarator
+      // (only to a URL being built: a variable holding a value read elsewhere — an env credential — is itself the part)
+      const decl = binding.path;
+      if (!binding.constant || !decl.isVariableDeclarator() || decl.node.id.type !== 'Identifier' || !decl.node.init) return [n];
+      if (decl.parentPath?.parentPath?.isForXStatement() || !URL_INIT.has(decl.node.init.type)) return [n];
+      return urlParts(decl.node.init, decl, depth + 1);
+    }
+    if (n.type === 'BinaryExpression' && n.operator === '+') {
       return [...urlParts(n.left as Node, p, depth + 1), ...urlParts(n.right, p, depth + 1)];
+    }
+    if (n.type === 'NewExpression' && n.callee.type === 'Identifier' && n.callee.name === 'URL' && !p.scope.getBinding('URL')
+      && n.arguments.length >= 1 && n.arguments.length <= 2 && n.arguments.every((a) => a.type !== 'SpreadElement')) {
+      const path = urlParts(n.arguments[0] as Node, p, depth + 1);
+      if (n.arguments.length === 1) return path;
+      const base = urlParts(n.arguments[1] as Node, p, depth + 1);
+      if (base.some((b) => typeof b !== 'string')) return [n];
+      const head = typeof path[0] === 'string' ? path[0] : undefined;
+      // `/v1/models` resolves under the base's host; `//host`, `/\\host` or an absolute URL doesn't
+      if (head === undefined || !/^\/[^/\\]/.test(head)) return [n];
+      try {
+        return [new URL(head, (base as string[]).join('')).href, ...path.slice(1)];
+      } catch {
+        return [n];
+      }
     }
     return [n];
   };
@@ -663,7 +881,9 @@ function analyzeUncached(code: string): DataFlowResult[] {
             const socketClient = propName === 'send' && sinkObject !== undefined && clientSockets.has(sinkObject);
             for (const [sourceVar, sourceKind] of new Map<string, 'file' | 'env'>([...sourceVars, ...inlinePairs])) {
               if (inline.includes(sourceVar) || mentions(argStr, sourceVar)) {
+                if (!inline.includes(sourceVar) && otherBinding(path, sourceVar)) continue;
                 if (!processSink && credentialToOwnApi(callArgs, sourceVar, sourceKind, path)) continue;
+                if (!processSink && sourceKind === 'env' && genericCredentialAuth(callArgs, sourceVar, path)) continue;
                 if (!processSink && sourceKind === 'env' && onlyAddressing(callArgs, propName, sourceVar, path)) continue;
                 results.push({
                   type: 'source-to-sink',
@@ -680,6 +900,18 @@ function analyzeUncached(code: string): DataFlowResult[] {
                     : `Data flows from "${sourceVar}" to network sink "${propName}"`,
                 });
               }
+            }
+            // What the client itself carries (`axios.create({ headers })`, `axios.defaults.headers…`)
+            const client = !processSink && receiver.type === 'Identifier' && HTTP_REQUEST_METHODS.has(propName)
+              ? clients.get(path.scope.getBinding(receiver.name) ?? {}) : undefined;
+            for (const c of client?.creds ?? []) {
+              if (results.some((r) => r.type === 'source-to-sink' && r.line === line && r.source === c.source)) continue;
+              if (!clientCredentialLeaves(c, client!.base, callArgs, path)) continue;
+              results.push({
+                type: 'source-to-sink', source: c.source, sourceKind: 'env', sink: propName, sinkObject: receiver.type === 'Identifier' ? receiver.name : undefined,
+                line, snippet: snippet.slice(0, 120),
+                description: `Data flows from "${c.source}" (carried by the client) to network sink "${propName}"`,
+              });
             }
           }
 
@@ -740,7 +972,9 @@ function analyzeUncached(code: string): DataFlowResult[] {
                 node.arguments[node.arguments.length - 1]?.end ?? 0,
               );
               if (inline.includes(sourceVar) || mentions(argStr, sourceVar)) {
+                if (!inline.includes(sourceVar) && otherBinding(path, sourceVar)) continue;
                 if (credentialToOwnApi(node.arguments as Node[], sourceVar, sourceKind, path)) continue;
+                if (sourceKind === 'env' && genericCredentialAuth(node.arguments as Node[], sourceVar, path)) continue;
                 if (sourceKind === 'env' && onlyAddressing(node.arguments as Node[], 'fetch', sourceVar, path)) continue;
                 results.push({
                   type: 'source-to-sink',
@@ -758,11 +992,43 @@ function analyzeUncached(code: string): DataFlowResult[] {
         }
       },
 
+      // `axios.defaults.headers.common.Authorization = key`, `api.defaults.auth = {…}`, `axios.defaults.baseURL = '…'`
+      AssignmentExpression(path) {
+        if (path.node.operator !== '=') return;
+        const chain: string[] = [];
+        let left: Node = path.node.left;
+        while (left.type === 'MemberExpression') {
+          chain.unshift(memberName(left) ?? '');
+          left = left.object;
+        }
+        if (left.type !== 'Identifier' || chain[0] !== 'defaults') return;
+        const binding = path.scope.getBinding(left.name);
+        if (!binding || !(clients.has(binding) || HTTP_CLIENT_MODULE.test(bindingModule(binding) ?? ''))) return;
+        const right = path.get('right') as NodePath;
+        if (chain.length === 1) { readClientConfig(right, binding); return; }
+        if ((chain[1] === 'baseURL' || chain[1] === 'prefixUrl') && right.isStringLiteral()) { clientOf(binding).base = right.node.value; return; }
+        const slot = chain[1] === 'headers' || chain[1] === 'auth' ? 'headers' : /^(?:params|searchParams|cookies?)$/.test(chain[1]) ? 'other' : undefined;
+        if (slot) for (const r of envRefs(right)) clientOf(binding).creds.push({ ...r, slot });
+      },
+
       // Track variable assignments from sources
       VariableDeclarator(path) {
         const init = path.node.init;
         if (!init) return;
         const id = path.node.id;
+        // `const api = axios.create({ baseURL, headers })` — a client carrying its config
+        if (id.type === 'Identifier' && init.type === 'CallExpression' && init.callee.type === 'MemberExpression'
+          && init.callee.object.type === 'Identifier' && /^(?:create|extend)$/.test(memberName(init.callee) ?? '')) {
+          const parent = path.scope.getBinding(init.callee.object.name);
+          const binding = path.scope.getBinding(id.name);
+          if (parent && binding && (clients.has(parent) || /^(?:axios|got|ky|ky-universal)$/.test(bindingModule(parent) ?? ''))) {
+            const inherited = clients.get(parent);
+            const c = clientOf(binding);
+            if (inherited) { c.creds.push(...inherited.creds); c.base = inherited.base; }
+            readClientConfig((path.get('init') as NodePath).get('arguments.0') as NodePath, binding);
+            return;
+          }
+        }
         // `const { AWS_SECRET_ACCESS_KEY, OPENAI_API_KEY: key = '', ...rest } = process.env`
         if (id.type === 'ObjectPattern') {
           if (init.type !== 'MemberExpression' || init.computed || init.object.type !== 'Identifier' || init.object.name !== 'process'
@@ -783,6 +1049,8 @@ function analyzeUncached(code: string): DataFlowResult[] {
             sourceVars.set(local.name, 'env');
             envNames.set(local.name, envName);
             destructuredEnv.add(local.name);
+            const binding = path.scope.getBinding(local.name);
+            if (binding) addBinding(local.name, binding);
           }
           return;
         }
@@ -816,7 +1084,48 @@ function analyzeUncached(code: string): DataFlowResult[] {
           sourceVars.set(id.name, 'env');
           if (init.property.type === 'Identifier') envNames.set(id.name, init.property.name);
           else if (init.property.type === 'StringLiteral') envNames.set(id.name, init.property.value);
+          const binding = path.scope.getBinding(id.name);
+          if (binding) addBinding(id.name, binding);
+          return;
         }
+
+        // A value built from environment values — headers or options objects,
+        // `Bearer ${key}`, `process.env.A || process.env.B` — carries them:
+        // `const opts = { headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` } }`
+        if (sourceVars.has(id.name) || !CARRIER_INIT.has(init.type)) return;
+        const carried: Array<{ name: string; inHeaders: boolean }> = [];
+        const headerValues = init.type === 'ObjectExpression'
+          ? init.properties.filter((pr) => pr.type === 'ObjectProperty' && !pr.computed
+            && ((pr.key.type === 'Identifier' && pr.key.name === 'headers') || (pr.key.type === 'StringLiteral' && pr.key.value === 'headers')))
+            .map((pr) => (pr as { value: Node }).value)
+          : [];
+        const inHeaders = (q: NodePath) => headerValues.some((h) => (q.node.start ?? 0) >= (h.start ?? 0) && (q.node.end ?? 0) <= (h.end ?? 0));
+        (path.get('init') as NodePath).traverse({
+          Function(q) { q.skip(); },
+          // a test or comparison yields a flag, not the value (`process.env.X === 'true'`, `process.env.X ? a : b`)
+          BinaryExpression(q) { if (q.node.operator !== '+') q.skip(); },
+          UnaryExpression(q) { q.skip(); },
+          ConditionalExpression(q) { q.get('test').skip(); },
+          MemberExpression(q) {
+            const name = q.node.object.type === 'MemberExpression' && !q.node.object.computed
+              && q.node.object.object.type === 'Identifier' && q.node.object.object.name === 'process'
+              && q.node.object.property.type === 'Identifier' && q.node.object.property.name === 'env' ? memberName(q.node) : undefined;
+            if (name !== undefined) carried.push({ name, inHeaders: inHeaders(q) });
+          },
+          Identifier(q) {
+            if (!q.isReferencedIdentifier() || sourceVars.get(q.node.name) !== 'env' || wholeEnvAt(q, q.node.name)) return;
+            const name = envNames.get(q.node.name);
+            if (name !== undefined) carried.push({ name, inHeaders: inHeaders(q) });
+          },
+        });
+        // (credentials only: a setting carried into a value — a port, a base URL — was never data)
+        const names = carried.map((c) => c.name).filter((n) => credentialEnvName(n));
+        if (names.length === 0) return;
+        sourceVars.set(id.name, 'env');
+        envNames.set(id.name, names.find((n) => ownedCredential(n)) ?? names[0]);
+        const binding = path.scope.getBinding(id.name);
+        if (binding) addBinding(id.name, binding);
+        if (carried.filter((c) => credentialEnvName(c.name)).every((c) => c.inHeaders)) headerOptionVars.add(id.name);
       },
 
       // zx / execa `$\`cmd ${arg}\``: a command run through a shell, each
@@ -895,6 +1204,12 @@ function analyzeUncached(code: string): DataFlowResult[] {
   return results;
 }
 
+/** Expressions a URL variable is built from (`const endpoint = 'https://…'`, `base + path`, `new URL(…)`). */
+const URL_INIT = new Set(['StringLiteral', 'TemplateLiteral', 'BinaryExpression', 'NewExpression']);
+
+/** Expressions that build a value out of others (not a call, whose result is something else). */
+const CARRIER_INIT = new Set(['ObjectExpression', 'ArrayExpression', 'TemplateLiteral', 'BinaryExpression', 'LogicalExpression', 'ConditionalExpression']);
+
 const describePath = (t: Taint): string => (t.kind === 'file' && t.resolved && t.resolved !== '…' ? ` (${t.resolved})` : '');
 
 /**
@@ -922,8 +1237,13 @@ function mergeFlows(ast: JsAst, results: DataFlowResult[], lineText: (line: numb
     const same = byLine.get(r.line)?.find(f => f.taint.kind === 'file' && (f.source === r.source || !fa.namedReads.has(r.source ?? '')));
     Object.assign(r, pathFields(same?.taint ?? fa.namedReads.get(r.source ?? '')));
   }
+  const added = new Set<string>();
   for (const f of fa.flows) {
     if (covered.has(f.line)) continue;
+    // one flow per value, sink and line: an object carrying two values of one source is one flow
+    const key = `${f.line}\0${f.source}\0${f.sink}`;
+    if (added.has(key)) continue;
+    added.add(key);
     const t = f.taint;
     const kind = t.kind === 'file' ? 'file' : 'env';
     const what = t.kind === 'host' ? (f.source === t.origin ? '' : ` (${t.origin})`) : describePath(t);

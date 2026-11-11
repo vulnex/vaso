@@ -1,4 +1,4 @@
-import { join } from 'node:path';
+import { join, normalize } from 'node:path';
 import { parseYamlSafe } from '../../core/yaml-safe.js';
 import { parseIfPresent, pathPresent } from '../../adapters/load-if-present.js';
 import type { Evidence, ParsedConfig, ScanContext } from '../../core/types.js';
@@ -110,7 +110,7 @@ export async function listDir(ctx: ScanContext, dir: string): Promise<{ name: st
  */
 export function redirectedTlsDir(ctx: ScanContext): string | undefined {
   const env = gatewayEnv(ctx)?.data.OPENSHELL_LOCAL_TLS_DIR;
-  return typeof env === 'string' && env.trim() ? expandHome(env.trim(), paths(ctx).home) : undefined;
+  return typeof env === 'string' && env.trim() ? normalPath(expandHome(env.trim(), paths(ctx).home)) : undefined;
 }
 
 /** The sqlite database gateway.env redirects to (`OPENSHELL_DB_URL=sqlite:<path>`); not in a remote snapshot either. */
@@ -118,7 +118,18 @@ export function redirectedDatabase(ctx: ScanContext): string | undefined {
   const url = gatewayEnv(ctx)?.data.OPENSHELL_DB_URL;
   if (typeof url !== 'string') return undefined;
   const m = /^sqlite:(?:\/\/)?(.+?)(?:\?.*)?$/.exec(url.trim());
-  return m ? expandHome(m[1], paths(ctx).home) : undefined;
+  return m ? normalPath(expandHome(m[1], paths(ctx).home)) : undefined;
+}
+
+/** `a/./b`, `a//b` and a trailing slash name the same file as `a/b`: compare them as one. */
+function normalPath(p: string): string {
+  const n = normalize(p);
+  return n.length > 1 ? n.replace(/\/+$/, '') : n;
+}
+
+/** NemoClaw's OpenShell gateway state (its gateway.env redirects here; the probe manifest collects it). */
+function nemoclawGatewayDir(home: string): string {
+  return join(home, '.local', 'state', 'nemoclaw', 'openshell-docker-gateway');
 }
 
 /** TLS directories the gateway may use: env override, deb/systemd, Homebrew (prefix + mirror), snap. */
@@ -136,6 +147,7 @@ export function fixedTlsDirs(ctx: ScanContext): string[] {
     ...(ctx.fs.platform === 'darwin' ? BREW_VAR_DIRS.map(d => join(d, 'tls')) : []),
     join(SNAP_COMMON_DIR, 'tls'),
     join(snapUserDir(p.home), '.local', 'state', 'openshell', 'tls'),
+    join(nemoclawGatewayDir(p.home), 'tls'),
   ];
   return [...new Set(dirs)];
 }
@@ -152,6 +164,7 @@ export function fixedDatabasePaths(ctx: ScanContext): string[] {
   return [
     join(p.stateDir, 'gateway', 'openshell.db'),
     join(snapUserDir(p.home), '.local', 'state', 'openshell', 'gateway', 'openshell.db'),
+    join(nemoclawGatewayDir(p.home), 'openshell.db'),
   ];
 }
 
@@ -167,6 +180,15 @@ export interface PolicyRef {
 
 const NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const MAX_SANDBOXES = 100;
+/** `openshell policy get` on a sandbox that has no policy (live-validated 2026-10-07). */
+const NO_ACTIVE_POLICY = /no active policy/i;
+
+/** A name or workspace as listed, for a "not checked" note: bounded, never raw objects. */
+function shortLabel(v: unknown): string {
+  if (typeof v !== 'string') return v === undefined || v === null ? '?' : `<${typeof v}>`;
+  const s = JSON.stringify(v);
+  return s.length > 42 ? `${s.slice(0, 40)}…"` : s;
+}
 
 /** The policies OSH-011–014 judge, and the sources that could not be read. */
 export interface PolicyScan {
@@ -219,13 +241,26 @@ async function livePolicies(ctx: ScanContext, unread: string[]): Promise<PolicyR
       const name = sb?.name;
       const ws = sb?.workspace;
       const workspace = ws === undefined || ws === null || ws === '' ? DEFAULT_WORKSPACE : ws;
-      if (typeof workspace !== 'string') continue;
-      if (typeof name !== 'string' || !NAME.test(name) || !NAME.test(workspace)) continue;
+      // A name the CLI would not accept is never passed to it — but the
+      // sandbox is then unchecked, and the verdict says so
+      if (typeof name !== 'string' || typeof workspace !== 'string' || !NAME.test(name) || !NAME.test(workspace)) {
+        unread.push(`sandbox ${shortLabel(workspace)}/${shortLabel(name)} (name not queried)`);
+        continue;
+      }
       const res = await run(sandboxPolicyArgs(name, workspace));
-      const policy = res.exitCode === 0 ? record(parseJson(res.stdout)?.policy) : undefined;
-      // A sandbox without an active policy answers non-zero ("no active
-      // policy configured for sandbox"): nothing to judge, not a failure
-      if (policy) out.push({ source: `sandbox ${workspace}/${name}`, file: `openshell sandbox ${workspace}/${name}`, policy });
+      if (res.exitCode !== 0) {
+        // A sandbox without an active policy answers non-zero ("no active
+        // policy configured for sandbox"): nothing to judge, not a failure.
+        // Any other error (gateway unreachable, auth) leaves it unchecked.
+        if (!NO_ACTIVE_POLICY.test(`${res.stderr}\n${res.stdout}`)) unread.push(`sandbox ${workspace}/${name} (\`policy get\` failed, exit ${res.exitCode})`);
+        continue;
+      }
+      const policy = record(parseJson(res.stdout)?.policy);
+      if (!policy) {
+        unread.push(`sandbox ${workspace}/${name} (\`policy get\` output was not understood)`);
+        continue;
+      }
+      out.push({ source: `sandbox ${workspace}/${name}`, file: `openshell sandbox ${workspace}/${name}`, policy });
     }
   }
 
@@ -277,6 +312,19 @@ export function policyScan(ctx: ScanContext): Promise<PolicyScan> {
   return p;
 }
 
+/** `not checked: a; b; …` for the sources that could not be read, at most five named. */
+function unreadList(unread: string[]): string {
+  if (unread.length === 0) return '';
+  const shown = unread.slice(0, 5).join('; ');
+  return `not checked: ${shown}${unread.length > 5 ? `; and ${unread.length - 5} more` : ''}`;
+}
+
+/** Suffix for a failing OSH-011–014 message when some policies could not be read. */
+export async function policyUnreadNote(ctx: ScanContext): Promise<string> {
+  const skipped = unreadList((await policyScan(ctx)).unread);
+  return skipped ? ` (${skipped})` : '';
+}
+
 /** Every sandbox policy in reach: each sandbox's effective policy, the global policy, and $OPENSHELL_SANDBOX_POLICY. */
 export async function sandboxPolicies(ctx: ScanContext): Promise<PolicyRef[]> {
   return (await policyScan(ctx)).refs;
@@ -288,7 +336,7 @@ export async function sandboxPolicies(ctx: ScanContext): Promise<PolicyRef[]> {
  */
 export async function policyPassMessage(ctx: ScanContext, verdict: string): Promise<string> {
   const { refs, unread } = await policyScan(ctx);
-  const skipped = unread.length > 0 ? `not checked: ${unread.join('; ')}` : '';
+  const skipped = unreadList(unread);
   if (refs.length === 0) return skipped ? `No sandbox policy could be checked — ${skipped}` : 'No sandbox policies found — nothing to check';
   return skipped ? `${verdict} (${refs.length} polic${refs.length === 1 ? 'y' : 'ies'} read; ${skipped})` : verdict;
 }

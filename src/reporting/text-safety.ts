@@ -42,6 +42,23 @@ export function escapeControlCharsDeep<T>(value: T, options?: { lineBreaks?: boo
 
 // SGR colour sequences — the only escapes VASO's own output contains
 // (scanned text is escaped above)
+/**
+ * Characters JSON.stringify leaves raw that still reorder or hide text when a
+ * JSON or SARIF report is viewed (bidi overrides and isolates, C1 controls
+ * such as U+009B CSI, DEL, line/paragraph separators).
+ */
+const JSON_UNSAFE_RE = /[\u007f-\u009f\u200e\u200f\u202a-\u202e\u2066-\u2069\u2028\u2029]/g;
+
+/**
+ * JSON text with those characters written as `\uXXXX` escapes: the parsed
+ * values are unchanged (nothing is dropped), the file shows no live control
+ * character. Only for the output of JSON.stringify, where such characters
+ * can occur only inside strings.
+ */
+export function escapeJsonUnsafe(json: string): string {
+  return json.replace(JSON_UNSAFE_RE, ch => `\\u${ch.charCodeAt(0).toString(16).padStart(4, '0')}`);
+}
+
 const SGR_RE = /\u001b\[[0-9;]*m/g;
 
 /**

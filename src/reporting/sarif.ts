@@ -6,6 +6,7 @@ import { VERSION } from '../version.js';
 import { checkRegistry } from '../core/check-registry.js';
 import { owaspAgenticForCheckId, OWASP_AGENTIC_TITLES } from './owasp-agentic.js';
 import { owaspMcpForCheckId, OWASP_MCP_TITLES } from './owasp-mcp.js';
+import { escapeJsonUnsafe } from './text-safety.js';
 
 /**
  * SARIF `artifactLocation.uri` must be a URI reference: absolute paths become
@@ -66,7 +67,8 @@ export class SarifReporter implements Reporter {
       }],
     };
 
-    return JSON.stringify(sarifLog, null, 2);
+    // bidi / C1 controls from scanned text become \uXXXX escapes (values unchanged)
+    return escapeJsonUnsafe(JSON.stringify(sarifLog, null, 2));
   }
 
   /** A scan is only "successful" if every check produced a real verdict. The

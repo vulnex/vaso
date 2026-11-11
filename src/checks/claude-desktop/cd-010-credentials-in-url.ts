@@ -1,6 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { findUrlSecrets, headerSecret } from '../../mcp/config-secrets.js';
+import { findArgSecrets, findUrlSecrets, findValueSecrets, headerSecret } from '../../mcp/config-secrets.js';
 
 export const cd010 = defineCheck({
   id: 'CD-010',
@@ -33,18 +33,34 @@ export const cd010 = defineCheck({
             });
           }
         }
-        // `npx mcp-remote https://…/<secret>`: the same URL passed as an argument
-        const args = Array.isArray(server.args) ? server.args : [];
-        args.forEach((arg, i) => {
-          if (typeof arg !== 'string' || !/^[a-z][a-z0-9+.-]*:\/\//i.test(arg)) return;
-          for (const secret of findUrlSecrets(arg, `args[${i}]`)) {
-            evidence.push({
-              file: config.filePath,
-              snippet: `mcpServers.${name}.args[${i}] = ${secret.masked}`,
-              detail: `${capitalize(secret.kind)} in a URL argument — readable in this config and by any local user via the process list`,
-            });
+        // The same passed as arguments: `npx mcp-remote https://…/<secret>`,
+        // `mcp-remote <url> --header "Authorization: Bearer <tok>"` (the
+        // documented Claude Desktop remote-auth form), `-H "X-API-Key: <k>"`,
+        // a database URL or connection string with its password
+        const args = Array.isArray(server.args) ? server.args.filter((a): a is string => typeof a === 'string') : [];
+        for (const secret of findArgSecrets(args)) {
+          if (secret.via !== 'url' && secret.via !== 'header' && secret.via !== 'connection') continue;
+          evidence.push({
+            file: config.filePath,
+            snippet: `mcpServers.${name}.${secret.location} = ${secret.masked}`,
+            // (a header's kind already names its argument)
+            detail: `${capitalize(secret.kind)}${secret.via === 'header' ? '' : secret.via === 'url' ? ' in a URL argument' : ' in an argument'} — readable in this config and by any local user via the process list`,
+          });
+        }
+        // `DATABASE_URL=postgres://u:<pw>@db`, `REDIS_URL`, a connection string in env
+        const env = server.env as Record<string, unknown> | undefined;
+        if (env && typeof env === 'object') {
+          for (const [ek, ev] of Object.entries(env)) {
+            if (typeof ev !== 'string') continue;
+            for (const secret of findValueSecrets(ev, `env.${ek}`)) {
+              evidence.push({
+                file: config.filePath,
+                snippet: `mcpServers.${name}.env.${ek} = ${secret.masked}`,
+                detail: `${capitalize(secret.kind)} — stored in plaintext in this config and handed to the server process`,
+              });
+            }
           }
-        });
+        }
 
         const headers = server.headers as Record<string, unknown> | undefined;
         if (headers && typeof headers === 'object') {

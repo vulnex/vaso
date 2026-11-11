@@ -2,6 +2,7 @@ import { dirname } from 'node:path';
 import type { Evidence, ParsedConfig, ScanContext } from '../../core/types.js';
 import { markUnreachable, queryPermissions } from '../../core/permissions.js';
 import { nanobotWorkspaceDir } from '../../adapters/nanobot.js';
+import { isLoopbackAddress } from '../../core/listen-address.js';
 
 /*
  * Shared helpers for the NB-* checks. Every accessor tolerates the shapes a
@@ -77,10 +78,9 @@ export function isChannelEnabled(section: Record<string, unknown>): boolean {
   return pyBool(section.enabled) === true;
 }
 
-const LOOPBACK_HOST = /^(?:localhost|127(?:\.\d{1,3}){3}|\[?::1\]?)$/i;
-
+/** Loopback in any spelling asyncio binds as such (`127.1`, `0x7f.1`, `::1`) — src/core/listen-address.ts. */
 export function isLoopbackHost(host: string): boolean {
-  return LOOPBACK_HOST.test(host.trim());
+  return isLoopbackAddress(host);
 }
 
 export function nonEmptyString(v: unknown): v is string {

@@ -84,6 +84,21 @@ CONFIGS=()
 [ -f "$MAIN_CONFIG" ] && CONFIGS+=("$MAIN_CONFIG")
 ENV_FILE="$INSTALL_DIR/.env"
 
+# A config that exists but can't be read would pass every check unseen:
+# stop instead of printing a clean grade (exit 2, as `vaso` does when it
+# cannot run)
+UNREADABLE=()
+for f in "$MAIN_CONFIG" "$ENV_FILE"; do
+  if [ -e "$f" ] && { [ ! -f "$f" ] || [ ! -r "$f" ]; }; then UNREADABLE+=("$f"); fi
+done
+if [ ${#UNREADABLE[@]} -gt 0 ]; then
+  for f in "${UNREADABLE[@]}"; do
+    echo -e "  ${RED}[!]${NC} Cannot read $f — not a readable file"
+  done
+  echo -e "\n${YELLOW}Scan incomplete: run as the file's owner (or fix its permissions), or use \`vaso scan\`.${NC}\n"
+  exit 2
+fi
+
 # OpenClaw's own container test (isContainerEnvironment): bind "auto" — and
 # an unset bind — listen on 0.0.0.0 inside a container, loopback elsewhere
 in_container() {
@@ -227,9 +242,11 @@ echo -e "${BOLD}Checking file permissions...${NC}"
 PERM_ISSUES=0
 for f in ${CONFIGS[@]+"${CONFIGS[@]}"} "$ENV_FILE"; do
   [ -f "$f" ] || continue
-  # GNU stat first: on Linux `stat -f` is filesystem status and "succeeds"
-  PERMS=$(stat -c '%a' "$f" 2>/dev/null || stat -f '%Lp' "$f" 2>/dev/null)
-  if [ "${PERMS:-644}" != "600" ] && [ "${PERMS:-644}" != "400" ]; then
+  # GNU stat first: on Linux `stat -f` is filesystem status and "succeeds".
+  # -L judges a symlinked config by the file it points to.
+  PERMS=$(stat -L -c '%a' "$f" 2>/dev/null || stat -L -f '%Lp' "$f" 2>/dev/null) || PERMS=""
+  # Owner-only (no group/other bits: 600, 400, 700, 500…) is restrictive
+  if ! [[ "$PERMS" =~ ^[0-7]+$ ]] || [ $(( 8#$PERMS & 8#077 )) -ne 0 ]; then
     PERM_ISSUES=$((PERM_ISSUES + 1))
   fi
 done

@@ -3,13 +3,13 @@ import { defineCheck } from '../../core/check-builder.js';
 import { checkoutDir, checkoutEnv } from './shared.js';
 import { compareVersions } from '../../core/semver.js';
 import type { ScanContext } from '../../core/types.js';
+import { isLoopbackAddress, isWildcardAddress } from '../../core/listen-address.js';
 
 /**
  * First release whose webhook server binds WEBHOOK_HOST, default 127.0.0.1
  * (upstream 8a91aadb, #4185); earlier ones hardcode listen(port, '0.0.0.0').
  */
 const LOOPBACK_DEFAULT_SINCE = '2026.10.1-rc.2';
-const LOOPBACK = /^(?:127(?:\.\d{1,3}){3}|::1|\[::1\]|localhost)$/i;
 
 /**
  * The address the webhook server binds: WEBHOOK_HOST from the checkout's
@@ -84,10 +84,10 @@ export const nc004 = defineCheck({
     if (webhook.length === 0) return h.passed('No webhook-mode channel installed; NanoClaw opens no network listener');
 
     const { host, from } = await webhookHost(ctx, checkout, env);
-    if (LOOPBACK.test(host)) {
+    if (isLoopbackAddress(host)) {
       return h.passed(`Webhook server for ${webhook.join(', ')} listens on ${host}:${port} (${from === 'WEBHOOK_HOST' ? 'WEBHOOK_HOST' : 'release default'}) — loopback only`);
     }
-    const all = host === '0.0.0.0' || host === '::' || host === '[::]';
+    const all = host.trim() !== '' && isWildcardAddress(host);
     const evidence = [{
       file: from === 'WEBHOOK_HOST' ? checkoutEnv(ctx).file ?? barrel : barrel,
       detail: `Webhook channel${webhook.length === 1 ? '' : 's'} ${webhook.join(', ')} → listener on ${host}:${port} (/webhook/${webhook.join(', /webhook/')})${from === 'WEBHOOK_HOST' ? ' set by WEBHOOK_HOST' : from === 'hardcoded' ? ' (bind address hardcoded in this release)' : ''}, ${all ? 'reachable from every interface' : 'reachable beyond this host'}`,

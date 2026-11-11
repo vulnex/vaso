@@ -6,23 +6,44 @@ import { getNestedValue } from '../../core/utils.js';
 import { envOverridesOf } from '../../adapters/env-overrides.js';
 import { managedOverride } from '../../adapters/hermes-managed.js';
 import { containerEnvironment, isOpenclawAutoBind, openclawAutoBindDetail } from '../../adapters/openclaw-bind.js';
+import { hostPort, isWildcardAddress } from '../../core/listen-address.js';
+import { picoclawPublicLauncher } from '../../adapters/picoclaw.js';
 
 const LISTENER_KEY = /host|bind|listen/i;
 
 interface ListenerHit { path: string; key: string; value: string }
 
+/** Whether a listener value (at a config path) binds every interface. */
+type WildcardTest = (value: string, path: string) => boolean;
+
+/**
+ * Any wildcard spelling (src/core/listen-address.ts). Nanobot's websocket
+ * channel hands its host to asyncio, which binds every interface for an
+ * empty one (pydantic keeps "").
+ */
+function listenerTest(agent: string): WildcardTest {
+  return (value, path) => {
+    // A bare `0` is an address only under a key that names one
+    // (`host`, `bind_host`, `listenAddress`), not `hostKeyChecking: "0"`
+    if (/^\s*0+\s*$/.test(value) && !/(?:host|bind|listen|addr|address)$/i.test(path.split('.').pop() ?? '')) return false;
+    return isWildcardAddress(value, {
+      emptyIsWildcard: agent === 'nanobot' && /^channels\.websocket\.host$/i.test(path),
+    });
+  };
+}
+
 /** Wildcard-bound listener keys in a parsed config, skipping disabled sections. */
-function wildcardListeners(data: unknown, wildcards: string[], path = '', depth = 0): ListenerHit[] {
+function wildcardListeners(data: unknown, isWildcard: WildcardTest, path = '', depth = 0): ListenerHit[] {
   if (depth > 8 || !data || typeof data !== 'object' || Array.isArray(data)) return [];
   const obj = data as Record<string, unknown>;
   if (obj.enabled === false || obj.enable === false) return [];
   const hits: ListenerHit[] = [];
   for (const [key, value] of Object.entries(obj)) {
     const p = path ? `${path}.${key}` : key;
-    if (typeof value === 'string' && LISTENER_KEY.test(key) && wildcards.includes(value.trim())) {
-      hits.push({ path: p, key, value: value.trim() });
+    if (typeof value === 'string' && LISTENER_KEY.test(key) && isWildcard(value, p)) {
+      hits.push({ path: p, key, value: value.trim() === '' ? '""' : value.trim() });
     } else if (value && typeof value === 'object') {
-      hits.push(...wildcardListeners(value, wildcards, p, depth + 1));
+      hits.push(...wildcardListeners(value, isWildcard, p, depth + 1));
     }
   }
   return hits;
@@ -39,14 +60,21 @@ function nanobotUnixSocket(data: Record<string, unknown>): boolean {
 /** The wildcard address the evidence names (`::` binds IPv6 too), for the headline. */
 function wildcardLabel(evidence: Evidence[]): string {
   const text = evidence.map(e => e.detail ?? '').join(' ');
-  if (/(?:^|[\s=])(?:\[::\]|::)(?=[\s:—]|$)/.test(text) && !text.includes('0.0.0.0')) return '::';
+  const ipv6 = /(?:^|[\s=])(?:\[::\]|::)(?=[\s:—]|$)/.test(text)
+    || text.split(/\s+/).some(t => t.includes(':') && isWildcardAddress(t.replace(/^(\[[^\]]*\]):\d+$/, '$1')));
+  if (ipv6 && !text.includes('0.0.0.0')) return '::';
   return '0.0.0.0';
 }
 
 const HOST_PATHS = ['gateway.host', 'server.host', 'host', 'GATEWAY_HOST'];
-const WILDCARD_ADDRS = ['0.0.0.0', '[::]', '::'];
-/** Bind values that expose the listener beyond loopback (symbolic modes and wildcard addresses). */
-const SYMBOLIC_EXPOSED = ['all', 'lan', 'auto', ...WILDCARD_ADDRS];
+/** Symbolic bind values that expose the listener beyond loopback (wildcard addresses also do). */
+const SYMBOLIC_EXPOSED = ['all', 'lan', 'auto'];
+/** A bind value that exposes the listener: a symbolic mode or any wildcard spelling. */
+function exposedBind(bind: string): boolean {
+  return SYMBOLIC_EXPOSED.includes(bind.trim().toLowerCase()) || (bind.trim() !== '' && isWildcardAddress(bind));
+}
+/** Raw-text fallback for configs that didn't parse: the common spellings only. */
+const WILDCARD_TEXT = ['0.0.0.0', '[::]', '::'];
 
 /**
  * Why an exposed symbolic bind is reported. OpenClaw `gateway.bind` "lan"
@@ -92,6 +120,8 @@ export const cfg001 = defineCheck({
       }
     }
     const evidence: Evidence[] = [];
+    // The wildcard addresses as configured, for a headline that matches NET-001's
+    const spellings = new Set<string>();
     // The fix rewrites gateway.host / GATEWAY_HOST; only offer it when that
     // key is what is exposed (a channel webhook needs its own setting).
     let gatewayKey = false;
@@ -109,12 +139,10 @@ export const cfg001 = defineCheck({
       const host = hostPath ? getNestedValue(config.data, hostPath) : undefined;
       const reported = new Set<string>(hostPath ? [hostPath] : []);
 
-      const WILDCARD_BINDS = ['0.0.0.0', '[::]', '::'];
-
       // A host may be a comma-separated list, and `*` means every interface
       // (PicoClaw's gateway.host accepts both).
       const hostParts = typeof host === 'string' ? host.split(',').map(p => p.trim()) : [];
-      if (hostParts.some(p => p === '*' || WILDCARD_BINDS.includes(p))) {
+      if (hostParts.some(p => p !== '' && isWildcardAddress(p))) {
         // Set by an env override (ZeroClaw's ZEROCLAW_GATEWAY_HOST…): the
         // file doesn't hold it, so there is nothing for a fix to rewrite
         const env = envOverridesOf(config.data).find(o => o.path === hostPath)?.env;
@@ -129,6 +157,7 @@ export const cfg001 = defineCheck({
           });
         } else {
           if (!env) gatewayKey = true;
+          for (const p of hostParts) if (p !== '' && isWildcardAddress(p)) spellings.add(p);
           evidence.push({
             file: config.filePath,
             detail: env
@@ -142,7 +171,7 @@ export const cfg001 = defineCheck({
       const bind = getNestedValue(config.data, 'gateway.bind') ?? getNestedValue(config.data, 'bind');
       if (getNestedValue(config.data, 'gateway.bind') !== undefined) reported.add('gateway.bind');
       else if (getNestedValue(config.data, 'bind') !== undefined) reported.add('bind');
-      if (typeof bind === 'string' && SYMBOLIC_EXPOSED.includes(bind.toLowerCase())
+      if (typeof bind === 'string' && exposedBind(bind)
           && !tailscaleForcesLoopback(config.data)) {
         if (ctx.installation.agent === 'openclaw' && isOpenclawAutoBind(bind)) {
           // Outside a container (or unknowable, on a snapshot) it is a
@@ -161,7 +190,7 @@ export const cfg001 = defineCheck({
       // `enabled: false` and a 0.0.0.0 placeholder — are not reported.
       if (config.data && Object.keys(config.data).length > 0) {
         const lines = config.raw.split('\n');
-        for (const hit of wildcardListeners(config.data, WILDCARD_BINDS)) {
+        for (const hit of wildcardListeners(config.data, listenerTest(ctx.installation.agent))) {
           if (reported.has(hit.path)) continue;
           // Hermes: a value its administrator-managed layer replaces binds nothing
           if (managedOverride(ctx.configs, config, hit.path)) continue;
@@ -174,12 +203,13 @@ export const cfg001 = defineCheck({
             ...(line >= 0 ? { line: line + 1, snippet: lines[line].trim() } : {}),
             detail: `${hit.path} = ${hit.value} — listener accessible from all network interfaces`,
           });
+          spellings.add(hit.value);
         }
-      } else if (WILDCARD_BINDS.some(w => config.raw.includes(w))) {
+      } else if (WILDCARD_TEXT.some(w => config.raw.includes(w))) {
         // Unparsed content: fall back to grep-style detection.
         const lines = config.raw.split('\n');
         for (let i = 0; i < lines.length; i++) {
-          const hasMatch = WILDCARD_BINDS.some(w => lines[i].includes(w));
+          const hasMatch = WILDCARD_TEXT.some(w => lines[i].includes(w));
           if (hasMatch && LISTENER_KEY.test(lines[i])) {
             evidence.push({
               file: config.filePath,
@@ -191,14 +221,29 @@ export const cfg001 = defineCheck({
       }
     }
 
+    // PicoClaw: a public launcher puts the gateway on every interface over
+    // gateway.host, so the finding is the launcher's and no config.json
+    // rewrite would clear it
+    const launcher = ctx.installation.agent === 'picoclaw' ? picoclawPublicLauncher(ctx.configs) : undefined;
+    if (launcher) {
+      gatewayKey = false;
+      const line = launcher.raw.split('\n').findIndex(l => /"public"\s*:\s*true/.test(l));
+      evidence.push({
+        file: launcher.filePath,
+        ...(line >= 0 ? { line: line + 1, snippet: launcher.raw.split('\n')[line].trim() } : {}),
+        detail: `public: true — the PicoClaw launcher starts the gateway on all interfaces (0.0.0.0:${ctx.installation.gateway?.port ?? 18790}), whatever gateway.host says`,
+      });
+    }
+
     // The listener the adapter resolved (NET-001's view) can come from keys
     // this walk can't read as a bind: PicoClaw's launcher `public: true`,
     // OpenShell's `bind_address = "0.0.0.0:8080"`, an env override.
     const gw = ctx.installation.gateway;
-    if (evidence.length === 0 && gw?.host && WILDCARD_ADDRS.includes(gw.host.trim())) {
+    if (evidence.length === 0 && gw?.host && gw.host.split(',').some(p => p.trim() !== '' && isWildcardAddress(p))) {
+      spellings.add(gw.host);
       evidence.push({
         file: ctx.installation.configFiles[0]?.filePath ?? ctx.installation.installDir,
-        detail: `Gateway listener resolves to ${gw.host}${gw.port ? `:${gw.port}` : ''} — accessible from all network interfaces`,
+        detail: `Gateway listener resolves to ${hostPort(gw.host, gw.port || undefined)} — accessible from all network interfaces`,
       });
     }
 
@@ -219,7 +264,7 @@ export const cfg001 = defineCheck({
           ? ctx.installation.agent === 'nanobot'
             ? 'Nanobot health endpoint listens on all interfaces (GET /health only; no agent access)'
             : 'Gateway bind mode "auto" listens on 0.0.0.0 (all interfaces) when the gateway runs in a container'
-          : `Gateway is bound to ${wildcardLabel(uniqueEvidence)} — accessible from all network interfaces`,
+          : `Gateway is bound to ${spellings.size === 1 ? [...spellings][0] : wildcardLabel(uniqueEvidence)} — accessible from all network interfaces`,
       evidence: uniqueEvidence,
       fixable: gatewayKey,
       fixDescription: 'Rebind the gateway to loopback (127.0.0.1, or gateway.bind "loopback")',
@@ -242,7 +287,7 @@ export const cfg001 = defineCheck({
       const rewritten = new Set<string>();
       const symbolic = ['gateway.bind', 'bind'].find(path => {
         const bind = getNestedValue(config.data, path);
-        return typeof bind === 'string' && SYMBOLIC_EXPOSED.includes(bind.toLowerCase())
+        return typeof bind === 'string' && exposedBind(bind)
           && !tailscaleForcesLoopback(config.data)
           // OpenClaw "auto" exposes nothing outside a container
           && !(ctx.installation.agent === 'openclaw' && isOpenclawAutoBind(bind) && !inContainer);
@@ -256,7 +301,9 @@ export const cfg001 = defineCheck({
         const hostPath = HOST_PATHS.find(p => getNestedValue(config.data, p) != null);
         const host = hostPath ? getNestedValue(config.data, hostPath) : undefined;
         const fromEnv = envOverridesOf(config.data).some(o => o.path === hostPath);
-        if (!fromEnv && typeof host === 'string' && host.split(',').some(p => p.trim() === '*' || WILDCARD_ADDRS.includes(p.trim()))) {
+        // PicoClaw's public launcher overrides gateway.host: rewriting it clears nothing
+        const overridden = ctx.installation.agent === 'picoclaw' && !!picoclawPublicLauncher(ctx.configs);
+        if (!fromEnv && !overridden && typeof host === 'string' && host.split(',').some(p => p.trim() !== '' && isWildcardAddress(p))) {
           rewritten.add(hostPath!);
           result = await fixFirstConfig([config], {
             checkId: 'CFG-001',
@@ -269,7 +316,7 @@ export const cfg001 = defineCheck({
       }
       if (result?.applied) done.push(`${result.message} in ${config.filePath}`);
       if (config.format !== 'env') {
-        for (const hit of wildcardListeners(config.data, WILDCARD_ADDRS)) {
+        for (const hit of wildcardListeners(config.data, listenerTest(ctx.installation.agent))) {
           if (!rewritten.has(hit.path)) remaining.push(hit.path);
         }
       }

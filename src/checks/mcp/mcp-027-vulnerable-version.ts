@@ -9,7 +9,7 @@ import { fullVersion, rangeBounds, rangeEntirelyAffected, type VersionBounds } f
 import type { Advisory } from '../../advisory/advisory-types.js';
 import { DEPRECATED_NPM_PACKAGES } from '../../advisory/library-advisories.js';
 import { advisoryAppliesToPlatform } from '../../advisory/applicability.js';
-import { runnerPackage, type PinKind } from '../../mcp/package-pin.js';
+import { classifyNpm, runnerPackage, type PinKind, type RunnerPackage } from '../../mcp/package-pin.js';
 
 /**
  * MCP-027 — Vulnerable / Rolled-Back MCP Version.
@@ -27,7 +27,8 @@ import { runnerPackage, type PinKind } from '../../mcp/package-pin.js';
  *    seen for that package (tracked in the cross-scan state store).
  *  - shipped dependency: a package the server's project ships with (the MCP
  *    SDK, …) matches an advisory — exact versions from the installed copy or
- *    lockfile, a declared range only when every version it admits is affected.
+ *    lockfile; a declared range (no lockfile, nothing installed) by the same
+ *    policy as an unpinned runner spec (declaredRangeMatch()).
  *    An advisory scoped to a feature the server's code doesn't use is reported
  *    as mitigated.
  *
@@ -64,11 +65,14 @@ export type UnpinnedResolution = { kind: 'latest' } | { kind: 'tag' } | { kind: 
 export function pinnedRunnerPackage(
   server: MCPServerEntry,
 ): { name: string; ecosystem: 'npm' | 'pypi'; version?: string; resolves?: UnpinnedResolution } | undefined {
-  const pkg = runnerPackage(server.command, server.args);
+  const pkg = npmAliasTarget(runnerPackage(server.command, server.args));
   if (!pkg || pkg.pin === 'local') return undefined;
   // A registry tarball URL names one release (`…/@scope/x/-/x-1.0.0.tgz`)
   const tarball = pkg.ecosystem === 'npm' ? REGISTRY_TARBALL.exec(pkg.spec.trim()) : null;
-  if (tarball && parseSemVer(tarball[2])) return { name: decodeURIComponent(tarball[1]), ecosystem: 'npm', version: tarball[2] };
+  if (tarball && parseSemVer(tarball[2])) {
+    const name = decodeName(tarball[1]);
+    return name ? { name, ecosystem: 'npm', version: tarball[2] } : undefined;
+  }
   const base = { name: pkg.name, ecosystem: pkg.ecosystem };
   if (pkg.pin !== 'exact') {
     const resolves = unpinnedResolution(pkg.spec.trim(), pkg.name, pkg.ecosystem, pkg.pin);
@@ -85,8 +89,29 @@ export function pinnedRunnerPackage(
   return version && parseSemVer(version) ? { ...base, version } : base;
 }
 
+/**
+ * The package an npm spec really installs: an alias (`pm@npm:postmark-mcp@1.0.16`)
+ * installs its target, and an empty version (`postmark-mcp@`) is the bare name.
+ */
+function npmAliasTarget(pkg: RunnerPackage | undefined): RunnerPackage | undefined {
+  if (!pkg || pkg.ecosystem !== 'npm') return pkg;
+  const alias = /^(?:@[^@/\s]+\/)?[^@/\s]+@npm:(\S+)$/.exec(pkg.spec.trim());
+  const spec = (alias ? alias[1] : pkg.spec.trim()).replace(/@$/, '');
+  if (spec === pkg.spec) return pkg;
+  return { ...pkg, spec, ...classifyNpm(spec) };
+}
+
 /** `https://registry.npmjs.org/<name>/-/<base>-<version>.tgz` (also yarn's mirror): name and version. */
 const REGISTRY_TARBALL = /^https?:\/\/registry\.(?:npmjs\.org|yarnpkg\.com)\/((?:@[^/\s]+(?:\/|%2[fF]))?[^/\s]+)\/-\/[^/\s]+?-(\d+\.\d+\.\d+(?:-[\w.]+)?)\.tgz$/;
+
+/** A tarball URL's percent-encoded name (`@scope%2fx`); undefined when the encoding is malformed (no such package). */
+function decodeName(encoded: string): string | undefined {
+  try {
+    return decodeURIComponent(encoded);
+  } catch {
+    return undefined;
+  }
+}
 
 /** Registry specs only — a git URL or direct reference installs something the registry's advisories don't describe. */
 function unpinnedResolution(spec: string, name: string, ecosystem: 'npm' | 'pypi', pin: PinKind): UnpinnedResolution | undefined {
@@ -95,7 +120,8 @@ function unpinnedResolution(spec: string, name: string, ecosystem: 'npm' | 'pypi
     if (!spec.startsWith(`${name}@`)) return undefined;
     const rest = spec.slice(name.length + 1).trim();
     if (pin === 'tag') return rest === 'latest' ? { kind: 'latest' } : { kind: 'tag' };
-    return { kind: 'range', range: rest };
+    // `pkg@*` / `pkg@x` admit every release: the installer picks the latest
+    return /^(?:\*|[xX])$/.test(rest) ? { kind: 'latest' } : { kind: 'range', range: rest };
   }
   const m = /^[A-Za-z0-9][\w.-]*(?:\[[^\]]*\])?\s*(.*)$/.exec(spec);
   const rest = m?.[1].trim() ?? '';
@@ -276,6 +302,38 @@ function startsInside(branch: string, bounds: VersionBounds): boolean {
   return Boolean(top && compareSemVer(lowParsed, top) < 0);
 }
 
+/**
+ * What a declared dependency range installs when the project has no installed
+ * copy and no lockfile — read like a runner spec: `*`, `latest` or an empty
+ * PyPI spec install the newest release, a dist-tag whatever it points at.
+ * Git URLs, local paths, tarballs and aliases install something the
+ * registry's advisories don't describe.
+ */
+export function declaredResolution(range: string, ecosystem: 'npm' | 'pypi'): UnpinnedResolution | undefined {
+  const r = range.replace(/;.*$/, '').trim();
+  if (r === '' || r === '*' || /^[xX]$/.test(r) || r === 'latest') return { kind: 'latest' };
+  if (ecosystem === 'pypi') return /^@|:\/\//.test(r) ? undefined : { kind: 'range', range: r };
+  if (/^[a-z][\w+.-]*:|\//i.test(r)) return undefined;
+  const { pin } = classifyNpm(`x@${r}`);
+  return pin === 'tag' ? { kind: 'tag' } : pin === 'range' ? { kind: 'range', range: r } : undefined;
+}
+
+/**
+ * How a declared range meets an advisory, by the same policy as an unpinned
+ * runner spec: `affected` when the release it installs is affected, `malware`
+ * when the package has shipped malware and the range can install a malicious
+ * release (or every release is malware), `excluded` when the range stays clear
+ * of the malicious releases. Undefined: no match.
+ */
+export function declaredRangeMatch(range: string, ecosystem: 'npm' | 'pypi', adv: Advisory): 'affected' | 'malware' | 'excluded' | undefined {
+  const dep = adv.affectedDependency;
+  const resolves = dep ? declaredResolution(range, ecosystem) : undefined;
+  if (!dep || !resolves) return undefined;
+  if (unpinnedSpecAffected(resolves, ecosystem, dep.versionConstraint, adv.fixedVersion)) return 'affected';
+  if (!maliciousPackage(adv)) return undefined;
+  return malwareFromFirstRelease(adv) || canReachAffected(resolves, ecosystem, dep.versionConstraint) ? 'malware' : 'excluded';
+}
+
 export const mcp027 = defineCheck({
   id: 'MCP-027',
   name: 'Vulnerable / Rolled-Back MCP Version',
@@ -291,6 +349,8 @@ export const mcp027 = defineCheck({
 
     const db = getAdvisoryDatabase();
     const depAdvisories = db.advisories.filter((a) => a.affectedDependency && advisoryAppliesToPlatform(a, ctx.platform));
+    // Bundled entries limited to other platforms: their OSV twins (--audit-deps) don't apply here either
+    const offPlatform = db.advisories.filter((a) => a.affectedDependency && !advisoryAppliesToPlatform(a, ctx.platform));
     const store = ctx.mcpStateStore ?? defaultMcpStateStore();
     // Servers per package: a pre-1.3.0 history (keyed by package alone)
     // belongs to a server only when it is the one using that package.
@@ -395,28 +455,43 @@ export const mcp027 = defineCheck({
       for (const dep of source.dependencies ?? []) {
         const shown = dep.version ? `${dep.name}@${dep.version}` : `${dep.name} ${dep.range}`;
         const reported = new Set<string>();
+        for (const adv of offPlatform) {
+          const target = adv.affectedDependency!;
+          const targetEcosystem = target.ecosystem ?? 'npm';
+          if (targetEcosystem !== dep.ecosystem || packageKey(target.name, targetEcosystem) !== packageKey(dep.name, dep.ecosystem)) continue;
+          for (const id of advisoryIds(adv)) reported.add(id);
+        }
         for (const adv of depAdvisories) {
           const target = adv.affectedDependency!;
           const targetEcosystem = target.ecosystem ?? 'npm';
           if (targetEcosystem !== dep.ecosystem || packageKey(target.name, targetEcosystem) !== packageKey(dep.name, dep.ecosystem)) continue;
-          const affected = dep.version
-            ? satisfies(fullVersion(dep.version), target.versionConstraint)
-            : dep.range !== undefined && rangeEntirelyAffected(dep.range, dep.ecosystem, target.versionConstraint, adv.fixedVersion);
-          if (!affected) continue;
+          // An exact version; else the declared range, read as a runner spec would be
+          const match = dep.version
+            ? satisfies(fullVersion(dep.version), target.versionConstraint) ? 'affected' : undefined
+            : dep.range !== undefined ? declaredRangeMatch(dep.range, dep.ecosystem, adv) : undefined;
+          if (!match) continue;
 
-          reported.add(adv.id);
-          if (adv.reference) reported.add(adv.reference.split('/').pop()!);
-          const notUsed = featureNotUsed(adv, source.sourceCode);
-          if (!notUsed) {
+          for (const id of advisoryIds(adv)) reported.add(id);
+          const notUsed = match === 'affected' && featureNotUsed(adv, source.sourceCode);
+          const excluded = match === 'excluded';
+          if (!notUsed && !excluded) {
             if (adv.severity === 'critical') maxSeverity = 'critical';
             if (adv.severity !== 'info') liveWarning = true;
           }
+          const what =
+            match === 'affected'
+              ? `ships ${shown}, affected by "${adv.title}"`
+              : excluded
+                ? `declares ${shown}; ${dep.name} has published malicious releases (${target.versionConstraint}), which this range excludes — keep it pinned away from them: "${adv.title}"`
+                : malwareFromFirstRelease(adv)
+                  ? `declares ${shown}, a package published as malware, so no release of it is safe: "${adv.title}"`
+                  : `declares ${shown}; ${dep.name} has published malicious releases (${target.versionConstraint}) and this range can install one — pin a vetted version: "${adv.title}"`;
           evidence.push({
             file: dep.source,
             snippet: `Server "${source.serverName}": ${shown}`,
             detail:
-              `${adv.id}: server "${source.serverName}" ships ${shown}, affected by "${adv.title}"` +
-              ` (severity: ${adv.severity}${adv.fixedVersion ? `, fix: ${adv.fixedVersion}` : ''})` +
+              `${adv.id}: server "${source.serverName}" ${what}` +
+              ` (severity: ${excluded ? `info; the advisory is ${adv.severity}` : adv.severity}${adv.fixedVersion ? `, fix: ${adv.fixedVersion}` : ''})` +
               (notUsed ? ` — applies to ${adv.appliesWhen!.usage}, which this server's code doesn't use` : ''),
             ...(notUsed ? { mitigated: true } : {}),
           });
@@ -462,6 +537,11 @@ export const mcp027 = defineCheck({
     });
   },
 });
+
+/** The ids an advisory is known by: its own and its reference's (`…/GHSA-xxxx`). */
+function advisoryIds(adv: Advisory): string[] {
+  return adv.reference ? [adv.id, adv.reference.split('/').pop()!] : [adv.id];
+}
 
 /**
  * The advisory needs a feature (an HTTP transport, the OAuth client) that the

@@ -18,6 +18,7 @@ const SUBJECT_ACTIONS = new Set(['send-imessage', 'use-app']);
 const MESSAGES_ACTIONS = new Set(['read-messages', 'send-imessage']);
 
 const nonBlank = (v: unknown): v is string => typeof v === 'string' && v.trim() !== '';
+const isRecord = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 
 /** A grant the daemon would load and consult, as its parser and gate decide. */
 function honoured(g: Grant, messagesEnabled: boolean): boolean {
@@ -63,28 +64,64 @@ export const gb004 = defineCheck({
     if (grants.length === 0) return h.passed('No Grok Bot standing approvals the app honours');
 
     // Grants are honoured only when local execution isn't capped or refused
-    const ceiling = asPermission(settings.localToolPermissionCeiling);
-    const inactive = settings.localToolPermission === 'never' || (ceiling !== undefined && ceiling !== 'always');
+    // The daemon looks a grant up under the account whose session asks
+    // (keyed [accountScope, scope, action, recipient]) and only while that
+    // account's permission is not "never" and its ceiling allows "always".
+    // A grant for another account waits for that account; one for an
+    // account not signed in here is dormant.
+    const active = typeof settings.activeAccountScope === 'string' ? settings.activeAccountScope.trim() : undefined;
+    const scopes = isRecord(settings.accountScopes) ? settings.accountScopes : {};
+    const sendOff = settings.messagesSendEnabled === false;
+    const inactiveFor = (block: Record<string, unknown>): boolean => {
+      const ceiling = asPermission(block.localToolPermissionCeiling);
+      return block.localToolPermission === 'never' || (ceiling !== undefined && ceiling !== 'always');
+    };
 
     const evidence: Evidence[] = [];
-    const subjects = new Map<string, number>();
+    const subjects = new Map<string, { n: number; mitigated: boolean; why: string }>();
+    let warningCount = 0;
     for (const g of grants) {
       const action = typeof g.action === 'string' ? g.action : 'unknown action';
+      const account = (g.accountScope as string).trim();
+      const own = active === undefined || account === active;
+      const parked = !own && isRecord(scopes[account]) ? scopes[account] as Record<string, unknown> : undefined;
+      let why = '';
+      let mitigated = false;
+      if (action === 'send-imessage' && sendOff) {
+        mitigated = true;
+        why = 'sending Messages is turned off (messagesSendEnabled: false)';
+      } else if (own ? inactiveFor(settings) : parked ? inactiveFor(parked) : true) {
+        mitigated = true;
+        why = own || parked
+          ? 'inactive while local execution is "never" or capped below "always"'
+          : `belongs to account ${account.slice(0, 8)}…, which is not signed in here`;
+      } else if (parked) {
+        why = `account ${account.slice(0, 8)}… — takes effect when you switch to it`;
+      }
       if (g.scope === 'action') {
-        evidence.push({ file, snippet: `scope: "action", action: "${action}"`, detail: `"${action}" is always allowed for every recipient/app`, mitigated: inactive || undefined });
+        if (!mitigated) warningCount++;
+        evidence.push({
+          file,
+          snippet: `scope: "action", action: "${action}"`,
+          detail: `"${action}" is always allowed for every recipient/app${why ? ` — ${why}` : ''}`,
+          mitigated: mitigated || undefined,
+        });
       } else {
-        subjects.set(action, (subjects.get(action) ?? 0) + 1);
+        const key = `${action}\u0000${mitigated}\u0000${why}`;
+        const entry = subjects.get(key) ?? { n: 0, mitigated, why };
+        entry.n++;
+        subjects.set(key, entry);
       }
     }
-    const warningCount = evidence.length;
-    for (const [action, n] of subjects) {
-      evidence.push({ file, snippet: `scope: "subject", action: "${action}" × ${n}`, detail: `"${action}" is always allowed for ${n} specific recipient(s)/app(s)`, mitigated: inactive || undefined });
+    for (const [key, { n, mitigated, why }] of subjects) {
+      const action = key.split('\u0000')[0];
+      evidence.push({ file, snippet: `scope: "subject", action: "${action}" × ${n}`, detail: `"${action}" is always allowed for ${n} specific recipient(s)/app(s)${why ? ` — ${why}` : ''}`, mitigated: mitigated || undefined });
     }
 
     return h.fromEvidence(evidence, {
       passed: 'No Grok Bot standing approvals',
       failed: (n) => `Found ${n} Grok Bot standing approval(s)`,
-      severity: warningCount > 0 && !inactive ? undefined : 'info',
+      severity: warningCount > 0 ? undefined : 'info',
       fixDescription: 'Revoke standing approvals in Grok Bot (Settings → Agents → Approvals & Execution); delete local-tool-standing-grants.v1.json to clear them all',
     });
   },

@@ -57,6 +57,37 @@ describe('unsafeRegexReason', () => {
     '(a{1,4}){4}(a{1,4}){4}(a{1,4}){4}$',
     `${'(a|a)?'.repeat(20)}a{20}$`,
     '\\w+\\w{0,6}!',
+    // dt21 g8-F1: `\c` without a control letter is a backslash, then `c`
+    '(?:\\\\\\c|\\\\\\\\c)+$',
+    '(?:\\c|\\\\c)+$',
+    '(?:\\c_|\\\\c_)+$',
+    // dt21 g8-F2: `[^]` is any character and `[]` nothing (not PCRE's `[^]…]`)
+    '(?:[^]=]|\\w=])+$',
+    '(?:[^]a]|.a])+$',
+    '[^]*[^]*[^]*x',
+    '.*[^]*.*x',
+    // dt21 g8-F3: a lookahead body backtracks from every place it runs
+    // (`.+(?=.*=)`: ~31 s on a 4 KB line)
+    '.+(?=.*=)',
+    '\\w+(?=\\w*!)',
+    '[a-z]+(?=[a-z]*=)',
+    '(?:a(?=\\w*!))+$',
+    // … and a lookbehind body, right to left (`(?<=(?=\w*!)\w*)`: 9 s on 2 KB)
+    '(?<=(?=\\w*!)\\w*)',
+    '\\w+(?<=!\\w*)',
+    // a negative lookahead whose body can succeed (3.9 s on `a`×4095 + `!`)
+    '\\w+(?!\\w*!)',
+    // dt21 g8-F4: a backreference reads what its group read (`(.*)\1x`: n^3)
+    '(.*)\\1x',
+    '(\\w*)\\1x',
+    '(.*)\\1\\1\\1\\1x',
+    `(.*)${'\\1'.repeat(64)}x`,
+    '(.+)\\1{100}x',
+    '(?<n>\\w*)\\k<n>x',
+    '(?=(\\w*)\\1!)',
+    // a group that may not have matched: its backreference may read nothing
+    '(x)?(?:\\1a|a)+$',
+    '()(?:\\1a|a)+$',
   ])('rejects %s', (re) => {
     expect(unsafeRegexReason(re)).toBeDefined();
   });
@@ -117,6 +148,49 @@ describe('unsafeRegexReason', () => {
     '\\p{L}+',
     '[\\u4e00-\\u9fff]+\\s*=',
     '😀+x',
+    // dt21 g8: a sweep of realistic rule shapes
+    '["\']?(?:api[_-]?key|token)["\']?\\s*[:=]\\s*["\']?[A-Za-z0-9_\\-]{16,}',
+    'https?://[^\\s/]+(?:/[^\\s]*)?',
+    '\\b(?:\\d{1,3}\\.){3}\\d{1,3}\\b',
+    '[A-Za-z0-9+/]{40,}={0,2}',
+    '-----BEGIN [A-Z ]+PRIVATE KEY-----',
+    '^\\s*#.*$',
+    '\\$\\{[^}]+\\}',
+    '[\\w.+-]+@[\\w-]+\\.[\\w.]+',
+    '^\\s*"?allow"?\\s*:\\s*\\[.*\\*.*\\]',
+    '(?:password|passwd|pwd)\\s*[=:]\\s*\\S+',
+    '[a-f0-9]{32,64}',
+    '(?:\\.\\./)+',
+    '^(?:\\s*-\\s*)?\\w+:\\s*.*$',
+    // lookarounds with one loop in front of them at most
+    '\\bnpx\\s+(?:-y\\s+)?[\\w@/.-]+(?!@\\d)',
+    'token(?=.*secret)',
+    '(?=\\w*!)',
+    '\\w(?=\\w*!)',
+    '(?<=\\w*)x',
+    '(?<=!\\w*)x',
+    '(?<=\\w+)\\w*!',
+    '(?<=!\\w*)\\w+',
+    '\\w(?<=!\\w*)',
+    // dt21 g8-R: a lookbehind of optional single characters reads once
+    'x(?<=\\w*\\w*)',
+    'x(?<!\\s*[a-z]?\\d*)',
+    '\\w+(?<=a)',
+    // backreferences to a short or delimiting group
+    '([\'"]).*?\\1',
+    '(\\w+)\\s*=\\s*\\1',
+    '(\\w+)=\\1',
+    '(.+)\\1',
+    '(\\w{1,4})\\1',
+    '^(.*)\\1$',
+    '(?:(.)\\1)*x',
+    '(.)\\1{3,}',
+    // JavaScript classes and Annex B escapes
+    'a[]b',
+    'x[^]{0,3}y',
+    '\\cA+x',
+    '\\c+x',
+    '(a)\\10',
   ];
 
   it.each(ACCEPTED)('accepts %s', (re) => {
@@ -152,6 +226,23 @@ describe('unsafeRegexReason', () => {
     }
     expect(slow).toEqual([]);
   }, 60_000);
+
+  it('reads escapes and classes the way V8 does without the `u` flag (Annex B)', () => {
+    // each alternative reads the same text: exponential, not an empty loop
+    for (const re of [
+      '(?:\\\\\\c|\\\\\\\\c)+$', // `\c` = backslash, `c`
+      '(?:\\c_|\\\\c_)+$',
+      '(?:[^]=]|\\w=])+$', // `[^]` = any character, then `=]`
+      '(?:\\8|8)+$', // `\8` = `8`
+      '(a)(?:\\10|\\x08)+$', // `\10` with one group = octal 10
+      '(?:\\0|\\x00)+$',
+      '(?:\\k|k)+$', // no named groups: `\k` = `k`
+      '(?:\\k<n>|k<n>)+$',
+    ]) expect(unsafeRegexReason(re), re).toMatch(/exponentially/);
+    // with named groups `\k<n>` is a backreference
+    expect(unsafeRegexReason('(?<n>a)(?:\\k<n>b|ab)+$')).toMatch(/exponentially/);
+    expect(unsafeRegexReason('(?<n>a)\\k<x>')).toMatch(/could not be analysed/);
+  });
 
   it('rejects what it cannot parse', () => {
     expect(unsafeRegexReason('(?<x')).toBeDefined();

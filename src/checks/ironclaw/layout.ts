@@ -7,6 +7,7 @@ import {
   isRebornConfigData,
   ironclawServiceUnitPaths,
 } from '../../adapters/ironclaw.js';
+import { isLoopbackAddress, isWildcardAddress } from '../../core/listen-address.js';
 
 /*
  * Layout helpers shared by the IC-* checks. The adapter emits one
@@ -82,6 +83,31 @@ export function lineOf(config: ParsedConfig, key: string): number | undefined {
   const re = new RegExp(`^\\s*"?${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"?\\s*[=:]`);
   const idx = config.raw.split('\n').findIndex(l => re.test(l));
   return idx >= 0 ? idx + 1 : undefined;
+}
+
+/**
+ * Line of `key` inside the TOML table `tablePath` (`llm.backup` matches
+ * `[llm.backup]`, `[llm."backup"]` and a root `llm.backup.key = …`), so a
+ * second table's key isn't attributed to the first one's line.
+ */
+export function tableLineOf(config: ParsedConfig, tablePath: string, key: string): number | undefined {
+  const norm = (k: string): string => k.replace(/\s+/g, '').replace(/"([^"]*)"|'([^']*)'/g, '$1$2');
+  const esc = (k: string): string => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const keyRe = new RegExp(`^\\s*"?${esc(key)}"?\\s*=`);
+  const want = norm(tablePath);
+  let current = '';
+  const lines = config.raw.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const header = /^\s*\[([^\]]+)\]\s*(?:#.*)?$/.exec(lines[i]);
+    if (header) {
+      current = norm(header[1]);
+      continue;
+    }
+    if (current === want && keyRe.test(lines[i])) return i + 1;
+    const eq = lines[i].indexOf('=');
+    if (current === '' && eq > 0 && norm(lines[i].slice(0, eq)) === `${want}.${key}`) return i + 1;
+  }
+  return lineOf(config, key);
 }
 
 export interface ServiceUnit { file: string; raw: string }
@@ -175,14 +201,14 @@ export function legacySetting(ctx: ScanContext, envKey: string | undefined, toml
 
 // ── shared ──────────────────────────────────────────────────────────────
 
+/** Loopback in any spelling (src/core/listen-address.ts). */
 export function isLoopbackHost(host: string): boolean {
-  const h = host.trim().replace(/^\[|\]$/g, '').toLowerCase();
-  return h === 'localhost' || h === '::1' || /^127\./.test(h) || h.endsWith('.localhost');
+  return isLoopbackAddress(host);
 }
 
+/** Any spelling of the unspecified address (src/core/listen-address.ts); empty means unset. */
 export function isWildcardHost(host: string): boolean {
-  const h = host.trim().replace(/^\[|\]$/g, '');
-  return h === '0.0.0.0' || h === '::' || h === '0:0:0:0:0:0:0:0';
+  return host.trim() !== '' && isWildcardAddress(host);
 }
 
 /** Host of an http(s) URL, or undefined if it doesn't parse. */

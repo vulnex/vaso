@@ -127,18 +127,35 @@ export function credentialEnvName(name: string): boolean {
   return isSecretName(name) || CONNECTION_STRING_NAME.test(name);
 }
 
-/** Credentials never sent as they are, to anyone: they sign requests (AWS secret keys, private keys). */
-const SIGNING_SECRET_NAME = /(?:^|_)(?:SECRET_ACCESS_KEY|PRIVATE_KEY)$/i;
+/**
+ * Credentials never sent as they are, to anyone: they sign or encrypt
+ * (AWS secret keys, private keys, session/JWT/cookie/webhook signing
+ * secrets, HMAC and encryption keys, Django's `SECRET_KEY`).
+ */
+const SIGNING_SECRET_NAME = /(?:^|_)(?:SECRET_ACCESS_KEY|PRIVATE_KEY|SIGNING_(?:KEY|SECRET)|(?:SESSION|JWT|COOKIE|WEBHOOK|NEXTAUTH|AUTH|HMAC|APP|ENCRYPTION|SIGNATURE)_SECRET(?:_KEY)?|(?:HMAC|ENCRYPTION|JWT|SESSION|COOKIE)_KEY)$|^SECRET_KEY(?:_BASE)?$|^(?:HMAC|SIGNING)_/i;
+
+/** A credential that signs or encrypts — sent in any request, headers included, it is leaving. */
+export function signingSecret(name: string | undefined): boolean {
+  return name !== undefined && SIGNING_SECRET_NAME.test(name);
+}
+
+/**
+ * Database and broker credentials (`DB_PASSWORD`, `PGPASSWORD`,
+ * `MYSQL_ROOT_PASSWORD`, `DATABASE_URL`): their home is a database
+ * connection, never the headers or URL of an HTTP request.
+ */
+const STORE_CREDENTIAL_NAME = /^(?:PGPASSWORD|PGPASSFILE)$|(?:^|_)(?:DB|DATABASE|PG|POSTGRES(?:QL)?|MYSQL|MARIADB|MONGO(?:DB)?|REDIS|MSSQL|SQLSERVER|ORACLE|CLICKHOUSE|ELASTIC(?:SEARCH)?|RABBITMQ|AMQP|NEO4J|CASSANDRA|COUCHDB)_(?:[A-Z0-9]+_)*(?:PASS(?:WORD)?|PASSWD|PWD)$/i;
 
 /**
  * A credential whose rightful destination is known: a vendor's key
- * (`OPENAI_API_KEY` → openai.com, `GH_TOKEN` → github.com) or a signing
- * secret that goes nowhere. Sent outside a request body — in its URL,
+ * (`OPENAI_API_KEY` → openai.com, `GH_TOKEN` → github.com), a signing
+ * secret that goes nowhere, or a database credential (its connection). Sent outside a request body — in its URL,
  * headers, query, auth or cookies — anywhere but the vendor's own API
  * headers, it is leaving. A generic `API_KEY` or `TOKEN` in a request's
  * headers is how the skill authenticates to whatever API it calls.
  */
 export function ownedCredential(name: string | undefined): boolean {
   if (name === undefined || !credentialEnvName(name)) return false;
-  return vendorApiDomains(name) !== undefined || SIGNING_SECRET_NAME.test(name);
+  return vendorApiDomains(name) !== undefined || SIGNING_SECRET_NAME.test(name) || STORE_CREDENTIAL_NAME.test(name)
+    || CONNECTION_STRING_NAME.test(name);
 }

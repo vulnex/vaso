@@ -47,6 +47,15 @@ describe('validateSnapshot', () => {
   });
 });
 
+describe('validateSnapshot: skill-file heads', () => {
+  it('accepts a head that runs to a PE header at e_lfanew, not more than 1 MiB of one', () => {
+    const entry = (bytes: number) => ({ '/home/u/.claude/skills/x/a.exe': { exists: true, mode: 0o755, contentOmitted: true, omitted: 'size', head: Buffer.alloc(bytes).toString('base64') } });
+    expect(validateSnapshot(snap({ files: entry(0x2004) }))).toEqual([]);
+    expect(validateSnapshot(snap({ files: entry((1 << 20) + 4) }))).toEqual([]);
+    expect(validateSnapshot(snap({ files: entry((1 << 20) + 64) })).some(e => e.includes('not {content, mode, exists}'))).toBe(true);
+  });
+});
+
 describe('loadSnapshotFile', () => {
   let dir: string;
   beforeEach(async () => { dir = await mkdtemp(join(tmpdir(), 'vaso-snapload-')); });

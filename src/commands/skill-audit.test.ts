@@ -4,8 +4,10 @@ import type { ScanResult } from '../core/types.js';
 
 // Mock fs/promises.stat
 const mockStat = vi.fn();
+const mockReaddir = vi.fn().mockResolvedValue([]);
 vi.mock('node:fs/promises', () => ({
   stat: (...args: unknown[]) => mockStat(...args),
+  readdir: (...args: unknown[]) => mockReaddir(...args),
   writeFile: vi.fn(),
 }));
 
@@ -111,6 +113,18 @@ describe('runSkillAudit', () => {
 
     expect(process.exitCode).toBe(2);
     expect(consoleErrorLogs.join('\n')).toContain('Path is not a directory');
+    expect(mockScanSkill).not.toHaveBeenCalled();
+  });
+
+  it('dt21 g8-F20: errors (exit 2) when the directory can\'t be listed, instead of calling it empty', async () => {
+    mockStat.mockResolvedValue({ isDirectory: () => true });
+    mockReaddir.mockRejectedValueOnce(Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' }));
+
+    await runSkillAudit('/locked/skill', { format: 'terminal' });
+
+    expect(process.exitCode).toBe(2);
+    expect(consoleErrorLogs.join('\n')).toContain('Cannot read directory: /locked/skill (EACCES)');
+    expect(consoleErrorLogs.join('\n')).not.toContain('is empty');
     expect(mockScanSkill).not.toHaveBeenCalled();
   });
 

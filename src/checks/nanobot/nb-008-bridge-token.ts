@@ -1,5 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { nanobotWebsocketHost } from '../../adapters/nanobot.js';
+import { hostPort } from '../../core/listen-address.js';
 import { asRecord, getPath, isLoopbackHost, nanobotConfigs, nonEmptyString, pick, pyBool } from './shared.js';
 
 /*
@@ -31,14 +33,15 @@ export const nb008 = defineCheck({
       if (pyBool(ws.enabled) !== false) {
         const unixSocket = nonEmptyString(pick(ws, 'unixSocketPath'));
         const hostRaw = pick(ws, 'host');
-        const host = nonEmptyString(hostRaw) ? hostRaw.trim() : '127.0.0.1';
-        const local = unixSocket || isLoopbackHost(host);
+        // A whitespace-only host never binds: no network exposure to rate
+        const host = nanobotWebsocketHost(hostRaw) ?? '(unresolvable host)';
+        const local = unixSocket || host === '(unresolvable host)' || isLoopbackHost(host);
         const token = nonEmptyString(pick(ws, 'token'));
         const issueSecret = nonEmptyString(pick(ws, 'tokenIssueSecret'));
         const issuePath = nonEmptyString(pick(ws, 'tokenIssuePath'));
         const proxyAuth = asRecord(pick(ws, 'trustedProxyAuth')) !== undefined;
         const requiresToken = pyBool(pick(ws, 'websocketRequiresToken')) !== false;
-        const where = unixSocket ? 'a unix socket' : `${host}:${typeof ws.port === 'number' ? ws.port : 8765}`;
+        const where = unixSocket ? 'a unix socket' : hostPort(host, typeof ws.port === 'number' ? ws.port : 8765);
 
         let hole: string | undefined;
         if (!token && !requiresToken && !proxyAuth) {

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -71,6 +72,8 @@ var metadataOnlyExtensions = map[string]bool{
 	".zip": true, ".gz": true, ".tgz": true, ".tar": true, ".jar": true, ".7z": true, ".pdf": true,
 	".node": true, ".so": true, ".dylib": true, ".dll": true, ".exe": true, ".wasm": true, ".bin": true,
 	".pyc": true, ".db": true, ".sqlite": true, ".sqlite3": true,
+	".icns": true, ".tiff": true, ".tif": true, ".heic": true, ".avif": true,
+	".bz2": true, ".xz": true, ".zst": true, ".lz4": true, ".dmg": true, ".iso": true,
 }
 
 // Compiled artefacts read inside skill trees: IOC-003/007 hash a skill's
@@ -83,9 +86,27 @@ var skillBinaryExtensions = map[string]bool{
 // code SKILL.md runs — mirrors BUILD_OUTPUT_DIRS / keepBuildOutput in src/core/utils.ts.
 var skillTreeBuildDirs = map[string]bool{"dist": true, "build": true}
 
-// isSkillPattern reports whether a glob walks a skills tree (`…/skills/**`).
+// skillSegment is a directory name a skills tree is kept under: skills,
+// skills-cursor, custom_skills, installed_skills, open-skills,
+// optional-skills (every skills glob in the manifest has one).
+var skillSegment = regexp.MustCompile(`(?i)^(?:.*[-_.])?skills?(?:[-_.].*)?$`)
+
+// isSkillPattern reports whether a glob walks a skills tree
+// (`…/skills/**`, `~/.cursor/skills-cursor/**`, `${HERMES_HOME}/optional-skills/**`).
 func isSkillPattern(pattern string) bool {
-	return strings.Contains(filepath.ToSlash(pattern), "/skills/")
+	return hasSkillSegment(filepath.ToSlash(pattern))
+}
+
+// hasSkillSegment: a directory of the slash path p (not its last part) is a
+// skills directory.
+func hasSkillSegment(p string) bool {
+	parts := strings.Split(p, "/")
+	for _, seg := range parts[:len(parts)-1] {
+		if skillSegment.MatchString(seg) {
+			return true
+		}
+	}
+	return false
 }
 
 // collector carries per-snapshot state (the remaining content budget).
@@ -94,9 +115,13 @@ type collector struct {
 	truncated bool
 	// inSkillTree is set while collecting a skills glob's matches.
 	inSkillTree bool
+	// homes are the scanned users' home directories (scrubbable)
+	homes []string
 	// disguised maps each secret scrubbed from file content to its stand-in,
 	// so a key repeated across files stays one key (secret_scrub.go)
 	disguised map[string]string
+	// inFile: the values disguised in the file being scrubbed, and their stand-ins
+	inFile map[string]string
 }
 
 // inExcludedDir reports whether match lies under an excluded directory that
@@ -226,6 +251,9 @@ func Collect(manifest ProbeManifest, escalate bool) ProbeSnapshot {
 		PrivateGroups:  collectPrivateGroups(),
 	}
 	c := &collector{budget: maxTotalContentBytes}
+	for _, h := range homes {
+		c.homes = append(c.homes, h.Path)
+	}
 
 	// Track scanned users
 	for _, h := range homes {
@@ -244,10 +272,22 @@ func Collect(manifest ProbeManifest, escalate bool) ProbeSnapshot {
 		c.collectPath(&snapshot, p, p, false, true)
 	}
 
-	// Expand and collect glob patterns
-	expandedGlobs := expandPaths(manifest.GlobPatterns, homes)
-	for _, pattern := range expandedGlobs {
-		c.inSkillTree = isSkillPattern(pattern)
+	// Expand and collect glob patterns. Whether a glob walks a skill tree
+	// is read from the manifest's own pattern: a home or a variable's value
+	// under some ".../skills/" made every glob one, and nothing was scrubbed.
+	type glob struct {
+		pattern string
+		skills  bool
+	}
+	var expandedGlobs []glob
+	for _, raw := range manifest.GlobPatterns {
+		for _, p := range expandPaths([]string{raw}, homes) {
+			expandedGlobs = append(expandedGlobs, glob{p, isSkillPattern(raw)})
+		}
+	}
+	for _, g := range expandedGlobs {
+		pattern := g.pattern
+		c.inSkillTree = g.skills
 		// Never descend into symlinked directories: a local readdir lists the
 		// link without following it, so following here duplicated every file
 		// a skill symlinks in from elsewhere. The link itself still matches.
@@ -911,7 +951,8 @@ var secretEnvParts = map[string]bool{
 	"PASSPHRASE": true, "CREDENTIAL": true, "CREDENTIALS": true, "AUTH": true,
 	"COOKIE": true, "SESSION": true, "JWT": true, "DSN": true, "BEARER": true,
 	"HEADER": true, "HEADERS": true, "AUTHORIZATION": true, "SIGNATURE": true,
-	"PAT": true, // GH_PAT, a personal access token
+	// GH_PAT (a personal access token), DB_PWD, CLAUDE_PW, SIM_PIN
+	"PAT": true, "PWD": true, "PW": true, "PIN": true,
 }
 
 // Segments that end in a credential word without a separator
@@ -922,7 +963,8 @@ var locationEnvSuffix = map[string]bool{"PATH": true, "DIR": true, "FILE": true,
 
 func isSecretEnvName(name string) bool {
 	parts := strings.Split(strings.ToUpper(name), "_")
-	if locationEnvSuffix[parts[len(parts)-1]] {
+	// PWD alone is the shell's working directory
+	if locationEnvSuffix[parts[len(parts)-1]] || len(parts) == 1 && parts[0] == "PWD" {
 		return false
 	}
 	for _, p := range parts {
@@ -964,7 +1006,12 @@ func redactURLUserinfo(s string) string {
 // they stand in a value: a token in a variable whose name looks harmless
 // (OPENAI_ORG=sk-proj-…, LYRIE_TELEGRAM_BOT=123456:…) must not ship either.
 // RE2 is linear, so no input can make this slow.
-var tokenShaped = regexp.MustCompile(`(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-(?:proj-|ant-|svcacct-|admin-|or-v1-)?[A-Za-z0-9_-]{20,}|xox[abeprs]-[A-Za-z0-9-]{10,}|\bgsk_[A-Za-z0-9]{20,}|\bpat[A-Za-z0-9]{14}\.[0-9a-f]{64}|\bhf_[A-Za-z0-9]{20,}|\bxai-[A-Za-z0-9]{32,}|A(?:KIA|SIA)[0-9A-Z]{16,}|\bdevin-[A-Za-z0-9$._-]{60,}|\bcog_[A-Za-z0-9]{16,}|\bapk_(?:user_)?[A-Za-z0-9]{16,}|\bnvapi-[A-Za-z0-9_-]{20,}|AIza[0-9A-Za-z_-]{30,}|glpat-[A-Za-z0-9_-]{20,}|\b[0-9]{6,12}:[A-Za-z0-9_-]{30,}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]*)`)
+var tokenShaped = regexp.MustCompile(`(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-(?:proj-|ant-|svcacct-|admin-|or-v1-)?[A-Za-z0-9_-]{20,}|xox[abeprs]-[A-Za-z0-9-]{10,}|\bgsk_[A-Za-z0-9]{20,}|\bpat[A-Za-z0-9]{14}\.[0-9a-f]{64}|\bhf_[A-Za-z0-9]{20,}|\bxai-[A-Za-z0-9]{32,}|A(?:KIA|SIA)[0-9A-Z]{16,}|\bdevin-[A-Za-z0-9$._-]{60,}|\bcog_[A-Za-z0-9]{16,}|\bapk_(?:user_)?[A-Za-z0-9]{16,}|\bnvapi-[A-Za-z0-9_-]{20,}|AIza[0-9A-Za-z_-]{30,}|glpat-[A-Za-z0-9_-]{20,}|\b[0-9]{6,12}:[A-Za-z0-9_-]{30,}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]*|` +
+	// formats the checks don't name, never shipped either: Stripe, SendGrid,
+	// DigitalOcean, Shopify, Linear, Notion, Perplexity
+	`\b[sr]k_live_[A-Za-z0-9]{20,}|\bSG\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}|\bdop_v1_[a-f0-9]{64}|\bshpat_[a-fA-F0-9]{32}|\blin_api_[A-Za-z0-9]{32,}|\bntn_[A-Za-z0-9]{32,}|\bpplx-[A-Za-z0-9]{32,}|` +
+	// npm, PyPI, Figma, Docker Hub, Google OAuth access tokens
+	`\bnpm_[A-Za-z0-9]{36,}|\bpypi-AgE[A-Za-z0-9_-]{50,}|\bfigd_[A-Za-z0-9_-]{40,}|\bdckr_pat_[A-Za-z0-9_-]{24,}|\bya29\.[A-Za-z0-9_-]{40,})`)
 
 // gutterWrap is a continuation line of a Rust CLI error report (miette, as
 // openshell prints it): the report is wrapped to the terminal width anywhere,
@@ -988,12 +1035,29 @@ func redactSecretValues(s string) string {
 	s = redactURLUserinfo(s)
 	// a URL whose path is the credential (Zapier MCP, webhooks, random tokens)
 	s = replaceURLPathSecrets(s, func(string) string { return redactedEnvValue })
+	// …/mcp#<token>: a token that is the whole fragment
+	s = replaceURLFragmentTokens(s, func(string) string { return redactedEnvValue })
 	s = urlParam.ReplaceAllStringFunc(s, func(m string) string {
 		g := urlParam.FindStringSubmatch(m)
 		if urlSecretParam(g[2]) && g[3] != "" {
 			return g[1] + g[2] + "=" + redactedEnvValue
 		}
 		return m
+	})
+	// what the shared argv rules call a credential, in printed JSON args
+	// arrays and on command lines (mysql -p, sshpass -p, redis-cli -a, -k):
+	// redacted however plain the value is
+	s = redactArgvArrays(s, redactedEnvValue)
+	s = onSecretLines(s, argvHints, func(line string) string {
+		return commandCredentials(line, func(string) string { return redactedEnvValue })
+	})
+	// --api-key X, --token=X (HERMES_EXTRA_ARGS, a command line in output):
+	// as in files, judged by the value
+	s = flagCredentials(s, func(v string) string {
+		if !worthDisguising(v) {
+			return v
+		}
+		return redactedEnvValue
 	})
 	// Authorization: Bearer <opaque>, TOKEN=…, "apiKey": "…"
 	s = onSecretLines(s, secretHints, func(line string) string {
@@ -1020,7 +1084,26 @@ func redactJSONValue(v interface{}, secret bool) interface{} {
 		}
 		return t
 	case []interface{}:
+		// an argv: the shared argv rules ("--api-key", "<value>"; "mysql",
+		// "-p…"), the rest judged one by one
+		var argv []string
+		index := map[int]int{}
 		for i, val := range t {
+			if str, ok := val.(string); ok {
+				index[len(argv)] = i
+				argv = append(argv, str)
+			}
+		}
+		hit := map[int][2]int{}
+		for _, h := range judgeArgv(argv) {
+			hit[index[h.tok]] = [2]int{h.from, h.to}
+		}
+		for i, val := range t {
+			if sp, ok := hit[i]; ok {
+				str := val.(string)
+				t[i] = str[:sp[0]] + redactedEnvValue + str[sp[1]:]
+				continue
+			}
 			t[i] = redactJSONValue(val, secret)
 		}
 		return t
@@ -1450,9 +1533,15 @@ func recordDeniedDir(snapshot *ProbeSnapshot, dir string) {
 	}
 }
 
-// headBytes is how much of an omitted skill-tree file is shipped: enough for
-// every executable magic IOC-007 knows (ELF, Mach-O, PE, shebang-less blobs).
-const headBytes = 64
+// headBytes is how much of an omitted skill-tree file is shipped: what the
+// CLI reads to judge a format (HEAD_BYTES in src/analyzers/binary-text.ts
+// and ioc-007-binary-patterns.ts). A PE stub's header sits at e_lfanew,
+// which may lie past it: then the head runs to that header, up to
+// maxPEOffset as IOC-007 reads it locally.
+const (
+	headBytes   = 4096
+	maxPEOffset = 1 << 20
+)
 
 // withHead adds the first headBytes of a regular skill-tree file to an
 // omitted entry. Read on the opened file, non-blocking, so a FIFO swapped in
@@ -1469,11 +1558,32 @@ func (c *collector) withHead(e FileEntry, path string, info os.FileInfo) FileEnt
 	if st, err := f.Stat(); err != nil || !st.Mode().IsRegular() {
 		return e
 	}
+	// charged to the content budget like content: when it is spent, no
+	// head (a tree of sparse executables must not outgrow the snapshot)
+	if c.budget < int64(base64.StdEncoding.EncodedLen(headBytes)) {
+		c.truncated = true
+		return e
+	}
 	buf := make([]byte, headBytes)
 	n, _ := io.ReadFull(f, buf)
+	if n >= 0x40 && buf[0] == 'M' && buf[1] == 'Z' {
+		// up to the PE header only when one is there: an MZ-led script has
+		// no reason to ship more than 4 KiB
+		pe := int(binary.LittleEndian.Uint32(buf[0x3c:0x40]))
+		sig := make([]byte, 4)
+		if pe+4 > n && pe <= maxPEOffset {
+			if m, _ := f.ReadAt(sig, int64(pe)); m == 4 && string(sig) == "PE\x00\x00" &&
+				c.budget >= int64(base64.StdEncoding.EncodedLen(pe+4)) {
+				more := make([]byte, pe+4-n)
+				m, _ := f.ReadAt(more, int64(n))
+				buf = append(buf[:n], more[:m]...)
+				n += m
+			}
+		}
+	}
 	if n > 0 {
 		e.Head = base64.StdEncoding.EncodeToString(buf[:n])
-		c.budget -= int64(len(e.Head))
+		c.budget -= jsonSize(e.Head)
 	}
 	return e
 }

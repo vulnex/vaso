@@ -22,7 +22,7 @@ export const mcp001 = defineCheck({
           `Transport: ${server.transport}`,
           server.command ? `Command: ${server.command}` : null,
           server.url ? `URL: ${maskUrlSecrets(server.url)}` : null,
-          server.args?.length ? `Args: ${maskArgSecrets(server.args).join(' ')}` : null,
+          server.args?.length ? `Args: ${maskArgSecrets(server.args, server.command).join(' ')}` : null,
           server.env ? `Env vars: ${Object.keys(server.env).join(', ')}` : null,
         ].filter(Boolean).join(', ');
 

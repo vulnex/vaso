@@ -350,6 +350,10 @@ export const geminiAdapter: AgentAdapter = {
         // tmp/ files with content; chats and the rest stay out. The second
         // root is the runtime dir under the macOS seatbelt sandbox.
         '~/.gemini/tmp/*/memory/MEMORY.md',
+        // A context file renamed with `context.fileName` (GEM-010) — the
+        // manifest can't read settings, so every top-level markdown file
+        // (non-.md names stay local-only)
+        '~/.gemini/*.md',
         '~/.cache/.gemini/tmp/*/memory/MEMORY.md',
         nvmBinaryGlob('gemini'),
         ...npmPackageJsonGlobs(NPM_PACKAGE_NAME),

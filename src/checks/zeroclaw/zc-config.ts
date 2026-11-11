@@ -2,6 +2,7 @@ import type { FixResult, ParsedConfig, ScanContext } from '../../core/types.js';
 import { updateConfigValue } from '../../remediation/config-writer.js';
 import type { KeyPath } from '../../core/utils.js';
 import { envOverrideFor } from '../../adapters/env-overrides.js';
+import { isLoopbackAddress } from '../../core/listen-address.js';
 
 /**
  * Shared readers for ZeroClaw's V3 config schema (`schema_version = 3`,
@@ -41,11 +42,13 @@ export function mainConfig(configs: ParsedConfig[]): ParsedConfig | undefined {
   return configs.find(c => c.format === 'toml' && /(^|[\\/])config\.toml$/.test(c.filePath));
 }
 
-/** Upstream `zeroclaw_config::pairing::is_public_bind`: anything but these is non-loopback. */
-const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1', '[::1]', '0:0:0:0:0:0:0:1']);
-
+/**
+ * Whether the gateway host binds loopback only — any spelling the socket
+ * layer resolves to 127.0.0.0/8 or ::1 (src/core/listen-address.ts), not
+ * just the literals upstream's is_public_bind guard lists.
+ */
 export function isLoopbackHost(host: string): boolean {
-  return LOOPBACK_HOSTS.has(host.trim().toLowerCase());
+  return isLoopbackAddress(host);
 }
 
 export interface GatewayPosture {

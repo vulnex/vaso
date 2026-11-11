@@ -23,7 +23,7 @@ export const mcp021 = defineCheck({
 
         evidence.push({
           file: config.filePath,
-          snippet: `Server "${server.name}": ${server.command} ${maskArgSecrets(server.args).join(' ')}`,
+          snippet: `Server "${server.name}": ${server.command} ${maskArgSecrets(server.args, server.command).join(' ')}`,
           detail: `MCP server launched via ${shellInvocation(base, server.args)} — any value in env or args is parsed as shell, opening the door to injection`,
         });
       }

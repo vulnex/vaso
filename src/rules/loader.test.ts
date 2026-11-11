@@ -297,4 +297,16 @@ rules:
     expect(result.allRules).toHaveLength(0);
     expect(result.allErrors[0].message).toMatch(/backtrack/);
   });
+
+  it('loads every rule file of a directory named with --rules (dt21 g8-R2n7)', async () => {
+    const dir = join(TEST_DIR, 'rules');
+    const rule = (id: string) => `rules:\n  - id: ${id}\n    name: Dir test\n    category: config\n    severity: info\n    description: d\n    config:\n      path: "a.b"\n      operator: "exists"\n`;
+    await writeFile(join(dir, 'a.yaml'), rule('DIR-001'));
+    await writeFile(join(dir, 'b.yml'), rule('DIR-002'));
+    await writeFile(join(dir, 'notes.txt'), 'not a rule');
+    const result = await loadRules({ skipGlobal: true, skipProject: true, extraPaths: [dir] });
+    expect(result.allRules.map(r => r.id)).toEqual(['DIR-001', 'DIR-002']);
+    expect(result.files.every(f => !f.unreadable)).toBe(true);
+    expect(result.allRules.every(r => r.source === 'explicit')).toBe(true);
+  });
 });

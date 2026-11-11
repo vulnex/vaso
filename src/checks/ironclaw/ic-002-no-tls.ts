@@ -1,7 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import {
-  isLegacy, isLoopbackHost, legacyEnv, legacyToml, lineOf, rebornConfig, rebornProviders, str, table, urlHost,
+  isLegacy, isLoopbackHost, legacyEnv, legacyToml, lineOf, rebornConfig, rebornProviders, str, table, tableLineOf, urlHost,
 } from './layout.js';
 
 /*
@@ -43,7 +43,7 @@ export const ic002 = defineCheck({
       for (const [slot, raw] of Object.entries(llm)) {
         const url = str(table(raw)?.base_url);
         const host = url ? cleartext(url) : undefined;
-        if (config && url && host) flag(config.filePath, lineOf(config, 'base_url'), `[llm.${slot}].base_url`, url, host);
+        if (config && url && host) flag(config.filePath, tableLineOf(config, `llm.${slot}`, 'base_url'), `[llm.${slot}].base_url`, url, host);
       }
       const providers = rebornProviders(ctx);
       for (const entry of providers?.entries ?? []) {

@@ -173,7 +173,7 @@ export async function runMCPList(options: { format: string; path?: string[] }): 
 
     if (options.format === 'json') {
       // argv credentials (`--config '{"token":…}'`) masked as MCP-003 finds them
-      const configs = result.configs.map(c => ({ ...c, servers: c.servers.map(sv => (sv.args ? { ...sv, args: maskArgSecrets(sv.args) } : sv)) }));
+      const configs = result.configs.map(c => ({ ...c, servers: c.servers.map(sv => (sv.args ? { ...sv, args: maskArgSecrets(sv.args, sv.command) } : sv)) }));
       console.log(toReportJson({ ...result, configs }));
       return;
     }
@@ -194,7 +194,7 @@ export async function runMCPList(options: { format: string; path?: string[] }): 
         console.log(`    ${chalk.bold(server.name)}`);
         console.log(`      Transport: ${server.transport}`);
         if (server.command) {
-          const cmd = [server.command, ...maskArgSecrets(server.args ?? [])].join(' ');
+          const cmd = [server.command, ...maskArgSecrets(server.args ?? [], server.command)].join(' ');
           console.log(`      Command: ${cmd}`);
         }
         if (server.url) {

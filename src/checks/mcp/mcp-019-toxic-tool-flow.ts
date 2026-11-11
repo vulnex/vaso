@@ -1,6 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { splitStrings } from '../../mcp/source-segments.js';
+import { pythonToolHandlers } from '../../analyzers/python-sinks.js';
 
 // SQL, not the word: `SELECT … FROM`, or lower-case `select *` / `select a, b`.
 const SQL_TEXT = /\bSELECT\b[^;]{0,200}?\bFROM\b|\bselect\s+(?:\*|\w+\s*,)[^;]{0,200}?\bfrom\b/;
@@ -50,6 +51,36 @@ const SINK_PATTERNS = [
   /blob\.upload/i,
 ];
 
+/** The same capabilities in a Python tool function. */
+const PY_SOURCE_PATTERNS = [
+  /\bopen\s*\(/,
+  /\.read_(?:text|bytes)\s*\(/,
+  /\bos\.(?:listdir|scandir|walk)\s*\(|\bglob\.i?glob\s*\(|\.(?:r?glob|iterdir)\s*\(/,
+  /\bsubprocess\.\w+\s*\(|\bos\.(?:system|popen)\s*\(/,
+  /\.execute(?:many)?\s*\(|\bsqlite3\.connect\s*\(/,
+  SQL_TEXT,
+  /\bos\.(?:environ|getenv)\b/,
+  /\bPath\.home\s*\(|\bexpanduser\s*\(/,
+  /\/etc\/passwd/,
+  /\.ssh\//,
+  /\.env\b/,
+  /\bkeyring\.get_password\s*\(|\b(?:load|read|get)_?credentials?\w*\s*\(/i,
+];
+
+const PY_SINK_PATTERNS = [
+  /\b(?:requests|httpx)\.(?:post|put|patch|get|request|delete)\s*\(/,
+  /\b(?:requests\.Session|httpx\.(?:Async)?Client|aiohttp\.ClientSession|ClientSession)\s*\(/,
+  /\burlopen\s*\(/,
+  /\bsmtplib\.\w+\s*\(|\.sendmail\s*\(|\.send_message\s*\(/,
+  /\bwebsockets?\.\w+\s*\(/,
+  /\bsocket\.(?:socket|create_connection)\s*\(/,
+  /\.(?:upload_file|upload_fileobj|put_object)\s*\(/,
+  /webhook/i,
+  /slack/i,
+  /discord/i,
+  /telegram/i,
+];
+
 interface ToolClassification {
   name: string;
   isSource: boolean;
@@ -70,12 +101,12 @@ function handlerText(body: string): { text: string; data: string[] } {
   return { text: [code.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, ' '), ...data].join('\n'), data };
 }
 
-function classifyToolHandler(body: string): { isSource: boolean; isSink: boolean; sourceCapabilities: string[]; sinkCapabilities: string[] } {
+function classifyToolHandler(body: string, python = false): { isSource: boolean; isSink: boolean; sourceCapabilities: string[]; sinkCapabilities: string[] } {
   const sourceCapabilities: string[] = [];
   const sinkCapabilities: string[] = [];
-  const { text: handlerCode, data } = handlerText(body);
+  const { text: handlerCode, data } = handlerText(python ? body.replace(/(^|\s)#[^\n]*/g, '$1') : body);
 
-  for (const pattern of SOURCE_PATTERNS) {
+  for (const pattern of python ? PY_SOURCE_PATTERNS : SOURCE_PATTERNS) {
     const match = pattern.exec(handlerCode);
     if (match) {
       sourceCapabilities.push(match[0]);
@@ -84,7 +115,7 @@ function classifyToolHandler(body: string): { isSource: boolean; isSink: boolean
   const file = data.find(credentialFile);
   if (file) sourceCapabilities.push(file);
 
-  for (const pattern of SINK_PATTERNS) {
+  for (const pattern of python ? PY_SINK_PATTERNS : SINK_PATTERNS) {
     const match = pattern.exec(handlerCode);
     if (match) {
       sinkCapabilities.push(match[0]);
@@ -165,13 +196,15 @@ export const mcp019 = defineCheck({
     for (const source of sources) {
       if (!source.sourceCode) continue;
 
-      const handlers = extractToolHandlers(source.sourceCode);
+      // Python servers: the `@mcp.tool()` functions
+      const python = source.language === 'python';
+      const handlers = python ? pythonToolHandlers(source.sourceCode) : extractToolHandlers(source.sourceCode);
       const classifications: ToolClassification[] = [];
 
       if (handlers.size > 0) {
         // Classify each tool by its handler body
         for (const [name, body] of handlers) {
-          const result = classifyToolHandler(body);
+          const result = classifyToolHandler(body, python);
           classifications.push({ name, ...result });
         }
       } else {

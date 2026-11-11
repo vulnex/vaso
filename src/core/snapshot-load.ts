@@ -4,6 +4,12 @@ import type { ProbeSnapshot } from './snapshot-types.js';
 import { neutralizeSnapshotIdentity } from './snapshot-identity.js';
 
 /**
+ * A skill-tree file's head (probe ≥ 1.4.1): 4 KiB, or up to a PE stub's
+ * e_lfanew (at most 1 MiB, as IOC-007 reads it) plus the PE header — base64.
+ */
+const MAX_HEAD_BASE64_CHARS = Math.ceil(((1 << 20) + 4) / 3) * 4;
+
+/**
  * Loading `--snapshot` files (scan, detect, probe validate). A snapshot is
  * untrusted input — it may be hand-edited or come from another machine — so
  * it is held to what a real probe can produce: the file no larger than a
@@ -63,7 +69,7 @@ export function validateSnapshot(value: unknown): string[] {
       // A mode that isn't a permission number would read as 0 (owner-only)
       // and suppress every permission finding for the file
       if (!isRecord(entry) || (entry.content !== undefined && typeof entry.content !== 'string')
-        || (entry.head !== undefined && (typeof entry.head !== 'string' || entry.head.length > 128))
+        || (entry.head !== undefined && (typeof entry.head !== 'string' || entry.head.length > MAX_HEAD_BASE64_CHARS))
         || !isMode(entry.mode) || typeof entry.exists !== 'boolean') {
         badEntries++;
         continue;

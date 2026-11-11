@@ -1,6 +1,10 @@
 import { dirname, join } from 'node:path';
 import type { Evidence, ScanContext } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { truncateSnippet } from '../../core/patterns.js';
+
+/** `// turbo` / `// turbo-all` alone on a line (list markers and CR line ends allowed). */
+const TURBO_DIRECTIVE = /^\s*(?:[-*]\s+)?\/\/\s*turbo(-all)?\s*$/;
 
 const WORKSPACE_WORKFLOW_DIRS = [join('.devin', 'workflows'), join('.windsurf', 'workflows')];
 
@@ -59,12 +63,15 @@ export const ws006 = defineCheck({
         const lines = content.split('\n');
         for (let i = 0; i < lines.length; i++) {
           const line = lines[i];
-          if (!line.includes('// turbo')) continue;
-          const isTurboAll = line.includes('// turbo-all');
+          // The directive is a line of its own (`// turbo` above a step,
+          // `// turbo-all` anywhere); `// turbocharged build` is prose
+          const directive = TURBO_DIRECTIVE.exec(line);
+          if (!directive) continue;
+          const isTurboAll = directive[1] === '-all';
           evidence.push({
             file: filePath,
             line: i + 1,
-            snippet: line.trim().slice(0, 120),
+            snippet: truncateSnippet(line.trim()),
             detail: isTurboAll
               ? "'// turbo-all' auto-runs EVERY command in this workflow without approval"
               : "'// turbo' auto-runs the annotated command without approval",

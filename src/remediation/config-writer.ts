@@ -1,10 +1,12 @@
 import { readRegularFile, writeRegularFile, chmodNoFollow, regularMode, UnsafeTargetError } from './safe-file.js';
 import YAML from 'yaml';
-import { parse as parseTOML, stringify as stringifyTOML } from 'smol-toml';
+import { parse as parseTOMLStrict, stringify as stringifyTOML } from 'smol-toml';
 import type { FixResult, ParsedConfig } from '../core/types.js';
 import { getNestedValue, keySegments, setNestedValue, type KeyPath } from '../core/utils.js';
 import { loadConfig } from '../core/config-loader.js';
 import { parseJsonLenient } from '../core/jsonc.js';
+import { editJsonText } from './json-edit.js';
+import { isDeepStrictEqual } from 'node:util';
 
 /**
  * Update or insert a key=value pair in a .env file.
@@ -44,28 +46,43 @@ export async function updateEnvFile(filePath: string, key: string, value: string
 }
 
 /**
- * Update a nested value in a JSON file, detecting and preserving indentation.
+ * Update a nested value in a JSON file. The key's value is edited in the text
+ * (see json-edit.ts), so JSONC/JSON5 comments, number spellings and integers
+ * beyond 2^53 survive; the result must parse to the intended document.
+ * Layouts the editor can't follow are re-serialized as plain JSON (which both
+ * JSONC and JSON5 accept), with the detected indentation.
  */
 export async function updateJsonFile(filePath: string, keyPath: KeyPath, value: unknown): Promise<void> {
   const content = (await readRegularFile(filePath)).toString('utf-8');
   // JSONC/JSON5 configs load (see config-loader) — the fix must read them too.
-  // They are written back as plain JSON, which both formats accept.
   const obj = parseJsonLenient(content.replace(/^\uFEFF/, '')) as Record<string, unknown>;
+  setNestedValue(obj, keyPath, value);
+
+  const edited = editJsonText(content, keySegments(keyPath), value);
+  if (edited !== undefined) {
+    try {
+      if (isDeepStrictEqual(parseJsonLenient(edited.replace(/^\uFEFF/, '')), obj)) {
+        await writeRegularFile(filePath, edited);
+        return;
+      }
+    } catch {
+      // the in-place edit doesn't parse — fall back below
+    }
+  }
 
   // Detect indentation from the file
   const indentMatch = content.match(/^(\s+)/m);
   const indent = indentMatch ? indentMatch[1].length : 2;
-
-  setNestedValue(obj, keyPath, value);
   await writeRegularFile(filePath, JSON.stringify(obj, null, indent) + '\n');
 }
 
 /**
  * Update a nested value in a YAML file using Document API to preserve comments and structure.
+ * Integers are read as BigInt so values beyond 2^53 are written back unchanged.
  */
 export async function updateYamlFile(filePath: string, keyPath: KeyPath, value: unknown): Promise<void> {
   const content = (await readRegularFile(filePath)).toString('utf-8');
-  const doc = YAML.parseDocument(content);
+  const doc = YAML.parseDocument(content, { intAsBigInt: true });
   const keys = keySegments(keyPath);
   doc.setIn(keys, value);
   await writeRegularFile(filePath, doc.toString());
@@ -166,6 +183,11 @@ function scanTomlValue(lines: string[], line: number, from: number): { line: num
   return undefined;
 }
 
+/** Parse TOML with integers beyond 2^53 kept exact (BigInt), so they survive a re-serialization. */
+function parseTOML(content: string): Record<string, unknown> {
+  return parseTOMLStrict(content, { integersAsBigInt: 'asNeeded' }) as Record<string, unknown>;
+}
+
 /** Order-insensitive structural equality for parsed TOML documents. */
 function tomlEqual(a: unknown, b: unknown): boolean {
   if (a instanceof Date || b instanceof Date) return String(a) === String(b);
@@ -183,12 +205,72 @@ function tomlEqual(a: unknown, b: unknown): boolean {
 }
 
 /**
+ * Set `segs` inside a one-line inline table (`{ a = 1, b = { c = 2 } }`),
+ * replacing an existing value or appending the key before the closing brace.
+ */
+function editInlineTable(text: string, segs: string[], literal: string): string | undefined {
+  if (!text.startsWith('{') || !text.endsWith('}')) return undefined;
+  const members: { key: string[]; valueStart: number; valueEnd: number }[] = [];
+  let i = 1;
+  while (i < text.length - 1) {
+    while (text[i] === ' ' || text[i] === '\t') i++;
+    if (i >= text.length - 1) break;
+    const eq = text.indexOf('=', i);
+    if (eq === -1) return undefined;
+    const key = splitTomlKey(text.slice(i, eq));
+    if (!key) return undefined;
+    let j = eq + 1;
+    while (text[j] === ' ' || text[j] === '\t') j++;
+    const valueStart = j;
+    let depth = 0;
+    while (j < text.length - 1 || depth > 0) {
+      const c = text[j];
+      if (c === undefined) return undefined;
+      if (c === '"' || c === "'") {
+        let k = j + 1;
+        while (k < text.length && text[k] !== c) k += c === '"' && text[k] === '\\' ? 2 : 1;
+        if (k >= text.length) return undefined;
+        j = k + 1;
+        continue;
+      }
+      if (c === '[' || c === '{') depth++;
+      else if (c === ']' || c === '}') depth--;
+      else if (c === ',' && depth === 0) break;
+      j++;
+    }
+    members.push({ key, valueStart, valueEnd: j - (text.slice(valueStart, j).length - text.slice(valueStart, j).trimEnd().length) });
+    i = text[j] === ',' ? j + 1 : j;
+  }
+  for (const m of [...members].reverse()) {
+    if (m.key.join('\u0000') === segs.join('\u0000')) {
+      return text.slice(0, m.valueStart) + literal + text.slice(m.valueEnd);
+    }
+    if (m.key.length === 1 && m.key[0] === segs[0] && segs.length > 1 && text[m.valueStart] === '{') {
+      const inner = editInlineTable(text.slice(m.valueStart, m.valueEnd), segs.slice(1), literal);
+      return inner === undefined ? undefined : text.slice(0, m.valueStart) + inner + text.slice(m.valueEnd);
+    }
+  }
+  const entry = `${tomlKey(segs)} = ${literal}`;
+  if (members.length === 0) return `{ ${entry} }`;
+  const last = members[members.length - 1];
+  return `${text.slice(0, last.valueEnd)}, ${entry}${text.slice(last.valueEnd)}`;
+}
+
+/**
  * Edit one key in TOML text in place: replace the value of an existing
  * `key = …` line (keeping indentation and a trailing comment), else add the
  * key under the deepest `[table]` header on its path, else append a new
  * table. Returns undefined when the layout isn't one this can follow.
  */
 function editTomlText(content: string, path: string[], value: unknown): string | undefined {
+  // A CRLF file is edited as LF and written back CRLF, so the edited and the
+  // inserted lines end like the rest (a mixed file keeps its bare LFs)
+  const crlf = content.includes('\r\n') && !/(^|[^\r])\n/.test(content);
+  if (crlf) return editTomlLines(content.replace(/\r\n/g, '\n'), path, value)?.replace(/\n/g, '\r\n');
+  return editTomlLines(content, path, value);
+}
+
+function editTomlLines(content: string, path: string[], value: unknown): string | undefined {
   let rendered: string;
   try {
     rendered = stringifyTOML({ v: value }).trim();
@@ -225,7 +307,17 @@ function editTomlText(content: string, path: string[], value: unknown): string |
     const span = scanTomlValue(lines, n, valueStart);
     if (!keySegs || !span) return undefined;
     if (current) {
-      if ([...current, ...keySegs].join(SEP) === want) {
+      const full = [...current, ...keySegs];
+      if (span.line === n && full.length < path.length && full.every((k, i) => k === path[i])
+        && lines[n][valueStart] === '{') {
+        // A key inside an inline table: `workspace = { a = 1, b = 2 }`
+        const inline = editInlineTable(lines[n].slice(valueStart, span.end).trimEnd(), path.slice(full.length), literal);
+        if (inline === undefined) return undefined;
+        const tail = lines[n].slice(valueStart).slice(lines[n].slice(valueStart, span.end).trimEnd().length);
+        const replaced = `${lines[n].slice(0, valueStart)}${inline}${tail}`;
+        return [...lines.slice(0, n), replaced, ...lines.slice(n + 1)].join('\n');
+      }
+      if (full.join(SEP) === want) {
         const tail = lines[span.line].slice(span.end).trim();
         const comment = tail.startsWith('#') ? ` ${tail}` : '';
         const replaced = `${lines[n].slice(0, valueStart)}${literal}${comment}`;
@@ -254,8 +346,9 @@ function editTomlText(content: string, path: string[], value: unknown): string |
  * Update a nested value in a TOML file. The edit is surgical — only the one
  * key line changes, so comments, key order and number formatting (`1.0`)
  * survive — and the result is parse-validated against the intended document
- * before it is written. Layouts the line editor can't follow (inline tables,
- * arrays of tables) fall back to a full smol-toml re-serialization.
+ * before it is written; a key inside a one-line inline table is edited there.
+ * Layouts the line editor can't follow (multi-line inline tables, arrays of
+ * tables) fall back to a full smol-toml re-serialization.
  */
 export async function updateTomlFile(filePath: string, keyPath: KeyPath, value: unknown): Promise<void> {
   const content = (await readRegularFile(filePath)).toString('utf-8');

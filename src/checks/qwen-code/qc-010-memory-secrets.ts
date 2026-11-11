@@ -22,12 +22,18 @@ function contextFileNames(ctx: ScanContext): string[] {
   return [...names];
 }
 
-async function scanFile(file: string, reader: MemoryReader, evidence: Evidence[]): Promise<void> {
+async function scanFile(ctx: ScanContext, file: string, reader: MemoryReader, evidence: Evidence[]): Promise<void> {
   // Present but unreadable: reported as CONFIG-LOAD
   const content = await reader.read(file);
-  if (content === undefined) return;
+  if (content === undefined) {
+    // The probe collects ~/.qwen/*.md only (it can't read context.fileName):
+    // a renamed context file without .md is never in a snapshot
+    if (ctx.fs.kind === 'snapshot' && !/\.md$/i.test(file)) reader.unverified.push(`${file} (not collected: not a .md file)`);
+    return;
+  }
 
-  evidence.push(...scanMemorySecrets(file, content));
+  // One push per item: a spread of a huge result overflows the call stack
+  for (const e of scanMemorySecrets(file, content)) evidence.push(e);
 }
 
 export const qc010 = defineCheck({
@@ -42,7 +48,7 @@ export const qc010 = defineCheck({
     const evidence: Evidence[] = [];
     const reader = new MemoryReader(ctx.fs);
     for (const filename of contextFileNames(ctx)) {
-      await scanFile(join(ctx.installation.installDir, filename), reader, evidence);
+      await scanFile(ctx, join(ctx.installation.installDir, filename), reader, evidence);
     }
     return h.fromEvidence(evidence, {
       severity: memorySecretSeverity(evidence),

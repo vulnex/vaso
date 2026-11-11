@@ -55,7 +55,7 @@ export const cc012 = defineCheck({
         continue;
       }
       found++;
-      evidence.push(...scanMemorySecrets(memoryFile, content));
+      for (const e of scanMemorySecrets(memoryFile, content)) evidence.push(e);
     }
     if (found === 0) {
       // Omitted by the probe (size): not verified, rather than unreadable

@@ -46,6 +46,14 @@ async function discoverRuleFiles(dir: string, fs: FSProvider): Promise<string[]>
     .sort();
 }
 
+async function isDirectory(path: string, fs: FSProvider): Promise<boolean> {
+  try {
+    return (await fs.stat(path)).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
 async function parseRuleFile(filePath: string, source: RuleSource, fs: FSProvider): Promise<RuleFileResult> {
   let content: string;
   try {
@@ -78,7 +86,7 @@ const TIER_LABEL: Record<RuleSource, string> = { user: 'user', project: 'project
  * Load declarative rules from all discovery paths:
  * 1. User: ~/.vaso/rules/
  * 2. Project: .vaso/rules/ (relative to cwd) — untrusted, see RuleSource
- * 3. Extra paths from --rules CLI flag (replace a user rule of the same ID)
+ * 3. Extra paths from --rules CLI flag, files or directories (replace a user rule of the same ID)
  *
  * Within one tier the first definition of an ID wins (files load sorted) and
  * a later one is skipped with a warning naming both files.
@@ -105,7 +113,14 @@ export async function loadRules(options?: {
     for (const f of await discoverRuleFiles(projectDir, provider)) files.push(await parseRuleFile(f, 'project', provider));
   }
 
-  for (const p of options?.extraPaths ?? []) files.push(await parseRuleFile(p, 'explicit', provider));
+  for (const p of options?.extraPaths ?? []) {
+    // `--rules <dir>` loads the directory's rule files, like ~/.vaso/rules
+    if (await isDirectory(p, provider)) {
+      for (const f of await discoverRuleFiles(p, provider)) files.push(await parseRuleFile(f, 'explicit', provider));
+    } else {
+      files.push(await parseRuleFile(p, 'explicit', provider));
+    }
+  }
 
   for (const file of files) {
     for (const err of file.errors) {

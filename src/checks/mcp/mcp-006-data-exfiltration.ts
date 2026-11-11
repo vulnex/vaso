@@ -1,6 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { analyzeCode, type DataFlowResult } from '../../analyzers/ast-analyzer.js';
+import { analyzePythonDataFlow } from '../../analyzers/python-sinks.js';
 
 /** Receivers of outbound HTTP calls (`axios.post`, `got.get`, `this.axiosInstance.post`). */
 const HTTP_RECEIVER = /^(?:axios\w*|got|ky|http|https|request|superagent|needle|undici|\w*[Aa]xios\w*|\w*[Hh]ttp[Cc]lient)$/;
@@ -26,6 +27,17 @@ function isExfiltration(r: DataFlowResult): boolean {
   return OUTBOUND_METHODS.has(r.sink ?? '') && HTTP_RECEIVER.test(r.sinkObject ?? '');
 }
 
+/**
+ * The same for a Python server: file contents or the whole environment
+ * (`dict(os.environ)`) sent through a network client (`requests.post`,
+ * `httpx`, `urlopen`, `smtplib`) — not a single credential, and not a
+ * process the server runs (MCP-004/005 judge those).
+ */
+function isPythonExfiltration(r: DataFlowResult): boolean {
+  if (r.type !== 'source-to-sink' || r.sinkObject === undefined) return false;
+  return r.sourceKind === 'file' || r.wholeEnv === true;
+}
+
 export const mcp006 = defineCheck({
   id: 'MCP-006',
   name: 'Data Exfiltration Risk',
@@ -40,12 +52,10 @@ export const mcp006 = defineCheck({
 
     for (const source of sources) {
       if (!source.sourceCode) continue;
-      // The data-flow analyzer parses JavaScript; Python source has no AST here.
-      if (source.language === 'python') continue;
+      const python = source.language === 'python';
+      const results = python ? analyzePythonDataFlow(source.sourceCode) : analyzeCode(source.sourceCode, source.localPath ?? source.serverName);
 
-      const results = analyzeCode(source.sourceCode, source.localPath ?? source.serverName);
-
-      const exfilFindings = results.filter(isExfiltration);
+      const exfilFindings = results.filter(python ? isPythonExfiltration : isExfiltration);
       // Opening a WebSocket sends nothing by itself — a CDP/debugger or
       // realtime client (@metamask/device-mcp) is not exfiltration
       const suspiciousNet = results.filter(r => r.type === 'suspicious-network' && r.sink !== 'WebSocket');

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, rmSync, existsSync, readFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, rmSync, existsSync, readFileSync, symlinkSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -140,6 +140,40 @@ describe.skipIf(process.platform === 'win32')('bin/vaso-quick.sh', () => {
       expect(byState.out).toMatch(/\[x\].*all interfaces/);
       const byHome = quick({ 'openclaw.json': '{ gateway: { bind: "loopback" } }', '~/alt/.openclaw/openclaw.json': lan }, 0o600, 'bash', { OPENCLAW_HOME: '$HOME/alt' });
       expect(byHome.out).toMatch(/\[x\].*all interfaces/);
+    });
+  });
+
+  describe('dt21 g8-F19: unreadable, owner-only and symlinked configs', () => {
+    it.skipIf(process.getuid?.() === 0)('stops with exit 2 when the config exists but can\'t be read (no clean grade)', () => {
+      const r = quick({ 'openclaw.json': '{ gateway: { bind: "lan" } }' }, 0o000);
+      expect(r.status).toBe(2);
+      expect(r.out).toMatch(/Cannot read .*openclaw\.json/);
+      expect(r.out).not.toMatch(/Score:/);
+    });
+
+    it('treats any owner-only mode (700, 500, 400) as restrictive and 640 / 604 as not', () => {
+      for (const mode of [0o700, 0o500, 0o400, 0o600]) {
+        expect(quick({ 'openclaw.json': '{}' }, mode).out).toMatch(/\[\+\].*restrictive permissions/);
+      }
+      for (const mode of [0o640, 0o604, 0o644]) {
+        expect(quick({ 'openclaw.json': '{}' }, mode).out).toMatch(/\[x\].*permissive permissions/);
+      }
+    });
+
+    it('judges a symlinked config by its target', () => {
+      const home = mkdtempSync(join(tmpdir(), 'vaso-quick-'));
+      try {
+        mkdirSync(join(home, '.openclaw'));
+        mkdirSync(join(home, 'real'));
+        writeFileSync(join(home, 'real', 'cfg.json'), '{}');
+        chmodSync(join(home, 'real', 'cfg.json'), 0o600);
+        symlinkSync('../real/cfg.json', join(home, '.openclaw', 'openclaw.json'));
+        const r = spawnSync('bash', [script], { env: { HOME: home, PATH: '/usr/bin:/bin' }, encoding: 'utf-8' });
+        expect(r.stdout).toMatch(/\[\+\].*restrictive permissions/);
+        expect(r.status).toBe(0);
+      } finally {
+        rmSync(home, { recursive: true, force: true });
+      }
     });
   });
 

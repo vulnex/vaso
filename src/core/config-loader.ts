@@ -1,7 +1,7 @@
 import { dirname, extname } from 'node:path';
 import { parseYamlSafe } from './yaml-safe.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { parse as parseTOML } from 'smol-toml';
+import { parseTomlSafe } from './toml-safe.js';
 import type { ParsedConfig } from './types.js';
 import type { FSProvider } from './fs-provider.js';
 import { parseJsonLenient } from './jsonc.js';
@@ -233,7 +233,7 @@ function parseContent(raw: string, format: ParsedConfig['format']): Record<strin
     case 'env':
       return parseEnv(raw);
     case 'toml':
-      return parseTOML(raw) as Record<string, unknown>;
+      return parseTomlSafe(raw);
     case 'unknown':
       return tryParse(raw);
   }
@@ -274,7 +274,7 @@ function tryParse(raw: string): Record<string, unknown> {
       return (parseYamlSafe(raw) as Record<string, unknown> | null) ?? {};
     } catch {
       try {
-        return parseTOML(raw) as Record<string, unknown>;
+        return parseTomlSafe(raw);
       } catch {
         return UNPARSEABLE;
       }

@@ -164,7 +164,7 @@ describe('IOC-007: Binary Pattern Match', () => {
 
   it('fails when file contains ELF magic bytes', async () => {
     const buf = Buffer.concat([
-      Buffer.from([0x7f, 0x45, 0x4c, 0x46]), // ELF magic
+      Buffer.from([0x7f, 0x45, 0x4c, 0x46, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]), // ELF identification
       Buffer.from('// rest of js file'),
     ]);
     await writeFile(join(tempDir, 'suspicious.js'), buf);
@@ -528,7 +528,7 @@ describe('IOC skill coverage (deep test 2026-10-15)', () => {
   it('IOC-007 sees ELF/Mach-O/PE binaries in a skill (helper, .node, .exe)', async () => {
     const skills = join(tempDir, 'skills');
     await mkdir(join(skills, 'elf'), { recursive: true });
-    await writeFile(join(skills, 'elf', 'helper'), Buffer.concat([Buffer.from([0x7f, 0x45, 0x4c, 0x46]), Buffer.alloc(32)]), { mode: 0o755 });
+    await writeFile(join(skills, 'elf', 'helper'), Buffer.concat([Buffer.from([0x7f, 0x45, 0x4c, 0x46, 2, 1, 1]), Buffer.alloc(32)]), { mode: 0o755 });
     await writeFile(join(skills, 'elf', 'tool.node'), Buffer.concat([Buffer.from([0xcf, 0xfa, 0xed, 0xfe]), Buffer.alloc(32)]));
     await writeFile(join(skills, 'elf', 'x.exe'), fakePE());
     const result = await ioc007.run(makeContext(skills));

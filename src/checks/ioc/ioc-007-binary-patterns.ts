@@ -1,4 +1,4 @@
-import type { Evidence } from '../../core/types.js';
+import type { Evidence, ScanContext } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { getIOCDatabase } from '../../ioc/database.js';
 import { skillFilesOf, skillsDirsOf } from '../skills/skill-files.js';
@@ -22,6 +22,8 @@ function bytesStartWith(haystack: Uint8Array, needle: Uint8Array): boolean {
  */
 function realHeader(name: string, head: Uint8Array): boolean {
   if (name === 'PE/DOS executable') return binaryFormat(head) === 'PE executable';
+  // A script line forging `\x7fELF` without the identification padding runs as a script
+  if (name === 'ELF binary') return binaryFormat(head) === 'ELF executable';
   if (name === 'Mach-O universal binary') {
     if (head.length < 8) return false;
     const archs = ((head[4] << 24) | (head[5] << 16) | (head[6] << 8) | head[7]) >>> 0;
@@ -43,6 +45,39 @@ const SHELLCODE_BYTES: number[][] = [
   [0x90, 0x90, 0x90, 0x90], [0x0f, 0x05], [0xcd, 0x80], [0x31, 0xc0], [0x48, 0x31, 0xc0], [0x48, 0x31, 0xff],
   [...'/bin/sh'].map(c => c.charCodeAt(0)),
 ];
+/**
+ * In a data file a two-byte opcode next to a zero run is chance (weights and
+ * images hold millions of byte pairs), and so is a run of 0x90 alone (a
+ * tensor filled with one value): only `/bin/sh`, or a NOP sled that leads into
+ * machine code (dataShellcodeAt()), counts.
+ */
+const BIN_SH = [...'/bin/sh'].map(c => c.charCodeAt(0));
+const MIN_SLED = 8;
+/** Opcodes a sled leads into, within this many bytes of its end. */
+const SLED_REACH = 16;
+
+function matchesAt(bytes: Uint8Array, j: number, sig: number[]): boolean {
+  return sig.every((x, k) => bytes[j + k] === x);
+}
+
+/**
+ * `/bin/sh` at j, or a NOP sled at j followed shortly by a shellcode opcode.
+ * A sled is walked once, from its start (or from the window's first byte, `from`).
+ */
+function dataShellcodeAt(bytes: Uint8Array, j: number, from: number): boolean {
+  if (matchesAt(bytes, j, BIN_SH)) return true;
+  if (bytes[j] !== 0x90 || (j > from && bytes[j - 1] === 0x90)) return false;
+  let end = j;
+  while (end < bytes.length && bytes[end] === 0x90) end++;
+  if (end - j < MIN_SLED) return false;
+  for (let k = end; k < Math.min(bytes.length, end + SLED_REACH); k++) {
+    if (SHELLCODE_BYTES.some(sig => sig[0] !== 0x90 && matchesAt(bytes, k, sig))) return true;
+  }
+  return false;
+}
+
+/** Compiled code: zero runs next to machine code are what it is made of. */
+const EXECUTABLE_FORMATS = new Set(['ELF executable', 'Mach-O executable', 'PE executable', 'WebAssembly module']);
 const NEAR_RUN = 64;
 const MAX_RUNS = 1000;
 
@@ -51,12 +86,17 @@ const MAX_RUNS = 1000;
  * shellcode — model weights, arrays and padded data are full of them. It is
  * suspicious inside a script (extension or shebang; Node runs one with NULs
  * in it, padded to get past readers), or in any other file next to
- * machine-code bytes. Known data formats never are.
+ * machine-code bytes. A data file (by extension or format signature) needs
+ * an unmistakable payload next to the run; compiled executables never count.
  */
-function nulPaddingSuspicious(file: string, bytes: Uint8Array, content: string): boolean {
+function nulPaddingSuspicious(file: string, bytes: Uint8Array, content: string, format: string | undefined): boolean {
   if (isScriptFile(file, content)) return true;
-  if (DATA_EXTENSIONS.has(extname(file).toLowerCase())) return false;
+  if (format && EXECUTABLE_FORMATS.has(format)) return false;
   if (bytes.every(b => b === 0)) return false;
+  const data = Boolean(format) || DATA_EXTENSIONS.has(extname(file).toLowerCase());
+  const shellcodeAt = data
+    ? (j: number, from: number) => dataShellcodeAt(bytes, j, from)
+    : (j: number) => SHELLCODE_BYTES.some(sig => matchesAt(bytes, j, sig));
   let runs = 0;
   for (let i = 0; i < bytes.length && runs < MAX_RUNS; i++) {
     if (bytes[i] !== 0) continue;
@@ -67,13 +107,31 @@ function nulPaddingSuspicious(file: string, bytes: Uint8Array, content: string):
       // the bytes just before and just after the run
       for (const [from, to] of [[Math.max(0, i - NEAR_RUN), i], [end, Math.min(bytes.length, end + NEAR_RUN)]]) {
         for (let j = from; j < to; j++) {
-          if (SHELLCODE_BYTES.some(sig => sig.every((x, k) => bytes[j + k] === x))) return true;
+          if (shellcodeAt(j, from)) return true;
         }
       }
     }
     i = end;
   }
   return false;
+}
+
+/** Bytes read from a file too large to scan whole: enough for a PE stub's e_lfanew to land inside. */
+const HEAD_BYTES = 4096;
+/** e_lfanew beyond this is no real PE stub. */
+const MAX_PE_OFFSET = 1 << 20;
+
+/**
+ * The head of a file too large to scan whole. A PE header sits where the MZ
+ * stub's e_lfanew points (usually 0x80–0x118, sometimes past 4 KiB): read up
+ * to it.
+ */
+async function readFileHead(fs: ScanContext['fs'], file: string): Promise<Uint8Array | undefined> {
+  const head = await fs.readHead?.(file, HEAD_BYTES).catch(() => undefined);
+  if (!head || head.length < 0x40 || head[0] !== 0x4d || head[1] !== 0x5a) return head;
+  const peOffset = (head[0x3c] | (head[0x3d] << 8) | (head[0x3e] << 16) | (head[0x3f] << 24)) >>> 0;
+  if (peOffset + 4 <= head.length || peOffset > MAX_PE_OFFSET) return head;
+  return (await fs.readHead?.(file, peOffset + 4).catch(() => undefined)) ?? head;
 }
 
 export const ioc007 = defineCheck({
@@ -102,7 +160,7 @@ export const ioc007 = defineCheck({
         // A large native helper is exactly what this check is for. Its
         // header is in the first bytes, whatever the size: judge that, and
         // only say "not scanned" when even the header can't be read.
-        const head = await ctx.fs.readHead?.(file, 64).catch(() => undefined);
+        const head = await readFileHead(ctx.fs, file);
         const format = head && bufferPatterns.find(bp => bytesStartWith(head, bp.pattern as Uint8Array) && realHeader(bp.name, head));
         if (format) {
           evidence.push({ file, detail: `Compiled executable (${format.name}) — its code can't be reviewed or analysed (too large to scan beyond its header)` });
@@ -132,10 +190,8 @@ export const ioc007 = defineCheck({
         if (regexPatterns.length > 0) {
           const content = Buffer.from(bytes).toString('utf-8');
           for (const bp of regexPatterns) {
-            // NUL runs are what compiled code (a universal Mach-O) is made of
-            if (format && bp.name === 'NUL-padding shellcode') continue;
             if ((bp.pattern as RegExp).test(content)) {
-              if (bp.name === 'NUL-padding shellcode' && !nulPaddingSuspicious(file, bytes, content)) continue;
+              if (bp.name === 'NUL-padding shellcode' && !nulPaddingSuspicious(file, bytes, content, format)) continue;
               matched = { name: bp.name };
               break;
             }

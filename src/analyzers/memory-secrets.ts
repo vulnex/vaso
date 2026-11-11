@@ -36,13 +36,23 @@ const KNOWN_KEY_PATTERNS = [...API_KEY_PATTERNS, ...EXTRA_KEY_PATTERNS].map(({ p
 
 /**
  * `name: value` / `name = value` / `| name | value |` in prose, the name a
- * credential word (up to three words: `**API key**: …`), the value one
+ * credential word (up to three words: `**API key**: …`, `**API key:** …`), the value one
  * unbroken run that isn't a call (`token = getToken(…)`). Quotes, `**`
  * emphasis and backticks around either are allowed;
  * `Authorization: Bearer x` carries the value after the scheme.
  */
-const KEYED_VALUE = /(?<![A-Za-z0-9_])([A-Za-z][\w.-]{0,63}(?: [A-Za-z][\w.-]{0,31}){0,2})["'`*]*[ \t]*(?:[:=]|\|)[ \t]*(?:"([^"\n]{12,256})"|'([^'\n]{12,256})'|`([^`\n]{12,256})`|["'`]?(?:(?:bearer|basic|token)[ \t]+)?([^\s"'`|,;(){}[\]<>]{12,}))/gi;
+const KEYED_VALUE = /(?<![A-Za-z0-9_])([A-Za-z][\w.-]{0,63}(?: [A-Za-z][\w.-]{0,31}){0,2})["'`*]*[ \t]*(?:[:=]|\|)\*{0,2}[ \t]*(?:"([^"\n]{12,256})"|'([^'\n]{12,256})'|`([^`\n]{12,256})`|["'`]?(?:(?:bearer|basic|token)[ \t]+)?([^\s"'`|,;(){}[\]<>]{12,}))/gi;
 const CREDENTIAL_NAME = /(?:password|passwd|passphrase|pwd|secret|token|api[ _-]?key|apikey|private[ _-]?key|access[ _-]?key|credential|bearer|authorization|(?:^|[ _-])(?:key|pat|auth)$)/i;
+/**
+ * "… key" names that hold an identifier by meaning (`Idempotency key`,
+ * `Cache key`, `Partition key`, `S3 key` — an object path): the value is an
+ * ID. Not `Primary key`, `Storage key`, `Blob key` …: Azure calls its
+ * account access keys exactly that. Even under these names a value shaped
+ * like a key (STRONG_KEY_VALUE) is still reported.
+ */
+const IDENTIFIER_KEY_NAME = /(?:^|[ _-])(?:idempotency|cache|s3|partition|sort|foreign|composite|lookup|dedup(?:lication)?|routing|shard(?:ing)?|i18n|translation)[ _-]?key$/i;
+/** 32+ hex digits, or 40+ characters of base64 with its punctuation: a key whatever it is called. */
+const STRONG_KEY_VALUE = /^(?:[0-9a-f]{32,}|[0-9A-F]{32,}|(?=[A-Za-z0-9+/]*[+/])[A-Za-z0-9+/]{40,}={0,2}|[A-Za-z0-9+/]{40,}={1,2})$/;
 
 /** The first keyed credential on a line: a credential name with a random-looking value. */
 function keyedSecret(line: string): { name: string; value: string } | undefined {
@@ -59,6 +69,7 @@ function keyedSecret(line: string): { name: string; value: string } | undefined 
     if (/[(\[{]/.test(line[(m.index ?? 0) + m[0].length] ?? '')) continue;
     // `See the token docs: https://…` names a document, `$TOKEN`/`op://…` where the secret is kept
     if (!CREDENTIAL_NAME.test(name) || !isCredentialValueName(name.replace(/ /g, '_'))) continue;
+    if (IDENTIFIER_KEY_NAME.test(name) && !STRONG_KEY_VALUE.test(value) && !isKnownSecretValue(value)) continue;
     if (/^[a-z][a-z0-9+.-]*:\/\//i.test(value) || isPlaceholderSecret(value) || isSecretReference(value) || isHashedValue(value)) continue;
     if (isKnownSecretValue(value) || looksRandom(judged, 12)) return { name, value };
   }
@@ -74,6 +85,8 @@ const CREDENTIAL_EVIDENCE = new WeakSet<Evidence>();
 /** Evidence for every plaintext credential (one per line) and high-entropy string in `content`. */
 export function scanMemorySecrets(file: string, content: string, kind = 'memory file'): Evidence[] {
   const evidence: Evidence[] = [];
+  // one finding per line, looked up per line: a list scan was quadratic
+  const reported = new Set<number>();
   const lines = content.split('\n');
   for (let i = 0; i < lines.length; i++) {
     for (const { pattern, name } of KNOWN_KEY_PATTERNS) {
@@ -82,20 +95,23 @@ export function scanMemorySecrets(file: string, content: string, kind = 'memory 
       const item: Evidence = {
         file,
         line: i + 1,
-        snippet: `${m[0].slice(0, 12)}…`,
+        // no more of a key than reports show anywhere (8 characters)
+        snippet: `${m[0].slice(0, 4)}…${m[0].slice(-4)} (${m[0].length} chars)`,
         detail: `Plaintext ${name} in ${kind}`,
       };
       CREDENTIAL_EVIDENCE.add(item);
       evidence.push(item);
+      reported.add(i + 1);
       break;
     }
   }
 
   for (let i = 0; i < lines.length; i++) {
-    if (evidence.some(e => e.line === i + 1)) continue;
+    if (reported.has(i + 1)) continue;
     const keyed = keyedSecret(lines[i]);
     if (!keyed) continue;
     const v = keyed.value;
+    reported.add(i + 1);
     evidence.push({
       file,
       line: i + 1,
@@ -109,7 +125,8 @@ export function scanMemorySecrets(file: string, content: string, kind = 'memory 
   // entropy scan skips
   const prose = content.replace(/^([ \t]*)\*(?=[ \t])/gm, '$1-');
   for (const b of findHighEntropyBlocks(prose, ENTROPY_THRESHOLD, MIN_BLOCK_LEN)) {
-    if (evidence.some(e => e.line === b.line)) continue;
+    if (reported.has(b.line)) continue;
+    reported.add(b.line);
     evidence.push({
       file,
       line: b.line,

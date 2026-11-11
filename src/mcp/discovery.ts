@@ -1,9 +1,9 @@
 import { extname, join } from 'node:path';
+import { parseTomlSafe } from '../core/toml-safe.js';
 import type { MCPConfig, MCPConfigLoadError, MCPServerEntry, MCPDiscoveryResult } from './types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { stripJsonc } from '../core/jsonc.js';
-import { parse as parseTOML } from 'smol-toml';
 import { claudeConfigPaths } from '../adapters/claude-code.js';
 import { codexHome } from '../adapters/codex.js';
 import { copilotHome } from '../adapters/copilot-cli.js';
@@ -518,7 +518,7 @@ function parseConfigText(raw: string, format: 'json' | 'toml' | 'yaml'): Record<
   const text = raw.replace(/^\uFEFF/, '');
   let data: unknown;
   if (format === 'toml') {
-    data = parseTOML(text);
+    data = parseTomlSafe(text);
   } else if (format === 'yaml') {
     data = parseYamlSafe(text);
     if (data === null || data === undefined) return undefined;

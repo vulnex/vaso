@@ -161,3 +161,55 @@ describe('dt20 re-verify 5: Airtable personal access tokens', () => {
     expect(JSON.stringify([bare, keyed])).not.toContain(pat.slice(0, 16));
   });
 });
+
+describe('dt21: snippets, bold labels, large files', () => {
+  // known formats from the dt21 masking fixture (fake bodies)
+  const KEYS = [
+    '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',
+    'xai-jqevt0MLaMRTvetw0tESulEETldq8b8Vw2zbJYAxyL1aCcTlN99mhWp708DwGw5HqXDgLVXZx3scB8fn',
+    'sk-ant-api03-Q7rT2mZ9kLp4Vw8NcB1dYh6Ju3Fs0GxEa5Ri',
+    'xoxa-2-quQrDs0GPRZwwrPwV81Aw71l33SCx9vHjHkm1x72',
+    'patEsSfUQUAkNX7LH.d98065e5751f75143a5f61debc267b0bc8d3b1939a9b4ddbe45cf642b0c3a4ac',
+    `ghp_${'a1B2'.repeat(10)}`,
+  ];
+
+  it('no snippet shows more than 8 characters of a key', () => {
+    const ev = scanMemorySecrets('/r/CLAUDE.md', KEYS.map(k => `- use ${k} here`).join('\n'));
+    expect(ev.length).toBeGreaterThanOrEqual(4);
+    for (const k of KEYS) {
+      for (let i = 0; i + 9 <= k.length; i++) {
+        expect(JSON.stringify(ev), k).not.toContain(k.slice(i, i + 9));
+      }
+    }
+  });
+
+  it('reads a colon inside the bold markers (**API key:** …)', () => {
+    const ev = scanMemorySecrets('/r/CLAUDE.md', '**API key:** Zq8wX3mK9pL2vB7nR4tY\n**Token**: Hn4bV7cX1zM8qW2eR5tY\n');
+    expect(ev.map(e => e.line)).toEqual([1, 2]);
+  });
+
+  it('scans a large file in linear time', () => {
+    const lines = Array.from({ length: 130_000 }, (_, i) => (i % 2 ? `password: Zq8wX3mK9pL2vB7n${i}` : `line ${i} of notes`));
+    const start = Date.now();
+    expect(scanMemorySecrets('/r/CLAUDE.md', lines.join('\n')).length).toBeGreaterThan(60_000);
+    expect(Date.now() - start).toBeLessThan(10_000);
+  });
+});
+
+describe('dt21 round 2: identifier keys', () => {
+  it('does not read an ID under an "… key" name as a credential', () => {
+    const md = ['Idempotency key: 7f3a9c1e2b4d6f8a0c5e', 'Cache key: user_8f3k2m9q4p7x1z6w', 'S3 key: uploads/2026/Xq7Lk2Pz9Rt4Vw8Y.png',
+      'Partition key: tenant_9Zx8Lp2Vn7Rk4Tw9', 'Signing key: Zq8wX3mK9pL2vB7nR4tY'].join('\n');
+    expect(scanMemorySecrets('/r/AGENTS.md', md).map(e => e.line)).toEqual([5]);
+  });
+
+  it('reports Azure access keys under Primary/Storage/… key names, and key-shaped values under any name', () => {
+    const b64 = 'CPiPYCXVSCjFjI4ukDiD6ZFGJOPkxb9+meWXF76cZNnmA95SbnITHMPcaeUBr+UykT/B2SywgD2jgg9rmrkJPA==';
+    const md = [`Primary key: ${b64}`, `Storage key: ${b64.replace('C', 'D')}`, `Cosmos DB primary key: ${b64.replace('C', 'E')}`,
+      'Event Hubs primary key: OnDMyo2YKy4ZkGVnhIPCEt0xUAfVO59Z', 'Primary key: 52d22d2d857669119dc7e9003d0cafc1',
+      'Blob key: 5bC5SdWi5bY3VGkGrTIaST631GXEEqgn', 'Registry key: uOVFu67zc2FPiTFmfgaxlbXd2wDSNnWS', 'KV key: uwbPEl8i0KcjC6WdGGeaCttHNYDS20AR',
+      'Index key: uJXl15DdhmS6lIt4ddAFhLcBm1t3YW0C', 'Redis key: efYfbYOybGLC7EeNxymfmLNcdz4NFucZ',
+      `Cache key: ${b64.replace('C', 'F')}`, 'Idempotency key: 52d22d2d857669119dc7e9003d0cafc2'].join('\n');
+    expect(scanMemorySecrets('/r/CLAUDE.md', md).map(e => e.line)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12]); // line 10's value isn't random enough (as in round 1)
+  });
+});

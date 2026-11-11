@@ -1,8 +1,9 @@
-import { describe, it, expect } from 'vitest';
-import { compileRule } from './compiler.js';
+import { describe, it, expect, vi } from 'vitest';
+import { compileRule, RuleTimeBudget } from './compiler.js';
 import type { DeclarativeRule } from './schema.js';
 import type { ScanContext, ParsedConfig, AgentInstallation } from '../core/types.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
+import { MAX_RULE_SCAN_MS, MAX_RULES_SCAN_MS } from './regex-safety.js';
 
 function makeContext(overrides?: Partial<ScanContext>): ScanContext {
   const config: ParsedConfig = {
@@ -134,6 +135,95 @@ describe('compileRule', () => {
   });
 
   describe('pattern rules', () => {
+    it('stops after MAX_RULE_SCAN_MS of matching and reports the files it did not finish (dt21 g8-F5)', async () => {
+      const config = (filePath: string, raw: string): ParsedConfig => ({ raw, format: 'json', filePath, data: {} });
+      const configs = [
+        config('/tmp/a.json', 'token\nline\nline\nline'),
+        config('/tmp/b.json', 'line\nline'),
+        config('/tmp/c.json', 'token'),
+      ];
+      // every match takes 0.4 of the budget: the third line of a.json is the last one run
+      let clock = 0;
+      const now = vi.spyOn(performance, 'now').mockImplementation(() => (clock += MAX_RULE_SCAN_MS * 0.4));
+      try {
+        const result = await compileRule({
+          id: 'T-BUDGET', name: 'Slow', category: 'config', severity: 'warning', description: 'd',
+          pattern: { regex: 'token', target: 'configs' },
+        }).run(makeContext({ configs }));
+        expect(result.errored).toBe(true);
+        expect(result.passed).toBe(false);
+        expect(result.evidence?.map(e => e.file)).toEqual(['/tmp/a.json']);
+        expect(result.message).toMatch(/3 file\(s\) not fully scanned/);
+      } finally {
+        now.mockRestore();
+      }
+    });
+
+    it('all rules of a scan share one time budget per host (dt21 g8-R8)', async () => {
+      const budget = new RuleTimeBudget();
+      const ctx = makeContext();
+      const other = makeContext(); // another host: its own FSProvider
+      const pattern = compileRule({
+        id: 'T-P', name: 'P', category: 'config', severity: 'warning', description: 'd',
+        pattern: { regex: 'debug', target: 'configs' },
+      }, budget);
+      const config = compileRule({
+        id: 'T-C', name: 'C', category: 'config', severity: 'warning', description: 'd',
+        config: { path: 'server.debug', operator: 'matches', value: 'x' },
+      }, budget);
+      // the rules before them used the whole pool on this host
+      budget.add(ctx.fs, MAX_RULES_SCAN_MS + 1);
+      for (const check of [pattern, config]) {
+        const result = await check.run(ctx);
+        expect(result.errored).toBe(true);
+        expect(result.passed).toBe(false);
+        expect(result.message).toMatch(/all rules together spent 15 s matching on this host; 1 (file|config)\(s\) not checked/);
+        const elsewhere = await check.run(other);
+        expect(elsewhere.errored).toBeUndefined();
+      }
+    });
+
+    it('rules spend from the shared budget while they match', async () => {
+      const budget = new RuleTimeBudget();
+      const ctx = makeContext();
+      let clock = 0;
+      const now = vi.spyOn(performance, 'now').mockImplementation(() => (clock += MAX_RULES_SCAN_MS * 0.6));
+      try {
+        const rule = (id: string) => compileRule({
+          id, name: id, category: 'config', severity: 'warning', description: 'd',
+          pattern: { regex: 'debug', target: 'configs' },
+        }, budget);
+        // each takes 0.6 of the pool (over its own 5 s budget, but one line each)
+        expect((await rule('T-1').run(ctx)).errored).toBeUndefined();
+        expect((await rule('T-2').run(ctx)).errored).toBeUndefined();
+        expect((await rule('T-3').run(ctx)).errored).toBe(true);
+      } finally {
+        now.mockRestore();
+      }
+    });
+
+    it('quotes a long line cut with truncateSnippet, credentials masked first', async () => {
+      const secret = 'sk-' + 'Zq9'.repeat(30);
+      const raw = `api_key=${secret} debug ${'x'.repeat(200)}`;
+      const result = await compileRule({
+        id: 'T-SNIP', name: 'S', category: 'config', severity: 'warning', description: 'd',
+        pattern: { regex: 'debug', target: 'configs' },
+      }).run(makeContext({ configs: [{ raw, format: 'json', filePath: '/tmp/s.json', data: {} }] }));
+      const snippet = result.evidence?.[0].snippet ?? '';
+      expect(snippet.endsWith(' ...')).toBe(true);
+      expect(snippet.length).toBeLessThanOrEqual(124);
+      expect(snippet).not.toContain('Zq9Zq9');
+    });
+
+    it('a scan within the budget is not errored', async () => {
+      const result = await compileRule({
+        id: 'T-FAST', name: 'Fast', category: 'config', severity: 'warning', description: 'd',
+        pattern: { regex: 'nomatch', target: 'configs' },
+      }).run(makeContext());
+      expect(result.errored).toBeUndefined();
+      expect(result.passed).toBe(true);
+    });
+
     it('finds regex matches in config files', async () => {
       const rule: DeclarativeRule = {
         id: 'T-010',

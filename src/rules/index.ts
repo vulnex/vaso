@@ -1,12 +1,12 @@
 import type { CheckRegistry } from '../core/check-registry.js';
 import { loadRules, type LoadResult } from './loader.js';
-import { compileRule } from './compiler.js';
+import { compileRule, RuleTimeBudget } from './compiler.js';
 import type { CheckModule } from '../core/types.js';
 
 export type { DeclarativeRule, ValidationError } from './schema.js';
 export type { LoadResult, RuleFileResult } from './loader.js';
 export { loadRules } from './loader.js';
-export { compileRule } from './compiler.js';
+export { compileRule, RuleTimeBudget } from './compiler.js';
 export { validateRuleFile } from './schema.js';
 
 export interface RegisterResult {
@@ -30,10 +30,12 @@ export async function loadAndRegisterRules(
   const loadResult = await loadRules(options);
   const registered: CheckModule[] = [];
   const skipped: Array<{ id: string; reason: string }> = [];
+  // one matching-time pool for all of them (per host scanned)
+  const budget = new RuleTimeBudget();
 
   for (const rule of loadResult.allRules) {
     try {
-      const check = compileRule(rule);
+      const check = compileRule(rule, budget);
 
       // Check for ID collision with existing checks
       const existing = registry.getAll().find(c => c.id === check.id);

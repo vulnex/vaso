@@ -4,7 +4,8 @@ import { defineCheck } from '../../core/check-builder.js';
 import { getAdvisoryDatabase } from '../../advisory/database.js';
 import { satisfies } from '../../core/semver.js';
 import { advisoryAppliesToPlatform } from '../../advisory/applicability.js';
-import { fullVersion, rangeEntirelyAffected } from '../../core/version-range.js';
+import { fullVersion } from '../../core/version-range.js';
+import { declaredRangeMatch } from '../mcp/mcp-027-vulnerable-version.js';
 import { collectServerDependencies } from '../../mcp/server-dependencies.js';
 
 export const adv002 = defineCheck({
@@ -29,7 +30,7 @@ export const adv002 = defineCheck({
     const installDir = ctx.installation.installDir;
 
     // npm: the installed copy, else the lockfile, else the declared range —
-    // a range counts only when every version it admits is affected (as MCP-027).
+    // judged as MCP-027 judges an unpinned runner spec (declaredRangeMatch()).
     const npmDeps = await collectServerDependencies(join(installDir, 'package.json'), 'javascript', ctx.fs, { searchParents: false });
     const cargoDeps = await loadCargoTomlDeps(ctx, installDir);
     const undeclared = transitiveLookup(ctx, installDir);
@@ -38,14 +39,21 @@ export const adv002 = defineCheck({
       const dep = adv.affectedDependency!;
       const npm = npmDeps.find(d => d.name === dep.name);
       if (npm) {
-        const affected = npm.version
-          ? satisfies(fullVersion(npm.version), dep.versionConstraint)
-          : npm.range !== undefined && rangeEntirelyAffected(npm.range, 'npm', dep.versionConstraint, adv.fixedVersion);
-        if (affected) {
-          matched.add(adv.severity);
+        const match = npm.version
+          ? satisfies(fullVersion(npm.version), dep.versionConstraint) ? 'affected' : undefined
+          : npm.range !== undefined ? declaredRangeMatch(npm.range, 'npm', adv) : undefined;
+        if (match) {
+          // A range clear of a package's malicious releases: noted, not live
+          if (match !== 'excluded') matched.add(adv.severity);
+          const shown = `${dep.name}${npm.version ? `@${npm.version}` : ` ${npm.range}`}`;
           evidence.push({
             file: npm.source,
-            detail: `${adv.id}: ${dep.name}${npm.version ? `@${npm.version}` : ` ${npm.range}`} — ${adv.title}`,
+            detail: match === 'affected'
+              ? `${adv.id}: ${shown} — ${adv.title}`
+              : match === 'malware'
+                ? `${adv.id}: ${shown} can install a malicious release (${dep.versionConstraint}) — ${adv.title}`
+                : `${adv.id}: ${shown} excludes the malicious releases (${dep.versionConstraint}) — keep it pinned away from them — ${adv.title}`,
+            ...(match === 'excluded' ? { mitigated: true } : {}),
           });
         }
         continue;

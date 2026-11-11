@@ -22,11 +22,33 @@
  *     above MAX_SPLITS ways. A bounded repeat with a wide range
  *     (`{0,100}`) is judged as the unbounded loop it behaves like.
  *
+ * A lookahead body backtracks from every place it runs, so it is part of
+ * the NFA (a branch that ends nowhere): `.+(?=.*=)` costs what `.+.*=` does.
+ * A lookbehind body runs right to left and is judged on its own, its cost
+ * multiplied by how often the pattern gets there. A backreference is a copy
+ * of its group (`(.*)\1x` is `(.*)(?:.*)x`). The source is read the way V8
+ * reads it without the `u` flag: `[^]`, `[]`, `\c` without a letter, `\8`,
+ * octal escapes, `\k` without named groups.
+ *
  * Patterns the parser can't follow, or too large to analyse, are rejected.
  */
 
 /** Longest text (one line, one config value) a rule regex is run on. */
 export const MAX_RULE_INPUT = 4096;
+
+/**
+ * Longest a pattern rule may spend matching in one check run (all lines of
+ * all its files). An accepted pattern can still cost n^2 per line: ~16 ms on
+ * a 4 KB line, so seconds on a megabyte file and more on a skill tree.
+ */
+export const MAX_RULE_SCAN_MS = 5_000;
+
+/**
+ * Longest all rules together may spend matching on one host in one scan: a
+ * cloned repository's `.vaso/rules/` can hold many rules, each within its
+ * own budget, and the scan runs them for every agent.
+ */
+export const MAX_RULES_SCAN_MS = 15_000;
 
 interface Term {
   /** single-character atom (literal, escape, class, dot): its source */
@@ -35,28 +57,90 @@ interface Term {
   flags?: string;
   /** group alternatives */
   alts?: Term[][];
-  /** zero-width (anchor, lookaround, backreference) */
+  /** zero-width (anchor, `\b`, lookaround) */
   zeroWidth?: boolean;
   /** `^` / `$` outside multiline mode */
   anchor?: 'start' | 'end';
+  /** a lookaround's direction */
+  look?: 'ahead' | 'behind';
+  /** a backreference: it reads what its group read (`Backref`) */
+  ref?: Backref;
   min: number;
   max: number;
+}
+
+/**
+ * A backreference (`\1`, `\k<name>`). It reads up to the whole line, so it
+ * is analysed as a copy of its group — a superset of what it can read:
+ * `(.*)\1x` is `(.*)(?:.*)x`. The copy is optional unless the group has
+ * certainly matched by then (a group that is optional, in another
+ * alternative, later in the pattern or inside a lookaround leaves the
+ * backreference reading nothing).
+ */
+interface Backref {
+  group: number;
+  optional: boolean;
+  /** modifier flags in force at the backreference (`(?i:\1)` matches case variants) */
+  flags: string;
+}
+
+/** Where a group or backreference sits: its enclosing groups, with the alternative taken in each. */
+type Path = Array<{ term: Term; alt: number }>;
+
+/** Capturing groups of a pattern: how many, and their names. */
+function captureGroups(s: string): { count: number; names: Map<string, number> } {
+  const names = new Map<string, number>();
+  let count = 0;
+  for (let i = 0; i < s.length; i++) {
+    if (s[i] === '\\') i++;
+    else if (s[i] === '[') {
+      // JavaScript classes: the first unescaped `]` ends one (`[]`, `[^]`)
+      for (i++; i < s.length && s[i] !== ']'; i++) if (s[i] === '\\') i++;
+    } else if (s[i] === '(') {
+      const named = /^\(\?<([A-Za-z_$][\w$]*)>/.exec(s.slice(i));
+      if (named) names.set(named[1], ++count);
+      else if (s[i + 1] !== '?') count++;
+    }
+  }
+  return { count, names };
 }
 
 class Parser {
   i = 0;
   /** modifier flags in force (`(?i:…)` and friends) */
   flags = '';
-  constructor(private src: string) {}
+  private captures: { count: number; names: Map<string, number> };
+  /** the groups enclosing the parse position */
+  private path: Path = [];
+  /** capturing groups by number: term, enclosing path, where it ends */
+  groups: Array<{ term: Term; path: Path; end: number } | undefined> = [];
+  private groupCount = 0;
+  private refs: Array<{ term: Term; group: number; path: Path; at: number; flags: string }> = [];
+
+  constructor(private src: string) {
+    this.captures = captureGroups(src);
+  }
 
   fail(): never {
     throw new Error('unparseable');
+  }
+
+  /** The whole pattern, its backreferences resolved. */
+  pattern(): Term[][] {
+    const root: Term = { min: 1, max: 1 };
+    // snapshots of `path` keep the alternative taken at the time
+    this.path = [{ term: root, alt: 0 }];
+    const alts = this.alternatives();
+    if (this.i !== this.src.length) this.fail();
+    for (const r of this.refs) this.resolve(r);
+    return alts;
   }
 
   alternatives(): Term[][] {
     const alts: Term[][] = [this.sequence()];
     while (this.src[this.i] === '|') {
       this.i++;
+      this.path[this.path.length - 1].alt++;
       alts.push(this.sequence());
     }
     return alts;
@@ -76,48 +160,45 @@ class Parser {
     const s = this.src;
     const c = s[this.i];
     if (c === '(') {
+      const term: Term = { min: 1, max: 1 };
       this.i++;
-      let lookaround = false;
       const outer = this.flags;
+      let capturing = s[this.i] !== '?';
       if (s[this.i] === '?') {
-        const head = /^\?(?::|=|!|<=|<!|<[A-Za-z_$][\w$]*>|([ims]*)(?:-([ims]*))?:)/.exec(s.slice(this.i));
+        const head = /^\?(?::|=|!|<=|<!|<([A-Za-z_$][\w$]*)>|([ims]*)(?:-([ims]*))?:)/.exec(s.slice(this.i));
         if (!head) this.fail();
-        lookaround = /^\?(?:=|!|<=|<!)$/.test(head[0]);
-        if (head[1] !== undefined) {
+        if (/^\?(?:=|!)$/.test(head[0])) term.look = 'ahead';
+        if (/^\?(?:<=|<!)$/.test(head[0])) term.look = 'behind';
+        capturing = head[1] !== undefined;
+        if (head[2] !== undefined) {
           // modifiers (Node 23+): `(?i:…)`, `(?-s:…)`
-          const off = head[2] ?? '';
-          this.flags = [...new Set([...outer, ...head[1]])].filter(f => !off.includes(f)).join('');
+          const off = head[3] ?? '';
+          this.flags = [...new Set([...outer, ...head[2]])].filter(f => !off.includes(f)).join('');
         }
         this.i += head[0].length;
       }
-      const alts = this.alternatives();
+      const group = capturing ? ++this.groupCount : undefined;
+      const path = this.path.map(p => ({ ...p }));
+      this.path.push({ term, alt: 0 });
+      term.alts = this.alternatives();
+      this.path.pop();
       this.flags = outer;
       if (s[this.i] !== ')') this.fail();
       this.i++;
-      return lookaround ? { alts, zeroWidth: true, min: 1, max: 1 } : { alts, min: 1, max: 1 };
+      if (group !== undefined) this.groups[group] = { term, path, end: this.i };
+      if (term.look) term.zeroWidth = true;
+      return term;
     }
     if (c === '[') {
+      // JavaScript, not PCRE: `[]` matches nothing and `[^]` any character
       const start = this.i;
       this.i++;
-      if (s[this.i] === '^') this.i++;
-      if (s[this.i] === ']') this.i++;
       while (this.i < s.length && s[this.i] !== ']') this.i += s[this.i] === '\\' ? 2 : 1;
       if (this.i >= s.length) this.fail();
       this.i++;
       return { char: s.slice(start, this.i), flags: this.flags, min: 1, max: 1 };
     }
-    if (c === '\\') {
-      const esc = /^\\(?:[bB]|\d+|k<[^>]+>)/.exec(s.slice(this.i));
-      if (esc) {
-        this.i += esc[0].length;
-        return { zeroWidth: true, min: 1, max: 1 };
-      }
-      // rules compile without the `u` flag: `\u{…}` and `\p{…}` are no escapes there
-      const ch = /^\\(?:u[0-9A-Fa-f]{4}|x[0-9A-Fa-f]{2}|c[A-Za-z]|[\s\S])/.exec(s.slice(this.i));
-      if (!ch) this.fail();
-      this.i += ch[0].length;
-      return { char: ch[0], flags: this.flags, min: 1, max: 1 };
-    }
+    if (c === '\\') return this.escape();
     if (c === '^' || c === '$') {
       this.i++;
       // multiline (`(?m:…)`): a line boundary, anywhere — zero-width only
@@ -129,6 +210,78 @@ class Parser {
     return { char: c, flags: this.flags, min: 1, max: 1 };
   }
 
+  /**
+   * An escape outside a class, read the way V8 reads it without the `u`
+   * flag (Annex B): `\1` is a backreference only when the pattern has that
+   * many groups, else an octal escape (`\10` with one group is `\x08`) or a
+   * literal digit (`\8`); `\k` is a backreference only in a pattern with
+   * named groups, else the letter `k`; `\c` not followed by a letter is a
+   * backslash (and the `c` after it is a literal of its own).
+   */
+  private escape(): Term {
+    const s = this.src;
+    const rest = s.slice(this.i);
+    const atom = (source: string, length: number): Term => {
+      this.i += length;
+      return { char: source, flags: this.flags, min: 1, max: 1 };
+    };
+    if (/^\\[bB]/.test(rest)) {
+      this.i += 2;
+      return { zeroWidth: true, min: 1, max: 1 };
+    }
+    const decimal = /^\\(\d+)/.exec(rest);
+    if (decimal) {
+      const digits = decimal[1];
+      if (digits[0] !== '0' && Number(digits) <= this.captures.count) return this.backref(Number(digits), decimal[0].length);
+      const octal = /^(?:[0-3][0-7]{0,2}|[4-7][0-7]?)/.exec(digits);
+      if (!octal) return atom(digits[0], 2); // `\8`, `\9`
+      return atom(`\\x${parseInt(octal[0], 8).toString(16).padStart(2, '0')}`, 1 + octal[0].length);
+    }
+    if (rest[1] === 'k' && this.captures.names.size > 0) {
+      const named = /^\\k<([A-Za-z_$][\w$]*)>/.exec(rest);
+      const group = named ? this.captures.names.get(named[1]) : undefined;
+      if (!named || group === undefined) this.fail();
+      return this.backref(group, named[0].length);
+    }
+    if (rest[1] === 'c' && !/^\\c[A-Za-z]/.test(rest)) return atom('\\\\', 1);
+    // rules compile without the `u` flag: `\u{…}` and `\p{…}` are no escapes there
+    const ch = /^\\(?:u[0-9A-Fa-f]{4}|x[0-9A-Fa-f]{2}|c[A-Za-z]|[\s\S])/.exec(rest);
+    if (!ch) this.fail();
+    return atom(ch[0], ch[0].length);
+  }
+
+  private backref(group: number, length: number): Term {
+    const term: Term = { min: 1, max: 1 };
+    this.refs.push({ term, group, path: this.path.map(p => ({ ...p })), at: this.i, flags: this.flags });
+    this.i += length;
+    return term;
+  }
+
+  /**
+   * What a backreference reads: nothing inside its own group (the group
+   * hasn't matched yet), else a copy of the group — optional unless the
+   * group has certainly matched by then.
+   */
+  private resolve(r: { term: Term; group: number; path: Path; at: number; flags: string }): void {
+    const g = this.groups[r.group];
+    if (!g || r.path.some(p => p.term === g.term)) {
+      r.term.alts = [[]];
+      return;
+    }
+    let shared = 0;
+    while (shared < g.path.length && shared < r.path.length
+      && g.path[shared].term === r.path[shared].term && g.path[shared].alt === r.path[shared].alt) shared++;
+    // the groups around the group that aren't around the backreference
+    const own = g.path.slice(shared).map(p => p.term);
+    const certain = g.end <= r.at
+      // different alternatives of one group (`(?:(a)|\1)`): never both
+      && !(shared < g.path.length && shared < r.path.length && g.path[shared].term === r.path[shared].term)
+      && [...own, g.term].every(t => t.min >= 1 && !t.look)
+      && own.every(t => t.alts?.length === 1)
+      // matched right to left: a group left of it hasn't matched yet
+      && !r.path.some(p => p.term.look === 'behind');
+    r.term.ref = { group: r.group, optional: !certain, flags: r.flags };
+  }
   quantifier(term: Term): void {
     const s = this.src;
     const q = /^(?:\*|\+|\?|\{(\d+)(,(\d*))?\})/.exec(s.slice(this.i));
@@ -252,8 +405,15 @@ class Nfa {
   labels: string[] = [];
   labelFlags: string[] = [];
   private labelIds = new Map<string, number>();
-  /** inner patterns of lookarounds: they backtrack on their own */
-  lookarounds = new Set<Term[][]>();
+  /** lookbehinds: the body, and the state standing for "the lookbehind runs here" */
+  lookbehinds: Array<{ alts: Term[][]; at: number }> = [];
+  /** groups whose copy (for a backreference) is being built */
+  private copying = new Set<number>();
+  /** modifier flags a backreference adds to the copy of its group */
+  private extraFlags = '';
+
+  /** `groups[n]`: capturing group n, for backreferences */
+  constructor(private groups: Array<Term | undefined> = []) {}
 
   state(): number {
     if (this.edges.length >= MAX_STATES) throw new TooLarge();
@@ -266,6 +426,7 @@ class Nfa {
   }
 
   label(atom: string, flags = ''): number {
+    flags = [...new Set(flags + this.extraFlags)].sort().join('');
     const key = `${flags}\0${atom}`;
     let i = this.labelIds.get(key);
     if (i === undefined) {
@@ -303,10 +464,37 @@ class Nfa {
   once(t: Term, from: number): number {
     const to = this.state();
     if (t.zeroWidth) {
-      if (t.alts) this.lookarounds.add(t.alts);
+      if (t.look === 'ahead' && t.alts) {
+        // the body runs from here: a branch that reads on and ends nowhere
+        // (it backtracks like any other part, `.+(?=.*=)` is `.+.*=`)
+        const body = this.state();
+        this.edge(from, body, -2);
+        this.once({ alts: t.alts, min: 1, max: 1 }, body);
+      } else if (t.look === 'behind' && t.alts) {
+        // the body runs leftwards from here, analysed on its own
+        // (`backtrackingReason`); this state, reading anything forever, only
+        // tells how often the pattern gets here
+        const at = this.state();
+        this.edge(from, at, -2);
+        this.edge(at, at, this.label('[\\s\\S]'));
+        this.lookbehinds.push({ alts: t.alts, at });
+      }
       // an assertion (label -2): read nothing, like epsilon, but it can fail —
       // a state behind one hasn't matched yet. `$` has no edge at all.
       if (t.anchor !== 'end') this.edge(from, to, -2);
+    } else if (t.ref) {
+      const group = this.groups[t.ref.group];
+      const copy = group?.alts !== undefined && !this.copying.has(t.ref.group);
+      if (group?.alts && copy) {
+        const flags = this.extraFlags;
+        this.copying.add(t.ref.group);
+        this.extraFlags += t.ref.flags;
+        this.edge(this.once({ alts: group.alts, min: 1, max: 1 }, from), to, -1);
+        this.extraFlags = flags;
+        this.copying.delete(t.ref.group);
+      }
+      // reads nothing when its group hasn't matched (or inside its own copy)
+      if (t.ref.optional || !copy) this.edge(from, to, -1);
     } else if (t.char !== undefined) {
       this.edge(from, to, this.label(t.char, t.flags));
     } else {
@@ -492,15 +680,24 @@ function chained(g: Graph, comp: number[], a: number[], ca: number, b: number[],
   return false;
 }
 
-/** Why the graph backtracks too much (exponential, or a chain of loops too long), or undefined. */
-function loopReason(g: Graph, budget: { work: number }): string | undefined {
+/** What the loops of a graph cost. */
+interface Loops {
+  /** why they backtrack too much (exponential, or a chain of loops too long) */
+  reason?: string;
+  /** the longest chain of loops that can read the same text (0: no loop) */
+  degree: number;
+  /** the longest such chain ending at a node's loop, that loop included */
+  chainInto(node: number): number;
+}
+
+/**
+ * The loops of a graph. Nodes in `markers` (where a lookbehind runs) aren't
+ * loops of the pattern: they count only for `chainInto`.
+ */
+function loopAnalysis(g: Graph, budget: { work: number }, markers = new Set<number>()): Loops {
   const { comp, members, loop } = components(g);
-  const loops = members.map((_, c) => c).filter(c => loop[c]);
-  for (const c of loops) {
-    if (exponential(g, members[c], comp, c, budget)) {
-      return 'a repeated part can match the same text in exponentially many ways (nested or overlapping quantifiers)';
-    }
-  }
+  const marker = new Set([...markers].map(n => comp[n]));
+  const loops = members.map((_, c) => c).filter(c => loop[c] && !marker.has(c));
   // Tarjan numbers components in reverse topological order: successors first
   const reach = members.map(() => new Set<number>());
   for (let c = 0; c < members.length; c++) {
@@ -513,6 +710,27 @@ function loopReason(g: Graph, budget: { work: number }): string | undefined {
       }
     }
   }
+  const into = new Map<number, number>();
+  const chainIntoComponent = (c: number): number => {
+    let best = into.get(c);
+    if (best !== undefined) return best;
+    best = 1;
+    // predecessors have higher numbers: the recursion ends
+    for (const d of loops) {
+      if (d === c || !reach[d].has(c)) continue;
+      if (chained(g, comp, members[d], d, members[c], c, budget)) best = Math.max(best, chainIntoComponent(d) + 1);
+    }
+    into.set(c, best);
+    return best;
+  };
+  const result: Loops = { degree: 0, chainInto: node => chainIntoComponent(comp[node]) };
+
+  for (const c of loops) {
+    if (exponential(g, members[c], comp, c, budget)) {
+      result.reason = 'a repeated part can match the same text in exponentially many ways (nested or overlapping quantifiers)';
+      return result;
+    }
+  }
   const chain = new Map<number, number>();
   for (const c of loops) {
     let best = 1;
@@ -521,11 +739,13 @@ function loopReason(g: Graph, budget: { work: number }): string | undefined {
       if (chained(g, comp, members[c], c, members[d], d, budget)) best = (chain.get(d) as number) + 1;
     }
     chain.set(c, best);
+    result.degree = Math.max(result.degree, best);
     if (best > MAX_LOOP_CHAIN) {
-      return 'unbounded quantifiers in a row can match the same text (polynomial backtracking: three or more, counting the search over start positions)';
+      result.reason = 'unbounded quantifiers in a row can match the same text (polynomial backtracking: three or more, counting the search over start positions)';
+      return result;
     }
   }
-  return undefined;
+  return result;
 }
 
 /**
@@ -582,9 +802,25 @@ function anchoredAtStart(alts: Term[][]): boolean {
   });
 }
 
-/** Why one pattern (top level or a lookaround body) is unsafe, or undefined. */
-function backtrackingReason(alts: Term[][], anchored: boolean, chars: Set<number>): string | undefined {
-  const nfa = new Nfa();
+/**
+ * A lookbehind body the way it is matched: right to left. `$` inside it is
+ * an assertion like any other (nothing after it is unreachable any more).
+ */
+function reversed(alts: Term[][]): Term[][] {
+  return alts.map(seq => [...seq].reverse().map(t => {
+    if (t.anchor) return { ...t, anchor: undefined };
+    return t.alts && !t.look ? { ...t, alts: reversed(t.alts) } : t;
+  }));
+}
+
+/**
+ * Why one pattern (top level or a lookbehind body) is unsafe, and how
+ * many loops in a row its own matching costs (`degree`: n^degree steps).
+ */
+function backtrackingReason(
+  alts: Term[][], anchored: boolean, chars: Set<number>, groups: Array<Term | undefined>,
+): { reason?: string; degree: number } {
+  const nfa = new Nfa(groups);
   let start: number;
   let final: number;
   let closures: Array<Map<number, number>>;
@@ -593,8 +829,8 @@ function backtrackingReason(alts: Term[][], anchored: boolean, chars: Set<number
     final = nfa.once({ alts, min: 1, max: 1 }, start);
     closures = epsilonClosures(nfa);
   } catch (err) {
-    if (err instanceof TooLarge) return 'the pattern is too large to be analysed for backtracking';
-    if (err instanceof EmptyLoop) return 'a repeated group can match empty text';
+    if (err instanceof TooLarge) return { reason: 'the pattern is too large to be analysed for backtracking', degree: 0 };
+    if (err instanceof EmptyLoop) return { reason: 'a repeated group can match empty text', degree: 0 };
     throw err;
   }
 
@@ -646,13 +882,20 @@ function backtrackingReason(alts: Term[][], anchored: boolean, chars: Set<number
     edges.push([...merged.values()].filter(e => e.mask !== 0n));
     accepting.push(matched(state));
   }
+  // where lookbehinds run: not part of what the pattern reads
+  const markers = new Set(nfa.lookbehinds.map(lb => ids.get(lb.at) as number));
+  const unmarked = edges.map((out, i) => (markers.has(i) ? [] : out.filter(e => !markers.has(e.to))));
 
   const budget = { work: 0 };
+  let degree: number;
+  let search: Loops;
   try {
     // Anything the pattern can do once it has started matching
-    const whole: Graph = { edges, start: 0 };
-    const reason = loopReason(whole, budget) ?? splitsReason(whole, classes, budget);
-    if (reason) return reason;
+    const whole: Graph = { edges: unmarked, start: 0 };
+    const loops = loopAnalysis(whole, budget);
+    const reason = loops.reason ?? splitsReason(whole, classes, budget);
+    if (reason) return { reason, degree: 0 };
+    degree = loops.degree;
     // The search: start positions as one more loop in front, and states
     // where the pattern has matched as dead ends (the search stops there)
     const all = (1n << BigInt(classes)) - 1n;
@@ -661,19 +904,42 @@ function backtrackingReason(alts: Term[][], anchored: boolean, chars: Set<number
       const s = searchEdges.length;
       searchEdges.push([{ mask: all, to: s, mult: 1 }, ...searchEdges[0]]);
     }
-    const searchReason = loopReason({ edges: searchEdges, start: 0 }, budget);
+    search = loopAnalysis({ edges: searchEdges, start: 0 }, budget, markers);
     // fine once started: only where matching starts is the problem
-    if (searchReason) return `${searchReason} — drop a leading \`.*\` or anchor the pattern with \`^\``;
+    if (search.reason) return { reason: `${search.reason} — drop a leading \`.*\` or anchor the pattern with \`^\``, degree: 0 };
   } catch (err) {
-    if (err instanceof TooComplex) return 'the pattern is too complex to be analysed for backtracking';
+    if (err instanceof TooComplex) return { reason: 'the pattern is too complex to be analysed for backtracking', degree: 0 };
     throw err;
   }
 
-  for (const inner of nfa.lookarounds) {
-    const r = backtrackingReason(inner, false, chars);
-    if (r) return r;
+  // A lookbehind costs its body's matching (right to left, from where it
+  // runs) each time the pattern gets there: n^(chain of loops leading
+  // there) times. `\w+(?<=\w*!)` is three loops: start positions, `\w+`, `\w*`.
+  for (const lb of nfa.lookbehinds) {
+    // only optional single characters (`(?<=\w*\s*)`): the first way it tries
+    // succeeds, so it reads the line once and never backtracks
+    const linear = lb.alts.length === 1 && lb.alts[0].every(t => t.min === 0 && t.char !== undefined);
+    const body = linear
+      ? { degree: lb.alts[0].some(t => t.max === Infinity || t.max > MAX_UNROLLED_RANGE) ? 1 : 0 }
+      : backtrackingReason(reversed(lb.alts), true, chars, groups);
+    if (body.reason) return body;
+    if (body.degree === 0) continue;
+    let visits: number;
+    try {
+      visits = search.chainInto(ids.get(lb.at) as number) - 1;
+    } catch (err) {
+      if (err instanceof TooComplex) return { reason: 'the pattern is too complex to be analysed for backtracking', degree: 0 };
+      throw err;
+    }
+    if (visits + body.degree > MAX_LOOP_CHAIN) {
+      return {
+        reason: 'a lookbehind with an unbounded quantifier runs behind unbounded quantifiers that can read the same text (polynomial backtracking: three or more loops, counting the search over start positions)',
+        degree: 0,
+      };
+    }
+    degree = Math.max(degree, visits + body.degree);
   }
-  return undefined;
+  return { degree };
 }
 
 /**
@@ -682,14 +948,15 @@ function backtrackingReason(alts: Term[][], anchored: boolean, chars: Set<number
  */
 export function unsafeRegexReason(source: string): string | undefined {
   let alts: Term[][];
+  let groups: Array<Term | undefined>;
   try {
     const p = new Parser(source);
-    alts = p.alternatives();
-    if (p.i !== source.length) return 'the pattern could not be analysed for backtracking';
+    alts = p.pattern();
+    groups = p.groups.map(g => g?.term);
   } catch {
     return 'the pattern could not be analysed for backtracking';
   }
-  return backtrackingReason(alts, anchoredAtStart(alts), alphabet(source));
+  return backtrackingReason(alts, anchoredAtStart(alts), alphabet(source), groups).reason;
 }
 
 /** Text a rule regex runs on, capped at MAX_RULE_INPUT characters. */

@@ -118,6 +118,31 @@ describe('diffResults keys', () => {
   });
 });
 
+describe('dt21 g8-F22 / g8-R5: a finding that gains or loses a file', () => {
+  const at = (...files: string[]) => Object.assign(makeCheckResult('CC-004', false), { evidence: files.map(file => ({ file })) });
+
+  it('stays unchanged when it loses a file but still names one of the same', () => {
+    const lost = diffResults(makeScanResult([at('/h/.claude/settings.json')]), makeScanResult([at('/h/.claude/settings.json', '/h/.claude/settings.local.json')]));
+    expect(lost).toMatchObject({ newFindings: [], resolvedFindings: [] });
+    expect(lost.unchangedFindings).toHaveLength(1);
+  });
+
+  it('is new (not also resolved) when it names a file the baseline did not — a secret leaked into a new file', () => {
+    const gained = diffResults(makeScanResult([at('/h/.claude/settings.json', '/h/.claude/settings.local.json')]), makeScanResult([at('/h/.claude/settings.json')]));
+    expect(gained.newFindings).toHaveLength(1);
+    expect(gained.resolvedFindings).toHaveLength(0);
+    expect(gained.unchangedFindings).toHaveLength(0);
+  });
+
+  it('keeps repeated ids (one CONFIG-LOAD per file) apart by file', () => {
+    const load = (file: string) => Object.assign(makeCheckResult('CONFIG-LOAD', false), { evidence: [{ file }] });
+    const diff = diffResults(makeScanResult([load('/a.json'), load('/b.json')]), makeScanResult([load('/a.json')]));
+    expect(diff.newFindings.map(f => f.evidence?.[0].file)).toEqual(['/b.json']);
+    expect(diff.unchangedFindings).toHaveLength(1);
+    expect(diff.resolvedFindings).toHaveLength(0);
+  });
+});
+
 describe('baseline scopes', () => {
   it('keeps a separate latest baseline per agent filter and host', async () => {
     const { mkdtemp, rm, readdir } = await import('node:fs/promises');

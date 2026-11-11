@@ -90,3 +90,9 @@ describe('dt20 g3 re-verify: hyphen ranges', () => {
     expect(rangeBounds('1 - 2')).toEqual({ min: '1.0.0', maxExclusive: '3.0.0' });
   });
 });
+
+describe('dt21 g2-R1: a partial npm version is a range', () => {
+  it.each([['0.1', undefined], ['=0.1', undefined], ['1', undefined], ['v2.3', undefined], ['==0.1', '0.1.0'], ['===5.3', '5.3.0'], ['0.1.5', '0.1.5']])('%s', (spec, version) => {
+    expect(exactVersion(spec)).toBe(version);
+  });
+});

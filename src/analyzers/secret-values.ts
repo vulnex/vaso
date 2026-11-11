@@ -18,7 +18,7 @@ import { shannonEntropy } from './entropy.js';
  * Token formats `API_KEY_PATTERNS` leaves out (that list has a Go mirror in
  * the probe; these are judged on the scanning side only).
  */
-const EXTRA_TOKEN_PATTERNS: RegExp[] = [
+export const EXTRA_TOKEN_PATTERNS: RegExp[] = [
   /^github_pat_[A-Za-z0-9_]{20,}/,
   /^gh[ousr]_[A-Za-z0-9]{30,}/,
   /^sk-or-v1-[A-Za-z0-9]{32,}/,
@@ -112,7 +112,22 @@ export function isKnownSecretValue(value: string): boolean {
   const v = value.trim();
   if (v === '' || notStored(v)) return false;
   if (API_KEY_PATTERNS.some(({ pattern }) => pattern.test(v)) || EXTRA_TOKEN_PATTERNS.some(p => p.test(v))) return true;
-  return /^https?:\/\//i.test(v) && findUrlSecrets(v).length > 0;
+  return /^https?:\/\//i.test(v) && findUrlSecrets(v).some(s => !isTenantSegment(v, s.value));
+}
+
+/**
+ * Microsoft identity platform authorities (`https://login.microsoftonline.com/<tenant>/v2.0`):
+ * the tenant id in the first path segment is public — any sign-in page shows it.
+ */
+const AUTHORITY_HOST = /^(?:login\.microsoftonline\.(?:com|us|de)|login\.partner\.microsoftonline\.cn|login\.chinacloudapi\.cn|login\.windows\.net|login\.microsoft\.com|sts\.windows\.net)$/i;
+
+function isTenantSegment(url: string, value: string): boolean {
+  try {
+    const u = new URL(url);
+    return AUTHORITY_HOST.test(u.hostname) && u.pathname.split('/')[1] === value;
+  } catch {
+    return false;
+  }
 }
 
 /** A value under a credential name (`GITLAB_TOKEN`, `MISTRAL_KEY`) that is the credential itself. */
@@ -120,5 +135,9 @@ export function isSecretNamedValue(name: string, value: string): boolean {
   const v = value.trim();
   if (v === '' || notStored(v)) return false;
   if (isKnownSecretValue(v)) return true;
+  // A URL is judged by the credentials in it (findUrlSecrets above), not by
+  // how random the whole string looks: a tenant or resource id in its path
+  // is not the credential the name promises
+  if (/^https?:\/\//i.test(v)) return false;
   return isCredentialValueName(name) && looksRandom(v);
 }

@@ -21,7 +21,7 @@ async function scanFile(file: string, reader: MemoryReader, evidence: Evidence[]
   const content = await reader.read(file);
   if (content === undefined) return;
 
-  evidence.push(...scanMemorySecrets(file, content));
+  for (const e of scanMemorySecrets(file, content)) evidence.push(e);
 }
 
 export const cdx007 = defineCheck({

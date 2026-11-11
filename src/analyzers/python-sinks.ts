@@ -17,7 +17,7 @@
 
 import { classifySensitivePath } from './sensitive-paths.js';
 import type { DataFlowResult } from './ast-analyzer.js';
-import { onVendorHost, ownedCredential, staticOrigin, vendorApiDomains, vendorUrlSlot } from './vendor-domains.js';
+import { credentialEnvName, onVendorHost, ownedCredential, signingSecret, staticOrigin, vendorApiDomains, vendorUrlSlot } from './vendor-domains.js';
 
 /**
  * Each string literal in `text` replaced by `fill(literal)`: one pass, quotes
@@ -198,7 +198,10 @@ function stringConstantNames(stmts: CodeLine[], fns: PyFunction[]): Set<string> 
   const other = new Set<string>(fns.flatMap((f) => f.params));
   for (const { text } of stmts) {
     const m = /^\s*([A-Za-z_]\w*)\s*(?::[^=]+)?=(?!=)\s*([\s\S]*)$/.exec(text);
-    if (m) bound.set(m[1], [...(bound.get(m[1]) ?? []), m[2]]);
+    if (m) {
+      const values = bound.get(m[1]);
+      if (values) values.push(m[2]); else bound.set(m[1], [m[2]]);
+    }
     for (const b of text.matchAll(/\b(?:for|as)\s+([A-Za-z_]\w*)/g)) other.add(b[1]);
   }
   const constants = new Set<string>();
@@ -422,6 +425,21 @@ function functionsOf(stmts: Array<CodeLine & { last: number }>): PyFunction[] {
     fns.push({ name: def[2], params, start: i, end, tool });
   }
   return fns;
+}
+
+/**
+ * The MCP tool functions of a Python server (`@mcp.tool()`, `@server.call_tool()`
+ * decorated), by name: each function's source text, decorators excluded —
+ * what MCP-019 classifies as a source or a sink tool.
+ */
+export function pythonToolHandlers(code: string): Map<string, string> {
+  const stmts = statements(codeLines(code));
+  const out = new Map<string, string>();
+  for (const f of functionsOf(stmts)) {
+    if (!f.tool || out.has(f.name)) continue;
+    out.set(f.name, stmts.slice(f.start, f.end).map((st) => st.text).join('\n'));
+  }
+  return out;
 }
 
 /**
@@ -730,10 +748,21 @@ function inlineSources(text: string): Array<[string, SourceKind]> {
   return out;
 }
 
-/** `os.environ["KEY"]`, `os.environ.get("KEY")`, `os.getenv("KEY", …)` → KEY. */
+const ENV_READ = /\bos\.(?:environ\s*\[\s*[rRuU]?(["'])([^"']+)\1\s*\]|environ\.get\s*\(\s*[rRuU]?(["'])([^"']+)\3|getenv\s*\(\s*[rRuU]?(["'])([^"']+)\5)/g;
+
+/** `os.environ["KEY"]`, `os.environ.get("KEY")`, `os.getenv("KEY", …)` → KEY (the first). */
 function inlineEnvName(text: string): string | undefined {
-  const m = /\bos\.(?:environ\s*\[\s*[rRuU]?(["'])([^"']+)\1\s*\]|environ\.get\s*\(\s*[rRuU]?(["'])([^"']+)\3|getenv\s*\(\s*[rRuU]?(["'])([^"']+)\5)/.exec(text);
-  return m ? m[2] ?? m[4] ?? m[6] : undefined;
+  return inlineEnvNames(text)[0];
+}
+
+/** Every environment name `text` reads, in order. */
+function inlineEnvNames(text: string): string[] {
+  return [...text.matchAll(ENV_READ)].map((m) => m[2] ?? m[4] ?? m[6]);
+}
+
+/** The name to judge a value read from several by: a credential whose home is known, else any credential, else the first. */
+function sensitiveEnvName(names: string[]): string | undefined {
+  return names.find((n) => ownedCredential(n)) ?? names.find((n) => credentialEnvName(n)) ?? names[0];
 }
 
 /**
@@ -750,25 +779,103 @@ function codeOnly(text: string): string {
 }
 
 /**
- * Module-level names bound once, to a plain string literal
- * (`API_URL = "https://api.openai.com/v1"`): a request to one goes to that
- * literal. Function parameters and loop/`as` names are not constants.
+ * What a name in a request URL stands for, by Python's scoping: a name bound
+ * exactly once in its scope by a plain `name = value` — module-level
+ * (`API_URL = "https://api.openai.com/v1"`) or inside the function
+ * (`url = "https://api.openai.com/v1/" + path`) — stands for that value.
+ * Any other binding of it in that scope makes it unknown: a second
+ * assignment, `+=`, a tuple target (`API, X = …`), a walrus (`(API := …)`),
+ * `for`/`as`/`import`/`del`, a parameter, a `global API` rebinding from a
+ * function, or a module-level assignment nested in a block or class. Code
+ * that rebinds names dynamically (`globals()`, `setattr`, `exec`) has no
+ * module-level constants. Returns the value's expression text, looked up
+ * from the functions around a statement (outermost first).
  */
-function literalConstants(stmts: CodeLine[], fns: PyFunction[]): Map<string, string> {
-  const bound = new Map<string, string[]>();
-  const params = new Set(fns.flatMap((f) => f.params));
-  for (const { text } of stmts) {
-    const m = /^(\s*)([A-Za-z_]\w*)\s*(?::[^=]+)?=(?!=)\s*([\s\S]*)$/.exec(text);
-    if (m) bound.set(m[2], [...(bound.get(m[2]) ?? []), m[1] === '' ? m[3].trim() : '']);
-    for (const b of text.matchAll(/\b(?:for|as|global|nonlocal)\s+([A-Za-z_]\w*)/g)) params.add(b[1]);
+type UrlConstants = ((name: string, enclosing: readonly PyFunction[]) => string | undefined) & {
+  /** The scope whose binding of `name` a statement inside `enclosing` sees (undefined: module level). */
+  scopeOf(name: string, enclosing: readonly PyFunction[]): PyFunction | undefined;
+  /** The innermost function of each statement. */
+  owner: ReadonlyArray<PyFunction | undefined>;
+};
+
+function scopedConstants(stmts: CodeLine[], fns: PyFunction[]): UrlConstants {
+  // innermost function of each statement (a `def` line belongs to the scope around it)
+  const owner: Array<PyFunction | undefined> = new Array(stmts.length).fill(undefined);
+  for (const f of fns) for (let i = f.start + 1; i < f.end; i++) owner[i] = f;
+  // per scope and name: the value of its only plain binding, or null once bound any other way or twice
+  const bindings = new Map<PyFunction | undefined, Map<string, string | null>>();
+  const bind = (scope: PyFunction | undefined, name: string, value: string | undefined) => {
+    let m = bindings.get(scope);
+    if (!m) bindings.set(scope, (m = new Map()));
+    // undefined: a binding that isn't a plain `name = value`
+    m.set(name, m.has(name) || value === undefined ? null : value);
+  };
+  const globals = new Map<PyFunction, Set<string>>();
+  for (let i = 0; i < stmts.length; i++) {
+    const f = owner[i];
+    const g = /^\s*global\s+([\w\s,]+)$/.exec(stmts[i].text);
+    if (g && f) for (const n of g[1].split(',')) globals.set(f, new Set([...(globals.get(f) ?? []), n.trim()]));
   }
-  const out = new Map<string, string>();
-  for (const [name, values] of bound) {
-    const lit = values.length === 1 && !params.has(name) ? /^[rRuU]?(["'])([^"'{}]*)\1$/.exec(values[0]) : null;
-    if (lit) out.set(name, lit[2]);
+  let dynamic = false;
+  for (let i = 0; i < stmts.length; i++) {
+    const text = stmts[i].text;
+    const f = owner[i];
+    const scopeOf = (name: string) => (f && globals.get(f)?.has(name) ? undefined : f);
+    const code = blankStrings(text);
+    if (/\b(?:globals|vars|locals)\s*\(|\bsetattr\s*\(|__dict__|\b__builtins__\b|(?<![\w.])exec\s*\(/.test(code)) dynamic = true;
+    // (each pattern linear: a statement can be one 100 KB line)
+    for (const w of code.matchAll(/(?<![\w.])([A-Za-z_]\w*)\s*:=/g)) bind(scopeOf(w[1]), w[1], undefined);
+    const names = (t: string) => t.match(/(?<![\w.])[A-Za-z_]\w*/g) ?? [];
+    for (const b of code.matchAll(/\bfor\b([^:\n]{0,200})/g)) {
+      const at = b[1].search(/\sin\b/);
+      for (const n of names(at < 0 ? '' : b[1].slice(0, at))) bind(scopeOf(n), n, undefined);
+    }
+    for (const b of code.matchAll(/\bas\s+\(?([\w, ]{1,200})/g)) for (const n of names(b[1])) bind(scopeOf(n), n, undefined);
+    for (const b of code.matchAll(/^\s*(?:del|nonlocal|global)\s([\w\s,]*)/g)) for (const n of names(b[1])) bind(scopeOf(n), n, undefined);
+    const imp = /^\s*(?:from\s+\S+\s+)?import\s+(.+)$/.exec(code);
+    if (imp) for (const n of names(imp[1])) bind(scopeOf(n), n, undefined);
+    const aug = /^\s*([A-Za-z_]\w*)\s*(?:\/\/|\*\*|>>|<<|[-+*\/%&|^@])=/.exec(code);
+    if (aug) bind(scopeOf(aug[1]), aug[1], undefined);
+    // `a = b = v`, `a, b = …`, `(a, b) = …`, `[a] = …`: every target bound, none a constant
+    const plain = /^(\s*)([A-Za-z_]\w*)\s*(?::[^=]+)?=(?!=)\s*([\s\S]*)$/.exec(text);
+    const eq = /(?<![=!<>])=(?!=)/.exec(code);
+    const targets = eq ? code.slice(0, eq.index) : '';
+    if (plain && !/^\s*[A-Za-z_]\w*\s*=(?!=)/.test(blankStrings(plain[3]))) {
+      bind(scopeOf(plain[2]), plain[2], f || plain[1] === '' ? plain[3].trim() : undefined);
+    } else if (!aug && /^[\w\s,()[\]*.]+$/.test(targets) && /^\s*[([]|,/.test(targets) && !/[\w.\]]\s*\(/.test(targets)) {
+      for (const n of names(targets)) bind(scopeOf(n), n, undefined);
+    }
   }
-  return out;
+  for (const f of fns) for (const p of f.params) bind(f, p, undefined);
+  const lookup = (name: string, enclosing: readonly PyFunction[]): string | undefined => {
+    for (let i = enclosing.length - 1; i >= 0; i--) {
+      const scope = bindings.get(enclosing[i]);
+      if (scope?.has(name)) return scope.get(name) ?? undefined;
+    }
+    return dynamic ? undefined : bindings.get(undefined)?.get(name) ?? undefined;
+  };
+  const scopeOf = (name: string, enclosing: readonly PyFunction[]): PyFunction | undefined => {
+    for (let i = enclosing.length - 1; i >= 0; i--) if (bindings.get(enclosing[i])?.has(name)) return enclosing[i];
+    return undefined;
+  };
+  return Object.assign(lookup, { scopeOf, owner });
 }
+
+/**
+ * Code that sends every request of the file somewhere else, whatever URL a
+ * call names: a patched network module or client method
+ * (`socket.getaddrinfo = …`, `requests.Session.send = …`), or proxy / CA
+ * settings written to the environment (`os.environ["HTTPS_PROXY"] = …`,
+ * `REQUESTS_CA_BUNDLE`). A vendor key in its own API's headers then goes
+ * wherever that points.
+ */
+const PY_GLOBAL_REDIRECT = new RegExp([
+  String.raw`^\s*(?:requests|httpx|urllib3?|urllib|socket|ssl|http|aiohttp|certifi|dns|httplib2)(?:\.\w+)+\s*=(?!=)`,
+  String.raw`^\s*(?!self\b|cls\b)[A-Za-z_]\w*(?:\.\w+)*\.(?:send|request|urlopen|getaddrinfo|create_connection|_create_default_https_context|create_default_context|merge_environment_settings|get_adapter|rebuild_proxies|resolve|connect)\s*=(?!=)`,
+  String.raw`\bsetattr\s*\(\s*(?:requests|httpx|urllib3?|urllib|socket|ssl|http|aiohttp)\b`,
+  String.raw`\bos\.environ\s*\[\s*[rRuU]?["'][^"']*(?:PROXY|CA_BUNDLE|SSL_CERT|HTTPSVERIFY)[^"']*["']\s*\]\s*=(?!=)`,
+  String.raw`\bos\.(?:environ\.(?:update|setdefault)|putenv)\s*\([^\n]*(?:PROXY|CA_BUNDLE|SSL_CERT|HTTPSVERIFY)`,
+].join('|'), 'im');
 
 /** Options that send a request elsewhere or through someone else, or hide what is passed (`**kwargs`). */
 const PY_REDIRECT_KEYWORDS = /^(?:proxies|proxy|verify|transport|mounts|base_url|hooks|cert|unix_socket|connector)$/;
@@ -780,24 +887,43 @@ const PY_REDIRECT_KEYWORDS = /^(?:proxies|proxy|verify|transport|mounts|base_url
  * redirecting it. The same key in the URL, params, cookies or body, or sent
  * to any other host, is a leak.
  */
-function ownVendorApi(positional: string[], keywords: Map<string, string>, source: string, envName: string | undefined,
-  urlConstants: ReadonlyMap<string, string>): boolean {
-  const domains = vendorApiDomains(envName);
-  if (!domains) return false;
-  const urlKey = positional.length > 0 ? undefined : 'url';
-  const parts = pyUrlParts((positional[0] ?? keywords.get('url') ?? '').trim(), urlConstants);
+/**
+ * A request to the API of the vendor `envName` names: its URL (literal,
+ * constants, f-string) on that vendor's https host, nothing in the call
+ * redirecting it. Undefined otherwise — and for a signing secret, which is
+ * never how a request authenticates (`GITHUB_WEBHOOK_SECRET`).
+ */
+function vendorRequest(positional: string[], keywords: Map<string, string>, envName: string | undefined,
+  urlConstant: (name: string) => string | undefined, urlIndex: number):
+  { parts: Array<string | { code: string; before: string }>; prefix: string; computed: Array<{ code: string; before: string }> } | undefined {
+  const domains = signingSecret(envName) ? undefined : vendorApiDomains(envName);
+  if (!domains) return undefined;
+  const parts = pyUrlParts((positional[urlIndex] ?? keywords.get('url') ?? '').trim(), urlConstant);
+  // the static text before the first computed part (an interpolated constant is several strings)
+  const firstComputed = parts.findIndex((x) => typeof x !== 'string');
+  const prefix = (firstComputed < 0 ? parts : parts.slice(0, firstComputed)).join('');
   const computed = parts.filter((x): x is { code: string; before: string } => typeof x !== 'string');
   if (computed.length > 0) {
-    const origin = staticOrigin(typeof parts[0] === 'string' ? parts[0] : '');
-    if (!origin || !onVendorHost(origin, domains)) return false;
-  } else if (!onVendorHost(parts.join(''), domains)) return false;
-  if (positional.some((p) => p.startsWith('*')) || [...keywords.keys()].some((k) => PY_REDIRECT_KEYWORDS.test(k))) return false;
+    const origin = staticOrigin(prefix);
+    if (!origin || !onVendorHost(origin, domains)) return undefined;
+  } else if (!onVendorHost(parts.join(''), domains)) return undefined;
+  if (positional.some((p) => p.startsWith('*')) || [...keywords.keys()].some((k) => PY_REDIRECT_KEYWORDS.test(k))) return undefined;
+  return { parts, prefix, computed };
+}
+
+function ownVendorApi(positional: string[], keywords: Map<string, string>, source: string, envName: string | undefined,
+  urlConstant: (name: string) => string | undefined, urlIndex = 0): boolean {
+  const urlKey = positional.length > urlIndex ? undefined : 'url';
+  const target = vendorRequest(positional, keywords, envName, urlConstant, urlIndex);
+  if (!target) return false;
+  const { parts, prefix, computed } = target;
   const seen = (t: string) => (/^[A-Za-z_]\w*$/.test(source) ? mentions(codeOnly(t), source) : t.includes(source));
   // The value itself, maybe URL-quoted (`quote(key)`)
   const isSource = (t: string) => t.trim().replace(/^(?:urllib\.parse\.)?quote(?:_plus)?\s*\(([\s\S]*)\)$/, '$1').trim() === source;
   // Where the vendor takes its key: headers, auth, and the URL/query slots it documents
   const carrying = ['headers', 'auth'].map((k) => keywords.get(k) ?? '');
-  const rest = [...positional.slice(1), ...[...keywords].filter(([k]) => !['headers', 'auth', 'params', urlKey].includes(k)).map(([, v]) => v)];
+  // (`request(method, url)`: the method is a positional too)
+  const rest = [...positional.slice(urlIndex + 1), ...positional.slice(0, urlIndex).filter((x) => !/^[rRuU]?(["'])[A-Za-z]+\1$/.test(x.trim())), ...[...keywords].filter(([k]) => !['headers', 'auth', 'params', urlKey].includes(k)).map(([, v]) => v)];
   for (const c of computed) (isSource(c.code) && vendorUrlSlot(envName, c.before) ? carrying : rest).push(c.code);
   const params = keywords.get('params')?.trim() ?? '';
   const dict = params.startsWith('{') && params.endsWith('}') ? topLevelParts(params.slice(1, -1)) : undefined;
@@ -805,7 +931,7 @@ function ownVendorApi(positional: string[], keywords: Map<string, string>, sourc
   for (const entry of dict ?? []) {
     const kv = /^\s*[rRuU]?(["'])([^"']+)\1\s*:([\s\S]*)$/.exec(entry);
     // with the request's own origin, so a storage host's query (access logs) isn't a slot
-    const origin = staticOrigin(typeof parts[0] === 'string' ? parts[0] : '') ?? parts.join('');
+    const origin = staticOrigin(prefix) ?? parts.join('');
     (kv && isSource(kv[3]) && vendorUrlSlot(envName, `${/^https:\/\/[^/?#@]+/i.exec(origin)?.[0] ?? ''}/?${kv[2]}=`) ? carrying : rest).push(kv ? kv[3] : entry);
   }
   return carrying.some(seen) && !rest.some(seen);
@@ -816,7 +942,7 @@ function ownVendorApi(positional: string[], keywords: Map<string, string>, sourc
  * before each): a string literal, an f-string's literal text and `{…}`
  * fields, a module-level string constant, or a `+` chain of them.
  */
-function pyUrlParts(expr: string, urlConstants: ReadonlyMap<string, string>): Array<string | { code: string; before: string }> {
+function pyUrlParts(expr: string, urlConstant: (name: string) => string | undefined): Array<string | { code: string; before: string }> {
   const out: Array<string | { code: string; before: string }> = [];
   let before = '';
   const add = (part: string | { code: string }) => {
@@ -825,6 +951,11 @@ function pyUrlParts(expr: string, urlConstants: ReadonlyMap<string, string>): Ar
       out.push(part);
     } else out.push({ code: part.code, before });
   };
+  walkUrl(expr, urlConstant, add, 0);
+  return out;
+}
+
+function walkUrl(expr: string, urlConstant: (name: string) => string | undefined, add: (part: string | { code: string }) => void, level: number): void {
   // Split on top-level `+` (outside strings and brackets)
   const blank = blankStrings(expr);
   const pieces: string[] = [];
@@ -855,17 +986,78 @@ function pyUrlParts(expr: string, urlConstants: ReadonlyMap<string, string>): Ar
         else if (m[1] !== undefined) {
           if (text) add(text);
           text = '';
-          add({ code: m[1].replace(/(?:![rsa])?(?::[^:]*)?$/, '') });
+          // `f"{BASE}/models"`: a field resolved like a `+` operand
+          const field = m[1].replace(/(?:![rsa])?(?::[^:]*)?$/, '');
+          if (level < 8) walkUrl(field, urlConstant, add, level + 1);
+          else add({ code: field });
         } else text += m[0];
       }
       if (text) add(text);
       continue;
     }
-    const constant = urlConstants.get(piece);
-    if (constant !== undefined) add(constant);
+    // a name bound once to a value (`url = "https://…" + path`), followed a few levels
+    const unparen = piece.replace(/^\(\s*([\s\S]*?)\s*\)$/, '$1');
+    // (only a URL being built from text: a name holding a value read elsewhere — an env credential — is itself the part)
+    const bound = /^[A-Za-z_]\w*$/.test(unparen) && level < 8 ? urlConstant(unparen) : undefined;
+    const constant = bound !== undefined && /^\s*\(?\s*[rRuUfF]{0,2}["']|\+\s*[rRuUfF]{0,2}["']/.test(blankStrings(bound)) ? bound : undefined;
+    if (constant !== undefined) walkUrl(constant, urlConstant, add, level + 1);
     else add({ code: piece });
   }
-  return out;
+}
+
+const SESSION_CTOR = /\b(?:requests\.(?:Session|session)|httpx\.(?:Async)?Client|aiohttp\.ClientSession|urllib3\.PoolManager)\s*\(/;
+const SESSION_REDIRECT = /^(?:proxies|proxy|verify|mount|mounts|hooks|event_hooks|adapters|trust_env|cert|transport|base_url|connector)$/;
+
+/**
+ * Client sessions the file opens (`s = requests.Session()`, `with
+ * httpx.Client() as c:`, `self.http = aiohttp.ClientSession()`), as a
+ * pattern for their request calls (`s.get(…)` is a request like
+ * `requests.get(…)`), and the ones sent elsewhere or unverified — by their
+ * constructor (`proxies=`, `verify=`, `base_url=`, `transport=`) or later
+ * (`s.proxies = …`, `s.verify = False`, `s.mount(…)`).
+ */
+function clientSessions(texts: string[], owner: ReadonlyArray<PyFunction | undefined>):
+  { calls?: RegExp; redirected: Set<string>; scopes: Map<string, Set<PyFunction | undefined>> } {
+  const names = new Set<string>();
+  const redirected = new Set<string>();
+  // where each session name is bound: a same-named variable in another scope is something else
+  const scopes = new Map<string, Set<PyFunction | undefined>>();
+  for (const [i, text] of texts.entries()) {
+    const ctor = SESSION_CTOR.exec(text);
+    if (!ctor) continue;
+    const args = callArgs(text, ctor.index + ctor[0].length - 1);
+    const assigned = /^\s*([A-Za-z_][\w.]*)\s*(?::[^=]+)?=(?!=)\s*(?:await\s+)?$/.exec(text.slice(0, ctor.index));
+    const after = text.slice(ctor.index + ctor[0].length + args.length + 1);
+    const name = assigned?.[1] ?? /^\s*as\s+([A-Za-z_]\w*)/.exec(after)?.[1];
+    if (!name) continue;
+    names.add(name);
+    scopes.set(name, new Set([...(scopes.get(name) ?? []), owner[i]]));
+    if ([...splitArgs(args).keywords.keys()].some((k) => SESSION_REDIRECT.test(k))) redirected.add(name);
+  }
+  if (names.size === 0) return { redirected, scopes };
+  const alt = [...names].map((n) => n.replace(/\./g, '\\.')).join('|');
+  const later = new RegExp(String.raw`^\s*(${alt})\s*\.\s*(\w+)\s*(?:=(?!=)|\()`);
+  for (const text of texts) {
+    const m = later.exec(text);
+    if (m && SESSION_REDIRECT.test(m[2])) redirected.add(m[1]);
+  }
+  return { calls: new RegExp(String.raw`(?<![\w.])(?:${alt})\s*\.\s*(get|post|put|patch|delete|head|options|request|stream)\s*\(`), redirected, scopes };
+}
+
+/** Where a session carries credentials for every request: `s.headers.update(…)`, `s.headers[k] = …`, `s.auth = …`, `Client(headers=…)`. */
+type SessionSlot = 'headers' | 'other';
+
+/**
+ * Patterns for a session `name`: a statement attaching values to it — its
+ * headers or auth (`headers` slot), or its params/cookies (`other`) — and
+ * one binding it (`s = …`, `as s`).
+ */
+function sessionPatterns(name: string): { attach: RegExp; binds: RegExp } {
+  const n = name.replace(/\./g, '\\.');
+  return {
+    attach: new RegExp(String.raw`^\s*${n}\s*\.\s*(headers|auth|params|cookies)\s*(?:\[[^\]]*\]\s*)?(?:=(?!=)|\.\s*(?:update|set|setdefault|__setitem__)\s*\()\s*([\s\S]*)$`),
+    binds: new RegExp(String.raw`(?:^\s*${n}\s*(?::[^=]+)?=|\bas\s+${n}\b)`),
+  };
 }
 
 /** Programs whose arguments leave the machine: an env secret in their argv is sent somewhere. */
@@ -893,9 +1085,11 @@ const DIRECT_EXEC = /^(?:subprocess\.(?:run|call|check_call|check_output|Popen)|
  * `env=`/`cwd=` and other process options aren't data the process sends; and
  * a single environment value (a user agent, an API key in the headers of the
  * API it belongs to) is exfiltration only in a request body, in the argv of
- * a network program, or — when it is a vendor's key or a signing secret
- * (ownedCredential) — anywhere in a request but the vendor's own API headers;
- * file contents and the whole environment, anywhere.
+ * a network program, or — when it is a vendor's key, a signing secret or a
+ * database credential (ownedCredential) — anywhere in a request but the
+ * vendor's own API headers, and for any other credential anywhere but the
+ * request's headers and `auth`; file contents and the whole environment,
+ * anywhere.
  */
 export function analyzePythonDataFlow(code: string): DataFlowResult[] {
   const out: DataFlowResult[] = [];
@@ -904,7 +1098,14 @@ export function analyzePythonDataFlow(code: string): DataFlowResult[] {
   const stmts = statements(lines);
   const fns = functionsOf(stmts);
   const constants = stringConstantNames(stmts, fns);
-  const urlConstants = literalConstants(stmts, fns);
+  const urlConstants = scopedConstants(stmts, fns);
+  // the file redirects every request (patched client, proxy settings): no request is the vendor's own
+  const rewritten = stmts.map((st) => rewrite(st.text));
+  const redirectsAll = PY_GLOBAL_REDIRECT.test(rewritten.join('\n'));
+  const sessions = clientSessions(rewritten, urlConstants.owner);
+  // what each session carries into every request it makes (`s.headers.update({…})`, `Client(headers=…)`)
+  const sessionCreds = new Map<string, Array<{ source: string; kind: SourceKind; envName?: string; slot: SessionSlot }>>();
+  const sessionRes = new Map([...sessions.scopes.keys()].map((n) => [n, sessionPatterns(n)]));
   const scopes = new Map<PyFunction | undefined, Map<string, SourceKind>>([[undefined, new Map()]]);
   const scopeOf = (fn: PyFunction | undefined): Map<string, SourceKind> => {
     let m = scopes.get(fn);
@@ -988,7 +1189,7 @@ export function analyzePythonDataFlow(code: string): DataFlowResult[] {
         const flows = [...[...visible].filter(([v]) => mentions(sent, v)), ...inlineSources(sent)];
         for (const [v, kind] of flows) {
           if (kind === 'env' && !(program && NETWORK_PROGRAM.test(program))) continue;
-          out.push({ type: 'source-to-sink', source: v, sourceKind: report(kind), sink, line: stmt.line, snippet, description: `Data flows from "${v}" into process execution "${sink}"` });
+          out.push({ type: 'source-to-sink', source: v, sourceKind: report(kind), ...(kind === 'envall' ? { wholeEnv: true } : {}), sink, line: stmt.line, snippet, description: `Data flows from "${v}" into process execution "${sink}"` });
         }
       }
       break;
@@ -1003,10 +1204,37 @@ export function analyzePythonDataFlow(code: string): DataFlowResult[] {
       }
     }
 
-    const net = NETWORK_CALLS.exec(text);
+    // Values attached to a session: by its constructor, or set on it later
+    for (const [name, re] of sessionRes) {
+      const attached: Array<{ slot: SessionSlot; expr: string }> = [];
+      const set = re.attach.exec(text);
+      if (set) attached.push({ slot: set[1] === 'headers' || set[1] === 'auth' ? 'headers' : 'other', expr: set[2] });
+      const ctor = SESSION_CTOR.exec(text);
+      if (ctor && re.binds.test(text)) {
+        const kw = splitArgs(callArgs(text, ctor.index + ctor[0].length - 1)).keywords;
+        for (const [k, v] of kw) if (/^(?:headers|auth|params|cookies)$/.test(k)) attached.push({ slot: k === 'headers' || k === 'auth' ? 'headers' : 'other', expr: v });
+      }
+      for (const { slot, expr } of attached) {
+        const creds = sessionCreds.get(name) ?? [];
+        for (const [v, kind] of visible) if (mentions(expr, v)) creds.push({ source: v, kind, envName: visibleEnvName.get(v), slot });
+        for (const [v, kind] of inlineSources(expr)) creds.push({ source: v, kind, envName: kind === 'env' ? inlineEnvName(v) : undefined, slot });
+        sessionCreds.set(name, creds);
+      }
+    }
+
+    let net = NETWORK_CALLS.exec(text);
+    if (!net && sessions.calls) {
+      // a session call — of the session, not a same-named variable of another scope (`s = {}` in a function)
+      const m = sessions.calls.exec(text);
+      const name = m && /^([\w.]+?)\s*\.\s*\w+\s*\($/.exec(m[0])?.[1];
+      if (m && name && (name.includes('.') || sessions.scopes.get(name)?.has(urlConstants.scopeOf(name, enclosing)))) net = m;
+    }
     // Building a client or connection (`httpx.Client(base_url=url)`) sends nothing
     const constructs = net !== null && CLIENT_CONSTRUCTORS.test(net[1] ?? (/\w+/.exec(net[0])?.[0] ?? ''));
     if (net && !constructs) {
+      // (sinkObject: the client the call goes through — `requests`, `smtplib`, a session `s`)
+      const via = net[0].replace(/\s*\($/, '').replace(/\s+/g, '');
+      const client = /^([\w.]+?)\.\w+$/.exec(via)?.[1] ?? via;
       let { positional, keywords } = splitArgs(callArgs(text, text.indexOf('(', net.index)));
       const all = [...positional, ...keywords.values()].join(',');
       // A request body, or the payload of a raw socket send
@@ -1014,24 +1242,48 @@ export function analyzePythonDataFlow(code: string): DataFlowResult[] {
       // `urlopen(Request(url, data, headers=…))`: the request is the inner call
       const inner = rawSend ? null : /^(?:urllib\.request\.)?Request\s*\(/.exec(positional[0] ?? '');
       if (inner) ({ positional, keywords } = splitArgs(callArgs(positional[0], inner[0].length - 1)));
-      const body = [...(rawSend ? positional : positional.slice(1)), ...['data', 'json', 'files', 'content', 'body', 'msg'].map((k) => keywords.get(k) ?? '')].join(',');
+      // `request(method, url, …)`: the URL is the second argument
+      const urlIndex = !inner && net[1] === 'request' && /^[rRuU]?(["'])[A-Za-z]+\1$/.test(positional[0]?.trim() ?? '') ? 1 : 0;
+      const body = [...(rawSend ? positional : positional.slice(urlIndex + 1)), ...['data', 'json', 'files', 'content', 'body', 'msg'].map((k) => keywords.get(k) ?? '')].join(',');
       // Elsewhere in a request — its URL, headers, params, auth, cookies — a
       // single environment value counts when it is a credential whose home is
-      // known (a vendor's key, a signing secret), unless it is the vendor's
-      // key in the headers of that vendor's own API (ownVendorApi)
+      // known (a vendor's key, a signing secret, a database credential),
+      // unless it is the vendor's key in the headers of that vendor's own API
+      // (ownVendorApi); a credential tied to no vendor (`API_KEY`, `MY_TOKEN`)
+      // counts outside the headers and `auth` — there it is how the skill
+      // authenticates to whatever API it calls
       const request = !rawSend && !/^(?:connect|login|starttls|ehlo|helo|quit|close)$/.test(net[1] ?? '');
       const outside = codeOnly(all);
+      const outsideAuthRaw = [...positional, ...[...keywords].filter(([k]) => k !== 'headers' && k !== 'auth').map(([, v]) => v)].join(',');
+      const outsideAuth = codeOnly(outsideAuthRaw);
+      const urlConstant = (name: string) => urlConstants(name, enclosing);
+      const own = (v: string, name: string | undefined) => !redirectsAll && !sessions.redirected.has(client) && ownVendorApi(positional, keywords, v, name, urlConstant, urlIndex);
+      const outsideBody = (name: string | undefined, inOutside: boolean, inOutsideAuth: boolean, v: string): boolean => request
+        && (ownedCredential(name) ? inOutside && !own(v, name) : name !== undefined && credentialEnvName(name) && inOutsideAuth);
       const flows: Array<[string, SourceKind]> = [
         ...[...visible].filter(([v, k]) => (k !== 'env' ? mentions(all, v)
-          : mentions(body, v) || (request && ownedCredential(visibleEnvName.get(v)) && mentions(outside, v)
-            && !ownVendorApi(positional, keywords, v, visibleEnvName.get(v), urlConstants)))),
+          : mentions(body, v) || outsideBody(visibleEnvName.get(v), mentions(outside, v), mentions(outsideAuth, v), v))),
         ...inlineSources(all).filter(([, kind]) => kind !== 'env'),
         ...inlineSources(body).filter(([, kind]) => kind === 'env'),
-        ...(request ? inlineSources(all).filter(([v, kind]) => kind === 'env' && !body.includes(v)
-          && ownedCredential(inlineEnvName(v)) && !ownVendorApi(positional, keywords, v, inlineEnvName(v), urlConstants)) : []),
+        ...inlineSources(all).filter(([v, kind]) => kind === 'env' && !body.includes(v)
+          && outsideBody(inlineEnvName(v), true, outsideAuthRaw.includes(v), v)),
       ];
+      // What the session itself carries: judged like the same value in this request's headers (or params)
+      for (const c of request ? sessionCreds.get(client) ?? [] : []) {
+        if (flows.some(([v]) => v === c.source)) continue;
+        if (c.kind === 'env') {
+          if (ownedCredential(c.envName)) {
+            if (c.slot === 'headers' && !redirectsAll && !sessions.redirected.has(client)
+              && vendorRequest(positional, keywords, c.envName, urlConstant, urlIndex)) continue;
+          } else if (c.envName === undefined || !credentialEnvName(c.envName) || c.slot === 'headers') continue;
+        }
+        flows.push([c.source, c.kind]);
+      }
       for (const [v, kind] of flows) {
-        out.push({ type: 'source-to-sink', source: v, sourceKind: report(kind), sink: net[1] ?? 'urlopen', line: stmt.line, snippet, description: `Data flows from "${v}" to network sink "${net[0].replace(/\s*\($/, '')}"` });
+        out.push({
+          type: 'source-to-sink', source: v, sourceKind: report(kind), ...(kind === 'envall' ? { wholeEnv: true } : {}),
+          sink: net[1] ?? 'urlopen', sinkObject: client, line: stmt.line, snippet, description: `Data flows from "${v}" to network sink "${via}"`,
+        });
       }
     }
 
@@ -1046,13 +1298,14 @@ export function analyzePythonDataFlow(code: string): DataFlowResult[] {
       else if (/\bos\.environ\b(?!\s*(?:\[|\.get\b|\.setdefault\b|\.pop\b))/.test(rhs)) local.set(target, 'envall');
       else if (/\bos\.(?:environ|getenv)\b/.test(rhs)) {
         local.set(target, 'env');
-        const name = inlineEnvName(rhs);
+        // `os.environ.get("NOPE") or os.environ["AWS_SECRET_ACCESS_KEY"]`: the most sensitive of the names
+        const name = sensitiveEnvName([...inlineEnvNames(rhs), ...[...visible.keys()].filter((v) => mentions(values, v)).flatMap((v) => visibleEnvName.get(v) ?? [])]);
         if (name !== undefined) localEnvNames.set(target, name);
       } else {
-        const from = [...visible].find(([v]) => mentions(values, v));
-        if (from) {
-          local.set(target, from[1]);
-          const name = visibleEnvName.get(from[0]);
+        const from = [...visible].filter(([v]) => mentions(values, v));
+        if (from.length > 0) {
+          local.set(target, from.find(([, k]) => k !== 'env')?.[1] ?? from[0][1]);
+          const name = sensitiveEnvName(from.flatMap(([v]) => visibleEnvName.get(v) ?? []));
           if (name !== undefined) localEnvNames.set(target, name);
         } else local.delete(target);
       }

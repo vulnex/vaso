@@ -51,6 +51,17 @@ const COMMENT_WINDOW = 6;
 const KEYED_LITERAL =
   /["']?\b(?=[A-Za-z_])(?<!(?:^|[^\w])[A-Za-z_][\w-]*?)((?:[A-Za-z_][\w-]*?)?(?:api[_-]?key|apikey|secret|token|password|passwd|access[_-]?key|private[_-]?key|credential)s?)["']?\s*[:=]\s*["'`]([^"'`\s]{16,})["'`]/gi;
 const BEARER_LITERAL = /["'`]Bearer\s+([A-Za-z0-9._~+/=-]{20,})["'`]/g;
+/**
+ * Credentials inside a command line or URL string, where no quoted
+ * key/value pair surrounds them: a URL's userinfo password
+ * (`https://u:<pw>@`, `redis://:<pw>@`), an `Authorization:` header value
+ * inside a curl command, a `PGPASSWORD=<pw>` prefix, a MySQL/sshpass `-p`.
+ */
+const URL_PASSWORD = /\b[a-z][a-z0-9+.-]{1,31}:\/\/[^\s:@/"'`]*:([^\s@/"'`]{6,})@/gi;
+const AUTH_HEADER_VALUE = /\bAuthorization\s*:\s*(?:Bearer|Basic|Token)\s+([A-Za-z0-9._~+/=-]{16,})/gi;
+const ENV_ASSIGNED = /\b([A-Z][A-Z0-9_]*(?:PASSWORD|PASSWD|TOKEN|SECRET|API_KEY|APIKEY))=([^\s"'`$;&|]{12,})/g;
+const PASSWORD_FLAG = /\b(?:mysql\w*|mariadb\w*|sshpass)\b[^"'`\n]{0,200}?\s-p\s?([^\s"'`]{8,})/g;
+
 /** PEM header followed by key material, not a format constant in a crypto library. */
 const PRIVATE_KEY_BLOCK = /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----(?:\\n|\s)+[A-Za-z0-9+/=]{64}/;
 
@@ -100,6 +111,18 @@ export function findSourceSecrets(code: string): SourceSecret[] {
     }
     for (const m of text.matchAll(BEARER_LITERAL)) {
       if (looksLikeSecretValue(m[1])) add({ line, kind: 'bearer token', key: 'Authorization', masked: mask(m[1]) }, m[1]);
+    }
+    for (const m of text.matchAll(AUTH_HEADER_VALUE)) {
+      if (looksLikeSecretValue(m[1])) add({ line, kind: 'bearer token', key: 'Authorization', masked: mask(m[1]) }, m[1]);
+    }
+    for (const m of text.matchAll(URL_PASSWORD)) {
+      if (looksLikeSecretValue(m[1])) add({ line, kind: 'password in URL', masked: mask(m[1]) }, m[1]);
+    }
+    for (const m of text.matchAll(ENV_ASSIGNED)) {
+      if (looksLikeSecretValue(m[2])) add({ line, kind: 'secret-named value', key: m[1], masked: mask(m[2]) }, m[2]);
+    }
+    for (const m of text.matchAll(PASSWORD_FLAG)) {
+      if (looksLikeSecretValue(m[1])) add({ line, kind: 'password in command', key: '-p', masked: mask(m[1]) }, m[1]);
     }
   }
   return found;

@@ -27,7 +27,7 @@ export const aba012 = defineCheck({
       if (content === undefined) continue;
       scanned++;
       // the same key formats, keyed values and entropy scan as every other memory file
-      evidence.push(...scanMemorySecrets(file, content, 'AGENTS.md'));
+      for (const e of scanMemorySecrets(file, content, 'AGENTS.md')) evidence.push(e);
     }
 
     if (scanned === 0) return h.passed('No AGENTS.md files for this Abacus.AI installation');

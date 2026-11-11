@@ -2,9 +2,8 @@ import { defineCheck } from '../../core/check-builder.js';
 import { hermesApiServer, hermesApiServerState } from '../../adapters/hermes-api-server.js';
 import { CODING_AGENTS } from '../../core/types.js';
 import { getNestedValue } from '../../core/utils.js';
+import { hostPort, isWildcardAddress } from '../../core/listen-address.js';
 
-/** Addresses meaning "every interface" (IPv4, IPv6 with or without brackets, `*`). */
-const WILDCARD_HOSTS = new Set(['0.0.0.0', '::', '[::]', '*']);
 
 export const net001 = defineCheck({
   id: 'NET-001',
@@ -27,7 +26,7 @@ export const net001 = defineCheck({
     // release-dependent case (CFG-001 defers the same way)
     if (ctx.installation.agent === 'hermes'
         && hermesApiServerState(hermesApiServer(ctx.configs, ctx.installation.version), ctx.installation.version) !== 'unauthenticated') {
-      return h.passed(`Hermes API server on ${gw.host}:${gw.port ?? '?'} requires an API key or is refused without one (HM-004 covers unauthenticated exposure)`);
+      return h.passed(`Hermes API server on ${hostPort(gw.host, gw.port ?? '?')} requires an API key or is refused without one (HM-004 covers unauthenticated exposure)`);
     }
 
     // OpenClaw Tailscale Funnel publishes the (loopback-bound) gateway on the
@@ -46,11 +45,12 @@ export const net001 = defineCheck({
     }
 
     const host = gw.host.trim();
-    const publicBind = WILDCARD_HOSTS.has(host) || host.split(',').some(p => WILDCARD_HOSTS.has(p.trim()));
+    // Any spelling of the unspecified address (`::0`, `0`, `0:0:…:0`, `*`), alone or in a list
+    const publicBind = host.split(',').some(p => p.trim() !== '' && isWildcardAddress(p));
     return h.result({
       passed: !publicBind,
       message: publicBind
-        ? `Gateway bound to ${gw.host}:${gw.port ?? '?'} — exposed to all network interfaces`
+        ? `Gateway bound to ${hostPort(gw.host, gw.port ?? '?')} — exposed to all network interfaces`
         : `Gateway bound to ${gw.host} — not publicly exposed`,
     });
   },

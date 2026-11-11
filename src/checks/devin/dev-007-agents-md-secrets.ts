@@ -9,13 +9,29 @@ import { recordListFailure } from '../../core/config-loader.js';
 // config dir (CLAUDE.md is covered by the Claude Code checks).
 const RULE_FILES = ['AGENTS.md', 'AGENTS.local.md', 'AGENT.md', '.windsurfrules'];
 
+/** Whether `path` resolves to a directory (false when it can't be resolved — the reader reports that). */
+async function isDirectory(ctx: ScanContext, path: string): Promise<boolean> {
+  try {
+    return (await ctx.fs.stat(path)).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
 async function listMarkdown(ctx: ScanContext, dir: string): Promise<string[]> {
   try {
     // Regular files (or links to them) only: a directory named `x.md` is not
     // a rules file
     const entries = await ctx.fs.readdirEntries(dir);
     if (!Array.isArray(entries)) return [];
-    return entries.filter(e => e.name.endsWith('.md') && !e.isDirectory).map(e => join(dir, e.name));
+    const out: string[] = [];
+    for (const e of entries) {
+      if (!e.name.endsWith('.md') || e.isDirectory) continue;
+      // A link reports itself, not its target: follow it to drop `x.md -> some/dir`
+      if (e.isSymbolicLink && await isDirectory(ctx, join(dir, e.name))) continue;
+      out.push(join(dir, e.name));
+    }
+    return out;
   } catch (err) {
     // A rules folder that can't be listed hides its files
     await recordListFailure(dir, ctx.fs, err);
@@ -46,7 +62,7 @@ async function ruleFileCandidates(ctx: ScanContext): Promise<string[]> {
 }
 
 function scanContent(file: string, content: string, evidence: Evidence[]): void {
-  evidence.push(...scanMemorySecrets(file, content, 'rules file'));
+  for (const e of scanMemorySecrets(file, content, 'rules file')) evidence.push(e);
 }
 
 export const dev007 = defineCheck({

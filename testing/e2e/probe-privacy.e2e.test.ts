@@ -10,7 +10,10 @@ import { tmpdir } from 'node:os';
  * secrets in the shapes the probe promises to disguise (doc/user-guide.md,
  * "Secrets in collected config files"), plus credential environment
  * variables. No secret's hidden part (all but the first 8 / last 4
- * characters reports show) may appear in the snapshot. Skill trees ship
+ * characters reports show) may appear in the snapshot, nor may a stand-in
+ * keep more of a hex key than chance. Files are also written with CRLF line
+ * endings, a BOM, a Latin-1 byte or as UTF-16 (base64 in the snapshot,
+ * searched decoded). Skill trees ship
  * verbatim by design (IOC checks hash them) and are left out; so are paths
  * outside HOME and command output, which a fixture can't plant.
  *
@@ -81,8 +84,46 @@ const FORMATS: Array<[string, () => string]> = [
 /** A diceware-style passphrase: lowercase words, no digit or capital. */
 const passphrase = () => Array.from({ length: 4 }, () => body(7, 'abcdefghijklmnopqrstuvwyz')).join('-');
 
-/** A random credential under a credential-named key: no known prefix. */
-const generic = () => `${body(12)}!${body(14)}#${body(10)}`;
+/**
+ * A random credential under a credential-named key: no known prefix. A
+ * digit in it always: in free text the CLI takes a random run with no digit
+ * and entropy under 4.5 for prose, and so does the probe.
+ */
+const generic = () => `${body(11)}${body(1, '0123456789')}!${body(14)}#${body(10)}`;
+
+/** A short random credential (12–15 characters with digits: the CLI flags it from 12). */
+const short = () => `${body(5)}${body(3, '0123456789')}${body(5)}`;
+
+/** Random order of distinct characters: high entropy whatever the draw. */
+function distinct(alphabet: string, n: number): string[] {
+  const a = [...alphabet];
+  const r = randomBytes(a.length);
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = r[i] % (i + 1);
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a.slice(0, n);
+}
+
+/**
+ * A base64 secret that starts with "/" (one in 64 does): no file path. Its
+ * characters are distinct and a "+" splits it — a low-entropy draw, or one
+ * that happens to split into words, reads as a path name on both sides
+ * (isPathValue) and is kept like one.
+ */
+const slashed = () => {
+  const s = distinct([...distinct(BASE62.replace(/\d/g, ''), 26), ...distinct('0123456789', 4)].join(''), 30).join('');
+  return `/${s.slice(0, 15)}+${s.slice(15)}`;
+};
+
+/** Hex keys, whose stand-ins are also checked for reversibility. */
+const HEX = '0123456789abcdef';
+const hexCanaries = new Set<string>();
+const hex = () => {
+  const v = body(40, HEX);
+  hexCanaries.add(v);
+  return v;
+};
 
 function textFile(label: string): string {
   return FORMATS.map(([name, make]) => `${name}: ${canary(`${label} ${name}`, make)}`).join('\n') + '\n';
@@ -96,6 +137,14 @@ function envFile(label: string): string {
     `DB_PASSWORD=${canary(`${label} env passphrase`, passphrase)}`,
     `#OPENAI_API_KEY=${canary(`${label} env commented`, FORMATS[1][1])}`,
     `DATABASE_URL=postgres://app:${canary(`${label} env url password`, () => body(28))}@db.internal:5432/app`,
+    `REDIS_URL=redis://:${canary(`${label} env url password, no user`, () => body(28))}@cache:6379`,
+    `DATADOG_API_KEY=${canary(`${label} env hex`, hex)}`,
+    `DB_PWD=${canary(`${label} env pwd`, generic)}`,
+    `WEBHOOK_SECRET=${canary(`${label} env short`, short)}`,
+    `EXTRA_ARGS="--verbose --api-key ${canary(`${label} env argv`, generic)}"`,
+    `NUMERIC_PASSWORD=${canary(`${label} env numeric password`, () => body(9, '123456789'))}`,
+    `LOWER_PASSWORD=${canary(`${label} env lowercase password`, () => body(12, 'abcdefghijklmnopqrstuvwyz'))}`,
+    `QUOTED_ARGS='--no-auth --password "${canary(`${label} env quoted password`, () => `${body(6)} ${body(7)}2`)}"'`,
   ].join('\n') + '\n';
 }
 
@@ -128,6 +177,33 @@ function jsonFile(label: string): string {
     notes: `token ${c('token in prose', FORMATS[0][1])}`,
     // key=\"value\" inside a JSON string (custom instructions)
     instructions: `password="${c('escaped-quoted pair', generic)}" and api_key: "${c('escaped-quoted colon pair', generic)}"`,
+    userName: 'Jos\u00e9',
+    // lists, maps and argv the one-value rules missed
+    api_keys: [c('array item 1', generic), c('array item 2', hex)],
+    secrets: { github: c('secrets map child', generic), name: 'x' },
+    DB_PASSWORD: c('slash-leading base64', slashed),
+    NPM_CONFIG__AUTH: `//registry.npmjs.org/:_authToken=${c('npm authToken after a path', generic)}`,
+    SERVICE_TOKEN: `\${DB_PASSWORD:-${c('env fallback', generic)}}`,
+    API_SECRET: `$${c('dollar-led password', () => `Zx8${body(20)}`)}`,
+    tools: {
+      a: { args: ['-y', 'acme-mcp', '--verbose', '--token', c('argv after boolean flag', generic)] },
+      b: { args: ['supergateway', `--header=Authorization: Bearer ${c('header flag with =', generic)}`, `redis://:${c('url password, no user', () => body(28))}@cache:6379`] },
+      c: { command: 'sh', args: ['-c', `mysql -uroot -p${c('mysql -p', generic)} app && sshpass -p ${c('sshpass -p', generic)} ssh host`] },
+      d: { url: `https://${c('token as url user', () => body(32))}@o1.ingest.sentry.io/1`, args: ['--pwd', c('--pwd', generic)] },
+      e: { args: ['acme', '--no-auth', '--api-key', c('flag after a secret-named switch', generic)] },
+      f: { command: 'mysql', args: ['-u', 'root', `-p${c('-p<password> element', () => `${body(10)}7${body(9)}`)}`] },
+      g: { url: `https://${c('token:@ url user', () => body(32))}:@x.example/sse` },
+      h: { url: `https://x.example/sse#${c('fragment token', () => distinct(BASE62, 30).join(''))}` },
+      // the shared argv rules (probe/testdata/argv-verdicts.json)
+      j: { args: ['acme', '--api-key', `-${c('dash-led value', () => distinct(BASE62, 24).join(''))}`] },
+      k: { command: 'mysql', args: ['-u', 'root', '-p', c('mysql -p date-like', () => `20${body(2, '0123456789')}.${body(2, '0123456789')}.${body(2, '0123456789')}${body(6, '0123456789')}`)] },
+      l: { command: 'sshpass', args: ['-p', c('sshpass lowercase', () => body(14, 'abcdefghijklmnopqrstuvwyz')), 'ssh', 'host'] },
+      m: { command: 'redis-cli', args: ['-h', 'cache', '-p', '6379', '-a', c('redis-cli -a', () => body(16, 'abcdefghijklmnopqrstuvwyz'))] },
+      n: { args: ['-k', c('-k base64 with / and +', () => { const d = distinct(BASE62, 26).join(''); return `${d.slice(0, 13)}/${d.slice(13)}+`; })] },
+      // -k takes a key only when what follows is random (the report masker's rule)
+      i: { args: ['-k', c('-k random key', () => distinct(BASE62, 30).join(''))] },
+    },
+    apiKey: c('all-lowercase api key', () => body(32, 'abcdefghijklmnopqrstuvwyz0123456789')),
     // a pasted curl command: JSON inside the string, its quotes escaped twice
     curl: `Run: curl -d "{\\"api_key\\":\\"${c('embedded JSON in a JSON string', generic)}\\"}" https://api.x.com`,
   }, null, 2) + '\n';
@@ -161,6 +237,41 @@ function yamlFile(label: string): string {
     `anchored_token: &tok ${canary(`${label} yaml anchor`, generic)}`,
     `tagged_secret: !!str ${canary(`${label} yaml tag`, generic)}`,
     `list_tokens: [${canary(`${label} yaml flow sequence`, generic)}]`,
+    'model_list:',
+    '  m:',
+    '    api_keys:',
+    `      - ${canary(`${label} yaml block list`, generic)}`,
+    `      - "${canary(`${label} yaml block list quoted`, hex)}"`,
+    'anchored_keys: &keys',
+    `  - &k1 ${canary(`${label} yaml anchored list item`, generic)}`,
+    `  - !!str ${canary(`${label} yaml tagged list item`, generic)}`,
+    'headers:',
+    '  ? X-Other',
+    // a header no rule names: disguised when random
+    `  : ${canary(`${label} yaml explicit header key`, () => distinct(BASE62, 32).join(''))}`,
+    'deep:',
+    '  secrets:',
+    '    nested:',
+    `      deeper: ${canary(`${label} yaml secrets grandchild`, generic)}`,
+    'aux:',
+    '  api_key:',
+    `    ${canary(`${label} yaml next-line value`, generic)}`,
+    'secrets:',
+    `  github: ${canary(`${label} yaml secrets map child`, generic)}`,
+    // flow sequences with the command beside them (block or inline mapping)
+    'flow_servers:',
+    '  c1:',
+    '    command: sshpass',
+    `    args: ["-p", "${canary(`${label} yaml flow argv sshpass`, () => `${body(4)}!${body(5)}`)}", "ssh", "host"]`,
+    `  c4: {command: sshpass, args: [-p, "${canary(`${label} yaml inline mapping argv`, () => `${body(4)}!${body(5)}`)}", ssh, h]}`,
+    '  c5:',
+    '    command: mysql',
+    `    args: ["-u", "root", "-p", "${canary(`${label} yaml flow argv mysql`, () => `${body(3)}!${body(5)}`)}"]`,
+    'mcp:',
+    '  args:',
+    '    - --verbose',
+    '    - --api-key',
+    `    - ${canary(`${label} yaml argv block`, generic)}`,
   ].join('\n') + '\n';
 }
 
@@ -170,6 +281,14 @@ function tomlFile(label: string): string {
     `api_key = "${canary(`${label} toml api_key`, generic)}"`,
     `bearer_token = """${canary(`${label} toml multi-line string`, generic)}"""`,
     `env = { OPENAI_API_KEY = "${canary(`${label} toml inline`, FORMATS[1][1])}" }`,
+    `api_keys = ["${canary(`${label} toml array`, generic)}", "${canary(`${label} toml array hex`, hex)}"]`,
+    `tokens = { primary = "${canary(`${label} toml inline table child`, generic)}" }`,
+    '[http_request.secrets]',
+    `github = "${canary(`${label} toml secrets table child`, generic)}"`,
+    '[secrets.nested]',
+    `github = "${canary(`${label} toml secrets subtable child`, generic)}"`,
+    '[providers.x]',
+    `api_key."main" = "${canary(`${label} toml dotted quoted key`, generic)}"`,
   ].join('\n') + '\n';
 }
 
@@ -193,11 +312,44 @@ function markdownFile(label: string): string {
     `| API_KEY | ${c('table cell', () => body(40))} |`,
     `**API key**: ${c('bold label', () => body(40))}`,
     `Zapier: (https://mcp.zapier.com/api/mcp/s/${c('zapier url in prose', () => body(48))}/mcp).`,
+    // a value the rest of the line would make no credential (CLI: first word)
+    `API_KEY=${c('value then url', generic)} for https://x.example.com`,
+    `curl -H 'Authorization: Bearer ${c('single-quoted bearer then url', generic)}' https://api.example.com`,
+    `token: ${c('value then placeholder word', generic)} (see the example in the wiki)`,
+    `password: ${c('value then comma', generic)}, replace monthly`,
+    `API_KEY=${c('value then ellipsis', generic)} and so on...`,
+    `DB_PWD=${c('pwd', generic)}`,
+    `Token del servidor: ${c('multi-word name', generic)}`,
+    `**password**: ${c('short bold value', short)}`,
+    `| DB_PASSWORD | ${c('short table cell', short)} |`,
+    `token: @${c('@-led value', generic)}`,
+    `HEX_SECRET=${c('hex', hex)}`,
+    // half of a disguised token pasted elsewhere in the file
+    ...(() => {
+      const t = distinct(BASE62, 60).join('') + distinct(BASE62, 40).join('');
+      return [`TOKEN="${t}"`, `The first half: \`${c('copied half of a token', () => t.slice(0, 60))}\``];
+    })(),
   ].join('\n') + '\n' + textFile(label);
 }
 
 function pemFile(label: string): string {
   return `-----BEGIN RSA PRIVATE KEY-----\n${canary(`${label} pem body`, () => body(64))}\n-----END RSA PRIVATE KEY-----\n`;
+}
+
+/**
+ * The bytes a file is written as: a sixth of the files each with CRLF line
+ * endings, a BOM and CRLF, a Latin-1 byte (Windows editors), as UTF-16 with
+ * a BOM, or as big-endian UTF-16 without one.
+ */
+function encodeFor(index: number, content: string): Buffer {
+  switch (index % 6) {
+    case 5: return Buffer.from(`# Настройки сервера\n${content}`, 'utf16le').swap16();
+    case 1: return Buffer.from(content.replace(/\n/g, '\r\n'));
+    case 2: return Buffer.from(`\uFEFF${content.replace(/\n/g, '\r\n')}`);
+    case 3: return Buffer.from(content.includes('\u00e9') ? content : `${content}# Configuraci\u00f3n\n`, 'latin1');
+    case 4: return Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(content, 'utf16le')]);
+    default: return Buffer.from(content);
+  }
 }
 
 function contentFor(path: string): string {
@@ -215,7 +367,8 @@ function contentFor(path: string): string {
 
 /** A concrete path under HOME for a manifest entry, or undefined when it can't be planted. */
 function concrete(entry: string): string | undefined {
-  if (!entry.startsWith('~/') || entry.includes('$') || /\/skills\//.test(entry) || entry.includes('node_modules')) return undefined;
+  // skill trees (skills/, skills-cursor/, custom_skills/ …) ship as they are
+  if (!entry.startsWith('~/') || entry.includes('$') || /\/(?:[^/]*[-_.])?skills?(?:[-_.][^/]*)?\//i.test(entry) || entry.includes('node_modules')) return undefined;
   let p = entry.slice(2)
     .replace(/\{([^,}]*)(?:,[^}]*)?\}/g, '$1') // {a,b} → a
     .replace(/\*\*\//g, '')
@@ -233,13 +386,15 @@ describe.skipIf(!goAvailable)('probe privacy canary', () => {
   let snapshot: string;
   let planted = 0;
   let geminiIndex = '';
+  let haystack = '';
 
   beforeAll(async () => {
     const work = await mkdtemp(join(tmpdir(), 'vaso-canary-'));
     home = join(work, 'home');
     await mkdir(home);
     const probe = join(work, 'vaso-probe');
-    execFileSync('go', ['build', '-o', probe, '.'], { cwd: join(ROOT, 'probe'), stdio: 'ignore' });
+    // VASO_E2E_PROBE_SRC: another probe source tree (an older release, to show the canary catches it)
+    execFileSync('go', ['build', '-o', probe, '.'], { cwd: process.env.VASO_E2E_PROBE_SRC ?? join(ROOT, 'probe'), stdio: 'ignore' });
 
     const baseEnv = { HOME: home, PATH: '/usr/bin:/bin', NO_COLOR: '1', VASO_SKIP_IOC_UPDATE: '1', TMPDIR: tmpdir() };
     const m = await run(process.execPath, [CLI, 'probe', 'manifest'], baseEnv, home);
@@ -251,11 +406,11 @@ describe.skipIf(!goAvailable)('probe privacy canary', () => {
       const p = concrete(e);
       if (p) paths.add(p);
     }
-    for (const rel of [...paths].sort()) {
+    for (const [i, rel] of [...paths].sort().entries()) {
       const full = join(home, rel);
       try {
         await mkdir(dirname(full), { recursive: true });
-        await writeFile(full, contentFor(rel), { flag: 'wx' });
+        await writeFile(full, encodeFor(i, contentFor(rel)), { flag: 'wx' });
         planted++;
       } catch {
         // a path that another entry made a directory (or a file) — skip it
@@ -279,6 +434,8 @@ describe.skipIf(!goAvailable)('probe privacy canary', () => {
       env[`${base}API_KEY`] = canary(`env ${base}API_KEY`, generic);
       env[`${base}ORG`] = canary(`env ${base}ORG (token by shape)`, FORMATS[1][1]);
       env[`${base}PROXY_URL`] = `https://u:${canary(`env ${base}PROXY_URL password`, () => body(28))}@proxy.example.com:3128`;
+      env[`${base}EXTRA_ARGS`] = `--model x --api-key ${canary(`env ${base}EXTRA_ARGS argv`, generic)}`;
+      env[`${base}PW`] = canary(`env ${base}PW`, generic);
     }
     // Presence-only variables (FLY_MACHINE_ID…): set or not, never the value —
     // nor a longer name the old prefix rule matched
@@ -290,6 +447,15 @@ describe.skipIf(!goAvailable)('probe privacy canary', () => {
     const r = await run(probe, ['--manifest', join(work, 'manifest.json')], env, home);
     expect(r.code, r.stderr).toBe(0);
     snapshot = r.stdout;
+    // base64 contents (not UTF-8) are searched decoded, as Latin-1 and UTF-16
+    const files = (JSON.parse(snapshot) as { files: Record<string, { content?: string; encoding?: string }> }).files;
+    haystack = [snapshot, ...Object.values(files)
+      .filter(e => e.encoding === 'base64' && e.content)
+      .flatMap(e => {
+        const raw = Buffer.from(e.content!, 'base64');
+        const even = raw.subarray(0, raw.length - (raw.length % 2));
+        return [raw.toString('latin1'), raw.toString('utf16le'), raw.subarray(1).toString('utf16le'), Buffer.from(even).swap16().toString('utf16le')];
+      })].join('\n');
   }, 300_000);
 
   it('plants canaries across the manifest', () => {
@@ -309,7 +475,66 @@ describe.skipIf(!goAvailable)('probe privacy canary', () => {
   });
 
   it('ships no canary', () => {
-    const leaks = [...canaries].filter(([, value]) => snapshot.includes(hidden(value))).map(([label]) => label);
+    const leaks = [...canaries].filter(([, value]) => haystack.includes(hidden(value))).map(([label]) => label);
     expect(leaks, `${leaks.length} canaries shipped:\n${leaks.slice(0, 40).join('\n')}`).toEqual([]);
+  });
+
+  it('gives no character away over many snapshots', async () => {
+    // One small HOME collected again and again: a stand-in drawn without
+    // its original character (or with its class kept in place) shows over
+    // a few dozen snapshots which character each position held. Each draw
+    // must include the original, so it turns up about as often as chance.
+    const work = await mkdtemp(join(tmpdir(), 'vaso-canary-multi-'));
+    const probe = join(work, 'vaso-probe');
+    execFileSync('go', ['build', '-o', probe, '.'], { cwd: process.env.VASO_E2E_PROBE_SRC ?? join(ROOT, 'probe'), stdio: 'ignore' });
+    const h = join(work, 'home');
+    const pemBody = body(64, BASE62 + '+/');
+    const hexKeys = Array.from({ length: 12 }, () => body(40, HEX));
+    await mkdir(join(h, '.claude'), { recursive: true });
+    await writeFile(join(h, '.claude', 'settings.json'), JSON.stringify({
+      env: Object.fromEntries(hexKeys.map((k, i) => [`KEY_${i}_API_KEY`, k])),
+      tls: { key: `-----BEGIN PRIVATE KEY-----\n${pemBody}\n-----END PRIVATE KEY-----\n` },
+    }, null, 2));
+    await writeFile(join(work, 'manifest.json'), JSON.stringify({ filePaths: [join(h, '.claude', 'settings.json')], globPatterns: [], commands: [], directoryListings: [], envPrefixes: [] }));
+    const runs = 40;
+    let pemSame = 0;
+    let edgeSame = 0;
+    for (let n = 0; n < runs; n++) {
+      const r = await run(probe, ['--manifest', join(work, 'manifest.json')], { HOME: h, PATH: '/usr/bin:/bin', TMPDIR: tmpdir() }, h);
+      expect(r.code, r.stderr).toBe(0);
+      const content = Object.values((JSON.parse(r.stdout) as { files: Record<string, { content?: string }> }).files)[0].content ?? '';
+      const pem = /BEGIN PRIVATE KEY-----\\n([^\\]+)\\n-----END/.exec(content)?.[1] ?? '';
+      expect(pem).toHaveLength(64);
+      // letters and digits: + and / used to stay as they were, the rest never
+      for (let i = 0; i < 64; i++) if (/[A-Za-z0-9]/.test(pemBody[i]) && pem[i] === pemBody[i]) pemSame++;
+      for (const k of hexKeys) {
+        const d = new RegExp(`${k.slice(0, 8)}([0-9a-f]{28})${k.slice(-4)}`).exec(content)?.[1];
+        expect(d, k).toBeDefined();
+        // the first and last hidden characters
+        if (d![0] === k[8]) edgeSame++;
+        if (d![27] === k[35]) edgeSame++;
+      }
+    }
+    // chance: 1 in 64 for a PEM character (about 40 in 40 snapshots), about 1 in 10
+    // for a hex edge (about 96 of 960); excluding the original gives 0
+    expect(pemSame).toBeGreaterThan(10);
+    expect(edgeSame).toBeGreaterThan(20);
+  }, 300_000);
+
+  it('keeps no more of a hex key than chance', () => {
+    // a stand-in keeps the first 8 and last 4 characters; of the 28 between,
+    // a random hex character matches 1 time in 6 or 10 — a substitution
+    // keeping every symbol the head and tail show kept about two thirds
+    let same = 0;
+    let total = 0;
+    for (const v of hexCanaries) {
+      const re = new RegExp(`${v.slice(0, 8)}([0-9a-f]{28})${v.slice(-4)}`, 'g');
+      for (const m of haystack.matchAll(re)) {
+        for (let i = 0; i < 28; i++) if (m[1][i] === v[8 + i]) same++;
+        total += 28;
+      }
+    }
+    expect(total).toBeGreaterThan(28 * 100);
+    expect(same / total).toBeLessThan(0.3);
   });
 });

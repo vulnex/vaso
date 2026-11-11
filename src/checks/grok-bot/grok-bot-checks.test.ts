@@ -23,9 +23,11 @@ interface FsOpts {
   modes?: Record<string, number>;
   env?: Record<string, string>;
   platform?: NodeJS.Platform;
+  /** Extension-less paths that are regular files (others without an extension are directories) */
+  regular?: string[];
 }
 
-function makeFs({ files = {}, modes = {}, env = {}, platform = 'linux' }: FsOpts = {}): FSProvider {
+function makeFs({ files = {}, modes = {}, env = {}, platform = 'linux', regular = [] }: FsOpts = {}): FSProvider {
   const exists = (p: string) => p in files || p in modes;
   return {
     platform,
@@ -38,7 +40,8 @@ function makeFs({ files = {}, modes = {}, env = {}, platform = 'linux' }: FsOpts
     }),
     stat: vi.fn(async (p: string) => {
       if (!(p in modes)) throw new Error(`ENOENT ${p}`);
-      return { mode: modes[p], isFile: () => true, isDirectory: () => false };
+      const dir = !regular.includes(p) && !/\.[a-z]+$/.test(p);
+      return { mode: modes[p], isFile: () => !dir, isDirectory: () => dir };
     }),
   } as unknown as FSProvider;
 }
@@ -320,6 +323,11 @@ describe('GB-007 / GB-008 permissions', () => {
     const r = await check('GB-008').run(ctx([], box));
     // Every item mitigated → reported, but not offered to vaso fix
     expect(r).toMatchObject({ passed: false, severity: 'info', fixable: false });
+  });
+
+  it('GB-008 ignores a regular file where the app expects a directory', async () => {
+    const fs = makeFs({ modes: { [UD]: 0o644, [ROOT]: 0o700, ...OPEN_PARENTS }, regular: [UD] });
+    expect((await check('GB-008').run(ctx([], fs))).passed).toBe(true);
   });
 });
 
