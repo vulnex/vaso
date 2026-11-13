@@ -13,3 +13,12 @@ describe('report masking — dt21: linear on adversarial runs', () => {
     }
   });
 });
+
+describe('commandBefore is bounded', () => {
+  it('masks a 400 KB run of short flags in linear time', async () => {
+    const { maskCredentialsInText } = await import('./serialize.js');
+    const start = Date.now();
+    maskCredentialsInText('-p x '.repeat(80_000));
+    expect(Date.now() - start).toBeLessThan(3_000);
+  });
+});

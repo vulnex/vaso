@@ -306,9 +306,14 @@ const USER_PASS_FLAG = /(^|[\s"'[,])(-u|--user|--proxy-user)(=|\s+|["']\s*,\s*["
 /** Words of the sentence a flag is quoted in (`after --bot-token in server arguments`), not its value. */
 const PROSE_WORD = /^(?:in|on|at|to|of|for|from|by|with|and|or|is|was|the|a|an|as|flag|value|argument|arguments)$/;
 
-/** The command a flag at `offset` belongs to: the text since the last `;`, `&`, `|` or line break. */
+/** How far back a flag's command is looked for: a whole line sliced per flag was
+ *  quadratic (a 400 KB argument of `-p x` repeated took two minutes). */
+const COMMAND_LOOKBACK = 512;
+
+/** The command a flag at `offset` belongs to: the text since the last `;`, `&`, `|` or line break, at most COMMAND_LOOKBACK back. */
 function commandBefore(text: string, offset: number): string {
-  const before = text.slice(0, offset);
+  const from = Math.max(0, offset - COMMAND_LOOKBACK);
+  const before = text.slice(from, offset);
   return before.slice(Math.max(before.lastIndexOf(';'), before.lastIndexOf('&'), before.lastIndexOf('|'), before.lastIndexOf('\n')) + 1);
 }
 

