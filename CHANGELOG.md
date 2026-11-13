@@ -6,6 +6,8 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.4.1] - 2026-11-13
+
 ### Added
 
 - **Skill inventory in `vaso detect` and scan reports.** `vaso detect` now lists every skills directory an agent uses (marking ones that don't exist) and how many skills it holds; `--verbose` names each skill, flags those holding scripts or binaries, and shows where a symlinked skill really lives. `vaso detect -f json` and `vaso scan -f json` carry the full list per agent under `installation.inventory`: each skill's name and description from its SKILL.md frontmatter (shortened, secrets masked), path, file count and whether it holds code, plus folders and scripts under a skills directory that have no SKILL.md. A skill is a folder holding a SKILL.md, including skills inside category folders (`.system/`, synced skills) and skills whose SKILL.md is a link into another skill's folder; a SKILL.md inside a skill belongs to it. Skills in folders agents don't load (Hermes' `.archive/` of retired skills, `.curator_backups/`, `.hub/`, `.git/`) aren't counted; the folder is listed as an other entry, and the skill checks still read it. Remote and snapshot detection list the same skills as a local run.
