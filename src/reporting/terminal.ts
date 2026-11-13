@@ -1,5 +1,6 @@
 import chalk from 'chalk';
 import type { ScanResult, CheckResult, Severity } from '../core/types.js';
+import { surfaceCounts } from './inventory-text.js';
 import type { Reporter } from './reporter.js';
 import { escapeControlCharsDeep } from './text-safety.js';
 
@@ -61,6 +62,7 @@ export class TerminalReporter implements Reporter {
       lines.push(chalk.bold.cyan(`Agent: ${agentHeader}`));
       lines.push(`  Install: ${inst.installDir}`);
       lines.push(`  Score: ${this.formatScore(agent.score)} (${agent.grade})`);
+      if (inst.inventory) lines.push(chalk.dim(`  Surface: ${surfaceCounts(inst.inventory)} (vaso detect --verbose lists them)`));
       lines.push('');
 
       const failed = agent.results.filter(r => !r.passed);

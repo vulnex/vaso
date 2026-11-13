@@ -57,6 +57,7 @@ export class SarifReporter implements Reporter {
           },
         },
         results: this.buildResults(result),
+        ...this.inventoryProperties(result),
         invocations: [{
           executionSuccessful,
           startTimeUtc: result.timestamp,
@@ -69,6 +70,23 @@ export class SarifReporter implements Reporter {
 
     // bidi / C1 controls from scanned text become \uXXXX escapes (values unchanged)
     return escapeJsonUnsafe(JSON.stringify(sarifLog, null, 2));
+  }
+
+  /** The skills and MCP servers each agent loads. SARIF has no inventory
+   *  object; a run's property bag is the spec's extension point (§3.8). */
+  private inventoryProperties(result: ScanResult): { properties?: Record<string, unknown> } {
+    const agents = result.agents
+      .filter(a => a.installation.inventory)
+      .map(a => ({
+        agent: a.agent,
+        ...(a.installation.agentName ? { agentName: a.installation.agentName } : {}),
+        ...(a.installation.user ? { user: a.installation.user } : {}),
+        installDir: a.installation.installDir,
+        ...a.installation.inventory,
+      }));
+    const host = result.hostInventory?.mcpServers.length ? { host: result.hostInventory } : {};
+    if (agents.length === 0 && !('host' in host)) return {};
+    return { properties: { inventory: { agents, ...host } } };
   }
 
   /** A scan is only "successful" if every check produced a real verdict. The

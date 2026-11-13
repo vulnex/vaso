@@ -202,6 +202,8 @@ export interface McpServerItem {
   };
   envNames?: string[];
   headerNames?: string[];
+  /** Ids of failed checks whose evidence names it in its config file (scan only). */
+  findings?: string[];
 }
 
 /** What a host carries beyond its agents. */
@@ -232,6 +234,8 @@ export interface SkillItem {
   hasCode: boolean;
   /** Where the folder really is, when it is a symlink. */
   symlinkTarget?: string;
+  /** Ids of failed checks with evidence in it (scan only). */
+  findings?: string[];
 }
 
 export interface SkillTreeEntry {

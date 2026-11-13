@@ -11,6 +11,7 @@ import { dedupeInheritedFindings } from './inherited-findings.js';
 import { dedupePermissionFindings } from './duplicate-findings.js';
 import { collectSkillInventory } from '../inventory/skills.js';
 import { discoverMcpAssignment } from '../inventory/mcp.js';
+import { linkInventoryFindings } from '../inventory/findings.js';
 import { mapSourceEvidence } from '../mcp/source-locations.js';
 import { describeFetchFailure } from '../mcp/package-fetcher.js';
 import { extractToolDefinitions } from '../mcp/tool-baseline.js';
@@ -289,6 +290,7 @@ export class ScanEngine {
       results.push(configLoadResult({ ...error, agent: installation.agent, displayName }));
     }
 
+    linkInventoryFindings(installation.inventory, results);
     const score = computeScore(results);
 
     return {

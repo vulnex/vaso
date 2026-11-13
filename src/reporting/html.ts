@@ -1,5 +1,6 @@
 import { VERSION } from '../version.js';
-import type { ScanResult, AgentScanResult, Evidence, Grade, Severity } from '../core/types.js';
+import type { ScanResult, AgentScanResult, AgentInventory, Evidence, Grade, McpServerItem, Severity } from '../core/types.js';
+import { mcpScope, mcpTarget, surfaceCounts } from './inventory-text.js';
 import {
   computeOwaspAgenticCoverage,
   hasOwaspAgenticFindings,
@@ -178,6 +179,22 @@ const CSS = `
   .passed-list {
     margin-top: 1rem;
   }
+  .surface {
+    margin: 0.75rem 0 1rem;
+  }
+  .surface summary {
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 0.95rem;
+  }
+  .surface h4 {
+    font-size: 0.85rem;
+    margin: 0.75rem 0 0.25rem;
+    color: #475569;
+  }
+  .surface .muted {
+    color: #94a3b8;
+  }
   .passed-list h3 {
     font-size: 0.95rem;
     color: #16a34a;
@@ -291,6 +308,14 @@ export class HtmlReporter implements Reporter {
       lines.push(this.renderAgent(agent));
     }
 
+    if (result.hostInventory?.mcpServers.length) {
+      lines.push('<div class="agent-section">');
+      lines.push('<div class="agent-header"><h2>Host</h2></div>');
+      lines.push('<div class="agent-meta"><span>MCP servers in files no detected agent owns (VS Code, a project mcp.json)</span></div>');
+      lines.push(this.renderMcpTable(result.hostInventory.mcpServers));
+      lines.push('</div>');
+    }
+
     // OWASP coverage sections
     if (hasOwaspMcpFindings(result)) {
       lines.push(this.renderOwaspMcpCoverage(result));
@@ -334,6 +359,8 @@ export class HtmlReporter implements Reporter {
     metaParts.push(`<span>Install: ${escapeHtml(inst.installDir)}</span>`);
     lines.push(`<div class="agent-meta">${metaParts.join('')}</div>`);
 
+    if (inst.inventory) lines.push(this.renderSurface(inst.inventory));
+
     // Findings table
     const failed = agent.results.filter(r => !r.passed);
     const passed = agent.results.filter(r => r.passed);
@@ -369,6 +396,55 @@ export class HtmlReporter implements Reporter {
     }
 
     lines.push('</div>');
+    return lines.join('\n');
+  }
+
+  /** Skills and MCP servers the agent loads; collapsed — a host can carry dozens. */
+  private renderSurface(inventory: AgentInventory): string {
+    const lines: string[] = ['<details class="surface">'];
+    lines.push(`<summary>Attack surface: ${escapeHtml(surfaceCounts(inventory))}</summary>`);
+    const dirs = inventory.skillsDirs
+      .map(d => `${escapeHtml(d.path)}${d.exists ? '' : ' <span class="muted">(not present)</span>'}`)
+      .join('<br>');
+    if (dirs) lines.push(`<h4>Skills directories</h4><div class="evidence">${dirs}</div>`);
+    if (inventory.skills.length > 0) {
+      lines.push('<h4>Skills</h4>');
+      lines.push('<table>');
+      lines.push('<thead><tr><th>Name</th><th>Description</th><th>Path</th><th>Files</th><th>Code</th><th>Findings</th></tr></thead>');
+      lines.push('<tbody>');
+      for (const skill of inventory.skills) {
+        const link = skill.symlinkTarget ? `<br><span class="muted">→ ${escapeHtml(skill.symlinkTarget)}</span>` : '';
+        lines.push(`<tr><td>${escapeHtml(skill.name)}</td><td>${escapeHtml(skill.description ?? '')}</td>`
+          + `<td class="evidence">${escapeHtml(skill.path)}${link}</td><td>${skill.files}</td><td>${skill.hasCode ? 'yes' : '—'}</td>`
+          + `<td>${escapeHtml((skill.findings ?? []).join(', ')) || '—'}</td></tr>`);
+      }
+      lines.push('</tbody></table>');
+    }
+    if (inventory.otherEntries.length > 0) {
+      lines.push('<h4>Other entries (no SKILL.md)</h4>');
+      lines.push(`<div class="evidence">${inventory.otherEntries.map(e => `${escapeHtml(e.path)} <span class="muted">(${e.type}, ${e.files} file${e.files === 1 ? '' : 's'})</span>`).join('<br>')}</div>`);
+    }
+    if (inventory.mcpServers?.length) {
+      lines.push('<h4>MCP servers</h4>');
+      lines.push(this.renderMcpTable(inventory.mcpServers));
+    }
+    for (const note of inventory.incomplete ?? []) lines.push(`<div class="evidence">! ${escapeHtml(note)}</div>`);
+    lines.push('</details>');
+    return lines.join('\n');
+  }
+
+  private renderMcpTable(servers: McpServerItem[]): string {
+    const lines: string[] = ['<table>'];
+    lines.push('<thead><tr><th>Name</th><th>Transport</th><th>Runs / reaches</th><th>Scope</th><th>Env / headers</th><th>Config</th><th>Findings</th></tr></thead>');
+    lines.push('<tbody>');
+    for (const server of servers) {
+      const names = [...(server.envNames ?? []), ...(server.headerNames ?? [])].join(', ');
+      lines.push(`<tr><td>${escapeHtml(server.name)}</td><td>${escapeHtml(server.transport)}</td>`
+        + `<td class="evidence">${escapeHtml(mcpTarget(server))}</td><td>${escapeHtml(mcpScope(server))}</td>`
+        + `<td class="evidence">${escapeHtml(names) || '—'}</td><td class="evidence">${escapeHtml(server.configFile)}</td>`
+        + `<td>${escapeHtml((server.findings ?? []).join(', ')) || '—'}</td></tr>`);
+    }
+    lines.push('</tbody></table>');
     return lines.join('\n');
   }
 

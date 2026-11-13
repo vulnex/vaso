@@ -1,5 +1,6 @@
 import { VERSION } from '../version.js';
-import type { ScanResult, Severity } from '../core/types.js';
+import type { AgentInventory, McpServerItem, ScanResult, Severity } from '../core/types.js';
+import { mcpScope, mcpTarget, surfaceCounts } from './inventory-text.js';
 import type { Reporter } from './reporter.js';
 import { renderOwaspAgenticCoverageMarkdown } from './owasp-agentic.js';
 import { renderOwaspMcpCoverageMarkdown } from './owasp-mcp.js';
@@ -80,6 +81,16 @@ export class MarkdownReporter implements Reporter {
         }
         lines.push('');
       }
+
+      if (agent.installation.inventory) lines.push(...renderSurface(agent.installation.inventory));
+    }
+
+    if (result.hostInventory?.mcpServers.length) {
+      lines.push('## Host');
+      lines.push('');
+      lines.push('MCP servers in files no detected agent owns (VS Code, a project mcp.json).');
+      lines.push('');
+      lines.push(...renderMcpTable(result.hostInventory.mcpServers));
     }
 
     const owasp = renderOwaspMcpCoverageMarkdown(result);
@@ -97,4 +108,43 @@ export class MarkdownReporter implements Reporter {
 
     return lines.join('\n');
   }
+}
+
+const cell = (s: string) => mdInline(s) || '—';
+
+function renderSurface(inventory: AgentInventory): string[] {
+  const lines = [`### Attack surface (${surfaceCounts(inventory)})`, ''];
+  for (const dir of inventory.skillsDirs) {
+    lines.push(`- Skills directory: \`${mdInline(dir.path)}\`${dir.exists ? '' : ' (not present)'}`);
+  }
+  if (inventory.skillsDirs.length > 0) lines.push('');
+  if (inventory.skills.length > 0) {
+    lines.push('| Skill | Description | Path | Files | Code | Findings |');
+    lines.push('|-------|-------------|------|-------|------|----------|');
+    for (const skill of inventory.skills) {
+      const path = skill.symlinkTarget ? `${skill.path} → ${skill.symlinkTarget}` : skill.path;
+      lines.push(`| ${cell(skill.name)} | ${cell(skill.description ?? '')} | ${cell(path)} | ${skill.files} | ${skill.hasCode ? 'yes' : '—'} | ${cell((skill.findings ?? []).join(', '))} |`);
+    }
+    lines.push('');
+  }
+  if (inventory.otherEntries.length > 0) {
+    lines.push('Other entries (no SKILL.md):');
+    lines.push('');
+    for (const e of inventory.otherEntries) lines.push(`- \`${mdInline(e.path)}\` (${e.type}, ${e.files} file${e.files === 1 ? '' : 's'})`);
+    lines.push('');
+  }
+  if (inventory.mcpServers?.length) lines.push(...renderMcpTable(inventory.mcpServers));
+  for (const note of inventory.incomplete ?? []) lines.push(`> ! ${mdInline(note)}`, '');
+  return lines;
+}
+
+function renderMcpTable(servers: McpServerItem[]): string[] {
+  const lines = ['| MCP server | Transport | Runs / reaches | Scope | Env / headers | Config | Findings |'];
+  lines.push('|------------|-----------|----------------|-------|---------------|--------|----------|');
+  for (const s of servers) {
+    const names = [...(s.envNames ?? []), ...(s.headerNames ?? [])].join(', ');
+    lines.push(`| ${cell(s.name)} | ${s.transport} | ${cell(mcpTarget(s))} | ${cell(mcpScope(s))} | ${cell(names)} | ${cell(s.configFile)} | ${cell((s.findings ?? []).join(', '))} |`);
+  }
+  lines.push('');
+  return lines;
 }
