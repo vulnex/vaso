@@ -134,6 +134,21 @@ describe('collectSkillInventory', () => {
     expect(inventory.otherEntries.map(e => e.path)).toEqual([join(root, 'dangling')]);
   });
 
+  it('resolves a relative SKILL.md link under a symlinked skills root in the walked spelling', async () => {
+    const home = await tmp();
+    await put(join(home, 'real-skills', 'gs', 'skills', 'x', 'SKILL.md'), '---\nname: x\n---\n');
+    await put(join(home, 'real-skills', 'gs', 'skills', 'x', 'run.py'), 'x');
+    await put(join(home, 'real-skills', 'x', 'extra.py'), 'x');
+    await symlink('../gs/skills/x/SKILL.md', join(home, 'real-skills', 'x', 'SKILL.md'));
+    await symlink(join(home, 'real-skills'), join(home, 'skills'));
+    const root = join(home, 'skills');
+
+    const { inventory } = await collectSkillInventory(inst([root]), fs);
+
+    const x = inventory.skills.find(s => s.path === join(root, 'x'));
+    expect(x).toMatchObject({ files: 3, symlinkTarget: join(root, 'gs', 'skills', 'x') });
+  });
+
   it.skipIf(process.getuid?.() === 0)('reports an unlistable skill folder as incomplete and still counts its SKILL.md', async () => {
     const root = await tmp();
     await put(join(root, 'locked', 'SKILL.md'));

@@ -195,6 +195,20 @@ function isMissing(err: NodeJS.ErrnoException): boolean {
  * a dangling link or one leading out (the walk followed that one already).
  */
 async function inTreeTarget(fs: FSProvider, root: string, link: string): Promise<string | undefined> {
+  // A relative target (gstack writes `../gs/skills/x/SKILL.md`) resolves
+  // against the link's own path, in the walked spelling: the same locally and
+  // in a snapshot, which can't resolve it through a symlinked skills root
+  if (typeof fs.readlink === 'function') {
+    try {
+      const raw = await fs.readlink(link);
+      if (!isAbsolute(raw)) {
+        const target = join(dirname(link), raw);
+        if (isWithin(target, root)) return (await fs.access(target)) ? target : undefined;
+      }
+    } catch {
+      // fall through to the resolved path
+    }
+  }
   try {
     const [real, rootReal] = await Promise.all([fs.realpath(link), fs.realpath(root)]);
     if (!isWithin(real, rootReal)) return undefined;

@@ -423,7 +423,7 @@ function claudeProjectConfigs(filePath: string, data: Record<string, unknown>): 
   const configs: MCPConfig[] = [];
   for (const [projectPath, project] of Object.entries(projects as Record<string, unknown>)) {
     const servers = parseServerMap((project as Record<string, unknown> | null)?.mcpServers);
-    if (servers.length > 0) configs.push({ source: `Claude Code (project ${projectPath})`, agents: ['claude-code'], scope: 'project', projectRoot: projectPath, filePath, servers });
+    if (servers.length > 0) configs.push({ source: `Claude Code (project ${projectPath})`, agents: ['claude-code'], scope: 'project', projectRoot: projectPath, filePath, servers: entrySwitches(['claude-code'], servers) });
   }
   return configs;
 }
@@ -440,6 +440,19 @@ export function userConfigLocations(platform: Platform, home: string, fs: FSProv
     getAtomicAgentLocation(home, fs),
     ...getFrameworkLocations(home, fs),
   ].map(({ source, path, agents }) => ({ source, path, agents }));
+}
+
+/**
+ * Claude Code and Claude Desktop have no per-server switch in their configs
+ * (Claude Code turns servers off through `disabledMcpServers` lists): an
+ * `enabled: false` / `disabled: true` there is ignored and the server runs.
+ * Only agents that honour the field get servers marked disabled.
+ */
+const NO_ENTRY_SWITCH: ReadonlySet<AgentType> = new Set(['claude-code', 'claude-desktop']);
+
+function entrySwitches(agents: readonly AgentType[], servers: MCPServerEntry[]): MCPServerEntry[] {
+  if (agents.length === 0 || !agents.every(a => NO_ENTRY_SWITCH.has(a))) return servers;
+  return servers.map(({ disabled: _ignored, ...s }) => s);
 }
 
 /** Configs with their disabled servers removed; configs left with none are dropped. */
@@ -501,7 +514,7 @@ export class MCPDiscovery {
       try {
         const data = parseConfigText(raw, location.shape === 'codex' || location.shape === 'zeroclaw' ? 'toml' : location.shape === 'hermes' ? 'yaml' : 'json');
         if (!data) continue;
-        const servers = withExtensionPath(parseShape(location.shape, data), location.extensionPath);
+        const servers = entrySwitches(location.agents, withExtensionPath(parseShape(location.shape, data), location.extensionPath));
 
         if (servers.length > 0) {
           configs.push({

@@ -38,7 +38,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 ### Fixed
 
 - **Names starting with `..` are inside their folder.** A folder or file named like `..payload.js` was treated as outside the directory holding it: such a folder inside a skill tree lost the skill-tree rules of the IOC checks, SKL-013 reported a link to it as escaping the skills directory, and `vaso mcp scan` skipped a local module of that name.
-- **Agent MCP checks skip servers switched off in their config.** CD-003, CDX-004, OPC-003, GEM-007, QC-006, WS-004, DEV-004 and HM-010 judged servers marked `enabled: false` or `disabled: true`, which are never launched; `vaso mcp scan` already left them out.
+- **Agent MCP checks skip servers switched off in their config.** CDX-004, OPC-003, GEM-007, QC-006, WS-004, DEV-004 and HM-010 judged servers marked `enabled: false` or `disabled: true`, which are never launched; `vaso mcp scan` already left them out. Claude Code and Claude Desktop have no such per-server switch, so the field is ignored there, as those apps do.
 - **`uvx --from git+…` and `pipx run --spec git+…` are read as that source.** A VCS or URL source was taken for a PyPI package named `git` with a version range; it is now named by its URL and counts as pinned only with a commit hash or an archive hash, for MCP-027/028, the unpinned-server checks and the inventory.
 - **A JWT is masked without surrounding punctuation.** The report masker skipped text that had no `:`, `=`, `@` or `-`, so a bare `eyJ…` token in a snippet was printed.
 - **Markdown reports escape link syntax and rule names.** Text from scanned files (`[x](javascript:…)`, `![](http://…)`) and a custom rule's id and name could add links, images or headings to the Markdown report.
