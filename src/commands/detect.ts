@@ -524,7 +524,8 @@ function renderSkills(inst: AgentInstallation, verbose: boolean | undefined): st
 
 function renderMcp(servers: McpServerItem[] | undefined, verbose: boolean | undefined): string[] {
   if (!servers) return [];
-  const lines = [`  ${'MCP servers:'.padEnd(14)} ${servers.length}`];
+  const off = servers.filter(s => s.disabled).length;
+  const lines = [`  ${'MCP servers:'.padEnd(14)} ${servers.length}${off ? chalk.dim(` (${off} disabled)`) : ''}`];
   if (!verbose) return lines;
   const show = (s: string) => escapeControlChars(s, { lineBreaks: true });
   for (const server of servers.slice(0, MAX_LISTED)) {
@@ -534,7 +535,8 @@ function renderMcp(servers: McpServerItem[] | undefined, verbose: boolean | unde
       ? `${show(pkg.spec)}${pkg.pin === 'exact' || pkg.pin === 'local' ? '' : chalk.yellow(` (${pkg.pin === 'none' ? 'unpinned' : pkg.pin})`)}`
       : show(server.url ?? server.command ?? '');
     const scope = server.scope === 'user' ? '' : chalk.dim(` [${server.scope}${server.project ? ` ${show(server.project)}` : ''}]`);
-    lines.push(`    ${show(server.name)} ${chalk.dim(`— ${server.transport}`)} ${what}${scope}`);
+    const disabled = server.disabled ? chalk.dim(' (disabled)') : '';
+    lines.push(`    ${show(server.name)} ${chalk.dim(`— ${server.transport}`)} ${what}${scope}${disabled}`);
   }
   if (servers.length > MAX_LISTED) lines.push(chalk.dim(`    … and ${servers.length - MAX_LISTED} more`));
   return lines;

@@ -33,6 +33,7 @@ export function findSharedMcpServers(installations: AgentInstallation[]): Shared
   const groups = new Map<string, SharedMcpServer>();
   for (const inst of installations) {
     for (const server of inst.inventory?.mcpServers ?? []) {
+      if (server.disabled) continue; // never launched: shares nothing
       const key = mcpServerKey(server);
       if (!key) continue;
       const group = groups.get(key) ?? { key, users: [], unpinned: false };

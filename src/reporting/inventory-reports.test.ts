@@ -26,6 +26,7 @@ function result(): ScanResult {
           }, {
             name: 'remote', configFile: '/home/u/.claude.json', scope: 'project', project: '/srv/app', transport: 'streamable-http',
             url: 'https://mcp.example.com/sse?token=sk-live-abcdefghijklmnopqrstuvwx',
+            disabled: true,
           }],
         },
       },
@@ -54,7 +55,7 @@ function result(): ScanResult {
 describe('inventory in reports', () => {
   it('HTML: collapsible surface per agent, escaped, plus the host block', () => {
     const html = getReporter('html').render(result());
-    expect(html).toContain('<summary>Attack surface: 1 skill, 1 other skills-dir entry, 2 MCP servers</summary>');
+    expect(html).toContain('<summary>Attack surface: 1 skill, 1 other skills-dir entry, 2 MCP servers (1 disabled)</summary>');
     expect(html).not.toContain('<img src=x');
     expect(html).toContain('&lt;img src=x onerror=alert(1)&gt;');
     expect(html).toContain('@modelcontextprotocol/server-github (unpinned)');
@@ -70,10 +71,11 @@ describe('inventory in reports', () => {
 
   it('Markdown: surface section with tables that survive pipes and newlines', () => {
     const md = getReporter('markdown').render(result());
-    expect(md).toContain('### Attack surface (1 skill, 1 other skills-dir entry, 2 MCP servers)');
+    expect(md).toContain('### Attack surface (1 skill, 1 other skills-dir entry, 2 MCP servers (1 disabled))');
     expect(md).toContain('pipes \\| and newlines');
     expect(md).toContain('| github | stdio | @modelcontextprotocol/server-github (unpinned) |');
     expect(md).toContain('## Host');
+    expect(md).toContain('| remote (disabled) |');
     expect(md).toContain('| npm:@modelcontextprotocol/server-github | yes | claude-code: github, cursor-cli: &lt;b&gt;gh&lt;/b&gt; |');
     expect(md).toContain('(not present)');
     expect(md).not.toContain('abcdefghijklmnopqrstuvwx');
@@ -101,7 +103,7 @@ describe('inventory in reports', () => {
 
   it('terminal: one surface line per agent', () => {
     const out = getReporter('terminal').render(result());
-    expect(out).toContain('Surface: 1 skill, 1 other skills-dir entry, 2 MCP servers');
+    expect(out).toContain('Surface: 1 skill, 1 other skills-dir entry, 2 MCP servers (1 disabled)');
     expect(out).toContain('Shared MCP servers: 1');
   });
 });

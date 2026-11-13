@@ -10,6 +10,10 @@ export interface MCPServerEntry {
   headers?: Record<string, string>;
   url?: string;
   transport: 'stdio' | 'sse' | 'streamable-http';
+  /** Switched off in its config (`enabled: false`, `disabled: true`, a whole
+   *  MCP section off): never launched. Discovery leaves these out unless asked
+   *  (`includeDisabled`), so checks never see them. */
+  disabled?: boolean;
 }
 
 /** Where a config applies: the user's, one project's, or an extension's. */

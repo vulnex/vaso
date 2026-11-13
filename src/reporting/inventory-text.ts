@@ -6,7 +6,10 @@ const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? o
 export function surfaceCounts(inventory: AgentInventory): string {
   const parts = [plural(inventory.skills.length, 'skill')];
   if (inventory.otherEntries.length > 0) parts.push(plural(inventory.otherEntries.length, 'other skills-dir entry', 'other skills-dir entries'));
-  if (inventory.mcpServers) parts.push(plural(inventory.mcpServers.length, 'MCP server'));
+  if (inventory.mcpServers) {
+    const off = inventory.mcpServers.filter(s => s.disabled).length;
+    parts.push(`${plural(inventory.mcpServers.length, 'MCP server')}${off ? ` (${off} disabled)` : ''}`);
+  }
   return parts.join(', ');
 }
 

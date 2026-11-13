@@ -452,7 +452,8 @@ export class HtmlReporter implements Reporter {
     lines.push('<tbody>');
     for (const server of servers) {
       const names = [...(server.envNames ?? []), ...(server.headerNames ?? [])].join(', ');
-      lines.push(`<tr><td>${escapeHtml(server.name)}</td><td>${escapeHtml(server.transport)}</td>`
+      const off = server.disabled ? ' <span class="muted">(disabled)</span>' : '';
+      lines.push(`<tr><td>${escapeHtml(server.name)}${off}</td><td>${escapeHtml(server.transport)}</td>`
         + `<td class="evidence">${escapeHtml(mcpTarget(server))}</td><td>${escapeHtml(mcpScope(server))}</td>`
         + `<td class="evidence">${escapeHtml(names) || '—'}</td><td class="evidence">${escapeHtml(server.configFile)}</td>`
         + `<td>${escapeHtml((server.findings ?? []).join(', ')) || '—'}</td></tr>`);

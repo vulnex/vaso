@@ -161,7 +161,7 @@ function renderMcpTable(servers: McpServerItem[]): string[] {
   lines.push('|------------|-----------|----------------|-------|---------------|--------|----------|');
   for (const s of servers) {
     const names = [...(s.envNames ?? []), ...(s.headerNames ?? [])].join(', ');
-    lines.push(`| ${cell(s.name)} | ${s.transport} | ${cell(mcpTarget(s))} | ${cell(mcpScope(s))} | ${cell(names)} | ${cell(s.configFile)} | ${cell((s.findings ?? []).join(', '))} |`);
+    lines.push(`| ${cell(s.name)}${s.disabled ? ' (disabled)' : ''} | ${s.transport} | ${cell(mcpTarget(s))} | ${cell(mcpScope(s))} | ${cell(names)} | ${cell(s.configFile)} | ${cell((s.findings ?? []).join(', '))} |`);
   }
   lines.push('');
   return lines;

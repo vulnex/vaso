@@ -46,6 +46,7 @@ export function mcpServerItem(config: MCPConfig, server: MCPServerEntry): McpSer
     ...(pkg ? { package: { runner: pkg.runner, ecosystem: pkg.ecosystem, name: pkg.name, spec: pkg.spec, pin: pkg.pin } } : {}),
     ...(envNames.length ? { envNames } : {}),
     ...(headerNames.length ? { headerNames } : {}),
+    ...(server.disabled ? { disabled: true } : {}),
   };
 }
 
@@ -108,7 +109,7 @@ export function inventoriedAgents(fs: FSProvider): Set<AgentType> {
 export async function discoverMcpAssignment(installations: AgentInstallation[], fs: FSProvider): Promise<McpAssignment> {
   try {
     const projectDir = scanCwd(fs);
-    const result = await new MCPDiscovery(fs).discover(fs.platform, projectDir);
+    const result = await new MCPDiscovery(fs).discover(fs.platform, projectDir, { includeDisabled: true });
     const nanoclaw = (await Promise.all(installations.filter(i => i.agent === 'nanoclaw').map(i => nanoclawGroupConfigs(i.installDir, fs)))).flat();
     return assignMcpServers(installations, [...result.configs, ...nanoclaw], { home: fs.homedir(), inventoried: inventoriedAgents(fs), projectDir });
   } catch {

@@ -208,8 +208,8 @@ const TRANSPORT_TYPES: Record<string, MCPServerEntry['transport']> = {
 };
 
 /** A `name → { command, args, env, url, headers, type? }` server map.
- *  Servers explicitly disabled (`enabled: false`, Windsurf's `disabled: true`)
- *  are never connected. */
+ *  Servers explicitly disabled (`enabled: false`, Windsurf's and Abacus.AI's
+ *  `disabled: true`) are never connected: they are marked `disabled`. */
 export function parseServerMap(map: unknown): MCPServerEntry[] {
   const servers: MCPServerEntry[] = [];
   if (!map || typeof map !== 'object' || Array.isArray(map)) return servers;
@@ -217,7 +217,7 @@ export function parseServerMap(map: unknown): MCPServerEntry[] {
   for (const [name, raw] of Object.entries(map as Record<string, unknown>)) {
     if (!raw || typeof raw !== 'object') continue;
     const config = raw as Record<string, unknown>;
-    if (config.enabled === false || config.disabled === true) continue;
+    const disabled = config.enabled === false || config.disabled === true;
     // Windsurf / Devin Desktop name the remote URL `serverUrl`
     const url = typeof config.url === 'string' ? config.url
       : typeof config.serverUrl === 'string' ? config.serverUrl : undefined;
@@ -247,6 +247,7 @@ export function parseServerMap(map: unknown): MCPServerEntry[] {
         : undefined,
       url: url ?? httpUrl,
       transport,
+      ...(disabled ? { disabled: true } : {}),
     });
   }
 
@@ -266,7 +267,7 @@ function parseShape(shape: ConfigLocation['shape'], data: Record<string, unknown
     case 'nanobot':
       return parseServerMap(tools?.mcpServers ?? tools?.mcp_servers);
     case 'abacus':
-      return parseServerMap(withoutDisabled(data.mcpServers));
+      return parseServerMap(data.mcpServers);
     case 'abacus-config':
       return parseServerMap(abacusArrayToMap(data.mcpServers));
     case 'codex':
@@ -284,7 +285,8 @@ function parseShape(shape: ConfigLocation['shape'], data: Record<string, unknown
     case 'picoclaw': {
       // tools.mcp.enabled: false switches off the whole MCP integration
       const mcp = tools?.mcp as Record<string, unknown> | undefined;
-      return mcp?.enabled === false ? [] : parseServerMap(mcp?.servers);
+      const servers = parseServerMap(mcp?.servers);
+      return mcp?.enabled === false ? servers.map(s => ({ ...s, disabled: true })) : servers;
     }
     default:
       return parseServerEntries(data);
@@ -349,23 +351,19 @@ function opencodeServers(map: unknown): unknown {
 function zeroclawServers(mcp: unknown): unknown {
   if (!mcp || typeof mcp !== 'object' || Array.isArray(mcp)) return {};
   const cfg = mcp as Record<string, unknown>;
-  if (cfg.enabled === false || !Array.isArray(cfg.servers)) return {};
+  if (!Array.isArray(cfg.servers)) return {};
   const map: Record<string, unknown> = {};
   for (const s of cfg.servers) {
     if (!s || typeof s !== 'object') continue;
     const server = s as Record<string, unknown>;
     if (typeof server.name !== 'string' || !server.name) continue;
-    map[server.name] = { ...server, type: typeof server.transport === 'string' ? server.transport : 'stdio' };
+    map[server.name] = {
+      ...server,
+      type: typeof server.transport === 'string' ? server.transport : 'stdio',
+      ...(cfg.enabled === false ? { disabled: true } : {}),
+    };
   }
   return map;
-}
-
-/** Abacus.AI marks switched-off servers `disabled: true`; they are never launched. */
-function withoutDisabled(map: unknown): unknown {
-  if (!map || typeof map !== 'object' || Array.isArray(map)) return map;
-  return Object.fromEntries(Object.entries(map as Record<string, unknown>).filter(
-    ([, v]) => !(v && typeof v === 'object' && (v as Record<string, unknown>).disabled === true),
-  ));
 }
 
 /** Abacus.AI config.json form: `mcpServers: [{ name, command, args, env }]`. */
@@ -400,7 +398,7 @@ function parseAtomicAgentEntries(data: Record<string, unknown>): MCPServerEntry[
   for (const raw of mcp.servers as unknown[]) {
     if (!raw || typeof raw !== 'object') continue;
     const entry = raw as Record<string, unknown>;
-    if (entry.enabled === false || typeof entry.name !== 'string') continue;
+    if (typeof entry.name !== 'string') continue;
     const t = entry.transport as Record<string, unknown> | undefined;
     const transport = ATOMIC_TRANSPORTS[String(t?.kind)];
     if (!t || !transport) continue;
@@ -412,6 +410,7 @@ function parseAtomicAgentEntries(data: Record<string, unknown>): MCPServerEntry[
       headers: stringMap(t.headers),
       url: typeof t.url === 'string' ? t.url : undefined,
       transport,
+      ...(entry.enabled === false ? { disabled: true } : {}),
     });
   }
   return servers;
@@ -443,6 +442,13 @@ export function userConfigLocations(platform: Platform, home: string, fs: FSProv
   ].map(({ source, path, agents }) => ({ source, path, agents }));
 }
 
+/** Configs with their disabled servers removed; configs left with none are dropped. */
+function activeConfigs(configs: MCPConfig[]): MCPConfig[] {
+  return configs
+    .map(c => (c.servers.some(s => s.disabled) ? { ...c, servers: c.servers.filter(s => !s.disabled) } : c))
+    .filter(c => c.servers.length > 0);
+}
+
 export class MCPDiscovery {
   private fs: FSProvider;
 
@@ -450,9 +456,15 @@ export class MCPDiscovery {
     this.fs = fs ?? new LocalFSProvider();
   }
 
+  /**
+   * Every MCP config on the host. Disabled servers are left out — they are
+   * never launched, and the MCP checks must not judge them — unless
+   * `includeDisabled` (the inventory lists them, marked).
+   */
   async discover(
     platform: Platform = process.platform,
     projectDir?: string,
+    options: { includeDisabled?: boolean } = {},
   ): Promise<MCPDiscoveryResult> {
     const configs: MCPConfig[] = [];
     const home = this.fs.homedir();
@@ -519,8 +531,9 @@ export class MCPDiscovery {
       if (servers.length > 0) configs.push({ source: oc.source, agents: ['openclaw'], filePath: oc.filePath, servers });
     }
 
-    const totalServers = configs.reduce((sum, c) => sum + c.servers.length, 0);
-    return { configs, totalServers, ...(loadErrors.length > 0 ? { loadErrors } : {}) };
+    const kept = options.includeDisabled ? configs : activeConfigs(configs);
+    const totalServers = kept.reduce((sum, c) => sum + c.servers.length, 0);
+    return { configs: kept, totalServers, ...(loadErrors.length > 0 ? { loadErrors } : {}) };
   }
 
   async discoverFromPaths(paths: string[]): Promise<MCPDiscoveryResult> {
@@ -538,8 +551,8 @@ export class MCPDiscovery {
         const data = parseConfigText(raw, format);
         if (!data) { empty.push(filePath); continue; }
         const shape = shapeOf(format, data);
-        const servers = parseShape(shape, data);
-        const projects = claudeProjectConfigs(filePath, data);
+        const servers = parseShape(shape, data).filter(s => !s.disabled);
+        const projects = activeConfigs(claudeProjectConfigs(filePath, data));
 
         if (servers.length > 0) {
           configs.push({

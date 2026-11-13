@@ -43,6 +43,14 @@ describe('findSharedMcpServers', () => {
     ])).toEqual([]);
   });
 
+  it('ignores disabled servers', () => {
+    const off = { ...npx('github', '/h/.cursor/mcp.json', 'pkg', 'none'), disabled: true };
+    expect(findSharedMcpServers([
+      inst('claude-code', '/h/.claude', [npx('github', '/h/.claude.json', 'pkg', 'none')]),
+      inst('cursor-cli', '/h/.cursor', [off]),
+    ])).toEqual([]);
+  });
+
   it('lists unpinned groups first', () => {
     const shared = findSharedMcpServers([
       inst('claude-code', '/h/.claude', [npx('a', '/1', 'aaa@1.0.0', 'exact'), npx('z', '/1', 'zzz', 'none')]),

@@ -172,8 +172,8 @@ export interface AgentInventory {
   /** Other folders and code files directly under a skills directory: the
    *  skill checks read them, but they hold no SKILL.md. */
   otherEntries: SkillTreeEntry[];
-  /** MCP servers the agent loads (enabled ones — disabled servers are never
-   *  launched). Absent for agents whose MCP configs VASO doesn't read. */
+  /** MCP servers configured for the agent, disabled ones marked. Absent for
+   *  agents whose MCP configs VASO doesn't read. */
   mcpServers?: McpServerItem[];
   /** Why the lists may be partial (a directory that can't be listed). */
   incomplete?: string[];
@@ -202,6 +202,8 @@ export interface McpServerItem {
   };
   envNames?: string[];
   headerNames?: string[];
+  /** Switched off in its config: never launched, and not judged by the MCP checks. */
+  disabled?: boolean;
   /** Ids of failed checks whose evidence names it in its config file (scan only). */
   findings?: string[];
 }
