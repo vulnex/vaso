@@ -158,9 +158,38 @@ describe('attachMcpInventories', () => {
     expect(JSON.stringify(nc.inventory)).not.toContain('zzzzzzzz');
   });
 
+  it('reads IronClaw Reborn MCP extensions from their manifest, header names only', async () => {
+    const reborn = await mkdtemp(join(tmpdir(), 'vaso-mcpinv-ic-'));
+    dirs.push(reborn);
+    const ext = join(reborn, 'local-dev', 'system', 'extensions');
+    await mkdir(join(ext, 'notion'), { recursive: true });
+    await mkdir(join(ext, 'github'), { recursive: true });
+    await writeFile(join(ext, 'notion', 'manifest.toml'), [
+      'schema_version = "reborn.extension_manifest.v3"', 'id = "notion"', '',
+      '[mcp]', 'server = "https://mcp.notion.com/mcp"', 'default_permission = "ask"', '',
+      '[[mcp.credentials]]', 'handle = "mcp_notion_access_token"', 'injection = { type = "header", name = "authorization", prefix = "Bearer " }',
+    ].join('\n'));
+    // a WASM tool extension: no [mcp] section
+    await writeFile(join(ext, 'github', 'manifest.toml'), 'schema_version = "reborn.extension_manifest.v3"\nid = "github"\n');
+    const base = new LocalFSProvider();
+    const fs = Object.assign(Object.create(base) as FSProvider, { homedir: () => reborn, getEnv: () => undefined, kind: 'snapshot' });
+    const ic = inst('ironclaw', reborn);
+
+    await attachMcpInventories([ic], fs);
+
+    expect(ic.inventory?.mcpServers).toEqual([{
+      name: 'notion',
+      configFile: join(ext, 'notion', 'manifest.toml'),
+      scope: 'extension',
+      transport: 'streamable-http',
+      url: 'https://mcp.notion.com/mcp',
+      headerNames: ['authorization'],
+    }]);
+  });
+
   it('knows which agents it inventories', () => {
     const agents = inventoriedAgents(new LocalFSProvider());
-    for (const a of ['claude-code', 'claude-desktop', 'codex', 'cursor-cli', 'devin', 'windsurf', 'openclaw', 'gemini-cli', 'hermes', 'zeroclaw', 'nanoclaw'] as AgentType[]) {
+    for (const a of ['claude-code', 'claude-desktop', 'codex', 'cursor-cli', 'devin', 'windsurf', 'openclaw', 'gemini-cli', 'hermes', 'zeroclaw', 'nanoclaw', 'ironclaw'] as AgentType[]) {
       expect(agents.has(a), a).toBe(true);
     }
     expect(agents.has('grok-bot')).toBe(false);

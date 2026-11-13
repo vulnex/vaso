@@ -1,0 +1,20 @@
+{
+  "agent": "ironclaw",
+  "source": "Inventory: IronClaw 1.4 Reborn installed MCP extension (manifest.toml [mcp] server, credential header) \u2014 manifest copied from ironclaw 1.4.0's bundled Notion extension; on the ironclaw-clean-reborn fixture",
+  "modes": {
+    ".ironclaw/reborn/webui-token": "600",
+    ".ironclaw/reborn/providers.json": "600",
+    ".ironclaw/reborn/config.toml": "600",
+    ".ironclaw/reborn/local-dev/.reborn-local-dev-secrets-master-key": "600",
+    ".ironclaw/reborn/local-dev/reborn-local-dev.db": "600",
+    ".ironclaw": "700",
+    ".ironclaw/reborn": "700",
+    ".ironclaw/reborn/local-dev": "700"
+  },
+  "inventory": {
+    "skills": [],
+    "mcpServers": [
+      "notion"
+    ]
+  }
+}

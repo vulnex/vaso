@@ -1,0 +1,12 @@
+[
+  {
+    "id": "local-ollama",
+    "aliases": [],
+    "protocol": "ollama",
+    "api_key_required": false,
+    "default_base_url": "http://127.0.0.1:11434",
+    "default_model": "llama3",
+    "model_env": "LOCAL_OLLAMA_MODEL",
+    "description": "Local Ollama"
+  }
+]

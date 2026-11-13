@@ -1,0 +1,27 @@
+schema_version = "reborn.extension_manifest.v3"
+id = "notion"
+name = "Notion"
+version = "0.1.0"
+description = "Notion MCP tools for creating, searching, fetching, querying, and managing Notion workspace content."
+trust = "third_party"
+
+[mcp]
+origin_gate_matrix = { loop_run = "gated_unless_granted", product = "forbidden", automation = "forbidden" }
+server = "https://mcp.notion.com/mcp"
+namespace = "notion"
+max_tools = 256
+default_permission = "ask"
+effects = ["network", "use_secret", "external_write"]
+
+[[mcp.credentials]]
+handle = "mcp_notion_access_token"
+vendor = "notion"
+scopes = []
+injection = { type = "header", name = "authorization", prefix = "Bearer " }
+
+[auth.notion]
+method = "oauth2_code"
+display_name = "Notion account"
+authorization_endpoint = "https://mcp.notion.com/authorize"
+token_endpoint = "https://mcp.notion.com/token"
+scopes = []

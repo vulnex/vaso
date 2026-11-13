@@ -406,6 +406,8 @@ export const ironclawAdapter: AgentAdapter = {
         ...storageGlobs('skills/**'),
         ...storageGlobs('tenant-shared/skills/**'),
         ...storageGlobs('system/skills/**'),
+        // installed extensions' manifests: MCP servers and their permissions (no secrets)
+        ...storageGlobs('system/extensions/*/manifest.toml'),
         ...storageGlobs('tenants/*/shared/skills/**'),
         ...storageGlobs('tenants/*/users/*/skills/**'),
         '~/.ironclaw/skills/**',
