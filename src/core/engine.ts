@@ -77,17 +77,22 @@ export const MAX_EVIDENCE = 200;
  * of 150k-line files made a 0.5 GB JSON report and crashed SARIF). The
  * result's message keeps the full count.
  */
-function capSnippets(result: CheckResult): CheckResult {
+export function capSnippets(result: CheckResult): CheckResult {
   const evidence = result.evidence;
   if (!evidence) return result;
   const long = evidence.some(e => typeof e.snippet === 'string' && e.snippet.length > MAX_SNIPPET);
   if (!long && evidence.length <= MAX_EVIDENCE) return result;
-  const kept = (evidence.length > MAX_EVIDENCE ? evidence.slice(0, MAX_EVIDENCE - 1) : evidence)
+  // Which items are kept must not depend on walk order (a local walk and a
+  // snapshot list files differently): sort by file, then line, before cutting
+  const ordered = evidence.length > MAX_EVIDENCE
+    ? [...evidence].sort((a, b) => (a.file < b.file ? -1 : a.file > b.file ? 1 : (a.line ?? 0) - (b.line ?? 0)))
+    : evidence;
+  const kept = (evidence.length > MAX_EVIDENCE ? ordered.slice(0, MAX_EVIDENCE - 1) : evidence)
     .map(e => (typeof e.snippet === 'string' && e.snippet.length > MAX_SNIPPET
       ? { ...e, snippet: truncateSnippet(e.snippet, MAX_SNIPPET) }
       : e));
   if (evidence.length > MAX_EVIDENCE) {
-    const rest = evidence.slice(MAX_EVIDENCE - 1);
+    const rest = ordered.slice(MAX_EVIDENCE - 1);
     kept.push({
       file: rest[0].file,
       detail: `… and ${rest.length} more evidence item(s) not listed (${new Set(rest.map(e => e.file)).size} file(s))`,
@@ -98,6 +103,11 @@ function capSnippets(result: CheckResult): CheckResult {
 }
 
 export function runCheck(check: CheckModule, ctx: ScanContext, timeoutMs: number): Promise<CheckResult> {
+  return runCheckUncapped(check, ctx, timeoutMs).then(capSnippets);
+}
+
+/** runCheck without the evidence bounds — for callers that read all evidence first (inventory links). */
+function runCheckUncapped(check: CheckModule, ctx: ScanContext, timeoutMs: number): Promise<CheckResult> {
   return new Promise<CheckResult>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(`did not finish within ${Math.round(timeoutMs / 1000)}s`)), timeoutMs);
     Promise.resolve()
@@ -107,7 +117,7 @@ export function runCheck(check: CheckModule, ctx: ScanContext, timeoutMs: number
         if (!v || typeof v !== 'object' || typeof v.passed !== 'boolean' || typeof v.id !== 'string') {
           throw new Error(`returned ${v === undefined ? 'undefined' : v === null ? 'null' : typeof v !== 'object' ? typeof v : 'an object that is not a check result'} instead of a check result`);
         }
-        return capSnippets(v as CheckResult);
+        return v as CheckResult;
       })
       .then(resolve, reject)
       .finally(() => clearTimeout(timer));
@@ -318,18 +328,20 @@ export class ScanEngine {
     // and trust files) that exist but can't be read are captured as they are
     // during detection, and reported as CONFIG-LOAD like unreadable configs.
     const { result: settled, loadErrors } = await captureConfigLoadErrors(() => Promise.allSettled(
-      applicable.map(check => runCheck(check, context, this.checkTimeoutMs))
+      applicable.map(check => runCheckUncapped(check, context, this.checkTimeoutMs))
     ));
 
-    const results = dedupePermissionFindings(settled.map((r, index) =>
+    const uncapped = dedupePermissionFindings(settled.map((r, index) =>
       r.status === 'fulfilled' ? r.value : erroredResult(applicable[index], r.reason)));
     const displayName = adapter?.displayName ?? installation.agent;
     for (const error of loadErrors) {
-      if (results.some(r => r.id === 'CONFIG-LOAD' && r.evidence?.[0]?.file === error.filePath)) continue;
-      results.push(configLoadResult({ ...error, agent: installation.agent, displayName }));
+      if (uncapped.some(r => r.id === 'CONFIG-LOAD' && r.evidence?.[0]?.file === error.filePath)) continue;
+      uncapped.push(configLoadResult({ ...error, agent: installation.agent, displayName }));
     }
 
-    linkInventoryFindings(installation.inventory, results);
+    // links read every evidence item; reports get the bounded evidence
+    linkInventoryFindings(installation.inventory, uncapped);
+    const results = uncapped.map(capSnippets);
     const score = computeScore(results);
 
     return {

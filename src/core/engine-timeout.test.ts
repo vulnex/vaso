@@ -65,3 +65,14 @@ describe('runCheck evidence cap', () => {
     expect(result.message).toBe('Found 5000');
   });
 });
+
+describe('evidence cap order', () => {
+  it('keeps the same items whatever order the check produced them in', async () => {
+    const { capSnippets, MAX_EVIDENCE } = await import('./engine.js');
+    const items = Array.from({ length: 1000 }, (_, i) => ({ file: `/f${String(i).padStart(4, '0')}`, line: 1 }));
+    const base = { id: 'T', name: 't', category: 'config', severity: 'warning', passed: false, message: 'm' } as const;
+    const a = capSnippets({ ...base, evidence: items } as never);
+    const b = capSnippets({ ...base, evidence: [...items].reverse() } as never);
+    expect(a.evidence!.slice(0, MAX_EVIDENCE - 1)).toEqual(b.evidence!.slice(0, MAX_EVIDENCE - 1));
+  });
+});
