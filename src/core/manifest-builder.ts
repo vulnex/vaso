@@ -181,13 +181,17 @@ export function buildProbeManifest(adapters: AgentAdapter[]): ProbeManifest {
   );
 
   // MCP host configs that aren't owned by any single adapter
-  // (Claude Desktop, Cursor, Windsurf — consumed by `vaso mcp scan`)
+  // (Claude Desktop, Cursor, Windsurf, VS Code — MCP inventory, `vaso mcp scan`)
   merged.filePaths.push(
     '~/Library/Application Support/Claude/claude_desktop_config.json',
     '~/.config/Claude/claude_desktop_config.json',
     '~/.cursor/mcp.json',
     '~/.codeium/windsurf/mcp_config.json',
     '~/.lyrie/mcp.json',
+    // VS Code's user-level MCP servers (host inventory). Its settings.json,
+    // whose `mcp.servers` is an older form, is the whole editor config: not shipped
+    '~/.config/Code/User/mcp.json',
+    '~/Library/Application Support/Code/User/mcp.json',
   );
 
   // ADV-002 reads, next to an install's package.json, its lockfile and the

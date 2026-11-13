@@ -12,10 +12,20 @@ export interface MCPServerEntry {
   transport: 'stdio' | 'sse' | 'streamable-http';
 }
 
+/** Where a config applies: the user's, one project's, or an extension's. */
+export type MCPConfigScope = 'user' | 'project' | 'extension';
+
 export interface MCPConfig {
   source: string;
   filePath: string;
   servers: MCPServerEntry[];
+  /** The agents that load this file (discover() only); empty when no detected
+   *  agent owns it (VS Code, a bare project mcp.json). */
+  agents?: import('../core/types.js').AgentType[];
+  /** Absent means user scope. */
+  scope?: MCPConfigScope;
+  /** The project the config applies to (project scope). */
+  projectRoot?: string;
 }
 
 export interface MCPDiscoveryResult {

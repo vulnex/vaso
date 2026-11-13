@@ -66,8 +66,8 @@ interface GoldenCase {
   reachable?: boolean;
   /** Skip on these platforms (fixtures relying on POSIX modes). */
   skipOn?: NodeJS.Platform[];
-  /** Expected skill inventory: skill names, and the names of other entries. */
-  inventory?: { skills: string[]; otherEntries?: string[] };
+  /** Expected inventory: skill names, names of other entries, MCP server names. */
+  inventory?: { skills: string[]; otherEntries?: string[]; mcpServers?: string[] };
 }
 
 /** `mcpConfig: "<path>"` is shorthand for `mcp: { paths: ["<path>"] }`. */
@@ -198,6 +198,9 @@ describe.each(caseNames)('golden: %s', (name) => {
       const inv = local[0].installation.inventory;
       expect(inv?.skills.map(s => s.name).sort(), 'inventory skills').toEqual([...spec.inventory.skills].sort());
       expect(inv?.otherEntries.map(e => basename(e.path)).sort(), 'inventory other entries').toEqual([...(spec.inventory.otherEntries ?? [])].sort());
+      if (spec.inventory.mcpServers) {
+        expect(inv?.mcpServers?.map(s => s.name).sort(), 'inventory MCP servers').toEqual([...spec.inventory.mcpServers].sort());
+      }
     }
     if (spec.clean) {
       const ignored = new Set(spec.cleanIgnore ?? []);

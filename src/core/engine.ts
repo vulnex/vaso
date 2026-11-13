@@ -1,6 +1,6 @@
 import { VERSION } from '../version.js';
 import { dirname } from 'node:path';
-import type { ScanOptions, ScanResult, ScanContext, AgentScanResult, AgentInstallation, CheckResult, CheckModule } from './types.js';
+import type { ScanOptions, ScanResult, ScanContext, AgentScanResult, AgentInstallation, CheckResult, CheckModule, McpServerItem } from './types.js';
 import type { CheckRegistry } from './check-registry.js';
 import type { AdapterConfigLoadError, AdapterDetectionError, AdapterRegistry } from '../adapters/registry.js';
 import type { MCPConfig, MCPConfigLoadError, MCPServerSource } from '../mcp/types.js';
@@ -10,6 +10,7 @@ import { computeScore, scoreToGrade, summarizeResults, aggregateScore, meanScore
 import { dedupeInheritedFindings } from './inherited-findings.js';
 import { dedupePermissionFindings } from './duplicate-findings.js';
 import { collectSkillInventory } from '../inventory/skills.js';
+import { discoverMcpAssignment } from '../inventory/mcp.js';
 import { mapSourceEvidence } from '../mcp/source-locations.js';
 import { describeFetchFailure } from '../mcp/package-fetcher.js';
 import { extractToolDefinitions } from '../mcp/tool-baseline.js';
@@ -213,9 +214,12 @@ export class ScanEngine {
       return this.emptyResult(options.agentFilter);
     }
 
+    // MCP servers per installation for the inventory: one discovery per host
+    const mcp = await discoverMcpAssignment(filtered, this.fs);
+
     // 2. Scan each agent
     const agentResults = await Promise.allSettled(
-      filtered.map(installation => this.scanAgent(installation))
+      filtered.map(installation => this.scanAgent(installation, mcp.byInstallation.get(installation)))
     );
 
     const agents: AgentScanResult[] = [];
@@ -244,14 +248,16 @@ export class ScanEngine {
       totalGrade: scoreToGrade(totalScore),
       fleetAverage: meanScore(scores),
       summary,
+      // Servers no detected agent owns belong to the host, not to one agent
+      ...(!options.agentFilter && mcp.host.length > 0 ? { hostInventory: { mcpServers: mcp.host } } : {}),
     };
   }
 
-  private async scanAgent(installation: AgentInstallation): Promise<AgentScanResult> {
+  private async scanAgent(installation: AgentInstallation, mcpServers?: McpServerItem[]): Promise<AgentScanResult> {
     // One walk per skills directory: the files the checks read, and the
     // inventory reports carry
     const { files: skillFiles, inventory } = await collectSkillInventory(installation, this.fs);
-    installation.inventory = inventory;
+    installation.inventory = mcpServers ? { ...inventory, mcpServers } : inventory;
 
     const adapter = this.adapters.getAdapter(installation.agent);
     const credentialPaths = credentialPathsFor(adapter, installation, this.fs);

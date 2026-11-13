@@ -1,6 +1,6 @@
 import { extname, join } from 'node:path';
 import { parseTomlSafe } from '../core/toml-safe.js';
-import type { MCPConfig, MCPConfigLoadError, MCPServerEntry, MCPDiscoveryResult } from './types.js';
+import type { MCPConfig, MCPConfigLoadError, MCPConfigScope, MCPServerEntry, MCPDiscoveryResult } from './types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { stripJsonc } from '../core/jsonc.js';
@@ -14,11 +14,15 @@ import { openclawMcpServerMaps } from '../adapters/openclaw.js';
 import { parseYamlSafe } from '../core/yaml-safe.js';
 import { captureConfigLoadErrors } from '../core/config-loader.js';
 import { pathPresent } from '../adapters/load-if-present.js';
-import type { Platform } from '../core/types.js';
+import type { AgentType, Platform } from '../core/types.js';
 
 interface ConfigLocation {
   source: string;
   path: string;
+  /** The agents that load this file; empty for files no detected agent owns (VS Code, a bare mcp.json). */
+  agents: AgentType[];
+  scope?: MCPConfigScope;
+  projectRoot?: string;
   /** Config dialect; defaults to the common `mcpServers` map. */
   shape?: 'atomic-agent' | 'nanobot' | 'picoclaw' | 'abacus' | 'abacus-config' | 'claude-json' | 'codex' | 'opencode' | 'hermes' | 'vscode-settings';
   /** Value substituted for `${extensionPath}` (Gemini CLI extensions). */
@@ -32,17 +36,20 @@ function getGlobalConfigLocations(platform: Platform, home: string, fs: FSProvid
   if (platform === 'darwin') {
     locations.push({
       source: 'Claude Desktop',
+      agents: ['claude-desktop'],
       path: join(home, 'Library', 'Application Support', 'Claude', 'claude_desktop_config.json'),
     });
   } else if (platform === 'linux') {
     locations.push({
       source: 'Claude Desktop',
+      agents: ['claude-desktop'],
       path: join(home, '.config', 'Claude', 'claude_desktop_config.json'),
     });
   } else if (platform === 'win32') {
-    const appData = process.env.APPDATA ?? join(home, 'AppData', 'Roaming');
+    const appData = fs.getEnv('APPDATA') ?? join(home, 'AppData', 'Roaming');
     locations.push({
       source: 'Claude Desktop',
+      agents: ['claude-desktop'],
       path: join(appData, 'Claude', 'claude_desktop_config.json'),
     });
   }
@@ -52,22 +59,23 @@ function getGlobalConfigLocations(platform: Platform, home: string, fs: FSProvid
   // ($CLAUDE_CONFIG_DIR holds both when set)
   const claude = claudeConfigPaths(home, fs);
   locations.push(
-    { source: 'Claude Code', path: claude.rootStateFile, shape: 'claude-json' },
-    { source: 'Claude Code', path: join(claude.claudeDir, 'mcp.json') },
+    { source: 'Claude Code', agents: ['claude-code'], path: claude.rootStateFile, shape: 'claude-json' },
+    { source: 'Claude Code', agents: ['claude-code'], path: join(claude.claudeDir, 'mcp.json') },
   );
 
   // Copilot CLI: user-level servers in <config dir>/mcp-config.json ($COPILOT_HOME)
-  locations.push({ source: 'Copilot CLI', path: join(copilotHome(home, fs), 'mcp-config.json') });
+  locations.push({ source: 'Copilot CLI', agents: ['copilot-cli'], path: join(copilotHome(home, fs), 'mcp-config.json') });
 
   // Gemini CLI / Qwen Code: `mcpServers` in settings.json (JSONC)
   locations.push(
-    { source: 'Gemini CLI', path: join(geminiHome(home, fs), 'settings.json') },
-    { source: 'Qwen Code', path: join(qwenHome(home, fs), 'settings.json') },
+    { source: 'Gemini CLI', agents: ['gemini-cli'], path: join(geminiHome(home, fs), 'settings.json') },
+    { source: 'Qwen Code', agents: ['qwen-code'], path: join(qwenHome(home, fs), 'settings.json') },
   );
 
   // Cursor
   locations.push({
     source: 'Cursor',
+    agents: ['cursor-cli'],
     path: join(home, '.cursor', 'mcp.json'),
   });
 
@@ -75,68 +83,71 @@ function getGlobalConfigLocations(platform: Platform, home: string, fs: FSProvid
   const vscodeUser = platform === 'darwin'
     ? join(home, 'Library', 'Application Support', 'Code', 'User')
     : platform === 'win32'
-      ? join(process.env.APPDATA ?? join(home, 'AppData', 'Roaming'), 'Code', 'User')
-      : join(process.env.XDG_CONFIG_HOME?.trim() || join(home, '.config'), 'Code', 'User');
+      ? join(fs.getEnv('APPDATA') ?? join(home, 'AppData', 'Roaming'), 'Code', 'User')
+      : join(fs.getEnv('XDG_CONFIG_HOME')?.trim() || join(home, '.config'), 'Code', 'User');
   locations.push(
-    { source: 'VS Code', path: join(vscodeUser, 'mcp.json') },
+    { source: 'VS Code', agents: [], path: join(vscodeUser, 'mcp.json') },
     // Older form, still read: `"mcp": { "servers": {…} }` in user settings.json
-    { source: 'VS Code (settings.json)', path: join(vscodeUser, 'settings.json'), shape: 'vscode-settings' },
+    { source: 'VS Code (settings.json)', agents: [], path: join(vscodeUser, 'settings.json'), shape: 'vscode-settings' },
   );
 
   // Windsurf
   locations.push({
     source: 'Windsurf',
+    agents: ['windsurf'],
     path: join(home, '.codeium', 'windsurf', 'mcp_config.json'),
   });
 
   // Abacus.AI CLI + desktop: mcp.json and the desktop's per-mode files are
   // server maps; config.json carries an array form.
   locations.push(
-    { source: 'Abacus.AI', path: join(home, '.abacusai', 'mcp.json'), shape: 'abacus' },
-    { source: 'Abacus.AI', path: join(home, '.abacusai', 'config.json'), shape: 'abacus-config' },
-    { source: 'AbacusAI Desktop (code)', path: join(home, '.abacusai', 'desktop', 'mcp-code.json'), shape: 'abacus' },
-    { source: 'AbacusAI Desktop (cowork)', path: join(home, '.abacusai', 'desktop', 'mcp-cowork.json'), shape: 'abacus' },
+    { source: 'Abacus.AI', agents: ['abacus'], path: join(home, '.abacusai', 'mcp.json'), shape: 'abacus' },
+    { source: 'Abacus.AI', agents: ['abacus'], path: join(home, '.abacusai', 'config.json'), shape: 'abacus-config' },
+    { source: 'AbacusAI Desktop (code)', agents: ['abacus'], path: join(home, '.abacusai', 'desktop', 'mcp-code.json'), shape: 'abacus' },
+    { source: 'AbacusAI Desktop (cowork)', agents: ['abacus'], path: join(home, '.abacusai', 'desktop', 'mcp-cowork.json'), shape: 'abacus' },
   );
 
   // Devin CLI (XDG config dir on POSIX, %APPDATA%\devin on Windows)
   const devinConfigDir = platform === 'win32'
-    ? join(process.env.APPDATA ?? join(home, 'AppData', 'Roaming'), 'devin')
-    : join(process.env.XDG_CONFIG_HOME?.trim() || join(home, '.config'), 'devin');
+    ? join(fs.getEnv('APPDATA') ?? join(home, 'AppData', 'Roaming'), 'devin')
+    : join(fs.getEnv('XDG_CONFIG_HOME')?.trim() || join(home, '.config'), 'devin');
   locations.push({
     source: 'Devin CLI',
+    // Windsurf 3.x (Devin Desktop) reads the same file
+    agents: ['devin', 'windsurf'],
     path: join(devinConfigDir, 'mcp_config.json'),
   });
   // Devin before 3000.3 kept servers under `mcpServers` in config.json (newer
   // versions migrate them out on startup — docs.devin.ai/cli/extensibility/mcp).
-  locations.push({ source: 'Devin CLI (config.json)', path: join(devinConfigDir, 'config.json') });
+  locations.push({ source: 'Devin CLI (config.json)', agents: ['devin'], path: join(devinConfigDir, 'config.json') });
 
   // OpenCode: `mcp` in opencode.json[c] (opencode.ai/docs/mcp-servers), plus
   // the file $OPENCODE_CONFIG names.
   const opencodeDir = opencodeConfigDir(home, fs);
   locations.push(
-    { source: 'OpenCode', path: join(opencodeDir, 'opencode.json'), shape: 'opencode' },
-    { source: 'OpenCode', path: join(opencodeDir, 'opencode.jsonc'), shape: 'opencode' },
+    { source: 'OpenCode', agents: ['opencode'], path: join(opencodeDir, 'opencode.json'), shape: 'opencode' },
+    { source: 'OpenCode', agents: ['opencode'], path: join(opencodeDir, 'opencode.jsonc'), shape: 'opencode' },
   );
   const opencodeExtra = home === fs.homedir() ? fs.getEnv('OPENCODE_CONFIG')?.trim() : undefined;
-  if (opencodeExtra) locations.push({ source: 'OpenCode ($OPENCODE_CONFIG)', path: opencodeExtra, shape: 'opencode' });
+  if (opencodeExtra) locations.push({ source: 'OpenCode ($OPENCODE_CONFIG)', agents: ['opencode'], path: opencodeExtra, shape: 'opencode' });
 
   // Hermes: `mcp_servers` in $HERMES_HOME/config.yaml
   // (hermes-agent.nousresearch.com/docs/user-guide/features/mcp)
   const hermesHome = fs.getEnv('HERMES_HOME')?.trim() || join(home, '.hermes');
-  locations.push({ source: 'Hermes', path: join(hermesHome, 'config.yaml'), shape: 'hermes' });
+  locations.push({ source: 'Hermes', agents: ['hermes'], path: join(hermesHome, 'config.yaml'), shape: 'hermes' });
 
   return locations;
 }
 
 /** Codex: `[mcp_servers.<name>]` tables in `$CODEX_HOME/config.toml` (default ~/.codex). */
 function getCodexLocation(home: string, fs: FSProvider): ConfigLocation {
-  return { source: 'Codex', path: join(codexHome(home, fs), 'config.toml'), shape: 'codex' };
+  return { source: 'Codex', agents: ['codex'], path: join(codexHome(home, fs), 'config.toml'), shape: 'codex' };
 }
 
 /** Atomic Agent: `mcp.servers[]` in `<stateDir>/config.json`. */
 function getAtomicAgentLocation(home: string, fs: FSProvider): ConfigLocation {
   const stateDir = fs.getEnv('ATOMIC_AGENT_STATE_DIR')?.trim() || join(home, '.atomic-agent');
-  return { source: 'Atomic Agent', path: join(stateDir, 'config.json'), shape: 'atomic-agent' };
+  return { source: 'Atomic Agent', agents: ['atomic-agent'], path: join(stateDir, 'config.json'), shape: 'atomic-agent' };
 }
 
 /** Agent frameworks that keep MCP servers in their own config files. */
@@ -144,38 +155,39 @@ function getFrameworkLocations(home: string, fs: FSProvider): ConfigLocation[] {
   const picoHome = fs.getEnv('PICOCLAW_HOME')?.trim() || join(home, '.picoclaw');
   return [
     // Nanobot (HKUDS): `tools.mcpServers` in ~/.nanobot/config.json
-    { source: 'Nanobot', path: join(home, '.nanobot', 'config.json'), shape: 'nanobot' },
+    { source: 'Nanobot', agents: ['nanobot'], path: join(home, '.nanobot', 'config.json'), shape: 'nanobot' },
     // PicoClaw: `tools.mcp.servers` in $PICOCLAW_CONFIG or <home>/config.json
-    { source: 'PicoClaw', path: fs.getEnv('PICOCLAW_CONFIG')?.trim() || join(picoHome, 'config.json'), shape: 'picoclaw' },
+    { source: 'PicoClaw', agents: ['picoclaw'], path: fs.getEnv('PICOCLAW_CONFIG')?.trim() || join(picoHome, 'config.json'), shape: 'picoclaw' },
     // Lyrie: ~/.lyrie/mcp.json (`mcpServers`)
-    { source: 'Lyrie', path: join(home, '.lyrie', 'mcp.json') },
+    { source: 'Lyrie', agents: ['lyrie'], path: join(home, '.lyrie', 'mcp.json') },
   ];
 }
 
 const GENERIC_MCP_SOURCE = 'Generic MCP';
 
 function getProjectConfigLocations(projectDir: string): ConfigLocation[] {
+  const at = (loc: Omit<ConfigLocation, 'scope' | 'projectRoot'>): ConfigLocation => ({ ...loc, scope: 'project', projectRoot: projectDir });
   return [
-    { source: 'Claude Code (project)', path: join(projectDir, '.mcp.json') },
-    { source: 'Cursor (project)', path: join(projectDir, '.cursor', 'mcp.json') },
-    { source: 'Windsurf (project)', path: join(projectDir, '.windsurf', 'mcp.json') },
-    { source: 'Devin CLI (project)', path: join(projectDir, '.devin', 'mcp_config.json') },
-    { source: 'Devin CLI (local)', path: join(projectDir, '.devin', 'mcp_config.local.json') },
-    { source: 'Devin CLI (project config.json)', path: join(projectDir, '.devin', 'config.json') },
-    { source: 'Devin CLI (project config.local.json)', path: join(projectDir, '.devin', 'config.local.json') },
-    { source: 'Gemini CLI (project)', path: join(projectDir, '.gemini', 'settings.json') },
-    { source: 'Qwen Code (project)', path: join(projectDir, '.qwen', 'settings.json') },
-    // Copilot CLI reads a repo's .mcp.json (above) and .github/mcp.json
-    { source: 'Copilot CLI (project)', path: join(projectDir, '.github', 'mcp.json') },
-    { source: 'OpenCode (project)', path: join(projectDir, 'opencode.json'), shape: 'opencode' },
-    { source: 'OpenCode (project)', path: join(projectDir, 'opencode.jsonc'), shape: 'opencode' },
-    { source: 'Abacus.AI (project)', path: join(projectDir, '.abacusai', 'mcp.json'), shape: 'abacus' },
-    { source: 'Abacus.AI (project)', path: join(projectDir, '.abacusai', 'config.json'), shape: 'abacus-config' },
-    { source: 'VS Code', path: join(projectDir, '.vscode', 'mcp.json') },
-    { source: 'VS Code (settings.json)', path: join(projectDir, '.vscode', 'settings.json'), shape: 'vscode-settings' },
+    // Copilot CLI reads a repo's .mcp.json too
+    at({ source: 'Claude Code (project)', agents: ['claude-code', 'copilot-cli'], path: join(projectDir, '.mcp.json') }),
+    at({ source: 'Cursor (project)', agents: ['cursor-cli'], path: join(projectDir, '.cursor', 'mcp.json') }),
+    at({ source: 'Windsurf (project)', agents: ['windsurf'], path: join(projectDir, '.windsurf', 'mcp.json') }),
+    at({ source: 'Devin CLI (project)', agents: ['devin'], path: join(projectDir, '.devin', 'mcp_config.json') }),
+    at({ source: 'Devin CLI (local)', agents: ['devin'], path: join(projectDir, '.devin', 'mcp_config.local.json') }),
+    at({ source: 'Devin CLI (project config.json)', agents: ['devin'], path: join(projectDir, '.devin', 'config.json') }),
+    at({ source: 'Devin CLI (project config.local.json)', agents: ['devin'], path: join(projectDir, '.devin', 'config.local.json') }),
+    at({ source: 'Gemini CLI (project)', agents: ['gemini-cli'], path: join(projectDir, '.gemini', 'settings.json') }),
+    at({ source: 'Qwen Code (project)', agents: ['qwen-code'], path: join(projectDir, '.qwen', 'settings.json') }),
+    at({ source: 'Copilot CLI (project)', agents: ['copilot-cli'], path: join(projectDir, '.github', 'mcp.json') }),
+    at({ source: 'OpenCode (project)', agents: ['opencode'], path: join(projectDir, 'opencode.json'), shape: 'opencode' }),
+    at({ source: 'OpenCode (project)', agents: ['opencode'], path: join(projectDir, 'opencode.jsonc'), shape: 'opencode' }),
+    at({ source: 'Abacus.AI (project)', agents: ['abacus'], path: join(projectDir, '.abacusai', 'mcp.json'), shape: 'abacus' }),
+    at({ source: 'Abacus.AI (project)', agents: ['abacus'], path: join(projectDir, '.abacusai', 'config.json'), shape: 'abacus-config' }),
+    at({ source: 'VS Code', agents: [], path: join(projectDir, '.vscode', 'mcp.json') }),
+    at({ source: 'VS Code (settings.json)', agents: [], path: join(projectDir, '.vscode', 'settings.json'), shape: 'vscode-settings' }),
     // Codex loads a trusted project's `.codex/config.toml` over the user config
-    { source: 'Codex (project)', path: join(projectDir, '.codex', 'config.toml'), shape: 'codex' },
-    { source: GENERIC_MCP_SOURCE, path: join(projectDir, 'mcp.json') },
+    at({ source: 'Codex (project)', agents: ['codex'], path: join(projectDir, '.codex', 'config.toml'), shape: 'codex' }),
+    at({ source: GENERIC_MCP_SOURCE, agents: [], path: join(projectDir, 'mcp.json') }),
   ];
 }
 
@@ -383,9 +395,23 @@ function claudeProjectConfigs(filePath: string, data: Record<string, unknown>): 
   const configs: MCPConfig[] = [];
   for (const [projectPath, project] of Object.entries(projects as Record<string, unknown>)) {
     const servers = parseServerMap((project as Record<string, unknown> | null)?.mcpServers);
-    if (servers.length > 0) configs.push({ source: `Claude Code (project ${projectPath})`, filePath, servers });
+    if (servers.length > 0) configs.push({ source: `Claude Code (project ${projectPath})`, agents: ['claude-code'], scope: 'project', projectRoot: projectPath, filePath, servers });
   }
   return configs;
+}
+
+/**
+ * The user-level files discovery reads under `home` (not project files,
+ * Gemini extensions or OpenClaw's config, which are found by listing) —
+ * for the probe manifest guard test.
+ */
+export function userConfigLocations(platform: Platform, home: string, fs: FSProvider): Array<{ source: string; path: string; agents: AgentType[] }> {
+  return [
+    ...getGlobalConfigLocations(platform, home, fs),
+    getCodexLocation(home, fs),
+    getAtomicAgentLocation(home, fs),
+    ...getFrameworkLocations(home, fs),
+  ].map(({ source, path, agents }) => ({ source, path, agents }));
 }
 
 export class MCPDiscovery {
@@ -438,6 +464,9 @@ export class MCPDiscovery {
         if (servers.length > 0) {
           configs.push({
             source: location.source,
+            agents: location.agents,
+            ...(location.scope ? { scope: location.scope } : {}),
+            ...(location.projectRoot ? { projectRoot: location.projectRoot } : {}),
             filePath: location.path,
             servers,
           });
@@ -457,7 +486,7 @@ export class MCPDiscovery {
     for (const e of openclaw.loadErrors) loadErrors.push({ source: 'OpenClaw', filePath: e.filePath, stage: e.stage, message: e.message });
     for (const oc of openclaw.result) {
       const servers = parseServerMap(oc.servers);
-      if (servers.length > 0) configs.push({ source: oc.source, filePath: oc.filePath, servers });
+      if (servers.length > 0) configs.push({ source: oc.source, agents: ['openclaw'], filePath: oc.filePath, servers });
     }
 
     const totalServers = configs.reduce((sum, c) => sum + c.servers.length, 0);
@@ -563,6 +592,8 @@ async function geminiExtensionLocations(home: string, fs: FSProvider): Promise<C
   }
   return names.sort().map((name) => ({
     source: `Gemini CLI (extension ${name})`,
+    agents: ['gemini-cli'] as AgentType[],
+    scope: 'extension' as const,
     path: join(dir, name, 'gemini-extension.json'),
     extensionPath: join(dir, name),
   }));

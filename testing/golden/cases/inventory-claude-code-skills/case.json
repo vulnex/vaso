@@ -1,8 +1,19 @@
 {
   "agent": "claude-code",
-  "source": "Inventory: SKILL.md folders (frontmatter name, nested SKILL.md, category folder, dot folder), a folder without SKILL.md, no findings expected",
+  "source": "Inventory: SKILL.md folders (frontmatter name, nested SKILL.md, category folder, dot folder), a folder without SKILL.md; MCP servers in ~/.claude.json (user scope, pinned with an env token, unpinned) and per project",
   "inventory": {
-    "skills": ["arxiv-search", "creator", "pdf-tools"],
-    "otherEntries": ["helper"]
+    "skills": [
+      "arxiv-search",
+      "creator",
+      "pdf-tools"
+    ],
+    "otherEntries": [
+      "helper"
+    ],
+    "mcpServers": [
+      "github",
+      "local-files",
+      "project-db"
+    ]
   }
 }

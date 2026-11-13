@@ -189,6 +189,7 @@ export async function runMCPList(options: { format: string; path?: string[] }): 
     for (const config of maskCredentialsDeep(escapeControlCharsDeep(result.configs, { lineBreaks: true }))) {
       console.log(chalk.cyan(`  ${config.source}`));
       console.log(chalk.dim(`  ${config.filePath}`));
+      if (config.agents?.length) console.log(chalk.dim(`  Loaded by: ${config.agents.join(', ')}`));
 
       for (const server of config.servers) {
         console.log(`    ${chalk.bold(server.name)}`);

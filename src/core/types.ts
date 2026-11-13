@@ -172,8 +172,42 @@ export interface AgentInventory {
   /** Other folders and code files directly under a skills directory: the
    *  skill checks read them, but they hold no SKILL.md. */
   otherEntries: SkillTreeEntry[];
+  /** MCP servers the agent loads (enabled ones — disabled servers are never
+   *  launched). Absent for agents whose MCP configs VASO doesn't read. */
+  mcpServers?: McpServerItem[];
   /** Why the lists may be partial (a directory that can't be listed). */
   incomplete?: string[];
+}
+
+/** One MCP server as configured: names and locations only — env and header
+ *  values are never carried, URLs and arguments are masked. */
+export interface McpServerItem {
+  name: string;
+  /** The config file that declares it. */
+  configFile: string;
+  scope: 'user' | 'project' | 'extension';
+  /** The project it applies to (project scope). */
+  project?: string;
+  transport: 'stdio' | 'sse' | 'streamable-http';
+  command?: string;
+  args?: string[];
+  url?: string;
+  /** The package a runner (npx, uvx, …) installs, as written, and how it is pinned. */
+  package?: {
+    runner: string;
+    ecosystem: 'npm' | 'pypi';
+    name: string;
+    spec: string;
+    pin: 'exact' | 'range' | 'tag' | 'none' | 'local';
+  };
+  envNames?: string[];
+  headerNames?: string[];
+}
+
+/** What a host carries beyond its agents. */
+export interface HostInventory {
+  /** MCP servers in files no detected agent owns (VS Code, a bare project mcp.json). */
+  mcpServers: McpServerItem[];
 }
 
 export interface SkillsDirInfo {
@@ -266,6 +300,8 @@ export interface ScanResult {
   };
   /** Set by `scan --diff`: findings compared with the saved baseline. */
   baselineDiff?: BaselineDiffSummary;
+  /** MCP servers no detected agent owns (whole-host scans only). */
+  hostInventory?: HostInventory;
 }
 
 /** `scan --diff` outcome, as carried in reports. Findings are check ids. */
