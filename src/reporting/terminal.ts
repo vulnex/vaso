@@ -92,6 +92,11 @@ export class TerminalReporter implements Reporter {
     lines.push(`  Warnings: ${chalk.yellow(String(result.summary.warning))}`);
     lines.push(`  Info: ${chalk.blue(String(result.summary.info))}`);
     lines.push(`  Passed: ${chalk.green(String(result.summary.passed))}`);
+    const shared = result.hostInventory?.sharedMcpServers ?? [];
+    if (shared.length > 0) {
+      const unpinned = shared.filter(g => g.unpinned).length;
+      lines.push(`  Shared MCP servers: ${shared.length}${unpinned ? chalk.yellow(` (${unpinned} unpinned somewhere)`) : ''}`);
+    }
     lines.push(`  Overall: ${this.formatScore(result.totalScore)} (${result.totalGrade})`);
     if (result.agents.length > 1) {
       // Headline is worst-case (weakest agent); show the mean as context.

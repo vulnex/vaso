@@ -85,12 +85,30 @@ export class MarkdownReporter implements Reporter {
       if (agent.installation.inventory) lines.push(...renderSurface(agent.installation.inventory));
     }
 
-    if (result.hostInventory?.mcpServers.length) {
+    const host = result.hostInventory;
+    if (host && (host.mcpServers.length > 0 || host.sharedMcpServers?.length)) {
       lines.push('## Host');
       lines.push('');
-      lines.push('MCP servers in files no detected agent owns (VS Code, a project mcp.json).');
-      lines.push('');
-      lines.push(...renderMcpTable(result.hostInventory.mcpServers));
+      if (host.sharedMcpServers?.length) {
+        lines.push('### MCP servers shared by several agents');
+        lines.push('');
+        lines.push('An update or compromise of one reaches every agent listed; an unpinned one can change under all of them at once.');
+        lines.push('');
+        lines.push('| Server | Unpinned | Used by |');
+        lines.push('|--------|----------|---------|');
+        for (const g of host.sharedMcpServers) {
+          const users = g.users.map(u => `${u.agent}${u.agentName ? ` (${u.agentName})` : ''}: ${u.server}`).join(', ');
+          lines.push(`| ${cell(g.key)} | ${g.unpinned ? 'yes' : '—'} | ${cell(users)} |`);
+        }
+        lines.push('');
+      }
+      if (host.mcpServers.length > 0) {
+        lines.push('### MCP servers no detected agent owns');
+        lines.push('');
+        lines.push('VS Code, a project mcp.json.');
+        lines.push('');
+        lines.push(...renderMcpTable(host.mcpServers));
+      }
     }
 
     const owasp = renderOwaspMcpCoverageMarkdown(result);

@@ -13,6 +13,7 @@ import { join as joinPath } from 'node:path';
 import { toReportJson } from '../reporting/serialize.js';
 import { attachSkillInventories } from '../inventory/skills.js';
 import { attachMcpInventories } from '../inventory/mcp.js';
+import { findSharedMcpServers } from '../inventory/shared.js';
 import type { McpServerItem } from '../core/types.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 
@@ -456,6 +457,19 @@ function renderTerminal(installations: AgentInstallation[], verbose: boolean | u
   if (hostMcp.length > 0) {
     lines.push(chalk.bold.cyan('host (no detected agent owns these files)'));
     lines.push(...renderMcp(hostMcp, verbose));
+    lines.push('');
+  }
+
+  const shared = findSharedMcpServers(installations);
+  if (shared.length > 0) {
+    const unpinned = shared.filter(g => g.unpinned).length;
+    lines.push(chalk.bold.cyan(`Shared MCP servers: ${shared.length}${unpinned ? chalk.yellow(` (${unpinned} unpinned somewhere)`) : ''}`));
+    for (const group of shared.slice(0, MAX_LISTED)) {
+      const users = group.users.map(u => `${u.agent}${u.agentName ? ` (${escapeControlChars(u.agentName, { lineBreaks: true })})` : ''}`);
+      const flag = group.unpinned ? chalk.yellow(' unpinned') : '';
+      lines.push(`  ${escapeControlChars(group.key, { lineBreaks: true })}${flag} ${chalk.dim(`— ${[...new Set(users)].join(', ')}`)}`);
+    }
+    if (shared.length > MAX_LISTED) lines.push(chalk.dim(`  … and ${shared.length - MAX_LISTED} more`));
     lines.push('');
   }
 

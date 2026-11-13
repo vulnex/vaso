@@ -1,6 +1,6 @@
 import { VERSION } from '../version.js';
 import { dirname } from 'node:path';
-import type { ScanOptions, ScanResult, ScanContext, AgentScanResult, AgentInstallation, CheckResult, CheckModule, McpServerItem } from './types.js';
+import type { ScanOptions, ScanResult, ScanContext, AgentScanResult, AgentInstallation, CheckResult, CheckModule, McpServerItem, SharedMcpServer } from './types.js';
 import type { CheckRegistry } from './check-registry.js';
 import type { AdapterConfigLoadError, AdapterDetectionError, AdapterRegistry } from '../adapters/registry.js';
 import type { MCPConfig, MCPConfigLoadError, MCPServerSource } from '../mcp/types.js';
@@ -13,6 +13,7 @@ import { collectSkillInventory } from '../inventory/skills.js';
 import { truncateSnippet } from './patterns.js';
 import { discoverMcpAssignment } from '../inventory/mcp.js';
 import { linkInventoryFindings } from '../inventory/findings.js';
+import { findSharedMcpServers } from '../inventory/shared.js';
 import { mapSourceEvidence } from '../mcp/source-locations.js';
 import { describeFetchFailure } from '../mcp/package-fetcher.js';
 import { extractToolDefinitions } from '../mcp/tool-baseline.js';
@@ -59,6 +60,11 @@ export function checkTimeoutFromEnv(env: NodeJS.ProcessEnv = process.env, warn: 
  * the report), or a promise that never settles (the process used to exit 0
  * with no report once nothing else kept it alive).
  */
+function hostInventory(mcpServers: McpServerItem[], shared: SharedMcpServer[]): Pick<ScanResult, 'hostInventory'> {
+  if (mcpServers.length === 0 && shared.length === 0) return {};
+  return { hostInventory: { mcpServers, ...(shared.length > 0 ? { sharedMcpServers: shared } : {}) } };
+}
+
 /** Longest evidence snippet a result keeps. */
 export const MAX_SNIPPET = 300;
 
@@ -269,7 +275,7 @@ export class ScanEngine {
       fleetAverage: meanScore(scores),
       summary,
       // Servers no detected agent owns belong to the host, not to one agent
-      ...(!options.agentFilter && mcp.host.length > 0 ? { hostInventory: { mcpServers: mcp.host } } : {}),
+      ...hostInventory(options.agentFilter ? [] : mcp.host, findSharedMcpServers(filtered)),
     };
   }
 

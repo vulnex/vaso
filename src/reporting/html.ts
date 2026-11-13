@@ -308,11 +308,24 @@ export class HtmlReporter implements Reporter {
       lines.push(this.renderAgent(agent));
     }
 
-    if (result.hostInventory?.mcpServers.length) {
+    const host = result.hostInventory;
+    if (host && (host.mcpServers.length > 0 || host.sharedMcpServers?.length)) {
       lines.push('<div class="agent-section">');
       lines.push('<div class="agent-header"><h2>Host</h2></div>');
-      lines.push('<div class="agent-meta"><span>MCP servers in files no detected agent owns (VS Code, a project mcp.json)</span></div>');
-      lines.push(this.renderMcpTable(result.hostInventory.mcpServers));
+      if (host.sharedMcpServers?.length) {
+        lines.push('<h4>MCP servers shared by several agents</h4>');
+        lines.push('<div class="agent-meta"><span>An update or compromise of one reaches every agent listed; an unpinned one can change under all of them at once.</span></div>');
+        lines.push('<table><thead><tr><th>Server</th><th>Unpinned</th><th>Used by</th></tr></thead><tbody>');
+        for (const g of host.sharedMcpServers) {
+          const users = g.users.map(u => `${escapeHtml(u.agent)}${u.agentName ? ` (${escapeHtml(u.agentName)})` : ''}: ${escapeHtml(u.server)} <span class="muted">${escapeHtml(u.configFile)}</span>`).join('<br>');
+          lines.push(`<tr><td class="evidence">${escapeHtml(g.key)}</td><td>${g.unpinned ? 'yes' : '—'}</td><td class="evidence">${users}</td></tr>`);
+        }
+        lines.push('</tbody></table>');
+      }
+      if (host.mcpServers.length > 0) {
+        lines.push('<h4>MCP servers no detected agent owns (VS Code, a project mcp.json)</h4>');
+        lines.push(this.renderMcpTable(host.mcpServers));
+      }
       lines.push('</div>');
     }
 

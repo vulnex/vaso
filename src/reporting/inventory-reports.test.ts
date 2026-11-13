@@ -37,7 +37,17 @@ function result(): ScanResult {
     totalGrade: 'A',
     fleetAverage: 100,
     summary: { critical: 0, warning: 0, info: 0, passed: 0, total: 0 },
-    hostInventory: { mcpServers: [{ name: 'vscode-srv', configFile: '/home/u/.config/Code/User/mcp.json', scope: 'user', transport: 'stdio', command: 'node', args: ['s.js'] }] },
+    hostInventory: {
+      mcpServers: [{ name: 'vscode-srv', configFile: '/home/u/.config/Code/User/mcp.json', scope: 'user', transport: 'stdio', command: 'node', args: ['s.js'] }],
+      sharedMcpServers: [{
+        key: 'npm:@modelcontextprotocol/server-github',
+        unpinned: true,
+        users: [
+          { agent: 'claude-code', installDir: '/home/u/.claude', server: 'github', configFile: '/home/u/.claude.json', pin: 'none' },
+          { agent: 'cursor-cli', installDir: '/home/u/.cursor', server: '<b>gh</b>', configFile: '/home/u/.cursor/mcp.json', pin: 'exact' },
+        ],
+      }],
+    },
   };
 }
 
@@ -52,6 +62,9 @@ describe('inventory in reports', () => {
     expect(html).toContain('GITHUB_TOKEN');
     expect(html).toContain('CC-005');
     expect(html).toContain('vscode-srv');
+    expect(html).toContain('MCP servers shared by several agents');
+    expect(html).toContain('&lt;b&gt;gh&lt;/b&gt;');
+    expect(html).not.toContain('<b>gh</b>');
     expect(html).not.toContain('abcdefghijklmnopqrstuvwx');
   });
 
@@ -61,6 +74,7 @@ describe('inventory in reports', () => {
     expect(md).toContain('pipes \\| and newlines');
     expect(md).toContain('| github | stdio | @modelcontextprotocol/server-github (unpinned) |');
     expect(md).toContain('## Host');
+    expect(md).toContain('| npm:@modelcontextprotocol/server-github | yes | claude-code: github, cursor-cli: &lt;b&gt;gh&lt;/b&gt; |');
     expect(md).toContain('(not present)');
     expect(md).not.toContain('abcdefghijklmnopqrstuvwx');
     for (const line of md.split('\n').filter(l => l.startsWith('| github') || l.startsWith('| &lt;img'))) {
@@ -74,6 +88,7 @@ describe('inventory in reports', () => {
     expect(inv.agents[0]).toMatchObject({ agent: 'claude-code', installDir: '/home/u/.claude' });
     expect(inv.agents[0].mcpServers.map((s: { name: string }) => s.name)).toEqual(['github', 'remote']);
     expect(inv.host.mcpServers[0].name).toBe('vscode-srv');
+    expect(inv.host.sharedMcpServers[0].unpinned).toBe(true);
     expect(JSON.stringify(sarif)).not.toContain('abcdefghijklmnopqrstuvwx');
   });
 
@@ -85,6 +100,8 @@ describe('inventory in reports', () => {
   });
 
   it('terminal: one surface line per agent', () => {
-    expect(getReporter('terminal').render(result())).toContain('Surface: 1 skill, 1 other skills-dir entry, 2 MCP servers');
+    const out = getReporter('terminal').render(result());
+    expect(out).toContain('Surface: 1 skill, 1 other skills-dir entry, 2 MCP servers');
+    expect(out).toContain('Shared MCP servers: 1');
   });
 });

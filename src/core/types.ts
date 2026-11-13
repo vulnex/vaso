@@ -210,6 +210,25 @@ export interface McpServerItem {
 export interface HostInventory {
   /** MCP servers in files no detected agent owns (VS Code, a bare project mcp.json). */
   mcpServers: McpServerItem[];
+  /** The same MCP server configured for several installations, in separate config files. */
+  sharedMcpServers?: SharedMcpServer[];
+}
+
+/** One MCP server several installations configure: a change to it (or a compromise of it) reaches all of them. */
+export interface SharedMcpServer {
+  /** What makes them the same: `npm:<name>`, `pypi:<name>`, `url:<origin><path>`, `command:<command line>`. */
+  key: string;
+  users: Array<{
+    agent: AgentType;
+    agentName?: string;
+    installDir: string;
+    /** The server's name in that config. */
+    server: string;
+    configFile: string;
+    pin?: 'exact' | 'range' | 'tag' | 'none' | 'local';
+  }>;
+  /** At least one of them runs the package unpinned, by a range or by a moving tag. */
+  unpinned: boolean;
 }
 
 export interface SkillsDirInfo {

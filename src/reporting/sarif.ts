@@ -84,7 +84,8 @@ export class SarifReporter implements Reporter {
         installDir: a.installation.installDir,
         ...a.installation.inventory,
       }));
-    const host = result.hostInventory?.mcpServers.length ? { host: result.hostInventory } : {};
+    const hi = result.hostInventory;
+    const host = hi && (hi.mcpServers.length > 0 || hi.sharedMcpServers?.length) ? { host: hi } : {};
     if (agents.length === 0 && !('host' in host)) return {};
     return { properties: { inventory: { agents, ...host } } };
   }
