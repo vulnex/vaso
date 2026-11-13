@@ -1,10 +1,13 @@
-import { join, extname, dirname, relative, sep, basename } from 'node:path';
+import { join, extname, dirname, relative, sep, basename, isAbsolute } from 'node:path';
 import { mkdir, open, rename, unlink, writeFile } from 'node:fs/promises';
 import { constants as fsConstants } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import type { DirentInfo, FSProvider } from './fs-provider.js';
 import type { AgentInstallation } from './types.js';
 import { walkSkillTree } from './skill-walk.js';
+import { relEscapes } from './path-rel.js';
+
+export { relEscapes };
 import { LocalFSProvider } from './local-fs-provider.js';
 
 /**
@@ -76,7 +79,7 @@ export function isExcludedPath(
 ): boolean {
   if (!parentPath) return false;
   const rel = relative(root, parentPath);
-  if (!rel || rel.startsWith('..')) return false;
+  if (!rel || relEscapes(rel)) return false;
   for (const segment of rel.split(sep)) {
     if (!segment) continue;
     if (VENDOR_DIRS.has(segment)) return true;

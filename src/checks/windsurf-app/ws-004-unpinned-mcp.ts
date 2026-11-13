@@ -1,6 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { runnerPackage, isPinnedOrLocal, pinProblem } from '../../mcp/package-pin.js';
+import { isDisabledServerConfig } from '../../mcp/disabled.js';
 
 export const ws004 = defineCheck({
   id: 'WS-004',
@@ -18,6 +19,7 @@ export const ws004 = defineCheck({
       if (!servers || typeof servers !== 'object') continue;
 
       for (const [name, server] of Object.entries(servers)) {
+        if (isDisabledServerConfig(server)) continue; // never launched
         if (!server || typeof server !== 'object') continue;
         const rec = server as Record<string, unknown>;
         const command = rec.command;

@@ -373,7 +373,8 @@ function escapedQuotes(value: string, replacement: string): string {
 }
 
 function maskText(text: string): string {
-  if (!/[:=@-]/.test(text) && !BARE_TOKEN_HINT.test(text)) return text;
+  // a JWT (`eyJ…`) needs none of [:=@-] around it
+  if (!/[:=@-]/.test(text) && !text.includes('eyJ') && !BARE_TOKEN_HINT.test(text)) return text;
   const pem = text.includes('-----BEGIN') ? text.replace(PEM_BODY, MASK) : text;
   const jwt = pem.includes('eyJ') ? pem.replace(JWT, MASK) : pem;
   const bare = BARE_TOKEN_HINT.test(jwt)

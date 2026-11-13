@@ -27,14 +27,40 @@ describe('linkInventoryFindings', () => {
     expect(inv.skills.map(s => s.findings)).toEqual([['SKL-001', 'SKL-003'], ['SKL-002'], undefined]);
   });
 
-  it('links MCP findings by config file and the server named as a whole word', () => {
-    const server = (name: string) => ({ name, configFile: '/c.json', scope: 'user' as const, transport: 'stdio' as const });
-    const inv: AgentInventory = { skillsDirs: [], skills: [], otherEntries: [], mcpServers: [server('db'), server('db2'), server('web')] };
+  it('links MCP findings only where a check names the server, in its scope', () => {
+    const server = (name: string, extra: Partial<NonNullable<AgentInventory['mcpServers']>[number]> = {}) =>
+      ({ name, configFile: '/c.json', scope: 'user' as const, transport: 'stdio' as const, ...extra });
+    const inv: AgentInventory = {
+      skillsDirs: [], skills: [], otherEntries: [],
+      mcpServers: [
+        server('pg'), server('db'), server('github'), server('api'), server('api.v2'),
+        server('github', { scope: 'project', project: '/work/app' }),
+        server('off', { disabled: true }),
+        server('npx'), server('risk'),
+      ],
+    };
     linkInventoryFindings(inv, [
-      fail('CC-005', '/c.json', 'mcpServers.db: npx -y db-mcp'),
-      fail('CC-006', '/other.json', 'mcpServers.web.url = http://x'),
-      fail('CC-007', '/c.json', 'db2: uvx thing'),
+      fail('CC-005', '/c.json', 'mcpServers.pg: npx -y pg-mcp --conn db'),
+      fail('CC-005', '/c.json', 'mcpServers.foo: npx -y @acme/github'),
+      fail('CC-004', '/c.json', 'projects[/work/app].mcpServers.github.env.GITHUB_TOKEN = ***'),
+      fail('CUR-006', '/c.json', 'mcpServers.api.v2.url = http://x'),
+      fail('DEV-004', '/c.json', 'mcpServers.off: npx -y thing'),
+      { ...fail('CD-003', '/c.json', 'x'), evidence: [{ file: '/c.json', snippet: 'x', detail: 'MCP server package unpinned — supply chain risk' }] },
+      fail('GEM-008', '/other.json', 'mcpServers.pg.url = http://x'),
     ]);
-    expect(inv.mcpServers!.map(s => s.findings)).toEqual([['CC-005'], ['CC-007'], undefined]);
+    const by = Object.fromEntries(inv.mcpServers!.map(s => [`${s.name}${s.project ? '@' + s.project : ''}`, s.findings]));
+    expect(by).toEqual({
+      pg: ['CC-005'], db: undefined, github: undefined, api: undefined, 'api.v2': ['CUR-006'],
+      'github@/work/app': ['CC-004'], off: undefined, npx: undefined, risk: undefined,
+    });
+  });
+
+  it('links other entries by path', () => {
+    const inv: AgentInventory = {
+      skillsDirs: [], skills: [],
+      otherEntries: [{ path: '/s/sshdir', root: '/s', type: 'directory', files: 0, hasCode: false }],
+    };
+    linkInventoryFindings(inv, [fail('SKL-013', '/s/sshdir')]);
+    expect(inv.otherEntries[0].findings).toEqual(['SKL-013']);
   });
 });

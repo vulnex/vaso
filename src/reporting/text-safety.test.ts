@@ -52,7 +52,7 @@ describe('text safety', () => {
     const out = new MarkdownReporter().render(result());
     expect(out).not.toContain('\n# INJ');
     expect(out).not.toContain('<img');
-    expect(out).toContain('bad evil\\x1b[2J');
+    expect(out).toContain('bad evil\\x1b\\[2J'); // `[` escaped: no link syntax
   });
 
   it('csv cells carry no raw ESC/BEL', () => {

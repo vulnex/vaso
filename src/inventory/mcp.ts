@@ -1,4 +1,4 @@
-import { isAbsolute, join, relative } from 'node:path';
+import { dirname, isAbsolute, join, relative } from 'node:path';
 import type { FSProvider } from '../core/fs-provider.js';
 import type { AgentInstallation, AgentType, McpServerItem } from '../core/types.js';
 import type { MCPConfig, MCPServerEntry } from '../mcp/types.js';
@@ -7,7 +7,9 @@ import { parseJsonLenient } from '../core/jsonc.js';
 import { parseTomlSafe } from '../core/toml-safe.js';
 import { REBORN_STORAGE_SUBDIRS, isIronclawLegacy } from '../adapters/ironclaw.js';
 import { runnerPackage } from '../mcp/package-pin.js';
+import { relEscapes } from '../core/utils.js';
 import { maskArgSecrets, maskUrlSecrets } from '../mcp/config-secrets.js';
+import { maskCredentialsInText } from '../reporting/serialize.js';
 import { scanCwd } from '../adapters/project-configs.js';
 
 export interface McpAssignment {
@@ -19,7 +21,7 @@ export interface McpAssignment {
 
 function isWithin(path: string, dir: string): boolean {
   const rel = relative(dir, path);
-  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+  return rel === '' || !relEscapes(rel);
 }
 
 /** Leading path segments two paths share. */
@@ -33,19 +35,24 @@ function sharedDepth(a: string, b: string): number {
 
 /** One server as reports carry it: env and header names only, credentials in URLs and argv masked. */
 export function mcpServerItem(config: MCPConfig, server: MCPServerEntry): McpServerItem {
-  const pkg = runnerPackage(server.command, server.args);
+  // Everything carried is masked here, not only by the report serializer:
+  // detect's terminal output and the shared-server keys read these fields
+  const mask = (s: string) => maskCredentialsInText(s);
+  const args = server.args?.length ? maskArgSecrets(server.args, server.command).map(mask) : undefined;
+  const raw = runnerPackage(server.command, server.args);
+  const pkg = raw && { runner: raw.runner, ecosystem: raw.ecosystem, name: mask(maskUrlSecrets(raw.name)), spec: mask(maskUrlSecrets(raw.spec)), pin: raw.pin };
   const envNames = server.env ? Object.keys(server.env).sort() : [];
   const headerNames = server.headers ? Object.keys(server.headers).sort() : [];
   return {
-    name: server.name,
+    name: mask(server.name),
     configFile: config.filePath,
     scope: config.scope ?? 'user',
     ...(config.projectRoot ? { project: config.projectRoot } : {}),
     transport: server.transport,
-    ...(server.command ? { command: server.command } : {}),
-    ...(server.args?.length ? { args: maskArgSecrets(server.args, server.command) } : {}),
-    ...(server.url ? { url: maskUrlSecrets(server.url) } : {}),
-    ...(pkg ? { package: { runner: pkg.runner, ecosystem: pkg.ecosystem, name: pkg.name, spec: pkg.spec, pin: pkg.pin } } : {}),
+    ...(server.command ? { command: mask(server.command) } : {}),
+    ...(args ? { args } : {}),
+    ...(server.url ? { url: mask(maskUrlSecrets(server.url)) } : {}),
+    ...(pkg ? { package: pkg } : {}),
     ...(envNames.length ? { envNames } : {}),
     ...(headerNames.length ? { headerNames } : {}),
     ...(server.disabled ? { disabled: true } : {}),
@@ -84,8 +91,11 @@ export function assignMcpServers(
     for (const agent of agents) {
       const candidates = [...byInstallation.keys()].filter(i => i.agent === agent);
       if (candidates.length === 0) continue; // agent not installed: nothing loads it
+      // the install of exactly that project (`<project>/.claude`): Claude Code
+      // applies `projects[<path>]` servers to that folder only, not to nested ones
       const inProject = config.projectRoot
-        ? candidates.filter(i => i.profile === 'project' && isWithin(i.installDir, config.projectRoot!))
+        ? candidates.filter(i => i.profile === 'project'
+          && (i.installDir === config.projectRoot || dirname(i.installDir) === config.projectRoot))
         : [];
       const pool = inProject.length > 0 ? inProject : candidates.filter(i => i.profile !== 'project');
       const target = (pool.length > 0 ? pool : candidates)

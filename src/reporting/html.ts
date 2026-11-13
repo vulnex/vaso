@@ -435,7 +435,7 @@ export class HtmlReporter implements Reporter {
     }
     if (inventory.otherEntries.length > 0) {
       lines.push('<h4>Other entries (no SKILL.md)</h4>');
-      lines.push(`<div class="evidence">${inventory.otherEntries.map(e => `${escapeHtml(e.path)} <span class="muted">(${e.type}, ${e.files} file${e.files === 1 ? '' : 's'})</span>`).join('<br>')}</div>`);
+      lines.push(`<div class="evidence">${inventory.otherEntries.map(e => `${escapeHtml(e.path)} <span class="muted">(${e.type}, ${e.files} file${e.files === 1 ? '' : 's'})</span>${e.findings?.length ? ` — ${escapeHtml(e.findings.join(', '))}` : ''}`).join('<br>')}</div>`);
     }
     if (inventory.mcpServers?.length) {
       lines.push('<h4>MCP servers</h4>');

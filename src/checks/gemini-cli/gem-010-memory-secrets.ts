@@ -4,6 +4,7 @@ import { defineCheck } from '../../core/check-builder.js';
 import { memorySecretSeverity, scanMemorySecrets } from '../../analyzers/memory-secrets.js';
 import { MemoryReader } from '../../analyzers/memory-read.js';
 import { recordListFailure } from '../../core/config-loader.js';
+import { relEscapes } from '../../core/utils.js';
 
 // The save_memory tool and /memory write ~/.gemini/GEMINI.md; Gemini CLI
 // never reads a ~/.gemini/memory.md (memoryTool.ts, memoryDiscovery.ts)
@@ -42,7 +43,7 @@ function collectedByProbe(ctx: ScanContext, file: string): boolean {
 function notCollectedReason(ctx: ScanContext, file: string): string {
   if (!/\.md$/i.test(file)) return 'not a .md file';
   const rel = relative(ctx.installation.installDir, file);
-  return rel.startsWith('..') ? 'outside ~/.gemini' : 'not at the top of ~/.gemini';
+  return relEscapes(rel) ? 'outside ~/.gemini' : 'not at the top of ~/.gemini';
 }
 
 // The per-project memory index (memoryTool.ts getProjectMemoryIndexFilePath:

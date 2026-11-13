@@ -4,6 +4,7 @@ import { runnerPackage, isPinnedOrLocal, pinProblem } from '../../mcp/package-pi
 import { shellCommandWrapper, shellInvocation } from '../../mcp/shell-wrapper.js';
 import { queryPermissions } from '../../core/permissions.js';
 import { managedOverride, markManagedOverride } from '../../adapters/hermes-managed.js';
+import { isDisabledServerConfig } from '../../mcp/disabled.js';
 
 
 export const hm010 = defineCheck({
@@ -22,6 +23,7 @@ export const hm010 = defineCheck({
       if (!servers || typeof servers !== 'object') continue;
 
       for (const [name, serverRaw] of Object.entries(servers)) {
+        if (isDisabledServerConfig(serverRaw)) continue; // never launched
         if (!serverRaw || typeof serverRaw !== 'object') continue;
         const server = serverRaw as Record<string, unknown>;
         const command = server.command;

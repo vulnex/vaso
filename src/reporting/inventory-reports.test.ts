@@ -107,3 +107,20 @@ describe('inventory in reports', () => {
     expect(out).toContain('Shared MCP servers: 1');
   });
 });
+
+describe('markdown link syntax from scanned text', () => {
+  it('escapes link and image syntax in names and descriptions', async () => {
+    const { MarkdownReporter } = await import('./markdown.js');
+    const r = {
+      timestamp: 't', agents: [{
+        agent: 'claude-code', installation: { agent: 'claude-code', installDir: '/h', configFiles: [], inventory: {
+          skillsDirs: [], otherEntries: [],
+          skills: [{ name: '[click](javascript:alert(1))', path: '/s', root: '/', scope: 'user', kind: 'skill-md', description: '![x](http://evil/x.png)', files: 1, hasCode: false }],
+        } }, results: [], score: 100, grade: 'A',
+      }], totalScore: 100, totalGrade: 'A', fleetAverage: 100, summary: { critical: 0, warning: 0, info: 0, passed: 0, total: 0 },
+    } as unknown as import('../core/types.js').ScanResult;
+    const md = new MarkdownReporter().render(r);
+    expect(md).not.toMatch(/(?<!\\)\[click\]\(/);
+    expect(md).not.toMatch(/(?<!\\)!\[x\]/);
+  });
+});

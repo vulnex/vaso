@@ -15,7 +15,9 @@ function mdInline(s: string): string {
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-    .replace(/\|/g, '\\|');
+    .replace(/\|/g, '\\|')
+    // no live links or images (`[x](javascript:…)`, `![](http://tracker)`) or code spans
+    .replace(/[[\]!`]/g, (c) => `\\${c}`);
 }
 
 const SEVERITY_EMOJI: Record<Severity, string> = {
@@ -68,7 +70,7 @@ export class MarkdownReporter implements Reporter {
         lines.push('| ID | Name | Severity | Message |');
         lines.push('|----|------|----------|---------|');
         for (const r of failed) {
-          lines.push(`| ${r.id} | ${r.name} | ${r.severity} | ${mdInline(r.message)} |`);
+          lines.push(`| ${mdInline(r.id)} | ${mdInline(r.name)} | ${r.severity} | ${mdInline(r.message)} |`);
         }
         lines.push('');
       }
@@ -77,7 +79,7 @@ export class MarkdownReporter implements Reporter {
         lines.push(`### Passed (${passed.length})`);
         lines.push('');
         for (const r of passed) {
-          lines.push(`- **${r.id}**: ${r.name}`);
+          lines.push(`- **${mdInline(r.id)}**: ${mdInline(r.name)}`);
         }
         lines.push('');
       }
@@ -133,7 +135,7 @@ const cell = (s: string) => mdInline(s) || '—';
 function renderSurface(inventory: AgentInventory): string[] {
   const lines = [`### Attack surface (${surfaceCounts(inventory)})`, ''];
   for (const dir of inventory.skillsDirs) {
-    lines.push(`- Skills directory: \`${mdInline(dir.path)}\`${dir.exists ? '' : ' (not present)'}`);
+    lines.push(`- Skills directory: ${mdInline(dir.path)}${dir.exists ? '' : ' (not present)'}`);
   }
   if (inventory.skillsDirs.length > 0) lines.push('');
   if (inventory.skills.length > 0) {
@@ -148,7 +150,7 @@ function renderSurface(inventory: AgentInventory): string[] {
   if (inventory.otherEntries.length > 0) {
     lines.push('Other entries (no SKILL.md):');
     lines.push('');
-    for (const e of inventory.otherEntries) lines.push(`- \`${mdInline(e.path)}\` (${e.type}, ${e.files} file${e.files === 1 ? '' : 's'})`);
+    for (const e of inventory.otherEntries) lines.push(`- ${mdInline(e.path)} (${e.type}, ${e.files} file${e.files === 1 ? '' : 's'})${e.findings?.length ? ` — findings: ${e.findings.join(', ')}` : ''}`);
     lines.push('');
   }
   if (inventory.mcpServers?.length) lines.push(...renderMcpTable(inventory.mcpServers));

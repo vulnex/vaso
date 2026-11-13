@@ -7,7 +7,7 @@ import { collectServerDependencies } from './server-dependencies.js';
 import { parse as parseTOML } from 'smol-toml';
 import { binaryFileFormat, binaryFormat, isScriptFile, sourceText } from '../analyzers/binary-text.js';
 import { readCappedFile, ScanLimitError } from '../core/file-limits.js';
-import { isExcludedPath } from '../core/utils.js';
+import { isExcludedPath, relEscapes } from '../core/utils.js';
 import { isTestPath } from '../analyzers/test-paths.js';
 import { shellLaunchTarget } from './shell-launch.js';
 
@@ -679,7 +679,7 @@ async function withLocalImports(entry: string, entryCode: string, fs: FSProvider
       if (!path || seen.has(path)) continue;
       seen.add(path);
       const rel = relative(base, path);
-      if (rel.startsWith('..') || isExcludedPath(base, dirname(path), { keepBuildOutput: true })) continue;
+      if (relEscapes(rel) || isExcludedPath(base, dirname(path), { keepBuildOutput: true })) continue;
       if (files.length >= MAX_LOCAL_MODULES) {
         // one module more than the limit: the rest of the graph goes unread, and is reported
         denied?.push(moduleLimit(path, MAX_LOCAL_MODULES));

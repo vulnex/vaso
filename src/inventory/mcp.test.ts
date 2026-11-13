@@ -49,6 +49,17 @@ describe('mcpServerItem', () => {
   });
 });
 
+describe('mcpServerItem — masked at the source', () => {
+  it('masks secrets in the command, the server name and a URL package spec', () => {
+    const tok = 'ghp_' + 'A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8';
+    const item = mcpServerItem(
+      { source: 'x', filePath: '/c.json', servers: [] },
+      { name: tok, command: `/opt/tool --token=${tok}`, args: ['--from', `git+https://${tok}@github.com/o/r.git`, 'srv'], transport: 'stdio' },
+    );
+    expect(JSON.stringify(item)).not.toContain('A1b2C3d4E5f6');
+  });
+});
+
 describe('assignMcpServers', () => {
   it('gives a user config to the agent that loads it, and files no agent owns to the host', () => {
     const cc = inst('claude-code', `${HOME}/.claude`);

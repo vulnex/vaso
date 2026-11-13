@@ -75,8 +75,10 @@ export class SarifReporter implements Reporter {
   /** The skills and MCP servers each agent loads. SARIF has no inventory
    *  object; a run's property bag is the spec's extension point (§3.8). */
   private inventoryProperties(result: ScanResult): { properties?: Record<string, unknown> } {
+    const inv = (a: ScanResult['agents'][number]) => a.installation.inventory;
     const agents = result.agents
-      .filter(a => a.installation.inventory)
+      // an agent with nothing found adds nothing (plan: absent when nothing is inventoried)
+      .filter(a => inv(a) && (inv(a)!.skills.length || inv(a)!.otherEntries.length || inv(a)!.mcpServers?.length))
       .map(a => ({
         agent: a.agent,
         ...(a.installation.agentName ? { agentName: a.installation.agentName } : {}),

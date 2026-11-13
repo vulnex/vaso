@@ -3,6 +3,7 @@ import { defineCheck } from '../../core/check-builder.js';
 import { markUntrustedWorkspace } from '../../adapters/folder-trust.js';
 import { geminiWorkspaceTrusted } from '../../adapters/gemini.js';
 import { runnerPackage, isPinnedOrLocal, pinProblem } from '../../mcp/package-pin.js';
+import { isDisabledServerConfig } from '../../mcp/disabled.js';
 
 
 export const gem007 = defineCheck({
@@ -21,6 +22,7 @@ export const gem007 = defineCheck({
       if (!servers || typeof servers !== 'object') continue;
 
       for (const [name, server] of Object.entries(servers)) {
+        if (isDisabledServerConfig(server)) continue; // never launched
         if (!server || typeof server !== 'object') continue;
         const command = (server as Record<string, unknown>).command;
         const args = (server as Record<string, unknown>).args;

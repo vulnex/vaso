@@ -29,7 +29,16 @@ export interface SkillInventoryResult {
 
 function isWithin(path: string, dir: string): boolean {
   const rel = relative(dir, path);
-  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+  // `..x.js` is a file in `dir`, not a step out of it
+  return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
+}
+
+/** `path` and every directory above it, up to and including `root`. */
+function* upTo(path: string, root: string): Generator<string> {
+  for (let p = path; ; p = dirname(p)) {
+    yield p;
+    if (p === root || dirname(p) === p) return;
+  }
 }
 
 const isSkillMd = (path: string) => basename(path).toUpperCase() === 'SKILL.MD';
@@ -72,41 +81,63 @@ export async function collectSkillInventory(installation: AgentInstallation, fs:
       if (target) linked.set(parent, dirname(target));
     }
 
-    // Outermost folders holding a SKILL.md: a SKILL.md inside a skill (an
-    // example, a bundled sub-skill) belongs to it
-    const candidates = [...new Set([...listing.files.filter(isSkillMd).map(f => dirname(f)), ...linked.keys()])]
-      .sort((a, b) => a.split(sep).length - b.split(sep).length || a.localeCompare(b));
-    const inactive = (dir: string) => relative(root, dir).split(sep).some(seg => INACTIVE_SKILL_DIRS.has(seg));
-    const skillDirs: string[] = [];
-    for (const dir of candidates) {
-      if (inactive(dir)) continue;
-      if (!skillDirs.some(s => isWithin(dir, s))) skillDirs.push(dir);
+    // Files and code files under each directory, counted once per file
+    // (a lookup per skill over every file was quadratic: 7000 skills, 3 min)
+    const fileSet = new Set(listing.files);
+    const filesUnder = new Map<string, number>();
+    const codeUnder = new Map<string, number>();
+    for (const f of listing.files) {
+      const code = !isSkillMd(f);
+      for (const d of upTo(dirname(f), root)) {
+        filesUnder.set(d, (filesUnder.get(d) ?? 0) + 1);
+        if (code) codeUnder.set(d, (codeUnder.get(d) ?? 0) + 1);
+      }
     }
 
+    // Outermost folders holding a SKILL.md: a SKILL.md inside a skill (an
+    // example, a bundled sub-skill) belongs to it. The skills directory itself
+    // is a skill only when nothing below it is (`vaso skill audit <skill>`):
+    // agents load <root>/<name>/SKILL.md, so a stray root SKILL.md would
+    // otherwise swallow every skill.
+    const inactive = (dir: string) => relative(root, dir).split(sep).some(seg => INACTIVE_SKILL_DIRS.has(seg));
+    const found = [...new Set([...listing.files.filter(isSkillMd).map(f => dirname(f)), ...linked.keys()])]
+      .filter(dir => !inactive(dir));
+    const candidates = (found.some(d => d !== root) ? found.filter(d => d !== root) : found)
+      .sort((a, b) => a.split(sep).length - b.split(sep).length || a.localeCompare(b));
+    const chosen = new Set<string>();
+    for (const dir of candidates) {
+      let inside = false;
+      for (const up of upTo(dirname(dir), root)) if (up !== dir && chosen.has(up)) { inside = true; break; }
+      if (!inside && !(dir !== root && chosen.has(root))) chosen.add(dir);
+    }
+    const skillDirs = [...chosen];
+
     for (const dir of skillDirs) {
-      const contentDir = linked.get(dir) ?? dir;
-      const files = listing.files.filter(f => isWithin(f, contentDir));
-      const skillMd = linked.has(dir) ? join(dir, 'SKILL.md') : files.find(f => dirname(f) === dir && isSkillMd(f));
+      const target = linked.get(dir);
+      // a linked skill: its own folder (a script beside the link) plus the target's files
+      const count = (m: Map<string, number>) => (m.get(dir) ?? 0) + (target ? (m.get(target) ?? 0) : 0);
+      const skillMd = target ? join(dir, 'SKILL.md') : listing.files.find(f => dirname(f) === dir && isSkillMd(f));
       const front = skillMd ? await readFrontmatter(fs, skillMd) : {};
-      const target = linked.has(dir) ? contentDir : await symlinkTarget(fs, dir);
+      const link = target ?? await symlinkTarget(fs, dir);
       skills.push({
-        name: front.name ?? basename(dir),
+        name: front.name ?? cleanDescription(basename(dir)) ?? basename(dir),
         path: dir,
         root,
         scope,
         kind: 'skill-md',
         ...(front.description ? { description: front.description } : {}),
-        files: files.length,
-        hasCode: files.some(f => !isSkillMd(f)),
-        ...(target ? { symlinkTarget: target } : {}),
+        files: count(filesUnder),
+        hasCode: count(codeUnder) > 0,
+        ...(link ? { symlinkTarget: link } : {}),
       });
     }
 
     // Direct children with no skill in or around them: folders, and files
-    // the skill checks read (a loose script). Dotfiles and vendor dirs aren't
-    // something an agent loads. A plain listing, not the walk: a snapshot's
-    // recursive listing holds files only, so an empty folder or one holding
-    // no collected file would be missing from it.
+    // the skill checks read (a loose script). Vendor dirs aren't something an
+    // agent loads; a dot entry is listed when the checks read files in it.
+    // A plain listing, not the walk: a snapshot's recursive listing holds
+    // files only, so an empty folder or one holding no collected file would
+    // be missing from it.
     if (missing || listing.error) continue;
     let children: DirentInfo[];
     try {
@@ -114,18 +145,24 @@ export async function collectSkillInventory(installation: AgentInstallation, fs:
     } catch {
       continue;
     }
+    // top-level children that are, or hold, a skill
+    const holdsSkill = new Set<string>();
+    for (const dir of skillDirs) {
+      if (dir === root) continue;
+      holdsSkill.add(join(root, relative(root, dir).split(sep)[0]));
+    }
     for (const entry of children) {
-      if (entry.name.startsWith('.') && !INACTIVE_SKILL_DIRS.has(entry.name)) continue;
       const path = join(root, entry.name);
+      if (chosen.has(root) || holdsSkill.has(path)) continue;
       if (isExcludedPath(root, path, { keepBuildOutput: true })) continue;
-      if (skillDirs.some(s => isWithin(s, path) || isWithin(path, s))) continue;
-      const files = listing.files.filter(f => isWithin(f, path));
+      const files = filesUnder.get(path) ?? (fileSet.has(path) ? 1 : 0);
+      if (entry.name.startsWith('.') && !INACTIVE_SKILL_DIRS.has(entry.name) && files === 0) continue;
       // a symlink is a folder unless it leads to one file the checks read
-      const isFile = entry.isFile || (entry.isSymbolicLink === true && files.length === 1 && files[0] === path);
+      const isFile = entry.isFile || (entry.isSymbolicLink === true && fileSet.has(path));
       if (!isFile && (entry.isDirectory || entry.isSymbolicLink)) {
-        otherEntries.push({ path, root, type: 'directory', files: files.length, hasCode: files.length > 0 });
-      } else if (isFile && files.length > 0) {
-        otherEntries.push({ path, root, type: 'file', files: 1, hasCode: true });
+        otherEntries.push({ path, root, type: 'directory', files, hasCode: (codeUnder.get(path) ?? 0) > 0 });
+      } else if (isFile && files > 0) {
+        otherEntries.push({ path, root, type: 'file', files: 1, hasCode: !isSkillMd(path) });
       }
     }
   }
@@ -160,8 +197,11 @@ function isMissing(err: NodeJS.ErrnoException): boolean {
 async function inTreeTarget(fs: FSProvider, root: string, link: string): Promise<string | undefined> {
   try {
     const [real, rootReal] = await Promise.all([fs.realpath(link), fs.realpath(root)]);
-    if (!isWithin(real, rootReal) || !(await fs.access(real))) return undefined;
-    return join(root, relative(rootReal, real));
+    if (!isWithin(real, rootReal)) return undefined;
+    // the walk's spelling: a snapshot holds the file under the root as walked
+    // (a symlinked skills root), not under its real path
+    const inRoot = join(root, relative(rootReal, real));
+    return (await fs.access(inRoot)) ? inRoot : undefined;
   } catch {
     return undefined;
   }
@@ -186,7 +226,9 @@ export function cleanDescription(value: string): string | undefined {
   // eslint-disable-next-line no-control-regex
   const flat = value.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]+/g, ' ').replace(/\s+/g, ' ').trim();
   if (!flat) return undefined;
-  return maskCredentialsInLine(redactSecretsInLine(flat, MAX_SKILL_DESCRIPTION));
+  // mask first: redactSecretsInLine rewrites a PEM header, after which the
+  // key body is no longer recognisable
+  return redactSecretsInLine(maskCredentialsInLine(flat), MAX_SKILL_DESCRIPTION);
 }
 
 /**

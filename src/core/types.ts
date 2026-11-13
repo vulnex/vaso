@@ -265,6 +265,8 @@ export interface SkillTreeEntry {
   type: 'directory' | 'file';
   files: number;
   hasCode: boolean;
+  /** Ids of failed checks with evidence in it (scan only). */
+  findings?: string[];
 }
 
 /** One copy of an agent CLI: its path and (when determinable) version. */

@@ -1,6 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { snippetAround } from '../../core/patterns.js';
+import { iocSnippet } from './snippet.js';
 import { getIOCDatabase } from '../../ioc/database.js';
 import { iocScanFiles, readScanFile } from './scan-files.js';
 import { ipBoundaryRegex } from './boundary.js';
@@ -23,13 +23,12 @@ export const ioc001 = defineCheck({
         if (!re.test(content)) continue;
         const lines = content.split('\n');
         for (let i = 0; i < lines.length; i++) {
-          const m = re.exec(lines[i]);
-          if (m) {
+          if (re.test(lines[i])) {
             evidence.push({
               file,
               line: i + 1,
               // a minified or one-line file is one "line": show the match, not the file
-              snippet: snippetAround(lines[i], m.index, m[0].length),
+              snippet: iocSnippet(lines[i], re),
               detail: `Known C2 IP: ${ip}`,
             });
           }

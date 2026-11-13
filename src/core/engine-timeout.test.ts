@@ -50,3 +50,18 @@ describe('runCheck snippet cap', () => {
     expect(result.evidence![1].snippet).toBe('short');
   });
 });
+
+describe('runCheck evidence cap', () => {
+  it('keeps at most MAX_EVIDENCE items and counts the rest in the last one', async () => {
+    const { runCheck, MAX_EVIDENCE } = await import('./engine.js');
+    const evidence = Array.from({ length: 5000 }, (_, i) => ({ file: `/f${i % 3}`, snippet: `line ${i}` }));
+    const check = {
+      id: 'T-2', name: 't', category: 'config', severity: 'warning', description: 'd',
+      run: async () => ({ id: 'T-2', name: 't', category: 'config', severity: 'warning', passed: false, message: 'Found 5000', evidence }),
+    } as unknown as Parameters<typeof runCheck>[0];
+    const result = await runCheck(check, {} as Parameters<typeof runCheck>[1], 5_000);
+    expect(result.evidence).toHaveLength(MAX_EVIDENCE);
+    expect(result.evidence![MAX_EVIDENCE - 1].detail).toContain(`${5000 - MAX_EVIDENCE + 1} more evidence item(s)`);
+    expect(result.message).toBe('Found 5000');
+  });
+});

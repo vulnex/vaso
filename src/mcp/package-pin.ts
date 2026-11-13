@@ -226,6 +226,14 @@ export function classifyNpm(spec: string): { name: string; pin: PinKind } {
 
 export function classifyPypi(spec: string): { name: string; pin: PinKind } {
   if (isLocal(spec)) return { name: spec, pin: 'local' };
+  // `uvx --from git+https://…/repo.git[@ref]`, `pipx run --spec https://…`: a VCS or
+  // URL source, pinned only by a commit (`@<sha>`) or an archive hash
+  if (/^(?:git|hg|svn|bzr)\+|^(?:https?|file):/i.test(spec)) {
+    const url = spec.replace(/#.*$/, '');
+    const ref = /\.git@([^@/]+)$|@([0-9a-f]{7,40})$/i.exec(url);
+    const sha = ref && /^[0-9a-f]{7,40}$/i.test(ref[1] ?? ref[2] ?? '');
+    return { name: url, pin: sha || /#sha256=/.test(spec) ? 'exact' : 'none' };
+  }
   // name @ git+https://…@<sha> (PEP 508 direct reference)
   const direct = /^([A-Za-z0-9][\w.-]*)(?:\[[^\]]*\])?\s*@\s*(\S+)$/.exec(spec);
   if (direct && /:\/\//.test(direct[2])) {

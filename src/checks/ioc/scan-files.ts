@@ -1,6 +1,6 @@
 import { extname, join, relative, isAbsolute } from 'node:path';
 import type { ScanContext } from '../../core/types.js';
-import { getAllSkillsDirs, isExcludedPath } from '../../core/utils.js';
+import { getAllSkillsDirs, isExcludedPath, relEscapes } from '../../core/utils.js';
 import { followSkillLinks } from '../../core/skill-walk.js';
 
 // Text an indicator can hide in: code and scripts, config, and skill docs
@@ -21,7 +21,7 @@ import { readCappedFile } from '../../core/file-limits.js';
 
 function within(path: string, dir: string): boolean {
   const rel = relative(dir, path);
-  return !rel.startsWith('..') && !isAbsolute(rel);
+  return !relEscapes(rel);
 }
 
 /** Drop dirs nested inside another listed dir (skills under the install dir) — walk each tree once. */
@@ -30,7 +30,7 @@ function outermost(dirs: string[]): string[] {
   return unique.filter(d => !unique.some(o => {
     if (o === d) return false;
     const rel = relative(o, d);
-    return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel);
+    return rel !== '' && !relEscapes(rel);
   }));
 }
 
@@ -55,7 +55,7 @@ export async function iocScanFiles(ctx: ScanContext): Promise<string[]> {
     // Skills symlinked in from outside the tree: the listing shows the link only
     for (const skills of skillsDirs) {
       const rel = relative(dir, skills);
-      if (rel.startsWith('..') || isAbsolute(rel)) continue;
+      if (relEscapes(rel)) continue;
       entries = entries.concat(await followSkillLinks(ctx.fs, skills, entries));
     }
     for (const entry of entries) {

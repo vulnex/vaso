@@ -76,3 +76,19 @@ describe('runnerPackage', () => {
     expect(classifyPypi('pkg @ git+https://github.com/o/r@0123456789abcdef').pin).toBe('exact');
   });
 });
+
+describe('classifyPypi — VCS and URL sources', () => {
+  it('names the source by its URL and pins only by a commit or archive hash', () => {
+    expect(classifyPypi('git+https://gitlab.com/a/b.git')).toEqual({ name: 'git+https://gitlab.com/a/b.git', pin: 'none' });
+    expect(classifyPypi('git+https://gitlab.com/a/b.git@v1.2.0').pin).toBe('none');
+    expect(classifyPypi('git+https://gitlab.com/a/b.git@4f2c1e9a8b7d6c5e4f3a2b1c0d9e8f7a6b5c4d3e').pin).toBe('exact');
+    expect(classifyPypi('https://example.com/pkg-1.0.tar.gz#sha256=abc').pin).toBe('exact');
+    expect(classifyPypi('git+https://gitlab.com/a/b.git').name).not.toBe(classifyPypi('git+https://gitlab.com/c/d.git').name);
+  });
+
+  it('reads `uvx --from git+…` as that source, not a package named git', () => {
+    const p = runnerPackage('uvx', ['--from', 'git+https://gitlab.com/a/b.git', 'b-server']);
+    expect(p?.name).toBe('git+https://gitlab.com/a/b.git');
+    expect(p?.pin).toBe('none');
+  });
+});

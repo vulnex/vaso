@@ -67,20 +67,34 @@ function hostInventory(mcpServers: McpServerItem[], shared: SharedMcpServer[]): 
 
 /** Longest evidence snippet a result keeps. */
 export const MAX_SNIPPET = 300;
+/** Most evidence items a result keeps; the rest are counted in one closing item. */
+export const MAX_EVIDENCE = 200;
 
 /**
- * Evidence snippets cut to MAX_SNIPPET: a check quoting "the line" of a
- * minified or one-line file would otherwise copy the whole file into every
- * evidence item (a 1.3 MB report line × 70 matches made a 97 MB report).
+ * Evidence bounded in size: snippets cut to MAX_SNIPPET (a check quoting "the
+ * line" of a minified file would otherwise copy the whole file into every
+ * item — a 100 MB report), and at most MAX_EVIDENCE items (one IOC per line
+ * of 150k-line files made a 0.5 GB JSON report and crashed SARIF). The
+ * result's message keeps the full count.
  */
 function capSnippets(result: CheckResult): CheckResult {
-  if (!result.evidence?.some(e => typeof e.snippet === 'string' && e.snippet.length > MAX_SNIPPET)) return result;
-  return {
-    ...result,
-    evidence: result.evidence.map(e => (typeof e.snippet === 'string' && e.snippet.length > MAX_SNIPPET
+  const evidence = result.evidence;
+  if (!evidence) return result;
+  const long = evidence.some(e => typeof e.snippet === 'string' && e.snippet.length > MAX_SNIPPET);
+  if (!long && evidence.length <= MAX_EVIDENCE) return result;
+  const kept = (evidence.length > MAX_EVIDENCE ? evidence.slice(0, MAX_EVIDENCE - 1) : evidence)
+    .map(e => (typeof e.snippet === 'string' && e.snippet.length > MAX_SNIPPET
       ? { ...e, snippet: truncateSnippet(e.snippet, MAX_SNIPPET) }
-      : e)),
-  };
+      : e));
+  if (evidence.length > MAX_EVIDENCE) {
+    const rest = evidence.slice(MAX_EVIDENCE - 1);
+    kept.push({
+      file: rest[0].file,
+      detail: `… and ${rest.length} more evidence item(s) not listed (${new Set(rest.map(e => e.file)).size} file(s))`,
+      ...(rest.every(e => e.mitigated) ? { mitigated: true } : {}),
+    });
+  }
+  return { ...result, evidence: kept };
 }
 
 export function runCheck(check: CheckModule, ctx: ScanContext, timeoutMs: number): Promise<CheckResult> {

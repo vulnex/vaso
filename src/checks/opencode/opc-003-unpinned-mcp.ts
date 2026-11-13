@@ -1,6 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { runnerPackage, isPinnedOrLocal, pinProblem } from '../../mcp/package-pin.js';
+import { isDisabledServerConfig } from '../../mcp/disabled.js';
 
 
 interface LocalServer {
@@ -77,6 +78,7 @@ export const opc003 = defineCheck({
       if (!mcp || typeof mcp !== 'object') continue;
 
       for (const [name, srv] of Object.entries(mcp as Record<string, unknown>)) {
+        if (isDisabledServerConfig(srv)) continue; // never launched
         if (!srv || typeof srv !== 'object') continue;
         const obj = srv as Record<string, unknown>;
         if (obj.type === 'local') {

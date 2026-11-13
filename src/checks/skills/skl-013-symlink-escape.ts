@@ -1,7 +1,7 @@
 import { isAbsolute, join, resolve, relative, dirname } from 'node:path';
 import type { Evidence, Severity } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { getAllSkillsDirs } from '../../core/utils.js';
+import { getAllSkillsDirs, relEscapes } from '../../core/utils.js';
 import { classifySensitivePath } from '../../analyzers/sensitive-paths.js';
 
 /**
@@ -58,7 +58,7 @@ function escapesRoot(root: string, resolvedTarget: string): boolean {
   const rel = relative(root, resolvedTarget);
   // Empty rel means the target IS the root; a leading '..' or an absolute
   // result means the target sits outside the walked directory tree.
-  return rel === '' ? false : rel.startsWith('..') || isAbsolute(rel);
+  return rel === '' ? false : relEscapes(rel);
 }
 
 export const skl013 = defineCheck({

@@ -1,5 +1,6 @@
 import { basename, dirname, join, normalize, relative, isAbsolute } from 'node:path';
 import type { DirentInfo, FSProvider } from './fs-provider.js';
+import { relEscapes } from './path-rel.js';
 import { classifySensitivePath } from '../analyzers/sensitive-paths.js';
 
 /**
@@ -23,7 +24,7 @@ const MAX_LINK_DEPTH = 8;
 
 function isWithin(path: string, dir: string): boolean {
   const rel = relative(dir, path);
-  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+  return rel === '' || !relEscapes(rel);
 }
 
 /**

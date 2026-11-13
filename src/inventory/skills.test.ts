@@ -161,6 +161,45 @@ describe('collectSkillInventory', () => {
     expect(files).toContain(join(root, '.archive', 'old-skill', 'run.py'));
   });
 
+  it('ignores a stray SKILL.md at the skills root when skills sit below it', async () => {
+    const root = await tmp();
+    await put(join(root, 'SKILL.md'), '---\nname: rootskill\n---\n');
+    await put(join(root, 'a', 'SKILL.md'));
+    await put(join(root, 'b', 'SKILL.md'));
+    const { inventory } = await collectSkillInventory(inst([root]), fs);
+    expect(inventory.skills.map(s => s.name).sort()).toEqual(['a', 'b']);
+  });
+
+  it('treats the root as the skill when it is the only one (skill audit of one skill)', async () => {
+    const root = await tmp();
+    await put(join(root, 'SKILL.md'), '---\nname: solo\n---\n');
+    await put(join(root, 'scripts', 'run.py'));
+    const { inventory } = await collectSkillInventory(inst([root]), fs);
+    expect(inventory.skills.map(s => [s.name, s.files, s.hasCode])).toEqual([['solo', 2, true]]);
+    expect(inventory.otherEntries).toEqual([]);
+  });
+
+  it('lists dot entries the checks read, and counts ..x files inside a skill', async () => {
+    const root = await tmp();
+    await put(join(root, '.hidden.sh'), '#!/bin/sh\n');
+    await put(join(root, '.tools', 'rs.sh'), '#!/bin/sh\n');
+    await put(join(root, '.DS_Store'));
+    await put(join(root, 'dotdot', 'SKILL.md'));
+    await put(join(root, 'dotdot', '..payload.js'), 'x');
+    const { inventory } = await collectSkillInventory(inst([root]), fs);
+    expect(inventory.otherEntries.map(e => e.path.slice(root.length + 1)).sort()).toEqual(['.hidden.sh', '.tools']);
+    expect(inventory.skills.map(s => [s.name, s.files, s.hasCode])).toEqual([['dotdot', 2, true]]);
+  });
+
+  it('stays fast with thousands of skills', async () => {
+    const root = await tmp();
+    for (let i = 0; i < 3000; i++) await put(join(root, `s${i}`, 'SKILL.md'), '---\nname: x\n---\n');
+    const start = Date.now();
+    const { inventory } = await collectSkillInventory(inst([root]), fs);
+    expect(inventory.skills).toHaveLength(3000);
+    expect(Date.now() - start).toBeLessThan(15_000);
+  }, 120_000);
+
   it('uses project scope for project installations and dedupes repeated roots', async () => {
     const root = await tmp();
     await put(join(root, 'a', 'SKILL.md'));
@@ -196,6 +235,13 @@ describe('cleanDescription', () => {
     const out = cleanDescription('word '.repeat(100))!;
     expect(out.length).toBeLessThanOrEqual(204);
     expect(out.endsWith(' ...')).toBe(true);
+  });
+
+  it('masks a PEM body and a bare JWT', () => {
+    const jwt = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.Zk3pQ8rT2vX9yB4nM6sK1wE7hJ5cL0aD';
+    expect(cleanDescription(`session ${jwt}`)).not.toContain('Zk3pQ8rT2vX9');
+    const pem = '-----BEGIN RSA PRIVATE KEY----- MIIEowIBAAKCAQEAzk3pQ8rT2vX9yB4nM6sK1wE7hJ5cL0aDzk3pQ8rT2vX9yB4n -----END RSA PRIVATE KEY-----';
+    expect(cleanDescription(`key ${pem}`)).not.toContain('MIIEowIBAAKCAQEA');
   });
 
   it('masks secrets', () => {

@@ -10,7 +10,7 @@ import { VERSION } from '../version.js';
 import { parseRemoteOptions, type RemoteOptionValues } from './remote-options.js';
 import { HostFileNames, safeHostname } from '../transport/host-files.js';
 import { join as joinPath } from 'node:path';
-import { toReportJson } from '../reporting/serialize.js';
+import { maskCredentialsDeep, toReportJson } from '../reporting/serialize.js';
 import { attachSkillInventories } from '../inventory/skills.js';
 import { attachMcpInventories } from '../inventory/mcp.js';
 import { findSharedMcpServers } from '../inventory/shared.js';
@@ -372,7 +372,11 @@ function renderJson(installations: AgentInstallation[]): string {
  * against the scanning machine's home and platform, so its paths would name
  * this machine's files, not the target's.
  */
-function renderTerminal(installations: AgentInstallation[], verbose: boolean | undefined, local: boolean, hostMcp: McpServerItem[] = []): string {
+function renderTerminal(rawInstallations: AgentInstallation[], verbose: boolean | undefined, local: boolean, rawHostMcp: McpServerItem[] = []): string {
+  // Masked like every report format (getReporter): names, paths, commands and
+  // URLs come from scanned files
+  const installations = maskCredentialsDeep(rawInstallations);
+  const hostMcp = maskCredentialsDeep(rawHostMcp);
   const lines: string[] = [];
 
   if (verbose) {
