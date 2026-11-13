@@ -404,9 +404,9 @@ describe('NC-004: Webhook Listener Bound to All Interfaces', () => {
 
     it('flags a non-loopback WEBHOOK_HOST on a new release', async () => {
       const fs = snapFs({ [barrel]: github });
-      const lan = await check.run(versioned('2026.10.2', [env({ WEBHOOK_HOST: '192.168.1.5' })], fs));
+      const lan = await check.run(versioned('2026.10.2', [env({ WEBHOOK_HOST: '10.0.0.5' })], fs));
       expect(lan.passed).toBe(false);
-      expect(lan.message).toContain('192.168.1.5');
+      expect(lan.message).toContain('10.0.0.5');
       expect(lan.evidence?.[0].file).toBe(`${CHECKOUT}/.env`);
       const all = await check.run(versioned('2026.10.2', [env({ WEBHOOK_HOST: '0.0.0.0' })], fs));
       expect(all.message).toContain('all interfaces');
