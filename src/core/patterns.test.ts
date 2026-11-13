@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isPlaceholderSecret, isSecretReference, redactSecret, redactSecretsInLine, truncateSnippet } from './patterns.js';
+import { isPlaceholderSecret, isSecretReference, redactSecret, redactSecretsInLine, snippetAround, truncateSnippet } from './patterns.js';
 
 describe('isSecretReference (dt17 MD-C)', () => {
   it('knows secret manager references, key files, profile names and env references', () => {
@@ -189,5 +189,30 @@ describe('envReference: a $-value is a reference only when its name is variable-
     for (const v of ['$Zx8f3kq9Lm2Pq7Rt', '${Zx8f3kq9Lm2Pq7Rt}', 'Bearer $Zx8f3kq9Lm2Pq7Rt']) {
       expect(isEnvReference(v), v).toBe(false);
     }
+  });
+});
+
+describe('snippetAround', () => {
+  it('returns a short line whole', () => {
+    expect(snippetAround('  url = "https://evil.example"  ', 9, 20)).toBe('url = "https://evil.example"');
+  });
+
+  it('keeps context around a match deep in a long line, cut at value boundaries', () => {
+    const line = `${'{"k":"v",'.repeat(2000)}"endpoint":"https://evil.example/x",${'"z":"q",'.repeat(2000)}`;
+    const at = line.indexOf('evil.example');
+    const out = snippetAround(line, at, 'evil.example'.length);
+    expect(out).toContain('"endpoint":"https://evil.example/x"');
+    expect(out.startsWith('... ')).toBe(true);
+    expect(out.endsWith(' ...')).toBe(true);
+    expect(out.length).toBeLessThanOrEqual(130);
+  });
+
+  it('never starts inside a value', () => {
+    const secret = 'Zp9Yx8Wv7Ut6Sr5Qp4On3Ml2Kj1Ih0Gf';
+    const line = `${'a'.repeat(500)} token=${secret}${'b'.repeat(30)} evil.example ${'c'.repeat(500)}`;
+    const at = line.indexOf('evil.example');
+    const out = snippetAround(line, at, 12);
+    expect(out).toContain('evil.example');
+    expect(out).not.toMatch(/Ih0Gf/);
   });
 });

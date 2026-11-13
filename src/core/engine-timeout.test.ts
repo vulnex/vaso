@@ -33,3 +33,20 @@ describe('VASO_CHECK_TIMEOUT', () => {
     }
   });
 });
+
+describe('runCheck snippet cap', () => {
+  it('cuts evidence snippets to MAX_SNIPPET and leaves short ones alone', async () => {
+    const { runCheck, MAX_SNIPPET } = await import('./engine.js');
+    const check = {
+      id: 'T-1', name: 't', category: 'config', severity: 'warning', description: 'd',
+      run: async () => ({
+        id: 'T-1', name: 't', category: 'config', severity: 'warning', passed: false, message: 'm',
+        evidence: [{ file: '/a', snippet: 'x '.repeat(1_000_000) }, { file: '/b', snippet: 'short' }],
+      }),
+    } as unknown as Parameters<typeof runCheck>[0];
+    const result = await runCheck(check, {} as Parameters<typeof runCheck>[1], 5_000);
+    expect(result.evidence![0].snippet!.length).toBeLessThanOrEqual(MAX_SNIPPET + 4);
+    expect(result.evidence![0].snippet!.endsWith(' ...')).toBe(true);
+    expect(result.evidence![1].snippet).toBe('short');
+  });
+});

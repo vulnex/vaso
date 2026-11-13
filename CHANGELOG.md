@@ -32,6 +32,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **Reports no longer copy whole minified files into evidence.** IOC-001 and IOC-002 quoted the full matching line, and a minified or one-line file is a single line: a 1.3 MB saved report under a scanned directory made a 100 MB JSON report, copied once per match. They now quote the match with some context around it, and every check's evidence snippet is capped at 300 characters, cut at a value boundary.
 - **Reports no longer quote secrets in finding snippets.**
   - The memory-file checks (CC-012, CDX-007, OPC-007, GEM-010, QC-010, GHC-008, DEV-007, ABA-012) and SKL-002 printed up to 80 characters of a high-entropy string they flagged. They now show its first and last 4 characters and its length.
   - A quoted config line is now masked for `"key": "value"` and `key: value` credentials as well as `KEY=value`, so CFG-002 on a one-line JSON file (NemoClaw `credentials.json`, a minified config) no longer prints the other keys on that line. This covers every report format and saved baselines.

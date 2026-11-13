@@ -10,6 +10,7 @@ import { computeScore, scoreToGrade, summarizeResults, aggregateScore, meanScore
 import { dedupeInheritedFindings } from './inherited-findings.js';
 import { dedupePermissionFindings } from './duplicate-findings.js';
 import { collectSkillInventory } from '../inventory/skills.js';
+import { truncateSnippet } from './patterns.js';
 import { discoverMcpAssignment } from '../inventory/mcp.js';
 import { linkInventoryFindings } from '../inventory/findings.js';
 import { mapSourceEvidence } from '../mcp/source-locations.js';
@@ -58,6 +59,24 @@ export function checkTimeoutFromEnv(env: NodeJS.ProcessEnv = process.env, warn: 
  * the report), or a promise that never settles (the process used to exit 0
  * with no report once nothing else kept it alive).
  */
+/** Longest evidence snippet a result keeps. */
+export const MAX_SNIPPET = 300;
+
+/**
+ * Evidence snippets cut to MAX_SNIPPET: a check quoting "the line" of a
+ * minified or one-line file would otherwise copy the whole file into every
+ * evidence item (a 1.3 MB report line × 70 matches made a 97 MB report).
+ */
+function capSnippets(result: CheckResult): CheckResult {
+  if (!result.evidence?.some(e => typeof e.snippet === 'string' && e.snippet.length > MAX_SNIPPET)) return result;
+  return {
+    ...result,
+    evidence: result.evidence.map(e => (typeof e.snippet === 'string' && e.snippet.length > MAX_SNIPPET
+      ? { ...e, snippet: truncateSnippet(e.snippet, MAX_SNIPPET) }
+      : e)),
+  };
+}
+
 export function runCheck(check: CheckModule, ctx: ScanContext, timeoutMs: number): Promise<CheckResult> {
   return new Promise<CheckResult>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(`did not finish within ${Math.round(timeoutMs / 1000)}s`)), timeoutMs);
@@ -68,7 +87,7 @@ export function runCheck(check: CheckModule, ctx: ScanContext, timeoutMs: number
         if (!v || typeof v !== 'object' || typeof v.passed !== 'boolean' || typeof v.id !== 'string') {
           throw new Error(`returned ${v === undefined ? 'undefined' : v === null ? 'null' : typeof v !== 'object' ? typeof v : 'an object that is not a check result'} instead of a check result`);
         }
-        return v as CheckResult;
+        return capSnippets(v as CheckResult);
       })
       .then(resolve, reject)
       .finally(() => clearTimeout(timer));

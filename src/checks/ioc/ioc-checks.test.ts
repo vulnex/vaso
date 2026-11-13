@@ -96,6 +96,18 @@ describe('IOC-002: Malicious Domains', () => {
     expect(result.evidence!.some(e => e.detail?.includes(DOMAIN))).toBe(true);
   });
 
+  it('quotes the match, not the whole line, in a minified one-line file', async () => {
+    const filler = JSON.stringify({ a: 'x'.repeat(50_000) });
+    const ctx = makeContext(undefined, [
+      configWithRaw(`${filler},{"endpoint":"https://${DOMAIN}/api","key":"y"},${filler}`),
+    ]);
+    const result = await ioc002.run(ctx);
+    const snippet = result.evidence![0].snippet!;
+    expect(snippet).toContain(DOMAIN);
+    expect(snippet.length).toBeLessThan(200);
+    expect(snippet.startsWith('... ')).toBe(true);
+  });
+
   it('matches subdomain of a malicious domain', async () => {
     const ctx = makeContext(undefined, [
       configWithRaw(`endpoint = "https://bad.${DOMAIN}/exfil"`),

@@ -264,6 +264,32 @@ export function truncateSnippet(text: string, maxLen = 80): string {
   return `${cut} ...`;
 }
 
+/** Characters of context kept before a match by snippetAround. */
+const CONTEXT_BEFORE = 40;
+
+/**
+ * The part of a long line around a match at `index` (length `length`), cut
+ * like truncateSnippet at both ends: a value the start falls inside is
+ * skipped rather than shown in part, and the cut is marked `... `. A short
+ * line is returned whole (trimmed). For minified or one-line files, where the
+ * matching "line" is the whole file.
+ */
+export function snippetAround(line: string, index: number, length: number, maxLen = 120): string {
+  const text = line.trim();
+  const offset = line.length - line.trimStart().length;
+  if (text.length <= maxLen) return text;
+  const at = Math.max(0, index - offset);
+  let start = Math.max(0, at - CONTEXT_BEFORE);
+  if (start > 0 && !VALUE_BOUNDARY.test(text[start - 1])) {
+    // don't begin inside a value: move to just after the next boundary before the match
+    let s = start;
+    while (s < at && !VALUE_BOUNDARY.test(text[s])) s++;
+    start = s < at ? s + 1 : at;
+  }
+  const keep = Math.max(maxLen, at - start + length + CONTEXT_BEFORE);
+  return `${start > 0 ? '... ' : ''}${truncateSnippet(text.slice(start), keep)}`;
+}
+
 export function redactSecretsInLine(line: string, maxLen = 80): string {
   let redacted = line;
   for (const { pattern } of API_KEY_PATTERNS) {
