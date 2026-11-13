@@ -129,9 +129,38 @@ describe('attachMcpInventories', () => {
     expect(JSON.stringify(cursor.inventory)).not.toContain('ghp_');
   });
 
+  it('reads NanoClaw agent groups\' container.json and gives the servers to that checkout', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'vaso-mcpinv-nc-'));
+    dirs.push(home);
+    const checkout = join(home, 'nanoclaw');
+    await mkdir(join(checkout, 'groups', 'main'), { recursive: true });
+    await mkdir(join(checkout, 'groups', 'never-ran'), { recursive: true });
+    await writeFile(join(checkout, 'groups', 'main', 'container.json'), JSON.stringify({
+      mcpServers: {
+        notes: { command: 'npx', args: ['-y', 'notes-mcp@1.2.0'], env: { NOTES_TOKEN: 'secret-value-123456789' } },
+        crm: { type: 'http', url: 'https://crm.example.com/mcp', headers: { Authorization: 'Bearer zzzzzzzzzzzzzzzzzzzz' } },
+      },
+      packages: { apt: [], npm: [] },
+      additionalMounts: [],
+      skills: 'all',
+    }));
+    const base = new LocalFSProvider();
+    const fs = Object.assign(Object.create(base) as FSProvider, { homedir: () => home, getEnv: () => undefined, kind: 'snapshot' });
+    const nc = inst('nanoclaw', checkout);
+
+    await attachMcpInventories([nc], fs);
+
+    expect(nc.inventory?.mcpServers?.map(s => [s.name, s.transport, s.configFile.slice(checkout.length)])).toEqual([
+      ['notes', 'stdio', '/groups/main/container.json'],
+      ['crm', 'streamable-http', '/groups/main/container.json'],
+    ]);
+    expect(JSON.stringify(nc.inventory)).not.toContain('secret-value');
+    expect(JSON.stringify(nc.inventory)).not.toContain('zzzzzzzz');
+  });
+
   it('knows which agents it inventories', () => {
     const agents = inventoriedAgents(new LocalFSProvider());
-    for (const a of ['claude-code', 'claude-desktop', 'codex', 'cursor-cli', 'devin', 'windsurf', 'openclaw', 'gemini-cli', 'hermes'] as AgentType[]) {
+    for (const a of ['claude-code', 'claude-desktop', 'codex', 'cursor-cli', 'devin', 'windsurf', 'openclaw', 'gemini-cli', 'hermes', 'zeroclaw', 'nanoclaw'] as AgentType[]) {
       expect(agents.has(a), a).toBe(true);
     }
     expect(agents.has('grok-bot')).toBe(false);

@@ -11,6 +11,7 @@ import { geminiHome } from '../adapters/gemini.js';
 import { qwenHome } from '../adapters/qwen-code.js';
 import { xdgConfigDir as opencodeConfigDir } from '../adapters/opencode.js';
 import { openclawMcpServerMaps } from '../adapters/openclaw.js';
+import { zeroclawDirs } from '../adapters/zeroclaw.js';
 import { parseYamlSafe } from '../core/yaml-safe.js';
 import { captureConfigLoadErrors } from '../core/config-loader.js';
 import { pathPresent } from '../adapters/load-if-present.js';
@@ -24,7 +25,7 @@ interface ConfigLocation {
   scope?: MCPConfigScope;
   projectRoot?: string;
   /** Config dialect; defaults to the common `mcpServers` map. */
-  shape?: 'atomic-agent' | 'nanobot' | 'picoclaw' | 'abacus' | 'abacus-config' | 'claude-json' | 'codex' | 'opencode' | 'hermes' | 'vscode-settings';
+  shape?: 'atomic-agent' | 'nanobot' | 'picoclaw' | 'abacus' | 'abacus-config' | 'claude-json' | 'codex' | 'opencode' | 'hermes' | 'vscode-settings' | 'zeroclaw';
   /** Value substituted for `${extensionPath}` (Gemini CLI extensions). */
   extensionPath?: string;
 }
@@ -163,6 +164,12 @@ function getFrameworkLocations(home: string, fs: FSProvider): ConfigLocation[] {
   ];
 }
 
+/** ZeroClaw: `[[mcp.servers]]` in `<config dir>/config.toml` (ZEROCLAW_CONFIG_DIR, …). */
+async function getZeroclawLocation(home: string, fs: FSProvider): Promise<ConfigLocation> {
+  const { configDir } = await zeroclawDirs(home, fs);
+  return { source: 'ZeroClaw', agents: ['zeroclaw'], path: join(configDir, 'config.toml'), shape: 'zeroclaw' };
+}
+
 const GENERIC_MCP_SOURCE = 'Generic MCP';
 
 function getProjectConfigLocations(projectDir: string): ConfigLocation[] {
@@ -203,7 +210,7 @@ const TRANSPORT_TYPES: Record<string, MCPServerEntry['transport']> = {
 /** A `name → { command, args, env, url, headers, type? }` server map.
  *  Servers explicitly disabled (`enabled: false`, Windsurf's `disabled: true`)
  *  are never connected. */
-function parseServerMap(map: unknown): MCPServerEntry[] {
+export function parseServerMap(map: unknown): MCPServerEntry[] {
   const servers: MCPServerEntry[] = [];
   if (!map || typeof map !== 'object' || Array.isArray(map)) return servers;
 
@@ -268,6 +275,8 @@ function parseShape(shape: ConfigLocation['shape'], data: Record<string, unknown
       return parseServerMap(opencodeServers(data.mcp));
     case 'hermes':
       return parseServerMap(data.mcp_servers);
+    case 'zeroclaw':
+      return parseServerMap(zeroclawServers(data.mcp));
     case 'vscode-settings': {
       const mcp = data.mcp as Record<string, unknown> | undefined;
       return mcp && typeof mcp === 'object' && !Array.isArray(mcp.servers) ? parseServerMap(mcp.servers) : [];
@@ -329,6 +338,26 @@ function opencodeServers(map: unknown): unknown {
       type: cfg.type === 'remote' ? 'http' : cfg.type === 'local' ? 'stdio' : undefined,
     }]];
   }));
+}
+
+/**
+ * ZeroClaw 0.8 `[[mcp.servers]]`: `{ name, transport: stdio|http|sse, command,
+ * args, env, url, headers }`; `[mcp] enabled = false` turns MCP off. Only the
+ * array form loads — ZeroClaw resets an `[mcp.servers.<name>]` table section
+ * to defaults (verified with zeroclaw 0.8.5).
+ */
+function zeroclawServers(mcp: unknown): unknown {
+  if (!mcp || typeof mcp !== 'object' || Array.isArray(mcp)) return {};
+  const cfg = mcp as Record<string, unknown>;
+  if (cfg.enabled === false || !Array.isArray(cfg.servers)) return {};
+  const map: Record<string, unknown> = {};
+  for (const s of cfg.servers) {
+    if (!s || typeof s !== 'object') continue;
+    const server = s as Record<string, unknown>;
+    if (typeof server.name !== 'string' || !server.name) continue;
+    map[server.name] = { ...server, type: typeof server.transport === 'string' ? server.transport : 'stdio' };
+  }
+  return map;
 }
 
 /** Abacus.AI marks switched-off servers `disabled: true`; they are never launched. */
@@ -433,6 +462,7 @@ export class MCPDiscovery {
       getCodexLocation(home, this.fs),
       getAtomicAgentLocation(home, this.fs),
       ...getFrameworkLocations(home, this.fs),
+      await getZeroclawLocation(home, this.fs),
       ...await geminiExtensionLocations(home, this.fs),
       ...(projectDir ? getProjectConfigLocations(projectDir) : []),
     ];
@@ -457,7 +487,7 @@ export class MCPDiscovery {
         continue;
       }
       try {
-        const data = parseConfigText(raw, location.shape === 'codex' ? 'toml' : location.shape === 'hermes' ? 'yaml' : 'json');
+        const data = parseConfigText(raw, location.shape === 'codex' || location.shape === 'zeroclaw' ? 'toml' : location.shape === 'hermes' ? 'yaml' : 'json');
         if (!data) continue;
         const servers = withExtensionPath(parseShape(location.shape, data), location.extensionPath);
 

@@ -1,0 +1,15 @@
+{
+  "agent": "zeroclaw",
+  "source": "Inventory: ZeroClaw 0.8 [[mcp.servers]] array (stdio with an env token, http) on the zeroclaw-clean fixture; table form verified ignored by zeroclaw 0.8.5",
+  "modes": {
+    ".zeroclaw/config.toml": "600",
+    ".zeroclaw/.secret_key": "600"
+  },
+  "inventory": {
+    "skills": [],
+    "mcpServers": [
+      "github",
+      "remote-crm"
+    ]
+  }
+}

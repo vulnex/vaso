@@ -1,8 +1,9 @@
-import { isAbsolute, relative } from 'node:path';
+import { isAbsolute, join, relative } from 'node:path';
 import type { FSProvider } from '../core/fs-provider.js';
 import type { AgentInstallation, AgentType, McpServerItem } from '../core/types.js';
 import type { MCPConfig, MCPServerEntry } from '../mcp/types.js';
-import { MCPDiscovery, userConfigLocations } from '../mcp/discovery.js';
+import { MCPDiscovery, parseServerMap, userConfigLocations } from '../mcp/discovery.js';
+import { parseJsonLenient } from '../core/jsonc.js';
 import { runnerPackage } from '../mcp/package-pin.js';
 import { maskArgSecrets, maskUrlSecrets } from '../mcp/config-secrets.js';
 import { scanCwd } from '../adapters/project-configs.js';
@@ -95,7 +96,7 @@ export function assignMcpServers(
 
 /** Agents whose MCP configs discovery reads (OpenClaw's is found by its own loader). */
 export function inventoriedAgents(fs: FSProvider): Set<AgentType> {
-  const agents = new Set<AgentType>(['openclaw', 'gemini-cli']);
+  const agents = new Set<AgentType>(['openclaw', 'gemini-cli', 'zeroclaw', 'nanoclaw']);
   for (const loc of userConfigLocations(fs.platform, fs.homedir(), fs)) for (const a of loc.agents) agents.add(a);
   return agents;
 }
@@ -108,10 +109,40 @@ export async function discoverMcpAssignment(installations: AgentInstallation[], 
   try {
     const projectDir = scanCwd(fs);
     const result = await new MCPDiscovery(fs).discover(fs.platform, projectDir);
-    return assignMcpServers(installations, result.configs, { home: fs.homedir(), inventoried: inventoriedAgents(fs), projectDir });
+    const nanoclaw = (await Promise.all(installations.filter(i => i.agent === 'nanoclaw').map(i => nanoclawGroupConfigs(i.installDir, fs)))).flat();
+    return assignMcpServers(installations, [...result.configs, ...nanoclaw], { home: fs.homedir(), inventoried: inventoriedAgents(fs), projectDir });
   } catch {
     return { byInstallation: new Map(), host: [] };
   }
+}
+
+/**
+ * NanoClaw keeps each agent group's MCP servers in its database and writes
+ * them to `<checkout>/groups/<folder>/container.json` (`mcpServers`, stdio or
+ * http) when the group's container starts — a group that never ran has none
+ * on disk yet.
+ */
+export async function nanoclawGroupConfigs(installDir: string, fs: FSProvider): Promise<MCPConfig[]> {
+  const groupsDir = join(installDir, 'groups');
+  let groups: string[];
+  try {
+    groups = await fs.readdir(groupsDir);
+  } catch {
+    return [];
+  }
+  const configs: MCPConfig[] = [];
+  for (const group of groups.sort()) {
+    const filePath = join(groupsDir, group, 'container.json');
+    let data: unknown;
+    try {
+      data = parseJsonLenient(await fs.readFile(filePath));
+    } catch {
+      continue;
+    }
+    const servers = parseServerMap((data as Record<string, unknown> | null)?.mcpServers);
+    if (servers.length > 0) configs.push({ source: `NanoClaw (group ${group})`, agents: ['nanoclaw'], filePath, servers });
+  }
+  return configs;
 }
 
 /** Attach each installation's MCP servers (detect); returns the host-level ones. */

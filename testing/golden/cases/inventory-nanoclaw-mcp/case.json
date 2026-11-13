@@ -1,0 +1,14 @@
+{
+  "agent": "nanoclaw",
+  "source": "Inventory: NanoClaw v2 agent group container.json mcpServers (written at container start; shape from nanoclaw src/container-config.ts 143db6c) on the nanoclaw-clean fixture",
+  "modes": {
+    "nanoclaw/.env": "600"
+  },
+  "inventory": {
+    "skills": [],
+    "mcpServers": [
+      "notes",
+      "crm"
+    ]
+  }
+}

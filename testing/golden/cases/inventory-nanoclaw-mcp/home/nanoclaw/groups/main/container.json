@@ -1,0 +1,26 @@
+{
+  "mcpServers": {
+    "notes": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "notes-mcp@1.2.0"
+      ],
+      "env": {
+        "NOTES_API_KEY": "nk_live_8f3Kq2Lm9Np4Rs7Tv1Wx5Yz0"
+      }
+    },
+    "crm": {
+      "type": "http",
+      "url": "https://crm.example.com/mcp"
+    }
+  },
+  "packages": {
+    "apt": [],
+    "npm": []
+  },
+  "additionalMounts": [],
+  "skills": "all",
+  "groupName": "main",
+  "assistantName": "Andy"
+}

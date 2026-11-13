@@ -329,6 +329,8 @@ export const nanoclawAdapter: AgentAdapter = {
           `${c}/.env`,
           `${c}/src/channels/index.ts`,
           `${c}/container/skills/**`,
+          // each agent group's MCP servers, written when its container starts
+          `${c}/groups/*/container.json`,
         ]),
         '~/.config/systemd/user/nanoclaw-v2-*.service',
         '~/Library/LaunchAgents/com.nanoclaw-v2-*.plist',

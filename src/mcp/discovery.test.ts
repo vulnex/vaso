@@ -280,6 +280,31 @@ describe('MCPDiscovery — agent frameworks', () => {
     expect(cfg.configs.map(c => c.filePath)).toEqual(['/etc/pc.json']);
   });
 
+  it('finds ZeroClaw [[mcp.servers]] (array form only; [mcp] enabled = false turns them off)', async () => {
+    const toml = [
+      '[[mcp.servers]]', 'name = "gh"', 'transport = "stdio"', 'command = "npx"', 'args = ["-y", "@modelcontextprotocol/server-github"]', '',
+      '[mcp.servers.env]', '',
+      '[[mcp.servers]]', 'name = "remote"', 'transport = "http"', 'url = "https://mcp.example.test/mcp"', '',
+      '[[mcp.servers]]', 'name = "events"', 'transport = "sse"', 'url = "https://mcp.example.test/sse"',
+    ].join('\n');
+    const result = await new MCPDiscovery(makeFs({ '/home/t/.zeroclaw/config.toml': toml })).discover('linux');
+    expect(result.configs.map(c => [c.source, c.agents, c.servers.map(s => [s.name, s.transport])])).toEqual([
+      ['ZeroClaw', ['zeroclaw'], [['gh', 'stdio'], ['remote', 'streamable-http'], ['events', 'sse']]],
+    ]);
+
+    const off = '[mcp]\nenabled = false\n\n[[mcp.servers]]\nname = "gh"\ncommand = "npx"\n';
+    expect((await new MCPDiscovery(makeFs({ '/home/t/.zeroclaw/config.toml': off })).discover('linux')).configs).toEqual([]);
+    // ZeroClaw resets a table-form [mcp.servers.<name>] section to defaults: nothing loads
+    const table = '[mcp.servers.gh]\ntransport = "stdio"\ncommand = "npx"\n';
+    expect((await new MCPDiscovery(makeFs({ '/home/t/.zeroclaw/config.toml': table })).discover('linux')).configs).toEqual([]);
+  });
+
+  it('reads ZeroClaw from ZEROCLAW_CONFIG_DIR', async () => {
+    const toml = '[[mcp.servers]]\nname = "gh"\ncommand = "npx"\n';
+    const result = await new MCPDiscovery(makeFs({ '/srv/zc/config.toml': toml }, { ZEROCLAW_CONFIG_DIR: '/srv/zc' })).discover('linux');
+    expect(result.configs.map(c => c.filePath)).toEqual(['/srv/zc/config.toml']);
+  });
+
   it('accepts the framework dialects via --paths', async () => {
     const fs = makeFs({ '/a.json': nanobot, '/b.json': picoclaw });
     expect((await new MCPDiscovery(fs).discoverFromPaths(['/a.json', '/b.json'])).totalServers).toBe(4);

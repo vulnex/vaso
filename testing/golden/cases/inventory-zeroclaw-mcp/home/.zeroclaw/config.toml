@@ -1,0 +1,40 @@
+schema_version = 3
+
+[secrets]
+encrypt = true
+
+[providers.models.openai.main]
+model = "gpt-5"
+api_key = "enc2:abcdef0123456789"
+
+[gateway]
+host = "127.0.0.1"
+require_pairing = true
+
+[agents.main]
+model_provider = "openai.main"
+risk_profile = "default"
+
+[risk_profiles.default]
+level = "supervised"
+workspace_only = true
+sandbox_enabled = true
+auto_approve = ["file_read"]
+
+[browser]
+enabled = false
+automation_enabled = false
+
+[[mcp.servers]]
+name = "github"
+transport = "stdio"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-github@2025.4.8"]
+
+[mcp.servers.env]
+GITHUB_PERSONAL_ACCESS_TOKEN = "ghp_Q4k8sJ2mN7pR1tV5xZ9bC3dF6gH0jL2nP4qS"
+
+[[mcp.servers]]
+name = "remote-crm"
+transport = "http"
+url = "https://crm.example.com/mcp"
