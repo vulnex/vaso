@@ -1,5 +1,5 @@
 import chalk from 'chalk';
-import { stripColor } from '../reporting/text-safety.js';
+import { escapeControlChars, stripColor } from '../reporting/text-safety.js';
 import { EXIT_INCOMPLETE, EXIT_USAGE } from '../core/exit-criteria.js';
 import { adapterRegistry } from '../adapters/registry.js';
 import { allUsersCoverageWarning } from '../adapters/openclaw.js';
@@ -11,6 +11,8 @@ import { parseRemoteOptions, type RemoteOptionValues } from './remote-options.js
 import { HostFileNames, safeHostname } from '../transport/host-files.js';
 import { join as joinPath } from 'node:path';
 import { toReportJson } from '../reporting/serialize.js';
+import { attachSkillInventories } from '../inventory/skills.js';
+import { LocalFSProvider } from '../core/local-fs-provider.js';
 
 export interface DetectCommandOptions {
   agent?: string;
@@ -95,6 +97,7 @@ export async function runDetect(options: DetectCommandOptions): Promise<void> {
       const agentType = options.agent as AgentType;
       installations = installations.filter(i => i.agent === agentType);
     }
+    await attachSkillInventories(installations, new LocalFSProvider());
 
     const { hostname } = await import('node:os');
     await renderResults(installations, options, hostname(), true);
@@ -136,6 +139,7 @@ async function detectFromSnapshot(options: DetectCommandOptions): Promise<{ inst
   if (options.agent) {
     installations = installations.filter(i => i.agent === (options.agent as AgentType));
   }
+  await attachSkillInventories(installations, snapshotFs);
 
   return { installations, host: snapshot.hostname };
 }
@@ -255,6 +259,7 @@ async function detectRemoteHosts(options: DetectCommandOptions, remoteValues: Re
       if (options.agent) {
         installations = installations.filter(i => i.agent === (options.agent as AgentType));
       }
+      await attachSkillInventories(installations, snapshotFs);
 
       outcome = { host: snapshot.hostname ?? target.host, label: target.label, installations };
     } catch (err) {
@@ -398,7 +403,7 @@ function renderTerminal(installations: AgentInstallation[], verbose: boolean | u
     lines.push(`  ${'Version:'.padEnd(14)} ${inst.version ?? chalk.dim('unknown')}`);
     lines.push(`  ${'Install dir:'.padEnd(14)} ${inst.installDir}`);
     lines.push(`  ${'Config files:'.padEnd(14)} ${inst.configFiles.length}`);
-    lines.push(`  ${'Skills dir:'.padEnd(14)} ${inst.skillsDir ?? chalk.dim('none')}`);
+    lines.push(...renderSkills(inst, verbose));
 
     if (inst.cliBinary) {
       lines.push(`  ${'CLI binary:'.padEnd(14)} ${inst.cliBinary}`);
@@ -447,4 +452,43 @@ function renderTerminal(installations: AgentInstallation[], verbose: boolean | u
   }
 
   return lines.join('\n');
+}
+
+/** Items listed per kind under --verbose; the rest are counted (file formats keep all). */
+const MAX_LISTED = 20;
+
+function renderSkills(inst: AgentInstallation, verbose: boolean | undefined): string[] {
+  const inventory = inst.inventory;
+  const dirs = inventory?.skillsDirs ?? (inst.skillsDirs?.length ? inst.skillsDirs : inst.skillsDir ? [inst.skillsDir] : [])
+    .map(path => ({ path, exists: true }));
+  const lines: string[] = [];
+  if (dirs.length === 0) {
+    lines.push(`  ${'Skills dirs:'.padEnd(14)} ${chalk.dim('none')}`);
+    return lines;
+  }
+  for (const [i, dir] of dirs.entries()) {
+    const label = i === 0 ? 'Skills dirs:' : '';
+    lines.push(`  ${label.padEnd(14)} ${escapeControlChars(dir.path, { lineBreaks: true })}${dir.exists ? '' : chalk.dim(' (not present)')}`);
+  }
+  if (!inventory) return lines;
+
+  const { skills, otherEntries } = inventory;
+  const other = otherEntries.length > 0 ? chalk.dim(` (+${otherEntries.length} other ${otherEntries.length === 1 ? 'entry' : 'entries'})`) : '';
+  lines.push(`  ${'Skills:'.padEnd(14)} ${skills.length}${other}`);
+  if (verbose) {
+    for (const skill of skills.slice(0, MAX_LISTED)) {
+      const code = skill.hasCode ? chalk.dim(' [code]') : '';
+      const link = skill.symlinkTarget ? chalk.dim(` → ${escapeControlChars(skill.symlinkTarget, { lineBreaks: true })}`) : '';
+      lines.push(`    ${escapeControlChars(skill.name, { lineBreaks: true })}${code}${link}`);
+    }
+    if (skills.length > MAX_LISTED) lines.push(chalk.dim(`    … and ${skills.length - MAX_LISTED} more`));
+    for (const entry of otherEntries.slice(0, MAX_LISTED)) {
+      lines.push(chalk.dim(`    ${escapeControlChars(entry.path, { lineBreaks: true })} (no SKILL.md)`));
+    }
+    if (otherEntries.length > MAX_LISTED) lines.push(chalk.dim(`    … and ${otherEntries.length - MAX_LISTED} more`));
+  }
+  for (const note of inventory.incomplete ?? []) {
+    lines.push(chalk.yellow(`    ! ${escapeControlChars(note, { lineBreaks: true })}`));
+  }
+  return lines;
 }

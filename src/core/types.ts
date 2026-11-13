@@ -155,6 +155,57 @@ export interface AgentInstallation {
    *  `version` — e.g. an older npm global or another nvm Node version's copy.
    *  Advisory checks evaluate each one. */
   otherInstalls?: CliInstall[];
+  /** The skills this installation loads — set by `vaso detect` and `vaso scan`. */
+  inventory?: AgentInventory;
+}
+
+/**
+ * What an installation loads: descriptive, never judged. Names and paths
+ * only — a skill's description is masked and shortened, nothing else of a
+ * file's content is carried.
+ */
+export interface AgentInventory {
+  /** Every skills directory the adapter declares, and whether it exists. */
+  skillsDirs: SkillsDirInfo[];
+  /** Folders holding a SKILL.md (outermost one per tree). */
+  skills: SkillItem[];
+  /** Other folders and code files directly under a skills directory: the
+   *  skill checks read them, but they hold no SKILL.md. */
+  otherEntries: SkillTreeEntry[];
+  /** Why the lists may be partial (a directory that can't be listed). */
+  incomplete?: string[];
+}
+
+export interface SkillsDirInfo {
+  path: string;
+  exists: boolean;
+}
+
+export interface SkillItem {
+  /** SKILL.md frontmatter `name`, else the folder name. */
+  name: string;
+  /** The skill folder, as the agent reaches it (a symlink's own path). */
+  path: string;
+  /** The skills directory it was found in. */
+  root: string;
+  scope: 'user' | 'project' | 'plugin' | 'extension' | 'managed';
+  kind: 'skill-md' | 'plugin' | 'extension' | 'mcpb';
+  /** SKILL.md frontmatter `description`: at most 200 characters, secrets masked. */
+  description?: string;
+  /** Files in it the skill checks read (SKILL.md, scripts, binaries). */
+  files: number;
+  /** Holds a script or binary besides SKILL.md. */
+  hasCode: boolean;
+  /** Where the folder really is, when it is a symlink. */
+  symlinkTarget?: string;
+}
+
+export interface SkillTreeEntry {
+  path: string;
+  root: string;
+  type: 'directory' | 'file';
+  files: number;
+  hasCode: boolean;
 }
 
 /** One copy of an agent CLI: its path and (when determinable) version. */

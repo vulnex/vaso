@@ -3,7 +3,7 @@ import { spawn, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { chmod, cp, mkdtemp, readdir, readFile, rm, writeFile, lstat } from 'node:fs/promises';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { AgentScanResult, ScanResult, Severity } from '../../src/core/types.js';
 
@@ -66,6 +66,8 @@ interface GoldenCase {
   reachable?: boolean;
   /** Skip on these platforms (fixtures relying on POSIX modes). */
   skipOn?: NodeJS.Platform[];
+  /** Expected skill inventory: skill names, and the names of other entries. */
+  inventory?: { skills: string[]; otherEntries?: string[] };
 }
 
 /** `mcpConfig: "<path>"` is shorthand for `mcp: { paths: ["<path>"] }`. */
@@ -192,6 +194,11 @@ describe.each(caseNames)('golden: %s', (name) => {
       const severe = results.filter(r => r.id === id && !r.passed && r.severity !== 'info');
       expect(severe.map(r => `${r.severity}: ${r.message}`), `${id} should be info at most`).toEqual([]);
     }
+    if (spec.inventory) {
+      const inv = local[0].installation.inventory;
+      expect(inv?.skills.map(s => s.name).sort(), 'inventory skills').toEqual([...spec.inventory.skills].sort());
+      expect(inv?.otherEntries.map(e => basename(e.path)).sort(), 'inventory other entries').toEqual([...(spec.inventory.otherEntries ?? [])].sort());
+    }
     if (spec.clean) {
       const ignored = new Set(spec.cleanIgnore ?? []);
       const flagged = results.filter(r => r.category !== 'advisory' && !ignored.has(r.id)
@@ -210,6 +217,13 @@ describe.each(caseNames)('golden: %s', (name) => {
     const remote = (await scan(home, spec.agent, ['--snapshot', snapshot])).agents.filter(a => a.agent === spec.agent);
     const key = (as: AgentScanResult[]) => Object.fromEntries(as.map(a => [a.installation.installDir, verdicts(a)]));
     expect(key(remote)).toEqual(key(local));
+    // The skill inventory too — descriptions aside: the probe disguises
+    // secrets in what it ships, so a masked description may differ
+    const inventory = (as: AgentScanResult[]) => Object.fromEntries(as.map(a => {
+      const inv = a.installation.inventory;
+      return [a.installation.installDir, inv && { ...inv, skills: inv.skills.map(({ description: _d, ...s }) => s) }];
+    }));
+    expect(inventory(remote)).toEqual(inventory(local));
   }, 120_000);
 
   it.skipIf(skip || !spec.fix || Boolean(mcpOf(spec)))('fix resolves the findings without breaking others, and rollback restores every file', async () => {

@@ -107,11 +107,29 @@ export function getAllSkillsDirs(installation: AgentInstallation): string[] {
  * VENDOR_DIRS / BUILD_OUTPUT_DIRS.
  */
 export async function getSkillFiles(dir: string, fs?: FSProvider): Promise<string[]> {
+  return (await listSkillTree(dir, fs)).files;
+}
+
+/** One walk of a skills directory: what getSkillFiles returns, and what the inventory needs. */
+export interface SkillTreeListing {
+  /** Every entry the walk returned (symlinks outside the tree followed). */
+  entries: DirentInfo[];
+  /** The files skill/IOC checks read — see getSkillFiles. */
+  files: string[];
+  /** Skill directories that exist but can't be listed (see unlistableSkillDirs). */
+  unlistable: string[];
+  /** Why `dir` itself couldn't be listed (ENOENT when it doesn't exist). */
+  error?: NodeJS.ErrnoException;
+}
+
+export async function listSkillTree(dir: string, fs?: FSProvider): Promise<SkillTreeListing> {
   const provider = fs ?? new LocalFSProvider();
   const files: string[] = [];
+  let entries: DirentInfo[] = [];
+  let error: NodeJS.ErrnoException | undefined;
   try {
     // Follows symlinked skills that point outside the tree (walkSkillTree)
-    const entries = await walkSkillTree(provider, dir);
+    entries = await walkSkillTree(provider, dir);
     for (const entry of entries) {
       if (!entry.isFile) continue;
       if (isExcludedPath(dir, entry.parentPath, { keepBuildOutput: true })) continue;
@@ -123,16 +141,18 @@ export async function getSkillFiles(dir: string, fs?: FSProvider): Promise<strin
         files.push(fullPath);
       }
     }
-  } catch {
+  } catch (err) {
     // Directory may not exist
+    error = (err ?? undefined) as NodeJS.ErrnoException | undefined;
   }
   // A skill directory the scan can enter but not list (mode 111) hides every
   // file in it from the walk, while the agent still loads SKILL.md by name
-  for (const skillDir of await unlistableSkillDirs(dir, provider)) {
+  const unlistable = await unlistableSkillDirs(dir, provider);
+  for (const skillDir of unlistable) {
     const skillMd = join(skillDir, 'SKILL.md');
     if (!files.includes(skillMd) && await provider.access(skillMd)) files.push(skillMd);
   }
-  return files;
+  return { entries, files, unlistable, ...(error ? { error } : {}) };
 }
 
 /**

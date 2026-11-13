@@ -71,6 +71,45 @@ describe('runDetect', () => {
     expect(output).toContain('Found 2 agent(s).');
   });
 
+  it('lists every skills directory with skill counts, and names skills under --verbose', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'vaso-detect-skills-'));
+    try {
+      const { mkdir } = await import('node:fs/promises');
+      await mkdir(join(root, 'skills', 'pdf'), { recursive: true });
+      await writeFile(join(root, 'skills', 'pdf', 'SKILL.md'), '---\nname: pdf-tools\n---\n');
+      await writeFile(join(root, 'skills', 'pdf', 'fill.py'), 'print(1)');
+      await mkdir(join(root, 'skills', 'helper'));
+      await writeFile(join(root, 'skills', 'helper', 'run.js'), '1');
+      const inst: AgentInstallation = {
+        agent: 'codex',
+        installDir: root,
+        configFiles: [],
+        skillsDirs: [join(root, 'skills'), join(root, 'missing')],
+      };
+      vi.spyOn(adapterRegistry, 'detectAll').mockResolvedValue([inst]);
+
+      await runDetect({ format: 'terminal', verbose: true });
+      const output = consoleLogs.join('\n');
+      expect(output).toContain(join(root, 'skills'));
+      expect(output).toMatch(new RegExp(`${join(root, 'missing').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}.*not present`));
+      expect(output).toMatch(/Skills:\s+1 .*\+1 other entry/);
+      expect(output).toContain('pdf-tools');
+      expect(output).toContain('(no SKILL.md)');
+
+      consoleLogs = [];
+      await runDetect({ format: 'json' });
+      const parsed = JSON.parse(consoleLogs.join('\n'));
+      expect(parsed[0].inventory.skills.map((s: { name: string }) => s.name)).toEqual(['pdf-tools']);
+      expect(parsed[0].inventory.skillsDirs).toEqual([
+        { path: join(root, 'skills'), exists: true },
+        { path: join(root, 'missing'), exists: false },
+      ]);
+      expect(parsed[0].inventory.otherEntries).toHaveLength(1);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('renders detected agents in JSON format', async () => {
     vi.spyOn(adapterRegistry, 'detectAll').mockResolvedValue(mockInstallations);
 

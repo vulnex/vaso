@@ -9,7 +9,7 @@ import { LocalFSProvider } from './local-fs-provider.js';
 import { computeScore, scoreToGrade, summarizeResults, aggregateScore, meanScore } from './scoring.js';
 import { dedupeInheritedFindings } from './inherited-findings.js';
 import { dedupePermissionFindings } from './duplicate-findings.js';
-import { getAllSkillsDirs, getSkillFiles } from './utils.js';
+import { collectSkillInventory } from '../inventory/skills.js';
 import { mapSourceEvidence } from '../mcp/source-locations.js';
 import { describeFetchFailure } from '../mcp/package-fetcher.js';
 import { extractToolDefinitions } from '../mcp/tool-baseline.js';
@@ -248,10 +248,10 @@ export class ScanEngine {
   }
 
   private async scanAgent(installation: AgentInstallation): Promise<AgentScanResult> {
-    const skillsDirs = getAllSkillsDirs(installation);
-    const skillFiles = skillsDirs.length > 0
-      ? (await Promise.all(skillsDirs.map(d => getSkillFiles(d, this.fs)))).flat()
-      : undefined;
+    // One walk per skills directory: the files the checks read, and the
+    // inventory reports carry
+    const { files: skillFiles, inventory } = await collectSkillInventory(installation, this.fs);
+    installation.inventory = inventory;
 
     const adapter = this.adapters.getAdapter(installation.agent);
     const credentialPaths = credentialPathsFor(adapter, installation, this.fs);

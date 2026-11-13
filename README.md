@@ -81,7 +81,7 @@ vaso scan --snapshot ./snapshots/prod-agent-01.json --diff
 | Command | Description |
 |---------|-------------|
 | `vaso scan` | Scan installed agents and report findings |
-| `vaso detect` | List detected agent installations |
+| `vaso detect` | List detected agent installations, their skills directories and skills |
 | `vaso fix` | Auto-remediate fixable findings |
 | `vaso visualize` | Emit USecVisLib config files for visualization |
 | `vaso update` | Fetch signed threat-feed updates (published at least monthly — see [SECURITY.md](SECURITY.md#threat-feed-updates)) |
