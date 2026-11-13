@@ -146,6 +146,21 @@ describe('collectSkillInventory', () => {
     expect(inventory.incomplete).toEqual([`${join(root, 'locked')}: contents can't be listed`]);
   });
 
+  it('does not count archived skills (Hermes .archive) but lists the folder', async () => {
+    const root = await tmp();
+    await put(join(root, 'apple', 'notes', 'SKILL.md'));
+    await put(join(root, '.archive', 'old-skill', 'SKILL.md'));
+    await put(join(root, '.archive', 'old-skill', 'run.py'));
+    await put(join(root, '.system', 'creator', 'SKILL.md'));
+
+    const { inventory, files } = await collectSkillInventory(inst([root]), fs);
+
+    expect(inventory.skills.map(s => s.name).sort()).toEqual(['creator', 'notes']);
+    expect(inventory.otherEntries.map(e => [e.path.slice(root.length + 1), e.files])).toEqual([['.archive', 2]]);
+    // still read by the skill checks
+    expect(files).toContain(join(root, '.archive', 'old-skill', 'run.py'));
+  });
+
   it('uses project scope for project installations and dedupes repeated roots', async () => {
     const root = await tmp();
     await put(join(root, 'a', 'SKILL.md'));

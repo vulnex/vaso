@@ -6,6 +6,15 @@ import { parseYamlSafe } from '../core/yaml-safe.js';
 import { redactSecretsInLine } from '../core/patterns.js';
 import { maskCredentialsInLine } from '../reporting/serialize.js';
 
+/**
+ * Folders under a skills directory whose skills an agent doesn't load: Hermes
+ * moves unused skills to `.archive/` and skips these when it indexes skills
+ * (EXCLUDED_SKILL_DIRS, hermes-agent agent/skill_utils.py). The skill checks
+ * still read them — a restore brings them back — but they aren't counted as
+ * skills; the folder is listed as an other entry. Codex's `.system/` is loaded.
+ */
+const INACTIVE_SKILL_DIRS = new Set(['.archive', '.curator_backups', '.hub', '.locks', '.git', '.github']);
+
 /** Longest description carried into reports. */
 export const MAX_SKILL_DESCRIPTION = 200;
 /** SKILL.md bytes read for the frontmatter. */
@@ -67,8 +76,10 @@ export async function collectSkillInventory(installation: AgentInstallation, fs:
     // example, a bundled sub-skill) belongs to it
     const candidates = [...new Set([...listing.files.filter(isSkillMd).map(f => dirname(f)), ...linked.keys()])]
       .sort((a, b) => a.split(sep).length - b.split(sep).length || a.localeCompare(b));
+    const inactive = (dir: string) => relative(root, dir).split(sep).some(seg => INACTIVE_SKILL_DIRS.has(seg));
     const skillDirs: string[] = [];
     for (const dir of candidates) {
+      if (inactive(dir)) continue;
       if (!skillDirs.some(s => isWithin(dir, s))) skillDirs.push(dir);
     }
 
@@ -104,7 +115,7 @@ export async function collectSkillInventory(installation: AgentInstallation, fs:
       continue;
     }
     for (const entry of children) {
-      if (entry.name.startsWith('.')) continue;
+      if (entry.name.startsWith('.') && !INACTIVE_SKILL_DIRS.has(entry.name)) continue;
       const path = join(root, entry.name);
       if (isExcludedPath(root, path, { keepBuildOutput: true })) continue;
       if (skillDirs.some(s => isWithin(s, path) || isWithin(path, s))) continue;
