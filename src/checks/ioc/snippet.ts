@@ -1,8 +1,8 @@
 import { snippetAround } from '../../core/patterns.js';
 import { maskCredentialsInLine } from '../../reporting/serialize.js';
 
-/** Characters masked on each side of the match. */
-const MASK_REGION = 2048;
+let lastLine: string | undefined;
+let lastMasked = '';
 
 /**
  * The part of `line` around the IOC `re` matches, credentials masked FIRST:
@@ -12,20 +12,14 @@ const MASK_REGION = 2048;
  * again in the masked text.
  */
 export function iocSnippet(line: string, re: RegExp): string {
-  // Only the part around the match is masked: the window is ~120 chars, and
-  // masking a whole 5 MiB minified line per match cost seconds to minutes
-  const raw = re.exec(line);
-  const at = raw?.index ?? 0;
-  let start = Math.max(0, at - MASK_REGION);
-  // begin the region at a separator, not inside a value
-  if (start > 0) {
-    const ws = line.slice(start, at).search(/[\s,;{}]/);
-    start = ws >= 0 ? start + ws + 1 : at;
+  // The whole line is masked (once per line — every IOC on a minified file's
+  // one line asks for the same): a region cut around the match can start
+  // inside a long value and drop the key that makes it a credential
+  if (line !== lastLine) {
+    lastLine = line;
+    lastMasked = maskCredentialsInLine(line);
   }
-  const region = line.slice(start, Math.min(line.length, at + (raw?.[0].length ?? 0) + MASK_REGION));
-  const masked = maskCredentialsInLine(region);
+  const masked = lastMasked;
   const m = re.exec(masked);
-  const out = m ? snippetAround(masked, m.index, m[0].length) : snippetAround(masked, 0, 0);
-  // the region was cut from a longer line: say so even when the window starts at its edge
-  return start > 0 && !out.startsWith('... ') ? `... ${out}` : out;
+  return m ? snippetAround(masked, m.index, m[0].length) : snippetAround(masked, 0, 0);
 }

@@ -29,3 +29,13 @@ describe('iocSnippet — long lines', () => {
     expect(out).not.toContain(SECRET);
   });
 });
+
+describe('iocSnippet — a long credential value before the match', () => {
+  it('keeps the key: a value longer than any region is still masked', () => {
+    const tokens = Array.from({ length: 150 }, (_, i) => `Qu${'7HXDpWxohhHipzznjEr'}${i}`).join(', ');
+    const out = iocSnippet(`api_keys: [${tokens}] # c2 giftshop.club`, domainBoundaryRegex('giftshop.club'));
+    expect(out).not.toMatch(/Qu7HXDpWxohhHipzznjEr\d/);
+    const out2 = iocSnippet(`{"password":"${tokens.replace(/, /g, ' ')}","u":"http://91.92.242.30/x"}`, ipBoundaryRegex('91.92.242.30'));
+    expect(out2).not.toMatch(/Qu7HXDpWxohhHipzznjEr\d/);
+  });
+});
