@@ -15,6 +15,7 @@ import { zeroclawDirs } from '../adapters/zeroclaw.js';
 import { parseYamlSafe } from '../core/yaml-safe.js';
 import { captureConfigLoadErrors } from '../core/config-loader.js';
 import { pathPresent } from '../adapters/load-if-present.js';
+import { applyOffLists } from './off-lists.js';
 import type { AgentType, Platform } from '../core/types.js';
 
 interface ConfigLocation {
@@ -551,6 +552,8 @@ export class MCPDiscovery {
       if (servers.length > 0) configs.push({ source: oc.source, agents: ['openclaw'], filePath: oc.filePath, servers });
     }
 
+    // Servers the agents' settings switch off by name or policy
+    await applyOffLists(configs, this.fs, home, projectDir).catch(() => undefined);
     const kept = options.includeDisabled ? configs : activeConfigs(configs);
     const totalServers = kept.reduce((sum, c) => sum + c.servers.length, 0);
     return { configs: kept, totalServers, ...(loadErrors.length > 0 ? { loadErrors } : {}) };

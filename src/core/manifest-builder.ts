@@ -194,6 +194,17 @@ export function buildProbeManifest(adapters: AgentAdapter[]): ProbeManifest {
     '~/Library/Application Support/Code/User/mcp.json',
   );
 
+  // Lists that switch MCP servers off by name or policy (src/mcp/off-lists.ts):
+  // Gemini's /mcp disable state; Claude Code's managed settings and its
+  // exclusive managed-mcp.json (system paths, per OS)
+  merged.filePaths.push('~/.gemini/mcp-server-enablement.json');
+  merged.systemPaths!.push(
+    '/etc/claude-code/managed-mcp.json',
+    '/etc/claude-code/managed-settings.json',
+    '/Library/Application Support/ClaudeCode/managed-mcp.json',
+    '/Library/Application Support/ClaudeCode/managed-settings.json',
+  );
+
   // ADV-002 reads, next to an install's package.json, its lockfile and the
   // installed copy of each dependency an advisory names — ship the same
   // files, or a remote scan judges by the declared range alone
