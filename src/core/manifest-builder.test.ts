@@ -106,7 +106,11 @@ describe('buildProbeManifest', () => {
       '~/Library/Application Support/com.openai.chat/conversations-v3-*/**',
       '~/.gemini/tmp/*/chats/session-*.jsonl',
       '~/.copilot/command-history-state.json',
+      '~/.copilot/command-history-state/*',
       '~/.copilot/session-state/*',
+      '~/.copilot/session-store.db',
+      '~/.copilot/mcp-oauth-config/*',
+      '~/.copilot/mcp-secrets/*',
       '~/Library/Application Support/com.meta.endo/**',
       '~/.abacusai/history.jsonl',
       '~/.abacusai/projects/**',
@@ -119,7 +123,8 @@ describe('buildProbeManifest', () => {
     const content = [...manifest.globPatterns, ...manifest.filePaths];
     expect(content.filter(p => /conversation|Local Storage|\/memory\.json$/.test(p))).toEqual([]);
     for (const p of ['~/.gemini/tmp/*/chats/session-*.jsonl', '~/.copilot/command-history-state.json',
-      '~/.copilot/session-state/*.json', '~/Library/Application Support/com.meta.endo/**',
+      '~/.copilot/session-state/*.json', '~/.copilot/command-history-state/*', '~/.copilot/session-store.db',
+      '~/.copilot/mcp-oauth-config/*', '~/.copilot/mcp-secrets/*', '~/Library/Application Support/com.meta.endo/**',
       '~/.abacusai/history.jsonl', '~/.abacusai/projects/**']) {
       expect(content).not.toContain(p);
     }

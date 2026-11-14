@@ -36,6 +36,16 @@ function permissionsConfigEvidence(config: ParsedConfig, home: string): Found {
     for (const approval of Array.isArray(rec.tool_approvals) ? rec.tool_approvals : []) {
       if (!approval || typeof approval !== 'object') continue;
       const a = approval as Record<string, unknown>;
+      // `{kind: "mcp", serverName, toolName: null}` approves every tool on
+      // the server (config-dir reference, tool_approvals)
+      if (a.kind === 'mcp' && typeof a.serverName === 'string' && (a.toolName === null || a.toolName === '*')) {
+        out.push({
+          file: config.filePath,
+          snippet: `locations["${location}"].tool_approvals: mcp "${a.serverName}" (all tools)`,
+          detail: `Saved approval runs every tool of MCP server "${a.serverName}" in ${location} without prompting — a prompt-injected call reaches all of them`,
+        });
+        continue;
+      }
       if (a.kind === 'write') {
         out.push({
           file: config.filePath,
@@ -88,13 +98,21 @@ export const ghc002 = defineCheck({
   name: 'Copilot CLI Allow-All Permissions',
   category: 'coding-agent',
   severity: 'critical',
-  description: 'Detect persisted allow-all permissions: saved permissions-config.json approvals for any shell/interpreter command (`bash`, `python3`, `bash:*`) or directory grants over /, $HOME, /tmp, /etc (critical), any curl/wget/ssh command or every file write in a location (warning), and the legacy allowAllPermissions:true',
+  description: 'Detect persisted allow-all permissions: settings.json defaultPermissionMode "allow-all", saved permissions-config.json approvals for any shell/interpreter command (`bash`, `python3`, `bash:*`) or directory grants over /, $HOME, /tmp, /etc (critical), any curl/wget/ssh command, every tool of an MCP server (toolName null) or every file write in a location (warning), and the legacy allowAllPermissions:true',
   supportedAgents: ['copilot-cli'],
 
   async run(ctx, h) {
     const evidence: Evidence[] = [];
     const home = ctx.fs.homedir();
     let critical = false;
+
+    // permissions.disableBypassPermissionsMode blocks every allow-all option;
+    // a configured mode it blocks falls back to manual approval (config-dir
+    // reference, defaultPermissionMode)
+    const blockedBy = ctx.configs.find(c => {
+      const p = c.data.permissions as Record<string, unknown> | undefined;
+      return !!p && typeof p === 'object' && p.disableBypassPermissionsMode !== undefined && p.disableBypassPermissionsMode !== false;
+    })?.filePath;
 
     for (const config of ctx.configs) {
       if (config.filePath.endsWith('permissions-config.json')) {
@@ -104,6 +122,22 @@ export const ghc002 = defineCheck({
         continue;
       }
       if (!config.filePath.endsWith('settings.json')) continue;
+      // Repository settings (.github/copilot/settings*.json) carry hooks, not the session's permission mode
+      if (ctx.installation.profile === 'project') continue;
+      // defaultPermissionMode: "allow-all" starts every interactive session
+      // with broad permissions "equivalent to --allow-all" (user settings)
+      const mode = config.data.defaultPermissionMode;
+      if (typeof mode === 'string' && mode.toLowerCase() === 'allow-all') {
+        if (!blockedBy) critical = true;
+        evidence.push({
+          file: config.filePath,
+          snippet: `defaultPermissionMode = "${mode}"`,
+          detail: blockedBy
+            ? `New sessions would start in allow-all mode, but permissions.disableBypassPermissionsMode in ${blockedBy} blocks it (sessions start in manual approval)`
+            : 'New interactive sessions start in allow-all mode — every tool, path and URL runs without prompting (equivalent to --allow-all)',
+          ...(blockedBy ? { mitigated: true } : {}),
+        });
+      }
       // Not in the current settings reference (allow-all is a launch flag,
       // `--allow-all-tools`/`--yolo`), kept for configs written by older builds
       if (config.data.allowAllPermissions === true) {
@@ -120,7 +154,7 @@ export const ghc002 = defineCheck({
       passed: 'Copilot CLI requires per-tool approval',
       failed: (n) => `Found ${n} persisted allow-all permission grant(s) in Copilot CLI config`,
       severity: critical ? 'critical' : 'warning',
-      fixDescription: 'Remove broad saved approvals from ~/.copilot/permissions-config.json (or run /reset-allowed-tools in that repo), drop allowAllPermissions from settings.json, and consider permissions.disableBypassPermissionsMode: "disable" to block the --allow-all/--yolo flags',
+      fixDescription: 'Set defaultPermissionMode to "manual" (or "assisted"), remove broad saved approvals from ~/.copilot/permissions-config.json (or run /reset-allowed-tools in that repo), drop allowAllPermissions from settings.json, and consider permissions.disableBypassPermissionsMode: "disable" to block the --allow-all/--yolo flags',
     });
   },
 });

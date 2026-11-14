@@ -2,6 +2,8 @@ import { join } from 'node:path';
 import type { Evidence, ScanContext } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { stripJsonc } from '../../core/jsonc.js';
+import { truncateSnippet } from '../../core/patterns.js';
+import { hookItemRisks, hookItems, topTier } from '../../analyzers/hook-commands.js';
 
 const SHELL_METACHARS = /[;&|`$()<>]/;
 
@@ -33,10 +35,10 @@ async function scanLspConfig(filePath: string, ctx: ScanContext, evidence: Evide
 
 export const ghc007 = defineCheck({
   id: 'GHC-007',
-  name: 'Copilot CLI LSP Command Injection Risk',
+  name: 'Copilot CLI Unsafe LSP or Hook Commands',
   category: 'coding-agent',
   severity: 'warning',
-  description: 'Detect LSP server commands containing shell metacharacters in user or project LSP config',
+  description: 'Detect LSP server commands containing shell metacharacters, and hooks (settings.json, ~/.copilot/hooks/*.json, .github/hooks/*.json) that download and execute code, send credentials or hook input over the network, or re-evaluate input as code',
   supportedAgents: ['copilot-cli'],
 
   async run(ctx, h) {
@@ -50,10 +52,31 @@ export const ghc007 = defineCheck({
       ctx, evidence,
     );
 
+    // Hooks run on their own on every matching event, with the event JSON
+    // on stdin; repository hook files arrive with the clone
+    // (docs.github.com/en/copilot/reference/hooks-reference). Same analyzer
+    // as CC-003 / CUR-015 / WS-009.
+    let critical = false;
+    for (const config of ctx.configs) {
+      for (const item of hookItems(config.data.hooks)) {
+        const risks = hookItemRisks(item);
+        const tier = topTier(risks);
+        if (!tier) continue;
+        if (tier === 'critical') critical = true;
+        evidence.push({
+          file: config.filePath,
+          snippet: `hooks.${item.event}: ${truncateSnippet(item.url ?? item.scripts[0], 120)}`,
+          detail: `${item.url ? 'HTTP hook' : 'Hook command'} ${risks.map(r => r.reason).join('; ')}`,
+          ...(tier === 'info' ? { mitigated: true } : {}),
+        });
+      }
+    }
+
     return h.fromEvidence(evidence, {
-      passed: 'Copilot CLI LSP server commands have no shell metacharacters',
-      failed: (n) => `Found ${n} Copilot CLI LSP server command(s) with shell metacharacters`,
-      fixDescription: 'Replace shell-style commands with the binary path + args[] array; never embed pipes/semicolons in command',
+      passed: 'Copilot CLI LSP server commands have no shell metacharacters and no hook downloads code or sends data out',
+      failed: (n) => `Found ${n} unsafe Copilot CLI LSP server or hook command(s)`,
+      severity: critical ? 'critical' : 'warning',
+      fixDescription: 'Replace shell-style LSP commands with the binary path + args[] array; remove hooks you did not add yourself (a repository .github/hooks/*.json arrives with the clone), run reviewed scripts instead of downloads, and send audit data only to https endpoints you control',
     });
   },
 });

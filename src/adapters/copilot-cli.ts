@@ -20,9 +20,16 @@ const COPILOT_DIR_NAME = '.copilot';
 // future schema change without code edits.
 // mcp-config.json: user-level MCP servers (GHC-003/004)
 // permissions-config.json: saved per-location tool/directory approvals (GHC-002)
-const USER_CONFIG_FILES = ['config.json', 'settings.json', 'lsp-config.json', 'mcp-config.json', 'permissions-config.json'];
-// Project MCP servers live in `.mcp.json` or `.github/mcp.json` (CLI config-dir reference)
-const PROJECT_CONFIG_FILES = ['.mcp.json', join('.github', 'mcp.json')];
+// providers.json: BYOK providers, API keys stored in plain text (GHC-003;
+// docs.github.com/en/copilot/reference/copilot-cli-reference/cli-config-dir-reference)
+const USER_CONFIG_FILES = ['config.json', 'settings.json', 'lsp-config.json', 'mcp-config.json', 'permissions-config.json', 'providers.json'];
+// Project MCP servers live in `.mcp.json` or `.github/mcp.json` (CLI config-dir
+// reference); repository settings may carry inline hooks
+const PROJECT_CONFIG_FILES = ['.mcp.json', join('.github', 'mcp.json'), join('.github', 'copilot', 'settings.json'), join('.github', 'copilot', 'settings.local.json')];
+// Hook files: user-level <config dir>/hooks/*.json, repository .github/hooks/*.json
+// (docs.github.com/en/copilot/reference/hooks-reference "Hooks locations")
+const USER_HOOKS_DIR = 'hooks';
+const PROJECT_HOOKS_DIR = join('.github', 'hooks');
 // Personal skills: <config dir>/skills or ~/.agents/skills (GitHub Docs "Adding agent skills")
 const SHARED_SKILLS_DIR = join('.agents', 'skills');
 
@@ -51,6 +58,25 @@ async function loadFiles(dir: string, names: string[], fs: FSProvider): Promise<
     if (loaded) out.push(loaded);
   }
   return out;
+}
+
+/** Every `*.json` hook file directly in `dir`, sorted by name. */
+async function loadHookFiles(dir: string, fs: FSProvider): Promise<ParsedConfig[]> {
+  let names: string[];
+  try {
+    names = (await fs.readdirEntries(dir)).filter(e => e.isFile && e.name.endsWith('.json')).map(e => e.name).sort();
+  } catch {
+    return [];
+  }
+  return loadFiles(dir, names, fs);
+}
+
+/**
+ * BYOK provider registry: $COPILOT_PROVIDERS_CONFIG for the scanning user
+ * (config-dir reference), else <config dir>/providers.json.
+ */
+export function copilotProvidersPath(home: string, copilotDir: string, fs: FSProvider): string {
+  return envPath(home === fs.homedir() ? fs.getEnv?.('COPILOT_PROVIDERS_CONFIG') : undefined, home) ?? join(copilotDir, 'providers.json');
 }
 
 /**
@@ -110,6 +136,14 @@ export const copilotCliAdapter: AgentAdapter = {
       if (!hasCopilotDir && !cliBinary) continue;
 
       const configFiles = hasCopilotDir ? await loadFiles(copilotDir, USER_CONFIG_FILES, fs) : [];
+      if (hasCopilotDir) configFiles.push(...await loadHookFiles(join(copilotDir, USER_HOOKS_DIR), fs));
+      const providers = copilotProvidersPath(home, copilotDir, fs);
+      if (providers !== join(copilotDir, 'providers.json')) {
+        const relocated = await loadConfigIfPresent(providers, fs);
+        const i = configFiles.findIndex(c => c.filePath === join(copilotDir, 'providers.json'));
+        if (i >= 0) configFiles.splice(i, 1);
+        if (relocated) configFiles.push(relocated);
+      }
 
       // A bare ~/.copilot/ with no recognized config files and no `copilot`
       // binary is leftover state from another tool (the Copilot IDE extension
@@ -144,6 +178,7 @@ export const copilotCliAdapter: AgentAdapter = {
       const loaded = await loadConfigIfPresent(filePath, fs);
       if (loaded) projectConfigs.push(loaded);
     }
+    projectConfigs.push(...await loadHookFiles(join(cwd, PROJECT_HOOKS_DIR), fs));
     const githubLspPath = join(cwd, '.github', 'lsp.json');
     if (await fs.access(githubLspPath)) {
       try {
@@ -201,8 +236,13 @@ export const copilotCliAdapter: AgentAdapter = {
     return [
       join(installDir, 'config.json'),
       join(installDir, 'settings.json'),
+      join(installDir, 'providers.json'),
       join(installDir, 'command-history-state.json'),
+      join(installDir, 'command-history-state'),
       join(installDir, 'session-state'),
+      join(installDir, 'session-store.db'),
+      join(installDir, 'mcp-oauth-config'),
+      join(installDir, 'mcp-secrets'),
     ];
   },
 
@@ -212,15 +252,25 @@ export const copilotCliAdapter: AgentAdapter = {
 
   getProbeManifest(): ProbeManifest {
     return {
-      // Past prompts and session state are private — GHC-001 only needs their
+      // Past prompts, session state, the cross-session database and the MCP
+      // OAuth / secret fallback stores are private — GHC-001 only needs their
       // permissions, so collect existence + mode, never content.
-      metadataGlobPatterns: ['~/.copilot/command-history-state.json', '~/.copilot/session-state/*'],
+      metadataGlobPatterns: [
+        '~/.copilot/command-history-state.json',
+        '~/.copilot/command-history-state/*',
+        '~/.copilot/session-state/*',
+        '~/.copilot/session-store.db',
+        '~/.copilot/mcp-oauth-config/*',
+        '~/.copilot/mcp-secrets/*',
+      ],
       filePaths: [
         '~/.copilot/config.json',
         '~/.copilot/settings.json',
         '~/.copilot/lsp-config.json',
         '~/.copilot/mcp-config.json',
         '~/.copilot/permissions-config.json',
+        '~/.copilot/providers.json',
+        '${COPILOT_PROVIDERS_CONFIG}',
         '~/.copilot/copilot-instructions.md',
         '~/.config/gh/hosts.yml',
         // User-relative CLI install locations
@@ -233,6 +283,7 @@ export const copilotCliAdapter: AgentAdapter = {
         // package.json of every npm-global copy — versions non-primary copies on remote scans
         ...npmPackageJsonGlobs('@github/copilot'),
         '~/.copilot/instructions/**/*.instructions.md',
+        '~/.copilot/hooks/*.json',
         '~/.copilot/skills/**',
         '~/.agents/skills/**',
         nvmBinaryGlob('copilot'),
@@ -247,6 +298,10 @@ export const copilotCliAdapter: AgentAdapter = {
         '~/.copilot/skills',
         '~/.agents/skills',
         '~/.copilot/session-state',
+        '~/.copilot/command-history-state',
+        '~/.copilot/mcp-oauth-config',
+        '~/.copilot/mcp-secrets',
+        '~/.copilot/hooks',
         '~/.copilot/logs',
       ],
       envPrefixes: ['COPILOT_', 'GH_', 'GITHUB_'],
