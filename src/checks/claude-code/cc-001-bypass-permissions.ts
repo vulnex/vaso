@@ -5,8 +5,18 @@ import { getNestedValue } from '../../core/utils.js';
 import { compareVersions } from '../../core/semver.js';
 import { parseJsonLenient } from '../../core/jsonc.js';
 import { claudeConfigPaths, claudeManagedSettingsPaths } from '../../adapters/claude-code.js';
+import { readSubagents } from './subagents.js';
 
-const DANGEROUS_MODES = new Set(['bypassPermissions', 'acceptAll', 'dangerouslySkipPermissions']);
+// The documented modes are default, acceptEdits, plan, auto, dontAsk and
+// bypassPermissions (code.claude.com/docs/en/permission-modes); only the last
+// skips approval.
+const DANGEROUS_MODES = new Set(['bypassPermissions']);
+
+// Sub-agent frontmatter `permissionMode: bypassPermissions` takes effect only
+// when the main conversation already bypasses, from Claude Code 2.1.267
+// (code.claude.com/docs/en/sub-agents "Permission modes"); before that a
+// sub-agent could switch approvals off on its own.
+const SUBAGENT_BYPASS_GATED_SINCE = '2.1.267';
 
 // Claude Code 2.1.257 changelog: "Changed defaultMode: \"bypassPermissions\" in
 // .claude/settings.json or .claude/settings.local.json to be ignored, like
@@ -55,6 +65,7 @@ export const cc001 = defineCheck({
     const version = ctx.installation.version;
     const projectIgnored = project && !!version && compareVersions(version, PROJECT_BYPASS_IGNORED_SINCE) >= 0;
     let projectUnknown = false;
+    const autoMode: Evidence[] = [];
 
     for (const config of ctx.configs) {
       const mode = getNestedValue(config.data, 'permissions.defaultMode') as string | undefined;
@@ -76,6 +87,17 @@ export const cc001 = defineCheck({
         }
       }
 
+      // Auto mode: a classifier model reviews actions instead of you. It is
+      // the built-in default on current versions and is ignored in project
+      // settings, so an explicit user/managed value is informational.
+      if (mode === 'auto' && !project) {
+        autoMode.push({
+          file: config.filePath,
+          detail: 'permissions.defaultMode = "auto" — a classifier reviews tool calls instead of prompting you (not a bypass; deny rules still apply). Set permissions.disableAutoMode: "disable" in managed settings to require prompts',
+          mitigated: true,
+        });
+      }
+
       const skipFlag = config.data.dangerouslySkipPermissions;
       if (skipFlag === true) {
         evidence.push({
@@ -83,6 +105,23 @@ export const cc001 = defineCheck({
           detail: 'dangerouslySkipPermissions = true — agent will execute tools without approval',
         });
       }
+    }
+
+    // Sub-agents asking for bypassPermissions in their frontmatter
+    const subagentGated = !!version && compareVersions(version, SUBAGENT_BYPASS_GATED_SINCE) >= 0;
+    for (const agent of await readSubagents(ctx)) {
+      const pm = agent.frontmatter.permissionMode;
+      if (typeof pm !== 'string' || !DANGEROUS_MODES.has(pm)) continue;
+      evidence.push(subagentGated
+        ? {
+          file: agent.file,
+          detail: `Sub-agent permissionMode = "${pm}" — Claude Code ${version} (>= ${SUBAGENT_BYPASS_GATED_SINCE}) runs it in bypass only when the main conversation already is`,
+          mitigated: true,
+        }
+        : {
+          file: agent.file,
+          detail: `Sub-agent permissionMode = "${pm}" — honored by Claude Code < ${SUBAGENT_BYPASS_GATED_SINCE} (installed version unknown or older): the sub-agent's tool calls skip confirmation`,
+        });
     }
 
     // disableBypassPermissionsMode removes bypass mode (and
@@ -98,10 +137,15 @@ export const cc001 = defineCheck({
     // Project-scope bypass on an unknown/older version: real only on old
     // releases, so a warning rather than critical. User/managed scope (or the
     // skip flag) keeps the declared severity.
-    const onlyProjectBypass = projectUnknown && evidence.every(e => !e.mitigated && e.detail?.includes('project settings'));
+    const live = evidence.filter(e => !e.mitigated);
+    const onlyProjectBypass = projectUnknown && live.length > 0 && live.every(e => e.detail?.includes('project settings'));
+    const onlyAuto = evidence.length === 0 && autoMode.length > 0;
+    evidence.push(...autoMode);
     return h.fromEvidence(evidence, {
       passed: 'Permission approval prompts are not bypassed',
-      failed: () => disabledBy
+      failed: () => onlyAuto
+        ? 'Claude Code starts in auto mode — a classifier, not you, approves tool calls'
+        : disabledBy
         ? 'Settings request bypassPermissions, but permissions.disableBypassPermissionsMode blocks it'
         : projectIgnored && evidence.every(e => e.mitigated)
         ? 'Project settings request bypassPermissions, but this Claude Code version ignores it'

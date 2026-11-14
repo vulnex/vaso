@@ -1,6 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { runnerPackage, isPinnedOrLocal, pinProblem } from '../../mcp/package-pin.js';
+import { inlineMcpServers, readSubagents } from './subagents.js';
 
 interface ServerSpec {
   command?: string;
@@ -27,7 +28,7 @@ export const cc005 = defineCheck({
   name: 'Unpinned MCP Server Package',
   category: 'coding-agent',
   severity: 'warning',
-  description: 'Detect MCP servers launched via npx/uvx/etc. without a pinned package version',
+  description: 'Detect MCP servers (settings, ~/.claude.json, sub-agent frontmatter) launched via npx/uvx/etc. without a pinned package version',
   supportedAgents: ['claude-code'],
 
   async run(ctx, h) {
@@ -56,6 +57,14 @@ export const cc005 = defineCheck({
             }
           }
         }
+      }
+    }
+
+    // Inline servers in sub-agent frontmatter start with the sub-agent
+    // (code.claude.com/docs/en/sub-agents "Scope MCP servers to a subagent")
+    for (const agent of await readSubagents(ctx)) {
+      for (const [name, srv] of inlineMcpServers(agent.frontmatter)) {
+        checkServer(name, srv as ServerSpec, agent.file, evidence, 'mcpServers.');
       }
     }
 

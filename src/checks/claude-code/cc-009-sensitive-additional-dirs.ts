@@ -2,6 +2,7 @@ import { join, normalize } from 'node:path';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { getNestedValue } from '../../core/utils.js';
+import { classifySensitivePath } from '../../analyzers/sensitive-paths.js';
 
 interface SensitiveTarget {
   path: string;
@@ -49,7 +50,7 @@ export const cc009 = defineCheck({
   name: 'Sensitive Additional Directories',
   category: 'coding-agent',
   severity: 'critical',
-  description: 'Detect when permissions.additionalDirectories grants Claude Code access to credential or system directories',
+  description: 'Detect when permissions.additionalDirectories or sandbox.filesystem.allowWrite grants Claude Code access to credential or system directories',
   supportedAgents: ['claude-code'],
 
   async run(ctx, h) {
@@ -74,10 +75,39 @@ export const cc009 = defineCheck({
       }
     }
 
+    // sandbox.filesystem.allowWrite: paths sandboxed commands may write —
+    // and with sandbox.autoAllowBashIfSandboxed those commands run without a
+    // prompt. Write access to the home or filesystem root, SSH config or a
+    // shell startup file is code execution outside the sandbox (critical);
+    // to another credential store, a warning (the settings reference's own
+    // example opens ~/.kube).
+    let critical = evidence.length > 0;
+    for (const config of ctx.configs) {
+      const paths = getNestedValue(config.data, 'sandbox.filesystem.allowWrite') as unknown;
+      if (!Array.isArray(paths)) continue;
+      for (const entry of paths) {
+        if (typeof entry !== 'string') continue;
+        const abs = normalize(expandHome(entry, home)).replace(/(.)\/+$/, '$1');
+        // /var holds build caches and temp dirs (macOS /var/folders) — writing there is routine
+        const found = matchesSensitive(entry, sensitiveTargets, home);
+        const match = found?.path === '/var' ? undefined : found;
+        const startup = classifySensitivePath(abs).find(l => l.startsWith('shell startup'));
+        if (!match && !startup) continue;
+        const severe = !!startup || match!.broad === true || match!.path === join(home, '.ssh') || match!.path === '/etc' || match!.path === '/root';
+        if (severe) critical = true;
+        evidence.push({
+          file: config.filePath,
+          snippet: `sandbox.filesystem.allowWrite: ${entry}`,
+          detail: `Sandboxed commands may write ${startup ? `a ${startup}` : `${match!.path} — ${match!.reason}`}`,
+        });
+      }
+    }
+
     return h.fromEvidence(evidence, {
+      severity: critical ? 'critical' : 'warning',
       passed: 'No sensitive paths in permissions.additionalDirectories',
-      failed: (n) => `Found ${n} sensitive path(s) in permissions.additionalDirectories`,
-      fixDescription: 'Remove credential/system directories from permissions.additionalDirectories',
+      failed: (n) => `Found ${n} sensitive path(s) in permissions.additionalDirectories / sandbox.filesystem.allowWrite`,
+      fixDescription: 'Remove credential/system directories from permissions.additionalDirectories and sandbox.filesystem.allowWrite',
     });
   },
 });

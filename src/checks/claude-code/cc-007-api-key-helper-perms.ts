@@ -29,6 +29,7 @@ export const cc007 = defineCheck({
     const evidence: Evidence[] = [];
     const writable: Evidence[] = [];
     const unverified: string[] = [];
+    const missing: string[] = [];
 
     for (const config of ctx.configs) {
       const helper = config.data.apiKeyHelper;
@@ -42,17 +43,12 @@ export const cc007 = defineCheck({
 
       try {
         if (!(await ctx.fs.access(path))) {
-          // A snapshot holds only what the probe collected — the script's
-          // path comes from settings, so absence there says nothing.
-          if (ctx.fs.kind === 'snapshot') {
-            unverified.push(path);
-            continue;
-          }
-          evidence.push({
-            file: config.filePath,
-            snippet: `apiKeyHelper = ${helper}`,
-            detail: 'apiKeyHelper script does not exist on disk',
-          });
+          // Nothing to replace: a missing script only means Claude Code gets
+          // no key from it (the settings reference's own example names
+          // /bin/generate_temp_api_key.sh). A snapshot holds only what the
+          // probe collected, so absence there says nothing either way.
+          if (ctx.fs.kind === 'snapshot') unverified.push(path);
+          else missing.push(path);
           continue;
         }
         const perms = await queryPermissions(ctx.fs, path);
@@ -78,6 +74,8 @@ export const cc007 = defineCheck({
     return h.fromEvidence(evidence, {
       passed: unverified.length > 0 && evidence.length === 0
         ? `apiKeyHelper script ${unverified.join(', ')} not verified — the probe doesn't collect it (checked on local scans)`
+        : missing.length > 0
+        ? `apiKeyHelper script ${missing.join(', ')} does not exist — nothing to replace`
         : 'apiKeyHelper script (if configured) has safe permissions',
       failed: (n) => `Found ${n} apiKeyHelper issue(s)`,
       fixDescription: 'Run `chmod 700` on the apiKeyHelper script and ensure its parent directory is not world-writable',
