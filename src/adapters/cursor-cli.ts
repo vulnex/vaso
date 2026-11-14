@@ -210,7 +210,8 @@ export const cursorCliAdapter: AgentAdapter = {
       }
       const skillsDirs: string[] = [];
       for (const rel of USER_SKILL_DIRS) {
-        if (await fs.access(join(home, rel))) skillsDirs.push(join(home, rel));
+        // A directory only — a file there is no skills dir, locally or in a snapshot
+        if (await fs.stat(join(home, rel)).then(st => st.isDirectory(), () => false)) skillsDirs.push(join(home, rel));
       }
 
       installations.push({

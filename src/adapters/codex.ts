@@ -164,7 +164,8 @@ async function codexSkillDirs(home: string, codexDir: string, fs: FSProvider): P
   const candidates = [join(codexDir, 'skills'), join(home, '.agents', 'skills')];
   if (home === fs.homedir()) candidates.push('/etc/codex/skills');
   const dirs: string[] = [];
-  for (const d of candidates) if (await fs.access(d)) dirs.push(d);
+  // A directory: a file at one of these paths is no skills dir (and a snapshot wouldn't list it as one)
+  for (const d of candidates) if (await fs.stat(d).then(st => st.isDirectory(), () => false)) dirs.push(d);
   return dirs.length > 0 ? { skillsDir: dirs[0], ...(dirs.length > 1 ? { skillsDirs: dirs } : {}) } : {};
 }
 

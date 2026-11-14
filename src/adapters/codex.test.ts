@@ -19,20 +19,27 @@ vi.mock('../core/config-loader.js', () => ({
   loadConfig: vi.fn(),
 }));
 
-import { access } from 'node:fs/promises';
+import { access, stat } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import { loadConfig } from '../core/config-loader.js';
 
 const mockAccess = vi.mocked(access);
+const mockStat = vi.mocked(stat);
 const mockExecFileSync = vi.mocked(execFileSync);
 const mockLoadConfig = vi.mocked(loadConfig);
 
-function setExistingPaths(paths: string[]): void {
-  const set = new Set(paths);
+function setExistingPaths(paths: string[], files: string[] = []): void {
+  const set = new Set([...paths, ...files]);
   mockAccess.mockImplementation(async (path) => {
     if (set.has(path as string)) return undefined;
     throw new Error('ENOENT');
   });
+  // Paths with an extension, and `files`, are files; the rest directories
+  mockStat.mockImplementation((async (path: string) => {
+    if (!set.has(path)) throw new Error('ENOENT');
+    const file = files.includes(path) || /\.\w+$/.test(path);
+    return { mode: file ? 0o100644 : 0o40755, isFile: () => file, isDirectory: () => !file };
+  }) as never);
 }
 
 function mockConfig(filePath: string, data: Record<string, unknown> = {}) {
@@ -87,6 +94,18 @@ describe('Codex adapter', () => {
     const [inst] = await codexAdapter.detect();
     expect(inst.skillsDir).toBe(join(codexDir, 'skills'));
     expect(inst.skillsDirs).toEqual([join(codexDir, 'skills'), agentsSkills]);
+  });
+
+  it('does not list a file at ~/.agents/skills as a skill root', async () => {
+    const configPath = join(codexDir, 'config.toml');
+    const agentsSkills = join(dirname(codexDir), '.agents', 'skills');
+    setExistingPaths([codexDir, configPath], [agentsSkills]);
+    mockLoadConfig.mockImplementation(async (path) => {
+      if (path === configPath) return mockConfig(configPath, {});
+      throw new Error('ENOENT');
+    });
+    const [inst] = await codexAdapter.detect();
+    expect(inst.skillsDirs ?? [inst.skillsDir]).not.toContain(agentsSkills);
   });
 
   it('reports installation when CLI binary exists but no config dir', async () => {
