@@ -246,6 +246,7 @@ export function parseServerMap(map: unknown): MCPServerEntry[] {
         ? Object.fromEntries(Object.entries(config.headers as Record<string, unknown>).map(([k, v]) => [k, String(v)]))
         : undefined,
       url: url ?? httpUrl,
+      ...(typeof config.cwd === 'string' && config.cwd !== '' ? { cwd: config.cwd } : {}),
       transport,
       ...(disabled ? { disabled: true } : {}),
     });

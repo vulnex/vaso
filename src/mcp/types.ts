@@ -9,6 +9,8 @@ export interface MCPServerEntry {
   /** HTTP headers for remote (SSE / streamable-HTTP) servers — commonly carries `Authorization`. */
   headers?: Record<string, string>;
   url?: string;
+  /** Working directory a stdio server is started in (`cwd`, Gemini CLI / VS Code): relative entry paths resolve against it. */
+  cwd?: string;
   transport: 'stdio' | 'sse' | 'streamable-http';
   /** Switched off in its config (`enabled: false`, `disabled: true`, a whole
    *  MCP section off): never launched. Discovery leaves these out unless asked
@@ -81,6 +83,12 @@ export interface MCPServerSource {
    * No source then — reported as an inventory note, not a failed read.
    */
   compiledBinary?: string;
+  /**
+   * The command runs local code, but no source was found to analyze — the
+   * entry file is missing, the code is inline (`node -e`) or remote
+   * (`deno run https://…`): why. An inventory note (MCP-001), not a failed read.
+   */
+  unanalyzed?: string;
   /** Packages the server ships with (its manifest/lockfile/installed copies), for MCP-027. */
   dependencies?: ServerDependency[];
   /**

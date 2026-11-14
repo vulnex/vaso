@@ -96,17 +96,19 @@ const UV_VALUE_FLAGS = new Set([
  * `--directory` (the MCP quickstart form is `uv --directory <dir> run server.py`).
  * Undefined when the run target is a package/console script, not a `.py` file.
  */
-export function uvRunScript(args: string[]): string | undefined {
-  let directory: string | undefined;
+export function uvRunScript(args: string[], base?: string): string | undefined {
+  let directory: string | undefined = base;
   let afterRun = false;
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg === '--directory' || arg === '--project') {
-      directory = args[++i];
+      const dir = args[++i] ?? '';
+      directory = base ? resolve(base, dir) : dir;
       continue;
     }
     if (arg.startsWith('--directory=')) {
-      directory = arg.slice('--directory='.length);
+      const dir = arg.slice('--directory='.length);
+      directory = base ? resolve(base, dir) : dir;
       continue;
     }
     if (UV_VALUE_FLAGS.has(arg)) { i++; continue; }
@@ -123,13 +125,13 @@ export function uvRunScript(args: string[]): string | undefined {
   return undefined;
 }
 
-function pythonScript(args: string[]): string | undefined {
+function pythonScript(args: string[], base?: string): string | undefined {
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg === '-m' || arg === '-c') return undefined; // module / inline code, no file
     if (PYTHON_VALUE_FLAGS.has(arg)) { i++; continue; }
     if (arg.startsWith('-')) continue;
-    return resolve(arg);
+    return base ? resolve(base, arg) : resolve(arg);
   }
   return undefined;
 }
@@ -157,38 +159,237 @@ const LAUNCHERS = new Set([
   'ruby', 'perl', 'php', 'java', 'dotnet', 'go', 'cargo', 'lua', 'osascript', 'open',
 ]);
 
-export function resolveLocalPath(server: MCPServerEntry): string | undefined {
-  if (!server.command) return undefined;
+/**
+ * What a server's command runs from local disk: the entry file, modules
+ * preloaded into it (`node -r ./setup.js`, `--import ./register.mjs`), or a
+ * package directory whose script starts it (`pnpm --dir d start`). `note`
+ * says why a runner that executes local code named no file this scan can
+ * read (`node -e …`, a remote `deno run https://…`).
+ */
+export interface LaunchTarget {
+  entry?: string;
+  preloads: string[];
+  /** A local package directory whose package.json script (`script`) or main starts the server. */
+  packageDir?: string;
+  script?: string;
+  note?: string;
+  /** The OS runs `entry` itself (the command is the server's path): its magic bytes decide what it is. */
+  executed?: boolean;
+}
+
+/** node options that take the next argument as their value (`--opt value`). */
+const NODE_VALUE_FLAGS = new Set([
+  '-r', '--require', '--import', '--loader', '--experimental-loader', '--env-file', '--env-file-if-exists',
+  '-C', '--conditions', '--input-type', '--title', '--inspect-port', '--debug-port', '--redirect-warnings',
+  '--report-dir', '--report-directory', '--report-filename', '--diagnostic-dir', '--cpu-prof-dir', '--cpu-prof-name',
+  '--heap-prof-dir', '--heap-prof-name', '--openssl-config', '--icu-data-dir', '--tls-cipher-list', '--secure-heap',
+  '--secure-heap-min', '--disable-warning', '--watch-path', '--experimental-config-file', '--max-old-space-size',
+  '--max-semi-space-size', '--stack-size', '--stack-trace-limit', '--unhandled-rejections', '--dns-result-order',
+  '--experimental-default-type', '--localstorage-file', '--snapshot-blob', '--experimental-sea-config',
+  '--watch-kill-signal', '--test-reporter', '--test-reporter-destination',
+  // tsx / ts-node
+  '--tsconfig', '-P', '--project', '-O', '--compiler-options', '--compiler', '--cwd', '--dir',
+  // bun
+  '--preload', '--config', '-c', '--tsconfig-override', '--main-fields', '-d', '--define', '-l', '--port',
+]);
+/** Options whose value is a module loaded before the entry. */
+const NODE_PRELOAD_FLAGS = new Set(['-r', '--require', '--import', '--loader', '--experimental-loader', '--preload']);
+/** Options that run code given on the command line instead of a file. */
+const NODE_INLINE_FLAGS = new Set(['-e', '--eval', '-p', '--print']);
+/** deno options that take the next argument as their value. */
+const DENO_VALUE_FLAGS = new Set(['--config', '-c', '--import-map', '--lock', '--cert', '--location', '--seed', '--ext', '--watch-exclude', '--preload']);
+
+/** A module specifier that is a file on disk, not a package (`dotenv/config`, `tsx`). */
+function isLocalSpecifier(spec: string): boolean {
+  return /^(?:\.{1,2}[\\/]|[\\/]|[A-Za-z]:[\\/]|file:)/.test(spec);
+}
+
+function localFile(spec: string, base: string | undefined): string {
+  const path = spec.startsWith('file://') ? decodeURIComponent(spec.slice('file://'.length)) : spec.replace(/^file:/, '');
+  return base ? resolve(base, path) : resolve(path);
+}
+
+/**
+ * The script a node-style runner (node, tsx, ts-node, bun) executes: the
+ * first positional argument, past option values (`-r dotenv/config`,
+ * `--env-file .env`, `--max-old-space-size 4096`), with local preloads
+ * collected on the way.
+ */
+function nodeStyleTarget(args: string[], base: string | undefined, subcommands: Set<string> = new Set()): LaunchTarget {
+  const preloads: string[] = [];
+  let cwd = base;
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === '--') {
+      const next = args[i + 1];
+      return next ? { entry: localFile(next, cwd), preloads } : { preloads, note: 'no script file in its arguments' };
+    }
+    if (arg === '-') return { preloads, note: 'reads its code from stdin' };
+    const inline = /^(-{1,2}[\w-]+)=(.*)$/.exec(arg);
+    const flag = inline ? inline[1] : arg;
+    if (NODE_INLINE_FLAGS.has(flag)) return { preloads, note: `runs inline code (${flag})` };
+    if (arg.startsWith('-')) {
+      if (!NODE_VALUE_FLAGS.has(flag)) continue;
+      const value = inline ? inline[2] : args[++i];
+      if (value === undefined) continue;
+      if (flag === '--cwd') cwd = cwd ? resolve(cwd, value) : resolve(value);
+      else if (NODE_PRELOAD_FLAGS.has(flag) && isLocalSpecifier(value)) preloads.push(localFile(value, cwd));
+      continue;
+    }
+    if (subcommands.has(arg)) continue;
+    return { entry: localFile(arg, cwd), preloads };
+  }
+  return { preloads, note: 'no script file in its arguments' };
+}
+
+/** Packages that run a local file (`npx -y tsx@4 server.ts`). */
+const FILE_RUNNER_PACKAGES = new Set(['tsx', 'ts-node', 'esno', 'bun']);
+
+/** A file a JS/TS runner executes, not a package.json script name. */
+const SCRIPT_FILE = /\.(?:[mc]?[jt]s|[jt]sx)$/i;
+
+export function launchTarget(server: MCPServerEntry): LaunchTarget {
+  const none: LaunchTarget = { preloads: [] };
+  if (!server.command) return none;
 
   const cmd = server.command;
   const args = server.args ?? [];
+  const base = server.cwd ? resolve(server.cwd) : undefined;
+  const runner = runnerName(cmd).toLowerCase();
 
-  // A package runner given by path runs a published package, not this file.
-  if (PACKAGE_RUNNERS.has(runnerName(cmd))) return undefined;
+  // A package runner fetches and runs a published package, not a local file —
+  // unless that package is a script runner (`npx -y tsx server.ts`)
+  if (PACKAGE_RUNNERS.has(runner)) {
+    if (runner === 'npx' || runner === 'bunx' || runner === 'pnpx') {
+      const spec = inferPackageName(server);
+      const name = spec?.replace(/(?!^)@[^/]*$/, '');
+      if (spec && name && FILE_RUNNER_PACKAGES.has(name)) {
+        return nodeStyleTarget(args.slice(args.indexOf(spec) + 1), base, new Set(['watch']));
+      }
+    }
+    return none;
+  }
 
   // Interpreter + script, also when the interpreter is given by path — an
   // absolute nvm `node` or venv `python` is the norm in desktop configs, and
   // reading the interpreter binary as "server source" analyzed nothing.
   switch (interpreterOf(cmd)) {
     case 'node':
-      for (const arg of args) {
-        if (arg.startsWith('-')) continue;
-        return resolve(arg);
+      return nodeStyleTarget(args, base);
+    case 'python': {
+      const script = pythonScript(args, base);
+      if (script) return { entry: script, preloads: [] };
+      // `python -m pkg` runs an installed module
+      return args.includes('-m') ? none : { preloads: [], note: args.includes('-c') ? 'runs inline code (-c)' : 'no script file in its arguments' };
+    }
+    case 'uv': {
+      const script = uvRunScript(args, base);
+      return script ? { entry: script, preloads: [] } : none;
+    }
+  }
+
+  switch (runner) {
+    case 'tsx':
+    case 'ts-node':
+    case 'ts-node-esm':
+    case 'esno':
+      return nodeStyleTarget(args, base, new Set(['watch']));
+    case 'bun': {
+      const target = nodeStyleTarget(args, base, new Set(['run']));
+      const positional = args.find((a) => !a.startsWith('-') && a !== 'run');
+      // `bun run start` runs a package.json script; `bun x pkg` / `bun add` are package commands
+      if (target.entry && positional && !SCRIPT_FILE.test(positional) && !isLocalSpecifier(positional)) {
+        if (['x', 'add', 'install', 'i', 'create', 'init', 'pm', 'link'].includes(positional)) return none;
+        return { preloads: target.preloads, packageDir: base ?? process.cwd(), script: positional };
       }
-      return undefined;
-    case 'python':
-      return pythonScript(args);
-    case 'uv':
-      return uvRunScript(args);
+      return target;
+    }
+    case 'deno': {
+      const target = denoRunTarget(args);
+      if (!target) return none;
+      if (/^https?:/i.test(target)) return { preloads: [], note: `runs a remote module (${target})` };
+      if (/^(?:npm|jsr):/i.test(target)) return none;
+      return { entry: localFile(target, base), preloads: [] };
+    }
+    case 'fastmcp':
+    case 'mcp': {
+      // `fastmcp run server.py[:app]`, `mcp run server.py`
+      if (args[0] !== 'run' && args[0] !== 'dev') return none;
+      const file = args.slice(1).find((a) => !a.startsWith('-'));
+      if (!file) return { preloads: [], note: 'no script file in its arguments' };
+      const path = file.replace(/:[A-Za-z_][\w.]*$/, '');
+      return /\.py$/i.test(path) ? { entry: localFile(path, base), preloads: [] } : none;
+    }
+    case 'npm':
+    case 'pnpm':
+    case 'yarn': {
+      const run = packageScriptRun(args);
+      if (!run) return none;
+      const dir = run.dir ? (base ? resolve(base, run.dir) : resolve(run.dir)) : (base ?? process.cwd());
+      return { preloads: [], packageDir: dir, script: run.script };
+    }
   }
 
   // Direct path execution — of the server itself, not a launcher that runs
   // something else (`/usr/bin/env npx …`, `/bin/bash -c`, `docker run`)
-  if ((cmd.startsWith('/') || cmd.startsWith('./') || cmd.startsWith('../')) && !LAUNCHERS.has(runnerName(cmd).toLowerCase())) {
-    return resolve(cmd);
+  if ((cmd.startsWith('/') || cmd.startsWith('./') || cmd.startsWith('../')) && !LAUNCHERS.has(runner)) {
+    return { entry: base && !cmd.startsWith('/') ? resolve(base, cmd) : resolve(cmd), preloads: [], executed: true };
   }
 
+  return none;
+}
+
+/**
+ * The module `deno run|serve [flags] <module>` executes (a path, URL or
+ * `npm:`/`jsr:` specifier); undefined for other subcommands (`deno task`).
+ */
+export function denoRunTarget(args: string[]): string | undefined {
+  let sub: string | undefined;
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg.startsWith('-')) {
+      if (sub && DENO_VALUE_FLAGS.has(arg)) i++;
+      continue;
+    }
+    if (!sub) {
+      if (arg !== 'run' && arg !== 'serve') return undefined;
+      sub = arg;
+      continue;
+    }
+    return arg;
+  }
   return undefined;
+}
+
+/** npm/pnpm/yarn options naming the package directory, and other options that take a value. */
+const PM_DIR_FLAGS = new Set(['--dir', '-C', '--cwd', '--prefix']);
+const PM_VALUE_FLAGS = new Set(['--filter', '-F', '--workspace', '-w', '--userconfig', '--cache', '--registry']);
+
+/**
+ * `pnpm --dir d start`, `yarn --cwd d run serve`, `npm --prefix d start`:
+ * the package directory and the script name. Undefined for installs and
+ * package fetches (`dlx`, `exec`, `x`).
+ */
+export function packageScriptRun(args: string[]): { dir?: string; script: string } | undefined {
+  let dir: string | undefined;
+  let sawRun = false;
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    const inline = /^(--[\w-]+)=(.*)$/.exec(arg);
+    if (inline && PM_DIR_FLAGS.has(inline[1])) { dir = inline[2]; continue; }
+    if (PM_DIR_FLAGS.has(arg)) { dir = args[++i]; continue; }
+    if (PM_VALUE_FLAGS.has(arg)) { i++; continue; }
+    if (arg.startsWith('-')) continue;
+    if (!sawRun && (arg === 'run' || arg === 'run-script')) { sawRun = true; continue; }
+    if (!sawRun && ['dlx', 'exec', 'x', 'add', 'install', 'i', 'ci', 'create', 'init', 'link'].includes(arg)) return undefined;
+    return { dir, script: arg };
+  }
+  return undefined;
+}
+
+/** The entry file of `launchTarget`. */
+export function resolveLocalPath(server: MCPServerEntry): string | undefined {
+  return launchTarget(server).entry;
 }
 
 /** Python when run through a Python interpreter/uv, named `.py`, or with a python shebang. */
@@ -309,6 +510,39 @@ async function declaredEntries(dir: string, fs: FSProvider): Promise<string[]> {
   return out;
 }
 
+/**
+ * What `<pm> run <script>` in a local package starts: the file the
+ * package.json script runs (`"start": "node dist/index.js"`), read with the
+ * same launcher rules as a config command; else the package directory, whose
+ * declared entry findMainEntry() picks (npm's default `start` runs
+ * `server.js`, one of its candidates).
+ */
+async function packageScriptEntry(dir: string, script: string | undefined, fs: FSProvider): Promise<{ path?: string; note?: string }> {
+  let pkg: { scripts?: Record<string, unknown> } | undefined;
+  try {
+    pkg = JSON.parse(await fs.readFile(join(dir, 'package.json')));
+  } catch {
+    return (await fs.stat(dir).then((st) => st.isDirectory(), () => false))
+      ? { path: dir }
+      : { note: `package directory ${dir} not found` };
+  }
+  const line = script ? pkg?.scripts?.[script] : undefined;
+  const command = typeof line === 'string' ? line : undefined;
+  if (command) {
+    // the first command of the script, plain words only (`cross-env X=1 node a.js && …` stops at &&)
+    const words = command.split(/\s*(?:&&|\|\||;)\s*/)[0].trim().split(/\s+/).filter((w) => !/^[A-Z_][A-Z0-9_]*=/.test(w));
+    if (words[0] === 'cross-env' || words[0] === 'env') words.shift();
+    if (words.length > 0) {
+      const inner = launchTarget({ name: script ?? 'start', command: words[0], args: words.slice(1), cwd: dir, transport: 'stdio' });
+      // an unbuilt checkout's `node dist/index.js`: its TypeScript source, else the package's entry
+      for (const file of inner.entry ? [inner.entry, ...sourceTwins(dir, inner.entry)] : []) {
+        if (await isFile(file, fs)) return { path: file };
+      }
+    }
+  }
+  return { path: dir };
+}
+
 async function findMainEntry(dir: string, fs: FSProvider): Promise<string | undefined> {
   const [declared] = await declaredEntries(dir, fs);
   if (declared) return declared;
@@ -356,7 +590,15 @@ export async function resolveServerSources(
 
   for (const server of servers) {
     const packageName = inferPackageName(server);
-    const localPath = resolveLocalPath(server);
+    const target = launchTarget(server);
+    // Why a runner of local code left nothing to analyze (MCP-001 lists it)
+    let unanalyzed = target.note;
+    let localPath = target.entry;
+    if (!localPath && target.packageDir) {
+      const started = await packageScriptEntry(target.packageDir, target.script, provider);
+      localPath = started.path;
+      unanalyzed ??= started.note;
+    }
 
     let sourceCode: string | undefined;
     let entryFile: string | undefined;
@@ -375,7 +617,7 @@ export async function resolveServerSources(
     let launchedEntry: string | undefined;
     if (localPath) {
       // Run by the OS itself (no interpreter in the config): its magic bytes decide what it is
-      const executed = !interpreterOf(server.command ?? '');
+      const executed = target.executed === true;
       sourceCode = await readSourceFile(localPath, provider, denied, binary, executed);
       if (sourceCode) entryFile = localPath;
       // A shell launcher (`exec node "$(dirname "$0")/real.js"`): the server's code is the file it starts
@@ -403,6 +645,13 @@ export async function resolveServerSources(
           });
         }
       }
+      // The command names a file that isn't there (a moved checkout, a typo):
+      // the server can't start as configured, and nothing was analyzed
+      if (!sourceCode && !compiledBinary && !readFailure) {
+        unanalyzed ??= (await provider.stat(localPath).then((st) => st.isDirectory(), () => undefined)) === undefined
+          ? `entry file ${localPath} not found`
+          : `no entry file found in ${localPath}`;
+      }
     }
 
     // Opt-in: resolve npm-packaged servers so their source feeds the AST/tool
@@ -427,6 +676,14 @@ export async function resolveServerSources(
     let partialFailure: string | undefined;
     if (sourceCode && entryFile) {
       const files = language === 'python' ? await withPythonPackage(entryFile, provider, hidden) : await withLocalImports(entryFile, sourceCode, provider, undefined, hidden);
+      // Local modules preloaded into the entry (`node -r ./setup.js`) run as part of the server
+      for (const preload of language === 'python' ? [] : target.preloads) {
+        const code = await readSourceFile(preload, provider, (message) => hidden.push({ path: preload, reason: message }));
+        if (!code) continue;
+        for (const file of await withLocalImports(preload, code, provider, undefined, hidden)) {
+          if (!files.includes(file)) files.push(file);
+        }
+      }
       if (files.length > 1) {
         const root = language === 'python' ? dirname(entryFile) : await serverRoot(entryFile, provider);
         const read = await readServerFiles(files, root, provider, new Map([[entryFile, sourceCode]]));
@@ -447,6 +704,7 @@ export async function resolveServerSources(
       ...(readFailure && !sourceCode ? { readFailure } : {}),
       ...(partialFailure ? { readFailure: partialFailure } : {}),
       ...(compiledBinary && !sourceCode ? { compiledBinary } : {}),
+      ...(unanalyzed && !sourceCode && !compiledBinary && !readFailure && !resolveFailure ? { unanalyzed } : {}),
       ...(sourceRoot ? { sourceRoot } : {}),
     };
     if (language === 'python') {

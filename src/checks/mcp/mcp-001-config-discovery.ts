@@ -50,10 +50,24 @@ export const mcp001 = defineCheck({
         detail: `${kind} — source not analysed`,
       });
     }
-    if (compiled.length > 0) {
+    // Local code the source checks could not see: a missing entry file,
+    // inline (`node -e`) or remote (`deno run https://…`) code
+    const unanalyzed = (ctx.mcpServerSources ?? []).filter((s) => s.unanalyzed);
+    for (const s of unanalyzed) {
+      evidence.push({
+        file: s.localPath ?? s.serverName,
+        snippet: `Server: ${s.serverName} (source not analysed)`,
+        detail: `${s.unanalyzed} — source not analysed`,
+      });
+    }
+    if (compiled.length > 0 || unanalyzed.length > 0) {
+      const notes = [
+        compiled.length > 0 ? `${compiled.length} run a compiled binary` : null,
+        unanalyzed.length > 0 ? `${unanalyzed.length} name no source this scan could read` : null,
+      ].filter(Boolean).join(', ');
       return h.result({
         passed: false,
-        message: `${found}; ${compiled.length} run a compiled binary — source not analysed`,
+        message: `${found}; ${notes} — source not analysed`,
         evidence,
       });
     }
