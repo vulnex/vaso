@@ -65,6 +65,9 @@ describe('probe coverage', () => {
     expect(probeCoversTree(fs, `${HOME}/.nanobot/workspace/skills`)).toBe(true);
     expect(probeCoversTree(fs, `${HOME}/.claude/skills`)).toBe(true);
     expect(probeCoversTree(fs, `${HOME}/.zeroclaw/agents/main/workspace/skills`)).toBe(true);
+    // OpenClaw profiles and legacy dirs have a default workspace too
+    expect(probeCoversTree(fs, `${HOME}/.openclaw-ops/workspace/skills`)).toBe(true);
+    expect(probeCoversTree(fs, `${HOME}/.clawdbot/workspace/skills`)).toBe(true);
     expect(probeCoversFile(fs, `${HOME}/.hermes/config.yaml`)).toBe(true);
     expect(probeCoversFile(fs, `${HOME}/.claude/skills/x/run.sh`)).toBe(true);
   });

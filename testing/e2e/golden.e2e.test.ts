@@ -35,6 +35,9 @@ import type { AgentScanResult, ScanResult, Severity } from '../../src/core/types
  *            mitigated and has nothing to fix
  *   modes    { "<path under home>": "600" } — git keeps only 644/755 file
  *            modes and none for directories, so permissions are set here
+ *   localOnly  check ids whose evidence names a path the remote probe never
+ *            collects (an MCP server's command outside the manifest): their
+ *            links in the MCP inventory are compared on local scans only
  *   env      { "<NAME>": "<value>" } — extra environment for the scan, the
  *            probe and the fix ({{HOME}} substituted), e.g. a relocated
  *            system directory such as HERMES_MANAGED_DIR
@@ -63,6 +66,7 @@ interface GoldenCase {
   cleanIgnore?: string[];
   modes?: Record<string, string>;
   env?: Record<string, string>;
+  localOnly?: string[];
   reachable?: boolean;
   /** Skip on these platforms (fixtures relying on POSIX modes). */
   skipOn?: NodeJS.Platform[];
@@ -222,9 +226,18 @@ describe.each(caseNames)('golden: %s', (name) => {
     expect(key(remote)).toEqual(key(local));
     // The skill inventory too — descriptions aside: the probe disguises
     // secrets in what it ships, so a masked description may differ
+    const localOnly = new Set(spec.localOnly ?? []);
     const inventory = (as: AgentScanResult[]) => Object.fromEntries(as.map(a => {
       const inv = a.installation.inventory;
-      return [a.installation.installDir, inv && { ...inv, skills: inv.skills.map(({ description: _d, ...s }) => s) }];
+      const servers = inv?.mcpServers?.map(({ findings, ...s }) => {
+        const kept = (findings ?? []).filter(id => !localOnly.has(id));
+        return kept.length > 0 ? { ...s, findings: kept } : s;
+      });
+      return [a.installation.installDir, inv && {
+        ...inv,
+        skills: inv.skills.map(({ description: _d, ...s }) => s),
+        ...(servers ? { mcpServers: servers } : {}),
+      }];
     }));
     expect(inventory(remote)).toEqual(inventory(local));
   }, 120_000);

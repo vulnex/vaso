@@ -12,5 +12,8 @@
   },
   "modes": {
     "tools/mcp-bin": "777"
-  }
+  },
+  "localOnly": [
+    "HM-010"
+  ]
 }

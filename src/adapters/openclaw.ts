@@ -589,6 +589,8 @@ export const openclawAdapter: AgentAdapter = {
         '~/.openclaw-*/.env',
         '~/.openclaw-*/**/*.json5',
         '~/.openclaw-*/skills/**',
+        // a profile's default workspace skills/ (as for ~/.openclaw)
+        '~/.openclaw-*/workspace/skills/**',
         '~/.openclaw/agents/*/agent.yaml',
         '~/.openclaw/agents/*/agent.json',
         '~/.openclaw/agents/*/config.yaml',
@@ -596,7 +598,7 @@ export const openclawAdapter: AgentAdapter = {
         '~/.openclaw/agents/*/.env',
         '~/.openclaw/agents/*/skills/**',
         // Legacy dirs load skills the same way
-        ...['~/.clawdbot', '~/.moltbot'].flatMap(d => [`${d}/skills/**`, `${d}/agents/*/skills/**`]),
+        ...['~/.clawdbot', '~/.moltbot'].flatMap(d => [`${d}/skills/**`, `${d}/agents/*/skills/**`, `${d}/workspace/skills/**`]),
       ],
       commands: [
         { id: 'openclaw-which', cmd: 'which', args: ['openclaw'], timeout: 3000 },
