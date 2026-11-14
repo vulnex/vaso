@@ -42,7 +42,7 @@ describe('library entry point', () => {
   it('registers all built-in adapters and checks through the library surface', () => {
     expect(vaso.allAdapters.length).toBe(26);
     expect(vaso.adapterRegistry.getAdapters().length).toBe(26);
-    expect(vaso.checkRegistry.getAll().length).toBe(367);
+    expect(vaso.checkRegistry.getAll().length).toBe(368);
   });
 
   it('runs a programmatic scan end-to-end against a hermetic provider', async () => {
