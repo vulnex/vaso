@@ -1,5 +1,5 @@
 import { readFile, stat } from 'node:fs/promises';
-import { isAbsolute } from 'node:path';
+import { isAbsolute, posix } from 'node:path';
 import type { ProbeSnapshot } from './snapshot-types.js';
 import { neutralizeSnapshotIdentity } from './snapshot-identity.js';
 
@@ -49,6 +49,14 @@ function isMode(v: unknown): boolean {
   return Number.isInteger(v) && (v as number) >= 0 && (v as number) <= 0o7777;
 }
 
+/** `process.platform` values (core/types.ts Platform); the probe reports linux or darwin. */
+const PLATFORMS = new Set(['aix', 'android', 'darwin', 'freebsd', 'haiku', 'linux', 'openbsd', 'sunos', 'win32', 'cygwin', 'netbsd']);
+
+/** A record whose values are all strings. */
+function isStringRecord(v: unknown): boolean {
+  return isRecord(v) && Object.values(v).every(x => typeof x === 'string');
+}
+
 /** Every problem that makes `value` unusable as a snapshot; empty when valid. */
 export function validateSnapshot(value: unknown): string[] {
   if (!isRecord(value)) return ['Snapshot is not a JSON object'];
@@ -56,6 +64,8 @@ export function validateSnapshot(value: unknown): string[] {
   const errors: string[] = [];
   if (s.version !== 1) errors.push(`Unsupported snapshot version: ${String(s.version)}`);
   if (typeof s.platform !== 'string' || !s.platform) errors.push('Missing platform field');
+  // Checks branch on it, and it is printed: one of Node's platform names
+  else if (!PLATFORMS.has(s.platform)) errors.push(`Unknown platform "${s.platform.slice(0, 40)}" (expected ${[...PLATFORMS].join(', ')})`);
   if (typeof s.hostname !== 'string' || !s.hostname) errors.push('Missing hostname field');
   // Adapters resolve every user path from it; without one detection runs blind
   if (typeof s.homedir !== 'string' || !isAbsolute(s.homedir)) errors.push('Missing or relative homedir field');
@@ -95,7 +105,9 @@ export function validateSnapshot(value: unknown): string[] {
     errors.push('Invalid owners field ([uid, gid] pairs expected)');
   }
   if (!isRecord(s.commandOutputs)) errors.push('Missing or invalid commandOutputs field');
-  if (s.env !== undefined && !isRecord(s.env)) errors.push('Invalid env field');
+  if (s.env !== undefined && !isStringRecord(s.env)) errors.push('Invalid env field (string values expected)');
+  if (s.symlinks !== undefined && !isStringRecord(s.symlinks)) errors.push('Invalid symlinks field (link targets expected)');
+  if (s.timestamp !== undefined && typeof s.timestamp !== 'string') errors.push('Invalid timestamp field');
   if (s.probeVersion !== undefined && typeof s.probeVersion !== 'string') errors.push('Invalid probeVersion field (a version string expected)');
   if (s.privilege !== undefined) {
     const p = s.privilege;
@@ -111,7 +123,11 @@ export function validateSnapshot(value: unknown): string[] {
 export async function loadSnapshotFile(path: string): Promise<ProbeSnapshot> {
   let raw: string;
   try {
-    const size = (await stat(path)).size;
+    const info = await stat(path);
+    // A FIFO would block forever; a device such as /dev/zero reports size 0
+    // and never ends
+    if (!info.isFile()) throw new SnapshotLoadError(`Snapshot ${path} is not a regular file`);
+    const size = info.size;
     if (size > MAX_REMOTE_OUTPUT_BYTES) {
       throw new SnapshotLoadError(`Snapshot file is ${MiB(size)}, larger than any probe run produces (${MiB(MAX_REMOTE_OUTPUT_BYTES)})`);
     }
@@ -142,7 +158,18 @@ export function parseSnapshot(raw: string, what: string): ProbeSnapshot {
 
   const problems = validateSnapshot(parsed);
   if (problems.length > 0) throw new SnapshotLoadError(`Invalid ${what.charAt(0).toLowerCase()}${what.slice(1)}:`, problems);
-  return neutralizeSnapshotIdentity(parsed as ProbeSnapshot);
+  const snapshot = parsed as ProbeSnapshot;
+  // Adapters join user paths onto it and compare it with collected paths:
+  // `/home/u/` or `/home/x/../u` would match none of them
+  snapshot.homedir = normalizeHome(snapshot.homedir);
+  return neutralizeSnapshotIdentity(snapshot);
+}
+
+/** An absolute home path without `.`/`..` segments or a trailing slash (POSIX or Windows-style). */
+function normalizeHome(home: string): string {
+  if (!home.startsWith('/')) return home;
+  const normal = posix.normalize(home);
+  return normal.length > 1 && normal.endsWith('/') ? normal.slice(0, -1) : normal;
 }
 
 /** Lines to print for a SnapshotLoadError. */

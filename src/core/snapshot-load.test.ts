@@ -89,6 +89,42 @@ describe('loadSnapshotFile', () => {
     await writeFile(path, JSON.stringify(snap({ hostname: 'web-01.example.com' })));
     expect((await loadSnapshotFile(path)).hostname).toBe('web-01.example.com');
   });
+
+  it('neutralizes the probe version and timestamp it prints', async () => {
+    const path = join(dir, 'esc.json');
+    await writeFile(path, JSON.stringify(snap({ probeVersion: '1.4.1\u001b[2J', timestamp: 't‮' })));
+    const s = await loadSnapshotFile(path);
+    expect(s.probeVersion).toBe('1.4.1\\x1b[2J');
+    expect(s.timestamp).toBe('t\\u202e');
+  });
+
+  it('normalizes the home directory', async () => {
+    const path = join(dir, 'home.json');
+    await writeFile(path, JSON.stringify(snap({ homedir: '/home/x/../u/' })));
+    expect((await loadSnapshotFile(path)).homedir).toBe('/home/u');
+  });
+
+  it('reads only a regular file: a FIFO or a device is refused, not waited on or read', async () => {
+    const { execFileSync } = await import('node:child_process');
+    const fifo = join(dir, 'fifo.json');
+    execFileSync('mkfifo', [fifo]);
+    await expect(loadSnapshotFile(fifo)).rejects.toThrow(/not a regular file/);
+    await expect(loadSnapshotFile('/dev/zero')).rejects.toThrow(/not a regular file/);
+    await expect(loadSnapshotFile(dir)).rejects.toThrow(/not a regular file/);
+  });
+});
+
+describe('validateSnapshot: platform, env and symlinks', () => {
+  it('accepts only Node platform names', () => {
+    expect(validateSnapshot(snap({ platform: 'darwin' }))).toEqual([]);
+    expect(validateSnapshot(snap({ platform: 'linux\u001b[2J' })).some(e => e.startsWith('Unknown platform'))).toBe(true);
+  });
+
+  it('requires string env values and symlink targets', () => {
+    expect(validateSnapshot(snap({ env: { A: 1 } }))).toContain('Invalid env field (string values expected)');
+    expect(validateSnapshot(snap({ symlinks: { '/a': { x: 1 } } }))).toContain('Invalid symlinks field (link targets expected)');
+    expect(validateSnapshot(snap({ symlinks: { '/a': '/b' } }))).toEqual([]);
+  });
 });
 
 describe('probeVersionWarning', () => {
