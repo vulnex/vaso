@@ -1,0 +1,8 @@
+{
+  "agent": "codex",
+  "source": "Codex docs (learn.chatgpt.com/docs/config-file): a trusted project's .codex/config.toml layer disabling approvals and the sandbox, in a usual clone dir (collected by the probe too)",
+  "fail": {
+    "CDX-001": "critical",
+    "CDX-002": "critical"
+  }
+}

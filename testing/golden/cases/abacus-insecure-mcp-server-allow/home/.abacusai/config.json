@@ -1,0 +1,13 @@
+{
+  "permissionMode": "supervise",
+  "permissions": {
+    "allow": [
+      "mcp__playwright",
+      "mcp__github__*",
+      "Edit(//etc/**)"
+    ],
+    "deny": [
+      "Bash(rm -rf *)"
+    ]
+  }
+}

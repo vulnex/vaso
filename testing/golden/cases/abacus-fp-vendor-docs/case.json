@@ -1,0 +1,16 @@
+{
+  "agent": "abacus",
+  "source": "Abacus.AI docs (abacus.ai/help/abacusai-desktop/permissions, /mcp-configuration): workspace-anchored rule paths (/src/**, /**), the default auto mode, an OAuth clientSecret placeholder and a Cline autoApprove list (ignored by Abacus.AI)",
+  "clean": true,
+  "pass": [
+    "ABA-001",
+    "ABA-002",
+    "ABA-004",
+    "ABA-008"
+  ],
+  "modes": {
+    ".abacusai": "700",
+    ".abacusai/config.json": "600",
+    ".abacusai/mcp.json": "600"
+  }
+}

@@ -1,0 +1,9 @@
+approval_policy = "on-request"
+default_permissions = ":danger-full-access"
+
+[shell_environment_policy]
+inherit = "core"
+
+[mcp_servers.x]
+command = "/opt/x/bin/server"
+default_tools_approval_mode = "approve"

@@ -1,0 +1,12 @@
+{
+  "agent": "abacus",
+  "source": "Abacus.AI docs (abacus.ai/help/abacusai-desktop/permissions): \"mcp__<server>\" allows every tool of a server; \"//path\" anchors at the filesystem root",
+  "fail": {
+    "ABA-008": "warning",
+    "ABA-002": "critical"
+  },
+  "modes": {
+    ".abacusai": "700",
+    ".abacusai/config.json": "600"
+  }
+}

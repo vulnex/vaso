@@ -1,0 +1,25 @@
+{
+  "mcpServers": {
+    "github": {
+      "url": "https://api.githubcopilot.com/mcp/",
+      "headers": {
+        "Authorization": "Bearer ${GITHUB_TOKEN}"
+      }
+    },
+    "internal-api": {
+      "url": "https://mcp.internal.example.com/mcp",
+      "oauth": {
+        "clientId": "abacus-agent",
+        "clientSecret": "<only if your provider issued one>",
+        "scope": "read write offline_access"
+      }
+    },
+    "cline": {
+      "command": "/opt/srv/bin/server",
+      "args": [],
+      "autoApprove": [
+        "*"
+      ]
+    }
+  }
+}

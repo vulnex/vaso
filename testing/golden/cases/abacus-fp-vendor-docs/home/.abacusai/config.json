@@ -1,0 +1,23 @@
+{
+  "permissionMode": "auto",
+  "permissions": {
+    "allow": [
+      "Bash(git log *)",
+      "Bash(npm test *)",
+      "Read",
+      "Edit(/src/**)",
+      "Edit(/docs/**)",
+      "Edit(/**)",
+      "mcp__github__get_issue"
+    ],
+    "ask": [
+      "Edit(src/generated/**)"
+    ],
+    "deny": [
+      "Read(.env)",
+      "Bash(rm -rf *)",
+      "mcp__github__delete_repo"
+    ]
+  },
+  "autoUpdate": "auto"
+}

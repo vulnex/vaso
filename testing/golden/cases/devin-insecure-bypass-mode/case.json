@@ -1,0 +1,10 @@
+{
+  "agent": "devin",
+  "source": "Devin CLI docs (docs.devin.ai/cli/reference/configuration/config-file): permission_mode \"dangerous\" starts sessions in Bypass mode",
+  "fail": {
+    "DEV-001": "critical"
+  },
+  "modes": {
+    ".local/share/devin/credentials.toml": "600"
+  }
+}

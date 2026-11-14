@@ -1,0 +1,8 @@
+{
+  "agent": "codex",
+  "source": "Codex docs (learn.chatgpt.com/docs/permissions, /docs/extend/mcp): default_permissions = \":danger-full-access\" and an MCP server pre-approving every tool",
+  "fail": {
+    "CDX-002": "critical",
+    "CDX-001": "warning"
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "agent": "opencode",
+  "source": "OpenCode V2 config (opencode.ai/docs/config, /permissions, /mcp-servers): permissions rules, mcp.servers, plugins, snapshots, update",
+  "fail": {
+    "OPC-002": "critical",
+    "OPC-003": "warning",
+    "OPC-005": "warning",
+    "OPC-011": "info",
+    "OPC-012": "info"
+  }
+}
