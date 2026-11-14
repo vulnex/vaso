@@ -21,6 +21,9 @@ export interface ManifestEntry {
   before?: string;
   /** sha256 after the run's fixes (files); absent while a fix is running. */
   after?: string;
+  /** Mode after the run's fixes (all kinds; 1.4.2+). Equal to `mode` when the
+   *  run never changed it — rollback then leaves the current mode alone. */
+  afterMode?: number;
   /** Where the path resolved when backed up (its directory's real path, or
    *  the directory's own) and who owned it: rollback refuses a path that has
    *  since been re-pointed through a symlinked directory or handed to another

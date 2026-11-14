@@ -42,6 +42,8 @@ export async function rollback(timestamp?: string, options: { dryRun?: boolean }
 
   if (!await pathExists(backupsDir)) {
     console.log(chalk.yellow('No backups found at ~/.vaso/backups/'));
+    // a named backup that doesn't exist is an error, as when others exist
+    if (timestamp) process.exitCode = 2;
     return;
   }
 
@@ -54,6 +56,7 @@ export async function rollback(timestamp?: string, options: { dryRun?: boolean }
       ? 'No backup directories found.'
       : 'Every backup has already been restored. Name one to restore it again: vaso fix --rollback <backup>'));
     if (dirs.length > 0) console.log(`Available backups: ${dirs.join(', ')}`);
+    if (timestamp) process.exitCode = 2;
     return;
   }
 
@@ -96,6 +99,8 @@ export async function rollback(timestamp?: string, options: { dryRun?: boolean }
   const dirModes = Object.entries(manifest?.entries ?? {}).filter(([, e]) => e.kind === 'dir' || e.kind === 'mode');
   const total = files.length + dirModes.length;
   let restored = 0;
+  /** Recorded paths the fix run left alone, or already back as they were. */
+  let unchanged = 0;
 
   const roots = rollbackRoots();
   for (const backupFilePath of files) {
@@ -108,14 +113,23 @@ export async function rollback(timestamp?: string, options: { dryRun?: boolean }
         console.log(`  ${chalk.yellow('!')} Skipped ${originalPath}: not recorded in this backup's manifest`);
         continue;
       }
+      const entry = manifest?.entries[originalPath];
+      if (entry && untouched(entry)) {
+        unchanged++;
+        continue;
+      }
       if (dryRun) {
         console.log(`  ${chalk.cyan('[dry-run]')} Would restore ${originalPath}`);
         restored++;
         continue;
       }
-      const note = await withFixBoundary({ roots }, () => restoreFile(backupFilePath, originalPath, manifest?.entries[originalPath]));
-      if (note) {
-        console.log(`  ${chalk.yellow('!')} Skipped ${originalPath}: ${note}; the original is in ${backupFilePath}`);
+      const outcome = await withFixBoundary({ roots }, () => restoreFile(backupFilePath, originalPath, entry));
+      if (outcome.kind === 'skipped') {
+        console.log(`  ${chalk.yellow('!')} Skipped ${originalPath}: ${outcome.note}; the original is in ${backupFilePath}`);
+        continue;
+      }
+      if (outcome.kind === 'unchanged') {
+        unchanged++;
         continue;
       }
       console.log(`  ${chalk.green('+')} Restored ${originalPath}`);
@@ -128,6 +142,10 @@ export async function rollback(timestamp?: string, options: { dryRun?: boolean }
   // Directory modes a fix changed (NC-002 makes the allowlist dir owner-only),
   // and the modes of files the owner couldn't read (no content copy)
   for (const [dir, entry] of dirModes) {
+    if (untouched(entry)) {
+      unchanged++;
+      continue;
+    }
     try {
       const st = await lstat(dir);
       if (entry.kind === 'dir' ? !st.isDirectory() : !st.isFile()) {
@@ -139,12 +157,22 @@ export async function rollback(timestamp?: string, options: { dryRun?: boolean }
         console.log(`  ${chalk.yellow('!')} Skipped ${dir}: ${moved}`);
         continue;
       }
+      const now = st.mode & 0o7777;
+      if (now === entry.mode) {
+        unchanged++;
+        continue;
+      }
+      if (entry.afterMode !== undefined && now !== entry.afterMode) {
+        console.log(`  ${chalk.yellow('!')} Skipped ${dir}: its mode was changed after the fix (now ${now.toString(8)})`);
+        continue;
+      }
       if (dryRun) {
         console.log(`  ${chalk.cyan('[dry-run]')} Would restore the mode of ${dir}`);
         restored++;
         continue;
       }
       await withFixBoundary({ roots }, () => chmodNoFollow(dir, entry.mode));
+      console.log(`  ${chalk.green('+')} Restored the mode of ${dir}`);
       restored++;
     } catch (err) {
       console.log(`  ${chalk.red('x')} Failed to restore the mode of ${dir}: ${(err as Error).message}`);
@@ -153,19 +181,23 @@ export async function rollback(timestamp?: string, options: { dryRun?: boolean }
 
   // Retire the backup so the next rollback undoes the fix run before it.
   // A partial restore stays pending, to be retried.
+  const unchangedNote = unchanged > 0 ? ` (${unchanged} unchanged by the fix run, left as they are)` : '';
   if (dryRun) {
-    console.log(`\n${chalk.bold('Dry run:')} ${restored} item(s) would be restored`);
+    console.log(`\n${chalk.bold('Dry run:')} ${restored} item(s) would be restored${unchangedNote}`);
     return;
   }
-  if (restored === total && !target.startsWith(RESTORED_PREFIX)) {
+  const done = restored + unchanged === total;
+  if (done && !target.startsWith(RESTORED_PREFIX)) {
     await rename(backupDir, join(backupsDir, `${RESTORED_PREFIX}${target}`));
   }
 
-  console.log(`\n${chalk.bold('Rollback complete:')} ${restored} item(s) restored`);
   // Anything left unrestored (skipped symlink, edited since the fix, copy
   // error) is an incomplete rollback
-  if (restored < total) {
-    console.log(chalk.yellow(`  ${total - restored} item(s) not restored — the backup stays pending`));
+  if (done) {
+    console.log(`\n${chalk.bold('Rollback complete:')} ${restored} item(s) restored${unchangedNote}`);
+  } else {
+    console.log(`\n${chalk.bold('Rollback incomplete:')} ${restored} item(s) restored${unchangedNote}`);
+    console.log(chalk.yellow(`  ${total - restored - unchanged} item(s) not restored — the backup stays pending`));
     process.exitCode = 2;
   }
 }
@@ -180,6 +212,7 @@ async function isEmptyBackup(backupDir: string): Promise<boolean> {
   const manifest = await readManifest(backupDir);
   if (!manifest) return (await collectFiles(backupDir).catch(() => [])).length === 0;
   for (const [path, entry] of Object.entries(manifest.entries)) {
+    if (untouched(entry)) continue;
     if (entry.kind === 'file' && (entry.after === undefined || entry.after !== entry.before)) return false;
     const st = await lstat(path).catch(() => undefined);
     if (!st || (st.mode & 0o7777) !== entry.mode) return false;
@@ -194,27 +227,38 @@ async function isEmptyBackup(backupDir: string): Promise<boolean> {
  * not silently discard work. A read-only original is made writable for the
  * restore, then given its exact recorded mode (setuid included).
  */
-async function restoreFile(backupPath: string, originalPath: string, entry: ManifestEntry | undefined): Promise<string | undefined> {
+async function restoreFile(backupPath: string, originalPath: string, entry: ManifestEntry | undefined): Promise<RestoreOutcome> {
+  // Recorded as untouched by the fix run (content and mode): nothing to put
+  // back, and whatever happened to it since is the user's doing
+  if (entry && untouched(entry)) return { kind: 'unchanged' };
   const current = await lstat(originalPath).catch(() => undefined);
   if (current && !current.isFile()) {
-    return `it is now ${current.isSymbolicLink() ? 'a symlink' : 'not a regular file'}`;
+    return skipped(`it is now ${current.isSymbolicLink() ? 'a symlink' : 'not a regular file'}`);
   }
   const moved = entry ? await movedSinceBackup(originalPath, entry, false) : undefined;
-  if (moved) return moved;
+  if (moved) return skipped(moved);
   const original = await readFile(backupPath);
   const mode = entry?.mode ?? ((await stat(backupPath)).mode & 0o7777);
+  const currentMode = current ? current.mode & 0o7777 : undefined;
+  // Mode: restored only when the fix changed it (manifests from before 1.4.2
+  // don't say — then the recorded mode is restored as before)
+  const fixChangedMode = entry?.afterMode === undefined || entry.afterMode !== mode;
+  if (current && fixChangedMode && entry?.afterMode !== undefined
+      && currentMode !== entry.afterMode && currentMode !== mode) {
+    return skipped('its mode was changed after the fix');
+  }
   let rewrote = false;
   if (current && entry?.after !== undefined && entry.after === entry.before) {
-    // The fix run never changed this file's content (it was backed up as a
-    // precaution, or only chmod-ed): there is no content to restore, and an
-    // edit made since is the user's — keep it and restore just the mode
+    // The fix run never changed this file's content (it only chmod-ed it):
+    // there is no content to restore, and an edit made since is the user's
   } else if (current) {
     const now = await readRegularFile(originalPath).then(sha256, () => undefined);
     if (entry?.after && now !== undefined && now !== entry.after && now !== entry.before) {
-      return 'it was changed after the fix';
+      return skipped('it was changed after the fix');
     }
     if (now === undefined || now !== (entry?.before ?? sha256(original))) {
-      await chmodNoFollow(originalPath, 0o600);
+      // a read-only original is made writable for the restore
+      if (currentMode !== undefined && (currentMode & 0o200) === 0) await chmodNoFollow(originalPath, currentMode | 0o600);
       await writeRegularFile(originalPath, original);
       rewrote = true;
     }
@@ -223,12 +267,27 @@ async function restoreFile(backupPath: string, originalPath: string, entry: Mani
     await writeFile(originalPath, original, { flag: 'wx', mode: 0o600 });
     rewrote = true;
   }
-  // Already at its recorded mode and untouched: nothing to do. (A file the
-  // fix refused — a hard link — is in the backup but must not be chmod-ed,
-  // or the rollback stays pending forever.)
-  const unchanged = !rewrote && current !== undefined && (current.mode & 0o7777) === mode;
-  if (process.platform !== 'win32' && !unchanged) await chmodNoFollow(originalPath, mode);
-  return undefined;
+  // The mode to end with: the recorded one where the fix changed it (or the
+  // file is recreated), else the current one — a chmod the user made since
+  // the fix is kept
+  const target = fixChangedMode || currentMode === undefined ? mode : currentMode;
+  const nowMode = await lstat(originalPath).then(s => s.mode & 0o7777, () => undefined);
+  // (A file the fix refused — a hard link — is in the backup but must not be
+  // chmod-ed, or the rollback stays pending forever.)
+  if (process.platform !== 'win32' && nowMode !== target) await chmodNoFollow(originalPath, target);
+  return { kind: rewrote || nowMode !== target ? 'restored' : 'unchanged' };
+}
+
+type RestoreOutcome = { kind: 'restored' } | { kind: 'unchanged' } | { kind: 'skipped'; note: string };
+
+function skipped(note: string): RestoreOutcome {
+  return { kind: 'skipped', note };
+}
+
+/** The fix run recorded this path as left exactly as it was (1.4.2+ manifests). */
+function untouched(entry: ManifestEntry): boolean {
+  if (entry.afterMode === undefined || entry.afterMode !== entry.mode) return false;
+  return entry.kind !== 'file' || (entry.after !== undefined && entry.after === entry.before);
 }
 
 async function collectFiles(dir: string): Promise<string[]> {

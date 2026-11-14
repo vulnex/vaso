@@ -427,3 +427,63 @@ describe('rollback confinement (dt14)', () => {
     }
   });
 });
+
+describe('rollback restores only what the fix run changed', () => {
+  beforeEach(async () => {
+    home.dir = await mkdtemp(join(tmpdir(), 'vaso-rb-'));
+    logs = [];
+    vi.spyOn(console, 'log').mockImplementation((...a: unknown[]) => { logs.push(a.map(String).join(' ')); });
+    process.exitCode = undefined;
+  });
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    process.exitCode = undefined;
+    await rm(home.dir, { recursive: true, force: true });
+  });
+
+  it.skipIf(!posix)('keeps a chmod made since the fix on a file the fix never touched', async () => {
+    const touched = join(home.dir, 'config.json');
+    const bystander = join(home.dir, 'auth.json');
+    await writeFile(touched, '{"a":1}\n');
+    await writeFile(bystander, '{}\n');
+    await chmod(bystander, 0o644);
+    // the bystander is named in the evidence, so it is backed up as a precaution
+    await runFix(touched, p => writeRegularFile(p, '{"a":2}\n'), [touched, bystander]);
+    await chmod(bystander, 0o600);
+    await rollback();
+    expect(await readFile(touched, 'utf-8')).toBe('{"a":1}\n');
+    expect((await stat(bystander)).mode & 0o7777).toBe(0o600);
+    expect(process.exitCode).toBeUndefined();
+    expect(logs.some(l => l.includes('Rollback complete: 1 item(s) restored (1 unchanged'))).toBe(true);
+  });
+
+  it.skipIf(!posix)('keeps the mode of a file whose content alone the fix changed', async () => {
+    const f = join(home.dir, 'config.json');
+    await writeFile(f, '{"a":1}\n');
+    await chmod(f, 0o644);
+    await runFix(f, p => writeRegularFile(p, '{"a":2}\n'));
+    await chmod(f, 0o600);
+    await rollback();
+    expect(await readFile(f, 'utf-8')).toBe('{"a":1}\n');
+    expect((await stat(f)).mode & 0o7777).toBe(0o600);
+  });
+
+  it.skipIf(!posix)('skips a mode the user changed again after a permission fix', async () => {
+    const f = join(home.dir, 'cred.json');
+    await writeFile(f, '{}\n');
+    await chmod(f, 0o644);
+    await runFix(f, async p => { await restrictFilesToOwner('TST-001', [p]); });
+    expect((await stat(f)).mode & 0o7777).toBe(0o600);
+    await chmod(f, 0o400);
+    await rollback();
+    expect((await stat(f)).mode & 0o7777).toBe(0o400);
+    expect(process.exitCode).toBe(2);
+    expect(logs.some(l => l.includes('its mode was changed after the fix'))).toBe(true);
+    expect(logs.some(l => l.includes('Rollback incomplete'))).toBe(true);
+  });
+
+  it('exits 2 for a named backup when no backups exist', async () => {
+    await rollback('nonexist');
+    expect(process.exitCode).toBe(2);
+  });
+});
