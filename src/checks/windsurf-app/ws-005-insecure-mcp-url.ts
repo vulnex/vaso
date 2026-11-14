@@ -22,16 +22,16 @@ export const ws005 = defineCheck({
         // Windsurf's remote-server key is `serverUrl`; the Devin-format
         // mcp_config.json Devin Desktop shares uses `url`.
         const entry = server as Record<string, unknown>;
-        const key = typeof entry.serverUrl === 'string' ? 'serverUrl' : 'url';
-        const serverUrl = entry[key];
-        if (typeof serverUrl !== 'string') continue;
-        if (!isPlaintextRemoteUrl(serverUrl)) continue;
-
-        evidence.push({
-          file: config.filePath,
-          snippet: `mcpServers.${name}.${key}: ${serverUrl}`,
-          detail: 'Non-loopback MCP server over plaintext HTTP — headers (auth tokens) and tool traffic can be intercepted or tampered with',
-        });
+        // Both keys are judged: an entry may carry either or both
+        for (const key of ['serverUrl', 'url'] as const) {
+          const serverUrl = entry[key];
+          if (typeof serverUrl !== 'string' || !isPlaintextRemoteUrl(serverUrl)) continue;
+          evidence.push({
+            file: config.filePath,
+            snippet: `mcpServers.${name}.${key}: ${serverUrl}`,
+            detail: 'Non-loopback MCP server over plaintext HTTP — headers (auth tokens) and tool traffic can be intercepted or tampered with',
+          });
+        }
       }
     }
 

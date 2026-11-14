@@ -2,6 +2,7 @@ import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { shannonEntropy } from '../../analyzers/entropy.js';
 import { isEnvReference, isPlaceholderSecret } from '../../core/patterns.js';
+import { findArgSecrets, findUrlSecrets } from '../../mcp/config-secrets.js';
 
 const SECRET_KEY_NAMES = /(?:key|token|secret|pass|api|auth|credential)/i;
 const KNOWN_KEY_PREFIXES = [
@@ -47,6 +48,8 @@ function isLiteralSecret(key: string, raw: string): boolean {
   return value.length >= ENTROPY_MIN_LENGTH && shannonEntropy(value) > HIGH_ENTROPY_THRESHOLD;
 }
 
+const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
 function walkRecord(
   record: Record<string, unknown>,
   file: string,
@@ -69,7 +72,7 @@ export const ws003 = defineCheck({
   name: 'Windsurf Plaintext Secrets in MCP Config',
   category: 'coding-agent',
   severity: 'critical',
-  description: 'Detect literal API keys/tokens in mcp_config.json env or headers values instead of ${env:} / ${file:} interpolation',
+  description: 'Detect literal API keys/tokens in mcp_config.json env or headers values, server arguments or server URLs instead of ${env:} / ${file:} interpolation',
   supportedAgents: ['windsurf'],
 
   async run(ctx, h) {
@@ -90,6 +93,27 @@ export const ws003 = defineCheck({
         const headers = rec.headers;
         if (headers && typeof headers === 'object') {
           walkRecord(headers as Record<string, unknown>, config.filePath, `mcpServers.${name}.headers.`, evidence);
+        }
+        // Tokens passed on the command line (`--token ghp_…`, `-H "Authorization: …"`)
+        // or embedded in the server URL (`?api_key=…`, userinfo)
+        const args = Array.isArray(rec.args) ? rec.args.filter((a): a is string => typeof a === 'string') : [];
+        for (const secret of findArgSecrets(args, typeof rec.command === 'string' ? rec.command : undefined)) {
+          evidence.push({
+            file: config.filePath,
+            snippet: `mcpServers.${name}.${secret.location} = ${secret.masked}`,
+            detail: `${cap(secret.kind)} in an MCP server argument — stored in this config and visible to any local user in the process list; use \${env:VAR} interpolation`,
+          });
+        }
+        for (const key of ['serverUrl', 'url'] as const) {
+          const url = rec[key];
+          if (typeof url !== 'string') continue;
+          for (const secret of findUrlSecrets(url, key)) {
+            evidence.push({
+              file: config.filePath,
+              snippet: `mcpServers.${name}.${key} = ${secret.masked}`,
+              detail: `${cap(secret.kind)} in the MCP server URL — stored, logged and synced as written; use a header with \${env:VAR} interpolation`,
+            });
+          }
         }
       }
     }

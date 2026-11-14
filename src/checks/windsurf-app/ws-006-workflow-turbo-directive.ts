@@ -1,6 +1,7 @@
 import { dirname, join } from 'node:path';
 import type { Evidence, ScanContext } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { cascadeRemovedNote } from './cascade-removed.js';
 import { truncateSnippet } from '../../core/patterns.js';
 
 /** `// turbo` / `// turbo-all` alone on a line (list markers and CR line ends allowed). */
@@ -31,6 +32,8 @@ export const ws006 = defineCheck({
   supportedAgents: ['windsurf'],
 
   async run(ctx, h) {
+    const removed = cascadeRemovedNote(ctx);
+    if (removed) return h.passed(removed);
     const home = ctx.fs.homedir();
     const dirs = [join(home, '.codeium', 'windsurf', 'global_workflows')];
     // Workspace workflows: .devin/workflows (preferred) and legacy

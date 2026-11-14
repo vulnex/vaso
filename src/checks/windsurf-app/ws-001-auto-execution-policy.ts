@@ -1,5 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { cascadeRemovedNote } from './cascade-removed.js';
 
 /** Read a windsurf.* editor setting — flat VS Code key or nested object form. */
 function windsurfSetting(data: Record<string, unknown>, key: string): unknown {
@@ -19,6 +20,8 @@ export const ws001 = defineCheck({
   supportedAgents: ['windsurf'],
 
   async run(ctx, h) {
+    const removed = cascadeRemovedNote(ctx);
+    if (removed) return h.passed(removed);
     const evidence: Evidence[] = [];
     let hasTurbo = false;
     let policyFound = false;

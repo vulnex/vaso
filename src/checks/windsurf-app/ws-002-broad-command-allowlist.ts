@@ -1,5 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { cascadeRemovedNote } from './cascade-removed.js';
 
 const DANGEROUS_COMMANDS = new Set([
   'curl', 'wget', 'bash', 'sh', 'zsh', 'perl', 'python', 'python3', 'node',
@@ -49,6 +50,8 @@ export const ws002 = defineCheck({
   supportedAgents: ['windsurf'],
 
   async run(ctx, h) {
+    const removed = cascadeRemovedNote(ctx);
+    if (removed) return h.passed(removed);
     const evidence: Evidence[] = [];
     let allowListFound = false;
 
