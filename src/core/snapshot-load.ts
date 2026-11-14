@@ -107,6 +107,10 @@ export function validateSnapshot(value: unknown): string[] {
   if (!isRecord(s.commandOutputs)) errors.push('Missing or invalid commandOutputs field');
   if (s.env !== undefined && !isStringRecord(s.env)) errors.push('Invalid env field (string values expected)');
   if (s.symlinks !== undefined && !isStringRecord(s.symlinks)) errors.push('Invalid symlinks field (link targets expected)');
+  if (s.configTrees !== undefined && (!isRecord(s.configTrees)
+    || !Object.values(s.configTrees).every(v => v === 'collected' || v === 'refused' || v === 'limit'))) {
+    errors.push('Invalid configTrees field (collected, refused or limit expected)');
+  }
   if (s.timestamp !== undefined && typeof s.timestamp !== 'string') errors.push('Invalid timestamp field');
   if (s.probeVersion !== undefined && typeof s.probeVersion !== 'string') errors.push('Invalid probeVersion field (a version string expected)');
   if (s.privilege !== undefined) {

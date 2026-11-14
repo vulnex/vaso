@@ -99,6 +99,13 @@ const PROFILE_DIR = /^\.openclaw-([a-z0-9][a-z0-9_-]{0,63})$/i;
 /** Config file names in a state dir, in OpenClaw's order (2026.9.4 still
  *  reads the pre-rename clawdbot.json when there is no openclaw.json). */
 export const MAIN_CONFIG_NAMES = ['openclaw.json', 'clawdbot.json'];
+
+/** Main configs whose skill roots a remote probe reads (configRoots). */
+const OPENCLAW_MAIN_CONFIGS = [
+  '${OPENCLAW_CONFIG_PATH}',
+  ...['~/.openclaw', '~/.clawdbot', '~/.openclaw-*'].flatMap(d => MAIN_CONFIG_NAMES.map(n => `${d}/${n}`)),
+  '~/.moltbot/openclaw.json',
+];
 /** Pre-rename state dirs. OpenClaw reads ~/.clawdbot only while ~/.openclaw has
  *  no config; ~/.moltbot never. */
 export const LEGACY_STATE_DIRS = ['.clawdbot', '.moltbot'];
@@ -624,6 +631,24 @@ export const openclawAdapter: AgentAdapter = {
         ...OPENCLAW_CONTAINER_MARKERS.content,
       ],
       systemDirListings: [],
+      // Skill roots the main config sets: the workspace's skills/ and
+      // skills.load.extraDirs (only ~ is expanded, as the adapter does)
+      configRoots: [
+        {
+          configs: OPENCLAW_MAIN_CONFIGS,
+          format: 'json',
+          kind: 'tree',
+          keys: [['agents', 'defaults', 'workspace']],
+          globs: ['skills/**'],
+        },
+        {
+          configs: OPENCLAW_MAIN_CONFIGS,
+          format: 'json',
+          kind: 'tree',
+          keys: [['skills', 'load', 'extraDirs', '*']],
+          globs: ['**'],
+        },
+      ],
     };
   },
 };

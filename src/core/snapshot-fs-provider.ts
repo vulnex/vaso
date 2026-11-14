@@ -1,7 +1,7 @@
 import { join, basename, dirname, posix } from 'node:path';
 import type { FSProvider, DirentInfo, ExecResult, ExecOptions, PermissionQuery } from './fs-provider.js';
 import { posixPermissionFacts } from './permissions.js';
-import type { FileEntry, ProbeSnapshot } from './snapshot-types.js';
+import type { ConfigTreeStatus, FileEntry, ProbeSnapshot } from './snapshot-types.js';
 import type { Platform } from './types.js';
 
 function stripTrailingSlash(name: string): string {
@@ -294,6 +294,11 @@ export class SnapshotFSProvider implements FSProvider {
   /** The probe was asked for this file: it has an entry, even when the file was absent. */
   collected(path: string): boolean {
     return Object.hasOwn(this.snapshot.files, path);
+  }
+
+  /** Config-derived trees the probe walked, by walk base (path or glob), with what it did. */
+  configTrees(): Readonly<Record<string, ConfigTreeStatus>> {
+    return this.snapshot.configTrees ?? {};
   }
 
   get privilege() {

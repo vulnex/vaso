@@ -37,6 +37,9 @@ const SYSTEM_CLI_PATHS = ['/usr/local/bin/zeroclaw', '/opt/homebrew/bin/zeroclaw
 /** Homebrew installs keep config under `<prefix>/var/zeroclaw`. */
 const HOMEBREW_CONFIG_DIRS = ['/opt/homebrew/var/zeroclaw', '/usr/local/var/zeroclaw'];
 
+/** config.toml locations for configRoots (relocated twins come from the manifest builder). */
+const ZEROCLAW_CONFIGS = ['~/.zeroclaw/config.toml', ...HOMEBREW_CONFIG_DIRS.map(d => `${d}/config.toml`)];
+
 function expandTilde(p: string, home: string): string {
   if (p === '~') return home;
   if (p.startsWith('~/')) return join(home, p.slice(2));
@@ -414,6 +417,33 @@ export const zeroclawAdapter: AgentAdapter = {
         ...HOMEBREW_CONFIG_DIRS.flatMap(d => CONFIG_FILENAMES.map(f => `${d}/${f}`)),
       ],
       systemDirListings: [...HOMEBREW_CONFIG_DIRS],
+      // Skill roots config.toml sets (skillRoots): per-agent workspaces,
+      // skill bundles, the open-skills checkout
+      configRoots: [
+        {
+          configs: ZEROCLAW_CONFIGS,
+          format: 'toml',
+          kind: 'tree',
+          keys: [['agents', '*', 'workspace', 'path']],
+          globs: ['skills/**'],
+        },
+        {
+          configs: ZEROCLAW_CONFIGS,
+          format: 'toml',
+          kind: 'tree',
+          keys: [['skill_bundles', '*', 'directory']],
+          globs: ['**'],
+          relative: 'config',
+        },
+        {
+          configs: ZEROCLAW_CONFIGS,
+          format: 'toml',
+          kind: 'tree',
+          keys: [['skills', 'open_skills_dir']],
+          when: ['skills', 'open_skills_enabled'],
+          globs: ['**'],
+        },
+      ],
     };
   },
 };

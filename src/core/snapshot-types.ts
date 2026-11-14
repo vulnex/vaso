@@ -18,7 +18,46 @@ export interface ProbeManifest {
    *  1.4.0) stores ENV_PRESENT_VALUE when one is non-empty after trimming, and
    *  nothing otherwise — never its value. */
   envPresence?: string[];
+  /** Paths an agent's config sets — a workspace, an extra skills directory,
+   *  an MCP server's command — read by the probe (newer than 1.4.1) from the
+   *  configs it collects. Older probes ignore it. */
+  configRoots?: ConfigRootRequest[];
 }
+
+/**
+ * One kind of config-set path. The probe parses each config (JSON/JSONC/
+ * JSON5, TOML, or block-style YAML), takes the string values at `keys`, and
+ * either walks each value as a skill tree (`tree`: `globs` under it, content
+ * disguised like a config's; refused for `/`, a top-level directory, a home or
+ * a directory above one, and credential stores) or stats it (`stat`:
+ * existence, mode and owner — never content; absolute paths only, keyed as
+ * the config spells them).
+ */
+export interface ConfigRootRequest {
+  /** Config files, in manifest path syntax (`~`, `${VAR}`, globs). */
+  configs: string[];
+  format: 'json' | 'toml' | 'yaml';
+  /** Key paths; `*` is every key of a mapping or item of an array. */
+  keys: string[][];
+  kind: 'tree' | 'stat';
+  /** tree: globs relative to each value, each `**` or ending in `/**`. */
+  globs?: string[];
+  /** A relative value resolves against the scanned home or the config's
+   *  directory; omitted: relative values are skipped (the adapter resolves
+   *  them against its working directory, which the probe can't know). */
+  relative?: 'home' | 'config';
+  /** Expand `${NAME}` in values from the environment (unset: skipped). */
+  expandEnv?: boolean;
+  /** When no key holds a string: this variable's value. */
+  envFallback?: string;
+  /** Only when this key path is boolean true in the same config. */
+  when?: string[];
+  /** Used when `when` holds and no key holds a string. */
+  default?: string;
+}
+
+/** What the probe did with a config-derived tree (`ProbeSnapshot.configTrees`). */
+export type ConfigTreeStatus = 'collected' | 'refused' | 'limit';
 
 /** What a snapshot holds for an envPresence variable that is set. */
 export const ENV_PRESENT_VALUE = 'set';
@@ -71,6 +110,11 @@ export interface ProbeSnapshot {
   owners?: Record<string, [number, number]>;
   /** User-private groups on the host, gid → uid (probe ≥ 1.1.0, Linux). */
   privateGroups?: Record<string, number>;
+  /** Config-derived trees (probe newer than 1.4.1), by walk base — a path, or
+   *  a glob for a wildcard base (`/h/workspace-*\/skills`): collected (absent
+   *  files are absent), refused (a base no tree is walked from) or over the
+   *  probe's entry limit (not collected). */
+  configTrees?: Record<string, ConfigTreeStatus>;
 }
 
 export interface PrivilegeInfo {

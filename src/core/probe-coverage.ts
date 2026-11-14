@@ -2,6 +2,7 @@ import { posix } from 'node:path';
 import type { FSProvider } from './fs-provider.js';
 import { buildProbeManifest } from './manifest-builder.js';
 import { adapterRegistry } from '../adapters/registry.js';
+import type { ConfigTreeStatus } from './snapshot-types.js';
 
 /**
  * Whether the remote probe was asked for a path at all. A snapshot holds only
@@ -13,8 +14,18 @@ import { adapterRegistry } from '../adapters/registry.js';
  * answer true.
  *
  * Coverage is judged against the manifest this CLI builds from its registered
- * adapters — what `vaso probe manifest` prints and `--host` sends.
+ * adapters — what `vaso probe manifest` prints and `--host` sends — and, from
+ * probes newer than 1.4.1, against what the snapshot says the probe did with
+ * config-set paths (`configRoots`): a path it recorded (an MCP server's
+ * command, found or not) and the config-derived trees it walked. A snapshot
+ * from an older probe has neither, so those paths stay not verified.
  */
+
+/** What a snapshot provider tells about config-set paths (SnapshotFSProvider). */
+interface SnapshotRecords {
+  collected?(path: string): boolean;
+  configTrees?(): Readonly<Record<string, ConfigTreeStatus>>;
+}
 
 interface Compiled {
   /** Matches a path the probe records when it exists (file paths, globs, metadata globs). */
@@ -23,6 +34,8 @@ interface Compiled {
   recursive: RegExp[];
   /** Matches a directory the probe lists (its direct entries). */
   listed: RegExp[];
+  /** Matches a config-derived tree the probe walked (`configTrees` collected). */
+  configTrees: RegExp[];
 }
 
 const cache = new WeakMap<FSProvider, { key: string; compiled: Compiled }>();
@@ -125,6 +138,10 @@ function compiled(fs: FSProvider): Compiled | undefined {
     files: re([...m.filePaths, ...globs, ...(m.systemPaths ?? [])]),
     recursive: re(globs.filter(g => g.endsWith('/**')).map(g => g.slice(0, -3))),
     listed: re([...m.directoryListings, ...(m.systemDirListings ?? [])]),
+    configTrees: Object.entries((fs as SnapshotRecords).configTrees?.() ?? {})
+      .filter(([base, status]) => status === 'collected' && base.startsWith('/'))
+      .map(([base]) => patternRegex(base, fs))
+      .filter((r): r is RegExp => r !== undefined),
   };
   cache.set(fs, { key, compiled: result });
   return result;
@@ -148,7 +165,7 @@ export function probeCoversTree(fs: FSProvider, dir: string): boolean {
   if (!c) return true;
   const chain = selfAndAncestors(dir);
   if (chain.length > 0 && c.listed.some(r => r.test(chain[0]))) return true;
-  return chain.some(d => c.recursive.some(r => r.test(d)));
+  return chain.some(d => c.recursive.some(r => r.test(d)) || c.configTrees.some(r => r.test(d)));
 }
 
 /**
@@ -160,9 +177,11 @@ export function probeCoversFile(fs: FSProvider, path: string): boolean {
   if (fs.kind !== 'snapshot') return true;
   const c = compiled(fs);
   if (!c) return true;
+  // Recorded by the probe — a config-named path it looked for, found or not
+  if ((fs as SnapshotRecords).collected?.(path)) return true;
   const p = posix.normalize(path);
   if (c.files.some(r => r.test(p))) return true;
-  return selfAndAncestors(posix.dirname(p)).some(d => c.recursive.some(r => r.test(d)));
+  return selfAndAncestors(posix.dirname(p)).some(d => c.recursive.some(r => r.test(d)) || c.configTrees.some(r => r.test(d)));
 }
 
 /**

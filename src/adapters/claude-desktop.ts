@@ -211,6 +211,13 @@ export const claudeDesktopAdapter: AgentAdapter = {
       envPrefixes: ['CLAUDE_', 'ANTHROPIC_'],
       systemPaths: [APP_BUNDLE_PATH],
       systemDirListings: [],
+      // MCP server commands the config launches (CD-009): mode and owner only
+      configRoots: [{
+        configs: ['~/Library/Application Support/Claude/claude_desktop_config.json'],
+        format: 'json',
+        kind: 'stat',
+        keys: [['mcpServers', '*', 'command']],
+      }],
     };
   },
 

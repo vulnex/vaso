@@ -99,6 +99,9 @@ function literalPath(p: string): string {
   return isAbsolute(p) ? p : resolve(p);
 }
 
+/** The config files workspaces are read from on remote scans ($PICOCLAW_HOME's is a relocated twin). */
+const PICOCLAW_CONFIGS = ['${PICOCLAW_CONFIG}', '~/.picoclaw/config.json'];
+
 function expandHome(p: string, userHome: string): string {
   if (p === '~') return userHome;
   if (p.startsWith('~/')) return join(userHome, p.slice(2));
@@ -461,6 +464,24 @@ export const picoclawAdapter: AgentAdapter = {
       ],
       systemPaths: [],
       systemDirListings: [],
+      // Workspaces set in config.json (picoclawWorkspaces): the default one,
+      // the `workspace-<id>` dirs named agents get beside it, and per-agent ones
+      configRoots: [
+        {
+          configs: PICOCLAW_CONFIGS,
+          format: 'json',
+          kind: 'tree',
+          keys: [['agents', 'defaults', 'workspace']],
+          globs: ['skills/**', '../workspace-*/skills/**'],
+        },
+        {
+          configs: PICOCLAW_CONFIGS,
+          format: 'json',
+          kind: 'tree',
+          keys: [['agents', 'list', '*', 'workspace']],
+          globs: ['skills/**'],
+        },
+      ],
     };
   },
 };

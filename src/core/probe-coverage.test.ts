@@ -3,7 +3,7 @@ import { registerAllAdapters } from '../adapters/index.js';
 import { adapterRegistry } from '../adapters/registry.js';
 import { SnapshotFSProvider } from './snapshot-fs-provider.js';
 import type { FileEntry, ProbeSnapshot } from './snapshot-types.js';
-import type { AgentInstallation, ParsedConfig, ScanContext } from './types.js';
+import type { AgentInstallation, Evidence, ParsedConfig, ScanContext } from './types.js';
 import { LocalFSProvider } from './local-fs-provider.js';
 import { globToRegexSource, probeCoversFile, probeCoversTree, uncollectedPath } from './probe-coverage.js';
 import { collectSkillInventory } from '../inventory/skills.js';
@@ -229,5 +229,86 @@ describe('config-set skill roots on snapshots', () => {
     });
     const [install] = await zeroclawAdapter.detect({ fs });
     expect(install.skillsDirs).toEqual(['/srv/zcws/skills']);
+  });
+});
+describe('config-set paths a newer probe recorded', () => {
+  const ws = `${HOME}/work/nbws/skills`;
+  const nb = inst('nanobot', `${HOME}/.nanobot`, [], { skillsDir: ws, skillsDirs: [ws] });
+  const cmd = '/opt/bin/mcp-srv';
+
+  it('a config-derived tree the probe walked is covered, and absent when empty', async () => {
+    const fs = snapshot({}, { configTrees: { [ws]: 'collected' } });
+    expect(probeCoversTree(fs, ws)).toBe(true);
+    expect(probeCoversTree(fs, `${ws}/a/b`)).toBe(true);
+    const { inventory } = await collectSkillInventory(nb, fs);
+    expect(inventory.skillsDirs).toEqual([{ path: ws, exists: false }]);
+    expect((await skl002.run(ctx(nb, fs))).passed).toBe(true);
+  });
+
+  it('a wildcard base covers what it matches', () => {
+    const fs = snapshot({}, { configTrees: { [`${HOME}/workspace-*/skills`]: 'collected' } });
+    expect(probeCoversTree(fs, `${HOME}/workspace-coder/skills`)).toBe(true);
+    expect(probeCoversTree(fs, `${HOME}/workspace-coder/other`)).toBe(false);
+  });
+
+  it('a refused tree or one over the limit stays not verified', async () => {
+    for (const status of ['refused', 'limit'] as const) {
+      const fs = snapshot({}, { configTrees: { [ws]: status } });
+      expect(probeCoversTree(fs, ws)).toBe(false);
+      expect((await skl002.run(ctx(nb, fs))).message).toBe('Found 1 skill location(s) not scanned');
+    }
+  });
+
+  it('a skill in a collected config-derived tree is inventoried', async () => {
+    const fs = snapshot({ [`${ws}/evil/SKILL.md`]: file('# evil\n') }, { configTrees: { [ws]: 'collected' } });
+    const { inventory } = await collectSkillInventory(nb, fs);
+    expect(inventory.skills.map(s => s.name)).toEqual(['evil']);
+  });
+
+  it('a command path the probe recorded is judged, found or absent', async () => {
+    const c: ParsedConfig = { raw: '', format: 'yaml', filePath: `${HOME}/.hermes/config.yaml`, data: { mcp_servers: { s: { command: cmd } } } };
+    const absent = await hm010.run(ctx(inst('hermes', `${HOME}/.hermes`, [c]), snapshot({ [cmd]: { content: '', mode: 0, exists: false } })));
+    expect(absent.passed).toBe(true);
+    expect(absent.message).not.toMatch(/not verified/);
+    const ww = snapshot({ [cmd]: { content: '', mode: 0o100777, exists: true, contentOmitted: true, omitted: 'metadata' } });
+    expect((await hm010.run(ctx(inst('hermes', `${HOME}/.hermes`, [c]), ww))).passed).toBe(false);
+  });
+
+  it('CD-009 judges a recorded command directory', async () => {
+    const c: ParsedConfig = {
+      raw: '', format: 'json', filePath: `${HOME}/.config/Claude/claude_desktop_config.json`,
+      data: { mcpServers: { s: { command: cmd } } },
+    };
+    const fs = snapshot(
+      { [cmd]: { content: '', mode: 0o100755, exists: true, contentOmitted: true, omitted: 'metadata' } },
+      { directoryModes: { '/opt/bin': 0o777 } },
+    );
+    const r = await cd009.run(ctx(inst('claude-desktop', `${HOME}/.config/Claude`, [c]), fs));
+    expect(r.passed).toBe(false);
+    expect(r.evidence?.[0].file).toBe('/opt/bin');
+  });
+
+  it('HM-009 judges a tirith_path the probe looked for', async () => {
+    const c: ParsedConfig = { raw: '', format: 'yaml', filePath: `${HOME}/.hermes/config.yaml`, data: { security: { tirith_enabled: true, tirith_path: '/opt/tools/tirith' } } };
+    const absent = await hm009.run(ctx(inst('hermes', `${HOME}/.hermes`, [c]), snapshot({ '/opt/tools/tirith': { content: '', mode: 0, exists: false } })));
+    expect(absent.passed).toBe(false);
+    const there = await hm009.run(ctx(inst('hermes', `${HOME}/.hermes`, [c]), snapshot({ '/opt/tools/tirith': { content: '', mode: 0o100755, exists: true, contentOmitted: true } })));
+    expect(there.message).not.toMatch(/not verified/);
+  });
+});
+
+describe('symlinked explicit files on snapshots', () => {
+  it('parent mitigation follows a recorded link to an open directory', async () => {
+    const { markUnreachable } = await import('./permissions.js');
+    const link = `${HOME}/.app/cred.json`;
+    const modes = { [HOME]: 0o700, [`${HOME}/.app`]: 0o700, '/home': 0o755, '/srv': 0o755, '/srv/open': 0o755 };
+    const fs = snapshot({ [link]: file('{}', 0o100644) }, { symlinks: { [link]: '/srv/open/cred.json' }, directoryModes: modes });
+    const evidence: Evidence[] = [{ file: link }];
+    await markUnreachable(fs, evidence);
+    expect(evidence[0].mitigated).toBeUndefined();
+    const old = snapshot({ [link]: file('{}', 0o100644) }, { directoryModes: modes });
+    const e2: Evidence[] = [{ file: link }];
+    await markUnreachable(old, e2);
+    expect(e2[0].mitigated).toBe(true);
   });
 });

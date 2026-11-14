@@ -127,6 +127,7 @@ export function buildProbeManifest(adapters: AgentAdapter[]): ProbeManifest {
     metadataGlobPatterns: [],
     envOriginOnly: [],
     envPresence: [],
+    configRoots: [],
   };
 
   for (const adapter of adapters) {
@@ -142,6 +143,7 @@ export function buildProbeManifest(adapters: AgentAdapter[]): ProbeManifest {
       if (m.metadataGlobPatterns) merged.metadataGlobPatterns!.push(...m.metadataGlobPatterns);
       if (m.envOriginOnly) merged.envOriginOnly!.push(...m.envOriginOnly);
       if (m.envPresence) merged.envPresence!.push(...m.envPresence);
+      if (m.configRoots) merged.configRoots!.push(...m.configRoots);
     }
     // Every copy of the agent's CLI (system prefixes, user bin dirs, each nvm
     // Node version) so remote scans inventory old copies too. Existence is all
@@ -224,6 +226,8 @@ export function buildProbeManifest(adapters: AgentAdapter[]): ProbeManifest {
   merged.envPresence = [...new Set(merged.envPresence!)];
   merged.systemPaths = [...new Set(merged.systemPaths!)];
   merged.systemDirListings = [...new Set(merged.systemDirListings!)];
+  // A config relocated by an environment variable sets paths the same way
+  merged.configRoots = merged.configRoots!.map(r => ({ ...r, configs: [...new Set(withRelocatedTwins(r.configs))] }));
   // Paths already collected with content need no metadata-only duplicate
   const collected = new Set([...merged.globPatterns, ...merged.filePaths, ...merged.systemPaths!]);
   merged.metadataGlobPatterns = [...new Set(merged.metadataGlobPatterns!)].filter(g => !collected.has(g));

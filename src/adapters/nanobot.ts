@@ -387,6 +387,18 @@ export const nanobotAdapter: AgentAdapter = {
       envPrefixes: ['NANOBOT_'],
       systemPaths: SYSTEM_CLI_PATHS,
       systemDirListings: [],
+      // A workspace set in config.json (nanobotWorkspaceDir): its skills and
+      // plugins, wherever it is
+      configRoots: [{
+        configs: ['~/.nanobot/config.json'],
+        format: 'json',
+        kind: 'tree',
+        keys: [['agents', 'defaults', 'workspace']],
+        globs: ['skills/**', 'plugins/**'],
+        relative: 'home',
+        expandEnv: true,
+        envFallback: 'NANOBOT_AGENTS__DEFAULTS__WORKSPACE',
+      }],
     };
   },
 

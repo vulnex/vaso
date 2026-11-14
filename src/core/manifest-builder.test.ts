@@ -24,6 +24,28 @@ describe('buildProbeManifest', () => {
     for (const p of stores) expect(content).not.toContain(p);
   });
 
+  it('asks for config-set paths from configs the probe collects, with relocated twins', () => {
+    const roots = manifest.configRoots ?? [];
+    const kinds = (agentFile: string) => roots.filter(r => r.configs.includes(agentFile)).map(r => r.kind);
+    expect(kinds('~/.nanobot/config.json')).toEqual(['tree']);
+    expect(kinds('~/.zeroclaw/config.toml')).toEqual(['tree', 'tree', 'tree']);
+    expect(kinds('~/.picoclaw/config.json')).toEqual(['tree', 'tree']);
+    expect(kinds('~/.openclaw/openclaw.json')).toEqual(['tree', 'tree']);
+    expect(kinds('~/.hermes/config.yaml')).toEqual(['stat']);
+    expect(kinds('~/.atomic-agent/config.json')).toEqual(['stat']);
+    expect(kinds('~/Library/Application Support/Claude/claude_desktop_config.json')).toEqual(['stat']);
+    // a config an environment variable relocates is read there too
+    expect(roots.find(r => r.configs.includes('~/.zeroclaw/config.toml'))!.configs).toContain('${ZEROCLAW_CONFIG_DIR}/config.toml');
+    expect(roots.find(r => r.configs.includes('~/.hermes/config.yaml'))!.configs).toContain('${HERMES_HOME}/config.yaml');
+    // every config read for paths is one the probe collects anyway
+    const collected = new Set([...manifest.filePaths, ...manifest.systemPaths!, ...manifest.globPatterns]);
+    for (const r of roots) {
+      for (const c of r.configs) expect(collected.has(c), `${c} is read for paths but not collected`).toBe(true);
+      // trees only below what the config names, never the value's whole parent
+      for (const g of r.globs ?? []) expect(g === '**' || g.endsWith('/**')).toBe(true);
+    }
+  });
+
   it("asks for POL-005's credential files as metadata only, two levels deep", () => {
     const cred = manifest.metadataGlobPatterns!.filter(g => g.includes('.netrc'));
     expect(cred).toEqual(expect.arrayContaining([

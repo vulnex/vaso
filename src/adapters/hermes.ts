@@ -49,6 +49,12 @@ const USER_CLI_RELATIVE_PATHS = [
   '.local/pipx/venvs/hermes-agent/bin/hermes',
 ];
 
+/** config.yaml files whose command paths a remote probe stats (configRoots). */
+const HERMES_YAML_CONFIGS = [
+  '~/.hermes/config.yaml',
+  ...[HERMES_MANAGED_DEFAULT_DIR, '${HERMES_MANAGED_DIR}'].map(d => `${d}/config.yaml`),
+];
+
 export const hermesAdapter: AgentAdapter = {
   agent: 'hermes',
   displayName: 'Hermes',
@@ -328,6 +334,14 @@ export const hermesAdapter: AgentAdapter = {
         '/usr/bin/hermes',
       ],
       systemDirListings: [HERMES_MANAGED_DEFAULT_DIR],
+      // What config.yaml launches or runs (HM-010 MCP commands, HM-009
+      // tirith_path): mode and owner only
+      configRoots: [{
+        configs: HERMES_YAML_CONFIGS,
+        format: 'yaml',
+        kind: 'stat',
+        keys: [['mcp_servers', '*', 'command'], ['security', 'tirith_path']],
+      }],
     };
   },
 };
