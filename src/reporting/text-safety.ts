@@ -6,12 +6,17 @@
  */
 
 // C0 controls except tab and newline, DEL, C1 controls (0x80–0x9f; 0x9b is
-// CSI) and the bidi embedding/override/isolate controls, which reorder how a
-// line displays (a file name or rule that reads differently than it is)
-const CONTROL_RE = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g;
+// CSI), the bidi embedding/override/isolate controls and marks (ALM, LRM,
+// RLM), which reorder how a line displays (a file name or rule that reads
+// differently than it is), and invisible characters — zero-width space and
+// joiners, word joiner and invisible operators, BOM, Unicode tag characters
+// (U+E0000–E007F, which spell hidden ASCII) — that make different strings
+// print alike
+const CONTROL_RE = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u061c\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff\u{e0000}-\u{e007f}]/gu;
 
 function visible(ch: string): string {
-  const code = ch.charCodeAt(0);
+  const code = ch.codePointAt(0)!;
+  if (code > 0xffff) return `\\u{${code.toString(16)}}`;
   return code > 0xff ? `\\u${code.toString(16).padStart(4, '0')}` : `\\x${code.toString(16).padStart(2, '0')}`;
 }
 
@@ -44,10 +49,10 @@ export function escapeControlCharsDeep<T>(value: T, options?: { lineBreaks?: boo
 // (scanned text is escaped above)
 /**
  * Characters JSON.stringify leaves raw that still reorder or hide text when a
- * JSON or SARIF report is viewed (bidi overrides and isolates, C1 controls
- * such as U+009B CSI, DEL, line/paragraph separators).
+ * JSON or SARIF report is viewed (bidi controls and marks, zero-width and tag
+ * characters, C1 controls such as U+009B CSI, DEL, line/paragraph separators).
  */
-const JSON_UNSAFE_RE = /[\u007f-\u009f\u200e\u200f\u202a-\u202e\u2066-\u2069\u2028\u2029]/g;
+const JSON_UNSAFE_RE = /[\u007f-\u009f\u061c\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\u2028\u2029\ufeff\u{e0000}-\u{e007f}]/gu;
 
 /**
  * JSON text with those characters written as `\uXXXX` escapes: the parsed
@@ -56,7 +61,7 @@ const JSON_UNSAFE_RE = /[\u007f-\u009f\u200e\u200f\u202a-\u202e\u2066-\u2069\u20
  * can occur only inside strings.
  */
 export function escapeJsonUnsafe(json: string): string {
-  return json.replace(JSON_UNSAFE_RE, ch => `\\u${ch.charCodeAt(0).toString(16).padStart(4, '0')}`);
+  return json.replace(JSON_UNSAFE_RE, ch => ch.split('').map(u => `\\u${u.charCodeAt(0).toString(16).padStart(4, '0')}`).join(''));
 }
 
 const SGR_RE = /\u001b\[[0-9;]*m/g;
@@ -72,7 +77,7 @@ export function stripColor(s: string): string {
 
 // XML 1.0 Char production: everything below 0x20 except tab, LF, CR is invalid,
 // as are lone surrogates and U+FFFE/U+FFFF.
-const XML_INVALID_RE = /[\u0000-\u0008\u000b\u000c\u000e-\u001f￾￿]|[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g;
+const XML_INVALID_RE = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\ufffe\uffff]|[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g;
 
 /** Characters XML cannot carry at all, shown as `\xNN` so the document stays well-formed. */
 export function stripXmlInvalid(s: string): string {

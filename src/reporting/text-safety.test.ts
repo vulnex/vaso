@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { escapeControlChars, escapeControlCharsDeep, stripXmlInvalid } from './text-safety.js';
+import { escapeControlChars, escapeControlCharsDeep, escapeJsonUnsafe, stripXmlInvalid } from './text-safety.js';
 import { TerminalReporter } from './terminal.js';
 import { JunitReporter } from './junit.js';
 import { MarkdownReporter } from './markdown.js';
@@ -61,10 +61,16 @@ describe('text safety', () => {
 
   it('neutralises bidi embedding/override/isolate controls, keeps other Unicode', () => {
     expect(escapeControlChars('a‮b⁦c⁩d‪e')).toBe('a\\u202eb\\u2066c\\u2069d\\u202ae');
-    expect(escapeControlChars('café 中 ‍')).toBe('café 中 ‍');
+    expect(escapeControlChars('café 中 ok')).toBe('café 中 ok');
+    // invisible characters print alike different strings: zero-width, marks, BOM, tag characters
+    expect(escapeControlChars('a\u200bb\u200dc\u200ed\u061ce\u2060f\ufeffg\u{e0041}h')).toBe('a\\u200bb\\u200dc\\u200ed\\u061ce\\u2060f\\ufeffg\\u{e0041}h');
     const r = result();
     r.agents[0].results[0].message = 'file ‮txt.exe';
     expect(new TerminalReporter().render(r)).not.toContain('‮');
+  });
+
+  it('JSON keeps invisible characters as escapes', () => {
+    expect(escapeJsonUnsafe(JSON.stringify('a\u200bb\u{e0041}c'))).toBe('"a\\u200bb\\udb40\\udc41c"');
   });
 
   it('junit text carries no raw CR or C1 control', () => {
