@@ -3,6 +3,7 @@ import { defineCheck } from '../../core/check-builder.js';
 import { runnerPackage, isPinnedOrLocal, pinProblem } from '../../mcp/package-pin.js';
 import { shellCommandWrapper, shellInvocation } from '../../mcp/shell-wrapper.js';
 import { queryPermissions } from '../../core/permissions.js';
+import { notCollectedNote, uncollectedPath } from '../../core/probe-coverage.js';
 import { asRecord, atomicConfigs, isEnabled, isLoopbackHost, mcpServers, serverName, urlHost } from './shared.js';
 
 
@@ -16,6 +17,7 @@ export const at007 = defineCheck({
 
   async run(ctx, h) {
     const evidence: Evidence[] = [];
+    const unverified: string[] = [];
     for (const config of atomicConfigs(ctx.configs)) {
       const servers = mcpServers(config.data);
       for (let i = 0; i < servers.length; i++) {
@@ -59,12 +61,13 @@ export const at007 = defineCheck({
             if (perms !== 'unsupported' && perms.worldWrite) {
               evidence.push({
                 file: config.filePath,
-                snippet: `${command} (mode 0${perms.octal})`,
+                snippet: `mcp.servers[${name}].transport.command = ${command} (mode 0${perms.octal})`,
                 detail: 'MCP server command is world-writable — any local user can replace it before launch',
               });
             }
           } catch {
-            // Path doesn't exist on host — skip
+            // Absent — or, on a snapshot, outside the probe's paths: unknown, not safe
+            if (await uncollectedPath(ctx.fs, command)) unverified.push(command);
           }
         }
 
@@ -79,8 +82,10 @@ export const at007 = defineCheck({
       }
     }
     return h.fromEvidence(evidence, {
-      passed: 'Atomic Agent MCP servers use safe invocation, pinned packages and encrypted transport',
-      failed: (n) => `Found ${n} Atomic Agent MCP server hygiene issue(s)`,
+      passed: unverified.length > 0
+        ? `Atomic Agent MCP servers use safe invocation, pinned packages and encrypted transport; ${notCollectedNote('command path(s)', unverified)}`
+        : 'Atomic Agent MCP servers use safe invocation, pinned packages and encrypted transport',
+      failed: (n) => `Found ${n} Atomic Agent MCP server hygiene issue(s)${unverified.length > 0 ? `; ${notCollectedNote('command path(s)', unverified)}` : ''}`,
       fixDescription: 'Invoke server binaries directly (no `bash -c`), pin package versions (e.g. `@modelcontextprotocol/server-foo@1.2.3`), keep command paths non-world-writable, and use https:// for remote servers',
     });
   },

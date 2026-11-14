@@ -1,6 +1,6 @@
 import { VERSION } from '../version.js';
 import type { ScanResult, AgentScanResult, AgentInventory, Evidence, Grade, McpServerItem, Severity } from '../core/types.js';
-import { mcpScope, mcpTarget, surfaceCounts } from './inventory-text.js';
+import { mcpScope, mcpTarget, skillsDirNote, surfaceCounts } from './inventory-text.js';
 import {
   computeOwaspAgenticCoverage,
   hasOwaspAgenticFindings,
@@ -417,7 +417,7 @@ export class HtmlReporter implements Reporter {
     const lines: string[] = ['<details class="surface">'];
     lines.push(`<summary>Attack surface: ${escapeHtml(surfaceCounts(inventory))}</summary>`);
     const dirs = inventory.skillsDirs
-      .map(d => `${escapeHtml(d.path)}${d.exists ? '' : ' <span class="muted">(not present)</span>'}`)
+      .map(d => `${escapeHtml(d.path)}${d.exists ? '' : ` <span class="muted">${escapeHtml(skillsDirNote(d))}</span>`}`)
       .join('<br>');
     if (dirs) lines.push(`<h4>Skills directories</h4><div class="evidence">${dirs}</div>`);
     if (inventory.skills.length > 0) {

@@ -5,6 +5,7 @@ import { isTruthy } from '../../adapters/hermes-api-server.js';
 import { byHermesPrecedence, hermesYamlSetting } from '../../adapters/hermes-managed.js';
 import { hermesConfigAsWritten } from '../../adapters/hermes-config.js';
 import { compareVersions } from '../../core/semver.js';
+import { probeCoversFile } from '../../core/probe-coverage.js';
 
 /**
  * TIRITH_ENABLED / TIRITH_FAIL_OPEN override security.tirith_enabled /
@@ -33,8 +34,10 @@ function expandHome(p: string, ctx: ScanContext): string {
 /**
  * Whether the tirith binary is available: security.tirith_path when set, the
  * copy Hermes auto-installs at $HERMES_HOME/bin/tirith (not on PATH), or PATH.
+ * `{ unverified }` on a snapshot when none was found but tirith_path points
+ * where the remote probe doesn't look — absent from the snapshot, not the host.
  */
-async function tirithPresent(ctx: ScanContext, configured: unknown): Promise<boolean> {
+async function tirithPresent(ctx: ScanContext, configured: unknown): Promise<boolean | { unverified: string }> {
   const candidates = [
     ...(typeof configured === 'string' && configured.trim() && configured.trim() !== 'tirith'
       ? [expandHome(configured.trim(), ctx)]
@@ -49,10 +52,12 @@ async function tirithPresent(ctx: ScanContext, configured: unknown): Promise<boo
     }
   }
   try {
-    return ctx.fs.execSync('which', ['tirith'], { timeout: 3000 }).trim().length > 0;
+    if (ctx.fs.execSync('which', ['tirith'], { timeout: 3000 }).trim().length > 0) return true;
   } catch {
-    return false;
   }
+  const custom = candidates.length > 1 ? candidates[0] : undefined;
+  if (custom && !probeCoversFile(ctx.fs, custom)) return { unverified: custom };
+  return false;
 }
 
 /** Config version whose migration removed tirith (hermes-agent commit 911da42). */
@@ -74,6 +79,7 @@ export const hm009 = defineCheck({
 
   async run(ctx, h) {
     const evidence: Evidence[] = [];
+    let unverified: string | undefined;
     const enabledEnv = envOverride(ctx, 'TIRITH_ENABLED');
     const failOpenEnv = envOverride(ctx, 'TIRITH_FAIL_OPEN');
     // One effective config: the user's config.yaml with the administrator-
@@ -99,10 +105,11 @@ export const hm009 = defineCheck({
           snippet: enabledEnv ? enabledEnv.source : 'security.tirith_enabled: false',
           detail: 'Tirith pre-exec scanner explicitly disabled — agent-suggested commands run unscanned',
         });
-      } else if ((failOpenEnv ? failOpenEnv.value : failOpen?.value !== false)
-          // Default is fail_open: true. If the binary is missing, scanning silently no-ops.
-          && !(await tirithPresent(ctx, hermesYamlSetting(yamls, 'security.tirith_path')?.value))) {
-        evidence.push({
+      } else if (failOpenEnv ? failOpenEnv.value : failOpen?.value !== false) {
+        // Default is fail_open: true. If the binary is missing, scanning silently no-ops.
+        const present = await tirithPresent(ctx, hermesYamlSetting(yamls, 'security.tirith_path')?.value);
+        if (typeof present === 'object') unverified = present.unverified;
+        else if (!present) evidence.push({
           file: failOpenEnv?.file ?? failOpen?.file ?? primary.filePath,
           snippet: `${failOpenEnv ? failOpenEnv.source : `security.tirith_fail_open: ${failOpen?.value ?? '<default true>'}`} (binary missing)`,
           detail: 'Tirith fail-open is enabled and no tirith binary was found (tirith_path, $HERMES_HOME/bin/tirith or PATH) — pre-exec scanning silently does nothing',
@@ -110,7 +117,9 @@ export const hm009 = defineCheck({
       }
     }
     return h.fromEvidence(evidence, {
-      passed: 'Tirith pre-exec scanner is enabled and reachable',
+      passed: unverified
+        ? `Tirith binary at tirith_path ${unverified} not verified — the remote probe doesn't collect it (checked on local scans)`
+        : 'Tirith pre-exec scanner is enabled and reachable',
       failed: (n) => `Found ${n} Tirith configuration issue(s) — dangerous-command scanning may be inactive`,
       fixDescription: 'Set security.tirith_enabled: true and security.tirith_fail_open: false (and remove TIRITH_ENABLED=false from the environment / .env); install tirith ($HERMES_HOME/bin or PATH)',
     });

@@ -1,6 +1,6 @@
 import { VERSION } from '../version.js';
 import type { AgentInventory, McpServerItem, ScanResult, Severity } from '../core/types.js';
-import { mcpScope, mcpTarget, surfaceCounts } from './inventory-text.js';
+import { mcpScope, mcpTarget, skillsDirNote, surfaceCounts } from './inventory-text.js';
 import type { Reporter } from './reporter.js';
 import { renderOwaspAgenticCoverageMarkdown } from './owasp-agentic.js';
 import { renderOwaspMcpCoverageMarkdown } from './owasp-mcp.js';
@@ -135,7 +135,7 @@ const cell = (s: string) => mdInline(s) || '—';
 function renderSurface(inventory: AgentInventory): string[] {
   const lines = [`### Attack surface (${surfaceCounts(inventory)})`, ''];
   for (const dir of inventory.skillsDirs) {
-    lines.push(`- Skills directory: ${mdInline(dir.path)}${dir.exists ? '' : ' (not present)'}`);
+    lines.push(`- Skills directory: ${mdInline(dir.path)}${dir.exists ? '' : ` ${skillsDirNote(dir)}`}`);
   }
   if (inventory.skillsDirs.length > 0) lines.push('');
   if (inventory.skills.length > 0) {

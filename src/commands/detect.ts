@@ -14,6 +14,7 @@ import { maskCredentialsDeep, toReportJson } from '../reporting/serialize.js';
 import { attachSkillInventories } from '../inventory/skills.js';
 import { attachMcpInventories } from '../inventory/mcp.js';
 import { findSharedMcpServers } from '../inventory/shared.js';
+import { skillsDirNote } from '../reporting/inventory-text.js';
 import type { McpServerItem } from '../core/types.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 
@@ -510,7 +511,7 @@ function renderSkills(inst: AgentInstallation, verbose: boolean | undefined): st
   }
   for (const [i, dir] of dirs.entries()) {
     const label = i === 0 ? 'Skills dirs:' : '';
-    lines.push(`  ${label.padEnd(14)} ${escapeControlChars(dir.path, { lineBreaks: true })}${dir.exists ? '' : chalk.dim(' (not present)')}`);
+    lines.push(`  ${label.padEnd(14)} ${escapeControlChars(dir.path, { lineBreaks: true })}${dir.exists ? '' : chalk.dim(` ${skillsDirNote(dir)}`)}`);
   }
   if (!inventory) return lines;
 

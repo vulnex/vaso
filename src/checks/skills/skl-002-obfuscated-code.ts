@@ -9,6 +9,7 @@ import { markTestCode } from '../../analyzers/test-paths.js';
 import { analysisEvasion } from '../../analyzers/ast-analyzer.js';
 import { truncateSnippet } from '../../core/patterns.js';
 import { maskEncodedLiterals } from '../../mcp/string-table.js';
+import { probeCoversTree } from '../../core/probe-coverage.js';
 
 export const skl002 = defineCheck({
   id: 'SKL-002',
@@ -111,10 +112,31 @@ export const skl002 = defineCheck({
       }
     }
 
+    // A skills directory a config points outside the remote probe's trees (a
+    // Nanobot/PicoClaw/ZeroClaw workspace set in its config) isn't in the
+    // snapshot: whatever it holds was not scanned. Informational — it may not
+    // exist at all — but never passed as reviewed.
+    for (const skillsDir of skillsDirsOf(ctx)) {
+      if (probeCoversTree(ctx.fs, skillsDir) || await ctx.fs.access(skillsDir)) continue;
+      evidence.push({
+        file: skillsDir,
+        detail: 'not scanned: skills directory not collected by the remote probe (set outside its default locations) — not verified; scan the host locally to check these skills',
+        mitigated: true,
+      });
+    }
+
     await markTestCode(evidence, ctx.installation, ctx.fs);
+    const notScanned = evidence.filter(e => e.line === undefined).length;
     return h.fromEvidence(evidence, {
       passed: 'No obfuscated code blocks detected',
-      failed: (n) => `Found ${n} obfuscated code block(s) — possible obfuscation`,
+      failed: (n) => {
+        const blocks = n - notScanned;
+        const parts = [
+          ...(blocks > 0 ? [`${blocks} obfuscated code block(s) — possible obfuscation`] : []),
+          ...(notScanned > 0 ? [`${notScanned} skill location(s) not scanned`] : []),
+        ];
+        return `Found ${parts.join('; ')}`;
+      },
     });
   },
 });

@@ -1,4 +1,10 @@
-import type { AgentInventory, McpServerItem } from '../core/types.js';
+import type { AgentInventory, McpServerItem, SkillsDirInfo } from '../core/types.js';
+
+/** Note after a skills directory: '' when present, else why it holds nothing. */
+export function skillsDirNote(dir: SkillsDirInfo): string {
+  if (dir.exists) return '';
+  return dir.unverified ? '(not collected by the remote probe — not verified)' : '(not present)';
+}
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 

@@ -2,6 +2,7 @@ import { dirname } from 'node:path';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { queryPermissions } from '../../core/permissions.js';
+import { notCollectedNote, uncollectedPath } from '../../core/probe-coverage.js';
 
 export const cd009 = defineCheck({
   id: 'CD-009',
@@ -14,6 +15,7 @@ export const cd009 = defineCheck({
 
   async run(ctx, h) {
     const evidence: Evidence[] = [];
+    const unverified: string[] = [];
 
     for (const config of ctx.configs) {
       const mcpServers = config.data.mcpServers as Record<string, unknown> | undefined;
@@ -37,6 +39,8 @@ export const cd009 = defineCheck({
             continue;
           }
         } catch {
+          // A snapshot doesn't hold a command outside the probe's paths: unknown, not safe
+          if (await uncollectedPath(ctx.fs, command)) unverified.push(command);
           continue;
         }
 
@@ -46,7 +50,7 @@ export const cd009 = defineCheck({
           if (parentPerms !== 'unsupported' && parentPerms.worldWrite) {
             evidence.push({
               file: parent,
-              snippet: `${parent} (mode ${parentPerms.octal})`,
+              snippet: `mcpServers.${name}.command = ${command}: ${parent} (mode ${parentPerms.octal})`,
               detail: `Parent directory of MCP command is world-writable — attacker can swap ${command}`,
             });
           }
@@ -57,8 +61,10 @@ export const cd009 = defineCheck({
     }
 
     return h.fromEvidence(evidence, {
-      passed: 'No MCP commands live on world-writable paths',
-      failed: (n) => `Found ${n} MCP command(s) on world-writable paths`,
+      passed: unverified.length > 0
+        ? notCollectedNote('MCP command path(s)', unverified)
+        : 'No MCP commands live on world-writable paths',
+      failed: (n) => `Found ${n} MCP command(s) on world-writable paths${unverified.length > 0 ? `; ${notCollectedNote('command path(s)', unverified)}` : ''}`,
       fixDescription: 'Move MCP command binaries to a non-world-writable location and chmod o-w the parent directory',
     });
   },

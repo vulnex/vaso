@@ -236,6 +236,9 @@ export interface SharedMcpServer {
 export interface SkillsDirInfo {
   path: string;
   exists: boolean;
+  /** Snapshot scans: the remote probe doesn't collect this directory (a config
+   *  points it outside the manifest's trees), so `exists: false` means unknown. */
+  unverified?: true;
 }
 
 export interface SkillItem {

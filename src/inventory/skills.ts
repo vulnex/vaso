@@ -5,6 +5,7 @@ import { getAllSkillsDirs, isExcludedPath, listSkillTree } from '../core/utils.j
 import { parseYamlSafe } from '../core/yaml-safe.js';
 import { redactSecretsInLine } from '../core/patterns.js';
 import { maskCredentialsInLine } from '../reporting/serialize.js';
+import { probeCoversTree } from '../core/probe-coverage.js';
 
 /**
  * Folders under a skills directory whose skills an agent doesn't load: Hermes
@@ -61,7 +62,11 @@ export async function collectSkillInventory(installation: AgentInstallation, fs:
   for (const root of roots) {
     const listing = await listSkillTree(root, fs);
     const missing = listing.error !== undefined && isMissing(listing.error);
-    skillsDirs.push({ path: root, exists: !missing });
+    // A snapshot has nothing for a directory the probe never collected (one a
+    // config points outside the manifest's trees): unknown, not absent
+    const uncollected = missing && !probeCoversTree(fs, root);
+    skillsDirs.push({ path: root, exists: !missing, ...(uncollected ? { unverified: true as const } : {}) });
+    if (uncollected) incomplete.push(`${root}: not collected by the remote probe — not verified (scan locally)`);
     allFiles.push(...listing.files);
     if (listing.error && !missing) {
       incomplete.push(`${root}: can't be listed (${listing.error.code ?? listing.error.message})`);

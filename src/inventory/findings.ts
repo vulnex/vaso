@@ -1,4 +1,4 @@
-import { relative } from 'node:path';
+import { dirname, isAbsolute, relative } from 'node:path';
 import type { AgentInventory, CheckResult, McpServerItem } from '../core/types.js';
 import { relEscapes } from '../core/path-rel.js';
 
@@ -28,6 +28,17 @@ function serverPattern(server: McpServerItem): RegExp {
 }
 
 /**
+ * Files evidence about a server sits in: its config file, or — for a check
+ * reporting the mode of what the server launches (CD-009) — its absolute
+ * command and that command's directory.
+ */
+function inServerFiles(server: McpServerItem, file: string): boolean {
+  if (file === server.configFile) return true;
+  const cmd = server.command;
+  return cmd !== undefined && isAbsolute(cmd) && (file === cmd || file === dirname(cmd));
+}
+
+/**
  * Attach to each inventoried skill, other entry and MCP server the ids of the
  * failed checks that point at it. A skill or entry: evidence in its folder
  * (or the folder its symlink leads to). An MCP server: evidence in its config
@@ -53,7 +64,7 @@ export function linkInventoryFindings(inventory: AgentInventory, results: CheckR
   const links = new Map<McpServerItem, Set<string>>();
   for (const r of failed) {
     for (const e of r.evidence!) {
-      const hits = servers.filter(({ s, re }) => s.configFile === e.file && (re.test(e.snippet ?? '') || re.test(e.detail ?? '')));
+      const hits = servers.filter(({ s, re }) => inServerFiles(s, e.file) && (re.test(e.snippet ?? '') || re.test(e.detail ?? '')));
       if (hits.length === 0) continue;
       const longest = Math.max(...hits.map(h => h.s.name.length));
       for (const { s } of hits) {

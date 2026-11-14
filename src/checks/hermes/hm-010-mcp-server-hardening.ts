@@ -3,6 +3,7 @@ import { defineCheck } from '../../core/check-builder.js';
 import { runnerPackage, isPinnedOrLocal, pinProblem } from '../../mcp/package-pin.js';
 import { shellCommandWrapper, shellInvocation } from '../../mcp/shell-wrapper.js';
 import { queryPermissions } from '../../core/permissions.js';
+import { notCollectedNote, uncollectedPath } from '../../core/probe-coverage.js';
 import { managedOverride, markManagedOverride } from '../../adapters/hermes-managed.js';
 import { isDisabledServerConfig } from '../../mcp/disabled.js';
 
@@ -17,6 +18,7 @@ export const hm010 = defineCheck({
 
   async run(ctx, h) {
     const evidence: Evidence[] = [];
+    const unverified: string[] = [];
     for (const config of ctx.configs) {
       if (!config.filePath.endsWith('cli-config.yaml') && !config.filePath.endsWith('config.yaml')) continue;
       const servers = config.data.mcp_servers as Record<string, unknown> | undefined;
@@ -55,12 +57,13 @@ export const hm010 = defineCheck({
             if (perms !== 'unsupported' && perms.worldWrite) {
               push({
                 file: config.filePath,
-                snippet: `${command} (mode 0${perms.octal})`,
+                snippet: `mcp_servers.${name}.command = ${command} (mode 0${perms.octal})`,
                 detail: `MCP server command is world-writable — any local user can replace it before launch`,
               });
             }
           } catch {
-            // Path doesn't exist on host — skip
+            // Absent — or, on a snapshot, outside the probe's paths: unknown, not safe
+            if (await uncollectedPath(ctx.fs, command)) unverified.push(command);
           }
         }
 
@@ -76,8 +79,10 @@ export const hm010 = defineCheck({
       }
     }
     return h.fromEvidence(evidence, {
-      passed: 'Hermes MCP servers use safe stdio invocation and pinned packages',
-      failed: (n) => `Found ${n} Hermes MCP server hygiene issue(s)`,
+      passed: unverified.length > 0
+        ? `Hermes MCP servers use safe stdio invocation and pinned packages; ${notCollectedNote('command path(s)', unverified)}`
+        : 'Hermes MCP servers use safe stdio invocation and pinned packages',
+      failed: (n) => `Found ${n} Hermes MCP server hygiene issue(s)${unverified.length > 0 ? `; ${notCollectedNote('command path(s)', unverified)}` : ''}`,
       fixDescription: 'Drop `bash -c` wrappers (invoke the binary directly), pin package versions (e.g. `@modelcontextprotocol/server-foo@1.2.3`), and ensure command paths are not world-writable',
     });
   },
