@@ -15,7 +15,12 @@ import { isDeepStrictEqual } from 'node:util';
  * of the key, `export KEY=…` included (the `export` is kept).
  */
 export async function updateEnvFile(filePath: string, key: string, value: string): Promise<void> {
-  const content = (await readRegularFile(filePath)).toString('utf-8');
+  const raw = (await readRegularFile(filePath)).toString('utf-8');
+  // A byte-order mark and CRLF line endings are kept: the edited and the
+  // inserted lines end like the rest of the file
+  const bom = raw.startsWith('﻿') ? '﻿' : '';
+  const content = raw.slice(bom.length);
+  const crlf = content.includes('\r\n');
   const lines = content.split('\n');
   let found = false;
 
@@ -27,7 +32,10 @@ export async function updateEnvFile(filePath: string, key: string, value: string
     const rawKey = trimmed.slice(0, eqIndex).trim();
     const exported = /^export\s+/.test(rawKey);
     if (rawKey.replace(/^export\s+/, '') === key) {
-      lines[i] = `${exported ? 'export ' : ''}${key}=${value}`;
+      const cr = lines[i].endsWith('\r') ? '\r' : '';
+      // a trailing comment after the value stays on the line
+      const comment = /^\s*(?:"(?:[^"\\]|\\.)*"|'[^']*'|[^\s#]*)(\s+#.*)$/.exec(trimmed.slice(eqIndex + 1))?.[1] ?? '';
+      lines[i] = `${exported ? 'export ' : ''}${key}=${value}${comment}${cr}`;
       found = true;
       break;
     }
@@ -39,10 +47,15 @@ export async function updateEnvFile(filePath: string, key: string, value: string
     while (insertIndex > 0 && lines[insertIndex - 1].trim() === '') {
       insertIndex--;
     }
-    lines.splice(insertIndex, 0, `${key}=${value}`);
+    // After a last line without a newline, that line gets one first
+    if (insertIndex === lines.length && insertIndex > 0) {
+      if (crlf) lines[insertIndex - 1] += '\r';
+      lines.push('');
+    }
+    lines.splice(insertIndex, 0, `${key}=${value}${crlf ? '\r' : ''}`);
   }
 
-  await writeRegularFile(filePath, lines.join('\n'));
+  await writeRegularFile(filePath, bom + lines.join('\n'));
 }
 
 /**
@@ -84,8 +97,53 @@ export async function updateYamlFile(filePath: string, keyPath: KeyPath, value: 
   const content = (await readRegularFile(filePath)).toString('utf-8');
   const doc = YAML.parseDocument(content, { intAsBigInt: true });
   const keys = keySegments(keyPath);
+  assertNoAliasOnPath(doc, keys, filePath);
   doc.setIn(keys, value);
-  await writeRegularFile(filePath, doc.toString());
+  const expected = doc.toJS();
+  // An existing scalar is edited in its source token, so the rest of the
+  // file — folding, flow spacing, quoting, comments — stays byte for byte
+  const edited = editYamlScalar(content, keys, value, expected);
+  await writeRegularFile(filePath, edited ?? doc.toString());
+}
+
+/**
+ * Refuse a key path that runs through (or ends at) a YAML alias: the value
+ * lives at the anchor, and changing it there would change every other place
+ * that shares it. Merge keys (`<<: *defaults`) are fine — a key set next to
+ * them overrides the merged one.
+ */
+function assertNoAliasOnPath(doc: YAML.Document, keys: string[], filePath: string): void {
+  let node: unknown = doc.contents;
+  for (let i = 0; i <= keys.length; i++) {
+    if (YAML.isAlias(node)) {
+      const at = keys.slice(0, i).join('.') || '(document root)';
+      throw new Error(`${at} in ${filePath} is a YAML alias (*${node.source}) — vaso won't change the anchored value it shares with other keys; set ${keys.join('.')} by hand`);
+    }
+    if (i === keys.length || !(YAML.isMap(node) || YAML.isSeq(node))) return;
+    node = node.get(keys[i], true);
+  }
+}
+
+/** Replace an existing scalar's source token; undefined when that isn't possible or doesn't parse to `expected`. */
+function editYamlScalar(content: string, keys: string[], value: unknown, expected: unknown): string | undefined {
+  if (value === null || !['string', 'number', 'boolean', 'bigint'].includes(typeof value)) return undefined;
+  try {
+    const tokens = Array.from(new YAML.Parser().parse(content));
+    const docs = Array.from(new YAML.Composer({ intAsBigInt: true, keepSourceTokens: true }).compose(tokens));
+    if (docs.length !== 1) return undefined;
+    const node = docs[0].getIn(keys, true);
+    if (!YAML.isScalar(node) || !node.srcToken) return undefined;
+    const token = node.srcToken;
+    const types = [undefined, 'QUOTE_DOUBLE'] as const;
+    for (const type of typeof value === 'string' ? types : types.slice(0, 1)) {
+      YAML.CST.setScalarValue(token, String(value), type ? { type } : undefined);
+      const out = tokens.map(t => YAML.CST.stringify(t)).join('');
+      if (isDeepStrictEqual(YAML.parseDocument(out, { intAsBigInt: true }).toJS(), expected)) return out;
+    }
+  } catch {
+    // fall back to re-serializing the document
+  }
+  return undefined;
 }
 
 /** Split a TOML key (`a."b.c".d`) into its segments; undefined when malformed. */
@@ -126,6 +184,27 @@ function splitTomlKey(key: string): string[] | undefined {
     }
   }
   return out.length > 0 ? out : undefined;
+}
+
+/**
+ * Index of the `]` closing a `[table]` header line — the first one outside a
+ * quoted key, so a `]` in a trailing comment (`[gateway] # see [docs]`) or in
+ * a quoted segment (`[a."x]y"]`) doesn't end it. -1 when there is none.
+ */
+function headerClose(t: string): number {
+  for (let i = 1; i < t.length; i++) {
+    const c = t[i];
+    if (c === '"' || c === "'") {
+      let j = i + 1;
+      while (j < t.length && t[j] !== c) j += c === '"' && t[j] === '\\' ? 2 : 1;
+      if (j >= t.length) return -1;
+      i = j;
+      continue;
+    }
+    if (c === ']') return i;
+    if (c === '#') return -1;
+  }
+  return -1;
 }
 
 function tomlKey(segments: string[]): string {
@@ -294,7 +373,7 @@ function editTomlLines(content: string, path: string[], value: unknown): string 
       continue;
     }
     if (t.startsWith('[')) {
-      const close = t.lastIndexOf(']');
+      const close = headerClose(t);
       current = close > 0 ? splitTomlKey(t.slice(1, close)) : undefined;
       if (current) tables.set(current.join(SEP), { last: n });
       continue;
