@@ -2,7 +2,7 @@ import { join } from 'node:path';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { accessibleByOthers, markUnreachable, queryPermissions } from '../../core/permissions.js';
-import { chmodFile } from '../../remediation/config-writer.js';
+import { restrictFilesToOwner } from '../../remediation/config-writer.js';
 
 export const zc013 = defineCheck({
   id: 'ZC-013',
@@ -34,17 +34,12 @@ export const zc013 = defineCheck({
       passed: '.secret_key is owner-only (or not created yet)',
       failed: () => '.secret_key is accessible to other users',
       fixable: true,
-      fixDescription: 'Run: chmod 600 <config dir>/.secret_key',
+      fixDescription: 'Run: chmod go-rwx <config dir>/.secret_key',
     });
   },
 
   async fix(ctx) {
     const keyPath = join(ctx.installation.installDir, '.secret_key');
-    try {
-      await chmodFile(keyPath, 0o600);
-      return { checkId: 'ZC-013', applied: true, message: 'Set .secret_key permissions to 600' };
-    } catch {
-      return { checkId: 'ZC-013', applied: false, message: 'Failed to set permissions on .secret_key' };
-    }
+    return restrictFilesToOwner('ZC-013', [keyPath]);
   },
 });

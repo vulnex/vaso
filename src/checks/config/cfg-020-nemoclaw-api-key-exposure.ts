@@ -2,7 +2,7 @@ import { join } from 'node:path';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { accessibleByOthers, markUnreachable, queryPermissions } from '../../core/permissions.js';
-import { chmodFile } from '../../remediation/config-writer.js';
+import { restrictFilesToOwner } from '../../remediation/config-writer.js';
 
 const CREDENTIAL_FILE = 'credentials.json';
 
@@ -88,7 +88,7 @@ export const cfg020 = defineCheck({
         ? undefined
         : hasPlaintextKey ? 'warning' : 'info',
       fixable: hasLoosePerms,
-      fixDescription: hasLoosePerms ? 'Set credentials.json permissions to 600 (owner read/write only)' : undefined,
+      fixDescription: hasLoosePerms ? 'Remove group/other access from credentials.json (chmod go-rwx)' : undefined,
     });
   },
 
@@ -98,19 +98,6 @@ export const cfg020 = defineCheck({
       return { checkId: 'CFG-020', applied: false, message: 'Credentials file not found' };
     }
 
-    try {
-      await chmodFile(credPath, 0o600);
-      return {
-        checkId: 'CFG-020',
-        applied: true,
-        message: 'Set credentials.json permissions to 600 (owner read/write only)',
-      };
-    } catch (err) {
-      return {
-        checkId: 'CFG-020',
-        applied: false,
-        message: `Failed to fix permissions: ${err instanceof Error ? err.message : String(err)}`,
-      };
-    }
+    return restrictFilesToOwner('CFG-020', [credPath]);
   },
 });

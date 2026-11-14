@@ -409,7 +409,9 @@ export async function restrictFilesToOwner(checkId: string, paths: Iterable<stri
       else if (changed === 'dir') dirs++;
     } catch (err) {
       if (err instanceof UnsafeTargetError) refused.push(`${err.path} ${err.reason}`);
-      // otherwise the file doesn't exist
+      // a missing file is nothing to fix; any other error (EPERM: owned by
+      // someone else) is reported, not swallowed
+      else if ((err as NodeJS.ErrnoException).code !== 'ENOENT') refused.push(`${path}: ${(err as Error).message}`);
     }
   }
   const changed = [

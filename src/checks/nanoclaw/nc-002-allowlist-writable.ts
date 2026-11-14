@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import { defineCheck } from '../../core/check-builder.js';
 import { markUnreachable, queryPermissions } from '../../core/permissions.js';
-import { chmodFile } from '../../remediation/config-writer.js';
+import { restrictFilesToOwner } from '../../remediation/config-writer.js';
 import { NANOCLAW_HOST_SECRET_FILES } from '../../adapters/nanoclaw.js';
 import { Findings, groupOnlyNote, hostConfigDir } from './shared.js';
 
@@ -63,30 +63,13 @@ export const nc002 = defineCheck({
       failed: (n) => `${n} NanoClaw host config path${n === 1 ? ' is' : 's are'} accessible to other users`,
       severity: findings.severity('critical'),
       fixable: true,
-      fixDescription: 'chmod 700 ~/.config/nanoclaw; chmod 600 mount-allowlist.json account.json registry-auth.json device-key.json',
+      fixDescription: 'Remove group/other access from ~/.config/nanoclaw and mount-allowlist.json, account.json, registry-auth.json, device-key.json (chmod go-rwx)',
     });
   },
 
   async fix(ctx) {
     const dir = hostConfigDir(ctx);
-    const targets: Array<[string, number]> = [
-      [dir, 0o700],
-      ...['mount-allowlist.json', ...NANOCLAW_HOST_SECRET_FILES].map((n): [string, number] => [join(dir, n), 0o600]),
-    ];
-    let fixed = 0;
-    for (const [path, mode] of targets) {
-      if (!(await ctx.fs.access(path))) continue;
-      try {
-        await chmodFile(path, mode);
-        fixed++;
-      } catch {
-        // skip
-      }
-    }
-    return {
-      checkId: 'NC-002',
-      applied: fixed > 0,
-      message: fixed > 0 ? `Restricted ${fixed} NanoClaw host config path(s) to the owner` : 'No NanoClaw host config to fix',
-    };
+    // group/other bits cleared, never a fixed 700/600 (a 0400 file keeps no write)
+    return restrictFilesToOwner('NC-002', [dir, ...['mount-allowlist.json', ...NANOCLAW_HOST_SECRET_FILES].map(n => join(dir, n))]);
   },
 });
