@@ -109,6 +109,9 @@ export function accessibleByOthers(f: PermissionFacts): boolean {
  * Findings are downgraded (see `fromEvidence`), never dropped — the mode is
  * still wrong and becomes live if the parent is ever loosened.
  *
+ * The ancestors walked are those of the file's real path (symlinks
+ * resolved through the provider's realpath).
+ *
  * Unknown ancestors (stat errors, 'unsupported') count as traversable, so
  * remote/snapshot providers without ancestor data keep full severity.
  */
@@ -127,6 +130,15 @@ export async function markUnreachable(fs: FSProvider, evidence: Evidence[]): Pro
     return facts;
   };
 
+  const realPathOf = async (p: string): Promise<string> => {
+    try {
+      const r = await fs.realpath(p);
+      return isAbsolute(r) ? r : p;
+    } catch {
+      return p;
+    }
+  };
+
   for (const e of evidence) {
     if (!e.file || !isAbsolute(e.file)) continue;
     const facts = await factsOf(e.file);
@@ -135,9 +147,13 @@ export async function markUnreachable(fs: FSProvider, evidence: Evidence[]): Pro
     const worldExposed = facts.worldRead || facts.worldWrite || facts.worldExec;
     if (!groupExposed && !worldExposed) continue;
 
+    // Other users reach the file by its real path: a symlink (or a
+    // symlinked parent) in a private directory doesn't hide a target that
+    // sits in an open one, so the target's parents are the ones walked.
+    const real = await realPathOf(e.file);
     let groupBarrier: string | undefined;
     let worldBarrier: string | undefined;
-    for (let dir = dirname(e.file); ; dir = dirname(dir)) {
+    for (let dir = dirname(real); ; dir = dirname(dir)) {
       const a = await factsOf(dir);
       if (a) {
         if (!groupBarrier && !a.groupExec) groupBarrier = `${dir} (${a.octal})`;
