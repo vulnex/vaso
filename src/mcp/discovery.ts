@@ -325,8 +325,13 @@ function codexServers(map: unknown): unknown {
  * environment }` or `{ type: "remote", url, headers }`, `enabled: false` to
  * switch one off (opencode.ai/docs/mcp-servers).
  */
-function opencodeServers(map: unknown): unknown {
-  if (!map || typeof map !== 'object' || Array.isArray(map)) return {};
+function opencodeServers(mcp: unknown): unknown {
+  if (!mcp || typeof mcp !== 'object' || Array.isArray(mcp)) return {};
+  // V2 nests the servers: `mcp.servers.<name>` (a V1 server named "servers" has a `type`)
+  const nested = (mcp as Record<string, unknown>).servers;
+  const map = nested && typeof nested === 'object' && !Array.isArray(nested) && typeof (nested as Record<string, unknown>).type !== 'string'
+    ? nested
+    : mcp;
   return Object.fromEntries(Object.entries(map as Record<string, unknown>).flatMap(([name, raw]) => {
     if (!raw || typeof raw !== 'object') return [];
     const cfg = raw as Record<string, unknown>;
@@ -336,7 +341,8 @@ function opencodeServers(map: unknown): unknown {
       env: cfg.environment,
       url: cfg.url,
       headers: cfg.headers,
-      enabled: cfg.enabled,
+      // V1 `enabled: false`, V2 `disabled: true`
+      enabled: cfg.disabled === true ? false : cfg.enabled,
       type: cfg.type === 'remote' ? 'http' : cfg.type === 'local' ? 'stdio' : undefined,
     }]];
   }));

@@ -2,6 +2,7 @@ import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { buildBroadPaths, isBroadPath } from '../../analyzers/broad-paths.js';
 import { DANGEROUS_COMMANDS } from '../devin/dev-001-broad-permissions.js';
+import { actionMatches, isCatchAllResource, v2Action, v2CatchAll, v2PermissionRules } from './schema.js';
 
 /**
  * OpenCode's permission defaults (opencode.ai/docs/permissions): most tools
@@ -61,6 +62,42 @@ export const opc002 = defineCheck({
     const gated = new Set<string>();
 
     for (const config of ctx.configs) {
+      // V2: ordered `permissions` rules, last match wins, base policy allows
+      // everything (external_directory included)
+      const v2 = v2PermissionRules(config.data.permissions);
+      if (v2) {
+        for (const k of ALLOW_BY_DEFAULT) {
+          if (v2CatchAll(v2, v2Action(k)).effect !== 'allow') gated.add(k);
+        }
+        // A scoped allow after the action's catch-all ask/deny re-opens it
+        for (const [action, judge] of [
+          ['shell', (resource: string) => {
+            const family = commandFamily(resource);
+            return DANGEROUS_COMMANDS.has(family)
+              ? `"${family}" runs without confirmation — shell execution, network egress or privilege escalation`
+              : undefined;
+          }],
+          ['external_directory', (resource: string) => {
+            const hit = isBroadPath(globBase(resource), broad, home);
+            return hit ? `Outside-workspace access allowed for a path that ${hit.reason}` : undefined;
+          }],
+        ] as const) {
+          const top = v2CatchAll(v2, action);
+          if (top.effect === 'allow') continue;
+          v2.forEach((r, i) => {
+            if (i <= top.index || r.effect !== 'allow' || isCatchAllResource(r.resource) || !actionMatches(r.action, action)) return;
+            const detail = judge(r.resource);
+            if (detail) {
+              critical.push({
+                file: config.filePath,
+                snippet: `permissions[${i}] = { action: "${r.action}", resource: "${r.resource}", effect: "allow" }`,
+                detail,
+              });
+            }
+          });
+        }
+      }
+
       const perm = config.data.permission;
       if (typeof perm === 'string') {
         if (perm.toLowerCase() === 'allow') {

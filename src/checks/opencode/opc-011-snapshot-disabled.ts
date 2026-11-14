@@ -1,5 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { snapshotsOff } from './schema.js';
 
 export const opc011 = defineCheck({
   id: 'OPC-011',
@@ -13,10 +14,11 @@ export const opc011 = defineCheck({
     const evidence: Evidence[] = [];
 
     for (const config of ctx.configs) {
-      if (config.data.snapshot === false) {
+      const off = snapshotsOff(config.data);
+      if (off) {
         evidence.push({
           file: config.filePath,
-          snippet: 'snapshot = false',
+          snippet: off,
           detail: 'Snapshot disabled — there is no rollback path if the agent makes a destructive edit',
         });
       }
@@ -25,7 +27,7 @@ export const opc011 = defineCheck({
     return h.fromEvidence(evidence, {
       passed: 'OpenCode snapshot is enabled (default)',
       failed: () => 'OpenCode snapshot is disabled — no rollback after destructive edits',
-      fixDescription: 'Remove "snapshot": false from opencode.json (snapshot defaults to true)',
+      fixDescription: 'Remove "snapshot": false / "snapshots": false from opencode.json (snapshots are on by default)',
     });
   },
 });

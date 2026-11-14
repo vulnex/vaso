@@ -1,5 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { updatesOff } from './schema.js';
 
 export const opc012 = defineCheck({
   id: 'OPC-012',
@@ -13,10 +14,11 @@ export const opc012 = defineCheck({
     const evidence: Evidence[] = [];
 
     for (const config of ctx.configs) {
-      if (config.data.autoupdate === false) {
+      const off = updatesOff(config.data);
+      if (off) {
         evidence.push({
           file: config.filePath,
-          snippet: 'autoupdate = false',
+          snippet: off,
           detail: 'Auto-update disabled — no notification when a security release ships',
         });
       }
@@ -25,7 +27,7 @@ export const opc012 = defineCheck({
     return h.fromEvidence(evidence, {
       passed: 'OpenCode auto-update is enabled or set to notify',
       failed: () => 'OpenCode auto-update is disabled',
-      fixDescription: 'Remove "autoupdate": false from opencode.json, or set it to "notify"',
+      fixDescription: 'Remove "autoupdate": false / "update": "disable" from opencode.json, or set it to "notify"',
     });
   },
 });

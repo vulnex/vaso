@@ -2,6 +2,7 @@ import { basename, join } from 'node:path';
 import { parseYamlSafe } from '../../core/yaml-safe.js';
 import type { Evidence, ParsedConfig, ScanContext } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { actionMatches, v2Action, v2CatchAll, v2PermissionRules, type PermissionRule } from './schema.js';
 
 const RISK_LEVEL: Record<string, number> = { deny: 0, ask: 1, allow: 2 };
 const TRACKED_KEYS = ['bash', 'edit', 'webfetch', 'task'];
@@ -103,6 +104,35 @@ export const opc006 = defineCheck({
         }
       }
     };
+
+    // V2: agents.<id>.permissions are appended to the global `permissions`
+    // rules (last match wins), so any agent rule for an action loosens it
+    // when it allows more than the global catch-all
+    const globalV2: PermissionRule[] = ctx.configs.flatMap(c => v2PermissionRules(c.data.permissions) ?? []);
+    for (const config of ctx.configs) {
+      const agents = config.data.agents;
+      if (!agents || typeof agents !== 'object' || Array.isArray(agents)) continue;
+      for (const [name, agent] of Object.entries(agents as Record<string, unknown>)) {
+        const rules = v2PermissionRules((agent as Record<string, unknown> | null)?.permissions);
+        if (!rules) continue;
+        for (const key of TRACKED_KEYS) {
+          const action = v2Action(key);
+          const top = RISK_LEVEL[v2CatchAll(globalV2, action).effect];
+          let sub: number | undefined;
+          for (const r of rules) {
+            if (!actionMatches(r.action, action)) continue;
+            const lvl = RISK_LEVEL[r.effect];
+            if (lvl !== undefined && (sub === undefined || lvl > sub)) sub = lvl;
+          }
+          if (top === undefined || sub === undefined || sub <= top) continue;
+          evidence.push({
+            file: config.filePath,
+            snippet: `agents.${name}.permissions (${action})`,
+            detail: `Sub-agent "${name}" upgrades ${action} from "${levelName(top)}" to "${levelName(sub)}"`,
+          });
+        }
+      }
+    }
 
     for (const config of ctx.configs) {
       const agents = config.data.agent;

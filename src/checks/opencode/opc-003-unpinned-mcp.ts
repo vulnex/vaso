@@ -2,6 +2,7 @@ import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { runnerPackage, isPinnedOrLocal, pinProblem } from '../../mcp/package-pin.js';
 import { isDisabledServerConfig } from '../../mcp/disabled.js';
+import { opencodeMcpServers } from './schema.js';
 
 
 interface LocalServer {
@@ -15,7 +16,7 @@ interface RemoteServer {
   oauth?: unknown;
 }
 
-function checkLocal(name: string, server: LocalServer, file: string, evidence: Evidence[]): void {
+function checkLocal(name: string, server: LocalServer, file: string, evidence: Evidence[], path: string): void {
   const cmd = server.command;
   if (!Array.isArray(cmd) || cmd.length === 0) return;
   const exec = cmd[0];
@@ -29,7 +30,7 @@ function checkLocal(name: string, server: LocalServer, file: string, evidence: E
     if (!isPinnedOrLocal(pkg)) {
       evidence.push({
         file,
-        snippet: `mcp.${name}.command = ${cmd.join(' ')}`,
+        snippet: `${path}.command = ${cmd.join(' ')}`,
         detail: `MCP server package ${pinProblem(pkg)} — supply chain risk`,
       });
     }
@@ -44,19 +45,19 @@ function checkLocal(name: string, server: LocalServer, file: string, evidence: E
   if (!exec.startsWith('/') && !exec.startsWith('./') && !exec.startsWith('../') && !exec.startsWith('~')) {
     evidence.push({
       file,
-      snippet: `mcp.${name}.command = ${exec}`,
+      snippet: `${path}.command = ${exec}`,
       detail: `MCP server "${name}" launches bare binary "${exec}" — first match on PATH wins`,
     });
   }
 }
 
-function checkRemote(name: string, server: RemoteServer, file: string, evidence: Evidence[]): void {
+function checkRemote(server: RemoteServer, file: string, evidence: Evidence[], path: string): void {
   const url = server.url;
   if (typeof url !== 'string') return;
   if (url.startsWith('http://')) {
     evidence.push({
       file,
-      snippet: `mcp.${name}.url = ${url}`,
+      snippet: `${path}.url = ${url}`,
       detail: `Remote MCP server uses plaintext HTTP — credentials and tool calls travel unencrypted`,
     });
   }
@@ -74,17 +75,15 @@ export const opc003 = defineCheck({
     const evidence: Evidence[] = [];
 
     for (const config of ctx.configs) {
-      const mcp = config.data.mcp;
-      if (!mcp || typeof mcp !== 'object') continue;
-
-      for (const [name, srv] of Object.entries(mcp as Record<string, unknown>)) {
-        if (isDisabledServerConfig(srv)) continue; // never launched
-        if (!srv || typeof srv !== 'object') continue;
-        const obj = srv as Record<string, unknown>;
-        if (obj.type === 'local') {
-          checkLocal(name, obj as LocalServer, config.filePath, evidence);
-        } else if (obj.type === 'remote') {
-          checkRemote(name, obj as RemoteServer, config.filePath, evidence);
+      // V1 `mcp.<name>` and V2 `mcp.servers.<name>`
+      for (const { name, server, path } of opencodeMcpServers(config.data)) {
+        if (isDisabledServerConfig(server)) continue; // never launched
+        // `type` may be left out: a command means local, a url remote
+        const type = server.type ?? (Array.isArray(server.command) ? 'local' : typeof server.url === 'string' ? 'remote' : undefined);
+        if (type === 'local') {
+          checkLocal(name, server as LocalServer, config.filePath, evidence, path);
+        } else if (type === 'remote') {
+          checkRemote(server as RemoteServer, config.filePath, evidence, path);
         }
       }
     }
