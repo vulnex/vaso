@@ -22,6 +22,9 @@ type ProbeManifest struct {
 	// when non-empty after trimming, nothing otherwise — never the value
 	// (OpenClaw's FLY_MACHINE_ID / FLY_APP_NAME container markers).
 	EnvPresence []string `json:"envPresence,omitempty"`
+	// Paths an agent's config sets (workspaces, extra skill dirs, MCP server
+	// commands), read from configs the probe collects (config_roots.go).
+	ConfigRoots []ConfigRootRequest `json:"configRoots,omitempty"`
 }
 
 // CommandRequest describes a command to execute during probing.
@@ -82,6 +85,11 @@ type ProbeSnapshot struct {
 	// owner-only group are not reported as exposure.
 	Owners        map[string][2]int `json:"owners,omitempty"`
 	PrivateGroups map[string]int    `json:"privateGroups,omitempty"`
+	// Config-derived trees (configRoots "tree"), by walk base (a path, or a
+	// pattern for a wildcard base such as <dir>/workspace-*/skills): whether
+	// it was collected, refused (a base no tree is walked from) or over the
+	// entry limit. Only a collected tree's absence of files means "empty".
+	ConfigTrees map[string]string `json:"configTrees,omitempty"`
 }
 
 // PrivilegeInfo describes the privilege level of the probe process.

@@ -2496,7 +2496,7 @@ func (c *collector) scrubbable(path string) bool {
 			break
 		}
 	}
-	return !c.inSkillTree && !strings.Contains(slash, "/node_modules/")
+	return (!c.inSkillTree || c.configTree) && !strings.Contains(slash, "/node_modules/")
 }
 
 // URL path credentials, mirroring findUrlSecrets in src/mcp/config-secrets.ts:

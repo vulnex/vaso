@@ -105,7 +105,7 @@ func TestCollectPathRecordsDirectoriesAndAncestors(t *testing.T) {
 	c := &collector{budget: 1 << 20}
 	c.collectPath(&snap, dataDir, dataDir, false, true) // a directory requested as a "file path"
 	c.collectPath(&snap, file, file, false, false)
-	recordAncestorModes(&snap)
+	recordAncestorModes(&snap, nil)
 
 	if _, isFile := snap.Files[dataDir]; isFile {
 		t.Fatalf("directory recorded as a file entry")

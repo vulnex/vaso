@@ -115,6 +115,13 @@ type collector struct {
 	truncated bool
 	// inSkillTree is set while collecting a skills glob's matches.
 	inSkillTree bool
+	// configTree is set while collecting a tree an agent's config names
+	// (configRoots): walked as a skill tree, but its content is disguised like
+	// a config's — the directory is wherever the config says.
+	configTree bool
+	// explicit are the manifest's own file and system paths (their symlink
+	// chains and real parents are recorded, see recordExplicitLinks).
+	explicit []string
 	// homes are the scanned users' home directories (scrubbable)
 	homes []string
 	// disguised maps each secret scrubbed from file content to its stand-in,
@@ -130,6 +137,18 @@ type collector struct {
 // (npm package.json globs that target .../node_modules/<pkg>/package.json)
 // don't count.
 func inExcludedDir(pattern, match string) bool {
+	return inExcludedDirAs(pattern, match, isSkillPattern(pattern))
+}
+
+// excluded is inExcludedDir for the glob being collected: a config-derived
+// tree is a skill tree whatever its directory is called.
+func (c *collector) excluded(pattern, match string) bool {
+	return inExcludedDirAs(pattern, match, c.configTree || isSkillPattern(pattern))
+}
+
+// inExcludedDirAs is inExcludedDir with skills given: a skill tree keeps its
+// build output (dist/, build/).
+func inExcludedDirAs(pattern, match string, skills bool) bool {
 	slashPattern := filepath.ToSlash(pattern)
 	base, _ := doublestar.SplitPattern(slashPattern)
 	rel, err := filepath.Rel(filepath.FromSlash(base), match)
@@ -141,7 +160,6 @@ func inExcludedDir(pattern, match string) bool {
 		literal[seg] = true
 	}
 	parts := strings.Split(filepath.ToSlash(rel), "/")
-	skills := isSkillPattern(pattern)
 	for _, seg := range parts[:len(parts)-1] {
 		if excludedGlobDirs[seg] && !literal[seg] && !(skills && skillTreeBuildDirs[seg]) {
 			return true
@@ -265,11 +283,13 @@ func Collect(manifest ProbeManifest, escalate bool) ProbeSnapshot {
 	expandedPaths := expandPaths(manifest.FilePaths, homes)
 	for _, p := range expandedPaths {
 		c.collectPath(&snapshot, p, p, false, true)
+		c.recordExplicitLinks(&snapshot, p)
 	}
 
 	// Expand and collect system paths (not expanded per-user)
 	for _, p := range manifest.SystemPaths {
 		c.collectPath(&snapshot, p, p, false, true)
+		c.recordExplicitLinks(&snapshot, p)
 	}
 
 	// Expand and collect glob patterns. Whether a glob walks a skill tree
@@ -286,30 +306,8 @@ func Collect(manifest ProbeManifest, escalate bool) ProbeSnapshot {
 		}
 	}
 	for _, g := range expandedGlobs {
-		pattern := g.pattern
 		c.inSkillTree = g.skills
-		// Never descend into symlinked directories: a local readdir lists the
-		// link without following it, so following here duplicated every file
-		// a skill symlinks in from elsewhere. The link itself still matches.
-		matches, err := doublestar.FilepathGlob(pattern, doublestar.WithNoFollow())
-		if err != nil {
-			continue
-		}
-		for _, match := range matches {
-			if inExcludedDir(pattern, match) {
-				continue
-			}
-			recordSymlink(snapshot.Symlinks, match)
-			if _, exists := snapshot.Files[match]; !exists {
-				c.collectPath(&snapshot, match, globBase(pattern), false, false)
-			}
-		}
-		c.followLinkedTrees(&snapshot, pattern, matches, false)
-		c.collectNonUTF8Names(&snapshot, pattern)
-		recordDeniedDirs(&snapshot, pattern)
-		if c.inSkillTree {
-			c.collectUnlistableSkills(&snapshot, pattern)
-		}
+		c.collectGlob(&snapshot, g.pattern)
 	}
 	c.inSkillTree = false
 
@@ -330,6 +328,12 @@ func Collect(manifest ProbeManifest, escalate bool) ProbeSnapshot {
 		}
 		c.followLinkedTrees(&snapshot, pattern, matches, true)
 	}
+
+	// Trees and paths agents' configs set (a workspace moved elsewhere, an
+	// MCP server's command), read from the configs collected above. After the
+	// metadata globs: a private store inside such a tree (sessions, memory,
+	// tokens) is already recorded as metadata and stays that way.
+	c.collectConfigRoots(&snapshot, manifest.ConfigRoots, homes)
 
 	// Expand and collect directory listings. Only non-nil listings are stored:
 	// a nil result means the directory doesn't exist or can't be read, and
@@ -391,7 +395,7 @@ func Collect(manifest ProbeManifest, escalate bool) ProbeSnapshot {
 	// Record the mode of every ancestor of what was collected, so the TS side
 	// can tell whether a parent directory blocks other users (parent-directory
 	// mitigation) exactly as a local scan does.
-	recordAncestorModes(&snapshot)
+	recordAncestorModes(&snapshot, c.explicit)
 
 	// Collect filtered environment variables
 	snapshot.Env = collectEnv(manifest.EnvPrefixes)
@@ -492,6 +496,34 @@ func expandPaths(paths []string, homes []UserHome) []string {
 		}
 	}
 	return expanded
+}
+
+// collectGlob collects a glob's matches (content, or metadata past the
+// limits), the trees its symlinks point to, names a glob can't match and
+// directories it couldn't read. c.inSkillTree says whether it walks skills.
+func (c *collector) collectGlob(snapshot *ProbeSnapshot, pattern string) {
+	// Never descend into symlinked directories: a local readdir lists the
+	// link without following it, so following here duplicated every file
+	// a skill symlinks in from elsewhere. The link itself still matches.
+	matches, err := doublestar.FilepathGlob(pattern, doublestar.WithNoFollow())
+	if err != nil {
+		return
+	}
+	for _, match := range matches {
+		if c.excluded(pattern, match) {
+			continue
+		}
+		recordSymlink(snapshot.Symlinks, match)
+		if _, exists := snapshot.Files[match]; !exists {
+			c.collectPath(snapshot, match, globBase(pattern), false, false)
+		}
+	}
+	c.followLinkedTrees(snapshot, pattern, matches, false)
+	c.collectNonUTF8Names(snapshot, pattern)
+	c.recordDeniedDirs(snapshot, pattern)
+	if c.inSkillTree {
+		c.collectUnlistableSkills(snapshot, pattern)
+	}
 }
 
 // collectFile reads a file and returns its content and mode. Content is
@@ -632,7 +664,11 @@ func (c *collector) collectPath(snapshot *ProbeSnapshot, p, base string, metadat
 
 // recordAncestorModes stats each parent directory of every collected file and
 // directory (once each) up to the filesystem root.
-func recordAncestorModes(snapshot *ProbeSnapshot) {
+//
+// For explicit manifest paths, the parents of where they really are too: the
+// CLI judges whether a symlinked file is reachable by its real path's parents
+// (markUnreachable), resolved through the links recordExplicitLinks stored.
+func recordAncestorModes(snapshot *ProbeSnapshot, explicit []string) {
 	seen := make(map[string]bool)
 	visit := func(p string) {
 		for dir := filepath.Dir(p); ; dir = filepath.Dir(dir) {
@@ -657,6 +693,25 @@ func recordAncestorModes(snapshot *ProbeSnapshot) {
 	}
 	for d := range snapshot.Directories {
 		visit(d)
+	}
+	// …and of any collected file that is itself a link (a credential store a
+	// metadata glob met as a symlink)
+	linked := append([]string(nil), explicit...)
+	for p := range snapshot.Files {
+		if _, ok := snapshot.Symlinks[p]; ok {
+			linked = append(linked, p)
+		}
+	}
+	for _, p := range linked {
+		if e, ok := snapshot.Files[p]; !ok || !e.Exists {
+			continue
+		}
+		if r := resolveRecordedLinks(p, snapshot.Symlinks); r != p {
+			visit(r)
+		}
+		if r, err := filepath.EvalSymlinks(p); err == nil && r != p {
+			visit(r)
+		}
 	}
 }
 
@@ -731,7 +786,7 @@ func (c *collector) followFrom(snapshot *ProbeSnapshot, pattern string, matches 
 	}
 	for _, m := range matches {
 		info, err := os.Lstat(m)
-		if err != nil || info.Mode()&os.ModeSymlink == 0 || inExcludedDir(pattern, m) {
+		if err != nil || info.Mode()&os.ModeSymlink == 0 || c.excluded(pattern, m) {
 			continue
 		}
 		real, err := filepath.EvalSymlinks(m)
@@ -752,7 +807,7 @@ func (c *collector) followFrom(snapshot *ProbeSnapshot, pattern string, matches 
 			continue
 		}
 		for _, sm := range sub {
-			if inExcludedDir(pattern, sm) {
+			if c.excluded(pattern, sm) {
 				continue
 			}
 			recordSymlink(snapshot.Symlinks, sm)
@@ -1440,11 +1495,11 @@ func (c *collector) collectNonUTF8Names(snapshot *ProbeSnapshot, pattern string)
 		if err != nil || p == root {
 			return nil
 		}
-		if d.IsDir() && inExcludedDir(pattern, filepath.Join(p, "x")) {
+		if d.IsDir() && c.excluded(pattern, filepath.Join(p, "x")) {
 			return filepath.SkipDir
 		}
 		rel := strings.TrimPrefix(p, root)
-		if utf8.ValidString(rel) || inExcludedDir(pattern, p) {
+		if utf8.ValidString(rel) || c.excluded(pattern, p) {
 			return nil
 		}
 		recordSymlink(snapshot.Symlinks, p)
@@ -1466,7 +1521,7 @@ const maxDeniedWalkDirs = 10000
 // wildcard-reached vendor dirs skipped); a denied one gets its mode, which the
 // snapshot answers with EACCES as a local readdir does. A `<root>/**` pattern
 // needs none of this: `**` matches directories, so they are collected as such.
-func recordDeniedDirs(snapshot *ProbeSnapshot, pattern string) {
+func (c *collector) recordDeniedDirs(snapshot *ProbeSnapshot, pattern string) {
 	slash := filepath.ToSlash(pattern)
 	if strings.HasSuffix(slash, "/**") {
 		return
@@ -1502,7 +1557,7 @@ func recordDeniedDirs(snapshot *ProbeSnapshot, pattern string) {
 				continue
 			}
 			sub := filepath.Join(dir, e.Name())
-			if inExcludedDir(pattern, filepath.Join(sub, "x")) {
+			if c.excluded(pattern, filepath.Join(sub, "x")) {
 				continue
 			}
 			if seg == "**" {
