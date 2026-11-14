@@ -196,7 +196,7 @@ describe('MCP checks (ABA-004/006/007/008) over both config shapes', () => {
     expect(r.evidence?.map(e => e.snippet?.split(':')[0])).toEqual([
       'mcpServers.gh.env.GITHUB_TOKEN',
       'mcpServers.remote.headers.Authorization',
-      'mcpServers[0].env.DB_PASSWORD',
+      'mcpServers[db].env.DB_PASSWORD',
     ]);
   });
 

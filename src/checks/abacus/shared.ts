@@ -53,7 +53,8 @@ export function mcpServers(configs: ParsedConfig[]): McpServerRef[] {
         if (!entry || typeof entry !== 'object') return;
         const server = entry as Record<string, unknown>;
         const name = typeof server.name === 'string' ? server.name : `#${i}`;
-        refs.push({ config, name, server, path: `mcpServers[${i}]` });
+        // Named entries are written by name (`mcpServers[github]`): what the inventory links on
+        refs.push({ config, name, server, path: typeof server.name === 'string' ? `mcpServers[${server.name}]` : `mcpServers[${i}]` });
       });
     } else if (raw && typeof raw === 'object') {
       for (const [name, entry] of Object.entries(raw as Record<string, unknown>)) {

@@ -12,7 +12,7 @@ const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 /**
  * Where an agent MCP check names a server in its evidence: the key path it
  * writes (`mcpServers.<name>`, `mcp_servers.<name>`, `mcp.<name>`,
- * `mcp.servers[<name>]`, project servers behind `projects[<path>].`), or the
+ * `mcp.servers[<name>]`, Abacus.AI's array `mcpServers[<name>]`, project servers behind `projects[<path>].`), or the
  * quoted name (`Server "<name>"`, `MCP server "<name>"`). Matching the bare
  * name anywhere linked `db` to `--conn db` and `api` to `api.v2`.
  */
@@ -22,7 +22,7 @@ function serverPattern(server: McpServerItem): RegExp {
     ? `projects\\[${escapeRegex(server.project)}\\]\\.`
     : '(?<!\\]\\.)';
   const keyPath = `(?:^|[\\s"'({,])${scope}(?:tools\\.)?(?:mcpServers|mcp_servers|mcp)\\.${n}(?=[.:\\s=\\[]|$)`;
-  const bracket = `(?:^|[\\s"'({,])${scope}mcp\\.servers\\[${n}\\]`;
+  const bracket = `(?:^|[\\s"'({,])${scope}(?:mcp\\.servers|mcpServers)\\[${n}\\]`;
   const quoted = `[Ss]erver "${n}"`;
   return new RegExp(`${keyPath}|${bracket}|${quoted}`);
 }

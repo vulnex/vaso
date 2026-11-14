@@ -55,6 +55,15 @@ describe('linkInventoryFindings', () => {
     });
   });
 
+  it("links Abacus.AI's array form by name", () => {
+    const inv: AgentInventory = {
+      skillsDirs: [], skills: [], otherEntries: [],
+      mcpServers: [{ name: 'db', configFile: '/a.json', scope: 'user', transport: 'stdio' }],
+    };
+    linkInventoryFindings(inv, [fail('ABA-004', '/a.json', 'mcpServers[db].env.DB_PASSWORD: ***')]);
+    expect(inv.mcpServers![0].findings).toEqual(['ABA-004']);
+  });
+
   it('links other entries by path', () => {
     const inv: AgentInventory = {
       skillsDirs: [], skills: [],
