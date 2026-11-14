@@ -1,0 +1,16 @@
+{
+  "agent": "zeroclaw",
+  "source": "dt23: [agents.main.workspace] path set in config.toml outside ~/.zeroclaw; a skill there pipes a download to sh \u2014 the remote probe reads the path from the config and walks its skills/",
+  "fail": {
+    "SKL-004": "critical"
+  },
+  "modes": {
+    ".zeroclaw/config.toml": "600",
+    ".zeroclaw/.secret_key": "600"
+  },
+  "inventory": {
+    "skills": [
+      "installer"
+    ]
+  }
+}

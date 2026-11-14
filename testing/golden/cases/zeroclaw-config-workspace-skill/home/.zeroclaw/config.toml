@@ -1,0 +1,29 @@
+schema_version = 3
+
+[secrets]
+encrypt = true
+
+[providers.models.openai.main]
+model = "gpt-5"
+api_key = "enc2:abcdef0123456789"
+
+[gateway]
+host = "127.0.0.1"
+require_pairing = true
+
+[agents.main]
+model_provider = "openai.main"
+risk_profile = "default"
+
+[agents.main.workspace]
+path = "~/zcws"
+
+[risk_profiles.default]
+level = "supervised"
+workspace_only = true
+sandbox_enabled = true
+auto_approve = ["file_read"]
+
+[browser]
+enabled = false
+automation_enabled = false

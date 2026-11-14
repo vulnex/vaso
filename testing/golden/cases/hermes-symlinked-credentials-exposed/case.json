@@ -1,0 +1,14 @@
+{
+  "agent": "hermes",
+  "source": "dt23: .env and credentials.json are symlinks from the private ~/.hermes (700) into an open directory \u2014 other users reach them by their real path, so the private parent mitigates nothing (local and remote)",
+  "reachable": true,
+  "fail": {
+    "HM-002": "critical",
+    "HM-003": "critical"
+  },
+  "modes": {
+    ".hermes": "700",
+    ".hermes/config.yaml": "600",
+    "exposed": "755"
+  }
+}

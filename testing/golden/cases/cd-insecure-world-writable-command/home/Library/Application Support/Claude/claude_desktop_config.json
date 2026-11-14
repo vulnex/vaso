@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "ww-binary": {
+      "command": "{{HOME}}/tools/mcp-bin",
+      "args": []
+    },
+    "ww-dir": {
+      "command": "{{HOME}}/shared-bin/mcp-server",
+      "args": []
+    },
+    "absent": {
+      "command": "{{HOME}}/missing/mcp-server",
+      "args": []
+    }
+  }
+}

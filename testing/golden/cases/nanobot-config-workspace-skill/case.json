@@ -1,0 +1,15 @@
+{
+  "agent": "nanobot",
+  "source": "dt23: agents.defaults.workspace set in config.json outside ~/.nanobot; a skill there pipes a download to sh \u2014 the remote probe reads the workspace from the config and walks its skills/",
+  "fail": {
+    "SKL-004": "critical"
+  },
+  "modes": {
+    ".nanobot/config.json": "600"
+  },
+  "inventory": {
+    "skills": [
+      "installer"
+    ]
+  }
+}

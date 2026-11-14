@@ -5,15 +5,13 @@
     "HM-004": "critical",
     "HM-005": "warning",
     "HM-006": "critical",
-    "HM-008": "critical"
+    "HM-008": "critical",
+    "HM-010": "warning"
   },
   "fix": {
     "resolves": []
   },
   "modes": {
     "tools/mcp-bin": "777"
-  },
-  "localOnly": [
-    "HM-010"
-  ]
+  }
 }

@@ -1,0 +1,24 @@
+{
+  "agent": "claude-desktop",
+  "source": "dt23: MCP server commands a local user can replace \u2014 a world-writable binary and a binary in a world-writable directory; the remote probe stats the commands the config names (metadata only)",
+  "skipOn": [
+    "linux",
+    "win32"
+  ],
+  "fail": {
+    "CD-009": "warning"
+  },
+  "modes": {
+    "tools/mcp-bin": "777",
+    "shared-bin": "777",
+    "shared-bin/mcp-server": "755"
+  },
+  "inventory": {
+    "skills": [],
+    "mcpServers": [
+      "absent",
+      "ww-binary",
+      "ww-dir"
+    ]
+  }
+}

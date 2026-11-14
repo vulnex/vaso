@@ -381,6 +381,60 @@ function concrete(entry: string): string | undefined {
   return p;
 }
 
+/**
+ * Paths agents' configs set (configRoots): the configs (still full of
+ * canaries) point workspaces and extra skill dirs at trees whose files carry
+ * canaries — walked, and disguised like any config — at the home itself, a
+ * credential store and the root (refused), and name MCP commands and a
+ * tirith binary whose content is canaries (stat'd, never read).
+ */
+const CONFIG_TREE_FILES: Record<string, string> = {
+  'canary-ws/skills/s1/notes.md': 'md',
+  'canary-ws/skills/s1/settings.json': 'json',
+  'canary-ws/skills/s1/.env': 'env',
+  'canary-ws/skills/s1/tool.py': 'text',
+  'canary-ws/plugins/p/config.yaml': 'yaml',
+  'canary-oc/skills/o/SKILL.md': 'md',
+  'canary-extra/pack/x.toml': 'toml',
+  'canary-zc/skills/z/SKILL.md': 'md',
+  '.zeroclaw/bundle/b/settings.json': 'json',
+};
+/** Never collected: beside a walked tree, or under a refused base. */
+const CONFIG_ROOT_UNCOLLECTED = ['canary-ws/private.env', '.canary-home.env', '.ssh/id_canary', '.aws/canary-credentials'];
+const CONFIG_COMMANDS = ['canary-bin/hermes-server', 'canary-bin/tirith', 'canary-bin/cd-server', 'canary-bin/at-server'];
+
+async function plantConfigRoots(home: string): Promise<void> {
+  const put = async (rel: string, content: string) => {
+    await mkdir(dirname(join(home, rel)), { recursive: true });
+    await writeFile(join(home, rel), content);
+  };
+  const json = (label: string, extra: Record<string, unknown>) =>
+    JSON.stringify({ ...JSON.parse(jsonFile(label)), ...extra }, null, 2) + '\n';
+  const at = (rel: string) => join(home, rel);
+  await put('.nanobot/config.json', json('nanobot root config', { agents: { defaults: { workspace: '~/canary-ws' } } }));
+  await put('.openclaw/openclaw.json', json('openclaw root config', {
+    agents: { defaults: { workspace: '~/canary-oc' } },
+    skills: { load: { extraDirs: ['~', '~/.ssh', '/', '~/canary-extra'] } },
+  }));
+  await put('.zeroclaw/config.toml', tomlFile('zeroclaw root config') + [
+    '[agents.main.workspace]', 'path = "~/canary-zc"',
+    '[skill_bundles.b]', 'directory = "bundle"',
+    '[skills]', 'open_skills_enabled = true', 'open_skills_dir = "~/.aws"',
+  ].join('\n') + '\n');
+  await put('.hermes/config.yaml', [
+    'mcp_servers:', '  srv:', `    command: ${at(CONFIG_COMMANDS[0])}`,
+    'security:', `  tirith_path: ~/${CONFIG_COMMANDS[1]}`,
+  ].join('\n') + '\n' + yamlFile('hermes root config'));
+  await put('Library/Application Support/Claude/claude_desktop_config.json',
+    json('claude desktop root config', { mcpServers: { srv: { command: at(CONFIG_COMMANDS[2]) } } }));
+  await put('.atomic-agent/config.json',
+    json('atomic root config', { mcp: { servers: [{ name: 'srv', transport: { kind: 'stdio', command: at(CONFIG_COMMANDS[3]) } }] } }));
+  const make: Record<string, (label: string) => string> = { md: markdownFile, json: jsonFile, env: envFile, text: textFile, yaml: yamlFile, toml: tomlFile };
+  for (const [rel, kind] of Object.entries(CONFIG_TREE_FILES)) await put(rel, make[kind](rel));
+  for (const rel of CONFIG_ROOT_UNCOLLECTED) await put(rel, envFile(rel));
+  for (const rel of CONFIG_COMMANDS) await put(rel, `#!/bin/sh\n${textFile(rel)}`);
+}
+
 describe.skipIf(!goAvailable)('probe privacy canary', () => {
   let home: string;
   let snapshot: string;
@@ -425,6 +479,7 @@ describe.skipIf(!goAvailable)('probe privacy canary', () => {
     }
     geminiIndex = join(home, '.gemini/tmp/proj-1/memory/MEMORY.md');
     await writeFile(geminiIndex, contentFor('.gemini/tmp/proj-1/memory/MEMORY.md'));
+    await plantConfigRoots(home);
     await writeFile(join(work, 'manifest.json'), m.stdout);
 
     // Credential variables under every collected prefix (the probe redacts them)
@@ -472,6 +527,31 @@ describe.skipIf(!goAvailable)('probe privacy canary', () => {
       .filter(([p, e]) => p.includes('/.gemini/tmp/') && e.exists && !e.contentOmitted)
       .map(([p]) => p);
     expect(tmpContent.every(p => p.endsWith('/memory/MEMORY.md')), tmpContent.join('\n')).toBe(true);
+  });
+
+  it('walks config-set trees (disguised), refuses home, root and credential stores, and stats config-named commands', () => {
+    const snap = JSON.parse(snapshot) as {
+      files: Record<string, { exists: boolean; content?: string; contentOmitted?: boolean }>;
+      configTrees?: Record<string, string>;
+    };
+    for (const rel of Object.keys(CONFIG_TREE_FILES)) {
+      expect(snap.files[join(home, rel)]?.content, `${rel} collected`).toBeTruthy();
+    }
+    for (const rel of CONFIG_ROOT_UNCOLLECTED) expect(snap.files[join(home, rel)], `${rel} not collected`).toBeUndefined();
+    for (const rel of CONFIG_COMMANDS) {
+      const e = snap.files[join(home, rel)];
+      expect(e?.exists, `${rel} stat'd`).toBe(true);
+      expect(e?.contentOmitted).toBe(true);
+      expect(e?.content ?? '').toBe('');
+    }
+    expect(snap.configTrees).toMatchObject({
+      [join(home, 'canary-ws/skills')]: 'collected',
+      [join(home, 'canary-extra')]: 'collected',
+      [home]: 'refused',
+      [join(home, '.ssh')]: 'refused',
+      [join(home, '.aws')]: 'refused',
+      '/': 'refused',
+    });
   });
 
   it('ships no canary', () => {
