@@ -62,7 +62,7 @@ describe('runFix', () => {
     const mockScan = vi.fn().mockResolvedValue({ agents: [] });
     mockScanEngine.mockImplementation(function () { return { scan: mockScan } as any; });
 
-    await runFix({});
+    await runFix({ yes: true });
     expect(consoleLogs.some(l => l.includes('No agents detected'))).toBe(true);
   });
 
@@ -75,7 +75,7 @@ describe('runFix', () => {
     });
     mockScanEngine.mockImplementation(function () { return { scan: mockScan } as any; });
 
-    await runFix({});
+    await runFix({ yes: true });
     expect(consoleLogs.some(l => l.includes('No fixable issues'))).toBe(true);
   });
 
@@ -89,7 +89,7 @@ describe('runFix', () => {
     mockScanEngine.mockImplementation(function () { return { scan: mockScan } as any; });
 
     const mockFix = vi.fn().mockResolvedValue([{ applied: true }]);
-    mockRemediationEngine.mockImplementation(function () { return { fix: mockFix } as any; });
+    mockRemediationEngine.mockImplementation(function () { return { fix: mockFix, stillOpen: () => [] } as any; });
 
     await runFix({ dryRun: true, yes: true });
     expect(mockFix).toHaveBeenCalledWith(
@@ -110,7 +110,7 @@ describe('runFix', () => {
     });
     mockScanEngine.mockImplementation(function () { return { scan: mockScan } as any; });
     const mockFix = vi.fn().mockResolvedValue([{ applied: true }]);
-    mockRemediationEngine.mockImplementation(function () { return { fix: mockFix } as any; });
+    mockRemediationEngine.mockImplementation(function () { return { fix: mockFix, stillOpen: () => [] } as any; });
 
     await runFix({ yes: true });
     expect(mockFix).toHaveBeenCalled();
@@ -133,9 +133,9 @@ describe('runFix', () => {
       { applied: true },
       { applied: false },
     ]);
-    mockRemediationEngine.mockImplementation(function () { return { fix: mockFix } as any; });
+    mockRemediationEngine.mockImplementation(function () { return { fix: mockFix, stillOpen: () => [] } as any; });
 
-    await runFix({});
+    await runFix({ yes: true });
     expect(consoleLogs.some(l => l.includes('1 applied, 1 not applied'))).toBe(true);
     // an unapplied fix leaves its finding open
     expect(process.exitCode).toBe(1);
@@ -146,16 +146,45 @@ describe('runFix', () => {
     const mockScan = vi.fn().mockRejectedValue(new Error('fix failed'));
     mockScanEngine.mockImplementation(function () { return { scan: mockScan } as any; });
 
-    await runFix({});
+    await runFix({ yes: true });
     expect(process.exitCode).toBe(1);
     expect(consoleErrors.some(l => l.includes('Fix failed'))).toBe(true);
+  });
+
+  it('names applied fixes whose finding is still reported after a rescan', async () => {
+    const scanResult = { agents: [{ agent: 'zeroclaw', results: [{ id: 'ZC-008', passed: false, fixable: true }] }] };
+    const mockScan = vi.fn().mockResolvedValue(scanResult);
+    mockScanEngine.mockImplementation(function () { return { scan: mockScan } as any; });
+    const mockFix = vi.fn().mockResolvedValue([{ checkId: 'ZC-008', applied: true }]);
+    const stillOpen = vi.fn().mockReturnValue([{ checkId: 'ZC-008', result: { applied: true }, finding: { id: 'ZC-008', severity: 'warning', message: 'open skills still on' } }]);
+    mockRemediationEngine.mockImplementation(function () { return { fix: mockFix, stillOpen } as any; });
+
+    await runFix({ yes: true });
+    expect(mockScan).toHaveBeenCalledTimes(2);
+    expect(stillOpen).toHaveBeenCalledWith(scanResult);
+    expect(consoleLogs.some(l => l.includes('ZC-008 (warning): open skills still on'))).toBe(true);
+    expect(consoleLogs.some(l => l.includes('1 applied (1 partially — finding still open)'))).toBe(true);
+  });
+
+  it('exits 2 without --yes on a non-interactive terminal, before scanning', async () => {
+    const tty = process.stdin.isTTY;
+    Object.defineProperty(process.stdin, 'isTTY', { value: false, configurable: true });
+    try {
+      await runFix({});
+      expect(process.exitCode).toBe(2);
+      expect(mockScanEngine).not.toHaveBeenCalled();
+      expect(consoleErrors.some(l => l.includes('--yes'))).toBe(true);
+    } finally {
+      Object.defineProperty(process.stdin, 'isTTY', { value: tty, configurable: true });
+      process.exitCode = undefined;
+    }
   });
 
   it('passes agent filter to scan', async () => {
     const mockScan = vi.fn().mockResolvedValue({ agents: [] });
     mockScanEngine.mockImplementation(function () { return { scan: mockScan } as any; });
 
-    await runFix({ agent: 'nanoclaw' });
+    await runFix({ agent: 'nanoclaw', yes: true });
     expect(mockScan).toHaveBeenCalledWith(expect.objectContaining({ agentFilter: 'nanoclaw' }));
   });
 });

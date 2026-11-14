@@ -27,6 +27,14 @@ export async function runFix(options: FixCommandOptions): Promise<void> {
     return;
   }
 
+  // Nothing to prompt on: refuse up front (a usage error), not after a scan
+  // with a 0 exit that reads as "fixed"
+  if (!options.yes && !options.dryRun && !process.stdin.isTTY) {
+    console.error(chalk.red('Non-interactive terminal: use --yes to apply fixes (or --dry-run to preview them)'));
+    process.exitCode = 2;
+    return;
+  }
+
   try {
     // First, run a scan
     const engine = new ScanEngine(adapterRegistry, checkRegistry);
@@ -59,7 +67,23 @@ export async function runFix(options: FixCommandOptions): Promise<void> {
     const done = results.filter(r => !r.applied && r.alreadyDone).length;
     const skipped = results.filter(r => !r.applied && r.skipped).length;
     const failed = results.length - applied - done - skipped;
-    const parts = [`${applied} applied`];
+
+    // An applied fix is only "fixed" when the finding is gone: scan again
+    // and name the ones still reported
+    let partial = 0;
+    if (applied > 0 && !options.dryRun) {
+      const rescan = await engine.scan({ agentFilter: options.agent });
+      const open = remediation.stillOpen(rescan);
+      partial = open.length;
+      if (open.length > 0) {
+        console.log(`\n${chalk.yellow('Partially applied')} — still reported after the fix:`);
+        for (const o of open) {
+          console.log(`  ${chalk.yellow('~')} ${o.checkId} (${o.finding.severity}): ${o.finding.message}`);
+        }
+      }
+    }
+
+    const parts = [partial > 0 ? `${applied} applied (${partial} partially — finding still open)` : `${applied} applied`];
     if (done) parts.push(`${done} already in place`);
     if (skipped) parts.push(options.dryRun ? `${skipped} would be applied` : `${skipped} skipped`);
     if (failed) parts.push(`${failed} not applied`);

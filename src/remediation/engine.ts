@@ -11,7 +11,7 @@ import { getAllSkillsDirs, getSkillFiles } from '../core/utils.js';
 import { promptForFix } from './prompt.js';
 import { readRegularFile, regularMode, resolvedDir, withChangeRecorder, withFixBoundary, UnsafeTargetError } from './safe-file.js';
 import { getUserHomeDirs } from '../adapters/openclaw.js';
-import { sha256, appendManifestEntry, type BackupManifest } from './backup-manifest.js';
+import { sha256, appendManifestEntry, type BackupManifest, type ManifestEntry } from './backup-manifest.js';
 
 /**
  * Whether `vaso fix` should act on a result: a failing fixable finding, or a
@@ -159,9 +159,12 @@ export class RemediationEngine {
 
           await this.recordAfterState();
           results.push(fixResult);
+          if (fixResult.applied) this.applied.push({ install: installKey(agent), checkId: finding.id, result: fixResult });
           const icon = fixResult.applied ? chalk.green('+') : fixResult.alreadyDone ? chalk.dim('=') : chalk.red('x');
           console.log(`  ${icon} ${finding.id}: ${fixResult.message}`);
         } catch (err) {
+          // whatever the failed fix changed before it threw is recorded too
+          await this.recordAfterState().catch(() => undefined);
           results.push({
             checkId: finding.id,
             applied: false,
@@ -173,6 +176,26 @@ export class RemediationEngine {
     }
 
     return results;
+  }
+
+  /** Fixes this run applied, by installation. */
+  private applied: Array<{ install: string; checkId: string; result: FixResult }> = [];
+
+  /**
+   * The applied fixes whose finding a scan taken after the run still reports
+   * failing on the same installation: the fix changed something but did not
+   * resolve everything (a setting it can't write, an env override, a part
+   * left for manual review). `vaso fix` reports these as partially applied.
+   */
+  stillOpen(rescan: ScanResult): Array<{ checkId: string; result: FixResult; finding: CheckResult }> {
+    const open = new Map<string, CheckResult>();
+    for (const agent of rescan.agents) {
+      for (const r of agent.results) if (!r.passed) open.set(`${installKey(agent)}\0${r.id}`, r);
+    }
+    return this.applied.flatMap(a => {
+      const finding = open.get(`${a.install}\0${a.checkId}`);
+      return finding ? [{ checkId: a.checkId, result: a.result, finding }] : [];
+    });
   }
 
   /** The run's backup manifest (see backup-manifest.ts); the first backup of a
@@ -201,6 +224,7 @@ export class RemediationEngine {
       if (content === undefined) {
         this.manifest.entries[filePath] = { kind: 'mode', mode, ...where };
         await appendManifestEntry(this.backupDir, filePath, this.manifest.entries[filePath]);
+        this.backedUp.add(filePath);
         return;
       }
       const destDir = join(this.backupDir, dirname(filePath));
@@ -227,19 +251,25 @@ export class RemediationEngine {
   private async recordAfterState(): Promise<void> {
     for (const path of this.backedUp) {
       const entry = this.manifest.entries[path];
-      if (entry?.kind !== 'file' || this.changed.has(path) || entry.after !== undefined) continue;
-      entry.after = entry.before;
-      await appendManifestEntry(this.backupDir, path, { after: entry.after });
+      if (!entry || this.changed.has(path)) continue;
+      const update: Partial<ManifestEntry> = {};
+      if (entry.kind === 'file' && entry.after === undefined) update.after = entry.after = entry.before;
+      if (entry.afterMode === undefined) update.afterMode = entry.afterMode = entry.mode;
+      if (Object.keys(update).length > 0) await appendManifestEntry(this.backupDir, path, update);
     }
     this.backedUp.clear();
     for (const path of this.changed) {
       const entry = this.manifest.entries[path];
-      if (entry?.kind !== 'file') continue;
-      const after = await readRegularFile(path).then(sha256, () => undefined);
-      if (after !== entry.after) {
-        entry.after = after;
-        await appendManifestEntry(this.backupDir, path, { after });
+      if (!entry) continue;
+      const update: Partial<ManifestEntry> = {};
+      if (entry.kind === 'file') {
+        const after = await readRegularFile(path).then(sha256, () => undefined);
+        if (after !== entry.after) update.after = entry.after = after;
       }
+      // Mode as the fix left it: rollback restores a mode only where it changed
+      const afterMode = await lstat(path).then(s => s.mode & 0o7777, () => undefined);
+      if (afterMode !== undefined && afterMode !== entry.afterMode) update.afterMode = entry.afterMode = afterMode;
+      if (Object.keys(update).length > 0) await appendManifestEntry(this.backupDir, path, update);
     }
     this.changed.clear();
   }
@@ -252,6 +282,11 @@ export class RemediationEngine {
     if (process.platform !== 'win32') await chmod(backupsRoot, 0o700);
     await mkdir(this.backupDir, { recursive: true, mode: 0o700 });
   }
+}
+
+/** One installation across two scans of the same host. */
+function installKey(agent: AgentScanResult): string {
+  return `${agent.agent}\0${agent.installation.installDir}\0${agent.installation.agentName ?? ''}`;
 }
 
 /**
