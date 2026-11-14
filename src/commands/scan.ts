@@ -1,10 +1,10 @@
 import chalk from 'chalk';
-import { stripColor } from '../reporting/text-safety.js';
+import { escapeControlChars, stripColor } from '../reporting/text-safety.js';
 import { ScanEngine } from '../core/engine.js';
 import { adapterRegistry } from '../adapters/registry.js';
 import { checkRegistry } from '../core/check-registry.js';
 import { getReporter } from '../reporting/index.js';
-import { saveBaseline, loadBaseline, diffResults } from '../core/baseline.js';
+import { saveBaseline, loadBaseline, diffResults, BaselineLoadError } from '../core/baseline.js';
 import { SnapshotFSProvider } from '../core/snapshot-fs-provider.js';
 import { allUsersCoverageWarning } from '../adapters/openclaw.js';
 import type { ProbeSnapshot } from '../core/snapshot-types.js';
@@ -15,9 +15,9 @@ import type { CheckResult, ScanOptions, ScanResult } from '../core/types.js';
 import { shouldFailScan, isValidFailOn, incompleteResults, EXIT_FINDINGS, EXIT_INCOMPLETE, EXIT_USAGE, type FailOnLevel } from '../core/exit-criteria.js';
 import { logError } from '../core/debug.js';
 import { writeFileEnsureDir, writeFileOwnerOnly } from '../core/utils.js';
-import { HostFileNames, safeHostname } from '../transport/host-files.js';
+import { HostFileNames, hostFileBase } from '../transport/host-files.js';
 import { writeFile } from 'node:fs/promises';
-import { toReportJson } from '../reporting/serialize.js';
+import { maskCredentialsDeep, toReportJson } from '../reporting/serialize.js';
 
 export interface ScanCommandOptions {
   agent?: string;
@@ -73,12 +73,7 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
     process.exitCode = 2;
     return;
   }
-  // Snapshots are what a remote scan collects; a local scan has none to save
-  if (options.saveSnapshot && !options.host?.length && !options.inventory) {
-    console.error(chalk.red('--save-snapshot applies to remote scans only (use with --host or --inventory)'));
-    process.exitCode = 2;
-    return;
-  }
+  // (also --save-snapshot / --ssh-key / --sudo without remote hosts, --snapshot with them)
   let remoteValues: RemoteOptionValues;
   try {
     remoteValues = parseRemoteOptions(options);
@@ -116,7 +111,7 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
 
   // SSH remote scanning
   if (options.host || options.inventory) {
-    const { parseSSHTarget, uniqueTargets, assertIdentityFiles } = await import('../transport/ssh.js');
+    const { parseSSHTarget, uniqueTargets, assertIdentityFiles, assertDistinctLabels } = await import('../transport/ssh.js');
     const { parseInventory } = await import('../transport/inventory.js');
     const { scanMultipleHosts } = await import('../transport/multi-host.js');
     const { buildProbeManifest } = await import('../core/manifest-builder.js');
@@ -153,6 +148,8 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
     const deduped = uniqueTargets(targets);
     targets = deduped.targets;
     await assertIdentityFiles(targets);
+    // Labels name each host's baseline and files: two alike would share them
+    assertDistinctLabels(targets);
     for (const label of deduped.duplicates) log(chalk.yellow(`  ! ${label} is listed more than once — scanning it once`));
 
     if (targets.length === 0) {
@@ -201,6 +198,10 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
     // One name per target for its snapshot and its report
     const hostFiles = new HostFileNames();
     const targetLabel = (t: { label?: string; user: string; host: string }) => t.label ?? `${t.user}@${t.host}`;
+    // Files asked for (reports, snapshots, baselines) that could not be
+    // written: the scan says so and exits 2 instead of reporting success
+    let writeFailures = 0;
+    let reportsWritten = 0;
 
     const hostResults = await scanMultipleHosts({
       targets,
@@ -222,7 +223,8 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
               await writeFileOwnerOnly(outPath, JSON.stringify(snapshot, null, 2));
               log(chalk.dim(`  Saved snapshot for ${target.host} → ${outPath}`));
             } catch (err) {
-              log(chalk.yellow(`  Warning: failed to save snapshot for ${target.host}: ${(err as Error).message}`));
+              writeFailures++;
+              console.error(chalk.red(`  Failed to save snapshot for ${target.host}: ${(err as Error).message}`));
             }
           }
         : undefined,
@@ -240,7 +242,7 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
           // hosts can report the same name and would share one baseline
           const t = entry.target;
           const targetKey = t.label ?? `${t.user ? `${t.user}@` : ''}${t.host}${t.port ? `:${t.port}` : ''}`;
-          await applyBaseline(entry.result, { agent: options.agent, host: targetKey }, options, log);
+          if ((await applyBaseline(entry.result, { agent: options.agent, host: targetKey }, options, log)).writeFailed) writeFailures++;
           const findings = entry.result.summary;
           const summary = `${findings.critical}C / ${findings.warning}W / ${findings.info}I`;
           log(chalk.green(`  ✓ ${label} (${dur}) — score ${entry.result.totalScore}/100, ${summary}`));
@@ -252,9 +254,11 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
               const safeHost = hostFiles.claim(entry.result.host ?? entry.target.host, targetLabel(entry.target));
               const outPath = joinPath(options.outputDir, `${safeHost}.${ext}`);
               await writeFile(outPath, stripColor(reporter.render(entry.result)), 'utf-8');
+              reportsWritten++;
               log(chalk.dim(`    → ${outPath}`));
             } catch (err) {
-              log(chalk.yellow(`  Warning: failed to write output for ${entry.target.host}: ${(err as Error).message}`));
+              writeFailures++;
+              console.error(chalk.red(`  Failed to write the report for ${label}: ${(err as Error).message}`));
             }
           }
         }
@@ -266,7 +270,8 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
     const failedResults = hostResults.filter(hr => hr.error);
 
     if (options.outputDir) {
-      log(chalk.green(`\n  Wrote ${successResults.length} report(s) to ${options.outputDir}/`));
+      const unwritten = successResults.length - reportsWritten;
+      log((unwritten > 0 ? chalk.yellow : chalk.green)(`\n  Wrote ${reportsWritten} report(s) to ${options.outputDir}/${unwritten > 0 ? ` — ${unwritten} could not be written` : ''}`));
     } else if (options.output) {
       // Aggregate to a single file. JSON gets a structured per-host array;
       // text formats get the per-host renders concatenated with a plain
@@ -344,7 +349,11 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
     );
     const erroredChecks = incompleteResults(allResults);
     if (erroredChecks.length > 0) log(chalk.yellow(incompleteNote(erroredChecks)));
-    if (failedResults.length > 0 || erroredChecks.length > 0) {
+    if (writeFailures > 0) {
+      // Output that was asked for is missing: VASO did not finish its job
+      console.error(chalk.red(`  ${writeFailures} file(s) could not be written — see above`));
+      process.exitCode = EXIT_USAGE;
+    } else if (failedResults.length > 0 || erroredChecks.length > 0) {
       process.exitCode = EXIT_INCOMPLETE;
     } else if (shouldFailScan(allResults, failOn)) {
       process.exitCode = EXIT_FINDINGS;
@@ -382,7 +391,7 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
     // One baseline per scan scope (agent filter, scanned host)
     const baselineScope = { agent: options.agent, host: snapshotFs ? result.host : undefined };
 
-    await applyBaseline(result, baselineScope, options, localLog);
+    const { writeFailed: baselineFailed } = await applyBaseline(result, baselineScope, options, localLog);
 
     const reporter = getReporter(scanOptions.format ?? 'terminal');
     const output = reporter.render(result);
@@ -396,7 +405,7 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
       const { hostname } = await import('node:os');
       const ext = FORMAT_EXT[scanOptions.format ?? 'terminal'] ?? 'txt';
       // A snapshot scan reports on the snapshot's host, not this machine
-      const outPath = joinPath(options.outputDir, `${safeHostname(result.host ?? hostname())}.${ext}`);
+      const outPath = joinPath(options.outputDir, `${hostFileBase(result.host ?? hostname())}.${ext}`);
       await writeFileEnsureDir(outPath, stripColor(output));
       localLog(chalk.green(`Report written to ${outPath}`));
     } else {
@@ -407,8 +416,11 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
     // when findings meet the --fail-on threshold (default: critical only)
     const allResults = result.agents.flatMap(a => a.results);
     const erroredChecks = incompleteResults(allResults);
-    if (erroredChecks.length > 0) {
-      localLog(chalk.yellow(incompleteNote(erroredChecks)));
+    if (erroredChecks.length > 0) localLog(chalk.yellow(incompleteNote(erroredChecks)));
+    if (baselineFailed) {
+      // --save-baseline asked for a file that isn't there
+      process.exitCode = EXIT_USAGE;
+    } else if (erroredChecks.length > 0) {
       process.exitCode = EXIT_INCOMPLETE;
     } else if (shouldFailScan(allResults, failOn)) {
       process.exitCode = EXIT_FINDINGS;
@@ -436,10 +448,24 @@ async function applyBaseline(
   baselineScope: { agent?: string; host?: string },
   options: Pick<ScanCommandOptions, 'diff' | 'saveBaseline'>,
   localLog: (msg: string) => void,
-): Promise<void> {
+): Promise<{ writeFailed: boolean }> {
+  // Baseline text (ids, names, messages, its VASO version) may be hand-edited
+  // or quote scanned files: masked like a report, escaped, one line each
+  const line = (s: unknown) => escapeControlChars(maskCredentialsDeep(String(s)), { lineBreaks: true });
+  const forHost = baselineScope.host !== undefined ? ` for ${line(baselineScope.host)}` : '';
+  let writeFailed = false;
   if (options.diff) {
-    let baseline = await loadBaseline(baselineScope);
+    let baseline: ScanResult | null;
     let mismatched = false;
+    try {
+      baseline = await loadBaseline(baselineScope);
+    } catch (err) {
+      if (!(err instanceof BaselineLoadError)) throw err;
+      // A damaged baseline costs the comparison, not the scan
+      localLog(chalk.yellow(`The saved baseline${forHost} can't be used: ${line(err.message)} — not compared. Run with --save-baseline to replace it.`));
+      baseline = null;
+      mismatched = true;
+    }
     // A pre-1.3.1 latest.json may have been saved with -a for other agents:
     // comparing it with this scan would show everything as new or resolved
     const types = (r: ScanResult) => [...new Set(r.agents.map(a => a.agent))].sort();
@@ -472,7 +498,7 @@ async function applyBaseline(
       };
       localLog(chalk.bold('\nDifferential Scan Results:'));
       if (baseline.vasoVersion !== result.vasoVersion) {
-        localLog(chalk.dim(`  Baseline taken with VASO ${baseline.vasoVersion ?? '< 1.3.1'}; checks added or changed since may show as new or resolved.`));
+        localLog(chalk.dim(`  Baseline taken with VASO ${baseline.vasoVersion === undefined ? '< 1.3.1' : line(baseline.vasoVersion)}; checks added or changed since may show as new or resolved.`));
       }
       localLog(`  New findings: ${chalk.red(String(diff.newFindings.length))}`);
       localLog(`  Resolved: ${chalk.green(String(diff.resolvedFindings.length))}`);
@@ -481,23 +507,30 @@ async function applyBaseline(
       if (diff.newFindings.length > 0) {
         localLog(chalk.bold('\n  New findings:'));
         for (const f of diff.newFindings) {
-          localLog(`    ${chalk.red('[NEW]')} ${f.id}: ${f.name} — ${f.message}`);
+          localLog(`    ${chalk.red('[NEW]')} ${line(f.id)}: ${line(f.name)} — ${line(f.message)}`);
         }
       }
       if (diff.resolvedFindings.length > 0) {
         localLog(chalk.bold('\n  Resolved:'));
         for (const f of diff.resolvedFindings) {
-          localLog(`    ${chalk.green('[RESOLVED]')} ${f.id}: ${f.name}`);
+          localLog(`    ${chalk.green('[RESOLVED]')} ${line(f.id)}: ${line(f.name)}`);
         }
       }
       localLog('');
     } else if (!mismatched) {
-      localLog(chalk.yellow('No baseline found. Run with --save-baseline first.'));
+      localLog(chalk.yellow(`No baseline found${forHost}. Run with --save-baseline first.`));
     }
   }
 
   if (options.saveBaseline) {
-    const path = await saveBaseline({ ...result, baselineDiff: undefined }, baselineScope);
-    localLog(chalk.green(`Baseline saved to ${path}`));
+    try {
+      const path = await saveBaseline({ ...result, baselineDiff: undefined }, baselineScope);
+      localLog(chalk.green(`Baseline saved to ${path}`));
+    } catch (err) {
+      // Not saved: said so, and the scan exits 2 (the report is still written)
+      console.error(chalk.red(`Baseline${forHost} not saved: ${line((err as Error).message)}`));
+      writeFailed = true;
+    }
   }
+  return { writeFailed };
 }

@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { assertIdentityFiles, describeConnectFailure, parseProbeOutput, parseSSHTarget, uniqueTargets, withRetry } from './ssh.js';
+import { assertDistinctLabels, assertIdentityFiles, describeConnectFailure, executeRemoteProbe, parseProbeOutput, parseSSHTarget, uniqueTargets, withRetry } from './ssh.js';
 
 describe('parseProbeOutput', () => {
   const target = { user: 'u', host: 'h.test' };
@@ -109,10 +109,14 @@ describe('parseSSHTarget', () => {
     expect(() => parseSSHTarget('user@')).toThrow('missing hostname');
   });
 
-  it('ignores invalid port and treats it as part of host', () => {
-    const result = parseSSHTarget('user@host:notaport');
-    expect(result.host).toBe('host:notaport');
-    expect(result.port).toBe(22);
+  it('rejects a colon that is neither a port nor part of an IPv6 address', () => {
+    expect(() => parseSSHTarget('user@host:notaport')).toThrow('only valid in an IPv6 address');
+    expect(() => parseSSHTarget('root@h:22:22')).toThrow('only valid in an IPv6 address');
+    expect(() => parseSSHTarget('root@h:')).toThrow('missing port');
+    expect(() => parseSSHTarget('a:b@h')).toThrow('may not contain ":"');
+    expect(() => parseSSHTarget('u@fe80::1%')).toThrow('invalid host');
+    expect(() => parseSSHTarget('u@host%en0')).toThrow('invalid host');
+    expect(parseSSHTarget('u@fe80::1%en0')).toMatchObject({ host: 'fe80::1%en0', port: 22 });
   });
 
   it('reads IPv6 hosts: bare (no port) and bracketed with a port', () => {
@@ -224,5 +228,44 @@ describe('assertIdentityFiles', () => {
     writeFileSync(key, 'not a real key', { mode: 0o600 });
     await expect(assertIdentityFiles([{ user: 'u', host: 'h', port: 22, identity: key }, { user: 'u', host: 'g', port: 22 }])).resolves.toBeUndefined();
     await expect(assertIdentityFiles([{ user: 'u', host: 'h', port: 22, identity: join(dir, 'nope') }])).rejects.toThrow(/SSH key ".*nope" is not readable \(ENOENT\)/);
+  });
+
+  it('rejects a directory or an empty file as a key', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'vaso-key-'));
+    const empty = join(dir, 'empty');
+    writeFileSync(empty, '', { mode: 0o600 });
+    await expect(assertIdentityFiles([{ user: 'u', host: 'h', port: 22, identity: dir }])).rejects.toThrow('is not a file');
+    await expect(assertIdentityFiles([{ user: 'u', host: 'h', port: 22, identity: empty }])).rejects.toThrow('is empty');
+  });
+});
+
+describe('target identity', () => {
+  it('scans Host and host once: host names are case-insensitive', () => {
+    const { targets, duplicates } = uniqueTargets([parseSSHTarget('u@Host'), parseSSHTarget('u@host')]);
+    expect(targets).toHaveLength(1);
+    expect(duplicates).toEqual(['u@host']);
+  });
+
+  it('rejects labels that would share baseline and report files', () => {
+    const t = (host: string, label?: string) => ({ user: 'root', host, port: 22, ...(label !== undefined ? { label } : {}) });
+    expect(() => assertDistinctLabels([t('a', 'prod'), t('b', 'prod')])).toThrow('used by more than one host');
+    expect(() => assertDistinctLabels([t('a', 'Prod'), t('b', 'prod')])).toThrow('would name the same files');
+    expect(() => assertDistinctLabels([t('a', 'p/1'), t('b', 'p_1')])).toThrow('would name the same files');
+    expect(() => assertDistinctLabels([t('a', 'prod'), t('b', 'stage'), t('c')])).not.toThrow();
+  });
+});
+
+describe('ssh not installed', () => {
+  it('fails at once instead of waiting out --ssh-timeout', async () => {
+    const path = process.env.PATH;
+    process.env.PATH = mkdtempSync(join(tmpdir(), 'vaso-nossh-'));
+    const started = Date.now();
+    try {
+      await expect(executeRemoteProbe({ user: 'u', host: 'h', port: 22 }, { probeBinDir: '/nonexistent', manifest: {} as never, timeout: 30_000 }))
+        .rejects.toThrow('not installed or not on PATH');
+    } finally {
+      process.env.PATH = path;
+    }
+    expect(Date.now() - started).toBeLessThan(5_000);
   });
 });

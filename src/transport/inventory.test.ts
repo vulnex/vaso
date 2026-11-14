@@ -187,4 +187,23 @@ hosts:
     await expect(parseInventory(await writeTempYAML('hosts:\n  - host: u@192.0.2.1\n    sudo: "yes"\n'))).rejects.toThrow(/"sudo" must be a boolean/);
     await expect(parseInventory(await writeTempYAML('hosts:\n  - host: u@192.0.2.1\n    identity: 123\n'))).rejects.toThrow(/"identity" must be a string/);
   });
+
+  it('rejects a blank label (it would name this machine\'s own baseline)', async () => {
+    await expect(parseInventory(await writeTempYAML('hosts:\n  - host: u@192.0.2.1\n    label: ""\n'))).rejects.toThrow(/"label" must not be empty/);
+    await expect(parseInventory(await writeTempYAML('hosts:\n  - host: u@192.0.2.1\n    label: "  "\n'))).rejects.toThrow(/"label" must not be empty/);
+  });
+
+  it('rejects a host with a stray colon', async () => {
+    await expect(parseInventory(await writeTempYAML('hosts:\n  - host: h:22:22\n'))).rejects.toThrow(/IPv6/);
+  });
+
+  it('reads only a regular file (a FIFO would block)', async () => {
+    const { execFileSync } = await import('node:child_process');
+    const dir = await mkdtemp(join(tmpdir(), 'vaso-inv-'));
+    dirs.push(dir);
+    const fifo = join(dir, 'inv.yaml');
+    execFileSync('mkfifo', [fifo]);
+    await expect(parseInventory(fifo)).rejects.toThrow(/not a regular file/);
+    await expect(parseInventory(dir)).rejects.toThrow(/not a regular file/);
+  });
 });

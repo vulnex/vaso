@@ -194,4 +194,48 @@ describe('baseline scopes', () => {
       await rm(home, { recursive: true, force: true });
     }
   });
+
+  it('reports a damaged baseline as unusable instead of returning something diffResults crashes on', async () => {
+    const { mkdtemp, rm, mkdir, writeFile } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const home = await mkdtemp(join(tmpdir(), 'vaso-bl-'));
+    const { vi } = await import('vitest');
+    vi.resetModules();
+    vi.doMock('node:os', async (orig) => ({ ...(await orig<typeof import('node:os')>()), homedir: () => home }));
+    try {
+      const { loadBaseline, BaselineLoadError } = await import('./baseline.js');
+      const dir = join(home, '.vaso', 'baselines');
+      await mkdir(dir, { recursive: true });
+      for (const text of ['{"agents": [', 'null', '[]', '{"agents": {}}', '{"agents": [{"agent": "x", "installation": {}, "results": [{"id": 1}]}]}']) {
+        await writeFile(join(dir, 'latest.json'), text);
+        await expect(loadBaseline()).rejects.toBeInstanceOf(BaselineLoadError);
+      }
+      // a damaged legacy latest.json is not a fallback for a scoped baseline
+      expect(await loadBaseline({ agent: 'openclaw' })).toBeNull();
+    } finally {
+      vi.doUnmock('node:os');
+      vi.resetModules();
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it('never saves a blank host as this machine\'s own latest.json', async () => {
+    const { mkdtemp, rm, readdir } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const home = await mkdtemp(join(tmpdir(), 'vaso-bl-'));
+    const { vi } = await import('vitest');
+    vi.resetModules();
+    vi.doMock('node:os', async (orig) => ({ ...(await orig<typeof import('node:os')>()), homedir: () => home }));
+    try {
+      const { saveBaseline } = await import('./baseline.js');
+      await saveBaseline(makeScanResult([]), { host: '' });
+      expect((await readdir(join(home, '.vaso', 'baselines'))).filter(f => f.startsWith('latest'))).toEqual(['latest-_.json']);
+    } finally {
+      vi.doUnmock('node:os');
+      vi.resetModules();
+      await rm(home, { recursive: true, force: true });
+    }
+  });
 });

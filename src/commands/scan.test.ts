@@ -12,6 +12,7 @@ vi.mock('../core/baseline.js', () => ({
   saveBaseline: vi.fn(),
   loadBaseline: vi.fn(),
   diffResults: vi.fn(),
+  BaselineLoadError: class BaselineLoadError extends Error {},
 }));
 
 vi.mock('node:fs/promises', () => ({
@@ -21,7 +22,7 @@ vi.mock('node:fs/promises', () => ({
 
 import { ScanEngine } from '../core/engine.js';
 import { getReporter } from '../reporting/index.js';
-import { saveBaseline, loadBaseline, diffResults } from '../core/baseline.js';
+import { saveBaseline, loadBaseline, diffResults, BaselineLoadError } from '../core/baseline.js';
 import { writeFile, mkdir } from 'node:fs/promises';
 import { runScan } from './scan.js';
 import type { ScanResult } from '../core/types.js';
@@ -132,6 +133,37 @@ describe('runScan', () => {
     expect(mockDiffResults.mock.calls[0][0].agents.map((a: { agent: string }) => a.agent)).toEqual(['openclaw']);
     expect(consoleErrors.some(l => l.includes('covers only openclaw') && l.includes('not in the baseline: grok-bot'))).toBe(true);
     expect(consoleErrors.some(l => l.includes('Differential'))).toBe(true);
+  });
+
+  it('warns about a damaged baseline and still writes the report', async () => {
+    mockLoadBaseline.mockRejectedValue(new BaselineLoadError('/h/.vaso/baselines/latest.json is not valid JSON'));
+    await runScan({ format: 'terminal', diff: true });
+    expect(consoleLogs.some(l => l.includes('rendered output'))).toBe(true);
+    expect(consoleErrors.some(l => l.includes("can't be used") && l.includes('not valid JSON'))).toBe(true);
+    expect(consoleErrors.some(l => l.includes('No baseline found'))).toBe(false);
+    expect(process.exitCode).not.toBe(2);
+  });
+
+  it('exits 2 when --save-baseline could not write, after writing the report', async () => {
+    mockSaveBaseline.mockRejectedValue(new Error('EACCES: permission denied'));
+    await runScan({ format: 'terminal', saveBaseline: true });
+    expect(consoleLogs.some(l => l.includes('rendered output'))).toBe(true);
+    expect(consoleErrors.some(l => l.includes('not saved') && l.includes('EACCES'))).toBe(true);
+    expect(consoleErrors.some(l => l.includes('Baseline saved'))).toBe(false);
+    expect(process.exitCode).toBe(2);
+  });
+
+  it('prints diff lines from a baseline escaped and masked', async () => {
+    mockLoadBaseline.mockResolvedValue(makeScanResult());
+    mockDiffResults.mockReturnValue({
+      newFindings: [],
+      resolvedFindings: [{ id: 'X\u001b[2J', name: 'n\u001b]0;t\u0007', category: 'config' as const, severity: 'warning' as const, passed: false, message: 'm' }],
+      unchangedFindings: [],
+    });
+    await runScan({ format: 'terminal', diff: true });
+    const line = consoleErrors.find(l => l.includes('[RESOLVED]'))!;
+    expect(line).toContain('X\\x1b[2J');
+    expect(line).not.toMatch(/\u001b\[2J|\u001b\]0/);
   });
 
   it('shows no baseline message when none found', async () => {

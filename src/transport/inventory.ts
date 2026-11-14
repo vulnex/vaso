@@ -12,7 +12,7 @@
  *     - host: ops@10.0.1.6:2222   # user@host[:port], as with --host
  */
 
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { parse as parseYAML } from 'yaml';
 import { parseSSHTarget, assertSSHTargetParts, targetLabel, unbracketHost } from './ssh.js';
 import type { SSHTarget } from './ssh.js';
@@ -35,6 +35,8 @@ const INVENTORY_KEYS = new Set(['host', 'user', 'port', 'label', 'identity', 'su
  * Parse a YAML inventory file and return an array of SSHTarget objects.
  */
 export async function parseInventory(path: string): Promise<SSHTarget[]> {
+  // A FIFO would block the CLI and a device such as /dev/zero never ends
+  if (!(await stat(path)).isFile()) throw new Error(`Inventory "${path}" is not a regular file`);
   const raw = await readFile(path, 'utf-8');
   const doc = parseYAML(raw) as InventoryFile;
 
@@ -67,6 +69,10 @@ export async function parseInventory(path: string): Promise<SSHTarget[]> {
       if (value !== undefined && typeof value !== type) {
         throw new Error(`Inventory entry #${idx + 1}: "${key}" must be a ${type}`);
       }
+    }
+    // A blank label names no file: its baseline would be this machine's own
+    if (entry.label !== undefined && entry.label.trim() === '') {
+      throw new Error(`Inventory entry #${idx + 1}: "label" must not be empty`);
     }
     // `host: user@host[:port]` is read like `--host`; it used to become
     // `root@user@host`, which ssh can only reject.

@@ -6,9 +6,10 @@
  * ssh/scp commands without re-authenticating.
  */
 
-import { spawn, execFileSync } from 'node:child_process';
+import { spawn, execFileSync, type ChildProcess, type SpawnOptions } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { writeFile, unlink, access } from 'node:fs/promises';
+import { writeFile, unlink, access, stat } from 'node:fs/promises';
+import { isIP } from 'node:net';
 import { openSync, readFileSync, closeSync, unlinkSync, constants } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -17,6 +18,7 @@ import { resolveProbeBinary } from './probe-fetch.js';
 import { escapeControlChars } from '../reporting/text-safety.js';
 import { isDebug } from '../core/debug.js';
 import { MAX_REMOTE_OUTPUT_BYTES, parseSnapshot, SnapshotLoadError } from '../core/snapshot-load.js';
+import { safeHostname } from './host-files.js';
 
 export interface SSHTarget {
   user: string;
@@ -68,6 +70,8 @@ export function parseSSHTarget(target: string): SSHTarget {
     host = rest;
   } else if (colonIdx !== -1) {
     const maybePart = rest.slice(colonIdx + 1);
+    // `host:` names no port; ssh would get a host called `host:`
+    if (maybePart === '') throw new Error(`Invalid SSH target "${target}": missing port after ":"`);
     if (/^\d+$/.test(maybePart)) {
       // `host:99999` names a port, just not a valid one — not a host called that
       host = rest.slice(0, colonIdx);
@@ -108,11 +112,19 @@ export function assertSSHTargetParts(target: string, user: string, host: string,
   const bad = (why: string) => new Error(`Invalid SSH target "${target}": ${why}`);
   if (!user) throw bad('missing user (expected user@host[:port])');
   if (user.startsWith('-') || host.startsWith('-')) throw bad('user and host may not start with "-"');
+  // `user:password@host` — ssh takes no password in the target, and a ':' in
+  // the user would be passed on as part of the login name
+  if (user.includes(':')) throw bad('the user may not contain ":" (ssh takes no password in the target)');
   if (/[\s\u0000-\u001f\u007f]/.test(user + host)) throw bad('whitespace or control characters');
   // What's left of a malformed [ipv6]:port, or a second user@
   if (/[[\]@/]/.test(host)) throw bad(`invalid host "${host}"`);
   // A host name, an IPv4 or IPv6 address (with a %zone): nothing else reaches ssh
   if (!/^[A-Za-z0-9._:%-]+$/.test(host)) throw bad(`invalid host "${host}"`);
+  // Only an IPv6 address has colons (`h:22:22` is not one), and only an
+  // address carries a %zone
+  const [address, zone] = host.split('%', 2);
+  if (host.includes(':') && isIP(address) !== 6) throw bad(`invalid host "${host}" (a colon is only valid in an IPv6 address)`);
+  if (zone !== undefined && (isIP(address) !== 6 || zone === '')) throw bad(`invalid host "${host}"`);
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw bad(`port must be 1–65535 (got ${String(port)})`);
 }
 
@@ -130,20 +142,48 @@ export async function assertIdentityFiles(targets: SSHTarget[]): Promise<void> {
       const code = (err as NodeJS.ErrnoException).code ?? 'unreadable';
       throw new Error(`SSH key "${identity}" is not readable (${code})`);
     }
+    // ssh warns about a directory or an empty file and goes on with other keys
+    const info = await stat(path);
+    if (!info.isFile()) throw new Error(`SSH key "${identity}" is not a file`);
+    if (info.size === 0) throw new Error(`SSH key "${identity}" is empty`);
   }
 }
 
-/** Targets without repeats (same user, host and port); returns the dropped labels. */
+/**
+ * Targets without repeats (same user, host and port — host names are
+ * case-insensitive, `Host` and `host` are one machine); returns the dropped labels.
+ */
 export function uniqueTargets(targets: SSHTarget[]): { targets: SSHTarget[]; duplicates: string[] } {
   const seen = new Set<string>();
   const out: SSHTarget[] = [];
   const duplicates: string[] = [];
   for (const t of targets) {
-    const key = `${t.user}@${t.host}:${t.port}`;
+    const key = `${t.user}@${t.host.toLowerCase()}:${t.port}`;
     if (seen.has(key)) duplicates.push(t.label ?? key);
     else { seen.add(key); out.push(t); }
   }
   return { targets: out, duplicates };
+}
+
+/**
+ * A target's label names its baseline (and its report and snapshot files when
+ * hostnames repeat), sanitised to a file name on a file system that may
+ * ignore case. Two targets whose labels come out the same would overwrite
+ * each other's — rejected before anything is scanned.
+ */
+export function assertDistinctLabels(targets: SSHTarget[]): void {
+  const owners = new Map<string, string>();
+  for (const t of targets) {
+    const label = t.label ?? targetLabel(t.user, t.host, t.port);
+    const key = safeHostname(label).toLowerCase();
+    const other = owners.get(key);
+    if (other !== undefined) {
+      throw new Error(other === label
+        ? `Label "${label}" is used by more than one host — give each host its own label`
+        : `Labels "${other}" and "${label}" would name the same files (baselines and reports) — give each host a distinct label`);
+    }
+    owners.set(key, label);
+  }
 }
 
 /**
@@ -171,6 +211,30 @@ export function describeConnectFailure(
     return `SSH connection to ${who} failed (ssh exit 255: connection refused, unknown host, or authentication rejected — check the host, user and --ssh-key)`;
   }
   return `SSH connection to ${who} failed (ssh exit ${code})`;
+}
+
+/**
+ * spawn() with its own kill timer. Node's `timeout` option leaves its timer
+ * running when the command can't start at all (ssh not installed), so the
+ * process sat out the whole --ssh-timeout after the error.
+ */
+function spawnTimed(cmd: string, args: string[], options: SpawnOptions, timeout?: number): ChildProcess {
+  const child = spawn(cmd, args, options);
+  if (timeout && timeout > 0) {
+    const timer = setTimeout(() => child.kill('SIGTERM'), timeout);
+    const clear = () => clearTimeout(timer);
+    child.once('exit', clear);
+    child.once('close', clear);
+    child.once('error', clear);
+  }
+  return child;
+}
+
+/** The error for a command that could not be started. */
+function startError(cmd: string, err: Error): Error {
+  return (err as NodeJS.ErrnoException).code === 'ENOENT'
+    ? new Error(`${cmd} is not installed or not on PATH — remote scans need the OpenSSH client (${cmd})`)
+    : err;
 }
 
 /** ssh's ConnectTimeout fires on whole seconds; allow for timer and start-up skew. */
@@ -203,10 +267,9 @@ function establishControlMaster(target: SSHTarget, controlPath: string, timeout:
     // ControlPersist's 120 s (or SIGPIPE the master once read and closed).
     const log = quiet ? openQuietLog() : undefined;
     const started = Date.now();
-    const child = spawn('ssh', args, {
+    const child = spawnTimed('ssh', args, {
       stdio: log ? ['inherit', 'inherit', log.fd] : 'inherit', // Full terminal access for password prompts
-      timeout,
-    });
+    }, timeout);
 
     // ControlPersist keeps the connection alive in the background after
     // the master process exits, so we wait for it to fork and return.
@@ -215,7 +278,7 @@ function establishControlMaster(target: SSHTarget, controlPath: string, timeout:
       if (code === 0) return resolve();
       reject(new Error(describeConnectFailure(target, code, signal, timeout, Date.now() - started)));
     });
-    child.on('error', (err) => { log?.finish(); reject(err); });
+    child.on('error', (err) => { log?.finish(); reject(startError('ssh', err)); });
   });
 }
 
@@ -258,16 +321,13 @@ function runOverControl(
   options: { timeout?: number } = {},
 ): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
-    const child = spawn(cmd, args, {
-      stdio: ['pipe', 'pipe', 'pipe'],
-      timeout: options.timeout,
-    });
+    const child = spawnTimed(cmd, args, { stdio: ['pipe', 'pipe', 'pipe'] }, options.timeout);
 
     const chunks: Buffer[] = [];
     const errChunks: Buffer[] = [];
     let received = 0;
     let oversized = false;
-    child.stdout.on('data', (d: Buffer) => {
+    child.stdout!.on('data', (d: Buffer) => {
       received += d.length;
       if (received > MAX_REMOTE_OUTPUT_BYTES) {
         if (!oversized) {
@@ -279,7 +339,7 @@ function runOverControl(
       }
       chunks.push(d);
     });
-    child.stderr.on('data', (d: Buffer) => errChunks.push(d));
+    child.stderr!.on('data', (d: Buffer) => errChunks.push(d));
 
     child.on('close', (code, signal) => {
       if (oversized) {
@@ -299,7 +359,7 @@ function runOverControl(
         reject(new Error(`Command failed: ${cmd} ${args.slice(-1).join(' ')}\n${stderr || stdout}`.trim()));
       }
     });
-    child.on('error', reject);
+    child.on('error', (err) => reject(startError(cmd, err)));
   });
 }
 

@@ -26,7 +26,10 @@ export interface BaselineScope {
 }
 
 function latestName(scope: BaselineScope = {}): string {
-  const parts = [scope.agent, scope.host].filter((p): p is string => Boolean(p))
+  // A host is always named: an empty one (a blank inventory label) must not
+  // fall back to this machine's own latest.json
+  const parts = [scope.agent || undefined, scope.host === undefined ? undefined : scope.host || '_']
+    .filter((p): p is string => p !== undefined)
     .map(p => p.replace(/[^A-Za-z0-9._-]/g, '_'));
   return parts.length === 0 ? 'latest.json' : `latest-${parts.join('--')}.json`;
 }
@@ -47,21 +50,59 @@ export async function saveBaseline(result: ScanResult, scope: BaselineScope = {}
   return filePath;
 }
 
-async function readBaseline(name: string): Promise<ScanResult | null> {
-  try {
-    return JSON.parse(await readFile(join(BASELINES_DIR, name), 'utf-8')) as ScanResult;
-  } catch {
-    return null;
-  }
+/** A saved baseline that exists but can't be used (unreadable, not JSON, not a scan result). */
+export class BaselineLoadError extends Error {}
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
 
+/**
+ * Whether `value` has the shape diffResults reads: agents with an
+ * installation and results (id, passed, evidence[]). A hand-edited or
+ * truncated file must not crash the scan before its report is written.
+ */
+function isBaselineShape(value: unknown): value is ScanResult {
+  if (!isRecord(value) || !Array.isArray(value.agents)) return false;
+  return value.agents.every(a => isRecord(a) && typeof a.agent === 'string'
+    && isRecord(a.installation) && Array.isArray(a.results)
+    && a.results.every(r => isRecord(r) && typeof r.id === 'string' && typeof r.passed === 'boolean'
+      && (r.evidence === undefined || (Array.isArray(r.evidence) && r.evidence.every(isRecord)))));
+}
+
+async function readBaseline(name: string): Promise<ScanResult | null> {
+  const path = join(BASELINES_DIR, name);
+  let text: string;
+  try {
+    text = await readFile(path, 'utf-8');
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT') return null;
+    throw new BaselineLoadError(`${path} can't be read (${code ?? (err as Error).message})`);
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new BaselineLoadError(`${path} is not valid JSON`);
+  }
+  if (!isBaselineShape(parsed)) throw new BaselineLoadError(`${path} is not a VASO scan result`);
+  return parsed;
+}
+
+/**
+ * This scope's latest baseline, or null when none was saved. Throws
+ * BaselineLoadError when one exists but can't be used — the caller warns and
+ * scans on.
+ */
 export async function loadBaseline(scope: BaselineScope = {}): Promise<ScanResult | null> {
   const scoped = await readBaseline(latestName(scope));
   if (scoped || latestName(scope) === 'latest.json') return scoped;
   // Before 1.3.1 every baseline was saved as latest.json, whatever its
   // scope. Use one that covers exactly this scope — same scanned host, only
-  // the filtered agent — so an upgrade doesn't lose `--diff` history.
-  const legacy = await readBaseline('latest.json');
+  // the filtered agent — so an upgrade doesn't lose `--diff` history. An
+  // unusable legacy file is simply not one.
+  const legacy = await readBaseline('latest.json').catch(() => null);
   if (!legacy || legacy.vasoVersion !== undefined) return null;
   if ((legacy.host ?? undefined) !== (scope.host ?? undefined)) return null;
   if (scope.agent && !(legacy.agents.length > 0 && legacy.agents.every(a => a.agent === scope.agent))) return null;

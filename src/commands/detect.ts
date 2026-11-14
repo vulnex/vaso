@@ -8,7 +8,7 @@ import { logError } from '../core/debug.js';
 import { writeFileEnsureDir, writeFileOwnerOnly } from '../core/utils.js';
 import { VERSION } from '../version.js';
 import { parseRemoteOptions, type RemoteOptionValues } from './remote-options.js';
-import { HostFileNames, safeHostname } from '../transport/host-files.js';
+import { HostFileNames, hostFileBase } from '../transport/host-files.js';
 import { join as joinPath } from 'node:path';
 import { maskCredentialsDeep, toReportJson } from '../reporting/serialize.js';
 import { attachSkillInventories } from '../inventory/skills.js';
@@ -57,12 +57,7 @@ export async function runDetect(options: DetectCommandOptions): Promise<void> {
     process.exitCode = 2;
     return;
   }
-  // Snapshots are what a remote scan collects; a local scan has none to save
-  if (options.saveSnapshot && !options.host?.length && !options.inventory) {
-    console.error(chalk.red('--save-snapshot applies to remote scans only (use with --host or --inventory)'));
-    process.exitCode = 2;
-    return;
-  }
+  // (also --save-snapshot / --ssh-key without remote hosts, --snapshot with them)
   let remoteValues: RemoteOptionValues;
   try {
     remoteValues = parseRemoteOptions(options);
@@ -160,7 +155,7 @@ interface HostDetectResult {
 }
 
 async function detectRemoteHosts(options: DetectCommandOptions, remoteValues: RemoteOptionValues): Promise<void> {
-  const { parseSSHTarget, executeRemoteProbeWithRetry, uniqueTargets, assertIdentityFiles } = await import('../transport/ssh.js');
+  const { parseSSHTarget, executeRemoteProbeWithRetry, uniqueTargets, assertIdentityFiles, assertDistinctLabels } = await import('../transport/ssh.js');
   const { parseInventory } = await import('../transport/inventory.js');
   const { buildProbeManifest } = await import('../core/manifest-builder.js');
   const { SnapshotFSProvider } = await import('../core/snapshot-fs-provider.js');
@@ -196,6 +191,8 @@ async function detectRemoteHosts(options: DetectCommandOptions, remoteValues: Re
   const deduped = uniqueTargets(targets);
   targets = deduped.targets;
   await assertIdentityFiles(targets);
+  // Labels name each host's files when hostnames repeat: two alike would share them
+  assertDistinctLabels(targets);
   for (const label of deduped.duplicates) console.error(chalk.yellow(`  ! ${label} is listed more than once — detecting it once`));
 
   if (targets.length === 0) {
@@ -224,6 +221,9 @@ async function detectRemoteHosts(options: DetectCommandOptions, remoteValues: Re
   // One name per target for its snapshot and its report
   const hostFiles = new HostFileNames();
   const targetLabel = (t: SSHTarget) => t.label ?? `${t.user}@${t.host}`;
+  // Files asked for that could not be written: said so, exit 2
+  let writeFailures = 0;
+  let reportsWritten = 0;
 
   async function processTarget(target: SSHTarget): Promise<HostDetectResult> {
     const start = Date.now();
@@ -250,7 +250,8 @@ async function detectRemoteHosts(options: DetectCommandOptions, remoteValues: Re
           await writeFileOwnerOnly(outPath, JSON.stringify(snapshot, null, 2));
           log(chalk.dim(`  Saved snapshot for ${target.host} → ${outPath}`));
         } catch (err) {
-          log(chalk.yellow(`  Warning: failed to save snapshot for ${target.host}: ${(err as Error).message}`));
+          writeFailures++;
+          console.error(chalk.red(`  Failed to save snapshot for ${target.host}: ${(err as Error).message}`));
         }
       }
 
@@ -287,8 +288,10 @@ async function detectRemoteHosts(options: DetectCommandOptions, remoteValues: Re
           ? toReportJson(outcome.installations)
           : renderTerminal(outcome.installations, options.verbose, false, outcome.hostMcp);
         await writeFile(outPath, text, 'utf-8');
+        reportsWritten++;
       } catch (err) {
-        log(chalk.yellow(`  Warning: failed to write output for ${target.host}: ${(err as Error).message}`));
+        writeFailures++;
+        console.error(chalk.red(`  Failed to write the report for ${target.label ?? target.host}: ${(err as Error).message}`));
       }
     }
 
@@ -305,14 +308,20 @@ async function detectRemoteHosts(options: DetectCommandOptions, remoteValues: Re
   }
 
   const results = await runConcurrent(targets, concurrency, processTarget);
-  // Scan incomplete: one or more hosts could not be reached/probed
-  if (results.some(r => r.error)) process.exitCode = EXIT_INCOMPLETE;
+  // 2 when asked-for files are missing, else 3 when a host could not be
+  // reached/probed (detection incomplete)
+  if (writeFailures > 0) {
+    console.error(chalk.red(`  ${writeFailures} file(s) could not be written — see above`));
+    process.exitCode = EXIT_USAGE;
+  } else if (results.some(r => r.error)) {
+    process.exitCode = EXIT_INCOMPLETE;
+  }
 
   // When --output-dir is set, per-host files were already written above;
   // skip the combined-output rendering branch entirely.
   if (options.outputDir) {
-    const wrote = results.filter(r => !r.error).length;
-    log(chalk.green(`\n  Wrote ${wrote} report(s) to ${options.outputDir}/`));
+    const unwritten = results.filter(r => !r.error).length - reportsWritten;
+    log((unwritten > 0 ? chalk.yellow : chalk.green)(`\n  Wrote ${reportsWritten} report(s) to ${options.outputDir}/${unwritten > 0 ? ` — ${unwritten} could not be written` : ''}`));
     return;
   }
 
@@ -358,7 +367,7 @@ async function renderResults(installations: AgentInstallation[], options: Detect
     : renderTerminal(installations, options.verbose, local, hostMcp);
   // --output-dir: the <dir>/<host>.<ext> layout multi-host detect uses
   const output = options.outputDir
-    ? joinPath(options.outputDir, `${safeHostname(host)}.${options.format === 'json' ? 'json' : 'txt'}`)
+    ? joinPath(options.outputDir, `${hostFileBase(host)}.${options.format === 'json' ? 'json' : 'txt'}`)
     : options.output;
   await emit(text, output, options.silent);
 }

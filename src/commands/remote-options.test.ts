@@ -15,4 +15,20 @@ describe('parseRemoteOptions', () => {
     expect(() => parseRemoteOptions({ sshTimeout: '86401' })).toThrow(/at most 86400/);
     expect(() => parseRemoteOptions({ sshTimeout: '9999999999' })).toThrow(/at most/);
   });
+
+  it('bounds --ssh-retries', () => {
+    expect(parseRemoteOptions({ sshRetries: '10' }).retries).toBe(10);
+    expect(() => parseRemoteOptions({ sshRetries: '11' })).toThrow(/at most 10/);
+  });
+
+  it('rejects option combinations that can\'t apply', () => {
+    const host = ['root@h'];
+    expect(() => parseRemoteOptions({ snapshot: 's.json', host })).toThrow(/mutually exclusive/);
+    expect(() => parseRemoteOptions({ snapshot: 's.json', inventory: 'i.yaml' })).toThrow(/mutually exclusive/);
+    expect(() => parseRemoteOptions({ saveSnapshot: 'd' })).toThrow(/--save-snapshot applies to remote scans only/);
+    expect(() => parseRemoteOptions({ sshKey: '~/.ssh/id' })).toThrow(/--ssh-key applies to remote scans only/);
+    expect(() => parseRemoteOptions({ sudo: true, snapshot: 's.json' })).toThrow(/--sudo applies to remote scans only/);
+    expect(() => parseRemoteOptions({ sshKey: '', host })).toThrow(/needs a key file/);
+    expect(parseRemoteOptions({ sshKey: 'k', sudo: true, saveSnapshot: 'd', host }).retries).toBe(0);
+  });
 });
