@@ -1,4 +1,5 @@
 import { SECURITY_PATTERNS, scanWithPatterns } from './pattern-engine.js';
+import { shellCommandWrapper } from '../mcp/shell-wrapper.js';
 
 /**
  * Shell-command analysis shared by the agent hook checks (CC-003, CUR-015,
@@ -93,9 +94,27 @@ export const PIPE_TO_SHELL_PATTERN = /\|\s*(?:sudo\s+(?:-\S+\s+)*)?(?:\S*\/)?(?:
  */
 const CURL_SEND = /\bcurl\b[^|;&\n]{0,2000}?\s(?:-[a-zA-Z]*[dFT]|--(?:data(?:-binary|-raw|-urlencode|-ascii)?|form|json|upload-file))(?=[\s=@'"]|$)/;
 const WGET_SEND = /\bwget\b[^|;&\n]{0,2000}?\s--(?:post|body)-(?:data|file)\b/;
-const RAW_SOCKET_SEND = /\|\s*(?:nc|ncat|netcat|telnet)\s|\b(?:nc|ncat|netcat|telnet)\s[^|;&\n]{0,500}?<\s*\S/;
+// input piped or redirected into a raw socket client, or into ssh (`… | ssh host 'cat > x'`)
+const RAW_SOCKET_SEND = /\|\s*(?:nc|ncat|netcat|telnet|ssh)\s|\b(?:nc|ncat|netcat|telnet|ssh)\s[^|;&\n]{0,500}?<\s*\S/;
+/**
+ * A file copy to another host: scp / rsync / sftp whose LAST argument is a
+ * remote target (`host:path`, `user@host:path`, rsync `host::module`) — an
+ * upload; a remote source copied to a local path is a download.
+ */
+const REMOTE_COPY_SEND = /\b(?:scp|rsync|sftp)\s[^|;&\n]{0,2000}?\s(?:[\w.+-]{1,64}@)?([\w.-]{1,253}):{1,2}[^\s:'"]{0,1000}\s*$/;
 /** Material worth stealing in the same script: environment dumps, secret-named variables. */
-const SECRET_MATERIAL = /\b(?:env|printenv|set)\s*(?:\||>)|\$\{?[A-Z0-9_]{0,64}(?:TOKEN|SECRET|PASSWORD|PASSWD|API_?KEY|ACCESS_KEY|PRIVATE_KEY|CREDENTIALS?)\b/;
+const SECRET_VARIABLE = /\$\{?[A-Z0-9_]{0,64}(?:TOKEN|SECRET|PASSWORD|PASSWD|API_?KEY|ACCESS_KEY|PRIVATE_KEY|CREDENTIALS?)\b/;
+const SECRET_MATERIAL = new RegExp(`\\b(?:env|printenv|set)\\s*(?:\\||>)|${SECRET_VARIABLE.source}`);
+/** A request header carrying a secret-named variable (`curl -H "Authorization: Bearer $API_KEY" …`). */
+const HEADER_SECRET = new RegExp(`\\b(?:curl|wget|http|https|xh)\\b[^|;&\\n]{0,2000}?\\s(?:-H|--header)(?:\\s+|=)["']?[^"'\\n]{0,500}?${SECRET_VARIABLE.source}`);
+/** `xargs … sh -c …`: every input line becomes shell code. */
+const XARGS_SHELL = /\bxargs\b[^|;&\n]{0,500}?\s(?:[^\s/]{0,64}\/){0,8}(?:ba|z|da|k|mk)?sh\s+(?:-[a-zA-Z]+\s+){0,4}?-[a-zA-Z]*c\b/;
+/** An interpreter given inline code (`python3 -c "…"`, `node -e '…'`, `perl -e …`). */
+const INLINE_CODE = /(?:^|[\s;&|(])(?:[^\s/]{0,64}\/){0,8}(?:python[\d.]*|node|perl|ruby|php)\s+(?:-[A-Za-z]+\s+){0,4}?-(?:c|e|-eval)\s+/g;
+/** Inline code that runs a command it builds (os.system, subprocess, child_process, exec/eval). */
+const CODE_EXEC_SINK = /\b(?:os\.(?:system|popen|exec\w*|spawn\w*)|subprocess\.\w+|commands\.getoutput|pty\.spawn|child_process|exec(?:Sync|File|FileSync)?\s*\(|spawn(?:Sync)?\s*\(|system\s*\(|eval\s*\(|exec\s*\(|`)/;
+/** …from the hook's input (stdin). */
+const CODE_STDIN = /\b(?:sys\.stdin|process\.stdin|STDIN|stdin|input\s*\(\s*\))|\/dev\/stdin|readFileSync\(\s*0\b/;
 
 export type HookRiskTier = 'critical' | 'warning' | 'info';
 
@@ -180,8 +199,9 @@ export function hookCommandRisks(script: string, opts: { expansion?: RegExp } = 
   // (`cp ~/.ssh/id_rsa /tmp/k; curl -T /tmp/k …`).
   const credentials = statements.some(stmt => SECRET_MATERIAL.test(stmt) || scanWithPatterns(stmt, CREDENTIAL_RULES).length > 0);
   for (const stmt of statements) {
-    if (!CURL_SEND.test(stmt) && !WGET_SEND.test(stmt) && !RAW_SOCKET_SEND.test(stmt)) continue;
-    const { tier, dest } = destinationTier(stmt);
+    const copy = REMOTE_COPY_SEND.exec(stmt);
+    if (!copy && !CURL_SEND.test(stmt) && !WGET_SEND.test(stmt) && !RAW_SOCKET_SEND.test(stmt)) continue;
+    const { tier, dest } = copy ? { tier: 'warning' as const, dest: `${copy[1]} (scp/rsync/sftp upload)` } : destinationTier(stmt);
     if (credentials) {
       risks.push({ tier: 'critical', reason: `sends credential files, secret variables or the environment over the network (${dest})` });
     } else if (tier === 'warning') {
@@ -192,12 +212,142 @@ export function hookCommandRisks(script: string, opts: { expansion?: RegExp } = 
     break;
   }
 
+  // A secret variable in a request header goes to whoever runs that host
+  // (no request body needed). The API the key belongs to is a normal use, so
+  // a named https host is a warning; a plaintext, IP, paste/tunnel or
+  // computed destination is critical.
+  if (!risks.some(r => r.tier === 'critical')) {
+    for (const stmt of statements) {
+      if (!HEADER_SECRET.test(stmt)) continue;
+      const { tier, dest } = destinationTier(stmt);
+      risks.push(tier === 'warning'
+        ? { tier: 'critical', reason: `sends a secret variable in a request header to ${dest} (plaintext, IP, paste/tunnel host or computed address)` }
+        : { tier: 'warning', reason: `sends a secret variable in a request header to ${dest} — confirm the host is the service the secret belongs to` });
+      break;
+    }
+  }
+
   // read on the whole script: a quoted `sh -c "…"` argument spans separators
   if (evaluatesDynamicText(script, opts.expansion)) {
     risks.push({ tier: 'warning', reason: 're-evaluates expanded text (eval/exec or an outer-quoted sh -c script) — hook input becomes code' });
+  } else if (statements.some(stmt => XARGS_SHELL.test(stmt))) {
+    risks.push({ tier: 'warning', reason: 'runs its input through xargs sh -c — every input line becomes shell code' });
+  } else if (inlineCodeRunsInput(script)) {
+    risks.push({ tier: 'warning', reason: 'runs inline interpreter code that executes a command built from its stdin — hook input becomes code' });
   } else if (fetchExec.length === 0 && statements.some(stmt => PIPE_TO_SHELL_PATTERN.test(stmt))) {
     risks.push({ tier: 'warning', reason: 'pipes data into a shell — hook input or command output runs as a script' });
   }
+  return risks;
+}
+
+/** At most this many inline-code arguments are read per script (keeps the scan linear). */
+const MAX_INLINE_CODE = 32;
+
+/**
+ * Whether an interpreter's inline code (`python3 -c "…"`, `node -e '…'`)
+ * both reads stdin and runs a command it builds — the hook's JSON input
+ * turned into a shell command. The quoted argument is read whole (16 KiB at
+ * most), across the `;` inside it.
+ */
+function inlineCodeRunsInput(script: string): boolean {
+  INLINE_CODE.lastIndex = 0;
+  for (let n = 0; n < MAX_INLINE_CODE; n++) {
+    const m = INLINE_CODE.exec(script);
+    if (!m) return false;
+    const at = m.index + m[0].length;
+    const quote = script[at];
+    let code: string;
+    if (quote === '"') {
+      code = quotedSpan(script, at);
+    } else if (quote === "'") {
+      const end = script.indexOf("'", at + 1);
+      code = script.slice(at, end < 0 ? Math.min(script.length, at + 16_384) : Math.min(end + 1, at + 16_384));
+    } else {
+      code = /^\S{0,16384}/.exec(script.slice(at, at + 16_384))?.[0] ?? '';
+    }
+    if (CODE_EXEC_SINK.test(code) && CODE_STDIN.test(code)) return true;
+  }
+  return false;
+}
+
+/**
+ * Risks of an HTTP hook (`type: "http"`): the agent POSTs the event's JSON —
+ * prompts, tool input, file contents — to `url`. A named https host is the
+ * documented audit-logging shape (info); a plaintext, IP, paste/tunnel host
+ * or an unparseable URL is a warning.
+ */
+export function httpHookRisks(url: string): HookRisk[] {
+  const { tier, dest } = destinationTier(url.trim());
+  if (/^http:\/\/(?:localhost|127(?:\.\d{1,3}){3}|\[::1\])(?::\d+)?(?:\/|$)/i.test(url.trim())) {
+    return [{ tier: 'info', reason: `posts hook input to a local endpoint (${dest})` }];
+  }
+  return [tier === 'warning'
+    ? { tier, reason: `posts hook input (prompts, code, commands) to ${dest} — plaintext, IP, paste/tunnel host or computed address` }
+    : { tier, reason: `posts hook input (prompts, code, commands) to ${dest} (audit-logging shape; confirm the endpoint is yours)` }];
+}
+
+/** One hook definition found in an agent's `hooks` object. */
+export interface HookItem {
+  event: string;
+  matcher?: string;
+  /** `command` / `bash` / `powershell` shell text (several when a hook sets more than one). */
+  scripts: string[];
+  /** `url` of an HTTP hook. */
+  url?: string;
+}
+
+/**
+ * The hooks of a `hooks` object in either documented shape: Claude-style
+ * `{Event: [{matcher, hooks: [{type, command}]}]}` (Claude Code, Gemini CLI,
+ * Devin) or flat `{event: [{type, command | bash | powershell | url}]}`
+ * (Cursor, Copilot CLI). `prompt` / `agent` / `mcp_tool` hooks run nothing
+ * here; Copilot's `exec` form spawns a program without a shell and is skipped
+ * as well.
+ */
+export function hookItems(hooks: unknown): HookItem[] {
+  const out: HookItem[] = [];
+  if (!hooks || typeof hooks !== 'object' || Array.isArray(hooks)) return out;
+  const add = (event: string, h: unknown, matcher?: string) => {
+    if (!h || typeof h !== 'object') return;
+    const rec = h as Record<string, unknown>;
+    const type = typeof rec.type === 'string' ? rec.type : 'command';
+    if (type === 'http') {
+      if (typeof rec.url === 'string') out.push({ event, matcher, scripts: [], url: rec.url });
+      return;
+    }
+    if (type !== 'command') return;
+    // Exec form (`command` + `args`) spawns the program with no shell: only
+    // a shell given `-c <script>` runs shell text
+    if (Array.isArray(rec.args) && typeof rec.command === 'string') {
+      const args = rec.args.filter((a): a is string => typeof a === 'string');
+      const at = shellCommandWrapper(rec.command, args) ? args.findIndex(a => /^-[a-zA-Z]*c[a-zA-Z]*$/.test(a)) : -1;
+      if (at >= 0 && typeof args[at + 1] === 'string') out.push({ event, matcher, scripts: [args[at + 1]] });
+      return;
+    }
+    const scripts = [...new Set(['command', 'bash', 'powershell']
+      .map(k => rec[k])
+      .filter((v): v is string => typeof v === 'string' && v.trim() !== ''))];
+    if (scripts.length > 0) out.push({ event, matcher, scripts });
+  };
+  for (const [event, entries] of Object.entries(hooks as Record<string, unknown>)) {
+    for (const entry of Array.isArray(entries) ? entries : [entries]) {
+      if (!entry || typeof entry !== 'object') continue;
+      const e = entry as Record<string, unknown>;
+      const matcher = typeof e.matcher === 'string' ? e.matcher : undefined;
+      if (Array.isArray(e.hooks)) {
+        for (const h of e.hooks) add(event, h, matcher);
+      } else {
+        add(event, e, matcher);
+      }
+    }
+  }
+  return out;
+}
+
+/** Risks of one hook item: its shell scripts and its HTTP target. */
+export function hookItemRisks(item: HookItem, opts: { expansion?: RegExp } = {}): HookRisk[] {
+  const risks = item.scripts.flatMap(s => hookCommandRisks(s, opts));
+  if (item.url) risks.push(...httpHookRisks(item.url));
   return risks;
 }
 

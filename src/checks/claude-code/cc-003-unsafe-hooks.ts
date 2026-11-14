@@ -1,7 +1,8 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { truncateSnippet } from '../../core/patterns.js';
 import { shellCommandWrapper } from '../../mcp/shell-wrapper.js';
-import { hookCommandRisks, hookExpansion, topTier } from '../../analyzers/hook-commands.js';
+import { hookCommandRisks, hookExpansion, httpHookRisks, topTier } from '../../analyzers/hook-commands.js';
 
 // ${CLAUDE_PROJECT_DIR} / ${CLAUDE_PLUGIN_ROOT} / ${CLAUDE_PLUGIN_DATA} are
 // path placeholders the hooks docs use unquoted in their own examples
@@ -19,6 +20,7 @@ interface HookSpec {
   type?: string;
   command?: string;
   args?: unknown;
+  url?: string;
 }
 
 interface HookEntry {
@@ -46,7 +48,7 @@ export const cc003 = defineCheck({
   name: 'Unsafe Hook Commands',
   category: 'coding-agent',
   severity: 'warning',
-  description: 'Detect Claude Code hooks that download and execute code, send credentials or hook input over the network, re-evaluate input as code, or exec untrusted shell input without quoting',
+  description: 'Detect Claude Code hooks that download and execute code, send credentials or hook input over the network (incl. http hooks), re-evaluate input as code, or exec untrusted shell input without quoting',
   supportedAgents: ['claude-code'],
 
   async run(ctx, h) {
@@ -63,6 +65,19 @@ export const cc003 = defineCheck({
           const hookList = Array.isArray(entry?.hooks) ? entry.hooks : [];
           for (const hook of hookList) {
             if (!hook || typeof hook !== 'object') continue;
+            // HTTP hooks POST the event JSON (prompts, tool input) to `url`
+            if (hook.type === 'http' && typeof hook.url === 'string') {
+              const risks = httpHookRisks(hook.url);
+              const tier = topTier(risks);
+              if (!tier) continue;
+              evidence.push({
+                file: config.filePath,
+                snippet: `${event}${entry.matcher ? `(${entry.matcher})` : ''}: http ${truncateSnippet(hook.url, 120)}`,
+                detail: `HTTP hook ${risks.map(r => r.reason).join('; ')}`,
+                ...(tier === 'info' ? { mitigated: true } : {}),
+              });
+              continue;
+            }
             const cmd = shellScript(hook);
             if (typeof cmd !== 'string') continue;
 
