@@ -185,11 +185,39 @@ describe('QC-005: Deny vs Allow', () => {
     expect(result.passed).toBe(false);
   });
 
-  it('passes when deny is non-empty', async () => {
+  it('passes when a deny (or ask) rule covers the same tool', async () => {
     const result = await check.run(makeCtx([makeConfig('settings.json', {
       permissions: { allow: ['Shell(*)'], deny: ['Shell(rm)'] },
     })]));
     expect(result.passed).toBe(true);
+    // Bash / Shell / run_shell_command are one tool (settings.md aliases)
+    expect((await check.run(makeCtx([makeConfig('settings.json', { permissions: { allow: ['Bash(*)'], ask: ['run_shell_command(git push *)'] } })]))).passed).toBe(true);
+    // the Edit meta-category covers write_file
+    expect((await check.run(makeCtx([makeConfig('settings.json', { permissions: { allow: ['WriteFile'], deny: ['Edit(.env)'] } })]))).passed).toBe(true);
+  });
+
+  it('fails when the only deny rule is for an unrelated tool', async () => {
+    const result = await check.run(makeCtx([makeConfig('settings.json', {
+      permissions: { allow: ['Bash(*)', 'run_shell_command'], deny: ['Read(.env)'] },
+    })]));
+    expect(result.passed).toBe(false);
+    expect(result.evidence?.[0].detail).toContain('Bash(*)');
+    // `*` needs at least a shell net
+    expect((await check.run(makeCtx([makeConfig('settings.json', { permissions: { allow: ['*'], deny: ['WebFetch'] } })]))).passed).toBe(false);
+    expect((await check.run(makeCtx([makeConfig('settings.json', { permissions: { allow: ['*'], deny: ['Bash(rm -rf *)'] } })]))).passed).toBe(true);
+  });
+});
+
+describe('QC-008: approvalMode "auto" (classifier) is info (tools.approvalMode docs)', () => {
+  const check = qwenCodeChecks.find(c => c.id === 'QC-008')!;
+  it('reports auto as info and auto-edit as a warning', async () => {
+    const auto = await check.run(makeCtx([makeConfig('settings.json', { tools: { approvalMode: 'auto' } })]));
+    expect(auto.passed).toBe(false);
+    expect(auto.severity).toBe('info');
+    expect(auto.message).toContain('auto');
+    const edit = await check.run(makeCtx([makeConfig('settings.json', { tools: { approvalMode: 'auto-edit' } })]));
+    expect(edit.severity).toBe('warning');
+    expect((await check.run(makeCtx([makeConfig('settings.json', { tools: { approvalMode: 'default' } })]))).passed).toBe(true);
   });
 });
 
@@ -346,11 +374,15 @@ describe('deep-test 2026-10-15 regressions', () => {
     expect(narrow.passed).toBe(true);
   });
 
-  it('QC-005 counts legacy tools.exclude as a deny net', async () => {
+  it('QC-005 counts legacy tools.exclude as a deny net — for the tool it excludes', async () => {
     const result = await byId('QC-005').run(makeCtx([makeConfig('settings.json', {
-      permissions: { allow: ['Bash'] }, tools: { exclude: ['write_file'] },
+      permissions: { allow: ['Bash'] }, tools: { exclude: ['run_shell_command(rm)'] },
     })]));
     expect(result.passed).toBe(true);
+    const unrelated = await byId('QC-005').run(makeCtx([makeConfig('settings.json', {
+      permissions: { allow: ['Bash'] }, tools: { exclude: ['write_file'] },
+    })]));
+    expect(unrelated.passed).toBe(false);
   });
 
   it('QC-007 compares the parsed host (localhost.evil.com is remote)', async () => {
