@@ -1,6 +1,7 @@
-import { open, lstat, chmod, realpath } from 'node:fs/promises';
+import { open, lstat, chmod, realpath, rename, unlink } from 'node:fs/promises';
 import { constants } from 'node:fs';
-import { dirname, isAbsolute, sep } from 'node:path';
+import { randomBytes } from 'node:crypto';
+import { basename, dirname, isAbsolute, join, sep } from 'node:path';
 import { AsyncLocalStorage } from 'node:async_hooks';
 
 /**
@@ -121,9 +122,18 @@ export async function readRegularFile(path: string): Promise<Buffer> {
   }
 }
 
-/** Replace the content of an existing regular file in place (mode and owner kept). */
+/**
+ * Replace the content of an existing regular file, keeping its mode and owner.
+ * The new content goes to a temporary file in the same directory that is then
+ * renamed over the original, so a reader (the agent itself) never sees a
+ * truncated or half-written config. The original is still opened for writing
+ * first: a file the user made read-only stays refused, as do symlinks and
+ * anything that is not a regular file. A directory vaso can't create files in
+ * falls back to rewriting the file in place.
+ */
 export async function writeRegularFile(path: string, data: string | Buffer): Promise<void> {
   requireAbsolute(path);
+  const bytes = typeof data === 'string' ? Buffer.from(data, 'utf-8') : data;
   const handle = await open(path, constants.O_WRONLY | NOFOLLOW | NONBLOCK).catch(err => refuse(path, err));
   try {
     const st = await handle.stat();
@@ -131,10 +141,52 @@ export async function writeRegularFile(path: string, data: string | Buffer): Pro
     await guard(path, st);
     // backed up only once it is certain to change
     await beforeChange(path);
+    if (await replaceByRename(path, bytes, st)) return;
     await handle.truncate(0);
-    await handle.write(typeof data === 'string' ? Buffer.from(data, 'utf-8') : data, 0, undefined, 0);
+    await handle.write(bytes, 0, undefined, 0);
   } finally {
     await handle.close();
+  }
+}
+
+/**
+ * Write `bytes` to a sibling temporary file with the original's mode (and
+ * owner, where it can be set) and rename it over `path`. Returns false when
+ * the directory doesn't allow creating it, so the caller rewrites in place.
+ *
+ * Only for the user's own files, and not as root: the temporary file and the rename resolve the directory path
+ * again, and a user who swaps a directory for a symlink in between could
+ * point a root write elsewhere — root keeps writing through the checked handle.
+ */
+async function replaceByRename(path: string, bytes: Buffer, st: { mode: number; uid: number; gid: number }): Promise<boolean> {
+  // A file someone else owns would change owner by the rename: rewrite in place
+  const uid = process.getuid?.();
+  if (uid === undefined || uid === 0 || st.uid !== uid) return false;
+  const tmp = join(dirname(path), `.${basename(path)}.vaso-${process.pid}-${randomBytes(4).toString('hex')}.tmp`);
+  let tmpHandle;
+  try {
+    tmpHandle = await open(tmp, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | NOFOLLOW, 0o600);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'EACCES' || code === 'EPERM' || code === 'EROFS') return false;
+    throw err;
+  }
+  let renamed = false;
+  try {
+    try {
+      await tmpHandle.write(bytes, 0, undefined, 0);
+      // group first (best effort): chown clears setgid, which the chmod restores
+      await tmpHandle.chown(-1, st.gid).catch(() => undefined);
+      await tmpHandle.chmod(st.mode & 0o7777);
+      await tmpHandle.sync();
+    } finally {
+      await tmpHandle.close();
+    }
+    await rename(tmp, path);
+    renamed = true;
+    return true;
+  } finally {
+    if (!renamed) await unlink(tmp).catch(() => undefined);
   }
 }
 
