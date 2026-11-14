@@ -201,11 +201,12 @@ describe('GEM-004: YOLO Mode Guard', () => {
 describe('GEM-005: Sandbox Disabled', () => {
   const check = geminiCliChecks.find(c => c.id === 'GEM-005')!;
 
-  it('fails when tools.sandbox is false', async () => {
+  it('reports tools.sandbox false as info — the legacy sandbox is off by default', async () => {
     const result = await check.run(makeCtx([makeConfig('settings.json', {
       tools: { sandbox: false },
     })]));
     expect(result.passed).toBe(false);
+    expect(result.severity).toBe('info');
   });
 
   it('passes when tools.sandbox is true or "docker"', async () => {
@@ -466,5 +467,56 @@ describe('deep-test 2026-10-15 regressions', () => {
     const result = await byId('GEM-011').run(makeCtx([], fs));
     expect(result.passed).toBe(false);
     expect(result.evidence?.[0].file).toBe('/etc/trust.json');
+  });
+});
+
+describe('GEM-003: policy engine allow rules (geminicli.com/docs/reference/policy-engine)', () => {
+  const check = geminiCliChecks.find(c => c.id === 'GEM-003')!;
+  const policy = (rule: Record<string, unknown>[], file = '/home/test/.gemini/policies/auto-saved.toml') =>
+    ({ raw: '', format: 'toml' as const, filePath: file, data: { rule } });
+
+  it('flags allow-everything, any-shell, broad prefixes and whole-server MCP rules', async () => {
+    const r = await check.run(makeCtx([policy([
+      { toolName: '*', decision: 'allow', priority: 100 },
+      { toolName: 'run_shell_command', decision: 'allow', priority: 100 },
+      { toolName: 'run_shell_command', commandPrefix: 'bash', decision: 'allow' },
+      { commandPrefix: ['git status', 'python3'], decision: 'allow' },
+      { toolName: 'run_shell_command', commandRegex: '.*', decision: 'allow' },
+      { mcpName: '*', decision: 'allow' },
+      { mcpName: 'github', toolName: '*', decision: 'allow' },
+      { toolName: 'mcp_jira_*', decision: 'allow' },
+    ])]));
+    expect(r.passed).toBe(false);
+    expect(r.severity).toBe('critical');
+    expect(r.evidence?.map(e => e.snippet)).toEqual([
+      'rule[0]: toolName = "*" → allow',
+      'rule[1]: toolName = "run_shell_command" → allow',
+      'rule[2]: commandPrefix = "bash" → allow',
+      'rule[3]: commandPrefix = "python3" → allow',
+      'rule[4]: commandRegex = ".*" → allow',
+      'rule[5]: mcpName = "*" → allow',
+      'rule[6]: mcpName = "github", toolName = "*" → allow',
+      'rule[7]: toolName = "mcp_jira_*" → allow',
+    ]);
+  });
+
+  it('passes the documented scoped rules, deny/ask rules and yolo-only allows', async () => {
+    const r = await check.run(makeCtx([policy([
+      { toolName: 'run_shell_command', commandPrefix: 'git', decision: 'ask_user', priority: 100 },
+      { toolName: 'run_shell_command', commandPrefix: ['git status', 'npm test'], decision: 'allow' },
+      { toolName: 'run_shell_command', commandRegex: 'git (commit|push)', decision: 'allow' },
+      { mcpName: 'my-jira-server', toolName: 'search', decision: 'allow', priority: 200 },
+      { mcpName: 'untrusted-server', decision: 'deny', priority: 500 },
+      { toolName: '*', mcpName: '*', decision: 'ask_user', priority: 10 },
+      { toolName: ['write_file', 'replace'], decision: 'ask_user' },
+      { toolName: 'read_file', decision: 'allow' },
+      { toolName: '*', decision: 'allow', modes: ['yolo'] },
+    ], '/home/test/.gemini/policies/my-rules.toml')]));
+    expect(r.passed).toBe(true);
+  });
+
+  it('ignores .toml files that are not policy files', async () => {
+    const r = await check.run(makeCtx([{ raw: '', format: 'toml', filePath: '/home/test/.gemini/x.toml', data: { toolName: '*' } }]));
+    expect(r.passed).toBe(true);
   });
 });

@@ -2,6 +2,7 @@ import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { markUntrustedWorkspace } from '../../adapters/folder-trust.js';
 import { geminiWorkspaceTrusted } from '../../adapters/gemini.js';
+import { isPolicyFile, policyEvidence } from './policy-rules.js';
 
 // Patterns under tools.allowed that effectively grant unbounded shell access.
 // `run_shell_command` without parens (catch-all for any shell command) and
@@ -19,13 +20,18 @@ export const gem003 = defineCheck({
   name: 'Gemini Overbroad Tools Allow',
   category: 'coding-agent',
   severity: 'critical',
-  description: 'Detect tools.allowed entries that grant unbounded shell access, and MCP servers marked trust:true (no tool-call confirmation)',
+  description: 'Detect tools.allowed entries and policy-engine allow rules (~/.gemini/policies/*.toml incl. auto-saved.toml, admin policies) that grant unbounded shell or tool access, and MCP servers marked trust:true or allowed whole (no tool-call confirmation)',
   supportedAgents: ['gemini-cli'],
 
   async run(ctx, h) {
     const evidence: Evidence[] = [];
 
     for (const config of ctx.configs) {
+      // Policy engine files (user ~/.gemini/policies, admin system dir)
+      if (isPolicyFile(config)) {
+        evidence.push(...policyEvidence(config));
+        continue;
+      }
       // mcpServers.<name>.trust: true "bypasses all tool call confirmations
       // for this server" (Gemini CLI MCP server docs) — an allow-everything
       // rule scoped to one server's tools
@@ -64,9 +70,9 @@ export const gem003 = defineCheck({
     await markUntrustedWorkspace(ctx, evidence, geminiWorkspaceTrusted);
 
     return h.fromEvidence(evidence, {
-      passed: 'Gemini tools.allowed has no overbroad shell entries and no MCP server is trusted',
-      failed: (n) => `Found ${n} overbroad allow rule(s) (shell catch-alls or trusted MCP servers) in Gemini config`,
-      fixDescription: 'Replace catch-alls with specific commands (e.g. `run_shell_command(git status)`, `run_shell_command(npm test)`) and drop trust:true from MCP servers',
+      passed: 'Gemini tools.allowed and policy rules have no overbroad allow entries and no MCP server is trusted',
+      failed: (n) => `Found ${n} overbroad allow rule(s) (shell/tool catch-alls or trusted MCP servers) in Gemini config`,
+      fixDescription: 'Replace catch-alls with specific commands (e.g. `run_shell_command(git status)`, `run_shell_command(npm test)`) remove broad allow rules from ~/.gemini/policies/*.toml (auto-saved.toml holds "always allow" answers), and drop trust:true from MCP servers',
     });
   },
 });

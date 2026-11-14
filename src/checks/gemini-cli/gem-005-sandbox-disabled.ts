@@ -18,10 +18,14 @@ export const gem005 = defineCheck({
       const tools = config.data.tools as Record<string, unknown> | undefined;
       if (!tools || typeof tools !== 'object') continue;
       if (tools.sandbox === false) {
+        // `tools.sandbox` (the legacy full-process sandbox) defaults to
+        // undefined = off (geminicli.com/docs/reference/configuration), so an
+        // explicit false weakens nothing: informational
         evidence.push({
           file: config.filePath,
           snippet: 'tools.sandbox = false',
-          detail: 'Tools run unsandboxed — shell commands and file ops touch the host directly',
+          detail: 'Tools run unsandboxed — shell commands and file ops touch the host directly (the same as the default: the sandbox is opt-in)',
+          mitigated: true,
         });
       }
     }
@@ -30,7 +34,7 @@ export const gem005 = defineCheck({
 
     return h.fromEvidence(evidence, {
       passed: 'Gemini sandbox is not explicitly disabled',
-      failed: () => 'Gemini sandbox is disabled — tools execute on the host',
+      failed: () => 'Gemini sandbox is off (tools.sandbox = false, the default) — tools execute on the host',
       fixDescription: 'Set tools.sandbox: true (or "docker"/"podman") in ~/.gemini/settings.json',
     });
   },

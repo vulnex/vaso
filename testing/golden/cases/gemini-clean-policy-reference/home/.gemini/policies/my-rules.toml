@@ -1,0 +1,23 @@
+[[rule]]
+toolName = "run_shell_command"
+commandPrefix = "git"
+decision = "ask_user"
+priority = 100
+
+[[rule]]
+mcpName = "my-jira-server"
+toolName = "search"
+decision = "allow"
+priority = 200
+
+[[rule]]
+mcpName = "untrusted-server"
+decision = "deny"
+priority = 500
+denyMessage = "This server is not trusted by the admin."
+
+[[rule]]
+toolName = "*"
+mcpName = "*"
+decision = "ask_user"
+priority = 10

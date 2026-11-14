@@ -1,0 +1,5 @@
+{
+  "agent": "gemini-cli",
+  "source": "vendor docs example: policy-engine rules (ask_user for git, allow one MCP tool, deny a server, ask for every MCP tool)",
+  "clean": true
+}

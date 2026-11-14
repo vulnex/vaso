@@ -49,6 +49,42 @@ const SYSTEM_SETTINGS_LINUX = '/etc/gemini-cli/settings.json';
 const SYSTEM_SETTINGS_WIN32 = 'C:\\ProgramData\\gemini-cli\\settings.json';
 
 /**
+ * Policy engine directories (geminicli.com/docs/reference/policy-engine;
+ * core config/storage.ts getUserPoliciesDir / getSystemPoliciesDir): user
+ * policies in ~/.gemini/policies/*.toml (auto-saved "always allow" approvals
+ * land in auto-saved.toml there) and admin policies in the fixed system
+ * config dir — not relocated by GEMINI_CLI_SYSTEM_SETTINGS_PATH. Workspace
+ * policies (<repo>/.gemini/policies) are documented as disabled and are not
+ * loaded.
+ */
+const POLICIES_DIR = 'policies';
+const SYSTEM_POLICIES_DARWIN = '/Library/Application Support/GeminiCli/policies';
+const SYSTEM_POLICIES_LINUX = '/etc/gemini-cli/policies';
+const SYSTEM_POLICIES_WIN32 = 'C:\\ProgramData\\gemini-cli\\policies';
+
+export function geminiSystemPoliciesDir(fs: FSProvider): string {
+  if (fs.platform === 'darwin') return SYSTEM_POLICIES_DARWIN;
+  if (fs.platform === 'win32') return SYSTEM_POLICIES_WIN32;
+  return SYSTEM_POLICIES_LINUX;
+}
+
+/** Every `*.toml` policy file directly in `dir`, sorted by name. */
+async function loadPolicies(dir: string, fs: FSProvider): Promise<ParsedConfig[]> {
+  let names: string[];
+  try {
+    names = (await fs.readdirEntries(dir)).filter(e => e.isFile && e.name.endsWith('.toml')).map(e => e.name).sort();
+  } catch {
+    return [];
+  }
+  const out: ParsedConfig[] = [];
+  for (const name of names) {
+    const parsed = await loadConfigIfPresent(join(dir, name), fs);
+    if (parsed) out.push(parsed);
+  }
+  return out;
+}
+
+/**
  * System-wide settings file, which overrides user and workspace settings
  * (gemini-cli settings.ts getSystemSettingsPath: $GEMINI_CLI_SYSTEM_SETTINGS_PATH,
  * else a per-OS location).
@@ -211,6 +247,7 @@ export const geminiAdapter: AgentAdapter = {
       const parsed = await loadJsoncConfig(path, fs);
       if (parsed) systemSettings.push(parsed);
     }
+    systemSettings.push(...await loadPolicies(geminiSystemPoliciesDir(fs), fs));
 
     for (const { home, user } of userDirs) {
       const geminiDir = geminiHome(home, fs);
@@ -227,6 +264,7 @@ export const geminiAdapter: AgentAdapter = {
       if (!hasGeminiDir && !cliBinary) continue;
 
       const configFiles = hasGeminiDir ? await loadSettings(geminiDir, fs) : [];
+      if (hasGeminiDir) configFiles.push(...await loadPolicies(join(geminiDir, POLICIES_DIR), fs));
       if (systemSettings.length > 0 && (configFiles.length > 0 || cliBinary)) {
         configFiles.push(...systemSettings.splice(0));
       }
@@ -345,6 +383,9 @@ export const geminiAdapter: AgentAdapter = {
         '~/.gemini/agents/*.md',
         '~/.gemini/commands/*',
         '~/.gemini/policies/*',
+        // admin policies (fixed system config dir)
+        `${SYSTEM_POLICIES_LINUX}/*.toml`,
+        `${SYSTEM_POLICIES_DARWIN}/*.toml`,
         '~/.gemini/extensions/**',
         // Project memory indexes the memory tool writes (GEM-010) — the only
         // tmp/ files with content; chats and the rest stay out. The second
@@ -373,7 +414,7 @@ export const geminiAdapter: AgentAdapter = {
       ],
       envPrefixes: ['GEMINI_', 'GOOGLE_'],
       systemPaths: [...SYSTEM_CLI_PATHS, SYSTEM_SETTINGS_DARWIN, SYSTEM_SETTINGS_LINUX, ...[SYSTEM_SETTINGS_DARWIN, SYSTEM_SETTINGS_LINUX].map(p => p.replace(/[^/]+$/, 'system-defaults.json'))],
-      systemDirListings: [],
+      systemDirListings: [SYSTEM_POLICIES_LINUX, SYSTEM_POLICIES_DARWIN],
     };
   },
 

@@ -1,0 +1,7 @@
+{
+  "agent": "gemini-cli",
+  "source": "vendor docs-derived: ~/.gemini/policies/*.toml allow rules for every tool / any shell / a bash prefix (geminicli.com/docs/reference/policy-engine)",
+  "fail": {
+    "GEM-003": "critical"
+  }
+}
