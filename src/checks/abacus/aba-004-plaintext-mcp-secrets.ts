@@ -1,8 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { isEnvReference, literalSecret, mask, mcpServers } from './shared.js';
-
-const MIN_SECRET_LENGTH = 8;
+import { literalSecret, mask, mcpServers } from './shared.js';
 
 export const aba004 = defineCheck({
   id: 'ABA-004',
@@ -17,7 +15,9 @@ export const aba004 = defineCheck({
 
     for (const { config, server, path } of mcpServers(ctx.configs)) {
       const oauth = server.oauth as Record<string, unknown> | undefined;
-      if (oauth && typeof oauth.clientSecret === 'string' && oauth.clientSecret.length >= MIN_SECRET_LENGTH && !isEnvReference(oauth.clientSecret)) {
+      // Placeholders (`<only if your provider issued one>`) and env references
+      // are not secrets — judged like any other secret-named value
+      if (oauth && typeof oauth.clientSecret === 'string' && literalSecret('clientSecret', oauth.clientSecret)) {
         evidence.push({
           file: config.filePath,
           snippet: `${path}.oauth.clientSecret: ${mask(oauth.clientSecret)}`,

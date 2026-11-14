@@ -5,24 +5,23 @@ import { isProjectInstall, markUntrustedProject, settingsConfigs } from './share
 
 // The CLI normalizes the value (trim, lowercase, `_`/space → `-`) and accepts
 // aliases: unsupervised = yolo = bypasspermissions (every tool call runs
-// unprompted); auto lets the model decide which calls need approval.
+// unprompted). "auto" is the documented default mode (each command and edit is
+// checked against the workspace and the request), so setting it explicitly is
+// no weaker than leaving it unset and is not reported.
 const UNSUPERVISED = new Set(['unsupervised', 'yolo', 'bypasspermissions', 'bypass-permissions']);
-const AUTO = new Set(['auto']);
 
 function normalize(mode: string): string {
   return mode.trim().toLowerCase().replace(/[\s_]+/g, '-');
 }
 
-function classify(mode: unknown): 'critical' | 'warning' | undefined {
-  if (typeof mode !== 'string') return undefined;
+function unsupervised(mode: unknown): boolean {
+  if (typeof mode !== 'string') return false;
   const m = normalize(mode);
-  if (UNSUPERVISED.has(m) || UNSUPERVISED.has(m.replace(/-/g, ''))) return 'critical';
-  if (AUTO.has(m)) return 'warning';
-  return undefined;
+  return UNSUPERVISED.has(m) || UNSUPERVISED.has(m.replace(/-/g, ''));
 }
 
 function unsafeModeConfigs(configs: ParsedConfig[]): ParsedConfig[] {
-  return settingsConfigs(configs).filter(c => classify(c.data.permissionMode) !== undefined);
+  return settingsConfigs(configs).filter(c => unsupervised(c.data.permissionMode));
 }
 
 export const aba001 = defineCheck({
@@ -30,34 +29,28 @@ export const aba001 = defineCheck({
   name: 'Abacus.AI Unsupervised Permission Mode',
   category: 'coding-agent',
   severity: 'critical',
-  description: 'Detect Abacus.AI sessions starting in "unsupervised" mode (alias yolo / bypassPermissions — every tool call runs without approval) or "auto" (the model decides which calls need approval), via permissionMode in config.json / desktop agent-config files or ABACUS_PERMISSION_MODE',
+  description: 'Detect Abacus.AI sessions starting in "unsupervised" mode (alias yolo / bypassPermissions — every tool call runs without approval), via permissionMode in config.json / desktop agent-config files or ABACUS_PERMISSION_MODE',
   supportedAgents: ['abacus'],
 
   async run(ctx, h) {
-    const critical: Evidence[] = [];
-    const warning: Evidence[] = [];
+    const evidence: Evidence[] = [];
 
     for (const config of settingsConfigs(ctx.configs)) {
       const mode = config.data.permissionMode;
-      const level = classify(mode);
-      if (!level) continue;
-      (level === 'critical' ? critical : warning).push({
+      if (!unsupervised(mode)) continue;
+      evidence.push({
         file: config.filePath,
         snippet: `permissionMode: "${String(mode)}"`,
-        detail: level === 'critical'
-          ? 'Sessions start unsupervised — shell commands, edits and MCP tools run without any approval prompt'
-          : 'Sessions start in auto mode — the model itself decides which tool calls skip approval',
+        detail: 'Sessions start unsupervised — shell commands, edits and MCP tools run without any approval prompt',
       });
     }
-    await markUntrustedProject(ctx, critical);
-    await markUntrustedProject(ctx, warning);
+    await markUntrustedProject(ctx, evidence);
 
     // The environment override applies to every session the user starts
     if (!isProjectInstall(ctx)) {
       const envMode = ctx.fs.getEnv('ABACUS_PERMISSION_MODE');
-      const level = classify(envMode);
-      if (level) {
-        (level === 'critical' ? critical : warning).push({
+      if (unsupervised(envMode)) {
+        evidence.push({
           file: '<process env>',
           snippet: `ABACUS_PERMISSION_MODE=${String(envMode)}`,
           detail: 'Environment override sets the starting permission mode for every Abacus.AI session',
@@ -65,14 +58,12 @@ export const aba001 = defineCheck({
       }
     }
 
-    const live = critical.filter(e => !e.mitigated);
-    return h.fromEvidence([...critical, ...warning], {
-      passed: 'Abacus.AI sessions start in a supervised permission mode',
-      failed: (n) => `Found ${n} unsafe Abacus.AI permission mode setting(s)`,
-      severity: live.length > 0 ? undefined : (warning.some(e => !e.mitigated) ? 'warning' : undefined),
+    return h.fromEvidence(evidence, {
+      passed: 'Abacus.AI sessions do not start unsupervised',
+      failed: (n) => `Found ${n} unsupervised Abacus.AI permission mode setting(s)`,
       // Untrusted project files are inactive — nothing to fix until trusted
-      fixable: [...critical, ...warning].some(e => !e.mitigated && e.file !== '<process env>'),
-      fixDescription: 'Set permissionMode to "supervise" (or "accept-edits") and unset ABACUS_PERMISSION_MODE; pass --permission-mode per session when needed',
+      fixable: evidence.some(e => !e.mitigated && e.file !== '<process env>'),
+      fixDescription: 'Set permissionMode to "supervise" (or keep the default "auto") and unset ABACUS_PERMISSION_MODE; pass --permission-mode per session when needed',
     });
   },
 

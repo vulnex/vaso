@@ -12,6 +12,17 @@ const ANY = new Set(['', '*', '**']);
 // Commands whose wildcard allowance hands the agent code execution or egress.
 const RISKY_COMMANDS = new Set(['sh', 'bash', 'zsh', 'sudo', 'su', 'curl', 'wget', 'eval', 'python', 'python3', 'node', 'perl', 'ruby', 'ssh', 'nc', 'rm', 'chmod', 'npx']);
 
+/**
+ * The host path a rule pattern names, or undefined when it is anchored at the
+ * workspace root. Abacus rule paths: `//path` is the filesystem root,
+ * `~/path` the home folder, and `/path`, `./path` or `path` the workspace.
+ */
+function hostPath(pattern: string): string | undefined {
+  if (pattern.startsWith('//')) return `/${pattern.replace(/^\/+/, '')}`;
+  if (pattern === '~' || pattern.startsWith('~/')) return pattern;
+  return undefined;
+}
+
 function firstToken(pattern: string): string {
   const first = pattern.trim().split(/[\s:]+/)[0] ?? '';
   return first.split('/').pop() ?? first;
@@ -53,10 +64,13 @@ export const aba002 = defineCheck({
         }
 
         if (WRITE_TOOLS.has(tool)) {
-          // Bare Edit/Write is bounded by the workspace; an absolute or home
-          // glob is not.
+          // Bare Edit/Write is bounded by the workspace, and so is every rule
+          // path except `//…` (filesystem root) and `~/…` (home): `/src/**`,
+          // `./src` and `src` all anchor at the workspace root.
           if (!pattern || ANY.has(pattern)) continue;
-          const base = canonicalSystemPath(pattern.replace(/(?:[\\/]\*{1,2})+$/, '') || '/');
+          const target = hostPath(pattern);
+          if (target === undefined) continue;
+          const base = canonicalSystemPath(target.replace(/(?:[\\/]\*{1,2})+$/, '') || '/');
           const broad = isBroadPath(base, broadPaths, home);
           const sinks = classifySensitivePath(base.replace(/^~/, home));
           if (broad) {

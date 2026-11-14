@@ -70,10 +70,8 @@ describe('ABA-001 permission mode', () => {
     }
   });
 
-  it('warns on auto and passes supervise / accept-edits', async () => {
-    const auto = await check('ABA-001').run(userCtx([cfg(USER_CFG, { permissionMode: 'auto' })]));
-    expect(auto.severity).toBe('warning');
-    for (const mode of ['supervise', 'accept-edits', 'plan']) {
+  it('passes the documented default auto mode and supervise / accept-edits', async () => {
+    for (const mode of ['auto', 'supervise', 'accept-edits', 'plan', 'dont-ask']) {
       expect((await check('ABA-001').run(userCtx([cfg(USER_CFG, { permissionMode: mode })]))).passed).toBe(true);
     }
   });
@@ -114,7 +112,7 @@ describe('ABA-001 permission mode', () => {
 describe('ABA-002 broad permission rules', () => {
   it('flags unrestricted Bash and whole-disk / credential writes as critical', async () => {
     const r = await check('ABA-002').run(userCtx([cfg(USER_CFG, {
-      permissions: { allow: ['Bash', 'Bash(*)', 'Edit(/**)', 'Write(~/.ssh/**)', 'Edit(src/**)', 'Bash(git log *)'] },
+      permissions: { allow: ['Bash', 'Bash(*)', 'Edit(//**)', 'Write(~/.ssh/**)', 'Edit(src/**)', 'Bash(git log *)'] },
     })]));
     expect(r.passed).toBe(false);
     expect(r.severity).toBe('critical');
@@ -130,8 +128,18 @@ describe('ABA-002 broad permission rules', () => {
   it('treats an all-wildcard Bash pattern as any command and /private/etc as /etc', async () => {
     const r0 = await check('ABA-002').run(userCtx([cfg(USER_CFG, { permissions: { allow: ['Bash(* *)'] } })]));
     expect(r0.severity).toBe('critical');
-    const etc = await check('ABA-002').run(userCtx([cfg(USER_CFG, { permissions: { allow: ['Write(/private/etc/**)'] } })]));
+    const etc = await check('ABA-002').run(userCtx([cfg(USER_CFG, { permissions: { allow: ['Write(//private/etc/**)'] } })]));
     expect(etc.severity).toBe('critical');
+  });
+
+  it('treats /path, ./path and path as workspace-anchored and // as the filesystem root', async () => {
+    const workspace = await check('ABA-002').run(userCtx([cfg(USER_CFG, {
+      permissions: { allow: ['Edit(/**)', 'Edit(/etc/**)', 'Write(/src/**)', 'Edit(./.ssh/**)', 'Write(.aws/**)'] },
+    })]));
+    expect(workspace.passed).toBe(true);
+    const root = await check('ABA-002').run(userCtx([cfg(USER_CFG, { permissions: { allow: ['Edit(//etc/**)', 'Write(~/**)'] } })]));
+    expect(root.severity).toBe('critical');
+    expect(root.evidence).toHaveLength(2);
   });
 
   it('passes scoped rules', async () => {
@@ -226,10 +234,39 @@ describe('MCP checks (ABA-004/006/007/008) over both config shapes', () => {
     expect(r.evidence?.[0].snippet).toContain('mcp.example.com');
   });
 
-  it('ABA-008 flags blanket auto-approve, not a tool list', async () => {
-    const list = cfg(USER_MCP, { mcpServers: { a: { command: 'x', autoApprove: ['read_file'] } } });
-    expect((await check('ABA-008').run(userCtx([mapShape]))).evidence).toHaveLength(1);
-    expect((await check('ABA-008').run(userCtx([list]))).passed).toBe(true);
+  it('ABA-008 ignores MCP-file autoApprove lists, which Abacus.AI does not honour', async () => {
+    expect((await check('ABA-008').run(userCtx([mapShape]))).passed).toBe(true);
+  });
+
+  it('ABA-008 flags allow rules covering every tool of an MCP server, not tool-scoped rules', async () => {
+    const r = await check('ABA-008').run(userCtx([cfg(USER_CFG, { permissions: {
+      allow: ['mcp__github', 'mcp__playwright__*', 'mcp__*', 'mcp__github__get_*', 'mcp__github__create_issue', 'Bash(git log *)'],
+    } })]));
+    expect(r.passed).toBe(false);
+    expect(r.severity).toBe('warning');
+    expect(r.evidence?.map(e => e.snippet)).toEqual([
+      'permissions.allow: "mcp__github"',
+      'permissions.allow: "mcp__playwright__*"',
+      'permissions.allow: "mcp__*"',
+    ]);
+  });
+
+  it('ABA-008 downgrades rules from an untrusted project', async () => {
+    const r = await check('ABA-008').run(projectCtx([cfg('/work/app/.abacusai/config.json', { permissions: { allow: ['mcp__github'] } })]));
+    expect(r.severity).toBe('info');
+  });
+
+  it('ABA-004 ignores documentation placeholders in an OAuth client secret, not a literal one', async () => {
+    const placeholder = await check('ABA-004').run(userCtx([cfg(USER_MCP, { mcpServers: {
+      a: { url: 'https://mcp.example.com/mcp', oauth: { clientId: 'abacus-agent', clientSecret: '<only if your provider issued one>' } },
+      b: { url: 'https://mcp.example.com/mcp', oauth: { clientId: 'x', clientSecret: '${OAUTH_SECRET}' } },
+      c: { url: 'https://mcp.example.com/mcp', oauth: { clientId: 'x', clientSecret: 'your-client-secret' } },
+    } })]));
+    expect(placeholder.passed).toBe(true);
+    const literal = await check('ABA-004').run(userCtx([cfg(USER_MCP, { mcpServers: {
+      a: { url: 'https://mcp.example.com/mcp', oauth: { clientId: 'x', clientSecret: 'supersecretvalue123' } },
+    } })]));
+    expect(literal.passed).toBe(false);
   });
 });
 
