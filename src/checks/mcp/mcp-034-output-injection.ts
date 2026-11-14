@@ -58,8 +58,10 @@ export const mcp034 = defineCheck({
       const reported = new Set<number>();
       // Lines of description strings: MCP-024 judges their hidden characters too.
       const descriptionLines = new Set(units.filter((u) => u.description).map((u) => u.line));
-      const ownedByDescription = (trimmed: string): boolean =>
-        trimmed.length >= 8 && descriptions.some((d) => trimmed.includes(d) || d.includes(trimmed));
+      const hasDirective = (s: string): boolean => analyzeText(s, { steering: true }).length > 0;
+      const hasHidden = (s: string): boolean => hiddenCharacters(s).length > 0;
+      const ownedByDescription = (trimmed: string, finds: (s: string) => boolean = hasDirective): boolean =>
+        descriptionOwns(trimmed, descriptions, finds);
       for (const unit of units) {
         if (unit.description || reported.has(unit.line)) continue;
         const trimmed = unit.text.trim();
@@ -138,7 +140,7 @@ export const mcp034 = defineCheck({
         const text = decoded.replace(/(["'`])([^"'`]{1,8})\1/gu, (m, _q: string, body: string) => (isInvisibleConstant(body) ? '' : m));
         if (isCharacterTable(text)) continue;
         const invisible = hiddenCharacters(text);
-        if (invisible.length === 0 || ownedByDescription(decoded.trim()) || ownedByDescription(foldWhitespace(decoded))) continue;
+        if (invisible.length === 0 || ownedByDescription(decoded.trim(), hasHidden) || ownedByDescription(foldWhitespace(decoded), hasHidden)) continue;
         hiddenAt.set(i + 1, invisible);
       }
       const fromStrings = new Set<number>();
@@ -174,6 +176,26 @@ export const mcp034 = defineCheck({
     });
   },
 });
+
+/**
+ * The finding in `text` belongs to a tool description (MCP-024's surface):
+ * `text` is part of a description, or it holds a whole description that
+ * itself carries the finding and nothing outside that description does.
+ * A description that merely occurs inside returned text ("Service status"
+ * in "Service status: OK. Ignore previous instructions…", or a one-word
+ * description such as ".") owns nothing.
+ */
+export function descriptionOwns(text: string, descriptions: string[], finds: (s: string) => boolean): boolean {
+  if (text.length < 8) return false;
+  for (const d of descriptions) {
+    if (d.includes(text)) return true;
+  }
+  const inside = descriptions.filter((d) => d.length >= 8 && text.includes(d) && finds(d));
+  if (inside.length === 0) return false;
+  let rest = text;
+  for (const d of inside.sort((a, b) => b.length - a.length)) rest = rest.split(d).join(' ');
+  return !finds(rest);
+}
 
 /** Unicode tag characters (U+E0000–E007F), which spell invisible ASCII. */
 function hasTagCharacters(text: string): boolean {
