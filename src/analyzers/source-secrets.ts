@@ -10,8 +10,9 @@
  * repeat the credential.
  */
 
-import { API_KEY_PATTERNS } from '../core/patterns.js';
+import { API_KEY_PATTERNS, isPlaceholderSecret } from '../core/patterns.js';
 import { shannonEntropy } from './entropy.js';
+import { EXTRA_TOKEN_PATTERNS } from './secret-values.js';
 import { sourceSegments } from '../mcp/source-segments.js';
 
 export interface SourceSecret {
@@ -49,7 +50,13 @@ const COMMENT_WINDOW = 6;
  * already tried, and retrying the run from each `-` was quadratic.
  */
 const KEYED_LITERAL =
-  /["']?\b(?=[A-Za-z_])(?<!(?:^|[^\w])[A-Za-z_][\w-]*?)((?:[A-Za-z_][\w-]*?)?(?:api[_-]?key|apikey|secret|token|password|passwd|access[_-]?key|private[_-]?key|credential)s?)["']?\s*[:=]\s*["'`]([^"'`\s]{16,})["'`]/gi;
+  /["']?\b(?=[A-Za-z_])(?<!(?:^|[^\w])[A-Za-z_][\w-]*?)((?:[A-Za-z_][\w-]*?)?(?:api[_-]?key|apikey|secret|token|password|passwd|access[_-]?key|private[_-]?key|credential)s?)["']?\s*[:=]\s*(?:[\w$.]{1,120}(?:\([^()"'`\n]{0,80}(?:["'][\w.-]{1,64}["'][^()"'`\n]{0,20})?\)|\[["'][\w.-]{1,64}["']\])?\s*(?:\?\?|\|\||\bor\b)\s*)?["'`]([^"'`\s]{16,})["'`]/gi;
+/**
+ * The default of an environment lookup — `os.getenv("API_KEY", "…")`,
+ * `os.environ.get("DB_PASSWORD", "…")` — is stored in the source all the same.
+ */
+const ENV_DEFAULT =
+  /\b(?:getenv|environ\.get|env\.get)\(\s*["']([A-Za-z_]\w{0,80}?(?:key|token|secret|password|passwd|credential)s?)["']\s*,\s*["']([^"'\s]{16,})["']/gi;
 const BEARER_LITERAL = /["'`]Bearer\s+([A-Za-z0-9._~+/=-]{20,})["'`]/g;
 /**
  * Credentials inside a command line or URL string, where no quoted
@@ -64,6 +71,32 @@ const PASSWORD_FLAG = /\b(?:mysql\w*|mariadb\w*|sshpass)\b[^"'`\n]{0,200}?\s-p\s
 
 /** PEM header followed by key material, not a format constant in a crypto library. */
 const PRIVATE_KEY_BLOCK = /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----(?:\\n|\s)+[A-Za-z0-9+/=]{64}/;
+
+/**
+ * Token formats found anywhere in a statement — in a URL query (`?key=AIza…`),
+ * a constructor argument, a `??` fallback: `API_KEY_PATTERNS` plus the
+ * scanner-side `EXTRA_TOKEN_PATTERNS` (unanchored here) and two formats only
+ * source scanning looks for (Stripe secret/restricted keys, SendGrid keys).
+ */
+const TOKEN_NAMES: Array<[string, string]> = [
+  ['github_pat_', 'GitHub fine-grained PAT'], ['gh', 'GitHub token'], ['sk-or-v1-', 'OpenRouter API key'],
+  ['sk-ant-', 'Anthropic API key'], ['sk-ak-', 'Zapier MCP key'], ['sk-lf-', 'Langfuse secret key'],
+  ['xox', 'Slack token'], ['AIza', 'Google API key'], ['ASIA', 'AWS temporary access key'], ['gsk_', 'Groq API key'],
+  ['hf_', 'Hugging Face token'], ['xai-', 'xAI API key'], ['nvapi-', 'NVIDIA API key'], ['glpat-', 'GitLab PAT'],
+  ['pat', 'Airtable personal access token'],
+];
+export const SOURCE_TOKEN_PATTERNS: Array<{ pattern: RegExp; name: string }> = [
+  ...EXTRA_TOKEN_PATTERNS.map((p) => {
+    const body = p.source.replace(/^\^/, '');
+    const anchoredEnd = body.endsWith('$');
+    return {
+      pattern: new RegExp(`(?<![A-Za-z0-9_])${anchoredEnd ? `${body.slice(0, -1)}(?![A-Za-z0-9_-])` : body}`, p.flags.replace('g', '')),
+      name: TOKEN_NAMES.find(([prefix]) => body.startsWith(prefix))?.[1] ?? 'API token',
+    };
+  }),
+  { pattern: /(?<![A-Za-z0-9_])[sr]k_live_[A-Za-z0-9]{24,}/, name: 'Stripe secret key' },
+  { pattern: /(?<![A-Za-z0-9_])SG\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}(?![A-Za-z0-9_-])/, name: 'SendGrid API key' },
+];
 
 const PLACEHOLDER = /your|example|sample|dummy|placeholder|changeme|replace|insert|redacted|xxxx|\*{3}|<[^>]*>|\$\{|\{\{|%s/i;
 const MIN_ENTROPY = 3.8;
@@ -97,17 +130,29 @@ export function findSourceSecrets(code: string): SourceSecret[] {
   };
 
   for (const { line, text } of sourceSegments(code)) {
+    const tokens: string[] = [];
     for (const { pattern, name } of API_KEY_PATTERNS) {
       if (name === 'Private key') {
         if (PRIVATE_KEY_BLOCK.test(text)) add({ line, kind: name, masked: '-----BEGIN … PRIVATE KEY-----' }, 'pem');
         continue;
       }
       const m = pattern.exec(text);
-      if (m && !PLACEHOLDER.test(m[0])) add({ line, kind: name, masked: mask(m[0]) }, m[0]);
+      if (m && !PLACEHOLDER.test(m[0])) { add({ line, kind: name, masked: mask(m[0]) }, m[0]); tokens.push(m[0]); }
     }
-    for (const m of text.matchAll(KEYED_LITERAL)) {
-      const [, key, value] = m;
-      if (looksLikeSecretValue(value)) add({ line, kind: 'secret-named value', key, masked: mask(value) }, value);
+    for (const { pattern, name } of SOURCE_TOKEN_PATTERNS) {
+      const m = pattern.exec(text);
+      if (!m || PLACEHOLDER.test(m[0]) || isPlaceholderSecret(m[0])) continue;
+      // The same token already matched by a broader format on this statement
+      if (tokens.some((t) => t.includes(m[0]) || m[0].includes(t))) continue;
+      add({ line, kind: name, masked: mask(m[0]) }, m[0]);
+      tokens.push(m[0]);
+    }
+    for (const re of [KEYED_LITERAL, ENV_DEFAULT]) {
+      for (const m of text.matchAll(re)) {
+        const [, key, value] = m;
+        if (tokens.some((t) => value.includes(t))) continue;
+        if (looksLikeSecretValue(value)) add({ line, kind: 'secret-named value', key, masked: mask(value) }, value);
+      }
     }
     for (const m of text.matchAll(BEARER_LITERAL)) {
       if (looksLikeSecretValue(m[1])) add({ line, kind: 'bearer token', key: 'Authorization', masked: mask(m[1]) }, m[1]);
