@@ -6,6 +6,53 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Security
+
+- **Project rules can no longer reveal credential values.** Rules in a repository's `.vaso/rules/` are judged on the masked view of the scanned files — the same text their evidence would print — so their pass/fail verdicts say nothing about a credential the report would not show. Rules in `~/.vaso/rules` and `--rules` files are unchanged.
+- **Parent-directory mitigation follows symlinks.** A symlinked credential file whose target sits in a directory other users can enter is no longer reported as mitigated.
+
+### Added
+
+- **GEM-012: Gemini CLI hook command fetches code or exfiltrates.** Gemini CLI hooks in `settings.json` are judged by the shared hook analyzer, like Claude Code, Copilot CLI and Devin hooks.
+- **Cursor `sandbox.json` and `permissions.json`** (user and per-repository) are judged: `type: "insecure_none"` (CUR-001), an open network policy (CUR-008), shells, interpreters and network tools in `terminalAllowlist` (CUR-003), `mcpAllowlist "*:*"` and read-write paths covering home, `/` or credential stores (CUR-009). CUR-006 also reports plaintext credentials and unpinned packages in `mcp.json`.
+- **Copilot CLI:** `defaultPermissionMode: "allow-all"` and MCP approvals covering every tool of a server (GHC-002); plaintext keys in `providers.json` (GHC-003); hook commands (GHC-007); permissions of `command-history-state/`, `session-store.db`, `mcp-oauth-config/` and `mcp-secrets/` (GHC-001, metadata-only in remote scans).
+- **Gemini CLI policy engine.** GEM-003 judges allow rules in user and admin policies (`~/.gemini/policies/*.toml` including `auto-saved.toml`, `/etc/gemini-cli/policies`, `/Library/Application Support/GeminiCli/policies`): every tool, bare shell, catch-all command patterns, broad command prefixes and whole-server MCP rules.
+- **Claude Code:** sub-agent `permissionMode` and `mcpServers` (CC-001, CC-005), `sandbox.filesystem.allowWrite` covering home, `/`, `~/.ssh` or credential stores (CC-009), http hooks (CC-003).
+- **Codex permission profiles.** `default_permissions = ":danger-full-access"` and `[permissions.<name>]` profiles writing to the filesystem root, home, `/etc` or credential folders (CDX-002, CDX-008); `default_tools_approval_mode = "approve"` (CDX-001). Trusted projects' `.codex/` layers in the usual clone folders are collected by remote scans.
+- **OpenCode V2 configuration** (`permissions`, `agents`, `mcp.servers`, `plugins`, `snapshots`, `update`) is read alongside V1.
+- **Devin CLI** `permission_mode: "dangerous"` (critical) and `local_tools_bypass_permissions` (DEV-001).
+- **Abacus.AI** `mcp__<server>` allow rules that cover a whole server (ABA-008).
+- **MCP servers switched off by the agent are marked disabled**: Claude Code `managed-mcp.json`, `deniedMcpServers`/`allowedMcpServers`, `disabledMcpjsonServers` and per-project `disabledMcpServers`; Gemini CLI `mcp.allowed`/`mcp.excluded` and `/mcp disable`; Qwen Code `mcp.allowed`/`mcp.excluded`. A file several agents read is marked disabled only when every one of them leaves the server off.
+- **MCP-001 notes servers whose source could not be analysed** (missing entry file, inline code, a remote module).
+
+### Changed
+
+- **Hook analyzer** also reports secrets sent in request headers, scp/rsync/sftp uploads, `xargs … sh -c`, inline interpreter code that runs input, and http hooks; DEV-006 uses it.
+- **MCP source resolution** finds the real entry past node/tsx/bun/deno options (`-r`, `--import`, `--env-file`, …), analyses local preload modules, honours `cwd`, and follows `fastmcp run`, `npx tsx` and npm/pnpm/yarn scripts.
+- **MCP-003** source scanning finds Google, GitHub fine-grained, Hugging Face, Groq, xAI, NVIDIA, Stripe live and SendGrid keys and secrets given as `??`/`||`/`or` fallbacks or `getenv` defaults (masked). WS-003 finds tokens in MCP arguments and URLs; WS-005 checks both `serverUrl` and `url`.
+- **Python MCP analysis** follows assigned, `getattr` and `importlib` sink aliases, `**kwargs` that turn the shell on and pathlib joins; MCP-005 traces tool input into SQL text in JavaScript. Python result-flow and sink analysis scale linearly with module size.
+- **Remote scans report what the probe did not collect as not verified** instead of missing or safe: HM-009 `tirith_path`, CD-009/HM-010/AT-007 MCP command paths, and skills directories a config moves outside the default trees (SKL-002 info, inventory `unverified`). OpenClaw profile and legacy workspace skills are collected remotely.
+- **Defaults are information, not findings:** Claude Code `auto` mode, Qwen Code `approvalMode: "auto"`, Abacus.AI `auto` mode, Gemini CLI `tools.sandbox: false`. CDX-005 reports an unset `shell_environment_policy` (which inherits everything) as info, and counts `filters` as an allowlist.
+- **CDX-009** reports one finding per notify setting, critical when its script downloads and runs code.
+- **Windsurf** Cascade checks (WS-001/002/006) pass on Devin Desktop 3.9.19 and later, where Cascade was removed.
+- **`vaso fix`:** configs are replaced through a temporary file and rename (in place as root or when the directory is read-only); ZC-013, CFG-020 and NC-002 clear group/other bits instead of setting 600/700 and report chmod errors; YAML fixes edit only the changed value and refuse to write through an alias; env fixes keep CRLF, BOM and trailing comments; TOML headers with `]` in a trailing comment are edited in place; fixes whose finding is still reported after a rescan are listed as partially applied. Without `--yes` on a non-interactive terminal, `vaso fix` exits 2.
+- **`vaso fix --rollback`** restores only the content and modes the fix run changed (a chmod made since is kept), reports unchanged items separately and exits 2 for a named backup when none exist.
+- **CLI input validation:** `--snapshot` with `--host`/`--inventory`, and `--ssh-key`/`--sudo` without remote hosts, are usage errors; `--ssh-retries` is capped at 10; SSH key paths must be non-empty files; SSH targets with stray colons are rejected; rule IDs must be identifiers and `platforms` known platform names; a `--rules` file with invalid rules exits 2; snapshots must name a known platform. `--snapshot` and `--inventory` read regular files only.
+- **Output escaping** covers bidi marks, zero-width and tag characters in every format, and diff lines, snapshot probe version and timestamp, rule IDs and rule text in terminal output.
+- **ADV-001** snippets name the advisory, installed version and fixed version. Renamed: CUR-006 "Cursor MCP Server Insecure Config", GHC-003 "…GitHub Token or Provider Key", GHC-007 "Copilot CLI Unsafe LSP or Hook Commands".
+
+### Fixed
+
+- **ZC-006's fix** writes a dotted agent alias (`[agents."ops.v2"]`) as one key instead of adding a nested table.
+- **A damaged baseline** no longer aborts the scan; failed report, snapshot or baseline writes exit 2 instead of claiming success; per-host files no longer overwrite each other through duplicate, case-only or blank labels.
+- **CG-005 and MM-001** report "not verified" instead of a critical "unsigned" finding when codesign did not complete.
+- **MCP-034** no longer skips a directive because a tool description appears inside the output text.
+- **MCP-030** no longer flags `deno run <local file>`, `pnpm --dir`, `yarn --cwd` or `npx --prefix`.
+- **ABA-002** treats `/path` as workspace-anchored (`//` is the filesystem root); **ABA-004** no longer reports documentation placeholders; ABA-008 no longer reads `autoApprove`, which Abacus.AI ignores.
+- **QC-005** counts only deny/ask rules on the same tool as a safety net; **CC-007** no longer reports a missing `apiKeyHelper` script.
+- A missing ssh client fails immediately; deeply nested configs no longer crash CFG-003/POL-003; rule `fix.set` cannot reach the object prototype.
+- MCP inventory: installs relocated by `CODEX_HOME`/`CLAUDE_CONFIG_DIR` get their servers; findings link for Abacus.AI array entries, world-writable command paths and bare config lines (IOC-001, CFG-002). Skill descriptions mask bare high-entropy tokens. Codex and Cursor skill roots must be directories. `detect --snapshot --silent` prints no progress line.
+
 ## [1.4.1] - 2026-11-13
 
 ### Added
