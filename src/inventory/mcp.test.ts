@@ -115,6 +115,14 @@ describe('assignMcpServers', () => {
     expect(byInstallation.has(other)).toBe(false);
     expect(byInstallation.has(grok)).toBe(false);
   });
+
+  it('gives servers to an installation relocated outside home (CODEX_HOME) whose config discovery found', () => {
+    const codex = inst('codex', '/srv/codex');
+    const { byInstallation } = assignMcpServers([codex], [
+      config('/srv/codex/config.toml', ['codex'], ['relo']),
+    ], { home: HOME, inventoried: new Set([...inventoried, 'codex']) });
+    expect(byInstallation.get(codex)!.map(s => s.name)).toEqual(['relo']);
+  });
 });
 
 describe('attachMcpInventories', () => {

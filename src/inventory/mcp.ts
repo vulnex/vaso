@@ -65,16 +65,21 @@ export function mcpServerItem(config: MCPConfig, server: MCPServerEntry): McpSer
  * project config goes to the project installation under its root (else the
  * user installation), and the closest installation by path wins — an
  * OpenClaw profile's config goes to that profile. Only installations under
- * `home` or the project are given servers: discovery reads the scanning
- * user's files, not other users' (--all-users).
+ * `home` or the project, or holding a discovered config of their agent, are
+ * given servers: discovery reads the scanning user's files, not other users'
+ * (--all-users).
  */
 export function assignMcpServers(
   installations: AgentInstallation[],
   configs: MCPConfig[],
   options: { home: string; inventoried: ReadonlySet<AgentType>; projectDir?: string },
 ): McpAssignment {
+  // An install relocated outside home by the scanning user's environment
+  // (CODEX_HOME, CLAUDE_CONFIG_DIR, …) is theirs too: discovery followed the
+  // same variable to a config inside it
   const own = (inst: AgentInstallation) => isWithin(inst.installDir, options.home)
-    || (options.projectDir !== undefined && isWithin(inst.installDir, options.projectDir));
+    || (options.projectDir !== undefined && isWithin(inst.installDir, options.projectDir))
+    || configs.some(c => (c.agents ?? []).includes(inst.agent) && isWithin(c.filePath, inst.installDir));
   const byInstallation = new Map<AgentInstallation, McpServerItem[]>();
   for (const inst of installations) {
     if (options.inventoried.has(inst.agent) && own(inst)) byInstallation.set(inst, []);
