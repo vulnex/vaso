@@ -5,6 +5,7 @@ import { getAllSkillsDirs, isExcludedPath, listSkillTree } from '../core/utils.j
 import { parseYamlSafe } from '../core/yaml-safe.js';
 import { redactSecretsInLine } from '../core/patterns.js';
 import { maskCredentialsInLine } from '../reporting/serialize.js';
+import { shannonEntropy } from '../analyzers/entropy.js';
 import { probeCoversTree } from '../core/probe-coverage.js';
 
 /**
@@ -247,7 +248,21 @@ export function cleanDescription(value: string): string | undefined {
   if (!flat) return undefined;
   // mask first: redactSecretsInLine rewrites a PEM header, after which the
   // key body is no longer recognisable
-  return redactSecretsInLine(maskCredentialsInLine(flat), MAX_SKILL_DESCRIPTION);
+  return redactSecretsInLine(maskBareTokens(maskCredentialsInLine(flat)), MAX_SKILL_DESCRIPTION);
+}
+
+/**
+ * A bare high-entropy token in prose — an AWS secret access key, a random
+ * API token with no recognisable prefix — names no key the maskers know.
+ * Descriptions are prose: such a token is masked whatever its shape.
+ */
+const BARE_TOKEN = /(?<![A-Za-z0-9+/=_-])[A-Za-z0-9+/=_-]{32,}(?![A-Za-z0-9+/=_-])/g;
+
+function maskBareTokens(text: string): string {
+  return text.replace(BARE_TOKEN, (t) => {
+    const classes = [/[a-z]/, /[A-Z]/, /[0-9]/].filter(re => re.test(t)).length;
+    return classes === 3 && shannonEntropy(t) >= 4 ? `${t.slice(0, 4)}…${t.slice(-4)} (${t.length} chars)` : t;
+  });
 }
 
 /**

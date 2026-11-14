@@ -252,6 +252,14 @@ describe('cleanDescription', () => {
     expect(out.endsWith(' ...')).toBe(true);
   });
 
+  it('masks a bare high-entropy token (AWS secret key), not words, paths or hex digests', () => {
+    const out = cleanDescription('Deploy with PtYgjmUhBel31iEl2hpChYgCfrL1spNxnyVmihA+ as the secret')!;
+    expect(out).not.toContain('Bel31iEl2hpChYg');
+    expect(out).toContain('(40 chars)');
+    const benign = 'Uses internationalization-and-localization-helpers at 3f786850e387550fdab836ed7e6dc881de23001b';
+    expect(cleanDescription(benign)).toBe(benign);
+  });
+
   it('masks a PEM body and a bare JWT', () => {
     const jwt = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.Zk3pQ8rT2vX9yB4nM6sK1wE7hJ5cL0aD';
     expect(cleanDescription(`session ${jwt}`)).not.toContain('Zk3pQ8rT2vX9');
