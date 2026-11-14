@@ -1,6 +1,7 @@
 import { dirname, isAbsolute, relative } from 'node:path';
 import type { AgentInventory, CheckResult, McpServerItem } from '../core/types.js';
 import { relEscapes } from '../core/path-rel.js';
+import { serverSpan } from './spans.js';
 
 function isWithin(path: string, dir: string): boolean {
   const rel = relative(dir, path);
@@ -38,6 +39,18 @@ function inServerFiles(server: McpServerItem, file: string): boolean {
   return cmd !== undefined && isAbsolute(cmd) && (file === cmd || file === dirname(cmd));
 }
 
+/** The server whose entry most narrowly spans `line` of `file`; none when two tie. */
+function byLine<T extends { s: McpServerItem }>(servers: T[], file: string, line: number): T[] {
+  const holding = servers
+    .map(x => ({ x, span: serverSpan(x.s) }))
+    .filter(({ x, span }) => x.s.configFile === file && span !== undefined && span[0] <= line && line <= span[1]);
+  if (holding.length === 0) return [];
+  const width = (span: readonly [number, number]) => span[1] - span[0];
+  const narrowest = Math.min(...holding.map(h => width(h.span!)));
+  const best = holding.filter(h => width(h.span!) === narrowest);
+  return best.length === 1 ? [best[0].x] : [];
+}
+
 /**
  * Attach to each inventoried skill, other entry and MCP server the ids of the
  * failed checks that point at it. A skill or entry: evidence in its folder
@@ -64,7 +77,10 @@ export function linkInventoryFindings(inventory: AgentInventory, results: CheckR
   const links = new Map<McpServerItem, Set<string>>();
   for (const r of failed) {
     for (const e of r.evidence!) {
-      const hits = servers.filter(({ s, re }) => inServerFiles(s, e.file) && (re.test(e.snippet ?? '') || re.test(e.detail ?? '')));
+      let hits = servers.filter(({ s, re }) => inServerFiles(s, e.file) && (re.test(e.snippet ?? '') || re.test(e.detail ?? '')));
+      // A bare config line (IOC-001's URL, CFG-002's key) names no server:
+      // the entry whose lines hold it, when exactly one does most narrowly
+      if (hits.length === 0 && e.line !== undefined) hits = byLine(servers, e.file, e.line);
       if (hits.length === 0) continue;
       const longest = Math.max(...hits.map(h => h.s.name.length));
       for (const { s } of hits) {

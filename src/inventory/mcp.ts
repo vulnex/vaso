@@ -11,6 +11,7 @@ import { relEscapes } from '../core/utils.js';
 import { maskArgSecrets, maskUrlSecrets } from '../mcp/config-secrets.js';
 import { maskCredentialsInText } from '../reporting/serialize.js';
 import { scanCwd } from '../adapters/project-configs.js';
+import { recordServerSpans } from './spans.js';
 
 export interface McpAssignment {
   /** Servers per installation; only installations whose MCP configs VASO reads have an entry. */
@@ -129,7 +130,9 @@ export async function discoverMcpAssignment(installations: AgentInstallation[], 
     const result = await new MCPDiscovery(fs).discover(fs.platform, projectDir, { includeDisabled: true });
     const nanoclaw = (await Promise.all(installations.filter(i => i.agent === 'nanoclaw').map(i => nanoclawGroupConfigs(i.installDir, fs)))).flat();
     const ironclaw = (await Promise.all(installations.filter(i => i.agent === 'ironclaw' && !isIronclawLegacy(i)).map(i => ironclawExtensionConfigs(i.installDir, fs)))).flat();
-    return assignMcpServers(installations, [...result.configs, ...nanoclaw, ...ironclaw], { home: fs.homedir(), inventoried: inventoriedAgents(fs), projectDir });
+    const assignment = assignMcpServers(installations, [...result.configs, ...nanoclaw, ...ironclaw], { home: fs.homedir(), inventoried: inventoriedAgents(fs), projectDir });
+    await recordServerSpans([...[...assignment.byInstallation.values()].flat(), ...assignment.host], fs);
+    return assignment;
   } catch {
     return { byInstallation: new Map(), host: [] };
   }
