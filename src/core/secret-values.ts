@@ -29,17 +29,23 @@ export function isSecretLikeValue(value: string, keyName = ''): boolean {
 }
 
 export function configHoldsSecret(data: unknown): boolean {
+  // Depth-first, first MAX_NODES nodes in document order; an explicit stack,
+  // so a config nested thousands of levels deep can't exhaust the call stack
+  const stack: Array<[unknown, string]> = [[data, '']];
   let seen = 0;
-  const walk = (node: unknown, key: string): boolean => {
+  while (stack.length > 0) {
     if (++seen > MAX_NODES) return false;
-    if (typeof node === 'string') return isSecretLikeValue(node, key);
-    if (Array.isArray(node)) return node.some(v => walk(v, key));
-    if (node && typeof node === 'object') {
-      return Object.entries(node as Record<string, unknown>).some(([k, v]) => walk(v, k));
+    const [node, key] = stack.pop()!;
+    if (typeof node === 'string') {
+      if (isSecretLikeValue(node, key)) return true;
+    } else if (Array.isArray(node)) {
+      for (let i = node.length - 1; i >= 0; i--) stack.push([node[i], key]);
+    } else if (node && typeof node === 'object') {
+      const entries = Object.entries(node as Record<string, unknown>);
+      for (let i = entries.length - 1; i >= 0; i--) stack.push([entries[i][1], entries[i][0]]);
     }
-    return false;
-  };
-  return walk(data, '');
+  }
+  return false;
 }
 
 /** Files that are credentials by what they are, whatever they hold right now. */

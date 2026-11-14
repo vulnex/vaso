@@ -13,4 +13,12 @@ describe('configHoldsSecret', () => {
     expect(configHoldsSecret({ mcpServers: { x: { headers: { Authorization: 'Bearer q8Z2vK4mN7pR1sT5wX9yB3cF6hJ0' } } } })).toBe(true);
     expect(isSecretLikeValue('q8Z2vK4mN7pR1sT5wX9yB3cF6hJ0', 'description')).toBe(false);
   });
+
+  it('walks a config nested far deeper than the call stack allows', () => {
+    const depth = 200_000;
+    const deep = JSON.parse(`{"a":${'['.repeat(depth)}${']'.repeat(depth)}}`) as unknown;
+    expect(configHoldsSecret(deep)).toBe(false);
+    // a key early in document order is still found
+    expect(configHoldsSecret({ env: { ANTHROPIC_API_KEY: 'sk-ant-api03-Ab3dEf6hIj9kLm2nOp5qRs8tUv' }, a: deep })).toBe(true);
+  });
 });
