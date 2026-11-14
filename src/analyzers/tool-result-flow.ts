@@ -466,7 +466,8 @@ function analyzePython(code: string): ExternalContentFlow[] {
   const rawLines = code.split('\n');
   const stmts = statements(codeLines(code));
   const blanked = stmts.map((s) => blankStrings(s.text));
-  const indentOf = (i: number): number => stmts[i].text.search(/\S/);
+  const indents = stmts.map((s) => s.text.search(/\S/));
+  const indentOf = (i: number): number => indents[i];
 
   // Modules of a joined multi-file source (`// === pkg/server.py ===`)
   const moduleOf: number[] = [];
@@ -511,28 +512,52 @@ function analyzePython(code: string): ExternalContentFlow[] {
     if (ctor && classes.has(`${moduleOf[i]}:${ctor}`)) instances.set(`${moduleOf[i]}:${a[1]}`, ctor);
   }
 
-  // Functions and methods
+  // Functions and methods. The block a statement sits in is the nearest
+  // earlier statement of its module indented less: a stack of open blocks
+  // finds it in one pass (a backward scan per def was quadratic).
   const fns: PyFn[] = [];
+  const blocks: number[] = [];
   for (let i = 0; i < stmts.length; i++) {
+    if (i > 0 && moduleOf[i] !== moduleOf[i - 1]) blocks.length = 0;
+    if (stmts[i].text.trim() === '') continue;
+    const indent = indentOf(i);
+    while (blocks.length > 0 && indentOf(blocks[blocks.length - 1]) >= indent) blocks.pop();
+    const enclosing = blocks.length > 0 ? blocks[blocks.length - 1] : undefined;
+    blocks.push(i);
     const def = /^(\s*)(?:async\s+)?def\s+(\w+)\s*\(/.exec(stmts[i].text);
     if (!def) continue;
-    const indent = def[1].length;
     let params = topLevelParts(callArgs(stmts[i].text, def[0].length - 1))
       .map((p) => /^\s*\**([A-Za-z_]\w*)/.exec(p)?.[1])
       .filter((p): p is string => !!p);
-    let cls: string | undefined;
-    for (let j = i - 1; j >= 0 && moduleOf[j] === moduleOf[i]; j--) {
-      if (stmts[j].text.trim() === '' || indentOf(j) >= indent) continue;
-      cls = /^\s*class\s+(\w+)/.exec(stmts[j].text)?.[1];
-      break;
-    }
+    const cls = enclosing !== undefined ? /^\s*class\s+(\w+)/.exec(stmts[enclosing].text)?.[1] : undefined;
     if (cls && (params[0] === 'self' || params[0] === 'cls')) params = params.slice(1);
     let tool = false;
     for (let d = i - 1; d >= 0 && /^\s*@/.test(stmts[d].text); d--) if (PY_TOOL_DECORATOR.test(stmts[d].text)) tool = true;
     fns.push({ name: def[2], params, def: i, end: bodyEnd(i), module: moduleOf[i], ...(cls ? { cls } : {}), tool });
   }
+  const fnIndex = new Map<string, PyFn>();
+  for (const f of fns) {
+    const key = `${f.module}\0${f.cls ?? ''}\0${f.name}`;
+    if (!fnIndex.has(key)) fnIndex.set(key, f);
+  }
   const functionNamed = (module: number, name: string, cls?: string): PyFn | undefined =>
-    fns.find((f) => f.module === module && f.name === name && f.cls === cls);
+    fnIndex.get(`${module}\0${cls ?? ''}\0${name}`);
+  // Module-level statements per module, and each class's methods
+  const topLevel = new Map<number, number[]>();
+  for (let j = 0; j < stmts.length; j++) {
+    if (indentOf(j) !== 0) continue;
+    const list = topLevel.get(moduleOf[j]) ?? [];
+    list.push(j);
+    topLevel.set(moduleOf[j], list);
+  }
+  const methodsOf = new Map<string, PyFn[]>();
+  for (const f of fns) {
+    if (!f.cls) continue;
+    const key = `${f.module}\0${f.cls}`;
+    methodsOf.set(key, [...(methodsOf.get(key) ?? []), f]);
+  }
+  // Whether `made` matches a module-level statement / a statement of the class — per receiver, once
+  const madeCache = new Map<string, boolean>();
 
   /** Where an expression in `fn` starts, given the aliases assigned so far. */
   const startOf = (raw: string, fn: PyFn, aliases: Map<string, PyStart>, depth = 0): PyStart | undefined => {
@@ -723,9 +748,25 @@ function analyzePython(code: string): ExternalContentFlow[] {
         // `self.session.get(…)`: the session may be made in another method of
         // the class (`__init__: self.session = requests.Session()`)
         const onSelf = receiver !== undefined && fn.cls !== undefined && /\bself\s*\.\s*$/.test(code.slice(0, http.index));
-        const inClass = (j: number): boolean => onSelf && fns.some((f) => f.cls === fn.cls && f.module === fn.module && j > f.def && j < f.end);
-        const madeHere = made !== undefined && blanked.some((b, j) =>
-          ((j > fn.def && j < fn.end) || (indentOf(j) === 0 && moduleOf[j] === fn.module) || inClass(j)) && made.test(b));
+        let madeHere = false;
+        if (made !== undefined) {
+          for (let j = fn.def + 1; j < fn.end && !madeHere; j++) madeHere = made.test(blanked[j]);
+          const outside = (key: string, lines: () => Iterable<number>): boolean => {
+            let hit = madeCache.get(key);
+            if (hit === undefined) {
+              hit = false;
+              for (const j of lines()) if (made.test(blanked[j])) { hit = true; break; }
+              madeCache.set(key, hit);
+            }
+            return hit;
+          };
+          madeHere ||= outside(`m\0${fn.module}\0${receiver}`, () => topLevel.get(fn.module) ?? []);
+          if (!madeHere && onSelf) {
+            madeHere = outside(`c\0${fn.module}\0${fn.cls}\0${receiver}`, function* () {
+              for (const f of methodsOf.get(`${fn.module}\0${fn.cls}`) ?? []) for (let j = f.def + 1; j < f.end; j++) yield j;
+            });
+          }
+        }
         if (!receiver || urlLike || madeHere) {
           consider({
             line: stmts[i].line, snippet: firstLine(i), via: 'http', through: [],

@@ -548,7 +548,14 @@ export function analyzePythonSinks(code: string): PythonSinkFinding[] {
   const fns = functionsOf(stmts);
   const tainted = taintedNames(stmts, fns, rewrite);
   const constants = stringConstantNames(stmts, fns);
-  const fnAt = (i: number): PyFunction | undefined => fns.filter((f) => i > f.start && i < f.end).at(-1);
+  // The innermost function each statement sits in, and the statement each
+  // line belongs to — precomputed: a lookup per line was quadratic
+  const innermost: Array<PyFunction | undefined> = new Array(stmts.length);
+  for (const f of fns) for (let j = f.start + 1; j < f.end; j++) innermost[j] = f;
+  const fnAt = (i: number): PyFunction | undefined => innermost[i];
+  const lineText = new Map(lines.map((l) => [l.line, l.text]));
+  const stmtOfLine = new Map<number, number>();
+  stmts.forEach((s, i) => { for (let l = s.line; l <= s.last; l++) if (!stmtOfLine.has(l)) stmtOfLine.set(l, i); });
   const confined = RESOLVES.test(code) && CONFINES.test(code);
   const touchesFiles = FILE_OPS.test(code);
   const injectedLines = new Set<number>();
@@ -586,7 +593,7 @@ export function analyzePythonSinks(code: string): PythonSinkFinding[] {
       // The name suggests input; whether it is: a parameter (a helper's
       // caller may pass tool input) or a tainted name is; a local built from
       // a hash or a constant table joins nothing the caller chose
-      const si = stmts.findIndex((s) => s.line <= line && line <= s.last);
+      const si = stmtOfLine.get(line) ?? -1;
       const fnHere = si >= 0 ? fnAt(si) : undefined;
       const root = m?.[1].split('.')[0] ?? '';
       const fromInput = m && (!fnHere || fnHere.params.includes(root) || root === 'self' || tainted.get(fnHere)?.has(root) === true);
@@ -643,7 +650,7 @@ export function analyzePythonSinks(code: string): PythonSinkFinding[] {
       const finding: PythonSinkFinding = {
         kind: 'exec',
         line: stmt.line,
-        snippet: lines.find((l) => l.line === stmt.line)!.text.trim().slice(0, 120),
+        snippet: (lineText.get(stmt.line) ?? '').trim().slice(0, 120),
         description: `${sink}() call detected`,
         ...(command ? { command } : {}),
         ...(dynamic ? { dynamic } : {}),
@@ -652,7 +659,8 @@ export function analyzePythonSinks(code: string): PythonSinkFinding[] {
       };
       findings.push(finding);
 
-      const covered = [...injectedLines].some((l) => l >= stmt.line && l <= stmt.last);
+      let covered = false;
+      for (let l = stmt.line; l <= stmt.last && !covered; l++) covered = injectedLines.has(l);
       if (!covered) {
         const shell = /\bshell\s*=\s*True\b/.test(args) || /^(?:os\.(?:system|popen)|asyncio\.create_subprocess_shell|subprocess\.(?:getoutput|getstatusoutput)|commands\.getoutput)$/.test(sink);
         if (from) {
@@ -698,9 +706,10 @@ export function analyzePythonCapabilities(code: string): PythonCapability[] {
   const out: PythonCapability[] = [];
   const rewrite = aliasRewriter(code);
   const lines = codeLines(code);
+  const lineText = new Map(lines.map((l) => [l.line, l.text]));
   for (const stmt of statements(lines)) {
     const text = rewrite(stmt.text);
-    const snippet = lines.find((l) => l.line === stmt.line)!.text.trim().slice(0, 120);
+    const snippet = (lineText.get(stmt.line) ?? '').trim().slice(0, 120);
     for (const { re, name } of EXEC_SINKS) {
       // Matched on code only: `"eval": "eval() has…"` is a string, not a call
       const m = re.exec(blankStrings(text));
