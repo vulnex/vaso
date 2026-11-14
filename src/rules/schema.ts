@@ -3,6 +3,8 @@ import { VALID_OPERATORS } from './operators.js';
 import type { CheckCategory, AgentType, Severity, Platform } from '../core/types.js';
 import { AGENT_TYPES, CHECK_CATEGORIES } from '../core/types.js';
 import { unsafeRegexReason } from './regex-safety.js';
+import { escapeControlChars } from '../reporting/text-safety.js';
+import { keySegments } from '../core/utils.js';
 
 const VALID_CATEGORIES: readonly string[] = CHECK_CATEGORIES;
 
@@ -11,6 +13,25 @@ const VALID_AGENTS: readonly string[] = AGENT_TYPES;
 const VALID_SEVERITIES: readonly string[] = ['critical', 'warning', 'info'];
 
 const VALID_TARGETS: readonly string[] = ['configs', 'skills', 'all'];
+
+/** Values of `process.platform` (core/types.ts Platform). */
+const VALID_PLATFORMS: readonly string[] = ['aix', 'android', 'darwin', 'freebsd', 'haiku', 'linux', 'openbsd', 'sunos', 'win32', 'cygwin', 'netbsd'];
+
+/**
+ * A rule ID is printed in every report format and in terminal warnings, and is
+ * SARIF's ruleId: letters, digits, `.`, `_`, `-` — no control characters,
+ * spaces or markup.
+ */
+const RULE_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+
+/**
+ * Key path segments that reach an object's prototype instead of a config
+ * key: `fix.set: __proto__.polluted` would change every object in VASO.
+ */
+const PROTOTYPE_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
+
+/** One display line of rule text: control characters shown escaped. */
+const line = (s: string) => escapeControlChars(s, { lineBreaks: true });
 
 /** Raw shape of a config rule block in YAML. */
 export interface RawConfigRule {
@@ -93,7 +114,9 @@ export function validateRuleFile(data: unknown): { rules: DeclarativeRule[]; err
 
   for (let i = 0; i < doc.rules.length; i++) {
     const raw = doc.rules[i];
-    const label = raw?.id ? String(raw.id) : `rules[${i}]`;
+    // Printed in warnings before the ID is validated
+    const rawId = raw?.id ? String(raw.id) : '';
+    const label = rawId ? line(rawId.length > 80 ? `${rawId.slice(0, 80)}…` : rawId) : `rules[${i}]`;
 
     if (!raw || typeof raw !== 'object') {
       errors.push({ rule: label, message: 'Rule must be an object' });
@@ -108,6 +131,9 @@ export function validateRuleFile(data: unknown): { rules: DeclarativeRule[]; err
       if (typeof r[field] !== 'string' || (r[field] as string).trim() === '') {
         ruleErrors.push({ rule: label, field, message: `"${field}" is required and must be a non-empty string` });
       }
+    }
+    if (typeof r.id === 'string' && r.id.trim() !== '' && !RULE_ID_RE.test(r.id)) {
+      ruleErrors.push({ rule: label, field: 'id', message: '"id" must be 1–64 letters, digits, ".", "_" or "-", starting with a letter or digit' });
     }
 
     // Category
@@ -129,8 +155,8 @@ export function validateRuleFile(data: unknown): { rules: DeclarativeRule[]; err
 
     // Optional platforms array
     if (r.platforms !== undefined) {
-      if (!Array.isArray(r.platforms) || !r.platforms.every(p => typeof p === 'string')) {
-        ruleErrors.push({ rule: label, field: 'platforms', message: '"platforms" must be an array of strings' });
+      if (!Array.isArray(r.platforms) || !r.platforms.every(p => VALID_PLATFORMS.includes(p as string))) {
+        ruleErrors.push({ rule: label, field: 'platforms', message: `"platforms" must be an array of: ${VALID_PLATFORMS.join(', ')}` });
       }
     }
 
@@ -219,6 +245,10 @@ export function validateRuleFile(data: unknown): { rules: DeclarativeRule[]; err
         }
         if (hasSet && typeof f.set !== 'string') {
           ruleErrors.push({ rule: label, field: 'fix.set', message: '"fix.set" must be a string (config path)' });
+        } else if (hasSet && (f.set as string).trim() === '') {
+          ruleErrors.push({ rule: label, field: 'fix.set', message: '"fix.set" must name a config key' });
+        } else if (hasSet && keySegments(f.set as string).some(k => PROTOTYPE_KEYS.has(k))) {
+          ruleErrors.push({ rule: label, field: 'fix.set', message: '"fix.set" may not name __proto__, prototype or constructor' });
         }
         if (hasGuidance && typeof f.guidance !== 'string') {
           ruleErrors.push({ rule: label, field: 'fix.guidance', message: '"fix.guidance" must be a string' });
@@ -229,18 +259,21 @@ export function validateRuleFile(data: unknown): { rules: DeclarativeRule[]; err
     if (ruleErrors.length > 0) {
       errors.push(...ruleErrors);
     } else {
+      // Rule text is shown in terminals and reports: control characters escaped
+      const pattern = r.pattern as RawPatternRule | undefined;
+      const fix = r.fix as RawFix | undefined;
       rules.push({
         id: r.id as string,
-        name: r.name as string,
+        name: line(r.name as string),
         category: r.category as CheckCategory,
         severity: r.severity as Severity,
-        description: r.description as string,
+        description: escapeControlChars(r.description as string),
         agents: r.agents as AgentType[] | undefined,
         platforms: r.platforms as Platform[] | undefined,
         config: r.config as RawConfigRule | undefined,
-        pattern: r.pattern as RawPatternRule | undefined,
+        pattern: pattern?.message !== undefined ? { ...pattern, message: escapeControlChars(pattern.message) } : pattern,
         file_exists: r.file_exists as RawFileExistsRule | undefined,
-        fix: r.fix as RawFix | undefined,
+        fix: fix?.guidance !== undefined ? { ...fix, guidance: escapeControlChars(fix.guidance) } : fix,
       });
     }
   }

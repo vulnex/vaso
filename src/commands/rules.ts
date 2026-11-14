@@ -1,11 +1,15 @@
 import { writeFile, mkdir } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import chalk from 'chalk';
 import { loadRules, validateRuleFile } from '../rules/index.js';
 import { checkRegistry } from '../core/check-registry.js';
 import { readFile } from 'node:fs/promises';
 import YAML from 'yaml';
+import { escapeControlChars } from '../reporting/text-safety.js';
+
+/** A file name or rule text on one terminal line (names come from directory listings). */
+const show = (s: string) => escapeControlChars(s, { lineBreaks: true });
 
 export interface RulesListOptions {
   format: string;
@@ -17,10 +21,10 @@ export async function runRulesList(options: RulesListOptions): Promise<void> {
   if (result.allErrors.length > 0 || result.warnings.length > 0) {
     for (const err of result.allErrors) {
       const loc = err.rule ? ` (rule ${err.rule})` : '';
-      console.error(chalk.yellow(`  Warning: ${err.file}${loc}: ${err.message}`));
+      console.error(chalk.yellow(`  Warning: ${show(err.file)}${loc}: ${err.message}`));
     }
     for (const w of result.warnings) {
-      console.error(chalk.yellow(`  Warning: ${w.file} (rule ${w.rule}): ${w.message}`));
+      console.error(chalk.yellow(`  Warning: ${show(w.file)} (rule ${w.rule}): ${w.message}`));
     }
     console.error();
   }
@@ -65,7 +69,7 @@ export async function runRulesList(options: RulesListOptions): Promise<void> {
   // Show source files
   for (const file of result.files) {
     if (file.rules.length > 0) {
-      console.log(chalk.dim(`  ${file.filePath} (${file.rules.length} rule(s))`));
+      console.log(chalk.dim(`  ${show(file.filePath)} (${file.rules.length} rule(s))`));
     }
   }
   console.log();
@@ -146,7 +150,8 @@ export async function runRulesValidate(filePath: string, options: RulesValidateO
 const STARTER_TEMPLATE = `# VASO Declarative Rules
 # Place this file in ~/.vaso/rules/ (global) or .vaso/rules/ (project-level).
 # All rules are loaded automatically on scan. Project-level rules are
-# untrusted: their fix.set is ignored and they can't replace a global rule ID.
+# untrusted: their fix.set is ignored, they can't replace a global rule ID,
+# and they judge config values as reports show them (credentials masked).
 #
 # Each rule must have exactly one type: config, pattern, or file_exists.
 # See: https://github.com/vulnex/vaso#declarative-rules
@@ -198,16 +203,22 @@ export interface RulesInitOptions {
 }
 
 export async function runRulesInit(options: RulesInitOptions): Promise<void> {
-  const targetDir = options.dir ?? join(homedir(), '.vaso', 'rules');
+  const defaultDir = join(homedir(), '.vaso', 'rules');
+  const targetDir = options.dir ?? defaultDir;
   const targetFile = join(targetDir, 'example.yaml');
+  // Where `vaso scan` finds the file by itself: ~/.vaso/rules/ or ./.vaso/rules/
+  const loadedByScan = [defaultDir, join(process.cwd(), '.vaso', 'rules')].includes(resolve(targetDir));
 
   try {
-    await mkdir(targetDir, { recursive: true });
+    // ~/.vaso also holds scan baselines: private, like they are (0700)
+    await mkdir(targetDir, { recursive: true, ...(options.dir === undefined ? { mode: 0o700 } : {}) });
     // 'wx' fails on an existing file: never overwrite the user's rules unasked
     await writeFile(targetFile, STARTER_TEMPLATE, { encoding: 'utf-8', flag: options.force ? 'w' : 'wx' });
     console.log(chalk.green(`  Created starter rule file: ${targetFile}\n`));
     console.log(chalk.dim('  Edit the file and run "vaso rules validate" to check it.'));
-    console.log(chalk.dim('  Rules are loaded automatically on "vaso scan".\n'));
+    console.log(chalk.dim(loadedByScan
+      ? '  Rules are loaded automatically on "vaso scan".\n'
+      : `  "vaso scan" loads ~/.vaso/rules/ and ./.vaso/rules/ only — pass this directory with --rules ${show(targetDir)}\n`));
   } catch (err) {
     const exists = (err as NodeJS.ErrnoException).code === 'EEXIST';
     console.error(chalk.red(exists

@@ -35,6 +35,14 @@ describe('getNestedValue', () => {
   it('returns undefined for missing paths', () => {
     expect(getNestedValue({ a: 1 }, 'b.c')).toBeUndefined();
   });
+
+  it('reads own keys only, never Object.prototype', () => {
+    expect(getNestedValue({}, 'constructor')).toBeUndefined();
+    expect(getNestedValue({ a: {} }, 'a.__proto__')).toBeUndefined();
+    expect(getNestedValue({ a: {} }, 'a.toString')).toBeUndefined();
+    expect(getNestedValue(JSON.parse('{"constructor": 1}') as Record<string, unknown>, 'constructor')).toBe(1);
+    expect(getNestedValue({ list: [1, 2] }, 'list.1')).toBe(2);
+  });
 });
 
 describe('setNestedValue', () => {
@@ -42,6 +50,13 @@ describe('setNestedValue', () => {
     const obj: Record<string, unknown> = {};
     setNestedValue(obj, 'a.b.c', 1);
     expect(obj).toEqual({ a: { b: { c: 1 } } });
+  });
+
+  it('refuses a path through the prototype', () => {
+    for (const path of ['__proto__.polluted', 'a.__proto__.polluted', 'constructor.prototype.polluted', 'prototype']) {
+      expect(() => setNestedValue({}, path, true)).toThrow(/not config keys/);
+    }
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
   });
 });
 

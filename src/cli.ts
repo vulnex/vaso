@@ -17,6 +17,7 @@ import { AGENT_TYPES, isScannableAgentType } from './core/types.js';
 import { VERSION } from './version.js';
 import { isReportFormat, reportFormats } from './reporting/index.js';
 import { colorDisabled } from './core/color.js';
+import { escapeControlChars } from './reporting/text-safety.js';
 
 if (colorDisabled(process.argv.slice(2), process.env)) chalk.level = 0;
 
@@ -120,17 +121,29 @@ program
         const rulesResult = await loadAndRegisterRules(checkRegistry, { extraPaths });
         // A rule file named on the command line that can't be read is an
         // unreadable input, like a missing --snapshot or --inventory (exit 2)
+        // File names come from directory listings (a cloned repo's .vaso/rules)
+        const show = (s: string) => escapeControlChars(s, { lineBreaks: true });
         const unreadable = rulesResult.loadResult.files.find(f => f.source === 'explicit' && f.unreadable);
         if (unreadable) {
-          throw new Error(`--rules ${unreadable.filePath}: ${unreadable.errors[0]?.message ?? 'cannot be read'}`);
+          throw new Error(`--rules ${show(unreadable.filePath)}: ${unreadable.errors[0]?.message ?? 'cannot be read'}`);
+        }
+        // So is one whose rules don't validate: the scan would run without them
+        const explicit = new Set(rulesResult.loadResult.files.filter(f => f.source === 'explicit').map(f => f.filePath));
+        const rejected = rulesResult.loadResult.allErrors.filter(e => explicit.has(e.file));
+        if (rejected.length > 0) {
+          for (const err of rejected) {
+            const loc = err.rule ? ` (rule ${err.rule})` : '';
+            console.error(chalk.red(`  --rules ${show(err.file)}${loc}: ${err.message}`));
+          }
+          throw new Error(`--rules: ${rejected.length} invalid rule definition(s) — fix them or leave the file out (vaso rules validate <file>)`);
         }
         if (!silent) {
           for (const err of rulesResult.loadResult.allErrors) {
             const loc = err.rule ? ` (rule ${err.rule})` : '';
-            console.error(chalk.yellow(`  Warning: rule file ${err.file}${loc}: ${err.message}\n`));
+            console.error(chalk.yellow(`  Warning: rule file ${show(err.file)}${loc}: ${err.message}\n`));
           }
           for (const w of rulesResult.loadResult.warnings) {
-            console.error(chalk.yellow(`  Warning: rule file ${w.file} (rule ${w.rule}): ${w.message}\n`));
+            console.error(chalk.yellow(`  Warning: rule file ${show(w.file)} (rule ${w.rule}): ${w.message}\n`));
           }
           for (const skip of rulesResult.skipped) {
             console.error(chalk.yellow(`  Warning: rule "${skip.id}" skipped: ${skip.reason}\n`));

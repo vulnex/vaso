@@ -2,6 +2,40 @@ import { describe, it, expect } from 'vitest';
 import { validateRuleFile } from './schema.js';
 import { AGENT_TYPES, CHECK_CATEGORIES } from '../core/types.js';
 
+describe('validateRuleFile: identifiers, platforms, fix paths, display text', () => {
+  const base = { name: 'n', category: 'config', severity: 'info', description: 'd', config: { path: 'a', operator: 'exists' } };
+  const check = (rule: Record<string, unknown>) => validateRuleFile({ rules: [{ ...base, ...rule }] });
+
+  it('accepts identifier-shaped ids only', () => {
+    expect(check({ id: 'ORG-001' }).errors).toEqual([]);
+    expect(check({ id: 'org.rule_2' }).errors).toEqual([]);
+    for (const id of ['A\u001b[2JB', 'has space', '-lead', 'X'.repeat(65), 'a<b>']) {
+      expect(check({ id }).errors.some(e => e.field === 'id')).toBe(true);
+    }
+    // the label in the error is printable
+    expect(check({ id: 'A\u001b[2JB' }).errors[0].rule).toBe('A\\x1b[2JB');
+  });
+
+  it('accepts only platform names VASO knows', () => {
+    expect(check({ id: 'P-1', platforms: ['linux', 'darwin'] }).errors).toEqual([]);
+    expect(check({ id: 'P-2', platforms: ['macos'] }).errors.some(e => e.field === 'platforms')).toBe(true);
+  });
+
+  it('rejects a fix.set path through the prototype', () => {
+    for (const set of ['__proto__.x', 'a.constructor.prototype', '']) {
+      expect(check({ id: 'F-1', fix: { set, value: 1 } }).errors.some(e => e.field === 'fix.set')).toBe(true);
+    }
+    expect(check({ id: 'F-2', fix: { set: 'server.debug', value: false } }).errors).toEqual([]);
+  });
+
+  it('escapes control characters in names, descriptions and messages', () => {
+    const { rules } = check({ id: 'T-1', name: 'a\u001b]0;x\u0007\nb', description: 'line1\nline2‮', fix: { guidance: 'g\u001b[2J' } });
+    expect(rules[0].name).toBe('a\\x1b]0;x\\x07\\nb');
+    expect(rules[0].description).toBe('line1\nline2\\u202e');
+    expect(rules[0].fix?.guidance).toBe('g\\x1b[2J');
+  });
+});
+
 describe('validateRuleFile', () => {
   it('validates a correct config rule', () => {
     const { rules, errors } = validateRuleFile({

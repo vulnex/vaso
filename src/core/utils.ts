@@ -31,13 +31,18 @@ export function formatKeyPath(path: KeyPath): string {
 /**
  * Navigate a nested object by key path.
  * e.g. getNestedValue({ a: { b: 1 } }, 'a.b') → 1
+ * Own keys only: `constructor` or `__proto__` is a config key or nothing,
+ * never Object.prototype's.
  */
 export function getNestedValue(obj: Record<string, unknown>, path: KeyPath): unknown {
   return keySegments(path).reduce<unknown>((curr, key) => {
-    if (curr && typeof curr === 'object') return (curr as Record<string, unknown>)[key];
+    if (curr && typeof curr === 'object' && Object.hasOwn(curr, key)) return (curr as Record<string, unknown>)[key];
     return undefined;
   }, obj);
 }
+
+/** Key path segments that reach an object's prototype rather than a key of it. */
+const PROTOTYPE_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
 
 const CODE_EXTENSIONS = new Set([
   '.js', '.ts', '.mjs', '.cjs', '.jsx', '.tsx', '.mts', '.cts', '.py',
@@ -198,12 +203,17 @@ async function isExecutable(fs: FSProvider, path: string): Promise<boolean> {
  * Set a value at a key path in a nested object.
  * Creates intermediate objects as needed.
  * e.g. setNestedValue({}, 'a.b.c', 1) → { a: { b: { c: 1 } } }
+ * Throws for a `__proto__`, `prototype` or `constructor` segment: setting
+ * through one would change Object.prototype for the whole process.
  */
 export function setNestedValue(obj: Record<string, unknown>, path: KeyPath, value: unknown): void {
   const keys = keySegments(path);
+  if (keys.some(k => PROTOTYPE_KEYS.has(k))) {
+    throw new Error(`Refusing to set "${formatKeyPath(path)}": __proto__, prototype and constructor are not config keys`);
+  }
   let current: Record<string, unknown> = obj;
   for (let i = 0; i < keys.length - 1; i++) {
-    if (!(keys[i] in current) || typeof current[keys[i]] !== 'object' || current[keys[i]] === null) {
+    if (!Object.hasOwn(current, keys[i]) || typeof current[keys[i]] !== 'object' || current[keys[i]] === null) {
       current[keys[i]] = {};
     }
     current = current[keys[i]] as Record<string, unknown>;
