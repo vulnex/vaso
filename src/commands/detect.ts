@@ -123,7 +123,8 @@ async function detectFromSnapshot(options: DetectCommandOptions): Promise<{ inst
 
   const snapshotFs = new SnapshotFSProvider(snapshot);
 
-  console.error(chalk.dim(`  Detecting agents from snapshot "${snapshot.hostname}" (${snapshot.platform})\n`));
+  // Progress only; warnings below still print under --silent
+  if (!options.silent) console.error(chalk.dim(`  Detecting agents from snapshot "${snapshot.hostname}" (${snapshot.platform})\n`));
   if (snapshot.truncated) console.error(chalk.yellow(`  ! ${SNAPSHOT_TRUNCATED_WARNING}`));
   const probeWarning = probeVersionWarning(snapshot, VERSION);
   if (probeWarning) console.error(chalk.yellow(`  ! ${probeWarning}`));

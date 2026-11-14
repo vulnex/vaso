@@ -333,4 +333,21 @@ describe('runDetect', () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  it('--silent on a snapshot prints no progress line', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'vaso-detect-snap-'));
+    try {
+      const file = join(dir, 'host.json');
+      await writeFile(file, JSON.stringify({
+        version: 1, hostname: 'box', platform: 'linux', homedir: '/home/u', timestamp: 't',
+        privilege: { uid: 1000, username: 'u', isRoot: false, sudoAvailable: false, escalated: false, scannedUsers: ['u'], skippedPaths: [] },
+        files: {}, directories: {}, commandOutputs: {}, env: {},
+      }));
+      vi.spyOn(adapterRegistry, 'detectAll').mockResolvedValue([]);
+      await runDetect({ format: 'json', snapshot: file, silent: true, output: join(dir, 'out.json') });
+      expect(consoleErrorLogs.some(l => l.includes('Detecting agents from snapshot'))).toBe(false);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });
