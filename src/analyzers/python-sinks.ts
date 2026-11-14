@@ -110,6 +110,20 @@ const INJECTION_RULES: Array<{ re: RegExp; description: string; dashC?: boolean 
 /** `os.path.join(base, <name>)` where the joined name reads like caller input. */
 const PATH_JOIN_INPUT = /\bos\.path\.join\(\s*[^,()]+,\s*([A-Za-z_][\w.]*)\s*\)/;
 const INPUT_PATH_NAME = /(?:path|file|name|dir|rel|target|dest|input|arg|param)/i;
+/** pathlib joins: `Path(base) / <name>`, `ROOT / <name>` (ROOT a Path), and `Path(base, <name>)`. */
+const PATHLIB_DIV = /(?:(?<![\w.])(?:pathlib\.)?(?:Pure)?Path\([^()]*\)|(?<![\w.])([A-Za-z_][\w.]*))\s*\/\s*([A-Za-z_][\w.]*)(?![\w.]*\s*\()/g;
+const PATHLIB_CTOR = /(?<![\w.])(?:pathlib\.)?(?:Pure)?Path\(\s*[^,()]+,\s*([A-Za-z_][\w.]*)\s*\)/;
+/** Names bound to a Path: `ROOT = Path("/srv")`, `self.base = pathlib.Path.home() / "x"`. */
+const PATH_BINDING = /(?<![\w.])((?:self\.)?[A-Za-z_]\w*)\s*(?::[^=\n]+)?=\s*(?:pathlib\.)?(?:Pure)?Path\b/g;
+
+/** The caller-named part a pathlib join adds to a base directory, if any. */
+function pathlibJoin(text: string, pathNames: Set<string>): string | undefined {
+  const code = blankStrings(text);
+  for (const m of code.matchAll(PATHLIB_DIV)) {
+    if (m[1] === undefined || pathNames.has(m[1])) return m[2];
+  }
+  return PATHLIB_CTOR.exec(code)?.[1];
+}
 /** Evidence that the file confines joined paths to a base directory. */
 const RESOLVES = /\b(?:realpath|abspath|resolve)\s*\(/;
 const CONFINES = /\b(?:startswith|commonpath|is_relative_to|relative_to)\s*\(/;
@@ -292,19 +306,68 @@ function aliasRewriter(code: string): (text: string) => string {
       rewrites.push([new RegExp(String.raw`(?<![\w.])${local}\s*\(`, 'g'), `${m[1]}.${im[1]}(`]);
     }
   }
+  // Names bound by assignment at any indent: a module (`sp = importlib.import_module("subprocess")`),
+  // a sink function (`runner = subprocess.run`, `run = getattr(subprocess, "r" + "un")`,
+  // `_ev = getattr(builtins, "eval")`), keyword options that turn the shell on (`OPTS = {"shell": True}`)
+  const modules = new Map<string, string>([...SINK_MODULES, 'builtins'].map((m) => [m, m]));
+  for (const m of code.matchAll(/^[ \t]*import[ \t]+([^\n#]+)/gm)) {
+    for (const part of m[1].split(',')) {
+      const am = /^\s*([\w.]+)\s+as\s+(\w+)\s*$/.exec(part);
+      if (am && (SINK_MODULES.has(am[1]) || am[1] === 'builtins')) modules.set(am[2], am[1]);
+    }
+  }
+  const assigned = [...code.matchAll(/^[ \t]*([A-Za-z_]\w*)[ \t]*(?::[^=\n]+)?=[ \t]*([^\n#]{1,300}?)[ \t]*$/gm)];
+  for (const [, name, expr] of assigned) {
+    const mod = /^(?:importlib\.import_module|__import__)\(\s*["'](\w+)["']\s*\)$/.exec(expr)?.[1];
+    if (mod && (SINK_MODULES.has(mod) || mod === 'builtins') && name !== mod) {
+      modules.set(name, mod);
+      rewrites.push([new RegExp(String.raw`(?<![\w.])${name}\.`, 'g'), mod === 'builtins' ? '' : `${mod}.`]);
+    }
+  }
+  for (const [, name, expr] of assigned) {
+    const target = sinkReference(expr, modules);
+    if (target && target !== name) rewrites.push([new RegExp(String.raw`(?<![\w.])${name}\s*\(`, 'g'), `${target}(`]);
+    if (/^(?:\{.*["']shell["']\s*:\s*True\b.*\}|dict\(.*\bshell\s*=\s*True\b.*\))$/.test(expr)) {
+      rewrites.push([new RegExp(String.raw`\*\*${name}\b`, 'g'), `shell=True, **${name}`]);
+    }
+  }
   return (text: string): string => {
     let out = text.replace(/\b__import__\(\s*["'](\w+)["']\s*\)\s*\./g, '$1.');
     // getattr(os, "sys" + "tem")(cmd): a sink name assembled to dodge a grep.
     // The name stops at `(` too (a name holding one is never rewritten), and
     // its leading space is the name's: `,\s*[^)]*` split a long space run
     // every way, and each `getattr(` scanned the rest of the text (quadratic)
-    out = out.replace(/\bgetattr\(\s*(os|subprocess)\s*,([^()]*)\)\s*\(/g, (m, mod: string, name: string) => {
+    out = out.replace(/\bgetattr\(\s*(os|subprocess|builtins)\s*,([^()]*)\)\s*\(/g, (m, mod: string, name: string) => {
       const literal = name.replace(/["'\s+]/g, '');
-      return /^\w+$/.test(literal) ? `${mod}.${literal}(` : m;
+      if (!/^\w+$/.test(literal)) return m;
+      return mod === 'builtins' ? `${literal}(` : `${mod}.${literal}(`;
     });
+    out = out.replace(/(?<![\w.])builtins\.(\w+)\s*\(/g, '$1(');
     for (const [re, to] of rewrites) out = out.replace(re, to);
     return out;
   };
+}
+
+/** Builtins that run code. */
+const CODE_BUILTINS = new Set(['eval', 'exec', 'compile', '__import__']);
+
+/**
+ * The sink an assigned expression names: `subprocess.run`, `sp.run` (sp a
+ * module alias), `getattr(subprocess, "r" + "un")`, `getattr(builtins, "eval")`,
+ * `builtins.exec`. Undefined for anything else.
+ */
+function sinkReference(expr: string, modules: Map<string, string>): string | undefined {
+  const qualify = (alias: string, fn: string): string | undefined => {
+    const mod = modules.get(alias);
+    if (!mod || !/^\w+$/.test(fn)) return undefined;
+    if (mod === 'builtins') return CODE_BUILTINS.has(fn) ? fn : undefined;
+    return `${mod}.${fn}`;
+  };
+  const dotted = /^([A-Za-z_]\w*)\.(\w+)$/.exec(expr);
+  if (dotted) return qualify(dotted[1], dotted[2]);
+  const ga = /^getattr\(\s*([A-Za-z_]\w*)\s*,([^()]*)\)$/.exec(expr);
+  if (ga && /^\s*(?:["'][\w]*["']\s*\+?\s*)+$/.test(ga[2])) return qualify(ga[1], ga[2].replace(/["'\s+]/g, ''));
+  return undefined;
 }
 
 /** The marker between files of a joined multi-file source. */
@@ -558,6 +621,8 @@ export function analyzePythonSinks(code: string): PythonSinkFinding[] {
   stmts.forEach((s, i) => { for (let l = s.line; l <= s.last; l++) if (!stmtOfLine.has(l)) stmtOfLine.set(l, i); });
   const confined = RESOLVES.test(code) && CONFINES.test(code);
   const touchesFiles = FILE_OPS.test(code);
+  const pathNames = new Set<string>();
+  if (touchesFiles) for (const m of code.matchAll(PATH_BINDING)) pathNames.add(m[1]);
   const injectedLines = new Set<number>();
 
   // Physical-line rules: injection shapes visible on one line.
@@ -588,16 +653,16 @@ export function analyzePythonSinks(code: string): PythonSinkFinding[] {
     }
 
     if (!confined && touchesFiles) {
-      const m = PATH_JOIN_INPUT.exec(text);
-      const joined = m?.[1].split('.').pop() ?? '';
+      const expr = PATH_JOIN_INPUT.exec(text)?.[1] ?? pathlibJoin(text, pathNames);
+      const joined = expr?.split('.').pop() ?? '';
       // The name suggests input; whether it is: a parameter (a helper's
       // caller may pass tool input) or a tainted name is; a local built from
       // a hash or a constant table joins nothing the caller chose
       const si = stmtOfLine.get(line) ?? -1;
       const fnHere = si >= 0 ? fnAt(si) : undefined;
-      const root = m?.[1].split('.')[0] ?? '';
-      const fromInput = m && (!fnHere || fnHere.params.includes(root) || root === 'self' || tainted.get(fnHere)?.has(root) === true);
-      if (m && INPUT_PATH_NAME.test(joined) && fromInput) {
+      const root = expr?.split('.')[0] ?? '';
+      const fromInput = expr && (!fnHere || fnHere.params.includes(root) || root === 'self' || tainted.get(fnHere)?.has(root) === true);
+      if (expr && INPUT_PATH_NAME.test(joined) && fromInput) {
         findings.push({
           kind: 'injection',
           line,
