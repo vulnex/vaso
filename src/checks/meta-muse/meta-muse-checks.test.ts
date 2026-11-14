@@ -76,6 +76,27 @@ describe('MM-001: Codesign / Team ID', () => {
     const result = await check.run(makeCtx([], fs, '/Applications/Muse.app'));
     expect(result.passed).toBe(false);
   });
+
+  it('reports not verified (not unsigned) when codesign did not run or ended abnormally', async () => {
+    for (const run of [
+      { exitCode: 127, stdout: '', stderr: 'Command not collected in snapshot: codesign -dv /Applications/Muse.app' },
+      { exitCode: 1, stdout: '', stderr: '' },
+    ]) {
+      const fs = makeFs({ exec: vi.fn(async () => run) });
+      const result = await check.run(makeCtx([], fs, '/Applications/Muse.app'));
+      expect(result.passed).toBe(true);
+      expect(result.message).toContain('not verified');
+    }
+  });
+
+  it('does not read TeamIdentifier as the bundle identifier', async () => {
+    const fs = makeFs({
+      exec: vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: 'TeamIdentifier=V9WTTPBFK9\nIdentifier=com.example.fake' })),
+    });
+    const result = await check.run(makeCtx([], fs, '/Applications/Muse.app'));
+    expect(result.passed).toBe(false);
+    expect(result.evidence?.[0].snippet).toContain('com.example.fake');
+  });
 });
 
 describe('MM-002: Analytics Telemetry Active', () => {

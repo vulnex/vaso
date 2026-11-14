@@ -1,10 +1,9 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { CLASSIC_APP_BUNDLE_PATH } from '../../adapters/chatgpt-desktop.js';
+import { readCodesign } from '../../analyzers/codesign.js';
 
 const EXPECTED_TEAM_ID = '2DC432GLL2';
-const TEAM_ID_RE = /TeamIdentifier=([A-Z0-9]+)/;
-const IDENTIFIER_RE = /^Identifier=([\w.-]+)/m;
 
 // OpenAI ships two apps under /Applications: the current ChatGPT.app (bundle
 // com.openai.codex since the Codex-based rewrite; com.openai.chat before it)
@@ -30,6 +29,8 @@ export const cg005 = defineCheck({
 
     const evidence: Evidence[] = [];
     let verified = 0;
+    // Bundles codesign didn't give a verdict on (failed run, not collected)
+    const unverified: string[] = [];
 
     for (const bundle of BUNDLES) {
       if (!(await ctx.fs.access(bundle.path))) continue;
@@ -39,21 +40,28 @@ export const cg005 = defineCheck({
       } catch {
         continue; // codesign unavailable
       }
-      verified++;
       const name = bundle.path.split('/').pop();
 
-      // codesign writes its metadata to stderr by design
-      const text = `${result.stdout}\n${result.stderr}`;
-      const team = text.match(TEAM_ID_RE)?.[1];
-      const id = text.match(IDENTIFIER_RE)?.[1];
-
-      if (!team || !id) {
-        evidence.push({
-          file: bundle.path,
-          detail: `codesign returned no TeamIdentifier/Identifier for ${name} — bundle is unsigned or its signature is broken`,
-        });
+      // Only codesign's own verdict says unsigned; a run that failed says nothing
+      const sig = readCodesign(result);
+      if (sig.state === 'unknown') {
+        unverified.push(`${name} (${sig.reason})`);
         continue;
       }
+      verified++;
+      if (sig.state === 'unsigned') {
+        evidence.push({ file: bundle.path, detail: `codesign reports ${name} is not signed at all — this is not the official OpenAI build` });
+        continue;
+      }
+      if (sig.state === 'broken') {
+        evidence.push({ file: bundle.path, snippet: sig.detail, detail: `codesign reports an invalid signature on ${name} — the bundle was modified after signing` });
+        continue;
+      }
+      if (sig.state === 'adhoc') {
+        evidence.push({ file: bundle.path, snippet: 'Signature=adhoc', detail: `${name} is signed ad hoc, without a developer identity — this is not the official OpenAI build` });
+        continue;
+      }
+      const { team, identifier: id } = sig;
       if (team !== EXPECTED_TEAM_ID) {
         evidence.push({
           file: bundle.path,
@@ -70,9 +78,12 @@ export const cg005 = defineCheck({
       }
     }
 
-    if (verified === 0) return h.passed('codesign tool not available — skipping');
+    const notVerified = unverified.length > 0 ? `; not verified: ${unverified.join(', ')}` : '';
+    if (verified === 0) {
+      return h.passed(unverified.length > 0 ? `ChatGPT app signature not verified — ${unverified.join(', ')}` : 'codesign tool not available — skipping');
+    }
     return h.fromEvidence(evidence, {
-      passed: `ChatGPT app codesign matches the expected OpenAI Team ID (${verified} bundle${verified === 1 ? '' : 's'})`,
+      passed: `ChatGPT app codesign matches the expected OpenAI Team ID (${verified} bundle${verified === 1 ? '' : 's'})${notVerified}`,
       failed: (n) => `Found ${n} codesign mismatch(es) on the ChatGPT apps`,
       fixDescription: 'Reinstall ChatGPT from chatgpt.com/desktop or the App Store; verify the download host before trusting any prompts shown by the current bundle',
     });

@@ -237,12 +237,36 @@ describe('CG-005: ChatGPT.app Codesign / Team ID', () => {
     expect(result.severity).toBe('critical');
   });
 
-  it('fails when codesign returns no identifiers (unsigned bundle)', async () => {
+  it('fails when codesign reports the bundle unsigned', async () => {
     const fs = makeFs({
-      exec: vi.fn(async () => ({ stdout: '', stderr: 'no signature', exitCode: 1 })),
+      exec: vi.fn(async () => ({ stdout: '', stderr: '/Applications/ChatGPT.app: code object is not signed at all', exitCode: 1 })),
     });
     const result = await check.run(makeCtx([], fs, '/Applications/ChatGPT.app'));
     expect(result.passed).toBe(false);
+    expect(result.evidence?.[0].detail).toContain('not signed at all');
+  });
+
+  it('fails on an ad hoc signature', async () => {
+    const fs = makeFs({
+      exec: vi.fn(async () => ({ stdout: '', stderr: 'Identifier=com.openai.chat\nSignature=adhoc\nTeamIdentifier=not set\n', exitCode: 0 })),
+    });
+    const result = await check.run(makeCtx([], fs, '/Applications/ChatGPT.app'));
+    expect(result.passed).toBe(false);
+    expect(result.evidence?.[0].detail).toContain('ad hoc');
+  });
+
+  it('reports not verified (not unsigned) when codesign did not run or ended abnormally', async () => {
+    for (const run of [
+      { stdout: '', stderr: 'Command not collected in snapshot: codesign -dv /Applications/ChatGPT.app', exitCode: 127 },
+      { stdout: '', stderr: '', exitCode: 1 }, // killed by the timeout
+      { stdout: '', stderr: 'codesign: refused', exitCode: 126 },
+      { stdout: 'garbage', stderr: '', exitCode: 0 },
+    ]) {
+      const fs = makeFs({ exec: vi.fn(async () => run) });
+      const result = await check.run(makeCtx([], fs, '/Applications/ChatGPT.app'));
+      expect(result.passed).toBe(true);
+      expect(result.message).toContain('not verified');
+    }
   });
 
   const signed = (id: string, team = '2DC432GLL2') => ({ stdout: '', stderr: `Executable=x\nIdentifier=${id}\nTeamIdentifier=${team}\n`, exitCode: 0 });
