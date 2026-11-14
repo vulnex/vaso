@@ -1,3 +1,4 @@
+import { basename } from 'node:path';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { overbroadShellReason, shellDenied } from './permission-rules.js';
@@ -7,13 +8,30 @@ export const cur003 = defineCheck({
   name: 'Cursor Overbroad Shell Allow',
   category: 'coding-agent',
   severity: 'critical',
-  description: 'Detect permissions.allow entries that grant unbounded shell access',
+  description: 'Detect permissions.allow entries (cli-config.json) and permissions.json terminalAllowlist entries that grant unbounded shell access',
   supportedAgents: ['cursor-cli'],
 
   async run(ctx, h) {
     const evidence: Evidence[] = [];
 
     for (const config of ctx.configs) {
+      // permissions.json terminalAllowlist: commands that run without
+      // approval, prefix-matched, `command` or `command:args_glob`
+      // (cursor.com/docs/reference/permissions)
+      if (basename(config.filePath) === 'permissions.json') {
+        const list = Array.isArray(config.data.terminalAllowlist) ? config.data.terminalAllowlist : [];
+        for (const entry of list) {
+          if (typeof entry !== 'string') continue;
+          const reason = entry.trim() === '' ? undefined : overbroadShellReason(`Shell(${entry.trim()})`);
+          if (!reason) continue;
+          evidence.push({
+            file: config.filePath,
+            snippet: `terminalAllowlist: "${entry}"`,
+            detail: `Runs without approval: the entry ${reason}`,
+          });
+        }
+        continue;
+      }
       const perms = config.data.permissions as Record<string, unknown> | undefined;
       if (!perms || typeof perms !== 'object') continue;
       const allow = Array.isArray(perms.allow) ? (perms.allow as unknown[]).filter((a): a is string => typeof a === 'string') : [];

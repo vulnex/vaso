@@ -1,3 +1,4 @@
+import { basename } from 'node:path';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { overbroadPathRule } from './permission-rules.js';
@@ -12,7 +13,7 @@ export const cur009 = defineCheck({
   name: 'Cursor Overbroad Path/Web Allow',
   category: 'coding-agent',
   severity: 'warning',
-  description: 'Detect permissions.allow entries granting unbounded Write/Read/WebFetch/Mcp access',
+  description: 'Detect permissions.allow entries granting unbounded Write/Read/WebFetch/Mcp access, permissions.json mcpAllowlist "*:*", and sandbox.json additionalReadwritePaths over the home directory, filesystem root or credential stores',
   supportedAgents: ['cursor-cli'],
 
   async run(ctx, h) {
@@ -20,6 +21,36 @@ export const cur009 = defineCheck({
     const home = ctx.fs.homedir();
 
     for (const config of ctx.configs) {
+      const name = basename(config.filePath);
+      // permissions.json mcpAllowlist `server:tool` (case-insensitive): "*:*"
+      // runs every tool of every MCP server without approval
+      if (name === 'permissions.json') {
+        for (const entry of Array.isArray(config.data.mcpAllowlist) ? config.data.mcpAllowlist : []) {
+          if (typeof entry !== 'string' || !/^\s*\*\s*:\s*\*\s*$/.test(entry)) continue;
+          evidence.push({
+            file: config.filePath,
+            snippet: `mcpAllowlist: "${entry}"`,
+            detail: 'Every tool of every MCP server runs without approval — a prompt-injected call reaches all of them unchecked',
+          });
+        }
+        continue;
+      }
+      // sandbox.json additionalReadwritePaths: extra paths sandboxed
+      // commands may write. The workspace is writable already; the home
+      // directory, / or a credential store / shell startup file is not.
+      if (name === 'sandbox.json') {
+        for (const entry of Array.isArray(config.data.additionalReadwritePaths) ? config.data.additionalReadwritePaths : []) {
+          if (typeof entry !== 'string') continue;
+          const reason = overbroadPathRule(`Write(${entry})`, home);
+          if (!reason || reason.startsWith('covers every file in the workspace')) continue;
+          evidence.push({
+            file: config.filePath,
+            snippet: `additionalReadwritePaths: "${entry}"`,
+            detail: `Sandbox write access ${reason.replace(/^lets the agent write /, 'to ')} — sandboxed commands run without a prompt`,
+          });
+        }
+        continue;
+      }
       const perms = config.data.permissions as Record<string, unknown> | undefined;
       if (!perms || typeof perms !== 'object') continue;
       const allow = Array.isArray(perms.allow) ? (perms.allow as unknown[]).filter((a): a is string => typeof a === 'string') : [];

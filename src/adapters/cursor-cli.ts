@@ -18,8 +18,11 @@ const CURSOR_DIR_NAME = '.cursor';
 // sandbox / hooks configuration (also honored by the CLI since Cursor 3.x).
 const USER_CONFIG_FILES = ['cli-config.json', 'mcp.json', 'permissions.json', 'sandbox.json', 'hooks.json'];
 
-// Project-level files under <cwd>/.cursor/
-const PROJECT_CONFIG_FILES = ['mcp.json', 'cli.json', 'hooks.json'];
+// Project-level files under <cwd>/.cursor/. permissions.json and sandbox.json
+// have per-repo copies too (cursor.com/docs/reference/permissions: arrays
+// concatenated with the user file; /reference/sandbox: per-repo overrides
+// per-user).
+const PROJECT_CONFIG_FILES = ['mcp.json', 'cli.json', 'hooks.json', 'permissions.json', 'sandbox.json'];
 
 const IDE_APP_BUNDLE = '/Applications/Cursor.app';
 
@@ -232,7 +235,7 @@ export const cursorCliAdapter: AgentAdapter = {
       if (enterprise) installations[0].configFiles.push(enterprise);
     }
 
-    // Project-level: .cursor/{mcp,cli,hooks}.json under cwd (project hooks
+    // Project-level: .cursor/{mcp,cli,hooks,permissions,sandbox}.json under cwd (project hooks
     // run from the repo in any trusted workspace — cursor.com/docs/agent/hooks)
     const cwd = scanCwd(fs);
     if (!cwd) return installations;

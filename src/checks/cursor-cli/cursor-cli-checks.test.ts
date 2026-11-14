@@ -466,3 +466,67 @@ describe('deep-test 2026-10-15 regressions', () => {
     expect(result.evidence ?? []).toHaveLength(0);
   });
 });
+
+describe('Cursor sandbox.json / permissions.json (cursor.com/docs/reference/sandbox, /reference/permissions)', () => {
+  const byId = (id: string) => cursorCliChecks.find(c => c.id === id)!;
+  const sandbox = (data: Record<string, unknown>) => makeConfig('/home/test/.cursor/sandbox.json', data);
+  const perms = (data: Record<string, unknown>) => makeConfig('/home/test/.cursor/permissions.json', data);
+
+  it('CUR-001: sandbox.json type "insecure_none" disables the sandbox', async () => {
+    const r = await byId('CUR-001').run(makeCtx([sandbox({ type: 'insecure_none' })]));
+    expect(r.passed).toBe(false);
+    expect(r.severity).toBe('critical');
+    for (const type of ['workspace_readwrite', 'workspace_readonly']) {
+      expect((await byId('CUR-001').run(makeCtx([sandbox({ type })]))).passed).toBe(true);
+    }
+    // a top-level `type` elsewhere is not the sandbox switch
+    expect((await byId('CUR-001').run(makeCtx([makeConfig('/home/test/.cursor/hooks.json', { type: 'insecure_none' })]))).passed).toBe(true);
+  });
+
+  it('CUR-008: networkPolicy default "allow" or a "*" allow entry', async () => {
+    expect((await byId('CUR-008').run(makeCtx([sandbox({ networkPolicy: { default: 'allow' } })]))).passed).toBe(false);
+    expect((await byId('CUR-008').run(makeCtx([sandbox({ networkPolicy: { default: 'deny', allow: ['*'] } })]))).passed).toBe(false);
+    expect((await byId('CUR-008').run(makeCtx([sandbox({ networkPolicy: { default: 'deny', allow: ['*.github.com', '10.0.0.0/8'] } })]))).passed).toBe(true);
+    expect((await byId('CUR-008').run(makeCtx([sandbox({ type: 'workspace_readwrite' })]))).passed).toBe(true);
+  });
+
+  it('CUR-003: terminalAllowlist shells, interpreters and network tools', async () => {
+    const r = await byId('CUR-003').run(makeCtx([perms({ terminalAllowlist: ['bash', 'curl', 'python3', 'git', 'npm:install*'] })]));
+    expect(r.passed).toBe(false);
+    expect(r.evidence?.map(e => e.snippet)).toEqual(['terminalAllowlist: "bash"', 'terminalAllowlist: "curl"', 'terminalAllowlist: "python3"']);
+    expect((await byId('CUR-003').run(makeCtx([perms({ terminalAllowlist: ['git', 'npm:install*', 'ls'] })]))).passed).toBe(true);
+  });
+
+  it('CUR-009: mcpAllowlist "*:*" and additionalReadwritePaths over home, root or credential stores', async () => {
+    const mcp = await byId('CUR-009').run(makeCtx([perms({ mcpAllowlist: ['*:*', 'datadog:*', '*:search'] })]));
+    expect(mcp.evidence?.map(e => e.snippet)).toEqual(['mcpAllowlist: "*:*"']);
+    const rw = await byId('CUR-009').run(makeCtx([sandbox({ additionalReadwritePaths: ['~', '/', '~/.ssh', '/tmp/build-cache', './out'] })]));
+    expect(rw.evidence?.map(e => e.snippet)).toEqual([
+      'additionalReadwritePaths: "~"', 'additionalReadwritePaths: "/"', 'additionalReadwritePaths: "~/.ssh"',
+    ]);
+  });
+
+  it('CUR-006: plaintext credentials in env/headers/args (critical), unpinned packages (warning), ${env:} references pass', async () => {
+    const mcp = (servers: Record<string, unknown>) => makeFs({
+      access: vi.fn(async (p: string) => p.endsWith('mcp.json')),
+      readFile: vi.fn(async () => JSON.stringify({ mcpServers: servers })),
+    });
+    const gh = 'ghp_' + 'Zq3xV9mK2pL8rT4wY6nB1cD5fG7hJ0sA2eQx';
+    const secret = await byId('CUR-006').run(makeCtx([], mcp({
+      gh: { command: 'npx', args: ['-y', '@modelcontextprotocol/server-github@2025.4.8'], env: { GITHUB_PERSONAL_ACCESS_TOKEN: gh } },
+      remote: { url: 'https://mcp.example.net/sse', headers: { Authorization: 'Bearer Zq3xV9mK2pL8rT4wY6nB1cD5fG7hJ0sA2eQxW9' } },
+    })));
+    expect(secret.severity).toBe('critical');
+    expect(secret.evidence).toHaveLength(2);
+    expect(JSON.stringify(secret.evidence)).not.toContain(gh);
+    const unpinned = await byId('CUR-006').run(makeCtx([], mcp({ gh: { command: 'npx', args: ['-y', '@modelcontextprotocol/server-github'] } })));
+    expect(unpinned.severity).toBe('warning');
+    expect(unpinned.evidence?.[0].detail).toMatch(/version/i);
+    // the documented secure shape (cursor.com/docs/context/mcp)
+    const clean = await byId('CUR-006').run(makeCtx([], mcp({
+      'server-name': { command: 'npx', args: ['-y', 'mcp-server@1.2.3'], env: { API_KEY: '${env:API_KEY}' } },
+      remote: { url: 'https://mcp.example.com/mcp', headers: { Authorization: 'Bearer ${env:MY_SERVICE_TOKEN}' } },
+    })));
+    expect(clean.passed).toBe(true);
+  });
+});
