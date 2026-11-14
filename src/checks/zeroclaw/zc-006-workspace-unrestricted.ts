@@ -55,7 +55,7 @@ export const zc006 = defineCheck({
         writable = true;
         evidence.push({
           file: config.filePath,
-          detail: `agents.${a.alias}.workspace.unrestricted_filesystem = true — agent can read/write anywhere the host user can`,
+          detail: `agents.${/^[A-Za-z0-9_-]+$/.test(a.alias) ? a.alias : JSON.stringify(a.alias)}.workspace.unrestricted_filesystem = true — agent can read/write anywhere the host user can`,
         });
       }
     }
@@ -78,7 +78,8 @@ export const zc006 = defineCheck({
       }
       for (const a of enabledAgents(config.data)) {
         if (isTrue(asRecord(a.data.workspace)?.unrestricted_filesystem)) {
-          updates.push([`agents.${a.alias}.workspace.unrestricted_filesystem`, false]);
+          // segments, not a dotted string: an alias may contain a dot (`[agents."ops.v2"]`)
+          updates.push([['agents', a.alias, 'workspace', 'unrestricted_filesystem'], false]);
         }
       }
     }
