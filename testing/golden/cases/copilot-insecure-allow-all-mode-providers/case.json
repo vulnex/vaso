@@ -1,0 +1,13 @@
+{
+  "agent": "copilot-cli",
+  "source": "vendor docs-derived: settings.json defaultPermissionMode allow-all, providers.json literal apiKey, an MCP approval with toolName null",
+  "fail": {
+    "GHC-002": "critical",
+    "GHC-003": "critical"
+  },
+  "modes": {
+    ".copilot/settings.json": "600",
+    ".copilot/providers.json": "600",
+    ".copilot/permissions-config.json": "600"
+  }
+}

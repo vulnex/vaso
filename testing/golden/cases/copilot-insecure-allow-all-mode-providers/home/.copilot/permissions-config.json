@@ -1,0 +1,13 @@
+{
+  "locations": {
+    "{{HOME}}/src": {
+      "tool_approvals": [
+        {
+          "kind": "mcp",
+          "serverName": "github",
+          "toolName": null
+        }
+      ]
+    }
+  }
+}

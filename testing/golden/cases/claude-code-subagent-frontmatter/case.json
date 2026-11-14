@@ -1,0 +1,7 @@
+{
+  "agent": "claude-code",
+  "source": "vendor docs-derived: ~/.claude/agents/*.md with an inline npx @latest MCP server (code.claude.com/docs/en/sub-agents)",
+  "fail": {
+    "CC-005": "warning"
+  }
+}

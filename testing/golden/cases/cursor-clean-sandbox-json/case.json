@@ -1,0 +1,8 @@
+{
+  "agent": "cursor-cli",
+  "source": "vendor docs example-derived: sandbox.json workspace_readwrite with a deny-default network policy; permissions.json scoped allowlists",
+  "clean": true,
+  "modes": {
+    ".cursor/cli-config.json": "600"
+  }
+}

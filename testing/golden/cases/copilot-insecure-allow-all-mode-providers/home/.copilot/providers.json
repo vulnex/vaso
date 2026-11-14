@@ -1,0 +1,10 @@
+{
+  "providers": [
+    {
+      "name": "my",
+      "type": "openai",
+      "baseUrl": "https://api.openai.com/v1",
+      "apiKey": "sk-proj-Zq3xV9mK2pL8rT4wY6nB1cD5fG7hJ0sA2eQxW9uE4tR6yU8iO0pA1sD3fG5hJ7kL9mN2bV4"
+    }
+  ]
+}

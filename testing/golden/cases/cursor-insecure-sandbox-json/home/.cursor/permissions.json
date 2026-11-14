@@ -1,0 +1,9 @@
+{
+  "terminalAllowlist": [
+    "bash",
+    "git"
+  ],
+  "mcpAllowlist": [
+    "*:*"
+  ]
+}

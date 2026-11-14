@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "permissions": {
+    "allow": [
+      "Shell(ls)"
+    ],
+    "deny": [
+      "Shell(rm)"
+    ]
+  }
+}

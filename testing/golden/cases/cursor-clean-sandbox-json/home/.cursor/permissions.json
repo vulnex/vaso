@@ -1,0 +1,10 @@
+{
+  "terminalAllowlist": [
+    "git",
+    "npm:install*"
+  ],
+  "mcpAllowlist": [
+    "datadog:*",
+    "my-server:list_*"
+  ]
+}

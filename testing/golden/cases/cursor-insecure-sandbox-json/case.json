@@ -1,0 +1,13 @@
+{
+  "agent": "cursor-cli",
+  "source": "vendor docs-derived: sandbox.json type insecure_none + networkPolicy allow + home readwrite; permissions.json terminalAllowlist bash and mcpAllowlist *:*",
+  "fail": {
+    "CUR-001": "critical",
+    "CUR-003": "critical",
+    "CUR-008": "warning",
+    "CUR-009": "warning"
+  },
+  "modes": {
+    ".cursor/cli-config.json": "600"
+  }
+}

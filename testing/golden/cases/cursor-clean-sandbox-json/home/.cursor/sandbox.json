@@ -1,0 +1,13 @@
+{
+  "type": "workspace_readwrite",
+  "networkPolicy": {
+    "default": "deny",
+    "allow": [
+      "*.github.com",
+      "registry.npmjs.org"
+    ]
+  },
+  "additionalReadwritePaths": [
+    "/tmp/build-cache"
+  ]
+}
