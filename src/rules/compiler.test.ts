@@ -435,3 +435,61 @@ describe('compileRule', () => {
     });
   });
 });
+
+describe('project rules are judged on the masked view', () => {
+  const KEY = 'sk-ant-api03-' + 'P'.repeat(10) + 'abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJ';
+  const secretContext = (): ScanContext => {
+    const raw = JSON.stringify({ env: { ANTHROPIC_API_KEY: KEY, MODE: 'fast' } });
+    return makeContext({
+      configs: [{ raw, format: 'json', filePath: '/tmp/settings.json', data: JSON.parse(raw) as Record<string, unknown> }],
+    });
+  };
+  const configRule = (operator: 'matches' | 'eq' | 'contains', value: unknown, source?: 'project' | 'user', path = 'env.ANTHROPIC_API_KEY') => ({
+    id: 'PRJ-1', name: 'p', category: 'config' as const, severity: 'info' as const, description: 'd',
+    config: { path, operator, value },
+    ...(source ? { source } : {}),
+  });
+
+  it('a project rule\'s verdict does not depend on a credential\'s characters', async () => {
+    const hit = await compileRule(configRule('matches', '^sk-ant-api03-P', 'project')).run(secretContext());
+    const miss = await compileRule(configRule('matches', '^sk-ant-api03-Q', 'project')).run(secretContext());
+    expect(hit.passed).toBe(true);
+    expect(miss.passed).toBe(true);
+    for (const op of ['eq', 'contains'] as const) {
+      expect((await compileRule(configRule(op, KEY, 'project')).run(secretContext())).passed).toBe(true);
+    }
+    // a whole map under a credential name is compared masked too
+    const whole = configRule('eq', { ANTHROPIC_API_KEY: KEY, MODE: 'fast' }, 'project', 'env');
+    expect((await compileRule(whole).run(secretContext())).passed).toBe(true);
+  });
+
+  it('a project rule still sees what the report shows (the masked value, other settings)', async () => {
+    expect((await compileRule(configRule('eq', '***', 'project')).run(secretContext())).passed).toBe(false);
+    expect((await compileRule(configRule('eq', 'fast', 'project', 'env.MODE')).run(secretContext())).passed).toBe(false);
+  });
+
+  it('user and --rules rules still judge raw values', async () => {
+    expect((await compileRule(configRule('matches', '^sk-ant-api03-P', 'user')).run(secretContext())).passed).toBe(false);
+    expect((await compileRule(configRule('matches', '^sk-ant-api03-Q', 'user')).run(secretContext())).passed).toBe(true);
+    expect((await compileRule(configRule('matches', '^sk-ant-api03-P')).run(secretContext())).passed).toBe(false);
+  });
+
+  it('a project pattern rule matches the masked line', async () => {
+    const pattern = (regex: string, source?: 'project') => ({
+      id: 'PRJ-2', name: 'p', category: 'config' as const, severity: 'info' as const, description: 'd',
+      pattern: { regex }, ...(source ? { source } : {}),
+    });
+    expect((await compileRule(pattern('api03-P', 'project')).run(secretContext())).passed).toBe(true);
+    expect((await compileRule(pattern('api03-Q', 'project')).run(secretContext())).passed).toBe(true);
+    expect((await compileRule(pattern('ANTHROPIC_API_KEY', 'project')).run(secretContext())).passed).toBe(false);
+    expect((await compileRule(pattern('api03-P')).run(secretContext())).passed).toBe(false);
+  });
+
+  it('a credential straddling the input cap is masked before the cut', async () => {
+    const line = `${'x'.repeat(4080)} token: "${KEY}"`;
+    const ctx = makeContext({ configs: [{ raw: line, format: 'yaml', filePath: '/tmp/c.yaml', data: {} }] });
+    const rule = { id: 'PRJ-3', name: 'p', category: 'config' as const, severity: 'info' as const, description: 'd', pattern: { regex: 'sk-a' }, source: 'project' as const };
+    expect((await compileRule(rule).run(ctx)).passed).toBe(true);
+    expect((await compileRule({ ...rule, source: undefined }).run(ctx)).passed).toBe(false);
+  });
+});

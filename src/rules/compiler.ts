@@ -6,9 +6,41 @@ import { pathExists } from '../core/utils.js';
 import { evaluateOperator } from './operators.js';
 import { updateConfigValue } from '../remediation/config-writer.js';
 import { maskConfigValue, maskCredentialsInLine } from '../reporting/serialize.js';
-import { ruleInput, MAX_RULE_SCAN_MS, MAX_RULES_SCAN_MS } from './regex-safety.js';
+import { ruleInput, MAX_RULE_INPUT, MAX_RULE_SCAN_MS, MAX_RULES_SCAN_MS } from './regex-safety.js';
 import { truncateSnippet } from '../core/patterns.js';
 import type { DeclarativeRule, RawConfigRule } from './schema.js';
+import type { RuleSource } from './loader.js';
+
+/** A rule to compile, with where it was loaded from (absent: trusted). */
+export type CompilableRule = DeclarativeRule & { source?: RuleSource };
+
+/**
+ * A project rule (`.vaso/rules/` in the working directory — a cloned
+ * repository can ship one) is untrusted, and its verdict is published like
+ * its evidence: in the report, a SARIF upload, a CI log. Judged on raw
+ * values, each pass/fail would be one bit about whatever the rule names —
+ * `env.API_KEY matches ^sk-ant-api03-P`, then `-Q`, … reads a key one
+ * character at a time. So an untrusted rule is judged on the masked view of
+ * the file, the same text its evidence would quote (credentials replaced by
+ * `***`): its verdict then tells nothing the report doesn't already show.
+ * Rules the person running VASO chose (~/.vaso/rules/, --rules) see raw
+ * values, so they can still flag a plaintext key by its format.
+ */
+function judgesMaskedView(rule: CompilableRule): boolean {
+  return rule.source === 'project';
+}
+
+/**
+ * Raw text masked before the input cap: masking after the cut would leave a
+ * credential that straddles it unrecognised (and its prefix matchable). A
+ * credential is far shorter than the slack, so one starting before the cap
+ * ends inside the masked text.
+ */
+const MASK_SLACK = 8192;
+
+function maskedRuleInput(line: string): string {
+  return ruleInput(maskCredentialsInLine(line.length > MAX_RULE_INPUT + MASK_SLACK ? line.slice(0, MAX_RULE_INPUT + MASK_SLACK) : line));
+}
 
 /**
  * Time the rules of one scan have spent matching, per host (its FSProvider):
@@ -42,19 +74,24 @@ function interpolateMessage(template: string, vars: Record<string, string>): str
   return template.replace(/\{\{(\w+)\}\}/g, (_, key) => vars[key] ?? '');
 }
 
-/** Whether a config rule fails on one config file. */
-function configFails(config: RawConfigRule, cfg: ParsedConfig): { failed: boolean; actual: unknown } {
+/**
+ * Whether a config rule fails on one config file. `masked`: the operator
+ * sees the value as the evidence would quote it (see judgesMaskedView).
+ */
+function configFails(config: RawConfigRule, cfg: ParsedConfig, masked = false): { failed: boolean; actual: unknown } {
   const actual = getNestedValue(cfg.data, config.path);
-  const conditionMatches = evaluateOperator(actual, config.operator, config.value);
+  const judged = masked ? maskConfigValue(config.path, actual) : actual;
+  const conditionMatches = evaluateOperator(judged, config.operator, config.value);
   // Default: condition match = fail (detecting the bad thing)
   // pass_when: "match" = condition match means pass
   const passWhen = config.pass_when ?? 'no-match';
   return { failed: passWhen === 'match' ? !conditionMatches : conditionMatches, actual };
 }
 
-function compileConfigRule(rule: DeclarativeRule, budget: RuleTimeBudget): CheckModule['run'] {
+function compileConfigRule(rule: CompilableRule, budget: RuleTimeBudget): CheckModule['run'] {
   const { config } = rule;
   if (!config) throw new Error('No config block');
+  const masked = judgesMaskedView(rule);
 
   return async (ctx: ScanContext): Promise<CheckResult> => {
     const evidence: Evidence[] = [];
@@ -67,7 +104,7 @@ function compileConfigRule(rule: DeclarativeRule, budget: RuleTimeBudget): Check
         break;
       }
       const started = performance.now();
-      const { failed, actual } = configFails(config, cfg);
+      const { failed, actual } = configFails(config, cfg, masked);
       budget.add(ctx.fs, performance.now() - started);
       if (failed) {
         evidence.push({
@@ -96,9 +133,10 @@ function compileConfigRule(rule: DeclarativeRule, budget: RuleTimeBudget): Check
   };
 }
 
-function compilePatternRule(rule: DeclarativeRule, budget: RuleTimeBudget): CheckModule['run'] {
+function compilePatternRule(rule: CompilableRule, budget: RuleTimeBudget): CheckModule['run'] {
   const { pattern } = rule;
   if (!pattern) throw new Error('No pattern block');
+  const masked = judgesMaskedView(rule);
   const re = new RegExp(pattern.regex);
   const target = pattern.target ?? 'configs';
   const msgTemplate = pattern.message ?? `Pattern match in {{file}}:{{line}} — {{snippet}}`;
@@ -151,9 +189,10 @@ function compilePatternRule(rule: DeclarativeRule, budget: RuleTimeBudget): Chec
           unfinished++;
           break;
         }
-        // Input is capped so even a slow pattern stays bounded (regex-safety.ts)
+        // Input is capped so even a slow pattern stays bounded (regex-safety.ts);
+        // an untrusted rule matches the masked line (judgesMaskedView)
         const started = performance.now();
-        const match = re.exec(ruleInput(lines[i]));
+        const match = re.exec(masked ? maskedRuleInput(lines[i]) : ruleInput(lines[i]));
         const took = performance.now() - started;
         spent += took;
         budget.add(ctx.fs, took);
@@ -263,7 +302,7 @@ function compileFix(rule: DeclarativeRule): CheckModule['fix'] | undefined {
 /**
  * Compile a validated DeclarativeRule into a CheckModule.
  */
-export function compileRule(rule: DeclarativeRule, budget = new RuleTimeBudget()): CheckModule {
+export function compileRule(rule: CompilableRule, budget = new RuleTimeBudget()): CheckModule {
   let run: CheckModule['run'];
 
   if (rule.config) {
