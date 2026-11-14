@@ -73,7 +73,7 @@ export const dev001 = defineCheck({
   name: 'Devin Over-Broad Permission Rules',
   category: 'coding-agent',
   severity: 'critical',
-  description: 'Detect Devin permission allow rules granting unrestricted execution (exec, Exec(*), edit, Write(**), Write(/**), Fetch(*), mcp__*, shell/network/interpreter commands) or an allow list with no deny guardrails',
+  description: 'Detect Devin sessions starting in Bypass mode (permission_mode "dangerous", local_tools_bypass_permissions) and permission allow rules granting unrestricted execution (exec, Exec(*), edit, Write(**), Write(/**), Fetch(*), mcp__*, shell/network/interpreter commands) or an allow list with no deny guardrails',
   // Devin Desktop 3.x (windsurf adapter) reads the same ~/.config/devin/config.json permissions
   supportedAgents: ['devin', 'windsurf'],
 
@@ -92,6 +92,31 @@ export const dev001 = defineCheck({
       const p = c.data.permissions as Record<string, unknown> | undefined;
       return Array.isArray(p?.deny) && p.deny.some(e => typeof e === 'string');
     });
+
+    // User-only settings (docs.devin.ai/cli/reference/configuration/config-file):
+    // permission_mode "dangerous" starts every local session in Bypass mode
+    // (all tool calls auto-approved); local_tools_bypass_permissions starts
+    // every local-tools connection (cloud session driving this machine) with
+    // per-call prompts off. Project files can't set either.
+    if (ctx.installation.agent === 'devin' && ctx.installation.profile !== 'project') {
+      for (const config of ctx.configs) {
+        const mode = config.data.permission_mode;
+        if (typeof mode === 'string' && mode.trim().toLowerCase() === 'dangerous') {
+          criticalEvidence.push({
+            file: config.filePath,
+            snippet: `permission_mode: "${mode}"`,
+            detail: 'New sessions start in Bypass mode — every tool call (shell, writes, MCP) is auto-approved without a prompt',
+          });
+        }
+        if (config.data.local_tools_bypass_permissions === true) {
+          warningEvidence.push({
+            file: config.filePath,
+            snippet: 'local_tools_bypass_permissions: true',
+            detail: 'Local-tools connections start with Bypass Permissions on — a cloud session runs commands on this machine without a per-call prompt (deny/ask rules still apply)',
+          });
+        }
+      }
+    }
 
     for (const config of ctx.configs) {
       const permissions = config.data.permissions as Record<string, unknown> | undefined;
@@ -191,8 +216,9 @@ export const dev001 = defineCheck({
       failed: (n) => `Found ${n} over-broad Devin permission finding(s)`,
       // Deny-gap alone is hygiene, not an exposure — info, as CC-008 rates
       // the same gap in Claude Code
-      severity: criticalEvidence.length === 0 ? 'info' : undefined,
-      fixDescription: 'Scope Exec()/Write() allow rules to specific commands and paths, and add deny rules for shells, network tools, and credential paths',
+      severity: criticalEvidence.length > 0 ? undefined
+        : warningEvidence.some(e => e.snippet?.startsWith('local_tools_bypass_permissions')) ? 'warning' : 'info',
+      fixDescription: 'Remove permission_mode "dangerous" (use "normal" or "smart") and local_tools_bypass_permissions, scope Exec()/Write() allow rules to specific commands and paths, and add deny rules for shells, network tools, and credential paths',
     });
   },
 });
