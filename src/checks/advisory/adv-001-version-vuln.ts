@@ -42,6 +42,8 @@ export const adv001 = defineCheck({
         matchedSeverities.add(adv.severity);
         evidence.push({
           file: v.path ?? adv.reference ?? adv.id,
+          // The terminal shows file and snippet: say which advisory, against which copy
+          snippet: `${adv.id} (${adv.severity}) — installed v${v.version}${adv.fixedVersion ? `, fixed in v${adv.fixedVersion}` : ''}`,
           detail: `${adv.id}: ${adv.title} (severity: ${adv.severity}${adv.fixedVersion ? `, fix: v${adv.fixedVersion}` : ''})${v.path ? ` — affects installed copy ${describeVersion(v)}` : ''}`,
         });
       }

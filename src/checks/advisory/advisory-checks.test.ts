@@ -47,6 +47,8 @@ describe('ADV-001: Known Framework Vulnerability', () => {
     expect(result.message).toMatch(/^(?:1 known vulnerability affects|\d+ known vulnerabilities affect) /);
     expect(result.evidence?.length).toBeGreaterThan(0);
     expect(result.evidence?.some(e => e.detail?.includes('CVE-2026-35641'))).toBe(true);
+    // The terminal shows file + snippet only: the snippet names the advisory
+    expect(result.evidence?.some(e => e.snippet?.startsWith('CVE-2026-35641 (') && e.snippet.includes('installed v2026.3.20'))).toBe(true);
   });
 
   it('passes for fixed version', async () => {
