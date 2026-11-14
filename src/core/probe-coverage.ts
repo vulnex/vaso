@@ -179,3 +179,12 @@ export async function uncollectedPath(fs: FSProvider, path: string): Promise<boo
 export function notCollectedNote(what: string, paths: readonly string[]): string {
   return `${what} ${paths.join(', ')} not verified — the remote probe doesn't collect ${paths.length === 1 ? 'it' : 'them'} (checked on local scans)`;
 }
+
+/**
+ * Keep a config-derived directory (a workspace's skills/, extra skill dirs):
+ * it exists, or a snapshot can't tell because the probe never looked there —
+ * then dropping it would hide it; keeping it reports it as not verified.
+ */
+export async function dirExistsOrUncollected(fs: FSProvider, dir: string): Promise<boolean> {
+  return (await fs.access(dir).catch(() => false)) || !probeCoversTree(fs, dir);
+}

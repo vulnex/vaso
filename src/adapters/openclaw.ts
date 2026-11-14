@@ -12,6 +12,7 @@ import { queryCliVersion, readPackageVersion } from './version-query.js';
 import { includeRootsFromEnv, loadOpenclawConfig } from './openclaw-includes.js';
 import { pathPresent } from './load-if-present.js';
 import { containerEnvironment, isOpenclawAutoBind, openclawAutoBindHost, openclawEffectiveBind, OPENCLAW_CONTAINER_MARKERS } from './openclaw-bind.js';
+import { dirExistsOrUncollected } from '../core/probe-coverage.js';
 
 /**
  * Files OpenClaw reads from its state dir besides the main config
@@ -360,7 +361,7 @@ export const openclawAdapter: AgentAdapter = {
           ...(Array.isArray(extraDirs) ? extraDirs.filter((d): d is string => typeof d === 'string' && d.trim() !== '').map(d => expand(d.trim())) : []),
         ].filter((d): d is string => Boolean(d));
         const skillsDirs: string[] = [];
-        for (const d of [...new Set(roots)]) if (d === skillsDir || await fs.access(d)) skillsDirs.push(d);
+        for (const d of [...new Set(roots)]) if (d === skillsDir || await dirExistsOrUncollected(fs, d)) skillsDirs.push(d);
 
         const globalInstallation: AgentInstallation = {
           agent: 'openclaw',

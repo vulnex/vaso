@@ -208,3 +208,23 @@ describe('world-writable MCP command paths on snapshots', () => {
     expect(inventory.mcpServers.map(s => (s as { findings?: string[] }).findings)).toEqual([['CD-009'], ['CD-009']]);
   });
 });
+
+describe('config-set skill roots on snapshots', () => {
+  it('OpenClaw keeps an extra skills dir the probe never collected', async () => {
+    const { openclawAdapter } = await import('../adapters/openclaw.js');
+    const fs = snapshot({
+      [`${HOME}/.openclaw/openclaw.json`]: file(JSON.stringify({ skills: { load: { extraDirs: ['/srv/packs'] } } })),
+    });
+    const [install] = (await openclawAdapter.detect({ fs })).filter(i => !i.agentName);
+    expect(install.skillsDirs).toEqual([`${HOME}/.openclaw/skills`, '/srv/packs']);
+  });
+
+  it('ZeroClaw keeps a workspace path set in config.toml', async () => {
+    const { zeroclawAdapter } = await import('../adapters/zeroclaw.js');
+    const fs = snapshot({
+      [`${HOME}/.zeroclaw/config.toml`]: file('schema_version = 3\n[agents.main.workspace]\npath = "/srv/zcws"\n'),
+    });
+    const [install] = await zeroclawAdapter.detect({ fs });
+    expect(install.skillsDirs).toEqual(['/srv/zcws/skills']);
+  });
+});

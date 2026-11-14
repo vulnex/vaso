@@ -12,6 +12,7 @@ import { queryCliVersion } from './version-query.js';
 import { applyEnvOverrides, type EnvOverrideSpec, type EnvValueType } from './env-overrides.js';
 import { envPath } from './env-path.js';
 import { compareVersions } from '../core/semver.js';
+import { dirExistsOrUncollected } from '../core/probe-coverage.js';
 
 /**
  * ZeroClaw (zeroclaw-labs/zeroclaw, Rust) — V3 config schema (zeroclaw ≥ 0.8).
@@ -190,7 +191,8 @@ async function skillRoots(configDir: string, data: Record<string, unknown>, home
   const out: string[] = [];
   for (const c of candidates) {
     if (out.includes(c)) continue;
-    if (await fs.access(c)) out.push(c);
+    // A snapshot lacks a workspace the config moved outside the probe's trees: kept, reported unverified
+    if (await dirExistsOrUncollected(fs, c)) out.push(c);
   }
   return out;
 }
