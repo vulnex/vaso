@@ -106,6 +106,21 @@ export const mcp005 = defineCheck({
           const fileSink = sink.kind === 'file-read' || sink.kind === 'file-write';
           if (fileSink && confined) continue;
           reported.add(sink.line);
+          if (sink.kind === 'query') {
+            // Wrapping the caller's whole statement (a derived table, EXPLAIN)
+            // in a server whose tool runs the caller's SQL gives nothing new
+            const wraps = sink.wrapsStatement === true && runsCallerSql(source.sourceCode);
+            evidence.push({
+              file,
+              line: sink.line,
+              snippet: sink.snippet,
+              detail: wraps
+                ? `SQL injection via template literal: ${sink.sink}() wraps a whole query from tool input (${sink.origin}) in a server with a tool that runs the caller's SQL — the caller already chooses the statement`
+                : `${sink.sink}() builds SQL text from tool input (${sink.origin}) — SQL injection; pass values as bound parameters`,
+              ...(wraps ? { mitigated: true } : {}),
+            });
+            continue;
+          }
           evidence.push({
             file,
             line: sink.line,

@@ -52,9 +52,21 @@ export interface TaintedSink {
    * file read or written; `file-meta`: the path listed, stat'ed or probed.
    */
   kind: SinkKind;
+  /** `query`: every tainted interpolation stands for a whole statement (a derived table, `EXPLAIN`). */
+  wrapsStatement?: boolean;
 }
 
-export type SinkKind = 'code' | 'process' | 'file-read' | 'file-write' | 'file-meta';
+export type SinkKind = 'code' | 'process' | 'file-read' | 'file-write' | 'file-meta' | 'query';
+
+/** Database calls whose first argument is SQL text (`db.query`, `db.prepare`, Prisma's `$queryRawUnsafe`, postgres.js `sql.unsafe`). */
+const SQL_METHODS = new Set(['query', 'execute', 'raw', 'prepare', 'unsafe', '$queryRawUnsafe', '$executeRawUnsafe']);
+/** Generic method names (sqlite's `db.run/all/get/exec`): only SQL written in capitals counts. */
+const SQL_GENERIC_METHODS = new Set(['exec', 'run', 'all', 'get', 'each']);
+const SQL_KEYWORDS = String.raw`\b(?:SELECT\b[\s\S]{0,2000}?\bFROM|INSERT\s+INTO|UPDATE\b[^;]{0,200}?\bSET|DELETE\s+FROM|DROP\s+TABLE|CREATE\s+TABLE|ALTER\s+TABLE)\b`;
+const SQL_TEXT = new RegExp(SQL_KEYWORDS, 'i');
+const SQL_TEXT_CAPS = new RegExp(SQL_KEYWORDS);
+/** An interpolation that stands for a whole statement: `FROM (${q})`, `EXPLAIN ${q}`. */
+const WRAP_BEFORE = /\b(?:FROM|JOIN|AS)\s*\(\s*$|\bEXPLAIN(?:\s+[A-Z]+)*\s+$/i;
 
 /**
  * Parameter names that mean tool/request input wherever they appear. Generic
@@ -633,6 +645,22 @@ function analyze(code: string): TaintedSink[] {
             const shown = callee.object.type === 'Identifier' ? callee.object.name : 'fs.promises';
             return report(path, `${shown}.${prop}`, args.slice(0, fsCall.paths), fsCall.kind);
           }
+          // SQL text built from tool input: `db.prepare(`SELECT … '${name}'`)`, `"… WHERE id = " + id`
+          if ((SQL_METHODS.has(prop) || SQL_GENERIC_METHODS.has(prop)) && args[0]) {
+            const built = sqlPieces(args[0], SQL_METHODS.has(prop) ? SQL_TEXT : SQL_TEXT_CAPS);
+            if (built) {
+              const tainted = built.parts.filter((p) => p.path.node && expressionOrigin(p.path, 0));
+              if (tainted.length > 0) {
+                const origin = expressionOrigin(tainted[0].path, 0)!;
+                const line = path.node.loc?.start.line ?? 0;
+                const shown = callee.object.type === 'Identifier' ? callee.object.name : callee.object.type === 'ThisExpression' ? 'this' : '…';
+                results.push({
+                  line, snippet: lineText(line).slice(0, 120), sink: `${shown}.${prop}`, origin, kind: 'query',
+                  ...(tainted.every((p) => p.wraps) ? { wrapsStatement: true } : {}),
+                });
+              }
+            }
+          }
         }
       },
     });
@@ -641,6 +669,47 @@ function analyze(code: string): TaintedSink[] {
   }
 
   return results;
+}
+
+/**
+ * The interpolated pieces of an SQL string an argument builds: an untagged
+ * template literal or a `+` chain whose literal text is SQL, given inline or
+ * through a variable it was declared with. Tagged templates (sql`…`) are
+ * parameterized by their library and are not text.
+ */
+function sqlPieces(arg: NodePath, sql: RegExp, depth = 0): { parts: Array<{ path: NodePath; wraps: boolean }> } | undefined {
+  if (depth > 2) return undefined;
+  if (arg.isTemplateLiteral()) {
+    const quasis = arg.node.quasis.map((q) => q.value.cooked ?? q.value.raw);
+    if (!sql.test(quasis.join(' '))) return undefined;
+    const expressions = arg.get('expressions') as NodePath[];
+    return {
+      parts: expressions.map((path, i) => ({
+        path,
+        wraps: WRAP_BEFORE.test(quasis[i] ?? '') && /^\s*(?:\)|$)/.test(quasis[i + 1] ?? ''),
+      })),
+    };
+  }
+  if (arg.isBinaryExpression({ operator: '+' })) {
+    const operands: NodePath[] = [];
+    const flatten = (p: NodePath): void => {
+      if (p.isBinaryExpression({ operator: '+' }) && operands.length < 64) {
+        flatten(p.get('left') as NodePath);
+        flatten(p.get('right') as NodePath);
+      } else operands.push(p);
+    };
+    flatten(arg);
+    const text = operands.map((p) => staticString(p.node, p.scope) ?? ' ').join('');
+    if (!sql.test(text)) return undefined;
+    return { parts: operands.filter((p) => staticString(p.node, p.scope) === undefined).map((path) => ({ path, wraps: false })) };
+  }
+  if (arg.isIdentifier()) {
+    const binding = arg.scope.getBinding(arg.node.name);
+    if (!binding?.constant || !binding.path.isVariableDeclarator()) return undefined;
+    const init = binding.path.get('init');
+    return init.node ? sqlPieces(init as NodePath, sql, depth + 1) : undefined;
+  }
+  return undefined;
 }
 
 /**
