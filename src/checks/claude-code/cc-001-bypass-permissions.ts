@@ -149,6 +149,8 @@ export const cc001 = defineCheck({
         ? 'Settings request bypassPermissions, but permissions.disableBypassPermissionsMode blocks it'
         : projectIgnored && evidence.every(e => e.mitigated)
         ? 'Project settings request bypassPermissions, but this Claude Code version ignores it'
+        : live.length === 0
+        ? 'Bypass is requested (sub-agent frontmatter or auto mode), but this Claude Code version does not let it skip approval on its own'
         : 'Permission bypass mode is enabled — Claude Code will execute tools without confirmation',
       severity: onlyProjectBypass ? 'warning' : undefined,
       fixDescription: 'Remove permissions.defaultMode = "bypassPermissions" or set it to "default"/"acceptEdits"',
