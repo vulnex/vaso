@@ -7,6 +7,7 @@ import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { loadConfigIfPresent } from './load-if-present.js';
 import { recordLoadError } from '../core/config-loader.js';
 import { getUserHomeDirs } from './openclaw.js';
+import { CHECKOUT_PARENTS, anyCaseGlob } from './checkout-parents.js';
 
 /**
  * NanoClaw v2 (github.com/nanocoai/nanoclaw) is not a package or a binary: it
@@ -31,20 +32,6 @@ import { getUserHomeDirs } from './openclaw.js';
 const CHECKOUT_NAME_RE = /nanoclaw/i;
 /** Case-insensitive `*nanoclaw*` for the probe's doublestar globs. */
 const CHECKOUT_NAME_GLOB = '*[nN][aA][nN][oO][cC][lL][aA][wW]*';
-/**
- * Common parent directories people clone into (one level below home), in
- * lower case: any spelling on disk matches (~/GitHub, ~/Projects, ~/SRC).
- */
-const CHECKOUT_PARENTS = [
-  'src', 'code', 'projects', 'dev', 'developer', 'git', 'repos', 'workspace',
-  'work', 'github',
-];
-
-/** Every-case glob for one name: `src` → `[sS][rR][cC]`. */
-function anyCaseGlob(name: string): string {
-  return [...name].map(c => (c.toLowerCase() === c.toUpperCase() ? c : `[${c.toLowerCase()}${c.toUpperCase()}]`)).join('');
-}
-
 /** Service definitions written by `setup --step service` (per-checkout slug). */
 const SYSTEMD_UNIT_RE = /^nanoclaw-v2-[a-z0-9_-]+\.service$/;
 const LAUNCHD_PLIST_RE = /^com\.nanoclaw-v2-[a-z0-9_-]+\.plist$/;

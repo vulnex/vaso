@@ -1,6 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { buildBroadPaths, isBroadPath } from '../../analyzers/broad-paths.js';
+import { codexTrustedProjects, isCollectedProjectRoot } from '../../adapters/codex.js';
 
 function extractTrustedPaths(data: Record<string, unknown>): string[] {
   const paths: string[] = [];
@@ -54,8 +55,17 @@ export const cdx006 = defineCheck({
       }
     }
 
+    // A remote scan sees a trusted project's `.codex/` layer only in the
+    // usual clone locations (the probe can't read the list before it runs)
+    const unverified = ctx.fs.kind === 'snapshot' && ctx.installation.profile !== 'project'
+      ? codexTrustedProjects(ctx.configs).filter(p => !isCollectedProjectRoot(p, home))
+      : [];
+    const note = unverified.length > 0
+      ? `; .codex layer of trusted project(s) ${unverified.join(', ')} not verified — the probe doesn't collect it (checked on local scans)`
+      : '';
+
     return h.fromEvidence(evidence, {
-      passed: 'Codex trusted projects scope is reasonable',
+      passed: `Codex trusted projects scope is reasonable${note}`,
       failed: (n) => `Found ${n} overly broad trusted project path(s)`,
       fixDescription: 'Trust specific project directories (e.g. ~/code/myrepo), not /, $HOME, or /tmp',
     });

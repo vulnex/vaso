@@ -170,9 +170,9 @@ describe('CDX-005: Codex Shell Env Inherits All', () => {
     expect(result.passed).toBe(true);
   });
 
-  it('passes when shell_environment_policy is unset', async () => {
+  it('is info (the vendor default, inherit = "all") when shell_environment_policy is unset', async () => {
     const result = await check.run(makeCtx([makeConfig('config.toml', { model: 'o4-mini' })]));
-    expect(result.passed).toBe(true);
+    expect(result.severity).toBe('info');
   });
   it('is info when inherit = "all" filters secrets (official config sample)', async () => {
     for (const policy of [

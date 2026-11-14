@@ -11,6 +11,7 @@ import { discoverCliInstalls } from './cli-installs.js';
 import { getUserHomeDirs } from './openclaw.js';
 import { queryCliVersion, readPackageVersion } from './version-query.js';
 import { envPath } from './env-path.js';
+import { CHECKOUT_PARENTS, checkoutParentsGlob } from './checkout-parents.js';
 
 const CODEX_DIR_NAME = '.codex';
 // auth.json holds OAuth tokens; only its presence and permissions matter
@@ -118,6 +119,31 @@ function trustedProjects(configs: ParsedConfig[]): string[] {
   return Object.entries(projects as Record<string, unknown>)
     .filter(([, p]) => (p as Record<string, unknown> | null)?.trust_level === 'trusted')
     .map(([path]) => path);
+}
+
+/**
+ * Project roots whose `.codex/` layer (and root AGENTS.md) the probe
+ * collects: ~/<clone parent>/<repo> and ~/<clone parent>/<org>/<repo>, the
+ * parents being the usual clone dirs (~/src, ~/code, ~/Projects …, any case).
+ * The trusted-project list lives in config.toml, which the manifest can't
+ * read before the probe runs, so a trusted project elsewhere is not in a
+ * snapshot — CDX-006 says it was not verified (checked on local scans).
+ */
+const PROJECT_ROOT_GLOBS = [`${checkoutParentsGlob()}/*`, `${checkoutParentsGlob()}/*/*`];
+
+/** Whether the probe manifest covers `project`'s `.codex/` layer (see PROJECT_ROOT_GLOBS). */
+export function isCollectedProjectRoot(project: string, home: string): boolean {
+  const prefix = home.endsWith('/') ? home : `${home}/`;
+  if (!project.startsWith(prefix)) return false;
+  const parts = project.slice(prefix.length).replace(/\/+$/, '').split('/');
+  return (parts.length === 2 || parts.length === 3)
+    && CHECKOUT_PARENTS.includes(parts[0].toLowerCase())
+    && parts.every(p => p !== '' && p !== '.' && p !== '..');
+}
+
+/** Trusted projects (absolute paths) from the user config. */
+export function codexTrustedProjects(configs: ParsedConfig[]): string[] {
+  return trustedProjects(configs).filter(p => p.startsWith('/'));
 }
 
 /**
@@ -289,6 +315,14 @@ export const codexAdapter: AgentAdapter = {
       globPatterns: [
         // Prefix allow rules (CDX-010)
         '~/.codex/rules/*.rules',
+        // Trusted projects' `.codex/` layers and root instructions, in the
+        // usual clone locations (CDX-001…010 on the project installation)
+        ...PROJECT_ROOT_GLOBS.flatMap(root => [
+          `${root}/.codex/config.toml`,
+          `${root}/.codex/rules/*.rules`,
+          `${root}/AGENTS.md`,
+          `${root}/AGENTS.override.md`,
+        ]),
         // Profile files, `codex -p <name>` (CDX-008/009)
         '~/.codex/*.config.toml',
         // User skills (SKL/IOC checks; skill links are followed by the probe)

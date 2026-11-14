@@ -1,8 +1,7 @@
-import { join, normalize } from 'node:path';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { codexProfileName } from '../../adapters/codex.js';
-import { expandHome } from '../../analyzers/broad-paths.js';
+import { broadRoot, judgeDefaultPermissions } from './permission-profiles.js';
 
 const DANGEROUS_SANDBOX_MODES = new Set([
   'danger-full-access',
@@ -12,24 +11,12 @@ const DANGEROUS_SANDBOX_MODES = new Set([
   'disabled',
 ]);
 
-const CREDENTIAL_DIRS = ['.ssh', '.aws', '.gnupg', '.kube', '.docker', '.codex'];
-
-/** Why a writable root is too broad: `/`, the home directory or a parent of
- *  it, a system config dir, or a credential directory. */
-function broadRoot(root: string, home: string): string | undefined {
-  const p = normalize(expandHome(root, home)).replace(/(.)\/+$/, '$1');
-  if (p === '/' || p === home || home.startsWith(p + '/')) return `"${p}" covers the home directory`;
-  if (p === '/etc' || p.startsWith('/etc/')) return `"${p}" is system configuration`;
-  const cred = CREDENTIAL_DIRS.find(d => p === join(home, d) || p.startsWith(join(home, d) + '/'));
-  return cred ? `"${p}" holds credentials (~/${cred})` : undefined;
-}
-
 export const cdx002 = defineCheck({
   id: 'CDX-002',
   name: 'Codex Sandbox Disabled',
   category: 'coding-agent',
   severity: 'critical',
-  description: 'Detect when Codex sandbox_mode grants unrestricted host access',
+  description: 'Detect when Codex sandbox_mode or the default_permissions profile grants unrestricted host access (danger-full-access, writable roots over home, /etc or credential dirs) or unrestricted network access',
   supportedAgents: ['codex'],
 
   async run(ctx, h) {
@@ -40,6 +27,13 @@ export const cdx002 = defineCheck({
     for (const config of ctx.configs) {
       // Profile files only apply under `codex -p <name>` — CDX-008's finding
       if (codexProfileName(config.filePath)) continue;
+
+      // Permission profiles (default_permissions) replace sandbox_mode
+      for (const f of judgeDefaultPermissions(config.data, home)) {
+        if (f.level === 'critical') critical = true;
+        evidence.push({ file: config.filePath, snippet: f.snippet, detail: f.detail });
+      }
+
       const mode = config.data.sandbox_mode ?? config.data.sandboxMode;
       if (typeof mode === 'string' && DANGEROUS_SANDBOX_MODES.has(mode.toLowerCase())) {
         critical = true;
@@ -84,7 +78,7 @@ export const cdx002 = defineCheck({
         : 'Codex sandboxed commands have outbound network access',
       // network_access alone weakens the sandbox but does not remove it
       severity: critical ? undefined : 'warning',
-      fixDescription: 'Set sandbox_mode to "read-only" or "workspace-write", keep writable_roots to project paths, and leave network_access off',
+      fixDescription: 'Set sandbox_mode to "read-only" or "workspace-write" (or default_permissions to ":read-only" / ":workspace"), keep writable roots to project paths, and leave network access off or limited to a domain allowlist',
     });
   },
 });

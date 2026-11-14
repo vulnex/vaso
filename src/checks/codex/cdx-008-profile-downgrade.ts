@@ -1,6 +1,8 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { codexProfileName } from '../../adapters/codex.js';
+import { judgeDefaultPermissions } from './permission-profiles.js';
+import { envMitigation, inheritOf } from './cdx-005-shell-env-policy.js';
 
 const DANGEROUS_APPROVAL = new Set(['never', 'none', 'auto']);
 const DANGEROUS_SANDBOX = new Set([
@@ -19,6 +21,11 @@ function isDangerousSandbox(v: unknown): boolean {
   return typeof v === 'string' && DANGEROUS_SANDBOX.has(v.toLowerCase());
 }
 
+function shellPolicy(data: Record<string, unknown>): Record<string, unknown> | undefined {
+  const p = data.shell_environment_policy ?? data.shellEnvironmentPolicy;
+  return p && typeof p === 'object' && !Array.isArray(p) ? p as Record<string, unknown> : undefined;
+}
+
 function checkProfile(
   name: string,
   p: Record<string, unknown>,
@@ -26,7 +33,41 @@ function checkProfile(
   file: string,
   label: string,
   evidence: Evidence[],
+  home: string,
 ): void {
+  // default_permissions: the profile may select a [permissions.<name>] table
+  // from config.toml or its own file
+  if (typeof p.default_permissions === 'string') {
+    const merged = {
+      ...p,
+      permissions: { ...(root.permissions as Record<string, unknown> ?? {}), ...(p.permissions as Record<string, unknown> ?? {}) },
+    };
+    const rootCritical = judgeDefaultPermissions(root, home).some(f => f.level === 'critical');
+    for (const f of judgeDefaultPermissions(merged, home)) {
+      if (f.level !== 'critical' || rootCritical) continue;
+      evidence.push({
+        file,
+        snippet: `${label} ${f.snippet}`,
+        detail: `${f.detail} under \`codex --profile ${name}\` (root config does not)`,
+      });
+    }
+  }
+
+  // shell_environment_policy: inherit = "all" where the root config narrows
+  // it (unset, the root already inherits everything — no downgrade)
+  const policy = shellPolicy(p);
+  if (inheritOf(policy) === 'all' && !envMitigation(policy)) {
+    const rootPolicy = shellPolicy(root);
+    const rootInherit = inheritOf(rootPolicy);
+    if ((rootInherit !== undefined && rootInherit !== 'all') || envMitigation(rootPolicy)) {
+      evidence.push({
+        file,
+        snippet: `${label} shell_environment_policy.inherit = "all"`,
+        detail: 'Profile passes the full process environment (secrets included) to tool subprocesses (root config restricts it)',
+      });
+    }
+  }
+
   const approval = p.approval_policy ?? p.approvalPolicy;
   if (isDangerousApproval(approval) && !isDangerousApproval(root.approval_policy ?? root.approvalPolicy)) {
     evidence.push({
@@ -51,11 +92,12 @@ export const cdx008 = defineCheck({
   name: 'Codex Profile Security Downgrade',
   category: 'coding-agent',
   severity: 'warning',
-  description: 'Detect Codex profiles that override approval_policy or sandbox_mode to a more permissive value than the root config',
+  description: 'Detect Codex profiles that override approval_policy, sandbox_mode, default_permissions or shell_environment_policy.inherit to a more permissive value than the root config',
   supportedAgents: ['codex'],
 
   async run(ctx, h) {
     const evidence: Evidence[] = [];
+    const home = ctx.fs.homedir();
     // Project config can't select or define profiles (Codex ignores
     // profile/profiles there)
     if (ctx.installation.profile === 'project') return h.passed('Project config cannot define Codex profiles');
@@ -66,7 +108,7 @@ export const cdx008 = defineCheck({
     for (const config of ctx.configs) {
       const name = codexProfileName(config.filePath);
       if (!name) continue;
-      checkProfile(name, config.data, root?.data ?? {}, config.filePath, `${name}.config.toml:`, evidence);
+      checkProfile(name, config.data, root?.data ?? {}, config.filePath, `${name}.config.toml:`, evidence, home);
     }
 
     // Legacy [profiles.<name>] tables (read by Codex < 0.134)
@@ -77,7 +119,7 @@ export const cdx008 = defineCheck({
 
       for (const [name, profile] of Object.entries(profiles)) {
         if (!profile || typeof profile !== 'object') continue;
-        checkProfile(name, profile as Record<string, unknown>, config.data, config.filePath, `[profiles.${name}]`, evidence);
+        checkProfile(name, profile as Record<string, unknown>, config.data, config.filePath, `[profiles.${name}]`, evidence, home);
       }
     }
 
