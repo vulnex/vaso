@@ -40,6 +40,7 @@ describe('CDX-002 permission profiles (default_permissions)', () => {
       expect((await check('CDX-002').run(ctx([cfg(MAIN, { default_permissions: p })]))).passed, p).toBe(true);
     }
     const custom = await check('CDX-002').run(ctx([cfg(MAIN, {
+      features: { network_proxy: true },
       default_permissions: 'project-edit',
       permissions: { 'project-edit': {
         extends: ':workspace',
@@ -104,6 +105,112 @@ describe('CDX-002 permission profiles (default_permissions)', () => {
       permissions: { child: { extends: 'parent' }, parent: { filesystem: { '~': 'write' } } },
     })]));
     expect(r.severity).toBe('critical');
+  });
+});
+
+describe('CDX-002 permission profile merge semantics', () => {
+  const run = (data: Record<string, unknown>) => check('CDX-002').run(ctx([cfg(MAIN, data)]));
+
+  it('judges profile-defined workspace roots that receive :workspace_roots write', async () => {
+    const explicit = await run({ default_permissions: 'dev', permissions: { dev: {
+      extends: ':workspace', workspace_roots: { '~': true }, filesystem: { ':workspace_roots': { '.': 'write' } },
+    } } });
+    expect(explicit.severity).toBe('critical');
+    expect(explicit.evidence?.[0].snippet).toBe('[permissions.dev.workspace_roots] "~" = true');
+    // the :workspace base already writes the workspace roots
+    const base = await run({ default_permissions: 'dev', permissions: { dev: { extends: ':workspace', workspace_roots: { '~/.ssh/': true } } } });
+    expect(base.severity).toBe('critical');
+    // a parent's root, disabled by the child
+    const off = await run({ default_permissions: 'c', permissions: {
+      p: { extends: ':workspace', workspace_roots: { '~': true } }, c: { extends: 'p', workspace_roots: { '~': false } },
+    } });
+    expect(off.passed).toBe(true);
+    // project roots (the docs example) and roots without write stay clean
+    const doc = await run({ default_permissions: 'dev', permissions: { dev: {
+      extends: ':workspace', workspace_roots: { '~/code/app': true, '~/code/shared-lib': true },
+      filesystem: { ':workspace_roots': { '.': 'write', '**/*.env': 'deny' } },
+    } } });
+    expect(doc.passed).toBe(true);
+    const readOnly = await run({ default_permissions: 'dev', permissions: { dev: { extends: ':read-only', workspace_roots: { '~': true } } } });
+    expect(readOnly.passed).toBe(true);
+    // a :workspace_roots sub-path write lands in each root
+    const sub = await run({ default_permissions: 'dev', permissions: { dev: {
+      workspace_roots: { [HOME]: true }, filesystem: { ':workspace_roots': { '.ssh': 'write' } },
+    } } });
+    expect(sub.severity).toBe('critical');
+  });
+
+  it('lets a child override its parent and deny beat write on the same path', async () => {
+    const base = { extends: ':workspace', filesystem: { '~/.kube': 'write' } };
+    for (const access of ['deny', 'read']) {
+      const r = await run({ default_permissions: 'child', permissions: { base, child: { extends: 'base', filesystem: { '~/.kube': access } } } });
+      expect(r.passed, access).toBe(true);
+    }
+    const same = await run({ default_permissions: 'dev', permissions: { dev: { filesystem: { '~/.ssh': 'write', '~/.ssh/': { '.': 'deny' } } } } });
+    expect(same.passed).toBe(true);
+    const nested = await run({ default_permissions: 'dev', permissions: { dev: { filesystem: { '~/.ssh': 'write', '~': { './.ssh': 'deny' } } } } });
+    expect(nested.passed).toBe(true);
+    // a child re-opening its parent's deny
+    const reopen = await run({ default_permissions: 'c', permissions: {
+      p: { filesystem: { '~/.aws': 'deny' } }, c: { extends: 'p', filesystem: { '~/.aws': 'write' } },
+    } });
+    expect(reopen.severity).toBe('critical');
+    // a narrower deny leaves the broader write (home) in place
+    const home = await run({ default_permissions: 'dev', permissions: { dev: { filesystem: { '~': 'write', '~/.ssh': 'deny' } } } });
+    expect(home.evidence?.map(e => e.snippet)).toEqual(['[permissions.dev.filesystem] "~" = "write"']);
+  });
+
+  it('resolves :root sub-paths and globs that can match a sensitive directory', async () => {
+    const etc = await run({ default_permissions: 'dev', permissions: { dev: { filesystem: { ':root': { etc: 'write' } } } } });
+    expect(etc.severity).toBe('critical');
+    expect(etc.evidence?.[0].detail).toMatch(/"\/etc" is system configuration/);
+    for (const glob of ['~/.ss*', '~/.ssh/auth*', '/e?c', '~/.[sa][sw][hs]', '/home/*/.aws']) {
+      const r = await run({ default_permissions: 'dev', permissions: { dev: { filesystem: { [glob]: 'write' } } } });
+      expect(r.severity, glob).toBe('critical');
+    }
+    for (const glob of ['~/code/*/build', '/opt/*/cache', '~/projects/**/*.log']) {
+      const r = await run({ default_permissions: 'dev', permissions: { dev: { filesystem: { [glob]: 'write' } } } });
+      expect(r.passed, glob).toBe(true);
+    }
+  });
+
+  it('reports nothing for configs Codex rejects: extends cycles and unknown parents', async () => {
+    const cycle = await run({ default_permissions: 'a', permissions: { a: { extends: 'b', filesystem: { '~': 'write' } }, b: { extends: 'a' } } });
+    expect(cycle.passed).toBe(true);
+    const unknown = await run({ default_permissions: 'a', permissions: { a: { extends: 'nope', filesystem: { '~': 'write' } } } });
+    expect(unknown.passed).toBe(true);
+    const traversal = await run({ default_permissions: 'a', permissions: { a: { extends: ':workspace', filesystem: { ':workspace_roots': { '../../..': 'write' } } } } });
+    expect(traversal.passed).toBe(true);
+  });
+
+  it('counts a domain allowlist as a bound only with the network proxy on', async () => {
+    const profile = { permissions: { dev: { extends: ':workspace', network: { enabled: true, domains: { 'api.github.com': 'allow' } } } }, default_permissions: 'dev' };
+    const noProxy = await run(profile);
+    expect(noProxy.severity).toBe('warning');
+    expect(noProxy.evidence?.[0].detail).toMatch(/features\.network_proxy/);
+    expect((await run({ ...profile, features: { network_proxy: true } })).passed).toBe(true);
+    expect((await run({ ...profile, features: { network_proxy: { enabled: true } } })).passed).toBe(true);
+    expect((await run({ ...profile, features: { network_proxy: { enabled: false } } })).severity).toBe('warning');
+    // a child turning the parent's network off
+    const off = await run({ default_permissions: 'c', permissions: {
+      p: { network: { enabled: true } }, c: { extends: 'p', network: { enabled: false } },
+    } });
+    expect(off.passed).toBe(true);
+  });
+});
+
+describe('CDX-008 profile files layer over config.toml', () => {
+  it('merges a profile file\'s permission tables and features into the root ones', async () => {
+    const r = await check('CDX-008').run(ctx([
+      cfg(MAIN, { default_permissions: 'dev', permissions: { dev: { extends: ':workspace', filesystem: { '~/code': 'write' } } } }),
+      cfg(FAST, { default_permissions: 'dev', permissions: { dev: { filesystem: { '~/.aws': { '.': 'write' } } } } }),
+    ]));
+    expect(r.evidence?.map(e => e.snippet)).toEqual(['fast.config.toml: [permissions.dev.filesystem."~/.aws"] "." = "write"']);
+    const proxied = await check('CDX-002').run(ctx([cfg(MAIN, {
+      features: { network_proxy: true }, default_permissions: 'dev',
+      permissions: { dev: { network: { enabled: true, domains: { 'pypi.org': 'allow' } } } },
+    })]));
+    expect(proxied.passed).toBe(true);
   });
 });
 
