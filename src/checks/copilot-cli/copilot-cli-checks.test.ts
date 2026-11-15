@@ -654,6 +654,72 @@ describe.skipIf(process.platform === 'win32')('GHC-001 store files', () => {
     });
   });
 
+  it('a linked session folder outside the home is a warning: not walked, not fixable', async () => {
+    const { mkdtemp, rm, symlink, chmod, stat } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const out = await mkdtemp(join(tmpdir(), 'vaso-ghc001o-'));
+    try {
+      await withHome(async (dir, ctx) => {
+        await put(join(out, 'sess', 'events.jsonl'), 0o644);
+        await chmod(join(out, 'sess'), 0o755);
+        await put(join(dir, 'session-store.db'), 0o600);
+        await (await import('node:fs/promises')).mkdir(join(dir, 'session-state'), { mode: 0o700 });
+        await symlink(join(out, 'sess'), join(dir, 'session-state', 'abc'));
+        const r = await check.run(ctx);
+        expect(r.passed).toBe(false);
+        expect(r.severity).toBe('warning');
+        expect(r.fixable).toBe(false);
+        expect(r.message).toMatch(/1 store link\(s\) point outside the store and the home/);
+        expect(r.evidence?.map(e => e.file)).toEqual([join(dir, 'session-state', 'abc')]);
+        expect(r.evidence?.[0].detail).not.toMatch(/Session transcript/);
+        await check.fix!(ctx);
+        expect((await stat(join(out, 'sess', 'events.jsonl'))).mode & 0o777).toBe(0o644);
+      });
+    } finally {
+      await rm(out, { recursive: true, force: true });
+    }
+  });
+
+  it('a session folder linked into a credential store in the home is a warning; the fix never touches it', async () => {
+    await withHome(async (dir, ctx) => {
+      const { join } = await import('node:path');
+      const { symlink, chmod, stat } = await import('node:fs/promises');
+      const aws = join(dir, '..', '.aws');
+      await put(join(aws, 'credentials'), 0o644);
+      await chmod(aws, 0o755);
+      await put(join(dir, 'session-store.db'), 0o644);
+      await (await import('node:fs/promises')).mkdir(join(dir, 'session-state'), { mode: 0o700 });
+      await symlink(aws, join(dir, 'session-state', 'abc'));
+      const r = await check.run(ctx);
+      expect(r.passed).toBe(false);
+      expect(r.message).toMatch(/or into a sensitive location/);
+      expect(r.evidence?.map(e => e.file)).toEqual([join(dir, 'session-store.db'), join(dir, 'session-state', 'abc')]);
+      expect(r.evidence?.[1].detail).toMatch(/AWS credentials/);
+      await check.fix!(ctx);
+      expect((await stat(join(aws, 'credentials'))).mode & 0o777).toBe(0o644);
+      expect((await stat(join(dir, 'session-store.db'))).mode & 0o077).toBe(0);
+      const after = await check.run(ctx);
+      expect(after.severity).toBe('warning');
+      expect(after.fixable).toBe(false);
+    });
+  });
+
+  it('lists at most 10 outside links (then "+N more"), after the exposure evidence', async () => {
+    await withHome(async (dir, ctx) => {
+      const { join } = await import('node:path');
+      const { symlink } = await import('node:fs/promises');
+      await put(join(dir, 'mcp-secrets', 'keep.json'), 0o600);
+      for (let i = 0; i < 30; i++) await symlink('/etc/hosts', join(dir, 'mcp-secrets', `x${String(i).padStart(2, '0')}.json`));
+      await put(join(dir, 'session-store.db'), 0o644);
+      const r = await check.run(ctx);
+      expect(r.message).toMatch(/^Found 1 Copilot CLI path\(s\).*30 store link\(s\) point outside/);
+      expect(r.evidence?.[0].file).toBe(join(dir, 'session-store.db'));
+      expect(r.evidence).toHaveLength(12);
+      expect(r.evidence?.[11]).toMatchObject({ file: dir, snippet: '+20 more link(s)' });
+    });
+  });
+
   it('checks files one folder down (session-state/<id>/events.jsonl)', async () => {
     await withHome(async (dir, ctx) => {
       const { join } = await import('node:path');
@@ -676,7 +742,7 @@ describe.skipIf(process.platform === 'win32')('GHC-001 store files', () => {
     } as unknown as Partial<FSProvider>);
     const r = await check.run(makeCtx([], fs));
     expect(r.passed).toBe(true);
-    expect(r.message).toMatch(/files behind 1 linked folder\(s\) in session-state\/ \(abc\) not verified/);
+    expect(r.message).toMatch(/^Not verified — the files behind 1 linked folder\(s\) in session-state\/ \(abc\) not verified/);
   });
 
   it('a remote scan judges the files behind a linked session folder the probe followed, as a local scan does', async () => {

@@ -83,9 +83,12 @@ export function capSnippets(result: CheckResult): CheckResult {
   const long = evidence.some(e => typeof e.snippet === 'string' && e.snippet.length > MAX_SNIPPET);
   if (!long && evidence.length <= MAX_EVIDENCE) return result;
   // Which items are kept must not depend on walk order (a local walk and a
-  // snapshot list files differently): sort by file, then line, before cutting
+  // snapshot list files differently): sort before cutting — live exposures
+  // before mitigated ones (a cut must not drop what the verdict rests on),
+  // then by file, then line
   const ordered = evidence.length > MAX_EVIDENCE
-    ? [...evidence].sort((a, b) => (a.file < b.file ? -1 : a.file > b.file ? 1 : (a.line ?? 0) - (b.line ?? 0)))
+    ? [...evidence].sort((a, b) => (Number(!!a.mitigated) - Number(!!b.mitigated))
+      || (a.file < b.file ? -1 : a.file > b.file ? 1 : (a.line ?? 0) - (b.line ?? 0)))
     : evidence;
   const kept = (evidence.length > MAX_EVIDENCE ? ordered.slice(0, MAX_EVIDENCE - 1) : evidence)
     .map(e => (typeof e.snippet === 'string' && e.snippet.length > MAX_SNIPPET

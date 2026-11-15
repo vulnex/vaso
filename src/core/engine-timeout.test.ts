@@ -75,4 +75,15 @@ describe('evidence cap order', () => {
     const b = capSnippets({ ...base, evidence: [...items].reverse() } as never);
     expect(a.evidence!.slice(0, MAX_EVIDENCE - 1)).toEqual(b.evidence!.slice(0, MAX_EVIDENCE - 1));
   });
+
+  it('keeps live items before mitigated ones when it cuts', async () => {
+    const { capSnippets, MAX_EVIDENCE } = await import('./engine.js');
+    const mitigated = Array.from({ length: 500 }, (_, i) => ({ file: `/a${String(i).padStart(4, '0')}`, mitigated: true }));
+    const live = { file: '/z-live' };
+    const base = { id: 'T', name: 't', category: 'config', severity: 'critical', passed: false, message: 'm' } as const;
+    const r = capSnippets({ ...base, evidence: [...mitigated, live] } as never);
+    expect(r.evidence).toHaveLength(MAX_EVIDENCE);
+    expect(r.evidence![0]).toEqual(live);
+    expect(r.evidence![MAX_EVIDENCE - 1].mitigated).toBe(true);
+  });
 });
