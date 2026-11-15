@@ -1,7 +1,10 @@
 import type { Evidence } from '../../core/types.js';
+import type { FSProvider } from '../../core/fs-provider.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { shellCommandWrapper, shellInvocation } from '../../mcp/shell-wrapper.js';
-import { codexProfileName } from '../../adapters/codex.js';
+import { join } from 'node:path';
+import { codexHome, codexProfileName } from '../../adapters/codex.js';
+import { parseTomlSafe } from '../../core/toml-safe.js';
 import { hookCommandRisks, hookItemRisks, hookItems, hookSnippet, topTier } from '../../analyzers/hook-commands.js';
 
 const INTERPRETERS = /^(?:python[\d.]*|node|bun|deno|ruby|perl|bash|sh|zsh|osascript)$/;
@@ -16,6 +19,24 @@ interface NotifyFinding {
 function basename(p: string): string {
   const idx = Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'));
   return idx >= 0 ? p.slice(idx + 1) : p;
+}
+
+/** `[features] hooks` (`codex_hooks` is the deprecated alias), when set. */
+function hooksFeature(data: Record<string, unknown>): boolean | undefined {
+  const f = data.features;
+  if (!f || typeof f !== 'object' || Array.isArray(f)) return undefined;
+  const r = f as Record<string, unknown>;
+  const v = r.hooks ?? r.codex_hooks;
+  return typeof v === 'boolean' ? v : undefined;
+}
+
+/** The user config.toml's `[features] hooks`, for a project layer. */
+async function userHooksFeature(fs: FSProvider): Promise<boolean | undefined> {
+  try {
+    return hooksFeature(parseTomlSafe(await fs.readFile(join(codexHome(fs.homedir(), fs), 'config.toml'))));
+  } catch {
+    return undefined;
+  }
 }
 
 function inspectNotify(notify: unknown): NotifyFinding[] {
@@ -88,18 +109,32 @@ export const cdx009 = defineCheck({
     // A profile file's (`<name>.config.toml`) [hooks] apply under `codex -p <name>`.
     // Codex runs a non-managed hook only once its definition is reviewed and
     // trusted by hash in /hooks — state VASO cannot see, so every hook is judged.
+    // `[features] hooks = false` turns hooks off (on by default). A profile
+    // file layers its own [features] over config.toml under `codex -p`.
+    let rootFeature = ctx.configs
+      .filter(c => !codexProfileName(c.filePath) && basename(c.filePath) === 'config.toml')
+      .map(c => hooksFeature(c.data))
+      .find(v => v !== undefined);
+    // A project layer that doesn't set it inherits the user config's value
+    if (rootFeature === undefined && ctx.installation.profile === 'project') rootFeature = await userHooksFeature(ctx.fs);
+    const profileFeatures = ctx.configs
+      .filter(c => codexProfileName(c.filePath))
+      .map(c => hooksFeature(c.data));
+    // base-layer hooks stay off only if no profile turns the feature back on
+    const baseOff = rootFeature === false && !profileFeatures.includes(true);
     for (const config of ctx.configs) {
       const profileName = codexProfileName(config.filePath);
+      const off = profileName ? (hooksFeature(config.data) ?? rootFeature) === false : baseOff;
       for (const item of hookItems(config.data.hooks)) {
         const risks = hookItemRisks(item);
         const tier = topTier(risks);
         if (!tier) continue;
-        if (tier === 'critical') critical = true;
+        if (tier === 'critical' && !off) critical = true;
         evidence.push({
           file: config.filePath,
           snippet: `${profileName ? `${profileName}.config.toml: ` : ''}${hookSnippet(item.event, (item.url ?? item.scripts[0]).slice(0, 120), item.matcher ? `(${item.matcher})` : '')}`,
-          detail: `Hook command ${risks.map(r => r.reason).join('; ')}${profileName ? ` under \`codex -p ${profileName}\`` : ''}`,
-          ...(tier === 'info' ? { mitigated: true } : {}),
+          detail: `Hook command ${risks.map(r => r.reason).join('; ')}${profileName ? ` under \`codex -p ${profileName}\`` : ''}${off ? ' — not run: hooks disabled (features.hooks = false)' : ''}`,
+          ...(tier === 'info' || off ? { mitigated: true } : {}),
         });
       }
     }
