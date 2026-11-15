@@ -1,8 +1,8 @@
-import { join } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative } from 'node:path';
 import type { Evidence, ScanContext } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { accessibleByOthers, markUnreachable, queryPermissions, readableByOthers, writableByOthers } from '../../core/permissions.js';
-import { configHoldsSecret } from '../../core/secret-values.js';
+import { configHoldsSecret, CREDENTIAL_FILE_NAME } from '../../core/secret-values.js';
 import { ghc003 } from './ghc-003-plaintext-token.js';
 import { restrictFilesToOwner } from '../../remediation/config-writer.js';
 
@@ -20,62 +20,161 @@ const PRIVATE_FILES = new Set(['command-history-state.json', 'session-store.db']
  * Directories of private files (config-dir reference): session transcripts,
  * command history (a directory since it replaced command-history-state.json),
  * and the MCP OAuth token / secret fallback stores used when no keychain is
- * available.
+ * available. Listed most sensitive first — tokens and secrets before history
+ * and transcripts.
  */
 const PRIVATE_DIRS: Array<{ dir: string; what: string }> = [
-  { dir: 'session-state', what: 'Session transcript' },
-  { dir: 'command-history-state', what: 'Command history file' },
   { dir: 'mcp-oauth-config', what: 'MCP OAuth token/registration file' },
   { dir: 'mcp-secrets', what: 'MCP secret fallback file' },
+  { dir: 'command-history-state', what: 'Command history file' },
+  { dir: 'session-state', what: 'Session transcript' },
 ];
 const PROTECTED_DIRS = ['.', ...PRIVATE_DIRS.map(d => d.dir)];
-/** Open store files listed per store; the rest are counted in one line (all are judged, and the fix changes all). */
-const MAX_LISTED_PER_STORE = 200;
+/**
+ * Open store files listed per store; the rest are counted in one line (all
+ * are judged, and the fix changes all). Four stores of 40 plus the top-level
+ * paths stay under the engine's evidence cap (MAX_EVIDENCE in core/engine.ts),
+ * so no item is cut from the reports.
+ */
+const MAX_LISTED_PER_STORE = 40;
 /** Files judged per store at most — a bound on a pathological history, far above a real one. */
 const MAX_JUDGED_PER_STORE = 20_000;
 
 interface Findings {
   evidence: Evidence[];
+  /** Paths found open — the listed ones plus those counted in a "+N more" line. */
+  total: number;
+  /** Store links to a file outside the store and the home that isn't a credential store (judged apart). */
+  outside: Evidence[];
   /** Store files a remote scan couldn't judge (the probe didn't collect their metadata). */
   unverified: string[];
   /** Stores with more files than MAX_JUDGED_PER_STORE: only that many were judged. */
   truncated: string[];
 }
 
+interface StoreListing {
+  files: string[];
+  /** Links to a file outside the store and the home: link → resolved target. */
+  outside: Array<{ path: string; target: string }>;
+  /** Linked subdirectories whose files a remote scan doesn't have (the probe doesn't follow links). */
+  linkedDirs: string[];
+  truncated: boolean;
+}
+
+/** Whether `path` is `dir` or inside it. */
+function within(path: string, dir: string): boolean {
+  const rel = relative(dir, path);
+  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+}
+
+/** The home holding the store: the parent of ~/.copilot, else the scanning user's. */
+function storeHome(ctx: ScanContext): string {
+  const dir = ctx.installation.installDir;
+  return basename(dir) === '.copilot' ? dirname(dir) : ctx.fs.homedir();
+}
+
+/** What a symlink resolves to: a directory, a file (with its real path when known), or nothing (dangling). */
+async function linkTarget(ctx: ScanContext, path: string): Promise<{ kind: 'dir' | 'file'; target?: string } | undefined> {
+  let st: Awaited<ReturnType<ScanContext['fs']['stat']>>;
+  try {
+    st = await ctx.fs.stat(path);
+  } catch {
+    return undefined;
+  }
+  if (st.isDirectory()) return { kind: 'dir' };
+  let target: string | undefined;
+  try {
+    target = await ctx.fs.realpath(path);
+  } catch {
+    target = undefined;
+  }
+  return { kind: 'file', target };
+}
+
 /**
  * A store's files: its entries and the entries of its subdirectories, one
  * level deep (session-state/<session id>/events.jsonl). Symlinks count — a
- * store file's data is wherever it points, and its mode is the target's.
+ * store file's data is wherever it points, and its mode is the target's; a
+ * link to a directory is a subdirectory like any other (its own mode is not a
+ * store file's). A link leaving the store and the home for a file that isn't
+ * a credential store (`mcp-secrets/x.json → /etc/hosts`) is set apart: its
+ * mode says nothing about the agent's data.
  */
-async function storeFiles(ctx: ScanContext, storeDir: string): Promise<{ files: string[]; truncated: boolean }> {
+async function storeFiles(ctx: ScanContext, storeDir: string): Promise<StoreListing> {
   const files: string[] = [];
-  const add = (path: string) => { if (files.length < MAX_JUDGED_PER_STORE + 1) files.push(path); };
-  for (const e of await ctx.fs.readdirEntries(storeDir)) {
-    const path = join(storeDir, e.name);
-    if (e.isFile || e.isSymbolicLink) {
+  const outside: StoreListing['outside'] = [];
+  const linkedDirs: string[] = [];
+  // Both spellings of the home and the store: a target is compared by its real path
+  const roots = [storeHome(ctx), ctx.installation.installDir];
+  for (const root of [...roots]) {
+    try {
+      const real = await ctx.fs.realpath(root);
+      if (typeof real === 'string' && real !== root) roots.push(real);
+    } catch {
+      // the written spelling only
+    }
+  }
+  const full = () => files.length > MAX_JUDGED_PER_STORE;
+  const add = (path: string) => { if (!full()) files.push(path); };
+  const addLink = (path: string, target: string | undefined) => {
+    if (target !== undefined && !roots.some(root => within(target, root)) && !CREDENTIAL_FILE_NAME.test(basename(target))) {
+      outside.push({ path, target });
+    } else {
       add(path);
-    } else if (e.isDirectory) {
-      try {
-        for (const sub of await ctx.fs.readdirEntries(path)) {
-          if (sub.isFile || sub.isSymbolicLink) add(join(path, sub.name));
-        }
-      } catch {
-        // an unreadable session folder: nobody else can list it either
+    }
+  };
+  const subdirFiles = async (dir: string) => {
+    let entries: Awaited<ReturnType<ScanContext['fs']['readdirEntries']>>;
+    try {
+      entries = await ctx.fs.readdirEntries(dir);
+    } catch {
+      return;
+    }
+    for (const sub of entries) {
+      if (full()) return;
+      const path = join(dir, sub.name);
+      if (sub.isFile) {
+        add(path);
+      } else if (sub.isSymbolicLink) {
+        const link = await linkTarget(ctx, path);
+        // a directory two levels down is not judged (like a real one)
+        if (link?.kind === 'file') addLink(path, link.target);
+        else if (!link) add(path);
       }
     }
-    if (files.length > MAX_JUDGED_PER_STORE) break;
+  };
+
+  for (const e of await ctx.fs.readdirEntries(storeDir)) {
+    const path = join(storeDir, e.name);
+    if (e.isFile) {
+      add(path);
+    } else if (e.isSymbolicLink) {
+      const link = await linkTarget(ctx, path);
+      if (link?.kind === 'dir') {
+        // The probe doesn't follow links: a remote scan has the link, not the files behind it
+        if (ctx.fs.kind === 'snapshot') linkedDirs.push(path);
+        else await subdirFiles(path);
+      } else if (link?.kind === 'file') {
+        addLink(path, link.target);
+      } else {
+        add(path);
+      }
+    } else if (e.isDirectory) {
+      await subdirFiles(path);
+    }
+    if (full()) break;
   }
-  return { files: files.slice(0, MAX_JUDGED_PER_STORE), truncated: files.length > MAX_JUDGED_PER_STORE };
+  return { files: files.slice(0, MAX_JUDGED_PER_STORE), outside, linkedDirs, truncated: files.length > MAX_JUDGED_PER_STORE };
 }
 
 /** The paths readable or writable beyond the owner; `maxListed` caps the files listed per private store. */
 async function findings(ctx: ScanContext, maxListed: number): Promise<Findings> {
   const evidence: Evidence[] = [];
+  const outside: Evidence[] = [];
   const unverified: string[] = [];
   const truncated: string[] = [];
+  let total = 0;
 
-  // Directories: a readable one exposes file names only — what matters is
-  // whether others can replace files in it, and the modes of the files
   for (const subdir of PROTECTED_DIRS) {
     const path = subdir === '.' ? ctx.installation.installDir : join(ctx.installation.installDir, subdir);
     if (!(await ctx.fs.access(path))) continue;
@@ -87,14 +186,34 @@ async function findings(ctx: ScanContext, maxListed: number): Promise<Findings> 
           snippet: `mode 0${perms.octal}`,
           detail: `${subdir === '.' ? '~/.copilot/' : `${subdir}/`} is writable by group/other — its auth and session files can be replaced`,
         });
+        total++;
       }
     } catch {}
   }
 
-  // Private stores: each file's own mode (a symlink's target's)
+  for (const filename of PROTECTED_FILES) {
+    const filePath = join(ctx.installation.installDir, filename);
+    if (!(await ctx.fs.access(filePath))) continue;
+    if (!PRIVATE_FILES.has(filename)) {
+      const config = ctx.configs.find(c => c.filePath === filePath);
+      if (config && !configHoldsSecret(config.data) && (await ghc003.run({ ...ctx, configs: [config] })).passed) continue;
+    }
+    try {
+      const perms = await queryPermissions(ctx.fs, filePath);
+      if (perms !== 'unsupported' && accessibleByOthers(perms)) {
+        evidence.push({
+          file: filePath,
+          snippet: `mode 0${perms.octal}`,
+          detail: `${filename} is readable or writable by group/other`,
+        });
+        total++;
+      }
+    } catch {}
+  }
+
   for (const { dir, what } of PRIVATE_DIRS) {
     const storeDir = join(ctx.installation.installDir, dir);
-    let listing: Awaited<ReturnType<typeof storeFiles>>;
+    let listing: StoreListing;
     try {
       listing = await storeFiles(ctx, storeDir);
     } catch {
@@ -108,7 +227,6 @@ async function findings(ctx: ScanContext, maxListed: number): Promise<Findings> 
       try {
         perms = await queryPermissions(ctx.fs, filePath);
       } catch {
-        // gone, or a dangling link: nothing to read — unless the probe just didn't collect it
         if (ctx.fs.kind === 'snapshot') missing++;
         continue;
       }
@@ -117,6 +235,19 @@ async function findings(ctx: ScanContext, maxListed: number): Promise<Findings> 
       }
     }
     if (missing > 0) unverified.push(`${missing} file(s) in ${dir}/`);
+    if (listing.linkedDirs.length > 0) {
+      unverified.push(`the files behind ${listing.linkedDirs.length} linked folder(s) in ${dir}/ (${listing.linkedDirs.map(p => basename(p)).join(', ')})`);
+    }
+    for (const { path, target } of listing.outside) {
+      outside.push({
+        file: path,
+        snippet: `-> ${target}`,
+        detail: `${what} is a link to ${target}, outside the store and the home — not the agent's own file, but the agent reads and writes through it`,
+      });
+    }
+    // Which files are listed must not depend on walk order (local vs snapshot)
+    open.sort((a, b) => (a.file < b.file ? -1 : a.file > b.file ? 1 : 0));
+    total += open.length;
     evidence.push(...open.slice(0, maxListed));
     if (open.length > maxListed) {
       evidence.push({
@@ -127,28 +258,7 @@ async function findings(ctx: ScanContext, maxListed: number): Promise<Findings> 
     }
   }
 
-  for (const filename of PROTECTED_FILES) {
-    const filePath = join(ctx.installation.installDir, filename);
-    if (!(await ctx.fs.access(filePath))) continue;
-    // Config files leak only what they hold: a token or other secret.
-    // History and session data are the user's own record and always private.
-    if (!PRIVATE_FILES.has(filename)) {
-      const config = ctx.configs.find(c => c.filePath === filePath);
-      if (config && !configHoldsSecret(config.data) && (await ghc003.run({ ...ctx, configs: [config] })).passed) continue;
-    }
-    try {
-      const perms = await queryPermissions(ctx.fs, filePath);
-      if (perms !== 'unsupported' && accessibleByOthers(perms)) {
-        evidence.push({
-          file: filePath,
-          snippet: `mode 0${perms.octal}`,
-          detail: `${filename} is readable or writable by group/other`,
-        });
-      }
-    } catch {}
-  }
-
-  return { evidence, unverified, truncated };
+  return { evidence, total, outside, unverified, truncated };
 }
 
 export const ghc001 = defineCheck({
@@ -161,20 +271,35 @@ export const ghc001 = defineCheck({
   supportedPlatforms: ['darwin', 'linux'],
 
   async run(ctx, h) {
-    // A project install is the repo checkout, not ~/.copilot
     if (ctx.installation.profile === 'project') return h.passed('Project configuration — ~/.copilot permissions are checked on the user install');
-    const { evidence, unverified, truncated } = await findings(ctx, MAX_LISTED_PER_STORE);
+    const { evidence, total, outside, unverified, truncated } = await findings(ctx, MAX_LISTED_PER_STORE);
     await markUnreachable(ctx.fs, evidence);
     const notes = [
-      ...(unverified.length > 0 ? [`modes of ${unverified.join(', ')} not verified — the probe didn't collect them (checked on local scans)`] : []),
+      ...(unverified.length > 0 ? [`${unverified.join(', ')} not verified — the probe didn't collect them (checked on local scans)`] : []),
       ...(truncated.length > 0 ? [`only the first ${MAX_JUDGED_PER_STORE} files of ${truncated.join(', ')} checked`] : []),
     ];
-    return h.fromEvidence(evidence, {
-      passed: `Copilot CLI directory and config files are owner-only${notes.length > 0 ? `; ${notes.join('; ')}` : ''}`,
-      failed: (n) => `Found ${n} Copilot CLI path(s) with overly permissive mode`,
+    const noteText = notes.length > 0 ? `; ${notes.join('; ')}` : '';
+    const outsideText = outside.length > 0
+      ? `${outside.length} store link(s) point outside the store and the home`
+      : '';
+    if (evidence.length === 0 && outside.length > 0) {
+      // Not an exposure of the agent's data: worth a look, nothing to chmod
+      return h.result({
+        passed: false,
+        severity: 'warning',
+        message: `Copilot CLI directory and store files are owner-only, but ${outsideText}${noteText}`,
+        evidence: outside,
+        fixable: false,
+        fixDescription: 'Replace the link with a file of the agent\'s own (or remove it) unless you made it on purpose',
+      });
+    }
+    const result = h.fromEvidence(evidence, {
+      passed: `Copilot CLI directory and config files are owner-only${noteText}`,
+      failed: () => `Found ${total} Copilot CLI path(s) with overly permissive mode${outsideText ? `; ${outsideText}` : ''}${noteText}`,
       fixable: true,
       fixDescription: 'Remove group/other access (chmod go-rwx) from the listed ~/.copilot paths — `chmod -R go-rwx ~/.copilot` covers everything',
     });
+    return outside.length > 0 ? { ...result, evidence: [...(result.evidence ?? []), ...outside] } : result;
   },
 
   async fix(ctx) {
