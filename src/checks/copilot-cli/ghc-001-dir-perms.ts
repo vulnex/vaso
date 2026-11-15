@@ -122,6 +122,9 @@ async function storeFiles(ctx: ScanContext, storeDir: string): Promise<StoreList
     } catch {
       // the written spelling only
     }
+    // A snapshot holds no link for a linked home: the probe records where it resolves
+    const recorded = (ctx.fs as { resolvedDir?(p: string): string }).resolvedDir?.(root);
+    if (recorded !== undefined && !roots.includes(recorded)) roots.push(recorded);
   }
   const full = () => files.length > MAX_JUDGED_PER_STORE;
   const add = (path: string) => { if (!full()) files.push(path); };
