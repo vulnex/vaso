@@ -116,7 +116,21 @@ function mask(value: string): string {
 }
 
 export function findSourceSecrets(code: string): SourceSecret[] {
-  const found: SourceSecret[] = [];
+  return collectSourceSecrets(code).map((f) => f.secret);
+}
+
+/**
+ * The raw values findSourceSecrets flags in `code` — for masking them where
+ * another check quotes the same source (never put these in evidence).
+ */
+export function findSourceSecretValues(code: string): string[] {
+  return [...new Set(collectSourceSecrets(code).map((f) => f.value).filter((v) => v !== PEM_MARK))];
+}
+
+const PEM_MARK = '\0pem';
+
+function collectSourceSecrets(code: string): Array<{ secret: SourceSecret; value: string }> {
+  const found: Array<{ secret: SourceSecret; value: string }> = [];
   const seen = new Set<string>();
   const lines = code.split('\n');
   const commentAbove = (line: number): string =>
@@ -126,14 +140,14 @@ export function findSourceSecrets(code: string): SourceSecret[] {
     if (seen.has(id) || DOCUMENTED_PUBLIC_VALUES.has(value)) return;
     seen.add(id);
     if (DECLARED_PUBLIC.test(commentAbove(secret.line))) secret.declaredPublic = true;
-    found.push(secret);
+    found.push({ secret, value });
   };
 
   for (const { line, text } of sourceSegments(code)) {
     const tokens: string[] = [];
     for (const { pattern, name } of API_KEY_PATTERNS) {
       if (name === 'Private key') {
-        if (PRIVATE_KEY_BLOCK.test(text)) add({ line, kind: name, masked: '-----BEGIN … PRIVATE KEY-----' }, 'pem');
+        if (PRIVATE_KEY_BLOCK.test(text)) add({ line, kind: name, masked: '-----BEGIN … PRIVATE KEY-----' }, PEM_MARK);
         continue;
       }
       const m = pattern.exec(text);

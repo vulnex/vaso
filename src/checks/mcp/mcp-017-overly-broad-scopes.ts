@@ -1,6 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { nearbyText, sourceSegments } from '../../mcp/source-segments.js';
+import { sourceSnippet } from '../../mcp/source-snippet.js';
 
 /** Value tests applied to an OAuth scope string (not to the whole line). */
 const DANGEROUS_SCOPE_VALUES = [
@@ -130,7 +131,7 @@ export const mcp017 = defineCheck({
           evidence.push({
             file: filePath,
             line: segments[i].line,
-            snippet: line.trim().slice(0, 120),
+            snippet: sourceSnippet(source, line),
             detail: broad.detail,
           });
         }
@@ -145,7 +146,7 @@ export const mcp017 = defineCheck({
               evidence.push({
                 file: filePath,
                 line: segments[i].line,
-                snippet: line.trim().slice(0, 120),
+                snippet: sourceSnippet(source, line),
                 detail: `Excessive scope count (${scopes.length}) — apply principle of least privilege`,
               });
             }

@@ -1,6 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { nearbyText, sourceSegments, withoutStringText } from '../../mcp/source-segments.js';
+import { sourceSnippet } from '../../mcp/source-snippet.js';
 
 /** A token *value* in code: a variable/property, not the word in a message. */
 const TOKEN_REF = String.raw`\b(?:access_?token|refresh_?token|id_?token|oauth_?token|bearer_?token|token|tokens|bearer)\b`;
@@ -92,7 +93,7 @@ export const mcp014 = defineCheck({
             evidence.push({
               file: filePath,
               line: segments[i].line,
-              snippet: line.trim().slice(0, 120),
+              snippet: sourceSnippet(source, line),
               detail: queryAuth
                 ? `Token in URL query parameter — required by the ${queryAuth.vendor} API, which documents no header alternative (${queryAuth.source}); keep these URLs out of logs`
                 : detail,

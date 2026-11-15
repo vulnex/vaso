@@ -2,6 +2,7 @@ import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { OAUTH_REQUEST_CONTEXT, isAuthorizeRequest } from '../../mcp/oauth-context.js';
 import { sourceSegments, nearbyText, blockText, isStringConstant } from '../../mcp/source-segments.js';
+import { sourceSnippet } from '../../mcp/source-snippet.js';
 
 const STATE_PARAM_PATTERN = /state/;
 const STATIC_STATE_PATTERN = /state\s*[:=]\s*['"][^'"]*['"]/;
@@ -66,7 +67,7 @@ export const mcp018 = defineCheck({
               evidence.push({
                 file: filePath,
                 line: segments[i].line,
-                snippet: line.trim().slice(0, 120),
+                snippet: sourceSnippet(source, line),
                 detail: 'OAuth authorization URL constructed without state parameter — vulnerable to CSRF',
               });
             }
@@ -84,7 +85,7 @@ export const mcp018 = defineCheck({
             evidence.push({
               file: filePath,
               line: segments[i].line,
-              snippet: line.trim().slice(0, 120),
+              snippet: sourceSnippet(source, line),
               detail: 'Static/hardcoded state value — state must be a unique random value per request',
             });
           }
@@ -106,7 +107,7 @@ export const mcp018 = defineCheck({
               evidence.push({
                 file: filePath,
                 line: segments[i].line,
-                snippet: line.trim().slice(0, 120),
+                snippet: sourceSnippet(source, line),
                 detail: 'OAuth callback handler does not verify state parameter — vulnerable to CSRF',
               });
             }

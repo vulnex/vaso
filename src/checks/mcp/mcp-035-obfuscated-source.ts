@@ -5,6 +5,7 @@ import { analyzeObfuscation } from '../../analyzers/obfuscation.js';
 import { analysisEvasion } from '../../analyzers/ast-analyzer.js';
 import type { RevealedStrings } from '../../analyzers/obfuscation.js';
 import { analyzeStringTable, maskEncodedLiterals } from '../../mcp/string-table.js';
+import { maskSourceSecrets } from '../../mcp/source-snippet.js';
 
 /**
  * MCP-035 — Obfuscated / Encoded Server Source.
@@ -62,7 +63,7 @@ export const mcp035 = defineCheck({
         evidence.push({
           file,
           line: deep,
-          snippet: truncateSnippet(text),
+          snippet: truncateSnippet(maskSourceSecrets(source, text)),
           detail: evasion.whole
             ? 'The file is nested or chained deeply enough to overflow the JavaScript parser and could not be analysed — only a line-by-line scan for exec and exfiltration calls ran'
             : 'Code nested or chained deeply enough to crash the JavaScript parser (brackets, templates, `?:`/`!` chains) or flood it with syntax errors — the statement is skipped by the other MCP source checks',
@@ -73,7 +74,7 @@ export const mcp035 = defineCheck({
 
       const lines = source.sourceCode.split('\n');
       // Masked before truncation: a cut must not leave an encoded value's start behind
-      const shown = (line: number) => truncateSnippet(maskEncodedLiterals(lines[line - 1]?.trim() ?? ''));
+      const shown = (line: number) => truncateSnippet(maskSourceSecrets(source, maskEncodedLiterals(lines[line - 1]?.trim() ?? '')));
       if (table.confirmed) {
         sawStringTable = true;
         const what = table.decodedCount >= 3 ? 'Encoded string-table obfuscation' : 'Runtime-decoded hidden string';

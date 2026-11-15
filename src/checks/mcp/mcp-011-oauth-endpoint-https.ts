@@ -2,6 +2,7 @@ import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { sourceSegments } from '../../mcp/source-segments.js';
 import { isRemotePlaintextUrl } from '../../mcp/remote-endpoint.js';
+import { sourceSnippet } from '../../mcp/source-snippet.js';
 
 const OAUTH_URL_ENV_PATTERNS = /(?:oauth|auth|token|authorize)[_-]?(?:url|endpoint|uri|server)/i;
 
@@ -63,7 +64,7 @@ export const mcp011 = defineCheck({
             evidence.push({
               file: source.localPath ?? source.serverName,
               line: segments[i].line,
-              snippet: line.trim().slice(0, 120),
+              snippet: sourceSnippet(source, line),
               detail,
             });
             break; // one finding per line: the patterns overlap on one URL

@@ -2,7 +2,8 @@ import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { confinesPaths, findTaintedSinks, literalOnlyNames } from '../../analyzers/tool-input-taint.js';
 import { analyzePythonSinks } from '../../analyzers/python-sinks.js';
-import { sourceSegments, segmentSnippet } from '../../mcp/source-segments.js';
+import { sourceSegments } from '../../mcp/source-segments.js';
+import { maskSourceSecrets, sourceSnippet } from '../../mcp/source-snippet.js';
 
 const INPUT_NAMES = 'req|input|args|params|query|body|tool_input|message';
 const INPUT = String.raw`(?:${INPUT_NAMES})\b`;
@@ -94,7 +95,7 @@ export const mcp005 = defineCheck({
         for (const finding of analyzePythonSinks(source.sourceCode)) {
           if (finding.kind !== 'injection' || reported.has(finding.line)) continue;
           reported.add(finding.line);
-          evidence.push({ file, line: finding.line, snippet: finding.snippet, detail: finding.description });
+          evidence.push({ file, line: finding.line, snippet: maskSourceSecrets(source, finding.snippet), detail: finding.description });
         }
       } else {
         // Tool input traced through variables into eval/Function/vm/child_process,
@@ -113,7 +114,7 @@ export const mcp005 = defineCheck({
             evidence.push({
               file,
               line: sink.line,
-              snippet: sink.snippet,
+              snippet: maskSourceSecrets(source, sink.snippet),
               detail: wraps
                 ? `SQL injection via template literal: ${sink.sink}() wraps a whole query from tool input (${sink.origin}) in a server with a tool that runs the caller's SQL — the caller already chooses the statement`
                 : `${sink.sink}() builds SQL text from tool input (${sink.origin}) — SQL injection; pass values as bound parameters`,
@@ -124,7 +125,7 @@ export const mcp005 = defineCheck({
           evidence.push({
             file,
             line: sink.line,
-            snippet: sink.snippet,
+            snippet: maskSourceSecrets(source, sink.snippet),
             detail: fileSink
               ? `${sink.sink}() ${sink.kind === 'file-read' ? 'reads' : 'writes'} a path taken from tool input (${sink.origin}) with no containment check — the caller can ${sink.kind === 'file-read' ? 'read' : 'write'} any file the server can (path traversal)`
               : `${sink.sink}() receives tool input (${sink.origin})`,
@@ -144,12 +145,12 @@ export const mcp005 = defineCheck({
             reported.add(segment.line);
             if (name === 'SQL injection via template literal' && wrapsWholeStatement(segment.text) && (sqlTool ??= runsCallerSql(source.sourceCode))) {
               evidence.push({
-                file, line: segment.line, snippet: segmentSnippet(segment), mitigated: true,
+                file, line: segment.line, snippet: sourceSnippet(source, segment.text), mitigated: true,
                 detail: `${name}: the template wraps a whole query (derived table, CTE or EXPLAIN) in a server with a tool that runs the caller's SQL — the caller already chooses the statement`,
               });
               break;
             }
-            evidence.push({ file, line: segment.line, snippet: segmentSnippet(segment), detail: name });
+            evidence.push({ file, line: segment.line, snippet: sourceSnippet(source, segment.text), detail: name });
             break;
           }
         }

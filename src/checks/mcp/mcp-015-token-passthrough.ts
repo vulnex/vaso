@@ -1,6 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { sourceSegments } from '../../mcp/source-segments.js';
+import { sourceSnippet } from '../../mcp/source-snippet.js';
 
 const TOKEN_PASSTHROUGH_PATTERNS = [
   { pattern: /req(?:uest)?\.headers\.authorization.*(?:fetch|http\.request|axios|got|request\()/i, detail: 'Inbound authorization header forwarded to outbound request' },
@@ -40,7 +41,7 @@ export const mcp015 = defineCheck({
             evidence.push({
               file: filePath,
               line: segments[i].line,
-              snippet: line.trim().slice(0, 120),
+              snippet: sourceSnippet(source, line),
               detail,
             });
             break;
