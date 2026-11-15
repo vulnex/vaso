@@ -143,6 +143,14 @@ export function validateSnapshot(value: unknown): string[] {
       errors.push('Invalid configTrees field (normalized absolute directory paths expected)');
     }
   }
+  if (s.resolvedDirs !== undefined) {
+    const entries = isRecord(s.resolvedDirs) ? Object.entries(s.resolvedDirs) : undefined;
+    if (!entries || !entries.every(([k, v]) => isConfigTreePath(k) && typeof v === 'string' && isConfigTreePath(v))) {
+      errors.push('Invalid resolvedDirs field (normalized absolute directory paths expected)');
+    } else if (entries.length > MAX_CONFIG_TREES) {
+      errors.push(`Invalid resolvedDirs field (more than ${MAX_CONFIG_TREES} entries)`);
+    }
+  }
   if (s.timestamp !== undefined && typeof s.timestamp !== 'string') errors.push('Invalid timestamp field');
   if (s.probeVersion !== undefined && typeof s.probeVersion !== 'string') errors.push('Invalid probeVersion field (a version string expected)');
   if (s.privilege !== undefined) {

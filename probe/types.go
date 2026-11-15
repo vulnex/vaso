@@ -90,6 +90,13 @@ type ProbeSnapshot struct {
 	// it was collected, refused (a base no tree is walked from) or over the
 	// entry limit. Only a collected tree's absence of files means "empty".
 	ConfigTrees map[string]string `json:"configTrees,omitempty"`
+	// Where a scanned home, or a directory naming a home the other way (a
+	// config's workspace spelled through a link to the home), resolves to —
+	// only when that differs from its spelling. The CLI resolves either
+	// spelling of a linked home with it when judging config-set skills
+	// directories; the links themselves are not recorded (snapshot keys stay
+	// as spelled).
+	ResolvedDirs map[string]string `json:"resolvedDirs,omitempty"`
 }
 
 // PrivilegeInfo describes the privilege level of the probe process.

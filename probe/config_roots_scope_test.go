@@ -365,3 +365,40 @@ func TestConfigTreeWithGlobCharactersInItsName(t *testing.T) {
 		t.Error("a metacharacter matched another directory")
 	}
 }
+
+// A workspace set through a link to the home (or a home that is a link, with
+// the workspace spelled the real way): the home spelled the other way is
+// never listed, but where it resolves is recorded, so the CLI tells derived
+// workspace-<id> siblings spelled that way are in the home.
+func TestHomeSpelledTheOtherWayRecordsItsResolution(t *testing.T) {
+	home := setupHome(t)
+	link := filepath.Join(filepath.Dir(home), "homelink")
+	mustSymlink(t, home, link)
+	write(t, filepath.Join(home, "myws", "skills", "x", "SKILL.md"), "# x\n", 0o644)
+	write(t, filepath.Join(home, ".picoclaw", "config.json"), `{"agents": {"defaults": {"workspace": "`+filepath.Join(link, "myws")+`"}}}`, 0o644)
+	req := ConfigRootRequest{
+		Configs: []string{"~/.picoclaw/config.json"}, Format: "json", Kind: "tree",
+		Keys: [][]string{{"agents", "defaults", "workspace"}}, Globs: []string{"skills/**", "../workspace-*/skills/**"},
+	}
+	snap := Collect(ProbeManifest{ConfigRoots: []ConfigRootRequest{req}}, false)
+	if got := snap.ResolvedDirs[link]; got != home {
+		t.Fatalf("resolvedDirs %v, want %s → %s", snap.ResolvedDirs, link, home)
+	}
+	if _, listed := snap.Directories[link]; listed {
+		t.Fatal("home listed under its other spelling")
+	}
+	if _, listed := snap.Directories[home]; listed {
+		t.Fatal("home listed")
+	}
+
+	// the home itself a link
+	t.Setenv("HOME", link)
+	write(t, filepath.Join(home, ".picoclaw", "config.json"), `{"agents": {"defaults": {"workspace": "`+filepath.Join(home, "myws")+`"}}}`, 0o644)
+	snap = Collect(ProbeManifest{ConfigRoots: []ConfigRootRequest{req}}, false)
+	if got := snap.ResolvedDirs[link]; got != home {
+		t.Fatalf("resolvedDirs %v, want the home %s → %s", snap.ResolvedDirs, link, home)
+	}
+	if _, ok := snap.ResolvedDirs[home]; ok {
+		t.Fatal("a directory recorded resolving to itself")
+	}
+}

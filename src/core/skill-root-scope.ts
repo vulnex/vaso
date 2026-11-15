@@ -30,8 +30,19 @@ function strictlyWithin(p: string, dir: string): boolean {
   return rel !== '' && !relEscapes(rel) && !isAbsolute(rel);
 }
 
-/** `p` resolved like a realpath for as much of it as exists; the rest appended. */
+/**
+ * `p` resolved like a realpath for as much of it as exists; the rest
+ * appended. On a snapshot, a linked home's other spelling resolves through
+ * what the probe recorded for it (resolvedDirs): the link itself isn't in
+ * the snapshot.
+ */
 async function resolveExisting(fs: FSProvider, p: string): Promise<string> {
+  const viaLinks = await realpathExisting(fs, p);
+  const recorded = (fs as { resolvedDir?(path: string): string }).resolvedDir?.(viaLinks) ?? viaLinks;
+  return recorded === viaLinks ? viaLinks : realpathExisting(fs, recorded);
+}
+
+async function realpathExisting(fs: FSProvider, p: string): Promise<string> {
   const tail: string[] = [];
   for (let cur = p; ; cur = dirname(cur)) {
     try {
