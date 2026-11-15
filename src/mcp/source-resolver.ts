@@ -852,7 +852,7 @@ async function scriptLineEntry(dir: string, script: string, line: string, fs: FS
   const capped = text.length > MAX_SCRIPT_CHARS;
   const all = capped ? cutScriptCommands(text) : scriptCommands(text);
   const commands = all.slice(0, MAX_SCRIPT_COMMANDS);
-  let partial: string | undefined = capped
+  const partial: string | undefined = capped
     ? `package script "${script}" is longer than ${MAX_SCRIPT_CHARS / 1024} KiB and was read only in part`
     : all.length > MAX_SCRIPT_COMMANDS
       ? `package script "${script}" runs more than ${MAX_SCRIPT_COMMANDS} commands and was read only in part`
@@ -861,17 +861,20 @@ async function scriptLineEntry(dir: string, script: string, line: string, fs: FS
   let fallback = false;
   // Every command's launch target: `node scripts/check.js && node dist/server.js` runs both
   const paths: string[] = [];
+  // Why a command was not followed (`bash evil.sh`): kept even when another command is
+  const unfollowed: string[] = [];
   for (const command of commands) {
     const r = await scriptCommandEntry(dir, script, command, fs, depth);
     for (const p of [r.path, ...(r.extra ?? [])]) if (p && !paths.includes(p)) paths.push(p);
     if (r.fallback) fallback = true;
-    partial ??= r.partial;
-    note ??= r.note;
+    note ??= r.note ?? r.partial;
+    for (const why of [r.partial, r.note]) if (why && why !== partial && !unfollowed.includes(why)) unfollowed.push(why);
   }
   // `node dist/index.js` before a build: the package's own entry or its TypeScript source
   if (fallback && !paths.includes(dir)) paths.push(dir);
   if (paths.length === 0) return { note: note ?? `package script "${script}" starts no file this scan can follow` };
-  return { path: paths[0], ...(paths.length > 1 ? { extra: paths.slice(1) } : {}), ...(partial ? { partial } : {}) };
+  const why = [partial, ...unfollowed].filter((w): w is string => w !== undefined).join('; ');
+  return { path: paths[0], ...(paths.length > 1 ? { extra: paths.slice(1) } : {}), ...(why ? { partial: why } : {}) };
 }
 
 async function scriptCommandEntry(
@@ -897,6 +900,11 @@ async function scriptCommandEntry(
     for (const file of [inner.entry, ...sourceTwins(dir, inner.entry)]) {
       if (await isFile(file, fs)) return { path: file };
     }
+    // `node sub`: Node runs the directory's package.json main, else its index.js
+    if (await fs.stat(inner.entry).then((st) => st.isDirectory(), () => false)) {
+      const file = await directoryEntry(inner.entry, fs);
+      return file ? { path: file } : { note: `package script "${script}" runs the directory ${inner.entry}, which has no entry file` };
+    }
     return { fallback: true };
   }
   if (inner.packageDir) {
@@ -910,6 +918,21 @@ async function scriptCommandEntry(
   if (inner.note) return { note: `package script "${script}" ${inner.note}` };
   // build steps (`tsc`, `rimraf dist`) before the server starts: the next command decides
   return {};
+}
+
+/** The file Node loads for a directory: its package.json `main` (as a file, `.js` or a directory index), else index.js. */
+async function directoryEntry(entryDir: string, fs: FSProvider): Promise<string | undefined> {
+  let main: unknown;
+  try {
+    main = (JSON.parse(await fs.readFile(join(entryDir, 'package.json'))) as { main?: unknown }).main;
+  } catch {
+    main = undefined;
+  }
+  const candidates = typeof main === 'string' && main !== ''
+    ? [join(entryDir, main), `${join(entryDir, main)}.js`, join(entryDir, main, 'index.js')]
+    : [];
+  for (const file of [...candidates, join(entryDir, 'index.js')]) if (await isFile(file, fs)) return file;
+  return undefined;
 }
 
 /** The file `python -m <module>` runs from `base` (its own package, not an installed one), if there. */
