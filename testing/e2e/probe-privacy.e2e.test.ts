@@ -80,6 +80,19 @@ function hidden(s: string): string {
   return s.length >= 24 ? s.slice(8, -4) : s.length >= 16 ? s.slice(4) : s;
 }
 
+/**
+ * Secrets written wholly in escapes (\u0041 in JSON and TOML, \x41 in YAML):
+ * the escapes of their hidden characters, of which no run of eight may ship.
+ */
+const escapedCanaries = new Map<string, string[]>();
+const jsonEscape = (ch: string) => `\\u${ch.charCodeAt(0).toString(16).padStart(4, '0')}`;
+const yamlEscape = (ch: string) => `\\x${ch.charCodeAt(0).toString(16).padStart(2, '0')}`;
+function escapedCanary(label: string, make: () => string, escape: (ch: string) => string): string {
+  const value = make();
+  escapedCanaries.set(label, [...hidden(value)].map(escape));
+  return [...value].map(escape).join('');
+}
+
 // Known key formats (API_KEY_PATTERNS plus the probe's extra token shapes)
 const FORMATS: Array<[string, () => string]> = [
   ['anthropic', () => `sk-ant-api03-${body(40)}`],
@@ -250,7 +263,11 @@ function jsonFile(label: string): string {
     apiKey: c('all-lowercase api key', () => body(32, 'abcdefghijklmnopqrstuvwyz0123456789')),
     // a pasted curl command: JSON inside the string, its quotes escaped twice
     curl: `Run: curl -d "{\\"api_key\\":\\"${c('embedded JSON in a JSON string', generic)}\\"}" https://api.x.com`,
-  }, null, 2) + '\n';
+    // the value under a credential-named key, a level down
+    credentials: { primary: { value: c('credentials.primary.value', short), name: 'main' } },
+    auth: { type: 'bearer', value: c('auth.value', short) },
+    ESCAPED_API_KEY: '@ESCAPED@',
+  }, null, 2).replace('"@ESCAPED@"', `"${escapedCanary(`${label} json all-escaped key`, generic, jsonEscape)}"`) + '\n';
 }
 
 /** JSON5 as OpenClaw writes it: unquoted keys, single quotes, comments, trailing commas. */
@@ -323,6 +340,23 @@ function yamlFile(label: string): string {
     `    - carol:${canary(`${label} yaml curl -u block`, lowerWord)}`,
     '    - --pw',
     `    - ${canary(`${label} yaml --pw block`, lowerWord)}`,
+    `escaped_password: "${escapedCanary(`${label} yaml all-escaped password`, generic, yamlEscape)}"`,
+    // credentials written over two lines: folded, literal, plain
+    'multi:',
+    '  api_key: >-',
+    `    ${canary(`${label} yaml folded line 1`, short)}`,
+    `    ${canary(`${label} yaml folded line 2`, short)}`,
+    '  secret: |',
+    `    ${canary(`${label} yaml literal line 1`, short)}`,
+    `    ${canary(`${label} yaml literal line 2`, short)}`,
+    '  token:',
+    `    ${canary(`${label} yaml plain next-line 1`, short)}`,
+    `    ${canary(`${label} yaml plain next-line 2`, short)}`,
+    `  password: ${canary(`${label} yaml plain same-line 1`, short)}`,
+    `    ${canary(`${label} yaml plain same-line 2`, short)}`,
+    'credentials:',
+    '  primary:',
+    `    value: ${canary(`${label} yaml credentials.primary.value`, short)}`,
   ].join('\n') + '\n';
 }
 
@@ -343,6 +377,9 @@ function tomlFile(label: string): string {
     '[mcp_servers.curl]',
     'command = "curl"',
     `args = ["-u", "carol:${canary(`${label} toml curl -u`, lowerWord)}", "--pass", "${canary(`${label} toml --pass`, lowerWord)}"]`,
+    '[mcp_servers.curl.env]',
+    `API_KEY = "${escapedCanary(`${label} toml all-escaped key`, generic, jsonEscape)}"`,
+    `credentials = { primary = { value = "${canary(`${label} toml credentials.primary.value`, short)}", name = "main" } }`,
   ].join('\n') + '\n';
 }
 
@@ -704,6 +741,15 @@ describe.skipIf(!goAvailable)('probe privacy canary', () => {
   it('ships no canary', () => {
     const leaks = [...canaries].filter(([, value]) => haystack.includes(hidden(value))).map(([label]) => label);
     expect(leaks, `${leaks.length} canaries shipped:\n${leaks.slice(0, 40).join('\n')}`).toEqual([]);
+  });
+
+  it('ships no run of an escaped secret\'s escapes', () => {
+    expect(escapedCanaries.size).toBeGreaterThan(200);
+    const leaks = [...escapedCanaries].filter(([, esc]) => {
+      for (let i = 0; i + 8 <= esc.length; i++) if (contentText.includes(esc.slice(i, i + 8).join(''))) return true;
+      return false;
+    }).map(([label]) => label);
+    expect(leaks, `${leaks.length} escaped canaries shipped:\n${leaks.slice(0, 40).join('\n')}`).toEqual([]);
   });
 
   it('ships no short credential or email address in its context', () => {
