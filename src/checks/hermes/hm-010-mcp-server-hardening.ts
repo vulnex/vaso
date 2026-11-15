@@ -25,7 +25,7 @@ export const hm010 = defineCheck({
       if (!servers || typeof servers !== 'object') continue;
 
       for (const [name, serverRaw] of Object.entries(servers)) {
-        if (isDisabledServerConfig(serverRaw)) continue; // never launched
+        if (isDisabledServerConfig(serverRaw, { yaml11: true })) continue; // never launched (PyYAML reads `enabled: no` as false)
         if (!serverRaw || typeof serverRaw !== 'object') continue;
         const server = serverRaw as Record<string, unknown>;
         const command = server.command;

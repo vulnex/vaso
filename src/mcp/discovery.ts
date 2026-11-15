@@ -17,6 +17,7 @@ import { parseYamlSafe } from '../core/yaml-safe.js';
 import { captureConfigLoadErrors } from '../core/config-loader.js';
 import { pathPresent } from '../adapters/load-if-present.js';
 import { applyOffLists } from './off-lists.js';
+import { hermesServerMap } from './disabled.js';
 import type { AgentType, Platform } from '../core/types.js';
 
 interface ConfigLocation {
@@ -285,7 +286,7 @@ function parseShape(shape: ConfigLocation['shape'], data: Record<string, unknown
     case 'opencode':
       return parseServerMap(opencodeServers(data.mcp));
     case 'hermes':
-      return parseServerMap(data.mcp_servers);
+      return parseServerMap(hermesServerMap(data.mcp_servers));
     case 'zeroclaw':
       return parseServerMap(zeroclawServers(data.mcp));
     case 'vscode-settings': {

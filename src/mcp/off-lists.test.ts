@@ -148,3 +148,17 @@ describe('agent MCP checks honour the off lists', () => {
     expect((await qc004.run(ctx)).passed).toBe(true);
   });
 });
+
+describe('Hermes YAML 1.1 switches', () => {
+  it('marks enabled: no / off servers disabled in discovery', async () => {
+    const fs = new SnapshotFSProvider({
+      version: 1, hostname: 'h', platform: 'linux', homedir: HOME, timestamp: 't',
+      privilege: { uid: 1000, username: 'u', isRoot: false, sudoAvailable: false, escalated: false, scannedUsers: ['u'], skippedPaths: [] },
+      files: { [`${HOME}/.hermes/config.yaml`]: { content: 'mcp_servers:\n  a:\n    command: node\n    enabled: no\n  b:\n    command: node\n    enabled: off\n  c:\n    command: node\n', mode: 0o100644, exists: true } },
+      directories: {}, commandOutputs: {}, env: {},
+    });
+    const r = await new MCPDiscovery(fs).discover('linux', undefined, { includeDisabled: true });
+    const hermes = r.configs.find(c => c.source === 'Hermes')!;
+    expect(hermes.servers.map(s => [s.name, s.disabled === true])).toEqual([['a', true], ['b', true], ['c', false]]);
+  });
+});
