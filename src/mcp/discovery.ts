@@ -6,6 +6,7 @@ import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { stripJsonc } from '../core/jsonc.js';
 import { claudeConfigPaths } from '../adapters/claude-code.js';
 import { codexHome } from '../adapters/codex.js';
+import { projectDirs as devinProjectDirs } from '../adapters/devin.js';
 import { copilotHome } from '../adapters/copilot-cli.js';
 import { geminiHome } from '../adapters/gemini.js';
 import { qwenHome } from '../adapters/qwen-code.js';
@@ -173,17 +174,24 @@ async function getZeroclawLocation(home: string, fs: FSProvider): Promise<Config
 
 const GENERIC_MCP_SOURCE = 'Generic MCP';
 
-function getProjectConfigLocations(projectDir: string): ConfigLocation[] {
+/**
+ * Devin CLI loads `.devin/` from the repository root above cwd and from each
+ * directory between it and cwd (root first): the project is the root.
+ */
+function getProjectConfigLocations(projectDir: string, devin: { root: string; dirs: string[] } = { root: projectDir, dirs: [projectDir] }): ConfigLocation[] {
   const at = (loc: Omit<ConfigLocation, 'scope' | 'projectRoot'>): ConfigLocation => ({ ...loc, scope: 'project', projectRoot: projectDir });
+  const devinAt = (loc: Omit<ConfigLocation, 'scope' | 'projectRoot'>): ConfigLocation => ({ ...loc, scope: 'project', projectRoot: devin.root });
   return [
     // Copilot CLI reads a repo's .mcp.json too
     at({ source: 'Claude Code (project)', agents: ['claude-code', 'copilot-cli'], path: join(projectDir, '.mcp.json') }),
     at({ source: 'Cursor (project)', agents: ['cursor-cli'], path: join(projectDir, '.cursor', 'mcp.json') }),
     at({ source: 'Windsurf (project)', agents: ['windsurf'], path: join(projectDir, '.windsurf', 'mcp.json') }),
-    at({ source: 'Devin CLI (project)', agents: ['devin'], path: join(projectDir, '.devin', 'mcp_config.json') }),
-    at({ source: 'Devin CLI (local)', agents: ['devin'], path: join(projectDir, '.devin', 'mcp_config.local.json') }),
-    at({ source: 'Devin CLI (project config.json)', agents: ['devin'], path: join(projectDir, '.devin', 'config.json') }),
-    at({ source: 'Devin CLI (project config.local.json)', agents: ['devin'], path: join(projectDir, '.devin', 'config.local.json') }),
+    ...devin.dirs.flatMap(dir => [
+      devinAt({ source: 'Devin CLI (project)', agents: ['devin'], path: join(dir, '.devin', 'mcp_config.json') }),
+      devinAt({ source: 'Devin CLI (local)', agents: ['devin'], path: join(dir, '.devin', 'mcp_config.local.json') }),
+      devinAt({ source: 'Devin CLI (project config.json)', agents: ['devin'], path: join(dir, '.devin', 'config.json') }),
+      devinAt({ source: 'Devin CLI (project config.local.json)', agents: ['devin'], path: join(dir, '.devin', 'config.local.json') }),
+    ]),
     at({ source: 'Gemini CLI (project)', agents: ['gemini-cli'], path: join(projectDir, '.gemini', 'settings.json') }),
     at({ source: 'Qwen Code (project)', agents: ['qwen-code'], path: join(projectDir, '.qwen', 'settings.json') }),
     at({ source: 'Copilot CLI (project)', agents: ['copilot-cli'], path: join(projectDir, '.github', 'mcp.json') }),
@@ -497,7 +505,7 @@ export class MCPDiscovery {
       ...getFrameworkLocations(home, this.fs),
       await getZeroclawLocation(home, this.fs),
       ...await geminiExtensionLocations(home, this.fs),
-      ...(projectDir ? getProjectConfigLocations(projectDir) : []),
+      ...(projectDir ? getProjectConfigLocations(projectDir, await devinProjectDirs(projectDir, this.fs).catch(() => undefined)) : []),
     ];
 
     // One file, one config: run from $HOME, the project's `.cursor/mcp.json`
