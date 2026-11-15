@@ -1,0 +1,11 @@
+{
+  "agent": "claude-code",
+  "source": "dt23 re-verify round 3: ~/.claude/settings.json written by Python json.dump (ASCII-escaped), a GitHub token whose \\u00e9 escape straddles the 8 characters reports keep \u2014 the probe's stand-in keeps the escape whole, so the remote scan parses the file and reaches the local verdicts",
+  "modes": {
+    ".claude": "700",
+    ".claude/settings.json": "600"
+  },
+  "fail": {
+    "CC-004": "critical"
+  }
+}
