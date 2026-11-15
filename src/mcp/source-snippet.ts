@@ -114,21 +114,29 @@ export function findingSnippet(source: Pick<MCPServerSource, 'sourceCode'>, find
  * `token: …`, `use passphrase "…"`. The value is one unbroken run after the
  * credential word (and an optional `is` / `was` / `:` / `=`).
  */
-const PROSE_SECRET = /(?<![A-Za-z0-9_])(?:password|passwd|passphrase|pwd|pin|secret|token|api[ _-]?key|access[ _-]?key|private[ _-]?key|credentials?)(?![A-Za-z0-9_])(?:\s*(?:[:=]|\bis\b|\bwas\b|\bset to\b|\bequals\b))?\s*["'`]?([^\s"'`,;()[\]{}<>]{8,})/gi;
+const PROSE_SECRET = /(?<![A-Za-z0-9_])(password|passwd|passphrase|pass ?code|pwd|pin|secret|token|api[ _-]?key|access[ _-]?key|private[ _-]?key|credentials?)(?![A-Za-z0-9_])(?:\s+for\s+[\w.@-]{1,64})?(?:\s*([:=]|\bis\b|\bwas\b|\bset to\b|\bequals\b))?\s*["'`]?([^\s"'`,;()[\]{}<>]{8,})/gi;
 
-function proseSecretValue(run: string): string | undefined {
+/** Credential words a person types: whatever is named as one after `is` / `:` is masked unless it is a plain word. */
+const TYPED_SECRET = /^(?:password|passwd|passphrase|pass ?code|pwd|pin)$/i;
+
+function proseSecretValue(run: string, keyword: string, connector: string | undefined): string | undefined {
   const value = run.replace(/[.!?:]+$/, '');
   if (value.length < 8 || isPlaceholderSecret(value) || isSecretReference(value) || /^[a-z][a-z0-9+.-]*:\/\//i.test(value)) return undefined;
   // a word or a phrase (`required`, `pass-through`) is not a credential
   if (!/[A-Za-z]/.test(value)) return undefined;
   if (/\d/.test(value) || looksRandom(value, 8) || isKnownSecretValue(value)) return value;
+  // `The passphrase is Kettle-Zebra-Quartz-Lamp`: a typed secret need not
+  // look random. A single word (`required`) or a short hyphenated phrase
+  // (`case-sensitive`) is still prose
+  if (connector && TYPED_SECRET.test(keyword)
+    && !/^[A-Za-z][a-z]*$/.test(value) && !(/^[a-z]+(?:-[a-z]+)*$/.test(value) && value.length < 16)) return value;
   return undefined;
 }
 
 /** `text` with credentials written out in prose masked (MCP-034 quotes prose). */
 export function maskProseSecrets(text: string): string {
-  return text.replace(PROSE_SECRET, (match: string, run: string) => {
-    const value = proseSecretValue(run);
+  return text.replace(PROSE_SECRET, (match: string, keyword: string, connector: string | undefined, run: string) => {
+    const value = proseSecretValue(run, keyword, connector);
     if (!value) return match;
     const at = match.lastIndexOf(run);
     return `${match.slice(0, at)}${maskValue(value)}${run.slice(value.length)}`;
