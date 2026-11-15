@@ -106,3 +106,35 @@ describe('HTML reports neutralise bidi and control characters (dt17)', () => {
     expect(html).not.toContain('<img onerror');
   });
 });
+
+describe('line and paragraph separators, SARIF values, every JSON (dt23 N8)', () => {
+  it('escapes U+2028/U+2029 even when newlines are kept', () => {
+    expect(escapeControlChars('a\u2028b\u2029c\nd')).toBe('a\\u2028b\\u2029c\nd');
+  });
+
+  it('SARIF snippet, message and rule description values carry no live bidi/zero-width/separator characters', async () => {
+    const { SarifReporter } = await import('./sarif.js');
+    const { checkRegistry } = await import('../core/check-registry.js');
+    const r = result();
+    r.agents[0].results[0].evidence = [{ file: '/h/x.json', line: 3, snippet: 'key\u202e\u200bvalue\u2028' }];
+    r.agents[0].results[0].message = 'msg\u202e\u2028x';
+    const id = 'TST-N8-1';
+    if (!checkRegistry.getAll().some(c => c.id === id)) {
+      checkRegistry.register({ id, name: 'n', category: 'config', severity: 'info', description: 'd\u2028e\u202e', run: async () => ({ id, name: 'n', category: 'config', severity: 'info', passed: true, message: '' }) });
+    }
+    const log = JSON.parse(new SarifReporter().render(r));
+    const res = log.runs[0].results[0];
+    const unsafe = /[\u200b\u202e\u2028\u2029]/;
+    expect(res.locations[0].physicalLocation.region.snippet.text).toBe('key\\u202e\\u200bvalue\\u2028');
+    expect(res.message.text).not.toMatch(unsafe);
+    const rule = log.runs[0].tool.driver.rules.find((x: { id: string }) => x.id === id);
+    expect(rule.fullDescription.text).toBe('d\\u2028e\\u202e');
+  });
+
+  it('every report JSON (detect, multi-host, baselines) writes them as \\u escapes', async () => {
+    const { toReportJson } = await import('./serialize.js');
+    const json = toReportJson([{ agentName: 'a\u202eb\u200bc\u{e0041}' }]);
+    expect(json).not.toMatch(/[\u200b\u202e]|\u{e0041}/u);
+    expect(JSON.parse(json)[0].agentName).toBe('a\u202eb\u200bc\u{e0041}');
+  });
+});

@@ -6,7 +6,7 @@ import { VERSION } from '../version.js';
 import { checkRegistry } from '../core/check-registry.js';
 import { owaspAgenticForCheckId, OWASP_AGENTIC_TITLES } from './owasp-agentic.js';
 import { owaspMcpForCheckId, OWASP_MCP_TITLES } from './owasp-mcp.js';
-import { escapeJsonUnsafe } from './text-safety.js';
+import { escapeJsonUnsafe, escapeControlChars } from './text-safety.js';
 
 /**
  * SARIF `artifactLocation.uri` must be a URI reference: absolute paths become
@@ -107,7 +107,7 @@ export class SarifReporter implements Reporter {
         if (!check.errored) continue;
         notes.push({
           level: 'error',
-          message: { text: check.message },
+          message: { text: escapeControlChars(check.message) },
           associatedRule: { id: check.id },
         });
       }
@@ -142,7 +142,7 @@ export class SarifReporter implements Reporter {
         id: check.id,
         name: check.name,
         shortDescription: { text: check.name },
-        fullDescription: { text: check.description },
+        fullDescription: { text: escapeControlChars(check.description) },
         defaultConfiguration: {
           level: SARIF_LEVEL_MAP[check.severity],
         },
@@ -161,7 +161,7 @@ export class SarifReporter implements Reporter {
         const sarifResult: Record<string, unknown> = {
           ruleId: check.id,
           level: SARIF_SEVERITY_MAP[check.severity],
-          message: { text: check.message },
+          message: { text: escapeControlChars(check.message) },
           locations: [],
           partialFingerprints: { 'vaso/v1': this.fingerprint(agent, check) },
           ...(agent.installation.agentName ? {
@@ -176,7 +176,8 @@ export class SarifReporter implements Reporter {
               ...(e.line ? {
                 region: {
                   startLine: e.line,
-                  snippet: e.snippet ? { text: e.snippet } : undefined,
+                  // shown by code-scanning UIs as text: no live bidi/zero-width characters
+                  snippet: e.snippet ? { text: escapeControlChars(e.snippet) } : undefined,
                 },
               } : {}),
             },
