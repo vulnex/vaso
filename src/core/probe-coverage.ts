@@ -213,6 +213,18 @@ export function configTreeGap(fs: FSProvider, dir: string): 'refused' | 'limit' 
 }
 
 /**
+ * What the probe recorded for the config-derived tree at `dir` or the
+ * nearest one above it — collected, refused or over its limit — or
+ * undefined (off snapshots, older probes, a tree it never looked at).
+ */
+export function configTreeStatus(fs: FSProvider, dir: string): ConfigTreeStatus | undefined {
+  if (fs.kind !== 'snapshot') return undefined;
+  const c = compiled(fs);
+  if (!c) return undefined;
+  return treeStatus(c, selfAndAncestors(dir));
+}
+
+/**
  * A manifest tree whose wildcard directory is a link (a PicoClaw
  * `workspace-<id>` linked elsewhere): the probe's glob can't enter it, so it
  * walks it as a config-derived tree (probes newer than 1.4.1). A refusal or

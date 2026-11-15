@@ -1,0 +1,19 @@
+{
+  "agent": "picoclaw",
+  "source": "dt23 re-verify round 3: agent \"lnk\" gets ~/.picoclaw/workspace-lnk under the default root, a link into ~/.ssh \u2014 a credential store is never walked as skill code, on local and remote scans alike (SKL-002 warning)",
+  "modes": {
+    ".picoclaw/config.json": "600",
+    ".picoclaw/launcher-config.json": "600",
+    ".picoclaw/.security.yml": "600",
+    ".ssh": "700"
+  },
+  "fail": {
+    "SKL-002": "warning"
+  },
+  "pass": [
+    "SKL-004"
+  ],
+  "inventory": {
+    "skills": []
+  }
+}

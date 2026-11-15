@@ -510,6 +510,9 @@ func expandPaths(paths []string, homes []UserHome) []string {
 // limits), the trees its symlinks point to, names a glob can't match and
 // directories it couldn't read. c.inSkillTree says whether it walks skills.
 func (c *collector) collectGlob(snapshot *ProbeSnapshot, pattern string) {
+	if c.inSkillTree && !c.configTree && c.refuseLinkedSkillBase(snapshot, pattern) {
+		return
+	}
 	// Never descend into symlinked directories: a local readdir lists the
 	// link without following it, so following here duplicated every file
 	// a skill symlinks in from elsewhere. The link itself still matches.
