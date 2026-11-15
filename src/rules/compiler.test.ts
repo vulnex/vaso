@@ -433,5 +433,26 @@ describe('compileRule', () => {
       expect(await readFile(envPath, 'utf-8')).toBe('OPENROUTER_API_KEY=x\n');
       await rm(dir, { recursive: true, force: true });
     });
+
+    it('says why a config was not written', async () => {
+      const { mkdtemp, writeFile, readFile, rm } = await import('node:fs/promises');
+      const { tmpdir } = await import('node:os');
+      const { join } = await import('node:path');
+      const dir = await mkdtemp(join(tmpdir(), 'vaso-rulefix-'));
+      const yamlPath = join(dir, 'config.yaml');
+      const src = 'approvals: &a\n  mode: off\nbackup: *a\n';
+      await writeFile(yamlPath, src);
+      const configs: ParsedConfig[] = [{ raw: '', format: 'yaml', filePath: yamlPath, data: { approvals: { mode: 'off' }, backup: { mode: 'off' } } }];
+      const check = compileRule({
+        id: 'ORG-101', name: 'n', category: 'config', severity: 'warning', description: 'd',
+        config: { path: 'approvals.mode', operator: 'eq', value: 'off' },
+        fix: { set: 'approvals.mode', value: 'manual' },
+      });
+      const res = await check.fix!(makeContext({ configs }));
+      expect(res.applied).toBe(false);
+      expect(res.message).toMatch(/^Could not apply fix for ORG-101 — not changed: approvals in .* is a YAML anchor \(&a\)/);
+      expect(await readFile(yamlPath, 'utf-8')).toBe(src);
+      await rm(dir, { recursive: true, force: true });
+    });
   });
 });

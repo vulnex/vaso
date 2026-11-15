@@ -236,6 +236,7 @@ function compileFix(rule: DeclarativeRule): CheckModule['fix'] | undefined {
   const { set: keyPath, value } = rule.fix;
   return async (ctx: ScanContext): Promise<FixResult> => {
     let applied = false;
+    const refused: string[] = [];
     for (const cfg of ctx.configs) {
       // Only the configs the rule failed on — a config rule's check, re-run
       // here; never a file the finding didn't name (a Hermes .env gaining
@@ -246,16 +247,18 @@ function compileFix(rule: DeclarativeRule): CheckModule['fix'] | undefined {
       try {
         await updateConfigValue(cfg, keyPath, value);
         applied = true;
-      } catch {
-        // skip configs that can't be written
+      } catch (err) {
+        // the other configs are still written; say why this one wasn't
+        refused.push(err instanceof Error ? err.message : String(err));
       }
     }
+    const why = refused.length > 0 ? ` — not changed: ${refused[0]}${refused.length > 1 ? ` (and ${refused.length - 1} more)` : ''}` : '';
     return {
       checkId: rule.id,
       applied,
       message: applied
-        ? `Set ${keyPath} to ${JSON.stringify(value)}`
-        : `Could not apply fix for ${rule.id}`,
+        ? `Set ${keyPath} to ${JSON.stringify(value)}${why}`
+        : `Could not apply fix for ${rule.id}${why}`,
     };
   };
 }
