@@ -608,7 +608,7 @@ function analyze(code: string): TaintedSink[] {
       if (!(SQL_METHODS.has(prop) || SQL_GENERIC_METHODS.has(prop)) || !args[0]) return;
       const built = sqlPieces(args[0], SQL_METHODS.has(prop) ? SQL_TEXT : SQL_TEXT_CAPS);
       if (!built) return;
-      const tainted = built.parts.filter((p) => p.path.node && !sqlSafePiece(p.path, constrainedInput) && expressionOrigin(p.path, 0));
+      const tainted = built.parts.filter((p) => p.path.node && !sqlSafePiece(p.path, constrainedInput, 0, p.quoted === true) && expressionOrigin(p.path, 0));
       if (tainted.length === 0) return;
       const origin = expressionOrigin(tainted[0].path, 0)!;
       const line = path.node.loc?.start.line ?? 0;
@@ -710,12 +710,36 @@ function analyze(code: string): TaintedSink[] {
  * local helper returns. Tagged templates (sql`…`) are parameterized by their
  * library and are not text.
  */
-function sqlPieces(arg: NodePath, sql: RegExp, depth = 0): { parts: Array<{ path: NodePath; wraps: boolean }> } | undefined {
+/**
+ * An interpolated piece of SQL text: `wraps`, it is the whole statement in
+ * parentheses; `quoted`, it sits inside a `'…'` literal of the text.
+ */
+interface SqlPart {
+  path: NodePath;
+  wraps: boolean;
+  quoted?: boolean;
+}
+
+/** The SQL text before a piece leaves a `'…'` literal open (`''` escapes count twice). */
+function insideQuote(before: string): boolean {
+  return (before.split("'").length - 1) % 2 === 1;
+}
+
+function sqlPieces(arg: NodePath, sql: RegExp, depth = 0): { parts: SqlPart[] } | undefined {
   if (depth > 3) return undefined;
-  const fromOperands = (operands: NodePath[], sep = ''): { parts: Array<{ path: NodePath; wraps: boolean }> } | undefined => {
-    const text = operands.map((p) => staticString(p.node, p.scope) ?? ' ').join(sep || '');
+  const fromOperands = (operands: NodePath[], sep = ''): { parts: SqlPart[] } | undefined => {
+    const texts = operands.map((p) => staticString(p.node, p.scope));
+    const text = texts.map((t) => t ?? ' ').join(sep || '');
     if (!sql.test(text)) return undefined;
-    return { parts: operands.filter((p) => staticString(p.node, p.scope) === undefined).map((path) => ({ path, wraps: false })) };
+    const parts: SqlPart[] = [];
+    let before = '';
+    operands.forEach((path, i) => {
+      if (i > 0) before += sep;
+      const fixedText = texts[i];
+      if (fixedText !== undefined) before += fixedText;
+      else parts.push({ path, wraps: false, ...(insideQuote(before) ? { quoted: true } : {}) });
+    });
+    return { parts };
   };
   if (arg.isTemplateLiteral()) {
     const quasis = arg.node.quasis.map((q) => q.value.cooked ?? q.value.raw);
@@ -725,6 +749,7 @@ function sqlPieces(arg: NodePath, sql: RegExp, depth = 0): { parts: Array<{ path
       parts: expressions.map((path, i) => ({
         path,
         wraps: WRAP_BEFORE.test(quasis[i] ?? '') && /^\s*(?:\)|$)/.test(quasis[i + 1] ?? ''),
+        ...(insideQuote(quasis.slice(0, i + 1).join('')) ? { quoted: true } : {}),
       })),
     };
   }
@@ -804,7 +829,7 @@ function sqlPieces(arg: NodePath, sql: RegExp, depth = 0): { parts: Array<{ path
 }
 
 /** `format("SELECT … '%s'", a, b)`: the arguments after a format string that is SQL. */
-function formatPieces(args: NodePath[], sql: RegExp): { parts: Array<{ path: NodePath; wraps: boolean }> } | undefined {
+function formatPieces(args: NodePath[], sql: RegExp): { parts: SqlPart[] } | undefined {
   const text = args[0] ? staticString(args[0].node, args[0].scope) : undefined;
   if (text === undefined || !sql.test(text)) return undefined;
   return { parts: args.slice(1).map((path) => ({ path, wraps: false })) };
@@ -842,6 +867,10 @@ function boundSqlMethod(binding: Binding | undefined): { prop: string; shown: st
 
 /** Calls that make a value safe to put in SQL text: driver escaping and identifier/literal quoting. */
 const SQL_ESCAPES = /^(?:escape|escapeId|escapeIdentifier|escapeLiteral|escapeString|quoteIdent|quoteIdentifier|quoteLiteral|quote_ident|quote_literal)$/;
+/** Escapers that quote an identifier, not a value: unsafe inside a `'…'` literal. */
+const SQL_IDENTIFIER_ESCAPES = /^(?:escapeId|escapeIdentifier|quoteIdent|quoteIdentifier|quote_ident)$/;
+/** pg-format's escaping members (`format.literal(x)`). */
+const PG_FORMAT_ESCAPES = /^(?:literal|ident|string)$/;
 /** Modules whose `format` escapes its values (`mysql.format`, pg-format's `format('%I', x)`). */
 const SQL_FORMAT_MODULES = /^(?:mysql2?(?:\/promise)?|sqlstring|pg-format)$/;
 /** SQL drivers and builders whose escaping helpers SQL_ESCAPES names. */
@@ -898,33 +927,43 @@ function sqlEscapeCall(callee: NodePath): boolean {
  * from fixed values (`[…].includes(x) ? x : "id"`), or input the tool's schema
  * limits to fixed values or numbers (`z.enum([...])`, `z.number()`).
  */
-function sqlSafePiece(path: NodePath, constrained: (path: NodePath) => boolean, depth = 0): boolean {
+function sqlSafePiece(path: NodePath, constrained: (path: NodePath) => boolean, depth = 0, quoted = false): boolean {
   if (depth > 4 || !path.node) return false;
   if (constrained(path)) return true;
   if (path.isIdentifier()) {
     const binding = path.scope.getBinding(path.node.name);
     if (!binding?.constant || !binding.path.isVariableDeclarator()) return false;
     const init = binding.path.get('init') as NodePath;
-    return !!init.node && sqlSafePiece(init, constrained, depth + 1);
+    return !!init.node && sqlSafePiece(init, constrained, depth + 1, quoted);
   }
   if (path.isConditionalExpression()) return allowListChoice(path);
   // `COLUMNS[name] ?? "id"`: a lookup in a table of fixed values, with a fixed fallback
   if (path.isLogicalExpression() && (path.node.operator === '??' || path.node.operator === '||')) {
-    const fixedOr = (p: NodePath): boolean => staticString(p.node, p.scope) !== undefined || p.isNumericLiteral() || sqlSafePiece(p, constrained, depth + 1);
+    const fixedOr = (p: NodePath): boolean => staticString(p.node, p.scope) !== undefined || p.isNumericLiteral() || sqlSafePiece(p, constrained, depth + 1, quoted);
     return fixedOr(path.get('left') as NodePath) && fixedOr(path.get('right') as NodePath);
   }
   if (path.isMemberExpression() && path.node.computed) return fixedList(path.node.object, path.scope, 0, true);
   if (path.isTemplateLiteral()) {
-    return (path.get('expressions') as NodePath[]).every((e) => sqlSafePiece(e, constrained, depth + 1));
+    return (path.get('expressions') as NodePath[]).every((e) => sqlSafePiece(e, constrained, depth + 1, quoted));
   }
   if (!path.isCallExpression()) return false;
   const callee = path.get('callee');
   const name = callee.isIdentifier() ? callee.node.name
     : callee.isMemberExpression() && !callee.node.computed && callee.node.property.type === 'Identifier' ? callee.node.property.name : '';
-  if (SQL_ESCAPES.test(name) && sqlEscapeCall(callee as NodePath)) return true;
+  // Inside a `'…'` literal only a value escaper keeps it closed: an
+  // identifier escaper (`escapeId`) leaves `'` as it is
+  if (SQL_ESCAPES.test(name) && !(quoted && SQL_IDENTIFIER_ESCAPES.test(name)) && sqlEscapeCall(callee as NodePath)) return true;
+  // pg-format's `format.literal(x)` / `format.ident(x)` / `format.string(x)`
+  if (PG_FORMAT_ESCAPES.test(name) && !(quoted && name === 'ident') && callee.isMemberExpression()) {
+    const holder = callee.get('object') as NodePath;
+    if (holder.isIdentifier() && bindingModule(holder.scope.getBinding(holder.node.name)) === 'pg-format') return true;
+  }
   if (name === 'format') {
     const holder = callee.isIdentifier() ? callee : callee.isMemberExpression() ? callee.get('object') as NodePath : undefined;
-    if (holder?.isIdentifier() && SQL_FORMAT_MODULES.test(bindingModule(holder.scope.getBinding(holder.node.name)) ?? holder.node.name)) return true;
+    // a fixed format string and values to put in it: `mysql.format(x)` alone returns `x`
+    const args = path.get('arguments') as NodePath[];
+    if (holder?.isIdentifier() && SQL_FORMAT_MODULES.test(bindingModule(holder.scope.getBinding(holder.node.name)) ?? holder.node.name)
+      && args.length >= 2 && staticString(args[0].node, args[0].scope) !== undefined) return true;
   }
   if (callee.isMemberExpression() && (name === 'join' || name === 'map')) {
     const receiver = callee.get('object') as NodePath;
@@ -968,34 +1007,54 @@ function placeholderMap(call: NodePath): boolean {
 /** `ALLOWED.includes(x) ? x : "id"`, `x === "asc" ? "ASC" : "DESC"`: the value is one of fixed choices. */
 function allowListChoice(path: NodePath): boolean {
   if (!path.isConditionalExpression()) return false;
-  let test = path.get('test') as NodePath;
-  // `!ALLOWED.includes(x) ? "id" : x`: the value is checked in the other branch
-  let negated = false;
-  while (test.isUnaryExpression({ operator: '!' })) {
-    negated = !negated;
-    test = test.get('argument') as NodePath;
-  }
-  let checked: string | undefined;
-  if (test.isCallExpression()) {
-    const callee = test.node.callee;
-    const first = test.node.arguments[0];
-    if (callee.type === 'MemberExpression' && callee.property.type === 'Identifier' && /^(?:includes|has)$/.test(callee.property.name)
-      && first?.type === 'Identifier' && fixedList(callee.object, test.scope)) {
-      checked = first.name;
-    }
-  } else if (test.isBinaryExpression() && /^(?:===|==|!==|!=)$/.test(test.node.operator)) {
-    if (test.node.operator.startsWith('!')) negated = !negated;
-    const { left, right } = test.node;
-    if (left.type === 'Identifier' && staticString(right, test.scope) !== undefined) checked = left.name;
-    else if (right.type === 'Identifier' && staticString(left, test.scope) !== undefined) checked = right.name;
-  } else if (test.isBinaryExpression({ operator: "in" }) && test.node.left.type === "Identifier" && fixedList(test.node.right, test.scope)) {
-    checked = test.node.left.name;
-  }
-  // the checked value is one of the fixed choices only in the branch where the test holds
-  const fixed = (branch: Node, holds: boolean): boolean =>
+  const test = path.node.test;
+  // the checked value is one of the fixed choices only in the branch where the test says so
+  const fixed = (branch: Node, checked: string | undefined): boolean =>
     staticString(branch, path.scope) !== undefined || branch.type === 'NumericLiteral'
-    || (holds && checked !== undefined && branch.type === 'Identifier' && branch.name === checked);
-  return fixed(path.node.consequent, !negated) && fixed(path.node.alternate, negated);
+    || (checked !== undefined && branch.type === 'Identifier' && branch.name === checked);
+  return fixed(path.node.consequent, choiceChecked(test, true, path.scope))
+    && fixed(path.node.alternate, choiceChecked(test, false, path.scope));
+}
+
+/**
+ * The name a test proves to be one of fixed values when it evaluates to
+ * `outcome`: `ALLOWED.includes(x)` (true), `x !== "asc"` (false),
+ * `!ALLOWED.includes(x)` (false). `A && B` true makes both hold, so either
+ * one's check counts (`ALLOWED.includes(x) && x.length > 0`); `A || B` false
+ * makes both fail. Nothing otherwise.
+ */
+function choiceChecked(test: Node, outcome: boolean, scope: Scope, depth = 0): string | undefined {
+  if (depth > 8) return undefined;
+  if (test.type === 'ParenthesizedExpression') return choiceChecked(test.expression, outcome, scope, depth + 1);
+  if (test.type === 'UnaryExpression' && test.operator === '!') return choiceChecked(test.argument, !outcome, scope, depth + 1);
+  if (test.type === 'LogicalExpression') {
+    // `A && B` true: both true; `A || B` false: both false
+    if ((test.operator === '&&' && outcome) || (test.operator === '||' && !outcome)) {
+      return choiceChecked(test.left, outcome, scope, depth + 1) ?? choiceChecked(test.right, outcome, scope, depth + 1);
+    }
+    return undefined;
+  }
+  if (test.type === 'CallExpression') {
+    const callee = test.callee;
+    const first = test.arguments[0];
+    if (outcome && callee.type === 'MemberExpression' && callee.property.type === 'Identifier' && /^(?:includes|has)$/.test(callee.property.name)
+      && first?.type === 'Identifier' && fixedList(callee.object, scope)) {
+      return first.name;
+    }
+    return undefined;
+  }
+  if (test.type === 'BinaryExpression' && /^(?:===|==|!==|!=)$/.test(test.operator)) {
+    // `x === "asc"` true, `x !== "asc"` false
+    if (outcome === test.operator.startsWith('!')) return undefined;
+    const { left, right } = test;
+    if (left.type === 'Identifier' && staticString(right, scope) !== undefined) return left.name;
+    if (right.type === 'Identifier' && left.type !== 'PrivateName' && staticString(left, scope) !== undefined) return right.name;
+    return undefined;
+  }
+  if (outcome && test.type === 'BinaryExpression' && test.operator === 'in' && test.left.type === 'Identifier' && fixedList(test.right, scope)) {
+    return test.left.name;
+  }
+  return undefined;
 }
 
 /** A list of fixed values: an array literal of strings/numbers, `new Set([...])` of them, an object literal (with `values`: of fixed values too), or a constant holding one. */
