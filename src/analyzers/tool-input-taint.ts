@@ -608,7 +608,7 @@ function analyze(code: string): TaintedSink[] {
       if (!(SQL_METHODS.has(prop) || SQL_GENERIC_METHODS.has(prop)) || !args[0]) return;
       const built = sqlPieces(args[0], SQL_METHODS.has(prop) ? SQL_TEXT : SQL_TEXT_CAPS);
       if (!built) return;
-      const tainted = built.parts.filter((p) => p.path.node && !sqlSafePiece(p.path, constrainedInput, 0, p.quoted === true) && expressionOrigin(p.path, 0));
+      const tainted = built.parts.filter((p) => p.path.node && !sqlSafePiece(p.path, constrainedInput, 0, p.quote) && expressionOrigin(p.path, 0));
       if (tainted.length === 0) return;
       const origin = expressionOrigin(tainted[0].path, 0)!;
       const line = path.node.loc?.start.line ?? 0;
@@ -712,17 +712,31 @@ function analyze(code: string): TaintedSink[] {
  */
 /**
  * An interpolated piece of SQL text: `wraps`, it is the whole statement in
- * parentheses; `quoted`, it sits inside a `'…'` literal of the text.
+ * parentheses; `quote`, the `'…'` or `"…"` literal of the text it sits inside.
  */
 interface SqlPart {
   path: NodePath;
   wraps: boolean;
-  quoted?: boolean;
+  quote?: SqlQuote;
+}
+type SqlQuote = "'" | '"';
+
+/** The quote the SQL text before a piece leaves open (`''` / `""` escapes count twice), if any. */
+function openQuote(before: string): SqlQuote | undefined {
+  let open: SqlQuote | undefined;
+  for (let i = 0; i < before.length; i++) {
+    const c = before[i];
+    if (c !== "'" && c !== '"') continue;
+    if (open === undefined) open = c;
+    else if (c === open) open = undefined;
+  }
+  return open;
 }
 
-/** The SQL text before a piece leaves a `'…'` literal open (`''` escapes count twice). */
-function insideQuote(before: string): boolean {
-  return (before.split("'").length - 1) % 2 === 1;
+/** `{ quote }` for a piece after `before`, or nothing. */
+function quoteOf(before: string): { quote?: SqlQuote } {
+  const quote = openQuote(before);
+  return quote ? { quote } : {};
 }
 
 function sqlPieces(arg: NodePath, sql: RegExp, depth = 0): { parts: SqlPart[] } | undefined {
@@ -737,7 +751,7 @@ function sqlPieces(arg: NodePath, sql: RegExp, depth = 0): { parts: SqlPart[] } 
       if (i > 0) before += sep;
       const fixedText = texts[i];
       if (fixedText !== undefined) before += fixedText;
-      else parts.push({ path, wraps: false, ...(insideQuote(before) ? { quoted: true } : {}) });
+      else parts.push({ path, wraps: false, ...quoteOf(before) });
     });
     return { parts };
   };
@@ -749,7 +763,7 @@ function sqlPieces(arg: NodePath, sql: RegExp, depth = 0): { parts: SqlPart[] } 
       parts: expressions.map((path, i) => ({
         path,
         wraps: WRAP_BEFORE.test(quasis[i] ?? '') && /^\s*(?:\)|$)/.test(quasis[i + 1] ?? ''),
-        ...(insideQuote(quasis.slice(0, i + 1).join('')) ? { quoted: true } : {}),
+        ...quoteOf(quasis.slice(0, i + 1).join('')),
       })),
     };
   }
@@ -927,34 +941,37 @@ function sqlEscapeCall(callee: NodePath): boolean {
  * from fixed values (`[…].includes(x) ? x : "id"`), or input the tool's schema
  * limits to fixed values or numbers (`z.enum([...])`, `z.number()`).
  */
-function sqlSafePiece(path: NodePath, constrained: (path: NodePath) => boolean, depth = 0, quoted = false): boolean {
+function sqlSafePiece(path: NodePath, constrained: (path: NodePath) => boolean, depth = 0, quote?: SqlQuote): boolean {
   if (depth > 4 || !path.node) return false;
   if (constrained(path)) return true;
   if (path.isIdentifier()) {
     const binding = path.scope.getBinding(path.node.name);
     if (!binding?.constant || !binding.path.isVariableDeclarator()) return false;
     const init = binding.path.get('init') as NodePath;
-    return !!init.node && sqlSafePiece(init, constrained, depth + 1, quoted);
+    return !!init.node && sqlSafePiece(init, constrained, depth + 1, quote);
   }
   if (path.isConditionalExpression()) return allowListChoice(path);
   // `COLUMNS[name] ?? "id"`: a lookup in a table of fixed values, with a fixed fallback
   if (path.isLogicalExpression() && (path.node.operator === '??' || path.node.operator === '||')) {
-    const fixedOr = (p: NodePath): boolean => staticString(p.node, p.scope) !== undefined || p.isNumericLiteral() || sqlSafePiece(p, constrained, depth + 1, quoted);
+    const fixedOr = (p: NodePath): boolean => staticString(p.node, p.scope) !== undefined || p.isNumericLiteral() || sqlSafePiece(p, constrained, depth + 1, quote);
     return fixedOr(path.get('left') as NodePath) && fixedOr(path.get('right') as NodePath);
   }
   if (path.isMemberExpression() && path.node.computed) return fixedList(path.node.object, path.scope, 0, true);
   if (path.isTemplateLiteral()) {
-    return (path.get('expressions') as NodePath[]).every((e) => sqlSafePiece(e, constrained, depth + 1, quoted));
+    return (path.get('expressions') as NodePath[]).every((e) => sqlSafePiece(e, constrained, depth + 1, quote));
   }
   if (!path.isCallExpression()) return false;
   const callee = path.get('callee');
   const name = callee.isIdentifier() ? callee.node.name
     : callee.isMemberExpression() && !callee.node.computed && callee.node.property.type === 'Identifier' ? callee.node.property.name : '';
   // Inside a `'…'` literal only a value escaper keeps it closed: an
-  // identifier escaper (`escapeId`) leaves `'` as it is
+  // identifier escaper (`escapeId`) leaves `'` as it is. MySQL reads `"…"` as
+  // a string literal too (ANSI_QUOTES is off by default), which its escapeId
+  // leaves open the same way
+  const quoted = quote === "'" || (quote === '"' && name === 'escapeId');
   if (SQL_ESCAPES.test(name) && !(quoted && SQL_IDENTIFIER_ESCAPES.test(name)) && sqlEscapeCall(callee as NodePath)) return true;
   // pg-format's `format.literal(x)` / `format.ident(x)` / `format.string(x)`
-  if (PG_FORMAT_ESCAPES.test(name) && !(quoted && name === 'ident') && callee.isMemberExpression()) {
+  if (PG_FORMAT_ESCAPES.test(name) && !(quote === "'" && name === 'ident') && callee.isMemberExpression()) {
     const holder = callee.get('object') as NodePath;
     if (holder.isIdentifier() && bindingModule(holder.scope.getBinding(holder.node.name)) === 'pg-format') return true;
   }
@@ -1009,31 +1026,39 @@ function allowListChoice(path: NodePath): boolean {
   if (!path.isConditionalExpression()) return false;
   const test = path.node.test;
   // the checked value is one of the fixed choices only in the branch where the test says so
-  const fixed = (branch: Node, checked: string | undefined): boolean =>
+  const fixed = (branch: Node, checked: Set<string>): boolean =>
     staticString(branch, path.scope) !== undefined || branch.type === 'NumericLiteral'
-    || (checked !== undefined && branch.type === 'Identifier' && branch.name === checked);
+    || (branch.type === 'Identifier' && checked.has(branch.name));
   return fixed(path.node.consequent, choiceChecked(test, true, path.scope))
     && fixed(path.node.alternate, choiceChecked(test, false, path.scope));
 }
 
 /**
- * The name a test proves to be one of fixed values when it evaluates to
+ * The names a test proves to be one of fixed values when it evaluates to
  * `outcome`: `ALLOWED.includes(x)` (true), `x !== "asc"` (false),
- * `!ALLOWED.includes(x)` (false). `A && B` true makes both hold, so either
- * one's check counts (`ALLOWED.includes(x) && x.length > 0`); `A || B` false
- * makes both fail. Nothing otherwise.
+ * `!ALLOWED.includes(x)` (false). `A && B` true makes both hold, so every
+ * operand's check counts (`ALLOWED.includes(o) && ALLOWED.includes(col)`);
+ * `A || B` false makes both fail. Nothing otherwise.
  */
-function choiceChecked(test: Node, outcome: boolean, scope: Scope, depth = 0): string | undefined {
-  if (depth > 8) return undefined;
-  if (test.type === 'ParenthesizedExpression') return choiceChecked(test.expression, outcome, scope, depth + 1);
-  if (test.type === 'UnaryExpression' && test.operator === '!') return choiceChecked(test.argument, !outcome, scope, depth + 1);
+function choiceChecked(test: Node, outcome: boolean, scope: Scope, depth = 0, into = new Set<string>()): Set<string> {
+  if (depth > 8) return into;
+  if (test.type === 'ParenthesizedExpression') return choiceChecked(test.expression, outcome, scope, depth + 1, into);
+  if (test.type === 'UnaryExpression' && test.operator === '!') return choiceChecked(test.argument, !outcome, scope, depth + 1, into);
   if (test.type === 'LogicalExpression') {
     // `A && B` true: both true; `A || B` false: both false
     if ((test.operator === '&&' && outcome) || (test.operator === '||' && !outcome)) {
-      return choiceChecked(test.left, outcome, scope, depth + 1) ?? choiceChecked(test.right, outcome, scope, depth + 1);
+      choiceChecked(test.left, outcome, scope, depth + 1, into);
+      choiceChecked(test.right, outcome, scope, depth + 1, into);
     }
-    return undefined;
+    return into;
   }
+  const name = checkedName(test, outcome, scope);
+  if (name !== undefined) into.add(name);
+  return into;
+}
+
+/** The name one comparison or membership test proves fixed when it evaluates to `outcome`. */
+function checkedName(test: Node, outcome: boolean, scope: Scope): string | undefined {
   if (test.type === 'CallExpression') {
     const callee = test.callee;
     const first = test.arguments[0];

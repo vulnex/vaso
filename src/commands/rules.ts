@@ -1,4 +1,4 @@
-import { writeFile, mkdir } from 'node:fs/promises';
+import { writeFile, mkdir, chmod } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import chalk from 'chalk';
@@ -117,9 +117,14 @@ export async function runRulesValidate(filePath: string, options: RulesValidateO
   try {
     data = YAML.parse(content);
   } catch (err) {
-    console.error(chalk.red(`  Error: Invalid YAML syntax`));
-    console.error(chalk.red(`  ${err instanceof Error ? err.message : String(err)}\n`));
     process.exitCode = 1;
+    const message = err instanceof Error ? err.message : String(err);
+    if (options.format === 'json') {
+      console.log(escapeJsonUnsafe(JSON.stringify({ valid: false, rules: 0, errors: [{ message: `Invalid YAML syntax: ${message}` }] }, null, 2)));
+      return;
+    }
+    console.error(chalk.red(`  Error: Invalid YAML syntax`));
+    console.error(chalk.red(`  ${show(message)}\n`));
     return;
   }
 
@@ -141,23 +146,24 @@ export async function runRulesValidate(filePath: string, options: RulesValidateO
     return true;
   });
 
+  // Invalid rules exit 1 in every format, so a CI step reading JSON fails too
+  if (errors.length > 0) process.exitCode = 1;
   if (options.format === 'json') {
     console.log(escapeJsonUnsafe(JSON.stringify({ valid: errors.length === 0, rules: rules.length, errors }, null, 2)));
     return;
   }
 
   if (errors.length > 0) {
-    console.log(chalk.red(`  ${errors.length} validation error(s) in ${filePath}:\n`));
+    console.log(chalk.red(`  ${errors.length} validation error(s) in ${show(filePath)}:\n`));
     for (const err of errors) {
       const loc = [err.rule, err.field].filter(Boolean).join('.');
       console.log(chalk.red(`  ${loc ? `[${loc}] ` : ''}${err.message}`));
     }
     console.log();
-    process.exitCode = 1;
   }
 
   if (rules.length > 0) {
-    console.log(chalk.green(`  ${rules.length} valid rule(s) in ${filePath}\n`));
+    console.log(chalk.green(`  ${rules.length} valid rule(s) in ${show(filePath)}\n`));
     for (const rule of rules) {
       const type = rule.config ? 'config' : rule.pattern ? 'pattern' : 'file_exists';
       console.log(`    ${chalk.bold(rule.id)}  ${rule.name}  ${chalk.dim(`(${type}, ${rule.severity})`)}`);
@@ -237,9 +243,12 @@ export async function runRulesInit(options: RulesInitOptions): Promise<void> {
   try {
     // ~/.vaso also holds scan baselines: private, like they are (0700)
     await mkdir(targetDir, { recursive: true, ...(options.dir === undefined ? { mode: 0o700 } : {}) });
-    // 'wx' fails on an existing file: never overwrite the user's rules unasked
-    await writeFile(targetFile, STARTER_TEMPLATE, { encoding: 'utf-8', flag: options.force ? 'w' : 'wx' });
-    console.log(chalk.green(`  Created starter rule file: ${targetFile}\n`));
+    // 'wx' fails on an existing file: never overwrite the user's rules unasked.
+    // Owner-only whatever the umask: scan refuses a rule file group or others can write
+    await writeFile(targetFile, STARTER_TEMPLATE, { encoding: 'utf-8', flag: options.force ? 'w' : 'wx', mode: 0o600 });
+    // --force over an existing file keeps its mode: tighten it the same way
+    if (options.force) await chmod(targetFile, 0o600);
+    console.log(chalk.green(`  Created starter rule file: ${show(targetFile)}\n`));
     console.log(chalk.dim('  Edit the file and run "vaso rules validate" to check it.'));
     console.log(chalk.dim(loadedByScan
       ? '  Rules are loaded automatically on "vaso scan".\n'
@@ -249,8 +258,8 @@ export async function runRulesInit(options: RulesInitOptions): Promise<void> {
   } catch (err) {
     const exists = (err as NodeJS.ErrnoException).code === 'EEXIST';
     console.error(chalk.red(exists
-      ? `  ${targetFile} already exists — use --force to overwrite it\n`
-      : `  Error creating rule file: ${err instanceof Error ? err.message : String(err)}\n`));
+      ? `  ${show(targetFile)} already exists — use --force to overwrite it\n`
+      : `  Error creating rule file: ${show(err instanceof Error ? err.message : String(err))}\n`));
     process.exitCode = 2;
   }
 }

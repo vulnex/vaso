@@ -10,7 +10,11 @@ const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? o
 
 /** "12 skills, 3 MCP servers" — MCP left out for agents whose MCP configs VASO doesn't read. */
 export function surfaceCounts(inventory: AgentInventory): string {
-  const parts = [plural(inventory.skills.length, 'skill')];
+  // No skills directory walked (all refused or not collected): unknown, not "0 skills"
+  const notScanned = inventory.skillsDirs.length > 0 && inventory.skillsDirs.every(d => d.unverified);
+  const parts = [notScanned
+    ? 'skills not scanned'
+    : `${plural(inventory.skills.length, 'skill')}${inventory.incomplete?.length ? ' (skills inventory incomplete)' : ''}`];
   if (inventory.otherEntries.length > 0) parts.push(plural(inventory.otherEntries.length, 'other skills-dir entry', 'other skills-dir entries'));
   if (inventory.mcpServers) {
     const off = inventory.mcpServers.filter(s => s.disabled).length;

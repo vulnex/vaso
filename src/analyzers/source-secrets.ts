@@ -68,9 +68,17 @@ const NOT_SECRET_KEY = new Set([
   'local', 'shortcut', 'hot', 'keyboard', 'cursor', 'page', 'node', 'element', 'component', 'react', 'redis', 'kv', 'store',
   'bucket', 'file', 'config', 'setting', 'settings', 'option', 'metadata', 'meta', 'header', 'sub', 'parent', 'child', 'next',
   'prev', 'last', 'first', 'id', 'name', 'type', 'path', 'url', 'env', 'context', 'data', 'request', 'response', 'lock', 'job',
-  'queue', 'task', 'user', 'session',
+  'queue', 'task', 'user', 'session', 'model', 'feature', 'flag', 'shard', 'sharding', 'asset', 'deduplication', 's3',
+  'routing', 'buster', 'tenant', 'namespace', 'secondary', 'composite', 'surrogate',
   // analytics ingest keys, public by design (Segment write keys, Application Insights instrumentation keys)
   'write', 'insights', 'instrumentation', 'analytics', 'telemetry', 'ingest', 'ingestion', 'tracking', 'measurement',
+  // client-side product-analytics project keys, shipped in every web page by design
+  'posthog', 'segment', 'mixpanel', 'amplitude',
+]);
+/** Parts before a `token` that make it an LLM/pagination token, not a credential: `maxTokens`, `nextPageToken`. */
+const NOT_SECRET_TOKEN = new Set([
+  'max', 'min', 'num', 'total', 'input', 'output', 'prompt', 'completion', 'reasoning', 'cached', 'context', 'page', 'next',
+  'prev', 'continuation', 'cursor', 'pagination', 'sync', 'bos', 'eos', 'pad', 'unk', 'sep', 'cls', 'mask', 'special', 'stop',
 ]);
 /** Last parts that describe a credential rather than hold one: `secretName`, `tokenUrl`, `API_KEY_ENV`. */
 const DESCRIPTIVE_PART = new Set([
@@ -80,6 +88,10 @@ const DESCRIPTIVE_PART = new Set([
   'policy', 'expiry', 'expires', 'ttl', 'timeout', 'limit', 'max', 'min', 'strength', 'validator', 'schema', 'input', 'kind',
   'mode', 'source', 'provider', 'scope', 'scopes', 'hash', 'help', 'message', 'msg', 'error', 'required', 'enabled', 'store',
   'storage', 'cache', 'arn', 'ref', 'reference', 'version', 'handle', 'uuid', 'guid', 'resource', 'region', 'account', 'link', 'route',
+  // the shape of a credential, not one: `TOKEN_CHARS`, `PASSWORD_ALPHABET`, `PASSWORD_RULE`, `sshKeyFingerprint`
+  'char', 'chars', 'characters', 'charset', 'alphabet', 'strings', 'delimiter', 'delimiters', 'separator',
+  'separators', 'rule', 'rules', 'regexp', 'patterns', 'formats', 'fingerprint', 'fingerprints', 'cookie', 'cookies', 'flag',
+  'flags', 'metric', 'metrics', 'usage',
 ]);
 /** Parts before a last `key` naming where a credential is kept: `TOKEN_KEY`, `PASSWORD_STORAGE_KEY`. */
 const STORED_UNDER = new Set(['token', 'tokens', 'password', 'passwd', 'pass', 'credential', 'credentials', 'storage', 'store', 'cache', 'cookie', 'session', 'local']);
@@ -108,15 +120,21 @@ export function isSecretKeyName(name: string): boolean {
   const parts = nameParts(name);
   if (parts.length === 0) return false;
   if (parts.length > 1 && PREDICATE_PART.has(parts[0])) return false;
-  const last = parts[parts.length - 1];
-  for (let i = 0; i < parts.length; i++) {
+  // a trailing number or version names a variant, not a role: `secretKeyFormat2`, `apiKeyV2`, `password2`
+  let end = parts.length - 1;
+  while (end > 0 && /^(?:v?\d+|v)$/.test(parts[end])) end--;
+  const last = parts[end];
+  for (let i = 0; i <= end; i++) {
     const part = parts[i];
-    const keyed = (part === 'key' || part === 'keys') && i > 0 && !NOT_SECRET_KEY.has(parts[i - 1]);
+    // `S3_KEY` → [s, 3, key]: the qualifier is `s3`
+    const qualifier = i > 1 && /^\d+$/.test(parts[i - 1]) ? parts[i - 2] + parts[i - 1] : parts[i - 1];
+    const keyed = (part === 'key' || part === 'keys') && i > 0 && !NOT_SECRET_KEY.has(qualifier);
     if (!keyed && !CREDENTIAL_PART.test(part)) continue;
+    if ((part === 'token' || part === 'tokens') && i > 0 && NOT_SECRET_TOKEN.has(parts[i - 1])) continue;
     // what follows the credential word names something about it: `tokenUrl`,
     // and `TOKEN_KEY` / `TOKEN_STORAGE_KEY`, the key a token is stored under
-    if (i < parts.length - 1 && DESCRIPTIVE_PART.has(last)) return false;
-    if (i < parts.length - 1 && (last === 'key' || last === 'keys') && STORED_UNDER.has(parts[parts.length - 2])) return false;
+    if (i < end && DESCRIPTIVE_PART.has(last)) return false;
+    if (i < end && (last === 'key' || last === 'keys') && STORED_UNDER.has(parts[end - 1])) return false;
     return true;
   }
   return false;
@@ -165,12 +183,37 @@ export const SOURCE_TOKEN_PATTERNS: Array<{ pattern: RegExp; name: string }> = [
 const PLACEHOLDER = /your|example|sample|dummy|placeholder|changeme|replace|insert|redacted|xxxx|\*{3}|<[^>]*>|\$\{|\{\{|%s/i;
 const MIN_ENTROPY = 3.8;
 
+/** Regular-expression text: a character class with a quantifier, a group construct, an escape class, a `{n,m}`. */
+const REGEX_SHAPED = /\[[^\]]{1,80}\][+*?{]|\(\?[=!:<]|\\[dwsDWSb]|[^\\]\{\d+(?:,\d*)?\}|^\^.*\$$/;
+/** Public half of a key pair: PEM/OpenSSH public keys, base64 DER SubjectPublicKeyInfo. */
+const PUBLIC_KEY_VALUE =
+  /^(?:-----BEGIN (?:RSA )?PUBLIC KEY|ssh-(?:rsa|ed25519|dss)\b|ecdsa-sha2-|MCowBQYDK2V[uw]|MEMwBQYDK2Vx|MEIwBQYDK2Vv|MFkwEwYHKoZIzj0CAQ|MHYwEAYHKoZIzj0CAQ|MIGbMBAGByqGSM49AgE|MI[A-Za-z0-9+/]{2,6}(?:BgkqhkiG9w0BAQEFAAO|CSqGSIb3DQEBAQUAA4))/;
+/** A key fingerprint (`SHA256:…`), published to let others check the key. */
+const FINGERPRINT_VALUE = /^(?:SHA(?:1|256|384|512)|MD5):/i;
+
+/**
+ * Share of a value made of ascending runs (`abcdefgh`, `0123456789`) of three or
+ * more: an alphabet or charset constant, not random key material.
+ */
+function sequentialShare(value: string): number {
+  let covered = 0;
+  let run = 1;
+  for (let i = 1; i <= value.length; i++) {
+    if (i < value.length && value.charCodeAt(i) === value.charCodeAt(i - 1) + 1) { run++; continue; }
+    if (run >= 3) covered += run;
+    run = 1;
+  }
+  return covered / value.length;
+}
+
 function looksLikeSecretValue(value: string): boolean {
   if (PLACEHOLDER.test(value)) return false;
   if (/^[A-Z][A-Z0-9_]+$/.test(value)) return false; // an env-var name: API_KEY: "OPENAI_API_KEY"
   if (/^(?:[a-z]+|[a-z]+(?:[A-Z][a-z0-9]+)+|[A-Z][a-z]+(?:[A-Z][a-z0-9]+)*)$/.test(value)) return false; // identifier
   if (/^(?:https?:)?\/\/|^[./~]/.test(value)) return false; // URL or path
   if (/^(.)\1+$/.test(value)) return false;
+  if (REGEX_SHAPED.test(value) || PUBLIC_KEY_VALUE.test(value) || FINGERPRINT_VALUE.test(value)) return false;
+  if (sequentialShare(value) >= 0.6) return false;
   if (!/[A-Za-z]/.test(value) || !/\d/.test(value)) return false;
   return shannonEntropy(value) >= MIN_ENTROPY;
 }

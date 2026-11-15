@@ -176,16 +176,35 @@ export function findingSnippet(source: Pick<MCPServerSource, 'sourceCode'>, find
 
 /**
  * A credential named in prose: `The admin password is Hunter7-…`,
- * `token: …`, `use passphrase "…"`. The value is one unbroken run after the
- * credential word (and an optional `is` / `was` / `:` / `=`).
+ * `token: …`, `use passphrase "…"`, `the password for the admin account is: …`,
+ * `password -> …`. The value is one unbroken run after the credential word
+ * (and an optional `is` / `was` / `:` / `=` / `->`), or a quoted phrase.
+ * `pass` counts only with a connector (`the pass is …`): alone it is a verb.
  */
-const PROSE_SECRET = /(?<![A-Za-z0-9_])(password|passwd|passphrase|pass ?code|pwd|pin|secret|token|api[ _-]?key|access[ _-]?key|private[ _-]?key|credentials?)(?![A-Za-z0-9_])(?:\s+for\s+[\w.@-]{1,64})?(?:\s*([:=]|\bis\b|\bwas\b|\bset to\b|\bequals\b))?\s*["'`]?([^\s"'`,;()[\]{}<>]{8,})/gi;
+const PROSE_SECRET = /(?<![A-Za-z0-9_])(password|passwd|passphrase|pass ?code|pwd|pin|secret|token|api[ _-]?key|access[ _-]?key|private[ _-]?key|credentials?|pass(?=\s*(?:[:=]|->|=>|\bis\b|\bwas\b)))(?![A-Za-z0-9_])(?:\s+for\s+(?:(?:the|an?|your|our|this|that)\s+)?[\w.@-]{1,64}(?:\s+(?!(?:is|was|set|equals)\b)[\w.@-]{1,32}){0,2})?(?:\s*(->|=>|[:=]|\b(?:is|was)\b(?:\s*[:=])?|\bset to\b|\bequals\b))?\s*(?:"([^"\n]{8,80})"|'([^'\n]{8,80})'|["'`]?([^\s"'`,;()[\]{}<>]{6,}))/gi;
 
 /** Credential words a person types: whatever is named as one after `is` / `:` is masked unless it is a plain word. */
-const TYPED_SECRET = /^(?:password|passwd|passphrase|pass ?code|pwd|pin)$/i;
+const TYPED_SECRET = /^(?:password|passwd|passphrase|pass ?code|pwd|pin|pass)$/i;
+/** Words of ordinary prose: a quoted phrase holding one is a sentence, not a passphrase. */
+const PROSE_WORDS = new Set([
+  'the', 'a', 'an', 'you', 'your', 'yours', 'to', 'of', 'in', 'on', 'for', 'is', 'are', 'be', 'that', 'this', 'it', 'with', 'as',
+  'at', 'by', 'from', 'or', 'and', 'not', 'no', 'must', 'should', 'will', 'can', 'may', 'here', 'there', 'enter', 'use', 'set',
+  'same', 'least', 'most', 'than', 'chars', 'characters', 'long', 'required', 'when', 'if', 'we', 'our', 'my', 'me', 'please',
+  'do', 'does', 'have', 'has', 'was', 'were', 'one', 'any', 'all', 'only', 'new', 'old', 'current',
+]);
 
-function proseSecretValue(run: string, keyword: string, connector: string | undefined): string | undefined {
-  const value = run.replace(/[.!?:]+$/, '');
+function proseSecretValue(run: string, keyword: string, connector: string | undefined, quoted: boolean): string | undefined {
+  const value = quoted ? run : run.replace(/[.!?:]+$/, '');
+  const typed = TYPED_SECRET.test(keyword);
+  // a quoted phrase after `password is`: three or more words, none of them prose (`"moon lamp kettle 77"`)
+  if (/\s/.test(value)) {
+    const words = value.trim().split(/\s+/);
+    if (typed && connector && words.length >= 3 && words.every((w) => /^[A-Za-z0-9]+$/.test(w) && !PROSE_WORDS.has(w.toLowerCase()))) return value;
+    // else its first word, as when unquoted: `"Hunter8Zebra Kettle"`
+    return /^\s/.test(value) ? undefined : proseSecretValue(value.split(/\s/)[0], keyword, connector, false);
+  }
+  // a PIN or numeric passcode: `Your PIN is 48291173`
+  if (/^\d+$/.test(value)) return typed && connector && value.length >= 6 ? value : undefined;
   if (value.length < 8 || isPlaceholderSecret(value) || isSecretReference(value) || /^[a-z][a-z0-9+.-]*:\/\//i.test(value)) return undefined;
   // a word or a phrase (`required`, `pass-through`) is not a credential
   if (!/[A-Za-z]/.test(value)) return undefined;
@@ -193,15 +212,18 @@ function proseSecretValue(run: string, keyword: string, connector: string | unde
   // `The passphrase is Kettle-Zebra-Quartz-Lamp`: a typed secret need not
   // look random. A single word (`required`) or a short hyphenated phrase
   // (`case-sensitive`) is still prose
-  if (connector && TYPED_SECRET.test(keyword)
+  if (connector && typed
     && !/^[A-Za-z][a-z]*$/.test(value) && !(/^[a-z]+(?:-[a-z]+)*$/.test(value) && value.length < 16)) return value;
+  // `Use passcode Quartz-Kettle-Zebra-Lamp-Moon`: with no connector, only a run of three or more capitalised words
+  if (typed && /^[A-Z][a-z]+(?:[-_.][A-Z][a-z]+){2,}$/.test(value)) return value;
   return undefined;
 }
 
 /** `text` with credentials written out in prose masked (MCP-034 quotes prose). */
 export function maskProseSecrets(text: string): string {
-  return text.replace(PROSE_SECRET, (match: string, keyword: string, connector: string | undefined, run: string) => {
-    const value = proseSecretValue(run, keyword, connector);
+  return text.replace(PROSE_SECRET, (match: string, keyword: string, connector: string | undefined, dq?: string, sq?: string, bare?: string) => {
+    const run = dq ?? sq ?? bare ?? '';
+    const value = proseSecretValue(run, keyword, connector, dq !== undefined || sq !== undefined);
     if (!value) return match;
     const at = match.lastIndexOf(run);
     return `${match.slice(0, at)}${maskValue(value)}${run.slice(value.length)}`;

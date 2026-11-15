@@ -312,6 +312,51 @@ function isFixedCode(expr: string, constants: Set<string>): boolean {
 }
 
 /**
+ * Whether the line at an offset is inside a `def` or `class` body: some
+ * less-indented line above it opens one. A `try:`/`if` block at module level
+ * is still module level. One pass over the lines, on first use.
+ */
+function definitionScopes(code: string): (offset: number) => boolean {
+  let starts: number[] | undefined;
+  let inside: Uint8Array | undefined;
+  const build = (): void => {
+    starts = [];
+    const flags: number[] = [];
+    // open blocks as [indent, opened by def/class]
+    const stack: Array<[number, boolean]> = [];
+    let start = 0;
+    while (start <= code.length) {
+      const nl = code.indexOf('\n', start);
+      const end = nl < 0 ? code.length : nl;
+      const line = code.slice(start, end);
+      const lead = /^[ \t]*/.exec(line)![0].length;
+      starts.push(start);
+      if (/^\s*(?:#|$)/.test(line)) {
+        flags.push(stack.some(([, def]) => def) ? 1 : 0);
+      } else {
+        while (stack.length > 0 && stack[stack.length - 1][0] >= lead) stack.pop();
+        flags.push(stack.some(([, def]) => def) ? 1 : 0);
+        stack.push([lead, /^[ \t]*(?:async[ \t]+)?(?:def|class)[ \t]/.test(line)]);
+      }
+      if (nl < 0) break;
+      start = nl + 1;
+    }
+    inside = Uint8Array.from(flags);
+  };
+  return (offset: number): boolean => {
+    if (!starts) build();
+    let lo = 0;
+    let hi = starts!.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (starts![mid] <= offset) lo = mid;
+      else hi = mid - 1;
+    }
+    return inside![lo] === 1;
+  };
+}
+
+/**
  * Import aliases rewritten to the canonical dotted names the sink patterns
  * know: `sp.run(` → `subprocess.run(`, `check_output(` (from-imported) →
  * `subprocess.check_output(`, `__import__("os").system(` → `os.system(`.
@@ -337,14 +382,22 @@ function aliasRewriter(code: string): (text: string) => string {
   // binding of a name is what it calls (`from subprocess import run` then
   // `def run(…)` is the local function; a later re-import is the sink again)
   const bindings: Array<{ at: number; name: string; target?: string }> = [];
+  // An import inside a def/class binds the name there only: it is a call
+  // alias only when nothing at module level binds the name
+  const localImports: Array<{ name: string; target: string }> = [];
+  const insideDefinition = definitionScopes(code);
   for (const m of code.matchAll(/^[ \t]*from[ \t]+(os|subprocess|asyncio|pty)[ \t]+import[ \t]+\(?([^\n#)]+)/gm)) {
+    const local = /^[ \t]/.test(m[0]) && insideDefinition(m.index ?? 0);
     for (const part of m[2].split(',')) {
       const im = /^\s*(\w+)(?:\s+as\s+(\w+))?\s*$/.exec(part);
-      if (im) bindings.push({ at: m.index ?? 0, name: im[2] ?? im[1], target: `${m[1]}.${im[1]}` });
+      if (!im) continue;
+      const binding = { at: m.index ?? 0, name: im[2] ?? im[1], target: `${m[1]}.${im[1]}` };
+      if (local) localImports.push(binding);
+      else bindings.push(binding);
     }
   }
-  if (bindings.length > 0) {
-    const imported = new Set(bindings.map((b) => b.name));
+  if (bindings.length > 0 || localImports.length > 0) {
+    const imported = new Set([...bindings, ...localImports].map((b) => b.name));
     for (const d of code.matchAll(/^(?:async[ \t]+)?(?:def|class)[ \t]+([A-Za-z_]\w*)/gm)) {
       if (imported.has(d[1])) bindings.push({ at: d.index ?? 0, name: d[1] });
     }
@@ -352,6 +405,7 @@ function aliasRewriter(code: string): (text: string) => string {
     const last = new Map<string, string | undefined>();
     for (const b of bindings) last.set(b.name, b.target);
     for (const [name, target] of last) if (target) addCall(name, target);
+    for (const { name, target } of localImports) if (!last.has(name)) addCall(name, target);
   }
   // Names bound by assignment at any indent: a module (`sp = importlib.import_module("subprocess")`),
   // a sink function (`runner = subprocess.run`, `run = getattr(subprocess, "r" + "un")`,
@@ -438,7 +492,8 @@ function aliasRewriter(code: string): (text: string) => string {
         continue;
       }
       const call = callAliases.get(name);
-      if (!call) continue;
+      // `def run(self):` defines a name, it doesn't call the imported one
+      if (!call || /\b(?:def|class)[ \t]+$/.test(text.slice(Math.max(0, at - 16), at))) continue;
       edits.push([at, at + whole.length, `${call.target}(`]);
       // keyword arguments the alias was bound with go in before its call's `)`
       const close = call.extra ? closingParen(text, at + whole.length, (closes ??= matchBrackets(text))) : -1;
