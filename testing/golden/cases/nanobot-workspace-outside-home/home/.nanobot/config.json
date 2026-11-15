@@ -1,0 +1,50 @@
+{
+  "agents": {
+    "defaults": {
+      "workspace": "{{HOME}}/../srv-nanobot/ws",
+      "model": "anthropic/claude-opus-4-5"
+    }
+  },
+  "providers": {
+    "anthropic": {
+      "apiKey": "${ANTHROPIC_API_KEY}"
+    }
+  },
+  "channels": {
+    "telegram": {
+      "enabled": true,
+      "token": "${TELEGRAM_TOKEN}",
+      "allowFrom": [
+        "12345"
+      ]
+    },
+    "websocket": {
+      "enabled": true,
+      "tokenIssueSecret": "${WS_SECRET}"
+    }
+  },
+  "tools": {
+    "restrictToWorkspace": true,
+    "ssrfWhitelist": [
+      "100.64.0.0/10"
+    ],
+    "exec": {
+      "enable": true,
+      "sandbox": "seatbelt"
+    },
+    "mcpServers": {
+      "fs": {
+        "command": "npx",
+        "args": [
+          "-y",
+          "@modelcontextprotocol/server-filesystem@2025.8.21",
+          "/tmp/x"
+        ]
+      }
+    }
+  },
+  "gateway": {
+    "host": "127.0.0.1",
+    "port": 18790
+  }
+}

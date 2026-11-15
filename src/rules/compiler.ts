@@ -5,7 +5,7 @@ import { getNestedValue } from '../core/utils.js';
 import { pathExists } from '../core/utils.js';
 import { evaluateOperator } from './operators.js';
 import { updateConfigValue } from '../remediation/config-writer.js';
-import { maskConfigValue, maskCredentialsInLine } from '../reporting/serialize.js';
+import { credentialValuesIn, knownValueMasker, maskConfigValue, maskCredentialsInLine } from '../reporting/serialize.js';
 import { ruleInput, MAX_RULE_SCAN_MS, MAX_RULES_SCAN_MS } from './regex-safety.js';
 import { truncateSnippet } from '../core/patterns.js';
 import type { DeclarativeRule, RawConfigRule } from './schema.js';
@@ -107,11 +107,11 @@ function compilePatternRule(rule: DeclarativeRule, budget: RuleTimeBudget): Chec
     const evidence: Evidence[] = [];
 
     // Collect files to scan: configs use raw content (already loaded), skills read from disk
-    const entries: Array<{ filePath: string; content: string | null }> = [];
+    const entries: Array<{ filePath: string; content: string | null; cfg?: ParsedConfig }> = [];
 
     if (target === 'configs' || target === 'all') {
       for (const cfg of ctx.configs) {
-        entries.push({ filePath: cfg.filePath, content: cfg.raw });
+        entries.push({ filePath: cfg.filePath, content: cfg.raw, cfg });
       }
     }
     if (target === 'skills' || target === 'all') {
@@ -144,6 +144,11 @@ function compilePatternRule(rule: DeclarativeRule, budget: RuleTimeBudget): Chec
         }
       }
       const filePath = entry.filePath;
+      // A config's credential values, masked wherever a quoted line holds
+      // them (built on the first match only)
+      let maskKnown: ((line: string) => string) | undefined;
+      const knownMasker = (): ((line: string) => string) =>
+        (maskKnown ??= entry.cfg ? knownValueMasker(credentialValuesIn(entry.cfg.data)) : (line: string) => line);
 
       const lines = content.split('\n');
       for (let i = 0; i < lines.length; i++) {
@@ -160,7 +165,7 @@ function compilePatternRule(rule: DeclarativeRule, budget: RuleTimeBudget): Chec
         if (match) {
           // The line is quoted from the user's file: credentials on it are masked
           // (masked whole, then cut: a cut-off credential still reads as one)
-          const snippet = truncateSnippet(maskCredentialsInLine(ruleInput(lines[i].trim())), 120);
+          const snippet = truncateSnippet(knownMasker()(maskCredentialsInLine(ruleInput(lines[i].trim()))), 120);
           // a match the masking removed from the line is (part of) a credential
           const matched = snippet.includes(match[0]) ? match[0] : '***';
           evidence.push({

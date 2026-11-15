@@ -4,7 +4,7 @@ import { defineCheck } from '../../core/check-builder.js';
 import { analyzeCode } from '../../analyzers/ast-analyzer.js';
 import { analyzePythonDataFlow } from '../../analyzers/python-sinks.js';
 import { scanWithPatterns, SECURITY_PATTERNS } from '../../analyzers/pattern-engine.js';
-import { isSourceFile, readSkillText, skillFilesOf, skillsDirsOf } from './skill-files.js';
+import { isSourceFile, readSkillText, skillFilesOf, skillsDirsOf, noSkillsDirResult } from './skill-files.js';
 import { markTestCode } from '../../analyzers/test-paths.js';
 
 const CRED_HARVEST_RULES = SECURITY_PATTERNS.filter(r => r.category === 'credential-harvest');
@@ -31,7 +31,8 @@ export const skl006 = defineCheck({
   description: 'Detect access to .ssh, .aws, .env, and other credential stores',
 
   async run(ctx, h) {
-    if (skillsDirsOf(ctx).length === 0) return h.passed('No skills directory found');
+    const noDir = noSkillsDirResult(ctx, h);
+    if (noDir) return noDir;
 
     const evidence: Evidence[] = [];
     const files = await skillFilesOf(ctx);

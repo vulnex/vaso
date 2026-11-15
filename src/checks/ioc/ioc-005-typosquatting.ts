@@ -4,6 +4,7 @@ import { getIOCDatabase } from '../../ioc/database.js';
 import { getAllSkillsDirs } from '../../core/utils.js';
 import { namedSkills, nameSegments } from './skill-names.js';
 import { detectTyposquatting } from '../../ioc/typosquat.js';
+import { noSkillsDirResult } from '../skills/skill-files.js';
 
 /**
  * Ordinary words of tool names. A lookalike misspells the trusted name
@@ -44,7 +45,8 @@ export const ioc005 = defineCheck({
   async run(ctx, h) {
     const evidence: Evidence[] = [];
     const db = getIOCDatabase();
-    if (getAllSkillsDirs(ctx.installation).length === 0) return h.passed('No skills directory found');
+    const noDir = noSkillsDirResult(ctx, h);
+    if (noDir) return noDir;
 
     for (const skill of await namedSkills(ctx)) {
       for (const name of skill.names) {

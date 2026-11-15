@@ -3,7 +3,7 @@ import type { Evidence, Severity } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { analyzeCode, type DataFlowResult } from '../../analyzers/ast-analyzer.js';
 import { analyzePythonDataFlow } from '../../analyzers/python-sinks.js';
-import { readSkillText, skillFilesOf, skillsDirsOf } from './skill-files.js';
+import { readSkillText, skillFilesOf, skillsDirsOf, noSkillsDirResult } from './skill-files.js';
 import { markTestCode } from '../../analyzers/test-paths.js';
 
 /**
@@ -37,7 +37,8 @@ export const skl001 = defineCheck({
   description: 'Detect data flows from file/env sources to network or process-execution sinks (AST-based)',
 
   async run(ctx, h) {
-    if (skillsDirsOf(ctx).length === 0) return h.passed('No skills directory found');
+    const noDir = noSkillsDirResult(ctx, h);
+    if (noDir) return noDir;
 
     const evidence: Evidence[] = [];
     const levels: Severity[] = [];

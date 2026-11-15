@@ -55,6 +55,15 @@ describe('validateSnapshot', () => {
     expect(errors.some(e => e.startsWith('Invalid privilege field'))).toBe(true);
   });
 
+  it('rejects mistyped commandOutputs entries (checks read them as text)', () => {
+    const ok = { stdout: 'x', stderr: '', exitCode: 0 };
+    expect(validateSnapshot(snap({ commandOutputs: { a: ok } }))).toEqual([]);
+    expect(validateSnapshot(snap({ commandOutputs: { a: ok, b: { stdout: 5, stderr: [1], exitCode: '0' }, c: 'x' } })))
+      .toContain('2 commandOutputs entries are not {stdout, stderr, exitCode} objects (text, text, integer)');
+    expect(validateSnapshot(snap({ commandOutputs: { a: { stdout: '', stderr: '' } } })))
+      .toContain('1 commandOutputs entry is not {stdout, stderr, exitCode} objects (text, text, integer)');
+  });
+
   it('rejects malformed file entries and oversized content', () => {
     expect(validateSnapshot(snap({ files: { '/a': 'x', '/b': { content: 5 } } })))
       .toContain('2 file entries are not {content, mode, exists} objects');

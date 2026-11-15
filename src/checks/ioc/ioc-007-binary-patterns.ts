@@ -1,7 +1,7 @@
 import type { Evidence, ScanContext } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { getIOCDatabase } from '../../ioc/database.js';
-import { skillFilesOf, skillsDirsOf } from '../skills/skill-files.js';
+import { skillFilesOf, skillsDirsOf, noSkillsDirResult } from '../skills/skill-files.js';
 import { readCappedBytes, ScanLimitError } from '../../core/file-limits.js';
 import { extname } from 'node:path';
 import { binaryFormat, isScriptFile } from '../../analyzers/binary-text.js';
@@ -143,7 +143,8 @@ export const ioc007 = defineCheck({
 
   async run(ctx, h) {
     const evidence: Evidence[] = [];
-    if (skillsDirsOf(ctx).length === 0) return h.passed('No skills directory found');
+    const noDir = noSkillsDirResult(ctx, h);
+    if (noDir) return noDir;
 
     const db = getIOCDatabase();
     const files = await skillFilesOf(ctx);

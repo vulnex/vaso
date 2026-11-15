@@ -56,10 +56,9 @@ function validateFormatOption(options: { format?: string }, allowed?: readonly s
 const LISTING_FORMATS = ['terminal', 'json'] as const;
 
 /** The one line saying a repository's own rules were not loaded, and how to load them. */
-function untrustedProjectNotice(files: Array<{ rules: unknown[] }>, projectDir: string): string {
-  const count = files.reduce((n, f) => n + f.rules.length, 0);
+function untrustedProjectNotice(files: readonly unknown[], projectDir: string): string {
   const dir = escapeControlChars(projectDir, { lineBreaks: true });
-  return `Skipped ${count} project rule(s) in ${dir}/.vaso/rules/ — the project isn't trusted. `
+  return `Skipped ${files.length} project rule file(s) in ${dir}/.vaso/rules/ — the project isn't trusted. `
     + `To load them pass --project-rules, or add ${dir} to ~/.vaso/trusted-projects`;
 }
 
@@ -123,6 +122,9 @@ program
 
     if (needsRules) {
       const skipRules = subOpts.customRules === false;
+      if (skipRules && !silent && (subOpts.projectRules === true || (subOpts.rules as string[] | undefined)?.length)) {
+        console.error(chalk.yellow(`  Warning: ${subOpts.projectRules === true ? '--project-rules' : '--rules'} is ignored with --no-custom-rules (no declarative rules load)\n`));
+      }
 
       if (!skipRules) {
         const extraPaths = subOpts.rules as string[] | undefined;

@@ -3,7 +3,7 @@ import { defineCheck } from '../../core/check-builder.js';
 import { findHighEntropyBlocks } from '../../analyzers/entropy.js';
 import { OBFUSCATION_PATTERNS, analyzeObfuscation, isBenignEncodedData, isBinaryHexEscapes } from '../../analyzers/obfuscation.js';
 import { ScanLimitError } from '../../core/file-limits.js';
-import { readSkillText, skillFilesOf, skillsDirsOf, unreadableSkillFile } from './skill-files.js';
+import { readSkillText, skillFilesOf, skillsDirsOf, unreadableSkillFile, unscannedShort } from './skill-files.js';
 import { unlistableSkillDirs } from '../../core/utils.js';
 import { markTestCode } from '../../analyzers/test-paths.js';
 import { analysisEvasion } from '../../analyzers/ast-analyzer.js';
@@ -20,7 +20,8 @@ export const skl002 = defineCheck({
   description: 'Detect obfuscated code using Shannon entropy analysis and pattern matching',
 
   async run(ctx, h) {
-    if (skillsDirsOf(ctx).length === 0) return h.passed('No skills directory found');
+    const unscannedRoots = ctx.installation.unscannedSkillsDirs ?? [];
+    if (skillsDirsOf(ctx).length === 0 && unscannedRoots.length === 0) return h.passed('No skills directory found');
 
     const evidence: Evidence[] = [];
     const files = await skillFilesOf(ctx);
@@ -133,22 +134,27 @@ export const skl002 = defineCheck({
       });
     }
     // Skills directories the config sets where no scan walks (outside the
-    // home, a credential store, over the probe's limit, a relative path)
-    for (const { path, reason } of ctx.installation.unscannedSkillsDirs ?? []) {
-      evidence.push({ file: path, detail: unscannedReason(reason), mitigated: true });
+    // home, a credential store, over the probe's limit, a relative path):
+    // the agent loads whatever they hold, unreviewed — a warning, reported
+    // here once per directory (the other skill checks say "not verified")
+    for (const { path, reason } of unscannedRoots) {
+      evidence.push({ file: path, detail: unscannedReason(reason) });
     }
 
     await markTestCode(evidence, ctx.installation, ctx.fs);
     const notScanned = evidence.filter(e => e.line === undefined).length;
+    const rootNote = unscannedRoots.map(u => `skills directory ${u.path} not scanned (${unscannedShort(u.reason)})`);
     return h.fromEvidence(evidence, {
       passed: 'No obfuscated code blocks detected',
       failed: (n) => {
         const blocks = n - notScanned;
+        const otherLocations = notScanned - unscannedRoots.length;
         const parts = [
           ...(blocks > 0 ? [`${blocks} obfuscated code block(s) — possible obfuscation`] : []),
-          ...(notScanned > 0 ? [`${notScanned} skill location(s) not scanned`] : []),
+          ...(otherLocations > 0 ? [`${otherLocations} skill location(s) not scanned`] : []),
         ];
-        return `Found ${parts.join('; ')}`;
+        const found = parts.length > 0 ? `Found ${parts.join('; ')}` : '';
+        return [found, ...rootNote].filter(Boolean).join('; ');
       },
     });
   },

@@ -121,7 +121,14 @@ export function validateSnapshot(value: unknown): string[] {
     Array.isArray(o) && o.length === 2 && o.every(id => Number.isInteger(id) && id >= 0)))) {
     errors.push('Invalid owners field ([uid, gid] pairs expected)');
   }
-  if (!isRecord(s.commandOutputs)) errors.push('Missing or invalid commandOutputs field');
+  if (!isRecord(s.commandOutputs)) {
+    errors.push('Missing or invalid commandOutputs field');
+  } else {
+    // Checks read stdout/stderr as text and branch on the exit status
+    const bad = Object.values(s.commandOutputs).filter(o => !isRecord(o)
+      || typeof o.stdout !== 'string' || typeof o.stderr !== 'string' || !Number.isInteger(o.exitCode)).length;
+    if (bad > 0) errors.push(`${bad} commandOutputs entr${bad === 1 ? 'y is' : 'ies are'} not {stdout, stderr, exitCode} objects (text, text, integer)`);
+  }
   if (s.env !== undefined && !isStringRecord(s.env)) errors.push('Invalid env field (string values expected)');
   if (s.symlinks !== undefined && !isStringRecord(s.symlinks)) errors.push('Invalid symlinks field (link targets expected)');
   if (s.configTrees !== undefined) {

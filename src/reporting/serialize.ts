@@ -482,17 +482,87 @@ function maskLine(raw: string): string {
 const CUT_TOKEN_TAIL = new RegExp(String.raw`\b(${[...CUT_PREFIXES, String.raw`\d{8,10}:`].join('|')})[A-Za-z0-9_.$-]{4,}((?: ?\.\.\.|…)?)$`);
 
 /**
- * A config value quoted in a finding: a string under a credential name is
- * masked (references and placeholders stay), and every string inside it is
- * masked as text.
+ * Whether a config path names a credential: any segment does (`apiKeys.0`,
+ * `credentials.db.user`, `env.PIN`) — array indices skipped — unless its
+ * last name is a setting about one (`session.timeout`, `max_tokens`).
  */
-export function maskConfigValue(name: string, value: unknown): unknown {
-  if (typeof value === 'string') return isSecretName(name) ? mask(value) : maskCredentialsInText(value);
-  if (Array.isArray(value)) return value.map(v => maskConfigValue(name, v));
+function isSecretPath(path: string): boolean {
+  const names = path.split('.').filter(s => s !== '' && !/^\d+$/.test(s));
+  const leaf = names.at(-1);
+  if (leaf === undefined || SETTING_NAME.test(leaf)) return false;
+  return names.some(n => isSecretName(n));
+}
+
+/**
+ * A config value quoted in a finding (`name` is its key or dotted path): a
+ * string or number under a credential name — or anywhere below one — is
+ * masked (references and placeholders stay), an `args` array is masked as
+ * argv (the value after `--api-key`), and every other string is masked as text.
+ */
+export function maskConfigValue(name: string, value: unknown, inherited = false): unknown {
+  const secret = inherited || isSecretPath(name);
+  if (typeof value === 'string') return secret ? mask(value) : maskCredentialsInText(value);
+  if (typeof value === 'number' || typeof value === 'bigint') return secret ? MASK : value;
+  if (Array.isArray(value)) {
+    if (!secret && /(?:^|\.)args$/.test(name) && isStringArray(value)) return maskArgv(value);
+    return value.map(v => maskConfigValue(name, v, secret));
+  }
   if (value && typeof value === 'object') {
-    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, maskConfigValue(k, v)]));
+    const command = (value as { command?: unknown }).command;
+    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k,
+      !secret && k === 'args' && isStringArray(v) ? maskArgv(v, command) : maskConfigValue(k, v, secret)]));
   }
   return value;
+}
+
+/** At most this many credential values are collected from one config file. */
+const MAX_CREDENTIAL_VALUES = 2000;
+
+/**
+ * The credential values a parsed config holds — every string or number
+ * maskConfigValue masks whole (each line of a multi-line one) — so a line
+ * quoted from the file can be masked even where the line alone doesn't show
+ * it is a credential (an argv element below its flag, an item of a
+ * `secrets:` list, a numeric PIN).
+ */
+export function credentialValuesIn(data: unknown): string[] {
+  const out = new Set<string>();
+  const add = (v: string) => {
+    for (const line of v.split(/\r?\n/)) {
+      const t = line.trim();
+      if (t.length >= 3 && t !== MASK && out.size < MAX_CREDENTIAL_VALUES) out.add(t);
+    }
+  };
+  const visit = (orig: unknown, masked: unknown): void => {
+    if (out.size >= MAX_CREDENTIAL_VALUES) return;
+    if (masked === MASK && (typeof orig === 'string' || typeof orig === 'number' || typeof orig === 'bigint')) {
+      add(String(orig));
+    } else if (Array.isArray(orig) && Array.isArray(masked)) {
+      orig.forEach((o, i) => visit(o, masked[i]));
+    } else if (orig && typeof orig === 'object' && masked && typeof masked === 'object') {
+      for (const [k, v] of Object.entries(orig)) visit(v, (masked as Record<string, unknown>)[k]);
+    }
+  };
+  visit(data, maskConfigValue('', data));
+  return [...out];
+}
+
+const escapeRegex = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * A masker replacing each of `values` (credentialValuesIn) wherever it
+ * stands as a whole word in a line — also JSON-escaped (`pw\"x`).
+ */
+export function knownValueMasker(values: readonly string[]): (line: string) => string {
+  const forms = new Set<string>();
+  for (const v of values) {
+    forms.add(v);
+    forms.add(JSON.stringify(v).slice(1, -1));
+  }
+  if (forms.size === 0) return line => line;
+  const alternatives = [...forms].sort((a, b) => b.length - a.length).map(escapeRegex).join('|');
+  const re = new RegExp(`(?<![A-Za-z0-9_])(?:${alternatives})(?![A-Za-z0-9_])`, 'g');
+  return line => line.replace(re, MASK);
 }
 
 /** Flags whose value is the next argv element. */

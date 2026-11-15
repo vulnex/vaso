@@ -8,6 +8,7 @@ import { markTestCode } from '../../analyzers/test-paths.js';
 import { readCappedFile } from '../../core/file-limits.js';
 import { collectServerDependencies } from '../../mcp/server-dependencies.js';
 import { exactVersion } from '../../core/version-range.js';
+import { noSkillsDirResult } from './skill-files.js';
 
 /**
  * Packages hijacked or sabotaged in specific releases (npm has since pulled
@@ -36,7 +37,8 @@ export const skl011 = defineCheck({
 
   async run(ctx, h) {
     const skillsDirs = getAllSkillsDirs(ctx.installation);
-    if (skillsDirs.length === 0) return h.passed('No skills directory found');
+    const noDir = noSkillsDirResult(ctx, h);
+    if (noDir) return noDir;
 
     const db = getIOCDatabase();
     const skills = await listSkills(ctx.fs, skillsDirs, { rootIsSkill: ctx.installation.agent === 'skill-audit' });
