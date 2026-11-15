@@ -210,6 +210,16 @@ describe('MCPDiscovery — Atomic Agent', () => {
     expect(cfg.servers[1].headers).toEqual({ Authorization: 'Bearer t' });
   });
 
+  it('lists a server without transport.kind by what it names, as AT-007 judges it', async () => {
+    const noKind = JSON.stringify({ mcp: { servers: [
+      { name: 'cmd', transport: { command: 'npx', args: ['-y', 'x'] } },
+      { name: 'web', transport: { url: 'https://mcp.example.test/mcp' } },
+      { name: 'odd', transport: { kind: 'carrier_pigeon', command: 'x' } },
+    ] } });
+    const result = await new MCPDiscovery(makeFs({ '/home/t/.atomic-agent/config.json': noKind })).discover('linux');
+    expect(result.configs[0].servers.map(s => [s.name, s.transport])).toEqual([['cmd', 'stdio'], ['web', 'streamable-http']]);
+  });
+
   it('honours ATOMIC_AGENT_STATE_DIR', async () => {
     const fs = makeFs({ '/srv/atomic/config.json': config }, { ATOMIC_AGENT_STATE_DIR: '/srv/atomic' });
     const result = await new MCPDiscovery(fs).discover('linux');

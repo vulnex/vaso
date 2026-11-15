@@ -417,8 +417,13 @@ function parseAtomicAgentEntries(data: Record<string, unknown>): MCPServerEntry[
     const entry = raw as Record<string, unknown>;
     if (typeof entry.name !== 'string') continue;
     const t = entry.transport as Record<string, unknown> | undefined;
-    const transport = ATOMIC_TRANSPORTS[String(t?.kind)];
-    if (!t || !transport) continue;
+    if (!t || typeof t !== 'object') continue;
+    // No `kind`: judged by what it names, as AT-007 judges it (a command
+    // launches a process, a url is reached over HTTP); an unknown kind is skipped
+    const transport = t.kind === undefined
+      ? (typeof t.command === 'string' ? 'stdio' : typeof t.url === 'string' ? 'streamable-http' : undefined)
+      : ATOMIC_TRANSPORTS[String(t.kind)];
+    if (!transport) continue;
     servers.push({
       name: entry.name,
       command: typeof t.command === 'string' ? t.command : undefined,
