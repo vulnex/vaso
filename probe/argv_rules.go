@@ -15,12 +15,14 @@ import (
 //     flag-shaped (--name, -n: ^--?[A-Za-z][A-Za-z0-9_-]*$ with a name that
 //     doesn't look random) or exactly "--" (end of options: what follows is
 //     a positional). Any other "-"-led element (-Xq9Zr…) is a value.
-//  2. -p after a password client (mysql, mysqldump, mariadb, mysqladmin,
-//     sshpass) is a password, separate or glued, unless a reference; after
-//     psql, pg_dump or redis-cli it is a port; after anything else -p <v> is a
-//     password only when v looks like a credential (MCP-003's
-//     looksLikeSecret) and is no port, port mapping, version, package spec,
-//     reference or lowercase word.
+//  2. -p<v> glued after a password client (mysql, mysqldump, mariadb,
+//     mysqladmin, sshpass) is a password unless a reference; a separate
+//     -p <v> is one only after sshpass (MySQL/MariaDB take the password glued:
+//     in mysql -p app_db, app_db is the database). After psql, pg_dump or
+//     redis-cli -p is a port; anywhere else (a MySQL client's separate -p
+//     included) -p <v> is a password only when v looks like a credential
+//     (MCP-003's looksLikeSecret) and is no port, port mapping, version,
+//     package spec, reference or lowercase word.
 //  3. -k <v> is a credential when v looks random and is no URL, host[:port]
 //     or path ("/" and "+" inside a base64 key don't make it one).
 //  4. redis-cli -a <v> is a password unless a reference.
@@ -146,8 +148,10 @@ func judgeArgv(tokens []string) []argvHit {
 				client = name
 			}
 		case t == "-p":
+			// a separate value is the password only after sshpass; MySQL/MariaDB
+			// take it glued (`mysql -p app_db` prompts, app_db is the database)
 			if v, ok := value(i); ok {
-				if passwordClients[client] && passwordValue(v) || !passwordClients[client] && !portClients[client] && unknownPassword(v) {
+				if client == "sshpass" && passwordValue(v) || client != "sshpass" && !portClients[client] && unknownPassword(v) {
 					hits = append(hits, argvHit{i + 1, 0, len(v)})
 				}
 				i++
