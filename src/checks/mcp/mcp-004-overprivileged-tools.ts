@@ -3,6 +3,7 @@ import { defineCheck } from '../../core/check-builder.js';
 import { analyzeCode, type DataFlowResult } from '../../analyzers/ast-analyzer.js';
 import { analyzePythonSinks, type PythonSinkFinding } from '../../analyzers/python-sinks.js';
 import { findTaintedSinks } from '../../analyzers/tool-input-taint.js';
+import { maskSourceSecrets } from '../../mcp/source-snippet.js';
 
 /**
  * Commands that are an attack on their own, whoever supplies them: download
@@ -80,7 +81,7 @@ export const mcp004 = defineCheck({
             evidence.push({
               file: source.localPath ?? source.serverName,
               line: finding.line,
-              snippet: finding.snippet,
+              snippet: maskSourceSecrets(source, finding.snippet),
               detail: `Sensitive file access: ${finding.description}`,
             });
             continue;
@@ -90,7 +91,7 @@ export const mcp004 = defineCheck({
           evidence.push({
             file: source.localPath ?? source.serverName,
             line: finding.line,
-            snippet: finding.snippet,
+            snippet: maskSourceSecrets(source, finding.snippet),
             detail: `Command execution: ${finding.description} — ${why}`,
           });
         }
@@ -109,7 +110,7 @@ export const mcp004 = defineCheck({
         evidence.push({
           file,
           line: finding.line,
-          snippet: finding.snippet,
+          snippet: maskSourceSecrets(source, finding.snippet),
           detail: `Command execution: ${finding.description} — ${why}`,
         });
       }
@@ -119,7 +120,7 @@ export const mcp004 = defineCheck({
         evidence.push({
           file,
           line: finding.line,
-          snippet: finding.snippet,
+          snippet: maskSourceSecrets(source, finding.snippet),
           detail: `Sensitive file access: ${finding.description}`,
         });
       }

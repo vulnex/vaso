@@ -296,3 +296,33 @@ describe('analyzePythonSinks — path joins judged by where the name comes from 
     expect(analyzePythonSinks(param).filter(f => f.kind === 'injection').map(f => f.line)).toEqual([3]);
   });
 });
+
+describe('analyzePythonSinks — alias following', () => {
+  const HEAD = ['import os, subprocess, functools', 'from pathlib import Path', 'from mcp.server.fastmcp import FastMCP', "mcp = FastMCP('x')", "BASE = Path('/srv/docs')"];
+  const injected = (code: string[]) => analyzePythonSinks([...HEAD, ...code].join('\n')).filter((f) => f.kind === 'injection');
+
+  it('follows `b = a` and `b = a = os.system` alias chains', () => {
+    expect(injected(['a = os.system', 'b = a', '@mcp.tool()', 'def ping(host: str) -> str:', "    return str(b('ping -c1 ' + host))"])).not.toHaveLength(0);
+    expect(injected(['b = a = os.system', '@mcp.tool()', 'def ping(host: str) -> str:', "    return str(b('ping -c1 ' + host))"])).not.toHaveLength(0);
+  });
+
+  it('carries shell=True bound by functools.partial into the call', () => {
+    expect(injected(['shell_run = functools.partial(subprocess.run, shell=True)', '@mcp.tool()', 'def ping(host: str) -> str:', "    return shell_run('ping -c1 ' + host).stdout"])).not.toHaveLength(0);
+    expect(injected(['plain_run = functools.partial(subprocess.run, check=True)', '@mcp.tool()', 'def ping(host: str) -> str:', "    return plain_run(['ping', '-c1', host]).stdout"])).toHaveLength(0);
+  });
+
+  it('reads Path.joinpath(<name>) as a join of the caller-named part', () => {
+    expect(injected(['@mcp.tool()', 'def read(name: str) -> str:', '    return BASE.joinpath(name).read_text()'])).not.toHaveLength(0);
+    expect(injected(['@mcp.tool()', 'def read() -> str:', "    return BASE.joinpath('index.md').read_text()"])).toHaveLength(0);
+  });
+
+  it('stays linear in the number of aliases', () => {
+    const n = 4000;
+    const code = [...HEAD];
+    for (let i = 0; i < n; i++) code.push(`a${i} = getattr(subprocess, 'run')`);
+    for (let i = 0; i < n; i++) code.push('@mcp.tool()', `def t${i}(h: str) -> str:`, '    p = BASE / h', `    return a${i}(['ls', str(p)]).stdout`);
+    const start = Date.now();
+    analyzePythonSinks(code.join('\n'));
+    expect(Date.now() - start).toBeLessThan(5000);
+  });
+});

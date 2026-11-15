@@ -1,6 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { sourceSegments } from '../../mcp/source-segments.js';
+import { sourceSnippet } from '../../mcp/source-snippet.js';
 
 const LOCALHOST_EXCEPTIONS = ['localhost', '127.0.0.1', '[::1]'];
 
@@ -66,7 +67,7 @@ export const mcp016 = defineCheck({
             evidence.push({
               file: filePath,
               line: segments[i].line,
-              snippet: line.trim().slice(0, 120),
+              snippet: sourceSnippet(source, line),
               detail,
             });
             break;

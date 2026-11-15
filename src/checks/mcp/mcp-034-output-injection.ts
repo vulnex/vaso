@@ -4,6 +4,7 @@ import { extractToolDefinitions } from '../../mcp/tool-baseline.js';
 import { analyzeText, decodeUnicodeEscapes, hiddenCharacters, isInvisibleConstant, isWeakDirective } from '../../mcp/injection-directives.js';
 import { maskJsLiterals, pythonStringLines, stringLines } from '../../analyzers/string-literals.js';
 import type { StringLine } from '../../analyzers/string-literals.js';
+import { sourceSnippet } from '../../mcp/source-snippet.js';
 
 /**
  * MCP-034 — Prompt-Injection Directive in Tool Output.
@@ -78,7 +79,7 @@ export const mcp034 = defineCheck({
           evidence.push({
             file,
             line: unit.line,
-            snippet: trimmed.slice(0, 120),
+            snippet: sourceSnippet(source, trimmed),
             detail: `${reasons.join('; ')} inside prompt text in server "${source.serverName}" — content of an MCP prompt the user selects, not tool output; review only if a tool returns it`,
             mitigated: true,
           });
@@ -89,7 +90,7 @@ export const mcp034 = defineCheck({
         evidence.push({
           file,
           line: unit.line,
-          snippet: trimmed.slice(0, 120),
+          snippet: sourceSnippet(source, trimmed),
           detail: strong
             ? `Hardcoded ${reasons.join('; ')} in server "${source.serverName}" — directives embedded in returned tool content steer the client LLM at call time (indirect prompt injection)`
             : `Instruction-like phrasing (${reasons.join('; ')}) in server "${source.serverName}" — weak signal on its own: common in error messages and prompts; review whether it reaches tool output`,
@@ -108,7 +109,7 @@ export const mcp034 = defineCheck({
           evidence.push({
             file: data.path,
             line: i + 1,
-            snippet: lines[i].trim().slice(0, 120),
+            snippet: sourceSnippet(source, lines[i]),
             detail: strong
               ? `${reasons.join('; ')} in a data file server "${source.serverName}" loads — content it returns as tool output steers the client LLM (indirect prompt injection)`
               : `Instruction-like phrasing (${reasons.join('; ')}) in a data file server "${source.serverName}" loads — weak signal on its own; review the content it returns`,
@@ -161,7 +162,7 @@ export const mcp034 = defineCheck({
         evidence.push({
           file,
           line,
-          snippet: (lines[line - 1] ?? '').trim().slice(0, 120),
+          snippet: sourceSnippet(source, lines[line - 1] ?? ''),
           detail: `Hardcoded invisible/bidi characters (${invisible.join(', ')}) in server "${source.serverName}" — hidden text the client LLM reads but a reviewer cannot see`,
         });
       }

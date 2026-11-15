@@ -1,7 +1,8 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { isRemotePlaintextUrl, remoteEndpoint } from '../../mcp/remote-endpoint.js';
-import { sourceSegments, segmentSnippet } from '../../mcp/source-segments.js';
+import { sourceSegments } from '../../mcp/source-segments.js';
+import { sourceSnippet } from '../../mcp/source-snippet.js';
 
 /** Server code binding a listener to every interface. */
 const ALL_INTERFACES_BIND = [
@@ -101,7 +102,7 @@ export const mcp002 = defineCheck({
       evidence.push({
         file: source.localPath ?? source.packageName ?? source.serverName,
         line: bind.line,
-        snippet: segmentSnippet(bind),
+        snippet: sourceSnippet(source, bind.text),
         detail: inContainerOnly
           ? `Server "${source.serverName}" listens on every interface (0.0.0.0) when it detects a container, and its code has no authentication — anyone who can reach the published port can call its tools; publish it on 127.0.0.1 only`
           : `Server "${source.serverName}" listens on every network interface (0.0.0.0) and its code has no authentication — anyone who can reach the host can call its tools`,

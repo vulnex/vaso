@@ -1,7 +1,8 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { remoteEndpoint } from '../../mcp/remote-endpoint.js';
-import { sourceSegments, segmentSnippet } from '../../mcp/source-segments.js';
+import { sourceSegments } from '../../mcp/source-segments.js';
+import { sourceSnippet } from '../../mcp/source-snippet.js';
 
 const LOCALHOST_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '0:0:0:0:0:0:0:1']);
 
@@ -96,7 +97,7 @@ export const mcp023 = defineCheck({
         evidence.push({
           file: source.localPath ?? source.packageName ?? source.serverName,
           line: seg.line,
-          snippet: segmentSnippet(seg),
+          snippet: sourceSnippet(source, seg.text),
           detail: `Server "${source.serverName}" ${hit.detail} — Host/Origin validation is what stops a web page from driving the server through DNS rebinding or cross-origin requests`,
         });
       }

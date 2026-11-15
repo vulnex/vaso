@@ -27,7 +27,7 @@ export const EXTRA_TOKEN_PATTERNS: RegExp[] = [
   /^sk-lf-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, // Langfuse secret key
   /^xox[abeprs]-[A-Za-z0-9-]{10,}/,
   /^AIza[0-9A-Za-z_-]{30,}/,
-  /^ASIA[0-9A-Z]{16,}/,
+  /^ASIA[0-9A-Z]{16}\b/, // an STS key id is exactly 20 characters
   /^gsk_[A-Za-z0-9]{20,}/,
   /^hf_[A-Za-z0-9]{20,}/,
   /^xai-[A-Za-z0-9]{32,}/,

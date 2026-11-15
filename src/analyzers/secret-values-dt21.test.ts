@@ -23,3 +23,10 @@ describe('identity authority URLs (dt21 g6-F8)', () => {
     expect(isKnownSecretValue('https://actions.zapier.com/mcp/sk-ak-Zq8wLm3vT9kR2pN7aY4cB6dFhJ2k/sse')).toBe(true);
   });
 });
+
+describe('AWS temporary key ids are exactly ASIA + 16', () => {
+  it('matches the 20-character id, not a longer all-caps word', () => {
+    expect(isKnownSecretValue('ASIAQ7RT2MZ9KLP4WN1X')).toBe(true);
+    expect(isKnownSecretValue('ASIAPACIFICNORTHEAST1')).toBe(false);
+  });
+});

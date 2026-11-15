@@ -56,4 +56,12 @@ describe('findSourceSecrets — keyed fallbacks', () => {
     expect(findSourceSecrets('const cfg = { apiKey: process.env.API_KEY ?? "" };')).toEqual([]);
     expect(findSourceSecrets('const cfg = { token: process.env.TOKEN || "your-token-goes-here-123" };')).toEqual([]);
   });
+
+  it('takes an AWS key id only at its exact length (AKIA/ASIA + 16)', () => {
+    const body = tail(16, 'Q7RT2MZ9KLP4WN1X');
+    expect(findSourceSecrets(`const id = "ASIA${body}";`).map((s) => s.kind)).toEqual(['AWS temporary access key']);
+    expect(findSourceSecrets(`const id = "AKIA${body}";`).map((s) => s.kind)).toEqual(['AWS Access Key']);
+    expect(findSourceSecrets('const REGION = "ASIAPACIFICNORTHEAST1";')).toEqual([]);
+    expect(findSourceSecrets('const ZONE = "AKIAPACIFICNORTHEAST1";')).toEqual([]);
+  });
 });

@@ -2,6 +2,7 @@ import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { AUTH_CODE_GRANT, isAuthorizeRequest } from '../../mcp/oauth-context.js';
 import { sourceSegments, nearbyText, blockText, isStringConstant } from '../../mcp/source-segments.js';
+import { sourceSnippet } from '../../mcp/source-snippet.js';
 
 const CODE_CHALLENGE_PATTERN = /code_challenge/;
 const CODE_VERIFIER_PATTERN = /code_verifier/;
@@ -46,7 +47,7 @@ export const mcp013 = defineCheck({
             evidence.push({
               file: filePath,
               line: segments[i].line,
-              snippet: line.trim().slice(0, 120),
+              snippet: sourceSnippet(source, line),
               detail: 'OAuth authorization URL constructed without PKCE code_challenge parameter',
             });
           }
@@ -57,7 +58,7 @@ export const mcp013 = defineCheck({
           evidence.push({
             file: filePath,
             line: segments[i].line,
-            snippet: line.trim().slice(0, 120),
+            snippet: sourceSnippet(source, line),
             detail: 'PKCE code_challenge_method set to "plain" — must use "S256" for security',
           });
         }
@@ -70,7 +71,7 @@ export const mcp013 = defineCheck({
             evidence.push({
               file: filePath,
               line: segments[i].line,
-              snippet: line.trim().slice(0, 120),
+              snippet: sourceSnippet(source, line),
               detail: 'Token exchange with authorization_code grant but no code_verifier — PKCE not enforced',
             });
           }
