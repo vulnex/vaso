@@ -1,0 +1,7 @@
+{
+  "port": 18800,
+  "public": false,
+  "allowed_cidrs": [
+    "10.20.30.0/24"
+  ]
+}

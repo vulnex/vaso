@@ -286,6 +286,24 @@ describe('config-set paths a newer probe recorded', () => {
     }
   });
 
+  it('a manifest tree behind a linked wildcard directory the probe refused is not verified', async () => {
+    // ~/.picoclaw/workspace-*/skills/** is a manifest glob; workspace-x is a
+    // link out of the home, so the probe recorded the tree refused
+    const lnk = `${HOME}/.picoclaw/workspace-x/skills`;
+    const pc = inst('picoclaw', `${HOME}/.picoclaw`, [], { skillsDir: lnk, skillsDirs: [lnk] });
+    const fs = snapshot({}, { configTrees: { [lnk]: 'refused' }, symlinks: { [`${HOME}/.picoclaw/workspace-x`]: '/srv/elsewhere' } });
+    expect(probeCoversTree(fs, lnk)).toBe(false);
+    const res = await skl002.run(ctx(pc, fs));
+    expect(res.message).toBe('Found 1 skill location(s) not scanned');
+    const { inventory } = await collectSkillInventory(pc, fs);
+    expect(inventory.skillsDirs).toEqual([{ path: lnk, exists: false, unverified: true }]);
+    // The manifest's own tree wins where the snapshot holds it
+    const held = snapshot({ [`${lnk}/a/SKILL.md`]: file('# a\n') }, { configTrees: { [lnk]: 'refused' } });
+    expect(probeCoversTree(held, lnk)).toBe(true);
+    // …and a collected one is covered
+    expect(probeCoversTree(snapshot({}, { configTrees: { [lnk]: 'collected' } }), lnk)).toBe(true);
+  });
+
   it('a skill in a collected config-derived tree is inventoried', async () => {
     const fs = snapshot({ [`${ws}/evil/SKILL.md`]: file('# evil\n') }, { configTrees: { [ws]: 'collected' } });
     const { inventory } = await collectSkillInventory(nb, fs);

@@ -301,6 +301,13 @@ export class SnapshotFSProvider implements FSProvider {
     return Object.hasOwn(this.snapshot.directories, dir) ? this.snapshot.directories[dir] : undefined;
   }
 
+  /** The snapshot holds something below `dir` (a file, a listing or a link). */
+  holdsUnder(dir: string): boolean {
+    const prefix = dir.endsWith('/') ? dir : dir + '/';
+    return this.hasChildPaths(dir) || this.keysUnder('symlinks', prefix).length > 0
+      || this.keysUnder('directoryModes', prefix).length > 0;
+  }
+
   /** Config-derived trees the probe walked, by literal base path, with what it did. */
   configTrees(): Readonly<Record<string, ConfigTreeStatus>> {
     return this.snapshot.configTrees ?? {};

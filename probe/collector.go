@@ -536,6 +536,9 @@ func (c *collector) collectGlob(snapshot *ProbeSnapshot, pattern string) {
 	c.recordDeniedDirs(snapshot, pattern)
 	if c.inSkillTree {
 		c.collectUnlistableSkills(snapshot, pattern)
+		if !c.configTree {
+			c.collectLinkedSkillBases(snapshot, pattern)
+		}
 	}
 }
 
@@ -807,10 +810,11 @@ const maxLinkDepth = 8
 // is skipped: that content is already collected. Mirrors walkSkillTree in
 // src/core/skill-walk.ts so local and remote scans read the same files.
 func (c *collector) followLinkedTrees(snapshot *ProbeSnapshot, pattern string, matches []string, metadataOnly bool) {
-	if !strings.HasSuffix(filepath.ToSlash(pattern), "/**") {
+	root, ok := literalTreeRoot(pattern)
+	if !ok {
 		return
 	}
-	rootReal, err := filepath.EvalSymlinks(strings.TrimSuffix(filepath.ToSlash(pattern), "/**"))
+	rootReal, err := filepath.EvalSymlinks(root)
 	if err != nil {
 		return
 	}
@@ -844,7 +848,11 @@ func (c *collector) followFrom(snapshot *ProbeSnapshot, pattern string, matches 
 			continue // a file link was collected (followed) by the glob itself
 		}
 		visited[real] = true
-		sub, err := doublestar.FilepathGlob(filepath.Join(m, "**"), doublestar.WithNoFollow())
+		escaped, ok := escapeGlobMeta(m)
+		if !ok {
+			continue
+		}
+		sub, err := doublestar.FilepathGlob(filepath.Join(escaped, "**"), doublestar.WithNoFollow())
 		if err != nil {
 			continue
 		}
@@ -1492,11 +1500,10 @@ func expandForEach(req CommandRequest, outputs map[string]CommandOutput) [][]str
 // SKILL.md by name. Its mode is recorded and SKILL.md and package.json collected, as a local
 // scan reads it. The root is the pattern's literal prefix before "/**".
 func (c *collector) collectUnlistableSkills(snapshot *ProbeSnapshot, pattern string) {
-	i := strings.Index(pattern, "/**")
-	if i <= 0 || strings.ContainsAny(pattern[:i], "*?[{") {
+	root, ok := literalTreeRoot(pattern)
+	if !ok || root == "" {
 		return
 	}
-	root := pattern[:i]
 	entries, err := os.ReadDir(root)
 	if err != nil {
 		return
@@ -1531,11 +1538,10 @@ func (c *collector) collectNonUTF8Names(snapshot *ProbeSnapshot, pattern string)
 	if runtime.GOOS == "darwin" || runtime.GOOS == "windows" || !strings.HasSuffix(filepath.ToSlash(pattern), "/**") {
 		return
 	}
-	root := strings.TrimSuffix(filepath.ToSlash(pattern), "/**")
-	if strings.ContainsAny(root, "*?[{") {
+	root, ok := literalTreeRoot(pattern)
+	if !ok {
 		return
 	}
-	root = filepath.FromSlash(root)
 	_ = filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
 		if err != nil || p == root {
 			return nil

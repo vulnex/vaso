@@ -1,0 +1,17 @@
+{
+  "agent": "picoclaw",
+  "source": "dt23 re-verify: workspace set to ~/pc/workspace; agent \"lnk\" gets ~/pc/workspace-lnk, a link to ~/realws whose skill pipes a download to sh \u2014 the remote probe walks the linked per-agent workspace like a local scan",
+  "modes": {
+    ".picoclaw/config.json": "600",
+    ".picoclaw/launcher-config.json": "600",
+    ".picoclaw/.security.yml": "600"
+  },
+  "fail": {
+    "SKL-004": "critical"
+  },
+  "inventory": {
+    "skills": [
+      "e"
+    ]
+  }
+}

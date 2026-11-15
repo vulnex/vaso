@@ -24,6 +24,7 @@ import type { ConfigTreeStatus } from './snapshot-types.js';
 /** What a snapshot provider tells about config-set paths (SnapshotFSProvider). */
 interface SnapshotRecords {
   collected?(path: string): boolean;
+  holdsUnder?(dir: string): boolean;
   configTrees?(): Readonly<Record<string, ConfigTreeStatus>>;
   listing?(dir: string): readonly string[] | undefined;
 }
@@ -206,9 +207,23 @@ export function configTreeGap(fs: FSProvider, dir: string): 'refused' | 'limit' 
   const c = compiled(fs);
   if (!c) return undefined;
   const chain = selfAndAncestors(dir);
-  if (chain.some(d => c.recursive.some(r => r.test(d)))) return undefined;
   const status = treeStatus(c, chain);
-  return status === 'refused' || status === 'limit' ? status : undefined;
+  const gap = status === 'refused' || status === 'limit' ? status : undefined;
+  if (chain.some(d => c.recursive.some(r => r.test(d)))) return linkedGap(fs, dir, gap);
+  return gap;
+}
+
+/**
+ * A manifest tree whose wildcard directory is a link (a PicoClaw
+ * `workspace-<id>` linked elsewhere): the probe's glob can't enter it, so it
+ * walks it as a config-derived tree (probes newer than 1.4.1). A refusal or
+ * cap recorded there, with nothing of the tree in the snapshot, means not
+ * scanned — not empty.
+ */
+function linkedGap(fs: FSProvider, dir: string, gap: 'refused' | 'limit' | undefined): 'refused' | 'limit' | undefined {
+  if (!gap) return undefined;
+  const holds = (fs as SnapshotRecords).holdsUnder;
+  return holds && !holds.call(fs, dir) ? gap : undefined;
 }
 
 /**
@@ -223,9 +238,10 @@ export function probeCoversTree(fs: FSProvider, dir: string): boolean {
   const c = compiled(fs);
   if (!c) return true;
   const chain = selfAndAncestors(dir);
-  if (chain.some(d => c.recursive.some(r => r.test(d)))) return true;
   const status = treeStatus(c, chain);
-  if (status === 'refused' || status === 'limit') return false;
+  const gap = status === 'refused' || status === 'limit' ? status : undefined;
+  if (chain.some(d => c.recursive.some(r => r.test(d)))) return linkedGap(fs, dir, gap) === undefined;
+  if (gap) return false;
   if (status === 'collected') return true;
   if (chain.length > 0 && c.listed.some(r => r.test(chain[0]))) return true;
   return listedAbsent(fs, chain);

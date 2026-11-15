@@ -244,11 +244,16 @@ func (c *collector) collectConfigRoots(snapshot *ProbeSnapshot, requests []Confi
 					continue
 				}
 				root, ok := resolveConfigValue(req, raw, src)
-				if !ok || strings.ContainsAny(root, "*?[{\\") {
-					continue // a literal glob character can't be walked as one
+				if !ok {
+					continue
+				}
+				// A directory named `ws[2]` is walked as itself
+				pattern, ok := escapeGlobMeta(root)
+				if !ok {
+					continue
 				}
 				for _, g := range req.Globs {
-					c.collectConfigTree(snapshot, root, g, src.home)
+					c.collectConfigTree(snapshot, pattern, g, src.home)
 				}
 			}
 		}
@@ -308,22 +313,22 @@ func (c *collector) collectConfigTree(snapshot *ProbeSnapshot, root, g, home str
 	if snapshot.ConfigTrees == nil {
 		snapshot.ConfigTrees = make(map[string]string)
 	}
-	if !strings.ContainsAny(base, "*?[{") {
-		c.collectConfigBase(snapshot, filepath.FromSlash(base), home)
+	if !hasGlobMeta(base) {
+		c.collectConfigBase(snapshot, filepath.FromSlash(unescapeGlob(base)), home)
 		return
 	}
 	// The directory the first wildcard segment ranges over, and the ones it
 	// matches, are listed (names only) when a tree could be walked there; a
 	// home is never listed — a match missing below it stays not verified
-	static, _ := doublestar.SplitPattern(base)
+	static, rest := doublestar.SplitPattern(base)
 	staticDir := filepath.FromSlash(static)
-	if treeAllowed(staticDir, home) {
-		rest := strings.TrimPrefix(strings.TrimPrefix(base, static), "/")
+	escapedStatic, ok := escapeGlobMeta(staticDir)
+	if ok && treeAllowed(staticDir, home) {
 		first := strings.SplitN(rest, "/", 2)[0]
 		if listing := collectDirectory(staticDir, snapshot.Symlinks); listing != nil {
 			snapshot.Directories[staticDir] = listing
 		}
-		if dirs, err := doublestar.FilepathGlob(filepath.Join(staticDir, first), doublestar.WithNoFollow()); err == nil {
+		if dirs, err := doublestar.FilepathGlob(filepath.Join(escapedStatic, first), doublestar.WithNoFollow()); err == nil {
 			for _, d := range dirs {
 				if !treeAllowed(d, home) {
 					continue
@@ -334,13 +339,138 @@ func (c *collector) collectConfigTree(snapshot *ProbeSnapshot, root, g, home str
 			}
 		}
 	}
-	matches, err := doublestar.FilepathGlob(filepath.FromSlash(base), doublestar.WithNoFollow())
-	if err != nil {
-		return
-	}
-	for _, m := range matches {
+	// A match reached through a directory link (a per-agent workspace that is
+	// a link) is the agent's tree too: collectConfigBase judges where it leads
+	for _, m := range expandFollowingDirLinks(filepath.FromSlash(base)) {
 		c.collectConfigBase(snapshot, m, home)
 	}
+}
+
+// maxLinkedExpansion bounds how many paths expandFollowingDirLinks returns.
+const maxLinkedExpansion = maxConfigTrees
+
+// expandFollowingDirLinks expands a wildcard path (no `**`) segment by
+// segment, following directory links at every segment as an agent opening
+// `<dir>/workspace-<id>/skills` does — doublestar's no-follow glob never
+// enters a linked `workspace-<id>`. Matches keep the names they were reached
+// by; nothing is read but directory listings.
+func expandFollowingDirLinks(pattern string) []string {
+	static, rest := doublestar.SplitPattern(filepath.ToSlash(pattern))
+	if rest == "" {
+		if _, err := os.Lstat(pattern); err == nil {
+			return []string{pattern}
+		}
+		return nil
+	}
+	segs := strings.Split(rest, "/")
+	for _, seg := range segs {
+		if seg == "**" {
+			matches, _ := doublestar.FilepathGlob(pattern, doublestar.WithNoFollow())
+			return matches
+		}
+	}
+	cur := []string{filepath.FromSlash(static)}
+	for i, seg := range segs {
+		last := i == len(segs)-1
+		var next []string
+		for _, dir := range cur {
+			if !strings.ContainsAny(seg, `*?[{\`) {
+				if p := filepath.Join(dir, seg); keepExpanded(p, last) {
+					next = append(next, p)
+				}
+				continue
+			}
+			entries, err := os.ReadDir(dir) // follows dir when it is a link
+			if err != nil {
+				continue
+			}
+			for _, e := range entries {
+				if ok, _ := doublestar.Match(seg, e.Name()); !ok {
+					continue
+				}
+				if p := filepath.Join(dir, e.Name()); keepExpanded(p, last) {
+					next = append(next, p)
+				}
+			}
+		}
+		if len(next) > maxLinkedExpansion {
+			next = next[:maxLinkedExpansion]
+		}
+		cur = next
+	}
+	sort.Strings(cur)
+	return cur
+}
+
+// keepExpanded: p exists, and is a directory (or a link to one) unless it is
+// the last segment.
+func keepExpanded(p string, last bool) bool {
+	if last {
+		_, err := os.Lstat(p)
+		return err == nil
+	}
+	st, err := os.Stat(p)
+	return err == nil && st.IsDir()
+}
+
+// throughLink: a component of p below static (p itself included) is a symlink.
+func throughLink(static, p string) bool {
+	rel, err := filepath.Rel(static, p)
+	if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
+		return false
+	}
+	cur := static
+	for _, part := range strings.Split(rel, string(filepath.Separator)) {
+		cur = filepath.Join(cur, part)
+		if info, err := os.Lstat(cur); err == nil && info.Mode()&os.ModeSymlink != 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// collectLinkedSkillBases walks, for a manifest skills glob with wildcard
+// directories (`~/.picoclaw/workspace-*/skills/**`), the bases its no-follow
+// glob couldn't enter because a matched directory is a link: as a
+// config-derived tree (treeAllowed — inside the scanned home, outside every
+// credential store), recorded in ConfigTrees under the linked path, so the
+// CLI reports one it refused or capped as not scanned instead of empty.
+func (c *collector) collectLinkedSkillBases(snapshot *ProbeSnapshot, pattern string) {
+	slash := filepath.ToSlash(pattern)
+	if !strings.HasSuffix(slash, "/**") {
+		return
+	}
+	base := strings.TrimSuffix(slash, "/**")
+	static, rest := doublestar.SplitPattern(base)
+	if rest == "" {
+		return
+	}
+	if snapshot.ConfigTrees == nil {
+		snapshot.ConfigTrees = make(map[string]string)
+	}
+	staticDir := filepath.FromSlash(static)
+	for _, m := range expandFollowingDirLinks(filepath.FromSlash(base)) {
+		if throughLink(staticDir, m) {
+			c.collectConfigBase(snapshot, m, c.homeOf(m))
+		}
+	}
+}
+
+// homeOf is the scanned home (or the probe user's) p lies strictly inside,
+// as written; "" when none — a tree there is refused.
+func (c *collector) homeOf(p string) string {
+	homes := c.homes
+	if own, err := os.UserHomeDir(); err == nil {
+		homes = append(homes[:len(homes):len(homes)], own)
+	}
+	best := ""
+	for _, h := range homes {
+		h = filepath.Clean(h)
+		if strictlyWithin(filepath.Clean(p), h) && len(h) > len(best) {
+			best = h
+		}
+	}
+	return best
 }
 
 // collectConfigBase walks base as a config-derived skill tree and records
@@ -350,7 +480,7 @@ func (c *collector) collectConfigBase(snapshot *ProbeSnapshot, base, home string
 	if _, done := snapshot.ConfigTrees[key]; done || len(snapshot.ConfigTrees) >= maxConfigTrees {
 		return
 	}
-	if !treeAllowed(base, home) || c.scannedHomeOrAbove(base) {
+	if home == "" || !treeAllowed(base, home) || c.scannedHomeOrAbove(base) {
 		snapshot.ConfigTrees[key] = treeRefused
 		return
 	}
@@ -358,9 +488,14 @@ func (c *collector) collectConfigBase(snapshot *ProbeSnapshot, base, home string
 		snapshot.ConfigTrees[key] = treeLimit
 		return
 	}
+	pattern, ok := escapeGlobMeta(base)
+	if !ok {
+		return
+	}
+	saved := [3]interface{}{c.inSkillTree, c.configTree, c.treeHome}
 	c.inSkillTree, c.configTree, c.treeHome = true, true, home
-	c.collectGlob(snapshot, filepath.Join(base, "**"))
-	c.inSkillTree, c.configTree, c.treeHome = false, false, ""
+	c.collectGlob(snapshot, filepath.Join(pattern, "**"))
+	c.inSkillTree, c.configTree, c.treeHome = saved[0].(bool), saved[1].(bool), saved[2].(string)
 	snapshot.ConfigTrees[key] = treeCollected
 }
 
@@ -481,6 +616,68 @@ var credentialName = regexp.MustCompile(`(?i)^(?:\.?(?:tokens?|secrets?|credenti
 
 func credentialFileName(p string) bool {
 	return credentialName.MatchString(filepath.Base(p))
+}
+
+// escapeGlobMeta escapes doublestar's metacharacters in a literal path, so a
+// directory named `ws[2]` or `ws{1}` is globbed as itself. ok is false where
+// `\` is the path separator (no escaping) and p holds a metacharacter.
+func escapeGlobMeta(p string) (string, bool) {
+	if !strings.ContainsAny(p, `*?[]{}\`) {
+		return p, true
+	}
+	if filepath.Separator == '\\' {
+		return p, false
+	}
+	var b strings.Builder
+	for _, r := range p {
+		if strings.ContainsRune(`*?[]{}\`, r) {
+			b.WriteByte('\\')
+		}
+		b.WriteRune(r)
+	}
+	return b.String(), true
+}
+
+// literalTreeRoot is the directory a `<root>/**` glob walks when root has no
+// unescaped metacharacter (escapes removed); ok is false otherwise.
+func literalTreeRoot(pattern string) (string, bool) {
+	slash := filepath.ToSlash(pattern)
+	if !strings.HasSuffix(slash, "/**") {
+		return "", false
+	}
+	root := strings.TrimSuffix(slash, "/**")
+	if hasGlobMeta(root) {
+		return "", false
+	}
+	return filepath.FromSlash(unescapeGlob(root)), true
+}
+
+// hasGlobMeta: s holds an unescaped glob metacharacter.
+func hasGlobMeta(s string) bool {
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '\\':
+			i++
+		case '*', '?', '[', '{':
+			return true
+		}
+	}
+	return false
+}
+
+// unescapeGlob removes escapeGlobMeta's backslashes.
+func unescapeGlob(s string) string {
+	if !strings.Contains(s, `\`) {
+		return s
+	}
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\\' && i+1 < len(s) {
+			i++
+		}
+		b.WriteByte(s[i])
+	}
+	return b.String()
 }
 
 // envRef is a ${NAME} reference in a config value.
