@@ -13,6 +13,7 @@ import { includeRootsFromEnv, loadOpenclawConfig } from './openclaw-includes.js'
 import { pathPresent } from './load-if-present.js';
 import { containerEnvironment, isOpenclawAutoBind, openclawAutoBindHost, openclawEffectiveBind, OPENCLAW_CONTAINER_MARKERS } from './openclaw-bind.js';
 import { dirExistsOrUncollected } from '../core/probe-coverage.js';
+import { screenSkillRoots } from '../core/skill-root-scope.js';
 
 /**
  * Files OpenClaw reads from its state dir besides the main config
@@ -362,10 +363,18 @@ export const openclawAdapter: AgentAdapter = {
         const expand = (p: string) => (p === '~' || p.startsWith('~/') ? join(home, p.slice(1)) : p);
         const workspace = getNestedValue(merged, 'agents.defaults.workspace');
         const extraDirs = getNestedValue(merged, 'skills.load.extraDirs');
+        // Roots the config sets are walked only inside the home; a relative
+        // one depends on OpenClaw's working directory (not documented, and
+        // unknown to either scan): reported, not guessed
+        const configSet = [
+          ...(typeof workspace === 'string' && workspace.trim() ? [join(expand(workspace.trim()), 'skills')] : []),
+          ...(Array.isArray(extraDirs) ? extraDirs.filter((d): d is string => typeof d === 'string' && d.trim() !== '').map(d => expand(d.trim())) : []),
+        ];
+        const { scan, unscanned } = await screenSkillRoots(fs, [...new Set(configSet)].filter(d => d !== skillsDir), home);
         const roots = [
           skillsDir,
-          join(typeof workspace === 'string' && workspace.trim() ? expand(workspace.trim()) : join(dir, 'workspace'), 'skills'),
-          ...(Array.isArray(extraDirs) ? extraDirs.filter((d): d is string => typeof d === 'string' && d.trim() !== '').map(d => expand(d.trim())) : []),
+          ...(typeof workspace === 'string' && workspace.trim() ? [] : [join(dir, 'workspace', 'skills')]),
+          ...scan,
         ].filter((d): d is string => Boolean(d));
         const skillsDirs: string[] = [];
         for (const d of [...new Set(roots)]) if (d === skillsDir || await dirExistsOrUncollected(fs, d)) skillsDirs.push(d);
@@ -377,6 +386,7 @@ export const openclawAdapter: AgentAdapter = {
           configFiles,
           skillsDir,
           skillsDirs: skillsDirs.length > 1 ? skillsDirs : undefined,
+          ...(unscanned.length > 0 ? { unscannedSkillsDirs: unscanned } : {}),
           gateway: openclawGatewayInfo(merged, inContainer),
           models: await this.getModels?.(configFiles),
           profile,

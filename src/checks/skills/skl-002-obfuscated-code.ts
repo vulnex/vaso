@@ -9,7 +9,8 @@ import { markTestCode } from '../../analyzers/test-paths.js';
 import { analysisEvasion } from '../../analyzers/ast-analyzer.js';
 import { truncateSnippet } from '../../core/patterns.js';
 import { maskEncodedLiterals } from '../../mcp/string-table.js';
-import { probeCoversTree } from '../../core/probe-coverage.js';
+import { configTreeGap, probeCoversTree } from '../../core/probe-coverage.js';
+import { unscannedReason } from '../../core/skill-root-scope.js';
 
 export const skl002 = defineCheck({
   id: 'SKL-002',
@@ -116,13 +117,25 @@ export const skl002 = defineCheck({
     // Nanobot/PicoClaw/ZeroClaw workspace set in its config) isn't in the
     // snapshot: whatever it holds was not scanned. Informational — it may not
     // exist at all — but never passed as reviewed.
+    // A tree the probe refused or capped may still be in the snapshot in part
+    // (another agent's files below it): judged before whether it exists.
     for (const skillsDir of skillsDirsOf(ctx)) {
+      const gap = configTreeGap(ctx.fs, skillsDir);
+      if (gap) {
+        evidence.push({ file: skillsDir, detail: unscannedReason(gap === 'refused' ? 'outside' : 'limit'), mitigated: true });
+        continue;
+      }
       if (probeCoversTree(ctx.fs, skillsDir) || await ctx.fs.access(skillsDir)) continue;
       evidence.push({
         file: skillsDir,
         detail: 'not scanned: skills directory not collected by the remote probe (set outside its default locations) — not verified; scan the host locally to check these skills',
         mitigated: true,
       });
+    }
+    // Skills directories the config sets where no scan walks (outside the
+    // home, a credential store, over the probe's limit, a relative path)
+    for (const { path, reason } of ctx.installation.unscannedSkillsDirs ?? []) {
+      evidence.push({ file: path, detail: unscannedReason(reason), mitigated: true });
     }
 
     await markTestCode(evidence, ctx.installation, ctx.fs);

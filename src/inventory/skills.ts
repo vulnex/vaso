@@ -6,7 +6,8 @@ import { parseYamlSafe } from '../core/yaml-safe.js';
 import { redactSecretsInLine } from '../core/patterns.js';
 import { maskCredentialsInLine } from '../reporting/serialize.js';
 import { shannonEntropy } from '../analyzers/entropy.js';
-import { probeCoversTree } from '../core/probe-coverage.js';
+import { configTreeGap, probeCoversTree } from '../core/probe-coverage.js';
+import { unscannedReason } from '../core/skill-root-scope.js';
 
 /**
  * Folders under a skills directory whose skills an agent doesn't load: Hermes
@@ -60,7 +61,21 @@ export async function collectSkillInventory(installation: AgentInstallation, fs:
   const incomplete: string[] = [];
   const allFiles: string[] = [];
 
+  // Skills directories the config sets where no scan walks: listed, unverified
+  for (const { path, reason } of installation.unscannedSkillsDirs ?? []) {
+    skillsDirs.push({ path, exists: await fs.access(path).catch(() => false), unverified: true });
+    incomplete.push(`${path}: ${unscannedReason(reason)}`);
+  }
+
   for (const root of roots) {
+    // A tree the remote probe refused or capped: whatever of it the snapshot
+    // holds for other reasons is not the tree — not walked, not verified
+    const gap = configTreeGap(fs, root);
+    if (gap) {
+      skillsDirs.push({ path: root, exists: await fs.access(root).catch(() => false), unverified: true });
+      incomplete.push(`${root}: ${unscannedReason(gap === 'refused' ? 'outside' : 'limit')}`);
+      continue;
+    }
     const listing = await listSkillTree(root, fs);
     const missing = listing.error !== undefined && isMissing(listing.error);
     // A snapshot has nothing for a directory the probe never collected (one a

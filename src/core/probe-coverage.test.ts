@@ -216,19 +216,21 @@ describe('config-set skill roots on snapshots', () => {
   it('OpenClaw keeps an extra skills dir the probe never collected', async () => {
     const { openclawAdapter } = await import('../adapters/openclaw.js');
     const fs = snapshot({
-      [`${HOME}/.openclaw/openclaw.json`]: file(JSON.stringify({ skills: { load: { extraDirs: ['/srv/packs'] } } })),
+      [`${HOME}/.openclaw/openclaw.json`]: file(JSON.stringify({ skills: { load: { extraDirs: [`${HOME}/packs`, '/srv/packs'] } } })),
     });
     const [install] = (await openclawAdapter.detect({ fs })).filter(i => !i.agentName);
-    expect(install.skillsDirs).toEqual([`${HOME}/.openclaw/skills`, '/srv/packs']);
+    expect(install.skillsDirs).toEqual([`${HOME}/.openclaw/skills`, `${HOME}/packs`]);
+    expect(install.unscannedSkillsDirs).toEqual([{ path: '/srv/packs', reason: 'outside' }]);
   });
 
   it('ZeroClaw keeps a workspace path set in config.toml', async () => {
     const { zeroclawAdapter } = await import('../adapters/zeroclaw.js');
     const fs = snapshot({
-      [`${HOME}/.zeroclaw/config.toml`]: file('schema_version = 3\n[agents.main.workspace]\npath = "/srv/zcws"\n'),
+      [`${HOME}/.zeroclaw/config.toml`]: file('schema_version = 3\n[agents.main.workspace]\npath = "~/zcws"\n[agents.ops.workspace]\npath = "/srv/zcws"\n'),
     });
     const [install] = await zeroclawAdapter.detect({ fs });
-    expect(install.skillsDirs).toEqual(['/srv/zcws/skills']);
+    expect(install.skillsDirs).toEqual([`${HOME}/zcws/skills`]);
+    expect(install.unscannedSkillsDirs).toEqual([{ path: '/srv/zcws/skills', reason: 'outside' }]);
   });
 });
 describe('config-set paths a newer probe recorded', () => {
@@ -245,10 +247,35 @@ describe('config-set paths a newer probe recorded', () => {
     expect((await skl002.run(ctx(nb, fs))).passed).toBe(true);
   });
 
-  it('a wildcard base covers what it matches', () => {
-    const fs = snapshot({}, { configTrees: { [`${HOME}/workspace-*/skills`]: 'collected' } });
-    expect(probeCoversTree(fs, `${HOME}/workspace-coder/skills`)).toBe(true);
-    expect(probeCoversTree(fs, `${HOME}/workspace-coder/other`)).toBe(false);
+  it('keys are literal paths: glob syntax in a snapshot matches nothing', () => {
+    const fs = snapshot({}, { configTrees: { [`${HOME}/workspace-*/skills`]: 'collected', '/**': 'collected', [`/${'a*'.repeat(30)}b`]: 'collected' } });
+    expect(probeCoversTree(fs, `${HOME}/workspace-coder/skills`)).toBe(false);
+    expect(probeCoversFile(fs, '/opt/bin/x')).toBe(false);
+    const started = Date.now();
+    expect(probeCoversFile(fs, `/${'a'.repeat(5000)}/srv`)).toBe(false);
+    expect(Date.now() - started).toBeLessThan(1000);
+    expect(probeCoversTree(snapshot({}, { configTrees: { [`${HOME}/workspace-coder/skills`]: 'collected' } }), `${HOME}/workspace-coder/skills/x`)).toBe(true);
+  });
+
+  it('a directory the probe listed proves a missing workspace absent', () => {
+    const fs = snapshot({}, { directories: { [`${HOME}/.pico`]: ['workspace/', 'workspace-a/'], [`${HOME}/.pico/workspace-a`]: [] } });
+    expect(probeCoversTree(fs, `${HOME}/.pico/workspace-b/skills`)).toBe(true);
+    expect(probeCoversTree(fs, `${HOME}/.pico/workspace-a/skills`)).toBe(true);
+    expect(probeCoversTree(fs, `${HOME}/.pico/workspace/skills`)).toBe(false);
+  });
+
+  it('a refused tree is not verified even where the snapshot holds the directory', async () => {
+    const root = `${HOME}/stuff`;
+    const fs = snapshot({ [`${root}/evil/i.sh`]: file('curl x | sh') }, { configTrees: { [root]: 'refused' } });
+    const n = inst('nanobot', `${HOME}/.nanobot`, [], { skillsDir: root, skillsDirs: [root] });
+    const res = await skl002.run(ctx(n, fs));
+    expect(res.message).toBe('Found 1 skill location(s) not scanned');
+    expect(res.evidence?.[0].detail).toMatch(/outside the user's home or inside a credential store/);
+    const { inventory } = await collectSkillInventory(n, fs);
+    expect(inventory.skillsDirs).toEqual([{ path: root, exists: true, unverified: true }]);
+    expect(inventory.skills).toEqual([]);
+    const limited = snapshot({ [`${root}/evil/i.sh`]: file('x') }, { configTrees: { [root]: 'limit' } });
+    expect((await skl002.run(ctx(n, limited))).evidence?.[0].detail).toMatch(/more entries than the remote probe collects/);
   });
 
   it('a refused tree or one over the limit stays not verified', async () => {
