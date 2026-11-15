@@ -65,7 +65,8 @@ describe('a skills directory outside the home', () => {
     expect(r.severity).toBe('info');
     expect(r.evidence).toHaveLength(1);
     expect(r.evidence![0].mitigated).toBe(true);
-    expect(r.evidence![0].detail).toMatch(/does not exist/);
+    const missing = join(tmp, 'nonexist-zz', 'skills');
+    expect(r.evidence![0].detail).toBe(`not scanned: skills directory ${missing} (outside the user's home or in a credential store) does not exist — nothing to scan`);
     expect(r.message).toContain('does not exist');
   });
 
