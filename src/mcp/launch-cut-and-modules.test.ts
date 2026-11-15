@@ -43,10 +43,57 @@ describe('package scripts longer than the read cap', () => {
     expect(source.sourceCode).toContain('exec(cmd)');
   });
 
+  it('a resolving first command does not hide that the rest was not read', async () => {
+    write('p/index.js', 'console.log("ok");\n');
+    const [source] = await resolveServerSources([server('npm', ['--prefix', pkg(`node index.js${' '.repeat(9000)}&& node evil.js`), 'start'])]);
+    expect(source.sourceCode).toContain('console.log');
+    expect(source.readFailure).toMatch(/longer than 8 KiB/);
+  });
+
   it('an entry word past the cap is not guessed: noted', async () => {
     const [source] = await resolveServerSources([server('npm', ['--prefix', pkg(`node${' '.repeat(60000)}evil.js`), 'start'])]);
     expect(source.sourceCode).toBeUndefined();
     expect(source.unanalyzed).toMatch(/longer than 8 KiB/);
+  });
+});
+
+describe('every command of a package script chain', () => {
+  it.each([
+    ['&&', 'node index.js && node evil.js'],
+    [';', 'node index.js; node evil.js'],
+    ['||', 'node index.js || node evil.js'],
+    ['a nested sh -c', `sh -c 'node index.js && node evil.js'`],
+  ])('%s: the later command\'s file is analysed too', async (_label, start) => {
+    write('p/index.js', 'console.log("ok");\n');
+    const [source] = await resolveServerSources([server('npm', ['--prefix', pkg(start), 'start'])]);
+    expect(source.sourceCode).toContain('console.log');
+    expect(source.sourceCode).toContain('exec(cmd)');
+    expect(source.readFailure).toBeUndefined();
+  });
+
+  it('a missing build output before a later command keeps the package entry', async () => {
+    write('p/index.js', EXEC_TOOL);
+    write('p/scripts/check.js', 'console.log("check");\n');
+    write('p/package.json', JSON.stringify({ name: 'p', version: '1.0.0', main: 'index.js', scripts: { start: 'node dist/server.js && node scripts/check.js' } }));
+    const [source] = await resolveServerSources([server('npm', ['--prefix', join(dir, 'p'), 'start'])]);
+    expect(source.sourceCode).toContain('exec(cmd)');
+    expect(source.sourceCode).toContain('console.log("check")');
+  });
+
+  it('more commands than the cap: read only in part', async () => {
+    write('p/index.js', 'console.log("ok");\n');
+    const start = ['node index.js', ...Array.from({ length: 20 }, () => 'true'), 'node evil.js'].join(' && ');
+    const [source] = await resolveServerSources([server('npm', ['--prefix', pkg(start), 'start'])]);
+    expect(source.sourceCode).not.toContain('exec(cmd)');
+    expect(source.readFailure).toMatch(/more than 16 commands/);
+  });
+
+  it('a later command in another language is noted, not mixed in', async () => {
+    write('p/index.js', 'console.log("ok");\n');
+    write('p/tool.py', PY_TOOL);
+    const [source] = await resolveServerSources([server('npm', ['--prefix', pkg('node index.js && python3 tool.py'), 'start'])]);
+    expect(source.sourceCode).not.toContain('shell=True');
+    expect(source.readFailure).toMatch(/another language/);
   });
 });
 
