@@ -11,6 +11,15 @@ function anyHost(entry: string): boolean {
   return entry.includes('*') && /^[*.]+$/.test(entry);
 }
 
+/** What an anyHost entry opens, for the detail. */
+function reach(entry: string): string {
+  if (entry === '*' || !/^[*.]+$/.test(entry)) return 'lets sandboxed commands reach any host';
+  const labels = entry.split('.').filter(Boolean).length;
+  return labels <= 1
+    ? 'names no domain (wildcards only) and lets sandboxed commands reach any host'
+    : `names no domain (wildcards only) and lets sandboxed commands reach any host with ${labels} or more name labels (${labels === 2 ? 'every domain' : `e.g. ${['a', 'b', 'example', 'com'].slice(-labels).join('.')}`})`;
+}
+
 export const cur008 = defineCheck({
   id: 'CUR-008',
   name: 'Cursor Sandbox Network Unrestricted',
@@ -42,7 +51,7 @@ export const cur008 = defineCheck({
             evidence.push({
               file: config.filePath,
               snippet: `networkPolicy.allow contains "${open.trim()}"`,
-              detail: `A "${open.trim()}" allow entry ${/^[*.]+$/.test(open.trim()) && open.trim() !== '*' ? 'names no domain (wildcards only) and ' : ''}lets sandboxed commands reach any host`,
+              detail: `A "${open.trim()}" allow entry ${reach(open.trim())}`,
             });
           }
         }
