@@ -1,5 +1,5 @@
 import { extname } from 'node:path';
-import type { CheckResult, Evidence, ScanContext, UnscannedSkillsDir } from '../../core/types.js';
+import type { CheckModule, CheckResult, Evidence, ScanContext, UnscannedSkillsDir } from '../../core/types.js';
 import type { CheckHelpers } from '../../core/check-builder.js';
 import type { FSProvider } from '../../core/fs-provider.js';
 import { BINARY_EXTENSIONS, getAllSkillsDirs, getSkillFiles } from '../../core/utils.js';
@@ -34,6 +34,26 @@ export function noSkillsDirResult(ctx: ScanContext, h: CheckHelpers, none = 'No 
   if (unscanned.length === 0) return h.passed(none);
   const list = unscanned.map(u => `${u.path} (${unscannedShort(u.reason)})`).join(', ');
   return h.passed(`Not verified — skills directory ${list} not scanned; reported by SKL-002`);
+}
+
+/**
+ * A skill check whose pass says which config-set skills directories it did
+ * not look at, when the installation has others it did scan: "No reverse
+ * shell detected" over the scanned ones alone would read as a verdict on all
+ * (with none scanned, noSkillsDirResult already says "Not verified").
+ */
+export function notingUnscannedRoots(check: CheckModule): CheckModule {
+  const run = check.run;
+  return {
+    ...check,
+    async run(ctx) {
+      const result = await run(ctx);
+      const unscanned = ctx.installation.unscannedSkillsDirs ?? [];
+      if (!result.passed || unscanned.length === 0 || skillsDirsOf(ctx).length === 0) return result;
+      const list = unscanned.map(u => u.path).join(', ');
+      return { ...result, message: `${result.message} (skills ${unscanned.length === 1 ? 'directory' : 'directories'} ${list} not scanned; see SKL-002)` };
+    },
+  };
 }
 
 /** The engine's skill file list, else a walk of every skills directory. */

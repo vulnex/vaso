@@ -12,19 +12,11 @@ import { skl010 } from './skl-010-unauthorized-fs.js';
 import { skl011 } from './skl-011-dependency-audit.js';
 import { skl012 } from './skl-012-code-complexity.js';
 import { skl013 } from './skl-013-symlink-escape.js';
+import { notingUnscannedRoots } from './skill-files.js';
 
+// SKL-002 reports the unscanned directories itself; the others note them on a pass
 export const skillChecks: CheckModule[] = [
-  skl001,
+  notingUnscannedRoots(skl001),
   skl002,
-  skl003,
-  skl004,
-  skl005,
-  skl006,
-  skl007,
-  skl008,
-  skl009,
-  skl010,
-  skl011,
-  skl012,
-  skl013,
+  ...[skl003, skl004, skl005, skl006, skl007, skl008, skl009, skl010, skl011, skl012, skl013].map(notingUnscannedRoots),
 ];
