@@ -31,8 +31,15 @@ describe('DEV-001 permission mode', () => {
     expect(r.evidence?.[0].snippet).toBe('permission_mode: "dangerous"');
   });
 
+  it('warns on Accept Edits mode (workspace edits auto-approved)', async () => {
+    const r = await dev001.run(ctx({ permission_mode: 'accept-edits' }));
+    expect(r.passed).toBe(false);
+    expect(r.severity).toBe('warning');
+    expect(r.evidence?.[0].snippet).toBe('permission_mode: "accept-edits"');
+  });
+
   it('passes the other modes', async () => {
-    for (const mode of ['normal', 'accept-edits', 'smart', null]) {
+    for (const mode of ['normal', 'smart', null]) {
       expect((await dev001.run(ctx({ permission_mode: mode }))).passed, String(mode)).toBe(true);
     }
   });

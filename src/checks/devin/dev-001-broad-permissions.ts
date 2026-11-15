@@ -107,6 +107,14 @@ export const dev001 = defineCheck({
             snippet: `permission_mode: "${mode}"`,
             detail: 'New sessions start in Bypass mode — every tool call (shell, writes, MCP) is auto-approved without a prompt',
           });
+        } else if (typeof mode === 'string' && mode.trim().toLowerCase() === 'accept-edits') {
+          // docs.devin.ai/cli/reference/permissions: workspace file edits
+          // auto-approved; shell commands and outside writes still prompt
+          warningEvidence.push({
+            file: config.filePath,
+            snippet: `permission_mode: "${mode}"`,
+            detail: 'New sessions start in Accept Edits mode — workspace file edits are auto-approved without review (shell commands still prompt)',
+          });
         }
         if (config.data.local_tools_bypass_permissions === true) {
           warningEvidence.push({
@@ -217,7 +225,7 @@ export const dev001 = defineCheck({
       // Deny-gap alone is hygiene, not an exposure — info, as CC-008 rates
       // the same gap in Claude Code
       severity: criticalEvidence.length > 0 ? undefined
-        : warningEvidence.some(e => e.snippet?.startsWith('local_tools_bypass_permissions')) ? 'warning' : 'info',
+        : warningEvidence.some(e => e.snippet?.startsWith('local_tools_bypass_permissions') || e.snippet?.startsWith('permission_mode')) ? 'warning' : 'info',
       fixDescription: 'Remove permission_mode "dangerous" (use "normal" or "smart") and local_tools_bypass_permissions, scope Exec()/Write() allow rules to specific commands and paths, and add deny rules for shells, network tools, and credential paths',
     });
   },
