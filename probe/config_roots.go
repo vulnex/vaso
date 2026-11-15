@@ -248,7 +248,7 @@ func (c *collector) collectConfigRoots(snapshot *ProbeSnapshot, requests []Confi
 					continue // a literal glob character can't be walked as one
 				}
 				for _, g := range req.Globs {
-					c.collectConfigTree(snapshot, root, g)
+					c.collectConfigTree(snapshot, root, g, src.home)
 				}
 			}
 		}
@@ -285,104 +285,203 @@ func (c *collector) statConfigPath(snapshot *ProbeSnapshot, raw string, src conf
 	return n
 }
 
+// maxConfigTrees bounds how many config-derived trees one snapshot records
+// (the CLI rejects a snapshot with more, see snapshot-load.ts).
+const maxConfigTrees = 2000
+
 // collectConfigTree walks glob g under root as a skill tree, unless its base
-// is somewhere no tree is walked from or holds too much.
-func (c *collector) collectConfigTree(snapshot *ProbeSnapshot, root, g string) {
+// is somewhere no tree is walked from or holds too much. Every base is
+// recorded under its literal path: a wildcard base (`…/workspace-*/skills`)
+// is judged and recorded per match, and the directories its wildcard ranges
+// over are listed, so the CLI can tell a match that doesn't exist from one
+// the probe never looked at — without reading glob syntax out of a snapshot.
+func (c *collector) collectConfigTree(snapshot *ProbeSnapshot, root, g, home string) {
 	g = filepath.ToSlash(g)
 	if g != "**" && !strings.HasSuffix(g, "/**") {
 		return
 	}
 	pattern := filepath.Clean(filepath.Join(root, filepath.FromSlash(g)))
-	basePattern := filepath.ToSlash(strings.TrimSuffix(strings.TrimSuffix(filepath.ToSlash(pattern), "**"), "/"))
-	if basePattern == "" {
-		basePattern = "/"
+	base := strings.TrimSuffix(strings.TrimSuffix(filepath.ToSlash(pattern), "**"), "/")
+	if base == "" {
+		base = "/"
 	}
 	if snapshot.ConfigTrees == nil {
 		snapshot.ConfigTrees = make(map[string]string)
 	}
-	if _, done := snapshot.ConfigTrees[basePattern]; done {
+	if !strings.ContainsAny(base, "*?[{") {
+		c.collectConfigBase(snapshot, filepath.FromSlash(base), home)
 		return
 	}
-	bases := []string{filepath.FromSlash(basePattern)}
-	if strings.ContainsAny(basePattern, "*?[{") {
-		// judged per match: ~/workspace-*/skills is fine although ~ is not
-		matches, err := doublestar.FilepathGlob(filepath.FromSlash(basePattern), doublestar.WithNoFollow())
-		if err != nil {
-			snapshot.ConfigTrees[basePattern] = treeRefused
-			return
+	// The directory the first wildcard segment ranges over, and the ones it
+	// matches, are listed (names only) when a tree could be walked there; a
+	// home is never listed — a match missing below it stays not verified
+	static, _ := doublestar.SplitPattern(base)
+	staticDir := filepath.FromSlash(static)
+	if treeAllowed(staticDir, home) {
+		rest := strings.TrimPrefix(strings.TrimPrefix(base, static), "/")
+		first := strings.SplitN(rest, "/", 2)[0]
+		if listing := collectDirectory(staticDir, snapshot.Symlinks); listing != nil {
+			snapshot.Directories[staticDir] = listing
 		}
-		bases = matches
-	}
-	if c.unsafeTreeBase(filepath.FromSlash(basePattern)) {
-		snapshot.ConfigTrees[basePattern] = treeRefused
-		return
-	}
-	entries := 0
-	for _, b := range bases {
-		if c.unsafeTreeBase(b) {
-			snapshot.ConfigTrees[basePattern] = treeRefused
-			return
-		}
-		if entries += countTreeEntries(b, maxConfigTreeEntries-entries+1); entries > maxConfigTreeEntries {
-			snapshot.ConfigTrees[basePattern] = treeLimit
-			return
-		}
-	}
-	c.inSkillTree, c.configTree = true, true
-	c.collectGlob(snapshot, pattern)
-	c.inSkillTree, c.configTree = false, false
-	snapshot.ConfigTrees[basePattern] = treeCollected
-}
-
-// unsafeTreeBase: a directory no config-derived tree is walked from — the
-// root or a top-level directory, a scanned home or a directory above one, or
-// a credential store or shell startup file (lexically or once resolved).
-func (c *collector) unsafeTreeBase(b string) bool {
-	check := func(p string) bool {
-		p = filepath.Clean(p)
-		if !filepath.IsAbs(p) || p == string(filepath.Separator) || filepath.Dir(p) == string(filepath.Separator) {
-			return true
-		}
-		homes := c.homes
-		if own, err := os.UserHomeDir(); err == nil {
-			homes = append(homes[:len(homes):len(homes)], own)
-		}
-		for _, h := range homes {
-			if within(filepath.Clean(h), p) {
-				return true // p is h or above it
+		if dirs, err := doublestar.FilepathGlob(filepath.Join(staticDir, first), doublestar.WithNoFollow()); err == nil {
+			for _, d := range dirs {
+				if !treeAllowed(d, home) {
+					continue
+				}
+				if listing := collectDirectory(d, snapshot.Symlinks); listing != nil {
+					snapshot.Directories[d] = listing
+				}
 			}
 		}
-		return len(sinkSet(p)) > 0
 	}
-	if check(b) {
-		return true
+	matches, err := doublestar.FilepathGlob(filepath.FromSlash(base), doublestar.WithNoFollow())
+	if err != nil {
+		return
 	}
-	if real, err := filepath.EvalSymlinks(b); err == nil && real != b && check(real) {
-		return true
+	for _, m := range matches {
+		c.collectConfigBase(snapshot, m, home)
+	}
+}
+
+// collectConfigBase walks base as a config-derived skill tree and records
+// what it did under base's path.
+func (c *collector) collectConfigBase(snapshot *ProbeSnapshot, base, home string) {
+	key := filepath.ToSlash(filepath.Clean(base))
+	if _, done := snapshot.ConfigTrees[key]; done || len(snapshot.ConfigTrees) >= maxConfigTrees {
+		return
+	}
+	if !treeAllowed(base, home) || c.scannedHomeOrAbove(base) {
+		snapshot.ConfigTrees[key] = treeRefused
+		return
+	}
+	if countTreeEntries(base, home, maxConfigTreeEntries) > maxConfigTreeEntries {
+		snapshot.ConfigTrees[key] = treeLimit
+		return
+	}
+	c.inSkillTree, c.configTree, c.treeHome = true, true, home
+	c.collectGlob(snapshot, filepath.Join(base, "**"))
+	c.inSkillTree, c.configTree, c.treeHome = false, false, ""
+	snapshot.ConfigTrees[key] = treeCollected
+}
+
+// scannedHomeOrAbove: p is a scanned home, the probe user's home, or a
+// directory above one (homes nested in another user's home).
+func (c *collector) scannedHomeOrAbove(p string) bool {
+	homes := c.homes
+	if own, err := os.UserHomeDir(); err == nil {
+		homes = append(homes[:len(homes):len(homes)], own)
+	}
+	for _, h := range homes {
+		if within(filepath.Clean(h), filepath.Clean(p)) {
+			return true
+		}
 	}
 	return false
 }
 
-// countTreeEntries counts what a walk of dir would visit (vendor and VCS
-// directories skipped, links not followed), stopping past limit.
-func countTreeEntries(dir string, limit int) int {
+// treeAllowed is the one place a config-derived tree may be walked from, and
+// what a link met while walking one may lead to: strictly inside home — the
+// home of the user whose config named it — and outside every credential
+// store (SENSITIVE_SINKS), both as written and once resolved. Anything else
+// (/, /etc or /private/etc, other users' homes, the home itself, ~/.ssh,
+// ~/.config/gh…) is refused; the CLI applies the same rule to local scans
+// (src/core/skill-root-scope.ts).
+func treeAllowed(p, home string) bool {
+	p, home = filepath.Clean(p), filepath.Clean(home)
+	if !filepath.IsAbs(p) || !filepath.IsAbs(home) || home == string(filepath.Separator) {
+		return false
+	}
+	if !strictlyWithin(p, home) || len(sinkSet(p)) > 0 {
+		return false
+	}
+	realHome := resolveExisting(home)
+	real := resolveExisting(p)
+	return strictlyWithin(real, realHome) && len(sinkSet(real)) == 0
+}
+
+// strictlyWithin: p lies below dir (not dir itself).
+func strictlyWithin(p, dir string) bool {
+	return p != dir && within(p, dir)
+}
+
+// resolveExisting resolves p's links like a realpath, for as much of p as
+// exists: the deepest existing directory resolved, the rest appended as is.
+func resolveExisting(p string) string {
+	var tail []string
+	for cur := p; ; cur = filepath.Dir(cur) {
+		if real, err := filepath.EvalSymlinks(cur); err == nil {
+			for i := len(tail) - 1; i >= 0; i-- {
+				real = filepath.Join(real, tail[i])
+			}
+			return real
+		}
+		if filepath.Dir(cur) == cur {
+			return p
+		}
+		tail = append(tail, filepath.Base(cur))
+	}
+}
+
+// countTreeEntries counts what a config-tree walk of dir visits — vendor and
+// VCS directories skipped, directory links followed wherever the walk follows
+// them (treeAllowed targets, each real directory once, maxLinkDepth deep) —
+// stopping past limit. It may count more than the walk collects, never less.
+func countTreeEntries(dir, home string, limit int) int {
 	n := 0
-	_ = filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
-		if err != nil || p == dir {
+	visited := map[string]bool{}
+	rootReal, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		rootReal = dir
+	}
+	visited[rootReal] = true
+	var walk func(d string, depth int) bool
+	walk = func(d string, depth int) bool {
+		stop := false
+		_ = filepath.WalkDir(d, func(p string, e fs.DirEntry, err error) error {
+			if err != nil || p == d {
+				return nil
+			}
+			if e.IsDir() && excludedGlobDirs[e.Name()] && !skillTreeBuildDirs[e.Name()] {
+				return filepath.SkipDir
+			}
+			if n++; n > limit {
+				stop = true
+				return errStopWalk
+			}
+			if e.Type()&os.ModeSymlink == 0 || depth >= maxLinkDepth || !treeAllowed(p, home) {
+				return nil
+			}
+			real, err := filepath.EvalSymlinks(p)
+			// a link back into the tree or above it isn't followed (followFrom)
+			if err != nil || visited[real] || within(real, rootReal) || within(rootReal, real) {
+				return nil
+			}
+			if st, err := os.Stat(p); err != nil || !st.IsDir() {
+				return nil
+			}
+			visited[real] = true
+			if walk(real, depth+1) { // WalkDir doesn't descend into a link given as its root
+				stop = true
+				return errStopWalk
+			}
 			return nil
-		}
-		if d.IsDir() && excludedGlobDirs[d.Name()] && !skillTreeBuildDirs[d.Name()] {
-			return filepath.SkipDir
-		}
-		if n++; n > limit {
-			return errStopWalk
-		}
-		return nil
-	})
+		})
+		return stop
+	}
+	walk(dir, 0)
 	return n
 }
 
 var errStopWalk = errors.New("stop walk")
+
+// credentialName: a file name that marks the file as a credential — its
+// content may be a bare token no key names, which the disguiser can't tell
+// from a hash. A config-derived tree ships such files as metadata only.
+var credentialName = regexp.MustCompile(`(?i)^(?:\.?(?:tokens?|secrets?|credentials?|passwords?|api[_-]?keys?|access[_-]?tokens?|auth[_-]?tokens?)(?:\.(?:json|toml|ya?ml|txt|ini|cfg|conf|env|dat))?|.*\.(?:key|pem|p12|pfx|jks|keystore|kdbx|token|secret|gpg|asc)|id_(?:rsa|dsa|ecdsa|ed25519)|client_secret[\w.-]*\.json|\.htpasswd)$`)
+
+func credentialFileName(p string) bool {
+	return credentialName.MatchString(filepath.Base(p))
+}
 
 // envRef is a ${NAME} reference in a config value.
 var envRef = regexp.MustCompile(`\$\{[A-Za-z_][A-Za-z0-9_]*\}`)

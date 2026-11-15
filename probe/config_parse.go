@@ -442,12 +442,152 @@ func (p *yamlParser) mapping(ind int) map[string]interface{} {
 			} else {
 				m[key] = nil
 			}
+		case rest[0] == '|' || rest[0] == '>':
+			m[key] = p.blockScalar(rest, ind)
 		default:
-			m[key] = yamlScalar(rest)
+			m[key] = yamlValue(rest)
 			p.skipDeeper(ind)
 		}
 	}
 	return m
+}
+
+// blockScalar reads a literal (|) or folded (>) block scalar whose content is
+// one line — a command path written `command: >-` — with its chomping
+// indicator; longer ones are skipped (nil), as before.
+func (p *yamlParser) blockScalar(header string, ind int) interface{} {
+	start := p.i
+	p.skipDeeper(ind)
+	if i := strings.Index(header, " #"); i >= 0 {
+		header = header[:i]
+	}
+	header = strings.TrimSpace(header)
+	for _, c := range header[1:] {
+		if c != '-' && c != '+' && (c < '1' || c > '9') {
+			return nil // not a block scalar header
+		}
+	}
+	if p.i-start != 1 {
+		return nil
+	}
+	if strings.Contains(header, "-") {
+		return p.lines[start].text
+	}
+	return p.lines[start].text + "\n"
+}
+
+// yamlValue is yamlScalar, plus a flow mapping or sequence written on one line
+// (`srv: {command: /opt/x, args: [a, b]}`).
+func yamlValue(rest string) interface{} {
+	if rest != "" && (rest[0] == '{' || rest[0] == '[') {
+		f := &yamlFlow{s: rest}
+		v, ok := f.value(0)
+		f.space()
+		if ok && (f.i == len(f.s) || f.s[f.i] == '#') {
+			return v
+		}
+		return nil
+	}
+	return yamlScalar(rest)
+}
+
+// yamlFlow reads a one-line flow collection: plain or quoted scalars, nested
+// collections, no aliases or multi-line content.
+type yamlFlow struct {
+	s string
+	i int
+}
+
+func (f *yamlFlow) space() {
+	for f.i < len(f.s) && (f.s[f.i] == ' ' || f.s[f.i] == '\t') {
+		f.i++
+	}
+}
+
+func (f *yamlFlow) value(depth int) (interface{}, bool) {
+	f.space()
+	if f.i >= len(f.s) || depth > maxParseDepth {
+		return nil, false
+	}
+	switch f.s[f.i] {
+	case '{':
+		return f.collection(depth, '}')
+	case '[':
+		return f.collection(depth, ']')
+	case '"', '\'':
+		end := quotedEnd(f.s[f.i:])
+		if end < 0 {
+			return nil, false
+		}
+		v := yamlScalar(f.s[f.i : f.i+end+1])
+		f.i += end + 1
+		return v, true
+	case '*', '&', '!', '|', '>':
+		return nil, false
+	}
+	// plain scalar up to , ] } or a ": " inside a mapping
+	start := f.i
+	for f.i < len(f.s) {
+		c := f.s[f.i]
+		if c == ',' || c == ']' || c == '}' || (c == ':' && (f.i+1 == len(f.s) || f.s[f.i+1] == ' ')) || (c == '#' && f.i > start && f.s[f.i-1] == ' ') {
+			break
+		}
+		f.i++
+	}
+	text := strings.TrimSpace(f.s[start:f.i])
+	if text == "" {
+		return nil, true
+	}
+	return yamlScalar(text), true
+}
+
+func (f *yamlFlow) collection(depth int, closing byte) (interface{}, bool) {
+	f.i++ // the opening bracket
+	var list []interface{}
+	m := map[string]interface{}{}
+	for {
+		f.space()
+		if f.i >= len(f.s) {
+			return nil, false
+		}
+		if f.s[f.i] == closing {
+			f.i++
+			if closing == '}' {
+				return m, true
+			}
+			if list == nil {
+				list = []interface{}{}
+			}
+			return list, true
+		}
+		item, ok := f.value(depth + 1)
+		if !ok {
+			return nil, false
+		}
+		f.space()
+		if closing == '}' {
+			key, isKey := item.(string)
+			if !isKey || f.i >= len(f.s) || f.s[f.i] != ':' {
+				return nil, false
+			}
+			f.i++
+			v, ok := f.value(depth + 1)
+			if !ok {
+				return nil, false
+			}
+			m[key] = v
+			f.space()
+		} else {
+			list = append(list, item)
+		}
+		if f.i < len(f.s) && f.s[f.i] == ',' {
+			f.i++
+			continue
+		}
+		if f.i >= len(f.s) || f.s[f.i] != closing {
+			return nil, false
+		}
+	}
 }
 
 func (p *yamlParser) seq(ind int) []interface{} {
@@ -473,7 +613,7 @@ func (p *yamlParser) seq(ind int) []interface{} {
 			continue
 		}
 		p.i++
-		out = append(out, yamlScalar(rest))
+		out = append(out, yamlValue(rest))
 		p.skipDeeper(ind)
 	}
 	return out
