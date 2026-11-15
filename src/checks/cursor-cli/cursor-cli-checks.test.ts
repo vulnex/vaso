@@ -487,6 +487,9 @@ describe('Cursor sandbox.json / permissions.json (cursor.com/docs/reference/sand
     expect((await byId('CUR-008').run(makeCtx([sandbox({ networkPolicy: { default: 'allow' } })]))).passed).toBe(false);
     expect((await byId('CUR-008').run(makeCtx([sandbox({ networkPolicy: { default: 'deny', allow: ['*'] } })]))).passed).toBe(false);
     expect((await byId('CUR-008').run(makeCtx([sandbox({ networkPolicy: { default: 'deny', allow: ['*.github.com', '10.0.0.0/8'] } })]))).passed).toBe(true);
+    const cidr = await byId('CUR-008').run(makeCtx([sandbox({ networkPolicy: { default: 'deny', allow: ['registry.npmjs.org', '0.0.0.0/0'] } })]));
+    expect(cidr.evidence?.map(e => e.snippet)).toEqual(['networkPolicy.allow contains "0.0.0.0/0"']);
+    expect((await byId('CUR-008').run(makeCtx([sandbox({ networkPolicy: { allow: ['::/0'] } })]))).passed).toBe(false);
     expect((await byId('CUR-008').run(makeCtx([sandbox({ type: 'workspace_readwrite' })]))).passed).toBe(true);
   });
 
@@ -498,12 +501,17 @@ describe('Cursor sandbox.json / permissions.json (cursor.com/docs/reference/sand
   });
 
   it('CUR-009: mcpAllowlist "*:*" and additionalReadwritePaths over home, root or credential stores', async () => {
-    const mcp = await byId('CUR-009').run(makeCtx([perms({ mcpAllowlist: ['*:*', 'datadog:*', '*:search'] })]));
-    expect(mcp.evidence?.map(e => e.snippet)).toEqual(['mcpAllowlist: "*:*"']);
+    const mcp = await byId('CUR-009').run(makeCtx([perms({ mcpAllowlist: ['*:*', 'datadog:*', '*:search', '*:**', 'gh:list_*'] })]));
+    expect(mcp.evidence?.map(e => e.snippet)).toEqual(['mcpAllowlist: "*:*"', 'mcpAllowlist: "*:**"']);
     const rw = await byId('CUR-009').run(makeCtx([sandbox({ additionalReadwritePaths: ['~', '/', '~/.ssh', '/tmp/build-cache', './out'] })]));
     expect(rw.evidence?.map(e => e.snippet)).toEqual([
       'additionalReadwritePaths: "~"', 'additionalReadwritePaths: "/"', 'additionalReadwritePaths: "~/.ssh"',
     ]);
+    // ignored unless the sandbox type is workspace_readwrite (the default)
+    for (const type of ['workspace_readonly', 'insecure_none']) {
+      expect((await byId('CUR-009').run(makeCtx([sandbox({ type, additionalReadwritePaths: ['~'] })]))).passed, type).toBe(true);
+    }
+    expect((await byId('CUR-009').run(makeCtx([sandbox({ type: 'workspace_readwrite', additionalReadwritePaths: ['~'] })]))).passed).toBe(false);
   });
 
   it('CUR-006: plaintext credentials in env/headers/args (critical), unpinned packages (warning), ${env:} references pass', async () => {
