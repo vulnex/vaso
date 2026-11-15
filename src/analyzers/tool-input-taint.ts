@@ -844,6 +844,52 @@ function boundSqlMethod(binding: Binding | undefined): { prop: string; shown: st
 const SQL_ESCAPES = /^(?:escape|escapeId|escapeIdentifier|escapeLiteral|escapeString|quoteIdent|quoteIdentifier|quoteLiteral|quote_ident|quote_literal)$/;
 /** Modules whose `format` escapes its values (`mysql.format`, pg-format's `format('%I', x)`). */
 const SQL_FORMAT_MODULES = /^(?:mysql2?(?:\/promise)?|sqlstring|pg-format)$/;
+/** SQL drivers and builders whose escaping helpers SQL_ESCAPES names. */
+const SQL_ESCAPE_MODULES = /^(?:mysql2?(?:\/promise)?|sqlstring|pg|pg-format|pg-escape|knex)$/;
+
+/** The root identifier of `a.b.c(…).d`, `new a.B()`, `await a.connect()`. */
+function rootIdentifier(node: Node | null | undefined): Node | undefined {
+  let n = node;
+  for (let i = 0; n && i < 32; i++) {
+    if (n.type === 'Identifier' || n.type === 'ThisExpression') return n;
+    if (n.type === 'AwaitExpression') n = n.argument;
+    else if (n.type === 'MemberExpression' || n.type === 'OptionalMemberExpression') n = n.object;
+    else if (n.type === 'CallExpression' || n.type === 'OptionalCallExpression' || n.type === 'NewExpression') n = n.callee as Node;
+    else if (n.type === 'TSNonNullExpression' || n.type === 'TSAsExpression' || n.type === 'ParenthesizedExpression') n = n.expression;
+    else return undefined;
+  }
+  return undefined;
+}
+
+/**
+ * Whether the receiver of an escaping call can be a SQL driver: `mysql`,
+ * `pg`, a connection or pool made from one (`await mysql.createConnection()`,
+ * `new pg.Pool()`, `pool.connect()`), or one the code doesn't show (a
+ * parameter, `this.db`, a global). A local object, function or class is not.
+ */
+function sqlDriverReceiver(node: Node, scope: Scope, depth = 0): boolean {
+  if (depth > 4) return false;
+  const root = rootIdentifier(node);
+  if (!root) return false;
+  if (root.type === 'ThisExpression') return true;
+  if (root.type !== 'Identifier') return false;
+  const binding = scope.getBinding(root.name);
+  if (!binding || binding.kind === 'param') return true;
+  const module = bindingModule(binding);
+  if (module !== undefined) return SQL_ESCAPE_MODULES.test(module);
+  const decl = binding.path.node;
+  if (decl.type !== 'VariableDeclarator' || !decl.init) return false;
+  return decl.init !== node && sqlDriverReceiver(decl.init, binding.scope, depth + 1);
+}
+
+/** `mysql.escape(x)`, `conn.escape(x)`, `import { escape } from "sqlstring"` — not a local `escape` or the global URL encoder. */
+function sqlEscapeCall(callee: NodePath): boolean {
+  if (callee.isIdentifier()) {
+    const module = bindingModule(callee.scope.getBinding(callee.node.name));
+    return module !== undefined && SQL_ESCAPE_MODULES.test(module);
+  }
+  return callee.isMemberExpression() && sqlDriverReceiver(callee.node.object, callee.scope);
+}
 
 /**
  * An interpolated piece that can't carry SQL whatever the input: an escaped
@@ -875,7 +921,7 @@ function sqlSafePiece(path: NodePath, constrained: (path: NodePath) => boolean, 
   const callee = path.get('callee');
   const name = callee.isIdentifier() ? callee.node.name
     : callee.isMemberExpression() && !callee.node.computed && callee.node.property.type === 'Identifier' ? callee.node.property.name : '';
-  if (SQL_ESCAPES.test(name)) return true;
+  if (SQL_ESCAPES.test(name) && sqlEscapeCall(callee as NodePath)) return true;
   if (name === 'format') {
     const holder = callee.isIdentifier() ? callee : callee.isMemberExpression() ? callee.get('object') as NodePath : undefined;
     if (holder?.isIdentifier() && SQL_FORMAT_MODULES.test(bindingModule(holder.scope.getBinding(holder.node.name)) ?? holder.node.name)) return true;
@@ -883,6 +929,11 @@ function sqlSafePiece(path: NodePath, constrained: (path: NodePath) => boolean, 
   if (callee.isMemberExpression() && (name === 'join' || name === 'map')) {
     const receiver = callee.get('object') as NodePath;
     const mapped = name === 'join' ? receiver : path;
+    if (name === 'join') {
+      // the separator is SQL text too: absent or fixed
+      const sep = (path.get('arguments') as NodePath[])[0];
+      if (sep && staticString(sep.node, sep.scope) === undefined) return false;
+    }
     return mapped.isCallExpression() && placeholderMap(mapped);
   }
   return false;
@@ -917,7 +968,13 @@ function placeholderMap(call: NodePath): boolean {
 /** `ALLOWED.includes(x) ? x : "id"`, `x === "asc" ? "ASC" : "DESC"`: the value is one of fixed choices. */
 function allowListChoice(path: NodePath): boolean {
   if (!path.isConditionalExpression()) return false;
-  const test = path.get('test') as NodePath;
+  let test = path.get('test') as NodePath;
+  // `!ALLOWED.includes(x) ? "id" : x`: the value is checked in the other branch
+  let negated = false;
+  while (test.isUnaryExpression({ operator: '!' })) {
+    negated = !negated;
+    test = test.get('argument') as NodePath;
+  }
   let checked: string | undefined;
   if (test.isCallExpression()) {
     const callee = test.node.callee;
@@ -926,17 +983,19 @@ function allowListChoice(path: NodePath): boolean {
       && first?.type === 'Identifier' && fixedList(callee.object, test.scope)) {
       checked = first.name;
     }
-  } else if (test.isBinaryExpression() && /^(?:===|==)$/.test(test.node.operator)) {
+  } else if (test.isBinaryExpression() && /^(?:===|==|!==|!=)$/.test(test.node.operator)) {
+    if (test.node.operator.startsWith('!')) negated = !negated;
     const { left, right } = test.node;
     if (left.type === 'Identifier' && staticString(right, test.scope) !== undefined) checked = left.name;
     else if (right.type === 'Identifier' && staticString(left, test.scope) !== undefined) checked = right.name;
   } else if (test.isBinaryExpression({ operator: "in" }) && test.node.left.type === "Identifier" && fixedList(test.node.right, test.scope)) {
     checked = test.node.left.name;
   }
-  const fixed = (branch: Node): boolean =>
+  // the checked value is one of the fixed choices only in the branch where the test holds
+  const fixed = (branch: Node, holds: boolean): boolean =>
     staticString(branch, path.scope) !== undefined || branch.type === 'NumericLiteral'
-    || (checked !== undefined && branch.type === 'Identifier' && branch.name === checked);
-  return fixed(path.node.consequent) && fixed(path.node.alternate);
+    || (holds && checked !== undefined && branch.type === 'Identifier' && branch.name === checked);
+  return fixed(path.node.consequent, !negated) && fixed(path.node.alternate, negated);
 }
 
 /** A list of fixed values: an array literal of strings/numbers, `new Set([...])` of them, an object literal (with `values`: of fixed values too), or a constant holding one. */

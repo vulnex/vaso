@@ -40,3 +40,30 @@ describe('SQL taint: built SQL text stays injection', () => {
     expect(queries(code)).toHaveLength(1);
   });
 });
+
+describe('SQL taint: allow-lists, placeholder separators and escaping helpers are judged by what they check', () => {
+  it.each([
+    ['equality, value in the matching branch', tool('  const dir = name === "asc" ? name : "desc";\n  await pool.query(`SELECT * FROM users ORDER BY id ${dir}`);')],
+    ['negated includes, value in the alternate', 'const ALLOWED = ["id", "name"];\n' + tool('  const col = !ALLOWED.includes(name) ? "id" : name;\n  await pool.query(`SELECT * FROM users ORDER BY ${col}`);')],
+    ['inequality, value in the alternate', tool('  const dir = name !== "asc" ? "DESC" : name;\n  await pool.query(`SELECT * FROM users ORDER BY id ${dir}`);')],
+    ['placeholders joined with a fixed separator', tool('  await pool.query(`SELECT * FROM users WHERE id IN (${ids.map(() => "?").join(", ")})`, ids);', '{ ids: z.array(z.string()) }', '{ ids }')],
+    ['escape on a mysql2 connection', 'import mysql from "mysql2/promise";\nconst c = await mysql.createConnection({});\n' + tool('  await c.query(`SELECT * FROM users WHERE name = ${c.escape(name)}`);')],
+    ['escapeLiteral on a pg client from a pool', 'const client = await pool.connect();\n' + tool('  await client.query(`SELECT * FROM t WHERE a = ${client.escapeLiteral(name)}`);')],
+    ['escape imported from sqlstring', 'import { escape } from "sqlstring";\n' + tool('  await pool.query(`SELECT * FROM users WHERE name = ${escape(name)}`);')],
+    ['escape on a connection passed in', 'async function find(conn, name) { return conn.query(`SELECT * FROM users WHERE name = ${conn.escape(name)}`); }\n' + tool('  await find(pool, name);')],
+  ])('%s', (_label, code) => {
+    expect(queries(code)).toEqual([]);
+  });
+
+  it.each([
+    ['equality, value in the other branch', tool('  const dir = name === "asc" ? "ASC" : name;\n  await pool.query(`SELECT * FROM users ORDER BY id ${dir}`);')],
+    ['includes, value in the alternate', 'const ALLOWED = ["id", "name"];\n' + tool('  const col = ALLOWED.includes(name) ? "id" : name;\n  await pool.query(`SELECT * FROM users ORDER BY ${col}`);')],
+    ['negated includes, value in the consequent', 'const ALLOWED = ["id", "name"];\n' + tool('  const col = !ALLOWED.includes(name) ? name : "id";\n  await pool.query(`SELECT * FROM users ORDER BY ${col}`);')],
+    ['placeholders joined with a caller-given separator', tool('  await pool.query(`SELECT * FROM users WHERE id IN (${ids.map(() => "?").join(name)})`, ids);', '{ ids: z.array(z.string()), name: z.string() }', '{ ids, name }')],
+    ['a local function named escape', 'function escape(s) { return s; }\n' + tool('  await pool.query(`SELECT * FROM users WHERE name = \'${escape(name)}\'`);')],
+    ['the global escape (a URL encoder)', tool('  await pool.query(`SELECT * FROM users WHERE name = \'${escape(name)}\'`);')],
+    ['escape on a local object', 'const fake = { escape: (s) => s };\n' + tool('  await pool.query(`SELECT * FROM users WHERE name = ${fake.escape(name)}`);')],
+  ])('%s', (_label, code) => {
+    expect(queries(code)).toHaveLength(1);
+  });
+});
