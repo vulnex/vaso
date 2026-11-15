@@ -70,6 +70,25 @@ export const cdx005 = defineCheck({
         : { file: config.filePath, detail: 'shell_environment_policy.inherit = "all" — every parent env var (incl. AWS_*, GITHUB_TOKEN, ANTHROPIC_API_KEY) is exposed to tool subprocesses and MCP servers' });
     }
 
+    // Profile files apply only under `codex -p <name>`. Where the root config
+    // restricts the environment a profile widening it is CDX-008's downgrade;
+    // otherwise an explicit inherit = "all" there is noted with the default.
+    const rootPolicy = shellPolicy(configs.find(c => c.filePath.endsWith('config.toml'))?.data ?? {});
+    const rootRestricts = (inheritOf(rootPolicy) !== undefined && inheritOf(rootPolicy) !== 'all') || envMitigation(rootPolicy) !== undefined;
+    if (!isProject && !rootRestricts) {
+      for (const config of ctx.configs) {
+        const name = codexProfileName(config.filePath);
+        const policy = name ? shellPolicy(config.data) : undefined;
+        if (!name || inheritOf(policy) !== 'all' || envMitigation(policy)) continue;
+        evidence.push({
+          file: config.filePath,
+          snippet: `${name}.config.toml: shell_environment_policy.inherit = "all"`,
+          mitigated: true,
+          detail: `\`codex -p ${name}\` passes every parent env var (secrets included) to tool subprocesses`,
+        });
+      }
+    }
+
     // Unset, Codex inherits everything (ShellEnvironmentPolicyInherit's
     // default is All) — the same exposure, but the vendor default rather than
     // a choice: advice, not a scored finding. The user config decides it; a
@@ -77,10 +96,11 @@ export const cdx005 = defineCheck({
     if (!explicit && !isProject) {
       const main = configs.find(c => c.filePath.endsWith('config.toml'));
       if (!envMitigation(main ? shellPolicy(main.data) : undefined)) {
+        // No config file at all: point at what was found, not a missing file
         evidence.push({
-          file: main?.filePath ?? join(ctx.installation.installDir, 'config.toml'),
+          file: main?.filePath ?? ctx.installation.cliBinary ?? ctx.installation.installDir,
           mitigated: true,
-          detail: 'shell_environment_policy.inherit is unset — Codex defaults to "all", passing every parent env var (secrets included) to tool subprocesses; set inherit = "core" or an include allowlist',
+          detail: `${main ? 'shell_environment_policy.inherit is unset' : `no ${join(ctx.installation.installDir, 'config.toml')} sets shell_environment_policy`} — Codex defaults to "all", passing every parent env var (secrets included) to tool subprocesses; set inherit = "core" or an include allowlist`,
         });
       }
     }
@@ -90,7 +110,9 @@ export const cdx005 = defineCheck({
       passed: 'Codex shell environment policy is restricted',
       failed: () => live
         ? 'Codex inherits the entire process environment into tool subprocesses'
-        : 'Codex passes the full process environment to tool subprocesses by default',
+        : explicit
+          ? 'Codex passes the full process environment to tool subprocesses (inherit = "all", narrowed or limited to a profile)'
+          : 'Codex passes the full process environment to tool subprocesses by default',
       fixDescription: 'Set [shell_environment_policy] inherit = "core" (or "none") and use an include allowlist (filters / include_only) and set for the specific vars tools need',
     });
   },

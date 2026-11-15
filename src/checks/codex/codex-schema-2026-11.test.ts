@@ -137,6 +137,9 @@ describe('CDX-005 shell environment policy semantics', () => {
     expect(unset.message).toMatch(/by default/);
     const noFile = await check('CDX-005').run(ctx([]));
     expect(noFile.severity).toBe('info');
+    // no config file: the evidence points at the install, not a file that doesn't exist
+    expect(noFile.evidence?.[0].file).toBe(`${HOME}/.codex`);
+    expect(noFile.evidence?.[0].detail).toMatch(/^no \/home\/test\/\.codex\/config\.toml sets/);
     const explicit = await check('CDX-005').run(ctx([cfg(MAIN, { shell_environment_policy: { inherit: 'all' } })]));
     expect(explicit.severity).toBe('critical');
   });
@@ -144,6 +147,7 @@ describe('CDX-005 shell environment policy semantics', () => {
   it('treats an include filter allowlist as mitigation, exclude-only filters as not', async () => {
     const include = await check('CDX-005').run(ctx([cfg(MAIN, { shell_environment_policy: { inherit: 'all', filters: { PATH: 'include', 'HOME': 'include', 'AWS_*': 'exclude' } } })]));
     expect(include.severity).toBe('info');
+    expect(include.message).not.toMatch(/by default/);
     const wildcard = await check('CDX-005').run(ctx([cfg(MAIN, { shell_environment_policy: { inherit: 'all', filters: { '*': 'include' } } })]));
     expect(wildcard.severity).toBe('critical');
     const exclude = await check('CDX-005').run(ctx([cfg(MAIN, { shell_environment_policy: { inherit: 'all', filters: { 'AWS_*': 'exclude' } } })]));
@@ -155,6 +159,10 @@ describe('CDX-005 shell environment policy semantics', () => {
   it('leaves profile files to CDX-008 and does not report the default for a project layer', async () => {
     const r = await check('CDX-005').run(ctx([cfg(MAIN, { shell_environment_policy: { inherit: 'core' } }), cfg(FAST, { shell_environment_policy: { inherit: 'all' } })]));
     expect(r.passed).toBe(true);
+    // root inherits everything anyway: an explicit "all" in a profile file is noted with the default
+    const unsetRoot = await check('CDX-005').run(ctx([cfg(MAIN, { model: 'x' }), cfg(FAST, { shell_environment_policy: { inherit: 'all' } })]));
+    expect(unsetRoot.severity).toBe('info');
+    expect(unsetRoot.evidence?.map(e => e.snippet)).toContain('fast.config.toml: shell_environment_policy.inherit = "all"');
     const project = await check('CDX-005').run(ctx([cfg('/work/app/.codex/config.toml', { model: 'x' })], 'project'));
     expect(project.passed).toBe(true);
     const projectAll = await check('CDX-005').run(ctx([cfg('/work/app/.codex/config.toml', { shell_environment_policy: { inherit: 'all' } })], 'project'));
