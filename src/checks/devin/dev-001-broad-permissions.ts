@@ -115,6 +115,14 @@ export const dev001 = defineCheck({
             snippet: `permission_mode: "${mode}"`,
             detail: 'New sessions start in Accept Edits mode — workspace file edits are auto-approved without review (shell commands still prompt)',
           });
+        } else if (typeof mode === 'string' && mode.trim().toLowerCase() === 'smart') {
+          // Smart: Accept Edits plus a model that judges shell commands, web
+          // fetches, MCP tools and outside writes, auto-running those it deems safe
+          warningEvidence.push({
+            file: config.filePath,
+            snippet: `permission_mode: "${mode}"`,
+            detail: 'New sessions start in Smart mode — workspace file edits are auto-approved, and a model decides which shell commands, fetches, MCP tool calls and outside writes run without a prompt',
+          });
         }
         if (config.data.local_tools_bypass_permissions === true) {
           warningEvidence.push({
@@ -226,7 +234,7 @@ export const dev001 = defineCheck({
       // the same gap in Claude Code
       severity: criticalEvidence.length > 0 ? undefined
         : warningEvidence.some(e => e.snippet?.startsWith('local_tools_bypass_permissions') || e.snippet?.startsWith('permission_mode')) ? 'warning' : 'info',
-      fixDescription: 'Remove permission_mode "dangerous" (use "normal" or "smart") and local_tools_bypass_permissions, scope Exec()/Write() allow rules to specific commands and paths, and add deny rules for shells, network tools, and credential paths',
+      fixDescription: 'Set permission_mode to "normal" (not "dangerous", "smart" or "accept-edits") and local_tools_bypass_permissions, scope Exec()/Write() allow rules to specific commands and paths, and add deny rules for shells, network tools, and credential paths',
     });
   },
 });
