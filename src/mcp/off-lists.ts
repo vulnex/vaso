@@ -1,8 +1,11 @@
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { FSProvider } from '../core/fs-provider.js';
-import type { AgentType } from '../core/types.js';
+import type { AgentType, ScanContext } from '../core/types.js';
 import type { MCPConfig, MCPServerEntry } from './types.js';
 import { parseJsonLenient } from '../core/jsonc.js';
+import { scanCwd } from '../adapters/project-configs.js';
+import { isDisabledServerConfig } from './disabled.js';
+import { parseServerMap } from './discovery.js';
 import { claudeConfigPaths, claudeManagedDir, claudeManagedSettingsPaths } from '../adapters/claude-code.js';
 import { geminiHome } from '../adapters/gemini.js';
 import { qwenHome } from '../adapters/qwen-code.js';
@@ -36,13 +39,12 @@ import { qwenHome } from '../adapters/qwen-code.js';
  *   with `*` / `?` globs, excluded winning.
  */
 export async function applyOffLists(configs: MCPConfig[], fs: FSProvider, home: string, projectDir?: string): Promise<void> {
-  const rules = new Map<AgentType, (config: MCPConfig, server: MCPServerEntry) => boolean>();
-  const claude = await claudeOff(configs, fs, home, projectDir);
-  if (claude) rules.set('claude-code', claude);
-  const gemini = await geminiOff(fs, home, projectDir);
-  if (gemini) rules.set('gemini-cli', gemini);
-  const qwen = await qwenOff(fs, home, projectDir);
-  if (qwen) rules.set('qwen-code', qwen);
+  const rules = new Map<AgentType, OffRule>();
+  for (const agent of OFF_LIST_AGENTS) {
+    if (!configs.some(c => c.agents?.includes(agent))) continue;
+    const rule = await agentOffRule(agent, fs, home, projectDir);
+    if (rule) rules.set(agent, rule);
+  }
   if (rules.size === 0) return;
 
   for (const config of configs) {
@@ -54,6 +56,52 @@ export async function applyOffLists(configs: MCPConfig[], fs: FSProvider, home: 
       return off ? { ...server, disabled: true } : server;
     });
   }
+}
+
+/** Where a server is declared, as the off-list rules need it. */
+export type OffRuleConfig = Pick<MCPConfig, 'filePath' | 'scope' | 'projectRoot'>;
+export type OffRule = (config: OffRuleConfig, server: MCPServerEntry) => boolean;
+
+/** Agents whose settings switch servers off by name or policy. */
+export const OFF_LIST_AGENTS = ['claude-code', 'gemini-cli', 'qwen-code'] as const;
+type OffListAgent = typeof OFF_LIST_AGENTS[number];
+
+/** One agent's off-list rule, or undefined when its settings switch nothing off. */
+export async function agentOffRule(agent: OffListAgent, fs: FSProvider, home: string, projectDir?: string): Promise<OffRule | undefined> {
+  if (agent === 'claude-code') return claudeOff(fs, home, projectDir);
+  if (agent === 'gemini-cli') return geminiOff(fs, home, projectDir);
+  return qwenOff(fs, home, projectDir);
+}
+
+/**
+ * For an agent's own checks: whether the agent never starts a server it
+ * declares — switched off in its entry (where the agent honours that) or by
+ * the agent's off-lists, exactly as discovery marks it in the inventory.
+ * Project scope is inferred like discovery assigns it: a project `.mcp.json`
+ * belongs to its folder, `projects[<path>]` entries of ~/.claude.json to
+ * `<path>` (pass it as `projectRoot`).
+ */
+export type ServerOffPredicate = (
+  name: string,
+  raw: unknown,
+  where: { filePath: string; projectRoot?: string },
+) => boolean;
+
+export async function serverOffPredicate(ctx: ScanContext): Promise<ServerOffPredicate> {
+  const agent = ctx.installation.agent;
+  const honoursEntrySwitch = agent !== 'claude-code' && agent !== 'claude-desktop';
+  const rule = (OFF_LIST_AGENTS as readonly AgentType[]).includes(agent)
+    ? await agentOffRule(agent as OffListAgent, ctx.fs, ctx.fs.homedir(), scanCwd(ctx.fs)).catch(() => undefined)
+    : undefined;
+  return (name, raw, where) => {
+    if (honoursEntrySwitch && isDisabledServerConfig(raw)) return true;
+    if (!rule || !raw || typeof raw !== 'object' || Array.isArray(raw)) return false;
+    const entry = parseServerMap({ [name]: raw })[0];
+    if (!entry) return false;
+    const projectRoot = where.projectRoot
+      ?? (where.filePath.endsWith('/.mcp.json') || where.filePath.endsWith('\\.mcp.json') ? dirname(where.filePath) : undefined);
+    return rule({ filePath: where.filePath, ...(projectRoot ? { scope: 'project', projectRoot } : {}) }, entry);
+  };
 }
 
 async function readObject(fs: FSProvider, path: string): Promise<Record<string, unknown> | undefined> {
@@ -113,8 +161,7 @@ function allowedBy(entries: PolicyEntry[], server: MCPServerEntry): boolean {
     || (!strict && e.serverName !== undefined && e.serverName === server.name));
 }
 
-async function claudeOff(configs: MCPConfig[], fs: FSProvider, home: string, projectDir?: string): Promise<((c: MCPConfig, s: MCPServerEntry) => boolean) | undefined> {
-  if (!configs.some(c => c.agents?.includes('claude-code'))) return undefined;
+async function claudeOff(fs: FSProvider, home: string, projectDir?: string): Promise<OffRule | undefined> {
   const paths = claudeConfigPaths(home, fs);
   const managed = (await Promise.all((await claudeManagedSettingsPaths(fs)).map(p => readObject(fs, p))))
     .filter((d): d is Record<string, unknown> => d !== undefined);
@@ -148,7 +195,7 @@ async function claudeOff(configs: MCPConfig[], fs: FSProvider, home: string, pro
   };
 }
 
-async function geminiOff(fs: FSProvider, home: string, projectDir?: string): Promise<((c: MCPConfig, s: MCPServerEntry) => boolean) | undefined> {
+async function geminiOff(fs: FSProvider, home: string, projectDir?: string): Promise<OffRule | undefined> {
   const dir = geminiHome(home, fs);
   const user = await readObject(fs, join(dir, 'settings.json'));
   const project = projectDir ? await readObject(fs, join(projectDir, '.gemini', 'settings.json')) : undefined;
@@ -177,7 +224,7 @@ function globMatch(pattern: string, name: string): boolean {
   return re.test(name);
 }
 
-async function qwenOff(fs: FSProvider, home: string, projectDir?: string): Promise<((c: MCPConfig, s: MCPServerEntry) => boolean) | undefined> {
+async function qwenOff(fs: FSProvider, home: string, projectDir?: string): Promise<OffRule | undefined> {
   const user = await readObject(fs, join(qwenHome(home, fs), 'settings.json'));
   const project = projectDir ? await readObject(fs, join(projectDir, '.qwen', 'settings.json')) : undefined;
   const pick = (key: 'allowed' | 'excluded'): string[] | undefined => {

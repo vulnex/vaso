@@ -3,7 +3,7 @@ import { defineCheck } from '../../core/check-builder.js';
 import { markUntrustedWorkspace } from '../../adapters/folder-trust.js';
 import { geminiWorkspaceTrusted } from '../../adapters/gemini.js';
 import { runnerPackage, isPinnedOrLocal, pinProblem } from '../../mcp/package-pin.js';
-import { isDisabledServerConfig } from '../../mcp/disabled.js';
+import { serverOffPredicate } from '../../mcp/off-lists.js';
 
 
 export const gem007 = defineCheck({
@@ -16,13 +16,14 @@ export const gem007 = defineCheck({
 
   async run(ctx, h) {
     const evidence: Evidence[] = [];
+    const off = await serverOffPredicate(ctx);
 
     for (const config of ctx.configs) {
       const servers = config.data.mcpServers as Record<string, unknown> | undefined;
       if (!servers || typeof servers !== 'object') continue;
 
       for (const [name, server] of Object.entries(servers)) {
-        if (isDisabledServerConfig(server)) continue; // never launched
+        if (off(name, server, { filePath: config.filePath })) continue; // never launched
         if (!server || typeof server !== 'object') continue;
         const command = (server as Record<string, unknown>).command;
         const args = (server as Record<string, unknown>).args;
