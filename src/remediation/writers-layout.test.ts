@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { updateEnvFile, updateTomlFile, updateYamlFile } from './config-writer.js';
+import { updateEnvFile, updateTomlFile, updateYamlFile, collectWriteNotes } from './config-writer.js';
 import { parseTomlSafe } from '../core/toml-safe.js';
 import { parseYamlSafe } from '../core/yaml-safe.js';
 
@@ -52,6 +52,49 @@ describe('YAML fixes', () => {
     const p = file('f.yaml', src);
     await updateYamlFile(p, 'gateway.bind', 'loopback');
     expect(readFileSync(p, 'utf8')).toBe(src.replace("'lan'", "'loopback'"));
+  });
+
+  it('refuses to edit an anchored node an alias elsewhere refers to (scalar or ancestor map)', async () => {
+    const scalar = 'gateway:\n  bind: &host lan\nchannels:\n  web:\n    listen: *host\n';
+    const p = file('as.yaml', scalar);
+    await expect(updateYamlFile(p, 'gateway.bind', 'loopback')).rejects.toThrow(/gateway\.bind in .* is a YAML anchor \(&host\) other keys alias/);
+    expect(readFileSync(p, 'utf8')).toBe(scalar);
+    const map = 'gateway: &g\n  bind: lan\nbackup: *g\n';
+    const q = file('am.yaml', map);
+    await expect(updateYamlFile(q, 'gateway.bind', 'loopback')).rejects.toThrow(/gateway in .* is a YAML anchor \(&g\)/);
+    await expect(updateYamlFile(q, 'gateway.port', 1)).rejects.toThrow(/YAML anchor/);
+    expect(readFileSync(q, 'utf8')).toBe(map);
+  });
+
+  it('edits an anchored node no alias refers to', async () => {
+    const p = file('an.yaml', 'gateway:\n  bind: &host lan\n');
+    await updateYamlFile(p, 'gateway.bind', 'loopback');
+    expect(readFileSync(p, 'utf8')).toBe('gateway:\n  bind: &host loopback\n');
+  });
+
+  it('adds a missing key as a new line in its block, leaving every other line as it was', async () => {
+    const long = 'This is a very long description string that definitely exceeds eighty characters in width for sure yes';
+    const src = `# only comment\ngateway:\n  port: 18789 # p\n  tls: {enabled: false}\nmcp:\n  args: ["-y", "pkg"]\n  env: {API_KEY: "\${KEY}"}\nlong: "${long}"\n`;
+    const p = file('add.yaml', src);
+    await updateYamlFile(p, 'gateway.bind', 'loopback');
+    expect(readFileSync(p, 'utf8')).toBe(src.replace('  tls: {enabled: false}\n', '  tls: {enabled: false}\n  bind: loopback\n'));
+    // a missing parent too, with the file's indentation, CRLF and no final newline
+    const q = file('add2.yaml', 'model:\r\n    name: x\r\n    args: [a,b]');
+    await updateYamlFile(q, 'model.limits.max', 5);
+    expect(readFileSync(q, 'utf8')).toBe('model:\r\n    name: x\r\n    args: [a,b]\r\n    limits:\r\n        max: 5\r\n');
+    // at the root, after a nested block and a trailing comment
+    const r = file('add3.yaml', 'a:\n  b: 1 # c\n# tail\n');
+    await updateYamlFile(r, 'z', true);
+    expect(parseYamlSafe(readFileSync(r, 'utf8'))).toEqual({ a: { b: 1 }, z: true });
+    expect(readFileSync(r, 'utf8')).toMatch(/^a:\n  b: 1 # c\n/);
+  });
+
+  it('says so when the key can only be added by re-serializing', async () => {
+    const p = file('flow.yaml', 'gateway: {port: 1}\nargs: [ "-y" ]\n');
+    const { notes } = await collectWriteNotes(() => updateYamlFile(p, 'gateway.bind', 'loopback'));
+    expect(parseYamlSafe(readFileSync(p, 'utf8'))).toEqual({ gateway: { port: 1, bind: 'loopback' }, args: ['-y'] });
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toMatch(/re-serialized to set gateway\.bind/);
   });
 
   it('quotes a string that would otherwise read as another type', async () => {

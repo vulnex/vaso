@@ -7,6 +7,7 @@ import { loadConfig } from '../core/config-loader.js';
 import { parseJsonLenient } from '../core/jsonc.js';
 import { editJsonText } from './json-edit.js';
 import { isDeepStrictEqual } from 'node:util';
+import { AsyncLocalStorage } from 'node:async_hooks';
 
 /**
  * Update or insert a key=value pair in a .env file.
@@ -90,8 +91,29 @@ export async function updateJsonFile(filePath: string, keyPath: KeyPath, value: 
 }
 
 /**
+ * Notes a write leaves for the person running `vaso fix` — a layout the
+ * writer could not keep. The fix engine prints them under the fix's line.
+ */
+const writeNotes = new AsyncLocalStorage<string[]>();
+
+/** Run `fn` collecting the notes the config writers leave. */
+export async function collectWriteNotes<T>(fn: () => Promise<T>): Promise<{ value: T; notes: string[] }> {
+  const notes: string[] = [];
+  const value = await writeNotes.run(notes, fn);
+  return { value, notes };
+}
+
+function noteWrite(note: string): void {
+  writeNotes.getStore()?.push(note);
+}
+
+/**
  * Update a nested value in a YAML file using Document API to preserve comments and structure.
  * Integers are read as BigInt so values beyond 2^53 are written back unchanged.
+ * An existing scalar is edited in its source token and a missing key is
+ * inserted as new lines in its block mapping, so the rest of the file —
+ * folding, flow spacing, quoting, comments — stays byte for byte. Only when
+ * neither is possible is the document re-serialized (and a note says so).
  */
 export async function updateYamlFile(filePath: string, keyPath: KeyPath, value: unknown): Promise<void> {
   const content = (await readRegularFile(filePath)).toString('utf-8');
@@ -99,29 +121,97 @@ export async function updateYamlFile(filePath: string, keyPath: KeyPath, value: 
   const keys = keySegments(keyPath);
   assertNoAliasOnPath(doc, keys, filePath);
   doc.setIn(keys, value);
-  const expected = doc.toJS();
-  // An existing scalar is edited in its source token, so the rest of the
-  // file — folding, flow spacing, quoting, comments — stays byte for byte
-  const edited = editYamlScalar(content, keys, value, expected);
+  // what the re-serialized document reads back as (a number written reads back as BigInt)
+  const expected = YAML.parseDocument(doc.toString(), { intAsBigInt: true }).toJS();
+  const edited = editYamlScalar(content, keys, value, expected) ?? insertYamlKey(content, keys, value, expected);
+  if (edited === undefined) {
+    noteWrite(`${filePath} was re-serialized to set ${keys.join('.')} (its layout didn't allow an in-place edit): values and comments are kept, spacing and line folding may differ`);
+  }
   await writeRegularFile(filePath, edited ?? doc.toString());
 }
 
 /**
- * Refuse a key path that runs through (or ends at) a YAML alias: the value
- * lives at the anchor, and changing it there would change every other place
- * that shares it. Merge keys (`<<: *defaults`) are fine — a key set next to
- * them overrides the merged one.
+ * Refuse a key path that runs through (or ends at) a YAML alias, or through a
+ * node carrying an anchor that an alias elsewhere refers to: the value lives
+ * at the anchor, and changing it there would change every other place that
+ * shares it. Merge keys (`<<: *defaults`) are fine — a key set next to them
+ * overrides the merged one.
  */
 function assertNoAliasOnPath(doc: YAML.Document, keys: string[], filePath: string): void {
+  const aliased = new Set<string>();
+  YAML.visit(doc, { Alias: (_k, a) => { aliased.add(a.source); } });
+  const refuse = (i: number, what: string): never => {
+    const at = keys.slice(0, i).join('.') || '(document root)';
+    throw new Error(`${at} in ${filePath} is ${what} — vaso won't change the anchored value it shares with other keys; set ${keys.join('.')} by hand`);
+  };
   let node: unknown = doc.contents;
   for (let i = 0; i <= keys.length; i++) {
-    if (YAML.isAlias(node)) {
-      const at = keys.slice(0, i).join('.') || '(document root)';
-      throw new Error(`${at} in ${filePath} is a YAML alias (*${node.source}) — vaso won't change the anchored value it shares with other keys; set ${keys.join('.')} by hand`);
-    }
+    if (YAML.isAlias(node)) refuse(i, `a YAML alias (*${node.source})`);
+    if (YAML.isNode(node) && node.anchor && aliased.has(node.anchor)) refuse(i, `a YAML anchor (&${node.anchor}) other keys alias`);
     if (i === keys.length || !(YAML.isMap(node) || YAML.isSeq(node))) return;
     node = node.get(keys[i], true);
   }
+}
+
+/**
+ * Add a missing key as new lines at the end of the deepest existing block
+ * mapping on its path, indented like that mapping's keys; undefined when that
+ * isn't possible (a flow mapping, a non-mapping on the path, several
+ * documents) or the result doesn't parse to `expected`.
+ */
+function insertYamlKey(content: string, keys: string[], value: unknown, expected: unknown): string | undefined {
+  try {
+    const docs = YAML.parseAllDocuments(content, { intAsBigInt: true });
+    if (!Array.isArray(docs) || docs.length !== 1 || docs[0].errors.length > 0) return undefined;
+    let map: unknown = docs[0].contents;
+    let depth = 0;
+    while (depth < keys.length && YAML.isMap(map) && map.has(keys[depth])) {
+      map = map.get(keys[depth], true);
+      depth++;
+    }
+    if (depth === keys.length || !YAML.isMap(map) || map.flow || map.items.length === 0) return undefined;
+    const first = map.items[0].key;
+    const last = map.items[map.items.length - 1];
+    const lastEnd = (YAML.isNode(last.value) ? last.value.range?.[1] : undefined) ?? (YAML.isNode(last.key) ? last.key.range?.[1] : undefined);
+    if (!YAML.isNode(first) || !first.range || lastEnd === undefined) return undefined;
+    const lineStart = content.lastIndexOf('\n', first.range[0] - 1) + 1;
+    const indent = content.slice(lineStart, first.range[0]);
+    if (!/^ *$/.test(indent)) return undefined; // a key not at the start of its line (`- key:` in a sequence)
+    // after the line the last entry ends on (its trailing comment included)
+    const eol = content.includes('\r\n') ? '\r\n' : '\n';
+    let at: number;
+    let prefix = '';
+    if (lastEnd > 0 && content[lastEnd - 1] === '\n') {
+      at = lastEnd;
+    } else {
+      const nl = content.indexOf('\n', lastEnd);
+      if (nl === -1) { at = content.length; prefix = eol; } else at = nl + 1;
+    }
+    let sub: unknown = value;
+    for (let i = keys.length - 1; i > depth; i--) sub = { [keys[i]]: sub };
+    const text = YAML.stringify({ [keys[depth]]: sub }, { lineWidth: 0, indent: indentStep(content, docs[0].contents) })
+      .replace(/\n$/, '').split('\n').map(l => indent + l + eol).join('');
+    const out = content.slice(0, at) + prefix + text + content.slice(at);
+    if (isDeepStrictEqual(YAML.parseDocument(out, { intAsBigInt: true }).toJS(), expected)) return out;
+  } catch {
+    // fall back to re-serializing the document
+  }
+  return undefined;
+}
+
+/** The file's indentation step: how far the first block mapping under a root key is indented; 2 when there is none. */
+function indentStep(content: string, root: unknown): number {
+  const column = (offset: number) => offset - (content.lastIndexOf('\n', offset - 1) + 1);
+  if (!YAML.isMap(root) || root.flow) return 2;
+  for (const item of root.items) {
+    const inner = item.value;
+    if (!YAML.isMap(inner) || inner.flow || !YAML.isNode(item.key) || !item.key.range) continue;
+    const key = inner.items[0]?.key;
+    if (!YAML.isNode(key) || !key.range) continue;
+    const step = column(key.range[0]) - column(item.key.range[0]);
+    if (step > 0) return step;
+  }
+  return 2;
 }
 
 /** Replace an existing scalar's source token; undefined when that isn't possible or doesn't parse to `expected`. */
