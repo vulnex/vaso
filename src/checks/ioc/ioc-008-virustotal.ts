@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { skillFilesOf, skillsDirsOf } from '../skills/skill-files.js';
+import { skillFilesOf, skillsDirsOf, noSkillsDirResult } from '../skills/skill-files.js';
 import { readCappedBytes } from '../../core/file-limits.js';
 
 export const ioc008 = defineCheck({
@@ -15,7 +15,8 @@ export const ioc008 = defineCheck({
     const apiKey = process.env['VIRUSTOTAL_API_KEY'];
     if (!apiKey) return h.passed('VirusTotal check skipped — no VIRUSTOTAL_API_KEY set');
 
-    if (skillsDirsOf(ctx).length === 0) return h.passed('No skills directory found');
+    const noDir = noSkillsDirResult(ctx, h);
+    if (noDir) return noDir;
 
     const evidence: Evidence[] = [];
     const files = await skillFilesOf(ctx);

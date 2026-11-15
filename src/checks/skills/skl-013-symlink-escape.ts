@@ -3,6 +3,7 @@ import type { Evidence, Severity } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { getAllSkillsDirs, relEscapes } from '../../core/utils.js';
 import { classifySensitivePath } from '../../analyzers/sensitive-paths.js';
+import { noSkillsDirResult } from './skill-files.js';
 
 /**
  * SKL-013 — Workspace Symlink Escape (GhostApproval / CWE-61 + CWE-451).
@@ -71,7 +72,8 @@ export const skl013 = defineCheck({
 
   async run(ctx, h) {
     const dirs = getAllSkillsDirs(ctx.installation);
-    if (dirs.length === 0) return h.passed('No skills/workspace directory to scan for symlinks');
+    const noDir = noSkillsDirResult(ctx, h, 'No skills/workspace directory to scan for symlinks');
+    if (noDir) return noDir;
 
     // Providers that can't observe link status (mocks, snapshots from probes
     // before 1.1.0) never set isSymbolicLink — nothing to do there.

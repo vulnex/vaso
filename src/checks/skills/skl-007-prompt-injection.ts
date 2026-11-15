@@ -6,6 +6,7 @@ import { markTestCode } from '../../analyzers/test-paths.js';
 import { getAllSkillsDirs, isExcludedPath, unlistableSkillDirs } from '../../core/utils.js';
 import { readCappedFile } from '../../core/file-limits.js';
 import { walkSkillTree } from '../../core/skill-walk.js';
+import { noSkillsDirResult } from './skill-files.js';
 
 const DOC_EXTENSIONS = new Set(['.md', '.txt', '.rst']);
 const PROMPT_INJECTION_RULES = SECURITY_PATTERNS.filter(r => r.category === 'prompt-injection');
@@ -44,7 +45,8 @@ export const skl007 = defineCheck({
 
   async run(ctx, h) {
     const dirs = getAllSkillsDirs(ctx.installation);
-    if (dirs.length === 0) return h.passed('No skills directory found');
+    const noDir = noSkillsDirResult(ctx, h);
+    if (noDir) return noDir;
 
     const evidence: Evidence[] = [];
     const files = [...new Set((await Promise.all(dirs.map(d => getDocFiles(d, ctx.fs)))).flat())];

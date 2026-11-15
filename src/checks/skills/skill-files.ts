@@ -1,5 +1,6 @@
 import { extname } from 'node:path';
-import type { Evidence, ScanContext } from '../../core/types.js';
+import type { CheckResult, Evidence, ScanContext, UnscannedSkillsDir } from '../../core/types.js';
+import type { CheckHelpers } from '../../core/check-builder.js';
 import type { FSProvider } from '../../core/fs-provider.js';
 import { BINARY_EXTENSIONS, getAllSkillsDirs, getSkillFiles } from '../../core/utils.js';
 import { readCappedFile } from '../../core/file-limits.js';
@@ -8,6 +9,30 @@ import { binaryFileFormat, sourceText } from '../../analyzers/binary-text.js';
 /** Every skills directory of the installation (not just the primary one). */
 export function skillsDirsOf(ctx: ScanContext): string[] {
   return getAllSkillsDirs(ctx.installation);
+}
+
+/** Why a config-set skills directory went unscanned, in a few words. */
+export function unscannedShort(reason: UnscannedSkillsDir['reason']): string {
+  switch (reason) {
+    case 'outside': return 'outside the user\'s home or in a credential store';
+    case 'limit': return 'over the remote probe\'s entry limit';
+    case 'relative': return 'set as a relative path';
+  }
+}
+
+/**
+ * The early result of a skill check when the installation has no skills
+ * directory to walk, undefined when it has one. A skills directory the
+ * config sets but no scan walks (outside the home, …) is not "no skills
+ * directory": SKL-002 reports it as not scanned (a warning), the other skill
+ * checks say their verdict is not verified instead of claiming none exists.
+ */
+export function noSkillsDirResult(ctx: ScanContext, h: CheckHelpers, none = 'No skills directory found'): CheckResult | undefined {
+  if (skillsDirsOf(ctx).length > 0) return undefined;
+  const unscanned = ctx.installation.unscannedSkillsDirs ?? [];
+  if (unscanned.length === 0) return h.passed(none);
+  const list = unscanned.map(u => `${u.path} (${unscannedShort(u.reason)})`).join(', ');
+  return h.passed(`Not verified — skills directory ${list} not scanned; reported by SKL-002`);
 }
 
 /** The engine's skill file list, else a walk of every skills directory. */

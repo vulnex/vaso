@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { getIOCDatabase } from '../../ioc/database.js';
-import { skillFilesOf, skillsDirsOf } from '../skills/skill-files.js';
+import { skillFilesOf, skillsDirsOf, noSkillsDirResult } from '../skills/skill-files.js';
 import { readCappedBytes } from '../../core/file-limits.js';
 
 export const ioc003 = defineCheck({
@@ -16,7 +16,8 @@ export const ioc003 = defineCheck({
     const evidence: Evidence[] = [];
     const db = getIOCDatabase();
     const hashSet = new Set(db.fileHashes);
-    if (skillsDirsOf(ctx).length === 0) return h.passed('No skills directory found');
+    const noDir = noSkillsDirResult(ctx, h);
+    if (noDir) return noDir;
 
     const files = await skillFilesOf(ctx);
 

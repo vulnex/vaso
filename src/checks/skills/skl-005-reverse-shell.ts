@@ -1,7 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { scanWithPatterns, SECURITY_PATTERNS } from '../../analyzers/pattern-engine.js';
-import { readSkillText, skillFilesOf, skillsDirsOf } from './skill-files.js';
+import { readSkillText, skillFilesOf, skillsDirsOf, noSkillsDirResult } from './skill-files.js';
 import { markTestCode } from '../../analyzers/test-paths.js';
 
 const REVERSE_SHELL_RULES = SECURITY_PATTERNS.filter(r => r.category === 'reverse-shell');
@@ -14,7 +14,8 @@ export const skl005 = defineCheck({
   description: 'Detect reverse shell patterns (Bash, netcat, Node.js, Python, etc.)',
 
   async run(ctx, h) {
-    if (skillsDirsOf(ctx).length === 0) return h.passed('No skills directory found');
+    const noDir = noSkillsDirResult(ctx, h);
+    if (noDir) return noDir;
 
     const evidence: Evidence[] = [];
     const files = await skillFilesOf(ctx);

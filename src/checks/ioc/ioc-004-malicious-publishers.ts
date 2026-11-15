@@ -4,6 +4,7 @@ import { defineCheck } from '../../core/check-builder.js';
 import { listSkills } from '../../core/skill-walk.js';
 import { getAllSkillsDirs } from '../../core/utils.js';
 import { getIOCDatabase } from '../../ioc/database.js';
+import { noSkillsDirResult } from '../skills/skill-files.js';
 
 export const ioc004 = defineCheck({
   id: 'IOC-004',
@@ -17,7 +18,8 @@ export const ioc004 = defineCheck({
     const db = getIOCDatabase();
     const publisherSet = new Set(db.maliciousPublishers.map(p => p.toLowerCase()));
     const skillsDirs = getAllSkillsDirs(ctx.installation);
-    if (skillsDirs.length === 0) return h.passed('No skills directory found');
+    const noDir = noSkillsDirResult(ctx, h);
+    if (noDir) return noDir;
 
     const skills = await listSkills(ctx.fs, skillsDirs, { rootIsSkill: ctx.installation.agent === 'skill-audit' });
     for (const skill of skills) {
