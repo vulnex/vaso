@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { writeFile, mkdir, rm } from 'node:fs/promises';
+import { writeFile, mkdir, rm, chmod, symlink, realpath } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { loadRules } from './loader.js';
@@ -206,7 +206,7 @@ rules:
   });
 });
 
-describe('project rules (.vaso/rules in the working directory) are untrusted', () => {
+describe('project rules (.vaso/rules in the working directory)', () => {
   const RULE = (id: string, extra = '') => `
 rules:
   - id: ${id}
@@ -238,9 +238,65 @@ ${extra}`;
 
   afterEach(() => vi.restoreAllMocks());
 
+  it('are not loaded unless the project is trusted; they are reported as skipped', async () => {
+    await writeFile(join(project, '.vaso', 'rules', 'a.yaml'), RULE('ORG-1') + RULE('ORG-2').replace('rules:\n', ''));
+    const result = await loadRules({ fs });
+    expect(result.allRules).toEqual([]);
+    expect(result.files).toEqual([]);
+    expect(result.untrustedProject).toHaveLength(1);
+    expect(result.untrustedProject[0].rules.map(r => r.id)).toEqual(['ORG-1', 'ORG-2']);
+    expect(result.projectDir).toBe(await realpath(project));
+  });
+
+  it('load when ~/.vaso/trusted-projects lists the project (realpath, comments, relative lines ignored)', async () => {
+    await writeFile(join(project, '.vaso', 'rules', 'a.yaml'), RULE('ORG-1'));
+    const list = join(home, '.vaso', 'trusted-projects');
+    await writeFile(list, `# trusted\nrelative/repo\n${project}   # this one\n`, { mode: 0o600 });
+    await chmod(list, 0o600);
+    const result = await loadRules({ fs });
+    expect(result.allRules.map(r => [r.id, r.source])).toEqual([['ORG-1', 'project']]);
+    expect(result.untrustedProject).toEqual([]);
+
+    await writeFile(list, 'relative/repo\n');
+    expect((await loadRules({ fs })).allRules).toEqual([]);
+  });
+
+  it('a project reached through a symlink matches its listed real path', async () => {
+    await writeFile(join(project, '.vaso', 'rules', 'a.yaml'), RULE('ORG-1'));
+    const link = join(TEST_DIR, 'repo-link');
+    await symlink(project, link);
+    vi.spyOn(process, 'cwd').mockReturnValue(link);
+    const list = join(home, '.vaso', 'trusted-projects');
+    await writeFile(list, `${project}\n`);
+    await chmod(list, 0o600);
+    expect((await loadRules({ fs })).allRules).toHaveLength(1);
+  });
+
+  it.skipIf(process.platform === 'win32')('ignores a trusted-projects file group or others can write', async () => {
+    await writeFile(join(project, '.vaso', 'rules', 'a.yaml'), RULE('ORG-1'));
+    const list = join(home, '.vaso', 'trusted-projects');
+    await writeFile(list, `${project}\n`);
+    await chmod(list, 0o620);
+    const result = await loadRules({ fs });
+    expect(result.allRules).toEqual([]);
+    expect(result.untrustedProject).toHaveLength(1);
+    expect(result.trustWarning).toMatch(/writable by group or others — ignored/);
+  });
+
+  it('a trusted project rule is judged like a user rule but its fix is still dropped', async () => {
+    await writeFile(join(project, '.vaso', 'rules', 'style.yaml'), RULE('ORG-778', FIX));
+    const list = join(home, '.vaso', 'trusted-projects');
+    await writeFile(list, `${project}\n`);
+    await chmod(list, 0o600);
+    const result = await loadRules({ fs });
+    expect(result.allRules[0]).toMatchObject({ id: 'ORG-778', source: 'project' });
+    expect(result.allRules[0].fix).toBeUndefined();
+    expect(result.warnings[0].message).toContain('even trusted');
+  });
+
   it('a project rule may add a finding but its fix is dropped, with a warning', async () => {
     await writeFile(join(project, '.vaso', 'rules', 'style.yaml'), RULE('ORG-777', FIX));
-    const result = await loadRules({ fs });
+    const result = await loadRules({ fs, projectRules: true });
     expect(result.allRules).toHaveLength(1);
     expect(result.allRules[0]).toMatchObject({ id: 'ORG-777', source: 'project' });
     expect(result.allRules[0].fix).toBeUndefined();
@@ -264,7 +320,7 @@ ${extra}`;
     const repo = join(project, '.vaso', 'rules', 'a.yaml');
     await writeFile(user, RULE('ORG-001'));
     await writeFile(repo, RULE('ORG-001').replace('permissions.defaultMode', 'nonexistent.key'));
-    const result = await loadRules({ fs });
+    const result = await loadRules({ fs, projectRules: true });
     expect(result.allRules).toHaveLength(1);
     expect(result.allRules[0]).toMatchObject({ source: 'user', file: user, config: { path: 'permissions.defaultMode' } });
     expect(result.warnings[0]).toMatchObject({ file: repo, rule: 'ORG-001' });
@@ -275,7 +331,7 @@ ${extra}`;
     const extra = join(TEST_DIR, 'extra.yaml');
     await writeFile(extra, RULE('ORG-5'));
     await writeFile(join(project, '.vaso', 'rules', 'a.yaml'), RULE('ORG-5').replace('critical', 'info'));
-    const result = await loadRules({ fs, extraPaths: [extra] });
+    const result = await loadRules({ fs, extraPaths: [extra], projectRules: true });
     expect(result.allRules).toHaveLength(1);
     expect(result.allRules[0]).toMatchObject({ source: 'explicit', severity: 'critical' });
     expect(result.warnings).toHaveLength(1);
@@ -293,7 +349,7 @@ rules:
       regex: "(a+)+$"
       target: configs
 `);
-    const result = await loadRules({ fs });
+    const result = await loadRules({ fs, projectRules: true });
     expect(result.allRules).toHaveLength(0);
     expect(result.allErrors[0].message).toMatch(/backtrack/);
   });

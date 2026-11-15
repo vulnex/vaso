@@ -55,6 +55,7 @@ vaso scan [options]
 | `--no-color` | Disable colored terminal output |
 | `--rules <paths...>` | Load additional declarative rule files (see [Custom rules](#custom-rules-vaso-rules)); a file that can't be read exits `2` |
 | `--no-custom-rules` | Skip declarative rules (`~/.vaso/rules/`, `.vaso/rules/` and `--rules`) |
+| `--project-rules` | Also load the working directory's `.vaso/rules/` (a repository's own rules; not loaded unless the project is trusted — see [Custom rules](#custom-rules-vaso-rules)) |
 | `--host <target...>` | Scan one or more remote hosts via SSH (`user@host[:port]`). Variadic. |
 | `--inventory <path>` | YAML file listing hosts to scan |
 | `--ssh-key <path>` | SSH identity file for remote connections |
@@ -215,6 +216,7 @@ vaso fix [options]
 | `-a, --agent <type>` | Fix a specific agent |
 | `--dry-run` | Preview fixes without applying them |
 | `-y, --yes` | Apply all fixes without prompting |
+| `--project-rules` | Also load the working directory's `.vaso/rules/` (their `fix.set` is never applied) |
 | `--rollback [backup]` | Undo the last fix run; run it again to undo the one before. Name a backup (from `~/.vaso/backups/`, owner-only) to restore that one |
 | `--no-color` | Disable colored output |
 
@@ -400,7 +402,9 @@ Rules load from three places:
 |--------|---------|-------|
 | `~/.vaso/rules/*.yaml` | yes | Your own (or your organisation's) rules |
 | `--rules <file...>` | yes | Named on the command line; replaces a `~/.vaso/rules/` rule with the same ID (with a warning) |
-| `.vaso/rules/*.yaml` in the working directory | no | A cloned repository can ship these, so they are treated as untrusted input: they may add findings, but their `fix.set` is ignored (only `fix.guidance` text stays) and they never replace a rule ID already defined in `~/.vaso/rules/` or by `--rules` — that rule is skipped with a warning naming both files. Move a project rule to `~/.vaso/rules/` or pass it with `--rules` to keep its fix |
+| `.vaso/rules/*.yaml` in the working directory | only when you trust the project | A cloned repository can ship these, so they are **not loaded** unless you pass `--project-rules` or list the project in `~/.vaso/trusted-projects`; otherwise `scan`/`fix` print one notice saying how many project rules were skipped (hidden by `--silent`) and `vaso rules list` shows them as "untrusted (not loaded)". Once trusted they run like your own rules, except that their `fix.set` is still ignored (only `fix.guidance` text stays) and they never replace a rule ID already defined in `~/.vaso/rules/` or by `--rules` — that rule is skipped with a warning naming both files. Move a project rule to `~/.vaso/rules/` or pass it with `--rules` to keep its fix |
+
+`~/.vaso/trusted-projects` lists one absolute project path per line (the directory you run VASO from; `#` starts a comment, relative lines are ignored); a project reached through a symlink matches its real path. VASO ignores the file, with a warning, when group or others can write it — keep it `chmod 600`.
 
 Within one source, the first definition of an ID wins and a duplicate is skipped with a warning. A rule whose ID matches a built-in check is skipped.
 
@@ -739,6 +743,7 @@ VASO keeps all local state under `~/.vaso/`:
 | `~/.vaso/mcp-state/` | Per-server MCP state: version history for MCP-027 rollback detection, config fingerprints for MCP-028 drift |
 | `~/.vaso/mcp-pkg-cache/` | npm package tarballs downloaded by `vaso mcp scan --resolve-packages` |
 | `~/.vaso/rules/` | Custom YAML rules (`vaso rules init`) |
+| `~/.vaso/trusted-projects` | Projects whose `.vaso/rules/` load without `--project-rules` (one absolute path per line, owner-writable only) |
 
 Nothing under `~/.vaso/` leaves the machine. VASO makes outbound network calls only in these cases:
 
