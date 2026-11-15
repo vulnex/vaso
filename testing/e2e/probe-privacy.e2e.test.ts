@@ -243,6 +243,9 @@ function jsonFile(label: string): string {
       n: { args: ['-k', c('-k base64 with / and +', () => { const d = distinct(BASE62, 26).join(''); return `${d.slice(0, 13)}/${d.slice(13)}+`; })] },
       // -k takes a key only when what follows is random (the report masker's rule)
       i: { args: ['-k', c('-k random key', () => distinct(BASE62, 30).join(''))] },
+      // curl user:password as separate elements (rule 5); --pw/--pass take a password
+      o: { command: 'curl', args: ['-u', `carol:${c('curl -u separate', lowerWord)}`, '--user', `dave:${c('curl --user separate', lowerWord)}`, `--proxy-user=p:${c('curl --proxy-user=', lowerWord)}`, 'https://x.example'] },
+      p: { command: 'acme', args: ['--pw', c('lowercase --pw', lowerWord), '--pass', c('lowercase --pass', lowerWord)] },
     },
     apiKey: c('all-lowercase api key', () => body(32, 'abcdefghijklmnopqrstuvwyz0123456789')),
     // a pasted curl command: JSON inside the string, its quotes escaped twice
@@ -313,6 +316,13 @@ function yamlFile(label: string): string {
     '    - --verbose',
     '    - --api-key',
     `    - ${canary(`${label} yaml argv block`, generic)}`,
+    'curl:',
+    '  command: curl',
+    '  args:',
+    '    - -u',
+    `    - carol:${canary(`${label} yaml curl -u block`, lowerWord)}`,
+    '    - --pw',
+    `    - ${canary(`${label} yaml --pw block`, lowerWord)}`,
   ].join('\n') + '\n';
 }
 
@@ -330,6 +340,9 @@ function tomlFile(label: string): string {
     `github = "${canary(`${label} toml secrets subtable child`, generic)}"`,
     '[providers.x]',
     `api_key."main" = "${canary(`${label} toml dotted quoted key`, generic)}"`,
+    '[mcp_servers.curl]',
+    'command = "curl"',
+    `args = ["-u", "carol:${canary(`${label} toml curl -u`, lowerWord)}", "--pass", "${canary(`${label} toml --pass`, lowerWord)}"]`,
   ].join('\n') + '\n';
 }
 

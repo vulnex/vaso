@@ -1,5 +1,5 @@
 {
- "about": "Shared argv rules (dt21 round 3). Each case is an argv array (MCP server args, element 0 the command) or a command string. 'secrets' are the credential values (exact substrings) the probe disguises, the report masker masks and MCP-003 reports; 'keep' are elements or substrings that must stay as written. Rules: (1) a following element is a flag, not a value, only when flag-shaped (^--?[A-Za-z][A-Za-z0-9_-]*$ AND the name after the dashes does not look random: looksRandom(name, 12) false, so -Xq9Zr7Lm2Pv8Kd4Wb6Tn3Hc is a value while -v, -pthread, --no-auth are flags) or exactly '--' (end of options; what follows is a positional, no flag's value); any other '-'-led element is a value. (2) -p after a password client (mysql, mysqldump, mariadb, mariadb-dump, mysqladmin, sshpass) is a password, separate or glued, unless a reference; psql/pg_dump/redis-cli -p is a port; after any other command -p <v> is a password only when v looks like a credential (MCP-003's looksLikeSecret) and is no port, port mapping, version, package spec, reference or lowercase word. (3) -k <v> is a credential when v looks random (looksRandom, 16) and is no URL, host[:port] or path (isPathValue); '/' and '+' inside do not exclude it. (4) redis-cli -a <v> is a password unless a reference.",
+ "about": "Shared argv rules (dt21 round 3). Each case is an argv array (MCP server args, element 0 the command) or a command string. 'secrets' are the credential values (exact substrings) the probe disguises, the report masker masks and MCP-003 reports; 'keep' are elements or substrings that must stay as written. Rules: (1) a following element is a flag, not a value, only when flag-shaped (^--?[A-Za-z][A-Za-z0-9_-]*$ AND the name after the dashes does not look random: looksRandom(name, 12) false, so -Xq9Zr7Lm2Pv8Kd4Wb6Tn3Hc is a value while -v, -pthread, --no-auth are flags) or exactly '--' (end of options; what follows is a positional, no flag's value); any other '-'-led element is a value. (2) -p after a password client (mysql, mysqldump, mariadb, mariadb-dump, mysqladmin, sshpass) is a password, separate or glued, unless a reference; psql/pg_dump/redis-cli -p is a port; after any other command -p <v> is a password only when v looks like a credential (MCP-003's looksLikeSecret) and is no port, port mapping, version, package spec, reference or lowercase word. (3) -k <v> is a credential when v looks random (looksRandom, 16) and is no URL, host[:port] or path (isPathValue); '/' and '+' inside do not exclude it. (4) redis-cli -a <v> is a password unless a reference. (5) curl -u/--user/--proxy-user (separate, or --user=/--proxy-user=) user:password: the part after the first colon is the password unless empty or a reference; another command's -u (docker -u 1000:1000, --user app:app) is not judged. --pw and --pass are credential flags like --password.",
  "cases": [
   {"name": "dash-led value after a credential flag", "argv": ["acme", "--api-key", "-Xq9Zr7Lm2Pv8Kd4Wb6Tn3Hc"], "secrets": ["-Xq9Zr7Lm2Pv8Kd4Wb6Tn3Hc"], "keep": ["--api-key"]},
   {"name": "dash-led password", "argv": ["acme", "--password", "-Pz9Lm2Qr7Xv4Kt8Wn3Yb5"], "secrets": ["-Pz9Lm2Qr7Xv4Kt8Wn3Yb5"], "keep": ["--password"]},
@@ -9,7 +9,6 @@
   {"name": "end of options after a credential flag", "argv": ["node", "--token", "--", "server.js"], "secrets": [], "keep": ["--token", "--", "server.js"]},
   {"name": "credential flag, = form", "argv": ["acme", "--api-key=Zq8wX3mK9pL2vB7nR4tY6uI1"], "secrets": ["Zq8wX3mK9pL2vB7nR4tY6uI1"], "keep": ["--api-key="]},
   {"name": "credential flag, separate", "argv": ["acme", "--token", "Zq8wX3mK9pL2vB7nR4tY6uI2"], "secrets": ["Zq8wX3mK9pL2vB7nR4tY6uI2"], "keep": ["--token"]},
-
   {"name": "mysql -p glued, a date-like password", "argv": ["mysql", "-u", "root", "-p2024.11.05"], "secrets": ["2024.11.05"], "keep": ["-u", "root"]},
   {"name": "mysql -p separate, a date-like password", "argv": ["mysql", "-u", "root", "-p", "2024.11.05", "app"], "secrets": ["2024.11.05"], "keep": ["root", "app"]},
   {"name": "mysql -p glued, a lowercase passphrase", "argv": ["mysql", "-pcorrecthorsebattery"], "secrets": ["correcthorsebattery"], "keep": []},
@@ -36,23 +35,31 @@
   {"name": "-p random value, unknown command", "argv": ["acme", "-p", "Xq9Zr7Lm2Pv8Kd4Wb6Tn3Hc"], "secrets": ["Xq9Zr7Lm2Pv8Kd4Wb6Tn3Hc"], "keep": []},
   {"name": "-p glued random value, unknown command", "argv": ["acme", "-pXq9Zr7Lm2Pv8Kd4Wb6Tn3He"], "secrets": ["Xq9Zr7Lm2Pv8Kd4Wb6Tn3He"], "keep": []},
   {"name": "-pthread", "argv": ["gcc", "-pthread", "x.c"], "secrets": [], "keep": ["-pthread"]},
-
   {"name": "redis-cli -a", "argv": ["redis-cli", "-h", "cache", "-p", "6379", "-a", "letmeinplease"], "secrets": ["letmeinplease"], "keep": ["6379", "cache"]},
   {"name": "redis-cli -a reference", "argv": ["redis-cli", "-a", "$REDIS_PASSWORD"], "secrets": [], "keep": ["$REDIS_PASSWORD"]},
-
   {"name": "-k random base64 with / and +", "argv": ["acme", "-k", "Xq9/Zr7+Lm2Pv8Kd4Wb6Tn3Hc=="], "secrets": ["Xq9/Zr7+Lm2Pv8Kd4Wb6Tn3Hc=="], "keep": []},
   {"name": "-k random key", "argv": ["acme", "-k", "Zq8wX3mK9pL2vB7nR4tY6uI1"], "secrets": ["Zq8wX3mK9pL2vB7nR4tY6uI1"], "keep": []},
   {"name": "curl -k before a URL", "argv": ["curl", "-k", "https://x.example/api"], "secrets": [], "keep": ["https://x.example/api"]},
   {"name": "-k host:port", "argv": ["acme", "-k", "cache.internal:6379"], "secrets": [], "keep": ["cache.internal:6379"]},
   {"name": "-k path", "argv": ["acme", "-k", "/etc/ssl/private/server.key"], "secrets": [], "keep": ["/etc/ssl/private/server.key"]},
   {"name": "-k word", "argv": ["acme", "-k", "insecure"], "secrets": [], "keep": ["insecure"]},
-
   {"name": "command string: mysql glued in sh -c, psql port beside it", "command": "sh -c 'mysql -uroot -p2024.11.05 app && psql -p 5432 db'", "secrets": ["2024.11.05"], "keep": ["5432"]},
   {"name": "command string: mysql -p separate", "command": "mysql -u root -p 2024.11.05 app", "secrets": ["2024.11.05"], "keep": ["root", "app"]},
   {"name": "command string: sshpass", "command": "sshpass -p letmeinplease ssh deploy@host", "secrets": ["letmeinplease"], "keep": ["deploy@host"]},
   {"name": "command string: docker port", "command": "docker run -p 8080:80 img", "secrets": [], "keep": ["8080:80"]},
   {"name": "command string: redis-cli -a beside a port", "command": "redis-cli -h cache -p 6379 -a Sup3rS3cretPass", "secrets": ["Sup3rS3cretPass"], "keep": ["6379"]},
   {"name": "command string: switch then credential flag", "command": "npx acme --use-oauth-token --api-key Xq9Zr7Lm2Pv8Kd4Wb6Tn3Hf", "secrets": ["Xq9Zr7Lm2Pv8Kd4Wb6Tn3Hf"], "keep": ["--use-oauth-token --api-key "]},
-  {"name": "command string: dash-led value", "command": "acme --api-key -Xq9Zr7Lm2Pv8Kd4Wb6Tn3Hg", "secrets": ["-Xq9Zr7Lm2Pv8Kd4Wb6Tn3Hg"], "keep": ["--api-key "]}
+  {"name": "command string: dash-led value", "command": "acme --api-key -Xq9Zr7Lm2Pv8Kd4Wb6Tn3Hg", "secrets": ["-Xq9Zr7Lm2Pv8Kd4Wb6Tn3Hg"], "keep": ["--api-key "]},
+  {"name": "curl -u and --user as separate elements", "argv": ["curl", "-u", "carol:curlpw2low", "--user", "dave:userpwlow", "https://x.example/api"], "secrets": ["curlpw2low", "userpwlow"], "keep": ["carol:", "dave:", "https://x.example/api"]},
+  {"name": "curl --proxy-user separate", "argv": ["curl", "--proxy-user", "proxyuser:Pr0xyPassw0rd", "https://x.example"], "secrets": ["Pr0xyPassw0rd"], "keep": ["proxyuser:"]},
+  {"name": "curl --user= form", "argv": ["curl", "--user=erin:hunter2abc", "https://x.example"], "secrets": ["hunter2abc"], "keep": ["--user=erin:"]},
+  {"name": "curl via a full path, a short password", "argv": ["/usr/bin/curl", "-u", "bob:pw1", "https://x.example"], "secrets": ["pw1"], "keep": ["bob:"]},
+  {"name": "curl -u with a reference", "argv": ["curl", "-u", "bob:$CURL_PASSWORD", "https://x.example"], "secrets": [], "keep": ["bob:$CURL_PASSWORD"]},
+  {"name": "curl -u user only", "argv": ["curl", "-u", "bob", "https://x.example"], "secrets": [], "keep": ["bob"]},
+  {"name": "curl -u empty password", "argv": ["curl", "-u", "bob:", "https://x.example"], "secrets": [], "keep": ["bob:"]},
+  {"name": "docker --user uid:gid is not a password", "argv": ["docker", "run", "--user", "1000:1000", "img"], "secrets": [], "keep": []},
+  {"name": "--pw credential flag", "argv": ["acme", "--pw", "Xq9Zr7Lm2Pv8Kd4Wb6Tn3Hk"], "secrets": ["Xq9Zr7Lm2Pv8Kd4Wb6Tn3Hk"], "keep": ["--pw"]},
+  {"name": "--pass credential flag", "argv": ["acme", "--pass", "Xq9Zr7Lm2Pv8Kd4Wb6Tn3Hm"], "secrets": ["Xq9Zr7Lm2Pv8Kd4Wb6Tn3Hm"], "keep": ["--pass"]},
+  {"name": "command string: curl -u", "command": "sh -c 'curl -sS -u carol:Curlpw2Low9 https://x.example/api'", "secrets": ["Curlpw2Low9"], "keep": ["carol:", "https://x.example/api"]}
  ]
 }

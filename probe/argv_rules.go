@@ -35,11 +35,14 @@ var (
 	// clients whose -p is the password
 	passwordClients = map[string]bool{"mysql": true, "mysqldump": true, "mariadb": true, "mariadb-dump": true, "mysqladmin": true, "sshpass": true}
 	// clients whose -p is a port
-	portClients = map[string]bool{"psql": true, "pg_dump": true, "pg_dumpall": true, "pg_restore": true, "pg_isready": true, "redis-cli": true}
-	versionLike = regexp.MustCompile(`^v?\d+(?:\.\d+)*$`)
-	packageSpec = regexp.MustCompile(`^(?:@[\w.-]+/)?[\w.-]+@[\w.^~*<>=-]+$|^@[\w.-]+/[\w.-]+$`)
-	lowerWordRe = regexp.MustCompile(`^[a-z]+$`)
-	hostPort    = regexp.MustCompile(`^[A-Za-z0-9.-]+:\d+$`)
+	// clients whose -u/--user/--proxy-user value is user:password
+	userPassClients = map[string]bool{"curl": true, "curl.exe": true}
+	userPassFlags   = map[string]bool{"-u": true, "--user": true, "--proxy-user": true}
+	portClients     = map[string]bool{"psql": true, "pg_dump": true, "pg_dumpall": true, "pg_restore": true, "pg_isready": true, "redis-cli": true}
+	versionLike     = regexp.MustCompile(`^v?\d+(?:\.\d+)*$`)
+	packageSpec     = regexp.MustCompile(`^(?:@[\w.-]+/)?[\w.-]+@[\w.^~*<>=-]+$|^@[\w.-]+/[\w.-]+$`)
+	lowerWordRe     = regexp.MustCompile(`^[a-z]+$`)
+	hostPort        = regexp.MustCompile(`^[A-Za-z0-9.-]+:\d+$`)
 	// ${port}:3000, $PORT: a reference inside a value
 	embeddedRef = regexp.MustCompile(`\$\{?[A-Za-z_]`)
 )
@@ -62,6 +65,16 @@ func passwordValue(v string) bool {
 }
 
 // unknownPassword: -p <v> after an unknown command (rule 2).
+// userPassword: the password span of a curl user:password value — after
+// the first colon, when one is stored there (not empty, not a reference).
+func userPassword(v string) (int, bool) {
+	i := strings.IndexByte(v, ':')
+	if i < 0 || !passwordValue(v[i+1:]) {
+		return 0, false
+	}
+	return i + 1, true
+}
+
 func unknownPassword(v string) bool {
 	return looksLikeSecret(v) && !portLike.MatchString(v) && !versionLike.MatchString(v) && !packageSpec.MatchString(v) &&
 		!isSecretReference(v) && !embeddedRef.MatchString(v) && !lowerWordRe.MatchString(v)
@@ -98,6 +111,19 @@ func flagValueSpan(v string) (int, int, bool) {
 	return from, len(v), true
 }
 
+// secretFlagValueSpan is flagValueSpan for the value of flag; after a flag
+// naming a password or key itself (--password, --pw, --api-key) a plain
+// value is the credential too, as in a config's argv pairs (flagTakesCredential).
+func secretFlagValueSpan(flag, v string) (int, int, bool) {
+	if from, to, ok := flagValueSpan(v); ok {
+		return from, to, true
+	}
+	if strongCredentialFlag(flag) && plainCredential(v) {
+		return 0, len(v), true
+	}
+	return 0, 0, false
+}
+
 // judgeArgv returns the credentials among tokens, one command line (a
 // segment of one: the caller splits at ; && || |).
 func judgeArgv(tokens []string) []argvHit {
@@ -116,7 +142,7 @@ func judgeArgv(tokens []string) []argvHit {
 			// end of options: the rest are positionals
 			return hits
 		case !strings.HasPrefix(t, "-"):
-			if name := clientName(t); passwordClients[name] || portClients[name] {
+			if name := clientName(t); passwordClients[name] || portClients[name] || userPassClients[name] {
 				client = name
 			}
 		case t == "-p":
@@ -130,6 +156,18 @@ func judgeArgv(tokens []string) []argvHit {
 			v := t[2:]
 			if passwordClients[client] && passwordValue(v) || !passwordClients[client] && !portClients[client] && unknownPassword(v) {
 				hits = append(hits, argvHit{i, 2, len(t)})
+			}
+		case userPassFlags[t] && userPassClients[client]:
+			if v, ok := value(i); ok {
+				if from, ok := userPassword(v); ok {
+					hits = append(hits, argvHit{i + 1, from, len(v)})
+				}
+				i++
+			}
+		case strings.HasPrefix(t, "--") && userPassFlags[t[:max(strings.IndexByte(t, '='), 0)]] && userPassClients[client]:
+			eq := strings.IndexByte(t, '=')
+			if from, ok := userPassword(t[eq+1:]); ok {
+				hits = append(hits, argvHit{i, eq + 1 + from, len(t)})
 			}
 		case t == "-a" && client == "redis-cli":
 			if v, ok := value(i); ok {
@@ -145,12 +183,12 @@ func judgeArgv(tokens []string) []argvHit {
 			}
 		case strings.HasPrefix(t, "--") && strings.Contains(t, "="):
 			eq := strings.IndexByte(t, '=')
-			if from, to, ok := flagValueSpan(t[eq+1:]); isSecretFlag(t[:eq]) && ok {
+			if from, to, ok := secretFlagValueSpan(t[:eq], t[eq+1:]); isSecretFlag(t[:eq]) && ok {
 				hits = append(hits, argvHit{i, eq + 1 + from, eq + 1 + to})
 			}
 		case flagShaped(t) && isSecretFlag(t):
 			if v, ok := value(i); ok {
-				if from, to, ok := flagValueSpan(v); ok {
+				if from, to, ok := secretFlagValueSpan(t, v); ok {
 					hits = append(hits, argvHit{i + 1, from, to})
 				}
 				i++
@@ -276,7 +314,7 @@ func commandCredentialsVariable(line string, replace func(string) string) string
 }
 
 // argvLines is a cheap filter: a line that may hold a command's credential.
-var argvHints = []string{"-p", "-a", "-k", "--", "mysql", "sshpass", "mariadb"}
+var argvHints = []string{"-p", "-a", "-k", "-u", "--", "mysql", "sshpass", "mariadb"}
 
 // command: "x" / command = 'x' / {command: x, …} (YAML takes it unquoted)
 var commandKey = regexp.MustCompile(`(?:^|[\s{,])["']?command["']?[ \t]*[:=][ \t]*(?:["']([^"'\r\n]+)["']|([^\s,{}\[\]"'#]+))`)
