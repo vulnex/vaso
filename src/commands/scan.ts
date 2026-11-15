@@ -73,7 +73,7 @@ export async function runScan(options: ScanCommandOptions): Promise<void> {
     process.exitCode = 2;
     return;
   }
-  // (also --save-snapshot / --ssh-key / --sudo without remote hosts, --snapshot with them)
+  // (also --save-snapshot without remote hosts, --snapshot with them)
   let remoteValues: RemoteOptionValues;
   try {
     remoteValues = parseRemoteOptions(options);
