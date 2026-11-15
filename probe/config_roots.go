@@ -619,11 +619,54 @@ var errStopWalk = errors.New("stop walk")
 
 // credentialName: a file name that marks the file as a credential — its
 // content may be a bare token no key names, which the disguiser can't tell
-// from a hash. A config-derived tree ships such files as metadata only.
-var credentialName = regexp.MustCompile(`(?i)^(?:\.?(?:tokens?|secrets?|credentials?|passwords?|api[_-]?keys?|access[_-]?tokens?|auth[_-]?tokens?)(?:\.(?:json|toml|ya?ml|txt|ini|cfg|conf|env|dat))?|.*\.(?:key|pem|p12|pfx|jks|keystore|kdbx|token|secret|gpg|asc)|id_(?:rsa|dsa|ecdsa|ed25519)|client_secret[\w.-]*\.json|\.htpasswd)$`)
+// from a hash: token and key files, a Vault token (.vault-token), shell and
+// client histories (.bash_history, .psql_history: passwords typed inline),
+// login keyrings, netrc/pgpass/git-credentials, browser cookie and login
+// stores (Cookies, Login Data, Web Data, key4.db, logins.json). A
+// config-derived tree ships such files as metadata only.
+var credentialName = regexp.MustCompile(`(?i)^(?:\.?(?:tokens?|secrets?|credentials?|passwords?|api[_-]?keys?|access[_-]?tokens?|auth[_-]?tokens?)(?:\.(?:json|toml|ya?ml|txt|ini|cfg|conf|env|dat))?|.*\.(?:key|pem|p12|pfx|jks|keystore|keyring|kdbx|token|secret|gpg|asc)|id_(?:rsa|dsa|ecdsa|ed25519)|client_secret[\w.-]*\.json|\.htpasswd|\.vault-token|\.[\w-]*history|\.histfile|\.lesshst|[._]netrc|\.pgpass|\.my\.cnf|\.git-credentials|\.Xauthority|Cookies(?:-journal)?|Login Data(?: For Account)?(?:-journal)?|Web Data(?:-journal)?|key[34]\.db|logins\.json|cookies\.sqlite(?:-wal|-journal)?|signons\.sqlite)$`)
+
+// credentialDir: a directory whose files are credentials whatever they are
+// called (GNOME keyrings).
+var credentialDir = regexp.MustCompile(`(?i)^keyrings$`)
 
 func credentialFileName(p string) bool {
-	return credentialName.MatchString(filepath.Base(p))
+	if credentialName.MatchString(filepath.Base(p)) {
+		return true
+	}
+	for dir := filepath.Dir(p); dir != filepath.Dir(dir); dir = filepath.Dir(dir) {
+		if credentialDir.MatchString(filepath.Base(dir)) {
+			return true
+		}
+	}
+	return false
+}
+
+// programHeader: the file starts like a program — a `#!` script or an
+// executable format (ELF, Mach-O, PE) — so an executable bit means what it
+// says and a credential-like name doesn't make it a credential.
+func programHeader(p string) bool {
+	f, err := openForRead(p)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	head := make([]byte, 4)
+	n, _ := io.ReadFull(f, head)
+	head = head[:n]
+	switch {
+	case len(head) >= 2 && head[0] == '#' && head[1] == '!':
+		return true
+	case len(head) >= 2 && head[0] == 'M' && head[1] == 'Z':
+		return true
+	case len(head) == 4:
+		for _, m := range [][]byte{{0x7f, 'E', 'L', 'F'}, {0xfe, 0xed, 0xfa, 0xce}, {0xfe, 0xed, 0xfa, 0xcf}, {0xce, 0xfa, 0xed, 0xfe}, {0xcf, 0xfa, 0xed, 0xfe}, {0xca, 0xfe, 0xba, 0xbe}} {
+			if string(head) == string(m) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // escapeGlobMeta escapes doublestar's metacharacters in a literal path, so a

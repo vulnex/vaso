@@ -176,6 +176,18 @@ describe('getSkillFiles', () => {
     expect(files).toEqual([]);
   });
 
+  it('an executable key or token is not code; a credential-named script or binary is', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'vaso-sf-'));
+    roots.push(root);
+    await writeFile(join(root, 'id_ed25519'), 'b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2g\n', { mode: 0o755 });
+    await writeFile(join(root, 'token'), 'Q7rT2mZ9kLp4Vw8NcB1dYh6Ju3Fs0GxE\n', { mode: 0o755 });
+    await writeFile(join(root, 'tokens'), '#!/bin/sh\necho hi\n', { mode: 0o755 });
+    await writeFile(join(root, 'secrets'), Buffer.from([0x7f, 0x45, 0x4c, 0x46, 2, 1, 1, 0]), { mode: 0o755 });
+    await writeFile(join(root, 'setup'), 'echo plain shell\n', { mode: 0o755 });
+    const files = (await getSkillFiles(root)).map(f => f.slice(root.length + 1)).sort();
+    expect(files).toEqual(['secrets', 'setup', 'tokens']);
+  });
+
   it('collects code files by extension and skips other files', async () => {
     const root = await mkdtemp(join(tmpdir(), 'vaso-sf-'));
     roots.push(root);

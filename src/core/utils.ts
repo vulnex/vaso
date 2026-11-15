@@ -6,6 +6,7 @@ import type { DirentInfo, FSProvider } from './fs-provider.js';
 import type { AgentInstallation } from './types.js';
 import { walkSkillTree } from './skill-walk.js';
 import { relEscapes } from './path-rel.js';
+import { isCredentialNotProgram } from '../analyzers/credential-file-names.js';
 
 export { relEscapes };
 import { LocalFSProvider } from './local-fs-provider.js';
@@ -145,7 +146,9 @@ export async function listSkillTree(dir: string, fs?: FSProvider): Promise<Skill
       const ext = extname(entry.name).toLowerCase();
       if (CODE_EXTENSIONS.has(ext) || BINARY_EXTENSIONS.has(ext) || entry.name.toUpperCase() === 'SKILL.MD') {
         files.push(fullPath);
-      } else if (ext === '' && !entry.name.startsWith('.') && await isExecutable(provider, fullPath)) {
+      } else if (ext === '' && !entry.name.startsWith('.') && await isExecutable(provider, fullPath)
+        // an id_ed25519 or token with an execute bit is a key, not a program
+        && !(await isCredentialNotProgram(provider, fullPath, entry.name))) {
         files.push(fullPath);
       }
     }

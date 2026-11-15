@@ -335,6 +335,7 @@ func TestTokenShapedCoversEveryFormat(t *testing.T) {
 		"ASIAQ7RT2MZ9KLP4VW8N", "gsk_Q7rT2mZ9kLp4Vw8NcB1dYh6J", "hf_Q7rT2mZ9kLp4Vw8NcB1dYh6J",
 		"xai-Q7rT2mZ9kLp4Vw8NcB1dYh6Ju3Fs0GxEa5Ri", nvidiaKey, "glpat-Q7rT2mZ9kLp4Vw8NcB1d",
 		"patQ7rT2mZ9kLp4Vw.9c1e5b2d4f6a8c0e9c1e5b2d4f6a8c0e9c1e5b2d4f6a8c0e9c1e5b2d4f6a8c0e", // Airtable
+		"hvs.Q7rT2mZ9kLp4Vw8NcB1dYh6J", "s.Q7rT2mZ9kLp4Vw8NcB1dYh6J", // Vault
 	}
 	for _, s := range samples {
 		if tokenFormats(s) == 0 {
@@ -348,6 +349,34 @@ func TestTokenShapedCoversEveryFormat(t *testing.T) {
 		if strings.Contains(redactSecretValues("x "+s+" y"), secretMiddle(s)) {
 			t.Errorf("%s in command output", s)
 		}
+	}
+}
+
+// Under a key or token name (API_KEY, X-Api-Key, Authorization) a value is
+// the credential whatever its entropy; settings beside it are kept.
+func TestLowEntropyValuesUnderKeyNamesAreDisguised(t *testing.T) {
+	c := &collector{}
+	out := scrubFile(t, c, "/h/.claude.json", `{"mcpServers": {"svc": {"command": "npx",
+  "env": {"API_KEY": "plainlowentropy", "GITHUB_TOKEN": "lowentropytoken", "OPENAI_API_KEY": "${OPENAI_KEY}", "BACKUP_API_KEY": "none"},
+  "headers": {"Authorization": "Bearer lowentropybearer", "X-Api-Key": "zz-custom-key"}}},
+  "apiKeyHelper": "/usr/local/bin/key-helper-script", "auth": "oauth-personal", "token_type": "bearer", "max_tokens": 4096}`)
+	for _, leaked := range []string{"plainlowentropy", "lowentropytoken", "lowentropybearer", "zz-custom-key"} {
+		if strings.Contains(out, leaked[2:len(leaked)-2]) {
+			t.Errorf("%s shipped: %s", leaked, out)
+		}
+	}
+	for _, kept := range []string{"${OPENAI_KEY}", `"none"`, "/usr/local/bin/key-helper-script", "oauth-personal", `"token_type": "bearer"`, "4096"} {
+		if !strings.Contains(out, kept) {
+			t.Errorf("%s changed: %s", kept, out)
+		}
+	}
+	env := "API_KEY=plainlowentropy\nX_API_KEY=zz-custom-key\n"
+	if out := scrubFile(t, &collector{}, "/h/.hermes/.env", env); strings.Contains(out, "lowentrop") || strings.Contains(out, "custom-k") {
+		t.Errorf("dotenv shipped: %s", out)
+	}
+	yaml := "mcp_servers:\n  s:\n    env:\n      API_KEY: plainlowentropy\n    headers:\n      Authorization: Bearer lowentropybearer\n"
+	if out := scrubFile(t, &collector{}, "/h/.hermes/config.yaml", yaml); strings.Contains(out, "lowentrop") {
+		t.Errorf("yaml shipped: %s", out)
 	}
 }
 

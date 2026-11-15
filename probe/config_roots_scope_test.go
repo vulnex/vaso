@@ -209,9 +209,18 @@ func TestCredentialNamedFilesInConfigTreesAreMetadataOnly(t *testing.T) {
 	write(t, filepath.Join(tree, "s", "credentials.json"), `{"x": "`+bare+`"}`, 0o600)
 	write(t, filepath.Join(tree, "s", "tokens"), "#!/bin/sh\necho hi\n", 0o755)
 	write(t, filepath.Join(tree, "s", "tokenizer.js"), "module.exports = 1\n", 0o644)
+	// an executable bit alone doesn't make a key or a token file a program
+	write(t, filepath.Join(tree, "s", "id_ed25519"), "b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQ"+bare+"\n", 0o755)
+	write(t, filepath.Join(tree, "s", "secrets.json"), `{"x": "`+bare+`"}`, 0o755)
+	stores := []string{".vault-token", ".psql_history", ".bash_history", ".mysql_history", "login.keyring",
+		"Cookies", "Login Data", "Web Data", "key4.db", "logins.json",
+		filepath.Join("keyrings", "user.keystore2"), filepath.Join("keyrings", "default")}
+	for _, n := range stores {
+		write(t, filepath.Join(tree, "s", n), "hvs.Q7rT2mZ9kLp4Vw8NcB1dYh6J PASSWORD 'pw-"+bare+"'\n", 0o600)
+	}
 	writeExtraDirs(t, home, "~/tree")
 	snap := Collect(extraDirsManifest(), false)
-	for _, n := range []string{"token", "server.key", "credentials.json"} {
+	for _, n := range append([]string{"token", "server.key", "credentials.json", "id_ed25519", "secrets.json"}, stores...) {
 		if e := snap.Files[filepath.Join(tree, "s", n)]; !e.Exists || e.Content != "" || e.Omitted != "metadata" {
 			t.Errorf("%s: %+v", n, e)
 		}

@@ -42,6 +42,7 @@ var apiKeyPatterns = []string{
 	`\bdevin-[A-Za-z0-9$._-]{60,}`,
 	`\bcog_[a-zA-Z0-9]{16,}`,
 	`\bapk_(?:user_)?[a-zA-Z0-9]{16,}`,
+	`\bhv[sbr]\.[A-Za-z0-9_-]{24,}`,
 	`VELLUM_API_KEY\s*[=:]\s*['"]?[a-zA-Z0-9._-]{20,}`,
 }
 
@@ -272,6 +273,7 @@ var extraTokenPatterns = []string{
 	`^nvapi-[A-Za-z0-9_-]{20,}`,
 	`^glpat-[A-Za-z0-9_-]{20,}`,
 	`^pat[A-Za-z0-9]{14}\.[0-9a-f]{64}`,
+	`^[sr]\.[A-Za-z0-9]{24}$`,
 }
 
 var tokenFormatRes = func() []*regexp.Regexp {
@@ -296,7 +298,7 @@ func tokenFormats(v string) uint64 {
 // knownTokenPrefix is the fixed lead of a known token format. A stand-in
 // keeps it whole even past the 8 characters reports show: github_pat_ whose
 // "at_" was substituted (github_pct_…) matched no format any more.
-var knownTokenPrefix = regexp.MustCompile(`^(?:github_pat_|sk-(?:proj|svcacct|admin)-|sk-ant-(?:api|admin)[0-9]{2}-|sk-ant-|sk-or-v1-|sk-lf-|sk-ak-|xox[abeprs]-|glpat-|gh[pousr]_|nvapi-|devin-|cog_|apk_user_|apk_|A[KS]IA|AIza|gsk_|hf_|xai-)`)
+var knownTokenPrefix = regexp.MustCompile(`^(?:github_pat_|sk-(?:proj|svcacct|admin)-|sk-ant-(?:api|admin)[0-9]{2}-|sk-ant-|sk-or-v1-|sk-lf-|sk-ak-|xox[abeprs]-|glpat-|gh[pousr]_|nvapi-|devin-|cog_|apk_user_|apk_|A[KS]IA|AIza|gsk_|hf_|xai-|hv[sbr]\.|[sr]\.)`)
 
 func matchesAPIKey(v string) bool {
 	for _, re := range apiKeyRes {
@@ -1164,8 +1166,11 @@ func (c *collector) disguiseAs(v string, passphrase, keyed bool) string {
 // a key a lowercase passphrase is the credential, where elsewhere a
 // lowercase-words value is a setting (auth: oauth-personal) and is kept.
 var (
-	strongCredentialWord = regexp.MustCompile(`(?:^|_)(?:password|passwd|pwd|passphrase|secret|pin|passcode)\d*(?:_|$)`)
-	credentialAboutWord  = regexp.MustCompile(`_(?:mode|method|policy|url|uri|file|path|dir|id|arn|ref|name|type|hint|prompt|length|backend|store|provider|manager|source|format|algorithm|scheme|strategy|env|var)$`)
+	// …and a key or token by name (API_KEY, apiKey, X-Api-Key, GITHUB_TOKEN,
+	// access_token, Authorization): whatever its entropy, the value under
+	// it is the credential (a low-entropy key is still someone's key)
+	strongCredentialWord = regexp.MustCompile(`(?:^|_)(?:password|passwd|pwd|passphrase|secret|pin|passcode|api_?key|token|access_token|auth_token|authorization|bearer)\d*(?:_|$)`)
+	credentialAboutWord  = regexp.MustCompile(`_(?:mode|method|policy|url|uri|file|path|dir|id|arn|ref|name|type|hint|prompt|length|backend|store|provider|manager|source|format|algorithm|scheme|strategy|env|var|limit|count|budget|size|ttl|expiry|expires|lifetime|endpoint|header|prefix|helper|command|cmd)$`)
 	passphraseWords      = regexp.MustCompile(`^[A-Za-z0-9]+(?:[-_ ][A-Za-z0-9]+){2,}$`)
 )
 

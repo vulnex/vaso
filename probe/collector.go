@@ -584,10 +584,12 @@ func (c *collector) collectFileLimit(path, base string, metadataOnly bool, limit
 		return omitted("sensitive")
 	// In a config-derived tree: nothing behind a link out of the user's home
 	// or into a credential store, and no file a name marks as a credential
-	// (token, *.key, credentials.json…) unless it is a program
+	// (token, *.key, credentials.json…) unless it is a program: executable
+	// and starting like one (`#!`, ELF, Mach-O, PE) — an executable bit
+	// alone doesn't make an id_ed25519 anything but a key
 	case c.configTree && !treeAllowed(path, c.treeHome):
 		return omitted("sensitive")
-	case c.configTree && credentialFileName(path) && info.Mode().Perm()&0o111 == 0:
+	case c.configTree && credentialFileName(path) && (info.Mode().Perm()&0o111 == 0 || !programHeader(path)):
 		return omitted("metadata")
 	case assetOnly:
 		return omitted("asset")
@@ -1118,8 +1120,9 @@ var tokenShaped = regexp.MustCompile(`(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[
 	// formats the checks don't name, never shipped either: Stripe, SendGrid,
 	// DigitalOcean, Shopify, Linear, Notion, Perplexity
 	`\b[sr]k_live_[A-Za-z0-9]{20,}|\bSG\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}|\bdop_v1_[a-f0-9]{64}|\bshpat_[a-fA-F0-9]{32}|\blin_api_[A-Za-z0-9]{32,}|\bntn_[A-Za-z0-9]{32,}|\bpplx-[A-Za-z0-9]{32,}|` +
+	// Vault tokens (hvs./hvb./hvr., legacy s./r.);
 	// npm, PyPI, Figma, Docker Hub, Google OAuth access tokens
-	`\bnpm_[A-Za-z0-9]{36,}|\bpypi-AgE[A-Za-z0-9_-]{50,}|\bfigd_[A-Za-z0-9_-]{40,}|\bdckr_pat_[A-Za-z0-9_-]{24,}|\bya29\.[A-Za-z0-9_-]{40,})`)
+	`\bhv[sbr]\.[A-Za-z0-9_-]{24,}|\b[sr]\.[A-Za-z0-9]{24}\b|\bnpm_[A-Za-z0-9]{36,}|\bpypi-AgE[A-Za-z0-9_-]{50,}|\bfigd_[A-Za-z0-9_-]{40,}|\bdckr_pat_[A-Za-z0-9_-]{24,}|\bya29\.[A-Za-z0-9_-]{40,})`)
 
 // gutterWrap is a continuation line of a Rust CLI error report (miette, as
 // openshell prints it): the report is wrapped to the terminal width anywhere,

@@ -4,10 +4,28 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
 )
+
+// credentialName is CREDENTIAL_FILE_NAME (src/analyzers/credential-file-names.ts):
+// the CLI leaves out of skill code the same credential-named files the probe
+// ships as metadata only.
+func TestCredentialNamesMatchTS(t *testing.T) {
+	src, err := os.ReadFile(filepath.Join("..", "src", "analyzers", "credential-file-names.ts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := regexp.MustCompile(`(?m)^export const CREDENTIAL_FILE_NAME = /(.*)/i;$`).FindSubmatch(src)
+	if m == nil {
+		t.Fatal("CREDENTIAL_FILE_NAME not found")
+	}
+	if got := "(?i)" + string(m[1]); got != credentialName.String() {
+		t.Fatalf("credential names differ:\nTS:    %s\nprobe: %s", got, credentialName.String())
+	}
+}
 
 func TestParseJSON5ReadsCommentsTrailingCommasAndBareKeys(t *testing.T) {
 	v, err := parseConfig("json", []byte("\ufeff// top\n{\n  agents: { defaults: { 'workspace': \"~/ws\", }, },\n  /* block */ list: [1, 0x1F, +2, .5, Infinity, 'a\\'b',],\n  \"esc\": \"\\u00e9\\n\",\n}\n"))
