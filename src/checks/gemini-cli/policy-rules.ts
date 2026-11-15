@@ -73,7 +73,7 @@ export function policyEvidence(config: ParsedConfig): Evidence[] {
       if (tool === '*') {
         if (argsPattern) continue;
         push('toolName = "*"', 'Every tool — shell commands, file writes, web fetches, MCP tools — runs without confirmation (yolo for every session)');
-      } else if (tool === 'mcp_*' || /^mcp_[^_*]+_\*$/.test(tool)) {
+      } else if (tool === 'mcp_*' || /^mcp_[^*]+_\*$/.test(tool)) {
         if (argsPattern) continue;
         push(`toolName = "${tool}"`, tool === 'mcp_*'
           ? 'Every tool of every MCP server runs without confirmation'
