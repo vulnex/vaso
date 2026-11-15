@@ -199,8 +199,9 @@ function proseSecretValue(run: string, keyword: string, connector: string | unde
   // a quoted phrase after `password is`: three or more words, none of them prose (`"moon lamp kettle 77"`)
   if (/\s/.test(value)) {
     const words = value.trim().split(/\s+/);
-    return typed && connector && words.length >= 3 && words.every((w) => /^[A-Za-z0-9]+$/.test(w) && !PROSE_WORDS.has(w.toLowerCase()))
-      ? value : undefined;
+    if (typed && connector && words.length >= 3 && words.every((w) => /^[A-Za-z0-9]+$/.test(w) && !PROSE_WORDS.has(w.toLowerCase()))) return value;
+    // else its first word, as when unquoted: `"Hunter8Zebra Kettle"`
+    return /^\s/.test(value) ? undefined : proseSecretValue(value.split(/\s/)[0], keyword, connector, false);
   }
   // a PIN or numeric passcode: `Your PIN is 48291173`
   if (/^\d+$/.test(value)) return typed && connector && value.length >= 6 ? value : undefined;

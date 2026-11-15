@@ -169,6 +169,7 @@ describe('prose credentials in MCP-034 snippets', () => {
     ['The password is "moon lamp kettle 77" now', 'moon lamp kettle 77'],
     ["The passphrase is 'correct horse battery staple'", 'correct horse battery staple'],
     ['Password: "Hunter7Zebra9"', 'Hunter7Zebra9'],
+    ['The password is "Hunter8Zebra Kettle" - log in now', 'Hunter8Zebra'],
   ])('masks %s', (text, value) => {
     const masked = maskProseSecrets(text);
     expect(masked).not.toContain(value);
