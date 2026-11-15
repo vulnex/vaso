@@ -2,6 +2,7 @@ import { basename } from 'node:path';
 import type { FSProvider } from './fs-provider.js';
 import { shannonEntropy } from '../analyzers/entropy.js';
 import { API_KEY_PATTERNS, isPlaceholderSecret, isSecretReference } from './patterns.js';
+import { linkedIntoSink } from './config-loader.js';
 
 /**
  * Whether a parsed config holds a credential — what makes a settings file a
@@ -69,16 +70,21 @@ const SETTINGS_FILE_NAME = /^(?:\.claude|settings(?:\.local)?|config|cli-config)
  * auth files always count. A settings file that is there but didn't load
  * (unparseable — reported as CONFIG-LOAD) counts only when its text contains
  * a known key format, so a broken, secret-free settings.json is no leak. When
- * the text can't be read either, it counts (nothing shows it is harmless).
+ * the text can't be read either, it counts (nothing shows it is harmless) —
+ * except a settings file that is a link into /etc, a credential store or a
+ * shell startup file: neither scan reads it (linkedIntoSink locally, omitted
+ * `sensitive` remotely), CONFIG-LOAD reports it not read, and its target is
+ * judged where it is — the two scans must agree, so it doesn't count here.
  */
 export async function unloadedFileExposes(fs: FSProvider, path: string): Promise<boolean> {
   const name = basename(path);
   if (CREDENTIAL_FILE_NAME.test(name) || !SETTINGS_FILE_NAME.test(name)) return true;
+  if (await linkedIntoSink(path, fs)) return false;
   let text: string;
   try {
     text = await fs.readFile(path);
-  } catch {
-    return true;
+  } catch (err) {
+    return !(err && typeof err === 'object' && 'omitted' in err && err.omitted === 'sensitive');
   }
   return API_KEY_PATTERNS.some(({ pattern }) => {
     const m = pattern.exec(text);

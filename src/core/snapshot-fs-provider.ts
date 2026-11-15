@@ -519,7 +519,7 @@ const OMITTED_WHY: Record<NonNullable<FileEntry['omitted']>, string> = {
   asset: 'binary asset, recorded as metadata',
   metadata: 'recorded as metadata only',
   special: 'not a regular file',
-  sensitive: 'reached through a symlink into a credential store, never shipped',
+  sensitive: 'reached through a symlink into a credential store, shell startup file or /etc, never shipped',
 };
 
 /** A file present on the host whose content the probe did not ship (`omitted` says why). */
