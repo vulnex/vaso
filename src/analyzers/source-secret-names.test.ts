@@ -16,7 +16,7 @@ describe('credential key names', () => {
   it.each([
     'secret_name', 'secretName', 'tokenPath', 'passwordFile', 'tokenUrl', 'passwordLength', 'tokenType', 'clientSecretId',
     'apiKeyHeader', 'API_KEY_ENV', 'secretArn', 'SECRET_REF', 'isSecret', 'hasPassword', 'TOKEN_KEY', 'TOKEN_STORAGE_KEY', 'publicKey', 'primaryKey',
-    'cacheKey', 'sortKey', 'idempotencyKey', 'passwordHash', 'key', 'keys', 'tokenizer', 'bypass', 'passwordField',
+    'cacheKey', 'sortKey', 'idempotencyKey', 'passwordHash', 'key', 'keys', 'tokenizer', 'bypass', 'passwordField', 'PROD_WRITE_KEY', 'APP_INSIGHTS_KEY',
   ])('%s does not', (name) => {
     expect(isSecretKeyName(name)).toBe(false);
     expect(findSourceSecrets(`const config = { ${JSON.stringify(name)}: "${VALUE}" };`)).toEqual([]);

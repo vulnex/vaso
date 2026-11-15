@@ -69,6 +69,8 @@ const NOT_SECRET_KEY = new Set([
   'bucket', 'file', 'config', 'setting', 'settings', 'option', 'metadata', 'meta', 'header', 'sub', 'parent', 'child', 'next',
   'prev', 'last', 'first', 'id', 'name', 'type', 'path', 'url', 'env', 'context', 'data', 'request', 'response', 'lock', 'job',
   'queue', 'task', 'user', 'session',
+  // analytics ingest keys, public by design (Segment write keys, Application Insights instrumentation keys)
+  'write', 'insights', 'instrumentation', 'analytics', 'telemetry', 'ingest', 'ingestion', 'tracking', 'measurement',
 ]);
 /** Last parts that describe a credential rather than hold one: `secretName`, `tokenUrl`, `API_KEY_ENV`. */
 const DESCRIPTIVE_PART = new Set([
