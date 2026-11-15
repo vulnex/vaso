@@ -480,22 +480,30 @@ func (c *collector) collectConfigBase(snapshot *ProbeSnapshot, base, home string
 	if _, done := snapshot.ConfigTrees[key]; done || len(snapshot.ConfigTrees) >= maxConfigTrees {
 		return
 	}
+	// A tree not walked still says whether it exists (its mode, never a
+	// listing): the CLI reports it present or absent as a local scan sees it
+	notWalked := func(status string) {
+		snapshot.ConfigTrees[key] = status
+		if _, done := snapshot.DirectoryModes[base]; !done {
+			recordDirMode(snapshot, base)
+		}
+	}
 	if home == "" || !treeAllowed(base, home) || c.scannedHomeOrAbove(base) {
-		snapshot.ConfigTrees[key] = treeRefused
+		notWalked(treeRefused)
 		return
 	}
 	if countTreeEntries(base, home, maxConfigTreeEntries) > maxConfigTreeEntries {
-		snapshot.ConfigTrees[key] = treeLimit
+		notWalked(treeLimit)
 		return
 	}
 	pattern, ok := escapeGlobMeta(base)
 	if !ok {
 		return
 	}
-	saved := [3]interface{}{c.inSkillTree, c.configTree, c.treeHome}
+	inSkillTree, configTree, treeHome := c.inSkillTree, c.configTree, c.treeHome
 	c.inSkillTree, c.configTree, c.treeHome = true, true, home
 	c.collectGlob(snapshot, filepath.Join(pattern, "**"))
-	c.inSkillTree, c.configTree, c.treeHome = saved[0].(bool), saved[1].(bool), saved[2].(string)
+	c.inSkillTree, c.configTree, c.treeHome = inSkillTree, configTree, treeHome
 	snapshot.ConfigTrees[key] = treeCollected
 }
 

@@ -86,6 +86,13 @@ func TestConfigTreesOutsideTheHomeShipNothing(t *testing.T) {
 		if snap.ConfigTrees[base] != treeRefused {
 			t.Errorf("%s: %q, want refused", base, snap.ConfigTrees[base])
 		}
+		// its existence is recorded (a mode), never a listing
+		if _, ok := snap.DirectoryModes[base]; !ok {
+			t.Errorf("%s: existence not recorded", base)
+		}
+		if _, ok := snap.Directories[base]; ok {
+			t.Errorf("%s listed", base)
+		}
 	}
 	for p, e := range snap.Files {
 		if strings.HasPrefix(p, "/private/etc") || strings.HasPrefix(p, "/etc") || strings.HasPrefix(p, other) || strings.Contains(p, filepath.Join(".config", "gh")) {
