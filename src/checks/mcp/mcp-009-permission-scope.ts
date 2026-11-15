@@ -2,7 +2,7 @@ import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { sourceSegments } from '../../mcp/source-segments.js';
 import { confinesPaths, findTaintedSinks } from '../../analyzers/tool-input-taint.js';
-import { maskSourceSecrets, sourceSnippet } from '../../mcp/source-snippet.js';
+import { findingSnippet, sourceSnippet } from '../../mcp/source-snippet.js';
 
 // Patterns indicating disproportionate resource access in server names/packages
 const OVERPRIVILEGED_PATTERNS = [
@@ -81,7 +81,7 @@ export const mcp009 = defineCheck({
           evidence.push({
             file,
             line: sink.line,
-            snippet: maskSourceSecrets(source, sink.snippet),
+            snippet: findingSnippet(source, sink),
             detail: `${sink.sink}() takes its path from tool input (${sink.origin}) with no base-directory check — the tool reaches any path on the host`,
           });
         }

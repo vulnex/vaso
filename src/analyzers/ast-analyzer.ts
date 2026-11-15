@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import _traverse from '@babel/traverse';
 import type { Node } from '@babel/types';
 import type { Binding, NodePath } from '@babel/traverse';
+import { cutLine } from './finding-snippet.js';
 import { mayBeJavaScript, parseLenientReport, recordedEvasion, sourceChunks, type JsAst } from './js-parse.js';
 import { bindingModule, memberName, sinkCallee } from './tool-input-taint.js';
 import { analyzeFlows, type SourcePath, type Taint } from './js-flow.js';
@@ -67,6 +68,8 @@ export interface DataFlowResult {
   fixedCode?: boolean;
   line: number;
   snippet: string;
+  /** The whole line when `snippet` is a cut of it (see `cutLine`). */
+  sourceLine?: string;
   description: string;
 }
 
@@ -327,14 +330,14 @@ export function lineFallback(code: string): DataFlowResult[] {
     if (text.length > 4000) return; // the over-deep line itself
     const decl = /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*([^;]*)/.exec(text);
     if (decl && source.test(decl[2])) sourceVars.add(decl[1]);
-    const snippet = text.trim().slice(0, 120);
+    const snippet = cutLine(text.trim());
     if (execCall.test(text)) {
-      out.push({ type: 'eval-exec', line: i + 1, snippet, description: 'Command or code execution (line scan — the file overflows the parser)', dynamic: true });
+      out.push({ type: 'eval-exec', line: i + 1, ...snippet, description: 'Command or code execution (line scan — the file overflows the parser)', dynamic: true });
     }
     if (send.test(text)) {
       const carried = source.test(text) ? 'inline source' : [...sourceVars].find(v => new RegExp(`(?<![\\w$.])${v}(?![\\w$])`).test(text));
       if (carried) {
-        out.push({ type: 'source-to-sink', source: carried, sourceKind: 'file', line: i + 1, snippet, description: `Data flows from "${carried}" to a network call (line scan — the file overflows the parser)` });
+        out.push({ type: 'source-to-sink', source: carried, sourceKind: 'file', line: i + 1, ...snippet, description: `Data flows from "${carried}" to a network call (line scan — the file overflows the parser)` });
       }
     }
   });
@@ -751,7 +754,7 @@ function analyzeUncached(code: string): DataFlowResult[] {
           results.push({
             type: 'eval-exec',
             line,
-            snippet: snippet.slice(0, 120),
+            ...cutLine(snippet),
             description: sink && node.callee.type === 'MemberExpression' && sink.kind === 'process'
               ? `${name}() — command execution`
               : `${name}() call detected`,
@@ -791,7 +794,7 @@ function analyzeUncached(code: string): DataFlowResult[] {
                 ...(sourceKind === 'env' && wholeEnvAt(path, sourceVar) ? { wholeEnv: true } : {}),
                 sink: name,
                 line,
-                snippet: snippet.slice(0, 120),
+                ...cutLine(snippet),
                 description: network
                   ? `Data flows from "${sourceVar}" to network program "${program}"`
                   : `Data flows from "${sourceVar}" into process execution "${name}"`,
@@ -822,7 +825,7 @@ function analyzeUncached(code: string): DataFlowResult[] {
                   type: 'fs-access',
                   source: firstArg.value,
                   line,
-                  snippet: snippet.slice(0, 120),
+                  ...cutLine(snippet),
                   description: `Reading sensitive path: ${firstArg.value}`,
                 });
               }
@@ -851,7 +854,7 @@ function analyzeUncached(code: string): DataFlowResult[] {
                     type: 'fs-access',
                     source: firstArg.value,
                     line,
-                    snippet: snippet.slice(0, 120),
+                    ...cutLine(snippet),
                     description: `Reading sensitive path: ${firstArg.value}`,
                   });
                 }
@@ -894,7 +897,7 @@ function analyzeUncached(code: string): DataFlowResult[] {
                   ...(sinkObject ? { sinkObject } : {}),
                   ...(socketClient ? { socketClient } : {}),
                   line,
-                  snippet: snippet.slice(0, 120),
+                  ...cutLine(snippet),
                   description: processImports.has(propName) || EXEC_FUNCTIONS.has(propName)
                     ? `Data flows from "${sourceVar}" into process execution "${propName}"`
                     : `Data flows from "${sourceVar}" to network sink "${propName}"`,
@@ -909,7 +912,7 @@ function analyzeUncached(code: string): DataFlowResult[] {
               if (!clientCredentialLeaves(c, client!.base, callArgs, path)) continue;
               results.push({
                 type: 'source-to-sink', source: c.source, sourceKind: 'env', sink: propName, sinkObject: receiver.type === 'Identifier' ? receiver.name : undefined,
-                line, snippet: snippet.slice(0, 120),
+                line, ...cutLine(snippet),
                 description: `Data flows from "${c.source}" (carried by the client) to network sink "${propName}"`,
               });
             }
@@ -931,7 +934,7 @@ function analyzeUncached(code: string): DataFlowResult[] {
               results.push({
                 type: 'eval-exec',
                 line,
-                snippet: snippet.slice(0, 120),
+                ...cutLine(snippet),
                 description: `${obj.name}.${propName}() — command execution`,
                 ...commandText(node.arguments),
                 ...(runsDirectly(propName, path, constStrings) ? { noShell: true } : {}),
@@ -957,7 +960,7 @@ function analyzeUncached(code: string): DataFlowResult[] {
                   type: 'suspicious-network',
                   sink: url,
                   line,
-                  snippet: snippet.slice(0, 120),
+                  ...cutLine(snippet),
                   description: `Non-localhost HTTP or non-HTTPS fetch: ${url}`,
                 });
               }
@@ -983,7 +986,7 @@ function analyzeUncached(code: string): DataFlowResult[] {
                   ...(sourceKind === 'env' && wholeEnvAt(path, sourceVar) ? { wholeEnv: true } : {}),
                   sink: 'fetch',
                   line,
-                  snippet: snippet.slice(0, 120),
+                  ...cutLine(snippet),
                   description: `Data flows from "${sourceVar}" to fetch()`,
                 });
               }
@@ -1144,7 +1147,7 @@ function analyzeUncached(code: string): DataFlowResult[] {
         results.push({
           type: 'eval-exec',
           line,
-          snippet: lineText(line).slice(0, 120),
+          ...cutLine(lineText(line)),
           description: `${mod ?? 'zx'} $\`…\` — command execution`,
           ...(parts.trim() ? { command: parts.trim() } : {}),
           ...(dynamic ? { dynamic: true } : {}),
@@ -1164,7 +1167,7 @@ function analyzeUncached(code: string): DataFlowResult[] {
           results.push({
             type: 'eval-exec',
             line,
-            snippet: lineText(line).slice(0, 120),
+            ...cutLine(lineText(line)),
             description: `new ${vmSink.display}() — dynamic code execution`,
             ...commandText(node.arguments),
           });
@@ -1175,7 +1178,7 @@ function analyzeUncached(code: string): DataFlowResult[] {
           results.push({
             type: 'eval-exec',
             line,
-            snippet: snippet.slice(0, 120),
+            ...cutLine(snippet),
             description: 'new Function() constructor — dynamic code execution',
             ...commandText(node.arguments),
           });
@@ -1187,7 +1190,7 @@ function analyzeUncached(code: string): DataFlowResult[] {
             type: 'suspicious-network',
             sink: 'WebSocket',
             line,
-            snippet: snippet.slice(0, 120),
+            ...cutLine(snippet),
             description: 'WebSocket connection created',
           });
         }
@@ -1258,7 +1261,7 @@ function mergeFlows(ast: JsAst, results: DataFlowResult[], lineText: (line: numb
       derived: true,
       ...(f.dns ? { dns: true } : {}),
       line: f.line,
-      snippet: lineText(f.line).slice(0, 120),
+      ...cutLine(lineText(f.line)),
       description: f.via
         ? `Data flows from "${f.source}"${what} through ${f.via}() to ${f.sink}`
         : f.dns
@@ -1269,7 +1272,7 @@ function mergeFlows(ast: JsAst, results: DataFlowResult[], lineText: (line: numb
   const reported = new Set(results.filter(r => r.type === 'fs-access').map(r => r.line));
   for (const c of fa.credentialReads) {
     if (reported.has(c.line)) continue;
-    results.push({ type: 'fs-access', source: c.resolved, line: c.line, snippet: lineText(c.line).slice(0, 120), description: `Reading sensitive path: ${c.resolved}` });
+    results.push({ type: 'fs-access', source: c.resolved, line: c.line, ...cutLine(lineText(c.line)), description: `Reading sensitive path: ${c.resolved}` });
   }
   for (const m of fa.moduleCalls) {
     const t = m.taint;
@@ -1277,14 +1280,14 @@ function mergeFlows(ast: JsAst, results: DataFlowResult[], lineText: (line: numb
       type: 'module-call', source: m.source, sourceKind: t.kind === 'file' ? 'file' : 'env',
       ...(t.kind === 'env' && t.wholeEnv ? { wholeEnv: true } : {}), ...pathFields(t),
       module: m.module, exportName: m.exportName, argIndex: m.argIndex,
-      line: m.line, snippet: lineText(m.line).slice(0, 120),
+      line: m.line, ...cutLine(lineText(m.line)),
       description: `Data from "${m.source}"${describePath(t)} passed to ${m.module}`,
     });
   }
   for (const p of fa.paramSinks) {
     results.push({
       type: 'param-sink', exportName: p.exportName, argIndex: p.paramIndex, sink: p.sink,
-      line: p.line, snippet: lineText(p.line).slice(0, 120),
+      line: p.line, ...cutLine(lineText(p.line)),
       description: `Parameter ${p.paramIndex + 1} of export "${p.exportName}" reaches ${p.sink}`,
     });
   }

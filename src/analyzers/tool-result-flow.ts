@@ -18,6 +18,7 @@
  * host where anyone can publish (Wikipedia, Reddit, forums), or a fixed API.
  */
 
+import { cutLine } from './finding-snippet.js';
 import { createHash } from 'node:crypto';
 import _traverse from '@babel/traverse';
 import type { Binding, NodePath } from '@babel/traverse';
@@ -31,6 +32,8 @@ const traverse = typeof _traverse === 'function' ? _traverse : (_traverse as { d
 export interface ExternalContentFlow {
   line: number;
   snippet: string;
+  /** The whole line when `snippet` is a cut of it. */
+  sourceLine?: string;
   via: 'http' | 'file';
   /** Host of the URL when it starts with a literal. */
   host?: string;
@@ -280,7 +283,7 @@ function analyzeJs(code: string): ExternalContentFlow[] {
         const origin = expressionOrigin(value, 0);
         if (!origin) return;
         const line = path.node.loc?.start.line ?? 0;
-        results.push({ line, snippet: lineText(line).slice(0, 120), ...classify(origin) });
+        results.push({ line, ...cutLine(lineText(line)), ...classify(origin) });
       },
     });
   } catch {
@@ -828,7 +831,7 @@ function analyzePython(code: string): ExternalContentFlow[] {
     const source = flow.through.length > 0 ? `${flow.base} via ${flow.through[0]}()` : flow.base;
     results.push({
       line: flow.line,
-      snippet: flow.snippet.slice(0, 120),
+      ...cutLine(flow.snippet),
       via: flow.via,
       source,
       callerChosenUrl: flow.via === 'http' && flow.start.param !== undefined,

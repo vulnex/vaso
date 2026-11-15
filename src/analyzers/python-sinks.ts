@@ -15,6 +15,7 @@
  * apart from one the caller supplies.
  */
 
+import { cutLine } from './finding-snippet.js';
 import { classifySensitivePath } from './sensitive-paths.js';
 import type { DataFlowResult } from './ast-analyzer.js';
 import { credentialEnvName, onVendorHost, ownedCredential, signingSecret, staticOrigin, vendorApiDomains, vendorUrlSlot } from './vendor-domains.js';
@@ -57,6 +58,8 @@ export interface PythonSinkFinding {
   kind: 'exec' | 'fs-access' | 'injection';
   line: number;
   snippet: string;
+  /** The whole line when `snippet` is a cut of it. */
+  sourceLine?: string;
   description: string;
   /** exec: the static text of the command/code argument(s), `{…}` for values. */
   command?: string;
@@ -201,9 +204,27 @@ export function codeLines(code: string): CodeLine[] {
     const trimmed = text.trim();
     if (strings[i] !== undefined) continue;
     if (trimmed === '' || trimmed.startsWith('#')) continue;
-    out.push({ line: i + 1, text });
+    out.push({ line: i + 1, text: stripComment(text) });
   }
   return out;
+}
+
+/**
+ * `text` without a trailing `# comment` (a `#` inside a string literal is
+ * text). A line that opens or closes a triple-quoted string is kept whole:
+ * part of it is string body this line can't tell from code.
+ */
+export function stripComment(text: string): string {
+  if (!text.includes('#')) return text;
+  let from = 0;
+  const triples = [...text.matchAll(/"""|'''/g)];
+  if (triples.length > 0) {
+    if (triples.length % 2 === 1) return text;
+    const last = triples[triples.length - 1];
+    from = (last.index ?? 0) + 3;
+  }
+  const at = blankStrings(text.slice(from)).indexOf('#');
+  return at < 0 ? text : text.slice(0, from + at).trimEnd();
 }
 
 /**
@@ -312,12 +333,21 @@ function aliasRewriter(code: string): (text: string) => string {
       if (am && SINK_MODULES.has(am[1]) && am[2] !== am[1]) addModule(am[2], `${am[1]}.`);
     }
   }
+  const fromImportAt = new Map<string, number>();
   for (const m of code.matchAll(/^[ \t]*from[ \t]+(os|subprocess|asyncio|pty)[ \t]+import[ \t]+\(?([^\n#)]+)/gm)) {
     for (const part of m[2].split(',')) {
       const im = /^\s*(\w+)(?:\s+as\s+(\w+))?\s*$/.exec(part);
       if (!im) continue;
-      addCall(im[2] ?? im[1], `${m[1]}.${im[1]}`);
+      const name = im[2] ?? im[1];
+      if (!fromImportAt.has(name)) fromImportAt.set(name, m.index ?? 0);
+      addCall(name, `${m[1]}.${im[1]}`);
     }
+  }
+  // `from subprocess import run` then a module-level `def run(…)`: the later
+  // definition is what the name calls
+  for (const d of code.matchAll(/^(?:async[ \t]+)?(?:def|class)[ \t]+([A-Za-z_]\w*)/gm)) {
+    const at = fromImportAt.get(d[1]);
+    if (at !== undefined && (d.index ?? 0) > at) callAliases.delete(d[1]);
   }
   // Names bound by assignment at any indent: a module (`sp = importlib.import_module("subprocess")`),
   // a sink function (`runner = subprocess.run`, `run = getattr(subprocess, "r" + "un")`,
@@ -373,6 +403,8 @@ function aliasRewriter(code: string): (text: string) => string {
   const rewriteAliases = (text: string): string => {
     // edits as [start, end, replacement]; an insertion has start === end
     const edits: Array<[number, number, string]> = [];
+    // brackets matched once per text, on the first call that needs one
+    let closes: Int32Array | undefined;
     for (const m of text.matchAll(identifier)) {
       const [whole, name, after] = m;
       const at = m.index ?? 0;
@@ -385,7 +417,7 @@ function aliasRewriter(code: string): (text: string) => string {
       if (!call) continue;
       edits.push([at, at + whole.length, `${call.target}(`]);
       // keyword arguments the alias was bound with go in before its call's `)`
-      const close = call.extra ? closingParen(text, at + whole.length) : -1;
+      const close = call.extra ? closingParen(text, at + whole.length, (closes ??= matchBrackets(text))) : -1;
       if (close >= 0) edits.push([close, close, `, ${call.extra}`]);
     }
     if (edits.length === 0) return text;
@@ -420,12 +452,17 @@ function aliasRewriter(code: string): (text: string) => string {
 /** Furthest a call's closing `)` is looked for. */
 const MAX_CALL_SCAN = 4000;
 
-/** The index of the `)` closing a call whose arguments start at `from`, or -1. */
-function closingParen(text: string, from: number): number {
-  let depth = 0;
+/**
+ * For each opening bracket in `text`, the index of the bracket that closes
+ * it (any kind, as a depth count would), or -1; quoted text is skipped. One
+ * pass with a stack: looking up a call's `)` is constant time, however many
+ * calls a line nests.
+ */
+function matchBrackets(text: string): Int32Array {
+  const closes = new Int32Array(text.length).fill(-1);
+  const open: number[] = [];
   let quote = '';
-  const end = Math.min(text.length, from + MAX_CALL_SCAN);
-  for (let i = from; i < end; i++) {
+  for (let i = 0; i < text.length; i++) {
     const c = text[i];
     if (quote) {
       if (c === '\\') i++;
@@ -433,13 +470,19 @@ function closingParen(text: string, from: number): number {
       continue;
     }
     if (c === '"' || c === "'") quote = c;
-    else if (c === '(' || c === '[' || c === '{') depth++;
+    else if (c === '(' || c === '[' || c === '{') open.push(i);
     else if (c === ')' || c === ']' || c === '}') {
-      if (depth === 0) return c === ')' ? i : -1;
-      depth--;
+      const at = open.pop();
+      if (at !== undefined) closes[at] = i;
     }
   }
-  return -1;
+  return closes;
+}
+
+/** The index of the `)` closing a call whose arguments start at `from` (just after its `(`), or -1. */
+function closingParen(text: string, from: number, closes: Int32Array): number {
+  const close = from > 0 && text[from - 1] === '(' ? closes[from - 1] : -1;
+  return close >= 0 && close - from < MAX_CALL_SCAN && text[close] === ')' ? close : -1;
 }
 
 /** Builtins that run code. */
@@ -722,13 +765,13 @@ export function analyzePythonSinks(code: string): PythonSinkFinding[] {
   // Physical-line rules: injection shapes visible on one line.
   for (const { line, text: raw } of lines) {
     const text = rewrite(raw);
-    const snippet = raw.trim().slice(0, 120);
+    const snippet = cutLine(raw.trim());
 
     if (/\bopen\s*\(|\bPath\s*\(|expanduser\s*\(/.test(text)) {
       for (const m of text.matchAll(STRING_LITERAL)) {
         const labels = classifySensitivePath(m[1]);
         if (labels.length > 0) {
-          findings.push({ kind: 'fs-access', line, snippet, description: `reads ${labels[0]}` });
+          findings.push({ kind: 'fs-access', line, ...snippet, description: `reads ${labels[0]}` });
           break;
         }
       }
@@ -740,7 +783,7 @@ export function analyzePythonSinks(code: string): PythonSinkFinding[] {
         // follows it is the script's argv (`[sys.executable, "-c", SCRIPT, path]`)
         const code = dashC ? /["']-c["']\s*,\s*([^,)\]]+)/.exec(text)?.[1]?.trim() : undefined;
         if (code !== undefined && isFixedCode(code, constants)) continue;
-        findings.push({ kind: 'injection', line, snippet, description });
+        findings.push({ kind: 'injection', line, ...snippet, description });
         injectedLines.add(line);
         break;
       }
@@ -760,7 +803,7 @@ export function analyzePythonSinks(code: string): PythonSinkFinding[] {
         findings.push({
           kind: 'injection',
           line,
-          snippet,
+          ...snippet,
           description: `Path joined from caller input (${joined}) with no containment check — "../" escapes the base directory (path traversal)`,
         });
       }
@@ -809,7 +852,7 @@ export function analyzePythonSinks(code: string): PythonSinkFinding[] {
       const finding: PythonSinkFinding = {
         kind: 'exec',
         line: stmt.line,
-        snippet: (lineText.get(stmt.line) ?? '').trim().slice(0, 120),
+        ...cutLine((lineText.get(stmt.line) ?? '').trim()),
         description: `${sink}() call detected`,
         ...(command ? { command } : {}),
         ...(dynamic ? { dynamic } : {}),
@@ -827,10 +870,11 @@ export function analyzePythonSinks(code: string): PythonSinkFinding[] {
             kind: 'injection',
             line: stmt.line,
             snippet: finding.snippet,
+            ...(finding.sourceLine !== undefined ? { sourceLine: finding.sourceLine } : {}),
             description: `${sink}() runs a command built from tool input (${names.get(from)})${shell ? ' through a shell' : ''} — command injection`,
           });
         } else if (shell && stmt.last > stmt.line && /^\s*(?:f["']|(?![rRbBuU]?["'])[A-Za-z_])/.test(args)) {
-          findings.push({ kind: 'injection', line: stmt.line, snippet: finding.snippet, description: 'Dynamic command run with shell=True — command injection' });
+          findings.push({ kind: 'injection', line: stmt.line, snippet: finding.snippet, ...(finding.sourceLine !== undefined ? { sourceLine: finding.sourceLine } : {}), description: 'Dynamic command run with shell=True — command injection' });
         }
       }
       break;
@@ -1297,7 +1341,7 @@ export function analyzePythonDataFlow(code: string): DataFlowResult[] {
 
   stmts.forEach((stmt, i) => {
     const text = rewrite(stmt.text);
-    const snippet = (lineText.get(stmt.line) ?? '').trim().slice(0, 120);
+    const snippet = cutLine((lineText.get(stmt.line) ?? '').trim());
     // Functions nest: leave the ones that ended, enter the ones whose `def` precedes
     while (enclosing.length > 0 && i >= enclosing[enclosing.length - 1].end) enclosing.pop();
     while (nextFn < fns.length && fns[nextFn].start < i) {
@@ -1347,7 +1391,7 @@ export function analyzePythonDataFlow(code: string): DataFlowResult[] {
       const dashCode = DIRECT_EXEC.test(sink) && !shell ? codeAfterDashC(argv) : undefined;
       const fixedCode = dashCode !== undefined && isFixedCode(dashCode, constants);
       out.push({
-        type: 'eval-exec', line: stmt.line, snippet, description: `${sink}() call detected`,
+        type: 'eval-exec', line: stmt.line, ...snippet, description: `${sink}() call detected`,
         ...(command ? { command } : {}), ...(dynamic ? { dynamic } : {}), ...(DECODES.test(args) ? { decoded: true } : {}),
         ...(noShell ? { noShell } : {}), ...(fixedCode ? { fixedCode } : {}),
       });
@@ -1357,7 +1401,7 @@ export function analyzePythonDataFlow(code: string): DataFlowResult[] {
         const flows = [...[...visible].filter(([v]) => mentions(sent, v)), ...inlineSources(sent)];
         for (const [v, kind] of flows) {
           if (kind === 'env' && !(program && NETWORK_PROGRAM.test(program))) continue;
-          out.push({ type: 'source-to-sink', source: v, sourceKind: report(kind), ...(kind === 'envall' ? { wholeEnv: true } : {}), sink, line: stmt.line, snippet, description: `Data flows from "${v}" into process execution "${sink}"` });
+          out.push({ type: 'source-to-sink', source: v, sourceKind: report(kind), ...(kind === 'envall' ? { wholeEnv: true } : {}), sink, line: stmt.line, ...snippet, description: `Data flows from "${v}" into process execution "${sink}"` });
         }
       }
       break;
@@ -1366,7 +1410,7 @@ export function analyzePythonDataFlow(code: string): DataFlowResult[] {
     if (/\bopen\s*\(|\bPath\s*\(|expanduser\s*\(/.test(text)) {
       for (const m of text.matchAll(STRING_LITERAL)) {
         if (classifySensitivePath(m[1]).length > 0) {
-          out.push({ type: 'fs-access', source: m[1], line: stmt.line, snippet, description: `Reading sensitive path: ${m[1]}` });
+          out.push({ type: 'fs-access', source: m[1], line: stmt.line, ...snippet, description: `Reading sensitive path: ${m[1]}` });
           break;
         }
       }
@@ -1450,7 +1494,7 @@ export function analyzePythonDataFlow(code: string): DataFlowResult[] {
       for (const [v, kind] of flows) {
         out.push({
           type: 'source-to-sink', source: v, sourceKind: report(kind), ...(kind === 'envall' ? { wholeEnv: true } : {}),
-          sink: net[1] ?? 'urlopen', sinkObject: client, line: stmt.line, snippet, description: `Data flows from "${v}" to network sink "${via}"`,
+          sink: net[1] ?? 'urlopen', sinkObject: client, line: stmt.line, ...snippet, description: `Data flows from "${v}" to network sink "${via}"`,
         });
       }
     }
