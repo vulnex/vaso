@@ -138,7 +138,10 @@ export const skl002 = defineCheck({
     // the agent loads whatever they hold, unreviewed — a warning, reported
     // here once per directory (the other skill checks say "not verified")
     for (const { path, reason } of unscannedRoots) {
-      evidence.push({ file: path, detail: unscannedReason(reason) });
+      // a directory outside the home can still be reviewed on its own
+      const how = `review it with \`vaso skill audit ${path}\``;
+      const detail = unscannedReason(reason);
+      evidence.push({ file: path, detail: reason === 'outside' ? (detail.includes('review it by hand') ? detail.replace('review it by hand', how) : `${detail}; ${how}`) : detail });
     }
 
     await markTestCode(evidence, ctx.installation, ctx.fs);

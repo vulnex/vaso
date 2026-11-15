@@ -1,8 +1,9 @@
 import { join, extname, isAbsolute, resolve, dirname } from 'node:path';
-import { lstat, stat } from 'node:fs/promises';
+import { lstat, realpath, stat } from 'node:fs/promises';
 import { validateRuleFile, type DeclarativeRule, type ValidationError } from './schema.js';
 import { pathExists } from '../core/utils.js';
 import { parseYamlSafe } from '../core/yaml-safe.js';
+import { INPUT_LIMITS } from '../core/input-file.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 
@@ -68,6 +69,17 @@ async function isDirectory(path: string, fs: FSProvider): Promise<boolean> {
 
 async function parseRuleFile(filePath: string, source: RuleSource, fs: FSProvider): Promise<RuleFileResult> {
   let content: string;
+  // a rule file is a few KiB: a huge one is not read (as `--rules` and `rules validate` refuse it)
+  const size = await stat(filePath).then(s => s.size, () => 0);
+  if (size > INPUT_LIMITS.small) {
+    return {
+      filePath,
+      source,
+      rules: [],
+      errors: [{ message: `Cannot read rule file: it is over ${INPUT_LIMITS.small / (1024 * 1024)} MiB` }],
+      unreadable: true,
+    };
+  }
   try {
     content = await fs.readFile(filePath);
   } catch (err) {
@@ -105,18 +117,60 @@ export const MAX_TRUSTED_PROJECTS_BYTES = 64 * 1024;
  * regular file the user owns that group and others can't write, in a
  * ~/.vaso with the same properties, and small.
  */
-async function trustedFileProblem(file: string): Promise<string | undefined> {
+async function trustedFileProblem(file: string, fs: FSProvider): Promise<string | undefined> {
   const st = await stat(file);
   if (!st.isFile()) return `${file} is not a regular file — ignored`;
   if (st.size > MAX_TRUSTED_PROJECTS_BYTES) return `${file} is over ${MAX_TRUSTED_PROJECTS_BYTES / 1024} KiB — ignored`;
+  return ownedFileProblem(file, 'ignored', fs);
+}
+
+/**
+ * Write access beyond the owner: others' write bit, or the group's — unless
+ * the group is the owner's private group (umask 002 distributions), which
+ * reaches nobody else.
+ */
+function othersCanWrite(st: { mode: number; uid: number; gid: number }, privateGroups: ReadonlyMap<number, number>): boolean {
+  return (st.mode & 0o002) !== 0 || ((st.mode & 0o020) !== 0 && privateGroups.get(st.gid) !== st.uid);
+}
+
+/** The user's own uid, or root's: a root-owned file or directory is as safe as one's own. */
+function ownedBySelf(owner: number, uid: number | undefined): boolean {
+  return uid === undefined || owner === uid || owner === 0;
+}
+
+/**
+ * Why a file whose content steers VASO (~/.vaso/trusted-projects, a rule in
+ * ~/.vaso/rules) can't be relied on, undefined when it can: someone else
+ * could change it, or replace it through its directory. The file — or a
+ * symlink's target — must be the user's own and only owner-writable; the
+ * directory holding it and the directory holding the link's target must be
+ * the user's own and owner-writable (a sticky directory is enough for the
+ * target's: others can't rename or replace a file they don't own there).
+ * `outcome` ends the sentence (`ignored`, `not loaded`).
+ */
+async function ownedFileProblem(file: string, outcome: string, fs: FSProvider): Promise<string | undefined> {
   if (process.platform === 'win32') return undefined;
   const uid = process.getuid?.();
-  const owners = [st, await lstat(file)];
+  const groups = (await fs.privateGroups?.().catch(() => undefined)) ?? new Map<number, number>();
+  const st = await stat(file);
+  const link = await lstat(file);
   const dir = await stat(dirname(file));
-  if ((st.mode & 0o022) !== 0) return `${file} is writable by group or others — ignored (chmod 600 it to use it)`;
-  if (uid !== undefined && owners.some(o => o.uid !== uid)) return `${file} is not owned by you — ignored`;
-  if ((dir.mode & 0o022) !== 0) return `${dirname(file)} is writable by group or others — ${file} ignored (chmod 700 it to use it)`;
-  if (uid !== undefined && dir.uid !== uid) return `${dirname(file)} is not owned by you — ${file} ignored`;
+  if (othersCanWrite(st, groups)) return `${file} is writable by group or others — ${outcome} (chmod 600 it to use it)`;
+  if (!ownedBySelf(st.uid, uid) || !ownedBySelf(link.uid, uid)) return `${file} is not owned by you — ${outcome}`;
+  if (othersCanWrite(dir, groups)) return `${dirname(file)} is writable by group or others — ${file} ${outcome} (chmod 700 it to use it)`;
+  if (!ownedBySelf(dir.uid, uid)) return `${dirname(file)} is not owned by you — ${file} ${outcome}`;
+  let real: string;
+  try {
+    real = await realpath(file);
+  } catch {
+    return undefined;
+  }
+  if (dirname(real) !== (await realpath(dirname(file)).catch(() => dirname(file)))) {
+    const targetDir = await stat(dirname(real));
+    if (othersCanWrite(targetDir, groups) && (targetDir.mode & 0o1000) === 0) {
+      return `${file} links to ${real}, in a directory group or others can write (they could replace it) — ${outcome}`;
+    }
+  }
   return undefined;
 }
 
@@ -133,7 +187,7 @@ async function readTrustedProjects(
   const trusted = new Set<string>();
   let content: string;
   try {
-    const problem = await trustedFileProblem(file);
+    const problem = await trustedFileProblem(file, fs);
     if (problem) {
       warn(problem);
       return trusted;
@@ -153,6 +207,36 @@ async function readTrustedProjects(
     }
   }
   return trusted;
+}
+
+/**
+ * Why ~/.vaso/rules as a whole can't be relied on: it, or ~/.vaso holding it,
+ * is writable by others or not the user's (anyone could add or swap a rule).
+ */
+async function userRulesDirProblem(dir: string, fs: FSProvider): Promise<string | undefined> {
+  if (process.platform === 'win32') return undefined;
+  const uid = process.getuid?.();
+  const groups = (await fs.privateGroups?.().catch(() => undefined)) ?? new Map<number, number>();
+  for (const d of [dir, dirname(dir)]) {
+    let st: Awaited<ReturnType<typeof stat>>;
+    try {
+      st = await stat(d);
+    } catch {
+      return undefined; // no rules directory: nothing to load
+    }
+    if (othersCanWrite(st, groups)) return `${d} is writable by group or others — the rules in ${dir} are not loaded (chmod 700 it to use them)`;
+    if (!ownedBySelf(st.uid, uid)) return `${d} is not owned by you — the rules in ${dir} are not loaded`;
+  }
+  return undefined;
+}
+
+/** Whether two paths name the same existing directory. */
+async function sameDirectory(a: string, b: string, fs: FSProvider): Promise<boolean> {
+  try {
+    return (await fs.realpath(a)) === (await fs.realpath(b));
+  } catch {
+    return false;
+  }
 }
 
 const TIER_LABEL: Record<RuleSource, string> = { user: 'user', project: 'project', explicit: '--rules' };
@@ -191,13 +275,31 @@ export async function loadRules(options?: {
     // keep the path as given
   }
 
+  const globalDir = join(provider.homedir(), '.vaso', 'rules');
   if (!options?.skipGlobal) {
-    const globalDir = join(provider.homedir(), '.vaso', 'rules');
-    for (const f of await discoverRuleFiles(globalDir, provider)) files.push(await parseRuleFile(f, 'user', provider));
+    // A user rule may carry a fix `vaso fix` applies: like trusted-projects,
+    // it counts only when nobody else could have written or replaced it
+    const dirProblem = await userRulesDirProblem(globalDir, provider);
+    for (const f of await discoverRuleFiles(globalDir, provider)) {
+      let problem = dirProblem;
+      try {
+        problem ??= await ownedFileProblem(f, 'not loaded', provider);
+      } catch {
+        // unreadable: parseRuleFile says so
+      }
+      if (problem) {
+        allErrors.push({ message: problem, file: f });
+        continue;
+      }
+      files.push(await parseRuleFile(f, 'user', provider));
+    }
   }
 
-  if (!options?.skipProject) {
-    const projectFiles = await discoverRuleFiles(join(process.cwd(), '.vaso', 'rules'), provider);
+  // Run from the home, the project's rules are the user's own (~/.vaso/rules): one tier, loaded once
+  const projectRulesDir = join(process.cwd(), '.vaso', 'rules');
+  const sameAsUser = await sameDirectory(projectRulesDir, globalDir, provider);
+  if (!options?.skipProject && !sameAsUser) {
+    const projectFiles = await discoverRuleFiles(projectRulesDir, provider);
     if (projectFiles.length > 0) {
       const trusted = options?.projectRules === true
         || (await readTrustedProjects(provider, m => { trustWarning = m; })).has(projectDir);
