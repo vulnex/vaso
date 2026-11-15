@@ -308,24 +308,36 @@ describe('fix + rollback (real files)', () => {
   });
 
   it.skipIf(!posix)('backs up thousands of files a fix chmods in linear time, and rolls them all back', async () => {
-    const dir = join(home.dir, 'mcp-tokens');
-    await mkdir(dir);
-    const files: string[] = [];
-    for (let i = 0; i < 6000; i++) {
-      const f = join(dir, `t${i}.json`);
-      await writeFile(f, `{"i":${i}}`);
-      await chmod(f, 0o644);
-      files.push(f);
-    }
-    const start = Date.now();
-    await runFix(files[0], async () => { await restrictFilesToOwner('HM-003', files); }, [files[0]]);
-    // was quadratic: the whole manifest rewritten per file (5000 files ≈ 9 s, 20000 ≈ 121 s)
-    expect(Date.now() - start).toBeLessThan(15_000);
+    const makeFiles = async (name: string, n: number): Promise<string[]> => {
+      const dir = join(home.dir, name);
+      await mkdir(dir);
+      const files: string[] = [];
+      for (let i = 0; i < n; i++) {
+        const f = join(dir, `t${i}.json`);
+        await writeFile(f, `{"i":${i}}`);
+        await chmod(f, 0o644);
+        files.push(f);
+      }
+      return files;
+    };
+    const timeFix = async (files: string[]): Promise<number> => {
+      const start = Date.now();
+      await runFix(files[0], async () => { await restrictFilesToOwner('HM-003', files); }, [files[0]]);
+      return Date.now() - start;
+    };
+    // was quadratic: the whole manifest rewritten per file (5000 files ≈ 9 s, 20000 ≈ 121 s).
+    // Compared with a run 6x smaller in the same process, so machine load cancels out:
+    // linear ≈ 6x, quadratic ≈ 36x.
+    const small = await timeFix(await makeFiles('mcp-tokens-small', 1000));
+    await rollback();
+    const files = await makeFiles('mcp-tokens', 6000);
+    const large = await timeFix(files);
+    expect(large).toBeLessThan(Math.max(small, 200) * 15);
     expect((await stat(files[5999])).mode & 0o777).toBe(0o600);
     await rollback();
     expect((await stat(files[5999])).mode & 0o777).toBe(0o644);
     expect((await stat(files[0])).mode & 0o777).toBe(0o644);
-  }, 120_000);
+  }, 180_000);
 
   it('restores backups made before the manifest existed', async () => {
     const f = join(home.dir, 'legacy.env');
