@@ -623,10 +623,17 @@ function bracketDepth(line: string): number {
   return depth;
 }
 
+/**
+ * An environment-variable lookup opening right before a quoted string
+ * (`os.environ.get(`, `os.environ[`, `getenv(`, `process.env[`, `ENV.fetch(`,
+ * `env::var(`): the string is the variable's name, not a credential.
+ */
+const ENV_LOOKUP_BEFORE = /(?:\benviron(?:\.get|\.setdefault)?|\b[gG]etenv|\bprocess\.env|\bENV(?:\.fetch)?|\benv::var(?:_os)?|\bDeno\.env\.get)\s*[[(]\s*$/;
+
 /** A value's text masked: quoted strings' contents, else the bare words (brackets, commas and `- ` kept). */
 function maskValueText(text: string): string {
   if (/["']/.test(text)) {
-    return text.replace(QUOTED, (q) => (keepValue(q.slice(1, -1)) ? q : `${q[0]}${MASK}${q[0]}`));
+    return text.replace(QUOTED, (q, offset: number) => (keepValue(q.slice(1, -1)) || ENV_LOOKUP_BEFORE.test(text.slice(0, offset)) ? q : `${q[0]}${MASK}${q[0]}`));
   }
   return text.replace(/[^\s,[\](){}]+(?:[ \t]+[^\s,[\](){}]+)*/g, (w) => (w === '-' || keepValue(w) ? w : (w.startsWith('- ') ? `- ${MASK}` : MASK)));
 }
