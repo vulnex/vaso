@@ -119,8 +119,15 @@ export async function updateYamlFile(filePath: string, keyPath: KeyPath, value: 
   const content = (await readRegularFile(filePath)).toString('utf-8');
   const doc = YAML.parseDocument(content, { intAsBigInt: true });
   const keys = keySegments(keyPath);
+  if (doc.errors.length > 0) {
+    throw new Error(`${filePath} has YAML errors (${doc.errors[0].code === 'DUPLICATE_KEY' ? 'a duplicate key' : 'it does not parse cleanly'}) — vaso won't rewrite it; set ${keys.join('.')} by hand`);
+  }
   assertNoAliasOnPath(doc, keys, filePath);
-  doc.setIn(keys, value);
+  try {
+    doc.setIn(keys, value);
+  } catch {
+    throw new Error(yamlPathBlocked(doc, keys, filePath));
+  }
   // what the re-serialized document reads back as (a number written reads back as BigInt)
   const expected = YAML.parseDocument(doc.toString(), { intAsBigInt: true }).toJS();
   const edited = editYamlScalar(content, keys, value, expected) ?? insertYamlKey(content, keys, value, expected);
@@ -128,6 +135,27 @@ export async function updateYamlFile(filePath: string, keyPath: KeyPath, value: 
     noteWrite(`${filePath} was re-serialized to set ${keys.join('.')} (its layout didn't allow an in-place edit): values and comments are kept, spacing and line folding may differ`);
   }
   await writeRegularFile(filePath, edited ?? doc.toString({ lineWidth: 0, flowCollectionPadding: false }));
+}
+
+/**
+ * Why `setIn` couldn't place `keys` — in plain words instead of the yaml
+ * library's ("Expected YAML collection at gateway. Remaining path: tls,enabled"):
+ * the first parent on the path that isn't a mapping, and what it is instead.
+ */
+export function yamlPathBlocked(doc: YAML.Document, keys: string[], filePath: string): string {
+  const leaf = keys.join('.');
+  for (let i = 1; i < keys.length; i++) {
+    const node = doc.getIn(keys.slice(0, i), true);
+    if (node === undefined || YAML.isMap(node)) continue;
+    const what = YAML.isSeq(node) ? 'a list'
+      : YAML.isScalar(node) && (node.value === null || node.value === undefined) ? 'empty (null)'
+      : 'a single value';
+    return `${keys.slice(0, i).join('.')} in ${filePath} is ${what}, not a mapping — there is nowhere to set ${keys.slice(i).join('.')} under it; set ${leaf} by hand`;
+  }
+  if (!YAML.isMap(doc.contents) && doc.contents !== null) {
+    return `${filePath} is not a mapping at the top level — set ${leaf} by hand`;
+  }
+  return `${leaf} could not be set in ${filePath} — set it by hand`;
 }
 
 /**
