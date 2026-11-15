@@ -266,8 +266,10 @@ const SECRET_DASHED_HEADER = /(^|[\s"'=])((?:[A-Z][A-Za-z0-9]*-)+(?:Key|Token|Se
  * `env K=V cmd`, inline `sh -c`), also as a flag's value or a dotted path
  * (`--env=K=V`, `--from-literal=password=X`, `--set auth.password=X`).
  */
-// (a value may be quoted with escaped quotes: `DB_PASSWORD=\"x\"` inside a JSON string)
-const SECRET_ASSIGN = /(^|[\s"'`(;&|:$=.])([A-Za-z_][A-Za-z0-9_]*)(\s*=(?!=)\s*)(\\+"[^"\\\n]*\\+"|"[^"]*"|'[^']*'|[^\s"'`;&|)\\]+)/g;
+// (a value may be quoted with escaped quotes: `DB_PASSWORD=\"x\"` inside a JSON string;
+// an object or list (`credentials = {"primary":…}`, `tokens = ["***"]`) is not one value —
+// its bracket is kept, the values inside are masked where they stand)
+const SECRET_ASSIGN = /(^|[\s"'`(;&|:$=.])([A-Za-z_][A-Za-z0-9_]*)(\s*=(?!=)\s*)(\\+"[^"\\\n]*\\+"|"[^"]*"|'[^']*'|(?![{[](?:["'{[\]}\s]|$))[^\s"'`;&|)\\]+)/g;
 
 /**
  * An assignment's unquoted value that is code, not a secret, in source
@@ -520,17 +522,24 @@ const MAX_CREDENTIAL_VALUES = 2000;
 
 /**
  * The credential values a parsed config holds — every string or number
- * maskConfigValue masks whole (each line of a multi-line one) — so a line
- * quoted from the file can be masked even where the line alone doesn't show
- * it is a credential (an argv element below its flag, an item of a
- * `secrets:` list, a numeric PIN).
+ * maskConfigValue masks whole (each line of a multi-line one, and each word of
+ * at least 6 characters: a YAML folded or plain multi-line scalar reads back
+ * with its line breaks turned to spaces) — so a line quoted from the file can
+ * be masked even where the line alone doesn't show it is a credential (an
+ * argv element below its flag, an item of a `secrets:` list, a numeric PIN).
  */
 export function credentialValuesIn(data: unknown): string[] {
   const out = new Set<string>();
+  const put = (t: string) => {
+    if (t.length >= 3 && t !== MASK && out.size < MAX_CREDENTIAL_VALUES) out.add(t);
+  };
   const add = (v: string) => {
     for (const line of v.split(/\r?\n/)) {
       const t = line.trim();
-      if (t.length >= 3 && t !== MASK && out.size < MAX_CREDENTIAL_VALUES) out.add(t);
+      put(t);
+      if (/\s/.test(t)) {
+        for (const word of t.split(/\s+/)) if (word.length >= 6 && !keepValue(word)) put(word);
+      }
     }
   };
   const visit = (orig: unknown, masked: unknown): void => {
@@ -549,9 +558,39 @@ export function credentialValuesIn(data: unknown): string[] {
 
 const escapeRegex = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
+/** A character escape inside a quoted string: JSON/JS `\uXXXX`, YAML/Python `\xNN` and `\UXXXXXXXX` (and `\\`, kept). */
+const CHAR_ESCAPE = /\\(?:u([0-9A-Fa-f]{4})|x([0-9A-Fa-f]{2})|U([0-9A-Fa-f]{8})|\\)/g;
+
+/**
+ * `re` run over the line with its character escapes decoded, each match
+ * masked in the line as written: a value spelled `"Hunter2"` in an
+ * ASCII-escaped JSON file is the value `Hunter2`.
+ */
+function maskDecoded(line: string, re: RegExp): string {
+  // the decoded text, and for each decoded character the raw offset it starts at
+  let decoded = '';
+  const at: number[] = [];
+  let last = 0;
+  for (const m of line.matchAll(CHAR_ESCAPE)) {
+    for (let k = last; k < m.index; k++) { decoded += line[k]; at.push(k); }
+    const hex = m[1] ?? m[2] ?? m[3];
+    const ch = hex === undefined ? m[0] : String.fromCodePoint(Math.min(parseInt(hex, 16), 0x10ffff));
+    for (let k = 0; k < ch.length; k++) { decoded += ch[k]; at.push(m.index); }
+    last = m.index + m[0].length;
+  }
+  for (let k = last; k < line.length; k++) { decoded += line[k]; at.push(k); }
+  at.push(line.length);
+  const spans: Array<[number, number]> = [];
+  for (const m of decoded.matchAll(re)) spans.push([at[m.index], at[m.index + m[0].length]]);
+  let out = line;
+  for (const [a, b] of spans.reverse()) out = `${out.slice(0, a)}${MASK}${out.slice(b)}`;
+  return out;
+}
+
 /**
  * A masker replacing each of `values` (credentialValuesIn) wherever it
- * stands as a whole word in a line — also JSON-escaped (`pw\"x`).
+ * stands as a whole word in a line — also JSON-escaped (`pw\"x`), and spelled
+ * with character escapes (`Hunter2`, `\x48unter2`).
  */
 export function knownValueMasker(values: readonly string[]): (line: string) => string {
   const forms = new Set<string>();
@@ -562,7 +601,107 @@ export function knownValueMasker(values: readonly string[]): (line: string) => s
   if (forms.size === 0) return line => line;
   const alternatives = [...forms].sort((a, b) => b.length - a.length).map(escapeRegex).join('|');
   const re = new RegExp(`(?<![A-Za-z0-9_])(?:${alternatives})(?![A-Za-z0-9_])`, 'g');
-  return line => line.replace(re, MASK);
+  return line => {
+    const out = line.replace(re, MASK);
+    return /\\[uxU][0-9A-Fa-f]/.test(out) ? maskDecoded(out, re) : out;
+  };
+}
+
+/** `name = …` / `name: …` / `"name": …` opening a value, optionally a declaration (`const password = (`). */
+const VALUE_OPENER = /^(\s*)(?:-\s+)?(?:(?:export\s+)?(?:const|let|var)\s+)?(["']?)([A-Za-z_$][\w.$-]*)\2\s*(?::=|[:=])\s*(.*)$/;
+/** A `key: value` / `"key": value` / `key = value` line inside a block. */
+const KEYED_LINE = /^(\s*(?:-\s+)?(["']?)[A-Za-z_$][\w.$-]*\2\s*(?::=|[:=])\s*)(.+)$/;
+const QUOTED = /"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g;
+
+/** Net opening brackets on a line, quoted strings skipped. */
+function bracketDepth(line: string): number {
+  let depth = 0;
+  for (const ch of line.replace(QUOTED, '""')) {
+    if (ch === '[' || ch === '(' || ch === '{') depth++;
+    else if (ch === ']' || ch === ')' || ch === '}') depth--;
+  }
+  return depth;
+}
+
+/** A value's text masked: quoted strings' contents, else the bare words (brackets, commas and `- ` kept). */
+function maskValueText(text: string): string {
+  if (/["']/.test(text)) {
+    return text.replace(QUOTED, (q) => (keepValue(q.slice(1, -1)) ? q : `${q[0]}${MASK}${q[0]}`));
+  }
+  return text.replace(/[^\s,[\](){}]+(?:[ \t]+[^\s,[\](){}]+)*/g, (w) => (w === '-' || keepValue(w) ? w : (w.startsWith('- ') ? `- ${MASK}` : MASK)));
+}
+
+type ContinuationBlock = 'brackets' | 'indented' | 'scalar' | 'triple';
+
+/** A line of a credential's value continued from the line naming it. */
+function maskContinuation(line: string, block: ContinuationBlock): string {
+  const indent = /^\s*/.exec(line)![0];
+  const body = line.slice(indent.length);
+  if (body === '') return line;
+  if (block === 'scalar') return `${indent}${MASK}`;
+  // the closing line of a `"""` string keeps its quotes and what follows them
+  if (block === 'triple') return /^(.*?)("""|''')/.test(body) ? `${indent}${body.replace(/^.*?("""|''')/, (m, q: string) => (m === q ? q : `${MASK}${q}`))}` : `${indent}${MASK}`;
+  // a key inside the value (a nested object): its value is the credential's
+  const keyed = KEYED_LINE.exec(line);
+  if (keyed) return `${keyed[1]}${maskValueText(keyed[3])}`;
+  return `${indent}${maskValueText(body)}`;
+}
+
+/**
+ * The lines of a file that continue a credential's value from the line naming
+ * it: `API_KEYS = [` / `password = (` / `"password":` then the value on the
+ * next lines, a YAML block or multi-line plain scalar under `api_key:`, a
+ * TOML `"""` string. Such a line alone shows no credential name, so a
+ * declarative rule quoting it would quote the secret; this masks the values
+ * on them (brackets and punctuation kept). Works on any text — a skill file
+ * has no parsed config to take the values from.
+ */
+export function continuationMasker(lines: readonly string[]): (index: number, line: string) => string {
+  const blocks = new Map<number, ContinuationBlock>();
+  for (let i = 0; i < lines.length; i++) {
+    const open = VALUE_OPENER.exec(lines[i]);
+    if (!open || !isSecretName(open[3])) continue;
+    const keyIndent = open[1].length;
+    const rest = open[4].replace(/\s+(?:#|\/\/).*$/, '').trim();
+    if (rest.startsWith('"""') || rest.startsWith("'''")) {
+      const q = rest.slice(0, 3);
+      if (rest.slice(3).includes(q)) continue;
+      let j = i + 1;
+      for (; j < lines.length && !lines[j].includes(q); j++) blocks.set(j, 'triple');
+      if (j < lines.length) blocks.set(j, 'triple');
+      i = j;
+      continue;
+    }
+    const depth = bracketDepth(rest);
+    if (depth > 0) {
+      let d = depth;
+      let j = i + 1;
+      for (; j < lines.length && d > 0; j++) {
+        blocks.set(j, 'brackets');
+        d += bracketDepth(lines[j]);
+      }
+      i = j - 1;
+      continue;
+    }
+    const scalar = /^[|>][-+]?\d*$/.test(rest);
+    if (rest !== '' && !scalar) continue;
+    // the value on the lines indented below the name (YAML), or on the next line (`"password":` then the value)
+    let j = i + 1;
+    for (; j < lines.length; j++) {
+      if (lines[j].trim() === '') continue;
+      if (/^\s*/.exec(lines[j])![0].length <= keyIndent) break;
+      // a nested mapping's keys are names, not the value
+      if (!scalar && KEYED_LINE.test(lines[j])) continue;
+      blocks.set(j, scalar ? 'scalar' : 'indented');
+      // a quoted value (JSON) is one line
+      if (!scalar && /^\s*["']/.test(lines[j])) { j++; break; }
+    }
+    i = j - 1;
+  }
+  return (index, line) => {
+    const block = blocks.get(index);
+    return block ? maskContinuation(line, block) : line;
+  };
 }
 
 /** Flags whose value is the next argv element. */
