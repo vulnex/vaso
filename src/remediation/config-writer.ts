@@ -134,12 +134,16 @@ export async function updateYamlFile(filePath: string, keyPath: KeyPath, value: 
  * Refuse a key path that runs through (or ends at) a YAML alias, or through a
  * node carrying an anchor that an alias elsewhere refers to: the value lives
  * at the anchor, and changing it there would change every other place that
- * shares it. Merge keys (`<<: *defaults`) are fine — a key set next to them
- * overrides the merged one.
+ * shares it. A merge key (`<<: *defaults`) is fine when the merged key is the
+ * leaf — a key set next to it overrides the merged one — but not when a
+ * mapping on the path exists only through the merge: merging is shallow, so
+ * a new `tls:` next to `<<` would replace the merged `tls` and drop its
+ * other keys.
  */
 function assertNoAliasOnPath(doc: YAML.Document, keys: string[], filePath: string): void {
-  const aliased = new Set<string>();
-  YAML.visit(doc, { Alias: (_k, a) => { aliased.add(a.source); } });
+  // the nodes aliases actually refer to (an anchor name defined twice refers to the latest definition before the alias)
+  const aliased = new Set<unknown>();
+  YAML.visit(doc, { Alias: (_k, a) => { aliased.add(a.resolve(doc)); } });
   const refuse = (i: number, what: string): never => {
     const at = keys.slice(0, i).join('.') || '(document root)';
     throw new Error(`${at} in ${filePath} is ${what} — vaso won't change the anchored value it shares with other keys; set ${keys.join('.')} by hand`);
@@ -147,10 +151,29 @@ function assertNoAliasOnPath(doc: YAML.Document, keys: string[], filePath: strin
   let node: unknown = doc.contents;
   for (let i = 0; i <= keys.length; i++) {
     if (YAML.isAlias(node)) refuse(i, `a YAML alias (*${node.source})`);
-    if (YAML.isNode(node) && node.anchor && aliased.has(node.anchor)) refuse(i, `a YAML anchor (&${node.anchor}) other keys alias`);
+    if (YAML.isNode(node) && node.anchor && aliased.has(node)) refuse(i, `a YAML anchor (&${node.anchor}) other keys alias`);
     if (i === keys.length || !(YAML.isMap(node) || YAML.isSeq(node))) return;
+    if (YAML.isMap(node) && i < keys.length - 1 && !node.has(keys[i]) && mergedHas(doc, node, keys[i], new Set())) {
+      const at = keys.slice(0, i + 1).join('.');
+      throw new Error(`${at} in ${filePath} comes from a YAML merge key (<<) — setting ${keys.join('.')} there would replace the merged mapping and drop its other keys; set it by hand`);
+    }
     node = node.get(keys[i], true);
   }
+}
+
+/** Whether `key` reaches `map` through one of its `<<` merge keys. */
+function mergedHas(doc: YAML.Document, map: YAML.YAMLMap, key: string, seen: Set<unknown>): boolean {
+  if (seen.has(map)) return false;
+  seen.add(map);
+  for (const item of map.items) {
+    if (!YAML.isScalar(item.key) || item.key.value !== '<<') continue;
+    const sources = YAML.isSeq(item.value) ? item.value.items : [item.value];
+    for (const source of sources) {
+      const target = YAML.isAlias(source) ? source.resolve(doc) : source;
+      if (YAML.isMap(target) && (target.has(key) || mergedHas(doc, target, key, seen))) return true;
+    }
+  }
+  return false;
 }
 
 /**
@@ -185,7 +208,7 @@ function insertYamlKey(content: string, keys: string[], value: unknown, expected
       return check(`${content.slice(0, lastEnd)}, ${pair}${content.slice(lastEnd)}`);
     }
     const lineStart = content.lastIndexOf('\n', first.range[0] - 1) + 1;
-    const indent = content.slice(lineStart, first.range[0]);
+    const indent = content.slice(lineStart, first.range[0]).replace(/^\uFEFF/, '');
     if (!/^ *$/.test(indent)) return undefined; // a key not at the start of its line (`- key:` in a sequence)
     // after the line the last entry ends on (its trailing comment included)
     const eol = content.includes('\r\n') ? '\r\n' : '\n';
@@ -208,7 +231,11 @@ function insertYamlKey(content: string, keys: string[], value: unknown, expected
 
 /** The file's indentation step: how far the first block mapping under a root key is indented; 2 when there is none. */
 function indentStep(content: string, root: unknown): number {
-  const column = (offset: number) => offset - (content.lastIndexOf('\n', offset - 1) + 1);
+  // a byte-order mark before the first line is not a column
+  const column = (offset: number) => {
+    const lineStart = content.lastIndexOf('\n', offset - 1) + 1;
+    return offset - lineStart - (lineStart === 0 && content.startsWith('\uFEFF') ? 1 : 0);
+  };
   if (!YAML.isMap(root) || root.flow) return 2;
   for (const item of root.items) {
     const inner = item.value;

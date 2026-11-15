@@ -66,6 +66,41 @@ describe('YAML fixes', () => {
     expect(readFileSync(q, 'utf8')).toBe(map);
   });
 
+  it('refuses a path whose mapping exists only through a merge key (setting it would drop the merged siblings)', async () => {
+    const src = 'd: &d {tls: {cert: /c, enabled: false}}\ngateway: {<<: *d, port: 1}\n';
+    const p = file('mi.yaml', src);
+    await expect(updateYamlFile(p, 'gateway.tls.enabled', true)).rejects.toThrow(/gateway\.tls in .* comes from a YAML merge key/);
+    expect(readFileSync(p, 'utf8')).toBe(src);
+    // nested merges and a list of merge sources too
+    const deep = 'a: &a {tls: {cert: /c}}\nb: &b {<<: *a}\ngateway:\n  <<: [*b]\n  port: 1\n';
+    const q = file('mi2.yaml', deep);
+    await expect(updateYamlFile(q, 'gateway.tls.enabled', true)).rejects.toThrow(/merge key/);
+    // a key the mapping has itself is still edited
+    const own = file('mi3.yaml', 'd: &d {tls: {cert: /c}}\ngateway:\n  <<: *d\n  tls:\n    cert: /c\n');
+    await updateYamlFile(own, 'gateway.tls.enabled', true);
+    expect((parseYamlSafe(readFileSync(own, 'utf8')) as { gateway: { tls: unknown } }).gateway.tls).toEqual({ cert: '/c', enabled: true });
+  });
+
+  it('judges an anchor name defined twice by the definition the alias refers to', async () => {
+    const src = 'a: &x 1\nb: *x\ngateway:\n  tls: &x {enabled: false}\n';
+    const p = file('ar.yaml', src);
+    await updateYamlFile(p, 'gateway.tls.enabled', true);
+    expect(parseYamlSafe(readFileSync(p, 'utf8'))).toEqual({ a: 1, b: 1, gateway: { tls: { enabled: true } } });
+    // the later alias refers to the later definition
+    const q = file('ar2.yaml', 'a: &x 1\ngateway:\n  tls: &x {enabled: false}\nc: *x\n');
+    await expect(updateYamlFile(q, 'gateway.tls.enabled', true)).rejects.toThrow(/YAML anchor \(&x\)/);
+  });
+
+  it('does not count a byte-order mark as an indentation column', async () => {
+    const p = file('bom.yaml', '\uFEFFgateway:\n  port: 1\n');
+    await updateYamlFile(p, 'gateway.tls.enabled', true);
+    expect(readFileSync(p, 'utf8')).toBe('\uFEFFgateway:\n  port: 1\n  tls:\n    enabled: true\n');
+    const r = file('bomroot.yaml', '\uFEFFa: 1\n');
+    const { notes } = await collectWriteNotes(() => updateYamlFile(r, 'b', 2));
+    expect(readFileSync(r, 'utf8')).toBe('\uFEFFa: 1\nb: 2\n');
+    expect(notes).toEqual([]);
+  });
+
   it('edits an anchored node no alias refers to', async () => {
     const p = file('an.yaml', 'gateway:\n  bind: &host lan\n');
     await updateYamlFile(p, 'gateway.bind', 'loopback');
