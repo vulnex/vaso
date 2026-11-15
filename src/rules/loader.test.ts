@@ -244,8 +244,72 @@ ${extra}`;
     expect(result.allRules).toEqual([]);
     expect(result.files).toEqual([]);
     expect(result.untrustedProject).toHaveLength(1);
-    expect(result.untrustedProject[0].rules.map(r => r.id)).toEqual(['ORG-1', 'ORG-2']);
+    // not read for a scan: only counted
+    expect(result.untrustedProject[0].rules).toEqual([]);
     expect(result.projectDir).toBe(await realpath(project));
+    // `rules list` parses them to show what was skipped
+    const listed = await loadRules({ fs, parseUntrusted: true });
+    expect(listed.allRules).toEqual([]);
+    expect(listed.untrustedProject[0].rules.map(r => r.id)).toEqual(['ORG-1', 'ORG-2']);
+  });
+
+  it('never reads an untrusted rule file for a scan (a huge or broken one costs nothing)', async () => {
+    const big = join(project, '.vaso', 'rules', 'big.yaml');
+    await writeFile(big, 'rules: [\n');
+    const spy = vi.spyOn(fs, 'readFile');
+    const result = await loadRules({ fs });
+    expect(spy.mock.calls.map(c => c[0])).not.toContain(big);
+    expect(result.untrustedProject.map(f => f.filePath)).toEqual([big]);
+    expect(result.allErrors).toEqual([]);
+  });
+
+  describe.skipIf(process.platform === 'win32')('~/.vaso/trusted-projects must be the user\'s own, private and small', () => {
+    const trustedBy = async (setup: (list: string) => Promise<void>) => {
+      await writeFile(join(project, '.vaso', 'rules', 'a.yaml'), RULE('ORG-1'));
+      const list = join(home, '.vaso', 'trusted-projects');
+      await writeFile(list, `${project}\n`);
+      await chmod(list, 0o600);
+      await setup(list);
+      return loadRules({ fs });
+    };
+
+    it('a group/other-writable ~/.vaso makes it ignored', async () => {
+      const result = await trustedBy(async () => { await chmod(join(home, '.vaso'), 0o777); });
+      await chmod(join(home, '.vaso'), 0o755);
+      expect(result.allRules).toEqual([]);
+      expect(result.trustWarning).toMatch(/\.vaso is writable by group or others/);
+    });
+
+    it('a file over 64 KiB is ignored', async () => {
+      const result = await trustedBy(async (list) => { await writeFile(list, `${project}\n${'#'.repeat(70 * 1024)}\n`); });
+      expect(result.allRules).toEqual([]);
+      expect(result.trustWarning).toMatch(/over 64 KiB/);
+    });
+
+    it('a directory in its place is ignored', async () => {
+      const result = await trustedBy(async (list) => { await rm(list); await mkdir(list); });
+      expect(result.allRules).toEqual([]);
+      expect(result.trustWarning).toMatch(/not a regular file/);
+    });
+
+    it('a file owned by another user is ignored', async () => {
+      const uid = process.getuid!();
+      vi.spyOn(process, 'getuid').mockReturnValue(uid + 1);
+      const result = await trustedBy(async () => {});
+      expect(result.allRules).toEqual([]);
+      expect(result.trustWarning).toMatch(/not owned by you/);
+    });
+
+    it('a symlink to a private file of the user is honoured', async () => {
+      const result = await trustedBy(async (list) => {
+        const target = join(TEST_DIR, 'tp-target');
+        await writeFile(target, `${project}\n`, { mode: 0o600 });
+        await chmod(target, 0o600);
+        await rm(list);
+        await symlink(target, list);
+      });
+      expect(result.allRules.map(r => r.id)).toEqual(['ORG-1']);
+    });
   });
 
   it('load when ~/.vaso/trusted-projects lists the project (realpath, comments, relative lines ignored)', async () => {

@@ -16,7 +16,7 @@ export interface RulesListOptions {
 }
 
 export async function runRulesList(options: RulesListOptions): Promise<void> {
-  const result = await loadRules();
+  const result = await loadRules({ parseUntrusted: true });
   const untrusted = result.untrustedProject.flatMap(f => f.rules.map(r => ({ ...r, file: f.filePath })));
   const typeOf = (r: DeclarativeRule) => (r.config ? 'config' : r.pattern ? 'pattern' : 'file_exists');
 

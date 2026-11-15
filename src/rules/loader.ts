@@ -1,4 +1,5 @@
-import { join, extname, isAbsolute, resolve } from 'node:path';
+import { join, extname, isAbsolute, resolve, dirname } from 'node:path';
+import { lstat, stat } from 'node:fs/promises';
 import { validateRuleFile, type DeclarativeRule, type ValidationError } from './schema.js';
 import { pathExists } from '../core/utils.js';
 import { parseYamlSafe } from '../core/yaml-safe.js';
@@ -31,7 +32,8 @@ export interface LoadResult {
   files: RuleFileResult[];
   /**
    * Project rule files found but not loaded: the project isn't trusted.
-   * Parsed only to count their rules (`rules` holds the valid ones).
+   * Not read at all (`rules` empty) unless `parseUntrusted` asks for their
+   * rules (`vaso rules list`).
    */
   untrustedProject: RuleFileResult[];
   /** The project directory (realpath of the working directory). */
@@ -93,11 +95,35 @@ async function parseRuleFile(filePath: string, source: RuleSource, fs: FSProvide
 /** One absolute project path per line; `#` starts a comment. */
 export const TRUSTED_PROJECTS_FILE = join('.vaso', 'trusted-projects');
 
+/** Larger trusted-projects files are ignored (a list of paths is a few lines). */
+export const MAX_TRUSTED_PROJECTS_BYTES = 64 * 1024;
+
+/**
+ * Why ~/.vaso/trusted-projects can't be relied on, undefined when it can:
+ * anyone who can change the file (or replace it, through ~/.vaso) could
+ * make a repository trusted. The file — or a symlink's target — must be a
+ * regular file the user owns that group and others can't write, in a
+ * ~/.vaso with the same properties, and small.
+ */
+async function trustedFileProblem(file: string): Promise<string | undefined> {
+  const st = await stat(file);
+  if (!st.isFile()) return `${file} is not a regular file — ignored`;
+  if (st.size > MAX_TRUSTED_PROJECTS_BYTES) return `${file} is over ${MAX_TRUSTED_PROJECTS_BYTES / 1024} KiB — ignored`;
+  if (process.platform === 'win32') return undefined;
+  const uid = process.getuid?.();
+  const owners = [st, await lstat(file)];
+  const dir = await stat(dirname(file));
+  if ((st.mode & 0o022) !== 0) return `${file} is writable by group or others — ignored (chmod 600 it to use it)`;
+  if (uid !== undefined && owners.some(o => o.uid !== uid)) return `${file} is not owned by you — ignored`;
+  if ((dir.mode & 0o022) !== 0) return `${dirname(file)} is writable by group or others — ${file} ignored (chmod 700 it to use it)`;
+  if (uid !== undefined && dir.uid !== uid) return `${dirname(file)} is not owned by you — ${file} ignored`;
+  return undefined;
+}
+
 /**
  * The projects the person running VASO trusts to supply rules, from
- * ~/.vaso/trusted-projects. The file is ignored (with a warning) when group
- * or others can write it: anyone who can add a line could make a repository
- * trusted. Relative entries are ignored.
+ * ~/.vaso/trusted-projects. The file is ignored (with a warning) when it
+ * can't be relied on (trustedFileProblem). Relative entries are ignored.
  */
 async function readTrustedProjects(
   fs: FSProvider,
@@ -107,10 +133,9 @@ async function readTrustedProjects(
   const trusted = new Set<string>();
   let content: string;
   try {
-    const st = await fs.stat(file);
-    if (!st.isFile()) return trusted;
-    if (process.platform !== 'win32' && (st.mode & 0o022) !== 0) {
-      warn(`${file} is writable by group or others — ignored (chmod 600 it to use it)`);
+    const problem = await trustedFileProblem(file);
+    if (problem) {
+      warn(problem);
       return trusted;
     }
     content = await fs.readFile(file);
@@ -148,6 +173,8 @@ export async function loadRules(options?: {
   skipProject?: boolean;
   /** Trust the working directory's project rules (`--project-rules`). */
   projectRules?: boolean;
+  /** Parse untrusted project rule files too (listing them); otherwise they are only counted. */
+  parseUntrusted?: boolean;
   fs?: FSProvider;
 }): Promise<LoadResult> {
   const provider = options?.fs ?? new LocalFSProvider();
@@ -175,7 +202,10 @@ export async function loadRules(options?: {
       const trusted = options?.projectRules === true
         || (await readTrustedProjects(provider, m => { trustWarning = m; })).has(projectDir);
       for (const f of projectFiles) {
-        (trusted ? files : untrustedProject).push(await parseRuleFile(f, 'project', provider));
+        if (trusted) files.push(await parseRuleFile(f, 'project', provider));
+        // An untrusted repository's file is never read for a scan: counted only
+        else if (options?.parseUntrusted) untrustedProject.push(await parseRuleFile(f, 'project', provider));
+        else untrustedProject.push({ filePath: f, source: 'project', rules: [], errors: [] });
       }
     }
   }
