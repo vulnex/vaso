@@ -149,6 +149,21 @@ describe('Lyrie adapter', () => {
     expect(inst.configFiles.map(c => c.filePath)).toEqual([`${HOME}/lyrie-ai/.env`, `${STATE}/config.json`]);
   });
 
+  it('expands $HOME in the env layers to the scanned home on local and snapshot scans alike', async () => {
+    const files: ProbeSnapshot['files'] = {};
+    for (const [path, content] of Object.entries(liveLayout())) {
+      files[path] = { content: path.endsWith('/.env') ? `${content}\nLYRIE_FS_ROOT=$HOME\n` : content, mode: 0o600, exists: true };
+    }
+    const fs = new SnapshotFSProvider({
+      version: 1, hostname: 'remote', platform: 'linux', homedir: HOME, timestamp: '2026-01-01T00:00:00Z',
+      privilege: { uid: 1000, username: 'test', isRoot: false, sudoAvailable: false, escalated: false, scannedUsers: ['test'], skippedPaths: [] },
+      files, directories: {}, commandOutputs: {}, env: {},
+    });
+    const [inst] = await lyrieAdapter.detect({ fs });
+    const env = inst.configFiles.find(c => c.filePath.endsWith('/.env'))!;
+    expect((env.data as Record<string, unknown>).LYRIE_FS_ROOT).toBe(HOME);
+  });
+
   it('detects state-only installs (pairing.json / migrations)', async () => {
     const [inst] = await lyrieAdapter.detect({ fs: memFs({ [`${STATE}/pairing.json`]: '{"pending":[],"approved":[]}' }) });
     expect(inst.installDir).toBe(STATE);
