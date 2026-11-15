@@ -113,13 +113,27 @@ describe('Nanobot adapter', () => {
   });
 
   it('follows a relocated workspace for skills', async () => {
-    const cfg = JSON.stringify({ agents: { defaults: { workspace: '/srv/bot-ws' } } });
+    const cfg = JSON.stringify({ agents: { defaults: { workspace: '/home/test/bot-ws' } } });
     const fs = makeFs({
-      dirs: ['/home/test/.nanobot', '/srv/bot-ws/plugins'],
+      dirs: ['/home/test/.nanobot', '/home/test/bot-ws/plugins'],
       files: { '/home/test/.nanobot/config.json': cfg },
     });
     const [inst] = await nanobotAdapter.detect({ fs });
-    expect(inst.skillsDirs).toEqual(['/srv/bot-ws/skills', '/srv/bot-ws/plugins']);
+    expect(inst.skillsDirs).toEqual(['/home/test/bot-ws/skills', '/home/test/bot-ws/plugins']);
+    expect(inst.unscannedSkillsDirs).toBeUndefined();
+  });
+
+  it('does not walk a workspace set outside the home or in a credential store', async () => {
+    for (const ws of ['/srv/bot-ws', '/', '~/.ssh', '~/.config/gh']) {
+      const fs = makeFs({
+        dirs: ['/home/test/.nanobot', `${ws}/plugins`.replace('~', '/home/test')],
+        files: { '/home/test/.nanobot/config.json': JSON.stringify({ agents: { defaults: { workspace: ws } } }) },
+      });
+      const [inst] = await nanobotAdapter.detect({ fs });
+      expect(inst.skillsDirs, ws).toEqual([]);
+      expect(inst.unscannedSkillsDirs?.every(u => u.reason === 'outside'), ws).toBe(true);
+      expect(inst.unscannedSkillsDirs?.length, ws).toBeGreaterThan(0);
+    }
   });
 
   it('resolves the workspace: config, ~ expansion, ${VAR}, env fallback, default', () => {

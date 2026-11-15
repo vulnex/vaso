@@ -157,6 +157,16 @@ export interface AgentInstallation {
   otherInstalls?: CliInstall[];
   /** The skills this installation loads — set by `vaso detect` and `vaso scan`. */
   inventory?: AgentInventory;
+  /** Skills directories the agent's config sets that no scan walks (outside
+   *  the user's home or in a credential store, over the remote probe's limit,
+   *  or a relative path): not in skillsDirs, reported as not scanned. */
+  unscannedSkillsDirs?: UnscannedSkillsDir[];
+}
+
+/** A config-set skills directory left unscanned, and why (src/core/skill-root-scope.ts). */
+export interface UnscannedSkillsDir {
+  path: string;
+  reason: 'outside' | 'limit' | 'relative';
 }
 
 /**

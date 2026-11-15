@@ -2,6 +2,7 @@ import { basename, dirname, isAbsolute, join } from 'node:path';
 import type { AgentAdapter, DetectOptions } from './adapter.js';
 import type { AgentInstallation, GatewayInfo, ModelRef, ParsedConfig, ZoneGraph } from '../core/types.js';
 import type { ProbeManifest } from '../core/snapshot-types.js';
+import { screenSkillRoots } from '../core/skill-root-scope.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { loadConfig } from '../core/config-loader.js';
@@ -203,8 +204,10 @@ export const nanobotAdapter: AgentAdapter = {
 
       const configData = configFiles[0]?.data;
       const workspace = nanobotWorkspaceDir(dataDir, configData, fs);
-      const skillsDirs = [join(workspace, 'skills')];
-      if (await fs.access(join(workspace, 'plugins'))) skillsDirs.push(join(workspace, 'plugins'));
+      const roots = [join(workspace, 'skills')];
+      if (await fs.access(join(workspace, 'plugins'))) roots.push(join(workspace, 'plugins'));
+      // A workspace the config moves outside the home is not walked
+      const { scan: skillsDirs, unscanned } = await screenSkillRoots(fs, roots, home);
 
       installations.push({
         agent: 'nanobot',
@@ -212,6 +215,7 @@ export const nanobotAdapter: AgentAdapter = {
         configFiles,
         skillsDir: skillsDirs[0],
         skillsDirs,
+        ...(unscanned.length > 0 ? { unscannedSkillsDirs: unscanned } : {}),
         gateway: configFiles.length > 0 ? this.getGatewayInfo(configData ?? {}) : undefined,
         models: await this.getModels?.(configFiles, fs),
         user: options?.allUsers ? user : undefined,

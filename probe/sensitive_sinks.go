@@ -21,6 +21,14 @@ var sensitiveSinkPatterns = []string{
 	`(^|\/)\.docker(\/|$)`,
 	`(^|\/)\.(bashrc|bash_profile|bash_login|bash_logout|profile|zshrc|zprofile|zshenv|zlogin)$`,
 	`^\/etc(\/|$)`,
+	`(^|\/)\.config\/gh(\/|$)`,
+	`(^|\/)\.config\/gcloud(\/|$)`,
+	`(^|\/)\.azure(\/|$)`,
+	`(^|\/)\.password-store(\/|$)`,
+	`(^|\/)Library\/Keychains(\/|$)`,
+	`(^|\/)\.codex\/auth\.json$`,
+	`(^|\/)\.(netrc|git-credentials|pgpass|pypirc|npmrc)$`,
+	`(^|\/)(Library\/Application Support\/(Google\/Chrome|Chromium|BraveSoftware|Microsoft Edge|Firefox|Arc)|\.config\/(google-chrome|chromium|BraveSoftware|microsoft-edge)|\.mozilla|Library\/Cookies)(\/|$)`,
 }
 
 var sensitiveSinks = func() []*regexp.Regexp {

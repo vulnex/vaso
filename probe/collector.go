@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -119,6 +120,10 @@ type collector struct {
 	// (configRoots): walked as a skill tree, but its content is disguised like
 	// a config's — the directory is wherever the config says.
 	configTree bool
+	// treeHome is the home a config tree being walked must stay inside
+	// (treeAllowed): links leading out of it, or into a credential store,
+	// are neither followed nor read
+	treeHome string
 	// explicit are the manifest's own file and system paths (their symlink
 	// chains and real parents are recorded, see recordExplicitLinks).
 	explicit []string
@@ -395,6 +400,7 @@ func Collect(manifest ProbeManifest, escalate bool) ProbeSnapshot {
 	// Record the mode of every ancestor of what was collected, so the TS side
 	// can tell whether a parent directory blocks other users (parent-directory
 	// mitigation) exactly as a local scan does.
+	c.recordCollectedLinkChains(&snapshot)
 	recordAncestorModes(&snapshot, c.explicit)
 
 	// Collect filtered environment variables
@@ -513,6 +519,11 @@ func (c *collector) collectGlob(snapshot *ProbeSnapshot, pattern string) {
 		if c.excluded(pattern, match) {
 			continue
 		}
+		// A config-derived tree's entries outside its user's home or in a
+		// credential store (as named or resolved) aren't recorded at all
+		if c.configTree && !treeAllowed(match, c.treeHome) {
+			continue
+		}
 		recordSymlink(snapshot.Symlinks, match)
 		if _, exists := snapshot.Files[match]; !exists {
 			c.collectPath(snapshot, match, globBase(pattern), false, false)
@@ -566,6 +577,13 @@ func (c *collector) collectFileLimit(path, base string, metadataOnly bool, limit
 	// Before size: not even the head of a file behind such a link is shipped
 	case escapesToSink(path, base):
 		return omitted("sensitive")
+	// In a config-derived tree: nothing behind a link out of the user's home
+	// or into a credential store, and no file a name marks as a credential
+	// (token, *.key, credentials.json…) unless it is a program
+	case c.configTree && !treeAllowed(path, c.treeHome):
+		return omitted("sensitive")
+	case c.configTree && credentialFileName(path) && info.Mode().Perm()&0o111 == 0:
+		return omitted("metadata")
 	case assetOnly:
 		return omitted("asset")
 	case info.Size() > limit:
@@ -694,11 +712,11 @@ func recordAncestorModes(snapshot *ProbeSnapshot, explicit []string) {
 	for d := range snapshot.Directories {
 		visit(d)
 	}
-	// …and of any collected file that is itself a link (a credential store a
-	// metadata glob met as a symlink)
+	// …and of any collected file reached through a link (a credential store a
+	// metadata glob met as a symlink, or in a linked directory)
 	linked := append([]string(nil), explicit...)
 	for p := range snapshot.Files {
-		if _, ok := snapshot.Symlinks[p]; ok {
+		if resolveRecordedLinks(p, snapshot.Symlinks) != p {
 			linked = append(linked, p)
 		}
 	}
@@ -711,6 +729,24 @@ func recordAncestorModes(snapshot *ProbeSnapshot, explicit []string) {
 		}
 		if r, err := filepath.EvalSymlinks(p); err == nil && r != p {
 			visit(r)
+		}
+	}
+}
+
+// recordCollectedLinkChains records the full link chain of every collected
+// file whose real path differs from its own (recordLinkChain): globs record
+// only a match's first hop.
+func (c *collector) recordCollectedLinkChains(snapshot *ProbeSnapshot) {
+	paths := make([]string, 0, len(snapshot.Files))
+	for p, e := range snapshot.Files {
+		if e.Exists {
+			paths = append(paths, p)
+		}
+	}
+	sort.Strings(paths)
+	for _, p := range paths {
+		if real, err := filepath.EvalSymlinks(p); err == nil && real != p {
+			c.recordLinkChain(snapshot, p)
 		}
 	}
 }
@@ -798,6 +834,10 @@ func (c *collector) followFrom(snapshot *ProbeSnapshot, pattern string, matches 
 		if escapesToSink(m, globBase(pattern)) {
 			continue
 		}
+		// A config-derived tree is walked only inside its user's home
+		if c.configTree && !treeAllowed(m, c.treeHome) {
+			continue
+		}
 		if st, err := os.Stat(m); err != nil || !st.IsDir() {
 			continue // a file link was collected (followed) by the glob itself
 		}
@@ -807,7 +847,7 @@ func (c *collector) followFrom(snapshot *ProbeSnapshot, pattern string, matches 
 			continue
 		}
 		for _, sm := range sub {
-			if c.excluded(pattern, sm) {
+			if c.excluded(pattern, sm) || (c.configTree && !treeAllowed(sm, c.treeHome)) {
 				continue
 			}
 			recordSymlink(snapshot.Symlinks, sm)

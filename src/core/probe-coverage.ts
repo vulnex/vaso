@@ -25,6 +25,7 @@ import type { ConfigTreeStatus } from './snapshot-types.js';
 interface SnapshotRecords {
   collected?(path: string): boolean;
   configTrees?(): Readonly<Record<string, ConfigTreeStatus>>;
+  listing?(dir: string): readonly string[] | undefined;
 }
 
 interface Compiled {
@@ -34,8 +35,10 @@ interface Compiled {
   recursive: RegExp[];
   /** Matches a directory the probe lists (its direct entries). */
   listed: RegExp[];
-  /** Matches a config-derived tree the probe walked (`configTrees` collected). */
-  configTrees: RegExp[];
+  /** Config-derived trees by literal directory path (`configTrees`), with
+   *  what the probe did. Snapshot data: compared as plain strings, never
+   *  compiled into a pattern. */
+  trees: ReadonlyMap<string, ConfigTreeStatus>;
 }
 
 const cache = new WeakMap<FSProvider, { key: string; compiled: Compiled }>();
@@ -138,10 +141,7 @@ function compiled(fs: FSProvider): Compiled | undefined {
     files: re([...m.filePaths, ...globs, ...(m.systemPaths ?? [])]),
     recursive: re(globs.filter(g => g.endsWith('/**')).map(g => g.slice(0, -3))),
     listed: re([...m.directoryListings, ...(m.systemDirListings ?? [])]),
-    configTrees: Object.entries((fs as SnapshotRecords).configTrees?.() ?? {})
-      .filter(([base, status]) => status === 'collected' && base.startsWith('/'))
-      .map(([base]) => patternRegex(base, fs))
-      .filter((r): r is RegExp => r !== undefined),
+    trees: new Map(Object.entries((fs as SnapshotRecords).configTrees?.() ?? {})),
   };
   cache.set(fs, { key, compiled: result });
   return result;
@@ -155,17 +155,80 @@ function selfAndAncestors(path: string): string[] {
 }
 
 /**
+ * What the probe did with the config-derived tree nearest above (or at) one
+ * of `chain`'s directories: the deepest recorded base wins.
+ */
+function treeStatus(c: Compiled, chain: readonly string[]): ConfigTreeStatus | undefined {
+  for (const d of chain) {
+    const status = c.trees.get(d);
+    if (status !== undefined) return status;
+  }
+  return undefined;
+}
+
+/**
+ * The snapshot proves the first directory of `chain` absent: the nearest
+ * directory above it that the probe listed has no entry on the way down.
+ */
+function listedAbsent(fs: FSProvider, chain: readonly string[]): boolean {
+  const listing = (fs as SnapshotRecords).listing;
+  if (!listing) return false;
+  for (let i = 1; i <= chain.length; i++) {
+    const parent = i < chain.length ? chain[i] : '/';
+    const names = listing.call(fs, parent);
+    if (names === undefined) continue;
+    const child = posix.basename(chain[i - 1]);
+    return !names.includes(child) && !names.includes(`${child}/`);
+  }
+  return false;
+}
+
+/**
+ * The manifest's own recursive trees (`<dir>/**`) contain `dir`: the probe
+ * walks it whatever a config says, and so do local scans. Judged the same
+ * way for local and snapshot providers.
+ */
+export function manifestCoversTree(fs: FSProvider, dir: string): boolean {
+  const c = compiled(fs);
+  if (!c) return false;
+  return selfAndAncestors(dir).some(d => c.recursive.some(r => r.test(d)));
+}
+
+/**
+ * A config-derived skills directory the remote probe didn't walk because it
+ * refused the tree (outside the user's home, a credential store) or found it
+ * over its entry limit — though the directory may well be in the snapshot for
+ * another reason. Undefined off snapshots, and when the manifest's own trees
+ * cover it.
+ */
+export function configTreeGap(fs: FSProvider, dir: string): 'refused' | 'limit' | undefined {
+  if (fs.kind !== 'snapshot') return undefined;
+  const c = compiled(fs);
+  if (!c) return undefined;
+  const chain = selfAndAncestors(dir);
+  if (chain.some(d => c.recursive.some(r => r.test(d)))) return undefined;
+  const status = treeStatus(c, chain);
+  return status === 'refused' || status === 'limit' ? status : undefined;
+}
+
+/**
  * The probe collects this directory's contents: it is a listed directory of
  * the manifest, or it or a directory above it is collected recursively
- * (`<dir>/**`). Always true off snapshots.
+ * (`<dir>/**`) or as a config-derived tree, or the snapshot shows it doesn't
+ * exist. A tree the probe refused or capped is not covered. Always true off
+ * snapshots.
  */
 export function probeCoversTree(fs: FSProvider, dir: string): boolean {
   if (fs.kind !== 'snapshot') return true;
   const c = compiled(fs);
   if (!c) return true;
   const chain = selfAndAncestors(dir);
+  if (chain.some(d => c.recursive.some(r => r.test(d)))) return true;
+  const status = treeStatus(c, chain);
+  if (status === 'refused' || status === 'limit') return false;
+  if (status === 'collected') return true;
   if (chain.length > 0 && c.listed.some(r => r.test(chain[0]))) return true;
-  return chain.some(d => c.recursive.some(r => r.test(d)) || c.configTrees.some(r => r.test(d)));
+  return listedAbsent(fs, chain);
 }
 
 /**
@@ -181,7 +244,9 @@ export function probeCoversFile(fs: FSProvider, path: string): boolean {
   if ((fs as SnapshotRecords).collected?.(path)) return true;
   const p = posix.normalize(path);
   if (c.files.some(r => r.test(p))) return true;
-  return selfAndAncestors(posix.dirname(p)).some(d => c.recursive.some(r => r.test(d)) || c.configTrees.some(r => r.test(d)));
+  const chain = selfAndAncestors(posix.dirname(p));
+  if (chain.some(d => c.recursive.some(r => r.test(d)))) return true;
+  return treeStatus(c, chain) === 'collected';
 }
 
 /**

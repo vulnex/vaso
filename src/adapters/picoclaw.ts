@@ -2,6 +2,7 @@ import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import type { AgentAdapter, DetectOptions } from './adapter.js';
 import type { AgentInstallation, GatewayInfo, ModelRef, ParsedConfig } from '../core/types.js';
 import type { ProbeManifest } from '../core/snapshot-types.js';
+import { screenSkillRoots } from '../core/skill-root-scope.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { loadConfig } from '../core/config-loader.js';
@@ -145,6 +146,18 @@ function normalizeAgentId(id: string): string {
   return lower.replace(/[^a-z0-9_-]+/g, '-').replace(/^-+/, '').replace(/-+$/, '') || 'main';
 }
 
+/**
+ * A workspace (from picoclawWorkspaces) whose location the config chose: any
+ * of them once `agents.defaults.workspace` is set, else the per-agent
+ * `workspace` values — not the default under the PicoClaw home or the
+ * `workspace-<id>` dirs beside it.
+ */
+function configSetWorkspace(configData: Record<string, unknown> | undefined, ws: string, picoHome: string): boolean {
+  if (nonEmptyString(asRecord(asRecord(configData?.agents)?.defaults)?.workspace)) return true;
+  const primary = join(picoHome, 'workspace');
+  return ws !== primary && !(dirname(ws) === dirname(primary) && basename(ws).startsWith('workspace-'));
+}
+
 /** Every workspace directory the config makes agents run in. */
 export function picoclawWorkspaces(
   configData: Record<string, unknown> | undefined,
@@ -217,8 +230,15 @@ export const picoclawAdapter: AgentAdapter = {
 
       const workspaces = picoclawWorkspaces(main?.data, paths.workspaceRoot, userHome);
       const builtinSkills = userHome === fs.homedir() ? envOverride(fs, 'PICOCLAW_BUILTIN_SKILLS') : undefined;
+      // Workspaces the config sets (and the named-agent ones beside a
+      // configured default) are walked only inside the home; the default
+      // under $PICOCLAW_HOME is the agent's own
+      const derived = workspaces.filter(w => !configSetWorkspace(main?.data, w, paths.workspaceRoot)).map(w => join(w, 'skills'));
+      const screened = await screenSkillRoots(fs, workspaces.map(w => join(w, 'skills')).filter(d => !derived.includes(d)), userHome);
+      const unscanned = screened.unscanned;
+      const workspaceSkills = workspaces.map(w => join(w, 'skills')).filter(d => derived.includes(d) || screened.scan.includes(d));
       const skillsDirs = [
-        ...workspaces.map(w => join(w, 'skills')),
+        ...workspaceSkills,
         join(paths.home, 'skills'),
         ...(builtinSkills ? [expandHome(builtinSkills, userHome)] : []),
       ];
@@ -241,6 +261,7 @@ export const picoclawAdapter: AgentAdapter = {
         configFiles,
         skillsDir: skillsDirs[0],
         skillsDirs: [...new Set(skillsDirs)],
+        ...(unscanned.length > 0 ? { unscannedSkillsDirs: unscanned } : {}),
         gateway: main ? this.getGatewayInfo(gatewayInput) : undefined,
         models: await this.getModels?.(configFiles, fs),
         version: installs.primary?.version,

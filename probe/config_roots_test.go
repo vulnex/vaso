@@ -42,7 +42,18 @@ mcp_servers:
       KEY: x
   "quoted name":
     command: '/opt/it''s/bin'
-  flow: {command: /never/read}
+  flow: {command: /flow/bin, args: ["--x", y], env: {A: "b"}}
+  folded:
+    command: >-
+      /opt/folded/bin
+  literal:
+    command: |
+      /opt/literal/bin
+  multi:
+    command: >
+      /two
+      lines
+  broken: {command: /never/read
   block:
     description: |
       command: /not/a/key
@@ -62,7 +73,7 @@ second: /doc
 		t.Fatal(err)
 	}
 	got := lookupKeys(v, []string{"mcp_servers", "*", "command"})
-	want := []interface{}{"/opt/block/bin", "/opt/mcp/bin/files", "/opt/it's/bin"}
+	want := []interface{}{"/opt/block/bin", "/opt/mcp/bin/files", "/flow/bin", "/opt/folded/bin", "/opt/literal/bin\n", nil, "/opt/it's/bin"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("commands: %v", got)
 	}
@@ -158,7 +169,7 @@ func write(t *testing.T, p, content string, mode os.FileMode) {
 
 func TestCollectConfigDerivedSkillTree(t *testing.T) {
 	home := setupHome(t)
-	ws := filepath.Join(filepath.Dir(home), "elsewhere", "ws")
+	ws := filepath.Join(home, "elsewhere", "ws")
 	write(t, filepath.Join(home, ".nanobot", "config.json"), `{"agents": {"defaults": {"workspace": "`+ws+`"}}}`, 0o644)
 	secret := "sk-proj-" + strings.Repeat("Ab3dE", 9)
 	write(t, filepath.Join(ws, "skills", "evil", "SKILL.md"), "# evil\nOPENAI_API_KEY="+secret+"\n", 0o644)
@@ -255,8 +266,12 @@ func TestConfigDerivedSiblingWorkspaces(t *testing.T) {
 	if _, ok := snap.Files[filepath.Join(home, "workspace-coder", "skills", "a", "SKILL.md")]; !ok {
 		t.Fatalf("sibling workspace skill not collected (%v)", snap.ConfigTrees)
 	}
-	if snap.ConfigTrees[filepath.Join(home, "workspace-*", "skills")] != treeCollected {
+	// recorded under the literal match, never a glob
+	if snap.ConfigTrees[filepath.Join(home, "workspace-coder", "skills")] != treeCollected || len(snap.ConfigTrees) != 2 {
 		t.Fatalf("status %v", snap.ConfigTrees)
+	}
+	if _, ok := snap.Directories[home]; ok {
+		t.Fatal("listed the home")
 	}
 	if _, ok := snap.Files[filepath.Join(home, "secret.txt")]; ok {
 		t.Fatal("collected the home itself")

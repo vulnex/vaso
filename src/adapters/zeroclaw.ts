@@ -1,6 +1,7 @@
 import { basename, dirname, isAbsolute, join } from 'node:path';
 import type { AgentAdapter, DetectOptions } from './adapter.js';
-import type { AgentInstallation, GatewayInfo, ModelRef, ParsedConfig } from '../core/types.js';
+import type { AgentInstallation, GatewayInfo, ModelRef, ParsedConfig, UnscannedSkillsDir } from '../core/types.js';
+import { skillRootGap } from '../core/skill-root-scope.js';
 import type { ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
@@ -167,14 +168,17 @@ async function listDirs(dir: string, fs: FSProvider): Promise<string[]> {
  * `shared/skills` (bundles, or `[skill_bundles.<b>] directory`), and the
  * open-skills checkout when `[skills] open_skills_enabled`.
  */
-async function skillRoots(configDir: string, data: Record<string, unknown>, home: string, fs: FSProvider): Promise<string[]> {
+async function skillRoots(configDir: string, data: Record<string, unknown>, home: string, fs: FSProvider): Promise<{ roots: string[]; unscanned: UnscannedSkillsDir[] }> {
   const candidates: string[] = [];
+  // Roots config.toml sets itself: walked only inside the home (skill-root-scope)
+  const configSet = new Set<string>();
   const agents = asRecord(data.agents) ?? {};
   const aliases = new Set([...Object.keys(agents), ...(await listDirs(join(configDir, 'agents'), fs))]);
   for (const alias of aliases) {
     const ws = asRecord(asRecord(agents[alias])?.workspace);
     const custom = typeof ws?.path === 'string' && ws.path.trim() ? expandTilde(ws.path.trim(), home) : undefined;
     candidates.push(join(custom ?? join(configDir, 'agents', alias, 'workspace'), 'skills'));
+    if (custom) configSet.add(candidates[candidates.length - 1]);
   }
   candidates.push(join(configDir, 'shared', 'skills'));
   for (const raw of Object.values(asRecord(data.skill_bundles) ?? {})) {
@@ -182,6 +186,7 @@ async function skillRoots(configDir: string, data: Record<string, unknown>, home
     if (typeof dir === 'string' && dir.trim()) {
       const d = expandTilde(dir.trim(), home);
       candidates.push(isAbsolute(d) ? d : join(configDir, d));
+      configSet.add(candidates[candidates.length - 1]);
     }
   }
   const skills = asRecord(data.skills);
@@ -190,14 +195,23 @@ async function skillRoots(configDir: string, data: Record<string, unknown>, home
       ? expandTilde(skills.open_skills_dir.trim(), home)
       : join(home, 'open-skills');
     candidates.push(dir);
+    configSet.add(dir);
   }
   const out: string[] = [];
+  const unscanned: UnscannedSkillsDir[] = [];
   for (const c of candidates) {
-    if (out.includes(c)) continue;
+    if (out.includes(c) || unscanned.some(u => u.path === c)) continue;
+    if (configSet.has(c)) {
+      const reason = await skillRootGap(fs, c, home);
+      if (reason) {
+        unscanned.push({ path: c, reason });
+        continue;
+      }
+    }
     // A snapshot lacks a workspace the config moved outside the probe's trees: kept, reported unverified
     if (await dirExistsOrUncollected(fs, c)) out.push(c);
   }
-  return out;
+  return { roots: out, unscanned };
 }
 
 export const zeroclawAdapter: AgentAdapter = {
@@ -236,7 +250,7 @@ export const zeroclawAdapter: AgentAdapter = {
       // The env describes the scanning user's daemon only (see zeroclawDirs).
       if (main && home === fs.homedir()) main.data = applyEnvOverrides(main.data, zeroclawEnvSpecs(main.data, installs.primary?.version), fs);
       const data = main?.data ?? {};
-      const skillsDirs = await skillRoots(configDir, data, home, fs);
+      const { roots: skillsDirs, unscanned } = await skillRoots(configDir, data, home, fs);
 
       installations.push({
         agent: 'zeroclaw',
@@ -244,6 +258,7 @@ export const zeroclawAdapter: AgentAdapter = {
         configFiles,
         skillsDir: skillsDirs[0] ?? this.getSkillsDir(configDir),
         skillsDirs: skillsDirs.length > 0 ? skillsDirs : undefined,
+        ...(unscanned.length > 0 ? { unscannedSkillsDirs: unscanned } : {}),
         gateway: main ? this.getGatewayInfo(data) : undefined,
         models: await this.getModels?.(configFiles, fs),
         user: options?.allUsers ? user : undefined,

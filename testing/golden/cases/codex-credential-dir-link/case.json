@@ -1,0 +1,14 @@
+{
+  "agent": "codex",
+  "source": "dt23 re-verify (p-H): ~/.codex/auth.json links to ~/priv/lnk/auth.json, where ~/priv (700) holds lnk → ~/open (755) — the file's real parents are open, so the private dir mitigates nothing (local and remote)",
+  "reachable": true,
+  "fail": {
+    "CDX-003": "warning"
+  },
+  "modes": {
+    ".codex": "700",
+    "priv": "700",
+    "open": "755",
+    "open/auth.json": "644"
+  }
+}

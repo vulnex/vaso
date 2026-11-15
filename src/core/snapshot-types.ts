@@ -28,8 +28,9 @@ export interface ProbeManifest {
  * One kind of config-set path. The probe parses each config (JSON/JSONC/
  * JSON5, TOML, or block-style YAML), takes the string values at `keys`, and
  * either walks each value as a skill tree (`tree`: `globs` under it, content
- * disguised like a config's; refused for `/`, a top-level directory, a home or
- * a directory above one, and credential stores) or stats it (`stat`:
+ * disguised like a config's; walked only strictly inside the home of the user
+ * whose config names it and outside credential stores, refused otherwise —
+ * see src/core/skill-root-scope.ts) or stats it (`stat`:
  * existence, mode and owner — never content; absolute paths only, keyed as
  * the config spells them).
  */
@@ -110,10 +111,10 @@ export interface ProbeSnapshot {
   owners?: Record<string, [number, number]>;
   /** User-private groups on the host, gid → uid (probe ≥ 1.1.0, Linux). */
   privateGroups?: Record<string, number>;
-  /** Config-derived trees (probe newer than 1.4.1), by walk base — a path, or
-   *  a glob for a wildcard base (`/h/workspace-*\/skills`): collected (absent
-   *  files are absent), refused (a base no tree is walked from) or over the
-   *  probe's entry limit (not collected). */
+  /** Config-derived trees (probe newer than 1.4.1), by literal base path (a
+   *  wildcard base is recorded per match): collected (absent files are
+   *  absent), refused (a base no tree is walked from) or over the probe's
+   *  entry limit (not collected). At most 2000; compared as plain strings. */
   configTrees?: Record<string, ConfigTreeStatus>;
 }
 

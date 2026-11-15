@@ -21,6 +21,15 @@ const maxExplicitLinkHops = 40
 // collected path through them would leave the snapshot's keys behind.
 func (c *collector) recordExplicitLinks(snapshot *ProbeSnapshot, p string) {
 	c.explicit = append(c.explicit, p)
+	c.recordLinkChain(snapshot, p)
+}
+
+// recordLinkChain records the links a realpath of p goes through (see
+// recordExplicitLinks) — for an explicit path, and for any collected file a
+// glob met through a link (a credential linked from a private directory into
+// an open one, stow- or home-manager-style chains): one recorded hop would
+// leave the CLI judging the parents of an intermediate link.
+func (c *collector) recordLinkChain(snapshot *ProbeSnapshot, p string) {
 	pending := []string{filepath.Clean(p)}
 	seen := make(map[string]bool)
 	for hops := 0; len(pending) > 0 && hops < maxExplicitLinkHops; hops++ {

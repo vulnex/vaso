@@ -20,6 +20,14 @@ export const SENSITIVE_SINKS: SensitiveSink[] = [
   { re: /(^|\/)\.docker(\/|$)/i, label: 'Docker credentials (~/.docker)' },
   { re: /(^|\/)\.(bashrc|bash_profile|bash_login|bash_logout|profile|zshrc|zprofile|zshenv|zlogin)$/i, label: 'shell startup file (code-execution persistence)' },
   { re: /^\/etc(\/|$)/i, label: 'system configuration (/etc)' },
+  { re: /(^|\/)\.config\/gh(\/|$)/i, label: 'GitHub CLI credentials (~/.config/gh)' },
+  { re: /(^|\/)\.config\/gcloud(\/|$)/i, label: 'Google Cloud credentials (~/.config/gcloud)' },
+  { re: /(^|\/)\.azure(\/|$)/i, label: 'Azure credentials (~/.azure)' },
+  { re: /(^|\/)\.password-store(\/|$)/i, label: 'password store credentials (~/.password-store)' },
+  { re: /(^|\/)Library\/Keychains(\/|$)/i, label: 'macOS keychain credentials (~/Library/Keychains)' },
+  { re: /(^|\/)\.codex\/auth\.json$/i, label: 'Codex credentials (~/.codex/auth.json)' },
+  { re: /(^|\/)\.(netrc|git-credentials|pgpass|pypirc|npmrc)$/i, label: 'credentials file (.netrc, .git-credentials, .pgpass, .pypirc, .npmrc)' },
+  { re: /(^|\/)(Library\/Application Support\/(Google\/Chrome|Chromium|BraveSoftware|Microsoft Edge|Firefox|Arc)|\.config\/(google-chrome|chromium|BraveSoftware|microsoft-edge)|\.mozilla|Library\/Cookies)(\/|$)/i, label: 'browser profile credentials (cookies, saved passwords)' },
 ];
 
 /**
@@ -39,7 +47,7 @@ export function classifySensitivePath(path: string): string[] {
  * analyzers use it to tell a credential read (SKL-006/010, SKL-001's source)
  * from a skill reading its own data.
  */
-const CREDENTIAL_SINK_LABELS = /SSH|AWS|GnuPG|Kubernetes|Docker/;
+const CREDENTIAL_SINK_LABELS = /SSH|AWS|GnuPG|Kubernetes|Docker|credentials/;
 const CREDENTIAL_FILES: RegExp[] = [
   /\/\.ssh\//i,
   /\/\.aws\//i,

@@ -299,10 +299,11 @@ describe('PicoClaw adapter', () => {
     expect(inst.skillsDirs).toEqual([
       `${PICO}/workspace/skills`,
       `${PICO}/workspace-research-bot/skills`,
-      '/data/ops-ws/skills',
       `${PICO}/skills`,
       '/opt/picoclaw/skills',
     ]);
+    // a workspace the config sets outside the home is not walked
+    expect(inst.unscannedSkillsDirs).toEqual([{ path: '/data/ops-ws/skills', reason: 'outside' }]);
     expect(picoclawWorkspaces(undefined, PICO, HOME)).toEqual([`${PICO}/workspace`]);
   });
 
