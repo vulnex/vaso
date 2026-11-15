@@ -158,6 +158,19 @@ describe.skipIf(!darwin)('writeRegularFile keeps macOS metadata (in place)', () 
     expect((await stat(f)).ino).toBe(ino);
     expect(sh('/bin/ls', '-led', f)).not.toMatch(/daemon/);
   }));
+  it('sees an inheritable ACL on the real directory behind a symlinked one', () => withFile(async (dir, f) => {
+    sh('/bin/chmod', '+a', 'user:daemon allow read,file_inherit', dir);
+    const link = `${dir}-link`;
+    await symlink(dir, link);
+    try {
+      const viaLink = join(link, 'config.toml');
+      expect(await renameKeepsMetadata(viaLink)).toBe(false);
+      await writeRegularFile(viaLink, 'new');
+      expect(sh('/bin/ls', '-led', f)).not.toMatch(/daemon/);
+    } finally {
+      await rm(link, { force: true });
+    }
+  }));
   it('still renames a plain file', () => withFile(async (_d, f) => {
     const ino = (await stat(f)).ino;
     expect(await renameKeepsMetadata(f)).toBe(true);

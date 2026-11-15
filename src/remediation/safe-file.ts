@@ -208,14 +208,17 @@ async function replaceByRename(path: string, bytes: Buffer, st: { mode: number; 
  */
 export async function renameKeepsMetadata(path: string): Promise<boolean> {
   try {
+    // the replacement is created in the real directory: through a symlinked
+    // one, `ls -d` would describe the link, which carries no ACL
+    const parent = await realpath(dirname(path));
     if (process.platform === 'darwin') {
-      const [file, dir] = await Promise.all([run('/bin/ls', ['-lnde@O', '--', path]), run('/bin/ls', ['-lnde@O', '--', dirname(path)])]);
+      const [file, dir] = await Promise.all([run('/bin/ls', ['-lnde@O', '--', path]), run('/bin/ls', ['-lnde@O', '--', parent])]);
       return darwinPlain(file, false) && darwinPlain(dir, true);
     }
     if (process.platform === 'linux') {
       const [fileAttrs, dirAttrs, flags] = await Promise.all([
         run('getfattr', ['--absolute-names', '-m', '-', '--', path]),
-        run('getfattr', ['--absolute-names', '-m', '-', '--', dirname(path)]),
+        run('getfattr', ['--absolute-names', '-m', '-', '--', parent]),
         run('lsattr', ['-d', '--', path]),
       ]);
       return linuxXattrNames(fileAttrs).length === 0
