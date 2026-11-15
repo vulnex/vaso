@@ -24,7 +24,7 @@ describe('OpenClaw skill roots', () => {
     expect(install.unscannedSkillsDirs).toEqual([
       { path: '/srv/packs', reason: 'outside' },
       { path: '/', reason: 'outside' },
-      { path: '/home/u', reason: 'outside' },
+      { path: '/home/u', reason: 'home' },
       { path: 'rel/skills', reason: 'relative' },
     ]);
   });
