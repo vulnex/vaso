@@ -6,7 +6,7 @@ import { loadRules, validateRuleFile, type DeclarativeRule } from '../rules/inde
 import { checkRegistry } from '../core/check-registry.js';
 import { readInputFile, INPUT_LIMITS } from '../core/input-file.js';
 import YAML from 'yaml';
-import { escapeControlChars } from '../reporting/text-safety.js';
+import { escapeControlChars, escapeJsonUnsafe } from '../reporting/text-safety.js';
 
 /** A file name or rule text on one terminal line (names come from directory listings). */
 const show = (s: string) => escapeControlChars(s, { lineBreaks: true });
@@ -31,6 +31,12 @@ export async function runRulesList(options: RulesListOptions): Promise<void> {
     if (result.trustWarning) console.error(chalk.yellow(`  Warning: ${show(result.trustWarning)}`));
     console.error();
   }
+  // An untrusted project file that couldn't be read or parsed (too large, broken YAML) still shows up
+  const brokenUntrusted = result.untrustedProject.filter(f => f.rules.length === 0 && f.errors.length > 0);
+  for (const f of brokenUntrusted) {
+    console.error(chalk.yellow(`  Warning: project rule file ${show(f.filePath)} (untrusted, not loaded): ${show(f.errors[0].message)}`));
+  }
+  if (brokenUntrusted.length > 0) console.error();
 
   if (options.format === 'json') {
     const output = [
@@ -46,12 +52,14 @@ export async function runRulesList(options: RulesListOptions): Promise<void> {
       file: r.file,
       status,
     }));
-    console.log(JSON.stringify(output, null, 2));
+    console.log(escapeJsonUnsafe(JSON.stringify(output, null, 2)));
     return;
   }
 
   if (result.allRules.length === 0 && untrusted.length === 0) {
-    console.log(chalk.dim('  No declarative rules found.'));
+    console.log(chalk.dim(brokenUntrusted.length > 0
+      ? `  No declarative rules loaded (${brokenUntrusted.length} untrusted project rule file(s) could not be read — see above).`
+      : '  No declarative rules found.'));
     console.log(chalk.dim(`  Create rules in ~/.vaso/rules/ (or a project's .vaso/rules/, loaded only when trusted)`));
     console.log(chalk.dim(`  Run "vaso rules init" to generate a starter template.\n`));
     return;
@@ -134,7 +142,7 @@ export async function runRulesValidate(filePath: string, options: RulesValidateO
   });
 
   if (options.format === 'json') {
-    console.log(JSON.stringify({ valid: errors.length === 0, rules: rules.length, errors }, null, 2));
+    console.log(escapeJsonUnsafe(JSON.stringify({ valid: errors.length === 0, rules: rules.length, errors }, null, 2)));
     return;
   }
 
