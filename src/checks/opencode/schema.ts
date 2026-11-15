@@ -93,11 +93,12 @@ export function v2Action(v1Key: string): string {
 
 const CATCH_ALL = /^\*+$/;
 
-/** Whether a rule's action pattern covers `action` (`*` or a simple glob). */
+/** Whether a rule's action pattern covers `action`: OpenCode wildcards are
+ *  `*` (any run, `/` included) and `?` (exactly one character). */
 export function actionMatches(pattern: string, action: string): boolean {
   if (CATCH_ALL.test(pattern) || pattern === action) return true;
-  if (!pattern.includes('*')) return false;
-  return wildcardMatch(pattern, action);
+  if (!/[*?]/.test(pattern)) return false;
+  return wildcardMatch(pattern, action, { question: true });
 }
 
 export function isCatchAllResource(resource: string): boolean {
