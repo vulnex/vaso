@@ -15,7 +15,7 @@ describe('credential key names', () => {
 
   it.each([
     'secret_name', 'secretName', 'tokenPath', 'passwordFile', 'tokenUrl', 'passwordLength', 'tokenType', 'clientSecretId',
-    'apiKeyHeader', 'API_KEY_ENV', 'isSecret', 'hasPassword', 'TOKEN_KEY', 'TOKEN_STORAGE_KEY', 'publicKey', 'primaryKey',
+    'apiKeyHeader', 'API_KEY_ENV', 'secretArn', 'SECRET_REF', 'isSecret', 'hasPassword', 'TOKEN_KEY', 'TOKEN_STORAGE_KEY', 'publicKey', 'primaryKey',
     'cacheKey', 'sortKey', 'idempotencyKey', 'passwordHash', 'key', 'keys', 'tokenizer', 'bypass', 'passwordField',
   ])('%s does not', (name) => {
     expect(isSecretKeyName(name)).toBe(false);

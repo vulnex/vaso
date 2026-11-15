@@ -118,6 +118,22 @@ const server = new McpServer({ name: "x", version: "1.0.0" });
   });
 });
 
+describe('masking with many flagged values', () => {
+  it('masks every value a line holds, longest first, in linear time per line', () => {
+    const rand = (i: number): string => `Qx_${(i * 7919).toString(36)}-Lp9Vz4KsW8nBc3H${i}`;
+    const values = Array.from({ length: 5000 }, (_, i) => rand(i));
+    const code = values.map((v, i) => `const password${i} = "${v}";`).join('\n') + '\n';
+    const source = { sourceCode: code };
+    const start = Date.now();
+    for (let i = 0; i < 5000; i += 1) {
+      const shown = sourceSnippet(source, `execSync("login --pw ${values[i]} --again ${values[(i + 1) % 5000]}")`, 400);
+      expect(shown).not.toContain(values[i]);
+      expect(shown).not.toContain(values[(i + 1) % 5000]);
+    }
+    expect(Date.now() - start).toBeLessThan(5000);
+  });
+});
+
 describe('prose credentials in MCP-034 snippets', () => {
   it('masks a password written out in a sentence', () => {
     expect(maskProseSecrets('The admin password is Hunter7-Zebra-Kettle-Quartz - log in now'))

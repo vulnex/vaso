@@ -38,9 +38,74 @@ function maskValue(value: string): string {
   return `${value.slice(0, MASK_SHOWN)}… (${value.length} chars)`;
 }
 
+/**
+ * Values by a hash of their first `width` characters, to find the few a text
+ * can hold: a rolling hash reads each position of the text once.
+ */
+interface ValueIndex {
+  width: number;
+  /** BASE ** (width - 1), to drop the character leaving the window. */
+  lead: number;
+  byStart: Map<number, string[]>;
+  /** Each value's place in the values' order (longest first). */
+  rank: Map<string, number>;
+}
+const valueIndexes = new WeakMap<string[], ValueIndex | null>();
+/** Below this many values a plain scan is as fast as the index. */
+const INDEX_MIN_VALUES = 32;
+const BASE = 31;
+
+function startHash(text: string, from: number, width: number): number {
+  let h = 0;
+  for (let i = 0; i < width; i++) h = (Math.imul(h, BASE) + text.charCodeAt(from + i)) | 0;
+  return h;
+}
+
+function valueIndex(values: string[]): ValueIndex | undefined {
+  let index = valueIndexes.get(values);
+  if (index === undefined) {
+    const width = Math.min(8, ...values.map((v) => v.length));
+    index = null;
+    if (values.length >= INDEX_MIN_VALUES && width >= 4) {
+      const byStart = new Map<number, string[]>();
+      for (const v of values) {
+        const key = startHash(v, 0, width);
+        const list = byStart.get(key);
+        if (list) list.push(v);
+        else byStart.set(key, [v]);
+      }
+      let lead = 1;
+      for (let i = 1; i < width; i++) lead = Math.imul(lead, BASE);
+      index = { width, lead, byStart, rank: new Map(values.map((v, i) => [v, i])) };
+    }
+    valueIndexes.set(values, index);
+  }
+  return index ?? undefined;
+}
+
 function maskAll(text: string, values: string[]): string {
+  // Many values: only those whose start occurs in the text can be in it
+  // (each line was scanned for every value — 10k values × 10k lines)
+  let candidates = values;
+  const index = valueIndex(values);
+  if (index) {
+    const { width, lead, byStart } = index;
+    const present = new Set<string>();
+    if (text.length >= width) {
+      let h = startHash(text, 0, width);
+      for (let i = 0; ; i++) {
+        const list = byStart.get(h);
+        if (list) for (const v of list) if (text.startsWith(v, i)) present.add(v);
+        if (i + width >= text.length) break;
+        h = (Math.imul(h - Math.imul(text.charCodeAt(i), lead), BASE) + text.charCodeAt(i + width)) | 0;
+      }
+    }
+    if (present.size === 0) return text;
+    // in the values' own order (longest first), as the plain scan masks them
+    candidates = [...present].sort((a, b) => index.rank.get(a)! - index.rank.get(b)!);
+  }
   let out = text;
-  for (const value of values) {
+  for (const value of candidates) {
     if (out.includes(value)) out = out.split(value).join(maskValue(value));
   }
   return out;
