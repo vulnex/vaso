@@ -424,6 +424,8 @@ function analyze(code: string): TaintedSink[] {
   // Pass 1: functions registered as tool/request handlers — all their
   // parameters carry tool input.
   const handlers = new WeakSet<Node>();
+  // Input fields each handler's schema limits to fixed choices or numbers (`z.enum`, `z.number`)
+  const constrainedInputs = new WeakMap<Node, Set<string>>();
   // Parameters (by position) of local functions that are called with tool input.
   const taintedParams = new WeakMap<Node, Set<number>>();
   const results: TaintedSink[] = [];
@@ -436,9 +438,11 @@ function analyze(code: string): TaintedSink[] {
         if (!HANDLER_REGISTRARS.has(callee.property.name)) return;
         // Inline, by reference (`server.tool("t", "d", {}, handleIt)`), or
         // FastMCP-TS's `addTool({ name, execute })`.
+        const constrained = constrainedSchemaFields(args as Node[]);
         const addHandler = (node: Node | undefined): void => {
           const fn = functionNode(path, node);
           if (fn) handlers.add(fn);
+          if (fn && constrained.size > 0) constrainedInputs.set(fn, constrained);
         };
         for (const arg of args) {
           if (arg.type === 'ObjectExpression') {
@@ -577,6 +581,40 @@ function analyze(code: string): TaintedSink[] {
       return found ? `${name}() ← ${found}` : undefined;
     };
 
+    /** A handler's input field its schema limits to fixed choices or numbers: `sort` from `{ sort }`, or `args.sort`. */
+    const constrainedInput = (p: NodePath): boolean => {
+      const param = (name: string): Binding | undefined => {
+        const b = p.scope.getBinding(name);
+        return b?.kind === 'param' && handlers.has(b.scope.block) ? b : undefined;
+      };
+      if (p.isIdentifier()) {
+        const b = param(p.node.name);
+        const field = b ? destructuredField(b) : undefined;
+        return !!b && field !== undefined && !!constrainedInputs.get(b.scope.block)?.has(field);
+      }
+      if (p.isMemberExpression() && !p.node.computed && p.node.object.type === 'Identifier' && p.node.property.type === 'Identifier') {
+        const b = param(p.node.object.name);
+        const first = (b?.scope.block as { params?: Node[] } | undefined)?.params?.[0];
+        return !!b && first === b.identifier && !!constrainedInputs.get(b.scope.block)?.has(p.node.property.name);
+      }
+      return false;
+    };
+
+    /** SQL text built from tool input and handed to `<shown>.<prop>(…)`. */
+    const reportSql = (path: NodePath, prop: string, shown: string, args: NodePath[]): void => {
+      if (!(SQL_METHODS.has(prop) || SQL_GENERIC_METHODS.has(prop)) || !args[0]) return;
+      const built = sqlPieces(args[0], SQL_METHODS.has(prop) ? SQL_TEXT : SQL_TEXT_CAPS);
+      if (!built) return;
+      const tainted = built.parts.filter((p) => p.path.node && !sqlSafePiece(p.path, constrainedInput) && expressionOrigin(p.path, 0));
+      if (tainted.length === 0) return;
+      const origin = expressionOrigin(tainted[0].path, 0)!;
+      const line = path.node.loc?.start.line ?? 0;
+      results.push({
+        line, snippet: lineText(line).slice(0, 120), sink: `${shown}.${prop}`, origin, kind: 'query',
+        ...(tainted.every((p) => p.wraps) ? { wrapsStatement: true } : {}),
+      });
+    };
+
     const report = (path: NodePath<Node>, sink: string, candidates: NodePath[], kind: SinkKind): void => {
       for (const arg of candidates) {
         if (!arg.node) continue;
@@ -635,6 +673,9 @@ function analyze(code: string): TaintedSink[] {
           if (fsCall && FS_MODULE.test(bindingModule(path.scope.getBinding(callee.name)) ?? '')) {
             return report(path, callee.name, args.slice(0, fsCall.paths), fsCall.kind);
           }
+          // `const run = pool.query.bind(pool); run(`SELECT …${name}`)`
+          const bound = boundSqlMethod(path.scope.getBinding(callee.name));
+          if (bound) reportSql(path, bound.prop, bound.shown, args);
           return;
         }
 
@@ -646,21 +687,8 @@ function analyze(code: string): TaintedSink[] {
             return report(path, `${shown}.${prop}`, args.slice(0, fsCall.paths), fsCall.kind);
           }
           // SQL text built from tool input: `db.prepare(`SELECT … '${name}'`)`, `"… WHERE id = " + id`
-          if ((SQL_METHODS.has(prop) || SQL_GENERIC_METHODS.has(prop)) && args[0]) {
-            const built = sqlPieces(args[0], SQL_METHODS.has(prop) ? SQL_TEXT : SQL_TEXT_CAPS);
-            if (built) {
-              const tainted = built.parts.filter((p) => p.path.node && expressionOrigin(p.path, 0));
-              if (tainted.length > 0) {
-                const origin = expressionOrigin(tainted[0].path, 0)!;
-                const line = path.node.loc?.start.line ?? 0;
-                const shown = callee.object.type === 'Identifier' ? callee.object.name : callee.object.type === 'ThisExpression' ? 'this' : '…';
-                results.push({
-                  line, snippet: lineText(line).slice(0, 120), sink: `${shown}.${prop}`, origin, kind: 'query',
-                  ...(tainted.every((p) => p.wraps) ? { wrapsStatement: true } : {}),
-                });
-              }
-            }
-          }
+          const shown = callee.object.type === 'Identifier' ? callee.object.name : callee.object.type === 'ThisExpression' ? 'this' : '…';
+          reportSql(path, prop, shown, args);
         }
       },
     });
@@ -673,12 +701,19 @@ function analyze(code: string): TaintedSink[] {
 
 /**
  * The interpolated pieces of an SQL string an argument builds: an untagged
- * template literal or a `+` chain whose literal text is SQL, given inline or
- * through a variable it was declared with. Tagged templates (sql`…`) are
- * parameterized by their library and are not text.
+ * template literal, a `+` chain, `[…].join(sep)`, `"…".concat(…)` or
+ * `util.format("…%s…", …)` whose literal text is SQL — given inline, through
+ * a variable it was declared with (and `q += …` appends to it), or as what a
+ * local helper returns. Tagged templates (sql`…`) are parameterized by their
+ * library and are not text.
  */
 function sqlPieces(arg: NodePath, sql: RegExp, depth = 0): { parts: Array<{ path: NodePath; wraps: boolean }> } | undefined {
-  if (depth > 2) return undefined;
+  if (depth > 3) return undefined;
+  const fromOperands = (operands: NodePath[], sep = ''): { parts: Array<{ path: NodePath; wraps: boolean }> } | undefined => {
+    const text = operands.map((p) => staticString(p.node, p.scope) ?? ' ').join(sep || '');
+    if (!sql.test(text)) return undefined;
+    return { parts: operands.filter((p) => staticString(p.node, p.scope) === undefined).map((path) => ({ path, wraps: false })) };
+  };
   if (arg.isTemplateLiteral()) {
     const quasis = arg.node.quasis.map((q) => q.value.cooked ?? q.value.raw);
     if (!sql.test(quasis.join(' '))) return undefined;
@@ -699,15 +734,288 @@ function sqlPieces(arg: NodePath, sql: RegExp, depth = 0): { parts: Array<{ path
       } else operands.push(p);
     };
     flatten(arg);
-    const text = operands.map((p) => staticString(p.node, p.scope) ?? ' ').join('');
-    if (!sql.test(text)) return undefined;
-    return { parts: operands.filter((p) => staticString(p.node, p.scope) === undefined).map((path) => ({ path, wraps: false })) };
+    return fromOperands(operands);
+  }
+  if (arg.isCallExpression()) {
+    const callee = arg.get('callee');
+    const args = arg.get('arguments') as NodePath[];
+    if (callee.isMemberExpression() && !callee.node.computed && callee.node.property.type === 'Identifier') {
+      const method = callee.node.property.name;
+      const object = callee.get('object') as NodePath;
+      // ["SELECT … '", name, "'"].join("")
+      if (method === 'join' && object.isArrayExpression()) {
+        const elements = (object.get('elements') as NodePath[]).filter((e) => e.node && !e.isSpreadElement());
+        if (elements.length > 64) return undefined;
+        return fromOperands(elements, args[0] ? staticString(args[0].node, args[0].scope) ?? ' ' : ',');
+      }
+      // "SELECT … '".concat(name, "'")
+      if (method === 'concat' && staticString(object.node, object.scope) !== undefined) {
+        return fromOperands([object, ...args].slice(0, 64));
+      }
+      // util.format("SELECT … '%s'", name)
+      if (method === 'format' && object.isIdentifier() && (object.node.name === 'util' || bindingModule(object.scope.getBinding(object.node.name)) === 'util')) {
+        return formatPieces(args, sql);
+      }
+    }
+    if (callee.isIdentifier()) {
+      const binding = arg.scope.getBinding(callee.node.name);
+      if (callee.node.name === 'format' && bindingModule(binding) === 'util') return formatPieces(args, sql);
+      // a local helper that returns the SQL text: `function byName(n) { return `…${n}…`; }`
+      const returned = returnedExpression(binding);
+      return returned ? sqlPieces(returned, sql, depth + 1) : undefined;
+    }
+    return undefined;
   }
   if (arg.isIdentifier()) {
     const binding = arg.scope.getBinding(arg.node.name);
-    if (!binding?.constant || !binding.path.isVariableDeclarator()) return undefined;
+    if (!binding?.path.isVariableDeclarator()) return undefined;
     const init = binding.path.get('init');
-    return init.node ? sqlPieces(init as NodePath, sql, depth + 1) : undefined;
+    if (!init.node) return undefined;
+    if (binding.constant) return sqlPieces(init as NodePath, sql, depth + 1);
+    // `let q = "SELECT …"; q += " WHERE name = '" + name + "'"`: the text is the declaration plus every append
+    const appends = binding.constantViolations;
+    if (appends.length === 0 || appends.length > 16) return undefined;
+    const operands: NodePath[] = [init as NodePath];
+    for (const v of appends) {
+      if (!v.isAssignmentExpression({ operator: '+=' })) return undefined;
+      const right = v.get('right') as NodePath;
+      const flatten = (p: NodePath): void => {
+        if (p.isBinaryExpression({ operator: '+' }) && operands.length < 64) {
+          flatten(p.get('left') as NodePath);
+          flatten(p.get('right') as NodePath);
+        } else operands.push(p);
+      };
+      flatten(right);
+    }
+    const templates = operands.filter((p) => p.isTemplateLiteral());
+    const text =operands.map((p) => (p.isTemplateLiteral() ? p.node.quasis.map((q) => q.value.cooked ?? '').join(' ') : staticString(p.node, p.scope) ?? ' ')).join('');
+    if (!sql.test(text)) return undefined;
+    return {
+      parts: [
+        ...operands.filter((p) => !p.isTemplateLiteral() && staticString(p.node, p.scope) === undefined).map((path) => ({ path, wraps: false })),
+        ...templates.flatMap((t) => (t.get('expressions') as NodePath[]).map((path) => ({ path, wraps: false }))),
+      ],
+    };
+  }
+  return undefined;
+}
+
+/** `format("SELECT … '%s'", a, b)`: the arguments after a format string that is SQL. */
+function formatPieces(args: NodePath[], sql: RegExp): { parts: Array<{ path: NodePath; wraps: boolean }> } | undefined {
+  const text = args[0] ? staticString(args[0].node, args[0].scope) : undefined;
+  if (text === undefined || !sql.test(text)) return undefined;
+  return { parts: args.slice(1).map((path) => ({ path, wraps: false })) };
+}
+
+/** What a local function returns, when it is one expression (an arrow body or a single `return`). */
+function returnedExpression(binding: Binding | undefined): NodePath | undefined {
+  if (!binding) return undefined;
+  let fn: NodePath | undefined;
+  if (binding.path.isFunctionDeclaration()) fn = binding.path;
+  else if (binding.path.isVariableDeclarator()) {
+    const init = binding.path.get('init');
+    if (init.isFunctionExpression() || init.isArrowFunctionExpression()) fn = init as NodePath;
+  }
+  if (!fn) return undefined;
+  const body = fn.get('body') as NodePath;
+  if (!body.isBlockStatement()) return body;
+  const statements = body.get('body') as NodePath[];
+  const returns = statements.filter((s) => s.isReturnStatement());
+  if (returns.length !== 1) return undefined;
+  const argument = returns[0].get('argument') as NodePath;
+  return argument.node ? argument : undefined;
+}
+
+/** `X.query.bind(X)` held in a constant: the SQL method it calls. */
+function boundSqlMethod(binding: Binding | undefined): { prop: string; shown: string } | undefined {
+  const decl = binding?.constant ? binding.path.node : undefined;
+  const init = decl?.type === 'VariableDeclarator' ? decl.init : undefined;
+  if (init?.type !== 'CallExpression' || init.callee.type !== 'MemberExpression' || init.callee.property.type !== 'Identifier'
+    || init.callee.property.name !== 'bind') return undefined;
+  const target = init.callee.object;
+  if (target.type !== 'MemberExpression' || target.property.type !== 'Identifier' || !SQL_METHODS.has(target.property.name)) return undefined;
+  return { prop: target.property.name, shown: target.object.type === 'Identifier' ? target.object.name : '…' };
+}
+
+/** Calls that make a value safe to put in SQL text: driver escaping and identifier/literal quoting. */
+const SQL_ESCAPES = /^(?:escape|escapeId|escapeIdentifier|escapeLiteral|escapeString|quoteIdent|quoteIdentifier|quoteLiteral|quote_ident|quote_literal)$/;
+/** Modules whose `format` escapes its values (`mysql.format`, pg-format's `format('%I', x)`). */
+const SQL_FORMAT_MODULES = /^(?:mysql2?(?:\/promise)?|sqlstring|pg-format)$/;
+
+/**
+ * An interpolated piece that can't carry SQL whatever the input: an escaped
+ * value (`mysql.escape(x)`, `pg.escapeIdentifier(x)`), a placeholder list
+ * (`ids.map(() => "?").join(",")`, `.map((_, i) => `$${i + 1}`)`), a choice
+ * from fixed values (`[…].includes(x) ? x : "id"`), or input the tool's schema
+ * limits to fixed values or numbers (`z.enum([...])`, `z.number()`).
+ */
+function sqlSafePiece(path: NodePath, constrained: (path: NodePath) => boolean, depth = 0): boolean {
+  if (depth > 4 || !path.node) return false;
+  if (constrained(path)) return true;
+  if (path.isIdentifier()) {
+    const binding = path.scope.getBinding(path.node.name);
+    if (!binding?.constant || !binding.path.isVariableDeclarator()) return false;
+    const init = binding.path.get('init') as NodePath;
+    return !!init.node && sqlSafePiece(init, constrained, depth + 1);
+  }
+  if (path.isConditionalExpression()) return allowListChoice(path);
+  // `COLUMNS[name] ?? "id"`: a lookup in a table of fixed values, with a fixed fallback
+  if (path.isLogicalExpression() && (path.node.operator === '??' || path.node.operator === '||')) {
+    const fixedOr = (p: NodePath): boolean => staticString(p.node, p.scope) !== undefined || p.isNumericLiteral() || sqlSafePiece(p, constrained, depth + 1);
+    return fixedOr(path.get('left') as NodePath) && fixedOr(path.get('right') as NodePath);
+  }
+  if (path.isMemberExpression() && path.node.computed) return fixedList(path.node.object, path.scope, 0, true);
+  if (path.isTemplateLiteral()) {
+    return (path.get('expressions') as NodePath[]).every((e) => sqlSafePiece(e, constrained, depth + 1));
+  }
+  if (!path.isCallExpression()) return false;
+  const callee = path.get('callee');
+  const name = callee.isIdentifier() ? callee.node.name
+    : callee.isMemberExpression() && !callee.node.computed && callee.node.property.type === 'Identifier' ? callee.node.property.name : '';
+  if (SQL_ESCAPES.test(name)) return true;
+  if (name === 'format') {
+    const holder = callee.isIdentifier() ? callee : callee.isMemberExpression() ? callee.get('object') as NodePath : undefined;
+    if (holder?.isIdentifier() && SQL_FORMAT_MODULES.test(bindingModule(holder.scope.getBinding(holder.node.name)) ?? holder.node.name)) return true;
+  }
+  if (callee.isMemberExpression() && (name === 'join' || name === 'map')) {
+    const receiver = callee.get('object') as NodePath;
+    const mapped = name === 'join' ? receiver : path;
+    return mapped.isCallExpression() && placeholderMap(mapped);
+  }
+  return false;
+}
+
+/** `xs.map(() => "?")`, `xs.map((_, i) => `$${i + 1}`)`: every element replaced by text that ignores it. */
+function placeholderMap(call: NodePath): boolean {
+  if (!call.isCallExpression()) return false;
+  const callee = call.node.callee;
+  if (callee.type !== 'MemberExpression' || callee.property.type !== 'Identifier' || callee.property.name !== 'map') return false;
+  const cb = (call.get('arguments') as NodePath[])[0];
+  if (!cb || !(cb.isArrowFunctionExpression() || cb.isFunctionExpression())) return false;
+  const params = cb.node.params;
+  if (params.some((p) => p.type !== 'Identifier')) return false;
+  const element = params[0]?.type === 'Identifier' ? params[0].name : undefined;
+  const index = params[1]?.type === 'Identifier' ? params[1].name : undefined;
+  const body = cb.get('body') as NodePath;
+  if (!body.isExpression()) return false;
+  // the body is literal text, numbers and the index only
+  let ok = true;
+  body.traverse({
+    Identifier(id) {
+      if (!id.isReferencedIdentifier()) return;
+      if (id.node.name === element || id.node.name !== index) { ok = false; id.stop(); }
+    },
+    CallExpression(c) { ok = false; c.stop(); },
+  });
+  if (body.isIdentifier()) ok = body.node.name === index;
+  return ok;
+}
+
+/** `ALLOWED.includes(x) ? x : "id"`, `x === "asc" ? "ASC" : "DESC"`: the value is one of fixed choices. */
+function allowListChoice(path: NodePath): boolean {
+  if (!path.isConditionalExpression()) return false;
+  const test = path.get('test') as NodePath;
+  let checked: string | undefined;
+  if (test.isCallExpression()) {
+    const callee = test.node.callee;
+    const first = test.node.arguments[0];
+    if (callee.type === 'MemberExpression' && callee.property.type === 'Identifier' && /^(?:includes|has)$/.test(callee.property.name)
+      && first?.type === 'Identifier' && fixedList(callee.object, test.scope)) {
+      checked = first.name;
+    }
+  } else if (test.isBinaryExpression() && /^(?:===|==)$/.test(test.node.operator)) {
+    const { left, right } = test.node;
+    if (left.type === 'Identifier' && staticString(right, test.scope) !== undefined) checked = left.name;
+    else if (right.type === 'Identifier' && staticString(left, test.scope) !== undefined) checked = right.name;
+  } else if (test.isBinaryExpression({ operator: "in" }) && test.node.left.type === "Identifier" && fixedList(test.node.right, test.scope)) {
+    checked = test.node.left.name;
+  }
+  const fixed = (branch: Node): boolean =>
+    staticString(branch, path.scope) !== undefined || branch.type === 'NumericLiteral'
+    || (checked !== undefined && branch.type === 'Identifier' && branch.name === checked);
+  return fixed(path.node.consequent) && fixed(path.node.alternate);
+}
+
+/** A list of fixed values: an array literal of strings/numbers, `new Set([...])` of them, an object literal (with `values`: of fixed values too), or a constant holding one. */
+function fixedList(node: Node, scope: Scope, depth = 0, values = false): boolean {
+  if (depth > 3) return false;
+  if (node.type === 'ArrayExpression') {
+    return node.elements.every((e) => !!e && (e.type === 'NumericLiteral' || (e.type !== 'SpreadElement' && staticString(e, scope) !== undefined)));
+  }
+  if (node.type === 'NewExpression' && node.callee.type === 'Identifier' && node.callee.name === 'Set') {
+    const first = node.arguments[0];
+    return !!first && first.type !== 'SpreadElement' && first.type !== 'ArgumentPlaceholder' && fixedList(first as Node, scope, depth + 1, values);
+  }
+  if (node.type === 'ObjectExpression') {
+    return node.properties.every((p) => p.type === 'ObjectProperty' && !p.computed
+      && (!values || p.value.type === 'NumericLiteral' || staticString(p.value as Node, scope) !== undefined));
+  }
+  if (node.type === 'Identifier') {
+    const binding = scope.getBinding(node.name);
+    const decl = binding?.path.node;
+    if (!binding?.constant || decl?.type !== 'VariableDeclarator' || !decl.init) return false;
+    return fixedList(decl.init, binding.scope, depth + 1, values);
+  }
+  return false;
+}
+
+/** zod refinements that keep a field's type (`z.enum([...]).optional()`). */
+const ZOD_KEEPS_TYPE = new Set(['optional', 'default', 'describe', 'nullable', 'nullish', 'int', 'min', 'max', 'gt', 'gte', 'lt', 'lte',
+  'positive', 'negative', 'nonnegative', 'nonpositive', 'finite', 'safe', 'catch', 'readonly', 'multipleOf', 'step', 'brand']);
+/** zod types whose values are fixed choices or numbers. */
+const ZOD_FIXED = new Set(['enum', 'nativeEnum', 'literal', 'number', 'boolean', 'bigint', 'int', 'nan']);
+
+/** A schema field whose value can only be one of fixed choices, a number or a boolean (or an array of those). */
+function fixedZodType(node: Node | null | undefined, depth = 0): boolean {
+  let n = node;
+  for (let i = 0; i < 16 && n?.type === 'CallExpression' && n.callee.type === 'MemberExpression' && n.callee.property.type === 'Identifier'
+    && ZOD_KEEPS_TYPE.has(n.callee.property.name); i++) n = n.callee.object;
+  if (n?.type !== 'CallExpression' || n.callee.type !== 'MemberExpression' || n.callee.property.type !== 'Identifier') return false;
+  const kind = n.callee.property.name;
+  if (ZOD_FIXED.has(kind)) return true;
+  if (kind === 'array' && depth < 2) return fixedZodType(n.arguments[0] as Node, depth + 1);
+  return false;
+}
+
+/**
+ * Input fields a tool's schema limits to fixed choices or numbers: the shape
+ * object (`server.tool(n, d, { sort: z.enum([...]) }, h)`), or its
+ * `inputSchema`/`parameters`/`schema` given as a shape or `z.object({...})`.
+ */
+function constrainedSchemaFields(args: Node[]): Set<string> {
+  const out = new Set<string>();
+  const shapeOf = (node: Node | null | undefined): Node | undefined => {
+    if (node?.type === 'ObjectExpression') return node;
+    if (node?.type === 'CallExpression' && node.callee.type === 'MemberExpression' && node.callee.property.type === 'Identifier'
+      && node.callee.property.name === 'object') return node.arguments[0]?.type === 'ObjectExpression' ? node.arguments[0] : undefined;
+    return undefined;
+  };
+  const readShape = (shape: Node | undefined): void => {
+    if (shape?.type !== 'ObjectExpression') return;
+    for (const p of shape.properties) {
+      if (p.type !== 'ObjectProperty' || p.computed) continue;
+      const key = p.key.type === 'Identifier' ? p.key.name : p.key.type === 'StringLiteral' ? p.key.value : undefined;
+      if (key && fixedZodType(p.value as Node)) out.add(key);
+    }
+  };
+  for (const arg of args) {
+    if (arg.type !== 'ObjectExpression') continue;
+    const nested = arg.properties.find((p) => p.type === 'ObjectProperty' && !p.computed && p.key.type === 'Identifier'
+      && /^(?:inputSchema|parameters|schema|argsSchema)$/.test(p.key.name));
+    readShape(nested?.type === 'ObjectProperty' ? shapeOf(nested.value as Node) : arg);
+  }
+  return out;
+}
+
+/** The input field a handler parameter binding reads: `{ sort }` / `{ sort: s }` → `sort`. */
+function destructuredField(binding: Binding): string | undefined {
+  const fn = binding.scope.block as { params?: Node[] };
+  const first = fn.params?.[0];
+  if (first?.type !== 'ObjectPattern') return undefined;
+  for (const p of first.properties) {
+    if (p.type !== 'ObjectProperty' || p.computed) continue;
+    const value = p.value.type === 'AssignmentPattern' ? p.value.left : p.value;
+    if (value === binding.identifier) return p.key.type === 'Identifier' ? p.key.name : p.key.type === 'StringLiteral' ? p.key.value : undefined;
   }
   return undefined;
 }
