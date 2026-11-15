@@ -63,6 +63,41 @@ describe('CDX-002 permission profiles (default_permissions)', () => {
     expect(net.severity).toBe('warning');
   });
 
+  it('judges nested filesystem tables: each "<sub>" = "write" under its root, "." being the root', async () => {
+    const r = await check('CDX-002').run(ctx([cfg(MAIN, {
+      default_permissions: 'dev',
+      permissions: { dev: { filesystem: {
+        [HOME]: { '.': 'write' },
+        '~/.ssh': { '**': 'write' },
+        '/opt/data': { '.': 'write', 'cache/**': 'write' },
+        '/srv': { 'etc': 'read' },
+        ':workspace_roots': { '.': 'write' },
+        glob_scan_max_depth: 3,
+      } } },
+    })]));
+    expect(r.severity).toBe('critical');
+    expect(r.evidence?.map(e => e.snippet)).toEqual([
+      `[permissions.dev.filesystem."${HOME}"] "." = "write"`,
+      '[permissions.dev.filesystem."~/.ssh"] "**" = "write"',
+    ]);
+  });
+
+  it('treats "<dir>/**" like <dir> itself', async () => {
+    const r = await check('CDX-002').run(ctx([cfg(MAIN, {
+      default_permissions: 'g', permissions: { g: { filesystem: { '~/**': 'write', '/opt/x/**': 'write' } } },
+    })]));
+    expect(r.evidence?.map(e => e.snippet)).toEqual(['[permissions.g.filesystem] "~/**" = "write"']);
+  });
+
+  it('reports nothing for a profile extending :danger-full-access — Codex rejects that config', async () => {
+    const r = await check('CDX-002').run(ctx([cfg(MAIN, {
+      approval_policy: 'on-request',
+      default_permissions: 'child',
+      permissions: { child: { extends: ':danger-full-access', filesystem: { '~': 'write' } } },
+    })]));
+    expect(r.passed).toBe(true);
+  });
+
   it('follows extends chains', async () => {
     const r = await check('CDX-002').run(ctx([cfg(MAIN, {
       default_permissions: 'child',
