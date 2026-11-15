@@ -57,6 +57,17 @@ function isStringRecord(v: unknown): boolean {
   return isRecord(v) && Object.values(v).every(x => typeof x === 'string');
 }
 
+/** probe/config_roots.go maxConfigTrees: config-derived trees one snapshot records. */
+export const MAX_CONFIG_TREES = 2000;
+/** Longest configTrees key accepted (PATH_MAX). */
+const MAX_CONFIG_TREE_PATH = 4096;
+
+/** A configTrees key: an absolute, normalized directory path (no `..`, no trailing slash, no NUL). */
+function isConfigTreePath(k: string): boolean {
+  return k.length > 0 && k.length <= MAX_CONFIG_TREE_PATH && k.startsWith('/') && !k.includes('\0')
+    && posix.normalize(k) === k && (k === '/' || !k.endsWith('/'));
+}
+
 /** Every problem that makes `value` unusable as a snapshot; empty when valid. */
 export function validateSnapshot(value: unknown): string[] {
   if (!isRecord(value)) return ['Snapshot is not a JSON object'];
@@ -107,9 +118,17 @@ export function validateSnapshot(value: unknown): string[] {
   if (!isRecord(s.commandOutputs)) errors.push('Missing or invalid commandOutputs field');
   if (s.env !== undefined && !isStringRecord(s.env)) errors.push('Invalid env field (string values expected)');
   if (s.symlinks !== undefined && !isStringRecord(s.symlinks)) errors.push('Invalid symlinks field (link targets expected)');
-  if (s.configTrees !== undefined && (!isRecord(s.configTrees)
-    || !Object.values(s.configTrees).every(v => v === 'collected' || v === 'refused' || v === 'limit'))) {
-    errors.push('Invalid configTrees field (collected, refused or limit expected)');
+  if (s.configTrees !== undefined) {
+    // Keys are literal directory paths, compared as such (probe-coverage.ts);
+    // as many as the probe records at most (maxConfigTrees)
+    const entries = isRecord(s.configTrees) ? Object.entries(s.configTrees) : undefined;
+    if (!entries || !entries.every(([, v]) => v === 'collected' || v === 'refused' || v === 'limit')) {
+      errors.push('Invalid configTrees field (collected, refused or limit expected)');
+    } else if (entries.length > MAX_CONFIG_TREES) {
+      errors.push(`Invalid configTrees field (more than ${MAX_CONFIG_TREES} trees)`);
+    } else if (!entries.every(([k]) => isConfigTreePath(k))) {
+      errors.push('Invalid configTrees field (normalized absolute directory paths expected)');
+    }
   }
   if (s.timestamp !== undefined && typeof s.timestamp !== 'string') errors.push('Invalid timestamp field');
   if (s.probeVersion !== undefined && typeof s.probeVersion !== 'string') errors.push('Invalid probeVersion field (a version string expected)');

@@ -296,7 +296,12 @@ export class SnapshotFSProvider implements FSProvider {
     return Object.hasOwn(this.snapshot.files, path);
   }
 
-  /** Config-derived trees the probe walked, by walk base (path or glob), with what it did. */
+  /** The names the probe listed in `dir` (directories end in `/`), if it listed it. */
+  listing(dir: string): readonly string[] | undefined {
+    return Object.hasOwn(this.snapshot.directories, dir) ? this.snapshot.directories[dir] : undefined;
+  }
+
+  /** Config-derived trees the probe walked, by literal base path, with what it did. */
   configTrees(): Readonly<Record<string, ConfigTreeStatus>> {
     return this.snapshot.configTrees ?? {};
   }
