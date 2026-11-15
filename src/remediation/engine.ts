@@ -195,9 +195,24 @@ export class RemediationEngine {
     for (const agent of rescan.agents) {
       for (const r of agent.results) if (!r.passed) open.set(`${installKey(agent)}\0${r.id}`, r);
     }
+    // A folded finding (see foldedInto) passes in the rescan too: its fix is
+    // partial when a check it was folded into is still open — that check is
+    // named (once, and not again when its own fix ran and is listed already)
+    const folded = new Map<string, string[]>();
+    for (const agent of rescan.agents) {
+      for (const r of agent.results) if (r.passed && r.foldedInto) folded.set(`${installKey(agent)}\0${r.id}`, r.foldedInto.split(', '));
+    }
+    const listed = new Set(this.applied.map(a => `${a.install}\0${a.checkId}`).filter(k => open.has(k)));
     return this.applied.flatMap(a => {
       const finding = open.get(`${a.install}\0${a.checkId}`);
-      return finding ? [{ checkId: a.checkId, result: a.result, finding }] : [];
+      if (finding) return [{ checkId: a.checkId, result: a.result, finding }];
+      return (folded.get(`${a.install}\0${a.checkId}`) ?? []).flatMap(owner => {
+        const key = `${a.install}\0${owner}`;
+        const ownerFinding = open.get(key);
+        if (!ownerFinding || listed.has(key)) return [];
+        listed.add(key);
+        return [{ checkId: owner, result: a.result, finding: ownerFinding }];
+      });
     });
   }
 

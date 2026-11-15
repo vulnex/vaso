@@ -106,6 +106,49 @@ describe('GHC-001: Directory Permissions', () => {
   });
 });
 
+describe.skipIf(process.platform === 'win32')('GHC-001 fix', () => {
+  it('removes group/other access from every private store file, session-store.db and a writable store dir', async () => {
+    const { mkdtemp, mkdir, writeFile, chmod, stat, rm } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const { LocalFSProvider } = await import('../../core/local-fs-provider.js');
+    const home = await mkdtemp(join(tmpdir(), 'vaso-ghc001-'));
+    const dir = join(home, '.copilot');
+    try {
+      const files: Record<string, number> = {
+        'mcp-oauth-config/github.tokens.json': 0o644,
+        'mcp-secrets/index.json': 0o644,
+        'command-history-state/history.jsonl': 0o640,
+        'session-store.db': 0o644,
+      };
+      for (const [rel, mode] of Object.entries(files)) {
+        await mkdir(join(dir, rel, '..'), { recursive: true });
+        await writeFile(join(dir, rel), 'x');
+        await chmod(join(dir, rel), mode);
+      }
+      await mkdir(join(dir, 'session-state'));
+      for (let i = 0; i < 205; i++) { await writeFile(join(dir, 'session-state', `s${i}.json`), 'x'); await chmod(join(dir, 'session-state', `s${i}.json`), 0o644); }
+      await chmod(join(dir, 'mcp-secrets'), 0o777);
+      const check = copilotCliChecks.find(c => c.id === 'GHC-001')!;
+      const ctx: ScanContext = {
+        installation: { agent: 'copilot-cli', installDir: dir, configFiles: [] } as AgentInstallation,
+        configs: [], platform: process.platform as ScanContext['platform'], fs: new LocalFSProvider(),
+      };
+      expect((await check.run(ctx)).passed).toBe(false);
+      const res = await check.fix!(ctx);
+      expect(res.applied).toBe(true);
+      for (const rel of Object.keys(files)) expect((await stat(join(dir, rel))).mode & 0o077).toBe(0);
+      // past the scan's per-store cap too
+      expect((await stat(join(dir, 'session-state', 's204.json'))).mode & 0o077).toBe(0);
+      expect((await stat(join(dir, 'mcp-secrets'))).mode & 0o777).toBe(0o700);
+      expect((await check.run(ctx)).passed).toBe(true);
+      expect((await check.fix!(ctx)).alreadyDone).toBe(true);
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('Copilot checks on the project install (installDir = the repo)', () => {
   it('GHC-001 does not judge the repo directory as ~/.copilot', async () => {
     const fs = makeFs({ stat: vi.fn(async () => ({ mode: 0o755, isFile: () => false, isDirectory: () => true })) });
