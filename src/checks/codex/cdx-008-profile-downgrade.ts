@@ -49,7 +49,9 @@ function checkProfile(
       features: deepMerge(table(root.features), table(p.features)),
     };
     // report what the profile adds over the root config's own findings
-    const key = (f: { level: string; snippet: string; detail: string }) => `${f.level}\0${f.snippet}\0${f.detail}`;
+    // the detail names the normalized path: a root grant the profile restates
+    // with another spelling (`"~"` vs `"~/"`) is the same finding
+    const key = (f: { level: string; detail: string }) => `${f.level}\0${f.detail}`;
     const rootFindings = new Set(judgeDefaultPermissions(root, home).map(key));
     for (const f of judgeDefaultPermissions(merged, home)) {
       if (rootFindings.has(key(f))) continue;

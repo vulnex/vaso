@@ -28,7 +28,12 @@ const { join, normalize, dirname } = posix;
 
 const CREDENTIAL_DIRS = ['.ssh', '.aws', '.gnupg', '.kube', '.docker', '.codex'];
 
-const GLOB_CHARS = /[*?[]/;
+// Codex reads a path as a glob when it holds * ? [ or ] (codex-rs
+// permission_path.rs contains_glob_chars_for_platform); braces and
+// backslashes alone are literal path characters
+const GLOB_CHARS = /[*?[\]]/;
+/** Longest glob a detail quotes in full. */
+const MAX_SHOWN_GLOB = 100;
 
 /** Paths whose write access is too broad (see broadRoot), for glob matching. */
 function sensitiveCandidates(home: string): string[] {
@@ -58,12 +63,13 @@ export function broadReason(root: string, home: string): { path: string; why: st
     // No real path is this long; a glob this long is judged by length alone
     if (p.length > MAX_GLOB_LENGTH) return { path: truncateSnippet(p, 60), why: `is a glob too long to judge (${p.length} characters)` };
     const hit = sensitiveCandidates(home).find(c => pathGlobMatch(p, c));
-    if (hit) return { path: p, why: `can match ${whichClause(broadReason(hit, home))}` };
+    const shown = p.length > MAX_SHOWN_GLOB ? `${Array.from(p).slice(0, MAX_SHOWN_GLOB).join('')}… (${p.length} characters)` : p;
+    if (hit) return { path: shown, why: `can match ${whichClause(broadReason(hit, home))}` };
     // a glob inside /etc or a credential dir (`~/.ssh/auth*`)
     const literal = dirname(p.slice(0, p.search(GLOB_CHARS)) + 'x');
     const inside = literal !== '/' && (literal === '/etc' || literal.startsWith('/etc/')
       || CREDENTIAL_DIRS.some(d => literal === join(home, d) || literal.startsWith(join(home, d) + '/')));
-    return inside ? { path: p, why: `is inside ${whichClause(broadReason(literal, home))}` } : undefined;
+    return inside ? { path: shown, why: `is inside ${whichClause(broadReason(literal, home))}` } : undefined;
   }
   if (p === '/') return { path: p, why: 'is the whole filesystem' };
   if (p === home || home.startsWith(p + '/')) return { path: p, why: 'covers the home directory' };

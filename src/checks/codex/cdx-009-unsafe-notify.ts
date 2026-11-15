@@ -117,11 +117,15 @@ export const cdx009 = defineCheck({
       .find(v => v !== undefined);
     // A project layer that doesn't set it inherits the user config's value
     if (rootFeature === undefined && ctx.installation.profile === 'project') rootFeature = await userHooksFeature(ctx.fs);
-    const profileFeatures = ctx.configs
-      .filter(c => codexProfileName(c.filePath))
-      .map(c => hooksFeature(c.data));
-    // base-layer hooks stay off only if no profile turns the feature back on
-    const baseOff = rootFeature === false && !profileFeatures.includes(true);
+    // base-layer hooks stay off only if no profile turns the feature back on,
+    // and then run only under those profiles
+    const enabling = ctx.configs
+      .filter(c => codexProfileName(c.filePath) && hooksFeature(c.data) === true)
+      .map(c => codexProfileName(c.filePath) as string);
+    const baseOff = rootFeature === false && enabling.length === 0;
+    const onlyUnder = rootFeature === false && enabling.length > 0
+      ? ` — runs only under ${enabling.map(n => `\`codex -p ${n}\``).join(' / ')} (features.hooks = false otherwise)`
+      : '';
     for (const config of ctx.configs) {
       const profileName = codexProfileName(config.filePath);
       const off = profileName ? (hooksFeature(config.data) ?? rootFeature) === false : baseOff;
@@ -133,7 +137,7 @@ export const cdx009 = defineCheck({
         evidence.push({
           file: config.filePath,
           snippet: `${profileName ? `${profileName}.config.toml: ` : ''}${hookSnippet(item.event, (item.url ?? item.scripts[0]).slice(0, 120), item.matcher ? `(${item.matcher})` : '')}`,
-          detail: `Hook command ${risks.map(r => r.reason).join('; ')}${profileName ? ` under \`codex -p ${profileName}\`` : ''}${off ? ' — not run: hooks disabled (features.hooks = false)' : ''}`,
+          detail: `Hook command ${risks.map(r => r.reason).join('; ')}${profileName ? ` under \`codex -p ${profileName}\`` : onlyUnder}${off ? ' — not run: hooks disabled (features.hooks = false)' : ''}`,
           ...(tier === 'info' || off ? { mitigated: true } : {}),
         });
       }
