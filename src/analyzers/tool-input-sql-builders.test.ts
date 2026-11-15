@@ -91,3 +91,20 @@ describe('SQL taint: && guards, pg-format members, identifier escapers in quotes
     expect(queries(code)).toHaveLength(1);
   });
 });
+
+describe('SQL taint: MySQL double-quoted literals, two-name && guards', () => {
+  it.each([
+    ['both names checked in an && guard', 'const ALLOWED = ["id", "name"];\n' + tool('  const col = ALLOWED.includes(o) && ALLOWED.includes(name) ? name : "id";\n  await pool.query(`SELECT * FROM users ORDER BY ${col}`);', '{ name: z.string(), o: z.string() }', '{ name, o }')],
+    ['pg escapeIdentifier inside double quotes', tool('  await pool.query(`SELECT * FROM "${pg.escapeIdentifier(name)}"`);')],
+    ['escapeId with a double quote inside a single-quoted literal', 'import mysql from "mysql2";\n' + tool('  await pool.query(`SELECT \'a"b\' AS x FROM ${mysql.escapeId(name)}`);')],
+  ])('%s is safe', (_label, code) => {
+    expect(queries(code)).toEqual([]);
+  });
+
+  it.each([
+    ['escapeId inside a double-quoted MySQL literal', 'import mysql from "mysql2";\n' + tool('  await pool.query(`SELECT * FROM users WHERE name = "${mysql.escapeId(name)}"`);')],
+    ['only the other name checked in an && guard', 'const ALLOWED = ["id", "name"];\n' + tool('  const col = ALLOWED.includes(o) && name.length > 0 ? name : "id";\n  await pool.query(`SELECT * FROM users ORDER BY ${col}`);', '{ name: z.string(), o: z.string() }', '{ name, o }')],
+  ])('%s stays injection', (_label, code) => {
+    expect(queries(code)).toHaveLength(1);
+  });
+});
