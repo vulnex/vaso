@@ -59,6 +59,40 @@ function jsonSpan(text: string, starts: number[], name: string): [number, number
   return end === undefined ? undefined : [lineOf(starts, hits[0].index!), lineOf(starts, end)];
 }
 
+/** Offsets of the containers (`{` / `[`) open at `offset`, outermost first. */
+function openContainers(text: string, offset: number): number[] {
+  const stack: number[] = [];
+  let inString = false;
+  for (let i = 0; i < offset; i++) {
+    const c = text[i];
+    if (inString) {
+      if (c === '\\') i++;
+      else if (c === '"') inString = false;
+      continue;
+    }
+    if (c === '"') inString = true;
+    else if (c === '{' || c === '[') stack.push(i);
+    else if (c === '}' || c === ']') stack.pop();
+  }
+  return stack;
+}
+
+/**
+ * An array entry `{ "name": "<name>", … }` (Abacus.AI `mcpServers[]`, Atomic
+ * Agent `mcp.servers[]`) — the one object in an array naming it exactly once.
+ */
+function jsonArrayEntrySpan(text: string, starts: number[], name: string): [number, number] | undefined {
+  const re = new RegExp(`"name"\\s*:\\s*"${escapeRegex(JSON.stringify(name).slice(1, -1))}"`, 'g');
+  const hits = [...text.matchAll(re)];
+  if (hits.length !== 1) return undefined;
+  const open = openContainers(text, hits[0].index!);
+  const objectStart = open[open.length - 1];
+  const parent = open[open.length - 2];
+  if (objectStart === undefined || parent === undefined || text[objectStart] !== '{' || text[parent] !== '[') return undefined;
+  const end = jsonValueEnd(text, objectStart);
+  return end === undefined ? undefined : [lineOf(starts, objectStart), lineOf(starts, end)];
+}
+
 /** `name:` as a mapping key (YAML): until the next line indented no deeper. */
 function yamlSpan(lines: string[], name: string): [number, number] | undefined {
   const re = new RegExp(`^(\\s*)(?:"${escapeRegex(name)}"|'${escapeRegex(name)}'|${escapeRegex(name)}):\\s*(?:#.*)?$`);
@@ -112,7 +146,7 @@ export async function recordServerSpans(items: McpServerItem[], fs: FSProvider):
     for (const item of list) {
       const span = kind === 'toml' ? tomlSpan(lines, item.name)
         : kind === 'yaml' ? yamlSpan(lines, item.name)
-          : jsonSpan(text, starts, item.name);
+          : jsonSpan(text, starts, item.name) ?? jsonArrayEntrySpan(text, starts, item.name);
       if (span) spans.set(item, span);
     }
   }
