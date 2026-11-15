@@ -73,6 +73,15 @@ function storeHome(ctx: ScanContext): string {
   return basename(dir) === '.copilot' ? dirname(dir) : ctx.fs.homedir();
 }
 
+/** The snapshot holds an entry under `dir` (the probe followed the link to it). */
+async function snapshotHolds(ctx: ScanContext, dir: string): Promise<boolean> {
+  try {
+    return (await ctx.fs.readdirEntries(dir)).length > 0;
+  } catch {
+    return false;
+  }
+}
+
 /** What a symlink resolves to: a directory, a file (with its real path when known), or nothing (dangling). */
 async function linkTarget(ctx: ScanContext, path: string): Promise<{ kind: 'dir' | 'file'; target?: string } | undefined> {
   let st: Awaited<ReturnType<ScanContext['fs']['stat']>>;
@@ -151,8 +160,10 @@ async function storeFiles(ctx: ScanContext, storeDir: string): Promise<StoreList
     } else if (e.isSymbolicLink) {
       const link = await linkTarget(ctx, path);
       if (link?.kind === 'dir') {
-        // The probe doesn't follow links: a remote scan has the link, not the files behind it
-        if (ctx.fs.kind === 'snapshot') linkedDirs.push(path);
+        // The probe records the files behind a link that stays inside the
+        // home and outside credential stores (probes newer than 1.4.1); for any other, a
+        // remote scan has the link, not the files behind it
+        if (ctx.fs.kind === 'snapshot' && !(await snapshotHolds(ctx, path))) linkedDirs.push(path);
         else await subdirFiles(path);
       } else if (link?.kind === 'file') {
         addLink(path, link.target);

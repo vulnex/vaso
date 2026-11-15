@@ -91,3 +91,33 @@ func TestRefusedConfigTreeRecordsItsLink(t *testing.T) {
 		t.Errorf("link of the refused tree not recorded: %v", snap.Symlinks)
 	}
 }
+
+// A metadata glob's matches behind a linked folder (Copilot's
+// session-state/<id> → ~/sess) are recorded, metadata only, when the link
+// stays inside the home and outside credential stores; never otherwise.
+func TestLinkedFoldersOfMetadataGlobsAreFollowedInsideTheHome(t *testing.T) {
+	home := setupHome(t)
+	write(t, filepath.Join(home, "sess", "events.jsonl"), "SESSION-CANARY\n", 0o644)
+	write(t, filepath.Join(home, ".ssh", "id_canary"), "SSH-CANARY\n", 0o600)
+	outside := filepath.Join(filepath.Dir(home), "elsewhere")
+	write(t, filepath.Join(outside, "events.jsonl"), "OUTSIDE-CANARY\n", 0o644)
+	state := filepath.Join(home, ".copilot", "session-state")
+	mustSymlink(t, filepath.Join(home, "sess"), filepath.Join(state, "in"))
+	mustSymlink(t, filepath.Join(home, ".ssh"), filepath.Join(state, "ssh"))
+	mustSymlink(t, outside, filepath.Join(state, "out"))
+	snap := Collect(ProbeManifest{MetadataGlobPatterns: []string{"~/.copilot/session-state/*", "~/.copilot/session-state/*/*"}}, false)
+	e, ok := snap.Files[filepath.Join(state, "in", "events.jsonl")]
+	if !ok || !e.Exists || e.Mode != 0o644 || e.Content != "" {
+		t.Errorf("file behind an in-home link: %+v (recorded %v), want metadata", e, ok)
+	}
+	for _, p := range []string{filepath.Join(state, "ssh", "id_canary"), filepath.Join(state, "out", "events.jsonl")} {
+		if _, ok := snap.Files[p]; ok {
+			t.Errorf("%s recorded behind a link out of the home or into a store", p)
+		}
+	}
+	for p, e := range snap.Files {
+		if strings.Contains(e.Content, "CANARY") {
+			t.Errorf("content shipped: %s", p)
+		}
+	}
+}

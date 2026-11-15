@@ -666,7 +666,7 @@ describe.skipIf(process.platform === 'win32')('GHC-001 store files', () => {
     });
   });
 
-  it('a remote scan says a linked session folder\'s files are not verified (the probe does not follow links)', async () => {
+  it('a remote scan says a linked session folder\'s files are not verified when the probe did not follow the link', async () => {
     const fs = makeFs({
       kind: 'snapshot',
       access: vi.fn(async (p: string) => p === '/home/test/.copilot' || p.endsWith('session-state')),
@@ -677,6 +677,23 @@ describe.skipIf(process.platform === 'win32')('GHC-001 store files', () => {
     const r = await check.run(makeCtx([], fs));
     expect(r.passed).toBe(true);
     expect(r.message).toMatch(/files behind 1 linked folder\(s\) in session-state\/ \(abc\) not verified/);
+  });
+
+  it('a remote scan judges the files behind a linked session folder the probe followed, as a local scan does', async () => {
+    const open = { octal: '644', ownerRead: true, ownerWrite: true, ownerExec: false, groupRead: true, groupWrite: false, groupExec: false, otherRead: true, otherWrite: false, otherExec: false, description: 'mode 644' };
+    const closed = { ...open, octal: '700', ownerExec: true, groupRead: false, otherRead: false, description: 'mode 700' };
+    const fs = makeFs({
+      kind: 'snapshot',
+      access: vi.fn(async (p: string) => p === '/home/test/.copilot' || p.endsWith('session-state')),
+      stat: vi.fn(async (p: string) => ({ mode: p.endsWith('.jsonl') ? 0o644 : 0o700, isFile: () => p.endsWith('.jsonl'), isDirectory: () => !p.endsWith('.jsonl') })),
+      permissions: vi.fn(async (p: string) => (p.endsWith('.jsonl') ? open : closed)),
+      readdirEntries: vi.fn(async (d: string) => (d.endsWith('session-state') ? [{ name: 'abc', isFile: false, isDirectory: false, isSymbolicLink: true }]
+        : d.endsWith('abc') ? [{ name: 'events.jsonl', isFile: true, isDirectory: false }] : [])),
+    } as unknown as Partial<FSProvider>);
+    const r = await check.run(makeCtx([], fs));
+    expect(r.passed).toBe(false);
+    expect(r.evidence?.map(e => e.file)).toEqual(['/home/test/.copilot/session-state/abc/events.jsonl']);
+    expect(r.message).not.toMatch(/linked folder/);
   });
 
   it('a remote scan without a store file\'s metadata says "not verified" instead of passing silently', async () => {

@@ -1,0 +1,16 @@
+{
+  "agent": "copilot-cli",
+  "source": "dt23 round 4: ~/.copilot/session-state/abc is a link to ~/sessions/abc, whose transcript is readable by group/other \u2014 the remote probe records the metadata of the files behind a linked folder inside the home, so the remote scan judges them like a local one",
+  "reachable": true,
+  "modes": {
+    ".copilot": "700",
+    ".copilot/config.json": "600",
+    ".copilot/session-state": "700",
+    "sessions": "755",
+    "sessions/abc": "755",
+    "sessions/abc/events.jsonl": "644"
+  },
+  "fail": {
+    "GHC-001": "critical"
+  }
+}

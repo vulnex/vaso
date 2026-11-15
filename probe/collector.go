@@ -334,6 +334,7 @@ func Collect(manifest ProbeManifest, escalate bool) ProbeSnapshot {
 			}
 		}
 		c.followLinkedTrees(&snapshot, pattern, matches, true)
+		c.followLinkedMetadata(&snapshot, pattern)
 	}
 
 	// Trees and paths agents' configs set (a workspace moved elsewhere, an

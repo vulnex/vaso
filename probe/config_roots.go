@@ -456,6 +456,35 @@ func (c *collector) collectLinkedSkillBases(snapshot *ProbeSnapshot, pattern str
 	}
 }
 
+// followLinkedMetadata records, for a metadata glob with wildcard
+// directories (`~/.copilot/session-state/*/*`), the matches its no-follow
+// glob couldn't reach because a matched directory is a link
+// (session-state/<id> → ~/sess): metadata only, under the linked path, and
+// only where the link stays inside the home and outside credential stores
+// (treeAllowed) — as a local scan judges the files it finds behind it.
+func (c *collector) followLinkedMetadata(snapshot *ProbeSnapshot, pattern string) {
+	slash := filepath.ToSlash(pattern)
+	static, rest := doublestar.SplitPattern(slash)
+	if rest == "" || strings.Contains(rest, "**") || !strings.Contains(rest, "/") {
+		return
+	}
+	staticDir := filepath.FromSlash(static)
+	for _, m := range expandFollowingDirLinks(pattern) {
+		if !throughLink(staticDir, m) || inExcludedDir(pattern, m) {
+			continue
+		}
+		if _, done := snapshot.Files[m]; done {
+			continue
+		}
+		home := c.homeOf(m)
+		if home == "" || !treeAllowed(m, home) {
+			continue
+		}
+		recordSymlink(snapshot.Symlinks, m)
+		c.collectPath(snapshot, m, globBase(pattern), true, false)
+	}
+}
+
 // homeOf is the scanned home (or the probe user's) p lies strictly inside,
 // as written, else once both are resolved (a linked home spelled the other
 // way); "" when none — a tree there is refused.
