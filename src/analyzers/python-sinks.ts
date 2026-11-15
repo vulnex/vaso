@@ -112,7 +112,9 @@ const PATH_JOIN_INPUT = /\bos\.path\.join\(\s*[^,()]+,\s*([A-Za-z_][\w.]*)\s*\)/
 const INPUT_PATH_NAME = /(?:path|file|name|dir|rel|target|dest|input|arg|param)/i;
 /** pathlib joins: `Path(base) / <name>`, `ROOT / <name>` (ROOT a Path), and `Path(base, <name>)`. */
 const PATHLIB_DIV = /(?:(?<![\w.])(?:pathlib\.)?(?:Pure)?Path\([^()]*\)|(?<![\w.])([A-Za-z_][\w.]*))\s*\/\s*([A-Za-z_][\w.]*)(?![\w.]*\s*\()/g;
-const PATHLIB_CTOR = /(?<![\w.])(?:pathlib\.)?(?:Pure)?Path\(\s*[^,()]+,\s*([A-Za-z_][\w.]*)\s*\)/;
+/** `ROOT.joinpath(<name>)`, `Path(base).joinpath("a", <name>)`: the last argument is the caller's part. */
+const PATHLIB_JOINPATH = /(?:(?<![\w.])(?:pathlib\.)?(?:Pure)?Path\([^()]*\)|(?<![\w.])([A-Za-z_][\w.]*))\.joinpath\(([^()]*)\)/g;
+const PATHLIB_CTOR =/(?<![\w.])(?:pathlib\.)?(?:Pure)?Path\(\s*[^,()]+,\s*([A-Za-z_][\w.]*)\s*\)/;
 /** Names bound to a Path: `ROOT = Path("/srv")`, `self.base = pathlib.Path.home() / "x"`. */
 const PATH_BINDING = /(?<![\w.])((?:self\.)?[A-Za-z_]\w*)\s*(?::[^=\n]+)?=\s*(?:pathlib\.)?(?:Pure)?Path\b/g;
 
@@ -121,6 +123,11 @@ function pathlibJoin(text: string, pathNames: Set<string>): string | undefined {
   const code = blankStrings(text);
   for (const m of code.matchAll(PATHLIB_DIV)) {
     if (m[1] === undefined || pathNames.has(m[1])) return m[2];
+  }
+  for (const m of code.matchAll(PATHLIB_JOINPATH)) {
+    if (m[1] !== undefined && !pathNames.has(m[1])) continue;
+    const last = /([A-Za-z_][\w.]*)\s*$/.exec(m[2].split(',').pop() ?? '')?.[1];
+    if (last) return last;
   }
   return PATHLIB_CTOR.exec(code)?.[1];
 }
@@ -289,26 +296,34 @@ function isFixedCode(expr: string, constants: Set<string>): boolean {
  * `subprocess.check_output(`, `__import__("os").system(` → `os.system(`.
  */
 function aliasRewriter(code: string): (text: string) => string {
-  const rewrites: Array<[RegExp, string]> = [];
+  // One map per rewrite shape, applied in a single pass per text (a regex
+  // per alias over every line was O(aliases × lines)); the first binding of
+  // a name wins, as when each rewrite ran in turn.
+  const moduleAliases = new Map<string, string>(); // `sp.` → `subprocess.`
+  const callAliases = new Map<string, { target: string; extra?: string }>(); // `run(` → `subprocess.run(`
+  const shellKwargs = new Set<string>(); // `**OPTS` → `shell=True, **OPTS`
+  const addModule = (name: string, to: string): void => { if (!moduleAliases.has(name)) moduleAliases.set(name, to); };
+  const addCall = (name: string, target: string, extra?: string): void => {
+    if (!callAliases.has(name)) callAliases.set(name, extra ? { target, extra } : { target });
+  };
   for (const m of code.matchAll(/^[ \t]*import[ \t]+([^\n#]+)/gm)) {
     for (const part of m[1].split(',')) {
       const am = /^\s*([\w.]+)\s+as\s+(\w+)\s*$/.exec(part);
-      if (am && SINK_MODULES.has(am[1]) && am[2] !== am[1]) {
-        rewrites.push([new RegExp(String.raw`(?<![\w.])${am[2]}\.`, 'g'), `${am[1]}.`]);
-      }
+      if (am && SINK_MODULES.has(am[1]) && am[2] !== am[1]) addModule(am[2], `${am[1]}.`);
     }
   }
   for (const m of code.matchAll(/^[ \t]*from[ \t]+(os|subprocess|asyncio|pty)[ \t]+import[ \t]+\(?([^\n#)]+)/gm)) {
     for (const part of m[2].split(',')) {
       const im = /^\s*(\w+)(?:\s+as\s+(\w+))?\s*$/.exec(part);
       if (!im) continue;
-      const local = im[2] ?? im[1];
-      rewrites.push([new RegExp(String.raw`(?<![\w.])${local}\s*\(`, 'g'), `${m[1]}.${im[1]}(`]);
+      addCall(im[2] ?? im[1], `${m[1]}.${im[1]}`);
     }
   }
   // Names bound by assignment at any indent: a module (`sp = importlib.import_module("subprocess")`),
   // a sink function (`runner = subprocess.run`, `run = getattr(subprocess, "r" + "un")`,
-  // `_ev = getattr(builtins, "eval")`), keyword options that turn the shell on (`OPTS = {"shell": True}`)
+  // `_ev = getattr(builtins, "eval")`, `b = a` with `a` one, `b = a = os.system`,
+  // `functools.partial(subprocess.run, shell=True)`), keyword options that turn
+  // the shell on (`OPTS = {"shell": True}`)
   const modules = new Map<string, string>([...SINK_MODULES, 'builtins'].map((m) => [m, m]));
   for (const m of code.matchAll(/^[ \t]*import[ \t]+([^\n#]+)/gm)) {
     for (const part of m[1].split(',')) {
@@ -316,21 +331,74 @@ function aliasRewriter(code: string): (text: string) => string {
       if (am && (SINK_MODULES.has(am[1]) || am[1] === 'builtins')) modules.set(am[2], am[1]);
     }
   }
-  const assigned = [...code.matchAll(/^[ \t]*([A-Za-z_]\w*)[ \t]*(?::[^=\n]+)?=[ \t]*([^\n#]{1,300}?)[ \t]*$/gm)];
-  for (const [, name, expr] of assigned) {
+  const assigned: Array<[string, string]> = [];
+  const CHAIN = /^([A-Za-z_]\w*)[ \t]*=(?!=)[ \t]*(\S.*)$/;
+  for (const [, name, rhs] of code.matchAll(/^[ \t]*([A-Za-z_]\w*)[ \t]*(?::[^=\n]+)?=[ \t]*([^\n#]{1,300}?)[ \t]*$/gm)) {
+    // `b = a = os.system`: every target binds the last expression
+    let expr = rhs;
+    const names = [name];
+    for (let chain = CHAIN.exec(expr); chain && names.length < 8; chain = CHAIN.exec(expr)) {
+      names.push(chain[1]);
+      expr = chain[2];
+    }
+    for (const n of names) assigned.push([n, expr]);
+  }
+  for (const [name, expr] of assigned) {
     const mod = /^(?:importlib\.import_module|__import__)\(\s*["'](\w+)["']\s*\)$/.exec(expr)?.[1];
     if (mod && (SINK_MODULES.has(mod) || mod === 'builtins') && name !== mod) {
       modules.set(name, mod);
-      rewrites.push([new RegExp(String.raw`(?<![\w.])${name}\.`, 'g'), mod === 'builtins' ? '' : `${mod}.`]);
+      addModule(name, mod === 'builtins' ? '' : `${mod}.`);
     }
   }
-  for (const [, name, expr] of assigned) {
-    const target = sinkReference(expr, modules);
-    if (target && target !== name) rewrites.push([new RegExp(String.raw`(?<![\w.])${name}\s*\(`, 'g'), `${target}(`]);
-    if (/^(?:\{.*["']shell["']\s*:\s*True\b.*\}|dict\(.*\bshell\s*=\s*True\b.*\))$/.test(expr)) {
-      rewrites.push([new RegExp(String.raw`\*\*${name}\b`, 'g'), `shell=True, **${name}`]);
+  const plainAliases: Array<[string, string]> = [];
+  for (const [name, expr] of assigned) {
+    const partial = /^(?:functools\.)?partial\(\s*([A-Za-z_][\w.]*)\s*,(.*)\)$/.exec(expr);
+    const target = sinkReference(partial ? partial[1] : expr, modules);
+    if (target && target !== name) {
+      addCall(name, target, partial && /\bshell\s*=\s*True\b/.test(partial[2]) ? 'shell=True' : undefined);
+    } else if (/^[A-Za-z_]\w*$/.test(expr) && expr !== name) {
+      plainAliases.push([name, expr]);
+    }
+    if (/^(?:\{.*["']shell["']\s*:\s*True\b.*\}|dict\(.*\bshell\s*=\s*True\b.*\))$/.test(expr)) shellKwargs.add(name);
+  }
+  // `b = a` where `a` is a sink alias (or a from-imported sink), a few hops
+  for (let hop = 0, changed = true; changed && hop < 4; hop++) {
+    changed = false;
+    for (const [name, from] of plainAliases) {
+      const to = callAliases.get(from);
+      if (to && !callAliases.has(name)) { callAliases.set(name, to); changed = true; }
     }
   }
+  const identifier = /(?<![\w.])([A-Za-z_]\w*)(\s*\(|\.)/g;
+  const rewriteAliases = (text: string): string => {
+    // edits as [start, end, replacement]; an insertion has start === end
+    const edits: Array<[number, number, string]> = [];
+    for (const m of text.matchAll(identifier)) {
+      const [whole, name, after] = m;
+      const at = m.index ?? 0;
+      if (after === '.') {
+        const to = moduleAliases.get(name);
+        if (to !== undefined) edits.push([at, at + whole.length, to]);
+        continue;
+      }
+      const call = callAliases.get(name);
+      if (!call) continue;
+      edits.push([at, at + whole.length, `${call.target}(`]);
+      // keyword arguments the alias was bound with go in before its call's `)`
+      const close = call.extra ? closingParen(text, at + whole.length) : -1;
+      if (close >= 0) edits.push([close, close, `, ${call.extra}`]);
+    }
+    if (edits.length === 0) return text;
+    edits.sort((x, y) => x[0] - y[0] || x[1] - y[1]);
+    let out = '';
+    let last = 0;
+    for (const [start, end, to] of edits) {
+      if (start < last) continue;
+      out += text.slice(last, start) + to;
+      last = end;
+    }
+    return out + text.slice(last);
+  };
   return (text: string): string => {
     let out = text.replace(/\b__import__\(\s*["'](\w+)["']\s*\)\s*\./g, '$1.');
     // getattr(os, "sys" + "tem")(cmd): a sink name assembled to dodge a grep.
@@ -343,9 +411,35 @@ function aliasRewriter(code: string): (text: string) => string {
       return mod === 'builtins' ? `${literal}(` : `${mod}.${literal}(`;
     });
     out = out.replace(/(?<![\w.])builtins\.(\w+)\s*\(/g, '$1(');
-    for (const [re, to] of rewrites) out = out.replace(re, to);
+    if (moduleAliases.size > 0 || callAliases.size > 0) out = rewriteAliases(out);
+    if (shellKwargs.size > 0) out = out.replace(/\*\*([A-Za-z_]\w*)\b/g, (m, name: string) => (shellKwargs.has(name) ? `shell=True, ${m}` : m));
     return out;
   };
+}
+
+/** Furthest a call's closing `)` is looked for. */
+const MAX_CALL_SCAN = 4000;
+
+/** The index of the `)` closing a call whose arguments start at `from`, or -1. */
+function closingParen(text: string, from: number): number {
+  let depth = 0;
+  let quote = '';
+  const end = Math.min(text.length, from + MAX_CALL_SCAN);
+  for (let i = from; i < end; i++) {
+    const c = text[i];
+    if (quote) {
+      if (c === '\\') i++;
+      else if (c === quote) quote = '';
+      continue;
+    }
+    if (c === '"' || c === "'") quote = c;
+    else if (c === '(' || c === '[' || c === '{') depth++;
+    else if (c === ')' || c === ']' || c === '}') {
+      if (depth === 0) return c === ')' ? i : -1;
+      depth--;
+    }
+  }
+  return -1;
 }
 
 /** Builtins that run code. */
