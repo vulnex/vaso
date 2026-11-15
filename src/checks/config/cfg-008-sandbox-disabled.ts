@@ -34,7 +34,7 @@ export const cfg008 = defineCheck({
           // A boolean switch can be flipped in place; a string mode's enabled
           // value differs per framework, so that is left to the user
           fixable: sandbox === false,
-          fixDescription: `Enable sandbox mode (${key})`,
+          fixDescription: `Enable sandbox mode (${key}), then give the sandbox at least two constraints (exec, filesystem, network) — POL-004 reports an enabled sandbox without them`,
         });
       }
     }
@@ -60,7 +60,7 @@ export const cfg008 = defineCheck({
     for (const config of ctx.configs) {
       const key = sandboxKey(config.data);
       if (key && getNestedValue(config.data, key) === false) {
-        return fixFirstConfig([config], { checkId: 'CFG-008', path: key, value: true, message: `Set ${key} to true` });
+        return fixFirstConfig([config], { checkId: 'CFG-008', path: key, value: true, message: `Set ${key} to true — add sandbox constraints by hand (POL-004 checks them)` });
       }
     }
     return { checkId: 'CFG-008', applied: false, message: 'No boolean sandbox switch is turned off' };
