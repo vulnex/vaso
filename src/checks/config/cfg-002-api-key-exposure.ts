@@ -2,6 +2,7 @@ import { basename } from 'node:path';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { API_KEY_PATTERNS, redactSecretsInLine, isPlaceholderSecret } from '../../core/patterns.js';
+import { hookCommandSecrets, hookItems } from '../../analyzers/hook-commands.js';
 
 /** Framework-designated secret files (PicoClaw keeps model/channel keys in
  *  `.security.yml`, written 0600, instead of config.json). */
@@ -35,6 +36,23 @@ export const cfg002 = defineCheck({
             });
           }
         }
+      }
+
+      // Passwords in hook commands that no token format covers
+      // (`--password <pw>`, `https://user:<pw>@host`, `Authorization: Basic …`,
+      // `mysql -p<pw>`, `sshpass -p <pw>`)
+      const scripts = hookItems(config.data.hooks).flatMap(item => item.scripts);
+      const seen = new Set<string>();
+      for (const secret of scripts.flatMap(hookCommandSecrets)) {
+        if (seen.has(secret.value) || API_KEY_PATTERNS.some(({ pattern }) => pattern.test(secret.value))) continue;
+        seen.add(secret.value);
+        const at = lines.findIndex(l => l.includes(secret.value));
+        evidence.push({
+          file: config.filePath,
+          ...(at >= 0 ? { line: at + 1 } : {}),
+          snippet: redactSecretsInLine(at >= 0 ? lines[at].split(secret.value).join('***') : secret.masked),
+          detail: `Found ${secret.kind} in a hook command`,
+        });
       }
     }
 

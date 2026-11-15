@@ -9,6 +9,7 @@ import { parseServerMap } from './discovery.js';
 import { claudeConfigPaths, claudeManagedMcpPath, claudeManagedSettingsPaths } from '../adapters/claude-code.js';
 import { geminiHome } from '../adapters/gemini.js';
 import { qwenHome } from '../adapters/qwen-code.js';
+import { wildcardMatch } from '../analyzers/wildcard.js';
 
 /**
  * Servers an agent's settings switch off by name or policy rather than with a
@@ -140,8 +141,9 @@ function policyEntries(v: unknown): PolicyEntry[] {
 /** Default port of a URL scheme, as Claude Code applies it to a pattern written without a port. */
 const DEFAULT_PORTS: Record<string, string> = { http: '80', https: '443', ws: '80', wss: '443' };
 
-function globRe(pattern: string, flags = ''): RegExp {
-  return new RegExp(`^${pattern.split('*').map(p => p.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('.*')}$`, flags);
+/** `*` glob over one URL part, case-insensitive for scheme and host (no RegExp: patterns come from config). */
+function glob(pattern: string, text: string, ignoreCase = false): boolean {
+  return wildcardMatch(pattern, text, { ignoreCase });
 }
 
 const bareHost = (h: string) => h.toLowerCase().replace(/\.$/, '');
@@ -166,24 +168,24 @@ export function urlMatches(pattern: string, url: string): boolean {
   }
   const [, patScheme, authority, patPath] = p;
   const scheme = server.protocol.replace(/:$/, '').toLowerCase();
-  if (!globRe(patScheme, 'i').test(scheme)) return false;
+  if (!glob(patScheme, scheme, true)) return false;
 
   const hostPort = authority.slice(authority.lastIndexOf('@') + 1);
   const m = /^(\[[^\]]*\]|[^:]*)(?::([^:]*))?$/.exec(hostPort);
   if (!m) return false;
   const [, patHost, patPort] = m;
-  if (!globRe(bareHost(patHost), 'i').test(bareHost(server.hostname))) return false;
+  if (!glob(bareHost(patHost), bareHost(server.hostname), true)) return false;
 
   const defaultPort = DEFAULT_PORTS[scheme] ?? '';
   const port = server.port || defaultPort;
   if (patPort !== undefined) {
-    if (!globRe(patPort).test(port)) return false;
+    if (!glob(patPort, port)) return false;
   } else if (!patHost.includes('*') && port !== defaultPort) {
     return false;
   }
 
   if (patPath === undefined) return true;
-  return globRe(patPath, 's').test(server.pathname + server.search);
+  return glob(patPath, server.pathname + server.search);
 }
 
 /**
@@ -311,8 +313,7 @@ async function geminiOff(fs: FSProvider, home: string, projectDir?: string): Pro
 }
 
 function globMatch(pattern: string, name: string): boolean {
-  const re = new RegExp(`^${pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.')}$`);
-  return re.test(name);
+  return wildcardMatch(pattern, name, { question: true });
 }
 
 async function qwenOff(fs: FSProvider, home: string, projectDir?: string): Promise<OffRule | undefined> {

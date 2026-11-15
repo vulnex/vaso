@@ -98,4 +98,81 @@ describe('maskConfigValue / credentialValuesIn', () => {
     // whole words only
     expect(mask('x84736251y 84736251')).toBe('x84736251y ***');
   });
+
+  it('collects the words of a folded or plain multi-line scalar', () => {
+    const values = credentialValuesIn({ api_key: 'FoldedPartOne11 FoldedPartTwo22', token: 'PlainMultiAaa44 PlainMultiBbb55' });
+    const mask = knownValueMasker(values);
+    expect(mask('    FoldedPartTwo22')).toBe('    ***');
+    expect(mask('  PlainMultiAaa44')).toBe('  ***');
+  });
+
+  it('masks a value spelled with character escapes', () => {
+    const mask = knownValueMasker(credentialValuesIn({ apiKeys: ['HunterTwoEsc99'], password: 'EscapedPw33' }));
+    expect(mask('    "\\u0048unterTwoEsc99"')).toBe('    "***"');
+    expect(mask('    "Hunter\\u0054woEsc99", "x"')).toBe('    "***", "x"');
+    expect(mask('password: "Esc\\x61pedPw33" # note')).toBe('password: "***" # note');
+    // an escape that isn't part of a value stays
+    expect(mask('"\\u0041bc" HunterTwoEsc99x')).toBe('"\\u0041bc" HunterTwoEsc99x');
+  });
+});
+
+describe('rule evidence on lines continuing a credential value', () => {
+  const run = async (id: string, regex: string, target: 'configs' | 'skills', configs: ParsedConfig[], skillFiles: string[] = []) =>
+    compileRule(rule(id, { pattern: { regex, target, message: 'hit {{match}} in {{snippet}}' } })).run({
+      installation: { agent: 'hermes', installDir: '/h', configFiles: configs },
+      configs, platform: 'darwin', fs: new LocalFSProvider(), skillFiles,
+    });
+
+  it('YAML folded and plain multi-line scalars, JSON escapes, TOML arrays and strings', async () => {
+    const yaml: ParsedConfig = {
+      raw: 'model:\n  provider: openrouter\n  api_key: >-\n    FoldedPartOne11\n    FoldedPartTwo22\ntoken:\n  PlainMultiAaa44\n  PlainMultiBbb55\n',
+      format: 'yaml', filePath: '/h/config.yaml',
+      data: { model: { provider: 'openrouter', api_key: 'FoldedPartOne11 FoldedPartTwo22' }, token: 'PlainMultiAaa44 PlainMultiBbb55' },
+    };
+    const json: ParsedConfig = {
+      raw: '{\n  "apiKeys": [\n    "\\u0048unterTwoEsc99"\n  ]\n}\n', format: 'json', filePath: '/h/settings.json', data: { apiKeys: ['HunterTwoEsc99'] },
+    };
+    const r = await run('ORG-M1', 'Folded|PlainMulti|unterTwo|openrouter', 'configs', [yaml, json]);
+    const text = JSON.stringify(r.evidence);
+    for (const s of ['FoldedPart', 'PlainMulti', 'unterTwoEsc99']) expect(text).not.toContain(s);
+    expect(text).toContain('openrouter');
+  });
+
+  it('skill files: values below `NAME = [` / `name = (` / `"password":`', async () => {
+    const { mkdtemp, writeFile, rm } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const dir = await mkdtemp(join(tmpdir(), 'vaso-rule-skill-'));
+    try {
+      const py = join(dir, 'run.py');
+      await writeFile(py, 'API_KEYS = [\n    "SkillPySecret99",\n]\npassword = (\n    "SkillPyPw42"\n)\nname = "SkillName"\n');
+      const js = join(dir, 'config.json');
+      await writeFile(js, '{\n  "apiKeys": [\n    "SkillArraySecret77"\n  ],\n  "password":\n    "SkillPwNextLine88",\n  "label": "SkillLabel"\n}\n');
+      const r = await run('ORG-M2', 'Skill', 'skills', [], [py, js]);
+      const text = JSON.stringify(r.evidence);
+      for (const s of ['SkillPySecret99', 'SkillPyPw42', 'SkillArraySecret77', 'SkillPwNextLine88']) expect(text).not.toContain(s);
+      expect(text).toContain('SkillName');
+      expect(text).toContain('SkillLabel');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('config rule details keep their brackets', () => {
+  it('an object or a list under a credential name', async () => {
+    const cfg: ParsedConfig = { raw: '', format: 'toml', filePath: '/h/c.toml', data: { credentials: { primary: { value: 'NestedCredQq77' } }, bearer_tokens: ['TomlArrSecret99'] } };
+    const c = { installation: { agent: 'codex' as const, installDir: '/h', configFiles: [cfg] }, configs: [cfg], platform: 'darwin' as const, fs: new LocalFSProvider() };
+    const creds = await compileRule(rule('ORG-N1', { config: { path: 'credentials', operator: 'exists' } })).run(c);
+    const tokens = await compileRule(rule('ORG-N2', { config: { path: 'bearer_tokens', operator: 'exists' } })).run(c);
+    const scan = {
+      timestamp: 't', totalScore: 0, totalGrade: 'F', fleetAverage: 0,
+      summary: { critical: 2, warning: 0, info: 0, passed: 0, total: 2 },
+      agents: [{ agent: 'codex', score: 0, grade: 'F', installation: { agent: 'codex', installDir: '/h', configFiles: [] }, results: [creds, tokens] }],
+    };
+    const out = getReporter('json').render(scan as never);
+    expect(out).toContain('credentials = {\\"primary\\":{\\"value\\":\\"***\\"}}');
+    expect(out).toContain('bearer_tokens = [\\"***\\"]');
+    expect(out).not.toMatch(/NestedCredQq77|TomlArrSecret99/);
+  });
 });

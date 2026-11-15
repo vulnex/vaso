@@ -490,6 +490,10 @@ describe('Cursor sandbox.json / permissions.json (cursor.com/docs/reference/sand
     const cidr = await byId('CUR-008').run(makeCtx([sandbox({ networkPolicy: { default: 'deny', allow: ['registry.npmjs.org', '0.0.0.0/0'] } })]));
     expect(cidr.evidence?.map(e => e.snippet)).toEqual(['networkPolicy.allow contains "0.0.0.0/0"']);
     expect((await byId('CUR-008').run(makeCtx([sandbox({ networkPolicy: { allow: ['::/0'] } })]))).passed).toBe(false);
+    // wildcards only, no domain named
+    const stars = await byId('CUR-008').run(makeCtx([sandbox({ networkPolicy: { default: 'deny', allow: ['*.*'] } })]));
+    expect(stars.passed).toBe(false);
+    expect(stars.evidence?.[0].detail).toMatch(/names no domain/);
     expect((await byId('CUR-008').run(makeCtx([sandbox({ type: 'workspace_readwrite' })]))).passed).toBe(true);
   });
 

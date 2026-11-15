@@ -4,6 +4,13 @@ import { defineCheck } from '../../core/check-builder.js';
 
 const UNRESTRICTED_VALUES = new Set(['unrestricted', 'allowed', 'all', 'true']);
 
+/** An allow entry that opens every host: `*`, an entry of wildcards and
+ *  dots only (`*.*`, `*.*.*` — no domain named), or an all-addresses CIDR. */
+function anyHost(entry: string): boolean {
+  if (entry === '0.0.0.0/0' || entry === '::/0') return true;
+  return entry.includes('*') && /^[*.]+$/.test(entry);
+}
+
 export const cur008 = defineCheck({
   id: 'CUR-008',
   name: 'Cursor Sandbox Network Unrestricted',
@@ -30,12 +37,12 @@ export const cur008 = defineCheck({
           });
         } else {
           const open = (Array.isArray(policy.allow) ? policy.allow : [])
-            .find((a): a is string => typeof a === 'string' && /^\s*(?:\*|0\.0\.0\.0\/0|::\/0)\s*$/.test(a));
+            .find((a): a is string => typeof a === 'string' && anyHost(a.trim()));
           if (open) {
             evidence.push({
               file: config.filePath,
               snippet: `networkPolicy.allow contains "${open.trim()}"`,
-              detail: `A "${open.trim()}" allow entry lets sandboxed commands reach any host`,
+              detail: `A "${open.trim()}" allow entry ${/^[*.]+$/.test(open.trim()) && open.trim() !== '*' ? 'names no domain (wildcards only) and ' : ''}lets sandboxed commands reach any host`,
             });
           }
         }

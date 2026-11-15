@@ -300,6 +300,37 @@ ${extra}`;
       expect(result.trustWarning).toMatch(/not owned by you/);
     });
 
+    it('a symlink to a file in a directory others can write (not sticky) is ignored', async () => {
+      const open = join(TEST_DIR, 'wdir');
+      const result = await trustedBy(async (list) => {
+        await mkdir(open);
+        const target = join(open, 'tp');
+        await writeFile(target, `${project}\n`);
+        await chmod(target, 0o600);
+        await chmod(open, 0o777);
+        await rm(list);
+        await symlink(target, list);
+      });
+      await chmod(open, 0o755);
+      expect(result.allRules).toEqual([]);
+      expect(result.trustWarning).toMatch(/links to .*wdir\/tp, in a directory group or others can write/);
+    });
+
+    it('a sticky target directory is enough (others can\'t replace the user\'s file there)', async () => {
+      const open = join(TEST_DIR, 'sdir');
+      const result = await trustedBy(async (list) => {
+        await mkdir(open);
+        const target = join(open, 'tp');
+        await writeFile(target, `${project}\n`);
+        await chmod(target, 0o600);
+        await chmod(open, 0o1777);
+        await rm(list);
+        await symlink(target, list);
+      });
+      await chmod(open, 0o755);
+      expect(result.allRules.map(r => r.id)).toEqual(['ORG-1']);
+    });
+
     it('a symlink to a private file of the user is honoured', async () => {
       const result = await trustedBy(async (list) => {
         const target = join(TEST_DIR, 'tp-target');
@@ -340,7 +371,7 @@ ${extra}`;
     await writeFile(join(project, '.vaso', 'rules', 'a.yaml'), RULE('ORG-1'));
     const list = join(home, '.vaso', 'trusted-projects');
     await writeFile(list, `${project}\n`);
-    await chmod(list, 0o620);
+    await chmod(list, 0o602);
     const result = await loadRules({ fs });
     expect(result.allRules).toEqual([]);
     expect(result.untrustedProject).toHaveLength(1);
@@ -365,6 +396,49 @@ ${extra}`;
     expect(result.allRules[0]).toMatchObject({ id: 'ORG-777', source: 'project' });
     expect(result.allRules[0].fix).toBeUndefined();
     expect(result.warnings[0].message).toContain('can\'t carry fixes');
+  });
+
+  it('run from the home, ~/.vaso/rules loads once, as user rules (not also as an untrusted project)', async () => {
+    await writeFile(join(home, '.vaso', 'rules', 'u.yaml'), RULE('ORG-1', FIX));
+    vi.spyOn(process, 'cwd').mockReturnValue(home);
+    const result = await loadRules({ fs, parseUntrusted: true });
+    expect(result.allRules.map(r => [r.id, r.source, r.fix?.set])).toEqual([['ORG-1', 'user', 'permissions.defaultMode']]);
+    expect(result.untrustedProject).toEqual([]);
+    expect(result.warnings).toEqual([]);
+    const withFlag = await loadRules({ fs, projectRules: true });
+    expect(withFlag.warnings).toEqual([]);
+  });
+
+  describe.skipIf(process.platform === 'win32')('user rules others could have written are not loaded', () => {
+    it('a group/other-writable ~/.vaso/rules or ~/.vaso', async () => {
+      await writeFile(join(home, '.vaso', 'rules', 'u.yaml'), RULE('ORG-1', FIX));
+      for (const dir of [join(home, '.vaso', 'rules'), join(home, '.vaso')]) {
+        await chmod(dir, 0o777);
+        const result = await loadRules({ fs });
+        await chmod(dir, 0o755);
+        expect(result.allRules).toEqual([]);
+        expect(result.allErrors[0].message).toMatch(/is writable by group or others — the rules in .* are not loaded/);
+      }
+      expect((await loadRules({ fs })).allRules.map(r => r.id)).toEqual(['ORG-1']);
+    });
+
+    it('a group/other-writable rule file, unless the group is the owner\'s private group', async () => {
+      const file = join(home, '.vaso', 'rules', 'u.yaml');
+      await writeFile(file, RULE('ORG-1', FIX));
+      await chmod(file, 0o666);
+      const result = await loadRules({ fs });
+      expect(result.allRules).toEqual([]);
+      expect(result.allErrors).toEqual([expect.objectContaining({ file, message: expect.stringMatching(/writable by group or others — not loaded/) })]);
+      // umask 002 distributions: 0664 in the user's own group reaches nobody else
+      await chmod(file, 0o664);
+      const { stat: st } = await import('node:fs/promises');
+      const s = await st(file);
+      const upg = new (class extends LocalFSProvider {
+        homedir() { return home; }
+        async privateGroups() { return new Map([[s.gid, s.uid]]); }
+      })();
+      expect((await loadRules({ fs: upg })).allRules.map(r => r.id)).toEqual(['ORG-1']);
+    });
   });
 
   it('user and --rules rules keep their fixes', async () => {

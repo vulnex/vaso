@@ -144,12 +144,12 @@ export async function screenSkillRoots(
 }
 
 /** The sentence reports and the inventory give for an unscanned skills directory. */
-export function unscannedReason(reason: UnscannedSkillsDir['reason']): string {
+export function unscannedReason(reason: UnscannedSkillsDir['reason'], path = '<path>'): string {
   switch (reason) {
     case 'home':
       return 'not scanned: skills directory set to the home directory itself — VASO doesn\'t walk the whole home (locally or remotely); point it at a dedicated folder';
     case 'outside':
-      return 'not scanned: skills directory set outside the user\'s home or inside a credential store — VASO doesn\'t walk it (locally or remotely); review it by hand';
+      return `not scanned: skills directory set outside the user's home or inside a credential store — VASO doesn't walk it (locally or remotely); review it with \`vaso skill audit ${path}\``;
     case 'limit':
       return 'not scanned: skills directory holds more entries than the remote probe collects (10000) — not verified; scan the host locally to check these skills';
     case 'relative':

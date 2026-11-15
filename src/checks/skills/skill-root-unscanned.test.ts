@@ -69,6 +69,19 @@ describe('a skills directory outside the home', () => {
     expect(r.message).toContain('does not exist');
   });
 
+  it('SKL-002 says how to review it: vaso skill audit <path>', async () => {
+    const r = await byId('SKL-002').run(ctx(OUT));
+    expect(r.evidence![0].detail).toContain(`review it with \`vaso skill audit ${OUT[0].path}\``);
+    expect(r.evidence![0].detail).not.toContain('by hand');
+  });
+
+  it.each(['SKL-001', 'SKL-004', 'SKL-005', 'SKL-013', 'IOC-003', 'IOC-006', 'IOC-007'])(
+    '%s next to a scanned directory: the pass names the one not scanned', async (id) => {
+      const r = await byId(id).run(ctx(OUT, ['/nonexistent-vaso-home/skills']));
+      expect(r.passed).toBe(true);
+      expect(r.message.endsWith(`(skills directory ${OUT[0].path} not scanned; see SKL-002)`), r.message).toBe(true);
+    });
+
   it('without any skills directory the checks still pass as before', async () => {
     const r = await byId('SKL-004').run(ctx(undefined));
     expect(r.passed).toBe(true);

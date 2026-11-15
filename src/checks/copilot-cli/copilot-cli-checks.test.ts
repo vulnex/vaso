@@ -576,18 +576,81 @@ describe.skipIf(process.platform === 'win32')('GHC-001 store files', () => {
     });
   });
 
-  it('judges every file of a long store, listing at most 200 and counting the rest', async () => {
+  it('judges every file of a long store, listing at most 40 and counting the rest in the message', async () => {
     await withHome(async (dir, ctx) => {
       const { join } = await import('node:path');
-      for (let i = 0; i < 230; i++) await put(join(dir, 'session-state', `a${String(i).padStart(3, '0')}.jsonl`), 0o600);
+      for (let i = 0; i < 50; i++) await put(join(dir, 'session-state', `a${String(i).padStart(3, '0')}.jsonl`), 0o600);
       for (let i = 0; i < 30; i++) await put(join(dir, 'session-state', `z${i}.jsonl`), 0o644);
       const few = await check.run(ctx);
       expect(few.passed).toBe(false);
       expect(few.evidence).toHaveLength(30);
-      for (let i = 30; i < 205; i++) await put(join(dir, 'session-state', `z${i}.jsonl`), 0o644);
+      for (let i = 30; i < 245; i++) await put(join(dir, 'session-state', `z${i}.jsonl`), 0o644);
+      await put(join(dir, 'session-store.db'), 0o644);
+      await put(join(dir, 'mcp-oauth-config', 'github.tokens.json'), 0o644);
       const many = await check.run(ctx);
-      expect(many.evidence).toHaveLength(201);
-      expect(many.evidence?.[200]).toMatchObject({ file: join(dir, 'session-state'), snippet: '+5 more file(s)' });
+      expect(many.message).toMatch(/^Found 247 Copilot CLI path\(s\)/);
+      // the database and the token store come first; one closing line per store
+      expect(many.evidence?.[0].file).toBe(join(dir, 'session-store.db'));
+      expect(many.evidence?.[1].file).toBe(join(dir, 'mcp-oauth-config', 'github.tokens.json'));
+      expect(many.evidence).toHaveLength(43);
+      expect(many.evidence?.[42]).toMatchObject({ file: join(dir, 'session-state'), snippet: '+205 more file(s)' });
+    });
+  });
+
+  it('stays under the engine evidence cap with every store full', async () => {
+    const { capSnippets, MAX_EVIDENCE } = await import('../../core/engine.js');
+    await withHome(async (dir, ctx) => {
+      const { join } = await import('node:path');
+      for (const store of ['session-state', 'command-history-state', 'mcp-oauth-config', 'mcp-secrets']) {
+        for (let i = 0; i < 60; i++) await put(join(dir, store, `f${i}.json`), 0o644);
+      }
+      await put(join(dir, 'session-store.db'), 0o644);
+      const r = await check.run(ctx);
+      expect(r.evidence!.length).toBeLessThan(MAX_EVIDENCE);
+      expect(capSnippets(r).evidence?.some(e => e.file === join(dir, 'session-store.db'))).toBe(true);
+      expect(r.message).toMatch(/^Found 241 /);
+    });
+  });
+
+  it('a symlinked session folder is a folder: its files are judged, not the folder mode', async () => {
+    await withHome(async (dir, ctx) => {
+      const { join } = await import('node:path');
+      const { symlink, chmod, stat } = await import('node:fs/promises');
+      const sess = join(dir, '..', 'sess');
+      await put(join(sess, 'events.jsonl'), 0o600);
+      await chmod(sess, 0o755);
+      await put(join(dir, 'session-state', 'real', 'events.jsonl'), 0o600);
+      await symlink(sess, join(dir, 'session-state', 'abc'));
+      expect((await check.run(ctx)).passed).toBe(true);
+      await chmod(join(sess, 'events.jsonl'), 0o644);
+      const r = await check.run(ctx);
+      expect(r.passed).toBe(false);
+      expect(r.evidence?.map(e => e.file)).toEqual([join(dir, 'session-state', 'abc', 'events.jsonl')]);
+      const res = await check.fix!(ctx);
+      expect(res.applied).toBe(true);
+      expect((await stat(join(sess, 'events.jsonl'))).mode & 0o077).toBe(0);
+      expect((await check.run(ctx)).passed).toBe(true);
+    });
+  });
+
+  it('a store link to a non-credential file outside the home is a warning, not a leak', async () => {
+    await withHome(async (dir, ctx) => {
+      const { join } = await import('node:path');
+      const { symlink } = await import('node:fs/promises');
+      await put(join(dir, 'mcp-secrets', 'index.json'), 0o600);
+      await symlink('/etc/hosts', join(dir, 'mcp-secrets', 'x.json'));
+      const r = await check.run(ctx);
+      expect(r.passed).toBe(false);
+      expect(r.severity).toBe('warning');
+      expect(r.fixable).toBe(false);
+      expect(r.message).toMatch(/point outside the store and the home/);
+      expect(r.evidence?.map(e => e.file)).toEqual([join(dir, 'mcp-secrets', 'x.json')]);
+      // with a real exposure too: judged as before (critical, or info under a private home), the link listed after it
+      await put(join(dir, 'session-store.db'), 0o644);
+      const both = await check.run(ctx);
+      expect(['critical', 'info']).toContain(both.severity);
+      expect(both.message).toMatch(/^Found 1 Copilot CLI path\(s\).*1 store link\(s\) point outside/);
+      expect(both.evidence?.map(e => e.file)).toEqual([join(dir, 'session-store.db'), join(dir, 'mcp-secrets', 'x.json')]);
     });
   });
 
@@ -601,6 +664,19 @@ describe.skipIf(process.platform === 'win32')('GHC-001 store files', () => {
       await check.fix!(ctx);
       expect((await check.run(ctx)).passed).toBe(true);
     });
+  });
+
+  it('a remote scan says a linked session folder\'s files are not verified (the probe does not follow links)', async () => {
+    const fs = makeFs({
+      kind: 'snapshot',
+      access: vi.fn(async (p: string) => p === '/home/test/.copilot' || p.endsWith('session-state')),
+      stat: vi.fn(async (p: string) => ({ mode: 0o755, isFile: () => false, isDirectory: () => !p.endsWith('.jsonl') })),
+      permissions: vi.fn(async () => ({ octal: '755', groupRead: true, groupWrite: false, groupExec: true, worldRead: true, worldWrite: false, worldExec: true, description: 'mode 755' })),
+      readdirEntries: vi.fn(async (d: string) => (d.endsWith('session-state') ? [{ name: 'abc', isFile: false, isDirectory: false, isSymbolicLink: true }] : [])),
+    } as unknown as Partial<FSProvider>);
+    const r = await check.run(makeCtx([], fs));
+    expect(r.passed).toBe(true);
+    expect(r.message).toMatch(/files behind 1 linked folder\(s\) in session-state\/ \(abc\) not verified/);
   });
 
   it('a remote scan without a store file\'s metadata says "not verified" instead of passing silently', async () => {

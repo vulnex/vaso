@@ -142,3 +142,23 @@ describe('round 3: TOML edits in CRLF files (dt21 g5-R2-5)', () => {
     expect(readFileSync(p, 'utf-8')).toBe('a = 1\r\nb = 3\n');
   });
 });
+
+describe('YAML fix refusals read as plain sentences', () => {
+  it('names the parent that is not a mapping', async () => {
+    const nul = file('a.yaml', 'gateway:\nother: 1\n');
+    await expect(updateYamlFile(nul, 'gateway.tls.enabled', true)).rejects.toThrow(/gateway in .* is empty \(null\), not a mapping — there is nowhere to set tls\.enabled under it/);
+    const seq = file('b.yaml', 'gateway:\n  - tls\n');
+    await expect(updateYamlFile(seq, 'gateway.tls.enabled', true)).rejects.toThrow(/gateway in .* is a list, not a mapping/);
+    const scalar = file('c.yaml', 'gateway:\n  tls: yes-please\n');
+    await expect(updateYamlFile(scalar, 'gateway.tls.enabled', true)).rejects.toThrow(/gateway\.tls in .* is a single value, not a mapping/);
+    for (const p of [nul, seq, scalar]) {
+      await expect(updateYamlFile(p, 'gateway.tls.enabled', true)).rejects.not.toThrow(/Remaining path|Expected/);
+    }
+  });
+
+  it('says a file with YAML errors is not rewritten, without quoting it', async () => {
+    const p = file('d.yaml', 'token: sk-ant-api03-AAAAAAAAAAAAAAAA\ntoken: sk-ant-api03-BBBBBBBBBBBBBBBB\n');
+    await expect(updateYamlFile(p, 'gateway.tls.enabled', true)).rejects.toThrow(/has YAML errors \(a duplicate key\) — vaso won't rewrite it; set gateway\.tls\.enabled by hand/);
+    await expect(updateYamlFile(p, 'gateway.tls.enabled', true)).rejects.not.toThrow(/sk-ant/);
+  });
+});

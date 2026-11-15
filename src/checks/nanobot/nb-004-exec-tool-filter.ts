@@ -1,5 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { unsafeRegexReason } from '../../rules/regex-safety.js';
 import { asRecord, asStringArray, getPath, nanobotConfigs, pick, pyBool } from './shared.js';
 
 // allowPatterns are re.fullmatch()ed against each shell segment and take
@@ -26,7 +27,9 @@ export function compilePyFullmatch(pattern: string): RegExp | undefined {
     src = src.slice(m[0].length);
   }
   try {
-    return new RegExp(`^(?:${src})$`, flags);
+    const re = new RegExp(`^(?:${src})$`, flags);
+    // a pattern that backtracks super-linearly is not run (it comes from config)
+    return unsafeRegexReason(re.source) ? undefined : re;
   } catch {
     return undefined;
   }

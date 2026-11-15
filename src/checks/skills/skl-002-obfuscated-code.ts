@@ -126,7 +126,7 @@ export const skl002 = defineCheck({
     for (const skillsDir of skillsDirsOf(ctx)) {
       const gap = configTreeGap(ctx.fs, skillsDir);
       if (gap) {
-        evidence.push({ file: skillsDir, detail: unscannedReason(gap === 'refused' ? 'outside' : 'limit'), mitigated: true });
+        evidence.push({ file: skillsDir, detail: unscannedReason(gap === 'refused' ? 'outside' : 'limit', skillsDir), mitigated: true });
         continue;
       }
       if (probeCoversTree(ctx.fs, skillsDir) || await ctx.fs.access(skillsDir)) continue;
@@ -145,9 +145,9 @@ export const skl002 = defineCheck({
     for (const root of unscannedRoots) {
       if (await unscannedRootMissing(ctx.fs, root)) {
         missingRoots.push(root);
-        evidence.push({ file: root.path, detail: `${unscannedReason(root.reason)} — it does not exist, nothing to scan`, mitigated: true });
+        evidence.push({ file: root.path, detail: `not scanned: skills directory set ${unscannedShort(root.reason)} does not exist — nothing to scan`, mitigated: true });
       } else {
-        evidence.push({ file: root.path, detail: unscannedReason(root.reason) });
+        evidence.push({ file: root.path, detail: unscannedReason(root.reason, root.path) });
       }
     }
 

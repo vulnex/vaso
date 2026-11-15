@@ -1,5 +1,7 @@
 import { SECURITY_PATTERNS, scanWithPatterns } from './pattern-engine.js';
 import { shellCommandWrapper } from '../mcp/shell-wrapper.js';
+import { findArgSecrets, type ConfigSecret } from '../mcp/config-secrets.js';
+import { shellWords } from '../mcp/script-command.js';
 
 /**
  * Shell-command analysis shared by the agent hook checks (CC-003, CUR-015,
@@ -168,6 +170,23 @@ export function hookStatements(script: string): string[] {
     }
   }
   return [...out];
+}
+
+/**
+ * Credentials written into a hook's shell text, read statement by statement
+ * as argv: `--password <pw>`, `-p<pw>` after a MySQL client, `sshpass -p`,
+ * `redis-cli -a`, `https://user:<pw>@host`, `Authorization: Basic …`
+ * headers, `NAME=<token>` assignments, known token formats. Each value comes
+ * with a masked rendering; never print `value`.
+ */
+export function hookCommandSecrets(script: string): ConfigSecret[] {
+  const out: ConfigSecret[] = [];
+  for (const stmt of hookStatements(script)) {
+    for (const secret of findArgSecrets(shellWords(stmt))) {
+      if (!out.some(o => o.value === secret.value)) out.push(secret);
+    }
+  }
+  return out;
 }
 
 /**

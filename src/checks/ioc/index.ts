@@ -7,14 +7,11 @@ import { ioc005 } from './ioc-005-typosquatting.js';
 import { ioc006 } from './ioc-006-skill-name-patterns.js';
 import { ioc007 } from './ioc-007-binary-patterns.js';
 import { ioc008 } from './ioc-008-virustotal.js';
+import { notingUnscannedRoots } from '../skills/skill-files.js';
 
 export const iocChecks: CheckModule[] = [
   ioc001,
   ioc002,
-  ioc003,
-  ioc004,
-  ioc005,
-  ioc006,
-  ioc007,
-  ioc008,
+  // the skill-file checks note config-set skills directories they didn't scan
+  ...[ioc003, ioc004, ioc005, ioc006, ioc007, ioc008].map(notingUnscannedRoots),
 ];
