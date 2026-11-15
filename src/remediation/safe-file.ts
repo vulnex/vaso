@@ -3,6 +3,7 @@ import { constants } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { basename, dirname, isAbsolute, join, sep } from 'node:path';
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { execFile } from 'node:child_process';
 
 /**
  * File I/O for `vaso fix` and `--rollback`. Fixes write into paths taken from
@@ -128,8 +129,10 @@ export async function readRegularFile(path: string): Promise<Buffer> {
  * renamed over the original, so a reader (the agent itself) never sees a
  * truncated or half-written config. The original is still opened for writing
  * first: a file the user made read-only stays refused, as do symlinks and
- * anything that is not a regular file. A directory vaso can't create files in
- * falls back to rewriting the file in place.
+ * anything that is not a regular file. A directory vaso can't create files in,
+ * and a file whose ACL, extended attributes or flags a new inode would lose
+ * (or whose directory would hand the new inode an inherited ACL), fall back to
+ * rewriting the file in place — see `renameKeepsMetadata`.
  */
 export async function writeRegularFile(path: string, data: string | Buffer): Promise<void> {
   requireAbsolute(path);
@@ -162,6 +165,7 @@ async function replaceByRename(path: string, bytes: Buffer, st: { mode: number; 
   // A file someone else owns would change owner by the rename: rewrite in place
   const uid = process.getuid?.();
   if (uid === undefined || uid === 0 || st.uid !== uid) return false;
+  if (!(await renameKeepsMetadata(path))) return false;
   const tmp = join(dirname(path), `.${basename(path)}.vaso-${process.pid}-${randomBytes(4).toString('hex')}.tmp`);
   let tmpHandle;
   try {
@@ -188,6 +192,90 @@ async function replaceByRename(path: string, bytes: Buffer, st: { mode: number; 
   } finally {
     if (!renamed) await unlink(tmp).catch(() => undefined);
   }
+}
+
+/**
+ * Whether a renamed-in replacement of `path` would carry everything the
+ * original has. A new inode gets only the mode and group vaso copies: an ACL,
+ * extended attributes (Finder tags, anything an app stores) and file flags
+ * (`hidden`) on the original would be lost, and an inheritable ACL on the
+ * directory (macOS `file_inherit`, Linux default ACL) would be added — possibly
+ * granting another account read access to a file that had none. Node has no
+ * API for any of these, so it asks `ls` (macOS) or `getfattr`/`lsattr`
+ * (Linux). Anything it can't confirm — another platform, a tool missing or
+ * failing, output it doesn't recognise — answers false: in place is always
+ * the safe way to write.
+ */
+export async function renameKeepsMetadata(path: string): Promise<boolean> {
+  try {
+    if (process.platform === 'darwin') {
+      const [file, dir] = await Promise.all([run('/bin/ls', ['-lnde@O', '--', path]), run('/bin/ls', ['-lnde@O', '--', dirname(path)])]);
+      return darwinPlain(file, false) && darwinPlain(dir, true);
+    }
+    if (process.platform === 'linux') {
+      const [fileAttrs, dirAttrs, flags] = await Promise.all([
+        run('getfattr', ['--absolute-names', '-m', '-', '--', path]),
+        run('getfattr', ['--absolute-names', '-m', '-', '--', dirname(path)]),
+        run('lsattr', ['-d', '--', path]),
+      ]);
+      return linuxXattrNames(fileAttrs).length === 0
+        && !linuxXattrNames(dirAttrs).includes('system.posix_acl_default')
+        && linuxFlagsPlain(flags);
+    }
+  } catch {
+    /* tool missing or failed: in place */
+  }
+  return false;
+}
+
+function run(cmd: string, args: string[]): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile(cmd, args, { timeout: 5000, maxBuffer: 1 << 20, env: { ...process.env, LC_ALL: 'C' } }, (err, stdout) => {
+      if (err) reject(err);
+      else resolve(stdout);
+    });
+  });
+}
+
+/** Set by the kernel on files a tracked process creates — the replacement gets its own. */
+const SYSTEM_XATTRS = new Set(['com.apple.provenance']);
+
+/**
+ * `ls -lnde@O` of one entry: the long line (flags in the fifth column),
+ * then a tab-led line per extended attribute and a ` N: ` line per ACL entry.
+ * For the file: no flags, no ACL, no attribute but the kernel's provenance tag.
+ * For the directory: no ACL entry a new file would inherit.
+ */
+export function darwinPlain(out: string, isDir: boolean): boolean {
+  const lines = out.split('\n').filter(l => l !== '');
+  const head = lines.shift()?.split(/\s+/);
+  if (!head || head.length < 6 || !/^[-dlbcps][-rwxsStT]{9}[@+]?$/.test(head[0])) return false;
+  if (!isDir && head[4] !== '-') return false;
+  for (const line of lines) {
+    const acl = /^\s*\d+: (.*)$/.exec(line);
+    if (acl) {
+      if (!isDir || /\bfile_inherit\b/.test(acl[1])) return false;
+      continue;
+    }
+    const xattr = /^\t([^\t]+)\t/.exec(line);
+    if (xattr) {
+      if (!isDir && !SYSTEM_XATTRS.has(xattr[1])) return false;
+      continue;
+    }
+    return false; // a line it doesn't recognise (a newline in the name, a new ls format)
+  }
+  return true;
+}
+
+/** Attribute names `getfattr -m -` lists (incl. `system.posix_acl_*` and `security.*`). */
+export function linuxXattrNames(out: string): string[] {
+  return out.split('\n').map(l => l.trim()).filter(l => l !== '' && !l.startsWith('# file:'));
+}
+
+/** `lsattr -d`: only filesystem-internal flags (extents, inline data, indexed dir) may be set. */
+export function linuxFlagsPlain(out: string): boolean {
+  const flags = out.trim().split(/\s+/)[0] ?? '';
+  return /^[-eNI]+$/.test(flags);
 }
 
 /**

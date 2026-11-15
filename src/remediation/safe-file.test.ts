@@ -2,7 +2,8 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { mkdtemp, writeFile, rm, chmod, stat, readFile, readdir, symlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { chmodNoFollow, withFixBoundary, writeRegularFile } from './safe-file.js';
+import { execFileSync } from 'node:child_process';
+import { chmodNoFollow, withFixBoundary, writeRegularFile, renameKeepsMetadata, darwinPlain, linuxXattrNames, linuxFlagsPlain } from './safe-file.js';
 
 const posix = process.platform !== 'win32';
 
@@ -58,7 +59,8 @@ describe.skipIf(!posix)('writeRegularFile', () => {
       await writeRegularFile(f, 'new content');
       expect(await readFile(f, 'utf8')).toBe('new content');
       expect((await stat(f)).mode & 0o7777).toBe(0o640);
-      expect((await stat(f)).ino).not.toBe(before); // a new inode: never truncated in place
+      // a new inode (never truncated in place) wherever the platform can confirm nothing is lost
+      if (await renameKeepsMetadata(f)) expect((await stat(f)).ino).not.toBe(before);
       expect(await readdir(dir)).toEqual(['config.toml']);
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -94,4 +96,72 @@ describe.skipIf(!posix)('writeRegularFile', () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+});
+
+describe('renameKeepsMetadata output parsing', () => {
+  it('macOS: accepts a plain file (kernel provenance tag only) and a directory without inheritable ACL', () => {
+    expect(darwinPlain('-rw-------@ 1 501  20  - 1610 Nov 14 15:10 /h/.zeroclaw/config.toml\n\tcom.apple.provenance\t  11 \n', false)).toBe(true);
+    expect(darwinPlain('drwxr-xr-x  7 501  20  -  224 Nov 14 15:10 /h/.zeroclaw\n 0: user:daemon allow list\n', true)).toBe(true);
+  });
+  it('macOS: refuses ACLs, attributes, flags, inheritable directory ACLs and anything unrecognised', () => {
+    expect(darwinPlain('-rw-r--r--+ 1 501  20  - 1 Nov 14 15:10 f\n 0: user:nobody deny read\n', false)).toBe(false);
+    expect(darwinPlain('-rw-r--r--@ 1 501  20  - 1 Nov 14 15:10 f\n\tcom.example.tag\t  4 \n', false)).toBe(false);
+    expect(darwinPlain('-rw-r--r--  1 501  20  hidden 1 Nov 14 15:10 f\n', false)).toBe(false);
+    expect(darwinPlain('drwxr-xr-x@ 7 501  20  -  224 Nov 14 15:10 d\n 0: FFFF allow list,file_inherit\n', true)).toBe(false);
+    expect(darwinPlain('', false)).toBe(false);
+    expect(darwinPlain('-rw-r--r--  1 501  20  - 1 Nov 14 15:10 f\nsecond-line-of-a-name\n', false)).toBe(false);
+  });
+  it('Linux: any attribute on the file, a default ACL on the directory, or a user flag keeps the write in place', () => {
+    expect(linuxXattrNames('')).toEqual([]);
+    expect(linuxXattrNames('# file: /h/c.toml\nsystem.posix_acl_access\n\n')).toEqual(['system.posix_acl_access']);
+    expect(linuxFlagsPlain('--------------e------- /h/c.toml\n')).toBe(true);
+    expect(linuxFlagsPlain('----a---------e------- /h/c.toml\n')).toBe(false);
+    expect(linuxFlagsPlain('')).toBe(false);
+  });
+});
+
+const darwin = process.platform === 'darwin';
+describe.skipIf(!darwin)('writeRegularFile keeps macOS metadata (in place)', () => {
+  const sh = (cmd: string, ...args: string[]) => execFileSync(cmd, args, { stdio: 'pipe' }).toString();
+  async function withFile(fn: (dir: string, f: string) => Promise<void>): Promise<void> {
+    const dir = await mkdtemp(join(tmpdir(), 'vaso-sf-md-'));
+    const f = join(dir, 'config.toml');
+    await writeFile(f, 'old');
+    await chmod(f, 0o600);
+    try { await fn(dir, f); } finally {
+      try { sh('/usr/bin/chflags', 'nohidden', f); } catch { /* gone */ }
+      await rm(dir, { recursive: true, force: true });
+    }
+  }
+  it('keeps an ACL', () => withFile(async (_d, f) => {
+    sh('/bin/chmod', '+a', 'user:nobody deny read', f);
+    const ino = (await stat(f)).ino;
+    await writeRegularFile(f, 'new');
+    expect(await readFile(f, 'utf8')).toBe('new');
+    expect((await stat(f)).ino).toBe(ino);
+    expect(sh('/bin/ls', '-led', f)).toMatch(/nobody deny read/);
+  }));
+  it('keeps extended attributes', () => withFile(async (_d, f) => {
+    sh('/usr/bin/xattr', '-w', 'com.example.tag', 'keep', f);
+    await writeRegularFile(f, 'new');
+    expect(sh('/usr/bin/xattr', '-p', 'com.example.tag', f).trim()).toBe('keep');
+  }));
+  it('keeps file flags', () => withFile(async (_d, f) => {
+    sh('/usr/bin/chflags', 'hidden', f);
+    await writeRegularFile(f, 'new');
+    expect(sh('/bin/ls', '-lOd', f)).toMatch(/hidden/);
+  }));
+  it('does not pick up an inheritable directory ACL', () => withFile(async (dir, f) => {
+    sh('/bin/chmod', '+a', 'user:daemon allow read,file_inherit', dir);
+    const ino = (await stat(f)).ino;
+    await writeRegularFile(f, 'new');
+    expect((await stat(f)).ino).toBe(ino);
+    expect(sh('/bin/ls', '-led', f)).not.toMatch(/daemon/);
+  }));
+  it('still renames a plain file', () => withFile(async (_d, f) => {
+    const ino = (await stat(f)).ino;
+    expect(await renameKeepsMetadata(f)).toBe(true);
+    await writeRegularFile(f, 'new');
+    expect((await stat(f)).ino).not.toBe(ino);
+  }));
 });
