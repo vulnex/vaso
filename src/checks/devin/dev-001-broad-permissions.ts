@@ -174,7 +174,7 @@ export const dev001 = defineCheck({
             criticalEvidence.push({
               file: config.filePath,
               snippet: `permissions.allow: "${entry}"`,
-              detail: `Write allow rule ${broad.reason} — the agent may modify files there without approval`,
+              detail: `Write allow rule path ${broad.reason} — the agent may modify files there without approval`,
             });
             continue;
           }

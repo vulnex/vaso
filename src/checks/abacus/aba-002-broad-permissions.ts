@@ -74,7 +74,7 @@ export const aba002 = defineCheck({
           const broad = isBroadPath(base, broadPaths, home);
           const sinks = classifySensitivePath(base.replace(/^~/, home));
           if (broad) {
-            critical.push({ file: config.filePath, snippet, detail: `Write access ${broad.reason}` });
+            critical.push({ file: config.filePath, snippet, detail: `Writable path ${broad.reason}` });
           } else if (sinks.length > 0) {
             critical.push({ file: config.filePath, snippet, detail: `Write access to ${sinks.join(', ')}` });
           }

@@ -51,7 +51,7 @@ export const cur009 = defineCheck({
           evidence.push({
             file: config.filePath,
             snippet: `additionalReadwritePaths: "${entry}"`,
-            detail: `Sandbox write access ${reason.replace(/^lets the agent write /, 'to ')} — sandboxed commands run without a prompt`,
+            detail: `${reason.startsWith('lets the agent write ') ? `Sandbox write access to ${reason.slice('lets the agent write '.length)}` : `Sandbox-writable path ${reason}`} — sandboxed commands run without a prompt`,
           });
         }
         continue;

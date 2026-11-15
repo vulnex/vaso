@@ -15,9 +15,9 @@ export function buildBroadPaths(home: string): BroadPath[] {
   return [
     { path: '/', reason: 'covers the entire filesystem' },
     { path: home, reason: 'covers the entire home directory' },
-    { path: '/tmp', reason: 'shared by all local users' },
-    { path: '/var/tmp', reason: 'shared by all local users' },
-    { path: '/etc', reason: 'system configuration directory' },
+    { path: '/tmp', reason: 'is shared by all local users' },
+    { path: '/var/tmp', reason: 'is shared by all local users' },
+    { path: '/etc', reason: 'is the system configuration directory' },
   ];
 }
 
