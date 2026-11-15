@@ -459,8 +459,15 @@ export class SnapshotFSProvider implements FSProvider {
       }
     }
 
-    // Try matching by command name and args pattern
+    // A command naming a path (`codesign -dv /Applications/Muse.app`) is
+    // answered only by its own output: a fuzzy match would hand it another
+    // path's (another app's signature). Not collected = exit 127, not verified
+    if (args.some(looksLikePath)) return undefined;
+
+    // Try matching by command name and args pattern (manifest ids such as
+    // `netstat-tcp`; a natural `cmd args` key is matched exactly above)
     for (const [id, output] of Object.entries(this.snapshot.commandOutputs)) {
+      if (/\s/.test(id)) continue;
       // Match ids like "netstat-tcp" against cmd "netstat" with args containing "tcp"
       const idParts = id.split('-');
       if (idParts[0] === cmdBase || id.startsWith(cmdBase)) {
@@ -487,6 +494,11 @@ export class SnapshotFSProvider implements FSProvider {
       return suffix.toLowerCase().includes(cleaned.toLowerCase());
     });
   }
+}
+
+/** An argument naming a file or directory (absolute, home- or dot-relative, or with a slash). */
+function looksLikePath(arg: string): boolean {
+  return arg.includes('/') || arg.includes('\\') || arg.startsWith('~') || arg === '.' || arg === '..';
 }
 
 const OMITTED_WHY: Record<NonNullable<FileEntry['omitted']>, string> = {
