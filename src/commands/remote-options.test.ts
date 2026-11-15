@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseRemoteOptions } from './remote-options.js';
+import { parseRemoteOptions, unusedTuningOptions } from './remote-options.js';
 
 describe('parseRemoteOptions', () => {
   const host = ['h'];
@@ -30,8 +30,14 @@ describe('parseRemoteOptions', () => {
     expect(() => parseRemoteOptions({ sudo: true, snapshot: 's.json' })).toThrow(/--sudo applies to remote scans only/);
     expect(() => parseRemoteOptions({ sshKey: '', host })).toThrow(/needs a key file/);
     expect(parseRemoteOptions({ sshKey: 'k', sudo: true, saveSnapshot: 'd', host }).retries).toBe(0);
-    expect(() => parseRemoteOptions({ sshTimeout: '30' })).toThrow(/--ssh-timeout applies to remote scans only/);
-    expect(() => parseRemoteOptions({ parallel: '2', sshRetries: '1', snapshot: 's.json' }))
-      .toThrow(/--ssh-retries and --parallel apply to remote scans only/);
+  });
+
+  it('accepts (and ignores) --ssh-timeout, --ssh-retries and --parallel on local and snapshot scans, as 1.4.1 did', () => {
+    expect(parseRemoteOptions({ sshTimeout: '30' }).sshTimeoutSec).toBe(30);
+    expect(parseRemoteOptions({ parallel: '2', sshRetries: '1', snapshot: 's.json' })).toEqual({ concurrency: 2, retries: 1, sshTimeoutSec: 60 });
+    expect(unusedTuningOptions({ parallel: '2', sshTimeout: '30' })).toEqual(['--ssh-timeout', '--parallel']);
+    expect(unusedTuningOptions({ parallel: '2', host })).toEqual([]);
+    // still validated: a typo is a usage error wherever it appears
+    expect(() => parseRemoteOptions({ sshTimeout: 'abc' })).toThrow(/--ssh-timeout/);
   });
 });
