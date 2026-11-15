@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { spawn, execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { mkdir, mkdtemp, symlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, symlink, writeFile } from 'node:fs/promises';
 import { realpathSync } from 'node:fs';
 import { dirname, extname, basename, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -79,7 +79,7 @@ const FORMATS: Array<[string, () => string]> = [
   ['gitlab', () => `glpat-${body(24)}`],
   ['google', () => `AIza${body(35)}`],
   ['devin', () => `devin-${body(80)}`],
-  ['airtable', () => `pat${body(14)}.${body(64, 'abcdef0123456789')}`],
+  ['airtable', () => `pat${body(14)}.${body(64, 'abcdef0123456789')}`],  ['vault', () => `hvs.${body(90)}`],
 ];
 
 /** A diceware-style passphrase: lowercase words, no digit or capital. */
@@ -411,6 +411,24 @@ const ESCAPE_LINKS: Record<string, string> = {
   'canary-extra/pack/gh': '../../.config/gh',
   'canary-extra/pack/ssh': '../../.ssh',
 };
+/**
+ * Credential-named files inside a walked config tree: metadata only, an
+ * executable bit notwithstanding (a key or token with +x is no program).
+ */
+const CONFIG_TREE_CREDENTIALS: Record<string, { mode: number; content: (label: string) => string }> = {
+  'canary-extra/pack/.vault-token': { mode: 0o600, content: l => canary(l, () => `hvs.${body(90)}`) },
+  'canary-extra/pack/.legacy/.vault-token': { mode: 0o600, content: l => canary(l, () => `s.${body(24)}`) },
+  'canary-extra/pack/.psql_history': { mode: 0o600, content: l => `ALTER USER admin PASSWORD '${canary(l, short)}';\n` },
+  'canary-extra/pack/.mysql_history': { mode: 0o600, content: l => `SET PASSWORD = '${canary(l, short)}';\n` },
+  'canary-extra/pack/.bash_history': { mode: 0o600, content: l => `mysql -p${canary(l, short)}\n` },
+  'canary-extra/pack/.local/share/keyrings/login.keyring': { mode: 0o600, content: l => canary(l, () => body(40)) },
+  'canary-extra/pack/.local/share/keyrings/default': { mode: 0o600, content: l => canary(l, () => body(40)) },
+  'canary-extra/pack/Vivaldi/Default/Cookies': { mode: 0o600, content: l => `SQLite format 3 ${canary(l, () => body(40))}` },
+  'canary-extra/pack/Vivaldi/Default/Login Data': { mode: 0o600, content: l => canary(l, () => body(40)) },
+  'canary-extra/pack/Vivaldi/Default/Web Data': { mode: 0o600, content: l => canary(l, () => body(40)) },
+  'canary-extra/pack/id_ed25519': { mode: 0o755, content: l => `b3BlbnNzaC1rZXktdjE${canary(l, () => body(64))}\n` },
+  'canary-extra/pack/secrets.json': { mode: 0o755, content: l => `{"x": "${canary(l, () => body(40))}"}\n` },
+};
 const CONFIG_COMMANDS = ['canary-bin/hermes-server', 'canary-bin/tirith', 'canary-bin/cd-server', 'canary-bin/at-server'];
 
 async function plantConfigRoots(home: string): Promise<void> {
@@ -435,13 +453,26 @@ async function plantConfigRoots(home: string): Promise<void> {
     'mcp_servers:', '  srv:', `    command: ${at(CONFIG_COMMANDS[0])}`,
     'security:', `  tirith_path: ~/${CONFIG_COMMANDS[1]}`,
   ].join('\n') + '\n' + yamlFile('hermes root config'));
+  // Low-entropy values under key and token names are credentials too
+  const lower = () => body(20, 'abcdefghijklmnopqrstuvwyz');
   await put('Library/Application Support/Claude/claude_desktop_config.json',
-    json('claude desktop root config', { mcpServers: { srv: { command: at(CONFIG_COMMANDS[2]) } } }));
+    json('claude desktop root config', { mcpServers: {
+      srv: { command: at(CONFIG_COMMANDS[2]) },
+      low: {
+        command: 'npx',
+        env: { API_KEY: canary('low-entropy env API_KEY', lower), GITHUB_TOKEN: canary('low-entropy env GITHUB_TOKEN', lower) },
+        headers: { Authorization: `Bearer ${canary('low-entropy Authorization bearer', lower)}`, 'X-Api-Key': canary('low-entropy X-Api-Key', lower) },
+      },
+    } }));
   await put('.atomic-agent/config.json',
     json('atomic root config', { mcp: { servers: [{ name: 'srv', transport: { kind: 'stdio', command: at(CONFIG_COMMANDS[3]) } }] } }));
   const make: Record<string, (label: string) => string> = { md: markdownFile, json: jsonFile, env: envFile, text: textFile, yaml: yamlFile, toml: tomlFile };
   for (const [rel, kind] of Object.entries(CONFIG_TREE_FILES)) await put(rel, make[kind](rel));
   for (const rel of CONFIG_ROOT_UNCOLLECTED) await put(rel, envFile(rel));
+  for (const [rel, { mode, content }] of Object.entries(CONFIG_TREE_CREDENTIALS)) {
+    await put(rel, content(`config tree credential ${rel}`));
+    await chmod(join(home, rel), mode);
+  }
   for (const rel of CONFIG_COMMANDS) await put(rel, `#!/bin/sh\n${textFile(rel)}`);
   for (const rel of OUTSIDE_HOME) {
     await mkdir(dirname(join(otherHome(home), rel)), { recursive: true });
@@ -450,6 +481,12 @@ async function plantConfigRoots(home: string): Promise<void> {
   await symlink(otherHome(home), join(home, 'to-other'));
   await symlink(otherHome(home), join(home, 'canary-extra/pack/other'));
   for (const [rel, target] of Object.entries(ESCAPE_LINKS)) await symlink(target, join(home, rel));
+  // Linked per-agent workspaces under a manifest glob (~/.picoclaw/workspace-*/skills/**):
+  // one inside the home (walked, disguised), one into another user's home (refused)
+  await put('canary-pc/skills/p/settings.json', jsonFile('canary-pc/skills/p/settings.json'));
+  await mkdir(join(home, '.picoclaw'), { recursive: true });
+  await symlink(join(home, 'canary-pc'), join(home, '.picoclaw/workspace-in'));
+  await symlink(otherHome(home), join(home, '.picoclaw/workspace-out'));
 }
 
 /** A directory beside the scanned home, standing in for another user's. */
@@ -560,6 +597,11 @@ describe.skipIf(!goAvailable)('probe privacy canary', () => {
       expect(snap.files[join(home, rel)]?.content, `${rel} collected`).toBeTruthy();
     }
     for (const rel of CONFIG_ROOT_UNCOLLECTED) expect(snap.files[join(home, rel)], `${rel} not collected`).toBeUndefined();
+    for (const rel of Object.keys(CONFIG_TREE_CREDENTIALS)) {
+      const e = snap.files[join(home, rel)];
+      expect(e?.exists, `${rel} recorded`).toBe(true);
+      expect(e?.content ?? '', `${rel} metadata only`).toBe('');
+    }
     for (const rel of CONFIG_COMMANDS) {
       const e = snap.files[join(home, rel)];
       expect(e?.exists, `${rel} stat'd`).toBe(true);
@@ -578,10 +620,14 @@ describe.skipIf(!goAvailable)('probe privacy canary', () => {
       [otherHome(home)]: 'refused',
       [join(home, '.config/gh')]: 'refused',
       [join(home, 'to-other')]: 'refused',
+      [join(home, '.picoclaw/workspace-in/skills')]: 'collected',
+      [join(home, '.picoclaw/workspace-out/skills')]: 'refused',
     });
+    expect(snap.files[join(home, '.picoclaw/workspace-in/skills/p/settings.json')]?.content).toBeTruthy();
+    expect(Object.keys(snap.files).filter(p => p.startsWith(join(home, '.picoclaw/workspace-out') + '/'))).toEqual([]);
     // nothing from /etc or the other user's home ships content — through a
     // config or a link to it — and a walked tree's links out of the home or
-    // into a store are not even recorded
+    // into a store are recorded as links only, nothing behind them
     const real = (p: string) => { try { return realpathSync(p); } catch { return p; } };
     const forbidden = ['/etc/', '/private/etc/', real(otherHome(home)) + '/'];
     for (const [p, e] of Object.entries(snap.files)) {

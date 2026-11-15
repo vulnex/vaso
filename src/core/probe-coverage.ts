@@ -24,6 +24,7 @@ import type { ConfigTreeStatus } from './snapshot-types.js';
 /** What a snapshot provider tells about config-set paths (SnapshotFSProvider). */
 interface SnapshotRecords {
   collected?(path: string): boolean;
+  holdsUnder?(dir: string): boolean;
   configTrees?(): Readonly<Record<string, ConfigTreeStatus>>;
   listing?(dir: string): readonly string[] | undefined;
 }
@@ -206,9 +207,30 @@ export function configTreeGap(fs: FSProvider, dir: string): 'refused' | 'limit' 
   const c = compiled(fs);
   if (!c) return undefined;
   const chain = selfAndAncestors(dir);
-  if (chain.some(d => c.recursive.some(r => r.test(d)))) return undefined;
+  if (chain.some(d => c.recursive.some(r => r.test(d)))) return linkedGap(fs, c, chain);
   const status = treeStatus(c, chain);
   return status === 'refused' || status === 'limit' ? status : undefined;
+}
+
+/**
+ * A manifest tree whose wildcard directory is a link (a PicoClaw
+ * `workspace-<id>` linked elsewhere): the probe's glob can't enter it, so it
+ * walks it as a config-derived tree (probes newer than 1.4.1). A refusal or
+ * cap the probe recorded there — at a base inside the manifest's tree, not a
+ * config-set directory above it — with nothing of the tree in the snapshot,
+ * means not scanned, not empty.
+ */
+function linkedGap(fs: FSProvider, c: Compiled, chain: readonly string[]): 'refused' | 'limit' | undefined {
+  const holds = (fs as SnapshotRecords).holdsUnder;
+  if (!holds || chain.length === 0) return undefined;
+  for (let i = 0; i < chain.length; i++) {
+    const status = c.trees.get(chain[i]);
+    if (status === undefined) continue;
+    if (status === 'collected') return undefined;
+    if (!chain.slice(i).some(d => c.recursive.some(r => r.test(d)))) return undefined;
+    return holds.call(fs, chain[0]) ? undefined : status;
+  }
+  return undefined;
 }
 
 /**
@@ -223,7 +245,7 @@ export function probeCoversTree(fs: FSProvider, dir: string): boolean {
   const c = compiled(fs);
   if (!c) return true;
   const chain = selfAndAncestors(dir);
-  if (chain.some(d => c.recursive.some(r => r.test(d)))) return true;
+  if (chain.some(d => c.recursive.some(r => r.test(d)))) return linkedGap(fs, c, chain) === undefined;
   const status = treeStatus(c, chain);
   if (status === 'refused' || status === 'limit') return false;
   if (status === 'collected') return true;

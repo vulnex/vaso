@@ -286,6 +286,40 @@ describe('config-set paths a newer probe recorded', () => {
     }
   });
 
+  it('a manifest tree behind a linked wildcard directory the probe refused is not verified', async () => {
+    // ~/.picoclaw/workspace-*/skills/** is a manifest glob; workspace-x is a
+    // link out of the home, so the probe recorded the tree refused
+    const lnk = `${HOME}/.picoclaw/workspace-x/skills`;
+    const pc = inst('picoclaw', `${HOME}/.picoclaw`, [], { skillsDir: lnk, skillsDirs: [lnk] });
+    const fs = snapshot({}, { configTrees: { [lnk]: 'refused' }, symlinks: { [`${HOME}/.picoclaw/workspace-x`]: '/srv/elsewhere' } });
+    expect(probeCoversTree(fs, lnk)).toBe(false);
+    const res = await skl002.run(ctx(pc, fs));
+    expect(res.message).toBe('Found 1 skill location(s) not scanned');
+    const { inventory } = await collectSkillInventory(pc, fs);
+    expect(inventory.skillsDirs).toEqual([{ path: lnk, exists: false, unverified: true }]);
+    // The manifest's own tree wins where the snapshot holds it
+    const held = snapshot({ [`${lnk}/a/SKILL.md`]: file('# a\n') }, { configTrees: { [lnk]: 'refused' } });
+    expect(probeCoversTree(held, lnk)).toBe(true);
+    // …and a collected one is covered
+    expect(probeCoversTree(snapshot({}, { configTrees: { [lnk]: 'collected' } }), lnk)).toBe(true);
+  });
+
+  it('a refused directory exists in the inventory as the probe recorded it, however the config spells it', async () => {
+    const n = inst('nanobot', `${HOME}/.nanobot`, [], { unscannedSkillsDirs: [{ path: `${HOME}/./x/../.ssh`, reason: 'outside' }] });
+    const fs = snapshot({}, { configTrees: { [`${HOME}/.ssh`]: 'refused' }, directoryModes: { [`${HOME}/.ssh`]: 0o700 } });
+    const { inventory } = await collectSkillInventory(n, fs);
+    expect(inventory.skillsDirs[0]).toEqual({ path: `${HOME}/./x/../.ssh`, exists: true, unverified: true });
+  });
+
+  it('a config-set directory refused above a manifest tree leaves that tree covered', async () => {
+    // extraDirs: ["~"] — the home is refused, ~/.openclaw/skills is still the manifest's
+    const own = `${HOME}/.openclaw/skills`;
+    const fs = snapshot({}, { configTrees: { [HOME]: 'refused' }, directoryModes: { [HOME]: 0o755 } });
+    expect(probeCoversTree(fs, own)).toBe(true);
+    const oc = inst('openclaw', `${HOME}/.openclaw`, [], { skillsDir: own, skillsDirs: [own] });
+    expect((await skl002.run(ctx(oc, fs))).passed).toBe(true);
+  });
+
   it('a skill in a collected config-derived tree is inventoried', async () => {
     const fs = snapshot({ [`${ws}/evil/SKILL.md`]: file('# evil\n') }, { configTrees: { [ws]: 'collected' } });
     const { inventory } = await collectSkillInventory(nb, fs);

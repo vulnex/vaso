@@ -519,12 +519,14 @@ func (c *collector) collectGlob(snapshot *ProbeSnapshot, pattern string) {
 		if c.excluded(pattern, match) {
 			continue
 		}
+		// A link is recorded (name and target, never what it points to)
+		// wherever it leads: SKL-013 reports a link out of the tree from it
+		recordSymlink(snapshot.Symlinks, match)
 		// A config-derived tree's entries outside its user's home or in a
-		// credential store (as named or resolved) aren't recorded at all
+		// credential store (as named or resolved) aren't collected
 		if c.configTree && !treeAllowed(match, c.treeHome) {
 			continue
 		}
-		recordSymlink(snapshot.Symlinks, match)
 		if _, exists := snapshot.Files[match]; !exists {
 			c.collectPath(snapshot, match, globBase(pattern), false, false)
 		}
@@ -534,6 +536,9 @@ func (c *collector) collectGlob(snapshot *ProbeSnapshot, pattern string) {
 	c.recordDeniedDirs(snapshot, pattern)
 	if c.inSkillTree {
 		c.collectUnlistableSkills(snapshot, pattern)
+		if !c.configTree {
+			c.collectLinkedSkillBases(snapshot, pattern)
+		}
 	}
 }
 
@@ -579,10 +584,12 @@ func (c *collector) collectFileLimit(path, base string, metadataOnly bool, limit
 		return omitted("sensitive")
 	// In a config-derived tree: nothing behind a link out of the user's home
 	// or into a credential store, and no file a name marks as a credential
-	// (token, *.key, credentials.json…) unless it is a program
+	// (token, *.key, credentials.json…) unless it is a program: executable
+	// and starting like one (`#!`, ELF, Mach-O, PE) — an executable bit
+	// alone doesn't make an id_ed25519 anything but a key
 	case c.configTree && !treeAllowed(path, c.treeHome):
 		return omitted("sensitive")
-	case c.configTree && credentialFileName(path) && info.Mode().Perm()&0o111 == 0:
+	case c.configTree && credentialFileName(path) && (info.Mode().Perm()&0o111 == 0 || !programHeader(path)):
 		return omitted("metadata")
 	case assetOnly:
 		return omitted("asset")
@@ -805,10 +812,11 @@ const maxLinkDepth = 8
 // is skipped: that content is already collected. Mirrors walkSkillTree in
 // src/core/skill-walk.ts so local and remote scans read the same files.
 func (c *collector) followLinkedTrees(snapshot *ProbeSnapshot, pattern string, matches []string, metadataOnly bool) {
-	if !strings.HasSuffix(filepath.ToSlash(pattern), "/**") {
+	root, ok := literalTreeRoot(pattern)
+	if !ok {
 		return
 	}
-	rootReal, err := filepath.EvalSymlinks(strings.TrimSuffix(filepath.ToSlash(pattern), "/**"))
+	rootReal, err := filepath.EvalSymlinks(root)
 	if err != nil {
 		return
 	}
@@ -842,15 +850,22 @@ func (c *collector) followFrom(snapshot *ProbeSnapshot, pattern string, matches 
 			continue // a file link was collected (followed) by the glob itself
 		}
 		visited[real] = true
-		sub, err := doublestar.FilepathGlob(filepath.Join(m, "**"), doublestar.WithNoFollow())
+		escaped, ok := escapeGlobMeta(m)
+		if !ok {
+			continue
+		}
+		sub, err := doublestar.FilepathGlob(filepath.Join(escaped, "**"), doublestar.WithNoFollow())
 		if err != nil {
 			continue
 		}
 		for _, sm := range sub {
-			if c.excluded(pattern, sm) || (c.configTree && !treeAllowed(sm, c.treeHome)) {
+			if c.excluded(pattern, sm) {
 				continue
 			}
 			recordSymlink(snapshot.Symlinks, sm)
+			if c.configTree && !treeAllowed(sm, c.treeHome) {
+				continue
+			}
 			if _, exists := snapshot.Files[sm]; !exists {
 				c.collectPath(snapshot, sm, globBase(pattern), metadataOnly, false)
 			}
@@ -1105,8 +1120,9 @@ var tokenShaped = regexp.MustCompile(`(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[
 	// formats the checks don't name, never shipped either: Stripe, SendGrid,
 	// DigitalOcean, Shopify, Linear, Notion, Perplexity
 	`\b[sr]k_live_[A-Za-z0-9]{20,}|\bSG\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}|\bdop_v1_[a-f0-9]{64}|\bshpat_[a-fA-F0-9]{32}|\blin_api_[A-Za-z0-9]{32,}|\bntn_[A-Za-z0-9]{32,}|\bpplx-[A-Za-z0-9]{32,}|` +
+	// Vault tokens (hvs./hvb./hvr., legacy s./r.);
 	// npm, PyPI, Figma, Docker Hub, Google OAuth access tokens
-	`\bnpm_[A-Za-z0-9]{36,}|\bpypi-AgE[A-Za-z0-9_-]{50,}|\bfigd_[A-Za-z0-9_-]{40,}|\bdckr_pat_[A-Za-z0-9_-]{24,}|\bya29\.[A-Za-z0-9_-]{40,})`)
+	`\bhv[sbr]\.[A-Za-z0-9_-]{24,}|\b[sr]\.[A-Za-z0-9]{24}\b|\bnpm_[A-Za-z0-9]{36,}|\bpypi-AgE[A-Za-z0-9_-]{50,}|\bfigd_[A-Za-z0-9_-]{40,}|\bdckr_pat_[A-Za-z0-9_-]{24,}|\bya29\.[A-Za-z0-9_-]{40,})`)
 
 // gutterWrap is a continuation line of a Rust CLI error report (miette, as
 // openshell prints it): the report is wrapped to the terminal width anywhere,
@@ -1487,11 +1503,10 @@ func expandForEach(req CommandRequest, outputs map[string]CommandOutput) [][]str
 // SKILL.md by name. Its mode is recorded and SKILL.md and package.json collected, as a local
 // scan reads it. The root is the pattern's literal prefix before "/**".
 func (c *collector) collectUnlistableSkills(snapshot *ProbeSnapshot, pattern string) {
-	i := strings.Index(pattern, "/**")
-	if i <= 0 || strings.ContainsAny(pattern[:i], "*?[{") {
+	root, ok := literalTreeRoot(pattern)
+	if !ok || root == "" {
 		return
 	}
-	root := pattern[:i]
 	entries, err := os.ReadDir(root)
 	if err != nil {
 		return
@@ -1526,11 +1541,10 @@ func (c *collector) collectNonUTF8Names(snapshot *ProbeSnapshot, pattern string)
 	if runtime.GOOS == "darwin" || runtime.GOOS == "windows" || !strings.HasSuffix(filepath.ToSlash(pattern), "/**") {
 		return
 	}
-	root := strings.TrimSuffix(filepath.ToSlash(pattern), "/**")
-	if strings.ContainsAny(root, "*?[{") {
+	root, ok := literalTreeRoot(pattern)
+	if !ok {
 		return
 	}
-	root = filepath.FromSlash(root)
 	_ = filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
 		if err != nil || p == root {
 			return nil

@@ -86,6 +86,13 @@ func TestConfigTreesOutsideTheHomeShipNothing(t *testing.T) {
 		if snap.ConfigTrees[base] != treeRefused {
 			t.Errorf("%s: %q, want refused", base, snap.ConfigTrees[base])
 		}
+		// its existence is recorded (a mode), never a listing
+		if _, ok := snap.DirectoryModes[base]; !ok {
+			t.Errorf("%s: existence not recorded", base)
+		}
+		if _, ok := snap.Directories[base]; ok {
+			t.Errorf("%s listed", base)
+		}
 	}
 	for p, e := range snap.Files {
 		if strings.HasPrefix(p, "/private/etc") || strings.HasPrefix(p, "/etc") || strings.HasPrefix(p, other) || strings.Contains(p, filepath.Join(".config", "gh")) {
@@ -129,6 +136,39 @@ func TestLinksInsideAConfigTreeStayInsideTheHome(t *testing.T) {
 	if _, ok := snap.Files[filepath.Join(tree, "s", "one.js")]; ok {
 		t.Error("file link out of the home recorded")
 	}
+	// …but every link is recorded by name and target, as a local walk sees
+	// it: SKL-013 reports a link into a credential store or out of the home
+	for _, n := range []string{"etc", "etc2", "lib", "one.js", "gh", "home"} {
+		if _, ok := snap.Symlinks[filepath.Join(tree, "s", n)]; !ok {
+			t.Errorf("link %s not recorded: %v", n, snap.Symlinks)
+		}
+	}
+}
+
+// A link met inside a linked directory of a config tree is recorded too,
+// even when it leads somewhere the walk never goes.
+func TestLinksInALinkedDirOfAConfigTreeAreRecorded(t *testing.T) {
+	home := setupHome(t)
+	write(t, filepath.Join(home, ".ssh", "id_ed25519"), "KEY-CANARY\n", 0o600)
+	lib := filepath.Join(home, "lib")
+	write(t, filepath.Join(lib, "x.js"), "module.exports = 1\n", 0o644)
+	mustSymlink(t, filepath.Join(home, ".ssh"), filepath.Join(lib, "keys"))
+	tree := filepath.Join(home, "tree")
+	write(t, filepath.Join(tree, "s", "SKILL.md"), "# s\n", 0o644)
+	mustSymlink(t, lib, filepath.Join(tree, "s", "lib"))
+	writeExtraDirs(t, home, "~/tree")
+	snap := Collect(extraDirsManifest(), false)
+	if _, ok := snap.Files[filepath.Join(tree, "s", "lib", "x.js")]; !ok {
+		t.Fatal("linked directory not walked")
+	}
+	if _, ok := snap.Symlinks[filepath.Join(tree, "s", "lib", "keys")]; !ok {
+		t.Fatalf("link into ~/.ssh not recorded: %v", snap.Symlinks)
+	}
+	for p, e := range snap.Files {
+		if strings.Contains(e.Content, "CANARY") {
+			t.Errorf("content behind a link shipped: %s", p)
+		}
+	}
 }
 
 func TestConfigTreeCountFollowsLinksLikeTheWalk(t *testing.T) {
@@ -169,9 +209,18 @@ func TestCredentialNamedFilesInConfigTreesAreMetadataOnly(t *testing.T) {
 	write(t, filepath.Join(tree, "s", "credentials.json"), `{"x": "`+bare+`"}`, 0o600)
 	write(t, filepath.Join(tree, "s", "tokens"), "#!/bin/sh\necho hi\n", 0o755)
 	write(t, filepath.Join(tree, "s", "tokenizer.js"), "module.exports = 1\n", 0o644)
+	// an executable bit alone doesn't make a key or a token file a program
+	write(t, filepath.Join(tree, "s", "id_ed25519"), "b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQ"+bare+"\n", 0o755)
+	write(t, filepath.Join(tree, "s", "secrets.json"), `{"x": "`+bare+`"}`, 0o755)
+	stores := []string{".vault-token", ".psql_history", ".bash_history", ".mysql_history", "login.keyring",
+		"Cookies", "Login Data", "Web Data", "key4.db", "logins.json",
+		filepath.Join("keyrings", "user.keystore2"), filepath.Join("keyrings", "default")}
+	for _, n := range stores {
+		write(t, filepath.Join(tree, "s", n), "hvs.Q7rT2mZ9kLp4Vw8NcB1dYh6J PASSWORD 'pw-"+bare+"'\n", 0o600)
+	}
 	writeExtraDirs(t, home, "~/tree")
 	snap := Collect(extraDirsManifest(), false)
-	for _, n := range []string{"token", "server.key", "credentials.json"} {
+	for _, n := range append([]string{"token", "server.key", "credentials.json", "id_ed25519", "secrets.json"}, stores...) {
 		if e := snap.Files[filepath.Join(tree, "s", n)]; !e.Exists || e.Content != "" || e.Omitted != "metadata" {
 			t.Errorf("%s: %+v", n, e)
 		}
@@ -245,5 +294,74 @@ func TestGlobbedCredentialRecordsTheWholeLinkChain(t *testing.T) {
 	}
 	if _, ok := snap.DirectoryModes[open]; !ok {
 		t.Fatalf("real parent mode not recorded")
+	}
+}
+
+// A per-agent workspace that is a link (`workspace-<id>` → elsewhere): the
+// no-follow glob can't enter it, so it is walked as a config-derived tree
+// when it stays inside the home, and recorded refused otherwise — both for
+// the manifest's own glob and a config-derived wildcard base.
+func TestLinkedWildcardWorkspacesAreWalkedOrRefused(t *testing.T) {
+	home := setupHome(t)
+	write(t, filepath.Join(home, "realws", "skills", "e", "SKILL.md"), "# e\n", 0o644)
+	outside := filepath.Join(filepath.Dir(home), "elsewhere")
+	write(t, filepath.Join(outside, "skills", "o", "SKILL.md"), "OUTSIDE-CANARY\n", 0o644)
+	write(t, filepath.Join(home, ".ssh", "skills", "k", "SKILL.md"), "SSH-CANARY\n", 0o600)
+	for _, dir := range []string{".picoclaw", "pc"} {
+		mustSymlink(t, filepath.Join(home, "realws"), filepath.Join(home, dir, "workspace-lnk"))
+		mustSymlink(t, outside, filepath.Join(home, dir, "workspace-out"))
+		mustSymlink(t, filepath.Join(home, ".ssh"), filepath.Join(home, dir, "workspace-ssh"))
+	}
+	write(t, filepath.Join(home, ".picoclaw", "config.json"), `{agents: {defaults: {workspace: "~/pc/workspace"}}}`, 0o644)
+	snap := Collect(ProbeManifest{
+		GlobPatterns: []string{"~/.picoclaw/workspace-*/skills/**"},
+		ConfigRoots: []ConfigRootRequest{{
+			Configs: []string{"~/.picoclaw/config.json"}, Format: "json", Kind: "tree",
+			Keys: [][]string{{"agents", "defaults", "workspace"}}, Globs: []string{"skills/**", "../workspace-*/skills/**"},
+		}},
+	}, false)
+	for _, dir := range []string{".picoclaw", "pc"} {
+		lnk := filepath.Join(home, dir, "workspace-lnk", "skills")
+		if snap.ConfigTrees[lnk] != treeCollected {
+			t.Errorf("%s: %q, want collected", lnk, snap.ConfigTrees[lnk])
+		}
+		if e := snap.Files[filepath.Join(lnk, "e", "SKILL.md")]; e.Content == "" {
+			t.Errorf("%s: skill behind the link not collected", dir)
+		}
+		for _, n := range []string{"workspace-out", "workspace-ssh"} {
+			if p := filepath.Join(home, dir, n, "skills"); snap.ConfigTrees[p] != treeRefused {
+				t.Errorf("%s: %q, want refused", p, snap.ConfigTrees[p])
+			}
+		}
+	}
+	for p, e := range snap.Files {
+		if strings.Contains(e.Content, "CANARY") {
+			t.Errorf("content behind a refused link shipped: %s", p)
+		}
+	}
+}
+
+// A config-set skill root whose name holds glob metacharacters is walked as
+// the literal directory it is.
+func TestConfigTreeWithGlobCharactersInItsName(t *testing.T) {
+	home := setupHome(t)
+	names := []string{"ws{1}", "ws[2]", "ws*3", "ws?4"}
+	for _, d := range names {
+		write(t, filepath.Join(home, d, "s", "SKILL.md"), "# s\n", 0o644)
+	}
+	write(t, filepath.Join(home, "ws1", "s", "SKILL.md"), "# decoy\n", 0o644)
+	writeExtraDirs(t, home, "~/ws{1}", "~/ws[2]", "~/ws*3", "~/ws?4")
+	snap := Collect(extraDirsManifest(), false)
+	for _, d := range names {
+		base := filepath.Join(home, d)
+		if snap.ConfigTrees[base] != treeCollected {
+			t.Errorf("%s: %q, want collected", d, snap.ConfigTrees[base])
+		}
+		if e := snap.Files[filepath.Join(base, "s", "SKILL.md")]; e.Content == "" {
+			t.Errorf("%s: skill not collected", d)
+		}
+	}
+	if _, ok := snap.Files[filepath.Join(home, "ws1", "s", "SKILL.md")]; ok {
+		t.Error("a metacharacter matched another directory")
 	}
 }

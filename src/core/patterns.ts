@@ -23,6 +23,9 @@ export const API_KEY_PATTERNS = [
   { pattern: /\bdevin-[A-Za-z0-9$._-]{60,}/, name: 'Devin API token' },
   { pattern: /\bcog_[a-zA-Z0-9]{16,}/, name: 'Devin API token (cog_)' },
   { pattern: /\bapk_(?:user_)?[a-zA-Z0-9]{16,}/, name: 'Devin API key (legacy)' },
+  // Vault ≥ 1.10 service/batch/recovery tokens: hvs./hvb./hvr. + ≥ 24 chars
+  // (developer.hashicorp.com/vault/docs/concepts/tokens)
+  { pattern: /\bhv[sbr]\.[A-Za-z0-9_-]{24,}/, name: 'HashiCorp Vault token' },
   // Vellum keys have no documented prefix — match by env-var assignment only.
   { pattern: /VELLUM_API_KEY\s*[=:]\s*['"]?[a-zA-Z0-9._-]{20,}/, name: 'Vellum API key assignment' },
 ];

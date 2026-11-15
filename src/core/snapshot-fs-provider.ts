@@ -301,6 +301,13 @@ export class SnapshotFSProvider implements FSProvider {
     return Object.hasOwn(this.snapshot.directories, dir) ? this.snapshot.directories[dir] : undefined;
   }
 
+  /** The snapshot holds something below `dir` (a file, a listing or a link). */
+  holdsUnder(dir: string): boolean {
+    const prefix = dir.endsWith('/') ? dir : dir + '/';
+    return this.hasChildPaths(dir) || this.keysUnder('symlinks', prefix).length > 0
+      || this.keysUnder('directoryModes', prefix).length > 0;
+  }
+
   /** Config-derived trees the probe walked, by literal base path, with what it did. */
   configTrees(): Readonly<Record<string, ConfigTreeStatus>> {
     return this.snapshot.configTrees ?? {};
@@ -512,7 +519,7 @@ const OMITTED_WHY: Record<NonNullable<FileEntry['omitted']>, string> = {
   asset: 'binary asset, recorded as metadata',
   metadata: 'recorded as metadata only',
   special: 'not a regular file',
-  sensitive: 'reached through a symlink into a credential store, never shipped',
+  sensitive: 'reached through a symlink into a credential store, shell startup file or /etc, never shipped',
 };
 
 /** A file present on the host whose content the probe did not ship (`omitted` says why). */

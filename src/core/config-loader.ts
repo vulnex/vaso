@@ -181,7 +181,9 @@ export async function linkedIntoSink(filePath: string, fs: FSProvider): Promise<
 
 /** The error a read of such a file fails with (shaped like a snapshot's omitted content). */
 export function sinkLinkError(filePath: string, target: string): Error & { omitted: 'sensitive' } {
-  return Object.assign(new Error(`not read: reached through a symlink into a credential store (${target}): ${filePath}`), { omitted: 'sensitive' as const });
+  // Named for what the target is: /etc/hosts is system configuration, not a credential store
+  const what = classifySensitivePath(target)[0] ?? 'a credential store, shell startup file or /etc';
+  return Object.assign(new Error(`not read: reached through a symlink into ${what} (${target}): ${filePath}`), { omitted: 'sensitive' as const });
 }
 
 export async function loadConfig(filePath: string, fs?: FSProvider): Promise<ParsedConfig> {

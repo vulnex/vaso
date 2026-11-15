@@ -34,6 +34,7 @@ export const EXTRA_TOKEN_PATTERNS: RegExp[] = [
   /^nvapi-[A-Za-z0-9_-]{20,}/,
   /^glpat-[A-Za-z0-9_-]{20,}/,
   /^pat[A-Za-z0-9]{14}\.[0-9a-f]{64}/, // Airtable personal access token
+  /^[sr]\.[A-Za-z0-9]{24}$/, // Vault ≤ 1.9 service / recovery token
 ];
 
 /**

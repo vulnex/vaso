@@ -1,0 +1,17 @@
+{
+  "agent": "openclaw",
+  "source": "dt23 re-verify: skills.load.extraDirs names ~/ws{1} and ~/ws[2] \u2014 directory names holding glob characters are walked as themselves by the remote probe, like a local scan",
+  "fail": {
+    "SKL-004": "critical"
+  },
+  "modes": {
+    ".openclaw/openclaw.json": "600",
+    ".openclaw": "700"
+  },
+  "inventory": {
+    "skills": [
+      "one",
+      "two"
+    ]
+  }
+}

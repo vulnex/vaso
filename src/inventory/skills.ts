@@ -1,4 +1,4 @@
-import { basename, dirname, join, relative, isAbsolute, sep } from 'node:path';
+import { basename, dirname, join, relative, isAbsolute, posix, sep } from 'node:path';
 import type { DirentInfo, FSProvider } from '../core/fs-provider.js';
 import type { AgentInstallation, AgentInventory, SkillItem, SkillTreeEntry, SkillsDirInfo } from '../core/types.js';
 import { getAllSkillsDirs, isExcludedPath, listSkillTree } from '../core/utils.js';
@@ -63,7 +63,9 @@ export async function collectSkillInventory(installation: AgentInstallation, fs:
 
   // Skills directories the config sets where no scan walks: listed, unverified
   for (const { path, reason } of installation.unscannedSkillsDirs ?? []) {
-    skillsDirs.push({ path, exists: await fs.access(path).catch(() => false), unverified: true });
+    // A snapshot keys paths normalized (`~/./a/../.ssh` is `~/.ssh` there)
+    const at = fs.kind === 'snapshot' && isAbsolute(path) ? posix.normalize(path) : path;
+    skillsDirs.push({ path, exists: await fs.access(at).catch(() => false), unverified: true });
     incomplete.push(`${path}: ${unscannedReason(reason)}`);
   }
 
