@@ -1,0 +1,14 @@
+{
+  "agent": "codex",
+  "source": "dt23 re-verify (p-C): ~/.codex/auth.json links to ~/priv/auth.json (700 dir), itself a link to an open ~/open/auth.json — other users read it by its real path, so the private intermediate dir mitigates nothing (local and remote: the probe records the whole link chain)",
+  "reachable": true,
+  "fail": {
+    "CDX-003": "warning"
+  },
+  "modes": {
+    ".codex": "700",
+    "priv": "700",
+    "open": "755",
+    "open/auth.json": "644"
+  }
+}

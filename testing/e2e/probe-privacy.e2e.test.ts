@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { spawn, execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, symlink, writeFile } from 'node:fs/promises';
+import { realpathSync } from 'node:fs';
 import { dirname, extname, basename, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -401,6 +402,15 @@ const CONFIG_TREE_FILES: Record<string, string> = {
 };
 /** Never collected: beside a walked tree, or under a refused base. */
 const CONFIG_ROOT_UNCOLLECTED = ['canary-ws/private.env', '.canary-home.env', '.ssh/id_canary', '.aws/canary-credentials'];
+/** Outside the scanned home (another user's): never collected, whatever links or configs point there. */
+const OUTSIDE_HOME = ['notes/secret.md', 'skills/s/tool.py'];
+/** Links inside a walked config tree that lead out of the home or into a store. */
+const ESCAPE_LINKS: Record<string, string> = {
+  'canary-extra/pack/etc': '/private/etc',
+  'canary-extra/pack/etc2': '/etc',
+  'canary-extra/pack/gh': '../../.config/gh',
+  'canary-extra/pack/ssh': '../../.ssh',
+};
 const CONFIG_COMMANDS = ['canary-bin/hermes-server', 'canary-bin/tirith', 'canary-bin/cd-server', 'canary-bin/at-server'];
 
 async function plantConfigRoots(home: string): Promise<void> {
@@ -414,7 +424,7 @@ async function plantConfigRoots(home: string): Promise<void> {
   await put('.nanobot/config.json', json('nanobot root config', { agents: { defaults: { workspace: '~/canary-ws' } } }));
   await put('.openclaw/openclaw.json', json('openclaw root config', {
     agents: { defaults: { workspace: '~/canary-oc' } },
-    skills: { load: { extraDirs: ['~', '~/.ssh', '/', '~/canary-extra'] } },
+    skills: { load: { extraDirs: ['~', '~/.ssh', '/', '~/canary-extra', '/private/etc', '/etc', otherHome(home), '~/.config/gh', '~/.config', '~/to-other'] } },
   }));
   await put('.zeroclaw/config.toml', tomlFile('zeroclaw root config') + [
     '[agents.main.workspace]', 'path = "~/canary-zc"',
@@ -433,6 +443,18 @@ async function plantConfigRoots(home: string): Promise<void> {
   for (const [rel, kind] of Object.entries(CONFIG_TREE_FILES)) await put(rel, make[kind](rel));
   for (const rel of CONFIG_ROOT_UNCOLLECTED) await put(rel, envFile(rel));
   for (const rel of CONFIG_COMMANDS) await put(rel, `#!/bin/sh\n${textFile(rel)}`);
+  for (const rel of OUTSIDE_HOME) {
+    await mkdir(dirname(join(otherHome(home), rel)), { recursive: true });
+    await writeFile(join(otherHome(home), rel), envFile(`other user ${rel}`));
+  }
+  await symlink(otherHome(home), join(home, 'to-other'));
+  await symlink(otherHome(home), join(home, 'canary-extra/pack/other'));
+  for (const [rel, target] of Object.entries(ESCAPE_LINKS)) await symlink(target, join(home, rel));
+}
+
+/** A directory beside the scanned home, standing in for another user's. */
+function otherHome(home: string): string {
+  return join(dirname(home), 'other-user');
 }
 
 describe.skipIf(!goAvailable)('probe privacy canary', () => {
@@ -551,7 +573,24 @@ describe.skipIf(!goAvailable)('probe privacy canary', () => {
       [join(home, '.ssh')]: 'refused',
       [join(home, '.aws')]: 'refused',
       '/': 'refused',
+      '/private/etc': 'refused',
+      '/etc': 'refused',
+      [otherHome(home)]: 'refused',
+      [join(home, '.config/gh')]: 'refused',
+      [join(home, 'to-other')]: 'refused',
     });
+    // nothing from /etc or the other user's home ships content — through a
+    // config or a link to it — and a walked tree's links out of the home or
+    // into a store are not even recorded
+    const real = (p: string) => { try { return realpathSync(p); } catch { return p; } };
+    const forbidden = ['/etc/', '/private/etc/', real(otherHome(home)) + '/'];
+    for (const [p, e] of Object.entries(snap.files)) {
+      if (e.content) expect(forbidden.some(f => p.startsWith(f) || real(p).startsWith(f)), `content shipped for ${p}`).toBe(false);
+    }
+    for (const rel of [...Object.keys(ESCAPE_LINKS), 'canary-extra/pack/other']) {
+      const leaked = Object.keys(snap.files).filter(p => p === join(home, rel) || p.startsWith(join(home, rel) + '/'));
+      expect(leaked, rel).toEqual([]);
+    }
   });
 
   it('ships no canary', () => {
