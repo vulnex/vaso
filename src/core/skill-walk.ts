@@ -2,6 +2,7 @@ import { basename, dirname, join, normalize, relative, isAbsolute } from 'node:p
 import type { DirentInfo, FSProvider } from './fs-provider.js';
 import { relEscapes } from './path-rel.js';
 import { classifySensitivePath } from '../analyzers/sensitive-paths.js';
+import { linkScope } from './skill-root-scope.js';
 
 /**
  * Skills are often installed as symlinks — `~/.codex/skills/<name>` pointing
@@ -18,7 +19,9 @@ import { classifySensitivePath } from '../analyzers/sensitive-paths.js';
  * A link into a credential store or shell startup file (`skills/keys` →
  * ~/.ssh, `creds.txt` → ~/.aws/credentials) is never followed: SKL-013
  * reports it from its target, and the probe never ships what is behind it
- * (≥ 1.4.0, escapesToSink in probe/sensitive_sinks.go).
+ * (≥ 1.4.0, escapesToSink in probe/sensitive_sinks.go). Nor is one leading
+ * where the tree's root may not (another user's home, an OS directory, the
+ * home itself — linkScope in skill-root-scope.ts; linkInScope in the probe).
  */
 const MAX_LINK_DEPTH = 8;
 
@@ -112,8 +115,11 @@ async function sinkLink(fs: FSProvider, link: string, real: string, named: Reado
  */
 export async function walkSkillTree(fs: FSProvider, root: string): Promise<DirentInfo[]> {
   const real = await realOrSelf(fs, root);
-  return walk(fs, root, [real], new Visited(real), 0, true, new Set(classifySensitivePath(root)));
+  return walk(fs, root, [real], new Visited(real), 0, true, new Set(classifySensitivePath(root)), await linkScope(fs, root));
 }
+
+/** Whether a link met in the walk may be followed (linkScope). */
+type InScope = (link: string) => Promise<boolean>;
 
 /**
  * The second half of walkSkillTree for a caller that already listed `root`
@@ -125,7 +131,7 @@ export async function followSkillLinks(fs: FSProvider, root: string, entries: Di
   const visited = new Visited(rootReal);
   const prefix = root.endsWith('/') ? root : root + '/';
   const links = entries.filter(e => e.isSymbolicLink && (e.parentPath === root || (e.parentPath ?? '').startsWith(prefix)));
-  return (await follow(fs, root, links, [rootReal], visited, 0, new Set(classifySensitivePath(root)))).filter(e => !e.isSymbolicLink || !links.includes(e));
+  return (await follow(fs, root, links, [rootReal], visited, 0, new Set(classifySensitivePath(root)), await linkScope(fs, root))).filter(e => !e.isSymbolicLink || !links.includes(e));
 }
 
 async function walk(
@@ -136,6 +142,7 @@ async function walk(
   depth: number,
   isRoot: boolean,
   named: ReadonlySet<string>,
+  inScope: InScope,
 ): Promise<DirentInfo[]> {
   let entries: DirentInfo[];
   try {
@@ -153,7 +160,7 @@ async function walk(
       entries = entries.filter(e => !underAny(join(real, relative(dir, e.parentPath ?? dir), e.name), real, taken));
     }
   }
-  return follow(fs, dir, entries, roots, visited, depth, named);
+  return follow(fs, dir, entries, roots, visited, depth, named, inScope);
 }
 
 /** `entries` with every followable symlink among them expanded in place. */
@@ -165,6 +172,7 @@ async function follow(
   visited: Visited,
   depth: number,
   named: ReadonlySet<string>,
+  inScope: InScope,
 ): Promise<DirentInfo[]> {
   const out: DirentInfo[] = [];
   const dirLinks: Array<{ entry: DirentInfo; parent: string; link: string; real: string }> = [];
@@ -188,7 +196,8 @@ async function follow(
     }
     // Inside a tree already being walked, or a parent of one (a link back up
     // would re-walk it), or seen through another link
-    if (roots.some(r => isWithin(real, r) || isWithin(r, real)) || visited.has(real) || await sinkLink(fs, link, real, named)) {
+    if (roots.some(r => isWithin(real, r) || isWithin(r, real)) || visited.has(real) || await sinkLink(fs, link, real, named)
+      || !(await inScope(link))) {
       out.push(entry);
       continue;
     }
@@ -220,7 +229,7 @@ async function follow(
     }
     visited.add(real);
     out.push({ name: entry.name, isFile: false, isDirectory: true, parentPath: parent });
-    out.push(...await walk(fs, link, [...roots, real], visited, depth + 1, false, named));
+    out.push(...await walk(fs, link, [...roots, real], visited, depth + 1, false, named, inScope));
   }
   return out;
 }

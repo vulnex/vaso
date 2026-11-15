@@ -231,7 +231,7 @@ export const picoclawAdapter: AgentAdapter = {
       const workspaces = picoclawWorkspaces(main?.data, paths.workspaceRoot, userHome);
       const builtinSkills = userHome === fs.homedir() ? envOverride(fs, 'PICOCLAW_BUILTIN_SKILLS') : undefined;
       // Workspaces the config sets (and the named-agent ones beside a
-      // configured default) are walked only inside the home; the default
+      // configured default) are walked where a skills tree may be; the default
       // under $PICOCLAW_HOME is the agent's own
       const derived = workspaces.filter(w => !configSetWorkspace(main?.data, w, paths.workspaceRoot)).map(w => join(w, 'skills'));
       const screened = await screenSkillRoots(fs, workspaces.map(w => join(w, 'skills')).filter(d => !derived.includes(d)), userHome);

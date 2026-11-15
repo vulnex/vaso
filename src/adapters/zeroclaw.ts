@@ -1,7 +1,7 @@
 import { basename, dirname, isAbsolute, join } from 'node:path';
 import type { AgentAdapter, DetectOptions } from './adapter.js';
 import type { AgentInstallation, GatewayInfo, ModelRef, ParsedConfig, UnscannedSkillsDir } from '../core/types.js';
-import { skillRootGap } from '../core/skill-root-scope.js';
+import { skillRootGap, unscannedDir } from '../core/skill-root-scope.js';
 import type { ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
@@ -170,7 +170,7 @@ async function listDirs(dir: string, fs: FSProvider): Promise<string[]> {
  */
 async function skillRoots(configDir: string, data: Record<string, unknown>, home: string, fs: FSProvider): Promise<{ roots: string[]; unscanned: UnscannedSkillsDir[] }> {
   const candidates: string[] = [];
-  // Roots config.toml sets itself: walked only inside the home (skill-root-scope)
+  // Roots config.toml sets itself: walked where a skills tree may be (skill-root-scope)
   const configSet = new Set<string>();
   const agents = asRecord(data.agents) ?? {};
   const aliases = new Set([...Object.keys(agents), ...(await listDirs(join(configDir, 'agents'), fs))]);
@@ -204,7 +204,7 @@ async function skillRoots(configDir: string, data: Record<string, unknown>, home
     if (configSet.has(c)) {
       const reason = await skillRootGap(fs, c, home);
       if (reason) {
-        unscanned.push({ path: c, reason });
+        unscanned.push(await unscannedDir(fs, c, reason, home));
         continue;
       }
     }

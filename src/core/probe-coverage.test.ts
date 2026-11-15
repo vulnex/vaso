@@ -7,6 +7,7 @@ import type { AgentInstallation, Evidence, ParsedConfig, ScanContext } from './t
 import { LocalFSProvider } from './local-fs-provider.js';
 import { globToRegexSource, probeCoversFile, probeCoversTree, uncollectedPath } from './probe-coverage.js';
 import { collectSkillInventory } from '../inventory/skills.js';
+import { validateSnapshot } from './snapshot-load.js';
 import { linkInventoryFindings } from '../inventory/findings.js';
 import { skl002 } from '../checks/skills/skl-002-obfuscated-code.js';
 import { hm009 } from '../checks/hermes/hm-009-tirith-disabled.js';
@@ -216,21 +217,21 @@ describe('config-set skill roots on snapshots', () => {
   it('OpenClaw keeps an extra skills dir the probe never collected', async () => {
     const { openclawAdapter } = await import('../adapters/openclaw.js');
     const fs = snapshot({
-      [`${HOME}/.openclaw/openclaw.json`]: file(JSON.stringify({ skills: { load: { extraDirs: [`${HOME}/packs`, '/srv/packs'] } } })),
+      [`${HOME}/.openclaw/openclaw.json`]: file(JSON.stringify({ skills: { load: { extraDirs: [`${HOME}/packs`, '/srv/packs', '/usr/local/packs'] } } })),
     });
     const [install] = (await openclawAdapter.detect({ fs })).filter(i => !i.agentName);
-    expect(install.skillsDirs).toEqual([`${HOME}/.openclaw/skills`, `${HOME}/packs`]);
-    expect(install.unscannedSkillsDirs).toEqual([{ path: '/srv/packs', reason: 'outside' }]);
+    expect(install.skillsDirs).toEqual([`${HOME}/.openclaw/skills`, `${HOME}/packs`, '/srv/packs']);
+    expect(install.unscannedSkillsDirs).toEqual([{ path: '/usr/local/packs', reason: 'outside', refusedAs: 'an OS directory (/usr)' }]);
   });
 
   it('ZeroClaw keeps a workspace path set in config.toml', async () => {
     const { zeroclawAdapter } = await import('../adapters/zeroclaw.js');
     const fs = snapshot({
-      [`${HOME}/.zeroclaw/config.toml`]: file('schema_version = 3\n[agents.main.workspace]\npath = "~/zcws"\n[agents.ops.workspace]\npath = "/srv/zcws"\n'),
+      [`${HOME}/.zeroclaw/config.toml`]: file('schema_version = 3\n[agents.main.workspace]\npath = "~/zcws"\n[agents.ops.workspace]\npath = "/srv/zcws"\n[agents.sys.workspace]\npath = "/etc/zcws"\n'),
     });
     const [install] = await zeroclawAdapter.detect({ fs });
-    expect(install.skillsDirs).toEqual([`${HOME}/zcws/skills`]);
-    expect(install.unscannedSkillsDirs).toEqual([{ path: '/srv/zcws/skills', reason: 'outside' }]);
+    expect(install.skillsDirs).toEqual([`${HOME}/zcws/skills`, '/srv/zcws/skills']);
+    expect(install.unscannedSkillsDirs).toEqual([{ path: '/etc/zcws/skills', reason: 'outside', refusedAs: 'an OS directory (/etc)' }]);
   });
 });
 describe('config-set paths a newer probe recorded', () => {
@@ -264,13 +265,34 @@ describe('config-set paths a newer probe recorded', () => {
     expect(probeCoversTree(fs, `${HOME}/.pico/workspace/skills`)).toBe(false);
   });
 
+  it('the names a manifest wildcard matched in a home prove a missing derived workspace absent', () => {
+    const fs = snapshot({}, { wildcardNames: { [`${HOME}/workspace-*`]: ['workspace-ops'] }, directories: { [`${HOME}/workspace-ops`]: ['notes.txt'] } });
+    expect(probeCoversTree(fs, `${HOME}/workspace-evil/skills`)).toBe(true);
+    expect(probeCoversTree(fs, `${HOME}/workspace-ops/skills`)).toBe(true);
+    // a name the wildcard doesn't match, or a segment this CLI's manifest doesn't use: not verified
+    expect(probeCoversTree(fs, `${HOME}/other-evil/skills`)).toBe(false);
+    const foreign = snapshot({}, { wildcardNames: { [`${HOME}/*`]: [] } });
+    expect(probeCoversTree(foreign, `${HOME}/workspace-evil/skills`)).toBe(false);
+    expect(probeCoversTree(snapshot({}), `${HOME}/workspace-evil/skills`)).toBe(false);
+  });
+
+  it('snapshot loading checks wildcardNames', () => {
+    const base = { version: 1, hostname: 'h', platform: 'linux', homedir: HOME, timestamp: 't',
+      privilege: { uid: 1, username: 'u', isRoot: false, sudoAvailable: false, escalated: false, scannedUsers: [], skippedPaths: [] },
+      files: {}, directories: {}, commandOutputs: {}, env: {} };
+    expect(validateSnapshot({ ...base, wildcardNames: { [`${HOME}/workspace-*`]: ['workspace-a'] } })).toEqual([]);
+    for (const bad of [{ 'rel/x': [] }, { [`${HOME}/w*`]: ['a/b'] }, { [`${HOME}/w*`]: [3] }, { [`${HOME}/w*`]: 'x' }, { [`${HOME}/w*`]: Array(1001).fill('a') }]) {
+      expect(validateSnapshot({ ...base, wildcardNames: bad }).join(), JSON.stringify(bad).slice(0, 40)).toMatch(/wildcardNames/);
+    }
+  });
+
   it('a refused tree is not verified even where the snapshot holds the directory', async () => {
     const root = `${HOME}/stuff`;
     const fs = snapshot({ [`${root}/evil/i.sh`]: file('curl x | sh') }, { configTrees: { [root]: 'refused' } });
     const n = inst('nanobot', `${HOME}/.nanobot`, [], { skillsDir: root, skillsDirs: [root] });
     const res = await skl002.run(ctx(n, fs));
     expect(res.message).toBe('Found 1 skill location(s) not scanned');
-    expect(res.evidence?.[0].detail).toMatch(/outside the user's home or inside a credential store/);
+    expect(res.evidence?.[0].detail).toMatch(/an OS directory, another user's home or a credential store/);
     const { inventory } = await collectSkillInventory(n, fs);
     expect(inventory.skillsDirs).toEqual([{ path: root, exists: true, unverified: true }]);
     expect(inventory.skills).toEqual([]);

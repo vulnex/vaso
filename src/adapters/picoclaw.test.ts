@@ -290,20 +290,23 @@ describe('PicoClaw adapter', () => {
           { id: 'main', default: true },
           { id: 'Research Bot' },
           { id: 'ops', workspace: '/data/ops-ws' },
+          { id: 'sys', workspace: '/var/lib/sys-ws' },
           'not-an-object',
         ],
       },
     });
     const fs = makeFs({ files: onboardFiles(config), env: { PICOCLAW_BUILTIN_SKILLS: '/opt/picoclaw/skills' } });
     const [inst] = await picoclawAdapter.detect({ fs });
+    // a workspace the config sets out of the home is walked where skills live (/data)…
     expect(inst.skillsDirs).toEqual([
       `${PICO}/workspace/skills`,
       `${PICO}/workspace-research-bot/skills`,
+      '/data/ops-ws/skills',
       `${PICO}/skills`,
       '/opt/picoclaw/skills',
     ]);
-    // a workspace the config sets outside the home is not walked
-    expect(inst.unscannedSkillsDirs).toEqual([{ path: '/data/ops-ws/skills', reason: 'outside' }]);
+    // …not in an OS directory
+    expect(inst.unscannedSkillsDirs).toEqual([{ path: '/var/lib/sys-ws/skills', reason: 'outside', refusedAs: 'an OS directory (/var)' }]);
     expect(picoclawWorkspaces(undefined, PICO, HOME)).toEqual([`${PICO}/workspace`]);
   });
 

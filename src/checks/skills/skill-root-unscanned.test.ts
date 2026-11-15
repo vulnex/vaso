@@ -7,8 +7,9 @@ import { LocalFSProvider } from '../../core/local-fs-provider.js';
 import { skillChecks } from './index.js';
 import { iocChecks } from '../ioc/index.js';
 
-// A skills directory the config sets outside the user's home is not walked
-// (local and remote alike). It must never read as "no skills directory": SKL-002
+// A skills directory the config sets where no skills tree is walked (an OS
+// directory, another user's home, a credential store) is not walked (local and
+// remote alike). It must never read as "no skills directory": SKL-002
 // reports it as a warning, once per directory; the other skill-tree checks say
 // their verdict is not verified.
 
@@ -38,7 +39,7 @@ describe('a skills directory outside the home', () => {
     const r = await byId('SKL-002').run(ctx(OUT));
     expect(r.passed).toBe(false);
     expect(r.severity).toBe('warning');
-    expect(r.message).toBe(`skills directory ${OUT[0].path} not scanned (outside the user's home or in a credential store)`);
+    expect(r.message).toBe(`skills directory ${OUT[0].path} not scanned (an OS directory, another user's home or a credential store)`);
     expect(r.evidence).toHaveLength(1);
     expect(r.evidence![0].mitigated).toBeUndefined();
   });
@@ -66,8 +67,16 @@ describe('a skills directory outside the home', () => {
     expect(r.evidence).toHaveLength(1);
     expect(r.evidence![0].mitigated).toBe(true);
     const missing = join(tmp, 'nonexist-zz', 'skills');
-    expect(r.evidence![0].detail).toBe(`not scanned: skills directory ${missing} (outside the user's home or in a credential store) does not exist — nothing to scan`);
+    expect(r.evidence![0].detail).toBe(`not scanned: skills directory ${missing} (an OS directory, another user's home or a credential store) does not exist — nothing to scan`);
     expect(r.message).toContain('does not exist');
+  });
+
+  it('SKL-002 names the kind of place, and the link target of a linked directory', async () => {
+    const r = await byId('SKL-002').run(ctx([{ ...OUT[0], target: '/etc/skills', refusedAs: 'an OS directory (/etc)', agentDefault: true }]));
+    expect(r.message).toBe(`skills directory ${OUT[0].path} not scanned (links to /etc/skills, an OS directory (/etc))`);
+    expect(r.evidence![0].detail).toBe('not scanned: skills directory links to /etc/skills, an OS directory (/etc) — VASO doesn\'t walk it (locally or remotely); review it with `vaso skill audit /etc/skills`');
+    const set = await byId('SKL-002').run(ctx([{ ...OUT[0], refusedAs: 'another user\'s home (/home/bob)' }]));
+    expect(set.evidence![0].detail).toMatch(/^not scanned: skills directory set to another user's home \(\/home\/bob\) — /);
   });
 
   it('SKL-002 says how to review it: vaso skill audit <path>', async () => {

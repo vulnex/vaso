@@ -323,6 +323,11 @@ export class SnapshotFSProvider implements FSProvider {
     }
   }
 
+  /** Names a config tree's wildcard segment matched in a home (`<dir>/<segment>` → names). */
+  wildcardNames(): Readonly<Record<string, readonly string[]>> {
+    return this.snapshot.wildcardNames ?? {};
+  }
+
   /** Config-derived trees the probe walked, by literal base path, with what it did. */
   configTrees(): Readonly<Record<string, ConfigTreeStatus>> {
     return this.snapshot.configTrees ?? {};

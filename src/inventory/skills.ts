@@ -62,11 +62,12 @@ export async function collectSkillInventory(installation: AgentInstallation, fs:
   const allFiles: string[] = [];
 
   // Skills directories the config sets where no scan walks: listed, unverified
-  for (const { path, reason } of installation.unscannedSkillsDirs ?? []) {
+  for (const u of installation.unscannedSkillsDirs ?? []) {
+    const { path, reason } = u;
     // A snapshot keys paths normalized (`~/./a/../.ssh` is `~/.ssh` there)
     const at = fs.kind === 'snapshot' && isAbsolute(path) ? posix.normalize(path) : path;
     skillsDirs.push({ path, exists: await fs.access(at).catch(() => false), unverified: true });
-    incomplete.push(`${path}: ${unscannedReason(reason, path)}`);
+    incomplete.push(`${path}: ${unscannedReason(reason, path, u)}`);
   }
 
   for (const root of roots) {

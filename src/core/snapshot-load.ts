@@ -60,6 +60,8 @@ function isStringRecord(v: unknown): boolean {
 
 /** probe/config_roots.go maxConfigTrees: config-derived trees one snapshot records. */
 export const MAX_CONFIG_TREES = 2000;
+/** probe/config_roots.go maxWildcardNames: names one wildcardNames entry holds. */
+const MAX_WILDCARD_NAMES = 1000;
 /** Longest configTrees key accepted (PATH_MAX). */
 const MAX_CONFIG_TREE_PATH = 4096;
 
@@ -149,6 +151,16 @@ export function validateSnapshot(value: unknown): string[] {
       errors.push('Invalid resolvedDirs field (normalized absolute directory paths expected)');
     } else if (entries.length > MAX_CONFIG_TREES) {
       errors.push(`Invalid resolvedDirs field (more than ${MAX_CONFIG_TREES} entries)`);
+    }
+  }
+  if (s.wildcardNames !== undefined) {
+    // probe/config_roots.go recordWildcardNames: names (no `/`), at most 1000 per directory
+    const entries = isRecord(s.wildcardNames) ? Object.entries(s.wildcardNames) : undefined;
+    if (!entries || !entries.every(([k, v]) => isConfigTreePath(k) && Array.isArray(v) && v.length <= MAX_WILDCARD_NAMES
+      && v.every(n => typeof n === 'string' && n.length > 0 && n.length <= 255 && !n.includes('/') && !n.includes('\0')))) {
+      errors.push('Invalid wildcardNames field (directory/segment keys with lists of names expected)');
+    } else if (entries.length > MAX_CONFIG_TREES) {
+      errors.push(`Invalid wildcardNames field (more than ${MAX_CONFIG_TREES} entries)`);
     }
   }
   if (s.timestamp !== undefined && typeof s.timestamp !== 'string') errors.push('Invalid timestamp field');
