@@ -22,6 +22,17 @@ describe('SENSITIVE_SINKS', () => {
     expect(classifySensitivePath('/home/u/.aws/credentials')).toHaveLength(1);
     expect(classifySensitivePath('/home/u/.claude/skills/sshlink')).toEqual([]);
   });
+
+  it('covers the other credential stores a config-set tree must never reach', () => {
+    for (const p of ['/home/u/.config/gh/hosts.yml', '/home/u/.config/gcloud', '/home/u/.azure/x', '/home/u/.password-store',
+      '/Users/u/Library/Keychains/login.keychain-db', '/home/u/.codex/auth.json', '/home/u/.netrc', '/home/u/.git-credentials',
+      '/Users/u/Library/Application Support/Google/Chrome/Default', '/home/u/.mozilla/firefox', '/home/u/.config/chromium']) {
+      expect(classifySensitivePath(p), p).toHaveLength(1);
+      expect(isCredentialPath(p), p).toBe(true);
+    }
+    // a Codex skills dir is not its credential store
+    for (const p of ['/home/u/.codex/skills/x', '/home/u/.config/ghostty', '/home/u/.github/x']) expect(classifySensitivePath(p), p).toEqual([]);
+  });
 });
 
 describe('isCredentialPath (skill read sources, dt17)', () => {
