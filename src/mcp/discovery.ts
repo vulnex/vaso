@@ -4,7 +4,7 @@ import type { MCPConfig, MCPConfigLoadError, MCPConfigScope, MCPServerEntry, MCP
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { stripJsonc } from '../core/jsonc.js';
-import { claudeConfigPaths } from '../adapters/claude-code.js';
+import { claudeConfigPaths, claudeManagedMcpPath } from '../adapters/claude-code.js';
 import { codexHome } from '../adapters/codex.js';
 import { projectDirs as devinProjectDirs } from '../adapters/devin.js';
 import { copilotHome } from '../adapters/copilot-cli.js';
@@ -65,6 +65,9 @@ function getGlobalConfigLocations(platform: Platform, home: string, fs: FSProvid
   locations.push(
     { source: 'Claude Code', agents: ['claude-code'], path: claude.rootStateFile, shape: 'claude-json' },
     { source: 'Claude Code', agents: ['claude-code'], path: join(claude.claudeDir, 'mcp.json') },
+    // The organization's managed-mcp.json (system path): its servers are the
+    // ones that run — it switches the others off (off-lists.ts)
+    { source: 'Claude Code (managed)', agents: ['claude-code'], path: claudeManagedMcpPath({ platform }) },
   );
 
   // Copilot CLI: user-level servers in <config dir>/mcp-config.json ($COPILOT_HOME)

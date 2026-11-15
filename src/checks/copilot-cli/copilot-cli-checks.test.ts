@@ -525,3 +525,97 @@ describe('Copilot CLI: allow-all mode, MCP approvals, providers.json, private st
     expect(benign.passed).toBe(true);
   });
 });
+
+describe.skipIf(process.platform === 'win32')('GHC-001 store files', () => {
+  async function withHome(fn: (dir: string, ctx: ScanContext) => Promise<void>): Promise<void> {
+    const { mkdtemp, mkdir, rm } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const { LocalFSProvider } = await import('../../core/local-fs-provider.js');
+    const home = await mkdtemp(join(tmpdir(), 'vaso-ghc001s-'));
+    const dir = join(home, '.copilot');
+    await mkdir(dir, { mode: 0o700 });
+    const ctx: ScanContext = {
+      installation: { agent: 'copilot-cli', installDir: dir, configFiles: [] } as AgentInstallation,
+      configs: [], platform: process.platform as ScanContext['platform'], fs: new LocalFSProvider(),
+    };
+    try {
+      await fn(dir, ctx);
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  }
+  const check = copilotCliChecks.find(c => c.id === 'GHC-001')!;
+  const put = async (path: string, mode: number) => {
+    const { mkdir, writeFile, chmod } = await import('node:fs/promises');
+    const { dirname } = await import('node:path');
+    await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+    await writeFile(path, 'x');
+    await chmod(path, mode);
+  };
+
+  it('judges a symlinked store file by its target; the fix leaves the link alone', async () => {
+    await withHome(async (dir) => {
+      const { symlink, stat } = await import('node:fs/promises');
+      const { join } = await import('node:path');
+      const target = join(dir, '..', 'open', 'tok.json');
+      await put(target, 0o644);
+      await put(join(dir, 'mcp-oauth-config', 'other.json'), 0o600);
+      await symlink(target, join(dir, 'mcp-oauth-config', 'github.tokens.json'));
+      const ctx = {
+        installation: { agent: 'copilot-cli', installDir: dir, configFiles: [] } as AgentInstallation,
+        configs: [], platform: process.platform as ScanContext['platform'],
+        fs: new (await import('../../core/local-fs-provider.js')).LocalFSProvider(),
+      } as ScanContext;
+      const r = await check.run(ctx);
+      expect(r.passed).toBe(false);
+      expect(r.evidence?.map(e => e.file)).toEqual([join(dir, 'mcp-oauth-config', 'github.tokens.json')]);
+      const res = await check.fix!(ctx);
+      expect(res.message).toMatch(/symlink/);
+      expect((await stat(target)).mode & 0o777).toBe(0o644);
+    });
+  });
+
+  it('judges every file of a long store, listing at most 200 and counting the rest', async () => {
+    await withHome(async (dir, ctx) => {
+      const { join } = await import('node:path');
+      for (let i = 0; i < 230; i++) await put(join(dir, 'session-state', `a${String(i).padStart(3, '0')}.jsonl`), 0o600);
+      for (let i = 0; i < 30; i++) await put(join(dir, 'session-state', `z${i}.jsonl`), 0o644);
+      const few = await check.run(ctx);
+      expect(few.passed).toBe(false);
+      expect(few.evidence).toHaveLength(30);
+      for (let i = 30; i < 205; i++) await put(join(dir, 'session-state', `z${i}.jsonl`), 0o644);
+      const many = await check.run(ctx);
+      expect(many.evidence).toHaveLength(201);
+      expect(many.evidence?.[200]).toMatchObject({ file: join(dir, 'session-state'), snippet: '+5 more file(s)' });
+    });
+  });
+
+  it('checks files one folder down (session-state/<id>/events.jsonl)', async () => {
+    await withHome(async (dir, ctx) => {
+      const { join } = await import('node:path');
+      await put(join(dir, 'session-state', 'abc', 'events.jsonl'), 0o644);
+      const r = await check.run(ctx);
+      expect(r.passed).toBe(false);
+      expect(r.evidence?.map(e => e.file)).toEqual([join(dir, 'session-state', 'abc', 'events.jsonl')]);
+      await check.fix!(ctx);
+      expect((await check.run(ctx)).passed).toBe(true);
+    });
+  });
+
+  it('a remote scan without a store file\'s metadata says "not verified" instead of passing silently', async () => {
+    const fs = makeFs({
+      kind: 'snapshot',
+      access: vi.fn(async (p: string) => p === '/home/test/.copilot' || p.endsWith('session-state')),
+      permissions: vi.fn(async (p: string) => {
+        if (p.endsWith('events.jsonl')) throw new Error('ENOENT: path not collected in snapshot');
+        return { octal: '700', ownerRead: true, ownerWrite: true, ownerExec: true, groupRead: false, groupWrite: false, groupExec: false, otherRead: false, otherWrite: false, otherExec: false };
+      }),
+      readdirEntries: vi.fn(async (d: string) => (d.endsWith('session-state') ? [{ name: 'abc', isFile: false, isDirectory: true }]
+        : d.endsWith('abc') ? [{ name: 'events.jsonl', isFile: true, isDirectory: false }] : [])),
+    } as unknown as Partial<FSProvider>);
+    const r = await check.run(makeCtx([], fs));
+    expect(r.passed).toBe(true);
+    expect(r.message).toMatch(/1 file\(s\) in session-state\/ not verified/);
+  });
+});

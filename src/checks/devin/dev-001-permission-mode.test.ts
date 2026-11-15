@@ -38,8 +38,16 @@ describe('DEV-001 permission mode', () => {
     expect(r.evidence?.[0].snippet).toBe('permission_mode: "accept-edits"');
   });
 
+  it('warns on Smart mode (Accept Edits plus model-approved shell, fetch and MCP calls)', async () => {
+    const r = await dev001.run(ctx({ permission_mode: 'smart' }));
+    expect(r.passed).toBe(false);
+    expect(r.severity).toBe('warning');
+    expect(r.evidence?.[0].snippet).toBe('permission_mode: "smart"');
+    expect(r.fixDescription).not.toMatch(/use "normal" or "smart"/);
+  });
+
   it('passes the other modes', async () => {
-    for (const mode of ['normal', 'smart', null]) {
+    for (const mode of ['normal', null]) {
       expect((await dev001.run(ctx({ permission_mode: mode }))).passed, String(mode)).toBe(true);
     }
   });

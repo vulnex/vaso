@@ -13,7 +13,7 @@ import { userConfigLocations } from './discovery.js';
 describe('probe manifest covers MCP discovery', () => {
   registerAllAdapters();
   const manifest = buildProbeManifest(adapterRegistry.getAdapters());
-  const patterns = [...manifest.filePaths, ...manifest.globPatterns];
+  const patterns = [...manifest.filePaths, ...manifest.globPatterns, ...(manifest.systemPaths ?? [])];
 
   const home = '/home/u';
   const fsFor = (platform: NodeJS.Platform): FSProvider => ({

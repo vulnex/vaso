@@ -262,6 +262,11 @@ export const copilotCliAdapter: AgentAdapter = {
         '~/.copilot/session-store.db',
         '~/.copilot/mcp-oauth-config/*',
         '~/.copilot/mcp-secrets/*',
+        // …and one folder level down (session-state/<session id>/events.jsonl)
+        '~/.copilot/command-history-state/*/*',
+        '~/.copilot/session-state/*/*',
+        '~/.copilot/mcp-oauth-config/*/*',
+        '~/.copilot/mcp-secrets/*/*',
       ],
       filePaths: [
         '~/.copilot/config.json',
