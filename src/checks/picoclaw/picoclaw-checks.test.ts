@@ -181,6 +181,16 @@ describe('PCL-007 broad tool paths', () => {
     const narrow = await byId('PCL-007').run(ctx([cfg(onboard({ tools: { allow_read_paths: ['^/srv/projects/app/'] } }))]));
     expect(narrow.passed).toBe(true);
   });
+
+  it('judges catch-alls with nested or overlapping quantifiers (RE2 never backtracks on them)', async () => {
+    for (const p of ['(.|\\s)*', '(.+)+', '.*.*.*']) {
+      const r = await byId('PCL-007').run(ctx([cfg(onboard({ tools: { allow_write_paths: [p] } }))]));
+      expect(r.severity, p).toBe('critical');
+      const g = await byId('PCL-002').run(ctx([cfg(onboard({ tools: { exec: { custom_allow_patterns: [p] } } }))]));
+      expect(g.passed, p).toBe(false);
+      expect(g.severity, p).toBe('critical');
+    }
+  });
 });
 
 describe('PCL-007 private host whitelist and relocated config', () => {

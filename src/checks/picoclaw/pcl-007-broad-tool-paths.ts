@@ -1,6 +1,7 @@
 import { dirname, join } from 'node:path';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
+import { testSamples } from '../../analyzers/bounded-regex.js';
 import { asRecord, compileGoRegex, picoMainConfigs, stringList } from './shared.js';
 import { riskyWhitelistEntry } from '../nanobot/nb-005-ssrf-webfetch.js';
 
@@ -52,7 +53,16 @@ export const pcl007 = defineCheck({
         for (const pattern of stringList(tools[key])) {
           const re = compileGoRegex(pattern);
           if (!re) continue;
-          const hits = targets.filter(t => re.test(t));
+          const matched = testSamples(re, targets);
+          if (!matched) {
+            evidence.push({
+              file: config.filePath,
+              snippet: `tools.${key}: ${JSON.stringify(pattern)}`,
+              detail: `Pattern not evaluated: it backtracks exponentially on sample paths, so whether it lets the agent ${write ? 'write' : 'read'} credentials or system files is unknown — review it`,
+            });
+            continue;
+          }
+          const hits = targets.filter((_, i) => matched[i]);
           if (hits.length === 0) continue;
           if (write) writes = true;
           evidence.push({
