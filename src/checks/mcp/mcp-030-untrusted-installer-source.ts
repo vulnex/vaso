@@ -14,7 +14,7 @@ import { denoRunTarget, inferPackageName, runnerName, uvRunScript } from '../../
  */
 
 const PACKAGE_RUNNERS = new Set([
-  'npx', 'pnpx', 'pnpm', 'bunx', 'bun', 'yarn',
+  'npx', 'pnpx', 'npm', 'pnpm', 'bunx', 'bun', 'yarn',
   'uvx', 'uv', 'pipx', 'pip', 'pip3', 'deno',
 ]);
 
@@ -22,6 +22,8 @@ const PACKAGE_RUNNERS = new Set([
 const INSTALL_VALUE_FLAGS = new Set(['--from', '--with', '--with-editable', '--spec']);
 /** pnpm/yarn/bun subcommands that fetch and run a package. */
 const FETCH_SUBCOMMANDS = new Set(['dlx', 'x']);
+/** npm subcommands that fetch and run a package (`npm exec`, `npm x`). */
+const NPM_FETCH_SUBCOMMANDS = new Set(['exec', 'x']);
 /** pnpm/yarn/bun options that take a value (a directory, a filter), not a package. */
 const PM_VALUE_FLAGS = new Set(['--dir', '-C', '--cwd', '--prefix', '--filter', '-F', '--workspace', '-w']);
 
@@ -82,24 +84,35 @@ export function installSpecs(cmd: string, args: string[]): string[] {
       // a local module is the server's own code, like `node ./server.js`
       return target && !isLocalSpec(target) ? [...flagged, target] : flagged;
     }
+    case 'npm':
     case 'pnpm':
     case 'yarn':
     case 'bun': {
+      // `--package`/`-p` before or after the subcommand (`pnpm --package=github:x dlx y`)
+      const packages: string[] = [];
+      const takePackage = (j: number, short = true): number => {
+        const inline = /^--package=(.+)$/.exec(args[j]);
+        if (inline) { packages.push(inline[1]); return j; }
+        if (((short && args[j] === '-p') || args[j] === '--package') && args[j + 1] !== undefined) { packages.push(args[j + 1]); return j + 1; }
+        return -1;
+      };
+      const fetchCommands = cmd === 'npm' ? NPM_FETCH_SUBCOMMANDS : FETCH_SUBCOMMANDS;
       for (let i = 0; i < args.length; i++) {
         const arg = args[i];
+        const took = takePackage(i, false);
+        if (took >= 0) { i = took; continue; }
         if (PM_VALUE_FLAGS.has(arg)) { i++; continue; }
         if (arg.startsWith('-')) continue;
         // `pnpm --dir d start`: a script of a local package, nothing fetched
-        if (!FETCH_SUBCOMMANDS.has(arg)) return flagged;
+        if (!fetchCommands.has(arg)) return flagged;
         for (let j = i + 1; j < args.length; j++) {
-          if (args[j] === '-p' || args[j] === '--package') {
-            if (args[j + 1] !== undefined) flagged.push(args[++j]);
-            continue;
-          }
+          const tookAfter = takePackage(j);
+          if (tookAfter >= 0) { j = tookAfter; continue; }
+          if (args[j] === '--') continue;
           if (args[j].startsWith('-')) continue;
-          return [...flagged, args[j]];
+          return [...flagged, ...packages, args[j]];
         }
-        return flagged;
+        return [...flagged, ...packages];
       }
       return flagged;
     }

@@ -30,7 +30,7 @@ describe('launchTarget: node option values are not the entry', () => {
   });
 
   it('notes inline code', () => {
-    const t = launchTarget(server('node', ['-e', 'require("./x")']));
+    const t = launchTarget(server('node', ['-e', 'require("./x").start(process.argv)']));
     expect(t.entry).toBeUndefined();
     expect(t.note).toMatch(/inline/);
   });

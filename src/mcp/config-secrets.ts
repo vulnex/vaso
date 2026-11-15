@@ -411,6 +411,9 @@ export function findValueSecrets(value: string, location: string): ConfigSecret[
  * `--set a.password=v`), header and cookie args, URLs of any scheme,
  * connection strings, inline JSON, bare tokens.
  */
+/** Runners whose `-p` names the package to install (`npx -p pkg cmd`, `yarn dlx -p pkg`). */
+const PACKAGE_P_RUNNERS = new Set(['npx', 'bunx', 'pnpx', 'npm', 'pnpm', 'yarn']);
+
 export function findArgSecrets(args: readonly string[], command?: string): ConfigSecret[] {
   const out: ConfigSecret[] = [];
   // a MySQL/MariaDB client or `sshpass` as the command or an earlier element: its `-p` is the password
@@ -418,6 +421,7 @@ export function findArgSecrets(args: readonly string[], command?: string): Confi
   const afterClient = (i: number): boolean => (command !== undefined && isPasswordClient(command)) || (clientAt >= 0 && clientAt < i);
   const redisAt = args.findIndex(isRedisCli);
   const afterRedis = (i: number): boolean => (command !== undefined && isRedisCli(command)) || (redisAt >= 0 && redisAt < i);
+  const packageRunner = command !== undefined && PACKAGE_P_RUNNERS.has(command.replace(/\\/g, '/').split('/').pop()?.replace(/\.(?:cmd|exe)$/i, '').toLowerCase() ?? '');
   const add = (i: number, value: string, kind: string, via: ConfigSecret['via'], text = args[i]) => {
     if (!value || notASecret(value) || out.some(s => s.value === value)) return;
     out.push({ location: `args[${i}]`, kind, masked: maskIn(text, value), value, via });
@@ -444,7 +448,9 @@ export function findArgSecrets(args: readonly string[], command?: string): Confi
     }
     // `-p <password>` (mysql, sshpass) — not a port mapping (`-p 8080:80`), a
     // version, a package or a word elsewhere (shared argv rules 1 and 2)
-    if (prev === '-p' && !isFlagShaped(arg)) {
+    // A package runner's `-p` is `--package` (`npx -p https://…/x.tgz cmd`):
+    // the value is a package spec, judged by the rules below like any argument
+    if (prev === '-p' && !isFlagShaped(arg) && !(packageRunner && !afterClient(i - 1))) {
       if (isPasswordAfterP(arg, afterClient(i - 1))) add(i, arg, 'password after -p', 'flag', `${prev} ${arg}`);
       continue;
     }
