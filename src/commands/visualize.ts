@@ -1,5 +1,5 @@
 import chalk from 'chalk';
-import { readFile } from 'node:fs/promises';
+import { readInputFile, INPUT_LIMITS } from '../core/input-file.js';
 import { join, resolve } from 'node:path';
 import { ScanEngine } from '../core/engine.js';
 import { adapterRegistry } from '../adapters/registry.js';
@@ -94,7 +94,7 @@ interface HostScan { label?: string; result: ScanResult }
  * `{ target, result | error }` entries. Hosts that failed have no result.
  */
 async function loadScanResults(path: string): Promise<HostScan[]> {
-  const raw = await readFile(path, 'utf-8');
+  const raw = await readInputFile(path, INPUT_LIMITS.report);
   const parsed = JSON.parse(raw);
   if (parsed && typeof parsed === 'object' && Array.isArray(parsed.agents)) {
     return [{ result: parsed as ScanResult }];

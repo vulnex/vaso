@@ -2,9 +2,9 @@ import { writeFile, mkdir } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import chalk from 'chalk';
-import { loadRules, validateRuleFile } from '../rules/index.js';
+import { loadRules, validateRuleFile, type DeclarativeRule } from '../rules/index.js';
 import { checkRegistry } from '../core/check-registry.js';
-import { readFile } from 'node:fs/promises';
+import { readInputFile, INPUT_LIMITS } from '../core/input-file.js';
 import YAML from 'yaml';
 import { escapeControlChars } from '../reporting/text-safety.js';
 
@@ -17,8 +17,10 @@ export interface RulesListOptions {
 
 export async function runRulesList(options: RulesListOptions): Promise<void> {
   const result = await loadRules();
+  const untrusted = result.untrustedProject.flatMap(f => f.rules.map(r => ({ ...r, file: f.filePath })));
+  const typeOf = (r: DeclarativeRule) => (r.config ? 'config' : r.pattern ? 'pattern' : 'file_exists');
 
-  if (result.allErrors.length > 0 || result.warnings.length > 0) {
+  if (result.allErrors.length > 0 || result.warnings.length > 0 || result.trustWarning) {
     for (const err of result.allErrors) {
       const loc = err.rule ? ` (rule ${err.rule})` : '';
       console.error(chalk.yellow(`  Warning: ${show(err.file)}${loc}: ${err.message}`));
@@ -26,53 +28,66 @@ export async function runRulesList(options: RulesListOptions): Promise<void> {
     for (const w of result.warnings) {
       console.error(chalk.yellow(`  Warning: ${show(w.file)} (rule ${w.rule}): ${w.message}`));
     }
+    if (result.trustWarning) console.error(chalk.yellow(`  Warning: ${show(result.trustWarning)}`));
     console.error();
   }
 
-  if (result.allRules.length === 0) {
-    if (options.format === 'json') {
-      console.log('[]');
-      return;
-    }
-    console.log(chalk.dim('  No declarative rules found.'));
-    console.log(chalk.dim(`  Create rules in ~/.vaso/rules/ or .vaso/rules/`));
-    console.log(chalk.dim(`  Run "vaso rules init" to generate a starter template.\n`));
-    return;
-  }
-
   if (options.format === 'json') {
-    const output = result.allRules.map(r => ({
+    const output = [
+      ...result.allRules.map(r => ({ r, status: 'loaded' })),
+      ...untrusted.map(r => ({ r, status: 'untrusted' })),
+    ].map(({ r, status }) => ({
       id: r.id,
       name: r.name,
       category: r.category,
       severity: r.severity,
       description: r.description,
-      type: r.config ? 'config' : r.pattern ? 'pattern' : 'file_exists',
+      type: typeOf(r),
+      file: r.file,
+      status,
     }));
     console.log(JSON.stringify(output, null, 2));
     return;
   }
 
-  console.log(chalk.bold(`  Loaded ${result.allRules.length} declarative rule(s):\n`));
+  if (result.allRules.length === 0 && untrusted.length === 0) {
+    console.log(chalk.dim('  No declarative rules found.'));
+    console.log(chalk.dim(`  Create rules in ~/.vaso/rules/ (or a project's .vaso/rules/, loaded only when trusted)`));
+    console.log(chalk.dim(`  Run "vaso rules init" to generate a starter template.\n`));
+    return;
+  }
 
   const severityColor = (s: string) =>
     s === 'critical' ? chalk.red(s) : s === 'warning' ? chalk.yellow(s) : chalk.blue(s);
+  const printRule = (rule: DeclarativeRule) => {
+    console.log(`  ${chalk.bold(show(rule.id))}  ${show(rule.name)}`);
+    console.log(`    ${severityColor(rule.severity)}  ${chalk.dim(typeOf(rule))}  ${chalk.dim(show(rule.description))}`);
+  };
 
-  for (const rule of result.allRules) {
-    const type = rule.config ? 'config' : rule.pattern ? 'pattern' : 'file_exists';
-    console.log(`  ${chalk.bold(rule.id)}  ${rule.name}`);
-    console.log(`    ${severityColor(rule.severity)}  ${chalk.dim(type)}  ${chalk.dim(rule.description)}`);
-  }
-
-  console.log();
-
-  // Show source files
-  for (const file of result.files) {
-    if (file.rules.length > 0) {
-      console.log(chalk.dim(`  ${show(file.filePath)} (${file.rules.length} rule(s))`));
+  if (result.allRules.length > 0) {
+    console.log(chalk.bold(`  Loaded ${result.allRules.length} declarative rule(s):\n`));
+    for (const rule of result.allRules) printRule(rule);
+    console.log();
+    for (const file of result.files) {
+      if (file.rules.length > 0) {
+        console.log(chalk.dim(`  ${show(file.filePath)} (${file.rules.length} rule(s))`));
+      }
     }
+    console.log();
   }
-  console.log();
+
+  if (untrusted.length > 0) {
+    console.log(chalk.bold(`  ${untrusted.length} project rule(s) — untrusted (not loaded):\n`));
+    for (const rule of untrusted) printRule(rule);
+    console.log();
+    for (const file of result.untrustedProject) {
+      if (file.rules.length > 0) {
+        console.log(chalk.dim(`  ${show(file.filePath)} (${file.rules.length} rule(s), untrusted)`));
+      }
+    }
+    const dir = show(result.projectDir);
+    console.log(chalk.dim(`\n  To load them: vaso scan --project-rules, or add ${dir} to ~/.vaso/trusted-projects\n`));
+  }
 }
 
 export interface RulesValidateOptions {
@@ -82,10 +97,10 @@ export interface RulesValidateOptions {
 export async function runRulesValidate(filePath: string, options: RulesValidateOptions): Promise<void> {
   let content: string;
   try {
-    content = await readFile(filePath, 'utf-8');
+    content = await readInputFile(filePath, INPUT_LIMITS.small);
   } catch (err) {
-    console.error(chalk.red(`  Error: Cannot read file: ${filePath}`));
-    console.error(chalk.red(`  ${err instanceof Error ? err.message : String(err)}\n`));
+    console.error(chalk.red(`  Error: Cannot read file: ${show(filePath)}`));
+    console.error(chalk.red(`  ${show(err instanceof Error ? err.message : String(err))}\n`));
     process.exitCode = 2;
     return;
   }
@@ -148,10 +163,11 @@ export async function runRulesValidate(filePath: string, options: RulesValidateO
 }
 
 const STARTER_TEMPLATE = `# VASO Declarative Rules
-# Place this file in ~/.vaso/rules/ (global) or .vaso/rules/ (project-level).
-# All rules are loaded automatically on scan. Project-level rules are
-# untrusted: their fix.set is ignored, they can't replace a global rule ID,
-# and they judge config values as reports show them (credentials masked).
+# Place this file in ~/.vaso/rules/ (global, loaded on every scan) or in a
+# project's .vaso/rules/. Project rules load only when you trust the project:
+# pass --project-rules, or add its absolute path to ~/.vaso/trusted-projects
+# (one per line, owner-writable only). Even then their fix.set is ignored and
+# they can't replace a global rule ID.
 #
 # Each rule must have exactly one type: config, pattern, or file_exists.
 # See: https://github.com/vulnex/vaso#declarative-rules
@@ -206,8 +222,9 @@ export async function runRulesInit(options: RulesInitOptions): Promise<void> {
   const defaultDir = join(homedir(), '.vaso', 'rules');
   const targetDir = options.dir ?? defaultDir;
   const targetFile = join(targetDir, 'example.yaml');
-  // Where `vaso scan` finds the file by itself: ~/.vaso/rules/ or ./.vaso/rules/
-  const loadedByScan = [defaultDir, join(process.cwd(), '.vaso', 'rules')].includes(resolve(targetDir));
+  // Where `vaso scan` finds the file by itself: ~/.vaso/rules/, or ./.vaso/rules/ once the project is trusted
+  const loadedByScan = resolve(targetDir) === defaultDir;
+  const projectTier = resolve(targetDir) === join(process.cwd(), '.vaso', 'rules');
 
   try {
     // ~/.vaso also holds scan baselines: private, like they are (0700)
@@ -218,7 +235,9 @@ export async function runRulesInit(options: RulesInitOptions): Promise<void> {
     console.log(chalk.dim('  Edit the file and run "vaso rules validate" to check it.'));
     console.log(chalk.dim(loadedByScan
       ? '  Rules are loaded automatically on "vaso scan".\n'
-      : `  "vaso scan" loads ~/.vaso/rules/ and ./.vaso/rules/ only — pass this directory with --rules ${show(targetDir)}\n`));
+      : projectTier
+        ? `  Project rules load only when the project is trusted: "vaso scan --project-rules", or add ${show(process.cwd())} to ~/.vaso/trusted-projects. Their fix.set is never applied.\n`
+        : `  "vaso scan" loads ~/.vaso/rules/ (and a trusted project's ./.vaso/rules/) only — pass this directory with --rules ${show(targetDir)}\n`));
   } catch (err) {
     const exists = (err as NodeJS.ErrnoException).code === 'EEXIST';
     console.error(chalk.red(exists
