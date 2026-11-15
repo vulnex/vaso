@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { skillFilesOf, skillsDirsOf, noSkillsDirResult } from '../skills/skill-files.js';
+import { skillFilesOf, noSkillsDirResult, unscannedRootsNote } from '../skills/skill-files.js';
 import { readCappedBytes } from '../../core/file-limits.js';
 
 export const ioc008 = defineCheck({
@@ -44,7 +44,7 @@ export const ioc008 = defineCheck({
     }
 
     return h.fromEvidence(evidence, {
-      passed: 'No skill files flagged by VirusTotal',
+      passed: `No skill files flagged by VirusTotal${unscannedRootsNote(ctx)}`,
       failed: (n) => `${n} file(s) flagged as malicious by VirusTotal`,
     });
   },

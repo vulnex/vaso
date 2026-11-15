@@ -106,6 +106,18 @@ describe('inventory in reports', () => {
     expect(out).toContain('Surface: 1 skill, 1 other skills-dir entry, 2 MCP servers (1 disabled)');
     expect(out).toContain('Shared MCP servers: 1');
   });
+
+  it('terminal: a refused or uncollected skills directory is "not scanned", not "0 skills"', () => {
+    const r = result();
+    const inv = r.agents[0].installation.inventory!;
+    inv.skillsDirs = [{ path: '/opt/team/skills', exists: true, unverified: true }];
+    inv.skills = [];
+    inv.otherEntries = [];
+    inv.incomplete = ['/opt/team/skills: outside the home — not scanned'];
+    expect(getReporter('terminal').render(r)).toContain('Surface: skills not scanned, 2 MCP servers');
+    inv.skillsDirs.push({ path: '/home/u/.claude/skills', exists: true });
+    expect(getReporter('terminal').render(r)).toContain('Surface: 0 skills (skills inventory incomplete), 2 MCP servers');
+  });
 });
 
 describe('markdown link syntax from scanned text', () => {
