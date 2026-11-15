@@ -519,12 +519,14 @@ func (c *collector) collectGlob(snapshot *ProbeSnapshot, pattern string) {
 		if c.excluded(pattern, match) {
 			continue
 		}
+		// A link is recorded (name and target, never what it points to)
+		// wherever it leads: SKL-013 reports a link out of the tree from it
+		recordSymlink(snapshot.Symlinks, match)
 		// A config-derived tree's entries outside its user's home or in a
-		// credential store (as named or resolved) aren't recorded at all
+		// credential store (as named or resolved) aren't collected
 		if c.configTree && !treeAllowed(match, c.treeHome) {
 			continue
 		}
-		recordSymlink(snapshot.Symlinks, match)
 		if _, exists := snapshot.Files[match]; !exists {
 			c.collectPath(snapshot, match, globBase(pattern), false, false)
 		}
@@ -847,10 +849,13 @@ func (c *collector) followFrom(snapshot *ProbeSnapshot, pattern string, matches 
 			continue
 		}
 		for _, sm := range sub {
-			if c.excluded(pattern, sm) || (c.configTree && !treeAllowed(sm, c.treeHome)) {
+			if c.excluded(pattern, sm) {
 				continue
 			}
 			recordSymlink(snapshot.Symlinks, sm)
+			if c.configTree && !treeAllowed(sm, c.treeHome) {
+				continue
+			}
 			if _, exists := snapshot.Files[sm]; !exists {
 				c.collectPath(snapshot, sm, globBase(pattern), metadataOnly, false)
 			}

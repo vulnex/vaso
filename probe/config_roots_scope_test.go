@@ -129,6 +129,39 @@ func TestLinksInsideAConfigTreeStayInsideTheHome(t *testing.T) {
 	if _, ok := snap.Files[filepath.Join(tree, "s", "one.js")]; ok {
 		t.Error("file link out of the home recorded")
 	}
+	// …but every link is recorded by name and target, as a local walk sees
+	// it: SKL-013 reports a link into a credential store or out of the home
+	for _, n := range []string{"etc", "etc2", "lib", "one.js", "gh", "home"} {
+		if _, ok := snap.Symlinks[filepath.Join(tree, "s", n)]; !ok {
+			t.Errorf("link %s not recorded: %v", n, snap.Symlinks)
+		}
+	}
+}
+
+// A link met inside a linked directory of a config tree is recorded too,
+// even when it leads somewhere the walk never goes.
+func TestLinksInALinkedDirOfAConfigTreeAreRecorded(t *testing.T) {
+	home := setupHome(t)
+	write(t, filepath.Join(home, ".ssh", "id_ed25519"), "KEY-CANARY\n", 0o600)
+	lib := filepath.Join(home, "lib")
+	write(t, filepath.Join(lib, "x.js"), "module.exports = 1\n", 0o644)
+	mustSymlink(t, filepath.Join(home, ".ssh"), filepath.Join(lib, "keys"))
+	tree := filepath.Join(home, "tree")
+	write(t, filepath.Join(tree, "s", "SKILL.md"), "# s\n", 0o644)
+	mustSymlink(t, lib, filepath.Join(tree, "s", "lib"))
+	writeExtraDirs(t, home, "~/tree")
+	snap := Collect(extraDirsManifest(), false)
+	if _, ok := snap.Files[filepath.Join(tree, "s", "lib", "x.js")]; !ok {
+		t.Fatal("linked directory not walked")
+	}
+	if _, ok := snap.Symlinks[filepath.Join(tree, "s", "lib", "keys")]; !ok {
+		t.Fatalf("link into ~/.ssh not recorded: %v", snap.Symlinks)
+	}
+	for p, e := range snap.Files {
+		if strings.Contains(e.Content, "CANARY") {
+			t.Errorf("content behind a link shipped: %s", p)
+		}
+	}
 }
 
 func TestConfigTreeCountFollowsLinksLikeTheWalk(t *testing.T) {

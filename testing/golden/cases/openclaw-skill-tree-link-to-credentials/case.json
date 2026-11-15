@@ -1,0 +1,18 @@
+{
+  "agent": "openclaw",
+  "source": "dt23 re-verify: skills.load.extraDirs names ~/extra1, where one skill links into ~/.ssh and another into /etc \u2014 the remote probe records both links (never what they point to), so SKL-013 reports them like a local scan",
+  "fail": {
+    "SKL-013": "critical"
+  },
+  "modes": {
+    ".openclaw/openclaw.json": "600",
+    ".openclaw": "700",
+    ".ssh": "700"
+  },
+  "inventory": {
+    "skills": [
+      "s",
+      "t"
+    ]
+  }
+}
