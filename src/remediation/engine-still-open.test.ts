@@ -47,4 +47,19 @@ describe('RemediationEngine.stillOpen', () => {
     // another installation's finding is not this fix's
     expect(engine.stillOpen(scanWith([failing('TST-001')], join(home.dir, 'other')))).toEqual([]);
   });
+
+  it('names the check a folded fix was folded into when that check is still open', async () => {
+    const registry = new CheckRegistry();
+    registry.register(defineCheck({
+      id: 'GEN-001', name: 'g', category: 'policy', severity: 'warning', description: 'g',
+      async run(_c, h) { return h.passed('x'); },
+      async fix() { return { checkId: 'GEN-001', applied: true, message: 'chmod one file' }; },
+    }));
+    const folded: CheckResult = { id: 'GEN-001', name: 'g', category: 'policy', severity: 'warning', passed: true, foldedInto: 'OWN-001', message: 'Reported by OWN-001', fixable: true };
+    const owner: CheckResult = { id: 'OWN-001', name: 'o', category: 'coding-agent', severity: 'critical', passed: false, message: '3 files still open' };
+    const engine = new RemediationEngine(registry);
+    await engine.fix(scanWith([folded, owner], home.dir), { yes: true });
+    expect(engine.stillOpen(scanWith([folded, owner], home.dir)).map(o => [o.checkId, o.finding.message])).toEqual([['OWN-001', '3 files still open']]);
+    expect(engine.stillOpen(scanWith([folded, { ...owner, passed: true }], home.dir))).toEqual([]);
+  });
 });

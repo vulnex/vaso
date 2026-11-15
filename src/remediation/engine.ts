@@ -9,6 +9,8 @@ import type { AdapterRegistry } from '../adapters/registry.js';
 import { credentialPathsFor } from '../adapters/adapter.js';
 import { getAllSkillsDirs, getSkillFiles } from '../core/utils.js';
 import { promptForFix } from './prompt.js';
+import { collectWriteNotes } from './config-writer.js';
+import { escapeControlChars } from '../reporting/text-safety.js';
 import { readRegularFile, regularMode, resolvedDir, withChangeRecorder, withFixBoundary, UnsafeTargetError } from './safe-file.js';
 import { getUserHomeDirs } from '../adapters/openclaw.js';
 import { sha256, appendManifestEntry, type BackupManifest, type ManifestEntry } from './backup-manifest.js';
@@ -148,20 +150,21 @@ export class RemediationEngine {
           // The home's owner, by lstat: a home a user made a symlink must not
           // lend its target's owner (root's, for /etc)
           const ownerUid = await lstat(home).then(s => s.uid, () => undefined);
-          const fixResult = await withFixBoundary({ roots, ownerUid }, () => withChangeRecorder(path => { this.changed.add(path); this.everChanged = true; return this.backupFile(path); }, () => check.fix!({
+          const { value: fixResult, notes } = await collectWriteNotes(() => withFixBoundary({ roots, ownerUid }, () => withChangeRecorder(path => { this.changed.add(path); this.everChanged = true; return this.backupFile(path); }, () => check.fix!({
             installation: agent.installation,
             configs: agent.installation.configFiles,
             platform: process.platform,
             fs,
             credentialPaths,
             skillFiles,
-          })));
+          }))));
 
           await this.recordAfterState();
           results.push(fixResult);
           if (fixResult.applied) this.applied.push({ install: installKey(agent), checkId: finding.id, result: fixResult });
           const icon = fixResult.applied ? chalk.green('+') : fixResult.alreadyDone ? chalk.dim('=') : chalk.red('x');
           console.log(`  ${icon} ${finding.id}: ${fixResult.message}`);
+          for (const note of notes) console.log(`      ${chalk.yellow('note:')} ${escapeControlChars(note, { lineBreaks: true })}`);
         } catch (err) {
           // whatever the failed fix changed before it threw is recorded too
           await this.recordAfterState().catch(() => undefined);
@@ -192,9 +195,24 @@ export class RemediationEngine {
     for (const agent of rescan.agents) {
       for (const r of agent.results) if (!r.passed) open.set(`${installKey(agent)}\0${r.id}`, r);
     }
+    // A folded finding (see foldedInto) passes in the rescan too: its fix is
+    // partial when a check it was folded into is still open — that check is
+    // named (once, and not again when its own fix ran and is listed already)
+    const folded = new Map<string, string[]>();
+    for (const agent of rescan.agents) {
+      for (const r of agent.results) if (r.passed && r.foldedInto) folded.set(`${installKey(agent)}\0${r.id}`, r.foldedInto.split(', '));
+    }
+    const listed = new Set(this.applied.map(a => `${a.install}\0${a.checkId}`).filter(k => open.has(k)));
     return this.applied.flatMap(a => {
       const finding = open.get(`${a.install}\0${a.checkId}`);
-      return finding ? [{ checkId: a.checkId, result: a.result, finding }] : [];
+      if (finding) return [{ checkId: a.checkId, result: a.result, finding }];
+      return (folded.get(`${a.install}\0${a.checkId}`) ?? []).flatMap(owner => {
+        const key = `${a.install}\0${owner}`;
+        const ownerFinding = open.get(key);
+        if (!ownerFinding || listed.has(key)) return [];
+        listed.add(key);
+        return [{ checkId: owner, result: a.result, finding: ownerFinding }];
+      });
     });
   }
 

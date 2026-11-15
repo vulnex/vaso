@@ -247,6 +247,8 @@ export function validateRuleFile(data: unknown): { rules: DeclarativeRule[]; err
           ruleErrors.push({ rule: label, field: 'fix.set', message: '"fix.set" must be a string (config path)' });
         } else if (hasSet && (f.set as string).trim() === '') {
           ruleErrors.push({ rule: label, field: 'fix.set', message: '"fix.set" must name a config key' });
+        } else if (hasSet && keySegments(f.set as string).some(k => k.trim() === '')) {
+          ruleErrors.push({ rule: label, field: 'fix.set', message: '"fix.set" has an empty key segment (leading, trailing or doubled ".")' });
         } else if (hasSet && keySegments(f.set as string).some(k => PROTOTYPE_KEYS.has(k))) {
           ruleErrors.push({ rule: label, field: 'fix.set', message: '"fix.set" may not name __proto__, prototype or constructor' });
         }
