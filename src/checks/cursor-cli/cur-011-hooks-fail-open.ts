@@ -1,4 +1,5 @@
 import type { Evidence } from '../../core/types.js';
+import { hookSnippet } from '../../analyzers/hook-commands.js';
 import { defineCheck } from '../../core/check-builder.js';
 
 // Cursor hooks (hooks.json — enterprise/user/project tiers) run arbitrary
@@ -43,7 +44,7 @@ export const cur011 = defineCheck({
           if (!failClosed) {
             evidence.push({
               file: config.filePath,
-              snippet: `${event}: ${command.slice(0, 80)}`,
+              snippet: hookSnippet(event, command.slice(0, 80)),
               detail: 'Guard hook is fail-open — if it crashes or times out, the action it gates proceeds unchecked',
             });
           }

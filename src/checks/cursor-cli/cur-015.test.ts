@@ -23,7 +23,7 @@ describe('CUR-015: Cursor Hook Command Fetches Code or Exfiltrates', () => {
     const result = await check.run(ctx);
     expect(result.passed).toBe(false);
     expect(result.severity).toBe('critical');
-    expect(result.evidence?.[0].snippet).toMatch(/^sessionStart: /);
+    expect(result.evidence?.[0].snippet).toMatch(/^sessionStart hook: /);
     expect((await cur011.run(ctx)).passed).toBe(true);
   });
 

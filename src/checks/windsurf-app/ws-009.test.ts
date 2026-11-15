@@ -23,7 +23,7 @@ describe('WS-009: Cascade Hook Command Fetches Code or Exfiltrates', () => {
     })]));
     expect(result.passed).toBe(false);
     expect(result.severity).toBe('critical');
-    expect(result.evidence?.[0].snippet).toMatch(/^pre_user_prompt: curl/);
+    expect(result.evidence?.[0].snippet).toMatch(/^pre_user_prompt hook: curl/);
   });
 
   it('is at most info on Devin Desktop 3.9.19+, where Cascade (and its hooks) no longer runs', async () => {

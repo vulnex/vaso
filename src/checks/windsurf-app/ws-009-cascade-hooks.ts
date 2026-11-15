@@ -1,7 +1,7 @@
 import { basename } from 'node:path';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { hookCommandRisks, hookExpansion, topTier } from '../../analyzers/hook-commands.js';
+import { hookCommandRisks, hookExpansion, topTier, hookSnippet } from '../../analyzers/hook-commands.js';
 import { cascadeRemovedNote } from './cascade-removed.js';
 
 /**
@@ -53,7 +53,7 @@ export const ws009 = defineCheck({
           if (tier === 'critical') critical = true;
           evidence.push({
             file: config.filePath,
-            snippet: `${event}${field === 'powershell' ? ' (powershell)' : ''}: ${script.slice(0, 120)}`,
+            snippet: hookSnippet(event, script.slice(0, 120), field === 'powershell' ? ' (powershell)' : ''),
             detail: `Hook command ${risks.map(r => r.reason).join('; ')}`,
             ...(tier === 'info' ? { mitigated: true } : {}),
           });

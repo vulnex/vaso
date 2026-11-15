@@ -3,7 +3,7 @@ import type { Evidence, ScanContext } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { stripJsonc } from '../../core/jsonc.js';
 import { truncateSnippet } from '../../core/patterns.js';
-import { hookItemRisks, hookItems, topTier } from '../../analyzers/hook-commands.js';
+import { hookItemRisks, hookItems, topTier, hookSnippet } from '../../analyzers/hook-commands.js';
 
 const SHELL_METACHARS = /[;&|`$()<>]/;
 
@@ -65,7 +65,7 @@ export const ghc007 = defineCheck({
         if (tier === 'critical') critical = true;
         evidence.push({
           file: config.filePath,
-          snippet: `hooks.${item.event}: ${truncateSnippet(item.url ?? item.scripts[0], 120)}`,
+          snippet: hookSnippet(`hooks.${item.event}`, truncateSnippet(item.url ?? item.scripts[0], 120)),
           detail: `${item.url ? 'HTTP hook' : 'Hook command'} ${risks.map(r => r.reason).join('; ')}`,
           ...(tier === 'info' ? { mitigated: true } : {}),
         });
