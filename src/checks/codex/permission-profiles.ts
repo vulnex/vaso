@@ -1,5 +1,7 @@
 import { posix } from 'node:path';
 import { expandHome } from '../../analyzers/broad-paths.js';
+import { MAX_GLOB_LENGTH, pathGlobMatch } from '../../analyzers/wildcard.js';
+import { truncateSnippet } from '../../core/patterns.js';
 
 const { join, normalize, dirname } = posix;
 
@@ -28,27 +30,6 @@ const CREDENTIAL_DIRS = ['.ssh', '.aws', '.gnupg', '.kube', '.docker', '.codex']
 
 const GLOB_CHARS = /[*?[]/;
 
-/** A Codex path glob as a regex: `**` any depth, `*` / `?` within a segment. */
-function globRegex(glob: string): RegExp {
-  let re = '';
-  for (let i = 0; i < glob.length; i++) {
-    const c = glob[i];
-    if (c === '*') {
-      if (glob[i + 1] === '*') {
-        i++;
-        // `**/` also matches no directory at all
-        if (glob[i + 1] === '/') { i++; re += '(?:.*/)?'; } else re += '.*';
-      } else re += '[^/]*';
-    } else if (c === '?') re += '[^/]';
-    else if (c === '[') {
-      const end = glob.indexOf(']', i + 2);
-      if (end < 0) re += '\\[';
-      else { re += `[${glob.slice(i + 1, end).replace(/^!/, '^').replace(/\\/g, '\\\\')}]`; i = end; }
-    } else re += c.replace(/[.+^${}()|\\]/g, '\\$&');
-  }
-  return new RegExp(`^${re}$`);
-}
-
 /** Paths whose write access is too broad (see broadRoot), for glob matching. */
 function sensitiveCandidates(home: string): string[] {
   const out = ['/', '/etc'];
@@ -57,28 +38,49 @@ function sensitiveCandidates(home: string): string[] {
   return out;
 }
 
+/** `<dir>/*` / `<dir>/**` (repeated) → `<dir>`, without a backtracking regex. */
+function stripTrailingWildcards(p: string): string {
+  for (;;) {
+    if (p.endsWith('/**')) p = p.slice(0, -3);
+    else if (p.endsWith('/*')) p = p.slice(0, -2);
+    else return p;
+  }
+}
+
 /** Why a writable path is too broad: `/`, the home directory or a parent of
  *  it, a system config dir, or a credential directory — or a glob that can
- *  match one of them. */
-export function broadRoot(root: string, home: string): string | undefined {
-  if (root === ':root') return '":root" is the whole filesystem';
+ *  match one of them. `path` is the path as judged, `why` the reason. */
+export function broadReason(root: string, home: string): { path: string; why: string } | undefined {
+  if (root === ':root') return { path: ':root', why: 'is the whole filesystem' };
   // `<dir>/**` and `<dir>/*` write everything below <dir>: judge <dir>
-  const p = normalize(expandHome(root, home)).replace(/(.)\/+$/, '$1').replace(/(?:\/\*\*?)+$/, '') || '/';
+  const p = stripTrailingWildcards(trimSlash(normalize(expandHome(root, home)))) || '/';
   if (GLOB_CHARS.test(p)) {
-    const re = globRegex(p);
-    const hit = sensitiveCandidates(home).find(c => re.test(c));
-    if (hit) return `"${p}" can match ${broadRoot(hit, home)}`;
+    // No real path is this long; a glob this long is judged by length alone
+    if (p.length > MAX_GLOB_LENGTH) return { path: truncateSnippet(p, 60), why: `is a glob too long to judge (${p.length} characters)` };
+    const hit = sensitiveCandidates(home).find(c => pathGlobMatch(p, c));
+    if (hit) return { path: p, why: `can match ${whichClause(broadReason(hit, home))}` };
     // a glob inside /etc or a credential dir (`~/.ssh/auth*`)
     const literal = dirname(p.slice(0, p.search(GLOB_CHARS)) + 'x');
     const inside = literal !== '/' && (literal === '/etc' || literal.startsWith('/etc/')
       || CREDENTIAL_DIRS.some(d => literal === join(home, d) || literal.startsWith(join(home, d) + '/')));
-    return inside ? `"${p}" is inside ${broadRoot(literal, home)}` : undefined;
+    return inside ? { path: p, why: `is inside ${whichClause(broadReason(literal, home))}` } : undefined;
   }
-  if (p === '/') return '"/" is the whole filesystem';
-  if (p === home || home.startsWith(p + '/')) return `"${p}" covers the home directory`;
-  if (p === '/etc' || p.startsWith('/etc/')) return `"${p}" is system configuration`;
+  if (p === '/') return { path: p, why: 'is the whole filesystem' };
+  if (p === home || home.startsWith(p + '/')) return { path: p, why: 'covers the home directory' };
+  if (p === '/etc' || p.startsWith('/etc/')) return { path: p, why: 'is system configuration' };
   const cred = CREDENTIAL_DIRS.find(d => p === join(home, d) || p.startsWith(join(home, d) + '/'));
-  return cred ? `"${p}" holds credentials (~/${cred})` : undefined;
+  return cred ? { path: p, why: `holds credentials (~/${cred})` } : undefined;
+}
+
+/** `"<path>", which <reason>` — for a reason that follows a noun. */
+export function whichClause(r: { path: string; why: string } | undefined): string {
+  return r ? `"${r.path}", which ${r.why}` : '';
+}
+
+/** `"<path>" <reason>`, or undefined when the path isn't too broad. */
+export function broadRoot(root: string, home: string): string | undefined {
+  const r = broadReason(root, home);
+  return r && `"${r.path}" ${r.why}`;
 }
 
 export interface PermissionFinding {
@@ -208,10 +210,14 @@ export function judgeDefaultPermissions(data: Record<string, unknown>, home: str
     snippet,
     detail: `profile grants write access to ${broad}${via} — sandboxed commands can modify it (shell rc files, credentials)`,
   });
+  const broadOf = (path: string) => {
+    const r = broadReason(path, home);
+    return r && whichClause(r);
+  };
 
   for (const [key, entry] of fs) {
     if (entry.access !== 'write' || key.startsWith(':')) continue;
-    const broad = broadRoot(key, home);
+    const broad = broadOf(key);
     if (broad) critical(entry.snippet, broad);
   }
 
@@ -222,7 +228,7 @@ export function judgeDefaultPermissions(data: Record<string, unknown>, home: str
     for (const [key, entry] of wsWrites) {
       const path = key === WS ? root : join(root, key.slice(WS.length + 1));
       if (fs.get(path)?.access === 'deny') continue;
-      const broad = broadRoot(path, home);
+      const broad = broadOf(path);
       if (broad) {
         critical(snippet, broad, ` (a workspace root with ${key === WS ? '":workspace_roots" write' : entry.snippet})`);
         break;

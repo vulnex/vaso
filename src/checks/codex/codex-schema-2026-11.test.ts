@@ -163,7 +163,7 @@ describe('CDX-002 permission profile merge semantics', () => {
   it('resolves :root sub-paths and globs that can match a sensitive directory', async () => {
     const etc = await run({ default_permissions: 'dev', permissions: { dev: { filesystem: { ':root': { etc: 'write' } } } } });
     expect(etc.severity).toBe('critical');
-    expect(etc.evidence?.[0].detail).toMatch(/"\/etc" is system configuration/);
+    expect(etc.evidence?.[0].detail).toMatch(/write access to "\/etc", which is system configuration/);
     for (const glob of ['~/.ss*', '~/.ssh/auth*', '/e?c', '~/.[sa][sw][hs]', '/home/*/.aws']) {
       const r = await run({ default_permissions: 'dev', permissions: { dev: { filesystem: { [glob]: 'write' } } } });
       expect(r.severity, glob).toBe('critical');
