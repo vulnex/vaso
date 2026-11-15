@@ -4,23 +4,29 @@
  * glob turned into a RegExp (`*` → `.*` / `[^/]*`) backtracks: a pattern of
  * twenty stars against a path takes exponential time. These matchers run in
  * O(pattern × text) at worst and never throw.
+ *
+ * Pattern and text are both read by code point (`Array.from`): an astral
+ * character (an emoji) is one character to `?`, to a class and to a literal
+ * alike. A combining mark is a code point of its own (`é` is two).
  */
 
 type Token =
   | { k: 'star' }
   | { k: 'any' }
   | { k: 'lit'; c: string }
-  | { k: 'class'; neg: boolean; ranges: Array<[string, string]> };
+  | { k: 'class'; neg: boolean; ranges: Array<[number, number]> };
 
 /** Longest glob judged; callers decide what a longer one means. */
 export const MAX_GLOB_LENGTH = 4096;
+
+const cp = (c: string): number => c.codePointAt(0) ?? 0;
 
 function one(t: Token, c: string, ignoreCase: boolean): boolean {
   switch (t.k) {
     case 'any': return true;
     case 'lit': return ignoreCase ? t.c.toLowerCase() === c.toLowerCase() : t.c === c;
     case 'class': {
-      const cs = ignoreCase ? [c.toLowerCase(), c.toUpperCase()] : [c];
+      const cs = ignoreCase ? [cp(c.toLowerCase()), cp(c.toUpperCase())] : [cp(c)];
       const hit = t.ranges.some(([lo, hi]) => cs.some(x => x >= lo && x <= hi));
       return hit !== t.neg;
     }
@@ -31,9 +37,9 @@ function one(t: Token, c: string, ignoreCase: boolean): boolean {
 /**
  * Two-pointer wildcard match: a star matches any run of characters, every
  * other token exactly one. Backtracks only to the last star, so the cost is
- * O(tokens × text).
+ * O(tokens × text). `s` is the text split into code points.
  */
-function matchTokens(toks: Token[], s: string, ignoreCase = false): boolean {
+function matchTokens(toks: Token[], s: readonly string[], ignoreCase = false): boolean {
   let ti = 0;
   let si = 0;
   let starT = -1;
@@ -70,16 +76,17 @@ export function wildcardMatch(pattern: string, text: string, opts: { question?: 
     } else if (c === '?' && opts.question) toks.push({ k: 'any' });
     else toks.push({ k: 'lit', c });
   }
-  return matchTokens(toks, text, opts.ignoreCase);
+  return matchTokens(toks, Array.from(text), opts.ignoreCase);
 }
 
-/** `[...]` at `start`: the class token and the index of its `]`, or
- *  undefined for an unterminated or invalid class (read as a literal `[`). */
-function parseClass(glob: string, start: number): { token: Token; end: number } | undefined {
+/** `[...]` at `start` of the code points `glob`: the class token and the
+ *  index of its `]`, or undefined for an unterminated or invalid class
+ *  (read as a literal `[`). */
+function parseClass(glob: readonly string[], start: number): { token: Token; end: number } | undefined {
   let i = start + 1;
   let neg = false;
   if (glob[i] === '!' || glob[i] === '^') { neg = true; i++; }
-  const ranges: Array<[string, string]> = [];
+  const ranges: Array<[number, number]> = [];
   let first = true;
   while (i < glob.length && (first || glob[i] !== ']')) {
     first = false;
@@ -90,9 +97,9 @@ function parseClass(glob: string, start: number): { token: Token; end: number } 
       hi = glob[i + 2];
       if (hi === '\\' && i + 3 < glob.length) { hi = glob[i + 3]; i++; }
       i += 2;
-      if (hi < lo) return undefined;
+      if (cp(hi) < cp(lo)) return undefined;
     }
-    ranges.push([lo, hi]);
+    ranges.push([cp(lo), cp(hi)]);
     i++;
   }
   if (i >= glob.length) return undefined;
@@ -101,7 +108,8 @@ function parseClass(glob: string, start: number): { token: Token; end: number } 
 
 /** One path segment of a glob: `*` and `?` stay inside it, `[...]` is a
  *  character class (`!`/`^` negates), `\x` a literal `x`. */
-function segmentTokens(seg: string): Token[] {
+function segmentTokens(segment: string): Token[] {
+  const seg = Array.from(segment);
   const toks: Token[] = [];
   for (let i = 0; i < seg.length; i++) {
     const c = seg[i];
@@ -130,17 +138,15 @@ export function pathGlobMatch(glob: string, path: string): boolean {
       if (pat[pat.length - 1] !== null || pat.length === 0) pat.push(null);
     } else pat.push(segmentTokens(seg));
   }
-  const segs = path.split('/');
+  const segs = path.split('/').map(seg => Array.from(seg));
   const P = pat.length;
   const S = segs.length;
-  // ok[j] for the pattern suffix from i: does pat[i..] match segs[j..]?
   let next = new Array<boolean>(S + 1).fill(false);
   next[S] = true;
   for (let i = P - 1; i >= 0; i--) {
     const cur = new Array<boolean>(S + 1).fill(false);
     const p = pat[i];
     if (p === null) {
-      // ** : skip it (next[j]) or consume segment j and stay (cur[j+1])
       for (let j = S; j >= 0; j--) cur[j] = next[j] || (j < S && cur[j + 1]);
     } else {
       for (let j = 0; j < S; j++) cur[j] = next[j + 1] && matchTokens(p, segs[j]);
