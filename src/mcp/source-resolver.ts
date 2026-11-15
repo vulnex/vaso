@@ -777,7 +777,7 @@ async function packageScriptEntry(
   script: string | undefined,
   fs: FSProvider,
   options: { deno?: boolean; depth?: number } = {},
-): Promise<{ path?: string; note?: string }> {
+): Promise<ScriptEntry> {
   const depth = options.depth ?? 0;
   const read = script ? await readPackageScript(dir, script, fs, options.deno === true) : { found: (await fs.access(join(dir, 'package.json'))) };
   if (!read.found) {
@@ -825,25 +825,53 @@ function openQuoteAt(command: string): number {
   return quote ? at : -1;
 }
 
-async function scriptLineEntry(dir: string, script: string, line: string, fs: FSProvider, depth: number): Promise<{ path?: string; note?: string }> {
+/**
+ * What a package script starts: `path`, the first file one of its commands
+ * runs; `extra`, the files later commands run (`node check.js && node
+ * dist/server.js` starts both); `partial`, why part of the script was not
+ * read (the length cap, the command cap); `note`, why nothing could be
+ * followed; `fallback`, a missing entry (before a build) — the package's own.
+ */
+interface ScriptEntry {
+  path?: string;
+  extra?: string[];
+  partial?: string;
+  note?: string;
+  fallback?: boolean;
+}
+
+/** Commands of one package script whose launch targets are followed. */
+const MAX_SCRIPT_COMMANDS = 16;
+
+async function scriptLineEntry(dir: string, script: string, line: string, fs: FSProvider, depth: number): Promise<ScriptEntry> {
   if (depth >= MAX_SCRIPT_DEPTH) return { note: `package script "${script}" nests other scripts too deeply` };
   // Past the cap only the commands wholly inside it are read; of the one the
   // cap cuts, the words before the cut word (its program and entry, when the
   // cut falls in later arguments or padding)
   const text = line.trimEnd();
   const capped = text.length > MAX_SCRIPT_CHARS;
-  const commands = capped ? cutScriptCommands(text) : scriptCommands(text);
-  let note: string | undefined = capped ? `package script "${script}" is longer than ${MAX_SCRIPT_CHARS / 1024} KiB and was read only in part` : undefined;
+  const all = capped ? cutScriptCommands(text) : scriptCommands(text);
+  const commands = all.slice(0, MAX_SCRIPT_COMMANDS);
+  let partial: string | undefined = capped
+    ? `package script "${script}" is longer than ${MAX_SCRIPT_CHARS / 1024} KiB and was read only in part`
+    : all.length > MAX_SCRIPT_COMMANDS
+      ? `package script "${script}" runs more than ${MAX_SCRIPT_COMMANDS} commands and was read only in part`
+      : undefined;
+  let note = partial;
   let fallback = false;
+  // Every command's launch target: `node scripts/check.js && node dist/server.js` runs both
+  const paths: string[] = [];
   for (const command of commands) {
     const r = await scriptCommandEntry(dir, script, command, fs, depth);
-    if (r.path) return { path: r.path };
+    for (const p of [r.path, ...(r.extra ?? [])]) if (p && !paths.includes(p)) paths.push(p);
     if (r.fallback) fallback = true;
+    partial ??= r.partial;
     note ??= r.note;
   }
   // `node dist/index.js` before a build: the package's own entry or its TypeScript source
-  if (fallback) return { path: dir };
-  return { note: note ?? `package script "${script}" starts no file this scan can follow` };
+  if (fallback && !paths.includes(dir)) paths.push(dir);
+  if (paths.length === 0) return { note: note ?? `package script "${script}" starts no file this scan can follow` };
+  return { path: paths[0], ...(paths.length > 1 ? { extra: paths.slice(1) } : {}), ...(partial ? { partial } : {}) };
 }
 
 async function scriptCommandEntry(
@@ -852,7 +880,7 @@ async function scriptCommandEntry(
   command: string,
   fs: FSProvider,
   depth: number,
-): Promise<{ path?: string; note?: string; fallback?: boolean }> {
+): Promise<ScriptEntry> {
   const words = commandWords(command);
   if (words.length === 0) return {};
   const program = runnerName(words[0]).toLowerCase();
@@ -862,8 +890,7 @@ async function scriptCommandEntry(
     const at = rest.findIndex((w) => /^-[a-z]*c$/.test(w));
     const code = at >= 0 ? rest[at + 1] : undefined;
     if (code === undefined) return { note: `package script "${script}" runs a ${program} script` };
-    const r = await scriptLineEntry(dir, script, code, fs, depth + 1);
-    return r.path ? r : { note: r.note };
+    return scriptLineEntry(dir, script, code, fs, depth + 1);
   }
   const inner = launchTarget({ name: script, command: words[0], args: rest, cwd: dir, transport: 'stdio' });
   if (inner.entry) {
@@ -948,10 +975,15 @@ export async function resolveServerSources(
     // Why a runner of local code left nothing to analyze (MCP-001 lists it)
     let unanalyzed = target.note;
     let localPath = target.entry;
+    // Files later commands of the package script start, and why part of it was not read
+    let scriptExtras: string[] = [];
+    let scriptPartial: SkippedFile | undefined;
     if (!localPath && target.packageDir) {
       const started = await packageScriptEntry(target.packageDir, target.script, provider, { deno: target.denoTask });
       localPath = started.path;
       unanalyzed ??= started.note;
+      scriptExtras = started.extra ?? [];
+      if (started.partial && started.path) scriptPartial = { path: target.packageDir, reason: started.partial };
     }
     // `python -m pkg` in a checkout runs its own copy; an installed module is not on this disk to read
     if (!localPath && target.module && target.moduleBase) localPath = await pythonModuleFile(target.module, target.moduleBase, provider);
@@ -1058,6 +1090,19 @@ export async function resolveServerSources(
           if (!files.includes(file)) files.push(file);
         }
       }
+      // What later commands of the package script start runs as part of the server too
+      for (const extra of scriptExtras.slice(0, MAX_SCRIPT_COMMANDS)) {
+        const file = (await isFile(extra, provider)) ? extra : await findMainEntry(extra, provider);
+        if (!file || files.includes(file)) continue;
+        if (file.endsWith('.py') !== (language === 'python')) {
+          hidden.push({ path: file, reason: `${file}: also started by the package script, in another language than its first file — not analyzed` });
+          continue;
+        }
+        const code = await readSourceFile(file, provider, (message) => hidden.push({ path: file, reason: message }));
+        if (!code) continue;
+        const more = language === 'python' ? await withPythonPackage(file, provider, hidden) : await withLocalImports(file, code, provider, undefined, hidden);
+        for (const f of more) if (!files.includes(f)) files.push(f);
+      }
       if (files.length > 1) {
         const root = language === 'python' ? dirname(entryFile) : await serverRoot(entryFile, provider);
         const read = await readServerFiles(files, root, provider, new Map([[entryFile, sourceCode]]));
@@ -1066,6 +1111,7 @@ export async function resolveServerSources(
         hidden.push(...read.skipped);
       }
     }
+    if (scriptPartial && sourceCode) hidden.push(scriptPartial);
     if (hidden.length > 0) partialFailure = describeSkipped(hidden);
 
     const source: MCPServerSource = {

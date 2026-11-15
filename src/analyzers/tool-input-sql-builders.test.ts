@@ -67,3 +67,27 @@ describe('SQL taint: allow-lists, placeholder separators and escaping helpers ar
     expect(queries(code)).toHaveLength(1);
   });
 });
+
+describe('SQL taint: && guards, pg-format members, identifier escapers in quotes, one-argument format', () => {
+  it.each([
+    ['an allow-list check in an && guard', 'const ALLOWED = ["id", "name"];\n' + tool('  const col = ALLOWED.includes(name) && name.length > 0 ? name : "id";\n  await pool.query(`SELECT * FROM users ORDER BY ${col}`);')],
+    ['a negated || guard, value in the alternate', 'const ALLOWED = ["id", "name"];\n' + tool('  const col = !ALLOWED.includes(name) || name === "" ? "id" : name;\n  await pool.query(`SELECT * FROM users ORDER BY ${col}`);')],
+    ['pg-format format.literal', 'import format from "pg-format";\n' + tool('  await pool.query(`SELECT * FROM users WHERE name = ${format.literal(name)}`);')],
+    ['pg-format format.ident', 'import format from "pg-format";\n' + tool('  await pool.query(`SELECT * FROM ${format.ident(name)}`);')],
+    ['escapeId outside quotes', 'import mysql from "mysql2";\n' + tool('  await pool.query(`SELECT * FROM ${mysql.escapeId(name)}`);')],
+    ['mysql.format with values', 'import mysql from "mysql2";\n' + tool('  await pool.query(mysql.format("SELECT * FROM users WHERE name = ?", [name]));\n  await pool.query(`SELECT * FROM users ${mysql.format("WHERE name = ?", [name])}`);')],
+  ])('%s is safe', (_label, code) => {
+    expect(queries(code)).toEqual([]);
+  });
+
+  it.each([
+    ['an || guard, value in the consequent', 'const ALLOWED = ["id", "name"];\n' + tool('  const col = ALLOWED.includes(name) || name.length > 0 ? name : "id";\n  await pool.query(`SELECT * FROM users ORDER BY ${col}`);')],
+    ['an && guard, value in the alternate', 'const ALLOWED = ["id", "name"];\n' + tool('  const col = ALLOWED.includes(name) && name.length > 0 ? "id" : name;\n  await pool.query(`SELECT * FROM users ORDER BY ${col}`);')],
+    ['escapeId inside a quoted literal', 'import mysql from "mysql2";\n' + tool('  await pool.query(`SELECT * FROM users WHERE name = \'${mysql.escapeId(name)}\'`);')],
+    ['escapeIdentifier inside a concatenated quoted literal', tool('  await pool.query("SELECT * FROM users WHERE name = \'" + pg.escapeIdentifier(name) + "\'");')],
+    ['mysql.format with no values', 'import mysql from "mysql2";\n' + tool('  await pool.query(`SELECT * FROM users WHERE name = ${mysql.format(name)}`);')],
+    ['a literal method on another object', 'const format = { literal: (s) => s };\n' + tool('  await pool.query(`SELECT * FROM users WHERE name = ${format.literal(name)}`);')],
+  ])('%s stays injection', (_label, code) => {
+    expect(queries(code)).toHaveLength(1);
+  });
+});

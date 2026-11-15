@@ -333,21 +333,25 @@ function aliasRewriter(code: string): (text: string) => string {
       if (am && SINK_MODULES.has(am[1]) && am[2] !== am[1]) addModule(am[2], `${am[1]}.`);
     }
   }
-  const fromImportAt = new Map<string, number>();
+  // From-imports and module-level `def`/`class` in file order: the last
+  // binding of a name is what it calls (`from subprocess import run` then
+  // `def run(…)` is the local function; a later re-import is the sink again)
+  const bindings: Array<{ at: number; name: string; target?: string }> = [];
   for (const m of code.matchAll(/^[ \t]*from[ \t]+(os|subprocess|asyncio|pty)[ \t]+import[ \t]+\(?([^\n#)]+)/gm)) {
     for (const part of m[2].split(',')) {
       const im = /^\s*(\w+)(?:\s+as\s+(\w+))?\s*$/.exec(part);
-      if (!im) continue;
-      const name = im[2] ?? im[1];
-      if (!fromImportAt.has(name)) fromImportAt.set(name, m.index ?? 0);
-      addCall(name, `${m[1]}.${im[1]}`);
+      if (im) bindings.push({ at: m.index ?? 0, name: im[2] ?? im[1], target: `${m[1]}.${im[1]}` });
     }
   }
-  // `from subprocess import run` then a module-level `def run(…)`: the later
-  // definition is what the name calls
-  for (const d of code.matchAll(/^(?:async[ \t]+)?(?:def|class)[ \t]+([A-Za-z_]\w*)/gm)) {
-    const at = fromImportAt.get(d[1]);
-    if (at !== undefined && (d.index ?? 0) > at) callAliases.delete(d[1]);
+  if (bindings.length > 0) {
+    const imported = new Set(bindings.map((b) => b.name));
+    for (const d of code.matchAll(/^(?:async[ \t]+)?(?:def|class)[ \t]+([A-Za-z_]\w*)/gm)) {
+      if (imported.has(d[1])) bindings.push({ at: d.index ?? 0, name: d[1] });
+    }
+    bindings.sort((a, b) => a.at - b.at);
+    const last = new Map<string, string | undefined>();
+    for (const b of bindings) last.set(b.name, b.target);
+    for (const [name, target] of last) if (target) addCall(name, target);
   }
   // Names bound by assignment at any indent: a module (`sp = importlib.import_module("subprocess")`),
   // a sink function (`runner = subprocess.run`, `run = getattr(subprocess, "r" + "un")`,
@@ -363,7 +367,12 @@ function aliasRewriter(code: string): (text: string) => string {
   }
   const assigned: Array<[string, string]> = [];
   const CHAIN = /^([A-Za-z_]\w*)[ \t]*=(?!=)[ \t]*(\S.*)$/;
-  for (const [, name, rhs] of code.matchAll(/^[ \t]*([A-Za-z_]\w*)[ \t]*(?::[^=\n]+)?=[ \t]*([^\n#]{1,300}?)[ \t]*$/gm)) {
+  // Over comment-stripped lines: a trailing `# note` must not hide the binding
+  const ASSIGNMENT = /^[ \t]*([A-Za-z_]\w*)[ \t]*(?::[^=\n]+)?=[ \t]*([^\n]{1,300}?)[ \t]*$/;
+  for (const { text } of codeLines(code)) {
+    const am = ASSIGNMENT.exec(text);
+    if (!am) continue;
+    const [, name, rhs] = am;
     // `b = a = os.system`: every target binds the last expression
     let expr = rhs;
     const names = [name];
@@ -380,9 +389,24 @@ function aliasRewriter(code: string): (text: string) => string {
       addModule(name, mod === 'builtins' ? '' : `${mod}.`);
     }
   }
+  // `partial` under the names it is imported as: `from functools import partial as P`, `import functools as ft`
+  const partialNames = new Set(['partial', 'functools.partial']);
+  for (const m of code.matchAll(/^[ \t]*from[ \t]+functools[ \t]+import[ \t]+\(?([^\n#)]+)/gm)) {
+    for (const part of m[1].split(',')) {
+      const im = /^\s*partial\s+as\s+(\w+)\s*$/.exec(part);
+      if (im) partialNames.add(im[1]);
+    }
+  }
+  for (const m of code.matchAll(/^[ \t]*import[ \t]+([^\n#]+)/gm)) {
+    for (const part of m[1].split(',')) {
+      const am = /^\s*functools\s+as\s+(\w+)\s*$/.exec(part);
+      if (am) partialNames.add(`${am[1]}.partial`);
+    }
+  }
   const plainAliases: Array<[string, string]> = [];
   for (const [name, expr] of assigned) {
-    const partial = /^(?:functools\.)?partial\(\s*([A-Za-z_][\w.]*)\s*,(.*)\)$/.exec(expr);
+    const call = /^([A-Za-z_][\w.]*)\(\s*([A-Za-z_][\w.]*)\s*,(.*)\)$/.exec(expr);
+    const partial = call && partialNames.has(call[1]) ? [call[0], call[2], call[3]] : null;
     const target = sinkReference(partial ? partial[1] : expr, modules);
     if (target && target !== name) {
       addCall(name, target, partial && /\bshell\s*=\s*True\b/.test(partial[2]) ? 'shell=True' : undefined);

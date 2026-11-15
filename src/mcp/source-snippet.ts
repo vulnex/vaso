@@ -38,9 +38,74 @@ function maskValue(value: string): string {
   return `${value.slice(0, MASK_SHOWN)}… (${value.length} chars)`;
 }
 
+/**
+ * Values by a hash of their first `width` characters, to find the few a text
+ * can hold: a rolling hash reads each position of the text once.
+ */
+interface ValueIndex {
+  width: number;
+  /** BASE ** (width - 1), to drop the character leaving the window. */
+  lead: number;
+  byStart: Map<number, string[]>;
+  /** Each value's place in the values' order (longest first). */
+  rank: Map<string, number>;
+}
+const valueIndexes = new WeakMap<string[], ValueIndex | null>();
+/** Below this many values a plain scan is as fast as the index. */
+const INDEX_MIN_VALUES = 32;
+const BASE = 31;
+
+function startHash(text: string, from: number, width: number): number {
+  let h = 0;
+  for (let i = 0; i < width; i++) h = (Math.imul(h, BASE) + text.charCodeAt(from + i)) | 0;
+  return h;
+}
+
+function valueIndex(values: string[]): ValueIndex | undefined {
+  let index = valueIndexes.get(values);
+  if (index === undefined) {
+    const width = Math.min(8, ...values.map((v) => v.length));
+    index = null;
+    if (values.length >= INDEX_MIN_VALUES && width >= 4) {
+      const byStart = new Map<number, string[]>();
+      for (const v of values) {
+        const key = startHash(v, 0, width);
+        const list = byStart.get(key);
+        if (list) list.push(v);
+        else byStart.set(key, [v]);
+      }
+      let lead = 1;
+      for (let i = 1; i < width; i++) lead = Math.imul(lead, BASE);
+      index = { width, lead, byStart, rank: new Map(values.map((v, i) => [v, i])) };
+    }
+    valueIndexes.set(values, index);
+  }
+  return index ?? undefined;
+}
+
 function maskAll(text: string, values: string[]): string {
+  // Many values: only those whose start occurs in the text can be in it
+  // (each line was scanned for every value — 10k values × 10k lines)
+  let candidates = values;
+  const index = valueIndex(values);
+  if (index) {
+    const { width, lead, byStart } = index;
+    const present = new Set<string>();
+    if (text.length >= width) {
+      let h = startHash(text, 0, width);
+      for (let i = 0; ; i++) {
+        const list = byStart.get(h);
+        if (list) for (const v of list) if (text.startsWith(v, i)) present.add(v);
+        if (i + width >= text.length) break;
+        h = (Math.imul(h - Math.imul(text.charCodeAt(i), lead), BASE) + text.charCodeAt(i + width)) | 0;
+      }
+    }
+    if (present.size === 0) return text;
+    // in the values' own order (longest first), as the plain scan masks them
+    candidates = [...present].sort((a, b) => index.rank.get(a)! - index.rank.get(b)!);
+  }
   let out = text;
-  for (const value of values) {
+  for (const value of candidates) {
     if (out.includes(value)) out = out.split(value).join(maskValue(value));
   }
   return out;
@@ -114,21 +179,29 @@ export function findingSnippet(source: Pick<MCPServerSource, 'sourceCode'>, find
  * `token: …`, `use passphrase "…"`. The value is one unbroken run after the
  * credential word (and an optional `is` / `was` / `:` / `=`).
  */
-const PROSE_SECRET = /(?<![A-Za-z0-9_])(?:password|passwd|passphrase|pwd|pin|secret|token|api[ _-]?key|access[ _-]?key|private[ _-]?key|credentials?)(?![A-Za-z0-9_])(?:\s*(?:[:=]|\bis\b|\bwas\b|\bset to\b|\bequals\b))?\s*["'`]?([^\s"'`,;()[\]{}<>]{8,})/gi;
+const PROSE_SECRET = /(?<![A-Za-z0-9_])(password|passwd|passphrase|pass ?code|pwd|pin|secret|token|api[ _-]?key|access[ _-]?key|private[ _-]?key|credentials?)(?![A-Za-z0-9_])(?:\s+for\s+[\w.@-]{1,64})?(?:\s*([:=]|\bis\b|\bwas\b|\bset to\b|\bequals\b))?\s*["'`]?([^\s"'`,;()[\]{}<>]{8,})/gi;
 
-function proseSecretValue(run: string): string | undefined {
+/** Credential words a person types: whatever is named as one after `is` / `:` is masked unless it is a plain word. */
+const TYPED_SECRET = /^(?:password|passwd|passphrase|pass ?code|pwd|pin)$/i;
+
+function proseSecretValue(run: string, keyword: string, connector: string | undefined): string | undefined {
   const value = run.replace(/[.!?:]+$/, '');
   if (value.length < 8 || isPlaceholderSecret(value) || isSecretReference(value) || /^[a-z][a-z0-9+.-]*:\/\//i.test(value)) return undefined;
   // a word or a phrase (`required`, `pass-through`) is not a credential
   if (!/[A-Za-z]/.test(value)) return undefined;
   if (/\d/.test(value) || looksRandom(value, 8) || isKnownSecretValue(value)) return value;
+  // `The passphrase is Kettle-Zebra-Quartz-Lamp`: a typed secret need not
+  // look random. A single word (`required`) or a short hyphenated phrase
+  // (`case-sensitive`) is still prose
+  if (connector && TYPED_SECRET.test(keyword)
+    && !/^[A-Za-z][a-z]*$/.test(value) && !(/^[a-z]+(?:-[a-z]+)*$/.test(value) && value.length < 16)) return value;
   return undefined;
 }
 
 /** `text` with credentials written out in prose masked (MCP-034 quotes prose). */
 export function maskProseSecrets(text: string): string {
-  return text.replace(PROSE_SECRET, (match: string, run: string) => {
-    const value = proseSecretValue(run);
+  return text.replace(PROSE_SECRET, (match: string, keyword: string, connector: string | undefined, run: string) => {
+    const value = proseSecretValue(run, keyword, connector);
     if (!value) return match;
     const at = match.lastIndexOf(run);
     return `${match.slice(0, at)}${maskValue(value)}${run.slice(value.length)}`;

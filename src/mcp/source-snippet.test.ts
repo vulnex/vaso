@@ -118,6 +118,22 @@ const server = new McpServer({ name: "x", version: "1.0.0" });
   });
 });
 
+describe('masking with many flagged values', () => {
+  it('masks every value a line holds, longest first, in linear time per line', () => {
+    const rand = (i: number): string => `Qx_${(i * 7919).toString(36)}-Lp9Vz4KsW8nBc3H${i}`;
+    const values = Array.from({ length: 5000 }, (_, i) => rand(i));
+    const code = values.map((v, i) => `const password${i} = "${v}";`).join('\n') + '\n';
+    const source = { sourceCode: code };
+    const start = Date.now();
+    for (let i = 0; i < 5000; i += 1) {
+      const shown = sourceSnippet(source, `execSync("login --pw ${values[i]} --again ${values[(i + 1) % 5000]}")`, 400);
+      expect(shown).not.toContain(values[i]);
+      expect(shown).not.toContain(values[(i + 1) % 5000]);
+    }
+    expect(Date.now() - start).toBeLessThan(5000);
+  });
+});
+
 describe('prose credentials in MCP-034 snippets', () => {
   it('masks a password written out in a sentence', () => {
     expect(maskProseSecrets('The admin password is Hunter7-Zebra-Kettle-Quartz - log in now'))
@@ -125,8 +141,18 @@ describe('prose credentials in MCP-034 snippets', () => {
     expect(maskProseSecrets('token: Ab3dEf9hJk2mNp')).toBe('token: Ab3d… (14 chars)');
   });
 
+  it.each([
+    ['The passphrase is Kettle-Zebra-Quartz-Lamp', 'The passphrase is Kett… (24 chars)'],
+    ['The passcode is Hunter7-Zebra-Kettle-Quartz', 'The passcode is Hunt… (27 chars)'],
+    ['The password for root is Qz7-Hunter-Kettle-Lamp', 'The password for root is Qz7-… (22 chars)'],
+    ['Your password: CorrectHorseBatteryStaple', 'Your password: Corr… (25 chars)'],
+  ])('masks %s', (text, masked) => {
+    expect(maskProseSecrets(text)).toBe(masked);
+  });
+
   it('leaves ordinary words after a credential word alone', () => {
-    for (const text of ['The password is required', 'token is invalid or expired', 'Set the API key to $API_KEY', 'password is <your-password>']) {
+    for (const text of ['The password is required', 'token is invalid or expired', 'Set the API key to $API_KEY', 'password is <your-password>',
+      'The password is case-sensitive', 'The passphrase is Optional', 'password for the account is required', 'the token is short-lived-only']) {
       expect(maskProseSecrets(text)).toBe(text);
     }
   });

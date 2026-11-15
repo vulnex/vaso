@@ -61,3 +61,36 @@ describe('functools.partial(..., shell=True) aliases', () => {
     expect(severe(code).length).toBeGreaterThan(0);
   });
 });
+
+describe('the last binding of a from-imported name wins', () => {
+  it.each([
+    ['re-import after a def', 'from subprocess import run\ndef run(*a, **k):\n    return None\nfrom subprocess import run\n'],
+    ['re-import under an alias after a def', 'from subprocess import run\ndef run(*a, **k):\n    return None\nfrom subprocess import Popen as run\n'],
+  ])('%s is the sink again', (_label, prelude) => {
+    const code = HEAD + prelude + tool('    return run(cmd, shell=True).stdout');
+    expect(severe(code).length).toBeGreaterThan(0);
+  });
+
+  it('import, def, import, class: the local definition', () => {
+    const code = HEAD + 'from subprocess import run\ndef run(x):\n    return x\nfrom subprocess import run\nclass run:\n    pass\n'
+      + tool('    return run(cmd)');
+    expect(analyzePythonSinks(code)).toEqual([]);
+  });
+});
+
+describe('alias lines with a trailing comment', () => {
+  it.each([
+    ['partial with a comment', 'import functools, subprocess\nsh = functools.partial(subprocess.run, shell=True)  # always shell\n', '    return sh(cmd).stdout'],
+    ['partial with a comment, no space', 'import functools, subprocess\nsh = functools.partial(subprocess.run, shell=True)#always shell\n', '    return sh(cmd).stdout'],
+    ['an assigned alias with a comment', 'import subprocess\nr = subprocess.run  # alias\n', '    return r(cmd, shell=True).stdout'],
+    ['partial imported under another name', 'import subprocess\nfrom functools import partial as P\nsh = P(subprocess.run, shell=True)\n', '    return sh(cmd).stdout'],
+    ['functools imported under another name', 'import subprocess\nimport functools as ft\nsh = ft.partial(subprocess.run, shell=True)\n', '    return sh(cmd).stdout'],
+  ])('%s is a sink', (_label, prelude, body) => {
+    expect(severe(HEAD + prelude + tool(body)).length).toBeGreaterThan(0);
+  });
+
+  it('an alias only named in a comment is not one', () => {
+    const code = 'import subprocess\n' + HEAD + 'r = str  # was subprocess.run\n' + tool('    return r(cmd)');
+    expect(analyzePythonSinks(code)).toEqual([]);
+  });
+});

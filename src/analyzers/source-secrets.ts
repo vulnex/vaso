@@ -50,13 +50,77 @@ const COMMENT_WINDOW = 6;
  * already tried, and retrying the run from each `-` was quadratic.
  */
 const KEYED_LITERAL =
-  /["']?\b(?=[A-Za-z_])(?<!(?:^|[^\w])[A-Za-z_][\w-]*?)((?:[A-Za-z_][\w-]*?)?(?:api[_-]?key|apikey|secret|token|password|passwd|access[_-]?key|private[_-]?key|credential)s?)["']?\s*[:=]\s*(?:[\w$.]{1,120}(?:\([^()"'`\n]{0,80}(?:["'][\w.-]{1,64}["'][^()"'`\n]{0,20})?\)|\[["'][\w.-]{1,64}["']\])?\s*(?:\?\?|\|\||\bor\b)\s*)?["'`]([^"'`\s]{16,})["'`]/gi;
+  /["']?\b(?=[A-Za-z_])(?<!(?:^|[^\w])[A-Za-z_][\w-]*?)([A-Za-z_][\w-]*)(?![\w-])["']?\s*[:=]\s*(?:[\w$.]{1,120}(?:\([^()"'`\n]{0,80}(?:["'][\w.-]{1,64}["'][^()"'`\n]{0,20})?\)|\[["'][\w.-]{1,64}["']\])?\s*(?:\?\?|\|\||\bor\b)\s*)?["'`]([^"'`\s]{16,})["'`]/gi;
 /**
  * The default of an environment lookup — `os.getenv("API_KEY", "…")`,
  * `os.environ.get("DB_PASSWORD", "…")` — is stored in the source all the same.
  */
 const ENV_DEFAULT =
-  /\b(?:getenv|environ\.get|env\.get)\(\s*["']([A-Za-z_]\w{0,80}?(?:key|token|secret|password|passwd|credential)s?)["']\s*,\s*["']([^"'\s]{16,})["']/gi;
+  /\b(?:getenv|environ\.get|env\.get)\(\s*["']([A-Za-z_]\w{0,80})["']\s*,\s*["']([^"'\s]{16,})["']/gi;
+
+/** Name parts that are a credential: `secret`, `apiToken` → `token`, `dbPass` → `pass`. */
+const CREDENTIAL_PART = /^(?:\w*(?:apikey|secret|token|password|passwd|accesskey|privatekey|credential)s?|pass|passphrase|passcode)$/;
+/** Parts before a trailing `key` that make it a lookup, index or public key, not a secret one. */
+const NOT_SECRET_KEY = new Set([
+  'public', 'publishable', 'pub', 'primary', 'foreign', 'sort', 'partition', 'cache', 'idempotency', 'storage', 'dedupe',
+  'dedup', 'row', 'unique', 'lookup', 'map', 'object', 'query', 'route', 'translation', 'i18n', 'message', 'label', 'state',
+  'item', 'entry', 'field', 'prop', 'attr', 'event', 'index', 'column', 'table', 'hash', 'site', 'list', 'group', 'schema',
+  'local', 'shortcut', 'hot', 'keyboard', 'cursor', 'page', 'node', 'element', 'component', 'react', 'redis', 'kv', 'store',
+  'bucket', 'file', 'config', 'setting', 'settings', 'option', 'metadata', 'meta', 'header', 'sub', 'parent', 'child', 'next',
+  'prev', 'last', 'first', 'id', 'name', 'type', 'path', 'url', 'env', 'context', 'data', 'request', 'response', 'lock', 'job',
+  'queue', 'task', 'user', 'session',
+  // analytics ingest keys, public by design (Segment write keys, Application Insights instrumentation keys)
+  'write', 'insights', 'instrumentation', 'analytics', 'telemetry', 'ingest', 'ingestion', 'tracking', 'measurement',
+]);
+/** Last parts that describe a credential rather than hold one: `secretName`, `tokenUrl`, `API_KEY_ENV`. */
+const DESCRIPTIVE_PART = new Set([
+  'name', 'names', 'path', 'paths', 'file', 'files', 'url', 'urls', 'uri', 'endpoint', 'length', 'len', 'type', 'types', 'id',
+  'ids', 'header', 'headers', 'env', 'var', 'vars', 'field', 'fields', 'prefix', 'suffix', 'label', 'format', 'pattern',
+  'regex', 're', 'count', 'size', 'hint', 'placeholder', 'description', 'desc', 'title', 'location', 'dir', 'param', 'params',
+  'policy', 'expiry', 'expires', 'ttl', 'timeout', 'limit', 'max', 'min', 'strength', 'validator', 'schema', 'input', 'kind',
+  'mode', 'source', 'provider', 'scope', 'scopes', 'hash', 'help', 'message', 'msg', 'error', 'required', 'enabled', 'store',
+  'storage', 'cache', 'arn', 'ref', 'reference', 'version', 'handle', 'uuid', 'guid', 'resource', 'region', 'account', 'link', 'route',
+]);
+/** Parts before a last `key` naming where a credential is kept: `TOKEN_KEY`, `PASSWORD_STORAGE_KEY`. */
+const STORED_UNDER = new Set(['token', 'tokens', 'password', 'passwd', 'pass', 'credential', 'credentials', 'storage', 'store', 'cache', 'cookie', 'session', 'local']);
+/** First parts that make the name a flag or a question: `isSecret`, `hasPassword`. */
+const PREDICATE_PART = new Set(['is', 'has', 'have', 'should', 'use', 'uses', 'require', 'requires', 'need', 'needs', 'show', 'hide', 'no', 'without', 'enable', 'disable', 'allow', 'can']);
+
+/** `apiKeyV2` → [api, key, v2]; `client_secret_key` → [client, secret, key]; `password2` → [password, 2]. */
+function nameParts(name: string): string[] {
+  return name
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+    .replace(/([A-Za-z])(\d)/g, '$1 $2')
+    .split(/[\s_\-.]+/)
+    .filter(Boolean)
+    .map((p) => p.toLowerCase());
+}
+
+/**
+ * Whether a key/variable name holds a credential: a credential word anywhere
+ * in it (`SECRET_KEY`, `secret_key_base`, `password2`, `dbPass`,
+ * `privateKeyPem`), or a `…Key` qualified by something other than a lookup or
+ * public key (`signingKey`, `stripeKey`, `apiKeyV2`). Names that describe a
+ * credential (`secretName`, `tokenUrl`, `API_KEY_ENV`, `isSecret`) don't.
+ */
+export function isSecretKeyName(name: string): boolean {
+  const parts = nameParts(name);
+  if (parts.length === 0) return false;
+  if (parts.length > 1 && PREDICATE_PART.has(parts[0])) return false;
+  const last = parts[parts.length - 1];
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i];
+    const keyed = (part === 'key' || part === 'keys') && i > 0 && !NOT_SECRET_KEY.has(parts[i - 1]);
+    if (!keyed && !CREDENTIAL_PART.test(part)) continue;
+    // what follows the credential word names something about it: `tokenUrl`,
+    // and `TOKEN_KEY` / `TOKEN_STORAGE_KEY`, the key a token is stored under
+    if (i < parts.length - 1 && DESCRIPTIVE_PART.has(last)) return false;
+    if (i < parts.length - 1 && (last === 'key' || last === 'keys') && STORED_UNDER.has(parts[parts.length - 2])) return false;
+    return true;
+  }
+  return false;
+}
 const BEARER_LITERAL = /["'`]Bearer\s+([A-Za-z0-9._~+/=-]{20,})["'`]/g;
 /**
  * Credentials inside a command line or URL string, where no quoted
@@ -166,7 +230,7 @@ function collectSourceSecrets(code: string): Array<{ secret: SourceSecret; value
     for (const re of [KEYED_LITERAL, ENV_DEFAULT]) {
       for (const m of text.matchAll(re)) {
         const [, key, value] = m;
-        if (tokens.some((t) => value.includes(t))) continue;
+        if (!isSecretKeyName(key) || tokens.some((t) => value.includes(t))) continue;
         if (looksLikeSecretValue(value)) add({ line, kind: 'secret-named value', key, masked: mask(value) }, value);
       }
     }
