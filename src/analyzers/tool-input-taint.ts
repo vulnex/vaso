@@ -13,6 +13,7 @@
  * (`const format = request.params.arguments.format; eval(`…${format}…`)`).
  */
 
+import { cutLine } from './finding-snippet.js';
 import { createHash } from 'node:crypto';
 import _traverse from '@babel/traverse';
 import type { Binding, NodePath, Scope } from '@babel/traverse';
@@ -43,6 +44,8 @@ function yieldsNumber(path: NodePath): boolean {
 export interface TaintedSink {
   line: number;
   snippet: string;
+  /** The whole line when `snippet` is a cut of it. */
+  sourceLine?: string;
   /** Sink as written, e.g. `eval`, `child_process.exec`. */
   sink: string;
   /** How the argument reaches tool input, e.g. `format ← request`. */
@@ -610,7 +613,7 @@ function analyze(code: string): TaintedSink[] {
       const origin = expressionOrigin(tainted[0].path, 0)!;
       const line = path.node.loc?.start.line ?? 0;
       results.push({
-        line, snippet: lineText(line).slice(0, 120), sink: `${shown}.${prop}`, origin, kind: 'query',
+        line, ...cutLine(lineText(line)), sink: `${shown}.${prop}`, origin, kind: 'query',
         ...(tainted.every((p) => p.wraps) ? { wrapsStatement: true } : {}),
       });
     };
@@ -621,7 +624,7 @@ function analyze(code: string): TaintedSink[] {
         const origin = expressionOrigin(arg, 0);
         if (origin) {
           const line = path.node.loc?.start.line ?? 0;
-          results.push({ line, snippet: lineText(line).slice(0, 120), sink, origin, kind });
+          results.push({ line, ...cutLine(lineText(line)), sink, origin, kind });
           return;
         }
       }

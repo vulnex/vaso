@@ -15,6 +15,7 @@
  * apart from one the caller supplies.
  */
 
+import { cutLine } from './finding-snippet.js';
 import { classifySensitivePath } from './sensitive-paths.js';
 import type { DataFlowResult } from './ast-analyzer.js';
 import { credentialEnvName, onVendorHost, ownedCredential, signingSecret, staticOrigin, vendorApiDomains, vendorUrlSlot } from './vendor-domains.js';
@@ -57,6 +58,8 @@ export interface PythonSinkFinding {
   kind: 'exec' | 'fs-access' | 'injection';
   line: number;
   snippet: string;
+  /** The whole line when `snippet` is a cut of it. */
+  sourceLine?: string;
   description: string;
   /** exec: the static text of the command/code argument(s), `{…}` for values. */
   command?: string;
@@ -722,13 +725,13 @@ export function analyzePythonSinks(code: string): PythonSinkFinding[] {
   // Physical-line rules: injection shapes visible on one line.
   for (const { line, text: raw } of lines) {
     const text = rewrite(raw);
-    const snippet = raw.trim().slice(0, 120);
+    const snippet = cutLine(raw.trim());
 
     if (/\bopen\s*\(|\bPath\s*\(|expanduser\s*\(/.test(text)) {
       for (const m of text.matchAll(STRING_LITERAL)) {
         const labels = classifySensitivePath(m[1]);
         if (labels.length > 0) {
-          findings.push({ kind: 'fs-access', line, snippet, description: `reads ${labels[0]}` });
+          findings.push({ kind: 'fs-access', line, ...snippet, description: `reads ${labels[0]}` });
           break;
         }
       }
@@ -740,7 +743,7 @@ export function analyzePythonSinks(code: string): PythonSinkFinding[] {
         // follows it is the script's argv (`[sys.executable, "-c", SCRIPT, path]`)
         const code = dashC ? /["']-c["']\s*,\s*([^,)\]]+)/.exec(text)?.[1]?.trim() : undefined;
         if (code !== undefined && isFixedCode(code, constants)) continue;
-        findings.push({ kind: 'injection', line, snippet, description });
+        findings.push({ kind: 'injection', line, ...snippet, description });
         injectedLines.add(line);
         break;
       }
@@ -760,7 +763,7 @@ export function analyzePythonSinks(code: string): PythonSinkFinding[] {
         findings.push({
           kind: 'injection',
           line,
-          snippet,
+          ...snippet,
           description: `Path joined from caller input (${joined}) with no containment check — "../" escapes the base directory (path traversal)`,
         });
       }
@@ -809,7 +812,7 @@ export function analyzePythonSinks(code: string): PythonSinkFinding[] {
       const finding: PythonSinkFinding = {
         kind: 'exec',
         line: stmt.line,
-        snippet: (lineText.get(stmt.line) ?? '').trim().slice(0, 120),
+        ...cutLine((lineText.get(stmt.line) ?? '').trim()),
         description: `${sink}() call detected`,
         ...(command ? { command } : {}),
         ...(dynamic ? { dynamic } : {}),
@@ -827,10 +830,11 @@ export function analyzePythonSinks(code: string): PythonSinkFinding[] {
             kind: 'injection',
             line: stmt.line,
             snippet: finding.snippet,
+            ...(finding.sourceLine !== undefined ? { sourceLine: finding.sourceLine } : {}),
             description: `${sink}() runs a command built from tool input (${names.get(from)})${shell ? ' through a shell' : ''} — command injection`,
           });
         } else if (shell && stmt.last > stmt.line && /^\s*(?:f["']|(?![rRbBuU]?["'])[A-Za-z_])/.test(args)) {
-          findings.push({ kind: 'injection', line: stmt.line, snippet: finding.snippet, description: 'Dynamic command run with shell=True — command injection' });
+          findings.push({ kind: 'injection', line: stmt.line, snippet: finding.snippet, ...(finding.sourceLine !== undefined ? { sourceLine: finding.sourceLine } : {}), description: 'Dynamic command run with shell=True — command injection' });
         }
       }
       break;
@@ -1297,7 +1301,7 @@ export function analyzePythonDataFlow(code: string): DataFlowResult[] {
 
   stmts.forEach((stmt, i) => {
     const text = rewrite(stmt.text);
-    const snippet = (lineText.get(stmt.line) ?? '').trim().slice(0, 120);
+    const snippet = cutLine((lineText.get(stmt.line) ?? '').trim());
     // Functions nest: leave the ones that ended, enter the ones whose `def` precedes
     while (enclosing.length > 0 && i >= enclosing[enclosing.length - 1].end) enclosing.pop();
     while (nextFn < fns.length && fns[nextFn].start < i) {
@@ -1347,7 +1351,7 @@ export function analyzePythonDataFlow(code: string): DataFlowResult[] {
       const dashCode = DIRECT_EXEC.test(sink) && !shell ? codeAfterDashC(argv) : undefined;
       const fixedCode = dashCode !== undefined && isFixedCode(dashCode, constants);
       out.push({
-        type: 'eval-exec', line: stmt.line, snippet, description: `${sink}() call detected`,
+        type: 'eval-exec', line: stmt.line, ...snippet, description: `${sink}() call detected`,
         ...(command ? { command } : {}), ...(dynamic ? { dynamic } : {}), ...(DECODES.test(args) ? { decoded: true } : {}),
         ...(noShell ? { noShell } : {}), ...(fixedCode ? { fixedCode } : {}),
       });
@@ -1357,7 +1361,7 @@ export function analyzePythonDataFlow(code: string): DataFlowResult[] {
         const flows = [...[...visible].filter(([v]) => mentions(sent, v)), ...inlineSources(sent)];
         for (const [v, kind] of flows) {
           if (kind === 'env' && !(program && NETWORK_PROGRAM.test(program))) continue;
-          out.push({ type: 'source-to-sink', source: v, sourceKind: report(kind), ...(kind === 'envall' ? { wholeEnv: true } : {}), sink, line: stmt.line, snippet, description: `Data flows from "${v}" into process execution "${sink}"` });
+          out.push({ type: 'source-to-sink', source: v, sourceKind: report(kind), ...(kind === 'envall' ? { wholeEnv: true } : {}), sink, line: stmt.line, ...snippet, description: `Data flows from "${v}" into process execution "${sink}"` });
         }
       }
       break;
@@ -1366,7 +1370,7 @@ export function analyzePythonDataFlow(code: string): DataFlowResult[] {
     if (/\bopen\s*\(|\bPath\s*\(|expanduser\s*\(/.test(text)) {
       for (const m of text.matchAll(STRING_LITERAL)) {
         if (classifySensitivePath(m[1]).length > 0) {
-          out.push({ type: 'fs-access', source: m[1], line: stmt.line, snippet, description: `Reading sensitive path: ${m[1]}` });
+          out.push({ type: 'fs-access', source: m[1], line: stmt.line, ...snippet, description: `Reading sensitive path: ${m[1]}` });
           break;
         }
       }
@@ -1450,7 +1454,7 @@ export function analyzePythonDataFlow(code: string): DataFlowResult[] {
       for (const [v, kind] of flows) {
         out.push({
           type: 'source-to-sink', source: v, sourceKind: report(kind), ...(kind === 'envall' ? { wholeEnv: true } : {}),
-          sink: net[1] ?? 'urlopen', sinkObject: client, line: stmt.line, snippet, description: `Data flows from "${v}" to network sink "${via}"`,
+          sink: net[1] ?? 'urlopen', sinkObject: client, line: stmt.line, ...snippet, description: `Data flows from "${v}" to network sink "${via}"`,
         });
       }
     }

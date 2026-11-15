@@ -2,7 +2,7 @@ import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { analyzeCode, type DataFlowResult } from '../../analyzers/ast-analyzer.js';
 import { analyzePythonDataFlow } from '../../analyzers/python-sinks.js';
-import { maskSourceSecrets } from '../../mcp/source-snippet.js';
+import { findingSnippet } from '../../mcp/source-snippet.js';
 
 /** Receivers of outbound HTTP calls (`axios.post`, `got.get`, `this.axiosInstance.post`). */
 const HTTP_RECEIVER = /^(?:axios\w*|got|ky|http|https|request|superagent|needle|undici|\w*[Aa]xios\w*|\w*[Hh]ttp[Cc]lient)$/;
@@ -65,7 +65,7 @@ export const mcp006 = defineCheck({
         evidence.push({
           file: source.localPath ?? source.serverName,
           line: finding.line,
-          snippet: maskSourceSecrets(source, finding.snippet),
+          snippet: findingSnippet(source, finding),
           detail: finding.description,
         });
       }
@@ -74,7 +74,7 @@ export const mcp006 = defineCheck({
         evidence.push({
           file: source.localPath ?? source.serverName,
           line: finding.line,
-          snippet: maskSourceSecrets(source, finding.snippet),
+          snippet: findingSnippet(source, finding),
           detail: finding.description,
         });
       }

@@ -79,7 +79,7 @@ export const mcp034 = defineCheck({
           evidence.push({
             file,
             line: unit.line,
-            snippet: sourceSnippet(source, trimmed),
+            snippet: sourceSnippet(source, trimmed, 120, true),
             detail: `${reasons.join('; ')} inside prompt text in server "${source.serverName}" — content of an MCP prompt the user selects, not tool output; review only if a tool returns it`,
             mitigated: true,
           });
@@ -90,7 +90,7 @@ export const mcp034 = defineCheck({
         evidence.push({
           file,
           line: unit.line,
-          snippet: sourceSnippet(source, trimmed),
+          snippet: sourceSnippet(source, trimmed, 120, true),
           detail: strong
             ? `Hardcoded ${reasons.join('; ')} in server "${source.serverName}" — directives embedded in returned tool content steer the client LLM at call time (indirect prompt injection)`
             : `Instruction-like phrasing (${reasons.join('; ')}) in server "${source.serverName}" — weak signal on its own: common in error messages and prompts; review whether it reaches tool output`,
@@ -109,7 +109,7 @@ export const mcp034 = defineCheck({
           evidence.push({
             file: data.path,
             line: i + 1,
-            snippet: sourceSnippet(source, lines[i]),
+            snippet: sourceSnippet(source, lines[i], 120, true),
             detail: strong
               ? `${reasons.join('; ')} in a data file server "${source.serverName}" loads — content it returns as tool output steers the client LLM (indirect prompt injection)`
               : `Instruction-like phrasing (${reasons.join('; ')}) in a data file server "${source.serverName}" loads — weak signal on its own; review the content it returns`,
@@ -162,7 +162,7 @@ export const mcp034 = defineCheck({
         evidence.push({
           file,
           line,
-          snippet: sourceSnippet(source, lines[line - 1] ?? ''),
+          snippet: sourceSnippet(source, lines[line - 1] ?? '', 120, true),
           detail: `Hardcoded invisible/bidi characters (${invisible.join(', ')}) in server "${source.serverName}" — hidden text the client LLM reads but a reviewer cannot see`,
         });
       }

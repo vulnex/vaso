@@ -3,7 +3,7 @@ import { defineCheck } from '../../core/check-builder.js';
 import { analyzeCode, type DataFlowResult } from '../../analyzers/ast-analyzer.js';
 import { analyzePythonSinks, type PythonSinkFinding } from '../../analyzers/python-sinks.js';
 import { findTaintedSinks } from '../../analyzers/tool-input-taint.js';
-import { maskSourceSecrets } from '../../mcp/source-snippet.js';
+import { findingSnippet, sourceSnippet } from '../../mcp/source-snippet.js';
 
 /**
  * Commands that are an attack on their own, whoever supplies them: download
@@ -28,10 +28,10 @@ const DANGEROUS_COMMAND = new RegExp([
  * command is an attack in itself, or when the code it runs is decoded at
  * runtime.
  */
-function execLevel(finding: DataFlowResult, taintedLines: Set<number>): { severity: Severity; why: string } {
+function execLevel(finding: DataFlowResult, taintedLines: Set<number>, quote: (text: string) => string): { severity: Severity; why: string } {
   if (taintedLines.has(finding.line)) return { severity: 'critical', why: 'tool input reaches it' };
   if (finding.decoded) return { severity: 'critical', why: 'it runs code decoded at runtime' };
-  if (finding.command && DANGEROUS_COMMAND.test(finding.command)) return { severity: 'critical', why: `the command is an attack on its own (${finding.command.slice(0, 60)})` };
+  if (finding.command && DANGEROUS_COMMAND.test(finding.command)) return { severity: 'critical', why: `the command is an attack on its own (${quote(finding.command)})` };
   const what = /eval|Function/.test(finding.description) ? 'code' : 'command';
   return {
     severity: 'info',
@@ -39,11 +39,11 @@ function execLevel(finding: DataFlowResult, taintedLines: Set<number>): { severi
   };
 }
 
-function pythonExecLevel(finding: PythonSinkFinding, injectedLines: Set<number>): { severity: Severity; why: string } {
+function pythonExecLevel(finding: PythonSinkFinding, injectedLines: Set<number>, quote: (text: string) => string): { severity: Severity; why: string } {
   if (finding.toolInput) return { severity: 'critical', why: `tool input reaches it (${finding.toolInput})` };
   if (injectedLines.has(finding.line)) return { severity: 'critical', why: 'caller-controlled input reaches it' };
   if (finding.decoded) return { severity: 'critical', why: 'it runs code decoded at runtime' };
-  if (finding.command && DANGEROUS_COMMAND.test(finding.command)) return { severity: 'critical', why: `the command is an attack on its own (${finding.command.slice(0, 60)})` };
+  if (finding.command && DANGEROUS_COMMAND.test(finding.command)) return { severity: 'critical', why: `the command is an attack on its own (${quote(finding.command)})` };
   const what = /^(?:eval|exec)\(/.test(finding.description) ? 'code' : 'command';
   return {
     severity: 'info',
@@ -67,6 +67,7 @@ export const mcp004 = defineCheck({
 
     for (const source of sources) {
       if (!source.sourceCode) continue;
+      const quote = (text: string): string => sourceSnippet(source, text, 60);
 
       if (source.language === 'python') {
         // Same tiers as JavaScript: AWS's official servers run fixed or
@@ -81,17 +82,17 @@ export const mcp004 = defineCheck({
             evidence.push({
               file: source.localPath ?? source.serverName,
               line: finding.line,
-              snippet: maskSourceSecrets(source, finding.snippet),
+              snippet: findingSnippet(source, finding),
               detail: `Sensitive file access: ${finding.description}`,
             });
             continue;
           }
-          const { severity: level, why } = pythonExecLevel(finding, injected);
+          const { severity: level, why } = pythonExecLevel(finding, injected, quote);
           if (level === 'critical') severity = 'critical';
           evidence.push({
             file: source.localPath ?? source.serverName,
             line: finding.line,
-            snippet: maskSourceSecrets(source, finding.snippet),
+            snippet: findingSnippet(source, finding),
             detail: `Command execution: ${finding.description} — ${why}`,
           });
         }
@@ -105,12 +106,12 @@ export const mcp004 = defineCheck({
       );
 
       for (const finding of results.filter(r => r.type === 'eval-exec')) {
-        const { severity: level, why } = execLevel(finding, taintedLines);
+        const { severity: level, why } = execLevel(finding, taintedLines, quote);
         if (level === 'critical') severity = 'critical';
         evidence.push({
           file,
           line: finding.line,
-          snippet: maskSourceSecrets(source, finding.snippet),
+          snippet: findingSnippet(source, finding),
           detail: `Command execution: ${finding.description} — ${why}`,
         });
       }
@@ -120,7 +121,7 @@ export const mcp004 = defineCheck({
         evidence.push({
           file,
           line: finding.line,
-          snippet: maskSourceSecrets(source, finding.snippet),
+          snippet: findingSnippet(source, finding),
           detail: `Sensitive file access: ${finding.description}`,
         });
       }

@@ -1,7 +1,7 @@
 import type { Evidence, Severity } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { findExternalContentFlows, type ExternalContentFlow } from '../../analyzers/tool-result-flow.js';
-import { maskSourceSecrets } from '../../mcp/source-snippet.js';
+import { findingSnippet } from '../../mcp/source-snippet.js';
 
 /**
  * MCP-007 — external content returned as a tool result. Fetched pages and
@@ -49,7 +49,7 @@ export const mcp007 = defineCheck({
         seen.add(flow.line);
         const { detail, severity: level } = describe(flow);
         if (level === 'warning') severity = 'warning';
-        evidence.push({ file, line: flow.line, snippet: maskSourceSecrets(source, flow.snippet), detail });
+        evidence.push({ file, line: flow.line, snippet: findingSnippet(source, flow), detail });
       }
     }
 
