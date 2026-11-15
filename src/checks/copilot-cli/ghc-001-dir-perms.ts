@@ -5,6 +5,7 @@ import { accessibleByOthers, markUnreachable, queryPermissions, readableByOthers
 import { configHoldsSecret, CREDENTIAL_FILE_NAME } from '../../core/secret-values.js';
 import { ghc003 } from './ghc-003-plaintext-token.js';
 import { restrictFilesToOwner } from '../../remediation/config-writer.js';
+import { classifySensitivePath } from '../../analyzers/sensitive-paths.js';
 
 const PROTECTED_FILES = [
   'config.json',
@@ -39,13 +40,19 @@ const PROTECTED_DIRS = ['.', ...PRIVATE_DIRS.map(d => d.dir)];
 const MAX_LISTED_PER_STORE = 40;
 /** Files judged per store at most — a bound on a pathological history, far above a real one. */
 const MAX_JUDGED_PER_STORE = 20_000;
+/** Store links outside the store and the home listed at most; the rest are counted in one line. */
+const MAX_LISTED_OUTSIDE = 10;
 
 interface Findings {
   evidence: Evidence[];
   /** Paths found open — the listed ones plus those counted in a "+N more" line. */
   total: number;
-  /** Store links to a file outside the store and the home that isn't a credential store (judged apart). */
+  /** Store links leaving the store and the home, or folders linked into a sensitive location (judged apart). */
   outside: Evidence[];
+  /** How many such links there are (`outside` lists at most MAX_LISTED_OUTSIDE, then a "+N more" line). */
+  outsideTotal: number;
+  /** One of them is a folder linked into a sensitive location of the home. */
+  intoSensitive: boolean;
   /** Store files a remote scan couldn't judge (the probe didn't collect their metadata). */
   unverified: string[];
   /** Stores with more files than MAX_JUDGED_PER_STORE: only that many were judged. */
@@ -54,8 +61,8 @@ interface Findings {
 
 interface StoreListing {
   files: string[];
-  /** Links to a file outside the store and the home: link → resolved target. */
-  outside: Array<{ path: string; target: string }>;
+  /** Links leaving the store and the home, or folders linked into a sensitive location: link → resolved target. */
+  outside: Array<{ path: string; target: string; dir?: boolean; sensitive?: string }>;
   /** Linked subdirectories whose files a remote scan doesn't have (the probe doesn't follow links). */
   linkedDirs: string[];
   truncated: boolean;
@@ -82,7 +89,7 @@ async function snapshotHolds(ctx: ScanContext, dir: string): Promise<boolean> {
   }
 }
 
-/** What a symlink resolves to: a directory, a file (with its real path when known), or nothing (dangling). */
+/** What a symlink resolves to: a directory or a file (with its real path when known), or nothing (dangling). */
 async function linkTarget(ctx: ScanContext, path: string): Promise<{ kind: 'dir' | 'file'; target?: string } | undefined> {
   let st: Awaited<ReturnType<ScanContext['fs']['stat']>>;
   try {
@@ -90,14 +97,14 @@ async function linkTarget(ctx: ScanContext, path: string): Promise<{ kind: 'dir'
   } catch {
     return undefined;
   }
-  if (st.isDirectory()) return { kind: 'dir' };
+  const kind = st.isDirectory() ? 'dir' : 'file';
   let target: string | undefined;
   try {
     target = await ctx.fs.realpath(path);
   } catch {
     target = undefined;
   }
-  return { kind: 'file', target };
+  return { kind, target };
 }
 
 /**
@@ -107,7 +114,10 @@ async function linkTarget(ctx: ScanContext, path: string): Promise<{ kind: 'dir'
  * link to a directory is a subdirectory like any other (its own mode is not a
  * store file's). A link leaving the store and the home for a file that isn't
  * a credential store (`mcp-secrets/x.json → /etc/hosts`) is set apart: its
- * mode says nothing about the agent's data.
+ * mode says nothing about the agent's data. So is a linked folder that leaves
+ * the home, lands in a sensitive location (`session-state/abc → ~/.aws`) or
+ * holds the store itself: it is not walked — its files aren't the agent's,
+ * and the fix must not change them.
  */
 async function storeFiles(ctx: ScanContext, storeDir: string): Promise<StoreListing> {
   const files: string[] = [];
@@ -131,6 +141,18 @@ async function storeFiles(ctx: ScanContext, storeDir: string): Promise<StoreList
     } else {
       add(path);
     }
+  };
+  /**
+   * Why a linked folder resolving to `target` isn't walked: a sensitive
+   * location's label, '' when it leaves the home (or is the home, an ancestor
+   * of it, or holds the store), undefined for an ordinary folder of the home.
+   */
+  const foreignDir = (target: string): string | undefined => {
+    const sensitive = classifySensitivePath(target)[0];
+    if (sensitive) return sensitive;
+    if (!roots.some(root => within(target, root))) return '';
+    if (roots.some(root => within(root, target)) || within(storeDir, target)) return '';
+    return undefined;
   };
   const subdirFiles = async (dir: string) => {
     let entries: Awaited<ReturnType<ScanContext['fs']['readdirEntries']>>;
@@ -159,7 +181,10 @@ async function storeFiles(ctx: ScanContext, storeDir: string): Promise<StoreList
       add(path);
     } else if (e.isSymbolicLink) {
       const link = await linkTarget(ctx, path);
-      if (link?.kind === 'dir') {
+      const foreign = link?.kind === 'dir' && link.target !== undefined ? foreignDir(link.target) : undefined;
+      if (link?.target !== undefined && foreign !== undefined) {
+        outside.push({ path, target: link.target, dir: true, ...(foreign ? { sensitive: foreign } : {}) });
+      } else if (link?.kind === 'dir') {
         // The probe records the files behind a link that stays inside the
         // home and outside credential stores (probes newer than 1.4.1); for any other, a
         // remote scan has the link, not the files behind it
@@ -182,6 +207,8 @@ async function storeFiles(ctx: ScanContext, storeDir: string): Promise<StoreList
 async function findings(ctx: ScanContext, maxListed: number): Promise<Findings> {
   const evidence: Evidence[] = [];
   const outside: Evidence[] = [];
+  let outsideTotal = 0;
+  let intoSensitive = false;
   const unverified: string[] = [];
   const truncated: string[] = [];
   let total = 0;
@@ -249,11 +276,16 @@ async function findings(ctx: ScanContext, maxListed: number): Promise<Findings> 
     if (listing.linkedDirs.length > 0) {
       unverified.push(`the files behind ${listing.linkedDirs.length} linked folder(s) in ${dir}/ (${listing.linkedDirs.map(p => basename(p)).join(', ')})`);
     }
-    for (const { path, target } of listing.outside) {
+    for (const { path, target, dir: isDir, sensitive } of listing.outside) {
+      outsideTotal++;
+      if (sensitive) intoSensitive = true;
+      if (outside.length >= MAX_LISTED_OUTSIDE) continue;
       outside.push({
         file: path,
         snippet: `-> ${target}`,
-        detail: `${what} is a link to ${target}, outside the store and the home — not the agent's own file, but the agent reads and writes through it`,
+        detail: isDir
+          ? `${dir}/ holds a link to the folder ${target}${sensitive ? ` (${sensitive})` : ', outside the store and the home'} — not the agent's own files (neither checked nor changed here), but the agent reads and writes through it`
+          : `${what} is a link to ${target}, outside the store and the home — not the agent's own file, but the agent reads and writes through it`,
       });
     }
     // Which files are listed must not depend on walk order (local vs snapshot)
@@ -269,7 +301,14 @@ async function findings(ctx: ScanContext, maxListed: number): Promise<Findings> 
     }
   }
 
-  return { evidence, total, outside, unverified, truncated };
+  if (outsideTotal > outside.length) {
+    outside.push({
+      file: ctx.installation.installDir,
+      snippet: `+${outsideTotal - outside.length} more link(s)`,
+      detail: `${outsideTotal - outside.length} more store link(s) point outside the store and the home (not listed)`,
+    });
+  }
+  return { evidence, total, outside, outsideTotal, intoSensitive, unverified, truncated };
 }
 
 export const ghc001 = defineCheck({
@@ -283,15 +322,15 @@ export const ghc001 = defineCheck({
 
   async run(ctx, h) {
     if (ctx.installation.profile === 'project') return h.passed('Project configuration — ~/.copilot permissions are checked on the user install');
-    const { evidence, total, outside, unverified, truncated } = await findings(ctx, MAX_LISTED_PER_STORE);
+    const { evidence, total, outside, outsideTotal, intoSensitive, unverified, truncated } = await findings(ctx, MAX_LISTED_PER_STORE);
     await markUnreachable(ctx.fs, evidence);
     const notes = [
       ...(unverified.length > 0 ? [`${unverified.join(', ')} not verified — the probe didn't collect them (checked on local scans)`] : []),
       ...(truncated.length > 0 ? [`only the first ${MAX_JUDGED_PER_STORE} files of ${truncated.join(', ')} checked`] : []),
     ];
     const noteText = notes.length > 0 ? `; ${notes.join('; ')}` : '';
-    const outsideText = outside.length > 0
-      ? `${outside.length} store link(s) point outside the store and the home`
+    const outsideText = outsideTotal > 0
+      ? `${outsideTotal} store link(s) point outside the store and the home${intoSensitive ? ' or into a sensitive location' : ''}`
       : '';
     if (evidence.length === 0 && outside.length > 0) {
       // Not an exposure of the agent's data: worth a look, nothing to chmod
@@ -305,7 +344,10 @@ export const ghc001 = defineCheck({
       });
     }
     const result = h.fromEvidence(evidence, {
-      passed: `Copilot CLI directory and config files are owner-only${noteText}`,
+      // Something the probe didn't collect: say so first, like other checks' "Not verified"
+      passed: unverified.length > 0
+        ? `Not verified — ${notes.join('; ')}; the rest of ~/.copilot is owner-only`
+        : `Copilot CLI directory and config files are owner-only${noteText}`,
       failed: () => `Found ${total} Copilot CLI path(s) with overly permissive mode${outsideText ? `; ${outsideText}` : ''}${noteText}`,
       fixable: true,
       fixDescription: 'Remove group/other access (chmod go-rwx) from the listed ~/.copilot paths — `chmod -R go-rwx ~/.copilot` covers everything',

@@ -13,5 +13,6 @@ export const iocChecks: CheckModule[] = [
   ioc001,
   ioc002,
   // the skill-file checks note config-set skills directories they didn't scan
-  ...[ioc003, ioc004, ioc005, ioc006, ioc007, ioc008].map(notingUnscannedRoots),
+  ...[ioc003, ioc004, ioc005, ioc006, ioc007].map(notingUnscannedRoots),
+  ioc008, // notes them itself — not on its "skipped" pass
 ];

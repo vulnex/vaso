@@ -83,6 +83,21 @@ describe('a skills directory outside the home', () => {
       expect(r.message.endsWith(`(skills directory ${OUT[0].path} not scanned; see SKL-002)`), r.message).toBe(true);
     });
 
+  it('IOC-008 skipped (no API key) carries no "not scanned" note; its verdict over the trees does', async () => {
+    const saved = process.env['VIRUSTOTAL_API_KEY'];
+    delete process.env['VIRUSTOTAL_API_KEY'];
+    try {
+      const skipped = await byId('IOC-008').run(ctx(OUT, ['/nonexistent-vaso-home/skills']));
+      expect(skipped.message).toBe('VirusTotal check skipped — no VIRUSTOTAL_API_KEY set');
+      process.env['VIRUSTOTAL_API_KEY'] = 'k';
+      const run = await byId('IOC-008').run(ctx(OUT, ['/nonexistent-vaso-home/skills']));
+      expect(run.message.endsWith(`(skills directory ${OUT[0].path} not scanned; see SKL-002)`), run.message).toBe(true);
+    } finally {
+      if (saved === undefined) delete process.env['VIRUSTOTAL_API_KEY'];
+      else process.env['VIRUSTOTAL_API_KEY'] = saved;
+    }
+  });
+
   it('without any skills directory the checks still pass as before', async () => {
     const r = await byId('SKL-004').run(ctx(undefined));
     expect(r.passed).toBe(true);

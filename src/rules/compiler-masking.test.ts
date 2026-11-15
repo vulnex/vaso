@@ -157,6 +157,23 @@ describe('rule evidence on lines continuing a credential value', () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  it('skill files: an environment variable name read below a credential name stays readable', async () => {
+    const { mkdtemp, writeFile, rm } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const dir = await mkdtemp(join(tmpdir(), 'vaso-rule-skill-'));
+    try {
+      const py = join(dir, 'run.py');
+      await writeFile(py, 'password = (\n    os.environ.get("DB_PASSWORD") or "SkillFallbackPw55"\n)\nTOKENS = [\n    os.environ["T1"],\n    getenv(\'T2\'),\n    "SkillLiteralTok66",\n]\n');
+      const r = await run('ORG-M3', 'environ|getenv|Skill', 'skills', [], [py]);
+      const text = JSON.stringify(r.evidence);
+      for (const s of ['os.environ.get(\\"DB_PASSWORD\\")', 'os.environ[\\"T1\\"]', "getenv('T2')"]) expect(text).toContain(s);
+      for (const s of ['SkillFallbackPw55', 'SkillLiteralTok66']) expect(text).not.toContain(s);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('config rule details keep their brackets', () => {

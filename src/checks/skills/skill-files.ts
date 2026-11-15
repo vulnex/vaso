@@ -48,12 +48,22 @@ export function notingUnscannedRoots(check: CheckModule): CheckModule {
     ...check,
     async run(ctx) {
       const result = await run(ctx);
-      const unscanned = ctx.installation.unscannedSkillsDirs ?? [];
-      if (!result.passed || unscanned.length === 0 || skillsDirsOf(ctx).length === 0) return result;
-      const list = unscanned.map(u => u.path).join(', ');
-      return { ...result, message: `${result.message} (skills ${unscanned.length === 1 ? 'directory' : 'directories'} ${list} not scanned; see SKL-002)` };
+      return result.passed ? { ...result, message: `${result.message}${unscannedRootsNote(ctx)}` } : result;
     },
   };
+}
+
+/**
+ * The note notingUnscannedRoots appends to a pass — for a check that adds it
+ * itself, only to a verdict over the skill trees (IOC-008's "skipped, no API
+ * key" isn't one). '' when every config-set skills directory was scanned, or
+ * none was (noSkillsDirResult says so).
+ */
+export function unscannedRootsNote(ctx: ScanContext): string {
+  const unscanned = ctx.installation.unscannedSkillsDirs ?? [];
+  if (unscanned.length === 0 || skillsDirsOf(ctx).length === 0) return '';
+  const list = unscanned.map(u => u.path).join(', ');
+  return ` (skills ${unscanned.length === 1 ? 'directory' : 'directories'} ${list} not scanned; see SKL-002)`;
 }
 
 /** The engine's skill file list, else a walk of every skills directory. */
