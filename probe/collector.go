@@ -368,7 +368,9 @@ func Collect(manifest ProbeManifest, escalate bool) ProbeSnapshot {
 	// mitigation on the TS side needs their real modes).
 	for _, h := range homes {
 		recordDirMode(&snapshot, h.Path)
+		recordResolvedDir(&snapshot, h.Path)
 	}
+	recordResolvedDir(&snapshot, homedir)
 
 	// Run allowed commands with PATH extended to include per-user bin dirs.
 	// Each output is stored under both its manifest ID (e.g. "nemoclaw-help")

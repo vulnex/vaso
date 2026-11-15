@@ -16,6 +16,10 @@
  *  3. `-k`: a credential when it looks random — never a URL, a host[:port]
  *     or a path.
  *  4. `redis-cli -a <pw>` is a password.
+ *  5. curl's `-u`/`--user`/`--proxy-user` (separate or `--user=`): in a
+ *     `user:password` value the part after the first colon is the password
+ *     unless it is empty or a reference. Other commands' `-u` (`docker -u
+ *     1000:1000`, `--user app:app`) is a user, not judged here.
  */
 
 import { isCredentialReference, isPathValue, isPlaceholderSecret } from '../core/patterns.js';
@@ -92,3 +96,15 @@ export function isKeyAfterK(value: string): boolean {
 
 /** Rule 4: `redis-cli -a <pw>`. */
 export const isPasswordAfterA = (value: string): boolean => !isUnstoredValue(value);
+
+/** Rule 5: clients whose `-u`/`--user`/`--proxy-user` value is `user:password`. */
+export const isUserPassClient = (token: string): boolean => /^curl$/i.test(basename(token));
+export const USER_PASS_FLAGS: ReadonlySet<string> = new Set(['-u', '--user', '--proxy-user']);
+
+/** Rule 5: the password in a `user:password` value, or undefined. */
+export function userPassword(value: string): string | undefined {
+  const i = value.indexOf(':');
+  if (i < 0) return undefined;
+  const pw = value.slice(i + 1);
+  return isUnstoredValue(pw) ? undefined : pw;
+}

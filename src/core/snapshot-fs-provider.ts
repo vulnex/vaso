@@ -308,6 +308,21 @@ export class SnapshotFSProvider implements FSProvider {
       || this.keysUnder('directoryModes', prefix).length > 0;
   }
 
+  /**
+   * `path` with its longest leading directory the probe recorded a resolution
+   * for (a linked home, either spelling) replaced by where it resolves; as
+   * is when none is recorded.
+   */
+  resolvedDir(path: string): string {
+    const dirs = this.snapshot.resolvedDirs;
+    if (!dirs) return path;
+    for (let cur = path; ; cur = posix.dirname(cur)) {
+      const real = Object.hasOwn(dirs, cur) ? dirs[cur] : undefined;
+      if (real !== undefined) return cur === path ? real : posix.join(real, posix.relative(cur, path));
+      if (posix.dirname(cur) === cur) return path;
+    }
+  }
+
   /** Config-derived trees the probe walked, by literal base path, with what it did. */
   configTrees(): Readonly<Record<string, ConfigTreeStatus>> {
     return this.snapshot.configTrees ?? {};

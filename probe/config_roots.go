@@ -323,6 +323,12 @@ func (c *collector) collectConfigTree(snapshot *ProbeSnapshot, root, g, home str
 	static, rest := doublestar.SplitPattern(base)
 	staticDir := filepath.FromSlash(static)
 	escapedStatic, ok := escapeGlobMeta(staticDir)
+	// The home itself, spelled the other way (a workspace set through a link
+	// to the home): its resolution is recorded, so the CLI can tell matches
+	// spelled that way are in the home
+	if home != "" && !treeAllowed(staticDir, home) && resolveExisting(filepath.Clean(staticDir)) == resolveExisting(filepath.Clean(home)) {
+		recordResolvedDir(snapshot, staticDir)
+	}
 	if ok && treeAllowed(staticDir, home) {
 		first := strings.SplitN(rest, "/", 2)[0]
 		if listing := collectDirectory(staticDir, snapshot.Symlinks); listing != nil {
@@ -344,6 +350,30 @@ func (c *collector) collectConfigTree(snapshot *ProbeSnapshot, root, g, home str
 	for _, m := range expandFollowingDirLinks(filepath.FromSlash(base)) {
 		c.collectConfigBase(snapshot, m, home)
 	}
+}
+
+// maxResolvedDirs bounds ResolvedDirs (homes, and home spellings met as a
+// config tree's wildcard directory).
+const maxResolvedDirs = maxConfigTrees
+
+// recordResolvedDir records where p resolves, when that differs from p.
+func recordResolvedDir(snapshot *ProbeSnapshot, p string) {
+	if p == "" || !filepath.IsAbs(p) {
+		return
+	}
+	p = filepath.Clean(p)
+	real := resolveExisting(p)
+	if real == p || !filepath.IsAbs(real) {
+		return
+	}
+	if snapshot.ResolvedDirs == nil {
+		snapshot.ResolvedDirs = make(map[string]string)
+	}
+	key := filepath.ToSlash(p)
+	if _, done := snapshot.ResolvedDirs[key]; done || len(snapshot.ResolvedDirs) >= maxResolvedDirs {
+		return
+	}
+	snapshot.ResolvedDirs[key] = filepath.ToSlash(real)
 }
 
 // maxLinkedExpansion bounds how many paths expandFollowingDirLinks returns.

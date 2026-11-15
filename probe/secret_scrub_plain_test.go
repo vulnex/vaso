@@ -117,3 +117,35 @@ func TestScrubEmailAddresses(t *testing.T) {
 		}
 	}
 }
+
+// --pw/--pass take a password like --password, and curl's -u/--user
+// user:password as separate argv elements is disguised in every config format.
+func TestScrubPasswordFlagsAndCurlUser(t *testing.T) {
+	files := map[string]string{
+		"/h/.claude.json": `{"mcpServers": {"b": {"command": "curl", "args": ["-u", "carol:curlpw2low", "--user", "dave:userpwlow", "https://x.example"]}, ` +
+			`"f": {"command": "acme", "args": ["--pw", "pwflaglow", "--pass", "passflaglow", "--db-pw", "dbpwflaglow"]}, ` +
+			`"d": {"command": "docker", "args": ["run", "--user", "app:appgroup", "img"]}}}`,
+		"/h/.hermes/config.yaml": "mcp_servers:\n  b:\n    command: curl\n    args:\n      - -u\n      - carol:curlpw2low\n      - --user\n      - dave:userpwlow\n" +
+			"  f:\n    command: acme\n    args: [--pw, pwflaglow, --pass, passflaglow]\n" +
+			"  g:\n    command: acme\n    args:\n      - --pw\n      - dbpwflaglow\n      - --password\n      - correcthorse\n",
+		"/h/.codex/config.toml": "[mcp_servers.b]\ncommand = \"curl\"\nargs = [\"-u\", \"carol:curlpw2low\", \"--user=dave:userpwlow\"]\n" +
+			"[mcp_servers.f]\ncommand = \"acme\"\nargs = [\"--pw\", \"pwflaglow\", \"--pass\", \"passflaglow\"]\n",
+	}
+	c := &collector{}
+	for name, content := range files {
+		out := string(c.scrubSecrets(name, []byte(content)))
+		for _, s := range []string{"curlpw2low", "userpwlow", "pwflaglow", "passflaglow", "dbpwflaglow", "correcthorse"} {
+			if strings.Contains(content, s) && strings.Contains(out, s) {
+				t.Errorf("%s ships %q:\n%s", name, s, out)
+			}
+		}
+		for _, keep := range []string{"carol:", "dave:", "--pw", "--pass"} {
+			if strings.Contains(content, keep) && !strings.Contains(out, keep) {
+				t.Errorf("%s lost %q:\n%s", name, keep, out)
+			}
+		}
+		if strings.Contains(content, "app:appgroup") && !strings.Contains(out, "app:appgroup") {
+			t.Errorf("%s: docker --user disguised:\n%s", name, out)
+		}
+	}
+}

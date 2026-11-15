@@ -1296,6 +1296,18 @@ var (
 	passphraseWords      = regexp.MustCompile(`^[A-Za-z0-9]+(?:[-_ ][A-Za-z0-9]+){2,}$`)
 )
 
+// passwordFlagName: --pw, --pass, --db-pass, --admin_pw — a password flag
+// whose name strongCredentialWord leaves out (as a settings key, "pass" and
+// "pw" are too often something else: pass_through).
+var passwordFlagName = regexp.MustCompile(`(?i)^(?:[a-z][a-z0-9]*[-_])*(?:pw|pass)$`)
+
+// strongCredentialFlag: strongCredentialKey for a flag (dashes trimmed), plus
+// passwordFlagName.
+func strongCredentialFlag(flag string) bool {
+	name := strings.TrimLeft(flag, "-")
+	return strongCredentialKey(name) || passwordFlagName.MatchString(name)
+}
+
 func strongCredentialKey(key string) bool {
 	k := normalizedKey(key)
 	return strongCredentialWord.MatchString(k) && !credentialAboutWord.MatchString(k)
@@ -1436,7 +1448,7 @@ func flagTakesCredential(flag, value string) bool {
 	if flag == "-k" {
 		return randomKey(value)
 	}
-	return isSecretFlag(flag) && (credentialLike(value) || strongCredentialKey(strings.TrimLeft(flag, "-")) && plainCredential(value))
+	return isSecretFlag(flag) && (credentialLike(value) || strongCredentialFlag(flag) && plainCredential(value))
 }
 
 // isSecretFlag: --token, --api-key, --password … (not --keyboard)
@@ -2292,7 +2304,7 @@ func flagCredentials(s string, replace func(string) string) string {
 			open, _ := m.group(3)
 			closing, _ := m.group(5)
 			value, _ := m.group(4)
-			if open != closing || !isSecretFlag(flag) || strings.HasPrefix(value, "-") || !credentialLike(value) && !passphraseLike(value) && !(strongCredentialKey(strings.TrimLeft(flag, "-")) && plainCredential(value)) {
+			if open != closing || !isSecretFlag(flag) || strings.HasPrefix(value, "-") || !credentialLike(value) && !passphraseLike(value) && !(strongCredentialFlag(flag) && plainCredential(value)) {
 				return m.text()
 			}
 			return m.with(4, 4, replace(value))

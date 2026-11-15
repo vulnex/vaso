@@ -288,7 +288,7 @@ function codeValue(value: string, sep: string): boolean {
 }
 
 /** The credential words a flag name ends in, dashed/underscored (`--api-key`) or any case. */
-const FLAG_WORD = String.raw`(?:access[_-]?token|auth[_-]?token|token|api[_-]?key|apikey|key|pat|secret|client[_-]?secret|password|passwd|pass|pwd|credentials?|auth|bearer)`;
+const FLAG_WORD = String.raw`(?:access[_-]?token|auth[_-]?token|token|api[_-]?key|apikey|key|pat|secret|client[_-]?secret|password|passwd|pass|pwd|pw|credentials?|auth|bearer)`;
 /** The same words ending a camelCase flag (`--apiToken`, `--oauth2Bearer`, `--secretKey`). */
 const CAMEL_FLAG_WORD = String.raw`[a-z][a-z0-9]*(?:[A-Z][a-z0-9]*)*?(?:AccessToken|AuthToken|Token|ApiKey|Key|Pat|Secret|Password|Passwd|Pass|Pwd|Credentials?|Auth|Bearer)`;
 /** Flag/value separators: `=`, ` = `, whitespace, and `", "` between JSON argv elements. */

@@ -116,6 +116,11 @@ export interface ProbeSnapshot {
    *  absent), refused (a base no tree is walked from) or over the probe's
    *  entry limit (not collected). At most 2000; compared as plain strings. */
   configTrees?: Record<string, ConfigTreeStatus>;
+  /** Where a scanned home — or a directory naming a home the other way, met
+   *  as a config tree's wildcard directory — resolves to, when that differs
+   *  from its spelling (probe newer than 1.4.1). Read only when judging
+   *  config-set skills directories (skill-root-scope.ts). */
+  resolvedDirs?: Record<string, string>;
 }
 
 export interface PrivilegeInfo {

@@ -1,7 +1,7 @@
 import { API_KEY_PATTERNS, isPlaceholderSecret } from '../core/patterns.js';
 import {
-  isFlagShaped, isKeyAfterK, isPasswordAfterA, isPasswordAfterP, isPasswordClient, isRedisCli,
-  isUnstoredValue as notASecret, looksLikeCredential as looksLikeSecret,
+  USER_PASS_FLAGS, isFlagShaped, isKeyAfterK, isPasswordAfterA, isPasswordAfterP, isPasswordClient, isRedisCli,
+  isUserPassClient, isUnstoredValue as notASecret, userPassword, looksLikeCredential as looksLikeSecret,
 } from './argv-rules.js';
 import { shannonEntropy } from '../analyzers/entropy.js';
 
@@ -28,7 +28,7 @@ export interface ConfigSecret {
 const MASK = '***';
 
 /** Flags whose value is a credential (`--token x`, `--api-key=x`, `--password x`, `--aws-secret-access-key x`). */
-const CREDENTIAL_FLAG = /^--?(?:[a-z][\w-]*?[-_])?(?:access[_-]?token|auth[_-]?token|token|api[_-]?key|apikey|(?:secret|private|access|signing|encryption|master)[_-]?key|pat|secret|client[_-]?secret|password|passwd|pwd|credentials?|bearer)$/i;
+const CREDENTIAL_FLAG = /^--?(?:[a-z][\w-]*?[-_])?(?:access[_-]?token|auth[_-]?token|token|api[_-]?key|apikey|(?:secret|private|access|signing|encryption|master)[_-]?key|pat|secret|client[_-]?secret|password|passwd|pass|pwd|pw|credentials?|bearer)$/i;
 /** The same in camelCase (`--apiToken`, `--githubToken`, `--oauth2Bearer`, `--secretKey`): case-sensitive, so `--monkey` isn't one. */
 const CAMEL_CREDENTIAL_FLAG = /^--?[a-z][a-z0-9]*(?:[A-Z][a-z0-9]*)*?(?:AccessToken|AuthToken|Token|ApiKey|Apikey|(?:Secret|Private|Access|Signing|Encryption|Master)Key|Pat|Secret|ClientSecret|Password|Passwd|Pwd|Credentials?|Bearer)$/;
 /** A flag whose value is a credential, in any of the spellings above. */
@@ -421,6 +421,8 @@ export function findArgSecrets(args: readonly string[], command?: string): Confi
   const afterClient = (i: number): boolean => (command !== undefined && isPasswordClient(command)) || (clientAt >= 0 && clientAt < i);
   const redisAt = args.findIndex(isRedisCli);
   const afterRedis = (i: number): boolean => (command !== undefined && isRedisCli(command)) || (redisAt >= 0 && redisAt < i);
+  const curlAt = args.findIndex(isUserPassClient);
+  const afterCurl = (i: number): boolean => (command !== undefined && isUserPassClient(command)) || (curlAt >= 0 && curlAt < i);
   const packageRunner = command !== undefined && PACKAGE_P_RUNNERS.has(command.replace(/\\/g, '/').split('/').pop()?.replace(/\.(?:cmd|exe)$/i, '').toLowerCase() ?? '');
   const add = (i: number, value: string, kind: string, via: ConfigSecret['via'], text = args[i]) => {
     if (!value || notASecret(value) || out.some(s => s.value === value)) return;
@@ -436,6 +438,18 @@ export function findArgSecrets(args: readonly string[], command?: string): Confi
     const arg = args[i];
     const prev = i > 0 ? args[i - 1] : undefined;
 
+    // curl `-u user:<password>` / `--user=user:<password>` (shared argv rule 5)
+    if (prev && USER_PASS_FLAGS.has(prev) && afterCurl(i - 1) && !isFlagShaped(arg)) {
+      const pw = userPassword(arg);
+      if (pw !== undefined) add(i, pw, `password after ${prev}`, 'flag', `${prev} ${arg}`);
+      continue;
+    }
+    const userEq = /^(--user|--proxy-user)=(.*)$/s.exec(arg);
+    if (userEq && afterCurl(i)) {
+      const pw = userPassword(userEq[2]);
+      if (pw !== undefined) add(i, pw, `password in ${userEq[1]}`, 'flag');
+      continue;
+    }
     // `--token <value>`: the value is the next element
     if (prev && isCredentialFlag(prev) && !isFlagShaped(arg)) {
       flagValue(i, prev, arg, `${prev} ${arg}`);
