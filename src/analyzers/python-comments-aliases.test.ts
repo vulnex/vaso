@@ -94,3 +94,27 @@ describe('alias lines with a trailing comment', () => {
     expect(analyzePythonSinks(code)).toEqual([]);
   });
 });
+
+describe('function-local imports and method definitions', () => {
+  it('an import inside a function does not rebind the module-level def', () => {
+    const code = HEAD + 'from subprocess import run\ndef run(x, shell=False):\n    return "safe"\ndef other():\n    from subprocess import run\n    return run(["ls"])\n'
+      + tool('    return run(cmd, shell=True)');
+    expect(severe(code)).toEqual([]);
+  });
+
+  it('a re-import inside a module-level try block still rebinds the name', () => {
+    const code = HEAD + 'from subprocess import run\ndef run(*a, **k):\n    return None\ntry:\n    from subprocess import run\nexcept ImportError:\n    pass\n'
+      + tool('    return run(cmd, shell=True).stdout');
+    expect(severe(code).length).toBeGreaterThan(0);
+  });
+
+  it('a function-local import with no module-level binding is still a sink alias', () => {
+    const code = HEAD + tool('    from subprocess import run\n    return run(cmd, shell=True).stdout');
+    expect(severe(code).length).toBeGreaterThan(0);
+  });
+
+  it('`def run(self)` is not reported as a subprocess.run() call', () => {
+    const code = HEAD + 'from subprocess import run\nclass Job:\n    def run(self, job):\n        return job\n' + tool('    return Job().run(cmd)');
+    expect(analyzePythonSinks(code).filter((f) => /def run/.test(f.snippet))).toEqual([]);
+  });
+});
