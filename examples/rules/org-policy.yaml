@@ -1,5 +1,6 @@
 # Organization Security Policy Rules
-# Drop this file in ~/.vaso/rules/ or .vaso/rules/ to enforce org-wide policies.
+# Drop this file in ~/.vaso/rules/ to enforce org-wide policies (a project's
+# .vaso/rules/ loads only when trusted: --project-rules or ~/.vaso/trusted-projects).
 
 rules:
   - id: ORG-001

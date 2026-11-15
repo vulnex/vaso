@@ -2,6 +2,7 @@ import { readFile, stat } from 'node:fs/promises';
 import { isAbsolute, posix } from 'node:path';
 import type { ProbeSnapshot } from './snapshot-types.js';
 import { neutralizeSnapshotIdentity } from './snapshot-identity.js';
+import { escapeControlChars } from '../reporting/text-safety.js';
 
 /**
  * A skill-tree file's head (probe ≥ 1.4.1): 4 KiB, or up to a PE stub's
@@ -62,13 +63,18 @@ export function validateSnapshot(value: unknown): string[] {
   if (!isRecord(value)) return ['Snapshot is not a JSON object'];
   const s = value;
   const errors: string[] = [];
-  if (s.version !== 1) errors.push(`Unsupported snapshot version: ${String(s.version)}`);
+  if (s.version !== 1) {
+    // a string "1" printed bare reads like the supported version
+    const shown = typeof s.version === 'number' ? String(s.version) : (JSON.stringify(s.version) ?? 'missing').slice(0, 40);
+    errors.push(`Unsupported snapshot version: ${shown} (expected the number 1)`);
+  }
   if (typeof s.platform !== 'string' || !s.platform) errors.push('Missing platform field');
   // Checks branch on it, and it is printed: one of Node's platform names
   else if (!PLATFORMS.has(s.platform)) errors.push(`Unknown platform "${s.platform.slice(0, 40)}" (expected ${[...PLATFORMS].join(', ')})`);
   if (typeof s.hostname !== 'string' || !s.hostname) errors.push('Missing hostname field');
   // Adapters resolve every user path from it; without one detection runs blind
   if (typeof s.homedir !== 'string' || !isAbsolute(s.homedir)) errors.push('Missing or relative homedir field');
+  else if (homeProblem(s.homedir)) errors.push(`Invalid homedir field: ${homeProblem(s.homedir)}`);
 
   if (!isRecord(s.files)) {
     errors.push('Missing or invalid files field');
@@ -169,6 +175,19 @@ export function parseSnapshot(raw: string, what: string): ProbeSnapshot {
   return neutralizeSnapshotIdentity(snapshot);
 }
 
+/**
+ * Why a home path can't be used: `/` (every user path would be a system
+ * path) or `.`/`..` segments (`/home/u/../../..` — paths joined onto it
+ * would resolve somewhere else than they read). A trailing or doubled slash
+ * is only tidied (normalizeHome): $HOME can carry one.
+ */
+function homeProblem(home: string): string | undefined {
+  if (!home.startsWith('/')) return undefined;
+  if (home.split('/').some(seg => seg === '.' || seg === '..')) return 'has "." or ".." segments';
+  if (posix.normalize(home) === '/') return 'is the filesystem root';
+  return undefined;
+}
+
 /** An absolute home path without `.`/`..` segments or a trailing slash (POSIX or Windows-style). */
 function normalizeHome(home: string): string {
   if (!home.startsWith('/')) return home;
@@ -176,9 +195,14 @@ function normalizeHome(home: string): string {
   return normal.length > 1 && normal.endsWith('/') ? normal.slice(0, -1) : normal;
 }
 
-/** Lines to print for a SnapshotLoadError. */
+/**
+ * Lines to print for a SnapshotLoadError. A message can quote the file's own
+ * bytes (a platform name, a JSON parse error): control characters are shown
+ * escaped, never sent to the terminal.
+ */
 export function snapshotErrorLines(err: SnapshotLoadError): string[] {
-  return [err.message, ...err.problems.map(p => `  - ${p}`)];
+  const show = (s: string) => escapeControlChars(s, { lineBreaks: true });
+  return [show(err.message), ...err.problems.map(p => `  - ${show(p)}`)];
 }
 
 /** Warning for a snapshot whose probe ran out of content budget (`truncated`). */

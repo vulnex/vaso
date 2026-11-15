@@ -50,8 +50,17 @@ function assertOptionCombination(options: RemoteOptionInput): void {
     throw new Error('--ssh-key needs a key file path');
   }
   if (!remote) {
-    const unused = [options.sshKey !== undefined && '--ssh-key', options.sudo && '--sudo'].filter(Boolean);
-    if (unused.length > 0) throw new Error(`${unused.join(' and ')} appl${unused.length > 1 ? 'y' : 'ies'} to remote scans only (use with --host or --inventory)`);
+    const unused = [
+      options.sshKey !== undefined && '--ssh-key',
+      options.sudo && '--sudo',
+      options.sshTimeout !== undefined && '--ssh-timeout',
+      options.sshRetries !== undefined && '--ssh-retries',
+      options.parallel !== undefined && '--parallel',
+    ].filter((o): o is string => typeof o === 'string');
+    if (unused.length > 0) {
+      const list = unused.length > 1 ? `${unused.slice(0, -1).join(', ')} and ${unused[unused.length - 1]}` : unused[0];
+      throw new Error(`${list} appl${unused.length > 1 ? 'y' : 'ies'} to remote scans only (use with --host or --inventory)`);
+    }
   }
 }
 

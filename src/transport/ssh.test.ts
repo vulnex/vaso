@@ -268,4 +268,20 @@ describe('ssh not installed', () => {
     }
     expect(Date.now() - started).toBeLessThan(5_000);
   });
+
+  it('is not retried with backoff', async () => {
+    const path = process.env.PATH;
+    process.env.PATH = mkdtempSync(join(tmpdir(), 'vaso-nossh-'));
+    const sleep = vi.fn(async () => {});
+    try {
+      await expect(withRetry({
+        retries: 5,
+        sleep,
+        fn: () => executeRemoteProbe({ user: 'u', host: 'h', port: 22 }, { probeBinDir: '/nonexistent', manifest: {} as never, timeout: 30_000 }),
+      })).rejects.toThrow('not installed or not on PATH');
+    } finally {
+      process.env.PATH = path;
+    }
+    expect(sleep).not.toHaveBeenCalled();
+  });
 });

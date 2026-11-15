@@ -12,7 +12,7 @@
  *     - host: ops@10.0.1.6:2222   # user@host[:port], as with --host
  */
 
-import { readFile, stat } from 'node:fs/promises';
+import { readInputFile, INPUT_LIMITS } from '../core/input-file.js';
 import { parse as parseYAML } from 'yaml';
 import { parseSSHTarget, assertSSHTargetParts, targetLabel, unbracketHost } from './ssh.js';
 import type { SSHTarget } from './ssh.js';
@@ -36,8 +36,14 @@ const INVENTORY_KEYS = new Set(['host', 'user', 'port', 'label', 'identity', 'su
  */
 export async function parseInventory(path: string): Promise<SSHTarget[]> {
   // A FIFO would block the CLI and a device such as /dev/zero never ends
-  if (!(await stat(path)).isFile()) throw new Error(`Inventory "${path}" is not a regular file`);
-  const raw = await readFile(path, 'utf-8');
+  let raw: string;
+  try {
+    raw = await readInputFile(path, INPUT_LIMITS.small);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'EINVAL' || code === 'EISDIR') throw new Error(`Inventory "${path}" is not a regular file`);
+    throw err;
+  }
   const doc = parseYAML(raw) as InventoryFile;
 
   if (!doc || !Array.isArray(doc.hosts)) {

@@ -46,3 +46,22 @@ describe('HostFileNames', () => {
     expect(new HostFileNames().claim('', 'a@h')).toBe('host');
   });
 });
+
+describe('long hostnames', () => {
+  it('are cut to a file-name-safe length with a hash that keeps them distinct', () => {
+    const a = hostFileBase('a'.repeat(300));
+    const b = hostFileBase('a'.repeat(299) + 'b');
+    expect(a.length).toBeLessThanOrEqual(100);
+    expect(a).not.toBe(b);
+    expect(a.startsWith('a'.repeat(80))).toBe(true);
+    const names = new HostFileNames();
+    const first = names.claim('x'.repeat(300), 'u@one');
+    const second = names.claim('x'.repeat(300), 'u@' + 'l'.repeat(300));
+    expect(second).not.toBe(first);
+    expect(Buffer.byteLength(`${second}.json`)).toBeLessThan(255);
+  });
+
+  it('leaves ordinary hostnames as they were', () => {
+    expect(hostFileBase('build-01.example.com')).toBe('build-01.example.com');
+  });
+});

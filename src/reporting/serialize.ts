@@ -11,6 +11,7 @@
 
 import { API_KEY_PATTERNS, OAUTH_TOKEN_VALUE_PATTERNS, isEnvReference, isPathValue, isPlaceholderSecret } from '../core/patterns.js';
 import { maskUrlSecrets } from '../mcp/config-secrets.js';
+import { escapeJsonUnsafe } from './text-safety.js';
 import { EXTRA_TOKEN_PATTERNS } from '../analyzers/secret-values.js';
 import {
   PASSWORD_P_CLIENT_IN_TEXT, REDIS_CLI_IN_TEXT, isFlagShaped, isKeyAfterK, isPasswordAfterA, isPasswordAfterP, isPasswordClient, isRedisCli,
@@ -592,7 +593,12 @@ export function reportReplacer(this: unknown, key: string, value: unknown): unkn
   return value;
 }
 
-/** Pretty-printed JSON with config contents stripped and MCP secrets masked. */
+/**
+ * Pretty-printed JSON with config contents stripped and MCP secrets masked.
+ * Bidi, zero-width, tag and C1 characters from scanned text are written as
+ * `\uXXXX` escapes (values unchanged) — every JSON VASO writes: scan and
+ * detect reports, multi-host lists, baselines.
+ */
 export function toReportJson(value: unknown): string {
-  return JSON.stringify(value, reportReplacer, 2);
+  return escapeJsonUnsafe(JSON.stringify(value, reportReplacer, 2));
 }

@@ -1,4 +1,4 @@
-import { join, extname } from 'node:path';
+import { join, extname, isAbsolute, resolve } from 'node:path';
 import { validateRuleFile, type DeclarativeRule, type ValidationError } from './schema.js';
 import { pathExists } from '../core/utils.js';
 import { parseYamlSafe } from '../core/yaml-safe.js';
@@ -9,8 +9,9 @@ import { LocalFSProvider } from '../core/local-fs-provider.js';
  * Where a rule file came from. `user` (~/.vaso/rules/) and `explicit`
  * (`--rules`) are chosen by the person running VASO; `project` rules come
  * from `.vaso/rules/` in the working directory — a cloned repository can
- * ship them, so they are untrusted: they may add findings, but never carry a
- * fix and never replace a user or `--rules` rule.
+ * ship them, so they load only when the person trusts that project
+ * (`--project-rules`, or its path in ~/.vaso/trusted-projects). Even then
+ * they never carry a fix and never replace a user or `--rules` rule.
  */
 export type RuleSource = 'user' | 'project' | 'explicit';
 
@@ -28,6 +29,15 @@ export type LoadedRule = DeclarativeRule & { file: string; source: RuleSource };
 
 export interface LoadResult {
   files: RuleFileResult[];
+  /**
+   * Project rule files found but not loaded: the project isn't trusted.
+   * Parsed only to count their rules (`rules` holds the valid ones).
+   */
+  untrustedProject: RuleFileResult[];
+  /** The project directory (realpath of the working directory). */
+  projectDir: string;
+  /** ~/.vaso/trusted-projects was there but ignored (why). */
+  trustWarning?: string;
   allRules: LoadedRule[];
   allErrors: Array<ValidationError & { file: string }>;
   /** Rules skipped or changed on load (duplicate IDs, project fixes dropped). */
@@ -80,12 +90,53 @@ async function parseRuleFile(filePath: string, source: RuleSource, fs: FSProvide
   }
 }
 
+/** One absolute project path per line; `#` starts a comment. */
+export const TRUSTED_PROJECTS_FILE = join('.vaso', 'trusted-projects');
+
+/**
+ * The projects the person running VASO trusts to supply rules, from
+ * ~/.vaso/trusted-projects. The file is ignored (with a warning) when group
+ * or others can write it: anyone who can add a line could make a repository
+ * trusted. Relative entries are ignored.
+ */
+async function readTrustedProjects(
+  fs: FSProvider,
+  warn: (message: string) => void,
+): Promise<Set<string>> {
+  const file = join(fs.homedir(), TRUSTED_PROJECTS_FILE);
+  const trusted = new Set<string>();
+  let content: string;
+  try {
+    const st = await fs.stat(file);
+    if (!st.isFile()) return trusted;
+    if (process.platform !== 'win32' && (st.mode & 0o022) !== 0) {
+      warn(`${file} is writable by group or others — ignored (chmod 600 it to use it)`);
+      return trusted;
+    }
+    content = await fs.readFile(file);
+  } catch {
+    return trusted;
+  }
+  for (const raw of content.split('\n')) {
+    const line = raw.replace(/#.*/, '').trim();
+    if (!line || !isAbsolute(line)) continue;
+    trusted.add(resolve(line));
+    try {
+      trusted.add(await fs.realpath(line));
+    } catch {
+      // a project that doesn't exist (yet) is matched by its path as written
+    }
+  }
+  return trusted;
+}
+
 const TIER_LABEL: Record<RuleSource, string> = { user: 'user', project: 'project', explicit: '--rules' };
 
 /**
  * Load declarative rules from all discovery paths:
  * 1. User: ~/.vaso/rules/
- * 2. Project: .vaso/rules/ (relative to cwd) — untrusted, see RuleSource
+ * 2. Project: .vaso/rules/ (relative to cwd) — only when the project is
+ *    trusted (`projectRules`, or listed in ~/.vaso/trusted-projects); see RuleSource
  * 3. Extra paths from --rules CLI flag, files or directories (replace a user rule of the same ID)
  *
  * Within one tier the first definition of an ID wins (files load sorted) and
@@ -95,13 +146,23 @@ export async function loadRules(options?: {
   extraPaths?: string[];
   skipGlobal?: boolean;
   skipProject?: boolean;
+  /** Trust the working directory's project rules (`--project-rules`). */
+  projectRules?: boolean;
   fs?: FSProvider;
 }): Promise<LoadResult> {
   const provider = options?.fs ?? new LocalFSProvider();
   const files: RuleFileResult[] = [];
+  const untrustedProject: RuleFileResult[] = [];
   const allErrors: Array<ValidationError & { file: string }> = [];
   const warnings: LoadResult['warnings'] = [];
   const ruleMap = new Map<string, LoadedRule>();
+  let trustWarning: string | undefined;
+  let projectDir = process.cwd();
+  try {
+    projectDir = await provider.realpath(projectDir);
+  } catch {
+    // keep the path as given
+  }
 
   if (!options?.skipGlobal) {
     const globalDir = join(provider.homedir(), '.vaso', 'rules');
@@ -109,8 +170,14 @@ export async function loadRules(options?: {
   }
 
   if (!options?.skipProject) {
-    const projectDir = join(process.cwd(), '.vaso', 'rules');
-    for (const f of await discoverRuleFiles(projectDir, provider)) files.push(await parseRuleFile(f, 'project', provider));
+    const projectFiles = await discoverRuleFiles(join(process.cwd(), '.vaso', 'rules'), provider);
+    if (projectFiles.length > 0) {
+      const trusted = options?.projectRules === true
+        || (await readTrustedProjects(provider, m => { trustWarning = m; })).has(projectDir);
+      for (const f of projectFiles) {
+        (trusted ? files : untrustedProject).push(await parseRuleFile(f, 'project', provider));
+      }
+    }
   }
 
   for (const p of options?.extraPaths ?? []) {
@@ -146,14 +213,14 @@ export async function loadRules(options?: {
         }
       }
       if (rule.source === 'project' && rule.fix?.set !== undefined) {
-        // A repository's rule must not choose what `vaso fix` writes into the
-        // user's own configs; guidance text stays
+        // Even a trusted repository's rule doesn't choose what `vaso fix`
+        // writes into the user's own configs; guidance text stays
         const guidance = rule.fix.guidance;
         rule = { ...rule, fix: guidance !== undefined ? { guidance } : undefined };
         warnings.push({
           file: file.filePath,
           rule: rule.id,
-          message: 'project rules can\'t carry fixes — its "fix.set" is ignored (move the rule to ~/.vaso/rules/ or pass it with --rules to keep the fix)',
+          message: 'project rules can\'t carry fixes, even trusted — its "fix.set" is ignored (move the rule to ~/.vaso/rules/ or pass it with --rules to keep the fix)',
         });
       }
       ruleMap.set(rule.id, rule);
@@ -162,6 +229,9 @@ export async function loadRules(options?: {
 
   return {
     files,
+    untrustedProject,
+    projectDir,
+    ...(trustWarning !== undefined ? { trustWarning } : {}),
     allRules: [...ruleMap.values()],
     allErrors,
     warnings,

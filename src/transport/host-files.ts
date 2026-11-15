@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 /**
  * File names for per-host output (`--output-dir`, `--save-snapshot`).
  *
@@ -13,10 +15,21 @@ export function safeHostname(host: string): string {
   return host.replace(/[^A-Za-z0-9._-]/g, '_');
 }
 
-/** A hostname as a file base name: never empty, `.` or `..`. */
+/**
+ * Longest file base name: file systems cap a name at 255 bytes, and the base
+ * still gets a `--<label>` suffix and an extension.
+ */
+const MAX_BASE = 100;
+
+/** A cut-down name that stays unique: its start plus a short hash of the whole. */
+function shorten(name: string): string {
+  return name.length <= MAX_BASE ? name : `${name.slice(0, MAX_BASE - 13)}-${createHash('sha256').update(name).digest('hex').slice(0, 12)}`;
+}
+
+/** A hostname as a file base name: never empty, `.` or `..`, never too long for a file name. */
 export function hostFileBase(host: string): string {
   const safe = safeHostname(host);
-  return /^\.*$/.test(safe) ? `host${safe.replace(/\./g, '_')}` : safe;
+  return shorten(/^\.*$/.test(safe) ? `host${safe.replace(/\./g, '_')}` : safe);
 }
 
 export class HostFileNames {
@@ -26,7 +39,7 @@ export class HostFileNames {
   /** The base name (no extension) for `hostname`, as seen on target `label`. */
   claim(hostname: string, label: string): string {
     const base = hostFileBase(hostname);
-    const alt = `${base}--${safeHostname(label)}`;
+    const alt = `${base}--${shorten(safeHostname(label))}`;
     for (let n = 0; ; n++) {
       const name = n === 0 ? base : n === 1 ? alt : `${alt}-${n}`;
       const key = name.toLowerCase();

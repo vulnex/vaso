@@ -5,7 +5,7 @@ import type { CheckModule } from '../core/types.js';
 
 export type { DeclarativeRule, ValidationError } from './schema.js';
 export type { LoadResult, RuleFileResult } from './loader.js';
-export { loadRules } from './loader.js';
+export { loadRules, TRUSTED_PROJECTS_FILE } from './loader.js';
 export { compileRule, RuleTimeBudget } from './compiler.js';
 export { validateRuleFile } from './schema.js';
 
@@ -25,6 +25,8 @@ export async function loadAndRegisterRules(
     extraPaths?: string[];
     skipGlobal?: boolean;
     skipProject?: boolean;
+    /** Trust the working directory's project rules (`--project-rules`). */
+    projectRules?: boolean;
   },
 ): Promise<RegisterResult> {
   const loadResult = await loadRules(options);

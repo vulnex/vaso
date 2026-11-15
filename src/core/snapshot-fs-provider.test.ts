@@ -429,6 +429,23 @@ describe('SnapshotFSProvider', () => {
       expect(result.exitCode).toBe(0);
       expect(result.stdout.trim()).toBe('/usr/local/bin/openclaw');
     });
+
+    it('never answers a command naming a path with another path\'s output', async () => {
+      const other = { stdout: '', stderr: 'Identifier=com.openai.chat\nTeamIdentifier=2DC432GLL2\n', exitCode: 0 };
+      const provider = new SnapshotFSProvider(
+        makeSnapshot({
+          commandOutputs: {
+            'chatgpt-classic-codesign': other,
+            'codesign -dv /Applications/ChatGPT Classic.app': other,
+          },
+        }),
+      );
+      const result = await provider.exec('codesign', ['-dv', '/Applications/Muse.app']);
+      expect(result.exitCode).toBe(127);
+      expect(result.stdout).toBe('');
+      // its own output still matches exactly
+      expect((await provider.exec('codesign', ['-dv', '/Applications/ChatGPT Classic.app'])).exitCode).toBe(0);
+    });
   });
 
   describe('execSync', () => {

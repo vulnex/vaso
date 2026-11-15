@@ -11,8 +11,9 @@
 // differently than it is), and invisible characters — zero-width space and
 // joiners, word joiner and invisible operators, BOM, Unicode tag characters
 // (U+E0000–E007F, which spell hidden ASCII) — that make different strings
-// print alike
-const CONTROL_RE = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u061c\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff\u{e0000}-\u{e007f}]/gu;
+// print alike. The Unicode line and paragraph separators (U+2028/2029) are
+// always shown escaped: only \n is a line break VASO's text keeps
+const CONTROL_RE = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u061c\u200b-\u200f\u2028\u2029\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff\u{e0000}-\u{e007f}]/gu;
 
 function visible(ch: string): string {
   const code = ch.codePointAt(0)!;
@@ -20,17 +21,14 @@ function visible(ch: string): string {
   return code > 0xff ? `\\u${code.toString(16).padStart(4, '0')}` : `\\x${code.toString(16).padStart(2, '0')}`;
 }
 
-/** Line breaks: a server name or rule containing one forges a report line. */
-const LINE_BREAK_RE = /[\n\u2028\u2029]/g;
-
 /**
- * Control characters shown as `\xNN`. Newlines are kept unless
- * `lineBreaks` is set, which shows them as `\n` (or `\u2028`/`\u2029`) —
- * for single-line fields in terminal output.
+ * Control characters shown as `\xNN` (`\u2028`, …). Newlines are kept unless
+ * `lineBreaks` is set, which shows them as `\n` — for single-line fields in
+ * terminal output (a server name or rule containing one forges a report line).
  */
 export function escapeControlChars(s: string, options?: { lineBreaks?: boolean }): string {
   const out = s.replace(CONTROL_RE, visible);
-  return options?.lineBreaks ? out.replace(LINE_BREAK_RE, ch => (ch === '\n' ? '\\n' : visible(ch))) : out;
+  return options?.lineBreaks ? out.replace(/\n/g, '\\n') : out;
 }
 
 /** A deep copy of `value` with every string passed through `escapeControlChars`. */

@@ -55,6 +55,14 @@ function validateFormatOption(options: { format?: string }, allowed?: readonly s
 
 const LISTING_FORMATS = ['terminal', 'json'] as const;
 
+/** The one line saying a repository's own rules were not loaded, and how to load them. */
+function untrustedProjectNotice(files: Array<{ rules: unknown[] }>, projectDir: string): string {
+  const count = files.reduce((n, f) => n + f.rules.length, 0);
+  const dir = escapeControlChars(projectDir, { lineBreaks: true });
+  return `Skipped ${count} project rule(s) in ${dir}/.vaso/rules/ — the project isn't trusted. `
+    + `To load them pass --project-rules, or add ${dir} to ~/.vaso/trusted-projects`;
+}
+
 const BANNER = `
 ${chalk.red('██╗   ██╗ █████╗ ███████╗ ██████╗')}
 ${chalk.red('██║   ██║██╔══██╗██╔════╝██╔═══██╗')}
@@ -118,7 +126,7 @@ program
 
       if (!skipRules) {
         const extraPaths = subOpts.rules as string[] | undefined;
-        const rulesResult = await loadAndRegisterRules(checkRegistry, { extraPaths });
+        const rulesResult = await loadAndRegisterRules(checkRegistry, { extraPaths, projectRules: subOpts.projectRules === true });
         // A rule file named on the command line that can't be read is an
         // unreadable input, like a missing --snapshot or --inventory (exit 2)
         // File names come from directory listings (a cloned repo's .vaso/rules)
@@ -145,6 +153,9 @@ program
           for (const w of rulesResult.loadResult.warnings) {
             console.error(chalk.yellow(`  Warning: rule file ${show(w.file)} (rule ${w.rule}): ${w.message}\n`));
           }
+          const { untrustedProject, projectDir, trustWarning } = rulesResult.loadResult;
+          if (trustWarning) console.error(chalk.yellow(`  Warning: ${show(trustWarning)}\n`));
+          if (untrustedProject.length > 0) console.error(chalk.yellow(`  ${untrustedProjectNotice(untrustedProject, projectDir)}\n`));
           for (const skip of rulesResult.skipped) {
             console.error(chalk.yellow(`  Warning: rule "${skip.id}" skipped: ${skip.reason}\n`));
           }
@@ -194,12 +205,13 @@ program
   .option('--silent', 'suppress all stdout/stderr chatter (requires -o or --output-dir)')
   .option('--rules <paths...>', 'load additional rule files')
   .option('--no-custom-rules', 'skip declarative rules')
+  .option('--project-rules', 'also load the rules in ./.vaso/rules/ (a repository\'s own rules; not loaded unless trusted)')
   .option('--host <targets...>', 'remote host(s) to scan via SSH (user@host[:port])')
   .option('--inventory <path>', 'YAML file listing hosts to scan')
   .option('--ssh-key <path>', 'SSH identity file for remote connections')
-  .option('--ssh-timeout <seconds>', 'SSH connection timeout in seconds', '60')
-  .option('--ssh-retries <n>', 'additional SSH attempts after the first failure', '0')
-  .option('--parallel <n>', 'max hosts to scan concurrently', '5')
+  .option('--ssh-timeout <seconds>', 'SSH connection timeout in seconds (default: 60)')
+  .option('--ssh-retries <n>', 'additional SSH attempts after the first failure (default: 0)')
+  .option('--parallel <n>', 'max hosts to scan concurrently (default: 5)')
   .option('--sudo', 'attempt privilege escalation via sudo on remote hosts')
   .option('--snapshot <path>', 'scan from a pre-collected probe snapshot file')
   .option('--save-snapshot <dir>', 'after fetching SSH snapshots, write each as <hostname>.json under this directory')
@@ -224,9 +236,9 @@ program
   .option('--host <targets...>', 'remote host(s) to detect via SSH (user@host[:port])')
   .option('--inventory <path>', 'YAML inventory file with host definitions')
   .option('--ssh-key <path>', 'SSH identity file for remote connections')
-  .option('--ssh-timeout <seconds>', 'SSH connection timeout in seconds', '60')
-  .option('--ssh-retries <n>', 'additional SSH attempts after the first failure', '0')
-  .option('--parallel <n>', 'max hosts to detect concurrently', '5')
+  .option('--ssh-timeout <seconds>', 'SSH connection timeout in seconds (default: 60)')
+  .option('--ssh-retries <n>', 'additional SSH attempts after the first failure (default: 0)')
+  .option('--parallel <n>', 'max hosts to detect concurrently (default: 5)')
   .option('--snapshot <path>', 'detect from a local probe snapshot JSON file')
   .option('--save-snapshot <dir>', 'after fetching SSH snapshots, write each as <hostname>.json under this directory (for debugging)')
   .option('--no-color', 'disable colored output')
@@ -242,6 +254,7 @@ program
   .option('-a, --agent <type>', 'fix a specific agent')
   .option('--dry-run', 'show what would be fixed without making changes')
   .option('-y, --yes', 'apply all fixes without confirmation')
+  .option('--project-rules', 'also load the rules in ./.vaso/rules/ (their fix.set is never applied)')
   .option('--rollback [backup]', 'undo the last fix run (again for the one before); or restore a named backup from ~/.vaso/backups')
   .option('--no-color', 'disable colored output')
   .action(async (options) => {

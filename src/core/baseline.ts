@@ -1,4 +1,5 @@
-import { readFile, mkdir, chmod } from 'node:fs/promises';
+import { mkdir, chmod } from 'node:fs/promises';
+import { readInputFile, INPUT_LIMITS } from './input-file.js';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import type { ScanResult, CheckResult } from './types.js';
@@ -74,7 +75,7 @@ async function readBaseline(name: string): Promise<ScanResult | null> {
   const path = join(BASELINES_DIR, name);
   let text: string;
   try {
-    text = await readFile(path, 'utf-8');
+    text = await readInputFile(path, INPUT_LIMITS.report);
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === 'ENOENT') return null;

@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  validateSnapshot, loadSnapshotFile, SnapshotLoadError, MAX_SNAPSHOT_FILE_CONTENT_CHARS,
+  validateSnapshot, loadSnapshotFile, SnapshotLoadError, MAX_SNAPSHOT_FILE_CONTENT_CHARS, snapshotErrorLines,
 } from './snapshot-load.js';
 
 function snap(overrides: Record<string, unknown> = {}): Record<string, unknown> {
@@ -98,10 +98,37 @@ describe('loadSnapshotFile', () => {
     expect(s.timestamp).toBe('t\\u202e');
   });
 
-  it('normalizes the home directory', async () => {
+  it('tidies a trailing or doubled slash in the home directory', async () => {
     const path = join(dir, 'home.json');
-    await writeFile(path, JSON.stringify(snap({ homedir: '/home/x/../u/' })));
+    await writeFile(path, JSON.stringify(snap({ homedir: '/home//u/' })));
     expect((await loadSnapshotFile(path)).homedir).toBe('/home/u');
+  });
+
+  it('rejects a home directory that is / or has . or .. segments', () => {
+    expect(validateSnapshot(snap({ homedir: '/' }))).toContain('Invalid homedir field: is the filesystem root');
+    expect(validateSnapshot(snap({ homedir: '//' }))).toContain('Invalid homedir field: is the filesystem root');
+    expect(validateSnapshot(snap({ homedir: '/home/x/../u' }))).toContain('Invalid homedir field: has "." or ".." segments');
+    expect(validateSnapshot(snap({ homedir: '/home/u/../../../..' }))).toContain('Invalid homedir field: has "." or ".." segments');
+    expect(validateSnapshot(snap({ homedir: '/home/./u' }))).toContain('Invalid homedir field: has "." or ".." segments');
+  });
+
+  it('says a string version is not the number 1', () => {
+    expect(validateSnapshot(snap({ version: '1' }))).toContain('Unsupported snapshot version: "1" (expected the number 1)');
+  });
+
+  it('error lines escape control characters quoted from the file', async () => {
+    const path = join(dir, 'ctrl.json');
+    await writeFile(path, JSON.stringify(snap({ platform: 'darwin\u001b]0;T\u0007\u001b[2J' })));
+    const err = await loadSnapshotFile(path).catch(e => e);
+    expect(err).toBeInstanceOf(SnapshotLoadError);
+    const text = snapshotErrorLines(err).join('\n');
+    expect(text).toContain('darwin\\x1b]0;T\\x07\\x1b[2J');
+    expect(text).not.toMatch(/[\u0000-\u0008\u000b-\u001f]/);
+
+    const nul = join(dir, 'nul.json');
+    await writeFile(nul, '{"version": 1,\u0000\u001b[2J}');
+    const parseErr = await loadSnapshotFile(nul).catch(e => e);
+    expect(snapshotErrorLines(parseErr).join('\n')).not.toMatch(/[\u0000-\u0008\u000b-\u001f]/);
   });
 
   it('reads only a regular file: a FIFO or a device is refused, not waited on or read', async () => {

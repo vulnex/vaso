@@ -33,7 +33,8 @@ export function readCodesign(result: ExecResult): CodesignInfo {
   if (result.exitCode !== 0) {
     if (BROKEN_RE.test(text)) return { state: 'broken', detail: firstLine(result.stderr || result.stdout) };
     const said = firstLine(result.stderr || result.stdout);
-    return { state: 'unknown', reason: `codesign exited ${result.exitCode}${said ? `: ${said}` : ''}` };
+    const status = typeof result.exitCode === 'number' ? `codesign exited ${result.exitCode}` : 'codesign reported no exit status';
+    return { state: 'unknown', reason: `${status}${said ? `: ${said}` : ''}` };
   }
   const team = TEAM_RE.exec(text)?.[1]?.trim().slice(0, 64);
   const identifier = IDENTIFIER_RE.exec(text)?.[1];
