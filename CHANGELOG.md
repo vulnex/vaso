@@ -13,6 +13,10 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - **MCP source snippets mask credentials.** A credential MCP-003 finds in a server's source is masked wherever another MCP check quotes that source (MCP-002/004–007/009/011/013–018/023/034/035).
 - **`vaso fix` keeps ACLs, extended attributes and file flags.** A file with any of them, or in a directory with an inheritable/default ACL, is rewritten in place; when this can't be determined, in place is used. Rollback follows the same rule.
 - **Parent-directory mitigation follows symlinks.** A symlinked credential file whose target sits in a directory other users can enter is no longer reported as mitigated.
+- **Probe disguises more secrets:** HashiCorp Vault tokens (`hvs.`/`hvb.`/`hvr.`, legacy `s.`/`r.`) and any value under an API-key, token or Authorization name, whatever its entropy. Inside config trees, Vault token files, shell and client histories, keyrings, browser cookie/login stores and credential-named files with an execute bit (unless they start like a program) ship as metadata only.
+- **Rule evidence masks credential values in every report format:** values below a credential-named key (`apiKeys.0`), numeric PINs and passwords, argv values after `--api-key`/`--password` and items of a `secrets:` list, even on a separate line from their key.
+- **MCP source snippets** mask every credential MCP-003 flags on the whole source line before cutting, so no fragment survives a cut; MCP-034 also masks passwords and tokens written out in prose.
+- **`~/.vaso/trusted-projects`** is honoured only when it is a regular file of at most 64 KiB, owned by the user and not group/other-writable, in a `~/.vaso` with the same properties.
 
 ### Added
 
@@ -31,6 +35,9 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - **CDX-009 judges Codex lifecycle hooks** (`~/.codex/hooks.json`, trusted projects' `.codex/hooks.json`, inline `[hooks]`) with the shared hook analyzer. CDX-002 judges nested `filesystem."<root>"` tables in permission profiles.
 - **DEV-001** warns on `permission_mode: "accept-edits"`; **CUR-008** flags `0.0.0.0/0`/`::/0` network allows; **CUR-009** flags `*:**` MCP allowlists; **GEM-003** flags `mcp_<server>_*` for server names with underscores.
 - **MCP-030** flags `npm exec`/`npm x` and `pnpm dlx --package=…` installs from git, URLs or local paths, and `uv run https://…`.
+- **Claude Code `managed-mcp.json`** (system managed directory) is discovered and scanned: CC-004/CC-005 and the MCP checks judge its servers, which still honour `deniedMcpServers`. It hides other servers only when it parses as valid JSON; an unparseable one is reported as CONFIG-LOAD.
+- **CDX-002** judges profile-defined `workspace_roots` that receive `:workspace_roots` write (home as a workspace root is critical), `:root` sub-paths and globs that can match a sensitive directory (`~/.ss*`). **CDX-009** judges hooks in Codex profile files (`<name>.config.toml`) and notes the `/hooks` trust review.
+- **DEV-001** warns on Devin `permission_mode: "smart"`, like `accept-edits`; the fix advice recommends "normal".
 
 ### Changed
 
@@ -55,8 +62,16 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - **Python MCP analysis** rewrites aliases in one pass and follows alias chains, `functools.partial(…, shell=True)` and `Path.joinpath(name)`.
 - **WS-009** is info on Devin Desktop 3.9.19 and later (Cascade removed). CDX-005 notes `inherit="all"` in profile files; a profile extending `:danger-full-access` (which Codex rejects) is not reported. CUR-009 ignores `additionalReadwritePaths` outside `workspace_readwrite`.
 - **Hook findings** read `<event> hook: <command>`, so reports mask only the secret part.
-- **CLI file inputs** (`rules validate`, `visualize -i`, `--inventory`, baselines) must be regular files under a size limit. `--ssh-timeout`, `--ssh-retries` and `--parallel` on a local or snapshot scan are usage errors. U+2028/U+2029 are escaped in every format; `detect -f json`, multi-host JSON and baselines are escaped like scan JSON.
+- **CLI file inputs** (`rules validate`, `visualize -i`, `--inventory`, baselines) must be regular files under a size limit. `--ssh-timeout`, `--ssh-retries` and `--parallel` are accepted on local and snapshot scans (validated, then ignored), as in 1.4.1. U+2028/U+2029 are escaped in every format; `detect -f json`, multi-host JSON and baselines are escaped like scan JSON.
 - **ADV-001** snippets name the advisory, installed version and fixed version. Renamed: CUR-006 "Cursor MCP Server Insecure Config", GHC-003 "…GitHub Token or Provider Key", GHC-007 "Copilot CLI Unsafe LSP or Hook Commands".
+- **CDX-002** merges permission profiles along `extends` before judging: a child overrides its parent, and on the same path deny beats write beats read. Configs Codex rejects (extends cycles, unknown parents) are not reported. A profile domain allowlist counts as a network bound only with `features.network_proxy` on. CDX-008 deep-merges a profile file's permission tables and features over config.toml.
+- **Claude Code MCP policy:** `serverUrl` patterns match scheme, host (case-insensitive, trailing dot ignored), port and path (case-sensitive) separately; `serverCommand`/`serverUrl` entries expand `${VAR}` and `${VAR:-default}` on both sides.
+- **GHC-001** judges symlinked store files by their target, every store file (listing up to 200 per store) and files one folder down (`session-state/<id>/`); remote scans say "not verified" for store files the probe did not collect.
+- **Skills directories a config sets outside the user's home, at the home itself or in a credential store** are reported by SKL-002 as a warning ("not scanned"), locally and remotely; the other skill and IOC skill checks say "not verified" instead of "No skills directory found".
+- **Remote scans:** links inside config-set skill trees are recorded (SKL-013 sees links into `~/.ssh` or out of the home); a per-agent workspace that is a symlink (PicoClaw `workspace-<id>`) is walked when it stays in the home, otherwise reported "not scanned"; skill roots whose names contain `[ { * ?` are walked; refused roots report whether they exist as locally.
+- **MCP-005 SQL:** an allow-list ternary is safe only in the branch its test holds; a placeholder `join()` needs a fixed separator; escape helpers count only from mysql/mysql2/pg/pg-format/pg-escape/sqlstring/knex.
+- **MCP launch targets:** a package script over 8 KiB still resolves a first command within the limit; `uv … run -m mod` / `uv run python -m mod` resolve the module from `--directory`; an unresolved `python -m` gets an MCP-001 note; node preloads are analysed when the entry file is missing.
+- Untrusted project rule files are counted, not parsed; the notice reads "Skipped N project rule file(s)". `--no-custom-rules` warns when `--project-rules` or `--rules` is also given.
 
 ### Fixed
 
@@ -75,6 +90,11 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - `rules`: `fix.set` paths with an empty key segment are rejected. CFG-008's guidance notes that an enabled sandbox still needs constraints (POL-004).
 - A missing ssh client fails immediately; deeply nested configs no longer crash CFG-003/POL-003; rule `fix.set` cannot reach the object prototype.
 - MCP inventory: installs relocated by `CODEX_HOME`/`CLAUDE_CONFIG_DIR` get their servers; findings link for Abacus.AI array entries, world-writable command paths and bare config lines (IOC-001, CFG-002). Skill descriptions mask bare high-entropy tokens. Codex and Cursor skill roots must be directories. `detect --snapshot --silent` prints no progress line.
+- **YAML fixes** refuse a key path that exists only through a `<<` merge instead of dropping the merged keys, judge aliases by the anchor definition they refer to, and no longer count a byte-order mark as indentation. Rule `fix.set` refusals say why the config was not written.
+- **`vaso fix`** judges the inheritable ACL of the real directory behind a symlinked config directory.
+- **Python MCP analysis:** trailing `# comments` are no longer read as code; a module-level `def` shadows an earlier `from subprocess import …`; `functools.partial(…, shell=True)` aliases are rewritten in linear time.
+- A settings file linked into `/etc` or a credential store is no longer counted as exposing on either scan, and CONFIG-LOAD names the target correctly. Hermes MCP `enabled`/`disabled` are read as Hermes reads them (`0`, quoted words, legacy `disabled`).
+- Snapshots whose `commandOutputs` entries are not `{stdout, stderr, exitCode}` are rejected as invalid instead of making checks error.
 
 ## [1.4.1] - 2026-11-13
 
