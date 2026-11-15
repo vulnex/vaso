@@ -1,6 +1,8 @@
 import type { AgentAdapter, DetectOptions } from './adapter.js';
 import type { AgentInstallation, AgentType } from '../core/types.js';
 import { captureConfigLoadErrors, type ConfigLoadError } from '../core/config-loader.js';
+import { LocalFSProvider } from '../core/local-fs-provider.js';
+import { screenDefaultSkillRoots } from './default-skill-roots.js';
 
 export interface AdapterDetectionError {
   agent: AgentType;
@@ -61,7 +63,7 @@ export class AdapterRegistry {
       this.adapters.map(a => captureConfigLoadErrors(() => a.detect(options)))
     );
 
-    const installations: AgentInstallation[] = [];
+    let installations: AgentInstallation[] = [];
     const errors: AdapterDetectionError[] = [];
     const configLoadErrors: AdapterConfigLoadError[] = [];
 
@@ -85,6 +87,10 @@ export class AdapterRegistry {
         });
       }
     }
+
+    // An agent's own skills directory linked out of the home or into a
+    // credential store: not scanned, on local and remote scans alike
+    installations = await screenDefaultSkillRoots(installations, options?.fs ?? new LocalFSProvider(), options?.allUsers);
 
     return { installations, errors, configLoadErrors };
   }

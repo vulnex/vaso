@@ -456,8 +456,38 @@ func (c *collector) collectLinkedSkillBases(snapshot *ProbeSnapshot, pattern str
 	}
 }
 
+// followLinkedMetadata records, for a metadata glob with wildcard
+// directories (`~/.copilot/session-state/*/*`), the matches its no-follow
+// glob couldn't reach because a matched directory is a link
+// (session-state/<id> → ~/sess): metadata only, under the linked path, and
+// only where the link stays inside the home and outside credential stores
+// (treeAllowed) — as a local scan judges the files it finds behind it.
+func (c *collector) followLinkedMetadata(snapshot *ProbeSnapshot, pattern string) {
+	slash := filepath.ToSlash(pattern)
+	static, rest := doublestar.SplitPattern(slash)
+	if rest == "" || strings.Contains(rest, "**") || !strings.Contains(rest, "/") {
+		return
+	}
+	staticDir := filepath.FromSlash(static)
+	for _, m := range expandFollowingDirLinks(pattern) {
+		if !throughLink(staticDir, m) || inExcludedDir(pattern, m) {
+			continue
+		}
+		if _, done := snapshot.Files[m]; done {
+			continue
+		}
+		home := c.homeOf(m)
+		if home == "" || !treeAllowed(m, home) {
+			continue
+		}
+		recordSymlink(snapshot.Symlinks, m)
+		c.collectPath(snapshot, m, globBase(pattern), true, false)
+	}
+}
+
 // homeOf is the scanned home (or the probe user's) p lies strictly inside,
-// as written; "" when none — a tree there is refused.
+// as written, else once both are resolved (a linked home spelled the other
+// way); "" when none — a tree there is refused.
 func (c *collector) homeOf(p string) string {
 	homes := c.homes
 	if own, err := os.UserHomeDir(); err == nil {
@@ -470,7 +500,39 @@ func (c *collector) homeOf(p string) string {
 			best = h
 		}
 	}
+	if best != "" {
+		return best
+	}
+	real := resolveExisting(filepath.Clean(p))
+	for _, h := range homes {
+		h = filepath.Clean(h)
+		if strictlyWithin(real, resolveExisting(h)) && len(h) > len(best) {
+			best = h
+		}
+	}
 	return best
+}
+
+// refuseLinkedSkillBase: the static base of a manifest skills glob
+// (~/.picoclaw/workspace/skills, ~/.claude/skills) lies in a home as written
+// but a link takes it out of the home or into a credential store — the same
+// rule as a config-derived tree's (treeAllowed). It is not walked, and is
+// recorded refused with the links that lead there, so local and remote scans
+// both report it not scanned instead of one reading what it points to.
+func (c *collector) refuseLinkedSkillBase(snapshot *ProbeSnapshot, pattern string) bool {
+	base := globBase(pattern)
+	if !filepath.IsAbs(base) || c.scannedHomeOrAbove(base) {
+		return false
+	}
+	home := c.homeOf(base)
+	if home == "" || !strictlyWithin(filepath.Clean(base), home) || len(sinkSet(base)) > 0 || treeAllowed(base, home) {
+		return false
+	}
+	if snapshot.ConfigTrees == nil {
+		snapshot.ConfigTrees = make(map[string]string)
+	}
+	c.collectConfigBase(snapshot, base, home)
+	return true
 }
 
 // collectConfigBase walks base as a config-derived skill tree and records
@@ -487,6 +549,9 @@ func (c *collector) collectConfigBase(snapshot *ProbeSnapshot, base, home string
 		if _, done := snapshot.DirectoryModes[base]; !done {
 			recordDirMode(snapshot, base)
 		}
+		// the links that take it where it leads (names and targets): the CLI
+		// tells a link to the home itself from one out of it, as locally
+		c.recordLinkChain(snapshot, base)
 	}
 	if home == "" || !treeAllowed(base, home) || c.scannedHomeOrAbove(base) {
 		notWalked(treeRefused)
@@ -523,23 +588,24 @@ func (c *collector) scannedHomeOrAbove(p string) bool {
 }
 
 // treeAllowed is the one place a config-derived tree may be walked from, and
-// what a link met while walking one may lead to: strictly inside home — the
-// home of the user whose config named it — and outside every credential
-// store (SENSITIVE_SINKS), both as written and once resolved. Anything else
-// (/, /etc or /private/etc, other users' homes, the home itself, ~/.ssh,
-// ~/.config/gh…) is refused; the CLI applies the same rule to local scans
-// (src/core/skill-root-scope.ts).
+// what a link met while walking one may lead to: once resolved, strictly
+// inside home — the home of the user whose config named it, resolved too, so
+// either spelling of a linked home (/home → /var/home) is the home — and
+// outside every credential store (SENSITIVE_SINKS), both as written and once
+// resolved. Anything else (/, /etc or /private/etc, other users' homes, the
+// home itself, ~/.ssh, ~/.config/gh, a link out of the home) is refused; the
+// CLI applies the same rule to local scans (src/core/skill-root-scope.ts).
 func treeAllowed(p, home string) bool {
 	p, home = filepath.Clean(p), filepath.Clean(home)
 	if !filepath.IsAbs(p) || !filepath.IsAbs(home) || home == string(filepath.Separator) {
 		return false
 	}
-	if !strictlyWithin(p, home) || len(sinkSet(p)) > 0 {
+	if len(sinkSet(p)) > 0 {
 		return false
 	}
 	realHome := resolveExisting(home)
 	real := resolveExisting(p)
-	return strictlyWithin(real, realHome) && len(sinkSet(real)) == 0
+	return realHome != string(filepath.Separator) && strictlyWithin(real, realHome) && len(sinkSet(real)) == 0
 }
 
 // strictlyWithin: p lies below dir (not dir itself).

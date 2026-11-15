@@ -134,6 +134,8 @@ type collector struct {
 	disguised map[string]string
 	// inFile: the values disguised in the file being scrubbed, and their stand-ins
 	inFile map[string]string
+	// emails maps the local part of each email address to its stand-in
+	emails map[string]string
 }
 
 // inExcludedDir reports whether match lies under an excluded directory that
@@ -332,6 +334,7 @@ func Collect(manifest ProbeManifest, escalate bool) ProbeSnapshot {
 			}
 		}
 		c.followLinkedTrees(&snapshot, pattern, matches, true)
+		c.followLinkedMetadata(&snapshot, pattern)
 	}
 
 	// Trees and paths agents' configs set (a workspace moved elsewhere, an
@@ -508,6 +511,9 @@ func expandPaths(paths []string, homes []UserHome) []string {
 // limits), the trees its symlinks point to, names a glob can't match and
 // directories it couldn't read. c.inSkillTree says whether it walks skills.
 func (c *collector) collectGlob(snapshot *ProbeSnapshot, pattern string) {
+	if c.inSkillTree && !c.configTree && c.refuseLinkedSkillBase(snapshot, pattern) {
+		return
+	}
 	// Never descend into symlinked directories: a local readdir lists the
 	// link without following it, so following here duplicated every file
 	// a skill symlinks in from elsewhere. The link itself still matches.
@@ -1165,7 +1171,7 @@ func redactSecretValues(s string) string {
 	// --api-key X, --token=X (HERMES_EXTRA_ARGS, a command line in output):
 	// as in files, judged by the value
 	s = flagCredentials(s, func(v string) string {
-		if !worthDisguising(v) {
+		if !worthDisguising(v) && !plainCredential(v) {
 			return v
 		}
 		return redactedEnvValue
@@ -1174,7 +1180,7 @@ func redactSecretValues(s string) string {
 	s = onSecretLines(s, secretHints, func(line string) string {
 		return inlineSecrets(line, false, func(key, value string) (string, bool) {
 			scheme := authSchemePrefix.FindString(value)
-			if !worthDisguising(value[len(scheme):]) && !(strongCredentialKey(key) && passphraseLike(value[len(scheme):])) {
+			if core := value[len(scheme):]; !worthDisguising(core) && !(strongCredentialKey(key) && (passphraseLike(core) || shortSecret(core))) {
 				return "", false
 			}
 			return scheme + redactedEnvValue, true

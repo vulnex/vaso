@@ -61,6 +61,20 @@ function canary(label: string, make: () => string): string {
   return value;
 }
 
+/**
+ * Values too short to search for alone (a 5-character token), and email
+ * addresses (whose first character stays): never shipped in the context
+ * they were planted in — the whole `"NAME": "value"`, `NAME=value`, address.
+ */
+const contextCanaries = new Map<string, string>();
+function contextCanary(label: string, value: string, context: (v: string) => string): string {
+  contextCanaries.set(label, context(value));
+  return value;
+}
+const LOWER = 'abcdefghijklmnopqrstuvwyz';
+/** A lowercase word: what a password or token often is, no marker in it. */
+const lowerWord = () => body(11, LOWER);
+
 /** The part of a secret the probe must never ship (reports show the rest). */
 function hidden(s: string): string {
   return s.length >= 24 ? s.slice(8, -4) : s.length >= 16 ? s.slice(4) : s;
@@ -146,6 +160,11 @@ function envFile(label: string): string {
     `NUMERIC_PASSWORD=${canary(`${label} env numeric password`, () => body(9, '123456789'))}`,
     `LOWER_PASSWORD=${canary(`${label} env lowercase password`, () => body(12, 'abcdefghijklmnopqrstuvwyz'))}`,
     `QUOTED_ARGS='--no-auth --password "${canary(`${label} env quoted password`, () => `${body(6)} ${body(7)}2`)}"'`,
+    // low-entropy values under names that hold a key, and a short one
+    `PRIVATE_KEY=${canary(`${label} env lowercase PRIVATE_KEY`, lowerWord)}`,
+    `ACCESS_KEY=${canary(`${label} env lowercase ACCESS_KEY`, lowerWord)}`,
+    `GITHUB_PAT=${contextCanary(`${label} env short GITHUB_PAT`, body(5, LOWER), v => `GITHUB_PAT=${v}`)}`,
+    `DB_URL=mysql://root:${canary(`${label} env lowercase url password`, lowerWord)}@localhost/db`,
   ].join('\n') + '\n';
 }
 
@@ -174,7 +193,28 @@ function jsonFile(label: string): string {
       signed: { url: `https://x.example.com/api?sig=${c('sig param', () => body(32))}&X-Amz-Signature=${c('amz signature', () => body(64, 'abcdef0123456789'))}` },
       session: { url: `https://x.example.com/p;jsessionid=${c('jsessionid', () => body(32))}` },
       catchHook: { url: `https://hooks.zapier.com/hooks/catch/123456/${c('zapier catch key', () => body(16, 'abcdefghijklmnopqrstuvwyz0123456789'))}/` },
+      // plain values in credential positions: a lowercase word after a
+      // credential flag or as a URL's password; low-entropy and short values
+      // under names that hold a key, token or session
+      plain: {
+        command: 'npx',
+        args: ['-y', 'db-mcp', '--password', c('lowercase --password', lowerWord), '--db', `postgres://admin:${c('lowercase url password', lowerWord)}@db.internal/x`,
+          `--api-key=${c('lowercase --api-key=', lowerWord)}`, '--token', c('lowercase --token', lowerWord), '--auth', c('lowercase --auth', lowerWord),
+          '--secret', c('lowercase --secret', lowerWord), `https://u:${c('lowercase url password in argv', lowerWord)}@x.example/y`],
+        env: {
+          DATABASE_URL: `mysql://root:${c('lowercase env url password', lowerWord)}@localhost/db`,
+          PRIVATE_KEY: c('lowercase PRIVATE_KEY', lowerWord),
+          AUTH: c('lowercase AUTH', lowerWord),
+          ACCESS_KEY: c('lowercase ACCESS_KEY', lowerWord),
+          SESSION: c('lowercase SESSION', lowerWord),
+          PAT: c('lowercase PAT', lowerWord),
+          TELEGRAM_BOT_TOKEN: contextCanary(`${label} json short TELEGRAM_BOT_TOKEN`, body(5, LOWER), v => `"TELEGRAM_BOT_TOKEN": "${v}"`),
+          API_KEY: contextCanary(`${label} json short API_KEY`, body(4, BASE62), v => `"API_KEY": "${v}"`),
+        },
+      },
     },
+    // an account's email address: personal data, its first character and domain stay
+    oauthAccount: { emailAddress: contextCanary(`${label} json email address`, `${body(12, LOWER)}@example.com`, v => v) },
     notes: `token ${c('token in prose', FORMATS[0][1])}`,
     // key=\"value\" inside a JSON string (custom instructions)
     instructions: `password="${c('escaped-quoted pair', generic)}" and api_key: "${c('escaped-quoted colon pair', generic)}"`,
@@ -500,6 +540,8 @@ describe.skipIf(!goAvailable)('probe privacy canary', () => {
   let planted = 0;
   let geminiIndex = '';
   let haystack = '';
+  /** The collected files' text, decoded (as the snapshot's JSON strings and base64 hold it). */
+  let contentText = '';
 
   beforeAll(async () => {
     const work = await mkdtemp(join(tmpdir(), 'vaso-canary-'));
@@ -570,6 +612,13 @@ describe.skipIf(!goAvailable)('probe privacy canary', () => {
         const even = raw.subarray(0, raw.length - (raw.length % 2));
         return [raw.toString('latin1'), raw.toString('utf16le'), raw.subarray(1).toString('utf16le'), Buffer.from(even).swap16().toString('utf16le')];
       })].join('\n');
+    contentText = Object.values(files).flatMap(e => {
+      if (!e.content) return [];
+      if (e.encoding !== 'base64') return [e.content];
+      const raw = Buffer.from(e.content, 'base64');
+      const even = raw.subarray(0, raw.length - (raw.length % 2));
+      return [raw.toString('latin1'), raw.toString('utf16le'), raw.subarray(1).toString('utf16le'), Buffer.from(even).swap16().toString('utf16le')];
+    }).join('\n');
   }, 300_000);
 
   it('plants canaries across the manifest', () => {
@@ -642,6 +691,12 @@ describe.skipIf(!goAvailable)('probe privacy canary', () => {
   it('ships no canary', () => {
     const leaks = [...canaries].filter(([, value]) => haystack.includes(hidden(value))).map(([label]) => label);
     expect(leaks, `${leaks.length} canaries shipped:\n${leaks.slice(0, 40).join('\n')}`).toEqual([]);
+  });
+
+  it('ships no short credential or email address in its context', () => {
+    expect(contextCanaries.size).toBeGreaterThan(300);
+    const leaks = [...contextCanaries].filter(([, context]) => contentText.includes(context)).map(([label, context]) => `${label}: ${context}`);
+    expect(leaks, `${leaks.length} shipped:\n${leaks.slice(0, 40).join('\n')}`).toEqual([]);
   });
 
   it('gives no character away over many snapshots', async () => {

@@ -1,0 +1,13 @@
+{
+  "agent": "hermes",
+  "source": "dt23 re-verify round 3: hermes-clean with model.api_key a plaintext Anthropic key in a YAML double-quoted string whose \\x74 escape straddles the 8 characters reports keep \u2014 the probe keeps the escape whole, so the remote scan parses config.yaml and reaches the local verdicts",
+  "modes": {
+    ".hermes": "700",
+    ".hermes/config.yaml": "600",
+    ".hermes/.env": "600",
+    ".hermes/bin/tirith": "755"
+  },
+  "fail": {
+    "HM-001": "critical"
+  }
+}

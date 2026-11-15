@@ -1,6 +1,6 @@
 {
   "agent": "nanobot",
-  "source": "dt23: agents.defaults.workspace set in config.json outside the user's home (a /srv-style deployment). Neither the local scan nor the remote probe walks it: SKL-002 reports it as not scanned (warning), never a clean pass",
+  "source": "dt23: agents.defaults.workspace set in config.json outside the user's home (a /srv-style deployment, the workspace present). Neither the local scan nor the remote probe walks it: SKL-002 reports it as not scanned (warning), never a clean pass",
   "fail": {
     "SKL-002": "warning"
   },

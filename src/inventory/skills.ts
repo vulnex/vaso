@@ -66,7 +66,7 @@ export async function collectSkillInventory(installation: AgentInstallation, fs:
     // A snapshot keys paths normalized (`~/./a/../.ssh` is `~/.ssh` there)
     const at = fs.kind === 'snapshot' && isAbsolute(path) ? posix.normalize(path) : path;
     skillsDirs.push({ path, exists: await fs.access(at).catch(() => false), unverified: true });
-    incomplete.push(`${path}: ${unscannedReason(reason)}`);
+    incomplete.push(`${path}: ${unscannedReason(reason, path)}`);
   }
 
   for (const root of roots) {
@@ -75,7 +75,7 @@ export async function collectSkillInventory(installation: AgentInstallation, fs:
     const gap = configTreeGap(fs, root);
     if (gap) {
       skillsDirs.push({ path: root, exists: await fs.access(root).catch(() => false), unverified: true });
-      incomplete.push(`${root}: ${unscannedReason(gap === 'refused' ? 'outside' : 'limit')}`);
+      incomplete.push(`${root}: ${unscannedReason(gap === 'refused' ? 'outside' : 'limit', root)}`);
       continue;
     }
     const listing = await listSkillTree(root, fs);

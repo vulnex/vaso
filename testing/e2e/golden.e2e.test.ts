@@ -42,6 +42,9 @@ import type { AgentScanResult, ScanResult, Severity } from '../../src/core/types
  *            probe and the fix ({{HOME}} substituted), e.g. a relocated
  *            system directory such as HERMES_MANAGED_DIR
  *
+ * A case's `outside/` directory, when it has one, is copied beside the
+ * fixture HOME (`<work>/outside`): what a link in the home leads out to.
+ *
  * Scans run with a minimal environment (no real HOME, PATH without agent
  * CLIs) from inside the fixture, so results depend on the fixture only.
  */
@@ -174,6 +177,7 @@ describe.each(caseNames)('golden: %s', (name) => {
     if (reachable) await chmod(work, 0o755);
     home = join(work, 'home');
     await materialize(join(CASES, name, 'home'), home);
+    if (existsSync(join(CASES, name, 'outside'))) await materialize(join(CASES, name, 'outside'), join(work, 'outside'));
     for (const [path, mode] of Object.entries(spec.modes ?? {})) await chmod(join(home, path), parseInt(mode, 8));
     if (spec.env) caseEnv.set(home, Object.fromEntries(Object.entries(spec.env).map(([k, v]) => [k, v.split('{{HOME}}').join(home)])));
     local = (await scan(home, spec.agent, [], mcpOf(spec))).agents.filter(a => a.agent === spec.agent);

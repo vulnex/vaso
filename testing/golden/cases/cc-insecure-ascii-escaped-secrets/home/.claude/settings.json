@@ -1,0 +1,13 @@
+{
+  "env": {
+    "ANTHROPIC_API_KEY": "sk-ant-api03-Qm7vT2xLp9WcR4nZ8bK1aaaaBBBBccccDDDDeeeeFFFF-gggg",
+    "DB_PASSWORD": "Contrase\u00f1a-Segura-2024-xyz",
+    "SERVICE_TOKEN": "tok\"quote\\back-Zx81kP0q",
+    "GITHUB_TOKEN": "ghp_\u00e9AbCdEfGhIjKlMnOpQrStUvWxYz012345"
+  },
+  "permissions": {
+    "allow": [
+      "Read"
+    ]
+  }
+}

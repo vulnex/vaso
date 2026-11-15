@@ -1,4 +1,7 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { mkdtemp, mkdir, realpath, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { CheckModule, ScanContext } from '../../core/types.js';
 import { LocalFSProvider } from '../../core/local-fs-provider.js';
 import { skillChecks } from './index.js';
@@ -18,15 +21,24 @@ const ctx = (unscanned: ScanContext['installation']['unscannedSkillsDirs'], skil
   configs: [], platform: 'linux', fs: new LocalFSProvider(), skillFiles: [],
 });
 
-const OUT = [{ path: '/srv/nanobot/ws/skills', reason: 'outside' as const }];
+// an existing directory outside the (fake) home
+const OUT = [{ path: '', reason: 'outside' as const }];
 const byId = (id: string): CheckModule => [...skillChecks, ...iocChecks].find(c => c.id === id)!;
+let tmp = '';
+
+beforeAll(async () => {
+  tmp = await realpath(await mkdtemp(join(tmpdir(), 'vaso-unscanned-')));
+  OUT[0].path = join(tmp, 'srv', 'nanobot', 'ws', 'skills');
+  await mkdir(OUT[0].path, { recursive: true });
+});
+afterAll(async () => rm(tmp, { recursive: true, force: true }));
 
 describe('a skills directory outside the home', () => {
   it('SKL-002 reports it as a warning naming the directory', async () => {
     const r = await byId('SKL-002').run(ctx(OUT));
     expect(r.passed).toBe(false);
     expect(r.severity).toBe('warning');
-    expect(r.message).toBe('skills directory /srv/nanobot/ws/skills not scanned (outside the user\'s home or in a credential store)');
+    expect(r.message).toBe(`skills directory ${OUT[0].path} not scanned (outside the user's home or in a credential store)`);
     expect(r.evidence).toHaveLength(1);
     expect(r.evidence![0].mitigated).toBeUndefined();
   });
@@ -35,7 +47,7 @@ describe('a skills directory outside the home', () => {
     const r = await byId('SKL-002').run(ctx([...OUT, { path: 'rel/skills', reason: 'relative' }], ['/nonexistent-vaso-home/skills']));
     expect(r.passed).toBe(false);
     expect(r.severity).toBe('warning');
-    expect(r.evidence!.filter(e => e.file === '/srv/nanobot/ws/skills')).toHaveLength(1);
+    expect(r.evidence!.filter(e => e.file === OUT[0].path)).toHaveLength(1);
     expect(r.message).toContain('rel/skills not scanned (set as a relative path)');
   });
 
@@ -45,12 +57,21 @@ describe('a skills directory outside the home', () => {
       const r = await byId(id).run(ctx(OUT));
       expect(r.message).not.toMatch(/No skills/);
       expect(r.message).toContain('Not verified');
-      expect(r.message).toContain('/srv/nanobot/ws/skills');
+      expect(r.message).toContain(OUT[0].path);
     });
+
+  it('SKL-002 notes one that does not exist, informational', async () => {
+    const r = await byId('SKL-002').run(ctx([{ path: join(tmp, 'nonexist-zz', 'skills'), reason: 'outside' }]));
+    expect(r.severity).toBe('info');
+    expect(r.evidence).toHaveLength(1);
+    expect(r.evidence![0].mitigated).toBe(true);
+    expect(r.evidence![0].detail).toMatch(/does not exist/);
+    expect(r.message).toContain('does not exist');
+  });
 
   it('SKL-002 says how to review it: vaso skill audit <path>', async () => {
     const r = await byId('SKL-002').run(ctx(OUT));
-    expect(r.evidence![0].detail).toContain('review it with `vaso skill audit /srv/nanobot/ws/skills`');
+    expect(r.evidence![0].detail).toContain(`review it with \`vaso skill audit ${OUT[0].path}\``);
     expect(r.evidence![0].detail).not.toContain('by hand');
   });
 
@@ -58,7 +79,7 @@ describe('a skills directory outside the home', () => {
     '%s next to a scanned directory: the pass names the one not scanned', async (id) => {
       const r = await byId(id).run(ctx(OUT, ['/nonexistent-vaso-home/skills']));
       expect(r.passed).toBe(true);
-      expect(r.message).toMatch(/\(skills directory \/srv\/nanobot\/ws\/skills not scanned; see SKL-002\)$/);
+      expect(r.message.endsWith(`(skills directory ${OUT[0].path} not scanned; see SKL-002)`), r.message).toBe(true);
     });
 
   it('without any skills directory the checks still pass as before', async () => {

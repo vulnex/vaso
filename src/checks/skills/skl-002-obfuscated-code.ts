@@ -1,3 +1,4 @@
+import { isAbsolute, posix } from 'node:path';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { findHighEntropyBlocks } from '../../analyzers/entropy.js';
@@ -9,7 +10,9 @@ import { markTestCode } from '../../analyzers/test-paths.js';
 import { analysisEvasion } from '../../analyzers/ast-analyzer.js';
 import { truncateSnippet } from '../../core/patterns.js';
 import { maskEncodedLiterals } from '../../mcp/string-table.js';
-import { configTreeGap, probeCoversTree } from '../../core/probe-coverage.js';
+import { configTreeGap, configTreeStatus, probeCoversTree } from '../../core/probe-coverage.js';
+import type { FSProvider } from '../../core/fs-provider.js';
+import type { UnscannedSkillsDir } from '../../core/types.js';
 import { unscannedReason } from '../../core/skill-root-scope.js';
 
 export const skl002 = defineCheck({
@@ -123,7 +126,7 @@ export const skl002 = defineCheck({
     for (const skillsDir of skillsDirsOf(ctx)) {
       const gap = configTreeGap(ctx.fs, skillsDir);
       if (gap) {
-        evidence.push({ file: skillsDir, detail: unscannedReason(gap === 'refused' ? 'outside' : 'limit'), mitigated: true });
+        evidence.push({ file: skillsDir, detail: unscannedReason(gap === 'refused' ? 'outside' : 'limit', skillsDir), mitigated: true });
         continue;
       }
       if (probeCoversTree(ctx.fs, skillsDir) || await ctx.fs.access(skillsDir)) continue;
@@ -137,16 +140,20 @@ export const skl002 = defineCheck({
     // home, a credential store, over the probe's limit, a relative path):
     // the agent loads whatever they hold, unreviewed — a warning, reported
     // here once per directory (the other skill checks say "not verified")
-    for (const { path, reason } of unscannedRoots) {
-      // a directory outside the home can still be reviewed on its own
-      const how = `review it with \`vaso skill audit ${path}\``;
-      const detail = unscannedReason(reason);
-      evidence.push({ file: path, detail: reason === 'outside' ? (detail.includes('review it by hand') ? detail.replace('review it by hand', how) : `${detail}; ${how}`) : detail });
+    // One that doesn't exist holds nothing to load: noted, informational
+    const missingRoots: typeof unscannedRoots = [];
+    for (const root of unscannedRoots) {
+      if (await unscannedRootMissing(ctx.fs, root)) {
+        missingRoots.push(root);
+        evidence.push({ file: root.path, detail: `not scanned: skills directory set ${unscannedShort(root.reason)} does not exist — nothing to scan`, mitigated: true });
+      } else {
+        evidence.push({ file: root.path, detail: unscannedReason(root.reason, root.path) });
+      }
     }
 
     await markTestCode(evidence, ctx.installation, ctx.fs);
     const notScanned = evidence.filter(e => e.line === undefined).length;
-    const rootNote = unscannedRoots.map(u => `skills directory ${u.path} not scanned (${unscannedShort(u.reason)})`);
+    const rootNote = unscannedRoots.map(u => `skills directory ${u.path} not scanned (${unscannedShort(u.reason)}${missingRoots.includes(u) ? '; does not exist' : ''})`);
     return h.fromEvidence(evidence, {
       passed: 'No obfuscated code blocks detected',
       failed: (n) => {
@@ -162,3 +169,16 @@ export const skl002 = defineCheck({
     });
   },
 });
+
+/**
+ * A skills directory set outside the home (or at it) that doesn't exist. A
+ * snapshot answers only for one the probe judged (it records the mode of a
+ * tree it refused when there is one); otherwise it may exist unseen.
+ */
+async function unscannedRootMissing(fs: FSProvider, root: UnscannedSkillsDir): Promise<boolean> {
+  if (root.reason !== 'outside' && root.reason !== 'home') return false;
+  if (fs.kind === 'snapshot' && configTreeStatus(fs, root.path) === undefined && configTreeGap(fs, root.path) === undefined) return false;
+  // a snapshot keys paths normalized (`~/./a/../x` is `~/x` there)
+  const at = fs.kind === 'snapshot' && isAbsolute(root.path) ? posix.normalize(root.path) : root.path;
+  return !(await fs.access(at).catch(() => false));
+}
