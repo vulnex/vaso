@@ -698,6 +698,90 @@ func keepBounds(n int) (int, int) {
 	return 0, 0
 }
 
+// escapeLen is the length of the backslash escape at s[i] (s[i] == '\\'):
+// \uXXXX (JSON, TOML, YAML) 6, \UXXXXXXXX (TOML, YAML) 10, \xNN (YAML) 4 —
+// with their hex digits there — and any other (\n, \", \\) 2.
+func escapeLen(s string, i int) int {
+	if i+1 >= len(s) {
+		return 1
+	}
+	hexRun := func(n int) bool {
+		if i+2+n > len(s) {
+			return false
+		}
+		for _, b := range []byte(s[i+2 : i+2+n]) {
+			if !(b >= '0' && b <= '9' || b >= 'a' && b <= 'f' || b >= 'A' && b <= 'F') {
+				return false
+			}
+		}
+		return true
+	}
+	switch s[i+1] {
+	case 'u':
+		if hexRun(4) {
+			return 6
+		}
+	case 'U':
+		if hexRun(8) {
+			return 10
+		}
+	case 'x':
+		if hexRun(2) {
+			return 4
+		}
+	}
+	return 2
+}
+
+// escapeMask marks the bytes of s that belong to a backslash escape.
+func escapeMask(s string) []bool {
+	var mask []bool
+	for i := 0; i < len(s); i++ {
+		if s[i] != '\\' {
+			continue
+		}
+		if mask == nil {
+			mask = make([]bool, len(s))
+		}
+		n := escapeLen(s, i)
+		for k := i; k < i+n && k < len(s); k++ {
+			mask[k] = true
+		}
+		i += n - 1
+	}
+	return mask
+}
+
+// alignToEscapes widens the kept head (pre) and tail (suf) of core so that
+// neither ends inside a backslash escape: a stand-in drawn from part of
+// \u00e9 or \x61 would no longer parse. A head and tail that would then
+// meet keep the head only, and nothing is kept of a value all head.
+func alignToEscapes(core string, pre, suf int) (int, int) {
+	if !strings.Contains(core, "\\") {
+		return pre, suf
+	}
+	for i := 0; i < len(core); i++ {
+		if core[i] != '\\' {
+			continue
+		}
+		n := escapeLen(core, i)
+		if i < pre && i+n > pre {
+			pre = i + n
+		}
+		if start := len(core) - suf; suf > 0 && i < start && i+n > start {
+			suf = len(core) - i
+		}
+		i += n - 1
+	}
+	if pre+suf >= len(core) {
+		suf = 0
+	}
+	if pre >= len(core) {
+		pre = 0
+	}
+	return pre, suf
+}
+
 func randIndex(n int) int {
 	i, err := rand.Int(rand.Reader, big.NewInt(int64(n)))
 	if err != nil {
@@ -763,11 +847,7 @@ func standInLayout(s string, fixed []bool, classes [][2]byte) [][2]byte {
 		}
 		if s[i] == '\\' {
 			flush()
-			if i+1 < len(s) && s[i+1] == 'u' {
-				i += 5
-			} else {
-				i++
-			}
+			i += escapeLen(s, i) - 1
 			continue
 		}
 		cl, ok := classOf(s[i])
@@ -813,11 +893,7 @@ func randomBase64(s string) string {
 	b := []byte(s)
 	for i := 0; i < len(b); i++ {
 		if b[i] == '\\' {
-			if i+1 < len(b) && b[i+1] == 'u' {
-				i += 5
-			} else {
-				i++
-			}
+			i += escapeLen(s, i) - 1
 			continue
 		}
 		if strings.IndexByte(base64Alphabet, b[i]) >= 0 {
@@ -939,11 +1015,19 @@ func relocateWeak(core, mid string, pre, suf int, sp [2]int) (string, []bool, bo
 	if sp[0] < pre || sp[1] > end {
 		return inPlace()
 	}
+	// an escape's hex digits are no letters to move: a run ends at one
+	esc := escapeMask(core)
+	escaped := func(i int) bool { return esc != nil && esc[i] }
+	for i := sp[0]; i < sp[1]; i++ {
+		if escaped(i) {
+			return inPlace()
+		}
+	}
 	ra, rb := sp[0], sp[1]
-	for ra > pre && isASCIIAlnum(core[ra-1]) {
+	for ra > pre && isASCIIAlnum(core[ra-1]) && !escaped(ra-1) {
 		ra--
 	}
-	for rb < end && isASCIIAlnum(core[rb]) {
+	for rb < end && isASCIIAlnum(core[rb]) && !escaped(rb) {
 		rb++
 	}
 	// at least two characters from the head and tail: one drawn character
@@ -1083,6 +1167,36 @@ func (c *collector) disguiseArgv(v string) string {
 	return out
 }
 
+// disguiseFlagValue disguises the value of a credential flag (--password,
+// --token, --api-key): there a lowercase word or a short value is the
+// credential too (plainCredential).
+func (c *collector) disguiseFlagValue(v string) string {
+	out := c.disguise(v)
+	if out == v && plainCredential(v) {
+		out = c.disguiseArgv(v)
+	}
+	return out
+}
+
+// disguiseURLPassword disguises the password of a URL's userinfo
+// (postgres://admin:<password>@db), however plain; a %XX escape in it
+// stays one.
+func (c *collector) disguiseURLPassword(v string) string {
+	out := c.disguiseFlagValue(v)
+	if out != v && !sameEscapes(v, out) {
+		for try := 0; try < 64; try++ {
+			cand := randomLike(v, nil)
+			if cand != v && sameEscapes(v, cand) && verdictsOf(cand) == verdictsOf(v) {
+				out = cand
+				break
+			}
+		}
+		c.disguised[v] = out
+		c.disguised[out] = out
+	}
+	return out
+}
+
 // disguiseKeyed disguises a value found under key: under a password or
 // secret name, a passphrase of lowercase words too (see passphraseLike).
 func (c *collector) disguiseKeyed(key, v string) string {
@@ -1103,7 +1217,7 @@ func (c *collector) disguiseAs(v string, passphrase, keyed bool) string {
 	if m := authSchemePrefix.FindStringIndex(v); m != nil {
 		lead, core = v[:m[1]], v[m[1]:]
 	}
-	if !worthDisguising(core) && !(passphrase && passphraseLike(core)) && !(keyed && lowercaseToken(core)) {
+	if !worthDisguising(core) && !(passphrase && (passphraseLike(core) || shortSecret(core))) && !(keyed && lowercaseToken(core)) {
 		return v
 	}
 	pre, suf := keepBounds(len(core))
@@ -1112,6 +1226,7 @@ func (c *collector) disguiseAs(v string, passphrase, keyed bool) string {
 			pre = p
 		}
 	}
+	pre, suf = alignToEscapes(core, pre, suf)
 	head, mid, tail := core[:pre], core[pre:len(core)-suf], core[len(core)-suf:]
 	// Every verdict a check reaches must hold for the stand-in (drawn again
 	// until it does, a bounded number of times); a CFG-009 match
@@ -1176,15 +1291,20 @@ var (
 	// …and a key or token by name (API_KEY, apiKey, X-Api-Key, GITHUB_TOKEN,
 	// access_token, Authorization): whatever its entropy, the value under
 	// it is the credential (a low-entropy key is still someone's key)
-	strongCredentialWord = regexp.MustCompile(`(?:^|_)(?:password|passwd|pwd|passphrase|secret|pin|passcode|api_?key|token|access_token|auth_token|authorization|bearer)\d*(?:_|$)`)
-	credentialAboutWord  = regexp.MustCompile(`_(?:mode|method|policy|url|uri|file|path|dir|id|arn|ref|name|type|hint|prompt|length|backend|store|provider|manager|source|format|algorithm|scheme|strategy|env|var|limit|count|budget|size|ttl|expiry|expires|lifetime|endpoint|header|prefix|helper|command|cmd)$`)
+	strongCredentialWord = regexp.MustCompile(`(?:^|_)(?:password|passwd|pwd|passphrase|secret|pin|passcode|api_?key|token|access_token|auth_token|authorization|bearer|auth|private_?key|access_?key|secret_?key|session|pat|credentials?)\d*(?:_|$)`)
+	credentialAboutWord  = regexp.MustCompile(`_(?:mode|method|policy|url|uri|file|path|dir|id|arn|ref|name|type|hint|prompt|length|backend|store|provider|manager|source|format|algorithm|scheme|strategy|env|var|limit|count|budget|size|ttl|expiry|expires|lifetime|endpoint|header|prefix|helper|command|cmd|timeout|interval|secs|seconds|duration|enabled|disabled|required|level|version|scopes?|audience|issuer)$`)
 	passphraseWords      = regexp.MustCompile(`^[A-Za-z0-9]+(?:[-_ ][A-Za-z0-9]+){2,}$`)
 )
 
 func strongCredentialKey(key string) bool {
-	k := strings.ToLower(camelBoundary.ReplaceAllString(key, "${1}_${2}"))
-	k = strings.NewReplacer("-", "_", ".", "_", " ", "_").Replace(strings.Trim(k, `"'`))
+	k := normalizedKey(key)
 	return strongCredentialWord.MatchString(k) && !credentialAboutWord.MatchString(k)
+}
+
+// normalizedKey: key in snake case (apiKey, X-Api-Key, db.password → api_key, x_api_key, db_password).
+func normalizedKey(key string) string {
+	k := strings.ToLower(camelBoundary.ReplaceAllString(key, "${1}_${2}"))
+	return strings.NewReplacer("-", "_", ".", "_", " ", "_").Replace(strings.Trim(k, `"'`))
 }
 
 // passphraseLike: a value under a strongCredentialKey that is a password even
@@ -1210,6 +1330,67 @@ var (
 	lowerWord       = regexp.MustCompile(`^[a-z][a-z0-9]{5,}$`)
 	passwordSetting = regexp.MustCompile(`^(?:none|null|disabled?|enabled?|required|optional|prompt|keychain|keyring|default|inherit|system|unset|empty|random|generated?|interactive|manual|automatic|auto)$`)
 	lowercaseKey    = regexp.MustCompile(`^[a-z0-9]{24,}$`)
+)
+
+// shortSecret: a value of 2–5 characters under a password, key or token
+// name (TELEGRAM_BOT_TOKEN=tg7x, API_KEY=abcde): short, but the credential
+// all the same — unless it reads as a setting or placeholder (none, true,
+// off, xxx, changeme), a small number or a reference.
+func shortSecret(v string) bool {
+	if !shortValue.MatchString(v) || settingWord.MatchString(v) || passwordSetting.MatchString(v) || smallNumber.MatchString(v) {
+		return false
+	}
+	if isPlaceholderSecret(v) || isSecretReference(v) || namedInterpolation(v) {
+		return false
+	}
+	return strings.ContainsAny(strings.ToLower(v), "abcdefghijklmnopqrstuvwxyz0123456789")
+}
+
+// keyedSecret: value, under key, is a credential to disguise — one that
+// looks like one anywhere, or, under a name that holds a password, key or
+// token itself, a passphrase, a lowercase word or a short value.
+func keyedSecret(key, value string) bool {
+	if credentialLike(value) {
+		return true
+	}
+	if !strongCredentialKey(key) {
+		return false
+	}
+	// auth: oauth-personal, auth: api-key — a method by name, no password
+	if authName.MatchString(normalizedKey(key)) && hyphenWords.MatchString(value) {
+		return false
+	}
+	return passphraseLike(value) || shortSecret(value)
+}
+
+var (
+	authName    = regexp.MustCompile(`(?:^|_)auth$`)
+	hyphenWords = regexp.MustCompile(`^[a-z]+(?:[-_][a-z]+)+$`)
+)
+
+// plainCredential: a value in a credential position (after --password,
+// --token, --api-key; a URL's userinfo password) that is one however plain
+// — a lowercase word, a short value — unless it is a reference
+// (${VAR}, $VAR, <your-key>), a placeholder or setting word, a path, a URL
+// or the next flag.
+func plainCredential(v string) bool {
+	if len(v) < 2 || strings.ContainsAny(v, " \t\r\n") || strings.Contains(v, "://") || strings.HasPrefix(v, "-") || flagShaped(v) {
+		return false
+	}
+	if settingWord.MatchString(v) || passwordSetting.MatchString(v) || smallNumber.MatchString(v) {
+		return false
+	}
+	if isPlaceholderSecret(v) || isSecretReference(v) || namedInterpolation(v) || isPathValue(v) {
+		return false
+	}
+	return strings.ContainsAny(strings.ToLower(v), "abcdefghijklmnopqrstuvwxyz0123456789")
+}
+
+var (
+	// no space or quote; letters, digits and the punctuation a password has
+	shortValue  = regexp.MustCompile(`^[A-Za-z0-9!#$%&()*+,./:;=?@\[\]^_{|}~-]{2,5}$`)
+	settingWord = regexp.MustCompile(`(?i)^(?:none|null|nil|true|false|yes|no|on|off|empty|x{3,}|changeme|n/?a|tbd|todo|auto|basic|bearer|oauth2?|oidc|token|apikey|api_key|sso|mtls)$`)
+	smallNumber = regexp.MustCompile(`^[0-9]{1,3}$`)
 )
 
 // lowercaseToken: an all-lowercase random key (24+ letters and digits)
@@ -1255,7 +1436,7 @@ func flagTakesCredential(flag, value string) bool {
 	if flag == "-k" {
 		return randomKey(value)
 	}
-	return isSecretFlag(flag) && credentialLike(value)
+	return isSecretFlag(flag) && (credentialLike(value) || strongCredentialKey(strings.TrimLeft(flag, "-")) && plainCredential(value))
 }
 
 // isSecretFlag: --token, --api-key, --password … (not --keyboard)
@@ -1386,7 +1567,7 @@ func (c *collector) tripleQuoted(key, raw string) string {
 	inner := raw[3 : len(raw)-3]
 	lead := len(inner) - len(strings.TrimLeft(inner, "\r\n"))
 	value := strings.TrimRight(inner[lead:], " \t\r\n")
-	if !isSecretKeyName(key) || strings.ContainsAny(value, "\r\n") || !credentialLike(value) && !(strongCredentialKey(key) && passphraseLike(value)) {
+	if !isSecretKeyName(key) || strings.ContainsAny(value, "\r\n") || !keyedSecret(key, value) {
 		return raw
 	}
 	return raw[:3+lead] + c.disguiseKeyed(key, value) + raw[3+lead+len(value):]
@@ -1785,7 +1966,7 @@ func (c *collector) keyedValue(key, raw string) string {
 		return raw
 	}
 	open, value, rest := scalarValue(raw)
-	if !credentialLike(value) && !(strongCredentialKey(key) && passphraseLike(value)) {
+	if !keyedSecret(key, value) {
 		return raw
 	}
 	return open + c.disguiseKeyed(key, value) + rest
@@ -1832,7 +2013,7 @@ func (c *collector) scrubText(path, s string) string {
 				vi = 7
 			}
 			value, _ := m.group(vi)
-			if !isSecretKeyName(key) || !credentialLike(value) && !(strongCredentialKey(key) && passphraseLike(value)) {
+			if !isSecretKeyName(key) || !keyedSecret(key, value) {
 				return m.text()
 			}
 			return m.with(vi, vi, c.disguiseKeyed(key, value))
@@ -1898,7 +2079,7 @@ func (c *collector) scrubText(path, s string) string {
 				closing, _ := m.group(4)
 				// one line only: the block is the secret, not a multi-line document
 				if open != closing || len(deeper) <= len(indent) || !strings.HasPrefix(deeper, indent) ||
-					!isSecretKeyName(key) || !credentialLike(value) && !(strongCredentialKey(key) && passphraseLike(value)) || nextLineDeeper(m.s[m.g[1]:], deeper) {
+					!isSecretKeyName(key) || !keyedSecret(key, value) || nextLineDeeper(m.s[m.g[1]:], deeper) {
 					return m.text()
 				}
 				return m.with(6, 6, c.disguiseKeyed(key, value))
@@ -1948,7 +2129,7 @@ func (c *collector) scrubText(path, s string) string {
 			if open != closing || !flagTakesCredential(flag, value) {
 				return "", false
 			}
-			out, ok := headerValue(value, c.disguise)
+			out, ok := headerValue(value, c.disguiseFlagValue)
 			return m.with(vi, vi, out), ok
 		})
 	}
@@ -1963,7 +2144,7 @@ func (c *collector) scrubText(path, s string) string {
 	s = flagCredentials(s, c.disguiseArgv)
 	s = urlPassword.ReplaceAllStringFunc(s, func(m string) string {
 		g := urlPassword.FindStringSubmatch(m)
-		return g[1] + c.disguise(g[2]) + "@"
+		return g[1] + c.disguiseURLPassword(g[2]) + "@"
 	})
 	s = urlUserToken.ReplaceAllStringFunc(s, func(m string) string {
 		g := urlUserToken.FindStringSubmatch(m)
@@ -2016,7 +2197,47 @@ func (c *collector) scrubText(path, s string) string {
 		})
 	}
 	s = tokenShaped.ReplaceAllStringFunc(s, c.disguise)
+	// an account's email address (oauthAccount.emailAddress, userEmail):
+	// personal data no check needs whole
+	s = c.disguiseEmails(s)
 	return c.disguiseCopies(s)
+}
+
+// emailAddress: name@domain.tld standing on its own — after a quote,
+// space, bracket or =, never inside a URL (scheme://user@host) or a
+// mailto:, and not git@host:org/repo (followed by ":").
+var emailAddress = regexp.MustCompile(`(^|[\s"'<(\[{,;=])([A-Za-z0-9][A-Za-z0-9._%+-]*)@((?:[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\.)+[A-Za-z]{2,})`)
+
+// disguiseEmails replaces the local part of every email address in s but
+// its first character with random characters of the same classes; the
+// domain stays. What a check reports of one (CG-002: j…@example.com) and
+// what makes it an address are unchanged.
+func (c *collector) disguiseEmails(s string) string {
+	if !strings.Contains(s, "@") {
+		return s
+	}
+	return replaceMatches(emailAddress, s, func(m submatch) string {
+		local, _ := m.group(2)
+		if end := m.g[1]; end < len(m.s) && (m.s[end] == ':' || m.s[end] == '@' || isASCIIAlnum(m.s[end]) || m.s[end] == '-') {
+			return m.text()
+		}
+		if len(local) < 2 {
+			return m.text()
+		}
+		if c.emails == nil {
+			c.emails = map[string]string{}
+		}
+		out, ok := c.emails[local]
+		if !ok {
+			out = local[:1] + randomLike(local[1:], nil)
+			for try := 0; try < 16 && out == local; try++ {
+				out = local[:1] + randomLike(local[1:], nil)
+			}
+			c.emails[local] = out
+			c.emails[out] = out
+		}
+		return m.with(2, 2, out)
+	})
 }
 
 // disguiseCopies replaces what is left in s of a value disguised in it: a
@@ -2058,7 +2279,7 @@ func flagCredentials(s string, replace func(string) string) string {
 	// the colon (--header=Authorization: Bearer <value>) the keyed rule reads it
 	s = flagValue.ReplaceAllStringFunc(s, func(m string) string {
 		g := flagValue.FindStringSubmatch(m)
-		if !isSecretFlag(g[1]) || !credentialLike(g[2]) {
+		if !flagTakesCredential(g[1], g[2]) {
 			return m
 		}
 		out, _ := headerValue(g[2], replace)
@@ -2071,7 +2292,7 @@ func flagCredentials(s string, replace func(string) string) string {
 			open, _ := m.group(3)
 			closing, _ := m.group(5)
 			value, _ := m.group(4)
-			if open != closing || !isSecretFlag(flag) || strings.HasPrefix(value, "-") || !credentialLike(value) && !passphraseLike(value) {
+			if open != closing || !isSecretFlag(flag) || strings.HasPrefix(value, "-") || !credentialLike(value) && !passphraseLike(value) && !(strongCredentialKey(strings.TrimLeft(flag, "-")) && plainCredential(value)) {
 				return m.text()
 			}
 			return m.with(4, 4, replace(value))
@@ -2091,7 +2312,7 @@ func flagCredentials(s string, replace func(string) string) string {
 	s = onSecretLines(s, []string{"-u", "--user"}, func(line string) string {
 		return replaceMatches(userFlag, line, func(m submatch) string {
 			password, _ := m.group(5)
-			if !credentialLike(password) {
+			if !credentialLike(password) && !plainCredential(password) {
 				return m.text()
 			}
 			return m.with(5, 5, replace(password))
@@ -2242,7 +2463,7 @@ func (c *collector) secretContainers(s string, toml bool) string {
 			if name == "" {
 				continue
 			}
-			if !credentialLike(value) && !(strongCredentialKey(name) && passphraseLike(value)) {
+			if !keyedSecret(name, value) {
 				continue
 			}
 			if b == nil {

@@ -134,6 +134,8 @@ type collector struct {
 	disguised map[string]string
 	// inFile: the values disguised in the file being scrubbed, and their stand-ins
 	inFile map[string]string
+	// emails maps the local part of each email address to its stand-in
+	emails map[string]string
 }
 
 // inExcludedDir reports whether match lies under an excluded directory that
@@ -1165,7 +1167,7 @@ func redactSecretValues(s string) string {
 	// --api-key X, --token=X (HERMES_EXTRA_ARGS, a command line in output):
 	// as in files, judged by the value
 	s = flagCredentials(s, func(v string) string {
-		if !worthDisguising(v) {
+		if !worthDisguising(v) && !plainCredential(v) {
 			return v
 		}
 		return redactedEnvValue
@@ -1174,7 +1176,7 @@ func redactSecretValues(s string) string {
 	s = onSecretLines(s, secretHints, func(line string) string {
 		return inlineSecrets(line, false, func(key, value string) (string, bool) {
 			scheme := authSchemePrefix.FindString(value)
-			if !worthDisguising(value[len(scheme):]) && !(strongCredentialKey(key) && passphraseLike(value[len(scheme):])) {
+			if core := value[len(scheme):]; !worthDisguising(core) && !(strongCredentialKey(key) && (passphraseLike(core) || shortSecret(core))) {
 				return "", false
 			}
 			return scheme + redactedEnvValue, true
