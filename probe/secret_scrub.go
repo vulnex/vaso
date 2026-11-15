@@ -507,22 +507,29 @@ var interpolation = regexp.MustCompile(`^\$\{([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z
 // enumLike values are settings, not secrets: oauth-personal, none, true.
 var enumLike = regexp.MustCompile(`^[a-z][a-z._-]*$|^[0-9]{1,11}$`)
 
+// namedInterpolation: ${process.env.OPENAI_API_KEY}, an interpolation, which
+// the CLI reads as a reference (not ${Zx8f…}: no variable is named like a password)
+func namedInterpolation(core string) bool {
+	m := interpolation.FindStringSubmatch(core)
+	if m == nil {
+		return false
+	}
+	for _, part := range strings.Split(m[1], ".") {
+		if !variableName.MatchString(part) {
+			return false
+		}
+	}
+	return true
+}
+
 // worthDisguising: something a credential could be, that isn't already a
 // placeholder, a reference, a URL or a PEM block.
 func worthDisguising(core string) bool {
 	if core == "" || enumLike.MatchString(core) || strings.Contains(core, "://") || strings.Contains(core, "-----BEGIN") {
 		return false
 	}
-	// ${process.env.OPENAI_API_KEY}: an interpolation, which the CLI reads
-	// as a reference (not ${Zx8f…}: no variable is named like a password)
-	if m := interpolation.FindStringSubmatch(core); m != nil {
-		named := true
-		for _, part := range strings.Split(m[1], ".") {
-			named = named && variableName.MatchString(part)
-		}
-		if named {
-			return false
-		}
+	if namedInterpolation(core) {
+		return false
 	}
 	// judged as the CLI reads it: "\u0041…" in a JSON string is "A…", no path
 	judged := unescapeValue(core)
@@ -1187,7 +1194,7 @@ func passphraseLike(v string) bool {
 	if v == "" || strings.Contains(v, "://") || strings.ContainsAny(v, "\r\n") || strings.TrimSpace(v) != v {
 		return false
 	}
-	if isPlaceholderSecret(v) || isSecretReference(v) || !strings.ContainsAny(strings.ToLower(v), "abcdefghijklmnopqrstuvwxyz0123456789") {
+	if isPlaceholderSecret(v) || isSecretReference(v) || namedInterpolation(v) || !strings.ContainsAny(strings.ToLower(v), "abcdefghijklmnopqrstuvwxyz0123456789") {
 		return false
 	}
 	// a PIN or numeric password (4821, 84736251); a single lowercase word
