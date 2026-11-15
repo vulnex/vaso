@@ -46,14 +46,23 @@ export async function inHomeOutsideStores(fs: FSProvider, dir: string, home: str
   return strictlyWithin(real, realHome) && classifySensitivePath(real).length === 0;
 }
 
+/** `dir` is the user's home itself, as written or once resolved. */
+async function isHomeItself(fs: FSProvider, dir: string, home: string): Promise<boolean> {
+  if (!isAbsolute(dir) || !isAbsolute(home)) return false;
+  const trim = (x: string): string => normalize(x).replace(/(.)\/$/, '$1');
+  if (trim(dir) === trim(home)) return true;
+  return trim(await resolveExisting(fs, trim(dir))) === trim(await resolveExisting(fs, trim(home)));
+}
+
 /**
  * Why a config-set skills directory is not scanned, or undefined when it is:
- * outside the user's home or in a credential store (`outside` — the probe
+ * the home itself (`home`), outside the user's home or in a credential store (`outside` — the probe
  * reports such trees `refused`), or over the remote probe's entry limit.
  */
 export async function skillRootGap(fs: FSProvider, dir: string, home: string): Promise<UnscannedSkillsDir['reason'] | undefined> {
   if (!isAbsolute(dir)) return 'relative';
   if (manifestCoversTree(fs, dir)) return undefined;
+  if (await isHomeItself(fs, dir, home)) return 'home';
   if (!(await inHomeOutsideStores(fs, dir, home))) return 'outside';
   const gap = configTreeGap(fs, dir);
   return gap === 'refused' ? 'outside' : gap;
@@ -83,6 +92,8 @@ export async function screenSkillRoots(
 /** The sentence reports and the inventory give for an unscanned skills directory. */
 export function unscannedReason(reason: UnscannedSkillsDir['reason']): string {
   switch (reason) {
+    case 'home':
+      return 'not scanned: skills directory set to the home directory itself — VASO doesn\'t walk the whole home (locally or remotely); point it at a dedicated folder';
     case 'outside':
       return 'not scanned: skills directory set outside the user\'s home or inside a credential store — VASO doesn\'t walk it (locally or remotely); review it by hand';
     case 'limit':

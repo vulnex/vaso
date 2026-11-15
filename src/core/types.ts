@@ -166,7 +166,7 @@ export interface AgentInstallation {
 /** A config-set skills directory left unscanned, and why (src/core/skill-root-scope.ts). */
 export interface UnscannedSkillsDir {
   path: string;
-  reason: 'outside' | 'limit' | 'relative';
+  reason: 'home' | 'outside' | 'limit' | 'relative';
 }
 
 /**

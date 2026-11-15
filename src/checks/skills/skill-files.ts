@@ -14,6 +14,7 @@ export function skillsDirsOf(ctx: ScanContext): string[] {
 /** Why a config-set skills directory went unscanned, in a few words. */
 export function unscannedShort(reason: UnscannedSkillsDir['reason']): string {
   switch (reason) {
+    case 'home': return 'the home directory itself';
     case 'outside': return 'outside the user\'s home or in a credential store';
     case 'limit': return 'over the remote probe\'s entry limit';
     case 'relative': return 'set as a relative path';

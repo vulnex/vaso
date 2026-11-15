@@ -53,4 +53,11 @@ describe('config-set skill roots (local scans)', () => {
     expect(unscanned).toEqual([{ path: '/', reason: 'outside' }, { path: 'rel', reason: 'relative' }]);
     expect(unscannedReason('outside')).toMatch(/^not scanned: /);
   });
+
+  it('names the home directory itself as its own reason, as written or through a link', async () => {
+    await symlink(home, join(root, 'home-link'));
+    const { unscanned } = await screenSkillRoots(fs, [home, `${home}/`, join(root, 'home-link'), join(home, 'work', '..')], home);
+    expect(unscanned.map(u => u.reason)).toEqual(['home', 'home', 'home', 'home']);
+    expect(unscannedReason('home')).toMatch(/home directory itself/);
+  });
 });
