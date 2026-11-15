@@ -44,8 +44,22 @@ describe('CFG-002 passwords in hook commands', () => {
       'psql -h db -p 5432 -U app',
       'docker run -p 8080:80 img',
       'git commit -m "update password docs"',
+      // MySQL takes the password glued: a separate -p value is the database
+      'mysql -u root -p app_db',
+      'mysql -h db -P 3306 -u app -p mydb',
     ])]));
     expect(r.passed).toBe(true);
+  });
+
+  it('names every hook a repeated password appears in', async () => {
+    const data = { hooks: {
+      PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: `sshpass -p ${PW} ssh a true` }] }],
+      Stop: [{ hooks: [{ type: 'command', command: `sshpass -p ${PW} ssh b true` }] }],
+    } };
+    const r = await cfg002.run(ctx([{ raw: JSON.stringify(data, null, 1), format: 'json', filePath: '/home/test/.claude/settings.json', data }]));
+    expect(r.evidence).toHaveLength(1);
+    expect(r.evidence?.[0].detail).toMatch(/PreToolUse \(Bash\), Stop — same value/);
+    expect(JSON.stringify(r.evidence)).not.toContain(PW);
   });
 
   it('does not report a token twice when a known format already matched the line', async () => {
