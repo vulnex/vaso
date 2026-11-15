@@ -85,8 +85,11 @@ export const cdx009 = defineCheck({
     // [hooks] in config.toml, user and trusted-project layers, Claude Code's
     // event schema. Command hooks run through the shell with the event JSON
     // on stdin; prompt / agent handlers are skipped, mcp_tool runs no shell.
+    // A profile file's (`<name>.config.toml`) [hooks] apply under `codex -p <name>`.
+    // Codex runs a non-managed hook only once its definition is reviewed and
+    // trusted by hash in /hooks — state VASO cannot see, so every hook is judged.
     for (const config of ctx.configs) {
-      if (codexProfileName(config.filePath)) continue;
+      const profileName = codexProfileName(config.filePath);
       for (const item of hookItems(config.data.hooks)) {
         const risks = hookItemRisks(item);
         const tier = topTier(risks);
@@ -94,8 +97,8 @@ export const cdx009 = defineCheck({
         if (tier === 'critical') critical = true;
         evidence.push({
           file: config.filePath,
-          snippet: hookSnippet(item.event, (item.url ?? item.scripts[0]).slice(0, 120), item.matcher ? `(${item.matcher})` : ''),
-          detail: `Hook command ${risks.map(r => r.reason).join('; ')}`,
+          snippet: `${profileName ? `${profileName}.config.toml: ` : ''}${hookSnippet(item.event, (item.url ?? item.scripts[0]).slice(0, 120), item.matcher ? `(${item.matcher})` : '')}`,
+          detail: `Hook command ${risks.map(r => r.reason).join('; ')}${profileName ? ` under \`codex -p ${profileName}\`` : ''}`,
           ...(tier === 'info' ? { mitigated: true } : {}),
         });
       }
@@ -123,7 +126,7 @@ export const cdx009 = defineCheck({
       passed: project ? 'No project hook downloads code, sends data out or runs input as code (a project cannot set notify)' : 'Codex notify command and hooks are safely configured (or not set)',
       failed: (n) => `Found ${n} unsafe Codex notify or hook configuration(s)`,
       severity: critical ? 'critical' : undefined,
-      fixDescription: 'Use an absolute path to a non-shell script (e.g. notify = ["/usr/local/bin/codex-notify"]); avoid sh -c and /tmp scripts. Remove hooks you did not add yourself, run reviewed local scripts instead of downloads, and never pipe hook input into a shell',
+      fixDescription: 'Use an absolute path to a non-shell script (e.g. notify = ["/usr/local/bin/codex-notify"]); avoid sh -c and /tmp scripts. Remove hooks you did not add yourself, run reviewed local scripts instead of downloads, and never pipe hook input into a shell. Codex runs a non-managed hook only after it is reviewed and trusted by hash in /hooks (VASO cannot see that review state): do not trust a hook like these there',
     });
   },
 });

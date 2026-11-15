@@ -2,6 +2,7 @@ import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { codexProfileName } from '../../adapters/codex.js';
 import { judgeDefaultPermissions } from './permission-profiles.js';
+import { deepMerge } from '../../core/utils.js';
 import { envMitigation, inheritOf } from './cdx-005-shell-env-policy.js';
 
 const DANGEROUS_APPROVAL = new Set(['never', 'none', 'auto']);
@@ -38,9 +39,12 @@ function checkProfile(
   // default_permissions: the profile may select a [permissions.<name>] table
   // from config.toml or its own file
   if (typeof p.default_permissions === 'string') {
+    // the profile layers over config.toml: tables merge key by key
+    const table = (v: unknown) => (v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : {});
     const merged = {
       ...p,
-      permissions: { ...(root.permissions as Record<string, unknown> ?? {}), ...(p.permissions as Record<string, unknown> ?? {}) },
+      permissions: deepMerge(table(root.permissions), table(p.permissions)),
+      features: deepMerge(table(root.features), table(p.features)),
     };
     const rootCritical = judgeDefaultPermissions(root, home).some(f => f.level === 'critical');
     for (const f of judgeDefaultPermissions(merged, home)) {

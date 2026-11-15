@@ -1,5 +1,7 @@
-import { join, normalize } from 'node:path';
+import { posix } from 'node:path';
 import { expandHome } from '../../analyzers/broad-paths.js';
+
+const { join, normalize, dirname } = posix;
 
 /**
  * Codex permission profiles (learn.chatgpt.com/docs/permissions):
@@ -8,20 +10,72 @@ import { expandHome } from '../../analyzers/broad-paths.js';
  * which may `extends` another profile and grant filesystem access by path
  * (`read` / `write` / `deny`, special paths such as `:root`, or a table
  * scoping nested `<subpath-or-glob> = …` entries under that root, `.` being
- * the root itself) and network
- * access (`network.enabled`, `network.domains`). Profiles replace
- * `sandbox_mode` / `[sandbox_workspace_write]`; the two don't compose.
+ * the root itself), add profile-defined workspace roots
+ * (`workspace_roots."<path>" = true`, which receive the `:workspace_roots`
+ * rules) and network access (`network.enabled`, `network.domains` — domain
+ * rules are enforced only by the network proxy, `features.network_proxy`).
+ * Profiles replace `sandbox_mode` / `[sandbox_workspace_write]`; the two
+ * don't compose.
+ *
+ * Precedence: a child profile overrides its parent; within the merged
+ * profile, a more specific path overrides a broader one, and on the same
+ * path deny beats write beats read. Codex rejects an `extends` of
+ * `:danger-full-access`, an unknown parent and a cycle — such a config
+ * never runs, so it yields no finding here.
  */
 
 const CREDENTIAL_DIRS = ['.ssh', '.aws', '.gnupg', '.kube', '.docker', '.codex'];
 
+const GLOB_CHARS = /[*?[]/;
+
+/** A Codex path glob as a regex: `**` any depth, `*` / `?` within a segment. */
+function globRegex(glob: string): RegExp {
+  let re = '';
+  for (let i = 0; i < glob.length; i++) {
+    const c = glob[i];
+    if (c === '*') {
+      if (glob[i + 1] === '*') {
+        i++;
+        // `**/` also matches no directory at all
+        if (glob[i + 1] === '/') { i++; re += '(?:.*/)?'; } else re += '.*';
+      } else re += '[^/]*';
+    } else if (c === '?') re += '[^/]';
+    else if (c === '[') {
+      const end = glob.indexOf(']', i + 2);
+      if (end < 0) re += '\\[';
+      else { re += `[${glob.slice(i + 1, end).replace(/^!/, '^').replace(/\\/g, '\\\\')}]`; i = end; }
+    } else re += c.replace(/[.+^${}()|\\]/g, '\\$&');
+  }
+  return new RegExp(`^${re}$`);
+}
+
+/** Paths whose write access is too broad (see broadRoot), for glob matching. */
+function sensitiveCandidates(home: string): string[] {
+  const out = ['/', '/etc'];
+  for (let p = home; p !== '/' && p !== '.'; p = dirname(p)) out.push(p);
+  for (const d of CREDENTIAL_DIRS) out.push(join(home, d));
+  return out;
+}
+
 /** Why a writable path is too broad: `/`, the home directory or a parent of
- *  it, a system config dir, or a credential directory. */
+ *  it, a system config dir, or a credential directory — or a glob that can
+ *  match one of them. */
 export function broadRoot(root: string, home: string): string | undefined {
   if (root === ':root') return '":root" is the whole filesystem';
   // `<dir>/**` and `<dir>/*` write everything below <dir>: judge <dir>
   const p = normalize(expandHome(root, home)).replace(/(.)\/+$/, '$1').replace(/(?:\/\*\*?)+$/, '') || '/';
-  if (p === '/' || p === home || home.startsWith(p + '/')) return `"${p}" covers the home directory`;
+  if (GLOB_CHARS.test(p)) {
+    const re = globRegex(p);
+    const hit = sensitiveCandidates(home).find(c => re.test(c));
+    if (hit) return `"${p}" can match ${broadRoot(hit, home)}`;
+    // a glob inside /etc or a credential dir (`~/.ssh/auth*`)
+    const literal = dirname(p.slice(0, p.search(GLOB_CHARS)) + 'x');
+    const inside = literal !== '/' && (literal === '/etc' || literal.startsWith('/etc/')
+      || CREDENTIAL_DIRS.some(d => literal === join(home, d) || literal.startsWith(join(home, d) + '/')));
+    return inside ? `"${p}" is inside ${broadRoot(literal, home)}` : undefined;
+  }
+  if (p === '/') return '"/" is the whole filesystem';
+  if (p === home || home.startsWith(p + '/')) return `"${p}" covers the home directory`;
   if (p === '/etc' || p.startsWith('/etc/')) return `"${p}" is system configuration`;
   const cred = CREDENTIAL_DIRS.find(d => p === join(home, d) || p.startsWith(join(home, d) + '/'));
   return cred ? `"${p}" holds credentials (~/${cred})` : undefined;
@@ -35,84 +89,163 @@ export interface PermissionFinding {
 
 const MAX_EXTENDS = 16;
 
-/** Writable paths of a profile's filesystem table, with how each is spelled. */
-function writablePaths(name: string, filesystem: Record<string, unknown>): Array<{ path: string; snippet: string }> {
-  const out: Array<{ path: string; snippet: string }> = [];
-  for (const [root, access] of Object.entries(filesystem)) {
-    if (access === 'write') {
-      out.push({ path: root, snippet: `[permissions.${name}.filesystem] "${root}" = "write"` });
-      continue;
-    }
-    const nested = record(access);
-    // `:workspace_roots` entries are relative to each workspace root
-    if (!nested || root === ':workspace_roots') continue;
-    for (const [sub, subAccess] of Object.entries(nested)) {
-      if (subAccess !== 'write') continue;
-      out.push({
-        path: sub === '.' || sub === '' ? root : join(root, sub),
-        snippet: `[permissions.${name}.filesystem."${root}"] "${sub}" = "write"`,
-      });
-    }
-  }
-  return out;
+type Access = 'read' | 'write' | 'deny';
+const RANK: Record<Access, number> = { read: 0, write: 1, deny: 2 };
+const WS = ':workspace_roots';
+
+interface Entry { access: Access; snippet: string }
+
+function isAccess(v: unknown): v is Access {
+  return v === 'read' || v === 'write' || v === 'deny';
 }
 
 function record(v: unknown): Record<string, unknown> | undefined {
   return v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : undefined;
 }
 
+function trimSlash(p: string): string {
+  return p.length > 1 ? p.replace(/\/+$/, '') : p;
+}
+
+/** The normalized key a filesystem entry targets: an absolute path (`~` and
+ *  `:root` resolved), `:workspace_roots[/<sub>]`, another special token, or
+ *  undefined for a parent traversal Codex rejects. */
+function entryKey(root: string, sub: string | undefined, home: string): string | undefined {
+  const rel = sub === undefined ? '.' : trimSlash(normalize(sub || '.'));
+  if (rel === '..' || rel.startsWith('../') || rel.startsWith('/')) return undefined;
+  if (root === WS) return rel === '.' ? WS : `${WS}/${rel}`;
+  const base = root === ':root' ? '/' : root;
+  if (base.startsWith(':')) return rel === '.' ? base : undefined; // :tmpdir, :minimal, … take `.` only
+  const abs = expandHome(base, home);
+  return trimSlash(normalize(rel === '.' ? abs : join(abs, rel)));
+}
+
+/** One profile's own filesystem entries, same-path ties resolved deny > write > read. */
+function profileEntries(name: string, filesystem: Record<string, unknown>, home: string): Map<string, Entry> {
+  const out = new Map<string, Entry>();
+  const put = (key: string | undefined, access: Access, snippet: string) => {
+    if (!key) return;
+    const prev = out.get(key);
+    if (!prev || RANK[access] > RANK[prev.access]) out.set(key, { access, snippet });
+  };
+  for (const [root, access] of Object.entries(filesystem)) {
+    if (isAccess(access)) {
+      put(entryKey(root, undefined, home), access, `[permissions.${name}.filesystem] "${root}" = "${access}"`);
+      continue;
+    }
+    for (const [sub, subAccess] of Object.entries(record(access) ?? {})) {
+      if (!isAccess(subAccess)) continue;
+      put(entryKey(root, sub, home), subAccess, `[permissions.${name}.filesystem."${root}"] "${sub}" = "${subAccess}"`);
+    }
+  }
+  return out;
+}
+
+/** features.network_proxy = true, or a [features.network_proxy] table with enabled = true. */
+function networkProxyActive(data: Record<string, unknown>): boolean {
+  const proxy = record(data.features)?.network_proxy;
+  return proxy === true || record(proxy)?.enabled === true;
+}
+
+/**
+ * The profile chain `default_permissions` selects, child first; undefined
+ * when Codex rejects it (cycle, unknown parent, `:danger-full-access` parent).
+ */
+function profileChain(selected: string, profiles: Record<string, unknown>): { chain: Array<[string, Record<string, unknown>]>; base?: string } | undefined {
+  const chain: Array<[string, Record<string, unknown>]> = [];
+  const seen = new Set<string>();
+  let name: string | undefined = selected;
+  while (name) {
+    if (name.startsWith(':')) {
+      if (name === ':danger-full-access') return undefined;
+      return { chain, base: name };
+    }
+    const profile = record(profiles[name]);
+    if (!profile || seen.has(name) || chain.length >= MAX_EXTENDS) return undefined;
+    seen.add(name);
+    chain.push([name, profile]);
+    name = typeof profile.extends === 'string' ? profile.extends : undefined;
+  }
+  return { chain };
+}
+
 /** What the profile `default_permissions` selects grants beyond a workspace sandbox. */
 export function judgeDefaultPermissions(data: Record<string, unknown>, home: string): PermissionFinding[] {
   const selected = data.default_permissions;
   if (typeof selected !== 'string' || !selected) return [];
-  const findings: PermissionFinding[] = [];
-  const profiles = record(data.permissions) ?? {};
-  const seen = new Set<string>();
+  if (selected === ':danger-full-access') {
+    return [{
+      level: 'critical',
+      snippet: `default_permissions = "${selected}"`,
+      detail: 'default_permissions selects ":danger-full-access" — Codex commands run without a sandbox',
+    }];
+  }
+  const resolved = profileChain(selected, record(data.permissions) ?? {});
+  if (!resolved || resolved.chain.length === 0) return [];
 
-  let name: string | undefined = selected;
-  for (let depth = 0; name && depth < MAX_EXTENDS && !seen.has(name); depth++) {
-    seen.add(name);
-    if (name === ':danger-full-access') {
-      // Codex rejects a profile extending :danger-full-access: the config
-      // doesn't load, so nothing it says takes effect
-      if (name !== selected) return [];
-      findings.push({
-        level: 'critical',
-        snippet: `default_permissions = "${selected}"`,
-        detail: 'default_permissions selects ":danger-full-access" — Codex commands run without a sandbox',
-      });
-      break;
+  // Merge base → child: a child entry replaces its parent's entry for the same path
+  const fs = new Map<string, Entry & { profile: string }>();
+  if (resolved.base === ':workspace') fs.set(WS, { access: 'write', snippet: `extends = ":workspace"`, profile: selected });
+  const roots = new Map<string, { enabled: boolean; snippet: string }>();
+  let network: { enabled: boolean; snippet: string } | undefined;
+  const domains = new Map<string, unknown>();
+  for (const [name, profile] of [...resolved.chain].reverse()) {
+    for (const [key, entry] of profileEntries(name, record(profile.filesystem) ?? {}, home)) {
+      fs.set(key, { ...entry, profile: name });
     }
-    if (name.startsWith(':')) break; // :read-only, :workspace
-    const profile = record(profiles[name]);
-    if (!profile) break;
+    for (const [root, on] of Object.entries(record(profile.workspace_roots) ?? {})) {
+      if (typeof on !== 'boolean') continue;
+      roots.set(trimSlash(normalize(expandHome(root, home))), { enabled: on, snippet: `[permissions.${name}.workspace_roots] "${root}" = ${on}` });
+    }
+    const net = record(profile.network);
+    if (typeof net?.enabled === 'boolean') network = { enabled: net.enabled, snippet: `[permissions.${name}.network] enabled = ${net.enabled}` };
+    for (const [d, v] of Object.entries(record(net?.domains) ?? {})) domains.set(d, v);
+  }
 
-    for (const { path, snippet } of writablePaths(name, record(profile.filesystem) ?? {})) {
+  const findings: PermissionFinding[] = [];
+  const critical = (snippet: string, broad: string, via = '') => findings.push({
+    level: 'critical',
+    snippet,
+    detail: `profile grants write access to ${broad}${via} — sandboxed commands can modify it (shell rc files, credentials)`,
+  });
+
+  for (const [key, entry] of fs) {
+    if (entry.access !== 'write' || key.startsWith(':')) continue;
+    const broad = broadRoot(key, home);
+    if (broad) critical(entry.snippet, broad);
+  }
+
+  // Profile-defined workspace roots receive the :workspace_roots rules
+  const wsWrites = [...fs].filter(([key, e]) => e.access === 'write' && (key === WS || key.startsWith(`${WS}/`)));
+  for (const [root, { enabled, snippet }] of roots) {
+    if (!enabled) continue;
+    for (const [key, entry] of wsWrites) {
+      const path = key === WS ? root : join(root, key.slice(WS.length + 1));
+      if (fs.get(path)?.access === 'deny') continue;
       const broad = broadRoot(path, home);
       if (broad) {
-        findings.push({
-          level: 'critical',
-          snippet,
-          detail: `profile grants write access to ${broad} — sandboxed commands can modify it (shell rc files, credentials)`,
-        });
+        critical(snippet, broad, ` (a workspace root with ${key === WS ? '":workspace_roots" write' : entry.snippet})`);
+        break;
       }
     }
+  }
 
-    const network = record(profile.network);
-    if (network?.enabled === true) {
-      const domains = record(network.domains);
-      const allowed = domains ? Object.entries(domains).filter(([, v]) => v === 'allow').map(([d]) => d) : [];
-      // A domain allowlist bounds where commands can connect
-      if (allowed.length === 0 || allowed.some(d => d === '*' || d === '**')) {
-        findings.push({
-          level: 'warning',
-          snippet: `[permissions.${name}.network] enabled = true`,
-          detail: 'Sandboxed commands have outbound network access to any host — a prompt-injected command can exfiltrate workspace data',
-        });
-      }
+  if (network?.enabled) {
+    const allowed = [...domains].filter(([, v]) => v === 'allow').map(([d]) => d);
+    const proxy = networkProxyActive(data);
+    if (allowed.length === 0 || allowed.some(d => d === '*' || d === '**')) {
+      findings.push({
+        level: 'warning',
+        snippet: network.snippet,
+        detail: 'Sandboxed commands have outbound network access to any host — a prompt-injected command can exfiltrate workspace data',
+      });
+    } else if (!proxy) {
+      findings.push({
+        level: 'warning',
+        snippet: network.snippet,
+        detail: 'Sandboxed commands have outbound network access to any host — the profile\'s domain allowlist is enforced only when features.network_proxy = true, so a prompt-injected command can exfiltrate workspace data',
+      });
     }
-
-    name = typeof profile.extends === 'string' ? profile.extends : undefined;
   }
   return findings;
 }
