@@ -151,6 +151,8 @@ function collectSourceSecrets(code: string): Array<{ secret: SourceSecret; value
         continue;
       }
       const m = pattern.exec(text);
+      // an access key id is exactly AKIA + 16: a longer all-caps word (`AKIAPACIFICNORTHEAST1`) is none
+      if (m && name === 'AWS Access Key' && (m[0].length !== 20 || /[A-Za-z0-9]/.test(text[m.index + 20] ?? ''))) continue;
       if (m && !PLACEHOLDER.test(m[0])) { add({ line, kind: name, masked: mask(m[0]) }, m[0]); tokens.push(m[0]); }
     }
     for (const { pattern, name } of SOURCE_TOKEN_PATTERNS) {
