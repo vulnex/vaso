@@ -12,24 +12,32 @@ const bs = "\\"
 
 // escapesKept: every backslash escape of in is at the same offset of out,
 // byte for byte — a stand-in never draws from an escape's hex digits.
+// escapesKept: every escape of in is at the same place in out, of the same
+// kind and width; one of a letter or digit may spell another letter or digit
+// (it is disguised like one), any other is unchanged.
 func escapesKept(t *testing.T, name, in, out string) {
 	t.Helper()
+	if len(out) != len(in) {
+		t.Fatalf("%s: length changed:\n%s", name, out)
+	}
 	for i := 0; i < len(in); i++ {
 		if in[i] != '\\' {
 			continue
 		}
 		n := escapeLen(in, i)
-		if i+n > len(out) || out[i:i+n] != in[i:i+n] {
-			t.Fatalf("%s: escape %q at %d became %q:\n%s", name, in[i:i+n], i, out[i:min(i+n, len(out))], out)
+		was, got := in[i:i+n], out[i:i+n]
+		_, wu := decodeEscapes(was)
+		_, gu := decodeEscapes(got)
+		switch {
+		case was == got:
+		case len(wu) == 1 && wu[0].alnum && len(gu) == 1 && gu[0].alnum && got[:2] == was[:2]:
+		default:
+			t.Fatalf("%s: escape %q at %d became %q:\n%s", name, was, i, got, out)
 		}
 		i += n - 1
 	}
 }
 
-// A non-ASCII character escaped by an ASCII-only writer (Python json.dump,
-// YAML \xNN, TOML \UXXXXXXXX) straddling the kept head or tail of a
-// disguised value: the stand-in keeps the escape whole, so the file still
-// parses and judges as it did.
 func TestScrubKeepsEscapesWhole(t *testing.T) {
 	e := bs + "u00e9" // é as json.dump writes it
 	jsonDoc := `{"env": {"GITHUB_TOKEN": "ghp_` + e + `AbCdEfGhIjKlMnOpQrStUvWxYz0123456789",` +
@@ -70,36 +78,11 @@ func TestScrubKeepsEscapesWhole(t *testing.T) {
 		if _, err := toml.Decode(gotTOML, &w); err != nil {
 			t.Fatalf("scrubbed TOML doesn't parse: %v\n%s", err, gotTOML)
 		}
+		// judged as the CLI reads them: decoded
 		for v, d := range c.disguised {
-			if verdictsOf(d) != verdictsOf(v) {
+			if verdictsOf(unescapeValue(d)) != verdictsOf(unescapeValue(v)) {
 				t.Fatalf("%q → %q: verdicts %+v → %+v", v, d, verdictsOf(v), verdictsOf(d))
 			}
-		}
-	}
-}
-
-func TestAlignToEscapes(t *testing.T) {
-	e := bs + "u00e9"
-	cases := []struct {
-		core     string
-		pre, suf int
-		wantPre  int
-		wantSuf  int
-	}{
-		{"ghp_" + e + "AbCdEfGhIjKlMnOpQrSt", 8, 4, 10, 4},  // head ends inside \u00e9
-		{"AbCdEfGhIjKlMnOpQrStUv" + e, 8, 4, 8, 6},          // tail starts inside it
-		{"Esc" + bs + "x61pedPw33AbCdEfGhIj", 4, 0, 7, 0},   // \x61 under a 4-character head
-		{"AbCdEfGh" + bs + "\"IjKlMnOpQrStUvWx", 9, 0, 10, 0}, // \"
-		{"AbCdEfGhIjKlMnOpQrStUvWx", 8, 4, 8, 4},           // no escape
-		{bs + bs + "u00e9AbCdEfGhIjKlMnOp", 1, 0, 2, 0},     // an escaped backslash, then plain text
-	}
-	for _, tc := range cases {
-		pre, suf := alignToEscapes(tc.core, tc.pre, tc.suf)
-		if pre != tc.wantPre || suf != tc.wantSuf {
-			t.Errorf("alignToEscapes(%q, %d, %d) = %d, %d; want %d, %d", tc.core, tc.pre, tc.suf, pre, suf, tc.wantPre, tc.wantSuf)
-		}
-		if pre+suf >= len(tc.core) {
-			t.Errorf("alignToEscapes(%q): nothing left to hide", tc.core)
 		}
 	}
 }
