@@ -1,7 +1,7 @@
 {
   "agents": {
     "defaults": {
-      "workspace": "{{HOME}}/../srv-nanobot/ws",
+      "workspace": "{{HOME}}/../outside/srv-nanobot/ws",
       "model": "anthropic/claude-opus-4-5"
     }
   },
