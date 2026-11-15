@@ -230,11 +230,19 @@ function spawnTimed(cmd: string, args: string[], options: SpawnOptions, timeout?
   return child;
 }
 
-/** The error for a command that could not be started. */
+/**
+ * The error for a command that could not be started. A missing client
+ * stays missing: it is marked `permanent`, so --ssh-retries doesn't retry it.
+ */
 function startError(cmd: string, err: Error): Error {
   return (err as NodeJS.ErrnoException).code === 'ENOENT'
-    ? new Error(`${cmd} is not installed or not on PATH — remote scans need the OpenSSH client (${cmd})`)
+    ? Object.assign(new Error(`${cmd} is not installed or not on PATH — remote scans need the OpenSSH client (${cmd})`), { permanent: true })
     : err;
+}
+
+/** An error no retry can fix (startError). */
+function isPermanent(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && (err as { permanent?: unknown }).permanent === true;
 }
 
 /** ssh's ConnectTimeout fires on whole seconds; allow for timer and start-up skew. */
@@ -469,6 +477,7 @@ export async function withRetry<T>(opts: WithRetryOptions<T>): Promise<T> {
     try {
       return await opts.fn();
     } catch (err) {
+      if (isPermanent(err)) throw err;
       lastErr = err;
     }
   }
