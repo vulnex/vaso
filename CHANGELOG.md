@@ -17,6 +17,9 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - **Rule evidence masks credential values in every report format:** values below a credential-named key (`apiKeys.0`), numeric PINs and passwords, argv values after `--api-key`/`--password` and items of a `secrets:` list, even on a separate line from their key.
 - **MCP source snippets** mask every credential MCP-003 flags on the whole source line before cutting, so no fragment survives a cut; MCP-034 also masks passwords and tokens written out in prose.
 - **`~/.vaso/trusted-projects`** is honoured only when it is a regular file of at most 64 KiB, owned by the user and not group/other-writable, in a `~/.vaso` with the same properties.
+- **Probe stand-ins keep escapes whole** (`\uXXXX`, `\xNN`, two-character escapes), so ASCII-escaped JSON, YAML and TOML configs still parse remotely. Lowercase or short credentials after `--password`/`--token`/`--api-key`/`--auth`/`--secret`, URL passwords, `curl -u` passwords and short values under key, token, session or PAT names are disguised; email addresses keep only their first character and domain.
+- **Config-supplied globs never backtrack:** Codex permission-profile globs, Claude Code/Qwen MCP allow/deny lists and OpenCode permission actions are matched by a linear segment matcher (a run of stars in a trusted project's config could hang a scan); Nanobot/PicoClaw regexes that would backtrack are not run.
+- **Rule evidence** no longer quotes credential values written over several lines (YAML folded or plain scalars, `NAME = [` lists, a JSON value on the next line, TOML `"""`), in skill files, or written with `\u`/`\x` escapes. User rules in `~/.vaso/rules` load only when nobody else can write them, like `trusted-projects`; a `trusted-projects` link whose target sits in a directory others can write is ignored.
 
 ### Added
 
@@ -38,6 +41,9 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - **Claude Code `managed-mcp.json`** (system managed directory) is discovered and scanned: CC-004/CC-005 and the MCP checks judge its servers, which still honour `deniedMcpServers`. It hides other servers only when it parses as valid JSON; an unparseable one is reported as CONFIG-LOAD.
 - **CDX-002** judges profile-defined `workspace_roots` that receive `:workspace_roots` write (home as a workspace root is critical), `:root` sub-paths and globs that can match a sensitive directory (`~/.ss*`). **CDX-009** judges hooks in Codex profile files (`<name>.config.toml`) and notes the `/hooks` trust review.
 - **DEV-001** warns on Devin `permission_mode: "smart"`, like `accept-edits`; the fix advice recommends "normal".
+- **CFG-002** finds passwords in hook commands (`https://user:<pw>@host`, `Authorization: Basic`, `--password`, `mysql -p<pw>`, `sshpass -p`, `redis-cli -a`), masked.
+- **MCP-003** recognises credential words anywhere in a key name (`SECRET_KEY`, `secretKey`, `secret_key_base`, `stripeKey`, `apiKeyV2`, `dbPass`, `privateKeyPem`); descriptive names (`secretName`, `tokenUrl`, `API_KEY_ENV`, `secretArn`) and analytics write keys are not flagged.
+- **CUR-008** flags wildcard-only `networkPolicy.allow` entries (`*.*`).
 
 ### Changed
 
@@ -72,6 +78,11 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - **MCP-005 SQL:** an allow-list ternary is safe only in the branch its test holds; a placeholder `join()` needs a fixed separator; escape helpers count only from mysql/mysql2/pg/pg-format/pg-escape/sqlstring/knex.
 - **MCP launch targets:** a package script over 8 KiB still resolves a first command within the limit; `uv … run -m mod` / `uv run python -m mod` resolve the module from `--directory`; an unresolved `python -m` gets an MCP-001 note; node preloads are analysed when the entry file is missing.
 - Untrusted project rule files are counted, not parsed; the notice reads "Skipped N project rule file(s)". `--no-custom-rules` warns when `--project-rules` or `--rules` is also given.
+- **An agent's own skills directory** under the home that a link takes out of the home or into a credential store is reported not scanned (SKL-002) on local and remote scans; home containment is judged on resolved paths, so either spelling of a linked home works. A non-existent skills directory outside the home is informational. Skill and IOC checks note skills directories they didn't scan; SKL-002 suggests `vaso skill audit <path>`.
+- **GHC-001** judges a symlinked session or store folder by the files inside it (also remotely), reports a store link to a non-credential file outside the home as a warning, lists at most 40 files per store (most sensitive first) and gives the true count.
+- **CDX-008** layers a profile file over the profile it inherits even when it doesn't restate `default_permissions`, and reports warning-level downgrades. **CDX-009** honours `[features] hooks = false` per layer. GEM-003 names both readings of `mcp_<x>_*`.
+- **MCP source resolution** analyses every command of a package script chain (`a && b`, `a; b`, `a || b`, `sh -c`), up to 16; a script cut by a cap is reported as read only in part.
+- **MCP-005 SQL:** `includes(x) && …` guards and pg-format `format.literal`/`format.ident` are safe; `escapeId` inside a quoted literal and a one-argument `mysql.format(x)` are not. MCP-034 masks `passcode` and "password for <user> is …" prose.
 
 ### Fixed
 
@@ -95,6 +106,8 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - **Python MCP analysis:** trailing `# comments` are no longer read as code; a module-level `def` shadows an earlier `from subprocess import …`; `functools.partial(…, shell=True)` aliases are rewritten in linear time.
 - A settings file linked into `/etc` or a credential store is no longer counted as exposing on either scan, and CONFIG-LOAD names the target correctly. Hermes MCP `enabled`/`disabled` are read as Hermes reads them (`0`, quoted words, legacy `disabled`).
 - Snapshots whose `commandOutputs` entries are not `{stdout, stderr, exitCode}` are rejected as invalid instead of making checks error.
+- **Python MCP analysis:** the last binding of a name decides what it calls (a re-import after a local `def` is a sink again); alias lines with a trailing comment and `partial` imported under another name are recognised.
+- YAML fix refusals say which parent isn't a mapping or that the file has YAML errors. Running from HOME no longer treats `~/.vaso/rules` as an untrusted project; `rules list`/`rules validate -f json` escape control and bidi characters; rule files over 4 MiB are not read.
 
 ## [1.4.1] - 2026-11-13
 
