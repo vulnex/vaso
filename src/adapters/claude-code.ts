@@ -140,8 +140,16 @@ const MANAGED_DIR_LINUX = '/etc/claude-code';
 const MANAGED_DIR_WIN32 = 'C:\\Program Files\\ClaudeCode';
 
 /** System directory holding managed-settings.json and managed-settings.d/ (code.claude.com/docs/en/managed-settings). */
-export function claudeManagedDir(fs: FSProvider): string {
+export function claudeManagedDir(fs: Pick<FSProvider, 'platform'>): string {
   return fs.platform === 'darwin' ? MANAGED_DIR_DARWIN : fs.platform === 'win32' ? MANAGED_DIR_WIN32 : MANAGED_DIR_LINUX;
+}
+
+/**
+ * managed-mcp.json in the managed directory: the organization's fixed server
+ * set, which takes exclusive control of MCP (code.claude.com/docs/en/managed-mcp).
+ */
+export function claudeManagedMcpPath(fs: Pick<FSProvider, 'platform'>): string {
+  return join(claudeManagedDir(fs), 'managed-mcp.json');
 }
 
 /**
@@ -174,7 +182,8 @@ export const claudeCodeAdapter: AgentAdapter = {
     const installations: AgentInstallation[] = [];
     // Machine-wide, so attributed to the first user install only
     const managed: ParsedConfig[] = [];
-    for (const path of await claudeManagedSettingsPaths(fs)) {
+    // managed-mcp.json's servers are the ones that run (CC-004/CC-005 judge them)
+    for (const path of [...await claudeManagedSettingsPaths(fs), claudeManagedMcpPath(fs)]) {
       const loaded = await loadConfigIfPresent(path, fs);
       if (loaded) managed.push(loaded);
     }

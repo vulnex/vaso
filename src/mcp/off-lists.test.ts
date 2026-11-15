@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { SnapshotFSProvider } from '../core/snapshot-fs-provider.js';
 import type { FileEntry } from '../core/snapshot-types.js';
 import { MCPDiscovery } from './discovery.js';
+import { expandClaudeVars, urlMatches } from './off-lists.js';
 import type { AgentType, ParsedConfig, ScanContext } from '../core/types.js';
 import { cc005 } from '../checks/claude-code/cc-005-unpinned-mcp.js';
 import { gem007 } from '../checks/gemini-cli/gem-007-unpinned-mcp.js';
@@ -160,5 +161,135 @@ describe('Hermes YAML 1.1 switches', () => {
     const r = await new MCPDiscovery(fs).discover('linux', undefined, { includeDisabled: true });
     const hermes = r.configs.find(c => c.source === 'Hermes')!;
     expect(hermes.servers.map(s => [s.name, s.disabled === true])).toEqual([['a', true], ['b', true], ['c', false]]);
+  });
+});
+
+/** A snapshot with raw file text and environment. */
+function fsRaw(files: Record<string, unknown>, text: Record<string, string> = {}, env: Record<string, string> = {}): SnapshotFSProvider {
+  const entries: Record<string, FileEntry> = {};
+  for (const [p, v] of Object.entries(files)) entries[p] = { content: JSON.stringify(v), mode: 0o100644, exists: true };
+  for (const [p, c] of Object.entries(text)) entries[p] = { content: c, mode: 0o100644, exists: true };
+  return new SnapshotFSProvider({
+    version: 1, hostname: 'h', platform: 'linux', homedir: HOME, timestamp: 't',
+    privilege: { uid: 1000, username: 'u', isRoot: false, sudoAvailable: false, escalated: false, scannedUsers: ['u'], skippedPaths: [] },
+    files: entries, directories: {}, commandOutputs: {}, env,
+  });
+}
+
+describe('Claude Code serverUrl patterns', () => {
+  const cases: Array<[string, string, boolean]> = [
+    // `*` stays inside the host
+    ['*://*.bad.example.com/*', 'http://good.example.org/x.bad.example.com/mcp', false],
+    ['*://*.bad.example.com/*', 'https://api.bad.example.com/mcp', true],
+    ['https://*.example.com/*', 'https://a.b.example.com:8443/mcp', true],
+    // host case-insensitive, trailing dot ignored; path case-sensitive
+    ['https://Mcp.Example.com/*', 'https://mcp.example.com/api', true],
+    ['https://mcp.example.com./api', 'https://MCP.example.com/api', true],
+    ['https://mcp.example.com/API', 'https://mcp.example.com/api', false],
+    // no path = any path; a path must match whole
+    ['https://mcp.example.com', 'https://mcp.example.com/any/path', true],
+    ['https://mcp.example.com/mcp', 'https://mcp.example.com/mcp/extra', false],
+    // ports: written-out host = default port only; `*` host or `:*` = every port
+    ['https://mcp.example.com/*', 'https://mcp.example.com:8443/api', false],
+    ['https://mcp.example.com/*', 'https://mcp.example.com:443/api', true],
+    ['https://mcp.example.com:*/*', 'https://mcp.example.com:8443/api', true],
+    ['https://mcp.example.com:8443/*', 'https://mcp.example.com:8443/api', true],
+    ['https://mcp.example.com:8443/*', 'https://mcp.example.com/api', false],
+    ['http://localhost:*/*', 'http://localhost:3000/mcp', true],
+    ['*://mcp.example.com/*', 'http://mcp.example.com/mcp', true],
+    ['*://mcp.example.com/*', 'http://mcp.example.com:8080/mcp', false],
+    ['https://mcp.example.com/*', 'http://mcp.example.com/mcp', false],
+    ['https://mcp.example.com/*', 'not a url', false],
+  ];
+  for (const [pattern, url, want] of cases) {
+    it(`${pattern} ${want ? 'matches' : 'does not match'} ${url}`, () => {
+      expect(urlMatches(pattern, url)).toBe(want);
+    });
+  }
+
+  it('a deny URL pattern does not hide a server on another host', async () => {
+    const got = await servers({
+      [`${HOME}/.claude/settings.json`]: { deniedMcpServers: [{ serverUrl: '*://*.bad.example.com/*' }] },
+      [`${HOME}/.claude.json`]: { mcpServers: {
+        web1: { type: 'http', url: 'http://good.example.org/x.bad.example.com/mcp' },
+        web2: { type: 'http', url: 'https://evil.bad.example.com/mcp' },
+      } },
+    });
+    expect(got).toEqual({ 'claude-code:web1': false, 'claude-code:web2': true });
+  });
+});
+
+describe('Claude Code ${VAR} in policy entries', () => {
+  it('expands both sides before comparing', async () => {
+    const fs = fsRaw({
+      [`${HOME}/.claude/settings.json`]: { allowedMcpServers: [{ serverCommand: ['${HOME}/bin/srv'] }, { serverUrl: 'https://${MCP_HOST}/*' }] },
+      [`${HOME}/.claude.json`]: { mcpServers: {
+        literal: { command: `${HOME}/bin/srv` },
+        ref: { command: '${HOME}/bin/srv' },
+        other: { command: '/opt/other' },
+        remote: { type: 'http', url: 'https://mcp.corp.test/mcp' },
+        remoteOther: { type: 'http', url: 'https://x.test/mcp' },
+      } },
+    }, {}, { MCP_HOST: 'mcp.corp.test' });
+    const r = await new MCPDiscovery(fs).discover('linux', undefined, { includeDisabled: true });
+    const got = Object.fromEntries(r.configs.flatMap(c => c.servers.map(s => [s.name, s.disabled === true])));
+    expect(got).toEqual({ literal: false, ref: false, other: true, remote: false, remoteOther: true });
+  });
+
+  it('expandClaudeVars: default values, HOME from the scanned home, unknown left as written', () => {
+    const fs = fsRaw({});
+    expect(expandClaudeVars('${HOME}/x', fs, HOME)).toBe(`${HOME}/x`);
+    expect(expandClaudeVars('${NOPE:-/d}/x', fs, HOME)).toBe('/d/x');
+    expect(expandClaudeVars('${NOPE}/x', fs, HOME)).toBe('${NOPE}/x');
+  });
+});
+
+describe('Claude Code managed-mcp.json', () => {
+  const MANAGED = '/etc/claude-code/managed-mcp.json';
+
+  it('discovers its servers and switches off the user\'s', async () => {
+    const got = await servers({
+      [MANAGED]: { mcpServers: { corp: U } },
+      [`${HOME}/.claude.json`]: { mcpServers: { mine: U } },
+    });
+    expect(got).toEqual({ 'claude-code:corp': false, 'claude-code:mine': true });
+  });
+
+  it('its servers still honour deniedMcpServers, and skip the allowlist unless they use ${VAR} outside env', async () => {
+    const got = await servers({
+      [`${HOME}/.claude/settings.json`]: {
+        deniedMcpServers: [{ serverName: 'blocked' }],
+        allowedMcpServers: [{ serverName: 'nothing-else' }],
+      },
+      [MANAGED]: { mcpServers: {
+        blocked: U,
+        plain: U,
+        envOnly: { ...U, env: { TOKEN: '${TOKEN}' } },
+        varArgs: { command: 'npx', args: ['-y', '${PKG}'] },
+      } },
+    });
+    expect(got).toEqual({
+      'claude-code:blocked': true, 'claude-code:plain': false,
+      'claude-code:envOnly': false, 'claude-code:varArgs': true,
+    });
+  });
+
+  it('a managed-mcp.json that does not parse takes no exclusive control', async () => {
+    const fs = fsRaw({ [`${HOME}/.claude.json`]: { mcpServers: { mine: U } } }, { [MANAGED]: '{ "mcpServers": { "corp": ' });
+    const r = await new MCPDiscovery(fs).discover('linux', undefined, { includeDisabled: true });
+    const mine = r.configs.flatMap(c => c.servers).find(s => s.name === 'mine');
+    expect(mine?.disabled).toBeUndefined();
+    expect(r.loadErrors?.map(e => e.filePath)).toEqual([MANAGED]);
+  });
+
+  it('CC-005 judges the managed servers and skips the user\'s', async () => {
+    const files: Record<string, unknown> = {
+      [MANAGED]: { mcpServers: { corp: U } },
+      [`${HOME}/.claude.json`]: { mcpServers: { mine: U } },
+    };
+    const fs = fsWith(files);
+    const configs: ParsedConfig[] = [MANAGED, `${HOME}/.claude.json`].map(p => ({ filePath: p, format: 'json', raw: JSON.stringify(files[p]), data: files[p] as Record<string, unknown> }));
+    const r = await cc005.run({ installation: { agent: 'claude-code', installDir: HOME, configFiles: configs }, configs, platform: 'linux', fs });
+    expect((r.evidence ?? []).map(e => [e.file, e.snippet?.split(':')[0]])).toEqual([[MANAGED, 'mcpServers.corp']]);
   });
 });

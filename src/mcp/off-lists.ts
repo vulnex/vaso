@@ -6,7 +6,7 @@ import { parseJsonLenient } from '../core/jsonc.js';
 import { scanCwd } from '../adapters/project-configs.js';
 import { isDisabledServerConfig } from './disabled.js';
 import { parseServerMap } from './discovery.js';
-import { claudeConfigPaths, claudeManagedDir, claudeManagedSettingsPaths } from '../adapters/claude-code.js';
+import { claudeConfigPaths, claudeManagedMcpPath, claudeManagedSettingsPaths } from '../adapters/claude-code.js';
 import { geminiHome } from '../adapters/gemini.js';
 import { qwenHome } from '../adapters/qwen-code.js';
 
@@ -18,10 +18,12 @@ import { qwenHome } from '../adapters/qwen-code.js';
  * leaves the server off.
  *
  * Claude Code (code.claude.com/docs/en/managed-mcp, /en/mcp):
- *  - `managed-mcp.json` in the managed directory takes exclusive control: no
- *    user, project or local server loads;
+ *  - `managed-mcp.json` in the managed directory, when it parses, takes
+ *    exclusive control: no user, project or local server loads. Its own
+ *    servers are discovered (a claude-code config) and still honour the
+ *    denylist; they skip the allowlist unless they use `${VAR}` outside `env`;
  *  - `deniedMcpServers` from every settings scope blocks matching servers
- *    (`serverName` exact, `serverCommand` exact argv, `serverUrl` with `*`);
+ *    (`serverName` exact, `serverCommand` exact argv, `serverUrl` globbed per URL part; `${VAR}` expanded on both sides);
  *  - `allowedMcpServers`, when set in any scope (only the managed ones under
  *    `allowManagedMcpServersOnly`), blocks the rest — a stdio server must match a
  *    `serverCommand` (a name counts only without command entries), a remote
@@ -135,30 +137,115 @@ function policyEntries(v: unknown): PolicyEntry[] {
   });
 }
 
-function urlMatches(pattern: string, url: string): boolean {
-  const re = new RegExp(`^${pattern.split('*').map(p => p.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('.*')}(?:/.*)?$`, 'i');
-  return re.test(url);
+/** Default port of a URL scheme, as Claude Code applies it to a pattern written without a port. */
+const DEFAULT_PORTS: Record<string, string> = { http: '80', https: '443', ws: '80', wss: '443' };
+
+function globRe(pattern: string, flags = ''): RegExp {
+  return new RegExp(`^${pattern.split('*').map(p => p.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('.*')}$`, flags);
 }
 
-function commandMatches(argv: string[], server: MCPServerEntry): boolean {
+const bareHost = (h: string) => h.toLowerCase().replace(/\.$/, '');
+
+/**
+ * A `serverUrl` pattern against a server URL (code.claude.com/docs/en/managed-mcp,
+ * "How serverUrl entries match"): scheme, host, port and path are matched
+ * separately. `*` globs within its part only; the host is case-insensitive
+ * and a trailing FQDN dot is ignored; the path is case-sensitive, and a
+ * pattern without a path matches every path. Without a port, a pattern whose
+ * host is written out matches the scheme's default port only, one with a `*`
+ * in the host matches every port.
+ */
+export function urlMatches(pattern: string, url: string): boolean {
+  const p = /^([^:/]*):\/\/([^/]*)(\/.*)?$/s.exec(pattern);
+  if (!p) return false;
+  let server: URL;
+  try {
+    server = new URL(url);
+  } catch {
+    return false;
+  }
+  const [, patScheme, authority, patPath] = p;
+  const scheme = server.protocol.replace(/:$/, '').toLowerCase();
+  if (!globRe(patScheme, 'i').test(scheme)) return false;
+
+  const hostPort = authority.slice(authority.lastIndexOf('@') + 1);
+  const m = /^(\[[^\]]*\]|[^:]*)(?::([^:]*))?$/.exec(hostPort);
+  if (!m) return false;
+  const [, patHost, patPort] = m;
+  if (!globRe(bareHost(patHost), 'i').test(bareHost(server.hostname))) return false;
+
+  const defaultPort = DEFAULT_PORTS[scheme] ?? '';
+  const port = server.port || defaultPort;
+  if (patPort !== undefined) {
+    if (!globRe(patPort).test(port)) return false;
+  } else if (!patHost.includes('*') && port !== defaultPort) {
+    return false;
+  }
+
+  if (patPath === undefined) return true;
+  return globRe(patPath, 's').test(server.pathname + server.search);
+}
+
+/**
+ * `${VAR}` / `${VAR:-default}` expansion, which Claude Code applies to
+ * `serverCommand` / `serverUrl` values on both sides before matching. A
+ * variable with no value and no default is left as written.
+ */
+export function expandClaudeVars(value: string, fs: FSProvider, home: string): string {
+  if (!value.includes('${')) return value;
+  return value.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}/g, (whole, name: string, fallback: string | undefined) => {
+    // HOME is the scanned user's home (also on a snapshot, which carries no HOME)
+    const v = name === 'HOME' || (name === 'USERPROFILE' && fs.platform === 'win32') ? home : fs.getEnv?.(name);
+    if (v !== undefined && v !== '') return v;
+    return fallback ?? whole;
+  });
+}
+
+/** `${VAR}` outside `env`: a managed-mcp.json server that uses one is still checked against the allowlist. */
+function usesVarOutsideEnv(server: MCPServerEntry): boolean {
+  const values = [server.command ?? '', ...(server.args ?? []), server.url ?? '', ...Object.values(server.headers ?? {})];
+  return values.some(v => /\$\{[^}]*\}/.test(v));
+}
+
+type Expand = (value: string) => string;
+
+function commandMatches(argv: string[], server: MCPServerEntry, expand: Expand): boolean {
   if (!server.command) return false;
-  const actual = [server.command, ...(server.args ?? [])];
-  return argv.length === actual.length && argv.every((a, i) => a === actual[i]);
+  const actual = [server.command, ...(server.args ?? [])].map(expand);
+  return argv.length === actual.length && argv.every((a, i) => expand(a) === actual[i]);
 }
 
-function matchesAny(entries: PolicyEntry[], server: MCPServerEntry): boolean {
+function urlEntryMatches(pattern: string, server: MCPServerEntry, expand: Expand): boolean {
+  return server.url !== undefined && urlMatches(expand(pattern), expand(server.url));
+}
+
+function matchesAny(entries: PolicyEntry[], server: MCPServerEntry, expand: Expand): boolean {
   return entries.some(e => (e.serverName !== undefined && e.serverName === server.name)
-    || (e.serverCommand !== undefined && commandMatches(e.serverCommand, server))
-    || (e.serverUrl !== undefined && server.url !== undefined && urlMatches(e.serverUrl, server.url)));
+    || (e.serverCommand !== undefined && commandMatches(e.serverCommand, server, expand))
+    || (e.serverUrl !== undefined && urlEntryMatches(e.serverUrl, server, expand)));
 }
 
-function allowedBy(entries: PolicyEntry[], server: MCPServerEntry): boolean {
+function allowedBy(entries: PolicyEntry[], server: MCPServerEntry, expand: Expand): boolean {
   const remote = server.transport !== 'stdio';
   const strict = remote ? entries.some(e => e.serverUrl !== undefined) : entries.some(e => e.serverCommand !== undefined);
   return entries.some(e => (remote
-    ? e.serverUrl !== undefined && server.url !== undefined && urlMatches(e.serverUrl, server.url)
-    : e.serverCommand !== undefined && commandMatches(e.serverCommand, server))
+    ? e.serverUrl !== undefined && urlEntryMatches(e.serverUrl, server, expand)
+    : e.serverCommand !== undefined && commandMatches(e.serverCommand, server, expand))
     || (!strict && e.serverName !== undefined && e.serverName === server.name));
+}
+
+/**
+ * Whether managed-mcp.json takes exclusive control: only a file Claude Code
+ * can read and parse does. One that fails to parse is reported by Claude
+ * Code ("failed to parse") and the user's servers keep loading.
+ */
+async function managedMcpInEffect(fs: FSProvider, path: string): Promise<boolean> {
+  try {
+    const data: unknown = JSON.parse((await fs.readFile(path)).replace(/^﻿/, ''));
+    return data !== null && typeof data === 'object' && !Array.isArray(data);
+  } catch {
+    return false;
+  }
 }
 
 async function claudeOff(fs: FSProvider, home: string, projectDir?: string): Promise<OffRule | undefined> {
@@ -170,13 +257,15 @@ async function claudeOff(fs: FSProvider, home: string, projectDir?: string): Pro
     ...(projectDir ? [join(projectDir, '.claude', 'settings.json'), join(projectDir, '.claude', 'settings.local.json')] : []),
   ].map(p => readObject(fs, p)))).filter((d): d is Record<string, unknown> => d !== undefined);
   const all = [...managed, ...others];
-  const exclusive = await fs.access(join(claudeManagedDir(fs), 'managed-mcp.json')).catch(() => false);
+  const managedMcp = claudeManagedMcpPath(fs);
+  const exclusive = await managedMcpInEffect(fs, managedMcp);
 
   const denied = all.flatMap(d => policyEntries(d.deniedMcpServers));
   const lockAllow = managed.some(d => d.allowManagedMcpServersOnly === true);
   const allowSources = (lockAllow ? managed : all).filter(d => Array.isArray(d.allowedMcpServers));
   const allowed = allowSources.length > 0 ? allowSources.flatMap(d => policyEntries(d.allowedMcpServers)) : undefined;
   const rejectedMcpjson = new Set(all.flatMap(d => strings(d.disabledMcpjsonServers)));
+  const expand: Expand = v => expandClaudeVars(v, fs, home);
 
   const state = await readObject(fs, paths.rootStateFile);
   const projects = record(state?.projects) ?? {};
@@ -184,9 +273,11 @@ async function claudeOff(fs: FSProvider, home: string, projectDir?: string): Pro
 
   if (!exclusive && denied.length === 0 && !allowed && rejectedMcpjson.size === 0 && Object.keys(projects).length === 0) return undefined;
   return (config, server) => {
+    if (matchesAny(denied, server, expand)) return true;
+    // The organization's own servers skip the allowlist unless they use ${VAR} outside env
+    if (config.filePath === managedMcp) return allowed !== undefined && usesVarOutsideEnv(server) && !allowedBy(allowed, server, expand);
     if (exclusive) return true;
-    if (matchesAny(denied, server)) return true;
-    if (allowed && !allowedBy(allowed, server)) return true;
+    if (allowed && !allowedBy(allowed, server, expand)) return true;
     const localScope = config.filePath === paths.rootStateFile && config.scope === 'project';
     if (localScope) return projectList(config.projectRoot, 'disabledMcpServers').has(server.name);
     const mcpjson = config.scope === 'project' && config.filePath.endsWith('.mcp.json');
