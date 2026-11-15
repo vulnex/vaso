@@ -345,6 +345,12 @@ vaso mcp scan --audit-deps
 
 Servers run from local files are analyzed whether they are JavaScript/TypeScript (`node server.js`) or Python (`python3 server.py`, a virtualenv interpreter, `uv run server.py`). Text files a server names in its code and reads at runtime (a `documents/` folder it returns to the model) are checked for injected instructions too. Remote servers reached through a local bridge (`npx mcp-remote <url>`, `npx supergateway --sse <url>`) get the same transport and authentication checks as `url` entries.
 
+Known limits of the source analysis (static, no code is run):
+
+- Tool input is traced within one file. Input a handler passes to a helper in another of the server's modules (`import { readDoc } from './docs.js'`) is not followed into that module, so a sink there is not tied to tool input. Code execution in helper modules is still reported by MCP-004.
+- SQL text passed to sqlite's generic methods (`db.exec`, `run`, `all`, `get`) counts only when its keywords are written in capitals; `db.query`/`prepare`/`execute`/`raw`/`$queryRawUnsafe` take any case.
+- A server started through a package script (`npm start`, `pnpm --dir d start`, `deno task`) is followed through `&&` chains, nested `npm run`, `sh -c` and `python -m` of the checkout's own module. Only the first 8 KiB of a script are read. A script it can't follow, or a package script whose directory the config doesn't set (no `cwd`), is listed by MCP-001 as "source not analysed" rather than guessed.
+
 ### `vaso mcp list`
 
 List discovered MCP server configurations without running security checks. Useful for verifying which MCP servers VASO can see before running a scan.
