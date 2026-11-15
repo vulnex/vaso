@@ -2,7 +2,7 @@ import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { shellCommandWrapper, shellInvocation } from '../../mcp/shell-wrapper.js';
 import { codexProfileName } from '../../adapters/codex.js';
-import { hookCommandRisks } from '../../analyzers/hook-commands.js';
+import { hookCommandRisks, hookItemRisks, hookItems, hookSnippet, topTier } from '../../analyzers/hook-commands.js';
 
 const INTERPRETERS = /^(?:python[\d.]*|node|bun|deno|ruby|perl|bash|sh|zsh|osascript)$/;
 const EVAL_LIKE = new Set(['eval', 'exec']);
@@ -69,7 +69,7 @@ export const cdx009 = defineCheck({
   name: 'Codex Unsafe Notify Command',
   category: 'coding-agent',
   severity: 'warning',
-  description: 'Detect Codex `notify` automation that invokes a shell (-c) — critical when the script downloads and runs code or sends secrets — uses a relative command name, or runs a script from a world-writable directory',
+  description: 'Detect Codex `notify` automation that invokes a shell (-c) — critical when the script downloads and runs code or sends secrets — uses a relative command name, or runs a script from a world-writable directory; and lifecycle hooks (hooks.json, [hooks]) whose commands download and run code, send data out or run hook input as code',
   supportedAgents: ['codex'],
 
   async run(ctx, h) {
@@ -81,10 +81,29 @@ export const cdx009 = defineCheck({
       if (findings.some(f => f.critical)) critical = true;
       evidence.push({ file, snippet, detail: findings.map(f => f.reason).join('; ') });
     };
-    // Codex ignores `notify` in a project's .codex/config.toml
-    if (ctx.installation.profile === 'project') return h.passed('Project config cannot set a Codex notify command');
-
+    // Lifecycle hooks (learn.chatgpt.com/docs/hooks): hooks.json or inline
+    // [hooks] in config.toml, user and trusted-project layers, Claude Code's
+    // event schema. Command hooks run through the shell with the event JSON
+    // on stdin; prompt / agent handlers are skipped, mcp_tool runs no shell.
     for (const config of ctx.configs) {
+      if (codexProfileName(config.filePath)) continue;
+      for (const item of hookItems(config.data.hooks)) {
+        const risks = hookItemRisks(item);
+        const tier = topTier(risks);
+        if (!tier) continue;
+        if (tier === 'critical') critical = true;
+        evidence.push({
+          file: config.filePath,
+          snippet: hookSnippet(item.event, (item.url ?? item.scripts[0]).slice(0, 120), item.matcher ? `(${item.matcher})` : ''),
+          detail: `Hook command ${risks.map(r => r.reason).join('; ')}`,
+          ...(tier === 'info' ? { mitigated: true } : {}),
+        });
+      }
+    }
+
+    // Codex ignores `notify` in a project's .codex/config.toml
+    const project = ctx.installation.profile === 'project';
+    for (const config of project ? [] : ctx.configs) {
       const rootNotify = config.data.notify;
       // Profile files (`<name>.config.toml`) override notify under `codex -p <name>`
       const profile = codexProfileName(config.filePath);
@@ -101,10 +120,10 @@ export const cdx009 = defineCheck({
     }
 
     return h.fromEvidence(evidence, {
-      passed: 'Codex notify command is safely configured (or not set)',
-      failed: (n) => `Found ${n} unsafe Codex notify configuration(s)`,
+      passed: project ? 'No project hook downloads code, sends data out or runs input as code (a project cannot set notify)' : 'Codex notify command and hooks are safely configured (or not set)',
+      failed: (n) => `Found ${n} unsafe Codex notify or hook configuration(s)`,
       severity: critical ? 'critical' : undefined,
-      fixDescription: 'Use an absolute path to a non-shell script (e.g. notify = ["/usr/local/bin/codex-notify"]); avoid sh -c and /tmp scripts',
+      fixDescription: 'Use an absolute path to a non-shell script (e.g. notify = ["/usr/local/bin/codex-notify"]); avoid sh -c and /tmp scripts. Remove hooks you did not add yourself, run reviewed local scripts instead of downloads, and never pipe hook input into a shell',
     });
   },
 });

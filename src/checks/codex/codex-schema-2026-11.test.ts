@@ -63,6 +63,41 @@ describe('CDX-002 permission profiles (default_permissions)', () => {
     expect(net.severity).toBe('warning');
   });
 
+  it('judges nested filesystem tables: each "<sub>" = "write" under its root, "." being the root', async () => {
+    const r = await check('CDX-002').run(ctx([cfg(MAIN, {
+      default_permissions: 'dev',
+      permissions: { dev: { filesystem: {
+        [HOME]: { '.': 'write' },
+        '~/.ssh': { '**': 'write' },
+        '/opt/data': { '.': 'write', 'cache/**': 'write' },
+        '/srv': { 'etc': 'read' },
+        ':workspace_roots': { '.': 'write' },
+        glob_scan_max_depth: 3,
+      } } },
+    })]));
+    expect(r.severity).toBe('critical');
+    expect(r.evidence?.map(e => e.snippet)).toEqual([
+      `[permissions.dev.filesystem."${HOME}"] "." = "write"`,
+      '[permissions.dev.filesystem."~/.ssh"] "**" = "write"',
+    ]);
+  });
+
+  it('treats "<dir>/**" like <dir> itself', async () => {
+    const r = await check('CDX-002').run(ctx([cfg(MAIN, {
+      default_permissions: 'g', permissions: { g: { filesystem: { '~/**': 'write', '/opt/x/**': 'write' } } },
+    })]));
+    expect(r.evidence?.map(e => e.snippet)).toEqual(['[permissions.g.filesystem] "~/**" = "write"']);
+  });
+
+  it('reports nothing for a profile extending :danger-full-access — Codex rejects that config', async () => {
+    const r = await check('CDX-002').run(ctx([cfg(MAIN, {
+      approval_policy: 'on-request',
+      default_permissions: 'child',
+      permissions: { child: { extends: ':danger-full-access', filesystem: { '~': 'write' } } },
+    })]));
+    expect(r.passed).toBe(true);
+  });
+
   it('follows extends chains', async () => {
     const r = await check('CDX-002').run(ctx([cfg(MAIN, {
       default_permissions: 'child',
@@ -102,6 +137,9 @@ describe('CDX-005 shell environment policy semantics', () => {
     expect(unset.message).toMatch(/by default/);
     const noFile = await check('CDX-005').run(ctx([]));
     expect(noFile.severity).toBe('info');
+    // no config file: the evidence points at the install, not a file that doesn't exist
+    expect(noFile.evidence?.[0].file).toBe(`${HOME}/.codex`);
+    expect(noFile.evidence?.[0].detail).toMatch(/^no \/home\/test\/\.codex\/config\.toml sets/);
     const explicit = await check('CDX-005').run(ctx([cfg(MAIN, { shell_environment_policy: { inherit: 'all' } })]));
     expect(explicit.severity).toBe('critical');
   });
@@ -109,6 +147,7 @@ describe('CDX-005 shell environment policy semantics', () => {
   it('treats an include filter allowlist as mitigation, exclude-only filters as not', async () => {
     const include = await check('CDX-005').run(ctx([cfg(MAIN, { shell_environment_policy: { inherit: 'all', filters: { PATH: 'include', 'HOME': 'include', 'AWS_*': 'exclude' } } })]));
     expect(include.severity).toBe('info');
+    expect(include.message).not.toMatch(/by default/);
     const wildcard = await check('CDX-005').run(ctx([cfg(MAIN, { shell_environment_policy: { inherit: 'all', filters: { '*': 'include' } } })]));
     expect(wildcard.severity).toBe('critical');
     const exclude = await check('CDX-005').run(ctx([cfg(MAIN, { shell_environment_policy: { inherit: 'all', filters: { 'AWS_*': 'exclude' } } })]));
@@ -120,6 +159,10 @@ describe('CDX-005 shell environment policy semantics', () => {
   it('leaves profile files to CDX-008 and does not report the default for a project layer', async () => {
     const r = await check('CDX-005').run(ctx([cfg(MAIN, { shell_environment_policy: { inherit: 'core' } }), cfg(FAST, { shell_environment_policy: { inherit: 'all' } })]));
     expect(r.passed).toBe(true);
+    // root inherits everything anyway: an explicit "all" in a profile file is noted with the default
+    const unsetRoot = await check('CDX-005').run(ctx([cfg(MAIN, { model: 'x' }), cfg(FAST, { shell_environment_policy: { inherit: 'all' } })]));
+    expect(unsetRoot.severity).toBe('info');
+    expect(unsetRoot.evidence?.map(e => e.snippet)).toContain('fast.config.toml: shell_environment_policy.inherit = "all"');
     const project = await check('CDX-005').run(ctx([cfg('/work/app/.codex/config.toml', { model: 'x' })], 'project'));
     expect(project.passed).toBe(true);
     const projectAll = await check('CDX-005').run(ctx([cfg('/work/app/.codex/config.toml', { shell_environment_policy: { inherit: 'all' } })], 'project'));

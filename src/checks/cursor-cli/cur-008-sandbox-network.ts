@@ -17,7 +17,8 @@ export const cur008 = defineCheck({
 
     for (const config of ctx.configs) {
       // sandbox.json networkPolicy: default "deny" unless set to "allow";
-      // a "*" allow entry opens every domain (cursor.com/docs/reference/sandbox)
+      // a "*" allow entry opens every domain, a 0.0.0.0/0 (or ::/0) CIDR
+      // entry every address (cursor.com/docs/reference/sandbox)
       if (basename(config.filePath) === 'sandbox.json') {
         const policy = config.data.networkPolicy as Record<string, unknown> | undefined;
         if (!policy || typeof policy !== 'object') continue;
@@ -27,12 +28,16 @@ export const cur008 = defineCheck({
             snippet: 'networkPolicy.default = "allow"',
             detail: 'Sandboxed commands may reach any host not explicitly denied — exfiltration paths stay open with the sandbox on',
           });
-        } else if (Array.isArray(policy.allow) && policy.allow.some(a => typeof a === 'string' && /^\s*\*\s*$/.test(a))) {
-          evidence.push({
-            file: config.filePath,
-            snippet: 'networkPolicy.allow contains "*"',
-            detail: 'A "*" allow entry lets sandboxed commands reach any host',
-          });
+        } else {
+          const open = (Array.isArray(policy.allow) ? policy.allow : [])
+            .find((a): a is string => typeof a === 'string' && /^\s*(?:\*|0\.0\.0\.0\/0|::\/0)\s*$/.test(a));
+          if (open) {
+            evidence.push({
+              file: config.filePath,
+              snippet: `networkPolicy.allow contains "${open.trim()}"`,
+              detail: `A "${open.trim()}" allow entry lets sandboxed commands reach any host`,
+            });
+          }
         }
         continue;
       }

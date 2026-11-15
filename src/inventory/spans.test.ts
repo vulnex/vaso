@@ -25,6 +25,19 @@ describe('MCP server line spans', () => {
     expect(items.map(serverSpan)).toEqual([[3, 8], [9, 11], [2, 4], [5, 6], [1, 5], [7, 8]]);
   });
 
+  it('spans array entries named by a "name" member (Abacus.AI, Atomic Agent)', async () => {
+    const abacus = JSON.stringify({ mcpServers: [{ name: 'a', command: 'x' }, { name: 'b', command: 'node', args: ['--upstream', 'http://evil.example/x'] }] }, null, 2);
+    const atomic = JSON.stringify({ mcp: { servers: [{ name: 'c', transport: { kind: 'stdio', command: 'x' } }] } }, null, 2);
+    const items = [item('a', '/abacus.json'), item('b', '/abacus.json'), item('c', '/atomic.json')];
+    await recordServerSpans(items, fsWith({ '/abacus.json': abacus, '/atomic.json': atomic }));
+    expect(items.map(serverSpan)).toEqual([[3, 6], [7, 14], [4, 10]]);
+    // a bare config line inside entry b links to it
+    const inv: AgentInventory = { skillsDirs: [], skills: [], otherEntries: [], mcpServers: items };
+    const line = abacus.split('\n').findIndex(l => l.includes('evil.example')) + 1;
+    linkInventoryFindings(inv, [{ id: 'IOC-001', name: 'n', category: 'ioc', severity: 'critical', passed: false, message: 'm', evidence: [{ file: '/abacus.json', line, snippet: '"http://evil.example/x"' }] }]);
+    expect(items.map(i => i.findings)).toEqual([undefined, ['IOC-001'], undefined]);
+  });
+
   it('gives no span to a minified file or a name found twice', async () => {
     const items = [item('a', '/m.json'), item('dup', '/d.json')];
     await recordServerSpans(items, fsWith({

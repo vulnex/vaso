@@ -210,6 +210,16 @@ describe('MCPDiscovery — Atomic Agent', () => {
     expect(cfg.servers[1].headers).toEqual({ Authorization: 'Bearer t' });
   });
 
+  it('lists a server without transport.kind by what it names, as AT-007 judges it', async () => {
+    const noKind = JSON.stringify({ mcp: { servers: [
+      { name: 'cmd', transport: { command: 'npx', args: ['-y', 'x'] } },
+      { name: 'web', transport: { url: 'https://mcp.example.test/mcp' } },
+      { name: 'odd', transport: { kind: 'carrier_pigeon', command: 'x' } },
+    ] } });
+    const result = await new MCPDiscovery(makeFs({ '/home/t/.atomic-agent/config.json': noKind })).discover('linux');
+    expect(result.configs[0].servers.map(s => [s.name, s.transport])).toEqual([['cmd', 'stdio'], ['web', 'streamable-http']]);
+  });
+
   it('honours ATOMIC_AGENT_STATE_DIR', async () => {
     const fs = makeFs({ '/srv/atomic/config.json': config }, { ATOMIC_AGENT_STATE_DIR: '/srv/atomic' });
     const result = await new MCPDiscovery(fs).discover('linux');
@@ -407,6 +417,18 @@ describe('MCPDiscovery — Abacus.AI', () => {
       await w('proj/.gemini/settings.json', JSON.stringify({ mcpServers: { pg: { command: 'node' } } }));
       await w('proj/.qwen/settings.json', JSON.stringify({ mcpServers: { pq: { command: 'node' } } }));
       await w('proj/opencode.jsonc', '{ "mcp": { "po": { "type": "local", "command": ["node", "p.js"] } } }');
+      await w('repo/.git/HEAD', 'ref: refs/heads/main\n');
+      await w('repo/.devin/config.json', JSON.stringify({ mcpServers: { rootsrv: { command: 'node' } } }));
+      await w('repo/sub/.devin/mcp_config.json', JSON.stringify({ mcpServers: { subsrv: { command: 'node' } } }));
+      await w('repo/sub/deep/x.txt', 'x');
+    });
+
+    it('finds Devin project servers from a subdirectory: the repo root and each .devin/ on the way', async () => {
+      const result = await new MCPDiscovery(new HomeFS()).discover('linux', join(home, 'repo/sub/deep'));
+      const devin = result.configs.filter(c => c.agents?.includes('devin') && c.scope === 'project');
+      expect(devin.map(c => [c.servers.map(s => s.name).join(), c.projectRoot])).toEqual([
+        ['rootsrv', join(home, 'repo')], ['subsrv', join(home, 'repo')],
+      ]);
     });
     afterAll(() => rm(home, { recursive: true, force: true }));
 

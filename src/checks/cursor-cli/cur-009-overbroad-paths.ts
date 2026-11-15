@@ -22,11 +22,12 @@ export const cur009 = defineCheck({
 
     for (const config of ctx.configs) {
       const name = basename(config.filePath);
-      // permissions.json mcpAllowlist `server:tool` (case-insensitive): "*:*"
-      // runs every tool of every MCP server without approval
+      // permissions.json mcpAllowlist `server:tool` (case-insensitive, glob
+      // `*` inside names): "*:*" — or "*:**", "**:*" — runs every tool of
+      // every MCP server without approval
       if (name === 'permissions.json') {
         for (const entry of Array.isArray(config.data.mcpAllowlist) ? config.data.mcpAllowlist : []) {
-          if (typeof entry !== 'string' || !/^\s*\*\s*:\s*\*\s*$/.test(entry)) continue;
+          if (typeof entry !== 'string' || !/^\s*\*+\s*:\s*\*+\s*$/.test(entry)) continue;
           evidence.push({
             file: config.filePath,
             snippet: `mcpAllowlist: "${entry}"`,
@@ -38,7 +39,11 @@ export const cur009 = defineCheck({
       // sandbox.json additionalReadwritePaths: extra paths sandboxed
       // commands may write. The workspace is writable already; the home
       // directory, / or a credential store / shell startup file is not.
+      // They apply only to type "workspace_readwrite" (the default) —
+      // cursor.com/docs/reference/sandbox.
       if (name === 'sandbox.json') {
+        const type = config.data.type;
+        if (typeof type === 'string' && type !== 'workspace_readwrite') continue;
         for (const entry of Array.isArray(config.data.additionalReadwritePaths) ? config.data.additionalReadwritePaths : []) {
           if (typeof entry !== 'string') continue;
           const reason = overbroadPathRule(`Write(${entry})`, home);
@@ -46,7 +51,7 @@ export const cur009 = defineCheck({
           evidence.push({
             file: config.filePath,
             snippet: `additionalReadwritePaths: "${entry}"`,
-            detail: `Sandbox write access ${reason.replace(/^lets the agent write /, 'to ')} — sandboxed commands run without a prompt`,
+            detail: `${reason.startsWith('lets the agent write ') ? `Sandbox write access to ${reason.slice('lets the agent write '.length)}` : `Sandbox-writable path ${reason}`} — sandboxed commands run without a prompt`,
           });
         }
         continue;

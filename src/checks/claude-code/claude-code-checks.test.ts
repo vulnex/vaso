@@ -14,7 +14,8 @@ function makeConfig(filePath: string, data: Record<string, unknown>): ParsedConf
 
 function makeFs(overrides: Partial<FSProvider> = {}): FSProvider {
   return {
-    access: vi.fn(async () => true),
+    // every file exists except a managed-mcp.json, which would switch all servers off
+    access: vi.fn(async (p: string) => !String(p).endsWith('managed-mcp.json')),
     stat: vi.fn(async () => ({ mode: 0o600, isFile: () => true, isDirectory: () => false })),
     readFile: vi.fn(),
     readdir: vi.fn(),

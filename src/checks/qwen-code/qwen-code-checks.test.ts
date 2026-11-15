@@ -368,6 +368,9 @@ describe('deep-test 2026-10-15 regressions', () => {
     }
     const legacy = await byId('QC-005').run(makeCtx([makeConfig('settings.json', { tools: { allowed: ['Bash'] } })]));
     expect(legacy.passed).toBe(false);
+    expect(legacy.evidence?.[0].snippet).toMatch(/^tools\.allowed has 1 broad rule/);
+    const both = await byId('QC-005').run(makeCtx([makeConfig('settings.json', { permissions: { allow: ['Bash(*)'] }, tools: { allowed: ['*'] } })]));
+    expect(both.evidence?.[0].snippet).toMatch(/^permissions\.allow and tools\.allowed has 2 broad rule/);
     const narrow = await byId('QC-005').run(makeCtx([makeConfig('settings.json', {
       permissions: { allow: ['Shell(git status)', 'Bash(git *)', 'Bash(npm run *)', 'Read', 'Read(**)'] },
     })]));

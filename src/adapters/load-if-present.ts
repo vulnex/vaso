@@ -1,4 +1,4 @@
-import { loadConfig, recordReadFailure, recordLoadError } from '../core/config-loader.js';
+import { linkedIntoSink, loadConfig, recordReadFailure, recordLoadError } from '../core/config-loader.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import type { ParsedConfig } from '../core/types.js';
 
@@ -39,6 +39,9 @@ export async function loadConfigIfPresent(filePath: string, fs: FSProvider): Pro
  */
 export async function readTextIfPresent(filePath: string, fs: FSProvider): Promise<string | undefined> {
   if (!(await pathPresent(filePath, fs))) return undefined;
+  // Never read through a link into a credential store — a snapshot has no
+  // content for it either
+  if (await linkedIntoSink(filePath, fs)) return undefined;
   try {
     return await fs.readFile(filePath);
   } catch (err) {

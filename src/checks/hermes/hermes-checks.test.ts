@@ -419,4 +419,13 @@ describe('HM-010 MCP server hardening', () => {
     const result = await check.run(makeCtx([cfg]));
     expect(result.passed).toBe(true);
   });
+  it('skips servers switched off with a YAML 1.1 false (enabled: no / off), as PyYAML reads them', async () => {
+    const unpinned = { command: 'npx', args: ['-y', '@modelcontextprotocol/server-foo'] };
+    for (const enabled of ['no', 'off', 'False', false]) {
+      const cfg = makeYaml('/h/.hermes/cli-config.yaml', { mcp_servers: { foo: { ...unpinned, enabled } } });
+      expect((await check.run(makeCtx([cfg]))).passed, String(enabled)).toBe(true);
+    }
+    const on = makeYaml('/h/.hermes/cli-config.yaml', { mcp_servers: { foo: { ...unpinned, enabled: 'yes' } } });
+    expect((await check.run(makeCtx([on]))).passed).toBe(false);
+  });
 });

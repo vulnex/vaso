@@ -357,3 +357,13 @@ export function topTier(risks: readonly HookRisk[]): HookRiskTier | undefined {
   if (risks.some(r => r.tier === 'warning')) return 'warning';
   return risks.length > 0 ? 'info' : undefined;
 }
+
+/**
+ * A hook finding's snippet: `<event>[(<matcher>)] hook: <body>`. Not
+ * `<event>: <body>` — that reads as a `name: value` line, and an event named
+ * like a credential (`SessionStart`) would have its whole command masked in
+ * reports; the body is still masked where it holds a secret.
+ */
+export function hookSnippet(event: string, body: string, qualifier = ''): string {
+  return `${event}${qualifier} hook: ${body}`;
+}

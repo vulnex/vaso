@@ -2,7 +2,7 @@ import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { truncateSnippet } from '../../core/patterns.js';
 import { shellCommandWrapper } from '../../mcp/shell-wrapper.js';
-import { hookCommandRisks, hookExpansion, httpHookRisks, topTier } from '../../analyzers/hook-commands.js';
+import { hookCommandRisks, hookExpansion, httpHookRisks, topTier, hookSnippet } from '../../analyzers/hook-commands.js';
 
 // ${CLAUDE_PROJECT_DIR} / ${CLAUDE_PLUGIN_ROOT} / ${CLAUDE_PLUGIN_DATA} are
 // path placeholders the hooks docs use unquoted in their own examples
@@ -72,7 +72,7 @@ export const cc003 = defineCheck({
               if (!tier) continue;
               evidence.push({
                 file: config.filePath,
-                snippet: `${event}${entry.matcher ? `(${entry.matcher})` : ''}: http ${truncateSnippet(hook.url, 120)}`,
+                snippet: hookSnippet(event, `http ${truncateSnippet(hook.url, 120)}`, entry.matcher ? `(${entry.matcher})` : ''),
                 detail: `HTTP hook ${risks.map(r => r.reason).join('; ')}`,
                 ...(tier === 'info' ? { mitigated: true } : {}),
               });
@@ -100,7 +100,7 @@ export const cc003 = defineCheck({
             if (tier === 'critical') critical = true;
             evidence.push({
               file: config.filePath,
-              snippet: `${event}${entry.matcher ? `(${entry.matcher})` : ''}: ${cmd.slice(0, 120)}`,
+              snippet: hookSnippet(event, cmd.slice(0, 120), entry.matcher ? `(${entry.matcher})` : ''),
               detail: `Hook command ${reasons.join('; ')}`,
               ...(tier === 'info' ? { mitigated: true } : {}),
             });

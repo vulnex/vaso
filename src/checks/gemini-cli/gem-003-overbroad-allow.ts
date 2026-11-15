@@ -1,6 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { markUntrustedWorkspace } from '../../adapters/folder-trust.js';
+import { serverOffPredicate } from '../../mcp/off-lists.js';
 import { geminiWorkspaceTrusted } from '../../adapters/gemini.js';
 import { isPolicyFile, policyEvidence } from './policy-rules.js';
 
@@ -25,6 +26,7 @@ export const gem003 = defineCheck({
 
   async run(ctx, h) {
     const evidence: Evidence[] = [];
+    const off = await serverOffPredicate(ctx); // switched-off servers never connect
 
     for (const config of ctx.configs) {
       // Policy engine files (user ~/.gemini/policies, admin system dir)
@@ -38,7 +40,8 @@ export const gem003 = defineCheck({
       const servers = config.data.mcpServers as Record<string, unknown> | undefined;
       if (servers && typeof servers === 'object') {
         for (const [name, server] of Object.entries(servers)) {
-          if (server && typeof server === 'object' && (server as Record<string, unknown>).trust === true) {
+          if (server && typeof server === 'object' && (server as Record<string, unknown>).trust === true
+            && !off(name, server, { filePath: config.filePath })) {
             evidence.push({
               file: config.filePath,
               snippet: `mcpServers.${name}.trust = true`,

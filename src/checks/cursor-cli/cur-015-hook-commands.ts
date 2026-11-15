@@ -1,6 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { hookCommandRisks, hookExpansion, topTier } from '../../analyzers/hook-commands.js';
+import { hookCommandRisks, hookExpansion, topTier, hookSnippet } from '../../analyzers/hook-commands.js';
 
 // Every hooks.json event runs its command on its own — sessionStart and
 // workspaceOpen before the user has typed anything — so what the command does
@@ -44,7 +44,7 @@ export const cur015 = defineCheck({
           if (tier === 'critical') critical = true;
           evidence.push({
             file: config.filePath,
-            snippet: `${event}: ${e.command.slice(0, 120)}`,
+            snippet: hookSnippet(event, e.command.slice(0, 120)),
             detail: `Hook command ${risks.map(r => r.reason).join('; ')}`,
             ...(tier === 'info' ? { mitigated: true } : {}),
           });

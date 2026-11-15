@@ -1,7 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { truncateSnippet } from '../../core/patterns.js';
-import { hookItemRisks, hookItems, topTier } from '../../analyzers/hook-commands.js';
+import { hookItemRisks, hookItems, topTier, hookSnippet } from '../../analyzers/hook-commands.js';
 
 function hookNames(hooks: unknown): string[] {
   if (Array.isArray(hooks)) {
@@ -53,7 +53,7 @@ export const dev006 = defineCheck({
         if (tier === 'critical') critical = true;
         evidence.push({
           file: config.filePath,
-          snippet: `${item.event}${item.matcher ? `(${item.matcher})` : ''}: ${truncateSnippet(item.url ?? item.scripts[0], 120)}`,
+          snippet: hookSnippet(item.event, truncateSnippet(item.url ?? item.scripts[0], 120), item.matcher ? `(${item.matcher})` : ''),
           detail: `Hook ${risks.map(r => r.reason).join('; ')}`,
         });
       }

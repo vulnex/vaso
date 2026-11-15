@@ -166,7 +166,9 @@ export function lyrieEnvLayers(nodeEnv: string | undefined): string[] {
  */
 function withBunDotenvValues(layers: ParsedConfig[], fs: FSProvider): ParsedConfig[] {
   const parsed = layers.map(l => (l.format === 'env' && l.raw ? parseBunDotenvRaw(l.raw) : undefined));
-  const expanded = expandBunDotenvLayers(parsed.map(p => p ?? {}), name => fs.getEnv(name));
+  // $HOME from the scanned home, not the environment: a snapshot carries no
+  // HOME, and the same file must read the same on local and remote scans
+  const expanded = expandBunDotenvLayers(parsed.map(p => p ?? {}), name => (name === 'HOME' ? fs.homedir() : fs.getEnv(name)));
   return layers.map((l, i) => (parsed[i] ? { ...l, data: expanded[i] } : l));
 }
 

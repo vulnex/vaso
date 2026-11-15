@@ -1,4 +1,4 @@
-import { dirname, isAbsolute, relative } from 'node:path';
+import { basename, dirname, isAbsolute, relative } from 'node:path';
 import type { AgentInventory, CheckResult, McpServerItem } from '../core/types.js';
 import { relEscapes } from '../core/path-rel.js';
 import { serverSpan } from './spans.js';
@@ -8,18 +8,24 @@ function isWithin(path: string, dir: string): boolean {
   return rel === '' || !relEscapes(rel);
 }
 
+/** Claude Code's state file (`~/.claude.json`, or under $CLAUDE_CONFIG_DIR). */
+const isClaudeStateFile = (file: string) => basename(file) === '.claude.json';
+
 const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 /**
  * Where an agent MCP check names a server in its evidence: the key path it
  * writes (`mcpServers.<name>`, `mcp_servers.<name>`, `mcp.<name>`,
- * `mcp.servers[<name>]`, Abacus.AI's array `mcpServers[<name>]`, project servers behind `projects[<path>].`), or the
+ * `mcp.servers[<name>]`, Abacus.AI's array `mcpServers[<name>]`, project servers behind `projects[<path>].` in ~/.claude.json), or the
  * quoted name (`Server "<name>"`, `MCP server "<name>"`). Matching the bare
  * name anywhere linked `db` to `--conn db` and `api` to `api.v2`.
  */
 function serverPattern(server: McpServerItem): RegExp {
   const n = escapeRegex(server.name);
-  const scope = server.project !== undefined
+  // Only ~/.claude.json keeps project servers under `projects[<path>]`; a
+  // project's own file (.mcp.json, .cursor/mcp.json, .devin/config.json)
+  // names them at the top level like a user file
+  const scope = server.project !== undefined && isClaudeStateFile(server.configFile)
     ? `projects\\[${escapeRegex(server.project)}\\]\\.`
     : '(?<!\\]\\.)';
   const keyPath = `(?:^|[\\s"'({,])${scope}(?:tools\\.)?(?:mcpServers|mcp_servers|mcp)\\.${n}(?=[.:\\s=\\[]|$)`;

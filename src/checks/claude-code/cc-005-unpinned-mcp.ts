@@ -2,6 +2,7 @@ import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { runnerPackage, isPinnedOrLocal, pinProblem } from '../../mcp/package-pin.js';
 import { inlineMcpServers, readSubagents } from './subagents.js';
+import { serverOffPredicate } from '../../mcp/off-lists.js';
 
 interface ServerSpec {
   command?: string;
@@ -33,12 +34,14 @@ export const cc005 = defineCheck({
 
   async run(ctx, h) {
     const evidence: Evidence[] = [];
+    // Servers Claude Code's off-lists switch off never start
+    const off = await serverOffPredicate(ctx);
 
     for (const config of ctx.configs) {
       const mcpServers = config.data.mcpServers as Record<string, unknown> | undefined;
       if (mcpServers && typeof mcpServers === 'object') {
         for (const [name, srv] of Object.entries(mcpServers)) {
-          if (srv && typeof srv === 'object') {
+          if (srv && typeof srv === 'object' && !off(name, srv, { filePath: config.filePath })) {
             checkServer(name, srv as ServerSpec, config.filePath, evidence, 'mcpServers.');
           }
         }
@@ -51,7 +54,7 @@ export const cc005 = defineCheck({
           const projectServers = (project as Record<string, unknown> | undefined)?.mcpServers as Record<string, unknown> | undefined;
           if (projectServers && typeof projectServers === 'object') {
             for (const [name, srv] of Object.entries(projectServers)) {
-              if (srv && typeof srv === 'object') {
+              if (srv && typeof srv === 'object' && !off(name, srv, { filePath: config.filePath, projectRoot: projectPath })) {
                 checkServer(name, srv as ServerSpec, config.filePath, evidence, `projects[${projectPath}].mcpServers.`);
               }
             }
@@ -64,6 +67,7 @@ export const cc005 = defineCheck({
     // (code.claude.com/docs/en/sub-agents "Scope MCP servers to a subagent")
     for (const agent of await readSubagents(ctx)) {
       for (const [name, srv] of inlineMcpServers(agent.frontmatter)) {
+        if (off(name, srv, { filePath: agent.file })) continue;
         checkServer(name, srv as ServerSpec, agent.file, evidence, 'mcpServers.');
       }
     }

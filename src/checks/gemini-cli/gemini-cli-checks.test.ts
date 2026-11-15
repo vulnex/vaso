@@ -485,6 +485,7 @@ describe('GEM-003: policy engine allow rules (geminicli.com/docs/reference/polic
       { mcpName: '*', decision: 'allow' },
       { mcpName: 'github', toolName: '*', decision: 'allow' },
       { toolName: 'mcp_jira_*', decision: 'allow' },
+      { toolName: 'mcp_my_server_*', decision: 'allow' },
     ])]));
     expect(r.passed).toBe(false);
     expect(r.severity).toBe('critical');
@@ -497,6 +498,7 @@ describe('GEM-003: policy engine allow rules (geminicli.com/docs/reference/polic
       'rule[5]: mcpName = "*" → allow',
       'rule[6]: mcpName = "github", toolName = "*" → allow',
       'rule[7]: toolName = "mcp_jira_*" → allow',
+      'rule[8]: toolName = "mcp_my_server_*" → allow',
     ]);
   });
 

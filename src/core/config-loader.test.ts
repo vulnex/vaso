@@ -254,3 +254,31 @@ describe('captureConfigLoadErrors', () => {
     await cleanup();
   });
 });
+
+describe('configs linked into a credential store', () => {
+  it('are not read locally (the probe never ships them): CONFIG-LOAD, like a snapshot scan', async () => {
+    const { mkdtemp, symlink } = await import('node:fs/promises');
+    const { LocalFSProvider } = await import('./local-fs-provider.js');
+    const { readTextIfPresent } = await import('../adapters/load-if-present.js');
+    const home = await mkdtemp(join(tmpdir(), 'vaso-sink-link-'));
+    try {
+      await mkdir(join(home, '.ssh'));
+      await mkdir(join(home, '.hermes'));
+      await mkdir(join(home, 'dotfiles'));
+      await writeFile(join(home, '.ssh', 'id_rsa'), 'PRIVATE KEY BODY\n');
+      await writeFile(join(home, 'dotfiles', 'env'), 'A=1\n');
+      await symlink(join(home, '.ssh', 'id_rsa'), join(home, '.hermes', '.env'));
+      await symlink(join(home, 'dotfiles', 'env'), join(home, '.hermes', 'ok.env'));
+      const fs = new LocalFSProvider();
+      const { result, loadErrors } = await captureConfigLoadErrors(() => loadConfig(join(home, '.hermes', '.env'), fs).catch((e: Error) => e));
+      expect(result).toBeInstanceOf(Error);
+      expect(loadErrors[0].message).toMatch(/^not read: reached through a symlink into a credential store/);
+      expect(await readTextIfPresent(join(home, '.hermes', '.env'), fs)).toBeUndefined();
+      // an ordinary link is read; a file inside the store itself is named, not escaped to
+      expect((await loadConfig(join(home, '.hermes', 'ok.env'), fs)).data).toEqual({ A: '1' });
+      expect(await readTextIfPresent(join(home, '.ssh', 'id_rsa'), fs)).toContain('PRIVATE');
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+});

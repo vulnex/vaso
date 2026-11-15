@@ -15,8 +15,9 @@ import { CHECKOUT_PARENTS, checkoutParentsGlob } from './checkout-parents.js';
 
 const CODEX_DIR_NAME = '.codex';
 // auth.json holds OAuth tokens; only its presence and permissions matter
-// (CDX-003), so it is never parsed.
-const CONFIG_FILES = ['config.toml'];
+// (CDX-003), so it is never parsed. hooks.json holds lifecycle hooks
+// (learn.chatgpt.com/docs/hooks; CDX-009), as may config.toml's [hooks].
+const CONFIG_FILES = ['config.toml', 'hooks.json'];
 const NPM_PACKAGE_NAME = '@openai/codex';
 
 const SYSTEM_CLI_PATHS = [
@@ -228,14 +229,16 @@ export const codexAdapter: AgentAdapter = {
         if (projectDir === codexDir || await isLoadedInstallDir(projectDir, installations, fs)) continue;
         if (!(await fs.access(projectDir))) continue;
         const projectConfig = await loadConfigIfPresent(join(projectDir, 'config.toml'), fs);
+        // Project hooks load only for a trusted `.codex/` layer — as here
+        const projectHooks = await loadConfigIfPresent(join(projectDir, 'hooks.json'), fs);
         const hasRules = await fs.access(join(projectDir, 'rules'));
-        if (!projectConfig && !hasRules) continue;
+        if (!projectConfig && !projectHooks && !hasRules) continue;
         installations.push({
           agent: 'codex',
           agentName: `project:${basename(project)}`,
           version,
           installDir: projectDir,
-          configFiles: projectConfig ? [projectConfig] : [],
+          configFiles: [projectConfig, projectHooks].filter((c): c is NonNullable<typeof c> => c !== undefined && c !== null),
           user: options?.allUsers ? user : undefined,
           profile: 'project',
         });
@@ -302,6 +305,8 @@ export const codexAdapter: AgentAdapter = {
     return {
       filePaths: [
         '~/.codex/config.toml',
+        // Lifecycle hooks (CDX-009)
+        '~/.codex/hooks.json',
         '~/.codex/instructions.md',
         '~/.codex/AGENTS.md',
         // Replaces AGENTS.md at the global scope when present (CDX-007)
@@ -320,6 +325,7 @@ export const codexAdapter: AgentAdapter = {
         // usual clone locations (CDX-001…010 on the project installation)
         ...PROJECT_ROOT_GLOBS.flatMap(root => [
           `${root}/.codex/config.toml`,
+          `${root}/.codex/hooks.json`,
           `${root}/.codex/rules/*.rules`,
           `${root}/AGENTS.md`,
           `${root}/AGENTS.override.md`,

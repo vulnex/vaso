@@ -3,7 +3,7 @@ import { defineCheck } from '../../core/check-builder.js';
 import { truncateSnippet } from '../../core/patterns.js';
 import { markUntrustedWorkspace } from '../../adapters/folder-trust.js';
 import { geminiWorkspaceTrusted } from '../../adapters/gemini.js';
-import { hookExpansion, hookItemRisks, hookItems, topTier } from '../../analyzers/hook-commands.js';
+import { hookExpansion, hookItemRisks, hookItems, topTier, hookSnippet } from '../../analyzers/hook-commands.js';
 
 // Hooks in settings.json (`{Event: [{matcher, hooks: [{type: "command",
 // command}]}]}`) run with the user's privileges on every matching event,
@@ -33,7 +33,7 @@ export const gem012 = defineCheck({
         if (tier === 'critical') critical = true;
         evidence.push({
           file: config.filePath,
-          snippet: `${item.event}${item.matcher ? `(${item.matcher})` : ''}: ${truncateSnippet(item.url ?? item.scripts[0], 120)}`,
+          snippet: hookSnippet(item.event, truncateSnippet(item.url ?? item.scripts[0], 120), item.matcher ? `(${item.matcher})` : ''),
           detail: `Hook command ${risks.map(r => r.reason).join('; ')}`,
           ...(tier === 'info' ? { mitigated: true } : {}),
         });

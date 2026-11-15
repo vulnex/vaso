@@ -29,7 +29,7 @@ describe('linkInventoryFindings', () => {
 
   it('links MCP findings only where a check names the server, in its scope', () => {
     const server = (name: string, extra: Partial<NonNullable<AgentInventory['mcpServers']>[number]> = {}) =>
-      ({ name, configFile: '/c.json', scope: 'user' as const, transport: 'stdio' as const, ...extra });
+      ({ name, configFile: '/h/.claude.json', scope: 'user' as const, transport: 'stdio' as const, ...extra });
     const inv: AgentInventory = {
       skillsDirs: [], skills: [], otherEntries: [],
       mcpServers: [
@@ -40,12 +40,12 @@ describe('linkInventoryFindings', () => {
       ],
     };
     linkInventoryFindings(inv, [
-      fail('CC-005', '/c.json', 'mcpServers.pg: npx -y pg-mcp --conn db'),
-      fail('CC-005', '/c.json', 'mcpServers.foo: npx -y @acme/github'),
-      fail('CC-004', '/c.json', 'projects[/work/app].mcpServers.github.env.GITHUB_TOKEN = ***'),
-      fail('CUR-006', '/c.json', 'mcpServers.api.v2.url = http://x'),
-      fail('DEV-004', '/c.json', 'mcpServers.off: npx -y thing'),
-      { ...fail('CD-003', '/c.json', 'x'), evidence: [{ file: '/c.json', snippet: 'x', detail: 'MCP server package unpinned — supply chain risk' }] },
+      fail('CC-005', '/h/.claude.json', 'mcpServers.pg: npx -y pg-mcp --conn db'),
+      fail('CC-005', '/h/.claude.json', 'mcpServers.foo: npx -y @acme/github'),
+      fail('CC-004', '/h/.claude.json', 'projects[/work/app].mcpServers.github.env.GITHUB_TOKEN = ***'),
+      fail('CUR-006', '/h/.claude.json', 'mcpServers.api.v2.url = http://x'),
+      fail('DEV-004', '/h/.claude.json', 'mcpServers.off: npx -y thing'),
+      { ...fail('CD-003', '/h/.claude.json', 'x'), evidence: [{ file: '/h/.claude.json', snippet: 'x', detail: 'MCP server package unpinned — supply chain risk' }] },
       fail('GEM-008', '/other.json', 'mcpServers.pg.url = http://x'),
     ]);
     const by = Object.fromEntries(inv.mcpServers!.map(s => [`${s.name}${s.project ? '@' + s.project : ''}`, s.findings]));
@@ -53,6 +53,21 @@ describe('linkInventoryFindings', () => {
       pg: ['CC-005'], db: undefined, github: undefined, api: undefined, 'api.v2': ['CUR-006'],
       'github@/work/app': ['CC-004'], off: undefined, npx: undefined, risk: undefined,
     });
+  });
+
+  it('links project-scope servers declared in the project\'s own file without a projects[] prefix', () => {
+    const inv: AgentInventory = {
+      skillsDirs: [], skills: [], otherEntries: [],
+      mcpServers: [
+        { name: 'p', configFile: '/work/app/.mcp.json', scope: 'project', project: '/work/app', transport: 'stdio' },
+        { name: 'c', configFile: '/work/app/.cursor/mcp.json', scope: 'project', project: '/work/app', transport: 'stdio' },
+      ],
+    };
+    linkInventoryFindings(inv, [
+      fail('CC-005', '/work/app/.mcp.json', 'mcpServers.p: npx -y thing'),
+      fail('CUR-006', '/work/app/.cursor/mcp.json', 'mcpServers.c.url = http://x'),
+    ]);
+    expect(inv.mcpServers!.map(s => s.findings)).toEqual([['CC-005'], ['CUR-006']]);
   });
 
   it("links Abacus.AI's array form by name", () => {

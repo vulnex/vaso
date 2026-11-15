@@ -1,7 +1,8 @@
 import { basename } from 'node:path';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { hookCommandRisks, hookExpansion, topTier } from '../../analyzers/hook-commands.js';
+import { hookCommandRisks, hookExpansion, topTier, hookSnippet } from '../../analyzers/hook-commands.js';
+import { cascadeRemovedNote } from './cascade-removed.js';
 
 /**
  * Cascade hooks (docs.devin.ai/desktop/cascade/hooks): hooks.json at system,
@@ -16,6 +17,8 @@ import { hookCommandRisks, hookExpansion, topTier } from '../../analyzers/hook-c
  * only on exit 2; any other failure lets the action proceed and there is no
  * fail-closed switch, so that is not reported. $ROOT_WORKSPACE_PATH (set for
  * post_setup_worktree) is a path Cascade chooses, not hook input.
+ * From Devin Desktop 3.9.19 on there is no Cascade (hooks have to be migrated
+ * to Devin hooks): leftover Cascade hooks never run and are at most info.
  */
 const EXPANSION = hookExpansion(['ROOT_WORKSPACE_PATH']);
 
@@ -50,7 +53,7 @@ export const ws009 = defineCheck({
           if (tier === 'critical') critical = true;
           evidence.push({
             file: config.filePath,
-            snippet: `${event}${field === 'powershell' ? ' (powershell)' : ''}: ${script.slice(0, 120)}`,
+            snippet: hookSnippet(event, script.slice(0, 120), field === 'powershell' ? ' (powershell)' : ''),
             detail: `Hook command ${risks.map(r => r.reason).join('; ')}`,
             ...(tier === 'info' ? { mitigated: true } : {}),
           });
@@ -58,10 +61,19 @@ export const ws009 = defineCheck({
       }
     }
 
+    const removed = cascadeRemovedNote(ctx);
+    if (removed) {
+      for (const e of evidence) {
+        e.detail = `${e.detail} — inactive: ${removed}`;
+        e.mitigated = true;
+      }
+      critical = false;
+    }
+
     return h.fromEvidence(evidence, {
-      passed: 'No Cascade hook command downloads code, sends data out or runs input as code',
+      passed: removed ?? 'No Cascade hook command downloads code, sends data out or runs input as code',
       failed: (n) => `Found ${n} Cascade hook command(s) that download code, send data over the network or run hook input as code`,
-      severity: critical ? 'critical' : 'warning',
+      severity: removed ? 'info' : critical ? 'critical' : 'warning',
       fixDescription: 'Remove hooks you did not add yourself (a workspace .devin/hooks.json or .windsurf/hooks.json arrives with the repo); run vendored, reviewed scripts instead of downloads, send audit data only to endpoints you control over https, and never eval or pipe hook input into a shell',
     });
   },

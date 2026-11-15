@@ -67,10 +67,9 @@ export const qc005 = defineCheck({
       const tools = config.data.tools as Record<string, unknown> | undefined;
       // tools.allowed / tools.exclude are deprecated but "still honoured at
       // startup" (settings.md migration table)
-      const allow = [
-        ...strings(perms && typeof perms === 'object' ? perms.allow : undefined),
-        ...strings(tools && typeof tools === 'object' ? tools.allowed : undefined),
-      ];
+      const permsAllow = strings(perms && typeof perms === 'object' ? perms.allow : undefined);
+      const toolsAllowed = strings(tools && typeof tools === 'object' ? tools.allowed : undefined);
+      const allow = [...permsAllow, ...toolsAllowed];
       // `ask` outranks `allow` (deny > ask > allow), so it is a net too
       const nets = [
         ...strings(perms && typeof perms === 'object' ? perms.deny : undefined),
@@ -90,7 +89,10 @@ export const qc005 = defineCheck({
 
       evidence.push({
         file: config.filePath,
-        snippet: `permissions.allow has ${broad.length} broad rule(s) with no deny/ask rule for the same tool`,
+        snippet: `${[
+          ...(broad.some(r => permsAllow.includes(r)) ? ['permissions.allow'] : []),
+          ...(broad.some(r => toolsAllowed.includes(r)) ? ['tools.allowed'] : []),
+        ].join(' and ')} has ${broad.length} broad rule(s) with no deny/ask rule for the same tool`,
         detail: `Broad allow rules without a deny net for their tool: ${broad.slice(0, 3).join(', ')}${broad.length > 3 ? ', …' : ''}`,
       });
     }
@@ -99,7 +101,7 @@ export const qc005 = defineCheck({
 
     return h.fromEvidence(evidence, {
       passed: 'Qwen permissions either lack broad allow rules or have a deny net',
-      failed: () => 'Qwen permissions.allow includes broad patterns with no deny/ask rule for the same tool',
+      failed: () => 'Qwen allow rules include broad patterns with no deny/ask rule for the same tool',
       fixDescription: 'Add explicit deny rules (e.g., "Bash(rm -rf *)", "Read(.env)") or narrow the allow patterns (e.g., "Bash(git *)")',
     });
   },
