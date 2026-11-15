@@ -37,18 +37,22 @@ function checkProfile(
   home: string,
 ): void {
   // default_permissions: the profile may select a [permissions.<name>] table
-  // from config.toml or its own file
-  if (typeof p.default_permissions === 'string') {
+  // from config.toml or its own file, or change the inherited selection's
+  // tables or [features] (network_proxy) — it layers over config.toml
+  if (typeof p.default_permissions === 'string' || 'permissions' in p || 'features' in p) {
     // the profile layers over config.toml: tables merge key by key
     const table = (v: unknown) => (v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : {});
     const merged = {
       ...p,
+      default_permissions: p.default_permissions ?? root.default_permissions,
       permissions: deepMerge(table(root.permissions), table(p.permissions)),
       features: deepMerge(table(root.features), table(p.features)),
     };
-    const rootCritical = judgeDefaultPermissions(root, home).some(f => f.level === 'critical');
+    // report what the profile adds over the root config's own findings
+    const key = (f: { level: string; snippet: string; detail: string }) => `${f.level}\0${f.snippet}\0${f.detail}`;
+    const rootFindings = new Set(judgeDefaultPermissions(root, home).map(key));
     for (const f of judgeDefaultPermissions(merged, home)) {
-      if (f.level !== 'critical' || rootCritical) continue;
+      if (rootFindings.has(key(f))) continue;
       evidence.push({
         file,
         snippet: `${label} ${f.snippet}`,

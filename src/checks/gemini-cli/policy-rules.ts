@@ -34,6 +34,15 @@ function broadPrefix(prefix: string): string | undefined {
   return undefined;
 }
 
+/** `mcp_<x>_*`: the tool name is `mcp_<server>_<tool>` and a server name
+ *  may hold `_`, so `mcp_github_get_*` is every tool of server "github_get"
+ *  or the `get_*` tools of server "github". */
+function mcpPrefixDetail(x: string): string {
+  const cut = x.indexOf('_');
+  const alt = cut > 0 ? ` (or the "${x.slice(cut + 1)}_*" tools of server "${x.slice(0, cut)}")` : '';
+  return `Every tool of MCP server "${x}"${alt} runs without confirmation`;
+}
+
 /** Whether `config` is a policy file (a `.toml` holding `[[rule]]` tables). */
 export function isPolicyFile(config: ParsedConfig): boolean {
   return config.filePath.endsWith('.toml') && Array.isArray(config.data.rule);
@@ -77,7 +86,7 @@ export function policyEvidence(config: ParsedConfig): Evidence[] {
         if (argsPattern) continue;
         push(`toolName = "${tool}"`, tool === 'mcp_*'
           ? 'Every tool of every MCP server runs without confirmation'
-          : `Every tool of MCP server "${tool.slice(4, -2)}" runs without confirmation`);
+          : mcpPrefixDetail(tool.slice(4, -2)));
       } else if (tool === SHELL_TOOL) {
         if (prefixes.length === 0 && regex === undefined && argsPattern === undefined) {
           push(`toolName = "${SHELL_TOOL}"`, 'Every shell command runs without confirmation — the rule has no commandPrefix / commandRegex / argsPattern');

@@ -1,3 +1,5 @@
+import { wildcardMatch } from '../../analyzers/wildcard.js';
+
 /**
  * OpenCode config keys in both schema generations (opencode.ai/docs/config):
  *
@@ -95,8 +97,7 @@ const CATCH_ALL = /^\*+$/;
 export function actionMatches(pattern: string, action: string): boolean {
   if (CATCH_ALL.test(pattern) || pattern === action) return true;
   if (!pattern.includes('*')) return false;
-  const re = new RegExp(`^${pattern.split('*').map(s => s.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('.*')}$`);
-  return re.test(action);
+  return wildcardMatch(pattern, action);
 }
 
 export function isCatchAllResource(resource: string): boolean {
