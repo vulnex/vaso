@@ -1,4 +1,5 @@
-import { dirname, extname } from 'node:path';
+import { dirname, extname, isAbsolute, join, normalize } from 'node:path';
+import { classifySensitivePath } from '../analyzers/sensitive-paths.js';
 import { parseYamlSafe } from './yaml-safe.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { parseTomlSafe } from './toml-safe.js';
@@ -152,11 +153,48 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/**
+ * Where a file is a symlink into a sensitive location (a credential store, a
+ * shell startup file, /etc) that its own path doesn't name: the link target,
+ * else undefined. The probe never ships such content (`omitted: sensitive`,
+ * escapesToSink in probe/sensitive_sinks.go); a local scan doesn't read it
+ * either, so both report the same — and an SSH key is never parsed as a config.
+ */
+export async function linkedIntoSink(filePath: string, fs: FSProvider): Promise<string | undefined> {
+  if (fs.kind === 'snapshot' || typeof fs.readlink !== 'function') return undefined;
+  let raw: string;
+  try {
+    raw = await fs.readlink(filePath);
+  } catch {
+    return undefined; // not a symlink
+  }
+  const named = new Set(classifySensitivePath(filePath));
+  const written = isAbsolute(raw) ? normalize(raw) : join(dirname(filePath), raw);
+  const targets = [written];
+  try {
+    targets.push(await fs.realpath(filePath));
+  } catch {
+    // the target as written is enough
+  }
+  return targets.some(t => classifySensitivePath(t).some(label => !named.has(label))) ? written : undefined;
+}
+
+/** The error a read of such a file fails with (shaped like a snapshot's omitted content). */
+export function sinkLinkError(filePath: string, target: string): Error & { omitted: 'sensitive' } {
+  return Object.assign(new Error(`not read: reached through a symlink into a credential store (${target}): ${filePath}`), { omitted: 'sensitive' as const });
+}
+
 export async function loadConfig(filePath: string, fs?: FSProvider): Promise<ParsedConfig> {
   const provider = fs ?? new LocalFSProvider();
 
   let raw: string;
   let bom = false;
+  const sink = await linkedIntoSink(filePath, provider);
+  if (sink) {
+    const error = sinkLinkError(filePath, sink);
+    recordLoadError({ filePath, stage: 'read', message: error.message });
+    throw error;
+  }
   try {
     // Editors on Windows save JSON with a UTF-8 BOM; JSON.parse rejects it
     raw = await provider.readFile(filePath);
