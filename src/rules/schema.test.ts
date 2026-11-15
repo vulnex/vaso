@@ -28,6 +28,12 @@ describe('validateRuleFile: identifiers, platforms, fix paths, display text', ()
     expect(check({ id: 'F-2', fix: { set: 'server.debug', value: false } }).errors).toEqual([]);
   });
 
+  it('rejects a fix.set path with an empty segment', () => {
+    for (const set of ['model..x', '.model', 'model.', 'a. .b']) {
+      expect(check({ id: 'F-3', fix: { set, value: 1 } }).errors.some(e => e.field === 'fix.set' && /empty key segment/.test(e.message))).toBe(true);
+    }
+  });
+
   it('escapes control characters in names, descriptions and messages', () => {
     const { rules } = check({ id: 'T-1', name: 'a\u001b]0;x\u0007\nb', description: 'line1\nline2‮', fix: { guidance: 'g\u001b[2J' } });
     expect(rules[0].name).toBe('a\\x1b]0;x\\x07\\nb');
