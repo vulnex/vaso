@@ -129,6 +129,45 @@ export function uvRunScript(args: string[], base?: string): string | undefined {
   return undefined;
 }
 
+/**
+ * The module a `uv … run -m <module>` or `uv … run python -m <module>`
+ * invocation runs, and the directory it runs in (`--directory`, else the
+ * config's cwd; unknown when neither is given or the directory is relative
+ * to an unknown cwd).
+ */
+export function uvRunModule(args: string[], base?: string): { module: string; directory?: string } | undefined {
+  let directory: string | undefined = base;
+  let afterRun = false;
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    let dir: string | undefined;
+    if (arg === '--directory' || arg === '--project') dir = args[++i] ?? '';
+    else if (arg.startsWith('--directory=')) dir = arg.slice('--directory='.length);
+    if (dir !== undefined) {
+      directory = base ? resolve(base, dir) : isAbsolute(dir) ? resolve(dir) : undefined;
+      continue;
+    }
+    if (UV_VALUE_FLAGS.has(arg)) { i++; continue; }
+    if (afterRun && (arg === '-m' || arg === '--module')) {
+      const module = args[i + 1];
+      return module && !module.startsWith('-') ? { module, ...(directory ? { directory } : {}) } : undefined;
+    }
+    if (arg.startsWith('-')) continue;
+    if (!afterRun) {
+      if (arg !== 'run') return undefined;
+      afterRun = true;
+      continue;
+    }
+    // `uv run python -m mod`
+    if (PYTHON_INTERPRETER.test(basename(arg))) {
+      const run = pythonRun(args.slice(i + 1));
+      return run.module ? { module: run.module, ...(directory ? { directory } : {}) } : undefined;
+    }
+    return undefined;
+  }
+  return undefined;
+}
+
 /** Python's boolean single-letter options, combinable (`-uB`, `-Ic`). */
 const PYTHON_BOOL_LETTERS = 'bBdEhiIOPqsSuvVx';
 const PYTHON_COMBINED = new RegExp(`^-[${PYTHON_BOOL_LETTERS}]*([cm])(.*)$`);
@@ -417,7 +456,9 @@ export function launchTarget(server: MCPServerEntry): LaunchTarget {
       const remote = uvRunRemote(args);
       if (remote) return { preloads: [], note: `runs a remote script (${remote})` };
       const script = uvRunScript(args, base);
-      return script ? { entry: script, preloads: [] } : none;
+      if (script) return { entry: script, preloads: [] };
+      const module = uvRunModule(args, base);
+      return module ? { preloads: [], module: module.module, ...(module.directory ? { moduleBase: module.directory } : {}) } : none;
     }
   }
 
@@ -748,11 +789,50 @@ async function packageScriptEntry(
   return scriptLineEntry(dir, script, read.line, fs, depth);
 }
 
+/**
+ * The commands of a script longer than the cap: those wholly inside it, and
+ * the one it cuts without its last (possibly cut) word — `node evil.js`
+ * followed by padding is still `node evil.js`.
+ */
+function cutScriptCommands(text: string): string[] {
+  const head = text.slice(0, MAX_SCRIPT_CHARS);
+  const commands = scriptCommands(head);
+  const last = commands.pop();
+  if (last === undefined) return commands;
+  // The cut word runs to the end of the head; a word whose quote the cut
+  // left open is cut too
+  const quoteAt = openQuoteAt(last);
+  const cutOnSpace = /\s/.test(text[MAX_SCRIPT_CHARS] ?? '') || /\s$/.test(head);
+  const kept = (quoteAt >= 0 ? last.slice(0, quoteAt).replace(/\S+$/, '') : cutOnSpace ? last : last.replace(/\S+$/, '')).trimEnd();
+  if (kept !== '') commands.push(kept);
+  return commands;
+}
+
+/** Where the quote `command` ends inside opens, or -1. */
+function openQuoteAt(command: string): number {
+  let quote = '';
+  let at = -1;
+  for (let i = 0; i < command.length; i++) {
+    const c = command[i];
+    if (quote) {
+      if (c === '\\' && quote === '"') i++;
+      else if (c === quote) quote = '';
+      continue;
+    }
+    if (c === '\\') { i++; continue; }
+    if (c === '"' || c === "'") { quote = c; at = i; }
+  }
+  return quote ? at : -1;
+}
+
 async function scriptLineEntry(dir: string, script: string, line: string, fs: FSProvider, depth: number): Promise<{ path?: string; note?: string }> {
   if (depth >= MAX_SCRIPT_DEPTH) return { note: `package script "${script}" nests other scripts too deeply` };
-  // Past the cap only the commands wholly inside it are read (the last one may be cut)
-  const capped = line.length > MAX_SCRIPT_CHARS;
-  const commands = capped ? scriptCommands(line.slice(0, MAX_SCRIPT_CHARS)).slice(0, -1) : scriptCommands(line);
+  // Past the cap only the commands wholly inside it are read; of the one the
+  // cap cuts, the words before the cut word (its program and entry, when the
+  // cut falls in later arguments or padding)
+  const text = line.trimEnd();
+  const capped = text.length > MAX_SCRIPT_CHARS;
+  const commands = capped ? cutScriptCommands(text) : scriptCommands(text);
   let note: string | undefined = capped ? `package script "${script}" is longer than ${MAX_SCRIPT_CHARS / 1024} KiB and was read only in part` : undefined;
   let fallback = false;
   for (const command of commands) {
@@ -875,6 +955,11 @@ export async function resolveServerSources(
     }
     // `python -m pkg` in a checkout runs its own copy; an installed module is not on this disk to read
     if (!localPath && target.module && target.moduleBase) localPath = await pythonModuleFile(target.module, target.moduleBase, provider);
+    if (!localPath && target.module) {
+      unanalyzed ??= target.moduleBase
+        ? `runs the installed Python module ${target.module}`
+        : `runs the Python module ${target.module} from the client's working directory, which the config does not set, or an installed copy`;
+    }
 
     let sourceCode: string | undefined;
     let entryFile: string | undefined;
@@ -927,6 +1012,19 @@ export async function resolveServerSources(
         unanalyzed ??= (await provider.stat(localPath).then((st) => st.isDirectory(), () => undefined)) === undefined
           ? `entry file ${localPath} not found`
           : `no entry file found in ${localPath}`;
+      }
+    }
+    // node loads its preloads (`-r ./setup.js`, `--import`) before it looks
+    // for the entry: with the entry missing or inline (`-e`) they still run,
+    // and are what this scan analyzes
+    if (!sourceCode && !compiledBinary && !readFailure && target.preloads.length > 0) {
+      for (const preload of target.preloads) {
+        const code = await readSourceFile(preload, provider, (message) => hidden.push({ path: preload, reason: message }));
+        if (code) {
+          sourceCode = code;
+          entryFile = preload;
+          break;
+        }
       }
     }
 
