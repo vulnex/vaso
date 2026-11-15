@@ -89,10 +89,21 @@ describe('YAML fixes', () => {
     expect(readFileSync(r, 'utf8')).toMatch(/^a:\n  b: 1 # c\n/);
   });
 
+  it('adds a missing key to a flow mapping as one more pair', async () => {
+    const src = 'gateway: {port: 1}  # flow\nargs: [ "-y" ]\n';
+    const p = file('flowadd.yaml', src);
+    const { notes } = await collectWriteNotes(() => updateYamlFile(p, 'gateway.tls.min', '1.2'));
+    expect(readFileSync(p, 'utf8')).toBe('gateway: {port: 1, tls: {min: "1.2"}}  # flow\nargs: [ "-y" ]\n');
+    expect(notes).toEqual([]);
+  });
+
   it('says so when the key can only be added by re-serializing', async () => {
-    const p = file('flow.yaml', 'gateway: {port: 1}\nargs: [ "-y" ]\n');
+    const p = file('flow.yaml', 'gateway: {}\nargs: ["-y","pkg"]\nlong: "' + 'word '.repeat(30).trim() + '"\n');
     const { notes } = await collectWriteNotes(() => updateYamlFile(p, 'gateway.bind', 'loopback'));
-    expect(parseYamlSafe(readFileSync(p, 'utf8'))).toEqual({ gateway: { port: 1, bind: 'loopback' }, args: ['-y'] });
+    expect(parseYamlSafe(readFileSync(p, 'utf8'))).toEqual({ gateway: { bind: 'loopback' }, args: ['-y', 'pkg'], long: 'word '.repeat(30).trim() });
+    // no flow padding added, no line folding
+    expect(readFileSync(p, 'utf8')).toMatch(/^args: \["-y", "pkg"\]$/m);
+    expect(readFileSync(p, 'utf8').split('\n').filter(Boolean)).toHaveLength(3);
     expect(notes).toHaveLength(1);
     expect(notes[0]).toMatch(/re-serialized to set gateway\.bind/);
   });

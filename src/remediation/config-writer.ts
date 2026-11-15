@@ -127,7 +127,7 @@ export async function updateYamlFile(filePath: string, keyPath: KeyPath, value: 
   if (edited === undefined) {
     noteWrite(`${filePath} was re-serialized to set ${keys.join('.')} (its layout didn't allow an in-place edit): values and comments are kept, spacing and line folding may differ`);
   }
-  await writeRegularFile(filePath, edited ?? doc.toString());
+  await writeRegularFile(filePath, edited ?? doc.toString({ lineWidth: 0, flowCollectionPadding: false }));
 }
 
 /**
@@ -155,9 +155,9 @@ function assertNoAliasOnPath(doc: YAML.Document, keys: string[], filePath: strin
 
 /**
  * Add a missing key as new lines at the end of the deepest existing block
- * mapping on its path, indented like that mapping's keys; undefined when that
- * isn't possible (a flow mapping, a non-mapping on the path, several
- * documents) or the result doesn't parse to `expected`.
+ * mapping on its path, indented like that mapping's keys (or as one more pair
+ * of a flow mapping `{…}`); undefined when that isn't possible (a non-mapping
+ * on the path, several documents) or the result doesn't parse to `expected`.
  */
 function insertYamlKey(content: string, keys: string[], value: unknown, expected: unknown): string | undefined {
   try {
@@ -169,11 +169,21 @@ function insertYamlKey(content: string, keys: string[], value: unknown, expected
       map = map.get(keys[depth], true);
       depth++;
     }
-    if (depth === keys.length || !YAML.isMap(map) || map.flow || map.items.length === 0) return undefined;
+    if (depth === keys.length || !YAML.isMap(map) || map.items.length === 0) return undefined;
     const first = map.items[0].key;
     const last = map.items[map.items.length - 1];
     const lastEnd = (YAML.isNode(last.value) ? last.value.range?.[1] : undefined) ?? (YAML.isNode(last.key) ? last.key.range?.[1] : undefined);
     if (!YAML.isNode(first) || !first.range || lastEnd === undefined) return undefined;
+    let sub: unknown = value;
+    for (let i = keys.length - 1; i > depth; i--) sub = { [keys[i]]: sub };
+    const check = (out: string) => (isDeepStrictEqual(YAML.parseDocument(out, { intAsBigInt: true }).toJS(), expected) ? out : undefined);
+    if (map.flow) {
+      // `{a: 1}` → `{a: 1, key: value}`, the new pair in flow style after the last one
+      const flow = { collectionStyle: 'flow', flowCollectionPadding: false, lineWidth: 0 } as const;
+      const pair = `${YAML.stringify(keys[depth], flow).trim()}: ${YAML.stringify(sub, flow).trim()}`;
+      if (pair.includes('\n')) return undefined;
+      return check(`${content.slice(0, lastEnd)}, ${pair}${content.slice(lastEnd)}`);
+    }
     const lineStart = content.lastIndexOf('\n', first.range[0] - 1) + 1;
     const indent = content.slice(lineStart, first.range[0]);
     if (!/^ *$/.test(indent)) return undefined; // a key not at the start of its line (`- key:` in a sequence)
@@ -187,12 +197,9 @@ function insertYamlKey(content: string, keys: string[], value: unknown, expected
       const nl = content.indexOf('\n', lastEnd);
       if (nl === -1) { at = content.length; prefix = eol; } else at = nl + 1;
     }
-    let sub: unknown = value;
-    for (let i = keys.length - 1; i > depth; i--) sub = { [keys[i]]: sub };
     const text = YAML.stringify({ [keys[depth]]: sub }, { lineWidth: 0, indent: indentStep(content, docs[0].contents) })
       .replace(/\n$/, '').split('\n').map(l => indent + l + eol).join('');
-    const out = content.slice(0, at) + prefix + text + content.slice(at);
-    if (isDeepStrictEqual(YAML.parseDocument(out, { intAsBigInt: true }).toJS(), expected)) return out;
+    return check(content.slice(0, at) + prefix + text + content.slice(at));
   } catch {
     // fall back to re-serializing the document
   }
