@@ -82,8 +82,19 @@ describe('MCP off lists', () => {
   it('Qwen Code: an allowed name or glob with an astral character keeps its server on', async () => {
     const exact = await servers({ [`${HOME}/.qwen/settings.json`]: { mcp: { allowed: ['srv-😀', 'gh'] }, mcpServers: { 'srv-😀': U, gh: U, other: U } } });
     expect(exact).toEqual({ 'qwen-code:srv-😀': false, 'qwen-code:gh': false, 'qwen-code:other': true });
-    const glob = await servers({ [`${HOME}/.qwen/settings.json`]: { mcp: { allowed: ['*😀*', 'srv-?x'] }, mcpServers: { 'srv-😀': U, 'srv-😁x': U, other: U } } });
+    const glob = await servers({ [`${HOME}/.qwen/settings.json`]: { mcp: { allowed: ['*😀*', 'srv-??x'] }, mcpServers: { 'srv-😀': U, 'srv-😁x': U, other: U } } });
     expect(glob).toEqual({ 'qwen-code:srv-😀': false, 'qwen-code:srv-😁x': false, 'qwen-code:other': true });
+  });
+
+  it("Qwen Code: `?` is one UTF-16 code unit, as in Qwen's matcher (an emoji takes two)", async () => {
+    const qq = await servers({ [`${HOME}/.qwen/settings.json`]: { mcp: { allowed: ['srv-??', 'gh'] }, mcpServers: { 'srv-😀': U, gh: U } } });
+    expect(qq['qwen-code:srv-😀']).toBe(false);
+    const q1 = await servers({ [`${HOME}/.qwen/settings.json`]: { mcp: { allowed: ['srv-?', 'gh'] }, mcpServers: { 'srv-😀': U, gh: U } } });
+    expect(q1['qwen-code:srv-😀']).toBe(true);
+    const ex1 = await servers({ [`${HOME}/.qwen/settings.json`]: { mcp: { excluded: ['srv-?'] }, mcpServers: { 'srv-😀': U } } });
+    expect(ex1['qwen-code:srv-😀']).toBe(false);
+    const ex2 = await servers({ [`${HOME}/.qwen/settings.json`]: { mcp: { excluded: ['srv-??'] }, mcpServers: { 'srv-😀': U } } });
+    expect(ex2['qwen-code:srv-😀']).toBe(true);
   });
 
   it('leaves servers alone without any list', async () => {

@@ -76,6 +76,20 @@ describe('wildcardMatch', () => {
     expect(wildcardMatch('😀*', '😀', { ignoreCase: true })).toBe(true);
   });
 
+  it("reads by UTF-16 code unit when asked (Qwen's matcher, OpenCode's RegExp `.`)", () => {
+    const u = { question: true, unit: 'utf16' as const };
+    // a literal equal to the name still matches
+    expect(wildcardMatch('srv-😀', 'srv-😀', u)).toBe(true);
+    expect(wildcardMatch('srv-😀', 'srv-😁', u)).toBe(false);
+    expect(wildcardMatch('srv-*', 'srv-😀', u)).toBe(true);
+    // `?` is one unit: an emoji takes two
+    expect(wildcardMatch('srv-??', 'srv-😀', u)).toBe(true);
+    expect(wildcardMatch('srv-?', 'srv-😀', u)).toBe(false);
+    expect(wildcardMatch('?', '𝒳', u)).toBe(false);
+    expect(wildcardMatch('??', '𝒳', u)).toBe(true);
+    expect(wildcardMatch('a?c', 'abc', u)).toBe(true);
+  });
+
   it('stays fast on many stars', () => {
     const start = Date.now();
     expect(wildcardMatch(`${'a*'.repeat(30)}b`, 'a'.repeat(5000))).toBe(false);
