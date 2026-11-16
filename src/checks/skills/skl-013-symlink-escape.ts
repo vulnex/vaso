@@ -4,6 +4,7 @@ import { defineCheck } from '../../core/check-builder.js';
 import { getAllSkillsDirs, relEscapes } from '../../core/utils.js';
 import { classifySensitivePath } from '../../analyzers/sensitive-paths.js';
 import { noSkillsDirResult } from './skill-files.js';
+import { linkScope } from '../../core/skill-root-scope.js';
 
 /**
  * SKL-013 — Workspace Symlink Escape (GhostApproval / CWE-61 + CWE-451).
@@ -44,6 +45,8 @@ interface SymlinkFinding {
   sensitiveLabels: string[];
   /** A whole skill linked into an installed agent's skills dir (`skills/x → ~/checkout/x`). */
   skillInstall: boolean;
+  /** Linked to where no skills tree is walked: its code is not scanned (SKL-002). */
+  unscanned?: boolean;
 }
 
 function resolveTarget(rawTarget: string, linkDir: string, home: string): string {
@@ -86,6 +89,11 @@ export const skl013 = defineCheck({
 
     for (const dir of dirs) {
       const root = resolve(dir);
+      const inScope = await linkScope(ctx.fs, dir);
+      // A relative target is resolved where the link really is (its folder
+      // may lie behind a link), and judged against the tree's either spelling
+      const realOf = (p: string) => ctx.fs.realpath(p).catch(() => p);
+      const rootReal = await realOf(root);
       let entries;
       try {
         entries = await ctx.fs.readdirEntries(dir, { recursive: true });
@@ -106,8 +114,9 @@ export const skl013 = defineCheck({
           continue;
         }
 
-        const resolvedTarget = resolveTarget(rawTarget, dirname(linkPath), ctx.fs.homedir());
-        if (!escapesRoot(root, resolvedTarget)) continue; // link stays inside the workspace — benign
+        const resolvedTarget = resolveTarget(rawTarget, await realOf(dirname(linkPath)), ctx.fs.homedir());
+        // link stays inside the workspace — benign
+        if (!escapesRoot(root, resolvedTarget) || !escapesRoot(rootReal, resolvedTarget)) continue;
 
         const sensitiveLabels = [
           ...new Set([
@@ -120,7 +129,8 @@ export const skl013 = defineCheck({
         // workspace file in disguise. `vaso skill audit` keeps judging it.
         const skillInstall = ctx.installation.agent !== 'skill-audit' && sensitiveLabels.length === 0 &&
           resolve(dirname(linkPath)) === root && await isDirectory(ctx.fs, linkPath);
-        findings.push({ linkPath, rawTarget, resolvedTarget, sensitiveLabels, skillInstall });
+        const unscanned = skillInstall && !(await inScope(linkPath));
+        findings.push({ linkPath, rawTarget, resolvedTarget, sensitiveLabels, skillInstall, unscanned });
       }
     }
 
@@ -134,6 +144,8 @@ export const skl013 = defineCheck({
       snippet: `${f.linkPath} → ${f.rawTarget}`,
       detail: f.sensitiveLabels.length > 0
         ? `Symlink resolves outside the workspace to ${f.sensitiveLabels.join(', ')} (${f.resolvedTarget}). An agent instructed to edit this "local" file writes to the sensitive target instead — GhostApproval-style informed-consent bypass.`
+        : f.unscanned
+          ? `Skill installed as a link to ${f.resolvedTarget} — a place no skills tree is walked, so its code is not scanned (see SKL-002); edits to it change what is there.`
         : f.skillInstall
           ? `Skill installed as a link to ${f.resolvedTarget} — its code is scanned there; edits to it change the source checkout.`
           : `Symlink resolves outside the workspace to ${f.resolvedTarget}. A write the user believes is workspace-local lands outside the project.`,

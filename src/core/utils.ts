@@ -129,6 +129,9 @@ export interface SkillTreeListing {
   unlistable: string[];
   /** Why `dir` itself couldn't be listed (ENOENT when it doesn't exist). */
   error?: NodeJS.ErrnoException;
+  /** Links in the tree the walk did not follow for where they lead (an OS
+   *  directory, another user's home, the home itself — linkScope). */
+  refusedLinks: string[];
 }
 
 export async function listSkillTree(dir: string, fs?: FSProvider): Promise<SkillTreeListing> {
@@ -136,9 +139,10 @@ export async function listSkillTree(dir: string, fs?: FSProvider): Promise<Skill
   const files: string[] = [];
   let entries: DirentInfo[] = [];
   let error: NodeJS.ErrnoException | undefined;
+  const refusedLinks: string[] = [];
   try {
     // Follows symlinked skills that point outside the tree (walkSkillTree)
-    entries = await walkSkillTree(provider, dir);
+    entries = await walkSkillTree(provider, dir, refusedLinks);
     for (const entry of entries) {
       if (!entry.isFile) continue;
       if (isExcludedPath(dir, entry.parentPath, { keepBuildOutput: true })) continue;
@@ -163,7 +167,7 @@ export async function listSkillTree(dir: string, fs?: FSProvider): Promise<Skill
     const skillMd = join(skillDir, 'SKILL.md');
     if (!files.includes(skillMd) && await provider.access(skillMd)) files.push(skillMd);
   }
-  return { entries, files, unlistable, ...(error ? { error } : {}) };
+  return { entries, files, unlistable, refusedLinks, ...(error ? { error } : {}) };
 }
 
 /**

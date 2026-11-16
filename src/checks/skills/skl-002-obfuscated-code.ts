@@ -145,7 +145,7 @@ export const skl002 = defineCheck({
     for (const root of unscannedRoots) {
       if (await unscannedRootMissing(ctx.fs, root)) {
         missingRoots.push(root);
-        evidence.push({ file: root.path, detail: `not scanned: skills directory ${root.path} (${unscannedShort(root)}) does not exist — nothing to scan`, mitigated: true });
+        evidence.push({ file: root.path, detail: `not scanned: ${root.skillLink ? 'skill' : 'skills directory'} ${root.path} (${unscannedShort(root)}) does not exist as a directory — nothing to scan`, mitigated: true });
       } else {
         evidence.push({ file: root.path, detail: unscannedReason(root.reason, root.path, root) });
       }
@@ -153,7 +153,7 @@ export const skl002 = defineCheck({
 
     await markTestCode(evidence, ctx.installation, ctx.fs);
     const notScanned = evidence.filter(e => e.line === undefined).length;
-    const rootNote = unscannedRoots.map(u => `skills directory ${u.path} not scanned (${unscannedShort(u)}${missingRoots.includes(u) ? '; does not exist' : ''})`);
+    const rootNote = unscannedRoots.map(u => `${u.skillLink ? 'skill' : 'skills directory'} ${u.path} not scanned (${unscannedShort(u)}${missingRoots.includes(u) ? '; no such directory' : ''})`);
     return h.fromEvidence(evidence, {
       passed: 'No obfuscated code blocks detected',
       failed: (n) => {
@@ -180,5 +180,11 @@ async function unscannedRootMissing(fs: FSProvider, root: UnscannedSkillsDir): P
   if (fs.kind === 'snapshot' && configTreeStatus(fs, root.path) === undefined && configTreeGap(fs, root.path) === undefined) return false;
   // a snapshot keys paths normalized (`~/./a/../x` is `~/x` there)
   const at = fs.kind === 'snapshot' && isAbsolute(root.path) ? posix.normalize(root.path) : root.path;
-  return !(await fs.access(at).catch(() => false));
+  // a link to /dev/null is no more a skills directory than a missing one
+  return !(await isDirectory(fs, at));
+}
+
+/** `path` is a directory (a snapshot knows it for a tree the probe judged). */
+export async function isDirectory(fs: FSProvider, path: string): Promise<boolean> {
+  return fs.stat(path).then(st => st.isDirectory(), () => false);
 }
