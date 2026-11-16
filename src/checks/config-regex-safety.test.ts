@@ -2,7 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { compilePyFullmatch, isCatchAllPattern, judgeAllowPattern } from './nanobot/nb-004-exec-tool-filter.js';
 import { compileGoRegex } from './picoclaw/shared.js';
 import { judgeCustomAllow } from './picoclaw/pcl-002-exec-guard.js';
-import { regexBudget, runSamples, testSamples } from '../analyzers/bounded-regex.js';
+import { regexBudget, runSampleBatch, runSamples, testSamples } from '../analyzers/bounded-regex.js';
+import { unjudgedEvidence } from '../analyzers/foreign-regex.js';
 import type { AgentInstallation, ParsedConfig, ScanContext } from '../core/types.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { nb004 } from './nanobot/nb-004-exec-tool-filter.js';
@@ -77,15 +78,16 @@ describe('regex budget and partial results', () => {
     const nb = await nb004.run(scanCtx('nanobot', { tools: { exec: { allowPatterns: patterns, sandbox: 'bwrap' } } }));
     const pc = await pcl002.run(scanCtx('picoclaw', { tools: { exec: { enabled: true, custom_allow_patterns: patterns } } }));
     const pw = await pcl007.run(scanCtx('picoclaw', { tools: { allow_write_paths: patterns } }));
-    // 1.5 s of budget per check plus screening; generous for a loaded CI host
-    expect(Date.now() - start).toBeLessThan(15_000);
+    // per check: a first pass of short slices, 1.5 s of budget, screening —
+    // a few seconds; generous for a loaded CI host
+    expect(Date.now() - start).toBeLessThan(30_000);
     for (const r of [nb, pc, pw]) {
       expect(r.passed).toBe(false);
       expect(r.severity).toBe('warning');
       expect(r.evidence!.length).toBeLessThan(20);
       expect(r.evidence!.some(e => /^\d+ patterns not evaluated: the time for judging slow patterns/.test(e.detail ?? ''))).toBe(true);
     }
-  }, 30_000);
+  }, 60_000);
 
   it('PCL-007 keeps a sensitive path matched before a later target timed out', async () => {
     const r = await pcl007.run(scanCtx('picoclaw', { tools: { allow_write_paths: ['.*/\\.ssh/.*|(?:(.|.)*Q)'] } }));
@@ -104,11 +106,51 @@ describe('regex budget and partial results', () => {
       const w = await pcl007.run(scanCtx('picoclaw', { tools: { allow_write_paths: [p] } }));
       expect(w.severity, p).toBe('critical');
     }
-    const u = await pcl002.run(scanCtx('picoclaw', { tools: { exec: { enabled: true, custom_allow_patterns: ['\\pL*.*'] } } }));
+    const u = await pcl002.run(scanCtx('picoclaw', { tools: { exec: { enabled: true, custom_allow_patterns: ['(?i)\\pL*.*'] } } }));
     expect(u.severity).toBe('warning');
     expect(u.evidence![0].detail).toContain('VASO cannot translate its regex syntax');
     // Go rejects it: PicoClaw allows nothing through it
     const bad = await pcl002.run(scanCtx('picoclaw', { tools: { exec: { enabled: true, custom_allow_patterns: ['(?=.*).*'] } } }));
     expect(bad.passed).toBe(true);
   });
+
+  it('slow patterns listed first cannot keep a later catch-all from being judged', async () => {
+    // each decoy runs out of time on the samples; together they outlast the budget
+    const NB_DECOY = '(?:(.|.)*Z|rm -rf /|shutdown -h now|cat ~/\\.ssh/id_rsa|mkfs\\.ext4 /dev/sda1|dd if=/dev/zero of=/dev/sda)';
+    const PC_DECOY = '(?:(.|.)*Z|rm|cat|curl)';
+    const nb = await nb004.run(scanCtx('nanobot', { tools: { exec: { allowPatterns: [...Array(12).fill(NB_DECOY), '(.+)+'], sandbox: 'bwrap' } } }));
+    expect(nb.severity).toBe('critical');
+    const pc = await pcl002.run(scanCtx('picoclaw', { tools: { exec: { enabled: true, custom_allow_patterns: [...Array(12).fill(PC_DECOY), '(.|\\s)*'] } } }));
+    expect(pc.severity).toBe('critical');
+    const pw = await pcl007.run(scanCtx('picoclaw', { tools: { allow_write_paths: [...Array(12).fill('(?:(.|.)*Z|zzz)'), '.*.*.*'] } }));
+    expect(pw.severity).toBe('critical');
+    // slow read patterns don't use up the time a write catch-all needs
+    const mixed = await pcl007.run(scanCtx('picoclaw', { tools: {
+      allow_read_paths: Array(12).fill('(?:(.|.)*Z|zzz)'),
+      allow_write_paths: ['(?:(.|.)*Z|zzz)', '(.+)+'],
+    } }));
+    expect(mixed.severity).toBe('critical');
+    expect(mixed.evidence!.some(e => e.snippet.startsWith('tools.allow_write_paths') && e.detail!.startsWith('Lets the agent write'))).toBe(true);
+  }, 60_000);
+
+  it('the second pass gets what the first pass left undecided', () => {
+    const budget = regexBudget(500);
+    // a linear pattern needing more than the first slice is still decided
+    const [run] = runSampleBatch([{ re: /^(a|b)*c$/, samples: ['ab'.repeat(200) + 'c'] }], { budget, firstPassMs: 0.001 });
+    expect(run.complete).toBe(true);
+    expect(run.hits).toEqual([true]);
+  });
+
+  it('NB-004 judges allow patterns as written (Nanobot does not strip them)', async () => {
+    const r = await nb004.run(scanCtx('nanobot', { tools: { exec: { allowPatterns: [' .*'], sandbox: 'bwrap' } } }));
+    expect(r.passed).toBe(true);
+    expect(judgeAllowPattern('.* ')).toBeUndefined();
+  });
+
+  it('one unjudged pattern is described in the singular', () => {
+    expect(unjudgedEvidence('f', 'k', ['x'], 'exempts dangerous commands').detail).toContain('whether it exempts dangerous commands is unknown — review it');
+    expect(unjudgedEvidence('f', 'k', ['x', 'y'], 'exempts dangerous commands').detail).toContain('2 patterns not evaluated');
+    expect(unjudgedEvidence('f', 'k', ['x', 'y'], 'exempts dangerous commands').detail).toContain('whether any of them exempts dangerous commands is unknown — review them');
+  });
 });
+

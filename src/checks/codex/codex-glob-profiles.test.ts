@@ -93,6 +93,24 @@ describe('CDX-002 permission-profile globs', () => {
     ]));
     expect(prof.passed).toBe(true);
   });
+
+  it('strips one trailing /** as Codex does, and rejects read globs too', async () => {
+    for (const glob of ['~/**/**', '~/.ssh/**/**']) {
+      const r = await check('CDX-002').run(ctx([cfg(MAIN, profile({ [glob]: 'write' }))]));
+      expect(r.severity, glob).toBe('info');
+    }
+    const read = await check('CDX-002').run(ctx([cfg(MAIN, profile({ '~/.s*': 'read' }))]));
+    expect(read.passed).toBe(false);
+    expect(read.severity).toBe('info');
+    expect(read.evidence?.[0].snippet).toContain('"~/.s*" = "read"');
+  });
+
+  it('judges no other grant of a profile Codex fails to load', async () => {
+    const r = await check('CDX-002').run(ctx([cfg(MAIN, profile({ '~/.s*': 'write', '/': 'write' }))]));
+    expect(r.severity).toBe('info');
+    expect(r.evidence).toHaveLength(1);
+    expect(r.evidence?.[0].snippet).toContain('~/.s*');
+  });
 });
 
 describe('CDX-008 profile files layered over config.toml', () => {

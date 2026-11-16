@@ -1,7 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { regexBudget, type RegexBudget } from '../../analyzers/bounded-regex.js';
-import { compileForeignRegex, judgeCatchAll, notEvaluatedDetail, unjudgedEvidence, type NotEvaluated } from '../../analyzers/foreign-regex.js';
+import { compileForeignRegex, judgeCatchAlls, notEvaluatedDetail, unjudgedEvidence, type NotEvaluated } from '../../analyzers/foreign-regex.js';
 import { asRecord, asStringArray, getPath, nanobotConfigs, pick, pyBool } from './shared.js';
 
 // allowPatterns are re.fullmatch()ed against each shell segment and take
@@ -28,13 +28,19 @@ export function compilePyFullmatch(pattern: string): RegExp | undefined {
 }
 
 /**
- * `catch-all` for an allow pattern that fullmatches every sample dangerous
+ * Per allow pattern: `catch-all` when it fullmatches every sample dangerous
  * command, why it is not evaluated (timeout, the check's regex budget spent,
  * syntax VASO can't run), undefined otherwise — a pattern Python rejects
- * included (Nanobot raises on it and allows nothing).
+ * included (Nanobot raises on it and allows nothing). Patterns are used as
+ * written: Nanobot doesn't strip them.
  */
+export function judgeAllowPatterns(patterns: readonly string[], budget?: RegexBudget): Array<'catch-all' | NotEvaluated | undefined> {
+  return judgeCatchAlls(patterns, 'python', DANGEROUS_SAMPLES, { fullmatch: true, budget });
+}
+
+/** `judgeAllowPatterns` for one pattern. */
 export function judgeAllowPattern(pattern: string, budget?: RegexBudget): 'catch-all' | NotEvaluated | undefined {
-  return judgeCatchAll(pattern.trim(), 'python', DANGEROUS_SAMPLES, { fullmatch: true, budget });
+  return judgeAllowPatterns([pattern], budget)[0];
 }
 
 /** An allow pattern that fullmatches every sample dangerous command. */
@@ -69,8 +75,10 @@ export const nb004 = defineCheck({
       if (pyBool(exec?.enable) === false) continue;
 
       const unjudged: string[] = [];
-      for (const pattern of asStringArray(pick(exec, 'allowPatterns'))) {
-        const verdict = judgeAllowPattern(pattern, budget);
+      const patterns = asStringArray(pick(exec, 'allowPatterns'));
+      const verdicts = judgeAllowPatterns(patterns, budget);
+      for (const [k, pattern] of patterns.entries()) {
+        const verdict = verdicts[k];
         if (verdict === 'budget') {
           unjudged.push(pattern);
           continue;
@@ -92,7 +100,7 @@ export const nb004 = defineCheck({
         });
       }
       if (unjudged.length > 0) {
-        evidence.push(unjudgedEvidence(config.filePath, 'tools.exec.allowPatterns', unjudged, 'exempt dangerous commands from the deny list'));
+        evidence.push(unjudgedEvidence(config.filePath, 'tools.exec.allowPatterns', unjudged, 'exempts dangerous commands from the deny list'));
       }
 
       const sandbox = pick(exec, 'sandbox');
