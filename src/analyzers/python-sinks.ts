@@ -442,12 +442,28 @@ function aliasRewriter(code: string): (text: string, line?: number) => string {
     }
   }
   // The call alias of a name on a line: the innermost body importing it there, else the file-wide one
+  // by first line, so the innermost body around a line is the nearest one before it that contains it
+  // (with the furthest last line of each prefix: the walk back stops where nothing earlier reaches the line)
+  const reach = new Map<string, number[]>();
+  for (const [name, list] of scopedCalls) {
+    list.sort((a, b) => a[0] - b[0]);
+    let far = 0;
+    reach.set(name, list.map((r) => (far = Math.max(far, r[1]))));
+  }
   const callAt = (name: string, line: number | undefined): { target: string; extra?: string } | undefined => {
     const scoped = line === undefined ? undefined : scopedCalls.get(name);
     if (scoped) {
-      let best: [number, number, string] | undefined;
-      for (const r of scoped) if (r[0] <= line! && line! <= r[1] && (!best || r[0] >= best[0])) best = r;
-      if (best) return { target: best[2] };
+      const far = reach.get(name)!;
+      let lo = 0;
+      let hi = scoped.length - 1;
+      while (lo < hi) {
+        const mid = (lo + hi + 1) >> 1;
+        if (scoped[mid][0] <= line!) lo = mid;
+        else hi = mid - 1;
+      }
+      for (let k = lo; k >= 0 && far[k] >= line!; k--) {
+        if (scoped[k][0] <= line! && line! <= scoped[k][1]) return { target: scoped[k][2] };
+      }
     }
     return callAliases.get(name);
   };

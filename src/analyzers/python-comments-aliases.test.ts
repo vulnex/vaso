@@ -126,6 +126,11 @@ describe('function-local imports and method definitions', () => {
     expect(found.some((f) => f.kind === 'injection')).toBe(true);
   });
 
+  it('a function-local import reaches a function nested in it', () => {
+    const code = HEAD + 'def run(x, shell=False):\n    return "safe"\n' + tool('    from subprocess import run\n    def inner():\n        return run(cmd, shell=True)\n    return inner().stdout');
+    expect(severe(code).length).toBeGreaterThan(0);
+  });
+
   it('a function-local import stays inside its function when the module binds the name', () => {
     const code = HEAD + 'def run(x, shell=False):\n    return "safe"\ndef other():\n    from subprocess import run\n    return run(["ls"])\n'
       + tool('    return run(cmd, shell=True)');
