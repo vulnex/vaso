@@ -45,6 +45,39 @@ describe('vaso rules validate (dt17)', () => {
     }
   });
 
+  it('prints no YAML warning quoting the file (an unresolved tag)', async () => {
+    const file = join(mkdtempSync(join(tmpdir(), 'vaso-rules-')), 'r.yml');
+    writeFileSync(file, 'rules:\n  - id: ORG-1\n    password: !secret sk-ant-api03-TagPlantedQq77\n');
+    const out: string[] = [];
+    const sink = (...a: unknown[]) => { out.push(a.map(String).join(' ')); };
+    vi.spyOn(console, 'log').mockImplementation(sink);
+    vi.spyOn(console, 'error').mockImplementation(sink);
+    vi.spyOn(console, 'warn').mockImplementation(sink);
+    vi.spyOn(process, 'emitWarning').mockImplementation(sink as never);
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation((c: unknown) => { out.push(String(c)); return true; });
+    for (const format of ['json', undefined]) await runRulesValidate(file, { format });
+    stderr.mockRestore();
+    expect(out.join('\n')).not.toContain('TagPlanted');
+    expect(out.join('\n')).not.toMatch(/Unresolved tag/);
+  });
+
+  it('judges a duplicate key as vaso scan --rules does: same verdict, same message', async () => {
+    const { loadRules } = await import('../rules/index.js');
+    const dir = mkdtempSync(join(tmpdir(), 'vaso-rules-'));
+    const file = join(dir, 'r.yml');
+    writeFileSync(file, `rules:\n  - id: ORG-1\n    id: ORG-DupPlanted9\n${rule('ORG-2').replace(/^ {2}- id: ORG-2\n/, '')}`);
+    const out: string[] = [];
+    vi.spyOn(console, 'log').mockImplementation((...a: unknown[]) => { out.push(a.join(' ')); });
+    await runRulesValidate(file, { format: 'json' });
+    const report = JSON.parse(out.join('\n'));
+    expect(report.valid).toBe(false);
+    expect(process.exitCode).toBe(1);
+    const loaded = await loadRules({ extraPaths: [file], skipGlobal: true, skipProject: true });
+    const scanErrors = loaded.allErrors.filter(e => e.file === file).map(e => e.message);
+    expect(scanErrors).toEqual(report.errors.map((e: { message: string }) => e.message));
+    expect(scanErrors[0]).toMatch(/^Invalid YAML syntax: .*duplicate key at line 3/);
+  });
+
   it('escapes control characters in the path it prints', async () => {
     const dir = join(mkdtempSync(join(tmpdir(), 'vaso-rules-')), 'p\x1b]0;PWN\x07\u202eX');
     mkdirSync(dir);

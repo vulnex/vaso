@@ -3,11 +3,9 @@ import { randomBytes } from 'node:crypto';
 import { join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import chalk from 'chalk';
-import { loadRules, validateRuleFile, type DeclarativeRule } from '../rules/index.js';
+import { loadRules, parseRuleYaml, ruleYamlError, validateRuleFile, type DeclarativeRule } from '../rules/index.js';
 import { checkRegistry } from '../core/check-registry.js';
 import { readInputFile, INPUT_LIMITS } from '../core/input-file.js';
-import YAML from 'yaml';
-import { parseErrorMessage } from '../core/parse-error.js';
 import { escapeControlChars, escapeJsonUnsafe } from '../reporting/text-safety.js';
 
 /** A file name or rule text on one terminal line (names come from directory listings). */
@@ -117,16 +115,15 @@ export async function runRulesValidate(filePath: string, options: RulesValidateO
 
   let data: unknown;
   try {
-    data = YAML.parse(content);
+    data = parseRuleYaml(content);
   } catch (err) {
     process.exitCode = 1;
-    const message = parseErrorMessage(err);
+    const message = ruleYamlError(err);
     if (options.format === 'json') {
-      console.log(escapeJsonUnsafe(JSON.stringify({ valid: false, rules: 0, errors: [{ message: `Invalid YAML syntax: ${message}` }] }, null, 2)));
+      console.log(escapeJsonUnsafe(JSON.stringify({ valid: false, rules: 0, errors: [{ message }] }, null, 2)));
       return;
     }
-    console.error(chalk.red(`  Error: Invalid YAML syntax`));
-    console.error(chalk.red(`  ${show(message)}\n`));
+    console.error(chalk.red(`  Error: ${show(message)}\n`));
     return;
   }
 

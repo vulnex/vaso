@@ -3,6 +3,7 @@ import { lstat, realpath, stat } from 'node:fs/promises';
 import { validateRuleFile, type DeclarativeRule, type ValidationError } from './schema.js';
 import { pathExists } from '../core/utils.js';
 import { parseYamlSafe } from '../core/yaml-safe.js';
+import { parseErrorMessage } from '../core/parse-error.js';
 import { INPUT_LIMITS } from '../core/input-file.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
@@ -91,17 +92,29 @@ async function parseRuleFile(filePath: string, source: RuleSource, fs: FSProvide
       unreadable: true,
     };
   }
+  let data: unknown;
   try {
-    const { rules, errors } = validateRuleFile(parseYamlSafe(content));
-    return { filePath, source, rules, errors };
+    data = parseRuleYaml(content);
   } catch (err) {
-    return {
-      filePath,
-      source,
-      rules: [],
-      errors: [{ message: `Failed to parse: ${err instanceof Error ? err.message : String(err)}` }],
-    };
+    return { filePath, source, rules: [], errors: [{ message: ruleYamlError(err) }] };
   }
+  const { rules, errors } = validateRuleFile(data);
+  return { filePath, source, rules, errors };
+}
+
+/**
+ * A rule file's YAML, read the same way by `vaso scan --rules` and `vaso rules
+ * validate`: a key repeated in one mapping is an error (a rule with two `id:`
+ * lines is a mistake, not a choice), and yaml's warnings — which quote the
+ * file's lines — are never printed.
+ */
+export function parseRuleYaml(content: string): unknown {
+  return parseYamlSafe(content, { duplicateKeys: 'reject' });
+}
+
+/** Why a rule file isn't valid YAML: the parser's description and position, no file text. */
+export function ruleYamlError(err: unknown): string {
+  return `Invalid YAML syntax: ${parseErrorMessage(err)}`;
 }
 
 /** One absolute project path per line; `#` starts a comment. */
