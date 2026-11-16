@@ -3,6 +3,7 @@ import type { AgentInstallation, AgentType } from '../core/types.js';
 import { captureConfigLoadErrors, type ConfigLoadError } from '../core/config-loader.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { screenDefaultSkillRoots } from './default-skill-roots.js';
+import { parseErrorMessage } from '../core/parse-error.js';
 
 export interface AdapterDetectionError {
   agent: AgentType;
@@ -83,7 +84,8 @@ export class AdapterRegistry {
         errors.push({
           agent: adapter.agent,
           displayName: adapter.displayName,
-          message: result.reason instanceof Error ? result.reason.message : String(result.reason),
+          // a parser's code frame would quote the config's lines
+          message: parseErrorMessage(result.reason),
         });
       }
     }

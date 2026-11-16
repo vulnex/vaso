@@ -19,6 +19,7 @@ import { describeFetchFailure } from '../mcp/package-fetcher.js';
 import { extractToolDefinitions } from '../mcp/tool-baseline.js';
 import { credentialPathsFor } from '../adapters/adapter.js';
 import { captureConfigLoadErrors } from './config-loader.js';
+import { parseErrorMessage } from './parse-error.js';
 
 /** How long one check may run before it is reported as errored (default 5 min). */
 export const DEFAULT_CHECK_TIMEOUT_MS = 300_000;
@@ -136,7 +137,7 @@ function erroredResult(check: Pick<CheckModule, 'id' | 'name' | 'category'>, rea
     severity: 'warning',
     passed: false,
     errored: true,
-    message: `Check errored and was not completed: ${reason instanceof Error ? reason.message : String(reason)}`,
+    message: `Check errored and was not completed: ${parseErrorMessage(reason)}`,
   };
 }
 
@@ -398,7 +399,7 @@ export class ScanEngine {
       severity: 'warning',
       passed: false,
       errored: true,
-      message: `The scan of this installation failed and its checks were not completed: ${reason instanceof Error ? reason.message : String(reason)}`,
+      message: `The scan of this installation failed and its checks were not completed: ${parseErrorMessage(reason)}`,
     };
     const score = computeScore([result]);
     return { agent: installation.agent, version: installation.version, installation, results: [result], score, grade: scoreToGrade(score) };
@@ -412,7 +413,7 @@ export class ScanEngine {
       severity: 'warning' as const,
       passed: false,
       errored: true,
-      message: `Adapter detection failed: ${error.message}`,
+      message: `Adapter detection failed: ${parseErrorMessage(error.message)}`,
     };
     const score = computeScore([result]);
 

@@ -1,4 +1,5 @@
 import { parse } from 'smol-toml';
+import { scrubParseError } from './parse-error.js';
 
 /**
  * Parse TOML from a scanned file. TOML integers are 64-bit, so a valid
@@ -10,7 +11,14 @@ import { parse } from 'smol-toml';
  * text, so a fix never rewrites such a value.
  */
 export function parseTomlSafe(raw: string): Record<string, unknown> {
-  return toNumbers(parse(raw, { integersAsBigInt: 'asNeeded' })) as Record<string, unknown>;
+  let data: unknown;
+  try {
+    data = parse(raw, { integersAsBigInt: 'asNeeded' });
+  } catch (err) {
+    // smol-toml's message (and `codeblock`) quote the lines around the error
+    throw scrubParseError(err);
+  }
+  return toNumbers(data) as Record<string, unknown>;
 }
 
 function toNumbers(value: unknown): unknown {

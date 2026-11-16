@@ -1,4 +1,5 @@
 import { parseJson5 } from './json5.js';
+import { scrubParseError } from './parse-error.js';
 /**
  * Strip JSONC comments (// ..., /* ... *\/) and trailing commas from a string,
  * preserving string contents. Used by adapters whose configs are JSON-with-
@@ -68,7 +69,8 @@ export function parseJsonLenient(raw: string): unknown {
       try {
         return parseJson5(raw);
       } catch {
-        throw err;
+        // V8 quotes a few characters of the text around the error
+        throw scrubParseError(err);
       }
     }
   }
