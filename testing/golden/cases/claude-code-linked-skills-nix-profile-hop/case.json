@@ -1,0 +1,13 @@
+{
+  "agent": "claude-code",
+  "source": "dt23 re-verify round 6: a home-manager layout — ~/.claude/skills links to ~/.nix-profile/share/skills and ~/.nix-profile links out of the home to a profile whose skill is a relative link into a store — the skill is scanned on local and remote scans alike",
+  "reachable": true,
+  "fail": {
+    "SKL-004": "critical"
+  },
+  "inventory": {
+    "skills": [
+      "evil"
+    ]
+  }
+}

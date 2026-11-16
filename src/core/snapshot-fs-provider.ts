@@ -4,18 +4,39 @@ import { posixPermissionFacts } from './permissions.js';
 import type { ConfigTreeStatus, FileEntry, ProbeSnapshot } from './snapshot-types.js';
 import type { Platform } from './types.js';
 
+/** Most respellings recordedUnder tries for one path (MAX_LINK_HOPS in skill-root-scope.ts). */
+const MAX_RESPELLINGS = 40;
+
 /**
- * The link target recorded for `path` under the spelling a followed link
- * gave its directory (`spelled`: where a link leads → the link), when none
- * is recorded under `path` itself.
+ * The link recorded for `path` under the spelling followed links gave its
+ * directory (`spelled`: where a link leads → the link), when none is recorded
+ * under `path` itself: its target and the key it is recorded under. Spellings
+ * compose — a link inside a linked skill, or reached through a second linked
+ * directory (`~/.claude/skills` → `~/.nix-profile/share/skills`,
+ * `~/.nix-profile` → elsewhere), is recorded under the first link's spelling
+ * only — so each respelling is tried in turn, a bounded number of times.
  */
-function recordedUnder(symlinks: Readonly<Record<string, string>>, spelled: ReadonlyArray<[string, string]>, path: string): string | undefined {
-  for (let i = spelled.length - 1; i >= 0; i--) {
-    const [real, link] = spelled[i];
-    const rel = posix.relative(real, path);
-    if (rel === '' || rel === '..' || rel.startsWith('../') || posix.isAbsolute(rel)) continue;
-    const target = symlinks[posix.join(link, rel)];
-    if (target !== undefined) return target;
+function recordedUnder(
+  symlinks: Readonly<Record<string, string>>,
+  spelled: ReadonlyArray<[string, string]>,
+  path: string,
+): { target: string; key: string } | undefined {
+  const pending = [path];
+  const seen = new Set(pending);
+  for (let tries = 0; pending.length > 0 && tries < MAX_RESPELLINGS; tries++) {
+    const cur = pending.shift()!;
+    for (let i = spelled.length - 1; i >= 0; i--) {
+      const [real, link] = spelled[i];
+      const rel = posix.relative(real, cur);
+      if (rel === '' || rel === '..' || rel.startsWith('../') || posix.isAbsolute(rel)) continue;
+      const key = posix.join(link, rel);
+      const target = Object.hasOwn(symlinks, key) ? symlinks[key] : undefined;
+      if (target !== undefined) return { target, key };
+      if (!seen.has(key)) {
+        seen.add(key);
+        pending.push(key);
+      }
+    }
   }
   return undefined;
 }
@@ -259,11 +280,13 @@ export class SnapshotFSProvider implements FSProvider {
     const spelled: Array<[real: string, link: string]> = [];
     for (let hops = 0; rest.length > 0;) {
       const next = posix.join(current, rest.shift()!);
-      const target = symlinks[next] ?? recordedUnder(symlinks, spelled, next);
-      if (target === undefined) { current = next; continue; }
+      const hit = Object.hasOwn(symlinks, next) ? { target: symlinks[next], key: next } : recordedUnder(symlinks, spelled, next);
+      if (hit === undefined) { current = next; continue; }
+      const { target, key } = hit;
       if (++hops > 40) return path; // loop — give up like ELOOP, keep the path
       const resolved = posix.normalize(posix.isAbsolute(target) ? target : posix.join(posix.dirname(next), target));
-      spelled.push([resolved, next]);
+      // under the spelling the link was recorded by, so spellings compose
+      spelled.push([resolved, key]);
       rest = [...resolved.split('/').filter(Boolean), ...rest];
       current = '/';
     }
@@ -278,7 +301,7 @@ export class SnapshotFSProvider implements FSProvider {
     throw new Error(`EINVAL: symlink target not collected in snapshot: ${path}`);
   }
 
-  /** Where each recorded link leads (normalized) → the link, built on first use. */
+  /** Where each recorded link leads (resolved) → the link, built on first use. */
   private linkTargets: Array<[real: string, link: string]> | undefined;
 
   /**
@@ -289,9 +312,10 @@ export class SnapshotFSProvider implements FSProvider {
   private recordedThroughLink(path: string): string | undefined {
     const symlinks = this.snapshot.symlinks;
     if (!symlinks || !posix.isAbsolute(path)) return undefined;
-    this.linkTargets ??= Object.entries(symlinks).map(([link, t]) =>
-      [posix.normalize(posix.isAbsolute(t) ? t : posix.join(posix.dirname(link), t)), link]);
-    return recordedUnder(symlinks, this.linkTargets, posix.normalize(path));
+    // where each link really leads (its whole chain followed: a relative
+    // target recorded under a linked spelling is relative to the real directory)
+    this.linkTargets ??= Object.keys(symlinks).map(link => [this.resolveSymlinks(link), link]);
+    return recordedUnder(symlinks, this.linkTargets, posix.normalize(path))?.target;
   }
 
   async exec(cmd: string, args: string[], _options?: ExecOptions): Promise<ExecResult> {
@@ -379,6 +403,11 @@ export class SnapshotFSProvider implements FSProvider {
   /** Config-derived trees the probe walked, by literal base path, with what it did. */
   configTrees(): Readonly<Record<string, ConfigTreeStatus>> {
     return this.snapshot.configTrees ?? {};
+  }
+
+  /** The probe stopped following links in skills trees past its record bound. */
+  skillLinksTruncated(): boolean {
+    return this.snapshot.skillLinksTruncated === true;
   }
 
   get privilege() {

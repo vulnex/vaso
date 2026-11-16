@@ -1,11 +1,12 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { mkdtemp, mkdir, realpath, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, realpath, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { CheckModule, ScanContext } from '../../core/types.js';
 import { LocalFSProvider } from '../../core/local-fs-provider.js';
 import { skillChecks } from './index.js';
 import { iocChecks } from '../ioc/index.js';
+import { collectSkillInventory } from '../../inventory/skills.js';
 
 // A skills directory the config sets where no skills tree is walked (an OS
 // directory, another user's home, a credential store) is not walked (local and
@@ -71,6 +72,18 @@ describe('a skills directory outside the home', () => {
     expect(r.message).toContain('no such directory');
   });
 
+  it('the inventory words a directory that is a link to /dev/null as SKL-002 does', async () => {
+    const link = join(tmp, 'devnull-skills');
+    await symlink('/dev/null', link);
+    const u = { path: link, reason: 'outside' as const, target: '/dev/null', refusedAs: 'an OS directory (/dev)', agentDefault: true as const };
+    const c = ctx([u]);
+    const r = await byId('SKL-002').run(c);
+    expect(r.severity).toBe('info');
+    const { inventory } = await collectSkillInventory(c.installation, c.fs);
+    expect(inventory.incomplete).toEqual([`${link}: ${r.evidence![0].detail}`]);
+    expect(r.evidence![0].detail).toMatch(/does not exist as a directory — nothing to scan$/);
+  });
+
   it('SKL-002 names the kind of place, and the link target of a linked directory', async () => {
     const r = await byId('SKL-002').run(ctx([{ ...OUT[0], target: '/etc/skills', refusedAs: 'an OS directory (/etc)', agentDefault: true }]));
     expect(r.message).toBe(`skills directory ${OUT[0].path} not scanned (links to /etc/skills, an OS directory (/etc))`);
@@ -105,6 +118,23 @@ describe('a skills directory outside the home', () => {
       if (saved === undefined) delete process.env['VIRUSTOTAL_API_KEY'];
       else process.env['VIRUSTOTAL_API_KEY'] = saved;
     }
+  });
+
+  it('messages list at most 20 unscanned directories; SKL-002 evidence keeps every one', async () => {
+    const many = Array.from({ length: 25 }, (_, i) => ({ path: `/opt/x/l${String(i).padStart(2, '0')}`, reason: 'limit' as const }));
+    const skl002 = await byId('SKL-002').run(ctx(many, ['/nonexistent-vaso-home/skills']));
+    expect(skl002.evidence).toHaveLength(25);
+    expect(skl002.message).toContain('/opt/x/l19 not scanned');
+    expect(skl002.message).not.toContain('/opt/x/l20');
+    expect(skl002.message.endsWith('… and 5 more not scanned (listed in the evidence)')).toBe(true);
+    const pass = await byId('SKL-004').run(ctx(many, ['/nonexistent-vaso-home/skills']));
+    expect(pass.message).toContain('/opt/x/l19 … and 5 more not scanned; see SKL-002)');
+    expect(pass.message).not.toContain('/opt/x/l20');
+    const none = await byId('IOC-007').run(ctx(many));
+    expect(none.message).toContain('… and 5 more not scanned; reported by SKL-002');
+    // exactly 20: listed whole
+    const twenty = await byId('SKL-004').run(ctx(many.slice(0, 20), ['/nonexistent-vaso-home/skills']));
+    expect(twenty.message).not.toContain('more');
   });
 
   it('without any skills directory the checks still pass as before', async () => {

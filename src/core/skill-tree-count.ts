@@ -9,8 +9,18 @@ import { isVendorDirName } from './utils.js';
  * points a skills directory at /Applications or a package store would
  * otherwise have every skill check read the whole of it. Local and remote
  * scans apply the same limit, decided before anything of the tree is read.
+ * Each directory link in a skills tree is held to it on its own.
  */
 export const MAX_SKILL_TREE_ENTRIES = 10000;
+
+/**
+ * What the directory links of one skills tree may hold together
+ * (probe/config_roots.go maxLinkedTreeEntries): five trees at the entry
+ * limit. Twenty links to 9,999-entry trees made a 49 MB snapshot in 161 s;
+ * 50,000 entries keep that near 12 MB, while real linked skill sets (a
+ * checkout of a skills repo, a home-manager profile) hold a few thousand.
+ */
+export const MAX_LINKED_SKILL_ENTRIES = 5 * MAX_SKILL_TREE_ENTRIES;
 
 /** probe/collector.go maxLinkDepth (and MAX_LINK_DEPTH in skill-walk.ts). */
 const MAX_LINK_DEPTH = 8;
@@ -20,76 +30,123 @@ function within(p: string, dir: string): boolean {
   return rel === '' || !relEscapes(rel);
 }
 
+/** Byte order of the UTF-8 names, as Go sorts a directory listing. */
+function byName(a: DirentInfo, b: DirentInfo): number {
+  return Buffer.compare(Buffer.from(a.name), Buffer.from(b.name));
+}
+
+/** What a count of one tree found: its entries and, in walk order, its links. */
+export interface TreeScan {
+  n: number;
+  /** The tree's symlinks, as paths under its real path. */
+  links: string[];
+}
+
 /**
- * How many entries a walk of the skills tree at `dir` visits, counted as the
- * probe counts them (countTreeEntries in probe/config_roots.go): from where
- * `dir` leads, vendor and VCS directories skipped (build output counted),
- * directory links followed where `followLink` allows — each real directory
- * once, not back into the tree or above it, at most MAX_LINK_DEPTH deep — and
- * the count stops once past `limit`. Unlistable directories count as their
- * own entry only.
+ * The entries a walk of the skills tree at `dir` visits, counted as the
+ * probe counts them (scanTree in probe/config_roots.go): from where `dir`
+ * leads, vendor and VCS directories skipped (build output counted), a link
+ * counted as one entry and never descended into — each link is judged from
+ * its own target (planSkillLinks) — stopping once past `limit` (Infinity:
+ * none). Unlistable directories count as their own entry only. Lists the
+ * tree's links in the order Go's WalkDir meets them.
  */
-export async function countSkillTreeEntries(
-  fs: FSProvider,
-  dir: string,
-  limit: number,
-  followLink: (path: string) => Promise<boolean>,
-): Promise<number> {
-  let n = 0;
-  const visited = new Set<string>();
+export async function scanSkillTree(fs: FSProvider, dir: string, limit: number): Promise<TreeScan> {
+  const s: TreeScan = { n: 0, links: [] };
   let rootReal: string;
   try {
     rootReal = await fs.realpath(dir);
   } catch {
     rootReal = dir;
   }
-  visited.add(rootReal);
-
-  /** Walks `root` (its entries, not itself); true once past the limit. */
   const list = async (d: string): Promise<DirentInfo[]> => {
     try {
-      // lexical order, as Go's WalkDir: which link reaches a shared target first
-      return (await fs.readdirEntries(d)).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+      return (await fs.readdirEntries(d)).sort(byName);
     } catch {
       return [];
     }
   };
   // Pre-order and depth-first like WalkDir, on an explicit stack
-  const walk = async (root: string, depth: number): Promise<boolean> => {
-    const stack: Array<{ dir: string; entries: DirentInfo[]; i: number }> = [{ dir: root, entries: await list(root), i: 0 }];
-    while (stack.length > 0) {
-      const top = stack[stack.length - 1];
-      if (top.i >= top.entries.length) {
-        stack.pop();
-        continue;
-      }
-      const e = top.entries[top.i++];
-      if (e.isDirectory && !e.isSymbolicLink && isVendorDirName(e.name)) continue;
-      if (++n > limit) return true;
-      const p = join(top.dir, e.name);
-      if (e.isDirectory && !e.isSymbolicLink) {
-        stack.push({ dir: p, entries: await list(p), i: 0 });
-        continue;
-      }
-      if (!e.isSymbolicLink || depth >= MAX_LINK_DEPTH || !(await followLink(p))) continue;
+  const stack: Array<{ dir: string; entries: DirentInfo[]; i: number }> = [{ dir: rootReal, entries: await list(rootReal), i: 0 }];
+  while (stack.length > 0) {
+    const top = stack[stack.length - 1];
+    if (top.i >= top.entries.length) {
+      stack.pop();
+      continue;
+    }
+    const e = top.entries[top.i++];
+    if (e.isDirectory && !e.isSymbolicLink && isVendorDirName(e.name)) continue;
+    if (++s.n > limit) return s;
+    const p = join(top.dir, e.name);
+    if (e.isSymbolicLink) s.links.push(p);
+    else if (e.isDirectory) stack.push({ dir: p, entries: await list(p), i: 0 });
+  }
+  return s;
+}
+
+/** scanSkillTree's count. */
+export async function countSkillTreeEntries(fs: FSProvider, dir: string, limit: number): Promise<number> {
+  return (await scanSkillTree(fs, dir, limit)).n;
+}
+
+/** planSkillLinks' verdict on a directory link's target. */
+export type LinkVerdict = 'follow' | 'limit' | 'total';
+
+/**
+ * Which directory links a walk of the skills tree at `root` follows, by
+ * where they lead (real path → verdict) — the same whichever way a walk
+ * meets them (probe/config_roots.go linkPlan). Links are taken in WalkDir
+ * order from the root, each followed one's own links right after it, at
+ * most MAX_LINK_DEPTH deep; one into a tree already taken, back into the
+ * root or above it, or where `followLink` refuses, gets no verdict. Each
+ * target is counted on its own (`scanOf`, to the entry limit) and the count
+ * charged to the root's links' total: over MAX_SKILL_TREE_ENTRIES → limit,
+ * past MAX_LINKED_SKILL_ENTRIES in all → total, else follow.
+ */
+export async function planSkillLinks(
+  fs: FSProvider,
+  root: string,
+  followLink: (path: string) => Promise<boolean>,
+  scanOf: (real: string) => Promise<TreeScan>,
+): Promise<Map<string, LinkVerdict>> {
+  const plan = new Map<string, LinkVerdict>();
+  let rootReal: string;
+  try {
+    rootReal = await fs.realpath(root);
+  } catch {
+    rootReal = root;
+  }
+  const taken = [rootReal];
+  let used = 0;
+  const visit = async (links: readonly string[], depth: number): Promise<void> => {
+    if (depth >= MAX_LINK_DEPTH) return;
+    for (const p of links) {
       let real: string;
       try {
         real = await fs.realpath(p);
       } catch {
         continue;
       }
-      // a link back into the tree or above it isn't followed
-      if (visited.has(real) || within(real, rootReal) || within(rootReal, real)) continue;
+      if (plan.has(real) || within(rootReal, real) || taken.some(t => within(real, t))) continue;
+      if (!(await followLink(p))) continue;
       try {
-        if (!(await fs.stat(p)).isDirectory()) continue;
+        if (!(await fs.stat(real)).isDirectory()) continue;
       } catch {
         continue;
       }
-      visited.add(real);
-      if (await walk(real, depth + 1)) return true;
+      const s = await scanOf(real);
+      used += s.n;
+      if (s.n > MAX_SKILL_TREE_ENTRIES) {
+        plan.set(real, 'limit');
+      } else if (used > MAX_LINKED_SKILL_ENTRIES) {
+        plan.set(real, 'total');
+      } else {
+        plan.set(real, 'follow');
+        taken.push(real);
+        await visit(s.links, depth + 1);
+      }
     }
-    return false;
   };
-  await walk(rootReal, 0);
-  return n;
+  await visit((await scanSkillTree(fs, rootReal, Infinity)).links, 0);
+  return plan;
 }

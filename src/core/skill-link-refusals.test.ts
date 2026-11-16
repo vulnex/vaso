@@ -77,6 +77,14 @@ describe('where a refused skills directory is', () => {
     expect(unscanned.map(u => u.refusedAs)).toEqual(['an OS directory (/System)', 'an OS directory (/Library)', 'an OS directory (/etc)']);
   });
 
+  it('names the OS directory as the OS stores it, however the path is written', async () => {
+    const fs = new LocalFSProvider();
+    const { unscanned } = await screenSkillRoots(fs, ['/Private/Var/Folders/x', '/PRIVATE/etc/x', '/SYSTEM/Library/Fonts', '/LIBRARY/x', '/USR/share/man'], '/nonexistent-vaso-home');
+    expect(unscanned.map(u => u.refusedAs)).toEqual([
+      'an OS directory (/var)', 'an OS directory (/etc)', 'an OS directory (/System)', 'an OS directory (/Library)', 'an OS directory (/usr)',
+    ]);
+  });
+
   it('suggests vaso skill audit only for another user\'s skills', () => {
     expect(unscannedReason('outside', '/etc/x', { refusedAs: 'an OS directory (/etc)' })).toMatch(/keep skills in a dedicated folder$/);
     expect(unscannedReason('outside', '/home/bob/s', { refusedAs: 'another user\'s home (/home/bob)' })).toMatch(/vaso skill audit \/home\/bob\/s`$/);

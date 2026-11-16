@@ -5,7 +5,7 @@ import { getAllSkillsDirs, relEscapes } from '../../core/utils.js';
 import { classifySensitivePath } from '../../analyzers/sensitive-paths.js';
 import { noSkillsDirResult } from './skill-files.js';
 import { linkScope } from '../../core/skill-root-scope.js';
-import { MAX_SKILL_TREE_ENTRIES } from '../../core/skill-tree-count.js';
+import { MAX_LINKED_SKILL_ENTRIES, MAX_SKILL_TREE_ENTRIES } from '../../core/skill-tree-count.js';
 
 /**
  * SKL-013 — Workspace Symlink Escape (GhostApproval / CWE-61 + CWE-451).
@@ -48,7 +48,7 @@ interface SymlinkFinding {
   skillInstall: boolean;
   /** Its code is not scanned (SKL-002): linked to where no skills tree is
    *  walked, or to a tree over the entry limit. */
-  unscanned?: 'outside' | 'limit';
+  unscanned?: 'outside' | 'limit' | 'total';
 }
 
 function resolveTarget(rawTarget: string, linkDir: string, home: string): string {
@@ -89,7 +89,8 @@ export const skl013 = defineCheck({
     const findings: SymlinkFinding[] = [];
     const seen = new Set<string>();
     // links the skill walk left out for the size of their tree (inventory)
-    const overLimit = new Set((ctx.installation.unscannedSkillsDirs ?? []).filter(u => u.reason === 'limit').map(u => u.path));
+    const capped = new Map((ctx.installation.unscannedSkillsDirs ?? [])
+      .filter(u => u.reason === 'limit' || u.reason === 'total').map(u => [u.path, u.reason as 'limit' | 'total']));
 
     for (const dir of dirs) {
       const root = resolve(dir);
@@ -135,7 +136,7 @@ export const skl013 = defineCheck({
           resolve(dirname(linkPath)) === root && await isDirectory(ctx.fs, linkPath);
         const unscanned = !skillInstall ? undefined
           : !(await inScope(linkPath)) ? 'outside' as const
-            : overLimit.has(linkPath) ? 'limit' as const : undefined;
+            : capped.get(linkPath);
         findings.push({ linkPath, rawTarget, resolvedTarget, sensitiveLabels, skillInstall, unscanned });
       }
     }
@@ -154,6 +155,8 @@ export const skl013 = defineCheck({
           ? `Skill installed as a link to ${f.resolvedTarget} — a place no skills tree is walked, so its code is not scanned (see SKL-002); edits to it change what is there.`
         : f.unscanned === 'limit'
           ? `Skill installed as a link to ${f.resolvedTarget} — a tree over the ${MAX_SKILL_TREE_ENTRIES}-entry limit VASO walks, so its code is not scanned (see SKL-002); edits to it change what is there.`
+        : f.unscanned === 'total'
+          ? `Skill installed as a link to ${f.resolvedTarget} — past the ${MAX_LINKED_SKILL_ENTRIES}-entry total VASO walks through one skills tree's links, so its code is not scanned (see SKL-002); edits to it change what is there.`
         : f.skillInstall
           ? `Skill installed as a link to ${f.resolvedTarget} — its code is scanned there; edits to it change the source checkout.`
           : `Symlink resolves outside the workspace to ${f.resolvedTarget}. A write the user believes is workspace-local lands outside the project.`,

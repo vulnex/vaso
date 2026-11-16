@@ -61,6 +61,9 @@ function isStringRecord(v: unknown): boolean {
 
 /** probe/config_roots.go maxConfigTrees: config-derived trees one snapshot records. */
 export const MAX_CONFIG_TREES = 2000;
+
+/** probe/collector.go maxLinkRecords: links in skills trees not followed for size, recorded in configTrees too. */
+export const MAX_LINK_RECORDS = 20000;
 /** probe/config_roots.go maxWildcardNames: names one wildcardNames entry holds. */
 const MAX_WILDCARD_NAMES = 1000;
 /** Longest configTrees key accepted (PATH_MAX). */
@@ -136,12 +139,12 @@ export function validateSnapshot(value: unknown): string[] {
   if (s.symlinks !== undefined && !isStringRecord(s.symlinks)) errors.push('Invalid symlinks field (link targets expected)');
   if (s.configTrees !== undefined) {
     // Keys are literal directory paths, compared as such (probe-coverage.ts);
-    // as many as the probe records at most (maxConfigTrees)
+    // as many as the probe records at most (maxConfigTrees trees, maxLinkRecords links)
     const entries = isRecord(s.configTrees) ? Object.entries(s.configTrees) : undefined;
-    if (!entries || !entries.every(([, v]) => v === 'collected' || v === 'refused' || v === 'limit')) {
-      errors.push('Invalid configTrees field (collected, refused or limit expected)');
-    } else if (entries.length > MAX_CONFIG_TREES) {
-      errors.push(`Invalid configTrees field (more than ${MAX_CONFIG_TREES} trees)`);
+    if (!entries || !entries.every(([, v]) => v === 'collected' || v === 'refused' || v === 'limit' || v === 'total')) {
+      errors.push('Invalid configTrees field (collected, refused, limit or total expected)');
+    } else if (entries.length > MAX_CONFIG_TREES + MAX_LINK_RECORDS) {
+      errors.push(`Invalid configTrees field (more than ${MAX_CONFIG_TREES + MAX_LINK_RECORDS} entries)`);
     } else if (!entries.every(([k]) => isConfigTreePath(k))) {
       errors.push('Invalid configTrees field (normalized absolute directory paths expected)');
     }

@@ -7,7 +7,7 @@ import { redactSecretsInLine } from '../core/patterns.js';
 import { maskCredentialsInLine } from '../reporting/serialize.js';
 import { shannonEntropy } from '../analyzers/entropy.js';
 import { configTreeGap, probeCoversTree } from '../core/probe-coverage.js';
-import { refusedSkillLink, unscannedReason } from '../core/skill-root-scope.js';
+import { missingRootReason, refusedSkillLink, unscannedReason, unscannedRootMissing } from '../core/skill-root-scope.js';
 
 /**
  * Folders under a skills directory whose skills an agent doesn't load: Hermes
@@ -68,7 +68,8 @@ export async function collectSkillInventory(installation: AgentInstallation, fs:
     const at = fs.kind === 'snapshot' && isAbsolute(path) ? posix.normalize(path) : path;
     // a link to /dev/null is no directory there (SKL-002 says so too)
     skillsDirs.push({ path, exists: await fs.stat(at).then(st => st.isDirectory(), () => false), unverified: true });
-    incomplete.push(`${path}: ${unscannedReason(reason, path, u)}`);
+    // worded as SKL-002 words it: one that isn't a directory holds nothing
+    incomplete.push(`${path}: ${(await unscannedRootMissing(fs, u)) ? missingRootReason(u) : unscannedReason(reason, path, u)}`);
   }
 
   for (const root of roots) {
@@ -77,7 +78,7 @@ export async function collectSkillInventory(installation: AgentInstallation, fs:
     const gap = configTreeGap(fs, root);
     if (gap) {
       skillsDirs.push({ path: root, exists: await fs.access(root).catch(() => false), unverified: true });
-      incomplete.push(`${root}: ${unscannedReason(gap === 'refused' ? 'outside' : 'limit', root)}`);
+      incomplete.push(`${root}: ${unscannedReason(gap === 'refused' ? 'outside' : gap, root)}`);
       continue;
     }
     const listing = await listSkillTree(root, fs);
@@ -106,11 +107,15 @@ export async function collectSkillInventory(installation: AgentInstallation, fs:
     }
     // A directory linked in from a tree over the entry limit: not walked, as
     // a skills directory over it isn't (SKL-002 reports it)
-    for (const link of listing.overLimitLinks) {
+    const capped = [
+      ...listing.overLimitLinks.map(path => ({ path, reason: 'limit' as const })),
+      ...listing.overTotalLinks.map(path => ({ path, reason: 'total' as const })),
+    ];
+    for (const u of capped) {
       const known = installation.unscannedSkillsDirs ?? [];
-      if (known.some(u => u.path === link)) continue;
-      installation.unscannedSkillsDirs = [...known, { path: link, reason: 'limit' }];
-      incomplete.push(`${link}: ${unscannedReason('limit', link)}`);
+      if (known.some(k => k.path === u.path)) continue;
+      installation.unscannedSkillsDirs = [...known, u];
+      incomplete.push(`${u.path}: ${unscannedReason(u.reason, u.path)}`);
     }
 
     // A SKILL.md that is a symlink into the same tree (gstack links each

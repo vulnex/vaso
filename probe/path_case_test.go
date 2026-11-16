@@ -64,7 +64,7 @@ func TestLinkedTreeRootsAreCappedLikeTheirTarget(t *testing.T) {
 	if d := time.Since(start); d > 30*time.Second {
 		t.Errorf("counting took %s", d)
 	}
-	if n := countTreeEntries(filepath.Join(home, "biglink"), home, 50); n != 51 {
+	if n := countTreeEntries(filepath.Join(home, "biglink"), 50); n != 51 {
 		t.Errorf("count through a linked root stops past the limit: %d", n)
 	}
 }
@@ -126,5 +126,68 @@ func TestHomeInOtherLettersIsTheHome(t *testing.T) {
 	}
 	if !treeAllowed(filepath.Join(base, "FX", "HU", "team"), home) {
 		t.Error("a folder in the home spelled in other letters refused")
+	}
+}
+
+// normalizationInsensitiveDir reports whether dir's filesystem opens a name
+// in the other Unicode normalization form (macOS APFS does).
+func normalizationInsensitiveDir(t *testing.T, dir string) bool {
+	t.Helper()
+	probe := filepath.Join(dir, "café-probe")
+	if err := os.WriteFile(probe, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(probe)
+	_, err := os.Stat(filepath.Join(dir, "café-probe"))
+	return err == nil
+}
+
+// A home stored in one Unicode normalization form and written in the other
+// (é as U+00E9 or e + U+0301; ガ as U+30AC or カ + U+3099) is the home:
+// respelled as stored, refused like the home — as extraDirs, the folder
+// above it, HOME itself written so, or a skill linked to it — and nothing of
+// it shipped.
+func TestHomeInOtherNormalizationIsTheHome(t *testing.T) {
+	for _, tc := range []struct{ nfc, nfd string }{
+		{"café", "café"},
+		{"ガ", "ガ"},
+	} {
+		t.Run(tc.nfc, func(t *testing.T) {
+			base := allowedOutside(t)
+			if !normalizationInsensitiveDir(t, base) {
+				t.Skip("normalization-sensitive filesystem")
+			}
+			home := filepath.Join(base, tc.nfc, "hu")
+			written := filepath.Join(base, tc.nfd, "hu")
+			write(t, filepath.Join(home, "Documents", "diary.txt"), "DIARY-CANARY\n", 0o644)
+			write(t, filepath.Join(home, ".claude", "skills", "own", "SKILL.md"), "# own\n", 0o644)
+			mustSymlink(t, written, filepath.Join(home, ".claude", "skills", "homelink"))
+			if got := canonicalCase(written); got != home {
+				t.Fatalf("canonicalCase(%q) = %q, want %q", written, got, home)
+			}
+			for _, h := range []string{home, written} {
+				t.Run("HOME "+h, func(t *testing.T) {
+					t.Setenv("HOME", h)
+					parent := filepath.Join(base, tc.nfd)
+					writeExtraDirs(t, home, written, parent)
+					m := extraDirsManifest()
+					m.GlobPatterns = []string{"~/.claude/skills/**"}
+					snap := Collect(m, false)
+					for _, p := range []string{written, parent} {
+						if snap.ConfigTrees[p] != treeRefused {
+							t.Errorf("%q: %q, want refused", p, snap.ConfigTrees[p])
+						}
+					}
+					for p, e := range snap.Files {
+						if strings.Contains(e.Content, "CANARY") {
+							t.Errorf("home content shipped: %s", p)
+						}
+					}
+					if !treeAllowed(filepath.Join(written, "team"), home) {
+						t.Error("a folder in the home spelled in the other form refused")
+					}
+				})
+			}
+		})
 	}
 }

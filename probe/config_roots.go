@@ -19,7 +19,8 @@ import (
 // tree ("tree": Globs under it, content disguised like any config) or
 // records it as metadata ("stat": existence, mode, owner — never content).
 type ConfigRootRequest struct {
-	// Config files, in manifest path syntax (~, ${VAR}, globs).
+	// Config files, in manifest path syntax (~, ${VAR}, globs). None, with
+	// EnvFallback set: the variable's value alone, for the probe user.
 	Configs []string `json:"configs"`
 	// "json" (JSON/JSONC/JSON5), "toml" or "yaml".
 	Format string `json:"format"`
@@ -224,9 +225,20 @@ func (c *collector) collectConfigRoots(snapshot *ProbeSnapshot, requests []Confi
 		if req.Kind != "tree" && req.Kind != "stat" {
 			continue
 		}
-		for _, src := range configSources(req.Configs, homes) {
+		sources := configSources(req.Configs, homes)
+		envOnly := len(req.Configs) == 0 && req.EnvFallback != ""
+		if envOnly {
+			// A path only an environment variable sets (PICOCLAW_BUILTIN_SKILLS):
+			// the probe user's own, as the CLI reads it for that user only
+			ownHome, _ := os.UserHomeDir()
+			sources = []configSource{{"", ownHome}}
+		}
+		for _, src := range sources {
 			key := req.Format + "\x00" + src.path
 			parsed, cached := parsedCache[key]
+			if envOnly {
+				parsed, cached = map[string]interface{}{}, true
+			}
 			if !cached {
 				if data, ok := readConfigForPaths(src.path); ok {
 					parsed, _ = parseConfig(req.Format, data)
@@ -628,7 +640,15 @@ func (c *collector) linkedOutSkillBase(snapshot *ProbeSnapshot, pattern string) 
 		return false
 	}
 	if strictlyWithin(resolveExisting(filepath.Clean(base)), resolveExisting(home)) && treeAllowed(base, home) {
-		return false // stays in the home: an ordinary manifest tree
+		// Stays in the home: an ordinary manifest tree — unless the skills
+		// directory is itself a link (~/.claude/skills → ~/bigdir), a linked
+		// root held to the entry limit wherever it leads, as local scans hold
+		// it (linkedManifestBase); collectLinkedSkillBases would record it
+		// after the glob had collected it whole
+		root, literal := literalTreeRoot(pattern)
+		if !literal || filepath.Clean(root) != filepath.Clean(base) || !isSymlink(root) {
+			return false
+		}
 	}
 	if snapshot.ConfigTrees == nil {
 		snapshot.ConfigTrees = make(map[string]string)
@@ -641,9 +661,10 @@ func (c *collector) linkedOutSkillBase(snapshot *ProbeSnapshot, pattern string) 
 // what it did under base's path.
 func (c *collector) collectConfigBase(snapshot *ProbeSnapshot, base, home string) {
 	key := filepath.ToSlash(filepath.Clean(base))
-	if _, done := snapshot.ConfigTrees[key]; done || len(snapshot.ConfigTrees) >= maxConfigTrees {
+	if _, done := snapshot.ConfigTrees[key]; done || c.treeRecords >= maxConfigTrees {
 		return
 	}
+	c.treeRecords++
 	// A tree not walked still says whether it exists (its mode, never a
 	// listing): the CLI reports it present or absent as a local scan sees it
 	notWalked := func(status string) {
@@ -659,7 +680,7 @@ func (c *collector) collectConfigBase(snapshot *ProbeSnapshot, base, home string
 		notWalked(treeRefused)
 		return
 	}
-	if countTreeEntries(base, home, maxConfigTreeEntries) > maxConfigTreeEntries {
+	if c.limitScan(base).n > maxConfigTreeEntries {
 		notWalked(treeLimit)
 		return
 	}
@@ -737,59 +758,155 @@ func resolveExisting(p string) string {
 	}
 }
 
-// countTreeEntries counts what a config-tree walk of dir visits — vendor and
-// VCS directories skipped, directory links followed wherever the walk follows
-// them (treeAllowed targets, each real directory once, maxLinkDepth deep) —
-// stopping past limit. It may count more than the walk collects, never less.
-func countTreeEntries(dir, home string, limit int) int {
-	n := 0
-	visited := map[string]bool{}
+// maxLinkedTreeEntries bounds what the directory links of one skills tree
+// may hold together (each followed link's own tree, counted on its own, and
+// what was read to judge links over the limit): five trees at the entry
+// limit. Twenty links to 9,999-entry trees made a 49 MB snapshot in 161 s;
+// 50,000 entries keep that near 12 MB, well inside the probe's content
+// budget and what the CLI loads, while real linked skill sets (a checkout
+// of a skills repo, a home-manager profile) hold a few thousand at most.
+// src/core/skill-tree-count.ts MAX_LINKED_SKILL_ENTRIES.
+const maxLinkedTreeEntries = 5 * maxConfigTreeEntries
+
+// treeScan is what a count of one tree found: its entries (stopping past
+// the limit it was counted to) and, in walk order, its directory links.
+type treeScan struct {
+	n     int
+	links []string
+}
+
+// scanTree counts the entries a skills-tree walk of dir visits, from where
+// dir leads — vendor and VCS directories skipped, build output counted, a
+// link counted as one entry and never descended into (each link is judged
+// from its own target: linkPlan) — stopping past limit (limit < 0: none).
+// It lists the tree's links (their paths under dir's real path) in the
+// order WalkDir meets them. skill-tree-count.ts scanSkillTree.
+func scanTree(dir string, limit int) treeScan {
+	var s treeScan
 	rootReal, err := realPath(dir)
 	if err != nil {
 		rootReal = dir
 	}
-	visited[rootReal] = true
-	var walk func(d string, depth int) bool
-	walk = func(d string, depth int) bool {
-		stop := false
-		_ = filepath.WalkDir(d, func(p string, e fs.DirEntry, err error) error {
-			if err != nil || p == d {
-				return nil
-			}
-			if e.IsDir() && excludedGlobDirs[e.Name()] && !skillTreeBuildDirs[e.Name()] {
-				return filepath.SkipDir
-			}
-			if n++; n > limit {
-				stop = true
-				return errStopWalk
-			}
-			if e.Type()&os.ModeSymlink == 0 || depth >= maxLinkDepth || !treeAllowed(p, home) {
-				return nil
-			}
-			real, err := realPath(p)
-			// a link back into the tree or above it isn't followed (followFrom)
-			if err != nil || visited[real] || within(real, rootReal) || within(rootReal, real) {
-				return nil
-			}
-			if st, err := os.Stat(p); err != nil || !st.IsDir() {
-				return nil
-			}
-			visited[real] = true
-			if walk(real, depth+1) { // WalkDir doesn't descend into a link given as its root
-				stop = true
-				return errStopWalk
-			}
+	// WalkDir lists nothing under a root that is itself a link
+	_ = filepath.WalkDir(rootReal, func(p string, e fs.DirEntry, err error) error {
+		if err != nil || p == rootReal {
 			return nil
-		})
-		return stop
-	}
-	// From where the root leads: WalkDir lists nothing under a root that is
-	// itself a link (a skills directory linked out of the home)
-	walk(rootReal, 0)
-	return n
+		}
+		if e.IsDir() && excludedGlobDirs[e.Name()] && !skillTreeBuildDirs[e.Name()] {
+			return filepath.SkipDir
+		}
+		if s.n++; limit >= 0 && s.n > limit {
+			return errStopWalk
+		}
+		if e.Type()&os.ModeSymlink != 0 {
+			s.links = append(s.links, p)
+		}
+		return nil
+	})
+	return s
+}
+
+// countTreeEntries is scanTree's count.
+func countTreeEntries(dir string, limit int) int {
+	return scanTree(dir, limit).n
 }
 
 var errStopWalk = errors.New("stop walk")
+
+// Verdicts of linkPlan on a directory link's target.
+const (
+	linkFollow = "follow"
+	linkLimit  = treeLimit // its tree holds more than maxConfigTreeEntries
+	linkTotal  = "total"   // the links' total (maxLinkedTreeEntries) is spent
+)
+
+// limitScan is c's scan of dir to the entry limit, remembered by where dir
+// leads: two hundred links to one tree count it once.
+func (c *collector) limitScan(dir string) treeScan {
+	real, err := realPath(dir)
+	if err != nil {
+		real = dir
+	}
+	if s, ok := c.treeScans[real]; ok {
+		return s
+	}
+	s := scanTree(real, maxConfigTreeEntries)
+	if c.treeScans == nil {
+		c.treeScans = make(map[string]treeScan)
+	}
+	c.treeScans[real] = s
+	return s
+}
+
+// linkPlan decides, for the skills tree at root (of the user whose home is
+// home), which directory links a walk of it follows, by where they lead —
+// the same whichever way a walk meets them. Links are taken in WalkDir order
+// from the root, each followed one's own links right after it, at most
+// maxLinkDepth deep; one into a tree already taken, back into the root or
+// above it, or where treeAllowed refuses, gets no verdict. Each target is
+// counted on its own (limitScan) and the count charged to the root's links'
+// total: over maxConfigTreeEntries → linkLimit, past maxLinkedTreeEntries in
+// all → linkTotal, else linkFollow. Remembered per home and root.
+// skill-tree-count.ts planSkillLinks.
+func (c *collector) linkPlan(root, home string) map[string]string {
+	rootReal, err := realPath(root)
+	if err != nil {
+		rootReal = root
+	}
+	key := home + "\x00" + rootReal
+	if p, ok := c.linkPlans[key]; ok {
+		return p
+	}
+	plan := make(map[string]string)
+	if c.linkPlans == nil {
+		c.linkPlans = make(map[string]map[string]string)
+	}
+	c.linkPlans[key] = plan
+	taken := []string{rootReal}
+	used := 0
+	var visit func(links []string, depth int)
+	visit = func(links []string, depth int) {
+		if depth >= maxLinkDepth {
+			return
+		}
+		for _, p := range links {
+			real, err := realPath(p)
+			if err != nil {
+				continue
+			}
+			if _, done := plan[real]; done || within(rootReal, real) {
+				continue
+			}
+			covered := false
+			for _, t := range taken {
+				if within(real, t) {
+					covered = true
+					break
+				}
+			}
+			if covered || !treeAllowed(p, home) {
+				continue
+			}
+			if st, err := os.Stat(real); err != nil || !st.IsDir() {
+				continue
+			}
+			s := c.limitScan(real)
+			used += s.n
+			switch {
+			case s.n > maxConfigTreeEntries:
+				plan[real] = linkLimit
+			case used > maxLinkedTreeEntries:
+				plan[real] = linkTotal
+			default:
+				plan[real] = linkFollow
+				taken = append(taken, real)
+				visit(s.links, depth+1)
+			}
+		}
+	}
+	visit(scanTree(rootReal, -1).links, 0)
+	return plan
+}
 
 // credentialName: a file name that marks the file as a credential — its
 // content may be a bare token no key names, which the disguiser can't tell

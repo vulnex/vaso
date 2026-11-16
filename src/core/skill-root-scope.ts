@@ -6,7 +6,8 @@ import {
   configTreeGap, configTreeStatus, expandManifestGlob, expandedGlobRegex, manifestCoversTree, manifestSkillGlobs, pathChain, splitGlob,
 } from './probe-coverage.js';
 import { relEscapes } from './path-rel.js';
-import { MAX_SKILL_TREE_ENTRIES, countSkillTreeEntries } from './skill-tree-count.js';
+import { MAX_LINKED_SKILL_ENTRIES, MAX_SKILL_TREE_ENTRIES, planSkillLinks, scanSkillTree } from './skill-tree-count.js';
+import type { LinkVerdict, TreeScan } from './skill-tree-count.js';
 
 /**
  * Where a skills tree may be walked from, and where a link met while walking
@@ -257,12 +258,12 @@ export async function skillRootGap(fs: FSProvider, dir: string, home: string): P
     // One the probe walks as a config-derived tree (a link takes it, or a
     // wildcard directory above it, elsewhere) holds to its entry limit
     const base = await linkedManifestBase(fs, p, home);
-    return base !== undefined && (await skillTreeAllowed(fs, base, home)) && (await overEntryLimit(fs, base, home)) ? 'limit' : undefined;
+    return base !== undefined && (await skillTreeAllowed(fs, base, home)) && (await overEntryLimit(fs, base)) ? 'limit' : undefined;
   }
   if (fs.kind === 'snapshot') {
     const status = configTreeStatus(fs, dir);
     if (status === 'collected') return undefined;
-    if (status === 'limit') return 'limit';
+    if (status === 'limit' || status === 'total') return status;
     if (status === 'refused') return refused();
   }
   if (await isHomeItself(fs, dir, home)) return 'home';
@@ -270,52 +271,101 @@ export async function skillRootGap(fs: FSProvider, dir: string, home: string): P
   const gap = configTreeGap(fs, dir);
   if (gap) return gap === 'refused' ? 'outside' : gap;
   // Local: the probe's entry limit, judged the same way before any of it is read
-  if (fs.kind !== 'snapshot' && (await overEntryLimit(fs, normalize(dir), home))) return 'limit';
+  if (fs.kind !== 'snapshot' && (await overEntryLimit(fs, normalize(dir)))) return 'limit';
   return undefined;
 }
 
-const limitCache = new WeakMap<FSProvider, Map<string, Promise<boolean>>>();
+const scanCache = new WeakMap<FSProvider, Map<string, Promise<TreeScan>>>();
 
 /**
- * The skills tree at `dir` holds more entries than a scan walks
- * (MAX_SKILL_TREE_ENTRIES, counted as the probe counts: skill-tree-count.ts);
- * links in it followed where a tree of the user whose home is `home` may lead.
- * Remembered per provider: adapters and the registry ask again.
+ * The skills tree at `dir` scanned to the entry limit (scanSkillTree),
+ * remembered per provider by where `dir` leads: adapters and the registry
+ * ask again, and two hundred links to one tree count it once.
  */
-export function overEntryLimit(fs: FSProvider, dir: string, home: string): Promise<boolean> {
-  let byDir = limitCache.get(fs);
-  if (!byDir) limitCache.set(fs, (byDir = new Map()));
-  const key = `${clean(home)}\0${clean(dir)}`;
-  let hit = byDir.get(key);
+async function limitScan(fs: FSProvider, dir: string): Promise<TreeScan> {
+  let byReal = scanCache.get(fs);
+  if (!byReal) scanCache.set(fs, (byReal = new Map()));
+  let real: string;
+  try {
+    real = await fs.realpath(dir);
+  } catch {
+    real = clean(dir);
+  }
+  let hit = byReal.get(real);
   if (!hit) {
-    hit = countSkillTreeEntries(fs, dir, MAX_SKILL_TREE_ENTRIES, p => skillTreeAllowed(fs, p, home))
-      .then(n => n > MAX_SKILL_TREE_ENTRIES, () => false);
-    byDir.set(key, hit);
+    hit = scanSkillTree(fs, real, MAX_SKILL_TREE_ENTRIES).catch(() => ({ n: 0, links: [] }));
+    byReal.set(real, hit);
   }
   return hit;
 }
 
 /**
- * For a walk of the skills tree at `root`: whether a directory link met in
- * it (one the walk would follow) leads to a tree over the entry limit, so
- * the walk leaves it out. Each link is counted from its target on its own
- * (MAX_SKILL_TREE_ENTRIES apiece, as the probe's followFrom counts it), its
- * own links followed where a tree of the root's user may lead; the plain
- * content of the tree being walked is not counted here. On a snapshot, what
- * the probe recorded for the link (configTrees `limit`) decides.
+ * The skills tree at `dir` holds more entries than a scan walks
+ * (MAX_SKILL_TREE_ENTRIES, counted as the probe counts: skill-tree-count.ts)
+ * — its own entries: a directory link in it counts as one, and is judged on
+ * its own when the tree is walked (linkCap).
  */
-export async function linkCap(fs: FSProvider, root: string): Promise<(link: string) => Promise<boolean>> {
+export async function overEntryLimit(fs: FSProvider, dir: string): Promise<boolean> {
+  return (await limitScan(fs, dir)).n > MAX_SKILL_TREE_ENTRIES;
+}
+
+const planCache = new WeakMap<FSProvider, Map<string, Promise<Map<string, LinkVerdict>>>>();
+
+/** Why a walk leaves a directory link out for its size. */
+export type LinkCapReason = 'limit' | 'total';
+
+/**
+ * For a walk of the skills tree at `root`: whether a directory link met in
+ * it (one the walk would follow) is left out for the size of what it leads
+ * to — a tree over the entry limit (`limit`), or one past what the tree's
+ * links may hold together (`total`, MAX_LINKED_SKILL_ENTRIES) — as
+ * planSkillLinks decides by its target, the same way the probe's linkPlan
+ * does; a link the plan gives no verdict is judged by its own count. The
+ * plain content of the tree being walked is not counted here. On a
+ * snapshot, what the probe recorded for the link (configTrees) decides —
+ * and past the probe's record bound (skillLinksTruncated) a link with
+ * nothing under it is not verified.
+ */
+export async function linkCap(fs: FSProvider, root: string): Promise<(link: string) => Promise<LinkCapReason | undefined>> {
   if (fs.kind === 'snapshot') {
-    return async link => isAbsolute(link) && configTreeStatus(fs, clean(posix.normalize(link))) === 'limit';
+    const records = fs as { skillLinksTruncated?(): boolean; holdsUnder?(dir: string): boolean };
+    const truncated = records.skillLinksTruncated?.() ?? false;
+    return async link => {
+      if (!isAbsolute(link)) return undefined;
+      const p = clean(posix.normalize(link));
+      const status = configTreeStatus(fs, p);
+      if (status === 'limit' || status === 'total') return status;
+      if (truncated && status === undefined && !records.holdsUnder?.(p)) return 'limit';
+      return undefined;
+    };
   }
-  let home: Promise<string> | undefined;
-  return async link => {
-    if (!isAbsolute(link)) return false;
-    if (!home) {
-      const me = homedirOf(fs);
-      home = me && isAbsolute(root) ? homeOfDir(fs, root, [me]).then(h => h ?? '') : Promise.resolve('');
+  let plan: Promise<Map<string, LinkVerdict>> | undefined;
+  const load = async (): Promise<Map<string, LinkVerdict>> => {
+    const me = homedirOf(fs);
+    // a tree in no home (a config-set one elsewhere): judged for the scanned user, as the probe judges it for the config's
+    const home = (me && isAbsolute(root) ? await homeOfDir(fs, root, [me]) : undefined) ?? me ?? '';
+    let byRoot = planCache.get(fs);
+    if (!byRoot) planCache.set(fs, (byRoot = new Map()));
+    const key = `${clean(home)}\0${clean(root)}`;
+    let hit = byRoot.get(key);
+    if (!hit) {
+      hit = planSkillLinks(fs, root, p => skillTreeAllowed(fs, p, home), real => limitScan(fs, real))
+        .catch(() => new Map<string, LinkVerdict>());
+      byRoot.set(key, hit);
     }
-    return overEntryLimit(fs, clean(link), await home);
+    return hit;
+  };
+  return async link => {
+    if (!isAbsolute(link)) return undefined;
+    plan ??= load();
+    let real: string;
+    try {
+      real = await fs.realpath(link);
+    } catch {
+      return undefined;
+    }
+    const verdict = (await plan).get(real) ?? ((await overEntryLimit(fs, real)) ? 'limit' : 'follow');
+    return verdict === 'follow' ? undefined : verdict;
   };
 }
 
@@ -435,28 +485,24 @@ async function linkChainTarget(fs: FSProvider, p: string, homes: readonly string
   return last;
 }
 
+/** OS directories whose stored name isn't lower case (macOS). */
+const CANONICAL_PLACES: Readonly<Record<string, string>> = { '/system': '/System', '/library': '/Library' };
+
 /**
- * An OS directory label's place (`/system`, lower case) as `paths` spell it
- * (`/System`): the first top-level directory, or the one under /private,
- * that names it.
+ * An OS directory label's place (`/system`, lower case) spelled as the OS
+ * stores it (`/System`, `/var`) — whatever case the path was written in
+ * (`/Private/Var/Folders` is in /var), so every report names it alike.
  */
-function spelledPlace(place: string, paths: readonly string[]): string {
-  const name = place.slice(1);
-  for (const p of paths) {
-    const parts = p.split('/').filter(Boolean);
-    const candidates = parts[0]?.toLowerCase() === 'private' ? [parts[0], parts[1]] : [parts[0]];
-    const hit = candidates.find(c => c !== undefined && c.toLowerCase() === name);
-    if (hit !== undefined) return `/${hit}`;
-  }
-  return place;
+function canonicalPlace(place: string): string {
+  return CANONICAL_PLACES[place] ?? place;
 }
 
-/** What a label says, for a report — places as `paths` spell them. */
-function labelPhrase(label: string, paths: readonly string[] = []): string {
+/** What a label says, for a report. */
+function labelPhrase(label: string): string {
   if (label === 'root') return 'the filesystem root';
   if (label === 'home') return 'the home directory or a directory above it';
   if (label.startsWith('other-home:')) return `another user's home (${label.slice('other-home:'.length)})`;
-  if (label.startsWith('system:')) return `an OS directory (${spelledPlace(label.slice('system:'.length), paths)})`;
+  if (label.startsWith('system:')) return `an OS directory (${canonicalPlace(label.slice('system:'.length))})`;
   const sink = SENSITIVE_SINKS[Number(label.slice('sink:'.length))];
   return `a credential store or sensitive location (${sink?.label ?? 'credentials'})`;
 }
@@ -480,7 +526,7 @@ async function refusalDetails(fs: FSProvider, dir: string, home: string, reason:
   const first = LABEL_ORDER.map(prefix => labels.filter(l => l === prefix || l.startsWith(prefix)).sort()[0]).find(l => l !== undefined);
   return {
     ...(target !== clean(dir) ? { target } : {}),
-    ...(first !== undefined && reason === 'outside' ? { refusedAs: labelPhrase(first, [target, clean(dir)]) } : {}),
+    ...(first !== undefined && reason === 'outside' ? { refusedAs: labelPhrase(first) } : {}),
   };
 }
 
@@ -565,9 +611,30 @@ export function unscannedReason(reason: UnscannedSkillsDir['reason'], path = '<p
       return `not scanned: ${unscannedWhat(u)} ${refusedWhere(u, u?.refusedAs ?? REFUSED_PLACES)} — VASO doesn't walk it (locally or remotely); ${outsideAdvice(u, path)}`;
     case 'limit':
       return `not scanned: skills directory holds more than ${MAX_SKILL_TREE_ENTRIES} entries, over the limit VASO walks in a skills tree (locally or remotely) — not verified; review it with \`vaso skill audit ${path}\``;
+    case 'total':
+      return `not scanned: linked skills directory past the ${MAX_LINKED_SKILL_ENTRIES}-entry total VASO walks through the links of one skills tree (locally or remotely) — not verified; review it with \`vaso skill audit ${path}\``;
     case 'relative':
       return 'not scanned: skills directory set as a relative path, which the agent resolves against its working directory — not verified; set an absolute path';
   }
+}
+
+/**
+ * An unscanned skills directory refused for where it is (outside, the home)
+ * that isn't a directory at all — missing, or a link to /dev/null. A
+ * snapshot answers only for one the probe judged (it records the mode of a
+ * tree it refused when there is one); otherwise it may exist unseen.
+ */
+export async function unscannedRootMissing(fs: FSProvider, root: UnscannedSkillsDir): Promise<boolean> {
+  if (root.reason !== 'outside' && root.reason !== 'home') return false;
+  if (fs.kind === 'snapshot' && configTreeStatus(fs, root.path) === undefined && configTreeGap(fs, root.path) === undefined) return false;
+  // a snapshot keys paths normalized (`~/./a/../x` is `~/x` there)
+  const at = fs.kind === 'snapshot' && isAbsolute(root.path) ? posix.normalize(root.path) : root.path;
+  return !(await fs.stat(at).then(st => st.isDirectory(), () => false));
+}
+
+/** The sentence for an unscanned directory that isn't one (unscannedRootMissing): SKL-002 and the inventory. */
+export function missingRootReason(u: UnscannedSkillsDir): string {
+  return `not scanned: ${unscannedWhat(u)} ${u.path} (${unscannedShortReason(u)}) does not exist as a directory — nothing to scan`;
 }
 
 /** Why a skills directory went unscanned, in a few words. */
@@ -576,6 +643,7 @@ export function unscannedShortReason(u: Pick<UnscannedSkillsDir, 'reason'> & Par
     case 'home': return u.target ? `links to ${u.target}, the home directory itself` : 'the home directory itself';
     case 'outside': return u.target ? `links to ${u.target}, ${u.refusedAs ?? REFUSED_PLACES}` : (u.refusedAs ?? REFUSED_PLACES);
     case 'limit': return `over the ${MAX_SKILL_TREE_ENTRIES}-entry limit`;
+    case 'total': return `past the ${MAX_LINKED_SKILL_ENTRIES}-entry total for linked trees`;
     case 'relative': return 'set as a relative path';
   }
 }

@@ -235,12 +235,19 @@ export const picoclawAdapter: AgentAdapter = {
       // under $PICOCLAW_HOME is the agent's own
       const derived = workspaces.filter(w => !configSetWorkspace(main?.data, w, paths.workspaceRoot)).map(w => join(w, 'skills'));
       const screened = await screenSkillRoots(fs, workspaces.map(w => join(w, 'skills')).filter(d => !derived.includes(d)), userHome);
-      const unscanned = screened.unscanned;
+      // $PICOCLAW_BUILTIN_SKILLS is set like a config value: screened the
+      // same way (refused places, the entry limit); a relative one resolves
+      // against the agent's working directory, which no scan knows
+      const builtinRelative = builtinSkills !== undefined && builtinSkills !== '~' && !builtinSkills.startsWith('~/') && !isAbsolute(builtinSkills);
+      const builtin = builtinSkills === undefined
+        ? { scan: [], unscanned: [] }
+        : await screenSkillRoots(fs, builtinRelative ? [] : [cleanSkillRoot(expandHome(builtinSkills, userHome))], userHome, builtinRelative ? [builtinSkills] : []);
+      const unscanned = [...screened.unscanned, ...builtin.unscanned];
       const workspaceSkills = workspaces.map(w => join(w, 'skills')).filter(d => derived.includes(d) || screened.scan.includes(d));
       const skillsDirs = [
         ...workspaceSkills,
         join(paths.home, 'skills'),
-        ...(builtinSkills ? [cleanSkillRoot(expandHome(builtinSkills, userHome))] : []),
+        ...builtin.scan,
       ];
 
       const installs = await discoverCliInstalls(userHome, fs, {
@@ -501,6 +508,16 @@ export const picoclawAdapter: AgentAdapter = {
           kind: 'tree',
           keys: [['agents', 'list', '*', 'workspace']],
           globs: ['skills/**'],
+        },
+        // $PICOCLAW_BUILTIN_SKILLS: a skills tree only the environment sets,
+        // walked and screened like a config-set one (refusals, entry limit)
+        {
+          configs: [],
+          format: 'json',
+          kind: 'tree',
+          keys: [],
+          envFallback: 'PICOCLAW_BUILTIN_SKILLS',
+          globs: ['**'],
         },
       ],
     };

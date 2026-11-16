@@ -41,7 +41,9 @@ export interface ProbeManifest {
  * the config spells them).
  */
 export interface ConfigRootRequest {
-  /** Config files, in manifest path syntax (`~`, `${VAR}`, globs). */
+  /** Config files, in manifest path syntax (`~`, `${VAR}`, globs). Empty,
+   *  with `envFallback` set: that variable's value alone, for the probe's
+   *  own user (probe ≥ 1.4.2; older probes collect nothing for it). */
   configs: string[];
   format: 'json' | 'toml' | 'yaml';
   /** Key paths; `*` is every key of a mapping or item of an array. */
@@ -64,7 +66,7 @@ export interface ConfigRootRequest {
 }
 
 /** What the probe did with a config-derived tree (`ProbeSnapshot.configTrees`). */
-export type ConfigTreeStatus = 'collected' | 'refused' | 'limit';
+export type ConfigTreeStatus = 'collected' | 'refused' | 'limit' | 'total';
 
 /** What a snapshot holds for an envPresence variable that is set. */
 export const ENV_PRESENT_VALUE = 'set';
@@ -120,8 +122,15 @@ export interface ProbeSnapshot {
   /** Config-derived trees (probe newer than 1.4.1), by literal base path (a
    *  wildcard base is recorded per match): collected (absent files are
    *  absent), refused (a base no tree is walked from) or over the probe's
-   *  entry limit (not collected). At most 2000; compared as plain strings. */
+   *  entry limit (not collected). At most 2000; compared as plain strings.
+   *  Also (probe ≥ 1.5.0) each directory link in a skills tree not followed
+   *  for size — over the entry limit (`limit`) or past what the tree's links
+   *  may hold together (`total`) — at most 20000 more. */
   configTrees?: Record<string, ConfigTreeStatus>;
+  /** More links in skills trees went unfollowed for size than configTrees
+   *  records: after that the probe followed no directory link in a skills
+   *  tree (probe ≥ 1.5.0). */
+  skillLinksTruncated?: boolean;
   /** Where a scanned home — or a directory naming a home the other way, met
    *  as a config tree's wildcard directory — resolves to, when that differs
    *  from its spelling (probe newer than 1.4.1). Read only when judging

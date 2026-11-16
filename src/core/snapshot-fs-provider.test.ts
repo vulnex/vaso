@@ -64,6 +64,46 @@ describe('links inside a tree walked through a link', () => {
   });
 });
 
+describe('links nested more than one link deep (Nix layouts)', () => {
+  const snap = (symlinks: Record<string, string>, files: ProbeSnapshot['files'] = {}) =>
+    new SnapshotFSProvider(makeSnapshot({ homedir: '/home/u', symlinks, files }));
+
+  it('a link inside a linked skill resolves through both spellings', async () => {
+    // ~/.claude/skills → /o/profile/skills; evil → ../../store/h-dir; inside it sub → ../h-sub
+    const fs = snap({
+      '/home/u/.claude/skills': '/o/profile/skills',
+      '/home/u/.claude/skills/evil': '../../store/h-dir',
+      '/home/u/.claude/skills/evil/sub': '../h-sub',
+    }, { '/home/u/.claude/skills/evil/sub/i.sh': { content: 'x', mode: 0o644, exists: true } });
+    expect(await fs.realpath('/home/u/.claude/skills/evil/sub')).toBe('/o/store/h-sub');
+    expect(await fs.realpath('/home/u/.claude/skills/evil/sub/i.sh')).toBe('/o/store/h-sub/i.sh');
+    expect(await fs.readlink('/o/store/h-dir/sub')).toBe('../h-sub');
+  });
+
+  it('a link reached through a second linked directory in the home (~/.nix-profile)', async () => {
+    // ~/.claude/skills → ../.nix-profile/share/skills; ~/.nix-profile → /o/prof; evil → ../../../store/h-evil
+    const fs = snap({
+      '/home/u/.claude/skills': '../.nix-profile/share/skills',
+      '/home/u/.nix-profile': '/o/prof',
+      '/home/u/.claude/skills/evil': '../../../store/h-evil',
+    });
+    expect(await fs.realpath('/home/u/.claude/skills/evil')).toBe('/o/store/h-evil');
+    expect(await fs.readlink('/o/prof/share/skills/evil')).toBe('../../../store/h-evil');
+  });
+
+  it('a chain of links several deep; a loop gives up', async () => {
+    const fs = snap({
+      '/home/u/s': '/a/1',
+      '/home/u/s/x': '../2',
+      '/home/u/s/x/y': '../3',
+      '/home/u/s/x/y/z': '../4',
+    });
+    expect(await fs.realpath('/home/u/s/x/y/z')).toBe('/a/4');
+    const loop = snap({ '/home/u/p': '/home/u/q', '/home/u/q': '/home/u/p' });
+    expect(await loop.realpath('/home/u/p')).toBe('/home/u/p');
+  });
+});
+
 describe('SnapshotFSProvider', () => {
   // ---------------------------------------------------------------------------
   // readFile

@@ -12,6 +12,19 @@ export function skillsDirsOf(ctx: ScanContext): string[] {
   return getAllSkillsDirs(ctx.installation);
 }
 
+/** How many items a message lists before "… and N more" (SKL-002 evidence lists every one). */
+export const MAX_LISTED_IN_MESSAGE = 20;
+
+/**
+ * `items` joined for a one-line message, the first MAX_LISTED_IN_MESSAGE
+ * only: a skills directory holding thousands of links over the entry limit
+ * must not turn every skill check's message into a list of all of them.
+ */
+export function cappedList(items: readonly string[], max = MAX_LISTED_IN_MESSAGE): string {
+  if (items.length <= max) return items.join(', ');
+  return `${items.slice(0, max).join(', ')} … and ${items.length - max} more`;
+}
+
 /** Why a skills directory went unscanned, in a few words. */
 export function unscannedShort(u: UnscannedSkillsDir): string {
   return unscannedShortReason(u);
@@ -28,7 +41,7 @@ export function noSkillsDirResult(ctx: ScanContext, h: CheckHelpers, none = 'No 
   if (skillsDirsOf(ctx).length > 0) return undefined;
   const unscanned = ctx.installation.unscannedSkillsDirs ?? [];
   if (unscanned.length === 0) return h.passed(none);
-  const list = unscanned.map(u => `${u.path} (${unscannedShort(u)})`).join(', ');
+  const list = cappedList(unscanned.map(u => `${u.path} (${unscannedShort(u)})`));
   return h.passed(`Not verified — skills directory ${list} not scanned; reported by SKL-002`);
 }
 
@@ -58,7 +71,7 @@ export function notingUnscannedRoots(check: CheckModule): CheckModule {
 export function unscannedRootsNote(ctx: ScanContext): string {
   const unscanned = ctx.installation.unscannedSkillsDirs ?? [];
   if (unscanned.length === 0 || skillsDirsOf(ctx).length === 0) return '';
-  const list = unscanned.map(u => u.path).join(', ');
+  const list = cappedList(unscanned.map(u => u.path));
   return ` (skills ${unscanned.length === 1 ? 'directory' : 'directories'} ${list} not scanned; see SKL-002)`;
 }
 

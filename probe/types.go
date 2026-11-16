@@ -93,7 +93,13 @@ type ProbeSnapshot struct {
 	// pattern for a wildcard base such as <dir>/workspace-*/skills): whether
 	// it was collected, refused (a base no tree is walked from) or over the
 	// entry limit. Only a collected tree's absence of files means "empty".
+	// Also each directory link in a skills tree that was not followed for
+	// size: over the entry limit ("limit") or past the links' total ("total").
 	ConfigTrees map[string]string `json:"configTrees,omitempty"`
+	// More links in skills trees went unfollowed for size than ConfigTrees
+	// records (maxLinkRecords): after that no directory link in a skills tree
+	// was followed, and an unrecorded one with nothing under it is not verified.
+	SkillLinksTruncated bool `json:"skillLinksTruncated,omitempty"`
 	// Where a scanned home, or a directory naming a home the other way (a
 	// config's workspace spelled through a link to the home), resolves to —
 	// only when that differs from its spelling. The CLI resolves either
