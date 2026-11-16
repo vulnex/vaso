@@ -108,3 +108,21 @@ describe('SQL taint: MySQL double-quoted literals, two-name && guards', () => {
     expect(queries(code)).toHaveLength(1);
   });
 });
+
+describe('SQL taint: one-of guards and assignments inside a guard', () => {
+  it.each([
+    ['x !== a && x !== b, value in the alternate', tool('  const dir = name !== "asc" && name !== "desc" ? "asc" : name;\n  await pool.query(`SELECT * FROM users ORDER BY id ${dir}`);')],
+    ['x === a || x === b, value in the consequent', tool('  const dir = name === "asc" || name === "desc" ? name : "asc";\n  await pool.query(`SELECT * FROM users ORDER BY id ${dir}`);')],
+  ])('%s is safe', (_label, code) => {
+    expect(queries(code)).toEqual([]);
+  });
+
+  it.each([
+    ['x !== a && y !== b, value in the alternate', tool('  const dir = name !== "asc" && o !== "desc" ? "asc" : name;\n  await pool.query(`SELECT * FROM users ORDER BY id ${dir}`);', '{ name: z.string(), o: z.string() }', '{ name, o }')],
+    ['x !== a && x !== b, value in the consequent', tool('  const dir = name !== "asc" && name !== "desc" ? name : "asc";\n  await pool.query(`SELECT * FROM users ORDER BY id ${dir}`);')],
+    ['a sequence assignment inside an && guard', 'const ALLOWED = ["id", "name"];\n' + tool('  let col = "id";\n  const c = ALLOWED.includes(col) && (col = name, true) ? col : "id";\n  await pool.query(`SELECT * FROM users ORDER BY ${c}`);')],
+    ['an assignment inside an && guard', 'const ALLOWED = ["id", "name"];\n' + tool('  let cc = "id";\n  const c = ALLOWED.includes(cc) && (cc = name) ? cc : "id";\n  await pool.query(`SELECT * FROM users ORDER BY ${c}`);')],
+  ])('%s stays injection', (_label, code) => {
+    expect(queries(code)).toHaveLength(1);
+  });
+});
