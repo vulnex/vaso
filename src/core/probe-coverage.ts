@@ -25,6 +25,7 @@ import type { ConfigTreeStatus } from './snapshot-types.js';
 interface SnapshotRecords {
   collected?(path: string): boolean;
   holdsUnder?(dir: string): boolean;
+  holdsContentUnder?(dir: string): boolean;
   configTrees?(): Readonly<Record<string, ConfigTreeStatus>>;
   listing?(dir: string): readonly string[] | undefined;
   wildcardNames?(): Readonly<Record<string, readonly string[]>>;
@@ -280,7 +281,11 @@ function linkedGap(fs: FSProvider, c: Compiled, chain: readonly string[]): 'refu
     if (status === undefined) continue;
     if (status === 'collected') return undefined;
     if (!chain.slice(i).some(d => c.recursive.some(r => r.test(d)))) return undefined;
-    return holds.call(fs, chain[0]) ? undefined : status;
+    // Recorded for the directory itself (a default skills directory linked
+    // out of the home): a listing of it — names and link targets, which the
+    // manifest asks for — is not its tree
+    const exact = i === 0 ? (fs as SnapshotRecords).holdsContentUnder : undefined;
+    return (exact ?? holds).call(fs, chain[0]) ? undefined : status;
   }
   return undefined;
 }
