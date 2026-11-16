@@ -19,11 +19,11 @@ describe('OpenClaw skill roots', () => {
       directories: {}, commandOutputs: {}, env: {},
     });
     const [install] = (await openclawAdapter.detect({ fs })).filter(i => !i.agentName);
-    expect(install.skillsDirs).toEqual(['/home/u/.openclaw/skills', '/home/u/ws/skills', '/home/u/packs']);
-    // outside the home, the home itself, a relative path: never walked, reported
+    // out of the home where skills live (/srv): walked
+    expect(install.skillsDirs).toEqual(['/home/u/.openclaw/skills', '/home/u/ws/skills', '/home/u/packs', '/srv/packs']);
+    // the filesystem root, the home itself, a relative path: never walked, reported
     expect(install.unscannedSkillsDirs).toEqual([
-      { path: '/srv/packs', reason: 'outside' },
-      { path: '/', reason: 'outside' },
+      { path: '/', reason: 'outside', refusedAs: 'the filesystem root' },
       { path: '/home/u', reason: 'home' },
       { path: 'rel/skills', reason: 'relative' },
     ]);

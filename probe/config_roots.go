@@ -319,21 +319,29 @@ func (c *collector) collectConfigTree(snapshot *ProbeSnapshot, root, g, home str
 	}
 	// The directory the first wildcard segment ranges over, and the ones it
 	// matches, are listed (names only) when a tree could be walked there; a
-	// home is never listed — a match missing below it stays not verified
+	// home is never listed — only the names its wildcard matches are recorded
+	// (WildcardNames), so a derived match that doesn't exist reads as missing
 	static, rest := doublestar.SplitPattern(base)
 	staticDir := filepath.FromSlash(static)
 	escapedStatic, ok := escapeGlobMeta(staticDir)
-	// The home itself, spelled the other way (a workspace set through a link
-	// to the home): its resolution is recorded, so the CLI can tell matches
-	// spelled that way are in the home
+	// The home itself, either spelling (a workspace set in the home, or
+	// through a link to it): its resolution is recorded, so the CLI can tell
+	// matches spelled the other way are in the home, and so are the names
+	// its wildcard matches there
+	first := strings.SplitN(rest, "/", 2)[0]
+	listMatches := false
 	if home != "" && !treeAllowed(staticDir, home) && resolveExisting(filepath.Clean(staticDir)) == resolveExisting(filepath.Clean(home)) {
 		recordResolvedDir(snapshot, staticDir)
+		recordWildcardNames(snapshot, staticDir, first)
+		listMatches = true
 	}
 	if ok && treeAllowed(staticDir, home) {
-		first := strings.SplitN(rest, "/", 2)[0]
 		if listing := collectDirectory(staticDir, snapshot.Symlinks); listing != nil {
 			snapshot.Directories[staticDir] = listing
 		}
+		listMatches = true
+	}
+	if ok && listMatches {
 		if dirs, err := doublestar.FilepathGlob(filepath.Join(escapedStatic, first), doublestar.WithNoFollow()); err == nil {
 			for _, d := range dirs {
 				if !treeAllowed(d, home) {
@@ -350,6 +358,40 @@ func (c *collector) collectConfigTree(snapshot *ProbeSnapshot, root, g, home str
 	for _, m := range expandFollowingDirLinks(filepath.FromSlash(base)) {
 		c.collectConfigBase(snapshot, m, home)
 	}
+}
+
+// maxWildcardNames bounds one WildcardNames entry; a directory with more
+// matches is not recorded (its matches stay not verified).
+const maxWildcardNames = 1000
+
+// recordWildcardNames records the names in dir (a home, never listed) that
+// the wildcard segment seg matches — only those names.
+func recordWildcardNames(snapshot *ProbeSnapshot, dir, seg string) {
+	if seg == "" || !strings.ContainsAny(seg, "*?[{") || strings.Contains(seg, "**") {
+		return
+	}
+	key := filepath.ToSlash(filepath.Join(dir, seg))
+	if _, done := snapshot.WildcardNames[key]; done || len(snapshot.WildcardNames) >= maxConfigTrees {
+		return
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	names := []string{}
+	for _, e := range entries {
+		if ok, _ := doublestar.Match(seg, e.Name()); ok {
+			if len(names) >= maxWildcardNames {
+				return
+			}
+			names = append(names, e.Name())
+		}
+	}
+	sort.Strings(names)
+	if snapshot.WildcardNames == nil {
+		snapshot.WildcardNames = make(map[string][]string)
+	}
+	snapshot.WildcardNames[key] = names
 }
 
 // maxResolvedDirs bounds ResolvedDirs (homes, and home spellings met as a
@@ -462,9 +504,9 @@ func throughLink(static, p string) bool {
 // collectLinkedSkillBases walks, for a manifest skills glob with wildcard
 // directories (`~/.picoclaw/workspace-*/skills/**`), the bases its no-follow
 // glob couldn't enter because a matched directory is a link: as a
-// config-derived tree (treeAllowed — inside the scanned home, outside every
-// credential store), recorded in ConfigTrees under the linked path, so the
-// CLI reports one it refused or capped as not scanned instead of empty.
+// config-derived tree (treeAllowed — see skill_scope.go), recorded in
+// ConfigTrees under the linked path, so the CLI reports one it refused or
+// capped as not scanned instead of empty.
 func (c *collector) collectLinkedSkillBases(snapshot *ProbeSnapshot, pattern string) {
 	slash := filepath.ToSlash(pattern)
 	if !strings.HasSuffix(slash, "/**") {
@@ -491,7 +533,7 @@ func (c *collector) collectLinkedSkillBases(snapshot *ProbeSnapshot, pattern str
 // glob couldn't reach because a matched directory is a link
 // (session-state/<id> → ~/sess): metadata only, under the linked path, and
 // only where the link stays inside the home and outside credential stores
-// (treeAllowed) — as a local scan judges the files it finds behind it.
+// (inHomeOutsideStores) — as a local scan judges the files it finds behind it.
 func (c *collector) followLinkedMetadata(snapshot *ProbeSnapshot, pattern string) {
 	slash := filepath.ToSlash(pattern)
 	static, rest := doublestar.SplitPattern(slash)
@@ -507,7 +549,7 @@ func (c *collector) followLinkedMetadata(snapshot *ProbeSnapshot, pattern string
 			continue
 		}
 		home := c.homeOf(m)
-		if home == "" || !treeAllowed(m, home) {
+		if home == "" || !inHomeOutsideStores(m, home) {
 			continue
 		}
 		recordSymlink(snapshot.Symlinks, m)
@@ -543,20 +585,25 @@ func (c *collector) homeOf(p string) string {
 	return best
 }
 
-// refuseLinkedSkillBase: the static base of a manifest skills glob
-// (~/.picoclaw/workspace/skills, ~/.claude/skills) lies in a home as written
-// but a link takes it out of the home or into a credential store — the same
-// rule as a config-derived tree's (treeAllowed). It is not walked, and is
-// recorded refused with the links that lead there, so local and remote scans
-// both report it not scanned instead of one reading what it points to.
-func (c *collector) refuseLinkedSkillBase(snapshot *ProbeSnapshot, pattern string) bool {
+// linkedOutSkillBase: the static base of a manifest skills glob
+// (~/.claude/skills, ~/.picoclaw/workspace/skills) lies in a home as written
+// but a link — the directory itself or one above it, ~/.claude → another
+// volume — takes it out of the home or into a place no skills tree is walked
+// (treeAllowed). It is walked as a config-derived tree when treeAllowed
+// (content disguised, credential-named files metadata only, entry cap) and
+// recorded refused otherwise, with the links that lead there — as local scans
+// walk or refuse it (src/core/skill-root-scope.ts).
+func (c *collector) linkedOutSkillBase(snapshot *ProbeSnapshot, pattern string) bool {
 	base := globBase(pattern)
 	if !filepath.IsAbs(base) || c.scannedHomeOrAbove(base) {
 		return false
 	}
 	home := c.homeOf(base)
-	if home == "" || !strictlyWithin(filepath.Clean(base), home) || len(sinkSet(base)) > 0 || treeAllowed(base, home) {
+	if home == "" || !strictlyWithin(filepath.Clean(base), home) || len(sinkSet(base)) > 0 {
 		return false
+	}
+	if strictlyWithin(resolveExisting(filepath.Clean(base)), resolveExisting(home)) && treeAllowed(base, home) {
+		return false // stays in the home: an ordinary manifest tree
 	}
 	if snapshot.ConfigTrees == nil {
 		snapshot.ConfigTrees = make(map[string]string)
@@ -617,15 +664,11 @@ func (c *collector) scannedHomeOrAbove(p string) bool {
 	return false
 }
 
-// treeAllowed is the one place a config-derived tree may be walked from, and
-// what a link met while walking one may lead to: once resolved, strictly
-// inside home — the home of the user whose config named it, resolved too, so
-// either spelling of a linked home (/home → /var/home) is the home — and
-// outside every credential store (SENSITIVE_SINKS), both as written and once
-// resolved. Anything else (/, /etc or /private/etc, other users' homes, the
-// home itself, ~/.ssh, ~/.config/gh, a link out of the home) is refused; the
-// CLI applies the same rule to local scans (src/core/skill-root-scope.ts).
-func treeAllowed(p, home string) bool {
+// inHomeOutsideStores: once resolved, p lies strictly inside home (resolved
+// too, so either spelling of a linked home is the home) and outside every
+// credential store, as written and resolved — where a linked metadata folder
+// (followLinkedMetadata) is followed. Skills trees use treeAllowed.
+func inHomeOutsideStores(p, home string) bool {
 	p, home = filepath.Clean(p), filepath.Clean(home)
 	if !filepath.IsAbs(p) || !filepath.IsAbs(home) || home == string(filepath.Separator) {
 		return false

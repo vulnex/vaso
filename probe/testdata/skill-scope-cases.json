@@ -1,0 +1,727 @@
+[
+ {
+  "path": "/",
+  "own": [
+   "/home/u"
+  ],
+  "all": [
+   "/home/u"
+  ],
+  "labels": [
+   "root"
+  ]
+ },
+ {
+  "path": "/home/u",
+  "own": [
+   "/home/u"
+  ],
+  "all": [
+   "/home/u"
+  ],
+  "labels": [
+   "home"
+  ]
+ },
+ {
+  "path": "/home",
+  "own": [
+   "/home/u"
+  ],
+  "all": [
+   "/home/u"
+  ],
+  "labels": [
+   "home"
+  ]
+ },
+ {
+  "path": "/home/u/",
+  "own": [
+   "/home/u"
+  ],
+  "all": [
+   "/home/u"
+  ],
+  "labels": [
+   "home"
+  ]
+ },
+ {
+  "path": "/home/u/.claude/skills",
+  "own": [
+   "/home/u"
+  ],
+  "all": [
+   "/home/u"
+  ],
+  "labels": []
+ },
+ {
+  "path": "/home/u/.ssh",
+  "own": [
+   "/home/u"
+  ],
+  "all": [
+   "/home/u"
+  ],
+  "labels": [
+   "sink:0"
+  ]
+ },
+ {
+  "path": "/home/u/.ssh/skills",
+  "own": [
+   "/home/u"
+  ],
+  "all": [
+   "/home/u"
+  ],
+  "labels": [
+   "sink:0"
+  ]
+ },
+ {
+  "path": "/home/u/.config/gh",
+  "own": [
+   "/home/u"
+  ],
+  "all": [
+   "/home/u"
+  ],
+  "labels": [
+   "sink:8"
+  ]
+ },
+ {
+  "path": "/home/bob/skills",
+  "own": [
+   "/home/u"
+  ],
+  "all": [
+   "/home/u"
+  ],
+  "labels": [
+   "other-home:/home/bob"
+  ]
+ },
+ {
+  "path": "/home/bob",
+  "own": [
+   "/home/u"
+  ],
+  "all": [
+   "/home/u"
+  ],
+  "labels": [
+   "other-home:/home/bob"
+  ]
+ },
+ {
+  "path": "/home/u/../bob/x",
+  "own": [
+   "/home/u"
+  ],
+  "all": [
+   "/home/u"
+  ],
+  "labels": [
+   "other-home:/home/bob"
+  ]
+ },
+ {
+  "path": "/Users/bob/x",
+  "own": [
+   "/Users/u"
+  ],
+  "all": [
+   "/Users/u"
+  ],
+  "labels": [
+   "other-home:/Users/bob"
+  ]
+ },
+ {
+  "path": "/Users",
+  "own": [
+   "/tmp/h"
+  ],
+  "all": [
+   "/tmp/h"
+  ],
+  "labels": [
+   "other-home:/Users"
+  ]
+ },
+ {
+  "path": "/home",
+  "own": [
+   "/tmp/h"
+  ],
+  "all": [
+   "/tmp/h"
+  ],
+  "labels": [
+   "other-home:/home"
+  ]
+ },
+ {
+  "path": "/Users/Shared/skills",
+  "own": [
+   "/Users/u"
+  ],
+  "all": [
+   "/Users/u"
+  ],
+  "labels": [
+   "other-home:/Users/Shared"
+  ]
+ },
+ {
+  "path": "/Users/alice/fx-store/skills",
+  "own": [
+   "/Users/alice/fx/home"
+  ],
+  "all": [
+   "/Users/alice/fx/home"
+  ],
+  "labels": []
+ },
+ {
+  "path": "/Users/alice",
+  "own": [
+   "/Users/alice/fx/home"
+  ],
+  "all": [
+   "/Users/alice/fx/home"
+  ],
+  "labels": [
+   "home"
+  ]
+ },
+ {
+  "path": "/root/skills",
+  "own": [
+   "/home/u"
+  ],
+  "all": [
+   "/home/u"
+  ],
+  "labels": [
+   "other-home:/root"
+  ]
+ },
+ {
+  "path": "/root/skills",
+  "own": [
+   "/root"
+  ],
+  "all": [
+   "/root"
+  ],
+  "labels": []
+ },
+ {
+  "path": "/var/root/skills",
+  "own": [
+   "/var/root"
+  ],
+  "all": [
+   "/var/root"
+  ],
+  "labels": []
+ },
+ {
+  "path": "/var/root/skills",
+  "own": [
+   "/Users/u"
+  ],
+  "all": [
+   "/Users/u"
+  ],
+  "labels": [
+   "system:/var"
+  ]
+ },
+ {
+  "path": "/etc",
+  "own": [
+   "/home/u"
+  ],
+  "all": [
+   "/home/u"
+  ],
+  "labels": [
+   "sink:7",
+   "system:/etc"
+  ]
+ },
+ {
+  "path": "/etc/skills",
+  "own": [
+   "/home/u"
+  ],
+  "all": [
+   "/home/u"
+  ],
+  "labels": [
+   "sink:7",
+   "system:/etc"
+  ]
+ },
+ {
+  "path": "/opt/a/../../etc",
+  "own": [
+   "/home/u"
+  ],
+  "all": [
+   "/home/u"
+  ],
+  "labels": [
+   "sink:7",
+   "system:/etc"
+  ]
+ },
+ {
+  "path": "/private/etc/x",
+  "own": [
+   "/Users/u"
+  ],
+  "all": [
+   "/Users/u"
+  ],
+  "labels": [
+   "system:/etc"
+  ]
+ },
+ {
+  "path": "/private",
+  "own": [
+   "/Users/u"
+  ],
+  "all": [
+   "/Users/u"
+  ],
+  "labels": [
+   "system:/private"
+  ]
+ },
+ {
+  "path": "/private/var/folders/x/T/skills",
+  "own": [
+   "/Users/u"
+  ],
+  "all": [
+   "/Users/u"
+  ],
+  "labels": [
+   "system:/var"
+  ]
+ },
+ {
+  "path": "/private/tmp/skills",
+  "own": [
+   "/Users/u"
+  ],
+  "all": [
+   "/Users/u"
+  ],
+  "labels": []
+ },
+ {
+  "path": "/tmp/skills",
+  "own": [
+   "/home/u"
+  ],
+  "all": [
+   "/home/u"
+  ],
+  "labels": []
+ },
+ {
+  "path": "/usr/local/share/skills",
+  "own": [
+   "/home/u"
+  ],
+  "all": [
+   "/home/u"
+  ],
+  "labels": [
+   "system:/usr"
+  ]
+ },
+ {
+  "path": "/USR/x",
+  "own": [
+   "/home/u"
+  ],
+  "all": [
+   "/home/u"
+  ],
+  "labels": [
+   "system:/usr"
+  ]
+ },
+ {
+  "path": "/lib64/x",
+  "own": [
+   "/home/u"
+  ],
+  "all": [
+   "/home/u"
+  ],
+  "labels": [
+   "system:/lib64"
+  ]
+ },
+ {
+  "path": "/libexec/x",
+  "own": [
+   "/home/u"
+  ],
+  "all": [
+   "/home/u"
+  ],
+  "labels": [
+   "system:/libexec"
+  ]
+ },
+ {
+  "path": "/System/Library/x",
+  "own": [
+   "/Users/u"
+  ],
+  "all": [
+   "/Users/u"
+  ],
+  "labels": [
+   "system:/system"
+  ]
+ },
+ {
+  "path": "/Library/Application Support/x",
+  "own": [
+   "/Users/u"
+  ],
+  "all": [
+   "/Users/u"
+  ],
+  "labels": [
+   "system:/library"
+  ]
+ },
+ {
+  "path": "/Library/Keychains",
+  "own": [
+   "/Users/u"
+  ],
+  "all": [
+   "/Users/u"
+  ],
+  "labels": [
+   "sink:12",
+   "system:/library"
+  ]
+ },
+ {
+  "path": "/Users/u/Library/Keychains/x",
+  "own": [
+   "/Users/u"
+  ],
+  "all": [
+   "/Users/u"
+  ],
+  "labels": [
+   "sink:12"
+  ]
+ },
+ {
+  "path": "/bin",
+  "own": [
+   "/home/u"
+  ],
+  "all": [
+   "/home/u"
+  ],
+  "labels": [
+   "system:/bin"
+  ]
+ },
+ {
+  "path": "/sbin/x",
+  "own": [
+   "/home/u"
+  ],
+  "all": [
+   "/home/u"
+  ],
+  "labels": [
+   "system:/sbin"
+  ]
+ },
+ {
+  "path": "/dev/x",
+  "own": [
+   "/home/u"
+  ],
+  "all": [
+   "/home/u"
+  ],
+  "labels": [
+   "system:/dev"
+  ]
+ },
+ {
+  "path": "/proc/1/root",
+  "own": [
+   "/home/u"
+  ],
+  "all": [
+   "/home/u"
+  ],
+  "labels": [
+   "system:/proc"
+  ]
+ },
+ {
+  "path": "/sys/kernel",
+  "own": [
+   "/home/u"
+  ],
+  "all": [
+   "/home/u"
+  ],
+  "labels": [
+   "system:/sys"
+  ]
+ },
+ {
+  "path": "/boot/x",
+  "own": [
+   "/home/u"
+  ],
+  "all": [
+   "/home/u"
+  ],
+  "labels": [
+   "system:/boot"
+  ]
+ },
+ {
+  "path": "/run/user/1000",
+  "own": [
+   "/home/u"
+  ],
+  "all": [
+   "/home/u"
+  ],
+  "labels": [
+   "system:/run"
+  ]
+ },
+ {
+  "path": "/opt/skills",
+  "own": [
+   "/home/u"
+  ],
+  "all": [
+   "/home/u"
+  ],
+  "labels": []
+ },
+ {
+  "path": "/opt/team-skills/a",
+  "own": [
+   "/home/u"
+  ],
+  "all": [
+   "/home/u"
+  ],
+  "labels": []
+ },
+ {
+  "path": "/srv/skills",
+  "own": [
+   "/home/u"
+  ],
+  "all": [
+   "/home/u"
+  ],
+  "labels": []
+ },
+ {
+  "path": "/nix/store/abc-hm/.claude/skills",
+  "own": [
+   "/home/u"
+  ],
+  "all": [
+   "/home/u"
+  ],
+  "labels": []
+ },
+ {
+  "path": "/Volumes/Team/skills",
+  "own": [
+   "/Users/u"
+  ],
+  "all": [
+   "/Users/u"
+  ],
+  "labels": []
+ },
+ {
+  "path": "/mnt/data/skills",
+  "own": [
+   "/home/u"
+  ],
+  "all": [
+   "/home/u"
+  ],
+  "labels": []
+ },
+ {
+  "path": "/media/usb/skills",
+  "own": [
+   "/home/u"
+  ],
+  "all": [
+   "/home/u"
+  ],
+  "labels": []
+ },
+ {
+  "path": "/opt/x/.aws/y",
+  "own": [
+   "/home/u"
+  ],
+  "all": [
+   "/home/u"
+  ],
+  "labels": [
+   "sink:2"
+  ]
+ },
+ {
+  "path": "/var/home/u/skills",
+  "own": [
+   "/home/u",
+   "/var/home/u"
+  ],
+  "all": [
+   "/home/u",
+   "/var/home/u"
+  ],
+  "labels": []
+ },
+ {
+  "path": "/var/home/bob/x",
+  "own": [
+   "/home/u",
+   "/var/home/u"
+  ],
+  "all": [
+   "/home/u",
+   "/var/home/u"
+  ],
+  "labels": [
+   "system:/var"
+  ]
+ },
+ {
+  "path": "/var/folders/T/home/.claude/skills",
+  "own": [
+   "/var/folders/T/home"
+  ],
+  "all": [
+   "/var/folders/T/home"
+  ],
+  "labels": []
+ },
+ {
+  "path": "/var/folders/T/outside/skills",
+  "own": [
+   "/var/folders/T/home"
+  ],
+  "all": [
+   "/var/folders/T/home"
+  ],
+  "labels": [
+   "system:/var"
+  ]
+ },
+ {
+  "path": "/var/folders/T",
+  "own": [
+   "/var/folders/T/home"
+  ],
+  "all": [
+   "/var/folders/T/home"
+  ],
+  "labels": [
+   "home"
+  ]
+ },
+ {
+  "path": "/usr/lib/node_modules/openclaw/skills",
+  "own": [],
+  "all": [
+   "/home/u"
+  ],
+  "labels": [
+   "system:/usr"
+  ]
+ },
+ {
+  "path": "/home/alice/.claude/skills",
+  "own": [],
+  "all": [
+   "/root"
+  ],
+  "labels": [
+   "other-home:/home/alice"
+  ]
+ },
+ {
+  "path": "/root/x",
+  "own": [],
+  "all": [
+   "/root"
+  ],
+  "labels": []
+ },
+ {
+  "path": "/home/alice/x",
+  "own": [
+   "/home/alice"
+  ],
+  "all": [
+   "/home/alice",
+   "/root"
+  ],
+  "labels": []
+ },
+ {
+  "path": "/root/x",
+  "own": [
+   "/home/alice"
+  ],
+  "all": [
+   "/home/alice",
+   "/root"
+  ],
+  "labels": []
+ },
+ {
+  "path": "/home/bob",
+  "own": [
+   "/home/alice"
+  ],
+  "all": [
+   "/home/alice",
+   "/home/bob"
+  ],
+  "labels": [
+   "home"
+  ]
+ }
+]

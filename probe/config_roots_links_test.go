@@ -8,34 +8,50 @@ import (
 )
 
 // An agent's own skills directory (a manifest glob's static base) linked out
-// of the home or into a credential store is refused like a config-derived
-// tree, with the links that lead there recorded; linked inside the home it
-// is walked as before.
-func TestLinkedDefaultSkillBasesAreRefusedOutsideTheHome(t *testing.T) {
+// of the home is walked as a config-derived tree (disguised, capped) where a
+// skills tree may be walked — another volume, a home-manager store — and
+// refused, with the links that lead there recorded, in an OS directory or a
+// credential store; linked inside the home it is walked as before.
+func TestLinkedDefaultSkillBasesOutsideTheHome(t *testing.T) {
 	home := setupHome(t)
-	outside := filepath.Join(filepath.Dir(home), "elsewhere")
-	write(t, filepath.Join(outside, "skills", "o", "SKILL.md"), "OUTSIDE-CANARY\n", 0o644)
+	outside := allowedOutside(t)
+	write(t, filepath.Join(outside, "skills", "o", "SKILL.md"), "# outside skill\n", 0o644)
+	write(t, filepath.Join(outside, "vol", "claude", "skills", "v", "SKILL.md"), "# volume skill\n", 0o644)
 	write(t, filepath.Join(home, ".ssh", "id_canary"), "SSH-CANARY\n", 0o600)
 	write(t, filepath.Join(home, "dotfiles", "codex", "skills", "c", "SKILL.md"), "# c\n", 0o644)
 	mustSymlink(t, outside, filepath.Join(home, ".picoclaw", "workspace"))
 	mustSymlink(t, filepath.Join(home, ".ssh"), filepath.Join(home, ".claude", "skills"))
 	mustSymlink(t, filepath.Join(home, "dotfiles", "codex"), filepath.Join(home, ".codex"))
+	mustSymlink(t, filepath.Join(outside, "vol", "claude"), filepath.Join(home, ".cfgvol"))
+	mustSymlink(t, "/etc", filepath.Join(home, ".gemini", "skills"))
 	snap := Collect(ProbeManifest{GlobPatterns: []string{
 		"~/.picoclaw/workspace/skills/**", "~/.claude/skills/**", "~/.codex/skills/**", "~/.qwen/skills/**",
+		"~/.cfgvol/skills/**", "~/.gemini/skills/**",
 	}}, false)
-	for _, p := range []string{filepath.Join(home, ".picoclaw", "workspace", "skills"), filepath.Join(home, ".claude", "skills")} {
+	for _, p := range []string{filepath.Join(home, ".picoclaw", "workspace", "skills"), filepath.Join(home, ".cfgvol", "skills")} {
+		if snap.ConfigTrees[p] != treeCollected {
+			t.Errorf("%s: %q, want collected", p, snap.ConfigTrees[p])
+		}
+	}
+	if e := snap.Files[filepath.Join(home, ".picoclaw", "workspace", "skills", "o", "SKILL.md")]; e.Content == "" {
+		t.Errorf("skill behind a link out of the home not collected")
+	}
+	if e := snap.Files[filepath.Join(home, ".cfgvol", "skills", "v", "SKILL.md")]; e.Content == "" {
+		t.Errorf("skill behind a linked parent directory not collected")
+	}
+	for _, p := range []string{filepath.Join(home, ".claude", "skills"), filepath.Join(home, ".gemini", "skills")} {
 		if snap.ConfigTrees[p] != treeRefused {
 			t.Errorf("%s: %q, want refused", p, snap.ConfigTrees[p])
 		}
 	}
-	if snap.Symlinks[filepath.Join(home, ".picoclaw", "workspace")] != outside {
-		t.Errorf("the link out of the home is not recorded: %v", snap.Symlinks)
-	}
 	if snap.Symlinks[filepath.Join(home, ".claude", "skills")] != filepath.Join(home, ".ssh") {
 		t.Errorf("the link into ~/.ssh is not recorded: %v", snap.Symlinks)
 	}
+	if snap.Symlinks[filepath.Join(home, ".gemini", "skills")] != "/etc" {
+		t.Errorf("the link into /etc is not recorded: %v", snap.Symlinks)
+	}
 	if _, ok := snap.ConfigTrees[filepath.Join(home, ".codex", "skills")]; ok {
-		t.Errorf("a link inside the home is refused")
+		t.Errorf("a link inside the home is walked as a config tree")
 	}
 	if e := snap.Files[filepath.Join(home, ".codex", "skills", "c", "SKILL.md")]; e.Content == "" {
 		t.Errorf("skill behind an in-home link not collected")
@@ -47,6 +63,9 @@ func TestLinkedDefaultSkillBasesAreRefusedOutsideTheHome(t *testing.T) {
 	for p, e := range snap.Files {
 		if strings.Contains(e.Content, "CANARY") {
 			t.Errorf("content behind a refused link shipped: %s", p)
+		}
+		if strings.HasPrefix(p, filepath.Join(home, ".gemini")) && e.Content != "" {
+			t.Errorf("content under /etc shipped: %s", p)
 		}
 	}
 }

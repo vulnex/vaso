@@ -27,6 +27,7 @@ interface SnapshotRecords {
   holdsUnder?(dir: string): boolean;
   configTrees?(): Readonly<Record<string, ConfigTreeStatus>>;
   listing?(dir: string): readonly string[] | undefined;
+  wildcardNames?(): Readonly<Record<string, readonly string[]>>;
 }
 
 interface Compiled {
@@ -40,6 +41,11 @@ interface Compiled {
    *  what the probe did. Snapshot data: compared as plain strings, never
    *  compiled into a pattern. */
   trees: ReadonlyMap<string, ConfigTreeStatus>;
+  // The wildcard segments of this manifest's config-tree globs (the
+  // `workspace-*` of `../workspace-*/skills/**`), compiled from the manifest:
+  // the only segments a snapshot's wildcardNames is read for
+
+  segments: ReadonlyArray<{ seg: string; re: RegExp }>;
 }
 
 const cache = new WeakMap<FSProvider, { key: string; compiled: Compiled }>();
@@ -143,9 +149,38 @@ function compiled(fs: FSProvider): Compiled | undefined {
     recursive: re(globs.filter(g => g.endsWith('/**')).map(g => g.slice(0, -3))),
     listed: re([...m.directoryListings, ...(m.systemDirListings ?? [])]),
     trees: new Map(Object.entries((fs as SnapshotRecords).configTrees?.() ?? {})),
+    segments: wildcardSegments(m.configRoots ?? []),
   };
   cache.set(fs, { key, compiled: result });
   return result;
+}
+
+/** Every wildcard segment (not `**`) of the config-tree globs, compiled. */
+function wildcardSegments(requests: ReadonlyArray<{ globs?: string[] }>): Array<{ seg: string; re: RegExp }> {
+  const segs = new Set<string>();
+  for (const r of requests) {
+    for (const g of r.globs ?? []) {
+      for (const seg of g.split('/')) if (seg !== '**' && /[*?[{]/.test(seg)) segs.add(seg);
+    }
+  }
+  return [...segs].map(seg => ({ seg, re: new RegExp(`^${globToRegexSource(seg)}$`) }));
+}
+
+/**
+ * What the snapshot's wildcardNames says of `child` in `parent`: the probe
+ * recorded the names a manifest wildcard matches there (a home it never
+ * lists) — present, absent, or undefined when it didn't.
+ */
+function wildcardPresence(fs: FSProvider, c: Compiled, parent: string, child: string): boolean | undefined {
+  const names = (fs as SnapshotRecords).wildcardNames?.call(fs);
+  if (!names) return undefined;
+  for (const { seg, re } of c.segments) {
+    if (!re.test(child)) continue;
+    const key = posix.join(parent, seg);
+    const list = Object.hasOwn(names, key) ? names[key] : undefined;
+    if (list) return list.includes(child);
+  }
+  return undefined;
 }
 
 /** `path` and every directory above it (normalized, no trailing slash). */
@@ -171,14 +206,19 @@ function treeStatus(c: Compiled, chain: readonly string[]): ConfigTreeStatus | u
  * The snapshot proves the first directory of `chain` absent: the nearest
  * directory above it that the probe listed has no entry on the way down.
  */
-function listedAbsent(fs: FSProvider, chain: readonly string[]): boolean {
+function listedAbsent(fs: FSProvider, c: Compiled, chain: readonly string[]): boolean {
   const listing = (fs as SnapshotRecords).listing;
   if (!listing) return false;
   for (let i = 1; i <= chain.length; i++) {
     const parent = i < chain.length ? chain[i] : '/';
-    const names = listing.call(fs, parent);
-    if (names === undefined) continue;
     const child = posix.basename(chain[i - 1]);
+    const names = listing.call(fs, parent);
+    if (names === undefined) {
+      // a home the probe never lists: the names a wildcard of the manifest matched there
+      const present = wildcardPresence(fs, c, parent, child);
+      if (present === undefined) continue;
+      return !present;
+    }
     return !names.includes(child) && !names.includes(`${child}/`);
   }
   return false;
@@ -197,7 +237,7 @@ export function manifestCoversTree(fs: FSProvider, dir: string): boolean {
 
 /**
  * A config-derived skills directory the remote probe didn't walk because it
- * refused the tree (outside the user's home, a credential store) or found it
+ * refused the tree (an OS directory, another user's home, a credential store) or found it
  * over its entry limit — though the directory may well be in the snapshot for
  * another reason. Undefined off snapshots, and when the manifest's own trees
  * cover it.
@@ -262,7 +302,7 @@ export function probeCoversTree(fs: FSProvider, dir: string): boolean {
   if (status === 'refused' || status === 'limit') return false;
   if (status === 'collected') return true;
   if (chain.length > 0 && c.listed.some(r => r.test(chain[0]))) return true;
-  return listedAbsent(fs, chain);
+  return listedAbsent(fs, c, chain);
 }
 
 /**

@@ -97,6 +97,13 @@ type ProbeSnapshot struct {
 	// directories; the links themselves are not recorded (snapshot keys stay
 	// as spelled).
 	ResolvedDirs map[string]string `json:"resolvedDirs,omitempty"`
+	// For a config tree's wildcard directory that lies directly in a home (a
+	// workspace set in the home: `~/workspace-*/skills` beside it), which the
+	// probe never lists: the names in it its wildcard segment matches, keyed
+	// "<dir>/<segment>" (e.g. "/home/u/workspace-*"). The CLI tells a derived
+	// `workspace-<id>` that doesn't exist from one never looked at — matching
+	// only segments of its own manifest, never compiling snapshot text.
+	WildcardNames map[string][]string `json:"wildcardNames,omitempty"`
 }
 
 // PrivilegeInfo describes the privilege level of the probe process.

@@ -363,7 +363,8 @@ export const openclawAdapter: AgentAdapter = {
         const expand = (p: string) => (p === '~' || p.startsWith('~/') ? join(home, p.slice(1)) : p);
         const workspace = getNestedValue(merged, 'agents.defaults.workspace');
         const extraDirs = getNestedValue(merged, 'skills.load.extraDirs');
-        // Roots the config sets are walked only inside the home; a relative
+        // Roots the config sets are walked where a skills tree may be (not an
+        // OS directory, another user's home or a credential store); a relative
         // one depends on OpenClaw's working directory (not documented, and
         // unknown to either scan): reported, not guessed
         const configSet = [

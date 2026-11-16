@@ -120,9 +120,10 @@ type collector struct {
 	// (configRoots): walked as a skill tree, but its content is disguised like
 	// a config's — the directory is wherever the config says.
 	configTree bool
-	// treeHome is the home a config tree being walked must stay inside
-	// (treeAllowed): links leading out of it, or into a credential store,
-	// are neither followed nor read
+	// treeHome is the home of the user whose config names the tree being
+	// walked: links leading where no skills tree is walked (treeAllowed —
+	// another user's home, an OS directory, a credential store) are neither
+	// followed nor read
 	treeHome string
 	// explicit are the manifest's own file and system paths (their symlink
 	// chains and real parents are recorded, see recordExplicitLinks).
@@ -136,6 +137,9 @@ type collector struct {
 	inFile map[string]string
 	// emails maps the local part of each email address to its stand-in
 	emails map[string]string
+	// baseScopes caches the scope of each manifest skills glob base
+	// (linkInScope)
+	baseScopes map[string]baseScope
 }
 
 // inExcludedDir reports whether match lies under an excluded directory that
@@ -351,7 +355,11 @@ func Collect(manifest ProbeManifest, escalate bool) ProbeSnapshot {
 	// remotely the way it is locally.
 	expandedDirs := expandPaths(manifest.DirectoryListings, homes)
 	for _, dir := range expandedDirs {
-		if listing := collectDirectory(dir, snapshot.Symlinks); listing != nil {
+		// One a link takes out of the home to where no skills tree is walked
+		// (~/.claude/skills → /etc): not listed — its links are recorded
+		if c.linkedOutRefused(dir) {
+			c.recordLinkChain(&snapshot, dir)
+		} else if listing := collectDirectory(dir, snapshot.Symlinks); listing != nil {
 			snapshot.Directories[dir] = listing
 		}
 		recordDirMode(&snapshot, dir)
@@ -513,7 +521,7 @@ func expandPaths(paths []string, homes []UserHome) []string {
 // limits), the trees its symlinks point to, names a glob can't match and
 // directories it couldn't read. c.inSkillTree says whether it walks skills.
 func (c *collector) collectGlob(snapshot *ProbeSnapshot, pattern string) {
-	if c.inSkillTree && !c.configTree && c.refuseLinkedSkillBase(snapshot, pattern) {
+	if c.inSkillTree && !c.configTree && c.linkedOutSkillBase(snapshot, pattern) {
 		return
 	}
 	// Never descend into symlinked directories: a local readdir lists the
@@ -596,6 +604,10 @@ func (c *collector) collectFileLimit(path, base string, metadataOnly bool, limit
 	// and starting like one (`#!`, ELF, Mach-O, PE) — an executable bit
 	// alone doesn't make an id_ed25519 anything but a key
 	case c.configTree && !treeAllowed(path, c.treeHome):
+		return omitted("sensitive")
+	// In a manifest skills tree: nothing behind a file link into another
+	// user's home or an OS directory (skill_scope.go)
+	case c.skillLinkOutOfScope(base, path):
 		return omitted("sensitive")
 	case c.configTree && credentialFileName(path) && (info.Mode().Perm()&0o111 == 0 || !programHeader(path)):
 		return omitted("metadata")
@@ -850,8 +862,12 @@ func (c *collector) followFrom(snapshot *ProbeSnapshot, pattern string, matches 
 		if escapesToSink(m, globBase(pattern)) {
 			continue
 		}
-		// A config-derived tree is walked only inside its user's home
+		// A config-derived tree's links lead only where a tree may be walked
 		if c.configTree && !treeAllowed(m, c.treeHome) {
+			continue
+		}
+		// nor one leading into another user's home or an OS directory
+		if c.inSkillTree && !c.configTree && !c.linkInScope(globBase(pattern), m) {
 			continue
 		}
 		if st, err := os.Stat(m); err != nil || !st.IsDir() {

@@ -26,8 +26,6 @@ describe('parseRemoteOptions', () => {
     expect(() => parseRemoteOptions({ snapshot: 's.json', host })).toThrow(/mutually exclusive/);
     expect(() => parseRemoteOptions({ snapshot: 's.json', inventory: 'i.yaml' })).toThrow(/mutually exclusive/);
     expect(() => parseRemoteOptions({ saveSnapshot: 'd' })).toThrow(/--save-snapshot applies to remote scans only/);
-    expect(() => parseRemoteOptions({ sshKey: '~/.ssh/id' })).toThrow(/--ssh-key applies to remote scans only/);
-    expect(() => parseRemoteOptions({ sudo: true, snapshot: 's.json' })).toThrow(/--sudo applies to remote scans only/);
     expect(() => parseRemoteOptions({ sshKey: '', host })).toThrow(/needs a key file/);
     expect(parseRemoteOptions({ sshKey: 'k', sudo: true, saveSnapshot: 'd', host }).retries).toBe(0);
   });
@@ -39,5 +37,16 @@ describe('parseRemoteOptions', () => {
     expect(unusedTuningOptions({ parallel: '2', host })).toEqual([]);
     // still validated: a typo is a usage error wherever it appears
     expect(() => parseRemoteOptions({ sshTimeout: 'abc' })).toThrow(/--ssh-timeout/);
+  });
+
+  it('accepts (and ignores) --ssh-key and --sudo on local and snapshot scans, as 1.4.1 did', () => {
+    expect(parseRemoteOptions({ sshKey: '~/.ssh/id' })).toEqual({ concurrency: 5, retries: 0, sshTimeoutSec: 60 });
+    expect(parseRemoteOptions({ sudo: true, snapshot: 's.json' }).retries).toBe(0);
+    expect(unusedTuningOptions({ sshKey: 'k', sudo: true, sshTimeout: '30' })).toEqual(['--ssh-key', '--sudo', '--ssh-timeout']);
+    expect(unusedTuningOptions({ sshKey: 'k', sudo: true, inventory: 'i.yaml' })).toEqual([]);
+    expect(unusedTuningOptions({ sudo: false })).toEqual([]);
+    // still validated
+    expect(() => parseRemoteOptions({ sshKey: '' })).toThrow(/needs a key file/);
+    expect(() => parseRemoteOptions({ sshKey: '  ', snapshot: 's.json' })).toThrow(/needs a key file/);
   });
 });

@@ -121,6 +121,11 @@ export interface ProbeSnapshot {
    *  from its spelling (probe newer than 1.4.1). Read only when judging
    *  config-set skills directories (skill-root-scope.ts). */
   resolvedDirs?: Record<string, string>;
+  /** For a config tree's wildcard directory directly in a home (which the
+   *  probe never lists): the names its wildcard segment matches there, keyed
+   *  `<dir>/<segment>` (`/home/u/workspace-*`). Read only for segments of
+   *  this CLI's own manifest, never compiled (probe-coverage.ts). */
+  wildcardNames?: Record<string, string[]>;
 }
 
 export interface PrivilegeInfo {

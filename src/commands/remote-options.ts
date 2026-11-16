@@ -37,7 +37,8 @@ export interface RemoteOptionInput {
  * Options that only make sense together (or apart). A scan reads one source:
  * this machine, a snapshot, or remote hosts — `--snapshot` with `--host` used
  * to scan the hosts in `scan` and the snapshot in `detect`. Remote-only
- * options given to a local or snapshot scan were silently ignored.
+ * options given to a local or snapshot scan are validated, then ignored
+ * (unusedTuningOptions).
  */
 function assertOptionCombination(options: RemoteOptionInput): void {
   const remote = !!options.host?.length || !!options.inventory;
@@ -51,28 +52,18 @@ function assertOptionCombination(options: RemoteOptionInput): void {
   if (options.sshKey !== undefined && options.sshKey.trim() === '') {
     throw new Error('--ssh-key needs a key file path');
   }
-  if (!remote) {
-    // --ssh-timeout, --ssh-retries and --parallel are accepted (validated,
-    // then unused) on local and snapshot scans, as in 1.4.1: wrappers pass
-    // the same flags to local and remote runs (see unusedTuningOptions)
-    const unused = [
-      options.sshKey !== undefined && '--ssh-key',
-      options.sudo && '--sudo',
-    ].filter((o): o is string => typeof o === 'string');
-    if (unused.length > 0) {
-      const list = unused.length > 1 ? `${unused.slice(0, -1).join(', ')} and ${unused[unused.length - 1]}` : unused[0];
-      throw new Error(`${list} appl${unused.length > 1 ? 'y' : 'ies'} to remote scans only (use with --host or --inventory)`);
-    }
-  }
 }
 
 /**
- * The remote tuning options given to a scan that reads no remote host:
- * accepted and ignored (a --debug note says so).
+ * The remote-only options given to a scan that reads no remote host: accepted
+ * and ignored (a --debug note says so), as in 1.4.1 — wrappers pass the same
+ * flags to local and remote runs.
  */
 export function unusedTuningOptions(options: RemoteOptionInput): string[] {
   if (options.host?.length || options.inventory) return [];
   return [
+    options.sshKey !== undefined && '--ssh-key',
+    options.sudo && '--sudo',
     options.sshTimeout !== undefined && '--ssh-timeout',
     options.sshRetries !== undefined && '--ssh-retries',
     options.parallel !== undefined && '--parallel',

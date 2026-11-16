@@ -28,8 +28,9 @@ function snapshot(homedir: string, extra: Partial<ProbeSnapshot> = {}): Snapshot
 }
 
 describe('config-set skill roots under a linked home spelled the other way (snapshots)', () => {
-  const real = '/fx/real';
-  const link = '/fx/link';
+  // Fedora Silverblue: /home → /var/home
+  const real = '/var/home/u';
+  const link = '/home/u';
 
   it('home real, workspace spelled through the link', async () => {
     const dir = `${link}/workspace-evil/skills`;
@@ -47,7 +48,10 @@ describe('config-set skill roots under a linked home spelled the other way (snap
 
   it('still refuses what lies outside the home or in a credential store', async () => {
     const fs = snapshot(real, { resolvedDirs: { [link]: real } });
-    expect(await skillRootGap(fs, '/fx/other/workspace-x/skills', real)).toBe('outside');
+    expect(await skillRootGap(fs, '/var/home/other/workspace-x/skills', real)).toBe('outside');
+    expect(await skillRootGap(fs, '/home/other/workspace-x/skills', real)).toBe('outside');
+    expect(await skillRootGap(fs, '/etc/workspace-x/skills', real)).toBe('outside');
+    expect(await skillRootGap(fs, '/opt/workspace-x/skills', real)).toBeUndefined();
     expect(await skillRootGap(fs, `${link}/.ssh/skills`, real)).toBe('outside');
     expect(await skillRootGap(fs, link, real)).toBe('home');
   });
@@ -66,7 +70,7 @@ describe('config-set skill roots under a linked home spelled the other way (snap
       files: {}, directories: {}, commandOutputs: {}, env: {} };
     expect(validateSnapshot({ ...base, resolvedDirs: { [link]: real } })).toEqual([]);
     expect(validateSnapshot({ ...base, resolvedDirs: { 'rel/x': real } }).join()).toMatch(/resolvedDirs/);
-    expect(validateSnapshot({ ...base, resolvedDirs: { [link]: '/fx/../etc' } }).join()).toMatch(/resolvedDirs/);
+    expect(validateSnapshot({ ...base, resolvedDirs: { [link]: '/var/../etc' } }).join()).toMatch(/resolvedDirs/);
     expect(validateSnapshot({ ...base, resolvedDirs: { [link]: 3 } }).join()).toMatch(/resolvedDirs/);
   });
 });

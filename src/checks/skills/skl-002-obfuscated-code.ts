@@ -145,15 +145,15 @@ export const skl002 = defineCheck({
     for (const root of unscannedRoots) {
       if (await unscannedRootMissing(ctx.fs, root)) {
         missingRoots.push(root);
-        evidence.push({ file: root.path, detail: `not scanned: skills directory ${root.path} (${unscannedShort(root.reason)}) does not exist — nothing to scan`, mitigated: true });
+        evidence.push({ file: root.path, detail: `not scanned: skills directory ${root.path} (${unscannedShort(root)}) does not exist — nothing to scan`, mitigated: true });
       } else {
-        evidence.push({ file: root.path, detail: unscannedReason(root.reason, root.path) });
+        evidence.push({ file: root.path, detail: unscannedReason(root.reason, root.path, root) });
       }
     }
 
     await markTestCode(evidence, ctx.installation, ctx.fs);
     const notScanned = evidence.filter(e => e.line === undefined).length;
-    const rootNote = unscannedRoots.map(u => `skills directory ${u.path} not scanned (${unscannedShort(u.reason)}${missingRoots.includes(u) ? '; does not exist' : ''})`);
+    const rootNote = unscannedRoots.map(u => `skills directory ${u.path} not scanned (${unscannedShort(u)}${missingRoots.includes(u) ? '; does not exist' : ''})`);
     return h.fromEvidence(evidence, {
       passed: 'No obfuscated code blocks detected',
       failed: (n) => {

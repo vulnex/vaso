@@ -4,6 +4,7 @@ import type { CheckHelpers } from '../../core/check-builder.js';
 import type { FSProvider } from '../../core/fs-provider.js';
 import { BINARY_EXTENSIONS, getAllSkillsDirs, getSkillFiles } from '../../core/utils.js';
 import { readCappedFile } from '../../core/file-limits.js';
+import { unscannedShortReason } from '../../core/skill-root-scope.js';
 import { binaryFileFormat, sourceText } from '../../analyzers/binary-text.js';
 
 /** Every skills directory of the installation (not just the primary one). */
@@ -11,14 +12,9 @@ export function skillsDirsOf(ctx: ScanContext): string[] {
   return getAllSkillsDirs(ctx.installation);
 }
 
-/** Why a config-set skills directory went unscanned, in a few words. */
-export function unscannedShort(reason: UnscannedSkillsDir['reason']): string {
-  switch (reason) {
-    case 'home': return 'the home directory itself';
-    case 'outside': return 'outside the user\'s home or in a credential store';
-    case 'limit': return 'over the remote probe\'s entry limit';
-    case 'relative': return 'set as a relative path';
-  }
+/** Why a skills directory went unscanned, in a few words. */
+export function unscannedShort(u: UnscannedSkillsDir): string {
+  return unscannedShortReason(u);
 }
 
 /**
@@ -32,7 +28,7 @@ export function noSkillsDirResult(ctx: ScanContext, h: CheckHelpers, none = 'No 
   if (skillsDirsOf(ctx).length > 0) return undefined;
   const unscanned = ctx.installation.unscannedSkillsDirs ?? [];
   if (unscanned.length === 0) return h.passed(none);
-  const list = unscanned.map(u => `${u.path} (${unscannedShort(u.reason)})`).join(', ');
+  const list = unscanned.map(u => `${u.path} (${unscannedShort(u)})`).join(', ');
   return h.passed(`Not verified — skills directory ${list} not scanned; reported by SKL-002`);
 }
 
