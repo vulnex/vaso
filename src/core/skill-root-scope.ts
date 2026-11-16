@@ -435,28 +435,24 @@ async function linkChainTarget(fs: FSProvider, p: string, homes: readonly string
   return last;
 }
 
+/** OS directories whose stored name isn't lower case (macOS). */
+const CANONICAL_PLACES: Readonly<Record<string, string>> = { '/system': '/System', '/library': '/Library' };
+
 /**
- * An OS directory label's place (`/system`, lower case) as `paths` spell it
- * (`/System`): the first top-level directory, or the one under /private,
- * that names it.
+ * An OS directory label's place (`/system`, lower case) spelled as the OS
+ * stores it (`/System`, `/var`) — whatever case the path was written in
+ * (`/Private/Var/Folders` is in /var), so every report names it alike.
  */
-function spelledPlace(place: string, paths: readonly string[]): string {
-  const name = place.slice(1);
-  for (const p of paths) {
-    const parts = p.split('/').filter(Boolean);
-    const candidates = parts[0]?.toLowerCase() === 'private' ? [parts[0], parts[1]] : [parts[0]];
-    const hit = candidates.find(c => c !== undefined && c.toLowerCase() === name);
-    if (hit !== undefined) return `/${hit}`;
-  }
-  return place;
+function canonicalPlace(place: string): string {
+  return CANONICAL_PLACES[place] ?? place;
 }
 
-/** What a label says, for a report — places as `paths` spell them. */
-function labelPhrase(label: string, paths: readonly string[] = []): string {
+/** What a label says, for a report. */
+function labelPhrase(label: string): string {
   if (label === 'root') return 'the filesystem root';
   if (label === 'home') return 'the home directory or a directory above it';
   if (label.startsWith('other-home:')) return `another user's home (${label.slice('other-home:'.length)})`;
-  if (label.startsWith('system:')) return `an OS directory (${spelledPlace(label.slice('system:'.length), paths)})`;
+  if (label.startsWith('system:')) return `an OS directory (${canonicalPlace(label.slice('system:'.length))})`;
   const sink = SENSITIVE_SINKS[Number(label.slice('sink:'.length))];
   return `a credential store or sensitive location (${sink?.label ?? 'credentials'})`;
 }
@@ -480,7 +476,7 @@ async function refusalDetails(fs: FSProvider, dir: string, home: string, reason:
   const first = LABEL_ORDER.map(prefix => labels.filter(l => l === prefix || l.startsWith(prefix)).sort()[0]).find(l => l !== undefined);
   return {
     ...(target !== clean(dir) ? { target } : {}),
-    ...(first !== undefined && reason === 'outside' ? { refusedAs: labelPhrase(first, [target, clean(dir)]) } : {}),
+    ...(first !== undefined && reason === 'outside' ? { refusedAs: labelPhrase(first) } : {}),
   };
 }
 
@@ -568,6 +564,25 @@ export function unscannedReason(reason: UnscannedSkillsDir['reason'], path = '<p
     case 'relative':
       return 'not scanned: skills directory set as a relative path, which the agent resolves against its working directory — not verified; set an absolute path';
   }
+}
+
+/**
+ * An unscanned skills directory refused for where it is (outside, the home)
+ * that isn't a directory at all — missing, or a link to /dev/null. A
+ * snapshot answers only for one the probe judged (it records the mode of a
+ * tree it refused when there is one); otherwise it may exist unseen.
+ */
+export async function unscannedRootMissing(fs: FSProvider, root: UnscannedSkillsDir): Promise<boolean> {
+  if (root.reason !== 'outside' && root.reason !== 'home') return false;
+  if (fs.kind === 'snapshot' && configTreeStatus(fs, root.path) === undefined && configTreeGap(fs, root.path) === undefined) return false;
+  // a snapshot keys paths normalized (`~/./a/../x` is `~/x` there)
+  const at = fs.kind === 'snapshot' && isAbsolute(root.path) ? posix.normalize(root.path) : root.path;
+  return !(await fs.stat(at).then(st => st.isDirectory(), () => false));
+}
+
+/** The sentence for an unscanned directory that isn't one (unscannedRootMissing): SKL-002 and the inventory. */
+export function missingRootReason(u: UnscannedSkillsDir): string {
+  return `not scanned: ${unscannedWhat(u)} ${u.path} (${unscannedShortReason(u)}) does not exist as a directory — nothing to scan`;
 }
 
 /** Why a skills directory went unscanned, in a few words. */
