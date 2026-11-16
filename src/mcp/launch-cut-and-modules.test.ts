@@ -178,6 +178,18 @@ describe('package script entries resolved the way the runtime does', () => {
     expect(source.unanalyzed ?? source.readFailure).toMatch(/no __main__\.py/);
   });
 
+  it('a script that runs itself is noted as a loop', async () => {
+    const [source] = await resolveServerSources([server('npm', ['--prefix', start('node index.js && npm start'), 'start'])]);
+    expect(source.sourceCode).toContain('console.log("ok")');
+    expect(source.readFailure).toMatch(/runs itself in a loop/);
+  });
+
+  it('scripts running each other are noted as a loop', async () => {
+    write('p/package.json', JSON.stringify({ name: 'p', version: '1.0.0', scripts: { start: 'npm run b', b: 'npm run start' } }));
+    const [source] = await resolveServerSources([server('npm', ['--prefix', join(dir, 'p'), 'start'])]);
+    expect(source.unanalyzed ?? source.readFailure).toMatch(/in a loop/);
+  });
+
   it('a missing entry analysed through the package main says so', async () => {
     const [source] = await resolveServerSources([server('npm', ['--prefix', start('node missing.js'), 'start'])]);
     expect(source.sourceCode).toContain('console.log("ok")');

@@ -844,7 +844,7 @@ interface ScriptEntry {
 const MAX_SCRIPT_COMMANDS = 16;
 
 async function scriptLineEntry(dir: string, script: string, line: string, fs: FSProvider, depth: number): Promise<ScriptEntry> {
-  if (depth >= MAX_SCRIPT_DEPTH) return { note: `package script "${script}" nests other scripts too deeply` };
+  if (depth >= MAX_SCRIPT_DEPTH) return { note: `package script "${script}" nests other scripts too deeply, or they run each other in a loop` };
   // Past the cap only the commands wholly inside it are read; of the one the
   // cap cuts, the words before the cut word (its program and entry, when the
   // cut falls in later arguments or padding)
@@ -916,6 +916,8 @@ async function scriptCommandEntry(
     return { fallback: true, note: `package script "${script}" runs ${inner.entry}, which is not there — the package's own entry was analysed instead` };
   }
   if (inner.packageDir) {
+    // `"start": "node index.js && npm start"`: the script runs itself
+    if (resolve(inner.packageDir) === resolve(dir) && inner.script === script) return { note: `package script "${script}" runs itself in a loop` };
     const nested = await packageScriptEntry(inner.packageDir, inner.script, fs, { deno: inner.denoTask, depth: depth + 1 });
     return nested;
   }
