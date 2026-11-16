@@ -106,6 +106,9 @@ describe('renameKeepsMetadata output parsing', () => {
   it('macOS: refuses ACLs, attributes, flags, inheritable directory ACLs and anything unrecognised', () => {
     expect(darwinPlain('-rw-r--r--+ 1 501  20  - 1 Nov 14 15:10 f\n 0: user:nobody deny read\n', false)).toBe(false);
     expect(darwinPlain('-rw-r--r--@ 1 501  20  - 1 Nov 14 15:10 f\n\tcom.example.tag\t  4 \n', false)).toBe(false);
+    // an attribute whose name starts like the kernel's tag, then a tab
+    expect(darwinPlain('-rw-r--r--@ 1 501  20  - 1 Nov 14 15:10 f\n\tcom.apple.provenance\t11 \n\tcom.apple.provenance\tz\t1 \n', false)).toBe(false);
+    expect(darwinPlain('-rw-r--r--@ 1 501  20  - 1 Nov 14 15:10 f\n\tcom.apple.provenance\t11 \n', false)).toBe(true);
     expect(darwinPlain('-rw-r--r--  1 501  20  hidden 1 Nov 14 15:10 f\n', false)).toBe(false);
     expect(darwinPlain('drwxr-xr-x@ 7 501  20  -  224 Nov 14 15:10 d\n 0: FFFF allow list,file_inherit\n', true)).toBe(false);
     expect(darwinPlain('', false)).toBe(false);

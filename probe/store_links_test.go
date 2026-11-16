@@ -16,6 +16,9 @@ type storeLinkCase struct {
 	StoreRoots []string `json:"storeRoots"`
 	StoreDir   string   `json:"storeDir"`
 	Want       *string  `json:"want"`
+	// AgentDir: a row for foreignAgentDir — the agent folder as written,
+	// resolving to Target
+	AgentDir string `json:"agentDir"`
 }
 
 func TestForeignStoreTargetMatchesTS(t *testing.T) {
@@ -34,6 +37,12 @@ func TestForeignStoreTargetMatchesTS(t *testing.T) {
 		want := ""
 		if c.Want != nil {
 			want = *c.Want
+		}
+		if c.AgentDir != "" {
+			if got := foreignAgentDir(c.AgentDir, c.Target, c.HomeRoots); got != want {
+				t.Errorf("foreignAgentDir(%s → %s, home=%v) = %q, want %q", c.AgentDir, c.Target, c.HomeRoots, got, want)
+			}
+			continue
 		}
 		if got := foreignStoreTarget(c.Target, c.HomeRoots, c.StoreRoots, c.StoreDir); got != want {
 			t.Errorf("foreignStoreTarget(%s, home=%v, store=%v, %s) = %q, want %q", c.Target, c.HomeRoots, c.StoreRoots, c.StoreDir, got, want)

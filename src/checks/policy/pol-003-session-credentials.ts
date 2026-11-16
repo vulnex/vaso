@@ -52,11 +52,20 @@ export const pol003 = defineCheck({
     }
 
     await markUnreachable(ctx.fs, evidence);
+    // vaso fix never changes a file through a link: a finding made only of
+    // links (a credential path linked to a file elsewhere) is not offered
+    let links = 0;
+    for (const e of evidence) {
+      const file = e.file;
+      if (file && await Promise.resolve().then(() => ctx.fs.readlink(file)).then(() => true, () => false)) links++;
+    }
+    const linkNote = links === 0 ? ''
+      : ` — ${links === evidence.length ? (links === 1 ? 'it is' : 'each is') : `${links} of them are`} a link, which vaso fix doesn't change: chmod the target yourself, or replace the link with a file of the agent's own`;
     return h.fromEvidence(evidence, {
       passed: 'All session/credential files have restrictive permissions',
       failed: (n) => `${n} session/credential file(s) have overly permissive permissions`,
-      fixable: true,
-      fixDescription: 'Remove group/other access (chmod go-rwx)',
+      fixable: links < evidence.length,
+      fixDescription: `Remove group/other access (chmod go-rwx)${linkNote}`,
     });
   },
 

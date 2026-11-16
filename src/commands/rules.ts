@@ -245,7 +245,19 @@ export async function runRulesInit(options: RulesInitOptions): Promise<void> {
   try {
     // Rule folders are private, like ~/.vaso and its scan baselines (0700);
     // an existing folder is left as it is
-    await mkdir(targetDir, { recursive: true, mode: 0o700 });
+    try {
+      await mkdir(targetDir, { recursive: true, mode: 0o700 });
+    } catch (err) {
+      // A file, or a link that isn't to a folder, where the folder or one
+      // above it should be — not an example.yaml that already exists
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === 'EEXIST' || code === 'ENOTDIR') {
+        console.error(chalk.red(`  ${show(targetDir)} (or a folder above it) is not a directory\n`));
+        process.exitCode = 2;
+        return;
+      }
+      throw err;
+    }
     // Owner-only whatever the umask: scan refuses a rule file group or others can write
     if (options.force) {
       // A new file renamed over the old name: an example.yaml that is a link
