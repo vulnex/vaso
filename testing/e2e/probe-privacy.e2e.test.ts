@@ -250,7 +250,8 @@ function jsonFile(label: string): string {
       h: { url: `https://x.example/sse#${c('fragment token', () => distinct(BASE62, 30).join(''))}` },
       // the shared argv rules (probe/testdata/argv-verdicts.json)
       j: { args: ['acme', '--api-key', `-${c('dash-led value', () => distinct(BASE62, 24).join(''))}`] },
-      k: { command: 'mysql', args: ['-u', 'root', '-p', c('mysql -p date-like', () => `20${body(2, '0123456789')}.${body(2, '0123456789')}.${body(2, '0123456789')}${body(6, '0123456789')}`)] },
+      // glued: mysql reads a separate value after -p as the database name
+      k: { command: 'mysql', args: ['-u', 'root', `-p${c('mysql -p date-like', () => `20${body(2, '0123456789')}.${body(2, '0123456789')}.${body(2, '0123456789')}${body(6, '0123456789')}`)}`] },
       l: { command: 'sshpass', args: ['-p', c('sshpass lowercase', () => body(14, 'abcdefghijklmnopqrstuvwyz')), 'ssh', 'host'] },
       m: { command: 'redis-cli', args: ['-h', 'cache', '-p', '6379', '-a', c('redis-cli -a', () => body(16, 'abcdefghijklmnopqrstuvwyz'))] },
       n: { args: ['-k', c('-k base64 with / and +', () => { const d = distinct(BASE62, 26).join(''); return `${d.slice(0, 13)}/${d.slice(13)}+`; })] },
@@ -260,7 +261,7 @@ function jsonFile(label: string): string {
       o: { command: 'curl', args: ['-u', `carol:${c('curl -u separate', lowerWord)}`, '--user', `dave:${c('curl --user separate', lowerWord)}`, `--proxy-user=p:${c('curl --proxy-user=', lowerWord)}`, 'https://x.example'] },
       p: { command: 'acme', args: ['--pw', c('lowercase --pw', lowerWord), '--pass', c('lowercase --pass', lowerWord)] },
     },
-    apiKey: c('all-lowercase api key', () => body(32, 'abcdefghijklmnopqrstuvwyz0123456789')),
+    api_key: c('all-lowercase api key', () => body(32, 'abcdefghijklmnopqrstuvwyz0123456789')),
     // a pasted curl command: JSON inside the string, its quotes escaped twice
     curl: `Run: curl -d "{\\"api_key\\":\\"${c('embedded JSON in a JSON string', generic)}\\"}" https://api.x.com`,
     // the value under a credential-named key, a level down
@@ -327,7 +328,8 @@ function yamlFile(label: string): string {
     `  c4: {command: sshpass, args: [-p, "${canary(`${label} yaml inline mapping argv`, () => `${body(4)}!${body(5)}`)}", ssh, h]}`,
     '  c5:',
     '    command: mysql',
-    `    args: ["-u", "root", "-p", "${canary(`${label} yaml flow argv mysql`, () => `${body(3)}!${body(5)}`)}"]`,
+    // glued: mysql reads a separate value after -p as the database name
+    `    args: ["-u", "root", "-p${canary(`${label} yaml flow argv mysql`, () => `${body(3)}!${body(5)}`)}"]`,
     'mcp:',
     '  args:',
     '    - --verbose',
