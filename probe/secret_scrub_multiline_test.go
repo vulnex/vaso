@@ -49,10 +49,19 @@ func TestScrubMultiLineYAMLCredentials(t *testing.T) {
 		if len(got) != len(doc) || strings.Count(got, "\n") != strings.Count(doc, "\n") {
 			t.Fatalf("layout changed:\n%s", got)
 		}
-		for _, s := range secrets {
-			// what reports show (a long value's first 8) may stay; the rest not
-			if strings.Contains(got, s) || strings.Contains(got, s[8:]) {
-				t.Fatalf("%s shipped:\n%s", s, got)
+		// each value is one stand-in over its lines: what reports show of
+		// it (its first 8, last 4) may stay, the rest is drawn at random by
+		// class, so a line may keep a character or two by chance, never most
+		for v := 0; v < len(secrets); v += 2 {
+			value := secrets[v:min(v+2, len(secrets))]
+			changed, hidden := 0, -12
+			for _, s := range value {
+				i := strings.Index(doc, s)
+				changed += changedBytes(s, got[i:i+len(s)])
+				hidden += len(s)
+			}
+			if changed < hidden/2 {
+				t.Fatalf("%v shipped (%d of %d changed):\n%s", value, changed, hidden, got)
 			}
 		}
 		for _, k := range kept {
@@ -130,4 +139,15 @@ func TestScrubKeepsPEMArmorInDotenv(t *testing.T) {
 			t.Fatalf("PEM body shipped:\n%s", got)
 		}
 	}
+}
+
+// changedBytes counts the positions where a and b differ.
+func changedBytes(a, b string) int {
+	n := 0
+	for i := 0; i < len(a) && i < len(b); i++ {
+		if a[i] != b[i] {
+			n++
+		}
+	}
+	return n
 }

@@ -178,6 +178,11 @@ function envFile(label: string): string {
     `ACCESS_KEY=${canary(`${label} env lowercase ACCESS_KEY`, lowerWord)}`,
     `GITHUB_PAT=${contextCanary(`${label} env short GITHUB_PAT`, body(5, LOWER), v => `GITHUB_PAT=${v}`)}`,
     `DB_URL=mysql://root:${canary(`${label} env lowercase url password`, lowerWord)}@localhost/db`,
+    // quoted values closed on a line below (python-dotenv reads them whole)
+    `SLACK_BOT_TOKEN='${canary(`${label} env single-quoted line 1`, short)}`,
+    `${canary(`${label} env single-quoted line 2`, short)}'`,
+    `MULTI_API_KEY="${canary(`${label} env double-quoted line 1`, short)}`,
+    `  ${canary(`${label} env double-quoted line 2`, short)}"`,
   ].join('\n') + '\n';
 }
 
@@ -359,6 +364,21 @@ function yamlFile(label: string): string {
     'credentials:',
     '  primary:',
     `    value: ${canary(`${label} yaml credentials.primary.value`, short)}`,
+    // quoted scalars over lines, a plain one ended by a comment
+    'quoted:',
+    `  api_key: "${canary(`${label} yaml double-quoted line 1`, short)}`,
+    `    ${canary(`${label} yaml double-quoted line 2`, short)}"`,
+    `  auth_token: '${canary(`${label} yaml single-quoted line 1`, short)}`,
+    '',
+    `    ${canary(`${label} yaml single-quoted line 2`, short)}'`,
+    `  secret_token: ${canary(`${label} yaml plain commented line 1`, short)}`,
+    `    ${canary(`${label} yaml plain commented line 2`, short)} # rotated`,
+    // an anchored value read under a credential name through an alias
+    'aliases:',
+    `  BASE: &base ${canary(`${label} yaml aliased anchor`, () => body(32))}`,
+    '  OPENAI_API_KEY: *base',
+    `  COMMON: &pw ${canary(`${label} yaml aliased lowercase`, lowerWord)}`,
+    '  DB_PASSWORD: *pw',
   ].join('\n') + '\n';
 }
 
@@ -367,6 +387,14 @@ function tomlFile(label: string): string {
     '[provider]',
     `api_key = "${canary(`${label} toml api_key`, generic)}"`,
     `bearer_token = """${canary(`${label} toml multi-line string`, generic)}"""`,
+    // multi-line strings over lines: basic, a line break escaped, literal
+    `ml_token = """${canary(`${label} toml basic line 1`, short)}`,
+    `${canary(`${label} toml basic line 2`, short)}"""`,
+    `bs_token = """${canary(`${label} toml escaped break line 1`, short)}\\`,
+    `   ${canary(`${label} toml escaped break line 2`, short)}"""`,
+    "lit_secret = '''",
+    `${canary(`${label} toml literal line 1`, short)}`,
+    `  ${canary(`${label} toml literal line 2`, short)}'''`,
     `env = { OPENAI_API_KEY = "${canary(`${label} toml inline`, FORMATS[1][1])}" }`,
     `api_keys = ["${canary(`${label} toml array`, generic)}", "${canary(`${label} toml array hex`, hex)}"]`,
     `tokens = { primary = "${canary(`${label} toml inline table child`, generic)}" }`,
