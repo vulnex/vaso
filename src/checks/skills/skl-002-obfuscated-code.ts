@@ -4,7 +4,7 @@ import { defineCheck } from '../../core/check-builder.js';
 import { findHighEntropyBlocks } from '../../analyzers/entropy.js';
 import { OBFUSCATION_PATTERNS, analyzeObfuscation, isBenignEncodedData, isBinaryHexEscapes } from '../../analyzers/obfuscation.js';
 import { ScanLimitError } from '../../core/file-limits.js';
-import { readSkillText, skillFilesOf, skillsDirsOf, unreadableSkillFile, unscannedShort } from './skill-files.js';
+import { readSkillText, skillFilesOf, skillsDirsOf, unreadableSkillFile, unscannedShort, MAX_LISTED_IN_MESSAGE } from './skill-files.js';
 import { unlistableSkillDirs } from '../../core/utils.js';
 import { markTestCode } from '../../analyzers/test-paths.js';
 import { analysisEvasion } from '../../analyzers/ast-analyzer.js';
@@ -164,7 +164,10 @@ export const skl002 = defineCheck({
           ...(otherLocations > 0 ? [`${otherLocations} skill location(s) not scanned`] : []),
         ];
         const found = parts.length > 0 ? `Found ${parts.join('; ')}` : '';
-        return [found, ...rootNote].filter(Boolean).join('; ');
+        const notes = rootNote.length > MAX_LISTED_IN_MESSAGE
+          ? [...rootNote.slice(0, MAX_LISTED_IN_MESSAGE), `… and ${rootNote.length - MAX_LISTED_IN_MESSAGE} more not scanned (listed in the evidence)`]
+          : rootNote;
+        return [found, ...notes].filter(Boolean).join('; ');
       },
     });
   },

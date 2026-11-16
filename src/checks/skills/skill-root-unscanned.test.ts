@@ -107,6 +107,23 @@ describe('a skills directory outside the home', () => {
     }
   });
 
+  it('messages list at most 20 unscanned directories; SKL-002 evidence keeps every one', async () => {
+    const many = Array.from({ length: 25 }, (_, i) => ({ path: `/opt/x/l${String(i).padStart(2, '0')}`, reason: 'limit' as const }));
+    const skl002 = await byId('SKL-002').run(ctx(many, ['/nonexistent-vaso-home/skills']));
+    expect(skl002.evidence).toHaveLength(25);
+    expect(skl002.message).toContain('/opt/x/l19 not scanned');
+    expect(skl002.message).not.toContain('/opt/x/l20');
+    expect(skl002.message.endsWith('… and 5 more not scanned (listed in the evidence)')).toBe(true);
+    const pass = await byId('SKL-004').run(ctx(many, ['/nonexistent-vaso-home/skills']));
+    expect(pass.message).toContain('/opt/x/l19 … and 5 more not scanned; see SKL-002)');
+    expect(pass.message).not.toContain('/opt/x/l20');
+    const none = await byId('IOC-007').run(ctx(many));
+    expect(none.message).toContain('… and 5 more not scanned; reported by SKL-002');
+    // exactly 20: listed whole
+    const twenty = await byId('SKL-004').run(ctx(many.slice(0, 20), ['/nonexistent-vaso-home/skills']));
+    expect(twenty.message).not.toContain('more');
+  });
+
   it('without any skills directory the checks still pass as before', async () => {
     const r = await byId('SKL-004').run(ctx(undefined));
     expect(r.passed).toBe(true);
