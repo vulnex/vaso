@@ -22,12 +22,15 @@ import (
 //     redis-cli -p is a port; anywhere else (a MySQL client's separate -p
 //     included) -p <v> is a password only when v looks like a credential
 //     (MCP-003's looksLikeSecret) and is no port, port mapping, version,
-//     package spec, reference or lowercase word.
+//     package spec, reference or lowercase word. A MySQL/MariaDB client's
+//     --password=<v> is its password like a glued -p<v>.
 //  3. -k <v> is a credential when v looks random and is no URL, host[:port]
 //     or path ("/" and "+" inside a base64 key don't make it one).
 //  4. redis-cli -a <v> is a password unless a reference.
 //  5. Any credential-named flag (--api-key, --token=…) takes the next value
 //     when it looks like a credential.
+//  6. MYSQL_PWD=<v>, PGPASSWORD=<v>, SSHPASS=<v>, REDISCLI_AUTH=<v> (a
+//     client's password variable) hold a password unless a reference.
 
 // argvHit is a credential inside token tok, bytes [from, to).
 type argvHit struct{ tok, from, to int }
@@ -40,11 +43,13 @@ var (
 	// clients whose -u/--user/--proxy-user value is user:password
 	userPassClients = map[string]bool{"curl": true, "curl.exe": true}
 	userPassFlags   = map[string]bool{"-u": true, "--user": true, "--proxy-user": true}
-	portClients     = map[string]bool{"psql": true, "pg_dump": true, "pg_dumpall": true, "pg_restore": true, "pg_isready": true, "redis-cli": true}
-	versionLike     = regexp.MustCompile(`^v?\d+(?:\.\d+)*$`)
-	packageSpec     = regexp.MustCompile(`^(?:@[\w.-]+/)?[\w.-]+@[\w.^~*<>=-]+$|^@[\w.-]+/[\w.-]+$`)
-	lowerWordRe     = regexp.MustCompile(`^[a-z]+$`)
-	hostPort        = regexp.MustCompile(`^[A-Za-z0-9.-]+:\d+$`)
+	// variables a client reads its password from and nothing else (rule 6)
+	clientPasswordVar = regexp.MustCompile(`^(?:MYSQL_PWD|PGPASSWORD|SSHPASS|REDISCLI_AUTH)=`)
+	portClients       = map[string]bool{"psql": true, "pg_dump": true, "pg_dumpall": true, "pg_restore": true, "pg_isready": true, "redis-cli": true}
+	versionLike       = regexp.MustCompile(`^v?\d+(?:\.\d+)*$`)
+	packageSpec       = regexp.MustCompile(`^(?:@[\w.-]+/)?[\w.-]+@[\w.^~*<>=-]+$|^@[\w.-]+/[\w.-]+$`)
+	lowerWordRe       = regexp.MustCompile(`^[a-z]+$`)
+	hostPort          = regexp.MustCompile(`^[A-Za-z0-9.-]+:\d+$`)
 	// ${port}:3000, $PORT: a reference inside a value
 	embeddedRef = regexp.MustCompile(`\$\{?[A-Za-z_]`)
 )
@@ -143,6 +148,12 @@ func judgeArgv(tokens []string) []argvHit {
 		case t == "--":
 			// end of options: the rest are positionals
 			return hits
+		case clientPasswordVar.MatchString(t):
+			// MYSQL_PWD=<pw> mysql, PGPASSWORD=<pw> psql (rule 6)
+			eq := strings.IndexByte(t, '=')
+			if passwordValue(t[eq+1:]) {
+				hits = append(hits, argvHit{i, eq + 1, len(t)})
+			}
 		case !strings.HasPrefix(t, "-"):
 			if name := clientName(t); passwordClients[name] || portClients[name] || userPassClients[name] {
 				client = name
@@ -185,6 +196,11 @@ func judgeArgv(tokens []string) []argvHit {
 				hits = append(hits, argvHit{i + 1, 0, len(v)})
 				i++
 			}
+		case strings.HasPrefix(t, "--password=") && passwordClients[client] && client != "sshpass":
+			// mysql --password=<pw>: whatever is stored, as glued to -p
+			if passwordValue(t[len("--password="):]) {
+				hits = append(hits, argvHit{i, len("--password="), len(t)})
+			}
 		case strings.HasPrefix(t, "--") && strings.Contains(t, "="):
 			eq := strings.IndexByte(t, '=')
 			if from, to, ok := secretFlagValueSpan(t[:eq], t[eq+1:]); isSecretFlag(t[:eq]) && ok {
@@ -203,17 +219,47 @@ func judgeArgv(tokens []string) []argvHit {
 }
 
 // commandToken is one whitespace-separated word of a command line, with the
-// quotes and punctuation around it stripped (word holds s[from:to]).
+// quotes and punctuation around it stripped and the quotes inside it left
+// out (-p"pw" is the word -ppw): word[i] is line[pos[i]], or line[from+i]
+// when pos is nil (nothing was left out inside).
 type commandToken struct {
 	word     string
 	from, to int
+	pos      []int
+}
+
+// at is where word[i] is in the line.
+func (t commandToken) at(i int) int {
+	if t.pos == nil {
+		return t.from + i
+	}
+	return t.pos[i]
+}
+
+// span is the part of the line holding word[a:b], from its first byte to its
+// last (a quote left out inside lies between them).
+func (t commandToken) span(a, b int) (int, int) {
+	return t.at(a), t.at(b-1) + 1
 }
 
 var commandSeparators = map[string]bool{";": true, "&&": true, "||": true, "|": true, "&": true}
 
+func isQuoteByte(ch byte) bool { return ch == '\'' || ch == '"' || ch == '`' }
+
+// quotesBalanced: every kind of quote in s comes in pairs (escaped ones
+// counted, so \"pw\" in a JSON string is a quoted word too).
+func quotesBalanced(s string) bool {
+	return strings.Count(s, "\"")%2 == 0 && strings.Count(s, "'")%2 == 0 && strings.Count(s, "`")%2 == 0
+}
+
 // commandSegments splits a line into the words of each command it runs:
 // sh -c 'mysql …' && psql … is two segments, sh -c being the start of the
-// first. Quotes and escaped quotes around a word are not part of it.
+// first. Quotes around and inside a word are not part of it, at any depth of
+// escaping (a JSON string's \" and \\\" alike), and $'…' quotes like '…'. A
+// quote opening a string of several words ("sh -c 'mysql …'", a JSON value)
+// starts a command of its own; one opening and closing a single word after
+// a flag (-p "pw", -u \"u:pw\") is that flag's argument; a word with its
+// quotes inside (-p"pw", --user="u:pw") ends nothing.
 func commandSegments(line string) [][]commandToken {
 	var segs [][]commandToken
 	var cur []commandToken
@@ -223,12 +269,13 @@ func commandSegments(line string) [][]commandToken {
 		}
 		cur = nil
 	}
+	space := func(ch byte) bool { return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' }
 	for i := 0; i < len(line); {
-		for i < len(line) && (line[i] == ' ' || line[i] == '\t' || line[i] == '\n' || line[i] == '\r') {
+		for i < len(line) && space(line[i]) {
 			i++
 		}
 		start := i
-		for i < len(line) && line[i] != ' ' && line[i] != '\t' && line[i] != '\n' && line[i] != '\r' {
+		for i < len(line) && !space(line[i]) {
 			i++
 		}
 		if start == i {
@@ -236,34 +283,72 @@ func commandSegments(line string) [][]commandToken {
 		}
 		from, to := start, i
 		begin := false
-		for from < to && strings.IndexByte("'\"`([{,\\", line[from]) >= 0 {
-			begin = begin || strings.IndexByte("'\"`", line[from]) >= 0
+		for from < to {
+			ch := line[from]
+			ansiC := ch == '$' && from+1 < to && (line[from+1] == '\'' || line[from+1] == '"')
+			if !ansiC && strings.IndexByte("'\"`([{,\\", ch) < 0 {
+				break
+			}
+			begin = begin || isQuoteByte(ch)
 			from++
 		}
-		end := false
+		end, semicolon := false, false
 		for to > from && strings.IndexByte("'\"`)]},;\\", line[to-1]) >= 0 {
-			end = end || strings.IndexByte("'\"`;", line[to-1]) >= 0
+			end = end || isQuoteByte(line[to-1])
+			semicolon = semicolon || line[to-1] == ';'
 			to--
 		}
+		balanced := quotesBalanced(line[start:i])
+		// a quoted word after a flag is the flag's argument
+		argument := begin && balanced && len(cur) > 0 && flagShaped(cur[len(cur)-1].word)
 		// a quote opens or closes a string: a command in one ("sh -c 'mysql
 		// …'", a JSON value) is judged on its own, apart from its neighbours
-		if begin {
+		if begin && !argument {
 			flush()
 		}
-		word := line[from:to]
-		if commandSeparators[word] {
+		tok := quotesLeftOut(line, from, to)
+		if commandSeparators[tok.word] {
 			flush()
 			continue
 		}
-		if from < to {
-			cur = append(cur, commandToken{word, from, to})
+		if tok.word != "" {
+			cur = append(cur, tok)
 		}
-		if end {
+		if semicolon || end && !argument && !(balanced && !begin) {
 			flush()
 		}
 	}
 	flush()
 	return segs
+}
+
+// quotesLeftOut is the word line[from:to] without the quotes inside it and
+// the backslashes escaping them.
+func quotesLeftOut(line string, from, to int) commandToken {
+	if strings.IndexAny(line[from:to], "'\"`") < 0 {
+		return commandToken{word: line[from:to], from: from, to: to}
+	}
+	var word []byte
+	var pos []int
+	for j := from; j < to; j++ {
+		ch := line[j]
+		if isQuoteByte(ch) {
+			continue
+		}
+		if ch == '\\' {
+			k := j
+			for k < to && line[k] == '\\' {
+				k++
+			}
+			if k < to && isQuoteByte(line[k]) {
+				j = k - 1
+				continue
+			}
+		}
+		word = append(word, ch)
+		pos = append(pos, j)
+	}
+	return commandToken{word: string(word), from: from, to: to, pos: pos}
 }
 
 // commandCredentials applies replace to every credential the argv rules
@@ -278,10 +363,13 @@ func commandCredentials(line string, replace func(string) string) string {
 		}
 		for _, h := range judgeArgv(words) {
 			t := seg[h.tok]
-			v := line[t.from+h.from : t.from+h.to]
+			v := t.word[h.from:h.to]
 			out := replace(v)
 			if len(out) == len(v) {
-				copy(b[t.from+h.from:], out)
+				// in place, around any quote left out inside the value
+				for k := 0; k < len(out); k++ {
+					b[t.at(h.from+k)] = out[k]
+				}
 				changed = changed || out != v
 				continue
 			}
@@ -306,8 +394,8 @@ func commandCredentialsVariable(line string, replace func(string) string) string
 			words[i] = t.word
 		}
 		for _, h := range judgeArgv(words) {
-			t := seg[h.tok]
-			spans = append(spans, span{t.from + h.from, t.from + h.to})
+			from, to := seg[h.tok].span(h.from, h.to)
+			spans = append(spans, span{from, to})
 		}
 	}
 	for i := len(spans) - 1; i >= 0; i-- {
@@ -318,7 +406,7 @@ func commandCredentialsVariable(line string, replace func(string) string) string
 }
 
 // argvLines is a cheap filter: a line that may hold a command's credential.
-var argvHints = []string{"-p", "-a", "-k", "-u", "--", "mysql", "sshpass", "mariadb"}
+var argvHints = []string{"-p", "-a", "-k", "-u", "--", "mysql", "sshpass", "mariadb", "pgpassword", "rediscli_auth"}
 
 // command: "x" / command = 'x' / {command: x, …} (YAML takes it unquoted)
 var commandKey = regexp.MustCompile(`(?:^|[\s{,])["']?command["']?[ \t]*[:=][ \t]*(?:["']([^"'\r\n]+)["']|([^\s,{}\[\]"'#]+))`)

@@ -80,6 +80,43 @@ describe('CFG-002 passwords in hook commands', () => {
     expect(db.passed).toBe(true);
   });
 
+  it('reads quoted passwords, client password variables and commands nested up to three levels', () => {
+    const cases: Array<[string, string]> = [
+      ['mysql -p"Top1Quoted9" app', 'Top1Quoted9'],
+      ['sshpass -p "Top3Spaced9" ssh x', 'Top3Spaced9'],
+      ['mysql --password="Top4Long9x" app', 'Top4Long9x'],
+      ['mysql --password=Ab12 app', 'Ab12'],
+      ['curl -u "adm:Top5Curl9x" https://x', 'Top5Curl9x'],
+      ['MYSQL_PWD="Top7Env9xx" mysql app', 'Top7Env9xx'],
+      ['PGPASSWORD=pg1 psql -h db app', 'pg1'],
+      [`ssh host "bash -c 'mysql -pQx7Lm2Vn9Bz4 app'"`, 'Qx7Lm2Vn9Bz4'],
+      [`ssh -p 2222 -i ~/.ssh/k h "sudo -u svc sh -c 'mysql -pSu8Do4Pw2Rt app'"`, 'Su8Do4Pw2Rt'],
+      [`ssh a "ssh b \\"bash -c 'mysql -pDe3pLv9Kq2 app'\\""`, 'De3pLv9Kq2'],
+      [`ssh h $'mysql -pAnsi7Cq3Lw app'`, 'Ansi7Cq3Lw'],
+      [`ssh h $'mysql -p\\x41nsi7Cq3Lw app'`, 'Ansi7Cq3Lw'],
+      [`su - app -c "sshpass -p Zq8Wn3Lx7Vb2 ssh deploy@h"`, 'Zq8Wn3Lx7Vb2'],
+      [`docker exec db sh -c "mysql -pDk4Rw9Np2Mz7 app"`, 'Dk4Rw9Np2Mz7'],
+      [`eval "mysql -pEv4Rw9Np2Mz7 app"`, 'Ev4Rw9Np2Mz7'],
+    ];
+    for (const [command, pw] of cases) expect(hookCommandSecrets(command).map(s => s.value), command).toEqual([pw]);
+    // `sh -c` around it n times, POSIX-quoted: three levels are read, four are past the bound
+    const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
+    const wrap = (n: number) => Array.from({ length: n }).reduce<string>(s => `sh -c ${q(s)}`, 'mysql -pF0urDeep9Lv app');
+    expect(hookCommandSecrets(wrap(3)).map(s => s.value)).toEqual(['F0urDeep9Lv']);
+    expect(hookCommandSecrets(wrap(4))).toEqual([]);
+  });
+
+  it('does not read text arguments as commands', () => {
+    for (const command of [
+      'git commit -m "use sshpass -p hunter2x9 here"',
+      'git commit --message="run mysql -pS3cretPw9x app"',
+      'echo "run: sshpass -p hunter2x9 ssh x"',
+      'grep -r "mysql -pS3cretPw9x" .',
+      'ssh h "mysql -p app"',
+      'mysql --password app_db',
+    ]) expect(hookCommandSecrets(command), command).toEqual([]);
+  });
+
   it('hookCommandSecrets reads each statement as argv', () => {
     const found = hookCommandSecrets(`echo start; curl https://u:${PW}@h.example/x && notify --password=${PW}x`);
     expect(found.map(s => s.value)).toEqual([PW, `${PW}x`]);

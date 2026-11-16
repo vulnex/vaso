@@ -307,15 +307,17 @@ const FLAG_SEP = String.raw`(\s*=\s*|\s+|["']\s*,\s*["'])`;
 // A value may start with `-` unless it is flag-shaped (shared argv rule 1;
 // `replaceFlagValues` rescans from a flag-shaped one: `--no-auth --api-key x`).
 // Escaped quotes may wrap the value (`--password=\"x\"`).
-const FLAG_VALUE = String.raw`(\\+"[^"\\\n]*\\+"|[^\s"'<>,\\][^\s"'<>,]*)`;
+/** A one-word quoted value (`-p "pw"`, `--password="pw"`, `-p'pw'`): the quotes are the shell's, not the value's. */
+const QUOTED_WORD = String.raw`\\*"[^"\\\s,]+\\*"|'[^'\s,]+'`;
+const FLAG_VALUE = String.raw`(\\+"[^"\\\n]*\\+"|${QUOTED_WORD}|[^\s"'<>,\\][^\s"'<>,]*)`;
 const SECRET_FLAG = new RegExp(String.raw`(^|[\s"'[,])(--?(?:[a-z][\w-]*?[-_])?${FLAG_WORD})${FLAG_SEP}${FLAG_VALUE}`, 'gi');
 const CAMEL_SECRET_FLAG = new RegExp(String.raw`(^|[\s"'[,])(--?${CAMEL_FLAG_WORD})${FLAG_SEP}${FLAG_VALUE}`, 'g');
 /** `-p <pw>`, `-k <key>`, `redis-cli -a <pw>`: judged by the shared argv rules 2–4. */
 const SHORT_FLAG = new RegExp(String.raw`(^|[\s"'[,])(-[pka])(\s+|["']\s*,\s*["'])${FLAG_VALUE}`, 'g');
-/** `mysql -pSECRET`: a password glued to `-p`. */
-const ATTACHED_P = /(^|[\s"'[,])(-p)()([^\s"'<>,]+)/g;
-/** `-u user:pass` / `--user user:pass` (curl, wget). */
-const USER_PASS_FLAG = /(^|[\s"'[,])(-u|--user|--proxy-user)(=|\s+|["']\s*,\s*["'])([^\s:"',]+):([^\s"',]+)/g;
+/** `mysql -pSECRET`, `mysql -p"SECRET"`: a password glued to `-p`. */
+const ATTACHED_P = new RegExp(String.raw`(^|[\s"'[,])(-p)()(${QUOTED_WORD}|[^\s"'<>,]+)`, 'g');
+/** `-u user:pass` / `--user user:pass` (curl, wget), the pair quoted or not (`-u "user:pass"`). */
+const USER_PASS_FLAG = /(^|[\s"'[,])(-u|--user|--proxy-user)((?:=|\s+)\\*["']?|["']\s*,\s*["'])([^\s:"',\\]+):([^\s"',\\]+)/g;
 /** Words of the sentence a flag is quoted in (`after --bot-token in server arguments`), not its value. */
 const PROSE_WORD = /^(?:in|on|at|to|of|for|from|by|with|and|or|is|was|the|a|an|as|flag|value|argument|arguments)$/;
 
@@ -348,7 +350,7 @@ function replaceFlagValues(text: string, re: RegExp, judge: (flag: string, value
       continue;
     }
     if (value === MASK || PROSE_WORD.test(value) || !judge(flag, value, m.index)) continue;
-    out += text.slice(last, valueAt) + escapedQuotes(value, MASK);
+    out += text.slice(last, valueAt) + quotedMask(value);
     last = valueAt + value.length;
   }
   return out + text.slice(last);
@@ -383,6 +385,12 @@ function withoutLabel(text: string, fn: (rest: string) => string): string {
  */
 export function maskCredentialsInText(text: string): string {
   return withoutLabel(text, maskText);
+}
+
+/** MASK inside the quotes, escaped or not, that wrapped a flag's value (`"***"`, `\"***\"`). */
+function quotedMask(value: string): string {
+  const q = /^(\\*["'])[\s\S]*\1$/.exec(value)?.[1];
+  return q && value.length > 2 * q.length ? `${q}${MASK}${q}` : MASK;
 }
 
 /** `replacement` inside the escaped quotes that wrapped `value` (`\"***\"`), or alone. */

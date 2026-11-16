@@ -1,6 +1,6 @@
 import { API_KEY_PATTERNS, isPlaceholderSecret } from '../core/patterns.js';
 import {
-  USER_PASS_FLAGS, isFlagShaped, isKeyAfterK, isPasswordAfterA, isPasswordAfterP, isPasswordClient, isRedisCli, isSeparatePasswordClient,
+  CLIENT_PASSWORD_VAR, USER_PASS_FLAGS, isFlagShaped, isKeyAfterK, isPasswordAfterA, isPasswordAfterP, isPasswordClient, isRedisCli, isSeparatePasswordClient,
   isUserPassClient, isUnstoredValue as notASecret, userPassword, looksLikeCredential as looksLikeSecret,
 } from './argv-rules.js';
 import { shannonEntropy } from '../analyzers/entropy.js';
@@ -453,6 +453,10 @@ function argSecrets(args: readonly string[], command: string | undefined, depth:
   // a MySQL/MariaDB client or `sshpass` as the command or an earlier element: its `-p` is the password
   const clientAt = args.findIndex(isPasswordClient);
   const afterClient = (i: number): boolean => (command !== undefined && isPasswordClient(command)) || (clientAt >= 0 && clientAt < i);
+  // a MySQL/MariaDB client (not sshpass): its `--password=` is the password
+  const isMysqlClient = (a: string): boolean => isPasswordClient(a) && !isSeparatePasswordClient(a);
+  const mysqlAt = args.findIndex(isMysqlClient);
+  const afterMysql = (i: number): boolean => (command !== undefined && isMysqlClient(command)) || (mysqlAt >= 0 && mysqlAt < i);
   // only `sshpass` takes it as a separate element (`mysql -p app_db` names the database)
   const sshpassAt = args.findIndex(isSeparatePasswordClient);
   const afterSshpass = (i: number): boolean => (command !== undefined && isSeparatePasswordClient(command)) || (sshpassAt >= 0 && sshpassAt < i);
@@ -538,6 +542,13 @@ function argSecrets(args: readonly string[], command: string | undefined, depth:
     // `--token=<value>`; any other `--flag=<value>` is judged by its value
     // (`--header=Authorization: Bearer x`, `--env=K=V`, `--connection-string=…`)
     const flagEq = /^(--?[A-Za-z][\w-]*)=(.+)$/s.exec(arg);
+    // `mysql --password=<pw>`: after a MySQL/MariaDB client, whatever is
+    // stored there is the password, as glued to -p (a separate value after
+    // `--password` is the database, as after -p)
+    if (flagEq && flagEq[1] === '--password' && afterMysql(i)) {
+      add(i, flagEq[2], 'password in --password', 'flag');
+      continue;
+    }
     if (flagEq && isCredentialFlag(flagEq[1])) {
       const known = knownToken(flagEq[2]);
       if (known) add(i, known.token, `${known.name} in ${flagEq[1]}`, 'flag');
@@ -596,7 +607,7 @@ function argSecrets(args: readonly string[], command: string | undefined, depth:
       const leaf = assign[1].split('.').pop() ?? assign[1];
       const known = knownToken(assign[2]);
       if (known) add(i, known.token, `${known.name} in ${assign[1]}=`, 'assignment');
-      else if (SECRET_VAR.test(leaf) && looksLikeSecret(assign[2])) add(i, assign[2], `credential in ${assign[1]}=`, 'assignment');
+      else if (CLIENT_PASSWORD_VAR.test(assign[1]) && !/\s/.test(assign[2]) || SECRET_VAR.test(leaf) && looksLikeSecret(assign[2])) add(i, assign[2], `credential in ${assign[1]}=`, 'assignment');
       continue;
     }
 

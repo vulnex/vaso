@@ -15,7 +15,8 @@
  *     prompts and `app_db` is the database, so a separate value there is
  *     judged like anywhere else — a password only when it looks like a
  *     credential and isn't a port, a port mapping, a version, a package spec
- *     or a lowercase word. (`psql`/`pg_dump -p` is a port.)
+ *     or a lowercase word. (`psql`/`pg_dump -p` is a port.) A MySQL/MariaDB
+ *     client's `--password=<v>` is its password like a glued `-p<v>`.
  *  3. `-k`: a credential when it looks random — never a URL, a host[:port]
  *     or a path.
  *  4. `redis-cli -a <pw>` is a password.
@@ -23,6 +24,11 @@
  *     `user:password` value the part after the first colon is the password
  *     unless it is empty or a reference. Other commands' `-u` (`docker -u
  *     1000:1000`, `--user app:app`) is a user, not judged here.
+ *  6. `MYSQL_PWD=`, `PGPASSWORD=`, `SSHPASS=`, `REDISCLI_AUTH=` (a client's
+ *     password variable): the value is the password unless a reference.
+ *
+ * In a command string the quotes around or inside a word are the shell's
+ * (`-p"pw"`, `-u "u:pw"`, `$'…'`), at any depth of escaping.
  */
 
 import { isCredentialReference, isPathValue, isPlaceholderSecret } from '../core/patterns.js';
@@ -105,6 +111,13 @@ export function isKeyAfterK(value: string): boolean {
 
 /** Rule 4: `redis-cli -a <pw>`. */
 export const isPasswordAfterA = (value: string): boolean => !isUnstoredValue(value);
+
+/**
+ * Rule 6: variables a client reads its password from and nothing else
+ * (`MYSQL_PWD=x mysql`, `PGPASSWORD=x psql`, `SSHPASS=x sshpass -e`,
+ * `REDISCLI_AUTH=x redis-cli`): any stored value is the password, however short.
+ */
+export const CLIENT_PASSWORD_VAR = /^(?:MYSQL_PWD|PGPASSWORD|SSHPASS|REDISCLI_AUTH)$/;
 
 /** Rule 5: clients whose `-u`/`--user`/`--proxy-user` value is `user:password`. */
 export const isUserPassClient = (token: string): boolean => /^curl$/i.test(basename(token));

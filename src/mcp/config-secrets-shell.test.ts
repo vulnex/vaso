@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { findArgSecrets } from './config-secrets.js';
-import { shellWords } from './script-command.js';
+import { scriptCommands, shellWords } from './script-command.js';
 
 const values = (command: string, args: string[]) => findArgSecrets(args, command).map((s) => s.value).sort();
 
@@ -45,6 +45,21 @@ describe('findArgSecrets — credentials inside a shell script argument', () => 
       expect(values(command, args)).toEqual([...c.secrets].sort());
     });
   }
+});
+
+describe('shellWords / scriptCommands — bash ANSI-C quoting', () => {
+  it('reads $\'…\' as one word, its escapes decoded', () => {
+    expect(shellWords(String.raw`ssh h $'mysql -p\x41b\'c app' x`)).toEqual(['ssh', 'h', "mysql -pAb'c app", 'x']);
+    expect(shellWords(String.raw`echo $'a\tb\\n\101'`)).toEqual(['echo', 'a\tb\\nA']);
+  });
+
+  it('does not split a script at a separator inside $\'…\'', () => {
+    expect(scriptCommands(String.raw`ssh h $'cd /x; mysql -p\'q\' app' && true`)).toEqual([String.raw`ssh h $'cd /x; mysql -p\'q\' app'`, 'true']);
+  });
+
+  it('finds a password in an ANSI-C quoted shell script', () => {
+    expect(values('sh', ['-c', String.raw`bash -c $'mysql -p\x41nsi7Cq3Lw app'`])).toEqual(['Ansi7Cq3Lw']);
+  });
 });
 
 describe('findArgSecrets — a package runner -p', () => {

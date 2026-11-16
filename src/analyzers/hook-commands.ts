@@ -1,7 +1,7 @@
 import { SECURITY_PATTERNS, scanWithPatterns } from './pattern-engine.js';
 import { shellCommandWrapper } from '../mcp/shell-wrapper.js';
 import { findArgSecrets, type ConfigSecret } from '../mcp/config-secrets.js';
-import { shellWords } from '../mcp/script-command.js';
+import { scriptCommands, shellWords } from '../mcp/script-command.js';
 
 /**
  * Shell-command analysis shared by the agent hook checks (CC-003, CUR-015,
@@ -181,15 +181,55 @@ export function hookStatements(script: string): string[] {
  */
 export function hookCommandSecrets(script: string): ConfigSecret[] {
   const out: ConfigSecret[] = [];
-  for (const stmt of hookStatements(script)) {
-    const words = shellWords(stmt);
-    // a quoted word holding a command (`ssh host "mysql -pX app"`, `sh -c '…'`)
-    // is read as argv too, one level deep
-    const nested = words.filter(w => /\s/.test(w.trim())).map(w => shellWords(w));
-    for (const argv of [words, ...nested]) {
-      for (const secret of findArgSecrets(argv)) {
-        if (!out.some(o => o.value === secret.value)) out.push(secret);
-      }
+  const read = (words: string[], depth: number): void => {
+    for (const secret of findArgSecrets(words)) {
+      if (!out.some(o => o.value === secret.value)) out.push(secret);
+    }
+    if (depth >= MAX_NESTED_COMMANDS) return;
+    for (const nested of nestedCommands(words)) {
+      for (const stmt of scriptCommands(nested)) read(shellWords(stmt), depth + 1);
+    }
+  };
+  for (const stmt of hookStatements(script)) read(shellWords(stmt), 0);
+  return out;
+}
+
+/** How deep commands quoted inside commands are read (`ssh h "bash -c 'mysql -pX app'"` is two levels). */
+const MAX_NESTED_COMMANDS = 3;
+/** ssh options that take a value (OpenSSH ssh(1)): the host is the first word after the options. */
+const SSH_VALUE_OPTION = /^-[BbcDEeFIiJLlmOoPpQRSWw]$/;
+
+/**
+ * The words of a command that are commands themselves, to be read as shell
+ * text: a shell's `-c` script (`sh -c '…'`, also run through `sudo`, `env`,
+ * `docker exec`, `xargs`), `su -c '…'`, the remote command `ssh [options]
+ * host …` runs, and what `eval` evaluates. Only these positions: any other
+ * argument is data — a commit message (`git commit -m "use sshpass -p x"`),
+ * text `echo` prints, a search pattern — and a password-client command
+ * spelled out in it runs nowhere.
+ */
+function nestedCommands(words: readonly string[]): string[] {
+  const out: string[] = [];
+  const name = (w: string): string => w.replace(/^.*\//, '');
+  for (let i = 0; i < words.length; i++) {
+    const w = name(words[i]);
+    if (w === 'eval' && i === 0) {
+      out.push(words.slice(1).join(' '));
+    } else if (w === 'su') {
+      const c = words.findIndex((a, k) => k > i && (a === '-c' || a === '--command'));
+      if (c >= 0 && c + 1 < words.length) out.push(words[c + 1]);
+    } else if (w === 'ssh') {
+      let k = i + 1;
+      while (k < words.length && words[k].startsWith('-') && words[k] !== '--') k += SSH_VALUE_OPTION.test(words[k]) ? 2 : 1;
+      if (words[k] === '--') k++;
+      // words after the host: ssh joins them with spaces for the remote shell
+      if (k + 1 < words.length) out.push(words.slice(k + 1).join(' '));
+      return out;
+    } else if (shellCommandWrapper(words[i], words.slice(i + 1))) {
+      const c = words.findIndex((a, k) => k > i && /^-[a-zA-Z]*c[a-zA-Z]*$/.test(a));
+      const script = words.findIndex((a, k) => k > c && !a.startsWith('-'));
+      if (c >= 0 && script >= 0) out.push(words[script]);
+      return out;
     }
   }
   return out;
