@@ -56,7 +56,7 @@ export async function iocScanFiles(ctx: ScanContext): Promise<string[]> {
     for (const skills of skillsDirs) {
       const rel = relative(dir, skills);
       if (relEscapes(rel)) continue;
-      entries = entries.concat(await followSkillLinks(ctx.fs, skills, entries));
+      entries = entries.concat(await followSkillLinks(ctx.fs, skills, entries, { uncapped: ctx.installation.agent === 'skill-audit' }));
     }
     for (const entry of entries) {
       const ext = extname(entry.name).toLowerCase();

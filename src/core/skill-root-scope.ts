@@ -1,4 +1,4 @@
-import { basename, dirname, isAbsolute, join, normalize, relative } from 'node:path';
+import { basename, dirname, isAbsolute, join, normalize, posix, relative } from 'node:path';
 import type { FSProvider } from './fs-provider.js';
 import type { UnscannedSkillsDir } from './types.js';
 import { SENSITIVE_SINKS, classifySensitivePath } from '../analyzers/sensitive-paths.js';
@@ -293,6 +293,30 @@ export function overEntryLimit(fs: FSProvider, dir: string, home: string): Promi
     byDir.set(key, hit);
   }
   return hit;
+}
+
+/**
+ * For a walk of the skills tree at `root`: whether a directory link met in
+ * it (one the walk would follow) leads to a tree over the entry limit, so
+ * the walk leaves it out. Each link is counted from its target on its own
+ * (MAX_SKILL_TREE_ENTRIES apiece, as the probe's followFrom counts it), its
+ * own links followed where a tree of the root's user may lead; the plain
+ * content of the tree being walked is not counted here. On a snapshot, what
+ * the probe recorded for the link (configTrees `limit`) decides.
+ */
+export async function linkCap(fs: FSProvider, root: string): Promise<(link: string) => Promise<boolean>> {
+  if (fs.kind === 'snapshot') {
+    return async link => isAbsolute(link) && configTreeStatus(fs, clean(posix.normalize(link))) === 'limit';
+  }
+  let home: Promise<string> | undefined;
+  return async link => {
+    if (!isAbsolute(link)) return false;
+    if (!home) {
+      const me = homedirOf(fs);
+      home = me && isAbsolute(root) ? homeOfDir(fs, root, [me]).then(h => h ?? '') : Promise.resolve('');
+    }
+    return overEntryLimit(fs, clean(link), await home);
+  };
 }
 
 /** A component of `p` below `stat` (`p` itself included) is a link (probe throughLink). */

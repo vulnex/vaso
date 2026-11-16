@@ -120,8 +120,8 @@ export function getAllSkillsDirs(installation: AgentInstallation): string[] {
  * native `helper`). Vendor dirs are skipped, build output is not — see
  * VENDOR_DIRS / BUILD_OUTPUT_DIRS.
  */
-export async function getSkillFiles(dir: string, fs?: FSProvider): Promise<string[]> {
-  return (await listSkillTree(dir, fs)).files;
+export async function getSkillFiles(dir: string, fs?: FSProvider, opts: { uncapped?: boolean } = {}): Promise<string[]> {
+  return (await listSkillTree(dir, fs, opts)).files;
 }
 
 /** One walk of a skills directory: what getSkillFiles returns, and what the inventory needs. */
@@ -137,17 +137,22 @@ export interface SkillTreeListing {
   /** Links in the tree the walk did not follow for where they lead (an OS
    *  directory, another user's home, the home itself — linkScope). */
   refusedLinks: string[];
+  /** Directory links in the tree the walk did not follow because the tree
+   *  they lead to holds more than MAX_SKILL_TREE_ENTRIES entries (linkCap). */
+  overLimitLinks: string[];
 }
 
-export async function listSkillTree(dir: string, fs?: FSProvider): Promise<SkillTreeListing> {
+/** `uncapped`: follow links whatever the size of their tree (`vaso skill audit`). */
+export async function listSkillTree(dir: string, fs?: FSProvider, opts: { uncapped?: boolean } = {}): Promise<SkillTreeListing> {
   const provider = fs ?? new LocalFSProvider();
   const files: string[] = [];
   let entries: DirentInfo[] = [];
   let error: NodeJS.ErrnoException | undefined;
   const refusedLinks: string[] = [];
+  const overLimitLinks: string[] = [];
   try {
     // Follows symlinked skills that point outside the tree (walkSkillTree)
-    entries = await walkSkillTree(provider, dir, refusedLinks);
+    entries = await walkSkillTree(provider, dir, refusedLinks, { overLimit: overLimitLinks, uncapped: opts.uncapped });
     for (const entry of entries) {
       if (!entry.isFile) continue;
       if (isExcludedPath(dir, entry.parentPath, { keepBuildOutput: true })) continue;
@@ -172,7 +177,7 @@ export async function listSkillTree(dir: string, fs?: FSProvider): Promise<Skill
     const skillMd = join(skillDir, 'SKILL.md');
     if (!files.includes(skillMd) && await provider.access(skillMd)) files.push(skillMd);
   }
-  return { entries, files, unlistable, refusedLinks, ...(error ? { error } : {}) };
+  return { entries, files, unlistable, refusedLinks, overLimitLinks, ...(error ? { error } : {}) };
 }
 
 /**
