@@ -236,6 +236,81 @@ export function manifestCoversTree(fs: FSProvider, dir: string): boolean {
   return selfAndAncestors(dir).some(d => c.recursive.some(r => r.test(d)));
 }
 
+/** probe/collector.go skillSegment: a directory name a skills tree is kept under. */
+const SKILL_SEGMENT = /^(?:.*[-_.])?skills?(?:[-_.].*)?$/i;
+
+let skillGlobCache: { key: string; globs: string[] } | undefined;
+
+/**
+ * The manifest's recursive skills globs (`~/.claude/skills/**`,
+ * `~/.picoclaw/workspace-*\/skills/**`), as written: those the probe walks as
+ * skills trees (isSkillPattern in probe/collector.go).
+ */
+export function manifestSkillGlobs(): string[] {
+  const adapters = adapterRegistry.getAdapters();
+  if (adapters.length === 0) return [];
+  const key = adapters.map(a => a.agent).join(',');
+  if (skillGlobCache?.key === key) return skillGlobCache.globs;
+  const globs = buildProbeManifest(adapters).globPatterns
+    .filter(g => g.endsWith('/**') && g.split('/').slice(0, -1).some(s => SKILL_SEGMENT.test(s)));
+  skillGlobCache = { key, globs };
+  return globs;
+}
+
+/**
+ * doublestar.SplitPattern: everything up to the last `/` before the first
+ * unescaped metacharacter (unescaped), and the rest; `.` and the pattern
+ * when there is no such `/`.
+ */
+export function splitGlob(p: string): { base: string; rest: string } {
+  let split = -1;
+  for (let i = 0; i < p.length; i++) {
+    const c = p[i];
+    if (c === '\\') i++;
+    else if (c === '/') split = i;
+    else if (c === '*' || c === '?' || c === '[' || c === '{') break;
+  }
+  if (split === 0) return { base: '/', rest: p.slice(1) };
+  if (split > 0) return { base: p.slice(0, split).replace(/\\(.)/g, '$1'), rest: p.slice(split + 1) };
+  return { base: '.', rest: p };
+}
+
+/**
+ * A manifest glob (`~/…`, `${VAR}/…`, `/…`) for the user whose home is
+ * `home`: the literal directory it starts from and the glob after it, as the
+ * probe expands it; undefined when it expands to nothing.
+ */
+export function expandManifestGlob(fs: FSProvider, pattern: string, home: string): { prefix: string; tail: string } | undefined {
+  if (pattern === '~' || pattern.startsWith('~/')) return { prefix: home, tail: pattern.slice(1) };
+  if (pattern.startsWith('${')) {
+    const env = /^\$\{([A-Za-z_][A-Za-z0-9_]*)\}(\/.*)?$/.exec(pattern);
+    if (!env) return undefined;
+    let value = fs.getEnv(env[1])?.trim();
+    if (!value) return undefined;
+    if (value === '~' || value.startsWith('~/')) value = fs.homedir() + value.slice(1);
+    if (!value.startsWith('/')) return undefined;
+    const rest = env[2] ?? '';
+    const up = /^(?:\/\.\.)*/.exec(rest)![0];
+    return { prefix: posix.normalize(value + up).replace(/(.)\/$/, '$1'), tail: rest.slice(up.length) };
+  }
+  if (pattern.startsWith('/')) return { prefix: '', tail: pattern };
+  return undefined;
+}
+
+/** `prefix` + `tail` as an anchored regex: the prefix literal, the tail a glob. */
+export function expandedGlobRegex(prefix: string, tail: string): RegExp | undefined {
+  try {
+    return new RegExp(`^${escapeRegex(prefix)}${globToRegexSource(tail).replace(/\\\/$/, '')}$`);
+  } catch {
+    return undefined;
+  }
+}
+
+/** `path` and every directory above it (normalized, no trailing slash). */
+export function pathChain(path: string): string[] {
+  return selfAndAncestors(path);
+}
+
 /**
  * A config-derived skills directory the remote probe didn't walk because it
  * refused the tree (an OS directory, another user's home, a credential store) or found it
