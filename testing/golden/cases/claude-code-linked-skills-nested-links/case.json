@@ -1,0 +1,17 @@
+{
+  "agent": "claude-code",
+  "source": "dt23 re-verify round 5: ~/.claude/skills links out of the home (a home-manager layout) to a tree whose skill is itself a relative link into a store, and another skill links to /usr/share \u2014 the store's skill is scanned and the /usr/share one reported not scanned, on local and remote scans alike",
+  "reachable": true,
+  "fail": {
+    "SKL-004": "critical",
+    "SKL-002": "warning"
+  },
+  "inventory": {
+    "skills": [
+      "evil"
+    ],
+    "otherEntries": [
+      "shareskill"
+    ]
+  }
+}
