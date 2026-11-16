@@ -4,6 +4,8 @@ import {
   isUserPassClient, isUnstoredValue as notASecret, userPassword, looksLikeCredential as looksLikeSecret,
 } from './argv-rules.js';
 import { shannonEntropy } from '../analyzers/entropy.js';
+import { shellCommandWrapper } from './shell-wrapper.js';
+import { commandWords, scriptCommands, shellWords } from './script-command.js';
 
 /**
  * Credentials written into an MCP server's argv or URL instead of its env
@@ -415,6 +417,38 @@ export function findValueSecrets(value: string, location: string): ConfigSecret[
 const PACKAGE_P_RUNNERS = new Set(['npx', 'bunx', 'pnpx', 'npm', 'pnpm', 'yarn']);
 
 export function findArgSecrets(args: readonly string[], command?: string): ConfigSecret[] {
+  return argSecrets(args, command, 0);
+}
+
+/** Shell scripts inside shell scripts followed (`sh -c "bash -c '…'"`). */
+const MAX_SHELL_DEPTH = 3;
+const POSIX_SCRIPT_FLAG = /^-[a-zA-Z]*c[a-zA-Z]*$/;
+
+/**
+ * `sh -c "mysql -pX db && curl -u u:X …"`: the script's commands, each read
+ * as argv by the same rules (`PGPASSWORD=X psql`, a URL's password, curl
+ * `-u`, sshpass `-p`), reported at the script's element.
+ */
+function shellScriptSecrets(args: readonly string[], command: string | undefined, depth: number): ConfigSecret[] {
+  if (command === undefined || depth >= MAX_SHELL_DEPTH) return [];
+  const shell = shellCommandWrapper(command, args);
+  if (!shell || shell === 'cmd' || shell === 'powershell' || shell === 'pwsh') return [];
+  const flag = args.findIndex((a) => POSIX_SCRIPT_FLAG.test(a));
+  const at = flag < 0 ? -1 : args.findIndex((a, i) => i > flag && !a.startsWith('-'));
+  if (at < 0) return [];
+  const out: ConfigSecret[] = [];
+  for (const stmt of scriptCommands(args[at])) {
+    const prog = commandWords(stmt);
+    const found = [
+      ...argSecrets(shellWords(stmt), undefined, depth + 1),
+      ...(prog.length > 1 ? shellScriptSecrets(prog.slice(1), prog[0], depth + 1) : []),
+    ];
+    for (const s of found) out.push({ ...s, location: `args[${at}]`, masked: maskIn(args[at], s.value) });
+  }
+  return out;
+}
+
+function argSecrets(args: readonly string[], command: string | undefined, depth: number): ConfigSecret[] {
   const out: ConfigSecret[] = [];
   // a MySQL/MariaDB client or `sshpass` as the command or an earlier element: its `-p` is the password
   const clientAt = args.findIndex(isPasswordClient);
@@ -426,7 +460,15 @@ export function findArgSecrets(args: readonly string[], command?: string): Confi
   const afterRedis = (i: number): boolean => (command !== undefined && isRedisCli(command)) || (redisAt >= 0 && redisAt < i);
   const curlAt = args.findIndex(isUserPassClient);
   const afterCurl = (i: number): boolean => (command !== undefined && isUserPassClient(command)) || (curlAt >= 0 && curlAt < i);
-  const packageRunner = command !== undefined && PACKAGE_P_RUNNERS.has(command.replace(/\\/g, '/').split('/').pop()?.replace(/\.(?:cmd|exe)$/i, '').toLowerCase() ?? '');
+  const runner = command?.replace(/\\/g, '/').split('/').pop()?.replace(/\.(?:cmd|exe)$/i, '').toLowerCase() ?? '';
+  // The runner's own options come before the package (`npx -y -p pkg cmd`;
+  // `npm exec -p pkg`): a `-p` after the package is the server's own
+  // (`npx -y mcp-server-mysql -p <pw>`)
+  const packageAt = PACKAGE_P_RUNNERS.has(runner)
+    ? args.findIndex((a, i) => !a.startsWith('-') && args[i - 1] !== '-p' && args[i - 1] !== '--package'
+      && !(['npm', 'pnpm', 'yarn'].includes(runner) && /^(?:exec|x|dlx)$/.test(a) && args.slice(0, i).every((b) => b.startsWith('-'))))
+    : -1;
+  const runnerOption = (i: number): boolean => PACKAGE_P_RUNNERS.has(runner) && (packageAt < 0 || i < packageAt);
   const add = (i: number, value: string, kind: string, via: ConfigSecret['via'], text = args[i]) => {
     if (!value || notASecret(value) || out.some(s => s.value === value)) return;
     out.push({ location: `args[${i}]`, kind, masked: maskIn(text, value), value, via });
@@ -467,7 +509,7 @@ export function findArgSecrets(args: readonly string[], command?: string): Confi
     // version, a package or a word elsewhere (shared argv rules 1 and 2)
     // A package runner's `-p` is `--package` (`npx -p https://…/x.tgz cmd`):
     // the value is a package spec, judged by the rules below like any argument
-    if (prev === '-p' && !isFlagShaped(arg) && !(packageRunner && !afterClient(i - 1))) {
+    if (prev === '-p' && !isFlagShaped(arg) && !(runnerOption(i - 1) && !afterClient(i - 1))) {
       if (isPasswordAfterP(arg, afterSshpass(i - 1))) add(i, arg, 'password after -p', 'flag', `${prev} ${arg}`);
       continue;
     }
@@ -573,6 +615,9 @@ export function findArgSecrets(args: readonly string[], command?: string): Confi
     // A bare token standing alone or inside a larger argument
     const known = knownToken(arg);
     if (known) add(i, known.token, known.name, 'token');
+  }
+  for (const s of shellScriptSecrets(args, command, depth)) {
+    if (!out.some(o => o.value === s.value)) out.push(s);
   }
   return out;
 }

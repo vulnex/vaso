@@ -1029,8 +1029,31 @@ function allowListChoice(path: NodePath): boolean {
   const fixed = (branch: Node, checked: Set<string>): boolean =>
     staticString(branch, path.scope) !== undefined || branch.type === 'NumericLiteral'
     || (branch.type === 'Identifier' && checked.has(branch.name));
-  return fixed(path.node.consequent, choiceChecked(test, true, path.scope))
-    && fixed(path.node.alternate, choiceChecked(test, false, path.scope));
+  // a name the test itself assigns (`ALLOWED.includes(c) && (c = o, true)`) holds what was assigned
+  const assigned = assignedNames(test);
+  const checked = (outcome: boolean): Set<string> => {
+    const names = choiceChecked(test, outcome, path.scope);
+    for (const n of assigned) names.delete(n);
+    return names;
+  };
+  return fixed(path.node.consequent, checked(true)) && fixed(path.node.alternate, checked(false));
+}
+
+/** Names an expression assigns or updates (`x = …`, `x += …`, `x++`), however deep. */
+function assignedNames(node: Node, depth = 0, into = new Set<string>()): Set<string> {
+  if (depth > 32) return into;
+  if (node.type === 'AssignmentExpression' && node.left.type === 'Identifier') into.add(node.left.name);
+  if (node.type === 'UpdateExpression' && node.argument.type === 'Identifier') into.add(node.argument.name);
+  // functions in the test run later, if ever: what they assign is not the test's
+  if (node.type === 'ArrowFunctionExpression' || node.type === 'FunctionExpression') return into;
+  for (const key of Object.keys(node) as Array<keyof Node>) {
+    if (key === 'loc' || key === 'leadingComments' || key === 'trailingComments' || key === 'innerComments') continue;
+    const value = node[key] as unknown;
+    for (const child of Array.isArray(value) ? value : [value]) {
+      if (child && typeof child === 'object' && typeof (child as Node).type === 'string') assignedNames(child as Node, depth + 1, into);
+    }
+  }
+  return into;
 }
 
 /**
@@ -1038,7 +1061,8 @@ function allowListChoice(path: NodePath): boolean {
  * `outcome`: `ALLOWED.includes(x)` (true), `x !== "asc"` (false),
  * `!ALLOWED.includes(x)` (false). `A && B` true makes both hold, so every
  * operand's check counts (`ALLOWED.includes(o) && ALLOWED.includes(col)`);
- * `A || B` false makes both fail. Nothing otherwise.
+ * `A || B` false makes both fail. `A && B` false and `A || B` true make one
+ * hold: a name both operands check (`x !== "asc" && x !== "desc"`).
  */
 function choiceChecked(test: Node, outcome: boolean, scope: Scope, depth = 0, into = new Set<string>()): Set<string> {
   if (depth > 8) return into;
@@ -1049,6 +1073,12 @@ function choiceChecked(test: Node, outcome: boolean, scope: Scope, depth = 0, in
     if ((test.operator === '&&' && outcome) || (test.operator === '||' && !outcome)) {
       choiceChecked(test.left, outcome, scope, depth + 1, into);
       choiceChecked(test.right, outcome, scope, depth + 1, into);
+    } else if (test.operator === '&&' || test.operator === '||') {
+      // `x !== "asc" && x !== "desc"` false, `x === "asc" || x === "desc"` true:
+      // one operand holds, so a name every operand checks is fixed
+      const left = choiceChecked(test.left, outcome, scope, depth + 1);
+      const right = choiceChecked(test.right, outcome, scope, depth + 1);
+      for (const n of left) if (right.has(n)) into.add(n);
     }
     return into;
   }

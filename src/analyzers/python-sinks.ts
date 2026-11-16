@@ -311,39 +311,64 @@ function isFixedCode(expr: string, constants: Set<string>): boolean {
   return FIXED_TEXT.test(expr) || constants.has(expr) || fixedValue(expr, constants);
 }
 
+interface DefinitionScopes {
+  /** Whether the line at an offset is inside a `def` or `class` body. */
+  inside(offset: number): boolean;
+  /** The 1-based first and last line of the innermost `def`/`class` around the line at an offset. */
+  enclosing(offset: number): [number, number] | undefined;
+}
+
 /**
- * Whether the line at an offset is inside a `def` or `class` body: some
- * less-indented line above it opens one. A `try:`/`if` block at module level
- * is still module level. One pass over the lines, on first use.
+ * The `def`/`class` bodies of a file: some less-indented line above a line
+ * opens one. A `try:`/`if` block at module level is still module level. One
+ * pass over the lines, on first use.
  */
-function definitionScopes(code: string): (offset: number) => boolean {
+function definitionScopes(code: string): DefinitionScopes {
   let starts: number[] | undefined;
-  let inside: Uint8Array | undefined;
+  // per line: index into `ranges` of the innermost def/class around it, or -1
+  let innermost: Int32Array | undefined;
+  const ranges: Array<[number, number]> = [];
   const build = (): void => {
     starts = [];
-    const flags: number[] = [];
-    // open blocks as [indent, opened by def/class]
-    const stack: Array<[number, boolean]> = [];
+    const around: number[] = [];
+    // open blocks as [indent, index into ranges when opened by def/class, else -1]
+    const stack: Array<[number, number]> = [];
+    const innermostOpen = (): number => {
+      for (let k = stack.length - 1; k >= 0; k--) if (stack[k][1] >= 0) return stack[k][1];
+      return -1;
+    };
+    let lastCode = 0;
     let start = 0;
     while (start <= code.length) {
       const nl = code.indexOf('\n', start);
       const end = nl < 0 ? code.length : nl;
       const line = code.slice(start, end);
       const lead = /^[ \t]*/.exec(line)![0].length;
+      const index = starts.length;
       starts.push(start);
       if (/^\s*(?:#|$)/.test(line)) {
-        flags.push(stack.some(([, def]) => def) ? 1 : 0);
+        around.push(innermostOpen());
       } else {
-        while (stack.length > 0 && stack[stack.length - 1][0] >= lead) stack.pop();
-        flags.push(stack.some(([, def]) => def) ? 1 : 0);
-        stack.push([lead, /^[ \t]*(?:async[ \t]+)?(?:def|class)[ \t]/.test(line)]);
+        while (stack.length > 0 && stack[stack.length - 1][0] >= lead) {
+          const [, r] = stack.pop()!;
+          if (r >= 0) ranges[r][1] = lastCode + 1;
+        }
+        around.push(innermostOpen());
+        let r = -1;
+        if (/^[ \t]*(?:async[ \t]+)?(?:def|class)[ \t]/.test(line)) {
+          r = ranges.length;
+          ranges.push([index + 1, index + 1]);
+        }
+        stack.push([lead, r]);
+        lastCode = index;
       }
       if (nl < 0) break;
       start = nl + 1;
     }
-    inside = Uint8Array.from(flags);
+    for (const [, r] of stack) if (r >= 0) ranges[r][1] = lastCode + 1;
+    innermost = Int32Array.from(around);
   };
-  return (offset: number): boolean => {
+  const lineAt = (offset: number): number => {
     if (!starts) build();
     let lo = 0;
     let hi = starts!.length - 1;
@@ -352,7 +377,18 @@ function definitionScopes(code: string): (offset: number) => boolean {
       if (starts![mid] <= offset) lo = mid;
       else hi = mid - 1;
     }
-    return inside![lo] === 1;
+    return lo;
+  };
+  return {
+    inside: (offset) => {
+      const line = lineAt(offset);
+      return innermost![line] >= 0;
+    },
+    enclosing: (offset) => {
+      const line = lineAt(offset);
+      const r = innermost![line];
+      return r >= 0 ? ranges[r] : undefined;
+    },
   };
 }
 
@@ -361,7 +397,7 @@ function definitionScopes(code: string): (offset: number) => boolean {
  * know: `sp.run(` → `subprocess.run(`, `check_output(` (from-imported) →
  * `subprocess.check_output(`, `__import__("os").system(` → `os.system(`.
  */
-function aliasRewriter(code: string): (text: string) => string {
+function aliasRewriter(code: string): (text: string, line?: number) => string {
   // One map per rewrite shape, applied in a single pass per text (a regex
   // per alias over every line was O(aliases × lines)); the first binding of
   // a name wins, as when each rewrite ran in turn.
@@ -382,20 +418,55 @@ function aliasRewriter(code: string): (text: string) => string {
   // binding of a name is what it calls (`from subprocess import run` then
   // `def run(…)` is the local function; a later re-import is the sink again)
   const bindings: Array<{ at: number; name: string; target?: string }> = [];
-  // An import inside a def/class binds the name there only: it is a call
-  // alias only when nothing at module level binds the name
+  // An import inside a def/class binds the name there only: inside that body
+  // it is the sink whatever the module binds; elsewhere it is a call alias
+  // only when nothing at module level binds the name
   const localImports: Array<{ name: string; target: string }> = [];
-  const insideDefinition = definitionScopes(code);
+  // name → the bodies importing it, as [first line, last line, target]
+  const scopedCalls = new Map<string, Array<[number, number, string]>>();
+  const scopes = definitionScopes(code);
   for (const m of code.matchAll(/^[ \t]*from[ \t]+(os|subprocess|asyncio|pty)[ \t]+import[ \t]+\(?([^\n#)]+)/gm)) {
-    const local = /^[ \t]/.test(m[0]) && insideDefinition(m.index ?? 0);
+    const body = /^[ \t]/.test(m[0]) ? scopes.enclosing(m.index ?? 0) : undefined;
     for (const part of m[2].split(',')) {
       const im = /^\s*(\w+)(?:\s+as\s+(\w+))?\s*$/.exec(part);
       if (!im) continue;
       const binding = { at: m.index ?? 0, name: im[2] ?? im[1], target: `${m[1]}.${im[1]}` };
-      if (local) localImports.push(binding);
-      else bindings.push(binding);
+      if (body) {
+        localImports.push(binding);
+        const list = scopedCalls.get(binding.name) ?? [];
+        if (list.length === 0) scopedCalls.set(binding.name, list);
+        list.push([body[0], body[1], binding.target]);
+      } else {
+        bindings.push(binding);
+      }
     }
   }
+  // The call alias of a name on a line: the innermost body importing it there, else the file-wide one
+  // by first line, so the innermost body around a line is the nearest one before it that contains it
+  // (with the furthest last line of each prefix: the walk back stops where nothing earlier reaches the line)
+  const reach = new Map<string, number[]>();
+  for (const [name, list] of scopedCalls) {
+    list.sort((a, b) => a[0] - b[0]);
+    let far = 0;
+    reach.set(name, list.map((r) => (far = Math.max(far, r[1]))));
+  }
+  const callAt = (name: string, line: number | undefined): { target: string; extra?: string } | undefined => {
+    const scoped = line === undefined ? undefined : scopedCalls.get(name);
+    if (scoped) {
+      const far = reach.get(name)!;
+      let lo = 0;
+      let hi = scoped.length - 1;
+      while (lo < hi) {
+        const mid = (lo + hi + 1) >> 1;
+        if (scoped[mid][0] <= line!) lo = mid;
+        else hi = mid - 1;
+      }
+      for (let k = lo; k >= 0 && far[k] >= line!; k--) {
+        if (scoped[k][0] <= line! && line! <= scoped[k][1]) return { target: scoped[k][2] };
+      }
+    }
+    return callAliases.get(name);
+  };
   if (bindings.length > 0 || localImports.length > 0) {
     const imported = new Set([...bindings, ...localImports].map((b) => b.name));
     for (const d of code.matchAll(/^(?:async[ \t]+)?(?:def|class)[ \t]+([A-Za-z_]\w*)/gm)) {
@@ -478,7 +549,7 @@ function aliasRewriter(code: string): (text: string) => string {
     }
   }
   const identifier = /(?<![\w.])([A-Za-z_]\w*)(\s*\(|\.)/g;
-  const rewriteAliases = (text: string): string => {
+  const rewriteAliases = (text: string, line?: number): string => {
     // edits as [start, end, replacement]; an insertion has start === end
     const edits: Array<[number, number, string]> = [];
     // brackets matched once per text, on the first call that needs one
@@ -491,7 +562,7 @@ function aliasRewriter(code: string): (text: string) => string {
         if (to !== undefined) edits.push([at, at + whole.length, to]);
         continue;
       }
-      const call = callAliases.get(name);
+      const call = callAt(name, line);
       // `def run(self):` defines a name, it doesn't call the imported one
       if (!call || /\b(?:def|class)[ \t]+$/.test(text.slice(Math.max(0, at - 16), at))) continue;
       edits.push([at, at + whole.length, `${call.target}(`]);
@@ -510,7 +581,7 @@ function aliasRewriter(code: string): (text: string) => string {
     }
     return out + text.slice(last);
   };
-  return (text: string): string => {
+  return (text: string, line?: number): string => {
     let out = text.replace(/\b__import__\(\s*["'](\w+)["']\s*\)\s*\./g, '$1.');
     // getattr(os, "sys" + "tem")(cmd): a sink name assembled to dodge a grep.
     // The name stops at `(` too (a name holding one is never rewritten), and
@@ -522,7 +593,7 @@ function aliasRewriter(code: string): (text: string) => string {
       return mod === 'builtins' ? `${literal}(` : `${mod}.${literal}(`;
     });
     out = out.replace(/(?<![\w.])builtins\.(\w+)\s*\(/g, '$1(');
-    if (moduleAliases.size > 0 || callAliases.size > 0) out = rewriteAliases(out);
+    if (moduleAliases.size > 0 || callAliases.size > 0 || scopedCalls.size > 0) out = rewriteAliases(out, line);
     if (shellKwargs.size > 0) out = out.replace(/\*\*([A-Za-z_]\w*)\b/g, (m, name: string) => (shellKwargs.has(name) ? `shell=True, ${m}` : m));
     return out;
   };
@@ -780,7 +851,7 @@ const mentions = (text: string, name: string): boolean => new RegExp(String.raw`
  * parameters, helper parameters passed tainted values at a call site, and
  * variables assigned from them. Two rounds cover tool → helper → helper.
  */
-function taintedNames(stmts: Array<CodeLine & { last: number }>, fns: PyFunction[], rewrite: (t: string) => string): Map<PyFunction, Map<string, string>> {
+function taintedNames(stmts: Array<CodeLine & { last: number }>, fns: PyFunction[], rewrite: (t: string, line?: number) => string): Map<PyFunction, Map<string, string>> {
   const tainted = new Map<PyFunction, Map<string, string>>();
   for (const fn of fns) {
     tainted.set(fn, new Map(fn.tool ? fn.params.map((p) => [p, p]) : []));
@@ -791,7 +862,7 @@ function taintedNames(stmts: Array<CodeLine & { last: number }>, fns: PyFunction
     for (const fn of fns) {
       const names = tainted.get(fn)!;
       for (let i = fn.start + 1; i < fn.end; i++) {
-        const text = rewrite(stmts[i].text);
+        const text = rewrite(stmts[i].text, stmts[i].line);
         const assign = /^\s*([A-Za-z_]\w*)\s*(?::[^=]+)?=(?!=)\s*([\s\S]+)$/.exec(text);
         if (assign && !names.has(assign[1])) {
           const rhs = dataPart(assign[2]);
@@ -843,7 +914,7 @@ export function analyzePythonSinks(code: string): PythonSinkFinding[] {
 
   // Physical-line rules: injection shapes visible on one line.
   for (const { line, text: raw } of lines) {
-    const text = rewrite(raw);
+    const text = rewrite(raw, line);
     const snippet = cutLine(raw.trim());
 
     if (/\bopen\s*\(|\bPath\s*\(|expanduser\s*\(/.test(text)) {
@@ -891,7 +962,7 @@ export function analyzePythonSinks(code: string): PythonSinkFinding[] {
 
   // Statement-level: exec sinks (a call may span lines), with tool-input tracing.
   stmts.forEach((stmt, i) => {
-    const text = rewrite(stmt.text);
+    const text = rewrite(stmt.text, stmt.line);
     for (const { re, name } of EXEC_SINKS) {
       // Matched on code only: `"eval": "eval() has…"` is a string, not a call
       const m = re.exec(blankStrings(text));
@@ -990,7 +1061,7 @@ export function analyzePythonCapabilities(code: string): PythonCapability[] {
   const lines = codeLines(code);
   const lineText = new Map(lines.map((l) => [l.line, l.text]));
   for (const stmt of statements(lines)) {
-    const text = rewrite(stmt.text);
+    const text = rewrite(stmt.text, stmt.line);
     const snippet = (lineText.get(stmt.line) ?? '').trim().slice(0, 120);
     for (const { re, name } of EXEC_SINKS) {
       // Matched on code only: `"eval": "eval() has…"` is a string, not a call
@@ -1391,7 +1462,7 @@ export function analyzePythonDataFlow(code: string): DataFlowResult[] {
   const constants = stringConstantNames(stmts, fns);
   const urlConstants = scopedConstants(stmts, fns);
   // the file redirects every request (patched client, proxy settings): no request is the vendor's own
-  const rewritten = stmts.map((st) => rewrite(st.text));
+  const rewritten = stmts.map((st) => rewrite(st.text, st.line));
   const redirectsAll = PY_GLOBAL_REDIRECT.test(rewritten.join('\n'));
   const sessions = clientSessions(rewritten, urlConstants.owner);
   // what each session carries into every request it makes (`s.headers.update({…})`, `Client(headers=…)`)
@@ -1419,7 +1490,7 @@ export function analyzePythonDataFlow(code: string): DataFlowResult[] {
   let nextFn = 0;
 
   stmts.forEach((stmt, i) => {
-    const text = rewrite(stmt.text);
+    const text = rewrite(stmt.text, stmt.line);
     const snippet = cutLine((lineText.get(stmt.line) ?? '').trim());
     // Functions nest: leave the ones that ended, enter the ones whose `def` precedes
     while (enclosing.length > 0 && i >= enclosing[enclosing.length - 1].end) enclosing.pop();
