@@ -1,11 +1,12 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { mkdtemp, mkdir, realpath, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, realpath, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { CheckModule, ScanContext } from '../../core/types.js';
 import { LocalFSProvider } from '../../core/local-fs-provider.js';
 import { skillChecks } from './index.js';
 import { iocChecks } from '../ioc/index.js';
+import { collectSkillInventory } from '../../inventory/skills.js';
 
 // A skills directory the config sets where no skills tree is walked (an OS
 // directory, another user's home, a credential store) is not walked (local and
@@ -69,6 +70,18 @@ describe('a skills directory outside the home', () => {
     const missing = join(tmp, 'nonexist-zz', 'skills');
     expect(r.evidence![0].detail).toBe(`not scanned: skills directory ${missing} (an OS directory, another user's home or a credential store) does not exist as a directory — nothing to scan`);
     expect(r.message).toContain('no such directory');
+  });
+
+  it('the inventory words a directory that is a link to /dev/null as SKL-002 does', async () => {
+    const link = join(tmp, 'devnull-skills');
+    await symlink('/dev/null', link);
+    const u = { path: link, reason: 'outside' as const, target: '/dev/null', refusedAs: 'an OS directory (/dev)', agentDefault: true as const };
+    const c = ctx([u]);
+    const r = await byId('SKL-002').run(c);
+    expect(r.severity).toBe('info');
+    const { inventory } = await collectSkillInventory(c.installation, c.fs);
+    expect(inventory.incomplete).toEqual([`${link}: ${r.evidence![0].detail}`]);
+    expect(r.evidence![0].detail).toMatch(/does not exist as a directory — nothing to scan$/);
   });
 
   it('SKL-002 names the kind of place, and the link target of a linked directory', async () => {
