@@ -143,6 +143,9 @@ type collector struct {
 	// foreignLinks are private-store links to places that aren't the
 	// agent's (store_links.go): recorded, nothing behind them collected
 	foreignLinks []string
+	// linkCounts caches, per home and link, whether a skills tree's link
+	// leads to a tree over the entry limit (linkOverLimit)
+	linkCounts map[string]bool
 }
 
 // inExcludedDir reports whether match lies under an excluded directory that
@@ -905,6 +908,13 @@ func (c *collector) followFrom(snapshot *ProbeSnapshot, pattern string, matches 
 		if st, err := os.Stat(m); err != nil || !st.IsDir() {
 			continue // a file link was collected (followed) by the glob itself
 		}
+		// A skills tree's link to a tree over the entry limit (a plain
+		// ~/.claude/skills holding a link to /opt/homebrew/Cellar) is not
+		// walked: neither collected nor marked visited (another link to the
+		// same tree is judged and recorded too)
+		if c.inSkillTree && c.linkOverLimit(snapshot, pattern, m) {
+			continue
+		}
 		visited[real] = true
 		escaped, ok := escapeGlobMeta(m)
 		if !ok {
@@ -928,6 +938,44 @@ func (c *collector) followFrom(snapshot *ProbeSnapshot, pattern string, matches 
 		}
 		c.followFrom(snapshot, pattern, sub, append(append([]string{}, roots...), real), visited, depth+1, metadataOnly)
 	}
+}
+
+// linkOverLimit: the directory link m, met while walking a skills tree,
+// leads to a tree of more than maxConfigTreeEntries entries — counted from
+// its target on its own (countTreeEntries: each link its own budget), its
+// links followed where a tree of the walk's user may lead. Such a link is
+// recorded in ConfigTrees as over the limit, with its mode (a directory: the
+// CLI reports it not scanned, as a local walk leaves it out — linkCap in
+// src/core/skill-root-scope.ts). The plain content of the tree being walked
+// is not counted here.
+func (c *collector) linkOverLimit(snapshot *ProbeSnapshot, pattern, m string) bool {
+	home := c.treeHome
+	if !c.configTree {
+		home = c.homeOf(globBase(pattern))
+	}
+	key := filepath.ToSlash(filepath.Clean(m))
+	cacheKey := home + "\x00" + key
+	over, counted := c.linkCounts[cacheKey]
+	if !counted {
+		over = countTreeEntries(m, home, maxConfigTreeEntries) > maxConfigTreeEntries
+		if c.linkCounts == nil {
+			c.linkCounts = make(map[string]bool)
+		}
+		c.linkCounts[cacheKey] = over
+	}
+	if !over {
+		return false
+	}
+	if snapshot.ConfigTrees == nil {
+		snapshot.ConfigTrees = make(map[string]string)
+	}
+	if _, done := snapshot.ConfigTrees[key]; !done && len(snapshot.ConfigTrees) < maxConfigTrees {
+		snapshot.ConfigTrees[key] = treeLimit
+	}
+	if _, done := snapshot.DirectoryModes[m]; !done {
+		recordDirMode(snapshot, m)
+	}
+	return true
 }
 
 // relatedToAny reports whether p is inside one of dirs or contains one.
