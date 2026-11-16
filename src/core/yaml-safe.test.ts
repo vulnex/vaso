@@ -29,10 +29,10 @@ describe('parseYamlSafe', () => {
     expect(parseYamlSafe('a: {k: 1, k: 2}\n')).toEqual({ a: { k: 2 } });
   });
 
-  it('rejects a duplicate key on request, naming it and its line', () => {
+  it('rejects a duplicate key on request, naming its line (never the key)', () => {
     const dup = 'approvals:\n  mode: manual\napprovals:\n  mode: off\n';
-    expect(() => parseYamlSafe(dup, { duplicateKeys: 'reject' })).toThrow('found duplicate key "approvals" at line 3');
-    expect(() => parseYamlSafe('a:\n  k: 1\n  k: 2\n', { duplicateKeys: 'reject' })).toThrow('"k" at line 3');
+    expect(() => parseYamlSafe(dup, { duplicateKeys: 'reject' })).toThrow(/^found duplicate key at line 3$/);
+    expect(() => parseYamlSafe('a:\n  k: 1\n  k: 2\n', { duplicateKeys: 'reject' })).toThrow(/^found duplicate key at line 3$/);
     // Equal keys in different mappings, merge keys and 1 vs "1" are not duplicates
     const fine = 'x: {k: 1}\ny: {k: 2}\nd: &d {a: 1}\ne:\n  <<: *d\n  <<: *d\nn: {1: a, "1": b}\n';
     expect(parseYamlSafe(fine, { duplicateKeys: 'reject' })).toMatchObject({ x: { k: 1 }, y: { k: 2 }, e: { a: 1 } });

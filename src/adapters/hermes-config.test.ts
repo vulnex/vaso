@@ -63,7 +63,7 @@ describe('Hermes duplicate keys by release', () => {
       const user = yaml(raw);
       const { loadErrors } = await captureConfigLoadErrors(async () => prepareHermesYaml([user], fsWith(), version));
       expect(user.data, version).toEqual({});
-      expect(loadErrors[0]?.message, version).toMatch(/found duplicate key "approvals" at line 4 — Hermes .* runs on its default settings/);
+      expect(loadErrors[0]?.message, version).toMatch(/found duplicate key at line 4 — Hermes .* runs on its default settings/);
     }
   });
 
