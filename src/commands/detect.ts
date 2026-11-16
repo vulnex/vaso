@@ -518,7 +518,9 @@ function renderSkills(inst: AgentInstallation, verbose: boolean | undefined): st
 
   const { skills, otherEntries } = inventory;
   const other = otherEntries.length > 0 ? chalk.dim(` (+${otherEntries.length} other ${otherEntries.length === 1 ? 'entry' : 'entries'})`) : '';
-  lines.push(`  ${'Skills:'.padEnd(14)} ${skills.length}${other}`);
+  // No skills directory walked (all refused or not collected): unknown, not 0
+  const notScanned = inventory.skillsDirs.length > 0 && inventory.skillsDirs.every(d => d.unverified);
+  lines.push(`  ${'Skills:'.padEnd(14)} ${notScanned ? chalk.dim('not scanned') : skills.length}${other}`);
   if (verbose) {
     for (const skill of skills.slice(0, MAX_LISTED)) {
       const code = skill.hasCode ? chalk.dim(' [code]') : '';

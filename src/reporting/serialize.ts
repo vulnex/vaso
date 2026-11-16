@@ -288,6 +288,15 @@ function codeValue(value: string, sep: string): boolean {
   return parts.length > 1 && parts.every((p) => /^[A-Za-z_$][A-Za-z_$]{0,23}\d{0,2}$/.test(p));
 }
 
+/**
+ * Code in parentheses (`api_key = (os.environ.get("K") or`, a value continued
+ * on the next lines): shown, with its string literals masked but an
+ * environment variable's name (maskValueText).
+ */
+function groupedCode(value: string, sep: string): boolean {
+  return value.startsWith('(') && codeValue(value.replace(/^\(+\s*/, ''), sep);
+}
+
 /** The credential words a flag name ends in, dashed/underscored (`--api-key`) or any case. */
 const FLAG_WORD = String.raw`(?:access[_-]?token|auth[_-]?token|token|api[_-]?key|apikey|key|pat|secret|client[_-]?secret|password|passwd|pass|pwd|pw|credentials?|auth|bearer)`;
 /** The same words ending a camelCase flag (`--apiToken`, `--oauth2Bearer`, `--secretKey`). */
@@ -401,7 +410,7 @@ function maskText(text: string): string {
     .replace(SECRET_DASHED_HEADER, (m, pre: string, name: string, sep: string, value: string) =>
       (keepValue(value) ? m : `${pre}${name}${sep}${MASK}`))
     .replace(SECRET_ASSIGN, (m, pre: string, name: string, sep: string, value: string) =>
-      (secretAssignName(name) && !keepValue(value) && !codeValue(value, sep) && !PROSE_WORD.test(value) ? `${pre}${name}${sep}${escapedQuotes(value, MASK)}` : m))
+      (secretAssignName(name) && !keepValue(value) && !codeValue(value, sep) && !groupedCode(value, sep) && !PROSE_WORD.test(value) ? `${pre}${name}${sep}${escapedQuotes(value, MASK)}` : m))
     .replace(USER_PASS_FLAG, (m, pre: string, flag: string, sep: string, user: string, pw: string) =>
       (keepValue(pw) ? m : `${pre}${flag}${sep}${user}:${MASK}`));
   const long = [SECRET_FLAG, CAMEL_SECRET_FLAG].reduce((t, re) => replaceFlagValues(t, re, (_flag, value) => !keepValue(value)), masked);
@@ -462,6 +471,7 @@ function maskLine(raw: string): string {
     const hash = rest.search(/\s#/);
     const value = (hash < 0 ? rest : rest.slice(0, hash)).trimEnd();
     if (!isSecretName(name) || keepValue(value) || (sep.includes('=') && codeValue(value, sep))) return m;
+    if (sep.includes('=') && groupedCode(value, sep)) return `${pre}${name}${sep}${maskValueText(value)}${rest.slice(value.length)}`;
     return `${pre}${name}${sep}${MASK}${rest.slice(value.length)}`;
   });
   const listed = whole.replace(SECRET_KEY_LIST, (m, pre: string, q: string, name: string, sep: string, items: string) =>
@@ -471,6 +481,8 @@ function maskLine(raw: string): string {
   const masked = listed.replace(SECRET_KEY_VALUE, (m, pre: string, q: string, name: string, sep: string, value: string) => {
     // `name = call(…)` in a source line is code (YAML `name: …` is always a value)
     if (!isSecretName(name) || keepValue(value) || (sep.includes('=') && codeValue(value, sep))) return m;
+    // (identifiers alone — the rest of the line, its literals, masked above)
+    if (sep.includes('=') && groupedCode(value, sep)) return /["']/.test(value) ? `${pre}${q}${name}${q}${sep}${maskValueText(value)}` : m;
     const quote = /^["']/.test(value) ? value[0] : '';
     return `${pre}${q}${name}${q}${sep}${quote ? `${quote}${MASK}${quote}` : escapedQuotes(value, MASK)}`;
   });
