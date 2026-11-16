@@ -271,9 +271,12 @@ function jsonFile(label: string): string {
     curl: `Run: curl -d "{\\"api_key\\":\\"${c('embedded JSON in a JSON string', generic)}\\"}" https://api.x.com`,
     // the value under a credential-named key, a level down
     credentials: { primary: { value: c('credentials.primary.value', short), name: 'main' } },
+    // compact nesting (replaced below): one container's { is the next key's prefix
+    compact: '@COMPACT@',
     auth: { type: 'bearer', value: c('auth.value', short) },
     ESCAPED_API_KEY: '@ESCAPED@',
-  }, null, 2).replace('"@ESCAPED@"', `"${escapedCanary(`${label} json all-escaped key`, generic, jsonEscape)}"`) + '\n';
+  }, null, 2).replace('"@ESCAPED@"', `"${escapedCanary(`${label} json all-escaped key`, generic, jsonEscape)}"`)
+    .replace('"@COMPACT@"', `{"creds": {"value": "${canary(`${label} json compact creds.value`, lowerWord)}"}}`) + '\n';
 }
 
 /** JSON5 as OpenClaw writes it: unquoted keys, single quotes, comments, trailing commas. */
@@ -410,6 +413,7 @@ function tomlFile(label: string): string {
     '[mcp_servers.curl.env]',
     `API_KEY = "${escapedCanary(`${label} toml all-escaped key`, generic, jsonEscape)}"`,
     `credentials = { primary = { value = "${canary(`${label} toml credentials.primary.value`, short)}", name = "main" } }`,
+    `nested = { CREDS = { value = "${canary(`${label} toml creds.value lowercase`, lowerWord)}" } }`,
   ].join('\n') + '\n';
 }
 

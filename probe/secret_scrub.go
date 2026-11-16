@@ -1396,7 +1396,7 @@ var (
 	// …and a key or token by name (API_KEY, apiKey, X-Api-Key, GITHUB_TOKEN,
 	// access_token, Authorization): whatever its entropy, the value under
 	// it is the credential (a low-entropy key is still someone's key)
-	strongCredentialWord = regexp.MustCompile(`(?:^|_)(?:password|passwd|pwd|passphrase|secret|pin|passcode|api_?key|token|access_token|auth_token|authorization|bearer|auth|private_?key|access_?key|secret_?key|session|pat|credentials?)\d*(?:_|$)`)
+	strongCredentialWord = regexp.MustCompile(`(?:^|_)(?:password|passwd|pwd|passphrase|secret|pin|passcode|api_?key|token|access_token|auth_token|authorization|bearer|auth|private_?key|access_?key|secret_?key|session|pat|credentials?|creds?)\d*(?:_|$)`)
 	credentialAboutWord  = regexp.MustCompile(`_(?:mode|method|policy|url|uri|file|path|dir|id|arn|ref|name|type|hint|prompt|length|backend|store|provider|manager|source|format|algorithm|scheme|strategy|env|var|limit|count|budget|size|ttl|expiry|expires|lifetime|endpoint|header|prefix|helper|command|cmd|timeout|interval|secs|seconds|duration|enabled|disabled|required|level|version|scopes?|audience|issuer)$`)
 	passphraseWords      = regexp.MustCompile(`^[A-Za-z0-9]+(?:[-_ ][A-Za-z0-9]+){2,}$`)
 )
@@ -2487,7 +2487,7 @@ func headerValue(v string, replace func(string) string) (string, bool) {
 // credentials whatever they are named. Not auth or headers, whose
 // children are settings (mode, Content-Type) beside the credential.
 var (
-	secretContainerName = regexp.MustCompile(`(?i)(?:api[_-]?keys?|apikeys?|tokens?|secrets?|passwords?|passwd|pwds?|credentials?|private[_-]?keys?|(?:^|[_.-])keys)$`)
+	secretContainerName = regexp.MustCompile(`(?i)(?:api[_-]?keys?|apikeys?|tokens?|secrets?|passwords?|passwd|pwds?|credentials?|creds?|private[_-]?keys?|(?:^|[_.-])keys)$`)
 	tokenCountName      = regexp.MustCompile(`(?i)(?:max|min|num|total|count|limit|output|input|prompt|completion|context)[_-]?tokens$`)
 )
 
@@ -2579,7 +2579,7 @@ func (c *collector) secretContainers(s string, toml bool) string {
 		}
 		copy(b[sp.from:sp.to], out)
 	}
-	for _, g := range containerOpen.FindAllStringSubmatchIndex(s, -1) {
+	for _, g := range containerOpens(s) {
 		m := submatch{s, g}
 		key, _ := m.first(2, 3, 4)
 		if headerMapKey.MatchString(key) && s[g[12]] == '{' {
@@ -2617,6 +2617,27 @@ func (c *collector) secretContainers(s string, toml bool) string {
 		return s
 	}
 	return string(b)
+}
+
+// containerOpens finds every containerOpen match. Matches may share a
+// bracket: the { that opens one container is the prefix of the next key in
+// compact JSON ({"env": {"creds": {…}}}), which FindAll would skip.
+func containerOpens(s string) [][]int {
+	var out [][]int
+	for pos := 0; pos < len(s); {
+		g := containerOpen.FindStringSubmatchIndex(s[pos:])
+		if g == nil {
+			break
+		}
+		for i := range g {
+			if g[i] >= 0 {
+				g[i] += pos
+			}
+		}
+		out = append(out, g)
+		pos = g[12] // the bracket itself
+	}
+	return out
 }
 
 // valueChildName: the key that holds the credential itself in a mapping

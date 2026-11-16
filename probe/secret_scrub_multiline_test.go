@@ -95,6 +95,9 @@ func TestScrubNestedCredentialValues(t *testing.T) {
 }
 `
 	tomlDoc := "credentials = { primary = { value = \"TomlNestedTt11\", name = \"main\" } }\n"
+	// a plain lowercase value under creds, two inline tables deep
+	credsTOML := "[mcp_servers.e]\ncommand = \"npx\"\nenv = { CREDS = { value = \"tomlnestedpw\" } }\n"
+	credsJSON := `{"env": {"creds": {"value": "jsonnestedpw"}}}`
 	for run := 0; run < 50; run++ {
 		c := &collector{}
 		got := string(c.scrubSecrets("/h/.claude/settings.json", []byte(jsonDoc)))
@@ -119,6 +122,17 @@ func TestScrubNestedCredentialValues(t *testing.T) {
 		}
 		if strings.Contains(gotTOML, "TomlNestedTt11") || !strings.Contains(gotTOML, `name = "main"`) {
 			t.Fatalf("TOML nested value:\n%s", gotTOML)
+		}
+		gotCreds := string(c.scrubSecrets("/h/.codex/config.toml", []byte(credsTOML)))
+		if _, err := toml.Decode(gotCreds, &w); err != nil {
+			t.Fatalf("scrubbed TOML doesn't parse: %v\n%s", err, gotCreds)
+		}
+		if strings.Contains(gotCreds, "tomlnestedpw") || !strings.Contains(gotCreds, `command = "npx"`) {
+			t.Fatalf("TOML creds value:\n%s", gotCreds)
+		}
+		gotCredsJSON := string(c.scrubSecrets("/h/.claude/settings.json", []byte(credsJSON)))
+		if err := json.Unmarshal([]byte(gotCredsJSON), &v); err != nil || strings.Contains(gotCredsJSON, "jsonnestedpw") {
+			t.Fatalf("JSON creds value (%v):\n%s", err, gotCredsJSON)
 		}
 	}
 }
