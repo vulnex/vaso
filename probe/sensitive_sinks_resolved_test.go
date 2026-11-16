@@ -112,6 +112,40 @@ func TestResolvedIntoSinkKeepsWhatTheSpellingNames(t *testing.T) {
 	}
 }
 
+// A default skills dir linked within the home is walked as a linked root (a
+// config-derived tree): a token file it reaches through that link is
+// recorded as a manifest tree records it — present, omitted as sensitive,
+// no content — not left out of the snapshot.
+func TestLinkedRootRecordsTokenFilesAsSensitive(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	mustWrite(t, filepath.Join(home, ".claude", ".credentials.json"), `{"claudeAiOauth":{"accessToken":"TOKCANARY"}}`)
+	mustWrite(t, filepath.Join(home, ".config", "gh", "hosts.yml"), "github.com:\n  oauth_token: GHCANARY\n")
+	mustWrite(t, filepath.Join(home, ".config", "tool", "notes.md"), "plain")
+	mustLink(t, filepath.Join(home, ".claude"), filepath.Join(home, ".agents", "skills"))
+	mustLink(t, filepath.Join(home, ".config"), filepath.Join(home, ".cursor", "skills"))
+	snap := Collect(ProbeManifest{GlobPatterns: []string{"~/.agents/skills/**", "~/.cursor/skills/**"}}, false)
+	for _, root := range []string{".agents/skills", ".cursor/skills"} {
+		if got := snap.ConfigTrees[filepath.ToSlash(filepath.Join(home, root))]; got != treeCollected {
+			t.Fatalf("%s: want walked as a linked root, got %q", root, got)
+		}
+	}
+	for _, rel := range []string{".agents/skills/.credentials.json", ".cursor/skills/gh/hosts.yml"} {
+		e := snap.Files[filepath.Join(home, rel)]
+		if !e.Exists || e.Omitted != "sensitive" || e.Content != "" || e.Head != "" {
+			t.Fatalf("%s: want recorded, omitted=sensitive, got %+v", rel, e)
+		}
+	}
+	for p, e := range snap.Files {
+		if strings.Contains(e.Content, "CANARY") || strings.Contains(e.Head, "CANARY") {
+			t.Fatalf("%s shipped token content", p)
+		}
+	}
+	if e := snap.Files[filepath.Join(home, ".cursor", "skills", "tool", "notes.md")]; e.Content != "plain" {
+		t.Fatalf("ordinary file in a linked root not collected: %+v", e)
+	}
+}
+
 func mustWrite(t *testing.T, p, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {

@@ -580,8 +580,12 @@ func (c *collector) collectGlob(snapshot *ProbeSnapshot, pattern string) {
 		// wherever it leads: SKL-013 reports a link out of the tree from it
 		recordSymlink(snapshot.Symlinks, match)
 		// A config-derived tree's entries outside its user's home or in a
-		// credential store (as named or resolved) aren't collected
-		if c.configTree && !treeAllowed(match, c.treeHome) {
+		// credential store (as named or resolved) aren't collected — except
+		// a file that really is in one through a link (a skills dir linked
+		// to ~/.claude lists .credentials.json): recorded as a manifest tree
+		// records it, present with its mode and no content (collectFileLimit
+		// omits it as sensitive)
+		if c.configTree && !treeAllowed(match, c.treeHome) && !c.sinkFileByTarget(pattern, match) {
 			continue
 		}
 		if _, exists := snapshot.Files[match]; !exists {
@@ -597,6 +601,16 @@ func (c *collector) collectGlob(snapshot *ProbeSnapshot, pattern string) {
 			c.collectLinkedSkillBases(snapshot, pattern)
 		}
 	}
+}
+
+// sinkFileByTarget: match, a glob match of a config-derived tree, is a
+// regular file whose real path is in a credential store neither the glob's
+// base nor match's own spelling names (resolvedIntoSink).
+func (c *collector) sinkFileByTarget(pattern, match string) bool {
+	if info, err := os.Stat(match); err != nil || !info.Mode().IsRegular() {
+		return false
+	}
+	return resolvedIntoSink(match, globBase(pattern))
 }
 
 // collectFile reads a file and returns its content and mode. Content is
