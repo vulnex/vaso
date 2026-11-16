@@ -16,7 +16,8 @@ export async function loadPlistAsConfig(filePath: string, fs: FSProvider): Promi
   const parsed = await readPlist(filePath, fs);
   if (!parsed) return undefined;
   const data = normalizeValue(parsed) as Record<string, unknown>;
-  return { raw: JSON.stringify(data), format: 'json', filePath, data };
+  // one key per line: a finding quoting a line quotes that key, not the file
+  return { raw: JSON.stringify(data, null, 2), format: 'json', filePath, data };
 }
 
 /**
@@ -41,7 +42,8 @@ export async function readPlist(filePath: string, fs: FSProvider): Promise<Recor
     // you don't have permission", "Property List error: …")
     const message = (result.stderr || result.stdout).trim() || `plutil exited with ${result.exitCode}`;
     const stage = /couldn.t be opened|permission|no such file/i.test(message) ? 'read' : 'parse';
-    recordLoadError({ filePath, stage, message });
+    // a parse error quotes the file (an unknown tag, the text at the error)
+    recordLoadError({ filePath, stage, message: stage === 'read' ? message : `not a valid property list (plutil exited with ${result.exitCode})` });
     return undefined;
   }
   if (!result.stdout) return undefined;

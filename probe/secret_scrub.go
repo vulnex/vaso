@@ -2345,9 +2345,10 @@ func (c *collector) scrubText(path, s string) string {
 }
 
 // emailAddress: name@domain.tld standing on its own — after a quote,
-// space, bracket or =, never inside a URL (scheme://user@host) or a
-// mailto:, and not git@host:org/repo (followed by ":").
-var emailAddress = regexp.MustCompile(`(^|[\s"'<(\[{,;=])([A-Za-z0-9][A-Za-z0-9._%+-]*)@((?:[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\.)+[A-Za-z]{2,})`)
+// space, bracket, = or an XML tag (a plist's <string>), never inside a URL
+// (scheme://user@host) or a mailto:, and not git@host:org/repo (followed
+// by ":").
+var emailAddress = regexp.MustCompile(`(^|[\s"'<>(\[{,;=])([A-Za-z0-9][A-Za-z0-9._%+-]*)@((?:[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\.)+[A-Za-z]{2,})`)
 
 // disguiseEmails replaces the local part of every email address in s but
 // its first character with random characters of the same classes; the

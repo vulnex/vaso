@@ -436,7 +436,7 @@ func Collect(manifest ProbeManifest, escalate bool) ProbeSnapshot {
 		for _, args := range argSets {
 			req := cmdReq
 			req.Args = args
-			out := runCommand(req, cmdPath)
+			out := c.runManifestCommand(req, cmdPath)
 			snapshot.CommandOutputs[cmdReq.ID] = out
 			naturalKey := strings.TrimSpace(req.Cmd + " " + strings.Join(req.Args, " "))
 			if naturalKey != "" && naturalKey != cmdReq.ID {
@@ -1063,6 +1063,12 @@ func setEnv(env []string, key, value string) []string {
 }
 
 func runCommand(req CommandRequest, augmentedPath string) CommandOutput {
+	return runCommandScrubbed(req, augmentedPath, redactSecretValues)
+}
+
+// runCommandScrubbed is runCommand with stdout passed through scrubOut
+// (stderr is always redacted).
+func runCommandScrubbed(req CommandRequest, augmentedPath string, scrubOut func(string) string) CommandOutput {
 	if !IsAllowed(req.Cmd) {
 		return CommandOutput{
 			Stderr:   fmt.Sprintf("command %q not in allowlist", req.Cmd),
@@ -1167,7 +1173,7 @@ func runCommand(req CommandRequest, augmentedPath string) CommandOutput {
 	// above all ("Unknown gateway '<file contents>'"): no check reads a
 	// credential from a command, so none leaves the host in one
 	return CommandOutput{
-		Stdout:   redactSecretValues(stdout.String()),
+		Stdout:   scrubOut(stdout.String()),
 		Stderr:   redactSecretValues(unwrapGutter(stderr.String())),
 		ExitCode: exitCode,
 	}
