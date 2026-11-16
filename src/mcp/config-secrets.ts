@@ -1,10 +1,11 @@
-import { API_KEY_PATTERNS, isPlaceholderSecret } from '../core/patterns.js';
+import { API_KEY_PATTERNS, isPathValue, isPlaceholderSecret, snippetAround } from '../core/patterns.js';
 import {
   USER_PASS_FLAGS, isFlagShaped, isKeyAfterK, isPasswordAfterA, isPasswordAfterP, isPasswordClient, isRedisCli, isSeparatePasswordClient,
-  isUserPassClient, isUnstoredValue as notASecret, userPassword, looksLikeCredential as looksLikeSecret,
+  isUserPassClient, isUnstoredValue as notASecret, PASSWORD_P_CLIENT_IN_TEXT, REDIS_CLI_IN_TEXT, SEPARATE_P_CLIENT_IN_TEXT, userPassword, looksLikeCredential as looksLikeSecret,
 } from './argv-rules.js';
 import { shannonEntropy } from '../analyzers/entropy.js';
 import { shellCommandWrapper } from './shell-wrapper.js';
+import { commandName } from './package-pin.js';
 import { commandWords, scriptCommands, shellWords } from './script-command.js';
 
 /**
@@ -128,7 +129,16 @@ function maskIn(text: string, value: string): string {
  * judged on web URLs only.
  */
 export function findUrlSecrets(url: string, location = 'url'): ConfigSecret[] {
+  const found = urlSecrets(url, location);
+  if (found.length === 0) return found;
+  // one masked copy of the URL for all of them
+  const masked = maskValues(url, found.map((f) => f.value));
+  return found.map((f) => ({ ...f, masked: masked.text === undefined ? MASK : elementWindow(masked.text, masked.firstAt.get(f.value)) }));
+}
+
+function urlSecrets(url: string, location: string): ConfigSecret[] {
   const out: ConfigSecret[] = [];
+  const seen = new Set<string>();
   if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(url)) return out;
   let parsed: URL | undefined;
   try {
@@ -137,8 +147,9 @@ export function findUrlSecrets(url: string, location = 'url'): ConfigSecret[] {
     parsed = undefined;
   }
   const add = (value: string, kind: string) => {
-    if (!value || notASecret(value) || out.some(s => s.value === value)) return;
-    out.push({ location, kind, masked: maskIn(url, value), value, via: 'url' });
+    if (!value || notASecret(value) || seen.has(value)) return;
+    seen.add(value);
+    out.push({ location, kind, masked: '', value, via: 'url' });
   };
 
   // Userinfo read from the raw text: the parser percent-encodes `${PASS}`
@@ -332,16 +343,6 @@ export function maskUrlSecrets(url: string): string {
   return masked;
 }
 
-/** `args` with every credential `findArgSecrets` finds replaced by `***` in its element. */
-export function maskArgSecrets(args: readonly string[], command?: string): string[] {
-  const out = [...args];
-  for (const s of findArgSecrets(args, command)) {
-    const i = Number(/^args\[(\d+)\]$/.exec(s.location)?.[1]);
-    if (Number.isInteger(i) && out[i] !== undefined) out[i] = out[i].includes(s.value) ? out[i].split(s.value).join(MASK) : MASK;
-  }
-  return out;
-}
-
 /** The raw (still percent-encoded) value of a query parameter, so masking finds it in the URL text. */
 function rawParam(url: string, name: string): string | undefined {
   const q = url.indexOf('?');
@@ -407,76 +408,243 @@ export function findValueSecrets(value: string, location: string): ConfigSecret[
   }));
 }
 
+/** Runners whose `-p` names the package to install (`npx -p pkg cmd`, `yarn dlx -p pkg`). */
+const PACKAGE_P_RUNNERS = new Set(['npx', 'bunx', 'pnpx', 'npm', 'pnpm', 'yarn']);
+
+/** A credential found in an element, before its masked rendering is built. */
+interface RawSecret {
+  /** The element of the outermost argv the value sits in. */
+  at: number;
+  value: string;
+  kind: string;
+  via: ConfigSecret['via'];
+  /** Text shown before the element (`--token `), when the flag is its own element. */
+  prefix?: string;
+}
+
+/** Findings reported per element; the rest are counted in the last one's kind. */
+export const MAX_SECRETS_PER_ARG = 50;
+/** An element longer than this is shown as a window around the value. */
+const MASKED_ELEMENT_CHARS = 300;
+
 /**
  * Secrets in an argv array: credential flags (both `--f v` and `--f=v`, also
  * camelCase and `-p<pw>`), env assignments (also `--env=K=V`, dotted
  * `--set a.password=v`), header and cookie args, URLs of any scheme,
- * connection strings, inline JSON, bare tokens.
+ * connection strings, inline JSON, bare tokens, and the commands of a
+ * `sh -c` script. Each element is masked once, with every value found in it.
  */
-/** Runners whose `-p` names the package to install (`npx -p pkg cmd`, `yarn dlx -p pkg`). */
-const PACKAGE_P_RUNNERS = new Set(['npx', 'bunx', 'pnpx', 'npm', 'pnpm', 'yarn']);
-
 export function findArgSecrets(args: readonly string[], command?: string): ConfigSecret[] {
-  return argSecrets(args, command, 0);
-}
-
-/** Shell scripts inside shell scripts followed (`sh -c "bash -c '…'"`). */
-const MAX_SHELL_DEPTH = 3;
-const POSIX_SCRIPT_FLAG = /^-[a-zA-Z]*c[a-zA-Z]*$/;
-
-/**
- * `sh -c "mysql -pX db && curl -u u:X …"`: the script's commands, each read
- * as argv by the same rules (`PGPASSWORD=X psql`, a URL's password, curl
- * `-u`, sshpass `-p`), reported at the script's element.
- */
-function shellScriptSecrets(args: readonly string[], command: string | undefined, depth: number): ConfigSecret[] {
-  if (command === undefined || depth >= MAX_SHELL_DEPTH) return [];
-  const shell = shellCommandWrapper(command, args);
-  if (!shell || shell === 'cmd' || shell === 'powershell' || shell === 'pwsh') return [];
-  const flag = args.findIndex((a) => POSIX_SCRIPT_FLAG.test(a));
-  const at = flag < 0 ? -1 : args.findIndex((a, i) => i > flag && !a.startsWith('-'));
-  if (at < 0) return [];
   const out: ConfigSecret[] = [];
-  for (const stmt of scriptCommands(args[at])) {
-    const prog = commandWords(stmt);
-    const found = [
-      ...argSecrets(shellWords(stmt), undefined, depth + 1),
-      ...(prog.length > 1 ? shellScriptSecrets(prog.slice(1), prog[0], depth + 1) : []),
-    ];
-    for (const s of found) out.push({ ...s, location: `args[${at}]`, masked: maskIn(args[at], s.value) });
+  for (const [at, list] of byElement(collectArgSecrets(args, command, 0))) {
+    const masked = maskValues(args[at] ?? '', list.map((r) => r.value));
+    const shown = list.slice(0, MAX_SECRETS_PER_ARG);
+    const more = list.length - shown.length;
+    shown.forEach((r, n) => {
+      const kind = more > 0 && n === shown.length - 1 ? `${r.kind} (+${more} more in this argument)` : r.kind;
+      const window = masked.text === undefined ? MASK : elementWindow(masked.text, masked.firstAt.get(r.value));
+      out.push({ location: `args[${at}]`, kind, masked: `${r.prefix ?? ''}${window}`, value: r.value, via: r.via });
+    });
   }
   return out;
 }
 
-function argSecrets(args: readonly string[], command: string | undefined, depth: number): ConfigSecret[] {
-  const out: ConfigSecret[] = [];
+/** `args` with every credential `findArgSecrets` finds replaced by `***` in its element. */
+export function maskArgSecrets(args: readonly string[], command?: string): string[] {
+  const out = [...args];
+  for (const [at, list] of byElement(collectArgSecrets(args, command, 0))) {
+    if (out[at] !== undefined) out[at] = maskValues(out[at], list.map((r) => r.value)).text ?? MASK;
+  }
+  return out;
+}
+
+function byElement(raw: readonly RawSecret[]): Map<number, RawSecret[]> {
+  const map = new Map<number, RawSecret[]>();
+  for (const r of raw) {
+    const list = map.get(r.at);
+    if (list) list.push(r);
+    else map.set(r.at, [r]);
+  }
+  return map;
+}
+
+interface TrieNode { next: Map<string, TrieNode>; end?: string }
+
+/**
+ * `text` with every copy of every value replaced by `***` in one left-to-right
+ * pass (the longest value at each position, through a trie of the values),
+ * and where each value's first mask starts. `text` is undefined when a value
+ * isn't in the element verbatim (unquoted out of a script): the element can't
+ * be shown without it.
+ */
+function maskValues(text: string, values: readonly string[]): { text: string | undefined; firstAt: Map<string, number> } {
+  const root: TrieNode = { next: new Map() };
+  for (const v of new Set(values)) {
+    if (!v) continue;
+    let node = root;
+    for (const ch of v) {
+      let child = node.next.get(ch);
+      if (!child) { child = { next: new Map() }; node.next.set(ch, child); }
+      node = child;
+    }
+    node.end = v;
+  }
+  const parts: string[] = [];
+  const firstAt = new Map<string, number>();
+  let length = 0;
+  let copied = 0;
+  for (let i = 0; i < text.length;) {
+    let node: TrieNode | undefined = root;
+    let match: string | undefined;
+    for (let j = i; j < text.length; j++) {
+      node = node.next.get(text[j]);
+      if (!node) break;
+      if (node.end !== undefined) match = node.end;
+    }
+    if (match === undefined) { i++; continue; }
+    parts.push(text.slice(copied, i));
+    length += i - copied;
+    if (!firstAt.has(match)) firstAt.set(match, length);
+    parts.push(MASK);
+    length += MASK.length;
+    i += match.length;
+    copied = i;
+  }
+  parts.push(text.slice(copied));
+  for (const v of values) if (v && !firstAt.has(v)) return { text: undefined, firstAt };
+  return { text: parts.join(''), firstAt };
+}
+
+/** A masked element, or the part of a long one around a value's mask. */
+function elementWindow(masked: string, at: number | undefined): string {
+  if (masked.length <= MASKED_ELEMENT_CHARS) return masked;
+  return snippetAround(masked, at ?? 0, MASK.length, MASKED_ELEMENT_CHARS);
+}
+
+/** Shell scripts inside shell scripts followed (`sh -c "bash -c 'zsh -c …'"`). */
+const MAX_SHELL_DEPTH = 4;
+const POSIX_SCRIPT_FLAG = /^-[a-zA-Z]*c[a-zA-Z]*$/;
+
+/**
+ * The element holding the script a shell runs: `sh -c '<script>'`,
+ * `cmd /c "<command line>"` written as one string, `powershell -Command
+ * '<script>'`. undefined when there is none (`cmd /c npx -y pkg` split into
+ * elements is read element by element already).
+ */
+function scriptElement(args: readonly string[], command: string): { at: number; powershell: boolean } | undefined {
+  const name = commandName(command).toLowerCase();
+  if (name === 'cmd') {
+    const flag = args.findIndex((a) => /^\/[ck]$/i.test(a));
+    const at = flag + 1;
+    return flag >= 0 && at === args.length - 1 && /\s/.test(args[at].trim()) ? { at, powershell: false } : undefined;
+  }
+  if (name === 'powershell' || name === 'pwsh') {
+    const flag = args.findIndex((a) => /^-(?:c|command)$/i.test(a));
+    return flag >= 0 && flag + 1 < args.length ? { at: flag + 1, powershell: true } : undefined;
+  }
+  if (!shellCommandWrapper(command, args)) return undefined;
+  const flag = args.findIndex((a) => POSIX_SCRIPT_FLAG.test(a));
+  const at = flag < 0 ? -1 : args.findIndex((a, i) => i > flag && !a.startsWith('-'));
+  return at < 0 ? undefined : { at, powershell: false };
+}
+
+/** PowerShell's `$env:NAME = "value"` as the `NAME=value` the assignment rule reads. */
+function powershellWords(words: readonly string[]): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < words.length; i++) {
+    const env = /^\$env:([A-Za-z_]\w*)(=.*)?$/is.exec(words[i]);
+    if (env && env[2] !== undefined) out.push(`${env[1]}${env[2]}`);
+    else if (env && words[i + 1] === '=' && words[i + 2] !== undefined) { out.push(`${env[1]}=${words[i + 2]}`); i += 2; }
+    else out.push(words[i]);
+  }
+  return out;
+}
+
+/**
+ * `sh -c "mysql -pX db && curl -u u:X …"`: the script's commands, each read
+ * as argv by the same rules (`PGPASSWORD=X psql`, a URL's password, curl
+ * `-u`, sshpass `-p`), reported at the script's element. In a script `-p`
+ * is judged only after a client whose `-p` is the password, or as a
+ * server's own option after a runner's package: `mkdir -p`, `kubectl -p`,
+ * `cp -p` are other options.
+ */
+function shellScriptSecrets(args: readonly string[], command: string | undefined, depth: number): RawSecret[] {
+  if (command === undefined || depth >= MAX_SHELL_DEPTH) return [];
+  const script = scriptElement(args, command);
+  if (!script) return [];
+  const { at } = script;
+  const out: RawSecret[] = [];
+  const seen = new Set<string>();
+  for (const stmt of scriptCommands(args[at])) {
+    const prog = commandWords(stmt);
+    const words = shellWords(stmt);
+    const found = [
+      ...collectArgSecrets(script.powershell ? powershellWords(words) : words, undefined, depth + 1, true),
+      ...(prog.length > 1 ? shellScriptSecrets(prog.slice(1), prog[0], depth + 1) : []),
+    ];
+    for (const s of found) {
+      if (seen.has(s.value)) continue;
+      seen.add(s.value);
+      out.push({ at, value: s.value, kind: s.kind, via: s.via });
+    }
+  }
+  return out;
+}
+
+/** A `-p` value that is a path (also `$VAR/…`, `~/…`) or an id (`myProject2024`, a UUID) — not a password. */
+function notAPasswordAfterP(value: string): boolean {
+  const v = value.replace(/^\\*["']|\\*["']$/g, '');
+  if (/^(?:~|\$\{?[A-Za-z_]\w*\}?)(?:[/\\]|$)|^\.{0,2}\/|^[A-Za-z]:\\/.test(v) || isPathValue(v)) return true;
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v)) return true;
+  // words and a number: a project, profile or directory name
+  return /^[A-Za-z][a-z]+(?:[A-Z][a-z]+)*[-_]?\d{1,8}$/.test(v);
+}
+
+/**
+ * The credentials of one argv, each at its element (`script`: the words of
+ * a command inside a shell script).
+ */
+function collectArgSecrets(args: readonly string[], command: string | undefined, depth: number, script = false): RawSecret[] {
+  const out: RawSecret[] = [];
+  const seen = new Set<string>();
   // a MySQL/MariaDB client or `sshpass` as the command or an earlier element: its `-p` is the password
-  const clientAt = args.findIndex(isPasswordClient);
+  // (in a script also inside a word: `(mysql`, `X=$(mysql`, `` `mysql ``)
+  const word = (plain: (t: string) => boolean, inText: RegExp) => (a: string): boolean => plain(a) || (script && inText.test(a));
+  const clientAt = args.findIndex(word(isPasswordClient, PASSWORD_P_CLIENT_IN_TEXT));
   const afterClient = (i: number): boolean => (command !== undefined && isPasswordClient(command)) || (clientAt >= 0 && clientAt < i);
   // only `sshpass` takes it as a separate element (`mysql -p app_db` names the database)
-  const sshpassAt = args.findIndex(isSeparatePasswordClient);
+  const sshpassAt = args.findIndex(word(isSeparatePasswordClient, SEPARATE_P_CLIENT_IN_TEXT));
   const afterSshpass = (i: number): boolean => (command !== undefined && isSeparatePasswordClient(command)) || (sshpassAt >= 0 && sshpassAt < i);
-  const redisAt = args.findIndex(isRedisCli);
+  const redisAt = args.findIndex(word(isRedisCli, REDIS_CLI_IN_TEXT));
   const afterRedis = (i: number): boolean => (command !== undefined && isRedisCli(command)) || (redisAt >= 0 && redisAt < i);
   const curlAt = args.findIndex(isUserPassClient);
   const afterCurl = (i: number): boolean => (command !== undefined && isUserPassClient(command)) || (curlAt >= 0 && curlAt < i);
-  const runner = command?.replace(/\\/g, '/').split('/').pop()?.replace(/\.(?:cmd|exe)$/i, '').toLowerCase() ?? '';
+  // The package runner: the command, or in a script a word of the command (`npx -y pkg -p X`)
+  const runnerName = (t: string): string => t.replace(/\\/g, '/').split('/').pop()?.replace(/\.(?:cmd|exe)$/i, '').toLowerCase() ?? '';
+  const runnerAt = script ? args.findIndex((a) => PACKAGE_P_RUNNERS.has(runnerName(a))) : -1;
+  const runner = runnerAt >= 0 ? runnerName(args[runnerAt]) : runnerName(command ?? '');
+  const optionsFrom = runnerAt + 1;
+  const rest = args.slice(optionsFrom);
   // The runner's own options come before the package (`npx -y -p pkg cmd`;
   // `npm exec -p pkg`): a `-p` after the package is the server's own
   // (`npx -y mcp-server-mysql -p <pw>`)
-  const packageAt = PACKAGE_P_RUNNERS.has(runner)
-    ? args.findIndex((a, i) => !a.startsWith('-') && args[i - 1] !== '-p' && args[i - 1] !== '--package'
-      && !(['npm', 'pnpm', 'yarn'].includes(runner) && /^(?:exec|x|dlx)$/.test(a) && args.slice(0, i).every((b) => b.startsWith('-'))))
+  const packageRel = PACKAGE_P_RUNNERS.has(runner)
+    ? rest.findIndex((a, i) => !a.startsWith('-') && rest[i - 1] !== '-p' && rest[i - 1] !== '--package'
+      && !(['npm', 'pnpm', 'yarn'].includes(runner) && /^(?:exec|x|dlx)$/.test(a) && rest.slice(0, i).every((b) => b.startsWith('-'))))
     : -1;
-  const runnerOption = (i: number): boolean => PACKAGE_P_RUNNERS.has(runner) && (packageAt < 0 || i < packageAt);
-  const add = (i: number, value: string, kind: string, via: ConfigSecret['via'], text = args[i]) => {
-    if (!value || notASecret(value) || out.some(s => s.value === value)) return;
-    out.push({ location: `args[${i}]`, kind, masked: maskIn(text, value), value, via });
+  const packageAt = packageRel < 0 ? -1 : packageRel + optionsFrom;
+  const runnerOption = (i: number): boolean => PACKAGE_P_RUNNERS.has(runner) && i >= optionsFrom && (packageAt < 0 || i < packageAt);
+  // In a script `-p` is judged after a password client or as a server's own option only
+  const scriptP = (i: number): boolean => !script || afterClient(i) || (PACKAGE_P_RUNNERS.has(runner) && packageAt >= 0 && i > packageAt);
+  const add = (i: number, value: string, kind: string, via: ConfigSecret['via'], prefix?: string) => {
+    if (!value || notASecret(value) || seen.has(value)) return;
+    seen.add(value);
+    out.push({ at: i, value, kind, via, prefix });
   };
-  const flagValue = (i: number, flag: string, value: string, text?: string) => {
+  const flagValue = (i: number, flag: string, value: string, prefix?: string) => {
     const known = knownToken(value);
-    if (known) add(i, known.token, `${known.name} after ${flag}`, 'flag', text);
-    else if (looksLikeSecret(value)) add(i, value, `credential after ${flag}`, 'flag', text);
+    if (known) add(i, known.token, `${known.name} after ${flag}`, 'flag', prefix);
+    else if (looksLikeSecret(value)) add(i, value, `credential after ${flag}`, 'flag', prefix);
   };
 
   for (let i = 0; i < args.length; i++) {
@@ -486,7 +654,7 @@ function argSecrets(args: readonly string[], command: string | undefined, depth:
     // curl `-u user:<password>` / `--user=user:<password>` (shared argv rule 5)
     if (prev && USER_PASS_FLAGS.has(prev) && afterCurl(i - 1) && !isFlagShaped(arg)) {
       const pw = userPassword(arg);
-      if (pw !== undefined) add(i, pw, `password after ${prev}`, 'flag', `${prev} ${arg}`);
+      if (pw !== undefined) add(i, pw, `password after ${prev}`, 'flag', `${prev} `);
       continue;
     }
     const userEq = /^(--user|--proxy-user)=(.*)$/s.exec(arg);
@@ -497,35 +665,39 @@ function argSecrets(args: readonly string[], command: string | undefined, depth:
     }
     // `--token <value>`: the value is the next element
     if (prev && isCredentialFlag(prev) && !isFlagShaped(arg)) {
-      flagValue(i, prev, arg, `${prev} ${arg}`);
+      flagValue(i, prev, arg, `${prev} `);
       continue;
     }
     // `--cookie "session=<value>"` (curl)
     if (prev === '--cookie' && !isFlagShaped(arg)) {
-      for (const value of cookieSecrets(arg)) add(i, value, 'session cookie after --cookie', 'header', `${prev} ${arg}`);
+      for (const value of cookieSecrets(arg)) add(i, value, 'session cookie after --cookie', 'header', `${prev} `);
       continue;
     }
     // `-p <password>` (sshpass) — not a port mapping (`-p 8080:80`), a
     // version, a package or a word elsewhere (shared argv rules 1 and 2)
     // A package runner's `-p` is `--package` (`npx -p https://…/x.tgz cmd`):
     // the value is a package spec, judged by the rules below like any argument
+    // A path, `$VAR/…`, `~/…` or id value is a directory, project or profile
     if (prev === '-p' && !isFlagShaped(arg) && !(runnerOption(i - 1) && !afterClient(i - 1))) {
-      if (isPasswordAfterP(arg, afterSshpass(i - 1))) add(i, arg, 'password after -p', 'flag', `${prev} ${arg}`);
+      const separate = afterSshpass(i - 1);
+      if (scriptP(i - 1) && (separate || !notAPasswordAfterP(arg)) && isPasswordAfterP(arg, separate)) {
+        add(i, arg, 'password after -p', 'flag', `${prev} `);
+      }
       continue;
     }
     // `-p<password>` glued (`mysql -uroot -pX`)
     const glued = /^-p(.+)$/s.exec(arg)?.[1];
-    if (glued && (afterClient(i) || !isFlagShaped(arg)) && isPasswordAfterP(glued, afterClient(i))) {
+    if (glued && scriptP(i) && (afterClient(i) || !isFlagShaped(arg)) && isPasswordAfterP(glued, afterClient(i))) {
       add(i, glued, 'password glued to -p', 'flag');
       continue;
     }
     // `-k <key>` (rule 3) and `redis-cli -a <password>` (rule 4)
     if (prev === '-k' && !isFlagShaped(arg)) {
-      if (isKeyAfterK(arg)) add(i, arg, 'key after -k', 'flag', `${prev} ${arg}`);
+      if (isKeyAfterK(arg)) add(i, arg, 'key after -k', 'flag', `${prev} `);
       continue;
     }
     if (prev === '-a' && afterRedis(i - 1) && !isFlagShaped(arg)) {
-      if (isPasswordAfterA(arg)) add(i, arg, 'password after redis-cli -a', 'flag', `${prev} ${arg}`);
+      if (isPasswordAfterA(arg)) add(i, arg, 'password after redis-cli -a', 'flag', `${prev} `);
       continue;
     }
     // `--api-key <value>` / `--token = <value>` written as one element
@@ -578,7 +750,7 @@ function argSecrets(args: readonly string[], command: string | undefined, depth:
     // A URL argument (`mcp-remote https://…?key=…`, `postgresql://u:<pw>@db`)
     if (/^[a-z][a-z0-9+.-]*:\/\//i.test(text)) {
       for (const s of findUrlSecrets(text, `args[${i}]`)) {
-        if (!out.some(o => o.value === s.value)) out.push({ ...s, masked: maskIn(arg, s.value) });
+        add(i, s.value, s.kind, s.via ?? 'url');
       }
       continue;
     }
@@ -589,7 +761,7 @@ function argSecrets(args: readonly string[], command: string | undefined, depth:
       // `DATABASE_URL=postgres://u:<pw>@db`: the URL's own secrets, whatever the name
       if (/^[a-z][a-z0-9+.-]*:\/\//i.test(assign[2])) {
         for (const s of findUrlSecrets(assign[2], `args[${i}]`)) {
-          if (!out.some(o => o.value === s.value)) out.push({ ...s, masked: maskIn(arg, s.value) });
+          add(i, s.value, s.kind, s.via ?? 'url');
         }
         continue;
       }
@@ -609,7 +781,7 @@ function argSecrets(args: readonly string[], command: string | undefined, depth:
         if (known) add(i, known.token, `${known.name} in inline JSON "${name}"`, 'json');
         else if (looksLikeSecret(value)) add(i, value, `credential in inline JSON "${name}"`, 'json');
       }
-      if (out.some(o => o.location === `args[${i}]`)) continue;
+      if (out.some(o => o.at === i)) continue;
     }
 
     // A bare token standing alone or inside a larger argument
@@ -617,7 +789,7 @@ function argSecrets(args: readonly string[], command: string | undefined, depth:
     if (known) add(i, known.token, known.name, 'token');
   }
   for (const s of shellScriptSecrets(args, command, depth)) {
-    if (!out.some(o => o.value === s.value)) out.push(s);
+    if (!seen.has(s.value)) { seen.add(s.value); out.push(s); }
   }
   return out;
 }
