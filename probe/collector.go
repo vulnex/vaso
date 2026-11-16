@@ -324,6 +324,13 @@ func Collect(manifest ProbeManifest, escalate bool) ProbeSnapshot {
 
 	// Metadata-only globs: existence + mode, never content
 	for _, pattern := range expandPaths(manifest.MetadataGlobPatterns, homes) {
+		// The links that take a store folder where it leads, every hop
+		// (session-state → ~/hop → elsewhere): the CLI resolves it as locally
+		if base := globBase(pattern); filepath.IsAbs(base) {
+			if _, err := os.Lstat(base); err == nil {
+				c.recordLinkChain(&snapshot, base)
+			}
+		}
 		matches, err := doublestar.FilepathGlob(pattern, doublestar.WithNoFollow())
 		if err != nil {
 			continue
@@ -333,6 +340,10 @@ func Collect(manifest ProbeManifest, escalate bool) ProbeSnapshot {
 				continue
 			}
 			recordSymlink(snapshot.Symlinks, match)
+			// …and of a link in it (session-state/abc → ~/hop → elsewhere)
+			if isSymlink(match) {
+				c.recordLinkChain(&snapshot, match)
+			}
 			if _, exists := snapshot.Files[match]; !exists {
 				c.collectPath(&snapshot, match, globBase(pattern), true, false)
 			}

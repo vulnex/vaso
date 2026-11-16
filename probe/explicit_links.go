@@ -65,7 +65,10 @@ func (c *collector) recordLinkChain(snapshot *ProbeSnapshot, p string) {
 }
 
 // linkCandidates are the components of p whose links are recorded, from the
-// top: p itself, and each directory strictly below a scanned home.
+// top: p itself, and each directory strictly below a scanned home. Never a
+// scanned home or a directory above one: a linked home is recorded as
+// resolvedDirs, and its link would make every path spelled through it resolve
+// to the other spelling, where no link below it was recorded.
 func (c *collector) linkCandidates(p string) []string {
 	var out []string
 	for dir := filepath.Dir(p); dir != filepath.Dir(dir); dir = filepath.Dir(dir) {
@@ -79,6 +82,9 @@ func (c *collector) linkCandidates(p string) []string {
 	// top first, as a realpath walks
 	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
 		out[i], out[j] = out[j], out[i]
+	}
+	if c.scannedHomeOrAbove(p) {
+		return out
 	}
 	return append(out, p)
 }

@@ -58,3 +58,73 @@ describe('GHC-001 under a linked home (snapshots)', () => {
     expect(r.message).toMatch(/outside the store and the home/);
   });
 });
+
+/** A plain home with the given store files, listings and links (as a probe records them). */
+function storeSnapshot(extra: Pick<ProbeSnapshot, 'files' | 'directories' | 'symlinks'> & { directoryModes?: Record<string, number> }): SnapshotFSProvider {
+  const home = '/home/u';
+  return new SnapshotFSProvider({
+    version: 1,
+    hostname: 'box',
+    platform: 'linux',
+    homedir: home,
+    timestamp: '2026-11-16T00:00:00Z',
+    privilege: { uid: 1000, username: 'u', isRoot: false, sudoAvailable: false, escalated: false, scannedUsers: ['u'], skippedPaths: [] },
+    files: { [`${home}/.copilot/config.json`]: { content: '{}', mode: 0o100600, exists: true }, ...extra.files },
+    directories: extra.directories,
+    symlinks: extra.symlinks,
+    commandOutputs: {},
+    env: {},
+    directoryModes: { [home]: 0o40755, [`${home}/.copilot`]: 0o40700, ...extra.directoryModes },
+  });
+}
+
+const meta = (mode: number) => ({ content: '', mode, exists: true, contentOmitted: true, omitted: 'metadata' as const });
+
+describe('GHC-001 store links on remote scans', () => {
+  it('a store folder that is itself a link into a credential store: one warning, as locally', async () => {
+    const fs = storeSnapshot({
+      files: { '/home/u/.copilot/session-state/credentials': meta(0o100644) },
+      directories: { '/home/u/.copilot': ['config.json', 'session-state'], '/home/u/.copilot/session-state': ['credentials'] },
+      symlinks: { '/home/u/.copilot/session-state': '/home/u/.aws' },
+      directoryModes: { '/home/u/.copilot/session-state': 0o40777 },
+    });
+    const r = await check.run(ctx(fs));
+    expect(r.severity).toBe('warning');
+    expect(r.fixable).toBe(false);
+    expect(r.evidence?.map(e => e.file)).toEqual(['/home/u/.copilot/session-state']);
+    expect(r.evidence?.[0].detail).toMatch(/^session-state\/ itself is a link to the folder \/home\/u\/\.aws \(AWS credentials/);
+  });
+
+  it('a linked session folder reached through a chain of links resolves where the chain ends', async () => {
+    const fs = storeSnapshot({
+      files: {},
+      directories: { '/home/u/.copilot': ['config.json', 'session-state/'], '/home/u/.copilot/session-state': ['abc'] },
+      symlinks: { '/home/u/.copilot/session-state/abc': '/home/u/hop', '/home/u/hop': '/srv/out/s' },
+      directoryModes: { '/home/u/.copilot/session-state': 0o40700, '/home/u/.copilot/session-state/abc': 0o40755 },
+    });
+    const r = await check.run(ctx(fs));
+    expect(r.severity).toBe('warning');
+    expect(r.message).toMatch(/1 store link\(s\) point outside the store and the home/);
+    expect(r.evidence?.map(e => [e.file, e.snippet])).toEqual([['/home/u/.copilot/session-state/abc', '-> /srv/out/s']]);
+  });
+
+  it('a file link into a credential store behind a followed session folder is judged, as locally', async () => {
+    const fs = storeSnapshot({
+      files: {
+        '/home/u/.copilot/session-state/abc/events.jsonl': meta(0o100600),
+        '/home/u/.copilot/session-state/abc/k.jsonl': meta(0o100644),
+      },
+      directories: { '/home/u/.copilot': ['config.json', 'session-state/'], '/home/u/.copilot/session-state': ['abc'] },
+      symlinks: {
+        '/home/u/.copilot/session-state/abc': '/home/u/sess',
+        '/home/u/.copilot/session-state/abc/k.jsonl': '/home/u/.ssh/id_rsa',
+        '/home/u/sess/k.jsonl': '/home/u/.ssh/id_rsa',
+      },
+      directoryModes: { '/home/u/.copilot/session-state': 0o40700, '/home/u/.copilot/session-state/abc': 0o40755 },
+    });
+    const r = await check.run(ctx(fs));
+    expect(r.passed).toBe(false);
+    expect(r.evidence?.map(e => e.file)).toEqual(['/home/u/.copilot/session-state/abc/k.jsonl']);
+    expect(r.message).not.toMatch(/Not verified/);
+  });
+});
