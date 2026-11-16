@@ -183,6 +183,10 @@ function envFile(label: string): string {
     `${canary(`${label} env single-quoted line 2`, short)}'`,
     `MULTI_API_KEY="${canary(`${label} env double-quoted line 1`, short)}`,
     `  ${canary(`${label} env double-quoted line 2`, short)}"`,
+    // backtick-quoted, over two lines (Node's dotenv reads it whole)
+    `OPENROUTER_API_KEY=\`${canary(`${label} env backtick line 1`, short)}`,
+    `${canary(`${label} env backtick line 2`, short)}\``,
+    `GATEWAY_TOKEN=\`${canary(`${label} env backtick one line`, generic)}\``,
   ].join('\n') + '\n';
 }
 
@@ -275,6 +279,14 @@ function jsonFile(label: string): string {
     compact: '@COMPACT@',
     auth: { type: 'bearer', value: c('auth.value', short) },
     ESCAPED_API_KEY: '@ESCAPED@',
+    // random strings deeper under a secrets container
+    creds: [{ k: c('creds array of objects', generic) }],
+    vault: { credentials: [[c('credentials array of arrays', generic)]], tokens: { x: { y: c('tokens deep map', generic) } } },
+    // a credential after more text than one container walk reads (one file)
+    ...(label === '.cursor/mcp.json' ? {
+      store: { credentials: { note: 'lorem ipsum dolor '.repeat(4000), primary: c('credential after a 70 KiB note', generic) } },
+      store2: { credentials: { ...Object.fromEntries(Array.from({ length: 9000 }, (_, i) => [`k${i}`, 1])), primary: c('credential after 9000 keys', generic) } },
+    } : {}),
   }, null, 2).replace('"@ESCAPED@"', `"${escapedCanary(`${label} json all-escaped key`, generic, jsonEscape)}"`)
     .replace('"@COMPACT@"', `{"creds": {"value": "${canary(`${label} json compact creds.value`, lowerWord)}"}}`) + '\n';
 }
