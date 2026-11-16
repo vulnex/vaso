@@ -7,6 +7,7 @@ import { loadRules, validateRuleFile, type DeclarativeRule } from '../rules/inde
 import { checkRegistry } from '../core/check-registry.js';
 import { readInputFile, INPUT_LIMITS } from '../core/input-file.js';
 import YAML from 'yaml';
+import { parseErrorMessage } from '../core/parse-error.js';
 import { escapeControlChars, escapeJsonUnsafe } from '../reporting/text-safety.js';
 
 /** A file name or rule text on one terminal line (names come from directory listings). */
@@ -119,7 +120,7 @@ export async function runRulesValidate(filePath: string, options: RulesValidateO
     data = YAML.parse(content);
   } catch (err) {
     process.exitCode = 1;
-    const message = err instanceof Error ? err.message : String(err);
+    const message = parseErrorMessage(err);
     if (options.format === 'json') {
       console.log(escapeJsonUnsafe(JSON.stringify({ valid: false, rules: 0, errors: [{ message: `Invalid YAML syntax: ${message}` }] }, null, 2)));
       return;

@@ -79,3 +79,52 @@ describe('E2E: visualize reads a --host report', () => {
     }
   });
 });
+
+// A config that doesn't parse is reported by file, line and column: the
+// parser's code frame would quote the lines around the error, credentials
+// included, into every output.
+describe('E2E: parse errors never quote config content', () => {
+  const KEYS = [
+    'sk-proj-PARSEERRCANARYa8Kd93LmQz7Xw2Vb5Nc1',
+    'sk-or-v1-PARSEERRYAMLCANARY0a9b8c7d6e5f4a3b2c1d0e9f8',
+    'parseerrweakpw',
+    'parseerrtomlpw1',
+  ];
+  let home: string;
+
+  beforeAll(async () => {
+    home = await mkdtemp(join(tmpdir(), 'vaso-e2e-perr-'));
+    await mkdir(join(home, '.codex'), { recursive: true });
+    await mkdir(join(home, '.hermes'), { recursive: true });
+    await mkdir(join(home, '.vaso/ioc'), { recursive: true });
+    await writeFile(join(home, '.codex/config.toml'), [
+      '[mcp_servers.c]', 'command = "npx"', 'args = ["-y", "x@1.0.0"]', '[mcp_servers.c.env]',
+      `OPENAI_API_KEY = "${KEYS[0]}"`, `DB_PASSWORD = "${KEYS[3]}"`, 'broken = = 1', '',
+    ].join('\n'));
+    await writeFile(join(home, '.hermes/config.yaml'), [
+      'model:', '  provider: openrouter', `  api_key: ${KEYS[1]}`, `  password: ${KEYS[2]}`, ' bad: [', '',
+    ].join('\n'));
+  });
+
+  afterAll(async () => {
+    await rm(home, { recursive: true, force: true });
+  });
+
+  it.each([
+    [['mcp', 'list']],
+    [['mcp', 'list', '-f', 'json']],
+    [['mcp', 'scan']],
+    [['mcp', 'scan', '-f', 'json']],
+    [['scan', '-a', 'codex']],
+    ...['json', 'markdown', 'html', 'sarif', 'csv', 'junit'].flatMap(f => [
+      [['scan', '-a', 'codex', '-f', f]],
+      [['scan', '-a', 'hermes', '-f', f]],
+    ]),
+  ])('%j', async (args) => {
+    const run = await runVasoCLI(args, { HOME: home });
+    const all = run.stdout + run.stderr;
+    for (const key of KEYS) expect(all).not.toContain(key);
+    // the error is still reported, by location
+    if (args[0] === 'mcp' || args.includes('json')) expect(all).toMatch(/at line \d+, column \d+/);
+  }, 120_000);
+});

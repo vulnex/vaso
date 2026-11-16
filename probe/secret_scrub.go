@@ -1684,6 +1684,12 @@ func (c *collector) tripleQuoted(key, raw string) string {
 	inner := raw[3 : len(raw)-3]
 	lead := len(inner) - len(strings.TrimLeft(inner, "\r\n"))
 	value := strings.TrimRight(inner[lead:], " \t\r\n")
+	if isSecretKeyName(key) && strings.ContainsAny(value, "\r\n") {
+		// written over several lines: one value, as the parser reads it
+		b := []byte(raw)
+		c.disguiseSpread(b, key, verbatimLines(inner[lead:], 3+lead, raw[0] == '"'))
+		return string(b)
+	}
 	if !isSecretKeyName(key) || strings.ContainsAny(value, "\r\n") || !keyedSecret(key, value) {
 		return raw
 	}
@@ -2090,6 +2096,9 @@ func (c *collector) keyedValue(key, raw string) string {
 }
 
 func (c *collector) scrubText(path, s string) string {
+	// the file as written: a value over several lines is judged from it, not
+	// from what a one-line rule made of its first line
+	original := s
 	// the values disguised in this file (disguiseCopies)
 	c.inFile = map[string]string{}
 	defer func() { c.inFile = nil }()
@@ -2117,9 +2126,16 @@ func (c *collector) scrubText(path, s string) string {
 		return g[1] + body + g[3]
 	})
 	if dotenv {
-		s = dotenvLine.ReplaceAllStringFunc(s, func(m string) string {
-			g := dotenvLine.FindStringSubmatch(m)
-			return g[1] + g[2] + g[3] + c.keyedValue(g[2], g[4]) + g[5]
+		// KEY='…' or KEY="…" closed on a line below: one value (python-dotenv
+		// reads it whole), its first line left to it
+		var spread map[int]bool
+		s, spread = c.dotenvMultiline(s)
+		s = replaceMatches(dotenvLine, s, func(m submatch) string {
+			if spread[m.g[0]] {
+				return m.text()
+			}
+			g := func(n int) string { v, _ := m.group(n); return v }
+			return g(1) + g(2) + g(3) + c.keyedValue(g(2), g(4)) + g(5)
 		})
 	}
 	if jsonish || yaml || toml || dotenv {
@@ -2202,9 +2218,11 @@ func (c *collector) scrubText(path, s string) string {
 				return m.with(6, 6, c.disguiseKeyed(key, value))
 			})
 		}
+		// a value an anchor names, read under the credential name of an alias
+		s = c.yamlAliases(s)
 		// values on the lines below their key: block sequences, a scalar on
 		// the next line, children of a secrets mapping, argv items
-		s = c.yamlNested(s)
+		s = c.yamlNested(s, original)
 	}
 	if toml {
 		headers := tomlHeader.FindAllStringSubmatchIndex(s, -1)
@@ -2697,7 +2715,13 @@ var (
 	yamlKeyLine  = regexp.MustCompile(`^(["']?)([A-Za-z0-9_.-]+)(["']?)[ \t]*:(?:[ \t]+(.*))?$`)
 	yamlItemLine = regexp.MustCompile(`^-(?:[ \t]+(.*))?$`)
 	yamlBareFlag = regexp.MustCompile(`^["']?(--?[A-Za-z][A-Za-z0-9_-]*)["']?[ \t]*(?:#.*)?$`)
-	yamlMapValue = regexp.MustCompile(`^["']?[A-Za-z0-9_.-]+["']?[ \t]*:(?:[ \t]|$)`)
+	// a comment after a plain scalar: whitespace, then #
+	yamlComment = regexp.MustCompile(`[ \t]#`)
+	// key: *alias, in a block or flow mapping (groups: key 2, alias 3)
+	yamlAliasPair = regexp.MustCompile(`(^|[\s{,])["']?([A-Za-z0-9_.-]+)["']?[ \t]*:[ \t]+\*([^\s,\[\]{}]+)`)
+	// &anchor before a value (group 1: the name); the value follows
+	yamlAnchorDef = regexp.MustCompile(`(?:^|[\s\[{,])&([^\s,\[\]{}]+)[ \t]+`)
+	yamlMapValue  = regexp.MustCompile(`^["']?[A-Za-z0-9_.-]+["']?[ \t]*:(?:[ \t]|$)`)
 )
 
 // yamlNested disguises YAML values written below their key, which the
@@ -2707,7 +2731,11 @@ var (
 // children of a mapping under a secretContainerKey (secrets: then
 // "github: <token>"), and the item after a credential flag in any sequence
 // (args: then "- --api-key", "- <value>").
-func (c *collector) yamlNested(s string) string {
+func (c *collector) yamlNested(s, original string) string {
+	// original: the text before any rule ran, where it still lines up with s
+	if len(original) != len(s) {
+		original = ""
+	}
 	type frame struct {
 		indent int
 		key    string
@@ -2813,12 +2841,20 @@ func (c *collector) yamlNested(s string) string {
 			if !isSecretKeyName(key) && ok && p.secrets != "" {
 				name = containerChildKey(p.secrets, key)
 			}
+			// a quoted scalar its line leaves open, closed on a line below
+			if value != "" && (value[0] == '"' || value[0] == '\'') && quoteEnd(value[1:], value[0], value[0] == '\'') < 0 {
+				if parts, n, ok := yamlQuotedLines(lines[li+1:], offset, valueAt+1, value[1:], value[0]); ok {
+					c.disguiseSpread(b, name, asWritten(original, parts))
+					skipTo = li + 1 + n
+					continue
+				}
+			}
 			// a plain scalar going on over the deeper lines below
 			if plainStart(value) {
 				more, n := continuationLines(lines[li+1:], offset, indent, false)
 				if len(more) > 0 {
 					parts := append([]scalarLine{{valueAt, strings.TrimRight(value, " \t"), 0}}, more...)
-					if c.disguiseLines(b, name, parts, 0, 0) {
+					if c.disguiseLines(b, name, linesAsWritten(original, parts), 0, 0) {
 						skipTo = li + 1 + n
 						continue
 					}
@@ -2844,7 +2880,7 @@ func (c *collector) yamlNested(s string) string {
 					chomp = header[i]
 				}
 				parts, _ := continuationLines(lines[li+1:], offset, indent, true)
-				c.disguiseLines(b, name, parts, value[0], chomp)
+				c.disguiseLines(b, name, linesAsWritten(original, parts), value[0], chomp)
 			case ok && !isSecretKeyName(key) && p.secrets != "":
 				disguiseAt(valueAt, containerChildKey(p.secrets, key), value)
 			case ok && !isSecretKeyName(key) && headerMapKey.MatchString(p.key):
@@ -2870,7 +2906,7 @@ func (c *collector) yamlNested(s string) string {
 			more, n := continuationLines(lines[li+1:], offset, p.indent, false)
 			if len(more) > 0 {
 				parts := append([]scalarLine{{bodyAt, strings.TrimRight(body, " \t"), 0}}, more...)
-				if c.disguiseLines(b, p.key, parts, 0, 0) {
+				if c.disguiseLines(b, p.key, linesAsWritten(original, parts), 0, 0) {
 					skipTo = li + 1 + n
 				}
 				continue
@@ -2930,7 +2966,12 @@ func continuationLines(rest []string, at, keyIndent int, block bool) ([]scalarLi
 				break
 			}
 			body, indent = line[blockIndent:], blockIndent
-		} else if body[0] == '#' || strings.Contains(body, ": ") || strings.HasSuffix(body, ":") || strings.Contains(body, " #") || body == "-" || strings.HasPrefix(body, "- ") {
+		} else if body[0] == '#' || strings.Contains(body, ": ") || strings.HasSuffix(body, ":") || body == "-" || strings.HasPrefix(body, "- ") {
+			break
+		} else if c := yamlComment.FindStringIndex(body); c != nil {
+			// a comment ends the scalar: its last line is what comes before
+			out = append(out, scalarLine{lineAt + indent, strings.TrimRight(body[:c[0]], " \t"), blanks})
+			taken = i + 1
 			break
 		}
 		out = append(out, scalarLine{lineAt + indent, strings.TrimRight(body, " \t"), blanks})
@@ -2984,9 +3025,302 @@ func (c *collector) disguiseLines(b []byte, name string, parts []scalarLine, sty
 		return false
 	}
 	for i, p := range parts {
-		copy(b[p.at:p.at+len(p.text)], out[offs[i]:offs[i]+len(p.text)])
+		c.writeRun(b, p.at, out[offs[i]:offs[i]+len(p.text)])
 	}
 	return true
+}
+
+// valuePart is one run of a value written over several lines: where its
+// text starts in the buffer, the text, and what comes before it in the
+// value a parser reads (the line break as the format folds it — a space,
+// line breaks, the next line's indentation in TOML — or nothing).
+type valuePart struct {
+	at   int
+	text string
+	sep  string
+}
+
+// disguiseSpread disguises a credential written over several lines under
+// name as the one value a parser reads: the separators stay as written and
+// each run gets its part of the stand-in, so the file keeps its shape and
+// the value its verdicts. Runs holding whitespace are words (prose), no
+// credential, and are left.
+func (c *collector) disguiseSpread(b []byte, name string, parts []valuePart) bool {
+	if !isSecretKeyName(name) || len(parts) < 2 {
+		return false
+	}
+	var joined, flat strings.Builder
+	offs := make([]int, len(parts))
+	for i, p := range parts {
+		if strings.ContainsAny(p.text, " \t\r\n") {
+			return false
+		}
+		joined.WriteString(p.sep)
+		offs[i] = joined.Len()
+		joined.WriteString(p.text)
+		flat.WriteString(p.text)
+	}
+	value := joined.String()
+	if !keyedSecret(name, value) && !keyedSecret(name, flat.String()) && !(strongCredentialKey(name) && plainCredential(flat.String())) {
+		return false
+	}
+	out := c.disguiseKeyed(name, value)
+	if out == value && strongCredentialKey(name) {
+		out = c.disguiseArgv(value)
+	}
+	if out == value || len(out) != len(value) {
+		return false
+	}
+	for i, p := range parts {
+		if out[offs[i]-len(p.sep):offs[i]] != p.sep {
+			return false
+		}
+	}
+	for i, p := range parts {
+		c.writeRun(b, p.at, out[offs[i]:offs[i]+len(p.text)])
+	}
+	return true
+}
+
+// asWritten gives each run its text as the file had it (original, "" when
+// it no longer lines up), so the value is judged as written.
+func asWritten(original string, parts []valuePart) []valuePart {
+	if original == "" {
+		return parts
+	}
+	out := make([]valuePart, len(parts))
+	for i, p := range parts {
+		out[i] = p
+		out[i].text = original[p.at : p.at+len(p.text)]
+	}
+	return out
+}
+
+// linesAsWritten is asWritten for the lines of a YAML scalar.
+func linesAsWritten(original string, parts []scalarLine) []scalarLine {
+	if original == "" {
+		return parts
+	}
+	out := make([]scalarLine, len(parts))
+	for i, p := range parts {
+		out[i] = p
+		out[i].text = original[p.at : p.at+len(p.text)]
+	}
+	return out
+}
+
+// writeRun writes run, a line's part of a multi-line value's stand-in, at
+// b[at:]. A one-line rule reading that line alone later (the first line's
+// KEY="…) keeps it: the stand-in is the whole value's.
+func (c *collector) writeRun(b []byte, at int, run string) {
+	copy(b[at:at+len(run)], run)
+	if c.disguised == nil {
+		c.disguised = map[string]string{}
+	}
+	for _, v := range []string{run, `"` + run, `'` + run} {
+		c.disguised[v] = v
+	}
+}
+
+// quoteEnd is where the quote q closes in s, or -1: a backslash escapes
+// the next character (yamlSingle: a YAML single-quoted scalar, where a
+// doubled quote is a quote inside and a backslash is a backslash).
+func quoteEnd(s string, q byte, yamlSingle bool) int {
+	for i := 0; i < len(s); i++ {
+		switch {
+		case s[i] == '\\' && !yamlSingle:
+			i++
+		case s[i] == q && yamlSingle && i+1 < len(s) && s[i+1] == q:
+			i++
+		case s[i] == q:
+			return i
+		}
+	}
+	return -1
+}
+
+// oddBackslashes: s ends in an unescaped backslash (a line break escaped).
+func oddBackslashes(s string) bool {
+	n := len(s) - len(strings.TrimRight(s, `\`))
+	return n%2 == 1
+}
+
+// yamlQuotedLines reads a YAML quoted scalar (q) that its first line
+// (first, starting at firstAt) leaves open, from the lines below (rest,
+// starting at file offset at): the runs of its value as YAML folds it —
+// a line break between lines a space, n blank lines n line breaks, an
+// escaped line break ("…\" at the end of a line) nothing — and how many
+// lines of rest it takes. ok is false when the quote doesn't close or
+// something other than a comment follows it.
+func yamlQuotedLines(rest []string, at, firstAt int, first string, q byte) ([]valuePart, int, bool) {
+	t := strings.TrimRight(first, " \t")
+	escaped := q == '"' && oddBackslashes(t)
+	if escaped {
+		t = t[:len(t)-1]
+	}
+	parts := []valuePart{{firstAt, t, ""}}
+	blanks := 0
+	for i, raw := range rest {
+		if i >= 64 {
+			break
+		}
+		lineAt := at
+		at += len(raw)
+		line := strings.TrimRight(raw, "\r\n")
+		body := strings.TrimLeft(line, " \t")
+		if body == "" {
+			blanks++
+			continue
+		}
+		sep := " "
+		switch {
+		case escaped:
+			sep = ""
+		case blanks > 0:
+			sep = strings.Repeat("\n", blanks)
+		}
+		blanks = 0
+		textAt := lineAt + len(line) - len(body)
+		if end := quoteEnd(body, q, q == '\''); end >= 0 {
+			after := strings.TrimSpace(body[end+1:])
+			if after != "" && after[0] != '#' {
+				return nil, 0, false
+			}
+			parts = append(parts, valuePart{textAt, strings.TrimRight(body[:end], " \t"), sep})
+			return parts, i + 1, true
+		}
+		t := strings.TrimRight(body, " \t")
+		escaped = q == '"' && oddBackslashes(t)
+		if escaped {
+			t = t[:len(t)-1]
+		}
+		parts = append(parts, valuePart{textAt, t, sep})
+	}
+	return nil, 0, false
+}
+
+// verbatimLines splits body (at offset at) — the inside of a quoted value
+// that spans lines and reads as written (a quoted dotenv value, a TOML
+// literal multi-line string) — into runs: each line's text, with the
+// whitespace and line breaks between them as separators. basic: a line
+// ending in an unescaped backslash continues at the next text with nothing
+// between (a TOML basic multi-line string).
+func verbatimLines(body string, at int, basic bool) []valuePart {
+	var parts []valuePart
+	sep := ""
+	joinNext := false
+	for _, raw := range strings.SplitAfter(body, "\n") {
+		content := strings.TrimRight(raw, "\r\n")
+		eol := raw[len(content):]
+		text := strings.TrimLeft(content, " \t")
+		lead := content[:len(content)-len(text)]
+		trimmed := strings.TrimRight(text, " \t")
+		trail := text[len(trimmed):]
+		text = trimmed
+		textAt := at + len(lead)
+		at += len(raw)
+		if joinNext {
+			// a line break escaped: the whitespace up to the next text goes
+			lead = ""
+		}
+		if text == "" {
+			if !joinNext {
+				sep += lead + trail + eol
+			}
+			continue
+		}
+		cont := basic && oddBackslashes(text)
+		if cont {
+			text = text[:len(text)-1]
+		}
+		parts = append(parts, valuePart{textAt, text, sep + lead})
+		joinNext = cont
+		sep = ""
+		if !cont {
+			sep = trail + eol
+		}
+	}
+	return parts
+}
+
+// dotenvMultiline disguises a quoted dotenv value that its line leaves
+// open and a line below closes, as the one value python-dotenv reads (the
+// line breaks kept). A PEM key in one is pemBody's: its armor lines hold
+// spaces, and disguiseSpread leaves runs of words.
+func (c *collector) dotenvMultiline(s string) (string, map[int]bool) {
+	if !strings.Contains(s, "\n") {
+		return s, nil
+	}
+	var b []byte
+	done := map[int]bool{}
+	for _, g := range dotenvLine.FindAllStringSubmatchIndex(s, -1) {
+		v := s[g[8]:g[9]]
+		if v == "" || v[0] != '"' && v[0] != '\'' || quoteEnd(v[1:], v[0], false) >= 0 {
+			continue
+		}
+		start := g[8] + 1
+		end := quoteEnd(s[start:], v[0], false)
+		if end < 0 || !strings.Contains(s[start:start+end], "\n") {
+			continue
+		}
+		if after := strings.TrimLeft(s[start+end+1:], " \t"); after != "" && after[0] != '\n' && after[0] != '\r' && after[0] != '#' {
+			continue
+		}
+		if b == nil {
+			b = []byte(s)
+		}
+		if c.disguiseSpread(b, s[g[4]:g[5]], verbatimLines(s[start:start+end], start, false)) {
+			done[g[0]] = true
+		}
+	}
+	if b == nil {
+		return s, nil
+	}
+	return string(b), done
+}
+
+// yamlAliases disguises the scalar an anchor names (&k <value>) where an
+// alias of it (*k) sits under a credential name: the parser reads the
+// value there, under that name, while the anchor's own key may name
+// nothing (BASE: &k …, then OPENAI_API_KEY: *k).
+func (c *collector) yamlAliases(s string) string {
+	if !strings.Contains(s, "*") || !strings.Contains(s, "&") {
+		return s
+	}
+	names := map[string]string{}
+	for _, m := range yamlAliasPair.FindAllStringSubmatch(s, -1) {
+		if isSecretKeyName(m[2]) {
+			if _, ok := names[m[3]]; !ok {
+				names[m[3]] = m[2]
+			}
+		}
+	}
+	if len(names) == 0 {
+		return s
+	}
+	b := []byte(s)
+	for _, g := range yamlAnchorDef.FindAllStringSubmatchIndex(s, -1) {
+		key, ok := names[s[g[2]:g[3]]]
+		if !ok {
+			continue
+		}
+		end := strings.IndexAny(s[g[1]:], "\r\n")
+		if end < 0 {
+			end = len(s) - g[1]
+		}
+		raw := s[g[1] : g[1]+end]
+		if raw == "" || strings.ContainsAny(raw[:1], "{[|>&*!#") {
+			continue
+		}
+		// in a flow collection a plain value ends at , ] or }
+		if i := strings.IndexAny(raw, ",]}"); i >= 0 && raw[0] != '"' && raw[0] != '\'' {
+			raw = raw[:i]
+		}
+		if out := c.keyedValue(key, raw); out != raw && len(out) == len(raw) {
+			copy(b[g[1]:g[1]+len(raw)], out)
+		}
+	}
+	return string(b)
 }
 
 // nextContentLine is the first line of lines that isn't blank or a comment.

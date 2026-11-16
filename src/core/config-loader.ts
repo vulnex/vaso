@@ -6,6 +6,7 @@ import { parseTomlSafe } from './toml-safe.js';
 import type { ParsedConfig } from './types.js';
 import type { FSProvider } from './fs-provider.js';
 import { parseJsonLenient } from './jsonc.js';
+import { parseErrorMessage } from './parse-error.js';
 import { LocalFSProvider } from './local-fs-provider.js';
 
 /** A config file that exists but could not be read or parsed. Without this
@@ -42,7 +43,8 @@ export async function captureConfigLoadErrors<T>(
 export function recordLoadError(error: ConfigLoadError): void {
   const store = loadErrorStore.getStore();
   if (!store || store.some(e => e.filePath === error.filePath && e.stage === error.stage)) return;
-  store.push(error);
+  // Never the parser's code frame: the lines around an error are often credentials
+  store.push({ ...error, message: parseErrorMessage(error.message) });
 }
 
 /**
@@ -150,7 +152,7 @@ async function isDirectoryPath(filePath: string, fs: FSProvider): Promise<boolea
 }
 
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  return parseErrorMessage(error);
 }
 
 /**

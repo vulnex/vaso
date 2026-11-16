@@ -14,6 +14,7 @@ import { xdgConfigDir as opencodeConfigDir } from '../adapters/opencode.js';
 import { openclawMcpServerMaps } from '../adapters/openclaw.js';
 import { zeroclawDirs } from '../adapters/zeroclaw.js';
 import { parseYamlSafe } from '../core/yaml-safe.js';
+import { parseErrorMessage } from '../core/parse-error.js';
 import { captureConfigLoadErrors } from '../core/config-loader.js';
 import { pathPresent } from '../adapters/load-if-present.js';
 import { applyOffLists } from './off-lists.js';
@@ -692,6 +693,7 @@ function withExtensionPath(servers: MCPServerEntry[], extensionPath: string | un
   }));
 }
 
+/** A read or parse failure's message — the parser's description and location, never the file's lines. */
 function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
+  return parseErrorMessage(err);
 }

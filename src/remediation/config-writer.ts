@@ -5,6 +5,7 @@ import type { FixResult, ParsedConfig } from '../core/types.js';
 import { getNestedValue, keySegments, setNestedValue, type KeyPath } from '../core/utils.js';
 import { loadConfig } from '../core/config-loader.js';
 import { parseJsonLenient } from '../core/jsonc.js';
+import { scrubParseError } from '../core/parse-error.js';
 import { editJsonText } from './json-edit.js';
 import { isDeepStrictEqual } from 'node:util';
 import { AsyncLocalStorage } from 'node:async_hooks';
@@ -416,7 +417,12 @@ function scanTomlValue(lines: string[], line: number, from: number): { line: num
 
 /** Parse TOML with integers beyond 2^53 kept exact (BigInt), so they survive a re-serialization. */
 function parseTOML(content: string): Record<string, unknown> {
-  return parseTOMLStrict(content, { integersAsBigInt: 'asNeeded' }) as Record<string, unknown>;
+  try {
+    return parseTOMLStrict(content, { integersAsBigInt: 'asNeeded' }) as Record<string, unknown>;
+  } catch (err) {
+    // A fix failure prints this message: no code frame of the file
+    throw scrubParseError(err);
+  }
 }
 
 /** Order-insensitive structural equality for parsed TOML documents. */

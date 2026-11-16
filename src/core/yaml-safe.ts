@@ -1,4 +1,5 @@
 import YAML from 'yaml';
+import { scrubParseError } from './parse-error.js';
 
 export interface YamlSafeOptions {
   /**
@@ -18,6 +19,15 @@ export interface YamlSafeOptions {
  * yaml.v3 do; a `<<` whose value isn't a map stays a plain key, as before.
  */
 export function parseYamlSafe(raw: string, opts: YamlSafeOptions = {}): unknown {
+  try {
+    return parseYaml(raw, opts);
+  } catch (err) {
+    // The library's messages quote the lines around the error
+    throw scrubParseError(err);
+  }
+}
+
+function parseYaml(raw: string, opts: YamlSafeOptions): unknown {
   // The library's own uniqueness check compares every key with every other
   // (80,000 keys: 2 minutes); duplicates are found in one pass instead
   const options = { logLevel: 'error', uniqueKeys: false } as const;

@@ -2,6 +2,7 @@ import { readFile, stat } from 'node:fs/promises';
 import { isAbsolute, posix } from 'node:path';
 import type { ProbeSnapshot } from './snapshot-types.js';
 import { neutralizeSnapshotIdentity } from './snapshot-identity.js';
+import { parseErrorMessage } from './parse-error.js';
 import { escapeControlChars } from '../reporting/text-safety.js';
 
 /**
@@ -209,7 +210,7 @@ export function parseSnapshot(raw: string, what: string): ProbeSnapshot {
   try {
     parsed = JSON.parse(raw);
   } catch (err) {
-    throw new SnapshotLoadError(`${what} is not valid JSON: ${(err as Error).message}`);
+    throw new SnapshotLoadError(`${what} is not valid JSON: ${parseErrorMessage(err)}`);
   }
 
   const problems = validateSnapshot(parsed);
