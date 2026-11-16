@@ -173,6 +173,9 @@ export interface FileEntry {
   /** Permission denied (probe ≥ 1.3.1): stat failed (exists false — inside a
    *  chmod-000 directory) or the file can't be opened (exists true, mode set). */
   denied?: boolean;
+  /** The credential-store file this one is a hard link to (probe ≥ 1.5.0;
+   *  omitted `sensitive`): SKL-013 reports it like a link into that store. */
+  hardLinkOf?: string;
 }
 
 export interface CommandOutput {

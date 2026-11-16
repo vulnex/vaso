@@ -14,7 +14,7 @@ describe('SENSITIVE_SINKS', () => {
     const probe = [...block![1].matchAll(/`([^`]*)`/g)].map(m => m[1]);
     expect(probe).toEqual(SENSITIVE_SINKS.map(s => s.re.source));
     // The probe compiles each one with (?i)
-    expect(SENSITIVE_SINKS.every(s => s.re.flags === 'i')).toBe(true);
+    expect(SENSITIVE_SINKS.every(s => s.re.flags === 'iu')).toBe(true);
   });
 
   it('classifies credential stores and leaves ordinary paths alone', () => {

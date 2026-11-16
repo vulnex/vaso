@@ -272,7 +272,7 @@ describe('configs linked into a credential store', () => {
       const fs = new LocalFSProvider();
       const { result, loadErrors } = await captureConfigLoadErrors(() => loadConfig(join(home, '.hermes', '.env'), fs).catch((e: Error) => e));
       expect(result).toBeInstanceOf(Error);
-      expect(loadErrors[0].message).toMatch(/^not read: reached through a symlink into SSH keys\/config \(~\/.ssh\)/);
+      expect(loadErrors[0].message).toMatch(/^not read: reached through a link into SSH keys\/config \(~\/.ssh\)/);
       expect(await readTextIfPresent(join(home, '.hermes', '.env'), fs)).toBeUndefined();
       // an ordinary link is read; a file inside the store itself is named, not escaped to
       expect((await loadConfig(join(home, '.hermes', 'ok.env'), fs)).data).toEqual({ A: '1' });
@@ -297,7 +297,7 @@ describe('configs linked into a credential store', () => {
       const fs = new LocalFSProvider();
       const { result, loadErrors } = await captureConfigLoadErrors(() => loadConfig(join(home, '.copilot', 'config.json'), fs).catch((e: Error) => e));
       expect(result).toBeInstanceOf(Error);
-      expect(loadErrors[0].message).toMatch(/^not read: reached through a symlink into AWS credentials \(~\/.aws\)/);
+      expect(loadErrors[0].message).toMatch(/^not read: reached through a link into AWS credentials \(~\/.aws\)/);
       expect(await readTextIfPresent(join(home, '.copilot', 'config.json'), fs)).toBeUndefined();
       // a folder linked anywhere else is read; the store's own spelling names it
       expect((await loadConfig(join(home, '.codex', 'config.json'), fs)).data).toEqual({ a: 1 });

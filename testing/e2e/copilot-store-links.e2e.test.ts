@@ -197,7 +197,7 @@ describe.each(layouts)('copilot-cli: $name', (layout) => {
     expect(local.results.filter(x => x.fixable && (!x.passed || x.foldedInto)).map(x => x.id)).toEqual([]);
     // config.json really is in ~/.aws: not read locally, as the probe never ships it
     const load = local.results.find(x => x.id === 'CONFIG-LOAD');
-    if (layout.configsInStore) expect(load?.message).toMatch(/not read: reached through a symlink into AWS credentials/);
+    if (layout.configsInStore) expect(load?.message).toMatch(/not read: reached through a link into AWS credentials/);
     else expect(load).toBeUndefined();
   });
 

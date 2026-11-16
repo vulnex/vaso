@@ -261,7 +261,7 @@ export class SnapshotFSProvider implements FSProvider {
     // resolutions (a linked home) are for the skill-root scope only
     const real = this.resolveSymlinks(path);
     const recorded = this.resolvedDir(real);
-    return recorded !== real && recorded.toLowerCase() === real.toLowerCase() ? recorded : real;
+    return recorded !== real && foldCase(recorded) === foldCase(real) ? recorded : real;
   }
 
   /**
@@ -291,6 +291,10 @@ export class SnapshotFSProvider implements FSProvider {
       current = '/';
     }
     return current;
+  }
+
+  async hardLinkOf(path: string): Promise<string | undefined> {
+    return this.snapshot.files[path]?.hardLinkOf;
   }
 
   async readlink(path: string): Promise<string> {
@@ -605,6 +609,15 @@ export class SnapshotFSProvider implements FSProvider {
   }
 }
 
+/**
+ * `s` with full Unicode case folding and normalization applied, as a
+ * case-insensitive volume compares names: `weiß` and `WEISS`, `ﬁx` and
+ * `fix`, `.ſſh` and `.ssh`, `é` composed or not all fold alike.
+ */
+export function foldCase(s: string): string {
+  return s.normalize('NFD').toLowerCase().toUpperCase().toLowerCase().normalize('NFD');
+}
+
 /** An argument naming a file or directory (absolute, home- or dot-relative, or with a slash). */
 function looksLikePath(arg: string): boolean {
   return arg.includes('/') || arg.includes('\\') || arg.startsWith('~') || arg === '.' || arg === '..';
@@ -616,7 +629,7 @@ const OMITTED_WHY: Record<NonNullable<FileEntry['omitted']>, string> = {
   asset: 'binary asset, recorded as metadata',
   metadata: 'recorded as metadata only',
   special: 'not a regular file',
-  sensitive: 'reached through a symlink into a credential store, shell startup file or /etc, never shipped',
+  sensitive: 'reached through a link into a credential store, shell startup file or /etc, never shipped',
 };
 
 /** A file present on the host whose content the probe did not ship (`omitted` says why). */

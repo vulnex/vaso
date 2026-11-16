@@ -8,6 +8,7 @@ import type { FSProvider } from './fs-provider.js';
 import { parseJsonLenient } from './jsonc.js';
 import { parseErrorMessage } from './parse-error.js';
 import { LocalFSProvider } from './local-fs-provider.js';
+import { hardLinkedSink } from './hard-link-sinks.js';
 
 /** A config file that exists but could not be read or parsed. Without this
  *  signal a corrupted config is indistinguishable from an absent one: adapters
@@ -189,14 +190,15 @@ export async function linkedIntoSink(filePath: string, fs: FSProvider): Promise<
   }
   // Through a linked directory above it (resolvedIntoSink)
   if (real !== undefined && real !== normalize(filePath) && outside(real)) return real;
-  return undefined;
+  // A store's file under another name: a hard link (hardLinkedSink)
+  return hardLinkedSink(fs, filePath);
 }
 
 /** The error a read of such a file fails with (shaped like a snapshot's omitted content). */
 export function sinkLinkError(filePath: string, target: string): Error & { omitted: 'sensitive' } {
   // Named for what the target is: /etc/hosts is system configuration, not a credential store
   const what = classifySensitivePath(target)[0] ?? 'a credential store, shell startup file or /etc';
-  return Object.assign(new Error(`not read: reached through a symlink into ${what} (${target}): ${filePath}`), { omitted: 'sensitive' as const });
+  return Object.assign(new Error(`not read: reached through a link into ${what} (${target}): ${filePath}`), { omitted: 'sensitive' as const });
 }
 
 export async function loadConfig(filePath: string, fs?: FSProvider): Promise<ParsedConfig> {

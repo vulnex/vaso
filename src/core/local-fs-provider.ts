@@ -11,6 +11,7 @@ import { posixPermissionFacts } from './permissions.js';
 import { parsePrivateGroups } from './private-groups.js';
 import { planExec } from './exec-safety.js';
 import { runBounded, runBoundedSync, type BoundedRunResult } from './bounded-exec.js';
+import { LocalHardLinkIndex } from './hard-link-sinks.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -209,6 +210,14 @@ export class LocalFSProvider implements FSProvider {
 
   async readlink(path: string): Promise<string> {
     return readlink(this.fsPath(path));
+  }
+
+  private hardLinks?: LocalHardLinkIndex;
+
+  async hardLinkOf(path: string): Promise<string | undefined> {
+    if (this.platform === 'win32') return undefined;
+    this.hardLinks ??= new LocalHardLinkIndex(() => [this.homedir()]);
+    return this.hardLinks.hardLinkOf(path);
   }
 
   async exec(cmd: string, args: string[], options?: ExecOptions): Promise<ExecResult> {

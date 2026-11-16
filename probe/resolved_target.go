@@ -72,7 +72,7 @@ func newResolvedTargets(metadataGlobs, configPaths, configGlobs []string, homes 
 	// hold ships disguised under its own path already
 	t.configGlobs = globs(configGlobs)
 	for _, p := range configPaths {
-		if real, err := filepath.EvalSymlinks(p); err == nil {
+		if real, err := realPath(p); err == nil {
 			t.configs[strings.ToLower(filepath.Clean(real))] = true
 		}
 	}
@@ -82,7 +82,7 @@ func newResolvedTargets(metadataGlobs, configPaths, configGlobs []string, homes 
 // skillTarget is where the skills-tree file p really is, when that differs
 // from how it is spelled ("" otherwise, or when it can't be resolved).
 func skillTarget(p string) string {
-	real, err := filepath.EvalSymlinks(p)
+	real, err := realPath(p)
 	if err != nil {
 		return ""
 	}

@@ -107,6 +107,14 @@ export interface FSProvider {
    */
   readlink(path: string): Promise<string>;
   /**
+   * The credential-store file (SENSITIVE_SINKS, in a home's stores) that the
+   * regular file at `path` is a hard link to — the same file under another
+   * name — or undefined. Optional: a local provider compares identities
+   * (src/core/hard-link-sinks.ts); a snapshot answers what the probe
+   * recorded (`hardLinkOf`, probe ≥ 1.5.0).
+   */
+  hardLinkOf?(path: string): Promise<string | undefined>;
+  /**
    * Semantic permission query (tri-state — see PermissionQuery). Optional
    * capability: providers that can evaluate real permissions implement it;
    * checks go through `queryPermissions()` in core/permissions.ts, which
