@@ -10,7 +10,7 @@
  */
 
 import { dirname, join } from 'node:path';
-import { parse as parseToml } from 'smol-toml';
+import { parseTomlSafe } from '../core/toml-safe.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import type { Severity } from '../core/types.js';
 import { exactVersion } from '../core/version-range.js';
@@ -144,7 +144,7 @@ async function pythonLocked(dir: string, fs: FSProvider): Promise<Map<string, Se
     const raw = await readText(fs, join(dir, lockName));
     if (!raw) continue;
     try {
-      const data = parseToml(raw) as { package?: Array<{ name?: string; version?: string }> };
+      const data = parseTomlSafe(raw) as { package?: Array<{ name?: string; version?: string }> };
       for (const pkg of data.package ?? []) {
         if (!pkg.name || !pkg.version) continue;
         const name = normalizePyName(pkg.name);
@@ -176,7 +176,7 @@ async function pythonDependencies(dir: string, fs: FSProvider): Promise<ServerDe
   const pyproject = await readText(fs, join(dir, 'pyproject.toml'));
   if (pyproject) {
     try {
-      const data = parseToml(pyproject) as {
+      const data = parseTomlSafe(pyproject) as {
         project?: { dependencies?: string[] };
         tool?: { poetry?: { dependencies?: Record<string, unknown> } };
       };

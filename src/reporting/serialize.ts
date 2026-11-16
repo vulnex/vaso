@@ -289,46 +289,214 @@ function codeValue(value: string, sep: string): boolean {
 }
 
 /**
- * An assignment to a credential name whose value is code with string literals
- * in it — a fallback (`password = os.getenv("X") or "pw"`, `apiKey = getKey()
- * || "k"`, `secret = cfg.secret ?? "s"`) or a ternary's branch: the value up
- * to the end of the statement, its top-level literals masked. `==` is a
- * comparison, not an assignment.
+ * A string literal in code: `"…"`, `'…'` or `` `…` ``, escapes honoured. An
+ * unclosed `"` or backtick runs to the end of the line (a value cut short, or
+ * continued on the next line); an unclosed `'` is an apostrophe.
  */
-const CODE_ASSIGN = /(^|[^\w$.])([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)(\s*(?:\?\?|\|\||&&)?=(?![=>~])\s*)([^;\n]*)/g;
+interface CodeLiteral { start: number; end: number; closed: boolean }
 
-function maskCodeFallbacks(text: string): string {
-  if (!text.includes('=') || !/["']/.test(text)) return text;
-  return text.replace(CODE_ASSIGN, (m, pre: string, name: string, sep: string, rest: string) => {
-    const leaf = name.slice(name.lastIndexOf('.') + 1);
-    if (!/["']/.test(rest) || !isSecretName(leaf)) return m;
-    // only code: a plain literal (`password = "x"`) is the other rules' to judge
-    const first = rest.replace(/^\(+\s*/, '');
-    if (/^["'`]/.test(first) || !/^[A-Za-z_$]/.test(first)) return m;
-    return `${pre}${name}${sep}${maskTopLevelLiterals(rest)}`;
-  });
+/** The string literals of a line, left to right (a quote escaped outside one is a plain character). */
+function codeLiterals(line: string): CodeLiteral[] {
+  const out: CodeLiteral[] = [];
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (c !== '"' && c !== "'" && c !== '`') continue;
+    if (i > 0 && line[i - 1] === '\\') continue;
+    let j = i + 1;
+    for (; j < line.length; j++) {
+      if (line[j] === '\\') { j++; continue; }
+      if (line[j] === c) break;
+    }
+    if (j < line.length) {
+      out.push({ start: i, end: j + 1, closed: true });
+      i = j;
+    } else if (c !== "'") {
+      out.push({ start: i, end: line.length, closed: false });
+      break;
+    }
+  }
+  return out;
+}
+
+/** `${NAME:-word}`, `${NAME-word}`, `${NAME:=word}`, `${NAME:+word}`: a shell default, assigned or alternate value. */
+const SHELL_DEFAULT = /\$\{(#?[A-Za-z_]\w*)(:?[-=+?])([^}]*)\}/g;
+
+function maskShellDefaults(text: string): string {
+  if (!text.includes('${')) return text;
+  return text.replace(SHELL_DEFAULT, (m, name: string, op: string, word: string) =>
+    (word === '' || word === MASK || keepValue(word) ? m : `\${${name}${op}${MASK}}`));
 }
 
 /**
- * The string literals of `code` outside any brackets — the values it may
- * evaluate to (`… or "pw"`, `… : "t"`), not a call's argument or an index
- * (`getpass("Password: ")`, `headers["x-token"]`), which the other rules judge.
+ * A literal in a credential's value, masked: kept only when it is a reference
+ * or placeholder (keepValue) or names the environment variable a lookup reads
+ * (`os.getenv("DB_PASSWORD")`); a shell default inside it (`"${KEY:-pw}"`)
+ * is masked on its own.
  */
-function maskTopLevelLiterals(code: string): string {
+function maskValueLiteral(line: string, lit: CodeLiteral): string {
+  const q = line[lit.start];
+  const body = line.slice(lit.start + 1, lit.closed ? lit.end - 1 : lit.end);
+  const close = lit.closed ? q : '';
+  if (body === '' || body === MASK) return `${q}${body}${close}`;
+  if (lit.closed && literalIsName(line, lit)) return `${q}${body}${close}`;
+  if (body.includes('${')) {
+    const defaults = maskShellDefaults(body);
+    // nothing but references around the masked defaults: they stay readable
+    if (/^(?:\s*\$\{[^}]*\})+\s*$/.test(defaults) && defaults.replace(/\$\{[^}]*\}/g, '').trim() === '') return `${q}${defaults}${close}`;
+    return `${q}${MASK}${close}`;
+  }
+  return keepValue(body) ? `${q}${body}${close}` : `${q}${MASK}${close}`;
+}
+
+/**
+ * A prompt shown when asking for a credential (`getpass("Password: ")`), not
+ * the credential.
+ */
+const PROMPT_CALL_BEFORE = /\b(?:getpass(?:\.getpass)?|input|raw_input|prompt|askpass|readline\.question)\s*\(\s*$/;
+
+/**
+ * A literal in a credential's value that names something rather than being a
+ * value it may take: the variable an environment lookup reads
+ * (`os.getenv("DB_PASSWORD")`), an index (`headers["x-token"]`), an object
+ * key (`{"value": …}`), a prompt (`getpass("Password: ")`).
+ */
+function literalIsName(line: string, lit: CodeLiteral): boolean {
+  const before = line.slice(Math.max(0, lit.start - 64), lit.start);
+  const after = line.slice(lit.end, lit.end + 8);
+  if (ENV_LOOKUP_BEFORE.test(before) || PROMPT_CALL_BEFORE.test(before)) return true;
+  // `x["key"]` — not a list (`= ["pw"]`): the bracket follows a name, a call or an index
+  if (/[\w$)\]]\s*\[\s*$/.test(before) && /^\s*\]/.test(after)) return true;
+  // `{"key": …}`, `, 'key' => …` — not a ternary's branch (`? "a" : "b"`)
+  return /[{,]\s*$/.test(before) && /^\s*(?::(?!:)|=>)/.test(after);
+}
+
+/** Where a credential's value starts on a line: after `name =`, `name:`, `"name":`, `["name"] =`, `name ||=`. */
+interface CredentialPosition { at: number; valueStart: number; plain?: boolean }
+
+/**
+ * A bare name and the separator that gives it a value: an assignment
+ * (`=`, `:=`, `||=`, `??=`, `&&=`, `+=`), a keyword argument (`password=`),
+ * or a key (`password:` in an object, YAML, a Python annotation).
+ */
+const BARE_POSITION = /(?<![\w$.@\\-])([$@]{0,2}[A-Za-z_][\w$]*(?:-[A-Za-z0-9_$]+)*(?:(?:\.|->|::|\?\.)[A-Za-z_$][\w$]*)*)(\s*(?:\|\|=|\?\?=|&&=|:=|\+=|=(?![=>~])|:(?![:=/])))/g;
+/** After a quoted key: `"password": …`, `'password' => …`, `"password" = …` (TOML). */
+const QUOTED_KEY_SEP = /^\s*(?::(?!:)|=>|=(?![=>~]))/;
+/** After `["password"]`: an assignment to that subscript. */
+const SUBSCRIPT_SEP = /^\s*\]\s*(?:\|\|=|\?\?=|&&=|\+=|=(?![=>~]))/;
+
+function credentialPositions(line: string, literals: CodeLiteral[]): CredentialPosition[] {
+  const out: CredentialPosition[] = [];
+  let from = 0;
+  const bare = (segment: string, offset: number) => {
+    BARE_POSITION.lastIndex = 0;
+    for (let m = BARE_POSITION.exec(segment); m; m = BARE_POSITION.exec(segment)) {
+      const leaf = m[1].split(/\.|->|::|\?\./).pop()!.replace(/^[$@]+/, '');
+      // `code` names a status or a script far more often than an OAuth code
+      if (/^code$/i.test(leaf) || !isSecretName(leaf)) continue;
+      // `name = "…"` / `name: "…"`: a plain literal, SECRET_ASSIGN / SECRET_KEY_VALUE's to mask
+      out.push({ at: offset + m.index, valueStart: offset + m.index + m[0].length, plain: /^\s*[:=]$/.test(m[2]) });
+    }
+  };
+  for (const lit of literals) {
+    bare(line.slice(from, lit.start), from);
+    from = lit.end;
+    if (!lit.closed) break;
+    const body = line.slice(lit.start + 1, lit.end - 1);
+    if (body.length > 128 || !isSecretName(body)) continue;
+    const after = line.slice(lit.end, lit.end + 16);
+    const key = QUOTED_KEY_SEP.exec(after);
+    if (key) { out.push({ at: lit.start, valueStart: lit.end + key[0].length }); continue; }
+    const sub = SUBSCRIPT_SEP.exec(after);
+    if (sub && /\[\s*$/.test(line.slice(Math.max(0, lit.start - 8), lit.start))) out.push({ at: lit.start, valueStart: lit.end + sub[0].length });
+  }
+  if (from < line.length) bare(line.slice(from), from);
+  return out.sort((a, b) => a.at - b.at);
+}
+
+/** Text ending a line that leaves an expression open: a line continuation or a binary operator. */
+const OPEN_TAIL = /(?:\\|\b(?:or|and|not)|\|\||&&|\?\?|\?:|[?:+|&=,([{-])\s*$/;
+
+/**
+ * Where a credential's value expression ends: at a `,` / `;` / closing
+ * bracket at its own depth, a ` #` or ` //` comment, or the end of the line.
+ * `open` when it runs past the line (brackets left open, a string left
+ * unclosed, or an operator / `\` at the end).
+ */
+function valueExtent(line: string, start: number, literals: CodeLiteral[], li: number): { end: number; open: boolean } {
   let depth = 0;
+  let k = li;
+  let i = start;
+  for (; i < line.length; i++) {
+    while (k < literals.length && literals[k].end <= i) k++;
+    const lit = literals[k];
+    if (lit && lit.start === i) {
+      if (!lit.closed) return { end: line.length, open: true };
+      i = lit.end - 1;
+      continue;
+    }
+    const c = line[i];
+    if (c === '(' || c === '[' || c === '{') depth++;
+    else if (c === ')' || c === ']' || c === '}') {
+      if (depth === 0) break;
+      depth--;
+    } else if ((c === ',' || c === ';') && depth === 0) break;
+    else if ((c === '#' || (c === '/' && line[i + 1] === '/')) && depth === 0 && /\s/.test(line[i - 1] ?? '')) break;
+  }
+  const open = i >= line.length && (depth > 0 || OPEN_TAIL.test(line.slice(start)));
+  return { end: i, open };
+}
+
+/**
+ * Every credential-named position on a line — an assignment target
+ * (`password = …`, `self.password = …`, `config["password"] = …`,
+ * `password ||= …`), a keyword argument, a dict / object / YAML key — with
+ * the string literals of its value expression masked: a fallback
+ * (`os.getenv("X") or "pw"`), a ternary's branch, a call's default argument
+ * (`os.getenv("Y", "pw")`), a shell default (`${DB_PW:-pw}`). A literal is
+ * kept only when it is a reference or placeholder, or the variable name an
+ * environment lookup reads. `open` is whether the last such value runs on
+ * past the end of the line.
+ */
+function maskCredentialValues(line: string, literalFree = false): { text: string; open: boolean } {
+  if (!/[=:]/.test(line) || (!literalFree && !/["'`]|\$\{/.test(line))) return { text: line, open: false };
+  const literals = codeLiterals(line);
+  const positions = credentialPositions(line, literals);
+  if (positions.length === 0) return { text: line, open: false };
   let out = '';
   let last = 0;
-  QUOTED.lastIndex = 0;
-  for (let m = QUOTED.exec(code); m; m = QUOTED.exec(code)) {
-    for (const ch of code.slice(last, m.index)) {
-      if (ch === '(' || ch === '[' || ch === '{') depth++;
-      else if ((ch === ')' || ch === ']' || ch === '}') && depth > 0) depth--;
+  let li = 0;
+  let open = false;
+  for (const pos of positions) {
+    // a position inside a value already masked (`password = {"token": …}`)
+    if (pos.at < last) continue;
+    while (li < literals.length && literals[li].end <= pos.valueStart) li++;
+    const only = literals[li];
+    if (pos.plain && only && only.closed && line[only.start] !== '`' && !line.slice(only.start, only.end).includes('${')
+      && line.slice(pos.valueStart, only.start).trim() === '' && /^\s*(?:$|[,;)\]}]|#|\/\/)/.test(line.slice(only.end, only.end + 64))) continue;
+    const extent = valueExtent(line, pos.valueStart, literals, li);
+    let cursor = pos.valueStart;
+    out += line.slice(last, cursor);
+    for (let k = li; k < literals.length && literals[k].start < extent.end; k++) {
+      const lit = literals[k];
+      out += maskShellDefaults(line.slice(cursor, lit.start)) + maskValueLiteral(line, lit);
+      cursor = lit.end;
     }
-    const q = m[0];
-    out += code.slice(last, m.index) + (depth === 0 && !keepValue(q.slice(1, -1)) ? `${q[0]}${MASK}${q[0]}` : q);
-    last = m.index + q.length;
+    const tailEnd = Math.max(cursor, extent.end);
+    out += maskShellDefaults(line.slice(cursor, tailEnd));
+    last = tailEnd;
+    open = extent.open;
   }
-  return out + code.slice(last);
+  return { text: out + line.slice(last), open };
+}
+
+function maskCodeFallbacks(text: string): string {
+  if (!text.includes('\n')) return maskCredentialValues(text).text;
+  return text.split('\n').map(l => maskCredentialValues(l).text).join('\n');
+}
+
+/** Whether a credential's value on `line` runs on to the next line (`token = os.getenv("X") or \`). */
+function credentialValueContinues(line: string): boolean {
+  return maskCredentialValues(line, true).open;
 }
 
 /**
@@ -730,11 +898,28 @@ function maskContinuation(line: string, block: ContinuationBlock): string {
  * on them (brackets and punctuation kept). Works on any text — a skill file
  * has no parsed config to take the values from.
  */
+/** At most this many lines continue one credential value. */
+const MAX_CONTINUED_LINES = 200;
+
 export function continuationMasker(lines: readonly string[]): (index: number, line: string) => string {
   const blocks = new Map<number, ContinuationBlock>();
+  // a credential's value expression left open at the end of the line
+  // (`token = os.getenv("X") or \`, `apiKey = getKey() ||`, `connect(password=(`):
+  // the lines up to where it closes; returns the last one
+  const openExpression = (i: number): number => {
+    if (!credentialValueContinues(lines[i])) return i;
+    let depth = Math.max(0, bracketDepth(lines[i]));
+    let j = i + 1;
+    for (; j < lines.length && j <= i + MAX_CONTINUED_LINES; j++) {
+      blocks.set(j, 'brackets');
+      depth = Math.max(0, depth + bracketDepth(lines[j]));
+      if (depth === 0 && !OPEN_TAIL.test(lines[j].replace(/\s+(?:#|\/\/).*$/, ''))) break;
+    }
+    return Math.min(j, lines.length - 1);
+  };
   for (let i = 0; i < lines.length; i++) {
     const open = VALUE_OPENER.exec(lines[i]);
-    if (!open || !isSecretName(open[3])) continue;
+    if (!open || !isSecretName(open[3])) { i = openExpression(i); continue; }
     const keyIndent = open[1].length;
     const rest = open[4].replace(/\s+(?:#|\/\/).*$/, '').trim();
     if (rest.startsWith('"""') || rest.startsWith("'''")) {
@@ -758,7 +943,7 @@ export function continuationMasker(lines: readonly string[]): (index: number, li
       continue;
     }
     const scalar = /^[|>][-+]?\d*$/.test(rest);
-    if (rest !== '' && !scalar) continue;
+    if (rest !== '' && !scalar) { i = openExpression(i); continue; }
     // the value on the lines indented below the name (YAML), or on the next line (`"password":` then the value)
     let j = i + 1;
     for (; j < lines.length; j++) {
