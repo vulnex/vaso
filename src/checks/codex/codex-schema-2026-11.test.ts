@@ -164,14 +164,16 @@ describe('CDX-002 permission profile merge semantics', () => {
     const etc = await run({ default_permissions: 'dev', permissions: { dev: { filesystem: { ':root': { etc: 'write' } } } } });
     expect(etc.severity).toBe('critical');
     expect(etc.evidence?.[0].detail).toMatch(/write access to "\/etc", which is system configuration/);
-    for (const glob of ['~/.ss*', '~/.ssh/auth*', '/e?c', '~/.[sa][sw][hs]', '/home/*/.aws']) {
+    // Codex accepts a glob only for deny (or as a trailing /** subtree): a read/write glob is rejected
+    for (const glob of ['~/.ss*', '~/.ssh/auth*', '/e?c', '~/.[sa][sw][hs]', '/home/*/.aws', '~/code/*/build', '~/projects/**/*.log']) {
       const r = await run({ default_permissions: 'dev', permissions: { dev: { filesystem: { [glob]: 'write' } } } });
-      expect(r.severity, glob).toBe('critical');
+      expect(r.severity, glob).toBe('info');
     }
-    for (const glob of ['~/code/*/build', '/opt/*/cache', '~/projects/**/*.log']) {
-      const r = await run({ default_permissions: 'dev', permissions: { dev: { filesystem: { [glob]: 'write' } } } });
-      expect(r.passed, glob).toBe(true);
+    for (const sub of ['~/.ssh/**', '/etc/**']) {
+      const r = await run({ default_permissions: 'dev', permissions: { dev: { filesystem: { [sub]: 'write' } } } });
+      expect(r.severity, sub).toBe('critical');
     }
+    expect((await run({ default_permissions: 'dev', permissions: { dev: { filesystem: { '/opt/cache/**': 'write' } } } })).passed).toBe(true);
   });
 
   it('reports nothing for configs Codex rejects: extends cycles and unknown parents', async () => {

@@ -31,7 +31,8 @@ export const cdx002 = defineCheck({
       // Permission profiles (default_permissions) replace sandbox_mode
       for (const f of judgeDefaultPermissions(config.data, home)) {
         if (f.level === 'critical') critical = true;
-        evidence.push({ file: config.filePath, snippet: f.snippet, detail: f.detail });
+        // an entry Codex rejects grants nothing: info
+        evidence.push({ file: config.filePath, snippet: f.snippet, detail: f.detail, ...(f.level === 'info' ? { mitigated: true } : {}) });
       }
 
       const mode = config.data.sandbox_mode ?? config.data.sandboxMode;
@@ -75,7 +76,9 @@ export const cdx002 = defineCheck({
       passed: 'Codex sandbox is restricting command execution',
       failed: () => critical
         ? 'Codex sandbox is disabled or can write outside the workspace'
-        : 'Codex sandboxed commands have outbound network access',
+        : evidence.every(e => e.mitigated)
+          ? 'Codex permission profile has entries Codex rejects'
+          : 'Codex sandboxed commands have outbound network access',
       // network_access alone weakens the sandbox but does not remove it
       severity: critical ? undefined : 'warning',
       fixDescription: 'Set sandbox_mode to "read-only" or "workspace-write" (or default_permissions to ":read-only" / ":workspace"), keep writable roots to project paths, and leave network access off or limited to a domain allowlist',
