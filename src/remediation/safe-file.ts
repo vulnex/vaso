@@ -4,6 +4,7 @@ import { randomBytes } from 'node:crypto';
 import { basename, dirname, isAbsolute, join, sep } from 'node:path';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { execFile } from 'node:child_process';
+import { classifySensitivePath } from '../analyzers/sensitive-paths.js';
 
 /**
  * File I/O for `vaso fix` and `--rollback`. Fixes write into paths taken from
@@ -61,6 +62,19 @@ export function withinRoot(path: string, root: string): boolean {
   return path === root || path.startsWith(root.endsWith(sep) ? root : root + sep);
 }
 
+/**
+ * The sensitive location (a credential store, a shell startup file, /etc)
+ * that `real` — where `written` really is — lies in and `written` doesn't
+ * name: a link above it leads there (`~/.copilot → ~/.aws/cop`). Undefined
+ * when there is none, or the written path names it already (a fix of
+ * ~/.ssh/<key>'s mode by its own path). vaso fix never writes into one
+ * through a link (also what the scan judges refusals by — fix-refusal.ts).
+ */
+export function sinkReachedThroughLink(written: string, real: string): string | undefined {
+  const named = new Set(classifySensitivePath(written));
+  return classifySensitivePath(real).find(label => !named.has(label));
+}
+
 /** Run `fn` (a fix) with writes confined to `b`. */
 export function withFixBoundary<T>(b: FixBoundary, fn: () => Promise<T>): Promise<T> {
   return boundary.run(b, fn);
@@ -81,6 +95,8 @@ async function guard(path: string, st: { isFile(): boolean; nlink: number; uid: 
   if (!b) return;
   const real = await realpath(isDir ? path : dirname(path)).catch(() => undefined);
   if (!real) throw new UnsafeTargetError(path, 'is in a directory that can no longer be resolved');
+  const sink = sinkReachedThroughLink(path, isDir ? real : join(real, basename(path)));
+  if (sink) throw new UnsafeTargetError(path, `is reached through a symlink into ${sink}`);
   if (process.getuid?.() === 0 && b.ownerUid !== undefined && st.uid !== b.ownerUid) {
     throw new UnsafeTargetError(path, `is owned by uid ${st.uid}, not by the installation's owner (uid ${b.ownerUid})`);
   }

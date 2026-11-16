@@ -10,7 +10,7 @@ import { AdapterRegistry } from '../adapters/registry.js';
 import { defineCheck } from '../core/check-builder.js';
 import type { AgentAdapter } from '../adapters/adapter.js';
 import type { CheckResult, ScanContext } from '../core/types.js';
-import { fixRefusal, fixHomeOf, markRefusedFix, permissionFixTargets, configFixTargets } from './fix-refusal.js';
+import { fixRefusal, fixHomeOf, markRefusedFix, permissionFixTargets, configFixTargets, shellQuote, codeSpan } from './fix-refusal.js';
 import { RemediationEngine } from './engine.js';
 
 /** A local provider whose home is a temporary directory. */
@@ -62,6 +62,24 @@ describe.skipIf(!posix)('fixRefusal', () => {
     const r = await fixRefusal(join(home, '.codex', 'auth.json'), fs, { home });
     expect(r).toMatchObject({ kind: 'through-link' });
     expect(r && r !== 'none' && r.reason).toContain(`resolves into ${outside}`);
+  });
+
+  it('refuses a file a linked folder takes into a credential store, but not one written at its own path there', async () => {
+    await mkdir(join(home, '.aws', 'cop'), { recursive: true });
+    await writeFile(join(home, '.aws', 'cop', 'session-store.db'), 'x');
+    await writeFile(join(home, '.aws', 'credentials'), 'x');
+    await symlink(join(home, '.aws', 'cop'), join(home, '.copilot'));
+    const r = await fixRefusal(join(home, '.copilot', 'session-store.db'), fs, { home });
+    expect(r).toMatchObject({ kind: 'sensitive', reason: 'is reached through a symlink into AWS credentials (~/.aws)' });
+    // the folder link itself, as a target
+    expect(await fixRefusal(join(home, '.copilot'), fs, { home })).toMatchObject({ kind: 'symlink' });
+    // written where it is: fixed (a permission fix of ~/.aws/credentials by its own path)
+    expect(await fixRefusal(join(home, '.aws', 'credentials'), fs, { home })).toBeUndefined();
+    expect(await fixRefusal(join(home, '.aws', 'cop', 'session-store.db'), fs, { home })).toBeUndefined();
+    // the home itself linked into nothing sensitive is fine
+    await mkdir(join(home, '.ssh'));
+    await writeFile(join(home, '.ssh', 'picoclaw_ed25519.key'), 'k');
+    expect(await fixRefusal(join(home, '.ssh', 'picoclaw_ed25519.key'), fs, { home })).toBeUndefined();
   });
 
   it('accepts a file behind a folder link that stays in the home', async () => {
@@ -155,12 +173,37 @@ describe.skipIf(!posix)('markRefusedFix', () => {
     expect(r.fixDescription).toBe(`chmod it — make this change by hand in ${join(home, 'linked.json')}: vaso fix changes only regular files and folders inside the home (where its backup can restore them), never through a symlink or a hard link`);
   });
 
+  it('gives a copy-paste command for odd names: shell-quoted, no raw control character, a code span that holds backticks', async () => {
+    const odd = join(root, 'data', "a'b $(touch PWNED) `id`\n;x.json");
+    await writeFile(odd, '{}');
+    const r = await markRefusedFix({ fixTargets: permissionFixTargets }, ctx(), result([odd]), { home });
+    const dir = join(root, 'data');
+    expect(r.fixDescription).toContain(`\`\` chmod go-rwx $'${dir}/a\\'b $(touch PWNED) \`id\`\\n;x.json' \`\``);
+    // eslint-disable-next-line no-control-regex
+    expect(r.fixDescription).not.toMatch(/[\x00-\x1f]/);
+    expect(shellQuote("a'b")).toBe(`'a'\\''b'`);
+    expect(shellQuote('/home/u/a b')).toBe(`'/home/u/a b'`);
+    expect(shellQuote('/home/u/a\tb\\c')).toBe(`$'/home/u/a\\tb\\\\c'`);
+    expect(codeSpan('chmod x')).toBe('`chmod x`');
+    expect(codeSpan('a ``b`` c')).toBe('``` a ``b`` c ```');
+  });
+
   it('a folded result loses the fix without a note in its passing message', async () => {
     const out = join(root, 'data', 'auth.json');
     await writeFile(out, '{}');
     const folded = result([out], { passed: true, foldedInto: 'CDX-003', message: 'Reported by CDX-003' });
     const r = await markRefusedFix(undefined, ctx(), folded, { home });
     expect(r).toMatchObject({ fixable: false, message: 'Reported by CDX-003' });
+  });
+
+  it('a partly refused folded result keeps its fix and notes what it leaves in its fix description', async () => {
+    const inside = join(home, 'a.json');
+    await writeFile(inside, '{}');
+    await symlink(inside, join(home, 'k.json'));
+    const folded = result([inside, join(home, 'k.json')], { passed: true, foldedInto: 'HM-003', message: 'Reported by HM-003' });
+    const r = await markRefusedFix({ fixTargets: permissionFixTargets }, ctx(), folded, { home });
+    expect(r).toMatchObject({ fixable: true, message: 'Reported by HM-003' });
+    expect(r.fixDescription).toBe(`chmod it; not changed by vaso fix: ${join(home, 'k.json')} is a symlink`);
   });
 });
 

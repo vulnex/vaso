@@ -161,14 +161,25 @@ export class RemediationEngine {
           }))));
 
           await this.recordAfterState();
-          results.push(fixResult);
-          if (fixResult.applied) this.applied.push({ install: installKey(agent), checkId: finding.id, result: fixResult });
-          const icon = fixResult.applied ? chalk.green('+') : fixResult.alreadyDone ? chalk.dim('=') : chalk.red('x');
-          console.log(`  ${icon} ${finding.id}: ${fixResult.message}`);
+          const outcome = leftAsNoted(fixResult, finding, agent.results);
+          results.push(outcome);
+          if (outcome.applied) this.applied.push({ install: installKey(agent), checkId: finding.id, result: outcome });
+          const icon = outcome.applied ? chalk.green('+') : outcome.alreadyDone || outcome.leftAsNoted ? chalk.dim('=') : chalk.red('x');
+          console.log(`  ${icon} ${finding.id}: ${outcome.message}`);
           for (const note of notes) console.log(`      ${chalk.yellow('note:')} ${escapeControlChars(note, { lineBreaks: true })}`);
         } catch (err) {
           // whatever the failed fix changed before it threw is recorded too
           await this.recordAfterState().catch(() => undefined);
+          // A file the scan already named as one vaso fix won't change is
+          // what it said: not a failure (a config fix throws on it)
+          if (err instanceof UnsafeTargetError) {
+            const outcome = leftAsNoted({ checkId: finding.id, applied: false, message: `not changed: ${err.path} ${err.reason}`, refused: [err.path] }, finding, agent.results);
+            if (outcome.leftAsNoted) {
+              results.push(outcome);
+              console.log(`  ${chalk.dim('=')} ${finding.id}: ${outcome.message}`);
+              continue;
+            }
+          }
           results.push({
             checkId: finding.id,
             applied: false,
@@ -301,6 +312,32 @@ export class RemediationEngine {
     if (process.platform !== 'win32') await chmod(backupsRoot, 0o700);
     await mkdir(this.backupDir, { recursive: true, mode: 0o700 });
   }
+}
+
+/** The marker fix-refusal.ts (markRefusedFix) ends a finding's message with. */
+const NOT_CHANGED_NOTE = 'not changed by vaso fix: ';
+
+/**
+ * A fix that changed nothing because every file it had left is one vaso fix
+ * won't change (`refused`), each named by the scan already ("not changed by
+ * vaso fix: …" in the finding's message — a folded finding's fix
+ * description — or in the message of the finding it was folded into):
+ * nothing left that vaso fix may change — not a failure
+ * (exit 0). A refusal the scan didn't announce, or any other failure, stays
+ * a failure (exit 1).
+ */
+export function leftAsNoted(result: FixResult, finding: CheckResult, agentResults: CheckResult[]): FixResult {
+  if (result.applied || result.alreadyDone || !result.refused?.length) return result;
+  const owners = (finding.foldedInto?.split(', ') ?? []).flatMap(id => agentResults.filter(r => r.id === id));
+  // A folded finding carries its note in the fix description (it passes)
+  const notes = [finding, ...owners].flatMap(r => [r.message, r.fixDescription ?? '']).flatMap(text => {
+    const at = text.indexOf(NOT_CHANGED_NOTE);
+    return at < 0 ? [] : [text.slice(at + NOT_CHANGED_NOTE.length)];
+  });
+  // markRefusedFix names three and counts the rest ("; N more")
+  const noted = (path: string) => notes.some(n => n.includes(path) || /(?:^|; )\d+ more$/.test(n));
+  if (!result.refused.every(noted)) return result;
+  return { ...result, leftAsNoted: true, message: `nothing left that vaso fix may change — ${result.message} (named in the scan)` };
 }
 
 /** One installation across two scans of the same host. */

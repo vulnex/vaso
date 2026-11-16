@@ -91,13 +91,29 @@ func storeWithin(p, dir string) bool {
 	return rel == "." || (!strings.HasPrefix(rel, "..") && !filepath.IsAbs(rel))
 }
 
-// storeHomeOf ports storeHomeOf (src/core/store-links.ts): the parent of
-// ~/.copilot, else (a folder COPILOT_HOME moved elsewhere) the probe user's home.
-func storeHomeOf(agentDir, homedir string) string {
+// storeHomeOf ports storeHomeOf (src/core/store-links.ts): the probe user's
+// home for that user's own Copilot folder (ownAgentDir: ~/.copilot, or the
+// folder COPILOT_HOME names), else the parent of another user's ~/.copilot.
+// Never the parent of a folder COPILOT_HOME names: ~/x/.copilot with ~/x
+// linked out of the home would make that outside folder a home.
+func storeHomeOf(agentDir, homedir, ownAgentDir string) string {
+	if agentDir == ownAgentDir {
+		return homedir
+	}
 	if filepath.Base(agentDir) == ".copilot" {
 		return filepath.Dir(agentDir)
 	}
 	return homedir
+}
+
+// ownCopilotDir: the probe user's Copilot folder — $COPILOT_HOME as
+// expandEnvPath reads it, else ~/.copilot (copilotHome in
+// src/adapters/copilot-cli.ts).
+func ownCopilotDir(own string) string {
+	if dir, ok := expandEnvPath("COPILOT_HOME", ""); ok {
+		return dir
+	}
+	return filepath.Join(own, ".copilot")
 }
 
 // spellings: p as written and resolved (resolveExisting), once each.
@@ -116,13 +132,14 @@ func spellings(p string) []string {
 // (behindForeignLink).
 func (c *collector) markForeignStoreLinks(snapshot *ProbeSnapshot, stores []string) {
 	own, _ := os.UserHomeDir()
+	ownAgentDir := ownCopilotDir(own)
 	for _, store := range stores {
 		if !filepath.IsAbs(store) {
 			continue
 		}
 		store = filepath.Clean(store)
 		agentDir := filepath.Dir(store)
-		homeRoots := spellings(storeHomeOf(agentDir, own))
+		homeRoots := spellings(storeHomeOf(agentDir, own, ownAgentDir))
 		// The agent folder itself (or a folder above it) linked to a place
 		// that isn't the agent's: its chain only, nothing in the store
 		if foreignAgentDir(agentDir, resolveExisting(agentDir), homeRoots) != "" {

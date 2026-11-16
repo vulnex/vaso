@@ -574,5 +574,40 @@
    "/real/u"
   ],
   "want": "home"
+ },
+ {
+  "agentDir": "/home/u/x/.copilot",
+  "target": "/data/x/.copilot",
+  "homeRoots": [
+   "/home/u"
+  ],
+  "want": "outside",
+  "note": "COPILOT_HOME=~/x/.copilot with ~/x linked out of the home: the home is the user's (storeHomeOf), never ~/x"
+ },
+ {
+  "agentDir": "/home/u/x/a/.copilot",
+  "target": "/data/x/a/.copilot",
+  "homeRoots": [
+   "/home/u"
+  ],
+  "want": "outside",
+  "note": "a linked folder two levels above it"
+ },
+ {
+  "agentDir": "/home/u/x/.copilot",
+  "target": "/home/u/.aws/x/.copilot",
+  "homeRoots": [
+   "/home/u"
+  ],
+  "want": "sensitive"
+ },
+ {
+  "agentDir": "/home/u/x/.copilot",
+  "target": "/home/u/dotfiles/x/.copilot",
+  "homeRoots": [
+   "/home/u"
+  ],
+  "want": null,
+  "note": "a link within the home is followed"
  }
 ]

@@ -2,7 +2,7 @@ import { access as fsAccess, open, readdir, readFile, stat, realpath, readlink }
 import { execFileSync, execFile } from 'node:child_process';
 import { constants as fsConstants, type Dirent } from 'node:fs';
 import { isUtf8 } from 'node:buffer';
-import { dirname, join } from 'node:path';
+import { dirname, join, posix } from 'node:path';
 import { homedir as osHomedir, hostname as osHostname } from 'node:os';
 import { promisify } from 'node:util';
 import type { FSProvider, DirentInfo, ExecResult, ExecOptions, PermissionQuery } from './fs-provider.js';
@@ -290,8 +290,16 @@ export class LocalFSProvider implements FSProvider {
     return process.getuid?.() === 0;
   }
 
+  /**
+   * $HOME without `.`/`..` segments or a trailing slash (`/home/u/.codex/..`
+   * is `/home/u`, as path.join reads it): the probe cleans it the same way
+   * (Collect in probe/collector.go), so local and snapshot paths match.
+   */
   homedir(): string {
-    return osHomedir();
+    const home = osHomedir();
+    if (!home.startsWith('/')) return home;
+    const normal = posix.normalize(home);
+    return normal.length > 1 && normal.endsWith('/') ? normal.slice(0, -1) : normal;
   }
 
   hostname(): string {

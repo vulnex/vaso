@@ -1,4 +1,4 @@
-import type { FixResult, ParsedConfig, ScanContext } from '../../core/types.js';
+import type { FixResult, FixTargets, ParsedConfig, ScanContext } from '../../core/types.js';
 import { updateConfigValue } from '../../remediation/config-writer.js';
 import type { KeyPath } from '../../core/utils.js';
 import { envOverrideFor } from '../../adapters/env-overrides.js';
@@ -40,6 +40,16 @@ export function hasWildcard(v: unknown): boolean {
 /** The main `config.toml` (never the migration backup or auth-profiles.json). */
 export function mainConfig(configs: ParsedConfig[]): ParsedConfig | undefined {
   return configs.find(c => c.format === 'toml' && /(^|[\\/])config\.toml$/.test(c.filePath));
+}
+
+/**
+ * What a writeMainConfig fix changes: config.toml alone, whichever files the
+ * finding lists (ZC-001 names auth-profiles.json and config.toml.backup too —
+ * a fixable one of those must not keep a fix offered that config.toml refuses).
+ */
+export function mainConfigFixTargets(ctx: ScanContext): FixTargets | undefined {
+  const config = mainConfig(ctx.configs);
+  return config ? { paths: [config.filePath], kind: 'config' } : undefined;
 }
 
 /**

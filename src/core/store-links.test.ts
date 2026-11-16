@@ -33,8 +33,16 @@ describe('foreignStoreTarget', () => {
 });
 
 describe('storeHomeOf', () => {
-  it('is the parent of ~/.copilot, else the scanning home', () => {
-    expect(storeHomeOf('/home/u/.copilot', '/home/me')).toBe('/home/u');
-    expect(storeHomeOf('/opt/cop', '/home/me')).toBe('/home/me');
+  it('is the parent of another user\'s ~/.copilot, else the scanning home', () => {
+    expect(storeHomeOf('/home/u/.copilot', '/home/me', '/home/me/.copilot')).toBe('/home/u');
+    expect(storeHomeOf('/opt/cop', '/home/me', '/opt/cop')).toBe('/home/me');
+    expect(storeHomeOf('/home/me/.copilot', '/home/me', '/home/me/.copilot')).toBe('/home/me');
+  });
+
+  it('is the scanning home for a COPILOT_HOME folder named .copilot, never its parent', () => {
+    // ~/x may be a link out of the home: its real path must not count as a home
+    expect(storeHomeOf('/home/me/x/.copilot', '/home/me', '/home/me/x/.copilot')).toBe('/home/me');
+    expect(storeHomeOf('/home/me/x/a/.copilot', '/home/me', '/home/me/x/a/.copilot')).toBe('/home/me');
+    expect(storeHomeOf('/data/.copilot', '/home/me', '/data/.copilot')).toBe('/home/me');
   });
 });

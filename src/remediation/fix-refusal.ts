@@ -1,8 +1,8 @@
-import { dirname, isAbsolute } from 'node:path';
+import { basename, dirname, isAbsolute, join } from 'node:path';
 import type { CheckModule, CheckResult, FixTargets, ScanContext } from '../core/types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { getUserHomeDirs } from '../adapters/openclaw.js';
-import { withinRoot } from './safe-file.js';
+import { sinkReachedThroughLink, withinRoot } from './safe-file.js';
 
 /**
  * What `vaso fix` refuses to change, judged ahead of the fix. The write-time
@@ -17,6 +17,10 @@ import { withinRoot } from './safe-file.js';
  *  - with a single hard link (the change would reach every name);
  *  - whose directory resolves inside the home of the installation's user,
  *    where its backup can restore it (outside it: refused);
+ *  - that a link above it doesn't take into a credential store, shell
+ *    startup file or /etc its own path doesn't name (`~/.copilot → ~/.aws/cop`
+ *    makes ~/.copilot/session-store.db a file in ~/.aws) — a file written at
+ *    its own credential path (~/.ssh/picoclaw_ed25519.key) is still fixed;
  *  - as root, owned by that home's owner.
  */
 
@@ -52,7 +56,7 @@ export async function fixBoundaryOf(installDir: string, fs: FSProvider): Promise
   return { home, ownerUid };
 }
 
-export type FixRefusalKind = 'symlink' | 'special' | 'hard-link' | 'owner' | 'outside' | 'through-link';
+export type FixRefusalKind = 'symlink' | 'special' | 'hard-link' | 'owner' | 'outside' | 'through-link' | 'sensitive';
 
 export interface FixRefusal {
   path: string;
@@ -92,6 +96,8 @@ export async function fixRefusal(path: string, fs: FSProvider, boundary: FixBoun
       return { path, kind: 'owner', reason: `is owned by uid ${owner.uid}, not by the home's owner (uid ${boundary.ownerUid})` };
     }
   }
+  const sink = sinkReachedThroughLink(path, isDir ? realDir : join(realDir, basename(path)));
+  if (sink) return { path, kind: 'sensitive', reason: `is reached through a symlink into ${sink}` };
   const realHome = await fs.realpath(boundary.home).catch(() => boundary.home);
   if (withinRoot(realDir, realHome)) return undefined;
   const writtenInHome = withinRoot(dir, boundary.home) || withinRoot(dir, realHome);
@@ -123,9 +129,34 @@ function evidenceFiles(result: CheckResult): string[] {
 /** Most refused paths a message names; the rest are counted. */
 const MAX_NAMED = 3;
 
-/** Quote a path for a copy-paste shell command. */
-function shellQuote(path: string): string {
-  return /^[\w@%+=:,./~-]+$/.test(path) ? path : `'${path.replace(/'/g, `'\\''`)}'`;
+/**
+ * Quote a path for a copy-paste shell command. A name with a control
+ * character (a newline) is written in ANSI-C quoting (`$'a\nb'`, bash and
+ * zsh) so the command shows no raw control character and copies back to the
+ * same name; any other name in single quotes.
+ */
+export function shellQuote(path: string): string {
+  if (/^[\w@%+=:,./~-]+$/.test(path)) return path;
+  // eslint-disable-next-line no-control-regex
+  if (!/[\x00-\x1f\x7f]/.test(path)) return `'${path.replace(/'/g, `'\\''`)}'`;
+  const body = [...path].map(ch => {
+    if (ch === '\\') return '\\\\';
+    if (ch === "'") return "\\'";
+    const code = ch.codePointAt(0)!;
+    if (ch === '\n') return '\\n';
+    if (ch === '\t') return '\\t';
+    if (code < 0x20 || code === 0x7f) return `\\x${code.toString(16).padStart(2, '0')}`;
+    return ch;
+  }).join('');
+  return `$'${body}'`;
+}
+
+/** `text` as a Markdown code span, its fence longer than any run of backticks inside it. */
+export function codeSpan(text: string): string {
+  const longest = Math.max(0, ...[...text.matchAll(/`+/g)].map(m => m[0].length));
+  if (longest === 0) return `\`${text}\``;
+  const fence = '`'.repeat(longest + 1);
+  return `${fence} ${text} ${fence}`;
 }
 
 function describe(refused: FixRefusal[]): string {
@@ -162,8 +193,13 @@ export async function markRefusedFix(
   }
   if (refused.length === 0) return result;
 
-  // A folded result passes: it only carries the fix, so there's no message to note it in
+  // A folded result passes: it only carries the fix, so there's no message to
+  // note it in — a partly refused one notes it in its fix description, where
+  // `vaso fix` (and its dry run) reads what the fix will leave
   const note = result.passed ? '' : `; not changed by vaso fix: ${describe(refused)}`;
+  if (fixable > 0 && result.passed) {
+    return { ...result, fixDescription: `${result.fixDescription ? `${result.fixDescription}; ` : ''}not changed by vaso fix: ${describe(refused)}` };
+  }
   if (fixable > 0) return { ...result, message: result.message + note };
 
   return {
@@ -181,7 +217,7 @@ function manualFix(kind: FixTargets['kind'], refused: FixRefusal[], original: st
     const links = refused.some(r => r.kind === 'symlink' || r.kind === 'through-link');
     const paths = refused.slice(0, MAX_NAMED).map(r => shellQuote(r.path)).join(' ');
     const more = refused.length > MAX_NAMED ? ` (and the other ${refused.length - MAX_NAMED} listed)` : '';
-    return `Remove group/other access yourself: \`chmod go-rwx ${paths}\`${more} — ${why}`
+    return `Remove group/other access yourself: ${codeSpan(`chmod go-rwx ${paths}`)}${more} — ${why}`
       + (links ? '; for a link, check where it points first (chmod changes the file it leads to)' : '');
   }
   const files = refused.slice(0, MAX_NAMED).map(r => r.path).join(', ') + (refused.length > MAX_NAMED ? ` and ${refused.length - MAX_NAMED} more` : '');

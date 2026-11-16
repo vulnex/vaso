@@ -101,3 +101,17 @@ describe.skipIf(process.platform !== 'linux')('LocalFSProvider non-UTF-8 file na
     expect(await fs.readFile(join(dir, 'plain.js'))).toBe('y');
   });
 });
+
+describe.skipIf(process.platform === 'win32')('LocalFSProvider.homedir', () => {
+  it('drops "."/".." segments and a trailing slash, as the probe does (snapshot paths match)', () => {
+    const saved = process.env.HOME;
+    try {
+      for (const [spelled, want] of [['/home/u/.codex/..', '/home/u'], ['/home/u/', '/home/u'], ['/home/u/./x/../', '/home/u'], ['/home/u', '/home/u']]) {
+        process.env.HOME = spelled;
+        expect(new LocalFSProvider().homedir()).toBe(want);
+      }
+    } finally {
+      process.env.HOME = saved;
+    }
+  });
+});

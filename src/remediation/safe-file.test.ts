@@ -42,6 +42,25 @@ describe('fix boundary', () => {
     }
   });
 
+  it.skipIf(!posix)('refuses a file a linked folder takes into a credential store, inside the roots too; not one written at its own path', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'vaso-sf-'));
+    try {
+      const { mkdir } = await import('node:fs/promises');
+      await mkdir(join(dir, '.aws', 'cop'), { recursive: true });
+      const real = join(dir, '.aws', 'cop', 'session-store.db');
+      await writeFile(real, 'x');
+      await chmod(real, 0o644);
+      await symlink(join(dir, '.aws', 'cop'), join(dir, '.copilot'));
+      await expect(withFixBoundary({ roots: [dir] }, () => chmodNoFollow(join(dir, '.copilot', 'session-store.db'), 0o600)))
+        .rejects.toThrow(/is reached through a symlink into AWS credentials \(~\/\.aws\)/);
+      expect((await stat(real)).mode & 0o777).toBe(0o644);
+      await withFixBoundary({ roots: [dir] }, () => chmodNoFollow(real, 0o600));
+      expect((await stat(real)).mode & 0o777).toBe(0o600);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it('refuses a relative path: it could not be backed up', async () => {
     await expect(writeRegularFile('.codex/config.toml', 'x')).rejects.toThrow(/not an absolute path/);
     await expect(chmodNoFollow('.codex/auth.json', 0o600)).rejects.toThrow(/not an absolute path/);

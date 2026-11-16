@@ -265,9 +265,25 @@ func rootChildPath(augmentedPath string) string {
 	return strings.Join(safe, string(os.PathListSeparator))
 }
 
+// cleanHomeEnv: $HOME without "."/".." segments or a trailing slash
+// (`/home/u/.codex/..` is /home/u, as the CLI's path.join reads it). Every
+// path is joined onto it and the snapshot's homedir is it; the CLI rejects a
+// homedir with such segments, and a local scan normalizes the same way
+// (LocalFSProvider.homedir).
+func cleanHomeEnv() {
+	home := os.Getenv("HOME")
+	if home == "" || !filepath.IsAbs(home) {
+		return
+	}
+	if clean := filepath.Clean(home); clean != home {
+		os.Setenv("HOME", clean)
+	}
+}
+
 // Collect executes the probe manifest and returns a snapshot.
 func Collect(manifest ProbeManifest, escalate bool) ProbeSnapshot {
 	MaybeEscalate(escalate)
+	cleanHomeEnv()
 
 	priv := DetectPrivilege()
 	homes := DiscoverUserHomes(priv)
@@ -656,6 +672,10 @@ func (c *collector) collectFileLimit(path, base string, metadataOnly bool, limit
 		return omitted("special")
 	case metadataOnly:
 		return omitted("metadata")
+	// Written inside another tool's credential store (an agent folder an
+	// environment variable puts there): no content, whatever it is called
+	case inCredentialStore(path):
+		return omitted("sensitive")
 	// Before size: not even the head of a file behind such a link is shipped
 	case escapesToSink(path, base):
 		return omitted("sensitive")

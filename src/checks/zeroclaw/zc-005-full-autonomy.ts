@@ -3,7 +3,7 @@ import { defineCheck } from '../../core/check-builder.js';
 import type { Evidence } from '../../core/types.js';
 import { effectiveProfiles, hasWildcard, mainConfig, profileLabel, writeMainConfig } from './zc-config.js';
 import type { KeyPath } from '../../core/utils.js';
-import { configFixTargets } from '../../remediation/fix-refusal.js';
+import { mainConfigFixTargets } from './zc-config.js';
 
 function isFull(level: unknown): boolean {
   return typeof level === 'string' && level.trim().toLowerCase() === 'full';
@@ -18,7 +18,7 @@ export const zc005 = defineCheck({
     'Detect a risk profile bound to an enabled agent with level = "full" (the `yolo` preset) — every tool call not in always_ask runs without approval',
   supportedAgents: ['zeroclaw'],
 
-  fixTargets: configFixTargets,
+  fixTargets: mainConfigFixTargets,
 
   async run(ctx, h) {
     const config = mainConfig(ctx.configs);

@@ -274,9 +274,9 @@ describe('configs linked into a credential store', () => {
       expect(result).toBeInstanceOf(Error);
       expect(loadErrors[0].message).toMatch(/^not read: reached through a symlink into SSH keys\/config \(~\/.ssh\)/);
       expect(await readTextIfPresent(join(home, '.hermes', '.env'), fs)).toBeUndefined();
-      // an ordinary link is read; a file inside the store itself is named, not escaped to
+      // an ordinary link is read; a file inside the store itself isn't read either (credentialStoreOf)
       expect((await loadConfig(join(home, '.hermes', 'ok.env'), fs)).data).toEqual({ A: '1' });
-      expect(await readTextIfPresent(join(home, '.ssh', 'id_rsa'), fs)).toContain('PRIVATE');
+      expect(await readTextIfPresent(join(home, '.ssh', 'id_rsa'), fs)).toBeUndefined();
     } finally {
       await rm(home, { recursive: true, force: true });
     }
@@ -299,9 +299,32 @@ describe('configs linked into a credential store', () => {
       expect(result).toBeInstanceOf(Error);
       expect(loadErrors[0].message).toMatch(/^not read: reached through a symlink into AWS credentials \(~\/.aws\)/);
       expect(await readTextIfPresent(join(home, '.copilot', 'config.json'), fs)).toBeUndefined();
-      // a folder linked anywhere else is read; the store's own spelling names it
+      // a folder linked anywhere else is read
       expect((await loadConfig(join(home, '.codex', 'config.json'), fs)).data).toEqual({ a: 1 });
-      expect((await loadConfig(join(home, '.aws', 'cop', 'config.json'), fs)).data).toEqual({ a: 1 });
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it('nor a config written inside one (an agent folder set there: COPILOT_HOME=~/.aws/cop), locally or from a snapshot', async () => {
+    const { mkdtemp } = await import('node:fs/promises');
+    const { LocalFSProvider } = await import('./local-fs-provider.js');
+    const { SnapshotFSProvider } = await import('./snapshot-fs-provider.js');
+    const home = await mkdtemp(join(tmpdir(), 'vaso-sink-inside-'));
+    try {
+      await mkdir(join(home, '.aws', 'cop'), { recursive: true });
+      await writeFile(join(home, '.aws', 'cop', 'config.json'), '{"a":1}\n');
+      const { loadErrors } = await captureConfigLoadErrors(() => loadConfig(join(home, '.aws', 'cop', 'config.json'), new LocalFSProvider()).catch((e: Error) => e));
+      expect(loadErrors[0].message).toBe(`not read: is inside AWS credentials (~/.aws): ${join(home, '.aws', 'cop', 'config.json')}`);
+      // an older probe that shipped the content: still not read
+      const snap = new SnapshotFSProvider({
+        version: 1, hostname: 'h', platform: 'linux', homedir: '/home/u', timestamp: '2026-11-16T00:00:00Z',
+        privilege: { uid: 1000, username: 'u', isRoot: false, sudoAvailable: false, escalated: false, scannedUsers: ['u'], skippedPaths: [] },
+        files: { '/home/u/.aws/cop/config.json': { content: '{"a":1}', mode: 0o100600, exists: true } },
+        directories: {}, commandOutputs: {}, env: {},
+      });
+      const remote = await captureConfigLoadErrors(() => loadConfig('/home/u/.aws/cop/config.json', snap).catch((e: Error) => e));
+      expect(remote.loadErrors[0].message).toBe('not read: is inside AWS credentials (~/.aws): /home/u/.aws/cop/config.json');
     } finally {
       await rm(home, { recursive: true, force: true });
     }

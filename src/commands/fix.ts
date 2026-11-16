@@ -63,10 +63,16 @@ export async function runFix(options: FixCommandOptions): Promise<void> {
       yes: options.yes,
     });
 
+    // Exit status: 1 when a fix failed — it threw, or it left a file the scan
+    // didn't name as one vaso fix won't change. A fix with nothing left but
+    // such named files (a symlink, a hard link, a file outside the home or
+    // reached through a link into a credential store — "not changed by vaso
+    // fix: …" in the finding) did all it may: not a failure, exit 0.
     const applied = results.filter(r => r.applied).length;
     const done = results.filter(r => !r.applied && r.alreadyDone).length;
+    const left = results.filter(r => !r.applied && !r.alreadyDone && r.leftAsNoted).length;
     const skipped = results.filter(r => !r.applied && r.skipped).length;
-    const failed = results.length - applied - done - skipped;
+    const failed = results.length - applied - done - left - skipped;
 
     // An applied fix is only "fixed" when the finding is gone: scan again
     // and name the ones still reported
@@ -85,6 +91,7 @@ export async function runFix(options: FixCommandOptions): Promise<void> {
 
     const parts = [partial > 0 ? `${applied} applied (${partial} partially — finding still open)` : `${applied} applied`];
     if (done) parts.push(`${done} already in place`);
+    if (left) parts.push(`${left} with only files vaso fix won't change left (change them by hand)`);
     if (skipped) parts.push(options.dryRun ? `${skipped} would be applied` : `${skipped} skipped`);
     if (failed) parts.push(`${failed} not applied`);
     console.log(`\n${chalk.bold('Summary:')} ${parts.join(', ')}`);
