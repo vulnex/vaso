@@ -260,7 +260,9 @@ export function darwinPlain(out: string, isDir: boolean): boolean {
       if (!isDir || /\bfile_inherit\b/.test(acl[1])) return false;
       continue;
     }
-    const xattr = /^\t([^\t]+)\t/.exec(line);
+    // `\t<name>\t<size>`: a name holding a tab (`com.apple.provenance\tz`)
+    // doesn't fit, so it is not mistaken for the kernel's tag
+    const xattr = /^\t([^\t]+)\t *\d+ *$/.exec(line);
     if (xattr) {
       if (!isDir && !SYSTEM_XATTRS.has(xattr[1])) return false;
       continue;
