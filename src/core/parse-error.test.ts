@@ -50,7 +50,7 @@ describe('parseErrorMessage', () => {
       expect(msg).not.toMatch(/sk-proj|planted/);
     }
     expect(parseErrorMessage(new SyntaxError(`Unexpected token 's', "${KEY.slice(0, 10)}"... is not valid JSON`)))
-      .toBe("Unexpected token 's' (not valid JSON)");
+      .toBe('not valid JSON');
   });
 
   it('keeps plain one-line messages', () => {

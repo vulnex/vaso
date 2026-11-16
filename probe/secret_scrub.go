@@ -1642,6 +1642,12 @@ func scalarValue(raw string) (string, string, string) {
 	if raw == "" {
 		return "", "", ""
 	}
+	// a backtick-quoted dotenv value (Node's dotenv); never a YAML scalar
+	if raw[0] == '`' {
+		if i := strings.IndexByte(raw[1:], '`'); i >= 0 {
+			return raw[:1], raw[1 : i+1], raw[i+1:]
+		}
+	}
 	if q := raw[0]; q == '"' || q == '\'' {
 		for i := 1; i < len(raw); i++ {
 			if raw[i] == '\\' && q == '"' {
@@ -2339,9 +2345,10 @@ func (c *collector) scrubText(path, s string) string {
 }
 
 // emailAddress: name@domain.tld standing on its own — after a quote,
-// space, bracket or =, never inside a URL (scheme://user@host) or a
-// mailto:, and not git@host:org/repo (followed by ":").
-var emailAddress = regexp.MustCompile(`(^|[\s"'<(\[{,;=])([A-Za-z0-9][A-Za-z0-9._%+-]*)@((?:[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\.)+[A-Za-z]{2,})`)
+// space, bracket, = or an XML tag (a plist's <string>), never inside a URL
+// (scheme://user@host) or a mailto:, and not git@host:org/repo (followed
+// by ":").
+var emailAddress = regexp.MustCompile(`(^|[\s"'<>(\[{,;=])([A-Za-z0-9][A-Za-z0-9._%+-]*)@((?:[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\.)+[A-Za-z]{2,})`)
 
 // disguiseEmails replaces the local part of every email address in s but
 // its first character with random characters of the same classes; the
@@ -2573,6 +2580,7 @@ func tomlKeyParts(key string) []string {
 // "auth": {"value": …}) holds the credential.
 func (c *collector) secretContainers(s string, toml bool) string {
 	var b []byte
+	conservedTo := -1
 	set := func(sp containerString, out string) {
 		if b == nil {
 			b = []byte(s)
@@ -2595,28 +2603,71 @@ func (c *collector) secretContainers(s string, toml bool) string {
 		if !container && !strongCredentialKey(key) {
 			continue
 		}
-		for _, sp := range containerStrings(s, g[12], toml) {
+		found, capped := containerStringsCapped(s, g[12], toml)
+		for _, sp := range found {
+			value := s[sp.from:sp.to]
 			name := ""
 			switch {
 			case sp.key != "" && valueChildName.MatchString(sp.key):
 				name = key
+			case sp.depth > 1 && container:
+				// deeper under a secrets container ("creds": [{"k": …}],
+				// {"x": {"y": …}}): anything random or secret-shaped is a
+				// credential, but for a setting beside it (label, provider)
+				if !settingChildName.MatchString(sp.key) && (looksRandom(value, 16) || looksLikeSecret(value)) {
+					set(sp, c.disguise(value))
+					continue
+				}
 			case sp.depth > 1 || !container:
 			case s[g[12]] == '{':
 				name = containerChildKey(key, sp.key)
 			default:
 				name = key
 			}
-			value := s[sp.from:sp.to]
 			if name == "" || !keyedSecret(name, value) {
 				continue
 			}
 			set(sp, c.disguiseKeyed(name, value))
+		}
+		// Past the walk's limits the rest of the text is judged without its
+		// structure: every random string in it is taken for a credential
+		// (once per file — later containers lie inside what this covers)
+		if capped >= 0 && capped > conservedTo {
+			for _, sp := range quotedStrings(s, capped) {
+				if value := s[sp.from:sp.to]; looksRandom(value, 16) || looksLikeSecret(value) {
+					set(sp, c.disguise(value))
+				}
+			}
+			conservedTo = len(s)
 		}
 	}
 	if b == nil {
 		return s
 	}
 	return string(b)
+}
+
+// quotedStrings: the contents of every one-line "…" or '…' string in s from
+// offset from on (escapes honoured).
+func quotedStrings(s string, from int) []containerString {
+	var out []containerString
+	for i := from; i < len(s); i++ {
+		ch := s[i]
+		if ch != '"' && ch != '\'' {
+			continue
+		}
+		end := i + 1
+		for ; end < len(s) && s[end] != ch && s[end] != '\n'; end++ {
+			if s[end] == '\\' {
+				end++
+			}
+		}
+		if end < len(s) && s[end] == ch {
+			out = append(out, containerString{i + 1, end, "", 0})
+		}
+		i = end
+	}
+	return out
 }
 
 // containerOpens finds every containerOpen match. Matches may share a
@@ -2653,10 +2704,25 @@ type containerString struct {
 // containerStrings returns the string values inside the array or table
 // opening at open, at any depth: every string of an array, the values
 // (after : or =) of a table, each with its own key and depth. Comments are
-// skipped; an unterminated string, a TOML multi-line string or more than
-// 64 KiB of text ends the walk.
+// skipped; an unterminated string or a TOML multi-line string ends the walk.
 func containerStrings(s string, open int, toml bool) []containerString {
-	var out []containerString
+	out, _ := containerStringsCapped(s, open, toml)
+	return out
+}
+
+// Bounds on one container walk: structure (outside strings) and the
+// strings themselves. A walk that reaches either stops there and says where
+// (capped): what follows is judged without its structure.
+const (
+	containerStructureLimit = 64 << 10
+	containerStringLimit    = 1 << 20
+)
+
+// containerStringsCapped is containerStrings, plus the offset where a walk
+// stopped at its limits (-1 when it reached the container's end or a string
+// it can't follow).
+func containerStringsCapped(s string, open int, toml bool) (out []containerString, capped int) {
+	capped = -1
 	type level struct {
 		array, afterSep bool
 		key             string
@@ -2668,12 +2734,17 @@ func containerStrings(s string, open int, toml bool) []containerString {
 		}
 		return &stack[len(stack)-1]
 	}
-	limit := open + 64<<10
-	for i := open; i < len(s) && i < limit; i++ {
+	// Long strings don't count against the structure limit (a 70 KiB note
+	// before the key), only against their own
+	limit, inStrings := open+containerStructureLimit, 0
+	for i := open; i < len(s); i++ {
+		if i >= limit || inStrings > containerStringLimit {
+			return out, i
+		}
 		switch ch := s[i]; {
 		case ch == '"' || ch == '\'':
 			if strings.HasPrefix(s[i:], `"""`) || strings.HasPrefix(s[i:], "'''") {
-				return out
+				return out, capped
 			}
 			end := i + 1
 			for ; end < len(s) && s[end] != ch && s[end] != '\n'; end++ {
@@ -2682,8 +2753,10 @@ func containerStrings(s string, open int, toml bool) []containerString {
 				}
 			}
 			if end >= len(s) || s[end] != ch {
-				return out
+				return out, capped
 			}
+			limit += end - i
+			inStrings += end - i
 			if l := top(); len(stack) > 0 {
 				if l.array {
 					out = append(out, containerString{i + 1, end, "", len(stack)})
@@ -2701,7 +2774,7 @@ func containerStrings(s string, open int, toml bool) []containerString {
 		case ch == ']' || ch == '}':
 			stack = stack[:len(stack)-1]
 			if len(stack) == 0 {
-				return out
+				return out, capped
 			}
 		case ch == ':' || ch == '=':
 			if l := top(); !l.array {
@@ -2717,7 +2790,7 @@ func containerStrings(s string, open int, toml bool) []containerString {
 		case ch == '/' && i+1 < len(s) && s[i+1] == '*':
 			j := strings.Index(s[i+2:], "*/")
 			if j < 0 {
-				return out
+				return out, capped
 			}
 			i += j + 3
 		case len(stack) > 0 && !top().array && !top().afterSep && (isASCIIAlnum(ch) || ch == '_' || ch == '$'):
@@ -2729,7 +2802,7 @@ func containerStrings(s string, open int, toml bool) []containerString {
 			i = j - 1
 		}
 	}
-	return out
+	return out, capped
 }
 
 var (
@@ -3264,9 +3337,19 @@ func verbatimLines(body string, at int, basic bool) []valuePart {
 	return parts
 }
 
+// dotenvQuoteEnd: where the dotenv value quoted with q ends in s — a
+// backtick-quoted one (Node's dotenv: OpenClaw, Lyrie) at the next backtick,
+// escapes not read.
+func dotenvQuoteEnd(s string, q byte) int {
+	if q == '`' {
+		return strings.IndexByte(s, '`')
+	}
+	return quoteEnd(s, q, false)
+}
+
 // dotenvMultiline disguises a quoted dotenv value that its line leaves
-// open and a line below closes, as the one value python-dotenv reads (the
-// line breaks kept). A PEM key in one is pemBody's: its armor lines hold
+// open and a line below closes, as the one value python-dotenv (and Node's
+// dotenv, which also reads backticks) reads (the line breaks kept). A PEM key in one is pemBody's: its armor lines hold
 // spaces, and disguiseSpread leaves runs of words.
 func (c *collector) dotenvMultiline(s string) (string, map[int]bool) {
 	if !strings.Contains(s, "\n") {
@@ -3276,11 +3359,11 @@ func (c *collector) dotenvMultiline(s string) (string, map[int]bool) {
 	done := map[int]bool{}
 	for _, g := range dotenvLine.FindAllStringSubmatchIndex(s, -1) {
 		v := s[g[8]:g[9]]
-		if v == "" || v[0] != '"' && v[0] != '\'' || quoteEnd(v[1:], v[0], false) >= 0 {
+		if v == "" || v[0] != '"' && v[0] != '\'' && v[0] != '`' || dotenvQuoteEnd(v[1:], v[0]) >= 0 {
 			continue
 		}
 		start := g[8] + 1
-		end := quoteEnd(s[start:], v[0], false)
+		end := dotenvQuoteEnd(s[start:], v[0])
 		if end < 0 || !strings.Contains(s[start:start+end], "\n") {
 			continue
 		}

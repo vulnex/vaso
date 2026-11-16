@@ -29,6 +29,14 @@ var sensitiveSinkPatterns = []string{
 	`(^|\/)\.codex\/auth\.json$`,
 	`(^|\/)\.(netrc|git-credentials|pgpass|pypirc|npmrc)$`,
 	`(^|\/)(Library\/Application Support\/(Google\/Chrome|Chromium|BraveSoftware|Microsoft Edge|Firefox|Arc)|\.config\/(google-chrome|chromium|BraveSoftware|microsoft-edge)|\.mozilla|Library\/Cookies)(\/|$)`,
+	`(^|\/)\.claude\/\.credentials\.json$`,
+	`(^|\/)(\.local\/share\/opencode|\.config\/nanoclaw|\.hermes|\.(openclaw(-[^/]+)?|clawdbot)(\/agents\/[^/]+\/agent)?)\/(auth|auth-profiles|auth-state|credentials|account|registry-auth|device-key)\.json$`,
+	`(^|\/)\.(openclaw(-[^/]+)?|clawdbot)\/credentials(\/|$)|(^|\/)\.hermes\/mcp-tokens(\/|$)|(^|\/)\.nanobot\/(auth|whatsapp-auth)(\/|$)`,
+	`(^|\/)\.(gemini|qwen)\/(oauth_creds|google_accounts|mcp-oauth-tokens|a2a-oauth-tokens)\.json$`,
+	`(^|\/)\.local\/share\/devin\/credentials\.toml$|(^|\/)\.abacusai\/keystore\.enc[^/]*$`,
+	`(^|\/)(\.grokbot|\.cursor\/sand|sand-data)\/(local-exec-daemon-credential|host-token)\.json$|(^|\/)Grok Bot\/(sand|user)-secrets\.json$`,
+	`(^|\/)\.ironclaw\/reborn\/(webui-token|([^/]+\/)?\.reborn-local-dev-secrets-master-key)$|(^|\/)\.?zeroclaw\/\.secret_key$`,
+	`(^|\/)openshell\/(gateway\/credentials|docker-sandbox-tokens|gateways\/[^/]+\/mtls)(\/|$)|(^|\/)openshell\/gateways\/[^/]+\/oidc_token\.json$`,
 }
 
 var sensitiveSinks = func() []*regexp.Regexp {
@@ -104,6 +112,33 @@ func linkIntoSink(link string, named map[int]bool) bool {
 			if !named[i] {
 				return true
 			}
+		}
+	}
+	return false
+}
+
+// resolvedIntoSink: the file at p really is in a sensitive location (a
+// credential store, an agent's token file) that neither the part of the path
+// VASO named (base) nor p's own spelling names — reached through a linked
+// directory above it, not a link escapesToSink sees below base: a skills dir
+// linked to ~/.claude lists .credentials.json, one linked to ~/.config lists
+// gh/hosts.yml. Mirrors inSinkByTarget in src/core/skill-walk.ts.
+func resolvedIntoSink(p, base string) bool {
+	real, err := filepath.EvalSymlinks(p)
+	if err != nil {
+		return false
+	}
+	real = filepath.Clean(real)
+	if real == filepath.Clean(p) {
+		return false
+	}
+	named := sinkSet(base)
+	for i := range sinkSet(p) {
+		named[i] = true
+	}
+	for i := range sinkSet(real) {
+		if !named[i] {
+			return true
 		}
 	}
 	return false

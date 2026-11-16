@@ -219,7 +219,45 @@ async function walk(
       entries = entries.filter(e => !underAny(join(real, relative(dir, e.parentPath ?? dir), e.name), real, taken));
     }
   }
+  entries = entries.filter(e => !inSinkByTarget(dir, roots[roots.length - 1], e, named));
   return follow(fs, dir, entries, roots, visited, depth, named, rules);
+}
+
+/**
+ * For a caller holding a plain listing of a skills tree (IOC file walks):
+ * whether `file`, under `root`, really is in a credential store neither the
+ * root nor the file's own spelling names (see inSinkByTarget). Real parent
+ * directories are cached in `cache`.
+ */
+export async function skillFileInSink(fs: FSProvider, root: string, file: string, cache: Map<string, string>): Promise<boolean> {
+  const parent = dirname(file);
+  let real = cache.get(parent);
+  if (real === undefined) {
+    real = await realOrSelf(fs, parent);
+    cache.set(parent, real);
+  }
+  const target = join(real, basename(file));
+  if (target === file) return false;
+  const named = new Set([...classifySensitivePath(root), ...classifySensitivePath(file)]);
+  return classifySensitivePath(target).some(label => !named.has(label));
+}
+
+/**
+ * A file listed under `dir` (whose real path is `real`; nothing between them
+ * is a link — the listing doesn't follow any) that really is in a credential
+ * store neither the walked root nor its own spelling names: a skills dir
+ * linked to `~/.claude` lists `.credentials.json`, one linked to `~/.config`
+ * lists `gh/hosts.yml`. Never read, as the probe never ships it
+ * (resolvedIntoSink in probe/sensitive_sinks.go).
+ */
+function inSinkByTarget(dir: string, real: string, entry: DirentInfo, named: ReadonlySet<string>): boolean {
+  if (!entry.isFile) return false;
+  const rel = join(relative(dir, entry.parentPath ?? dir), entry.name);
+  const target = join(real, rel);
+  const spelled = join(dir, rel);
+  if (target === spelled) return false;
+  const own = new Set(classifySensitivePath(spelled));
+  return classifySensitivePath(target).some(label => !named.has(label) && !own.has(label));
 }
 
 /** `entries` with every followable symlink among them expanded in place. */

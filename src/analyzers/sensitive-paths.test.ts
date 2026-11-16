@@ -33,6 +33,36 @@ describe('SENSITIVE_SINKS', () => {
     // a Codex skills dir is not its credential store
     for (const p of ['/home/u/.codex/skills/x', '/home/u/.config/ghostty', '/home/u/.github/x']) expect(classifySensitivePath(p), p).toEqual([]);
   });
+
+  it("covers every agent token store the probe manifest ships as metadata only", async () => {
+    // The manifest's metadata-only globs are the list of agent credential
+    // files; a skills tree reaching one through a link (or a linked root)
+    // must not read or ship it either — both sides judge by SENSITIVE_SINKS
+    const { buildProbeManifest } = await import('../core/manifest-builder.js');
+    const { allAdapters } = await import('../adapters/index.js');
+    const globs = buildProbeManifest(allAdapters).metadataGlobPatterns ?? [];
+    const credential = /(?:^|\/)(?:[^/]*(?:auth|credential|oauth|token|secret|google_accounts|keystore|mtls|device-key)[^/]*|\.secret_key)(?:\/\*\*?)?$/i;
+    // Copilot's mcp-secrets / mcp-oauth-config are private stores (store-links.ts)
+    const pnpmOrBin = /\/pnpm\/|\/bin\/|\/\.copilot\//;
+    const checked: string[] = [];
+    for (const g of globs) {
+      if (!g.startsWith('~/') || pnpmOrBin.test(g) || !credential.test(g)) continue;
+      // one concrete path per glob: `{a,b}` → a, `*`/`**` → a name
+      const p = g.replace('~', '/home/u').replace(/\{([^,}]+)[^}]*\}/g, '$1').replace(/\*\*?/g, 'x').replace(/\/x$/, '/x');
+      checked.push(p);
+      expect(classifySensitivePath(p), `${g} → ${p}`).not.toEqual([]);
+      expect(isCredentialPath(p), p).toBe(true);
+    }
+    for (const p of ['/home/u/.claude/.credentials.json', '/home/u/.codex/auth.json', '/home/u/.local/share/opencode/auth.json',
+      '/home/u/.gemini/oauth_creds.json', '/home/u/.local/share/devin/credentials.toml']) {
+      expect(checked, p).toContain(p);
+    }
+    // Their directories are not: `~/.claude` as a scope or a skills root is judged elsewhere
+    for (const p of ['/home/u/.claude', '/home/u/.claude/skills/x/SKILL.md', '/home/u/.gemini/settings.json', '/home/u/.copilot/config.json',
+      '/home/u/.hermes/config.yaml', '/home/u/.openclaw/openclaw.json', '/home/u/.grokbot/settings.json']) {
+      expect(classifySensitivePath(p), p).toEqual([]);
+    }
+  });
 });
 
 describe('isCredentialPath (skill read sources, dt17)', () => {

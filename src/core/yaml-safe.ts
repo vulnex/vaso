@@ -56,7 +56,8 @@ function assertUniqueKeys(raw: string): void {
           const id = `${typeof pair.key.value}:${String(pair.key.value)}`;
           if (seen.has(id)) {
             const line = pair.key.range ? lineCounter.linePos(pair.key.range[0]).line : undefined;
-            throw new Error(`found duplicate key "${String(pair.key.value)}"${line ? ` at line ${line}` : ''}`);
+            // The line, never the key: what a file says is not repeated in reports
+            throw new Error(`found duplicate key${line ? ` at line ${line}` : ''}`);
           }
           seen.add(id);
         }

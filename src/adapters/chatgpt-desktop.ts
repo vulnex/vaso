@@ -97,7 +97,8 @@ function normalizeValue(value: unknown): unknown {
  */
 function asConfig(filePath: string, data: Record<string, unknown>): ParsedConfig {
   return {
-    raw: JSON.stringify(data),
+    // one key per line: a finding quoting a line quotes that key, not the file
+    raw: JSON.stringify(data, null, 2),
     format: 'json',
     filePath,
     data,
@@ -254,21 +255,25 @@ export const chatgptDesktopAdapter: AgentAdapter = {
 
   getProbeManifest(): ProbeManifest {
     return {
-      filePaths: [
+      filePaths: [],
+      globPatterns: [
+        '~/Library/Application Support/com.openai.chat/app_pairing_extensions/**',
+      ],
+      // The preference plists are read through plutil (commands below, their
+      // output disguised by the probe): the files themselves — binary, an
+      // account's email in them — only for presence and mode. Workspace data
+      // (conversations, drafts, gizmos, …): CG-001 needs only their
+      // permissions — never ship content. Dir modes come from the same entries.
+      metadataGlobPatterns: [
         '~/Library/Preferences/com.openai.chat.plist',
         '~/Library/Preferences/com.openai.chat.StatsigService.plist',
         '~/Library/Preferences/ChatGPTHelper.plist',
-      ],
-      globPatterns: [
         '~/Library/Preferences/com.openai.chat.RemoteFeatureFlags.*.plist',
-        '~/Library/Application Support/com.openai.chat/app_pairing_extensions/**',
+        ...CHATGPT_WORKSPACE_DIR_PREFIXES.flatMap(p => [
+          `~/Library/Application Support/com.openai.chat/${p}*`,
+          `~/Library/Application Support/com.openai.chat/${p}*/**`,
+        ]),
       ],
-      // Workspace data (conversations, drafts, gizmos, …): CG-001 needs only their
-      // permissions — never ship content. Dir modes come from the same entries.
-      metadataGlobPatterns: CHATGPT_WORKSPACE_DIR_PREFIXES.flatMap(p => [
-        `~/Library/Application Support/com.openai.chat/${p}*`,
-        `~/Library/Application Support/com.openai.chat/${p}*/**`,
-      ]),
       commands: [
         { id: 'chatgpt-version', cmd: 'defaults', args: ['read', `${APP_BUNDLE_PATH}/Contents/Info.plist`, 'CFBundleShortVersionString'], timeout: 3000 },
         { id: 'chatgpt-codesign', cmd: 'codesign', args: ['-dv', APP_BUNDLE_PATH], timeout: 5000 },
