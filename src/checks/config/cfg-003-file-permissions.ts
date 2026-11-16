@@ -3,6 +3,7 @@ import { defineCheck } from '../../core/check-builder.js';
 import { accessibleByOthers, markUnreachable, queryPermissions } from '../../core/permissions.js';
 import { restrictFilesToOwner } from '../../remediation/config-writer.js';
 import { exposesCredentials } from '../../core/secret-values.js';
+import { permissionFixTargets } from '../../remediation/fix-refusal.js';
 
 
 export const cfg003 = defineCheck({
@@ -12,6 +13,8 @@ export const cfg003 = defineCheck({
   severity: 'warning',
   description: 'Check that credential-bearing config files have restrictive permissions (600 or tighter)',
   supportedPlatforms: ['darwin', 'linux'],
+
+  fixTargets: permissionFixTargets,
 
   async run(ctx, h) {
     const credentialPaths = new Set(ctx.credentialPaths ?? []);

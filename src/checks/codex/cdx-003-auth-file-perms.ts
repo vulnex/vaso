@@ -3,6 +3,7 @@ import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { accessibleByOthers, markUnreachable, queryPermissions } from '../../core/permissions.js';
 import { restrictFilesToOwner } from '../../remediation/config-writer.js';
+import { permissionFixTargets } from '../../remediation/fix-refusal.js';
 
 export const cdx003 = defineCheck({
   id: 'CDX-003',
@@ -12,6 +13,8 @@ export const cdx003 = defineCheck({
   description: 'Verify that ~/.codex/auth.json is not readable by other users',
   supportedAgents: ['codex'],
   supportedPlatforms: ['darwin', 'linux'],
+
+  fixTargets: permissionFixTargets,
 
   async run(ctx, h) {
     const authPath = join(ctx.installation.installDir, 'auth.json');

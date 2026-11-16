@@ -2,6 +2,7 @@ import type { Evidence, FixResult } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { fixFirstConfig } from '../../remediation/config-writer.js';
 import { accountBlocks, asPermission, effectivePermission, settingsConfig, noSettingsReason } from './shared.js';
+import { configFixTargets } from '../../remediation/fix-refusal.js';
 
 export const gb001 = defineCheck({
   id: 'GB-001',
@@ -10,6 +11,8 @@ export const gb001 = defineCheck({
   severity: 'critical',
   description: 'Detect Grok Bot "Execution on Local Computer" set to Always allow (localToolPermission: "always" with no stricter admin ceiling) — the cloud agent runs shell commands, reads and writes files under $HOME and reads other AI tools\' MCP setup and prompt history on this computer without asking, outside any sandbox',
   supportedAgents: ['grok-bot'],
+
+  fixTargets: configFixTargets,
 
   async run(ctx, h) {
     const config = settingsConfig(ctx);

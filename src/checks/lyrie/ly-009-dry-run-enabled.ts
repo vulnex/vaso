@@ -2,6 +2,7 @@ import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { fixFirstConfig } from '../../remediation/config-writer.js';
 import { envTrue, lyrieEnvConfigs } from './env.js';
+import { configFixTargets } from '../../remediation/fix-refusal.js';
 
 /** backends/factory.ts: dryRun = LYRIE_LOCAL_DRY_RUN === "1" || === "true". */
 export const ly009 = defineCheck({
@@ -11,6 +12,8 @@ export const ly009 = defineCheck({
   severity: 'warning',
   description: 'Detect LYRIE_LOCAL_DRY_RUN=true (or 1) — the local scan backend returns an empty SARIF without running Lyrie, so security scans report "no findings" without scanning anything.',
   supportedAgents: ['lyrie'],
+
+  fixTargets: configFixTargets,
 
   async run(ctx, h) {
     const evidence: Evidence[] = [];

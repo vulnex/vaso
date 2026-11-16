@@ -4,6 +4,7 @@ import { defineCheck } from '../../core/check-builder.js';
 import { accessibleByOthers, markUnreachable, queryPermissions } from '../../core/permissions.js';
 import { restrictFilesToOwner } from '../../remediation/config-writer.js';
 import { getNestedValue } from '../../core/utils.js';
+import { permissionFixTargets } from '../../remediation/fix-refusal.js';
 
 /**
  * Credential and state stores in an OpenClaw state dir (2026.9.4 sources):
@@ -112,6 +113,8 @@ export const oc006 = defineCheck({
   description: 'Verify OpenClaw\'s credential and state stores are not group/world-readable: the state and per-agent SQLite databases (sessions, auth profiles), credentials/ (OAuth tokens, channel logins such as WhatsApp creds.json), legacy auth-profiles.json / device identity / memory files, and file-based secret providers.',
   supportedAgents: ['openclaw'],
   supportedPlatforms: ['darwin', 'linux'],
+
+  fixTargets: permissionFixTargets,
 
   async run(ctx, h) {
     if (ctx.installation.agentName) {

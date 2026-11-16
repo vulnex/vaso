@@ -4,6 +4,7 @@ import { accessibleByOthers, markUnreachable, queryPermissions } from '../../cor
 import { restrictFilesToOwner } from '../../remediation/config-writer.js';
 import type { ScanContext } from '../../core/types.js';
 import { exposesCredentials, unloadedFileExposes } from '../../core/secret-values.js';
+import { permissionFixTargets } from '../../remediation/fix-refusal.js';
 
 /**
  * The declared credential paths that can expose something: a loaded settings
@@ -28,6 +29,8 @@ export const pol003 = defineCheck({
   severity: 'warning',
   description: 'Check that adapter-declared session/token/auth files have restrictive permissions (0600)',
   supportedPlatforms: ['darwin', 'linux'],
+
+  fixTargets: permissionFixTargets,
 
   async run(ctx, h) {
     if ((ctx.credentialPaths ?? []).length === 0) {

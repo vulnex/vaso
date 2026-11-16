@@ -1,6 +1,7 @@
 import { defineCheck } from '../../core/check-builder.js';
 import { fixFirstConfig } from '../../remediation/config-writer.js';
 import { gateway, gatewayToml, settingEvidence } from './shared.js';
+import { configFixTargets } from '../../remediation/fix-refusal.js';
 
 export const osh005 = defineCheck({
   id: 'OSH-005',
@@ -9,6 +10,8 @@ export const osh005 = defineCheck({
   severity: 'warning',
   description: 'Detect `policy_validation_failure_mode = "retain_last_valid"` — when a new policy generation fails validation, sandboxes keep enforcing the previous one instead of denying egress, so a tightening that breaks validation silently never takes effect',
   supportedAgents: ['openshell'],
+
+  fixTargets: configFixTargets,
 
   async run(ctx, h) {
     if (gateway(ctx).policy_validation_failure_mode !== 'retain_last_valid') {

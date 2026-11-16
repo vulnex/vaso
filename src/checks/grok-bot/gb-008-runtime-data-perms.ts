@@ -5,6 +5,7 @@ import { markUnreachable, queryPermissions, readableByOthers } from '../../core/
 import { restrictFilesToOwner } from '../../remediation/config-writer.js';
 import { DATA_FILES, USER_DATA_FILES } from '../../adapters/grok-bot.js';
 import { dataFile, userDataDir } from './shared.js';
+import { permissionFixTargets } from '../../remediation/fix-refusal.js';
 
 interface Target {
   path: string;
@@ -37,6 +38,8 @@ export const gb008 = defineCheck({
   description: 'Check that Grok Bot\'s data root, user-data profile and client state (cached transcripts, local-exec daemon log and state, telemetry outbox) are not readable by other local users — several are created with the default umask',
   supportedAgents: ['grok-bot'],
   supportedPlatforms: ['darwin', 'linux'],
+
+  fixTargets: permissionFixTargets,
 
   async run(ctx, h) {
     const warning: Evidence[] = [];

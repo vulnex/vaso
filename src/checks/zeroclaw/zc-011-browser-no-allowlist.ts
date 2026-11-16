@@ -6,6 +6,7 @@ import {
   type EffectiveProfile, type Rec,
 } from './zc-config.js';
 import type { KeyPath } from '../../core/utils.js';
+import { configFixTargets } from '../../remediation/fix-refusal.js';
 
 /** Last release where `[browser] enabled` (default true) also registers the
  *  full `browser` automation tool and `browser` is in the default
@@ -52,6 +53,8 @@ export const zc011 = defineCheck({
   description:
     'Detect the full `browser` automation tool (drives a possibly logged-in Chrome/Chromium) auto-approved by an agent risk profile, or [browser] allowed_private_hosts = ["*"] (reaches internal hosts and the cloud metadata endpoint)',
   supportedAgents: ['zeroclaw'],
+
+  fixTargets: configFixTargets,
 
   async run(ctx, h) {
     const config = mainConfig(ctx.configs);

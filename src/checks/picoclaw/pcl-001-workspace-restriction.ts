@@ -3,6 +3,7 @@ import { defineCheck } from '../../core/check-builder.js';
 import { envNote, envOverrideFor } from '../../adapters/env-overrides.js';
 import { fixFirstConfig } from '../../remediation/config-writer.js';
 import { asRecord, picoMainConfigs } from './shared.js';
+import { configFixTargets } from '../../remediation/fix-refusal.js';
 
 export const pcl001 = defineCheck({
   id: 'PCL-001',
@@ -11,6 +12,8 @@ export const pcl001 = defineCheck({
   severity: 'warning',
   description: 'agents.defaults.restrict_to_workspace: false lets file and exec tools work anywhere the user can (the default confines them to the agent workspace); allow_read_outside_workspace: true lets file reads leave it.',
   supportedAgents: ['picoclaw'],
+
+  fixTargets: configFixTargets,
 
   async run(ctx, h) {
     const evidence: Evidence[] = [];

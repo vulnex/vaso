@@ -12,7 +12,7 @@ import { promptForFix } from './prompt.js';
 import { collectWriteNotes } from './config-writer.js';
 import { escapeControlChars } from '../reporting/text-safety.js';
 import { readRegularFile, regularMode, resolvedDir, withChangeRecorder, withFixBoundary, UnsafeTargetError } from './safe-file.js';
-import { getUserHomeDirs } from '../adapters/openclaw.js';
+import { fixHomeOf } from './fix-refusal.js';
 import { sha256, appendManifestEntry, type BackupManifest, type ManifestEntry } from './backup-manifest.js';
 
 /**
@@ -145,7 +145,8 @@ export class RemediationEngine {
           // CODEX_HOME=/data/…) is refused rather than changed beyond undo
           // (an install outside every home falls back to the scanning user's,
           // so nothing there is writable either — rollback's own boundary)
-          const home = (await homeOf(agent.installation.installDir, fs)) ?? homedir();
+          // The same boundary the scan judges refusals by (fix-refusal.ts)
+          const home = await fixHomeOf(agent.installation.installDir, fs);
           const roots = [home];
           // The home's owner, by lstat: a home a user made a symlink must not
           // lend its target's owner (root's, for /etc)
@@ -305,22 +306,4 @@ export class RemediationEngine {
 /** One installation across two scans of the same host. */
 function installKey(agent: AgentScanResult): string {
   return `${agent.agent}\0${agent.installation.installDir}\0${agent.installation.agentName ?? ''}`;
-}
-
-/**
- * The home an installation lives in: the longest user home that contains its
- * directory (every user's home when running as root — `--all-users`), or
- * none for a system-wide install (/etc, /opt), which then is its own boundary.
- */
-async function homeOf(installDir: string, fs: LocalFSProvider): Promise<string | undefined> {
-  const homes = new Set<string>([homedir()]);
-  if (process.getuid?.() === 0) {
-    for (const { home } of await getUserHomeDirs(true, fs).catch(() => [])) homes.add(home);
-  }
-  let best: string | undefined;
-  for (const home of homes) {
-    const prefix = home.endsWith('/') ? home : `${home}/`;
-    if ((installDir === home || installDir.startsWith(prefix)) && (!best || home.length > best.length)) best = home;
-  }
-  return best;
 }

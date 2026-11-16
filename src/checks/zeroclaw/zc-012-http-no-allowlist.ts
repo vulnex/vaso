@@ -1,6 +1,7 @@
 import { defineCheck } from '../../core/check-builder.js';
 import type { Evidence } from '../../core/types.js';
 import { asRecord, hasWildcard, isFalse, isTrue, mainConfig, tomlLine, writeMainConfig } from './zc-config.js';
+import { configFixTargets } from '../../remediation/fix-refusal.js';
 
 export const zc012 = defineCheck({
   id: 'ZC-012',
@@ -10,6 +11,8 @@ export const zc012 = defineCheck({
   description:
     'Detect SSRF protection turned off for agent network tools: [http_request] allow_private_hosts=true or allowed_private_hosts=["*"], and [web_fetch] / [text_browser] allowed_private_hosts=["*"]',
   supportedAgents: ['zeroclaw'],
+
+  fixTargets: configFixTargets,
 
   async run(ctx, h) {
     const config = mainConfig(ctx.configs);

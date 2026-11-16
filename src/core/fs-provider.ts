@@ -92,7 +92,9 @@ export interface FSProvider {
   readdir(path: string): Promise<string[]>;
   readdirEntries(path: string, options?: { recursive?: boolean }): Promise<DirentInfo[]>;
   access(path: string): Promise<boolean>;
-  stat(path: string): Promise<{ mode: number; isFile(): boolean; isDirectory(): boolean }>;
+  /** `nlink` (hard-link count) is optional: a local stat reports it, a
+   *  snapshot doesn't. */
+  stat(path: string): Promise<{ mode: number; isFile(): boolean; isDirectory(): boolean; nlink?: number }>;
   realpath(path: string): Promise<string>;
   /**
    * Return the raw target of a symbolic link without resolving it. Unlike

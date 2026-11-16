@@ -101,6 +101,19 @@ export interface CheckModule {
   owaspAgentic?: OwaspAgenticId[];
   run(context: ScanContext): Promise<CheckResult>;
   fix?(context: ScanContext): Promise<FixResult>;
+  /**
+   * The paths `fix()` would change for this failing result, so the scan can
+   * tell a finding vaso fix would always refuse (see
+   * remediation/fix-refusal.ts). Undefined = can't say (nothing is judged).
+   * Without the hook: the result's evidence files.
+   */
+  fixTargets?(context: ScanContext, result: CheckResult): FixTargets | undefined;
+}
+
+/** What a fix changes: file modes (chmod), config settings, or something else. */
+export interface FixTargets {
+  paths: string[];
+  kind: 'permissions' | 'config' | 'other';
 }
 
 export interface ParsedConfig {

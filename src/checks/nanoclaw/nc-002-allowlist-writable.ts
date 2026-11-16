@@ -4,6 +4,7 @@ import { markUnreachable, queryPermissions } from '../../core/permissions.js';
 import { restrictFilesToOwner } from '../../remediation/config-writer.js';
 import { NANOCLAW_HOST_SECRET_FILES } from '../../adapters/nanoclaw.js';
 import { Findings, groupOnlyNote, hostConfigDir } from './shared.js';
+import { permissionFixTargets } from '../../remediation/fix-refusal.js';
 
 /**
  * ~/.config/nanoclaw holds the mount allowlist — deliberately outside the
@@ -21,6 +22,8 @@ export const nc002 = defineCheck({
   description: 'Verify ~/.config/nanoclaw and mount-allowlist.json are not writable by other users (a writable allowlist grants agents more host filesystem), and that account.json, registry-auth.json and device-key.json are not readable by other users.',
   supportedAgents: ['nanoclaw'],
   supportedPlatforms: ['darwin', 'linux'],
+
+  fixTargets: permissionFixTargets,
 
   async run(ctx, h) {
     const dir = hostConfigDir(ctx);

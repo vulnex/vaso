@@ -2,6 +2,7 @@ import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { fixFirstConfig } from '../../remediation/config-writer.js';
 import { envString, lyrieEnvConfigs } from './env.js';
+import { configFixTargets } from '../../remediation/fix-refusal.js';
 
 /**
  * ShieldManager.isUrlSafe() (packages/core/src/engine/shield-manager.ts)
@@ -21,6 +22,8 @@ export const ly018 = defineCheck({
   severity: 'warning',
   description: 'Detect NODE_ENV=development in the Lyrie .env (the .env.example default). In development mode the Shield\'s URL filter lets web_fetch/web_search reach localhost, private networks (10/8, 192.168/16, 172.16) and *.internal/*.local hosts, so a prompt-injected agent can probe and pull data from internal services.',
   supportedAgents: ['lyrie'],
+
+  fixTargets: configFixTargets,
 
   async run(ctx, h) {
     const evidence: Evidence[] = [];

@@ -5,6 +5,7 @@ import { NATIVE_POLICY_FRAMEWORKS } from './native-policy-frameworks.js';
 import { fixFirstConfig } from '../../remediation/config-writer.js';
 import { getNestedValue } from '../../core/utils.js';
 import { openclawAgentEntries } from './openclaw-agents.js';
+import { configFixTargets } from '../../remediation/fix-refusal.js';
 
 /** The exec policy one OpenClaw `tools.exec` object selects: `mode`, else the legacy `security`. */
 function execPolicy(exec: unknown): { value: string; key: string } | undefined {
@@ -71,6 +72,8 @@ export const cfg005 = defineCheck({
   // Hermes gates commands through approvals (HM-008; its command_allowlist
   // auto-approves rather than restricts) and NemoClaw through sandbox policy.
   excludedAgents: [...CODING_AGENTS, ...NATIVE_POLICY_FRAMEWORKS, 'hermes', 'nemoclaw'],
+
+  fixTargets: configFixTargets,
 
   async run(ctx, h) {
     if (ctx.installation.agent === 'openclaw') return openclawExecPolicy(ctx, h);

@@ -56,14 +56,16 @@ export interface FixBoundary {
 
 const boundary = new AsyncLocalStorage<FixBoundary>();
 
+/** Whether `path` is `root` or inside it (also what the scan judges refusals by — fix-refusal.ts). */
+export function withinRoot(path: string, root: string): boolean {
+  return path === root || path.startsWith(root.endsWith(sep) ? root : root + sep);
+}
+
 /** Run `fn` (a fix) with writes confined to `b`. */
 export function withFixBoundary<T>(b: FixBoundary, fn: () => Promise<T>): Promise<T> {
   return boundary.run(b, fn);
 }
 
-function within(path: string, root: string): boolean {
-  return path === root || path.startsWith(root.endsWith(sep) ? root : root + sep);
-}
 
 /**
  * Refuse a target vaso must not change: a file with more than one hard link
@@ -84,7 +86,7 @@ async function guard(path: string, st: { isFile(): boolean; nlink: number; uid: 
   }
   for (const root of b.roots) {
     const realRoot = await realpath(root).catch(() => undefined);
-    if (realRoot && within(real, realRoot)) return;
+    if (realRoot && withinRoot(real, realRoot)) return;
   }
   throw new UnsafeTargetError(path, `resolves into ${real}, outside ${b.roots.join(' and ')} (where rollback can restore it)`);
 }

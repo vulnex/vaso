@@ -2,6 +2,7 @@ import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { fixEveryConfig } from '../../remediation/config-writer.js';
 import { markUntrustedProject, settingsConfigs } from './shared.js';
+import { configFixTargets } from '../../remediation/fix-refusal.js';
 
 export const aba010 = defineCheck({
   id: 'ABA-010',
@@ -10,6 +11,8 @@ export const aba010 = defineCheck({
   severity: 'warning',
   description: 'Detect loadExternalMcpConfigs: true — Abacus.AI then also launches MCP servers from Cursor, VS Code, Claude Desktop and Windsurf configs, including a cloned repo\'s .cursor/mcp.json and .vscode/mcp.json',
   supportedAgents: ['abacus'],
+
+  fixTargets: configFixTargets,
 
   async run(ctx, h) {
     const evidence: Evidence[] = [];

@@ -145,6 +145,19 @@ const layouts: Layout[] = [
     configsInStore: true,
   },
   {
+    name: 'a session file linked to ~/.ssh/id_rsa (0644) in a linked in-home session folder',
+    async build(_base, home) {
+      await copilotDir(join(home, '.copilot'));
+      await put(join(home, '.ssh', 'id_rsa'), 0o644, '-----BEGIN KEY-----\nAAAA\n-----END KEY-----\n');
+      await put(join(home, 'sess', 'events.jsonl'));
+      await symlink(join(home, '.ssh', 'id_rsa'), join(home, 'sess', 'k.jsonl'));
+      await symlink(join(home, 'sess'), join(home, '.copilot', 'session-state', 'abc'));
+      return {};
+    },
+    ghc001: /not changed by vaso fix: .*\/session-state\/abc\/k\.jsonl is a symlink/,
+    fixable: false,
+  },
+  {
     name: 'COPILOT_HOME outside the home',
     async build(base, home) {
       const cp = join(base, 'data', 'cp');
@@ -176,7 +189,9 @@ describe.each(layouts)('copilot-cli: $name', (layout) => {
   it('GHC-001 reports it, not offered to vaso fix', () => {
     const r = result(local, 'GHC-001');
     expect(r.passed).toBe(false);
-    expect(r.message).toMatch(layout.ghc001);
+    // Under a private temporary directory (macOS) a mode finding is blocked
+    // by the parents: informational and never fixable, with nothing to note
+    if (!r.evidence?.every(e => e.mitigated)) expect(r.message).toMatch(layout.ghc001);
     expect(Boolean(r.fixable)).toBe(layout.fixable);
     // nothing else offered that vaso fix would refuse
     expect(local.results.filter(x => x.fixable && (!x.passed || x.foldedInto)).map(x => x.id)).toEqual([]);

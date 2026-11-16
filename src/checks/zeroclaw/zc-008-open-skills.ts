@@ -1,6 +1,7 @@
 import { defineCheck } from '../../core/check-builder.js';
 import type { Evidence } from '../../core/types.js';
 import { asRecord, isFalse, isTrue, mainConfig, tomlLine, writeMainConfig } from './zc-config.js';
+import { configFixTargets } from '../../remediation/fix-refusal.js';
 
 function insecureUrl(url: string): boolean {
   return /^(http|git):\/\//i.test(url.trim());
@@ -14,6 +15,8 @@ export const zc008 = defineCheck({
   description:
     'Detect [skills] open_skills_enabled=true (community open-skills repo synced into the prompt), allow_scripts=true (skills may ship shell scripts), or skill registries fetched over plaintext http:// / git://',
   supportedAgents: ['zeroclaw'],
+
+  fixTargets: configFixTargets,
 
   async run(ctx, h) {
     const config = mainConfig(ctx.configs);

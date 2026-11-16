@@ -3,6 +3,7 @@ import { defineCheck } from '../../core/check-builder.js';
 import type { ParsedConfig } from '../../core/types.js';
 import { markUnreachable, queryPermissions, readableByOthers } from '../../core/permissions.js';
 import { restrictFilesToOwner } from '../../remediation/config-writer.js';
+import { permissionFixTargets } from '../../remediation/fix-refusal.js';
 
 export const cd002 = defineCheck({
   id: 'CD-002',
@@ -12,6 +13,8 @@ export const cd002 = defineCheck({
   description: 'Verify claude_desktop_config.json is not group/world-readable when it contains MCP env values',
   supportedAgents: ['claude-desktop'],
   supportedPlatforms: ['darwin', 'linux'],
+
+  fixTargets: permissionFixTargets,
 
   async run(ctx, h) {
     const evidence: Evidence[] = [];

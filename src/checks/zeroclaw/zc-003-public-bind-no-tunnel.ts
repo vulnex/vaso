@@ -1,6 +1,7 @@
 import { defineCheck } from '../../core/check-builder.js';
 import type { Evidence } from '../../core/types.js';
 import { gatewayPosture, mainConfig, tomlLine, writeMainConfig } from './zc-config.js';
+import { configFixTargets } from '../../remediation/fix-refusal.js';
 
 export const zc003 = defineCheck({
   id: 'ZC-003',
@@ -10,6 +11,8 @@ export const zc003 = defineCheck({
   description:
     'Detect a gateway bound beyond loopback ([gateway] host, or allow_public_bind=true for `--host` binds) with no tunnel and no [gateway.tls] — pairing codes and bearer tokens travel in cleartext; critical when pairing is also disabled',
   supportedAgents: ['zeroclaw'],
+
+  fixTargets: configFixTargets,
 
   async run(ctx, h) {
     const config = mainConfig(ctx.configs);

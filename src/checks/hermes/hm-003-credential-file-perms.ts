@@ -4,6 +4,7 @@ import { defineCheck } from '../../core/check-builder.js';
 import { accessibleByOthers, markUnreachable, queryPermissions } from '../../core/permissions.js';
 import type { ScanContext } from '../../core/types.js';
 import { restrictFilesToOwner } from '../../remediation/config-writer.js';
+import { permissionFixTargets } from '../../remediation/fix-refusal.js';
 
 const SENSITIVE_FILES = [
   'credentials.json',
@@ -39,6 +40,8 @@ export const hm003 = defineCheck({
   description: 'Detect ~/.hermes/credentials.json, ~/.hermes/auth.json, and ~/.hermes/mcp-tokens/*.json with mode wider than 0600.',
   supportedAgents: ['hermes'],
   supportedPlatforms: ['darwin', 'linux'],
+
+  fixTargets: permissionFixTargets,
 
   async run(ctx, h) {
     const evidence: Evidence[] = [];

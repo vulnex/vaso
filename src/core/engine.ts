@@ -20,6 +20,7 @@ import { extractToolDefinitions } from '../mcp/tool-baseline.js';
 import { credentialPathsFor } from '../adapters/adapter.js';
 import { captureConfigLoadErrors } from './config-loader.js';
 import { parseErrorMessage } from './parse-error.js';
+import { fixBoundaryOf, markRefusedFix } from '../remediation/fix-refusal.js';
 
 /** How long one check may run before it is reported as errored (default 5 min). */
 export const DEFAULT_CHECK_TIMEOUT_MS = 300_000;
@@ -126,6 +127,21 @@ function runCheckUncapped(check: CheckModule, ctx: ScanContext, timeoutMs: numbe
       .then(resolve, reject)
       .finally(() => clearTimeout(timer));
   });
+}
+
+/**
+ * A finding offered to `vaso fix` whose fix would be refused for every file
+ * it changes (outside the home, a symlink, …) is not fixable — a second
+ * `vaso fix` would otherwise fail on it forever. Judged on the full evidence,
+ * before it is capped for reports.
+ */
+async function markRefusedFixes(checks: CheckModule[], ctx: ScanContext, results: CheckResult[]): Promise<CheckResult[]> {
+  if (!results.some(r => r.fixable)) return results;
+  const byId = new Map(checks.map(c => [c.id, c]));
+  const boundary = await fixBoundaryOf(ctx.installation.installDir, ctx.fs);
+  return Promise.all(results.map(r => (r.fixable && (!r.passed || r.foldedInto)
+    ? markRefusedFix(byId.get(r.id), ctx, r, boundary)
+    : r)));
 }
 
 /** The errored result standing in for a check that produced none. */
@@ -335,8 +351,8 @@ export class ScanEngine {
       applicable.map(check => runCheckUncapped(check, context, this.checkTimeoutMs))
     ));
 
-    const uncapped = dedupePermissionFindings(settled.map((r, index) =>
-      r.status === 'fulfilled' ? r.value : erroredResult(applicable[index], r.reason)));
+    const uncapped = await markRefusedFixes(applicable, context, dedupePermissionFindings(settled.map((r, index) =>
+      r.status === 'fulfilled' ? r.value : erroredResult(applicable[index], r.reason))));
     const displayName = adapter?.displayName ?? installation.agent;
     for (const error of loadErrors) {
       if (uncapped.some(r => r.id === 'CONFIG-LOAD' && r.evidence?.[0]?.file === error.filePath)) continue;

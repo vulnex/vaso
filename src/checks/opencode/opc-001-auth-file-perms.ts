@@ -4,6 +4,7 @@ import { xdgConfigDir, xdgDataDir } from '../../adapters/opencode.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { accessibleByOthers, markUnreachable, queryPermissions } from '../../core/permissions.js';
 import { restrictFilesToOwner } from '../../remediation/config-writer.js';
+import { permissionFixTargets } from '../../remediation/fix-refusal.js';
 
 export const opc001 = defineCheck({
   id: 'OPC-001',
@@ -13,6 +14,8 @@ export const opc001 = defineCheck({
   description: 'Verify that ~/.local/share/opencode/auth.json is not readable by other users',
   supportedAgents: ['opencode'],
   supportedPlatforms: ['darwin', 'linux'],
+
+  fixTargets: permissionFixTargets,
 
   async run(ctx, h) {
     const paths = authPaths(ctx);

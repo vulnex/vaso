@@ -162,10 +162,11 @@ export class LocalFSProvider implements FSProvider {
     }
   }
 
-  async stat(path: string): Promise<{ mode: number; isFile(): boolean; isDirectory(): boolean }> {
+  async stat(path: string): Promise<{ mode: number; isFile(): boolean; isDirectory(): boolean; nlink?: number }> {
     const s = await stat(this.fsPath(path));
     return {
       mode: s.mode,
+      nlink: s.nlink,
       isFile: () => s.isFile(),
       isDirectory: () => s.isDirectory(),
     };

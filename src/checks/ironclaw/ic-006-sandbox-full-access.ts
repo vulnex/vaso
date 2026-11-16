@@ -4,6 +4,7 @@ import { updateConfigValue, updateEnvFile } from '../../remediation/config-write
 import {
   isLegacy, isLegacyUnused, legacySetting, lineOf, rebornConfig, rebornProfileSources, rebornServiceUnits, str, table, truthy,
 } from './layout.js';
+import { configFixTargets } from '../../remediation/fix-refusal.js';
 
 /*
  * 1.x: boot profile `local-dev-yolo` (StandaloneUnrestricted) grants
@@ -26,6 +27,8 @@ export const ic006 = defineCheck({
   severity: 'critical',
   description: 'Check for the 1.x local-dev-yolo boot profile (unrestricted host filesystem, process, network and environment access) or the 0.x SANDBOX_POLICY=full_access + SANDBOX_ALLOW_FULL_ACCESS=true double opt-in',
   supportedAgents: ['ironclaw'],
+
+  fixTargets: configFixTargets,
 
   async run(ctx, h) {
     const evidence: Evidence[] = [];

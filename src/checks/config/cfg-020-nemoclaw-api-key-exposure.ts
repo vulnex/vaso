@@ -3,6 +3,7 @@ import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { accessibleByOthers, markUnreachable, queryPermissions } from '../../core/permissions.js';
 import { restrictFilesToOwner } from '../../remediation/config-writer.js';
+import { permissionFixTargets } from '../../remediation/fix-refusal.js';
 
 const CREDENTIAL_FILE = 'credentials.json';
 
@@ -13,6 +14,8 @@ export const cfg020 = defineCheck({
   severity: 'critical',
   description: 'Check if NemoClaw credentials.json stores API keys in plaintext with unsafe file permissions',
   supportedAgents: ['openclaw', 'nemoclaw'],
+
+  fixTargets: permissionFixTargets,
 
   async run(ctx, h) {
     const credPath = join(ctx.fs.homedir(), '.nemoclaw', CREDENTIAL_FILE);

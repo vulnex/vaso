@@ -2,6 +2,7 @@ import { defineCheck } from '../../core/check-builder.js';
 import type { Evidence } from '../../core/types.js';
 import { envNote } from '../../adapters/env-overrides.js';
 import { gatewayPosture, mainConfig, tomlLine, writeMainConfig } from './zc-config.js';
+import { configFixTargets } from '../../remediation/fix-refusal.js';
 
 export const zc004 = defineCheck({
   id: 'ZC-004',
@@ -11,6 +12,8 @@ export const zc004 = defineCheck({
   description:
     'Detect [gateway] require_pairing=false — the gateway accepts every bearer token (fails open), so any caller can drive the agent; critical when the gateway is reachable beyond loopback or through a tunnel',
   supportedAgents: ['zeroclaw'],
+
+  fixTargets: configFixTargets,
 
   async run(ctx, h) {
     const config = mainConfig(ctx.configs);

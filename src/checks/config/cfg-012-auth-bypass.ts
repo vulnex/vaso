@@ -3,6 +3,7 @@ import { defineCheck } from '../../core/check-builder.js';
 import { CODING_AGENTS } from '../../core/types.js';
 import { fixFirstConfig } from '../../remediation/config-writer.js';
 import { getNestedValue } from '../../core/utils.js';
+import { configFixTargets } from '../../remediation/fix-refusal.js';
 
 const BYPASS_KEYS = ['auth.bypass', 'gateway.auth.bypass', 'security.authBypass', 'noAuth'];
 
@@ -21,6 +22,8 @@ export const cfg012 = defineCheck({
   severity: 'critical',
   description: 'Check if authentication bypass is enabled in configuration',
   excludedAgents: CODING_AGENTS,
+
+  fixTargets: configFixTargets,
 
   async run(ctx, h) {
     const evidence: Evidence[] = [];

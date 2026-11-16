@@ -2,6 +2,7 @@ import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { updateConfigValue } from '../../remediation/config-writer.js';
 import { exposed, gateway, gatewayToml, record, settingEvidence } from './shared.js';
+import { configFixTargets } from '../../remediation/fix-refusal.js';
 
 const DEFAULT_SSH_TTL = 86400;
 
@@ -12,6 +13,8 @@ export const osh004 = defineCheck({
   severity: 'warning',
   description: 'Detect OpenShell sessions that never expire: `ssh_session_ttl_secs = 0` (sandbox SSH tokens valid forever), and sandbox gateway JWTs without a TTL (`gateway_jwt.ttl_secs` unset or 0) on a gateway reachable from other hosts or shared through OIDC — a stolen token stays usable for the life of the sandbox',
   supportedAgents: ['openshell'],
+
+  fixTargets: configFixTargets,
 
   async run(ctx, h) {
     const evidence: Evidence[] = [];
