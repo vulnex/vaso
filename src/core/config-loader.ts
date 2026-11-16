@@ -1,5 +1,5 @@
 import { dirname, extname, isAbsolute, join, normalize } from 'node:path';
-import { classifySensitivePath } from '../analyzers/sensitive-paths.js';
+import { classifySensitivePath, credentialStoreOf } from '../analyzers/sensitive-paths.js';
 import { parseYamlSafe } from './yaml-safe.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { parseTomlSafe } from './toml-safe.js';
@@ -166,6 +166,10 @@ function errorMessage(error: unknown): string {
  * either, so both report the same — and an SSH key is never parsed as a config.
  */
 export async function linkedIntoSink(filePath: string, fs: FSProvider): Promise<string | undefined> {
+  // A file written inside another tool's credential store (an agent folder
+  // set there: COPILOT_HOME=~/.aws/cop) — no agent keeps its config there;
+  // the probe ships no content from one either (credentialStoreSinks)
+  if (credentialStoreOf(filePath)) return filePath;
   if (fs.kind === 'snapshot') return undefined;
   const named = new Set(classifySensitivePath(filePath));
   const outside = (t: string) => classifySensitivePath(t).some(label => !named.has(label));
@@ -196,7 +200,10 @@ export async function linkedIntoSink(filePath: string, fs: FSProvider): Promise<
 export function sinkLinkError(filePath: string, target: string): Error & { omitted: 'sensitive' } {
   // Named for what the target is: /etc/hosts is system configuration, not a credential store
   const what = classifySensitivePath(target)[0] ?? 'a credential store, shell startup file or /etc';
-  return Object.assign(new Error(`not read: reached through a symlink into ${what} (${target}): ${filePath}`), { omitted: 'sensitive' as const });
+  const message = target === filePath
+    ? `not read: is inside ${credentialStoreOf(filePath) ?? what}: ${filePath}`
+    : `not read: reached through a symlink into ${what} (${target}): ${filePath}`;
+  return Object.assign(new Error(message), { omitted: 'sensitive' as const });
 }
 
 export async function loadConfig(filePath: string, fs?: FSProvider): Promise<ParsedConfig> {

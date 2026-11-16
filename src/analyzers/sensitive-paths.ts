@@ -53,6 +53,23 @@ export function classifySensitivePath(path: string): string[] {
 }
 
 /**
+ * The folders of SENSITIVE_SINKS (by index) that are other tools' credential
+ * stores — ~/.ssh, ~/.aws, ~/.gnupg, ~/.kube, ~/.docker, ~/.config/gh,
+ * ~/.config/gcloud, ~/.azure, ~/.password-store, ~/Library/Keychains,
+ * browser profiles. No agent keeps its configuration there, so an agent
+ * folder placed in one (COPILOT_HOME=~/.aws/cop, CODEX_HOME=~/.ssh/codex)
+ * is not read on either side: credentialStoreOf. The probe's copy is
+ * credentialStoreSinks in probe/sensitive_sinks.go.
+ */
+export const CREDENTIAL_STORE_SINKS: readonly number[] = [0, 2, 3, 4, 5, 8, 9, 10, 11, 12, 15];
+
+/** The credential store (CREDENTIAL_STORE_SINKS) a path lies in, by how it is written; undefined for none. */
+export function credentialStoreOf(path: string): string | undefined {
+  if (!path || path.startsWith('-')) return undefined;
+  return CREDENTIAL_STORE_SINKS.map(i => SENSITIVE_SINKS[i]).find(s => s.re.test(path))?.label;
+}
+
+/**
  * Credential stores a program reads secrets from, by path: the credential
  * entries of SENSITIVE_SINKS (not shell startup files or all of /etc, which
  * matter as write targets) plus files that hold secrets by name. The skill

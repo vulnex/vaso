@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { SENSITIVE_SINKS, classifySensitivePath, isCredentialPath } from './sensitive-paths.js';
+import { CREDENTIAL_STORE_SINKS, SENSITIVE_SINKS, classifySensitivePath, credentialStoreOf, isCredentialPath } from './sensitive-paths.js';
 
 describe('SENSITIVE_SINKS', () => {
   it('is the list the probe enforces (probe/sensitive_sinks.go), pattern for pattern', () => {
@@ -15,6 +15,25 @@ describe('SENSITIVE_SINKS', () => {
     expect(probe).toEqual(SENSITIVE_SINKS.map(s => s.re.source));
     // The probe compiles each one with (?i)
     expect(SENSITIVE_SINKS.every(s => s.re.flags === 'i')).toBe(true);
+  });
+
+  it('names the same credential-store folders as the probe (credentialStoreSinks)', () => {
+    const go = readFileSync(join(__dirname, '..', '..', 'probe', 'sensitive_sinks.go'), 'utf-8');
+    const list = /var credentialStoreSinks = \[\]int\{([^}]*)\}/.exec(go);
+    expect(list).not.toBeNull();
+    expect(list![1].split(',').map(s => Number(s.trim()))).toEqual([...CREDENTIAL_STORE_SINKS]);
+  });
+
+  it('credentialStoreOf: folders of other tools\' credentials, as written — not agents\' own token files, /etc or shell startup files', () => {
+    for (const p of ['/home/u/.aws/cop/config.json', '/home/u/.ssh/codex/config.toml', '/home/u/.AWS/x', '/home/u/.config/gh/cop/settings.json',
+      '/home/u/.gnupg/a', '/home/u/.kube/a', '/home/u/.docker/a', '/Users/u/Library/Keychains/x', '/home/u/.mozilla/x']) {
+      expect(credentialStoreOf(p), p).toBeDefined();
+    }
+    for (const p of ['/home/u/.copilot/config.json', '/etc/hermes/config.yaml', '/home/u/.bashrc', '/home/u/.codex/auth.json',
+      '/home/u/.hermes/auth.json', '/home/u/.netrc', '/home/u/awsome/x']) {
+      expect(credentialStoreOf(p), p).toBeUndefined();
+    }
+    expect(credentialStoreOf('/home/u/.aws/cop/config.json')).toBe('AWS credentials (~/.aws)');
   });
 
   it('classifies credential stores and leaves ordinary paths alone', () => {
