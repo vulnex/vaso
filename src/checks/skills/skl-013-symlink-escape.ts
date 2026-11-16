@@ -5,6 +5,7 @@ import { getAllSkillsDirs, relEscapes } from '../../core/utils.js';
 import { classifySensitivePath } from '../../analyzers/sensitive-paths.js';
 import { noSkillsDirResult } from './skill-files.js';
 import { linkScope } from '../../core/skill-root-scope.js';
+import { MAX_SKILL_TREE_ENTRIES } from '../../core/skill-tree-count.js';
 
 /**
  * SKL-013 — Workspace Symlink Escape (GhostApproval / CWE-61 + CWE-451).
@@ -45,8 +46,9 @@ interface SymlinkFinding {
   sensitiveLabels: string[];
   /** A whole skill linked into an installed agent's skills dir (`skills/x → ~/checkout/x`). */
   skillInstall: boolean;
-  /** Linked to where no skills tree is walked: its code is not scanned (SKL-002). */
-  unscanned?: boolean;
+  /** Its code is not scanned (SKL-002): linked to where no skills tree is
+   *  walked, or to a tree over the entry limit. */
+  unscanned?: 'outside' | 'limit';
 }
 
 function resolveTarget(rawTarget: string, linkDir: string, home: string): string {
@@ -86,6 +88,8 @@ export const skl013 = defineCheck({
 
     const findings: SymlinkFinding[] = [];
     const seen = new Set<string>();
+    // links the skill walk left out for the size of their tree (inventory)
+    const overLimit = new Set((ctx.installation.unscannedSkillsDirs ?? []).filter(u => u.reason === 'limit').map(u => u.path));
 
     for (const dir of dirs) {
       const root = resolve(dir);
@@ -129,7 +133,9 @@ export const skl013 = defineCheck({
         // workspace file in disguise. `vaso skill audit` keeps judging it.
         const skillInstall = ctx.installation.agent !== 'skill-audit' && sensitiveLabels.length === 0 &&
           resolve(dirname(linkPath)) === root && await isDirectory(ctx.fs, linkPath);
-        const unscanned = skillInstall && !(await inScope(linkPath));
+        const unscanned = !skillInstall ? undefined
+          : !(await inScope(linkPath)) ? 'outside' as const
+            : overLimit.has(linkPath) ? 'limit' as const : undefined;
         findings.push({ linkPath, rawTarget, resolvedTarget, sensitiveLabels, skillInstall, unscanned });
       }
     }
@@ -144,8 +150,10 @@ export const skl013 = defineCheck({
       snippet: `${f.linkPath} → ${f.rawTarget}`,
       detail: f.sensitiveLabels.length > 0
         ? `Symlink resolves outside the workspace to ${f.sensitiveLabels.join(', ')} (${f.resolvedTarget}). An agent instructed to edit this "local" file writes to the sensitive target instead — GhostApproval-style informed-consent bypass.`
-        : f.unscanned
+        : f.unscanned === 'outside'
           ? `Skill installed as a link to ${f.resolvedTarget} — a place no skills tree is walked, so its code is not scanned (see SKL-002); edits to it change what is there.`
+        : f.unscanned === 'limit'
+          ? `Skill installed as a link to ${f.resolvedTarget} — a tree over the ${MAX_SKILL_TREE_ENTRIES}-entry limit VASO walks, so its code is not scanned (see SKL-002); edits to it change what is there.`
         : f.skillInstall
           ? `Skill installed as a link to ${f.resolvedTarget} — its code is scanned there; edits to it change the source checkout.`
           : `Symlink resolves outside the workspace to ${f.resolvedTarget}. A write the user believes is workspace-local lands outside the project.`,

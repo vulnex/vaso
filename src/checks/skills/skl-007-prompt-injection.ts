@@ -11,10 +11,11 @@ import { noSkillsDirResult } from './skill-files.js';
 const DOC_EXTENSIONS = new Set(['.md', '.txt', '.rst']);
 const PROMPT_INJECTION_RULES = SECURITY_PATTERNS.filter(r => r.category === 'prompt-injection');
 
-async function getDocFiles(dir: string, fs: ScanContext['fs']): Promise<string[]> {
+/** `uncapped`: follow links whatever the size of their tree (`vaso skill audit`). */
+async function getDocFiles(dir: string, fs: ScanContext['fs'], uncapped: boolean): Promise<string[]> {
   const files: string[] = [];
   try {
-    const entries = await walkSkillTree(fs, dir);
+    const entries = await walkSkillTree(fs, dir, undefined, { uncapped });
     for (const entry of entries) {
       // Same vendor/VCS exclusions as the code walk (node_modules READMEs aren't skill docs)
       if (entry.isFile && !isExcludedPath(dir, entry.parentPath, { keepBuildOutput: true })) {
@@ -49,7 +50,7 @@ export const skl007 = defineCheck({
     if (noDir) return noDir;
 
     const evidence: Evidence[] = [];
-    const files = [...new Set((await Promise.all(dirs.map(d => getDocFiles(d, ctx.fs)))).flat())];
+    const files = [...new Set((await Promise.all(dirs.map(d => getDocFiles(d, ctx.fs, ctx.installation.agent === 'skill-audit')))).flat())];
 
     for (const file of files) {
       try {

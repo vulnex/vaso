@@ -2,7 +2,7 @@ import { basename, dirname, join, normalize, relative, isAbsolute } from 'node:p
 import type { DirentInfo, FSProvider } from './fs-provider.js';
 import { relEscapes } from './path-rel.js';
 import { classifySensitivePath } from '../analyzers/sensitive-paths.js';
-import { linkScope } from './skill-root-scope.js';
+import { linkCap, linkScope } from './skill-root-scope.js';
 
 /**
  * Skills are often installed as symlinks — `~/.codex/skills/<name>` pointing
@@ -23,6 +23,13 @@ import { linkScope } from './skill-root-scope.js';
  * where the tree's root may not (another user's home, an OS directory, the
  * home itself — linkScope in skill-root-scope.ts; linkInScope in the probe):
  * walkSkillTree lists those links (`refused`), whose skills go unscanned.
+ *
+ * A directory link whose target tree holds more than MAX_SKILL_TREE_ENTRIES
+ * entries (counted from the target, each link on its own — linkCap) is not
+ * followed either, as the probe doesn't (≥ 1.4.2): `/opt/homebrew/Cellar`
+ * linked into a plain `~/.claude/skills` would otherwise be read whole.
+ * walkSkillTree lists those links (`overLimit`); `vaso skill audit` walks
+ * its explicit target whole (`uncapped`).
  */
 const MAX_LINK_DEPTH = 8;
 
@@ -114,35 +121,59 @@ async function sinkLink(fs: FSProvider, link: string, real: string, named: Reado
  * a directory entry; a followed file link as a file entry. Throws like
  * readdirEntries when `root` itself can't be listed.
  */
-export async function walkSkillTree(fs: FSProvider, root: string, refused?: string[]): Promise<DirentInfo[]> {
+export async function walkSkillTree(fs: FSProvider, root: string, refused?: string[], opts: SkillWalkOptions = {}): Promise<DirentInfo[]> {
   const real = await realOrSelf(fs, root);
-  return walk(fs, root, [real], new Visited(real), 0, true, new Set(classifySensitivePath(root)), noting(await linkScope(fs, root), refused));
+  const rules: WalkRules = {
+    inScope: noting(await linkScope(fs, root), refused),
+    overLimit: noting(await capOf(fs, root, opts), opts.overLimit, true),
+  };
+  return walk(fs, root, [real], new Visited(real), 0, true, new Set(classifySensitivePath(root)), rules);
 }
 
-/** `inScope`, adding every link it refuses to `refused` (when given). */
-function noting(inScope: InScope, refused: string[] | undefined): InScope {
-  if (!refused) return inScope;
+export interface SkillWalkOptions {
+  /** Directory links left out for the size of the tree they lead to (linkCap) are added here. */
+  overLimit?: string[];
+  /** Follow links whatever the size of their tree (`vaso skill audit`'s explicit target). */
+  uncapped?: boolean;
+}
+
+/** The size rule for a walk of `root` (linkCap), or none when uncapped. */
+async function capOf(fs: FSProvider, root: string, opts: SkillWalkOptions): Promise<LinkRule> {
+  return opts.uncapped ? async () => false : linkCap(fs, root);
+}
+
+/** `rule`, adding every link it answers `when` for to `list` (when given). */
+function noting(rule: LinkRule, list: string[] | undefined, when = false): LinkRule {
+  if (!list) return rule;
   return async (link: string) => {
-    const ok = await inScope(link);
-    if (!ok && !refused.includes(link)) refused.push(link);
-    return ok;
+    const answer = await rule(link);
+    if (answer === when && !list.includes(link)) list.push(link);
+    return answer;
   };
 }
 
-/** Whether a link met in the walk may be followed (linkScope). */
-type InScope = (link: string) => Promise<boolean>;
+/** A yes/no rule on a link met in the walk. */
+type LinkRule = (link: string) => Promise<boolean>;
+
+interface WalkRules {
+  /** The link may be followed for where it leads (linkScope). */
+  inScope: LinkRule;
+  /** The directory link leads to a tree over the entry limit (linkCap). */
+  overLimit: LinkRule;
+}
 
 /**
  * The second half of walkSkillTree for a caller that already listed `root`
  * recursively: what the symlinks among `entries` (those inside `root`) lead
  * to. Entries of the listing itself are not repeated.
  */
-export async function followSkillLinks(fs: FSProvider, root: string, entries: DirentInfo[]): Promise<DirentInfo[]> {
+export async function followSkillLinks(fs: FSProvider, root: string, entries: DirentInfo[], opts: SkillWalkOptions = {}): Promise<DirentInfo[]> {
   const rootReal = await realOrSelf(fs, root);
   const visited = new Visited(rootReal);
   const prefix = root.endsWith('/') ? root : root + '/';
   const links = entries.filter(e => e.isSymbolicLink && (e.parentPath === root || (e.parentPath ?? '').startsWith(prefix)));
-  return (await follow(fs, root, links, [rootReal], visited, 0, new Set(classifySensitivePath(root)), await linkScope(fs, root))).filter(e => !e.isSymbolicLink || !links.includes(e));
+  const rules: WalkRules = { inScope: await linkScope(fs, root), overLimit: noting(await capOf(fs, root, opts), opts.overLimit, true) };
+  return (await follow(fs, root, links, [rootReal], visited, 0, new Set(classifySensitivePath(root)), rules)).filter(e => !e.isSymbolicLink || !links.includes(e));
 }
 
 async function walk(
@@ -153,7 +184,7 @@ async function walk(
   depth: number,
   isRoot: boolean,
   named: ReadonlySet<string>,
-  inScope: InScope,
+  rules: WalkRules,
 ): Promise<DirentInfo[]> {
   let entries: DirentInfo[];
   try {
@@ -171,7 +202,7 @@ async function walk(
       entries = entries.filter(e => !underAny(join(real, relative(dir, e.parentPath ?? dir), e.name), real, taken));
     }
   }
-  return follow(fs, dir, entries, roots, visited, depth, named, inScope);
+  return follow(fs, dir, entries, roots, visited, depth, named, rules);
 }
 
 /** `entries` with every followable symlink among them expanded in place. */
@@ -183,8 +214,9 @@ async function follow(
   visited: Visited,
   depth: number,
   named: ReadonlySet<string>,
-  inScope: InScope,
+  rules: WalkRules,
 ): Promise<DirentInfo[]> {
+  const { inScope } = rules;
   const out: DirentInfo[] = [];
   const dirLinks: Array<{ entry: DirentInfo; parent: string; link: string; real: string }> = [];
   for (const entry of entries) {
@@ -237,13 +269,15 @@ async function follow(
   // most specific link.
   dirLinks.sort((a, b) => b.real.length - a.real.length);
   for (const { entry, parent, link, real } of dirLinks) {
-    if (visited.covers(real)) {
+    // Over the entry limit: neither walked nor marked walked (another link
+    // to the same tree is reported too)
+    if (visited.covers(real) || await rules.overLimit(link)) {
       out.push(entry);
       continue;
     }
     visited.add(real);
     out.push({ name: entry.name, isFile: false, isDirectory: true, parentPath: parent });
-    out.push(...await walk(fs, link, [...roots, real], visited, depth + 1, false, named, inScope));
+    out.push(...await walk(fs, link, [...roots, real], visited, depth + 1, false, named, rules));
   }
   return out;
 }

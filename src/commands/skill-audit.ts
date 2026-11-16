@@ -54,7 +54,7 @@ export async function runSkillAudit(skillPath: string, options: SkillAuditComman
   }
 
   // Discover code files
-  const skillFiles = await getSkillFiles(resolved);
+  const skillFiles = await getSkillFiles(resolved, undefined, { uncapped: true });
 
   // Even a directory with no code files is worth auditing: an instructions-only
   // skill (SKILL.md) is what SKL-007 checks for prompt injection, the

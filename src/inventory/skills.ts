@@ -104,6 +104,14 @@ export async function collectSkillInventory(installation: AgentInstallation, fs:
       installation.unscannedSkillsDirs = [...known, u];
       incomplete.push(`${link}: ${unscannedReason(u.reason, link, u)}`);
     }
+    // A directory linked in from a tree over the entry limit: not walked, as
+    // a skills directory over it isn't (SKL-002 reports it)
+    for (const link of listing.overLimitLinks) {
+      const known = installation.unscannedSkillsDirs ?? [];
+      if (known.some(u => u.path === link)) continue;
+      installation.unscannedSkillsDirs = [...known, { path: link, reason: 'limit' }];
+      incomplete.push(`${link}: ${unscannedReason('limit', link)}`);
+    }
 
     // A SKILL.md that is a symlink into the same tree (gstack links each
     // skill's SKILL.md to its copy under skills/gstack/): the walk doesn't
