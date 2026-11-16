@@ -54,6 +54,21 @@ describe('GitHub Copilot CLI adapter', () => {
     expect(result).toEqual([]);
   });
 
+  it('a config file that is there but not read still marks the install (its CONFIG-LOAD and GHC-001 belong to it)', async () => {
+    // ~/.copilot linked into ~/.aws: config.json is not read on either side
+    setExistingPaths([copilotDir, join(copilotDir, 'config.json')]);
+    mockLoadConfig.mockRejectedValue(Object.assign(new Error('not read'), { omitted: 'sensitive' }));
+    const result = await copilotCliAdapter.detect();
+    expect(result).toHaveLength(1);
+    expect(result[0].installDir).toBe(copilotDir);
+    expect(result[0].configFiles).toEqual([]);
+  });
+
+  it('a bare ~/.copilot with no recognized config file is not an install', async () => {
+    setExistingPaths([copilotDir, join(copilotDir, 'ide')]);
+    expect(await copilotCliAdapter.detect()).toEqual([]);
+  });
+
   it('does not treat a repo with .mcp.json as a Copilot install when Copilot is absent', async () => {
     // .mcp.json is also Claude Code's project file
     setExistingPaths([join(process.cwd(), '.mcp.json')]);

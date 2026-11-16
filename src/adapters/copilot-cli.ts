@@ -5,7 +5,7 @@ import type { ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { loadConfig } from '../core/config-loader.js';
-import { loadConfigIfPresent } from './load-if-present.js';
+import { loadConfigIfPresent, pathPresent } from './load-if-present.js';
 import { nvmBinaryGlob, npmPackageJsonGlobs } from './nvm-binary.js';
 import { discoverCliInstalls } from './cli-installs.js';
 import { getUserHomeDirs } from './openclaw.js';
@@ -60,6 +60,13 @@ async function loadFiles(dir: string, names: string[], fs: FSProvider): Promise<
     if (loaded) out.push(loaded);
   }
   return out;
+}
+
+async function anyPresent(dir: string, names: string[], fs: FSProvider): Promise<boolean> {
+  for (const name of names) {
+    if (await pathPresent(join(dir, name), fs)) return true;
+  }
+  return false;
 }
 
 /** Every `*.json` hook file directly in `dir`, sorted by name. */
@@ -150,7 +157,10 @@ export const copilotCliAdapter: AgentAdapter = {
       // A bare ~/.copilot/ with no recognized config files and no `copilot`
       // binary is leftover state from another tool (the Copilot IDE extension
       // and `gh copilot` both write under ~/.copilot/ide/), not a CLI install.
-      if (configFiles.length === 0 && !cliBinary) continue;
+      // A recognized config file that is there but not read (unreadable, or
+      // ~/.copilot linked into a credential store) still marks an install:
+      // its CONFIG-LOAD and GHC-001's store-link finding belong to it.
+      if (configFiles.length === 0 && !cliBinary && !(await anyPresent(copilotDir, USER_CONFIG_FILES, fs))) continue;
 
       const version = installs.primary?.version;
 

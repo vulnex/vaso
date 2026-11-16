@@ -281,4 +281,29 @@ describe('configs linked into a credential store', () => {
       await rm(home, { recursive: true, force: true });
     }
   });
+
+  it('nor through a linked folder above them (~/.copilot → ~/.aws/cop), as the probe omits them (resolvedIntoSink)', async () => {
+    const { mkdtemp, symlink } = await import('node:fs/promises');
+    const { LocalFSProvider } = await import('./local-fs-provider.js');
+    const { readTextIfPresent } = await import('../adapters/load-if-present.js');
+    const home = await mkdtemp(join(tmpdir(), 'vaso-sink-dir-link-'));
+    try {
+      await mkdir(join(home, '.aws', 'cop'), { recursive: true });
+      await mkdir(join(home, 'dotfiles', 'cop'), { recursive: true });
+      await writeFile(join(home, '.aws', 'cop', 'config.json'), '{"a":1}\n');
+      await writeFile(join(home, 'dotfiles', 'cop', 'config.json'), '{"a":1}\n');
+      await symlink(join(home, '.aws', 'cop'), join(home, '.copilot'));
+      await symlink(join(home, 'dotfiles', 'cop'), join(home, '.codex'));
+      const fs = new LocalFSProvider();
+      const { result, loadErrors } = await captureConfigLoadErrors(() => loadConfig(join(home, '.copilot', 'config.json'), fs).catch((e: Error) => e));
+      expect(result).toBeInstanceOf(Error);
+      expect(loadErrors[0].message).toMatch(/^not read: reached through a symlink into AWS credentials \(~\/.aws\)/);
+      expect(await readTextIfPresent(join(home, '.copilot', 'config.json'), fs)).toBeUndefined();
+      // a folder linked anywhere else is read; the store's own spelling names it
+      expect((await loadConfig(join(home, '.codex', 'config.json'), fs)).data).toEqual({ a: 1 });
+      expect((await loadConfig(join(home, '.aws', 'cop', 'config.json'), fs)).data).toEqual({ a: 1 });
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
 });
