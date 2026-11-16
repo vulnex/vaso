@@ -2,8 +2,11 @@ import { basename, dirname, isAbsolute, join, normalize, relative } from 'node:p
 import type { FSProvider } from './fs-provider.js';
 import type { UnscannedSkillsDir } from './types.js';
 import { SENSITIVE_SINKS, classifySensitivePath } from '../analyzers/sensitive-paths.js';
-import { configTreeGap, configTreeStatus, manifestCoversTree } from './probe-coverage.js';
+import {
+  configTreeGap, configTreeStatus, expandManifestGlob, expandedGlobRegex, manifestCoversTree, manifestSkillGlobs, pathChain, splitGlob,
+} from './probe-coverage.js';
 import { relEscapes } from './path-rel.js';
+import { MAX_SKILL_TREE_ENTRIES, countSkillTreeEntries } from './skill-tree-count.js';
 
 /**
  * Where a skills tree may be walked from, and where a link met while walking
@@ -230,9 +233,12 @@ async function isHomeItself(fs: FSProvider, dir: string, home: string): Promise<
 /**
  * Why a skills directory is not scanned, or undefined when it is: the home
  * itself (`home`), somewhere no skills tree is walked (`outside` — the
- * probe reports such trees `refused`), or over the remote probe's entry
- * limit. An agent's own default tree (one the manifest walks) is judged only
- * when it lies in the home as written: a link may take it elsewhere.
+ * probe reports such trees `refused`), or over the skills-tree entry limit
+ * (`limit`, MAX_SKILL_TREE_ENTRIES — the probe's maxConfigTreeEntries), which
+ * a config-set tree and an agent's own tree the probe walks as a
+ * config-derived one (linkedManifestBase) hold to, locally as remotely. An
+ * agent's own default tree (one the manifest walks) is judged only when it
+ * lies in the home as written: a link may take it elsewhere.
  */
 export async function skillRootGap(fs: FSProvider, dir: string, home: string): Promise<UnscannedSkillsDir['reason'] | undefined> {
   if (!isAbsolute(dir)) return 'relative';
@@ -247,7 +253,11 @@ export async function skillRootGap(fs: FSProvider, dir: string, home: string): P
     }
     const p = normalize(dir);
     if (!isAbsolute(home) || !strictlyWithin(p, clean(home)) || classifySensitivePath(p).length > 0) return undefined;
-    return (await skillTreeAllowed(fs, dir, home)) ? undefined : refused();
+    if (!(await skillTreeAllowed(fs, dir, home))) return refused();
+    // One the probe walks as a config-derived tree (a link takes it, or a
+    // wildcard directory above it, elsewhere) holds to its entry limit
+    const base = await linkedManifestBase(fs, p, home);
+    return base !== undefined && (await skillTreeAllowed(fs, base, home)) && (await overEntryLimit(fs, base, home)) ? 'limit' : undefined;
   }
   if (fs.kind === 'snapshot') {
     const status = configTreeStatus(fs, dir);
@@ -258,7 +268,90 @@ export async function skillRootGap(fs: FSProvider, dir: string, home: string): P
   if (await isHomeItself(fs, dir, home)) return 'home';
   if (!(await skillTreeAllowed(fs, dir, home))) return 'outside';
   const gap = configTreeGap(fs, dir);
-  return gap === 'refused' ? 'outside' : gap;
+  if (gap) return gap === 'refused' ? 'outside' : gap;
+  // Local: the probe's entry limit, judged the same way before any of it is read
+  if (fs.kind !== 'snapshot' && (await overEntryLimit(fs, normalize(dir), home))) return 'limit';
+  return undefined;
+}
+
+const limitCache = new WeakMap<FSProvider, Map<string, Promise<boolean>>>();
+
+/**
+ * The skills tree at `dir` holds more entries than a scan walks
+ * (MAX_SKILL_TREE_ENTRIES, counted as the probe counts: skill-tree-count.ts);
+ * links in it followed where a tree of the user whose home is `home` may lead.
+ * Remembered per provider: adapters and the registry ask again.
+ */
+export function overEntryLimit(fs: FSProvider, dir: string, home: string): Promise<boolean> {
+  let byDir = limitCache.get(fs);
+  if (!byDir) limitCache.set(fs, (byDir = new Map()));
+  const key = `${clean(home)}\0${clean(dir)}`;
+  let hit = byDir.get(key);
+  if (!hit) {
+    hit = countSkillTreeEntries(fs, dir, MAX_SKILL_TREE_ENTRIES, p => skillTreeAllowed(fs, p, home))
+      .then(n => n > MAX_SKILL_TREE_ENTRIES, () => false);
+    byDir.set(key, hit);
+  }
+  return hit;
+}
+
+/** A component of `p` below `stat` (`p` itself included) is a link (probe throughLink). */
+async function throughLink(fs: FSProvider, stat: string, p: string): Promise<boolean> {
+  const rel = relative(stat, p);
+  if (rel === '' || relEscapes(rel) || isAbsolute(rel)) return false;
+  let cur = stat;
+  for (const part of rel.split('/')) {
+    cur = join(cur, part);
+    try {
+      await fs.readlink(cur);
+      return true;
+    } catch {
+      // not a link
+    }
+  }
+  return false;
+}
+
+/**
+ * For an agent's own skills directory `dir` in `home` (one the manifest's
+ * skills globs walk): the directory the remote probe walks it under as a
+ * config-derived tree, with that tree's entry limit — or undefined when it
+ * walks it as an ordinary manifest tree. As the probe does
+ * (probe/config_roots.go): a glob's static base that a link takes out of the
+ * home (or where no tree is walked) is one (linkedOutSkillBase); otherwise a
+ * match of the glob's directory reached through a link below its static
+ * part is one (collectLinkedSkillBases) — `~/.claude/skills` itself a link,
+ * a PicoClaw `workspace-<id>` linked elsewhere. The deepest such base above
+ * `dir` decides, as the CLI reads a snapshot (linkedGap). A plain directory
+ * in the home is no such tree: it is walked whatever it holds.
+ */
+async function linkedManifestBase(fs: FSProvider, dir: string, home: string): Promise<string | undefined> {
+  const chain = pathChain(dir);
+  let best: string | undefined;
+  const consider = (b: string) => {
+    if (chain.includes(b) && (best === undefined || b.length > best.length)) best = b;
+  };
+  for (const g of manifestSkillGlobs()) {
+    const exp = expandManifestGlob(fs, g, clean(home));
+    if (!exp) continue;
+    const baseTail = exp.tail.slice(0, -3); // without `/**`
+    const re = expandedGlobRegex(exp.prefix, baseTail);
+    const m = re && chain.find(d => re.test(d));
+    if (!m) continue;
+    // the static part of the glob (doublestar.SplitPattern), home written literally
+    const globBase = clean(exp.prefix + splitGlob(exp.tail).base.replace(/^\.$/, ''));
+    if (strictlyWithin(globBase, clean(home)) && classifySensitivePath(globBase).length === 0) {
+      const stays = strictlyWithin(await resolveExisting(fs, globBase), await resolveExisting(fs, clean(home)))
+        && (await skillTreeAllowed(fs, globBase, home));
+      if (!stays) {
+        consider(globBase);
+        continue;
+      }
+    }
+    const split = splitGlob(exp.prefix + baseTail);
+    if (split.rest !== '' && (await throughLink(fs, clean(split.base), m))) consider(m);
+  }
+  return best;
 }
 
 /**
@@ -447,7 +540,7 @@ export function unscannedReason(reason: UnscannedSkillsDir['reason'], path = '<p
     case 'outside':
       return `not scanned: ${unscannedWhat(u)} ${refusedWhere(u, u?.refusedAs ?? REFUSED_PLACES)} — VASO doesn't walk it (locally or remotely); ${outsideAdvice(u, path)}`;
     case 'limit':
-      return 'not scanned: skills directory holds more entries than the remote probe collects (10000) — not verified; scan the host locally to check these skills';
+      return `not scanned: skills directory holds more than ${MAX_SKILL_TREE_ENTRIES} entries, over the limit VASO walks in a skills tree (locally or remotely) — not verified; review it with \`vaso skill audit ${path}\``;
     case 'relative':
       return 'not scanned: skills directory set as a relative path, which the agent resolves against its working directory — not verified; set an absolute path';
   }
@@ -458,7 +551,7 @@ export function unscannedShortReason(u: Pick<UnscannedSkillsDir, 'reason'> & Par
   switch (u.reason) {
     case 'home': return u.target ? `links to ${u.target}, the home directory itself` : 'the home directory itself';
     case 'outside': return u.target ? `links to ${u.target}, ${u.refusedAs ?? REFUSED_PLACES}` : (u.refusedAs ?? REFUSED_PLACES);
-    case 'limit': return 'over the remote probe\'s entry limit';
+    case 'limit': return `over the ${MAX_SKILL_TREE_ENTRIES}-entry limit`;
     case 'relative': return 'set as a relative path';
   }
 }

@@ -297,7 +297,7 @@ describe('config-set paths a newer probe recorded', () => {
     expect(inventory.skillsDirs).toEqual([{ path: root, exists: true, unverified: true }]);
     expect(inventory.skills).toEqual([]);
     const limited = snapshot({ [`${root}/evil/i.sh`]: file('x') }, { configTrees: { [root]: 'limit' } });
-    expect((await skl002.run(ctx(n, limited))).evidence?.[0].detail).toMatch(/more entries than the remote probe collects/);
+    expect((await skl002.run(ctx(n, limited))).evidence?.[0].detail).toMatch(/more than 10000 entries, over the limit VASO walks/);
   });
 
   it('a refused tree or one over the limit stays not verified', async () => {
@@ -337,7 +337,7 @@ describe('config-set paths a newer probe recorded', () => {
       directoryModes: { [dir]: 0o755 },
     });
     expect(probeCoversTree(fs, dir)).toBe(false);
-    expect((await skl002.run(ctx(cc, fs))).evidence?.[0].detail).toMatch(/more entries than the remote probe collects/);
+    expect((await skl002.run(ctx(cc, fs))).evidence?.[0].detail).toMatch(/more than 10000 entries, over the limit VASO walks/);
     // a file of the tree in the snapshot: collected after all
     const held = snapshot({ [`${dir}/b/SKILL.md`]: file('# b\n') }, { configTrees: { [dir]: 'limit' } });
     expect(probeCoversTree(held, dir)).toBe(true);

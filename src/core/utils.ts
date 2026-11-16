@@ -74,6 +74,11 @@ const VENDOR_DIRS = new Set([
 // usually the code SKILL.md tells the agent to run.
 const BUILD_OUTPUT_DIRS = new Set(['dist', 'build']);
 
+/** A vendor/VCS/cache directory name every walk skips (build output not included). */
+export function isVendorDirName(name: string): boolean {
+  return VENDOR_DIRS.has(name);
+}
+
 /**
  * True when parentPath lies under a vendor/VCS dir below root — or a build
  * output dir, unless `keepBuildOutput` (skill trees).
