@@ -1,0 +1,13 @@
+{
+  "agent": "claude-code",
+  "source": "dt23 re-verify round 6: ~/.claude/skills links out of the home (a Nix profile) to a tree whose skill is a relative link into a store, and that skill holds a link to another store path — the nested skill's code is scanned on local and remote scans alike",
+  "reachable": true,
+  "fail": {
+    "SKL-004": "critical"
+  },
+  "inventory": {
+    "skills": [
+      "evil"
+    ]
+  }
+}
