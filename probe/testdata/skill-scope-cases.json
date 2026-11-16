@@ -173,9 +173,7 @@
   "all": [
    "/Users/u"
   ],
-  "labels": [
-   "other-home:/Users/Shared"
-  ]
+  "labels": []
  },
  {
   "path": "/Users/alice/fx-store/skills",
@@ -719,6 +717,72 @@
   "all": [
    "/home/alice",
    "/home/bob"
+  ],
+  "labels": [
+   "home"
+  ]
+ },
+ {
+  "path": "/Users/Shared",
+  "own": [
+   "/Users/u"
+  ],
+  "all": [
+   "/Users/u"
+  ],
+  "labels": []
+ },
+ {
+  "path": "/USERS/shared/team",
+  "own": [
+   "/Users/u"
+  ],
+  "all": [
+   "/Users/u"
+  ],
+  "labels": []
+ },
+ {
+  "path": "/Users/Sharedx/skills",
+  "own": [
+   "/Users/u"
+  ],
+  "all": [
+   "/Users/u"
+  ],
+  "labels": [
+   "other-home:/Users/Sharedx"
+  ]
+ },
+ {
+  "path": "/home/Shared/skills",
+  "own": [
+   "/home/u"
+  ],
+  "all": [
+   "/home/u"
+  ],
+  "labels": [
+   "other-home:/home/Shared"
+  ]
+ },
+ {
+  "path": "/Volumes/Data/U/FX/hu",
+  "own": [
+   "/Volumes/Data/u/fx/hu"
+  ],
+  "all": [
+   "/Volumes/Data/u/fx/hu"
+  ],
+  "labels": []
+ },
+ {
+  "path": "/Volumes/Data/u/fx/hu",
+  "own": [
+   "/Volumes/Data/u/fx/hu"
+  ],
+  "all": [
+   "/Volumes/Data/u/fx/hu"
   ],
   "labels": [
    "home"

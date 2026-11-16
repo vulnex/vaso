@@ -175,6 +175,9 @@ export interface UnscannedSkillsDir {
   refusedAs?: string;
   /** An agent's own default skills directory, not one its config sets. */
   agentDefault?: true;
+  /** A skill linked into a skills directory to where no skills tree is
+   *  walked (the walk did not follow it), not a skills directory itself. */
+  skillLink?: true;
 }
 
 /**

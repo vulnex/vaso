@@ -1,7 +1,7 @@
 import { basename, dirname, isAbsolute, join } from 'node:path';
 import type { AgentAdapter, DetectOptions } from './adapter.js';
 import type { AgentInstallation, GatewayInfo, ModelRef, ParsedConfig, UnscannedSkillsDir } from '../core/types.js';
-import { skillRootGap, unscannedDir } from '../core/skill-root-scope.js';
+import { cleanSkillRoot, skillRootGap, unscannedDir } from '../core/skill-root-scope.js';
 import type { ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
@@ -185,14 +185,14 @@ async function skillRoots(configDir: string, data: Record<string, unknown>, home
     const dir = asRecord(raw)?.directory;
     if (typeof dir === 'string' && dir.trim()) {
       const d = expandTilde(dir.trim(), home);
-      candidates.push(isAbsolute(d) ? d : join(configDir, d));
+      candidates.push(isAbsolute(d) ? cleanSkillRoot(d) : join(configDir, d));
       configSet.add(candidates[candidates.length - 1]);
     }
   }
   const skills = asRecord(data.skills);
   if (skills?.open_skills_enabled === true) {
     const dir = typeof skills.open_skills_dir === 'string' && skills.open_skills_dir.trim()
-      ? expandTilde(skills.open_skills_dir.trim(), home)
+      ? cleanSkillRoot(expandTilde(skills.open_skills_dir.trim(), home))
       : join(home, 'open-skills');
     candidates.push(dir);
     configSet.add(dir);

@@ -15,16 +15,16 @@ import (
 //
 //   - the filesystem root;
 //   - the scanned user's home itself, or a directory above it;
-//   - another user's home (/home/<u>, /Users/<u>, /root, and /home or /Users
-//     themselves) — one holding the scanned home is that home's ancestor,
-//     not another user's;
+//   - another user's home (/home/<u>, /Users/<u> but not /Users/Shared,
+//     /root, and /home or /Users themselves) — one holding the scanned home
+//     is that home's ancestor, not another user's;
 //   - an OS directory (/etc, /usr, /var, /bin, /sbin, /lib*, /System,
 //     /Library, /dev, /proc, /sys, /boot, /run; /private/etc and
 //     /private/var) — unless inside the scanned home;
 //   - a credential store or sensitive location (SENSITIVE_SINKS).
 //
-// /opt, /srv, /nix/store, /Volumes/*, /mnt/*, /media/* and /tmp are not
-// refused: skills live there (a home-manager store, a team volume).
+// /opt, /srv, /nix/store, /Volumes/*, /mnt/*, /media/*, /tmp and
+// /Users/Shared are not refused: skills live there (a home-manager store, a team volume).
 // src/core/skill-root-scope.ts applies the same rule to local scans;
 // testdata/skill-scope-cases.json holds the table both sides test.
 
@@ -94,12 +94,16 @@ func scopeLabels(p string, own, all []string) []string {
 }
 
 // otherHomeDir is the user home (or home area) p lies in, by location:
-// /home, /Users, /home/<u>, /Users/<u>, /root; "" otherwise.
+// /home, /Users, /home/<u>, /Users/<u>, /root; "" otherwise. macOS's
+// /Users/Shared is a shared folder, no user's home.
 func otherHomeDir(parts []string) string {
-	switch strings.ToLower(parts[0]) {
+	switch top := strings.ToLower(parts[0]); top {
 	case "home", "users":
 		if len(parts) == 1 {
 			return "/" + parts[0]
+		}
+		if top == "users" && strings.EqualFold(parts[1], "Shared") {
+			return ""
 		}
 		return "/" + parts[0] + "/" + parts[1]
 	case "root":

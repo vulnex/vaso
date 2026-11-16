@@ -2,7 +2,7 @@ import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import type { AgentAdapter, DetectOptions } from './adapter.js';
 import type { AgentInstallation, GatewayInfo, ModelRef, ParsedConfig } from '../core/types.js';
 import type { ProbeManifest } from '../core/snapshot-types.js';
-import { screenSkillRoots } from '../core/skill-root-scope.js';
+import { cleanSkillRoot, screenSkillRoots } from '../core/skill-root-scope.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { loadConfig } from '../core/config-loader.js';
@@ -240,7 +240,7 @@ export const picoclawAdapter: AgentAdapter = {
       const skillsDirs = [
         ...workspaceSkills,
         join(paths.home, 'skills'),
-        ...(builtinSkills ? [expandHome(builtinSkills, userHome)] : []),
+        ...(builtinSkills ? [cleanSkillRoot(expandHome(builtinSkills, userHome))] : []),
       ];
 
       const installs = await discoverCliInstalls(userHome, fs, {
