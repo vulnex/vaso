@@ -22,6 +22,16 @@ export const MAX_SKILL_TREE_ENTRIES = 10000;
  */
 export const MAX_LINKED_SKILL_ENTRIES = 5 * MAX_SKILL_TREE_ENTRIES;
 
+/**
+ * What judging the directory links of one skills tree may count in all
+ * (probe/config_roots.go maxJudgedLinkEntries): each distinct target is
+ * counted once, to the entry limit, whether it is followed or not — fifty
+ * targets at the limit. Past it, a link to a target not yet counted is not
+ * counted and gets the links' total verdict: links to many distinct large
+ * directories can't make a scan count without end.
+ */
+export const MAX_JUDGED_LINK_ENTRIES = 10 * MAX_LINKED_SKILL_ENTRIES;
+
 /** probe/collector.go maxLinkDepth (and MAX_LINK_DEPTH in skill-walk.ts). */
 const MAX_LINK_DEPTH = 8;
 
@@ -99,9 +109,12 @@ export type LinkVerdict = 'follow' | 'limit' | 'total';
  * order from the root, each followed one's own links right after it, at
  * most MAX_LINK_DEPTH deep; one into a tree already taken, back into the
  * root or above it, or where `followLink` refuses, gets no verdict. Each
- * target is counted on its own (`scanOf`, to the entry limit) and the count
- * charged to the root's links' total: over MAX_SKILL_TREE_ENTRIES → limit,
- * past MAX_LINKED_SKILL_ENTRIES in all → total, else follow.
+ * target is counted on its own (`scanOf`, to the entry limit): over
+ * MAX_SKILL_TREE_ENTRIES → limit (never walked, so not charged to the
+ * total); else its count is charged to the root's links' total, past
+ * MAX_LINKED_SKILL_ENTRIES in all → total (not charged either), else
+ * follow. Once the targets counted hold MAX_JUDGED_LINK_ENTRIES, a new
+ * target is not counted and gets total.
  */
 export async function planSkillLinks(
   fs: FSProvider,
@@ -118,6 +131,7 @@ export async function planSkillLinks(
   }
   const taken = [rootReal];
   let used = 0;
+  let judged = 0;
   const visit = async (links: readonly string[], depth: number): Promise<void> => {
     if (depth >= MAX_LINK_DEPTH) return;
     for (const p of links) {
@@ -134,13 +148,18 @@ export async function planSkillLinks(
       } catch {
         continue;
       }
+      if (judged >= MAX_JUDGED_LINK_ENTRIES) {
+        plan.set(real, 'total');
+        continue;
+      }
       const s = await scanOf(real);
-      used += s.n;
+      judged += s.n;
       if (s.n > MAX_SKILL_TREE_ENTRIES) {
         plan.set(real, 'limit');
-      } else if (used > MAX_LINKED_SKILL_ENTRIES) {
+      } else if (used + s.n > MAX_LINKED_SKILL_ENTRIES) {
         plan.set(real, 'total');
       } else {
+        used += s.n;
         plan.set(real, 'follow');
         taken.push(real);
         await visit(s.links, depth + 1);

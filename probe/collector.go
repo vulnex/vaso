@@ -983,8 +983,11 @@ func (c *collector) followFrom(snapshot *ProbeSnapshot, pattern string, matches 
 }
 
 // maxLinkRecords bounds how many links not followed for size ConfigTrees
-// records (src/core/snapshot-load.ts MAX_LINK_RECORDS). Past it, no
-// directory link in a skills tree is followed (SkillLinksTruncated).
+// records (src/core/snapshot-load.ts MAX_LINK_RECORDS). Past it, links the
+// plan follows are still followed, as a local walk follows them; a link not
+// followed is no longer recorded (SkillLinksTruncated) — the CLI takes the
+// verdict recorded for another link to the same target, or reports it not
+// verified (linkCap in src/core/skill-root-scope.ts).
 var maxLinkRecords = 20000
 
 // linkNotFollowed: the directory link m (leading to real), met while walking
@@ -995,9 +998,6 @@ var maxLinkRecords = 20000
 // (a directory: the CLI reports it not scanned, as a local walk leaves it out
 // — linkCap in src/core/skill-root-scope.ts).
 func (c *collector) linkNotFollowed(snapshot *ProbeSnapshot, pattern, m, real string) bool {
-	if snapshot.SkillLinksTruncated {
-		return true
-	}
 	root, ok := literalTreeRoot(pattern)
 	if !ok {
 		root = globBase(pattern)

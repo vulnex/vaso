@@ -110,6 +110,7 @@ export async function collectSkillInventory(installation: AgentInstallation, fs:
     const capped = [
       ...listing.overLimitLinks.map(path => ({ path, reason: 'limit' as const })),
       ...listing.overTotalLinks.map(path => ({ path, reason: 'total' as const })),
+      ...listing.unrecordedLinks.map(path => ({ path, reason: 'truncated' as const })),
     ];
     for (const u of capped) {
       const known = installation.unscannedSkillsDirs ?? [];

@@ -8,6 +8,7 @@ import {
 import { relEscapes } from './path-rel.js';
 import { MAX_LINKED_SKILL_ENTRIES, MAX_SKILL_TREE_ENTRIES, planSkillLinks, scanSkillTree } from './skill-tree-count.js';
 import type { LinkVerdict, TreeScan } from './skill-tree-count.js';
+import { MAX_LINK_RECORDS } from './snapshot-load.js';
 
 /**
  * Where a skills tree may be walked from, and where a link met while walking
@@ -311,8 +312,11 @@ export async function overEntryLimit(fs: FSProvider, dir: string): Promise<boole
 
 const planCache = new WeakMap<FSProvider, Map<string, Promise<Map<string, LinkVerdict>>>>();
 
-/** Why a walk leaves a directory link out for its size. */
-export type LinkCapReason = 'limit' | 'total';
+/**
+ * Why a walk leaves a directory link out for its size — or, on a snapshot,
+ * left out by a probe that had stopped recording such links (`truncated`).
+ */
+export type LinkCapReason = 'limit' | 'total' | 'truncated';
 
 /**
  * For a walk of the skills tree at `root`: whether a directory link met in
@@ -322,21 +326,32 @@ export type LinkCapReason = 'limit' | 'total';
  * planSkillLinks decides by its target, the same way the probe's linkPlan
  * does; a link the plan gives no verdict is judged by its own count. The
  * plain content of the tree being walked is not counted here. On a
- * snapshot, what the probe recorded for the link (configTrees) decides —
- * and past the probe's record bound (skillLinksTruncated) a link with
- * nothing under it is not verified.
+ * snapshot, what the probe recorded for the link (configTrees) decides.
+ * Past the probe's record bound (skillLinksTruncated) it still follows the
+ * links its plan follows, but records no others: a link with nothing of it
+ * in the snapshot shares the verdict recorded for another link of the tree
+ * to the same place (the plan judges targets), else is `truncated` — as is
+ * an empty directory followed past the bound, which nothing tells apart.
  */
 export async function linkCap(fs: FSProvider, root: string): Promise<(link: string) => Promise<LinkCapReason | undefined>> {
   if (fs.kind === 'snapshot') {
     const records = fs as { skillLinksTruncated?(): boolean; holdsUnder?(dir: string): boolean };
     const truncated = records.skillLinksTruncated?.() ?? false;
+    let byTarget: Promise<Map<string, LinkCapReason>> | undefined;
     return async link => {
       if (!isAbsolute(link)) return undefined;
       const p = clean(posix.normalize(link));
       const status = configTreeStatus(fs, p);
       if (status === 'limit' || status === 'total') return status;
-      if (truncated && status === undefined && !records.holdsUnder?.(p)) return 'limit';
-      return undefined;
+      if (!truncated || status !== undefined || records.holdsUnder?.(p)) return undefined;
+      byTarget ??= recordedLinkTargets(fs, root);
+      let real: string;
+      try {
+        real = await fs.realpath(p);
+      } catch {
+        return 'truncated';
+      }
+      return (await byTarget).get(real) ?? 'truncated';
     };
   }
   let plan: Promise<Map<string, LinkVerdict>> | undefined;
@@ -367,6 +382,28 @@ export async function linkCap(fs: FSProvider, root: string): Promise<(link: stri
     const verdict = (await plan).get(real) ?? ((await overEntryLimit(fs, real)) ? 'limit' : 'follow');
     return verdict === 'follow' ? undefined : verdict;
   };
+}
+
+/**
+ * Where the links of the tree at `root` the probe recorded as not followed
+ * for size lead, with the verdict recorded: the probe's plan judges targets,
+ * so another link to one of them got the same verdict.
+ */
+async function recordedLinkTargets(fs: FSProvider, root: string): Promise<Map<string, LinkCapReason>> {
+  const out = new Map<string, LinkCapReason>();
+  if (!isAbsolute(root)) return out;
+  const r = clean(posix.normalize(root));
+  const trees = (fs as { configTrees?(): Readonly<Record<string, string>> }).configTrees?.() ?? {};
+  for (const [k, v] of Object.entries(trees)) {
+    if ((v !== 'limit' && v !== 'total') || !strictlyWithin(k, r)) continue;
+    try {
+      const real = await fs.realpath(k);
+      if (!out.has(real)) out.set(real, v);
+    } catch {
+      // not resolvable from the snapshot
+    }
+  }
+  return out;
 }
 
 /** A component of `p` below `stat` (`p` itself included) is a link (probe throughLink). */
@@ -613,6 +650,8 @@ export function unscannedReason(reason: UnscannedSkillsDir['reason'], path = '<p
       return `not scanned: skills directory holds more than ${MAX_SKILL_TREE_ENTRIES} entries, over the limit VASO walks in a skills tree (locally or remotely) — not verified; review it with \`vaso skill audit ${path}\``;
     case 'total':
       return `not scanned: linked skills directory past the ${MAX_LINKED_SKILL_ENTRIES}-entry total VASO walks through the links of one skills tree (locally or remotely) — not verified; review it with \`vaso skill audit ${path}\``;
+    case 'truncated':
+      return `not scanned: linked skills directory left out by the remote probe, which had stopped recording links it does not follow (after ${MAX_LINK_RECORDS}) — not verified; review it with \`vaso skill audit ${path}\``;
     case 'relative':
       return 'not scanned: skills directory set as a relative path, which the agent resolves against its working directory — not verified; set an absolute path';
   }
@@ -644,6 +683,7 @@ export function unscannedShortReason(u: Pick<UnscannedSkillsDir, 'reason'> & Par
     case 'outside': return u.target ? `links to ${u.target}, ${u.refusedAs ?? REFUSED_PLACES}` : (u.refusedAs ?? REFUSED_PLACES);
     case 'limit': return `over the ${MAX_SKILL_TREE_ENTRIES}-entry limit`;
     case 'total': return `past the ${MAX_LINKED_SKILL_ENTRIES}-entry total for linked trees`;
+    case 'truncated': return `not verified: the remote probe stopped recording links after ${MAX_LINK_RECORDS}`;
     case 'relative': return 'set as a relative path';
   }
 }

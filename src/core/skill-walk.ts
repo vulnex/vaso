@@ -137,6 +137,8 @@ export interface SkillWalkOptions {
   overLimit?: string[];
   /** Directory links left out past what the tree's links may hold together (linkCap) are added here. */
   overTotal?: string[];
+  /** Directory links a snapshot's probe left out after it stopped recording such links (linkCap) are added here. */
+  unrecorded?: string[];
   /** Follow links whatever the size of their tree (`vaso skill audit`'s explicit target). */
   uncapped?: boolean;
 }
@@ -160,7 +162,7 @@ function noting(rule: LinkRule, list: string[] | undefined): LinkRule {
 function notingCap(rule: CapRule, opts: SkillWalkOptions): CapRule {
   return async (link: string) => {
     const reason = await rule(link);
-    const list = reason === 'limit' ? opts.overLimit : reason === 'total' ? opts.overTotal : undefined;
+    const list = reason === 'limit' ? opts.overLimit : reason === 'total' ? opts.overTotal : reason === 'truncated' ? opts.unrecorded : undefined;
     if (list && !list.includes(link)) list.push(link);
     return reason;
   };

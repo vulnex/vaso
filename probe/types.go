@@ -97,8 +97,8 @@ type ProbeSnapshot struct {
 	// size: over the entry limit ("limit") or past the links' total ("total").
 	ConfigTrees map[string]string `json:"configTrees,omitempty"`
 	// More links in skills trees went unfollowed for size than ConfigTrees
-	// records (maxLinkRecords): after that no directory link in a skills tree
-	// was followed, and an unrecorded one with nothing under it is not verified.
+	// records (maxLinkRecords): after that links the plan follows were still
+	// followed, and links not followed went unrecorded.
 	SkillLinksTruncated bool `json:"skillLinksTruncated,omitempty"`
 	// Where a scanned home, or a directory naming a home the other way (a
 	// config's workspace spelled through a link to the home), resolves to —

@@ -146,9 +146,10 @@ func TestManyLinksToOneTreeCountItOnce(t *testing.T) {
 	}
 }
 
-// Past maxLinkRecords links not followed for size, no further directory
-// link is followed and the snapshot says so.
-func TestLinkRecordsPastTheirBoundStopFollowing(t *testing.T) {
+// Past maxLinkRecords links not followed for size, no further one is
+// recorded and the snapshot says so — while a link the plan follows is still
+// followed, as a local walk follows it.
+func TestLinkRecordsPastTheirBound(t *testing.T) {
 	old := maxLinkRecords
 	maxLinkRecords = 3
 	defer func() { maxLinkRecords = old }()
@@ -176,8 +177,8 @@ func TestLinkRecordsPastTheirBoundStopFollowing(t *testing.T) {
 	if n != 3 {
 		t.Errorf("%d link records, want 3", n)
 	}
-	if shippedUnder(snap, filepath.Join(skills, "z")) {
-		t.Error("followed a link after the records ran out")
+	if !shippedUnder(snap, filepath.Join(skills, "z")) {
+		t.Error("a link the plan follows was not followed after the records ran out")
 	}
 }
 
@@ -195,8 +196,8 @@ func fill(t *testing.T, dir string, n int) {
 }
 
 // The plan of a tree's links, as skill-tree-count.test.ts plans the same
-// layout: each target judged on its own, counts charged to the links' total
-// in walk order, one target once.
+// layout: each target judged on its own, the counts of those followed
+// charged to the links' total in walk order, one target once.
 func TestLinkPlanMatchesTheCLI(t *testing.T) {
 	home := setupHome(t)
 	root := allowedOutside(t)
@@ -218,7 +219,8 @@ func TestLinkPlanMatchesTheCLI(t *testing.T) {
 	if plan[big] != linkLimit {
 		t.Errorf("big: %q", plan[big])
 	}
-	want := []string{linkFollow, linkFollow, linkFollow, linkTotal, linkTotal, linkTotal}
+	// a-big is over the limit, never walked: not charged to the total
+	want := []string{linkFollow, linkFollow, linkFollow, linkFollow, linkFollow, linkTotal}
 	for i, tg := range targets {
 		if plan[tg] != want[i] {
 			t.Errorf("t%d: %q, want %q", i+1, plan[tg], want[i])
@@ -245,5 +247,56 @@ func TestLinkPlanMatchesTheCLI(t *testing.T) {
 	np := c.linkPlan(nest, home)
 	if len(np) != 2 || np[outer] != linkFollow || np[inner] != linkFollow {
 		t.Errorf("nested plan: %v", np)
+	}
+}
+
+// The total is charged only with what is followed, and judging links counts
+// at most maxJudgedLinkEntries (skill-tree-count.test.ts, same layouts).
+func TestLinkPlanChargesFollowedAndBoundsJudging(t *testing.T) {
+	home := setupHome(t)
+	root := allowedOutside(t)
+	c := &collector{treeScans: map[string]treeScan{}}
+	mk := func(tree, name string, n int) string {
+		tg := filepath.Join(root, tree+"-"+name)
+		if err := os.MkdirAll(tg, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		mustSymlink(t, tg, filepath.Join(root, tree, name))
+		real, err := realPath(tg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		c.treeScans[real] = treeScan{n: n}
+		return real
+	}
+	if err := os.MkdirAll(filepath.Join(root, "judged"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var bigs []string
+	for i := 0; i < 51; i++ {
+		bigs = append(bigs, mk("judged", "b"+strconv.Itoa(100+i), maxConfigTreeEntries+1))
+	}
+	plan := c.linkPlan(filepath.Join(root, "judged"), home)
+	for i, b := range bigs[:50] {
+		if plan[b] != linkLimit {
+			t.Errorf("b%d: %q", i, plan[b])
+		}
+	}
+	if plan[bigs[50]] != linkTotal {
+		t.Errorf("51st: %q, want total", plan[bigs[50]])
+	}
+	if err := os.MkdirAll(filepath.Join(root, "fits"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var ts []string
+	for i, n := range []int{10000, 10000, 10000, 10000, 9999, 5000, 1} {
+		ts = append(ts, mk("fits", string(rune('a'+i)), n))
+	}
+	plan = c.linkPlan(filepath.Join(root, "fits"), home)
+	want := []string{linkFollow, linkFollow, linkFollow, linkFollow, linkFollow, linkTotal, linkFollow}
+	for i, tg := range ts {
+		if plan[tg] != want[i] {
+			t.Errorf("%c: %q, want %q", 'a'+i, plan[tg], want[i])
+		}
 	}
 }
