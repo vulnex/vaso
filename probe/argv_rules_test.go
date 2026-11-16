@@ -186,10 +186,13 @@ func TestCommandCredentialsQuoted(t *testing.T) {
 	for _, line := range []string{
 		`"command": "mysql -u root -p \"app_db\""`,
 		`"args": ["-p", "Xk9Lm2Qw7Zr4"]`,
-		`echo "-p" "Xk9Lm2Qw7Zr4"`,
 	} {
 		if out := commandCredentials(line, same); out != line {
 			t.Errorf("%s: changed to %s", line, out)
 		}
+	}
+	// quoted words are judged as the unquoted words the shell passes
+	if quoted, plain := commandCredentials(`echo "-p" "Xk9Lm2Qw7Zr4"`, same), commandCredentials(`echo -p Xk9Lm2Qw7Zr4`, same); strings.Contains(quoted, "Xk9") != strings.Contains(plain, "Xk9") {
+		t.Errorf("quoted %s, unquoted %s", quoted, plain)
 	}
 }
