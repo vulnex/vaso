@@ -100,6 +100,8 @@ interface Layout {
   build(base: string, home: string): Promise<Record<string, string>>;
   ghc001: RegExp;
   fixable: boolean;
+  /** Its config files really are in a credential store: not read on either side (CONFIG-LOAD) */
+  configsInStore?: boolean;
 }
 
 const layouts: Layout[] = [
@@ -140,6 +142,7 @@ const layouts: Layout[] = [
     },
     ghc001: /is a link into a sensitive location \(AWS credentials/,
     fixable: false,
+    configsInStore: true,
   },
   {
     name: 'COPILOT_HOME outside the home',
@@ -177,6 +180,10 @@ describe.each(layouts)('copilot-cli: $name', (layout) => {
     expect(Boolean(r.fixable)).toBe(layout.fixable);
     // nothing else offered that vaso fix would refuse
     expect(local.results.filter(x => x.fixable && (!x.passed || x.foldedInto)).map(x => x.id)).toEqual([]);
+    // config.json really is in ~/.aws: not read locally, as the probe never ships it
+    const load = local.results.find(x => x.id === 'CONFIG-LOAD');
+    if (layout.configsInStore) expect(load?.message).toMatch(/not read: reached through a symlink into AWS credentials/);
+    else expect(load).toBeUndefined();
   });
 
   it.skipIf(!goAvailable)('a probe snapshot reaches the same verdicts; no name from behind the link ships', async () => {

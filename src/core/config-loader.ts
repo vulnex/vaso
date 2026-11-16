@@ -156,29 +156,40 @@ function errorMessage(error: unknown): string {
 }
 
 /**
- * Where a file is a symlink into a sensitive location (a credential store, a
- * shell startup file, /etc) that its own path doesn't name: the link target,
- * else undefined. The probe never ships such content (`omitted: sensitive`,
- * escapesToSink in probe/sensitive_sinks.go); a local scan doesn't read it
+ * Where a file really is in a sensitive location (a credential store, a shell
+ * startup file, /etc) that its own path doesn't name — the file itself a
+ * symlink there, or reached through a linked directory above it
+ * (`~/.copilot → ~/.aws/cop` spells `~/.aws/cop/config.json` as
+ * `~/.copilot/config.json`): the link target or real path, else undefined.
+ * The probe never ships such content (`omitted: sensitive`, escapesToSink and
+ * resolvedIntoSink in probe/sensitive_sinks.go); a local scan doesn't read it
  * either, so both report the same — and an SSH key is never parsed as a config.
  */
 export async function linkedIntoSink(filePath: string, fs: FSProvider): Promise<string | undefined> {
-  if (fs.kind === 'snapshot' || typeof fs.readlink !== 'function') return undefined;
-  let raw: string;
-  try {
-    raw = await fs.readlink(filePath);
-  } catch {
-    return undefined; // not a symlink
-  }
+  if (fs.kind === 'snapshot') return undefined;
   const named = new Set(classifySensitivePath(filePath));
-  const written = isAbsolute(raw) ? normalize(raw) : join(dirname(filePath), raw);
-  const targets = [written];
+  const outside = (t: string) => classifySensitivePath(t).some(label => !named.has(label));
+  let real: string | undefined;
   try {
-    targets.push(await fs.realpath(filePath));
+    real = normalize(await fs.realpath(filePath));
   } catch {
-    // the target as written is enough
+    // missing or unresolvable: the target as written is all there is
   }
-  return targets.some(t => classifySensitivePath(t).some(label => !named.has(label))) ? written : undefined;
+  let raw: string | undefined;
+  if (typeof fs.readlink === 'function') {
+    try {
+      raw = await fs.readlink(filePath);
+    } catch {
+      // not a symlink
+    }
+  }
+  if (raw !== undefined) {
+    const written = isAbsolute(raw) ? normalize(raw) : join(dirname(filePath), raw);
+    if (outside(written) || (real !== undefined && outside(real))) return written;
+  }
+  // Through a linked directory above it (resolvedIntoSink)
+  if (real !== undefined && real !== normalize(filePath) && outside(real)) return real;
+  return undefined;
 }
 
 /** The error a read of such a file fails with (shaped like a snapshot's omitted content). */
