@@ -182,8 +182,14 @@ export function hookStatements(script: string): string[] {
 export function hookCommandSecrets(script: string): ConfigSecret[] {
   const out: ConfigSecret[] = [];
   for (const stmt of hookStatements(script)) {
-    for (const secret of findArgSecrets(shellWords(stmt))) {
-      if (!out.some(o => o.value === secret.value)) out.push(secret);
+    const words = shellWords(stmt);
+    // a quoted word holding a command (`ssh host "mysql -pX app"`, `sh -c '…'`)
+    // is read as argv too, one level deep
+    const nested = words.filter(w => /\s/.test(w.trim())).map(w => shellWords(w));
+    for (const argv of [words, ...nested]) {
+      for (const secret of findArgSecrets(argv)) {
+        if (!out.some(o => o.value === secret.value)) out.push(secret);
+      }
     }
   }
   return out;
