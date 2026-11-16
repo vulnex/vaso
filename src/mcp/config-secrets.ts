@@ -1,6 +1,6 @@
 import { API_KEY_PATTERNS, isPlaceholderSecret } from '../core/patterns.js';
 import {
-  USER_PASS_FLAGS, isFlagShaped, isKeyAfterK, isPasswordAfterA, isPasswordAfterP, isPasswordClient, isRedisCli,
+  USER_PASS_FLAGS, isFlagShaped, isKeyAfterK, isPasswordAfterA, isPasswordAfterP, isPasswordClient, isRedisCli, isSeparatePasswordClient,
   isUserPassClient, isUnstoredValue as notASecret, userPassword, looksLikeCredential as looksLikeSecret,
 } from './argv-rules.js';
 import { shannonEntropy } from '../analyzers/entropy.js';
@@ -419,6 +419,9 @@ export function findArgSecrets(args: readonly string[], command?: string): Confi
   // a MySQL/MariaDB client or `sshpass` as the command or an earlier element: its `-p` is the password
   const clientAt = args.findIndex(isPasswordClient);
   const afterClient = (i: number): boolean => (command !== undefined && isPasswordClient(command)) || (clientAt >= 0 && clientAt < i);
+  // only `sshpass` takes it as a separate element (`mysql -p app_db` names the database)
+  const sshpassAt = args.findIndex(isSeparatePasswordClient);
+  const afterSshpass = (i: number): boolean => (command !== undefined && isSeparatePasswordClient(command)) || (sshpassAt >= 0 && sshpassAt < i);
   const redisAt = args.findIndex(isRedisCli);
   const afterRedis = (i: number): boolean => (command !== undefined && isRedisCli(command)) || (redisAt >= 0 && redisAt < i);
   const curlAt = args.findIndex(isUserPassClient);
@@ -460,12 +463,12 @@ export function findArgSecrets(args: readonly string[], command?: string): Confi
       for (const value of cookieSecrets(arg)) add(i, value, 'session cookie after --cookie', 'header', `${prev} ${arg}`);
       continue;
     }
-    // `-p <password>` (mysql, sshpass) — not a port mapping (`-p 8080:80`), a
+    // `-p <password>` (sshpass) — not a port mapping (`-p 8080:80`), a
     // version, a package or a word elsewhere (shared argv rules 1 and 2)
     // A package runner's `-p` is `--package` (`npx -p https://…/x.tgz cmd`):
     // the value is a package spec, judged by the rules below like any argument
     if (prev === '-p' && !isFlagShaped(arg) && !(packageRunner && !afterClient(i - 1))) {
-      if (isPasswordAfterP(arg, afterClient(i - 1))) add(i, arg, 'password after -p', 'flag', `${prev} ${arg}`);
+      if (isPasswordAfterP(arg, afterSshpass(i - 1))) add(i, arg, 'password after -p', 'flag', `${prev} ${arg}`);
       continue;
     }
     // `-p<password>` glued (`mysql -uroot -pX`)

@@ -49,6 +49,21 @@ describe('CDX-002 permission-profile globs', () => {
     expect(r.passed).toBe(true);
   });
 
+  it('caps the glob quoted in the detail', async () => {
+    const glob = `~/.${'*'.repeat(1300)}sh`;
+    const r = await check('CDX-002').run(ctx([cfg(MAIN, profile({ [glob]: 'write' }))]));
+    expect(r.passed).toBe(false);
+    expect(r.evidence?.[0].detail.length).toBeLessThan(400);
+    expect(r.evidence?.[0].detail).toMatch(/which can match "\/home\/test\/\.ssh"/);
+  });
+
+  it('reads braces and backslashes as literal path characters, as Codex does (glob chars are * ? [ ] only)', async () => {
+    for (const p of ['~/.{ssh,aws}', '~/\\.ssh', '~/.{ssh,aws}/**']) {
+      const r = await check('CDX-002').run(ctx([cfg(MAIN, profile({ [p]: 'write' }))]));
+      expect(r.passed, p).toBe(true);
+    }
+  });
+
   it('names the path, then the reason', async () => {
     const r = await check('CDX-002').run(ctx([cfg(MAIN, profile({ '~': 'write' }))]));
     expect(r.evidence?.[0].detail).toMatch(/write access to "\/home\/test", which covers the home directory/);
@@ -93,6 +108,19 @@ describe('CDX-008 profile files layered over config.toml', () => {
     expect((await check('CDX-008').run(ctx([cfg(MAIN, base), cfg(FAST, { features: { network_proxy: true } })]))).passed).toBe(true);
   });
 
+  it('reports nothing new when a profile restates a root grant with another spelling', async () => {
+    const r = await check('CDX-008').run(ctx([
+      cfg(MAIN, { default_permissions: 'dev', permissions: { dev: { extends: ':workspace', workspace_roots: { '~': true } } } }),
+      cfg(FAST, { permissions: { dev: { workspace_roots: { '~/': true } } } }),
+    ]));
+    expect(r.passed).toBe(true);
+    const fs = await check('CDX-008').run(ctx([
+      cfg(MAIN, { default_permissions: 'dev', permissions: { dev: { filesystem: { '~/.ssh': 'write' } } } }),
+      cfg(FAST, { permissions: { dev: { filesystem: { '~/.ssh/': 'write' } } } }),
+    ]));
+    expect(fs.passed).toBe(true);
+  });
+
   it('reports nothing new when the root config already has the finding', async () => {
     const r = await check('CDX-008').run(ctx([
       cfg(MAIN, { default_permissions: 'dev', permissions: { dev: { filesystem: { '~': 'write' } } } }),
@@ -121,6 +149,8 @@ describe('CDX-009 features.hooks', () => {
       cfg(MAIN, { features: { hooks: false } }), cfg(FAST, { features: { hooks: true } }), cfg(HOOKS, hooks),
     ]));
     expect(back.severity).toBe('critical');
+    expect(back.evidence?.[0].detail).toMatch(/runs only under `codex -p fast` \(features\.hooks = false otherwise\)/);
+    expect((await check('CDX-009').run(ctx([cfg(HOOKS, hooks)]))).evidence?.[0].detail).not.toMatch(/runs only under/);
   });
 
   it('lets a project layer inherit the user config value unless it sets its own', async () => {

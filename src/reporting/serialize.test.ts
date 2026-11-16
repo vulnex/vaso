@@ -110,7 +110,8 @@ describe('credential masking: every payload, every output path', () => {
     [['run', '-e', 'SLACK_BOT_TOKEN=xoxb-DOCK0102'], 'DOCK0102'],
     [['pkg', '--token', 'TOK0103'], 'TOK0103'],
     [['pkg', '--password', 'PW0104'], 'PW0104'],
-    [['mysql', '-p', 'PW0105'], 'PW0105'],
+    [['mysql', '-pPW0105'], 'PW0105'],
+    [['sshpass', '-p', 'PW0107'], 'PW0107'],
     [['curl', '-u', 'admin:CURL0106'], 'CURL0106'],
   ];
 

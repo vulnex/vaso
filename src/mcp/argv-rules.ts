@@ -8,11 +8,14 @@
  *     (`--x`, `-x`, or `--` ending the options) and its name doesn't look
  *     random: a secret may start with `-` (one base64url token in 64), so
  *     `-Xq9Zr7Lm2Pv8Kd4…` is a value while `-v`, `-pthread`, `--no-auth` are flags.
- *  2. `-p`: after a password client (MySQL/MariaDB tools, `sshpass`) any
- *     stored value is the password, separate or glued. Elsewhere it is one
- *     only when it looks like a credential and isn't a port, a port mapping,
- *     a version, a package spec or a lowercase word. (`psql`/`pg_dump -p`
- *     is a port.)
+ *  2. `-p`: after a password client any stored value glued to it is the
+ *     password (`mysql -pPW`, `sshpass -pPW`); a separate value is the
+ *     password only after `sshpass` (`sshpass -p PW`). MySQL/MariaDB tools
+ *     take the password glued or not at all: in `mysql -p app_db` the client
+ *     prompts and `app_db` is the database, so a separate value there is
+ *     judged like anywhere else — a password only when it looks like a
+ *     credential and isn't a port, a port mapping, a version, a package spec
+ *     or a lowercase word. (`psql`/`pg_dump -p` is a port.)
  *  3. `-k`: a credential when it looks random — never a URL, a host[:port]
  *     or a path.
  *  4. `redis-cli -a <pw>` is a password.
@@ -64,10 +67,14 @@ export function isFlagShaped(token: string): boolean {
 const PASSWORD_P_CLIENT = /^(?:mysql|mysqldump|mysqladmin|mysqlimport|mysqlshow|mysqlcheck|mysqlpump|mysqlslap|mysqlsh|mariadb(?:-[a-z]+)?|sshpass)$/;
 /** The same, found as a word in command text. */
 export const PASSWORD_P_CLIENT_IN_TEXT = /(?:^|[\s/"'`(;&|])(?:mysql|mysqldump|mysqladmin|mysqlimport|mysqlshow|mysqlcheck|mysqlpump|mysqlslap|mysqlsh|mariadb(?:-[a-z]+)?|sshpass)(?=$|[\s"'`;&|)])/;
+/** `sshpass`, the one client whose separate `-p <value>` is the password, as a word in command text. */
+export const SEPARATE_P_CLIENT_IN_TEXT = /(?:^|[\s/"'`(;&|])sshpass(?=$|[\s"'`;&|)])/;
 export const REDIS_CLI_IN_TEXT = /(?:^|[\s/"'`(;&|])redis-cli(?=$|[\s"'`;&|)])/;
 
 const basename = (token: string): string => token.replace(/^.*[/\\]/, '').replace(/\.exe$/i, '');
 export const isPasswordClient = (token: string): boolean => PASSWORD_P_CLIENT.test(basename(token));
+/** Rule 2: a client whose separate `-p <value>` is the password (`sshpass`). */
+export const isSeparatePasswordClient = (token: string): boolean => basename(token) === 'sshpass';
 export const isRedisCli = (token: string): boolean => basename(token) === 'redis-cli';
 
 /** A port or port mapping (`8080`, `8080:80`, `127.0.0.1:8080:80`, `53/udp`). */
@@ -75,7 +82,9 @@ export const PORT_LIKE = /^\d+(?::\d+)*(?:\/(?:tcp|udp))?$|^[\d.]+:\d+(?::\d+)?$
 /** `npx -p <package>`: a scoped or versioned package spec. */
 export const PACKAGE_SPEC = /^(?:@[\w.-]+\/)?[\w.-]+@[\w.^~*<>=-]+$|^@[\w.-]+\/[\w.-]+$/;
 
-/** Rule 2: whether a `-p` value (separate or glued) is a password. */
+/** Rule 2: whether a `-p` value is a password. `afterClient`: a client
+ *  that takes it in this form came before — any password client for a glued
+ *  value, `sshpass` for a separate one. */
 export function isPasswordAfterP(value: string, afterClient: boolean): boolean {
   if (isUnstoredValue(value)) return false;
   if (afterClient) return true;

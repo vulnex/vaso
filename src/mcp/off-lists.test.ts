@@ -79,6 +79,13 @@ describe('MCP off lists', () => {
     expect(got).toEqual({ 'qwen-code:offqwen': true, 'qwen-code:offglob-x': true, 'qwen-code:offthird': false, 'qwen-code:keep': false, 'qwen-code:stray': true });
   });
 
+  it('Qwen Code: an allowed name or glob with an astral character keeps its server on', async () => {
+    const exact = await servers({ [`${HOME}/.qwen/settings.json`]: { mcp: { allowed: ['srv-😀', 'gh'] }, mcpServers: { 'srv-😀': U, gh: U, other: U } } });
+    expect(exact).toEqual({ 'qwen-code:srv-😀': false, 'qwen-code:gh': false, 'qwen-code:other': true });
+    const glob = await servers({ [`${HOME}/.qwen/settings.json`]: { mcp: { allowed: ['*😀*', 'srv-?x'] }, mcpServers: { 'srv-😀': U, 'srv-😁x': U, other: U } } });
+    expect(glob).toEqual({ 'qwen-code:srv-😀': false, 'qwen-code:srv-😁x': false, 'qwen-code:other': true });
+  });
+
   it('leaves servers alone without any list', async () => {
     const got = await servers({ [`${HOME}/.claude.json`]: { mcpServers: { a: U } }, [`${HOME}/.gemini/settings.json`]: { mcpServers: { b: U } } });
     expect(got).toEqual({ 'claude-code:a': false, 'gemini-cli:b': false });

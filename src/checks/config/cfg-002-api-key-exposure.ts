@@ -41,17 +41,26 @@ export const cfg002 = defineCheck({
       // Passwords in hook commands that no token format covers
       // (`--password <pw>`, `https://user:<pw>@host`, `Authorization: Basic …`,
       // `mysql -p<pw>`, `sshpass -p <pw>`)
-      const scripts = hookItems(config.data.hooks).flatMap(item => item.scripts);
-      const seen = new Set<string>();
-      for (const secret of scripts.flatMap(hookCommandSecrets)) {
-        if (seen.has(secret.value) || API_KEY_PATTERNS.some(({ pattern }) => pattern.test(secret.value))) continue;
-        seen.add(secret.value);
+      // one evidence per value, naming every hook that holds it
+      const found = new Map<string, { secret: ReturnType<typeof hookCommandSecrets>[number]; hooks: string[] }>();
+      for (const item of hookItems(config.data.hooks)) {
+        const hook = item.matcher ? `${item.event} (${item.matcher})` : item.event;
+        for (const secret of item.scripts.flatMap(hookCommandSecrets)) {
+          if (API_KEY_PATTERNS.some(({ pattern }) => pattern.test(secret.value))) continue;
+          const prev = found.get(secret.value);
+          if (!prev) found.set(secret.value, { secret, hooks: [hook] });
+          else if (!prev.hooks.includes(hook)) prev.hooks.push(hook);
+        }
+      }
+      for (const { secret, hooks } of found.values()) {
         const at = lines.findIndex(l => l.includes(secret.value));
         evidence.push({
           file: config.filePath,
           ...(at >= 0 ? { line: at + 1 } : {}),
           snippet: redactSecretsInLine(at >= 0 ? lines[at].split(secret.value).join('***') : secret.masked),
-          detail: `Found ${secret.kind} in a hook command`,
+          detail: hooks.length > 1
+            ? `Found ${secret.kind} in hook commands (${hooks.join(', ')} — same value)`
+            : `Found ${secret.kind} in a hook command`,
         });
       }
     }

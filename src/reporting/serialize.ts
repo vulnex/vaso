@@ -14,7 +14,8 @@ import { maskUrlSecrets } from '../mcp/config-secrets.js';
 import { escapeJsonUnsafe } from './text-safety.js';
 import { EXTRA_TOKEN_PATTERNS } from '../analyzers/secret-values.js';
 import {
-  PASSWORD_P_CLIENT_IN_TEXT, REDIS_CLI_IN_TEXT, isFlagShaped, isKeyAfterK, isPasswordAfterA, isPasswordAfterP, isPasswordClient, isRedisCli,
+  PASSWORD_P_CLIENT_IN_TEXT, REDIS_CLI_IN_TEXT, SEPARATE_P_CLIENT_IN_TEXT, isFlagShaped, isKeyAfterK, isPasswordAfterA, isPasswordAfterP,
+  isPasswordClient, isRedisCli, isSeparatePasswordClient,
 } from '../mcp/argv-rules.js';
 
 const MASKED_MAPS = new Set(['env', 'headers']);
@@ -347,7 +348,8 @@ function replaceFlagValues(text: string, re: RegExp, judge: (flag: string, value
 /** Shared argv rules 2–4 for a short flag's value, given the command before it. */
 function shortFlagSecret(flag: string, value: string, command: string): boolean {
   if (keepValue(value)) return false;
-  if (flag === '-p') return isPasswordAfterP(value, PASSWORD_P_CLIENT_IN_TEXT.test(command));
+  // a separate `-p <value>` is the password only after sshpass (rule 2)
+  if (flag === '-p') return isPasswordAfterP(value, SEPARATE_P_CLIENT_IN_TEXT.test(command));
   if (flag === '-k') return isKeyAfterK(value);
   return REDIS_CLI_IN_TEXT.test(command) && isPasswordAfterA(value);
 }
@@ -723,11 +725,14 @@ const CAMEL_VALUE_FLAG = new RegExp(String.raw`^--?${CAMEL_FLAG_WORD}$`);
 function maskArgv(args: string[], command?: unknown): string[] {
   const out = args.map(a => maskCredentialsInText(a));
   // a MySQL/MariaDB client, `sshpass` or `redis-cli` as the server's command
-  // or earlier in the array (shared argv rules 2 and 4)
+  // or earlier in the array (shared argv rules 2 and 4); a glued `-pX` after any of the first two
   const cmd = typeof command === 'string' ? command : '';
   const clientAt = args.findIndex(isPasswordClient);
   const redisAt = args.findIndex(isRedisCli);
   const clientBefore = (i: number): boolean => isPasswordClient(cmd) || (clientAt >= 0 && clientAt < i);
+  // a separate `-p <value>` is the password only after sshpass (`mysql -p app_db` names the database)
+  const sshpassAt = args.findIndex(isSeparatePasswordClient);
+  const sshpassBefore = (i: number): boolean => isSeparatePasswordClient(cmd) || (sshpassAt >= 0 && sshpassAt < i);
   const redisBefore = (i: number): boolean => isRedisCli(cmd) || (redisAt >= 0 && redisAt < i);
   for (let i = 0; i + 1 < out.length; i++) {
     const flag = args[i];
@@ -735,7 +740,7 @@ function maskArgv(args: string[], command?: unknown): string[] {
     // the next element is a value unless it is flag-shaped (rule 1)
     const isValue = next !== MASK && !isFlagShaped(next) && !keepValue(next);
     if (flag === '-p') {
-      if (isValue && isPasswordAfterP(args[i + 1], clientBefore(i))) out[i + 1] = MASK;
+      if (isValue && isPasswordAfterP(args[i + 1], sshpassBefore(i))) out[i + 1] = MASK;
     } else if (flag === '-k') {
       if (isValue && isKeyAfterK(args[i + 1])) out[i + 1] = MASK;
     } else if (flag === '-a') {

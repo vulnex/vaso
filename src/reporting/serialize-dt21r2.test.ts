@@ -32,12 +32,15 @@ describe('report masking — dt21 round 2', () => {
   it('g3-R3 / g3-R4: -p masks passwords only', () => {
     for (const keep of ['docker run -p ${port}:3000 nginx', 'docker run -p 8080:8080', 'ssh -p 2222 host', 'python3 -m pip install -p 3.11 foo',
       'tar -xzpf a.tgz -p preserve', 'npx -y -p @scope/mcp-server-xyz@1.2.3 mcp-xyz', 'npx -p mcp-xyz@1.2.3 x',
-      'mysql -h db -u root -p${process.env.DB_PASS} -e x', 'sshpass -p "$SSHPASS" ssh host', 'Usage: mysql -p<password>']) {
+      'mysql -h db -u root -p${process.env.DB_PASS} -e x', 'sshpass -p "$SSHPASS" ssh host', 'Usage: mysql -p<password>',
+      // a MySQL client's separate -p value is the database (it prompts for the password)
+      'mysql -p hunterhunter', 'mysql -u root -p app_db', 'mysql -h db -P 3306 -u app -p mydb']) {
       for (const out of both(keep)) expect(out, keep).toBe(keep);
     }
     expect(maskCredentialsDeep({ args: ['-y', '-p', '@scope/mcp-server-xyz@1.2.3', 'mcp-xyz'] }).args).toEqual(['-y', '-p', '@scope/mcp-server-xyz@1.2.3', 'mcp-xyz']);
     expect(maskCredentialsDeep({ args: ['run', '-p', '${PORT}:80'] }).args).toEqual(['run', '-p', '${PORT}:80']);
-    for (const masked of ['sshpass -p i9LE1Ki3ylOjt6o0 ssh', 'mysql -p hunterhunter', 'mysql -uroot -pHq7Zx3Rm9Lw2Np4Kv', 'mysql -p MyS3cret!x', 'x -p Xq9Zr7Lp2Wm4Kd8Vn3Bt6']) {
+    for (const masked of ['sshpass -p i9LE1Ki3ylOjt6o0 ssh', 'sshpass -p hunterhunter ssh', 'mysql -uroot -pHq7Zx3Rm9Lw2Np4Kv', 'mysql -pMyS3cret!x',
+      'mysql -u root -p Xk9mP2qR7vL4wZt8Hn3', 'x -p Xq9Zr7Lp2Wm4Kd8Vn3Bt6']) {
       for (const out of both(masked)) expect(out, masked).toContain('***');
     }
     expect(maskCredentialsDeep({ args: ['mysql', '-pHunterhunter'] }).args).toEqual(['mysql', '-p***']);

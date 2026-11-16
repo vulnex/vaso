@@ -493,7 +493,11 @@ describe('Cursor sandbox.json / permissions.json (cursor.com/docs/reference/sand
     // wildcards only, no domain named
     const stars = await byId('CUR-008').run(makeCtx([sandbox({ networkPolicy: { default: 'deny', allow: ['*.*'] } })]));
     expect(stars.passed).toBe(false);
-    expect(stars.evidence?.[0].detail).toMatch(/names no domain/);
+    expect(stars.evidence?.[0].detail).toMatch(/names no domain .* any host with 2 or more name labels \(every domain\)/);
+    const three = await byId('CUR-008').run(makeCtx([sandbox({ networkPolicy: { default: 'deny', allow: ['*.*.*'] } })]));
+    expect(three.evidence?.[0].detail).toMatch(/any host with 3 or more name labels \(e\.g\. b\.example\.com\)/);
+    const one = await byId('CUR-008').run(makeCtx([sandbox({ networkPolicy: { default: 'deny', allow: ['*'] } })]));
+    expect(one.evidence?.[0].detail).toBe('A "*" allow entry lets sandboxed commands reach any host');
     expect((await byId('CUR-008').run(makeCtx([sandbox({ type: 'workspace_readwrite' })]))).passed).toBe(true);
   });
 

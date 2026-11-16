@@ -40,6 +40,14 @@ describe('OpenCode V2 schema', () => {
     expect(v2CatchAll([], 'edit')).toEqual({ effect: 'allow', index: -1 });
   });
 
+  it('reads ? in an action as exactly one character', () => {
+    const gate = { action: 'shell', resource: '*', effect: 'ask' };
+    expect(v2CatchAll(v2PermissionRules([gate, { action: 'shel?', resource: '*', effect: 'allow' }])!, 'shell').effect).toBe('allow');
+    expect(v2CatchAll(v2PermissionRules([gate, { action: 's?ell*', resource: '*', effect: 'allow' }])!, 'shell').effect).toBe('allow');
+    expect(v2CatchAll(v2PermissionRules([gate, { action: 'shel??', resource: '*', effect: 'allow' }])!, 'shell').effect).toBe('ask');
+    expect(v2CatchAll(v2PermissionRules([gate, { action: 'she?', resource: '*', effect: 'allow' }])!, 'shell').effect).toBe('ask');
+  });
+
   it('OPC-002: gated V2 shell/edit pass; a dangerous scoped allow after the gate is critical', async () => {
     const gated = await run('OPC-002', { permissions: [
       { action: '*', resource: '*', effect: 'ask' },

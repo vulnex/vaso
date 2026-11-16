@@ -1,6 +1,5 @@
 import { basename } from 'node:path';
 import type { ParsedConfig } from '../../core/types.js';
-import { unsafeRegexReason } from '../../rules/regex-safety.js';
 
 const NON_MAIN_CONFIGS = new Set(['auth.json', 'launcher-config.json', '.security.yml']);
 
@@ -71,6 +70,7 @@ export function isChatChannel(ch: PicoChannel): boolean {
  * Compile a PicoClaw (Go RE2) pattern as a JS RegExp. Leading inline flag
  * groups such as `(?i)` or `(?is)` — valid in Go, a syntax error in JS — are
  * translated to RegExp flags. Returns undefined when it still doesn't parse.
+ * The pattern comes from config: run it with `testSamples`, never `re.test`.
  */
 export function compileGoRegex(pattern: string): RegExp | undefined {
   let src = pattern;
@@ -80,9 +80,7 @@ export function compileGoRegex(pattern: string): RegExp | undefined {
     src = src.slice(m[0].length);
   }
   try {
-    const re = new RegExp(src, flags);
-    // a pattern that backtracks super-linearly is not run (it comes from config)
-    return unsafeRegexReason(re.source) ? undefined : re;
+    return new RegExp(src, flags);
   } catch {
     return undefined;
   }

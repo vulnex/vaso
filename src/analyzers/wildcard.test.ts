@@ -25,6 +25,19 @@ describe('pathGlobMatch', () => {
     expect(pathGlobMatch('/a/[bc', '/a/[bc')).toBe(true);
   });
 
+  it('reads pattern and path by code point: astral characters in literals, ?, * and classes', () => {
+    expect(pathGlobMatch('/data/😀/x', '/data/😀/x')).toBe(true);
+    expect(pathGlobMatch('/data/?/x', '/data/😀/x')).toBe(true);
+    expect(pathGlobMatch('/data/??/x', '/data/😀/x')).toBe(false);
+    expect(pathGlobMatch('/data/*😀/x', '/data/ab😀/x')).toBe(true);
+    expect(pathGlobMatch('/data/[😀😁]/x', '/data/😁/x')).toBe(true);
+    expect(pathGlobMatch('/data/[!😀]/x', '/data/😀/x')).toBe(false);
+    expect(pathGlobMatch('/data/[😀-😂]/x', '/data/😁/x')).toBe(true);
+    expect(pathGlobMatch('/data/[a-z]/x', '/data/😁/x')).toBe(false);
+    expect(pathGlobMatch('/data/e?/x', '/data/é/x')).toBe(true);
+    expect(pathGlobMatch('/data/\\😀/x', '/data/😀/x')).toBe(true);
+  });
+
   it('stays fast on star runs and long globs that backtrack as a RegExp', () => {
     const start = Date.now();
     expect(pathGlobMatch(`/home/test/${'*'.repeat(40)}x`, '/home/test/.ssh')).toBe(false);
@@ -43,6 +56,24 @@ describe('wildcardMatch', () => {
     expect(wildcardMatch('a?c', 'abc', { question: true })).toBe(true);
     expect(wildcardMatch('*.EXAMPLE.com', 'api.example.com', { ignoreCase: true })).toBe(true);
     expect(wildcardMatch('a.c', 'abc')).toBe(false);
+  });
+
+  it('reads pattern and text by code point: astral characters, combining marks', () => {
+    // a literal equal to the name matches
+    expect(wildcardMatch('srv-😀', 'srv-😀')).toBe(true);
+    expect(wildcardMatch('srv-😀', 'srv-😁')).toBe(false);
+    expect(wildcardMatch('*😀*', 'srv-😀-x')).toBe(true);
+    expect(wildcardMatch('srv-*', 'srv-😀')).toBe(true);
+    // `?` is one character, an astral one included
+    expect(wildcardMatch('srv-?', 'srv-😀', { question: true })).toBe(true);
+    expect(wildcardMatch('srv-??', 'srv-😀', { question: true })).toBe(false);
+    expect(wildcardMatch('?', '𝒳', { question: true })).toBe(true);
+    // a combining mark is its own code point
+    expect(wildcardMatch('e?', 'é', { question: true })).toBe(true);
+    expect(wildcardMatch('?', 'é', { question: true })).toBe(false);
+    expect(wildcardMatch('café', 'café')).toBe(true);
+    expect(wildcardMatch('caf*', 'café')).toBe(true);
+    expect(wildcardMatch('😀*', '😀', { ignoreCase: true })).toBe(true);
   });
 
   it('stays fast on many stars', () => {
