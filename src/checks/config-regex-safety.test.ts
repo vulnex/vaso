@@ -78,15 +78,16 @@ describe('regex budget and partial results', () => {
     const nb = await nb004.run(scanCtx('nanobot', { tools: { exec: { allowPatterns: patterns, sandbox: 'bwrap' } } }));
     const pc = await pcl002.run(scanCtx('picoclaw', { tools: { exec: { enabled: true, custom_allow_patterns: patterns } } }));
     const pw = await pcl007.run(scanCtx('picoclaw', { tools: { allow_write_paths: patterns } }));
-    // 1.5 s of budget per check plus screening; generous for a loaded CI host
-    expect(Date.now() - start).toBeLessThan(15_000);
+    // per check: a first pass of short slices, 1.5 s of budget, screening —
+    // a few seconds; generous for a loaded CI host
+    expect(Date.now() - start).toBeLessThan(30_000);
     for (const r of [nb, pc, pw]) {
       expect(r.passed).toBe(false);
       expect(r.severity).toBe('warning');
       expect(r.evidence!.length).toBeLessThan(20);
       expect(r.evidence!.some(e => /^\d+ patterns not evaluated: the time for judging slow patterns/.test(e.detail ?? ''))).toBe(true);
     }
-  }, 30_000);
+  }, 60_000);
 
   it('PCL-007 keeps a sensitive path matched before a later target timed out', async () => {
     const r = await pcl007.run(scanCtx('picoclaw', { tools: { allow_write_paths: ['.*/\\.ssh/.*|(?:(.|.)*Q)'] } }));

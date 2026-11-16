@@ -40,7 +40,7 @@ export const REGEX_TOTAL_BUDGET_MS = 1500;
 export const REGEX_FIRST_PASS_MS = 5;
 
 /** First-pass time after which the remaining slices shrink to 1 ms. */
-const FIRST_PASS_TOTAL_MS = 1000;
+const FIRST_PASS_TOTAL_MS = 500;
 
 /** Longest sample text; the samples are short commands and paths. */
 const MAX_SAMPLE_LENGTH = 512;
