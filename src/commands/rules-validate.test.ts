@@ -88,6 +88,27 @@ describe.skipIf(process.platform === 'win32')('vaso rules init', () => {
     }
   });
 
+  it('says --dir is not a directory when it is a file, not that example.yaml exists', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'vaso-rules-init-'));
+    const file = join(root, 'rl');
+    writeFileSync(file, 'mine\n');
+    const err: string[] = [];
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation((...a: unknown[]) => { err.push(a.join(' ')); });
+    for (const dir of [file, join(file, 'sub')]) {
+      for (const force of [false, true]) {
+        err.length = 0;
+        await runRulesInit({ dir, force });
+        expect(process.exitCode).toBe(2);
+        process.exitCode = 0;
+        expect(err.join('\n')).toMatch(/is not a directory/);
+        expect(err.join('\n')).not.toMatch(/already exists/);
+      }
+    }
+    expect(readFileSync(file, 'utf-8')).toBe('mine\n');
+    expect(readdirSync(root)).toEqual(['rl']);
+  });
+
   it.skipIf(process.platform === 'win32')('--force replaces a symlinked example.yaml, never writing or chmodding its target', async () => {
     const root = mkdtempSync(join(tmpdir(), 'vaso-rules-init-'));
     const dir = join(root, 'rules');
