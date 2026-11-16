@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { join } from 'node:path';
-import { copilotCliAdapter } from './copilot-cli.js';
+import { copilotCliAdapter, COPILOT_PRIVATE_STORES } from './copilot-cli.js';
 
 vi.mock('node:fs/promises', () => ({
   access: vi.fn(),
@@ -139,6 +139,16 @@ describe('GitHub Copilot CLI adapter', () => {
     expect(manifest.envPrefixes).toContain('COPILOT_');
     expect(manifest.envPrefixes).toContain('GH_');
     expect(manifest.envPrefixes).toContain('GITHUB_');
+  });
+
+  it('probe manifest names every store GHC-001 judges as a private store', async () => {
+    const { PRIVATE_DIRS } = await import('../checks/copilot-cli/ghc-001-dir-perms.js');
+    const manifest = copilotCliAdapter.getProbeManifest!();
+    expect([...COPILOT_PRIVATE_STORES].sort()).toEqual(PRIVATE_DIRS.map(d => d.dir).sort());
+    expect(manifest.privateStores).toEqual(COPILOT_PRIVATE_STORES.map(d => `~/.copilot/${d}`));
+    const { buildProbeManifest } = await import('../core/manifest-builder.js');
+    const merged = buildProbeManifest([copilotCliAdapter]);
+    expect(merged.privateStores).toEqual(expect.arrayContaining(['~/.copilot/session-state', '${COPILOT_HOME}/session-state']));
   });
 
   it('credential paths surface config.json + settings.json', () => {

@@ -549,7 +549,7 @@ func (c *collector) followLinkedMetadata(snapshot *ProbeSnapshot, pattern string
 	}
 	staticDir := filepath.FromSlash(static)
 	for _, m := range expandFollowingDirLinks(pattern) {
-		if !throughLink(staticDir, m) || inExcludedDir(pattern, m) {
+		if !throughLink(staticDir, m) || inExcludedDir(pattern, m) || c.behindForeignLink(m) {
 			continue
 		}
 		if _, done := snapshot.Files[m]; done {

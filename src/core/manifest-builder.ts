@@ -128,6 +128,7 @@ export function buildProbeManifest(adapters: AgentAdapter[]): ProbeManifest {
     envOriginOnly: [],
     envPresence: [],
     configRoots: [],
+    privateStores: [],
   };
 
   for (const adapter of adapters) {
@@ -144,6 +145,7 @@ export function buildProbeManifest(adapters: AgentAdapter[]): ProbeManifest {
       if (m.envOriginOnly) merged.envOriginOnly!.push(...m.envOriginOnly);
       if (m.envPresence) merged.envPresence!.push(...m.envPresence);
       if (m.configRoots) merged.configRoots!.push(...m.configRoots);
+      if (m.privateStores) merged.privateStores!.push(...m.privateStores);
     }
     // Every copy of the agent's CLI (system prefixes, user bin dirs, each nvm
     // Node version) so remote scans inventory old copies too. Existence is all
@@ -224,6 +226,7 @@ export function buildProbeManifest(adapters: AgentAdapter[]): ProbeManifest {
   merged.envPrefixes = [...new Set(merged.envPrefixes)];
   merged.envOriginOnly = [...new Set(merged.envOriginOnly!)];
   merged.envPresence = [...new Set(merged.envPresence!)];
+  merged.privateStores = [...new Set(withRelocatedTwins(merged.privateStores!))];
   merged.systemPaths = [...new Set(merged.systemPaths!)];
   merged.systemDirListings = [...new Set(merged.systemDirListings!)];
   // A config relocated by an environment variable sets paths the same way

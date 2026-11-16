@@ -25,6 +25,10 @@ type ProbeManifest struct {
 	// Paths an agent's config sets (workspaces, extra skill dirs, MCP server
 	// commands), read from configs the probe collects (config_roots.go).
 	ConfigRoots []ConfigRootRequest `json:"configRoots,omitempty"`
+	// Private store folders (Copilot's session-state/, …) whose links to a
+	// place that isn't the agent's — the folder itself or one linked inside
+	// it — are recorded as links only, nothing behind them (store_links.go).
+	PrivateStores []string `json:"privateStores,omitempty"`
 }
 
 // CommandRequest describes a command to execute during probing.
