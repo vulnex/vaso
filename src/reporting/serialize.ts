@@ -10,12 +10,12 @@
  */
 
 import { API_KEY_PATTERNS, OAUTH_TOKEN_VALUE_PATTERNS, isEnvReference, isPathValue, isPlaceholderSecret } from '../core/patterns.js';
-import { maskUrlSecrets } from '../mcp/config-secrets.js';
+import { maskCommandCredentials, maskUrlSecrets } from '../mcp/config-secrets.js';
 import { escapeJsonUnsafe } from './text-safety.js';
 import { EXTRA_TOKEN_PATTERNS } from '../analyzers/secret-values.js';
 import {
   PASSWORD_P_CLIENT_IN_TEXT, REDIS_CLI_IN_TEXT, SEPARATE_P_CLIENT_IN_TEXT, isFlagShaped, isKeyAfterK, isPasswordAfterA, isPasswordAfterP,
-  isPasswordClient, isRedisCli, isSeparatePasswordClient,
+  isPasswordClient, isRedisCli, isSeparatePasswordClient, clientAndStdinHits,
 } from '../mcp/argv-rules.js';
 
 const MASKED_MAPS = new Set(['env', 'headers']);
@@ -445,7 +445,8 @@ function escapedQuotes(value: string, replacement: string): string {
 function maskText(input: string): string {
   // a JWT (`eyJ…`) needs none of [:=@-] around it
   if (!/[:=@-]/.test(input) && !input.includes('eyJ') && !BARE_TOKEN_HINT.test(input)) return input;
-  const text = maskCodeFallbacks(input);
+  // the argv rules on the commands in the text, words assembled as the shell does
+  const text = maskCodeFallbacks(maskCommandCredentials(input));
   const pem = text.includes('-----BEGIN') ? text.replace(PEM_BODY, MASK) : text;
   const jwt = pem.includes('eyJ') ? pem.replace(JWT, MASK) : pem;
   const bare = BARE_TOKEN_HINT.test(jwt)
@@ -823,6 +824,12 @@ function maskArgv(args: string[], command?: unknown): string[] {
     const p = /^-p(.+)$/s.exec(a)?.[1];
     const client = clientBefore(i);
     if (p && !keepValue(p) && (client || !isFlagShaped(a)) && isPasswordAfterP(p, client)) out[i] = `-p${MASK}`;
+  }
+  // other clients' password options, a password echoed into stdin (shared argv rules 7 and 8)
+  const argv = cmd ? [cmd, ...args] : args;
+  for (const h of clientAndStdinHits(argv)) {
+    const i = h.tok - (cmd ? 1 : 0);
+    if (i >= 0) out[i] = maskCredentialsInText(args[i].slice(0, h.from)) + MASK + maskCredentialsInText(args[i].slice(h.to));
   }
   return out;
 }

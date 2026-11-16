@@ -187,7 +187,7 @@ export function hookCommandSecrets(script: string): ConfigSecret[] {
     }
     if (depth >= MAX_NESTED_COMMANDS) return;
     for (const nested of nestedCommands(words)) {
-      for (const stmt of scriptCommands(nested)) read(shellWords(stmt), depth + 1);
+      for (const stmt of scriptCommands(nested, true)) read(shellWords(stmt), depth + 1);
     }
   };
   for (const stmt of hookStatements(script)) read(shellWords(stmt), 0);

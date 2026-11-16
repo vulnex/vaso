@@ -27,8 +27,18 @@
  *  6. `MYSQL_PWD=`, `PGPASSWORD=`, `SSHPASS=`, `REDISCLI_AUTH=` (a client's
  *     password variable): the value is the password unless a reference.
  *
- * In a command string the quotes around or inside a word are the shell's
- * (`-p"pw"`, `-u "u:pw"`, `$'…'`), at any depth of escaping.
+ *  7. Other clients' password options take any stored value: `sqlcmd`/`bcp
+ *     -P`, a registry login's `-p`/`--password` (`docker login`), `smbclient
+ *     -U user%<pw>`, `lftp -u user,<pw>`, the OpenLDAP tools' `-w`, the
+ *     MongoDB tools' `-p`/`--password`, `htpasswd -b`'s last argument, a
+ *     FreeRDP client's `/p:<pw>` (`clientPasswordHits`).
+ *  8. What `echo`/`printf` pipes into `sudo -S` or a registry login's
+ *     `--password-stdin` is the password (`stdinPasswordHits`).
+ *
+ * In a command string the words are what the shell assembles
+ * (`commandSegments`): quotes around or inside a word are the shell's at any
+ * depth of escaping, `-p"pass phrase"`, `'-p'"pw"`, `"-ppw"` and `-p$'pw'`
+ * are each one word.
  */
 
 import { isCredentialReference, isPathValue, isPlaceholderSecret } from '../core/patterns.js';
@@ -129,4 +139,355 @@ export function userPassword(value: string): string | undefined {
   if (i < 0) return undefined;
   const pw = value.slice(i + 1);
   return isUnstoredValue(pw) ? undefined : pw;
+}
+
+/**
+ * Rules 7 and 8 and the shell word assembly: the TypeScript twins of
+ * `clientPasswordHits`, `stdinPasswordHits` and `commandSegments` in
+ * `probe/argv_rules.go` (same shapes, same corpus).
+ */
+
+/** A credential inside word `tok`, characters [from, to). */
+export interface ArgvHit { tok: number; from: number; to: number }
+
+/** Rules 7 and 8: a stored value — not empty, not a reference (also one inside it: `pw$X`). */
+const passwordValue = (v: string): boolean => v !== '' && !isUnstoredValue(v) && !/\$\{?[A-Za-z_]/.test(v);
+
+/** The command a word names, by its file name, lowercased and without `.exe`. */
+export const commandBase = (t: string): string => t.replace(/^.*[/\\]/, '').toLowerCase().replace(/\.exe$/, '');
+
+/**
+ * Rule 7: an option through which a client takes its password — short
+ * (`-P <v>` or glued `-P<v>`) or long (`--password <v>`, `--password=<v>`).
+ * With `sep` the value is `user<sep>password`: the password follows the first `sep`.
+ */
+interface PasswordFlag { flag: string; sep?: string }
+const SMB_FLAGS: PasswordFlag[] = [{ flag: '-U', sep: '%' }, { flag: '--user', sep: '%' }, { flag: '--password' }];
+const LDAP_FLAGS: PasswordFlag[] = [{ flag: '-w' }];
+const MONGO_FLAGS: PasswordFlag[] = [{ flag: '-p' }, { flag: '--password' }];
+/** `login`: a registry CLI's login subcommand (`docker login`, `helm registry login`). */
+const CLIENT_PASSWORD_FLAGS: ReadonlyMap<string, readonly PasswordFlag[]> = new Map<string, PasswordFlag[]>([
+  ['sqlcmd', [{ flag: '-P' }, { flag: '-z' }, { flag: '-Z' }]],
+  ['bcp', [{ flag: '-P' }]],
+  ['login', [{ flag: '-p' }, { flag: '--password' }]],
+  ['lftp', [{ flag: '-u', sep: ',' }]],
+  ...['smbclient', 'rpcclient', 'smbcacls', 'smbcquotas'].map((c): [string, PasswordFlag[]] => [c, SMB_FLAGS]),
+  ...['ldapsearch', 'ldapadd', 'ldapmodify', 'ldapdelete', 'ldapmodrdn', 'ldapcompare', 'ldapwhoami', 'ldapexop'].map((c): [string, PasswordFlag[]] => [c, LDAP_FLAGS]),
+  ['ldappasswd', [{ flag: '-w' }, { flag: '-a' }, { flag: '-s' }]],
+  ...['mongo', 'mongosh', 'mongodump', 'mongorestore', 'mongoexport', 'mongoimport', 'mongostat', 'mongotop', 'mongofiles'].map((c): [string, PasswordFlag[]] => [c, MONGO_FLAGS]),
+]);
+/** Commands whose `login` subcommand takes `-p`/`--password`. */
+const REGISTRY_CLIS = new Set(['docker', 'podman', 'nerdctl', 'buildah', 'skopeo', 'oras', 'helm']);
+/** FreeRDP clients: `/p:<password>` (2.x also `/gp:<password>`). */
+const RDP_CLIENTS = new Set(['xfreerdp', 'xfreerdp3', 'wlfreerdp', 'wlfreerdp3', 'sdl-freerdp', 'sdl-freerdp3', 'wfreerdp']);
+/** sudo options that take a value. */
+const SUDO_VALUE_OPTION = new Set(['-u', '-g', '-h', '-p', '-C', '-D', '-R', '-T', '-U', '-r', '-t']);
+
+/** Words of the clients rules 2–8 know, in text: a cheap filter before tokenizing. */
+export const ARGV_CLIENT_IN_TEXT = /mysql|mariadb|sshpass|redis-cli|curl|PGPASSWORD|MYSQL_PWD|SSHPASS|REDISCLI_AUTH|sqlcmd|bcp|login|smbc|rpcclient|lftp|ldap|mongo|htpasswd|freerdp|sudo/i;
+
+/** Rule 7: the passwords given through a client's password options, a FreeRDP `/p:`, `htpasswd -b`. */
+export function clientPasswordHits(tokens: readonly string[]): ArgvHit[] {
+  const hits: ArgvHit[] = [];
+  const add = (tok: number, from: number, sep?: string): void => {
+    let v = tokens[tok].slice(from);
+    if (sep) {
+      const k = v.indexOf(sep);
+      if (k < 0) return;
+      from += k + 1;
+      v = v.slice(k + 1);
+    }
+    // `--password -` reads it from stdin; a URL is the server (`mongosh -p <url>` prompts)
+    if (passwordValue(v) && v !== '-' && !v.includes('://')) hits.push({ tok, from, to: tokens[tok].length });
+  };
+  let client = '';
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i];
+    if (t === '--') break;
+    if (!t.startsWith('-')) {
+      const name = commandBase(t);
+      if (RDP_CLIENTS.has(client) && t.startsWith('/p:')) add(i, 3);
+      else if (RDP_CLIENTS.has(client) && t.startsWith('/gp:')) add(i, 4);
+      else if (name === 'htpasswd') return [...hits, ...htpasswdHits(tokens, i)];
+      else if (name === 'login' && REGISTRY_CLIS.has(client)) client = 'login';
+      else if (CLIENT_PASSWORD_FLAGS.has(name) || REGISTRY_CLIS.has(name) || RDP_CLIENTS.has(name)) client = name;
+      continue;
+    }
+    for (const f of CLIENT_PASSWORD_FLAGS.get(client) ?? []) {
+      const long = f.flag.startsWith('--');
+      if (t === f.flag) {
+        if (i + 1 < tokens.length && !isFlagShaped(tokens[i + 1])) add(++i, 0, f.sep);
+        break;
+      }
+      if (long && t.startsWith(`${f.flag}=`)) { add(i, f.flag.length + 1, f.sep); break; }
+      if (!long && t.startsWith(f.flag)) { add(i, f.flag.length, f.sep); break; }
+    }
+  }
+  return hits;
+}
+
+/** `htpasswd -b[c] file user password`, `htpasswd -nb user password`: the last argument. */
+function htpasswdHits(tokens: readonly string[], at: number): ArgvHit[] {
+  let batch = false;
+  let noFile = false;
+  const positional: number[] = [];
+  for (let j = at + 1; j < tokens.length; j++) {
+    const t = tokens[j];
+    if (positional.length === 0 && t.length > 1 && t[0] === '-') {
+      for (let k = 1; k < t.length; k++) {
+        if (t[k] === 'b') batch = true;
+        else if (t[k] === 'n') noFile = true;
+        else if (t[k] === 'C' || t[k] === 'r') {
+          // -C cost, -r rounds: the value is the next word or glued
+          if (k === t.length - 1) j++;
+          break;
+        }
+      }
+      continue;
+    }
+    positional.push(j);
+  }
+  const p = positional[noFile ? 1 : 2];
+  return batch && p !== undefined && passwordValue(tokens[p]) ? [{ tok: p, from: 0, to: tokens[p].length }] : [];
+}
+
+/** Rule 8: what `echo`/`printf` pipes into a command reading its password from stdin. */
+export function stdinPasswordHits(tokens: readonly string[]): ArgvHit[] {
+  const hits: ArgvHit[] = [];
+  let start = 0;
+  let prev = -1;
+  for (let i = 0; i <= tokens.length; i++) {
+    if (i < tokens.length && tokens[i] !== '|') continue;
+    if (prev >= 0 && readsPasswordFromStdin(tokens.slice(start, i))) hits.push(...echoedText(tokens, prev, start - 1));
+    prev = start;
+    start = i + 1;
+  }
+  return hits;
+}
+
+function echoedText(tokens: readonly string[], from: number, to: number): ArgvHit[] {
+  if (from >= to) return [];
+  let k = from + 1;
+  const name = commandBase(tokens[from]);
+  if (name === 'echo') {
+    while (k < to && /^-[neE]+$/.test(tokens[k])) k++;
+  } else if (name === 'printf') {
+    if (k < to && tokens[k] === '--') k++;
+    // `printf '%s\n' pw` prints its arguments; `printf 'pw\n'` its format
+    if (k < to && tokens[k].includes('%')) k++;
+  } else return [];
+  const hits: ArgvHit[] = [];
+  for (; k < to; k++) if (passwordValue(tokens[k])) hits.push({ tok: k, from: 0, to: tokens[k].length });
+  return hits;
+}
+
+/** `sudo -S`/`--stdin`; a registry login with `--password-stdin` or `--password -`. */
+function readsPasswordFromStdin(tokens: readonly string[]): boolean {
+  let client = '';
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i];
+    const name = commandBase(t);
+    if (name === 'sudo' && client === '') {
+      client = name;
+      for (let j = i + 1; j < tokens.length && tokens[j].startsWith('-') && tokens[j] !== '--'; j++) {
+        const o = tokens[j];
+        if (o === '--stdin' || (!o.startsWith('--') && o.includes('S') && FLAG_SHAPE.test(o))) return true;
+        if (SUDO_VALUE_OPTION.has(o)) j++;
+      }
+      continue;
+    }
+    if (REGISTRY_CLIS.has(name) && (client === '' || client === 'sudo')) client = name;
+    else if (name === 'login' && REGISTRY_CLIS.has(client)) client = 'login';
+    else if (client === 'login' && (t === '--password-stdin' || t === '--password=-' || ((t === '--password' || t === '-p') && tokens[i + 1] === '-'))) return true;
+  }
+  return false;
+}
+
+/** Rules 7 and 8 over a word list (a pipeline's commands separated by `|`), overlapping hits dropped. */
+export function clientAndStdinHits(tokens: readonly string[]): ArgvHit[] {
+  const hits: ArgvHit[] = [];
+  let start = 0;
+  for (let i = 0; i <= tokens.length; i++) {
+    if (i < tokens.length && tokens[i] !== '|') continue;
+    for (const h of clientPasswordHits(tokens.slice(start, i))) hits.push({ ...h, tok: h.tok + start });
+    start = i + 1;
+  }
+  hits.push(...stdinPasswordHits(tokens));
+  return hits.filter((h, n) => !hits.slice(0, n).some((o) => o.tok === h.tok && h.from < o.to && o.from < h.to));
+}
+
+/**
+ * One word of a command line as the shell assembles it (`commandToken` in
+ * the probe): quotes around and inside it left out at any depth of escaping,
+ * a quoted part spanning spaces kept whole, `$'…'` decoded. `word[i]` is
+ * written at `line.slice(pos[i], ends[i])`.
+ */
+export interface CommandToken { word: string; pos: number[]; ends: number[] }
+/** One command of a line; `pipe`: its output is piped into the next. */
+export interface CommandSegment { tokens: CommandToken[]; pipe: boolean }
+
+const isQuote = (c: string): boolean => c === "'" || c === '"' || c === '`';
+const SEPARATORS = new Set([';', '&&', '||', '|', '&']);
+const LEAD = "'\"`([{,\\";
+const TRAIL = "'\"`)]},;\\";
+
+function escapesBefore(line: string, p: number): number {
+  let k = 0;
+  while (p - k > 0 && line[p - k - 1] === '\\') k++;
+  return k;
+}
+const sameQuote = (line: string, p: number, q: number): boolean => line[p] === line[q] && escapesBefore(line, p) === escapesBefore(line, q);
+
+/** Each quote → the next quote of the same character escaped as deeply (its closing quote). */
+function closingQuotes(line: string): Map<number, number> {
+  const next = new Map<number, number>();
+  const last = new Map<string, number>();
+  for (let p = line.length - 1; p >= 0; p--) {
+    if (!isQuote(line[p])) continue;
+    const kind = `${line[p]}${escapesBefore(line, p)}`;
+    const q = last.get(kind);
+    if (q !== undefined) next.set(p, q);
+    last.set(kind, p);
+  }
+  return next;
+}
+
+function pairQuotes(line: string, from: number, to: number, open: number): number {
+  for (let p = from; p < to; p++) {
+    if (!isQuote(line[p])) continue;
+    if (open < 0) open = p;
+    else if (sameQuote(line, p, open)) open = -1;
+  }
+  return open;
+}
+
+/** `w` ends with a bracket closing one opened in it (`${PASSWORD}`, `$(cat f)`): part of the word. */
+function closesInside(w: string): boolean {
+  const open = ({ '}': '{', ')': '(', ']': '[' } as Record<string, string>)[w[w.length - 1]];
+  return open !== undefined && w.split(open).length >= w.split(w[w.length - 1]).length;
+}
+
+function wordAfter(line: string, from: number, to: number): boolean {
+  for (let p = from; p < to; p++) if (!TRAIL.includes(line[p])) return true;
+  return false;
+}
+
+const ANSI_C: Record<string, string> = { a: '\x07', b: '\b', e: '\x1b', E: '\x1b', f: '\f', n: '\n', r: '\r', t: '\t', v: '\v', '\\': '\\', "'": "'", '"': '"', '?': '?' };
+function ansiEscape(s: string): [string, number] {
+  if (s[0] in ANSI_C) return [ANSI_C[s[0]], 1];
+  const hex = /^x([0-9A-Fa-f]{1,2})/.exec(s.slice(0, 3));
+  if (hex) return [String.fromCharCode(parseInt(hex[1], 16)), hex[0].length];
+  const oct = /^[0-7]{1,3}/.exec(s.slice(0, 3));
+  if (oct) return [String.fromCharCode(parseInt(oct[0], 8) & 0xff), oct[0].length];
+  return [`\\${s[0]}`, 1];
+}
+
+/** `line.slice(from, to)` without its quotes and the backslashes escaping them; `$'…'` decoded. */
+function quotesLeftOut(line: string, from: number, to: number): CommandToken {
+  let word = '';
+  const pos: number[] = [];
+  const ends: number[] = [];
+  let ansi = false;
+  for (let j = from; j < to; j++) {
+    const ch = line[j];
+    if (ansi && ch === '\\' && j + 1 < to) {
+      const [text, n] = ansiEscape(line.slice(j + 1, to));
+      for (const c of text) { word += c; pos.push(j); ends.push(j + 1 + n); }
+      j += n;
+      continue;
+    }
+    if (ansi && ch === "'") { ansi = false; continue; }
+    if (!ansi) {
+      if (ch === '$' && j + 1 < to && (line[j + 1] === "'" || line[j + 1] === '"')) { ansi = line[j + 1] === "'"; j++; continue; }
+      if (isQuote(ch)) continue;
+      if (ch === '\\') {
+        let k = j;
+        while (k < to && line[k] === '\\') k++;
+        if (k < to && isQuote(line[k])) { j = k - 1; continue; }
+      }
+    }
+    word += ch;
+    pos.push(j);
+    ends.push(j + 1);
+  }
+  return { word, pos, ends };
+}
+
+/** The commands of a line, word by word (`commandSegments` in the probe, whose comments give the rules). */
+export function commandSegments(line: string): CommandSegment[] {
+  const segs: CommandSegment[] = [];
+  let cur: CommandToken[] = [];
+  const flush = (): void => { if (cur.length > 0) segs.push({ tokens: cur, pipe: false }); cur = []; };
+  const closing = /['"`]/.test(line) ? closingQuotes(line) : new Map<number, number>();
+  const space = (c: string): boolean => c === ' ' || c === '\t' || c === '\n' || c === '\r';
+  const chunkEnd = (i: number): number => { while (i < line.length && !space(line[i])) i++; return i; };
+  for (let i = 0; i < line.length;) {
+    while (i < line.length && space(line[i])) i++;
+    const start = i;
+    i = chunkEnd(i);
+    if (start === i) break;
+    let from = start;
+    let begin = false;
+    while (from < i) {
+      const ch = line[from];
+      const ansiC = ch === '$' && from + 1 < i && (line[from + 1] === "'" || line[from + 1] === '"');
+      if (!ansiC && !LEAD.includes(ch)) break;
+      begin = begin || isQuote(ch);
+      from++;
+    }
+    // a quote opened inside the word: the word runs to its closing quote
+    let open = pairQuotes(line, start, i, -1);
+    while (open >= from && wordAfter(line, open + 1, i)) {
+      const c = closing.get(open);
+      if (c === undefined) break;
+      const scanned = i;
+      i = chunkEnd(c + 1);
+      open = pairQuotes(line, scanned, i, open);
+    }
+    let to = i;
+    let end = false;
+    let semicolon = false;
+    while (to > from && TRAIL.includes(line[to - 1]) && !closesInside(line.slice(from, to))) {
+      end = end || isQuote(line[to - 1]);
+      semicolon = semicolon || line[to - 1] === ';';
+      to--;
+    }
+    const balanced = open < 0;
+    const structural = /[([{,]/.test(line.slice(start, from)) || /[)\]},]/.test(line.slice(to, i));
+    const prevFlag = cur.length > 0 && isFlagShaped(cur[cur.length - 1].word);
+    const argument = begin && balanced && prevFlag;
+    const single = begin && balanced && !structural;
+    if (begin && !argument && !single) {
+      const c = closing.get(open);
+      if (c !== undefined && !balanced && open < from && prevFlag) {
+        const inner = c - escapesBefore(line, c);
+        if (inner > open + 1) cur.push(quotesLeftOut(line, open + 1, inner));
+      }
+      flush();
+    }
+    const tok = quotesLeftOut(line, from, to);
+    if (SEPARATORS.has(tok.word)) {
+      flush();
+      if (tok.word === '|' && segs.length > 0) segs[segs.length - 1].pipe = true;
+      continue;
+    }
+    if (tok.word !== '') cur.push(tok);
+    if (semicolon || (end && !argument && !single && !(balanced && !begin))) flush();
+  }
+  flush();
+  return segs;
+}
+
+/** A line's pipelines: the words of each, its commands separated by a `|` token (`commandPipelines` in the probe). */
+export function commandPipelines(line: string): CommandToken[][] {
+  const out: CommandToken[][] = [];
+  let cur: CommandToken[] = [];
+  for (const seg of commandSegments(line)) {
+    for (const t of seg.tokens) cur.push(t);
+    if (seg.pipe) { cur.push({ word: '|', pos: [], ends: [] }); continue; }
+    out.push(cur);
+    cur = [];
+  }
+  if (cur.length > 0) out.push(cur);
+  return out;
 }

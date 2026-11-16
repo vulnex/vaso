@@ -2,6 +2,7 @@ import { API_KEY_PATTERNS, isPathValue, isPlaceholderSecret, snippetAround } fro
 import {
   CLIENT_PASSWORD_VAR, USER_PASS_FLAGS, isFlagShaped, isKeyAfterK, isPasswordAfterA, isPasswordAfterP, isPasswordClient, isRedisCli, isSeparatePasswordClient,
   isUserPassClient, isUnstoredValue as notASecret, PASSWORD_P_CLIENT_IN_TEXT, REDIS_CLI_IN_TEXT, SEPARATE_P_CLIENT_IN_TEXT, userPassword, looksLikeCredential as looksLikeSecret,
+  ARGV_CLIENT_IN_TEXT, clientAndStdinHits, commandPipelines,
 } from './argv-rules.js';
 import { shannonEntropy } from '../analyzers/entropy.js';
 import { shellCommandWrapper } from './shell-wrapper.js';
@@ -575,7 +576,7 @@ function shellScriptSecrets(args: readonly string[], command: string | undefined
   const { at } = script;
   const out: RawSecret[] = [];
   const seen = new Set<string>();
-  for (const stmt of scriptCommands(args[at])) {
+  for (const stmt of scriptCommands(args[at], true)) {
     const prog = commandWords(stmt);
     const words = shellWords(stmt);
     const found = [
@@ -799,10 +800,48 @@ function collectArgSecrets(args: readonly string[], command: string | undefined,
     const known = knownToken(arg);
     if (known) add(i, known.token, known.name, 'token');
   }
+  // other clients' password options, and a password echoed into a command
+  // reading it from stdin (shared argv rules 7 and 8)
+  const lead = command === undefined ? 0 : 1;
+  const argv = command === undefined ? args : [command, ...args];
+  for (const h of clientAndStdinHits(argv)) {
+    if (h.tok >= lead) add(h.tok - lead, argv[h.tok].slice(h.from, h.to), 'password argument', 'flag');
+  }
   for (const s of shellScriptSecrets(args, command, depth)) {
     if (!seen.has(s.value)) { seen.add(s.value); out.push(s); }
   }
   return out;
+}
+
+/**
+ * `text` with every credential the argv rules find in the commands it holds
+ * replaced by `mask` where it is written. Words are assembled the way the
+ * shell (and the probe's scrubber) assembles them, so `'-p'"pw"`,
+ * `-p"pass phrase"`, `-p$'pw'` and `-p\"pw\"` inside a JSON string are
+ * masked whole.
+ */
+export function maskCommandCredentials(text: string, mask = MASK): string {
+  if (!ARGV_CLIENT_IN_TEXT.test(text)) return text;
+  const spans: [number, number][] = [];
+  for (const toks of commandPipelines(text)) {
+    for (const s of findArgSecrets(toks.map((t) => t.word))) {
+      const tok = toks[Number(/^args\[(\d+)\]$/.exec(s.location)?.[1] ?? -1)];
+      if (!tok || !s.value) continue;
+      for (let k = tok.word.indexOf(s.value); k >= 0; k = tok.word.indexOf(s.value, k + s.value.length)) {
+        spans.push([tok.pos[k], tok.ends[k + s.value.length - 1]]);
+      }
+    }
+  }
+  if (spans.length === 0) return text;
+  spans.sort((a, b) => a[0] - b[0] || b[1] - a[1]);
+  let out = '';
+  let copied = 0;
+  for (const [from, to] of spans) {
+    if (from < copied) { copied = Math.max(copied, to); continue; }
+    out += text.slice(copied, from) + mask;
+    copied = to;
+  }
+  return out + text.slice(copied);
 }
 
 

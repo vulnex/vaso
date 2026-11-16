@@ -3,7 +3,9 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { findArgSecrets } from './config-secrets.js';
-import { maskCredentialsDeep, maskCredentialsInText } from '../reporting/serialize.js';
+import { commandSegments } from './argv-rules.js';
+import { hookCommandSecrets } from '../analyzers/hook-commands.js';
+import { maskCredentialsDeep, maskCredentialsInLine, maskCredentialsInText } from '../reporting/serialize.js';
 
 /**
  * The shared argv corpus (probe/testdata/argv-verdicts.json): the probe's Go
@@ -11,7 +13,8 @@ import { maskCredentialsDeep, maskCredentialsInText } from '../reporting/seriali
  * agree on which argv values are credentials.
  */
 interface ArgvCase { name: string; argv?: string[]; command?: string; secrets: string[]; keep: string[] }
-const corpus = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'probe', 'testdata', 'argv-verdicts.json'), 'utf-8')) as { cases: ArgvCase[] };
+interface SegmentCase { line: string; words: string[][]; pipes?: boolean[] }
+const corpus = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'probe', 'testdata', 'argv-verdicts.json'), 'utf-8')) as { cases: ArgvCase[]; segments: SegmentCase[] };
 
 describe('shared argv rules (probe/testdata/argv-verdicts.json)', () => {
   it('has cases', () => expect(corpus.cases.length).toBeGreaterThan(20));
@@ -38,6 +41,21 @@ describe('shared argv rules (probe/testdata/argv-verdicts.json)', () => {
       const out = maskCredentialsInText(c.command!);
       for (const s of c.secrets) expect(out, s).not.toContain(s);
       for (const k of c.keep) expect(out, k).toContain(k);
+      // the same command inside a JSON string (a hook in settings.json)
+      const line = maskCredentialsInLine(`"command": ${JSON.stringify(c.command!)}`);
+      for (const s of c.secrets) expect(line, s).not.toContain(JSON.stringify(s).slice(1, -1));
+    });
+    it(`CFG-002 hook detection, command string: ${c.name}`, () => {
+      expect(hookCommandSecrets(c.command!).map(s => s.value).sort()).toEqual([...c.secrets].sort());
+    });
+  }
+
+  it('has segments', () => expect(corpus.segments.length).toBeGreaterThan(5));
+  for (const c of corpus.segments) {
+    it(`shell word assembly: ${c.line}`, () => {
+      const segs = commandSegments(c.line);
+      expect(segs.map(s => s.tokens.map(t => t.word))).toEqual(c.words);
+      if (c.pipes) expect(segs.map(s => s.pipe)).toEqual(c.pipes);
     });
   }
 });
