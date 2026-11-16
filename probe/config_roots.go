@@ -365,7 +365,8 @@ func (c *collector) collectConfigTree(snapshot *ProbeSnapshot, root, g, home str
 const maxWildcardNames = 1000
 
 // recordWildcardNames records the names in dir (a home, never listed) that
-// the wildcard segment seg matches — only those names.
+// the wildcard segment seg matches — only those names, and not a dangling
+// link's (nothing is there).
 func recordWildcardNames(snapshot *ProbeSnapshot, dir, seg string) {
 	if seg == "" || !strings.ContainsAny(seg, "*?[{") || strings.Contains(seg, "**") {
 		return
@@ -381,6 +382,12 @@ func recordWildcardNames(snapshot *ProbeSnapshot, dir, seg string) {
 	names := []string{}
 	for _, e := range entries {
 		if ok, _ := doublestar.Match(seg, e.Name()); ok {
+			// a dangling link is no directory there, as a local stat finds
+			if e.Type()&os.ModeSymlink != 0 {
+				if _, err := os.Stat(filepath.Join(dir, e.Name())); err != nil {
+					continue
+				}
+			}
 			if len(names) >= maxWildcardNames {
 				return
 			}
@@ -687,11 +694,19 @@ func strictlyWithin(p, dir string) bool {
 }
 
 // resolveExisting resolves p's links like a realpath, for as much of p as
-// exists: the deepest existing directory resolved, the rest appended as is.
+// exists: the deepest existing directory resolved (and spelled as the
+// filesystem stores it, canonicalCase), the rest appended as is.
 func resolveExisting(p string) string {
 	var tail []string
 	for cur := p; ; cur = filepath.Dir(cur) {
 		if real, err := filepath.EvalSymlinks(cur); err == nil {
+			// spelled as stored: a home written in other letters is the home
+			if stored := storedSpelling(real); stored != real {
+				if cur != real {
+					noteRespelled(cur, stored)
+				}
+				real = stored
+			}
 			for i := len(tail) - 1; i >= 0; i-- {
 				real = filepath.Join(real, tail[i])
 			}
@@ -711,7 +726,7 @@ func resolveExisting(p string) string {
 func countTreeEntries(dir, home string, limit int) int {
 	n := 0
 	visited := map[string]bool{}
-	rootReal, err := filepath.EvalSymlinks(dir)
+	rootReal, err := realPath(dir)
 	if err != nil {
 		rootReal = dir
 	}
@@ -733,7 +748,7 @@ func countTreeEntries(dir, home string, limit int) int {
 			if e.Type()&os.ModeSymlink == 0 || depth >= maxLinkDepth || !treeAllowed(p, home) {
 				return nil
 			}
-			real, err := filepath.EvalSymlinks(p)
+			real, err := realPath(p)
 			// a link back into the tree or above it isn't followed (followFrom)
 			if err != nil || visited[real] || within(real, rootReal) || within(rootReal, real) {
 				return nil
@@ -750,7 +765,9 @@ func countTreeEntries(dir, home string, limit int) int {
 		})
 		return stop
 	}
-	walk(dir, 0)
+	// From where the root leads: WalkDir lists nothing under a root that is
+	// itself a link (a skills directory linked out of the home)
+	walk(rootReal, 0)
 	return n
 }
 

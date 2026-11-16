@@ -280,6 +280,7 @@ func Collect(manifest ProbeManifest, escalate bool) ProbeSnapshot {
 		PrivateGroups:  collectPrivateGroups(),
 	}
 	c := &collector{budget: maxTotalContentBytes}
+	defer recordRespellings(&snapshot)()
 	for _, h := range homes {
 		c.homes = append(c.homes, h.Path)
 	}
@@ -836,7 +837,7 @@ func (c *collector) followLinkedTrees(snapshot *ProbeSnapshot, pattern string, m
 	if !ok {
 		return
 	}
-	rootReal, err := filepath.EvalSymlinks(root)
+	rootReal, err := realPath(root)
 	if err != nil {
 		return
 	}
@@ -853,7 +854,7 @@ func (c *collector) followFrom(snapshot *ProbeSnapshot, pattern string, matches 
 		if err != nil || info.Mode()&os.ModeSymlink == 0 || c.excluded(pattern, m) {
 			continue
 		}
-		real, err := filepath.EvalSymlinks(m)
+		real, err := realPath(m)
 		if err != nil || visited[real] || relatedToAny(real, roots) {
 			continue
 		}
@@ -862,12 +863,13 @@ func (c *collector) followFrom(snapshot *ProbeSnapshot, pattern string, matches 
 		if escapesToSink(m, globBase(pattern)) {
 			continue
 		}
-		// A config-derived tree's links lead only where a tree may be walked
-		if c.configTree && !treeAllowed(m, c.treeHome) {
-			continue
-		}
-		// nor one leading into another user's home or an OS directory
-		if c.inSkillTree && !c.configTree && !c.linkInScope(globBase(pattern), m) {
+		// A config-derived tree's links lead only where a tree may be walked,
+		// nor one leading into another user's home or an OS directory. What it
+		// is (a directory: a skill not scanned) is recorded, never its listing
+		if (c.configTree && !treeAllowed(m, c.treeHome)) || (c.inSkillTree && !c.configTree && !c.linkInScope(globBase(pattern), m)) {
+			if _, done := snapshot.DirectoryModes[m]; !done {
+				recordDirMode(snapshot, m)
+			}
 			continue
 		}
 		if st, err := os.Stat(m); err != nil || !st.IsDir() {
