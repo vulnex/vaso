@@ -4,7 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { LocalFSProvider } from './local-fs-provider.js';
 import type { DirentInfo, FSProvider } from './fs-provider.js';
-import { MAX_SKILL_TREE_ENTRIES, countSkillTreeEntries } from './skill-tree-count.js';
+import { MAX_LINKED_SKILL_ENTRIES, MAX_SKILL_TREE_ENTRIES, countSkillTreeEntries, planSkillLinks, scanSkillTree } from './skill-tree-count.js';
+import type { TreeScan } from './skill-tree-count.js';
 import { overEntryLimit, skillRootGap, unscannedReason, unscannedShortReason } from './skill-root-scope.js';
 import { screenDefaultSkillRoots } from '../adapters/default-skill-roots.js';
 import { registerAllAdapters } from '../adapters/index.js';
@@ -39,18 +40,18 @@ describe('skill tree entry count', () => {
     await fill(join(t, 'node_modules', 'x'), 50); // skipped whole
     await fill(join(t, '.git'), 5); // skipped whole
     await writeFile(join(t, 'SKILL.md'), '');
-    expect(await countSkillTreeEntries(fs, t, 100, always)).toBe(1 + 3 + 1 + 2 + 1);
+    expect(await countSkillTreeEntries(fs, t, 100)).toBe(1 + 3 + 1 + 2 + 1);
   });
 
   it('a tree of exactly the limit is within it; one more entry is over', async () => {
     const at = join(root, 'at');
     await fill(at, MAX_SKILL_TREE_ENTRIES);
-    expect(await countSkillTreeEntries(fs, at, MAX_SKILL_TREE_ENTRIES, always)).toBe(MAX_SKILL_TREE_ENTRIES);
-    expect(await overEntryLimit(fs, at, root)).toBe(false);
+    expect(await countSkillTreeEntries(fs, at, MAX_SKILL_TREE_ENTRIES)).toBe(MAX_SKILL_TREE_ENTRIES);
+    expect(await overEntryLimit(fs, at)).toBe(false);
     const over = join(root, 'over');
     await fill(over, MAX_SKILL_TREE_ENTRIES + 1);
-    expect(await countSkillTreeEntries(fs, over, MAX_SKILL_TREE_ENTRIES, always)).toBe(MAX_SKILL_TREE_ENTRIES + 1);
-    expect(await overEntryLimit(fs, over, root)).toBe(true);
+    expect(await countSkillTreeEntries(fs, over, MAX_SKILL_TREE_ENTRIES)).toBe(MAX_SKILL_TREE_ENTRIES + 1);
+    expect(await overEntryLimit(fs, over)).toBe(true);
   });
 
   it('stops listing once past the limit', async () => {
@@ -63,44 +64,27 @@ describe('skill tree entry count', () => {
     });
     const t = join(root, 'many');
     for (let d = 0; d < 20; d++) await fill(join(t, `d${String(d).padStart(2, '0')}`), 10);
-    expect(await countSkillTreeEntries(counting, t, 25, always)).toBe(26);
+    expect(await countSkillTreeEntries(counting, t, 25)).toBe(26);
     // d00 (11 entries), d01 (11), then d02's 4th entry: three directories listed past the root
     expect(listed.length).toBe(4);
   });
 
-  it('counts from where a linked root leads, and follows links out of the tree once', async () => {
+  it('counts from where a linked root leads; a link counts as one entry, never descended into', async () => {
     const target = join(root, 'target');
     await fill(join(target, 's'), 4); // s + 4
     const shared = join(root, 'shared');
     await fill(shared, 3);
-    await symlink(shared, join(target, 'l1')); // l1 + 3
-    await symlink(shared, join(target, 'l2')); // l2 only (seen)
-    await symlink(target, join(target, 's', 'back')); // back only (into the tree)
-    await symlink(root, join(target, 'up')); // up only (above the tree)
-    await symlink(join(root, 'missing'), join(target, 'dangling')); // itself only
+    await symlink(shared, join(target, 'l1'));
+    await symlink(target, join(target, 's', 'back'));
+    await symlink(join(root, 'missing'), join(target, 'dangling'));
     const link = join(root, 'linked-root');
     await symlink(target, link);
-    const expected = 5 + (1 + 3) + 1 + 1 + 1 + 1;
-    expect(await countSkillTreeEntries(fs, link, 1000, always)).toBe(expected);
-    expect(await countSkillTreeEntries(fs, target, 1000, always)).toBe(expected);
-    // a link the scope refuses is counted, not followed
-    expect(await countSkillTreeEntries(fs, target, 1000, async p => !p.endsWith('l1'))).toBe(expected);
-    expect(await countSkillTreeEntries(fs, target, 1000, async () => false)).toBe(expected - 3);
-  });
-
-  it('follows links at most eight deep', async () => {
-    // chain/c0 → d1, d1/next → d2, … each target holding one file and the next link
-    const base = join(root, 'chain');
-    await mkdir(base, { recursive: true });
-    const dirs = Array.from({ length: 12 }, (_, i) => join(root, `hop${i}`));
-    for (const [i, d] of dirs.entries()) {
-      await mkdir(d, { recursive: true });
-      await writeFile(join(d, 'f'), '');
-      if (i + 1 < dirs.length) await symlink(dirs[i + 1], join(d, 'next'));
-    }
-    await symlink(dirs[0], join(base, 'next'));
-    // links met at depths 0–7 are followed: 8 targets of 2 entries, plus the root's link
-    expect(await countSkillTreeEntries(fs, base, 1000, always)).toBe(1 + 8 * 2);
+    const expected = 5 + 1 + 1 + 1;
+    expect(await countSkillTreeEntries(fs, link, 1000)).toBe(expected);
+    const scan = await scanSkillTree(fs, target, 1000);
+    expect(scan.n).toBe(expected);
+    // in WalkDir order, under the tree's real path
+    expect(scan.links).toEqual([join(target, 'dangling'), join(target, 'l1'), join(target, 's', 'back')]);
   });
 
   it('an unreadable directory counts as itself', async () => {
@@ -110,8 +94,78 @@ describe('skill tree entry count', () => {
     const flaky: FSProvider = Object.assign(Object.create(fs) as LocalFSProvider, {
       readdirEntries: (p: string): Promise<DirentInfo[]> => (p === t ? fs.readdirEntries(p) : Promise.reject(new Error('EACCES'))),
     });
-    expect(await countSkillTreeEntries(flaky, t, 10, always)).toBe(1);
-    expect(await countSkillTreeEntries(fs, join(root, 'nope'), 10, always)).toBe(0);
+    expect(await countSkillTreeEntries(flaky, t, 10)).toBe(1);
+    expect(await countSkillTreeEntries(fs, join(root, 'nope'), 10)).toBe(0);
+  });
+});
+
+describe('link plan of a skills tree', () => {
+  let root: string;
+  const scans = new Map<string, Promise<TreeScan>>();
+  const scanOf = (real: string) => {
+    let s = scans.get(real);
+    if (!s) scans.set(real, (s = scanSkillTree(fs, real, MAX_SKILL_TREE_ENTRIES)));
+    return s;
+  };
+  beforeAll(async () => {
+    root = await realpath(await mkdtemp(join(tmpdir(), 'vaso-plan-')));
+  });
+  afterAll(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it('judges each link from its own target and charges the links\' total', async () => {
+    expect(MAX_LINKED_SKILL_ENTRIES).toBe(5 * MAX_SKILL_TREE_ENTRIES);
+    const tree = join(root, 'tree');
+    await fill(join(tree, 'own'), 20);
+    const targets: string[] = [];
+    for (let i = 1; i <= 6; i++) {
+      const t = join(root, `t${i}`);
+      await fill(join(t, 'pad'), MAX_SKILL_TREE_ENTRIES - 1); // 10,000 entries: at the limit
+      targets.push(t);
+      await symlink(t, join(tree, `l${i}`));
+    }
+    const big = join(root, 'big');
+    await fill(join(big, 'pad'), MAX_SKILL_TREE_ENTRIES);
+    await symlink(big, join(tree, 'a-big'));
+    await symlink(targets[0], join(tree, 'z-again'));
+    // a-big (limit, 10,001 charged), l1–l3 (40,001), l4 past 50,000
+    const plan = await planSkillLinks(fs, tree, always, scanOf);
+    expect(plan.get(big)).toBe('limit');
+    expect(targets.map(t => plan.get(t))).toEqual(['follow', 'follow', 'follow', 'total', 'total', 'total']);
+    expect(plan.size).toBe(7);
+  }, 120_000);
+
+  it('takes a followed link\'s own links right after it, not into a tree already taken nor above the root', async () => {
+    const tree = join(root, 'nest');
+    const outer = join(root, 'outer');
+    const inner = join(root, 'inner');
+    await fill(join(outer, 's'), 2);
+    await fill(inner, 2);
+    await symlink(inner, join(outer, 'in'));
+    await symlink(join(outer, 's'), join(outer, 'back'));
+    await mkdir(tree);
+    await symlink(outer, join(tree, 'out'));
+    await symlink(root, join(tree, 'up'));
+    const plan = await planSkillLinks(fs, tree, always, scanOf);
+    expect([...plan.entries()]).toEqual([[outer, 'follow'], [inner, 'follow']]);
+    // a link the scope refuses gets no verdict
+    const refused = await planSkillLinks(fs, tree, async p => !p.endsWith('/in'), scanOf);
+    expect([...refused.keys()]).toEqual([outer]);
+  });
+
+  it('follows links at most eight deep', async () => {
+    const base = join(root, 'chain');
+    await mkdir(base, { recursive: true });
+    const dirs = Array.from({ length: 12 }, (_, i) => join(root, `hop${i}`));
+    for (const [i, d] of dirs.entries()) {
+      await mkdir(d, { recursive: true });
+      await writeFile(join(d, 'f'), '');
+      if (i + 1 < dirs.length) await symlink(dirs[i + 1], join(d, 'next'));
+    }
+    await symlink(dirs[0], join(base, 'next'));
+    const plan = await planSkillLinks(fs, base, always, scanOf);
+    expect(plan.size).toBe(8);
   });
 });
 

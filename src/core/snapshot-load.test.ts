@@ -3,23 +3,23 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  validateSnapshot, loadSnapshotFile, SnapshotLoadError, MAX_SNAPSHOT_FILE_CONTENT_CHARS, MAX_CONFIG_TREES,
+  validateSnapshot, loadSnapshotFile, SnapshotLoadError, MAX_SNAPSHOT_FILE_CONTENT_CHARS, MAX_CONFIG_TREES, MAX_LINK_RECORDS,
   snapshotErrorLines,
 } from './snapshot-load.js';
 
 describe('validateSnapshot configTrees', () => {
   it('accepts literal absolute directory keys with a known status', () => {
-    expect(validateSnapshot(snap({ configTrees: { '/home/u/ws/skills': 'collected', '/': 'refused', '/home/u/a*b': 'limit' } }))).toEqual([]);
+    expect(validateSnapshot(snap({ configTrees: { '/home/u/ws/skills': 'collected', '/': 'refused', '/home/u/a*b': 'limit', '/home/u/s/l': 'total' } }))).toEqual([]);
   });
 
   it('rejects too many trees, relative, unnormalized or over-long keys', () => {
-    const many = Object.fromEntries(Array.from({ length: MAX_CONFIG_TREES + 1 }, (_, i) => [`/home/u/t${i}`, 'collected']));
-    expect(validateSnapshot(snap({ configTrees: many })).join()).toMatch(/more than 2000 trees/);
+    const many = Object.fromEntries(Array.from({ length: MAX_CONFIG_TREES + MAX_LINK_RECORDS + 1 }, (_, i) => [`/home/u/t${i}`, 'collected']));
+    expect(validateSnapshot(snap({ configTrees: many })).join()).toMatch(/more than 22000 entries/);
     for (const key of ['rel/skills', '/home/u/../x', '/home/u/ws/', '/home//u', `/${'a'.repeat(5000)}`, '/a\0b', '']) {
       expect(validateSnapshot(snap({ configTrees: { [key]: 'collected' } })).join(), JSON.stringify(key.slice(0, 20)))
         .toMatch(/normalized absolute directory paths/);
     }
-    expect(validateSnapshot(snap({ configTrees: { '/x': 'walked' } })).join()).toMatch(/collected, refused or limit/);
+    expect(validateSnapshot(snap({ configTrees: { '/x': 'walked' } })).join()).toMatch(/collected, refused, limit or total/);
   });
 });
 

@@ -381,6 +381,11 @@ export class SnapshotFSProvider implements FSProvider {
     return this.snapshot.configTrees ?? {};
   }
 
+  /** The probe stopped following links in skills trees past its record bound. */
+  skillLinksTruncated(): boolean {
+    return this.snapshot.skillLinksTruncated === true;
+  }
+
   get privilege() {
     return this.snapshot.privilege;
   }

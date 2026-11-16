@@ -318,14 +318,14 @@ export function pathChain(path: string): string[] {
  * another reason. Undefined off snapshots, and when the manifest's own trees
  * cover it.
  */
-export function configTreeGap(fs: FSProvider, dir: string): 'refused' | 'limit' | undefined {
+export function configTreeGap(fs: FSProvider, dir: string): 'refused' | 'limit' | 'total' | undefined {
   if (fs.kind !== 'snapshot') return undefined;
   const c = compiled(fs);
   if (!c) return undefined;
   const chain = selfAndAncestors(dir);
   if (chain.some(d => c.recursive.some(r => r.test(d)))) return linkedGap(fs, c, chain);
   const status = treeStatus(c, chain);
-  return status === 'refused' || status === 'limit' ? status : undefined;
+  return status === 'refused' || status === 'limit' || status === 'total' ? status : undefined;
 }
 
 /**
@@ -348,7 +348,7 @@ export function configTreeStatus(fs: FSProvider, dir: string): ConfigTreeStatus 
  * config-set directory above it — with nothing of the tree in the snapshot,
  * means not scanned, not empty.
  */
-function linkedGap(fs: FSProvider, c: Compiled, chain: readonly string[]): 'refused' | 'limit' | undefined {
+function linkedGap(fs: FSProvider, c: Compiled, chain: readonly string[]): 'refused' | 'limit' | 'total' | undefined {
   const holds = (fs as SnapshotRecords).holdsUnder;
   if (!holds || chain.length === 0) return undefined;
   for (let i = 0; i < chain.length; i++) {
@@ -379,7 +379,7 @@ export function probeCoversTree(fs: FSProvider, dir: string): boolean {
   const chain = selfAndAncestors(dir);
   if (chain.some(d => c.recursive.some(r => r.test(d)))) return linkedGap(fs, c, chain) === undefined;
   const status = treeStatus(c, chain);
-  if (status === 'refused' || status === 'limit') return false;
+  if (status === 'refused' || status === 'limit' || status === 'total') return false;
   if (status === 'collected') return true;
   if (chain.length > 0 && c.listed.some(r => r.test(chain[0]))) return true;
   return listedAbsent(fs, c, chain);

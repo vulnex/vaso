@@ -3,6 +3,7 @@ import type { DirentInfo, FSProvider } from './fs-provider.js';
 import { relEscapes } from './path-rel.js';
 import { classifySensitivePath } from '../analyzers/sensitive-paths.js';
 import { linkCap, linkScope } from './skill-root-scope.js';
+import type { LinkCapReason } from './skill-root-scope.js';
 
 /**
  * Skills are often installed as symlinks — `~/.codex/skills/<name>` pointing
@@ -27,9 +28,10 @@ import { linkCap, linkScope } from './skill-root-scope.js';
  * A directory link whose target tree holds more than MAX_SKILL_TREE_ENTRIES
  * entries (counted from the target, each link on its own — linkCap) is not
  * followed either, as the probe doesn't (≥ 1.4.2): `/opt/homebrew/Cellar`
- * linked into a plain `~/.claude/skills` would otherwise be read whole.
- * walkSkillTree lists those links (`overLimit`); `vaso skill audit` walks
- * its explicit target whole (`uncapped`).
+ * linked into a plain `~/.claude/skills` would otherwise be read whole. Nor
+ * is one past what a tree's links may hold together (MAX_LINKED_SKILL_ENTRIES).
+ * walkSkillTree lists those links (`overLimit`, `overTotal`); `vaso skill
+ * audit` walks its explicit target whole (`uncapped`).
  */
 const MAX_LINK_DEPTH = 8;
 
@@ -125,7 +127,7 @@ export async function walkSkillTree(fs: FSProvider, root: string, refused?: stri
   const real = await realOrSelf(fs, root);
   const rules: WalkRules = {
     inScope: noting(await linkScope(fs, root), refused),
-    overLimit: noting(await capOf(fs, root, opts), opts.overLimit, true),
+    capped: notingCap(await capOf(fs, root, opts), opts),
   };
   return walk(fs, root, [real], new Visited(real), 0, true, new Set(classifySensitivePath(root)), rules);
 }
@@ -133,24 +135,39 @@ export async function walkSkillTree(fs: FSProvider, root: string, refused?: stri
 export interface SkillWalkOptions {
   /** Directory links left out for the size of the tree they lead to (linkCap) are added here. */
   overLimit?: string[];
+  /** Directory links left out past what the tree's links may hold together (linkCap) are added here. */
+  overTotal?: string[];
   /** Follow links whatever the size of their tree (`vaso skill audit`'s explicit target). */
   uncapped?: boolean;
 }
 
 /** The size rule for a walk of `root` (linkCap), or none when uncapped. */
-async function capOf(fs: FSProvider, root: string, opts: SkillWalkOptions): Promise<LinkRule> {
-  return opts.uncapped ? async () => false : linkCap(fs, root);
+async function capOf(fs: FSProvider, root: string, opts: SkillWalkOptions): Promise<CapRule> {
+  return opts.uncapped ? async () => undefined : linkCap(fs, root);
 }
 
-/** `rule`, adding every link it answers `when` for to `list` (when given). */
-function noting(rule: LinkRule, list: string[] | undefined, when = false): LinkRule {
+/** `rule`, adding every link it refuses to `list` (when given). */
+function noting(rule: LinkRule, list: string[] | undefined): LinkRule {
   if (!list) return rule;
   return async (link: string) => {
     const answer = await rule(link);
-    if (answer === when && !list.includes(link)) list.push(link);
+    if (!answer && !list.includes(link)) list.push(link);
     return answer;
   };
 }
+
+/** `rule`, adding every link it leaves out to opts' list for the reason. */
+function notingCap(rule: CapRule, opts: SkillWalkOptions): CapRule {
+  return async (link: string) => {
+    const reason = await rule(link);
+    const list = reason === 'limit' ? opts.overLimit : reason === 'total' ? opts.overTotal : undefined;
+    if (list && !list.includes(link)) list.push(link);
+    return reason;
+  };
+}
+
+/** Why a directory link met in the walk is left out for its size, if it is. */
+type CapRule = (link: string) => Promise<LinkCapReason | undefined>;
 
 /** A yes/no rule on a link met in the walk. */
 type LinkRule = (link: string) => Promise<boolean>;
@@ -158,8 +175,8 @@ type LinkRule = (link: string) => Promise<boolean>;
 interface WalkRules {
   /** The link may be followed for where it leads (linkScope). */
   inScope: LinkRule;
-  /** The directory link leads to a tree over the entry limit (linkCap). */
-  overLimit: LinkRule;
+  /** The directory link is left out for the size of what it leads to (linkCap). */
+  capped: CapRule;
 }
 
 /**
@@ -172,7 +189,7 @@ export async function followSkillLinks(fs: FSProvider, root: string, entries: Di
   const visited = new Visited(rootReal);
   const prefix = root.endsWith('/') ? root : root + '/';
   const links = entries.filter(e => e.isSymbolicLink && (e.parentPath === root || (e.parentPath ?? '').startsWith(prefix)));
-  const rules: WalkRules = { inScope: await linkScope(fs, root), overLimit: noting(await capOf(fs, root, opts), opts.overLimit, true) };
+  const rules: WalkRules = { inScope: await linkScope(fs, root), capped: notingCap(await capOf(fs, root, opts), opts) };
   return (await follow(fs, root, links, [rootReal], visited, 0, new Set(classifySensitivePath(root)), rules)).filter(e => !e.isSymbolicLink || !links.includes(e));
 }
 
@@ -269,9 +286,9 @@ async function follow(
   // most specific link.
   dirLinks.sort((a, b) => b.real.length - a.real.length);
   for (const { entry, parent, link, real } of dirLinks) {
-    // Over the entry limit: neither walked nor marked walked (another link
-    // to the same tree is reported too)
-    if (visited.covers(real) || await rules.overLimit(link)) {
+    // Over the entry limit or the links' total: neither walked nor marked
+    // walked (another link to the same tree is reported too)
+    if (visited.covers(real) || (await rules.capped(link)) !== undefined) {
       out.push(entry);
       continue;
     }

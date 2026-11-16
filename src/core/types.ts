@@ -168,7 +168,7 @@ export interface AgentInstallation {
 /** A skills directory left unscanned, and why (src/core/skill-root-scope.ts). */
 export interface UnscannedSkillsDir {
   path: string;
-  reason: 'home' | 'outside' | 'limit' | 'relative';
+  reason: 'home' | 'outside' | 'limit' | 'total' | 'relative';
   /** Where its links lead, when it is (or lies under) a link. */
   target?: string;
   /** The kind of place it is (`home`/`outside`): "an OS directory (/etc)". */
