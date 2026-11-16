@@ -1,7 +1,7 @@
 import { dirname, join } from 'node:path';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { regexBudget, runSamples } from '../../analyzers/bounded-regex.js';
+import { regexBudget, runSampleBatch, type SampleRun } from '../../analyzers/bounded-regex.js';
 import { compileForeignRegex, notEvaluatedDetail, unjudgedEvidence } from '../../analyzers/foreign-regex.js';
 import { asRecord, picoMainConfigs, stringList } from './shared.js';
 import { riskyWhitelistEntry } from '../nanobot/nb-005-ssrf-webfetch.js';
@@ -38,7 +38,9 @@ export const pcl007 = defineCheck({
   async run(ctx, h) {
     const evidence: Evidence[] = [];
     let writes = false;
-    const budget = regexBudget();
+    // read and write allowances are judged with separate budgets: slow read
+    // patterns must not leave a write catch-all unjudged
+    const budgets = { allow_read_paths: regexBudget(), allow_write_paths: regexBudget() };
     for (const config of picoMainConfigs(ctx.configs)) {
       const targets = sensitiveTargets(ctx.fs.homedir(), dirname(config.filePath));
       const tools = asRecord(config.data.tools) ?? {};
@@ -54,16 +56,21 @@ export const pcl007 = defineCheck({
       for (const [key, write] of [['allow_read_paths', false], ['allow_write_paths', true]] as const) {
         const what = `lets the agent ${write ? 'write' : 'read'} credentials or system files`;
         const unjudged: string[] = [];
-        for (const pattern of stringList(tools[key])) {
+        const patterns = stringList(tools[key]);
+        const compiled = patterns.map(p => compileForeignRegex(p, 'go'));
+        const runs: Array<SampleRun | undefined> = compiled.map(() => undefined);
+        const ok = compiled.flatMap((c, k) => (c.kind === 'ok' ? [{ k, re: c.re }] : []));
+        runSampleBatch(ok.map(({ re }) => ({ re, samples: targets })), { budget: budgets[key] })
+          .forEach((run, j) => { runs[ok[j].k] = run; });
+        for (const [k, pattern] of patterns.entries()) {
           const snippet = `tools.${key}: ${JSON.stringify(pattern)}`;
-          const compiled = compileForeignRegex(pattern, 'go');
           // PicoClaw rejects a pattern Go can't compile: it allows nothing
-          if (compiled.kind === 'invalid') continue;
-          if (compiled.kind === 'unsupported') {
+          if (compiled[k].kind === 'invalid') continue;
+          const run = runs[k];
+          if (!run) {
             evidence.push({ file: config.filePath, snippet, detail: notEvaluatedDetail('unsupported', what) });
             continue;
           }
-          const run = runSamples(compiled.re, targets, { budget });
           // a target matched before the time ran out is a finding all the same
           const hits = targets.filter((_, i) => run.hits[i]);
           if (hits.length === 0) {
@@ -78,7 +85,7 @@ export const pcl007 = defineCheck({
             detail: `Lets the agent ${write ? 'write' : 'read'} ${hits.join(', ')}${run.complete ? '' : ' (the other sensitive paths were not evaluated)'}`,
           });
         }
-        if (unjudged.length > 0) evidence.push(unjudgedEvidence(config.filePath, `tools.${key}`, unjudged, what.replace('lets', 'let')));
+        if (unjudged.length > 0) evidence.push(unjudgedEvidence(config.filePath, `tools.${key}`, unjudged, what));
       }
     }
     return h.fromEvidence(evidence, {

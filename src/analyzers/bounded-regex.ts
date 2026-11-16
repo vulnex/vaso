@@ -15,10 +15,15 @@ import { unsafeRegexReason } from '../rules/regex-safety.js';
  * limit is hit the result is incomplete — "not evaluated", which callers
  * report rather than read as "doesn't match".
  *
- * Patterns judged by one check share a `RegexBudget`: once its total time is
- * spent, the remaining unscreened patterns are not run at all, so a config
- * listing hundreds of hostile patterns costs seconds, not minutes. Screened
- * patterns always run, so their verdicts don't depend on timing.
+ * The patterns judged by one check go through `runSampleBatch` in two
+ * passes. First every unscreened pattern gets a short slice of its own
+ * (`REGEX_FIRST_PASS_MS`): a catch-all matches on its first greedy path in
+ * microseconds, so no number of slow patterns listed before it can keep it
+ * from being judged. Then the patterns still undecided share the check's
+ * `RegexBudget`; once that is spent the rest stay "not evaluated" (`budget`),
+ * so a config listing hundreds of hostile patterns costs seconds, not
+ * minutes. Screened patterns always run, so their verdicts don't depend on
+ * timing.
  *
  * A pattern cut short still keeps what it showed: the samples matched before
  * the limit, and those matched by any top-level alternative the screen finds
@@ -30,6 +35,12 @@ export const REGEX_SAMPLE_BUDGET_MS = 250;
 
 /** Total time for the unscreened patterns of one check run. */
 export const REGEX_TOTAL_BUDGET_MS = 1500;
+
+/** First-pass slice for each unscreened pattern of a batch. */
+export const REGEX_FIRST_PASS_MS = 5;
+
+/** First-pass time after which the remaining slices shrink to 1 ms. */
+const FIRST_PASS_TOTAL_MS = 1000;
 
 /** Longest sample text; the samples are short commands and paths. */
 const MAX_SAMPLE_LENGTH = 512;
@@ -146,7 +157,19 @@ export function runSamples(
   samples: readonly string[],
   opts: { untilMiss?: boolean; budgetMs?: number; budget?: RegexBudget } = {},
 ): SampleRun {
-  const texts = samples.map(s => (s.length > MAX_SAMPLE_LENGTH ? s.slice(0, MAX_SAMPLE_LENGTH) : s));
+  return run(re, samples, opts, true);
+}
+
+const clip = (samples: readonly string[]): string[] => samples.map(s => (s.length > MAX_SAMPLE_LENGTH ? s.slice(0, MAX_SAMPLE_LENGTH) : s));
+
+/** `runSamples`; without `rescue`, a timed-out run skips the linear-alternative hits (a later pass adds them). */
+function run(
+  re: RegExp,
+  samples: readonly string[],
+  opts: { untilMiss?: boolean; budgetMs?: number; budget?: RegexBudget },
+  rescue: boolean,
+): SampleRun {
+  const texts = clip(samples);
   const untilMiss = !!opts.untilMiss;
   if (!unsafeRegexReason(re.source)) {
     const plain = new RegExp(re.source, strip(re.flags));
@@ -176,7 +199,7 @@ export function runSamples(
     return { hits: texts.map(() => false), complete: false, reason: 'timeout' };
   } catch {
     const partial = Array.isArray(sandbox.out) ? (sandbox.out as unknown[]).map(Boolean) : [];
-    const alt = linearAlternativeHits(re, texts);
+    const alt = rescue ? linearAlternativeHits(re, texts) : [];
     return { hits: texts.map((_, i) => !!partial[i] || alt[i]), complete: false, reason: 'timeout' };
   } finally {
     if (budget) budget.remainingMs -= performance.now() - started;
@@ -189,4 +212,45 @@ export function runSamples(
 export function testSamples(re: RegExp, samples: readonly string[], opts: { untilMiss?: boolean; budgetMs?: number; budget?: RegexBudget } = {}): boolean[] | undefined {
   const run = runSamples(re, samples, opts);
   return run.complete ? run.hits : undefined;
+}
+
+export interface SampleJob {
+  re: RegExp;
+  samples: readonly string[];
+  untilMiss?: boolean;
+}
+
+/**
+ * `runSamples` for every job of one check, in two passes: each job first
+ * runs under its own short slice, then the undecided ones share `budget`
+ * (a fresh `regexBudget()` when not given). A job left out of the second
+ * pass because the budget ran out keeps what its first pass showed, with
+ * reason `budget`.
+ */
+export function runSampleBatch(
+  jobs: readonly SampleJob[],
+  opts: { budget?: RegexBudget; firstPassMs?: number } = {},
+): SampleRun[] {
+  const budget = opts.budget ?? regexBudget();
+  const slice = opts.firstPassMs ?? REGEX_FIRST_PASS_MS;
+  const started = performance.now();
+  // past FIRST_PASS_TOTAL_MS the slices shrink: a catch-all still needs far less
+  const runs = jobs.map(j => run(j.re, j.samples, {
+    untilMiss: j.untilMiss,
+    budgetMs: performance.now() - started < FIRST_PASS_TOTAL_MS ? slice : Math.min(slice, 1),
+  }, false));
+  jobs.forEach((j, k) => {
+    const first = runs[k];
+    if (first.complete || (j.untilMiss && first.hits.every(Boolean))) return;
+    if (budget.remainingMs <= 0) {
+      const alt = linearAlternativeHits(j.re, clip(j.samples));
+      runs[k] = { hits: first.hits.map((h, i) => h || alt[i]), complete: false, reason: 'budget' };
+      return;
+    }
+    const second = runSamples(j.re, j.samples, { untilMiss: j.untilMiss, budget });
+    runs[k] = second.complete
+      ? second
+      : { hits: second.hits.map((h, i) => h || first.hits[i]), complete: false, reason: second.reason };
+  });
+  return runs;
 }
