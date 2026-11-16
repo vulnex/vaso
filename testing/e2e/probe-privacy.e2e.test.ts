@@ -271,6 +271,10 @@ function jsonFile(label: string): string {
       // curl user:password as separate elements (rule 5); --pw/--pass take a password
       o: { command: 'curl', args: ['-u', `carol:${c('curl -u separate', lowerWord)}`, '--user', `dave:${c('curl --user separate', lowerWord)}`, `--proxy-user=p:${c('curl --proxy-user=', lowerWord)}`, 'https://x.example'] },
       p: { command: 'acme', args: ['--pw', c('lowercase --pw', lowerWord), '--pass', c('lowercase --pass', lowerWord)] },
+      // other clients' password options (rule 7)
+      q: { command: 'docker', args: ['login', '-u', 'u', '-p', c('argv docker login -p', lowerWord), 'reg.example'] },
+      r: { command: 'sqlcmd', args: ['-S', 'db', '-U', 'sa', `-P${c('argv sqlcmd -P glued', alnum)}`] },
+      s: { command: 'mongosh', args: ['mongodb://h/db', '--password', c('argv mongosh --password', lowerWord)] },
     },
     // hook commands: passwords quoted the shell's way, nested in remote and
     // shell commands (in the JSON text the double quotes are escaped)
@@ -289,6 +293,25 @@ function jsonFile(label: string): string {
           `ssh h "sshpass -p \\"${c('hook ssh "sshpass -p \\"pw\\""', alnum)}\\" ssh x"`,
           `ssh h $'mysql -p${c("hook ssh $'mysql -ppw'", alnum)} app'`,
           `ssh host "bash -c 'mysql -p${c('hook two levels', alnum)} app'"`,
+          // the words the shell assembles: quoted whole, quoted in parts, a quoted space, ANSI-C
+          `mysql -u root "-p${c('hook "-ppw"', alnum)}" app`,
+          `mysql -u root '-p'"${c('hook \'-p\'"pw"', alnum)}" app`,
+          `mysql -u root -p"${c('hook -p"pw pw" first', alnum)} ${c('hook -p"pw pw" second', alnum)}" app`,
+          `mysql -p$'${c("hook -p$'pw'", alnum)}' app`,
+          `sshpass -p "${c('hook sshpass -p "pw pw" first', alnum)} ${c('hook sshpass -p "pw pw" second', alnum)}" ssh x`,
+          // other clients' password options (shared argv rule 7)
+          `sqlcmd -S h -U sa -P ${c('hook sqlcmd -P', alnum)}`,
+          `docker login -u u -p ${c('hook docker login -p', alnum)} reg.example`,
+          `podman login -u u --password="${c('hook podman login --password=', lowerWord)}" quay.io`,
+          `smbclient //h/s -U u%${c('hook smbclient -U u%pw', alnum)}`,
+          `lftp -u u,${c('hook lftp -u u,pw', lowerWord)} ftp.example`,
+          `ldapsearch -x -D cn=a -w ${c('hook ldapsearch -w', alnum)}`,
+          `mongo -u u -p ${c('hook mongo -p', alnum)} h/db`,
+          `htpasswd -b .htpasswd u ${c('hook htpasswd -b', lowerWord)}`,
+          `xfreerdp /u:admin /p:${c('hook xfreerdp /p:', alnum)} /v:h`,
+          // echoed into a command reading its password from stdin (rule 8)
+          `echo ${c('hook echo | sudo -S', lowerWord)} | sudo -S true`,
+          `echo '${c('hook echo | docker login --password-stdin', alnum)}' | docker login -u u --password-stdin reg`,
         ].map(command => ({ type: 'command', command })),
       }],
     },
