@@ -289,6 +289,49 @@ function codeValue(value: string, sep: string): boolean {
 }
 
 /**
+ * An assignment to a credential name whose value is code with string literals
+ * in it — a fallback (`password = os.getenv("X") or "pw"`, `apiKey = getKey()
+ * || "k"`, `secret = cfg.secret ?? "s"`) or a ternary's branch: the value up
+ * to the end of the statement, its top-level literals masked. `==` is a
+ * comparison, not an assignment.
+ */
+const CODE_ASSIGN = /(^|[^\w$.])([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)(\s*(?:\?\?|\|\||&&)?=(?![=>~])\s*)([^;\n]*)/g;
+
+function maskCodeFallbacks(text: string): string {
+  if (!text.includes('=') || !/["']/.test(text)) return text;
+  return text.replace(CODE_ASSIGN, (m, pre: string, name: string, sep: string, rest: string) => {
+    const leaf = name.slice(name.lastIndexOf('.') + 1);
+    if (!/["']/.test(rest) || !isSecretName(leaf)) return m;
+    // only code: a plain literal (`password = "x"`) is the other rules' to judge
+    const first = rest.replace(/^\(+\s*/, '');
+    if (/^["'`]/.test(first) || !/^[A-Za-z_$]/.test(first)) return m;
+    return `${pre}${name}${sep}${maskTopLevelLiterals(rest)}`;
+  });
+}
+
+/**
+ * The string literals of `code` outside any brackets — the values it may
+ * evaluate to (`… or "pw"`, `… : "t"`), not a call's argument or an index
+ * (`getpass("Password: ")`, `headers["x-token"]`), which the other rules judge.
+ */
+function maskTopLevelLiterals(code: string): string {
+  let depth = 0;
+  let out = '';
+  let last = 0;
+  QUOTED.lastIndex = 0;
+  for (let m = QUOTED.exec(code); m; m = QUOTED.exec(code)) {
+    for (const ch of code.slice(last, m.index)) {
+      if (ch === '(' || ch === '[' || ch === '{') depth++;
+      else if ((ch === ')' || ch === ']' || ch === '}') && depth > 0) depth--;
+    }
+    const q = m[0];
+    out += code.slice(last, m.index) + (depth === 0 && !keepValue(q.slice(1, -1)) ? `${q[0]}${MASK}${q[0]}` : q);
+    last = m.index + q.length;
+  }
+  return out + code.slice(last);
+}
+
+/**
  * Code in parentheses (`api_key = (os.environ.get("K") or`, a value continued
  * on the next lines): shown, with its string literals masked but an
  * environment variable's name (maskValueText).
@@ -391,9 +434,10 @@ function escapedQuotes(value: string, replacement: string): string {
   return q ? `${q}${replacement}${q}` : replacement;
 }
 
-function maskText(text: string): string {
+function maskText(input: string): string {
   // a JWT (`eyJ…`) needs none of [:=@-] around it
-  if (!/[:=@-]/.test(text) && !text.includes('eyJ') && !BARE_TOKEN_HINT.test(text)) return text;
+  if (!/[:=@-]/.test(input) && !input.includes('eyJ') && !BARE_TOKEN_HINT.test(input)) return input;
+  const text = maskCodeFallbacks(input);
   const pem = text.includes('-----BEGIN') ? text.replace(PEM_BODY, MASK) : text;
   const jwt = pem.includes('eyJ') ? pem.replace(JWT, MASK) : pem;
   const bare = BARE_TOKEN_HINT.test(jwt)
@@ -461,8 +505,9 @@ export function maskCredentialsInLine(raw: string): string {
 
 function maskLine(raw: string): string {
   // JSON escaped inside a string or a shell argument (`{\"apiKey\":\"…\"}`)
-  const line = raw.includes('\\') ? raw.replace(ESCAPED_JSON_PAIR, (m, q1: string, name: string, q2: string, value: string, q3: string) =>
+  const unescaped = raw.includes('\\') ? raw.replace(ESCAPED_JSON_PAIR, (m, q1: string, name: string, q2: string, value: string, q3: string) =>
     (isSecretName(name) && !keepValue(value) ? `${q1}${name}${q2}${MASK}${q3}` : m)) : raw;
+  const line = maskCodeFallbacks(unescaped);
   const b64 = BASE64_LINE.exec(line);
   if (b64 && /[A-Z]/.test(b64[2]) && /[a-z]/.test(b64[2]) && /\d/.test(b64[2])) return `${b64[1]}${MASK}${b64[3]}`;
   const whole = line.replace(SECRET_LINE_VALUE, (m, pre: string, name: string, sep: string, rest: string) => {
