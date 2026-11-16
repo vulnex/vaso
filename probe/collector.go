@@ -143,9 +143,13 @@ type collector struct {
 	// foreignLinks are private-store links to places that aren't the
 	// agent's (store_links.go): recorded, nothing behind them collected
 	foreignLinks []string
-	// linkCounts caches, per home and link, whether a skills tree's link
-	// leads to a tree over the entry limit (linkOverLimit)
-	linkCounts map[string]bool
+	// treeScans caches, by real path, a tree's count to the entry limit
+	// (limitScan); linkPlans each skills tree's link verdicts (linkPlan)
+	treeScans map[string]treeScan
+	linkPlans map[string]map[string]string
+	// treeRecords and linkRecords count ConfigTrees entries for trees
+	// (maxConfigTrees) and for links not followed (maxLinkRecords)
+	treeRecords, linkRecords int
 }
 
 // inExcludedDir reports whether match lies under an excluded directory that
@@ -908,11 +912,11 @@ func (c *collector) followFrom(snapshot *ProbeSnapshot, pattern string, matches 
 		if st, err := os.Stat(m); err != nil || !st.IsDir() {
 			continue // a file link was collected (followed) by the glob itself
 		}
-		// A skills tree's link to a tree over the entry limit (a plain
-		// ~/.claude/skills holding a link to /opt/homebrew/Cellar) is not
-		// walked: neither collected nor marked visited (another link to the
-		// same tree is judged and recorded too)
-		if c.inSkillTree && c.linkOverLimit(snapshot, pattern, m) {
+		// A skills tree's link to a tree over the entry limit, or past the
+		// total its links may hold (a plain ~/.claude/skills holding a link
+		// to /opt/homebrew/Cellar), is not walked: neither collected nor
+		// marked visited (another link to the same tree is recorded too)
+		if c.inSkillTree && c.linkNotFollowed(snapshot, pattern, m, real) {
 			continue
 		}
 		visited[real] = true
@@ -940,37 +944,51 @@ func (c *collector) followFrom(snapshot *ProbeSnapshot, pattern string, matches 
 	}
 }
 
-// linkOverLimit: the directory link m, met while walking a skills tree,
-// leads to a tree of more than maxConfigTreeEntries entries — counted from
-// its target on its own (countTreeEntries: each link its own budget), its
-// links followed where a tree of the walk's user may lead. Such a link is
-// recorded in ConfigTrees as over the limit, with its mode (a directory: the
-// CLI reports it not scanned, as a local walk leaves it out — linkCap in
-// src/core/skill-root-scope.ts). The plain content of the tree being walked
-// is not counted here.
-func (c *collector) linkOverLimit(snapshot *ProbeSnapshot, pattern, m string) bool {
+// maxLinkRecords bounds how many links not followed for size ConfigTrees
+// records (src/core/snapshot-load.ts MAX_LINK_RECORDS). Past it, no
+// directory link in a skills tree is followed (SkillLinksTruncated).
+var maxLinkRecords = 20000
+
+// linkNotFollowed: the directory link m (leading to real), met while walking
+// a skills tree, is not followed for the size of what it leads to — over the
+// entry limit, or past the total the tree's links may hold together
+// (linkPlan; a link the plan gives no verdict is judged by its own count).
+// Such a link is recorded in ConfigTrees ("limit" or "total"), with its mode
+// (a directory: the CLI reports it not scanned, as a local walk leaves it out
+// — linkCap in src/core/skill-root-scope.ts).
+func (c *collector) linkNotFollowed(snapshot *ProbeSnapshot, pattern, m, real string) bool {
+	if snapshot.SkillLinksTruncated {
+		return true
+	}
+	root, ok := literalTreeRoot(pattern)
+	if !ok {
+		root = globBase(pattern)
+	}
 	home := c.treeHome
 	if !c.configTree {
-		home = c.homeOf(globBase(pattern))
+		home = c.homeOf(root)
 	}
-	key := filepath.ToSlash(filepath.Clean(m))
-	cacheKey := home + "\x00" + key
-	over, counted := c.linkCounts[cacheKey]
-	if !counted {
-		over = countTreeEntries(m, home, maxConfigTreeEntries) > maxConfigTreeEntries
-		if c.linkCounts == nil {
-			c.linkCounts = make(map[string]bool)
+	verdict, planned := c.linkPlan(root, home)[real]
+	if !planned {
+		verdict = linkFollow
+		if c.limitScan(real).n > maxConfigTreeEntries {
+			verdict = linkLimit
 		}
-		c.linkCounts[cacheKey] = over
 	}
-	if !over {
+	if verdict == linkFollow {
 		return false
 	}
 	if snapshot.ConfigTrees == nil {
 		snapshot.ConfigTrees = make(map[string]string)
 	}
-	if _, done := snapshot.ConfigTrees[key]; !done && len(snapshot.ConfigTrees) < maxConfigTrees {
-		snapshot.ConfigTrees[key] = treeLimit
+	key := filepath.ToSlash(filepath.Clean(m))
+	if _, done := snapshot.ConfigTrees[key]; !done {
+		if c.linkRecords >= maxLinkRecords {
+			snapshot.SkillLinksTruncated = true
+			return true
+		}
+		c.linkRecords++
+		snapshot.ConfigTrees[key] = verdict
 	}
 	if _, done := snapshot.DirectoryModes[m]; !done {
 		recordDirMode(snapshot, m)

@@ -64,7 +64,7 @@ func TestLinkedTreeRootsAreCappedLikeTheirTarget(t *testing.T) {
 	if d := time.Since(start); d > 30*time.Second {
 		t.Errorf("counting took %s", d)
 	}
-	if n := countTreeEntries(filepath.Join(home, "biglink"), home, 50); n != 51 {
+	if n := countTreeEntries(filepath.Join(home, "biglink"), 50); n != 51 {
 		t.Errorf("count through a linked root stops past the limit: %d", n)
 	}
 }

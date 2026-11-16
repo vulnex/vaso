@@ -212,7 +212,7 @@ func TestLinksInALinkedDirOfAConfigTreeAreRecorded(t *testing.T) {
 	}
 }
 
-func TestConfigTreeCountFollowsLinksLikeTheWalk(t *testing.T) {
+func TestConfigTreeJudgesItsLinksOnTheirOwn(t *testing.T) {
 	home := setupHome(t)
 	small := filepath.Join(home, "small")
 	for i := 0; i < 11; i++ {
@@ -233,11 +233,20 @@ func TestConfigTreeCountFollowsLinksLikeTheWalk(t *testing.T) {
 	mustSymlink(t, huge, filepath.Join(small, "s", "huge"))
 	writeExtraDirs(t, home, "~/small")
 	snap := Collect(extraDirsManifest(), false)
-	if snap.ConfigTrees[small] != treeLimit {
-		t.Fatalf("a link past the entry limit: %v", snap.ConfigTrees)
+	// The link is judged on its own, not counted against the tree it is in:
+	// the tree is collected, the link past the entry limit is not followed
+	if snap.ConfigTrees[small] != treeCollected {
+		t.Fatalf("the tree holding a link past the entry limit: %v", snap.ConfigTrees)
 	}
-	if len(snap.Files) > 1 { // the config itself is not in the manifest
-		t.Fatalf("collected %d files", len(snap.Files))
+	link := filepath.Join(small, "s", "huge")
+	if snap.ConfigTrees[link] != treeLimit {
+		t.Fatalf("a link past the entry limit: %q", snap.ConfigTrees[link])
+	}
+	if _, ok := snap.Files[filepath.Join(small, "s", "f0.js")]; !ok {
+		t.Error("the tree's own files not collected")
+	}
+	if shippedUnder(snap, link) || shippedUnder(snap, huge) {
+		t.Fatal("collected behind a link past the entry limit")
 	}
 }
 
