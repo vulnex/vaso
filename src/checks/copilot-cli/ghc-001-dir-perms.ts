@@ -1,11 +1,11 @@
-import { basename, dirname, isAbsolute, join, relative } from 'node:path';
+import { basename, join } from 'node:path';
 import type { Evidence, ScanContext } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { accessibleByOthers, markUnreachable, queryPermissions, readableByOthers, writableByOthers } from '../../core/permissions.js';
 import { configHoldsSecret, CREDENTIAL_FILE_NAME } from '../../core/secret-values.js';
 import { ghc003 } from './ghc-003-plaintext-token.js';
 import { restrictFilesToOwner } from '../../remediation/config-writer.js';
-import { classifySensitivePath } from '../../analyzers/sensitive-paths.js';
+import { foreignStoreTarget, storeHomeOf, withinDir as within, type ForeignReason } from '../../core/store-links.js';
 
 const PROTECTED_FILES = [
   'config.json',
@@ -24,7 +24,7 @@ const PRIVATE_FILES = new Set(['command-history-state.json', 'session-store.db']
  * available. Listed most sensitive first — tokens and secrets before history
  * and transcripts.
  */
-const PRIVATE_DIRS: Array<{ dir: string; what: string }> = [
+export const PRIVATE_DIRS: Array<{ dir: string; what: string }> = [
   { dir: 'mcp-oauth-config', what: 'MCP OAuth token/registration file' },
   { dir: 'mcp-secrets', what: 'MCP secret fallback file' },
   { dir: 'command-history-state', what: 'Command history file' },
@@ -59,11 +59,6 @@ interface Findings {
   truncated: string[];
 }
 
-/** Why a linked folder isn't walked (foreignDir). */
-type ForeignReason =
-  | { why: 'sensitive'; label: string }
-  | { why: 'outside' | 'home' | 'store' };
-
 interface StoreLink {
   path: string;
   target: string;
@@ -84,16 +79,9 @@ interface StoreListing {
   foreignSelf?: boolean;
 }
 
-/** Whether `path` is `dir` or inside it. */
-function within(path: string, dir: string): boolean {
-  const rel = relative(dir, path);
-  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
-}
-
 /** The home holding the store: the parent of ~/.copilot, else the scanning user's. */
 function storeHome(ctx: ScanContext): string {
-  const dir = ctx.installation.installDir;
-  return basename(dir) === '.copilot' ? dirname(dir) : ctx.fs.homedir();
+  return storeHomeOf(ctx.installation.installDir, ctx.fs.homedir());
 }
 
 /** The snapshot holds an entry under `dir` (the probe followed the link to it). */
@@ -168,16 +156,11 @@ async function storeFiles(ctx: ScanContext, storeDir: string): Promise<StoreList
   /**
    * Why a linked folder resolving to `target` isn't walked: it lands in a
    * sensitive location, leaves the home (a folder above it too), is the home,
-   * or holds the store; undefined for an ordinary folder of the home.
+   * or holds the store; undefined for an ordinary folder of the home. The
+   * probe applies the same rule (privateStores) and ships nothing behind one.
    */
-  const foreignDir = (target: string): ForeignReason | undefined => {
-    const label = classifySensitivePath(target)[0];
-    if (label) return { why: 'sensitive', label };
-    if (!roots.some(root => within(target, root))) return { why: 'outside' };
-    if (homeRoots.some(root => within(root, target))) return { why: 'home' };
-    if (storeRoots.some(root => within(root, target)) || within(storeDir, target)) return { why: 'store' };
-    return undefined;
-  };
+  const foreignDir = (target: string): ForeignReason | undefined =>
+    foreignStoreTarget(target, { homeRoots, storeRoots, storeDir });
 
   // The store folder itself a link to such a place: its files aren't the
   // agent's — not walked, and the fix changes nothing behind it

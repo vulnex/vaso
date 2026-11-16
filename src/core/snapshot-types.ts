@@ -22,6 +22,12 @@ export interface ProbeManifest {
    *  an MCP server's command — read by the probe (newer than 1.4.1) from the
    *  configs it collects. Older probes ignore it. */
   configRoots?: ConfigRootRequest[];
+  /** Private store folders (Copilot's session-state/, …): the probe (newer
+   *  than 1.4.1) records a link from one to a place that isn't the agent's —
+   *  the folder itself or one linked directly inside it, judged by
+   *  foreignStoreTarget (src/core/store-links.ts) — as a link only, and
+   *  collects nothing behind it. Older probes ignore it. */
+  privateStores?: string[];
 }
 
 /**

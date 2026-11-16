@@ -140,6 +140,9 @@ type collector struct {
 	// baseScopes caches the scope of each manifest skills glob base
 	// (linkInScope)
 	baseScopes map[string]baseScope
+	// foreignLinks are private-store links to places that aren't the
+	// agent's (store_links.go): recorded, nothing behind them collected
+	foreignLinks []string
 }
 
 // inExcludedDir reports whether match lies under an excluded directory that
@@ -291,6 +294,10 @@ func Collect(manifest ProbeManifest, escalate bool) ProbeSnapshot {
 	}
 	snapshot.Privilege = priv
 
+	// Links from private stores to places that aren't the agent's, before
+	// anything is collected: nothing behind them is
+	c.markForeignStoreLinks(&snapshot, expandPaths(manifest.PrivateStores, homes))
+
 	// Expand and collect file paths
 	expandedPaths := expandPaths(manifest.FilePaths, homes)
 	for _, p := range expandedPaths {
@@ -337,7 +344,7 @@ func Collect(manifest ProbeManifest, escalate bool) ProbeSnapshot {
 			continue
 		}
 		for _, match := range matches {
-			if inExcludedDir(pattern, match) {
+			if inExcludedDir(pattern, match) || c.behindForeignLink(match) {
 				continue
 			}
 			recordSymlink(snapshot.Symlinks, match)
@@ -367,9 +374,15 @@ func Collect(manifest ProbeManifest, escalate bool) ProbeSnapshot {
 	// remotely the way it is locally.
 	expandedDirs := expandPaths(manifest.DirectoryListings, homes)
 	for _, dir := range expandedDirs {
+		if c.behindForeignLink(dir) {
+			continue
+		}
 		// One a link takes out of the home to where no skills tree is walked
-		// (~/.claude/skills → /etc): not listed — its links are recorded
-		if c.linkedOutRefused(dir) {
+		// (~/.claude/skills → /etc): not listed — its links are recorded.
+		// Nor a private store's link to a place that isn't the agent's
+		if c.isForeignLink(dir) {
+			c.recordLinkChain(&snapshot, dir)
+		} else if c.linkedOutRefused(dir) {
 			c.recordLinkChain(&snapshot, dir)
 		} else if listing := collectDirectory(dir, snapshot.Symlinks); listing != nil {
 			snapshot.Directories[dir] = listing
@@ -379,6 +392,9 @@ func Collect(manifest ProbeManifest, escalate bool) ProbeSnapshot {
 
 	// Collect system directory listings (not expanded per-user)
 	for _, dir := range manifest.SystemDirListings {
+		if c.behindForeignLink(dir) || c.isForeignLink(dir) {
+			continue
+		}
 		if listing := collectDirectory(dir, snapshot.Symlinks); listing != nil {
 			snapshot.Directories[dir] = listing
 		}
@@ -544,7 +560,7 @@ func (c *collector) collectGlob(snapshot *ProbeSnapshot, pattern string) {
 		return
 	}
 	for _, match := range matches {
-		if c.excluded(pattern, match) {
+		if c.excluded(pattern, match) || c.behindForeignLink(match) {
 			continue
 		}
 		// A link is recorded (name and target, never what it points to)
@@ -699,13 +715,16 @@ func jsonSize(s string) int64 {
 // or as a file. Directories used to be stored as file entries (os.ReadFile
 // fails, Exists+Mode kept), which made them look like files remotely.
 func (c *collector) collectPath(snapshot *ProbeSnapshot, p, base string, metadataOnly, listDir bool) {
+	if c.behindForeignLink(p) {
+		return
+	}
 	info, err := os.Stat(p)
 	if err == nil {
 		recordOwner(snapshot, p, info)
 	}
 	if err == nil && info.IsDir() {
 		snapshot.DirectoryModes[p] = int(info.Mode().Perm())
-		if listDir && !escapesToSink(p, base) {
+		if listDir && !escapesToSink(p, base) && !c.isForeignLink(p) {
 			if listing := collectDirectory(p, snapshot.Symlinks); listing != nil {
 				snapshot.Directories[p] = listing
 			}
@@ -862,7 +881,7 @@ func (c *collector) followFrom(snapshot *ProbeSnapshot, pattern string, matches 
 	}
 	for _, m := range matches {
 		info, err := os.Lstat(m)
-		if err != nil || info.Mode()&os.ModeSymlink == 0 || c.excluded(pattern, m) {
+		if err != nil || info.Mode()&os.ModeSymlink == 0 || c.excluded(pattern, m) || c.isForeignLink(m) || c.behindForeignLink(m) {
 			continue
 		}
 		real, err := realPath(m)
@@ -896,7 +915,7 @@ func (c *collector) followFrom(snapshot *ProbeSnapshot, pattern string, matches 
 			continue
 		}
 		for _, sm := range sub {
-			if c.excluded(pattern, sm) {
+			if c.excluded(pattern, sm) || c.behindForeignLink(sm) {
 				continue
 			}
 			recordSymlink(snapshot.Symlinks, sm)

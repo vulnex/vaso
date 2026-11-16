@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { spawn, execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { chmod, mkdir, mkdtemp, symlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { realpathSync } from 'node:fs';
 import { dirname, extname, basename, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -613,6 +613,53 @@ async function plantConfigRoots(home: string): Promise<void> {
   await symlink(otherHome(home), join(home, '.picoclaw/workspace-out'));
 }
 
+/**
+ * Copilot store folders linked to places that aren't the agent's — a store
+ * folder itself (to a dir out of the home, to ~/.aws, to the home) and folders
+ * linked inside a store (out of the home, to ~/.ssh, to the home, to
+ * ~/.copilot) — with files whose NAMES are canaries behind each: the probe
+ * records the links only, so no such name may ship. A folder linked inside
+ * the home is followed as before (STORE_LINK_FOLLOWED).
+ */
+const STORE_LINK_NAME = 'CANARYNAME';
+const STORE_LINK_FOLLOWED = 'canary-sess/events.jsonl';
+
+async function plantStoreLinks(home: string, work: string): Promise<{ links: string[]; followed: string }> {
+  const put = async (path: string) => {
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, '{}\n');
+  };
+  const outA = join(work, 'store-out-a');
+  const outB = join(work, 'store-out-b');
+  await put(join(outA, `${STORE_LINK_NAME}-out-a.json`));
+  await put(join(outA, 'sub', `${STORE_LINK_NAME}-out-a-sub.jsonl`));
+  await put(join(outB, `${STORE_LINK_NAME}-out-b.json`));
+  await put(join(outB, 'session', `${STORE_LINK_NAME}-out-b-sub.jsonl`));
+  await put(join(home, '.aws', `${STORE_LINK_NAME}-aws.json`));
+  await put(join(home, '.aws', 'sso', `${STORE_LINK_NAME}-aws-sub.json`));
+  await put(join(home, '.ssh', `${STORE_LINK_NAME}-ssh`));
+  await put(join(home, `${STORE_LINK_NAME}-home.json`));
+  await put(join(home, `${STORE_LINK_NAME}-dir`, `${STORE_LINK_NAME}-home-sub.json`));
+  await put(join(home, STORE_LINK_FOLLOWED));
+  const cop = join(home, '.copilot');
+  const links: Record<string, string> = {
+    'mcp-secrets': outA,
+    'mcp-oauth-config': join(home, '.aws'),
+    'command-history-state': home,
+    'session-state/linked-out': outB,
+    'session-state/linked-ssh': join(home, '.ssh'),
+    'session-state/linked-home': home,
+    'session-state/linked-agent': cop,
+  };
+  for (const [rel, target] of Object.entries(links)) {
+    await rm(join(cop, rel), { recursive: true, force: true });
+    await mkdir(dirname(join(cop, rel)), { recursive: true });
+    await symlink(target, join(cop, rel));
+  }
+  await symlink(join(home, 'canary-sess'), join(cop, 'session-state/linked-ok'));
+  return { links: Object.keys(links).map(rel => join(cop, rel)), followed: join(cop, 'session-state/linked-ok/events.jsonl') };
+}
+
 /** A directory beside the scanned home, standing in for another user's. */
 function otherHome(home: string): string {
   return join(dirname(home), 'other-user');
@@ -626,6 +673,7 @@ describe.skipIf(!goAvailable)('probe privacy canary', () => {
   let haystack = '';
   /** The collected files' text, decoded (as the snapshot's JSON strings and base64 hold it). */
   let contentText = '';
+  let storeLinks: { links: string[]; followed: string } = { links: [], followed: '' };
 
   beforeAll(async () => {
     const work = await mkdtemp(join(tmpdir(), 'vaso-canary-'));
@@ -665,6 +713,7 @@ describe.skipIf(!goAvailable)('probe privacy canary', () => {
     geminiIndex = join(home, '.gemini/tmp/proj-1/memory/MEMORY.md');
     await writeFile(geminiIndex, contentFor('.gemini/tmp/proj-1/memory/MEMORY.md'));
     await plantConfigRoots(home);
+    storeLinks = await plantStoreLinks(home, work);
     await writeFile(join(work, 'manifest.json'), m.stdout);
 
     // Credential variables under every collected prefix (the probe redacts them)
@@ -770,6 +819,22 @@ describe.skipIf(!goAvailable)('probe privacy canary', () => {
       const leaked = Object.keys(snap.files).filter(p => p === join(home, rel) || p.startsWith(join(home, rel) + '/'));
       expect(leaked, rel).toEqual([]);
     }
+  });
+
+  it('records Copilot store links to foreign places as links only, nothing behind them', () => {
+    const snap = JSON.parse(snapshot) as {
+      files: Record<string, { exists: boolean; content?: string }>;
+      symlinks?: Record<string, string>;
+      directories: Record<string, string[]>;
+    };
+    expect(snapshot.includes(STORE_LINK_NAME), 'a name from behind a foreign store link shipped').toBe(false);
+    for (const link of storeLinks.links) {
+      expect(snap.symlinks?.[link], `${link} recorded`).toBeTruthy();
+      expect(snap.directories[link], `${link} not listed`).toBeUndefined();
+      expect(Object.keys(snap.files).filter(p => p.startsWith(link + '/')), link).toEqual([]);
+    }
+    expect(snap.files[storeLinks.followed]?.exists, 'a folder linked inside the home is followed').toBe(true);
+    expect(snap.files[storeLinks.followed]?.content ?? '').toBe('');
   });
 
   it('ships no canary', () => {

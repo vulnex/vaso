@@ -29,6 +29,8 @@ const PROJECT_CONFIG_FILES = ['.mcp.json', join('.github', 'mcp.json'), join('.g
 // Hook files: user-level <config dir>/hooks/*.json, repository .github/hooks/*.json
 // (docs.github.com/en/copilot/reference/hooks-reference "Hooks locations")
 const USER_HOOKS_DIR = 'hooks';
+/** Private store folders under ~/.copilot whose files GHC-001 judges by mode (its PRIVATE_DIRS). */
+export const COPILOT_PRIVATE_STORES = ['mcp-oauth-config', 'mcp-secrets', 'command-history-state', 'session-state'] as const;
 const PROJECT_HOOKS_DIR = join('.github', 'hooks');
 // Personal skills: <config dir>/skills or ~/.agents/skills (GitHub Docs "Adding agent skills")
 const SHARED_SKILLS_DIR = join('.agents', 'skills');
@@ -309,6 +311,10 @@ export const copilotCliAdapter: AgentAdapter = {
         '~/.copilot/hooks',
         '~/.copilot/logs',
       ],
+      // A store folder linked to a place that isn't the agent's (~/.aws, the
+      // home, out of it) — or a folder linked inside one — is recorded as a
+      // link only: GHC-001 never walks it, so nothing behind it is collected
+      privateStores: [...COPILOT_PRIVATE_STORES].map(d => `~/.copilot/${d}`),
       envPrefixes: ['COPILOT_', 'GH_', 'GITHUB_'],
       systemPaths: SYSTEM_CLI_PATHS,
       systemDirListings: [],

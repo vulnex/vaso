@@ -1,0 +1,394 @@
+[
+ {
+  "target": "/home/u/sess",
+  "homeRoots": [
+   "/home/u"
+  ],
+  "storeRoots": [
+   "/home/u/.copilot"
+  ],
+  "storeDir": "/home/u/.copilot/session-state",
+  "want": null,
+  "note": "an ordinary folder of the home"
+ },
+ {
+  "target": "/home/u/work/sessions/a",
+  "homeRoots": [
+   "/home/u"
+  ],
+  "storeRoots": [
+   "/home/u/.copilot"
+  ],
+  "storeDir": "/home/u/.copilot/session-state",
+  "want": null
+ },
+ {
+  "target": "/home/u/.copilot/other",
+  "homeRoots": [
+   "/home/u"
+  ],
+  "storeRoots": [
+   "/home/u/.copilot"
+  ],
+  "storeDir": "/home/u/.copilot/session-state",
+  "want": null,
+  "note": "inside the agent folder"
+ },
+ {
+  "target": "/home/u/.copilot/session-state/x/y",
+  "homeRoots": [
+   "/home/u"
+  ],
+  "storeRoots": [
+   "/home/u/.copilot"
+  ],
+  "storeDir": "/home/u/.copilot/session-state",
+  "want": null
+ },
+ {
+  "target": "/home/u/.copilot/mcp-secrets",
+  "homeRoots": [
+   "/home/u"
+  ],
+  "storeRoots": [
+   "/home/u/.copilot"
+  ],
+  "storeDir": "/home/u/.copilot/session-state",
+  "want": null,
+  "note": "a sibling store is in the agent folder"
+ },
+ {
+  "target": "/home/u/.aws",
+  "homeRoots": [
+   "/home/u"
+  ],
+  "storeRoots": [
+   "/home/u/.copilot"
+  ],
+  "storeDir": "/home/u/.copilot/session-state",
+  "want": "sensitive"
+ },
+ {
+  "target": "/home/u/.AWS/sub",
+  "homeRoots": [
+   "/home/u"
+  ],
+  "storeRoots": [
+   "/home/u/.copilot"
+  ],
+  "storeDir": "/home/u/.copilot/session-state",
+  "want": "sensitive",
+  "note": "sinks are case-insensitive"
+ },
+ {
+  "target": "/home/u/.ssh",
+  "homeRoots": [
+   "/home/u"
+  ],
+  "storeRoots": [
+   "/home/u/.copilot"
+  ],
+  "storeDir": "/home/u/.copilot/session-state",
+  "want": "sensitive"
+ },
+ {
+  "target": "/home/u/.config/gh",
+  "homeRoots": [
+   "/home/u"
+  ],
+  "storeRoots": [
+   "/home/u/.copilot"
+  ],
+  "storeDir": "/home/u/.copilot/session-state",
+  "want": "sensitive"
+ },
+ {
+  "target": "/home/u/.gnupg/private",
+  "homeRoots": [
+   "/home/u"
+  ],
+  "storeRoots": [
+   "/home/u/.copilot"
+  ],
+  "storeDir": "/home/u/.copilot/session-state",
+  "want": "sensitive"
+ },
+ {
+  "target": "/home/u/Library/Keychains",
+  "homeRoots": [
+   "/home/u"
+  ],
+  "storeRoots": [
+   "/home/u/.copilot"
+  ],
+  "storeDir": "/home/u/.copilot/session-state",
+  "want": "sensitive"
+ },
+ {
+  "target": "/home/u/Library/Application Support/Google/Chrome/Default",
+  "homeRoots": [
+   "/home/u"
+  ],
+  "storeRoots": [
+   "/home/u/.copilot"
+  ],
+  "storeDir": "/home/u/.copilot/session-state",
+  "want": "sensitive"
+ },
+ {
+  "target": "/etc",
+  "homeRoots": [
+   "/home/u"
+  ],
+  "storeRoots": [
+   "/home/u/.copilot"
+  ],
+  "storeDir": "/home/u/.copilot/session-state",
+  "want": "sensitive"
+ },
+ {
+  "target": "/etc/ssl",
+  "homeRoots": [
+   "/home/u"
+  ],
+  "storeRoots": [
+   "/home/u/.copilot"
+  ],
+  "storeDir": "/home/u/.copilot/session-state",
+  "want": "sensitive"
+ },
+ {
+  "target": "/private/etc",
+  "homeRoots": [
+   "/home/u"
+  ],
+  "storeRoots": [
+   "/home/u/.copilot"
+  ],
+  "storeDir": "/home/u/.copilot/session-state",
+  "want": "outside",
+  "note": "only /etc as written is a sink"
+ },
+ {
+  "target": "/tmp/out",
+  "homeRoots": [
+   "/home/u"
+  ],
+  "storeRoots": [
+   "/home/u/.copilot"
+  ],
+  "storeDir": "/home/u/.copilot/session-state",
+  "want": "outside"
+ },
+ {
+  "target": "/",
+  "homeRoots": [
+   "/home/u"
+  ],
+  "storeRoots": [
+   "/home/u/.copilot"
+  ],
+  "storeDir": "/home/u/.copilot/session-state",
+  "want": "outside",
+  "note": "above the home: outside it"
+ },
+ {
+  "target": "/home",
+  "homeRoots": [
+   "/home/u"
+  ],
+  "storeRoots": [
+   "/home/u/.copilot"
+  ],
+  "storeDir": "/home/u/.copilot/session-state",
+  "want": "outside"
+ },
+ {
+  "target": "/home/bob/sess",
+  "homeRoots": [
+   "/home/u"
+  ],
+  "storeRoots": [
+   "/home/u/.copilot"
+  ],
+  "storeDir": "/home/u/.copilot/session-state",
+  "want": "outside",
+  "note": "another user's home"
+ },
+ {
+  "target": "/home/u2",
+  "homeRoots": [
+   "/home/u"
+  ],
+  "storeRoots": [
+   "/home/u/.copilot"
+  ],
+  "storeDir": "/home/u/.copilot/session-state",
+  "want": "outside",
+  "note": "a sibling sharing a prefix"
+ },
+ {
+  "target": "/home/u/..x",
+  "homeRoots": [
+   "/home/u"
+  ],
+  "storeRoots": [
+   "/home/u/.copilot"
+  ],
+  "storeDir": "/home/u/.copilot/session-state",
+  "want": "outside",
+  "note": "a name starting with '..' is not inside"
+ },
+ {
+  "target": "/home/u",
+  "homeRoots": [
+   "/home/u"
+  ],
+  "storeRoots": [
+   "/home/u/.copilot"
+  ],
+  "storeDir": "/home/u/.copilot/session-state",
+  "want": "home"
+ },
+ {
+  "target": "/home/u/.copilot",
+  "homeRoots": [
+   "/home/u"
+  ],
+  "storeRoots": [
+   "/home/u/.copilot"
+  ],
+  "storeDir": "/home/u/.copilot/session-state",
+  "want": "store"
+ },
+ {
+  "target": "/home/u/.copilot/session-state",
+  "homeRoots": [
+   "/home/u"
+  ],
+  "storeRoots": [
+   "/home/u/.copilot"
+  ],
+  "storeDir": "/home/u/.copilot/session-state",
+  "want": "store"
+ },
+ {
+  "target": "/real/u/sess",
+  "homeRoots": [
+   "/link/u",
+   "/real/u"
+  ],
+  "storeRoots": [
+   "/home/u/.copilot"
+  ],
+  "storeDir": "/home/u/.copilot/session-state",
+  "want": null,
+  "note": "a linked home, resolved spelling"
+ },
+ {
+  "target": "/real/u",
+  "homeRoots": [
+   "/link/u",
+   "/real/u"
+  ],
+  "storeRoots": [
+   "/home/u/.copilot"
+  ],
+  "storeDir": "/home/u/.copilot/session-state",
+  "want": "home"
+ },
+ {
+  "target": "/link/u",
+  "homeRoots": [
+   "/link/u",
+   "/real/u"
+  ],
+  "storeRoots": [
+   "/home/u/.copilot"
+  ],
+  "storeDir": "/home/u/.copilot/session-state",
+  "want": "home"
+ },
+ {
+  "target": "/real",
+  "homeRoots": [
+   "/link/u",
+   "/real/u"
+  ],
+  "storeRoots": [
+   "/home/u/.copilot"
+  ],
+  "storeDir": "/home/u/.copilot/session-state",
+  "want": "outside"
+ },
+ {
+  "target": "/opt/cop/data",
+  "homeRoots": [
+   "/home/u"
+  ],
+  "storeRoots": [
+   "/opt/cop"
+  ],
+  "storeDir": "/opt/cop/session-state",
+  "want": null,
+  "note": "COPILOT_HOME outside the home"
+ },
+ {
+  "target": "/opt/cop",
+  "homeRoots": [
+   "/home/u"
+  ],
+  "storeRoots": [
+   "/opt/cop"
+  ],
+  "storeDir": "/opt/cop/session-state",
+  "want": "store"
+ },
+ {
+  "target": "/opt",
+  "homeRoots": [
+   "/home/u"
+  ],
+  "storeRoots": [
+   "/opt/cop"
+  ],
+  "storeDir": "/opt/cop/session-state",
+  "want": "outside"
+ },
+ {
+  "target": "/opt/other",
+  "homeRoots": [
+   "/home/u"
+  ],
+  "storeRoots": [
+   "/opt/cop"
+  ],
+  "storeDir": "/opt/cop/session-state",
+  "want": "outside"
+ },
+ {
+  "target": "/data/cop",
+  "homeRoots": [
+   "/home/u"
+  ],
+  "storeRoots": [
+   "/home/u/.copilot",
+   "/data/cop"
+  ],
+  "storeDir": "/home/u/.copilot/session-state",
+  "want": "store",
+  "note": "the agent folder is a link"
+ },
+ {
+  "target": "/data/cop/session-state/a",
+  "homeRoots": [
+   "/home/u"
+  ],
+  "storeRoots": [
+   "/home/u/.copilot",
+   "/data/cop"
+  ],
+  "storeDir": "/home/u/.copilot/session-state",
+  "want": null
+ }
+]
