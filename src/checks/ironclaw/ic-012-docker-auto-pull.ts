@@ -2,6 +2,7 @@ import type { Evidence, FixResult } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { updateConfigValue, updateEnvFile } from '../../remediation/config-writer.js';
 import { falsy, isLegacy, isLegacyUnused, legacySetting, str, truthy } from './layout.js';
+import { configFixTargets } from '../../remediation/fix-refusal.js';
 
 /*
  * 0.x only: the sandbox worker image is SANDBOX_IMAGE / [sandbox].image
@@ -22,6 +23,8 @@ export const ic012 = defineCheck({
   severity: 'warning',
   description: 'Check if IronClaw 0.x auto-pulls the sandbox worker image (SANDBOX_AUTO_PULL) by a mutable tag instead of an @sha256 digest',
   supportedAgents: ['ironclaw'],
+
+  fixTargets: configFixTargets,
 
   async run(ctx, h) {
     if (!isLegacy(ctx)) return h.passed('Not applicable to IronClaw 1.x');

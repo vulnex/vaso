@@ -2,6 +2,7 @@ import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { fixFirstConfig } from '../../remediation/config-writer.js';
 import { envString, lyrieEnvConfigs } from './env.js';
+import { configFixTargets } from '../../remediation/fix-refusal.js';
 
 const VALID_MODES = new Set(['passive', 'active', 'strict']);
 
@@ -20,6 +21,8 @@ export const ly001 = defineCheck({
   severity: 'info',
   description: 'Detect LYRIE_SHIELD_MODE=passive (or an invalid value) in the checkout .env. Passive means "log threats, never block". Lyrie 3.4.0 parses the setting but does not pass it to ShieldManager (which always runs "active"), so passive is a latent downgrade that takes effect once upstream wires it; values other than passive/active/strict make Lyrie refuse to start.',
   supportedAgents: ['lyrie'],
+
+  fixTargets: configFixTargets,
 
   async run(ctx, h) {
     const evidence: Evidence[] = [];

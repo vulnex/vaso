@@ -3,6 +3,7 @@ import type { Evidence } from '../../core/types.js';
 import { accessibleByOthers, markUnreachable, queryPermissions } from '../../core/permissions.js';
 import { asRecord, isFalse, mainConfig, writeMainConfig } from './zc-config.js';
 import { findPlaintextSecrets, secretSources } from './zc-secrets.js';
+import { configFixTargets } from '../../remediation/fix-refusal.js';
 
 export const zc001 = defineCheck({
   id: 'ZC-001',
@@ -12,6 +13,8 @@ export const zc001 = defineCheck({
   description:
     'Detect plaintext secret values (provider api_key, reliability.api_keys, channel tokens, webhook secrets, OAuth tokens) in config.toml, auth-profiles.json or the migration backup — typically from secrets.encrypt=false',
   supportedAgents: ['zeroclaw'],
+
+  fixTargets: configFixTargets,
 
   async run(ctx, h) {
     const evidence: Evidence[] = [];

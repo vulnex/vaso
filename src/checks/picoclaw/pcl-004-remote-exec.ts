@@ -3,6 +3,7 @@ import { defineCheck } from '../../core/check-builder.js';
 import { envNote, envOverrideFor } from '../../adapters/env-overrides.js';
 import { fixFirstConfig } from '../../remediation/config-writer.js';
 import { enabledChannels, execConfig, isChatChannel, picoMainConfigs } from './shared.js';
+import { configFixTargets } from '../../remediation/fix-refusal.js';
 
 export const pcl004 = defineCheck({
   id: 'PCL-004',
@@ -11,6 +12,8 @@ export const pcl004 = defineCheck({
   severity: 'warning',
   description: 'tools.exec.allow_remote (default true) lets messages from chat channels trigger the exec tool (GHSA-pv8c-p6jf-3fpp). With a chat channel enabled, anyone allowed to message the bot can run shell commands on this host.',
   supportedAgents: ['picoclaw'],
+
+  fixTargets: configFixTargets,
 
   async run(ctx, h) {
     const evidence: Evidence[] = [];

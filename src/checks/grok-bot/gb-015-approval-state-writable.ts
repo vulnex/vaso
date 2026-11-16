@@ -4,6 +4,7 @@ import { markUnreachable, queryPermissions, writableByOthers } from '../../core/
 import { restrictFilesToOwner } from '../../remediation/config-writer.js';
 import { DATA_FILES } from '../../adapters/grok-bot.js';
 import { dataFile } from './shared.js';
+import { permissionFixTargets } from '../../remediation/fix-refusal.js';
 
 interface Target {
   path: string;
@@ -42,6 +43,8 @@ export const gb015 = defineCheck({
   description: 'Check that other local users cannot write Grok Bot\'s data root, settings.json, pending approvals or standing grants (critical — they could approve commands, file access, Messages or Mail for the cloud agent), or the spent-send and withdrawn-approval records and the computer-use / device-tool gates (warning)',
   supportedAgents: ['grok-bot'],
   supportedPlatforms: ['darwin', 'linux'],
+
+  fixTargets: permissionFixTargets,
 
   async run(ctx, h) {
     const critical: Evidence[] = [];

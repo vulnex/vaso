@@ -2,6 +2,7 @@ import type { Evidence, FixResult } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { updateConfigValue, updateEnvFile } from '../../remediation/config-writer.js';
 import { falsy, isLegacy, isLegacyUnused, legacySetting, lineOf } from './layout.js';
+import { configFixTargets } from '../../remediation/fix-refusal.js';
 
 /*
  * 0.x: SANDBOX_ENABLED (env) / [sandbox].enabled (config.toml overlay),
@@ -19,6 +20,8 @@ export const ic005 = defineCheck({
   severity: 'warning',
   description: 'Check if the IronClaw 0.x Docker sandbox is disabled (SANDBOX_ENABLED=false / [sandbox].enabled = false), running tools on the host',
   supportedAgents: ['ironclaw'],
+
+  fixTargets: configFixTargets,
 
   async run(ctx, h) {
     if (!isLegacy(ctx)) return h.passed('Not applicable to IronClaw 1.x (isolation is selected by boot profile — see IC-006)');

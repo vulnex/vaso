@@ -2,6 +2,7 @@ import type { Evidence, FixResult } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { updateEnvFile } from '../../remediation/config-writer.js';
 import { isLegacy, isLegacyUnused, legacySetting, lineOf, truthy } from './layout.js';
+import { configFixTargets } from '../../remediation/fix-refusal.js';
 
 /*
  * 0.x only: ALLOW_LOCAL_TOOLS=true (env-only, default false) registers the
@@ -16,6 +17,8 @@ export const ic008 = defineCheck({
   severity: 'warning',
   description: 'Check if IronClaw 0.x ALLOW_LOCAL_TOOLS=true runs tools on the host outside the Docker sandbox',
   supportedAgents: ['ironclaw'],
+
+  fixTargets: configFixTargets,
 
   async run(ctx, h) {
     if (!isLegacy(ctx)) return h.passed('Not applicable to IronClaw 1.x');

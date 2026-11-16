@@ -8,6 +8,7 @@ import { managedOverride } from '../../adapters/hermes-managed.js';
 import { containerEnvironment, isOpenclawAutoBind, openclawAutoBindDetail } from '../../adapters/openclaw-bind.js';
 import { hostPort, isWildcardAddress } from '../../core/listen-address.js';
 import { picoclawPublicLauncher } from '../../adapters/picoclaw.js';
+import { configFixTargets } from '../../remediation/fix-refusal.js';
 
 const LISTENER_KEY = /host|bind|listen/i;
 
@@ -104,6 +105,8 @@ export const cfg001 = defineCheck({
   // in 3.4.0; LY-010 reports it with the right context. IronClaw's listeners
   // are IC-001's (its schemas have no gateway.host for this fix to write).
   excludedAgents: [...CODING_AGENTS, 'lyrie', 'ironclaw'],
+
+  fixTargets: configFixTargets,
 
   async run(ctx, h) {
     // Hermes' API server is bearer-authenticated once a key is set, and

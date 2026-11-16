@@ -4,6 +4,7 @@ import { updateConfigValue, updateEnvFile } from '../../remediation/config-write
 import {
   isLegacy, isLegacyUnused, legacySetting, lineOf, rebornConfig, rebornSection, str, truthy,
 } from './layout.js';
+import { configFixTargets } from '../../remediation/fix-refusal.js';
 
 /*
  * 0.x: AGENT_AUTO_APPROVE_TOOLS (env) / [agent].auto_approve_tools
@@ -26,6 +27,8 @@ export const ic007 = defineCheck({
   severity: 'critical',
   description: 'Check for 0.x AGENT_AUTO_APPROVE_TOOLS=true (all tool calls skip approval) or a 1.x [policy].default_approval_policy of "minimal"',
   supportedAgents: ['ironclaw'],
+
+  fixTargets: configFixTargets,
 
   async run(ctx, h) {
     const evidence: Evidence[] = [];

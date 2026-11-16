@@ -3,6 +3,7 @@ import { CODING_AGENTS } from '../../core/types.js';
 import { NATIVE_POLICY_FRAMEWORKS } from './native-policy-frameworks.js';
 import { fixFirstConfig } from '../../remediation/config-writer.js';
 import { getNestedValue } from '../../core/utils.js';
+import { configFixTargets } from '../../remediation/fix-refusal.js';
 
 /** Attempts per window past which OpenClaw's auth throttle stops mattering. */
 const OPENCLAW_MAX_ATTEMPTS = 100;
@@ -17,6 +18,8 @@ export const cfg010 = defineCheck({
   // The other frameworks listed have no rateLimit key; writing one breaks strict loaders.
   // Hermes and NemoClaw have no rate-limit setting either.
   excludedAgents: [...CODING_AGENTS, ...NATIVE_POLICY_FRAMEWORKS, 'hermes', 'nemoclaw'],
+
+  fixTargets: configFixTargets,
 
   async run(ctx, h) {
     // OpenClaw 2026.x throttles gateway auth by default (10 attempts per 60 s,

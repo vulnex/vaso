@@ -3,6 +3,7 @@ import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { accessibleByOthers, markUnreachable, queryPermissions } from '../../core/permissions.js';
 import { restrictFilesToOwner } from '../../remediation/config-writer.js';
+import { permissionFixTargets } from '../../remediation/fix-refusal.js';
 
 // Upstream writes both with mode 0600, so a wider mode means the file was
 // created or copied by hand (a common first step: `cp .env.example .env`).
@@ -19,6 +20,8 @@ export const at005 = defineCheck({
   description: 'Detect <stateDir>/.env or <stateDir>/atomic-mail/session.json with a mode wider than 0600 — provider keys, bot tokens and the mail session JWT readable by other local users.',
   supportedAgents: ['atomic-agent'],
   supportedPlatforms: ['darwin', 'linux'],
+
+  fixTargets: permissionFixTargets,
 
   async run(ctx, h) {
     const evidence: Evidence[] = [];

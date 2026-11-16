@@ -2,6 +2,7 @@ import type { Evidence, ParsedConfig } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { fixEveryConfig } from '../../remediation/config-writer.js';
 import { isProjectInstall, markUntrustedProject, settingsConfigs } from './shared.js';
+import { configFixTargets } from '../../remediation/fix-refusal.js';
 
 // The CLI normalizes the value (trim, lowercase, `_`/space → `-`) and accepts
 // aliases: unsupervised = yolo = bypasspermissions (every tool call runs
@@ -31,6 +32,8 @@ export const aba001 = defineCheck({
   severity: 'critical',
   description: 'Detect Abacus.AI sessions starting in "unsupervised" mode (alias yolo / bypassPermissions — every tool call runs without approval), via permissionMode in config.json / desktop agent-config files or ABACUS_PERMISSION_MODE',
   supportedAgents: ['abacus'],
+
+  fixTargets: configFixTargets,
 
   async run(ctx, h) {
     const evidence: Evidence[] = [];

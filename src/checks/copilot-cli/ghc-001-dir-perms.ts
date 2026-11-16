@@ -6,6 +6,7 @@ import { configHoldsSecret, CREDENTIAL_FILE_NAME } from '../../core/secret-value
 import { ghc003 } from './ghc-003-plaintext-token.js';
 import { restrictFilesToOwner } from '../../remediation/config-writer.js';
 import { foreignAgentDir, foreignStoreTarget, storeHomeOf, withinDir as within, type ForeignReason } from '../../core/store-links.js';
+import { permissionFixTargets } from '../../remediation/fix-refusal.js';
 
 const PROTECTED_FILES = [
   'config.json',
@@ -439,6 +440,12 @@ export const ghc001 = defineCheck({
   description: 'Verify ~/.copilot/, its session/history/MCP-secret stores, session-store.db and credential files (incl. providers.json) are not group/world readable',
   supportedAgents: ['copilot-cli'],
   supportedPlatforms: ['darwin', 'linux'],
+
+  // Store links listed beside the modes are not the fix's: it chmods only what the modes name
+  fixTargets: (ctx, result) => permissionFixTargets(ctx, {
+    ...result,
+    evidence: result.evidence?.filter(e => !e.snippet?.startsWith('-> ') && !/^\+\d+ more link/.test(e.snippet ?? '')),
+  }),
 
   async run(ctx, h) {
     if (ctx.installation.profile === 'project') return h.passed('Project configuration — ~/.copilot permissions are checked on the user install');

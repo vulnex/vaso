@@ -4,6 +4,7 @@ import { fixFirstConfig } from '../../remediation/config-writer.js';
 import type { ParsedConfig } from '../../core/types.js';
 import { asRecord, atomicApprovalLevel, atomicConfigs, coerceIntLike, parseAtomicBool } from './shared.js';
 import { compareVersions } from '../../core/semver.js';
+import { configFixTargets } from '../../remediation/fix-refusal.js';
 
 /**
  * Approval levels ≥ 3 ("home") auto-approve the `http` category: per the
@@ -53,6 +54,8 @@ export const at003 = defineCheck({
   severity: 'warning',
   description: 'http.approvalMode "never" (the default before v0.6.13; from v0.6.13 the default is "writes" and a "never" stored by an older release loads as "writes") — or any mode under agent.approvalLevel ≥ 3, which auto-approves HTTP — with no http.hostAllowlist: the os.http.request tool sends any method, including POST/PUT with arbitrary bodies, to any public host without confirmation. A prompt-injected turn can exfiltrate data it has read in a single call.',
   supportedAgents: ['atomic-agent'],
+
+  fixTargets: configFixTargets,
 
   async run(ctx, h) {
     const evidence: Evidence[] = [];

@@ -1,6 +1,7 @@
 import { defineCheck } from '../../core/check-builder.js';
 import { fixFirstConfig } from '../../remediation/config-writer.js';
 import { exposed, gatewayToml, record, gateway, settingEvidence } from './shared.js';
+import { configFixTargets } from '../../remediation/fix-refusal.js';
 
 export const osh002 = defineCheck({
   id: 'OSH-002',
@@ -9,6 +10,8 @@ export const osh002 = defineCheck({
   severity: 'critical',
   description: 'Detect `[openshell.gateway.auth] allow_unauthenticated_users = true` — the gateway accepts CLI/API calls without OIDC or mTLS credentials, so anyone who reaches it manages every sandbox, policy and provider',
   supportedAgents: ['openshell'],
+
+  fixTargets: configFixTargets,
 
   async run(ctx, h) {
     if (record(gateway(ctx).auth)?.allow_unauthenticated_users !== true) {

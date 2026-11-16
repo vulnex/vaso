@@ -3,6 +3,7 @@ import { CODING_AGENTS } from '../../core/types.js';
 import { fixFirstConfig } from '../../remediation/config-writer.js';
 import { getNestedValue } from '../../core/utils.js';
 import { openclawAgentEntries } from './openclaw-agents.js';
+import { configFixTargets } from '../../remediation/fix-refusal.js';
 
 function sandboxKey(data: Record<string, unknown>): string | undefined {
   // agents.defaults.sandbox.mode: OpenClaw 2026.x (off | non-main | all)
@@ -20,6 +21,8 @@ export const cfg008 = defineCheck({
   severity: 'critical',
   description: 'Check if code sandbox/isolation is disabled',
   excludedAgents: CODING_AGENTS,
+
+  fixTargets: configFixTargets,
 
   async run(ctx, h) {
     for (const config of ctx.configs) {

@@ -5,6 +5,7 @@ import {
   isLegacy, isLegacyUnused, isLoopbackHost, isWildcardHost, lineOf, legacySetting,
   rebornConfig, rebornSection, rebornServiceUnits, str,
 } from './layout.js';
+import { configFixTargets } from '../../remediation/fix-refusal.js';
 
 /*
  * 1.x: the WebChat v2 listener (`ironclaw serve`) binds `[webui].listen_host`
@@ -31,6 +32,8 @@ export const ic001 = defineCheck({
   severity: 'warning',
   description: 'Check whether the WebChat v2 listener (1.x [webui].listen_host / serve --host) or the 0.x HTTP webhook / web gateway is bound to a non-loopback interface',
   supportedAgents: ['ironclaw'],
+
+  fixTargets: configFixTargets,
 
   async run(ctx, h) {
     const evidence: Evidence[] = [];

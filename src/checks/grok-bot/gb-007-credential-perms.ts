@@ -5,6 +5,7 @@ import { accessibleByOthers, markUnreachable, queryPermissions } from '../../cor
 import { restrictFilesToOwner } from '../../remediation/config-writer.js';
 import { DATA_FILES, USER_DATA_FILES } from '../../adapters/grok-bot.js';
 import { dataFile, userDataDir } from './shared.js';
+import { permissionFixTargets } from '../../remediation/fix-refusal.js';
 
 async function targets(ctx: ScanContext): Promise<{ path: string; level: 'critical' | 'warning'; holds: string }[]> {
   const userData = await userDataDir(ctx);
@@ -27,6 +28,8 @@ export const gb007 = defineCheck({
   description: 'Verify Grok Bot\'s local-exec credential and connection files, host-token.json, sand-secrets.json, user-secrets.json, approvals and session cookies are not accessible to other local users (the app writes them 0600)',
   supportedAgents: ['grok-bot'],
   supportedPlatforms: ['darwin', 'linux'],
+
+  fixTargets: permissionFixTargets,
 
   async run(ctx, h) {
     const critical: Evidence[] = [];

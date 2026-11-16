@@ -3,6 +3,7 @@ import { defineCheck } from '../../core/check-builder.js';
 import { getNestedValue } from '../../core/utils.js';
 import { fixFirstConfig } from '../../remediation/config-writer.js';
 import { atomicConfigs } from './shared.js';
+import { configFixTargets } from '../../remediation/fix-refusal.js';
 
 export const at002 = defineCheck({
   id: 'AT-002',
@@ -11,6 +12,8 @@ export const at002 = defineCheck({
   severity: 'warning',
   description: 'agent.readScope set to "unrestricted" — file reads anywhere on disk (~/.ssh, ~/.aws, other agents\' credentials) skip the approval gate instead of being confined to the working directory.',
   supportedAgents: ['atomic-agent'],
+
+  fixTargets: configFixTargets,
 
   async run(ctx, h) {
     const evidence: Evidence[] = [];

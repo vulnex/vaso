@@ -2,6 +2,7 @@ import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { fixFirstConfig } from '../../remediation/config-writer.js';
 import { asRecord, getPath, nanobotConfigs, pyBool } from './shared.js';
+import { configFixTargets } from '../../remediation/fix-refusal.js';
 
 export const nb003 = defineCheck({
   id: 'NB-003',
@@ -10,6 +11,8 @@ export const nb003 = defineCheck({
   severity: 'warning',
   description: 'Check tools.restrictToWorkspace (default false). When off, the file tools (read/write/edit/list) and shell exec path guards accept any path the user can reach — ~/.ssh, ~/.aws, other projects, and nanobot\'s own config.json with its API keys.',
   supportedAgents: ['nanobot'],
+
+  fixTargets: configFixTargets,
 
   async run(ctx, h) {
     const evidence: Evidence[] = [];

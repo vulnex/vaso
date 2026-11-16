@@ -7,6 +7,7 @@ import {
   asRecord, asStringArray, enabledAgents, effectiveProfiles, isFalse, isTrue, mainConfig, profileLabel, writeMainConfig,
 } from './zc-config.js';
 import type { KeyPath } from '../../core/utils.js';
+import { configFixTargets } from '../../remediation/fix-refusal.js';
 
 /** A root that is an ancestor of $HOME (e.g. /Users, /home) exposes it too. */
 function containsHome(root: string, home: string): boolean {
@@ -22,6 +23,8 @@ export const zc006 = defineCheck({
   description:
     'Detect filesystem scope escapes: risk profile workspace_only=false, allowed_roots covering / or $HOME, or [agents.<alias>.workspace] unrestricted_filesystem=true',
   supportedAgents: ['zeroclaw'],
+
+  fixTargets: configFixTargets,
 
   async run(ctx, h) {
     const config = mainConfig(ctx.configs);

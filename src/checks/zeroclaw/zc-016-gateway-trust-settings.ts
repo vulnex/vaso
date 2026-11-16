@@ -1,6 +1,7 @@
 import { defineCheck } from '../../core/check-builder.js';
 import type { Evidence } from '../../core/types.js';
 import { asRecord, isTrue, mainConfig, tomlLine, writeMainConfig, type Rec } from './zc-config.js';
+import { configFixTargets } from '../../remediation/fix-refusal.js';
 
 interface Finding {
   key: string;
@@ -56,6 +57,8 @@ export const zc016 = defineCheck({
   description:
     'Detect relaxed [gateway] safeguards: allow_self_upgrade, trust_forwarded_headers, allow_remote_admin, or pairing/webhook rate limiting disabled (0)',
   supportedAgents: ['zeroclaw'],
+
+  fixTargets: configFixTargets,
 
   async run(ctx, h) {
     const config = mainConfig(ctx.configs);

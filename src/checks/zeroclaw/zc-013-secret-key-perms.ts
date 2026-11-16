@@ -3,6 +3,7 @@ import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { accessibleByOthers, markUnreachable, queryPermissions } from '../../core/permissions.js';
 import { restrictFilesToOwner } from '../../remediation/config-writer.js';
+import { permissionFixTargets } from '../../remediation/fix-refusal.js';
 
 export const zc013 = defineCheck({
   id: 'ZC-013',
@@ -13,6 +14,8 @@ export const zc013 = defineCheck({
     'Check that the ChaCha20 master key (<config dir>/.secret_key) is owner-only — anyone who can read it decrypts every enc2: secret in config.toml and auth-profiles.json',
   supportedAgents: ['zeroclaw'],
   supportedPlatforms: ['linux', 'darwin'],
+
+  fixTargets: permissionFixTargets,
 
   async run(ctx, h) {
     const evidence: Evidence[] = [];
