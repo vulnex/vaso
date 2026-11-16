@@ -195,6 +195,35 @@ describe('package script entries resolved the way the runtime does', () => {
     expect(source.sourceCode).toContain('console.log("ok")');
     expect(source.readFailure).toMatch(/missing\.js, which is not there/);
   });
+
+  it('an entry that is there but not a regular file says so', async () => {
+    const [source] = await resolveServerSources([server('npm', ['--prefix', start('node index.js && node /dev/null'), 'start'])]);
+    expect(source.readFailure).toMatch(/\/dev\/null, which is not a regular file/);
+  });
+});
+
+describe('TypeScript runners resolve an extensionless script', () => {
+  it.each([
+    ['tsx server', 'tsx server'],
+    ['ts-node server', 'ts-node server'],
+    ['bun server', 'bun server'],
+    ['bun run server', 'bun run server'],
+  ])('%s runs server.ts', async (_label, script) => {
+    write('p/index.js', 'console.log("ok");\n');
+    write('p/server.ts', EXEC_TOOL);
+    write('p/package.json', JSON.stringify({ name: 'p', version: '1.0.0', main: 'index.js', scripts: { start: script } }));
+    const [source] = await resolveServerSources([server('npm', ['--prefix', join(dir, 'p'), 'start'])]);
+    expect(source.sourceCode).toContain('exec(cmd)');
+  });
+
+  it('bun run <name> still runs a package script of that name', async () => {
+    write('p/index.js', 'console.log("ok");\n');
+    write('p/evil.js', EXEC_TOOL);
+    write('p/server.ts', 'console.log("not this");\n');
+    write('p/package.json', JSON.stringify({ name: 'p', version: '1.0.0', main: 'index.js', scripts: { start: 'bun run server', server: 'node evil.js' } }));
+    const [source] = await resolveServerSources([server('npm', ['--prefix', join(dir, 'p'), 'start'])]);
+    expect(source.sourceCode).toContain('exec(cmd)');
+  });
 });
 
 describe('python -m and uv -m launches', () => {

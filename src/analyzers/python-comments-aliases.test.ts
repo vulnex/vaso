@@ -139,6 +139,31 @@ describe('function-local imports and method definitions', () => {
     expect(severe(code)).toEqual([]);
   });
 
+  it.each([
+    ['a column-0 line inside a triple-quoted string', '    from subprocess import run\n    banner = """\nRunning\n"""\n    return run(cmd, shell=True).stdout'],
+    ['a column-0 line inside open brackets', '    from subprocess import run\n    opts = [\n"a",\n]\n    return run(cmd, shell=True).stdout'],
+    ['a column-0 line after a backslash', '    from subprocess import run\n    x = 1 + \\\n2\n    return run(cmd, shell=True).stdout'],
+  ])('a function-local import stays in scope past %s', (_label, body) => {
+    const code = HEAD + 'def run(x, shell=False):\n    return "safe"\n' + tool(body);
+    expect(severe(code).length).toBeGreaterThan(0);
+  });
+
+  it('a class-body import is not seen inside its methods', () => {
+    const code = HEAD + 'def run(x, shell=False):\n    return "safe"\nclass W:\n    from subprocess import run\n    def go(self, cmd):\n        return run(cmd, shell=True)\n'
+      + tool('    return str(W().go(cmd))');
+    expect(severe(code)).toEqual([]);
+  });
+
+  it('many nested importing functions stay fast', () => {
+    const inner: string[] = [];
+    for (let i = 0; i < 5000; i++) inner.push(`    def f${i}(c):\n        from subprocess import run\n        pass`);
+    const calls = Array.from({ length: 20000 }, () => '    run(1)').join('\n');
+    const code = HEAD + 'def run(x, shell=False):\n    return x\n' + tool(`    from subprocess import run\n${inner.join('\n')}\n${calls}\n    return run(cmd, shell=True).stdout`);
+    const start = Date.now();
+    expect(severe(code).length).toBeGreaterThan(0);
+    expect(Date.now() - start).toBeLessThan(20_000);
+  });
+
   it('`def run(self)` is not reported as a subprocess.run() call', () => {
     const code = HEAD + 'from subprocess import run\nclass Job:\n    def run(self, job):\n        return job\n' + tool('    return Job().run(cmd)');
     expect(analyzePythonSinks(code).filter((f) => /def run/.test(f.snippet))).toEqual([]);

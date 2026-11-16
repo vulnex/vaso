@@ -47,8 +47,27 @@ describe('credential key names', () => {
     ['syncToken', 'sync_2024_11_16_9f8e7d'],
     ['AUTH_TOKEN_COOKIE', '__Host-auth-token-2024'],
     ['secretFlag', 'ENABLE_SECRET_SCAN_V2'],
+    ['S3_KEY', 'uploads/User123/avatarImage2024'],
+    ['S3_KEY', 'Reports2024/Q3/summaryFinal'],
+    ['modelKey', 'gpt4oMini20240718Preview'],
+    ['MODEL_KEY', 'claude3Opus20240229'],
+    ['secondaryKey', 'Settings2Secondary9Label'],
+    ['CSRF_TOKEN_COOKIE', '__Host-csrf-token-v2-2024'],
+    ['primaryKey', 'Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw=='],
   ])('%s holding a name or path (%s) is not flagged', (name, value) => {
     expect(findSourceSecrets(`const ${name} = "${value}";`)).toEqual([]);
+  });
+
+  it.each([
+    ['secondaryKey', 'd317867362b177f9946cc3eb0b144e4810a2f8c24036a6be6ccd07e8fa506da0'],
+    ['TENANT_KEY', '31e4a107444b5ecc71b8b0a3d604a66bb56a4920'],
+    ['secondaryKey', '1vVtu0U2b-FyO2z7u5BOVK-GOscvZ-G_2q7B0PHVVt4'],
+    ['AUTH_TOKEN_COOKIE', 'o_4W8WbKBepCS5qlItg0q3J_krlifZ-81cI-Um7C'],
+    ['contextToken', 'SC2cnlZU6hdnLSqYv2vX.cLbf51C49ARRCaQdFc5fUXoMRFVErV.2HPnsXPpjqcDrp1tGtEB'],
+    ['MODEL_KEY', 've35x7mu6vpau7t7wbid2t3klynwqm8fyq32eguc'],
+    ['syncToken', 'XPY3QLBC11M1695Z8Y6A8A2FOAAAPTU6OUL62T11'],
+  ])('%s holding hex, base64url, dotted or single-case key material (%s) is flagged', (name, value) => {
+    expect(findSourceSecrets(`const ${name} = "${value}";`)).toHaveLength(1);
   });
 
   it.each(['TOKEN_STRINGS', 'TOKEN_CHARS', 'PASSWORD_ALPHABET', 'SECRET_CHARSET', 'apiKeyCharacters', 'TOKEN_DELIMITERS'])(

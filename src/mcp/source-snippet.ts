@@ -179,16 +179,18 @@ export function findingSnippet(source: Pick<MCPServerSource, 'sourceCode'>, find
 /**
  * A credential named in prose: `The admin password is Hunter7-…`,
  * `token: …`, `use passphrase "…"`, `the password for the admin account is: …`,
- * `password -> …`. The value is one unbroken run after the credential word
- * (and an optional `is` / `was` / `:` / `=` / `->`), or a quoted phrase.
+ * `password -> …`, `Passphrase - …`, `The password, which is …`, `was set
+ * to …`, `**Password:** …`, `<b>Password:</b> …`, `Use the password (…)`.
+ * The value is one unbroken run after the credential word (and an optional
+ * connector), or a quoted phrase (also in typographic quotes).
  * `pass` counts only with a connector (`the pass is …`): alone it is a verb.
  */
-const PROSE_SECRET = /(?<![A-Za-z0-9_])(password|passwd|pass ?phrase|pass ?code|pwd|pin ?code|pin|secret|token|api[ _-]?key|access[ _-]?key|private[ _-]?key|credentials?|pass(?=\s*(?:[:=：]|->|=>|\bis\b|\bwas\b)))(?![A-Za-z0-9_])(?:\s+(?:for|of)\s+(?:(?:the|an?|your|our|this|that)\s+)?[\w.@-]{1,64}(?:\s+(?!(?:is|was|set|equals)\b)[\w.@-]{1,32}){0,5})?(?:\s*(->|=>|[:=：—–]|\b(?:is|was)\b(?:\s*[:=：])?|\bset to\b|\bequals\b))?\s*(?:"([^"\n]{8,80})"|'([^'\n]{8,80})'|["'`]?([^\s"'`,;()[\]{}<>]{4,}))/gi;
+const PROSE_SECRET = /(?<![A-Za-z0-9_])(password|passwd|pass ?phrase|pass ?code|pwd|pin ?code|pin|secret|token|api[ _-]?key|access[ _-]?key|private[ _-]?key|credentials?|pass(?=\s*(?:[:=：]|->|=>|\bis\b|\bwas\b)))(?![A-Za-z0-9_])(?:\s+number\b)?(?:\s+(?:for|of)\s+(?:(?:the|an?|your|our|this|that)\s+)?[\w.@-]{1,64}(?:\s+(?!(?:is|was|set|equals)\b)[\w.@-]{1,32}){0,5})?(?:\s*(->|=>|[:=：—–]|-(?=\s)|,\s*which\s+(?:is|was)\b|\b(?:is|was|has been)\s+(?:set|changed|reset)\s+to\b|\b(?:is|was)\b(?:\s*[:=：])?|\bset to\b|\bequals\b))?(?:\s*(?:\*{1,2}|_{1,2}|<\/?[A-Za-z]+>))*\s*(?:"([^"\n]{8,80})"|“([^”\n]{8,80})”|'([^'\n]{8,80})'|‘([^’\n]{8,80})’|["'`(]?([^\s"'`,;()[\]{}<>“”‘’]{4,}))/gi;
 
 /** Credential words a person types: whatever is named as one after `is` / `:` is masked unless it is a plain word. */
 const TYPED_SECRET = /^(?:password|passwd|pass ?phrase|pass ?code|pwd|pin ?code|pin|pass)$/i;
-/** A user/password pair: `Credentials: admin / <pw>`, `Login with admin/<pw>`. */
-const CREDENTIAL_PAIR = /(?<![A-Za-z0-9_])(?:credentials?\s*[:=：]?|log ?in\s+(?:with|as|using)\s*:?)\s*[\w.@+-]{1,64}\s*\/\s*([^\s"'`,;()<>/]{6,80})/gi;
+/** A user/password pair: `Credentials: admin / <pw>`, `Login with admin/<pw>`, `use admin/<pw> to log in`. */
+const CREDENTIAL_PAIR = /(?<![A-Za-z0-9_])(?:credentials?\s*[:=：]?|log ?in\s+(?:with|as|using)\s*:?|use(?=\s+[\w.@+-]{1,64}\s*\/\s*[^\s"'`,;()<>/]{6,80}\s+to\s+(?:log ?in|sign ?in)))\s*[\w.@+-]{1,64}\s*\/\s*([^\s"'`,;()<>/]{6,80})/gi;
 /** Words after a passphrase's first word (`The passphrase is correct horse battery staple`). */
 const PHRASE_WORDS = /^(?:[ \t]+[A-Za-z0-9]+){1,7}/;
 /** Words of ordinary prose: a quoted phrase holding one is a sentence, not a passphrase. */
@@ -259,7 +261,9 @@ export function maskProseSecrets(text: string): string {
   let out = '';
   let last = 0;
   for (const m of text.matchAll(PROSE_SECRET)) {
-    const [match, keyword, connector, dq, sq, bare] = m;
+    const [match, keyword, connector, plainDq, smartDq, plainSq, smartSq, bare] = m;
+    const dq = plainDq ?? smartDq;
+    const sq = plainSq ?? smartSq;
     const start = m.index ?? 0;
     if (start < last) continue;
     const run = dq ?? sq ?? bare ?? '';

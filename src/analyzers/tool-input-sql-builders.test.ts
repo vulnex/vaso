@@ -126,3 +126,25 @@ describe('SQL taint: one-of guards and assignments inside a guard', () => {
     expect(queries(code)).toHaveLength(1);
   });
 });
+
+describe('SQL taint: statement guards that leave or reset the value', () => {
+  it.each([
+    ['if (!ALLOWED.includes(x)) throw', 'const ALLOWED = ["id", "name"];\n' + tool('  if (!ALLOWED.includes(name)) throw new Error("bad");\n  const c = name;\n  await pool.query(`SELECT * FROM users ORDER BY ${c}`);')],
+    ['if (!(x === a || x === b)) throw', tool('  if (!(name === "asc" || name === "desc")) throw new Error("bad");\n  await pool.query(`SELECT * FROM users ORDER BY id ${name}`);')],
+    ['if (x !== a && x !== b) { return }', tool('  if (name !== "asc" && name !== "desc") {\n    return { content: [] };\n  }\n  await pool.query(`SELECT * FROM users ORDER BY id ${name}`);')],
+    ['if (x !== a && x !== b) x = a', tool('  let cc = name;\n  if (cc !== "asc" && cc !== "desc") cc = "asc";\n  await pool.query(`SELECT * FROM users ORDER BY id ${cc}`);')],
+    ['a guard in an enclosing block', 'const ALLOWED = ["id", "name"];\n' + tool('  if (!ALLOWED.includes(name)) throw new Error("bad");\n  if (name) {\n    await pool.query(`SELECT * FROM users ORDER BY ${name}`);\n  }')],
+  ])('%s is safe', (_label, code) => {
+    expect(queries(code)).toEqual([]);
+  });
+
+  it.each([
+    ['a guard that does not leave', 'const ALLOWED = ["id", "name"];\n' + tool('  if (!ALLOWED.includes(name)) console.log("bad");\n  await pool.query(`SELECT * FROM users ORDER BY ${name}`);')],
+    ['a guard checking another name', 'const ALLOWED = ["id", "name"];\n' + tool('  if (!ALLOWED.includes(o)) throw new Error("bad");\n  await pool.query(`SELECT * FROM users ORDER BY ${name}`);', '{ name: z.string(), o: z.string() }', '{ name, o }')],
+    ['a reassignment after the guard', 'const ALLOWED = ["id", "name"];\n' + tool('  let c = "id";\n  if (!ALLOWED.includes(c)) throw new Error("bad");\n  c = name;\n  await pool.query(`SELECT * FROM users ORDER BY ${c}`);')],
+    ['a reset to another input', tool('  let cc = name;\n  if (cc !== "asc" && cc !== "desc") cc = name.trim();\n  await pool.query(`SELECT * FROM users ORDER BY id ${cc}`);')],
+    ['a guard after the query', 'const ALLOWED = ["id", "name"];\n' + tool('  await pool.query(`SELECT * FROM users ORDER BY ${name}`);\n  if (!ALLOWED.includes(name)) throw new Error("bad");')],
+  ])('%s stays injection', (_label, code) => {
+    expect(queries(code)).toHaveLength(1);
+  });
+});
