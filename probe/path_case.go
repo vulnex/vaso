@@ -61,9 +61,16 @@ func canonicalCaseLocked(p string) string {
 }
 
 // storedName is how dir's listing spells the entry name opens, or name.
+//
+// A name with letters beyond ASCII may also be stored in another Unicode
+// normalization form (é as U+00E9, or e + U+0301; APFS opens either): when
+// the listing doesn't hold name itself, the entry that is the same file is
+// the stored spelling — a directory (never hard-linked), or the only entry
+// that is that file.
 func storedName(dir, name string) string {
 	other := swapCase(name)
-	if other == name {
+	ascii := isASCII(name)
+	if other == name && ascii {
 		return name
 	}
 	st, err := os.Lstat(filepath.Join(dir, name))
@@ -71,8 +78,10 @@ func storedName(dir, name string) string {
 		return name
 	}
 	// Case-sensitive here (or two distinct entries): the name is the entry
-	if ost, err := os.Lstat(filepath.Join(dir, other)); err != nil || !os.SameFile(st, ost) {
-		return name
+	if ascii {
+		if ost, err := os.Lstat(filepath.Join(dir, other)); err != nil || !os.SameFile(st, ost) {
+			return name
+		}
 	}
 	names, ok := caseNames[dir]
 	if !ok {
@@ -94,7 +103,29 @@ func storedName(dir, name string) string {
 			}
 		}
 	}
+	if ascii {
+		return name
+	}
+	var same []string
+	for _, n := range names {
+		if nst, err := os.Lstat(filepath.Join(dir, n)); err == nil && os.SameFile(st, nst) {
+			same = append(same, n)
+		}
+	}
+	if len(same) == 1 || (len(same) > 0 && st.IsDir()) {
+		return same[0]
+	}
 	return name
+}
+
+// isASCII: s holds only ASCII bytes (no other normalization form exists).
+func isASCII(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] >= 0x80 {
+			return false
+		}
+	}
+	return true
 }
 
 // swapCase is s with the case of every letter that has another case swapped.
