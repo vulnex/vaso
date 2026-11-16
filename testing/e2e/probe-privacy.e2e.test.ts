@@ -990,7 +990,9 @@ describe.skipIf(!goAvailable)('probe privacy canary', () => {
       expect(e?.content ?? '', rel).toBe('');
     }
     const hosts = snap.files[join(home, '.config/gh/hosts.yml')];
-    expect(hosts?.omitted, 'the store file under its own name').toBeUndefined();
+    // under its own name it is inside a credential store (~/.config/gh): withheld, but not as a hard link
+    expect(hosts?.omitted, 'the store file under its own name').toBe('sensitive');
+    expect(hosts?.content ?? '').toBe('');
     expect(hosts?.hardLinkOf).toBeUndefined();
   });
 
