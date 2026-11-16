@@ -62,24 +62,33 @@ const ENV_DEFAULT =
 const CREDENTIAL_PART = /^(?:\w*(?:apikey|secret|token|password|passwd|accesskey|privatekey|credential)s?|pass|passphrase|passcode)$/;
 /** Parts before a trailing `key` that make it a lookup, index or public key, not a secret one. */
 const NOT_SECRET_KEY = new Set([
-  'public', 'publishable', 'pub', 'primary', 'foreign', 'sort', 'partition', 'cache', 'idempotency', 'storage', 'dedupe',
+  'public', 'publishable', 'pub', 'foreign', 'sort', 'partition', 'cache', 'idempotency', 'storage', 'dedupe',
   'dedup', 'row', 'unique', 'lookup', 'map', 'object', 'query', 'route', 'translation', 'i18n', 'message', 'label', 'state',
   'item', 'entry', 'field', 'prop', 'attr', 'event', 'index', 'column', 'table', 'hash', 'site', 'list', 'group', 'schema',
   'local', 'shortcut', 'hot', 'keyboard', 'cursor', 'page', 'node', 'element', 'component', 'react', 'redis', 'kv', 'store',
   'bucket', 'file', 'config', 'setting', 'settings', 'option', 'metadata', 'meta', 'header', 'sub', 'parent', 'child', 'next',
   'prev', 'last', 'first', 'id', 'name', 'type', 'path', 'url', 'env', 'context', 'data', 'request', 'response', 'lock', 'job',
-  'queue', 'task', 'user', 'session', 'model', 'feature', 'flag', 'shard', 'sharding', 'asset', 'deduplication', 's3',
-  'routing', 'buster', 'tenant', 'namespace', 'secondary', 'composite', 'surrogate',
+  'queue', 'task', 'user', 'session', 'feature', 'flag', 'shard', 'sharding', 'asset', 'deduplication',
+  'routing', 'buster', 'composite', 'surrogate',
   // analytics ingest keys, public by design (Segment write keys, Application Insights instrumentation keys)
   'write', 'insights', 'instrumentation', 'analytics', 'telemetry', 'ingest', 'ingestion', 'tracking', 'measurement',
   // client-side product-analytics project keys, shipped in every web page by design
   'posthog', 'segment', 'mixpanel', 'amplitude',
 ]);
+/**
+ * Parts before a trailing `key` that name a lookup key as often as a
+ * credential: Azure ships credential pairs as primary/secondary keys, a
+ * tenant or namespace key can be either. Such a name holds a credential when
+ * its value is opaque key material (`opaqueValue`), not a path or a name.
+ */
+const MAYBE_SECRET_KEY = new Set(['primary', 'secondary', 'tenant', 'namespace', 'model', 's3']);
 /** Parts before a `token` that make it an LLM/pagination token, not a credential: `maxTokens`, `nextPageToken`. */
 const NOT_SECRET_TOKEN = new Set([
-  'max', 'min', 'num', 'total', 'input', 'output', 'prompt', 'completion', 'reasoning', 'cached', 'context', 'page', 'next',
-  'prev', 'continuation', 'cursor', 'pagination', 'sync', 'bos', 'eos', 'pad', 'unk', 'sep', 'cls', 'mask', 'special', 'stop',
+  'max', 'min', 'num', 'total', 'output', 'prompt', 'completion', 'reasoning', 'cached', 'page', 'next',
+  'prev', 'continuation', 'cursor', 'pagination', 'bos', 'eos', 'pad', 'unk', 'sep', 'cls', 'mask', 'special', 'stop',
 ]);
+/** Parts before a `token` that name an LLM or sync token as often as a credential; judged as MAYBE_SECRET_KEY. */
+const MAYBE_SECRET_TOKEN = new Set(['input', 'context', 'sync']);
 /** Last parts that describe a credential rather than hold one: `secretName`, `tokenUrl`, `API_KEY_ENV`. */
 const DESCRIPTIVE_PART = new Set([
   'name', 'names', 'path', 'paths', 'file', 'files', 'url', 'urls', 'uri', 'endpoint', 'length', 'len', 'type', 'types', 'id',
@@ -88,11 +97,20 @@ const DESCRIPTIVE_PART = new Set([
   'policy', 'expiry', 'expires', 'ttl', 'timeout', 'limit', 'max', 'min', 'strength', 'validator', 'schema', 'input', 'kind',
   'mode', 'source', 'provider', 'scope', 'scopes', 'hash', 'help', 'message', 'msg', 'error', 'required', 'enabled', 'store',
   'storage', 'cache', 'arn', 'ref', 'reference', 'version', 'handle', 'uuid', 'guid', 'resource', 'region', 'account', 'link', 'route',
-  // the shape of a credential, not one: `TOKEN_CHARS`, `PASSWORD_ALPHABET`, `PASSWORD_RULE`, `sshKeyFingerprint`
-  'char', 'chars', 'characters', 'charset', 'alphabet', 'strings', 'delimiter', 'delimiters', 'separator',
-  'separators', 'rule', 'rules', 'regexp', 'patterns', 'formats', 'fingerprint', 'fingerprints', 'cookie', 'cookies', 'flag',
-  'flags', 'metric', 'metrics', 'usage',
+  'regexp', 'patterns', 'formats', 'fingerprint', 'fingerprints', 'metric', 'metrics',
 ]);
+/**
+ * Last parts that describe a credential's shape or use as often as they name
+ * one holding it: `TOKEN_CHARS`, `PASSWORD_RULE`, `AUTH_TOKEN_COOKIE`,
+ * `secretFlag`. The name holds a credential when its value is opaque key
+ * material; a charset (every character once), a rule or a cookie name is not.
+ */
+const MAYBE_DESCRIPTIVE_PART = new Set([
+  'char', 'chars', 'characters', 'charset', 'alphabet', 'strings', 'delimiter', 'delimiters', 'separator', 'separators',
+  'rule', 'rules', 'cookie', 'cookies', 'flag', 'flags', 'usage',
+]);
+/** MAYBE_DESCRIPTIVE_PART entries naming a set of characters. */
+const CHARSET_PART = new Set(['char', 'chars', 'characters', 'charset', 'alphabet', 'strings', 'delimiter', 'delimiters', 'separator', 'separators']);
 /** Parts before a last `key` naming where a credential is kept: `TOKEN_KEY`, `PASSWORD_STORAGE_KEY`. */
 const STORED_UNDER = new Set(['token', 'tokens', 'password', 'passwd', 'pass', 'credential', 'credentials', 'storage', 'store', 'cache', 'cookie', 'session', 'local']);
 /** First parts that make the name a flag or a question: `isSecret`, `hasPassword`. */
@@ -110,16 +128,25 @@ function nameParts(name: string): string[] {
 }
 
 /**
- * Whether a key/variable name holds a credential: a credential word anywhere
- * in it (`SECRET_KEY`, `secret_key_base`, `password2`, `dbPass`,
- * `privateKeyPem`), or a `…Key` qualified by something other than a lookup or
- * public key (`signingKey`, `stripeKey`, `apiKeyV2`). Names that describe a
- * credential (`secretName`, `tokenUrl`, `API_KEY_ENV`, `isSecret`) don't.
+ * How a key/variable name relates to a credential:
+ * - `credential`: it holds one — a credential word anywhere in it
+ *   (`SECRET_KEY`, `secret_key_base`, `password2`, `dbPass`, `privateKeyPem`),
+ *   or a `…Key` qualified by something other than a lookup or public key
+ *   (`signingKey`, `stripeKey`, `apiKeyV2`);
+ * - `opaque`: it holds one only when the value is opaque key material
+ *   (`secondaryKey`, `TENANT_KEY`, `contextToken`, `AUTH_TOKEN_COOKIE`,
+ *   `TOKEN_CHARS`);
+ * - undefined: it describes one (`secretName`, `tokenUrl`, `API_KEY_ENV`,
+ *   `isSecret`) or is no credential at all.
+ * `charset` marks a name that may hold a set of characters (`TOKEN_CHARS`);
+ * `word` that a credential word (not just a `…Key`) named it.
  */
-export function isSecretKeyName(name: string): boolean {
+interface SecretName { kind: 'credential' | 'opaque'; charset: boolean; word: boolean }
+
+function secretName(name: string): SecretName | undefined {
   const parts = nameParts(name);
-  if (parts.length === 0) return false;
-  if (parts.length > 1 && PREDICATE_PART.has(parts[0])) return false;
+  if (parts.length === 0) return undefined;
+  if (parts.length > 1 && PREDICATE_PART.has(parts[0])) return undefined;
   // a trailing number or version names a variant, not a role: `secretKeyFormat2`, `apiKeyV2`, `password2`
   let end = parts.length - 1;
   while (end > 0 && /^(?:v?\d+|v)$/.test(parts[end])) end--;
@@ -129,15 +156,25 @@ export function isSecretKeyName(name: string): boolean {
     // `S3_KEY` → [s, 3, key]: the qualifier is `s3`
     const qualifier = i > 1 && /^\d+$/.test(parts[i - 1]) ? parts[i - 2] + parts[i - 1] : parts[i - 1];
     const keyed = (part === 'key' || part === 'keys') && i > 0 && !NOT_SECRET_KEY.has(qualifier);
-    if (!keyed && !CREDENTIAL_PART.test(part)) continue;
-    if ((part === 'token' || part === 'tokens') && i > 0 && NOT_SECRET_TOKEN.has(parts[i - 1])) continue;
+    const word = CREDENTIAL_PART.test(part);
+    if (!keyed && !word) continue;
+    const tokenPart = part === 'token' || part === 'tokens';
+    if (tokenPart && i > 0 && NOT_SECRET_TOKEN.has(parts[i - 1])) continue;
     // what follows the credential word names something about it: `tokenUrl`,
     // and `TOKEN_KEY` / `TOKEN_STORAGE_KEY`, the key a token is stored under
-    if (i < end && DESCRIPTIVE_PART.has(last)) return false;
-    if (i < end && (last === 'key' || last === 'keys') && STORED_UNDER.has(parts[end - 1])) return false;
-    return true;
+    if (i < end && DESCRIPTIVE_PART.has(last)) return undefined;
+    if (i < end && (last === 'key' || last === 'keys') && STORED_UNDER.has(parts[end - 1])) return undefined;
+    const maybe = (keyed && !word && MAYBE_SECRET_KEY.has(qualifier))
+      || (tokenPart && i > 0 && MAYBE_SECRET_TOKEN.has(parts[i - 1]))
+      || (i < end && MAYBE_DESCRIPTIVE_PART.has(last));
+    return { kind: maybe ? 'opaque' : 'credential', charset: i < end && CHARSET_PART.has(last), word };
   }
-  return false;
+  return undefined;
+}
+
+/** Whether a key/variable name holds a credential whatever its value looks like (see secretName). */
+export function isSecretKeyName(name: string): boolean {
+  return secretName(name)?.kind === 'credential';
 }
 const BEARER_LITERAL = /["'`]Bearer\s+([A-Za-z0-9._~+/=-]{20,})["'`]/g;
 /**
@@ -183,8 +220,23 @@ export const SOURCE_TOKEN_PATTERNS: Array<{ pattern: RegExp; name: string }> = [
 const PLACEHOLDER = /your|example|sample|dummy|placeholder|changeme|replace|insert|redacted|xxxx|\*{3}|<[^>]*>|\$\{|\{\{|%s/i;
 const MIN_ENTROPY = 3.8;
 
-/** Regular-expression text: a character class with a quantifier, a group construct, an escape class, a `{n,m}`. */
-const REGEX_SHAPED = /\[[^\]]{1,80}\][+*?{]|\(\?[=!:<]|\\[dwsDWSb]|[^\\]\{\d+(?:,\d*)?\}|^\^.*\$$/;
+/** Regular-expression constructs: a character class, a group construct, an escape class, a quantifier. */
+const REGEX_CONSTRUCT = /(?:\[[^\]]{1,80}\]|\((?:\?[=!:<])?[^()]{0,80}\)|\\[dwsDWSb.])(?:[+*?]|\{\d+(?:,\d*)?\})?|\{\d+(?:,\d*)?\}/g;
+/**
+ * Regular-expression text, not a password that happens to hold a bracket or a
+ * `\d`: anchored at both ends, three constructs or more, or constructs
+ * (a class, a group, an escape, each with its quantifier) making up half of it.
+ */
+function regexShaped(value: string): boolean {
+  if (/^\^.*\$$/.test(value) && /[[\\({+*?]/.test(value)) return true;
+  let count = 0;
+  let covered = 0;
+  for (const m of value.matchAll(REGEX_CONSTRUCT)) {
+    count++;
+    covered += m[0].length;
+  }
+  return count >= 3 || (count > 0 && covered / value.length >= 0.5);
+}
 /** Public half of a key pair: PEM/OpenSSH public keys, base64 DER SubjectPublicKeyInfo. */
 const PUBLIC_KEY_VALUE =
   /^(?:-----BEGIN (?:RSA )?PUBLIC KEY|ssh-(?:rsa|ed25519|dss)\b|ecdsa-sha2-|MCowBQYDK2V[uw]|MEMwBQYDK2Vx|MEIwBQYDK2Vv|MFkwEwYHKoZIzj0CAQ|MHYwEAYHKoZIzj0CAQ|MIGbMBAGByqGSM49AgE|MI[A-Za-z0-9+/]{2,6}(?:BgkqhkiG9w0BAQEFAAO|CSqGSIb3DQEBAQUAA4))/;
@@ -206,13 +258,31 @@ function sequentialShare(value: string): number {
   return covered / value.length;
 }
 
+/**
+ * Opaque key material: base64 or mixed-case alphanumerics with digits, no
+ * separators — a random credential, not a path, a name or a model id.
+ */
+function opaqueValue(value: string, charset: boolean): boolean {
+  if (!/^[A-Za-z0-9+/]{16,}={0,2}$/.test(value) || !/[a-z]/.test(value) || !/[A-Z]/.test(value) || !/\d/.test(value)) return false;
+  // a character set lists every character once; random key material repeats some
+  return !(charset && new Set(value).size === value.length);
+}
+
+/** A value under a name: whether it is a credential the name holds (see secretName). */
+function namedSecretValue(name: SecretName, value: string): boolean {
+  // `SHA256:…` is a key's fingerprint under a `…Key` name, never under `apiSecret`
+  if (!name.word && FINGERPRINT_VALUE.test(value)) return false;
+  if (!looksLikeSecretValue(value)) return false;
+  return name.kind === 'credential' || opaqueValue(value, name.charset);
+}
+
 function looksLikeSecretValue(value: string): boolean {
   if (PLACEHOLDER.test(value)) return false;
   if (/^[A-Z][A-Z0-9_]+$/.test(value)) return false; // an env-var name: API_KEY: "OPENAI_API_KEY"
   if (/^(?:[a-z]+|[a-z]+(?:[A-Z][a-z0-9]+)+|[A-Z][a-z]+(?:[A-Z][a-z0-9]+)*)$/.test(value)) return false; // identifier
   if (/^(?:https?:)?\/\/|^[./~]/.test(value)) return false; // URL or path
   if (/^(.)\1+$/.test(value)) return false;
-  if (REGEX_SHAPED.test(value) || PUBLIC_KEY_VALUE.test(value) || FINGERPRINT_VALUE.test(value)) return false;
+  if (regexShaped(value) || PUBLIC_KEY_VALUE.test(value)) return false;
   if (sequentialShare(value) >= 0.6) return false;
   if (!/[A-Za-z]/.test(value) || !/\d/.test(value)) return false;
   return shannonEntropy(value) >= MIN_ENTROPY;
@@ -273,8 +343,9 @@ function collectSourceSecrets(code: string): Array<{ secret: SourceSecret; value
     for (const re of [KEYED_LITERAL, ENV_DEFAULT]) {
       for (const m of text.matchAll(re)) {
         const [, key, value] = m;
-        if (!isSecretKeyName(key) || tokens.some((t) => value.includes(t))) continue;
-        if (looksLikeSecretValue(value)) add({ line, kind: 'secret-named value', key, masked: mask(value) }, value);
+        const name = secretName(key);
+        if (!name || tokens.some((t) => value.includes(t))) continue;
+        if (namedSecretValue(name, value)) add({ line, kind: 'secret-named value', key, masked: mask(value) }, value);
       }
     }
     for (const m of text.matchAll(BEARER_LITERAL)) {

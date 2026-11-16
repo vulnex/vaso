@@ -16,14 +16,51 @@ describe('credential key names', () => {
 
   it.each([
     'secret_name', 'secretName', 'tokenPath', 'passwordFile', 'tokenUrl', 'passwordLength', 'tokenType', 'clientSecretId',
-    'apiKeyHeader', 'API_KEY_ENV', 'secretArn', 'SECRET_REF', 'isSecret', 'hasPassword', 'TOKEN_KEY', 'TOKEN_STORAGE_KEY', 'publicKey', 'primaryKey',
+    'apiKeyHeader', 'API_KEY_ENV', 'secretArn', 'SECRET_REF', 'isSecret', 'hasPassword', 'TOKEN_KEY', 'TOKEN_STORAGE_KEY', 'publicKey',
     'cacheKey', 'sortKey', 'idempotencyKey', 'passwordHash', 'key', 'keys', 'tokenizer', 'bypass', 'passwordField', 'PROD_WRITE_KEY', 'APP_INSIGHTS_KEY',
-    'TOKEN_STRINGS', 'TOKEN_CHARS', 'PASSWORD_ALPHABET', 'SECRET_CHARSET', 'apiKeyCharacters', 'TOKEN_DELIMITERS',
-    'secretKeyFormat2', 'PASSWORD_RULE', 'sshKeyFingerprint', 'HOST_KEY_FINGERPRINT', 'posthogKey', 'featureFlagKey',
-    'modelKey', 'shardKey', 'S3_KEY', 'deduplicationKey', 'assetKey', 'CSRF_TOKEN_COOKIE', 'maxTokens', 'nextPageToken',
+    'secretKeyFormat2', 'sshKeyFingerprint', 'HOST_KEY_FINGERPRINT', 'posthogKey', 'featureFlagKey',
+    'shardKey', 'deduplicationKey', 'assetKey', 'maxTokens', 'nextPageToken',
   ])('%s does not', (name) => {
     expect(isSecretKeyName(name)).toBe(false);
     expect(findSourceSecrets(`const config = { ${JSON.stringify(name)}: "${VALUE}" };`)).toEqual([]);
+  });
+
+  // Names that hold a credential only when the value is opaque key material
+  it.each([
+    'primaryKey', 'secondaryKey', 'COSMOS_SECONDARY_KEY', 'TENANT_KEY', 'MODEL_KEY', 'modelKey', 'SERVICEBUS_NAMESPACE_KEY', 'S3_KEY',
+    'INPUT_TOKEN', 'contextToken', 'syncToken', 'AUTH_TOKEN_COOKIE', 'CSRF_TOKEN_COOKIE', 'ADMIN_PASSWORD_RULE', 'PASSWORD_RULE',
+    'secretFlag', 'API_KEY_USAGE',
+  ])('%s holding random key material is flagged', (name) => {
+    expect(isSecretKeyName(name)).toBe(false);
+    expect(findSourceSecrets(`const config = { ${JSON.stringify(name)}: "${VALUE}" };`)).toHaveLength(1);
+    expect(findSourceSecrets(`const ${name} = "Zm9vYmFyYmF6cXV4UXdlcnR5MTIzNDU2Nzg5MEFCQ0Q=";`)).toHaveLength(1);
+  });
+
+  it.each([
+    ['primaryKey', 'user_id_2024_v2'],
+    ['secondaryKey', 'created_at_desc_2'],
+    ['TENANT_KEY', 'acme-corp-eu-west-1'],
+    ['modelKey', 'claude-3-5-sonnet-20241022'],
+    ['S3_KEY', 'exports/2024-11/report-9f8e7d.csv'],
+    ['S3_KEY', 'data/2024/file123abc'],
+    ['contextToken', 'ctx-2024-session-9f8e7d6c'],
+    ['syncToken', 'sync_2024_11_16_9f8e7d'],
+    ['AUTH_TOKEN_COOKIE', '__Host-auth-token-2024'],
+    ['secretFlag', 'ENABLE_SECRET_SCAN_V2'],
+  ])('%s holding a name or path (%s) is not flagged', (name, value) => {
+    expect(findSourceSecrets(`const ${name} = "${value}";`)).toEqual([]);
+  });
+
+  it.each(['TOKEN_STRINGS', 'TOKEN_CHARS', 'PASSWORD_ALPHABET', 'SECRET_CHARSET', 'apiKeyCharacters', 'TOKEN_DELIMITERS'])(
+    '%s holding a shuffled character set (every character once) is not flagged',
+    (name) => {
+      expect(isSecretKeyName(name)).toBe(false);
+      expect(findSourceSecrets(`const config = { ${JSON.stringify(name)}: "${VALUE}" };`)).toEqual([]);
+    },
+  );
+
+  it('TOKEN_CHARS holding random key material (characters repeat) is flagged', () => {
+    expect(findSourceSecrets('const TOKEN_CHARS = "Qx7rT2mLp9Vz4KsW8nBc3HdF6yJaQx7rT2mL";')).toHaveLength(1);
   });
 
   it('an environment lookup default under a credential name is found', () => {
@@ -51,6 +88,24 @@ describe('values that describe a credential rather than hold one', () => {
     ['CSRF_TOKEN_COOKIE', '__Host-csrf-token-v2-2024'],
   ])('%s is not flagged', (name, value) => {
     expect(findSourceSecrets(`var ${name} = "${value}";`)).toEqual([]);
+  });
+
+  it.each([
+    ['adminPassword', 'Zx9[Qm4]+Lp2Rt8Vw3Yb7Kc'],
+    ['adminPassword', 'Kq7\\\\dPz2Lm9Xw4Rt6Yh'],
+    ['dbPassword', 'Hy7Nq{12}Wz3Lp8Kd5'],
+    ['apiSecret', 'sha256:Qx7rT2mLp9Vz4KsW8nBc3HdF6yJa1b2C3d4E5f'],
+    ['clientSecret', 'SHA256:Qx7rT2mLp9Vz4KsW8nBc3HdF6yJa1b2C3d4E5f'],
+  ])('%s holding a password with one regex-like character (%s) is flagged', (name, value) => {
+    expect(findSourceSecrets(`const ${name} = "${value}";`)).toHaveLength(1);
+  });
+
+  it.each([
+    ['hostKey', 'SHA256:Qx7rT2mLp9Vz4KsW8nBc3HdF6yJa1b2C3d4E5f6g7h8'],
+    ['apiSecret', '^[A-Za-z0-9]{32}$'],
+    ['secretValue', '(sk|pk)_(live|test)_[0-9a-zA-Z]{24}'],
+  ])('%s holding a fingerprint or a regex (%s) is not flagged', (name, value) => {
+    expect(findSourceSecrets(`const ${name} = "${value}";`)).toEqual([]);
   });
 
   it('the hono bearer-auth token pattern is not a credential', () => {
