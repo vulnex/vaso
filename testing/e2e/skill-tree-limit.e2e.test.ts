@@ -136,6 +136,51 @@ describe('claude-code: default skills directory linked to a tree over the limit'
   }, 300_000);
 });
 
+describe('claude-code: plain default skills directory holding links to trees at and over the limit', () => {
+  let home: string;
+  let base: string;
+  let local: { agents: AgentScanResult[]; ms: number };
+
+  beforeAll(async () => {
+    base = join(work, 'cc-inner');
+    home = join(base, 'home');
+    const skills = join(home, '.claude', 'skills');
+    await mkdir(join(skills, 'own'), { recursive: true });
+    await writeFile(join(home, '.claude', 'settings.json'), '{ "permissions": { "allow": ["Read"] } }\n');
+    await writeFile(join(skills, 'own', 'SKILL.md'), '---\nname: own\ndescription: mine\n---\nHello\n');
+    await skillTree(join(base, 'outside', 'big'), LIMIT + 1);
+    await skillTree(join(base, 'outside', 'exact'), LIMIT);
+    await symlink(join(base, 'outside', 'big'), join(skills, 'big'));
+    await symlink(join(base, 'outside', 'exact'), join(skills, 'exact'));
+    local = await scan(home, 'claude-code');
+  }, 300_000);
+
+  it('the link over the limit is not scanned; the one at the limit and the plain content are', () => {
+    const results = local.agents.flatMap(a => a.results);
+    const skl002 = results.find(r => r.id === 'SKL-002')!;
+    expect(skl002.passed).toBe(false);
+    expect(skl002.severity).toBe('warning');
+    const capped = (skl002.evidence ?? []).filter(e => SKL002_LIMIT.test(e.detail ?? '')).map(e => e.file);
+    expect(capped).toEqual([join(home, '.claude', 'skills', 'big')]);
+    // the malicious skill is found in the tree at the limit only
+    const skl004 = results.find(r => r.id === 'SKL-004')!;
+    expect(skl004.passed).toBe(false);
+    expect(new Set(skl004.evidence?.map(e => e.file))).toEqual(new Set([join(home, '.claude', 'skills', 'exact', 'evil', 'run.sh')]));
+    const inv = local.agents[0].installation.inventory!;
+    expect(inv.skills.map(s => s.path).sort()).toEqual([join(home, '.claude', 'skills', 'exact', 'evil'), join(home, '.claude', 'skills', 'own')]);
+    expect(local.ms).toBeLessThan(60_000);
+  });
+
+  it.skipIf(!goAvailable)('a probe snapshot reaches the same verdicts and inventory', async () => {
+    const r = await remote(home, 'claude-code');
+    const key = (as: AgentScanResult[]) => Object.fromEntries(as.map(a => [a.installation.installDir, verdicts(a)]));
+    expect(key(r)).toEqual(key(local.agents));
+    expect(inventory(r)).toEqual(inventory(local.agents));
+    const evidence = (as: AgentScanResult[], id: string) => as.flatMap(a => a.results).find(x => x.id === id)?.evidence?.map(e => `${e.file}: ${e.detail}`).sort();
+    for (const id of ['SKL-002', 'SKL-004', 'SKL-013']) expect(evidence(r, id), id).toEqual(evidence(local.agents, id));
+  }, 300_000);
+});
+
 describe('openclaw: config-set skills directories at and over the limit', () => {
   let home: string;
   let base: string;
