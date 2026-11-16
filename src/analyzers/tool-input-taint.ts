@@ -946,6 +946,7 @@ function sqlSafePiece(path: NodePath, constrained: (path: NodePath) => boolean, 
   if (constrained(path)) return true;
   if (path.isIdentifier()) {
     const binding = path.scope.getBinding(path.node.name);
+    if (binding && guardedBefore(path, binding)) return true;
     if (!binding?.constant || !binding.path.isVariableDeclarator()) return false;
     const init = binding.path.get('init') as NodePath;
     return !!init.node && sqlSafePiece(init, constrained, depth + 1, quote);
@@ -991,6 +992,46 @@ function sqlSafePiece(path: NodePath, constrained: (path: NodePath) => boolean, 
       if (sep && staticString(sep.node, sep.scope) === undefined) return false;
     }
     return mapped.isCallExpression() && placeholderMap(mapped);
+  }
+  return false;
+}
+
+/** A statement that always leaves: `throw …`, `return …`, or a block ending in one. */
+function alwaysExits(node: Node): boolean {
+  if (node.type === 'ThrowStatement' || node.type === 'ReturnStatement') return true;
+  return node.type === 'BlockStatement' && node.body.length > 0 && alwaysExits(node.body[node.body.length - 1]);
+}
+
+/** `x = "asc"` (also alone in a block): the assignment of a fixed value to `name`, or undefined. */
+function fixedReassignment(node: Node, name: string, scope: Scope): Node | undefined {
+  const stmt = node.type === 'BlockStatement' && node.body.length === 1 ? node.body[0] : node;
+  if (stmt.type !== 'ExpressionStatement') return undefined;
+  const e = stmt.expression;
+  if (e.type !== 'AssignmentExpression' || e.operator !== '=' || e.left.type !== 'Identifier' || e.left.name !== name) return undefined;
+  return staticString(e.right, scope) !== undefined || e.right.type === 'NumericLiteral' ? e : undefined;
+}
+
+/**
+ * Whether an earlier statement of the same function holds the name to fixed
+ * values where it is used: a guard that leaves unless the value is one of
+ * them (`if (!ALLOWED.includes(col)) throw …`, `if (x !== "asc" && x !==
+ * "desc") return …`) or that resets it to a fixed value (`if (…) x = "asc"`).
+ * The name may be assigned only before the guard, or by the guard itself.
+ */
+function guardedBefore(path: NodePath, binding: Binding): boolean {
+  const name = binding.identifier.name;
+  const stop = binding.scope.path;
+  for (let at: NodePath | null = path; at && at !== stop; at = at.parentPath) {
+    if (!at.isStatement() || !Array.isArray(at.container) || at.listKey !== 'body') continue;
+    for (const prev of at.getAllPrevSiblings()) {
+      if (!prev.isIfStatement()) continue;
+      const test = prev.node.test;
+      if (assignedNames(test).has(name) || !choiceChecked(test, false, prev.scope).has(name)) continue;
+      const reset = fixedReassignment(prev.node.consequent, name, prev.scope);
+      if (!reset && !alwaysExits(prev.node.consequent)) continue;
+      const start = prev.node.start ?? 0;
+      if (binding.constantViolations.every((v) => v.node === reset || (v.node.end ?? 0) <= start)) return true;
+    }
   }
   return false;
 }
