@@ -840,6 +840,10 @@ interface ScriptEntry {
   fallback?: boolean;
 }
 
+/** Runners that load TypeScript, and the extensions they try for an extensionless script. */
+const TS_RUNNERS = new Set(['tsx', 'ts-node', 'ts-node-esm', 'esno', 'bun']);
+const TS_RUNNER_EXTENSIONS = ['.ts', '.tsx', '.mts', '.cts', '.js', '.mjs', '.cjs', '.jsx'];
+
 /** Commands of one package script whose launch targets are followed. */
 const MAX_SCRIPT_COMMANDS = 16;
 
@@ -902,7 +906,9 @@ async function scriptCommandEntry(
     // Node looks for `X`, then `X.js`, before the directory `X/` (`node server` runs server.js)
     // (`node sub/` with its slash names the directory only)
     const dirOnly = rest.some((w) => /[\\/]$/.test(w) && resolve(dir, w) === inner.entry);
-    const files = python || dirOnly || /\.[cm]?[jt]sx?$/i.test(inner.entry) ? [inner.entry] : [inner.entry, `${inner.entry}.js`];
+    // tsx, ts-node and bun also try the TypeScript extensions (`tsx server` runs server.ts)
+    const extensions = TS_RUNNERS.has(program) ? TS_RUNNER_EXTENSIONS : ['.js'];
+    const files = python || dirOnly || /\.[cm]?[jt]sx?$/i.test(inner.entry) ? [inner.entry] : [inner.entry, ...extensions.map((e) => `${inner.entry}${e}`)];
     for (const file of files.flatMap((f) => [f, ...sourceTwins(dir, f)])) {
       if (await isFile(file, fs)) return { path: file };
     }
@@ -913,11 +919,21 @@ async function scriptCommandEntry(
       const file = python ? ((await isFile(main, fs)) ? main : undefined) : await directoryEntry(inner.entry, fs);
       return file ? { path: file } : { note: `package script "${script}" runs the directory ${inner.entry}, which has no ${python ? '__main__.py' : 'entry file'}` };
     }
-    return { fallback: true, note: `package script "${script}" runs ${inner.entry}, which is not there — the package's own entry was analysed instead` };
+    // `node /dev/zero`, a FIFO: there, but not a file this scan reads
+    const present = await fs.stat(inner.entry).then(() => true, () => false);
+    return { fallback: true, note: `package script "${script}" runs ${inner.entry}, which ${present ? 'is not a regular file' : 'is not there'} — the package's own entry was analysed instead` };
   }
   if (inner.packageDir) {
     // `"start": "node index.js && npm start"`: the script runs itself
     if (resolve(inner.packageDir) === resolve(dir) && inner.script === script) return { note: `package script "${script}" runs itself in a loop` };
+    // `bun server` / `bun run server` with no such package script runs the file (`server.ts`)
+    if (program === 'bun' && inner.script && (await readPackageScript(inner.packageDir, inner.script, fs, false)).line === undefined) {
+      const base = resolve(inner.packageDir, inner.script);
+      for (const file of [base, ...TS_RUNNER_EXTENSIONS.map((e) => `${base}${e}`)]) {
+        if (await isFile(file, fs)) return { path: file };
+      }
+      return { fallback: true, note: `package script "${script}" runs ${base}, which is not there — the package's own entry was analysed instead` };
+    }
     const nested = await packageScriptEntry(inner.packageDir, inner.script, fs, { deno: inner.denoTask, depth: depth + 1 });
     return nested;
   }
