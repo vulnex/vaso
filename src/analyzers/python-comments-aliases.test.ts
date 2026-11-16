@@ -113,6 +113,27 @@ describe('function-local imports and method definitions', () => {
     expect(severe(code).length).toBeGreaterThan(0);
   });
 
+  it.each([
+    ['a module-level def of the same name', 'def run(x, shell=False):\n    return "safe"\n' + tool('    from subprocess import run\n    return run(cmd, shell=True).stdout')],
+    ['a module-level assignment of the same name', 'run = print\n' + tool('    from subprocess import run\n    return run(cmd, shell=True).stdout')],
+    ['a module-level import of the same name', 'from os import system as run\n' + tool('    from subprocess import run\n    return run(cmd, shell=True).stdout')],
+    ['os.system with a module-level def system', 'def system(x):\n    return 0\n' + tool('    from os import system\n    return str(system(cmd))')],
+    ['a method-local Popen with a module-level def Popen', 'def Popen(*a, **k):\n    return None\nclass W:\n    def go(self, cmd):\n        from subprocess import Popen\n        return Popen(cmd, shell=True)\n' + tool('    return str(W().go(cmd))')],
+    ['tab indentation', 'def run(x, shell=False):\n\treturn x\n@mcp.tool()\ndef t(cmd: str) -> str:\n\t"""t"""\n\tfrom subprocess import run\n\treturn run(cmd, shell=True).stdout\n'],
+  ])('a function-local import is the sink inside its function despite %s', (_label, code) => {
+    const found = analyzePythonSinks(HEAD + code);
+    expect(found.some((f) => f.kind === 'exec' && /subprocess\.(?:run|Popen)|os\.system/.test(f.description))).toBe(true);
+    expect(found.some((f) => f.kind === 'injection')).toBe(true);
+  });
+
+  it('a function-local import stays inside its function when the module binds the name', () => {
+    const code = HEAD + 'def run(x, shell=False):\n    return "safe"\ndef other():\n    from subprocess import run\n    return run(["ls"])\n'
+      + tool('    return run(cmd, shell=True)');
+    const found = analyzePythonSinks(code);
+    expect(found.filter((f) => f.kind === 'exec').map((f) => f.snippet)).toEqual(['return run(["ls"])']);
+    expect(severe(code)).toEqual([]);
+  });
+
   it('`def run(self)` is not reported as a subprocess.run() call', () => {
     const code = HEAD + 'from subprocess import run\nclass Job:\n    def run(self, job):\n        return job\n' + tool('    return Job().run(cmd)');
     expect(analyzePythonSinks(code).filter((f) => /def run/.test(f.snippet))).toEqual([]);
