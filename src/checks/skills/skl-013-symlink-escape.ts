@@ -48,7 +48,7 @@ interface SymlinkFinding {
   skillInstall: boolean;
   /** Its code is not scanned (SKL-002): linked to where no skills tree is
    *  walked, or to a tree over the entry limit. */
-  unscanned?: 'outside' | 'limit' | 'total';
+  unscanned?: 'outside' | 'limit' | 'total' | 'truncated';
 }
 
 function resolveTarget(rawTarget: string, linkDir: string, home: string): string {
@@ -90,7 +90,8 @@ export const skl013 = defineCheck({
     const seen = new Set<string>();
     // links the skill walk left out for the size of their tree (inventory)
     const capped = new Map((ctx.installation.unscannedSkillsDirs ?? [])
-      .filter(u => u.reason === 'limit' || u.reason === 'total').map(u => [u.path, u.reason as 'limit' | 'total']));
+      .filter(u => u.reason === 'limit' || u.reason === 'total' || u.reason === 'truncated')
+      .map(u => [u.path, u.reason as 'limit' | 'total' | 'truncated']));
 
     for (const dir of dirs) {
       const root = resolve(dir);
@@ -157,6 +158,8 @@ export const skl013 = defineCheck({
           ? `Skill installed as a link to ${f.resolvedTarget} — a tree over the ${MAX_SKILL_TREE_ENTRIES}-entry limit VASO walks, so its code is not scanned (see SKL-002); edits to it change what is there.`
         : f.unscanned === 'total'
           ? `Skill installed as a link to ${f.resolvedTarget} — past the ${MAX_LINKED_SKILL_ENTRIES}-entry total VASO walks through one skills tree's links, so its code is not scanned (see SKL-002); edits to it change what is there.`
+        : f.unscanned === 'truncated'
+          ? `Skill installed as a link to ${f.resolvedTarget} — left out by the remote probe after it had stopped recording links it does not follow, so its code is not scanned (see SKL-002); edits to it change what is there.`
         : f.skillInstall
           ? `Skill installed as a link to ${f.resolvedTarget} — its code is scanned there; edits to it change the source checkout.`
           : `Symlink resolves outside the workspace to ${f.resolvedTarget}. A write the user believes is workspace-local lands outside the project.`,

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { LocalFSProvider } from './local-fs-provider.js';
 import type { DirentInfo, FSProvider } from './fs-provider.js';
-import { MAX_LINKED_SKILL_ENTRIES, MAX_SKILL_TREE_ENTRIES, countSkillTreeEntries, planSkillLinks, scanSkillTree } from './skill-tree-count.js';
+import { MAX_JUDGED_LINK_ENTRIES, MAX_LINKED_SKILL_ENTRIES, MAX_SKILL_TREE_ENTRIES, countSkillTreeEntries, planSkillLinks, scanSkillTree } from './skill-tree-count.js';
 import type { TreeScan } from './skill-tree-count.js';
 import { overEntryLimit, skillRootGap, unscannedReason, unscannedShortReason } from './skill-root-scope.js';
 import { screenDefaultSkillRoots } from '../adapters/default-skill-roots.js';
@@ -129,12 +129,48 @@ describe('link plan of a skills tree', () => {
     await fill(join(big, 'pad'), MAX_SKILL_TREE_ENTRIES);
     await symlink(big, join(tree, 'a-big'));
     await symlink(targets[0], join(tree, 'z-again'));
-    // a-big (limit, 10,001 charged), l1–l3 (40,001), l4 past 50,000
+    // a-big over the limit is never walked: not charged; l1–l5 (50,000), l6 past it
     const plan = await planSkillLinks(fs, tree, always, scanOf);
     expect(plan.get(big)).toBe('limit');
-    expect(targets.map(t => plan.get(t))).toEqual(['follow', 'follow', 'follow', 'total', 'total', 'total']);
+    expect(targets.map(t => plan.get(t))).toEqual(['follow', 'follow', 'follow', 'follow', 'follow', 'total']);
     expect(plan.size).toBe(7);
   }, 120_000);
+
+  it('charges the total only with what it follows, and counts a bounded amount to judge links', async () => {
+    const tree = join(root, 'judged');
+    const sizes = new Map<string, number>();
+    const fake = async (real: string): Promise<TreeScan> => ({ n: sizes.get(real) ?? 0, links: [] });
+    const link = async (name: string, n: number) => {
+      const t = join(root, `j-${name}`);
+      await mkdir(t, { recursive: true });
+      await symlink(t, join(tree, name));
+      sizes.set(t, n);
+      return t;
+    };
+    await mkdir(tree);
+    const bigs: string[] = [];
+    for (let i = 0; i < 51; i++) bigs.push(await link(`b${String(i).padStart(2, '0')}`, MAX_SKILL_TREE_ENTRIES + 1));
+    const plan = await planSkillLinks(fs, tree, always, fake);
+    // fifty targets at the limit fill what judging may count: the 51st is not counted
+    expect(bigs.slice(0, 50).every(b => plan.get(b) === 'limit')).toBe(true);
+    expect(plan.get(bigs[50])).toBe('total');
+    expect(MAX_JUDGED_LINK_ENTRIES).toBe(10 * MAX_LINKED_SKILL_ENTRIES);
+
+    // a link past the total isn't charged either: a later small one still fits
+    const tree2 = join(root, 'fits');
+    await mkdir(tree2);
+    const t2 = async (name: string, n: number) => {
+      const t = join(root, `f-${name}`);
+      await mkdir(t, { recursive: true });
+      await symlink(t, join(tree2, name));
+      sizes.set(t, n);
+      return t;
+    };
+    const ts = [];
+    for (const [name, n] of [['a', 10000], ['b', 10000], ['c', 10000], ['d', 10000], ['e', 9999], ['f', 5000], ['g', 1]] as const) ts.push(await t2(name, n));
+    const plan2 = await planSkillLinks(fs, tree2, always, fake);
+    expect(ts.map(t => plan2.get(t))).toEqual(['follow', 'follow', 'follow', 'follow', 'follow', 'total', 'follow']);
+  });
 
   it('takes a followed link\'s own links right after it, not into a tree already taken nor above the root', async () => {
     const tree = join(root, 'nest');
@@ -228,6 +264,9 @@ describe('skills trees over the entry limit (local scans)', () => {
     expect(reason).toBe(`not scanned: skills directory holds more than 10000 entries, over the limit VASO walks in a skills tree (locally or remotely) — not verified; review it with \`vaso skill audit ${dir}\``);
     expect(reason).not.toMatch(/remote probe/);
     expect(unscannedShortReason({ reason: 'limit' })).toBe('over the 10000-entry limit');
+    // a snapshot's link the probe no longer recorded: not "over the limit"
+    expect(unscannedShortReason({ reason: 'truncated' })).toBe('not verified: the remote probe stopped recording links after 20000');
+    expect(unscannedReason('truncated', dir)).toContain('stopped recording links it does not follow (after 20000) — not verified');
   });
 
   it('decides a huge tree fast', async () => {

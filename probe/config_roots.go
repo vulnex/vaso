@@ -461,6 +461,9 @@ func expandFollowingDirLinks(pattern string) []string {
 		}
 	}
 	cur := []string{filepath.FromSlash(static)}
+	// the names matching a segment in a directory, by where the directory
+	// leads: twenty thousand links to one folder list and match it once
+	matched := make(map[string][]string)
 	for i, seg := range segs {
 		last := i == len(segs)-1
 		var next []string
@@ -471,15 +474,26 @@ func expandFollowingDirLinks(pattern string) []string {
 				}
 				continue
 			}
-			entries, err := os.ReadDir(dir) // follows dir when it is a link
-			if err != nil {
-				continue
+			key := dir
+			if real, err := filepath.EvalSymlinks(dir); err == nil {
+				key = real
 			}
-			for _, e := range entries {
-				if ok, _ := doublestar.Match(seg, e.Name()); !ok {
+			key += "\x00" + seg
+			names, done := matched[key]
+			if !done {
+				entries, err := os.ReadDir(dir) // follows dir when it is a link
+				if err != nil {
 					continue
 				}
-				if p := filepath.Join(dir, e.Name()); keepExpanded(p, last) {
+				for _, e := range entries {
+					if ok, _ := doublestar.Match(seg, e.Name()); ok {
+						names = append(names, e.Name())
+					}
+				}
+				matched[key] = names
+			}
+			for _, name := range names {
+				if p := filepath.Join(dir, name); keepExpanded(p, last) {
 					next = append(next, p)
 				}
 			}
@@ -759,14 +773,22 @@ func resolveExisting(p string) string {
 }
 
 // maxLinkedTreeEntries bounds what the directory links of one skills tree
-// may hold together (each followed link's own tree, counted on its own, and
-// what was read to judge links over the limit): five trees at the entry
-// limit. Twenty links to 9,999-entry trees made a 49 MB snapshot in 161 s;
+// may hold together (each followed link's own tree, counted on its own; a
+// link over the entry limit is never walked and not charged): five trees at
+// the entry limit. Twenty links to 9,999-entry trees made a 49 MB snapshot in 161 s;
 // 50,000 entries keep that near 12 MB, well inside the probe's content
 // budget and what the CLI loads, while real linked skill sets (a checkout
 // of a skills repo, a home-manager profile) hold a few thousand at most.
 // src/core/skill-tree-count.ts MAX_LINKED_SKILL_ENTRIES.
 const maxLinkedTreeEntries = 5 * maxConfigTreeEntries
+
+// maxJudgedLinkEntries bounds what judging the directory links of one
+// skills tree may count in all: each distinct target counted once, to the
+// entry limit, followed or not — fifty targets at the limit. Past it, a link
+// to a target not yet counted is not counted and gets linkTotal, so links to
+// many distinct large directories can't make the probe count without end.
+// src/core/skill-tree-count.ts MAX_JUDGED_LINK_ENTRIES.
+const maxJudgedLinkEntries = 10 * maxLinkedTreeEntries
 
 // treeScan is what a count of one tree found: its entries (stopping past
 // the limit it was counted to) and, in walk order, its directory links.
@@ -844,9 +866,12 @@ func (c *collector) limitScan(dir string) treeScan {
 // from the root, each followed one's own links right after it, at most
 // maxLinkDepth deep; one into a tree already taken, back into the root or
 // above it, or where treeAllowed refuses, gets no verdict. Each target is
-// counted on its own (limitScan) and the count charged to the root's links'
-// total: over maxConfigTreeEntries → linkLimit, past maxLinkedTreeEntries in
-// all → linkTotal, else linkFollow. Remembered per home and root.
+// counted on its own (limitScan): over maxConfigTreeEntries → linkLimit
+// (never walked, not charged); else its count is charged to the root's
+// links' total, past maxLinkedTreeEntries in all → linkTotal (not charged
+// either), else linkFollow. Once the targets counted hold
+// maxJudgedLinkEntries, a new target is not counted and gets linkTotal.
+// Remembered per home and root.
 // skill-tree-count.ts planSkillLinks.
 func (c *collector) linkPlan(root, home string) map[string]string {
 	rootReal, err := realPath(root)
@@ -863,7 +888,7 @@ func (c *collector) linkPlan(root, home string) map[string]string {
 	}
 	c.linkPlans[key] = plan
 	taken := []string{rootReal}
-	used := 0
+	used, judged := 0, 0
 	var visit func(links []string, depth int)
 	visit = func(links []string, depth int) {
 		if depth >= maxLinkDepth {
@@ -890,14 +915,19 @@ func (c *collector) linkPlan(root, home string) map[string]string {
 			if st, err := os.Stat(real); err != nil || !st.IsDir() {
 				continue
 			}
+			if judged >= maxJudgedLinkEntries {
+				plan[real] = linkTotal
+				continue
+			}
 			s := c.limitScan(real)
-			used += s.n
+			judged += s.n
 			switch {
 			case s.n > maxConfigTreeEntries:
 				plan[real] = linkLimit
-			case used > maxLinkedTreeEntries:
+			case used+s.n > maxLinkedTreeEntries:
 				plan[real] = linkTotal
 			default:
+				used += s.n
 				plan[real] = linkFollow
 				taken = append(taken, real)
 				visit(s.links, depth+1)

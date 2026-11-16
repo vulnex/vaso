@@ -110,15 +110,26 @@ describe('links left out on a snapshot', () => {
     ...over,
   });
 
-  it('what the probe recorded decides; past its record bound a link with nothing under it is not verified', async () => {
+  it('what the probe recorded decides; past its record bound a link with nothing under it shares its target\'s verdict, else is not verified', async () => {
     const recorded = new SnapshotFSProvider(snapshot({ configTrees: { '/home/u/.claude/skills/big': 'limit', '/home/u/.claude/skills/late': 'total' } }));
     let cap = await linkCap(recorded, '/home/u/.claude/skills');
     expect(await cap('/home/u/.claude/skills/big')).toBe('limit');
     expect(await cap('/home/u/.claude/skills/late')).toBe('total');
     expect(await cap('/home/u/.claude/skills/other')).toBeUndefined();
-    const truncated = new SnapshotFSProvider(snapshot({ skillLinksTruncated: true }));
+    const truncated = new SnapshotFSProvider(snapshot({
+      skillLinksTruncated: true,
+      configTrees: { '/home/u/.claude/skills/l0': 'limit' },
+      symlinks: {
+        '/home/u/.claude/skills/l0': '/opt/big', '/home/u/.claude/skills/l1': '/opt/big',
+        '/home/u/.claude/skills/other': '/opt/small', '/home/u/elsewhere/l2': '/opt/big',
+      },
+      directoryModes: { '/opt/big': 0o755, '/opt/small': 0o755 },
+    }));
     cap = await linkCap(truncated, '/home/u/.claude/skills');
-    expect(await cap('/home/u/.claude/skills/other')).toBe('limit');
+    expect(await cap('/home/u/.claude/skills/l1')).toBe('limit');
+    expect(await cap('/home/u/.claude/skills/other')).toBe('truncated');
     expect(await cap('/home/u/.claude/skills/kept')).toBeUndefined();
+    // another tree's records say nothing about this one's links
+    expect(await (await linkCap(truncated, '/home/u/elsewhere'))('/home/u/elsewhere/l2')).toBe('truncated');
   });
 });

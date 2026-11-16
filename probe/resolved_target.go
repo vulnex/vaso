@@ -3,8 +3,6 @@ package main
 import (
 	"path/filepath"
 	"strings"
-
-	"github.com/bmatcuk/doublestar/v4"
 )
 
 // A manifest skills tree ships its files verbatim (IOC hashes need the
@@ -21,14 +19,14 @@ import (
 type resolvedTargets struct {
 	// metadata are the manifest's metadata-only globs, lower-cased, each
 	// also with its home spelled as the home really is
-	metadata []string
+	metadata globIndex
 	// configs are the real paths of the manifest's own config files,
 	// lower-cased (a case-insensitive volume lists ~/.config/cursor as the
 	// Cursor it stores)
 	configs map[string]bool
 	// configGlobs are its other (non-skill) globs, lower-cased, also with
 	// the home spelled as it really is: what they collect is disguised
-	configGlobs []string
+	configGlobs globIndex
 }
 
 func newResolvedTargets(metadataGlobs, configPaths, configGlobs []string, homes []string) resolvedTargets {
@@ -67,10 +65,10 @@ func newResolvedTargets(metadataGlobs, configPaths, configGlobs []string, homes 
 		}
 		return out
 	}
-	t.metadata = globs(metadataGlobs)
+	t.metadata = newGlobIndex(globs(metadataGlobs))
 	// Whole trees too (~/.claude/plugins/**, ~/.claude/rules/**): what they
 	// hold ships disguised under its own path already
-	t.configGlobs = globs(configGlobs)
+	t.configGlobs = newGlobIndex(globs(configGlobs))
 	for _, p := range configPaths {
 		if real, err := filepath.EvalSymlinks(p); err == nil {
 			t.configs[strings.ToLower(filepath.Clean(real))] = true
@@ -79,36 +77,12 @@ func newResolvedTargets(metadataGlobs, configPaths, configGlobs []string, homes 
 	return t
 }
 
-// skillTarget is where the skills-tree file p really is, when that differs
-// from how it is spelled ("" otherwise, or when it can't be resolved).
-func skillTarget(p string) string {
-	real, err := filepath.EvalSymlinks(p)
-	if err != nil {
-		return ""
-	}
-	real = filepath.Clean(real)
-	if real == filepath.Clean(p) {
-		return ""
-	}
-	return real
-}
-
 // metadataOnly: real is a path the manifest ships as metadata only.
 func (t resolvedTargets) metadataOnly(real string) bool {
-	return matchesAny(t.metadata, real)
+	return t.metadata.matches(real)
 }
 
 // config: real is a file the manifest collects (and disguises) as a config.
 func (t resolvedTargets) config(real string) bool {
-	return t.configs[strings.ToLower(real)] || matchesAny(t.configGlobs, real)
-}
-
-func matchesAny(globs []string, p string) bool {
-	slash := strings.ToLower(filepath.ToSlash(p))
-	for _, g := range globs {
-		if ok, _ := doublestar.Match(g, slash); ok {
-			return true
-		}
-	}
-	return false
+	return t.configs[strings.ToLower(real)] || t.configGlobs.matches(real)
 }

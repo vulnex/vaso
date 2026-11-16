@@ -143,6 +143,9 @@ export interface SkillTreeListing {
   /** Directory links in the tree the walk did not follow because the tree's
    *  links together would hold more than MAX_LINKED_SKILL_ENTRIES (linkCap). */
   overTotalLinks: string[];
+  /** On a snapshot: directory links the probe left out after it had
+   *  stopped recording links it does not follow (linkCap). */
+  unrecordedLinks: string[];
 }
 
 /** `uncapped`: follow links whatever the size of their tree (`vaso skill audit`). */
@@ -154,9 +157,10 @@ export async function listSkillTree(dir: string, fs?: FSProvider, opts: { uncapp
   const refusedLinks: string[] = [];
   const overLimitLinks: string[] = [];
   const overTotalLinks: string[] = [];
+  const unrecordedLinks: string[] = [];
   try {
     // Follows symlinked skills that point outside the tree (walkSkillTree)
-    entries = await walkSkillTree(provider, dir, refusedLinks, { overLimit: overLimitLinks, overTotal: overTotalLinks, uncapped: opts.uncapped });
+    entries = await walkSkillTree(provider, dir, refusedLinks, { overLimit: overLimitLinks, overTotal: overTotalLinks, unrecorded: unrecordedLinks, uncapped: opts.uncapped });
     for (const entry of entries) {
       if (!entry.isFile) continue;
       if (isExcludedPath(dir, entry.parentPath, { keepBuildOutput: true })) continue;
@@ -181,7 +185,7 @@ export async function listSkillTree(dir: string, fs?: FSProvider, opts: { uncapp
     const skillMd = join(skillDir, 'SKILL.md');
     if (!files.includes(skillMd) && await provider.access(skillMd)) files.push(skillMd);
   }
-  return { entries, files, unlistable, refusedLinks, overLimitLinks, overTotalLinks, ...(error ? { error } : {}) };
+  return { entries, files, unlistable, refusedLinks, overLimitLinks, overTotalLinks, unrecordedLinks, ...(error ? { error } : {}) };
 }
 
 /**

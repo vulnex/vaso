@@ -128,8 +128,8 @@ export interface ProbeSnapshot {
    *  may hold together (`total`) — at most 20000 more. */
   configTrees?: Record<string, ConfigTreeStatus>;
   /** More links in skills trees went unfollowed for size than configTrees
-   *  records: after that the probe followed no directory link in a skills
-   *  tree (probe ≥ 1.5.0). */
+   *  records: after that the probe still followed the links its plan
+   *  follows, and recorded no others (probe ≥ 1.5.0; linkCap). */
   skillLinksTruncated?: boolean;
   /** Where a scanned home — or a directory naming a home the other way, met
    *  as a config tree's wildcard directory — resolves to, when that differs

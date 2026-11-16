@@ -153,6 +153,8 @@ type collector struct {
 	// targets: what the manifest says about the real path of a skills-tree
 	// file reached through a link (resolved_target.go)
 	targets resolvedTargets
+	// resolved remembers what folders resolve to (resolve_cache.go)
+	resolved resolveCache
 }
 
 // inExcludedDir reports whether match lies under an excluded directory that
@@ -623,10 +625,12 @@ func (c *collector) collectGlob(snapshot *ProbeSnapshot, pattern string) {
 // regular file whose real path is in a credential store neither the glob's
 // base nor match's own spelling names (resolvedIntoSink).
 func (c *collector) sinkFileByTarget(pattern, match string) bool {
-	if info, err := os.Stat(match); err != nil || !info.Mode().IsRegular() {
+	info, isLink, err := lstatThenStat(match)
+	if err != nil || !info.Mode().IsRegular() {
 		return false
 	}
-	return resolvedIntoSink(match, globBase(pattern))
+	real, _ := c.resolveFile(match, isLink)
+	return c.resolvedIntoSinkAt(match, real, globBase(pattern))
 }
 
 // collectFile reads a file and returns its content and mode. Content is
@@ -646,7 +650,7 @@ func globBase(pattern string) string {
 
 // base is the part of path VASO named (see escapesToSink).
 func (c *collector) collectFileLimit(path, base string, metadataOnly bool, limit int64) FileEntry {
-	info, err := os.Stat(path)
+	info, isLink, err := lstatThenStat(path)
 	if err != nil {
 		return FileEntry{Exists: false, Denied: os.IsPermission(err)}
 	}
@@ -660,9 +664,11 @@ func (c *collector) collectFileLimit(path, base string, metadataOnly bool, limit
 	assetOnly := metadataOnlyExtensions[ext] && !(c.inSkillTree && skillBinaryExtensions[ext])
 	// A manifest skills tree's file is judged by where it really is too
 	// (resolved_target.go): a link can spell an agent's own files as skills
+	// (one resolution, its folder's remembered: resolve_cache.go)
+	real, _ := c.resolveFile(path, isLink)
 	target := ""
-	if c.inSkillTree && !c.configTree {
-		target = skillTarget(path)
+	if c.inSkillTree && !c.configTree && real != filepath.Clean(path) {
+		target = real
 	}
 	switch {
 	// Not a regular file (a FIFO, a device, a link to /dev/tty) before
@@ -677,11 +683,11 @@ func (c *collector) collectFileLimit(path, base string, metadataOnly bool, limit
 	case inCredentialStore(path):
 		return omitted("sensitive")
 	// Before size: not even the head of a file behind such a link is shipped
-	case escapesToSink(path, base):
+	case c.escapesToSinkAt(path, base, isLink):
 		return omitted("sensitive")
 	// …or whose real path is one, through a link above base (a skills dir
 	// linked to ~/.claude): judged by where the file is, not how it is spelled
-	case resolvedIntoSink(path, base):
+	case c.resolvedIntoSinkAt(path, real, base):
 		return omitted("sensitive")
 	case target != "" && c.targets.metadataOnly(target):
 		return omitted("metadata")
@@ -694,7 +700,7 @@ func (c *collector) collectFileLimit(path, base string, metadataOnly bool, limit
 		return omitted("sensitive")
 	// In a manifest skills tree: nothing behind a file link into another
 	// user's home or an OS directory (skill_scope.go)
-	case c.skillLinkOutOfScope(base, path):
+	case isLink && c.skillLinkOutOfScope(base, path):
 		return omitted("sensitive")
 	case c.configTree && credentialFileName(path) && (info.Mode().Perm()&0o111 == 0 || !programHeader(path)):
 		return omitted("metadata")
@@ -997,8 +1003,11 @@ func (c *collector) followFrom(snapshot *ProbeSnapshot, pattern string, matches 
 }
 
 // maxLinkRecords bounds how many links not followed for size ConfigTrees
-// records (src/core/snapshot-load.ts MAX_LINK_RECORDS). Past it, no
-// directory link in a skills tree is followed (SkillLinksTruncated).
+// records (src/core/snapshot-load.ts MAX_LINK_RECORDS). Past it, links the
+// plan follows are still followed, as a local walk follows them; a link not
+// followed is no longer recorded (SkillLinksTruncated) — the CLI takes the
+// verdict recorded for another link to the same target, or reports it not
+// verified (linkCap in src/core/skill-root-scope.ts).
 var maxLinkRecords = 20000
 
 // linkNotFollowed: the directory link m (leading to real), met while walking
@@ -1009,9 +1018,6 @@ var maxLinkRecords = 20000
 // (a directory: the CLI reports it not scanned, as a local walk leaves it out
 // — linkCap in src/core/skill-root-scope.ts).
 func (c *collector) linkNotFollowed(snapshot *ProbeSnapshot, pattern, m, real string) bool {
-	if snapshot.SkillLinksTruncated {
-		return true
-	}
 	root, ok := literalTreeRoot(pattern)
 	if !ok {
 		root = globBase(pattern)

@@ -87,4 +87,23 @@ describe('linkInventoryFindings', () => {
     linkInventoryFindings(inv, [fail('SKL-013', '/s/sshdir')]);
     expect(inv.otherEntries[0].findings).toEqual(['SKL-013']);
   });
+
+  it('links tens of thousands of entries against as many evidence items in linear time', () => {
+    const n = 20000;
+    const inv: AgentInventory = {
+      skillsDirs: [], skills: [],
+      otherEntries: Array.from({ length: n }, (_, i) => ({ path: `/h/skills/l${i}`, root: '/h/skills', type: 'directory' as const, files: 0, hasCode: false })),
+    };
+    const results = [
+      { ...fail('SKL-002', '/h/skills/l0'), evidence: Array.from({ length: n }, (_, i) => ({ file: `/h/skills/l${i}` })) },
+      { ...fail('SKL-013', '/h/skills/l7/x'), evidence: [{ file: '/h/skills/l7/x' }, { file: '/h/skills/l7' }] },
+      fail('SKL-004', '/elsewhere/a.sh'),
+    ] as CheckResult[];
+    const t0 = Date.now();
+    linkInventoryFindings(inv, results);
+    expect(Date.now() - t0).toBeLessThan(5000);
+    expect(inv.otherEntries[7].findings).toEqual(['SKL-002', 'SKL-013']);
+    // l1 is no folder of l10–l19's evidence
+    expect(inv.otherEntries[1].findings).toEqual(['SKL-002']);
+  });
 });
