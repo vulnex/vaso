@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -163,6 +163,33 @@ something_else:
   user: root
 `);
     await expect(parseInventory(path)).rejects.toThrow('expected a "hosts" array');
+  });
+
+  it('reports a YAML error by position only, never the file text next to it', async () => {
+    const secret = 'sk-ant-api03-InvPlantedQq77';
+    for (const text of [
+      `hosts:\n  - host: a.example\n    password: ${secret}\n   bad: [\n`,
+      `hosts:\n  - host: a.example\n    label: "${secret}\n`,
+      `hosts:\n  - host: a.example\n    label: ${secret}\n    label: other\n`,
+    ]) {
+      const err = await parseInventory(await writeTempYAML(text)).then(() => undefined, (e: Error) => e);
+      expect(err, text).toBeInstanceOf(Error);
+      expect(err!.message).toMatch(/^Invalid inventory file ".*": /);
+      expect(err!.message).not.toContain('InvPlanted');
+    }
+  });
+
+  it('prints no YAML warning quoting the file (an unresolved tag)', async () => {
+    const out: string[] = [];
+    const sink = (...a: unknown[]) => { out.push(a.map(String).join(' ')); };
+    const spies = [vi.spyOn(console, 'warn').mockImplementation(sink), vi.spyOn(process, 'emitWarning').mockImplementation(sink as never)];
+    try {
+      const path = await writeTempYAML('hosts:\n  - host: a.example\n    label: !secret sk-ant-api03-TagInvPlanted88\n');
+      await parseInventory(path).catch(() => undefined);
+    } finally {
+      for (const s of spies) s.mockRestore();
+    }
+    expect(out.join('\n')).not.toContain('TagInvPlanted');
   });
 
   it('supports sudo flag per host', async () => {

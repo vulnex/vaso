@@ -4,7 +4,7 @@ import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { fetchNpmPackageSource, packageExtractDir, type PackageFetchResult } from './package-fetcher.js';
 import { collectServerDependencies } from './server-dependencies.js';
-import { parse as parseTOML } from 'smol-toml';
+import { parseTomlSafe } from '../core/toml-safe.js';
 import { binaryFileFormat, binaryFormat, isScriptFile, sourceText } from '../analyzers/binary-text.js';
 import { readCappedFile, ScanLimitError } from '../core/file-limits.js';
 import { isExcludedPath, relEscapes } from '../core/utils.js';
@@ -1537,7 +1537,7 @@ async function pythonPackageFiles(dir: string, fs: FSProvider): Promise<string[]
   // Top-level modules of the console scripts: `x = "pkg.server:main"` → pkg
   const scriptPackages = new Set<string>();
   try {
-    const project = (parseTOML(await fs.readFile(join(dir, 'pyproject.toml'))) as Record<string, unknown>).project as Record<string, unknown> | undefined;
+    const project = (parseTomlSafe(await fs.readFile(join(dir, 'pyproject.toml'))) as Record<string, unknown>).project as Record<string, unknown> | undefined;
     const scripts = project?.scripts && typeof project.scripts === 'object' ? Object.values(project.scripts as Record<string, unknown>) : [];
     for (const target of scripts) {
       const mod = typeof target === 'string' ? target.split(':')[0].trim().split('.')[0] : '';

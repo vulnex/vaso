@@ -13,7 +13,8 @@
  */
 
 import { readInputFile, INPUT_LIMITS } from '../core/input-file.js';
-import { parse as parseYAML } from 'yaml';
+import { parseYamlSafe } from '../core/yaml-safe.js';
+import { parseErrorMessage } from '../core/parse-error.js';
 import { parseSSHTarget, assertSSHTargetParts, targetLabel, unbracketHost } from './ssh.js';
 import type { SSHTarget } from './ssh.js';
 import { escapeControlChars } from '../reporting/text-safety.js';
@@ -44,7 +45,13 @@ export async function parseInventory(path: string): Promise<SSHTarget[]> {
     if (code === 'EINVAL' || code === 'EISDIR') throw new Error(`Inventory "${path}" is not a regular file`);
     throw err;
   }
-  const doc = parseYAML(raw) as InventoryFile;
+  // yaml's warnings and errors quote the file's lines: only the position is reported
+  let doc: InventoryFile;
+  try {
+    doc = parseYamlSafe(raw, { duplicateKeys: 'reject' }) as InventoryFile;
+  } catch (err) {
+    throw new Error(`Invalid inventory file "${path}": ${parseErrorMessage(err)}`);
+  }
 
   if (!doc || !Array.isArray(doc.hosts)) {
     throw new Error(`Invalid inventory file "${path}": expected a "hosts" array`);
