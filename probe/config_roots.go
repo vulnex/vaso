@@ -461,6 +461,9 @@ func expandFollowingDirLinks(pattern string) []string {
 		}
 	}
 	cur := []string{filepath.FromSlash(static)}
+	// the names matching a segment in a directory, by where the directory
+	// leads: twenty thousand links to one folder list and match it once
+	matched := make(map[string][]string)
 	for i, seg := range segs {
 		last := i == len(segs)-1
 		var next []string
@@ -471,15 +474,26 @@ func expandFollowingDirLinks(pattern string) []string {
 				}
 				continue
 			}
-			entries, err := os.ReadDir(dir) // follows dir when it is a link
-			if err != nil {
-				continue
+			key := dir
+			if real, err := filepath.EvalSymlinks(dir); err == nil {
+				key = real
 			}
-			for _, e := range entries {
-				if ok, _ := doublestar.Match(seg, e.Name()); !ok {
+			key += "\x00" + seg
+			names, done := matched[key]
+			if !done {
+				entries, err := os.ReadDir(dir) // follows dir when it is a link
+				if err != nil {
 					continue
 				}
-				if p := filepath.Join(dir, e.Name()); keepExpanded(p, last) {
+				for _, e := range entries {
+					if ok, _ := doublestar.Match(seg, e.Name()); ok {
+						names = append(names, e.Name())
+					}
+				}
+				matched[key] = names
+			}
+			for _, name := range names {
+				if p := filepath.Join(dir, name); keepExpanded(p, last) {
 					next = append(next, p)
 				}
 			}
