@@ -47,3 +47,23 @@ export function foreignStoreTarget(target: string, places: StorePlaces): Foreign
   if (storeRoots.some(root => withinDir(root, target)) || withinDir(storeDir, target)) return { why: 'store' };
   return undefined;
 }
+
+/**
+ * Why the agent's folder itself (~/.copilot, or the folder COPILOT_HOME
+ * names) is a foreign place for its private stores, written at `written` and
+ * resolving to `real`: it resolves into a sensitive location; a folder set
+ * inside the home resolves out of it (a link on the folder or on one above
+ * it); or it resolves to the home or a folder above it. Undefined when its
+ * stores are the agent's own: no link, a link within the home, or a folder
+ * set outside the home on purpose (COPILOT_HOME=/data/copilot) — wherever
+ * that leads, it is the place the user chose. The Go port is foreignAgentDir
+ * in probe/store_links.go (rows with `agentDir` in store-link-cases.json).
+ */
+export function foreignAgentDir(written: string, real: string, homeRoots: string[]): ForeignReason | undefined {
+  const label = classifySensitivePath(real)[0];
+  if (label) return { why: 'sensitive', label };
+  if (real === written) return undefined;
+  if (homeRoots.some(root => withinDir(written, root)) && !homeRoots.some(root => withinDir(real, root))) return { why: 'outside' };
+  if (homeRoots.some(root => withinDir(root, real))) return { why: 'home' };
+  return undefined;
+}

@@ -390,5 +390,189 @@
   ],
   "storeDir": "/home/u/.copilot/session-state",
   "want": null
+ },
+ {
+  "agentDir": "/home/u/.copilot",
+  "target": "/home/u/.copilot",
+  "homeRoots": [
+   "/home/u"
+  ],
+  "want": null,
+  "note": "the agent folder is no link"
+ },
+ {
+  "agentDir": "/home/u/.copilot",
+  "target": "/home/u/dotfiles/copilot",
+  "homeRoots": [
+   "/home/u"
+  ],
+  "want": null,
+  "note": "linked within the home"
+ },
+ {
+  "agentDir": "/home/u/a/cp",
+  "target": "/home/u/b/cp",
+  "homeRoots": [
+   "/home/u"
+  ],
+  "want": null
+ },
+ {
+  "agentDir": "/home/u/.copilot",
+  "target": "/data/cop",
+  "homeRoots": [
+   "/home/u"
+  ],
+  "want": "outside",
+  "note": "~/.copilot linked out of the home"
+ },
+ {
+  "agentDir": "/home/u/cp",
+  "target": "/tmp/out",
+  "homeRoots": [
+   "/home/u"
+  ],
+  "want": "outside",
+  "note": "COPILOT_HOME set inside the home, linked out of it"
+ },
+ {
+  "agentDir": "/home/u/.copilot",
+  "target": "/home/bob/.copilot",
+  "homeRoots": [
+   "/home/u"
+  ],
+  "want": "outside",
+  "note": "another user's home"
+ },
+ {
+  "agentDir": "/home/u/.copilot",
+  "target": "/home/u2/.copilot",
+  "homeRoots": [
+   "/home/u"
+  ],
+  "want": "outside",
+  "note": "a sibling sharing a prefix"
+ },
+ {
+  "agentDir": "/home/u/.copilot",
+  "target": "/",
+  "homeRoots": [
+   "/home/u"
+  ],
+  "want": "outside",
+  "note": "above the home: outside it"
+ },
+ {
+  "agentDir": "/home/u/.copilot",
+  "target": "/home",
+  "homeRoots": [
+   "/home/u"
+  ],
+  "want": "outside"
+ },
+ {
+  "agentDir": "/home/u/.copilot",
+  "target": "/home/u/.aws",
+  "homeRoots": [
+   "/home/u"
+  ],
+  "want": "sensitive"
+ },
+ {
+  "agentDir": "/home/u/.copilot",
+  "target": "/home/u/.SSH/cop",
+  "homeRoots": [
+   "/home/u"
+  ],
+  "want": "sensitive",
+  "note": "sinks are case-insensitive"
+ },
+ {
+  "agentDir": "/home/u/.copilot",
+  "target": "/home/u",
+  "homeRoots": [
+   "/home/u"
+  ],
+  "want": "home"
+ },
+ {
+  "agentDir": "/opt/cop",
+  "target": "/opt/cop",
+  "homeRoots": [
+   "/home/u"
+  ],
+  "want": null,
+  "note": "COPILOT_HOME outside the home: the place the user chose"
+ },
+ {
+  "agentDir": "/opt/cop",
+  "target": "/data/cop",
+  "homeRoots": [
+   "/home/u"
+  ],
+  "want": null,
+  "note": "...wherever its link leads"
+ },
+ {
+  "agentDir": "/opt/cop",
+  "target": "/home/u/.aws",
+  "homeRoots": [
+   "/home/u"
+  ],
+  "want": "sensitive"
+ },
+ {
+  "agentDir": "/opt/cop",
+  "target": "/home/u",
+  "homeRoots": [
+   "/home/u"
+  ],
+  "want": "home"
+ },
+ {
+  "agentDir": "/opt/cop",
+  "target": "/",
+  "homeRoots": [
+   "/home/u"
+  ],
+  "want": "home",
+  "note": "a folder above the home"
+ },
+ {
+  "agentDir": "/etc/copilot",
+  "target": "/etc/copilot",
+  "homeRoots": [
+   "/home/u"
+  ],
+  "want": "sensitive",
+  "note": "a sensitive location even as written"
+ },
+ {
+  "agentDir": "/link/u/.copilot",
+  "target": "/real/u/.copilot",
+  "homeRoots": [
+   "/link/u",
+   "/real/u"
+  ],
+  "want": null,
+  "note": "a linked home, resolved spelling"
+ },
+ {
+  "agentDir": "/link/u/.copilot",
+  "target": "/data/c",
+  "homeRoots": [
+   "/link/u",
+   "/real/u"
+  ],
+  "want": "outside"
+ },
+ {
+  "agentDir": "/link/u/.copilot",
+  "target": "/real/u",
+  "homeRoots": [
+   "/link/u",
+   "/real/u"
+  ],
+  "want": "home"
  }
 ]
