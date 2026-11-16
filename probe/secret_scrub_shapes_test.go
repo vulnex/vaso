@@ -30,9 +30,10 @@ func scrubAll(t *testing.T, files map[string]string, secrets []string) (*collect
 			}
 		}
 	}
+	// judged as the CLI reads them: escapes decoded
 	for v, d := range c.disguised {
-		if verdictsOf(d) != verdictsOf(v) {
-			t.Errorf("%q → %q: verdicts %+v → %+v", v, d, verdictsOf(v), verdictsOf(d))
+		if verdictsOf(unescapeValue(d)) != verdictsOf(unescapeValue(v)) {
+			t.Errorf("%q → %q: verdicts %+v → %+v", v, d, verdictsOf(unescapeValue(v)), verdictsOf(unescapeValue(d)))
 		}
 	}
 	return c, out

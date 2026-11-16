@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { isPlaceholderSecret, isSecretReference } from './patterns.js';
 import { WEAK_PATTERNS } from '../checks/config/cfg-009-default-credentials.js';
 import { isKnownSecretValue } from '../analyzers/secret-values.js';
+import { parseYamlSafe } from './yaml-safe.js';
 
 /**
  * The probe disguises secrets in collected config files (probe/secret_scrub.go)
@@ -13,9 +14,13 @@ import { isKnownSecretValue } from '../analyzers/secret-values.js';
  */
 describe('probe secret-verdict corpus', () => {
   const cases = JSON.parse(readFileSync(join(__dirname, '..', '..', 'probe', 'testdata', 'secret-verdicts.json'), 'utf-8')) as
-    Array<{ value: string; placeholder: boolean; weak: boolean; reference: boolean; token?: boolean }>;
+    Array<{ value: string; escaped?: string; placeholder: boolean; weak: boolean; reference: boolean; token?: boolean }>;
 
   it.each(cases)('$value', (c) => {
+    // written in escapes: what the config parsers read is the value judged
+    if (c.escaped !== undefined) {
+      expect((parseYamlSafe(`v: "${c.escaped}"`) as { v: string }).v).toBe(c.value);
+    }
     expect({
       placeholder: isPlaceholderSecret(c.value),
       weak: WEAK_PATTERNS.some(p => p.test(c.value)),

@@ -99,11 +99,27 @@ func TestSecretVerdictsMatchCLI(t *testing.T) {
 		Value                        string
 		Placeholder, Weak, Reference bool
 		Token                        *bool
+		// the value written in escapes, as a JSON/YAML/TOML string holds it:
+		// judged decoded, and its stand-in decodes to a value judged the same
+		Escaped string
 	}
 	if err := json.Unmarshal(raw, &cases); err != nil {
 		t.Fatal(err)
 	}
 	for _, c := range cases {
+		if c.Escaped != "" {
+			if got := unescapeValue(c.Escaped); got != c.Value {
+				t.Errorf("unescapeValue(%q) = %q, the CLI reads %q", c.Escaped, got, c.Value)
+			}
+			for i := 0; i < 20; i++ {
+				col := &collector{}
+				d := col.disguiseKeyed("password", c.Escaped)
+				escapesKept(t, c.Escaped, c.Escaped, d)
+				if verdictsOf(unescapeValue(d)) != verdictsOf(c.Value) {
+					t.Fatalf("disguise(%q) = %q (%q) is judged differently from %q", c.Escaped, d, unescapeValue(d), c.Value)
+				}
+			}
+		}
 		if got := isPlaceholderSecret(c.Value); got != c.Placeholder {
 			t.Errorf("isPlaceholderSecret(%q) = %v, CLI says %v", c.Value, got, c.Placeholder)
 		}

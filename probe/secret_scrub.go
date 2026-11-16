@@ -524,16 +524,17 @@ func namedInterpolation(core string) bool {
 
 // worthDisguising: something a credential could be, that isn't already a
 // placeholder, a reference, a URL or a PEM block.
+// It is judged as the CLI reads it: "\u0041…" in a JSON string is "A…".
 func worthDisguising(core string) bool {
+	return disguisable(unescapeValue(core))
+}
+
+// disguisable is worthDisguising for a decoded value.
+func disguisable(core string) bool {
 	if core == "" || enumLike.MatchString(core) || strings.Contains(core, "://") || strings.Contains(core, "-----BEGIN") {
 		return false
 	}
-	if namedInterpolation(core) {
-		return false
-	}
-	// judged as the CLI reads it: "\u0041…" in a JSON string is "A…", no path
-	judged := unescapeValue(core)
-	if isPlaceholderSecret(judged) || isSecretReference(judged) {
+	if namedInterpolation(core) || isPlaceholderSecret(core) || isSecretReference(core) {
 		return false
 	}
 	for i := 0; i < len(core); i++ {
@@ -644,39 +645,134 @@ func splitsIntoWords(p string) bool {
 }
 
 // unescapeValue decodes the backslash escapes of a JSON/TOML/YAML
-// double-quoted string (\uXXXX, \/, \", \n …) for judging; a value without
-// a backslash is returned as is.
+// double-quoted string (\uXXXX, \xNN, \UXXXXXXXX, \/, \", \n …) for
+// judging; a value without a backslash is returned as is.
 func unescapeValue(v string) string {
+	d, _ := decodeEscapes(v)
+	return d
+}
+
+// escUnit is one piece of a value as written — a byte, or a backslash
+// escape — and what it decodes to.
+type escUnit struct {
+	raw, decoded string
+	// a hex escape (A, \x61, \U00000041) of an ASCII letter or digit:
+	// disguised like that character and written back as an escape of the
+	// same kind and width
+	alnum bool
+}
+
+// decodeEscapes decodes the backslash escapes of v (see unescapeValue) and
+// returns the units it is written in, nil when v holds no backslash. A
+// surrogate pair (😀) is one unit. \b and \f decode to a space,
+// as whitespace the CLI's \s sees.
+func decodeEscapes(v string) (string, []escUnit) {
 	if !strings.Contains(v, "\\") {
-		return v
+		return v, nil
 	}
+	var units []escUnit
 	var b strings.Builder
-	for i := 0; i < len(v); i++ {
+	hexAt := func(i, n int) (rune, bool) {
+		if i+n > len(v) {
+			return 0, false
+		}
+		x, err := strconv.ParseUint(v[i:i+n], 16, 32)
+		return rune(x), err == nil
+	}
+	for i := 0; i < len(v); {
 		if v[i] != '\\' || i+1 >= len(v) {
+			units = append(units, escUnit{raw: v[i : i+1], decoded: v[i : i+1]})
 			b.WriteByte(v[i])
+			i++
 			continue
 		}
-		i++
-		switch v[i] {
+		n := 2
+		var dec string
+		hex := false
+		switch v[i+1] {
 		case 'u':
-			if i+4 < len(v) {
-				if n, err := strconv.ParseUint(v[i+1:i+5], 16, 32); err == nil {
-					b.WriteRune(rune(n))
-					i += 4
-					continue
+			if r, ok := hexAt(i+2, 4); ok && v[i+2] != '+' && v[i+2] != '-' {
+				n, hex = 6, true
+				if r >= 0xD800 && r <= 0xDBFF && strings.HasPrefix(v[i+6:], "\\u") {
+					if lo, ok := hexAt(i+8, 4); ok && lo >= 0xDC00 && lo <= 0xDFFF {
+						r, n, hex = 0x10000+(r-0xD800)<<10+(lo-0xDC00), 12, false
+					}
 				}
+				dec = string(r)
+			} else {
+				dec = "u"
 			}
-			b.WriteString("\\u")
+		case 'U':
+			if r, ok := hexAt(i+2, 8); ok && v[i+2] != '+' && v[i+2] != '-' && utf8.ValidRune(r) {
+				n, hex, dec = 10, true, string(r)
+			} else {
+				dec = "U"
+			}
+		case 'x':
+			if r, ok := hexAt(i+2, 2); ok && v[i+2] != '+' && v[i+2] != '-' {
+				n, hex, dec = 4, true, string(r)
+			} else {
+				dec = "x"
+			}
 		case 'n':
-			b.WriteByte('\n')
+			dec = "\n"
 		case 't':
-			b.WriteByte('\t')
+			dec = "\t"
 		case 'r':
-			b.WriteByte('\r')
+			dec = "\r"
 		case 'b', 'f':
-			b.WriteByte(' ')
+			dec = " "
 		default:
-			b.WriteByte(v[i])
+			dec = v[i+1 : i+2]
+		}
+		units = append(units, escUnit{raw: v[i : i+n], decoded: dec, alnum: hex && len(dec) == 1 && isASCIIAlnum(dec[0])})
+		b.WriteString(dec)
+		i += n
+	}
+	return b.String(), units
+}
+
+// heldBytes marks the bytes of a decoded value that a stand-in keeps: those
+// of an escape other than a letter or digit's (\n, \", \\, é, an emoji).
+func heldBytes(units []escUnit, n int) []bool {
+	if units == nil {
+		return nil
+	}
+	held := make([]bool, n)
+	off := 0
+	for _, u := range units {
+		if u.raw != u.decoded && !u.alnum {
+			for k := off; k < off+len(u.decoded) && k < n; k++ {
+				held[k] = true
+			}
+		}
+		off += len(u.decoded)
+	}
+	return held
+}
+
+// encodeLike writes a stand-in drawn for a decoded value back in the form
+// the value was written in: a character that changed where an escape stood
+// becomes an escape of the same kind, width and hex case; what didn't
+// change is written as it was.
+func encodeLike(units []escUnit, standIn string) string {
+	var b strings.Builder
+	off := 0
+	for _, u := range units {
+		d := standIn[off : off+len(u.decoded)]
+		off += len(u.decoded)
+		switch {
+		case d == u.decoded:
+			b.WriteString(u.raw)
+		case u.alnum:
+			digits := strconv.FormatUint(uint64(d[0]), 16)
+			digits = strings.Repeat("0", len(u.raw)-2-len(digits)) + digits
+			if strings.ContainsAny(u.raw[2:], "ABCDEF") {
+				digits = strings.ToUpper(digits)
+			}
+			b.WriteString(u.raw[:2] + digits)
+		default:
+			b.WriteString(d)
 		}
 	}
 	return b.String()
@@ -750,36 +846,6 @@ func escapeMask(s string) []bool {
 		i += n - 1
 	}
 	return mask
-}
-
-// alignToEscapes widens the kept head (pre) and tail (suf) of core so that
-// neither ends inside a backslash escape: a stand-in drawn from part of
-// \u00e9 or \x61 would no longer parse. A head and tail that would then
-// meet keep the head only, and nothing is kept of a value all head.
-func alignToEscapes(core string, pre, suf int) (int, int) {
-	if !strings.Contains(core, "\\") {
-		return pre, suf
-	}
-	for i := 0; i < len(core); i++ {
-		if core[i] != '\\' {
-			continue
-		}
-		n := escapeLen(core, i)
-		if i < pre && i+n > pre {
-			pre = i + n
-		}
-		if start := len(core) - suf; suf > 0 && i < start && i+n > start {
-			suf = len(core) - i
-		}
-		i += n - 1
-	}
-	if pre+suf >= len(core) {
-		suf = 0
-	}
-	if pre >= len(core) {
-		pre = 0
-	}
-	return pre, suf
 }
 
 func randIndex(n int) int {
@@ -1213,27 +1279,39 @@ func (c *collector) disguiseAs(v string, passphrase, keyed bool) string {
 		}
 		return d
 	}
-	lead, core := "", v
+	lead, raw := "", v
 	if m := authSchemePrefix.FindStringIndex(v); m != nil {
-		lead, core = v[:m[1]], v[m[1]:]
+		lead, raw = v[:m[1]], v[m[1]:]
 	}
-	if !worthDisguising(core) && !(passphrase && (passphraseLike(core) || shortSecret(core))) && !(keyed && lowercaseToken(core)) {
+	// The stand-in is drawn for the value as the CLI reads it — escapes
+	// decoded: a key written all in \u escapes is a key, "\x50\x61ss…" a
+	// weak password — and written back in the value's own escapes
+	core, units := decodeEscapes(raw)
+	if !disguisable(core) && !(passphrase && (passphraseLike(core) || shortSecret(core))) && !(keyed && lowercaseToken(core)) {
 		return v
 	}
+	// a PEM's armor line (the body is pemBody's): the finding, no secret
+	if pemArmor.MatchString(strings.Trim(core, "\"' \t")) {
+		return v
+	}
+	held := heldBytes(units, len(core))
 	pre, suf := keepBounds(len(core))
 	if tokenFormats(core) != 0 {
 		if p := len(knownTokenPrefix.FindString(core)); p > pre && p < len(core)-suf {
 			pre = p
 		}
 	}
-	pre, suf = alignToEscapes(core, pre, suf)
 	head, mid, tail := core[:pre], core[pre:len(core)-suf], core[len(core)-suf:]
+	var midHeld []bool
+	if held != nil {
+		midHeld = held[pre : len(core)-suf]
+	}
 	// Every verdict a check reaches must hold for the stand-in (drawn again
 	// until it does, a bounded number of times); a CFG-009 match
 	// ("12345678", "password") that makes the value weak stays, one match
 	// only, moved to a random place of its run clear of the kept head and
 	// tail — next to the head it would show more of the value than reports do.
-	want := verdictsOf(v)
+	want := verdictsOf(lead + core)
 	spans := [][2]int{{-1, -1}}
 	if want.weak {
 		spans = append(weakSpans(core, pre, suf), spans...)
@@ -1248,6 +1326,9 @@ func (c *collector) disguiseAs(v string, passphrase, keyed bool) string {
 				m, fixed, ok := relocateWeak(core, mid, pre, suf, sp)
 				if !ok {
 					break
+				}
+				for i, h := range midHeld {
+					fixed[i] = fixed[i] || h
 				}
 				if cand := lead + head + arrangeLike(lead, head+tail, m, fixed, coarse) + tail; verdictsOf(cand) == want {
 					out = cand
@@ -1264,12 +1345,16 @@ func (c *collector) disguiseAs(v string, passphrase, keyed bool) string {
 	// no arrangement keeps every verdict: an independent random character of
 	// each class, still judged like the value
 	for try := 0; try < 64 && out == ""; try++ {
-		if cand := lead + head + randomLike(mid, nil) + tail; verdictsOf(cand) == want {
+		if cand := lead + head + randomLike(mid, midHeld) + tail; verdictsOf(cand) == want {
 			out = cand
 		}
 	}
 	if out == "" {
-		out = lead + head + randomLike(mid, nil) + tail
+		out = lead + head + randomLike(mid, midHeld) + tail
+	}
+	decodedOut := out[len(lead):]
+	if units != nil {
+		out = lead + encodeLike(units, decodedOut)
 	}
 	if c.disguised == nil {
 		c.disguised = map[string]string{}
@@ -1278,9 +1363,29 @@ func (c *collector) disguiseAs(v string, passphrase, keyed bool) string {
 	c.disguised[out] = out // idempotent: a later pass over the same text keeps it
 	if c.inFile != nil {
 		c.inFile[v] = out
+		// a plain copy of an escaped value elsewhere in the file
+		if units != nil {
+			c.inFile[core] = decodedOut
+		}
 	}
 	return out
 }
+
+// hexEscaped: v holds a \u, \U or \x escape — text whose windows repeat
+// (\u00…), so a copy of part of it can't be told from the stand-in's kept
+// head; disguiseCopies leaves it to the decoded value.
+func hexEscaped(v string) bool {
+	_, units := decodeEscapes(v)
+	for _, u := range units {
+		if len(u.raw) > 2 && u.raw[1] != '\\' && u.raw != u.decoded {
+			return true
+		}
+	}
+	return false
+}
+
+// pemArmor is a PEM's BEGIN or END line.
+var pemArmor = regexp.MustCompile(`^-----(?:BEGIN|END) [A-Z0-9 ]+-----$`)
 
 // strongCredentialKey: a key that names a password or secret itself
 // (password, db_passwd, pwd, passphrase, client_secret, secretKey) — not one
@@ -2257,7 +2362,7 @@ func (c *collector) disguiseEmails(s string) string {
 // into a note) gets the stand-in's characters at the same offsets.
 func (c *collector) disguiseCopies(s string) string {
 	for v, d := range c.inFile {
-		if len(v) < 24 || v == d || len(d) != len(v) {
+		if len(v) < 24 || v == d || len(d) != len(v) || hexEscaped(v) {
 			continue
 		}
 		for from := 8; from+16 <= len(v); from += 8 {
@@ -2445,43 +2550,49 @@ func tomlKeyParts(key string) []string {
 
 // secretContainers disguises the strings of an array or inline table under
 // a secretContainerKey (JSON, JSON5, TOML): array items, and table values
-// whose own key names no credential. Nested containers are walked over.
+// whose own key names no credential. Deeper down, a value/secret/data key
+// under any credential-named key ("credentials": {"primary": {"value": …}},
+// "auth": {"value": …}) holds the credential.
 func (c *collector) secretContainers(s string, toml bool) string {
 	var b []byte
+	set := func(sp containerString, out string) {
+		if b == nil {
+			b = []byte(s)
+		}
+		copy(b[sp.from:sp.to], out)
+	}
 	for _, g := range containerOpen.FindAllStringSubmatchIndex(s, -1) {
 		m := submatch{s, g}
 		key, _ := m.first(2, 3, 4)
 		if headerMapKey.MatchString(key) && s[g[12]] == '{' {
 			// headers: {"X-Custom": "<random>"}: a header no rule names
 			for _, sp := range containerStrings(s, g[12], toml) {
-				if value := s[sp.from:sp.to]; !isSecretKeyName(sp.key) && looksRandom(value, 16) {
-					if b == nil {
-						b = []byte(s)
-					}
-					copy(b[sp.from:sp.to], c.disguise(value))
+				if value := s[sp.from:sp.to]; sp.depth == 1 && !isSecretKeyName(sp.key) && looksRandom(value, 16) {
+					set(sp, c.disguise(value))
 				}
 			}
 			continue
 		}
-		if !secretContainerKey(key) {
+		container := secretContainerKey(key)
+		if !container && !strongCredentialKey(key) {
 			continue
 		}
 		for _, sp := range containerStrings(s, g[12], toml) {
-			name := key
-			if s[g[12]] == '{' {
+			name := ""
+			switch {
+			case sp.key != "" && valueChildName.MatchString(sp.key):
+				name = key
+			case sp.depth > 1 || !container:
+			case s[g[12]] == '{':
 				name = containerChildKey(key, sp.key)
+			default:
+				name = key
 			}
 			value := s[sp.from:sp.to]
-			if name == "" {
+			if name == "" || !keyedSecret(name, value) {
 				continue
 			}
-			if !keyedSecret(name, value) {
-				continue
-			}
-			if b == nil {
-				b = []byte(s)
-			}
-			copy(b[sp.from:sp.to], c.disguiseKeyed(name, value))
+			set(sp, c.disguiseKeyed(name, value))
 		}
 	}
 	if b == nil {
@@ -2490,19 +2601,34 @@ func (c *collector) secretContainers(s string, toml bool) string {
 	return string(b)
 }
 
+// valueChildName: the key that holds the credential itself in a mapping
+// under a credential name (credentials.primary.value, auth.secret).
+var valueChildName = regexp.MustCompile(`(?i)^(?:value|secret|data)$`)
+
 type containerString struct {
 	from, to int
 	key      string // the value's own key in a table, "" in an array
+	depth    int    // 1 directly inside the container, 2 a level below …
 }
 
-// containerStrings returns the string values directly inside the array or
-// table opening at open: every string of an array, the values (after : or
-// =) of a table. Comments are skipped; an unterminated string, a TOML
-// multi-line string or more than 64 KiB of text ends the walk.
+// containerStrings returns the string values inside the array or table
+// opening at open, at any depth: every string of an array, the values
+// (after : or =) of a table, each with its own key and depth. Comments are
+// skipped; an unterminated string, a TOML multi-line string or more than
+// 64 KiB of text ends the walk.
 func containerStrings(s string, open int, toml bool) []containerString {
 	var out []containerString
-	array := s[open] == '['
-	depth, afterSep, key := 0, false, ""
+	type level struct {
+		array, afterSep bool
+		key             string
+	}
+	var stack []level
+	top := func() *level {
+		if len(stack) == 0 {
+			return &level{}
+		}
+		return &stack[len(stack)-1]
+	}
 	limit := open + 64<<10
 	for i := open; i < len(s) && i < limit; i++ {
 		switch ch := s[i]; {
@@ -2519,27 +2645,31 @@ func containerStrings(s string, open int, toml bool) []containerString {
 			if end >= len(s) || s[end] != ch {
 				return out
 			}
-			if depth == 1 {
-				if array || afterSep {
-					out = append(out, containerString{i + 1, end, key})
+			if l := top(); len(stack) > 0 {
+				if l.array {
+					out = append(out, containerString{i + 1, end, "", len(stack)})
+				} else if l.afterSep {
+					out = append(out, containerString{i + 1, end, l.key, len(stack)})
 				} else {
-					key = s[i+1 : end]
+					l.key = s[i+1 : end]
 				}
-				afterSep = false
+				l.afterSep = false
 			}
 			i = end
 		case ch == '[' || ch == '{':
-			depth++
-			afterSep = false
+			top().afterSep = false
+			stack = append(stack, level{array: ch == '['})
 		case ch == ']' || ch == '}':
-			depth--
-			if depth == 0 {
+			stack = stack[:len(stack)-1]
+			if len(stack) == 0 {
 				return out
 			}
 		case ch == ':' || ch == '=':
-			afterSep = depth == 1
+			if l := top(); !l.array {
+				l.afterSep = true
+			}
 		case ch == ',' || ch == '\n':
-			afterSep = false
+			top().afterSep = false
 		case ch == '#' && toml, ch == '/' && i+1 < len(s) && s[i+1] == '/':
 			for i < len(s) && s[i] != '\n' {
 				i++
@@ -2551,12 +2681,12 @@ func containerStrings(s string, open int, toml bool) []containerString {
 				return out
 			}
 			i += j + 3
-		case depth == 1 && !array && !afterSep && (isASCIIAlnum(ch) || ch == '_' || ch == '$'):
+		case len(stack) > 0 && !top().array && !top().afterSep && (isASCIIAlnum(ch) || ch == '_' || ch == '$'):
 			j := i
 			for j < len(s) && (isASCIIAlnum(s[j]) || strings.IndexByte("_$-.", s[j]) >= 0) {
 				j++
 			}
-			key = s[i:j]
+			top().key = s[i:j]
 			i = j - 1
 		}
 	}
@@ -2595,10 +2725,15 @@ func (c *collector) yamlNested(s string) string {
 	// "? key" waiting for its ": value" line
 	explicitKey, explicitIndent := "", -1
 	offset := 0
+	// lines a multi-line plain scalar read below took
+	skipTo := 0
 	lines := strings.SplitAfter(s, "\n")
 	for li, raw := range lines {
 		lineStart := offset
 		offset += len(raw)
+		if li < skipTo {
+			continue
+		}
 		line := strings.TrimRight(raw, "\r\n")
 		bom := len(line) - len(strings.TrimPrefix(line, "\xef\xbb\xbf"))
 		body := strings.TrimLeft(line[bom:], " \t")
@@ -2672,6 +2807,23 @@ func (c *collector) yamlNested(s string) string {
 		if isKey {
 			p, ok := parent(false)
 			valueAt := bodyAt + len(body) - len(value)
+			// the name a value under key is judged by: key's own, or the
+			// secrets container's it sits in ("" when it names a setting)
+			name := key
+			if !isSecretKeyName(key) && ok && p.secrets != "" {
+				name = containerChildKey(p.secrets, key)
+			}
+			// a plain scalar going on over the deeper lines below
+			if plainStart(value) {
+				more, n := continuationLines(lines[li+1:], offset, indent, false)
+				if len(more) > 0 {
+					parts := append([]scalarLine{{valueAt, strings.TrimRight(value, " \t"), 0}}, more...)
+					if c.disguiseLines(b, name, parts, 0, 0) {
+						skipTo = li + 1 + n
+						continue
+					}
+				}
+			}
 			// &anchor / !!tag alone: the value is on the lines below
 			props := strings.TrimSpace(yamlProps.ReplaceAllString(value+" ", ""))
 			switch {
@@ -2685,6 +2837,14 @@ func (c *collector) yamlNested(s string) string {
 				stack = append(stack, frame{indent, key, secrets})
 			case value[0] == '|' || value[0] == '>':
 				blockIndent = indent
+				// a credential written over several lines (one line is yamlBlock's)
+				header := strings.Fields(value)[0]
+				chomp := byte(0)
+				if i := strings.IndexAny(header, "-+"); i >= 0 {
+					chomp = header[i]
+				}
+				parts, _ := continuationLines(lines[li+1:], offset, indent, true)
+				c.disguiseLines(b, name, parts, value[0], chomp)
 			case ok && !isSecretKeyName(key) && p.secrets != "":
 				disguiseAt(valueAt, containerChildKey(p.secrets, key), value)
 			case ok && !isSecretKeyName(key) && headerMapKey.MatchString(p.key):
@@ -2705,6 +2865,17 @@ func (c *collector) yamlNested(s string) string {
 		if !ok || !isSecretKeyName(p.key) || strings.Contains(body, ": ") || strings.ContainsAny(body[:1], "{[|>&*!") {
 			continue
 		}
+		// …or the first line of a plain scalar written over several
+		if plainStart(body) {
+			more, n := continuationLines(lines[li+1:], offset, p.indent, false)
+			if len(more) > 0 {
+				parts := append([]scalarLine{{bodyAt, strings.TrimRight(body, " \t"), 0}}, more...)
+				if c.disguiseLines(b, p.key, parts, 0, 0) {
+					skipTo = li + 1 + n
+				}
+				continue
+			}
+		}
 		if next := nextContentLine(lines[li+1:]); next != "" {
 			if nb := strings.TrimLeft(next, " \t"); len(next)-len(nb) >= indent {
 				continue
@@ -2713,6 +2884,109 @@ func (c *collector) yamlNested(s string) string {
 		disguiseAt(bodyAt, p.key, body)
 	}
 	return string(b)
+}
+
+// scalarLine is one line of a scalar written over several: where its text
+// starts in the file, the text, and how many blank lines come before it.
+type scalarLine struct {
+	at     int
+	text   string
+	blanks int
+}
+
+// plainStart: v (the rest of a line) can start a plain scalar that goes on
+// over the next lines — not quoted, a flow collection, an alias, a tag,
+// anchor or block header, and no comment ends it.
+func plainStart(v string) bool {
+	return v != "" && !strings.ContainsAny(v[:1], "\"'{[|>&*!#%@`") && !strings.Contains(v, " #")
+}
+
+// continuationLines returns the lines of rest (rest starting at file offset
+// at) that continue a scalar under a key indented by keyIndent: those deeper
+// than it, and how many lines of rest they take. A plain scalar ends at a
+// comment, a key or a sequence item; a block scalar's lines (| or >) are
+// read from its indentation.
+func continuationLines(rest []string, at, keyIndent int, block bool) ([]scalarLine, int) {
+	var out []scalarLine
+	taken, blanks, blockIndent := 0, 0, -1
+	for i, raw := range rest {
+		lineAt := at
+		at += len(raw)
+		line := strings.TrimRight(raw, "\r\n")
+		body := strings.TrimLeft(line, " \t")
+		if body == "" {
+			blanks++
+			continue
+		}
+		indent := len(line) - len(body)
+		if indent <= keyIndent {
+			break
+		}
+		if block {
+			if blockIndent < 0 {
+				blockIndent = indent
+			}
+			if indent < blockIndent {
+				break
+			}
+			body, indent = line[blockIndent:], blockIndent
+		} else if body[0] == '#' || strings.Contains(body, ": ") || strings.HasSuffix(body, ":") || strings.Contains(body, " #") || body == "-" || strings.HasPrefix(body, "- ") {
+			break
+		}
+		out = append(out, scalarLine{lineAt + indent, strings.TrimRight(body, " \t"), blanks})
+		blanks = 0
+		taken = i + 1
+	}
+	return out, taken
+}
+
+// disguiseLines disguises a credential written over several lines under
+// name — a plain scalar (style 0) or a | or > block — as the one value the
+// CLI reads (lines folded into spaces, or kept as line breaks), each line
+// getting its part of the stand-in. Lines of words (a description) are
+// prose, no credential, and are left.
+func (c *collector) disguiseLines(b []byte, name string, parts []scalarLine, style, chomp byte) bool {
+	if !isSecretKeyName(name) || len(parts) < 2 {
+		return false
+	}
+	var joined, flat strings.Builder
+	offs := make([]int, len(parts))
+	for i, p := range parts {
+		if strings.ContainsAny(p.text, " \t") {
+			return false
+		}
+		if i > 0 {
+			switch {
+			case style == '|':
+				joined.WriteString(strings.Repeat("\n", 1+p.blanks))
+			case p.blanks > 0:
+				joined.WriteString(strings.Repeat("\n", p.blanks))
+			default:
+				joined.WriteByte(' ')
+			}
+		}
+		offs[i] = joined.Len()
+		joined.WriteString(p.text)
+		flat.WriteString(p.text)
+	}
+	value := joined.String()
+	if style != 0 && chomp != '-' {
+		value += "\n"
+	}
+	if !keyedSecret(name, strings.TrimRight(value, "\n")) && !(strongCredentialKey(name) && plainCredential(flat.String())) {
+		return false
+	}
+	out := c.disguiseKeyed(name, value)
+	if out == value && strongCredentialKey(name) {
+		out = c.disguiseArgv(value)
+	}
+	if out == value || len(out) != len(value) {
+		return false
+	}
+	for i, p := range parts {
+		copy(b[p.at:p.at+len(p.text)], out[offs[i]:offs[i]+len(p.text)])
+	}
+	return true
 }
 
 // nextContentLine is the first line of lines that isn't blank or a comment.
