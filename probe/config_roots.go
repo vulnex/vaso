@@ -549,12 +549,30 @@ func (c *collector) followLinkedMetadata(snapshot *ProbeSnapshot, pattern string
 			continue
 		}
 		home := c.homeOf(m)
-		if home == "" || !inHomeOutsideStores(m, home) {
+		if home == "" {
+			continue
+		}
+		if !inHomeOutsideStores(m, home) {
+			// A file link in a followed folder that leads into a credential
+			// store or out of the home: recorded like a link directly in the
+			// store — its links (names, targets) and its mode, never content —
+			// so the CLI judges it as a local scan does
+			if isSymlink(m) && inHomeOutsideStores(filepath.Dir(m), home) {
+				recordSymlink(snapshot.Symlinks, m)
+				c.recordLinkChain(snapshot, m)
+				c.collectPath(snapshot, m, globBase(pattern), true, false)
+			}
 			continue
 		}
 		recordSymlink(snapshot.Symlinks, m)
 		c.collectPath(snapshot, m, globBase(pattern), true, false)
 	}
+}
+
+// isSymlink: p itself is a symbolic link.
+func isSymlink(p string) bool {
+	info, err := os.Lstat(p)
+	return err == nil && info.Mode()&os.ModeSymlink != 0
 }
 
 // homeOf is the scanned home (or the probe user's) p lies strictly inside,

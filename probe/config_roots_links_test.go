@@ -140,3 +140,89 @@ func TestLinkedFoldersOfMetadataGlobsAreFollowedInsideTheHome(t *testing.T) {
 		}
 	}
 }
+
+// A file link in a followed in-home folder that leads into a credential
+// store or out of the home is recorded like a link directly in the store:
+// its link chain and its mode, never content — so remote judges it as local.
+func TestFileLinksBehindAFollowedMetadataFolderAreRecorded(t *testing.T) {
+	home := setupHome(t)
+	write(t, filepath.Join(home, "sess", "events.jsonl"), "SESSION-CANARY\n", 0o600)
+	write(t, filepath.Join(home, ".ssh", "id_canary"), "SSH-CANARY\n", 0o644)
+	outside := filepath.Join(filepath.Dir(home), "elsewhere")
+	write(t, filepath.Join(outside, "d.json"), "OUTSIDE-CANARY\n", 0o644)
+	mustSymlink(t, filepath.Join(home, ".ssh", "id_canary"), filepath.Join(home, "sess", "k.jsonl"))
+	mustSymlink(t, filepath.Join(outside, "d.json"), filepath.Join(home, "sess", "o.json"))
+	state := filepath.Join(home, ".copilot", "session-state")
+	mustSymlink(t, filepath.Join(home, "sess"), filepath.Join(state, "abc"))
+	snap := Collect(ProbeManifest{MetadataGlobPatterns: []string{"~/.copilot/session-state/*", "~/.copilot/session-state/*/*"}}, false)
+	for _, name := range []string{"k.jsonl", "o.json"} {
+		p := filepath.Join(state, "abc", name)
+		if e, ok := snap.Files[p]; !ok || !e.Exists || e.Mode != 0o644 || e.Content != "" {
+			t.Errorf("%s: %+v (recorded %v), want metadata", p, e, ok)
+		}
+		if _, ok := snap.Symlinks[p]; !ok {
+			t.Errorf("%s: link not recorded: %v", p, snap.Symlinks)
+		}
+		if _, ok := snap.Symlinks[filepath.Join(home, "sess", name)]; !ok {
+			t.Errorf("%s: chain not recorded: %v", name, snap.Symlinks)
+		}
+	}
+	for p, e := range snap.Files {
+		if strings.Contains(e.Content, "CANARY") {
+			t.Errorf("content shipped: %s", p)
+		}
+	}
+}
+
+// Every hop of a store link is recorded — of a link in a store
+// (session-state/abc → ~/hop → elsewhere) and of the store folder itself
+// (mcp-secrets → ~/hop2 → elsewhere) — so the CLI resolves both as locally.
+func TestStoreLinkChainsAreRecorded(t *testing.T) {
+	home := setupHome(t)
+	outside := filepath.Join(filepath.Dir(home), "elsewhere")
+	write(t, filepath.Join(outside, "s", "events.jsonl"), "OUTSIDE-CANARY\n", 0o644)
+	write(t, filepath.Join(outside, "m", "x.json"), "OUTSIDE-CANARY\n", 0o644)
+	state := filepath.Join(home, ".copilot", "session-state")
+	if err := os.MkdirAll(state, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	mustSymlink(t, filepath.Join(outside, "s"), filepath.Join(home, "hop"))
+	mustSymlink(t, filepath.Join(home, "hop"), filepath.Join(state, "abc"))
+	mustSymlink(t, filepath.Join(outside, "m"), filepath.Join(home, "hop2"))
+	mustSymlink(t, filepath.Join(home, "hop2"), filepath.Join(home, ".copilot", "mcp-secrets"))
+	snap := Collect(ProbeManifest{MetadataGlobPatterns: []string{
+		"~/.copilot/session-state/*", "~/.copilot/session-state/*/*",
+		"~/.copilot/mcp-secrets/*", "~/.copilot/mcp-secrets/*/*",
+	}}, false)
+	for _, p := range []string{filepath.Join(state, "abc"), filepath.Join(home, "hop"), filepath.Join(home, ".copilot", "mcp-secrets"), filepath.Join(home, "hop2")} {
+		if _, ok := snap.Symlinks[p]; !ok {
+			t.Errorf("hop %s not recorded: %v", p, snap.Symlinks)
+		}
+	}
+	if _, ok := snap.Files[filepath.Join(state, "abc", "events.jsonl")]; ok {
+		t.Errorf("file behind a chain out of the home recorded")
+	}
+}
+
+// A home that is a link is never recorded as a link (resolvedDirs says where
+// it resolves): every path spelled through it would resolve to the other
+// spelling, where the links below it aren't recorded.
+func TestLinkedHomeIsNotRecordedAsALink(t *testing.T) {
+	home := setupHome(t)
+	link := filepath.Join(filepath.Dir(home), "homelink")
+	mustSymlink(t, home, link)
+	t.Setenv("HOME", link)
+	write(t, filepath.Join(home, "notes.txt"), "x\n", 0o644)
+	state := filepath.Join(home, ".copilot", "session-state")
+	if err := os.MkdirAll(state, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	mustSymlink(t, link, filepath.Join(state, "abc"))
+	snap := Collect(ProbeManifest{MetadataGlobPatterns: []string{"~/*.txt", "~/.copilot/session-state/*", "~/.copilot/session-state/*/*"}}, false)
+	if _, ok := snap.Symlinks[link]; ok {
+		t.Errorf("the linked home recorded as a link: %v", snap.Symlinks)
+	}
+	if got := snap.Symlinks[filepath.Join(link, ".copilot", "session-state", "abc")]; got != link {
+		t.Errorf("store link %q, want %s", got, link)
+	}
+}
