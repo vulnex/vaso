@@ -118,6 +118,8 @@ const passphrase = () => Array.from({ length: 4 }, () => body(7, 'abcdefghijklmn
  * and entropy under 4.5 for prose, and so does the probe.
  */
 const generic = () => `${body(11)}${body(1, '0123456789')}!${body(14)}#${body(10)}`;
+/** A password of letters with a digit in it, nothing the shell would read. */
+const alnum = () => `${body(7)}${body(1, '0123456789')}${body(6)}`;
 
 /** A short random credential (12–15 characters with digits: the CLI flags it from 12). */
 const short = () => `${body(5)}${body(3, '0123456789')}${body(5)}`;
@@ -265,6 +267,26 @@ function jsonFile(label: string): string {
       // curl user:password as separate elements (rule 5); --pw/--pass take a password
       o: { command: 'curl', args: ['-u', `carol:${c('curl -u separate', lowerWord)}`, '--user', `dave:${c('curl --user separate', lowerWord)}`, `--proxy-user=p:${c('curl --proxy-user=', lowerWord)}`, 'https://x.example'] },
       p: { command: 'acme', args: ['--pw', c('lowercase --pw', lowerWord), '--pass', c('lowercase --pass', lowerWord)] },
+    },
+    // hook commands: passwords quoted the shell's way, nested in remote and
+    // shell commands (in the JSON text the double quotes are escaped)
+    hooks: {
+      PostToolUse: [{
+        matcher: 'Bash',
+        hooks: [
+          `mysql -p"${c('hook mysql -p"pw"', alnum)}" app`,
+          `mysql -p'${c("hook mysql -p'pw'", alnum)}' app`,
+          `sshpass -p "${c('hook sshpass -p "pw"', alnum)}" ssh x`,
+          `curl -u "adm:${c('hook curl -u "u:pw"', alnum)}" https://x.example`,
+          `mysql --password="${c('hook mysql --password="pw"', lowerWord)}" app`,
+          `MYSQL_PWD="${c('hook MYSQL_PWD="pw"', lowerWord)}" mysql app`,
+          `PGPASSWORD=${c('hook PGPASSWORD=pw', lowerWord)} psql -h db app`,
+          `ssh h 'mysql -p"${c('hook ssh \'mysql -p"pw"\'', alnum)}" app'`,
+          `ssh h "sshpass -p \\"${c('hook ssh "sshpass -p \\"pw\\""', alnum)}\\" ssh x"`,
+          `ssh h $'mysql -p${c("hook ssh $'mysql -ppw'", alnum)} app'`,
+          `ssh host "bash -c 'mysql -p${c('hook two levels', alnum)} app'"`,
+        ].map(command => ({ type: 'command', command })),
+      }],
     },
     api_key: c('all-lowercase api key', () => body(32, 'abcdefghijklmnopqrstuvwyz0123456789')),
     // a pasted curl command: JSON inside the string, its quotes escaped twice
