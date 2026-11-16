@@ -11,6 +11,7 @@ import {
   updateConfigValue,
   fixFirstConfig,
   restrictFilesToOwner,
+  fixEveryConfig,
 } from './config-writer.js';
 import type { ParsedConfig } from '../core/types.js';
 import { loadConfig } from '../core/config-loader.js';
@@ -355,6 +356,37 @@ describe('updateConfigValue dispatcher', () => {
     };
 
     await expect(updateConfigValue(config, 'key', 'val')).rejects.toThrow('Cannot write to config format');
+  });
+});
+
+describe('multi-file fixes with a file vaso fix won\'t write', () => {
+  it('fixEveryConfig writes the others and names the refused one; all refused → not applied, refused listed', async () => {
+    const { symlink } = await import('node:fs/promises');
+    const real = join(TEST_DIR, 'real.json');
+    const second = join(TEST_DIR, 'agent-config-code.json');
+    await writeFile(real, JSON.stringify({ loadExternalMcpConfigs: true }));
+    await writeFile(second, JSON.stringify({ loadExternalMcpConfigs: true }));
+    await symlink(real, join(TEST_DIR, 'config.json'));
+    const cfg = (filePath: string): ParsedConfig => ({ filePath, format: 'json', raw: '', data: { loadExternalMcpConfigs: true } });
+    const spec = { checkId: 'ABA-010', path: 'loadExternalMcpConfigs', value: false, message: 'Set loadExternalMcpConfigs to false' };
+    const r = await fixEveryConfig([cfg(join(TEST_DIR, 'config.json')), cfg(second)], spec);
+    expect(r).toMatchObject({ applied: true, refused: [join(TEST_DIR, 'config.json')] });
+    expect(r.message).toBe(`Set loadExternalMcpConfigs to false — not changed: ${join(TEST_DIR, 'config.json')} is a symlink`);
+    expect(JSON.parse(await readFile(second, 'utf-8'))).toEqual({ loadExternalMcpConfigs: false });
+    expect(JSON.parse(await readFile(real, 'utf-8'))).toEqual({ loadExternalMcpConfigs: true });
+    const none = await fixEveryConfig([cfg(join(TEST_DIR, 'config.json'))], spec);
+    expect(none).toMatchObject({ applied: false, refused: [join(TEST_DIR, 'config.json')] });
+    expect(none.alreadyDone).toBeFalsy();
+  });
+
+  it('restrictFilesToOwner lists refused paths, not other failures', async () => {
+    const { symlink } = await import('node:fs/promises');
+    const file = join(TEST_DIR, 'a.json');
+    await writeFile(file, '{}');
+    await chmod(file, 0o644);
+    await symlink(file, join(TEST_DIR, 'l.json'));
+    const r = await restrictFilesToOwner('POL-003', [join(TEST_DIR, 'l.json')]);
+    expect(r).toMatchObject({ applied: false, refused: [join(TEST_DIR, 'l.json')] });
   });
 });
 

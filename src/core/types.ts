@@ -394,6 +394,12 @@ export interface FixResult {
   alreadyDone?: boolean;
   /** Not attempted: a dry run, or declined at the prompt. */
   skipped?: boolean;
+  /** Paths the fix left because vaso fix won't change them (a symlink, a
+   *  hard link, outside the home, into a credential store — UnsafeTargetError). */
+  refused?: string[];
+  /** Nothing left that vaso fix may change: every path it left was named
+   *  "not changed by vaso fix" by the scan already. Not a failure. */
+  leftAsNoted?: boolean;
 }
 
 /**

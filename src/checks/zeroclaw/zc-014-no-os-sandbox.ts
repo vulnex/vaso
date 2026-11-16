@@ -2,7 +2,7 @@ import { defineCheck } from '../../core/check-builder.js';
 import type { Evidence } from '../../core/types.js';
 import { asRecord, effectiveProfiles, isFalse, mainConfig, profileLabel, writeMainConfig, type EffectiveProfile } from './zc-config.js';
 import type { KeyPath } from '../../core/utils.js';
-import { configFixTargets } from '../../remediation/fix-refusal.js';
+import { mainConfigFixTargets } from './zc-config.js';
 
 function backendNone(p: EffectiveProfile): boolean {
   return typeof p.profile.sandbox_backend === 'string' && p.profile.sandbox_backend.trim().toLowerCase() === 'none';
@@ -26,7 +26,7 @@ export const zc014 = defineCheck({
     'Detect a risk profile with sandbox_enabled=false or sandbox_backend="none" while [runtime] kind is native — shell and tool subprocesses run with no OS-level isolation (Landlock/Firejail/Bubblewrap/Docker/Seatbelt)',
   supportedAgents: ['zeroclaw'],
 
-  fixTargets: configFixTargets,
+  fixTargets: mainConfigFixTargets,
 
   async run(ctx, h) {
     const config = mainConfig(ctx.configs);

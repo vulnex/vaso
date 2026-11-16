@@ -1,7 +1,8 @@
 import { defineCheck } from '../../core/check-builder.js';
 import { hermesApiServer, hermesApiServerState, HERMES_API_DISABLED } from '../../adapters/hermes-api-server.js';
 import { CODING_AGENTS, type Evidence, type FixResult } from '../../core/types.js';
-import { fixFirstConfig } from '../../remediation/config-writer.js';
+import { fixFirstConfig, unlessRefused, withRefusals } from '../../remediation/config-writer.js';
+import type { UnsafeTargetError } from '../../remediation/safe-file.js';
 import { getNestedValue } from '../../core/utils.js';
 import { envOverridesOf } from '../../adapters/env-overrides.js';
 import { managedOverride } from '../../adapters/hermes-managed.js';
@@ -284,6 +285,9 @@ export const cfg001 = defineCheck({
   async fix(ctx) {
     const done: string[] = [];
     const remaining: string[] = [];
+    // A file vaso fix won't write (a symlinked openclaw.json a sub-agent
+    // shares) is left and named; the others are still rewritten
+    const refused: UnsafeTargetError[] = [];
     const inContainer = ctx.installation.agent === 'openclaw' ? await containerEnvironment(ctx.fs) : undefined;
     for (const config of ctx.configs) {
       let result: FixResult | undefined;
@@ -297,9 +301,9 @@ export const cfg001 = defineCheck({
       });
       if (symbolic) {
         rewritten.add(symbolic);
-        result = await fixFirstConfig([config], {
+        result = await unlessRefused(refused, () => fixFirstConfig([config], {
           checkId: 'CFG-001', path: symbolic, value: 'loopback', message: `Set ${symbolic} to "loopback"`,
-        });
+        }));
       } else {
         const hostPath = HOST_PATHS.find(p => getNestedValue(config.data, p) != null);
         const host = hostPath ? getNestedValue(config.data, hostPath) : undefined;
@@ -308,13 +312,13 @@ export const cfg001 = defineCheck({
         const overridden = ctx.installation.agent === 'picoclaw' && !!picoclawPublicLauncher(ctx.configs);
         if (!fromEnv && !overridden && typeof host === 'string' && host.split(',').some(p => p.trim() !== '' && isWildcardAddress(p))) {
           rewritten.add(hostPath!);
-          result = await fixFirstConfig([config], {
+          result = await unlessRefused(refused, () => fixFirstConfig([config], {
             checkId: 'CFG-001',
             env: hostPath === 'GATEWAY_HOST' ? 'GATEWAY_HOST' : undefined,
             path: hostPath === 'GATEWAY_HOST' ? undefined : hostPath,
             value: '127.0.0.1',
             message: `Set ${hostPath} to 127.0.0.1`,
-          });
+          }));
         }
       }
       if (result?.applied) done.push(`${result.message} in ${config.filePath}`);
@@ -327,8 +331,8 @@ export const cfg001 = defineCheck({
     const left = remaining.length > 0
       ? `; still on all interfaces: ${remaining.join(', ')} — rebind ${remaining.length > 1 ? 'them in their' : 'it in its'} own settings`
       : '';
-    return done.length > 0
+    return withRefusals(done.length > 0
       ? { checkId: 'CFG-001', applied: true, message: done.join('; ') + left }
-      : { checkId: 'CFG-001', applied: false, message: `No wildcard gateway listener found to rebind${left}` };
+      : { checkId: 'CFG-001', applied: false, message: `No wildcard gateway listener found to rebind${left}` }, refused);
   },
 });

@@ -257,6 +257,10 @@ vaso fix --agent openclaw
 
 Before any modification, VASO backs up affected files to `~/.vaso/backups/<timestamp>/`.
 
+`vaso fix` changes only regular files and folders inside the home of the installation's user (where its backup can restore them): never a symlink, a hard-linked file, a FIFO or device, nor a file that a linked folder above it takes into a credential store (`~/.aws`, `~/.ssh`, …), a shell startup file or `/etc` its own path doesn't name. The scan says so first: such a finding's message ends with "not changed by vaso fix: <path> …", and when that covers every file the fix would change, the finding is not offered.
+
+`vaso fix` exits `0` when every fix it ran was applied, was already in place, was skipped, or had nothing left but files the scan named as "not changed by vaso fix" (reported as "nothing left that vaso fix may change"). It exits `1` when a fix failed — an error, or a refused file the scan did not name — and `2` when it cannot run.
+
 ### `vaso visualize`
 
 Emit USecVisLib config files (TOML/JSON/YAML) for rendering architecture diagrams of the scan result. Use these with the external `usecvis` renderer — VASO never depends on Python, Graphviz, or a network-reachable server at scan time.

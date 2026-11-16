@@ -639,16 +639,23 @@ export async function restrictFilesToOwner(checkId: string, paths: Iterable<stri
   // One unsafe file (a symlink, a hard link, a path leaving the home) is
   // refused and named; the others are still fixed
   const refused: string[] = [];
+  const refusedPaths: string[] = [];
+  let failed = false;
   for (const path of paths) {
     try {
       const changed = await restrictModeToOwner(path);
       if (changed === 'file') files++;
       else if (changed === 'dir') dirs++;
     } catch (err) {
-      if (err instanceof UnsafeTargetError) refused.push(`${err.path} ${err.reason}`);
+      if (err instanceof UnsafeTargetError) {
+        refused.push(`${err.path} ${err.reason}`);
+        refusedPaths.push(err.path);
       // a missing file is nothing to fix; any other error (EPERM: owned by
       // someone else) is reported, not swallowed
-      else if ((err as NodeJS.ErrnoException).code !== 'ENOENT') refused.push(`${path}: ${(err as Error).message}`);
+      } else if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+        refused.push(`${path}: ${(err as Error).message}`);
+        failed = true;
+      }
     }
   }
   const changed = [
@@ -663,6 +670,8 @@ export async function restrictFilesToOwner(checkId: string, paths: Iterable<stri
     applied: files + dirs > 0,
     message: parts.length > 0 ? parts.join(' — ') : 'Files are already owner-only',
     ...(files + dirs === 0 && refused.length === 0 ? { alreadyDone: true } : {}),
+    // Only refusals (no other failure): the engine tells whether the scan named them
+    ...(refusedPaths.length > 0 && !failed ? { refused: refusedPaths } : {}),
   };
 }
 
@@ -730,12 +739,43 @@ export interface FixUpdateSpec {
  */
 export async function fixEveryConfig(configs: ParsedConfig[], spec: FixUpdateSpec): Promise<FixResult> {
   let fixed = 0;
+  let setIn: FixResult | undefined;
+  const refused: UnsafeTargetError[] = [];
   for (const config of configs) {
-    const r = await fixFirstConfig([config], spec);
-    if (r.applied) fixed++;
+    const r = await unlessRefused(refused, () => fixFirstConfig([config], spec));
+    if (r?.applied) fixed++;
+    else if (r?.alreadyDone) setIn ??= r;
   }
-  if (fixed === 0) return fixFirstConfig([], spec);
-  return { checkId: spec.checkId, applied: true, message: fixed > 1 ? `${spec.message} (${fixed} files)` : spec.message };
+  if (fixed === 0) return withRefusals(refused.length === 0 && setIn ? setIn : await fixFirstConfig([], spec), refused);
+  return withRefusals({ checkId: spec.checkId, applied: true, message: fixed > 1 ? `${spec.message} (${fixed} files)` : spec.message }, refused);
+}
+
+/**
+ * One file's write in a fix that writes several: a file vaso fix won't
+ * write (a symlink, a hard link, outside the home — UnsafeTargetError) is
+ * noted in `refused` and skipped, so the others are still written. Any
+ * other error ends the fix.
+ */
+export async function unlessRefused<T>(refused: UnsafeTargetError[], write: () => Promise<T>): Promise<T | undefined> {
+  try {
+    return await write();
+  } catch (err) {
+    if (!(err instanceof UnsafeTargetError)) throw err;
+    refused.push(err);
+    return undefined;
+  }
+}
+
+/** A multi-file fix's result, naming the files it left (unlessRefused). */
+export function withRefusals(result: FixResult, refused: UnsafeTargetError[]): FixResult {
+  if (refused.length === 0) return result;
+  const note = `not changed: ${refused.map(e => `${e.path} ${e.reason}`).join('; ')}`;
+  return {
+    ...result,
+    alreadyDone: undefined,
+    message: result.applied ? `${result.message} — ${note}` : note,
+    refused: refused.map(e => e.path),
+  };
 }
 
 /**
