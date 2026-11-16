@@ -146,6 +146,9 @@ type collector struct {
 	// linkCounts caches, per home and link, whether a skills tree's link
 	// leads to a tree over the entry limit (linkOverLimit)
 	linkCounts map[string]bool
+	// targets: what the manifest says about the real path of a skills-tree
+	// file reached through a link (resolved_target.go)
+	targets resolvedTargets
 }
 
 // inExcludedDir reports whether match lies under an excluded directory that
@@ -303,6 +306,9 @@ func Collect(manifest ProbeManifest, escalate bool) ProbeSnapshot {
 
 	// Expand and collect file paths
 	expandedPaths := expandPaths(manifest.FilePaths, homes)
+	c.targets = newResolvedTargets(expandPaths(manifest.MetadataGlobPatterns, homes),
+		append(append([]string{}, expandedPaths...), manifest.SystemPaths...),
+		expandPaths(manifest.GlobPatterns, homes), c.homes)
 	for _, p := range expandedPaths {
 		c.collectPath(&snapshot, p, p, false, true)
 		c.recordExplicitLinks(&snapshot, p)
@@ -618,6 +624,12 @@ func (c *collector) collectFileLimit(path, base string, metadataOnly bool, limit
 
 	ext := strings.ToLower(filepath.Ext(path))
 	assetOnly := metadataOnlyExtensions[ext] && !(c.inSkillTree && skillBinaryExtensions[ext])
+	// A manifest skills tree's file is judged by where it really is too
+	// (resolved_target.go): a link can spell an agent's own files as skills
+	target := ""
+	if c.inSkillTree && !c.configTree {
+		target = skillTarget(path)
+	}
 	switch {
 	// Not a regular file (a FIFO, a device, a link to /dev/tty) before
 	// anything else: a metadata-only credential path replaced by one must not
@@ -629,6 +641,12 @@ func (c *collector) collectFileLimit(path, base string, metadataOnly bool, limit
 	// Before size: not even the head of a file behind such a link is shipped
 	case escapesToSink(path, base):
 		return omitted("sensitive")
+	// …or whose real path is one, through a link above base (a skills dir
+	// linked to ~/.claude): judged by where the file is, not how it is spelled
+	case resolvedIntoSink(path, base):
+		return omitted("sensitive")
+	case target != "" && c.targets.metadataOnly(target):
+		return omitted("metadata")
 	// In a config-derived tree: nothing behind a link out of the user's home
 	// or into a credential store, and no file a name marks as a credential
 	// (token, *.key, credentials.json…) unless it is a program: executable
@@ -677,7 +695,7 @@ func (c *collector) collectFileLimit(path, base string, metadataOnly bool, limit
 	if int64(len(content)) > limit {
 		return omitted("size")
 	}
-	if c.scrubbable(path) {
+	if c.scrubbable(path) || (target != "" && c.targets.config(target)) {
 		content = c.scrubSecrets(path, content)
 	}
 	return c.fileContent(content, mode)

@@ -53,6 +53,15 @@ describe('iocScanFiles', () => {
     // skills dir sits inside the install dir — walked once, not twice
     expect(walks).toEqual(['/h/.claude']);
   });
+
+  it('leaves out a token file a linked skills dir really holds (skills → ~/.codex)', async () => {
+    const { ctx } = makeCtx({
+      '/h/.claude/skills': ['auth.json', 'tool.js'],
+    });
+    ctx.installation = { ...ctx.installation, installDir: '/h/.claude/skills' };
+    (ctx.fs as unknown as { realpath: (p: string) => Promise<string> }).realpath = async (p: string) => p.replace('/h/.claude/skills', '/h/.codex');
+    expect((await iocScanFiles(ctx)).sort()).toEqual(['/h/.claude/skills/tool.js']);
+  });
 });
 
 describe('readScanFile', () => {

@@ -660,6 +660,37 @@ async function plantStoreLinks(home: string, work: string): Promise<{ links: str
   return { links: Object.keys(links).map(rel => join(cop, rel)), followed: join(cop, 'session-state/linked-ok/events.jsonl') };
 }
 
+/**
+ * Skills trees that reach agents' own files through links: a skill file
+ * linked to Claude Code's token file, a skill folder linked to ~/.codex, and
+ * skills roots linked to ~/.claude and to ~/.config (gh's oauth_token beside
+ * the planted configs). Skill trees ship verbatim, so whatever they reach is
+ * judged by where it really is: credential stores not at all, metadata-only
+ * stores as metadata, configs disguised.
+ */
+const SKILL_LINK_SINKS = [
+  '.claude/skills/canary-cred/c.json',
+  '.claude/skills/canary-codex/auth.json',
+  '.agents/skills/.credentials.json',
+  '.cursor/skills/gh/hosts.yml',
+];
+
+async function plantSkillLinks(home: string): Promise<void> {
+  const put = async (rel: string, content: string) => {
+    await mkdir(dirname(join(home, rel)), { recursive: true });
+    await writeFile(join(home, rel), content);
+  };
+  await put('.config/gh/hosts.yml', yamlFile('.config/gh/hosts.yml') + `github.com:\n  oauth_token: ${canary('gh oauth_token behind a skills link', () => `gho_${body(36)}`)}\n`);
+  await put('.claude/skills/canary-cred/SKILL.md', '---\nname: canary-cred\n---\n');
+  await symlink(join(home, '.claude/.credentials.json'), join(home, '.claude/skills/canary-cred/c.json'));
+  await symlink(join(home, '.codex'), join(home, '.claude/skills/canary-codex'));
+  for (const [root, target] of [['.agents/skills', '.claude'], ['.cursor/skills', '.config']]) {
+    await rm(join(home, root), { recursive: true, force: true });
+    await mkdir(dirname(join(home, root)), { recursive: true });
+    await symlink(join(home, target), join(home, root));
+  }
+}
+
 /** A directory beside the scanned home, standing in for another user's. */
 function otherHome(home: string): string {
   return join(dirname(home), 'other-user');
@@ -714,6 +745,7 @@ describe.skipIf(!goAvailable)('probe privacy canary', () => {
     await writeFile(geminiIndex, contentFor('.gemini/tmp/proj-1/memory/MEMORY.md'));
     await plantConfigRoots(home);
     storeLinks = await plantStoreLinks(home, work);
+    await plantSkillLinks(home);
     await writeFile(join(work, 'manifest.json'), m.stdout);
 
     // Credential variables under every collected prefix (the probe redacts them)
@@ -835,6 +867,16 @@ describe.skipIf(!goAvailable)('probe privacy canary', () => {
     }
     expect(snap.files[storeLinks.followed]?.exists, 'a folder linked inside the home is followed').toBe(true);
     expect(snap.files[storeLinks.followed]?.content ?? '').toBe('');
+  });
+
+  it('ships no agent credential a skills tree reaches through a link', () => {
+    const snap = JSON.parse(snapshot) as { files: Record<string, { exists: boolean; content?: string; omitted?: string }> };
+    for (const rel of SKILL_LINK_SINKS) {
+      const e = snap.files[join(home, rel)];
+      expect(e?.exists, `${rel} recorded`).toBe(true);
+      expect(e?.omitted, rel).toBe('sensitive');
+      expect(e?.content ?? '', rel).toBe('');
+    }
   });
 
   it('ships no canary', () => {

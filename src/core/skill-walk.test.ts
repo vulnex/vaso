@@ -94,6 +94,25 @@ describe.skipIf(process.platform === 'win32')('walkSkillTree', () => {
     expect(entries.filter(e => e.isSymbolicLink).map(e => e.name).sort()).toEqual(['.ssh', 'creds.txt', 'sshlink']);
   });
 
+  it('never reads an agent token file the tree reaches through a linked root or a file link', async () => {
+    await mkdir(join(base, '.claude', 'kit'), { recursive: true });
+    await writeFile(join(base, '.claude', '.credentials.json'), '{"accessToken":"TOKCANARY"}');
+    await writeFile(join(base, '.claude', 'kit', 'SKILL.md'), '---\nname: kit\n---\n');
+    await mkdir(join(base, '.config', 'gh'), { recursive: true });
+    await writeFile(join(base, '.config', 'gh', 'hosts.yml'), 'oauth_token: x');
+    await writeFile(join(base, '.config', 'notes.md'), 'n');
+    // a root linked to ~/.claude, one linked to ~/.config
+    await symlink(join(base, '.claude'), join(base, 'linked-root'));
+    expect(files(await walkSkillTree(fs, join(base, 'linked-root')))).toEqual([join(base, 'linked-root', 'kit', 'SKILL.md')]);
+    await symlink(join(base, '.config'), join(base, 'cfg-root'));
+    expect(files(await walkSkillTree(fs, join(base, 'cfg-root')))).toEqual([join(base, 'cfg-root', 'notes.md')]);
+    // a skill file linked to the token file
+    await symlink(join(base, '.claude', '.credentials.json'), join(skills, 'local', 'c.json'));
+    expect(files(await walkSkillTree(fs, skills))).toEqual([join(skills, 'local', 'index.js')]);
+    // the token store walked as itself is listed (it names itself)
+    expect(files(await walkSkillTree(fs, join(base, '.claude')))).toContain(join(base, '.claude', '.credentials.json'));
+  });
+
   it('lists symlinked skill directories by name', async () => {
     await symlink(join(outside, 'linked'), join(skills, 'linked'));
     await symlink(join(outside, 'linked', 'index.js'), join(skills, 'file-link'));

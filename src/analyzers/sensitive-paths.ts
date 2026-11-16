@@ -28,6 +28,18 @@ export const SENSITIVE_SINKS: SensitiveSink[] = [
   { re: /(^|\/)\.codex\/auth\.json$/i, label: 'Codex credentials (~/.codex/auth.json)' },
   { re: /(^|\/)\.(netrc|git-credentials|pgpass|pypirc|npmrc)$/i, label: 'credentials file (.netrc, .git-credentials, .pgpass, .pypirc, .npmrc)' },
   { re: /(^|\/)(Library\/Application Support\/(Google\/Chrome|Chromium|BraveSoftware|Microsoft Edge|Firefox|Arc)|\.config\/(google-chrome|chromium|BraveSoftware|microsoft-edge)|\.mozilla|Library\/Cookies)(\/|$)/i, label: 'browser profile credentials (cookies, saved passwords)' },
+  // Agents' own token stores — the credential files the probe manifest
+  // already ships as metadata only (guard test in sensitive-paths.test.ts).
+  // Copilot CLI's mcp-secrets / mcp-oauth-config are private stores, judged
+  // by store-links.ts. Appended: scope labels name sinks by index.
+  { re: /(^|\/)\.claude\/\.credentials\.json$/i, label: 'Claude Code credentials (~/.claude/.credentials.json)' },
+  { re: /(^|\/)(\.local\/share\/opencode|\.config\/nanoclaw|\.hermes|\.(openclaw(-[^/]+)?|clawdbot)(\/agents\/[^/]+\/agent)?)\/(auth|auth-profiles|auth-state|credentials|account|registry-auth|device-key)\.json$/i, label: 'agent credentials (auth.json, credentials.json)' },
+  { re: /(^|\/)\.(openclaw(-[^/]+)?|clawdbot)\/credentials(\/|$)|(^|\/)\.hermes\/mcp-tokens(\/|$)|(^|\/)\.nanobot\/(auth|whatsapp-auth)(\/|$)/i, label: 'agent credentials directory (OpenClaw, Hermes, Nanobot)' },
+  { re: /(^|\/)\.(gemini|qwen)\/(oauth_creds|google_accounts|mcp-oauth-tokens|a2a-oauth-tokens)\.json$/i, label: 'Gemini CLI / Qwen Code credentials (oauth_creds.json)' },
+  { re: /(^|\/)\.local\/share\/devin\/credentials\.toml$|(^|\/)\.abacusai\/keystore\.enc[^/]*$/i, label: 'agent credentials (Devin CLI credentials.toml, Abacus.AI keystore)' },
+  { re: /(^|\/)(\.grokbot|\.cursor\/sand|sand-data)\/(local-exec-daemon-credential|host-token)\.json$|(^|\/)Grok Bot\/(sand|user)-secrets\.json$/i, label: 'Grok Bot credentials (local exec credential, secret stores)' },
+  { re: /(^|\/)\.ironclaw\/reborn\/(webui-token|([^/]+\/)?\.reborn-local-dev-secrets-master-key)$|(^|\/)\.?zeroclaw\/\.secret_key$/i, label: 'agent credentials (IronClaw WebUI token / master key, ZeroClaw secret key)' },
+  { re: /(^|\/)openshell\/(gateway\/credentials|docker-sandbox-tokens|gateways\/[^/]+\/mtls)(\/|$)|(^|\/)openshell\/gateways\/[^/]+\/oidc_token\.json$/i, label: 'OpenShell credentials (key-encryption key, sandbox tokens, mTLS keys)' },
 ];
 
 /**

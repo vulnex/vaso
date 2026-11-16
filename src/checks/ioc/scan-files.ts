@@ -1,7 +1,7 @@
 import { extname, join, relative, isAbsolute } from 'node:path';
 import type { ScanContext } from '../../core/types.js';
 import { getAllSkillsDirs, isExcludedPath, relEscapes } from '../../core/utils.js';
-import { followSkillLinks } from '../../core/skill-walk.js';
+import { followSkillLinks, skillFileInSink } from '../../core/skill-walk.js';
 
 // Text an indicator can hide in: code and scripts, config, and skill docs
 // (SKILL.md tells the agent what to fetch and run).
@@ -45,6 +45,7 @@ export async function iocScanFiles(ctx: ScanContext): Promise<string[]> {
   const skip = new Set(ctx.configs.map(c => c.filePath));
   const files: string[] = [];
   const skillsDirs = getAllSkillsDirs(ctx.installation);
+  const realDirs = new Map<string, string>();
   for (const dir of dirs) {
     let entries;
     try {
@@ -69,6 +70,9 @@ export async function iocScanFiles(ctx: ScanContext): Promise<string[]> {
       const fullPath = entry.parentPath ? join(entry.parentPath, entry.name) : join(dir, entry.name);
       if (skip.has(fullPath)) continue;
       skip.add(fullPath);
+      // A credential store reached through a linked skills tree (skills →
+      // ~/.claude): never read, as the probe never ships it
+      if (skillsRoot && await skillFileInSink(ctx.fs, skillsRoot, fullPath, realDirs)) continue;
       files.push(fullPath);
     }
   }
