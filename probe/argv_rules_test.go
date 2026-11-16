@@ -107,3 +107,89 @@ func TestArgvVerdictsInSnapshots(t *testing.T) {
 		}
 	}
 }
+
+// Every password VASO's CFG-002 reads in a hook command (src/checks/config/
+// cfg-002-hook-secrets.test.ts) is disguised in a snapshot of the settings file.
+func TestHookPasswordsInSnapshots(t *testing.T) {
+	commands := map[string]string{
+		`mysql -p"Top1Quoted9" app`:                                   "Top1Quoted9",
+		`mysql -p'Top2Single9' app`:                                   "Top2Single9",
+		`sshpass -p "Top3Spaced9" ssh x`:                              "Top3Spaced9",
+		`mysql --password="Top4Long9x" app`:                           "Top4Long9x",
+		`mysql --password=Ab12 app`:                                   "Ab12",
+		`curl -u "adm:Top5Curl9x" https://x`:                          "Top5Curl9x",
+		`curl -u 'adm:Top6Curl9y' https://x`:                          "Top6Curl9y",
+		`MYSQL_PWD="Top7Env9xx" mysql app`:                            "Top7Env9xx",
+		`PGPASSWORD=pg1 psql -h db app`:                               "pg1",
+		`ssh host "bash -c 'mysql -pQx7Lm2Vn9Bz4 app'"`:               "Qx7Lm2Vn9Bz4",
+		`ssh h 'mysql -p"Qu0ted9Pass" app'`:                           "Qu0ted9Pass",
+		`ssh h "sshpass -p \"Esc4Pq8Wd\" ssh x"`:                      "Esc4Pq8Wd",
+		`ssh h $'mysql -pAnsi7Cq3Lw app'`:                             "Ansi7Cq3Lw",
+		`ssh -p 2222 h "sudo -u svc sh -c 'mysql -pSu8Do4Pw2Rt app'"`: "Su8Do4Pw2Rt",
+		`su - app -c "sshpass -p Zq8Wn3Lx7Vb2 ssh deploy@h"`:          "Zq8Wn3Lx7Vb2",
+		`docker exec db sh -c "mysql -pDk4Rw9Np2Mz7 app"`:             "Dk4Rw9Np2Mz7",
+		`eval "mysql -pEv4Rw9Np2Mz7 app"`:                             "Ev4Rw9Np2Mz7",
+	}
+	var hooks []map[string]string
+	for c := range commands {
+		hooks = append(hooks, map[string]string{"type": "command", "command": c})
+	}
+	doc := map[string]interface{}{"hooks": map[string]interface{}{"PostToolUse": []interface{}{map[string]interface{}{"matcher": "Bash", "hooks": hooks}}}}
+	in, _ := json.MarshalIndent(doc, "", " ")
+	out := string((&collector{}).scrubSecrets("/h/.claude/settings.json", in))
+	for c, pw := range commands {
+		if strings.Contains(out, pw) {
+			t.Errorf("%s: %q shipped", c, pw)
+		}
+	}
+}
+
+// Quoted command-line credentials: the quotes around and inside a value are
+// not part of it, at any depth of escaping, and a quoted flag argument
+// stays with its flag.
+func TestCommandCredentialsQuoted(t *testing.T) {
+	same := func(v string) string { return strings.Repeat("Z", len(v)) }
+	cases := []struct{ line, secret string }{
+		{`"command": "mysql -p\"Top1Quoted9\" app"`, "Top1Quoted9"},
+		{`"command": "sshpass -p \"Top3Spaced9\" ssh x"`, "Top3Spaced9"},
+		{`"command": "curl -u \"adm:Top5Curl9x\" https://x"`, "Top5Curl9x"},
+		{`"command": "ssh h 'mysql -p\"Qu0ted9Pass\" app'"`, "Qu0ted9Pass"},
+		{`"command": "ssh h \"sshpass -p \\\"Esc4Pq8Wd\\\" ssh x\""`, "Esc4Pq8Wd"},
+		{`"command": "ssh h $'mysql -pAnsi7Cq3Lw app'"`, "Ansi7Cq3Lw"},
+		{`command = "sshpass -p 'Tm9Lq2Wx7Zr' ssh x"`, "Tm9Lq2Wx7Zr"},
+		{`  command: mysql -u "root" -p"Rt5Qw8Lm3Zx" app`, "Rt5Qw8Lm3Zx"},
+		{`mysql -p"Ab3Cd"5Ef7Gh9 app`, "Ab3Cd5Ef7Gh9"},
+	}
+	for _, c := range cases {
+		var got []string
+		out := commandCredentials(c.line, func(v string) string {
+			got = append(got, v)
+			return same(v)
+		})
+		if len(got) != 1 || got[0] != c.secret {
+			t.Errorf("%s: credentials %q, want %q", c.line, got, c.secret)
+		}
+		if strings.Contains(out, c.secret) || len(out) != len(c.line) {
+			t.Errorf("%s: disguised as %s", c.line, out)
+		}
+		redacted := commandCredentials(c.line, func(string) string { return "[REDACTED]" })
+		if strings.Contains(redacted, c.secret) || !strings.Contains(redacted, "[REDACTED]") {
+			t.Errorf("%s: redacted as %s", c.line, redacted)
+		}
+	}
+	// the quotes stay where they were
+	if got := commandCredentials(`mysql -p"Ab3Cd"5Ef7Gh9 app`, same); got != `mysql -p"ZZZZZ"ZZZZZZZ app` {
+		t.Errorf("in place: %s", got)
+	}
+	// MySQL takes a separate value after -p as the database, quoted or not;
+	// a JSON args array is judged with its server's command (argvArraySpans)
+	for _, line := range []string{
+		`"command": "mysql -u root -p \"app_db\""`,
+		`"args": ["-p", "Xk9Lm2Qw7Zr4"]`,
+		`echo "-p" "Xk9Lm2Qw7Zr4"`,
+	} {
+		if out := commandCredentials(line, same); out != line {
+			t.Errorf("%s: changed to %s", line, out)
+		}
+	}
+}
