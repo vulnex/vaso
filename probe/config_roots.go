@@ -19,7 +19,8 @@ import (
 // tree ("tree": Globs under it, content disguised like any config) or
 // records it as metadata ("stat": existence, mode, owner — never content).
 type ConfigRootRequest struct {
-	// Config files, in manifest path syntax (~, ${VAR}, globs).
+	// Config files, in manifest path syntax (~, ${VAR}, globs). None, with
+	// EnvFallback set: the variable's value alone, for the probe user.
 	Configs []string `json:"configs"`
 	// "json" (JSON/JSONC/JSON5), "toml" or "yaml".
 	Format string `json:"format"`
@@ -224,9 +225,20 @@ func (c *collector) collectConfigRoots(snapshot *ProbeSnapshot, requests []Confi
 		if req.Kind != "tree" && req.Kind != "stat" {
 			continue
 		}
-		for _, src := range configSources(req.Configs, homes) {
+		sources := configSources(req.Configs, homes)
+		envOnly := len(req.Configs) == 0 && req.EnvFallback != ""
+		if envOnly {
+			// A path only an environment variable sets (PICOCLAW_BUILTIN_SKILLS):
+			// the probe user's own, as the CLI reads it for that user only
+			ownHome, _ := os.UserHomeDir()
+			sources = []configSource{{"", ownHome}}
+		}
+		for _, src := range sources {
 			key := req.Format + "\x00" + src.path
 			parsed, cached := parsedCache[key]
+			if envOnly {
+				parsed, cached = map[string]interface{}{}, true
+			}
 			if !cached {
 				if data, ok := readConfigForPaths(src.path); ok {
 					parsed, _ = parseConfig(req.Format, data)

@@ -41,7 +41,9 @@ export interface ProbeManifest {
  * the config spells them).
  */
 export interface ConfigRootRequest {
-  /** Config files, in manifest path syntax (`~`, `${VAR}`, globs). */
+  /** Config files, in manifest path syntax (`~`, `${VAR}`, globs). Empty,
+   *  with `envFallback` set: that variable's value alone, for the probe's
+   *  own user (probe ≥ 1.4.2; older probes collect nothing for it). */
   configs: string[];
   format: 'json' | 'toml' | 'yaml';
   /** Key paths; `*` is every key of a mapping or item of an array. */
