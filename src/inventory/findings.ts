@@ -1,11 +1,31 @@
-import { basename, dirname, isAbsolute, relative } from 'node:path';
+import { basename, dirname, isAbsolute, resolve, sep } from 'node:path';
 import type { AgentInventory, CheckResult, McpServerItem } from '../core/types.js';
-import { relEscapes } from '../core/path-rel.js';
 import { serverSpan } from './spans.js';
 
-function isWithin(path: string, dir: string): boolean {
-  const rel = relative(dir, path);
-  return rel === '' || !relEscapes(rel);
+/** How path.relative compares paths: resolved, and case-blind on Windows. */
+const pathKey = sep === '\\' ? (p: string) => resolve(p).toLowerCase() : (p: string) => resolve(p);
+
+/**
+ * The ids of the checks with evidence at or below each directory: every
+ * evidence file and each of its ancestors, once — a lookup per inventory
+ * entry then answers "evidence within this folder" (path.relative's test)
+ * without comparing every entry with every evidence item.
+ */
+function evidenceIndex(failed: CheckResult[]): Map<string, Set<string>> {
+  const index = new Map<string, Set<string>>();
+  for (const r of failed) {
+    const seen = new Set<string>();
+    for (const e of r.evidence!) {
+      for (let cur = pathKey(e.file); !seen.has(cur); cur = dirname(cur)) {
+        seen.add(cur);
+        let ids = index.get(cur);
+        if (!ids) index.set(cur, (ids = new Set()));
+        ids.add(r.id);
+        if (dirname(cur) === cur) break;
+      }
+    }
+  }
+  return index;
 }
 
 /** Claude Code's state file (`~/.claude.json`, or under $CLAUDE_CONFIG_DIR). */
@@ -66,9 +86,15 @@ function byLine<T extends { s: McpServerItem }>(servers: T[], file: string, line
  */
 export function linkInventoryFindings(inventory: AgentInventory, results: CheckResult[]): void {
   const failed = results.filter(r => !r.passed && r.evidence?.length);
-  const idsIn = (dirs: string[]) => [...new Set(failed
-    .filter(r => r.evidence!.some(e => dirs.some(d => isWithin(e.file, d))))
-    .map(r => r.id))];
+  const index = evidenceIndex(failed);
+  // in result order, as before
+  const order = new Map<string, number>();
+  failed.forEach((r, i) => { if (!order.has(r.id)) order.set(r.id, i); });
+  const idsIn = (dirs: string[]) => {
+    const ids = new Set<string>();
+    for (const d of dirs) for (const id of index.get(pathKey(d)) ?? []) ids.add(id);
+    return [...ids].sort((a, b) => order.get(a)! - order.get(b)!);
+  };
   for (const skill of inventory.skills) {
     const ids = idsIn(skill.symlinkTarget ? [skill.path, skill.symlinkTarget] : [skill.path]);
     if (ids.length > 0) skill.findings = ids;
