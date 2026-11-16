@@ -968,6 +968,10 @@ func (c *collector) linkNotFollowed(snapshot *ProbeSnapshot, pattern, m, real st
 	if !c.configTree {
 		home = c.homeOf(root)
 	}
+	if home == "" {
+		// a tree in no home: judged for the probe user, as local scans do
+		home, _ = os.UserHomeDir()
+	}
 	verdict, planned := c.linkPlan(root, home)[real]
 	if !planned {
 		verdict = linkFollow

@@ -71,6 +71,11 @@ describe('links in a skills tree: each its own budget, a total for all', () => {
     for (let i = 1; i <= 6; i++) await symlink(join(out, `t${i}`), join(skills, `l${i}`));
     const listing = await listSkillTree(skills, fs);
     expect(listing.overTotalLinks).toEqual([join(skills, 'l6')]);
+    // the same tree outside the home (a config-set root elsewhere) holds to the same total
+    const elsewhere = join(out, 'elsewhere');
+    await mkdir(elsewhere);
+    for (let i = 1; i <= 6; i++) await symlink(join(out, `t${i}`), join(elsewhere, `l${i}`));
+    expect((await listSkillTree(elsewhere, fs)).overTotalLinks).toEqual([join(elsewhere, 'l6')]);
     expect(listing.overLimitLinks).toEqual([]);
     for (let i = 1; i <= 5; i++) expect(listing.files).toContain(join(skills, `l${i}`, 's', 'SKILL.md'));
     expect(listing.files.some(f => f.startsWith(join(skills, 'l6') + '/'))).toBe(false);

@@ -342,7 +342,8 @@ export async function linkCap(fs: FSProvider, root: string): Promise<(link: stri
   let plan: Promise<Map<string, LinkVerdict>> | undefined;
   const load = async (): Promise<Map<string, LinkVerdict>> => {
     const me = homedirOf(fs);
-    const home = (me && isAbsolute(root) ? await homeOfDir(fs, root, [me]) : undefined) ?? '';
+    // a tree in no home (a config-set one elsewhere): judged for the scanned user, as the probe judges it for the config's
+    const home = (me && isAbsolute(root) ? await homeOfDir(fs, root, [me]) : undefined) ?? me ?? '';
     let byRoot = planCache.get(fs);
     if (!byRoot) planCache.set(fs, (byRoot = new Map()));
     const key = `${clean(home)}\0${clean(root)}`;
