@@ -311,11 +311,53 @@ function isFixedCode(expr: string, constants: Set<string>): boolean {
   return FIXED_TEXT.test(expr) || constants.has(expr) || fixedValue(expr, constants);
 }
 
+interface ContinuationState {
+  /** The open triple-quoted string's delimiter. */
+  triple?: string;
+  /** Open brackets. */
+  depth: number;
+  /** The line ended in a `\` outside a string. */
+  backslash: boolean;
+}
+
+/** `state` after one physical line: strings, brackets and a trailing `\` followed. */
+function scanContinuation(t: string, state: ContinuationState): void {
+  let i = 0;
+  const last = t.trimEnd().length - 1;
+  state.backslash = false;
+  while (i < t.length) {
+    if (state.triple) {
+      const close = t.indexOf(state.triple, i);
+      if (close < 0) return;
+      i = close + 3;
+      state.triple = undefined;
+      continue;
+    }
+    const c = t[i];
+    if (c === '#') return;
+    if (c === '"' || c === "'") {
+      if (t.startsWith(c.repeat(3), i)) { state.triple = c.repeat(3); i += 3; continue; }
+      let j = i + 1;
+      while (j < t.length && t[j] !== c) j += t[j] === '\\' ? 2 : 1;
+      i = j + 1;
+      continue;
+    }
+    if (c === '(' || c === '[' || c === '{') state.depth++;
+    else if (c === ')' || c === ']' || c === '}') state.depth = Math.max(0, state.depth - 1);
+    else if (c === '\\' && i === last) { state.backslash = true; return; }
+    i++;
+  }
+}
+
 interface DefinitionScopes {
   /** Whether the line at an offset is inside a `def` or `class` body. */
   inside(offset: number): boolean;
   /** The 1-based first and last line of the innermost `def`/`class` around the line at an offset. */
   enclosing(offset: number): [number, number] | undefined;
+  /** The same for a 1-based line number. */
+  enclosingLine(line: number): [number, number] | undefined;
+  /** Whether the body starting at a 1-based line is a `class` body. */
+  isClass(first: number): boolean;
 }
 
 /**
@@ -328,6 +370,7 @@ function definitionScopes(code: string): DefinitionScopes {
   // per line: index into `ranges` of the innermost def/class around it, or -1
   let innermost: Int32Array | undefined;
   const ranges: Array<[number, number]> = [];
+  const classes = new Set<number>();
   const build = (): void => {
     starts = [];
     const around: number[] = [];
@@ -339,6 +382,9 @@ function definitionScopes(code: string): DefinitionScopes {
     };
     let lastCode = 0;
     let start = 0;
+    // A line inside a triple-quoted string, an open bracket or after a `\`
+    // continues the statement above: its indentation closes nothing
+    const open: ContinuationState = { depth: 0, backslash: false };
     while (start <= code.length) {
       const nl = code.indexOf('\n', start);
       const end = nl < 0 ? code.length : nl;
@@ -346,7 +392,13 @@ function definitionScopes(code: string): DefinitionScopes {
       const lead = /^[ \t]*/.exec(line)![0].length;
       const index = starts.length;
       starts.push(start);
-      if (/^\s*(?:#|$)/.test(line)) {
+      if (FILE_MARKER.test(line.trim())) { open.triple = undefined; open.depth = 0; open.backslash = false; }
+      const continued = open.triple !== undefined || open.depth > 0 || open.backslash;
+      scanContinuation(line, open);
+      if (continued) {
+        around.push(innermostOpen());
+        if (line.trim() !== '') lastCode = index;
+      } else if (/^\s*(?:#|$)/.test(line)) {
         around.push(innermostOpen());
       } else {
         while (stack.length > 0 && stack[stack.length - 1][0] >= lead) {
@@ -358,6 +410,7 @@ function definitionScopes(code: string): DefinitionScopes {
         if (/^[ \t]*(?:async[ \t]+)?(?:def|class)[ \t]/.test(line)) {
           r = ranges.length;
           ranges.push([index + 1, index + 1]);
+          if (/^[ \t]*class[ \t]/.test(line)) classes.add(index + 1);
         }
         stack.push([lead, r]);
         lastCode = index;
@@ -388,6 +441,15 @@ function definitionScopes(code: string): DefinitionScopes {
       const line = lineAt(offset);
       const r = innermost![line];
       return r >= 0 ? ranges[r] : undefined;
+    },
+    enclosingLine: (line) => {
+      if (!starts) build();
+      const r = line >= 1 && line <= innermost!.length ? innermost![line - 1] : -1;
+      return r >= 0 ? ranges[r] : undefined;
+    },
+    isClass: (first) => {
+      if (!starts) build();
+      return classes.has(first);
     },
   };
 }
@@ -441,19 +503,25 @@ function aliasRewriter(code: string): (text: string, line?: number) => string {
       }
     }
   }
-  // The call alias of a name on a line: the innermost body importing it there, else the file-wide one
-  // by first line, so the innermost body around a line is the nearest one before it that contains it
-  // (with the furthest last line of each prefix: the walk back stops where nothing earlier reaches the line)
-  const reach = new Map<string, number[]>();
+  // The call alias of a name on a line: the innermost body importing it there, else the file-wide one.
+  // Bodies nest, so with each body's parent (the nearest earlier one containing it) the innermost one
+  // around a line is the last body starting at or before it, or the first of its parents reaching it
+  const parents = new Map<string, Int32Array>();
   for (const [name, list] of scopedCalls) {
-    list.sort((a, b) => a[0] - b[0]);
-    let far = 0;
-    reach.set(name, list.map((r) => (far = Math.max(far, r[1]))));
+    list.sort((a, b) => a[0] - b[0] || b[1] - a[1]);
+    const parent = new Int32Array(list.length);
+    const stack: number[] = [];
+    list.forEach((r, k) => {
+      while (stack.length > 0 && list[stack[stack.length - 1]][1] < r[0]) stack.pop();
+      parent[k] = stack.length > 0 ? stack[stack.length - 1] : -1;
+      stack.push(k);
+    });
+    parents.set(name, parent);
   }
   const callAt = (name: string, line: number | undefined): { target: string; extra?: string } | undefined => {
     const scoped = line === undefined ? undefined : scopedCalls.get(name);
     if (scoped) {
-      const far = reach.get(name)!;
+      const parent = parents.get(name)!;
       let lo = 0;
       let hi = scoped.length - 1;
       while (lo < hi) {
@@ -461,8 +529,11 @@ function aliasRewriter(code: string): (text: string, line?: number) => string {
         if (scoped[mid][0] <= line!) lo = mid;
         else hi = mid - 1;
       }
-      for (let k = lo; k >= 0 && far[k] >= line!; k--) {
-        if (scoped[k][0] <= line! && line! <= scoped[k][1]) return { target: scoped[k][2] };
+      for (let k = scoped[lo][0] <= line! ? lo : -1; k >= 0; k = parent[k]) {
+        if (line! > scoped[k][1]) continue;
+        // a class body's names aren't seen inside its methods or nested classes
+        if (scopes.isClass(scoped[k][0]) && scopes.enclosingLine(line!)?.[0] !== scoped[k][0]) continue;
+        return { target: scoped[k][2] };
       }
     }
     return callAliases.get(name);
