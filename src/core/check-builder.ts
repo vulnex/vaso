@@ -5,6 +5,7 @@ import type {
   CheckResult,
   Evidence,
   FixResult,
+  FixTargets,
   ScanContext,
   Severity,
   Platform,
@@ -60,6 +61,7 @@ export interface DefineCheckArgs {
   supportedPlatforms?: Platform[];
   run(ctx: ScanContext, h: CheckHelpers): Promise<CheckResult>;
   fix?(ctx: ScanContext): Promise<FixResult>;
+  fixTargets?(ctx: ScanContext, result: CheckResult): FixTargets | undefined;
 }
 
 export function defineCheck(args: DefineCheckArgs): CheckModule {
