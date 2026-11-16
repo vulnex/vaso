@@ -134,6 +134,57 @@ describe('package script commands this scan cannot follow', () => {
   });
 });
 
+describe('package script entries resolved the way the runtime does', () => {
+  const start = (script: string): string => {
+    write('p/package.json', JSON.stringify({ name: 'p', version: '1.0.0', main: 'index.js', scripts: { start: script } }));
+    write('p/index.js', 'console.log("ok");\n');
+    return join(dir, 'p');
+  };
+
+  it.each([['node server', 'p/server.js'], ['node lib/server', 'p/lib/server.js']])('`%s` runs %s', async (script, file) => {
+    write(file, EXEC_TOOL);
+    const [source] = await resolveServerSources([server('npm', ['--prefix', start(script), 'start'])]);
+    expect(source.sourceCode).toContain('exec(cmd)');
+    expect(source.readFailure).toBeUndefined();
+  });
+
+  it('`node sub` runs sub.js before the directory sub/', async () => {
+    write('p/sub.js', EXEC_TOOL);
+    write('p/sub/index.js', 'console.log("benign");\n');
+    const [source] = await resolveServerSources([server('npm', ['--prefix', start('node sub'), 'start'])]);
+    expect(source.sourceCode).toContain('exec(cmd)');
+    expect(source.sourceCode).not.toContain('benign');
+  });
+
+  it('`node sub/` with its slash runs the directory', async () => {
+    write('p/sub.js', 'console.log("file");\n');
+    write('p/sub/index.js', EXEC_TOOL);
+    const [source] = await resolveServerSources([server('npm', ['--prefix', start('node sub/'), 'start'])]);
+    expect(source.sourceCode).toContain('exec(cmd)');
+  });
+
+  it('`python3 sub` runs sub/__main__.py, not a Node index.js', async () => {
+    write('p/sub/__main__.py', PY_TOOL);
+    write('p/sub/index.js', 'console.log("benign");\n');
+    const [source] = await resolveServerSources([server('npm', ['--prefix', start('python3 sub'), 'start'])]);
+    expect(source.sourceCode).toContain('shell=True');
+    expect(source.sourceCode).not.toContain('benign');
+  });
+
+  it('`python3 sub` without a __main__.py is noted', async () => {
+    write('p/sub/index.js', 'console.log("benign");\n');
+    const [source] = await resolveServerSources([server('npm', ['--prefix', start('python3 sub'), 'start'])]);
+    expect(source.sourceCode ?? '').not.toContain('benign');
+    expect(source.unanalyzed ?? source.readFailure).toMatch(/no __main__\.py/);
+  });
+
+  it('a missing entry analysed through the package main says so', async () => {
+    const [source] = await resolveServerSources([server('npm', ['--prefix', start('node missing.js'), 'start'])]);
+    expect(source.sourceCode).toContain('console.log("ok")');
+    expect(source.readFailure).toMatch(/missing\.js, which is not there/);
+  });
+});
+
 describe('python -m and uv -m launches', () => {
   it('python -m without a working directory is noted', async () => {
     const [source] = await resolveServerSources([server('python3', ['-m', 'mymod'])]);

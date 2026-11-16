@@ -897,15 +897,23 @@ async function scriptCommandEntry(
   }
   const inner = launchTarget({ name: script, command: words[0], args: rest, cwd: dir, transport: 'stdio' });
   if (inner.entry) {
-    for (const file of [inner.entry, ...sourceTwins(dir, inner.entry)]) {
+    const interpreter = interpreterOf(words[0]);
+    const python = interpreter === 'python' || interpreter === 'uv';
+    // Node looks for `X`, then `X.js`, before the directory `X/` (`node server` runs server.js)
+    // (`node sub/` with its slash names the directory only)
+    const dirOnly = rest.some((w) => /[\\/]$/.test(w) && resolve(dir, w) === inner.entry);
+    const files = python || dirOnly || /\.[cm]?[jt]sx?$/i.test(inner.entry) ? [inner.entry] : [inner.entry, `${inner.entry}.js`];
+    for (const file of files.flatMap((f) => [f, ...sourceTwins(dir, f)])) {
       if (await isFile(file, fs)) return { path: file };
     }
-    // `node sub`: Node runs the directory's package.json main, else its index.js
+    // `node sub`: Node runs the directory's package.json main, else its
+    // index.js; `python3 sub` runs its __main__.py
     if (await fs.stat(inner.entry).then((st) => st.isDirectory(), () => false)) {
-      const file = await directoryEntry(inner.entry, fs);
-      return file ? { path: file } : { note: `package script "${script}" runs the directory ${inner.entry}, which has no entry file` };
+      const main = join(inner.entry, '__main__.py');
+      const file = python ? ((await isFile(main, fs)) ? main : undefined) : await directoryEntry(inner.entry, fs);
+      return file ? { path: file } : { note: `package script "${script}" runs the directory ${inner.entry}, which has no ${python ? '__main__.py' : 'entry file'}` };
     }
-    return { fallback: true };
+    return { fallback: true, note: `package script "${script}" runs ${inner.entry}, which is not there — the package's own entry was analysed instead` };
   }
   if (inner.packageDir) {
     const nested = await packageScriptEntry(inner.packageDir, inner.script, fs, { deno: inner.denoTask, depth: depth + 1 });
