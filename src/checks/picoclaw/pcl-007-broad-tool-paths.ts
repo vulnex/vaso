@@ -1,8 +1,9 @@
 import { dirname, join } from 'node:path';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { testSamples } from '../../analyzers/bounded-regex.js';
-import { asRecord, compileGoRegex, picoMainConfigs, stringList } from './shared.js';
+import { regexBudget, runSamples } from '../../analyzers/bounded-regex.js';
+import { compileForeignRegex, notEvaluatedDetail, unjudgedEvidence } from '../../analyzers/foreign-regex.js';
+import { asRecord, picoMainConfigs, stringList } from './shared.js';
 import { riskyWhitelistEntry } from '../nanobot/nb-005-ssrf-webfetch.js';
 
 /** Sensitive files a path allowance must not reach. `.security.yml` lives
@@ -37,6 +38,7 @@ export const pcl007 = defineCheck({
   async run(ctx, h) {
     const evidence: Evidence[] = [];
     let writes = false;
+    const budget = regexBudget();
     for (const config of picoMainConfigs(ctx.configs)) {
       const targets = sensitiveTargets(ctx.fs.homedir(), dirname(config.filePath));
       const tools = asRecord(config.data.tools) ?? {};
@@ -50,27 +52,33 @@ export const pcl007 = defineCheck({
         });
       }
       for (const [key, write] of [['allow_read_paths', false], ['allow_write_paths', true]] as const) {
+        const what = `lets the agent ${write ? 'write' : 'read'} credentials or system files`;
+        const unjudged: string[] = [];
         for (const pattern of stringList(tools[key])) {
-          const re = compileGoRegex(pattern);
-          if (!re) continue;
-          const matched = testSamples(re, targets);
-          if (!matched) {
-            evidence.push({
-              file: config.filePath,
-              snippet: `tools.${key}: ${JSON.stringify(pattern)}`,
-              detail: `Pattern not evaluated: it backtracks exponentially on sample paths, so whether it lets the agent ${write ? 'write' : 'read'} credentials or system files is unknown — review it`,
-            });
+          const snippet = `tools.${key}: ${JSON.stringify(pattern)}`;
+          const compiled = compileForeignRegex(pattern, 'go');
+          // PicoClaw rejects a pattern Go can't compile: it allows nothing
+          if (compiled.kind === 'invalid') continue;
+          if (compiled.kind === 'unsupported') {
+            evidence.push({ file: config.filePath, snippet, detail: notEvaluatedDetail('unsupported', what) });
             continue;
           }
-          const hits = targets.filter((_, i) => matched[i]);
-          if (hits.length === 0) continue;
+          const run = runSamples(compiled.re, targets, { budget });
+          // a target matched before the time ran out is a finding all the same
+          const hits = targets.filter((_, i) => run.hits[i]);
+          if (hits.length === 0) {
+            if (run.reason === 'budget') unjudged.push(pattern);
+            else if (run.reason) evidence.push({ file: config.filePath, snippet, detail: notEvaluatedDetail(run.reason, what) });
+            continue;
+          }
           if (write) writes = true;
           evidence.push({
             file: config.filePath,
-            snippet: `tools.${key}: ${JSON.stringify(pattern)}`,
-            detail: `Lets the agent ${write ? 'write' : 'read'} ${hits.join(', ')}`,
+            snippet,
+            detail: `Lets the agent ${write ? 'write' : 'read'} ${hits.join(', ')}${run.complete ? '' : ' (the other sensitive paths were not evaluated)'}`,
           });
         }
+        if (unjudged.length > 0) evidence.push(unjudgedEvidence(config.filePath, `tools.${key}`, unjudged, what.replace('lets', 'let')));
       }
     }
     return h.fromEvidence(evidence, {

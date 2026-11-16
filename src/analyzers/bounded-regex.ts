@@ -1,4 +1,5 @@
 import { createContext, runInContext, type Context } from 'node:vm';
+import { performance } from 'node:perf_hooks';
 import { unsafeRegexReason } from '../rules/regex-safety.js';
 
 /**
@@ -11,48 +12,181 @@ import { unsafeRegexReason } from '../rules/regex-safety.js';
  * directly. Any other pattern runs on the same short samples under a time
  * limit: a catch-all matches on its first greedy path, and only a pattern
  * that fails a sample in exponentially many ways can run long. When the
- * limit is hit the result is undefined — "not evaluated", which callers
+ * limit is hit the result is incomplete — "not evaluated", which callers
  * report rather than read as "doesn't match".
+ *
+ * Patterns judged by one check share a `RegexBudget`: once its total time is
+ * spent, the remaining unscreened patterns are not run at all, so a config
+ * listing hundreds of hostile patterns costs seconds, not minutes. Screened
+ * patterns always run, so their verdicts don't depend on timing.
+ *
+ * A pattern cut short still keeps what it showed: the samples matched before
+ * the limit, and those matched by any top-level alternative the screen finds
+ * linear (`.*|(.|.)*Z` matches everything through `.*` alone).
  */
 
 /** Time limit for one pattern over all its samples. */
 export const REGEX_SAMPLE_BUDGET_MS = 250;
 
+/** Total time for the unscreened patterns of one check run. */
+export const REGEX_TOTAL_BUDGET_MS = 1500;
+
 /** Longest sample text; the samples are short commands and paths. */
 const MAX_SAMPLE_LENGTH = 512;
 
+/** Time left for one check's unscreened patterns. */
+export interface RegexBudget {
+  remainingMs: number;
+}
+
+export function regexBudget(totalMs = REGEX_TOTAL_BUDGET_MS): RegexBudget {
+  return { remainingMs: totalMs };
+}
+
+export interface SampleRun {
+  /** Per sample: matched. When incomplete, false may also mean "not known". */
+  hits: boolean[];
+  /** Every sample was decided. */
+  complete: boolean;
+  /** Why it is incomplete: the pattern ran out of time, or the check's budget was spent before it ran. */
+  reason?: 'timeout' | 'budget';
+}
+
 let sandbox: Context | undefined;
 
+const strip = (flags: string): string => flags.replace(/[gy]/g, '');
+
+/** Index of the `)` closing the group opened at `open` in a JS regex source, or -1. */
+function closingParen(source: string, open: number): number {
+  let depth = 0;
+  for (let i = open; i < source.length; i++) {
+    const c = source[i];
+    if (c === '\\') { i++; continue; }
+    if (c === '[') {
+      for (i++; i < source.length && source[i] !== ']'; i++) if (source[i] === '\\') i++;
+      continue;
+    }
+    if (c === '(') depth++;
+    else if (c === ')' && --depth === 0) return i;
+  }
+  return -1;
+}
+
+/** Top-level `|` alternatives of a JS regex source. */
+function splitAlternatives(source: string): string[] {
+  const out: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < source.length; i++) {
+    const c = source[i];
+    if (c === '\\') { i++; continue; }
+    if (c === '[') {
+      for (i++; i < source.length && source[i] !== ']'; i++) if (source[i] === '\\') i++;
+      continue;
+    }
+    if (c === '(') depth++;
+    else if (c === ')') depth--;
+    else if (c === '|' && depth === 0) {
+      out.push(source.slice(start, i));
+      start = i + 1;
+    }
+  }
+  out.push(source.slice(start));
+  return out;
+}
+
 /**
- * Whether `re` matches each sample (`re.test`), or undefined when it ran out
- * of time. With `untilMiss` the samples are tried in order and the first
- * miss ends the run (the rest read as misses): a caller asking "does it
- * match all of these" passes the shortest samples first, so a pattern that
- * fails is told apart before it can backtrack on a long one.
+ * The top-level alternatives of `re` as standalone sources, keeping a
+ * `^(?:…)$` wrapper; undefined when there is only one or the pattern uses
+ * backreferences (an alternative alone would renumber them).
  */
-export function testSamples(re: RegExp, samples: readonly string[], opts: { untilMiss?: boolean; budgetMs?: number } = {}): boolean[] | undefined {
+function alternatives(source: string): string[] | undefined {
+  if (/\\[1-9]|\\k</.test(source)) return undefined;
+  let body = source;
+  let anchored = false;
+  if (body.startsWith('^(?:') && body.endsWith(')$') && closingParen(body, 1) === body.length - 2) {
+    anchored = true;
+    body = body.slice(4, -2);
+  }
+  for (;;) {
+    const open = /^\((?:\?:|\?<[A-Za-z_$][\w$]*>)?/.exec(body);
+    if (!open || closingParen(body, 0) !== body.length - 1) break;
+    body = body.slice(open[0].length, -1);
+  }
+  const parts = splitAlternatives(body);
+  if (parts.length < 2) return undefined;
+  return parts.map(p => (anchored ? `^(?:${p})$` : p));
+}
+
+/** Samples matched by any alternative of `re` the screen finds linear (never times out). */
+function linearAlternativeHits(re: RegExp, texts: readonly string[]): boolean[] {
+  const hits = texts.map(() => false);
+  for (const alt of alternatives(re.source) ?? []) {
+    if (unsafeRegexReason(alt)) continue;
+    let r: RegExp;
+    try {
+      r = new RegExp(alt, strip(re.flags));
+    } catch {
+      continue;
+    }
+    texts.forEach((t, i) => { hits[i] ||= r.test(t); });
+  }
+  return hits;
+}
+
+/**
+ * Whether `re` matches each sample (`re.test`). With `untilMiss` the samples
+ * are tried in order and the first miss ends the run (the rest read as
+ * misses): a caller asking "does it match all of these" passes the shortest
+ * samples first, so a pattern that fails is told apart before it can
+ * backtrack on a long one.
+ */
+export function runSamples(
+  re: RegExp,
+  samples: readonly string[],
+  opts: { untilMiss?: boolean; budgetMs?: number; budget?: RegexBudget } = {},
+): SampleRun {
   const texts = samples.map(s => (s.length > MAX_SAMPLE_LENGTH ? s.slice(0, MAX_SAMPLE_LENGTH) : s));
   const untilMiss = !!opts.untilMiss;
   if (!unsafeRegexReason(re.source)) {
-    const plain = new RegExp(re.source, re.flags.replace(/[gy]/g, ''));
+    const plain = new RegExp(re.source, strip(re.flags));
     let missed = false;
-    return texts.map(t => !(missed && untilMiss) && (plain.test(t) || ((missed = true), false)));
+    return { hits: texts.map(t => !(missed && untilMiss) && (plain.test(t) || ((missed = true), false))), complete: true };
   }
+  const budget = opts.budget;
+  const limit = Math.min(opts.budgetMs ?? REGEX_SAMPLE_BUDGET_MS, budget ? budget.remainingMs : Infinity);
+  if (limit <= 0) return { hits: linearAlternativeHits(re, texts), complete: false, reason: 'budget' };
+
   sandbox ??= createContext(Object.create(null));
   sandbox.source = re.source;
-  sandbox.flags = re.flags.replace(/[gy]/g, '');
+  sandbox.flags = strip(re.flags);
   sandbox.texts = texts;
   sandbox.untilMiss = untilMiss;
+  sandbox.out = undefined;
+  const started = performance.now();
   try {
-    const out = runInContext(
-      '(() => { const r = new RegExp(source, flags); let missed = false; return texts.map(t => !(missed && untilMiss) && (r.test(t) || ((missed = true), false))); })()',
+    // results are kept as they come, so a timeout keeps the samples already matched
+    runInContext(
+      '(() => { out = []; const r = new RegExp(source, flags); let missed = false; for (const t of texts) out.push(!(missed && untilMiss) && (r.test(t) || ((missed = true), false))); })()',
       sandbox,
-      { timeout: opts.budgetMs ?? REGEX_SAMPLE_BUDGET_MS },
-    ) as unknown;
-    return Array.isArray(out) ? out.map(Boolean) : undefined;
+      { timeout: Math.max(1, Math.ceil(limit)) },
+    );
+    const out = sandbox.out as unknown;
+    if (Array.isArray(out) && out.length === texts.length) return { hits: out.map(Boolean), complete: true };
+    return { hits: texts.map(() => false), complete: false, reason: 'timeout' };
   } catch {
-    return undefined;
+    const partial = Array.isArray(sandbox.out) ? (sandbox.out as unknown[]).map(Boolean) : [];
+    const alt = linearAlternativeHits(re, texts);
+    return { hits: texts.map((_, i) => !!partial[i] || alt[i]), complete: false, reason: 'timeout' };
   } finally {
+    if (budget) budget.remainingMs -= performance.now() - started;
     sandbox.texts = undefined;
+    sandbox.out = undefined;
   }
+}
+
+/** `runSamples` hits, or undefined when the run is incomplete ("not evaluated"). */
+export function testSamples(re: RegExp, samples: readonly string[], opts: { untilMiss?: boolean; budgetMs?: number; budget?: RegexBudget } = {}): boolean[] | undefined {
+  const run = runSamples(re, samples, opts);
+  return run.complete ? run.hits : undefined;
 }
