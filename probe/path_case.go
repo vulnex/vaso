@@ -52,6 +52,9 @@ func canonicalCaseLocked(p string) string {
 	name := filepath.Base(p)
 	dir := canonicalCaseLocked(parent)
 	out := filepath.Join(dir, storedName(dir, name))
+	if filepath.Base(out) == name {
+		out = anchorSpelling(out)
+	}
 	if len(caseCache) >= maxCaseCache {
 		caseCache = map[string]string{}
 		caseNames = map[string][]string{}
@@ -103,9 +106,8 @@ func storedName(dir, name string) string {
 			}
 		}
 	}
-	if ascii {
-		return name
-	}
+	// An ASCII name stored with letters full case folding maps to it (`weiss`
+	// opens `weiß`, `fix` opens `ﬁx` on APFS) is found by identity too
 	var same []string
 	for _, n := range names {
 		if nst, err := os.Lstat(filepath.Join(dir, n)); err == nil && os.SameFile(st, nst) {
@@ -116,6 +118,91 @@ func storedName(dir, name string) string {
 		return same[0]
 	}
 	return name
+}
+
+// identityAnchors are directories whose stored spelling is known — every
+// scanned home, each directory above one, and the credential stores in each
+// (sinkSearchRoots) — with their identity. A path component that is one of
+// them is spelled as the anchor, whatever letters it was written in and
+// whether or not its parent may be listed: on a case-insensitive volume
+// `weiss` opens `weiß` (full case folding), and a parent the probe may only
+// search lists nothing to respell from. Identity decides, never the name.
+var identityAnchors []identityAnchor
+
+type identityAnchor struct {
+	path string
+	info os.FileInfo
+}
+
+// maxIdentityAnchors bounds the anchor list (homes × depth + stores).
+const maxIdentityAnchors = 4096
+
+// setIdentityAnchors records the anchors for homes (see identityAnchors).
+// Holds caseMu.
+func setIdentityAnchorsLocked(homes []string) {
+	identityAnchors = nil
+	seen := make(map[string]bool)
+	add := func(p string) {
+		p = filepath.Clean(p)
+		if seen[p] || len(identityAnchors) >= maxIdentityAnchors {
+			return
+		}
+		seen[p] = true
+		if info, err := os.Lstat(p); err == nil && info.IsDir() {
+			identityAnchors = append(identityAnchors, identityAnchor{p, info})
+		}
+	}
+	for _, h := range homes {
+		if h == "" || !filepath.IsAbs(h) {
+			continue
+		}
+		// An anchor is spelled without links: one spelled through a link
+		// (/tmp/h for /private/tmp/h) would respell the real path back
+		real, err := filepath.EvalSymlinks(filepath.Clean(h))
+		if err != nil {
+			continue
+		}
+		h = real
+		for cur := h; ; cur = filepath.Dir(cur) {
+			add(cur)
+			if filepath.Dir(cur) == cur {
+				break
+			}
+		}
+		for _, r := range sinkSearchRoots {
+			if r.dir {
+				add(filepath.Join(h, filepath.FromSlash(r.path)))
+			}
+		}
+	}
+}
+
+// anchorSpelling is p spelled as the anchor directory in the same parent
+// that is the same directory, or p. A directory is never hard-linked, so the
+// same identity is the same directory; only its name is respelled, as a
+// local realpath(3) does (a firmlink spelling, /System/Volumes/Data/Users/u,
+// stays what it is there too).
+func anchorSpelling(p string) string {
+	if len(identityAnchors) == 0 {
+		return p
+	}
+	dir := filepath.Dir(p)
+	var st os.FileInfo
+	for _, a := range identityAnchors {
+		if a.path == p || filepath.Dir(a.path) != dir {
+			continue
+		}
+		if st == nil {
+			var err error
+			if st, err = os.Lstat(p); err != nil || !st.IsDir() {
+				return p
+			}
+		}
+		if os.SameFile(st, a.info) {
+			return a.path
+		}
+	}
+	return p
 }
 
 // isASCII: s holds only ASCII bytes (no other normalization form exists).
@@ -167,12 +254,14 @@ func noteRespelled(written, stored string) {
 }
 
 // recordRespellings makes every respelling canonicalCase does while the
-// collector runs a ResolvedDirs entry — the CLI resolves a home written in
+// collector runs a ResolvedDirs entry, with homes (and what is above and in
+// them) as identity anchors — the CLI resolves a home written in
 // other letters through it, as a local realpath does. The returned func
 // stops recording.
-func recordRespellings(snapshot *ProbeSnapshot) func() {
+func recordRespellings(snapshot *ProbeSnapshot, homes []string) func() {
 	caseMu.Lock()
 	caseCache, caseNames = map[string]string{}, map[string][]string{}
+	setIdentityAnchorsLocked(homes)
 	caseRecorder = func(written, stored string) {
 		if !filepath.IsAbs(written) || !filepath.IsAbs(stored) {
 			return
@@ -190,6 +279,7 @@ func recordRespellings(snapshot *ProbeSnapshot) func() {
 	return func() {
 		caseMu.Lock()
 		caseRecorder = nil
+		identityAnchors = nil
 		caseMu.Unlock()
 	}
 }

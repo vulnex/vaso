@@ -155,6 +155,8 @@ type collector struct {
 	targets resolvedTargets
 	// resolved remembers what folders resolve to (resolve_cache.go)
 	resolved resolveCache
+	// sinkIDs: identities of credential-store files (hard_links.go)
+	sinkIDs sinkIdentities
 }
 
 // inExcludedDir reports whether match lies under an excluded directory that
@@ -311,10 +313,10 @@ func Collect(manifest ProbeManifest, escalate bool) ProbeSnapshot {
 		PrivateGroups:  collectPrivateGroups(),
 	}
 	c := &collector{budget: maxTotalContentBytes}
-	defer recordRespellings(&snapshot)()
 	for _, h := range homes {
 		c.homes = append(c.homes, h.Path)
 	}
+	defer recordRespellings(&snapshot, append([]string{homedir}, c.homes...))()
 
 	// Track scanned users
 	for _, h := range homes {
@@ -597,6 +599,11 @@ func (c *collector) collectGlob(snapshot *ProbeSnapshot, pattern string) {
 		// A link is recorded (name and target, never what it points to)
 		// wherever it leads: SKL-013 reports a link out of the tree from it
 		recordSymlink(snapshot.Symlinks, match)
+		// …and, for one into a credential store, every hop to it (names and
+		// targets only): SKL-013 judges where it really leads, as locally
+		if c.inSkillTree && linkIntoSink(match, sinkSet(globBase(pattern))) {
+			c.recordLinkChain(snapshot, match)
+		}
 		// A config-derived tree's entries outside its user's home or in a
 		// credential store (as named or resolved) aren't collected — except
 		// a file that really is in one through a link (a skills dir linked
@@ -670,6 +677,10 @@ func (c *collector) collectFileLimit(path, base string, metadataOnly bool, limit
 	if c.inSkillTree && !c.configTree && real != filepath.Clean(path) {
 		target = real
 	}
+	hardSink := ""
+	if !metadataOnly {
+		hardSink = c.hardLinkedSink(path, base, info)
+	}
 	switch {
 	// Not a regular file (a FIFO, a device, a link to /dev/tty) before
 	// anything else: a metadata-only credential path replaced by one must not
@@ -689,6 +700,11 @@ func (c *collector) collectFileLimit(path, base string, metadataOnly bool, limit
 	// linked to ~/.claude): judged by where the file is, not how it is spelled
 	case c.resolvedIntoSinkAt(path, real, base):
 		return omitted("sensitive")
+	// …or that is a credential-store file under another name: a hard link
+	case hardSink != "":
+		e := omitted("sensitive")
+		e.HardLinkOf = hardSink
+		return e
 	case target != "" && c.targets.metadataOnly(target):
 		return omitted("metadata")
 	// In a config-derived tree: nothing behind a link out of the user's home

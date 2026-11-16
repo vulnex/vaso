@@ -16,8 +16,8 @@ func TestSensitiveSinksMatchTS(t *testing.T) {
 	}
 	var ts []string
 	for _, m := range regexp.MustCompile(`(?m)^\s*\{ re: /(.*)/([a-z]*), label:`).FindAllStringSubmatch(string(src), -1) {
-		if m[2] != "i" {
-			t.Fatalf("TS sink /%s/%s: the probe compiles every sink case-insensitively", m[1], m[2])
+		if m[2] != "iu" {
+			t.Fatalf("TS sink /%s/%s: the probe compiles every sink case-insensitively with Unicode folding (iu)", m[1], m[2])
 		}
 		ts = append(ts, m[1])
 	}

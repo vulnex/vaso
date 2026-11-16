@@ -4,6 +4,7 @@ import { relEscapes } from './path-rel.js';
 import { classifySensitivePath } from '../analyzers/sensitive-paths.js';
 import { linkCap, linkScope } from './skill-root-scope.js';
 import type { LinkCapReason } from './skill-root-scope.js';
+import { hardLinkedSink } from './hard-link-sinks.js';
 
 /**
  * Skills are often installed as symlinks — `~/.codex/skills/<name>` pointing
@@ -222,6 +223,7 @@ async function walk(
     }
   }
   entries = entries.filter(e => !inSinkByTarget(dir, roots[roots.length - 1], e, named));
+  entries = await withoutHardLinkedSinks(fs, dir, entries, named);
   return follow(fs, dir, entries, roots, visited, depth, named, rules);
 }
 
@@ -239,9 +241,26 @@ export async function skillFileInSink(fs: FSProvider, root: string, file: string
     cache.set(parent, real);
   }
   const target = join(real, basename(file));
-  if (target === file) return false;
   const named = new Set([...classifySensitivePath(root), ...classifySensitivePath(file)]);
-  return classifySensitivePath(target).some(label => !named.has(label));
+  if (target !== file && classifySensitivePath(target).some(label => !named.has(label))) return true;
+  return (await hardLinkedSink(fs, file, named)) !== undefined;
+}
+
+/**
+ * `entries` without the files that are a credential-store file under another
+ * name — a hard link (hard-link-sinks.ts) — to a store neither the walked
+ * root nor the file's own spelling names. Never read, as the probe never
+ * ships them (hardLinkedSink in probe/hard_links.go).
+ */
+async function withoutHardLinkedSinks(fs: FSProvider, dir: string, entries: DirentInfo[], named: ReadonlySet<string>): Promise<DirentInfo[]> {
+  if (typeof fs.hardLinkOf !== 'function') return entries;
+  const drop = new Set<DirentInfo>();
+  for (let i = 0; i < entries.length; i += 64) {
+    await Promise.all(entries.slice(i, i + 64).map(async e => {
+      if (e.isFile && !e.isSymbolicLink && await hardLinkedSink(fs, join(e.parentPath ?? dir, e.name), named) !== undefined) drop.add(e);
+    }));
+  }
+  return drop.size === 0 ? entries : entries.filter(e => !drop.has(e));
 }
 
 /**

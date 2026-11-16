@@ -152,6 +152,10 @@ type FileEntry struct {
 	// Exists false, the file may still be there) or the file exists but
 	// can't be opened (Exists true, Mode set). Never "absent" or "empty".
 	Denied bool `json:"denied,omitempty"`
+	// The credential-store file this one is a hard link to (probe ≥ 1.5.0;
+	// omitted "sensitive"): the same file under another name, so SKL-013
+	// reports it like a link into that store.
+	HardLinkOf string `json:"hardLinkOf,omitempty"`
 }
 
 // CommandOutput holds the result of an executed command.

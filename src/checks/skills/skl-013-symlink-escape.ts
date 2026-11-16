@@ -6,6 +6,7 @@ import { classifySensitivePath } from '../../analyzers/sensitive-paths.js';
 import { noSkillsDirResult } from './skill-files.js';
 import { linkScope } from '../../core/skill-root-scope.js';
 import { MAX_LINKED_SKILL_ENTRIES, MAX_SKILL_TREE_ENTRIES } from '../../core/skill-tree-count.js';
+import { hardLinkedSink } from '../../core/hard-link-sinks.js';
 
 /**
  * SKL-013 — Workspace Symlink Escape (GhostApproval / CWE-61 + CWE-451).
@@ -49,6 +50,8 @@ interface SymlinkFinding {
   /** Its code is not scanned (SKL-002): linked to where no skills tree is
    *  walked, or to a tree over the entry limit. */
   unscanned?: 'outside' | 'limit' | 'total' | 'truncated';
+  /** A hard link: the same file as `resolvedTarget`, under another name. */
+  hard?: boolean;
 }
 
 function resolveTarget(rawTarget: string, linkDir: string, home: string): string {
@@ -107,8 +110,21 @@ export const skl013 = defineCheck({
         continue; // directory may not exist
       }
 
+      const rootLabels = new Set(classifySensitivePath(root));
       for (const entry of entries) {
-        if (!entry.isSymbolicLink) continue;
+        if (!entry.isSymbolicLink) {
+          // A credential-store file under another name in the tree: a hard
+          // link, judged by identity (hard-link-sinks.ts)
+          if (!entry.isFile) continue;
+          const filePath = entry.parentPath ? join(entry.parentPath, entry.name) : join(dir, entry.name);
+          if (seen.has(filePath)) continue;
+          seen.add(filePath);
+          const sink = await hardLinkedSink(ctx.fs, filePath, rootLabels);
+          if (sink !== undefined) {
+            findings.push({ linkPath: filePath, rawTarget: sink, resolvedTarget: sink, sensitiveLabels: classifySensitivePath(sink), skillInstall: false, hard: true });
+          }
+          continue;
+        }
         const linkPath = entry.parentPath ? join(entry.parentPath, entry.name) : join(dir, entry.name);
         if (seen.has(linkPath)) continue;
         seen.add(linkPath);
@@ -124,10 +140,15 @@ export const skl013 = defineCheck({
         // link stays inside the workspace — benign
         if (!escapesRoot(root, resolvedTarget) || !escapesRoot(rootReal, resolvedTarget)) continue;
 
+        // …and where the link really leads: its whole chain followed and
+        // spelled as stored (`~/.ßh` opens `~/.ssh` on a case-insensitive
+        // volume; `hop → .ssh`) — judged by what it reaches, not its spelling
+        const realTarget = await ctx.fs.realpath(linkPath).catch(() => undefined);
         const sensitiveLabels = [
           ...new Set([
             ...classifySensitivePath(resolvedTarget),
             ...classifySensitivePath(rawTarget),
+            ...(realTarget !== undefined ? classifySensitivePath(realTarget) : []),
           ]),
         ];
         // Tools such as gstack install each skill as a link into their
@@ -149,8 +170,10 @@ export const skl013 = defineCheck({
     const anySensitive = findings.some((f) => f.sensitiveLabels.length > 0);
     const evidence: Evidence[] = findings.map((f) => ({
       file: f.linkPath,
-      snippet: `${f.linkPath} → ${f.rawTarget}`,
-      detail: f.sensitiveLabels.length > 0
+      snippet: f.hard ? `${f.linkPath} ⇔ ${f.rawTarget} (hard link)` : `${f.linkPath} → ${f.rawTarget}`,
+      detail: f.hard
+        ? `Hard link to ${f.sensitiveLabels.join(', ')} (${f.resolvedTarget}): the same file under a workspace name. An agent instructed to edit or share this "local" file reads or writes the credential itself.`
+        : f.sensitiveLabels.length > 0
         ? `Symlink resolves outside the workspace to ${f.sensitiveLabels.join(', ')} (${f.resolvedTarget}). An agent instructed to edit this "local" file writes to the sensitive target instead — GhostApproval-style informed-consent bypass.`
         : f.unscanned === 'outside'
           ? `Skill installed as a link to ${f.resolvedTarget} — a place no skills tree is walked, so its code is not scanned (see SKL-002); edits to it change what is there.`
@@ -172,7 +195,7 @@ export const skl013 = defineCheck({
       passed: false,
       severity,
       message: anySensitive
-        ? `${findings.length} workspace symlink(s) escape the directory, ${sensitiveCount} reaching credential stores or shell startup files`
+        ? `${findings.length} workspace link(s) escape the directory, ${sensitiveCount} reaching credential stores or shell startup files`
         : `${findings.length} workspace symlink(s) resolve outside the scanned directory`,
       evidence,
       fixDescription:

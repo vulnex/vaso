@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { spawn, execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
-import { realpathSync } from 'node:fs';
+import { chmod, link, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import { existsSync, realpathSync } from 'node:fs';
 import { dirname, extname, basename, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -720,7 +720,27 @@ const SKILL_LINK_SINKS = [
   '.cursor/skills/gh/hosts.yml',
 ];
 
-async function plantSkillLinks(home: string): Promise<void> {
+/**
+ * Credential-store files under another name in a skills tree — hard links,
+ * which no path check sees: recorded, never shipped, and named for the store
+ * file they are (hardLinkOf). The store files under their own names are what
+ * they always were (hosts.yml: a collected config, disguised).
+ */
+const SKILL_HARD_LINKS: Record<string, string> = {
+  '.claude/skills/canary-hard/id.txt': '.ssh/id_canary_hard',
+  '.claude/skills/canary-hard/c.json': '.claude/.credentials.json',
+  '.claude/skills/canary-hard/hosts.yml': '.config/gh/hosts.yml',
+};
+
+/**
+ * On a volume that folds names fully (APFS: `.ßh` opens `.ssh`, `.conﬁg`
+ * opens `.config`), links spelled that way into credential stores: a skill
+ * folder, an agent config, a config-set tree. Judged by where they lead.
+ */
+const FOLDED_SKILL_LINK = '.claude/skills/canary-fold/k';
+const FOLDED_CONFIG_LINK = '.copilot/config.json';
+
+async function plantSkillLinks(home: string): Promise<boolean> {
   const put = async (rel: string, content: string) => {
     await mkdir(dirname(join(home, rel)), { recursive: true });
     await writeFile(join(home, rel), content);
@@ -734,6 +754,17 @@ async function plantSkillLinks(home: string): Promise<void> {
     await mkdir(dirname(join(home, root)), { recursive: true });
     await symlink(join(home, target), join(home, root));
   }
+  await put('.ssh/id_canary_hard', pemFile('.ssh/id_canary_hard'));
+  await put('.claude/skills/canary-hard/SKILL.md', '---\nname: canary-hard\n---\n');
+  for (const [rel, target] of Object.entries(SKILL_HARD_LINKS)) await link(join(home, target), join(home, rel));
+  if (!existsSync(join(home, '.ßh')) || !existsSync(join(home, '.conﬁg'))) return false;
+  await put('.claude/skills/canary-fold/SKILL.md', '---\nname: canary-fold\n---\n');
+  await symlink(join(home, '.ßh'), join(home, FOLDED_SKILL_LINK));
+  await put('.ssh/cop/config.json', jsonFile('.ssh/cop/config.json behind a folded link'));
+  await rm(join(home, FOLDED_CONFIG_LINK), { force: true });
+  await mkdir(dirname(join(home, FOLDED_CONFIG_LINK)), { recursive: true });
+  await symlink(join(home, '.ßh/cop/config.json'), join(home, FOLDED_CONFIG_LINK));
+  return true;
 }
 
 /** A directory beside the scanned home, standing in for another user's. */
@@ -750,6 +781,7 @@ describe.skipIf(!goAvailable)('probe privacy canary', () => {
   /** The collected files' text, decoded (as the snapshot's JSON strings and base64 hold it). */
   let contentText = '';
   let storeLinks: { links: string[]; followed: string } = { links: [], followed: '' };
+  let folded = false;
 
   beforeAll(async () => {
     const work = await mkdtemp(join(tmpdir(), 'vaso-canary-'));
@@ -790,7 +822,7 @@ describe.skipIf(!goAvailable)('probe privacy canary', () => {
     await writeFile(geminiIndex, contentFor('.gemini/tmp/proj-1/memory/MEMORY.md'));
     await plantConfigRoots(home);
     storeLinks = await plantStoreLinks(home, work);
-    await plantSkillLinks(home);
+    folded = await plantSkillLinks(home);
     await writeFile(join(work, 'manifest.json'), m.stdout);
 
     // Credential variables under every collected prefix (the probe redacts them)
@@ -923,6 +955,29 @@ describe.skipIf(!goAvailable)('probe privacy canary', () => {
       expect(e?.omitted, rel).toBe('sensitive');
       expect(e?.content ?? '', rel).toBe('');
     }
+  });
+
+  it('ships no credential-store file a skills tree holds under another name (hard link)', () => {
+    const snap = JSON.parse(snapshot) as { files: Record<string, { exists: boolean; content?: string; omitted?: string; hardLinkOf?: string }> };
+    for (const [rel, target] of Object.entries(SKILL_HARD_LINKS)) {
+      const e = snap.files[join(home, rel)];
+      expect(e?.exists, `${rel} recorded`).toBe(true);
+      expect(e?.omitted, rel).toBe('sensitive');
+      expect(e?.hardLinkOf, rel).toBe(join(home, target));
+      expect(e?.content ?? '', rel).toBe('');
+    }
+    const hosts = snap.files[join(home, '.config/gh/hosts.yml')];
+    expect(hosts?.omitted, 'the store file under its own name').toBeUndefined();
+    expect(hosts?.hardLinkOf).toBeUndefined();
+  });
+
+  it.runIf(process.platform === 'darwin')('judges links spelled with folded letters by where they lead', () => {
+    if (!folded) return;
+    const snap = JSON.parse(snapshot) as { files: Record<string, { exists: boolean; content?: string; omitted?: string }> };
+    const config = snap.files[join(home, FOLDED_CONFIG_LINK)];
+    expect(config?.omitted).toBe('sensitive');
+    expect(config?.content ?? '').toBe('');
+    expect(Object.keys(snap.files).filter(p => p.startsWith(join(home, FOLDED_SKILL_LINK) + '/'))).toEqual([]);
   });
 
   it('ships no canary', () => {

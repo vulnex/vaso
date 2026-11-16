@@ -118,7 +118,9 @@ func linkIntoSink(link string, named map[int]bool) bool {
 		return false
 	}
 	var targets []string
-	if real, err := filepath.EvalSymlinks(link); err == nil {
+	// spelled as stored (realPath): `.ßh` opens `.ssh` on a case-insensitive
+	// volume, and only the stored name is a sink
+	if real, err := realPath(link); err == nil {
 		targets = append(targets, real)
 	}
 	if raw, err := os.Readlink(link); err == nil {
@@ -144,7 +146,7 @@ func linkIntoSink(link string, named map[int]bool) bool {
 // linked to ~/.claude lists .credentials.json, one linked to ~/.config lists
 // gh/hosts.yml. Mirrors inSinkByTarget in src/core/skill-walk.ts.
 func resolvedIntoSink(p, base string) bool {
-	real, err := filepath.EvalSymlinks(p)
+	real, err := realPath(p)
 	if err != nil {
 		return false
 	}

@@ -11,35 +11,37 @@ export interface SensitiveSink {
   label: string;
 }
 
+// `iu`: Unicode case folding, as the probe's `(?i)` folds (ſ is s, the
+// Kelvin sign K is k) — a case-insensitive volume opens `.ſſh` as `.ssh`.
 export const SENSITIVE_SINKS: SensitiveSink[] = [
-  { re: /(^|\/)\.ssh(\/|$)/i, label: 'SSH keys/config (~/.ssh)' },
-  { re: /authorized_keys/i, label: 'SSH authorized_keys (remote-access persistence)' },
-  { re: /(^|\/)\.aws(\/|$)/i, label: 'AWS credentials (~/.aws)' },
-  { re: /(^|\/)\.gnupg(\/|$)/i, label: 'GnuPG keyring (~/.gnupg)' },
-  { re: /(^|\/)\.kube(\/|$)/i, label: 'Kubernetes credentials (~/.kube)' },
-  { re: /(^|\/)\.docker(\/|$)/i, label: 'Docker credentials (~/.docker)' },
-  { re: /(^|\/)\.(bashrc|bash_profile|bash_login|bash_logout|profile|zshrc|zprofile|zshenv|zlogin)$/i, label: 'shell startup file (code-execution persistence)' },
-  { re: /^\/etc(\/|$)/i, label: 'system configuration (/etc)' },
-  { re: /(^|\/)\.config\/gh(\/|$)/i, label: 'GitHub CLI credentials (~/.config/gh)' },
-  { re: /(^|\/)\.config\/gcloud(\/|$)/i, label: 'Google Cloud credentials (~/.config/gcloud)' },
-  { re: /(^|\/)\.azure(\/|$)/i, label: 'Azure credentials (~/.azure)' },
-  { re: /(^|\/)\.password-store(\/|$)/i, label: 'password store credentials (~/.password-store)' },
-  { re: /(^|\/)Library\/Keychains(\/|$)/i, label: 'macOS keychain credentials (~/Library/Keychains)' },
-  { re: /(^|\/)\.codex\/auth\.json$/i, label: 'Codex credentials (~/.codex/auth.json)' },
-  { re: /(^|\/)\.(netrc|git-credentials|pgpass|pypirc|npmrc)$/i, label: 'credentials file (.netrc, .git-credentials, .pgpass, .pypirc, .npmrc)' },
-  { re: /(^|\/)(Library\/Application Support\/(Google\/Chrome|Chromium|BraveSoftware|Microsoft Edge|Firefox|Arc)|\.config\/(google-chrome|chromium|BraveSoftware|microsoft-edge)|\.mozilla|Library\/Cookies)(\/|$)/i, label: 'browser profile credentials (cookies, saved passwords)' },
+  { re: /(^|\/)\.ssh(\/|$)/iu, label: 'SSH keys/config (~/.ssh)' },
+  { re: /authorized_keys/iu, label: 'SSH authorized_keys (remote-access persistence)' },
+  { re: /(^|\/)\.aws(\/|$)/iu, label: 'AWS credentials (~/.aws)' },
+  { re: /(^|\/)\.gnupg(\/|$)/iu, label: 'GnuPG keyring (~/.gnupg)' },
+  { re: /(^|\/)\.kube(\/|$)/iu, label: 'Kubernetes credentials (~/.kube)' },
+  { re: /(^|\/)\.docker(\/|$)/iu, label: 'Docker credentials (~/.docker)' },
+  { re: /(^|\/)\.(bashrc|bash_profile|bash_login|bash_logout|profile|zshrc|zprofile|zshenv|zlogin)$/iu, label: 'shell startup file (code-execution persistence)' },
+  { re: /^\/etc(\/|$)/iu, label: 'system configuration (/etc)' },
+  { re: /(^|\/)\.config\/gh(\/|$)/iu, label: 'GitHub CLI credentials (~/.config/gh)' },
+  { re: /(^|\/)\.config\/gcloud(\/|$)/iu, label: 'Google Cloud credentials (~/.config/gcloud)' },
+  { re: /(^|\/)\.azure(\/|$)/iu, label: 'Azure credentials (~/.azure)' },
+  { re: /(^|\/)\.password-store(\/|$)/iu, label: 'password store credentials (~/.password-store)' },
+  { re: /(^|\/)Library\/Keychains(\/|$)/iu, label: 'macOS keychain credentials (~/Library/Keychains)' },
+  { re: /(^|\/)\.codex\/auth\.json$/iu, label: 'Codex credentials (~/.codex/auth.json)' },
+  { re: /(^|\/)\.(netrc|git-credentials|pgpass|pypirc|npmrc)$/iu, label: 'credentials file (.netrc, .git-credentials, .pgpass, .pypirc, .npmrc)' },
+  { re: /(^|\/)(Library\/Application Support\/(Google\/Chrome|Chromium|BraveSoftware|Microsoft Edge|Firefox|Arc)|\.config\/(google-chrome|chromium|BraveSoftware|microsoft-edge)|\.mozilla|Library\/Cookies)(\/|$)/iu, label: 'browser profile credentials (cookies, saved passwords)' },
   // Agents' own token stores — the credential files the probe manifest
   // already ships as metadata only (guard test in sensitive-paths.test.ts).
   // Copilot CLI's mcp-secrets / mcp-oauth-config are private stores, judged
   // by store-links.ts. Appended: scope labels name sinks by index.
-  { re: /(^|\/)\.claude\/\.credentials\.json$/i, label: 'Claude Code credentials (~/.claude/.credentials.json)' },
-  { re: /(^|\/)(\.local\/share\/opencode|\.config\/nanoclaw|\.hermes|\.(openclaw(-[^/]+)?|clawdbot)(\/agents\/[^/]+\/agent)?)\/(auth|auth-profiles|auth-state|credentials|account|registry-auth|device-key)\.json$/i, label: 'agent credentials (auth.json, credentials.json)' },
-  { re: /(^|\/)\.(openclaw(-[^/]+)?|clawdbot)\/credentials(\/|$)|(^|\/)\.hermes\/mcp-tokens(\/|$)|(^|\/)\.nanobot\/(auth|whatsapp-auth)(\/|$)/i, label: 'agent credentials directory (OpenClaw, Hermes, Nanobot)' },
-  { re: /(^|\/)\.(gemini|qwen)\/(oauth_creds|google_accounts|mcp-oauth-tokens|a2a-oauth-tokens)\.json$/i, label: 'Gemini CLI / Qwen Code credentials (oauth_creds.json)' },
-  { re: /(^|\/)\.local\/share\/devin\/credentials\.toml$|(^|\/)\.abacusai\/keystore\.enc[^/]*$/i, label: 'agent credentials (Devin CLI credentials.toml, Abacus.AI keystore)' },
-  { re: /(^|\/)(\.grokbot|\.cursor\/sand|sand-data)\/(local-exec-daemon-credential|host-token)\.json$|(^|\/)Grok Bot\/(sand|user)-secrets\.json$/i, label: 'Grok Bot credentials (local exec credential, secret stores)' },
-  { re: /(^|\/)\.ironclaw\/reborn\/(webui-token|([^/]+\/)?\.reborn-local-dev-secrets-master-key)$|(^|\/)\.?zeroclaw\/\.secret_key$/i, label: 'agent credentials (IronClaw WebUI token / master key, ZeroClaw secret key)' },
-  { re: /(^|\/)openshell\/(gateway\/credentials|docker-sandbox-tokens|gateways\/[^/]+\/mtls)(\/|$)|(^|\/)openshell\/gateways\/[^/]+\/oidc_token\.json$/i, label: 'OpenShell credentials (key-encryption key, sandbox tokens, mTLS keys)' },
+  { re: /(^|\/)\.claude\/\.credentials\.json$/iu, label: 'Claude Code credentials (~/.claude/.credentials.json)' },
+  { re: /(^|\/)(\.local\/share\/opencode|\.config\/nanoclaw|\.hermes|\.(openclaw(-[^/]+)?|clawdbot)(\/agents\/[^/]+\/agent)?)\/(auth|auth-profiles|auth-state|credentials|account|registry-auth|device-key)\.json$/iu, label: 'agent credentials (auth.json, credentials.json)' },
+  { re: /(^|\/)\.(openclaw(-[^/]+)?|clawdbot)\/credentials(\/|$)|(^|\/)\.hermes\/mcp-tokens(\/|$)|(^|\/)\.nanobot\/(auth|whatsapp-auth)(\/|$)/iu, label: 'agent credentials directory (OpenClaw, Hermes, Nanobot)' },
+  { re: /(^|\/)\.(gemini|qwen)\/(oauth_creds|google_accounts|mcp-oauth-tokens|a2a-oauth-tokens)\.json$/iu, label: 'Gemini CLI / Qwen Code credentials (oauth_creds.json)' },
+  { re: /(^|\/)\.local\/share\/devin\/credentials\.toml$|(^|\/)\.abacusai\/keystore\.enc[^/]*$/iu, label: 'agent credentials (Devin CLI credentials.toml, Abacus.AI keystore)' },
+  { re: /(^|\/)(\.grokbot|\.cursor\/sand|sand-data)\/(local-exec-daemon-credential|host-token)\.json$|(^|\/)Grok Bot\/(sand|user)-secrets\.json$/iu, label: 'Grok Bot credentials (local exec credential, secret stores)' },
+  { re: /(^|\/)\.ironclaw\/reborn\/(webui-token|([^/]+\/)?\.reborn-local-dev-secrets-master-key)$|(^|\/)\.?zeroclaw\/\.secret_key$/iu, label: 'agent credentials (IronClaw WebUI token / master key, ZeroClaw secret key)' },
+  { re: /(^|\/)openshell\/(gateway\/credentials|docker-sandbox-tokens|gateways\/[^/]+\/mtls)(\/|$)|(^|\/)openshell\/gateways\/[^/]+\/oidc_token\.json$/iu, label: 'OpenShell credentials (key-encryption key, sandbox tokens, mTLS keys)' },
 ];
 
 /**

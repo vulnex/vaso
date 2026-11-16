@@ -28,7 +28,7 @@ type resolveCache struct {
 	linkSinks map[string]bool
 }
 
-// realDir is filepath.EvalSymlinks(dir), remembered.
+// realDir is realPath(dir) (resolved, in its stored spelling), remembered.
 func (c *collector) realDir(dir string) (string, bool) {
 	if c.resolved.dirs == nil {
 		c.resolved.dirs = make(map[string]string)
@@ -36,7 +36,7 @@ func (c *collector) realDir(dir string) (string, bool) {
 	if r, ok := c.resolved.dirs[dir]; ok {
 		return r, r != ""
 	}
-	r, err := filepath.EvalSymlinks(dir)
+	r, err := realPath(dir)
 	if err != nil {
 		r = ""
 	}
@@ -44,11 +44,11 @@ func (c *collector) realDir(dir string) (string, bool) {
 	return r, r != ""
 }
 
-// resolveFile is filepath.EvalSymlinks(p), cleaned, for a file whose own
+// resolveFile is realPath(p), cleaned, for a file whose own
 // link status is known: a file that is no link resolves as its folder does.
 func (c *collector) resolveFile(p string, isLink bool) (string, bool) {
 	if isLink {
-		r, err := filepath.EvalSymlinks(p)
+		r, err := realPath(p)
 		if err != nil {
 			return "", false
 		}
@@ -57,7 +57,7 @@ func (c *collector) resolveFile(p string, isLink bool) (string, bool) {
 	p = filepath.Clean(p)
 	dir, name := filepath.Split(p)
 	if name == "" || dir == "" {
-		r, err := filepath.EvalSymlinks(p)
+		r, err := realPath(p)
 		if err != nil {
 			return "", false
 		}
