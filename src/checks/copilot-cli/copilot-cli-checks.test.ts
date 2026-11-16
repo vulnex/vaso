@@ -693,7 +693,7 @@ describe.skipIf(process.platform === 'win32')('GHC-001 store files', () => {
       await symlink(aws, join(dir, 'session-state', 'abc'));
       const r = await check.run(ctx);
       expect(r.passed).toBe(false);
-      expect(r.message).toMatch(/or into a sensitive location/);
+      expect(r.message).toMatch(/1 store link\(s\) point into a sensitive location/);
       expect(r.evidence?.map(e => e.file)).toEqual([join(dir, 'session-store.db'), join(dir, 'session-state', 'abc')]);
       expect(r.evidence?.[1].detail).toMatch(/AWS credentials/);
       await check.fix!(ctx);
@@ -702,6 +702,88 @@ describe.skipIf(process.platform === 'win32')('GHC-001 store files', () => {
       const after = await check.run(ctx);
       expect(after.severity).toBe('warning');
       expect(after.fixable).toBe(false);
+    });
+  });
+
+  it('a store folder that is itself a link into a credential store is one warning; nothing behind it is walked or changed', async () => {
+    await withHome(async (dir, ctx) => {
+      const { join } = await import('node:path');
+      const { symlink, chmod, stat } = await import('node:fs/promises');
+      const aws = join(dir, '..', '.aws');
+      await put(join(aws, 'credentials'), 0o644);
+      await chmod(aws, 0o777);
+      await symlink(aws, join(dir, 'session-state'));
+      const r = await check.run(ctx);
+      expect(r.passed).toBe(false);
+      expect(r.severity).toBe('warning');
+      expect(r.fixable).toBe(false);
+      expect(r.message).toMatch(/1 store link\(s\) point into a sensitive location/);
+      expect(r.evidence?.map(e => e.file)).toEqual([join(dir, 'session-state')]);
+      expect(r.evidence?.[0].detail).toMatch(/^session-state\/ itself is a link to the folder .* \(AWS credentials/);
+      await check.fix!(ctx);
+      expect((await stat(join(aws, 'credentials'))).mode & 0o777).toBe(0o644);
+      expect((await stat(aws)).mode & 0o777).toBe(0o777);
+    });
+  });
+
+  it('a store folder linked to the home or out of it is a warning, described as such; the fix changes nothing', async () => {
+    const { mkdtemp, rm, symlink, unlink, stat } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const out = await mkdtemp(join(tmpdir(), 'vaso-ghc001x-'));
+    try {
+      await withHome(async (dir, ctx) => {
+        const home = join(dir, '..');
+        await put(join(home, 'notes.txt'), 0o644);
+        await put(join(out, 'events.jsonl'), 0o644);
+        await symlink(home, join(dir, 'session-state'));
+        const r = await check.run(ctx);
+        expect(r.severity).toBe('warning');
+        expect(r.message).toMatch(/1 store link\(s\) point to the home itself/);
+        expect(r.evidence?.map(e => e.file)).toEqual([join(dir, 'session-state')]);
+        expect(r.evidence?.[0].detail).toMatch(/ — the home itself — /);
+        await check.fix!(ctx);
+        expect((await stat(join(home, 'notes.txt'))).mode & 0o777).toBe(0o644);
+
+        await unlink(join(dir, 'session-state'));
+        await symlink(out, join(dir, 'session-state'));
+        const o = await check.run(ctx);
+        expect(o.severity).toBe('warning');
+        expect(o.message).toMatch(/1 store link\(s\) point outside the store and the home/);
+        expect(o.evidence?.[0].detail).toMatch(/, outside the store and the home — /);
+        await check.fix!(ctx);
+        expect((await stat(join(out, 'events.jsonl'))).mode & 0o777).toBe(0o644);
+      });
+    } finally {
+      await rm(out, { recursive: true, force: true });
+    }
+  });
+
+  it('a session folder linked to ~/.copilot is described as a folder holding the store', async () => {
+    await withHome(async (dir, ctx) => {
+      const { join } = await import('node:path');
+      const { symlink, mkdir } = await import('node:fs/promises');
+      await mkdir(join(dir, 'session-state'), { mode: 0o700 });
+      await symlink(dir, join(dir, 'session-state', 'abc'));
+      const r = await check.run(ctx);
+      expect(r.severity).toBe('warning');
+      expect(r.message).toMatch(/1 store link\(s\) point to a folder holding the store/);
+      expect(r.evidence?.[0].detail).toMatch(/^session-state\/ holds a link to the folder .* — a folder holding the store — /);
+    });
+  });
+
+  it('a store folder linked to an ordinary folder of the home is walked like a real one', async () => {
+    await withHome(async (dir, ctx) => {
+      const { join } = await import('node:path');
+      const { symlink, stat } = await import('node:fs/promises');
+      const sess = join(dir, '..', 'sessions');
+      await put(join(sess, 'events.jsonl'), 0o644);
+      await symlink(sess, join(dir, 'session-state'));
+      const r = await check.run(ctx);
+      expect(r.severity).not.toBe('warning');
+      expect(r.evidence?.map(e => e.file)).toEqual([join(dir, 'session-state', 'events.jsonl')]);
+      await check.fix!(ctx);
+      expect((await stat(join(sess, 'events.jsonl'))).mode & 0o077).toBe(0);
     });
   });
 

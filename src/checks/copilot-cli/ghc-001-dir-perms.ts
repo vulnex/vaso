@@ -51,21 +51,37 @@ interface Findings {
   outside: Evidence[];
   /** How many such links there are (`outside` lists at most MAX_LISTED_OUTSIDE, then a "+N more" line). */
   outsideTotal: number;
-  /** One of them is a folder linked into a sensitive location of the home. */
-  intoSensitive: boolean;
+  /** Where they lead (the message names each kind present). */
+  kinds: Set<'outside' | 'sensitive' | 'home' | 'store'>;
   /** Store files a remote scan couldn't judge (the probe didn't collect their metadata). */
   unverified: string[];
   /** Stores with more files than MAX_JUDGED_PER_STORE: only that many were judged. */
   truncated: string[];
 }
 
+/** Why a linked folder isn't walked (foreignDir). */
+type ForeignReason =
+  | { why: 'sensitive'; label: string }
+  | { why: 'outside' | 'home' | 'store' };
+
+interface StoreLink {
+  path: string;
+  target: string;
+  /** A folder link (not walked), and why. */
+  folder?: ForeignReason;
+  /** The store folder itself is the link (~/.copilot/session-state → ~/.aws). */
+  self?: boolean;
+}
+
 interface StoreListing {
   files: string[];
-  /** Links leaving the store and the home, or folders linked into a sensitive location: link → resolved target. */
-  outside: Array<{ path: string; target: string; dir?: boolean; sensitive?: string }>;
+  /** Links leaving the store and the home, or folders linked into a sensitive location, the home or a folder holding the store. */
+  outside: StoreLink[];
   /** Linked subdirectories whose files a remote scan doesn't have (the probe doesn't follow links). */
   linkedDirs: string[];
   truncated: boolean;
+  /** The store folder itself links to such a place: nothing in it is the agent's (not walked, its mode not judged). */
+  foreignSelf?: boolean;
 }
 
 /** Whether `path` is `dir` or inside it. */
@@ -124,18 +140,22 @@ async function storeFiles(ctx: ScanContext, storeDir: string): Promise<StoreList
   const outside: StoreListing['outside'] = [];
   const linkedDirs: string[] = [];
   // Both spellings of the home and the store: a target is compared by its real path
-  const roots = [storeHome(ctx), ctx.installation.installDir];
-  for (const root of [...roots]) {
+  const spellings = async (root: string): Promise<string[]> => {
+    const out = [root];
     try {
       const real = await ctx.fs.realpath(root);
-      if (typeof real === 'string' && real !== root) roots.push(real);
+      if (typeof real === 'string' && real !== root) out.push(real);
     } catch {
       // the written spelling only
     }
     // A snapshot holds no link for a linked home: the probe records where it resolves
     const recorded = (ctx.fs as { resolvedDir?(p: string): string }).resolvedDir?.(root);
-    if (recorded !== undefined && !roots.includes(recorded)) roots.push(recorded);
-  }
+    if (recorded !== undefined && !out.includes(recorded)) out.push(recorded);
+    return out;
+  };
+  const homeRoots = await spellings(storeHome(ctx));
+  const storeRoots = await spellings(ctx.installation.installDir);
+  const roots = [...homeRoots, ...storeRoots];
   const full = () => files.length > MAX_JUDGED_PER_STORE;
   const add = (path: string) => { if (!full()) files.push(path); };
   const addLink = (path: string, target: string | undefined) => {
@@ -146,17 +166,36 @@ async function storeFiles(ctx: ScanContext, storeDir: string): Promise<StoreList
     }
   };
   /**
-   * Why a linked folder resolving to `target` isn't walked: a sensitive
-   * location's label, '' when it leaves the home (or is the home, an ancestor
-   * of it, or holds the store), undefined for an ordinary folder of the home.
+   * Why a linked folder resolving to `target` isn't walked: it lands in a
+   * sensitive location, leaves the home (a folder above it too), is the home,
+   * or holds the store; undefined for an ordinary folder of the home.
    */
-  const foreignDir = (target: string): string | undefined => {
-    const sensitive = classifySensitivePath(target)[0];
-    if (sensitive) return sensitive;
-    if (!roots.some(root => within(target, root))) return '';
-    if (roots.some(root => within(root, target)) || within(storeDir, target)) return '';
+  const foreignDir = (target: string): ForeignReason | undefined => {
+    const label = classifySensitivePath(target)[0];
+    if (label) return { why: 'sensitive', label };
+    if (!roots.some(root => within(target, root))) return { why: 'outside' };
+    if (homeRoots.some(root => within(root, target))) return { why: 'home' };
+    if (storeRoots.some(root => within(root, target)) || within(storeDir, target)) return { why: 'store' };
     return undefined;
   };
+
+  // The store folder itself a link to such a place: its files aren't the
+  // agent's — not walked, and the fix changes nothing behind it
+  let selfLink = false;
+  try {
+    await ctx.fs.readlink(storeDir);
+    selfLink = true;
+  } catch {
+    // not a link (or a provider that can't tell)
+  }
+  if (selfLink) {
+    const link = await linkTarget(ctx, storeDir);
+    const folder = link?.kind === 'dir' && link.target !== undefined ? foreignDir(link.target) : undefined;
+    if (link?.target !== undefined && folder !== undefined) {
+      return { files: [], outside: [{ path: storeDir, target: link.target, folder, self: true }], linkedDirs: [], truncated: false, foreignSelf: true };
+    }
+  }
+
   const subdirFiles = async (dir: string) => {
     let entries: Awaited<ReturnType<ScanContext['fs']['readdirEntries']>>;
     try {
@@ -184,9 +223,9 @@ async function storeFiles(ctx: ScanContext, storeDir: string): Promise<StoreList
       add(path);
     } else if (e.isSymbolicLink) {
       const link = await linkTarget(ctx, path);
-      const foreign = link?.kind === 'dir' && link.target !== undefined ? foreignDir(link.target) : undefined;
-      if (link?.target !== undefined && foreign !== undefined) {
-        outside.push({ path, target: link.target, dir: true, ...(foreign ? { sensitive: foreign } : {}) });
+      const folder = link?.kind === 'dir' && link.target !== undefined ? foreignDir(link.target) : undefined;
+      if (link?.target !== undefined && folder !== undefined) {
+        outside.push({ path, target: link.target, folder });
       } else if (link?.kind === 'dir') {
         // The probe records the files behind a link that stays inside the
         // home and outside credential stores (probes newer than 1.4.1); for any other, a
@@ -211,13 +250,24 @@ async function findings(ctx: ScanContext, maxListed: number): Promise<Findings> 
   const evidence: Evidence[] = [];
   const outside: Evidence[] = [];
   let outsideTotal = 0;
-  let intoSensitive = false;
+  const kinds: Findings['kinds'] = new Set();
   const unverified: string[] = [];
   const truncated: string[] = [];
   let total = 0;
 
+  // Listed first: a store folder linked out of the store has no mode of the agent's to judge
+  const listings = new Map<string, StoreListing>();
+  for (const { dir } of PRIVATE_DIRS) {
+    try {
+      listings.set(dir, await storeFiles(ctx, join(ctx.installation.installDir, dir)));
+    } catch {
+      // store absent
+    }
+  }
+
   for (const subdir of PROTECTED_DIRS) {
     const path = subdir === '.' ? ctx.installation.installDir : join(ctx.installation.installDir, subdir);
+    if (listings.get(subdir)?.foreignSelf) continue;
     if (!(await ctx.fs.access(path))) continue;
     try {
       const perms = await queryPermissions(ctx.fs, path);
@@ -254,12 +304,8 @@ async function findings(ctx: ScanContext, maxListed: number): Promise<Findings> 
 
   for (const { dir, what } of PRIVATE_DIRS) {
     const storeDir = join(ctx.installation.installDir, dir);
-    let listing: StoreListing;
-    try {
-      listing = await storeFiles(ctx, storeDir);
-    } catch {
-      continue; // store absent
-    }
+    const listing = listings.get(dir);
+    if (!listing) continue; // store absent
     if (listing.truncated) truncated.push(storeDir);
     const open: Evidence[] = [];
     let missing = 0;
@@ -279,16 +325,22 @@ async function findings(ctx: ScanContext, maxListed: number): Promise<Findings> 
     if (listing.linkedDirs.length > 0) {
       unverified.push(`the files behind ${listing.linkedDirs.length} linked folder(s) in ${dir}/ (${listing.linkedDirs.map(p => basename(p)).join(', ')})`);
     }
-    for (const { path, target, dir: isDir, sensitive } of listing.outside) {
+    for (const { path, target, folder, self } of listing.outside) {
       outsideTotal++;
-      if (sensitive) intoSensitive = true;
+      kinds.add(folder?.why ?? 'outside');
       if (outside.length >= MAX_LISTED_OUTSIDE) continue;
+      const where = !folder ? '' : folder.why === 'sensitive' ? ` (${folder.label})`
+        : folder.why === 'home' ? ' — the home itself'
+          : folder.why === 'store' ? ' — a folder holding the store'
+            : ', outside the store and the home';
       outside.push({
         file: path,
         snippet: `-> ${target}`,
-        detail: isDir
-          ? `${dir}/ holds a link to the folder ${target}${sensitive ? ` (${sensitive})` : ', outside the store and the home'} — not the agent's own files (neither checked nor changed here), but the agent reads and writes through it`
-          : `${what} is a link to ${target}, outside the store and the home — not the agent's own file, but the agent reads and writes through it`,
+        detail: self
+          ? `${dir}/ itself is a link to the folder ${target}${where} — not the agent's own files (neither checked nor changed here), but the agent reads and writes through it`
+          : folder
+            ? `${dir}/ holds a link to the folder ${target}${where} — not the agent's own files (neither checked nor changed here), but the agent reads and writes through it`
+            : `${what} is a link to ${target}, outside the store and the home — not the agent's own file, but the agent reads and writes through it`,
       });
     }
     // Which files are listed must not depend on walk order (local vs snapshot)
@@ -308,10 +360,21 @@ async function findings(ctx: ScanContext, maxListed: number): Promise<Findings> 
     outside.push({
       file: ctx.installation.installDir,
       snippet: `+${outsideTotal - outside.length} more link(s)`,
-      detail: `${outsideTotal - outside.length} more store link(s) point outside the store and the home (not listed)`,
+      detail: `${outsideTotal - outside.length} more store link(s) ${linkPlaces(kinds)} (not listed)`,
     });
   }
-  return { evidence, total, outside, outsideTotal, intoSensitive, unverified, truncated };
+  return { evidence, total, outside, outsideTotal, kinds, unverified, truncated };
+}
+
+/** Where store links lead, for the message: "point outside the store and the home or into a sensitive location". */
+function linkPlaces(kinds: Findings['kinds']): string {
+  const places = [
+    ...(kinds.has('outside') ? ['outside the store and the home'] : []),
+    ...(kinds.has('sensitive') ? ['into a sensitive location'] : []),
+    ...(kinds.has('home') ? ['to the home itself'] : []),
+    ...(kinds.has('store') ? ['to a folder holding the store'] : []),
+  ];
+  return `point ${places.join(' or ')}`;
 }
 
 export const ghc001 = defineCheck({
@@ -325,7 +388,7 @@ export const ghc001 = defineCheck({
 
   async run(ctx, h) {
     if (ctx.installation.profile === 'project') return h.passed('Project configuration — ~/.copilot permissions are checked on the user install');
-    const { evidence, total, outside, outsideTotal, intoSensitive, unverified, truncated } = await findings(ctx, MAX_LISTED_PER_STORE);
+    const { evidence, total, outside, outsideTotal, kinds, unverified, truncated } = await findings(ctx, MAX_LISTED_PER_STORE);
     await markUnreachable(ctx.fs, evidence);
     const notes = [
       ...(unverified.length > 0 ? [`${unverified.join(', ')} not verified — the probe didn't collect them (checked on local scans)`] : []),
@@ -333,7 +396,7 @@ export const ghc001 = defineCheck({
     ];
     const noteText = notes.length > 0 ? `; ${notes.join('; ')}` : '';
     const outsideText = outsideTotal > 0
-      ? `${outsideTotal} store link(s) point outside the store and the home${intoSensitive ? ' or into a sensitive location' : ''}`
+      ? `${outsideTotal} store link(s) ${linkPlaces(kinds)}`
       : '';
     if (evidence.length === 0 && outside.length > 0) {
       // Not an exposure of the agent's data: worth a look, nothing to chmod
