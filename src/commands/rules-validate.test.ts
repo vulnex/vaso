@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { mkdtempSync, writeFileSync, statSync, mkdirSync, chmodSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, statSync, mkdirSync, chmodSync, symlinkSync, readFileSync, lstatSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { registerAllChecks } from '../checks/index.js';
@@ -74,5 +74,40 @@ describe.skipIf(process.platform === 'win32')('vaso rules init', () => {
     } finally {
       process.umask(old);
     }
+  });
+
+  it('creates the --dir folder owner-only whatever the umask', async () => {
+    const dir = join(mkdtempSync(join(tmpdir(), 'vaso-rules-init-')), 'a', 'rules');
+    const old = process.umask(0o000);
+    try {
+      await runRulesInit({ dir });
+      expect(statSync(dir).mode & 0o777).toBe(0o700);
+      expect(statSync(join(dir, '..')).mode & 0o777).toBe(0o700);
+    } finally {
+      process.umask(old);
+    }
+  });
+
+  it.skipIf(process.platform === 'win32')('--force replaces a symlinked example.yaml, never writing or chmodding its target', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'vaso-rules-init-'));
+    const dir = join(root, 'rules');
+    mkdirSync(dir);
+    const victim = join(root, 'victim.txt');
+    writeFileSync(victim, 'keep\n');
+    chmodSync(victim, 0o644);
+    symlinkSync('../victim.txt', join(dir, 'example.yaml'));
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    await runRulesInit({ dir });
+    expect(process.exitCode).toBe(2);
+    process.exitCode = 0;
+    expect(readFileSync(victim, 'utf-8')).toBe('keep\n');
+    await runRulesInit({ dir, force: true });
+    expect(process.exitCode).toBe(0);
+    expect(readFileSync(victim, 'utf-8')).toBe('keep\n');
+    expect(statSync(victim).mode & 0o777).toBe(0o644);
+    expect(lstatSync(join(dir, 'example.yaml')).isSymbolicLink()).toBe(false);
+    expect(statSync(join(dir, 'example.yaml')).mode & 0o777).toBe(0o600);
+    expect(readdirSync(dir)).toEqual(['example.yaml']);
   });
 });

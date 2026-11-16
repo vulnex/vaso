@@ -1,4 +1,5 @@
-import { writeFile, mkdir, chmod } from 'node:fs/promises';
+import { writeFile, mkdir, rename, rm } from 'node:fs/promises';
+import { randomBytes } from 'node:crypto';
 import { join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import chalk from 'chalk';
@@ -241,13 +242,25 @@ export async function runRulesInit(options: RulesInitOptions): Promise<void> {
   const projectTier = resolve(targetDir) === join(process.cwd(), '.vaso', 'rules');
 
   try {
-    // ~/.vaso also holds scan baselines: private, like they are (0700)
-    await mkdir(targetDir, { recursive: true, ...(options.dir === undefined ? { mode: 0o700 } : {}) });
-    // 'wx' fails on an existing file: never overwrite the user's rules unasked.
+    // Rule folders are private, like ~/.vaso and its scan baselines (0700);
+    // an existing folder is left as it is
+    await mkdir(targetDir, { recursive: true, mode: 0o700 });
     // Owner-only whatever the umask: scan refuses a rule file group or others can write
-    await writeFile(targetFile, STARTER_TEMPLATE, { encoding: 'utf-8', flag: options.force ? 'w' : 'wx', mode: 0o600 });
-    // --force over an existing file keeps its mode: tighten it the same way
-    if (options.force) await chmod(targetFile, 0o600);
+    if (options.force) {
+      // A new file renamed over the old name: an example.yaml that is a link
+      // is replaced, never written or chmodded through
+      const tmp = join(targetDir, `.example.yaml.${randomBytes(6).toString('hex')}.tmp`);
+      try {
+        await writeFile(tmp, STARTER_TEMPLATE, { encoding: 'utf-8', flag: 'wx', mode: 0o600 });
+        await rename(tmp, targetFile);
+      } catch (err) {
+        await rm(tmp, { force: true }).catch(() => {});
+        throw err;
+      }
+    } else {
+      // 'wx' fails on an existing file (or link): never overwrite the user's rules unasked
+      await writeFile(targetFile, STARTER_TEMPLATE, { encoding: 'utf-8', flag: 'wx', mode: 0o600 });
+    }
     console.log(chalk.green(`  Created starter rule file: ${show(targetFile)}\n`));
     console.log(chalk.dim('  Edit the file and run "vaso rules validate" to check it.'));
     console.log(chalk.dim(loadedByScan
