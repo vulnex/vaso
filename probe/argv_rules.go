@@ -4,6 +4,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -31,6 +32,17 @@ import (
 //     when it looks like a credential.
 //  6. MYSQL_PWD=<v>, PGPASSWORD=<v>, SSHPASS=<v>, REDISCLI_AUTH=<v> (a
 //     client's password variable) hold a password unless a reference.
+//  7. Other clients' password options take any stored value
+//     (clientPasswordFlags): sqlcmd/bcp -P, a registry login's -p/--password,
+//     smbclient -U user%<pw>, lftp -u user,<pw>, the OpenLDAP tools' -w,
+//     the MongoDB tools' -p/--password, htpasswd -b's last argument, a
+//     FreeRDP client's /p:<pw>.
+//  8. What echo or printf pipes into sudo -S or a registry login's
+//     --password-stdin is the password.
+//
+// In a command string the words are what the shell assembles
+// (commandSegments): -p"pass phrase", '-p'"pw", "-ppw" and -p$'pw' are each
+// one word.
 
 // argvHit is a credential inside token tok, bytes [from, to).
 type argvHit struct{ tok, from, to int }
@@ -132,8 +144,42 @@ func secretFlagValueSpan(flag, v string) (int, int, bool) {
 }
 
 // judgeArgv returns the credentials among tokens, one command line (a
-// segment of one: the caller splits at ; && || |).
+// segment of one: the caller splits at ; && ||). A "|" token separates the
+// commands of a pipeline: each is judged on its own, and text echoed into a
+// command that reads its password from stdin is that password (rule 8).
 func judgeArgv(tokens []string) []argvHit {
+	var hits []argvHit
+	start := 0
+	for i := 0; i <= len(tokens); i++ {
+		if i < len(tokens) && tokens[i] != "|" {
+			continue
+		}
+		for _, h := range judgeCommand(tokens[start:i]) {
+			h.tok += start
+			hits = append(hits, h)
+		}
+		start = i + 1
+	}
+	return distinctHits(append(hits, stdinPasswordHits(tokens)...))
+}
+
+// distinctHits drops a hit overlapping an earlier one in the same token.
+func distinctHits(hits []argvHit) []argvHit {
+	var out []argvHit
+next:
+	for _, h := range hits {
+		for _, o := range out {
+			if o.tok == h.tok && h.from < o.to && o.from < h.to {
+				continue next
+			}
+		}
+		out = append(out, h)
+	}
+	return out
+}
+
+// judgeCommand returns the credentials among the words of one command.
+func judgeCommand(tokens []string) []argvHit {
 	var hits []argvHit
 	client := ""
 	value := func(i int) (string, bool) {
@@ -142,12 +188,13 @@ func judgeArgv(tokens []string) []argvHit {
 		}
 		return tokens[i+1], true
 	}
+words:
 	for i := 0; i < len(tokens); i++ {
 		t := tokens[i]
 		switch {
 		case t == "--":
 			// end of options: the rest are positionals
-			return hits
+			break words
 		case clientPasswordVar.MatchString(t):
 			// MYSQL_PWD=<pw> mysql, PGPASSWORD=<pw> psql (rule 6)
 			eq := strings.IndexByte(t, '=')
@@ -206,7 +253,8 @@ func judgeArgv(tokens []string) []argvHit {
 			if from, to, ok := secretFlagValueSpan(t[:eq], t[eq+1:]); isSecretFlag(t[:eq]) && ok {
 				hits = append(hits, argvHit{i, eq + 1 + from, eq + 1 + to})
 			}
-		case flagShaped(t) && isSecretFlag(t):
+		case flagShaped(t) && isSecretFlag(t) && !strings.HasSuffix(t, "-stdin"):
+			// (--password-stdin is a switch: the password comes from stdin)
 			if v, ok := value(i); ok {
 				if from, to, ok := secretFlagValueSpan(t, v); ok {
 					hits = append(hits, argvHit{i + 1, from, to})
@@ -215,17 +263,247 @@ func judgeArgv(tokens []string) []argvHit {
 			}
 		}
 	}
+	return append(hits, clientPasswordHits(tokens)...)
+}
+
+// passwordFlag is an option through which a client takes its password:
+// short (-P <v>, or glued -P<v>) or long (--password <v>, --password=<v>).
+// With sep, the value is user<sep>password and the password is what follows
+// the first sep.
+type passwordFlag struct {
+	flag string
+	sep  byte
+}
+
+var (
+	smbPasswordFlags   = []passwordFlag{{"-U", '%'}, {"--user", '%'}, {"--password", 0}}
+	ldapPasswordFlags  = []passwordFlag{{"-w", 0}}
+	mongoPasswordFlags = []passwordFlag{{"-p", 0}, {"--password", 0}}
+	// clientPasswordFlags: the password options of other clients (rule 7).
+	// "login" is a registry CLI's login subcommand (docker login, helm
+	// registry login).
+	clientPasswordFlags = map[string][]passwordFlag{
+		"sqlcmd": {{"-P", 0}, {"-z", 0}, {"-Z", 0}},
+		"bcp":    {{"-P", 0}},
+		"login":  {{"-p", 0}, {"--password", 0}},
+		"lftp":   {{"-u", ','}},
+
+		"smbclient": smbPasswordFlags, "rpcclient": smbPasswordFlags, "smbcacls": smbPasswordFlags, "smbcquotas": smbPasswordFlags,
+
+		"ldapsearch": ldapPasswordFlags, "ldapadd": ldapPasswordFlags, "ldapmodify": ldapPasswordFlags, "ldapdelete": ldapPasswordFlags,
+		"ldapmodrdn": ldapPasswordFlags, "ldapcompare": ldapPasswordFlags, "ldapwhoami": ldapPasswordFlags, "ldapexop": ldapPasswordFlags,
+		"ldappasswd": {{"-w", 0}, {"-a", 0}, {"-s", 0}},
+
+		"mongo": mongoPasswordFlags, "mongosh": mongoPasswordFlags, "mongodump": mongoPasswordFlags, "mongorestore": mongoPasswordFlags,
+		"mongoexport": mongoPasswordFlags, "mongoimport": mongoPasswordFlags, "mongostat": mongoPasswordFlags, "mongotop": mongoPasswordFlags,
+		"mongofiles": mongoPasswordFlags,
+	}
+	// registryCLIs: commands whose login subcommand takes -p/--password
+	registryCLIs = map[string]bool{"docker": true, "podman": true, "nerdctl": true, "buildah": true, "skopeo": true, "oras": true, "helm": true}
+	// rdpClients: FreeRDP clients (/p:<password>, 2.x /gp:<password>)
+	rdpClients = map[string]bool{"xfreerdp": true, "xfreerdp3": true, "wlfreerdp": true, "wlfreerdp3": true, "sdl-freerdp": true, "sdl-freerdp3": true, "wfreerdp": true}
+	// echo's own options (echo -n pw | sudo -S)
+	echoOption = regexp.MustCompile(`^-[neE]+$`)
+	// sudo options that take a value (the next word is not an option)
+	sudoValueOption = map[string]bool{"-u": true, "-g": true, "-h": true, "-p": true, "-C": true, "-D": true, "-R": true, "-T": true, "-U": true, "-r": true, "-t": true}
+)
+
+// commandBase is the command a word names, by its file name, lowercased and
+// without .exe (sqlcmd.exe).
+func commandBase(t string) string {
+	return strings.TrimSuffix(clientName(t), ".exe")
+}
+
+// clientPasswordHits returns the passwords given through clientPasswordFlags,
+// a FreeRDP client's /p:, and htpasswd -b's password argument (rule 7).
+func clientPasswordHits(tokens []string) []argvHit {
+	var hits []argvHit
+	add := func(tok, from int, sep byte) {
+		v := tokens[tok][from:]
+		if sep != 0 {
+			k := strings.IndexByte(v, sep)
+			if k < 0 {
+				return
+			}
+			from += k + 1
+			v = v[k+1:]
+		}
+		// --password - reads it from stdin; a URL is the server (mongosh -p <url> prompts)
+		if passwordValue(v) && v != "-" && !strings.Contains(v, "://") {
+			hits = append(hits, argvHit{tok, from, len(tokens[tok])})
+		}
+	}
+	client := ""
+	for i := 0; i < len(tokens); i++ {
+		t := tokens[i]
+		if t == "--" {
+			break
+		}
+		if !strings.HasPrefix(t, "-") {
+			switch name := commandBase(t); {
+			case rdpClients[client] && strings.HasPrefix(t, "/p:"):
+				add(i, len("/p:"), 0)
+			case rdpClients[client] && strings.HasPrefix(t, "/gp:"):
+				add(i, len("/gp:"), 0)
+			case name == "htpasswd":
+				return append(hits, htpasswdHits(tokens, i)...)
+			case name == "login" && registryCLIs[client]:
+				client = "login"
+			case clientPasswordFlags[name] != nil || registryCLIs[name] || rdpClients[name]:
+				client = name
+			}
+			continue
+		}
+		for _, f := range clientPasswordFlags[client] {
+			long := strings.HasPrefix(f.flag, "--")
+			if t == f.flag {
+				if i+1 < len(tokens) && !flagShaped(tokens[i+1]) {
+					add(i+1, 0, f.sep)
+					i++
+				}
+				break
+			}
+			if long && strings.HasPrefix(t, f.flag+"=") {
+				add(i, len(f.flag)+1, f.sep)
+				break
+			}
+			if !long && strings.HasPrefix(t, f.flag) {
+				add(i, len(f.flag), f.sep)
+				break
+			}
+		}
+	}
 	return hits
 }
 
-// commandToken is one whitespace-separated word of a command line, with the
-// quotes and punctuation around it stripped and the quotes inside it left
-// out (-p"pw" is the word -ppw): word[i] is line[pos[i]], or line[from+i]
-// when pos is nil (nothing was left out inside).
+// htpasswdHits: htpasswd -b takes the password as its last argument
+// (htpasswd -b[c] file user password, htpasswd -nb user password).
+func htpasswdHits(tokens []string, at int) []argvHit {
+	batch, noFile := false, false
+	var positional []int
+	for j := at + 1; j < len(tokens); j++ {
+		t := tokens[j]
+		if len(positional) == 0 && len(t) > 1 && t[0] == '-' {
+			for k := 1; k < len(t); k++ {
+				switch t[k] {
+				case 'b':
+					batch = true
+				case 'n':
+					noFile = true
+				case 'C', 'r':
+					// -C cost, -r rounds: the value is the next word or glued
+					if k == len(t)-1 {
+						j++
+					}
+					k = len(t)
+				}
+			}
+			continue
+		}
+		positional = append(positional, j)
+	}
+	want := 2
+	if noFile {
+		want = 1
+	}
+	if !batch || len(positional) <= want || !passwordValue(tokens[positional[want]]) {
+		return nil
+	}
+	p := positional[want]
+	return []argvHit{{p, 0, len(tokens[p])}}
+}
+
+// stdinPasswordHits: what echo or printf pipes into a command that reads its
+// password from stdin (echo pw | sudo -S, | docker login --password-stdin).
+func stdinPasswordHits(tokens []string) []argvHit {
+	var hits []argvHit
+	start, prev := 0, -1
+	for i := 0; i <= len(tokens); i++ {
+		if i < len(tokens) && tokens[i] != "|" {
+			continue
+		}
+		if prev >= 0 && readsPasswordFromStdin(tokens[start:i]) {
+			hits = append(hits, echoedText(tokens, prev, start-1)...)
+		}
+		prev, start = start, i+1
+	}
+	return hits
+}
+
+// echoedText is the text echo or printf in tokens[from:to] prints, word by word.
+func echoedText(tokens []string, from, to int) []argvHit {
+	if from >= to {
+		return nil
+	}
+	k := from + 1
+	switch commandBase(tokens[from]) {
+	case "echo":
+		for k < to && echoOption.MatchString(tokens[k]) {
+			k++
+		}
+	case "printf":
+		if k < to && tokens[k] == "--" {
+			k++
+		}
+		// printf '%s\n' pw prints its arguments; printf 'pw\n' its format
+		if k < to && strings.Contains(tokens[k], "%") {
+			k++
+		}
+	default:
+		return nil
+	}
+	var hits []argvHit
+	for ; k < to; k++ {
+		if passwordValue(tokens[k]) {
+			hits = append(hits, argvHit{k, 0, len(tokens[k])})
+		}
+	}
+	return hits
+}
+
+// readsPasswordFromStdin: sudo -S/--stdin, or a registry login with
+// --password-stdin or --password - / -p -.
+func readsPasswordFromStdin(tokens []string) bool {
+	client := ""
+	for i := 0; i < len(tokens); i++ {
+		t := tokens[i]
+		name := commandBase(t)
+		if name == "sudo" && client == "" {
+			client = name
+			for j := i + 1; j < len(tokens) && strings.HasPrefix(tokens[j], "-") && tokens[j] != "--"; j++ {
+				o := tokens[j]
+				if o == "--stdin" || !strings.HasPrefix(o, "--") && strings.Contains(o, "S") && flagShapedRe.MatchString(o) {
+					return true
+				}
+				if sudoValueOption[o] {
+					j++
+				}
+			}
+			continue
+		}
+		switch {
+		case registryCLIs[name] && (client == "" || client == "sudo"):
+			client = name
+		case name == "login" && registryCLIs[client]:
+			client = "login"
+		case client == "login" && (t == "--password-stdin" || t == "--password=-" || (t == "--password" || t == "-p") && i+1 < len(tokens) && tokens[i+1] == "-"):
+			return true
+		}
+	}
+	return false
+}
+
+// commandToken is one word of a command line as the shell assembles it: the
+// quotes around and inside it left out, at any depth of escaping (-p"pw",
+// '-p'"pw" and "-ppw" are all the word -ppw), a quoted part spanning spaces
+// kept whole (-p"pass phrase"), $'…' read as bash reads it. word[i] is
+// line[pos[i]] (line[from+i] when pos is nil); a character decoded from a
+// $'…' escape is written as line[pos[i]:ends[i]].
 type commandToken struct {
 	word     string
 	from, to int
 	pos      []int
+	ends     []int
 }
 
 // at is where word[i] is in the line.
@@ -236,85 +514,213 @@ func (t commandToken) at(i int) int {
 	return t.pos[i]
 }
 
+// end is where word[i] ends in the line.
+func (t commandToken) end(i int) int {
+	if t.ends == nil {
+		return t.at(i) + 1
+	}
+	return t.ends[i]
+}
+
 // span is the part of the line holding word[a:b], from its first byte to its
 // last (a quote left out inside lies between them).
 func (t commandToken) span(a, b int) (int, int) {
-	return t.at(a), t.at(b-1) + 1
+	return t.at(a), t.end(b - 1)
+}
+
+// literal: word[a:b] is written in the line byte for byte (no escape decoded).
+func (t commandToken) literal(a, b int) bool {
+	for i := a; t.ends != nil && i < b; i++ {
+		if t.ends[i] != t.pos[i]+1 {
+			return false
+		}
+	}
+	return true
+}
+
+// commandSegment is one command of a line; pipe: its output is piped into
+// the next one.
+type commandSegment struct {
+	tokens []commandToken
+	pipe   bool
 }
 
 var commandSeparators = map[string]bool{";": true, "&&": true, "||": true, "|": true, "&": true}
 
 func isQuoteByte(ch byte) bool { return ch == '\'' || ch == '"' || ch == '`' }
 
-// quotesBalanced: every kind of quote in s comes in pairs (escaped ones
-// counted, so \"pw\" in a JSON string is a quoted word too).
-func quotesBalanced(s string) bool {
-	return strings.Count(s, "\"")%2 == 0 && strings.Count(s, "'")%2 == 0 && strings.Count(s, "`")%2 == 0
+// escapesBefore is the number of backslashes right before line[p]: how
+// deeply a quote is escaped (" in a shell line, \" in a JSON string, \\\"
+// in a shell string inside one).
+func escapesBefore(line string, p int) int {
+	k := 0
+	for p-k > 0 && line[p-k-1] == '\\' {
+		k++
+	}
+	return k
+}
+
+// sameQuote: line[p] closes the quote line[q] opened — the same character,
+// escaped as deeply.
+func sameQuote(line string, p, q int) bool {
+	return line[p] == line[q] && escapesBefore(line, p) == escapesBefore(line, q)
+}
+
+// closingQuotes maps each quote of the line to the next sameQuote: the
+// quote that closes it if it opens one.
+func closingQuotes(line string) map[int]int {
+	type kind struct {
+		ch byte
+		k  int
+	}
+	next := map[int]int{}
+	last := map[kind]int{}
+	for p := len(line) - 1; p >= 0; p-- {
+		if !isQuoteByte(line[p]) {
+			continue
+		}
+		kd := kind{line[p], escapesBefore(line, p)}
+		if q, ok := last[kd]; ok {
+			next[p] = q
+		}
+		last[kd] = p
+	}
+	return next
+}
+
+// pairQuotes continues pairing the quotes of line[from:to] with open the
+// quote still open before (-1: none) and returns the one still open after
+// (-1: none). A quote of another kind inside an open one is part of it.
+func pairQuotes(line string, from, to, open int) int {
+	for p := from; p < to; p++ {
+		if !isQuoteByte(line[p]) {
+			continue
+		}
+		if open < 0 {
+			open = p
+		} else if sameQuote(line, p, open) {
+			open = -1
+		}
+	}
+	return open
+}
+
+// closesInside: w ends with a bracket that closes one opened in it (the }
+// of ${PASSWORD}, the ) of $(cat f)): part of the word, not punctuation
+// around it.
+func closesInside(w string) bool {
+	open := map[byte]byte{'}': '{', ')': '(', ']': '['}[w[len(w)-1]]
+	return open != 0 && strings.Count(w, string(open)) >= strings.Count(w, w[len(w)-1:])
+}
+
+// wordAfter: line[from:to] holds more of the word than closing punctuation.
+func wordAfter(line string, from, to int) bool {
+	for p := from; p < to; p++ {
+		if strings.IndexByte("'\"`)]},;\\", line[p]) < 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // commandSegments splits a line into the words of each command it runs:
 // sh -c 'mysql …' && psql … is two segments, sh -c being the start of the
-// first. Quotes around and inside a word are not part of it, at any depth of
-// escaping (a JSON string's \" and \\\" alike), and $'…' quotes like '…'. A
-// quote opening a string of several words ("sh -c 'mysql …'", a JSON value)
-// starts a command of its own; one opening and closing a single word after
-// a flag (-p "pw", -u \"u:pw\") is that flag's argument; a word with its
-// quotes inside (-p"pw", --user="u:pw") ends nothing.
-func commandSegments(line string) [][]commandToken {
-	var segs [][]commandToken
+// first. A word is what the shell assembles: quoted and unquoted parts
+// written together are one word ('-p'"pw"), and a quote opened inside a word
+// (-p"pass phrase", -p\"pass phrase\" in a JSON string) runs to its closing
+// quote across spaces. A word that is one quoted string ("-ppw", -p "pw")
+// belongs to its command; a quote opening a string of several words ("sh -c
+// 'mysql …'", a JSON value) starts a command of its own — after a flag it is
+// also that flag's argument (sshpass -p "pass phrase"). A quoted word with
+// data punctuation around it (["-p", "x"]: an array item) stands alone.
+func commandSegments(line string) []commandSegment {
+	var segs []commandSegment
 	var cur []commandToken
 	flush := func() {
 		if len(cur) > 0 {
-			segs = append(segs, cur)
+			segs = append(segs, commandSegment{tokens: cur})
 		}
 		cur = nil
 	}
+	var closing map[int]int
+	if strings.IndexAny(line, "'\"`") >= 0 {
+		closing = closingQuotes(line)
+	}
 	space := func(ch byte) bool { return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' }
+	chunkEnd := func(i int) int {
+		for i < len(line) && !space(line[i]) {
+			i++
+		}
+		return i
+	}
 	for i := 0; i < len(line); {
 		for i < len(line) && space(line[i]) {
 			i++
 		}
 		start := i
-		for i < len(line) && !space(line[i]) {
-			i++
-		}
+		i = chunkEnd(i)
 		if start == i {
 			break
 		}
-		from, to := start, i
+		from := start
 		begin := false
-		for from < to {
+		for from < i {
 			ch := line[from]
-			ansiC := ch == '$' && from+1 < to && (line[from+1] == '\'' || line[from+1] == '"')
+			ansiC := ch == '$' && from+1 < i && (line[from+1] == '\'' || line[from+1] == '"')
 			if !ansiC && strings.IndexByte("'\"`([{,\\", ch) < 0 {
 				break
 			}
 			begin = begin || isQuoteByte(ch)
 			from++
 		}
+		open := pairQuotes(line, start, i, -1)
+		// a quote opened inside the word: the word runs to its closing quote
+		for open >= from && wordAfter(line, open+1, i) {
+			c, ok := closing[open]
+			if !ok {
+				break
+			}
+			scanned := i
+			i = chunkEnd(c + 1)
+			open = pairQuotes(line, scanned, i, open)
+		}
+		to := i
 		end, semicolon := false, false
-		for to > from && strings.IndexByte("'\"`)]},;\\", line[to-1]) >= 0 {
+		for to > from && strings.IndexByte("'\"`)]},;\\", line[to-1]) >= 0 && !closesInside(line[from:to]) {
 			end = end || isQuoteByte(line[to-1])
 			semicolon = semicolon || line[to-1] == ';'
 			to--
 		}
-		balanced := quotesBalanced(line[start:i])
+		balanced := open < 0
+		structural := strings.ContainsAny(line[start:from], "([{,") || strings.ContainsAny(line[to:i], ")]},")
+		prevFlag := len(cur) > 0 && flagShaped(cur[len(cur)-1].word)
 		// a quoted word after a flag is the flag's argument
-		argument := begin && balanced && len(cur) > 0 && flagShaped(cur[len(cur)-1].word)
-		// a quote opens or closes a string: a command in one ("sh -c 'mysql
-		// …'", a JSON value) is judged on its own, apart from its neighbours
-		if begin && !argument {
+		argument := begin && balanced && prevFlag
+		// a word that is one quoted string belongs to its command
+		single := begin && balanced && !structural
+		if begin && !argument && !single {
+			// a quote opens a string of several words: a command in one ("sh
+			// -c 'mysql …'", a JSON value) is judged on its own; after a flag
+			// the string is that flag's argument too (sshpass -p "a b")
+			if c, ok := closing[open]; ok && !balanced && open < from && prevFlag {
+				if inner := c - escapesBefore(line, c); inner > open+1 {
+					cur = append(cur, quotesLeftOut(line, open+1, inner))
+				}
+			}
 			flush()
 		}
 		tok := quotesLeftOut(line, from, to)
 		if commandSeparators[tok.word] {
 			flush()
+			if tok.word == "|" && len(segs) > 0 {
+				segs[len(segs)-1].pipe = true
+			}
 			continue
 		}
 		if tok.word != "" {
 			cur = append(cur, tok)
 		}
-		if semicolon || end && !argument && !(balanced && !begin) {
+		if semicolon || end && !argument && !single && !(balanced && !begin) {
 			flush()
 		}
 	}
@@ -322,20 +728,65 @@ func commandSegments(line string) [][]commandToken {
 	return segs
 }
 
+// ansiEscapes: bash's $'…' backslash escapes.
+var ansiEscapes = map[byte]string{'a': "\a", 'b': "\b", 'e': "\x1b", 'E': "\x1b", 'f': "\f", 'n': "\n", 'r': "\r", 't': "\t", 'v': "\v", '\\': "\\", '\'': "'", '"': "\"", '?': "?"}
+
+var (
+	ansiHex   = regexp.MustCompile(`^x([0-9A-Fa-f]{1,2})`)
+	ansiOctal = regexp.MustCompile(`^[0-7]{1,3}`)
+)
+
+// ansiEscape decodes the escape at the start of s (just after a backslash in
+// $'…'): its text and how many bytes of s it takes.
+func ansiEscape(s string) (string, int) {
+	if t, ok := ansiEscapes[s[0]]; ok {
+		return t, 1
+	}
+	if m := ansiHex.FindStringSubmatch(s[:min(len(s), 3)]); m != nil {
+		n, _ := strconv.ParseUint(m[1], 16, 8)
+		return string([]byte{byte(n)}), len(m[0])
+	}
+	if m := ansiOctal.FindString(s[:min(len(s), 3)]); m != "" {
+		n, _ := strconv.ParseUint(m, 8, 16)
+		return string([]byte{byte(n)}), len(m)
+	}
+	return "\\" + s[:1], 1
+}
+
 // quotesLeftOut is the word line[from:to] without the quotes inside it and
-// the backslashes escaping them.
+// the backslashes escaping them; $'…' is read as bash does, its escapes
+// decoded ($"…" quotes like "…").
 func quotesLeftOut(line string, from, to int) commandToken {
 	if strings.IndexAny(line[from:to], "'\"`") < 0 {
 		return commandToken{word: line[from:to], from: from, to: to}
 	}
 	var word []byte
-	var pos []int
+	var pos, ends []int
+	decoded, ansi := false, false
 	for j := from; j < to; j++ {
 		ch := line[j]
-		if isQuoteByte(ch) {
+		switch {
+		case ansi && ch == '\\' && j+1 < to:
+			text, n := ansiEscape(line[j+1 : to])
+			for k := 0; k < len(text); k++ {
+				word = append(word, text[k])
+				pos = append(pos, j)
+				ends = append(ends, j+1+n)
+			}
+			decoded = true
+			j += n
 			continue
-		}
-		if ch == '\\' {
+		case ansi && ch == '\'':
+			ansi = false
+			continue
+		case ansi:
+		case ch == '$' && j+1 < to && (line[j+1] == '\'' || line[j+1] == '"'):
+			ansi = line[j+1] == '\''
+			j++
+			continue
+		case isQuoteByte(ch):
+			continue
+		case ch == '\\':
 			k := j
 			for k < to && line[k] == '\\' {
 				k++
@@ -347,8 +798,41 @@ func quotesLeftOut(line string, from, to int) commandToken {
 		}
 		word = append(word, ch)
 		pos = append(pos, j)
+		ends = append(ends, j+1)
 	}
-	return commandToken{word: string(word), from: from, to: to, pos: pos}
+	tok := commandToken{word: string(word), from: from, to: to, pos: pos}
+	if decoded {
+		tok.ends = ends
+	}
+	return tok
+}
+
+// commandPipelines is a line's commands as judgeArgv reads them: the words
+// of each pipeline, its commands separated by a "|" token.
+func commandPipelines(line string) [][]commandToken {
+	var out [][]commandToken
+	var cur []commandToken
+	for _, seg := range commandSegments(line) {
+		cur = append(cur, seg.tokens...)
+		if seg.pipe {
+			cur = append(cur, commandToken{word: "|"})
+			continue
+		}
+		out = append(out, cur)
+		cur = nil
+	}
+	if len(cur) > 0 {
+		out = append(out, cur)
+	}
+	return out
+}
+
+func tokenWords(toks []commandToken) []string {
+	words := make([]string, len(toks))
+	for i, t := range toks {
+		words[i] = t.word
+	}
+	return words
 }
 
 // commandCredentials applies replace to every credential the argv rules
@@ -356,25 +840,32 @@ func quotesLeftOut(line string, from, to int) commandToken {
 func commandCredentials(line string, replace func(string) string) string {
 	b := []byte(line)
 	changed := false
-	for _, seg := range commandSegments(line) {
-		words := make([]string, len(seg))
-		for i, t := range seg {
-			words[i] = t.word
-		}
-		for _, h := range judgeArgv(words) {
-			t := seg[h.tok]
-			v := t.word[h.from:h.to]
-			out := replace(v)
-			if len(out) == len(v) {
-				// in place, around any quote left out inside the value
-				for k := 0; k < len(out); k++ {
-					b[t.at(h.from+k)] = out[k]
+	for _, toks := range commandPipelines(line) {
+		for _, h := range judgeArgv(tokenWords(toks)) {
+			t := toks[h.tok]
+			if !t.literal(h.from, h.to) {
+				// written with $'…' escapes: what is written is disguised
+				from, to := t.span(h.from, h.to)
+				v := line[from:to]
+				out := replace(v)
+				if len(out) != len(v) {
+					return commandCredentialsVariable(line, replace)
 				}
+				copy(b[from:to], out)
 				changed = changed || out != v
 				continue
 			}
-			// redaction changes the length: rebuild from the end backwards
-			return commandCredentialsVariable(line, replace)
+			v := t.word[h.from:h.to]
+			out := replace(v)
+			if len(out) != len(v) {
+				// redaction changes the length: rebuild from the end backwards
+				return commandCredentialsVariable(line, replace)
+			}
+			// in place, around any quote left out inside the value
+			for k := 0; k < len(out); k++ {
+				b[t.at(h.from+k)] = out[k]
+			}
+			changed = changed || out != v
 		}
 	}
 	if !changed {
@@ -388,25 +879,25 @@ func commandCredentials(line string, replace func(string) string) string {
 func commandCredentialsVariable(line string, replace func(string) string) string {
 	type span struct{ from, to int }
 	var spans []span
-	for _, seg := range commandSegments(line) {
-		words := make([]string, len(seg))
-		for i, t := range seg {
-			words[i] = t.word
-		}
-		for _, h := range judgeArgv(words) {
-			from, to := seg[h.tok].span(h.from, h.to)
+	for _, toks := range commandPipelines(line) {
+		for _, h := range judgeArgv(tokenWords(toks)) {
+			from, to := toks[h.tok].span(h.from, h.to)
 			spans = append(spans, span{from, to})
 		}
 	}
+	sort.Slice(spans, func(i, j int) bool { return spans[i].from < spans[j].from })
 	for i := len(spans) - 1; i >= 0; i-- {
 		sp := spans[i]
+		if i > 0 && spans[i-1].to > sp.from {
+			continue
+		}
 		line = line[:sp.from] + replace(line[sp.from:sp.to]) + line[sp.to:]
 	}
 	return line
 }
 
 // argvLines is a cheap filter: a line that may hold a command's credential.
-var argvHints = []string{"-p", "-a", "-k", "-u", "--", "mysql", "sshpass", "mariadb", "pgpassword", "rediscli_auth"}
+var argvHints = []string{"-p", "-a", "-k", "-u", "--", "-w", "-z", "/p:", "/gp:", "mysql", "sshpass", "mariadb", "pgpassword", "rediscli_auth", "htpasswd", "sudo"}
 
 // command: "x" / command = 'x' / {command: x, …} (YAML takes it unquoted)
 var commandKey = regexp.MustCompile(`(?:^|[\s{,])["']?command["']?[ \t]*[:=][ \t]*(?:["']([^"'\r\n]+)["']|([^\s,{}\[\]"'#]+))`)

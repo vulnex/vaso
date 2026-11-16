@@ -9,8 +9,11 @@
 /** Longest script followed; a longer one is reported as not analysed. */
 export const MAX_SCRIPT_CHARS = 8 * 1024;
 
-/** The commands of a script line, trimmed, in order (empty ones dropped). */
-export function scriptCommands(line: string): string[] {
+/**
+ * The commands of a script line, trimmed, in order (empty ones dropped).
+ * `pipelines`: a pipeline stays one command (`echo pw | sudo -S id`).
+ */
+export function scriptCommands(line: string, pipelines = false): string[] {
   const out: string[] = [];
   let start = 0;
   let quote = '';
@@ -25,6 +28,7 @@ export function scriptCommands(line: string): string[] {
     if (c === '\\') { i++; continue; }
     if (c === '$' && line[i + 1] === "'") { quote = '$'; i++; continue; }
     if (c === '"' || c === "'") { quote = c; continue; }
+    if (pipelines && c === '|' && line[i + 1] !== '|' && line[i - 1] !== '|') continue;
     if (c === ';' || c === '\n' || c === '&' || c === '|') {
       out.push(line.slice(start, i));
       if ((c === '&' || c === '|') && line[i + 1] === c) i++;
