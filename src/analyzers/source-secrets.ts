@@ -258,27 +258,53 @@ function sequentialShare(value: string): number {
   return covered / value.length;
 }
 
+/** Keys published for local emulators: the Azurite / Azure Storage Emulator account key. */
+const PUBLIC_EMULATOR_KEYS = new Set([
+  'Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==',
+]);
+/** Lowercase or uppercase hex of 32+ characters with letters and digits: a key, a token, a digest. */
+const HEX_MATERIAL = /^(?=[0-9a-f]*[a-f])(?=[0-9a-f]*\d)[0-9a-f]{32,}$|^(?=[0-9A-F]*[A-F])(?=[0-9A-F]*\d)[0-9A-F]{32,}$/;
+/** A part made of words and numbers (`Settings2Secondary9Label`, `gpt4oMini20240718Preview`, `User123`). */
+const WORDS = /^(?:[A-Z]?[a-z]{2,}|[A-Z]{2,}(?![a-z])|\d+[a-z]?)+$/;
+
 /**
- * Opaque key material: base64 or mixed-case alphanumerics with digits, no
- * separators — a random credential, not a path, a name or a model id.
+ * Opaque key material, not a path, a name or a model id: hex (32+), base64
+ * or base64url in mixed case with digits, a dotted token (`<a>.<b>.<c>`,
+ * JWT-shaped), or a single-case random run (32+, letters and digits).
+ * Words and numbers joined (`Settings2Secondary9Label`, model ids with a
+ * date) and object-key paths (`uploads/User123/avatar2024`) are names.
  */
 function opaqueValue(value: string, charset: boolean): boolean {
-  if (!/^[A-Za-z0-9+/]{16,}={0,2}$/.test(value) || !/[a-z]/.test(value) || !/[A-Z]/.test(value) || !/\d/.test(value)) return false;
+  if (PUBLIC_EMULATOR_KEYS.has(value)) return false;
   // a character set lists every character once; random key material repeats some
-  return !(charset && new Set(value).size === value.length);
+  if (charset && new Set(value).size === value.length) return false;
+  if (HEX_MATERIAL.test(value)) return true;
+  if (/^[a-z0-9]{32,}$|^[A-Z0-9]{32,}$/.test(value)) {
+    const digits = value.replace(/\D/g, '').length;
+    return digits >= 4 && value.length - digits >= 4 && shannonEntropy(value) >= 4;
+  }
+  const segments = value.split('.');
+  if (segments.length > 3 || !segments.every((seg) => /^[A-Za-z0-9+/_-]{8,}={0,2}$/.test(seg)) || value.length < 16) return false;
+  if (!/[a-z]/.test(value) || !/[A-Z]/.test(value) || !/\d/.test(value)) return false;
+  // words, numbers and short parts joined: a name, a path, a cookie name (`__Host-csrf-token-v2`)
+  return !value.split(/[-_./+=]+/).filter(Boolean).every((part) => WORDS.test(part) || part.length <= 4);
 }
 
 /** A value under a name: whether it is a credential the name holds (see secretName). */
 function namedSecretValue(name: SecretName, value: string): boolean {
   // `SHA256:…` is a key's fingerprint under a `…Key` name, never under `apiSecret`
   if (!name.word && FINGERPRINT_VALUE.test(value)) return false;
-  if (!looksLikeSecretValue(value)) return false;
+  if (PUBLIC_EMULATOR_KEYS.has(value)) return false;
+  // hex is at most 4 bits a character: under a lookup-or-credential name it is judged by its shape, not the entropy floor
+  const hex = name.kind !== 'credential' && HEX_MATERIAL.test(value) && !PLACEHOLDER.test(value) && sequentialShare(value) < 0.6;
+  if (!looksLikeSecretValue(value) && !hex) return false;
   return name.kind === 'credential' || opaqueValue(value, name.charset);
 }
 
 function looksLikeSecretValue(value: string): boolean {
   if (PLACEHOLDER.test(value)) return false;
-  if (/^[A-Z][A-Z0-9_]+$/.test(value)) return false; // an env-var name: API_KEY: "OPENAI_API_KEY"
+  // an env-var name: API_KEY: "OPENAI_API_KEY" (a 32+ run with no `_` is a random uppercase token)
+  if (/^[A-Z][A-Z0-9_]+$/.test(value) && !(value.length >= 32 && !value.includes('_'))) return false;
   if (/^(?:[a-z]+|[a-z]+(?:[A-Z][a-z0-9]+)+|[A-Z][a-z]+(?:[A-Z][a-z0-9]+)*)$/.test(value)) return false; // identifier
   if (/^(?:https?:)?\/\/|^[./~]/.test(value)) return false; // URL or path
   if (/^(.)\1+$/.test(value)) return false;
