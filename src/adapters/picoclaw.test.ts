@@ -310,6 +310,27 @@ describe('PicoClaw adapter', () => {
     expect(picoclawWorkspaces(undefined, PICO, HOME)).toEqual([`${PICO}/workspace`]);
   });
 
+  it('screens PICOCLAW_BUILTIN_SKILLS like a config-set skills directory', async () => {
+    const cases: Array<[string, string[], Array<Record<string, unknown>>]> = [
+      ['/tmp/./pico-skills/', ['/tmp/pico-skills'], []],
+      ['/etc/', [], [{ path: '/etc', reason: 'outside', refusedAs: 'an OS directory (/etc)' }]],
+      ['~', [], [{ path: HOME, reason: 'home' }]],
+      ['~/.ssh', [], [expect.objectContaining({ path: `${HOME}/.ssh`, reason: 'outside' })]],
+      ['skills', [], [{ path: 'skills', reason: 'relative' }]],
+    ];
+    for (const [value, scan, unscanned] of cases) {
+      const fs = makeFs({ files: onboardFiles(onboardConfig()), env: { PICOCLAW_BUILTIN_SKILLS: value } });
+      const [inst] = await picoclawAdapter.detect({ fs });
+      expect(inst.skillsDirs, value).toEqual([`${PICO}/workspace/skills`, `${PICO}/skills`, ...scan]);
+      expect(inst.unscannedSkillsDirs ?? [], value).toEqual(unscanned);
+    }
+  });
+
+  it('asks the probe for PICOCLAW_BUILTIN_SKILLS as an env-only tree', () => {
+    const roots = picoclawAdapter.getProbeManifest!().configRoots ?? [];
+    expect(roots).toContainEqual(expect.objectContaining({ configs: [], kind: 'tree', keys: [], envFallback: 'PICOCLAW_BUILTIN_SKILLS', globs: ['**'] }));
+  });
+
   it('does not throw on null/odd sections', async () => {
     const config = { version: 3, agents: null, model_list: null, gateway: null, channel_list: { telegram: null, x: 5 } };
     const fs = makeFs({ files: { [`${PICO}/config.json`]: JSON.stringify(config), [`${PICO}/.security.yml`]: 'model_list:\n' } });

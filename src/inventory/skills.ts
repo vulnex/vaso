@@ -7,7 +7,7 @@ import { redactSecretsInLine } from '../core/patterns.js';
 import { maskCredentialsInLine } from '../reporting/serialize.js';
 import { shannonEntropy } from '../analyzers/entropy.js';
 import { configTreeGap, probeCoversTree } from '../core/probe-coverage.js';
-import { refusedSkillLink, unscannedReason } from '../core/skill-root-scope.js';
+import { missingRootReason, refusedSkillLink, unscannedReason, unscannedRootMissing } from '../core/skill-root-scope.js';
 
 /**
  * Folders under a skills directory whose skills an agent doesn't load: Hermes
@@ -68,7 +68,8 @@ export async function collectSkillInventory(installation: AgentInstallation, fs:
     const at = fs.kind === 'snapshot' && isAbsolute(path) ? posix.normalize(path) : path;
     // a link to /dev/null is no directory there (SKL-002 says so too)
     skillsDirs.push({ path, exists: await fs.stat(at).then(st => st.isDirectory(), () => false), unverified: true });
-    incomplete.push(`${path}: ${unscannedReason(reason, path, u)}`);
+    // worded as SKL-002 words it: one that isn't a directory holds nothing
+    incomplete.push(`${path}: ${(await unscannedRootMissing(fs, u)) ? missingRootReason(u) : unscannedReason(reason, path, u)}`);
   }
 
   for (const root of roots) {

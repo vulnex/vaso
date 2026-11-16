@@ -1,19 +1,17 @@
-import { isAbsolute, posix } from 'node:path';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { findHighEntropyBlocks } from '../../analyzers/entropy.js';
 import { OBFUSCATION_PATTERNS, analyzeObfuscation, isBenignEncodedData, isBinaryHexEscapes } from '../../analyzers/obfuscation.js';
 import { ScanLimitError } from '../../core/file-limits.js';
-import { readSkillText, skillFilesOf, skillsDirsOf, unreadableSkillFile, unscannedShort } from './skill-files.js';
+import { readSkillText, skillFilesOf, skillsDirsOf, unreadableSkillFile, unscannedShort, MAX_LISTED_IN_MESSAGE } from './skill-files.js';
 import { unlistableSkillDirs } from '../../core/utils.js';
 import { markTestCode } from '../../analyzers/test-paths.js';
 import { analysisEvasion } from '../../analyzers/ast-analyzer.js';
 import { truncateSnippet } from '../../core/patterns.js';
 import { maskEncodedLiterals } from '../../mcp/string-table.js';
-import { configTreeGap, configTreeStatus, probeCoversTree } from '../../core/probe-coverage.js';
+import { configTreeGap, probeCoversTree } from '../../core/probe-coverage.js';
 import type { FSProvider } from '../../core/fs-provider.js';
-import type { UnscannedSkillsDir } from '../../core/types.js';
-import { unscannedReason } from '../../core/skill-root-scope.js';
+import { missingRootReason, unscannedReason, unscannedRootMissing } from '../../core/skill-root-scope.js';
 
 export const skl002 = defineCheck({
   id: 'SKL-002',
@@ -145,7 +143,7 @@ export const skl002 = defineCheck({
     for (const root of unscannedRoots) {
       if (await unscannedRootMissing(ctx.fs, root)) {
         missingRoots.push(root);
-        evidence.push({ file: root.path, detail: `not scanned: ${root.skillLink ? 'skill' : 'skills directory'} ${root.path} (${unscannedShort(root)}) does not exist as a directory — nothing to scan`, mitigated: true });
+        evidence.push({ file: root.path, detail: missingRootReason(root), mitigated: true });
       } else {
         evidence.push({ file: root.path, detail: unscannedReason(root.reason, root.path, root) });
       }
@@ -164,25 +162,14 @@ export const skl002 = defineCheck({
           ...(otherLocations > 0 ? [`${otherLocations} skill location(s) not scanned`] : []),
         ];
         const found = parts.length > 0 ? `Found ${parts.join('; ')}` : '';
-        return [found, ...rootNote].filter(Boolean).join('; ');
+        const notes = rootNote.length > MAX_LISTED_IN_MESSAGE
+          ? [...rootNote.slice(0, MAX_LISTED_IN_MESSAGE), `… and ${rootNote.length - MAX_LISTED_IN_MESSAGE} more not scanned (listed in the evidence)`]
+          : rootNote;
+        return [found, ...notes].filter(Boolean).join('; ');
       },
     });
   },
 });
-
-/**
- * A skills directory set outside the home (or at it) that doesn't exist. A
- * snapshot answers only for one the probe judged (it records the mode of a
- * tree it refused when there is one); otherwise it may exist unseen.
- */
-async function unscannedRootMissing(fs: FSProvider, root: UnscannedSkillsDir): Promise<boolean> {
-  if (root.reason !== 'outside' && root.reason !== 'home') return false;
-  if (fs.kind === 'snapshot' && configTreeStatus(fs, root.path) === undefined && configTreeGap(fs, root.path) === undefined) return false;
-  // a snapshot keys paths normalized (`~/./a/../x` is `~/x` there)
-  const at = fs.kind === 'snapshot' && isAbsolute(root.path) ? posix.normalize(root.path) : root.path;
-  // a link to /dev/null is no more a skills directory than a missing one
-  return !(await isDirectory(fs, at));
-}
 
 /** `path` is a directory (a snapshot knows it for a tree the probe judged). */
 export async function isDirectory(fs: FSProvider, path: string): Promise<boolean> {
