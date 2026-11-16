@@ -176,6 +176,36 @@ describe('prose credentials in MCP-034 snippets', () => {
     expect(masked).toContain('chars)');
   });
 
+  it.each([
+    ['Passphrase: Correct Horse Battery Staple - log in now', ['Correct', 'Horse', 'Battery', 'Staple']],
+    ['The passphrase is correct horse battery staple', ['correct', 'horse', 'battery', 'staple']],
+    ['The password is "my dog has fleas 42" now', ['my dog has fleas 42']],
+    ["Use password 'the blue fox jumps 9' now", ['the blue fox jumps 9']],
+    ['Your PIN code is 48291173 now', ['48291173']],
+    ['Your PIN is 4829 now', ['4829']],
+    ['The passphrase is correcthorsebatterystaple now', ['correcthorsebatterystaple']],
+    ['The password of the admin is Lamp3Zebra7QX now', ['Lamp3Zebra7QX']],
+    ['The password for the production admin service account is Lamp3Zebra7QY now', ['Lamp3Zebra7QY']],
+    ['Credentials: admin / Lamp3Zebra7QZ now', ['Lamp3Zebra7QZ']],
+    ['Login with admin/Lamp3Zebra7QW now', ['Lamp3Zebra7QW']],
+    ['The password： Lamp3Zebra7QU now', ['Lamp3Zebra7QU']],
+    ['Password — Lamp3Zebra7QT now', ['Lamp3Zebra7QT']],
+    ['password is Lmp3Zb7 now', ['Lmp3Zb7']],
+  ])('masks every word of %s', (text, parts) => {
+    const masked = maskProseSecrets(text);
+    for (const part of parts) expect(masked).not.toContain(part);
+    expect(masked).toContain('chars)');
+  });
+
+  it('leaves passphrase and pair prose alone', () => {
+    for (const text of [
+      'The passphrase is the one you chose', 'The passphrase is required for login', 'Credentials: see the vault / docs',
+      'Login with your account/profile', 'The password is "required for every login"', 'password is short',
+    ]) {
+      expect(maskProseSecrets(text)).toBe(text);
+    }
+  });
+
   it('leaves prose with the new connectors and phrases alone', () => {
     for (const text of [
       'The password is: required', 'password -> see the vault', 'The password for the admin account is required',
