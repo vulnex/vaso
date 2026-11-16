@@ -54,7 +54,8 @@ function checkProfile(
     const key = (f: { level: string; detail: string }) => `${f.level}\0${f.detail}`;
     const rootFindings = new Set(judgeDefaultPermissions(root, home).map(key));
     for (const f of judgeDefaultPermissions(merged, home)) {
-      if (rootFindings.has(key(f))) continue;
+      // an entry Codex rejects grants nothing: no downgrade
+      if (f.level === 'info' || rootFindings.has(key(f))) continue;
       evidence.push({
         file,
         snippet: `${label} ${f.snippet}`,

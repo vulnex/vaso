@@ -68,6 +68,18 @@ describe('CFG-002 passwords in hook commands', () => {
     expect(r.evidence?.[0].detail).toBe('Found GitHub PAT');
   });
 
+  it('reads a quoted command inside a hook command as argv too', async () => {
+    const r = await cfg002.run(ctx([settings([
+      `ssh db1 "mysql -u root -p${PW}5 app"`,
+      `bash -c 'sshpass -p ${PW}6 ssh deploy@host true'`,
+    ])]));
+    expect(r.evidence).toHaveLength(2);
+    expect(JSON.stringify(r.evidence)).not.toContain(PW);
+    // the nested database-not-password rule still holds
+    const db = await cfg002.run(ctx([settings(['ssh db1 "mysql -u root -p app_db"', 'git commit -m "mysql -p mydb docs"'])]));
+    expect(db.passed).toBe(true);
+  });
+
   it('hookCommandSecrets reads each statement as argv', () => {
     const found = hookCommandSecrets(`echo start; curl https://u:${PW}@h.example/x && notify --password=${PW}x`);
     expect(found.map(s => s.value)).toEqual([PW, `${PW}x`]);

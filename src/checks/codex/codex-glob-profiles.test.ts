@@ -26,6 +26,7 @@ function ctx(configs: ParsedConfig[]): ScanContext {
 
 const check = (id: string) => codexChecks.find(c => c.id === id)!;
 const profile = (filesystem: Record<string, unknown>) => ({ default_permissions: 'dev', permissions: { dev: { filesystem } } });
+const roots = (root: string) => ({ sandbox_mode: 'workspace-write', sandbox_workspace_write: { writable_roots: [root] } });
 
 describe('CDX-002 permission-profile globs', () => {
   it('judges star runs and long globs quickly', async () => {
@@ -37,24 +38,26 @@ describe('CDX-002 permission-profile globs', () => {
     expect(Date.now() - start).toBeLessThan(2000);
   });
 
+  // Codex refuses read/write globs in profiles (deny only); globs in
+  // [sandbox_workspace_write] writable_roots are still judged by what they can match
   it('treats a glob longer than it judges as broad', async () => {
-    const r = await check('CDX-002').run(ctx([cfg(MAIN, profile({ [`/${'*a'.repeat(2100)}`]: 'write' }))]));
+    const r = await check('CDX-002').run(ctx([cfg(MAIN, roots(`/${'*a'.repeat(2100)}`))]));
     expect(r.severity).toBe('critical');
     expect(r.evidence?.[0].detail).toMatch(/too long to judge \(4201 characters\)/);
   });
 
   it('reads an invalid character class as literal text instead of erroring', async () => {
-    const r = await check('CDX-002').run(ctx([cfg(MAIN, profile({ '~/.[z-a]sh': 'write' }))]));
+    const r = await check('CDX-002').run(ctx([cfg(MAIN, roots('~/.[z-a]sh'))]));
     expect(r.errored).toBeFalsy();
     expect(r.passed).toBe(true);
   });
 
   it('caps the glob quoted in the detail', async () => {
     const glob = `~/.${'*'.repeat(1300)}sh`;
-    const r = await check('CDX-002').run(ctx([cfg(MAIN, profile({ [glob]: 'write' }))]));
+    const r = await check('CDX-002').run(ctx([cfg(MAIN, roots(glob))]));
     expect(r.passed).toBe(false);
     expect(r.evidence?.[0].detail.length).toBeLessThan(400);
-    expect(r.evidence?.[0].detail).toMatch(/which can match "\/home\/test\/\.ssh"/);
+    expect(r.evidence?.[0].detail).toMatch(/can match "\/home\/test\/\.ssh"/);
   });
 
   it('reads braces and backslashes as literal path characters, as Codex does (glob chars are * ? [ ] only)', async () => {
@@ -67,8 +70,28 @@ describe('CDX-002 permission-profile globs', () => {
   it('names the path, then the reason', async () => {
     const r = await check('CDX-002').run(ctx([cfg(MAIN, profile({ '~': 'write' }))]));
     expect(r.evidence?.[0].detail).toMatch(/write access to "\/home\/test", which covers the home directory/);
-    const g = await check('CDX-002').run(ctx([cfg(MAIN, profile({ '~/.ss*': 'write' }))]));
-    expect(g.evidence?.[0].detail).toMatch(/"\/home\/test\/\.ss\*", which can match "\/home\/test\/\.ssh", which holds credentials/);
+    const g = await check('CDX-002').run(ctx([cfg(MAIN, roots('~/.ss*'))]));
+    expect(g.evidence?.[0].detail).toMatch(/"\/home\/test\/\.ss\*" can match "\/home\/test\/\.ssh", which holds credentials/);
+  });
+
+  it('reports a read/write glob entry Codex rejects at info, a trailing /** as a subtree grant', async () => {
+    for (const glob of ['~/.ss*', '~/[.]ssh', '/Us**', '~/.ssh/*', `~/.${'*'.repeat(1300)}sh`, '~/.[z-a]sh']) {
+      const r = await check('CDX-002').run(ctx([cfg(MAIN, profile({ [glob]: 'write' }))]));
+      expect(r.severity, glob).toBe('info');
+      expect(r.evidence?.every(e => e.mitigated), glob).toBe(true);
+      expect(r.message, glob).toBe('Codex permission profile has entries Codex rejects');
+      expect(r.evidence?.[0].detail, glob).toMatch(/^Codex rejects this entry and does not load the config: a glob path supports only "deny" access/);
+    }
+    const subtree = await check('CDX-002').run(ctx([cfg(MAIN, profile({ '~/.ssh/**': 'write' }))]));
+    expect(subtree.severity).toBe('critical');
+    const deny = await check('CDX-002').run(ctx([cfg(MAIN, profile({ '~/.ss*': 'deny', '**/.git': 'deny' }))]));
+    expect(deny.passed).toBe(true);
+    // a rejected entry is not a profile downgrade either
+    const prof = await check('CDX-008').run(ctx([
+      cfg(MAIN, { default_permissions: 'dev', permissions: { dev: { extends: ':workspace' } } }),
+      cfg(FAST, { permissions: { dev: { filesystem: { '~/.ss*': 'write' } } } }),
+    ]));
+    expect(prof.passed).toBe(true);
   });
 });
 

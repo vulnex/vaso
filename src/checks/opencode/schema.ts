@@ -94,11 +94,12 @@ export function v2Action(v1Key: string): string {
 const CATCH_ALL = /^\*+$/;
 
 /** Whether a rule's action pattern covers `action`: OpenCode wildcards are
- *  `*` (any run, `/` included) and `?` (exactly one character). */
+ *  `*` (any run, `/` included) and `?` (exactly one UTF-16 code unit — a
+ *  RegExp `.` without the `u` flag). */
 export function actionMatches(pattern: string, action: string): boolean {
   if (CATCH_ALL.test(pattern) || pattern === action) return true;
   if (!/[*?]/.test(pattern)) return false;
-  return wildcardMatch(pattern, action, { question: true });
+  return wildcardMatch(pattern, action, { question: true, unit: 'utf16' });
 }
 
 export function isCatchAllResource(resource: string): boolean {

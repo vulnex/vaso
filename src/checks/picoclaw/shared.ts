@@ -1,5 +1,6 @@
 import { basename } from 'node:path';
 import type { ParsedConfig } from '../../core/types.js';
+import { compileForeignRegex } from '../../analyzers/foreign-regex.js';
 
 const NON_MAIN_CONFIGS = new Set(['auth.json', 'launcher-config.json', '.security.yml']);
 
@@ -67,21 +68,12 @@ export function isChatChannel(ch: PicoChannel): boolean {
 }
 
 /**
- * Compile a PicoClaw (Go RE2) pattern as a JS RegExp. Leading inline flag
- * groups such as `(?i)` or `(?is)` — valid in Go, a syntax error in JS — are
- * translated to RegExp flags. Returns undefined when it still doesn't parse.
- * The pattern comes from config: run it with `testSamples`, never `re.test`.
+ * Compile a PicoClaw (Go RE2) pattern as a JS RegExp, Go-only syntax
+ * translated (foreign-regex.ts). Returns undefined when it can't be run
+ * here. The pattern comes from config: run it with `testSamples`, never
+ * `re.test`.
  */
 export function compileGoRegex(pattern: string): RegExp | undefined {
-  let src = pattern;
-  let flags = '';
-  for (let m = /^\(\?([imsU]+)\)/.exec(src); m; m = /^\(\?([imsU]+)\)/.exec(src)) {
-    for (const f of m[1]) if (f !== 'U' && !flags.includes(f)) flags += f;
-    src = src.slice(m[0].length);
-  }
-  try {
-    return new RegExp(src, flags);
-  } catch {
-    return undefined;
-  }
+  const c = compileForeignRegex(pattern, 'go');
+  return c.kind === 'ok' ? c.re : undefined;
 }

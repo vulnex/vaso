@@ -37,7 +37,7 @@ function one(t: Token, c: string, ignoreCase: boolean): boolean {
 /**
  * Two-pointer wildcard match: a star matches any run of characters, every
  * other token exactly one. Backtracks only to the last star, so the cost is
- * O(tokens × text). `s` is the text split into code points.
+ * O(tokens × text). `s` is the text split into characters (code points or UTF-16 units).
  */
 function matchTokens(toks: Token[], s: readonly string[], ignoreCase = false): boolean {
   let ti = 0;
@@ -66,17 +66,23 @@ function matchTokens(toks: Token[], s: readonly string[], ignoreCase = false): b
 /**
  * A simple wildcard pattern against text: `*` matches any run of characters
  * (separators included), `?` one character when `question` is set; every
- * other character is literal.
+ * other character is literal. A character is a code point, or a UTF-16 code
+ * unit with `unit: 'utf16'`.
  */
-export function wildcardMatch(pattern: string, text: string, opts: { question?: boolean; ignoreCase?: boolean } = {}): boolean {
+export function wildcardMatch(
+  pattern: string,
+  text: string,
+  opts: { question?: boolean; ignoreCase?: boolean; unit?: 'codepoint' | 'utf16' } = {},
+): boolean {
+  const split = (s: string): string[] => (opts.unit === 'utf16' ? s.split('') : Array.from(s));
   const toks: Token[] = [];
-  for (const c of pattern) {
+  for (const c of split(pattern)) {
     if (c === '*') {
       if (toks[toks.length - 1]?.k !== 'star') toks.push({ k: 'star' });
     } else if (c === '?' && opts.question) toks.push({ k: 'any' });
     else toks.push({ k: 'lit', c });
   }
-  return matchTokens(toks, Array.from(text), opts.ignoreCase);
+  return matchTokens(toks, split(text), opts.ignoreCase);
 }
 
 /** `[...]` at `start` of the code points `glob`: the class token and the

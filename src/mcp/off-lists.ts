@@ -312,8 +312,9 @@ async function geminiOff(fs: FSProvider, home: string, projectDir?: string): Pro
     || switchedOff.has(server.name.trim().toLowerCase());
 }
 
+/** Qwen's matchesServerPattern: `*` and `?` over UTF-16 code units (it indexes the strings). */
 function globMatch(pattern: string, name: string): boolean {
-  return wildcardMatch(pattern, name, { question: true });
+  return wildcardMatch(pattern, name, { question: true, unit: 'utf16' });
 }
 
 async function qwenOff(fs: FSProvider, home: string, projectDir?: string): Promise<OffRule | undefined> {
