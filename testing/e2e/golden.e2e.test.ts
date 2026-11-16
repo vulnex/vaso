@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { spawn, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { chmod, cp, mkdtemp, readdir, readFile, rm, writeFile, lstat } from 'node:fs/promises';
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { AgentScanResult, ScanResult, Severity } from '../../src/core/types.js';
@@ -173,7 +173,9 @@ describe.each(caseNames)('golden: %s', (name) => {
   beforeAll(async () => {
     if (skip) return;
     const reachable = spec.reachable && process.platform !== 'win32';
-    work = await mkdtemp(join(reachable ? '/tmp' : tmpdir(), `vaso-golden-${name}-`));
+    // /tmp as the OS spells it (macOS: /private/tmp), so a link's target reads
+    // the same locally and from a snapshot, which holds no OS-level links
+    work = await mkdtemp(join(reachable ? realpathSync('/tmp') : tmpdir(), `vaso-golden-${name}-`));
     if (reachable) await chmod(work, 0o755);
     home = join(work, 'home');
     await materialize(join(CASES, name, 'home'), home);

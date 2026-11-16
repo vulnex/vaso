@@ -102,7 +102,7 @@ describe('config-set skill roots (local scans)', () => {
       { path: 'rel', reason: 'relative' },
     ]);
     expect(unscannedReason('outside', '/usr/local/skills', unscanned[1])).toBe(
-      'not scanned: skills directory set to an OS directory (/usr) — VASO doesn\'t walk it (locally or remotely); review it with `vaso skill audit /usr/local/skills`');
+      'not scanned: skills directory set to an OS directory (/usr) — VASO doesn\'t walk it (locally or remotely); keep skills in a dedicated folder');
     expect(unscannedReason('outside', unscanned[2].path, unscanned[2])).toMatch(/^not scanned: skills directory links to \/etc\/x, an OS directory \(\/etc\) — /);
     expect(unscannedShortReason(unscanned[2])).toBe('links to /etc/x, an OS directory (/etc)');
     expect(unscannedReason('outside')).toMatch(/^not scanned: skills directory set to an OS directory, another user's home or a credential store/);
@@ -111,7 +111,8 @@ describe('config-set skill roots (local scans)', () => {
   it('names the home directory itself as its own reason, as written or through a link', async () => {
     await symlink(home, join(root, 'home-link'));
     const { unscanned } = await screenSkillRoots(fs, [home, `${home}/`, join(root, 'home-link'), join(home, 'work', '..')], home);
-    expect(unscanned.map(u => u.reason)).toEqual(['home', 'home', 'home', 'home']);
+    // `<home>/` and `<home>/work/..` are the home, written another way: one entry
+    expect(unscanned.map(u => [u.path, u.reason])).toEqual([[home, 'home'], [join(root, 'home-link'), 'home']]);
     expect(unscannedReason('home')).toMatch(/home directory itself/);
   });
 });
@@ -183,6 +184,6 @@ describe('a linked home and linked default skill roots (local scans)', () => {
       { path: dirs[3], reason: 'outside', target: etcTarget, refusedAs: 'an OS directory (/etc)', agentDefault: true },
     ]);
     expect(unscannedReason('outside', dirs[3], inst.unscannedSkillsDirs![1])).toBe(
-      `not scanned: skills directory links to ${etcTarget}, an OS directory (/etc) — VASO doesn't walk it (locally or remotely); review it with \`vaso skill audit ${etcTarget}\``);
+      `not scanned: skills directory links to ${etcTarget}, an OS directory (/etc) — VASO doesn't walk it (locally or remotely); keep skills in a dedicated folder`);
   });
 });

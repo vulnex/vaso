@@ -21,7 +21,8 @@ import { linkScope } from './skill-root-scope.js';
  * reports it from its target, and the probe never ships what is behind it
  * (≥ 1.4.0, escapesToSink in probe/sensitive_sinks.go). Nor is one leading
  * where the tree's root may not (another user's home, an OS directory, the
- * home itself — linkScope in skill-root-scope.ts; linkInScope in the probe).
+ * home itself — linkScope in skill-root-scope.ts; linkInScope in the probe):
+ * walkSkillTree lists those links (`refused`), whose skills go unscanned.
  */
 const MAX_LINK_DEPTH = 8;
 
@@ -113,9 +114,19 @@ async function sinkLink(fs: FSProvider, link: string, real: string, named: Reado
  * a directory entry; a followed file link as a file entry. Throws like
  * readdirEntries when `root` itself can't be listed.
  */
-export async function walkSkillTree(fs: FSProvider, root: string): Promise<DirentInfo[]> {
+export async function walkSkillTree(fs: FSProvider, root: string, refused?: string[]): Promise<DirentInfo[]> {
   const real = await realOrSelf(fs, root);
-  return walk(fs, root, [real], new Visited(real), 0, true, new Set(classifySensitivePath(root)), await linkScope(fs, root));
+  return walk(fs, root, [real], new Visited(real), 0, true, new Set(classifySensitivePath(root)), noting(await linkScope(fs, root), refused));
+}
+
+/** `inScope`, adding every link it refuses to `refused` (when given). */
+function noting(inScope: InScope, refused: string[] | undefined): InScope {
+  if (!refused) return inScope;
+  return async (link: string) => {
+    const ok = await inScope(link);
+    if (!ok && !refused.includes(link)) refused.push(link);
+    return ok;
+  };
 }
 
 /** Whether a link met in the walk may be followed (linkScope). */
@@ -194,6 +205,9 @@ async function follow(
       out.push(entry); // dangling
       continue;
     }
+    // A link up to the home (or above it) is not followed either way; judged
+    // still, so a walk that lists refused links names it
+    if (roots.some(r => isWithin(r, real) && r !== real)) await inScope(link);
     // Inside a tree already being walked, or a parent of one (a link back up
     // would re-walk it), or seen through another link
     if (roots.some(r => isWithin(real, r) || isWithin(r, real)) || visited.has(real) || await sinkLink(fs, link, real, named)

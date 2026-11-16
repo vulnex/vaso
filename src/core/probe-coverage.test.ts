@@ -326,6 +326,23 @@ describe('config-set paths a newer probe recorded', () => {
     expect(probeCoversTree(snapshot({}, { configTrees: { [lnk]: 'collected' } }), lnk)).toBe(true);
   });
 
+  it('a default skills directory linked out of the home and over the entry limit stays not verified, though the manifest lists it', async () => {
+    const dir = `${HOME}/.claude/skills`;
+    const cc = inst('claude-code', `${HOME}/.claude`, [], { skillsDir: dir });
+    // the listing the manifest asks for (names, link targets) is not the tree
+    const fs = snapshot({}, {
+      configTrees: { [dir]: 'limit' },
+      directories: { [dir]: ['a', 'b/'] },
+      symlinks: { [dir]: '/opt/share', [`${dir}/a`]: '../Cellar/a' },
+      directoryModes: { [dir]: 0o755 },
+    });
+    expect(probeCoversTree(fs, dir)).toBe(false);
+    expect((await skl002.run(ctx(cc, fs))).evidence?.[0].detail).toMatch(/more entries than the remote probe collects/);
+    // a file of the tree in the snapshot: collected after all
+    const held = snapshot({ [`${dir}/b/SKILL.md`]: file('# b\n') }, { configTrees: { [dir]: 'limit' } });
+    expect(probeCoversTree(held, dir)).toBe(true);
+  });
+
   it('a refused directory exists in the inventory as the probe recorded it, however the config spells it', async () => {
     const n = inst('nanobot', `${HOME}/.nanobot`, [], { unscannedSkillsDirs: [{ path: `${HOME}/./x/../.ssh`, reason: 'outside' }] });
     const fs = snapshot({}, { configTrees: { [`${HOME}/.ssh`]: 'refused' }, directoryModes: { [`${HOME}/.ssh`]: 0o700 } });

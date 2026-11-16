@@ -7,7 +7,7 @@ import { redactSecretsInLine } from '../core/patterns.js';
 import { maskCredentialsInLine } from '../reporting/serialize.js';
 import { shannonEntropy } from '../analyzers/entropy.js';
 import { configTreeGap, probeCoversTree } from '../core/probe-coverage.js';
-import { unscannedReason } from '../core/skill-root-scope.js';
+import { refusedSkillLink, unscannedReason } from '../core/skill-root-scope.js';
 
 /**
  * Folders under a skills directory whose skills an agent doesn't load: Hermes
@@ -66,7 +66,8 @@ export async function collectSkillInventory(installation: AgentInstallation, fs:
     const { path, reason } = u;
     // A snapshot keys paths normalized (`~/./a/../.ssh` is `~/.ssh` there)
     const at = fs.kind === 'snapshot' && isAbsolute(path) ? posix.normalize(path) : path;
-    skillsDirs.push({ path, exists: await fs.access(at).catch(() => false), unverified: true });
+    // a link to /dev/null is no directory there (SKL-002 says so too)
+    skillsDirs.push({ path, exists: await fs.stat(at).then(st => st.isDirectory(), () => false), unverified: true });
     incomplete.push(`${path}: ${unscannedReason(reason, path, u)}`);
   }
 
@@ -91,6 +92,18 @@ export async function collectSkillInventory(installation: AgentInstallation, fs:
       incomplete.push(`${root}: can't be listed (${listing.error.code ?? listing.error.message})`);
     }
     for (const dir of listing.unlistable) incomplete.push(`${dir}: contents can't be listed`);
+    // A skill linked to where no skills tree is walked: the agent loads it,
+    // no scan reads it — not scanned, as a skills directory there would be
+    // (SKL-002 reports it from unscannedSkillsDirs)
+    const home = homedirOf(fs);
+    for (const link of listing.refusedLinks) {
+      if (!home || !(await fs.stat(link).then(st => st.isDirectory(), () => false))) continue;
+      const known = installation.unscannedSkillsDirs ?? [];
+      if (known.some(u => u.path === link)) continue;
+      const u = await refusedSkillLink(fs, link, home);
+      installation.unscannedSkillsDirs = [...known, u];
+      incomplete.push(`${link}: ${unscannedReason(u.reason, link, u)}`);
+    }
 
     // A SKILL.md that is a symlink into the same tree (gstack links each
     // skill's SKILL.md to its copy under skills/gstack/): the walk doesn't
@@ -205,6 +218,16 @@ export async function attachSkillInventories(installations: AgentInstallation[],
   await Promise.all(installations.map(async (inst) => {
     inst.inventory = (await collectSkillInventory(inst, fs)).inventory;
   }));
+}
+
+/** The scanned user's home, when the provider knows it. */
+function homedirOf(fs: FSProvider): string | undefined {
+  try {
+    const h = typeof fs.homedir === 'function' ? fs.homedir() : undefined;
+    return typeof h === 'string' && isAbsolute(h) ? h : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** The directory isn't there — locally (ENOENT/ENOTDIR) or in a snapshot, whose

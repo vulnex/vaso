@@ -67,14 +67,14 @@ describe('a skills directory outside the home', () => {
     expect(r.evidence).toHaveLength(1);
     expect(r.evidence![0].mitigated).toBe(true);
     const missing = join(tmp, 'nonexist-zz', 'skills');
-    expect(r.evidence![0].detail).toBe(`not scanned: skills directory ${missing} (an OS directory, another user's home or a credential store) does not exist — nothing to scan`);
-    expect(r.message).toContain('does not exist');
+    expect(r.evidence![0].detail).toBe(`not scanned: skills directory ${missing} (an OS directory, another user's home or a credential store) does not exist as a directory — nothing to scan`);
+    expect(r.message).toContain('no such directory');
   });
 
   it('SKL-002 names the kind of place, and the link target of a linked directory', async () => {
     const r = await byId('SKL-002').run(ctx([{ ...OUT[0], target: '/etc/skills', refusedAs: 'an OS directory (/etc)', agentDefault: true }]));
     expect(r.message).toBe(`skills directory ${OUT[0].path} not scanned (links to /etc/skills, an OS directory (/etc))`);
-    expect(r.evidence![0].detail).toBe('not scanned: skills directory links to /etc/skills, an OS directory (/etc) — VASO doesn\'t walk it (locally or remotely); review it with `vaso skill audit /etc/skills`');
+    expect(r.evidence![0].detail).toBe('not scanned: skills directory links to /etc/skills, an OS directory (/etc) — VASO doesn\'t walk it (locally or remotely); keep skills in a dedicated folder');
     const set = await byId('SKL-002').run(ctx([{ ...OUT[0], refusedAs: 'another user\'s home (/home/bob)' }]));
     expect(set.evidence![0].detail).toMatch(/^not scanned: skills directory set to another user's home \(\/home\/bob\) — /);
   });

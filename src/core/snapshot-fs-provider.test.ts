@@ -27,6 +27,43 @@ function makeSnapshot(overrides: Partial<ProbeSnapshot> = {}): ProbeSnapshot {
   };
 }
 
+describe('links inside a tree walked through a link', () => {
+  // ~/.claude/skills → /srv/rel/skills; the probe walked the tree through the
+  // link, so the links in it are recorded under ~/.claude/skills/<name>
+  const fs = () => new SnapshotFSProvider({
+    version: 1, hostname: 'h', platform: 'linux', homedir: '/home/u', timestamp: '2026-11-16T00:00:00Z',
+    privilege: { uid: 1000, username: 'u', isRoot: false, sudoAvailable: false, escalated: false, scannedUsers: ['u'], skippedPaths: [] },
+    files: { '/home/u/.claude/skills/rel/SKILL.md': { content: '# r', mode: 0o100644, exists: true } },
+    directories: {}, commandOutputs: {}, env: {},
+    symlinks: {
+      '/home/u/.claude/skills': '/srv/rel/skills',
+      '/home/u/.claude/skills/rel': '../store/rel',
+      '/home/u/.claude/skills/abs': '/srv/rel/store/abs',
+    },
+  });
+
+  it('resolve where they lead, a relative target against the real directory', async () => {
+    expect(await fs().realpath('/home/u/.claude/skills/rel')).toBe('/srv/rel/store/rel');
+    expect(await fs().realpath('/home/u/.claude/skills/abs')).toBe('/srv/rel/store/abs');
+  });
+
+  it('a realpath takes the stored letters the probe recorded, not other recorded resolutions', async () => {
+    const base = { version: 1, hostname: 'h', platform: 'darwin', homedir: '/Users/u/fx/hu', timestamp: '2026-11-16T00:00:00Z',
+      privilege: { uid: 501, username: 'u', isRoot: false, sudoAvailable: false, escalated: false, scannedUsers: ['u'], skippedPaths: [] },
+      files: { '/Users/u/FX/hu/a.txt': { content: 'a', mode: 0o100644, exists: true }, '/var/h/b.txt': { content: 'b', mode: 0o100644, exists: true } },
+      directories: {}, commandOutputs: {}, env: {},
+      resolvedDirs: { '/Users/u/FX/hu': '/Users/u/fx/hu', '/var/h': '/private/var/h' } };
+    const snap = new SnapshotFSProvider(base);
+    expect(await snap.realpath('/Users/u/FX/hu/a.txt')).toBe('/Users/u/fx/hu/a.txt');
+    expect(await snap.realpath('/var/h/b.txt')).toBe('/var/h/b.txt');
+  });
+
+  it('are read by their real spelling too', async () => {
+    expect(await fs().readlink('/srv/rel/skills/rel')).toBe('../store/rel');
+    await expect(fs().readlink('/srv/rel/skills/none')).rejects.toThrow(/not collected/);
+  });
+});
+
 describe('SnapshotFSProvider', () => {
   // ---------------------------------------------------------------------------
   // readFile

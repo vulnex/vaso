@@ -71,6 +71,20 @@ describe('runDetect', () => {
     expect(output).toContain('Found 2 agent(s).');
   });
 
+  it('says skills not scanned, not 0, when every skills directory is refused', async () => {
+    const inst: AgentInstallation = {
+      agent: 'openclaw',
+      installDir: '/nonexistent-vaso/.openclaw',
+      configFiles: [],
+      unscannedSkillsDirs: [{ path: '/etc', reason: 'outside', refusedAs: 'an OS directory (/etc)' }],
+    };
+    vi.spyOn(adapterRegistry, 'detectAll').mockResolvedValue([inst]);
+    await runDetect({ format: 'terminal' });
+    const output = consoleLogs.join('\n');
+    expect(output).toMatch(/Skills:\s+not scanned/);
+    expect(output).not.toMatch(/Skills:\s+0/);
+  });
+
   it('lists every skills directory with skill counts, and names skills under --verbose', async () => {
     const root = await mkdtemp(join(tmpdir(), 'vaso-detect-skills-'));
     try {

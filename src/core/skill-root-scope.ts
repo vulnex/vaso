@@ -15,15 +15,16 @@ import { relEscapes } from './path-rel.js';
  *
  *   - the filesystem root;
  *   - the scanned user's home itself, or a directory above it;
- *   - another user's home (/home/<u>, /Users/<u>, /root, and /home or /Users
- *     themselves) — one holding the scanned home is that home's ancestor;
+ *   - another user's home (/home/<u>, /Users/<u> but not /Users/Shared,
+ *     /root, and /home or /Users themselves) — one holding the scanned home
+ *     is that home's ancestor;
  *   - an OS directory (/etc, /usr, /var, /bin, /sbin, /lib*, /System,
  *     /Library, /dev, /proc, /sys, /boot, /run; /private/etc and
  *     /private/var) — unless inside the scanned home;
  *   - a credential store or sensitive location (SENSITIVE_SINKS).
  *
- * /opt, /srv, /nix/store, /Volumes/*, /mnt/*, /media/* and /tmp are not
- * refused. Such a directory is reported "not scanned" (SKL-002) by local and
+ * /opt, /srv, /nix/store, /Volumes/*, /mnt/*, /media/*, /tmp and
+ * /Users/Shared are not refused. Such a directory is reported "not scanned" (SKL-002) by local and
  * remote scans alike: the probe applies the same rule (probe/skill_scope.go,
  * treeAllowed), and probe/testdata/skill-scope-cases.json holds the table
  * both sides test. A link inside a walked tree follows it too
@@ -49,15 +50,28 @@ function clean(p: string): string {
   return normalize(p).replace(/(.)\/$/, '$1');
 }
 
+/**
+ * A skills directory a config sets, as both scans key it: an absolute one
+ * cleaned (`/tmp/./x`, `/tmp//x/`, `/etc/../tmp/x` → `/tmp/x`), as the probe
+ * records the tree it walked; a relative one as written.
+ */
+export function cleanSkillRoot(p: string): string {
+  return isAbsolute(p) ? clean(p) : p;
+}
+
 /** Top-level OS directories (lower case); `lib*` too. */
 const SYSTEM_TOPS = new Set(['etc', 'usr', 'var', 'bin', 'sbin', 'system', 'library', 'dev', 'proc', 'sys', 'boot', 'run']);
 
-/** The user home (or home area) `parts` lie in, by location; '' otherwise. */
+/** The user home (or home area) `parts` lie in, by location; '' otherwise.
+ *  macOS's /Users/Shared is a shared folder, no user's home. */
 function otherHomeDir(parts: readonly string[]): string {
-  switch (parts[0].toLowerCase()) {
+  const top = parts[0].toLowerCase();
+  switch (top) {
     case 'home':
     case 'users':
-      return parts.length === 1 ? `/${parts[0]}` : `/${parts[0]}/${parts[1]}`;
+      if (parts.length === 1) return `/${parts[0]}`;
+      if (top === 'users' && parts[1].toLowerCase() === 'shared') return '';
+      return `/${parts[0]}/${parts[1]}`;
     case 'root':
       return `/${parts[0]}`;
   }
@@ -304,12 +318,28 @@ async function linkChainTarget(fs: FSProvider, p: string, homes: readonly string
   return last;
 }
 
-/** What a label says, for a report. */
-function labelPhrase(label: string): string {
+/**
+ * An OS directory label's place (`/system`, lower case) as `paths` spell it
+ * (`/System`): the first top-level directory, or the one under /private,
+ * that names it.
+ */
+function spelledPlace(place: string, paths: readonly string[]): string {
+  const name = place.slice(1);
+  for (const p of paths) {
+    const parts = p.split('/').filter(Boolean);
+    const candidates = parts[0]?.toLowerCase() === 'private' ? [parts[0], parts[1]] : [parts[0]];
+    const hit = candidates.find(c => c !== undefined && c.toLowerCase() === name);
+    if (hit !== undefined) return `/${hit}`;
+  }
+  return place;
+}
+
+/** What a label says, for a report — places as `paths` spell them. */
+function labelPhrase(label: string, paths: readonly string[] = []): string {
   if (label === 'root') return 'the filesystem root';
   if (label === 'home') return 'the home directory or a directory above it';
   if (label.startsWith('other-home:')) return `another user's home (${label.slice('other-home:'.length)})`;
-  if (label.startsWith('system:')) return `an OS directory (${label.slice('system:'.length)})`;
+  if (label.startsWith('system:')) return `an OS directory (${spelledPlace(label.slice('system:'.length), paths)})`;
   const sink = SENSITIVE_SINKS[Number(label.slice('sink:'.length))];
   return `a credential store or sensitive location (${sink?.label ?? 'credentials'})`;
 }
@@ -333,7 +363,7 @@ async function refusalDetails(fs: FSProvider, dir: string, home: string, reason:
   const first = LABEL_ORDER.map(prefix => labels.filter(l => l === prefix || l.startsWith(prefix)).sort()[0]).find(l => l !== undefined);
   return {
     ...(target !== clean(dir) ? { target } : {}),
-    ...(first !== undefined && reason === 'outside' ? { refusedAs: labelPhrase(first) } : {}),
+    ...(first !== undefined && reason === 'outside' ? { refusedAs: labelPhrase(first, [target, clean(dir)]) } : {}),
   };
 }
 
@@ -354,6 +384,15 @@ export async function unscannedDir(
 }
 
 /**
+ * A skill linked (in a skills tree) to where no skills tree is walked, as an
+ * unscanned directory: the home itself, or a place refused (`outside`).
+ */
+export async function refusedSkillLink(fs: FSProvider, link: string, home: string): Promise<UnscannedSkillsDir> {
+  const reason = (await isHomeItself(fs, link, home)) ? 'home' : 'outside';
+  return { ...(await unscannedDir(fs, link, reason, home)), skillLink: true };
+}
+
+/**
  * Split config-set skills directories into those to scan and those that are
  * not scanned (with the reason). `relative` are values the agent resolves
  * against its own working directory, which neither scan can know.
@@ -366,7 +405,7 @@ export async function screenSkillRoots(
 ): Promise<{ scan: string[]; unscanned: UnscannedSkillsDir[] }> {
   const scan: string[] = [];
   const unscanned: UnscannedSkillsDir[] = relativeValues.map(path => ({ path, reason: 'relative' as const }));
-  for (const root of roots) {
+  for (const root of [...new Set(roots.map(cleanSkillRoot))]) {
     const reason = await skillRootGap(fs, root, home);
     if (reason) unscanned.push(await unscannedDir(fs, root, reason, home));
     else scan.push(root);
@@ -377,19 +416,36 @@ export async function screenSkillRoots(
 /** The generic kind of place no skills tree is walked. */
 const REFUSED_PLACES = 'an OS directory, another user\'s home or a credential store';
 
+/** What an unscanned entry is: a skills directory, or a skill linked into one. */
+function unscannedWhat(u: Partial<UnscannedSkillsDir> | undefined): string {
+  return u?.skillLink ? 'skill' : 'skills directory';
+}
+
 /** Where an unscanned directory is, in a few words: "links to /etc, an OS directory (/etc)". */
 function refusedWhere(u: Partial<UnscannedSkillsDir> | undefined, itself: string): string {
   if (u?.target) return `links to ${u.target}, ${itself}`;
   return `${u?.agentDefault ? 'is' : 'set to'} ${itself}`;
 }
 
+/**
+ * What to do about a directory refused for where it is: audit another user's
+ * skills (or ones in a place not named) with `vaso skill audit`; an OS
+ * directory, the filesystem root or a credential store is no place for
+ * skills at all.
+ */
+function outsideAdvice(u: Partial<UnscannedSkillsDir> | undefined, path: string): string {
+  const as = u?.refusedAs;
+  if (as === undefined || as.startsWith('another user\'s home')) return `review it with \`vaso skill audit ${u?.target ?? path}\``;
+  return 'keep skills in a dedicated folder';
+}
+
 /** The sentence reports and the inventory give for an unscanned skills directory. */
 export function unscannedReason(reason: UnscannedSkillsDir['reason'], path = '<path>', u?: Partial<UnscannedSkillsDir>): string {
   switch (reason) {
     case 'home':
-      return `not scanned: skills directory ${refusedWhere(u, 'the home directory itself')} — VASO doesn't walk the whole home (locally or remotely); point it at a dedicated folder`;
+      return `not scanned: ${unscannedWhat(u)} ${refusedWhere(u, 'the home directory itself')} — VASO doesn't walk the whole home (locally or remotely); point it at a dedicated folder`;
     case 'outside':
-      return `not scanned: skills directory ${refusedWhere(u, u?.refusedAs ?? REFUSED_PLACES)} — VASO doesn't walk it (locally or remotely); review it with \`vaso skill audit ${u?.target ?? path}\``;
+      return `not scanned: ${unscannedWhat(u)} ${refusedWhere(u, u?.refusedAs ?? REFUSED_PLACES)} — VASO doesn't walk it (locally or remotely); ${outsideAdvice(u, path)}`;
     case 'limit':
       return 'not scanned: skills directory holds more entries than the remote probe collects (10000) — not verified; scan the host locally to check these skills';
     case 'relative':

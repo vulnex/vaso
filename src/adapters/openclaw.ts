@@ -13,7 +13,7 @@ import { includeRootsFromEnv, loadOpenclawConfig } from './openclaw-includes.js'
 import { pathPresent } from './load-if-present.js';
 import { containerEnvironment, isOpenclawAutoBind, openclawAutoBindHost, openclawEffectiveBind, OPENCLAW_CONTAINER_MARKERS } from './openclaw-bind.js';
 import { dirExistsOrUncollected } from '../core/probe-coverage.js';
-import { screenSkillRoots } from '../core/skill-root-scope.js';
+import { cleanSkillRoot, screenSkillRoots } from '../core/skill-root-scope.js';
 
 /**
  * Files OpenClaw reads from its state dir besides the main config
@@ -360,7 +360,7 @@ export const openclawAdapter: AgentAdapter = {
         // Skill roots OpenClaw loads besides <dir>/skills: the workspace's
         // skills/ (agents.defaults.workspace, default <dir>/workspace) and
         // skills.load.extraDirs.
-        const expand = (p: string) => (p === '~' || p.startsWith('~/') ? join(home, p.slice(1)) : p);
+        const expand = (p: string) => cleanSkillRoot(p === '~' || p.startsWith('~/') ? join(home, p.slice(1)) : p);
         const workspace = getNestedValue(merged, 'agents.defaults.workspace');
         const extraDirs = getNestedValue(merged, 'skills.load.extraDirs');
         // Roots the config sets are walked where a skills tree may be (not an
