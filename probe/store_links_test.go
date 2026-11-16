@@ -51,11 +51,20 @@ func TestForeignStoreTargetMatchesTS(t *testing.T) {
 }
 
 func TestStoreHomeOf(t *testing.T) {
-	if got := storeHomeOf("/home/u/.copilot", "/home/me"); got != "/home/u" {
-		t.Errorf("got %s", got)
+	cases := []struct{ agentDir, own, ownAgentDir, want string }{
+		{"/home/u/.copilot", "/home/me", "/home/me/.copilot", "/home/u"},
+		{"/opt/cop", "/home/me", "/opt/cop", "/home/me"},
+		{"/home/me/.copilot", "/home/me", "/home/me/.copilot", "/home/me"},
+		// COPILOT_HOME named .copilot below a folder that may be linked out
+		// of the home: the home is the user's, never that folder
+		{"/home/me/x/.copilot", "/home/me", "/home/me/x/.copilot", "/home/me"},
+		{"/home/me/x/a/.copilot", "/home/me", "/home/me/x/a/.copilot", "/home/me"},
+		{"/data/.copilot", "/home/me", "/data/.copilot", "/home/me"},
 	}
-	if got := storeHomeOf("/opt/cop", "/home/me"); got != "/home/me" {
-		t.Errorf("got %s", got)
+	for _, c := range cases {
+		if got := storeHomeOf(c.agentDir, c.own, c.ownAgentDir); got != c.want {
+			t.Errorf("storeHomeOf(%s, %s, %s) = %s, want %s", c.agentDir, c.own, c.ownAgentDir, got, c.want)
+		}
 	}
 }
 

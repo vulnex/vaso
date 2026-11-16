@@ -201,3 +201,74 @@ describe('GHC-001: the agent folder itself linked away', () => {
     expect(r.evidence?.map(e => e.file)).toEqual([join(cp, 'session-state', 'abc', 'events.jsonl')]);
   });
 });
+
+describe('GHC-001: COPILOT_HOME named .copilot below a folder linked out of the home', () => {
+  for (const sub of ['.copilot', join('a', '.copilot')]) {
+    it(`~/x/${sub} with ~/x linked out: a link out of the home, nothing behind it judged or changed`, async () => {
+      const home = join(root, 'home');
+      await mkdir(home, { recursive: true });
+      const outside = join(root, 'outside', 'x');
+      const real = join(outside, sub);
+      await put(join(real, 'session-state', 'abc', 'events.jsonl'), 0o644);
+      await put(join(real, 'mcp-secrets', 'CANARY.json'), 0o644);
+      await symlink(outside, join(home, 'x'));
+      const cop = join(home, 'x', sub);
+      const ctx = localCtx(cop, home);
+      ctx.fs.getEnv = (k: string) => (k === 'COPILOT_HOME' ? cop : undefined);
+      const r = await check.run(ctx);
+      expect(r).toMatchObject({ passed: false, severity: 'warning', fixable: false });
+      expect(r.message).toMatch(/is a link out of the home/);
+      expect(JSON.stringify(r)).not.toMatch(/CANARY|events\.jsonl/);
+      await check.fix!(ctx);
+      expect((await stat(join(real, 'mcp-secrets', 'CANARY.json'))).mode & 0o777).toBe(0o644);
+    });
+  }
+});
+
+describe('GHC-001: fix targets beyond the listed evidence', () => {
+  it('judges every open store file, not the 40 listed and the "+N more" line naming the store folder', async () => {
+    const { markRefusedFix } = await import('../../remediation/fix-refusal.js');
+    const home = join(root, 'home');
+    const cop = join(home, '.copilot');
+    const sec = join(cop, 'mcp-secrets');
+    await mkdir(sec, { recursive: true, mode: 0o700 });
+    await chmod(cop, 0o700);
+    await chmod(sec, 0o700);
+    const targets = join(home, 'targets');
+    for (let i = 0; i < 45; i++) {
+      const name = `a${String(i).padStart(2, '0')}.json`;
+      await put(join(targets, name), 0o644);
+      await symlink(join(targets, name), join(sec, name));
+    }
+    for (let i = 0; i < 5; i++) await put(join(sec, `z${i}.json`), 0o644);
+    const before = await check.run(localCtx(cop, home));
+    const ctx = localCtx(cop, home);
+    const r1 = await check.run(ctx);
+    expect(r1.evidence?.some(e => /^\+\d+ more file/.test(e.snippet ?? ''))).toBe(true);
+    expect((await markRefusedFix(check, ctx, r1, { home })).fixable).toBe(true);
+    expect(before.fixable).toBe(true);
+    // the real files fixed: only links are left — no longer offered
+    for (let i = 0; i < 5; i++) await chmod(join(sec, `z${i}.json`), 0o600);
+    const ctx2 = localCtx(cop, home);
+    const r2 = await check.run(ctx2);
+    expect(r2.evidence?.some(e => e.file === sec)).toBe(true);
+    const marked = await markRefusedFix(check, ctx2, r2, { home });
+    expect(marked.fixable).toBe(false);
+    expect(marked.message).toMatch(/not changed by vaso fix: .*a00\.json is a symlink/);
+  });
+});
+
+describe('GHC-001: COPILOT_HOME set inside a credential store (no link)', () => {
+  it('says the folder is inside it, not that it is a link', async () => {
+    const home = join(root, 'home');
+    const cop = join(home, '.aws', 'cop');
+    await put(join(cop, 'session-state', 'abc', 'events.jsonl'), 0o644);
+    const ctx = localCtx(cop, home);
+    ctx.fs.getEnv = (k: string) => (k === 'COPILOT_HOME' ? cop : undefined);
+    const r = await check.run(ctx);
+    expect(r).toMatchObject({ passed: false, severity: 'warning', fixable: false });
+    expect(r.message).toBe(`Copilot CLI folder ${cop} is inside AWS credentials (~/.aws) — its private stores there are not checked and its config files are not read`);
+    expect(r.evidence?.[0].detail).toMatch(/is inside AWS credentials/);
+    expect(JSON.stringify(r)).not.toMatch(/is a link|events\.jsonl/);
+  });
+});

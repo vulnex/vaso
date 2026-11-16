@@ -6,7 +6,8 @@ import { configHoldsSecret, CREDENTIAL_FILE_NAME } from '../../core/secret-value
 import { ghc003 } from './ghc-003-plaintext-token.js';
 import { restrictFilesToOwner } from '../../remediation/config-writer.js';
 import { foreignAgentDir, foreignStoreTarget, storeHomeOf, withinDir as within, type ForeignReason } from '../../core/store-links.js';
-import { permissionFixTargets } from '../../remediation/fix-refusal.js';
+import { codeSpan, permissionFixTargets, shellQuote } from '../../remediation/fix-refusal.js';
+import { copilotHome } from '../../adapters/copilot-cli.js';
 
 const PROTECTED_FILES = [
   'config.json',
@@ -63,6 +64,10 @@ interface Findings {
   truncated: string[];
   /** The agent folder itself leads to a place that isn't the agent's: nothing behind it is judged. */
   agentLink?: ForeignReason;
+  /** agentLink comes from a link (else the folder is written inside a sensitive location). */
+  agentLinked?: boolean;
+  /** Every open path the fix would chmod — `evidence` lists at most maxListed per store. */
+  targets: string[];
   /** The agent folder resolves outside the home: vaso fix can't change it (it writes only where rollback can restore). */
   outsideHome?: boolean;
 }
@@ -89,9 +94,10 @@ interface StoreListing {
   foreignSelf?: boolean;
 }
 
-/** The home holding the store: the parent of ~/.copilot, else the scanning user's. */
+/** The home holding the store: the scanning user's for their own Copilot folder, else the parent of another user's ~/.copilot. */
 function storeHome(ctx: ScanContext): string {
-  return storeHomeOf(ctx.installation.installDir, ctx.fs.homedir());
+  const home = ctx.fs.homedir();
+  return storeHomeOf(ctx.installation.installDir, home, copilotHome(home, ctx.fs));
 }
 
 /** `root` as written and resolved (a snapshot also gives the spelling the probe recorded for it). */
@@ -278,13 +284,20 @@ async function findings(ctx: ScanContext, maxListed: number): Promise<Findings> 
   const agentLink = agentReal !== undefined ? foreignAgentDir(installDir, agentReal, homeRoots) : undefined;
   if (agentLink) {
     kinds.add(agentLink.why);
+    // Set inside a sensitive location without a link (COPILOT_HOME=~/.aws/cop)
+    const linked = agentReal !== installDir;
     return {
-      evidence, total, unverified, truncated, kinds, agentLink, outsideTotal: 1,
-      outside: [{
-        file: installDir,
-        snippet: `-> ${agentReal}`,
-        detail: `${installDir} is a link to the folder ${agentReal}${placeText(agentLink)} — its session, history and MCP secret stores there are not the agent's own files (neither checked nor changed here), but the agent reads and writes through it`,
-      }],
+      evidence, total, unverified, truncated, kinds, agentLink, agentLinked: linked, outsideTotal: 1, targets: [],
+      outside: [linked
+        ? {
+          file: installDir,
+          snippet: `-> ${agentReal}`,
+          detail: `${installDir} is a link to the folder ${agentReal}${placeText(agentLink)} — its session, history and MCP secret stores there are not the agent's own files (neither checked nor changed here), but the agent reads and writes through it`,
+        }
+        : {
+          file: installDir,
+          detail: `${installDir} is inside ${agentLink.why === 'sensitive' ? agentLink.label : 'a sensitive location'} — its session, history and MCP secret stores there are neither checked nor changed here, and its config files are not read`,
+        }],
     };
   }
   // A folder relocated outside the home (COPILOT_HOME=/data/copilot) is the
@@ -338,6 +351,8 @@ async function findings(ctx: ScanContext, maxListed: number): Promise<Findings> 
     } catch {}
   }
 
+  // Listed in full: the folders and files above; the stores' files below are capped
+  const targets = evidence.map(e => e.file);
   for (const { dir, what } of PRIVATE_DIRS) {
     const storeDir = join(ctx.installation.installDir, dir);
     const listing = listings.get(dir);
@@ -385,6 +400,7 @@ async function findings(ctx: ScanContext, maxListed: number): Promise<Findings> 
     // Which files are listed must not depend on walk order (local vs snapshot)
     open.sort((a, b) => (a.file < b.file ? -1 : a.file > b.file ? 1 : 0));
     total += open.length;
+    targets.push(...open.map(e => e.file));
     evidence.push(...open.slice(0, maxListed));
     if (open.length > maxListed) {
       evidence.push({
@@ -402,8 +418,11 @@ async function findings(ctx: ScanContext, maxListed: number): Promise<Findings> 
       detail: `${outsideTotal - outside.length} more store link(s) ${linkPlaces(kinds)} (not listed)`,
     });
   }
-  return { evidence, total, outside, outsideTotal, kinds, unverified, truncated, outsideHome };
+  return { evidence, total, outside, outsideTotal, kinds, unverified, truncated, outsideHome, targets };
 }
+
+/** The paths GHC-001's fix would chmod, by installation, from the scan that judged them (fixTargets). */
+const fixPaths = new WeakMap<object, string[]>();
 
 /** Where a link leads, after its target: " (AWS credentials (~/.aws))", " — the home itself", … */
 function placeText(reason: ForeignReason): string {
@@ -442,22 +461,36 @@ export const ghc001 = defineCheck({
   supportedPlatforms: ['darwin', 'linux'],
 
   // Store links listed beside the modes are not the fix's: it chmods only what the modes name
-  fixTargets: (ctx, result) => permissionFixTargets(ctx, {
-    ...result,
-    evidence: result.evidence?.filter(e => !e.snippet?.startsWith('-> ') && !/^\+\d+ more link/.test(e.snippet ?? '')),
-  }),
+  // The files the fix chmods: every open path, not only the ones the
+  // evidence lists (it caps each store at MAX_LISTED_PER_STORE, then "+N more
+  // file(s)" naming the store folder). Store links listed beside the modes
+  // are not the fix's.
+  fixTargets: (ctx, result) => {
+    const all = fixPaths.get(ctx.installation);
+    return all
+      ? { paths: all, kind: 'permissions' }
+      : permissionFixTargets(ctx, {
+        ...result,
+        evidence: result.evidence?.filter(e => !e.snippet?.startsWith('-> ') && !/^\+\d+ more (link|file)/.test(e.snippet ?? '')),
+      });
+  },
 
   async run(ctx, h) {
     if (ctx.installation.profile === 'project') return h.passed('Project configuration — ~/.copilot permissions are checked on the user install');
-    const { evidence, total, outside, outsideTotal, kinds, unverified, truncated, agentLink, outsideHome } = await findings(ctx, MAX_LISTED_PER_STORE);
+    const { evidence, total, outside, outsideTotal, kinds, unverified, truncated, agentLink, agentLinked, outsideHome, targets } = await findings(ctx, MAX_LISTED_PER_STORE);
+    fixPaths.set(ctx.installation, targets);
     if (agentLink) {
       return h.result({
         passed: false,
         severity: 'warning',
-        message: `Copilot CLI folder ${ctx.installation.installDir} is a link ${agentPlace(agentLink)} — its private stores there are not checked`,
+        message: agentLinked
+          ? `Copilot CLI folder ${ctx.installation.installDir} is a link ${agentPlace(agentLink)} — its private stores there are not checked`
+          : `Copilot CLI folder ${ctx.installation.installDir} is inside ${agentLink.why === 'sensitive' ? agentLink.label : 'a sensitive location'} — its private stores there are not checked and its config files are not read`,
         evidence: outside,
         fixable: false,
-        fixDescription: 'Keep the Copilot folder in the home (or set COPILOT_HOME to the folder you want) unless you linked it on purpose',
+        fixDescription: agentLinked
+          ? 'Keep the Copilot folder in the home (or set COPILOT_HOME to the folder you want) unless you linked it on purpose'
+          : 'Point COPILOT_HOME at a folder of its own, outside other tools\' credential stores',
       });
     }
     await markUnreachable(ctx.fs, evidence);
@@ -488,7 +521,7 @@ export const ghc001 = defineCheck({
       failed: () => `Found ${total} Copilot CLI path(s) with overly permissive mode${outsideText ? `; ${outsideText}` : ''}${noteText}${outsideHome ? `; not changed by vaso fix: ${ctx.installation.installDir} is outside the home` : ''}`,
       fixable: !outsideHome,
       fixDescription: outsideHome
-        ? `Remove group/other access yourself: \`chmod -R go-rwx ${ctx.installation.installDir}\` — the folder is outside the home, and vaso fix changes files only inside it (where it can restore them)`
+        ? `Remove group/other access yourself: ${codeSpan(`chmod -R go-rwx ${shellQuote(ctx.installation.installDir)}`)} — the folder is outside the home, and vaso fix changes files only inside it (where it can restore them)`
         : 'Remove group/other access (chmod go-rwx) from the listed ~/.copilot paths — `chmod -R go-rwx ~/.copilot` covers everything',
     });
     return outside.length > 0 ? { ...result, evidence: [...(result.evidence ?? []), ...outside] } : result;

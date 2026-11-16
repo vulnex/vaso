@@ -89,6 +89,46 @@ func TestAgentFolderLinkedAwayShipsNoStoreNames(t *testing.T) {
 	}
 }
 
+// COPILOT_HOME named .copilot below a folder of the home that links out of
+// it (~/x → elsewhere, COPILOT_HOME=~/x/.copilot): the folder resolves out of
+// the home, so nothing in its stores ships — its parent is no home.
+func TestRelocatedAgentFolderBelowLinkedParentShipsNoStoreNames(t *testing.T) {
+	for _, sub := range []string{".copilot", filepath.Join("a", ".copilot")} {
+		t.Run(sub, func(t *testing.T) {
+			home := setupHome(t)
+			outside, err := filepath.EvalSymlinks(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			real := filepath.Join(outside, "x", sub)
+			write(t, filepath.Join(real, "session-state", "abc", "CANARY-SESSION.jsonl"), "{}", 0o644)
+			write(t, filepath.Join(real, "mcp-secrets", "CANARY-SECRET.json"), "{}", 0o644)
+			mustSymlink(t, filepath.Join(outside, "x"), filepath.Join(home, "x"))
+			cop := filepath.Join(home, "x", sub)
+			t.Setenv("COPILOT_HOME", "~/"+filepath.ToSlash(filepath.Join("x", sub)))
+			m := ProbeManifest{
+				MetadataGlobPatterns: []string{
+					"${COPILOT_HOME}/session-state/*", "${COPILOT_HOME}/session-state/*/*",
+					"${COPILOT_HOME}/mcp-secrets/*", "${COPILOT_HOME}/mcp-secrets/*/*",
+				},
+				DirectoryListings: []string{"${COPILOT_HOME}/session-state", "${COPILOT_HOME}/mcp-secrets"},
+				PrivateStores:     []string{"${COPILOT_HOME}/session-state", "${COPILOT_HOME}/mcp-secrets"},
+			}
+			snap := Collect(m, false)
+			raw, err := json.Marshal(snap)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(raw), "CANARY") {
+				t.Errorf("store names from behind ~/x shipped")
+			}
+			if _, ok := snap.Directories[filepath.Join(cop, "session-state")]; ok {
+				t.Errorf("session-state listed")
+			}
+		})
+	}
+}
+
 // COPILOT_HOME set outside the home is the agent's own folder: its stores
 // are collected (names and modes) as under ~/.copilot.
 func TestRelocatedAgentFolderOutsideHomeIsOwn(t *testing.T) {
@@ -106,5 +146,40 @@ func TestRelocatedAgentFolderOutsideHomeIsOwn(t *testing.T) {
 	snap := Collect(m, false)
 	if e, ok := snap.Files[filepath.Join(cp, "session-state", "abc", "events.jsonl")]; !ok || !e.Exists || e.Mode != 0o644 {
 		t.Errorf("events.jsonl: %+v, want collected", e)
+	}
+}
+
+// HOME with ".." segments or a trailing slash is cleaned before anything is
+// joined onto it: the snapshot's homedir and paths are the ones a local
+// scan uses, and the CLI accepts the snapshot.
+func TestCollectCleansHome(t *testing.T) {
+	home := setupHome(t)
+	write(t, filepath.Join(home, ".codex", "config.toml"), "model = \"x\"\n", 0o600)
+	for _, spelled := range []string{filepath.Join(home, ".codex") + "/..", home + "/", home + "/./"} {
+		t.Setenv("HOME", spelled)
+		snap := Collect(ProbeManifest{FilePaths: []string{"~/.codex/config.toml"}}, false)
+		if snap.Homedir != home {
+			t.Errorf("HOME=%s: homedir %q, want %q", spelled, snap.Homedir, home)
+		}
+		if e, ok := snap.Files[filepath.Join(home, ".codex", "config.toml")]; !ok || !e.Exists {
+			t.Errorf("HOME=%s: config.toml not collected under the clean home", spelled)
+		}
+	}
+}
+
+// An agent folder an environment variable puts inside another tool's
+// credential store (COPILOT_HOME=~/.aws/cop): its files' content never ships.
+func TestNoContentFromInsideCredentialStores(t *testing.T) {
+	home := setupHome(t)
+	cfg := filepath.Join(home, ".aws", "cop", "config.json")
+	write(t, cfg, "{\"CANARY\": 1}\n", 0o600)
+	t.Setenv("COPILOT_HOME", "~/.aws/cop")
+	snap := Collect(ProbeManifest{FilePaths: []string{"${COPILOT_HOME}/config.json", "~/.copilot/config.json"}}, false)
+	e, ok := snap.Files[cfg]
+	if !ok || !e.Exists || e.Content != "" || e.Omitted != "sensitive" {
+		t.Errorf("config.json in ~/.aws: %+v, want present, content omitted (sensitive)", e)
+	}
+	if !inCredentialStore("/home/u/.ssh/codex/config.toml") || inCredentialStore("/home/u/.copilot/config.json") || inCredentialStore("/etc/hermes/config.yaml") {
+		t.Errorf("inCredentialStore")
 	}
 }

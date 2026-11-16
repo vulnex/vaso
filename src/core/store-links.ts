@@ -24,10 +24,15 @@ export interface StorePlaces {
 }
 
 /**
- * The home holding an agent folder: the parent of ~/.copilot, else (a folder
- * COPILOT_HOME moved elsewhere) the scanning user's home.
+ * The home holding an agent folder: the scanning user's home for that user's
+ * own folder (`ownAgentDir`: ~/.copilot, or the folder COPILOT_HOME names),
+ * else the parent of another user's ~/.copilot (`--all-users`). Never the
+ * parent of a folder COPILOT_HOME names: with `COPILOT_HOME=~/x/.copilot`
+ * and `~/x` linked out of the home, that outside folder would count as a
+ * home, and whatever lies behind the link as the agent's own.
  */
-export function storeHomeOf(agentDir: string, homedir: string): string {
+export function storeHomeOf(agentDir: string, homedir: string, ownAgentDir: string): string {
+  if (agentDir === ownAgentDir) return homedir;
   return basename(agentDir) === '.copilot' ? dirname(agentDir) : homedir;
 }
 

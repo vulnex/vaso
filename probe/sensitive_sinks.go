@@ -47,6 +47,26 @@ var sensitiveSinks = func() []*regexp.Regexp {
 	return res
 }()
 
+// credentialStoreSinks: the sinks (by index) that are other tools'
+// credential-store folders — ~/.ssh, ~/.aws, ~/.gnupg, ~/.kube, ~/.docker,
+// ~/.config/gh, ~/.config/gcloud, ~/.azure, ~/.password-store,
+// ~/Library/Keychains, browser profiles. Mirrors CREDENTIAL_STORE_SINKS in
+// src/analyzers/sensitive-paths.ts (its test reads this list).
+var credentialStoreSinks = []int{0, 2, 3, 4, 5, 8, 9, 10, 11, 12, 15}
+
+// inCredentialStore: p, as written, lies in one of credentialStoreSinks. No
+// agent keeps its configuration there; an agent folder an environment
+// variable puts there (COPILOT_HOME=~/.aws/cop) ships no content.
+func inCredentialStore(p string) bool {
+	slash := filepath.ToSlash(p)
+	for _, i := range credentialStoreSinks {
+		if sensitiveSinks[i].MatchString(slash) {
+			return true
+		}
+	}
+	return false
+}
+
 // sinkSet is the set of sensitive sinks (by index) a path matches.
 func sinkSet(p string) map[int]bool {
 	set := make(map[int]bool)

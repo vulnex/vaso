@@ -691,8 +691,19 @@ async function plantStoreLinks(home: string, work: string): Promise<{ links: str
     await symlink(target, join(cop, rel));
   }
   await symlink(join(home, 'canary-sess'), join(cop, 'session-state/linked-ok'));
+  // COPILOT_HOME (COPILOT_HOME_REL) named .copilot below a folder of the
+  // home linked out of it: the agent folder resolves out of the home, so
+  // none of its stores' names ship
+  const chomeOut = join(work, 'chome-out');
+  for (const rel of ['session-state/abc', 'mcp-secrets', 'mcp-oauth-config/srv', 'command-history-state']) {
+    await put(join(chomeOut, '.copilot', rel, `${STORE_LINK_NAME}-chome-${rel.replace(/\//g, '-')}.json`));
+  }
+  await symlink(chomeOut, join(home, 'chome'));
   return { links: Object.keys(links).map(rel => join(cop, rel)), followed: join(cop, 'session-state/linked-ok/events.jsonl') };
 }
+
+/** COPILOT_HOME for the canary run: below ~/chome, which plantStoreLinks links out of the home. */
+const COPILOT_HOME_REL = '~/chome/.copilot';
 
 /**
  * Skills trees that reach agents' own files through links: a skill file
@@ -799,6 +810,7 @@ describe.skipIf(!goAvailable)('probe privacy canary', () => {
       env[name] = canary(`env ${name} (presence only)`, () => body(24));
       env[`${name}_X`] = canary(`env ${name}_X (presence-only prefix)`, generic);
     }
+    env.COPILOT_HOME = COPILOT_HOME_REL;
     const r = await run(probe, ['--manifest', join(work, 'manifest.json')], env, home);
     expect(r.code, r.stderr).toBe(0);
     snapshot = r.stdout;
