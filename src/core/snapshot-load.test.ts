@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import {
   validateSnapshot, loadSnapshotFile, SnapshotLoadError, MAX_SNAPSHOT_FILE_CONTENT_CHARS, MAX_CONFIG_TREES, MAX_LINK_RECORDS,
   snapshotErrorLines,
+  sudoNotEffectiveWarning,
 } from './snapshot-load.js';
 
 describe('validateSnapshot configTrees', () => {
@@ -204,5 +205,18 @@ describe('validateSnapshot field types', () => {
     expect(validateSnapshot({ ...base, files: { '/x': { content: '', mode: 0o644, exists: 'yes' } } }).length).toBe(1);
     expect(validateSnapshot({ ...ok, directoryModes: { '/home/u': '755' } }).join()).toMatch(/directoryModes/);
     expect(validateSnapshot({ ...ok, owners: { '/home/u': [1000] } }).join()).toMatch(/owners/);
+  });
+});
+
+describe('sudoNotEffectiveWarning', () => {
+  const priv = (isRoot: boolean) => ({ privilege: { uid: isRoot ? 0 : 1000, username: isRoot ? 'root' : 'deploy', isRoot, sudoAvailable: false, escalated: false, scannedUsers: [], skippedPaths: [] } });
+  it('warns when --sudo was asked for and the probe ran unprivileged', () => {
+    expect(sudoNotEffectiveWarning(priv(false), true)).toMatch(/--sudo requested but the probe ran as "deploy", not root/);
+  });
+  it('is silent when the probe ran as root, without --sudo, or without privilege info', () => {
+    expect(sudoNotEffectiveWarning(priv(true), true)).toBeUndefined();
+    expect(sudoNotEffectiveWarning(priv(false), false)).toBeUndefined();
+    expect(sudoNotEffectiveWarning(priv(false), undefined)).toBeUndefined();
+    expect(sudoNotEffectiveWarning({}, true)).toBeUndefined();
   });
 });

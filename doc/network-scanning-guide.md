@@ -103,7 +103,11 @@ vaso detect --host root@10.0.0.5 --all-users
   ```
   (`vaso detect` prints the same message prefixed with the host label.)
 - **Regular user without `--all-users`** — no warning; the scan covers the connecting user's home, which is what was asked for.
-- **`--sudo` when the remote user has no passwordless sudo** — VASO does not stop or print a separate warning: the probe cannot escalate (it never prompts for a sudo password) and runs as the connecting user. Add `--all-users` to get the coverage warning above, or save the snapshot (`--save-snapshot`) and check the `Privilege:` line of `vaso probe validate`.
+- **`--sudo` when the remote user has no passwordless sudo** — the probe cannot escalate (it never prompts for a sudo password), runs as the connecting user, and the scan goes on. VASO prints a warning under the host's result:
+
+  ```
+  ! --sudo requested but the probe ran as "deploy", not root (no passwordless sudo on the host) — only files that user can read were scanned
+  ```
 - **Scanning a snapshot collected as a non-root user** (`vaso scan --snapshot`) — VASO prints `Warning: snapshot collected as non-root user "alice" — scan coverage may be limited.`
 
 ### SSH options
@@ -559,7 +563,7 @@ The downloaded binary doesn't match `probe/checksums.json` from your VASO instal
 
 ### Only one user's agents were scanned
 
-The probe ran as a regular user, or `--all-users` was not given. See [Privilege and multi-user coverage](#privilege-and-multi-user-coverage): use `root@host --all-users`, or `--sudo --all-users` with passwordless sudo. If `--sudo` is set but the remote user needs a password for sudo, the scan silently runs as that user — `--all-users` then prints:
+The probe ran as a regular user, or `--all-users` was not given. See [Privilege and multi-user coverage](#privilege-and-multi-user-coverage): use `root@host --all-users`, or `--sudo --all-users` with passwordless sudo. If `--sudo` is set but the remote user needs a password for sudo, the scan runs as that user and prints `--sudo requested but the probe ran as "…", not root`; with `--all-users` it also prints:
 
 ```
 ! --all-users needs root to read other users' homes; only /home/alice was covered (run as root, or add --sudo for remote hosts)

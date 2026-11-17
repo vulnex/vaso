@@ -260,6 +260,17 @@ export const SNAPSHOT_TRUNCATED_WARNING =
   'vaso-probe content budget reached — some large agent/skill files were recorded as metadata only and not analysed';
 
 /**
+ * A warning when `--sudo` was asked for but the probe still ran unprivileged
+ * (no passwordless sudo on the host): the scan then covers only what the
+ * connecting user can read, which is otherwise silent.
+ */
+export function sudoNotEffectiveWarning(snapshot: Pick<ProbeSnapshot, 'privilege'>, sudoRequested: boolean | undefined): string | undefined {
+  if (!sudoRequested || !snapshot.privilege || snapshot.privilege.isRoot) return undefined;
+  const who = snapshot.privilege.username ? ` "${snapshot.privilege.username}"` : '';
+  return `--sudo requested but the probe ran as${who}, not root (no passwordless sudo on the host) — only files that user can read were scanned`;
+}
+
+/**
  * A warning when the snapshot came from a probe older than this CLI (or one
  * too old to record its version, < 1.3.1). New probe releases collect more —
  * denied entries, omit reasons, followed skill links — and a scan of an old

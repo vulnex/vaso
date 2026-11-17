@@ -164,6 +164,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **`--sudo` that couldn't escalate is reported.** When the remote user has no passwordless sudo, the probe runs unprivileged; the scan now prints a warning under that host (`--sudo requested but the probe ran as "…", not root`) instead of silently covering only that user's files.
 - **Plugin API version** (`api.version`) reports the running VASO version (it said 0.2.1). The warning for a project rule's ignored `fix.set` no longer suggests `--rules`, which `vaso fix` doesn't take.
 - **ZC-006's fix** writes a dotted agent alias (`[agents."ops.v2"]`) as one key instead of adding a nested table.
 - **A damaged baseline** no longer aborts the scan; failed report, snapshot or baseline writes exit 2 instead of claiming success; per-host files no longer overwrite each other through duplicate, case-only or blank labels.

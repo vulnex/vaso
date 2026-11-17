@@ -8,7 +8,7 @@
 import type { SSHTarget } from './ssh.js';
 import type { ProbeManifest, ProbeSnapshot } from '../core/snapshot-types.js';
 import type { ScanResult } from '../core/types.js';
-import { SNAPSHOT_TRUNCATED_WARNING, probeVersionWarning } from '../core/snapshot-load.js';
+import { SNAPSHOT_TRUNCATED_WARNING, probeVersionWarning, sudoNotEffectiveWarning } from '../core/snapshot-load.js';
 import { VERSION } from '../version.js';
 
 export interface TransportOptions {
@@ -136,6 +136,8 @@ export async function scanMultipleHosts(
       }
       const probeWarning = probeVersionWarning(snapshot, VERSION);
       if (probeWarning) warnings.push(probeWarning);
+      const sudoWarning = sudoNotEffectiveWarning(snapshot, target.sudo);
+      if (sudoWarning) warnings.push(sudoWarning);
       if (scanOptions.allUsers) {
         const { allUsersCoverageWarning } = await import('../adapters/openclaw.js');
         const coverage = allUsersCoverageWarning(snapshotFs);
