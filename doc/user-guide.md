@@ -10,16 +10,13 @@ VASO is distributed from GitHub. The npm name `vaso` is held by an unrelated pac
 # One-liner (Linux / macOS / WSL) — recommended
 curl -fsSL https://raw.githubusercontent.com/vulnex/vaso/main/install.sh | bash
 
-# Or install the prebuilt release tarball directly with npm
-curl -fsSLo /tmp/vaso.tgz https://github.com/vulnex/vaso/releases/download/v1.4.1/vaso-1.4.1.tgz && npm install -g /tmp/vaso.tgz
-
-# npm 12 refuses tarball URLs by default (allow-remote=none): download it first
+# Or download the prebuilt release tarball and install it with npm
 curl -fLO https://github.com/vulnex/vaso/releases/download/v1.4.1/vaso-1.4.1.tgz && npm install -g ./vaso-1.4.1.tgz
 ```
 
 Requirements: Node.js 20 or later.
 
-Install the release **tarball**, not `npm install -g github:vulnex/vaso#<tag>` — on npm 11+ the global git-dependency install path mishandles the package and leaves an unusable install. The tarball is prebuilt and installs with no build step.
+Install the release **tarball**, not `npm install -g github:vulnex/vaso#<tag>` — on npm 11+ the global git-dependency install path mishandles the package and leaves an unusable install. Download the tarball first rather than passing its URL to npm: npm 12 refuses tarball URLs by default (`allow-remote=none`). The tarball is prebuilt and installs with no build step. To remove VASO, see [Uninstall](#uninstall).
 
 ## Quick Start
 
@@ -53,9 +50,9 @@ vaso scan [options]
 | `--fail-on <severity>` | Exit non-zero on findings of this severity or higher: `critical` (default), `warning`, `info`, or `none` |
 | `--silent` | Suppress all stdout/stderr chatter; requires `-o` or `--output-dir` |
 | `--no-color` | Disable colored terminal output |
-| `--rules <paths...>` | Load additional declarative rule files (see [Custom rules](#custom-rules-vaso-rules)); a file that can't be read exits `2` |
+| `--rules <paths...>` | Load additional declarative rule files or directories (see [Custom rule reference](#custom-rule-reference)); a file that can't be read, or whose rules don't validate, exits `2` |
 | `--no-custom-rules` | Skip declarative rules (`~/.vaso/rules/`, `.vaso/rules/` and `--rules`) |
-| `--project-rules` | Also load the working directory's `.vaso/rules/` (a repository's own rules; not loaded unless the project is trusted — see [Custom rules](#custom-rules-vaso-rules)) |
+| `--project-rules` | Also load the working directory's `.vaso/rules/` (a repository's own rules; not loaded unless the project is trusted — see [Custom rule reference](#custom-rule-reference)) |
 | `--host <target...>` | Scan one or more remote hosts via SSH (`user@host[:port]`). Variadic. |
 | `--inventory <path>` | YAML file listing hosts to scan |
 | `--ssh-key <path>` | SSH identity file for remote connections |
@@ -67,6 +64,8 @@ vaso scan [options]
 | `--save-snapshot <dir>` | When scanning over SSH, write each host's snapshot to `<dir>/<hostname>.json` |
 
 `--debug` is also available globally to print full stack traces on errors. For remote and fleet scanning details, see [`network-scanning-guide.md`](network-scanning-guide.md).
+
+The SSH options (`--ssh-key`, `--sudo`, `--ssh-timeout`, `--ssh-retries`, `--parallel`) are accepted on local and `--snapshot` scans and ignored (with `--debug`, a note says so), so a wrapper can pass the same flags to every run. Their values are still checked: `--parallel 0` or `--ssh-timeout abc` exits `2` on any scan. `--save-snapshot` without `--host`/`--inventory`, and `--snapshot` together with `--host`/`--inventory`, are usage errors (exit `2`).
 
 Examples:
 
@@ -123,8 +122,18 @@ Any other key is an error (exit 2) — a misspelt `identity` would otherwise be 
 - **OpenClaw `$include` files** outside what the probe collects: it collects the `*.json5` files under the config directory (`~/.openclaw`, `~/.clawdbot`, `~/.openclaw-<profile>`). An include with another extension (`./gateway.json`), or one under an `OPENCLAW_INCLUDE_ROOTS` root outside the config directory, is reported as `CONFIG-LOAD` "not collected by the remote probe".
 - **An OpenShell gateway TOML redirected** by `OPENSHELL_GATEWAY_CONFIG` in `gateway.env` to a location other than the defaults and NemoClaw's layout (`CONFIG-LOAD`).
 - **Environment variables**: the probe ships only the variables adapters read (for example `HERMES_*`, `TIRITH_ENABLED`), with credential values redacted. A Hermes `config.yaml` `${VAR}` reference resolves from `~/.hermes/.env` on both, but one only the shell environment defines resolves only on a local scan.
-- **Secrets in collected config files** never leave the host (probe ≥ 1.4.0). In `.env` files, settings JSON/YAML/TOML, instruction files and MCP configs, the probe replaces every API key, token or password it finds (known key formats, values under credential-named keys and `--token`-style arguments, URL passwords and `?api_key=` parameters, private-key bodies) with a stand-in of the same length and shape: the first 8 and last 4 characters stay, the rest is random. Checks reach the same verdict on it, and reports show the same masked value as a local scan. Placeholders (`sk-...`, `your-api-key`), references (`${OPENAI_API_KEY}`, `op://…`) and weak defaults (`changeme`) are kept as they are — they are what the checks report. Skill trees are collected unchanged (IOC checks hash them).
+- **Secrets in collected config files** never leave the host (probe ≥ 1.4.0). In `.env` files, settings JSON/YAML/TOML, instruction files and MCP configs, the probe replaces every API key, token or password it finds (known key formats, values under credential-named keys and `--token`-style arguments, URL passwords and `?api_key=` parameters, private-key bodies) with a stand-in of the same length and shape: the first 8 and last 4 characters stay, the rest is random. Checks reach the same verdict on it, and reports show the same masked value as a local scan. Placeholders (`sk-...`, `your-api-key`), references (`${OPENAI_API_KEY}`, `op://…`) and weak defaults (`changeme`) are kept as they are — they are what the checks report. Skill code, markdown and lockfiles are collected unchanged (IOC checks hash them); a skill's own settings and env files (`.env`, `config.json`, `secrets.yaml`, `.npmrc`, …) are disguised like agent configs.
 - Conversation and history stores (Codex sessions, ChatGPT conversations, Gemini chats, Copilot history, editor `state.vscdb`) and token stores are collected for their permissions only, never their content; a Grok Bot `.deb` that has never run is versioned from its package metadata on local scans only.
+
+**Skill directories outside the defaults.** A skills directory an agent's config sets (an OpenClaw `extraDirs` entry, a Nanobot, PicoClaw or ZeroClaw workspace), or an agent's own skills directory that a symlink takes elsewhere, is walked wherever it leads — locally and remotely, by the same rule — except in these places, judged on the path as written and as resolved:
+
+- the filesystem root;
+- your home directory itself, or any directory above it;
+- another user's home (`/home/<user>`, `/Users/<user>`, `/root`; not `/Users/Shared`);
+- OS directories (`/etc`, `/usr`, `/var`, `/bin`, `/sbin`, `/lib*`, `/System`, `/Library`, `/dev`, `/proc`, `/sys`, `/boot`, `/run`); `/opt`, `/srv`, `/nix`, `/Volumes`, `/mnt`, `/media` and `/tmp` are walked;
+- credential stores (`~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.kube`, `~/.docker`, `~/.config/gh`, `~/.config/gcloud`, `~/.azure`, `~/.password-store`, keychains, browser profiles, …).
+
+Links inside a skills tree follow the same rule. A tree is counted before it is read: one with more than 10,000 entries (each linked directory has its own 10,000-entry budget) is not read. A refused or oversized tree is reported by SKL-002 as a warning, "not scanned", with the reason; the other skill and IOC checks say "not verified" for it.
 
 ### `vaso detect`
 
@@ -197,11 +206,11 @@ vaso skill audit ./my-downloaded-skill/
 # Generate JSON report
 vaso skill audit ./skills/web-scraper --format json -o audit.json
 
-# Quick check from a CI pipeline
-vaso skill audit ./skills/new-skill && echo "Safe to install"
+# Gate a CI pipeline on warnings as well as critical findings
+vaso skill audit ./skills/new-skill --fail-on warning
 ```
 
-Exit code 1 is returned if any finding at or above `--fail-on` (default `critical`) is detected. If the path does not exist or is not a directory, VASO exits with code 2 without scanning; only an empty directory is reported as having nothing to audit (exit 0) — documentation, `package.json` and config files are audited too (SKL-007, IOC checks). Skills symlinked in from elsewhere are followed and scanned.
+Exit code 1 is returned if any finding at or above `--fail-on` (default `critical`) is detected. Exit 0 means only that nothing reached that threshold — with the default, warnings may still be reported, so read the report (or use `--fail-on warning`) before treating a skill as safe. If the path does not exist or is not a directory, VASO exits with code 2 without scanning; only an empty directory is reported as having nothing to audit (exit 0) — documentation, `package.json` and config files are audited too (SKL-007, IOC checks). Skills symlinked in from elsewhere are followed and scanned.
 
 ### `vaso fix`
 
@@ -224,9 +233,9 @@ When neither `--yes` nor `--dry-run` is set, VASO enters **interactive mode** an
 
 ```
   CFG-001 [critical]
-  Gateway bound to 0.0.0.0
-    /home/user/.openclaw/config.json:5
-  Fix: Change gateway host to 127.0.0.1
+  Gateway is bound to 0.0.0.0 — accessible from all network interfaces
+    /home/alice/.openclaw/openclaw.json
+  Fix: Rebind the gateway to loopback (127.0.0.1, or gateway.bind "loopback")
   Apply fix? [y]es / [n]o / [a]ll / [q]uit:
 ```
 
@@ -257,9 +266,29 @@ vaso fix --agent openclaw
 
 Before any modification, VASO backs up affected files to `~/.vaso/backups/<timestamp>/`.
 
-`vaso fix` changes only regular files and folders inside the home of the installation's user (where its backup can restore them): never a symlink, a hard-linked file, a FIFO or device, nor a file that a linked folder above it takes into a credential store (`~/.aws`, `~/.ssh`, …), a shell startup file or `/etc` its own path doesn't name. The scan says so first: such a finding's message ends with "not changed by vaso fix: <path> …", and when that covers every file the fix would change, the finding is not offered.
+`vaso fix` changes only regular files and folders inside the home of the installation's user (where its backup can restore them): never a file outside that home (`/etc/...`, `/opt/...`), a symlink, a hard-linked file, a FIFO or device, nor a file that a linked folder above it takes into a credential store (`~/.aws`, `~/.ssh`, …), a shell startup file or `/etc` its own path doesn't name. As root, it changes only files owned by that home's owner. The scan applies the same rules: such a finding's message ends with "not changed by vaso fix: <path> …", and when that covers every file the fix would change, the finding is reported as not fixable and `vaso fix` doesn't offer it.
 
 `vaso fix` exits `0` when every fix it ran was applied, was already in place, was skipped, or had nothing left but files the scan named as "not changed by vaso fix" (reported as "nothing left that vaso fix may change"). It exits `1` when a fix failed — an error, or a refused file the scan did not name — and `2` when it cannot run.
+
+**Which checks can be fixed.** 51 built-in checks have an automatic fix (a finding is offered only when the scan marks it fixable; every other finding carries guidance text only):
+
+| Category | Checks |
+|----------|--------|
+| config | CFG-001, CFG-003, CFG-005, CFG-008, CFG-010, CFG-012, CFG-020 |
+| policy | POL-003 |
+| openclaw | OC-006 |
+| nanoclaw | NC-002 |
+| picoclaw | PCL-001, PCL-002, PCL-004 |
+| ironclaw | IC-001, IC-005, IC-006, IC-007, IC-008, IC-012 |
+| nanobot | NB-003 |
+| zeroclaw | ZC-001, ZC-003, ZC-004, ZC-005, ZC-006, ZC-008, ZC-011, ZC-012, ZC-013, ZC-014, ZC-016 |
+| lyrie | LY-001, LY-009, LY-018 |
+| hermes | HM-003 |
+| atomic-agent | AT-002, AT-003, AT-005 |
+| openshell | OSH-002, OSH-004, OSH-005 |
+| coding-agent | CD-002, CDX-003, OPC-001, GHC-001, ABA-001, ABA-010, GB-001, GB-007, GB-008, GB-015 |
+
+Permission fixes remove group and other access (they never set a fixed mode such as 600); config fixes skip a value that is already in place. Your own [custom rules](#custom-rule-reference) can add fixes with `fix.set`.
 
 ### `vaso visualize`
 
@@ -291,7 +320,7 @@ vaso visualize -i scan.json -o ./diagrams
 vaso visualize --diagrams attack-tree --vis-format yaml
 ```
 
-The output directory contains one config file per (installation × diagram) plus a `README.md` with copy-paste `usecvis` commands.
+The output directory contains one `attack-tree` and one `privilege-gradient` config file per installation, one `topology.<ext>` file (the `component` diagram) for the whole host, and a `README.md` with copy-paste `usecvis` commands. With a multi-host `-i` report, each host's subdirectory holds its own set.
 
 ### `vaso update`
 
@@ -385,44 +414,88 @@ vaso mcp list --path .mcp.json
 
 Terminal output shows each server's name, transport type, command/URL, and environment variable names. JSON output returns the full discovery result.
 
-### `vaso ext`
+### Plugins (`vaso ext`)
 
-Manage user plugins — drop-in `.js` / `.mjs` files in `~/.vaso/plugins/` that register custom checks, adapters, or reporters. See `examples/plugins/` for working examples.
+User plugins are JavaScript modules that add checks, agent adapters or report formats.
 
-```bash
-vaso ext list [-f terminal|json]
-vaso ext info <name>
+> **Warning:** a plugin is code. VASO imports every plugin in `~/.vaso/plugins/` on every `vaso` command (`scan`, `detect`, `fix`, `mcp`, `update`, …), and it runs with the rights of the user running VASO (root, if you run VASO as root). VASO doesn't check a plugin's file permissions or origin. Install only plugins you have read and trust, and keep `~/.vaso/plugins/` writable only by you.
+
+**Where they go.** VASO loads, in name order, each entry of `~/.vaso/plugins/` that is:
+
+- a `.js` or `.mjs` file (ES module syntax), or
+- a directory with a `package.json` `main`, else an `index.mjs` or `index.js`.
+
+Entries whose names start with `.` or `_` are skipped (use this to disable a plugin without deleting it).
+
+**Module shape.** The module's default export (or the module itself) is an object with an optional `meta` and a `register(api)` function, which may be async:
+
+| `api` member | Use |
+|--------------|-----|
+| `registerCheck(check)` | Add one check: `{ id, name, category, severity, description, supportedAgents?, excludedAgents?, supportedPlatforms?, run(context), fix?(context) }`. `run` returns `{ id, name, category, severity, passed, message, evidence? }`; `context` holds `installation`, `configs` (each with `filePath`, `format`, `data`, `raw`), `platform`, `fs` and `skillFiles` |
+| `registerChecks(checks)` | Add several checks |
+| `registerAdapter(adapter)` | Add an agent adapter (`detect()`, `getConfigPaths()`, `getSkillsDir()`, `getGatewayInfo()`; `custom-agent-adapter.mjs` in the examples shows the full shape) |
+| `registerReporter(format, factory)` | Add an output format for `-f <format>`; built-in formats can't be replaced |
+
+Use one of the built-in categories (listed in [Custom rule reference](#custom-rule-reference)) for `category`, and `critical`, `warning` or `info` for `severity`. A check ID already taken — by a built-in check or another plugin — is refused. Read files through `context.fs` (not `node:fs`) so the check also works on remote and `--snapshot` scans.
+
+A minimal check plugin, `~/.vaso/plugins/debug-flag.mjs`:
+
+```js
+export default {
+  meta: {
+    name: 'debug-flag',
+    version: '1.0.0',
+    description: 'Flags DEBUG=true in agent configs',
+  },
+  register(api) {
+    api.registerCheck({
+      id: 'USR-100',
+      name: 'Debug flag left on',
+      category: 'config',
+      severity: 'warning',
+      description: 'An agent config sets DEBUG to true',
+      async run(ctx) {
+        const evidence = [];
+        for (const cfg of ctx.configs) {
+          cfg.raw.split('\n').forEach((line, i) => {
+            if (/\bDEBUG['"]?\s*[:=]\s*['"]?true/i.test(line)) {
+              evidence.push({ file: cfg.filePath, line: i + 1, snippet: line.trim() });
+            }
+          });
+        }
+        return {
+          id: 'USR-100',
+          name: 'Debug flag left on',
+          category: 'config',
+          severity: 'warning',
+          passed: evidence.length === 0,
+          message: evidence.length === 0 ? 'No DEBUG flag found' : `DEBUG=true in ${evidence.length} place(s)`,
+          evidence,
+        };
+      },
+    });
+  },
+};
 ```
 
-User plugins are loaded automatically on every CLI invocation; errors are isolated so a broken plugin can't crash the scan.
+```bash
+vaso ext list [-f terminal|json]   # Plugins found, their status and what each registered
+vaso ext info <name> [-f json]     # One plugin (by meta.name, else the file name); unknown name exits 2
+```
+
+**Errors are isolated.** A plugin that fails to import, has no `register()` function, throws from `register()` or registers a taken ID is marked `error` (with the reason) in `vaso ext list`, and a warning is printed; the command carries on with the other plugins. A check whose `run()` throws is reported as errored, and the scan exits `3` (incomplete). Isolation covers errors only — it is not a sandbox.
+
+More complete examples (batch registration with a `fix()`, a custom reporter, an adapter for a new agent) are in the repository at [examples/plugins](https://github.com/vulnex/vaso/tree/main/examples/plugins); they are not part of the npm tarball.
 
 ### Custom rules (`vaso rules`)
 
-Declarative YAML rules add your own checks to `vaso scan` and `vaso fix`: a config value (`config`), a regex over config or skill files (`pattern`) or a file that must or must not exist (`file_exists`), optionally with a `fix` that sets one config key. `vaso rules init` writes a commented starter file; `vaso rules list` shows what is loaded and `vaso rules validate <file>` checks one file.
+Declarative YAML rules add your own checks to `vaso scan` and `vaso fix`: a config value (`config`), a regex over config or skill files (`pattern`) or a file that must or must not exist (`file_exists`), optionally with a `fix` that sets one config key. The full format is in the [Custom rule reference](#custom-rule-reference).
 
 ```bash
-vaso rules init [--dir <path>]    # Write an example rule file (default ~/.vaso/rules/)
-vaso rules list [-f json]         # Rules that scan/fix would load, and where from
-vaso rules validate <file>        # Validate one rule file
+vaso rules init [--dir <path>] [--force]   # Write a commented example.yaml (default ~/.vaso/rules/)
+vaso rules list [-f json]                  # Rules that scan/fix would load, and where from
+vaso rules validate <file> [-f json]       # Validate one rule file
 ```
-
-Rules load from three places:
-
-| Source | Trusted | Notes |
-|--------|---------|-------|
-| `~/.vaso/rules/*.yaml` | yes | Your own (or your organisation's) rules |
-| `--rules <file...>` | yes | Named on the command line; replaces a `~/.vaso/rules/` rule with the same ID (with a warning) |
-| `.vaso/rules/*.yaml` in the working directory | only when you trust the project | A cloned repository can ship these, so they are **not loaded** unless you pass `--project-rules` or list the project in `~/.vaso/trusted-projects`; otherwise `scan`/`fix` print one notice saying how many project rules were skipped (hidden by `--silent`) and `vaso rules list` shows them as "untrusted (not loaded)". Once trusted they run like your own rules, except that their `fix.set` is still ignored (only `fix.guidance` text stays) and they never replace a rule ID already defined in `~/.vaso/rules/` or by `--rules` — that rule is skipped with a warning naming both files. Move a project rule to `~/.vaso/rules/` or pass it with `--rules` to keep its fix |
-
-`~/.vaso/trusted-projects` lists one absolute project path per line (the directory you run VASO from; `#` starts a comment, relative lines are ignored); a project reached through a symlink matches its real path. VASO ignores the file, with a warning, when group or others can write it — keep it `chmod 600`.
-
-Within one source, the first definition of an ID wins and a duplicate is skipped with a warning. A rule whose ID matches a built-in check is skipped.
-
-Rule regexes (`pattern.regex`, and the value of the `matches` operator) must not be able to backtrack super-linearly: patterns with nested quantifiers (`(a+)+`, `(\w+\s?)*`), repeated groups whose alternatives overlap (`(a|ab)*`) or overlapping unbounded quantifiers in a row (`\d+\d+`, `.*.*`) fail validation and are skipped at load with a warning. Rule regexes run on at most 4,096 characters of each line or value.
-
-Values a rule quotes in its findings (a config value, the matched line, `{{match}}`/`{{snippet}}` in its message) are masked like every other credential VASO reports: a value under a credential-like key (`api_key`, `token`, `password`, …) and well-known token formats show as `***`.
-
-A rule's fix writes only into the config files the rule failed on, and never writes a dotted key into a `.env` file.
 
 ### `vaso probe`
 
@@ -434,6 +507,173 @@ vaso probe validate <snapshot>    # Validate a probe snapshot JSON file
 ```
 
 See [`network-scanning-guide.md`](network-scanning-guide.md) for the full SSH workflow.
+
+## Custom rule reference
+
+### Where rules load from
+
+`vaso scan` loads rules from three places, and `vaso fix` from the first and third (other commands don't load rules). `vaso scan --no-custom-rules` skips all three:
+
+| Source | Loaded | Notes |
+|--------|--------|-------|
+| `~/.vaso/rules/*.yaml`, `*.yml` | always | Your own (or your organisation's) rules. Files starting with `.` are ignored |
+| `--rules <paths...>` (`scan` only) | when named | Files or directories (a directory loads its `*.yaml`/`*.yml`). A file that can't be read, or whose rules don't validate, exits `2`. Replaces a `~/.vaso/rules/` rule with the same ID (with a warning) |
+| `.vaso/rules/*.yaml`, `*.yml` in the working directory | only when you trust the project | A cloned repository can ship these, so they load only with `--project-rules` or when the project's path is listed in `~/.vaso/trusted-projects`. Otherwise `scan`/`fix` print one notice ("Skipped N project rule file(s)…", hidden by `--silent`) and `vaso rules list` shows them as "untrusted (not loaded)" |
+
+**`~/.vaso/rules/` must be yours alone.** A rule can carry a fix that `vaso fix` applies, so a rule file loads only when nobody else could have written or replaced it. A file is skipped, with a warning saying why, when:
+
+- the file, `~/.vaso/rules/` or `~/.vaso` is writable by group or others (group write is allowed when the group is your own private group);
+- any of them is owned by someone other than you or root;
+- the file is a symlink whose target sits in a directory others can write (unless it is sticky, like `/tmp`).
+
+`chmod 700 ~/.vaso ~/.vaso/rules` and `chmod 600` the files (`vaso rules init` creates them that way). Rule files larger than 4 MiB are not read.
+
+**`~/.vaso/trusted-projects`** lists one absolute project path per line (the directory you run VASO from; `#` starts a comment, relative lines are ignored); a project reached through a symlink matches its real path. VASO uses the file only when it is a regular file of at most 64 KiB, owned by you (or root), not writable by group or others, inside a `~/.vaso` with the same properties; otherwise it is ignored with a warning.
+
+**Trusted project rules** run like your own rules with two exceptions: their `fix.set` is ignored (only `fix.guidance` text stays — move the rule to `~/.vaso/rules/` to keep its fix; `vaso fix` has no `--rules` option), and they never replace a rule ID already defined in `~/.vaso/rules/` or by `--rules` (the project rule is skipped with a warning naming both files).
+
+**IDs.** Within one source, the first definition of an ID wins and later ones are skipped with a warning. A rule whose ID matches a built-in check (or a plugin's check) is skipped with a warning; `vaso rules validate` reports it as an error.
+
+Rules run on every scan target: local, `--host`/`--inventory` and `--snapshot` scans.
+
+### File format
+
+A rule file is a YAML document with a top-level `rules` list. Each rule has these fields:
+
+| Field | Required | Value |
+|-------|----------|-------|
+| `id` | yes | 1–64 letters, digits, `.`, `_` or `-`, starting with a letter or digit (`ORG-001`). Must not be a built-in check ID |
+| `name` | yes | Short title shown in reports |
+| `description` | yes | What the rule enforces; shown in the finding message |
+| `category` | yes | One of `config`, `skills`, `ioc`, `network`, `runtime`, `policy`, `mcp`, `openclaw`, `nanoclaw`, `picoclaw`, `ironclaw`, `nanobot`, `zeroclaw`, `lyrie`, `hermes`, `atomic-agent`, `openshell`, `advisory`, `coding-agent` |
+| `severity` | yes | `critical`, `warning` or `info` (scored like built-in checks) |
+| `agents` | no | List of agent types the rule applies to (the `-a` values, e.g. `[claude-code, codex]`). Without it, the rule runs against every detected agent |
+| `platforms` | no | List of platforms: `linux`, `darwin`, `win32`, `freebsd`, `openbsd`, `netbsd`, `sunos`, `aix`, `android`, `haiku`, `cygwin` |
+| `config` / `pattern` / `file_exists` | exactly one | The rule type, below |
+| `fix` | no | `set` + `value`, and/or `guidance`, below |
+
+#### `config` — a config value
+
+Evaluated against each parsed config file of each agent in scope (JSON, JSONC/JSON5, YAML, TOML, `.env`).
+
+| Sub-field | Value |
+|-----------|-------|
+| `path` | Dotted key path (`gateway.bind`, `permissions.defaultMode`); list items by index (`servers.0.url`). A key that itself contains a dot can't be addressed |
+| `operator` | One of the operators below |
+| `value` | Compared with the config value (not used by `exists` / `not-exists`) |
+| `pass_when` | `no-match` (default): the rule **fails** when the condition is true — write the condition as the bad state. `match`: the rule fails when the condition is false — write it as the required state |
+
+Operators:
+
+| Operator | True when |
+|----------|-----------|
+| `eq` | The value equals `value` (deep equality for lists and objects; types must match: `"true"` is not `true`) |
+| `neq` | The value does not equal `value` (a missing key counts as not equal) |
+| `in` | The value equals one item of `value`, which must be a list |
+| `not-in` | The value equals no item of the `value` list (a missing key counts as not in it) |
+| `exists` | The key is present (with any value, including `null`) |
+| `not-exists` | The key is absent |
+| `gt` | The value and `value` are both numbers and the value is greater (`"8080"` as a string never compares) |
+| `lt` | Both are numbers and the value is smaller |
+| `matches` | The value is a string and the regular expression `value` (JavaScript syntax, no flags, at most 500 characters) finds a match in it |
+| `contains` | The value is a list holding an item equal to `value`, or a string containing the string `value` |
+
+#### `pattern` — a regex over files
+
+| Sub-field | Value |
+|-----------|-------|
+| `regex` | JavaScript regular expression (no flags, at most 500 characters), tested against each line |
+| `target` | `configs` (default — the agent's config files), `skills` (its skill files) or `all` |
+| `message` | Optional evidence text; placeholders `{{file}}`, `{{line}}`, `{{snippet}}`, `{{match}}`. Default: `Pattern match in {{file}}:{{line}} — {{snippet}}` |
+
+Each matching line is one piece of evidence.
+
+#### `file_exists` — a file that must or must not exist
+
+| Sub-field | Value |
+|-----------|-------|
+| `path` | Absolute path, or a path relative to the agent's install directory (`~/.openclaw`, `~/.claude`, …). `~` is not expanded |
+| `pass_when` | `not-exists` (default): fails when the file exists. `exists`: fails when it is missing |
+
+#### `fix`
+
+| Sub-field | Value |
+|-----------|-------|
+| `set` | Dotted key path `vaso fix` writes (`__proto__`, `prototype`, `constructor` and empty segments are rejected). Applied only by `config` rules, only to the config files the rule failed on, never as a dotted key into a `.env` file; ignored in project rules |
+| `value` | The value `set` writes |
+| `guidance` | Text shown as the finding's fix advice (any rule type) |
+
+A `fix` needs `set` or `guidance`. `vaso fix` backs up files before writing, as for built-in fixes.
+
+### Regex safety
+
+Rule regexes (`pattern.regex` and the value of `matches`) are checked when a rule loads and by `vaso rules validate`. A pattern that can backtrack super-linearly is rejected and the rule skipped with a warning: nested or overlapping quantifiers (`(a+)+$`, `(a|aa)+$`, `(\w+\s?)*`), and chains of three or more overlapping loops, counting the unanchored search over start positions as one (`.*a.*a.*b`, `\d+\d+x`). Patterns the checker can't analyse are rejected too.
+
+At run time each regex sees at most the first 4,096 characters of a line or value. A pattern rule may spend 5 seconds matching per check run, and all rules together 15 seconds per host; past that the rule stops, its result is marked errored, and the scan exits `3` (incomplete).
+
+Values a rule quotes in its findings (a config value, the matched line, `{{match}}`/`{{snippet}}`) are masked like every other credential VASO reports: a value under a credential-like key (`api_key`, `token`, `password`, …) and well-known token formats show as `***`.
+
+### Examples
+
+Each of these passes `vaso rules validate`. A `config` rule with a fix:
+
+```yaml
+rules:
+  - id: ORG-001
+    name: Claude Code default mode is not bypassPermissions
+    category: coding-agent
+    severity: critical
+    description: Claude Code must not skip permission prompts by default
+    agents: [claude-code]
+    config:
+      path: permissions.defaultMode
+      operator: eq
+      value: bypassPermissions
+    fix:
+      set: permissions.defaultMode
+      value: default
+```
+
+A `pattern` rule over skill files:
+
+```yaml
+rules:
+  - id: ORG-002
+    name: Internal hostname in skill code
+    category: skills
+    severity: warning
+    description: Skills must not reference internal corp hosts
+    pattern:
+      regex: "\\b[a-z0-9-]+\\.corp\\.example\\.com\\b"
+      target: skills
+      message: "Internal host {{match}} in {{file}}:{{line}}"
+    fix:
+      guidance: Move the host name to configuration
+```
+
+A `file_exists` rule that requires a file:
+
+```yaml
+rules:
+  - id: ORG-003
+    name: OpenClaw audit log present
+    category: openclaw
+    severity: info
+    description: The OpenClaw state directory should keep an audit log
+    agents: [openclaw]
+    platforms: [linux, darwin]
+    file_exists:
+      path: logs/audit.log
+      pass_when: exists
+    fix:
+      guidance: Enable audit logging in openclaw.json
+```
+
+### Commands
+
+- `vaso rules init [--dir <path>] [--force]` writes a commented `example.yaml` (mode 600; a new directory is created 700) into `~/.vaso/rules/`, or `--dir`. It refuses to overwrite an existing file (exit `2`) unless `--force` is given. Files written to another directory load only with `--rules <dir>` (or, for `./.vaso/rules`, when the project is trusted).
+- `vaso rules validate <file> [-f json]` checks one file: YAML syntax (a key repeated in one mapping is an error), every field, regex safety, and IDs that a scan would skip (a built-in check ID, or one defined twice in the file). Exit `0` when every rule is valid, `1` on any invalid rule or YAML error (in both formats), `2` when the file can't be read. `-f json` prints `{ "valid", "rules", "errors" }`.
+- `vaso rules list [-f json]` lists the rules `scan`/`fix` would load with their file, plus untrusted project rules (status `untrusted` in JSON), and prints load warnings to stderr.
 
 ## Exit Codes
 
@@ -448,7 +688,7 @@ See [`network-scanning-guide.md`](network-scanning-guide.md) for the full SSH wo
 
 **`CONFIG-LOAD` never sets exit code 3.** A config file VASO can't read or parse (permission denied, malformed JSON/YAML/TOML, an unreadable config directory) is reported as a `CONFIG-LOAD` *finding* about the host — severity `warning`, listed with the file and the reason — not as an incomplete scan: VASO ran every check, and the unreadable file is the result. Like any finding it counts toward `--fail-on`, so it exits `1` with `--fail-on warning` or `info` and `0` with the default `critical`. Use `--fail-on warning` in CI if an unreadable agent config should fail the build.
 
-The other commands use the same codes: `skill audit` and `mcp scan` exit `1` on critical findings, `mcp scan` exits `3` when a result errored (for example a package `--resolve-packages` couldn't download — the `PACKAGE-RESOLVE` result says why), and every command exits `2` when it cannot run — a command-line error (unknown option or command, a missing or extra argument), a missing or unreadable input (`skill audit <path>`, `mcp scan/list --path`, `visualize -i`, `probe validate`), an unknown name (`ext info`), or an invalid option value such as `--ssh-timeout abc`. `probe validate` exits `2` for any snapshot it can't use — unreadable, not JSON, or failing validation (over the probe's size limits, a relative `homedir`, a malformed `privilege` block).
+The other commands use the same codes: `skill audit` and `mcp scan` exit `1` on findings at or above their `--fail-on` (default `critical`), `mcp scan` exits `3` when a result errored (for example a package `--resolve-packages` couldn't download — the `PACKAGE-RESOLVE` result says why), and every command exits `2` when it cannot run — a command-line error (unknown option or command, a missing or extra argument), a missing or unreadable input (`skill audit <path>`, `mcp scan/list --path`, `visualize -i`, `probe validate`), an unknown name (`ext info`), or an invalid option value such as `--ssh-timeout abc`. `probe validate` exits `2` for any snapshot it can't use — unreadable, not JSON, or failing validation (over the probe's size limits, a relative `homedir`, a malformed `privilege` block).
 
 `--fail-on` accepts `critical` (default), `warning`, `info`, or `none`. Use `--fail-on none` to never fail on findings — useful for scans that only produce reports.
 
@@ -470,10 +710,14 @@ VASO produces a 0-100 score with a letter grade:
 | D | 60-69 |
 | F | 0-59 |
 
-Penalties:
+Each agent starts at 100 and loses points for each failed check (once per check, however much evidence it has), down to a floor of 0:
 - **Critical** finding: -12 points
 - **Warning** finding: -5 points
 - **Info** finding: no penalty
+
+The weights are fixed.
+
+When several agents are scanned, the headline score and grade (`totalScore` / `totalGrade` in JSON) are those of the **weakest agent**, not an average: one wide-open agent is an exposure however many others are clean. The mean of the per-agent scores is still reported as the fleet average (`fleetAverage` in JSON; "Fleet average" in terminal, Markdown and HTML reports). With no agents detected the score is 100.
 
 ## Security Checks
 
@@ -659,25 +903,65 @@ The diff output shows:
 - **Resolved**: issues that were fixed since the baseline
 - **Unchanged**: issues that persist
 
-Baselines are stored per scope in `~/.vaso/baselines/`: `latest.json` for an unfiltered local scan, `latest-<agent>.json` with `-a`, `latest-<host>.json` / `latest-<agent>--<host>.json` for a snapshot or remote host (each `--host` target keeps its own). A `latest.json` written by VASO ≤ 1.3.0 with `-a` is still found by a matching `--diff -a`.
+Each `--save-baseline` writes a timestamped copy, `~/.vaso/baselines/baseline-<timestamp>.json` (kept as history; VASO never deletes them), and the scope's "latest" file that `--diff` compares against. The latest files are per scope: `latest.json` for an unfiltered local scan, `latest-<agent>.json` with `-a`, `latest-<host>.json` / `latest-<agent>--<host>.json` for a snapshot or remote host (each `--host` target keeps its own). A `latest.json` written by VASO ≤ 1.3.0 with `-a` is still found by a matching `--diff -a`.
 
 ## CI/CD Integration
 
-### GitHub Actions
+### GitHub Actions: the VASO action
+
+The repository is a GitHub Action. It installs the release tarball, runs `vaso scan` on the runner and uploads the SARIF report to GitHub Code Scanning:
 
 ```yaml
-name: VASO Security Scan
+name: VASO
 
 on:
   push:
     branches: [main]
-  pull_request:
-    branches: [main]
   schedule:
-    - cron: '0 6 * * 1' # Weekly Monday 6am
+    - cron: '0 6 * * 1' # Weekly, Monday 06:00
+
+permissions:
+  contents: read
+  security-events: write # SARIF upload
 
 jobs:
-  scan:
+  vaso:
+    runs-on: self-hosted # a runner where the agents to check are installed
+    steps:
+      - uses: vulnex/vaso@v1.4.1
+        with:
+          fail-on: warning
+```
+
+| Input | Default | Meaning |
+|-------|---------|---------|
+| `version` | `v1.4.1` | VASO release to install (a `vX.Y.Z` tag installs the release tarball; a branch or SHA installs from git) |
+| `agent` | all detected | Scan one agent only (`-a`) |
+| `format` | `sarif` | Report format |
+| `output` | `vaso-results.<ext>` | Report path |
+| `fail-on` | `critical` | `--fail-on` threshold; the step fails at or above it |
+| `working-directory` | `.` | Directory to run from |
+| `upload-sarif` | `true` | Upload a SARIF report to Code Scanning (also when the scan found something) |
+| `debug` | `false` | Pass `--debug` |
+| `extra-args` | — | Extra `vaso scan` flags, e.g. `--host deploy@10.0.0.5` or `--rules .github/vaso-rules` |
+
+The action's output `report-path` is the report's absolute path. `vaso scan` checks the machine it runs on: on a fresh GitHub-hosted runner there is usually no agent installed and the scan finds nothing. Use it on self-hosted runners and agent hosts, or with `extra-args: --host …` / `--inventory …`.
+
+### GitHub Actions: checking a repository
+
+To check what a repository ships — skills and MCP server configs — run `skill audit` and `mcp scan` on its files. Both exit `1` when findings reach `--fail-on`, which fails the step:
+
+```yaml
+name: VASO repository checks
+
+on: [push, pull_request]
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  vaso:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -687,38 +971,40 @@ jobs:
           node-version: '20'
 
       - name: Install VASO
-        run: curl -fsSLo /tmp/vaso.tgz https://github.com/vulnex/vaso/releases/download/v1.4.1/vaso-1.4.1.tgz && npm install -g /tmp/vaso.tgz
+        run: |
+          curl -fsSLo "$RUNNER_TEMP/vaso.tgz" https://github.com/vulnex/vaso/releases/download/v1.4.1/vaso-1.4.1.tgz
+          npm install -g "$RUNNER_TEMP/vaso.tgz"
 
-      - name: Run VASO scan
-        run: vaso scan --format sarif -o results.sarif
-        continue-on-error: true
+      - name: Audit skills
+        run: vaso skill audit ./skills --fail-on warning -f sarif -o vaso-skills.sarif
 
-      - name: Upload SARIF
-        if: always()
+      - name: Scan MCP config
+        if: always() # run even when the skill audit failed
+        run: vaso mcp scan -p .mcp.json --fail-on warning -f sarif -o vaso-mcp.sarif
+
+      - name: Upload skill audit
+        if: always() && hashFiles('vaso-skills.sarif') != ''
         uses: github/codeql-action/upload-sarif@v3
         with:
-          sarif_file: results.sarif
+          sarif_file: vaso-skills.sarif
+          category: vaso-skills
 
-      - name: Run VASO scan (JSON)
-        run: vaso scan --format json -o results.json
-        continue-on-error: true
-
-      - name: Upload scan results
-        if: always()
-        uses: actions/upload-artifact@v4
+      - name: Upload MCP scan
+        if: always() && hashFiles('vaso-mcp.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v3
         with:
-          name: vaso-scan-results
-          path: |
-            results.sarif
-            results.json
+          sarif_file: vaso-mcp.sarif
+          category: vaso-mcp
 ```
+
+Adjust `./skills` and `.mcp.json` to your layout (`mcp scan -p` takes several files; `--source <dir>` audits an MCP server's own code). A path that doesn't exist exits `2`, which also fails the job.
 
 ### Generic CI
 
 ```bash
-# Fail the pipeline on critical findings
-vaso scan --format json -o results.json
-# Exit code 1 = critical findings detected
+vaso scan --fail-on critical -f json -o results.json
+# 0 = nothing at or above critical, 1 = findings, 2 = VASO could not run,
+# 3 = incomplete (a host unscanned or a check errored)
 ```
 
 ## Zero-Dependency Quick Scan
@@ -743,7 +1029,7 @@ VASO keeps all local state under `~/.vaso/`:
 
 | Path | Purpose |
 |------|---------|
-| `~/.vaso/baselines/` | Saved scan baselines for `--save-baseline` / `--diff` |
+| `~/.vaso/baselines/` | Saved scan baselines for `--save-baseline` / `--diff`: `baseline-<timestamp>.json` history plus `latest*.json` per scope |
 | `~/.vaso/backups/<timestamp>/` | File backups before `vaso fix` modifies anything |
 | `~/.vaso/mcp-tool-baselines/` | Per-server tool-definition baselines for MCP-020 rug-pull detection (keyed by hostname + source) |
 | `~/.vaso/plugins/` | User-plugin drop-in directory (`vaso ext`) |
@@ -755,17 +1041,80 @@ VASO keeps all local state under `~/.vaso/`:
 | `~/.vaso/rules/` | Custom YAML rules (`vaso rules init`) |
 | `~/.vaso/trusted-projects` | Projects whose `.vaso/rules/` load without `--project-rules` (one absolute path per line, owner-writable only) |
 
-Nothing under `~/.vaso/` leaves the machine. VASO makes outbound network calls only in these cases:
+Nothing under `~/.vaso/` is sent anywhere. Reports go only where you write them (`-o`, `--output-dir`, stdout). VASO makes outbound network calls only in these cases:
 
-- `vaso update` — fetches the signed IOC/advisory feeds
-- `vaso mcp scan --resolve-packages` (opt-in) — downloads npm package tarballs for source analysis; they are never executed
-- `vaso mcp scan --audit-deps` (opt-in) — sends the names and exact versions of MCP servers' dependencies to OSV.dev (no code, paths or config)
-- `--host` / `--inventory` remote scans — connect over SSH and, on first use, download the `vaso-probe` binary from GitHub Releases (SHA-256-verified, cached under `~/.vaso/probe/`)
-- IOC-008 (opt-in) — queries VirusTotal with skill-file hashes only when `VIRUSTOTAL_API_KEY` is set
+- `vaso update` — fetches the signed IOC and advisory feeds (from `raw.githubusercontent.com` by default, or `--url` / `--advisory-url`)
+- `vaso mcp scan --resolve-packages` (opt-in) — downloads npm package tarballs with `npm pack` from your configured npm registry for source analysis; they are never executed
+- `vaso mcp scan --audit-deps` (opt-in) — sends the names and exact versions of MCP servers' npm and PyPI dependencies to OSV.dev (`api.osv.dev`; no code, paths or config)
+- `--host` / `--inventory` remote scans — connect over SSH, copy the probe to each host, and, on first use without a local build, download the `vaso-probe` binary from GitHub Releases (SHA-256-verified, cached under `~/.vaso/probe/`)
+- IOC-008 — whenever `VIRUSTOTAL_API_KEY` is set in VASO's environment, every `vaso scan` sends the SHA-256 hash of each skill file to VirusTotal (`www.virustotal.com`) with that key. Hashes only, never file content. Unset the variable to stop it
 
 ## Safety Guarantees
 
-- VASO never executes scanned code (all analysis is purely static)
-- No data leaves the machine unless you explicitly pipe output elsewhere
+- VASO never executes scanned code: skill code, MCP server source and downloaded packages are analysed statically. It does run installed agent CLIs for read-only queries (version checks; OpenShell `sandbox list` / `policy get`)
+- Nothing leaves the machine except in the cases listed under [Data Storage](#data-storage): feed updates, opt-in package and OSV lookups, remote scans and, when `VIRUSTOTAL_API_KEY` is set, file hashes sent to VirusTotal
 - Remediation always creates backups before modifying files
-- The scanner runs read-only by default; only `vaso fix` modifies files
+- Only `vaso fix` changes agent files; scans write only VASO's own state under `~/.vaso/` and the reports you ask for
+- User plugins are the exception to all of the above: they run as code with your rights (see [Plugins](#plugins-vaso-ext))
+
+## Environment Variables
+
+VASO itself reads:
+
+| Variable | Effect |
+|----------|--------|
+| `VASO_CHECK_TIMEOUT` | Per-check timeout in seconds (1–86400; default 300). A check that runs longer is reported as errored and the scan exits `3` |
+| `VIRUSTOTAL_API_KEY` | Enables IOC-008 (sends skill-file hashes to VirusTotal — see [Data Storage](#data-storage)) |
+
+Agents can be moved off their default locations; VASO follows these variables when they are set in the environment it runs in. They apply to the user running VASO, not to other accounts scanned with `--all-users`:
+
+| Agent | Variables |
+|-------|-----------|
+| Claude Code | `CLAUDE_CONFIG_DIR` (holds what `~/.claude` and `~/.claude.json` would) |
+| Codex | `CODEX_HOME` (instead of `~/.codex`) |
+| GitHub Copilot CLI | `COPILOT_HOME` (instead of `~/.copilot`) |
+| Gemini CLI | `GEMINI_CLI_HOME` (`$GEMINI_CLI_HOME/.gemini`), `GEMINI_CLI_SYSTEM_SETTINGS_PATH`, `GEMINI_CLI_TRUSTED_FOLDERS_PATH` |
+| Qwen Code | `QWEN_HOME` (instead of `~/.qwen`), `QWEN_CODE_SYSTEM_SETTINGS_PATH`, `QWEN_CODE_TRUSTED_FOLDERS_PATH` |
+| Cursor | `CURSOR_CONFIG_DIR` (instead of `~/.cursor`) |
+| OpenCode | `OPENCODE_CONFIG` (an extra config file), `OPENCODE_CONFIG_DIR` (an extra config directory), `OPENCODE_CONFIG_CONTENT`, `XDG_CONFIG_HOME`, `XDG_DATA_HOME` |
+| Devin CLI | `XDG_CONFIG_HOME`, `XDG_DATA_HOME` |
+| OpenClaw | `OPENCLAW_HOME` (replaces the home: `$OPENCLAW_HOME/.openclaw`), `OPENCLAW_STATE_DIR` (the state directory), `OPENCLAW_CONFIG_PATH` (the config file), `OPENCLAW_INCLUDE_ROOTS` |
+| Hermes | `HERMES_HOME` (instead of `~/.hermes`), `HERMES_MANAGED_DIR` (instead of `/etc/hermes`) |
+| PicoClaw | `PICOCLAW_HOME`, `PICOCLAW_CONFIG` |
+| ZeroClaw | `ZEROCLAW_CONFIG_DIR`, `ZEROCLAW_DATA_DIR`, `ZEROCLAW_WORKSPACE` |
+| IronClaw | `IRONCLAW_REBORN_HOME` (instead of `~/.ironclaw/reborn`) |
+| Atomic Agent | `ATOMIC_AGENT_STATE_DIR` (instead of `~/.atomic-agent`) |
+| NVIDIA OpenShell | `XDG_CONFIG_HOME`, `XDG_STATE_HOME`, `OPENSHELL_SANDBOX_POLICY` |
+| Grok Bot | `SAND_DATA_ROOT`, `SAND_USER_DATA_DIR` |
+
+`vaso mcp scan` follows `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `COPILOT_HOME` and `GEMINI_CLI_HOME` too. On remote scans the probe reports the variables as set on the host for the SSH session, with credential values redacted.
+
+## Troubleshooting
+
+**An agent isn't detected.** Run `vaso detect --verbose` (or `vaso detect -a <agent> --verbose`): it lists the paths VASO checked for each agent. If the agent keeps its config elsewhere, set the matching variable from [Environment Variables](#environment-variables) in the shell you run VASO from. A CLI agent is found through `PATH`, the usual install prefixes and Node version managers (nvm, fnm, asdf, mise, volta, n).
+
+**A `CONFIG-LOAD` result.** VASO found a config file it couldn't read or parse (permission denied, malformed JSON/YAML/TOML, an unreadable config directory, or a file inside a credential store). It is a `warning` finding with the file and the reason; fix the file (or its permissions) and re-scan. It doesn't make the scan incomplete — see [Exit Codes](#exit-codes).
+
+**"IOC feed is stale" / "Advisory feed is stale".** A feed fetched earlier by `vaso update` is more than 7 days old. Run `vaso update`. Installs that never ran `vaso update` use the bundled data and don't show the warning.
+
+**Exit code 3.** A check or adapter errored (threw, or ran past the per-check timeout), a custom rule ran out of matching time, or a remote host wasn't scanned. The report lists the errored results; findings may be missing. Raise the timeout with `VASO_CHECK_TIMEOUT=<seconds>` if a check is merely slow on a large install.
+
+**An error message without detail.** Run the command again with `--debug` (`vaso --debug scan …`) for the full stack trace.
+
+**A custom rule or plugin doesn't load.** `vaso rules list` and `vaso rules validate <file>` show why a rule is skipped (often the file or `~/.vaso/rules/` being writable by group or others); `vaso ext list` shows a plugin's load error.
+
+**Remote scan problems** (SSH failures, probe download, limited coverage): see [Troubleshooting](network-scanning-guide.md#troubleshooting) in the network scanning guide.
+
+## Uninstall
+
+```bash
+npm uninstall -g vaso      # add sudo if you installed with sudo
+```
+
+Then remove VASO's state if you no longer need it. `~/.vaso/backups/` holds the backups `vaso fix --rollback` restores from — keep it until you are sure you won't roll back:
+
+```bash
+rm -rf ~/.vaso
+```
+
+Remove a project's `.vaso/rules/` separately if you created one. VASO installs no services, cron jobs or shell hooks.

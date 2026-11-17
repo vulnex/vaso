@@ -44,7 +44,7 @@ The most common contribution. Steps:
 1. Pick a category in `src/checks/` (or propose a new one).
 2. Create `<id>-<short-name>.ts` (e.g., `cfg-025-something.ts`) exporting a `CheckModule`:
    ```ts
-   import type { CheckModule } from '../../core/types.js';
+   import { CODING_AGENTS, type CheckModule } from '../../core/types.js';
 
    export const cfg025: CheckModule = {
      id: 'CFG-025',
@@ -88,7 +88,7 @@ See [doc/development-guide.md](doc/development-guide.md) for the full reference.
 - TypeScript strict mode, ESM only (`"type": "module"`).
 - Don't add comments that just restate what the code does. Comment only the *why* when it's non-obvious.
 - No `eval`, no dynamic `require`, no execution of scanned code. VASO is static-analysis only — this is a hard constraint.
-- No outbound network calls during scans by default. The only network access is `vaso update` (signed feeds), opt-in `vaso mcp scan --resolve-packages` (npm tarball download, never executed), `--host` remote scans (SSH plus the checksum-verified probe download from GitHub Releases), and the opt-in VirusTotal lookup in IOC-008 (`VIRUSTOTAL_API_KEY`). Don't add new ones.
+- No outbound network calls during scans by default. The only network access is `vaso update` (signed feeds), opt-in `vaso mcp scan --resolve-packages` (npm tarball download, never executed), opt-in `vaso mcp scan --audit-deps` (dependency names and exact versions sent to OSV.dev), `--host` remote scans (SSH plus the checksum-verified probe download from GitHub Releases), and the opt-in VirusTotal lookup in IOC-008 (`VIRUSTOTAL_API_KEY`). Don't add new ones.
 - Prefer parsing libraries (`yaml`, `smol-toml`, `@babel/parser`) over hand-rolled regex when reading user-supplied config.
 - New code paths must have unit tests. PRs that don't add tests for new behavior will be asked to add them.
 

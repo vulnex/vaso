@@ -1,12 +1,21 @@
 # VASO Example Plugins
 
-Example user plugins demonstrating the VASO plugin API. Each file is a standalone `.mjs` module that can be dropped into `~/.vaso/plugins/` to extend VASO with custom checks, reporters, and agent adapters.
+Example user plugins demonstrating the VASO plugin API. Each file is a standalone `.mjs` module that can be dropped into `~/.vaso/plugins/` to extend VASO with custom checks, reporters, and agent adapters. VASO loads `.js` and `.mjs` files in that folder, and folders with a `package.json` `main`, `index.mjs` or `index.js`.
+
+> **Warning:** a plugin is code that runs as your user, with your permissions, every time you run any `vaso` command. Only install plugins you have read or trust.
+
+The examples live in the GitHub repository; they are not part of the npm tarball that `install.sh` installs.
 
 ## Installation
 
 ```bash
-# Copy one or more plugins to the VASO plugins directory
 mkdir -p ~/.vaso/plugins
+
+# Download one example without cloning the repository
+curl -fsSLo ~/.vaso/plugins/env-hygiene-check.mjs \
+  https://raw.githubusercontent.com/vulnex/vaso/main/examples/plugins/env-hygiene-check.mjs
+
+# Or copy it from a clone
 cp examples/plugins/env-hygiene-check.mjs ~/.vaso/plugins/
 
 # Verify it loaded
@@ -67,7 +76,14 @@ export default {
 
 ## Check ID Convention
 
-User plugin checks should use the `USR-` prefix to avoid collisions with built-in VASO checks (which use `CFG-`, `SKL-`, `IOC-`, `NET-`, `RUN-`, `POL-`, `MCP-`).
+User plugin checks should use the `USR-` prefix to avoid collisions with built-in VASO checks. Built-in IDs use these prefixes:
+
+- Core: `CFG-`, `SKL-`, `IOC-`, `NET-`, `RUN-`, `POL-`, `MCP-`, `ADV-`
+- Frameworks: `OC-`, `NC-`, `PCL-`, `IC-`, `NB-`, `ZC-`, `LY-`, `HM-`, `AT-`, `OSH-`
+- Coding agents and desktop apps: `CC-`, `CD-`, `CG-`, `CDX-`, `OPC-`, `GEM-`, `QC-`, `CUR-`, `GHC-`, `WS-`, `DEV-`, `MM-`, `PC-`, `ABA-`, `GB-`
+- Results VASO reports for its own errors (unreadable config, failed adapter or package resolution): `CONFIG-LOAD`, `ADAPTER-DETECT`, `AGENT-SCAN`, `PACKAGE-RESOLVE`, `SOURCE-READ`
+
+A check whose ID is already registered is not loaded, and `vaso ext list` shows the plugin's error. Run `vaso scan -f json` to see the IDs in use. Declarative rules (`vaso rules`) share the same ID space; the starter template uses `CUSTOM-`.
 
 ## No External Dependencies
 

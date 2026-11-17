@@ -64,7 +64,16 @@ check_node() {
   local major
   major=$(echo "$version" | cut -d. -f1)
 
-  if [ "$major" -lt "$MIN_NODE_MAJOR" ] 2>/dev/null; then
+  # A non-numeric major (empty output, a wrapper printing something else)
+  # is not a usable Node.js, not a pass
+  case "$major" in
+    ''|*[!0-9]*)
+      warn "Could not read the Node.js version ('node --version' printed '${version}'); VASO requires v${MIN_NODE_MAJOR}+"
+      return 1
+      ;;
+  esac
+
+  if [ "$major" -lt "$MIN_NODE_MAJOR" ]; then
     warn "Node.js $version found but VASO requires v${MIN_NODE_MAJOR}+"
     return 1
   fi
@@ -195,7 +204,8 @@ install_vaso() {
   # prebuilt tarball installs cleanly with no build step. It is downloaded
   # first and installed as a local file: npm 12 refuses remote tarball URLs by
   # default (allow-remote=none) but not files. Fall back to the git ref only
-  # when the release has no tarball (e.g. the `main` fallback) — a tarball
+  # when the release has no tarball (e.g. the `main` fallback), and only on
+  # npm 10 or older — a tarball
   # that exists but fails to download or install is an error, not a reason to
   # try a worse install path.
   if [ "$VERSION" != "$FALLBACK_REF" ]; then
@@ -215,22 +225,35 @@ install_vaso() {
     if [ "$rc" -ne 2 ]; then
       fail "Could not download ${tarball_url} (HTTP ${TARBALL_HTTP:-000}). Check your network or proxy and re-run."
     fi
-    warn "Release ${VERSION} has no tarball asset; falling back to git install (${git_spec})."
+    warn "Release ${VERSION} has no tarball asset."
   fi
 
-  # npm 12 refuses git installs unless allowed (allow-git defaults to none)
-  local npm_major allow_git
+  # Only npm 10 and older can install VASO from a git ref. On npm 11+ the
+  # global git install leaves an unusable package (see above), and npm 12
+  # also refuses git sources by default (allow-git=none): stop with the
+  # manual tarball steps instead of running a known-broken install. An npm
+  # version that can't be read is treated the same way.
+  local npm_major
   npm_major=$(npm --version 2>/dev/null | cut -d. -f1)
-  allow_git=$(npm config get allow-git 2>/dev/null || true)
-  if [ "${npm_major:-0}" -ge 12 ] 2>/dev/null && [ "$allow_git" = "none" ]; then
+  case "$npm_major" in
+    ''|*[!0-9]*) npm_major="" ;;
+  esac
+  if [ -z "$npm_major" ] || [ "$npm_major" -ge 11 ]; then
     echo ""
-    warn "npm ${npm_major} does not install packages from git by default (allow-git=none),"
+    if [ -n "$npm_major" ]; then
+      warn "npm ${npm_major} cannot install VASO from git (npm 11 and later leave a broken global install),"
+    else
+      warn "Could not read the npm version, so VASO will not be installed from git,"
+    fi
     warn "and ${VERSION} has no release tarball to install instead."
     echo ""
-    info "Install a published release instead:"
-    echo "    curl -fsSL https://raw.githubusercontent.com/${REPO}/main/install.sh | VASO_VERSION=<release tag> bash"
-    info "Or allow git for this one install:"
-    echo "    npm install -g --allow-git=all ${git_spec}"
+    info "Download a release tarball and install it from the file:"
+    echo "    curl -fLO https://github.com/${REPO}/releases/download/<tag>/vaso-<version>.tgz"
+    echo "    npm install -g ./vaso-<version>.tgz"
+    echo "  for example <tag> = v1.4.1 and <version> = 1.4.1. Releases: https://github.com/${REPO}/releases"
+    echo ""
+    info "Or re-run this script for a published release:"
+    echo "    curl -fsSL https://raw.githubusercontent.com/${REPO}/main/install.sh | VASO_VERSION=<tag> bash"
     echo ""
     fail "Not installed."
   fi
@@ -242,25 +265,42 @@ install_vaso() {
 
 verify_install() {
   echo ""
-  if ! command -v vaso &>/dev/null; then
-    # npm bin might not be in PATH
-    local npm_bin
-    npm_bin=$(npm prefix -g 2>/dev/null || true)/bin
-    if [ -x "$npm_bin/vaso" ]; then
-      warn "vaso installed to ${npm_bin}/vaso but it's not in your PATH."
-      echo ""
-      info "Add this to your shell profile (~/.bashrc, ~/.zshrc, etc.):"
-      echo "    export PATH=\"${npm_bin}:\$PATH\""
-      echo ""
-      info "Then reload your shell or run:"
-      echo "    source ~/.bashrc  # or ~/.zshrc"
-      return
-    fi
-    fail "Installation failed — 'vaso' command not found."
+  # Judge the command npm just installed, not whatever `vaso` is first in
+  # PATH (an older copy, or the unrelated npm package of the same name)
+  local npm_bin installed installed_version
+  npm_bin="$(npm prefix -g 2>/dev/null || true)/bin"
+  installed="$npm_bin/vaso"
+  if [ ! -x "$installed" ]; then
+    fail "Installation failed — npm did not create ${installed}."
   fi
 
-  local installed_version
-  installed_version=$(vaso --version 2>/dev/null || echo "unknown")
+  installed_version=$("$installed" --version 2>/dev/null || true)
+  if [ -z "$installed_version" ]; then
+    fail "Installation failed — ${installed} does not run ('vaso --version' printed nothing)."
+  fi
+  # A release must report its own version
+  local expected="${VERSION#v}"
+  if [[ "$expected" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] && [ "$installed_version" != "$expected" ]; then
+    fail "Installation failed — ${installed} reports version '${installed_version}', expected ${expected}."
+  fi
+
+  local on_path
+  on_path=$(command -v vaso 2>/dev/null || true)
+  if [ -z "$on_path" ]; then
+    warn "vaso installed to ${installed} but it's not in your PATH."
+    echo ""
+    info "Add this to your shell profile (~/.bashrc, ~/.zshrc, etc.):"
+    echo "    export PATH=\"${npm_bin}:\$PATH\""
+    echo ""
+    info "Then reload your shell or run:"
+    echo "    source ~/.bashrc  # or ~/.zshrc"
+    return
+  fi
+  if [ ! "$on_path" -ef "$installed" ]; then
+    warn "Another 'vaso' comes first in your PATH: ${on_path}"
+    warn "VASO ${installed_version} is installed at ${installed}; remove the other one or put ${npm_bin} first in PATH."
+  fi
+
   echo ""
   ok "VASO v${installed_version} installed successfully"
   echo ""

@@ -16,11 +16,11 @@ The signing **public key is pinned** in the released VASO binary at `src/ioc/pub
 - IOC feed: `https://raw.githubusercontent.com/vulnex/vaso/main/feeds/feed.json` (+ `.sig`)
 - Advisory feed: `https://raw.githubusercontent.com/vulnex/vaso/main/feeds/advisory-feed.json` (+ `.sig`)
 
-End users can override with `vaso update --url <url>`.
+End users can override them with `vaso update --url <url>` (IOC feed) and `vaso update --advisory-url <url>` (advisory feed). The override must still verify against the pinned key.
 
 ## How merging works
 
-VASO ships with bundled IOC and advisory data baked into every release. These feed files carry **deltas only** — new threats that surfaced after the release was cut. The client merges feed on top of bundled, deduplicating exact matches. Bundled coverage is the floor; the feed only ever adds to it.
+VASO ships with bundled IOC and advisory data baked into every release. The feeds are **cumulative**, not deltas: each version carries every published entry, and at release time the bundled data equals the signed feeds (a unit test enforces this). Between releases a newer feed adds what surfaced since. The client merges the cached feed on top of the bundled data, deduplicating exact matches, so bundled coverage is the floor and the feed only ever adds to it. Clients accept only a feed version newer than the one they have cached (`vaso update --force` re-installs the same version, never an older one).
 
 Advisories merge by `id`: a feed advisory overrides a bundled one with the same `id` (used to ship CVE corrections without a VASO release).
 

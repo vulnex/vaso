@@ -9,8 +9,7 @@ import type { VasoPlugin, VasoPluginAPI, LoadedPlugin } from './types.js';
 import type { CheckModule } from '../core/types.js';
 import type { AgentAdapter } from '../adapters/adapter.js';
 import type { Reporter } from '../reporting/reporter.js';
-
-const VERSION = '0.2.1';
+import { VERSION } from '../version.js';
 
 let loadedPlugins: LoadedPlugin[] = [];
 

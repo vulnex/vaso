@@ -365,7 +365,7 @@ export async function loadRules(options?: {
         warnings.push({
           file: file.filePath,
           rule: rule.id,
-          message: 'project rules can\'t carry fixes, even trusted — its "fix.set" is ignored (move the rule to ~/.vaso/rules/ or pass it with --rules to keep the fix)',
+          message: 'project rules can\'t carry fixes, even trusted — its "fix.set" is ignored (move the rule to ~/.vaso/rules/ to keep the fix)',
         });
       }
       ruleMap.set(rule.id, rule);
