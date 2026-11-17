@@ -452,3 +452,44 @@ func TestLog2MatchesV8(t *testing.T) {
 		t.Errorf("%d of %d products differ from V8", bad, k)
 	}
 }
+
+// A skill's settings and env files are disguised like an agent's config;
+// its code, markdown and lockfiles ship verbatim (SKL/IOC checks read them).
+func TestSkillDataFilesScrubbed(t *testing.T) {
+	c := &collector{homes: []string{"/h"}, inSkillTree: true}
+	for path, want := range map[string]bool{
+		"/h/.claude/skills/s/.env":                       true,
+		"/h/.claude/skills/s/.env.local":                 true,
+		"/h/.claude/skills/s/config.json":                true,
+		"/h/.claude/skills/s/secrets.YAML":               true,
+		"/h/.claude/skills/s/.npmrc":                     true,
+		"/h/.claude/skills/s/settings.toml":              true,
+		"/h/.claude/skills/s/index.js":                   false,
+		"/h/.claude/skills/s/run.py":                     false,
+		"/h/.claude/skills/s/SKILL.md":                   false,
+		"/h/.claude/skills/s/package-lock.json":          false,
+		"/h/.claude/skills/s/node_modules/x/config.json": false,
+	} {
+		if got := c.scrubbable(path); got != want {
+			t.Errorf("scrubbable(%q) = %v, want %v", path, got, want)
+		}
+	}
+	root := t.TempDir()
+	const key = "Zr8Ty3Uw6Qa1Sx4Dc7Fv9Gb2Hn5Jm0Kl"
+	env := filepath.Join(root, ".env")
+	js := filepath.Join(root, "index.js")
+	if err := os.WriteFile(env, []byte("OPENROUTER_API_KEY="+key+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code := "const k = '" + key + "';\n"
+	if err := os.WriteFile(js, []byte(code), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c = &collector{budget: 1 << 20, inSkillTree: true}
+	if e := c.collectFileLimit(env, env, false, 1<<16); strings.Contains(e.Content, key) || !strings.Contains(e.Content, "OPENROUTER_API_KEY=") {
+		t.Errorf("skill .env shipped: %q", e.Content)
+	}
+	if e := c.collectFileLimit(js, js, false, 1<<16); e.Content != code {
+		t.Errorf("skill code changed: %q", e.Content)
+	}
+}

@@ -3438,9 +3438,11 @@ func nextContentLine(lines []string) string {
 	return ""
 }
 
-// scrubbable: a file whose secrets are disguised. Files a skills glob of the
-// manifest collected ship verbatim (IOC-003/008 hash skill files), and so do
-// installed packages: neither is where an agent keeps its credentials. No
+// scrubbable: a file whose secrets are disguised. Code a skills glob of the
+// manifest collected ships verbatim (IOC-003/008 hash skill files, the SKL
+// checks read it), and so do installed packages: neither is where an agent
+// keeps its credentials. A skill's settings and env files are disguised
+// (skillDataFile): a skill's .env holds live keys as often as an agent's. No
 // other path is judged by its directory names: a config relocated under
 // ~/work/skill-lab/ is scrubbed like any other. node_modules is judged below
 // the user's home, so a home under some ".../node_modules/" is no package.
@@ -3453,7 +3455,33 @@ func (c *collector) scrubbable(path string) bool {
 			break
 		}
 	}
-	return (!c.inSkillTree || c.configTree) && !strings.Contains(slash, "/node_modules/")
+	return (!c.inSkillTree || c.configTree || skillDataFile(path)) && !strings.Contains(slash, "/node_modules/")
+}
+
+// Settings formats in a skill tree, disguised like an agent's config. Code,
+// markdown and lockfiles ship verbatim (lockfile integrity hashes are no
+// secret, and the files can be large).
+var skillDataExtensions = map[string]bool{
+	".env": true, ".json": true, ".jsonc": true, ".json5": true, ".yaml": true, ".yml": true,
+	".toml": true, ".ini": true, ".cfg": true, ".conf": true, ".properties": true,
+}
+
+var skillDataNames = map[string]bool{".netrc": true, ".npmrc": true, ".pypirc": true, ".pgpass": true, ".git-credentials": true}
+
+var skillLockfiles = map[string]bool{
+	"package-lock.json": true, "npm-shrinkwrap.json": true, "pnpm-lock.yaml": true, "yarn.lock": true,
+	"bun.lock": true, "composer.lock": true, "pipfile.lock": true, "poetry.lock": true, "uv.lock": true, "cargo.lock": true,
+}
+
+// skillDataFile: a settings or env file in a skill tree (.env, .env.local,
+// config.json, secrets.yaml, .npmrc…), not code or a lockfile.
+func skillDataFile(path string) bool {
+	name := strings.ToLower(filepath.Base(path))
+	if skillLockfiles[name] {
+		return false
+	}
+	return name == ".env" || strings.HasPrefix(name, ".env.") || skillDataNames[name] ||
+		skillDataExtensions[filepath.Ext(name)]
 }
 
 // URL path credentials, mirroring findUrlSecrets in src/mcp/config-secrets.ts:

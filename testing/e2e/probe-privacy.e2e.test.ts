@@ -761,6 +761,14 @@ const SKILL_HARD_LINKS: Record<string, string> = {
  * folder, an agent config, a config-set tree. Judged by where they lead.
  */
 const FOLDED_SKILL_LINK = '.claude/skills/canary-fold/k';
+/** Settings and env files inside a manifest skills tree. */
+const SKILL_DATA_FILES = [
+  '.claude/skills/canary-data/.env',
+  '.claude/skills/canary-data/.env.local',
+  '.claude/skills/canary-data/config.json',
+  '.claude/skills/canary-data/secrets.yaml',
+  '.claude/skills/canary-data/settings.toml',
+];
 const FOLDED_CONFIG_LINK = '.copilot/config.json';
 
 async function plantSkillLinks(home: string): Promise<boolean> {
@@ -777,6 +785,9 @@ async function plantSkillLinks(home: string): Promise<boolean> {
     await mkdir(dirname(join(home, root)), { recursive: true });
     await symlink(join(home, target), join(home, root));
   }
+  // A skill's own settings and env files carry live keys too: disguised (its code ships as is)
+  await put('.claude/skills/canary-data/SKILL.md', '---\nname: canary-data\n---\n');
+  for (const rel of SKILL_DATA_FILES) await put(rel, contentFor(rel));
   await put('.ssh/id_canary_hard', pemFile('.ssh/id_canary_hard'));
   await put('.claude/skills/canary-hard/SKILL.md', '---\nname: canary-hard\n---\n');
   for (const [rel, target] of Object.entries(SKILL_HARD_LINKS)) await link(join(home, target), join(home, rel));
@@ -1008,7 +1019,7 @@ describe.skipIf(!goAvailable)('probe privacy canary', () => {
   it('ships no canary', () => {
     const leaks = [...canaries].filter(([, value]) => haystack.includes(hidden(value))).map(([label]) => label);
     expect(leaks, `${leaks.length} canaries shipped:\n${leaks.slice(0, 40).join('\n')}`).toEqual([]);
-  });
+  }, 300_000); // ~12k searches of the whole snapshot: minutes on a loaded machine
 
   it('ships no run of an escaped secret\'s escapes', () => {
     expect(escapedCanaries.size).toBeGreaterThan(200);
