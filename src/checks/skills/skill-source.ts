@@ -100,9 +100,10 @@ function interpreterLang(prog: string): SkillLang | undefined {
 /**
  * `<interpreter> [options] <relative path>` in a SKILL.md: what it runs and
  * with what (`node scripts/tool.data`, `python3 -u scripts/helper.txt`,
- * `uv run scripts/x.py`, `bun run x.ts`).
+ * `uv run scripts/x.py`, `bun run x.ts`, `bash "${CLAUDE_SKILL_DIR}/scripts/run.bin"`
+ * — Claude Code's variable for the skill's own folder).
  */
-const RUN_REFERENCE = /(?:^|[\s`'"(;&|$])((?:[\w./-]*\/)?(?:node(?:js)?|bun|deno|tsx|ts-node|python[\d.]*|pypy[\d.]*|bash|sh|zsh|ksh|dash|source|ruby|perl|php[\d.]*|lua[\d.]*|pwsh|powershell))(?:\s+(?:run|-[\w-]+(?:=\S*)?))*\s+(?:\.\/)?((?:[\w.@+-]+\/)*[\w.@+-]+)/g;
+const RUN_REFERENCE = /(?:^|[\s`'"(;&|$])((?:[\w./-]*\/)?(?:node(?:js)?|bun|deno|tsx|ts-node|python[\d.]*|pypy[\d.]*|bash|sh|zsh|ksh|dash|source|ruby|perl|php[\d.]*|lua[\d.]*|pwsh|powershell))(?:\s+(?:run|-[\w-]+(?:=\S*)?))*\s+["']?(?:\.\/|\$\{?CLAUDE_SKILL_DIR\}?\/)?((?:[\w.@+-]+\/)*[\w.@+-]+)/g;
 
 /** The skill files a SKILL.md runs through an interpreter, and the language it runs them as. */
 function runReferences(skillMd: string, text: string): Array<[string, SkillLang]> {
@@ -211,10 +212,22 @@ export async function readSkillSource(
   opts: { data?: boolean } = {},
 ): Promise<SkillSource | undefined> {
   const ext = extname(file).toLowerCase();
-  if (BINARY_EXTENSIONS.has(ext)) return undefined;
   const md = isMarkdownFile(file);
   const manifest = basename(file) === 'package.json';
   const refs = await skillRunReferences(ctx);
+  // A compiled helper's extension (`run.bin`): judged by its content — a
+  // script SKILL.md runs, or one with a `#!` line, is read as one; binary
+  // content (a format signature) or a data blob is left to IOC-003/007
+  if (BINARY_EXTENSIONS.has(ext)) {
+    const loaded = await loadText(ctx, file);
+    if ('err' in loaded) {
+      if (refs.has(file)) throw loaded.err;
+      return undefined;
+    }
+    const lang = refs.get(file) ?? shebangLang(loaded.text);
+    if (!lang || (mode === 'code' && lang !== 'js' && lang !== 'python')) return undefined;
+    return { file, text: loaded.text, kind: 'script', lang };
+  }
   const named = LANG_BY_EXT[ext] ?? refs.get(file);
   const data = !md && !manifest && !named && DATA_EXTENSIONS.has(ext);
   if (mode === 'code' && (md || manifest || (named && named !== 'js' && named !== 'python') || data)) {
