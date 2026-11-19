@@ -18,7 +18,8 @@ import { createHash } from 'node:crypto';
 import _traverse from '@babel/traverse';
 import type { Binding, NodePath, Scope } from '@babel/traverse';
 import type { Node } from '@babel/types';
-import { parseJs, sourceChunks } from './js-parse.js';
+import { posix } from 'node:path';
+import { parseJs, sourceChunks, type JsAst, type SourceChunk } from './js-parse.js';
 
 const traverse = typeof _traverse === 'function' ? _traverse : (_traverse as { default: typeof _traverse }).default;
 
@@ -107,17 +108,88 @@ const CHILD_PROCESS_NAMES = new Set(['child_process', 'childProcess', 'cp']);
 const MAX_DEPTH = 8;
 const MAX_CACHED = 1_000;
 const cache = new Map<string, TaintedSink[]>();
+/** Rounds of carrying input into called functions: handler → helper → helper chains, across modules too. */
+const MAX_ROUNDS = 6;
+/**
+ * Most source analyzed as one program: files that import each other are
+ * parsed and traced together, so all their ASTs are alive at once (2 MB of
+ * linked modules held ~600 MB). Links that would grow a group past this are
+ * not followed; each side is still traced with its other links.
+ */
+export const MAX_GROUP_SOURCE = 512 * 1024;
 
 export function findTaintedSinks(code: string, filename = 'unknown.js'): TaintedSink[] {
   const key = `${filename}\0${createHash('sha1').update(code).digest('base64')}`;
   const cached = cache.get(key);
   if (cached) return cached.map((s) => ({ ...s }));
-  const results = sourceChunks(code).flatMap((chunk) =>
-    analyze(chunk.code).map((sink) => ({ ...sink, line: sink.line + chunk.startLine - 1 })),
-  );
+  const chunks = sourceChunks(code);
+  const results = moduleGroups(chunks)
+    .flatMap((group) => analyze(group.map((i) => chunks[i])))
+    .sort((a, b) => a.line - b.line);
   if (cache.size >= MAX_CACHED) cache.delete(cache.keys().next().value!);
   cache.set(key, results);
   return results.map((s) => ({ ...s }));
+}
+
+/** A relative module specifier in `import … from`, `export … from`, `import(…)`, `require(…)`. */
+const RELATIVE_SPECIFIER = /(?:\bfrom|\bimport|\brequire)\s*(?:\(\s*)?(["'`])(\.{1,2}\/[^"'`\r\n]{0,512})\1/g;
+const JS_EXTENSIONS = ['.js', '.mjs', '.cjs', '.ts', '.mts', '.cts', '.jsx', '.tsx'];
+
+/**
+ * The chunk a relative specifier names, from the chunk at `from`: as written,
+ * with an extension, or a directory's index; `./x.js` may be `./x.ts` in
+ * TypeScript source (the candidates the source resolver tries on disk).
+ */
+function resolveChunk<T>(from: string, specifier: string, byPath: Map<string, T>): T | undefined {
+  const base = posix.normalize(posix.join(posix.dirname(from), specifier.replace(/[?#].*$/, '')));
+  const ext = posix.extname(base).toLowerCase();
+  const candidates = JS_EXTENSIONS.includes(ext)
+    ? [base, base.replace(/\.([mc]?)js$/i, '.$1ts'), base.replace(/\.js$/i, '.tsx')]
+    : [...JS_EXTENSIONS.map((e) => base + e), ...JS_EXTENSIONS.map((e) => `${base}/index${e}`)];
+  for (const c of candidates) {
+    const at = byPath.get(c);
+    if (at !== undefined) return at;
+  }
+  return undefined;
+}
+
+/**
+ * Chunks (by index) to trace together: files linked by relative imports, in
+ * groups of at most MAX_GROUP_SOURCE (a link that would join two groups past
+ * it is dropped). A single scan of each file's text for specifiers and a
+ * union-find over the links — linear in the source.
+ */
+function moduleGroups(chunks: SourceChunk[]): number[][] {
+  const byPath = new Map<string, number>();
+  chunks.forEach((c, i) => { if (c.path && !byPath.has(c.path)) byPath.set(c.path, i); });
+  const parent = chunks.map((_, i) => i);
+  const size = chunks.map((c) => c.code.length);
+  const find = (i: number): number => {
+    while (parent[i] !== i) i = parent[i] = parent[parent[i]];
+    return i;
+  };
+  if (byPath.size > 1) {
+    chunks.forEach((c, i) => {
+      if (!c.path) return;
+      for (const m of c.code.matchAll(RELATIVE_SPECIFIER)) {
+        const j = resolveChunk(c.path, m[2], byPath);
+        if (j === undefined) continue;
+        const a = find(i);
+        const b = find(j);
+        if (a === b || size[a] + size[b] > MAX_GROUP_SOURCE) continue;
+        parent[b] = a;
+        size[a] += size[b];
+      }
+    });
+  }
+  const groups = new Map<number, number[]>();
+  chunks.forEach((_, i) => {
+    const root = find(i);
+    const group = groups.get(root);
+    if (group) group.push(i);
+    else groups.set(root, [i]);
+  });
+  return [...groups.values()];
 }
 
 /**
@@ -417,33 +489,237 @@ export function confinesPaths(code: string): boolean {
   return resolves && confines;
 }
 
-function analyze(code: string): TaintedSink[] {
-  const ast = parseJs(code);
-  if (!ast) return [];
+/** A file of a traced group, parsed. */
+interface ModuleFile {
+  chunk: SourceChunk;
+  ast: JsAst;
+  /** Functions it exports by name (`default`; `default.f` for a member of an exported object), filled on first use. */
+  exports?: Map<string, ExportEntry>;
+  /** Modules whose exports it re-exports whole (`export * from`, `module.exports = require(…)`). */
+  stars?: ModuleFile[];
+  lines?: string[];
+}
+type ExportEntry = { fn: NodePath } | { from: ModuleFile; name: string };
 
-  let lines: string[] | undefined;
-  const lineText = (line: number): string => (lines ??= code.split('\n'))[line - 1]?.trim() ?? '';
+/** `module.exports` */
+function isModuleExports(node: Node): boolean {
+  return node.type === 'MemberExpression' && node.object.type === 'Identifier' && node.object.name === 'module' && memberName(node) === 'exports';
+}
+
+/** A key of an object literal or an export specifier, when written as a name or a string. */
+function keyName(node: Node, computed = false): string | undefined {
+  if (node.type === 'Identifier' && !computed) return node.name;
+  return node.type === 'StringLiteral' ? node.value : undefined;
+}
+
+/**
+ * Traces a group of files that import each other as one program: tool input
+ * reaching a function another module exports (`import { run } from
+ * './helpers.js'`, `const h = require('./h')`, re-exports) follows it there.
+ */
+function analyze(chunks: SourceChunk[]): TaintedSink[] {
+  const files: ModuleFile[] = [];
+  for (const chunk of chunks) {
+    const ast = parseJs(chunk.code);
+    if (ast) files.push({ chunk, ast });
+  }
+  if (files.length === 0) return [];
+  const byPath = new Map<string, ModuleFile>();
+  const fileOfProgram = new WeakMap<Node, ModuleFile>();
+  for (const file of files) {
+    if (file.chunk.path && !byPath.has(file.chunk.path)) byPath.set(file.chunk.path, file);
+    fileOfProgram.set(file.ast.program, file);
+  }
+  const linked = byPath.size > 1;
+
+  let current = files[0];
+  const lineText = (line: number): string => (current.lines ??= current.chunk.code.split('\n'))[line - 1]?.trim() ?? '';
+  const results: TaintedSink[] = [];
+  /** A finding at `line` of the file being walked, placed in the joined source. */
+  const pushResult = (line: number, sink: Omit<TaintedSink, 'line' | 'snippet' | 'sourceLine'>): void => {
+    results.push({ line: line + current.chunk.startLine - 1, ...cutLine(lineText(line)), ...sink });
+  };
+  // A throw in one file's walk (a pathological AST) loses that walk, not the group's
+  const safely = (walk: () => void): void => {
+    try { walk(); } catch { /* report what was found so far */ }
+  };
+
+  /** The file of the group a relative specifier names, seen from `path`'s file. */
+  const moduleAt = (path: NodePath, specifier: string | undefined): ModuleFile | undefined => {
+    if (!linked || !specifier?.startsWith('.')) return undefined;
+    const from = fileOfProgram.get(path.scope.getProgramParent().block)?.chunk.path;
+    return from ? resolveChunk(from, specifier, byPath) : undefined;
+  };
+
+  /** The function `p` is or names in its own file: inline, a function declaration, or a function-valued constant. */
+  const functionAt = (p: NodePath | null | undefined): NodePath | undefined => {
+    if (!p?.node) return undefined;
+    if (p.isFunctionDeclaration() || p.isFunctionExpression() || p.isArrowFunctionExpression() || p.isObjectMethod()) return p;
+    if (!p.isIdentifier()) return undefined;
+    const b = p.scope.getBinding(p.node.name);
+    if (b?.path.isFunctionDeclaration()) return b.path;
+    if (b?.path.isVariableDeclarator()) {
+      const init = b.path.get('init');
+      if (init.isFunctionExpression() || init.isArrowFunctionExpression()) return init;
+    }
+    return undefined;
+  };
+
+  /** A file's export table: ES exports, CommonJS `module.exports`/`exports.f`, re-exports. One walk of its top-level statements. */
+  const exportsOf = (file: ModuleFile): Map<string, ExportEntry> => {
+    if (file.exports) return file.exports;
+    const table = new Map<string, ExportEntry>();
+    const stars: ModuleFile[] = [];
+    file.exports = table;
+    file.stars = stars;
+    const set = (name: string | undefined, fn: NodePath | undefined): void => {
+      if (name !== undefined && fn && !table.has(name)) table.set(name, { fn });
+    };
+    const setObject = (prefix: string, object: NodePath): void => {
+      for (const prop of object.get('properties') as NodePath[]) {
+        if (prop.isObjectMethod()) set(prefix + (keyName(prop.node.key, prop.node.computed) ?? ''), prop);
+        else if (prop.isObjectProperty()) {
+          const name = keyName(prop.node.key, prop.node.computed);
+          if (name !== undefined) set(prefix + name, functionAt(prop.get('value') as NodePath));
+        }
+      }
+    };
+    let program: NodePath | undefined;
+    traverse(file.ast, { Program(p) { program = p; p.stop(); } });
+    for (const stmt of (program?.get('body') ?? []) as NodePath[]) {
+      if (stmt.isExportNamedDeclaration()) {
+        const decl = stmt.get('declaration');
+        if (decl.isFunctionDeclaration() && decl.node.id) set(decl.node.id.name, decl);
+        else if (decl.isVariableDeclaration()) {
+          for (const d of decl.get('declarations')) {
+            if (d.node.id.type === 'Identifier') set(d.node.id.name, functionAt(d.get('init') as NodePath));
+          }
+        }
+        const source = stmt.node.source?.value;
+        const from = source !== undefined ? moduleAt(stmt, source) : undefined;
+        for (const spec of stmt.get('specifiers')) {
+          if (!spec.isExportSpecifier()) continue;
+          const name = keyName(spec.node.exported);
+          if (name === undefined) continue;
+          if (source === undefined) set(name, functionAt(spec.get('local')));
+          else if (from && !table.has(name)) table.set(name, { from, name: spec.node.local.name });
+        }
+      } else if (stmt.isExportDefaultDeclaration()) {
+        const decl = stmt.get('declaration') as NodePath;
+        if (decl.isObjectExpression()) setObject('default.', decl);
+        else set('default', functionAt(decl));
+      } else if (stmt.isExportAllDeclaration()) {
+        const from = moduleAt(stmt, stmt.node.source.value);
+        if (from) stars.push(from);
+      } else if (stmt.isExpressionStatement()) {
+        const e = stmt.get('expression');
+        if (!e.isAssignmentExpression({ operator: '=' })) continue;
+        const left = e.node.left;
+        const right = e.get('right');
+        if (isModuleExports(left)) {
+          // module.exports = { run, check() {} } / = run / = require('./impl')
+          if (right.isObjectExpression()) setObject('', right);
+          else {
+            const from = moduleAt(stmt, moduleOfInit(right.node, right.scope));
+            if (from) stars.push(from);
+            else set('default', functionAt(right));
+          }
+        } else if (left.type === 'MemberExpression' && (isModuleExports(left.object)
+          || (left.object.type === 'Identifier' && left.object.name === 'exports' && !e.scope.getBinding('exports')))) {
+          // exports.run = run / module.exports.run = function (…) {…}
+          set(memberName(left), functionAt(right));
+        }
+      }
+    }
+    return table;
+  };
+
+  /** The function a module exports under `name`, through re-exports; memoized, cycles end. */
+  const exported = new Map<ModuleFile, Map<string, NodePath | null>>();
+  const lookup = (file: ModuleFile, name: string, depth = 0): NodePath | undefined => {
+    let known = exported.get(file);
+    if (!known) exported.set(file, (known = new Map()));
+    if (known.has(name)) return known.get(name) ?? undefined;
+    if (depth > MAX_DEPTH) return undefined;
+    known.set(name, null); // a re-export cycle exports nothing more
+    const entry = exportsOf(file).get(name);
+    let fn: NodePath | undefined;
+    if (entry) fn = 'fn' in entry ? entry.fn : lookup(entry.from, entry.name, depth + 1);
+    else if (name !== 'default' && !name.startsWith('default.')) {
+      for (const star of file.stars ?? []) if ((fn = lookup(star, name, depth + 1))) break;
+    }
+    known.set(name, fn ?? null);
+    return fn;
+  };
+
+  /**
+   * The function of another module of the group that `node` (a callee or a
+   * handler reference, seen from `path`) names: `run` from `import { run }`,
+   * `import run from`, `const { run } = require(…)`; `h.run` from `import * as
+   * h`, `import h from`, `const h = require(…)`; `require('./h').run`; and
+   * TypeScript's CommonJS output `(0, h_1.run)(…)`.
+   */
+  const importedFunction = (path: NodePath, node: Node | undefined): NodePath | undefined => {
+    if (!linked || !node) return undefined;
+    if (node.type === 'SequenceExpression') node = node.expressions[node.expressions.length - 1];
+    if (node.type === 'Identifier') {
+      const b = path.scope.getBinding(node.name);
+      const decl = b?.path.node;
+      if (!b || !decl) return undefined;
+      if (decl.type === 'ImportSpecifier' || decl.type === 'ImportDefaultSpecifier') {
+        const from = moduleAt(b.path, bindingModule(b));
+        return from && lookup(from, decl.type === 'ImportDefaultSpecifier' ? 'default' : importedName(b));
+      }
+      if (decl.type !== 'VariableDeclarator') return undefined;
+      const from = moduleAt(b.path, moduleOfInit(decl.init, b.scope));
+      if (!from) return undefined;
+      return decl.id.type === 'ObjectPattern' ? lookup(from, importedName(b)) : lookup(from, 'default');
+    }
+    if (node.type !== 'MemberExpression' && node.type !== 'OptionalMemberExpression') return undefined;
+    const name = memberName(node);
+    if (name === undefined) return undefined;
+    const object = node.object;
+    let from: ModuleFile | undefined;
+    let viaDefault = false;
+    if (object.type === 'Identifier') {
+      const b = path.scope.getBinding(object.name);
+      const decl = b?.path.node;
+      if (!b || !decl) return undefined;
+      if (decl.type === 'ImportNamespaceSpecifier' || decl.type === 'ImportDefaultSpecifier') {
+        from = moduleAt(b.path, bindingModule(b));
+        viaDefault = decl.type === 'ImportDefaultSpecifier';
+      } else if (decl.type === 'VariableDeclarator' && decl.id.type === 'Identifier') {
+        from = moduleAt(b.path, moduleOfInit(decl.init, b.scope));
+      }
+    } else {
+      from = moduleAt(path, moduleOfInit(object, path.scope));
+    }
+    if (!from) return undefined;
+    // A default import of CommonJS is its module.exports: `h.run` is the export `run`
+    return viaDefault
+      ? lookup(from, `default.${name}`) ?? lookup(from, name)
+      : lookup(from, name) ?? lookup(from, `default.${name}`);
+  };
 
   // Pass 1: functions registered as tool/request handlers — all their
   // parameters carry tool input.
   const handlers = new WeakSet<Node>();
   // Input fields each handler's schema limits to fixed choices or numbers (`z.enum`, `z.number`)
   const constrainedInputs = new WeakMap<Node, Set<string>>();
-  // Parameters (by position) of local functions that are called with tool input.
+  // Parameters (by position) of functions that are called with tool input.
   const taintedParams = new WeakMap<Node, Set<number>>();
-  const results: TaintedSink[] = [];
 
-  try {
-    traverse(ast, {
+  for (const file of files) {
+    safely(() => traverse(file.ast, {
       CallExpression(path) {
         const { callee, arguments: args } = path.node;
         if (callee.type !== 'MemberExpression' || callee.property.type !== 'Identifier') return;
         if (!HANDLER_REGISTRARS.has(callee.property.name)) return;
-        // Inline, by reference (`server.tool("t", "d", {}, handleIt)`), or
-        // FastMCP-TS's `addTool({ name, execute })`.
+        // Inline, by reference (`server.tool("t", "d", {}, handleIt)`, also
+        // imported from another module), or FastMCP-TS's `addTool({ name, execute })`.
         const constrained = constrainedSchemaFields(args as Node[]);
         const addHandler = (node: Node | undefined): void => {
-          const fn = functionNode(path, node);
+          const fn = functionNode(path, node) ?? importedFunction(path, node)?.node;
           if (fn) handlers.add(fn);
           if (fn && constrained.size > 0) constrainedInputs.set(fn, constrained);
         };
@@ -460,8 +736,10 @@ function analyze(code: string): TaintedSink[] {
           }
         }
       },
-    });
+    }));
+  }
 
+  {
     let memo = new Map<Binding, string | null>();
 
     const bindingOrigin = (binding: Binding, depth: number): string | undefined => {
@@ -538,11 +816,11 @@ function analyze(code: string): TaintedSink[] {
       return found;
     };
 
-    /** The function a call invokes, when it is declared in this file. */
+    /** The function a call invokes, when it is declared in this file or exported by another module of the group. */
     const localFunctionCall = (path: NodePath): NodePath | undefined => {
       if (!path.isCallExpression()) return undefined;
       const callee = path.get('callee');
-      if (!callee.isIdentifier()) return undefined;
+      if (!callee.isIdentifier()) return importedFunction(path, callee.node);
       const binding = path.scope.getBinding(callee.node.name);
       if (!binding) return undefined;
       if (binding.path.isFunctionDeclaration()) return binding.path;
@@ -550,7 +828,7 @@ function analyze(code: string): TaintedSink[] {
         const init = binding.path.get('init');
         if (init.isFunctionExpression() || init.isArrowFunctionExpression()) return init;
       }
-      return undefined;
+      return importedFunction(path, callee.node);
     };
 
     /** First tool-input origin among a local function's return values.
@@ -612,8 +890,8 @@ function analyze(code: string): TaintedSink[] {
       if (tainted.length === 0) return;
       const origin = expressionOrigin(tainted[0].path, 0)!;
       const line = path.node.loc?.start.line ?? 0;
-      results.push({
-        line, ...cutLine(lineText(line)), sink: `${shown}.${prop}`, origin, kind: 'query',
+      pushResult(line, {
+        sink: `${shown}.${prop}`, origin, kind: 'query',
         ...(tainted.every((p) => p.wraps) ? { wrapsStatement: true } : {}),
       });
     };
@@ -624,42 +902,50 @@ function analyze(code: string): TaintedSink[] {
         const origin = expressionOrigin(arg, 0);
         if (origin) {
           const line = path.node.loc?.start.line ?? 0;
-          results.push({ line, ...cutLine(lineText(line)), sink, origin, kind });
+          pushResult(line, { sink, origin, kind });
           return;
         }
       }
     };
 
-    // Pass 1b: carry tool input into local functions through their call sites
-    // (`this.getFolderSize(request.params.arguments)` taints `getFolderSize(args)`),
-    // to a fixpoint — a few rounds covers handler → helper → helper chains.
-    for (let round = 0; round < 4; round++) {
-      let changed = false;
-      memo = new Map();
-      traverse(ast, {
-        CallExpression(path) {
-          const targets = localCallees(path);
-          if (targets.length === 0) return;
-          const args = path.get('arguments') as NodePath[];
-          args.forEach((arg, index) => {
-            if (!arg.node || !expressionOrigin(arg, 0)) return;
-            for (const target of targets) {
-              const set = taintedParams.get(target) ?? new Set<number>();
-              if (!set.has(index)) {
-                set.add(index);
-                taintedParams.set(target, set);
-                changed = true;
-              }
+    // Pass 1b: carry tool input into functions through their call sites
+    // (`this.getFolderSize(request.params.arguments)` taints `getFolderSize(args)`,
+    // `runQuery(args.sql)` taints the `runQuery` another module exports), to a
+    // fixpoint — a few rounds covers handler → helper → helper chains.
+    // Each round walks every file of the group once.
+    let changed = false;
+    const visitCalls = {
+      CallExpression(path: NodePath) {
+        const imported = importedFunction(path, (path.node as { callee: Node }).callee);
+        const targets = imported ? [...localCallees(path), imported.node] : localCallees(path);
+        if (targets.length === 0) return;
+        const args = path.get('arguments') as NodePath[];
+        args.forEach((arg, index) => {
+          if (!arg.node || !expressionOrigin(arg, 0)) return;
+          for (const target of targets) {
+            const set = taintedParams.get(target) ?? new Set<number>();
+            if (!set.has(index)) {
+              set.add(index);
+              taintedParams.set(target, set);
+              changed = true;
             }
-          });
-        },
-      });
+          }
+        });
+      },
+    };
+    for (let round = 0; round < MAX_ROUNDS; round++) {
+      changed = false;
+      // What reaches a parameter grew last round: origins worked out before are stale
+      memo = new Map();
+      returnMemo.clear();
+      for (const file of files) safely(() => traverse(file.ast, visitCalls));
       if (!changed) break;
     }
     memo = new Map();
+    returnMemo.clear();
 
     // Pass 2: sinks.
-    traverse(ast, {
+    const visitSinks = {
       'CallExpression|NewExpression'(path: NodePath) {
         if (!path.isCallExpression() && !path.isNewExpression()) return;
         const callee = path.node.callee;
@@ -694,9 +980,11 @@ function analyze(code: string): TaintedSink[] {
           reportSql(path, prop, shown, args);
         }
       },
-    });
-  } catch {
-    // Pathological ASTs (errorRecovery output) — report what was found so far.
+    };
+    for (const file of files) {
+      current = file;
+      safely(() => traverse(file.ast, visitSinks));
+    }
   }
 
   return results;

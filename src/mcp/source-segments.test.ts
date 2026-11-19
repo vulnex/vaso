@@ -68,8 +68,8 @@ describe('sourceChunks', () => {
   it('splits --resolve-packages concatenations at file headers', () => {
     const code = '// === dist/a.js ===\nconst a = 1;\n\n// === dist/b.js ===\nconst a = 2;';
     expect(sourceChunks(code)).toEqual([
-      { startLine: 1, code: '// === dist/a.js ===\nconst a = 1;\n' },
-      { startLine: 4, code: '// === dist/b.js ===\nconst a = 2;' },
+      { startLine: 1, code: '// === dist/a.js ===\nconst a = 1;\n', path: 'dist/a.js' },
+      { startLine: 4, code: '// === dist/b.js ===\nconst a = 2;', path: 'dist/b.js' },
     ]);
   });
 
