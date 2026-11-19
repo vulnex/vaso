@@ -193,3 +193,32 @@ describe('config rule details keep their brackets', () => {
     expect(out).not.toMatch(/NestedCredQq77|TomlArrSecret99/);
   });
 });
+
+describe('rule evidence deep in a long line', () => {
+  it('quotes the part of a minified line around the match, credentials still masked', async () => {
+    const token = 'ghp_' + 'Q7r8S9t0U1v2W3x4Y5z6A7b8C9d0E1f2G3h4';
+    const line = `${'var a=1;'.repeat(300)}var t="${token}";var DEBUG_HOOK=true;${'var b=2;'.repeat(50)}`;
+    const minified: ParsedConfig = { raw: line, format: 'json', filePath: '/h/app.min.json', data: {} };
+    const result = await compileRule(rule('ORG-M', { pattern: { regex: 'DEBUG_HOOK', target: 'configs', message: '{{match}}: {{snippet}}' } })).run({
+      installation: { agent: 'claude-code', installDir: '/h/.claude', configFiles: [minified] },
+      configs: [minified], platform: 'darwin', fs: new LocalFSProvider(),
+    });
+    const e = result.evidence![0];
+    expect(e.snippet).toContain('DEBUG_HOOK=true');
+    expect(e.snippet!.startsWith('... ')).toBe(true);
+    expect(e.detail).toMatch(/^DEBUG_HOOK: /);
+    expect(JSON.stringify(result)).not.toContain('Q7r8S9t0U1v2');
+  });
+
+  it('a match inside a credential is quoted near where it was, as ***', async () => {
+    const token = 'ghp_' + 'Q7r8S9t0U1v2W3x4Y5z6A7b8C9d0E1f2G3h4';
+    const line = `${'var a=1;'.repeat(300)}var t="${token}";`;
+    const minified: ParsedConfig = { raw: line, format: 'json', filePath: '/h/app.min.json', data: {} };
+    const result = await compileRule(rule('ORG-N', { pattern: { regex: 'S9t0U1', target: 'configs', message: '{{match}}' } })).run({
+      installation: { agent: 'claude-code', installDir: '/h/.claude', configFiles: [minified] },
+      configs: [minified], platform: 'darwin', fs: new LocalFSProvider(),
+    });
+    expect(result.evidence![0].detail).toBe('***');
+    expect(JSON.stringify(result)).not.toContain('S9t0U1');
+  });
+});

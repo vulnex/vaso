@@ -245,6 +245,9 @@ function withGlobalFlag(pattern: RegExp): RegExp {
     : new RegExp(pattern.source, pattern.flags + 'g');
 }
 
+/** Longest evidence snippet a result keeps (engine capSnippets; reports again after masking). */
+export const MAX_SNIPPET = 300;
+
 /** Characters that end a value in a config or source line. */
 const VALUE_BOUNDARY = /[\s"'`,;:=(){}[\]<>]/;
 /** The most of a value cut by truncation a snippet keeps. */

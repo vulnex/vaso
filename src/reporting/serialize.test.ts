@@ -304,3 +304,28 @@ describe('masking: nested one-line JSON, quoted headers, truncated values (dt20)
     }
   });
 });
+
+describe('snippet length after masking', () => {
+  it('cuts a snippet masking lengthened past MAX_SNIPPET, after masking', async () => {
+    const { maskCredentialsDeep } = await import('./serialize.js');
+    const { MAX_SNIPPET } = await import('../core/patterns.js');
+    // `"token":"b",` masks to `"token":"***",`: 300 characters become 350
+    const snippet = `{${'"token":"b",'.repeat(24)}"x":1}`;
+    expect(snippet.length).toBeLessThanOrEqual(MAX_SNIPPET);
+    for (const out of [
+      maskCredentialsDeep({ evidence: [{ file: '/f', snippet }] }).evidence[0].snippet,
+      JSON.parse(toReportJson({ evidence: [{ file: '/f', snippet }] })).evidence[0].snippet as string,
+    ]) {
+      expect(out.length).toBeLessThanOrEqual(MAX_SNIPPET + 4);
+      expect(out.endsWith(' ...')).toBe(true);
+      expect(out).not.toContain('"b"');
+    }
+  });
+
+  it('leaves a snippet the engine already cut as it is', async () => {
+    const { maskCredentialsDeep } = await import('./serialize.js');
+    const { MAX_SNIPPET, truncateSnippet } = await import('../core/patterns.js');
+    const cut = truncateSnippet('const a = 1; '.repeat(40), MAX_SNIPPET);
+    expect(maskCredentialsDeep({ snippet: cut }).snippet).toBe(cut);
+  });
+});

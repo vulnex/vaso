@@ -10,7 +10,7 @@ import { computeScore, scoreToGrade, summarizeResults, aggregateScore, meanScore
 import { dedupeInheritedFindings } from './inherited-findings.js';
 import { dedupePermissionFindings } from './duplicate-findings.js';
 import { collectSkillInventory } from '../inventory/skills.js';
-import { truncateSnippet } from './patterns.js';
+import { MAX_SNIPPET, truncateSnippet } from './patterns.js';
 import { discoverMcpAssignment, type McpAssignment } from '../inventory/mcp.js';
 import { linkInventoryFindings } from '../inventory/findings.js';
 import { buildHostInventory, isEmptyHostInventory } from '../inventory/host.js';
@@ -68,7 +68,7 @@ function hostInventory(installations: AgentInstallation[], mcp: McpAssignment, a
 }
 
 /** Longest evidence snippet a result keeps. */
-export const MAX_SNIPPET = 300;
+export { MAX_SNIPPET };
 /** Most evidence items a result keeps; the rest are counted in one closing item. */
 export const MAX_EVIDENCE = 200;
 

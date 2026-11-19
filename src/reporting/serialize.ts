@@ -9,7 +9,7 @@
  * the scanning machine).
  */
 
-import { API_KEY_PATTERNS, OAUTH_TOKEN_VALUE_PATTERNS, isEnvReference, isPathValue, isPlaceholderSecret } from '../core/patterns.js';
+import { API_KEY_PATTERNS, MAX_SNIPPET, OAUTH_TOKEN_VALUE_PATTERNS, isEnvReference, isPathValue, isPlaceholderSecret, truncateSnippet } from '../core/patterns.js';
 import { maskCommandCredentials, maskUrlSecrets } from '../mcp/config-secrets.js';
 import { escapeJsonUnsafe } from './text-safety.js';
 import { EXTRA_TOKEN_PATTERNS } from '../analyzers/secret-values.js';
@@ -1023,10 +1023,15 @@ function maskArgv(args: string[], command?: unknown): string[] {
  * An evidence snippet quotes a line of a config or source file, where a
  * credential is written `"key": "value"` / `key: value` as often as
  * `KEY=value` — a one-line JSON file puts every key a check didn't match on
- * the same line as the one it did.
+ * the same line as the one it did. Masking can lengthen a snippet the engine
+ * cut to MAX_SNIPPET: it is cut again, after masking — a cut before it could
+ * leave a value the masker no longer recognizes.
  */
 function maskString(value: string, key: string): string {
-  return key === 'snippet' ? maskCredentialsInLine(value) : maskCredentialsInText(value);
+  if (key !== 'snippet') return maskCredentialsInText(value);
+  const masked = maskCredentialsInLine(value);
+  // (a snippet the engine cut is MAX_SNIPPET plus its ` ...` marker)
+  return masked.length > MAX_SNIPPET + ' ...'.length ? truncateSnippet(masked, MAX_SNIPPET) : masked;
 }
 
 const isStringArray = (v: unknown): v is string[] => Array.isArray(v) && v.length > 0 && v.every(x => typeof x === 'string');

@@ -7,7 +7,7 @@ import { evaluateOperator } from './operators.js';
 import { updateConfigValue } from '../remediation/config-writer.js';
 import { continuationMasker, credentialValuesIn, knownValueMasker, maskConfigValue, maskCredentialsInLine } from '../reporting/serialize.js';
 import { ruleInput, MAX_RULE_SCAN_MS, MAX_RULES_SCAN_MS } from './regex-safety.js';
-import { truncateSnippet } from '../core/patterns.js';
+import { snippetAround } from '../core/patterns.js';
 import type { DeclarativeRule, RawConfigRule } from './schema.js';
 
 /**
@@ -164,15 +164,23 @@ function compilePatternRule(rule: DeclarativeRule, budget: RuleTimeBudget): Chec
         // Input is capped so even a slow pattern stays bounded (regex-safety.ts)
         const started = performance.now();
         const match = re.exec(ruleInput(lines[i]));
+        // The line is quoted from the user's file: credentials on it are masked
+        // (masked whole, then cut: a cut-off credential still reads as one).
+        // The match is found again in the masked line and the quote cut
+        // around it — deep in a minified line, the first 120 characters
+        // don't show it. Both runs count against the budget.
+        const masked = match ? knownMasker()(maskCredentialsInLine(ruleInput(continued(i).trim()))) : '';
+        const remasked = match ? re.exec(masked) : null;
         const took = performance.now() - started;
         spent += took;
         budget.add(ctx.fs, took);
         if (match) {
-          // The line is quoted from the user's file: credentials on it are masked
-          // (masked whole, then cut: a cut-off credential still reads as one)
-          const snippet = truncateSnippet(knownMasker()(maskCredentialsInLine(ruleInput(continued(i).trim()))), 120);
-          // a match the masking removed from the line is (part of) a credential
-          const matched = snippet.includes(match[0]) ? match[0] : '***';
+          // a match the masking removed from the line is (part of) a credential:
+          // quoted near where it was
+          const snippet = remasked
+            ? snippetAround(masked, remasked.index, remasked[0].length, 120)
+            : snippetAround(masked, Math.min(match.index, masked.length), 0, 120);
+          const matched = remasked && snippet.includes(remasked[0]) ? remasked[0] : '***';
           evidence.push({
             file: filePath,
             line: i + 1,
