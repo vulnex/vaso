@@ -162,9 +162,10 @@ describe.runIf(posix)('MCP command any local user can replace', () => {
       expect(await worldWritableCommandPath(await snapshotOf([cmd], { special: true }), cmd)).toBeUndefined();
     });
 
-    it('is not verified from a snapshot whose probe drops the sticky bit', async () => {
+    it('from a snapshot whose probe drops the sticky bit: root\'s shared directory is not verified, a user\'s is taken as not sticky', async () => {
       const cmd = await put('shared/srv');
-      expect(await worldWritableCommandPath(await snapshotOf([cmd]), cmd)).toBe('uncollected');
+      expect(await worldWritableCommandPath(await snapshotOf([cmd], { owners: { [dir]: 0 } }), cmd)).toBe('uncollected');
+      expect(await worldWritableCommandPath(await snapshotOf([cmd]), cmd)).toEqual({ kind: 'directory', path: dir, octal: '777', mode: '777' });
     });
 
     it('still flags a command that does not exist yet (anyone can plant it), printing the sticky bit', async () => {

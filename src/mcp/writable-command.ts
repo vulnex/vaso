@@ -28,11 +28,18 @@ async function ownerOf(fs: FSProvider, path: string): Promise<number | undefined
 }
 
 /**
- * Whether a world-writable directory is sticky (1777, like /tmp). Unknown
- * (undefined) on a snapshot from a probe that records permission bits only.
+ * Whether a world-writable directory is sticky (1777, like /tmp). A snapshot
+ * from a probe that records permission bits only can't say: a root-owned one
+ * (the shared /tmp, /var/tmp, /Users/Shared — sticky as installed) is
+ * unknown; one a user made world-writable is taken as not sticky, as such
+ * directories are, so a remote scan keeps flagging them (and a user's own
+ * sticky directory is flagged remotely only — the conservative side).
  */
 async function isSticky(fs: FSProvider, dir: string): Promise<boolean | undefined> {
-  if (fs.kind === 'snapshot' && !(fs as { recordsSpecialModeBits?(): boolean }).recordsSpecialModeBits?.()) return undefined;
+  if (fs.kind === 'snapshot' && !(fs as { recordsSpecialModeBits?(): boolean }).recordsSpecialModeBits?.()) {
+    const owner = await ownerOf(fs, dir);
+    return owner === undefined || owner === 0 ? undefined : false;
+  }
   try {
     return ((await fs.stat(dir)).mode & STICKY) !== 0;
   } catch {
