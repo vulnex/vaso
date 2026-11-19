@@ -476,18 +476,24 @@ function wrappedCommand(syntax: WrapperSyntax, args: readonly string[]): { comma
  */
 export function interpreterScripts(command: string, args: readonly string[]): string[] {
   const named = (p: string) => args.some(a => a === p || a.endsWith(`=${p}`) || a === `file://${p}` || a.trim().split(/\s+/).includes(p));
+  // A script the runner names by its resolved path (`/p/safe/../ww/s.py` as
+  // `/p/ww/s.py`) is judged as the config spells it: where its `..` leads
+  // depends on the links before it (launchPathSpelling)
+  const words = args.flatMap(a => [a, a.slice(a.indexOf('=') + 1), a.replace(/^file:\/\//, ''), ...a.trim().split(/\s+/)]);
+  const spelled = (p: string): string | undefined => named(p) ? p : words.find(w => isAbsolute(w) && w.includes('..') && posix.normalize(w) === p);
   const runner = basename(runnerName(command)).toLowerCase();
   const wrapper = Object.hasOwn(WRAPPERS, runner) ? WRAPPERS[runner] : undefined;
   if (runner === 'env' || wrapper) {
     const inner = wrapper ? wrappedCommand(wrapper, args) : envCommand(args);
     if (!inner) return [];
     const out = isAbsolute(inner.command) ? [inner.command] : [];
-    return [...new Set([...out, ...interpreterScripts(inner.command, inner.args)].filter(named))];
+    return [...new Set([...out, ...interpreterScripts(inner.command, inner.args)].map(spelled).filter((p): p is string => !!p))];
   }
   const target = launchTarget({ name: '', command, args: [...args], transport: 'stdio' });
-  const out = target.executed ? [] : [target.entry, ...target.preloads].filter((p): p is string => !!p && isAbsolute(p) && named(p));
+  const out = target.executed ? [] : [target.entry, ...target.preloads]
+    .map(p => p && isAbsolute(p) ? spelled(p) : undefined).filter((p): p is string => !!p);
   const syntax = Object.hasOwn(SCRIPT_RUNNERS, runner) ? SCRIPT_RUNNERS[runner] : undefined;
-  if (out.length === 0 && syntax) out.push(...runnerScripts(syntax, args).filter(named));
+  if (out.length === 0 && syntax) out.push(...runnerScripts(syntax, args).map(spelled).filter((p): p is string => !!p));
   return [...new Set(out)];
 }
 
@@ -514,6 +520,32 @@ export function expandUserTilde(value: string, platform: string): string {
   const name = m[1];
   const home = name === 'root' ? (platform === 'darwin' ? '/var/root' : '/root') : `${platform === 'darwin' ? '/Users' : '/home'}/${name}`;
   return home + (m[2] ?? '');
+}
+
+/**
+ * An absolute launch path as the kernel reads it: `.` and `//` collapsed, and
+ * each `..` taken from where the path before it leads — its links followed
+ * first (`/p/safe/lnk/../bin/cmd`, `lnk` → `/p/ww/bin`, is `/p/ww/bin/cmd`),
+ * not cut from the text. What follows the last `..` keeps its spelling: its
+ * links are judged where they are (worldWritableCommandPath).
+ */
+export async function launchPathSpelling(fs: FSProvider, path: string): Promise<string> {
+  const parts = path.split('/').filter(c => c !== '' && c !== '.');
+  const last = parts.lastIndexOf('..');
+  if (last < 0) return `/${parts.join('/')}`;
+  let queue = parts.slice(0, last + 1);
+  let cur = '/';
+  for (let hops = 0; queue.length > 0;) {
+    const c = queue.shift()!;
+    if (c === '..') { cur = dirname(cur); continue; }
+    const next = posix.join(cur, c);
+    const target = hops < MAX_LINK_HOPS ? await readLink(fs, next) : undefined;
+    if (target === undefined) { cur = next; continue; }
+    hops++;
+    if (target.startsWith('/')) cur = '/';
+    queue = [...target.split('/').filter(t => t !== '' && t !== '.'), ...queue];
+  }
+  return posix.join(cur, ...parts.slice(last + 1));
 }
 
 /**
@@ -547,8 +579,8 @@ export async function writableLaunchPaths(
   const out: WritableLaunchPath[] = [];
   for (const t of targets) {
     // judged where it leads, `/p/safe/../ww/x` as `/p/ww/x` (the probe
-    // records both spellings)
-    t.path = posix.normalize(t.path);
+    // records that spelling and the links before a `..`)
+    t.path = await launchPathSpelling(fs, t.path);
     if (out.some(o => o.path === t.path)) continue;
     const writable = await worldWritableCommandPath(fs, t.path, options);
     if (writable === 'uncollected') note(t.path);
