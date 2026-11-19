@@ -936,47 +936,154 @@ function dataPart(expr: string): string {
 const mentions = (text: string, name: string): boolean => new RegExp(String.raw`(?<![\w.])${name}\b`).test(text);
 
 /**
- * Names in each function that carry tool input: a tool function's
- * parameters, helper parameters passed tainted values at a call site, and
- * variables assigned from them. Two rounds cover tool → helper → helper.
+ * A tools/call dispatcher a low-level server writes itself
+ * (`async def handle_tools_call(self, message)` picking the tool by name):
+ * what it is given is the request, so its parameters carry tool input.
  */
-function taintedNames(stmts: Array<CodeLine & { last: number }>, fns: PyFunction[], rewrite: (t: string, line?: number) => string): Map<PyFunction, Map<string, string>> {
+const TOOL_DISPATCHER = /^_*(?:handle_?)?(?:tools?_?call|call_?tools?)$/i;
+/** Rounds of the taint fixpoint: each adds a name or ends it; bounds a pathological file. */
+const MAX_TAINT_ROUNDS = 32;
+
+/** The names a `for` loop, `with … as` or a walrus binds from an expression: `[names, expression]` pairs. */
+function otherBindings(text: string): Array<[string[], string]> {
+  const out: Array<[string[], string]> = [];
+  const loop = /^\s*(?:async\s+)?for\s+([\w\s,()[\]]+?)\s+in\s+([\s\S]+?):\s*$/.exec(text);
+  if (loop) out.push([identifiersOf(loop[1]), loop[2]]);
+  const withAs = /^\s*(?:async\s+)?with\s+([\s\S]+?)\s+as\s+([A-Za-z_]\w*)\s*:/.exec(text);
+  if (withAs) out.push([[withAs[2]], withAs[1]]);
+  for (const m of text.matchAll(/(?<![\w.])([A-Za-z_]\w*)\s*:=\s*([^,()]+(?:\([^()]*\)[^,()]*)*)/g)) out.push([[m[1]], m[2]]);
+  return out;
+}
+
+/**
+ * Names in each function that carry tool input: a tool function's (or a
+ * tools/call dispatcher's) parameters, helper parameters passed tainted
+ * values at a call site, and variables assigned from them (also tuple
+ * unpacking, `for` targets, `with … as`, walrus). Iterated to a fixpoint, so
+ * tool → helper → helper chains of any length taint, in any order of
+ * declaration. `blank` hides the arguments a confining helper takes
+ * (`open_repo(repo_path)` validates and returns): its result is not the
+ * caller's raw input.
+ */
+function taintedNames(stmts: Array<CodeLine & { last: number }>, fns: PyFunction[], rewrite: (t: string, line?: number) => string,
+  blank: (text: string) => string = (t) => t): Map<PyFunction, Map<string, string>> {
   const tainted = new Map<PyFunction, Map<string, string>>();
   for (const fn of fns) {
-    tainted.set(fn, new Map(fn.tool ? fn.params.map((p) => [p, p]) : []));
+    const seeded = fn.tool || TOOL_DISPATCHER.test(fn.name);
+    tainted.set(fn, new Map(seeded ? fn.params.map((p) => [p, p]) : []));
     argvNames.set(fn, new Set());
   }
   const byName = new Map(fns.map((f) => [f.name, f]));
-  for (let round = 0; round < 3; round++) {
+  const texts: Array<string | undefined> = new Array(stmts.length);
+  const textAt = (i: number): string => (texts[i] ??= rewrite(stmts[i].text, stmts[i].line));
+  let changed = true;
+  for (let round = 0; changed && round < MAX_TAINT_ROUNDS; round++) {
+    changed = false;
     for (const fn of fns) {
       const names = tainted.get(fn)!;
+      if (names.size === 0) continue;
       for (let i = fn.start + 1; i < fn.end; i++) {
-        const text = rewrite(stmts[i].text, stmts[i].line);
-        const assign = /^\s*([A-Za-z_]\w*)\s*(?::[^=]+)?=(?!=)\s*([\s\S]+)$/.exec(text);
-        if (assign && !names.has(assign[1])) {
+        const text = textAt(i);
+        const data = blank(text);
+        const assign = /^\s*([A-Za-z_]\w*(?:\s*,\s*[A-Za-z_]\w*)*)\s*(?::[^=]+)?=(?!=)\s*([\s\S]+)$/.exec(data);
+        if (assign) {
+          const targets = assign[1].split(',').map((t) => t.trim());
           const rhs = dataPart(assign[2]);
-          const from = [...names.keys()].find((n) => mentions(rhs, n));
+          const from = targets.some((t) => !names.has(t)) ? [...names.keys()].find((n) => mentions(rhs, n)) : undefined;
           if (from) {
-            names.set(assign[1], `${assign[1]} ← ${names.get(from)}`);
-            // An argv list with the input as one of its arguments.
-            if (LIST_BUILDING.test(assign[2]) || argvNames.get(fn)!.has(from)) argvNames.get(fn)!.add(assign[1]);
+            for (const target of targets) {
+              if (names.has(target)) continue;
+              names.set(target, `${target} ← ${names.get(from)}`);
+              changed = true;
+              // An argv list with the input as one of its arguments.
+              if (LIST_BUILDING.test(assign[2]) || argvNames.get(fn)!.has(from)) argvNames.get(fn)!.add(target);
+            }
+          }
+        }
+        for (const [targets, expr] of otherBindings(data)) {
+          if (targets.every((t) => names.has(t))) continue;
+          const rhs = dataPart(expr);
+          const from = [...names.keys()].find((n) => mentions(rhs, n));
+          if (!from) continue;
+          for (const target of targets) {
+            if (names.has(target)) continue;
+            names.set(target, `${target} ← ${names.get(from)}`);
+            changed = true;
           }
         }
         for (const call of text.matchAll(/(?<![\w.])(?:self\.)?(\w+)\s*\(/g)) {
           const callee = byName.get(call[1]);
           if (!callee || callee === fn) continue;
           const args = callArgs(text, call.index + call[0].length - 1).split(',');
+          const calleeNames = tainted.get(callee)!;
           args.forEach((arg, idx) => {
-            const from = [...names.keys()].find((n) => mentions(arg, n));
             const param = callee.params[idx];
-            const calleeNames = tainted.get(callee)!;
-            if (from && param && !calleeNames.has(param)) calleeNames.set(param, `${param} ← ${names.get(from)}`);
+            if (!param || calleeNames.has(param)) return;
+            const plain = blank(arg);
+            const from = [...names.keys()].find((n) => mentions(plain, n));
+            if (!from) return;
+            calleeNames.set(param, `${param} ← ${names.get(from)}`);
+            changed = true;
           });
         }
       }
     }
   }
   return tainted;
+}
+
+/**
+ * Helpers that confine a parameter and return a value (`open_repo(repo_path)`:
+ * validates the path against the allowed root, then returns the repository
+ * opened there): by name, the argument positions whose value comes back
+ * confined. What they return is not the caller's raw path.
+ */
+function confiningReturners(stmts: Array<CodeLine & { last: number }>, fns: PyFunction[],
+  rewrite: (t: string, line?: number) => string, confinedIn: Map<PyFunction, Map<string, number>>,
+  fnAt: (i: number) => PyFunction | undefined): Map<string, Set<number>> {
+  const out = new Map<string, Set<number>>();
+  for (const fn of fns) {
+    const confined = confinedIn.get(fn);
+    if (!confined || confined.size === 0) continue;
+    const from = new Map<string, Set<string>>(fn.positional.filter(Boolean).map((p) => [p, new Set([p])]));
+    const positions = new Set<number>();
+    for (let i = fn.start + 1; i < fn.end; i++) {
+      if (fnAt(i) !== fn) continue;
+      const text = rewrite(stmts[i].text, stmts[i].line);
+      if (/^\s*return\s+\S/.test(text)) {
+        for (const [c, at] of confined) {
+          if (at >= i) continue;
+          fn.positional.forEach((p, idx) => { if (p && (c === p || from.get(c)?.has(p))) positions.add(idx); });
+        }
+        continue;
+      }
+      const assign = /^\s*([A-Za-z_]\w*)\s*(?::[^=]+)?=(?!=)\s*([\s\S]+)$/.exec(text);
+      if (!assign) continue;
+      const data = dataPart(assign[2]);
+      const roots = new Set<string>();
+      for (const [n, r] of from) if (mentions(data, n)) for (const x of r) roots.add(x);
+      if (roots.size > 0) from.set(assign[1], roots);
+      else from.delete(assign[1]);
+    }
+    if (positions.size > 0) out.set(fn.name, positions);
+  }
+  return out;
+}
+
+/** `text` with the arguments confining helpers confine blanked out (same length). */
+function blankConfinedArgs(text: string, returners: Map<string, Set<number>>): string {
+  let out = text;
+  for (const m of text.matchAll(/(?<![\w.])(?:self\.)?(\w+)\s*\(/g)) {
+    const positions = returners.get(m[1]);
+    if (!positions) continue;
+    const open = m.index + m[0].length - 1;
+    let at = open + 1;
+    topLevelParts(callArgs(text, open)).forEach((part, idx) => {
+      if (positions.has(idx) && !/^\s*\w+\s*=/.test(part)) out = out.slice(0, at) + ' '.repeat(part.length) + out.slice(at + part.length);
+      at += part.length + 1;
+    });
+  }
+  return out;
 }
 
 /**
@@ -1125,6 +1232,9 @@ const AMBIGUOUS_METHODS = new Set(['open', 'glob', 'stat', 'lstat', 'rename', 'm
 const PATH_METHOD = /\.(read_text|read_bytes|open|write_text|write_bytes|unlink|rmdir|mkdir|touch|rename|symlink_to|iterdir|glob|rglob|stat|lstat)\s*\(/g;
 const PATH_CALL_RECEIVER = /^\(|^(?:pathlib\.)?(?:Pure|Posix|Windows)?Path\s*\(/;
 
+/** File calls that delete their path (reported as writes, described as deletes). */
+const DELETE_CALL = /(?:^|\.)(?:unlink|remove|removedirs|rmdir|rmtree)$/;
+
 /** A literal open mode that writes (`"w"`, `'ab'`, `"r+"`); anything else reads. */
 const writesMode = (mode: string | undefined): boolean => mode !== undefined && /^\s*[rRbBuU]{0,2}["'][^"']*[wax+]/.test(mode);
 
@@ -1189,7 +1299,6 @@ export function analyzePythonSinks(code: string): PythonSinkFinding[] {
   const lines = codeLines(code);
   const stmts = statements(lines);
   const fns = functionsOf(stmts);
-  const tainted = taintedNames(stmts, fns, rewrite);
   const constants = stringConstantNames(stmts, fns);
   // The innermost function each statement sits in, and the statement each
   // line belongs to — precomputed: a lookup per line was quadratic
@@ -1204,6 +1313,9 @@ export function analyzePythonSinks(code: string): PythonSinkFinding[] {
   const confined = RESOLVES.test(code) && CONFINES.test(code);
   const confinedIn = RESOLVES.test(code) && PATH_CONFINES.test(blankStrings(code))
     ? confinedNamesByFunction(stmts, fns, rewrite) : new Map<PyFunction, Map<string, number>>();
+  // What a validate-and-return helper gives back is confined, not raw input
+  const returners = confiningReturners(stmts, fns, rewrite, confinedIn, fnAt);
+  const tainted = taintedNames(stmts, fns, rewrite, returners.size > 0 ? (t) => blankConfinedArgs(t, returners) : undefined);
   const touchesFiles = FILE_OPS.test(code);
   const pathNames = new Set<string>();
   if (touchesFiles) for (const m of code.matchAll(PATH_BINDING)) pathNames.add(m[1]);
@@ -1243,13 +1355,16 @@ export function analyzePythonSinks(code: string): PythonSinkFinding[] {
     if (touchesFiles) {
       const expr = PATH_JOIN_INPUT.exec(text)?.[1] ?? pathlibJoin(text, pathNames);
       const joined = expr?.split('.').pop() ?? '';
-      // The name suggests input; whether it is: a parameter (a helper's
-      // caller may pass tool input) or a tainted name is; a local built from
-      // a hash or a constant table joins nothing the caller chose
+      // The name suggests input; whether it is: a name tool input reaches
+      // (a tool's parameter, a helper parameter some call site passes tool
+      // input to, a variable built from them). A helper parameter only its
+      // own code calls with fixed values (`_file(f"{kind}_style.xml")`), and
+      // a local built from a hash or a constant table, join nothing the
+      // caller chose
       const si = stmtOfLine.get(line) ?? -1;
       const fnHere = si >= 0 ? fnAt(si) : undefined;
       const root = expr?.split('.')[0] ?? '';
-      const fromInput = expr && (!fnHere || fnHere.params.includes(root) || root === 'self' || tainted.get(fnHere)?.has(root) === true);
+      const fromInput = expr && (!fnHere || root === 'self' || tainted.get(fnHere)?.has(root) === true);
       const target = expr && si >= 0 ? /^\s*([A-Za-z_]\w*)\s*(?::[^=]+)?=(?!=)/.exec(stmts[si].text)?.[1] : undefined;
       // Confined when the joined path is checked afterwards (`full = realpath(join(BASE, name))`
       // then `full.startswith(BASE)`), or the name joined was checked before
@@ -1359,16 +1474,24 @@ export function analyzePythonSinks(code: string): PythonSinkFinding[] {
         // Derived from a path already reported at its join
         const chain = names.get(from)!.split(' ← ');
         if (chain.some((n) => joinedNames.has(`${fn.start}:${n}`))) continue;
-        const verb = call.op === 'read' ? 'reads' : call.op === 'write' ? 'writes' : 'lists or stats';
+        // unlink/remove/rmdir/rmtree delete what they are given
+        const deletes = call.op === 'write' && DELETE_CALL.test(call.sink);
+        const verb = call.op === 'read' ? 'reads' : deletes ? 'deletes' : call.op === 'write' ? 'writes' : 'lists or stats';
+        // the physical line of the call in a statement over several lines
+        const method = call.sink.slice(call.sink.lastIndexOf('.') + 1);
+        let line = stmt.line;
+        for (let l = stmt.line; l <= stmt.last; l++) {
+          if (new RegExp(String.raw`(?<![\w])${method}\s*\(`).test(blankStrings(lineText.get(l) ?? ''))) { line = l; break; }
+        }
         findings.push({
           kind: 'file-path',
           fileOp: call.op,
-          line: stmt.line,
-          ...cutLine((lineText.get(stmt.line) ?? '').trim()),
+          line,
+          ...cutLine((lineText.get(line) ?? '').trim()),
           toolInput: names.get(from),
           description: call.op === 'meta'
             ? `${call.sink}() takes its path from tool input (${names.get(from)}) with no base-directory check — the tool reaches any path on the host`
-            : `${call.sink}() ${verb} a path taken from tool input (${names.get(from)}) with no containment check — the caller can ${call.op} any file the server can (path traversal)`,
+            : `${call.sink}() ${verb} a path taken from tool input (${names.get(from)}) with no containment check — the caller can ${deletes ? 'delete' : call.op} any file the server can (path traversal)`,
         });
         break;
       }

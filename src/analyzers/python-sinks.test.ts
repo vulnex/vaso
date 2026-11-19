@@ -22,6 +22,12 @@ describe('analyzePythonSinks', () => {
       '        process = await asyncio.create_subprocess_exec(',
       "            sys.executable, '-c', code,",
       '            cwd=working_dir)',
+      // tools/call dispatcher: the request's arguments reach the helpers
+      '    async def handle_tools_call(self, message):',
+      '        arguments = message.get("params", {}).get("arguments", {})',
+      '        if name == "read_file":',
+      '            return await self.read_file(arguments.get("path"))',
+      '        return await self.execute_code(arguments.get("code"), arguments.get("working_dir", "."))',
     ].join('\n');
     const findings = analyzePythonSinks(code);
     const injection = findings.filter((f) => f.kind === 'injection');
@@ -292,8 +298,103 @@ describe('analyzePythonSinks — path joins judged by where the name comes from 
       '        open(config_path)',
     ].join('\n');
     expect(analyzePythonSinks(ida).filter(f => f.kind === 'injection')).toEqual([]);
-    const param = ['import os', 'def read(base, file_name):', '    return open(os.path.join(base, file_name)).read()'].join('\n');
+    // a helper parameter tool input reaches: flagged; the same helper only
+    // called with fixed names (or not at all) joins nothing the caller chose
+    const param = ['import os', 'def read(base, file_name):', '    return open(os.path.join(base, file_name)).read()',
+      '@mcp.tool()', 'def get(name: str):', '    return read(ROOT, name)'].join('\n');
     expect(analyzePythonSinks(param).filter(f => f.kind === 'injection').map(f => f.line)).toEqual([3]);
+    const fixedOnly = ['import os', 'def read(base, file_name):', '    return open(os.path.join(base, file_name)).read()',
+      '@mcp.tool()', 'def get(kind: str):', '    return read(ROOT, "styles.xml")'].join('\n');
+    expect(analyzePythonSinks(fixedOnly).filter(f => f.kind === 'injection')).toEqual([]);
+  });
+
+  it('does not take a helper parameter for tool input by its name (excel-mcp-server chartex, zotero skill_install; dt24)', () => {
+    const chartex = [
+      'from pathlib import Path',
+      '_PARTS = Path(__file__).parent / "parts"',
+      'def chart_part(workbook, chart_type: str, plots, options):',
+      '    style = _file(f"{\'histogram\' if chart_type == \'pareto\' else chart_type}_style.xml")',
+      '    return style',
+      'def _file(name: str) -> bytes:',
+      '    return (_PARTS / name).read_bytes()',
+    ].join('\n');
+    expect(analyzePythonSinks(chartex).filter(f => f.kind === 'injection' || f.kind === 'file-path')).toEqual([]);
+    // only the CLI calls the installer
+    const install = [
+      'from pathlib import Path',
+      'def _install_rules_file(root: Path, force: bool, *, target: str, rel_dir: str, suffix: str) -> str:',
+      '    dst = root / rel_dir / f"skill{suffix}"',
+      '    dst.write_text("x")',
+      'def _install_instructions_file(root: Path, force: bool, *, target: str, filename: str) -> str:',
+      '    path = root / filename',
+      '    path.write_text("x")',
+    ].join('\n');
+    expect(analyzePythonSinks(install).filter(f => f.kind === 'injection' || f.kind === 'file-path')).toEqual([]);
+  });
+
+  it('follows tool input through helper chains longer than three calls, loops, unpacking and walrus', () => {
+    const code = [
+      'import os',
+      'def d(p):',
+      '    return open(os.path.join(BASE, p)).read()',
+      'def c(p):',
+      '    return d(p)',
+      'def b(p):',
+      '    return c(p)',
+      'def a(p):',
+      '    return b(p)',
+      '@mcp.tool()',
+      'def read_many(names: list[str], pair: str):',
+      '    for name in names:',
+      '        a(name)',
+      '    first, second = pair.split(":")',
+      '    open(second).read()',
+      '    if (target := pair.strip()):',
+      '        os.remove(target)',
+    ].join('\n');
+    const findings = analyzePythonSinks(code);
+    expect(findings.filter((f) => f.kind === 'file-path').map((f) => [f.line, f.fileOp])).toEqual([[3, 'read'], [15, 'read'], [17, 'write']]);
+    expect(findings[0].toolInput).toBe('p ← p ← p ← p ← name ← names');
+    expect(findings.find((f) => f.line === 17)?.description).toMatch(/os\.remove\(\) deletes a path .* the caller can delete any file/);
+  });
+
+  it('a validate-and-return helper yields a confined path; a fixed name under it is not traversal (mcp-server-git; dt24)', () => {
+    const git = [
+      'from pathlib import Path',
+      'import git',
+      'def validate_repo_path(repo_path: Path, allowed_repository) -> None:',
+      '    if allowed_repository is None:',
+      '        return',
+      '    resolved_repo = repo_path.resolve()',
+      '    resolved_allowed = allowed_repository.resolve()',
+      '    resolved_repo.relative_to(resolved_allowed)',
+      'def git_commit(repo, message: str) -> str:',
+      '    git_dir = Path(repo.git_dir)',
+      '    merge_head = git_dir / "MERGE_HEAD"',
+      '    if merge_head.exists():',
+      '        parents = [repo.head.commit] + [',
+      '            repo.commit(sha) for sha in merge_head.read_text().split()',
+      '        ]',
+      '        for name in ("MERGE_HEAD", "MERGE_MSG"):',
+      '            (git_dir / name).unlink(missing_ok=True)',
+      '    return "ok"',
+      'def create_server(repository):',
+      '    def open_repo(repo_path: str):',
+      '        path = Path(repo_path)',
+      '        validate_repo_path(path, repository)',
+      '        repo = git.Repo(path)',
+      '        return repo',
+      '    @server.tool(name="commit")',
+      '    def commit(repo_path: str, message: str) -> str:',
+      '        return git_commit(open_repo(repo_path), message)',
+    ].join('\n');
+    expect(analyzePythonSinks(git).filter((f) => f.kind === 'injection' || f.kind === 'file-path')).toEqual([]);
+    // without the validation the same code reads under a caller-chosen directory: reported at the call's own line, unlink as a delete
+    const open = git.replace('        validate_repo_path(path, repository)\n', '');
+    const found = analyzePythonSinks(open).filter((f) => f.kind === 'file-path');
+    expect(found.map((f) => f.line)).toEqual([14, 17]);
+    expect(found[0].sourceLine ?? found[0].snippet).toMatch(/merge_head\.read_text\(\)/);
+    expect(found[1].description).toMatch(/\.unlink\(\) deletes a path/);
   });
 });
 

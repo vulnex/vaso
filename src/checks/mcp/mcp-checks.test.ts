@@ -3034,6 +3034,10 @@ describe('Python MCP server source', () => {
       '        return f.read()',
       'async def execute_code(code):',
       "    p = await asyncio.create_subprocess_exec(sys.executable, '-c', code)",
+      // the server's own tools/call dispatcher: what it is given is the request
+      'async def handle_tools_call(message):',
+      '    arguments = message["params"]["arguments"]',
+      '    return await read_file(arguments.get("path"))',
     ].join('\n'),
   };
 
