@@ -70,4 +70,17 @@ describe('MCP server line spans', () => {
     }]);
     expect(inv.mcpServers!.map(s => s.findings)).toEqual([undefined, undefined]);
   });
+
+  it('indexes a large file once instead of scanning it per server', async () => {
+    // ~/.claude.json with thousands of projects, each repeating the same server names
+    const projects = Object.fromEntries(Array.from({ length: 20000 }, (_, i) => [`/p/${i}`, { mcpServers: { fs: { command: 'npx' }, [`only${i}`]: { command: 'x' } } }]));
+    const json = JSON.stringify({ projects }, null, 2);
+    const items = Object.keys(projects).flatMap((p, i) => [item('fs', '/big.json'), item(`only${i}`, '/big.json')]);
+    const started = Date.now();
+    await recordServerSpans(items, fsWith({ '/big.json': json }));
+    expect(Date.now() - started).toBeLessThan(3000);
+    expect(serverSpan(items[0])).toBeUndefined();
+    const line = json.split('\n').findIndex(l => l.includes('"only7"')) + 1;
+    expect(serverSpan(items[15])).toEqual([line, line + 2]);
+  });
 });

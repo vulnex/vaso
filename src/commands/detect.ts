@@ -490,9 +490,12 @@ function renderTerminal(rawInstallations: AgentInstallation[], verbose: boolean 
     const unpinned = shared.filter(g => g.unpinned).length;
     lines.push(chalk.bold.cyan(`Shared MCP servers: ${shared.length}${unpinned ? chalk.yellow(` (${unpinned} unpinned somewhere)`) : ''}`));
     for (const group of shared.slice(0, MAX_LISTED)) {
-      const users = group.users.map(u => escapeControlChars(sharedUserLabel(u), { lineBreaks: true }));
+      // Who uses it, as the other formats name them: a project-scope copy is
+      // not the user-scope one (the agent's label alone merged them)
+      const users = [...new Set(group.users.map(u => escapeControlChars(sharedUserLabel(u) + (u.project !== undefined ? ` project ${u.project}` : ''), { lineBreaks: true })))];
+      const listed = users.length > MAX_SHARED_USERS ? [...users.slice(0, MAX_SHARED_USERS), `… and ${users.length - MAX_SHARED_USERS} more`] : users;
       const flag = group.unpinned ? chalk.yellow(' unpinned') : '';
-      lines.push(`  ${escapeControlChars(group.key, { lineBreaks: true })}${flag} ${chalk.dim(`— ${[...new Set(users)].join(', ')}`)}`);
+      lines.push(`  ${escapeControlChars(group.key, { lineBreaks: true })}${flag} ${chalk.dim(`— ${listed.join(', ')}`)}`);
     }
     if (shared.length > MAX_LISTED) lines.push(chalk.dim(`  … and ${shared.length - MAX_LISTED} more`));
     lines.push('');
@@ -510,6 +513,9 @@ function renderTerminal(rawInstallations: AgentInstallation[], verbose: boolean 
 
 /** Items listed per kind under --verbose; the rest are counted (file formats keep all). */
 const MAX_LISTED = 20;
+
+/** Users named per shared MCP server in the terminal (file formats keep all). */
+const MAX_SHARED_USERS = 8;
 
 function renderSkills(inst: AgentInstallation, verbose: boolean | undefined): string[] {
   const inventory = inst.inventory;

@@ -269,12 +269,13 @@ export const atomicAgentAdapter: AgentAdapter = {
       envPrefixes: ['ATOMIC_AGENT_'],
       systemPaths: SYSTEM_CLI_PATHS,
       systemDirListings: [],
-      // MCP server commands config.json launches (AT-007): mode and owner only
+      // MCP server commands config.json launches, and absolute paths in their
+      // args (the script an interpreter runs) — AT-007: mode and owner only
       configRoots: [{
         configs: ['~/.atomic-agent/config.json'],
         format: 'json',
         kind: 'stat',
-        keys: [['mcp', 'servers', '*', 'transport', 'command']],
+        keys: [['mcp', 'servers', '*', 'transport', 'command'], ['mcp', 'servers', '*', 'transport', 'args', '*']],
       }],
     };
   },

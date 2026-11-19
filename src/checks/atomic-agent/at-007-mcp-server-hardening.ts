@@ -3,7 +3,7 @@ import { defineCheck } from '../../core/check-builder.js';
 import { runnerPackage, isPinnedOrLocal, pinProblem } from '../../mcp/package-pin.js';
 import { shellCommandWrapper, shellInvocation } from '../../mcp/shell-wrapper.js';
 import { notCollectedNote } from '../../core/probe-coverage.js';
-import { worldWritableCommandPath } from '../../mcp/writable-command.js';
+import { writableLaunchPaths, writableLaunchText } from '../../mcp/writable-command.js';
 import { asRecord, atomicConfigs, isEnabled, isLoopbackHost, mcpServers, serverName, urlHost } from './shared.js';
 
 
@@ -55,23 +55,15 @@ export const at007 = defineCheck({
           });
         }
 
-        if (command.startsWith('/')) {
-          const writable = await worldWritableCommandPath(ctx.fs, command);
-          // Absent — or, on a snapshot, outside the probe's paths: unknown, not safe
-          if (writable === 'uncollected') unverified.push(command);
-          else if (writable?.kind === 'binary') {
-            evidence.push({
-              file: config.filePath,
-              snippet: `mcp.servers[${name}].transport.command = ${command} (mode 0${writable.octal})`,
-              detail: 'MCP server command is world-writable — any local user can replace it before launch',
-            });
-          } else if (writable?.kind === 'directory') {
-            evidence.push({
-              file: config.filePath,
-              snippet: `mcp.servers[${name}].transport.command = ${command}: ${writable.path} (mode 0${writable.octal})`,
-              detail: `MCP server command's directory ${writable.path} is world-writable — any local user can swap ${command} before launch`,
-            });
-          }
+        // A command (or the script an interpreter runs) any local user can
+        // replace; on a snapshot, a path the probe didn't record: unknown, not safe
+        for (const w of await writableLaunchPaths(ctx.fs, command, argList, unverified, { config: config.filePath })) {
+          const { where, detail } = writableLaunchText(w);
+          evidence.push({
+            file: config.filePath,
+            snippet: `mcp.servers[${name}].transport.${w.role === 'command' ? 'command' : 'args'} = ${w.path}${where}`,
+            detail,
+          });
         }
 
         const pkg = runnerPackage(command, argList);

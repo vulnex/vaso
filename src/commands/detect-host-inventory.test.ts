@@ -103,4 +103,22 @@ describe('detect --host-inventory', () => {
     }
     expect(text).not.toContain('A1b2C3d4E5f6');
   });
+
+  it('terminal names a shared server\'s project-scope copy apart from the user-scope one', async () => {
+    const fsServer = { command: 'npx', args: ['-y', '@modelcontextprotocol/server-filesystem', '/data'] };
+    const snap = snapshot();
+    snap.files = {
+      '/home/u/.claude.json': { content: JSON.stringify({ mcpServers: { fs: fsServer }, projects: { '/srv/app': { mcpServers: { files: fsServer } } } }), mode: 0o600, exists: true },
+      '/home/u/.cursor/mcp.json': { content: JSON.stringify({ mcpServers: { fs: fsServer } }), mode: 0o644, exists: true },
+    };
+    const file = join(dir, 'box.json');
+    await writeFile(file, JSON.stringify(snap));
+    vi.spyOn(adapterRegistry, 'detectAll').mockResolvedValue([
+      { agent: 'claude-code', installDir: '/home/u/.claude', configFiles: [] },
+      { agent: 'cursor-cli', installDir: '/home/u/.cursor', configFiles: [] },
+    ]);
+    await runDetect({ format: 'terminal', snapshot: file });
+    const line = out.join('\n').split('\n').find(l => l.includes('npm:@modelcontextprotocol/server-filesystem'));
+    expect(line).toMatch(/— claude-code, claude-code project \/srv\/app, cursor-cli$/);
+  });
 });

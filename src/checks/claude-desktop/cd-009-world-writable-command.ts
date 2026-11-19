@@ -1,7 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { notCollectedNote } from '../../core/probe-coverage.js';
-import { worldWritableCommandPath } from '../../mcp/writable-command.js';
+import { writableLaunchPaths, writableLaunchText } from '../../mcp/writable-command.js';
 
 export const cd009 = defineCheck({
   id: 'CD-009',
@@ -23,25 +23,20 @@ export const cd009 = defineCheck({
       for (const [name, srv] of Object.entries(mcpServers)) {
         if (!srv || typeof srv !== 'object') continue;
         const command = (srv as Record<string, unknown>).command;
-        if (typeof command !== 'string' || !command.startsWith('/')) continue;
+        if (typeof command !== 'string') continue;
+        const rawArgs = (srv as Record<string, unknown>).args;
+        const args = Array.isArray(rawArgs) ? rawArgs.filter((a): a is string => typeof a === 'string') : [];
 
-        const writable = await worldWritableCommandPath(ctx.fs, command);
-        if (writable === 'uncollected') {
-          // A snapshot doesn't hold a command outside the probe's paths: unknown, not safe
-          unverified.push(command);
-        } else if (writable?.kind === 'binary') {
-          // Evidence on the binary itself, not the config (whose own mode
-          // other checks report — a shared file would hide that finding)
+        // The command, or a script an interpreter command runs. A snapshot
+        // without what it takes to judge a path: unknown, not safe
+        for (const w of await writableLaunchPaths(ctx.fs, command, args, unverified, { config: config.filePath })) {
+          const { where, detail } = writableLaunchText(w);
+          // Evidence on the file or directory itself, not the config (whose
+          // own mode other checks report — a shared file would hide that finding)
           evidence.push({
-            file: command,
-            snippet: `mcpServers.${name}.command = ${command} (mode ${writable.octal})`,
-            detail: `MCP command binary (set in ${config.filePath}) is world-writable — any local user can replace it and run code as you`,
-          });
-        } else if (writable?.kind === 'directory') {
-          evidence.push({
-            file: writable.path,
-            snippet: `mcpServers.${name}.command = ${command}: ${writable.path} (mode ${writable.octal})`,
-            detail: `Parent directory of MCP command is world-writable — attacker can swap ${command}`,
+            file: w.writable.kind === 'binary' ? w.path : w.writable.path,
+            snippet: `mcpServers.${name}.${w.role === 'command' ? 'command' : 'args'} = ${w.path}${where}`,
+            detail: `${detail} (set in ${config.filePath})`,
           });
         }
       }

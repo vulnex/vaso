@@ -105,6 +105,13 @@ function asConfig(filePath: string, data: Record<string, unknown>): ParsedConfig
   };
 }
 
+/** A snapshot holds no plutil output for this plist (exit 127): its keys are unknown, not absent. */
+async function plutilNotCollected(filePath: string, fs: FSProvider): Promise<boolean> {
+  if (!(await fs.access(filePath))) return false;
+  const result = await fs.exec('plutil', ['-convert', 'xml1', '-o', '-', filePath], { timeout: 3000 }).catch(() => undefined);
+  return result?.exitCode === 127;
+}
+
 async function findRemoteFlagsPlist(prefsDir: string, fs: FSProvider): Promise<string | undefined> {
   try {
     const entries = await fs.readdirEntries(prefsDir);
@@ -174,6 +181,10 @@ export const chatgptDesktopAdapter: AgentAdapter = {
       if (remoteFlagsPath) {
         const flags = await loadPlistAsObject(remoteFlagsPath, fs);
         if (flags) configFiles.push(asConfig(remoteFlagsPath, flags));
+        // The probe records it (metadata only) but can't run plutil on a
+        // name it only learns from a listing: list it like a local scan
+        // does, with no keys — no check reads its flags
+        else if (fs.kind === 'snapshot' && await plutilNotCollected(remoteFlagsPath, fs)) configFiles.push(asConfig(remoteFlagsPath, {}));
       }
 
       const helperPath = join(prefsDir, PLISTS.helper);

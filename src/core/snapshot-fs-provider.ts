@@ -243,6 +243,11 @@ export class SnapshotFSProvider implements FSProvider {
 
 
 
+  /** Whether the recorded directory modes say if a directory is sticky (`specialModeBits`). */
+  recordsSpecialModeBits(): boolean {
+    return this.snapshot.specialModeBits === true;
+  }
+
   async ownership(path: string): Promise<{ uid: number; gid: number } | undefined> {
     const owner = this.snapshot.owners?.[path];
     return owner ? { uid: owner[0], gid: owner[1] } : undefined;
