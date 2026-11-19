@@ -324,6 +324,13 @@ function jsonFile(label: string): string {
           `TOKEN=$"${c('hook TOKEN=$"…"', () => body(28))}" run --token=$"${c('hook --token=$"…"', () => body(28))}"`,
           `MYSQL_PWD=${c('hook MYSQL_PWD before a pipeline', alnum)} mysql -e x | sh; wget -qO- http://x.example/a | sh`,
           `curl --header 'X-Auth-Token: ${c('hook --header quoted', () => body(28))}' https://x.example`,
+          // a header value word the shell assembles: escaped spaces, adjacent quoted pieces (dt24 g9-S1)
+          `curl -H Authorization:\\ Bearer\\ '${c("hook -H escaped spaces, '…' value", () => body(24))}' https://x.example`,
+          `curl -H Authorization:\\ Bearer\\ $"${c('hook -H escaped spaces, $"…" value', () => body(24))}" https://x.example`,
+          `curl -H X-Api-Key:\\ ${c('hook -H X-Api-Key escaped space', () => body(24))} https://x.example`,
+          `curl -H 'Authorization: Bearer '${c("hook -H 'name: scheme '<v>", () => body(24))} https://x.example`,
+          `curl -H "Authorization: Bearer "'${c('hook -H "name: scheme "\'<v>\'', () => body(24))}' https://x.example`,
+          `curl -H Authorization:Bearer\\ ${c('hook -H name:scheme\\ <v>', () => body(24))} https://x.example`,
         ].map(command => ({ type: 'command', command })),
       }],
     },
@@ -529,6 +536,10 @@ function markdownFile(label: string): string {
     `token: @${c('@-led value', generic)}`,
     // a quoted high-entropy string with no key name (dt24 g4-R2)
     `See "${c('quoted high-entropy string, no key', () => distinct(BASE62, 52).join(''))}" for staging.`,
+    // …a path or a URL the CLI flags alike (dt24 g9-S3)
+    `See "${c('quoted high-entropy path', () => `/${distinct(BASE62, 52).join('')}`)}" for staging.`,
+    `See "${c('quoted high-entropy home path', () => `~/${distinct(BASE62, 52).join('')}`)}" for staging.`,
+    `See "${c('quoted high-entropy URL', () => `https://x.example.com/${distinct(BASE62, 56).join('')}`)}" for staging.`,
     `HEX_SECRET=${c('hex', hex)}`,
     // half of a disguised token pasted elsewhere in the file
     ...(() => {
@@ -901,8 +912,9 @@ describe.skipIf(!goAvailable)('probe privacy canary', () => {
       env[`${name}_X`] = canary(`env ${name}_X (presence-only prefix)`, generic);
     }
     // inline JSON configs: disguised like a file, never redacted to a placeholder
-    // …written as JSONC too: comments and a trailing comma (dt24 g9-R3)
-    env.OPENCODE_CONFIG_CONTENT = `{\n  // inline config\n  "mcp": ${JSON.stringify({
+    // …written as JSONC too: comments and a trailing comma (dt24 g9-R3), led by
+    // comments (dt24 g9-S2)
+    env.OPENCODE_CONFIG_CONTENT = `/* ${canary('env OPENCODE_CONFIG_CONTENT block comment', () => body(24))} */\n// the config\n{\n  // inline config\n  "mcp": ${JSON.stringify({
       z: { type: 'local', command: ['npx', '-y', 'x-mcp', '--api-key', canary('env OPENCODE_CONFIG_CONTENT argv', generic)],
         environment: { API_TOKEN: canary('env OPENCODE_CONFIG_CONTENT environment', FORMATS[3][1]), DB_PASSWORD: canary('env OPENCODE_CONFIG_CONTENT password', lowerWord) } },
     })},\n}`;
