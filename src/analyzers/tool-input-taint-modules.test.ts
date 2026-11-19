@@ -164,7 +164,7 @@ exports.runIt = runIt;`,
 server.tool('read', {}, async ({ name }) => fs.readFileSync(target(name)));`,
       'paths.js': `export const target = (n) => '/srv/' + n;`,
     });
-    expect(findTaintedSinks(code, 'ret.js')).toEqual([expect.objectContaining({ sink: 'fs.readFileSync', origin: expect.stringMatching(/^function\(\) ← n ← caller$/) })]);
+    expect(findTaintedSinks(code, 'ret.js')).toEqual([expect.objectContaining({ sink: 'fs.readFileSync', origin: 'function() ← n ← name' })]);
   });
 
   it('treats a handler imported by reference as a tool handler', () => {

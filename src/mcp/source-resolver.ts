@@ -9,6 +9,7 @@ import { binaryFileFormat, binaryFormat, isScriptFile, sourceText } from '../ana
 import { readCappedFile, ScanLimitError } from '../core/file-limits.js';
 import { isExcludedPath, relEscapes } from '../core/utils.js';
 import { isTestPath } from '../analyzers/test-paths.js';
+import { escapeFileMarkers } from '../analyzers/js-parse.js';
 import { shellLaunchTarget } from './shell-launch.js';
 import { commandWords, MAX_SCRIPT_CHARS, scriptCommands } from './script-command.js';
 import { parseJsonLenient } from '../core/jsonc.js';
@@ -1168,7 +1169,8 @@ export async function resolveServerSources(
       packageName,
       // a launcher's server code is the file it starts: findings point there
       localPath: launchedEntry ?? localPath,
-      sourceCode,
+      // one file's own text: a line of it reading as a `// === file ===` header is not one
+      sourceCode: sourceCode !== undefined && !sourceRoot && !packageDir ? escapeFileMarkers(sourceCode) : sourceCode,
       ...(resolveFailure ? { resolveFailure } : {}),
       ...(readFailure && !sourceCode ? { readFailure } : {}),
       ...(partialFailure ? { readFailure: partialFailure } : {}),
@@ -1489,7 +1491,8 @@ async function readServerFiles(
       continue;
     }
     total += code.length;
-    parts.push(files.length > 1 ? `// === ${relative(root, file) || basename(file)} ===\n${code}` : code);
+    // A line of the file that reads as a header would split the joined text there
+    parts.push(files.length > 1 ? `// === ${relative(root, file) || basename(file)} ===\n${escapeFileMarkers(code)}` : escapeFileMarkers(code));
   }
   return { code: parts.join('\n\n'), parts: parts.length, marked: files.length > 1, skipped };
 }

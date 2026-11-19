@@ -1,6 +1,8 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { maskArgSecrets, maskUrlSecrets } from '../../mcp/config-secrets.js';
+import { taintCoverage } from '../../analyzers/tool-input-taint.js';
+import { join } from 'node:path';
 
 export const mcp001 = defineCheck({
   id: 'MCP-001',
@@ -60,14 +62,31 @@ export const mcp001 = defineCheck({
         detail: `${s.unanalyzed} — source not analysed`,
       });
     }
-    if (compiled.length > 0 || unanalyzed.length > 0) {
+    // Modules a server's tool handlers import that cross-module tracing left
+    // out (size limit): tool input reaching them is not traced (MCP-004/005/009)
+    let incomplete = 0;
+    for (const s of ctx.mcpServerSources ?? []) {
+      if (!s.sourceCode || s.language === 'python') continue;
+      const { untraced } = taintCoverage(s.sourceCode);
+      if (untraced.length > 0) incomplete++;
+      for (const m of untraced) {
+        const file = s.sourceRoot ? join(s.sourceRoot, m.path) : s.packageName ? `${s.packageName}/${m.path}` : m.path;
+        evidence.push({
+          file,
+          snippet: `Server: ${s.serverName} (cross-module analysis incomplete)`,
+          detail: `cross-module analysis incomplete: ${m.path} not followed from ${m.from} (size limit) — tool input reaching it is not traced`,
+        });
+      }
+    }
+    if (compiled.length > 0 || unanalyzed.length > 0 || incomplete > 0) {
       const notes = [
         compiled.length > 0 ? `${compiled.length} run a compiled binary` : null,
         unanalyzed.length > 0 ? `${unanalyzed.length} name no source this scan could read` : null,
+        incomplete > 0 ? `${incomplete} not traced across all their modules (size limit)` : null,
       ].filter(Boolean).join(', ');
       return h.result({
         passed: false,
-        message: `${found}; ${notes} — source not analysed`,
+        message: `${found}; ${notes} — source not ${compiled.length + unanalyzed.length > 0 ? 'analysed' : 'fully analysed'}`,
         evidence,
       });
     }
