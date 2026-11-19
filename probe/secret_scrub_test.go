@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/BurntSushi/toml"
 )
 
 // tsList extracts the regex literals of one TS array (`const NAME = [ … ];`).
@@ -568,5 +570,25 @@ func TestNestedEscapedQuotedPairs(t *testing.T) {
 	}
 	if out := redactSecretValues(in); strings.Contains(out, secretMiddle(a)) || strings.Contains(out, secretMiddle(b)) {
 		t.Fatalf("command output: %s", out)
+	}
+}
+
+// A whole number under a credential-looking name (token_refresh_buffer_ms)
+// is disguised as one without a leading zero: JSON and TOML reject 0100500,
+// and a config that stops parsing remotely hides every server in it.
+func TestDisguisedIntegersStayValidNumbers(t *testing.T) {
+	for i := 0; i < 200; i++ {
+		out := scrubFile(t, &collector{}, "/h/.claude.json",
+			`{"bridge": {"token_refresh_buffer_ms": 300000, "api_key_pin": 48213579, "secret_offset": -730215}, "mcpServers": {"s": {"command": "npx"}}}`)
+		var v map[string]any
+		if err := json.Unmarshal([]byte(out), &v); err != nil {
+			t.Fatalf("JSON no longer parses: %v\n%s", err, out)
+		}
+		doc := "[bridge]\ntoken_refresh_buffer_ms = 300000\napi_key_pin = 48213579\n"
+		tout := scrubFile(t, &collector{}, "/h/.codex/config.toml", doc)
+		var tv map[string]any
+		if _, err := toml.Decode(tout, &tv); err != nil {
+			t.Fatalf("TOML no longer parses: %v\n%s", err, tout)
+		}
 	}
 }

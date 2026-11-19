@@ -1269,6 +1269,15 @@ func (c *collector) disguiseKeyed(key, v string) string {
 	return c.disguiseAs(v, strongCredentialKey(key), true)
 }
 
+// integerValue: a whole number as a config writes one, no leading zero.
+var integerValue = regexp.MustCompile(`^-?[1-9][0-9]+$`)
+
+// leadingZero reports whether a number's first digit is 0 (after a sign).
+func leadingZero(v string) bool {
+	v = strings.TrimPrefix(v, "-")
+	return len(v) > 1 && v[0] == '0'
+}
+
 // disguiseAs: passphrase — under a password name, where a passphrase, a PIN
 // or a lowercase word is the credential; keyed — under any credential name,
 // where an all-lowercase random key is one.
@@ -1312,6 +1321,13 @@ func (c *collector) disguiseAs(v string, passphrase, keyed bool) string {
 	// only, moved to a random place of its run clear of the kept head and
 	// tail — next to the head it would show more of the value than reports do.
 	want := verdictsOf(lead + core)
+	// an integer written without a leading zero (token_refresh_buffer_ms:
+	// 300000) keeps one: JSON, JSON5 and TOML reject 0100500, so the whole
+	// config would stop parsing remotely
+	integer := integerValue.MatchString(core)
+	fits := func(cand string) bool {
+		return verdictsOf(cand) == want && (!integer || !leadingZero(cand[len(lead):]))
+	}
 	spans := [][2]int{{-1, -1}}
 	if want.weak {
 		spans = append(weakSpans(core, pre, suf), spans...)
@@ -1330,7 +1346,7 @@ func (c *collector) disguiseAs(v string, passphrase, keyed bool) string {
 				for i, h := range midHeld {
 					fixed[i] = fixed[i] || h
 				}
-				if cand := lead + head + arrangeLike(lead, head+tail, m, fixed, coarse) + tail; verdictsOf(cand) == want {
+				if cand := lead + head + arrangeLike(lead, head+tail, m, fixed, coarse) + tail; fits(cand) {
 					out = cand
 				}
 			}
@@ -1345,12 +1361,15 @@ func (c *collector) disguiseAs(v string, passphrase, keyed bool) string {
 	// no arrangement keeps every verdict: an independent random character of
 	// each class, still judged like the value
 	for try := 0; try < 64 && out == ""; try++ {
-		if cand := lead + head + randomLike(mid, midHeld) + tail; verdictsOf(cand) == want {
+		if cand := lead + head + randomLike(mid, midHeld) + tail; fits(cand) {
 			out = cand
 		}
 	}
 	if out == "" {
 		out = lead + head + randomLike(mid, midHeld) + tail
+		if integer && leadingZero(out[len(lead):]) {
+			out = lead + strings.Replace(out[len(lead):], "0", string(rune('1'+randIndex(9))), 1)
+		}
 	}
 	decodedOut := out[len(lead):]
 	if units != nil {
