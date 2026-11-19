@@ -188,12 +188,63 @@ func inExcludedDirAs(pattern, match string, skills bool) bool {
 		literal[seg] = true
 	}
 	parts := strings.Split(filepath.ToSlash(rel), "/")
-	for _, seg := range parts[:len(parts)-1] {
+	top := -1
+	if skills {
+		top = skillTopIndex(slashPattern)
+	}
+	for i, seg := range parts[:len(parts)-1] {
 		if excludedGlobDirs[seg] && !literal[seg] && !(skills && skillTreeBuildDirs[seg]) {
+			// A folder directly under the skills root that holds a SKILL.md
+			// is a skill, whatever it is called (`venv`, `node_modules`)
+			if i == top && vendorNamedSkill(filepath.Join(filepath.FromSlash(base), filepath.Join(parts[:i+1]...))) {
+				continue
+			}
 			return true
 		}
 	}
 	return false
+}
+
+// skillTopIndex is, for a skills glob ending in its only `**` (`<root>/**`,
+// `~/.openclaw/agents/*/skills/**`), the index in a match's path below the
+// glob's static base of the folder directly under the skills root; -1 for
+// any other pattern.
+func skillTopIndex(slashPattern string) int {
+	_, rest := doublestar.SplitPattern(slashPattern)
+	segs := strings.Split(rest, "/")
+	if len(segs) == 0 || segs[len(segs)-1] != "**" {
+		return -1
+	}
+	for _, seg := range segs[:len(segs)-1] {
+		if strings.Contains(seg, "**") {
+			return -1
+		}
+	}
+	return len(segs) - 1
+}
+
+// vendorNamedSkills caches vendorNamedSkill by directory.
+var vendorNamedSkills = map[string]bool{}
+
+// vendorNamedSkill: dir, a folder directly under a skills root named like a
+// vendor dir, holds a SKILL.md (any case) — a skill the agent loads, not
+// vendored code: collected like any skill (vendorNamedSkills in
+// src/core/utils.ts). A real virtualenv or node_modules holds none at its top.
+func vendorNamedSkill(dir string) bool {
+	if v, ok := vendorNamedSkills[dir]; ok {
+		return v
+	}
+	found := false
+	if entries, err := os.ReadDir(dir); err == nil {
+		for _, e := range entries {
+			if strings.EqualFold(e.Name(), "SKILL.md") {
+				found = true
+				break
+			}
+		}
+	}
+	vendorNamedSkills[dir] = found
+	return found
 }
 
 // Common per-user bin dirs that hold CLIs we care about. Non-interactive SSH
@@ -1772,7 +1823,12 @@ func (c *collector) collectNonUTF8Names(snapshot *ProbeSnapshot, pattern string)
 	})
 }
 
-// maxDeniedWalkDirs bounds how many directories recordDeniedDirs lists per glob.
+// maxDeniedWalkDirs bounds how many directories recordDeniedDirs lists per
+// glob — outside skills trees. A skills tree is visited whole: its glob
+// lists every directory in it anyway (and a config-derived tree or a
+// followed link is held to the entry limit before it is walked), and a
+// locked folder past the bound went unreported remotely while a local walk
+// reported it.
 const maxDeniedWalkDirs = 10000
 
 // recordDeniedDirs records the directories a glob could not read. The glob
@@ -1799,9 +1855,10 @@ func (c *collector) recordDeniedDirs(snapshot *ProbeSnapshot, pattern string) {
 // base the link, segs `**`). Vendor dirs are skipped as `pattern` skips them.
 func (c *collector) recordDeniedUnder(snapshot *ProbeSnapshot, pattern, base string, segs []string) {
 	visited := 0
+	whole := c.inSkillTree || c.configTree
 	var walk func(dir string, i int)
 	walk = func(dir string, i int) {
-		if visited++; visited > maxDeniedWalkDirs {
+		if visited++; visited > maxDeniedWalkDirs && !whole {
 			return
 		}
 		entries, err := os.ReadDir(dir)
@@ -1810,6 +1867,9 @@ func (c *collector) recordDeniedUnder(snapshot *ProbeSnapshot, pattern, base str
 				recordDeniedDir(snapshot, dir)
 			}
 			return
+		}
+		if whole {
+			recordUnsearchableListing(snapshot, dir, entries)
 		}
 		if i >= len(segs)-1 && segs[len(segs)-1] != "**" {
 			return // the last segment names files
@@ -1835,6 +1895,40 @@ func (c *collector) recordDeniedUnder(snapshot *ProbeSnapshot, pattern, base str
 		}
 	}
 	walk(base, 0)
+}
+
+// recordUnsearchableListing records the listing of a skills-tree folder
+// that can be listed but not searched (mode 644): a local walk lists its
+// names, then can't read its files or list its folders. The glob matched
+// those names but could not stat them (denied entries); with the listing
+// the CLI lists them as a local walk does (readdirRecursive in
+// src/core/snapshot-fs-provider.ts). Links are left out: what they are
+// can't be read there.
+func recordUnsearchableListing(snapshot *ProbeSnapshot, dir string, entries []os.DirEntry) {
+	if len(entries) == 0 {
+		return
+	}
+	if _, err := os.Lstat(filepath.Join(dir, entries[0].Name())); err == nil || !os.IsPermission(err) {
+		return
+	}
+	info, err := os.Stat(dir)
+	if err != nil || !info.IsDir() {
+		return
+	}
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if e.Type()&os.ModeSymlink != 0 {
+			continue
+		}
+		name := e.Name()
+		if e.IsDir() {
+			name += "/"
+		}
+		names = append(names, name)
+	}
+	snapshot.Directories[dir] = names
+	snapshot.DirectoryModes[dir] = int(info.Mode().Perm())
+	recordOwner(snapshot, dir, info)
 }
 
 // recordDeniedDir records the mode of a directory that could not be listed —

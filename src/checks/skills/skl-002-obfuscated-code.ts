@@ -1,3 +1,4 @@
+import { dirname } from 'node:path';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { findHighEntropyBlocks } from '../../analyzers/entropy.js';
@@ -127,10 +128,14 @@ export const skl002 = defineCheck({
     // (another agent's files below it): judged before whether it exists.
     // A folder inside a skill the walk could not list: the files in it went
     // unread, so "no obfuscated code" would be a verdict on what wasn't seen
+    // A skill installed as a link to such a folder is the skill itself
+    const roots = new Set(skillsDirsOf(ctx));
     for (const dir of await skillUnlistableDirsOf(ctx)) {
       evidence.push({
         file: dir,
-        detail: 'not scanned: folder inside a skill can\'t be listed — its files are hidden from review and from these checks (an agent running with more privileges than this scan still loads them)',
+        detail: roots.has(dirname(dir))
+          ? 'not scanned: skill installed as a link to a folder that can\'t be listed — its files are hidden from review and from these checks (an agent running with more privileges than this scan still loads them)'
+          : 'not scanned: folder inside a skill can\'t be listed — its files are hidden from review and from these checks (an agent running with more privileges than this scan still loads them)',
       });
     }
 
@@ -138,6 +143,15 @@ export const skl002 = defineCheck({
       const gap = configTreeGap(ctx.fs, skillsDir);
       if (gap) {
         evidence.push({ file: skillsDir, detail: unscannedReason(gap === 'refused' ? 'outside' : gap, skillsDir), mitigated: true });
+        continue;
+      }
+      // A skills directory that can't be listed (mode 000 or 111) hides
+      // every skill in it, as a skill directory that can't be listed does
+      if (await rootDenied(ctx.fs, skillsDir)) {
+        evidence.push({
+          file: skillsDir,
+          detail: 'not scanned: skills directory can\'t be listed — the skills in it are hidden from review and from these checks (an agent running with more privileges than this scan still loads them)',
+        });
         continue;
       }
       if (probeCoversTree(ctx.fs, skillsDir) || await ctx.fs.access(skillsDir)) continue;
@@ -183,6 +197,17 @@ export const skl002 = defineCheck({
     });
   },
 });
+
+/** Listing the skills directory `dir` fails for permission (EACCES/EPERM). */
+async function rootDenied(fs: FSProvider, dir: string): Promise<boolean> {
+  try {
+    await fs.readdirEntries(dir);
+    return false;
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException | null)?.code;
+    return code === 'EACCES' || code === 'EPERM';
+  }
+}
 
 /** `path` is a directory (a snapshot knows it for a tree the probe judged). */
 export async function isDirectory(fs: FSProvider, path: string): Promise<boolean> {

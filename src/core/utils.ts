@@ -81,22 +81,45 @@ export function isVendorDirName(name: string): boolean {
 
 /**
  * True when parentPath lies under a vendor/VCS dir below root — or a build
- * output dir, unless `keepBuildOutput` (skill trees).
+ * output dir, unless `keepBuildOutput` (skill trees). `skills`: names of
+ * folders directly under root that are skills though named like a vendor dir
+ * (vendorNamedSkills) — not excluded themselves; vendor dirs inside them are.
  */
 export function isExcludedPath(
   root: string,
   parentPath: string | undefined,
-  opts: { keepBuildOutput?: boolean } = {},
+  opts: { keepBuildOutput?: boolean; skills?: ReadonlySet<string> } = {},
 ): boolean {
   if (!parentPath) return false;
   const rel = relative(root, parentPath);
   if (!rel || relEscapes(rel)) return false;
-  for (const segment of rel.split(sep)) {
+  const segments = rel.split(sep);
+  for (let i = 0; i < segments.length; i++) {
+    const segment = segments[i];
     if (!segment) continue;
+    if (i === 0 && opts.skills?.has(segment)) continue;
     if (VENDOR_DIRS.has(segment)) return true;
     if (!opts.keepBuildOutput && BUILD_OUTPUT_DIRS.has(segment)) return true;
   }
   return false;
+}
+
+/**
+ * Folders directly under the skills directory `root` that are named like a
+ * vendor dir (`venv`, `node_modules`, `.git`) yet hold a SKILL.md (any case):
+ * skills the agent loads, not vendored code, so they are read like any other
+ * (isExcludedPath's `skills`). A real virtualenv or node_modules holds no
+ * SKILL.md at its top. The probe judges a folder the same way
+ * (vendorNamedSkill in probe/collector.go).
+ */
+export function vendorNamedSkills(root: string, entries: readonly DirentInfo[]): ReadonlySet<string> {
+  const out = new Set<string>();
+  for (const e of entries) {
+    if (!e.parentPath || e.name.toUpperCase() !== 'SKILL.MD') continue;
+    const name = basename(e.parentPath);
+    if (VENDOR_DIRS.has(name) && join(root, name) === e.parentPath) out.add(name);
+  }
+  return out;
 }
 
 /**
@@ -165,9 +188,10 @@ export async function listSkillTree(dir: string, fs?: FSProvider, opts: { uncapp
   try {
     // Follows symlinked skills that point outside the tree (walkSkillTree)
     entries = await walkSkillTree(provider, dir, refusedLinks, { overLimit: overLimitLinks, overTotal: overTotalLinks, unrecorded: unrecordedLinks, uncapped: opts.uncapped });
+    const skills = vendorNamedSkills(dir, entries);
     for (const entry of entries) {
       if (!entry.isFile) continue;
-      if (isExcludedPath(dir, entry.parentPath, { keepBuildOutput: true })) continue;
+      if (isExcludedPath(dir, entry.parentPath, { keepBuildOutput: true, skills })) continue;
       const fullPath = entry.parentPath ? join(entry.parentPath, entry.name) : join(dir, entry.name);
       const ext = extname(entry.name).toLowerCase();
       if (CODE_EXTENSIONS.has(ext) || BINARY_EXTENSIONS.has(ext) || entry.name.toUpperCase() === 'SKILL.MD') {
@@ -189,8 +213,9 @@ export async function listSkillTree(dir: string, fs?: FSProvider, opts: { uncapp
     const skillMd = join(skillDir, 'SKILL.md');
     if (!files.includes(skillMd) && await provider.access(skillMd)) files.push(skillMd);
   }
-  const unlistableNested = (await unlistableSubdirs(provider, dir, entries)).filter(d => !unlistable.includes(d));
-  return { entries, files, unlistable, unlistableNested, refusedLinks, overLimitLinks, overTotalLinks, unrecordedLinks, ...(error ? { error } : {}) };
+  // Sorted: a local walk and a snapshot list folders in different orders
+  const unlistableNested = (await unlistableSubdirs(provider, dir, entries)).filter(d => !unlistable.includes(d)).sort();
+  return { entries, files, unlistable: unlistable.sort(), unlistableNested, refusedLinks, overLimitLinks, overTotalLinks, unrecordedLinks, ...(error ? { error } : {}) };
 }
 
 /**
@@ -223,26 +248,35 @@ export async function unlistableSkillDirs(skillsDir: string, fs?: FSProvider): P
 /**
  * Folders anywhere in a walked skill tree that exist but can't be listed
  * (EACCES — a chmod-000 `locked/` inside a skill): the recursive walk skips
- * them without a word, so the files in them would pass as reviewed. Only a
- * folder the walk listed nothing under is asked (an empty one lists fine);
- * vendor dirs are skipped as the walk's file list skips them. A snapshot's
- * recursive listing carries the folders its probe could not list for this.
+ * them without a word, so the files in them would pass as reviewed. The
+ * local and snapshot providers mark such folders as they walk
+ * (DirentInfo.denied); another provider's folders the walk listed nothing
+ * under are asked again (an empty one lists fine). Vendor dirs are skipped
+ * as the walk's file list skips them. A snapshot's recursive listing carries
+ * the folders its probe could not list for this.
  */
 async function unlistableSubdirs(fs: FSProvider, root: string, entries: DirentInfo[]): Promise<string[]> {
   const listed = new Set(entries.map(e => e.parentPath ?? root));
-  const out: string[] = [];
+  const skills = vendorNamedSkills(root, entries);
+  const marks = fs.kind === 'local' || fs.kind === 'snapshot';
+  const out = new Set<string>();
   for (const entry of entries) {
     if (!entry.isDirectory || entry.isSymbolicLink) continue;
+    if (marks && !entry.denied) continue;
     const path = join(entry.parentPath ?? root, entry.name);
-    if (listed.has(path) || isExcludedPath(root, path, { keepBuildOutput: true })) continue;
+    if (listed.has(path) || isExcludedPath(root, path, { keepBuildOutput: true, skills })) continue;
+    if (entry.denied) {
+      out.add(path);
+      continue;
+    }
     try {
       await fs.readdirEntries(path);
     } catch (err) {
       const code = (err as NodeJS.ErrnoException | null)?.code;
-      if ((code === 'EACCES' || code === 'EPERM') && !out.includes(path)) out.push(path);
+      if (code === 'EACCES' || code === 'EPERM') out.add(path);
     }
   }
-  return out;
+  return [...out];
 }
 
 /** Any execute bit set — what makes an extensionless file a script or program. */

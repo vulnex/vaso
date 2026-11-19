@@ -1,6 +1,6 @@
 import { extname, join, relative, isAbsolute } from 'node:path';
 import type { ScanContext } from '../../core/types.js';
-import { getAllSkillsDirs, isExcludedPath, relEscapes } from '../../core/utils.js';
+import { getAllSkillsDirs, isExcludedPath, relEscapes, vendorNamedSkills } from '../../core/utils.js';
 import { followSkillLinks, skillFileInSink } from '../../core/skill-walk.js';
 
 // Text an indicator can hide in: code and scripts, config, and skill docs
@@ -59,13 +59,20 @@ export async function iocScanFiles(ctx: ScanContext): Promise<string[]> {
       if (relEscapes(rel)) continue;
       entries = entries.concat(await followSkillLinks(ctx.fs, skills, entries, { uncapped: ctx.installation.agent === 'skill-audit' }));
     }
+    // per skills dir: its folders named like a vendor dir that are skills
+    const vendorNamed = new Map<string, ReadonlySet<string>>();
+    const skillsOf = (root: string) => {
+      let set = vendorNamed.get(root);
+      if (!set) vendorNamed.set(root, set = vendorNamedSkills(root, entries));
+      return set;
+    };
     for (const entry of entries) {
       const ext = extname(entry.name).toLowerCase();
       if (!entry.isFile || !SCAN_EXTENSIONS.has(ext)) continue;
       // Build output is skill code inside a skill tree, a build artefact elsewhere
       const skillsRoot = entry.parentPath ? skillsDirs.find(s => within(entry.parentPath!, s)) : undefined;
       if (!skillsRoot && SKILL_ONLY_EXTENSIONS.has(ext)) continue;
-      if (skillsRoot ? isExcludedPath(skillsRoot, entry.parentPath, { keepBuildOutput: true }) || isExcludedPath(dir, skillsRoot)
+      if (skillsRoot ? isExcludedPath(skillsRoot, entry.parentPath, { keepBuildOutput: true, skills: skillsOf(skillsRoot) }) || isExcludedPath(dir, skillsRoot)
         : isExcludedPath(dir, entry.parentPath)) continue;
       const fullPath = entry.parentPath ? join(entry.parentPath, entry.name) : join(dir, entry.name);
       if (skip.has(fullPath)) continue;

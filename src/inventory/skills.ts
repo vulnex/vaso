@@ -1,7 +1,7 @@
 import { basename, dirname, join, relative, isAbsolute, posix, sep } from 'node:path';
 import type { DirentInfo, FSProvider } from '../core/fs-provider.js';
 import type { AgentInstallation, AgentInventory, SkillItem, SkillTreeEntry, SkillsDirInfo } from '../core/types.js';
-import { getAllSkillsDirs, isExcludedPath, listSkillTree } from '../core/utils.js';
+import { getAllSkillsDirs, isExcludedPath, listSkillTree, vendorNamedSkills } from '../core/utils.js';
 import { parseYamlSafe } from '../core/yaml-safe.js';
 import { redactSecretsInLine } from '../core/patterns.js';
 import { maskCredentialsInLine } from '../reporting/serialize.js';
@@ -132,10 +132,11 @@ export async function collectSkillInventory(installation: AgentInstallation, fs:
     // follow it — the checks read the target where it is — but the agent
     // loads the skill. The skill's files are counted at the link's target.
     const linked = new Map<string, string>(); // skill dir → target dir
+    const vendorNamed = vendorNamedSkills(root, listing.entries);
     for (const entry of listing.entries) {
       if (!entry.isSymbolicLink || !isSkillMd(entry.name)) continue;
       const parent = entry.parentPath ?? root;
-      if (isExcludedPath(root, parent, { keepBuildOutput: true })) continue;
+      if (isExcludedPath(root, parent, { keepBuildOutput: true, skills: vendorNamed })) continue;
       const target = await inTreeTarget(fs, root, join(parent, entry.name));
       if (target) linked.set(parent, dirname(target));
     }
@@ -213,7 +214,7 @@ export async function collectSkillInventory(installation: AgentInstallation, fs:
     for (const entry of children) {
       const path = join(root, entry.name);
       if (chosen.has(root) || holdsSkill.has(path)) continue;
-      if (isExcludedPath(root, path, { keepBuildOutput: true })) continue;
+      if (isExcludedPath(root, path, { keepBuildOutput: true, skills: vendorNamed })) continue;
       const files = filesUnder.get(path) ?? (fileSet.has(path) ? 1 : 0);
       if (entry.name.startsWith('.') && !INACTIVE_SKILL_DIRS.has(entry.name) && files === 0) continue;
       // a symlink is a folder unless it leads to one file the checks read
@@ -230,7 +231,9 @@ export async function collectSkillInventory(installation: AgentInstallation, fs:
     skillsDirs,
     skills,
     otherEntries,
-    ...(incomplete.length > 0 ? { incomplete } : {}),
+    // Sorted (each line starts with its path): a local walk and a snapshot
+    // meet folders and links in different orders
+    ...(incomplete.length > 0 ? { incomplete: incomplete.sort() } : {}),
   };
   return { files: roots.length > 0 ? allFiles : undefined, unlistableDirs, inventory };
 }

@@ -5,6 +5,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -400,5 +401,109 @@ func TestSkillGlobRecordsDeniedSubdirectories(t *testing.T) {
 	}
 	if mode := snap.DirectoryModes[empty]; mode == 0 {
 		t.Errorf("a readable directory recorded as denied: %v", snap.DirectoryModes)
+	}
+}
+
+// A locked folder past the first 10,000 folders of a skills tree was never
+// recorded (the denied walk stopped there), while a local walk reported it.
+func TestSkillGlobRecordsDeniedDirsPastTheWalkBound(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root lists any directory")
+	}
+	home := t.TempDir()
+	big := filepath.Join(home, ".claude/skills/big")
+	for i := 0; i < maxDeniedWalkDirs+50; i++ {
+		if err := os.MkdirAll(filepath.Join(big, "d"+strconv.Itoa(100000+i)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	locked := filepath.Join(big, "zzz", "locked")
+	if err := os.MkdirAll(locked, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(locked, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(locked, 0o755) })
+
+	snap := Collect(ProbeManifest{GlobPatterns: []string{filepath.Join(home, ".claude/skills/**")}}, false)
+	if mode, ok := snap.DirectoryModes[locked]; !ok || mode != 0 {
+		t.Errorf("denied directory past the bound not recorded: %v", ok)
+	}
+}
+
+// A skill folder named like a vendor dir (`venv`, `node_modules`) holding a
+// SKILL.md is collected like any skill; vendor dirs inside a skill, and one
+// at the top holding no SKILL.md, are still skipped.
+func TestSkillGlobCollectsVendorNamedSkills(t *testing.T) {
+	home := t.TempDir()
+	skills := filepath.Join(home, ".claude/skills")
+	write := func(rel, body string) string {
+		p := filepath.Join(skills, rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	skillMd := write("venv/skill.md", "# venv\n")
+	run := write("venv/run.js", "eval(x)\n")
+	nm := write("node_modules/SKILL.md", "# nm\n")
+	inner := write("venv/node_modules/dep.js", "eval(x)\n")
+	nested := write("s/venv/x.js", "eval(x)\n")
+	plain := write(".venv/lib.js", "eval(x)\n")
+
+	snap := Collect(ProbeManifest{GlobPatterns: []string{filepath.Join(home, ".claude/skills/**")}}, false)
+	for _, p := range []string{skillMd, run, nm} {
+		if e, ok := snap.Files[p]; !ok || !e.Exists {
+			t.Errorf("%s not collected", p)
+		}
+	}
+	for _, p := range []string{inner, nested, plain} {
+		if _, ok := snap.Files[p]; ok {
+			t.Errorf("%s collected from a vendor dir", p)
+		}
+	}
+}
+
+// A skills-tree folder that can be listed but not searched (mode 644): its
+// listing is recorded (links left out), so the CLI lists its names as a
+// local walk does.
+func TestSkillGlobRecordsUnsearchableListing(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root searches any directory")
+	}
+	home := t.TempDir()
+	dir := filepath.Join(home, ".claude/skills/t")
+	if err := os.MkdirAll(filepath.Join(dir, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range []string{"SKILL.md", "run.js"} {
+		if err := os.WriteFile(filepath.Join(dir, n), []byte("x\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink("/etc/hosts", filepath.Join(dir, "ln")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(dir, 0o755) })
+
+	snap := Collect(ProbeManifest{GlobPatterns: []string{filepath.Join(home, ".claude/skills/**")}}, false)
+	got := append([]string(nil), snap.Directories[dir]...)
+	sort.Strings(got)
+	if strings.Join(got, ",") != "SKILL.md,run.js,sub/" {
+		t.Errorf("listing = %v", got)
+	}
+	if snap.DirectoryModes[dir] != 0o644 {
+		t.Errorf("mode = %o", snap.DirectoryModes[dir])
+	}
+	// a searchable folder gets no listing from this
+	if _, ok := snap.Directories[filepath.Join(home, ".claude/skills")]; ok {
+		t.Error("a searchable folder's listing recorded")
 	}
 }
