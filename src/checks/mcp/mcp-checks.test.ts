@@ -1330,6 +1330,31 @@ describe('MCP-011/MCP-016 beyond literals', () => {
     expect(await flags016('const r = req.query.redirect_uri;\nif (r !== registered) throw new Error("bad");\nres.redirect(r);')).toBe(false);
     expect(await flags016('const r = req.query.next;\nres.redirect("https://app.example.com/?next=" + encodeURIComponent(r));')).toBe(false);
     expect(await flags016('const r = req.query.next;\nconsole.log(r);\nres.redirect("/home");')).toBe(false);
+    // a parsed URL's origin compared, a validator taking it as a later argument, check/ensure helpers
+    expect(await flags016('const t = req.query.next;\nconst u = new URL(t, BASE);\nif (u.origin !== BASE) return res.status(400).end();\nres.redirect(t);')).toBe(false);
+    expect(await flags016('const t = req.query.redirect_uri;\nif (!validateRedirect(req.client, t)) return res.status(400).end();\nres.redirect(t);')).toBe(false);
+    expect(await flags016('const t = req.query.redirect_uri;\ncheckRedirect(t);\nres.redirect(t);')).toBe(false);
+    expect(await flags016('const t = req.query.redirect_uri;\nensureAllowed(t);\nres.redirect(t);')).toBe(false);
+  });
+
+  it('MCP-016 scopes the check to the redirect\'s own handler and ignores presence tests', async () => {
+    const handler = (body: string) => `app.get("/x", (req, res) => {\n  const target = req.query.redirect_uri;\n${body}\n  res.redirect(target);\n});`;
+    expect(await flags016(handler('  if (target === undefined) return res.status(400).end();'))).toBe(true);
+    expect(await flags016(handler('  if (null == target) return res.status(400).end();'))).toBe(true);
+    expect(await flags016(handler('  if (target === "") return res.status(400).end();'))).toBe(true);
+    expect(await flags016(handler('  if (typeof target !== "string") return res.status(400).end();'))).toBe(true);
+    // checked in another handler only
+    expect(await flags016(handler('  if (!ALLOWED.includes(target)) return res.status(400).end();') + '\n' + handler(''))).toBe(true);
+    expect(await flags016(handler('  if (!ALLOWED.includes(target)) return res.status(400).end();'))).toBe(false);
+    // bound in two steps
+    expect(await flags016('let target;\ntarget = req.query.redirect_uri;\nres.redirect(target);')).toBe(true);
+  });
+
+  it('MCP-016 stays fast on a long handler', async () => {
+    const t = performance.now();
+    const filler = ['x === undefined ', ' '.repeat(5000) + '!x; ', 'target.x; ', 'typeof   target; '].map((u) => u.repeat(Math.ceil(100000 / u.length))).join('\n');
+    expect(await flags016(`const target = req.query.next;\n${filler}\nres.redirect(target);`)).toBe(true);
+    expect(performance.now() - t).toBeLessThan(3000);
   });
 
   it('MCP-016 flags a wildcard redirect allowlist in a config object', async () => {
