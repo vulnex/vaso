@@ -9,7 +9,11 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 ### Security
 
 - **Padding a skill file past the size limit no longer hides findings.** A skill file over the 5 MiB content-scan limit is now an SKL-002 warning ("not scanned"), not a mitigated info. Padding a malicious script past the limit used to turn its critical findings into a single info. Large legitimate bundles (a skill's `dist/` output) now show this warning too.
-- **Hermes and Atomic Agent flag an MCP command in a world-writable directory** (HM-010, AT-007), as Claude Desktop (CD-009) already did; the three checks share one rule and agree on local and remote scans.
+- **Cross-module tracing starts from the tool handlers and says when it stops.** Large or comment-padded modules can no longer push a handler's helpers out of the analysis. A module left out for size is now named in MCP-001 (info), and MCP-004 no longer calls its commands clean.
+- **A source file can no longer fake a file boundary.** A comment shaped like the scanner's file header no longer redirects module resolution or where findings are reported.
+- **MCP command paths judged up to the root.** CD-009, HM-010 and AT-007 now flag a command that any local user can swap through any world-writable directory above it, through a link into one, or as the script an interpreter runs, and a command that doesn't exist yet in a writable directory. A sticky directory (`1777`) protects a command its user or root owns, and modes print the same in all three checks. Probe 1.4.2 records sticky bits so remote scans agree; with older probes a root-owned world-writable directory is reported as not verified.
+- **Remote scans find locked folders anywhere in a skills tree.** A locked folder past the first 10,000 folders, or a folder that can be listed but not searched, was missed remotely; remote verdicts now match local ones.
+- **Remote scans read configs with long numbers under credential-like names.** The probe's stand-in for a number such as `"token_refresh_buffer_ms": 300000` could start with a zero, which JSON and TOML reject, so the whole config (for example `~/.claude.json` and its MCP servers) went unread remotely.
 
 ### Added
 
@@ -17,6 +21,23 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **Python path containment judged where it happens.** A file read, written or listed at a caller-chosen path is only considered contained when that path is resolved and checked against the base directory, in the same function and before the call, or by a same-file helper called first. An unrelated `abspath()` or `startswith()` elsewhere no longer hides the finding.
+- **More Python file access recognised.** Aliased `pathlib.Path` and `aiofiles.open` imports, chained `Path(x).expanduser()/.resolve()` calls and `os.open` are now followed. A `"".join(...)` that keeps only filtered characters counts as sanitised.
+- **Helpers no longer spread tool input to unrelated callers.** A helper's return value now counts as tool input only where that call passes tool input in, so startup code calling the same helper with a constant is no longer reported critical.
+- **Long helper chains are followed to the end.** Tool input is traced through call chains of any length and in any declaration order, within one file or across modules.
+- **TypeScript CommonJS output is followed across modules.** `__importStar`, `__importDefault`, `__exportStar` and `Object.defineProperty` re-exports, `export default` of a constant object, and import-then-export barrels are now traced.
+- **Allow-list checks in helpers are recognised for commands and file paths.** A helper that rejects anything outside a fixed list before running a command or opening a file is no longer reported.
+- **OAuth endpoint findings deduplicated.** An `http://` OAuth constant is reported once, plus each endpoint built from it, not on every line that uses or logs it. Constants built in two steps, with `.format()` or `%`, typed `Final`, or local to a function are folded; reassigned names never are.
+- **Open-redirect checks scoped to the handler.** A check in another handler, or a presence test such as `=== undefined`, no longer hides an open redirect. URL-origin comparisons and `check*/ensure*` validators count as validation, and `let x; x = req.query…` is followed.
+- **Skill folders named like vendor directories are scanned.** A skill installed as `venv/`, `node_modules/` or `.git/` (holding a SKILL.md) was skipped as vendored code and missing from the inventory; it is now read and listed locally and remotely.
+- **Skills directories that can't be listed are reported.** A skills directory with mode 000 or 111 now gives an SKL-002 "not scanned" warning instead of a pass.
+- **Faster local scans of large skill trees.** Folders that can't be listed are found during the walk, so a large tree of empty folders is no longer listed twice.
+- **Clearer wording for unreadable skills.** A skill linked to a locked folder is reported as a skill, SKL-013 no longer says its code is scanned there, a file under 5 MiB on disk is no longer reported as over the limit because of invalid UTF-8, and the inventory's incomplete list is sorted the same way on both sides.
+- **Fast inventory on a large `~/.claude.json`.** MCP server line spans are indexed in one pass; `detect` on a file with 5000 projects dropped from about 6 s to about 1.4 s.
+- **Shared MCP servers in `detect` name project-scope copies** apart from the user-scope one.
+- **ChatGPT Desktop's RemoteFeatureFlags plist** is now listed on remote scans as it is locally.
+- **Readable URL snippets.** Report masking no longer blanks a plain address built under a `*_URL`, `*Endpoint` or `*Uri` name.
+- **Empty MCP config files.** `vaso mcp list/scan -p` now says an empty config file is empty.
 - **MCP source analysis follows tool input into the server's own modules.** A tool handler that passes its input to a helper imported from another file of the server is now traced there. This covers ES and CommonJS imports, re-exports and TypeScript's compiled output. A path read or command run in that helper is reported by MCP-005, and MCP-004 counts it as reached by tool input.
 - **Python MCP servers: path traversal through file calls.** A Python tool that reads, writes, deletes or copies a file at a caller-supplied path (`open(path)`, `Path(path).write_text(...)`, `os.remove`, `shutil.copy`/`rmtree`) is now reported under MCP-005, and one that lists or stats such a path under MCP-009. Servers that confine paths to a base directory are not flagged.
 - **OAuth checks follow constants and request variables.** MCP-011 now catches plaintext OAuth endpoints built from a same-file constant (`AUTH_HOST + "/authorize"`, `new URL("/oauth/token", AUTH_HOST)`, f-strings, `urljoin`). MCP-016 now catches redirects to an unchecked request value held in a variable, and wildcard redirect allowlists such as `allowedRedirect: "*"`.
