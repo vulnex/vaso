@@ -19,7 +19,7 @@ import _traverse from '@babel/traverse';
 import type { Binding, NodePath, Scope } from '@babel/traverse';
 import type { Node } from '@babel/types';
 import { posix } from 'node:path';
-import { parseJs, sourceChunks, type JsAst, type SourceChunk } from './js-parse.js';
+import { parseJs, significantLength, sourceChunks, type JsAst, type SourceChunk } from './js-parse.js';
 
 const traverse = typeof _traverse === 'function' ? _traverse : (_traverse as { default: typeof _traverse }).default;
 
@@ -106,15 +106,69 @@ const SHELLS = /^(?:\/(?:usr\/)?bin\/)?(?:sh|bash|zsh|dash|cmd(?:\.exe)?|powersh
 const CHILD_PROCESS_NAMES = new Set(['child_process', 'childProcess', 'cp']);
 
 const MAX_DEPTH = 8;
+/** Helpers summarized inside one another (a return chain `a(b(c(…)))` through that many functions). */
+const MAX_SUMMARY_NESTING = 64;
+/** Caller-parameter → callee-parameter links recorded for one group. */
+const MAX_FLOW_EDGES = 200_000;
+/** Parameters one value is tracked as depending on. */
+const MAX_DEPS = 16;
 const MAX_CACHED = 1_000;
+
+/** A parameter (by position) of a function: a value that came from it carries whatever its callers pass. */
+interface ParamDep {
+  fn: Node;
+  index: number;
+  /** How the value was derived from it, e.g. `line ← cmd`. */
+  chain: string;
+}
+
+/** What a value carries: tool input (`origin`, how it was reached), or what the listed parameters receive. */
+interface Taint {
+  origin?: string;
+  deps: ParamDep[];
+}
+
+const CLEAN: Taint = { deps: [] };
+
+function isClean(t: Taint): boolean {
+  return !t.origin && t.deps.length === 0;
+}
+
+/** Both values' input: the first certain origin, and their parameters (deduplicated, bounded). */
+function mergeTaint(a: Taint, b: Taint): Taint {
+  if (isClean(b)) return a;
+  if (isClean(a)) return b;
+  const deps = [...a.deps];
+  for (const d of b.deps) {
+    if (deps.length >= MAX_DEPS) break;
+    if (!deps.some((x) => x.fn === d.fn && x.index === d.index)) deps.push(d);
+  }
+  return { ...(a.origin || b.origin ? { origin: a.origin ?? b.origin } : {}), deps };
+}
+
+/** A value held under `name`: `name ← …` in front of how it was derived. */
+function renamed(name: string, t: Taint): Taint {
+  if (isClean(t)) return CLEAN;
+  return {
+    ...(t.origin ? { origin: t.origin === name ? name : `${name} ← ${t.origin}` } : {}),
+    deps: t.deps.map((d) => (d.chain === name ? d : { ...d, chain: `${name} ← ${d.chain}` })),
+  };
+}
+
+/** The argument a call passes at a parameter position; a spread before it may hold it. */
+function argumentAt(args: NodePath[], index: number): NodePath | undefined {
+  for (let i = 0; i < args.length && i <= index; i++) {
+    if (args[i].isSpreadElement()) return args[i].get('argument') as NodePath;
+  }
+  return args[index];
+}
 const cache = new Map<string, TaintedSink[]>();
-/** Rounds of carrying input into called functions: handler → helper → helper chains, across modules too. */
-const MAX_ROUNDS = 6;
 /**
  * Most source analyzed as one program: files that import each other are
  * parsed and traced together, so all their ASTs are alive at once (2 MB of
- * linked modules held ~600 MB). Links that would grow a group past this are
- * not followed; each side is still traced with its other links.
+ * linked modules held ~600 MB). Measured without comments and whitespace
+ * (significantLength). Links that would grow a group past this are not
+ * followed (see taintCoverage); each side is still traced with its other links.
  */
 export const MAX_GROUP_SOURCE = 512 * 1024;
 
@@ -123,13 +177,48 @@ export function findTaintedSinks(code: string, filename = 'unknown.js'): Tainted
   const cached = cache.get(key);
   if (cached) return cached.map((s) => ({ ...s }));
   const chunks = sourceChunks(code);
-  const results = moduleGroups(chunks)
+  const results = planModules(chunks).groups
     .flatMap((group) => analyze(group.map((i) => chunks[i])))
     .sort((a, b) => a.line - b.line);
   if (cache.size >= MAX_CACHED) cache.delete(cache.keys().next().value!);
   cache.set(key, results);
   return results.map((s) => ({ ...s }));
 }
+
+/** A module of a joined source the tracer did not follow into from a tool handler's file (the group size cap). */
+export interface UntracedModule {
+  /** Its path, as its `// === path ===` header names it. */
+  path: string;
+  /** The module whose import of it was not followed. */
+  from: string;
+  /** Its lines in the joined source (first, last). */
+  startLine: number;
+  endLine: number;
+}
+
+/**
+ * How far cross-module tracing got in a joined multi-file source: the
+ * modules a tool handler's file imports (directly or not) that were left out
+ * of its traced group for the size cap. Tool input reaching them is not
+ * traced, so a sink there is unknown, not clean. Text-only; no parse.
+ */
+export function taintCoverage(code: string): { untraced: UntracedModule[] } {
+  const key = createHash('sha1').update(code).digest('base64');
+  let untraced = coverageCache.get(key);
+  if (!untraced) {
+    const chunks = sourceChunks(code);
+    untraced = planModules(chunks).untraced.map(({ index, from }) => ({
+      path: chunks[index].path!,
+      from: chunks[from].path!,
+      startLine: chunks[index].startLine,
+      endLine: chunks[index].startLine + chunks[index].code.split('\n').length - 1,
+    }));
+    if (coverageCache.size >= MAX_CACHED) coverageCache.delete(coverageCache.keys().next().value!);
+    coverageCache.set(key, untraced);
+  }
+  return { untraced: untraced.map((m) => ({ ...m })) };
+}
+const coverageCache = new Map<string, UntracedModule[]>();
 
 /** A relative module specifier in `import … from`, `export … from`, `import(…)`, `require(…)`. */
 const RELATIVE_SPECIFIER = /(?:\bfrom|\bimport|\brequire)\s*(?:\(\s*)?(["'`])(\.{1,2}\/[^"'`\r\n]{0,512})\1/g;
@@ -153,43 +242,121 @@ function resolveChunk<T>(from: string, specifier: string, byPath: Map<string, T>
   return undefined;
 }
 
+/** A file that registers a tool/request handler (HANDLER_REGISTRARS): where tool input enters. */
+const HANDLER_REGISTRATION = /\.\s*(?:tool|registerTool|setRequestHandler|addTool)\s*\(/;
+
+interface ModulePlan {
+  /** Chunks (by index) to trace together. */
+  groups: number[][];
+  /** Modules a handler file reaches by imports that its group left out for size, with the importer whose link was dropped. */
+  untraced: Array<{ index: number; from: number }>;
+}
+
 /**
- * Chunks (by index) to trace together: files linked by relative imports, in
- * groups of at most MAX_GROUP_SOURCE (a link that would join two groups past
- * it is dropped). A single scan of each file's text for specifiers and a
- * union-find over the links — linear in the source.
+ * Chunks (by index) to trace together, in groups of at most MAX_GROUP_SOURCE.
+ * Tool input enters in the files that register handlers, so their group is
+ * grown first, outward along their imports (breadth first: the modules they
+ * import before the ones those import); a module that doesn't fit is skipped
+ * and recorded, the rest still join. The other files are grouped by their
+ * links as before (a link that would join two groups past the cap is
+ * dropped). One scan of each file's text for specifiers — linear in the source.
  */
-function moduleGroups(chunks: SourceChunk[]): number[][] {
+function planModules(chunks: SourceChunk[]): ModulePlan {
+  const n = chunks.length;
   const byPath = new Map<string, number>();
   chunks.forEach((c, i) => { if (c.path && !byPath.has(c.path)) byPath.set(c.path, i); });
-  const parent = chunks.map((_, i) => i);
-  const size = chunks.map((c) => c.code.length);
-  const find = (i: number): number => {
-    while (parent[i] !== i) i = parent[i] = parent[parent[i]];
-    return i;
-  };
+  const links: number[][] = chunks.map(() => []);
   if (byPath.size > 1) {
     chunks.forEach((c, i) => {
       if (!c.path) return;
       for (const m of c.code.matchAll(RELATIVE_SPECIFIER)) {
         const j = resolveChunk(c.path, m[2], byPath);
-        if (j === undefined) continue;
-        const a = find(i);
-        const b = find(j);
-        if (a === b || size[a] + size[b] > MAX_GROUP_SOURCE) continue;
-        parent[b] = a;
-        size[a] += size[b];
+        if (j !== undefined && j !== i && !links[i].includes(j)) links[i].push(j);
       }
     });
   }
-  const groups = new Map<number, number[]>();
-  chunks.forEach((_, i) => {
+  if (n === 1 || byPath.size <= 1) return { groups: chunks.map((_, i) => [i]), untraced: [] };
+  const size = chunks.map((c) => significantLength(c.code));
+  const groupOf = new Array<number>(n).fill(-1);
+  const groups: number[][] = [];
+  const total: number[] = [];
+  const dropped = new Map<number, number>();
+  const join = (i: number, g: number): void => {
+    groupOf[i] = g;
+    groups[g].push(i);
+    total[g] += size[i];
+  };
+
+  // Handler files and what they import, breadth first
+  let current = -1;
+  const handlerFiles: number[] = [];
+  for (let h = 0; h < n; h++) {
+    if (!chunks[h].path || !HANDLER_REGISTRATION.test(chunks[h].code)) continue;
+    handlerFiles.push(h);
+    if (groupOf[h] !== -1) continue;
+    if (current === -1 || total[current] + size[h] > MAX_GROUP_SOURCE) {
+      current = groups.length;
+      groups.push([]);
+      total.push(0);
+    }
+    join(h, current);
+    const queue = [h];
+    for (let q = 0; q < queue.length; q++) {
+      for (const t of links[queue[q]]) {
+        if (groupOf[t] === current) continue;
+        if (groupOf[t] !== -1 || total[current] + size[t] > MAX_GROUP_SOURCE) {
+          if (!dropped.has(t)) dropped.set(t, queue[q]);
+          continue;
+        }
+        join(t, current);
+        queue.push(t);
+      }
+    }
+  }
+  // Modules a handler file reaches only through a dropped link: not traced from it
+  const untraced: Array<{ index: number; from: number }> = [];
+  const seen = new Set<number>(handlerFiles);
+  const queue = [...handlerFiles];
+  for (let q = 0; q < queue.length; q++) {
+    for (const t of links[queue[q]]) {
+      if (seen.has(t)) continue;
+      seen.add(t);
+      queue.push(t);
+      if (groupOf[t] === -1) untraced.push({ index: t, from: dropped.get(t) ?? queue[q] });
+    }
+  }
+
+  // The rest: linked files together, as far as the cap allows
+  const parent = chunks.map((_, i) => i);
+  const weight = [...size];
+  const find = (i: number): number => {
+    while (parent[i] !== i) i = parent[i] = parent[parent[i]];
+    return i;
+  };
+  for (let i = 0; i < n; i++) {
+    if (groupOf[i] !== -1) continue;
+    for (const j of links[i]) {
+      if (groupOf[j] !== -1) continue;
+      const a = find(i);
+      const b = find(j);
+      if (a === b || weight[a] + weight[b] > MAX_GROUP_SOURCE) continue;
+      parent[b] = a;
+      weight[a] += weight[b];
+    }
+  }
+  const byRoot = new Map<number, number>();
+  for (let i = 0; i < n; i++) {
+    if (groupOf[i] !== -1) continue;
     const root = find(i);
-    const group = groups.get(root);
-    if (group) group.push(i);
-    else groups.set(root, [i]);
-  });
-  return [...groups.values()];
+    let g = byRoot.get(root);
+    if (g === undefined) {
+      byRoot.set(root, (g = groups.length));
+      groups.push([]);
+      total.push(0);
+    }
+    join(i, g);
+  }
+  return { groups, untraced: untraced.sort((a, b) => a.index - b.index) };
 }
 
 /**
@@ -242,13 +409,27 @@ function isRequireCallee(callee: Node): boolean {
   return callee.type === 'CallExpression' && callee.callee.type === 'Identifier' && callee.callee.name === 'createRequire';
 }
 
-/** `require('m')` / `await import('m')` / `import('m')` → `m` (the name may be built from constants). */
-function moduleOfInit(init: Node | null | undefined, scope?: Scope): string | undefined {
-  if (!init) return undefined;
-  if (init.type === 'AwaitExpression') return moduleOfInit(init.argument, scope);
+/** TypeScript's (and tslib's) CommonJS interop wrappers around a `require`: `__importStar(require('m'))`. */
+const INTEROP_HELPERS = /^__import(?:Star|Default)$/;
+
+/** The name a callee calls: `f`, `o.f`, `(0, o.f)`. */
+function calleeName(callee: Node): string | undefined {
+  const c = callee.type === 'SequenceExpression' ? callee.expressions[callee.expressions.length - 1] : callee;
+  return c.type === 'Identifier' ? c.name : memberName(c);
+}
+
+/**
+ * `require('m')` / `await import('m')` / `import('m')` → `m` (the name may be
+ * built from constants), also through TypeScript's interop wrappers
+ * (`__importStar(require('m'))`, `tslib_1.__importDefault(require('m'))`).
+ */
+function moduleOfInit(init: Node | null | undefined, scope?: Scope, depth = 0): string | undefined {
+  if (!init || depth > 4) return undefined;
+  if (init.type === 'AwaitExpression') return moduleOfInit(init.argument, scope, depth + 1);
   if (init.type === 'CallExpression') {
     const { callee, arguments: args } = init;
     if (isRequireCallee(callee) || callee.type === 'Import') return staticString(args[0] as Node, scope);
+    if (args.length === 1 && INTEROP_HELPERS.test(calleeName(callee as Node) ?? '')) return moduleOfInit(args[0] as Node, scope, depth + 1);
   }
   if (init.type === 'ImportExpression') return staticString(init.source, scope);
   return undefined;
@@ -565,6 +746,59 @@ function analyze(chunks: SourceChunk[]): TaintedSink[] {
     return undefined;
   };
 
+  /** The module of the group a CommonJS binding holds: `const h = require('./h')`, `const h_1 = __importStar(require("./h"))`. */
+  const requiredModule = (object: NodePath): ModuleFile | undefined => {
+    if (!object.isIdentifier()) return moduleAt(object, moduleOfInit(object.node, object.scope));
+    const b = object.scope.getBinding(object.node.name);
+    const decl = b?.path.node;
+    return decl?.type === 'VariableDeclarator' && decl.id.type === 'Identifier' ? moduleAt(b!.path, moduleOfInit(decl.init, b!.scope)) : undefined;
+  };
+
+  /**
+   * What an exported value stands for: a function of the file, or a name
+   * another module of the group exports — an imported binding passed on
+   * (`import { run } from './h'; export { run }`, `const { run } =
+   * require('./h')`), or a member of a required module (`exports.run =
+   * h_1.run`).
+   */
+  const exportEntry = (p: NodePath | null | undefined): ExportEntry | undefined => {
+    if (!p?.node) return undefined;
+    const fn = functionAt(p);
+    if (fn) return { fn };
+    if (p.isMemberExpression()) {
+      const name = memberName(p.node);
+      const from = name === undefined ? undefined : requiredModule(p.get('object') as NodePath);
+      return from && name !== undefined ? { from, name } : undefined;
+    }
+    if (!p.isIdentifier()) return undefined;
+    const b = p.scope.getBinding(p.node.name);
+    const decl = b?.path.node;
+    if (!b || !decl) return undefined;
+    if (decl.type === 'ImportSpecifier' || decl.type === 'ImportDefaultSpecifier') {
+      const from = moduleAt(b.path, bindingModule(b));
+      return from ? { from, name: decl.type === 'ImportDefaultSpecifier' ? 'default' : importedName(b) } : undefined;
+    }
+    if (decl.type === 'VariableDeclarator' && decl.id.type === 'ObjectPattern') {
+      const from = moduleAt(b.path, moduleOfInit(decl.init, b.scope));
+      return from ? { from, name: importedName(b) } : undefined;
+    }
+    return undefined;
+  };
+
+  /** The object literal a never-reassigned constant holds (`const h = { run() {…} }; export default h`). */
+  const constObject = (p: NodePath): NodePath | undefined => {
+    if (p.isObjectExpression()) return p;
+    if (!p.isIdentifier()) return undefined;
+    const b = p.scope.getBinding(p.node.name);
+    if (!b?.constant || !b.path.isVariableDeclarator()) return undefined;
+    const init = b.path.get('init') as NodePath;
+    return init.isObjectExpression() ? init : undefined;
+  };
+
+  /** `exports`, `module.exports` (not a local named `exports`). */
+  const isExportsObject = (node: Node, scope: Scope): boolean =>
+    isModuleExports(node) || (node.type === 'Identifier' && node.name === 'exports' && !scope.getBinding('exports'));
+
   /** A file's export table: ES exports, CommonJS `module.exports`/`exports.f`, re-exports. One walk of its top-level statements. */
   const exportsOf = (file: ModuleFile): Map<string, ExportEntry> => {
     if (file.exports) return file.exports;
@@ -572,15 +806,15 @@ function analyze(chunks: SourceChunk[]): TaintedSink[] {
     const stars: ModuleFile[] = [];
     file.exports = table;
     file.stars = stars;
-    const set = (name: string | undefined, fn: NodePath | undefined): void => {
-      if (name !== undefined && fn && !table.has(name)) table.set(name, { fn });
+    const set = (name: string | undefined, entry: ExportEntry | undefined): void => {
+      if (name !== undefined && entry && !table.has(name)) table.set(name, entry);
     };
     const setObject = (prefix: string, object: NodePath): void => {
       for (const prop of object.get('properties') as NodePath[]) {
-        if (prop.isObjectMethod()) set(prefix + (keyName(prop.node.key, prop.node.computed) ?? ''), prop);
+        if (prop.isObjectMethod()) set(prefix + (keyName(prop.node.key, prop.node.computed) ?? ''), { fn: prop });
         else if (prop.isObjectProperty()) {
           const name = keyName(prop.node.key, prop.node.computed);
-          if (name !== undefined) set(prefix + name, functionAt(prop.get('value') as NodePath));
+          if (name !== undefined) set(prefix + name, exportEntry(prop.get('value') as NodePath));
         }
       }
     };
@@ -589,10 +823,10 @@ function analyze(chunks: SourceChunk[]): TaintedSink[] {
     for (const stmt of (program?.get('body') ?? []) as NodePath[]) {
       if (stmt.isExportNamedDeclaration()) {
         const decl = stmt.get('declaration');
-        if (decl.isFunctionDeclaration() && decl.node.id) set(decl.node.id.name, decl);
+        if (decl.isFunctionDeclaration() && decl.node.id) set(decl.node.id.name, { fn: decl });
         else if (decl.isVariableDeclaration()) {
           for (const d of decl.get('declarations')) {
-            if (d.node.id.type === 'Identifier') set(d.node.id.name, functionAt(d.get('init') as NodePath));
+            if (d.node.id.type === 'Identifier') set(d.node.id.name, exportEntry(d.get('init') as NodePath));
           }
         }
         const source = stmt.node.source?.value;
@@ -601,33 +835,58 @@ function analyze(chunks: SourceChunk[]): TaintedSink[] {
           if (!spec.isExportSpecifier()) continue;
           const name = keyName(spec.node.exported);
           if (name === undefined) continue;
-          if (source === undefined) set(name, functionAt(spec.get('local')));
-          else if (from && !table.has(name)) table.set(name, { from, name: spec.node.local.name });
+          if (source === undefined) set(name, exportEntry(spec.get('local')));
+          else if (from) set(name, { from, name: spec.node.local.name });
         }
       } else if (stmt.isExportDefaultDeclaration()) {
         const decl = stmt.get('declaration') as NodePath;
-        if (decl.isObjectExpression()) setObject('default.', decl);
-        else set('default', functionAt(decl));
+        const object = constObject(decl);
+        if (object) setObject('default.', object);
+        else set('default', exportEntry(decl));
       } else if (stmt.isExportAllDeclaration()) {
         const from = moduleAt(stmt, stmt.node.source.value);
         if (from) stars.push(from);
       } else if (stmt.isExpressionStatement()) {
         const e = stmt.get('expression');
+        if (e.isCallExpression()) {
+          const name = calleeName(e.node.callee as Node);
+          const args = e.get('arguments') as NodePath[];
+          // TypeScript's `__exportStar(require("./h"), exports)`, esbuild's `__reExport(x, require("./h"))`
+          if (name === '__exportStar' || name === '__reExport') {
+            for (const a of args) {
+              const from = moduleAt(stmt, moduleOfInit(a.node, a.scope));
+              if (from) stars.push(from);
+            }
+          } else if (name === 'defineProperty' && args.length >= 3 && isExportsObject(args[0].node, e.scope) && args[2].isObjectExpression()) {
+            // `Object.defineProperty(exports, "run", { get: function () { return h_1.run; } })`, `{ value: run }`
+            const exportName = staticString(args[1].node, args[1].scope);
+            for (const prop of args[2].get('properties') as NodePath[]) {
+              const key = prop.isObjectProperty() || prop.isObjectMethod() ? keyName(prop.node.key, prop.node.computed) : undefined;
+              if (key === 'value' && prop.isObjectProperty()) set(exportName, exportEntry(prop.get('value') as NodePath));
+              if (key !== 'get') continue;
+              const getter = prop.isObjectMethod() ? prop : prop.isObjectProperty() ? functionAt(prop.get('value') as NodePath) : undefined;
+              const body = getter?.get('body') as NodePath | undefined;
+              const returned = body?.isBlockStatement() ? (body.get('body') as NodePath[]).find((s) => s.isReturnStatement())?.get('argument') as NodePath | undefined : body;
+              set(exportName, exportEntry(returned));
+            }
+          }
+          continue;
+        }
         if (!e.isAssignmentExpression({ operator: '=' })) continue;
         const left = e.node.left;
         const right = e.get('right');
         if (isModuleExports(left)) {
-          // module.exports = { run, check() {} } / = run / = require('./impl')
-          if (right.isObjectExpression()) setObject('', right);
+          // module.exports = { run, check() {} } / = run / = require('./impl') / = h (a constant object)
+          const object = constObject(right);
+          if (object) setObject('', object);
           else {
             const from = moduleAt(stmt, moduleOfInit(right.node, right.scope));
             if (from) stars.push(from);
-            else set('default', functionAt(right));
+            else set('default', exportEntry(right));
           }
-        } else if (left.type === 'MemberExpression' && (isModuleExports(left.object)
-          || (left.object.type === 'Identifier' && left.object.name === 'exports' && !e.scope.getBinding('exports')))) {
-          // exports.run = run / module.exports.run = function (…) {…}
-          set(memberName(left), functionAt(right));
+        } else if (left.type === 'MemberExpression' && isExportsObject(left.object, e.scope)) {
+          // exports.run = run / module.exports.run = function (…) {…} / exports.run = h_1.run
+          set(memberName(left), exportEntry(right));
         }
       }
     }
@@ -740,75 +999,87 @@ function analyze(chunks: SourceChunk[]): TaintedSink[] {
   }
 
   {
-    let memo = new Map<Binding, string | null>();
+    // What a value carries is worked out once, symbolically: tool input
+    // (`origin`), or the parameters of the functions it comes from (`deps`),
+    // whatever their callers pass. A parameter is tool input when some call
+    // site passes tool input there (taintedParams, Pass 1b). A call's return
+    // value carries what that call's own arguments carry: a helper that
+    // returns its argument cleaned up (`norm(s)`) carries tool input where a
+    // handler calls it with input, not where startup code calls it with a
+    // constant.
+    const memo = new Map<Binding, Taint | null>();
 
-    const bindingOrigin = (binding: Binding, depth: number): string | undefined => {
-      if (memo.has(binding)) return memo.get(binding) ?? undefined;
+    const bindingTaint = (binding: Binding, depth: number): Taint => {
+      const known = memo.get(binding);
+      if (known !== undefined) return known ?? CLEAN;
       memo.set(binding, null); // cycle guard
-      let origin: string | undefined;
+      let taint = CLEAN;
       const name = binding.identifier.name;
 
       if (binding.kind === 'param') {
         const fn = binding.scope.block;
         if (handlers.has(fn) || INPUT_NAMES.has(name)) {
-          origin = name;
+          taint = { origin: name, deps: [] };
         } else if (fn.type.includes('Function') || fn.type === 'ClassMethod' || fn.type === 'ObjectMethod') {
           const params = (fn as { params?: Node[] }).params ?? [];
           const id = binding.identifier;
           const index = params.findIndex((p) => (p.start ?? -1) <= (id.start ?? 0) && (id.end ?? 0) <= (p.end ?? -1));
-          if (index !== -1 && taintedParams.get(fn)?.has(index)) origin = `${name} ← caller`;
+          if (index !== -1) taint = { deps: [{ fn, index, chain: name }] };
         }
       } else if (depth < MAX_DEPTH && (binding.kind === 'const' || binding.kind === 'let' || binding.kind === 'var')) {
         const declarator = binding.path;
         if (declarator.isVariableDeclarator()) {
           const init = declarator.get('init');
-          const from = init.node ? expressionOrigin(init as NodePath, depth + 1) : undefined;
-          if (from) origin = from === name ? name : `${name} ← ${from}`;
+          if (init.node) taint = expressionTaint(init as NodePath, depth + 1);
         }
         for (const violation of binding.constantViolations) {
-          if (origin) break;
-          if (violation.isAssignmentExpression()) {
-            const from = expressionOrigin(violation.get('right'), depth + 1);
-            if (from) origin = `${name} ← ${from}`;
-          }
+          if (taint.origin) break;
+          if (violation.isAssignmentExpression()) taint = mergeTaint(taint, expressionTaint(violation.get('right'), depth + 1));
         }
+        taint = renamed(name, taint);
       }
 
-      memo.set(binding, origin ?? null);
-      return origin;
+      memo.set(binding, taint);
+      return taint;
     };
 
-    // First tool-input-derived identifier referenced anywhere in `path`.
-    const expressionOrigin = (path: NodePath, depth: number): string | undefined => {
+    /** What tool input `path` may carry: every input-derived identifier it references, up to the first certain one. */
+    const expressionTaint = (path: NodePath, depth: number): Taint => {
       // A number derived from input (`actions.length`, `Number(x)`) can't
       // carry a path, a query or a command
-      if (yieldsNumber(path)) return undefined;
+      if (yieldsNumber(path)) return CLEAN;
       const local = localFunctionCall(path);
-      if (local) return returnOrigin(local, depth);
-      const visit = (id: NodePath): string | undefined => {
-        if (!id.isIdentifier() || !id.isReferencedIdentifier()) return undefined;
+      if (local) return callTaint(path, local, depth);
+      let found = CLEAN;
+      const visit = (id: NodePath): void => {
+        if (!id.isIdentifier() || !id.isReferencedIdentifier()) return;
         const binding = id.scope.getBinding(id.node.name);
-        if (!binding) return INPUT_NAMES.has(id.node.name) ? id.node.name : undefined;
-        return bindingOrigin(binding, depth);
+        if (!binding) {
+          if (INPUT_NAMES.has(id.node.name)) found = mergeTaint(found, { origin: id.node.name, deps: [] });
+          return;
+        }
+        const t = bindingTaint(binding, depth);
+        // `if (!ALLOWED.includes(c)) throw …` before this use: `c` is one of fixed values here
+        if (isClean(t) || (binding.scope.path.isFunction() && guardedBefore(id, binding))) return;
+        found = mergeTaint(found, t);
       };
-      let found = visit(path);
-      if (found) return found;
+      visit(path);
+      if (found.origin) return found;
       path.traverse({
         Identifier(id) {
-          if (found) return id.stop();
-          found = visit(id);
+          if (found.origin) return id.stop();
+          visit(id);
         },
         // A nested function's body doesn't flow into this value.
         Function(fn) { fn.skip(); },
         MemberExpression(m) { if (yieldsNumber(m)) m.skip(); },
         CallExpression(c) {
-          if (found) return c.stop();
+          if (found.origin) return c.stop();
           if (yieldsNumber(c)) return c.skip();
-          // A call to a function of this file carries input only through what
-          // it returns, not because input was passed in
+          // A call to a function of the group carries what it returns for these arguments
           const fn = localFunctionCall(c);
           if (fn) {
-            found = returnOrigin(fn, depth);
+            found = mergeTaint(found, callTaint(c, fn, depth));
             c.skip();
           }
         },
@@ -831,36 +1102,80 @@ function analyze(chunks: SourceChunk[]): TaintedSink[] {
       return importedFunction(path, callee.node);
     };
 
-    /** First tool-input origin among a local function's return values.
-     *  Memoized per function: recomputing it at every call site was
-     *  exponential in call depth (a 1 KB file of nested helpers stalled a scan). */
-    const returnMemo = new Map<Node, string | null>();
-    const returnOrigin = (fn: NodePath, depth: number): string | undefined => {
-      if (depth >= MAX_DEPTH) return undefined;
-      const known = returnMemo.get(fn.node);
-      if (known !== undefined) return known ?? undefined;
-      returnMemo.set(fn.node, null); // recursion through itself carries nothing new
-      const origin = computeReturnOrigin(fn, depth);
-      returnMemo.set(fn.node, origin ?? null);
-      return origin;
-    };
-    const computeReturnOrigin = (fn: NodePath, depth: number): string | undefined => {
+    /**
+     * What a call of `fn` returns at this call site: what its returns carry,
+     * with its own parameters replaced by the arguments given here.
+     */
+    const callTaint = (call: NodePath, fn: NodePath, depth: number): Taint => {
+      const summary = returnSummary(fn);
+      if (isClean(summary)) return CLEAN;
       const name = (fn.node as { id?: { name?: string } }).id?.name ?? 'function';
-      if (fn.isArrowFunctionExpression() && !fn.get('body').isBlockStatement()) {
-        const from = expressionOrigin(fn.get('body') as NodePath, depth + 1);
-        return from ? `${name}() ← ${from}` : undefined;
+      let out: Taint = summary.origin ? { origin: `${name}() ← ${summary.origin}`, deps: [] } : CLEAN;
+      const args = call.get('arguments') as NodePath[];
+      for (const dep of summary.deps) {
+        if (out.origin) break;
+        if (dep.fn !== fn.node) {
+          // a parameter of an enclosing function the helper closes over
+          out = mergeTaint(out, { deps: [{ ...dep, chain: `${name}() ← ${dep.chain}` }] });
+          continue;
+        }
+        const arg = argumentAt(args, dep.index);
+        if (!arg || depth >= MAX_DEPTH) continue;
+        const given = expressionTaint(arg, depth + 1);
+        if (isClean(given)) continue;
+        const via = `${name}() ← ${dep.chain}`;
+        out = mergeTaint(out, {
+          ...(given.origin ? { origin: `${via} ← ${given.origin}` } : {}),
+          deps: given.deps.map((d) => ({ ...d, chain: `${via} ← ${d.chain}` })),
+        });
       }
-      let found: string | undefined;
-      fn.traverse({
-        Function(inner) { inner.skip(); },
-        ReturnStatement(r) {
-          if (found) return r.stop();
-          const arg = r.get('argument');
-          if (arg.node) found = expressionOrigin(arg as NodePath, depth + 1);
-        },
-      });
-      return found ? `${name}() ← ${found}` : undefined;
+      return out;
     };
+
+    /**
+     * What a function's return values carry, in terms of its parameters.
+     * Memoized per function (recomputing it at every call site was
+     * exponential in call depth); a function being summarized returns
+     * nothing new through itself.
+     */
+    const summaries = new Map<Node, Taint | null>();
+    let nesting = 0;
+    const returnSummary = (fn: NodePath): Taint => {
+      const known = summaries.get(fn.node);
+      if (known !== undefined) return known ?? CLEAN;
+      if (nesting >= MAX_SUMMARY_NESTING) return CLEAN;
+      summaries.set(fn.node, null);
+      nesting++;
+      let summary = CLEAN;
+      try {
+        if (fn.isArrowFunctionExpression() && !fn.get('body').isBlockStatement()) {
+          summary = expressionTaint(fn.get('body') as NodePath, 0);
+        } else {
+          fn.traverse({
+            Function(inner) { inner.skip(); },
+            ReturnStatement(r) {
+              if (summary.origin) return r.stop();
+              const arg = r.get('argument');
+              if (arg.node) summary = mergeTaint(summary, expressionTaint(arg as NodePath, 0));
+            },
+          });
+        }
+      } finally {
+        nesting--;
+      }
+      summaries.set(fn.node, summary);
+      return summary;
+    };
+
+    /** A taint made concrete: tool input, or a parameter some call site passes tool input to. */
+    const resolveTaint = (t: Taint): string | undefined => {
+      if (t.origin) return t.origin;
+      for (const d of t.deps) if (taintedParams.get(d.fn)?.has(d.index)) return `${d.chain} ← caller`;
+      return undefined;
+    };
+
+    /** The tool-input origin of `path`'s value, if it has one. */
+    const expressionOrigin = (path: NodePath, depth: number): string | undefined => resolveTaint(expressionTaint(path, depth));
 
     /** A handler's input field its schema limits to fixed choices or numbers: `sort` from `{ sort }`, or `args.sort`. */
     const constrainedInput = (p: NodePath): boolean => {
@@ -910,10 +1225,22 @@ function analyze(chunks: SourceChunk[]): TaintedSink[] {
 
     // Pass 1b: carry tool input into functions through their call sites
     // (`this.getFolderSize(request.params.arguments)` taints `getFolderSize(args)`,
-    // `runQuery(args.sql)` taints the `runQuery` another module exports), to a
-    // fixpoint — a few rounds covers handler → helper → helper chains.
-    // Each round walks every file of the group once.
-    let changed = false;
+    // `runQuery(args.sql)` taints the `runQuery` another module exports). One
+    // walk records, per call site argument, what it carries: tool input taints
+    // the callee's parameter at once; a parameter of the caller is an edge
+    // (caller param → callee param). Tool input then spreads along the edges
+    // to a fixpoint — handler → helper → helper chains of any length, in any
+    // order of declaration.
+    const flowsTo = new Map<Node, Map<number, Array<[Node, number]>>>();
+    const reached: Array<[Node, number]> = [];
+    let edges = 0;
+    const taintParam = (fn: Node, index: number): void => {
+      const set = taintedParams.get(fn) ?? new Set<number>();
+      if (set.has(index)) return;
+      set.add(index);
+      taintedParams.set(fn, set);
+      reached.push([fn, index]);
+    };
     const visitCalls = {
       CallExpression(path: NodePath) {
         const imported = importedFunction(path, (path.node as { callee: Node }).callee);
@@ -921,28 +1248,32 @@ function analyze(chunks: SourceChunk[]): TaintedSink[] {
         if (targets.length === 0) return;
         const args = path.get('arguments') as NodePath[];
         args.forEach((arg, index) => {
-          if (!arg.node || !expressionOrigin(arg, 0)) return;
+          if (!arg.node) return;
+          const t = expressionTaint(arg, 0);
+          if (isClean(t)) return;
           for (const target of targets) {
-            const set = taintedParams.get(target) ?? new Set<number>();
-            if (!set.has(index)) {
-              set.add(index);
-              taintedParams.set(target, set);
-              changed = true;
+            if (t.origin) {
+              taintParam(target, index);
+              continue;
+            }
+            for (const d of t.deps) {
+              if (edges >= MAX_FLOW_EDGES) return;
+              let byIndex = flowsTo.get(d.fn);
+              if (!byIndex) flowsTo.set(d.fn, (byIndex = new Map()));
+              const list = byIndex.get(d.index) ?? [];
+              if (list.length === 0) byIndex.set(d.index, list);
+              list.push([target, index]);
+              edges++;
             }
           }
         });
       },
     };
-    for (let round = 0; round < MAX_ROUNDS; round++) {
-      changed = false;
-      // What reaches a parameter grew last round: origins worked out before are stale
-      memo = new Map();
-      returnMemo.clear();
-      for (const file of files) safely(() => traverse(file.ast, visitCalls));
-      if (!changed) break;
+    for (const file of files) safely(() => traverse(file.ast, visitCalls));
+    for (let i = 0; i < reached.length; i++) {
+      const [fn, index] = reached[i];
+      for (const [target, at] of flowsTo.get(fn)?.get(index) ?? []) taintParam(target, at);
     }
-    memo = new Map();
-    returnMemo.clear();
 
     // Pass 2: sinks.
     const visitSinks = {
@@ -1306,18 +1637,40 @@ function fixedReassignment(node: Node, name: string, scope: Scope): Node | undef
  * "desc") return …`) or that resets it to a fixed value (`if (…) x = "asc"`).
  * The name may be assigned only before the guard, or by the guard itself.
  */
+const ifStatementsOf = new WeakMap<Node[], number[]>();
+/** Earlier `if` statements of one body examined for a guard. */
+const MAX_GUARDS = 64;
+
 function guardedBefore(path: NodePath, binding: Binding): boolean {
   const name = binding.identifier.name;
   const stop = binding.scope.path;
   for (let at: NodePath | null = path; at && at !== stop; at = at.parentPath) {
-    if (!at.isStatement() || !Array.isArray(at.container) || at.listKey !== 'body') continue;
-    for (const prev of at.getAllPrevSiblings()) {
-      if (!prev.isIfStatement()) continue;
-      const test = prev.node.test;
-      if (assignedNames(test).has(name) || !choiceChecked(test, false, prev.scope).has(name)) continue;
-      const reset = fixedReassignment(prev.node.consequent, name, prev.scope);
-      if (!reset && !alwaysExits(prev.node.consequent)) continue;
-      const start = prev.node.start ?? 0;
+    if (!at.isStatement() || !Array.isArray(at.container) || at.listKey !== 'body' || typeof at.key !== 'number') continue;
+    // The `if` statements of the body, found once per body: walking every
+    // earlier statement of a long body at every use of a name was quadratic
+    const siblings = at.container as Node[];
+    let ifs = ifStatementsOf.get(siblings);
+    if (!ifs) {
+      ifs = [];
+      for (let k = 0; k < siblings.length; k++) if (siblings[k]?.type === 'IfStatement') ifs.push(k);
+      ifStatementsOf.set(siblings, ifs);
+    }
+    // the last `if` before this statement, then back (at most MAX_GUARDS of them)
+    let lo = 0;
+    let hi = ifs.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (ifs[mid] < at.key) lo = mid + 1;
+      else hi = mid;
+    }
+    for (let i = lo - 1; i >= 0 && i >= lo - MAX_GUARDS; i--) {
+      const prev = siblings[ifs[i]];
+      if (prev?.type !== 'IfStatement') continue;
+      const test = prev.test;
+      if (assignedNames(test).has(name) || !choiceChecked(test, false, at.scope).has(name)) continue;
+      const reset = fixedReassignment(prev.consequent, name, at.scope);
+      if (!reset && !alwaysExits(prev.consequent)) continue;
+      const start = prev.start ?? 0;
       if (binding.constantViolations.every((v) => v.node === reset || (v.node.end ?? 0) <= start)) return true;
     }
   }

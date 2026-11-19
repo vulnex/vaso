@@ -4,6 +4,7 @@ import { homedir } from 'node:os';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { isTestPath } from '../analyzers/test-paths.js';
+import { escapeFileMarkers } from '../analyzers/js-parse.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -259,7 +260,7 @@ async function collectPackageSource(extractedDir: string): Promise<string | unde
     try {
       const buf = await readFile(file);
       const slice = buf.byteLength > PER_FILE_CAP ? buf.subarray(0, PER_FILE_CAP) : buf;
-      parts.push(`// === ${relative(extractedDir, file)} ===\n${slice.toString('utf-8')}`);
+      parts.push(`// === ${relative(extractedDir, file)} ===\n${escapeFileMarkers(slice.toString('utf-8'))}`);
       total += slice.byteLength;
     } catch {
       // unreadable file — skip

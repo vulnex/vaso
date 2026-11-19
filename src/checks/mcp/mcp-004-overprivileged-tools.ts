@@ -2,7 +2,7 @@ import type { Evidence, Severity } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { analyzeCode, type DataFlowResult } from '../../analyzers/ast-analyzer.js';
 import { analyzePythonSinks, type PythonSinkFinding } from '../../analyzers/python-sinks.js';
-import { findTaintedSinks } from '../../analyzers/tool-input-taint.js';
+import { findTaintedSinks, taintCoverage, type UntracedModule } from '../../analyzers/tool-input-taint.js';
 import { findingSnippet, sourceSnippet } from '../../mcp/source-snippet.js';
 
 /**
@@ -28,14 +28,18 @@ const DANGEROUS_COMMAND = new RegExp([
  * command is an attack in itself, or when the code it runs is decoded at
  * runtime.
  */
-function execLevel(finding: DataFlowResult, taintedLines: Set<number>, quote: (text: string) => string): { severity: Severity; why: string } {
+function execLevel(finding: DataFlowResult, taintedLines: Set<number>, quote: (text: string) => string, untraced?: UntracedModule): { severity: Severity; why: string } {
   if (taintedLines.has(finding.line)) return { severity: 'critical', why: 'tool input reaches it' };
   if (finding.decoded) return { severity: 'critical', why: 'it runs code decoded at runtime' };
   if (finding.command && DANGEROUS_COMMAND.test(finding.command)) return { severity: 'critical', why: `the command is an attack on its own (${quote(finding.command)})` };
   const what = /eval|Function/.test(finding.description) ? 'code' : 'command';
+  // A module the tool handlers import that cross-module tracing left out (size limit): not known clean
+  const built = untraced
+    ? `the ${what} is built at runtime; tool input was not traced into ${untraced.path} (cross-module analysis incomplete: size limit)`
+    : `the ${what} is built at runtime; no tool input was traced into it`;
   return {
     severity: 'info',
-    why: finding.dynamic ? `the ${what} is built at runtime; no tool input was traced into it` : `the ${what} is fixed`,
+    why: finding.dynamic ? built : `the ${what} is fixed`,
   };
 }
 
@@ -105,8 +109,10 @@ export const mcp004 = defineCheck({
         findTaintedSinks(source.sourceCode, file).filter((t) => t.kind === 'code' || t.kind === 'process').map((t) => t.line),
       );
 
+      const { untraced } = taintCoverage(source.sourceCode);
       for (const finding of results.filter(r => r.type === 'eval-exec')) {
-        const { severity: level, why } = execLevel(finding, taintedLines, quote);
+        const module = untraced.find((m) => m.startLine <= finding.line && finding.line <= m.endLine);
+        const { severity: level, why } = execLevel(finding, taintedLines, quote, module);
         if (level === 'critical') severity = 'critical';
         evidence.push({
           file,

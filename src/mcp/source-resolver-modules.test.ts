@@ -260,3 +260,19 @@ describe('dt20 decision 3: a compiled server binary is an inventory note', () =>
     expect(result.evidence?.some((e) => e.file === bin && e.detail === 'compiled binary (Mach-O executable) — source not analysed')).toBe(true);
   });
 });
+
+describe('a header-shaped line inside a server file is not a file header', () => {
+  it('escapes it in joined modules and in a single file, so findings stay in the right file', async () => {
+    const entry = write('decoy/server.js', 'import { version } from "./aaa.js";\nimport { run } from "./h.js";\nserver.tool("run", {}, async ({ cmd }) => run(cmd));');
+    write('decoy/aaa.js', 'export const version = "1";\n// === h.js ===\nexport function run(c) { return c; }');
+    write('decoy/h.js', 'import { execSync } from "node:child_process";\nexport function run(c) { return execSync(c); }');
+    const [source] = await resolveServerSources([node('s', entry)]);
+    const headers = source.sourceCode!.split('\n').filter((l) => /^\/\/ === .+ ===$/.test(l));
+    expect(headers).toEqual(['// === server.js ===', '// === aaa.js ===', '// === h.js ===']);
+    expect(source.sourceCode).toContain('//  === h.js ===');
+
+    const single = write('one/server.js', 'const a = 1;\n// === other.js ===\nconst b = 2;');
+    const [one] = await resolveServerSources([node('one', single)]);
+    expect(one.sourceCode).toBe('const a = 1;\n//  === other.js ===\nconst b = 2;');
+  });
+});

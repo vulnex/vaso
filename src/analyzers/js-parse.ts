@@ -389,6 +389,54 @@ export interface SourceChunk {
 
 /** `// === dist/tools.js ===` — the per-file header `--resolve-packages` writes. */
 const FILE_MARKER = /^\/\/ === (.+) ===$/;
+const FILE_MARKER_LINES = /^\/\/ === (.+) ===$/gm;
+
+/**
+ * A file's own text made safe to join under `// === path ===` headers: a
+ * line of it that reads as a header (a comment `// === h.js ===`) would split
+ * the joined source there and pass what follows off as another module — the
+ * cross-module tracer then resolves imports of `./h.js` to it. Such a line
+ * gets a second space (`//  === h.js ===`), so only the joiner's headers
+ * split. Line numbers and the code are unchanged.
+ */
+export function escapeFileMarkers(code: string): string {
+  return code.includes('// === ') ? code.replace(FILE_MARKER_LINES, '//  === $1 ===') : code;
+}
+
+/**
+ * The size of a file's code for the cross-module tracer's budget: its length
+ * without comments and whitespace (a licence header or a padding comment
+ * costs the AST almost nothing), but never less than an eighth of it — the
+ * scan doesn't recognize regex literals, and a `/*` inside one must not hide
+ * real code from the budget. One pass.
+ */
+export function significantLength(code: string): number {
+  let n = 0;
+  let quote = '';
+  let comment: '' | 'line' | 'block' = '';
+  for (let i = 0; i < code.length; i++) {
+    const c = code.charCodeAt(i);
+    if (comment === 'line') {
+      if (c === 10) comment = '';
+      continue;
+    }
+    if (comment === 'block') {
+      if (c === 42 && code.charCodeAt(i + 1) === 47) { comment = ''; i++; }
+      continue;
+    }
+    if (quote) {
+      n++;
+      if (c === 92) { i++; n++; } else if (code[i] === quote || (c === 10 && quote !== '`')) quote = '';
+      continue;
+    }
+    if (c === 47 && code.charCodeAt(i + 1) === 47) { comment = 'line'; i++; continue; }
+    if (c === 47 && code.charCodeAt(i + 1) === 42) { comment = 'block'; i++; continue; }
+    if (c === 32 || c === 9 || c === 10 || c === 13) continue;
+    if (c === 39 || c === 34 || c === 96) quote = code[i];
+    n++;
+  }
+  return Math.max(n, code.length >> 3);
+}
 
 /**
  * Source split back into the files it was concatenated from (npm packages
