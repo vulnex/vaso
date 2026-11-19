@@ -1,6 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { confinesPaths, findTaintedSinks, literalOnlyNames } from '../../analyzers/tool-input-taint.js';
+import { confinesPaths, findTaintedSinks, findUnverifiedSinks, literalOnlyNames, taintCoverage } from '../../analyzers/tool-input-taint.js';
 import { analyzePythonSinks } from '../../analyzers/python-sinks.js';
 import { sourceSegments } from '../../mcp/source-segments.js';
 import { findingSnippet, sourceSnippet } from '../../mcp/source-snippet.js';
@@ -85,6 +85,7 @@ export const mcp005 = defineCheck({
   async run(ctx, h) {
     const evidence: Evidence[] = [];
     const sources = ctx.mcpServerSources ?? [];
+    let unverified = 0;
 
     for (const source of sources) {
       if (!source.sourceCode) continue;
@@ -134,6 +135,22 @@ export const mcp005 = defineCheck({
               : `${sink.sink}() receives tool input (${sink.origin})`,
           });
         }
+        // Sinks in modules a handler's file imports that tracing left out (size
+        // cap), fed by what those modules export: not verified, never clean
+        const { untraced } = taintCoverage(source.sourceCode);
+        for (const sink of findUnverifiedSinks(source.sourceCode, file)) {
+          if (reported.has(sink.line) || sink.kind === 'file-meta') continue;
+          if ((sink.kind === 'file-read' || sink.kind === 'file-write') && confined) continue;
+          reported.add(sink.line);
+          const module = untraced.find((m) => m.startLine <= sink.line && sink.line <= m.endLine)?.path ?? 'a module';
+          unverified++;
+          evidence.push({
+            file,
+            line: sink.line,
+            snippet: findingSnippet(source, sink),
+            detail: `not verified: cross-module analysis incomplete — ${sink.sink}() in ${module} receives what that module's exports are called with (${sink.origin}); tracing did not follow it from the tool handlers (size limit), so tool input may reach it`,
+          });
+        }
       }
 
       let constants: Set<string> | undefined;
@@ -160,9 +177,14 @@ export const mcp005 = defineCheck({
       }
     }
 
+    // Only unverified sinks (and mitigated items): a warning, not a confirmed injection
+    const onlyUnverified = unverified > 0 && evidence.filter((e) => !e.mitigated).length === unverified;
     return h.fromEvidence(evidence, {
       passed: 'No injection vulnerabilities detected in MCP server source',
-      failed: (n) => `Found ${n} potential injection vulnerability(ies) in MCP server source`,
+      failed: (n) => onlyUnverified
+        ? `Found ${n} sink(s) in MCP server source not verified against tool input — cross-module analysis incomplete (size limit)`
+        : `Found ${n} potential injection vulnerability(ies) in MCP server source`,
+      ...(onlyUnverified ? { severity: 'warning' as const } : {}),
     });
   },
 });

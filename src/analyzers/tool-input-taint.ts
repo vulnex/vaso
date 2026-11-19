@@ -58,6 +58,8 @@ export interface TaintedSink {
   kind: SinkKind;
   /** `query`: every tainted interpolation stands for a whole statement (a derived table, `EXPLAIN`). */
   wrapsStatement?: boolean;
+  /** In a module the tracer did not follow into from a tool handler (size cap): fed by what its exports receive, tool input or not (findUnverifiedSinks). */
+  unverified?: boolean;
 }
 
 export type SinkKind = 'code' | 'process' | 'file-read' | 'file-write' | 'file-meta' | 'query';
@@ -173,16 +175,32 @@ const cache = new Map<string, TaintedSink[]>();
 export const MAX_GROUP_SOURCE = 512 * 1024;
 
 export function findTaintedSinks(code: string, filename = 'unknown.js'): TaintedSink[] {
+  return traced(code, filename).filter((s) => !s.unverified).map((s) => ({ ...s }));
+}
+
+/**
+ * Sinks in modules a tool handler's file imports that its traced group left
+ * out (the size cap) and that take a parameter of a function those modules
+ * export: whether tool input reaches them is not known — "not verified", never
+ * clean. Each has `unverified: true`.
+ */
+export function findUnverifiedSinks(code: string, filename = 'unknown.js'): TaintedSink[] {
+  return traced(code, filename).filter((s) => s.unverified).map((s) => ({ ...s }));
+}
+
+function traced(code: string, filename: string): TaintedSink[] {
   const key = `${filename}\0${createHash('sha1').update(code).digest('base64')}`;
   const cached = cache.get(key);
-  if (cached) return cached.map((s) => ({ ...s }));
+  if (cached) return cached;
   const chunks = sourceChunks(code);
-  const results = planModules(chunks).groups
-    .flatMap((group) => analyze(group.map((i) => chunks[i])))
+  const plan = planModules(chunks);
+  const untraced = new Set(plan.untraced.map((m) => chunks[m.index].path!));
+  const results = plan.groups
+    .flatMap((group) => analyze(group.map((i) => chunks[i]), untraced))
     .sort((a, b) => a.line - b.line);
   if (cache.size >= MAX_CACHED) cache.delete(cache.keys().next().value!);
   cache.set(key, results);
-  return results.map((s) => ({ ...s }));
+  return results;
 }
 
 /** A module of a joined source the tracer did not follow into from a tool handler's file (the group size cap). */
@@ -253,10 +271,82 @@ interface ModulePlan {
 }
 
 /**
+ * Text that suggests a sink the tracer reports — process or code execution,
+ * the filesystem, SQL, the network. Only orders which modules join a handler's
+ * group first; it decides no finding.
+ */
+const SINK_HINT = /\bchild_|\b(?:exec|execSync|execFile|execFileSync|spawn|spawnSync|fork|eval|Function|fetch|promisify)\s*\(|\bvm\b|\bfs\b|fs\/promises|fs-extra|\b(?:readFile|writeFile|appendFile|unlink|rm|rmdir|mkdir|createReadStream|createWriteStream|readdir|copyFile|rename|open)(?:Sync)?\s*\(|\.(?:query|execute|raw|prepare|exec|run)\s*\(|\brequire\s*\(\s*[^'"`\s)]|\bimport\s*\(/;
+
+/**
+ * What a module costs a group's budget. Its significant length — except a
+ * data module (literals only: no call, function, class, `new`, regex or
+ * template interpolation), whose AST is a list of literal nodes: a string
+ * there costs a few bytes whatever its length. Padding a handler's imports
+ * with big string tables then doesn't push the code out of the group.
+ * Numbers and keys outside strings count in full (their nodes are dense).
+ */
+export function moduleWeight(code: string): number {
+  const full = significantLength(code);
+  const CODE_WORDS = /^(?:function|class|new|get|set|async|await|yield|with|this|super|import)$/;
+  let outside = 0;
+  let strings = 0;
+  let quote = '';
+  let comment: '' | 'line' | 'block' = '';
+  let word = '';
+  let last = '';
+  for (let i = 0; i < code.length; i++) {
+    const c = code[i];
+    if (comment === 'line') {
+      if (c === '\n') comment = '';
+      continue;
+    }
+    if (comment === 'block') {
+      if (c === '*' && code[i + 1] === '/') { comment = ''; i++; }
+      continue;
+    }
+    if (quote) {
+      if (c === '\\') i++;
+      else if (quote === '`' && c === '$' && code[i + 1] === '{') return full;
+      else if (c === quote || (c === '\n' && quote !== '`')) quote = '';
+      continue;
+    }
+    if (/[\w$]/.test(c)) {
+      word += c;
+      outside++;
+      continue;
+    }
+    if (word) {
+      // `import x from './d.js'` is a declaration; `import(…)` is caught by its paren
+      if (CODE_WORDS.test(word) && !(word === 'import' && code.slice(i).trimStart()[0] !== '(')) return full;
+      last = word;
+      word = '';
+    }
+    if (c === '/') {
+      if (code[i + 1] === '/') { comment = 'line'; i++; continue; }
+      if (code[i + 1] === '*') { comment = 'block'; i++; continue; }
+      return full; // a regex or a division: not a data module
+    }
+    if (c === ' ' || c === '\t' || c === '\n' || c === '\r') continue;
+    // a call, a function, a getter (`(`), an arrow (`=>`); a tagged template
+    // calls its tag (`run`cmd``, `a[0]`x``)
+    if (c === '(' || (c === '=' && code[i + 1] === '>')) return full;
+    if (c === '`' && (last || /[\])]/.test(code[i - 1] ?? ''))) return full;
+    last = '';
+    if (c === "'" || c === '"' || c === '`') { quote = c; strings++; continue; }
+    outside++;
+  }
+  if (CODE_WORDS.test(word)) return full;
+  return Math.min(full, Math.max(outside + 8 * strings, code.length >> 6));
+}
+
+/**
  * Chunks (by index) to trace together, in groups of at most MAX_GROUP_SOURCE.
  * Tool input enters in the files that register handlers, so their group is
  * grown first, outward along their imports (breadth first: the modules they
- * import before the ones those import); a module that doesn't fit is skipped
+ * import before the ones those import) — first through the modules that hold
+ * or lead to a sink (SINK_HINT), then the rest, so sink-free modules can't
+ * crowd the code tool input reaches out of the group; data modules count at
+ * their literal cost (moduleWeight). A module that doesn't fit is skipped
  * and recorded, the rest still join. The other files are grouped by their
  * links as before (a link that would join two groups past the cap is
  * dropped). One scan of each file's text for specifiers — linear in the source.
@@ -276,7 +366,15 @@ function planModules(chunks: SourceChunk[]): ModulePlan {
     });
   }
   if (n === 1 || byPath.size <= 1) return { groups: chunks.map((_, i) => [i]), untraced: [] };
-  const size = chunks.map((c) => significantLength(c.code));
+  const size = chunks.map((c) => moduleWeight(c.code));
+  // Modules that hold a sink or import (directly or not) one that does
+  const toSink = chunks.map((c) => SINK_HINT.test(c.code));
+  const importers: number[][] = chunks.map(() => []);
+  links.forEach((targets, i) => { for (const t of targets) importers[t].push(i); });
+  const back = toSink.flatMap((s, i) => (s ? [i] : []));
+  for (let q = 0; q < back.length; q++) {
+    for (const i of importers[back[q]]) if (!toSink[i]) { toSink[i] = true; back.push(i); }
+  }
   const groupOf = new Array<number>(n).fill(-1);
   const groups: number[][] = [];
   const total: number[] = [];
@@ -300,16 +398,19 @@ function planModules(chunks: SourceChunk[]): ModulePlan {
       total.push(0);
     }
     join(h, current);
+    // Along the links to sinks first, then every link from what joined
     const queue = [h];
-    for (let q = 0; q < queue.length; q++) {
-      for (const t of links[queue[q]]) {
-        if (groupOf[t] === current) continue;
-        if (groupOf[t] !== -1 || total[current] + size[t] > MAX_GROUP_SOURCE) {
-          if (!dropped.has(t)) dropped.set(t, queue[q]);
-          continue;
+    for (const sinkward of [true, false]) {
+      for (let q = 0; q < queue.length; q++) {
+        for (const t of links[queue[q]]) {
+          if (groupOf[t] === current || (sinkward && !toSink[t])) continue;
+          if (groupOf[t] !== -1 || total[current] + size[t] > MAX_GROUP_SOURCE) {
+            if (!dropped.has(t)) dropped.set(t, queue[q]);
+            continue;
+          }
+          join(t, current);
+          queue.push(t);
         }
-        join(t, current);
-        queue.push(t);
       }
     }
   }
@@ -698,7 +799,7 @@ function keyName(node: Node, computed = false): string | undefined {
  * reaching a function another module exports (`import { run } from
  * './helpers.js'`, `const h = require('./h')`, re-exports) follows it there.
  */
-function analyze(chunks: SourceChunk[]): TaintedSink[] {
+function analyze(chunks: SourceChunk[], untraced: ReadonlySet<string> = new Set()): TaintedSink[] {
   const files: ModuleFile[] = [];
   for (const chunk of chunks) {
     const ast = parseJs(chunk.code);
@@ -1174,8 +1275,14 @@ function analyze(chunks: SourceChunk[]): TaintedSink[] {
       return undefined;
     };
 
-    /** The tool-input origin of `path`'s value, if it has one. */
-    const expressionOrigin = (path: NodePath, depth: number): string | undefined => resolveTaint(expressionTaint(path, depth));
+    /** Where `path`'s value comes from: tool input, or (`unverified`) what an untraced module's export receives. */
+    const sinkOrigin = (path: NodePath): { origin: string; unverified?: true } | undefined => {
+      const t = expressionTaint(path, 0);
+      const origin = resolveTaint(t);
+      if (origin) return { origin };
+      for (const d of t.deps) if (unknownParams.get(d.fn)?.has(d.index)) return { origin: `${d.chain} ← caller not traced`, unverified: true };
+      return undefined;
+    };
 
     /** A handler's input field its schema limits to fixed choices or numbers: `sort` from `{ sort }`, or `args.sort`. */
     const constrainedInput = (p: NodePath): boolean => {
@@ -1201,26 +1308,30 @@ function analyze(chunks: SourceChunk[]): TaintedSink[] {
       if (!(SQL_METHODS.has(prop) || SQL_GENERIC_METHODS.has(prop)) || !args[0]) return;
       const built = sqlPieces(args[0], SQL_METHODS.has(prop) ? SQL_TEXT : SQL_TEXT_CAPS);
       if (!built) return;
-      const tainted = built.parts.filter((p) => p.path.node && !sqlSafePiece(p.path, constrainedInput, 0, p.quote) && expressionOrigin(p.path, 0));
+      const tainted = built.parts.filter((p) => p.path.node && !sqlSafePiece(p.path, constrainedInput, 0, p.quote) && sinkOrigin(p.path));
       if (tainted.length === 0) return;
-      const origin = expressionOrigin(tainted[0].path, 0)!;
+      const found = tainted.map((p) => sinkOrigin(p.path)!);
+      const { origin, unverified } = found.find((f) => !f.unverified) ?? found[0];
       const line = path.node.loc?.start.line ?? 0;
       pushResult(line, {
         sink: `${shown}.${prop}`, origin, kind: 'query',
         ...(tainted.every((p) => p.wraps) ? { wrapsStatement: true } : {}),
+        ...(unverified ? { unverified } : {}),
       });
     };
 
     const report = (path: NodePath<Node>, sink: string, candidates: NodePath[], kind: SinkKind): void => {
+      let maybe: string | undefined;
       for (const arg of candidates) {
         if (!arg.node) continue;
-        const origin = expressionOrigin(arg, 0);
-        if (origin) {
-          const line = path.node.loc?.start.line ?? 0;
-          pushResult(line, { sink, origin, kind });
+        const found = sinkOrigin(arg);
+        if (found && !found.unverified) {
+          pushResult(path.node.loc?.start.line ?? 0, { sink, origin: found.origin, kind });
           return;
         }
+        maybe ??= found?.origin;
       }
+      if (maybe) pushResult(path.node.loc?.start.line ?? 0, { sink, origin: maybe, kind, unverified: true });
     };
 
     // Pass 1b: carry tool input into functions through their call sites
@@ -1273,6 +1384,34 @@ function analyze(chunks: SourceChunk[]): TaintedSink[] {
     for (let i = 0; i < reached.length; i++) {
       const [fn, index] = reached[i];
       for (const [target, at] of flowsTo.get(fn)?.get(index) ?? []) taintParam(target, at);
+    }
+
+    // Modules a tool handler's file imports that its group left out (size
+    // cap): the parameters of what they export may receive tool input
+    // nobody traced. Spread like tool input, kept apart: a sink they reach is
+    // "not verified", not tool input.
+    const unknownParams = new WeakMap<Node, Set<number>>();
+    const unknown: Array<[Node, number]> = [];
+    const markUnknown = (fn: Node, index: number): void => {
+      if (taintedParams.get(fn)?.has(index)) return;
+      const set = unknownParams.get(fn) ?? new Set<number>();
+      if (set.has(index)) return;
+      set.add(index);
+      unknownParams.set(fn, set);
+      unknown.push([fn, index]);
+    };
+    for (const file of files) {
+      if (!file.chunk.path || !untraced.has(file.chunk.path)) continue;
+      safely(() => {
+        for (const name of exportsOf(file).keys()) {
+          const fn = lookup(file, name)?.node as { params?: Node[] } | undefined;
+          fn?.params?.forEach((_, i) => markUnknown(fn as Node, i));
+        }
+      });
+    }
+    for (let i = 0; i < unknown.length; i++) {
+      const [fn, index] = unknown[i];
+      for (const [target, at] of flowsTo.get(fn)?.get(index) ?? []) markUnknown(target, at);
     }
 
     // Pass 2: sinks.
