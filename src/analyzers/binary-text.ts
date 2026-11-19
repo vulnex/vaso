@@ -1,5 +1,6 @@
-import { extname } from 'node:path';
+import { dirname, extname, join } from 'node:path';
 import type { FSProvider } from '../core/fs-provider.js';
+import { readCappedBytes, ScanLimitError } from '../core/file-limits.js';
 
 /**
  * Telling a binary (a Mach-O / ELF / PE executable, an archive) from source
@@ -35,15 +36,54 @@ const ascii = (s: string) => [...s].map(c => c.charCodeAt(0));
 /** binaryFormat's name for a macOS AppleDouble sidecar (magic 00 05 16 07). */
 export const APPLEDOUBLE = 'AppleDouble metadata';
 
+/** Entries an AppleDouble header lists at most (Finder writes two). */
+const MAX_APPLEDOUBLE_ENTRIES = 64;
+const u32be = (b: Uint8Array, at: number) => ((b[at] << 24) | (b[at + 1] << 16) | (b[at + 2] << 8) | b[at + 3]) >>> 0;
+
+/**
+ * An AppleDouble header (magic 00 05 16 07, version 1 or 2, 1 to
+ * MAX_APPLEDOUBLE_ENTRIES entries) whose entry table fits in `b` and, given
+ * the file's `size`, whose entries lie inside the file after the table.
+ */
+function appleDoubleHeader(b: Uint8Array, size?: number): boolean {
+  if (!startsWith(b, [0x00, 0x05, 0x16, 0x07])) return false;
+  if (!startsWith(b, [0x00, 0x02, 0x00, 0x00], 4) && !startsWith(b, [0x00, 0x01, 0x00, 0x00], 4)) return false;
+  if (b.length < 26) return false;
+  const n = (b[24] << 8) | b[25];
+  const table = 26 + 12 * n;
+  if (n < 1 || n > MAX_APPLEDOUBLE_ENTRIES || b.length < table) return false;
+  if (size === undefined) return true;
+  for (let i = 0; i < n; i++) {
+    const offset = u32be(b, 26 + 12 * i + 4);
+    const length = u32be(b, 26 + 12 * i + 8);
+    if (offset < table || offset + length > size) return false;
+  }
+  return true;
+}
+
 /**
  * A macOS AppleDouble sidecar (`._index.js` beside `index.js`: the
  * original's Finder metadata and resource fork, never run or read by an
- * agent) — by its name and its magic, read from the file's head.
+ * agent): a `._` name whose companion (`index.js`) is in the same folder,
+ * holding a valid AppleDouble header (appleDoubleHeader), read from the
+ * file's head. A `._setup.sh` with the magic but no companion, or a broken
+ * header, is a file like any other — `sh` runs it past its first line.
+ * listSkillTree also keeps one a file of the tree names.
  */
-export async function isAppleDouble(fs: Pick<FSProvider, 'readHead'>, path: string, name: string): Promise<boolean> {
-  if (!name.startsWith('._')) return false;
-  const head = await fs.readHead?.(path, 4).catch(() => undefined);
-  return head !== undefined && binaryFormat(head) === APPLEDOUBLE;
+export async function isAppleDouble(fs: FSProvider, path: string, name: string): Promise<boolean> {
+  if (!name.startsWith('._') || name.length === 2) return false;
+  const head = await fs.readHead?.(path, 26 + 12 * MAX_APPLEDOUBLE_ENTRIES).catch(() => undefined);
+  if (head === undefined || !appleDoubleHeader(head)) return false;
+  if (!await fs.stat(join(dirname(path), name.slice(2))).then(() => true, () => false)) return false;
+  // the entries against the file's size — unknown past the content-scan
+  // limit (a snapshot holds no content then), where the table must do
+  let size: number | undefined;
+  try {
+    size = (await readCappedBytes(fs, path)).byteLength;
+  } catch (err) {
+    if (!(err instanceof ScanLimitError)) return false;
+  }
+  return appleDoubleHeader(head, size);
 }
 
 /** Signatures checked on raw bytes. */
@@ -76,7 +116,7 @@ const SIGNATURES: Array<{ name: string; test: (b: Uint8Array) => boolean }> = [
   { name: 'SQLite database', test: b => startsWith(b, [...ascii('SQLite format 3'), 0]) },
   { name: 'PNG image', test: b => startsWith(b, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]) },
   // macOS resource-fork sidecar (`._name`, written by Finder/tar on non-HFS volumes)
-  { name: APPLEDOUBLE, test: b => startsWith(b, [0x00, 0x05, 0x16, 0x07]) },
+  { name: APPLEDOUBLE, test: b => appleDoubleHeader(b) },
 ];
 
 /** The binary format raw leading bytes start with, or undefined. */

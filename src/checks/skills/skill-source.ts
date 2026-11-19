@@ -42,6 +42,8 @@ export interface SkillSource {
   lang?: SkillLang;
   /** Markdown 'code' view: lines whose text comes from inline code spans only. */
   inlineLines?: ReadonlySet<number>;
+  /** Markdown 'code' view: lines of fenced blocks in a config language (```` ```toml ````, CONFIG_FENCES). */
+  configLines?: ReadonlySet<number>;
   /** Markdown 'prose' view: lines that are plain prose — no code block, no inline code. */
   proseLines?: ReadonlySet<number>;
   /**
@@ -221,7 +223,7 @@ export async function readSkillSource(
       inlineLines.add(i + 1);
       return parts.inline[i];
     });
-    return { file, text: lines.join('\n'), kind: 'markdown', inlineLines, ...(load ? { loadCommands: load } : {}) };
+    return { file, text: lines.join('\n'), kind: 'markdown', inlineLines, configLines: parts.config, ...(load ? { loadCommands: load } : {}) };
   }
   if (manifest) return { file, text, kind: 'manifest' };
   return lang ? { file, text, kind: 'script', lang } : { file, text, kind: 'data' };
@@ -351,7 +353,12 @@ export interface MarkdownParts {
   inline: string[];
   /** 1-based lines holding load-time commands (loadTimeCommands), with them. */
   load: Map<number, string[]>;
+  /** 1-based lines of fenced blocks whose info string is a config language (CONFIG_FENCES). */
+  config: Set<number>;
 }
+
+/** Fence info strings of config languages: a block of one shows settings, it runs nothing. */
+const CONFIG_FENCES = new Set(['toml', 'yaml', 'yml', 'ini', 'json', 'jsonc', 'json5', 'conf', 'cfg', 'properties']);
 
 const LIST_ITEM = /^\s{0,3}(?:[-*+]|\d{1,9}[.)])\s/;
 
@@ -366,22 +373,27 @@ export function markdownParts(md: string): MarkdownParts {
   const blocks: string[] = new Array(lines.length).fill('');
   const inline: string[] = new Array(lines.length).fill('');
   const load = new Map<number, string[]>();
+  const config = new Set<number>();
   let fence: string | undefined;
+  let configFence = false;
   let prevBlank = true;
   let indented = false;
   let inList = false;
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    const m = /^\s{0,3}(`{3,}|~{3,})/.exec(line);
+    const m = /^\s{0,3}(`{3,}|~{3,})[ \t]*([^\s`{]*)/.exec(line);
     if (m) {
-      if (!fence) fence = m[1];
-      else if (m[1][0] === fence[0] && m[1].length >= fence.length) fence = undefined;
+      if (!fence) {
+        fence = m[1];
+        configFence = CONFIG_FENCES.has(m[2].toLowerCase());
+      } else if (m[1][0] === fence[0] && m[1].length >= fence.length) fence = undefined;
       indented = false;
       prevBlank = false;
       continue;
     }
     if (fence) {
       blocks[i] = line;
+      if (configFence) config.add(i + 1);
       continue;
     }
     const blank = line.trim() === '';
@@ -407,7 +419,7 @@ export function markdownParts(md: string): MarkdownParts {
       else if (!at.includes(run.command)) at.push(run.command);
     }
   }
-  return { blocks, inline, load };
+  return { blocks, inline, load, config };
 }
 
 /** Inline code spans of one line: a run of N backticks to the next run of exactly N. */

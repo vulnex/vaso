@@ -213,22 +213,17 @@ export async function listSkillTree(dir: string, fs?: FSProvider, opts: { uncapp
     entries = await walkSkillTree(provider, dir, refusedLinks, { overLimit: overLimitLinks, overTotal: overTotalLinks, unrecorded: unrecordedLinks, uncapped: opts.uncapped });
     const skills = vendorNamedSkills(dir, entries);
     const skillMds: string[] = [];
-    for (const entry of entries) {
-      if (!entry.isFile) continue;
-      if (isExcludedPath(dir, entry.parentPath, { keepBuildOutput: true, skills })) continue;
-      const fullPath = entry.parentPath ? join(entry.parentPath, entry.name) : join(dir, entry.name);
-      const ext = extname(entry.name).toLowerCase();
-      // a macOS `._*` sidecar is Finder metadata, not a file of the skill
-      if (await isAppleDouble(provider, fullPath, entry.name)) continue;
+    const add = async (fullPath: string, name: string) => {
+      const ext = extname(name).toLowerCase();
       if (CODE_EXTENSIONS.has(ext) || BINARY_EXTENSIONS.has(ext)) {
         files.push(fullPath);
         codeFiles.push(fullPath);
-      } else if (entry.name.toUpperCase() === 'SKILL.MD') {
+      } else if (name.toUpperCase() === 'SKILL.MD') {
         files.push(fullPath);
         skillMds.push(fullPath);
       // an id_ed25519 or token (with an execute bit or not) is a key, not a program
-      } else if ((ext === '' && entry.name.startsWith('.')) || isSkillAsset(entry.name) || await keyFile(provider, fullPath, entry.name)) {
-        continue;
+      } else if ((ext === '' && name.startsWith('.')) || isSkillAsset(name) || await keyFile(provider, fullPath, name)) {
+        return;
       } else {
         files.push(fullPath);
         // a script by its execute bit (extensionless: without one a `#!` line
@@ -237,7 +232,21 @@ export async function listSkillTree(dir: string, fs?: FSProvider, opts: { uncapp
           codeFiles.push(fullPath);
         }
       }
+    };
+    const sidecars: string[] = [];
+    for (const entry of entries) {
+      if (!entry.isFile) continue;
+      if (isExcludedPath(dir, entry.parentPath, { keepBuildOutput: true, skills })) continue;
+      const fullPath = entry.parentPath ? join(entry.parentPath, entry.name) : join(dir, entry.name);
+      // a macOS `._*` sidecar is Finder metadata, not a file of the skill
+      if (await isAppleDouble(provider, fullPath, entry.name)) {
+        sidecars.push(fullPath);
+        continue;
+      }
+      await add(fullPath, entry.name);
     }
+    // …unless a file of the tree names it (`sh ._setup.sh`): then it is one
+    for (const path of await namedFiles(provider, files, sidecars)) await add(path, basename(path));
     // Files a SKILL.md runs from a vendor folder the walk skips
     const listed = new Set(files);
     const code = new Set(codeFiles);
@@ -330,6 +339,27 @@ async function vendorLoads(fs: FSProvider, root: string, files: readonly string[
     level = next.sort();
   }
   return out;
+}
+
+/**
+ * Those of `candidates` (sidecars) whose name one of `files` mentions, in
+ * candidate order: each file is read once, and only while some candidate is
+ * unnamed.
+ */
+async function namedFiles(fs: FSProvider, files: readonly string[], candidates: readonly string[]): Promise<string[]> {
+  if (candidates.length === 0) return [];
+  const named = new Set<string>();
+  for (const file of [...files].sort()) {
+    if (named.size === candidates.length) break;
+    let text: string;
+    try {
+      text = await readCappedFile(fs, file);
+    } catch {
+      continue;
+    }
+    for (const c of candidates) if (!named.has(c) && text.includes(basename(c))) named.add(c);
+  }
+  return candidates.filter(c => named.has(c));
 }
 
 /** The first of loadCandidates(p) that is a file in a vendor folder of the tree. */

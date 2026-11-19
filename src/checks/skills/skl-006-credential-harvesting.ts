@@ -34,7 +34,14 @@ const CODE_SHAPE = /\||>{1,2}|<\s*[~/$"']|\$\(|`|[\w$\]]\(|[\w$\]]\s*=[^=]/;
 /** `ssh-keygen … -f ~/.ssh/id_ed25519` as the line's only command: it writes a new key, reads none. */
 const KEYGEN = /^\s*(?:[$#>]\s+)?ssh-keygen\s[^|;&<>`$]*$/;
 
+/**
+ * A comment line in a documentation block (`# backend.auth.cmd = "security …"`,
+ * `// token in ~/.npmrc`, `; key = …`) — not a root prompt (`# cat ~/.ssh/id_rsa`).
+ */
+const COMMENT = /^\s*(?:#|\/\/|;)/;
+
 function commandLine(line: string): boolean {
+  if (COMMENT.test(line)) return /^\s*#\s/.test(line) && COMMAND_WORD.test(line);
   return COMMAND_WORD.test(line) || CODE_SHAPE.test(line);
 }
 
@@ -69,9 +76,11 @@ export const skl006 = defineCheck({
           // `!`cmd`` span runs when Claude Code loads the skill
           const onLoad = loadFormAt(src, match.line, cmd => scanWithPatterns(cmd, CRED_HARVEST_RULES).length > 0);
           // …and a code block line that isn't a command (sample output, a
-          // note: "cause: token in ~/.docker/config.json expired") names one
+          // note: "cause: token in ~/.docker/config.json expired", a comment,
+          // a setting in a ```toml block) names one
           const mention = !onLoad && src.kind === 'markdown'
-            && (src.inlineLines?.has(match.line) === true || !commandLine(lines[match.line - 1] ?? ''));
+            && (src.inlineLines?.has(match.line) === true || src.configLines?.has(match.line) === true
+              || !commandLine(lines[match.line - 1] ?? ''));
           // …and documentation that has ssh-keygen write a new key there reads none
           const keygen = !onLoad && !mention && src.kind === 'markdown' && KEYGEN.test(lines[match.line - 1] ?? '');
           evidence.push({

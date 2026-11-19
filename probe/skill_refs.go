@@ -105,7 +105,17 @@ var relativeLoad = regexp.MustCompile(`(?:\brequire\s*\(\s*|\bimport\s*\(\s*|\bf
 
 // loadSourceExtensions mirrors LOAD_SOURCE_EXTENSIONS; maxVendorLoads and
 // maxVendorLoadDepth mirror MAX_VENDOR_LOADS and MAX_VENDOR_LOAD_DEPTH.
-var loadSourceExtensions = map[string]bool{".js": true, ".mjs": true, ".cjs": true, ".jsx": true, ".ts": true, ".tsx": true, ".mts": true, ".cts": true}
+// builtLoad mirrors BUILT_LOAD in src/core/skill-tree-files.ts: a module
+// path built from the script's folder out of literal segments
+// (path.join(__dirname, ...), new URL(..., import.meta.url),
+// os.path.join(os.path.dirname(__file__), ...)) and Python sys.path folders.
+var builtLoad = regexp.MustCompile(`\b(?:path\.)?(?:join|resolve)\s*\(\s*(?:__dirname|import\.meta\.dirname)\s*((?:,\s*(?:'[^'\n]*'|"[^"\n]*")\s*)+)\)|\bnew\s+URL\s*\(\s*(?:'([^'\n]{1,256})'|"([^"\n]{1,256})")\s*,\s*import\.meta\.url\s*\)|\bos\.path\.join\s*\(\s*os\.path\.dirname\s*\(\s*(?:os\.path\.(?:abspath|realpath)\s*\(\s*__file__\s*\)|__file__)\s*\)\s*((?:,\s*(?:'[^'\n]*'|"[^"\n]*")\s*)+)\)|\bsys\.path\.(?:insert\s*\(\s*\d+\s*,|append\s*\()\s*(?:'([^'\n]{1,256})'|"([^"\n]{1,256})"|os\.path\.join\s*\(\s*os\.path\.dirname\s*\(\s*(?:os\.path\.(?:abspath|realpath)\s*\(\s*__file__\s*\)|__file__)\s*\)\s*((?:,\s*(?:'[^'\n]*'|"[^"\n]*")\s*)+)\))`)
+
+var loadSegment = regexp.MustCompile(`'([^'\n]*)'|"([^"\n]*)"`)
+
+var pyImport = regexp.MustCompile(`(?m)^[ \t]*(?:import[ \t]+([\w.]+(?:[ \t]+as[ \t]+\w+)?(?:[ \t]*,[ \t]*[\w.]+(?:[ \t]+as[ \t]+\w+)?)*)|from[ \t]+(\w[\w.]*)[ \t]+import\b)`)
+
+var loadSourceExtensions = map[string]bool{".js": true, ".mjs": true, ".cjs": true, ".jsx": true, ".ts": true, ".tsx": true, ".mts": true, ".cts": true, ".py": true}
 
 const (
 	maxVendorLoads     = 64
@@ -122,19 +132,144 @@ func loadReferences(p, text string) []string {
 	if filepath.Base(p) == "package.json" {
 		return vendorReferences(text)
 	}
+	var found []foldedLoad
+	for _, m := range relativeLoad.FindAllStringSubmatchIndex(text, -1) {
+		g := 2
+		if m[2] < 0 {
+			g = 4
+		}
+		found = append(found, foldedLoad{m[0], text[m[g]:m[g+1]]})
+	}
+	loads, dirs := foldedLoads(text)
+	found = append(found, loads...)
+	// a sys.path folder: the modules the script imports from it
+	if len(dirs) > 0 {
+		modules := pythonImports(text)
+		for _, d := range dirs {
+			for _, mod := range modules {
+				found = append(found, foldedLoad{d.at, d.spec + "/" + mod + ".py"}, foldedLoad{d.at, d.spec + "/" + mod + "/__init__.py"})
+			}
+		}
+	}
+	// in source order (a stable sort keeps a sys.path folder's modules together)
+	sort.SliceStable(found, func(i, j int) bool { return found[i].at < found[j].at })
 	var out []string
 	seen := map[string]bool{}
-	for _, m := range relativeLoad.FindAllStringSubmatch(text, -1) {
+	for _, f := range found {
 		if len(out) >= maxVendorReferences {
 			break
 		}
-		spec := m[1]
-		if spec == "" {
-			spec = m[2]
+		if !seen[f.spec] {
+			seen[f.spec] = true
+			out = append(out, f.spec)
 		}
-		if !seen[spec] {
-			seen[spec] = true
-			out = append(out, spec)
+	}
+	return out
+}
+
+// foldedLoad is a load specifier and its offset in the source.
+type foldedLoad struct {
+	at   int
+	spec string
+}
+
+// relativeSpec mirrors relativeSpec in src/core/skill-tree-files.ts: literal
+// segments as a relative specifier, refused when one is absolute.
+func relativeSpec(segs []string) (string, bool) {
+	if len(segs) > 16 {
+		return "", false
+	}
+	var parts []string
+	for _, s := range segs {
+		if len([]rune(s)) > 256 || strings.HasPrefix(s, "/") || strings.HasPrefix(s, "~") || strings.Contains(s, `\`) || strings.Contains(s, ":") {
+			return "", false
+		}
+		for _, p := range strings.Split(s, "/") {
+			if p != "" && p != "." {
+				parts = append(parts, p)
+			}
+		}
+	}
+	if len(parts) == 0 {
+		return "", false
+	}
+	return "./" + strings.Join(parts, "/"), true
+}
+
+// foldedLoads mirrors foldedLoads in src/core/skill-tree-files.ts: builtLoad
+// matches as relative specifiers with their offsets — module paths, and
+// Python sys.path folders.
+func foldedLoads(text string) (loads, dirs []foldedLoad) {
+	for _, m := range builtLoad.FindAllStringSubmatchIndex(text, -1) {
+		group := func(g int) (string, bool) {
+			if m[2*g] < 0 {
+				return "", false
+			}
+			return text[m[2*g]:m[2*g+1]], true
+		}
+		var segs []string
+		listed := false
+		for _, g := range []int{1, 4, 7} {
+			if list, ok := group(g); ok {
+				for _, q := range loadSegment.FindAllStringSubmatch(list, -1) {
+					if strings.HasPrefix(q[0], "'") {
+						segs = append(segs, q[1])
+					} else {
+						segs = append(segs, q[2])
+					}
+				}
+				listed = true
+				break
+			}
+		}
+		if !listed {
+			for _, g := range []int{2, 3, 5, 6} {
+				if single, ok := group(g); ok {
+					segs = []string{single}
+					break
+				}
+			}
+		}
+		spec, ok := relativeSpec(segs)
+		if !ok {
+			continue
+		}
+		_, d5 := group(5)
+		_, d6 := group(6)
+		_, d7 := group(7)
+		if d5 || d6 || d7 {
+			dirs = append(dirs, foldedLoad{m[0], spec})
+		} else {
+			loads = append(loads, foldedLoad{m[0], spec})
+		}
+	}
+	return loads, dirs
+}
+
+// pythonImports mirrors pythonImports in src/core/skill-tree-files.ts: the
+// top-level module names a Python file imports, in order, without duplicates.
+func pythonImports(text string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, m := range pyImport.FindAllStringSubmatchIndex(text, -1) {
+		var names []string
+		if m[2] >= 0 {
+			for _, n := range strings.Split(text[m[2]:m[3]], ",") {
+				n = strings.TrimSpace(n)
+				if i := strings.IndexAny(n, " \t"); i >= 0 {
+					n = n[:i]
+				}
+				names = append(names, n)
+			}
+		} else {
+			names = []string{text[m[4]:m[5]]}
+		}
+		for _, n := range names {
+			top := strings.Split(n, ".")[0]
+			if top != "" && !seen[top] {
+				seen[top] = true
+				out = append(out, top)
+			}
 		}
 	}
 	return out
