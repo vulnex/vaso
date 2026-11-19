@@ -3,7 +3,10 @@ import type { AgentInstallation, AgentType, CheckResult, ParsedConfig, ScanConte
 import { AGENT_TYPES } from '../core/types.js';
 import { SnapshotFSProvider } from '../core/snapshot-fs-provider.js';
 import { checkRegistry } from '../core/check-registry.js';
-import { maskCredentialsInLine, maskCredentialsInText, toReportJson } from '../reporting/serialize.js';
+import { maskCredentialsDeep, maskCredentialsInLine, maskCredentialsInText, toReportJson } from '../reporting/serialize.js';
+import { scanMemorySecrets } from '../analyzers/memory-secrets.js';
+import { findHighEntropyBlocks } from '../analyzers/entropy.js';
+import { redactSecretsInLine, secretShape } from '../core/patterns.js';
 import { registerAllChecks } from './index.js';
 
 /**
@@ -144,5 +147,92 @@ describe('plaintext-secret evidence never quotes a secret', () => {
       }
     }
     for (const id of ['WS-003', 'DEV-003', 'CC-004', 'QC-001', 'GEM-001', 'CD-001']) expect(flagged).toContain(id);
+  });
+});
+
+/**
+ * dt24 g8-R1/g5-R1/g4-R1: the shared helpers quoted the first and last 4
+ * characters of a token (memory files, CFG-002/POL-002, entropy blocks) or
+ * its first 4 (`mcp list` JSON). They print its kind and length only.
+ */
+describe('shared secret helpers print a secret\'s shape, no character of it', () => {
+  beforeAll(() => {
+    if (checkRegistry.getAll().length === 0) registerAllChecks();
+  });
+
+  const GITHUB_TOKEN = 'ghp_Jr5Qw8Mt2Zk7Vn4Hb9Lc3Ys6Fd1Gp0Ue2Wax';
+
+  /** No 4-character run of `s` in `text`. */
+  function quotes(text: string, s: string): string | undefined {
+    for (let i = 0; i + 4 <= s.length; i++) if (text.includes(s.slice(i, i + 4))) return s.slice(i, i + 4);
+    return undefined;
+  }
+
+  it('memory files: known tokens and high-entropy strings', () => {
+    const blob = 'Q9w8E7r6T5y4U3i2O1p0AaSsDdFfGgHhJjKkLlZzXxCcVvBbNnMm+/';
+    const ev = scanMemorySecrets('/h/AGENTS.md', `Use ${GITHUB_TOKEN} for the API\nThe blob is "${blob}" here\n`);
+    expect(ev.map(e => e.snippet)).toEqual([`<literal, ${GITHUB_TOKEN.length} chars, GitHub PAT>`, `<literal, ${blob.length} chars, high-entropy string>`]);
+    for (const e of ev) {
+      expect(quotes(toReportJson(e), GITHUB_TOKEN.slice(4))).toBeUndefined();
+      expect(quotes(toReportJson(e), blob)).toBeUndefined();
+    }
+  });
+
+  it('entropy blocks', () => {
+    const [b] = findHighEntropyBlocks(`const k = "${ENTROPIC}";`, 4.5, 30);
+    expect(b.snippet).toBe(`<literal, ${ENTROPIC.length} chars, high-entropy string>`);
+  });
+
+  it('CFG-002: the token\'s kind and length, around the match in a one-line config', async () => {
+    const random = 'Hk3Lq9Zm2Vx7Rt5Wb8Nc4Py1Jd6Gs0Fa';
+    const raw = JSON.stringify({ sessionId: random, region: 'eu-west-1', theme: 'dark', retries: 3, timeoutMs: 30000, logLevel: 'info', apiKey: OPENAI_KEY });
+    const configs = [{ raw, format: 'json', filePath: `${HOME}/.openclaw/openclaw.json`, data: JSON.parse(raw) }] as ParsedConfig[];
+    const ctx: ScanContext = { installation: { agent: 'openclaw', installDir: `${HOME}/.openclaw`, configFiles: configs }, configs, platform: 'linux', fs: emptyFs() };
+    const r = await checkRegistry.getAll().find(c => c.id === 'CFG-002')!.run(ctx);
+    expect(r.passed).toBe(false);
+    const text = toReportJson(r);
+    expect(text).toContain(`<literal, ${OPENAI_KEY.length} chars, OpenAI API key>`);
+    expect(quotes(text, OPENAI_KEY.slice(8))).toBeUndefined();
+    expect(quotes(text, random)).toBeUndefined();
+  });
+
+  it('mcp list JSON: env and header values', () => {
+    const out = toReportJson({ configs: [{ servers: [{ name: 's', env: { GITHUB_TOKEN, DB_PASSWORD: PASSWORD }, headers: { Authorization: `Bearer ${SHORT_TOKEN}` } }] }] });
+    for (const s of [GITHUB_TOKEN, PASSWORD, SHORT_TOKEN]) expect(quotes(out, s)).toBeUndefined();
+    const terminal = JSON.stringify(maskCredentialsDeep({ env: { GITHUB_TOKEN } }));
+    expect(quotes(terminal, GITHUB_TOKEN)).toBeUndefined();
+  });
+
+  it('redactSecretsInLine (CFG-002, POL-002, skill descriptions)', () => {
+    const out = redactSecretsInLine(`token: ${GITHUB_TOKEN}`);
+    expect(out).toBe(`token: <literal, ${GITHUB_TOKEN.length} chars, GitHub PAT>`);
+    // the report masker keeps the shape as written
+    expect(maskCredentialsInLine(out)).toBe(out);
+    expect(JSON.parse(toReportJson({ snippet: `"apiKey":"${secretShape(OPENAI_KEY, 'OpenAI API key')}"` })).snippet).toContain('OpenAI API key');
+  });
+});
+
+/** dt24 g4-R3: a short `${VAR:-default}` under a credential name is a stored secret. */
+describe('a stored default under a credential name', () => {
+  beforeAll(() => {
+    if (checkRegistry.getAll().length === 0) registerAllChecks();
+  });
+  const PW = 'Xe5rT2yQ8u';
+  const server = { command: 'npx', args: ['-y', 'dmcp@1.0.0'], env: { DB_PASS: `${'$'}{DB_PASS:-${PW}}`, LOG_LEVEL: '${LOG_LEVEL:-info}' } };
+
+  it.each([['gemini-cli', 'GEM-001', '/.gemini/settings.json'], ['devin', 'DEV-003', '/.config/devin/mcp_config.json']] as const)('%s: %s flags it, quoting none of it', async (agent, id, rel) => {
+    const data = { mcpServers: { a: server } };
+    const configs = [{ raw: JSON.stringify(data), format: 'json', filePath: HOME + rel, data }] as ParsedConfig[];
+    const ctx: ScanContext = { installation: { agent, installDir: HOME, configFiles: configs }, configs, platform: 'linux', fs: emptyFs() };
+    const r = await checkRegistry.getAll().find(c => c.id === id)!.run(ctx);
+    expect(r.passed).toBe(false);
+    expect(r.evidence?.some(e => !e.mitigated && e.snippet?.includes('DB_PASS'))).toBe(true);
+    expect(toReportJson(r)).not.toContain(PW.slice(2, 8));
+    expect(r.evidence?.some(e => e.snippet?.includes('LOG_LEVEL') && !e.mitigated)).toBe(false);
+  });
+
+  it('mcp list JSON masks the default, keeping the reference', () => {
+    const out = JSON.parse(toReportJson({ configs: [{ servers: [{ name: 'a', ...server }] }] }));
+    expect(out.configs[0].servers[0].env).toEqual({ DB_PASS: '${DB_PASS:-***}', LOG_LEVEL: '${LOG_LEVEL:-info}' });
   });
 });

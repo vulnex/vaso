@@ -1,7 +1,7 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { isKnownSecretValue, isSecretNamedValue } from '../../analyzers/secret-values.js';
-import { secretShape } from '../../core/patterns.js';
+import { secretShape, storedFallback } from '../../core/patterns.js';
 
 // …or a name ending in KEY / PAT (MISTRAL_KEY, GITLAB_PAT)
 const SECRET_KEY_NAMES = /(?:api[_-]?key|token|secret|password|passwd|credential|auth|private[_-]?key|(?:^|[_-])(?:key|pat)$)/i;
@@ -15,6 +15,8 @@ const AUTH_SCHEME = /^(?:bearer|basic|token)\s+/i;
  * placeholders, public keys and client IDs are never secrets.
  */
 function isSecretValue(key: string, value: string): boolean {
+  // `DB_PASS: ${DB_PASS:-<pw>}`: the default is stored here, however short
+  if (storedFallback(key, value) !== undefined) return true;
   return SECRET_KEY_NAMES.test(key) ? isSecretNamedValue(key, value) : isKnownSecretValue(value);
 }
 

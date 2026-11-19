@@ -213,3 +213,18 @@ describe('dt21 round 2: identifier keys', () => {
     expect(scanMemorySecrets('/r/CLAUDE.md', md).map(e => e.line)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12]); // line 10's value isn't random enough (as in round 1)
   });
 });
+
+// dt24 g4-R2: the probe disguises the strings this rule reports in memory
+// files (probe/secret_scrub_memory.go); both read this table
+describe('memory-file entropy rule (probe parity)', () => {
+  it('reports the quoted strings of probe/testdata/memory-entropy-cases.json as the probe finds them', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const { resolve } = await import('node:path');
+    const cases = JSON.parse(await readFile(resolve(import.meta.dirname, '../../probe/testdata/memory-entropy-cases.json'), 'utf-8')) as Array<{ line: string; flagged: boolean }>;
+    expect(cases.length).toBeGreaterThanOrEqual(10);
+    for (const c of cases) {
+      const ev = scanMemorySecrets('/h/AGENTS.md', `# Notes\n\n${c.line}\n`).filter(e => e.detail?.startsWith('High-entropy'));
+      expect(ev.length > 0, c.line).toBe(c.flagged);
+    }
+  });
+});

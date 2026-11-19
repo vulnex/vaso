@@ -384,7 +384,11 @@ func Collect(manifest ProbeManifest, escalate bool) ProbeSnapshot {
 	var expandedGlobs []glob
 	for _, raw := range manifest.GlobPatterns {
 		for _, p := range expandPaths([]string{raw}, homes) {
-			if envGlobRefused(raw, p) {
+			if envGlobRefused(raw, p, c.homes) {
+				// Its links, so the CLI judges where the base leads as locally
+				if base := globBase(p); filepath.IsAbs(base) {
+					c.recordLinkChain(&snapshot, base)
+				}
 				continue
 			}
 			expandedGlobs = append(expandedGlobs, glob{p, isSkillPattern(raw)})
@@ -400,7 +404,7 @@ func Collect(manifest ProbeManifest, escalate bool) ProbeSnapshot {
 	var metadataGlobs []string
 	for _, raw := range manifest.MetadataGlobPatterns {
 		for _, p := range expandPaths([]string{raw}, homes) {
-			if !envGlobRefused(raw, p) {
+			if !envGlobRefused(raw, p, c.homes) {
 				metadataGlobs = append(metadataGlobs, p)
 			}
 		}
@@ -1441,9 +1445,12 @@ func redactEnvValue(key, val string) string {
 	trimmed := strings.TrimSpace(val)
 	if strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[") {
 		var parsed interface{}
+		// JSONC (comments, trailing commas) as the CLI reads it (stripJSONC);
+		// broken JSON can't be disguised inside, so it is redacted whole
 		if err := json.Unmarshal([]byte(trimmed), &parsed); err != nil {
-			// JSONC or broken JSON: can't redact inside it, so not at all
-			return redactedEnvValue
+			if err := json.Unmarshal([]byte(stripJSONC(trimmed)), &parsed); err != nil {
+				return redactedEnvValue
+			}
 		}
 		if out, err := json.Marshal((&collector{}).disguiseJSONValue(parsed, "", false)); err == nil {
 			return string(out)

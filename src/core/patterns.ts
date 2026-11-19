@@ -111,6 +111,23 @@ export function isEnvReference(value: string): boolean {
   return envReference(value) !== undefined;
 }
 
+/** A credential word in a key or variable name (`DB_PASS`, `apiKey`, `GITHUB_TOKEN`). */
+const CREDENTIAL_NAME_WORD = /api[_-]?key|apikey|token|secret|passw|passphrase|(?:^|[_.-])pass(?:$|[_.-])|pwd|credential|auth|private[_-]?key|(?:^|[_.-])(?:key|pat)$/i;
+
+/**
+ * The default a `${VAR:-default}` (`${VAR-…}`, `${VAR:=…}`) value under a
+ * credential-named key stores: the credential itself, however short
+ * (`DB_PASS: ${DB_PASS:-Xe5rT2yQ8u}`) — envReference only counts a 16+
+ * character one, as it can't see the key. Undefined when there is none, or
+ * it is empty, a placeholder or another reference. probe/secret_scrub_fallback.go.
+ */
+export function storedFallback(name: string, value: string): string | undefined {
+  if (!CREDENTIAL_NAME_WORD.test(name)) return undefined;
+  const fallback = /^\$\{[A-Za-z_][A-Za-z0-9_]*:?[-=](.*)\}$/.exec(value.replace(AUTH_SCHEME_PREFIX, '').trim())?.[1].trim();
+  if (!fallback || isPlaceholderSecret(fallback) || isEnvReference(fallback) || isSecretReference(fallback)) return undefined;
+  return fallback;
+}
+
 /**
  * Where a secret is kept, written in place of the secret: a secret manager's
  * reference, which the server or a wrapper (`op run`, `vals`, the platform)
@@ -240,13 +257,19 @@ export const OAUTH_TOKEN_VALUE_PATTERNS = [
  * secret, and the report masker reads a trailing `…` as a placeholder
  * (`sk-ant-…`), so it printed it in every format.
  */
-export function secretShape(value: string): string {
-  return `<literal, ${value.length} chars>`;
+export function secretShape(value: string, kind?: string): string {
+  // the kind inside the brackets: before them, the report masker read its
+  // first word as the value (`token: *** PAT <literal, 40 chars>`)
+  return kind ? `<literal, ${value.length} chars, ${kind}>` : `<literal, ${value.length} chars>`;
 }
 
-export function redactSecret(token: string): string {
-  if (token.length <= 12) return `[REDACTED:${token.length}c]`;
-  return `${token.slice(0, 4)}...${token.slice(-4)}`;
+/**
+ * A recognised token as evidence prints it: its length and kind, no
+ * character of it (`<literal, 40 chars, GitHub PAT>`). The first and last
+ * four characters it used to keep were 8 of a short token's characters.
+ */
+export function redactSecret(token: string, kind?: string): string {
+  return secretShape(token, kind);
 }
 
 function withGlobalFlag(pattern: RegExp): RegExp {
@@ -306,10 +329,43 @@ export function snippetAround(line: string, index: number, length: number, maxLe
   return `${start > 0 ? '... ' : ''}${truncateSnippet(text.slice(start), keep)}`;
 }
 
-export function redactSecretsInLine(line: string, maxLen = 80): string {
-  let redacted = line;
-  for (const { pattern } of API_KEY_PATTERNS) {
-    redacted = redacted.replace(withGlobalFlag(pattern), (m) => redactSecret(m));
+/** `text` with every recognised token replaced by its kind and length. */
+function redactTokens(text: string): string {
+  let redacted = text;
+  for (const { pattern, name } of API_KEY_PATTERNS) {
+    redacted = redacted.replace(withGlobalFlag(pattern), (m) => redactSecret(m, name));
   }
-  return truncateSnippet(redacted.trim(), maxLen);
+  return redacted;
+}
+
+export function redactSecretsInLine(line: string, maxLen = 80): string {
+  return truncateSnippet(redactTokens(line).trim(), maxLen);
+}
+
+/** A bare run of 32+ token characters: a key with no prefix a pattern knows. */
+const BARE_TOKEN_RUN = /(?<![A-Za-z0-9+/=_-])[A-Za-z0-9+/=_-]{32,}(?![A-Za-z0-9+/=_-])/g;
+
+/**
+ * Prose a check quotes (an instruction, a description) with every token in
+ * it named by its shape: a recognised format, or a bare random run of 32+
+ * characters in all three classes (an AWS secret key) — words, paths and
+ * hex digests stay.
+ */
+export function redactProseSecrets(text: string, maxLen = 100): string {
+  const bare = redactTokens(text).replace(BARE_TOKEN_RUN, (t) => {
+    const classes = [/[a-z]/, /[A-Z]/, /[0-9]/].filter(re => re.test(t)).length;
+    return classes === 3 && shannonEntropy(t) >= 4 ? secretShape(t, 'high-entropy token') : t;
+  });
+  return truncateSnippet(bare.trim(), maxLen);
+}
+
+/**
+ * redactSecretsInLine around the match at `index` (length `length`): in a
+ * one-line (minified) file the line is the whole file, and a snippet from
+ * its start quoted whatever values came first, not the match.
+ */
+export function redactSecretsAround(line: string, index: number, length: number, maxLen = 80): string {
+  const before = redactTokens(line.slice(0, index));
+  const at = redactTokens(line.slice(index, index + length));
+  return snippetAround(before + at + redactTokens(line.slice(index + length)), before.length, at.length, maxLen);
 }

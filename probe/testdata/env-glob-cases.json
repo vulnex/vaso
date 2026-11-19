@@ -1,0 +1,17 @@
+[
+  { "value": "/", "glob": "${OPENCLAW_STATE_DIR}/**/*.json5", "refused": true },
+  { "value": "$HOME", "glob": "${OPENCLAW_STATE_DIR}/**/*.json5", "refused": true },
+  { "value": "$HOME/..", "glob": "${OPENCLAW_STATE_DIR}/**/*.json5", "refused": true },
+  { "value": "$HOME/.ssh", "glob": "${OPENCLAW_STATE_DIR}/**/*.json5", "refused": true },
+  { "value": "$HOME/.openclaw-state", "glob": "${OPENCLAW_STATE_DIR}/**/*.json5", "refused": false },
+  { "value": "$HOME", "glob": "${OPENCLAW_STATE_DIR}/skills/**", "refused": false },
+  { "value": "/home/someone-else/.openclaw", "glob": "${OPENCLAW_STATE_DIR}/skills/**", "refused": true },
+  { "value": "/home", "glob": "${PICOCLAW_HOME}/workspace*/skills/**", "refused": true },
+  { "value": "/", "glob": "${PICOCLAW_HOME}/workspace*/skills/**", "refused": true },
+  { "value": "/etc/openclaw", "glob": "${OPENCLAW_STATE_DIR}/skills/**", "refused": true },
+  { "value": "/var/lib/openclaw", "glob": "${OPENCLAW_STATE_DIR}/skills/**", "refused": false },
+  { "value": "/var/lib/openclaw", "glob": "${OPENCLAW_STATE_DIR}/**/*.json5", "refused": false },
+  { "value": "/var/lib/picoclaw", "glob": "${PICOCLAW_HOME}/workspace*/skills/**", "refused": false },
+  { "value": "/usr/lib/node_modules/openclaw", "glob": "${OPENCLAW_STATE_DIR}/skills/**", "refused": false },
+  { "value": "/opt/openclaw", "glob": "${OPENCLAW_STATE_DIR}/skills/**", "refused": false }
+]

@@ -655,6 +655,9 @@ func commandSegments(line string) []commandSegment {
 		}
 		return i
 	}
+	// the quote open before the word (a JSON or YAML string the command is
+	// written in), read up to scanned
+	outer, scanned := -1, 0
 	for i := 0; i < len(line); {
 		for i < len(line) && space(line[i]) {
 			i++
@@ -664,11 +667,12 @@ func commandSegments(line string) []commandSegment {
 		if start == i {
 			break
 		}
+		outer, scanned = pairQuotes(line, scanned, start, outer), start
 		from := start
 		begin := false
 		for from < i {
 			ch := line[from]
-			ansiC := ch == '$' && from+1 < i && (line[from+1] == '\'' || line[from+1] == '"')
+			ansiC := dollarQuote(line, from, i) > 0
 			if !ansiC && strings.IndexByte("'\"`([{,\\", ch) < 0 {
 				break
 			}
@@ -676,6 +680,14 @@ func commandSegments(line string) []commandSegment {
 			from++
 		}
 		open := pairQuotes(line, start, i, -1)
+		// the last word of a string the command is written in: its last
+		// quote (before closing brackets: ["-c", "… -P 'pw'"]) closes that
+		// string, not one of the word's
+		outerEnd := -1
+		if open >= 0 && outer >= 0 && sameQuote(line, open, outer) && strings.Trim(line[open+1:i], ")]},;") == "" &&
+			pairQuotes(line, start, open, -1) < 0 {
+			outerEnd, open = open, -1
+		}
 		// a quote opened inside the word: the word runs to its closing quote
 		for open >= from && wordAfter(line, open+1, i) {
 			c, ok := closing[open]
@@ -694,7 +706,12 @@ func commandSegments(line string) []commandSegment {
 			to--
 		}
 		balanced := open < 0
-		structural := strings.ContainsAny(line[start:from], "([{,") || strings.ContainsAny(line[to:i], ")]},")
+		// punctuation after the string's closing quote is the string's, not the word's
+		tail := line[to:i]
+		if outerEnd >= to {
+			tail = line[to:outerEnd]
+		}
+		structural := strings.ContainsAny(line[start:from], "([{,") || strings.ContainsAny(tail, ")]},")
 		prevFlag := len(cur) > 0 && flagShaped(cur[len(cur)-1].word)
 		// a quoted word after a flag is the flag's argument
 		argument := begin && balanced && prevFlag
@@ -722,7 +739,8 @@ func commandSegments(line string) []commandSegment {
 		if tok.word != "" {
 			cur = append(cur, tok)
 		}
-		if semicolon || end && !argument && !single && !(balanced && !begin) {
+		// the string the command is written in ends with this word: so does the command
+		if semicolon || outerEnd >= 0 || end && !argument && !single && !(balanced && !begin) {
 			flush()
 		}
 	}
@@ -755,6 +773,43 @@ func ansiEscape(s string) (string, int) {
 	return "\\" + s[:1], 1
 }
 
+// escapedAuthHeader is an Authorization header in a shell word with its
+// spaces escaped (curl -H Authorization:\ Bearer\ <token>, the backslashes
+// doubled inside a JSON string): the word assembly splits at the spaces.
+// ESCAPED_AUTH_HEADER in src/reporting/serialize.ts.
+var escapedAuthHeader = regexp.MustCompile(`(?i)(authorization:(?:\\+[ \t])+(?:bearer|basic|token)(?:\\+[ \t])+)([^\s"'\\]+)`)
+
+// disguiseEscapedAuthHeaders disguises the credential of each escapedAuthHeader.
+func (c *collector) disguiseEscapedAuthHeaders(s string) string {
+	if !strings.Contains(s, "\\") {
+		return s
+	}
+	return escapedAuthHeader.ReplaceAllStringFunc(s, func(m string) string {
+		g := escapedAuthHeader.FindStringSubmatch(m)
+		return g[1] + c.disguiseKeyed("authorization", g[2])
+	})
+}
+
+// dollarQuote: line[j] is the $ of $'…' or $"…" — the latter also with its
+// quote escaped (sshpass -p $\"pw\" in a JSON string) — and the index of
+// that quote; 0 otherwise. A $ before an escaped ' is a plain $.
+func dollarQuote(line string, j, to int) int {
+	if line[j] != '$' || j+1 >= to {
+		return 0
+	}
+	if line[j+1] == '\'' {
+		return j + 1
+	}
+	k := j + 1
+	for k < to && line[k] == '\\' {
+		k++
+	}
+	if k < to && line[k] == '"' {
+		return k
+	}
+	return 0
+}
+
 // quotesLeftOut is the word line[from:to] without the quotes inside it and
 // the backslashes escaping them; $'…' is read as bash does, its escapes
 // decoded ($"…" quotes like "…").
@@ -782,9 +837,11 @@ func quotesLeftOut(line string, from, to int) commandToken {
 			ansi = false
 			continue
 		case ansi:
-		case ch == '$' && j+1 < to && (line[j+1] == '\'' || line[j+1] == '"'):
-			ansi = line[j+1] == '\''
-			j++
+		case dollarQuote(line, j, to) > 0:
+			q := dollarQuote(line, j, to)
+			ansi = line[q] == '\''
+			// $\"…\" in a JSON string: its quote's backslashes go too
+			j = q
 			continue
 		case isQuoteByte(ch):
 			continue

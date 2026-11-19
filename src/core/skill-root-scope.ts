@@ -182,6 +182,34 @@ export async function skillTreeAllowed(fs: FSProvider, dir: string, home: string
 }
 
 /**
+ * probe/env_globs.go envGlobRefused: a manifest skills glob an environment
+ * variable roots (`${OPENCLAW_STATE_DIR}/skills/**`) is not walked when its
+ * base is the filesystem root, a scanned home or a directory above one,
+ * another user's home or a credential store — the first such label, or
+ * undefined when it is walked. An OS directory's subtree the variable names
+ * (/var/lib/openclaw, a systemd StateDirectory) is walked. `homes` are the
+ * scanned homes.
+ */
+export async function envTreeRefusal(fs: FSProvider, base: string, homes: readonly string[]): Promise<string | undefined> {
+  if (!isAbsolute(base)) return undefined;
+  if (clean(base) === '/') return 'root';
+  const me = homedirOf(fs);
+  if (!me || clean(me) === '/') return 'home';
+  const { own, all } = await scopeHomes(fs, me);
+  for (const h of homes) {
+    if (!isAbsolute(h)) continue;
+    for (const s of [clean(h), clean(await resolveExisting(fs, clean(h)))]) if (!all.includes(s)) all.push(s);
+  }
+  const labels = [...(await pathScope(fs, base, own, all))].filter(l => !l.startsWith('system:'));
+  return LABEL_ORDER.map(prefix => labels.filter(l => l === prefix || l.startsWith(prefix)).sort()[0]).find(l => l !== undefined);
+}
+
+/** A label of envTreeRefusal as a report phrases it. */
+export function refusalPhrase(label: string): string {
+  return labelPhrase(label);
+}
+
+/**
  * For a walk of the skills tree at `root`: whether a link in it may be
  * followed (or the file behind it read) — what it leads to, as written and
  * resolved, carries no label the root itself doesn't (a bundled tree under

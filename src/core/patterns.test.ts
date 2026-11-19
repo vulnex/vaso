@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { isPlaceholderSecret, isSecretReference, redactSecret, redactSecretsInLine, snippetAround, truncateSnippet } from './patterns.js';
+import { isPlaceholderSecret, isSecretReference, redactSecret, redactSecretsInLine, snippetAround, storedFallback, truncateSnippet } from './patterns.js';
+import { isSecretNamedValue } from '../analyzers/secret-values.js';
 
 describe('isSecretReference (dt17 MD-C)', () => {
   it('knows secret manager references, key files, profile names and env references', () => {
@@ -20,18 +21,12 @@ describe('isSecretReference (dt17 MD-C)', () => {
 });
 
 describe('redactSecret', () => {
-  it('reveals first 4 + last 4 characters of long tokens', () => {
+  // dt24: first 4 + last 4 characters were 8 of a short token's characters
+  it('names a token by its kind and length, none of its characters', () => {
     const token = 'sk-ant-aaaaaaaaaaaaaaaaaaaabbbbcccc';
-    expect(redactSecret(token)).toBe('sk-a...cccc');
-  });
-
-  it('fully masks short tokens with their length', () => {
-    expect(redactSecret('short')).toBe('[REDACTED:5c]');
-    expect(redactSecret('twelve_chars')).toBe('[REDACTED:12c]');
-  });
-
-  it('switches to fingerprint at 13 characters', () => {
-    expect(redactSecret('thirteen_char')).toBe('thir...char');
+    expect(redactSecret(token)).toBe('<literal, 35 chars>');
+    expect(redactSecret(token, 'Anthropic API key')).toBe('<literal, 35 chars, Anthropic API key>');
+    expect(redactSecret('short')).toBe('<literal, 5 chars>');
   });
 });
 
@@ -41,7 +36,7 @@ describe('redactSecretsInLine', () => {
     const out = redactSecretsInLine(line);
     expect(out).toContain('"apiKey":');
     expect(out).not.toContain('sk-abc123456789012345678901234567890123');
-    expect(out).toMatch(/sk-a\.\.\./);
+    expect(out).toContain('<literal, 39 chars, OpenAI API key>');
   });
 
   it('redacts every secret in a line, even when multiple distinct patterns match', () => {
@@ -102,7 +97,8 @@ describe('redactSecretsInLine', () => {
     const out = redactSecretsInLine(line);
     expect(out).not.toContain(tok);
     expect(out).not.toContain('AAWXYZ');
-    expect(out).toMatch(/ghp_\.\.\.WXYZ/);
+    expect(out).not.toContain('WXYZ');
+    expect(out).toContain('<literal, 46 chars, ');
   });
 
   it('redacts a longer-than-spec gho_ token without leaking bridging bytes', () => {
@@ -111,7 +107,8 @@ describe('redactSecretsInLine', () => {
     const out = redactSecretsInLine(line);
     expect(out).not.toContain(tok);
     expect(out).not.toContain('BBWXYZ');
-    expect(out).toMatch(/gho_\.\.\.WXYZ/);
+    expect(out).not.toContain('WXYZ');
+    expect(out).toContain('<literal, 48 chars, GitHub OAuth token>');
   });
 
   it('redacts a Telegram bot token longer than 35 chars after the colon', () => {
@@ -132,7 +129,8 @@ describe('redactSecretsInLine', () => {
     const out = redactSecretsInLine(line);
     expect(out).not.toContain(tok);
     expect(out).not.toContain('BWXYZ');
-    expect(out).toMatch(/AKIA\.\.\.WXYZ/);
+    expect(out).not.toContain('WXYZ');
+    expect(out).toContain('<literal, 26 chars, AWS Access Key>');
   });
 });
 
@@ -214,5 +212,27 @@ describe('snippetAround', () => {
     const out = snippetAround(line, at, 12);
     expect(out).toContain('evil.example');
     expect(out).not.toMatch(/Ih0Gf/);
+  });
+});
+
+// dt24 g4-R3: a short default under a credential name was read as a reference
+describe('storedFallback', () => {
+  it('is the default a ${VAR:-default} stores under a credential name', () => {
+    expect(storedFallback('DB_PASS', '${DB_PASS:-Xe5rT2yQ8u}')).toBe('Xe5rT2yQ8u');
+    expect(storedFallback('API_TOKEN', '${API_TOKEN-hunterpass}')).toBe('hunterpass');
+    expect(storedFallback('AUTH', 'Bearer ${API_TOK:-Zq1wE6rT3y}')).toBe('Zq1wE6rT3y');
+    expect(storedFallback('dbPassword', '${DB:=s3cr3t}')).toBe('s3cr3t');
+  });
+
+  it('is none for a setting, an empty default, a placeholder or another reference', () => {
+    for (const [k, v] of [['LOG_LEVEL', '${LOG_LEVEL:-info}'], ['DB_PASS', '${DB_PASS:-}'], ['DB_PASS', '${DB_PASS:-changeme}'], ['DB_PASS', '${DB_PASS:-$OTHER_PASS}'], ['DB_PASS', '${DB_PASS}'], ['DB_PASS', '${DB_PASS:?required}'], ['DB_PASS', 'Xe5rT2yQ8u']]) {
+      expect(storedFallback(k, v), `${k}=${v}`).toBeUndefined();
+    }
+  });
+
+  it('makes the value a stored secret for the plaintext-secret checks', () => {
+    expect(isSecretNamedValue('DB_PASS', '${DB_PASS:-Xe5rT2yQ8u}')).toBe(true);
+    expect(isSecretNamedValue('DB_PASS', '${DB_PASS}')).toBe(false);
+    expect(isSecretNamedValue('DB_PASS', '${DB_PASS:-changeme}')).toBe(false);
   });
 });

@@ -257,7 +257,8 @@ describe('cleanDescription', () => {
   it('masks a bare high-entropy token (AWS secret key), not words, paths or hex digests', () => {
     const out = cleanDescription('Deploy with PtYgjmUhBel31iEl2hpChYgCfrL1spNxnyVmihA+ as the secret')!;
     expect(out).not.toContain('Bel31iEl2hpChYg');
-    expect(out).toContain('(40 chars)');
+    expect(out).toContain('<literal, 40 chars, high-entropy token>');
+    expect(out).not.toContain('PtYg');
     const benign = 'Uses internationalization-and-localization-helpers at 3f786850e387550fdab836ed7e6dc881de23001b';
     expect(cleanDescription(benign)).toBe(benign);
   });

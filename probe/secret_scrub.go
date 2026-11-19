@@ -1266,6 +1266,10 @@ func (c *collector) disguiseURLPassword(v string) string {
 // disguiseKeyed disguises a value found under key: under a password or
 // secret name, a passphrase of lowercase words too (see passphraseLike).
 func (c *collector) disguiseKeyed(key, v string) string {
+	// ${DB_PASS:-<pw>}: the default is the secret, the reference stays
+	if out, ok := c.disguiseFallback(key, v); ok {
+		return out
+	}
 	return c.disguiseAs(v, strongCredentialKey(key), true)
 }
 
@@ -1511,6 +1515,9 @@ func shortSecret(v string) bool {
 // looks like one anywhere, or, under a name that holds a password, key or
 // token itself, a passphrase, a lowercase word or a short value.
 func keyedSecret(key, value string) bool {
+	if _, _, _, ok := storedFallback(key, value); ok {
+		return true
+	}
 	if credentialLike(value) {
 		return true
 	}
@@ -2353,6 +2360,7 @@ func (c *collector) scrubText(path, s string) string {
 		s = c.yamlFlowArgv(s)
 	}
 	s = flagCredentials(s, c.disguiseArgv)
+	s = c.disguiseEscapedAuthHeaders(s)
 	s = urlPassword.ReplaceAllStringFunc(s, func(m string) string {
 		g := urlPassword.FindStringSubmatch(m)
 		return g[1] + c.disguiseURLPassword(g[2]) + "@"
@@ -2406,6 +2414,8 @@ func (c *collector) scrubText(path, s string) string {
 				return m.with(3, 3, c.disguise(value))
 			})
 		})
+		// a quoted high-entropy string with no key name (memory checks)
+		s = c.disguiseMemoryEntropy(s)
 	}
 	s = tokenShaped.ReplaceAllStringFunc(s, c.disguise)
 	// an account's email address (oauthAccount.emailAddress, userEmail):

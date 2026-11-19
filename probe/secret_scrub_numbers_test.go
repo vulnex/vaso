@@ -140,3 +140,38 @@ func TestNumberStandInKeepsLiteralShape(t *testing.T) {
 		}
 	}
 }
+
+// dt24 g9-R2: a 16-digit integer stand-in with a kept head could pass
+// 2^53 - 1, and smol-toml rejects such a TOML integer: the config did not
+// parse remotely. A stand-in for an integer within the limit stays within.
+func TestNumberStandInStaysSafeInteger(t *testing.T) {
+	const limit = 1<<53 - 1
+	for _, v := range []string{"9007199254740991", "9007199254740990", "-9007199254740991", "9007199254740899", "8999999999999999", "9007_1992_5474_0991", "0x1FFFFFFFFFFFFF"} {
+		for try := 0; try < 200; try++ {
+			c := &collector{}
+			conf := "[mcp_servers.x.env]\ntoken = " + v + "\n"
+			out := string(c.scrubSecrets("/h/.codex/config.toml", []byte(conf)))
+			var m map[string]interface{}
+			if _, err := toml.Decode(out, &m); err != nil {
+				t.Fatalf("%s: %v\n%s", v, err, out)
+			}
+			n := m["mcp_servers"].(map[string]interface{})["x"].(map[string]interface{})["env"].(map[string]interface{})["token"].(int64)
+			if n > limit || n < -limit {
+				t.Fatalf("%s → %d: past 2^53 - 1\n%s", v, n, out)
+			}
+		}
+	}
+	if !safeInteger("9007199254740991") || safeInteger("9007199254740992") || !safeInteger("-0x1F_FFFF") || safeInteger("1.5") || safeInteger("1e3") {
+		t.Error("safeInteger")
+	}
+	// a JSON number past the limit (JSON.parse reads it, inexactly) stays a number
+	c := &collector{}
+	out := c.scrubSecrets("/h/.claude.json", []byte(`{"token": 98765432109876543210}`))
+	var m map[string]interface{}
+	if err := json.Unmarshal(out, &m); err != nil {
+		t.Fatalf("%v: %s", err, out)
+	}
+	if _, ok := m["token"].(float64); !ok {
+		t.Errorf("not a number: %s", out)
+	}
+}

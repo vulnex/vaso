@@ -1,4 +1,4 @@
-import { API_KEY_PATTERNS, isEnvReference, isPlaceholderSecret, isSecretReference } from '../core/patterns.js';
+import { API_KEY_PATTERNS, isEnvReference, isPlaceholderSecret, isSecretReference, storedFallback } from '../core/patterns.js';
 import { findUrlSecrets } from '../mcp/config-secrets.js';
 import { shannonEntropy } from './entropy.js';
 
@@ -134,6 +134,8 @@ function isTenantSegment(url: string, value: string): boolean {
 /** A value under a credential name (`GITLAB_TOKEN`, `MISTRAL_KEY`) that is the credential itself. */
 export function isSecretNamedValue(name: string, value: string): boolean {
   const v = value.trim();
+  // `${DB_PASS:-<pw>}`: the default is stored in the file, however short
+  if (isCredentialValueName(name) && storedFallback(name, v) !== undefined) return true;
   if (v === '' || notStored(v)) return false;
   if (isKnownSecretValue(v)) return true;
   // A URL is judged by the credentials in it (findUrlSecrets above), not by

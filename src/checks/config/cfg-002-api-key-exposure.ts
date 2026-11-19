@@ -1,7 +1,7 @@
 import { basename } from 'node:path';
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { API_KEY_PATTERNS, redactSecretsInLine, isPlaceholderSecret } from '../../core/patterns.js';
+import { API_KEY_PATTERNS, redactSecretsAround, redactSecretsInLine, isPlaceholderSecret } from '../../core/patterns.js';
 import { hookCommandSecrets, hookItems } from '../../analyzers/hook-commands.js';
 
 /** Framework-designated secret files (PicoClaw keeps model/channel keys in
@@ -31,7 +31,7 @@ export const cfg002 = defineCheck({
             evidence.push({
               file: config.filePath,
               line: i + 1,
-              snippet: redactSecretsInLine(lines[i]),
+              snippet: redactSecretsAround(lines[i], m.index, m[0].length),
               detail: `Found ${name}`,
             });
           }
@@ -54,10 +54,13 @@ export const cfg002 = defineCheck({
       }
       for (const { secret, hooks } of found.values()) {
         const at = lines.findIndex(l => l.includes(secret.value));
+        const pos = at >= 0 ? lines[at].indexOf(secret.value) : -1;
         evidence.push({
           file: config.filePath,
           ...(at >= 0 ? { line: at + 1 } : {}),
-          snippet: redactSecretsInLine(at >= 0 ? lines[at].split(secret.value).join('***') : secret.masked),
+          snippet: at >= 0
+            ? redactSecretsAround(lines[at].split(secret.value).join('***'), pos, 3)
+            : redactSecretsInLine(secret.masked),
           detail: hooks.length > 1
             ? `Found ${secret.kind} in hook commands (${hooks.join(', ')} — same value)`
             : `Found ${secret.kind} in a hook command`,

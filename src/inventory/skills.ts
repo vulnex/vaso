@@ -3,7 +3,7 @@ import type { DirentInfo, FSProvider } from '../core/fs-provider.js';
 import type { AgentInstallation, AgentInventory, SkillItem, SkillTreeEntry, SkillsDirInfo } from '../core/types.js';
 import { getAllSkillsDirs, isExcludedPath, listSkillTree, vendorNamedSkills } from '../core/utils.js';
 import { parseYamlSafe } from '../core/yaml-safe.js';
-import { redactSecretsInLine } from '../core/patterns.js';
+import { redactSecretsInLine, secretShape } from '../core/patterns.js';
 import { maskCredentialsInLine } from '../reporting/serialize.js';
 import { shannonEntropy } from '../analyzers/entropy.js';
 import { configTreeGap, probeCoversTree } from '../core/probe-coverage.js';
@@ -344,7 +344,7 @@ const BARE_TOKEN = /(?<![A-Za-z0-9+/=_-])[A-Za-z0-9+/=_-]{32,}(?![A-Za-z0-9+/=_-
 function maskBareTokens(text: string): string {
   return text.replace(BARE_TOKEN, (t) => {
     const classes = [/[a-z]/, /[A-Z]/, /[0-9]/].filter(re => re.test(t)).length;
-    return classes === 3 && shannonEntropy(t) >= 4 ? `${t.slice(0, 4)}…${t.slice(-4)} (${t.length} chars)` : t;
+    return classes === 3 && shannonEntropy(t) >= 4 ? secretShape(t, 'high-entropy token') : t;
   });
 }
 

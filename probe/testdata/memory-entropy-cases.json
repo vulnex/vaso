@@ -1,0 +1,15 @@
+[
+  { "line": "See \"Q9w8E7r6T5y4U3i2O1p0AaSsDdFfGgHhJjKkLlZzXxCcVvBbNnMm+/\" for staging.", "flagged": true, "disguised": true },
+  { "line": "See 'Q9w8E7r6T5y4U3i2O1p0AaSsDdFfGgHhJjKkLlZzXxCcVvBbNnMm+/' for staging.", "flagged": true, "disguised": true },
+  { "line": "See `Q9w8E7r6T5y4U3i2O1p0AaSsDdFfGgHhJjKkLlZzXxCcVvBbNnMm+/` for staging.", "flagged": true, "disguised": true },
+  { "line": "See \"5@75&yx&8xm5Msl-fY5ub+iheyEd7P4z*DL#ak6J0?kGOD&Kdi^nZnLXicaBAg8WY1j^zIRlNQb0prFmbh7!w@y5&yq1XoY1BaIMcAxY_mfsB4HbQLXjjlA~\" for staging.", "flagged": true, "disguised": true },
+  { "line": "  * the key is \"Q9w8E7r6T5y4U3i2O1p0AaSsDdFfGgHhJjKkLlZzXxCcVvBbNnMm+/\"", "flagged": true, "disguised": true },
+  { "line": "*\"Q9w8E7r6T5y4U3i2O1p0AaSsDdFfGgHhJjKkLlZzXxCcVvBbNnMm+/\"", "flagged": false, "disguised": false },
+  { "line": "// \"Q9w8E7r6T5y4U3i2O1p0AaSsDdFfGgHhJjKkLlZzXxCcVvBbNnMm+/\"", "flagged": false, "disguised": false },
+  { "line": "# \"Q9w8E7r6T5y4U3i2O1p0AaSsDdFfGgHhJjKkLlZzXxCcVvBbNnMm+/\"", "flagged": false, "disguised": false },
+  { "line": "Short one: \"Q9w8E7r6T5y4U3i2O1p0AaSsDdFfG\" and more words here", "flagged": false, "disguised": false },
+  { "line": "Hex digest \"0123456789abcdef0123456789abcdef01234567\" is a commit", "flagged": false, "disguised": false },
+  { "line": "Plain \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\" filler", "flagged": false, "disguised": false },
+  { "line": "Docs at \"https://example.com/Q9w8E7r6T5y4U3i2O1p0AaSsDdFfGgHhJjKkLlZzXxCcVvBbNnMm\" here", "flagged": true, "disguised": true },
+  { "line": "Use the quoted words \"the quick brown fox jumps over the lazy dog again\" here", "flagged": false, "disguised": false }
+]

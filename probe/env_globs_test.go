@@ -1,8 +1,10 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -22,7 +24,17 @@ func TestEnvGlobsRefuseRootAndHome(t *testing.T) {
 		{"/", "${OPENCLAW_STATE_DIR}/**/*.json5", true},
 		{home, "${OPENCLAW_STATE_DIR}/**/*.json5", true},
 		{filepath.Dir(home), "${OPENCLAW_STATE_DIR}/**/*.json5", true},
-		{"/etc", "${OPENCLAW_STATE_DIR}/**/*.json5", true},
+		// another user's home, the home area itself
+		{"/home/someone-else/.openclaw", "${OPENCLAW_STATE_DIR}/skills/**", true},
+		{"/home", "${PICOCLAW_HOME}/workspace*/skills/**", true},
+		// dt24 g1-R1: an OS directory's subtree the agent's own variable
+		// names (systemd StateDirectory=openclaw, a node package dir) is
+		// walked, as locally
+		{"/var/lib/openclaw", "${OPENCLAW_STATE_DIR}/skills/**", false},
+		{"/var/lib/openclaw", "${OPENCLAW_STATE_DIR}/**/*.json5", false},
+		{"/usr/lib/node_modules/picoclaw", "${PICOCLAW_HOME}/workspace*/skills/**", false},
+		// /etc is a sensitive location (SENSITIVE_SINKS), not just an OS dir
+		{"/etc/openclaw", "${OPENCLAW_STATE_DIR}/**/*.json5", true},
 		{filepath.Join(home, ".ssh"), "${OPENCLAW_STATE_DIR}/**/*.json5", true},
 		{state, "${OPENCLAW_STATE_DIR}/**/*.json5", false},
 		{"/opt/openclaw", "${OPENCLAW_STATE_DIR}/**/*.json5", false},
@@ -42,12 +54,36 @@ func TestEnvGlobsRefuseRootAndHome(t *testing.T) {
 		if len(got) != 1 {
 			t.Fatalf("%s=%s %s: expanded to %q", name, c.env, c.raw, got)
 		}
-		if r := envGlobRefused(c.raw, got[0]); r != c.refused {
+		if r := envGlobRefused(c.raw, got[0], []string{home}); r != c.refused {
 			t.Errorf("%s=%s %s (%s): refused %v, want %v", name, c.env, c.raw, got[0], r, c.refused)
 		}
 	}
+	// the table src/adapters/default-skill-roots.test.ts reads too
+	raw, err := os.ReadFile("testdata/env-glob-cases.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var shared []struct {
+		Value, Glob string
+		Refused     bool
+	}
+	if err := json.Unmarshal(raw, &shared); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range shared {
+		value := filepath.Clean(strings.ReplaceAll(c.Value, "$HOME", home))
+		name := envPathPrefix.FindStringSubmatch(c.Glob)[1]
+		t.Setenv(name, value)
+		got := expandPaths([]string{c.Glob}, nil)
+		if len(got) != 1 {
+			t.Fatalf("%s=%s %s: expanded to %q", name, value, c.Glob, got)
+		}
+		if r := envGlobRefused(c.Glob, got[0], []string{home}); r != c.Refused {
+			t.Errorf("shared case %s=%s %s: refused %v, want %v", name, c.Value, c.Glob, r, c.Refused)
+		}
+	}
 	// a ~/ glob is the manifest's own, never refused here
-	if envGlobRefused("~/.openclaw/**/*.json5", filepath.Join(home, ".openclaw/**/*.json5")) {
+	if envGlobRefused("~/.openclaw/**/*.json5", filepath.Join(home, ".openclaw/**/*.json5"), []string{home}) {
 		t.Error("manifest glob refused")
 	}
 }

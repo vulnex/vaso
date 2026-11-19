@@ -382,6 +382,19 @@ function ansiEscape(s: string): [string, number] {
   return [`\\${s[0]}`, 1];
 }
 
+/**
+ * `line[j]` is the `$` of `$'…'` or `$"…"` — the latter also with its quote
+ * escaped (`sshpass -p $\"pw\"` in a JSON string): the index of that quote,
+ * else 0. probe/argv_rules.go dollarQuote.
+ */
+function dollarQuote(line: string, j: number, to: number): number {
+  if (line[j] !== '$' || j + 1 >= to) return 0;
+  if (line[j + 1] === "'") return j + 1;
+  let k = j + 1;
+  while (k < to && line[k] === '\\') k++;
+  return k < to && line[k] === '"' ? k : 0;
+}
+
 /** `line.slice(from, to)` without its quotes and the backslashes escaping them; `$'…'` decoded. */
 function quotesLeftOut(line: string, from: number, to: number): CommandToken {
   let word = '';
@@ -398,7 +411,9 @@ function quotesLeftOut(line: string, from: number, to: number): CommandToken {
     }
     if (ansi && ch === "'") { ansi = false; continue; }
     if (!ansi) {
-      if (ch === '$' && j + 1 < to && (line[j + 1] === "'" || line[j + 1] === '"')) { ansi = line[j + 1] === "'"; j++; continue; }
+      const q = dollarQuote(line, j, to);
+      // $\"…\" in a JSON string: its quote's backslashes go too
+      if (q > 0) { ansi = line[q] === "'"; j = q; continue; }
       if (isQuote(ch)) continue;
       if (ch === '\\') {
         let k = j;
@@ -421,22 +436,36 @@ export function commandSegments(line: string): CommandSegment[] {
   const closing = /['"`]/.test(line) ? closingQuotes(line) : new Map<number, number>();
   const space = (c: string): boolean => c === ' ' || c === '\t' || c === '\n' || c === '\r';
   const chunkEnd = (i: number): number => { while (i < line.length && !space(line[i])) i++; return i; };
+  // the quote open before the word (a JSON or YAML string the command is written in), read up to scanned
+  let outer = -1;
+  let scanned = 0;
   for (let i = 0; i < line.length;) {
     while (i < line.length && space(line[i])) i++;
     const start = i;
     i = chunkEnd(i);
     if (start === i) break;
+    outer = pairQuotes(line, scanned, start, outer);
+    scanned = start;
     let from = start;
     let begin = false;
     while (from < i) {
       const ch = line[from];
-      const ansiC = ch === '$' && from + 1 < i && (line[from + 1] === "'" || line[from + 1] === '"');
+      const ansiC = dollarQuote(line, from, i) > 0;
       if (!ansiC && !LEAD.includes(ch)) break;
       begin = begin || isQuote(ch);
       from++;
     }
     // a quote opened inside the word: the word runs to its closing quote
     let open = pairQuotes(line, start, i, -1);
+    // the last word of a string the command is written in: its last quote
+    // (before closing brackets: `["-c", "… -P 'pw'"]`) closes that string,
+    // not one of the word's
+    let outerEnd = -1;
+    if (open >= 0 && outer >= 0 && sameQuote(line, open, outer) && /^[)\]},;]*$/.test(line.slice(open + 1, i))
+      && pairQuotes(line, start, open, -1) < 0) {
+      outerEnd = open;
+      open = -1;
+    }
     while (open >= from && wordAfter(line, open + 1, i)) {
       const c = closing.get(open);
       if (c === undefined) break;
@@ -453,7 +482,8 @@ export function commandSegments(line: string): CommandSegment[] {
       to--;
     }
     const balanced = open < 0;
-    const structural = /[([{,]/.test(line.slice(start, from)) || /[)\]},]/.test(line.slice(to, i));
+    // punctuation after the string's closing quote is the string's, not the word's
+    const structural = /[([{,]/.test(line.slice(start, from)) || /[)\]},]/.test(line.slice(to, outerEnd >= to ? outerEnd : i));
     const prevFlag = cur.length > 0 && isFlagShaped(cur[cur.length - 1].word);
     const argument = begin && balanced && prevFlag;
     const single = begin && balanced && !structural;
@@ -472,7 +502,8 @@ export function commandSegments(line: string): CommandSegment[] {
       continue;
     }
     if (tok.word !== '') cur.push(tok);
-    if (semicolon || (end && !argument && !single && !(balanced && !begin))) flush();
+    // the string the command is written in ends with this word: so does the command
+    if (semicolon || outerEnd >= 0 || (end && !argument && !single && !(balanced && !begin))) flush();
   }
   flush();
   return segs;

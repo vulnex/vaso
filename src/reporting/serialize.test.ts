@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { toReportJson } from './serialize.js';
+import { maskCredentialsInLine, maskCredentialsInText, toReportJson } from './serialize.js';
 
 const SECRET = 'sk-ant-api03-FAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE';
 
@@ -18,8 +18,9 @@ describe('toReportJson', () => {
       configs: [{ servers: [{ name: 'gh', env: { GITHUB_TOKEN: token, DEBUG: '1' }, headers: { Authorization: `Bearer ${SECRET}` } }] }],
     }));
     const server = out.configs[0].servers[0];
-    expect(server.env).toEqual({ GITHUB_TOKEN: `ghp_…(${token.length} chars)`, DEBUG: '***' });
-    expect(server.headers.Authorization).toBe(`Bear…(${SECRET.length + 7} chars)`);
+    // its length only: no character of the value (a prefix was half of a short secret)
+    expect(server.env).toEqual({ GITHUB_TOKEN: `<literal, ${token.length} chars>`, DEBUG: '***' });
+    expect(server.headers.Authorization).toBe(`<literal, ${SECRET.length + 7} chars>`);
   });
 
   it('masks every credential on a quoted one-line JSON snippet', () => {
@@ -327,5 +328,17 @@ describe('snippet length after masking', () => {
     const { MAX_SNIPPET, truncateSnippet } = await import('../core/patterns.js');
     const cut = truncateSnippet('const a = 1; '.repeat(40), MAX_SNIPPET);
     expect(maskCredentialsDeep({ snippet: cut }).snippet).toBe(cut);
+  });
+});
+
+// dt24 g9-R4: an Authorization header in a shell word with its spaces escaped
+describe('escaped Authorization header', () => {
+  it('masks its token in text, a line and a JSON string', () => {
+    const tok = 'Cu9Esc7WzQx2Lp';
+    const cmd = `curl -H Authorization:\\ Bearer\\ ${tok} https://x.example`;
+    for (const out of [maskCredentialsInText(cmd), maskCredentialsInLine(cmd), maskCredentialsInLine(`"command": ${JSON.stringify(cmd)}`)]) {
+      expect(out).not.toContain(tok);
+      expect(out).toContain('https://x.example');
+    }
   });
 });
