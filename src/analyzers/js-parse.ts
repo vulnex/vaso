@@ -383,10 +383,12 @@ export interface SourceChunk {
   /** 1-based line of the chunk's first line in the full source. */
   startLine: number;
   code: string;
+  /** The file's path as its `// === path ===` header names it (`/`-separated); absent for unmarked source. */
+  path?: string;
 }
 
 /** `// === dist/tools.js ===` — the per-file header `--resolve-packages` writes. */
-const FILE_MARKER = /^\/\/ === .+ ===$/;
+const FILE_MARKER = /^\/\/ === (.+) ===$/;
 
 /**
  * Source split back into the files it was concatenated from (npm packages
@@ -404,8 +406,9 @@ export function sourceChunks(code: string): SourceChunk[] {
   const chunks: SourceChunk[] = [];
   const chunk = (from: number, to: number): SourceChunk => {
     const part = lines.slice(from, to);
-    if (FILE_MARKER.test(part[0] ?? '') && part[1]?.startsWith('#!')) part[1] = `//${part[1].slice(2)}`;
-    return { startLine: from + 1, code: part.join('\n') };
+    const marker = FILE_MARKER.exec(part[0] ?? '');
+    if (marker && part[1]?.startsWith('#!')) part[1] = `//${part[1].slice(2)}`;
+    return { startLine: from + 1, code: part.join('\n'), ...(marker ? { path: marker[1].replace(/\\/g, '/') } : {}) };
   };
   let start = 0;
   for (let i = 0; i < lines.length; i++) {
