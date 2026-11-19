@@ -287,7 +287,7 @@ const SINK_HINT = /\bchild_|\b(?:exec|execSync|execFile|execFileSync|spawn|spawn
  */
 export function moduleWeight(code: string): number {
   const full = significantLength(code);
-  const CODE_WORDS = /^(?:function|class|new|get|set|async|await|yield|with|this|super|import)$/;
+  const CODE_WORDS = /^(?:function|class|new|get|set|async|await|yield|with|this|super)$/;
   let outside = 0;
   let strings = 0;
   let quote = '';
@@ -316,8 +316,8 @@ export function moduleWeight(code: string): number {
       continue;
     }
     if (word) {
-      // `import x from './d.js'` is a declaration; `import(…)` is caught by its paren
-      if (CODE_WORDS.test(word) && !(word === 'import' && code.slice(i).trimStart()[0] !== '(')) return full;
+      // (`import x from './d.js'` is a declaration; `import(…)` is caught by its paren)
+      if (CODE_WORDS.test(word)) return full;
       last = word;
       word = '';
     }
