@@ -205,12 +205,16 @@ async function walk(
   isRoot: boolean,
   named: ReadonlySet<string>,
   rules: WalkRules,
+  self?: DirentInfo,
 ): Promise<DirentInfo[]> {
   let entries: DirentInfo[];
   try {
     entries = await fs.readdirEntries(dir, { recursive: true });
   } catch (err) {
     if (isRoot) throw err;
+    // A followed link to a folder that can't be listed (DirentInfo.denied)
+    const code = (err as NodeJS.ErrnoException | null)?.code;
+    if (self && (code === 'EACCES' || code === 'EPERM')) self.denied = true;
     return [];
   }
   if (!isRoot) {
@@ -352,8 +356,9 @@ async function follow(
       continue;
     }
     visited.add(real);
-    out.push({ name: entry.name, isFile: false, isDirectory: true, parentPath: parent });
-    out.push(...await walk(fs, link, [...roots, real], visited, depth + 1, false, named, rules));
+    const self: DirentInfo = { name: entry.name, isFile: false, isDirectory: true, parentPath: parent };
+    out.push(self);
+    out.push(...await walk(fs, link, [...roots, real], visited, depth + 1, false, named, rules, self));
   }
   return out;
 }

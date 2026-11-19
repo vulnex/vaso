@@ -13,6 +13,13 @@ export interface DirentInfo {
    */
   isSymbolicLink?: boolean;
   parentPath?: string;
+  /**
+   * A directory a recursive listing (or the skill walk) met but could not
+   * list (EACCES/EPERM): nothing under it is in the listing. Set by the local
+   * and snapshot providers, so the skill walk reports such folders without
+   * listing every empty one again.
+   */
+  denied?: boolean;
 }
 
 /**

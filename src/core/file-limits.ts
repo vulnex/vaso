@@ -71,8 +71,28 @@ export async function readCappedFile(fs: FSProvider, path: string): Promise<stri
     if (reason) throw new ScanLimitError(path, reason);
     throw err;
   }
-  if (Buffer.byteLength(content, 'utf-8') > MAX_SCAN_FILE_BYTES) throw new ScanLimitError(path);
+  // The limit is on the bytes on disk: decoding turns each invalid UTF-8
+  // byte into a 3-byte U+FFFD, so a 4 MiB file of such bytes decodes past it
+  if (Buffer.byteLength(content, 'utf-8') > MAX_SCAN_FILE_BYTES && await bytesOnDisk(fs, path) > MAX_SCAN_FILE_BYTES) {
+    throw new ScanLimitError(path);
+  }
   return content;
+}
+
+/** The file's size in bytes as stored (a snapshot holds its bytes exactly, probe ≥ 1.1.0). */
+async function bytesOnDisk(fs: FSProvider, path: string): Promise<number> {
+  if (fs.kind === 'local') {
+    try {
+      return (await stat(path)).size;
+    } catch {
+      return Infinity;
+    }
+  }
+  try {
+    return (await fs.readBytes(path)).byteLength;
+  } catch {
+    return Infinity;
+  }
 }
 
 /** readCappedFile for raw bytes (hashes, executable headers). */

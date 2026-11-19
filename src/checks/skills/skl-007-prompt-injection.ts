@@ -3,7 +3,7 @@ import type { Evidence, ScanContext } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { scanWithPatterns, SECURITY_PATTERNS } from '../../analyzers/pattern-engine.js';
 import { markTestCode } from '../../analyzers/test-paths.js';
-import { getAllSkillsDirs, isExcludedPath, unlistableSkillDirs } from '../../core/utils.js';
+import { getAllSkillsDirs, isExcludedPath, unlistableSkillDirs, vendorNamedSkills } from '../../core/utils.js';
 import { readCappedFile } from '../../core/file-limits.js';
 import { walkSkillTree } from '../../core/skill-walk.js';
 import { noSkillsDirResult } from './skill-files.js';
@@ -16,9 +16,10 @@ async function getDocFiles(dir: string, fs: ScanContext['fs'], uncapped: boolean
   const files: string[] = [];
   try {
     const entries = await walkSkillTree(fs, dir, undefined, { uncapped });
+    const skills = vendorNamedSkills(dir, entries);
     for (const entry of entries) {
       // Same vendor/VCS exclusions as the code walk (node_modules READMEs aren't skill docs)
-      if (entry.isFile && !isExcludedPath(dir, entry.parentPath, { keepBuildOutput: true })) {
+      if (entry.isFile && !isExcludedPath(dir, entry.parentPath, { keepBuildOutput: true, skills })) {
         const ext = extname(entry.name);
         const name = entry.name.toUpperCase();
         if (DOC_EXTENSIONS.has(ext) || name === 'SKILL.MD' || name === 'README.MD') {

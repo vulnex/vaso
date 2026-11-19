@@ -135,20 +135,23 @@ export class LocalFSProvider implements FSProvider {
     // subdirectory, so one chmod-000 folder inside a skill would hide every
     // file beside it. Walk by hand and skip what can't be listed, as the
     // probe does; only an unreadable root is an error. Symlinked directories
-    // are listed, not entered.
+    // are listed, not entered. A folder that can't be listed is marked
+    // `denied` (the skill walk reports it without listing it again).
     const results: DirentInfo[] = [];
-    const pending = [path];
-    for (let dir = pending.pop(); dir !== undefined; dir = pending.pop()) {
+    const pending: Array<{ dir: string; entry?: DirentInfo }> = [{ dir: path }];
+    for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
       let entries;
       try {
-        entries = await this.list(dir);
+        entries = await this.list(next.dir);
       } catch (err) {
-        if (dir === path) throw err;
+        if (!next.entry) throw err;
+        const code = (err as NodeJS.ErrnoException | null)?.code;
+        if (code === 'EACCES' || code === 'EPERM') next.entry.denied = true;
         continue;
       }
       for (const e of entries) {
         results.push(e);
-        if (e.isDirectory) pending.push(join(dir, e.name));
+        if (e.isDirectory) pending.push({ dir: join(next.dir, e.name), entry: e });
       }
     }
     return results;

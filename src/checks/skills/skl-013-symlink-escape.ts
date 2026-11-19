@@ -40,6 +40,17 @@ async function isDirectory(fs: { stat(p: string): Promise<{ isDirectory(): boole
   }
 }
 
+/** Listing `dir` fails for permission (EACCES/EPERM). */
+async function listingDenied(fs: { readdirEntries(p: string): Promise<unknown> }, dir: string): Promise<boolean> {
+  try {
+    await fs.readdirEntries(dir);
+    return false;
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException | null)?.code;
+    return code === 'EACCES' || code === 'EPERM';
+  }
+}
+
 interface SymlinkFinding {
   linkPath: string;
   rawTarget: string;
@@ -49,7 +60,7 @@ interface SymlinkFinding {
   skillInstall: boolean;
   /** Its code is not scanned (SKL-002): linked to where no skills tree is
    *  walked, or to a tree over the entry limit. */
-  unscanned?: 'outside' | 'limit' | 'total' | 'truncated';
+  unscanned?: 'outside' | 'limit' | 'total' | 'truncated' | 'unreadable';
   /** A hard link: the same file as `resolvedTarget`, under another name. */
   hard?: boolean;
 }
@@ -158,7 +169,7 @@ export const skl013 = defineCheck({
           resolve(dirname(linkPath)) === root && await isDirectory(ctx.fs, linkPath);
         const unscanned = !skillInstall ? undefined
           : !(await inScope(linkPath)) ? 'outside' as const
-            : capped.get(linkPath);
+            : capped.get(linkPath) ?? (await listingDenied(ctx.fs, linkPath) ? 'unreadable' as const : undefined);
         findings.push({ linkPath, rawTarget, resolvedTarget, sensitiveLabels, skillInstall, unscanned });
       }
     }
@@ -181,6 +192,8 @@ export const skl013 = defineCheck({
           ? `Skill installed as a link to ${f.resolvedTarget} — a tree over the ${MAX_SKILL_TREE_ENTRIES}-entry limit VASO walks, so its code is not scanned (see SKL-002); edits to it change what is there.`
         : f.unscanned === 'total'
           ? `Skill installed as a link to ${f.resolvedTarget} — past the ${MAX_LINKED_SKILL_ENTRIES}-entry total VASO walks through one skills tree's links, so its code is not scanned (see SKL-002); edits to it change what is there.`
+        : f.unscanned === 'unreadable'
+          ? `Skill installed as a link to ${f.resolvedTarget} — a folder this scan can't list, so its code is not scanned (see SKL-002); edits to it change what is there.`
         : f.unscanned === 'truncated'
           ? `Skill installed as a link to ${f.resolvedTarget} — left out by the remote probe after it had stopped recording links it does not follow, so its code is not scanned (see SKL-002); edits to it change what is there.`
         : f.skillInstall

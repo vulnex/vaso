@@ -429,6 +429,12 @@ export class SnapshotFSProvider implements FSProvider {
     return mode !== undefined && (mode & 0o444) === 0 && !this.snapshot.directories[path] && !this.isPrivileged();
   }
 
+  /** A directory the probe recorded without search (x) permission for anyone. */
+  private unsearchable(path: string): boolean {
+    const mode = this.snapshot.directoryModes?.[path];
+    return mode !== undefined && (mode & 0o111) === 0 && !this.isPrivileged();
+  }
+
   /**
    * Under a directory the probe recorded without search (x) permission: a
    * local stat or open of anything there fails with EACCES, existing or not,
@@ -548,7 +554,27 @@ export class SnapshotFSProvider implements FSProvider {
       // (a link to one is listed as the link, above)
       if (dirPath === basePath || dirPath in symlinks || !this.unlistable(dirPath) || this.behindUnsearchable(dirPath) || behindLink(dirPath)) continue;
       const name = posix.basename(dirPath);
-      results.push({ name, isFile: false, isDirectory: true, parentPath: posix.dirname(dirPath) });
+      results.push({ name, isFile: false, isDirectory: true, parentPath: posix.dirname(dirPath), denied: true });
+    }
+    // A folder that can be listed but not searched (mode 644): a local walk
+    // lists its names, cannot read its files (EACCES) and cannot list its
+    // folders. The probe (newer than 1.4.1) records its listing; the files
+    // in it are denied entries without content, read here as EACCES.
+    const listings = this.keysUnder('directories', prefix);
+    if (Array.isArray(this.snapshot.directories[basePath])) listings.push(basePath);
+    for (const dirPath of listings) {
+      const listing = this.snapshot.directories[dirPath];
+      if (!Array.isArray(listing) || !this.unsearchable(dirPath) || dirPath in symlinks
+        || this.behindUnsearchable(dirPath) || (dirPath !== basePath && behindLink(`${dirPath}/x`))) continue;
+      for (const raw of listing) {
+        const isDir = raw.endsWith('/');
+        const name = stripTrailingSlash(raw);
+        const path = posix.join(dirPath, name);
+        if (path in symlinks || this.snapshot.files[path]?.exists) continue; // listed above
+        results.push(isDir
+          ? { name, isFile: false, isDirectory: true, parentPath: dirPath, denied: true }
+          : { name, isFile: true, isDirectory: false, parentPath: dirPath });
+      }
     }
 
     return results;
