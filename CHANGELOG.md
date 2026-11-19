@@ -13,7 +13,17 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - **A source file can no longer fake a file boundary.** A comment shaped like the scanner's file header no longer redirects module resolution or where findings are reported.
 - **MCP command paths judged up to the root.** CD-009, HM-010 and AT-007 now flag a command that any local user can swap through any world-writable directory above it, through a link into one, or as the script an interpreter runs, and a command that doesn't exist yet in a writable directory. A sticky directory (`1777`) protects a command its user or root owns, and modes print the same in all three checks. Probe 1.4.2 records sticky bits so remote scans agree; with older probes a root-owned world-writable directory is reported as not verified.
 - **Remote scans find locked folders anywhere in a skills tree.** A locked folder past the first 10,000 folders, or a folder that can be listed but not searched, was missed remotely; remote verdicts now match local ones.
-- **Remote scans read configs with long numbers under credential-like names.** The probe's stand-in for a number such as `"token_refresh_buffer_ms": 300000` could start with a zero, which JSON and TOML reject, so the whole config (for example `~/.claude.json` and its MCP servers) went unread remotely.
+- **Remote scans read configs with numbers under credential-like names.** The probe's stand-in for a number such as `"token_refresh_buffer_ms": 300000` could start with a zero or lose its exponent, which JSON and TOML reject (stand-ins now change digits only; dates, `inf` and `nan` stay as written), so the whole config (for example `~/.claude.json` and its MCP servers) went unread remotely.
+- **Skill instructions are read in full.** Commands in SKILL.md prose, inline code and indented blocks are now checked, not only fenced blocks. Claude Code's `` !`cmd` `` lines, which run when the skill loads, are critical unless `disableSkillShellExecution` is set.
+- **Every text file in a skill is checked.** Scripts are recognised by how SKILL.md runs them or by their `#!` line, whatever their extension (an extensionless script, `helper.txt` run with python3). Ruby, Perl, PHP and Lua scripts, reference docs, and `package.json` install scripts are now checked too.
+- **Files a skill runs from vendor folders are read.** A SKILL.md running `node_modules/…`, `.cache/…` or `venv/…` files gets them checked. A vendor folder it runs as a whole is reported as not scanned. Skills nested in such folders (as Hermes loads them) are scanned.
+- **Claude Code plugin skills are scanned.** Skills of enabled plugins are checked and listed in the inventory as `<plugin>:<skill>`; disabled plugins are skipped.
+- **Plaintext-secret findings no longer quote part of the secret.** Evidence names a secret by its length (`DB_PASSWORD=<literal, 11 chars>`) in every report format; before, up to 8 of its characters were printed (WS-003, DEV-003, CC-004, QC-001, CD-001, GEM-001, HM-001, GHC-003, MCP-003, MCP-012, IC-009, CFG-020, NB-002 and others).
+- **Remote scans no longer ship secrets quoted as bash `$'…'` or `$"…"`** in config command strings, nor hook passwords in compact one-line settings files, and reports mask them too.
+- **Inline JSON configs in variables (`OPENCODE_CONFIG_CONTENT`) get stand-ins rather than `[redacted]`,** so plaintext-key findings match local scans.
+- **An environment variable pointing an agent's directory at `/` or the home no longer makes the probe walk the filesystem** or ship unrelated files from it.
+- **Cross-module padding no longer hides command execution.** Modules that lead to a sink are traced before sink-free ones, and large string tables count at their real parse cost. A sink in a module still left out for size is now a "not verified" warning in MCP-004 and MCP-005, never a pass.
+- **A sticky world-writable directory owned by another user no longer counts as protection.** A link in a sticky directory is judged by the link's own owner. Paths that other users can't reach are reported as mitigated.
 
 ### Added
 
@@ -21,6 +31,13 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **World-writable MCP command paths judged the same locally and remotely.** A command or script that doesn't exist yet, a link that leads nowhere, `--require=/path`-style arguments, `env`-wrapped commands, and interpreter options such as `bash -o`, `perl -I` and `java -jar` are now judged identically by local scans and probe snapshots (probe 1.4.2). Paths that can't be verified are listed once.
+- **Hermes MCP commands written as `~/…`, `${HOME}/…` or with surrounding spaces are now checked.**
+- **Unreadable or broken IronClaw extension manifests are reported** instead of being skipped silently.
+- **Python path-traversal false positives.** A helper's parameter is no longer treated as tool input because of its name. A path validated by a helper that then returns it (like mcp-server-git's `open_repo`) counts as confined, as does a join checked later through a derived name. File sinks are reported on their own line, and deletions are described as deletions.
+- **Deeper Python taint tracing.** Tool input is now followed through helper chains of any length, `for` loops, tuple unpacking, `with … as`, walrus and hand-written tools/call dispatchers.
+- **A hook command after `PGPASSWORD=`/`MYSQL_PWD=` keeps its words in remote scans,** so unsafe-hook findings no longer disappear remotely.
+- **Quoted header names stay readable, and probe command output is capped at 8 MiB.**
 - **Python path containment judged where it happens.** A file read, written or listed at a caller-chosen path is only considered contained when that path is resolved and checked against the base directory, in the same function and before the call, or by a same-file helper called first. An unrelated `abspath()` or `startswith()` elsewhere no longer hides the finding.
 - **More Python file access recognised.** Aliased `pathlib.Path` and `aiofiles.open` imports, chained `Path(x).expanduser()/.resolve()` calls and `os.open` are now followed. A `"".join(...)` that keeps only filtered characters counts as sanitised.
 - **Helpers no longer spread tool input to unrelated callers.** A helper's return value now counts as tool input only where that call passes tool input in, so startup code calling the same helper with a constant is no longer reported critical.
