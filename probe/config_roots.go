@@ -32,8 +32,10 @@ type ConfigRootRequest struct {
 	// tree: globs relative to each value ("skills/**", "**",
 	// "../workspace-*/skills/**"); each must end in "/**" or be "**".
 	Globs []string `json:"globs,omitempty"`
-	// A relative value is resolved against "home" or "config" (the config
-	// file's directory); empty: relative values are skipped.
+	// A relative value is resolved against "home", "config" (the config
+	// file's directory) or "configParent" (the directory above it: a plugin
+	// root, for <root>/.claude-plugin/plugin.json); empty: relative values
+	// are skipped.
 	Relative string `json:"relative,omitempty"`
 	// Expand ${NAME} from the environment in values (unset: value skipped).
 	ExpandEnv bool `json:"expandEnv,omitempty"`
@@ -43,6 +45,22 @@ type ConfigRootRequest struct {
 	When []string `json:"when,omitempty"`
 	// Used when When holds and no key holds a string (expanded the same way).
 	Default string `json:"default,omitempty"`
+	// Walked before the manifest's globs, which would otherwise collect the
+	// tree as plain files first (a Claude Code plugin's extra skills
+	// directories, under the ~/.claude/plugins/** glob).
+	BeforeGlobs bool `json:"beforeGlobs,omitempty"`
+}
+
+// configRootsPhase: the requests walked before the manifest's globs (early),
+// or the others.
+func configRootsPhase(requests []ConfigRootRequest, early bool) []ConfigRootRequest {
+	var out []ConfigRootRequest
+	for _, r := range requests {
+		if r.BeforeGlobs == early {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 // Status of a config-derived tree, by its walk base (ConfigTrees).
@@ -211,6 +229,8 @@ func resolveConfigValue(req ConfigRootRequest, raw string, src configSource) (st
 		v = filepath.Join(src.home, v)
 	case req.Relative == "config":
 		v = filepath.Join(filepath.Dir(src.path), v)
+	case req.Relative == "configParent":
+		v = filepath.Join(filepath.Dir(filepath.Dir(src.path)), v)
 	default:
 		return "", false
 	}

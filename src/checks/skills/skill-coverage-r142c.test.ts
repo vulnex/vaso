@@ -300,10 +300,10 @@ describe('Claude Code plugin skills', () => {
   it('an enabled plugin\'s skills are scanned and listed as <plugin>:<skill>', async () => {
     const fs = snapshot({ enabledPlugins: { 'devtools@acme-mkt': true } });
     const [inst] = (await claudeCodeAdapter.detect({ fs })).filter(i => i.installDir === `${HOME}/.claude`);
-    // a project-scope plugin, and one without skills, add nothing
-    expect(inst.skillsDirs).toEqual([`${HOME}/.claude/skills`, `${cache}/acme-mkt/devtools/1.2.0/skills`]);
+    // one without skills adds nothing; a project-scope one is installed here too
+    expect(inst.skillsDirs).toEqual([`${HOME}/.claude/skills`, `${cache}/acme-mkt/devtools/1.2.0/skills`, `${cache}/acme-mkt/repo/2.0.0/skills`]);
     const { files, inventory } = await collectSkillInventory(inst, fs);
-    expect(inventory.skills.map(s => [s.name, s.scope])).toEqual([['devtools:deploy', 'plugin']]);
+    expect(inventory.skills.map(s => [s.name, s.scope])).toEqual([['devtools:deploy', 'plugin'], ['repo:r', 'plugin']]);
     const ctx: ScanContext = { installation: inst, configs: inst.configFiles, platform: 'linux', fs, skillFiles: files, skillUnlistableDirs: [] };
     expect((await skl001.run(ctx)).severity).toBe('critical');
     expect((await skl001.run(ctx)).passed).toBe(false);
@@ -312,9 +312,9 @@ describe('Claude Code plugin skills', () => {
   it('a disabled plugin, or one recorded outside the plugin cache, is not', async () => {
     const off = (await claudeCodeAdapter.detect({ fs: snapshot({ enabledPlugins: { 'devtools@acme-mkt': false } }) }))
       .find(i => i.installDir === `${HOME}/.claude`);
-    expect(off?.skillsDirs).toBeUndefined();
+    expect(off?.skillsDirs).toEqual([`${HOME}/.claude/skills`, `${cache}/acme-mkt/repo/2.0.0/skills`]);
     const outside = (await claudeCodeAdapter.detect({ fs: snapshot({}, '/opt/elsewhere') }))
       .find(i => i.installDir === `${HOME}/.claude`);
-    expect(outside?.skillsDirs).toBeUndefined();
+    expect(outside?.skillsDirs).toEqual([`${HOME}/.claude/skills`, `${cache}/acme-mkt/repo/2.0.0/skills`]);
   });
 });
