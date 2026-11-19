@@ -2,6 +2,7 @@ import { dirname, isAbsolute, relative } from 'node:path';
 import type { FSProvider } from '../core/fs-provider.js';
 import type { AgentInstallation, AgentType, HostInventory, McpServerItem } from '../core/types.js';
 import type { MCPConfig, MCPServerEntry } from '../mcp/types.js';
+import { captureConfigLoadErrors, type ConfigLoadError } from '../core/config-loader.js';
 
 export { ironclawExtensionConfigs, nanoclawGroupConfigs } from '../mcp/discovery.js';
 import { MCPDiscovery, ironclawExtensionConfigs, nanoclawGroupConfigs, userConfigLocations } from '../mcp/discovery.js';
@@ -21,6 +22,10 @@ export interface McpAssignment {
   host: McpServerItem[];
   /** Host-level files that may hold servers but couldn't be read (a remote scan). */
   incomplete?: string[];
+  /** Per installation, its MCP config files that exist but couldn't be read
+   *  or parsed (IronClaw extension manifests): their servers are missing
+   *  from the list, and a scan reports them (CONFIG-LOAD). */
+  loadErrors?: Map<AgentInstallation, ConfigLoadError[]>;
 }
 
 function isWithin(path: string, dir: string): boolean {
@@ -136,10 +141,17 @@ export async function discoverMcpAssignment(installations: AgentInstallation[], 
     // file discovery already read is listed once
     const discovered = new Set(result.configs.map(c => c.filePath));
     const nanoclaw = (await Promise.all(installations.filter(i => i.agent === 'nanoclaw').map(i => nanoclawGroupConfigs(i.installDir, fs)))).flat();
-    const ironclaw = (await Promise.all(installations.filter(i => i.agent === 'ironclaw' && !isIronclawLegacy(i)).map(i => ironclawExtensionConfigs(i.installDir, fs)))).flat();
-    const extra = [...nanoclaw, ...ironclaw].filter(c => !discovered.has(c.filePath));
-    const assignment = assignMcpServers(installations, [...result.configs, ...extra], { home: fs.homedir(), inventoried: inventoriedAgents(fs), projectDir });
+    const rebornInstalls = installations.filter(i => i.agent === 'ironclaw' && !isIronclawLegacy(i));
+    const ironclaw = await captureConfigLoadErrors(async () => (await Promise.all(rebornInstalls.map(i => ironclawExtensionConfigs(i.installDir, fs)))).flat());
+    const extra = [...nanoclaw, ...ironclaw.result].filter(c => !discovered.has(c.filePath));
+    const assignment: McpAssignment = assignMcpServers(installations, [...result.configs, ...extra], { home: fs.homedir(), inventoried: inventoriedAgents(fs), projectDir });
     await recordServerSpans([...[...assignment.byInstallation.values()].flat(), ...assignment.host], fs);
+    const loadErrors = extensionLoadErrors(rebornInstalls, [...(result.loadErrors ?? []), ...ironclaw.loadErrors]);
+    if (loadErrors.size > 0) {
+      assignment.loadErrors = loadErrors;
+      // An install whose only manifests are broken still gets its (empty, incomplete) list
+      for (const inst of loadErrors.keys()) if (!assignment.byInstallation.has(inst)) assignment.byInstallation.set(inst, []);
+    }
     const incomplete = await hostInventoryGaps(fs);
     return incomplete.length > 0 ? { ...assignment, incomplete } : assignment;
   } catch {
@@ -148,13 +160,50 @@ export async function discoverMcpAssignment(installations: AgentInstallation[], 
 }
 
 /**
+ * The IronClaw extension manifests (or extensions directories) that exist
+ * but couldn't be read or parsed, by the Reborn install they belong to —
+ * found by discovery for the scanning user's home, or by listing each
+ * detected install. One entry per file.
+ */
+function extensionLoadErrors(
+  installs: AgentInstallation[],
+  errors: ReadonlyArray<Pick<ConfigLoadError, 'filePath' | 'stage' | 'message' | 'directory'>>,
+): Map<AgentInstallation, ConfigLoadError[]> {
+  const out = new Map<AgentInstallation, ConfigLoadError[]>();
+  for (const e of errors) {
+    const inst = installs.find(i => isWithin(e.filePath, i.installDir) && relative(i.installDir, e.filePath).split('/').includes('extensions'));
+    if (!inst) continue;
+    const list = out.get(inst) ?? [];
+    if (list.some(x => x.filePath === e.filePath)) continue;
+    list.push({ filePath: e.filePath, stage: e.stage, message: e.message, ...(e.directory ? { directory: true } : {}) });
+    out.set(inst, list);
+  }
+  return out;
+}
+
+/** Inventory notes for MCP config files an installation has but couldn't read. */
+export function mcpLoadNotes(errors: readonly ConfigLoadError[] | undefined): string[] {
+  return (errors ?? []).map(e => e.directory
+    ? `${e.filePath}: can't be listed — the MCP extensions in it are not inventoried`
+    : `${e.filePath}: can't be ${e.stage === 'read' ? 'read' : 'parsed'} — its MCP server is not inventoried`);
+}
+
+/** An inventory with the MCP list and the notes on what's missing from it. */
+export function withMcpInventory(inst: AgentInstallation, servers: McpServerItem[], errors?: readonly ConfigLoadError[]): NonNullable<AgentInstallation['inventory']> {
+  const base = { skillsDirs: [], skills: [], otherEntries: [], ...inst.inventory, mcpServers: servers };
+  const notes = mcpLoadNotes(errors);
+  if (notes.length === 0) return base;
+  return { ...base, incomplete: [...new Set([...(base.incomplete ?? []), ...notes])].sort() };
+}
+
+/**
  * Attach each installation's MCP servers (detect); returns the host's
  * inventory, shaped like a scan's (`agentFilter`: only shared servers).
  */
 export async function attachMcpInventories(installations: AgentInstallation[], fs: FSProvider, options: { agentFilter?: boolean } = {}): Promise<HostInventory> {
-  const { byInstallation, host, incomplete } = await discoverMcpAssignment(installations, fs);
+  const { byInstallation, host, incomplete, loadErrors } = await discoverMcpAssignment(installations, fs);
   for (const [inst, servers] of byInstallation) {
-    inst.inventory = { skillsDirs: [], skills: [], otherEntries: [], ...inst.inventory, mcpServers: servers };
+    inst.inventory = withMcpInventory(inst, servers, loadErrors?.get(inst));
   }
   return buildHostInventory(installations, { mcpServers: host, incomplete }, options);
 }

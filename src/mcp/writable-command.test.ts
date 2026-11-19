@@ -7,7 +7,7 @@ import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 import { SnapshotFSProvider } from '../core/snapshot-fs-provider.js';
 import type { FileEntry, ProbeSnapshot } from '../core/snapshot-types.js';
-import { interpreterScripts, worldWritableCommandPath, writableLaunchText, type WritableCommandPath } from './writable-command.js';
+import { expandUserTilde, interpreterScripts, worldWritableCommandPath, writableLaunchPaths, writableLaunchText, type WritableCommandPath } from './writable-command.js';
 import { hm010 } from '../checks/hermes/hm-010-mcp-server-hardening.js';
 import { at007 } from '../checks/atomic-agent/at-007-mcp-server-hardening.js';
 import { cd009 } from '../checks/claude-desktop/cd-009-world-writable-command.js';
@@ -315,6 +315,77 @@ describe.runIf(posix)('MCP command any local user can replace', () => {
     await chmod(join(root, 'priv'), 0o755);
   });
 
+  it('a 750 home blocks only when its group is the owner\'s private group', async () => {
+    // macOS: /Users/u drwxr-x--- u:staff — staff (gid 20) is every user's
+    // primary group, so the others still traverse it and swap the command.
+    // Linux: /home/u 750 u:u — a private group, nobody else gets in.
+    const host = (platform: 'darwin' | 'linux', home: string, gid: number, privateGroups?: Record<string, number>) => {
+      const open = `${home}/open`;
+      return new SnapshotFSProvider({
+        version: 1, hostname: 'h', platform, homedir: home, timestamp: 't',
+        privilege: { uid: 501, username: 'u', isRoot: false, sudoAvailable: false, escalated: false, scannedUsers: ['u'], skippedPaths: [] },
+        files: {
+          [`${open}/srv`]: { content: '', mode: 0o755, exists: true, contentOmitted: true, omitted: 'metadata' },
+          [`${home}/ww`]: { content: '', mode: 0o777, exists: true, contentOmitted: true, omitted: 'metadata' },
+        },
+        directoryModes: { '/': 0o755, [dirname(home)]: 0o755, [home]: 0o750, [open]: 0o777 },
+        owners: {
+          '/': [0, 0], [dirname(home)]: [0, 0], [home]: [501, gid], [open]: [501, gid],
+          [`${open}/srv`]: [501, gid], [`${home}/ww`]: [501, gid],
+        },
+        symlinks: {}, directories: {}, commandOutputs: {}, env: {}, specialModeBits: true,
+        ...(privateGroups ? { privateGroups } : {}),
+      } as ProbeSnapshot);
+    };
+    const mac = host('darwin', '/Users/u', 20);
+    expect(await worldWritableCommandPath(mac, '/Users/u/open/srv')).toEqual({ kind: 'directory', path: '/Users/u/open', octal: '777', mode: '777' });
+    expect(await worldWritableCommandPath(mac, '/Users/u/ww')).toEqual({ kind: 'binary', path: '/Users/u/ww', octal: '777', mode: '777' });
+    const linux = host('linux', '/home/u', 1000, { 1000: 501 });
+    expect(await worldWritableCommandPath(linux, '/home/u/open/srv'))
+      .toEqual({ kind: 'directory', path: '/home/u/open', octal: '777', mode: '777', barrier: '/home/u (750)' });
+    expect(await worldWritableCommandPath(linux, '/home/u/ww')).toEqual({ kind: 'binary', path: '/home/u/ww', octal: '777', mode: '777', barrier: '/home/u (750)' });
+    // A shared group on Linux (not anyone's private group) still reaches it
+    const shared = host('linux', '/home/u', 100, { 1000: 501 });
+    expect(await worldWritableCommandPath(shared, '/home/u/open/srv')).toEqual({ kind: 'directory', path: '/home/u/open', octal: '777', mode: '777' });
+  });
+
+  it('a 750 parent with a shared group is no barrier locally either', async () => {
+    // New directories under /tmp take its group (wheel on macOS) — not the
+    // owner's private group; on Linux they take the user's primary group,
+    // which is private on most distributions (then it does block).
+    await mkdir(join(root, 'home', 'open'), { recursive: true });
+    await chmod(join(root, 'home', 'open'), 0o777);
+    await chmod(join(root, 'home'), 0o750);
+    const cmd = await put('home/open/srv');
+    const { stat } = await import('node:fs/promises');
+    const gid = (await stat(join(root, 'home'))).gid;
+    const priv = await local.privateGroups();
+    const blocks = process.platform === 'linux' && priv.get(gid) === uid;
+    const got = await worldWritableCommandPath(local, cmd);
+    expect(got).toEqual({ kind: 'directory', path: join(root, 'home', 'open'), octal: '777', mode: '777', ...(blocks ? { barrier: `${join(root, 'home')} (750)` } : {}) });
+    await chmod(join(root, 'home'), 0o755);
+  });
+
+  it('judges a path written with `..` where it leads, locally and from a snapshot', async () => {
+    await mkdir(join(root, 'safe'));
+    await mkdir(join(root, 'ww'));
+    await chmod(join(root, 'ww'), 0o777);
+    const exist = await put('ww/cmd');
+    const missing = `${root}/safe/../ww/missing2`;
+    const existing = `${root}/safe/../ww/cmd`;
+    // the probe records both spellings (configPathsWithin)
+    const remote = await snapshotOf([missing, join(root, 'ww', 'missing2'), existing, exist], { special: true });
+    for (const cmd of [missing, existing]) {
+      const unverifiedLocal: string[] = [];
+      const unverifiedRemote: string[] = [];
+      const l = await writableLaunchPaths(local, cmd, [], unverifiedLocal);
+      const r = await writableLaunchPaths(remote, cmd, [], unverifiedRemote);
+      expect(l.map(w => [w.path, w.writable.path]), cmd).toEqual([[cmd === missing ? join(root, 'ww', 'missing2') : exist, join(root, 'ww')]]);
+      expect(r).toEqual(l);
+      expect(unverifiedRemote).toEqual([]);
+    }
+  });
+
   it('lists each path not verified once', async () => {
     const script = join(root, 'elsewhere', 's.js');
     const config = join(root, 'c.json');
@@ -400,5 +471,54 @@ describe('interpreterScripts', () => {
     expect(interpreterScripts('/usr/bin/env', ['-u', 'X', '-i', '/x/srv', '--port', '1'])).toEqual(['/x/srv']);
     expect(interpreterScripts('/usr/bin/env', ['-S', 'node /x/s.js'])).toEqual(['/x/s.js']);
     expect(interpreterScripts('/usr/bin/env', ['bash', '-c', 'echo hi'])).toEqual([]);
+  });
+
+  it('looks through wrappers to the command they run', () => {
+    expect(interpreterScripts('timeout', ['60', 'node', '/x/s.js'])).toEqual(['/x/s.js']);
+    expect(interpreterScripts('timeout', ['-s', 'KILL', '-k', '5', '60', '/x/srv'])).toEqual(['/x/srv']);
+    expect(interpreterScripts('timeout', ['-s9', '--kill-after=5', '--preserve-status', '1m', '/x/srv'])).toEqual(['/x/srv']);
+    expect(interpreterScripts('/usr/bin/timeout', ['--signal', 'TERM', '60', 'python3', '/x/s.py'])).toEqual(['/x/s.py']);
+    expect(interpreterScripts('nice', ['-n', '5', 'python3', '/x/s.py'])).toEqual(['/x/s.py']);
+    expect(interpreterScripts('nice', ['-n5', '/x/srv'])).toEqual(['/x/srv']);
+    expect(interpreterScripts('nice', ['-10', '/x/srv'])).toEqual(['/x/srv']);
+    expect(interpreterScripts('nohup', ['python3', '/x/s.py'])).toEqual(['/x/s.py']);
+    expect(interpreterScripts('nohup', ['--', '/x/srv'])).toEqual(['/x/srv']);
+    expect(interpreterScripts('stdbuf', ['-oL', 'node', '/x/s.js'])).toEqual(['/x/s.js']);
+    expect(interpreterScripts('stdbuf', ['-o', 'L', '-e', '0', '/x/srv'])).toEqual(['/x/srv']);
+    expect(interpreterScripts('xvfb-run', ['node', '/x/s.js'])).toEqual(['/x/s.js']);
+    expect(interpreterScripts('xvfb-run', ['-a', '-s', '-screen 0 1280x1024x24', '/x/srv'])).toEqual(['/x/srv']);
+    expect(interpreterScripts('xvfb-run', ['--server-args=-ac', '/x/srv'])).toEqual(['/x/srv']);
+    expect(interpreterScripts('ionice', ['-c', '3', '/x/srv'])).toEqual(['/x/srv']);
+    expect(interpreterScripts('ionice', ['-c2', '-n7', 'node', '/x/s.js'])).toEqual(['/x/s.js']);
+    expect(interpreterScripts('ionice', ['-p', '1234'])).toEqual([]);
+    expect(interpreterScripts('chrt', ['-f', '10', '/x/srv'])).toEqual(['/x/srv']);
+    expect(interpreterScripts('chrt', ['--idle', '0', 'node', '/x/s.js'])).toEqual(['/x/s.js']);
+    expect(interpreterScripts('chrt', ['-p', '10', '1234'])).toEqual([]);
+    expect(interpreterScripts('taskset', ['0x3', '/x/srv'])).toEqual(['/x/srv']);
+    expect(interpreterScripts('taskset', ['-c', '0-3', 'python3', '/x/s.py'])).toEqual(['/x/s.py']);
+    expect(interpreterScripts('taskset', ['-p', '0x3', '1234'])).toEqual([]);
+    // nested, and through env
+    expect(interpreterScripts('timeout', ['60', 'nice', '-n', '5', 'nohup', 'node', '/x/s.js'])).toEqual(['/x/s.js']);
+    expect(interpreterScripts('/usr/bin/env', ['timeout', '60', '/x/srv'])).toEqual(['/x/srv']);
+    // no command
+    expect(interpreterScripts('timeout', ['60'])).toEqual([]);
+    expect(interpreterScripts('nohup', [])).toEqual([]);
+  });
+
+  it('reads pypy like python', () => {
+    expect(interpreterScripts('pypy3', ['/x/s.py'])).toEqual(['/x/s.py']);
+    expect(interpreterScripts('/opt/pypy/bin/pypy', ['-u', '/x/s.py'])).toEqual(['/x/s.py']);
+    expect(interpreterScripts('pypy3.10', ['-m', 'pkg'])).toEqual([]);
+  });
+});
+
+describe('expandUserTilde', () => {
+  it('puts ~name where the OS keeps homes, as the probe stats it', () => {
+    expect(expandUserTilde('~alice/tools/mcp-bin', 'darwin')).toBe('/Users/alice/tools/mcp-bin');
+    expect(expandUserTilde('~alice/tools/mcp-bin', 'linux')).toBe('/home/alice/tools/mcp-bin');
+    expect(expandUserTilde('~root/bin/x', 'linux')).toBe('/root/bin/x');
+    expect(expandUserTilde('~root', 'darwin')).toBe('/var/root');
+    expect(expandUserTilde('~/x', 'linux')).toBe('~/x');
+    expect(expandUserTilde('mcp-server', 'linux')).toBe('mcp-server');
   });
 });

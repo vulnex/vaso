@@ -621,4 +621,25 @@ describe('MCPDiscovery — NanoClaw and IronClaw installs', () => {
     if (process.getuid?.() !== 0) expect(errors).toContainEqual(['IronClaw', '/locked/manifest.toml', 'read']);
     expect(errors).toHaveLength(process.getuid?.() !== 0 ? 2 : 1);
   });
+
+  it('reports an extensions directory it cannot list, and ignores a stray file in it', async () => {
+    const exts = join(home, '.ironclaw', 'reborn', 'local-dev', 'system', 'extensions');
+    await mkdir(join(exts, 'notion'), { recursive: true });
+    await writeFile(join(exts, 'notion', 'manifest.toml'), 'id = "notion"\n\n[mcp]\nserver = "https://mcp.notion.com/mcp"\n');
+    // Finder's .DS_Store: not an extension, no ENOTDIR warning
+    await writeFile(join(exts, '.DS_Store'), '\0');
+    const fs = Object.assign(Object.create(new LocalFSProvider()) as FSProvider, { homedir: () => home, getEnv: () => undefined });
+    const ok = await new MCPDiscovery(fs).discover('linux');
+    expect(ok.loadErrors).toBeUndefined();
+    expect(ok.configs.map(c => c.servers.map(s => s.name))).toEqual([['notion']]);
+
+    if (process.getuid?.() === 0) return;
+    await chmod(exts, 0o000);
+    try {
+      const denied = await new MCPDiscovery(fs).discover('linux');
+      expect(denied.loadErrors?.map(e => [e.filePath, e.stage, e.directory])).toEqual([[exts, 'read', true]]);
+    } finally {
+      await chmod(exts, 0o755);
+    }
+  });
 });

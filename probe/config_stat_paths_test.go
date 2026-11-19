@@ -93,10 +93,36 @@ func TestConfigPathsWithin(t *testing.T) {
 		"/plain/path":         nil,
 		"${OTHER}/x":          nil,
 		"KEY=value":           nil,
+		// where it leads, too: the CLI judges the cleaned path
+		"/p/safe/../ww/missing2": {"/p/ww/missing2"},
+		"node /p/a/../s.js":      {"/p/a/../s.js", "/p/s.js"},
+		"--require=/x//pre.js":   {"/x//pre.js", "/x/pre.js"},
 	}
 	for raw, want := range cases {
 		if got := configPathsWithin(raw, "/h"); !reflect.DeepEqual(got, want) {
 			t.Errorf("%q: got %v, want %v", raw, got, want)
+		}
+	}
+}
+
+// `~name/…` as the CLI expands a Hermes command: the home where the OS puts it.
+func TestUserTildePath(t *testing.T) {
+	cases := []struct {
+		v, goos, want string
+		ok            bool
+	}{
+		{"~alice/tools/mcp-bin", "darwin", "/Users/alice/tools/mcp-bin", true},
+		{"~alice/tools/mcp-bin", "linux", "/home/alice/tools/mcp-bin", true},
+		{"~root/bin/x", "linux", "/root/bin/x", true},
+		{"~root", "darwin", "/var/root", true},
+		{"~/x", "linux", "", false},
+		{"~", "linux", "", false},
+		{"/abs", "linux", "", false},
+		{"~al ice/x", "linux", "", false},
+	}
+	for _, c := range cases {
+		if got, ok := userTildePath(c.v, c.goos); got != c.want || ok != c.ok {
+			t.Errorf("%q on %s: got %q %v, want %q %v", c.v, c.goos, got, ok, c.want, c.ok)
 		}
 	}
 }

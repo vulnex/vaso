@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 )
 
@@ -42,7 +43,47 @@ func configPathsWithin(raw, home string) []string {
 			}
 		}
 	}
+	if p, ok := userTildePath(v, runtime.GOOS); ok {
+		out = append(out, p)
+	}
+	// The CLI judges a path where it leads (`/p/safe/../ww/x` as `/p/ww/x`):
+	// the cleaned spelling too
+	named := out
+	if strings.HasPrefix(v, "/") {
+		named = append([]string{v}, out...)
+	}
+	for _, p := range named {
+		if c := filepath.Clean(p); c != p {
+			out = append(out, c)
+		}
+	}
 	return out
+}
+
+// tildeUser is `~name` or `~name/…` (POSIX portable user names).
+var tildeUser = regexp.MustCompile(`^~([A-Za-z_][A-Za-z0-9._-]*)(/.*)?$`)
+
+// userTildePath is `~name/…` with the user's home where the OS puts homes,
+// as the CLI expands a Hermes command (expandUserTilde in
+// src/mcp/writable-command.ts) — not from the password database, which the
+// CLI can't read, so both judge the same path.
+func userTildePath(v, goos string) (string, bool) {
+	m := tildeUser.FindStringSubmatch(v)
+	if m == nil {
+		return "", false
+	}
+	var home string
+	switch {
+	case m[1] == "root" && goos == "darwin":
+		home = "/var/root"
+	case m[1] == "root":
+		home = "/root"
+	case goos == "darwin":
+		home = "/Users/" + m[1]
+	default:
+		home = "/home/" + m[1]
+	}
+	return home + m[2], true
 }
 
 // recordMissingTarget records, for a config-named path that doesn't exist
