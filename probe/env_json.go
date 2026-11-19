@@ -55,6 +55,17 @@ func stripJSONC(raw string) string {
 	return jsoncTrailingComma.ReplaceAllString(out.String(), "$1")
 }
 
+// envJSONText is the JSON document a variable's trimmed value holds, and
+// whether it holds one: a value opening with a comment ("// the token\n{…}",
+// "/* … */ {…}") is JSONC to the CLI (stripJsonc, then JSON.parse) and is
+// the document without its comments — they are left out of the snapshot.
+func envJSONText(trimmed string) (string, bool) {
+	if strings.HasPrefix(trimmed, "/") {
+		trimmed = strings.TrimSpace(stripJSONC(trimmed))
+	}
+	return trimmed, strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[")
+}
+
 // disguiseJSONValue disguises, inside an inline JSON config a variable holds
 // (OPENCODE_CONFIG_CONTENT), what was redacted there before — every string
 // under a credential-named key (apiKey, headers, environment…) and an
