@@ -2,8 +2,8 @@ import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { runnerPackage, isPinnedOrLocal, pinProblem } from '../../mcp/package-pin.js';
 import { shellCommandWrapper, shellInvocation } from '../../mcp/shell-wrapper.js';
-import { queryPermissions } from '../../core/permissions.js';
-import { notCollectedNote, uncollectedPath } from '../../core/probe-coverage.js';
+import { notCollectedNote } from '../../core/probe-coverage.js';
+import { worldWritableCommandPath } from '../../mcp/writable-command.js';
 import { asRecord, atomicConfigs, isEnabled, isLoopbackHost, mcpServers, serverName, urlHost } from './shared.js';
 
 
@@ -12,7 +12,7 @@ export const at007 = defineCheck({
   name: 'Atomic Agent MCP Server Hardening',
   category: 'atomic-agent',
   severity: 'warning',
-  description: 'Detect enabled mcp.servers[] launched via shell-c (`bash -c …`), running unpinned packages via npx/uvx/etc., invoking a world-writable command path, or reached over plaintext http:// to a non-loopback host (streamable_http / sse transports) — supply-chain, TOCTOU and interception vectors.',
+  description: 'Detect enabled mcp.servers[] launched via shell-c (`bash -c …`), running unpinned packages via npx/uvx/etc., invoking a command any local user can replace (world-writable, or in a world-writable directory), or reached over plaintext http:// to a non-loopback host (streamable_http / sse transports) — supply-chain, TOCTOU and interception vectors.',
   supportedAgents: ['atomic-agent'],
 
   async run(ctx, h) {
@@ -56,18 +56,21 @@ export const at007 = defineCheck({
         }
 
         if (command.startsWith('/')) {
-          try {
-            const perms = await queryPermissions(ctx.fs, command);
-            if (perms !== 'unsupported' && perms.worldWrite) {
-              evidence.push({
-                file: config.filePath,
-                snippet: `mcp.servers[${name}].transport.command = ${command} (mode 0${perms.octal})`,
-                detail: 'MCP server command is world-writable — any local user can replace it before launch',
-              });
-            }
-          } catch {
-            // Absent — or, on a snapshot, outside the probe's paths: unknown, not safe
-            if (await uncollectedPath(ctx.fs, command)) unverified.push(command);
+          const writable = await worldWritableCommandPath(ctx.fs, command);
+          // Absent — or, on a snapshot, outside the probe's paths: unknown, not safe
+          if (writable === 'uncollected') unverified.push(command);
+          else if (writable?.kind === 'binary') {
+            evidence.push({
+              file: config.filePath,
+              snippet: `mcp.servers[${name}].transport.command = ${command} (mode 0${writable.octal})`,
+              detail: 'MCP server command is world-writable — any local user can replace it before launch',
+            });
+          } else if (writable?.kind === 'directory') {
+            evidence.push({
+              file: config.filePath,
+              snippet: `mcp.servers[${name}].transport.command = ${command}: ${writable.path} (mode 0${writable.octal})`,
+              detail: `MCP server command's directory ${writable.path} is world-writable — any local user can swap ${command} before launch`,
+            });
           }
         }
 
