@@ -1837,6 +1837,7 @@ func (c *collector) recordDeniedUnder(snapshot *ProbeSnapshot, pattern, base str
 		}
 		for _, e := range entries {
 			if !e.IsDir() {
+				c.recordDeniedLink(snapshot, dir, e, seg)
 				continue
 			}
 			sub := filepath.Join(dir, e.Name())

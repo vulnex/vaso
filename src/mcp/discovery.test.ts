@@ -2,9 +2,11 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from
 import { MCPDiscovery } from './discovery.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { join } from 'node:path';
-import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
+import { SnapshotFSProvider } from '../core/snapshot-fs-provider.js';
+import type { ProbeSnapshot } from '../core/snapshot-types.js';
 
 const FIXTURES = join(__dirname, '../../testing/fixtures/mcp');
 
@@ -620,6 +622,41 @@ describe('MCPDiscovery — NanoClaw and IronClaw installs', () => {
     expect(errors).toContainEqual(['IronClaw', '/broken/manifest.toml', 'parse']);
     if (process.getuid?.() !== 0) expect(errors).toContainEqual(['IronClaw', '/locked/manifest.toml', 'read']);
     expect(errors).toHaveLength(process.getuid?.() !== 0 ? 2 : 1);
+  });
+
+  it('reports an extension linked into a folder it cannot enter; skips a dangling link or a loop', async () => {
+    const exts = join(home, '.ironclaw', 'reborn', 'local-dev', 'system', 'extensions');
+    await mkdir(exts, { recursive: true });
+    await mkdir(join(home, 'locked', 'evil'), { recursive: true });
+    await writeFile(join(home, 'locked', 'evil', 'manifest.toml'), 'id = "evil"\n\n[mcp]\nserver = "https://evil.example/mcp"\n');
+    await symlink(join(home, 'locked', 'evil'), join(exts, 'evil'));
+    await symlink(join(home, 'nowhere'), join(exts, 'dangle'));
+    await symlink(join(exts, 'loop'), join(exts, 'loop'));
+    const fs = Object.assign(Object.create(new LocalFSProvider()) as FSProvider, { homedir: () => home, getEnv: () => undefined });
+    expect((await new MCPDiscovery(fs).discover('linux')).configs.map(c => c.servers.map(s => s.name))).toEqual([['evil']]);
+    if (process.getuid?.() === 0) return;
+    await chmod(join(home, 'locked'), 0o000);
+    try {
+      const denied = await new MCPDiscovery(fs).discover('linux');
+      expect(denied.configs).toEqual([]);
+      expect(denied.loadErrors?.map(e => [e.filePath, e.stage, e.message])).toEqual([
+        [join(exts, 'evil'), 'read', `EACCES: permission denied, stat '${join(exts, 'evil')}'`],
+      ]);
+    } finally {
+      await chmod(join(home, 'locked'), 0o755);
+    }
+    // the same from a snapshot: the probe records the link and its denied stat
+    const snap = new SnapshotFSProvider({
+      version: 1, hostname: 'box', platform: 'linux', homedir: home, timestamp: 't',
+      privilege: { uid: 1, username: 'u', isRoot: false, sudoAvailable: false, escalated: false, scannedUsers: ['u'], skippedPaths: [] },
+      files: { [join(exts, 'evil')]: { content: '', mode: 0, exists: false, denied: true } },
+      directoryModes: { [exts]: 0o755 }, symlinks: { [join(exts, 'evil')]: join(home, 'locked', 'evil'), [join(exts, 'dangle')]: join(home, 'nowhere') },
+      directories: {}, commandOutputs: {}, env: {},
+    } as ProbeSnapshot);
+    const remote = await new MCPDiscovery(snap).discover('linux');
+    expect(remote.loadErrors?.map(e => [e.filePath, e.stage, e.message])).toEqual([
+      [join(exts, 'evil'), 'read', `EACCES: permission denied, stat '${join(exts, 'evil')}'`],
+    ]);
   });
 
   it('reports an extensions directory it cannot list, and ignores a stray file in it', async () => {

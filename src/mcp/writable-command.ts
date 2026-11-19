@@ -406,6 +406,10 @@ interface WrapperSyntax {
   noCommand?: ReadonlySet<string>;
   /** `nice -5`: an old-style numeric option. */
   numericFlags?: boolean;
+  /** `sudo NAME=value cmd`: environment assignments before the command. */
+  assignments?: boolean;
+  /** `flock FILE -c 'cmd …'`: right after the positional words, options whose value is a shell command line. */
+  commandLine?: ReadonlySet<string>;
 }
 
 const WRAPPERS: Readonly<Record<string, WrapperSyntax>> = {
@@ -421,6 +425,16 @@ const WRAPPERS: Readonly<Record<string, WrapperSyntax>> = {
     noCommand: new Set(['-p', '--pid']),
   },
   taskset: { value: new Set(), positional: 1, noCommand: new Set(['-p', '--pid']) },
+  sudo: {
+    value: new Set(['-u', '--user', '-g', '--group', '-h', '--host', '-p', '--prompt', '-C', '--close-from', '-D', '--chdir',
+      '-R', '--chroot', '-T', '--command-timeout', '-U', '--other-user', '-r', '--role', '-t', '--type']),
+    noCommand: new Set(['-l', '--list', '-v', '--validate', '-K', '--remove-timestamp', '-V', '--version', '-e', '--edit', '--help']),
+    assignments: true,
+  },
+  doas: { value: new Set(['-u', '-a']), noCommand: new Set(['-C', '-L']) },
+  caffeinate: { value: new Set(['-t', '-w']) },
+  flock: { value: new Set(['-w', '--wait', '--timeout', '-E', '--conflict-exit-code']), positional: 1, commandLine: new Set(['-c', '--command']) },
+  setsid: { value: new Set() },
 };
 
 /** The command a wrapper (`timeout 60 node /x/s.js`) runs, with its arguments. */
@@ -453,7 +467,15 @@ function wrappedCommand(syntax: WrapperSyntax, args: readonly string[]): { comma
       }
       continue;
     }
-    if (positional > 0) { positional--; continue; }
+    if (positional > 0) {
+      positional--;
+      // `flock /x/lock -c 'node /x/s.js'`: a shell runs the command line
+      if (positional === 0 && syntax.commandLine?.has(args[i + 1] ?? '')) {
+        return args[i + 2] !== undefined ? { command: 'sh', args: ['-c', args[i + 2]] } : undefined;
+      }
+      continue;
+    }
+    if (syntax.assignments && ENV_ASSIGNMENT.test(arg)) continue;
     if (optional) {
       optional = undefined;
       if (syntax.optionalPositional!.test(arg)) continue;
@@ -469,25 +491,32 @@ function wrappedCommand(syntax: WrapperSyntax, args: readonly string[]): { comma
  * `bash -o pipefail /x/run.sh`, `java -jar /x/s.jar`, modules preloaded with
  * `-r`/`--import`, and through `env [NAME=value…] cmd …` (or a wrapper:
  * `timeout 60 cmd`, `nice -n 5 cmd`, `nohup`, `stdbuf`, `xvfb-run`,
- * `ionice`, `chrt`, `taskset`) the command and what it runs. Relative paths depend on the client's working directory and
+ * `ionice`, `chrt`, `taskset`, `sudo -u user`, `doas -u user`, `caffeinate`,
+ * `flock FILE`, `setsid`) the command and what it runs. Relative paths depend on the client's working directory and
  * are not judged. A path is judged only as the config spells it — a whole
  * argument, an `--option=` value, or a word of one (`env -S`, `bash -c`) —
  * which is what a remote probe stats.
  */
 export function interpreterScripts(command: string, args: readonly string[]): string[] {
   const named = (p: string) => args.some(a => a === p || a.endsWith(`=${p}`) || a === `file://${p}` || a.trim().split(/\s+/).includes(p));
+  // A script the runner names by its resolved path (`/p/safe/../ww/s.py` as
+  // `/p/ww/s.py`) is judged as the config spells it: where its `..` leads
+  // depends on the links before it (launchPathSpelling)
+  const words = args.flatMap(a => [a, a.slice(a.indexOf('=') + 1), a.replace(/^file:\/\//, ''), ...a.trim().split(/\s+/)]);
+  const spelled = (p: string): string | undefined => named(p) ? p : words.find(w => isAbsolute(w) && w.includes('..') && posix.normalize(w) === p);
   const runner = basename(runnerName(command)).toLowerCase();
   const wrapper = Object.hasOwn(WRAPPERS, runner) ? WRAPPERS[runner] : undefined;
   if (runner === 'env' || wrapper) {
     const inner = wrapper ? wrappedCommand(wrapper, args) : envCommand(args);
     if (!inner) return [];
     const out = isAbsolute(inner.command) ? [inner.command] : [];
-    return [...new Set([...out, ...interpreterScripts(inner.command, inner.args)].filter(named))];
+    return [...new Set([...out, ...interpreterScripts(inner.command, inner.args)].map(spelled).filter((p): p is string => !!p))];
   }
   const target = launchTarget({ name: '', command, args: [...args], transport: 'stdio' });
-  const out = target.executed ? [] : [target.entry, ...target.preloads].filter((p): p is string => !!p && isAbsolute(p) && named(p));
+  const out = target.executed ? [] : [target.entry, ...target.preloads]
+    .map(p => p && isAbsolute(p) ? spelled(p) : undefined).filter((p): p is string => !!p);
   const syntax = Object.hasOwn(SCRIPT_RUNNERS, runner) ? SCRIPT_RUNNERS[runner] : undefined;
-  if (out.length === 0 && syntax) out.push(...runnerScripts(syntax, args).filter(named));
+  if (out.length === 0 && syntax) out.push(...runnerScripts(syntax, args).map(spelled).filter((p): p is string => !!p));
   return [...new Set(out)];
 }
 
@@ -514,6 +543,32 @@ export function expandUserTilde(value: string, platform: string): string {
   const name = m[1];
   const home = name === 'root' ? (platform === 'darwin' ? '/var/root' : '/root') : `${platform === 'darwin' ? '/Users' : '/home'}/${name}`;
   return home + (m[2] ?? '');
+}
+
+/**
+ * An absolute launch path as the kernel reads it: `.` and `//` collapsed, and
+ * each `..` taken from where the path before it leads — its links followed
+ * first (`/p/safe/lnk/../bin/cmd`, `lnk` → `/p/ww/bin`, is `/p/ww/bin/cmd`),
+ * not cut from the text. What follows the last `..` keeps its spelling: its
+ * links are judged where they are (worldWritableCommandPath).
+ */
+export async function launchPathSpelling(fs: FSProvider, path: string): Promise<string> {
+  const parts = path.split('/').filter(c => c !== '' && c !== '.');
+  const last = parts.lastIndexOf('..');
+  if (last < 0) return `/${parts.join('/')}`;
+  let queue = parts.slice(0, last + 1);
+  let cur = '/';
+  for (let hops = 0; queue.length > 0;) {
+    const c = queue.shift()!;
+    if (c === '..') { cur = dirname(cur); continue; }
+    const next = posix.join(cur, c);
+    const target = hops < MAX_LINK_HOPS ? await readLink(fs, next) : undefined;
+    if (target === undefined) { cur = next; continue; }
+    hops++;
+    if (target.startsWith('/')) cur = '/';
+    queue = [...target.split('/').filter(t => t !== '' && t !== '.'), ...queue];
+  }
+  return posix.join(cur, ...parts.slice(last + 1));
 }
 
 /**
@@ -547,8 +602,8 @@ export async function writableLaunchPaths(
   const out: WritableLaunchPath[] = [];
   for (const t of targets) {
     // judged where it leads, `/p/safe/../ww/x` as `/p/ww/x` (the probe
-    // records both spellings)
-    t.path = posix.normalize(t.path);
+    // records that spelling and the links before a `..`)
+    t.path = await launchPathSpelling(fs, t.path);
     if (out.some(o => o.path === t.path)) continue;
     const writable = await worldWritableCommandPath(fs, t.path, options);
     if (writable === 'uncollected') note(t.path);

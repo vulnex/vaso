@@ -386,6 +386,41 @@ describe.runIf(posix)('MCP command any local user can replace', () => {
     }
   });
 
+  it('takes a `..` after a link from where the link leads, locally and from a snapshot', async () => {
+    await mkdir(join(root, 'safe'));
+    await mkdir(join(root, 'ww', 'bin'), { recursive: true });
+    await chmod(join(root, 'ww'), 0o777);
+    const real = await put('ww/bin/cmd');
+    await symlink(join(root, 'ww', 'bin'), join(root, 'safe', 'lnk2'));
+    const existing = `${root}/safe/lnk2/../bin/cmd`;
+    const missing = `${root}/safe/lnk2/../missing3`;
+    // the probe records where the `..` leads and the link before it (dotDotSpelling)
+    const remote = await snapshotOf([existing, real, missing, join(root, 'ww', 'missing3')], {
+      special: true, links: { [join(root, 'safe', 'lnk2')]: join(root, 'ww', 'bin') },
+    });
+    for (const [cmd, judged] of [[existing, real], [missing, join(root, 'ww', 'missing3')]]) {
+      const unverifiedRemote: string[] = [];
+      const l = await writableLaunchPaths(local, cmd, [], []);
+      const r = await writableLaunchPaths(remote, cmd, [], unverifiedRemote);
+      expect(l.map(w => [w.path, w.writable.path]), cmd).toEqual([[judged, join(root, 'ww')]]);
+      expect(r).toEqual(l);
+      expect(unverifiedRemote).toEqual([]);
+    }
+  });
+
+  it('judges a script whose path has a `..` (python3 /p/safe/../ww/s.py)', async () => {
+    await mkdir(join(root, 'safe'));
+    await mkdir(join(root, 'ww'));
+    await chmod(join(root, 'ww'), 0o777);
+    const script = await put('ww/s.py', 0o644);
+    const arg = `${root}/safe/../ww/s.py`;
+    const remote = await snapshotOf([arg, script], { special: true });
+    for (const fs of [local, remote]) {
+      const got = await writableLaunchPaths(fs, 'python3', [arg], []);
+      expect(got.map(w => [w.role, w.path, w.writable.path]), fs.kind).toEqual([['script', script, join(root, 'ww')]]);
+    }
+  });
+
   it('lists each path not verified once', async () => {
     const script = join(root, 'elsewhere', 's.js');
     const config = join(root, 'c.json');
@@ -497,8 +532,25 @@ describe('interpreterScripts', () => {
     expect(interpreterScripts('taskset', ['0x3', '/x/srv'])).toEqual(['/x/srv']);
     expect(interpreterScripts('taskset', ['-c', '0-3', 'python3', '/x/s.py'])).toEqual(['/x/s.py']);
     expect(interpreterScripts('taskset', ['-p', '0x3', '1234'])).toEqual([]);
+    // sudo/doas with a user, caffeinate, flock on a lock file, setsid
+    expect(interpreterScripts('sudo', ['-u', 'nobody', 'node', '/x/s.js'])).toEqual(['/x/s.js']);
+    expect(interpreterScripts('/usr/bin/sudo', ['-E', '--user=nobody', '-g', 'staff', 'X=1', '/x/srv'])).toEqual(['/x/srv']);
+    expect(interpreterScripts('sudo', ['-unobody', '-C', '5', 'python3', '/x/s.py'])).toEqual(['/x/s.py']);
+    expect(interpreterScripts('sudo', ['-l', '/x/srv'])).toEqual([]);
+    expect(interpreterScripts('doas', ['-u', 'nobody', 'node', '/x/s.js'])).toEqual(['/x/s.js']);
+    expect(interpreterScripts('doas', ['-n', '/x/srv'])).toEqual(['/x/srv']);
+    expect(interpreterScripts('doas', ['-C', '/etc/doas.conf', '/x/srv'])).toEqual([]);
+    expect(interpreterScripts('caffeinate', ['-i', 'node', '/x/s.js'])).toEqual(['/x/s.js']);
+    expect(interpreterScripts('caffeinate', ['-dims', '-t', '3600', '/x/srv'])).toEqual(['/x/srv']);
+    expect(interpreterScripts('flock', ['/x/lock', 'node', '/x/s.js'])).toEqual(['/x/s.js']);
+    expect(interpreterScripts('flock', ['-w', '10', '-x', '/x/lock', '/x/srv'])).toEqual(['/x/srv']);
+    expect(interpreterScripts('flock', ['/x/lock', '-c', '/x/srv --flag'])).toEqual(['/x/srv']);
+    expect(interpreterScripts('flock', ['9'])).toEqual([]);
+    expect(interpreterScripts('setsid', ['-w', 'node', '/x/s.js'])).toEqual(['/x/s.js']);
+    expect(interpreterScripts('setsid', ['-f', '/x/srv'])).toEqual(['/x/srv']);
     // nested, and through env
     expect(interpreterScripts('timeout', ['60', 'nice', '-n', '5', 'nohup', 'node', '/x/s.js'])).toEqual(['/x/s.js']);
+    expect(interpreterScripts('sudo', ['-u', 'svc', 'timeout', '60', 'node', '/x/s.js'])).toEqual(['/x/s.js']);
     expect(interpreterScripts('/usr/bin/env', ['timeout', '60', '/x/srv'])).toEqual(['/x/srv']);
     // no command
     expect(interpreterScripts('timeout', ['60'])).toEqual([]);

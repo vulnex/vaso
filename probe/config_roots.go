@@ -306,6 +306,11 @@ func (c *collector) statConfigPath(snapshot *ProbeSnapshot, raw string, src conf
 		paths = append(paths, filepath.Join(src.home, t[2:]))
 	}
 	paths = append(paths, configPathsWithin(raw, src.home)...)
+	for _, p := range paths {
+		if real, ok := c.dotDotSpelling(snapshot, p); ok {
+			paths = append(paths, real)
+		}
+	}
 	n := 0
 	for _, p := range paths {
 		if strings.ContainsRune(p, 0) {

@@ -81,6 +81,92 @@ func TestDanglingConfigLinkRecordsWhereItLeads(t *testing.T) {
 	}
 }
 
+// A `..` after a link is taken from where the link leads, as the kernel does
+// (and the CLI, launchPathSpelling): that spelling is stat'd and the link
+// before the `..` recorded, so the CLI walks the same way on the snapshot.
+func TestDotDotAfterLinkStatsWhereItLeads(t *testing.T) {
+	home := setupHome(t)
+	open := filepath.Join(filepath.Dir(home), "open")
+	safe := filepath.Join(filepath.Dir(home), "safe")
+	for _, d := range []string{filepath.Join(open, "bin"), safe} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Chmod(open, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(open, "bin", "cmd"), "#!/bin/sh\n", 0o755)
+	link := filepath.Join(safe, "lnk2")
+	if err := os.Symlink(filepath.Join(open, "bin"), link); err != nil {
+		t.Fatal(err)
+	}
+	cmd := link + "/../bin/cmd"
+	script := link + "/./../missing3.py"
+	write(t, filepath.Join(home, ".hermes", "config.yaml"), "mcp_servers:\n  a:\n    command: "+cmd+"\n    args: ["+script+"]\n", 0o644)
+	snap := Collect(ProbeManifest{ConfigRoots: []ConfigRootRequest{
+		{Configs: []string{"~/.hermes/config.yaml"}, Format: "yaml", Kind: "stat", Keys: [][]string{{"mcp_servers", "*", "command"}, {"mcp_servers", "*", "args", "*"}}},
+	}}, false)
+	if e, ok := snap.Files[filepath.Join(open, "bin", "cmd")]; !ok || !e.Exists {
+		t.Fatalf("where the command leads not stat'd: %+v (%v)", e, ok)
+	}
+	if e, ok := snap.Files[filepath.Join(open, "missing3.py")]; !ok || e.Exists {
+		t.Fatalf("where the script leads not recorded as absent: %+v (%v)", e, ok)
+	}
+	if snap.Symlinks[link] != filepath.Join(open, "bin") {
+		t.Fatalf("the link before `..` not recorded: %v", snap.Symlinks)
+	}
+	if _, ok := snap.LinkOwners[link]; !ok {
+		t.Fatal("the link's owner not recorded")
+	}
+	c := &collector{}
+	if got, ok := c.dotDotSpelling(&ProbeSnapshot{}, "/a/./b//c"); ok {
+		t.Fatalf("no `..`: %q", got)
+	}
+	if got, _ := c.dotDotSpelling(&ProbeSnapshot{}, "/nonexistent-vaso/x/../../y/z"); got != "/y/z" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+// A wildcard-matched link into a folder the probe can't enter (IronClaw
+// `extensions/evil -> ~/locked/evil`) is recorded with a denied entry, so the
+// CLI reports it as a local stat fails; a dangling link is not.
+func TestDeniedLinkUnderWildcardIsRecorded(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root enters any folder")
+	}
+	home := setupHome(t)
+	exts := filepath.Join(home, ".ironclaw", "reborn", "local-dev", "system", "extensions")
+	locked := filepath.Join(home, "locked")
+	if err := os.MkdirAll(filepath.Join(locked, "evil"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(locked, "evil", "manifest.toml"), "id = \"evil\"\n", 0o644)
+	write(t, filepath.Join(exts, "notion", "manifest.toml"), "id = \"notion\"\n", 0o644)
+	evil := filepath.Join(exts, "evil")
+	dangle := filepath.Join(exts, "dangle")
+	if err := os.Symlink(filepath.Join(locked, "evil"), evil); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(home, "nowhere"), dangle); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(locked, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+	snap := Collect(ProbeManifest{GlobPatterns: []string{"~/.ironclaw/reborn/local-dev/system/extensions/*/manifest.toml"}}, false)
+	if e, ok := snap.Files[evil]; !ok || e.Exists || !e.Denied {
+		t.Fatalf("denied link not recorded: %+v (%v)", e, ok)
+	}
+	if snap.Symlinks[evil] != filepath.Join(locked, "evil") {
+		t.Fatalf("link target not recorded: %v", snap.Symlinks)
+	}
+	if _, ok := snap.Files[dangle]; ok {
+		t.Fatal("a dangling link is not a denied one")
+	}
+}
+
 // The paths a value names besides itself, as the CLI judges them.
 func TestConfigPathsWithin(t *testing.T) {
 	cases := map[string][]string{

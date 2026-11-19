@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+
+	"github.com/bmatcuk/doublestar/v4"
 )
 
 // homeRef is a ${HOME} reference (Hermes also reads ${env:HOME}) in a config
@@ -157,4 +159,117 @@ func recordLinkOwner(snapshot *ProbeSnapshot, p string, info os.FileInfo) {
 		}
 		snapshot.LinkOwners[p] = [2]int{uid, gid}
 	}
+}
+
+// dotDotSpelling is p as the kernel reads a `..` in it (launchPathSpelling in
+// src/mcp/writable-command.ts): each `..` taken from where the path before it
+// leads, its links followed first (`/p/safe/lnk/../bin/cmd` with `lnk` →
+// `/p/ww/bin` is `/p/ww/bin/cmd`); what follows the last `..` keeps its
+// spelling. The links it follows are recorded so the CLI walks the same way
+// on the snapshot. A link that is a scanned home or above one is neither
+// followed nor recorded (see linkCandidates). ok is false without a `..`.
+func (c *collector) dotDotSpelling(snapshot *ProbeSnapshot, p string) (string, bool) {
+	if !strings.HasPrefix(p, "/") || strings.ContainsRune(p, 0) {
+		return "", false
+	}
+	var parts []string
+	for _, comp := range strings.Split(p, "/") {
+		if comp != "" && comp != "." {
+			parts = append(parts, comp)
+		}
+	}
+	last := -1
+	for i, comp := range parts {
+		if comp == ".." {
+			last = i
+		}
+	}
+	if last < 0 {
+		return "", false
+	}
+	queue := append([]string{}, parts[:last+1]...)
+	cur := "/"
+	for hops := 0; len(queue) > 0; {
+		comp := queue[0]
+		queue = queue[1:]
+		if comp == ".." {
+			cur = filepath.Dir(cur)
+			continue
+		}
+		next := filepath.Join(cur, comp)
+		target, ok := c.followableLink(snapshot, next, hops)
+		if !ok {
+			cur = next
+			continue
+		}
+		hops++
+		if strings.HasPrefix(target, "/") {
+			cur = "/"
+		}
+		var rest []string
+		for _, t := range strings.Split(target, "/") {
+			if t != "" && t != "." {
+				rest = append(rest, t)
+			}
+		}
+		queue = append(rest, queue...)
+	}
+	return filepath.Join(append([]string{cur}, parts[last+1:]...)...), true
+}
+
+// followableLink is the target of link p, recorded with its owner, when a
+// walk may follow it.
+func (c *collector) followableLink(snapshot *ProbeSnapshot, p string, hops int) (string, bool) {
+	if hops >= maxExplicitLinkHops {
+		return "", false
+	}
+	for _, h := range c.homes {
+		if within(filepath.Clean(h), p) {
+			return "", false
+		}
+	}
+	info, err := os.Lstat(p)
+	if err != nil || info.Mode()&os.ModeSymlink == 0 {
+		return "", false
+	}
+	target, err := os.Readlink(p)
+	if err != nil {
+		return "", false
+	}
+	if snapshot.Symlinks == nil {
+		snapshot.Symlinks = make(map[string]string)
+	}
+	snapshot.Symlinks[p] = target
+	recordLinkOwner(snapshot, p, info)
+	return target, true
+}
+
+// recordDeniedLink records a link a wildcard segment (seg, not the last of
+// its pattern) matches in dir whose target can't be stat'd for lack of
+// permission (`extensions/evil -> ~/locked/evil`, ~/locked mode 000): its
+// target, and a denied entry — the CLI reports what it hides as a read
+// failure, as a local stat of it fails, instead of finding nothing there.
+// Skills trees are left as their walk records them.
+func (c *collector) recordDeniedLink(snapshot *ProbeSnapshot, dir string, e fs.DirEntry, seg string) {
+	if c.inSkillTree || seg == "**" || e.Type()&os.ModeSymlink == 0 {
+		return
+	}
+	if ok, _ := doublestar.Match(seg, e.Name()); !ok {
+		return
+	}
+	p := filepath.Join(dir, e.Name())
+	if _, err := os.Stat(p); err == nil || !os.IsPermission(err) {
+		return
+	}
+	if _, done := snapshot.Files[p]; done {
+		return
+	}
+	if snapshot.Symlinks == nil {
+		snapshot.Symlinks = make(map[string]string)
+	}
+	recordSymlink(snapshot.Symlinks, p)
+	if info, err := os.Lstat(p); err == nil {
+		recordLinkOwner(snapshot, p, info)
+	}
+	snapshot.Files[p] = FileEntry{Exists: false, Denied: true}
 }
