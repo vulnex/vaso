@@ -154,10 +154,14 @@ func TestCollectEnvRedactsHeadersJoinedNamesURLsAndInlineJSON(t *testing.T) {
 
 	env := collectEnv([]string{"VASOTEST_"})
 	for _, k := range []string{"VASOTEST_CUSTOM_HEADERS", "VASOTEST_GITHUB_ACCESSTOKEN", "VASOTEST_SLACK_BOTTOKEN",
-		"VASOTEST_AGENT_PRIVATEKEY", "VASOTEST_SIGNING_JWT", "VASOTEST_SENTRY_DSN", "VASOTEST_PERMISSION_CONTENT"} {
+		"VASOTEST_AGENT_PRIVATEKEY", "VASOTEST_SIGNING_JWT", "VASOTEST_SENTRY_DSN"} {
 		if env[k] != redactedEnvValue {
 			t.Errorf("%s = %q, want redacted", k, env[k])
 		}
+	}
+	// JSONC, as the CLI reads it (stripJsonc): disguised inside, not redacted
+	if env["VASOTEST_PERMISSION_CONTENT"] != `{"bash":"allow"}` {
+		t.Errorf("VASOTEST_PERMISSION_CONTENT = %q", env["VASOTEST_PERMISSION_CONTENT"])
 	}
 	// URLs keep scheme and host (checks judge http:// and the endpoint), not credentials
 	if env["VASOTEST_DATABASE_URL"] != "postgres://[redacted]@db.internal:5432/app" || env["VASOTEST_PROXY"] != "http://[redacted]@proxy:3128" {
