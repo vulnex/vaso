@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { spawn, execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { chmod, link, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, link, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { existsSync, realpathSync } from 'node:fs';
 import { dirname, extname, basename, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -251,6 +251,8 @@ function jsonFile(label: string): string {
     DB_PASSWORD: c('slash-leading base64', slashed),
     NPM_CONFIG__AUTH: `//registry.npmjs.org/:_authToken=${c('npm authToken after a path', generic)}`,
     SERVICE_TOKEN: `\${DB_PASSWORD:-${c('env fallback', generic)}}`,
+    // a short default under a credential name is stored all the same (dt24 g4-R3)
+    DB_PASS: `\${DB_PASS:-${c('short env fallback', short)}}`,
     API_SECRET: `$${c('dollar-led password', () => `Zx8${body(20)}`)}`,
     tools: {
       a: { args: ['-y', 'acme-mcp', '--verbose', '--token', c('argv after boolean flag', generic)] },
@@ -258,6 +260,9 @@ function jsonFile(label: string): string {
       c: { command: 'sh', args: ['-c', `mysql -uroot -p${c('mysql -p', generic)} app && sshpass -p ${c('sshpass -p', generic)} ssh host`] },
       d: { url: `https://${c('token as url user', () => body(32))}@o1.ingest.sentry.io/1`, args: ['--pwd', c('--pwd', generic)] },
       e: { args: ['acme', '--no-auth', '--api-key', c('flag after a secret-named switch', generic)] },
+      // $"…" quoting, a quoted password closing its string, an escaped-space header (dt24 g9-R1/R4)
+      f: { command: 'sh', args: ['-c', `sshpass -p $"${c('sshpass -p $"…"', alnum)}" ssh h && sqlcmd -S h -U sa -P '${c('sqlcmd -P quoted, closing the string', alnum)}'`] },
+      g: { command: 'sh', args: ['-c', `mysql -p$"${c('mysql -p$"…"', alnum)}" app; curl -H Authorization:\\ Bearer\\ ${c('escaped-space bearer', alnum)} https://x.example`] },
       f: { command: 'mysql', args: ['-u', 'root', `-p${c('-p<password> element', () => `${body(10)}7${body(9)}`)}`] },
       g: { url: `https://${c('token:@ url user', () => body(32))}:@x.example/sse` },
       h: { url: `https://x.example/sse#${c('fragment token', () => distinct(BASE62, 30).join(''))}` },
@@ -486,6 +491,8 @@ function tomlFile(label: string): string {
     `API_KEY = "${escapedCanary(`${label} toml all-escaped key`, generic, jsonEscape)}"`,
     `credentials = { primary = { value = "${canary(`${label} toml credentials.primary.value`, short)}", name = "main" } }`,
     `nested = { CREDS = { value = "${canary(`${label} toml creds.value lowercase`, lowerWord)}" } }`,
+    // a 16-digit integer within 2^53 - 1: its stand-in stays within (dt24 g9-R2)
+    `pin_token = ${canary(`${label} toml 16-digit integer`, () => `8${body(15, '0123456789')}`)}`,
   ].join('\n') + '\n';
 }
 
@@ -520,6 +527,8 @@ function markdownFile(label: string): string {
     `**password**: ${c('short bold value', short)}`,
     `| DB_PASSWORD | ${c('short table cell', short)} |`,
     `token: @${c('@-led value', generic)}`,
+    // a quoted high-entropy string with no key name (dt24 g4-R2)
+    `See "${c('quoted high-entropy string, no key', () => distinct(BASE62, 52).join(''))}" for staging.`,
     `HEX_SECRET=${c('hex', hex)}`,
     // half of a disguised token pasted elsewhere in the file
     ...(() => {
@@ -892,10 +901,11 @@ describe.skipIf(!goAvailable)('probe privacy canary', () => {
       env[`${name}_X`] = canary(`env ${name}_X (presence-only prefix)`, generic);
     }
     // inline JSON configs: disguised like a file, never redacted to a placeholder
-    env.OPENCODE_CONFIG_CONTENT = JSON.stringify({
-      mcp: { z: { type: 'local', command: ['npx', '-y', 'x-mcp', '--api-key', canary('env OPENCODE_CONFIG_CONTENT argv', generic)],
-        environment: { API_TOKEN: canary('env OPENCODE_CONFIG_CONTENT environment', FORMATS[3][1]), DB_PASSWORD: canary('env OPENCODE_CONFIG_CONTENT password', lowerWord) } } },
-    });
+    // …written as JSONC too: comments and a trailing comma (dt24 g9-R3)
+    env.OPENCODE_CONFIG_CONTENT = `{\n  // inline config\n  "mcp": ${JSON.stringify({
+      z: { type: 'local', command: ['npx', '-y', 'x-mcp', '--api-key', canary('env OPENCODE_CONFIG_CONTENT argv', generic)],
+        environment: { API_TOKEN: canary('env OPENCODE_CONFIG_CONTENT environment', FORMATS[3][1]), DB_PASSWORD: canary('env OPENCODE_CONFIG_CONTENT password', lowerWord) } },
+    })},\n}`;
     env.COPILOT_HOME = COPILOT_HOME_REL;
     const r = await run(probe, ['--manifest', join(work, 'manifest.json')], env, home);
     expect(r.code, r.stderr).toBe(0);
@@ -1040,6 +1050,33 @@ describe.skipIf(!goAvailable)('probe privacy canary', () => {
     const leaks = [...canaries].filter(([, value]) => haystack.includes(hidden(value))).map(([label]) => label);
     expect(leaks, `${leaks.length} canaries shipped:\n${leaks.slice(0, 40).join('\n')}`).toEqual([]);
   }, 300_000); // ~12k searches of the whole snapshot: minutes on a loaded machine
+
+  it('disguises an inline JSONC config, not redacting it', () => {
+    const v = (JSON.parse(snapshot) as { env: Record<string, string> }).env.OPENCODE_CONFIG_CONTENT;
+    expect(v).toBeDefined();
+    expect(() => JSON.parse(v)).not.toThrow();
+    expect(v).toContain('"type":"local"');
+  });
+
+  it('ships TOML that parses wherever the planted file does', async () => {
+    const { parse } = await import('smol-toml');
+    const files = (JSON.parse(snapshot) as { files: Record<string, { content?: string; encoding?: string }> }).files;
+    const broken: string[] = [];
+    for (const [path, e] of Object.entries(files)) {
+      if (!path.endsWith('.toml') || !e.content || e.encoding === 'base64') continue;
+      try {
+        parse(e.content);
+      } catch {
+        try {
+          parse(await readFile(path, 'utf-8'));
+          broken.push(path);
+        } catch {
+          // the planted file does not parse either
+        }
+      }
+    }
+    expect(broken).toEqual([]);
+  });
 
   it('ships no run of an escaped secret\'s escapes', () => {
     expect(escapedCanaries.size).toBeGreaterThan(200);
