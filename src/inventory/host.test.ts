@@ -19,6 +19,12 @@ describe('buildHostInventory', () => {
     expect(isEmptyHostInventory(filtered)).toBe(true);
     expect(isEmptyHostInventory({ mcpServers: [], incomplete: ['note'] })).toBe(false);
   });
+
+  it('a host inventory present for a note alone still carries its (empty) server list', () => {
+    // One shape wherever hostInventory appears (local, snapshot, detect):
+    // mcpServers is always there; only an empty inventory is left out
+    expect(buildHostInventory([], { mcpServers: [], incomplete: ['note'] })).toEqual({ mcpServers: [], incomplete: ['note'] });
+  });
 });
 
 describe('hostInventoryGaps', () => {
