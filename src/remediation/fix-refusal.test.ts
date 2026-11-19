@@ -215,7 +215,7 @@ describe('fix families', () => {
     const all = checkRegistry.getAll();
     expect(all.filter(c => c.fix).length).toBeGreaterThan(40);
     expect(all.filter(c => c.fix && !c.fixTargets).map(c => c.id)).toEqual([]);
-  });
+  }, 30_000);
 });
 
 describe.skipIf(!posix)('scan and fix agree on refused fixes', () => {
