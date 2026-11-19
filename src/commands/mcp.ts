@@ -1,6 +1,6 @@
 import chalk from 'chalk';
 import { escapeControlCharsDeep, stripColor } from '../reporting/text-safety.js';
-import { writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { ScanEngine } from '../core/engine.js';
 import { adapterRegistry } from '../adapters/registry.js';
 import { checkRegistry } from '../core/check-registry.js';
@@ -16,11 +16,21 @@ import { EXIT_FINDINGS, EXIT_INCOMPLETE, EXIT_USAGE, incompleteResults, parseFai
 import { describeFetchFailure } from '../mcp/package-fetcher.js';
 import type { MCPConfigLoadError, MCPDiscoveryResult } from '../mcp/types.js';
 
+/** Whether a file holds nothing but whitespace (a 0-byte config): read back only to word the warning. */
+async function blankFile(p: string): Promise<boolean> {
+  try {
+    return (await readFile(p, 'utf8')).trim() === '';
+  } catch {
+    return false;
+  }
+}
+
 /** Paths named with -p must exist and parse; otherwise nothing would be scanned silently. */
-function reportUnreadable(result: MCPDiscoveryResult): boolean {
+async function reportUnreadable(result: MCPDiscoveryResult): Promise<boolean> {
   const declared = new Set(result.noServers);
   for (const p of result.empty ?? []) {
-    const why = declared.has(p) ? 'the config declares no enabled servers' : 'no known config dialect matched';
+    const why = declared.has(p) ? 'the config declares no enabled servers'
+      : await blankFile(p) ? 'the file is empty' : 'no known config dialect matched';
     console.error(chalk.yellow(`No MCP servers found in ${p} (${why})`));
   }
   if (!result.unreadable?.length) return false;
@@ -65,7 +75,7 @@ export async function runMCPScan(options: MCPScanCommandOptions): Promise<void> 
       : options.path
         ? await discovery.discoverFromPaths(options.path)
         : await discovery.discover(process.platform, process.cwd());
-    if (reportUnreadable(discoveryResult)) return;
+    if (await reportUnreadable(discoveryResult)) return;
 
     const direct = options.source?.length ? await resolveSourcePaths(options.source) : { sources: [], unreadable: [] };
     // One bad --source path doesn't cost the others their scan: report it,
@@ -172,7 +182,7 @@ export async function runMCPList(options: { format: string; path?: string[] }): 
     const result = options.path
       ? await discovery.discoverFromPaths(options.path)
       : await discovery.discover(process.platform, process.cwd());
-    if (reportUnreadable(result)) return;
+    if (await reportUnreadable(result)) return;
     reportLoadErrors(result.loadErrors ?? []);
 
     if (options.format === 'json') {

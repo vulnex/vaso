@@ -377,6 +377,61 @@ describe('analyzePythonSinks — file paths taken from tool input', () => {
       "if full.startswith('http'):", "    raise ValueError('url')", 'return open(full).read()'))).toHaveLength(1);
   });
 
+  it('judges containment per function, per path and before the use', () => {
+    // a startswith on the unresolved path, with a resolve elsewhere in the file
+    expect(fileSinks([...tool('read(path: str)', 'if not path.startswith(ROOT):', '    raise ValueError()', 'return open(path).read()'),
+      '@mcp.tool()', 'def where():', "    return os.path.realpath('.')"])).toHaveLength(1);
+    // a confined tool next to an unconfined one
+    expect(fileSinks([...tool('safe_read(path: str)', 'p = (BASE / path).resolve()', 'if not p.is_relative_to(BASE):',
+      '    raise ValueError()', 'return p.read_text()'), '@mcp.tool()', 'def unsafe_delete(path: str):', '    Path(path).unlink()'])
+      .map((f) => f.line)).toEqual([11]);
+    // the check comes after the use
+    expect(fileSinks(tool('delete(path: str)', 'os.remove(path)', 'full = os.path.realpath(path)',
+      'if os.path.commonpath([full, BASE]) != BASE:', "    return 'outside'"))).toHaveLength(1);
+    // a resolved path that is never checked, and an unrelated startswith
+    expect(fileSinks([...tool('read(path: str)', 'full = os.path.abspath(os.path.join(ROOT, path))', 'return open(path).read()'),
+      'def unrelated(url):', '    return url.startswith(ROOT)'])).toHaveLength(1);
+    // the resolved path is checked, but the raw one is opened
+    expect(fileSinks(tool('read(path: str)', 'full = os.path.realpath(path)', 'if not full.startswith(ROOT):',
+      '    raise ValueError()', 'return open(path).read()'))).toHaveLength(1);
+    // checked inline on the resolved value; the input resolved in place
+    expect(fileSinks(tool('read(path: str)', 'if not os.path.realpath(path).startswith(ROOT):', '    raise ValueError()',
+      'return open(path).read()'))).toHaveLength(0);
+    expect(fileSinks(tool('read(path: str)', 'path = os.path.realpath(path)', 'if not path.startswith(ROOT):',
+      '    raise ValueError()', 'return open(path).read()'))).toHaveLength(0);
+  });
+
+  it('accepts a same-file helper that confines the path it is given', () => {
+    const helper = ['def check(p):', '    full = os.path.realpath(p)', '    if not full.startswith(ROOT):', "        raise ValueError('outside')"];
+    expect(fileSinks([...helper, ...tool('read(path: str)', 'check(path)', 'return open(path).read()')])).toHaveLength(0);
+    // called after the use, or on another value
+    expect(fileSinks([...helper, ...tool('read(path: str)', 'data = open(path).read()', 'check(path)', 'return data')])).toHaveLength(1);
+    expect(fileSinks([...helper, ...tool('read(path: str, other: str)', 'check(other)', 'return open(path).read()')])).toHaveLength(1);
+  });
+
+  it('confines a traversal join only when its result (or the name joined) is checked', () => {
+    const joined = (...body: string[]) => analyzePythonSinks(tool('read(rel_path: str)', ...body).join('\n')).filter((f) => f.kind === 'injection');
+    expect(joined('full = os.path.realpath(os.path.join(BASE, rel_path))', 'if not full.startswith(BASE):', '    raise ValueError()',
+      'return open(full).read()')).toHaveLength(0);
+    expect(joined('full = os.path.abspath(os.path.join(BASE, rel_path))', 'return open(full).read()')).toHaveLength(1);
+  });
+
+  it('follows aliased Path/aiofiles imports, method chains and os.open', () => {
+    expect(fileSinks(['from pathlib import Path as P', '@mcp.tool()', 'def t(name: str, body: str):', '    P(name).write_text(body)'])[0]?.fileOp).toBe('write');
+    expect(fileSinks(['from aiofiles import open as aopen', '@mcp.tool()', 'async def t(name: str):', '    async with aopen(name) as f:', '        return await f.read()'])[0]?.fileOp).toBe('read');
+    expect(fileSinks(tool('t(name: str)', 'return Path(name).expanduser().read_text()'))[0]?.fileOp).toBe('read');
+    expect(fileSinks(tool('t(name: str)', 'return Path(name).resolve().read_text()'))[0]?.fileOp).toBe('read');
+    expect(fileSinks(tool('t(name: str)', 'fd = os.open(name, os.O_RDONLY)'))[0]?.fileOp).toBe('read');
+    expect(fileSinks(tool('t(name: str)', 'fd = os.open(name, os.O_WRONLY | os.O_CREAT)'))[0]?.fileOp).toBe('write');
+  });
+
+  it('treats a join over a filtered comprehension as sanitized', () => {
+    expect(fileSinks(tool('t(city: str)', "name = ''.join(c for c in city if c.isalnum())", 'return open(os.path.join(DIR, name)).read()'))).toHaveLength(0);
+    expect(fileSinks(tool('t(city: str)', "name = ''.join([c for c in city if c.isalnum()])", 'return open(name).read()'))).toHaveLength(0);
+    // an unfiltered join still carries the input
+    expect(fileSinks(tool('t(parts: list)', "name = '/'.join(parts)", 'return open(name).read()'))).toHaveLength(1);
+  });
+
   it('reports a traversal join once, at the join', () => {
     const findings = analyzePythonSinks(tool('read(rel_path: str)', 'full = os.path.join(BASE, rel_path)', 'return open(full).read()').join('\n'));
     expect(findings.filter((f) => f.kind === 'injection')).toHaveLength(1);

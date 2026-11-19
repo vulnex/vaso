@@ -86,3 +86,29 @@ describe('every credential-named position on a line has its value literals maske
     }
   });
 });
+
+describe('addresses under address names', () => {
+  it('keeps a plain URL built under a *_URL / *Endpoint / *Uri name readable', () => {
+    for (const line of [
+      'TOKEN_URL = f"{AUTH_HOST}/oauth/token"',
+      'TOKEN_URL = f"http://auth.example.com/oauth/token"',
+      'const tokenEndpoint = new URL("http://auth.example.com/oauth/token");',
+      'const tokenUrl = new URL("/oauth/token", AUTH_HOST);',
+      'const tokenUri = `${AUTH_HOST}/oauth/token`;',
+      'TOKEN_URL = AUTH_HOST + "/oauth/token"',
+      'TOKEN_URL = "{}/oauth/token".format(AUTH_HOST)',
+      'TOKEN_URL = urljoin(AUTH_HOST, "/oauth/token")',
+    ]) expect(maskCredentialsInLine(line)).toBe(line);
+    // a bare word under the name is still masked
+    expect(maskCredentialsInLine('TOKEN_URL=SkBareWord97531')).not.toContain('SkBareWord97531');
+  });
+
+  it('still masks what a credential could be: queries, userinfo, other literals, other names', () => {
+    expect(maskCredentialsInLine('TOKEN_URL = f"{x}?access_token=SkQueryTok12345"')).not.toContain('SkQueryTok12345');
+    expect(maskCredentialsInLine('TOKEN_URL = f"{AUTH_HOST}/oauth/token" + "SkTailLit67890"')).not.toContain('SkTailLit67890');
+    expect(maskCredentialsInLine('token_url = "http://user:SkUserPw4321@h/x"')).not.toContain('SkUserPw4321');
+    expect(maskCredentialsInLine('PASSWORD_URL = f"SkNotAUrl24680"')).not.toContain('SkNotAUrl24680');
+    expect(maskCredentialsInLine('api_token = f"{AUTH}/SkPathTok13579"')).not.toContain('SkPathTok13579');
+    expect(maskCredentialsInLine('TOKEN_URL = "ghp_abcdefghijklmnopqrstuvwxyz0123456789"')).not.toContain('ghp_abcdef');
+  });
+});

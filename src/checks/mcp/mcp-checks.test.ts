@@ -1296,6 +1296,26 @@ describe('MCP-011/MCP-016 beyond literals', () => {
     expect(await flags011('let AUTH_HOST = "http://auth.example.com";\nif (prod) { let AUTH_HOST = "https://auth.example.com"; }\nconst u = AUTH_HOST + "/authorize";')).toBe(false);
     // the constant alone is not an OAuth endpoint
     expect(await flags011('const API = "http://api.example.com";\nfetch(API + "/v1/items");')).toBe(false);
+    // reassigned (a `let`, an indented Python branch): which value is used is unknown
+    expect(await flags011('let AUTH_HOST = "http://auth.example.com";\nif (prod) AUTH_HOST = "https://auth.example.com";\nconst a = AUTH_HOST + "/authorize";')).toBe(false);
+    expect(await flags011('AUTH_HOST = "http://auth.example.com"\nif PROD:\n    AUTH_HOST = "https://auth.example.com"\nTOKEN_URL = f"{AUTH_HOST}/oauth/token"', 'python')).toBe(false);
+    // a parameter of the same name elsewhere
+    expect(await flags011('def a():\n    host = "http://auth.example.com"\n    return host\ndef b(host):\n    return host + "/authorize"', 'python')).toBe(false);
+  });
+
+  it('MCP-011 reports an OAuth constant once, plus the endpoints built from it', async () => {
+    const lines = async (code: string, language?: 'python') =>
+      (await mcp011.run(makeContext({ mcpServerSources: src(code, language) }))).evidence?.map(e => e.line);
+    // uses of the constant (a fetch target, logging it) add nothing
+    expect(await lines('const AUTHORIZE_URL = "http://auth.corp.example/authorize";\nfetch(AUTHORIZE_URL);\nfetch(AUTHORIZE_URL + "?x=1");\nconsole.log("using", AUTHORIZE_URL);')).toEqual([1]);
+    expect(await lines('const DOCS = "http://docs.example.com/oauth2/";\nconsole.error("see " + DOCS);')).toEqual([1]);
+    // built in two steps, with .format / %, as a typing.Final, inside a function
+    expect(await lines('const HOST = "http://auth.example.com";\nconst BASE = HOST + "/oauth";\nconst tok = BASE + "/token";')).toEqual([3]);
+    expect(await lines('AUTH_HOST = "http://auth.example.com"\nTOKEN_URL = "{}/oauth/token".format(AUTH_HOST)\nA2 = "%s/authorize" % AUTH_HOST', 'python')).toEqual([2, 3]);
+    expect(await lines('from typing import Final\nAUTH_HOST: Final = "http://auth.example.com"\nTOKEN_URL = AUTH_HOST + "/oauth/token"', 'python')).toEqual([3]);
+    expect(await lines('def build():\n    host = "http://auth.example.com"\n    return host + "/authorize"', 'python')).toEqual([3]);
+    // a plaintext URL that is no OAuth endpoint stays unflagged
+    expect(await lines('API = "http://api.example.com"\nUSERS = API + "/v1/users"', 'python')).toBeUndefined();
   });
 
   it('MCP-016 follows a request value bound to a name into a redirect', async () => {
@@ -1310,6 +1330,31 @@ describe('MCP-011/MCP-016 beyond literals', () => {
     expect(await flags016('const r = req.query.redirect_uri;\nif (r !== registered) throw new Error("bad");\nres.redirect(r);')).toBe(false);
     expect(await flags016('const r = req.query.next;\nres.redirect("https://app.example.com/?next=" + encodeURIComponent(r));')).toBe(false);
     expect(await flags016('const r = req.query.next;\nconsole.log(r);\nres.redirect("/home");')).toBe(false);
+    // a parsed URL's origin compared, a validator taking it as a later argument, check/ensure helpers
+    expect(await flags016('const t = req.query.next;\nconst u = new URL(t, BASE);\nif (u.origin !== BASE) return res.status(400).end();\nres.redirect(t);')).toBe(false);
+    expect(await flags016('const t = req.query.redirect_uri;\nif (!validateRedirect(req.client, t)) return res.status(400).end();\nres.redirect(t);')).toBe(false);
+    expect(await flags016('const t = req.query.redirect_uri;\ncheckRedirect(t);\nres.redirect(t);')).toBe(false);
+    expect(await flags016('const t = req.query.redirect_uri;\nensureAllowed(t);\nres.redirect(t);')).toBe(false);
+  });
+
+  it('MCP-016 scopes the check to the redirect\'s own handler and ignores presence tests', async () => {
+    const handler = (body: string) => `app.get("/x", (req, res) => {\n  const target = req.query.redirect_uri;\n${body}\n  res.redirect(target);\n});`;
+    expect(await flags016(handler('  if (target === undefined) return res.status(400).end();'))).toBe(true);
+    expect(await flags016(handler('  if (null == target) return res.status(400).end();'))).toBe(true);
+    expect(await flags016(handler('  if (target === "") return res.status(400).end();'))).toBe(true);
+    expect(await flags016(handler('  if (typeof target !== "string") return res.status(400).end();'))).toBe(true);
+    // checked in another handler only
+    expect(await flags016(handler('  if (!ALLOWED.includes(target)) return res.status(400).end();') + '\n' + handler(''))).toBe(true);
+    expect(await flags016(handler('  if (!ALLOWED.includes(target)) return res.status(400).end();'))).toBe(false);
+    // bound in two steps
+    expect(await flags016('let target;\ntarget = req.query.redirect_uri;\nres.redirect(target);')).toBe(true);
+  });
+
+  it('MCP-016 stays fast on a long handler', async () => {
+    const t = performance.now();
+    const filler = ['x === undefined ', ' '.repeat(5000) + '!x; ', 'target.x; ', 'typeof   target; '].map((u) => u.repeat(Math.ceil(100000 / u.length))).join('\n');
+    expect(await flags016(`const target = req.query.next;\n${filler}\nres.redirect(target);`)).toBe(true);
+    expect(performance.now() - t).toBeLessThan(3000);
   });
 
   it('MCP-016 flags a wildcard redirect allowlist in a config object', async () => {
@@ -3056,8 +3101,14 @@ describe('Python MCP server source', () => {
         '',
       ].join('\n')),
     };
-    expect((await mcp005.run(makeContext({ mcpServerSources: [confined] }))).passed).toBe(true);
-    expect((await mcp009.run(makeContext({ mcpServerSources: [confined] }))).passed).toBe(true);
+    // a helper that is never called confines nothing
+    expect((await mcp005.run(makeContext({ mcpServerSources: [confined] }))).passed).toBe(false);
+    const used: MCPServerSource = {
+      ...confined,
+      sourceCode: confined.sourceCode!.replace(/Path\(path\)/g, 'safe(path)').replace('os.listdir(path)', 'os.listdir(safe(path))'),
+    };
+    expect((await mcp005.run(makeContext({ mcpServerSources: [used] }))).passed).toBe(true);
+    expect((await mcp009.run(makeContext({ mcpServerSources: [used] }))).passed).toBe(true);
   });
 });
 

@@ -3,7 +3,7 @@ import { defineCheck } from '../../core/check-builder.js';
 import { sourceSegments } from '../../mcp/source-segments.js';
 import { isRemotePlaintextUrl } from '../../mcp/remote-endpoint.js';
 import { sourceSnippet } from '../../mcp/source-snippet.js';
-import { foldConstants, stringConstants } from '../../mcp/source-constants.js';
+import { foldConstants, referencedConstants, stringConstants } from '../../mcp/source-constants.js';
 
 const OAUTH_URL_ENV_PATTERNS = /(?:oauth|auth|token|authorize)[_-]?(?:url|endpoint|uri|server)/i;
 
@@ -68,9 +68,13 @@ export const mcp011 = defineCheck({
       for (let i = 0; i < segments.length; i++) {
         const line = segments[i].text;
         const folded = remoteConstant ? foldConstants(line, constants) : undefined;
+        // A constant that is an OAuth endpoint by itself is reported at its
+        // binding; a line only using it (`fetch(TOKEN_URL)`, logging it) adds
+        // nothing — one built from it (`AUTH_HOST + "/authorize"`) does
+        const used = folded !== undefined ? referencedConstants(line, constants).map((v) => `"${v}"`) : [];
         for (const { pattern, detail } of SOURCE_HTTP_OAUTH_PATTERNS) {
           const direct = pattern.test(line);
-          if (direct || (folded !== undefined && pattern.test(folded))) {
+          if (direct || (folded !== undefined && pattern.test(folded) && !used.some((v) => pattern.test(v)))) {
             evidence.push({
               file: source.localPath ?? source.serverName,
               line: segments[i].line,

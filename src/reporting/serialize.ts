@@ -371,7 +371,21 @@ function literalIsName(line: string, lit: CodeLiteral): boolean {
 }
 
 /** Where a credential's value starts on a line: after `name =`, `name:`, `"name":`, `["name"] =`, `name ||=`. */
-interface CredentialPosition { at: number; valueStart: number; plain?: boolean }
+interface CredentialPosition { at: number; valueStart: number; plain?: boolean; url?: boolean }
+
+/** A name for an address (`TOKEN_URL`, `tokenEndpoint`, `authUri`): its value is a URL, not the credential the name mentions. */
+const URL_NAME = /(?:url|uri|endpoint)$/i;
+/**
+ * A literal that is an address and nothing else: an http(s) URL with no
+ * userinfo, query or fragment (where a credential could ride along), or a
+ * template that only appends a path to interpolated values
+ * (`{AUTH_HOST}/oauth/token`, `${base}/token`).
+ */
+function plainAddress(body: string): boolean {
+  if (/^https?:\/\/[^\s@?#'"`{}$\\]+$/i.test(body)) return true;
+  const rest = body.replace(/\$?\{[A-Za-z_][\w.]*\}/g, '');
+  return rest !== body && /^(?:https?:\/\/[^\s@?#'"`{}$\\]*|\/[\w\-./~%]*)?$/i.test(rest);
+}
 
 /**
  * A bare name and the separator that gives it a value: an assignment
@@ -394,7 +408,7 @@ function credentialPositions(line: string, literals: CodeLiteral[]): CredentialP
       // `code` names a status or a script far more often than an OAuth code
       if (/^code$/i.test(leaf) || !isSecretName(leaf)) continue;
       // `name = "…"` / `name: "…"`: a plain literal, SECRET_ASSIGN / SECRET_KEY_VALUE's to mask
-      out.push({ at: offset + m.index, valueStart: offset + m.index + m[0].length, plain: /^\s*[:=]$/.test(m[2]) });
+      out.push({ at: offset + m.index, valueStart: offset + m.index + m[0].length, plain: /^\s*[:=]$/.test(m[2]), ...(URL_NAME.test(leaf) ? { url: true } : {}) });
     }
   };
   for (const lit of literals) {
@@ -474,6 +488,11 @@ function maskCredentialValues(line: string, literalFree = false): { text: string
     if (pos.plain && only && only.closed && line[only.start] !== '`' && !line.slice(only.start, only.end).includes('${')
       && line.slice(pos.valueStart, only.start).trim() === '' && /^\s*(?:$|[,;)\]}]|#|\/\/)/.test(line.slice(only.end, only.end + 64))) continue;
     const extent = valueExtent(line, pos.valueStart, literals, li);
+    // an address under an address name: `TOKEN_URL = f"{AUTH_HOST}/oauth/token"`, `tokenUrl = new URL("http://…")`
+    if (pos.url) {
+      const lits = literals.slice(li).filter((l) => l.start < extent.end);
+      if (lits.length > 0 && lits.every((l) => l.closed && addressPiece(line.slice(l.start + 1, l.end - 1)))) continue;
+    }
     let cursor = pos.valueStart;
     out += line.slice(last, cursor);
     for (let k = li; k < literals.length && literals[k].start < extent.end; k++) {
@@ -610,6 +629,33 @@ function escapedQuotes(value: string, replacement: string): string {
   return q ? `${q}${replacement}${q}` : replacement;
 }
 
+/**
+ * An address under an address name, `rest` being the text from the value on:
+ * an expression of names and address pieces only — a plain address literal,
+ * prefixed or not (`TOKEN_URL = f"{HOST}/oauth/token"`), a path joined to a
+ * base (`AUTH_HOST + "/oauth/token"`, `new URL("/oauth/token", HOST)`,
+ * `urljoin(HOST, "/token")`, `"{}/token".format(HOST)`). At least one
+ * literal, each of them an address piece: a bare word stays masked.
+ */
+function addressValue(name: string, rest: string): boolean {
+  if (!URL_NAME.test(name)) return false;
+  let literals = 0;
+  let pieces = true;
+  const code = rest.slice(0, 1024).replace(/[rRbBuUfF]{0,2}(["'`])([^"'`\n]*)\1/g, (_m, _q, body: string) => {
+    literals++;
+    if (!addressPiece(body)) pieces = false;
+    return ' L ';
+  });
+  if (literals === 0 || !pieces) return false;
+  // the value ends at a statement end, a comment or an unmatched `)` / `,` (an argument)
+  const value = code.replace(/\s(?:#|\/\/)[\s\S]*$|;[\s\S]*$/, '');
+  return /^(?:\s|L\b|new\b|[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*|[+%(),.])*$/.test(value);
+}
+
+/** A literal an address is built from: a plain address, a path, a format template ahead of a path. */
+const addressPiece = (body: string): boolean =>
+  plainAddress(body) || /^(?:\{0?\}|%s)?\/[\w\-./~%]*$/.test(body);
+
 function maskText(input: string): string {
   // a JWT (`eyJ…`) needs none of [:=@-] around it
   if (!/[:=@-]/.test(input) && !input.includes('eyJ') && !BARE_TOKEN_HINT.test(input)) return input;
@@ -630,8 +676,9 @@ function maskText(input: string): string {
       (keepValue(value) ? m : `${pre}${name}${sep}${scheme ?? ''}${MASK}`))
     .replace(SECRET_DASHED_HEADER, (m, pre: string, name: string, sep: string, value: string) =>
       (keepValue(value) ? m : `${pre}${name}${sep}${MASK}`))
-    .replace(SECRET_ASSIGN, (m, pre: string, name: string, sep: string, value: string) =>
-      (secretAssignName(name) && !keepValue(value) && !codeValue(value, sep) && !groupedCode(value, sep) && !PROSE_WORD.test(value) ? `${pre}${name}${sep}${escapedQuotes(value, MASK)}` : m))
+    .replace(SECRET_ASSIGN, (m, pre: string, name: string, sep: string, value: string, offset: number, whole: string) =>
+      (secretAssignName(name) && !keepValue(value) && !codeValue(value, sep) && !groupedCode(value, sep) && !PROSE_WORD.test(value)
+        && !addressValue(name, whole.slice(offset + m.length - value.length)) ? `${pre}${name}${sep}${escapedQuotes(value, MASK)}` : m))
     .replace(USER_PASS_FLAG, (m, pre: string, flag: string, sep: string, user: string, pw: string) =>
       (keepValue(pw) ? m : `${pre}${flag}${sep}${user}:${MASK}`));
   const long = [SECRET_FLAG, CAMEL_SECRET_FLAG].reduce((t, re) => replaceFlagValues(t, re, (_flag, value) => !keepValue(value)), masked);
@@ -692,7 +739,7 @@ function maskLine(raw: string): string {
     // optional comment group rescans the line per character)
     const hash = rest.search(/\s#/);
     const value = (hash < 0 ? rest : rest.slice(0, hash)).trimEnd();
-    if (!isSecretName(name) || keepValue(value) || (sep.includes('=') && codeValue(value, sep))) return m;
+    if (!isSecretName(name) || keepValue(value) || (sep.includes('=') && codeValue(value, sep)) || addressValue(name, rest)) return m;
     if (sep.includes('=') && groupedCode(value, sep)) return `${pre}${name}${sep}${maskValueText(value)}${rest.slice(value.length)}`;
     return `${pre}${name}${sep}${MASK}${rest.slice(value.length)}`;
   });
@@ -700,9 +747,10 @@ function maskLine(raw: string): string {
     (isSecretName(name)
       ? `${pre}${q}${name}${q}${sep}[${items.replace(/[^,\s"']+(?:\s+[^,\s"']+)*/g, (v) => (keepValue(v) ? v : MASK))}]`
       : m));
-  const masked = listed.replace(SECRET_KEY_VALUE, (m, pre: string, q: string, name: string, sep: string, value: string) => {
+  const masked = listed.replace(SECRET_KEY_VALUE, (m, pre: string, q: string, name: string, sep: string, value: string, offset: number, all: string) => {
     // `name = call(…)` in a source line is code (YAML `name: …` is always a value)
     if (!isSecretName(name) || keepValue(value) || (sep.includes('=') && codeValue(value, sep))) return m;
+    if (addressValue(name, all.slice(offset + m.length - value.length))) return m;
     // (identifiers alone — the rest of the line, its literals, masked above)
     if (sep.includes('=') && groupedCode(value, sep)) return /["']/.test(value) ? `${pre}${q}${name}${q}${sep}${maskValueText(value)}` : m;
     const quote = /^["']/.test(value) ? value[0] : '';
