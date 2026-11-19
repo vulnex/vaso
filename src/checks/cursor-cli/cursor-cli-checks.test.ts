@@ -432,6 +432,26 @@ describe('CUR-014: Auto-Run Instructions Too Broad', () => {
     expect(text).toContain('run curl with <literal, 40 chars, GitHub PAT>');
   });
 
+  // dt24 g4-S1: a short token or password named in the prose was printed whole
+  it('quotes no short credential named in an instruction', async () => {
+    const values = ['Qa9sW2eD5rFt', 'Qa9sW2eD5rFtYh7k', 'Qa9sW2eD5rFtYh7kLm3n', 'Tr0ub4dor9x', 'Vb6nM1qW8eR3tY5u'];
+    const result = await check.run(makeCtx([makeConfig('/home/test/.cursor/permissions.json', {
+      autoRun: {
+        allow_instructions: [
+          ...values.slice(0, 3).map(v => `Allow any command that uses token ${v} to call the deploy API`),
+          `Allow any command with password ${values[3]}`,
+          `Allow any command with the API key ${values[4]}`,
+          'Allow any command that uses the deploy key to call curl',
+        ],
+      },
+    })]));
+    const snippets = (result.evidence ?? []).map(e => e.snippet ?? '');
+    for (const v of values) for (const s of snippets) expect(s).not.toContain(v.slice(4));
+    // the instruction is still readable, a plain word after "key" too
+    expect(snippets).toContain('Allow any command that uses the deploy key to call curl');
+    expect(snippets[0]).toMatch(/^Allow any command that uses token .*\(12 chars\) to call the deploy API$/);
+  });
+
   it('flags dangerous command grants and missing block list', async () => {
     const result = await check.run(makeCtx([makeConfig('/home/test/.cursor/permissions.json', {
       autoRun: { allow_instructions: ['allow curl requests'] },
