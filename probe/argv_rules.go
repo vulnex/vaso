@@ -790,6 +790,147 @@ func (c *collector) disguiseEscapedAuthHeaders(s string) string {
 	})
 }
 
+// headerFlag is a request-header option (curl/wget -H, --header,
+// --proxy-header) and the separator before its value word.
+// HEADER_FLAG in src/mcp/argv-rules.ts.
+var headerFlag = regexp.MustCompile(`(?:^|[\s"'\[,(\\])(?:-H|--header|--proxy-header)(?:[ \t]+|=)`)
+
+// secretHeader is a header whose value is a credential: Authorization,
+// X-Api-Key, X-Auth-Token, Api-Key, Private-Token, Ocp-Apim-Subscription-Key.
+// SECRET_HEADER_WORD in src/mcp/argv-rules.ts.
+var secretHeader = regexp.MustCompile(`(?i)^(?:(?:proxy-)?authorization|x-[A-Za-z0-9_-]*(?:key|token|secret|auth)[A-Za-z0-9_-]*|api[_-]?key|[A-Za-z0-9_-]*-(?:key|token|secret))$`)
+
+// headerWordAt assembles the shell word that starts at line[from] as the
+// shell does: a backslash-escaped space (Authorization:\ Bearer\ <v>, the
+// backslash doubled in a JSON string) stays in the word, quoted pieces next
+// to each other are one word ('Authorization: Bearer '<v>, "…"'<v>'), $'…'
+// is decoded and $"…" read as "…". A quote escaped as deeply as outer (the
+// open quote of the JSON or TOML string the command is written in; -1:
+// none) closes that string and ends the word.
+func headerWordAt(line string, from, outer int) commandToken {
+	var word []byte
+	var pos, ends []int
+	decoded := false
+	add := func(ch byte, p, e int) {
+		word = append(word, ch)
+		pos = append(pos, p)
+		ends = append(ends, e)
+	}
+	open, ansi := -1, false
+	j := from
+	for j < len(line) && line[j] != '\n' && line[j] != '\r' {
+		k := j
+		for k < len(line) && line[k] == '\\' {
+			k++
+		}
+		if open >= 0 {
+			switch {
+			case k < len(line) && line[k] == line[open] && sameQuote(line, k, open):
+				open, ansi = -1, false
+				j = k + 1
+			case ansi && k > j && k < len(line):
+				text, n := ansiEscape(line[k:])
+				for i := 0; i < len(text); i++ {
+					add(text[i], j, k+n)
+				}
+				decoded = true
+				j = k + n
+			default:
+				add(line[j], j, j+1)
+				j++
+			}
+			continue
+		}
+		ch := line[j]
+		switch {
+		case k > j && k < len(line) && (line[k] == ' ' || line[k] == '\t'):
+			// an escaped space is part of the word
+			add(line[k], k, k+1)
+			j = k + 1
+		case k < len(line) && isQuoteByte(line[k]) && outer >= 0 && line[k] == line[outer] && sameQuote(line, k, outer):
+			return headerToken(word, from, j, pos, ends, decoded)
+		case k < len(line) && isQuoteByte(line[k]):
+			open = k
+			j = k + 1
+		case dollarQuote(line, j, len(line)) > 0:
+			q := dollarQuote(line, j, len(line))
+			if outer >= 0 && sameQuote(line, q, outer) {
+				return headerToken(word, from, j, pos, ends, decoded)
+			}
+			open, ansi = q, line[q] == '\''
+			j = q + 1
+		case ch == ' ' || ch == '\t' || strings.IndexByte(";|&<>", ch) >= 0:
+			return headerToken(word, from, j, pos, ends, decoded)
+		default:
+			add(ch, j, j+1)
+			j++
+		}
+	}
+	return headerToken(word, from, j, pos, ends, decoded)
+}
+
+func headerToken(word []byte, from, to int, pos, ends []int, decoded bool) commandToken {
+	t := commandToken{word: string(word), from: from, to: to, pos: pos}
+	if decoded {
+		t.ends = ends
+	}
+	return t
+}
+
+// headerWordCredentials applies replace to the credential in the value of
+// each request-header option of line (curl -H 'X-Api-Key: <v>'), the word
+// assembled first (headerWordAt) and then split at the header's colon and
+// scheme: escaped spaces and adjacent quoted pieces hide the value from the
+// keyed rule. A value replace returns unchanged is kept.
+func headerWordCredentials(line string, replace func(string) string) string {
+	type hit struct {
+		tok      commandToken
+		from, to int
+	}
+	var hits []hit
+	scanned, outer := 0, -1
+	for _, m := range headerFlag.FindAllStringIndex(line, -1) {
+		outer, scanned = pairQuotes(line, scanned, m[1], outer), m[1]
+		t := headerWordAt(line, m[1], outer)
+		h := headerName.FindString(t.word)
+		if h == "" || !secretHeader.MatchString(h[:len(h)-1]) {
+			continue
+		}
+		from := len(h)
+		for from < len(t.word) && (t.word[from] == ' ' || t.word[from] == '\t') {
+			from++
+		}
+		from += len(authSchemePrefix.FindString(t.word[from:]))
+		if v := t.word[from:]; v != "" && credentialLike(v) && !isSecretReference(v) && !isPlaceholderSecret(v) {
+			hits = append(hits, hit{t, from, len(t.word)})
+		}
+	}
+	// from the end backwards: a replacement may change the length
+	for i := len(hits) - 1; i >= 0; i-- {
+		h := hits[i]
+		if h.tok.literal(h.from, h.to) {
+			v := h.tok.word[h.from:h.to]
+			out := replace(v)
+			if out == v {
+				continue
+			}
+			if len(out) == len(v) {
+				b := []byte(line)
+				for k := 0; k < len(out); k++ {
+					b[h.tok.at(h.from+k)] = out[k]
+				}
+				line = string(b)
+				continue
+			}
+		}
+		from, to := h.tok.span(h.from, h.to)
+		if out := replace(line[from:to]); out != line[from:to] {
+			line = line[:from] + out + line[to:]
+		}
+	}
+	return line
+}
+
 // dollarQuote: line[j] is the $ of $'…' or $"…" — the latter also with its
 // quote escaped (sshpass -p $\"pw\" in a JSON string) — and the index of
 // that quote; 0 otherwise. A $ before an escaped ' is a plain $.
@@ -895,8 +1036,14 @@ func tokenWords(toks []commandToken) []string {
 }
 
 // commandCredentials applies replace to every credential the argv rules
-// find in the commands of a line of text.
+// find in the commands of a line of text, and to those in its request
+// headers (headerWordCredentials).
 func commandCredentials(line string, replace func(string) string) string {
+	return headerWordCredentials(argvLineCredentials(line, replace), replace)
+}
+
+// argvLineCredentials is commandCredentials for the argv rules alone.
+func argvLineCredentials(line string, replace func(string) string) string {
 	b := []byte(line)
 	changed := false
 	for _, toks := range commandPipelines(line) {
@@ -956,7 +1103,7 @@ func commandCredentialsVariable(line string, replace func(string) string) string
 }
 
 // argvLines is a cheap filter: a line that may hold a command's credential.
-var argvHints = []string{"-p", "-a", "-k", "-u", "--", "-w", "-z", "/p:", "/gp:", "mysql", "sshpass", "mariadb", "pgpassword", "rediscli_auth", "htpasswd", "sudo"}
+var argvHints = []string{"-p", "-a", "-k", "-u", "--", "-w", "-z", "-h", "/p:", "/gp:", "mysql", "sshpass", "mariadb", "pgpassword", "rediscli_auth", "htpasswd", "sudo"}
 
 // command: "x" / command = 'x' / {command: x, …} (YAML takes it unquoted)
 var commandKey = regexp.MustCompile(`(?:^|[\s{,])["']?command["']?[ \t]*[:=][ \t]*(?:["']([^"'\r\n]+)["']|([^\s,{}\[\]"'#]+))`)

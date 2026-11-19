@@ -15,7 +15,7 @@ import { escapeJsonUnsafe } from './text-safety.js';
 import { EXTRA_TOKEN_PATTERNS } from '../analyzers/secret-values.js';
 import {
   PASSWORD_P_CLIENT_IN_TEXT, REDIS_CLI_IN_TEXT, SEPARATE_P_CLIENT_IN_TEXT, isFlagShaped, isKeyAfterK, isPasswordAfterA, isPasswordAfterP,
-  isPasswordClient, isRedisCli, isSeparatePasswordClient, clientAndStdinHits,
+  isPasswordClient, isRedisCli, isSeparatePasswordClient, clientAndStdinHits, headerWordValues,
 } from '../mcp/argv-rules.js';
 
 const MASKED_MAPS = new Set(['env', 'headers']);
@@ -742,8 +742,22 @@ export function maskCredentialsInLine(raw: string): string {
 /** `Authorization:\\ Bearer\\ <token>`: a header in a shell word, its spaces escaped (probe/argv_rules.go escapedAuthHeader). */
 const ESCAPED_AUTH_HEADER = /(authorization:(?:\\+[ \t])+(?:bearer|basic|token)(?:\\+[ \t])+)([^\s"'\\]+)/gi;
 
-function maskEscapedAuthHeaders(text: string): string {
+function maskEscapedAuthHeaders(input: string): string {
+  // request-header words first: this pattern's value would stop at the quote of $'<v>'
+  const text = maskHeaderWords(input);
   return text.includes('\\') ? text.replace(ESCAPED_AUTH_HEADER, (m, head: string, value: string) => (keepValue(value) ? m : `${head}${MASK}`)) : text;
+}
+
+/**
+ * The credential in each request-header option's value (`curl -H
+ * X-Api-Key:\ <v>`, `-H 'Authorization: Bearer '<v>`), the shell word
+ * assembled first (headerWordValues): escapes and adjacent quoted pieces
+ * hide it from SECRET_HEADER.
+ */
+function maskHeaderWords(text: string): string {
+  const spans = headerWordValues(text, (v) => !keepValue(v));
+  for (let i = spans.length - 1; i >= 0; i--) text = `${text.slice(0, spans[i].from)}${MASK}${text.slice(spans[i].to)}`;
+  return text;
 }
 
 function maskLine(input: string): string {

@@ -161,6 +161,16 @@
   {"name": "docker login -p in argv", "argv": ["docker", "login", "-u", "u", "-p", "Dk4Pw9xQ", "reg.example"], "secrets": ["Dk4Pw9xQ"], "keep": ["reg.example"]},
   {"name": "sqlcmd -P in argv", "argv": ["sqlcmd", "-S", "db", "-U", "sa", "-P", "Sq3Pw9xLm"], "secrets": ["Sq3Pw9xLm"], "keep": ["sa"]},
   {"name": "mongosh --password in argv", "argv": ["mongosh", "mongodb://h/db", "--password", "Mg3Pw9xQ"], "secrets": ["Mg3Pw9xQ"], "keep": ["mongodb://h/db"]},
-  {"name": "ldapsearch -w glued in argv", "argv": ["ldapsearch", "-x", "-wLd4Pw9xQ"], "secrets": ["Ld4Pw9xQ"], "keep": ["-x"]}
+  {"name": "ldapsearch -w glued in argv", "argv": ["ldapsearch", "-x", "-wLd4Pw9xQ"], "secrets": ["Ld4Pw9xQ"], "keep": ["-x"]},
+  {"name": "curl header word: escaped spaces, single-quoted value", "command": "curl -H Authorization:\\ Bearer\\ 'Hd7kQw2xRt9mVb4nZp6c' https://api.example.io", "secrets": ["Hd7kQw2xRt9mVb4nZp6c"], "keep": ["Authorization:", "https://api.example.io"]},
+  {"name": "curl header word: escaped spaces, double-quoted value", "command": "curl -H Authorization:\\ Bearer\\ \"Hd7kQw2xRt9mVb4nZp6c\" https://api.example.io", "secrets": ["Hd7kQw2xRt9mVb4nZp6c"], "keep": ["Authorization:", "https://api.example.io"]},
+  {"name": "curl header word: escaped spaces, $'' value", "command": "curl -H Authorization:\\ Bearer\\ $'Hd7kQw2xRt9mVb4nZp6c' https://api.example.io", "secrets": ["Hd7kQw2xRt9mVb4nZp6c"], "keep": ["Authorization:", "https://api.example.io"]},
+  {"name": "curl header word: escaped spaces, $\"\" value", "command": "curl -H Authorization:\\ Bearer\\ $\"Hd7kQw2xRt9mVb4nZp6c\" https://api.example.io", "secrets": ["Hd7kQw2xRt9mVb4nZp6c"], "keep": ["Authorization:", "https://api.example.io"]},
+  {"name": "curl header word: X-Api-Key with an escaped space", "command": "curl -H X-Api-Key:\\ Hd7kQw2xRt9mVb4nZp6c https://api.example.io", "secrets": ["Hd7kQw2xRt9mVb4nZp6c"], "keep": ["X-Api-Key:", "https://api.example.io"]},
+  {"name": "curl header word: quoted name and scheme, value glued after the quote", "command": "curl -H 'Authorization: Bearer 'Hd7kQw2xRt9mVb4nZp6c https://api.example.io", "secrets": ["Hd7kQw2xRt9mVb4nZp6c"], "keep": ["Authorization:", "https://api.example.io"]},
+  {"name": "curl header word: double-quoted name and scheme, single-quoted value", "command": "curl -H \"Authorization: Bearer \"'Hd7kQw2xRt9mVb4nZp6c' https://api.example.io", "secrets": ["Hd7kQw2xRt9mVb4nZp6c"], "keep": ["Authorization:", "https://api.example.io"]},
+  {"name": "curl header word: no space after the colon, escaped space after the scheme", "command": "curl -H Authorization:Bearer\\ Hd7kQw2xRt9mVb4nZp6c https://api.example.io", "secrets": ["Hd7kQw2xRt9mVb4nZp6c"], "keep": ["Authorization:", "https://api.example.io"]},
+  {"name": "curl header word: --header with an escaped space", "command": "curl --header X-Auth-Token:\\ Hd7kQw2xRt9mVb4nZp6c https://api.example.io", "secrets": ["Hd7kQw2xRt9mVb4nZp6c"], "keep": ["X-Auth-Token:", "https://api.example.io"]},
+  {"name": "curl header word: a reference in an escaped header stays", "command": "curl -H Authorization:\\ Bearer\\ \"$API_TOKEN\" https://api.example.io", "secrets": [], "keep": ["$API_TOKEN", "https://api.example.io"]}
  ]
 }
