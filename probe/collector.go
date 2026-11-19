@@ -384,7 +384,11 @@ func Collect(manifest ProbeManifest, escalate bool) ProbeSnapshot {
 	var expandedGlobs []glob
 	for _, raw := range manifest.GlobPatterns {
 		for _, p := range expandPaths([]string{raw}, homes) {
-			if envGlobRefused(raw, p) {
+			if envGlobRefused(raw, p, c.homes) {
+				// Its links, so the CLI judges where the base leads as locally
+				if base := globBase(p); filepath.IsAbs(base) {
+					c.recordLinkChain(&snapshot, base)
+				}
 				continue
 			}
 			expandedGlobs = append(expandedGlobs, glob{p, isSkillPattern(raw)})
@@ -400,7 +404,7 @@ func Collect(manifest ProbeManifest, escalate bool) ProbeSnapshot {
 	var metadataGlobs []string
 	for _, raw := range manifest.MetadataGlobPatterns {
 		for _, p := range expandPaths([]string{raw}, homes) {
-			if !envGlobRefused(raw, p) {
+			if !envGlobRefused(raw, p, c.homes) {
 				metadataGlobs = append(metadataGlobs, p)
 			}
 		}
