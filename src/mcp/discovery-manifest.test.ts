@@ -37,4 +37,14 @@ describe('probe manifest covers MCP discovery', () => {
       expect(missing.join('; ')).toBe('');
     });
   }
+
+  // Found by listing (not in userConfigLocations): the default places the
+  // NanoClaw and IronClaw adapters find their installs
+  it('collects NanoClaw group configs and IronClaw extension manifests', () => {
+    for (const path of [
+      `${home}/nanoclaw/groups/main/container.json`,
+      `${home}/projects/nanoclaw/groups/main/container.json`,
+      `${home}/.ironclaw/reborn/local-dev/system/extensions/notion/manifest.toml`,
+    ]) expect(covered(path), path).toBe(true);
+  });
 });

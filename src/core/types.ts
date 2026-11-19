@@ -257,10 +257,14 @@ export interface SharedMcpServer {
   users: Array<{
     agent: AgentType;
     agentName?: string;
+    /** The installation's profile (an OpenClaw profile, `project`). */
+    profile?: string;
     installDir: string;
     /** The server's name in that config. */
     server: string;
     configFile: string;
+    /** The project it applies to (a project-scope server). */
+    project?: string;
     pin?: 'exact' | 'range' | 'tag' | 'none' | 'local';
   }>;
   /** At least one of them runs the package unpinned, by a range or by a moving tag. */

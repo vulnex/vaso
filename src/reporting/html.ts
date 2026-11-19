@@ -1,6 +1,6 @@
 import { VERSION } from '../version.js';
 import type { ScanResult, AgentScanResult, AgentInventory, Evidence, Grade, McpServerItem, Severity } from '../core/types.js';
-import { mcpScope, mcpTarget, skillsDirNote, surfaceCounts } from './inventory-text.js';
+import { mcpScope, mcpTarget, sharedServerLabel, sharedUserLabel, skillsDirNote, surfaceCounts } from './inventory-text.js';
 import {
   computeOwaspAgenticCoverage,
   hasOwaspAgenticFindings,
@@ -317,7 +317,7 @@ export class HtmlReporter implements Reporter {
         lines.push('<div class="agent-meta"><span>An update or compromise of one reaches every agent listed; an unpinned one can change under all of them at once.</span></div>');
         lines.push('<table><thead><tr><th>Server</th><th>Unpinned</th><th>Used by</th></tr></thead><tbody>');
         for (const g of host.sharedMcpServers) {
-          const users = g.users.map(u => `${escapeHtml(u.agent)}${u.agentName ? ` (${escapeHtml(u.agentName)})` : ''}: ${escapeHtml(u.server)} <span class="muted">${escapeHtml(u.configFile)}</span>`).join('<br>');
+          const users = g.users.map(u => `${escapeHtml(sharedUserLabel(u))}: ${escapeHtml(sharedServerLabel(u))} <span class="muted">${escapeHtml(u.configFile)}</span>`).join('<br>');
           lines.push(`<tr><td class="evidence">${escapeHtml(g.key)}</td><td>${g.unpinned ? 'yes' : '—'}</td><td class="evidence">${users}</td></tr>`);
         }
         lines.push('</tbody></table>');

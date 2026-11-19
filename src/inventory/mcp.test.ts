@@ -206,6 +206,22 @@ describe('attachMcpInventories', () => {
     }]);
   });
 
+  it('lists a NanoClaw checkout discovery also reads once', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'vaso-mcpinv-nc2-'));
+    dirs.push(home);
+    const checkout = join(home, 'nanoclaw');
+    await mkdir(join(checkout, 'groups', 'main'), { recursive: true });
+    await writeFile(join(checkout, 'package.json'), JSON.stringify({ name: 'nanoclaw', version: '2.4.0' }));
+    await writeFile(join(checkout, 'groups', 'main', 'container.json'), JSON.stringify({ mcpServers: { notes: { command: 'npx', args: ['-y', 'notes-mcp@1.2.0'] } } }));
+    const base = new LocalFSProvider();
+    const fs = Object.assign(Object.create(base) as FSProvider, { homedir: () => home, getEnv: () => undefined });
+    const nc = inst('nanoclaw', checkout);
+
+    await attachMcpInventories([nc], fs);
+
+    expect(nc.inventory?.mcpServers?.map(s => s.name)).toEqual(['notes']);
+  });
+
   it('knows which agents it inventories', () => {
     const agents = inventoriedAgents(new LocalFSProvider());
     for (const a of ['claude-code', 'claude-desktop', 'codex', 'cursor-cli', 'devin', 'windsurf', 'openclaw', 'gemini-cli', 'hermes', 'zeroclaw', 'nanoclaw', 'ironclaw'] as AgentType[]) {

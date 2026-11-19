@@ -569,3 +569,29 @@ describe('MCPDiscovery — empty and unreadable configs (deep test 2026-11-09)',
     expect((await new MCPDiscovery(new HomeFS()).discover('linux')).loadErrors).toBeUndefined();
   });
 });
+
+describe('MCPDiscovery — NanoClaw and IronClaw installs', () => {
+  let home: string;
+  beforeEach(async () => { home = await mkdtemp(join(tmpdir(), 'vaso-mcp-claws-')); });
+  afterEach(async () => { await rm(home, { recursive: true, force: true }); });
+
+  it('reads NanoClaw group container.json files and IronClaw extension manifests, as `vaso mcp` sees them', async () => {
+    const checkout = join(home, 'nanoclaw');
+    await mkdir(join(checkout, 'groups', 'main'), { recursive: true });
+    await writeFile(join(checkout, 'package.json'), JSON.stringify({ name: 'nanoclaw', version: '2.4.0' }));
+    await writeFile(join(checkout, 'groups', 'main', 'container.json'), JSON.stringify({ mcpServers: { notes: { command: 'npx', args: ['-y', 'notes-mcp'] } } }));
+    // a folder named like a checkout that isn't one: not read
+    await mkdir(join(home, 'nanoclaw-notes', 'groups', 'x'), { recursive: true });
+    await writeFile(join(home, 'nanoclaw-notes', 'groups', 'x', 'container.json'), JSON.stringify({ mcpServers: { nope: { command: 'node' } } }));
+    const ext = join(home, '.ironclaw', 'reborn', 'local-dev', 'system', 'extensions', 'notion');
+    await mkdir(ext, { recursive: true });
+    await writeFile(join(ext, 'manifest.toml'), 'id = "notion"\n\n[mcp]\nserver = "https://mcp.notion.com/mcp"\n');
+
+    const fs = Object.assign(Object.create(new LocalFSProvider()) as FSProvider, { homedir: () => home, getEnv: () => undefined });
+    const result = await new MCPDiscovery(fs).discover('linux');
+    expect(result.configs.map(c => [c.agents, c.filePath.slice(home.length), c.servers.map(s => s.name)])).toEqual([
+      [['nanoclaw'], '/nanoclaw/groups/main/container.json', ['notes']],
+      [['ironclaw'], '/.ironclaw/reborn/local-dev/system/extensions/notion/manifest.toml', ['notion']],
+    ]);
+  });
+});

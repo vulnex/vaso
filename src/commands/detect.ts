@@ -14,7 +14,7 @@ import { maskCredentialsDeep, toReportJson } from '../reporting/serialize.js';
 import { attachSkillInventories } from '../inventory/skills.js';
 import { attachMcpInventories } from '../inventory/mcp.js';
 import { findSharedMcpServers } from '../inventory/shared.js';
-import { skillsDirNote } from '../reporting/inventory-text.js';
+import { sharedUserLabel, skillsDirNote } from '../reporting/inventory-text.js';
 import type { McpServerItem } from '../core/types.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 
@@ -480,7 +480,7 @@ function renderTerminal(rawInstallations: AgentInstallation[], verbose: boolean 
     const unpinned = shared.filter(g => g.unpinned).length;
     lines.push(chalk.bold.cyan(`Shared MCP servers: ${shared.length}${unpinned ? chalk.yellow(` (${unpinned} unpinned somewhere)`) : ''}`));
     for (const group of shared.slice(0, MAX_LISTED)) {
-      const users = group.users.map(u => `${u.agent}${u.agentName ? ` (${escapeControlChars(u.agentName, { lineBreaks: true })})` : ''}`);
+      const users = group.users.map(u => escapeControlChars(sharedUserLabel(u), { lineBreaks: true }));
       const flag = group.unpinned ? chalk.yellow(' unpinned') : '';
       lines.push(`  ${escapeControlChars(group.key, { lineBreaks: true })}${flag} ${chalk.dim(`— ${[...new Set(users)].join(', ')}`)}`);
     }
