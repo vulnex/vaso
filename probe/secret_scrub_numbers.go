@@ -1,6 +1,10 @@
 package main
 
-import "regexp"
+import (
+	"math/big"
+	"regexp"
+	"strings"
+)
 
 // What a scalar parses as, for stand-ins that must parse the same: a stand-in
 // drawn from a number's classes lost an exponent's e (933336529534e11 →
@@ -119,8 +123,11 @@ func numberStandIn(core string, pre, suf int, want secretVerdicts) (string, bool
 		}
 		return string(b)
 	}
+	// an integer a JavaScript number holds exactly holds a stand-in that
+	// is one too: smol-toml rejects a TOML integer past 2^53 - 1
+	safe := safeInteger(core)
 	fits := func(cand string) bool {
-		if cand == core || verdictsOf(cand) != want {
+		if cand == core || verdictsOf(cand) != want || safe && !safeInteger(cand) {
 			return false
 		}
 		for _, i := range pos {
@@ -139,6 +146,36 @@ func numberStandIn(core string, pre, suf int, want secretVerdicts) (string, bool
 		}
 	}
 	return cand, false
+}
+
+// maxSafeInteger is JavaScript's Number.MAX_SAFE_INTEGER, 2^53 - 1.
+var maxSafeInteger = big.NewInt(1<<53 - 1)
+
+// safeInteger: v is an integer literal (decimal, or 0x / 0o / 0b; signs and
+// underscores allowed) whose magnitude is at most 2^53 - 1 — one smol-toml
+// parses (it rejects a larger one) and JSON.parse reads exactly. A
+// fraction, an exponent or anything else is no such integer.
+func safeInteger(v string) bool {
+	digits := strings.ReplaceAll(strings.TrimLeft(v, "+-"), "_", "")
+	if len(v)-len(strings.TrimLeft(v, "+-")) > 1 || digits == "" {
+		return false
+	}
+	base := 10
+	if len(digits) > 2 && digits[0] == '0' {
+		switch digits[1] | 0x20 {
+		case 'x':
+			base = 16
+		case 'o':
+			base = 8
+		case 'b':
+			base = 2
+		}
+		if base != 10 {
+			digits = digits[2:]
+		}
+	}
+	n, ok := new(big.Int).SetString(digits, base)
+	return ok && n.CmpAbs(maxSafeInteger) <= 0
 }
 
 // sameNumberLayout: cand has a digit wherever number has one and its other
