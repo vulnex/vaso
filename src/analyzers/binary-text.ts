@@ -32,6 +32,20 @@ const startsWith = (b: Uint8Array, sig: number[], at = 0) => b.length >= at + si
 const u32le = (b: Uint8Array, at: number) => (b[at] | (b[at + 1] << 8) | (b[at + 2] << 16) | (b[at + 3] << 24)) >>> 0;
 const ascii = (s: string) => [...s].map(c => c.charCodeAt(0));
 
+/** binaryFormat's name for a macOS AppleDouble sidecar (magic 00 05 16 07). */
+export const APPLEDOUBLE = 'AppleDouble metadata';
+
+/**
+ * A macOS AppleDouble sidecar (`._index.js` beside `index.js`: the
+ * original's Finder metadata and resource fork, never run or read by an
+ * agent) — by its name and its magic, read from the file's head.
+ */
+export async function isAppleDouble(fs: Pick<FSProvider, 'readHead'>, path: string, name: string): Promise<boolean> {
+  if (!name.startsWith('._')) return false;
+  const head = await fs.readHead?.(path, 4).catch(() => undefined);
+  return head !== undefined && binaryFormat(head) === APPLEDOUBLE;
+}
+
 /** Signatures checked on raw bytes. */
 const SIGNATURES: Array<{ name: string; test: (b: Uint8Array) => boolean }> = [
   // ELF: class (32/64-bit) and data (LE/BE) bytes valid, version 1, and the
@@ -61,6 +75,8 @@ const SIGNATURES: Array<{ name: string; test: (b: Uint8Array) => boolean }> = [
   { name: 'rar archive', test: b => startsWith(b, [0x52, 0x61, 0x72, 0x21, 0x1a, 0x07]) },
   { name: 'SQLite database', test: b => startsWith(b, [...ascii('SQLite format 3'), 0]) },
   { name: 'PNG image', test: b => startsWith(b, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]) },
+  // macOS resource-fork sidecar (`._name`, written by Finder/tar on non-HFS volumes)
+  { name: APPLEDOUBLE, test: b => startsWith(b, [0x00, 0x05, 0x16, 0x07]) },
 ];
 
 /** The binary format raw leading bytes start with, or undefined. */

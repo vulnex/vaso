@@ -394,6 +394,8 @@ func Collect(manifest ProbeManifest, escalate bool) ProbeSnapshot {
 			expandedGlobs = append(expandedGlobs, glob{p, isSkillPattern(raw)})
 		}
 	}
+	// Config-set trees a glob below would collect as plain files first
+	c.collectConfigRoots(&snapshot, configRootsPhase(manifest.ConfigRoots, true), homes)
 	for _, g := range expandedGlobs {
 		c.inSkillTree = g.skills
 		c.collectGlob(&snapshot, g.pattern)
@@ -442,7 +444,7 @@ func Collect(manifest ProbeManifest, escalate bool) ProbeSnapshot {
 	// MCP server's command), read from the configs collected above. After the
 	// metadata globs: a private store inside such a tree (sessions, memory,
 	// tokens) is already recorded as metadata and stays that way.
-	c.collectConfigRoots(&snapshot, manifest.ConfigRoots, homes)
+	c.collectConfigRoots(&snapshot, configRootsPhase(manifest.ConfigRoots, false), homes)
 
 	// Expand and collect directory listings. Only non-nil listings are stored:
 	// a nil result means the directory doesn't exist or can't be read, and
@@ -666,7 +668,7 @@ func (c *collector) collectGlob(snapshot *ProbeSnapshot, pattern string) {
 	c.collectNonUTF8Names(snapshot, pattern)
 	c.recordDeniedDirs(snapshot, pattern)
 	if c.inSkillTree {
-		c.collectVendorReferences(snapshot, pattern, matches)
+		c.collectVendorLoads(snapshot, pattern, matches, c.collectVendorReferences(snapshot, pattern, matches))
 		c.collectUnlistableSkills(snapshot, pattern)
 		if !c.configTree {
 			c.collectLinkedSkillBases(snapshot, pattern)

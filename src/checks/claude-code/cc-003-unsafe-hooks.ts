@@ -3,6 +3,7 @@ import { defineCheck } from '../../core/check-builder.js';
 import { truncateSnippet } from '../../core/patterns.js';
 import { shellCommandWrapper } from '../../mcp/shell-wrapper.js';
 import { hookCommandRisks, hookExpansion, httpHookRisks, topTier, hookSnippet } from '../../analyzers/hook-commands.js';
+import { customCommandRuns } from './custom-commands.js';
 
 // ${CLAUDE_PROJECT_DIR} / ${CLAUDE_PLUGIN_ROOT} / ${CLAUDE_PLUGIN_DATA} are
 // path placeholders the hooks docs use unquoted in their own examples
@@ -48,7 +49,7 @@ export const cc003 = defineCheck({
   name: 'Unsafe Hook Commands',
   category: 'coding-agent',
   severity: 'warning',
-  description: 'Detect Claude Code hooks that download and execute code, send credentials or hook input over the network (incl. http hooks), re-evaluate input as code, or exec untrusted shell input without quoting',
+  description: 'Detect Claude Code hooks and custom slash commands (`!`cmd`` lines) that download and execute code, send credentials or hook input over the network (incl. http hooks), re-evaluate input as code, or exec untrusted shell input without quoting',
   supportedAgents: ['claude-code'],
 
   async run(ctx, h) {
@@ -109,11 +110,30 @@ export const cc003 = defineCheck({
       }
     }
 
+    // Custom slash commands: their `!`cmd`` lines and ```! blocks run in a
+    // shell whenever the command is invoked — the same as a hook
+    const shellOff = ctx.configs.some(c => (c.data as Record<string, unknown> | undefined)?.disableSkillShellExecution === true);
+    for (const run of await customCommandRuns(ctx)) {
+      const risks = hookCommandRisks(run.command, { expansion: DYNAMIC_EXPANSION });
+      const tier = topTier(risks);
+      if (!tier) continue;
+      const live = tier !== 'info' && !shellOff;
+      if (live && tier === 'critical') critical = true;
+      const reasons = risks.map(r => r.reason.replace('every time the hook fires', 'every time the command runs').replace(/hook input/g, 'command input'));
+      evidence.push({
+        file: run.file,
+        line: run.line,
+        snippet: `command: ${truncateSnippet(run.command.replace(/\s*\n\s*/g, ' ; '), 120)}`,
+        detail: `Custom command's ${run.form} shell command (Claude Code runs it when the command is invoked) ${reasons.join('; ')}${shellOff ? ' — not run: disableSkillShellExecution is set' : ''}`,
+        ...(live ? {} : { mitigated: true }),
+      });
+    }
+
     return h.fromEvidence(evidence, {
       passed: 'No unsafe hook commands detected',
-      failed: (n) => `Found ${n} hook command(s) that download code, send data out or may execute untrusted input`,
+      failed: (n) => `Found ${n} hook or custom-command shell command(s) that download code, send data out or may execute untrusted input`,
       severity: critical ? 'critical' : 'warning',
-      fixDescription: 'Remove hooks you did not add yourself (a project .claude/settings.json arrives with the repo); run vendored, reviewed scripts instead of downloads, send audit data only to endpoints you control over https, quote $-variables ("$VAR"), and avoid eval/sh -c and piping into a shell — or use exec form (`args`) so no shell runs',
+      fixDescription: 'Remove hooks and custom commands you did not add yourself (a project .claude/settings.json or .claude/commands/ arrives with the repo); run vendored, reviewed scripts instead of downloads, send audit data only to endpoints you control over https, quote $-variables ("$VAR"), and avoid eval/sh -c and piping into a shell — or use exec form (`args`) so no shell runs',
     });
   },
 });

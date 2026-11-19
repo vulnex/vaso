@@ -1,4 +1,4 @@
-import { join, extname, dirname, relative, sep, basename, isAbsolute } from 'node:path';
+import { join, extname, dirname, normalize, relative, sep, basename, isAbsolute } from 'node:path';
 import { mkdir, open, rename, unlink, writeFile } from 'node:fs/promises';
 import { constants as fsConstants } from 'node:fs';
 import { randomBytes } from 'node:crypto';
@@ -7,8 +7,9 @@ import type { AgentInstallation } from './types.js';
 import { walkSkillTree } from './skill-walk.js';
 import { relEscapes } from './path-rel.js';
 import { CREDENTIAL_FILE_NAME, startsLikeProgram } from '../analyzers/credential-file-names.js';
-import { isSkillAsset, vendorReferencePaths } from './skill-tree-files.js';
+import { MAX_VENDOR_LOAD_DEPTH, MAX_VENDOR_LOADS, isLoadSource, isSkillAsset, loadCandidates, loadReferences, runReferences, vendorReferencePaths } from './skill-tree-files.js';
 import { readCappedFile } from './file-limits.js';
+import { isAppleDouble } from '../analyzers/binary-text.js';
 
 export { relEscapes };
 import { LocalFSProvider } from './local-fs-provider.js';
@@ -166,8 +167,9 @@ export interface SkillTreeListing {
   /** The files skill/IOC checks read — see getSkillFiles. */
   files: string[];
   /** Those of `files` that are code: scripts and source by extension,
-   *  compiled helpers, extensionless executables and the vendor-folder files
-   *  a SKILL.md runs (inventory `hasCode`). */
+   *  compiled helpers, extensionless executables, files starting with `#!`,
+   *  files a SKILL.md runs through an interpreter and the vendor-folder files
+   *  a skill runs or loads (inventory `hasCode`). */
   codeFiles: string[];
   /** Folders inside vendor dirs a SKILL.md runs (`node node_modules/helper`):
    *  only the files it names are read, so SKL-002 reports them as not scanned. */
@@ -216,6 +218,8 @@ export async function listSkillTree(dir: string, fs?: FSProvider, opts: { uncapp
       if (isExcludedPath(dir, entry.parentPath, { keepBuildOutput: true, skills })) continue;
       const fullPath = entry.parentPath ? join(entry.parentPath, entry.name) : join(dir, entry.name);
       const ext = extname(entry.name).toLowerCase();
+      // a macOS `._*` sidecar is Finder metadata, not a file of the skill
+      if (await isAppleDouble(provider, fullPath, entry.name)) continue;
       if (CODE_EXTENSIONS.has(ext) || BINARY_EXTENSIONS.has(ext)) {
         files.push(fullPath);
         codeFiles.push(fullPath);
@@ -227,17 +231,29 @@ export async function listSkillTree(dir: string, fs?: FSProvider, opts: { uncapp
         continue;
       } else {
         files.push(fullPath);
-        if (ext === '' && await isExecutable(provider, fullPath)) codeFiles.push(fullPath);
+        // a script by its execute bit (extensionless: without one a `#!` line
+        // doesn't run it) or by its `#!` line under any other name
+        if (ext === '' ? await isExecutable(provider, fullPath) : !NO_SHEBANG_EXTENSIONS.has(ext) && await startsWithShebang(provider, fullPath)) {
+          codeFiles.push(fullPath);
+        }
       }
     }
     // Files a SKILL.md runs from a vendor folder the walk skips
     const listed = new Set(files);
+    const code = new Set(codeFiles);
     for (const skillMd of skillMds) {
       let text: string;
       try {
         text = await readCappedFile(provider, skillMd);
       } catch {
         continue;
+      }
+      // a file it runs through an interpreter is code, whatever its name (`python3 helper.txt`)
+      for (const [path] of runReferences(skillMd, text)) {
+        if (listed.has(path) && !code.has(path)) {
+          code.add(path);
+          codeFiles.push(path);
+        }
       }
       for (const path of vendorReferencePaths(dir, skillMd, text)) {
         if (listed.has(path) || !isExcludedPath(dir, dirname(path), { keepBuildOutput: true, skills })) continue;
@@ -251,6 +267,14 @@ export async function listSkillTree(dir: string, fs?: FSProvider, opts: { uncapp
         files.push(path);
         codeFiles.push(path);
       }
+    }
+    // …and the vendor-folder files the tree's scripts load from there
+    // (`require('../node_modules/helper')`) or its package.json scripts run
+    // (`node .cache/boot.js`), a few loads deep
+    for (const path of await vendorLoads(provider, dir, files, skills)) {
+      listed.add(path);
+      files.push(path);
+      codeFiles.push(path);
     }
   } catch (err) {
     // Directory may not exist
@@ -266,6 +290,64 @@ export async function listSkillTree(dir: string, fs?: FSProvider, opts: { uncapp
   // Sorted: a local walk and a snapshot list folders in different orders
   const unlistableNested = (await unlistableSubdirs(provider, dir, entries)).filter(d => !unlistable.includes(d)).sort();
   return { entries, files, codeFiles, vendorDirRefs: vendorDirRefs.sort(), unlistable: unlistable.sort(), unlistableNested, refusedLinks, overLimitLinks, overTotalLinks, unrecordedLinks, ...(error ? { error } : {}) };
+}
+
+/**
+ * Vendor-folder files (`node_modules/`, `.cache/`, … — the walk skips them)
+ * that the tree's files load: a script's relative require/import, a
+ * package.json's references (loadReferences), resolved as Node resolves a
+ * module path (loadCandidates) and followed from the files they add, at
+ * most MAX_VENDOR_LOAD_DEPTH loads deep and MAX_VENDOR_LOADS files. Sources
+ * are taken in path order, level by level, so the bound cuts where the
+ * probe's does (probe/skill_refs.go collectVendorLoads).
+ */
+async function vendorLoads(fs: FSProvider, root: string, files: readonly string[], skills: ReadonlySet<string>): Promise<string[]> {
+  const inVendor = (p: string) => !relEscapes(relative(root, p)) && isExcludedPath(root, dirname(p), { keepBuildOutput: true, skills });
+  const known = new Set(files);
+  const out: string[] = [];
+  let level = files.filter(isLoadSource).sort();
+  for (let depth = 0; depth < MAX_VENDOR_LOAD_DEPTH && level.length > 0 && out.length < MAX_VENDOR_LOADS; depth++) {
+    const next: string[] = [];
+    for (const source of level) {
+      let text: string;
+      try {
+        text = await readCappedFile(fs, source);
+      } catch {
+        continue;
+      }
+      for (const ref of loadReferences(source, text)) {
+        if (out.length >= MAX_VENDOR_LOADS) return out;
+        const p = normalize(join(dirname(source), ...ref.split('/')));
+        if (!inVendor(p)) continue;
+        const target = await resolveLoad(fs, p, inVendor);
+        if (target === undefined || known.has(target)) continue;
+        known.add(target);
+        if (isSkillAsset(target) || await keyFile(fs, target, basename(target))) continue;
+        out.push(target);
+        if (isLoadSource(target)) next.push(target);
+      }
+    }
+    level = next.sort();
+  }
+  return out;
+}
+
+/** The first of loadCandidates(p) that is a file in a vendor folder of the tree. */
+async function resolveLoad(fs: FSProvider, p: string, inVendor: (p: string) => boolean): Promise<string | undefined> {
+  let main: string | undefined;
+  if (await fs.stat(p).then(st => st.isDirectory(), () => false)) {
+    try {
+      const m = (JSON.parse(await readCappedFile(fs, join(p, 'package.json'))) as { main?: unknown } | null)?.main;
+      if (typeof m === 'string' && m.trim() !== '') main = m;
+    } catch {
+      // no package.json, or no main in it
+    }
+  }
+  for (const c of loadCandidates(p, main)) {
+    if (!inVendor(c)) continue;
+    if (await fs.stat(c).then(st => st.isFile(), () => false)) return c;
+  }
+  return undefined;
 }
 
 /** A key or token file by its name that isn't a program (isCredentialNotProgram) — the name is tested first. */
@@ -332,6 +414,15 @@ async function unlistableSubdirs(fs: FSProvider, root: string, entries: DirentIn
     }
   }
   return [...out];
+}
+
+/** Documents and data a `#!` line isn't looked for in (inventory `hasCode`). */
+const NO_SHEBANG_EXTENSIONS = new Set(['.md', '.mdx', '.markdown', '.json', '.jsonl', '.yaml', '.yml', '.csv', '.tsv', '.lock', '.svg', '.html', '.htm', '.xml']);
+
+/** The file starts with `#!`: a script whatever its name. */
+async function startsWithShebang(fs: FSProvider, path: string): Promise<boolean> {
+  const head = await fs.readHead?.(path, 2).catch(() => undefined);
+  return head !== undefined && head[0] === 0x23 && head[1] === 0x21;
 }
 
 /** Any execute bit set — what makes an extensionless file a script or program. */

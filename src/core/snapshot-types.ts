@@ -51,10 +51,12 @@ export interface ConfigRootRequest {
   kind: 'tree' | 'stat';
   /** tree: globs relative to each value, each `**` or ending in `/**`. */
   globs?: string[];
-  /** A relative value resolves against the scanned home or the config's
-   *  directory; omitted: relative values are skipped (the adapter resolves
-   *  them against its working directory, which the probe can't know). */
-  relative?: 'home' | 'config';
+  /** A relative value resolves against the scanned home, the config's
+   *  directory, or the directory above it (`configParent`: a plugin root,
+   *  for `<root>/.claude-plugin/plugin.json`); omitted: relative values are
+   *  skipped (the adapter resolves them against its working directory,
+   *  which the probe can't know). */
+  relative?: 'home' | 'config' | 'configParent';
   /** Expand `${NAME}` in values from the environment (unset: skipped). */
   expandEnv?: boolean;
   /** When no key holds a string: this variable's value. */
@@ -63,6 +65,9 @@ export interface ConfigRootRequest {
   when?: string[];
   /** Used when `when` holds and no key holds a string. */
   default?: string;
+  /** Walked before the manifest's globs, which would otherwise collect the
+   *  tree as plain files first (probe ≥ 1.4.2; older probes walk it after). */
+  beforeGlobs?: boolean;
 }
 
 /** What the probe did with a config-derived tree (`ProbeSnapshot.configTrees`). */

@@ -1,6 +1,6 @@
 import { join, basename, dirname } from 'node:path';
 import type { AgentAdapter, DetectOptions } from './adapter.js';
-import type { AgentInstallation, GatewayInfo, ModelRef, ParsedConfig, ZoneGraph } from '../core/types.js';
+import type { AgentInstallation, GatewayInfo, ModelRef, ParsedConfig, UnscannedSkillsDir, ZoneGraph } from '../core/types.js';
 import type { ProbeManifest } from '../core/snapshot-types.js';
 import type { FSProvider } from '../core/fs-provider.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
@@ -12,7 +12,7 @@ import { getUserHomeDirs } from './openclaw.js';
 import { queryCliVersion, readPackageVersion } from './version-query.js';
 import { withoutLoadedConfigs, scanCwd, isLoadedInstallDir } from './project-configs.js';
 import { envPath } from './env-path.js';
-import { claudePlugins, claudePluginSkillsDir } from './claude-plugins.js';
+import { claudePluginExtraSkillsDirs, claudePlugins, claudePluginSkillsDir } from './claude-plugins.js';
 
 const CLAUDE_DIR_NAME = '.claude';
 const SETTINGS_FILES = ['settings.json', 'settings.local.json'];
@@ -227,9 +227,16 @@ export const claudeCodeAdapter: AgentAdapter = {
       // plugin's don't (a settings change that enables one shows up in the
       // next scan)
       const pluginSkillsDirs: string[] = [];
+      const unscannedSkillsDirs: UnscannedSkillsDir[] = [];
+      const isDir = (d: string) => fs.stat(d).then(st => st.isDirectory(), () => false);
       for (const plugin of await claudePlugins(claudeDir, configFiles, fs)) {
+        if (!plugin.enabled) continue;
         const dir = claudePluginSkillsDir(plugin);
-        if (plugin.enabled && !pluginSkillsDirs.includes(dir) && await fs.stat(dir).then(st => st.isDirectory(), () => false)) pluginSkillsDirs.push(dir);
+        if (!pluginSkillsDirs.includes(dir) && await isDir(dir)) pluginSkillsDirs.push(dir);
+        // …and the directories its plugin.json adds (`"skills": ["./tools/"]`)
+        const extra = await claudePluginExtraSkillsDirs(plugin, home, fs);
+        for (const d of extra.scan) if (!pluginSkillsDirs.includes(d) && d !== skillsDir && await isDir(d)) pluginSkillsDirs.push(d);
+        for (const u of extra.unscanned) if (!unscannedSkillsDirs.some(o => o.path === u.path)) unscannedSkillsDirs.push(u);
       }
 
       installations.push({
@@ -239,6 +246,7 @@ export const claudeCodeAdapter: AgentAdapter = {
         configFiles,
         skillsDir,
         ...(skillsDir && pluginSkillsDirs.length > 0 ? { skillsDirs: [skillsDir, ...pluginSkillsDirs] } : {}),
+        ...(unscannedSkillsDirs.length > 0 ? { unscannedSkillsDirs } : {}),
         models: await this.getModels?.(configFiles, fs),
         user: options?.allUsers ? user : undefined,
         cliBinary,
@@ -388,7 +396,11 @@ export const claudeCodeAdapter: AgentAdapter = {
         // plugins glob below, which would collect them as plugin data first
         '~/.claude/plugins/cache/*/*/*/skills/**',
         '~/.claude/plugins/**',
+        // (collected by the glob above too: named, as the configRoots below read it)
+        '~/.claude/plugins/cache/*/*/*/.claude-plugin/plugin.json',
         '~/.claude/agents/**',
+        // Custom slash commands: their `!`cmd`` lines run when invoked (CC-003)
+        '~/.claude/commands/**',
         // User-level memory rules (CC-012)
         '~/.claude/rules/**',
         nvmBinaryGlob('claude'),
@@ -405,8 +417,21 @@ export const claudeCodeAdapter: AgentAdapter = {
         '~/.claude/skills',
         '~/.claude/plugins',
         '~/.claude/agents',
+        '~/.claude/commands',
         '~/.claude/rules',
       ],
+      // Skills directories a plugin's plugin.json adds (relative to the
+      // plugin root), walked as skill trees before the plugins glob above
+      // collects them as plain files (claudePluginExtraSkillsDirs)
+      configRoots: [{
+        configs: ['~/.claude/plugins/cache/*/*/*/.claude-plugin/plugin.json'],
+        format: 'json',
+        kind: 'tree',
+        keys: [['skills'], ['skills', '*']],
+        globs: ['**'],
+        relative: 'configParent',
+        beforeGlobs: true,
+      }],
       envPrefixes: ['CLAUDE_', 'ANTHROPIC_'],
       // Managed settings (machine-wide policy) and their drop-in directory
       systemPaths: [...SYSTEM_CLI_PATHS, `${MANAGED_DIR_DARWIN}/managed-settings.json`, `${MANAGED_DIR_LINUX}/managed-settings.json`],

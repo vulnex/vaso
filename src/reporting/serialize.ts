@@ -489,6 +489,8 @@ function maskCredentialValues(line: string, literalFree = false): { text: string
   for (const pos of positions) {
     // a position inside a value already masked (`password = {"token": …}`)
     if (pos.at < last) continue;
+    // Claude Code's `!`cmd`` is a command, not a credential literal
+    if (BANG_VALUE.test(line.slice(pos.valueStart, pos.valueStart + 8))) continue;
     while (li < literals.length && literals[li].end <= pos.valueStart) li++;
     const only = literals[li];
     if (pos.plain && only && only.closed && line[only.start] !== '`' && !line.slice(only.start, only.end).includes('${')
@@ -513,6 +515,9 @@ function maskCredentialValues(line: string, literalFree = false): { text: string
   }
   return { text: out + line.slice(last), open };
 }
+
+/** A value that is Claude Code's `!`cmd`` (`KEY=!`cmd``): a command, never a literal secret. */
+const BANG_VALUE = /^\s*!(?=`)/;
 
 function maskCodeFallbacks(text: string): string {
   if (!text.includes('\n')) return maskCredentialValues(text).text;
@@ -684,7 +689,7 @@ function maskText(input: string): string {
     .replace(SECRET_DASHED_HEADER, (m, pre: string, name: string, sep: string, value: string) =>
       (keepValue(value) ? m : `${pre}${name}${sep}${MASK}`))
     .replace(SECRET_ASSIGN, (m, pre: string, name: string, sep: string, value: string, offset: number, whole: string) =>
-      (secretAssignName(name) && !keepValue(value) && !codeValue(value, sep) && !groupedCode(value, sep) && !PROSE_WORD.test(value)
+      (secretAssignName(name) && !keepValue(value) && !codeValue(value, sep) && !BANG_VALUE.test(whole.slice(offset + m.length - value.length)) && !groupedCode(value, sep) && !PROSE_WORD.test(value)
         && !addressValue(name, whole.slice(offset + m.length - value.length)) ? `${pre}${name}${sep}${escapedQuotes(value, MASK)}` : m))
     .replace(USER_PASS_FLAG, (m, pre: string, flag: string, sep: string, user: string, pw: string) =>
       (keepValue(pw) ? m : `${pre}${flag}${sep}${user}:${MASK}`));
@@ -763,8 +768,9 @@ function maskLine(input: string): string {
       ? `${pre}${q}${name}${q}${sep}[${items.replace(/[^,\s"']+(?:\s+[^,\s"']+)*/g, (v) => (keepValue(v) ? v : MASK))}]`
       : m));
   const masked = listed.replace(SECRET_KEY_VALUE, (m, pre: string, q: string, name: string, sep: string, value: string, offset: number, all: string) => {
-    // `name = call(…)` in a source line is code (YAML `name: …` is always a value)
-    if (!isSecretName(name) || keepValue(value) || (sep.includes('=') && codeValue(value, sep))) return m;
+    // `name = call(…)` in a source line is code (YAML `name: …` is always a value),
+    // and so is `name=!`cmd`` (a `!` is a YAML tag only after `:`)
+    if (!isSecretName(name) || keepValue(value) || (sep.includes('=') && (codeValue(value, sep) || /=\s*!`/.test(sep)))) return m;
     if (addressValue(name, all.slice(offset + m.length - value.length))) return m;
     // (identifiers alone — the rest of the line, its literals, masked above)
     if (sep.includes('=') && groupedCode(value, sep)) return /["']/.test(value) ? `${pre}${q}${name}${q}${sep}${maskValueText(value)}` : m;

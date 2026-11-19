@@ -63,7 +63,7 @@ export const skl001 = defineCheck({
     for (const file of files) {
       try {
         // Shell commands that run on their own: a SKILL.md's `!`cmd`` spans
-        // (Claude Code, on load) and a package.json's install scripts (npm)
+        // and ```! blocks (Claude Code, on load) and a package.json's install scripts (npm)
         if (basename(file).toUpperCase() === 'SKILL.MD' || basename(file) === 'package.json') {
           const src = await readSkillSource(ctx, file, 'patterns', 'prose');
           for (const run of src ? commandsRunOnTheirOwn(src) : []) {
@@ -73,7 +73,7 @@ export const skl001 = defineCheck({
               evidence.push({
                 file,
                 line: run.line,
-                snippet: truncateSnippet(run.command),
+                snippet: truncateSnippet(run.command.replace(/\s*\n\s*/g, ' ; ')),
                 detail: `${run.label} ${risk.reason}`,
                 ...(risk.tier === 'info' ? { mitigated: true } : {}),
               });

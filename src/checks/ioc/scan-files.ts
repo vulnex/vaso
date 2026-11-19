@@ -1,20 +1,17 @@
-import { extname, join, relative, isAbsolute } from 'node:path';
+import { extname, join, relative } from 'node:path';
 import type { ScanContext } from '../../core/types.js';
-import { getAllSkillsDirs, isExcludedPath, relEscapes, vendorNamedSkills } from '../../core/utils.js';
-import { followSkillLinks, skillFileInSink } from '../../core/skill-walk.js';
+import { getAllSkillsDirs, isExcludedPath, relEscapes } from '../../core/utils.js';
+import { skillFileInSink } from '../../core/skill-walk.js';
+import { skillFilesOf } from '../skills/skill-files.js';
+import { claudePlugins } from '../../adapters/claude-plugins.js';
 
-// Text an indicator can hide in: code and scripts, config, and skill docs
-// (SKILL.md tells the agent what to fetch and run).
+// Text an indicator can hide in outside skill trees: code and scripts, and
+// config (in skill trees every file the skill checks read counts).
 const SCAN_EXTENSIONS = new Set([
   '.js', '.ts', '.mjs', '.cjs', '.jsx', '.tsx', '.mts', '.cts', '.py',
   '.sh', '.bash', '.zsh', '.ps1',
   '.json', '.jsonc', '.json5', '.yaml', '.yml', '.toml', '.env', '.ini', '.cfg', '.conf',
-  '.md',
 ]);
-// Markdown only inside skill trees: elsewhere in an install dir it is the
-// agent's own data — Claude Code's per-project memory notes, plans, transcripts
-// — which quote whatever the user discussed (and the probe doesn't collect).
-const SKILL_ONLY_EXTENSIONS = new Set(['.md']);
 
 export { MAX_SCAN_FILE_BYTES } from '../../core/file-limits.js';
 import { readCappedFile } from '../../core/file-limits.js';
@@ -24,64 +21,61 @@ function within(path: string, dir: string): boolean {
   return !relEscapes(rel);
 }
 
-/** Drop dirs nested inside another listed dir (skills under the install dir) — walk each tree once. */
-function outermost(dirs: string[]): string[] {
-  const unique = [...new Set(dirs)];
-  return unique.filter(d => !unique.some(o => {
-    if (o === d) return false;
-    const rel = relative(o, d);
-    return rel !== '' && !relEscapes(rel);
-  }));
+/**
+ * Install paths of the Claude Code plugins the settings disable: none of
+ * their files load, so — as the skill checks skip their skills — the IOC
+ * checks don't read them.
+ */
+async function disabledPluginPaths(ctx: ScanContext): Promise<string[]> {
+  if (ctx.installation.agent !== 'claude-code') return [];
+  return (await claudePlugins(ctx.installation.installDir, ctx.configs, ctx.fs)).filter(p => !p.enabled).map(p => p.installPath);
 }
 
 /**
- * Code and config files an IOC check should read for an installation: the
- * install dir and skills dirs, minus vendor/VCS dirs and — outside skill
- * trees — build output (see isExcludedPath), files already covered by
- * `ctx.configs`, and oversized files.
+ * Files an IOC check should read for an installation:
+ *  - in skill trees, every file the skill checks read (skillFilesOf: the
+ *    listSkillTree walk — any extension, extensionless scripts, linked
+ *    skills, vendor-folder files a skill runs or loads);
+ *  - elsewhere in the install dir, code and config by extension (Markdown
+ *    there is the agent's own data — Claude Code's per-project memory notes,
+ *    plans, transcripts — which quote whatever the user discussed, and the
+ *    probe doesn't collect), minus vendor/VCS dirs, build output
+ *    (isExcludedPath) and disabled plugins;
+ * never a file already covered by `ctx.configs`. Oversized files are left to
+ * readScanFile.
  */
 export async function iocScanFiles(ctx: ScanContext): Promise<string[]> {
-  const dirs = outermost([ctx.installation.installDir, ...getAllSkillsDirs(ctx.installation)]);
   const skip = new Set(ctx.configs.map(c => c.filePath));
   const files: string[] = [];
   const skillsDirs = getAllSkillsDirs(ctx.installation);
   const realDirs = new Map<string, string>();
-  for (const dir of dirs) {
-    let entries;
-    try {
-      entries = await ctx.fs.readdirEntries(dir, { recursive: true });
-    } catch {
-      continue;
-    }
-    // Skills symlinked in from outside the tree: the listing shows the link only
-    for (const skills of skillsDirs) {
-      const rel = relative(dir, skills);
-      if (relEscapes(rel)) continue;
-      entries = entries.concat(await followSkillLinks(ctx.fs, skills, entries, { uncapped: ctx.installation.agent === 'skill-audit' }));
-    }
-    // per skills dir: its folders named like a vendor dir that are skills
-    const vendorNamed = new Map<string, ReadonlySet<string>>();
-    const skillsOf = (root: string) => {
-      let set = vendorNamed.get(root);
-      if (!set) vendorNamed.set(root, set = vendorNamedSkills(root, entries));
-      return set;
-    };
-    for (const entry of entries) {
-      const ext = extname(entry.name).toLowerCase();
-      if (!entry.isFile || !SCAN_EXTENSIONS.has(ext)) continue;
-      // Build output is skill code inside a skill tree, a build artefact elsewhere
-      const skillsRoot = entry.parentPath ? skillsDirs.find(s => within(entry.parentPath!, s)) : undefined;
-      if (!skillsRoot && SKILL_ONLY_EXTENSIONS.has(ext)) continue;
-      if (skillsRoot ? isExcludedPath(skillsRoot, entry.parentPath, { keepBuildOutput: true, skills: skillsOf(skillsRoot) }) || isExcludedPath(dir, skillsRoot)
-        : isExcludedPath(dir, entry.parentPath)) continue;
-      const fullPath = entry.parentPath ? join(entry.parentPath, entry.name) : join(dir, entry.name);
-      if (skip.has(fullPath)) continue;
-      skip.add(fullPath);
-      // A credential store reached through a linked skills tree (skills →
-      // ~/.claude): never read, as the probe never ships it
-      if (skillsRoot && await skillFileInSink(ctx.fs, skillsRoot, fullPath, realDirs)) continue;
-      files.push(fullPath);
-    }
+  for (const file of await skillFilesOf(ctx)) {
+    if (skip.has(file)) continue;
+    skip.add(file);
+    // A credential store reached through a linked skills tree (skills →
+    // ~/.claude): never read, as the probe never ships it
+    const skillsRoot = skillsDirs.find(s => within(file, s));
+    if (skillsRoot && await skillFileInSink(ctx.fs, skillsRoot, file, realDirs)) continue;
+    files.push(file);
+  }
+  const dir = ctx.installation.installDir;
+  let entries;
+  try {
+    entries = await ctx.fs.readdirEntries(dir, { recursive: true });
+  } catch {
+    return files;
+  }
+  if (!Array.isArray(entries)) return files;
+  const disabled = await disabledPluginPaths(ctx);
+  for (const entry of entries) {
+    if (!entry.isFile || !SCAN_EXTENSIONS.has(extname(entry.name).toLowerCase())) continue;
+    const parent = entry.parentPath ?? dir;
+    // skill trees are read above, from the skill checks' own list
+    if (skillsDirs.some(s => within(parent, s)) || isExcludedPath(dir, parent) || disabled.some(p => within(parent, p))) continue;
+    const fullPath = join(parent, entry.name);
+    if (skip.has(fullPath)) continue;
+    skip.add(fullPath);
+    files.push(fullPath);
   }
   return files;
 }
