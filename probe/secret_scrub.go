@@ -1316,12 +1316,13 @@ func (c *collector) disguiseAs(v string, passphrase, keyed bool) string {
 	case scalarKept:
 		return v
 	case scalarNumber:
-		// a plain JSON number is arranged below (its entropy exact, a weak
-		// run moved), as a number still; a hex, octal, binary or underscored
-		// one, or one with a sign or a bare dot, has its digits drawn here
-		if lead == "" && units == nil && !numberValue.MatchString(core) {
-			out, _ := numberStandIn(core, pre, suf, verdictsOf(core))
-			return c.remember(v, out)
+		// its digits rearranged or drawn, nothing else moved; a plain JSON
+		// number no such stand-in judges alike (a weak run to move: 12345678)
+		// is arranged below, as a number still
+		if lead == "" && units == nil {
+			if out, ok := numberStandIn(core, pre, suf, verdictsOf(core)); ok || !numberValue.MatchString(core) {
+				return c.remember(v, out)
+			}
 		}
 	}
 	held := heldBytes(units, len(core))
