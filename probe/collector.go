@@ -347,21 +347,22 @@ func Collect(manifest ProbeManifest, escalate bool) ProbeSnapshot {
 	homedir, _ := os.UserHomeDir()
 
 	snapshot := ProbeSnapshot{
-		Version:        1,
-		ProbeVersion:   version,
-		Hostname:       hostname,
-		Platform:       runtime.GOOS,
-		Homedir:        homedir,
-		Timestamp:      time.Now().UTC().Format(time.RFC3339),
-		Privilege:      priv,
-		Files:          make(map[string]FileEntry),
-		Directories:    make(map[string][]string),
-		CommandOutputs: make(map[string]CommandOutput),
-		Env:            make(map[string]string),
-		DirectoryModes: make(map[string]int),
-		Symlinks:       make(map[string]string),
-		Owners:         make(map[string][2]int),
-		PrivateGroups:  collectPrivateGroups(),
+		Version:         1,
+		ProbeVersion:    version,
+		Hostname:        hostname,
+		Platform:        runtime.GOOS,
+		Homedir:         homedir,
+		Timestamp:       time.Now().UTC().Format(time.RFC3339),
+		Privilege:       priv,
+		Files:           make(map[string]FileEntry),
+		Directories:     make(map[string][]string),
+		CommandOutputs:  make(map[string]CommandOutput),
+		Env:             make(map[string]string),
+		DirectoryModes:  make(map[string]int),
+		SpecialModeBits: true,
+		Symlinks:        make(map[string]string),
+		Owners:          make(map[string][2]int),
+		PrivateGroups:   collectPrivateGroups(),
 	}
 	c := &collector{budget: maxTotalContentBytes}
 	for _, h := range homes {
@@ -855,7 +856,7 @@ func (c *collector) collectPath(snapshot *ProbeSnapshot, p, base string, metadat
 		recordOwner(snapshot, p, info)
 	}
 	if err == nil && info.IsDir() {
-		snapshot.DirectoryModes[p] = int(info.Mode().Perm())
+		snapshot.DirectoryModes[p] = unixMode(info.Mode())
 		if listDir && !escapesToSink(p, base) && !c.isForeignLink(p) {
 			if listing := collectDirectory(p, snapshot.Symlinks); listing != nil {
 				snapshot.Directories[p] = listing
@@ -944,7 +945,7 @@ func (c *collector) recordCollectedLinkChains(snapshot *ProbeSnapshot) {
 // recordDirMode stores a directory's permission bits when it can be stat'd.
 func recordDirMode(snapshot *ProbeSnapshot, dir string) {
 	if info, err := os.Stat(dir); err == nil && info.IsDir() {
-		snapshot.DirectoryModes[dir] = int(info.Mode().Perm())
+		snapshot.DirectoryModes[dir] = unixMode(info.Mode())
 		recordOwner(snapshot, dir, info)
 	}
 }
@@ -1927,8 +1928,25 @@ func recordUnsearchableListing(snapshot *ProbeSnapshot, dir string, entries []os
 		names = append(names, name)
 	}
 	snapshot.Directories[dir] = names
-	snapshot.DirectoryModes[dir] = int(info.Mode().Perm())
+	snapshot.DirectoryModes[dir] = unixMode(info.Mode())
 	recordOwner(snapshot, dir, info)
+}
+
+// unixMode is a directory's mode as stat(2) gives it: the permission bits
+// plus setuid/setgid/sticky (0o7000), so a 0777 directory is known not to be
+// sticky (SpecialModeBits). Go keeps those three in its own FileMode bits.
+func unixMode(m os.FileMode) int {
+	mode := int(m.Perm())
+	if m&os.ModeSetuid != 0 {
+		mode |= 0o4000
+	}
+	if m&os.ModeSetgid != 0 {
+		mode |= 0o2000
+	}
+	if m&os.ModeSticky != 0 {
+		mode |= 0o1000
+	}
+	return mode
 }
 
 // recordDeniedDir records the mode of a directory that could not be listed —
@@ -1938,7 +1956,7 @@ func recordDeniedDir(snapshot *ProbeSnapshot, dir string) {
 	for d := dir; ; d = filepath.Dir(d) {
 		if info, err := os.Stat(d); err == nil {
 			if info.IsDir() {
-				snapshot.DirectoryModes[d] = int(info.Mode().Perm())
+				snapshot.DirectoryModes[d] = unixMode(info.Mode())
 				recordOwner(snapshot, d, info)
 			}
 			return

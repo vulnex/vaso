@@ -507,3 +507,40 @@ func TestSkillGlobRecordsUnsearchableListing(t *testing.T) {
 		t.Error("a searchable folder's listing recorded")
 	}
 }
+
+// A sticky world-writable directory is recorded as 01777, so a snapshot scan
+// can tell it from a plain 0777 one (specialModeBits).
+func TestDirectoryModesKeepTheStickyBit(t *testing.T) {
+	root := t.TempDir()
+	sticky := filepath.Join(root, "shared")
+	plain := filepath.Join(root, "open")
+	for _, d := range []string{sticky, plain} {
+		if err := os.Mkdir(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Chmod(sticky, 0o777|os.ModeSticky); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(plain, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	cmd := filepath.Join(sticky, "server")
+	if err := os.WriteFile(cmd, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	snap := ProbeSnapshot{Files: map[string]FileEntry{}, Directories: map[string][]string{}, DirectoryModes: map[string]int{}}
+	c := &collector{budget: 1 << 20}
+	c.collectPath(&snap, cmd, cmd, false, false)
+	c.collectPath(&snap, plain, plain, false, true)
+	recordAncestorModes(&snap, nil)
+	if got := snap.DirectoryModes[sticky]; got != 0o1777 {
+		t.Fatalf("sticky directory recorded as %o, want 1777", got)
+	}
+	if got := snap.DirectoryModes[plain]; got != 0o777 {
+		t.Fatalf("plain directory recorded as %o, want 777", got)
+	}
+	if !Collect(ProbeManifest{}, false).SpecialModeBits {
+		t.Fatalf("snapshot does not declare specialModeBits")
+	}
+}

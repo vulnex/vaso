@@ -77,6 +77,9 @@ type ProbeSnapshot struct {
 	// Permission bits of listed directories and user homes, so remote
 	// permission checks evaluate real modes instead of guessing.
 	DirectoryModes map[string]int `json:"directoryModes,omitempty"`
+	// SpecialModeBits: DirectoryModes carry setuid/setgid/sticky (0o7000), so
+	// a 0777 directory is known not to be sticky.
+	SpecialModeBits bool `json:"specialModeBits,omitempty"`
 	// True when the content budget was exhausted and later files were
 	// recorded as metadata only.
 	Truncated bool `json:"truncated,omitempty"`
