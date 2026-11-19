@@ -1,4 +1,4 @@
-import { dirname, extname, join, normalize, relative, sep } from 'node:path';
+import { basename, dirname, extname, join, normalize, relative, sep } from 'node:path';
 
 /**
  * Which files of a skill tree the skill and IOC checks read, beyond the walk
@@ -71,5 +71,58 @@ export function vendorReferencePaths(root: string, skillMd: string, text: string
     if (!rel || rel === '..' || rel.startsWith(`..${sep}`)) continue;
     out.push(path);
   }
+  return out;
+}
+
+/**
+ * A relative module a script loads: `require('../node_modules/helper')`,
+ * `import x from './.cache/boot.js'`, `import('../venv/x.mjs')`. Group 1 or 2
+ * is the specifier. (RE2 syntax: probe/skill_refs.go relativeLoad is the same
+ * pattern, kept equal by a Go test.)
+ */
+export const RELATIVE_LOAD = /(?:\brequire\s*\(\s*|\bimport\s*\(\s*|\bfrom\s+|\bimport\s+)(?:'(\.\.?\/[^'\n]{1,256})'|"(\.\.?\/[^"\n]{1,256})")/g;
+
+/** Files whose loads are followed: JavaScript by extension, and package.json (its scripts' files). */
+export const LOAD_SOURCE_EXTENSIONS = new Set(['.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx', '.mts', '.cts']);
+
+/** Vendor-folder files a tree's loads add at most, and how many loads deep they are followed. */
+export const MAX_VENDOR_LOADS = 64;
+export const MAX_VENDOR_LOAD_DEPTH = 3;
+
+/** A file whose loads are followed (LOAD_SOURCE_EXTENSIONS, or a package.json). */
+export function isLoadSource(path: string): boolean {
+  return basename(path) === 'package.json' || LOAD_SOURCE_EXTENSIONS.has(extname(path).toLowerCase());
+}
+
+/**
+ * What a source file loads, as relative paths in its own folder's terms (in
+ * order, no duplicates, at most MAX_VENDOR_REFERENCES): a package.json's
+ * vendor references (`"start": "node .cache/boot.js"`), a script's relative
+ * require/import specifiers.
+ */
+export function loadReferences(path: string, text: string): string[] {
+  if (basename(path) === 'package.json') return vendorReferences(text);
+  const out: string[] = [];
+  RELATIVE_LOAD.lastIndex = 0;
+  for (let m = RELATIVE_LOAD.exec(text); m && out.length < MAX_VENDOR_REFERENCES; m = RELATIVE_LOAD.exec(text)) {
+    const spec = m[1] ?? m[2];
+    if (!out.includes(spec)) out.push(spec);
+  }
+  return out;
+}
+
+/**
+ * Where Node looks for a module at `p` (no extension resolution beyond the
+ * common ones): a folder's package.json `main` (and it with `.js` or as a
+ * folder), then `p` itself, with `.js`/`.mjs`/`.cjs`, and its `index`
+ * files. `main` is the folder's package.json's, when given.
+ */
+export function loadCandidates(p: string, main?: string): string[] {
+  const out: string[] = [];
+  if (main !== undefined) {
+    const m = normalize(join(p, main));
+    out.push(m, `${m}.js`, join(m, 'index.js'));
+  }
+  out.push(p, `${p}.js`, `${p}.mjs`, `${p}.cjs`, join(p, 'index.js'), join(p, 'index.mjs'), join(p, 'index.cjs'));
   return out;
 }

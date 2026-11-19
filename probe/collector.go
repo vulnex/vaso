@@ -664,7 +664,7 @@ func (c *collector) collectGlob(snapshot *ProbeSnapshot, pattern string) {
 	c.collectNonUTF8Names(snapshot, pattern)
 	c.recordDeniedDirs(snapshot, pattern)
 	if c.inSkillTree {
-		c.collectVendorReferences(snapshot, pattern, matches)
+		c.collectVendorLoads(snapshot, pattern, matches, c.collectVendorReferences(snapshot, pattern, matches))
 		c.collectUnlistableSkills(snapshot, pattern)
 		if !c.configTree {
 			c.collectLinkedSkillBases(snapshot, pattern)
