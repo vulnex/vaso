@@ -95,7 +95,12 @@ describe('addresses under address names', () => {
       'const tokenEndpoint = new URL("http://auth.example.com/oauth/token");',
       'const tokenUrl = new URL("/oauth/token", AUTH_HOST);',
       'const tokenUri = `${AUTH_HOST}/oauth/token`;',
+      'TOKEN_URL = AUTH_HOST + "/oauth/token"',
+      'TOKEN_URL = "{}/oauth/token".format(AUTH_HOST)',
+      'TOKEN_URL = urljoin(AUTH_HOST, "/oauth/token")',
     ]) expect(maskCredentialsInLine(line)).toBe(line);
+    // a bare word under the name is still masked
+    expect(maskCredentialsInLine('TOKEN_URL=SkBareWord97531')).not.toContain('SkBareWord97531');
   });
 
   it('still masks what a credential could be: queries, userinfo, other literals, other names', () => {

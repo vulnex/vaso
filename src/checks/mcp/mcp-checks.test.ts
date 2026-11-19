@@ -1296,6 +1296,26 @@ describe('MCP-011/MCP-016 beyond literals', () => {
     expect(await flags011('let AUTH_HOST = "http://auth.example.com";\nif (prod) { let AUTH_HOST = "https://auth.example.com"; }\nconst u = AUTH_HOST + "/authorize";')).toBe(false);
     // the constant alone is not an OAuth endpoint
     expect(await flags011('const API = "http://api.example.com";\nfetch(API + "/v1/items");')).toBe(false);
+    // reassigned (a `let`, an indented Python branch): which value is used is unknown
+    expect(await flags011('let AUTH_HOST = "http://auth.example.com";\nif (prod) AUTH_HOST = "https://auth.example.com";\nconst a = AUTH_HOST + "/authorize";')).toBe(false);
+    expect(await flags011('AUTH_HOST = "http://auth.example.com"\nif PROD:\n    AUTH_HOST = "https://auth.example.com"\nTOKEN_URL = f"{AUTH_HOST}/oauth/token"', 'python')).toBe(false);
+    // a parameter of the same name elsewhere
+    expect(await flags011('def a():\n    host = "http://auth.example.com"\n    return host\ndef b(host):\n    return host + "/authorize"', 'python')).toBe(false);
+  });
+
+  it('MCP-011 reports an OAuth constant once, plus the endpoints built from it', async () => {
+    const lines = async (code: string, language?: 'python') =>
+      (await mcp011.run(makeContext({ mcpServerSources: src(code, language) }))).evidence?.map(e => e.line);
+    // uses of the constant (a fetch target, logging it) add nothing
+    expect(await lines('const AUTHORIZE_URL = "http://auth.corp.example/authorize";\nfetch(AUTHORIZE_URL);\nfetch(AUTHORIZE_URL + "?x=1");\nconsole.log("using", AUTHORIZE_URL);')).toEqual([1]);
+    expect(await lines('const DOCS = "http://docs.example.com/oauth2/";\nconsole.error("see " + DOCS);')).toEqual([1]);
+    // built in two steps, with .format / %, as a typing.Final, inside a function
+    expect(await lines('const HOST = "http://auth.example.com";\nconst BASE = HOST + "/oauth";\nconst tok = BASE + "/token";')).toEqual([3]);
+    expect(await lines('AUTH_HOST = "http://auth.example.com"\nTOKEN_URL = "{}/oauth/token".format(AUTH_HOST)\nA2 = "%s/authorize" % AUTH_HOST', 'python')).toEqual([2, 3]);
+    expect(await lines('from typing import Final\nAUTH_HOST: Final = "http://auth.example.com"\nTOKEN_URL = AUTH_HOST + "/oauth/token"', 'python')).toEqual([3]);
+    expect(await lines('def build():\n    host = "http://auth.example.com"\n    return host + "/authorize"', 'python')).toEqual([3]);
+    // a plaintext URL that is no OAuth endpoint stays unflagged
+    expect(await lines('API = "http://api.example.com"\nUSERS = API + "/v1/users"', 'python')).toBeUndefined();
   });
 
   it('MCP-016 follows a request value bound to a name into a redirect', async () => {

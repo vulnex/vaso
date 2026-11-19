@@ -491,7 +491,7 @@ function maskCredentialValues(line: string, literalFree = false): { text: string
     // an address under an address name: `TOKEN_URL = f"{AUTH_HOST}/oauth/token"`, `tokenUrl = new URL("http://…")`
     if (pos.url) {
       const lits = literals.slice(li).filter((l) => l.start < extent.end);
-      if (lits.length > 0 && lits.every((l) => l.closed && plainAddress(line.slice(l.start + 1, l.end - 1)))) continue;
+      if (lits.length > 0 && lits.every((l) => l.closed && addressPiece(line.slice(l.start + 1, l.end - 1)))) continue;
     }
     let cursor = pos.valueStart;
     out += line.slice(last, cursor);
@@ -631,17 +631,30 @@ function escapedQuotes(value: string, replacement: string): string {
 
 /**
  * An address under an address name, `rest` being the text from the value on:
- * a plain address literal, prefixed or not (`TOKEN_URL = f"{HOST}/oauth/token"`),
- * or one passed to `new URL(…)` (`tokenEndpoint = new URL("http://…")`).
+ * an expression of names and address pieces only — a plain address literal,
+ * prefixed or not (`TOKEN_URL = f"{HOST}/oauth/token"`), a path joined to a
+ * base (`AUTH_HOST + "/oauth/token"`, `new URL("/oauth/token", HOST)`,
+ * `urljoin(HOST, "/token")`, `"{}/token".format(HOST)`). At least one
+ * literal, each of them an address piece: a bare word stays masked.
  */
 function addressValue(name: string, rest: string): boolean {
   if (!URL_NAME.test(name)) return false;
-  // the whole value: nothing else (another literal) may follow it
-  const lit = /^\s*(?:new\s+URL\s*\(\s*(["'`])([^"'`\n]*)\1\s*(?:,\s*[A-Za-z_$][\w$.]*\s*)?\)|[rRbBuUfF]{0,2}(["'`])([^"'`\n]*)\3)\s*(?:[;,)]|#|\/\/|$)/.exec(rest);
-  if (lit === null) return false;
-  // `new URL("/oauth/token", BASE)`: a path against a base
-  return lit[2] !== undefined ? plainAddress(lit[2]) || /^\/[\w\-./~%]*$/.test(lit[2]) : plainAddress(lit[4]);
+  let literals = 0;
+  let pieces = true;
+  const code = rest.slice(0, 1024).replace(/[rRbBuUfF]{0,2}(["'`])([^"'`\n]*)\1/g, (_m, _q, body: string) => {
+    literals++;
+    if (!addressPiece(body)) pieces = false;
+    return ' L ';
+  });
+  if (literals === 0 || !pieces) return false;
+  // the value ends at a statement end, a comment or an unmatched `)` / `,` (an argument)
+  const value = code.replace(/\s(?:#|\/\/)[\s\S]*$|;[\s\S]*$/, '');
+  return /^(?:\s|L\b|new\b|[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*|[+%(),.])*$/.test(value);
 }
+
+/** A literal an address is built from: a plain address, a path, a format template ahead of a path. */
+const addressPiece = (body: string): boolean =>
+  plainAddress(body) || /^(?:\{0?\}|%s)?\/[\w\-./~%]*$/.test(body);
 
 function maskText(input: string): string {
   // a JWT (`eyJ…`) needs none of [:=@-] around it
