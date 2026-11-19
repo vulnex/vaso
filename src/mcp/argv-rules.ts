@@ -382,6 +382,19 @@ function ansiEscape(s: string): [string, number] {
   return [`\\${s[0]}`, 1];
 }
 
+/**
+ * `line[j]` is the `$` of `$'…'` or `$"…"` — the latter also with its quote
+ * escaped (`sshpass -p $\"pw\"` in a JSON string): the index of that quote,
+ * else 0. probe/argv_rules.go dollarQuote.
+ */
+function dollarQuote(line: string, j: number, to: number): number {
+  if (line[j] !== '$' || j + 1 >= to) return 0;
+  if (line[j + 1] === "'") return j + 1;
+  let k = j + 1;
+  while (k < to && line[k] === '\\') k++;
+  return k < to && line[k] === '"' ? k : 0;
+}
+
 /** `line.slice(from, to)` without its quotes and the backslashes escaping them; `$'…'` decoded. */
 function quotesLeftOut(line: string, from: number, to: number): CommandToken {
   let word = '';
@@ -398,7 +411,9 @@ function quotesLeftOut(line: string, from: number, to: number): CommandToken {
     }
     if (ansi && ch === "'") { ansi = false; continue; }
     if (!ansi) {
-      if (ch === '$' && j + 1 < to && (line[j + 1] === "'" || line[j + 1] === '"')) { ansi = line[j + 1] === "'"; j++; continue; }
+      const q = dollarQuote(line, j, to);
+      // $\"…\" in a JSON string: its quote's backslashes go too
+      if (q > 0) { ansi = line[q] === "'"; j = q; continue; }
       if (isQuote(ch)) continue;
       if (ch === '\\') {
         let k = j;
@@ -430,7 +445,7 @@ export function commandSegments(line: string): CommandSegment[] {
     let begin = false;
     while (from < i) {
       const ch = line[from];
-      const ansiC = ch === '$' && from + 1 < i && (line[from + 1] === "'" || line[from + 1] === '"');
+      const ansiC = dollarQuote(line, from, i) > 0;
       if (!ansiC && !LEAD.includes(ch)) break;
       begin = begin || isQuote(ch);
       from++;

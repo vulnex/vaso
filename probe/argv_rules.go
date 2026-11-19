@@ -668,7 +668,7 @@ func commandSegments(line string) []commandSegment {
 		begin := false
 		for from < i {
 			ch := line[from]
-			ansiC := ch == '$' && from+1 < i && (line[from+1] == '\'' || line[from+1] == '"')
+			ansiC := dollarQuote(line, from, i) > 0
 			if !ansiC && strings.IndexByte("'\"`([{,\\", ch) < 0 {
 				break
 			}
@@ -755,6 +755,26 @@ func ansiEscape(s string) (string, int) {
 	return "\\" + s[:1], 1
 }
 
+// dollarQuote: line[j] is the $ of $'…' or $"…" — the latter also with its
+// quote escaped (sshpass -p $\"pw\" in a JSON string) — and the index of
+// that quote; 0 otherwise. A $ before an escaped ' is a plain $.
+func dollarQuote(line string, j, to int) int {
+	if line[j] != '$' || j+1 >= to {
+		return 0
+	}
+	if line[j+1] == '\'' {
+		return j + 1
+	}
+	k := j + 1
+	for k < to && line[k] == '\\' {
+		k++
+	}
+	if k < to && line[k] == '"' {
+		return k
+	}
+	return 0
+}
+
 // quotesLeftOut is the word line[from:to] without the quotes inside it and
 // the backslashes escaping them; $'…' is read as bash does, its escapes
 // decoded ($"…" quotes like "…").
@@ -782,9 +802,11 @@ func quotesLeftOut(line string, from, to int) commandToken {
 			ansi = false
 			continue
 		case ansi:
-		case ch == '$' && j+1 < to && (line[j+1] == '\'' || line[j+1] == '"'):
-			ansi = line[j+1] == '\''
-			j++
+		case dollarQuote(line, j, to) > 0:
+			q := dollarQuote(line, j, to)
+			ansi = line[q] == '\''
+			// $\"…\" in a JSON string: its quote's backslashes go too
+			j = q
 			continue
 		case isQuoteByte(ch):
 			continue

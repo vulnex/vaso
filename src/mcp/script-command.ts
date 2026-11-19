@@ -80,6 +80,8 @@ export function shellWords(command: string): string[] {
       continue;
     }
     if (c === '$' && command[i + 1] === "'") { quote = '$'; inWord = true; i++; continue; }
+    // $"…" (a locale-translated string) quotes like "…"
+    if (c === '$' && command[i + 1] === '"') { quote = '"'; inWord = true; i++; continue; }
     if (c === '"' || c === "'") { quote = c; inWord = true; continue; }
     if (c === '\\' && i + 1 < command.length) { word += command[++i]; inWord = true; continue; }
     if (/\s/.test(c)) {
