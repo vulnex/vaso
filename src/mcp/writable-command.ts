@@ -1,5 +1,5 @@
 import { basename, dirname, isAbsolute, resolve } from 'node:path';
-import type { FSProvider } from '../core/fs-provider.js';
+import type { FSProvider, PermissionFacts } from '../core/fs-provider.js';
 import { queryPermissions } from '../core/permissions.js';
 import { uncollectedPath } from '../core/probe-coverage.js';
 import { launchTarget, runnerName } from './source-resolver.js';
@@ -113,17 +113,24 @@ function knownAbsent(fs: FSProvider, path: string): boolean {
 }
 
 /**
- * The first directory on the way to `path` (by its real path; `path` itself
- * included when `self`) that other users can't traverse: nobody but its
- * owner and group reaches what is below it. Unknown modes count as
- * traversable, as in markUnreachable.
+ * The directory on the way to `path` (by its real path; `path` itself
+ * included when `self`) that keeps other users from reaching it, as
+ * markUnreachable judges: anyone outside the group is stopped by one they
+ * can't traverse, and the group's members (who get the group bits) by one
+ * the group can't traverse — or by `target` not granting the group write.
+ * A group that is its owner's private group (Linux) grants nobody else
+ * access (queryPermissions drops its bits): a 750 home with a private group
+ * is a barrier, one with a shared group (macOS `staff`) is not. Unknown
+ * modes count as traversable.
  */
-async function worldBarrier(fs: FSProvider, path: string, self: boolean): Promise<string | undefined> {
+async function worldBarrier(fs: FSProvider, path: string, self: boolean, target: PermissionFacts): Promise<string | undefined> {
   let real = path;
   try {
     const r = await fs.realpath(path);
     if (isAbsolute(r)) real = r;
   } catch { /* judged by the configured spelling */ }
+  let world: string | undefined;
+  let group: string | undefined;
   for (let dir = self ? real : dirname(real); ; dir = dirname(dir)) {
     let facts: Awaited<ReturnType<typeof queryPermissions>> | undefined;
     try {
@@ -131,9 +138,14 @@ async function worldBarrier(fs: FSProvider, path: string, self: boolean): Promis
     } catch {
       facts = undefined;
     }
-    if (facts !== undefined && facts !== 'unsupported' && !facts.worldExec) return `${dir} (${facts.octal})`;
-    if (dirname(dir) === dir) return undefined;
+    if (facts !== undefined && facts !== 'unsupported') {
+      if (!world && !facts.worldExec) world = `${dir} (${facts.octal})`;
+      if (!group && !facts.groupExec) group = `${dir} (${facts.octal})`;
+    }
+    if (dirname(dir) === dir) break;
   }
+  if (!world) return undefined;
+  return !target.groupWrite || group ? world : undefined;
 }
 
 type Level = Omit<Extract<WritableCommandPath, { kind: 'directory' }>, 'kind' | 'via'>;
@@ -197,7 +209,7 @@ async function swappableAbove(fs: FSProvider, path: string, exists: boolean, mis
       if (hit === 'unknown') {
         unknown = true;
       } else if (hit) {
-        const barrier = await worldBarrier(fs, dir, true);
+        const barrier = await worldBarrier(fs, dir, true, facts);
         if (!barrier) return hit;
         blocked ??= { ...hit, barrier };
       }
@@ -231,7 +243,7 @@ export async function worldWritableCommandPath(
   try {
     const perms = await queryPermissions(fs, command);
     if (perms !== 'unsupported' && perms.worldWrite) {
-      const barrier = await worldBarrier(fs, command, false);
+      const barrier = await worldBarrier(fs, command, false, perms);
       return { kind: 'binary', path: command, octal: perms.octal, mode: perms.octal, ...(barrier ? { barrier } : {}) };
     }
   } catch {

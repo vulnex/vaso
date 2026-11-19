@@ -315,6 +315,57 @@ describe.runIf(posix)('MCP command any local user can replace', () => {
     await chmod(join(root, 'priv'), 0o755);
   });
 
+  it('a 750 home blocks only when its group is the owner\'s private group', async () => {
+    // macOS: /Users/u drwxr-x--- u:staff — staff (gid 20) is every user's
+    // primary group, so the others still traverse it and swap the command.
+    // Linux: /home/u 750 u:u — a private group, nobody else gets in.
+    const host = (platform: 'darwin' | 'linux', home: string, gid: number, privateGroups?: Record<string, number>) => {
+      const open = `${home}/open`;
+      return new SnapshotFSProvider({
+        version: 1, hostname: 'h', platform, homedir: home, timestamp: 't',
+        privilege: { uid: 501, username: 'u', isRoot: false, sudoAvailable: false, escalated: false, scannedUsers: ['u'], skippedPaths: [] },
+        files: {
+          [`${open}/srv`]: { content: '', mode: 0o755, exists: true, contentOmitted: true, omitted: 'metadata' },
+          [`${home}/ww`]: { content: '', mode: 0o777, exists: true, contentOmitted: true, omitted: 'metadata' },
+        },
+        directoryModes: { '/': 0o755, [dirname(home)]: 0o755, [home]: 0o750, [open]: 0o777 },
+        owners: {
+          '/': [0, 0], [dirname(home)]: [0, 0], [home]: [501, gid], [open]: [501, gid],
+          [`${open}/srv`]: [501, gid], [`${home}/ww`]: [501, gid],
+        },
+        symlinks: {}, directories: {}, commandOutputs: {}, env: {}, specialModeBits: true,
+        ...(privateGroups ? { privateGroups } : {}),
+      } as ProbeSnapshot);
+    };
+    const mac = host('darwin', '/Users/u', 20);
+    expect(await worldWritableCommandPath(mac, '/Users/u/open/srv')).toEqual({ kind: 'directory', path: '/Users/u/open', octal: '777', mode: '777' });
+    expect(await worldWritableCommandPath(mac, '/Users/u/ww')).toEqual({ kind: 'binary', path: '/Users/u/ww', octal: '777', mode: '777' });
+    const linux = host('linux', '/home/u', 1000, { 1000: 501 });
+    expect(await worldWritableCommandPath(linux, '/home/u/open/srv'))
+      .toEqual({ kind: 'directory', path: '/home/u/open', octal: '777', mode: '777', barrier: '/home/u (750)' });
+    expect(await worldWritableCommandPath(linux, '/home/u/ww')).toEqual({ kind: 'binary', path: '/home/u/ww', octal: '777', mode: '777', barrier: '/home/u (750)' });
+    // A shared group on Linux (not anyone's private group) still reaches it
+    const shared = host('linux', '/home/u', 100, { 1000: 501 });
+    expect(await worldWritableCommandPath(shared, '/home/u/open/srv')).toEqual({ kind: 'directory', path: '/home/u/open', octal: '777', mode: '777' });
+  });
+
+  it('a 750 parent with a shared group is no barrier locally either', async () => {
+    // New directories under /tmp take its group (wheel on macOS) — not the
+    // owner's private group; on Linux they take the user's primary group,
+    // which is private on most distributions (then it does block).
+    await mkdir(join(root, 'home', 'open'), { recursive: true });
+    await chmod(join(root, 'home', 'open'), 0o777);
+    await chmod(join(root, 'home'), 0o750);
+    const cmd = await put('home/open/srv');
+    const { stat } = await import('node:fs/promises');
+    const gid = (await stat(join(root, 'home'))).gid;
+    const priv = await local.privateGroups();
+    const blocks = process.platform === 'linux' && priv.get(gid) === uid;
+    const got = await worldWritableCommandPath(local, cmd);
+    expect(got).toEqual({ kind: 'directory', path: join(root, 'home', 'open'), octal: '777', mode: '777', ...(blocks ? { barrier: `${join(root, 'home')} (750)` } : {}) });
+    await chmod(join(root, 'home'), 0o755);
+  });
+
   it('lists each path not verified once', async () => {
     const script = join(root, 'elsewhere', 's.js');
     const config = join(root, 'c.json');
