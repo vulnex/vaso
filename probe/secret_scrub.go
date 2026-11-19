@@ -2303,6 +2303,8 @@ func (c *collector) scrubText(path, s string) string {
 	if jsonish || toml {
 		// an args array: the shared argv rules, its server's command in front
 		s = c.argvArrays(s, toml)
+		// a command line in a string value, on its own (compact JSON)
+		s = stringCommands(s, c.disguiseArgv)
 	}
 	if yaml {
 		s = c.yamlArgv(s)
