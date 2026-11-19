@@ -446,10 +446,14 @@ describe('CUR-014: Auto-Run Instructions Too Broad', () => {
       },
     })]));
     const snippets = (result.evidence ?? []).map(e => e.snippet ?? '');
-    for (const v of values) for (const s of snippets) expect(s).not.toContain(v.slice(4));
+    // no character run of a secret is quoted, not even its first four
+    for (const v of values) for (const s of snippets) {
+      expect(s).not.toContain(v.slice(0, 4));
+      expect(s).not.toContain(v.slice(4));
+    }
     // the instruction is still readable, a plain word after "key" too
     expect(snippets).toContain('Allow any command that uses the deploy key to call curl');
-    expect(snippets[0]).toMatch(/^Allow any command that uses token .*\(12 chars\) to call the deploy API$/);
+    expect(snippets[0]).toBe('Allow any command that uses token <literal, 12 chars> to call the deploy API');
   });
 
   it('flags dangerous command grants and missing block list', async () => {

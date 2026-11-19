@@ -256,8 +256,13 @@ function passphraseRun(text: string, at: number, first: string): number {
   return words >= 3 ? length : 0;
 }
 
-/** `text` with credentials written out in prose masked (MCP-034 quotes prose). */
-export function maskProseSecrets(text: string): string {
+/**
+ * `text` with credentials written out in prose masked (MCP-034 quotes prose).
+ * `mask` writes the masked value: source snippets keep a short prefix
+ * (`maskValue`); evidence that must show no character of a secret passes
+ * `secretShape` from core/patterns.
+ */
+export function maskProseSecrets(text: string, mask: (value: string) => string = maskValue): string {
   let out = '';
   let last = 0;
   for (const m of text.matchAll(PROSE_SECRET)) {
@@ -271,21 +276,21 @@ export function maskProseSecrets(text: string): string {
     // a passphrase is words: the run goes on past the match
     const phrase = bare !== undefined && connector && /^pass ?phrase$/i.test(keyword) ? passphraseRun(text, runAt, bare) : 0;
     if (phrase > 0) {
-      out += text.slice(last, runAt) + maskValue(text.slice(runAt, runAt + phrase));
+      out += text.slice(last, runAt) + mask(text.slice(runAt, runAt + phrase));
       last = runAt + phrase;
       continue;
     }
     const value = proseSecretValue(run, keyword, connector, dq !== undefined || sq !== undefined);
     if (!value) continue;
-    out += text.slice(last, runAt) + maskValue(value);
+    out += text.slice(last, runAt) + mask(value);
     last = runAt + value.length;
   }
   out += text.slice(last);
   return out.replace(CREDENTIAL_PAIR, (match: string, value: string) => {
     const pw = value.replace(/[.!?:]+$/, '');
-    if (pw.length < 6 || isPlaceholderSecret(pw) || isSecretReference(pw) || pw.includes('…')) return match;
+    if (pw.length < 6 || isPlaceholderSecret(pw) || isSecretReference(pw) || pw.includes('…') || pw.startsWith('<literal')) return match;
     if (!(/\d/.test(pw) && /[A-Za-z]/.test(pw)) && !looksRandom(pw, 8) && !isKnownSecretValue(pw)) return match;
     const at = match.lastIndexOf(value);
-    return `${match.slice(0, at)}${maskValue(pw)}${match.slice(at + pw.length)}`;
+    return `${match.slice(0, at)}${mask(pw)}${match.slice(at + pw.length)}`;
   });
 }

@@ -1,6 +1,6 @@
 import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
-import { redactProseSecrets } from '../../core/patterns.js';
+import { redactProseSecrets, secretShape } from '../../core/patterns.js';
 import { maskCredentialsInLine } from '../../reporting/serialize.js';
 import { maskProseSecrets } from '../../mcp/source-snippet.js';
 
@@ -36,13 +36,13 @@ export const cur014 = defineCheck({
         if (BLANKET_RE.test(entry) || BROAD_VERB_RE.test(entry)) {
           evidence.push({
             file: config.filePath,
-            snippet: maskCredentialsInLine(redactProseSecrets(maskProseSecrets(entry))),
+            snippet: maskCredentialsInLine(redactProseSecrets(maskProseSecrets(entry, (v) => secretShape(v)))),
             detail: 'Blanket auto-run grant — the agent executes matching commands with no prompt',
           });
         } else if (DANGEROUS_WORD_RE.test(entry)) {
           evidence.push({
             file: config.filePath,
-            snippet: maskCredentialsInLine(redactProseSecrets(maskProseSecrets(entry))),
+            snippet: maskCredentialsInLine(redactProseSecrets(maskProseSecrets(entry, (v) => secretShape(v)))),
             detail: 'Auto-run grant covers a command that provides network access or arbitrary execution',
           });
         }
