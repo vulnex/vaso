@@ -38,20 +38,42 @@ describe('iocScanFiles', () => {
       '/h/.claude/plugins/p/.git/hooks': ['pre-commit.sh'],
       '/h/.claude/plugins/p/src': ['main.ts'],
       '/h/.claude/skills/tool/dist': ['index.js'],
-      '/h/.claude/skills/tool/scripts': ['run.py', 'conf.toml'],
+      '/h/.claude/skills/tool/scripts': ['run.py', 'conf.toml', 'helper.txt'],
     });
+    // in skill trees: the skill checks' own file list (listSkillTree), whatever the extension
+    ctx.skillFiles = [
+      '/h/.claude/skills/tool/SKILL.md', '/h/.claude/skills/tool/index.js', '/h/.claude/skills/tool/dist/index.js',
+      '/h/.claude/skills/tool/scripts/run.py', '/h/.claude/skills/tool/scripts/conf.toml', '/h/.claude/skills/tool/scripts/helper.txt',
+    ];
     const files = await iocScanFiles(ctx);
-    // Build output and .py/.md/.toml count inside a skill tree; dist/ elsewhere doesn't
+    // Build output and any text file count inside a skill tree; dist/ and .md elsewhere don't
     expect(files.sort()).toEqual([
       '/h/.claude/plugins/p/src/main.ts',
       '/h/.claude/skills/tool/SKILL.md',
       '/h/.claude/skills/tool/dist/index.js',
       '/h/.claude/skills/tool/index.js',
       '/h/.claude/skills/tool/scripts/conf.toml',
+      '/h/.claude/skills/tool/scripts/helper.txt',
       '/h/.claude/skills/tool/scripts/run.py',
     ]);
-    // skills dir sits inside the install dir — walked once, not twice
+    // the install dir is walked once; skill trees aren't walked again
     expect(walks).toEqual(['/h/.claude']);
+  });
+
+  it('leaves out the files of a plugin the settings disable, as the skill checks do', async () => {
+    const cache = '/h/.claude/plugins/cache/m';
+    const { ctx } = makeCtx({
+      [`${cache}/on/1.0.0/hooks`]: ['run.sh'],
+      [`${cache}/off/1.0.0/hooks`]: ['run.sh'],
+    }, {
+      '/h/.claude/plugins/installed_plugins.json': JSON.stringify({ version: 2, plugins: {
+        'on@m': [{ scope: 'user', installPath: `${cache}/on/1.0.0` }],
+        'off@m': [{ scope: 'user', installPath: `${cache}/off/1.0.0` }],
+      } }),
+    });
+    ctx.skillFiles = [];
+    ctx.configs = [{ filePath: '/h/.claude/settings.json', format: 'json', raw: '', data: { enabledPlugins: { 'off@m': false } } }];
+    expect(await iocScanFiles(ctx)).toEqual([`${cache}/on/1.0.0/hooks/run.sh`]);
   });
 
   it('leaves out a token file a linked skills dir really holds (skills → ~/.codex)', async () => {
