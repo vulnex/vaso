@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/binary"
@@ -1293,9 +1292,9 @@ func runCommandScrubbed(req CommandRequest, augmentedPath string, scrubOut func(
 	}
 	cmd.Env = env
 
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	stdout, stderr := newCappedBuffer(maxCommandOutputBytes), newCappedBuffer(maxCommandOutputBytes)
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
 
 	err := cmd.Run()
 	killProcessGroup(cmd) // what it left running

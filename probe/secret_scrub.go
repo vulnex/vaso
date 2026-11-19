@@ -2208,7 +2208,7 @@ func (c *collector) scrubText(path, s string) string {
 				return m.text()
 			}
 			g := func(n int) string { v, _ := m.group(n); return v }
-			return g(1) + g(2) + g(3) + c.keyedValue(g(2), g(4)) + g(5)
+			return g(1) + g(2) + g(3) + c.dotenvEscapedTail(g(2), c.keyedValue(g(2), g(4))) + g(5)
 		})
 	}
 	if jsonish || yaml || toml || dotenv {
@@ -2506,7 +2506,9 @@ func flagCredentials(s string, replace func(string) string) string {
 			if open != closing || !isSecretFlag(flag) || strings.HasPrefix(value, "-") || !credentialLike(value) && !passphraseLike(value) && !(strongCredentialFlag(flag) && plainCredential(value)) {
 				return m.text()
 			}
-			return m.with(4, 4, replace(value))
+			// --header 'X-Auth-Token: <value>': the header's name stays
+			out, _ := headerValue(value, replace)
+			return m.with(4, 4, out)
 		})
 	})
 	s = onSecretLines(s, append([]string{"-k"}, secretHints...), func(line string) string {
