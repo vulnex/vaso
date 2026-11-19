@@ -43,5 +43,6 @@ describe('MCPDiscovery — disabled servers', () => {
     const result = await new MCPDiscovery(makeFs({ '/x.json': JSON.stringify({ mcpServers: { a: { command: 'n', disabled: true } } }) })).discoverFromPaths(['/x.json']);
     expect(result.configs).toEqual([]);
     expect(result.empty).toEqual(['/x.json']);
+    expect(result.noServers).toEqual(['/x.json']);
   });
 });
