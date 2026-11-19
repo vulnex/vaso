@@ -1,6 +1,6 @@
 import { VERSION } from '../version.js';
 import type { AgentInventory, McpServerItem, ScanResult, Severity } from '../core/types.js';
-import { mcpScope, mcpTarget, skillsDirNote, surfaceCounts } from './inventory-text.js';
+import { mcpScope, mcpTarget, sharedServerLabel, sharedUserLabel, skillsDirNote, surfaceCounts } from './inventory-text.js';
 import type { Reporter } from './reporter.js';
 import { renderOwaspAgenticCoverageMarkdown } from './owasp-agentic.js';
 import { renderOwaspMcpCoverageMarkdown } from './owasp-mcp.js';
@@ -88,7 +88,7 @@ export class MarkdownReporter implements Reporter {
     }
 
     const host = result.hostInventory;
-    if (host && (host.mcpServers.length > 0 || host.sharedMcpServers?.length)) {
+    if (host && (host.mcpServers.length > 0 || host.sharedMcpServers?.length || host.incomplete?.length)) {
       lines.push('## Host');
       lines.push('');
       if (host.sharedMcpServers?.length) {
@@ -99,7 +99,7 @@ export class MarkdownReporter implements Reporter {
         lines.push('| Server | Unpinned | Used by |');
         lines.push('|--------|----------|---------|');
         for (const g of host.sharedMcpServers) {
-          const users = g.users.map(u => `${u.agent}${u.agentName ? ` (${u.agentName})` : ''}: ${u.server}`).join(', ');
+          const users = g.users.map(u => `${sharedUserLabel(u)}: ${sharedServerLabel(u)}`).join(', ');
           lines.push(`| ${cell(g.key)} | ${g.unpinned ? 'yes' : '—'} | ${cell(users)} |`);
         }
         lines.push('');
@@ -111,6 +111,8 @@ export class MarkdownReporter implements Reporter {
         lines.push('');
         lines.push(...renderMcpTable(host.mcpServers));
       }
+      for (const note of host.incomplete ?? []) lines.push(`- ! ${mdInline(note)}`);
+      if (host.incomplete?.length) lines.push('');
     }
 
     const owasp = renderOwaspMcpCoverageMarkdown(result);

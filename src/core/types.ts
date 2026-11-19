@@ -248,6 +248,8 @@ export interface HostInventory {
   mcpServers: McpServerItem[];
   /** The same MCP server configured for several installations, in separate config files. */
   sharedMcpServers?: SharedMcpServer[];
+  /** Why the lists may be partial (a remote scan can't read a file that may hold servers). */
+  incomplete?: string[];
 }
 
 /** One MCP server several installations configure: a change to it (or a compromise of it) reaches all of them. */
@@ -257,10 +259,14 @@ export interface SharedMcpServer {
   users: Array<{
     agent: AgentType;
     agentName?: string;
+    /** The installation's profile (an OpenClaw profile, `project`). */
+    profile?: string;
     installDir: string;
     /** The server's name in that config. */
     server: string;
     configFile: string;
+    /** The project it applies to (a project-scope server). */
+    project?: string;
     pin?: 'exact' | 'range' | 'tag' | 'none' | 'local';
   }>;
   /** At least one of them runs the package unpinned, by a range or by a moving tag. */

@@ -1,4 +1,4 @@
-import type { AgentInventory, McpServerItem, SkillsDirInfo } from '../core/types.js';
+import type { AgentInventory, McpServerItem, SharedMcpServer, SkillsDirInfo } from '../core/types.js';
 
 /** Note after a skills directory: '' when present, else why it holds nothing. */
 export function skillsDirNote(dir: SkillsDirInfo): string {
@@ -36,4 +36,17 @@ export function mcpTarget(server: McpServerItem): string {
 /** "project /srv/app", "user", "extension". */
 export function mcpScope(server: McpServerItem): string {
   return server.project ? `${server.scope} ${server.project}` : server.scope;
+}
+
+type SharedUser = SharedMcpServer['users'][number];
+
+/** Who uses a shared server: "openclaw (profile work)", "openclaw (main, profile work)". */
+export function sharedUserLabel(user: SharedUser): string {
+  const qualifiers = [user.agentName, user.profile ? `profile ${user.profile}` : undefined].filter(Boolean);
+  return qualifiers.length > 0 ? `${user.agent} (${qualifiers.join(', ')})` : user.agent;
+}
+
+/** The server's name in that user's config: "github", "github (project /srv/app)". */
+export function sharedServerLabel(user: SharedUser): string {
+  return user.project !== undefined ? `${user.server} (project ${user.project})` : user.server;
 }

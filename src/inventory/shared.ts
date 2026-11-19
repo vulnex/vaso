@@ -38,13 +38,18 @@ export function findSharedMcpServers(installations: AgentInstallation[]): Shared
       if (!key) continue;
       const group = groups.get(key) ?? { key, users: [], unpinned: false };
       groups.set(key, group);
-      if (group.users.some(u => u.installDir === inst.installDir && u.agentName === inst.agentName && u.configFile === server.configFile && u.server === server.name)) continue;
+      // One entry per configured server: a file can declare one name twice
+      // (~/.claude.json's user scope and a project's), pinned differently
+      if (group.users.some(u => u.installDir === inst.installDir && u.agentName === inst.agentName && u.configFile === server.configFile
+        && u.server === server.name && u.project === server.project)) continue;
       group.users.push({
         agent: inst.agent,
         ...(inst.agentName ? { agentName: inst.agentName } : {}),
+        ...(inst.profile ? { profile: inst.profile } : {}),
         installDir: inst.installDir,
         server: server.name,
         configFile: server.configFile,
+        ...(server.project !== undefined ? { project: server.project } : {}),
         ...(server.package ? { pin: server.package.pin } : {}),
       });
       if (server.package && UNPINNED.has(server.package.pin)) group.unpinned = true;

@@ -13,6 +13,9 @@ import { qwenHome } from '../adapters/qwen-code.js';
 import { xdgConfigDir as opencodeConfigDir } from '../adapters/opencode.js';
 import { openclawMcpServerMaps } from '../adapters/openclaw.js';
 import { zeroclawDirs } from '../adapters/zeroclaw.js';
+import { REBORN_STORAGE_SUBDIRS, ironclawRebornHome } from '../adapters/ironclaw.js';
+import { findNanoclawCheckouts } from '../adapters/nanoclaw.js';
+import { parseJsonLenient } from '../core/jsonc.js';
 import { parseYamlSafe } from '../core/yaml-safe.js';
 import { parseErrorMessage } from '../core/parse-error.js';
 import { captureConfigLoadErrors } from '../core/config-loader.js';
@@ -570,6 +573,15 @@ export class MCPDiscovery {
       if (servers.length > 0) configs.push({ source: oc.source, agents: ['openclaw'], filePath: oc.filePath, servers });
     }
 
+    // NanoClaw agent groups' container.json and IronClaw 1.x MCP extension
+    // manifests: found by listing the installs, as their adapters find them
+    for (const config of await frameworkInstallConfigs(home, this.fs).catch(() => [])) {
+      const real = await Promise.resolve(this.fs.realpath?.(config.filePath)).catch(() => undefined) ?? config.filePath;
+      if (seen.has(real)) continue;
+      seen.add(real);
+      configs.push(config);
+    }
+
     // Servers the agents' settings switch off by name or policy
     await applyOffLists(configs, this.fs, home, projectDir).catch(() => undefined);
     const kept = options.includeDisabled ? configs : activeConfigs(configs);
@@ -713,4 +725,101 @@ function withExtensionPath(servers: MCPServerEntry[], extensionPath: string | un
 /** A read or parse failure's message — the parser's description and location, never the file's lines. */
 function errorMessage(err: unknown): string {
   return parseErrorMessage(err);
+}
+
+/**
+ * NanoClaw keeps each agent group's MCP servers in its database and writes
+ * them to `<checkout>/groups/<folder>/container.json` (`mcpServers`, stdio or
+ * http) when the group's container starts — a group that never ran has none
+ * on disk yet.
+ */
+export async function nanoclawGroupConfigs(installDir: string, fs: FSProvider): Promise<MCPConfig[]> {
+  const groupsDir = join(installDir, 'groups');
+  let groups: string[];
+  try {
+    groups = await fs.readdir(groupsDir);
+  } catch {
+    return [];
+  }
+  const configs: MCPConfig[] = [];
+  for (const group of groups.sort()) {
+    const filePath = join(groupsDir, group, 'container.json');
+    let data: unknown;
+    try {
+      data = parseJsonLenient(await fs.readFile(filePath));
+    } catch {
+      continue;
+    }
+    const servers = parseServerMap((data as Record<string, unknown> | null)?.mcpServers);
+    if (servers.length > 0) configs.push({ source: `NanoClaw (group ${group})`, agents: ['nanoclaw'], filePath, servers });
+  }
+  return configs;
+}
+
+/**
+ * IronClaw 1.x (Reborn) has no MCP server list: MCP servers come as installed
+ * extension packages, `<reborn home>/<profile storage>/system/extensions/<id>/
+ * manifest.toml` (`reborn.extension_manifest.v3`), whose `[mcp]` section names
+ * the server (`server = "https://…"`, hosted). Credentials stay in IronClaw's
+ * secret store: the manifest only says which header carries one
+ * (`[[mcp.credentials]] injection`). Verified with ironclaw 1.4.0's bundled
+ * Notion and NEAR AI extensions.
+ */
+export async function ironclawExtensionConfigs(rebornHome: string, fs: FSProvider): Promise<MCPConfig[]> {
+  const configs: MCPConfig[] = [];
+  for (const sub of REBORN_STORAGE_SUBDIRS) {
+    const extDir = join(rebornHome, sub, 'system', 'extensions');
+    let ids: string[];
+    try {
+      ids = await fs.readdir(extDir);
+    } catch {
+      continue;
+    }
+    for (const id of ids.sort()) {
+      const filePath = join(extDir, id, 'manifest.toml');
+      let data: Record<string, unknown>;
+      try {
+        data = parseTomlSafe(await fs.readFile(filePath)) as Record<string, unknown>;
+      } catch {
+        continue;
+      }
+      const server = ironclawMcpServer(id, data);
+      if (server) configs.push({ source: `IronClaw (extension ${id})`, agents: ['ironclaw'], scope: 'extension', filePath, servers: [server] });
+    }
+  }
+  return configs;
+}
+
+function ironclawMcpServer(id: string, manifest: Record<string, unknown>): MCPServerEntry | undefined {
+  const mcp = manifest.mcp;
+  if (!mcp || typeof mcp !== 'object' || Array.isArray(mcp)) return undefined;
+  const m = mcp as Record<string, unknown>;
+  const url = typeof m.server === 'string' ? m.server : typeof m.url === 'string' ? m.url : undefined;
+  const command = typeof m.command === 'string' && m.command ? m.command : undefined;
+  if (!url && !command) return undefined;
+  // header names only: the values are handles into the secret store
+  const headers: Record<string, string> = {};
+  for (const cred of Array.isArray(m.credentials) ? m.credentials : []) {
+    const inj = (cred as Record<string, unknown> | null)?.injection as Record<string, unknown> | undefined;
+    if (inj?.type === 'header' && typeof inj.name === 'string') headers[inj.name] = `<secret store: ${String((cred as Record<string, unknown>).handle ?? '')}>`;
+  }
+  return {
+    name: typeof manifest.id === 'string' ? manifest.id : id,
+    ...(command ? { command, args: Array.isArray(m.args) ? m.args.map(String) : undefined } : {}),
+    ...(url ? { url } : {}),
+    ...(Object.keys(headers).length ? { headers } : {}),
+    transport: url ? (/\/sse\b/.test(url) ? 'sse' : 'streamable-http') : 'stdio',
+  };
+}
+
+/**
+ * The MCP configs of the scanning user's NanoClaw checkouts and IronClaw 1.x
+ * home, found where the adapters find them (`vaso mcp` has no detected
+ * installations to start from).
+ */
+export async function frameworkInstallConfigs(home: string, fs: FSProvider): Promise<MCPConfig[]> {
+  const checkouts = await findNanoclawCheckouts(home, fs).catch(() => []);
+  const nanoclaw = (await Promise.all(checkouts.map(c => nanoclawGroupConfigs(c.dir, fs)))).flat();
+  const ironclaw = await ironclawExtensionConfigs(ironclawRebornHome(home, fs), fs);
+  return [...nanoclaw, ...ironclaw];
 }

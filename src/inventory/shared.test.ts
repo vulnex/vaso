@@ -7,8 +7,8 @@ const npx = (name: string, configFile: string, spec: string, pin: NonNullable<Mc
   package: { runner: 'npx', ecosystem: 'npm', name: spec.replace(/@[^@/]*$/, '') || spec, spec, pin },
 });
 
-function inst(agent: AgentType, installDir: string, servers: McpServerItem[], agentName?: string): AgentInstallation {
-  return { agent, installDir, configFiles: [], ...(agentName ? { agentName } : {}), inventory: { skillsDirs: [], skills: [], otherEntries: [], mcpServers: servers } };
+function inst(agent: AgentType, installDir: string, servers: McpServerItem[], agentName?: string, profile?: string): AgentInstallation {
+  return { agent, installDir, configFiles: [], ...(agentName ? { agentName } : {}), ...(profile ? { profile } : {}), inventory: { skillsDirs: [], skills: [], otherEntries: [], mcpServers: servers } };
 }
 
 describe('mcpServerKey', () => {
@@ -57,5 +57,29 @@ describe('findSharedMcpServers', () => {
       inst('codex', '/h/.codex', [npx('a', '/2', 'aaa@1.0.0', 'exact'), npx('z', '/2', 'zzz@latest', 'tag')]),
     ]);
     expect(shared.map(g => [g.key, g.unpinned])).toEqual([['npm:zzz', true], ['npm:aaa', false]]);
+  });
+
+  it('keeps a project-scope twin of a user-scope server in the same file, and its pin', () => {
+    // ~/.claude.json: `x` pinned at user scope, unpinned for one project
+    const shared = findSharedMcpServers([
+      inst('claude-code', '/h/.claude', [
+        npx('x', '/h/.claude.json', 'pkg@1.0.0', 'exact'),
+        { ...npx('x', '/h/.claude.json', 'pkg', 'none'), scope: 'project', project: '/srv/app' },
+      ]),
+      inst('cursor-cli', '/h/.cursor', [npx('x', '/h/.cursor/mcp.json', 'pkg@1.0.0', 'exact')]),
+    ]);
+    expect(shared).toHaveLength(1);
+    expect(shared[0].unpinned).toBe(true);
+    expect(shared[0].users.map(u => [u.agent, u.project, u.pin])).toEqual([
+      ['claude-code', undefined, 'exact'], ['claude-code', '/srv/app', 'none'], ['cursor-cli', undefined, 'exact'],
+    ]);
+  });
+
+  it('carries each installation\'s profile', () => {
+    const shared = findSharedMcpServers([
+      inst('openclaw', '/h/.openclaw', [npx('s', '/h/.openclaw/openclaw.json', 'shared-mcp-pkg', 'none')]),
+      inst('openclaw', '/h/.openclaw-work', [npx('s', '/h/.openclaw-work/openclaw.json', 'shared-mcp-pkg', 'none')], undefined, 'work'),
+    ]);
+    expect(shared[0].users.map(u => [u.agent, u.profile])).toEqual([['openclaw', undefined], ['openclaw', 'work']]);
   });
 });

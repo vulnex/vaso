@@ -13,9 +13,8 @@ import { join as joinPath } from 'node:path';
 import { maskCredentialsDeep, toReportJson } from '../reporting/serialize.js';
 import { attachSkillInventories } from '../inventory/skills.js';
 import { attachMcpInventories } from '../inventory/mcp.js';
-import { findSharedMcpServers } from '../inventory/shared.js';
-import { skillsDirNote } from '../reporting/inventory-text.js';
-import type { McpServerItem } from '../core/types.js';
+import { sharedUserLabel, skillsDirNote } from '../reporting/inventory-text.js';
+import type { HostInventory, McpServerItem } from '../core/types.js';
 import { LocalFSProvider } from '../core/local-fs-provider.js';
 
 export interface DetectCommandOptions {
@@ -34,6 +33,8 @@ export interface DetectCommandOptions {
   parallel?: string;
   snapshot?: string;
   saveSnapshot?: string;
+  /** JSON: one host's output becomes `{ installations, hostInventory }` (default: the bare installations array). */
+  hostInventory?: boolean;
 }
 
 
@@ -72,7 +73,7 @@ export async function runDetect(options: DetectCommandOptions): Promise<void> {
     // Snapshot-based detection
     if (options.snapshot) {
       const detected = await detectFromSnapshot(options);
-      if (detected) await renderResults(detected.installations, options, detected.host, false, detected.hostMcp);
+      if (detected) await renderResults(detected.installations, options, detected.host, false, detected.hostInventory);
       return;
     }
 
@@ -98,17 +99,17 @@ export async function runDetect(options: DetectCommandOptions): Promise<void> {
     }
     const localFs = new LocalFSProvider();
     await attachSkillInventories(installations, localFs);
-    const hostMcp = await attachMcpInventories(installations, localFs);
+    const hostInventory = await attachMcpInventories(installations, localFs, { agentFilter: Boolean(options.agent) });
 
     const { hostname } = await import('node:os');
-    await renderResults(installations, options, hostname(), true, options.agent ? [] : hostMcp);
+    await renderResults(installations, options, hostname(), true, hostInventory);
   } catch (err) {
     logError(chalk.red('Detection failed:'), err);
     process.exitCode = EXIT_USAGE;
   }
 }
 
-async function detectFromSnapshot(options: DetectCommandOptions): Promise<{ installations: AgentInstallation[]; host: string; hostMcp: McpServerItem[] } | undefined> {
+async function detectFromSnapshot(options: DetectCommandOptions): Promise<{ installations: AgentInstallation[]; host: string; hostInventory: HostInventory } | undefined> {
   const { SnapshotFSProvider } = await import('../core/snapshot-fs-provider.js');
   const { loadSnapshotFile, SnapshotLoadError, snapshotErrorLines, SNAPSHOT_TRUNCATED_WARNING, probeVersionWarning } = await import('../core/snapshot-load.js');
   let snapshot;
@@ -142,17 +143,19 @@ async function detectFromSnapshot(options: DetectCommandOptions): Promise<{ inst
     installations = installations.filter(i => i.agent === (options.agent as AgentType));
   }
   await attachSkillInventories(installations, snapshotFs);
-  const hostMcp = await attachMcpInventories(installations, snapshotFs);
+  const hostInventory = await attachMcpInventories(installations, snapshotFs, { agentFilter: Boolean(options.agent) });
 
-  return { installations, host: snapshot.hostname, hostMcp: options.agent ? [] : hostMcp };
+  return { installations, host: snapshot.hostname, hostInventory };
 }
 
 interface HostDetectResult {
   host: string;
   label?: string;
   installations: AgentInstallation[];
-  /** MCP servers no detected agent owns. */
+  /** MCP servers no detected agent owns (kept: hostInventory.mcpServers). */
   hostMcp?: McpServerItem[];
+  /** As a scan's `ScanResult.hostInventory` (always present for a detected host). */
+  hostInventory?: HostInventory;
   error?: string;
 }
 
@@ -271,9 +274,9 @@ async function detectRemoteHosts(options: DetectCommandOptions, remoteValues: Re
         installations = installations.filter(i => i.agent === (options.agent as AgentType));
       }
       await attachSkillInventories(installations, snapshotFs);
-      const hostMcp = await attachMcpInventories(installations, snapshotFs);
+      const hostInventory = await attachMcpInventories(installations, snapshotFs, { agentFilter: Boolean(options.agent) });
 
-      outcome = { host: snapshot.hostname ?? target.host, label: target.label, installations, hostMcp: options.agent ? [] : hostMcp };
+      outcome = { host: snapshot.hostname ?? target.host, label: target.label, installations, hostMcp: hostInventory.mcpServers, hostInventory };
     } catch (err) {
       outcome = { host: target.host, label: target.label, installations: [], error: (err as Error).message };
     }
@@ -287,8 +290,8 @@ async function detectRemoteHosts(options: DetectCommandOptions, remoteValues: Re
         const ext = options.format === 'json' ? 'json' : 'txt';
         const outPath = joinPath(options.outputDir, `${safeHost}.${ext}`);
         const text = options.format === 'json'
-          ? toReportJson(outcome.installations)
-          : renderTerminal(outcome.installations, options.verbose, false, outcome.hostMcp);
+          ? renderJson(outcome.installations, options, outcome.hostInventory)
+          : renderTerminal(outcome.installations, options.verbose, false, outcome.hostInventory);
         await writeFile(outPath, text, 'utf-8');
         reportsWritten++;
       } catch (err) {
@@ -346,7 +349,7 @@ async function detectRemoteHosts(options: DetectCommandOptions, remoteValues: Re
         continue;
       }
 
-      sections.push(renderTerminal(hr.installations, options.verbose, false, hr.hostMcp));
+      sections.push(renderTerminal(hr.installations, options.verbose, false, hr.hostInventory));
     }
 
     const successCount = results.filter(r => !r.error).length;
@@ -363,10 +366,10 @@ async function detectRemoteHosts(options: DetectCommandOptions, remoteValues: Re
   }
 }
 
-async function renderResults(installations: AgentInstallation[], options: DetectCommandOptions, host: string, local: boolean, hostMcp: McpServerItem[] = []): Promise<void> {
+async function renderResults(installations: AgentInstallation[], options: DetectCommandOptions, host: string, local: boolean, hostInventory: HostInventory): Promise<void> {
   const text = options.format === 'json'
-    ? renderJson(installations)
-    : renderTerminal(installations, options.verbose, local, hostMcp);
+    ? renderJson(installations, options, hostInventory)
+    : renderTerminal(installations, options.verbose, local, hostInventory);
   // --output-dir: the <dir>/<host>.<ext> layout multi-host detect uses
   const output = options.outputDir
     ? joinPath(options.outputDir, `${hostFileBase(host)}.${options.format === 'json' ? 'json' : 'txt'}`)
@@ -374,8 +377,13 @@ async function renderResults(installations: AgentInstallation[], options: Detect
   await emit(text, output, options.silent);
 }
 
-function renderJson(installations: AgentInstallation[]): string {
-  return toReportJson(installations);
+/**
+ * One host's JSON: the bare installations array (the stable shape), or with
+ * --host-inventory `{ installations, hostInventory }`. Masked like every
+ * report (toReportJson).
+ */
+function renderJson(installations: AgentInstallation[], options: DetectCommandOptions, hostInventory: HostInventory = { mcpServers: [] }): string {
+  return toReportJson(options.hostInventory ? { installations, hostInventory } : installations);
 }
 
 /**
@@ -383,11 +391,12 @@ function renderJson(installations: AgentInstallation[]): string {
  * against the scanning machine's home and platform, so its paths would name
  * this machine's files, not the target's.
  */
-function renderTerminal(rawInstallations: AgentInstallation[], verbose: boolean | undefined, local: boolean, rawHostMcp: McpServerItem[] = []): string {
+function renderTerminal(rawInstallations: AgentInstallation[], verbose: boolean | undefined, local: boolean, rawHost: HostInventory = { mcpServers: [] }): string {
   // Masked like every report format (getReporter): names, paths, commands and
   // URLs come from scanned files
   const installations = maskCredentialsDeep(rawInstallations);
-  const hostMcp = maskCredentialsDeep(rawHostMcp);
+  const host = maskCredentialsDeep(rawHost);
+  const hostMcp = host.mcpServers;
   const lines: string[] = [];
 
   if (verbose) {
@@ -469,18 +478,19 @@ function renderTerminal(rawInstallations: AgentInstallation[], verbose: boolean 
     lines.push('');
   }
 
-  if (hostMcp.length > 0) {
+  if (hostMcp.length > 0 || host.incomplete?.length) {
     lines.push(chalk.bold.cyan('host (no detected agent owns these files)'));
-    lines.push(...renderMcp(hostMcp, verbose));
+    if (hostMcp.length > 0) lines.push(...renderMcp(hostMcp, verbose));
+    for (const note of host.incomplete ?? []) lines.push(chalk.yellow(`  ! ${escapeControlChars(note, { lineBreaks: true })}`));
     lines.push('');
   }
 
-  const shared = findSharedMcpServers(installations);
+  const shared = host.sharedMcpServers ?? [];
   if (shared.length > 0) {
     const unpinned = shared.filter(g => g.unpinned).length;
     lines.push(chalk.bold.cyan(`Shared MCP servers: ${shared.length}${unpinned ? chalk.yellow(` (${unpinned} unpinned somewhere)`) : ''}`));
     for (const group of shared.slice(0, MAX_LISTED)) {
-      const users = group.users.map(u => `${u.agent}${u.agentName ? ` (${escapeControlChars(u.agentName, { lineBreaks: true })})` : ''}`);
+      const users = group.users.map(u => escapeControlChars(sharedUserLabel(u), { lineBreaks: true }));
       const flag = group.unpinned ? chalk.yellow(' unpinned') : '';
       lines.push(`  ${escapeControlChars(group.key, { lineBreaks: true })}${flag} ${chalk.dim(`— ${[...new Set(users)].join(', ')}`)}`);
     }

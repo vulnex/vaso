@@ -1,6 +1,6 @@
 import { VERSION } from '../version.js';
 import { dirname } from 'node:path';
-import type { ScanOptions, ScanResult, ScanContext, AgentScanResult, AgentInstallation, CheckResult, CheckModule, McpServerItem, SharedMcpServer } from './types.js';
+import type { ScanOptions, ScanResult, ScanContext, AgentScanResult, AgentInstallation, CheckResult, CheckModule, McpServerItem } from './types.js';
 import type { CheckRegistry } from './check-registry.js';
 import type { AdapterConfigLoadError, AdapterDetectionError, AdapterRegistry } from '../adapters/registry.js';
 import type { MCPConfig, MCPConfigLoadError, MCPServerSource } from '../mcp/types.js';
@@ -10,10 +10,10 @@ import { computeScore, scoreToGrade, summarizeResults, aggregateScore, meanScore
 import { dedupeInheritedFindings } from './inherited-findings.js';
 import { dedupePermissionFindings } from './duplicate-findings.js';
 import { collectSkillInventory } from '../inventory/skills.js';
-import { truncateSnippet } from './patterns.js';
-import { discoverMcpAssignment } from '../inventory/mcp.js';
+import { MAX_SNIPPET, truncateSnippet } from './patterns.js';
+import { discoverMcpAssignment, type McpAssignment } from '../inventory/mcp.js';
 import { linkInventoryFindings } from '../inventory/findings.js';
-import { findSharedMcpServers } from '../inventory/shared.js';
+import { buildHostInventory, isEmptyHostInventory } from '../inventory/host.js';
 import { mapSourceEvidence } from '../mcp/source-locations.js';
 import { describeFetchFailure } from '../mcp/package-fetcher.js';
 import { extractToolDefinitions } from '../mcp/tool-baseline.js';
@@ -62,13 +62,13 @@ export function checkTimeoutFromEnv(env: NodeJS.ProcessEnv = process.env, warn: 
  * the report), or a promise that never settles (the process used to exit 0
  * with no report once nothing else kept it alive).
  */
-function hostInventory(mcpServers: McpServerItem[], shared: SharedMcpServer[]): Pick<ScanResult, 'hostInventory'> {
-  if (mcpServers.length === 0 && shared.length === 0) return {};
-  return { hostInventory: { mcpServers, ...(shared.length > 0 ? { sharedMcpServers: shared } : {}) } };
+function hostInventory(installations: AgentInstallation[], mcp: McpAssignment, agentFilter: boolean): Pick<ScanResult, 'hostInventory'> {
+  const host = buildHostInventory(installations, { mcpServers: mcp.host, incomplete: mcp.incomplete }, { agentFilter });
+  return isEmptyHostInventory(host) ? {} : { hostInventory: host };
 }
 
 /** Longest evidence snippet a result keeps. */
-export const MAX_SNIPPET = 300;
+export { MAX_SNIPPET };
 /** Most evidence items a result keeps; the rest are counted in one closing item. */
 export const MAX_EVIDENCE = 200;
 
@@ -319,7 +319,7 @@ export class ScanEngine {
       fleetAverage: meanScore(scores),
       summary,
       // Servers no detected agent owns belong to the host, not to one agent
-      ...hostInventory(options.agentFilter ? [] : mcp.host, findSharedMcpServers(filtered)),
+      ...hostInventory(filtered, mcp, Boolean(options.agentFilter)),
     };
   }
 

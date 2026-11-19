@@ -2,8 +2,8 @@ import type { Evidence } from '../../core/types.js';
 import { defineCheck } from '../../core/check-builder.js';
 import { runnerPackage, isPinnedOrLocal, pinProblem } from '../../mcp/package-pin.js';
 import { shellCommandWrapper, shellInvocation } from '../../mcp/shell-wrapper.js';
-import { queryPermissions } from '../../core/permissions.js';
-import { notCollectedNote, uncollectedPath } from '../../core/probe-coverage.js';
+import { notCollectedNote } from '../../core/probe-coverage.js';
+import { worldWritableCommandPath } from '../../mcp/writable-command.js';
 import { managedOverride, markManagedOverride } from '../../adapters/hermes-managed.js';
 import { isDisabledServerConfig } from '../../mcp/disabled.js';
 
@@ -13,7 +13,7 @@ export const hm010 = defineCheck({
   name: 'Hermes MCP Server Stdio Hardening',
   category: 'hermes',
   severity: 'warning',
-  description: 'Detect MCP servers in mcp_servers.<name> launched via shell-c (`bash -c …`), running unpinned packages via npx/uvx/etc., or invoking a world-writable command path — supply-chain and TOCTOU vectors.',
+  description: 'Detect MCP servers in mcp_servers.<name> launched via shell-c (`bash -c …`), running unpinned packages via npx/uvx/etc., or invoking a command any local user can replace (world-writable, or in a world-writable directory) — supply-chain and TOCTOU vectors.',
   supportedAgents: ['hermes'],
 
   async run(ctx, h) {
@@ -50,20 +50,23 @@ export const hm010 = defineCheck({
           });
         }
 
-        // World-writable command path
+        // World-writable command path, or one in a world-writable directory
         if (command.startsWith('/')) {
-          try {
-            const perms = await queryPermissions(ctx.fs, command);
-            if (perms !== 'unsupported' && perms.worldWrite) {
-              push({
-                file: config.filePath,
-                snippet: `mcp_servers.${name}.command = ${command} (mode 0${perms.octal})`,
-                detail: `MCP server command is world-writable — any local user can replace it before launch`,
-              });
-            }
-          } catch {
-            // Absent — or, on a snapshot, outside the probe's paths: unknown, not safe
-            if (await uncollectedPath(ctx.fs, command)) unverified.push(command);
+          const writable = await worldWritableCommandPath(ctx.fs, command);
+          // Absent — or, on a snapshot, outside the probe's paths: unknown, not safe
+          if (writable === 'uncollected') unverified.push(command);
+          else if (writable?.kind === 'binary') {
+            push({
+              file: config.filePath,
+              snippet: `mcp_servers.${name}.command = ${command} (mode 0${writable.octal})`,
+              detail: `MCP server command is world-writable — any local user can replace it before launch`,
+            });
+          } else if (writable?.kind === 'directory') {
+            push({
+              file: config.filePath,
+              snippet: `mcp_servers.${name}.command = ${command}: ${writable.path} (mode 0${writable.octal})`,
+              detail: `MCP server command's directory ${writable.path} is world-writable — any local user can swap ${command} before launch`,
+            });
           }
         }
 
